@@ -34,7 +34,10 @@
       impulses at its own hull vertices against the floor (CBZ.floorAt),
       collider tops and a rubble height-field (pieces PILE on pieces), with
       restitution + Coulomb friction per material. A slab tips about its
-      contact edge because the impulse is applied where it touches.
+      contact edge because the impulse is applied where it touches. Walls are
+      a SWEPT contact for the whole flight (no tunnelling at blast speed, no
+      4-second cutoff); a calm piece SLEEPS (skipped) until it bakes or is
+      woken by a landing beside it, a blast impulse, or its support going.
    4. FREEZE. A piece that has been still for a moment is baked (world
       transform applied) into a merged static mesh per (cell, material) —
       rubble that costs one draw call per material per 16 m cell and zero
@@ -70,6 +73,10 @@
      tag(object, kind)            declare an object's material kind
      clear(owner?)                remove live + frozen debris (all, or one owner)
      clearNear(x, z, r)           haul off every piece within r (a crew clearing a lot)
+     impulse(x, y, z, R, power)   radial shove (m/s at the centre) through the LIVE
+                                  pieces, waking sleepers; baked rubble is static
+   SHARED WITH EVERY LOOSE BODY (see below): CBZ.PHYS gravities and
+   CBZ.looseContact (swept segment vs colliders, pushOut, ground).
      pile(o) / adopt(obj, o)      settled rubble mound / hand a whole part to the sim
      chunkGeo(i)                  shared irregular chunk geometry for authored scenery rubble
      stats()                      live/static/grit counts for audits
@@ -95,9 +102,171 @@
   const GRIT_CAP = PHONE ? 180 : TABLET ? 300 : 600;      // chips, all variants
   const DUST_CAP = PHONE ? 260 : TABLET ? 420 : 800;       // dust motes
   const PER_CALL_CAP = PHONE ? 14 : TABLET ? 22 : 40;      // pieces per shatter
-  const G = 9.81;
+  /* ---- ONE SET OF GRAVITIES (CBZ.PHYS) -----------------------------------
+     Three honest numbers, one place. Loose things that are not people fall at
+     the real rate; people fall at the tuned gameplay rate (TUNE.gravity, the
+     jump/fall feel every character is balanced around); a thrown vehicle keeps
+     the heavier arc the tornado/crash code was tuned with. Consumers that load
+     BEFORE this file (bodyfall.js) read it at runtime with the same defaults,
+     so load order never changes a number. G_ACTOR is a getter so a live TUNE
+     edit is seen without a reload. */
+  if (!CBZ.PHYS) {
+    CBZ.PHYS = {
+      G_REAL: 9.81,
+      get G_ACTOR() { return (CBZ.TUNE && CBZ.TUNE.gravity) || 22; },
+      G_VEHICLE: 19.2,
+    };
+  }
+  const G = CBZ.PHYS.G_REAL;
   const CELL = 16;                                         // static bucket size (m)
   const HF = 0.3;                                          // rubble height-field cell (m)
+
+  /* ==== LOOSE-BODY CONTACT (CBZ.looseContact, alias CBZ.debrisContact) =====
+     The one swept test every loose thing in the game uses against the world
+     colliders: rigid debris, quake masonry, tornado-thrown cars, human and
+     animal ragdoll points. It is a SEGMENT (last position -> this position)
+     against each collider box grown by the body's radius (Minkowski AABB, or
+     the oriented body in its own frame when the record carries `yaw`), so a
+     fast piece meets the FIRST face it crosses instead of being found on the
+     far side of a 0.2 m wall and pushed out the wrong way. Height bands
+     (y0/y1) are real boxes here: a piece can land on a collider's TOP, hit
+     its SIDE, or pass under a band that starts above it.
+
+       segment(ax,ay,az, bx,by,bz, pad, cols, out, opts) -> bool
+         first entry along A->B among `cols`; out = {t, x,y,z, nx,ny,nz, c}
+         (x,y,z is the body centre AT contact, already `pad` off the face).
+         A box the segment STARTS inside is skipped (a piece born in its own
+         wall leaves freely; depenetration is pushOut's job, not this one's).
+       sweep(ax,ay,az, bx,by,bz, pad, out, opts) -> bool
+         same, gathering its own candidates through CBZ.queryCollidersNear.
+       pushOut(x,y,z, pad, c, out, opts) -> bool
+         shortest exit from box c (sides, and the top when banded).
+       ground(x, z, fromY)    groundAt(fromY) (roofs/platforms) else floorAt.
+     opts: skip(c) -> true to ignore a collider; sides: true = side faces
+     only (a body whose floor is groundAt's job); padY: grow the height band
+     by this instead of `pad` (a ragdoll point uses CBZ.collide's 0.1 so it
+     can lie ON a low box); defTop = the top of a
+     collider with no y band (default Infinity = full height, the same as
+     CBZ.collide); defBot likewise (default -Infinity).
+     Pure arithmetic, zero allocation per call; headless-safe. */
+  const LC_EPS = 0.002;
+  function lcBand(c, o) {
+    const y0 = c.y0 != null ? c.y0 : (o && o.defBot != null ? o.defBot : -Infinity);
+    const y1 = c.y1 != null ? c.y1 : (o && o.defTop != null ? o.defTop : Infinity);
+    _lcBand0 = y0; return y1;
+  }
+  let _lcBand0 = 0;
+  // slab test of A + t*D against [x0,x1]x[y0,y1]x[z0,z1]; writes _lcT/_lcAx/_lcSg
+  let _lcT = 0, _lcAx = 0, _lcSg = 0;
+  function lcSlab(ax, ay, az, dx, dy, dz, x0, x1, y0, y1, z0, z1) {
+    let tmin = -Infinity, tmax = Infinity, axis = -1, sg = 0;
+    // X
+    if (dx > -1e-9 && dx < 1e-9) { if (ax < x0 || ax > x1) return 0; }
+    else {
+      let t1 = (x0 - ax) / dx, t2 = (x1 - ax) / dx, s = -1;
+      if (t1 > t2) { const tt = t1; t1 = t2; t2 = tt; s = 1; }
+      if (t1 > tmin) { tmin = t1; axis = 0; sg = s; }
+      if (t2 < tmax) tmax = t2;
+    }
+    // Y
+    if (dy > -1e-9 && dy < 1e-9) { if (ay < y0 || ay > y1) return 0; }
+    else {
+      let t1 = (y0 - ay) / dy, t2 = (y1 - ay) / dy, s = -1;
+      if (t1 > t2) { const tt = t1; t1 = t2; t2 = tt; s = 1; }
+      if (t1 > tmin) { tmin = t1; axis = 1; sg = s; }
+      if (t2 < tmax) tmax = t2;
+    }
+    // Z
+    if (dz > -1e-9 && dz < 1e-9) { if (az < z0 || az > z1) return 0; }
+    else {
+      let t1 = (z0 - az) / dz, t2 = (z1 - az) / dz, s = -1;
+      if (t1 > t2) { const tt = t1; t1 = t2; t2 = tt; s = 1; }
+      if (t1 > tmin) { tmin = t1; axis = 2; sg = s; }
+      if (t2 < tmax) tmax = t2;
+    }
+    if (tmin > tmax || tmax < 0) return 0;          // miss / box behind
+    if (tmin < 0 || axis < 0) return 2;             // started inside
+    if (tmin > 1) return 0;                         // beyond this step
+    _lcT = tmin; _lcAx = axis; _lcSg = sg;
+    return 1;
+  }
+  function lcSegment(ax, ay, az, bx, by, bz, pad, cols, out, o) {
+    const dx = bx - ax, dy = by - ay, dz = bz - az;
+    const skip = o && o.skip, sides = !!(o && o.sides);
+    const py = o && o.padY != null ? o.padY : pad;
+    let best = Infinity, bnx = 0, bny = 0, bnz = 0, bc = null;
+    for (let i = 0; i < cols.length; i++) {
+      const c = cols[i];
+      if (!c || c.minX == null) continue;
+      if (skip && skip(c)) continue;
+      const y1 = lcBand(c, o), y0 = _lcBand0;
+      if (!(y1 > y0)) continue;
+      let r, nx = 0, ny = 0, nz = 0;
+      if (c.yaw) {
+        const co = Math.cos(c.yaw), si = Math.sin(c.yaw);
+        const rx = ax - c.cx, rz = az - c.cz;
+        const lx = rx * co - rz * si, lz = rx * si + rz * co;         // world -> local (physics.js oriPush)
+        const ldx = dx * co - dz * si, ldz = dx * si + dz * co;
+        r = lcSlab(lx, ay, lz, ldx, dy, ldz, -c.hw - pad, c.hw + pad, y0 - py, y1 + py, -c.hd - pad, c.hd + pad);
+        if (r !== 1 || _lcT >= best || (sides && _lcAx === 1)) continue;
+        let lnx = 0, lnz = 0;
+        if (_lcAx === 0) lnx = _lcSg; else if (_lcAx === 2) lnz = _lcSg; else ny = _lcSg;
+        nx = lnx * co + lnz * si; nz = -lnx * si + lnz * co;          // local -> world
+      } else {
+        r = lcSlab(ax, ay, az, dx, dy, dz, c.minX - pad, c.maxX + pad, y0 - py, y1 + py, c.minZ - pad, c.maxZ + pad);
+        if (r !== 1 || _lcT >= best || (sides && _lcAx === 1)) continue;
+        if (_lcAx === 0) nx = _lcSg; else if (_lcAx === 1) ny = _lcSg; else nz = _lcSg;
+      }
+      best = _lcT; bnx = nx; bny = ny; bnz = nz; bc = c;
+    }
+    if (!bc) return false;
+    out.t = best; out.nx = bnx; out.ny = bny; out.nz = bnz; out.c = bc;
+    out.x = ax + dx * best + bnx * LC_EPS;
+    out.y = ay + dy * best + bny * LC_EPS;
+    out.z = az + dz * best + bnz * LC_EPS;
+    return true;
+  }
+  const _lcCols = [];
+  function lcSweep(ax, ay, az, bx, by, bz, pad, out, o) {
+    if (!CBZ.queryCollidersNear) return false;
+    const mx = (ax + bx) * 0.5, mz = (az + bz) * 0.5;
+    const r = Math.hypot(bx - ax, bz - az) * 0.5 + pad + 0.1;
+    let cols;
+    try { cols = CBZ.queryCollidersNear(mx, mz, r, _lcCols); } catch (e) { return false; }
+    return lcSegment(ax, ay, az, bx, by, bz, pad, cols, out, o);
+  }
+  function lcPushOut(x, y, z, pad, c, out, o) {
+    const y1 = lcBand(c, o), y0 = _lcBand0;
+    const py = o && o.padY != null ? o.padY : pad;
+    if (y < y0 - py || y > y1 + py) return false;
+    let lx = x, lz = z, hx0, hx1, hz0, hz1, co = 1, si = 0;
+    if (c.yaw) {
+      co = Math.cos(c.yaw); si = Math.sin(c.yaw);
+      const rx = x - c.cx, rz = z - c.cz;
+      lx = rx * co - rz * si; lz = rx * si + rz * co;
+      hx0 = -c.hw; hx1 = c.hw; hz0 = -c.hd; hz1 = c.hd;
+    } else { hx0 = c.minX; hx1 = c.maxX; hz0 = c.minZ; hz1 = c.maxZ; }
+    hx0 -= pad; hx1 += pad; hz0 -= pad; hz1 += pad;
+    if (lx <= hx0 || lx >= hx1 || lz <= hz0 || lz >= hz1) return false;
+    let d = lx - hx0, nx = -1, nz = 0, ny = 0;
+    if (hx1 - lx < d) { d = hx1 - lx; nx = 1; nz = 0; }
+    if (lz - hz0 < d) { d = lz - hz0; nx = 0; nz = -1; }
+    if (hz1 - lz < d) { d = hz1 - lz; nx = 0; nz = 1; }
+    if (!(o && o.sides) && isFinite(y1) && y1 + py - y < d) { d = y1 + py - y; nx = 0; nz = 0; ny = 1; }
+    d += LC_EPS;
+    const wnx = c.yaw ? nx * co + nz * si : nx, wnz = c.yaw ? -nx * si + nz * co : nz;
+    out.nx = wnx; out.ny = ny; out.nz = wnz; out.c = c; out.t = 0;
+    out.x = x + wnx * d; out.y = y + ny * d; out.z = z + wnz * d;
+    return true;
+  }
+  function lcGround(x, z, fromY) {
+    let g;
+    try { g = CBZ.groundAt ? CBZ.groundAt(x, z, fromY) : (CBZ.floorAt ? CBZ.floorAt(x, z, fromY) : 0); } catch (e) { g = 0; }
+    return isFinite(g) ? g : 0;
+  }
+  CBZ.looseContact = CBZ.debrisContact = {
+    segment: lcSegment, sweep: lcSweep, pushOut: lcPushOut, ground: lcGround,
+  };
 
   /* ---- MATERIAL KINDS -----------------------------------------------------
      density kg/m3, size = target piece diameter (m), e = restitution,
@@ -682,6 +851,11 @@
       owner: o.owner || null, solid: !!o.solid, maxLife: o.maxLife || 7,
       ignore: null, px: piece.mesh.position.x, pz: piece.mesh.position.z, py: piece.mesh.position.y,
       floorT: -1, floorY: 0, contact: false, born: nowT,
+      // swept-contact radius: the piece's half-thickness (a shard is thin, a
+      // block is not). Growing boxes by the full bounding radius would hold a
+      // long plank a metre off every wall.
+      pad: Math.max(0.03, Math.min(0.3, Math.min(ex, ey, ez) * 0.8)),
+      calm: 0, asleep: false, sleepT: 0, _skip: null, _opts: null,
     };
     // colliders the piece is born inside (its own wall, being removed this
     // frame) must not trap it
@@ -698,13 +872,105 @@
   }
   function inCol(c, x, y, z) {
     if (x < c.minX || x > c.maxX || z < c.minZ || z > c.maxZ) return false;
-    const y0 = c.y0 != null ? c.y0 : -Infinity, y1 = c.y1 != null ? c.y1 : 2.6;
+    if (c.yaw) {                        // the oriented body, not its bounding box
+      const co = Math.cos(c.yaw), si = Math.sin(c.yaw), rx = x - c.cx, rz = z - c.cz;
+      const lx = rx * co - rz * si, lz = rx * si + rz * co;
+      if (lx < -c.hw || lx > c.hw || lz < -c.hd || lz > c.hd) return false;
+    }
+    // no band = full height, the same reading CBZ.collide and looseContact give it
+    const y0 = c.y0 != null ? c.y0 : -Infinity, y1 = c.y1 != null ? c.y1 : Infinity;
     return y >= y0 && y <= y1;
   }
 
   let nowT = 0;
   const _cp = new Float32Array(24);
   const _wp = new THREE.Vector3(), _r = new THREE.Vector3(), _vr = new THREE.Vector3(), _tmp = new THREE.Vector3(), _tan = new THREE.Vector3();
+  const _hit = { t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0, c: null };
+  // one contact against a collider face: place the piece on the face, bounce
+  // the normal velocity by its restitution, let the face's friction take
+  // some of the slide, bleed spin. A top face is a floor: the 10 Hz floor
+  // sample is refreshed so the hull-vertex contact below takes over.
+  function wallHit(b, p, h) {
+    p.x = h.x; p.y = h.y; p.z = h.z;
+    const v = b.v, vn = v.x * h.nx + v.y * h.ny + v.z * h.nz;
+    if (vn < 0) {
+      const j = (1 + b.e) * vn;
+      v.x -= j * h.nx; v.y -= j * h.ny; v.z -= j * h.nz;
+      const f = Math.max(0, 1 - b.mu * 0.35);
+      const d = v.x * h.nx + v.y * h.ny + v.z * h.nz;
+      const tx = v.x - d * h.nx, ty = v.y - d * h.ny, tz = v.z - d * h.nz;
+      v.x -= tx * (1 - f); v.y -= ty * (1 - f); v.z -= tz * (1 - f);
+      if (-vn > 3 && b.mass > 4) { _wp.set(p.x, p.y, p.z); impactFx(b, _wp, -vn); }
+    }
+    b.w.multiplyScalar(0.7);
+    if (h.ny > 0.5) b.floorT = -1;
+    b.px = p.x; b.py = p.y; b.pz = p.z;
+  }
+  // what holds a piece up at its centre: ground/floor, or a banded collider top
+  function supportUnder(b, p) {
+    let f = floorAt(p.x, p.z, p.y + b.radius);
+    if (CBZ.queryCollidersNear) {
+      try {
+        for (const c of CBZ.queryCollidersNear(p.x, p.z, b.radius, _cols)) {
+          if (c.y1 == null || c.debris) continue;
+          if (b.ignore && b.ignore.has(c)) continue;
+          if (p.x < c.minX || p.x > c.maxX || p.z < c.minZ || p.z > c.maxZ) continue;
+          if (c.y1 <= p.y + 0.05 && c.y1 > f) f = c.y1;
+        }
+      } catch (e) {}
+    }
+    return f;
+  }
+  const SLEEP_V2 = 0.12, SLEEP_W2 = 0.8;   // (0.35 m/s)^2, (0.9 rad/s)^2
+  const SLEEP_T = 0.3, SLEEP_BAKE = 0.45;  // s calm before sleeping; s asleep before baking
+  function sleepBody(b) {
+    b.asleep = true; b.sleepT = 0; b.calm = 0;
+    b.v.set(0, 0, 0); b.w.set(0, 0, 0);
+  }
+  function wakeBody(b) {
+    if (!b.asleep) return;
+    b.asleep = false; b.sleepT = 0; b.calm = 0; b.quiet = 0; b.floorT = -1;
+  }
+  // a sleeper checks, at 10 Hz, that what it lies on is still there; returns
+  // 1 when it has slept long enough to bake, 0 to keep sleeping (or woken)
+  function tickAsleep(b, dt) {
+    b.sleepT += dt;
+    if (b.sleepT - (b._supT || 0) > 0.1) {
+      b._supT = b.sleepT;
+      const f = supportUnder(b, b.mesh.position);
+      if (f < b.floorY - 0.05) { b.floorY = f; wakeBody(b); return 0; }
+    }
+    return b.sleepT > SLEEP_BAKE ? 1 : 0;
+  }
+  // a hard landing wakes the sleepers it lands among
+  function wakeNear(x, y, z, r) {
+    for (let i = 0; i < live.length; i++) {
+      const b = live[i]; if (!b.asleep) continue;
+      const p = b.mesh.position, rr2 = (r + b.radius) * (r + b.radius);
+      if ((p.x - x) * (p.x - x) + (p.y - y) * (p.y - y) + (p.z - z) * (p.z - z) < rr2) wakeBody(b);
+    }
+  }
+  /* A blast (or any shove) through the live pieces: every body within R of
+     the point, flying, settling or asleep, takes a radial kick of `power`
+     m/s at the centre falling off to 0 at R, plus a tumble, and is awake.
+     Baked rubble is static by design and is not touched. Returns bodies hit. */
+  function impulse(x, y, z, R, power) {
+    if (!(R > 0) || !(power > 0)) return 0;
+    let n = 0;
+    for (let i = 0; i < live.length; i++) {
+      const b = live[i], p = b.mesh.position;
+      const dx = p.x - x, dy = p.y - y, dz = p.z - z, d = Math.hypot(dx, dy, dz);
+      if (d > R) continue;
+      const k = power * (1 - d / R) / (d > 1e-3 ? d : 1);
+      wakeBody(b);
+      b.v.x += dx * k; b.v.y += Math.max(dy * k, power * (1 - d / R) * 0.35); b.v.z += dz * k;
+      const s = power * (1 - d / R) * 0.8;
+      b.w.x += rr(-s, s); b.w.y += rr(-s, s); b.w.z += rr(-s, s);
+      b.quiet = 0; b.calm = 0;
+      n++;
+    }
+    return n;
+  }
   function stepBody(b, dt) {
     const m = b.mesh, p = m.position;
     b.t += dt;
@@ -718,41 +984,39 @@
       _q.setFromAxisAngle(_tmp, wl * dt);
       m.quaternion.premultiply(_q);
     }
-    // walls: resolve only a face we ENTERED (a piece born in its opening leaves freely)
-    if (CBZ.queryCollidersNear && (b.t < 4)) {
+    // WALLS, FOR THE WHOLE FLIGHT. This used to run only while b.t < 4 and
+    // only as a "centre is inside a box" test, so a piece still tumbling
+    // after four seconds (a slab sliding down a pile, a chunk rolling off a
+    // roof) passed through walls, and a fast one (a blast shard at 40 m/s
+    // moves 1 m a substep) was found on the far side of a 0.2 m wall and
+    // resolved out THAT side. Now it is a swept segment (last centre -> this
+    // centre, grown by the piece's own half-thickness) against the side AND
+    // top faces of every collider it crosses, until the piece sleeps.
+    // A collider the piece was born inside (its own wall, being removed this
+    // frame) stays ignored; any other box it ends up embedded in (rotated
+    // into, pushed by a neighbour) is exited by the shortest face.
+    if (CBZ.queryCollidersNear) {
       try {
-        const cols = CBZ.queryCollidersNear(p.x, p.z, b.radius + 0.1, _cols);
-        for (let i = 0; i < cols.length; i++) {
-          const c = cols[i];
-          if (b.ignore && b.ignore.has(c)) continue;
-          if (c.debris) continue;
-          if (!inCol(c, p.x, p.y, p.z)) continue;
-          if (inCol(c, b.px, b.py, b.pz)) { (b.ignore || (b.ignore = new Set())).add(c); continue; }
-          const y1 = c.y1 != null ? c.y1 : 2.6;
-          if (b.py >= y1 - 0.02) { p.y = y1 + 0.001; if (b.v.y < 0) b.v.y *= -b.e; continue; }   // landed on top — contact below handles it
-          if (b.px < c.minX) { p.x = c.minX - 0.001; b.v.x = -Math.abs(b.v.x) * b.e; }
-          else if (b.px > c.maxX) { p.x = c.maxX + 0.001; b.v.x = Math.abs(b.v.x) * b.e; }
-          else if (b.pz < c.minZ) { p.z = c.minZ - 0.001; b.v.z = -Math.abs(b.v.z) * b.e; }
-          else if (b.pz > c.maxZ) { p.z = c.maxZ + 0.001; b.v.z = Math.abs(b.v.z) * b.e; }
-          b.w.multiplyScalar(0.7);
+        const pad = b.pad;
+        const mx = (p.x + b.px) * 0.5, mz = (p.z + b.pz) * 0.5;
+        const reach = Math.hypot(p.x - b.px, p.z - b.pz) * 0.5 + pad + 0.1;
+        const cols = CBZ.queryCollidersNear(mx, mz, reach, _cols);
+        if (cols.length) {
+          b._skip = b._skip || ((c) => c.debris || (b.ignore != null && b.ignore.has(c)));
+          if (lcSegment(b.px, b.py, b.pz, p.x, p.y, p.z, pad, cols, _hit, b._opts || (b._opts = { skip: b._skip }))) {
+            wallHit(b, p, _hit);
+          } else {
+            for (let i = 0; i < cols.length; i++) {
+              const c = cols[i];
+              if (c.debris || (b.ignore && b.ignore.has(c))) continue;
+              if (lcPushOut(p.x, p.y, p.z, pad * 0.5, c, _hit, null)) { wallHit(b, p, _hit); break; }
+            }
+          }
         }
       } catch (e) {}
     }
     // floor under the piece: terrain/floorAt, sampled at 10 Hz per piece
-    if (b.floorT < 0 || nowT - b.floorT > 0.1) {
-      b.floorY = floorAt(p.x, p.z, p.y + b.radius);
-      if (CBZ.queryCollidersNear) {
-        try {
-          for (const c of CBZ.queryCollidersNear(p.x, p.z, b.radius, _cols)) {
-            if (c.y1 == null || c.debris) continue;
-            if (b.ignore && b.ignore.has(c)) continue;
-            if (p.x < c.minX || p.x > c.maxX || p.z < c.minZ || p.z > c.maxZ) continue;
-            if (c.y1 <= p.y + 0.05 && c.y1 > b.floorY) b.floorY = c.y1;
-          }
-        } catch (e) {}
-      }
-      b.floorT = nowT;
-    }
+    if (b.floorT < 0 || nowT - b.floorT > 0.1) { b.floorY = supportUnder(b, p); b.floorT = nowT; }
     // contacts at the hull vertices: sequential impulses per touching vertex
     // (a slab on its face is held by its corners; a piece on one edge tips)
     _mm.compose(p, m.quaternion, _one);
@@ -800,10 +1064,19 @@
       b.w.multiplyScalar(f);
       if (nC >= 3) { const g = Math.max(0, 1 - 1.5 * dt); b.v.x *= g; b.v.z *= g; }
     }
-    // sleep test
-    const still = b.contact && b.v.lengthSq() < 0.06 && b.w.lengthSq() < 0.2;
+    // rest test: dead still for a quarter second -> bake into rubble now
+    const vl2 = b.v.lengthSq(), wl2 = b.w.lengthSq();
+    const still = b.contact && vl2 < 0.06 && wl2 < 0.2;
     b.quiet = still ? b.quiet + dt : 0;
     if (b.quiet > 0.25) return 1;
+    // SLEEP: calm but not dead still (a slab rocking on a rubble tooth, a
+    // shard buzzing on its edge) used to integrate at full cost until
+    // maxLife. Calm on the floor for SLEEP_T -> stop integrating; it bakes
+    // after SLEEP_BAKE unless something wakes it (a hard landing next to
+    // it, a blast through CBZ.debris.impulse, its support taken away).
+    const calm = b.contact && vl2 < SLEEP_V2 && wl2 < SLEEP_W2;
+    b.calm = calm ? b.calm + dt : 0;
+    if (b.calm > SLEEP_T) return 3;
     if (b.t > b.maxLife && b.contact) return 1;
     if (b.t > b.maxLife + 5) return 1;
     if (p.y < -60 || !isFinite(p.x) || !isFinite(p.y) || !isFinite(p.z)) return 2;
@@ -817,6 +1090,7 @@
     }
   }
   function impactFx(b, pt, speed) {
+    if (speed > 4) wakeNear(pt.x, pt.y, pt.z, 0.6);
     if (!b.lastFx || nowT - b.lastFx > 0.4) {
       b.lastFx = nowT;
       const k = K(b.kind);
@@ -1494,7 +1768,11 @@
       for (let i = live.length - 1; i >= 0; i--) {
         const b = live[i];
         let r = 0;
-        for (let s = 0; s < sub && !r; s++) r = stepBody(b, h);
+        if (b.asleep) r = tickAsleep(b, dt);
+        else {
+          for (let s = 0; s < sub && !r; s++) r = stepBody(b, h);
+          if (r === 3) { sleepBody(b); r = 0; }
+        }
         if (r === 1) { live.splice(i, 1); freeze(b); frozenPending.push(b); }
         else if (r === 2) { live.splice(i, 1); retire(b); }
       }
@@ -1642,16 +1920,18 @@
     kindOf,
     tag(obj, kind) { if (obj) { if (obj.userData) obj.userData.debrisKind = kind; else if (obj.material) obj.material.userData.debrisKind = kind; } return obj; },
     clear, clearNear, reset: hardReset,
+    impulse,
     update,
     KINDS,
     stats() {
       let tris = 0; for (const bk of buckets.values()) for (const q of bk.parts) tris += q.p.length / 9;
       let gritLive = 0; if (grit) for (const v of grit.variants) for (const s of v.slots) if (s) gritLive++;
       let dustLive = 0; if (dustSys) for (const m of dustSys.motes) if (m) dustLive++;
-      return { live: live.length, static: staticCount, buckets: buckets.size, staticTris: tris, grit: gritLive, dust: dustLive,
+      let asleep = 0; for (const b of live) if (b.asleep) asleep++;
+      return { live: live.length, asleep, static: staticCount, buckets: buckets.size, staticTris: tris, grit: gritLive, dust: dustLive,
         caps: { live: LIVE_CAP, static: STATIC_CAP, grit: GRIT_CAP, perCall: PER_CALL_CAP }, device: DEVICE };
     },
     // test hooks (node checks drive the fracture without a scene)
-    _internal: { boxTris, clipSolid, fractureComponent, snapComponent, volumeOf, soupBounds, buildPiece, S, kindOf },
+    _internal: { stepBody, addBody, live, lcSegment, lcPushOut, wallHit, tickAsleep, sleepBody, boxTris, clipSolid, fractureComponent, snapComponent, volumeOf, soupBounds, buildPiece, S, kindOf },
   };
 })();

@@ -782,14 +782,16 @@
   }
   function seatIn(p, c, slot) {
     if (!p || !c || !c.group || !CBZ.npcLife || !CBZ.npcLife.attach) return false;
-    let a = null;
-    if (CBZ.carOccupancySeatAnchor) { try { a = CBZ.carOccupancySeatAnchor(c, slot); } catch (e) { a = null; } }
+    let a = null, parent = c.group;
+    if (CBZ.carSeatPlacement) {
+      try { const pl = CBZ.carSeatPlacement(c, slot); if (pl) { a = pl.anchor; parent = pl.parent; } } catch (e) { a = null; }
+    }
     if (!a) {
       const side = (slot === SEAT_DRIVER || slot === SEAT_REAR) ? 1 : -1, rear = slot === SEAT_PRINCIPAL || slot === SEAT_REAR;
       a = { x: side * 0.42, y: 0.32, z: rear ? -0.85 : 0.15, pose: "sit", state: "sit" };
     }
     let ok = false;
-    try { ok = !!CBZ.npcLife.attach(p, c.group, a); } catch (e) { ok = false; }
+    try { ok = !!CBZ.npcLife.attach(p, parent, a); } catch (e) { ok = false; }
     if (!ok) return false;
     p.inCar = c; p.controlled = true; p._mcCar = c; p._mcSlot = slot; p.staffPost = null;
     claimSeat(p, c, slot);

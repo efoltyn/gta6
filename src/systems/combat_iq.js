@@ -521,26 +521,18 @@
   const BODY_R = 0.55;
   let _coverQ = 0, _coverHit = 0;
 
-  // does the segment (ax,az)->(bx,bz) cross this box in XZ? (slab test)
+  // does the segment (ax,az)->(bx,bz) cross this box in XZ? physics.js's
+  // per-box primitive: exact for an oriented wall (its real body, not the
+  // bounding box a diagonal chord used to block a whole lane with).
   function segBox(ax, az, bx, bz, c) {
+    if (CBZ.colliderRayT2) return CBZ.colliderRayT2(c, ax, az, bx - ax, bz - az, 0, 1) >= 0;
+    // studio pages (battle/warlord) run without physics.js: plain XZ slab
     const dx = bx - ax, dz = bz - az;
     let t0 = 0, t1 = 1;
     if (Math.abs(dx) < 1e-6) { if (ax < c.minX || ax > c.maxX) return false; }
-    else {
-      const inv = 1 / dx;
-      let a1 = (c.minX - ax) * inv, a2 = (c.maxX - ax) * inv;
-      if (a1 > a2) { const t = a1; a1 = a2; a2 = t; }
-      if (a1 > t0) t0 = a1; if (a2 < t1) t1 = a2;
-      if (t0 > t1) return false;
-    }
+    else { let a = (c.minX - ax) / dx, b = (c.maxX - ax) / dx; if (a > b) { const t = a; a = b; b = t; } if (a > t0) t0 = a; if (b < t1) t1 = b; if (t0 > t1) return false; }
     if (Math.abs(dz) < 1e-6) { if (az < c.minZ || az > c.maxZ) return false; }
-    else {
-      const inv = 1 / dz;
-      let b1 = (c.minZ - az) * inv, b2 = (c.maxZ - az) * inv;
-      if (b1 > b2) { const t = b1; b1 = b2; b2 = t; }
-      if (b1 > t0) t0 = b1; if (b2 < t1) t1 = b2;
-      if (t0 > t1) return false;
-    }
+    else { let a = (c.minZ - az) / dz, b = (c.maxZ - az) / dz; if (a > b) { const t = a; a = b; b = t; } if (a > t0) t0 = a; if (b < t1) t1 = b; if (t0 > t1) return false; }
     return true;
   }
   function tallEnough(c) {

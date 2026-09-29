@@ -941,39 +941,173 @@
   };
 
   // ---------------------------------------------------------- the colliders
-  // The movement floor every games/ page re-typed: axis-aligned boxes and a
-  // circle that SLIDES along them instead of stopping dead. Boxes live in a
-  // uniform hash grid so a 12 km world with 3000 colliders still resolves in
-  // constant time.
+  /* THE SLICE PAGE'S PHYSICS CORE (2026-09-29). Every games/ page that stands
+     on microboot (Warlord, Battle, Bomb Survivor, ...) resolves bodies here,
+     because systems/physics.js cannot come to a slice page: it reads the
+     player, the city and the game mode at load. So this IS physics.js for
+     those pages, and it speaks the SAME record and the SAME verbs:
+
+       record   {minX,maxX,minZ,maxZ}          the conservative AABB (always)
+                + {y0,y1}                      optional vertical band
+                + {cx,cz,hw,hd,yaw}            optional ORIENTED body; hw/hd are
+                                               half-extents on the box's own
+                                               local +x/+z, yaw is THREE's
+                                               rotation.y. The AABB stays the
+                                               broadphase; the resolve is exact.
+                + noBlock                      sight/blast pass through it
+                + ref / tag / anything else    carried, never read
+
+       CBZ.collide(pos, r, feetY, headY)        push a disc out, -> moved
+       CBZ.collideSlide(pos, r, feetY, headY)   same, -> moved >= 2 mm
+       CBZ.sweepCircle(from, to, r, feetY, headY, out)   first contact of
+                                                a moving disc, -> hit
+       CBZ.rayColliders(ox,oy,oz, dx,dy,dz, maxT, out, opts) -> record|null
+       CBZ.colliderAdd / colliderRemove / colliderShrunk / segmentHitsCollider
+       CBZ.orientedCollider / orientedSlack
+
+     Every CBZ name yields (the full engine defines its own first), so the
+     page shims that used to translate collide() into resolveCircle() are
+     gone; shared consumers (ragdolls, debris, bodyfall, verbs) call the same
+     name in both worlds and get the same answer.
+
+     THE OLD FLOOR WAS AABB-ONLY. A prop turned 30 degrees registered its
+     rotated bounding rectangle, so a 6 m x 0.9 m sandbag run became a 5.6 m
+     square of solid air: men stopped a metre and a half short of cover they
+     could see through, and the corner of a turned container was walk-through
+     on one diagonal and an invisible wall on the other.
+
+     THE GRID HOLDS RECORDS, NOT INDICES. It used to file array indices, so a
+     splice without the doorbell silently shifted every later box onto the
+     wrong record. A record-filed grid can at worst keep a ghost until the
+     next rebuild, never answer with the wrong wall. */
   const CELL = 48;
   const grid = new Map();
-  const boxes = [];
+  // adopt a registry an earlier file already made: one array, never two
+  const boxes = Array.isArray(CBZ.colliders) ? CBZ.colliders : [];
+  const cellsOf = new WeakMap();          // record -> [x0,x1,z0,z1] it was filed under
+  let gridN = 0, gridDirty = false, qid = 0;
   function cellKey(cx, cz) { return cx * 73856093 ^ cz * 19349663; }
-  function gridAdd(b, i) {
+  function gridAdd(b) {
     const x0 = Math.floor(b.minX / CELL), x1 = Math.floor(b.maxX / CELL);
     const z0 = Math.floor(b.minZ / CELL), z1 = Math.floor(b.maxZ / CELL);
     for (let cx = x0; cx <= x1; cx++) for (let cz = z0; cz <= z1; cz++) {
       const k = cellKey(cx, cz);
       let a = grid.get(k);
       if (!a) { a = []; grid.set(k, a); }
-      a.push(i);
+      a.push(b);
     }
+    cellsOf.set(b, [x0, x1, z0, z1]);
   }
-  // addCollider({minX,maxX,minZ,maxZ, y0?, y1?, ref?, tag?})
+  function gridDrop(b) {
+    const r = cellsOf.get(b);
+    if (!r) return false;
+    let ok = true;
+    for (let cx = r[0]; cx <= r[1]; cx++) for (let cz = r[2]; cz <= r[3]; cz++) {
+      const k = cellKey(cx, cz), a = grid.get(k);
+      const i = a ? a.indexOf(b) : -1;
+      if (i < 0) { ok = false; continue; }
+      a.splice(i, 1);
+      if (!a.length) grid.delete(k);
+    }
+    cellsOf.delete(b);
+    return ok;
+  }
+  function inSync() { return !gridDirty && gridN === boxes.length; }
+  function ensureGrid() {
+    if (inSync()) return;
+    grid.clear();
+    for (let i = 0; i < boxes.length; i++) gridAdd(boxes[i]);
+    gridN = boxes.length;
+    gridDirty = false;
+  }
+
+  // A record made of only an oriented body gets its AABB; a swapped AABB is
+  // put right. Mutates and returns the record (callers keep their object).
+  function normalize(b) {
+    if (b.yaw && b.cx != null && b.hw != null) {
+      const co = Math.cos(b.yaw), si = Math.sin(b.yaw);
+      const ac = co < 0 ? -co : co, as = si < 0 ? -si : si;
+      const ex = b.hw * ac + b.hd * as, ez = b.hw * as + b.hd * ac;
+      if (b.minX == null || b.maxX == null) { b.minX = b.cx - ex; b.maxX = b.cx + ex; }
+      if (b.minZ == null || b.maxZ == null) { b.minZ = b.cz - ez; b.maxZ = b.cz + ez; }
+    }
+    if (b.minX > b.maxX) { const t = b.minX; b.minX = b.maxX; b.maxX = t; }
+    if (b.minZ > b.maxZ) { const t = b.minZ; b.minZ = b.maxZ; b.maxZ = t; }
+    return b;
+  }
+
+  // addCollider({minX,maxX,minZ,maxZ, y0?, y1?, cx?,cz?,hw?,hd?,yaw?, ref?, tag?})
   // y0/y1 make it a HEIGHT-GATED box (a wall you can fly over, a rail you can
   // vault); omit them and it is full height, which is what a building is.
   micro.addCollider = function (b) {
     if (!b) return null;
-    if (b.minX > b.maxX) { const t = b.minX; b.minX = b.maxX; b.maxX = t; }
-    if (b.minZ > b.maxZ) { const t = b.minZ; b.minZ = b.maxZ; b.maxZ = t; }
+    normalize(b);
+    const sync = inSync();
     boxes.push(b);
-    if (gridN === boxes.length - 1 && !gridDirty) { gridAdd(b, boxes.length - 1); gridN = boxes.length; }
+    if (sync) { gridAdd(b); gridN = boxes.length; }
     return b;
   };
+  // THE ONE PLACE A ROTATED WALL BECOMES A COLLIDER (physics.js's own
+  // function, same numbers): the oriented body plus its conservative AABB. A
+  // box within a hair of a right angle comes back a plain AABB with no yaw.
+  const ORI_EPS = 1e-4;
+  function orientedCollider(cx, cz, hw, hd, yaw, y0, y1) {
+    yaw = +yaw || 0;
+    const co = Math.cos(yaw), si = Math.sin(yaw);
+    const ac = co < 0 ? -co : co, as = si < 0 ? -si : si;
+    const ex = hw * ac + hd * as, ez = hw * as + hd * ac;
+    const c = { minX: cx - ex, maxX: cx + ex, minZ: cz - ez, maxZ: cz + ez };
+    if (as > ORI_EPS && ac > ORI_EPS) { c.cx = cx; c.cz = cz; c.hw = hw; c.hd = hd; c.yaw = yaw; }
+    if (y0 != null) { c.y0 = y0; c.y1 = y1; }
+    return c;
+  }
+  micro.orientedCollider = orientedCollider;
+  if (!CBZ.orientedCollider) CBZ.orientedCollider = orientedCollider;
+  if (!CBZ.orientedSlack) CBZ.orientedSlack = function (hw, hd, yaw) {
+    const co = Math.cos(yaw), si = Math.sin(yaw);
+    const ac = co < 0 ? -co : co, as = si < 0 ? -si : si;
+    const ex = hw * ac + hd * as, ez = hw * as + hd * ac;
+    return (ex * as + ez * ac) - hd;
+  };
+  // A box centred (x,y,z), w x h x d. `extra.yaw` turns it about Y exactly as
+  // a mesh's rotation.y would (w along the turned local x, d along local z);
+  // every other key on `extra` is copied onto the record.
   micro.addBoxCollider = function (x, y, z, w, h, d, extra) {
-    const b = { minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2, y0: y - h / 2, y1: y + h / 2 };
-    if (extra) for (const k in extra) b[k] = extra[k];
+    const yaw = extra && extra.yaw ? +extra.yaw : 0;
+    const b = orientedCollider(x, z, w / 2, d / 2, yaw, y - h / 2, y + h / 2);
+    if (extra) for (const k in extra) if (k !== "yaw") b[k] = extra[k];
     return micro.addCollider(b);
+  };
+  // Take a record (or every record carrying `ref`) out of the world, in place.
+  // Returns how many went.
+  micro.removeCollider = function (bOrRef) {
+    if (bOrRef == null) return 0;
+    let n = 0;
+    for (let i = boxes.length - 1; i >= 0; i--) {
+      const b = boxes[i];
+      if (b !== bOrRef && !(b.ref != null && b.ref === bOrRef)) continue;
+      const sync = inSync();
+      boxes.splice(i, 1);
+      if (sync && gridDrop(b)) gridN = boxes.length; else gridDirty = true;
+      n++;
+      if (b === bOrRef) break;
+    }
+    return n;
+  };
+  // A record's bounds were edited in place (a door slid, a crate was shoved):
+  // refile it. Cheap — only its own cells are touched.
+  micro.moveCollider = function (b) {
+    if (!b) return;
+    if (!inSync() || !cellsOf.has(b)) { gridDirty = true; return; }
+    gridDrop(b);
+    gridAdd(b);
+  };
+  // Translate a record (AABB and oriented centre together) and refile it.
+  micro.shiftCollider = function (b, dx, dz) {
+    if (!b) return;
+    b.minX += dx; b.maxX += dx; b.minZ += dz; b.maxZ += dz;
+    if (b.cx != null) { b.cx += dx; b.cz += dz; }
+    micro.moveCollider(b);
   };
   micro.colliders = boxes;
 
@@ -981,54 +1115,23 @@
      `CBZ.colliders` is Gang City's world-geometry registry — 40+ files write
      it and the shared verbs READ it: physics.js's vault probe, fracture.js's
      carveHole, crashfx.js's wall ruin and airstrike collapse, the camera's
-     occlusion test. Its element is exactly the box this file already builds,
-     field for field: {minX,maxX,minZ,maxZ, y0?, y1?, ref?}. Nothing needed
-     converting; the two registries were the same registry under two names.
-
-     THE FAULT. Microboot kept its boxes at `micro.colliders` and nowhere
-     else, so a one-shot page stood up a world with two hundred towers in it
-     and every shared verb in the engine looked at `CBZ.colliders`, found
-     undefined, and did nothing. The owner filmed the result: "you can't hit
-     buildings". The buildings were never invulnerable. They were INVISIBLE
-     to the only code that knew how to hurt them.
-
-     SAME ARRAY, not a copy — a copy would go stale the moment a game
-     registered another box, and staleness here reads as "the collapse missed
-     a building that is plainly there". Yields per this file's own rule: the
-     full engine defines CBZ.colliders long before microboot would run, and a
-     slice page that already made one keeps it, so adoption cannot clobber. */
+     occlusion test. Its element is exactly the box this file builds. SAME
+     ARRAY, not a copy, and nothing may ever reassign it: every mutation here
+     is in place (push / splice / length = 0). Yields to a registry the full
+     engine or an earlier file already made. */
   if (!CBZ.colliders) CBZ.colliders = boxes;
 
-  /* ---- THE DOORBELL, AND THE THREE NAMES A MOVING SOLID NEEDS -------------
-     systems/physics.js owns these in the full engine and NOTHING owned them on
-     a slice page, which made two failures that both look like "the feature does
-     not work" and neither of which says anything:
-
-       • THE GRID STORES INDICES, AND `CBZ.colliders` IS `boxes`. A caller that
-         pushes straight onto the array — world/materials.js's addBox with
-         {solid:true}, systems/pushables.js when it mints a prop's own box —
-         lands in `boxes` and never in `grid`. The collider is registered and
-         you walk through it. Measured: every wall a one-shot page drew through
-         CBZ.addBox was scenery.
-       • A COLLIDER TRANSLATED IN PLACE keeps the bucket it was filed under, so
-         a pushed stool is solid where it used to be. Every sliding door in the
-         engine already rings markCollidersDirty for exactly this; on a slice
-         page the bell was not connected to anything.
-
-     One flag and one rebuild answer both. The length check is the belt: a page
-     that never rings the bell still gets a correct grid the moment it pushes. */
-  let gridN = 0, gridDirty = false;
-  function ensureGrid() {
-    if (!gridDirty && gridN === boxes.length) return;
-    grid.clear();
-    for (let i = 0; i < boxes.length; i++) gridAdd(boxes[i], i);
-    gridN = boxes.length;
-    gridDirty = false;
-  }
-  micro.rebuildColliderGrid = ensureGrid;
-  if (!CBZ.markCollidersDirty) CBZ.markCollidersDirty = function () { gridDirty = true; };
-  // the name every shared verb in the engine asks by (physics.js's own)
-  if (!CBZ.queryCollidersNear) CBZ.queryCollidersNear = function (x, z, r, out) { return micro.queryColliders(x, z, r, out); };
+  /* ---- THE DOORBELL, AND THE NAMES A MOVING SOLID NEEDS -------------------
+     A caller that pushes straight onto the array (world/materials.js addBox
+     {solid:true}, systems/pushables.js) is caught by the length check; one
+     that translates a record in place must ring markCollidersDirty (or use
+     micro.moveCollider), exactly as it must under physics.js. */
+  micro.rebuildColliderGrid = function () { gridDirty = true; ensureGrid(); };
+  micro.markCollidersDirty = function () { gridDirty = true; };
+  if (!CBZ.markCollidersDirty) CBZ.markCollidersDirty = micro.markCollidersDirty;
+  if (!CBZ.colliderAdd) CBZ.colliderAdd = micro.addCollider;
+  if (!CBZ.colliderRemove) CBZ.colliderRemove = function (c) { return micro.removeCollider(c) > 0; };
+  if (!CBZ.colliderShrunk) CBZ.colliderShrunk = function (c) { micro.moveCollider(c); };
 
   /* ---- WALK SURFACES ------------------------------------------------------
      `CBZ.platforms` is the engine's ONE contract for "the top of this thing is
@@ -1069,121 +1172,405 @@
 
   micro.clearColliders = function () { boxes.length = 0; grid.clear(); gridN = 0; gridDirty = false; };
 
-  micro.queryColliders = function (x, z, r, out) {
-    out = out || [];
-    out.length = 0;
-    ensureGrid();
-    const x0 = Math.floor((x - r) / CELL), x1 = Math.floor((x + r) / CELL);
-    const z0 = Math.floor((z - r) / CELL), z1 = Math.floor((z + r) / CELL);
-    const seen = micro._qseen || (micro._qseen = new Set());
-    seen.clear();
+  // ---- broadphase ---------------------------------------------------------
+  // Dedupe by stamping the record with the query id (physics.js's trick): a
+  // property compare instead of a Set per call.
+  function gatherCells(x0, x1, z0, z1, id, out) {
     for (let cx = x0; cx <= x1; cx++) for (let cz = z0; cz <= z1; cz++) {
       const a = grid.get(cellKey(cx, cz));
       if (!a) continue;
       for (let i = 0; i < a.length; i++) {
-        const idx = a[i];
-        if (seen.has(idx)) continue;
-        seen.add(idx);
-        out.push(boxes[idx]);
+        const b = a[i];
+        if (b._mq === id) continue;
+        b._mq = id;
+        out.push(b);
       }
     }
+  }
+  micro.queryColliders = function (x, z, r, out) {
+    out = out || [];
+    out.length = 0;
+    ensureGrid();
+    r = r || 0;
+    gatherCells(Math.floor((x - r) / CELL), Math.floor((x + r) / CELL),
+      Math.floor((z - r) / CELL), Math.floor((z + r) / CELL), ++qid, out);
     return out;
   };
+  // every record in the cells a segment (widened by `pad`) passes through.
+  // Samples at half a cell with a quarter-cell halo, so the union of the
+  // sampled squares covers the whole swept band: no cell is ever stepped over.
+  function gatherSegment(ax, az, bx, bz, pad, out) {
+    out.length = 0;
+    ensureGrid();
+    const id = ++qid;
+    const dx = bx - ax, dz = bz - az;
+    const n = Math.max(1, Math.ceil(Math.hypot(dx, dz) / (CELL * 0.5)));
+    const h = CELL * 0.25 + (pad || 0);
+    for (let i = 0; i <= n; i++) {
+      const x = ax + dx * i / n, z = az + dz * i / n;
+      gatherCells(Math.floor((x - h) / CELL), Math.floor((x + h) / CELL),
+        Math.floor((z - h) / CELL), Math.floor((z + h) / CELL), id, out);
+    }
+    return out;
+  }
 
-  // Slide a circle of radius `r` at height span [y, y+height] out of every
-  // box it overlaps. Pushes along the SHALLOWEST axis, which is what makes a
-  // wall slide instead of a wall stop.
-  const _qbuf = [];
-  micro.resolveCircle = function (pos, r, y, height) {
-    const list = micro.queryColliders(pos.x, pos.z, r + 4, _qbuf);
-    let hit = false;
+  // ---- one record's own frame ---------------------------------------------
+  // THREE's rotation.y sends local +x -> world (cos,-sin) and local +z ->
+  // world (sin,cos); world -> local is the transpose. An AABB is the same
+  // frame with no turn, centred on its middle.
+  const F = { ox: 0, oz: 0, co: 1, si: 0, hw: 0, hd: 0 };
+  function frame(c) {
+    if (c.yaw && c.cx != null && c.hw != null) {
+      // trig cached on the record under physics.js's own field names
+      if (c._triYaw !== c.yaw) { c._triYaw = c.yaw; c._co = Math.cos(c.yaw); c._si = Math.sin(c.yaw); }
+      F.ox = c.cx; F.oz = c.cz; F.co = c._co; F.si = c._si;
+      F.hw = c.hw; F.hd = c.hd;
+    } else {
+      F.ox = (c.minX + c.maxX) * 0.5; F.oz = (c.minZ + c.maxZ) * 0.5; F.co = 1; F.si = 0;
+      F.hw = (c.maxX - c.minX) * 0.5; F.hd = (c.maxZ - c.minZ) * 0.5;
+    }
+    return F;
+  }
+  // feetY/headY gate a banded record exactly as physics.js's collide() does:
+  // skipped when the body is wholly under it or wholly over it. Omit both and
+  // every record is full height.
+  function bandSkip(c, feetY, headY) {
+    return c.y0 != null && (headY <= c.y0 || feetY >= (c.y1 == null ? Infinity : c.y1));
+  }
+
+  // Penetration of a disc into one record. Returns the depth (0 = clear) and
+  // leaves the world-space push that clears it in _pen.
+  const _pen = { x: 0, z: 0 };
+  function penetration(c, x, z, r) {
+    const f = frame(c);
+    const rx = x - f.ox, rz = z - f.oz;
+    const lx = rx * f.co - rz * f.si, lz = rx * f.si + rz * f.co;
+    const qx = lx < -f.hw ? -f.hw : (lx > f.hw ? f.hw : lx);
+    const qz = lz < -f.hd ? -f.hd : (lz > f.hd ? f.hd : lz);
+    const dx = lx - qx, dz = lz - qz;
+    const d2 = dx * dx + dz * dz;
+    if (d2 >= r * r) return 0;
+    let px, pz, depth;
+    if (d2 < 1e-8) {
+      // centre INSIDE: leave through the nearest face, on the box's own axes
+      const penX = f.hw - (lx < 0 ? -lx : lx), penZ = f.hd - (lz < 0 ? -lz : lz);
+      if (penX < penZ) { depth = penX + r; px = (lx < 0 ? -1 : 1) * depth; pz = 0; }
+      else { depth = penZ + r; px = 0; pz = (lz < 0 ? -1 : 1) * depth; }
+    } else {
+      const d = Math.sqrt(d2), k = (r - d) / d;
+      depth = r - d; px = dx * k; pz = dz * k;
+    }
+    _pen.x = px * f.co + pz * f.si;
+    _pen.z = -px * f.si + pz * f.co;
+    return depth;
+  }
+
+  /* ---- THE RESOLVER — physics.js's collide(), same contract (2026-09-29).
+     Each pass collects the contacts, resolves them DEEPEST FIRST (each one
+     re-measured from where the deeper pushes left the body, so a contact the
+     first push already cleared costs nothing), and repeats until a pass finds
+     none (cap 4). A body wedged into an inside corner clears both walls in
+     one call instead of being shoved out of one into the other. Mutates
+     pos.{x,z}; pos.y untouched. Returns true iff a collider pushed it. */
+  const MAX_PASSES = 4, CT_MAX = 16, PEN_EPS = 1e-4;
+  const _qbuf = [], _cand = [], _ctC = new Array(CT_MAX), _ctD = new Float64Array(CT_MAX);
+  function collideCore(pos, r, feetY, headY) {
+    if (!pos || !(r > 0)) return false;
+    const list = micro.queryColliders(pos.x, pos.z, r + 1, _qbuf);
+    if (!list.length) return false;
+    // narrow once: band + a generous AABB halo (a centre-inside push can move
+    // the body up to a box half-width, so the halo is not just r)
+    const reach = r + 6;
+    _cand.length = 0;
     for (let i = 0; i < list.length; i++) {
-      const b = list[i];
-      if (b.y0 != null && b.y1 != null) {
-        if (y + (height || 0) < b.y0 || y > b.y1) continue;   // passes over/under
+      const c = list[i];
+      if (bandSkip(c, feetY, headY)) continue;
+      if (!(pos.x >= c.minX - reach && pos.x <= c.maxX + reach && pos.z >= c.minZ - reach && pos.z <= c.maxZ + reach)) continue;
+      _cand.push(c);
+    }
+    // depth > PEN_EPS: a body resolved to exactly r is not re-counted
+    let moved = false;
+    for (let pass = 0; pass < MAX_PASSES; pass++) {
+      const x = pos.x, z = pos.z;
+      let n = 0;
+      for (let i = 0; i < _cand.length && n < CT_MAX; i++) {
+        const c = _cand[i];
+        if (!(x >= c.minX - r && x <= c.maxX + r && z >= c.minZ - r && z <= c.maxZ + r)) continue;
+        const d = penetration(c, x, z, r);
+        if (d > PEN_EPS) { _ctC[n] = c; _ctD[n] = d; n++; }
       }
-      const cx = Math.max(b.minX, Math.min(pos.x, b.maxX));
-      const cz = Math.max(b.minZ, Math.min(pos.z, b.maxZ));
-      const dx = pos.x - cx, dz = pos.z - cz;
-      const d2 = dx * dx + dz * dz;
-      if (d2 > r * r) continue;
-      hit = true;
-      if (d2 > 1e-8) {
-        const d = Math.sqrt(d2);
-        pos.x = cx + (dx / d) * r;
-        pos.z = cz + (dz / d) * r;
-      } else {
-        // dead centre inside the box: leave by the nearest face
-        const pxL = pos.x - b.minX, pxR = b.maxX - pos.x;
-        const pzL = pos.z - b.minZ, pzR = b.maxZ - pos.z;
-        const m = Math.min(pxL, pxR, pzL, pzR);
-        if (m === pxL) pos.x = b.minX - r;
-        else if (m === pxR) pos.x = b.maxX + r;
-        else if (m === pzL) pos.z = b.minZ - r;
-        else pos.z = b.maxZ + r;
+      if (!n) break;
+      for (let i = 1; i < n; i++) {        // deepest first (insertion sort, n is tiny)
+        const c = _ctC[i], d = _ctD[i];
+        let j = i - 1;
+        while (j >= 0 && _ctD[j] < d) { _ctC[j + 1] = _ctC[j]; _ctD[j + 1] = _ctD[j]; j--; }
+        _ctC[j + 1] = c; _ctD[j + 1] = d;
+      }
+      for (let i = 0; i < n; i++) {
+        if (penetration(_ctC[i], pos.x, pos.z, r) > PEN_EPS) { pos.x += _pen.x; pos.z += _pen.z; moved = true; }
       }
     }
+    return moved;
+  }
+  micro.collide = function (pos, r, feetY, headY) {
+    const hit = collideCore(pos, r, feetY, headY);
+    // moving walls (systems/platforms_moving.js), exactly as physics.js does
+    if (CBZ.mpCollide) CBZ.mpCollide(pos, r, feetY, headY);
     return hit;
   };
+  // The old name, kept for the forty call sites that use it: a body of
+  // `height` standing at `y`. height omitted = a 1.8 m person.
+  micro.resolveCircle = function (pos, r, y, height) {
+    return micro.collide(pos, r, y, y + (height != null ? height : 1.8));
+  };
+  // collide() plus "did it actually move >= 2 mm" (the old 5th `passes`
+  // argument is accepted and ignored, as in physics.js)
+  micro.collideSlide = function (pos, r, feetY, headY) {
+    const bx = pos.x, bz = pos.z;
+    micro.collide(pos, r, feetY, headY);
+    const dx = pos.x - bx, dz = pos.z - bz;
+    return dx * dx + dz * dz >= 0.002 * 0.002;
+  };
+  if (!CBZ.collide) CBZ.collide = micro.collide;
+  if (!CBZ.collideSlide) CBZ.collideSlide = micro.collideSlide;
+
+  // Exact point tests, for the call sites that used to read minX..maxZ by
+  // hand (an OBB's AABB is conservative, never exact). `pad` grows the box.
+  micro.colliderContains = function (c, x, z, pad) {
+    const f = frame(c), p = pad || 0;
+    const rx = x - f.ox, rz = z - f.oz;
+    const lx = rx * f.co - rz * f.si, lz = rx * f.si + rz * f.co;
+    return lx >= -f.hw - p && lx <= f.hw + p && lz >= -f.hd - p && lz <= f.hd + p;
+  };
+  // the first record containing (x,z) whose band holds y (y null = any height)
+  const _atBuf = [];
+  micro.colliderAt = function (x, y, z, pad) {
+    const list = micro.queryColliders(x, z, (pad || 0) + 0.01, _atBuf);
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i];
+      if (y != null && c.y0 != null && (y < c.y0 || y > (c.y1 == null ? Infinity : c.y1))) continue;
+      if (micro.colliderContains(c, x, z, pad)) return c;
+    }
+    return null;
+  };
+
+  /* ---- THE SWEPT DISC — physics.js's CBZ.sweepCircle, same contract.
+       micro.sweepCircle(from, to, radius, feetY, headY, out?) -> hit:boolean
+         from/to  {x,z} (not mutated)
+         out      {hit, t, x, z, nx, nz, c}: t = fraction of from->to at first
+                  contact (1 = none); x,z = the SAFE centre, backed off 1 cm
+                  along the path (== to when nothing is hit); (nx,nz) = unit
+                  outward normal at the contact; c = the record.
+     Exact: the Minkowski sum of a box and a disc is two widened rectangles
+     and four corner discs, and the first entry into their union is the first
+     contact, in the box's own frame. No step size, so no speed tunnels
+     through a 12 cm wall. A box the disc already overlaps at `from` is
+     collide()'s business and is ignored, unless the step drives deeper into
+     it (t = 0); a centre already inside is ignored outright. */
+  function rayRect(ox, oz, dx, dz, ex, ez) {
+    let t0 = -Infinity, t1 = Infinity, a, b, s;
+    if (dx > -1e-12 && dx < 1e-12) { if (ox < -ex || ox > ex) return Infinity; }
+    else { a = (-ex - ox) / dx; b = (ex - ox) / dx; if (a > b) { s = a; a = b; b = s; } if (a > t0) t0 = a; if (b < t1) t1 = b; }
+    if (dz > -1e-12 && dz < 1e-12) { if (oz < -ez || oz > ez) return Infinity; }
+    else { a = (-ez - oz) / dz; b = (ez - oz) / dz; if (a > b) { s = a; a = b; b = s; } if (a > t0) t0 = a; if (b < t1) t1 = b; }
+    if (t0 > t1 || t1 < 0 || t0 < -1e-6) return Infinity;
+    return t0 < 0 ? 0 : t0;
+  }
+  function rayDisc(ox, oz, dx, dz, cx, cz, r) {
+    const fx = ox - cx, fz = oz - cz;
+    const a = dx * dx + dz * dz;
+    if (a < 1e-18) return Infinity;
+    const b = fx * dx + fz * dz, c = fx * fx + fz * fz - r * r;
+    const disc = b * b - a * c;
+    if (disc < 0) return Infinity;
+    const t = (-b - Math.sqrt(disc)) / a;
+    if (t < -1e-6) return Infinity;
+    return t < 0 ? 0 : t;
+  }
+  const SWEEP = { hit: false, t: 1, x: 0, z: 0, nx: 0, nz: 0, c: null };
+  const SW_SKIN = 0.01;
+  const _sw = [];
+  micro.sweepCircle = function (from, to, r, feetY, headY, out) {
+    out = out || SWEEP;
+    const ax = from.x, az = from.z, bx = to.x, bz = to.z;
+    const vx = bx - ax, vz = bz - az, len2 = vx * vx + vz * vz;
+    out.hit = false; out.t = 1; out.x = bx; out.z = bz; out.nx = 0; out.nz = 0; out.c = null;
+    if (!(len2 > 1e-12)) return false;
+    r = r > 0 ? r : 0;
+    const list = gatherSegment(ax, az, bx, bz, r + 0.01, _sw);
+    const sx0 = Math.min(ax, bx) - r, sx1 = Math.max(ax, bx) + r;
+    const sz0 = Math.min(az, bz) - r, sz1 = Math.max(az, bz) + r;
+    let bestT = 1, bestC = null, bnx = 0, bnz = 0;
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i];
+      if (c.maxX < sx0 || c.minX > sx1 || c.maxZ < sz0 || c.minZ > sz1) continue;
+      if (bandSkip(c, feetY, headY)) continue;
+      const f = frame(c);
+      const hw = f.hw, hd = f.hd, co = f.co, si = f.si;
+      const r0x = ax - f.ox, r0z = az - f.oz;
+      const l0x = r0x * co - r0z * si, l0z = r0x * si + r0z * co;
+      const ddx = vx * co - vz * si, ddz = vx * si + vz * co;
+      let qx = l0x < -hw ? -hw : (l0x > hw ? hw : l0x);
+      let qz = l0z < -hd ? -hd : (l0z > hd ? hd : l0z);
+      let ex = l0x - qx, ez = l0z - qz;
+      const s2 = ex * ex + ez * ez;
+      let t, nlx, nlz;
+      if (s2 < r * r && r - Math.sqrt(s2) > 1e-5) {
+        // overlapping at the start
+        if (s2 < 1e-10) continue;                        // centre inside: collide()'s job
+        if (ex * ddx + ez * ddz >= 0) continue;          // leaving (or sliding along) it
+        const s = Math.sqrt(s2);
+        t = 0; nlx = ex / s; nlz = ez / s;
+      } else {
+        t = rayRect(l0x, l0z, ddx, ddz, hw + r, hd);
+        let u = rayRect(l0x, l0z, ddx, ddz, hw, hd + r); if (u < t) t = u;
+        u = rayDisc(l0x, l0z, ddx, ddz, -hw, -hd, r); if (u < t) t = u;
+        u = rayDisc(l0x, l0z, ddx, ddz, hw, -hd, r); if (u < t) t = u;
+        u = rayDisc(l0x, l0z, ddx, ddz, -hw, hd, r); if (u < t) t = u;
+        u = rayDisc(l0x, l0z, ddx, ddz, hw, hd, r); if (u < t) t = u;
+        if (!(t < bestT)) continue;
+        // the contact normal: from the box to the disc centre at contact
+        const px = l0x + ddx * t, pz = l0z + ddz * t;
+        qx = px < -hw ? -hw : (px > hw ? hw : px);
+        qz = pz < -hd ? -hd : (pz > hd ? hd : pz);
+        ex = px - qx; ez = pz - qz;
+        const nl = Math.sqrt(ex * ex + ez * ez);
+        if (nl < 1e-9) continue;
+        nlx = ex / nl; nlz = ez / nl;
+        if (ddx * nlx + ddz * nlz >= 0) continue;        // grazing / leaving
+      }
+      if (!(t < bestT)) continue;
+      bestT = t; bestC = c;
+      bnx = nlx * co + nlz * si; bnz = -nlx * si + nlz * co;
+    }
+    if (!bestC) return false;
+    const tb = Math.max(0, bestT - SW_SKIN / Math.sqrt(len2));
+    out.hit = true; out.t = bestT; out.c = bestC;
+    out.x = ax + vx * tb; out.z = az + vz * tb; out.nx = bnx; out.nz = bnz;
+    return true;
+  };
+  if (!CBZ.sweepCircle) CBZ.sweepCircle = micro.sweepCircle;
+
+  /* ---- THE RAY — physics.js's CBZ.rayColliders, same contract.
+       micro.rayColliders(ox,oy,oz, dx,dy,dz, maxT, out?, opts?) -> record|null
+         ray o + d*t, t in [0, maxT], t in units of |d| (b-a with maxT 1 is
+         the segment a->b); x/z on the record's own axes, y on its band
+         (unbanded = opts.y0..y1, default unbounded).
+         out   {hit, c, t, x,y,z, nx,ny,nz}: nearest entry, the unit outward
+               normal of the face entered.
+         opts  {any, inside, minT, noCam, skip, filter, y0, y1}
+               any    first hit met, not the nearest (LOS "blocked?")
+               inside a record CONTAINING the origin hits at t=0, normal -d
+                      (default: skipped, it has no entry face)
+               minT   entries nearer than this are ignored
+               noCam  skip records flagged noCam
+               skip   one record to ignore (the caller's own)
+               filter fn(c) -> false ignores c
+         On a slice page noBlock records also never block (the ordnance
+         flag); physics.js has no such records. */
+  const RAYHIT = { hit: false, c: null, t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0 };
+  const NO_OPTS = {};
+  const _ry = [];
+  micro.rayColliders = function (ox, oy, oz, dx, dy, dz, maxT, out, opts) {
+    out = out || RAYHIT;
+    opts = opts || NO_OPTS;
+    out.hit = false; out.c = null; out.t = maxT;
+    out.x = ox + dx * maxT; out.y = oy + dy * maxT; out.z = oz + dz * maxT;
+    out.nx = 0; out.ny = 0; out.nz = 0;
+    if (!(maxT > 0)) return null;
+    const any = !!opts.any, inside = !!opts.inside, minT = opts.minT || 0;
+    const noCam = !!opts.noCam, skip = opts.skip || null, filter = opts.filter || null;
+    const y0d = opts.y0 != null ? opts.y0 : -1e9, y1d = opts.y1 != null ? opts.y1 : 1e9;
+    const ex = ox + dx * maxT, ez = oz + dz * maxT;
+    const list = gatherSegment(ox, oz, ex, ez, 0.01, _ry);
+    const sx0 = Math.min(ox, ex), sx1 = Math.max(ox, ex), sz0 = Math.min(oz, ez), sz1 = Math.max(oz, ez);
+    let best = maxT, bc = null, bax = -1, bsg = 0, bco = 1, bsi = 0, bIn = false;
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i];
+      if (c.maxX < sx0 || c.minX > sx1 || c.maxZ < sz0 || c.minZ > sz1) continue;
+      if (c === skip || c.noBlock || (noCam && c.noCam)) continue;
+      const f = frame(c);
+      const rx = ox - f.ox, rz = oz - f.oz;
+      const lox = rx * f.co - rz * f.si, loz = rx * f.si + rz * f.co;
+      const ldx = dx * f.co - dz * f.si, ldz = dx * f.si + dz * f.co;
+      const y0 = c.y0 != null ? c.y0 : y0d, y1 = c.y1 != null ? c.y1 : y1d;
+      let t0 = -Infinity, t1 = best, ax = -1, sg = 0, a, b, s;
+      if (ldx > -1e-12 && ldx < 1e-12) { if (!(lox >= -f.hw && lox <= f.hw)) continue; }
+      else {
+        a = (-f.hw - lox) / ldx; b = (f.hw - lox) / ldx; if (a > b) { s = a; a = b; b = s; }
+        if (a > t0) { t0 = a; ax = 0; sg = ldx > 0 ? -1 : 1; } if (b < t1) t1 = b;
+        if (t0 > t1) continue;
+      }
+      if (dy > -1e-12 && dy < 1e-12) { if (!(oy >= y0 && oy <= y1)) continue; }
+      else {
+        a = (y0 - oy) / dy; b = (y1 - oy) / dy; if (a > b) { s = a; a = b; b = s; }
+        if (a > t0) { t0 = a; ax = 1; sg = dy > 0 ? -1 : 1; } if (b < t1) t1 = b;
+        if (t0 > t1) continue;
+      }
+      if (ldz > -1e-12 && ldz < 1e-12) { if (!(loz >= -f.hd && loz <= f.hd)) continue; }
+      else {
+        a = (-f.hd - loz) / ldz; b = (f.hd - loz) / ldz; if (a > b) { s = a; a = b; b = s; }
+        if (a > t0) { t0 = a; ax = 2; sg = ldz > 0 ? -1 : 1; } if (b < t1) t1 = b;
+        if (t0 > t1) continue;
+      }
+      if (t1 < 0) continue;
+      if (t0 < 0 || ax < 0) {                            // origin inside
+        if (!inside) continue;
+        if (filter && filter(c) === false) continue;
+        best = 0; bc = c; bIn = true;
+        break;                                           // nothing is nearer than t=0
+      }
+      if (t0 < minT || t0 >= best) continue;
+      if (filter && filter(c) === false) continue;
+      best = t0; bc = c; bax = ax; bsg = sg; bco = f.co; bsi = f.si; bIn = false;
+      if (any) break;
+    }
+    if (!bc) return null;
+    out.hit = true; out.c = bc; out.t = best;
+    out.x = ox + dx * best; out.y = oy + dy * best; out.z = oz + dz * best;
+    if (bIn) {
+      const l = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+      out.nx = -dx / l; out.ny = -dy / l; out.nz = -dz / l;
+    } else {
+      const lnx = bax === 0 ? bsg : 0, lnz = bax === 2 ? bsg : 0;
+      out.nx = lnx * bco + lnz * bsi; out.ny = bax === 1 ? bsg : 0; out.nz = -lnx * bsi + lnz * bco;
+    }
+    return bc;
+  };
+  if (!CBZ.rayColliders) CBZ.rayColliders = micro.rayColliders;
 
   // Does a straight line from a to b clear every collider? The one honest
   // answer to "can the blast see me" and "can that shot land" — used by
-  // systems/ordnance.js for cover attenuation.
-  // EXACT, not sampled. Point-sampling a segment misses any slab thinner
-  // than the step, and the thin slabs are precisely the ones that matter —
-  // a 1.3 m shelter roof under a bomb is the whole cover rule, and a sampler
-  // walking 2 m at a time steps over it two times in three. Worse, it fails
-  // SILENTLY and at random, so cover appears to "sometimes work". This is
-  // the standard three-slab ray/AABB test against every box the segment's
-  // cells contain: no step size, no misses.
-  const _segSeen = new Set();
-  const _segList = [];
+  // systems/ordnance.js for cover attenuation. EXACT, not sampled (a sampler
+  // steps over the 1.3 m shelter roof that is the whole cover rule), and now
+  // exact against a turned box too. An endpoint INSIDE a box counts as
+  // blocked (a man inside the bunker is behind its walls), as it always has.
+  const _segOut = { hit: false, c: null, t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0 };
+  const SEG_OPTS = { any: true, inside: true };
   micro.segmentBlocked = function (ax, ay, az, bx, by, bz) {
     const dx = bx - ax, dy = by - ay, dz = bz - az;
-    if (Math.hypot(dx, dy, dz) < 0.001) return false;
+    if (dx * dx + dy * dy + dz * dz < 1e-6) return false;
+    return micro.rayColliders(ax, ay, az, dx, dy, dz, 1, _segOut, SEG_OPTS) !== null;
+  };
 
-    _segSeen.clear();
-    _segList.length = 0;
-    const n = Math.max(1, Math.ceil(Math.hypot(dx, dz) / (CELL * 0.5)));
-    for (let i = 0; i <= n; i++) {
-      const t = i / n;
-      const list = micro.queryColliders(ax + dx * t, az + dz * t, CELL * 0.75, _qbuf);
-      for (let j = 0; j < list.length; j++) {
-        const b = list[j];
-        if (!_segSeen.has(b)) { _segSeen.add(b); _segList.push(b); }
-      }
-    }
-
-    for (let i = 0; i < _segList.length; i++) {
-      const b = _segList[i];
-      if (b.noBlock) continue;
-      const y0 = b.y0 != null ? b.y0 : -1e6, y1 = b.y1 != null ? b.y1 : 1e6;
-      let t0 = 0, t1 = 1, ta, tb, s;
-      if (Math.abs(dx) < 1e-9) { if (ax < b.minX || ax > b.maxX) continue; }
-      else {
-        ta = (b.minX - ax) / dx; tb = (b.maxX - ax) / dx;
-        if (ta > tb) { s = ta; ta = tb; tb = s; }
-        if (ta > t0) t0 = ta; if (tb < t1) t1 = tb;
-        if (t0 > t1) continue;
-      }
-      if (Math.abs(dy) < 1e-9) { if (ay < y0 || ay > y1) continue; }
-      else {
-        ta = (y0 - ay) / dy; tb = (y1 - ay) / dy;
-        if (ta > tb) { s = ta; ta = tb; tb = s; }
-        if (ta > t0) t0 = ta; if (tb < t1) t1 = tb;
-        if (t0 > t1) continue;
-      }
-      if (Math.abs(dz) < 1e-9) { if (az < b.minZ || az > b.maxZ) continue; }
-      else {
-        ta = (b.minZ - az) / dz; tb = (b.maxZ - az) / dz;
-        if (ta > tb) { s = ta; ta = tb; tb = s; }
-        if (ta > t0) t0 = ta; if (tb < t1) t1 = tb;
-        if (t0 > t1) continue;
-      }
-      return true;
+  // physics.js's early-out segment walk: hit(c) is asked of every record whose
+  // AABB meets the (pad-widened) segment's box, first true wins.
+  const _shc = [];
+  micro.segmentHitsCollider = function (ax, az, bx, bz, pad, hit) {
+    pad = pad || 0;
+    const list = gatherSegment(ax, az, bx, bz, pad, _shc);
+    const minX = Math.min(ax, bx) - pad, maxX = Math.max(ax, bx) + pad;
+    const minZ = Math.min(az, bz) - pad, maxZ = Math.max(az, bz) + pad;
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i];
+      if (c.maxX < minX || c.minX > maxX || c.maxZ < minZ || c.minZ > maxZ) continue;
+      if (hit(c)) return true;
     }
     return false;
   };
+  if (!CBZ.segmentHitsCollider) CBZ.segmentHitsCollider = micro.segmentHitsCollider;
+  // the name every shared verb in the engine asks by (physics.js's own)
+  if (!CBZ.queryCollidersNear) CBZ.queryCollidersNear = function (x, z, r, out) { return micro.queryColliders(x, z, r, out); };
 
   // ------------------------------------------------------------- the SFX
   // Procedurally synthesised, zero asset files, zero CDN. Every games/ page

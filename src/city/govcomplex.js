@@ -323,6 +323,20 @@
     return im;
   }
 
+  // PARTERRE HEDGES. A clipped 1.4-1.6 m box hedge is a wall of wood you
+  // walk AROUND — the parterre's paths are the 0.8 m gaps and the 9 m aisles
+  // between rows, which is the whole point of a parterre. These were the
+  // solidityAudit's undecided "gov:hedge" row (99 of them, 0 colliders); the
+  // decision is SOLID, noCam (a camera may look through foliage), measured
+  // per instance off the drawn InstancedMesh by systems/meshcollider.js so
+  // the box can never drift from the hedge. Park hedges stay brushable
+  // decoys — those line public walks where a chase must not snag.
+  function hedges(root, geo, pts, yFn) {
+    const im = repeat(root, geo, M.hedge, pts, yFn);
+    if (im && CBZ.solidFromMesh) CBZ.solidFromMesh(im, { noCam: true, ref: null, tag: "gov-hedge" });
+    return im;
+  }
+
   /* ====================================================================
      §1  THE SILHOUETTE KIT — the vocabulary every complex is drawn from.
 
@@ -416,12 +430,57 @@
         wallRunFence(root, e, horiz, gapC, e[4] === gs ? gw : 0, h, hex);
       }
       repeat(root, bg(0.16, h, 0.16), M.fenceP, posts, function () { return h / 2; });
+      if (gw > 0 && o.leaves !== false) gateLeaves(root, rect, gs, gw, 0.08, h, cx, cz);
       return;
     }
     for (const e of edges) {
       const horiz = e[4] < 2;
       const gapC = horiz ? cx : cz;
       wallRun(root, e[0], e[1], e[2], e[3], h, thick, hex, gapC, e[4] === gs ? gw : 0);
+    }
+    if (gw > 0 && o.leaves !== false) gateLeaves(root, rect, gs, gw, thick, h, cx, cz);
+  }
+  // THE GATE THAT WAS NEVER HUNG. Every walled complex left a 16-24 m hole
+  // in its perimeter with nothing that could ever close it: the solidity
+  // audit's "gov:perimeter-GATE-opening" row, which it rightly called a
+  // missing OBJECT, not a missing collider. Sealing the hole would be wrong —
+  // it is the complex's only road in, and the gatehouse arms stand raised
+  // because the compound is MANNED, not locked. So the object is hung the way
+  // a real wide compound gate is: two steel SLIDING leaves on a ground track,
+  // parked OPEN behind the wall on its inner face, clear of the opening.
+  // Each leaf is solid, its collider measured off the drawn rails, stiles and
+  // bars (systems/meshcollider.js), so it is exactly the steel you see.
+  // `o.leaves:false` for a site that builds its own working barrier (the
+  // Executive Mansion's checkpoint, whose planter return sits where a leaf
+  // would park).
+  function gateLeaves(root, rect, side, gw, thick, h, cx, cz) {
+    const horiz = side < 2;
+    const line = side === 0 ? rect.minZ : side === 1 ? rect.maxZ : side === 2 ? rect.minX : rect.maxX;
+    const inward = (side === 0 || side === 2) ? 1 : -1;
+    const n = line + inward * (thick / 2 + 0.3);     // 0.3 m off the inner face
+    const gapC = horiz ? cx : cz;
+    const H = Math.max(1.6, Math.min(h - 0.2, 2.6)), L = gw / 2;
+    for (const s of [-1, 1]) {
+      const c = gapC + s * (gw / 2 + L / 2);          // parked behind its own wall run
+      const g = new THREE.Group();
+      g.name = "gov-gate-leaf";
+      root.add(g);
+      const at = function (t, y, lenT, hh, dN, hex) {
+        return box(g, horiz ? t : n, y, horiz ? n : t, horiz ? lenT : dN, hh, horiz ? dN : lenT, hex);
+      };
+      at(c, 0.1, L, 0.12, 0.1, M.steelD);                              // bottom rail on the track
+      at(c, H - 0.05, L, 0.1, 0.08, M.steelD);                         // top rail
+      at(c, H * 0.55, L, 0.06, 0.06, M.steelD);                        // mid rail
+      at(c - L / 2 + 0.05, H / 2 + 0.02, 0.1, H - 0.04, 0.1, M.steelD); // end stiles
+      at(c + L / 2 - 0.05, H / 2 + 0.02, 0.1, H - 0.04, 0.1, M.steelD);
+      const bars = [], nb = Math.max(2, Math.round(L / 0.16));
+      for (let i = 1; i < nb; i++) {
+        const t = c - L / 2 + i * L / nb;
+        bars.push(horiz ? { x: t, z: n } : { x: n, z: t });
+      }
+      repeat(g, bg(0.035, H - 0.2, 0.035), M.steel, bars, function () { return H / 2 + 0.02; });
+      if (CBZ.solidFromMesh) CBZ.solidFromMesh(g, { merge: true, ref: null, tag: "gov-gate-leaf" });
+      else col(horiz ? c : n, horiz ? n : c, horiz ? L : 0.12, horiz ? 0.12 : L, 0, H);
     }
   }
   // collision thickness of a chain-link run — the same 0.32 the venue site kit
@@ -1641,7 +1700,7 @@
   }
   // the gate leaves, SLID OPEN along the inside of the railing (a real
   // compound gate runs on a track; the working barrier is the checkpoint)
-  function gateLeaves(F, gw, h) {
+  function estateGateLeaves(F, gw, h) {
     const G = railGeos(h - 0.3), items = [];
     for (const sgn of [-1, 1]) {
       const u0 = sgn * (gw / 2 + 1.5), u1 = sgn * (gw / 2 + 1.5 + gw / 2);
@@ -2085,7 +2144,7 @@
 
     // ---- THE PERIMETER, THE GATE, THE LODGES -----------------------------------
     estatePerimeter(F, T);
-    if (T.perimeter === "railing") gateLeaves(F, T.gateW, T.h);
+    if (T.perimeter === "railing") estateGateLeaves(F, T.gateW, T.h);
     const gq = F.p(0, hv - 6);
     if (spec.gatehouse !== false) {
       // the parked boom arms pivot 11 m off the lane: only a gate wide enough
@@ -3064,7 +3123,7 @@
         // the stock the money pretends to come from
         const hedge = [];
         for (let i = 0; i < 13; i++) hedge.push({ x: cx - 80 + i * 6.2, z: cz - 78 });
-        repeat(root, bg(5.4, 1.6, 1.6), M.hedge, hedge, function () { return 0.8; });
+        hedges(root, bg(5.4, 1.6, 1.6), hedge, function () { return 0.8; });
         return { gate: { x: R.minX, z: cz }, seat: main };
       },
     },

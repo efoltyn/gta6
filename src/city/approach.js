@@ -353,7 +353,13 @@
       const ST = city.street || null;
       const kitted = !!(lot.grid && ST);
       const along = kitted ? (kAlong - ST.footway) - frontage : Math.max(2.4, run);
-      if (!kitted || along >= 0.4) {
+      // THE GRID DRAWS ITS OWN. On a kitted parcel city/cityground.js paints
+      // the driveway into the lot surface itself (poured slab, wheel tracks,
+      // an oil drip, the lawn scuffed along its edges) from b.approach below;
+      // the flat grey sheet with white edge lines this used to lay there read
+      // as a parking bay glued onto the lawn. Off-grid parcels keep theirs.
+      const groundOwns = kitted && !!CBZ.cityGround;
+      if (!groundOwns && (!kitted || along >= 0.4)) {
         const off = kitted ? 0 : -0.3;
         const ay = kitted ? ST.yLot + 0.02 : 0.12;
         const mx = lot.cx + nx * (frontage + along / 2 + off);

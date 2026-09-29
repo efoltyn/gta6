@@ -797,7 +797,14 @@
       for (let k = 0; k < 4; k++) box(g, rx - 0.1, FY + 0.7 + (k % 2) * 0.8, rz - 0.9 + k * 0.6, 0.16, 1.1, 0.16, M.gun); // racked rifles
       col(ix1 - 1.9, ix1, rz - 1.4, rz + 1.4, FY, FY + 2.0);
     }
-    for (let i = 0; i < 3; i++) box(g, ix1 - 1.4, FY + 0.4 + (i > 1 ? 0.8 : 0), iz0 + 6.5 + (i % 2) * 1.4, 1.2, 0.8, 1.2, M.crateAmmo);
+    // the ammo crate stack — the one piece of this file that had no col().
+    // Measured off the drawn crates (meshcollider.js), so the stacked third
+    // crate is its own banded box on top of the first instead of a guess.
+    for (let i = 0; i < 3; i++) {
+      const crate = box(g, ix1 - 1.4, FY + 0.4 + (i > 1 ? 0.8 : 0), iz0 + 6.5 + (i % 2) * 1.4, 1.2, 0.8, 1.2, M.crateAmmo);
+      if (CBZ.solidFromMesh) CBZ.solidFromMesh(crate, { ref: null, tag: "bunker-ammo" });
+      else if (i < 2) col(ix1 - 2.0, ix1 - 0.8, iz0 + 5.9 + i * 1.4, iz0 + 7.1 + i * 1.4, FY, FY + (i ? 0.8 : 1.6));
+    }
     // THE ORDNANCE CRATE — long, striped, unmistakable (the buster stock)
     const ocX = ix1 - 1.6, ocZ = iz0 + 3.4;
     box(g, ocX, FY + 0.45, ocZ, 1.4, 0.9, 3.4, M.crate);

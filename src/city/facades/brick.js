@@ -287,6 +287,19 @@
               dep * 0.62, iron, dep * 0.18);
             F.box(ctx, f, tt, yy + railH * 0.9, (Math.abs(tb - t) / runs) * 1.2, barr, barr,
               iron, dep * 0.18 + dep * 0.62 - barr);
+            // THE DROP LADDER IS SOLID WHERE IT HANGS INTO YOU. The lowest
+            // flight stops ~1 m off the pavement, so its bottom treads sit at
+            // head/chest height: you duck round it, you do not walk through
+            // it. One banded body PER TREAD, from its underside to its rail
+            // top, on the tread's own drawn footprint — so the high end,
+            // which clears your head, stays open to walk under, and nothing
+            // is added off the wall past the iron that is actually there.
+            const under = yy - barr * 0.55;
+            if (k === 1 && under < 2.1) {
+              const top = yy + railH * 0.9 + barr / 2;
+              F.solidBox(ctx, f, tt, (under + top) / 2, (Math.abs(tb - t) / runs) * 1.2, top - under,
+                dep * 0.62, dep * 0.18, { noCam: true });
+            }
           }
         }
       }

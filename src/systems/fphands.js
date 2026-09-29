@@ -267,9 +267,36 @@
     geo.applyMatrix4(_m);
     parts.push(geo);
   }
-  function seg(parts, a, b, r0, r1) {
+  function seg(parts, a, b, r0, r1, ink) {
     const L = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
-    place(new THREE.CylinderGeometry(r1, r0, L, 8, 1, true), a, b, parts);
+    const g = new THREE.CylinderGeometry(r1, r0, L, 8, 1, true);
+    if (ink) {
+      // a FINGER SEGMENT on the skin chart (entities/tattoo.js hand chart):
+      // turned half a turn about its axis so the cylinder's u seam runs down
+      // the palm side and the back of the finger sits at u 0.5; u then grows
+      // toward +x on the back of a right hand (a letter reads true), and v
+      // runs knuckle -> tip across the finger's three segments
+      g.rotateY(Math.PI);
+      inkUV(g, function (u, v) { return fingerUV(ink.col, u, (ink.s + v) / 3); });
+    }
+    place(g, a, b, parts);
+  }
+  /* ---- THE SKIN CHART (entities/tattoo.js HAND layout) --------------------
+     Finger columns of 1/8 width (index, middle, ring, little, thumb): u
+     across one column is once round the finger with the back at its centre;
+     v from the knuckle (bottom of the 3/4-high finger block) to the tip.
+     The back of the hand is a planar patch in u [.625, 1]; everything else
+     (palm side, stub, joints, web) reads one blank texel. Parts carry these
+     as `inkuv`; mergeParts turns them into the hand's `uv`. */
+  const INK_COL = 0.125, INK_FH = 0.75, INK_PALM = 0.625, INK_BLANK = [0.30, 0.05];
+  function fingerUV(col, u, a) {
+    return [(col + u) * INK_COL, 1 - INK_FH * (1 - Math.min(1, Math.max(0, a)))];
+  }
+  function inkUV(g, fn) {
+    const uv = g.attributes.uv, out = new Float32Array(uv.count * 2);
+    for (let i = 0; i < uv.count; i++) { const q = fn(uv.getX(i), uv.getY(i)); out[i * 2] = q[0]; out[i * 2 + 1] = q[1]; }
+    g.setAttribute("inkuv", new THREE.BufferAttribute(out, 2));
+    return g;
   }
   /* A CLOSED lathe along the hand's Z: rings [z, rx, ry, cy] from the bottom
      up, each an ellipse (rx across X, ry across Y, centred at y = cy); a ring
@@ -378,7 +405,26 @@
       pos.setXYZ(i, x, y, z - hz);
     }
     g.computeVertexNormals();
-    return g;
+    // the BACK OF THE HAND on the skin chart: per triangle (the palm goes
+    // non-indexed here, which mergeParts would do anyway), a triangle on the
+    // back takes a planar projection (thumb side -> little-finger side,
+    // knuckles -> wrist), every other triangle the blank texel — so nothing
+    // on the back can smear round the edge onto the palm
+    const f = g.toNonIndexed();
+    g.dispose();
+    const p = f.attributes.position, uv = new Float32Array(p.count * 2);
+    for (let t = 0; t < p.count; t += 3) {
+      const cy = (p.getY(t) + p.getY(t + 1) + p.getY(t + 2)) / 3;
+      for (let k = 0; k < 3; k++) {
+        const i = t + k;
+        if (cy > hy * 0.25) {
+          uv[i * 2] = INK_PALM + (1 - INK_PALM) * (p.getX(i) + hx) / (2 * hx);
+          uv[i * 2 + 1] = Math.min(1, Math.max(0, -p.getZ(i) / PALM.len));
+        } else { uv[i * 2] = INK_BLANK[0]; uv[i * 2 + 1] = INK_BLANK[1]; }
+      }
+    }
+    f.setAttribute("inkuv", new THREE.BufferAttribute(uv, 2));
+    return f;
   }
   function mergeParts(parts) {
     let n = 0;
@@ -388,11 +434,14 @@
       n += f.attributes.position.count;
       return f;
     });
-    const P = new Float32Array(n * 3), N = new Float32Array(n * 3);
+    const P = new Float32Array(n * 3), N = new Float32Array(n * 3), U = new Float32Array(n * 2);
     let o = 0;
     flat.forEach(function (f) {
       P.set(f.attributes.position.array, o * 3);
       N.set(f.attributes.normal.array, o * 3);
+      const iu = f.attributes.inkuv;
+      if (iu) U.set(iu.array, o * 2);
+      else for (let i = 0; i < f.attributes.position.count; i++) { U[(o + i) * 2] = INK_BLANK[0]; U[(o + i) * 2 + 1] = INK_BLANK[1]; }
       o += f.attributes.position.count;
       f.dispose();
     });
@@ -400,6 +449,7 @@
     const out = new THREE.BufferGeometry();
     out.setAttribute("position", new THREE.BufferAttribute(P, 3));
     out.setAttribute("normal", new THREE.BufferAttribute(N, 3));
+    out.setAttribute("uv", new THREE.BufferAttribute(U, 2));
     return out;
   }
   function mirrorX(geo) {
@@ -407,11 +457,25 @@
     // triangle's winding so the faces still point out (a negative scale.x on
     // the mesh would render the hand inside-out).
     const P = geo.attributes.position.array, N = geo.attributes.normal.array;
+    const U = geo.attributes.uv ? geo.attributes.uv.array : null;
     for (let i = 0; i < P.length; i += 3) { P[i] = -P[i]; N[i] = -N[i]; }
     for (let t = 0; t < P.length; t += 9) {
       for (let k = 0; k < 3; k++) {
         let tmp = P[t + 3 + k]; P[t + 3 + k] = P[t + 6 + k]; P[t + 6 + k] = tmp;
         tmp = N[t + 3 + k]; N[t + 3 + k] = N[t + 6 + k]; N[t + 6 + k] = tmp;
+      }
+    }
+    if (U) {
+      // the skin chart mirrors with the hand, or every letter on a left hand
+      // would read backwards: each triangle reflects its u about the centre
+      // of the column (finger) or patch (back of the hand) it lies in
+      for (let t = 0; t < U.length; t += 6) {
+        let tmp = U[t + 2]; U[t + 2] = U[t + 4]; U[t + 4] = tmp;          // same winding swap as P/N
+        tmp = U[t + 3]; U[t + 3] = U[t + 5]; U[t + 5] = tmp;
+        const cu = (U[t] + U[t + 2] + U[t + 4]) / 3;
+        if (Math.abs(cu - INK_BLANK[0]) < 1e-6 && Math.abs(U[t + 1] - INK_BLANK[1]) < 1e-6) continue;
+        const axis = cu >= INK_PALM ? (INK_PALM + 1) / 2 : (Math.floor(cu / INK_COL) + 0.5) * INK_COL;
+        U[t] = 2 * axis - U[t]; U[t + 2] = 2 * axis - U[t + 2]; U[t + 4] = 2 * axis - U[t + 4];
       }
     }
     return geo;
@@ -428,7 +492,7 @@
       // knuckle (a touch proud on the back of the hand), the two finger joints, the pad of the tip
       ball(parts, [pts[0][0], pts[0][1] + 0.002, pts[0][2]], f.r * 1.12, 1, 0.95, 1);
       for (let s = 0; s < 3; s++) {
-        seg(parts, pts[s], pts[s + 1], rs[s], rs[s + 1]);
+        seg(parts, pts[s], pts[s + 1], rs[s], rs[s + 1], { col: i, s: s });
         ball(parts, pts[s + 1], rs[s + 1] * (s === 2 ? 1 : 1.04));
       }
       // the web between knuckles: a flat bridge so the fingers leave a palm, not a comb
@@ -481,7 +545,7 @@
      on the right; left mirrored), authored in metres. Cached per
      (side, pose, lod) and shared by every body in the game, so pedinstance
      pools it by identity; per-body size is mesh.scale. */
-  function tube(parts, pts, radii, sides, phase, tip) {
+  function tube(parts, pts, radii, sides, phase, tip, ink) {
     // one continuous tube through pts with a ring per point; radii[i] = [ru, rv]
     // (ru across the lateral axis, rv across the other). Parallel-transported
     // frame, mitred rings, smooth radial normals, pointed tip cap.
@@ -522,12 +586,24 @@
         ring.push({
           p: [pts[i][0] + (u[0] * ru + v[0] * rv) * mit, pts[i][1] + (u[1] * ru + v[1] * rv) * mit, pts[i][2] + (u[2] * ru + v[2] * rv) * mit],
           n: [nx, ny, nz],
+          // skin chart: round the finger with its back (t = 3pi/2) at 0.5
+          q: ink ? (((t - Math.PI * 1.5) / (Math.PI * 2) + 0.5) % 1 + 1) % 1 : 0,
+          a: ink ? ink.a[i] : 0,
         });
       }
       rings.push({ ring, d });
     }
-    const P = [], N = [];
-    const tri = function (a, b, c) { P.push(a.p[0], a.p[1], a.p[2], b.p[0], b.p[1], b.p[2], c.p[0], c.p[1], c.p[2]); N.push(a.n[0], a.n[1], a.n[2], b.n[0], b.n[1], b.n[2], c.n[0], c.n[1], c.n[2]); };
+    const P = [], N = [], UV = [];
+    const tri = function (a, b, c) {
+      P.push(a.p[0], a.p[1], a.p[2], b.p[0], b.p[1], b.p[2], c.p[0], c.p[1], c.p[2]); N.push(a.n[0], a.n[1], a.n[2], b.n[0], b.n[1], b.n[2], c.n[0], c.n[1], c.n[2]);
+      if (!ink) return;
+      // unwrap across the seam (it runs down the palm side, which is blank)
+      let qa = a.q, qb = b.q, qc = c.q;
+      const hi = Math.max(qa, qb, qc);
+      if (hi - Math.min(qa, qb, qc) > 0.5) { if (qa < 0.5) qa += 1; if (qb < 0.5) qb += 1; if (qc < 0.5) qc += 1; }
+      const A = fingerUV(ink.col, qa, a.a), B = fingerUV(ink.col, qb, b.a), C = fingerUV(ink.col, qc, c.a);
+      UV.push(A[0], A[1], B[0], B[1], C[0], C[1]);
+    };
     for (let i = 0; i < n - 1; i++) {
       const A = rings[i].ring, B = rings[i + 1].ring;
       for (let s = 0; s < sides; s++) {
@@ -538,8 +614,11 @@
     }
     if (tip) {
       const last = rings[n - 1], e = pts[n - 1], d = last.d;
-      const T = { p: [e[0] + d[0] * tip, e[1] + d[1] * tip, e[2] + d[2] * tip], n: d };
-      for (let s = 0; s < sides; s++) tri(last.ring[s], T, last.ring[(s + 1) % sides]);
+      for (let s = 0; s < sides; s++) {
+        const r0 = last.ring[s], r1 = last.ring[(s + 1) % sides];
+        const T = { p: [e[0] + d[0] * tip, e[1] + d[1] * tip, e[2] + d[2] * tip], n: d, q: r0.q, a: 1 };
+        tri(r0, T, r1);
+      }
     }
     // winding check once: the first quad's face normal must point along its
     // vertex normal (outward); flip every triangle if the frame came out left-handed
@@ -552,11 +631,15 @@
           let tmp = P[t + 3 + k]; P[t + 3 + k] = P[t + 6 + k]; P[t + 6 + k] = tmp;
           tmp = N[t + 3 + k]; N[t + 3 + k] = N[t + 6 + k]; N[t + 6 + k] = tmp;
         }
+        if (ink) for (let t = 0; t < UV.length; t += 6) for (let k = 0; k < 2; k++) {
+          const tmp = UV[t + 2 + k]; UV[t + 2 + k] = UV[t + 4 + k]; UV[t + 4 + k] = tmp;
+        }
       }
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.Float32BufferAttribute(P, 3));
     g.setAttribute("normal", new THREE.Float32BufferAttribute(N, 3));
+    if (ink) g.setAttribute("inkuv", new THREE.Float32BufferAttribute(UV, 2));
     parts.push(g);
   }
   const SQ2 = Math.SQRT2;
@@ -603,7 +686,7 @@
         // a touch fatter at each joint than the bone either side is the
         // knuckle line a hand is recognised by.
         const rs = [1.10, 1.07, 0.97, 0.90, 0.74].map(function (k) { const r = f.r * k * 1.08; return [r, r]; });
-        tube(parts, [root].concat(pts), rs, 6, Math.PI / 6, f.r * 0.70);
+        tube(parts, [root].concat(pts), rs, 6, Math.PI / 6, f.r * 0.70, { col: i, a: [-0.08, 0, 1 / 3, 2 / 3, 1] });
       });
     } else {
       // THE MITTEN: the averaged chain, index..little wide, a finger thick.
@@ -692,8 +775,50 @@
     // the elbow end stays open: the elbow ball covers it
     const parts = [];
     const g = lathe(parts, rings, 12, 0);
+    skinUV(g, rings, 12);
     g._shared = true; g.userData._shared = true;
     return (FORE = g);
+  }
+  /* THE FOREARM ON THE SKIN CHART (entities/tattoo.js "fore"): u = the
+     lathe's angle / 2pi from +x, v = wrist (0) -> elbow (1). The lathe
+     shares one vertex per ring position, so the u seam at +x would smear a
+     strip of triangles across the whole chart: the seam column is split off
+     into its own vertices (u = 1), normals kept welded. Apex rings (the
+     closed wrist dome) sit at the chart's wrist edge. */
+  function skinUV(g, rings, sides) {
+    const pos = g.attributes.position, nrm = g.attributes.normal, idx = g.index.array;
+    const nv = pos.count, uv = [], P = Array.from(pos.array), N = Array.from(nrm.array);
+    const zOf = function (z) { return Math.min(1, Math.max(0, z)); };
+    for (let i = 0; i < nv; i++) {
+      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+      const a = (Math.atan2(y, x) + Math.PI * 2) % (Math.PI * 2);
+      uv.push(Math.abs(x) + Math.abs(y) < 1e-9 ? 0.5 : a / (Math.PI * 2), zOf(z));
+    }
+    // duplicate every seam vertex (u 0) as a u 1 twin for triangles on the far side of it
+    const twin = new Map();
+    const out = Array.from(idx);
+    for (let t = 0; t < out.length; t += 3) {
+      const us = [uv[out[t] * 2], uv[out[t + 1] * 2], uv[out[t + 2] * 2]];
+      if (Math.max(us[0], us[1], us[2]) - Math.min(us[0], us[1], us[2]) < 0.5) continue;
+      for (let k = 0; k < 3; k++) {
+        const vi = out[t + k];
+        if (uv[vi * 2] > 0.25) continue;
+        let tw = twin.get(vi);
+        if (tw == null) {
+          tw = P.length / 3;
+          P.push(P[vi * 3], P[vi * 3 + 1], P[vi * 3 + 2]); N.push(N[vi * 3], N[vi * 3 + 1], N[vi * 3 + 2]);
+          uv.push(uv[vi * 2] + 1, uv[vi * 2 + 1]);
+          twin.set(vi, tw);
+        }
+        out[t + k] = tw;
+      }
+    }
+    g.setAttribute("position", new THREE.Float32BufferAttribute(P, 3));
+    g.setAttribute("normal", new THREE.Float32BufferAttribute(N, 3));
+    g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(out);
+    void rings; void sides;
+    return g;
   }
   function upperGeo() {
     if (UPPER) return UPPER;
@@ -788,12 +913,21 @@
   }
 
   // ------------------------------------------------------------ objects
+  // THE PLAYER'S INK (entities/tattoo.js): every first-person hand and
+  // forearm asks, as it is drawn, whether the skin under its material is bare
+  // and carries ink; tattoo.js swaps in a twin of the caller's material that
+  // wears the chart (next frame) and hands the caller's own back when not.
+  function fpInk(kind) {
+    return function () { const T = CBZ.tattoo; if (T && T.fpSync) T.fpSync(this, kind); };
+  }
+  const HAND_INK = fpInk("hand"), FORE_INK = fpInk("fore");
   function makeHand(side, pose, material) {
     const m = new THREE.Mesh(handGeometry(side, pose), material);
     m.name = side < 0 ? "fp_hand_l" : "fp_hand_r";
     m.userData.side = side < 0 ? -1 : 1;
     m.userData.pose = pose;
     m.castShadow = false;
+    m.onBeforeRender = HAND_INK;
     return m;
   }
   function setPose(hand, pose) {
@@ -828,10 +962,14 @@
 
   /* An arm: forearm (+ cuff) and upper arm with an elbow ball. `pose()` lays
      it from a wrist to an elbow to a shoulder, in its parent's space. */
-  function makeArm(mats) {
+  // side: -1 left, +1 right (which ink chart the forearm wears); omitted, the
+  // first poseArm reads it off the shoulder (+x = right, the viewmodel frame)
+  function makeArm(mats, side) {
     const g = new THREE.Group();
     g.name = "fp_arm";
+    if (side != null) g.userData.side = side < 0 ? -1 : 1;
     const fore = new THREE.Mesh(foreGeo(), mats.fore);
+    fore.onBeforeRender = FORE_INK;
     const cuff = new THREE.Mesh(cuffGeo(), mats.fore);
     const upper = new THREE.Mesh(upperGeo(), mats.upper || mats.fore);
     const elbow = new THREE.Mesh(elbowGeo(), mats.upper || mats.fore);
@@ -857,6 +995,8 @@
      flat face rolls with the wrist. k = thickness scale at the wrist. */
   function poseArm(arm, wrist, elbow, shoulder, handQ, k, sleeved) {
     const P = arm.userData.parts;
+    arm.userData.sleeved = !!sleeved;
+    if (arm.userData.side == null) arm.userData.side = ((shoulder || elbow).x < 0) ? -1 : 1;
     _hy.set(0, 1, 0).applyQuaternion(handQ);
     _d.subVectors(elbow, wrist);
     const lf = _d.length();
@@ -1444,7 +1584,7 @@
       const o = a[i];
       const m = o && (o.material || o);
       const mm = Array.isArray(m) ? m[0] : m;
-      if (mm && mm.color && !mm.map) return mm.color.getHex();
+      if (mm && mm.color && (!mm.map || (mm.userData && mm.userData.cbzInk))) return mm.color.getHex();
     }
     return null;
   }

@@ -554,10 +554,12 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 3. entities -->
   <!-- the ONE hand: first person (gun kit hands, fists, car wheel, bailout) AND
        every body's hand (character.js builds it) — so it loads before bodies -->
-  <script src="src/systems/fphands.js?v=mce86a5"></script>
+  <script src="src/systems/fphands.js?v=w09290250"></script>
+  <!-- ink in skin: tattoo charts for arms / hands / head, profiles, the FP sync; before character.js (its arm UVs read the chart split) -->
+  <script src="src/entities/tattoo.js?v=w09290250"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
-  <script src="src/entities/character.js?v=w09290232"></script>
+  <script src="src/entities/character.js?v=w09290250"></script>
   <script src="src/entities/headwear.js?v=hw1"></script>
   <!-- real jewelry (PBR metal, brilliants, draped link chains, pendants): before watch.js (its metals) and bling.js -->
   <script src="src/entities/jewelry_kit.js?v=w09290232"></script>
@@ -586,7 +588,7 @@ document.body.appendChild(b);}}catch(e){}})();
      size), the cuffs the cuff verb closes on a wrist, the open pair in an
      officer's hand and the case on a cop's / prison officer's duty belt. -->
 <script src="src/entities/handcuffs.js?v=mc5ae55"></script>
-<script src="src/systems/verbs.js?v=mce86a5"></script>
+<script src="src/systems/verbs.js?v=colcore1"></script>
 <!-- CBZ.arrest: getting arrested is a contest, not a cutscene. The one rule
      (compliant / subdued / outnumbered-from-behind), the struggle's odds, the
      committed tackle lunge, the taser, and the one physical take of the
@@ -598,14 +600,14 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/cuffedplayer.js?v=cuffs1"></script>
 <script src="src/entities/verbposes.js?v=verbs1"></script>
 <script src="src/entities/meleeposes.js?v=fallreal1"></script>
-<script src="src/systems/verbs_strike.js?v=ba1"></script>
+<script src="src/systems/verbs_strike.js?v=colcore1"></script>
 <script src="src/systems/bodyfall.js?v=vit3"></script>
 <!-- CBZ.vitals: ONE body that can be hurt, in every game. Blunt trauma knocks a
      man out (and he comes to, groggy); a bullet or a blade opens a bleed that
      drains his blood until someone wraps it or he bleeds out; state(a) is what
      cuffs, AI and HUD ask. Games plug in through CBZ.vitals.on(mode, hooks). -->
 <script src="src/systems/vitals.js?v=vit3"></script>
-<script src="src/systems/verbs_pickup.js?v=mce86a5"></script>
+<script src="src/systems/verbs_pickup.js?v=w09290250"></script>
 <script src="src/entities/player.js?v=mc5ae55"></script>
 <!-- Legacy down-state decals were REMOVED, not merely untagged (the file itself
      is gone as of 2026-07-26; this comment used to describe it in the present
@@ -650,7 +652,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- Who is in this prison: ten heritages (skin range, hair, facial hair, ink,
      jumpsuit tied at the waist). Rolled by npc.js; the ink is painted by
      city/clothes.js and the head atlas below. -->
-<script src="src/entities/heritage.js?v=cars1"></script>
+<script src="src/entities/heritage.js?v=w09290250"></script>
 <!-- THE CARS: the yard sorts itself by race (heritage -> car), no colours.
      Before npc.js (its key holders are indexed by car) and ai.js. -->
 <script src="src/systems/prisoncars.js?v=cars1"></script>
@@ -716,7 +718,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (city) buys one shadowless SpotLight + floor pool, toggled through
      CBZ.playerFlashlight. After weapons/flashlight.js (the model) and
      prisonnight.js (CBZ.prisonLights.level prices the dark). -->
-<script src="src/systems/playerflashlight.js?v=w09290204"></script>
+<script src="src/systems/playerflashlight.js?v=colcore1"></script>
 <script src="src/world/prisonlook.js?v=look1"></script>
 <!-- BODIES USE THE FURNITURE. The bunks in this wing had never once become
      propuse anchors (city/propuse.js loads 337 tags after world/cellblock.js,
@@ -747,7 +749,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/input.js"></script>
 <script src="src/systems/spatialgrid.js?v=scale3"></script>
 <script src="src/systems/camera.js?v=me6f1ee"></script>
-<script src="src/systems/physics.js?v=w09290242x"></script>
+<script src="src/systems/physics.js?v=colcore1"></script>
+<script src="src/systems/meshcollider.js?v=meshcol1"></script>
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
 <script src="src/systems/climb.js?v=lad1"></script>
 <!-- The tower post officers (entities/towerwatch.js): after guards.js, prisonkit.js (CBZ.prisonTowers) and climb.js. -->
@@ -763,7 +766,7 @@ document.body.appendChild(b);}}catch(e){}})();
      a floating dock + hinged gangway, marina pontoons, and yacht decks.
      Next adopters are one line each — elevators.js (the teleporting cab is
      the reason this exists) and the airliner cabin deck. -->
-<script src="src/systems/actorcollide.js?v=bodyphys1-st1"></script>
+<script src="src/systems/actorcollide.js?v=colcore1"></script>
 <!-- A DEAD MAN LIES ON THE FLOOR, IN THE ROOM. Owns every prison corpse's
      transform: clear lie direction, wall depenetration at both ends of the
      body, limb sprawl. entities/npc.js + entities/guards.js call its tick
@@ -863,7 +866,7 @@ document.body.appendChild(b);}}catch(e){}})();
      its world lazily, so the prison game above is untouched. Must load
      BEFORE loop.js so its frame-work is included in the sort. -->
 <script src="src/systems/fx.js?v=sharkmode1"></script>
-<script src="src/systems/debris.js?v=w09290242x"></script>
+<script src="src/systems/debris.js?v=loose1"></script>
 <!-- REAL LIGHTNING. Registers a `lightning` row + FX composer on the impact
      bus, so a cloud-to-ground strike draws a forked channel with return
      strokes, ground flashover, steam and a burn scar instead of falling
@@ -898,7 +901,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE QUAKE IS SHARED: systems/quake.js owns facade shedding, drop-cover,
      gas fires and downed lines for BOTH worlds (CITY_QUAKE for the city).
      Must precede systems/disasters.js so the roster finds CBZ.quake. -->
-<script src="src/systems/quake.js?v=quake1"></script>
+<script src="src/systems/quake.js?v=loose1"></script>
 <!-- ==== PER-DISASTER MODULE SEAM ==========================================
      One line per disaster in the survival roster, each owned by exactly that
      disaster and nobody else. A disaster whose behaviour outgrows its entry in
@@ -964,7 +967,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/tsunami_flow.js?v=tsureal1"></script>
 <script src="src/world/tsunami_scene.js?v=tsureal1"></script>
 <!-- the grid street layer (road, kerbs, footways, markings) world.js builds -->
-<script src="src/city/streetkit.js?v=deslop1"></script>
+<script src="src/city/streetkit.js?v=w0929gnd"></script>
 <!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
      inventory item; an NPC's keys live on the NPC and every existing way to
      take something off a person moves them. MUST load before city/buildings.js
@@ -979,8 +982,8 @@ document.body.appendChild(b);}}catch(e){}})();
      register ONE style and must load after it. The generalisation of what
      govcomplex.js does to this same office shell: a spec at the call site.
      Inert until a caller passes {dress:{style}} (or ?cfg_FACADE_KIT_CITY=1). -->
-<script src="src/city/facade_kit.js?v=w09290210"></script>
-<script src="src/city/facades/brick.js?v=fk1"></script>
+<script src="src/city/facade_kit.js?v=meshcol1"></script>
+<script src="src/city/facades/brick.js?v=meshcol1"></script>
 <script src="src/city/facades/stone.js?v=fk1"></script>
 <script src="src/city/facades/mosque.js?v=fk1"></script>
 <script src="src/city/facades/artdeco.js?v=fk1"></script>
@@ -1273,7 +1276,7 @@ document.body.appendChild(b);}}catch(e){}})();
      severe weather, deterministic per in-game day. The survival-mode duplicate
      was deleted and migrated onto this file — WITHOUT THIS TAG the survival
      tornado is a silent no-op. Only needs config.js; no other ordering. -->
-<script src="src/systems/tornado.js?v=tornado1"></script>
+<script src="src/systems/tornado.js?v=loose1"></script>
 <!-- weapon attachments: scopes / bigger mags / suppressor / grips, sold at the
      gunsmith bench in the gun store (sights.js reads a fitted optic) -->
 <!-- AIMING DOWN THE SIGHTS: the gun's sight solved onto the eye in first
@@ -1417,6 +1420,11 @@ document.body.appendChild(b);}}catch(e){}})();
      the near lane. After marina.js/boatyard.js — marina wraps the same spawn
      for boats first, and this wrapper passes every marine hull straight
      through to it. Revert with ?cfg_LOT_APPROACH=0. -->
+<!-- THE CITY GROUND: one splat-mapped Standard material for every grid lot
+     pad + the footway breakup (city/cityground.js). Runtime-only: world.js
+     and streetkit.js call it inside buildCity; it registers its paint pass
+     at landmass order 68, so it loads after worldmap.js and approach.js. -->
+<script src="src/city/cityground.js?v=w0929gnd"></script>
 <!-- FISHING (owner: the world had a "Fisherman" title and nobody wearing it;
      a mackerel was harvested by SHOOTING it through the hunting pipeline).
      Registers water-side spots that SELF-VALIDATE against CBZ.cityWaterAt — a
@@ -1850,7 +1858,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the Mansion when the republic falls. Security (the detail, the gate
      checkpoint, counter-snipers, the panic protocol) lives in protection.js. -->
 <script src="src/city/president_office.js?v=pres3"></script>
-<script src="src/city/motorcade.js?v=pres3"></script>
+<script src="src/city/motorcade.js?v=w09290250y"></script>
 <script src="src/city/president_public.js?v=w09290219"></script>
 <script src="src/city/president_regime.js?v=pres3-st1"></script>
 

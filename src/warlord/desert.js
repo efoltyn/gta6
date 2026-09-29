@@ -1552,8 +1552,9 @@
               if (M && M.addBoxCollider && pc) {
                 for (let i = 0; i < pc.length; i++) {
                   const q = pc[i];
+                  // turned with the rock it stands for (props.js sets q.yaw)
                   raised.cols.push(M.addBoxCollider(wx + q.x, q.y, wz + q.z, q.w, q.h, q.d,
-                    { warlordCover: true }));
+                    { warlordCover: true, yaw: q.yaw || 0 }));
                 }
               }
               placed = true;
@@ -1578,7 +1579,7 @@
           for (let i = 0; i < cover.length; i++) {
             const c = cover[i];
             raised.cols.push(M.addBoxCollider(c.x, c.y + c.h / 2, c.z, c.w, c.h, c.d,
-              { warlordCover: true }));
+              { warlordCover: true, yaw: c.yaw || 0 }));   // the fallback rock is drawn at c.yaw
           }
         }
         if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
@@ -1589,6 +1590,7 @@
         const M = CBZ.micro;
         if (M && M.colliders) {
           for (let i = raised.cols.length - 1; i >= 0; i--) {
+            if (M.removeCollider) { M.removeCollider(raised.cols[i]); continue; }
             const at = M.colliders.indexOf(raised.cols[i]);
             if (at >= 0) M.colliders.splice(at, 1);
           }

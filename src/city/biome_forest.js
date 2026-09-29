@@ -1183,7 +1183,13 @@
       // same reserved clearings, trails, and tree claims as every other
       // generated object rather than clipping through them.
       if (inClearing(x, z) || !claimNature(x, z, 6.5)) continue;
-      fallenLog(x, z, 5 + rng() * 5, 0.35 + rng() * 0.25, rng() * 6.28);
+      const log = fallenLog(x, z, 5 + rng() * 5, 0.35 + rng() * 0.25, rng() * 6.28);
+      // A 0.7-1.2 m trunk lying on the ground is over physics' 0.45 STEP_UP:
+      // you climb over it, you do not walk through it. Its yaw is random,
+      // which is exactly why it never got a hand-typed AABB; the collider is
+      // MEASURED off the drawn cylinder as an oriented box (meshcollider.js).
+      // ref:null keeps the log batchable; noCam so a chase cam never snags.
+      if (CBZ.solidFromMesh) CBZ.solidFromMesh(log, { noCam: true, ref: null, tag: "forest-log" });
     }
 
     // FALLEN-TREE BRIDGE: a big log spanning a narrow neck of the lake — a
@@ -1365,6 +1371,9 @@
       body.rotation.y = Math.PI / 4; body.position.y = 1.3; body.castShadow = true;
       g.add(body);
       g.position.set(x, 0, z); g.rotation.y = rng() * 6.28; root.add(g);
+      // a 4.8 m tent is a solid you walk around (measured: the pyramid's own
+      // square base at the group's yaw, 0..2.6 m)
+      if (CBZ.solidFromMesh) CBZ.solidFromMesh(body, { noCam: true, ref: null, tag: "forest-tent" });
     }
     tent(campX - 5, campZ - 3, 0xb5532e);
     tent(campX + 4, campZ + 4, 0x2e6db5);

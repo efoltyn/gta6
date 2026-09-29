@@ -371,6 +371,23 @@
     return true;
   };
 
+  // drop every entry owned by a piece in `ids` from `arr`, IN PLACE (the
+  // array object survives, so every alias of it stays live). `mesh` = the
+  // entries are Meshes tagged via userData.pieceId, not {pieceId} records.
+  function compactOut(arr, ids, mesh) {
+    if (!arr || !arr.length) return false;
+    let w = 0;
+    for (let i = 0; i < arr.length; i++) {
+      const e = arr[i];
+      const pid = mesh ? (e && e.userData ? e.userData.pieceId : null) : (e ? e.pieceId : null);
+      if (pid != null && ids.has(pid)) continue;
+      arr[w++] = e;
+    }
+    if (w === arr.length) return false;
+    arr.length = w;
+    return true;
+  }
+
   // ============================================================
   // teardownBatch(ids) — the array/mesh/index cleanup for one Set of
   // already-marked-dead pieceIds (factored out of reapDrain so B4's
@@ -388,46 +405,24 @@
   // was never a cascade casualty itself).
   // ============================================================
   function teardownBatch(ids) {
-    let touchedColliders = false;
-    if (CBZ.colliders.length) {
-      const next = [];
-      for (let i = 0; i < CBZ.colliders.length; i++) {
-        const c = CBZ.colliders[i];
-        if (c.pieceId != null && ids.has(c.pieceId)) { touchedColliders = true; continue; }
-        next.push(c);
-      }
-      if (touchedColliders) CBZ.colliders = next;
-    }
+    // IN-PLACE COMPACTION, never `CBZ.colliders = next`. The three world
+    // lists are aliased: microboot keeps micro.colliders === CBZ.colliders,
+    // and any system that grabbed the array once kept reading the OLD one
+    // after a reassign — a despawned wall still solid to it, a new wall never
+    // seen. Write-index filter, then truncate: same survivors, same order,
+    // same array object.
+    const touchedColliders = compactOut(CBZ.colliders, ids, false);
     if (touchedColliders && CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     // a piece that registered a stair (building.js stairs, compoundkit's tower
     // ladder) owns a CBZ.stairs link under "piece:<id>" — drop it with the piece
     if (CBZ.stairs) ids.forEach(function (id) { CBZ.stairs.removeOwner("piece:" + id); });
 
-    if (CBZ.platforms.length) {
-      const next = [];
-      let touchedPlatforms = false;
-      for (let i = 0; i < CBZ.platforms.length; i++) {
-        const p = CBZ.platforms[i];
-        if (p.pieceId != null && ids.has(p.pieceId)) { touchedPlatforms = true; continue; }
-        next.push(p);
-      }
-      if (touchedPlatforms) CBZ.platforms = next;
-    }
+    if (compactOut(CBZ.platforms, ids, false) && CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
 
-    // F7 addition: mirror the same one-filter-pass reap for losBlockers.
-    // Entries there are raw Meshes (not {pieceId,...} records like
-    // colliders/platforms), so identify a piece's own blocker via the
-    // userData.pieceId tag spawnPiece already stamps on every mesh it builds.
-    if (CBZ.losBlockers && CBZ.losBlockers.length) {
-      const next = [];
-      let touchedLos = false;
-      for (let i = 0; i < CBZ.losBlockers.length; i++) {
-        const m = CBZ.losBlockers[i];
-        if (m && m.userData && m.userData.pieceId != null && ids.has(m.userData.pieceId)) { touchedLos = true; continue; }
-        next.push(m);
-      }
-      if (touchedLos) CBZ.losBlockers = next;
-    }
+    // F7 addition: the same reap for losBlockers. Entries there are raw
+    // Meshes (not {pieceId,...} records), so a piece's own blocker is found
+    // via the userData.pieceId tag spawnPiece stamps on every mesh it builds.
+    compactOut(CBZ.losBlockers, ids, true);
 
     const dirtyChunks = new Set();
     const frontier = new Set(); // B4: surviving dependents of this batch's dead pieces

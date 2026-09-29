@@ -105,10 +105,37 @@
     if (!M || !M.feet || !a.group) return;
     M.feet(a, a.group.position, dt);
   }
+  /* NO TUNNELLING. collide() only sees where a body ENDED UP; a guard who
+     covered more than his radius plus half a wall in one tick (a sprint on a
+     slow frame, a shove from humancontact on top of his own step) can end
+     with his centre past the middle of a cell wall, and the shortest exit is
+     then out the far side. So a body that moved further than SWEEP_MIN since
+     last tick's settled spot (the same sample the vault reads, stamped at the
+     end of the previous tick) is swept along that step first
+     (CBZ.sweepCircle): stopped at the first wall it meets, keeping the part
+     of the step that runs along that wall. Steps longer than SWEEP_MAX, or a
+     sample older than one tick, are relocations (a respawn, a leash, a verb
+     that carried him), never swept. */
+  const SWEEP_MIN = R * 0.9, SWEEP_MAX = 2.5;
+  const _swFrom = { x: 0, z: 0 };
+  const _sw = { hit: false, t: 1, x: 0, z: 0, nx: 0, nz: 0, c: null };
+  let tick = 0;
   function clampOut(a) {
     const p = posOf(a);
-    const feet = (p.y || 0) + FOOT_CLEAR;
-    CBZ.collide(p, radOf(a), feet, (p.y || 0) + BODY_H);
+    const feet = (p.y || 0) + FOOT_CLEAR, head = (p.y || 0) + BODY_H;
+    if (!a._p && a._acF === tick - 1 && CBZ.sweepCircle) {
+      const dx = p.x - a._acX, dz = p.z - a._acZ, d2 = dx * dx + dz * dz;
+      if (d2 > SWEEP_MIN * SWEEP_MIN && d2 < SWEEP_MAX * SWEEP_MAX) {
+        _swFrom.x = a._acX; _swFrom.z = a._acZ;
+        if (CBZ.sweepCircle(_swFrom, p, radOf(a), feet, head, _sw)) {
+          const rest = 1 - _sw.t, rx = dx * rest, rz = dz * rest;
+          const into = rx * _sw.nx + rz * _sw.nz;
+          p.x = _sw.x; p.z = _sw.z;
+          if (into < 0) { p.x += rx - into * _sw.nx; p.z += rz - into * _sw.nz; }   // slide along it
+        }
+      }
+    }
+    CBZ.collide(p, radOf(a), feet, head);
   }
 
   // reused every frame — no per-frame allocation
@@ -126,7 +153,7 @@
   // exists for, and the probe never fires. That cost one probe round to find.
   function stampRest(a) {
     const p = a._p ? a.pos : a.group.position;
-    a._acX = p.x; a._acZ = p.z;
+    a._acX = p.x; a._acZ = p.z; a._acF = tick;
   }
 
   // Run/finish a vault for one prison actor. Returns true when the traversal
@@ -172,6 +199,7 @@
 
   CBZ.onUpdate(25, function (dt) {
     if (CBZ.game.mode !== "escape") return; // survival uses its own grid separation
+    tick++;
 
     const vaultOn = CBZ.modeHas ? CBZ.modeHas("traverse") : false;
     list.length = 0;

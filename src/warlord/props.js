@@ -1196,17 +1196,30 @@
      in a photograph and is invisible to every fighter on the field, which is
      worse than not drawing it. Anything below the bar is tagged solid:true,
      cover:false — it still stops a body, it just does not pretend. */
-  function col(list, x, y, z, w, h, d, tag) {
-    list.push({ x: x, y: y, z: z, w: w, h: h, d: d, tag: tag || "" });
+  // `yaw` (optional) turns the box about its own centre, exactly as a mesh's
+  // rotation.y would: w runs along the turned local x, d along local z.
+  function col(list, x, y, z, w, h, d, tag, yaw) {
+    const c = { x: x, y: y, z: z, w: w, h: h, d: d, tag: tag || "" };
+    if (yaw) c.yaw = yaw;
+    list.push(c);
     return list;
   }
 
-  /* THE AABB PROBLEM, STATED. micro's colliders are axis-aligned; a prop
-     placed at a yaw is not. There is no exact AABB for a rotated box, so the
-     footprint is expanded to the rotated box's own bounding rectangle. That
-     errs toward MORE solid, which for cover is the right direction to err —
-     a man who thinks a sandbag wall is 20 cm wider than it is takes cover
-     behind it; a man who thinks it is narrower stands in the open. */
+  /* TURNED PROPS GET TURNED COLLIDERS (2026-09-29). This used to expand a
+     rotated box to its own bounding rectangle because micro's registry was
+     AABB-only, and the "errs toward more solid" defence did not survive a
+     walk around the result: a 6 m sandbag run at 45 degrees was a 4.9 m
+     square of solid air, men halted a metre and a half short of cover they
+     could see through, and a turned container was walk-through on one
+     diagonal corner and an invisible wall on the other. micro now resolves
+     oriented boxes exactly (the same record physics.js reads), so each box
+     is registered at the prop's yaw plus its own.
+
+     MESH-DERIVED, WHERE A PROP ASKS. `userData.meshCollider` (true for the
+     whole group, or one Object3D) says the typed box is only a stand-in for
+     an irregular shape; when systems/meshcollider.js is on the page the
+     records are cut from that mesh instead. Absent the file, or if it
+     produces nothing, the typed boxes stand. */
   P.place = function (group, x, y, z, yaw) {
     if (!group) return null;
     yaw = yaw || 0;
@@ -1217,18 +1230,32 @@
     const M2 = CBZ.micro;
     const out = [];
     if (M2 && M2.addBoxCollider) {
+      const mc = group.userData && group.userData.meshCollider;
+      const MC = CBZ.meshCollider;
+      if (mc && MC && MC.fromMesh) {
+        try {
+          const tag = (cs[0] && cs[0].tag) || "mesh";
+          const recs = MC.fromMesh(mc === true ? group : mc, { tag: tag, ref: group }) || [];
+          for (let i = 0; i < recs.length; i++) {
+            const r = recs[i];
+            if (!r) continue;
+            r.warlordProp = true; r.propTag = tag;
+            out.push(M2.addCollider(r));
+          }
+        } catch (e) { out.length = 0; }
+      }
       const cy = Math.cos(yaw), sy = Math.sin(yaw);
-      for (let i = 0; i < cs.length; i++) {
+      const fromMesh = out.length > 0;
+      for (let i = 0; i < cs.length && !fromMesh; i++) {
         const c = cs[i];
         if (c.cover === false && c.solid === false) continue;
         const wx = x + c.x * cy + c.z * sy;
         const wz = z - c.x * sy + c.z * cy;
-        const ew = Math.abs(c.w * cy) + Math.abs(c.d * sy);
-        const ed = Math.abs(c.w * sy) + Math.abs(c.d * cy);
-        out.push(M2.addBoxCollider(wx, y + c.y, wz, ew, c.h, ed,
-          { warlordProp: true, propTag: c.tag || "" }));
+        out.push(M2.addBoxCollider(wx, y + c.y, wz, c.w, c.h, c.d,
+          { warlordProp: true, propTag: c.tag || "", yaw: yaw + (c.yaw || 0) }));
       }
-      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+      // no doorbell: micro files each record in place as it is added, and the
+      // bell would throw the whole grid away once per outpost raised
     }
     group.userData.placed = out;
     // matrix freeze last: the group's own transform is final from here.
@@ -1240,12 +1267,16 @@
     const raised = group && group.userData && group.userData.placed;
     if (!raised || !M2 || !M2.colliders) return;
     for (let i = raised.length - 1; i >= 0; i--) {
+      if (M2.removeCollider) { M2.removeCollider(raised[i]); continue; }
       const at = M2.colliders.indexOf(raised[i]);
       if (at >= 0) M2.colliders.splice(at, 1);
     }
     group.userData.placed = null;
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
-    if (M2.rebuildColliderGrid) M2.rebuildColliderGrid();
+    // removeCollider unfiles in place; the old splice path needs the bell
+    if (!M2.removeCollider) {
+      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+      if (M2.rebuildColliderGrid) M2.rebuildColliderGrid();
+    }
   };
 
   /* ============================================================ LOD
@@ -1731,12 +1762,15 @@
     im.castShadow = im.receiveShadow = true;
     g.add(im);
     g.userData.colliders = [];
-    // one collider per 3 m of run, so a bowed wall is cover from every angle
+    // one collider per 3 m of run, so a bowed wall is cover from every angle;
+    // each is the CHORD of its stretch of the bow, turned to lie along it
     const segs = Math.max(1, Math.round(len / 3));
     for (let i = 0; i < segs; i++) {
-      const u = (i + 0.5) / segs;
-      col(g.userData.colliders, (u - 0.5) * len, h / 2, Math.sin(u * Math.PI) * curve,
-        len / segs + 0.2, h, 0.9, "sandbag");
+      const u0 = i / segs, u1 = (i + 1) / segs;
+      const x0 = (u0 - 0.5) * len, z0 = Math.sin(u0 * Math.PI) * curve;
+      const x1 = (u1 - 0.5) * len, z1 = Math.sin(u1 * Math.PI) * curve;
+      col(g.userData.colliders, (x0 + x1) / 2, h / 2, (z0 + z1) / 2,
+        Math.hypot(x1 - x0, z1 - z0) + 0.2, h, 0.9, "sandbag", Math.atan2(-(z1 - z0), x1 - x0));
     }
     return g;
   };
@@ -1862,7 +1896,8 @@
       const s = stacks[i];
       if (!s.list.length) continue;
       const T = CRATE_TYPES[s.type];
-      const cc = col(g.userData.colliders, s.x, s.h / 2, s.z, Math.max(T.w, T.d), s.h, Math.max(T.w, T.d), "crate");
+      // the BASE crate's own footprint at its own turn (the stack is squared on it)
+      const cc = col(g.userData.colliders, s.x, s.h / 2, s.z, T.w, s.h, T.d, "crate", s.list[0].yaw);
       if (s.h < 0.85) cc[cc.length - 1].cover = false;
     }
     g.userData.top = top;
@@ -2239,7 +2274,7 @@
       const g = new THREE.Group();
       const m = box(g, w, h, d, M("rock"), 0, h / 2, 0, W.hash01(w, d, 3) * Math.PI);
       m.castShadow = m.receiveShadow = true;
-      g.userData.colliders = []; col(g.userData.colliders, 0, h / 2, 0, w, h, d, kind || "cover");
+      g.userData.colliders = []; col(g.userData.colliders, 0, h / 2, 0, w, h, d, kind || "cover", m.rotation.y);
       return g;
     }
     const r = stream(opts.seed == null ? Math.round(w * 97 + h * 31 + d * 7) : opts.seed);
@@ -2276,7 +2311,10 @@
     im.castShadow = true;
     g.add(im);
     g.userData.colliders = [];
-    col(g.userData.colliders, 0, h / 2, 0, w * 0.86, h, d * 0.86, slab ? "slab" : "boulder");
+    // the rock is turned; its box turns with it (a 3 x 2 m boulder at 60
+    // degrees used to be solid across the wrong 3 m)
+    col(g.userData.colliders, 0, h / 2, 0, w * 0.86, h, d * 0.86, slab ? "slab" : "boulder", m.rotation.y);
+    g.userData.meshCollider = m;          // the rock itself, not the spall at its foot
     return g;
   }
 
@@ -2377,8 +2415,9 @@
       if (!OLD && (kind === "boulder" || kind === "slab")) {
         const r = stream(seed);
         const v = kind === "slab" ? 3 : Math.floor(r.f() * 3);
-        rockBuckets[v].push({ c: c, r: r, slab: kind === "slab" });
-        colliders.push({ x: c.x, y: (c.y || 0) + c.h / 2, z: c.z, w: c.w * 0.86, h: c.h, d: c.d * 0.86, tag: kind });
+        const rc = { x: c.x, y: (c.y || 0) + c.h / 2, z: c.z, w: c.w * 0.86, h: c.h, d: c.d * 0.86, tag: kind };
+        rockBuckets[v].push({ c: c, r: r, slab: kind === "slab", col: rc });
+        colliders.push(rc);
         for (let k = 0; k < 4; k++) {
           const a = r.f() * TAU, rr = (c.w + c.d) * 0.25 * r.range(0.8, 1.3);
           rubble.push({ x: c.x + Math.cos(a) * rr, y: (c.y || 0) + 0.1, z: c.z + Math.sin(a) * rr,
@@ -2397,8 +2436,7 @@
         const q = sc[k];
         colliders.push({
           x: c.x + q.x * cy + q.z * sy, y: (c.y || 0) + q.y, z: c.z - q.x * sy + q.z * cy,
-          w: Math.abs(q.w * cy) + Math.abs(q.d * sy), h: q.h,
-          d: Math.abs(q.w * sy) + Math.abs(q.d * cy), tag: q.tag,
+          w: q.w, h: q.h, d: q.d, tag: q.tag, yaw: sub.rotation.y + (q.yaw || 0),
         });
       }
     }
@@ -2412,6 +2450,7 @@
         d.position.set(c.x, (c.y || 0) + c.h * (slab ? 0.34 : 0.42), c.z);
         d.rotation.set(r.range(-0.18, 0.18), (c.yaw || 0) + r.f() * TAU, r.range(-0.18, 0.18));
         d.scale.set(c.w / 2, c.h / (slab ? 0.9 : 2), c.d / 2);
+        b[i].col.yaw = d.rotation.y;      // the rock's own turn is its collider's
         d.updateMatrix(); im.setMatrixAt(i, d.matrix);
       }
       im.instanceMatrix.needsUpdate = true;
@@ -3227,9 +3266,9 @@
         box(seg, chord + 0.3, 0.14, t + 0.06, M("post"), 0, 2.0 + FLOOR + 0.07, 0);
       } else {
         box(seg, chord, H - SINK, t, wall, 0, (H + SINK) / 2, 0);
-        const cw = Math.abs(chord * Math.sin(a)) + Math.abs(t * Math.cos(a));
-        const cd = Math.abs(chord * Math.cos(a)) + Math.abs(t * Math.sin(a));
-        col(CS, px, FLOOR + (H - FLOOR) / 2, pz, cw, H - FLOOR, cd, "house");
+        // the chord at its own turn, not its bounding square: the sixteen
+        // fattened squares used to close half the doorway and eat the floor
+        col(CS, px, FLOOR + (H - FLOOR) / 2, pz, chord, H - FLOOR, t, "house", seg.rotation.y);
       }
     }
     // the thatch: an open cone, two-sided so it is the ceiling from inside,
@@ -3394,8 +3433,14 @@
     const s = opts.scale || 1, cy = Math.cos(rot), sy = Math.sin(rot), odd = q % 2 === 1;
     for (let i = 0; i < local.length; i++) {
       const c = local[i];
-      col(g.userData.colliders, (c.x * cy + c.z * sy) * s, c.y * s, (-c.x * sy + c.z * cy) * s,
-        (odd ? c.d : c.w) * s, c.h * s, (odd ? c.w : c.d) * s, "house");
+      if (c.yaw) {
+        // an already-turned wall (the round house's chords): turn it once more
+        col(g.userData.colliders, (c.x * cy + c.z * sy) * s, c.y * s, (-c.x * sy + c.z * cy) * s,
+          c.w * s, c.h * s, c.d * s, "house", c.yaw + rot);
+      } else {
+        col(g.userData.colliders, (c.x * cy + c.z * sy) * s, c.y * s, (-c.x * sy + c.z * cy) * s,
+          (odd ? c.d : c.w) * s, c.h * s, (odd ? c.w : c.d) * s, "house");
+      }
     }
     g.userData.h = dim.h * s;
     g.userData.hx = dim.hx * s;
@@ -3676,9 +3721,7 @@
       c.rotation.y = L.yaw + r.range(-0.03, 0.03);
       near.add(c);
       if (L.y === 0) {
-        const sw = Math.abs(L.len * Math.cos(L.yaw)) + Math.abs(2.44 * Math.sin(L.yaw));
-        const sd = Math.abs(L.len * Math.sin(L.yaw)) + Math.abs(2.44 * Math.cos(L.yaw));
-        col(CS, L.x, 1.2, L.z, sw, 2.4, sd, "container");
+        col(CS, L.x, 1.2, L.z, L.len, 2.4, 2.44, "container", c.rotation.y);
       }
     }
 
@@ -3780,7 +3823,8 @@
     for (let i = 0; i < sc.length; i++) {
       const q = sc[i];
       col(CS, x + q.x * cy + q.z * sy, y + q.y, z - q.x * sy + q.z * cy,
-        Math.abs(q.w * cy) + Math.abs(q.d * sy), q.h, Math.abs(q.w * sy) + Math.abs(q.d * cy), q.tag);
+        q.w, q.h, q.d, q.tag, yaw + (q.yaw || 0));
+      if (q.cover === false) CS[CS.length - 1].cover = false;
     }
   }
   function oldBlock(near, CS, w, h, mat) {
@@ -4360,7 +4404,8 @@
       if (!c || !c.warlordProp) continue;
       const h = (c.y1 == null) ? 99 : c.y1 - (c.y0 || 0);
       if (h < 0.85 || (c.y0 || 0) > 1.2) continue;
-      if ((c.maxX - c.minX) < 0.7 && (c.maxZ - c.minZ) < 0.7) continue;
+      const ew = c.hw != null ? c.hw * 2 : c.maxX - c.minX, ed = c.hd != null ? c.hd * 2 : c.maxZ - c.minZ;
+      if (ew < 0.7 && ed < 0.7) continue;
       out.coverBoxes++;
     }
     if (!R || !cam || !scene) return out;

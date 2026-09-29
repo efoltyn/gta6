@@ -142,6 +142,16 @@
     const goldX = 150 + GLD.dx, goldMouthZ = 470;      // minicities goldspire cx / road plug z
     const capeX = 430 + CPH.dx, capeMouthZ = -130;     // minicities capeharbor cx / road plug z
     const foundryMouthX = -380, foundryRowZ = 225 + FND.dz;  // minicities foundry road plug
+    // island_military CW_MAXX: the Brandt deck's EAST end is pinned at the
+    // authored mainland shore point while the base slides with the dial
+    const brandtEastX = -133;
+    // WHAT FOUNDRY ROW ACTUALLY MEETS. It was written to "T flush onto Route
+    // 3's deck", but Route 3 runs NORTH from the Goldspire mouth; once the
+    // re-lay pushed Foundry Row south of that mouth it met the Goldspire LINK
+    // (minicities.js, a 24 m causeway deck, half 14.4) instead — and stopped
+    // 15.3 m short of the line, i.e. ~1 m of grass short of that deck with a
+    // square end. Dock on whichever deck is really there.
+    const r4EndX = foundryRowZ > goldMouthZ ? goldX - CW_HALF : goldX - HALF;
 
     // ---- the loop's free-country lanes (verified ≥40m clear of every
     //      registered footprint incl. Greater Mercy and the nations — the
@@ -252,7 +262,7 @@
         id: "R4", name: "Foundry Row", width: WIDTH, lanesPerDir: 3, fillet: 60,
         pts: [
           { x: foundryMouthX, z: foundryRowZ },          // dock: Foundry link mouth
-          { x: goldX - HALF, z: foundryRowZ },           // T flush onto Route 3's deck
+          { x: r4EndX, z: foundryRowZ },                 // T flush onto the Goldspire link / Route 3
         ],
         recA: foundryMouthX - 20, recB: goldX,
         docks: [{ x: foundryMouthX, z: foundryRowZ, note: "Foundry link" }],
@@ -299,15 +309,33 @@
         // as -1000 a world move would have floated this connector off the leg
         // it T's into and off the Mercy lane it docks against. It is the same
         // number in the stage-3 world, so this changes nothing there.
+        //
+        // AND IT STARTS WHERE THE BRANDT DECK ENDS. "T flush onto Route 1's
+        // first leg" stopped being true when the base moved north: brandtZ is
+        // the Brandt causeway's own centreline, so this connector was laid ON
+        // TOP of that causeway from Route 1 to its pinned east end (411 m of
+        // two decks stacked, two sets of lane paint 0.9 m apart), and the
+        // Brandt deck's paint, rumble strips and median ended abruptly in the
+        // middle of this one. Where the Brandt deck reaches past Route 1, the
+        // connector now carries on from its end, flush, end to end.
         pts: [
-          { x: timberX + HALF, z: brandtZ },             // T flush onto Route 1's first leg
+          { x: Math.max(timberX + HALF, brandtEastX), z: brandtZ },   // Brandt deck end (or T onto Route 1)
           { x: mercyX - CW_HALF, z: brandtZ },           // dock: Mercy causeway west edge
         ],
-        recA: timberX, recB: mercyX,
+        recA: brandtEastX > timberX + HALF ? brandtEastX - 20 : timberX, recB: mercyX,
         docks: [{ x: mercyX, z: brandtZ, note: "Mercy causeway" }],
       },
     ];
   }
+
+  // The table is pure data off the layout dial, so a builder that runs
+  // BEFORE the network (a mini-city at order 34) can ask where the lanes will
+  // be and dock onto one instead of plugging into empty country.
+  CBZ.highwayNetTable = function () {
+    if (!CBZ.CONFIG || CBZ.CONFIG.HIGHWAY_NET_V2 === false) return [];
+    return routeTable();
+  };
+  CBZ.HIGHWAY_NET_HALF = HALF;
 
   // ============================================================
   //  BUILD-TIME CLEARANCE SWEEP (deterministic).

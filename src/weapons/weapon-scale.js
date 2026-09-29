@@ -139,7 +139,9 @@
     let min = Infinity, max = -Infinity;
     model.traverse(function (o) {
       if (!o.isMesh || !o.geometry) return;
-      if (mat && o.material === mat.skin) return;
+      // (a hand drawn with the player's ink wears a twin of mat.skin; its
+      // own is kept as userData.inkBase — entities/tattoo.js fpSync)
+      if (mat && (o.material === mat.skin || o.userData.inkBase === mat.skin)) return;
       const geo = o.geometry;
       if (!geo.boundingBox && geo.computeBoundingBox) geo.computeBoundingBox();
       const b = geo.boundingBox;
