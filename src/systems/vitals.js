@@ -752,7 +752,12 @@
     const R = P && P._vt;
     let k = 0;
     if (R && !P.dead) {
-      k = weak(R);
+      // THE PRISON PAINTS NOTHING OVER THE VIEW (owner, 2026-09-29: low
+      // health is known "by blood coming out, by looking down and seeing a
+      // hole, by limping"). There the blood you have lost is in your legs
+      // (speedMul, no sprint) and on the floor behind you, never a grey rim;
+      // the lights still go out when you are out cold.
+      k = mode() === "escape" ? 0 : weak(R);
       if (R.koT > 0 || R.collapsed) k = 1;
     }
     if (k < 0.01 && veilK <= 0.01) return;

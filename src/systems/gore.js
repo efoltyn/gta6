@@ -4130,6 +4130,10 @@
     if (CBZ.scene && (!ldMesh || ldMesh.parent !== CBZ.scene)) landLayer();
     // ...and the air layer's, for the same reason
     if (CBZ.scene && !airMesh) airReady();
+    // the prison paints nothing red over the view (owner: "the screen turning
+    // red ... is dumb"): a kill beside you is the blood on the floor and on
+    // the walls, not a red rim on your screen
+    if (flashV > 0 && CBZ.game && CBZ.game.mode === "escape") flashV = 0;
     if (flashV > 0.002) { ensureFlash().style.opacity = String(Math.min(0.5, flashV)); flashV *= Math.pow(0.0012, dt); }
     else if (flashEl && flashEl.style.opacity !== "0") { flashEl.style.opacity = "0"; flashV = 0; }
 

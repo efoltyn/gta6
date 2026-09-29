@@ -264,7 +264,6 @@
     opts = Object.assign({}, opts || {});
     if (opts.strike === false && !opts.kind) opts.kind = "medical";
     if (!opts.kind) opts.kind = (CBZ.prisonEscapeCapture && CBZ.prisonEscapeCapture()) ? "transfer" : "hole";
-    flash();
     startEscort(msg, opts);
   }
   CBZ.haulToCell = haulToCell;
@@ -310,7 +309,6 @@
     law("shu");
     if (CBZ.shake) CBZ.shake(strike >= 2 ? 0.85 : 0.6);
     if (CBZ.sfx) { try { CBZ.sfx(taken > 0 ? "coin" : "punch"); } catch (e) {} }
-    flash();
     g.invuln = Math.max(g.invuln || 0, confineT + 0.5);
   }
 
@@ -382,6 +380,58 @@
   }
   CBZ.playerDowned = function () { return !!down || !!(esc && esc.kind === "medical"); };
   const VIT = () => CBZ.vitals || null;
+  /* ---- THE HOLE IS ON YOU (2026-09-29). Owner: "they know by blood coming
+     out, by looking down and seeing a hole, they know by limping." Every
+     round or blade that opens a bleed in you (CBZ.vitals) now also leaves
+     the hole on YOUR rig, the same way it does on every man in the yard
+     (CBZ.bodyWound, systems/wounds.js): a dark entry, a cut in the shirt,
+     the stain spreading from it. It rides the body part, so you see it over
+     the shoulder and when you look down in first person (fpsmode.js keeps
+     your body under the lens in this mode).
+     A screw's or a tower's round has no ray behind it, only a roll, so the
+     roll picks WHERE on a standing man it went: legs, gut, chest, an arm.
+     Never the head: a stray roll does not get to end a run outright. The
+     same zone goes to CBZ.vitals, so the hole, the bleed and the limp agree. */
+  const WOUND_ACTOR = {
+    isPlayer: true,
+    get char() { return CBZ.playerChar || null; },
+    get group() { return CBZ.playerChar ? CBZ.playerChar.group : null; },
+    get pos() { return player.pos; },
+    get dead() { return !!player.dead; },
+  };
+  CBZ.playerWoundActor = WOUND_ACTOR;
+  const ZONE_Y = { head: 1.66, neck: 1.5, chest: 1.28, abdomen: 1.0, legL: 0.58, legR: 0.58, armL: 1.22, armR: 1.22 };
+  const ZONE_SIDE = { legL: -0.1, legR: 0.1, armL: -0.26, armR: 0.26 };
+  function rollZone() {
+    const r = Math.random();
+    if (r < 0.32) return Math.random() < 0.5 ? "legL" : "legR";
+    if (r < 0.58) return "abdomen";
+    if (r < 0.9) return "chest";
+    return Math.random() < 0.5 ? "armL" : "armR";
+  }
+  function playerWound(weapon, opts, dx, dz) {
+    let zone = opts.zone || null;
+    let point = opts.point || null;
+    if (!point) {
+      if (!zone || !(zone in ZONE_Y)) zone = opts.head ? "head" : rollZone();
+      const ch = CBZ.playerChar, yaw = ch && ch.group ? ch.group.rotation.y : 0;
+      const side = ZONE_SIDE[zone] || 0;
+      const lying = !!(down || (ch && ch.fall && ch.fall.on));
+      const y = lying ? 0.28 : ZONE_Y[zone];
+      // on the surface facing where it came from (dx,dz points shooter -> you)
+      point = { x: player.pos.x + Math.cos(yaw) * side - dx * 0.12,
+        y: (player.pos.y || 0) + y,
+        z: player.pos.z - Math.sin(yaw) * side - dz * 0.12 };
+    }
+    if (CBZ.bodyWound && CBZ.playerChar && !player.dead) {
+      const blade = weapon === "shank";
+      try {
+        CBZ.bodyWound(WOUND_ACTOR, point, { melee: blade ? "blade" : undefined, head: !!opts.head || zone === "head",
+          cal: opts.cal != null ? opts.cal : (blade ? 0.7 : 1), dir: (dx || dz) ? { x: dx, y: 0, z: dz } : null });
+      } catch (e) { /* wounds off */ }
+    }
+    return { zone: zone, point: point };
+  }
   CBZ.hurtPlayer = function (dmg, fromX, fromZ, opts) {
     opts = opts || {};
     if (player.dead) return false;
@@ -392,7 +442,8 @@
     // man on the floor is another hole, and he is already bleeding hard
     if (down) {
       if (steel && !((g.invuln || 0) > 0)) {
-        if (V) V.wound(player, { kind: weapon === "shank" ? "stab" : "bullet", zone: opts.zone, point: opts.point, by: opts.by || null, critical: true, cal: opts.cal });
+        const hole = playerWound(weapon, opts, opts.dirX || 0, opts.dirZ || 0);
+        if (V) V.wound(player, { kind: weapon === "shank" ? "stab" : "bullet", zone: hole.zone, point: hole.point, by: opts.by || null, critical: true, cal: opts.cal });
         else die(weapon === "shank" ? "Stabbed on the floor" : "Shot on the floor", opts);
         return true;
       }
@@ -408,7 +459,6 @@
     if (opts.melee && CBZ.playerHitReact) CBZ.playerHitReact(opts.stun != null ? opts.stun : 0.42, opts);
     else player.stun = Math.max(player.stun || 0, opts.stun || 0.25);
     if (CBZ.shake) CBZ.shake(opts.shake || 0.6);
-    flash();
     CBZ.sfx && CBZ.sfx(opts.sfx || (opts.melee ? "punch" : "hit"));
     // the blow on YOUR body: a strike through CBZ.verbs has already played
     // its reaction (opts.reacted); anything else gets the same one from here
@@ -443,8 +493,9 @@
     // STEEL OR A ROUND: a hole that bleeds; out of hp, down bleeding
     const crit = player.hp <= 0;
     if (player.hp < 1) player.hp = crit ? 0 : 1;
+    const hole = playerWound(weapon, opts, dx, dz);
     const W = V.wound(player, { kind: weapon === "shank" ? "stab" : weapon === "blast" ? "blast" : "bullet",
-      zone: opts.zone, point: opts.point, head: !!opts.head, cal: opts.cal, by: opts.by || null,
+      zone: hole.zone, point: hole.point, head: !!opts.head, cal: opts.cal, by: opts.by || null,
       dirX: dx, dirZ: dz, fromX, fromZ, critical: crit });
     return !!W && (W.outcome === "down" || W.outcome === "dead");
   };
@@ -476,13 +527,58 @@
     const V = VIT();
     if (V && V.fall) V.fall(player, h);
     if (CBZ.shake) CBZ.shake(Math.min(1.3, 0.35 + h * 0.07));
-    flash();
     if (CBZ.sfx) { CBZ.sfx("hit"); if (sev !== "sprain") CBZ.sfx("ko"); }
     if (sev === "broken") player.ko = Math.max(player.ko || 0, 2.6);
     else player.stun = Math.max(player.stun || 0, sev === "fracture" ? 1.1 : 0.35);
     if (CBZ.guardHear) { try { CBZ.guardHear(player.pos.x, player.pos.z, sev === "sprain" ? 10 : 26, { type: "impact", player: true }); } catch (e) {} }
     return sev;
   };
+  /* ---- THE LIMP YOU SEE. vitals.js already SLOWS a man with a hole in a
+     leg or legs hurt in a fall (speedMul, which physics.js applies to you);
+     entities/character.js already knows how a hurt leg WALKS (ch.legHurt: a
+     short stiff stride on that side, the dip onto it each step). wounds.js
+     writes legHurt for every man but you, so the player limped in speed only
+     and his legs walked sound. This keeps your rig's legHurt on what
+     CBZ.vitals says about your legs, every frame, in this mode: the worst open
+     leg hole (its side; a wrapped one still favoured, half as hard) or the
+     fall (a turned ankle, a broken one, broken legs). Nothing else writes the
+     player's legHurt here, so it is set and cleared only by this. */
+  let limpSet = false;
+  function playerLimp() {
+    const ch = CBZ.playerChar;
+    if (!ch) return null;
+    const V = VIT();
+    const R = V && V.peek ? V.peek(player) : null;
+    let side = 0, sev = 0;
+    if (R && !player.dead) {
+      for (let i = 0; i < R.bleeds.length; i++) {
+        const b = R.bleeds[i];
+        if (b.zone !== "legL" && b.zone !== "legR") continue;
+        const k = Math.min(1, 0.5 + (b.rate0 || b.rate) * 55) * (b.band >= 0.5 ? 0.5 : 1);
+        if (k > sev) { sev = k; side = b.zone === "legL" ? -1 : 1; }
+      }
+      const lame = V.lame ? V.lame(player) : 1;
+      if (lame < 1) {
+        const k = Math.min(1, (1 - lame) / 0.55);
+        if (k > sev) { sev = k; side = side || -1; }
+      }
+    }
+    if (sev > 0.02 && !ch.legGone) {
+      const lh = ch.legHurt;
+      if (!lh || lh.side !== side || Math.abs(lh.sev - sev) > 0.01) ch.legHurt = { side: side, sev: sev, t: 9999 };
+      else lh.t = 9999;
+      limpSet = true;
+    } else if (limpSet) {
+      ch.legHurt = null;
+      limpSet = false;
+    }
+    return ch.legHurt || null;
+  }
+  CBZ.prisonPlayerLimp = playerLimp;
+  CBZ.onUpdate(9.5, function () {
+    if (g.mode !== "escape") { if (limpSet && CBZ.playerChar) { CBZ.playerChar.legHurt = null; limpSet = false; } return; }
+    playerLimp();
+  });
   CBZ.shootPlayer = function (dmg, fromX, fromZ, opts) {
     return CBZ.hurtPlayer(dmg, fromX, fromZ, Object.assign({ weapon: "gun" }, opts || {}));
   };
@@ -559,7 +655,6 @@
     g._deathLine = cause || "Dead";
     deathT = 2.6;                       // you see it happen before the card
     if (CBZ.shake) CBZ.shake(0.9);
-    flash();
   }
 
   // ============================================================
@@ -663,9 +758,13 @@
     if (CBZ.animChar && gd.char) CBZ.animChar(gd.char, step / Math.max(dt, 1e-4), dt);
     return Math.max(0, d - stop);
   }
-  function flash() {
-    if (CBZ.el && CBZ.el.flash) { CBZ.el.flash.classList.remove("go"); void CBZ.el.flash.offsetWidth; CBZ.el.flash.classList.add("go"); }
-  }
+  /* NO RED SCREEN. This file used to fire the full-screen #flash (a #ff2a3a
+     wash at 55%) on every blow, fall, tase, tower round, haul and death, so a
+     man taking a beating watched his screen strobe red (owner: "the screen
+     turning red when I'm low health is dumb"). Being hurt reads on the BODY:
+     the hole and the blood on you (wounds.js, playerWound below), the drip
+     and the trail (vitals.js), the limp (playerLimp below), the shake and the
+     sound. Nothing is painted over the view. */
   function tiesOn(on) {
     CBZ.playerChar.cuffed = !!on;
     if (CBZ.verbs && CBZ.verbs.setCuffs) CBZ.verbs.setCuffs(CBZ.verbs.playerActor(), !!on);
@@ -902,7 +1001,6 @@
         if (CBZ.taserFx && CBZ.taserFx.actorTasePlayer) { try { CBZ.taserFx.actorTasePlayer(lead); } catch (er) {} }
         if (CBZ.sfx) { try { CBZ.sfx("tase"); } catch (er) {} }
         if (CBZ.shake) CBZ.shake(0.55);
-        flash();
       }
       if (ch.body) ch.body.rotation.x += 0.28 * Math.max(0, 1 - e.t / ESC.TASE);
       if (lead) screwStep(lead, px, pz, ESC.REACH, px, pz, false, dt);
@@ -1187,7 +1285,6 @@
     const a = arrest, gd = a.gd;
     law("tases");
     const r = AR() && AR().tase ? AR().tase(gd) : { hit: true };
-    flash();
     if (!AR()) { player.stun = 1.85; }
     if (r.hit) {
       a.phase = "tased"; a.t = 0; a.after = 0; a.tasedAt = clock();
@@ -1895,7 +1992,6 @@
       } else if (towerSeq === 2 && towerShotCD <= 0) {
         towerBurst(towerSrc, 2.4, 4);                                   // final volley, CLOSE
         CBZ.shake && CBZ.shake(0.5);
-        flash();
         towerShotCD = 1.3;
         if (towerT > 3.2) towerSeq = 3;
       } else if (towerSeq === 3 && towerShotCD <= 0) {

@@ -5045,8 +5045,10 @@
     if (cityHotbarSelect(n)) e.preventDefault();
   });
 
+  const fpBody = { on: false, hid: [] };   // YOUR BODY UNDER THE LENS, below
   function setActive(on) {
     fps.active = on;
+    if (!on && fpBody.on) fpBodyOff();
     if (CBZ.playerChar) CBZ.playerChar.group.visible = !on;
     // Same owner as the per-frame pass below (aquaticRide): the eye toggle can
     // land AFTER this frame's onAlways(52), so without it a [V] pressed mid-ride
@@ -5088,6 +5090,73 @@
     // unarmed/holstered.
     if (CBZ.playerChar && on) { CBZ.playerChar.aimingPose = false; CBZ.playerChar.carryPose = false; }
   }
+
+  /* ---- YOUR BODY UNDER THE LENS (prison, 2026-09-29) ----------------------
+     Owner: low health is known "by blood coming out, by looking down and
+     seeing a hole, by limping". First person used to hide the whole rig
+     (setActive above), so looking down showed the floor and the hole the
+     round made in you was nowhere. In the prison the rig now stays drawn
+     under the eye: the head and neck go (the lens is in them) and the arms go
+     (the viewmodel hands are the arms here), and the body stands square to
+     the lens with the front of the chest ~13 cm ahead of the eye. Straight
+     ahead the shoulders sit under the bottom edge of the frame (the frame's
+     lowest ray passes 31 degrees down, the shoulder edge is ~49 degrees
+     down); look down and there is your chest, your gut, your legs, and the
+     holes and the stains wounds.js stamped on them.
+     Not while crouched or prone (the torso folds forward into the lens), on
+     the floor, seated, riding or diving: the rig is hidden then, as before. */
+  const FP_BODY_FRONT = 0.13;     // m the chest's front face sits ahead of the eye
+  function fpBodyWanted() {
+    const P = CBZ.player, ch = CBZ.playerChar, g = CBZ.game;
+    if (!fps.active || !ch || !ch.group || !P || P.dead) return false;
+    if (!g || g.mode !== "escape" || g.state !== "playing") return false;
+    if (P.prone || P.crouch || P.driving || (P.ko || 0) > 0) return false;
+    if (ch.crouch || ch.pronePose || ch.slidePose || ch.skydiving || ch.riding || ch.lying || ch.sitting) return false;
+    if (ch.fall && ch.fall.on) return false;
+    if (CBZ.playerDowned && CBZ.playerDowned()) return false;
+    if (P.captureState && P.captureState !== "normal") return false;
+    if (aquaticRide()) return false;
+    // the eye is a fixed 1.65 m: only a body it sits in (head above, shoulders below)
+    const m = ch.group.userData && ch.group.userData.characterMetric;
+    if (m && (m.height < 1.6 || m.height > 2.1)) return false;
+    return true;
+  }
+  function fpBodyOff() {
+    for (let i = 0; i < fpBody.hid.length; i++) fpBody.hid[i].visible = true;
+    fpBody.hid.length = 0;
+    fpBody.on = false;
+  }
+  CBZ.fpBodyOn = function () { return fpBody.on; };
+  CBZ.onAlways(52.5, function () {
+    const ch = CBZ.playerChar;
+    if (!fpBodyWanted()) {
+      if (fpBody.on) {
+        fpBodyOff();
+        if (ch && ch.group && fps.active) ch.group.visible = false;
+      }
+      return;
+    }
+    if (!fpBody.on) {
+      fpBody.on = true;
+      const L = ch.low || {}, Pp = ch.parts || {};
+      const cut = [ch.head, ch.neck, Pp.la, Pp.ra, L.la, L.ra];
+      for (let i = 0; i < cut.length; i++) {
+        const o = cut[i];
+        if (o && o.visible !== false && fpBody.hid.indexOf(o) < 0) { o.visible = false; fpBody.hid.push(o); }
+      }
+    }
+    ch.group.visible = true;
+    // square to the lens, and stood so the chest front is FP_BODY_FRONT ahead
+    // of the eye (written absolutely off player.pos, as physics.js writes it)
+    const yaw = Math.atan2(-Math.sin(CBZ.cam.yaw), -Math.cos(CBZ.cam.yaw));
+    ch.group.rotation.y = yaw;
+    const hs = (ch.group.userData && ch.group.userData.humanScale) || 0.7;
+    const half = ((ch.profile && ch.profile.torsoD) || 0.5) * hs * 0.5;
+    const back = half - FP_BODY_FRONT;
+    const P = CBZ.player;
+    ch.group.position.x = P.pos.x - Math.sin(yaw) * back;
+    ch.group.position.z = P.pos.z - Math.cos(yaw) * back;
+  });
 
   CBZ.toggleFPS = function () { setActive(!fps.active); };
   CBZ.setFPS = function (on) { setActive(!!on); };
