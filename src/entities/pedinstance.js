@@ -265,6 +265,267 @@
     return t;
   }
 
+  /* ---- TEXTURE PAGES: ONE POOL PER SHAPE, NOT PER SHAPE x OUTFIT ----------
+     THE MEASUREMENT (tools/human-audit.mjs, 2026-09-28, the 864-body crowd,
+     right after the outfit remake ca969395): 1,748 distinct pool keys wanted
+     against the 1,024-pool table, so every body whose last combo came late
+     drew itself whole — fallbackMeshes 5,823 -> 10,729, instancesLive
+     19,891 -> 14,723. The same crowd with the map left OUT of the key is 345
+     keys. The texture was the whole multiplier: city/clothes.js paints ONE
+     128x256 atlas per outfit key (the remake added ~30 more of them), every
+     garment part's UVs index the SAME layout whatever the outfit (clothGeom /
+     limbPainter never read the outfit), and the key was geometry x map — so
+     each body shape was a pool per outfit it wore.
+
+     So a pool no longer holds a texture, it holds a PAGE: a big canvas the
+     small textures are copied into, slot by slot, and each instance carries
+     its slot as a per-instance UV offset+scale (attribute `pinUv`, applied to
+     vUv right after uv_vertex). The pixels are the same pixels (1:1 copy,
+     smoothing off), each slot is ringed with a gutter of its own edge texels
+     (8 px where the texture mips, 1 px where it does not) so bilinear and the
+     first mip levels never reach a neighbour, and the page carries the
+     source's filter/mip/encoding settings (a class per setting set, so a
+     no-mip yoke never shares a page with a mipped jacket). Nothing about the
+     SOURCE changes: its material and texture are untouched, a body that draws
+     itself (the fallback, the player, every non-city game) samples its own
+     128x256 canvas exactly as before. Shadows are unaffected: r128's depth
+     pass ignores `map` unless an alphaMap is set.
+
+     Only the plain case is paged — a canvas map, ClampToEdge, flipY, identity
+     UV transform, no second map sharing vUv. Anything else keeps the old
+     exact-map key (still correct, just narrower). Page memory: pages are 2048
+     wide and double in height as they fill (a full 2048x2048 page holds 98
+     outfit atlases; the 864-body audit crowd needs 5 pages, ~pageMB in
+     pedInstanceAudit()). The per-outfit textures of pooled bodies never
+     upload at all (their meshes sit on the hide layer), so GPU memory is
+     roughly a wash.
+
+     New slots go up incrementally (renderer.copyTextureToTexture, a
+     texSubImage2D of just the slot) once the page is on the GPU; before that,
+     or headless, the page canvas simply re-uploads. A source texture that is
+     repainted (texture.version moves) is re-copied the next frame a body
+     wearing it is placed. */
+  const PAGE_MAX = 2048, PAGES_PER_CLASS = 6;
+  const pageClasses = new Map();    // settings key -> class { w, h, g, sw, sh, PW, PH, cols, rows, pages, scratch }
+  const slotOf = new Map();         // source texture uuid -> slot
+  let pageSeq = 0, pageCopies = 0, pageFullUploads = 0;
+  const _pagePos = new THREE.Vector2();
+  let _pageSrc = null;
+
+  const VUV_MAPS = ["alphaMap", "emissiveMap", "bumpMap", "normalMap", "specularMap", "displacementMap",
+    "roughnessMap", "metalnessMap", "lightMap", "aoMap", "gradientMap", "clearcoatMap", "clearcoatNormalMap",
+    "clearcoatRoughnessMap", "transmissionMap", "sheenColorMap"];
+  const PAGED_TYPES = { MeshLambertMaterial: 1, MeshPhongMaterial: 1, MeshStandardMaterial: 1, MeshPhysicalMaterial: 1, MeshBasicMaterial: 1, MeshToonMaterial: 1 };
+  function pageable(m) {
+    const t = m.map;
+    if (!t || !t.isTexture || t.isDataTexture || t.isCompressedTexture || t.isVideoTexture || t.isCubeTexture) return false;
+    if (!PAGED_TYPES[m.type]) return false;
+    for (let i = 0; i < VUV_MAPS.length; i++) if (m[VUV_MAPS[i]]) return false;
+    const im = t.image;
+    if (!im || typeof im.getContext !== "function" || !(im.width > 0) || !(im.height > 0) || im.width > 512 || im.height > 512) return false;
+    if (t.wrapS !== THREE.ClampToEdgeWrapping || t.wrapT !== THREE.ClampToEdgeWrapping || t.flipY !== true) return false;
+    if (t.offset.x !== 0 || t.offset.y !== 0 || t.repeat.x !== 1 || t.repeat.y !== 1 || t.rotation !== 0 || t.matrixAutoUpdate === false) return false;
+    return true;
+  }
+
+  function pageClass(t) {
+    const im = t.image, w = im.width, h = im.height;
+    const mips = t.generateMipmaps !== false && t.minFilter !== THREE.NearestFilter && t.minFilter !== THREE.LinearFilter;
+    const key = w + "x" + h + "|" + t.minFilter + "|" + t.magFilter + "|" + (mips ? 1 : 0) + "|" + t.anisotropy +
+      "|" + t.encoding + "|" + (t.premultiplyAlpha ? 1 : 0) + "|" + t.format + "|" + t.type + "|" + t.unpackAlignment;
+    let C = pageClasses.get(key);
+    if (C !== undefined) return C;
+    const g = mips ? 8 : 1, sw = w + 2 * g, sh = h + 2 * g;
+    /* A page is PAGE_MAX wide and starts one slot-row tall (power of two,
+       so WebGL1 still mips it); it DOUBLES IN HEIGHT as its class fills
+       (growPage), so a class with a dozen textures (faces, eyes) costs a
+       strip, not a 16 MB square, and a class with a hundred (the outfit
+       atlases) still ends up on one page — one pool per shape. */
+    const PW = PAGE_MAX;
+    let PH0 = 64;
+    while (PH0 < sh && PH0 < PAGE_MAX) PH0 *= 2;
+    C = null;
+    if (Math.floor(PW / sw) >= 4 && Math.floor(PAGE_MAX / sh) >= 2) {
+      C = { key: key, w: w, h: h, g: g, sw: sw, sh: sh, PW: PW, PH0: PH0, cols: Math.floor(PW / sw),
+        pages: [], scratch: null, proto: t };
+    }
+    pageClasses.set(key, C);
+    return C;
+  }
+
+  function newPage(C) {
+    if (typeof document === "undefined" || !document.createElement) return null;
+    const cv = document.createElement("canvas");
+    cv.width = C.PW; cv.height = C.PH0;
+    const ctx = cv.getContext("2d");
+    if (!ctx) return null;
+    ctx.imageSmoothingEnabled = false;
+    const s = C.proto, t = new THREE.CanvasTexture(cv);
+    t.minFilter = s.minFilter; t.magFilter = s.magFilter; t.generateMipmaps = s.generateMipmaps;
+    t.anisotropy = s.anisotropy; t.encoding = s.encoding; t.premultiplyAlpha = s.premultiplyAlpha;
+    t.format = s.format; t.type = s.type; t.unpackAlignment = s.unpackAlignment;
+    t.name = "pedinst-page";
+    t._shared = true;
+    const P = { id: ++pageSeq, cls: C, cv: cv, ctx: ctx, tex: t, PH: C.PH0, next: 0, cap: C.cols * Math.floor(C.PH0 / C.sh), slots: [] };
+    C.pages.push(P);
+    return P;
+  }
+
+  // flipY: image row y (from the top) is texture v = 1 - y / PH
+  function slotUv(s) {
+    const P = s.page, C = P.cls;
+    return [(s.x + C.g) / C.PW, 1 - (s.y + C.g + C.h) / P.PH, C.w / C.PW, C.h / P.PH];
+  }
+
+  /* Double a full page's height. Every slot keeps its pixel position; only
+     the normalised v of each slot moves, so every live instance on the page
+     gets its pinUv rewritten here (a rare event: a handful per session). */
+  function growPage(P) {
+    const C = P.cls;
+    if (P.PH >= PAGE_MAX) return false;
+    const PH = P.PH * 2, cv = document.createElement("canvas");
+    cv.width = C.PW; cv.height = PH;
+    const ctx = cv.getContext("2d");
+    if (!ctx) return false;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(P.cv, 0, 0);
+    P.cv = cv; P.ctx = ctx; P.PH = PH;
+    P.cap = C.cols * Math.floor(PH / C.sh);
+    P.tex.image = cv;
+    P.tex.needsUpdate = true;
+    pageFullUploads++;
+    for (let i = 0; i < P.slots.length; i++) P.slots[i].uv = slotUv(P.slots[i]);
+    pools.forEach(function (p) {
+      if (p.page !== P || !p.uv) return;
+      for (let i = 0; i < p.recs.length; i++) {
+        const rec = p.recs[i];
+        if (rec.slot >= 0 && rec.ps) p.uv.array.set(rec.ps.uv, rec.slot * 4);
+      }
+      p.uDirty = true;
+    });
+    return true;
+  }
+
+  // copy the source into its slot (1:1 body + edge-texel gutter), then to the GPU
+  function paintSlot(s) {
+    const P = s.page, C = P.cls, src = s.tex && s.tex.image;
+    if (!src) return;
+    let sc = C.scratch;
+    if (!sc) {
+      sc = C.scratch = document.createElement("canvas");
+      sc.width = C.sw; sc.height = C.sh;
+      sc._ctx = sc.getContext("2d");
+      sc._ctx.imageSmoothingEnabled = false;
+    }
+    const x = sc._ctx, w = C.w, h = C.h, g = C.g;
+    x.clearRect(0, 0, C.sw, C.sh);
+    x.drawImage(src, 0, 0, w, h, g, g, w, h);
+    x.drawImage(src, 0, 0, w, 1, g, 0, w, g);                  // top edge
+    x.drawImage(src, 0, h - 1, w, 1, g, g + h, w, g);          // bottom edge
+    x.drawImage(src, 0, 0, 1, h, 0, g, g, h);                  // left edge
+    x.drawImage(src, w - 1, 0, 1, h, g + w, g, g, h);          // right edge
+    x.drawImage(src, 0, 0, 1, 1, 0, 0, g, g);                  // corners
+    x.drawImage(src, w - 1, 0, 1, 1, g + w, 0, g, g);
+    x.drawImage(src, 0, h - 1, 1, 1, 0, g + h, g, g);
+    x.drawImage(src, w - 1, h - 1, 1, 1, g + w, g + h, g, g);
+    P.ctx.clearRect(s.x, s.y, C.sw, C.sh);
+    P.ctx.drawImage(sc, s.x, s.y);
+    s.ver = s.tex.version;
+    // incremental upload once the page lives on the GPU; otherwise the whole
+    // canvas goes up with the page's next (or first) upload
+    const R = CBZ.renderer, T = P.tex;
+    if (R && R.copyTextureToTexture && R.properties) {
+      const pr = R.properties.get(T);
+      if (pr && pr.__webglInit && pr.__version === T.version) {
+        if (!_pageSrc) _pageSrc = new THREE.Texture();
+        _pageSrc.image = sc;
+        try {
+          R.copyTextureToTexture(_pagePos.set(s.x, P.PH - s.y - C.sh), _pageSrc, T);
+          pageCopies++;
+          return;
+        } catch (e) { /* fall through to the whole-page upload */ }
+      }
+    }
+    T.needsUpdate = true;
+    pageFullUploads++;
+  }
+
+  function freeSlotOf(t) {
+    const s = slotOf.get(t.uuid);
+    if (s && s.tex === t) { slotOf.delete(t.uuid); s.tex = null; }
+  }
+  function onSourceDispose(ev) { freeSlotOf(ev.target); }
+
+  /* The slot holding this texture, allocating (or re-copying) as needed; null
+     when the texture is not pageable or every page of its class is full of
+     slots still worn by somebody. */
+  function takeCell(C) {
+    for (let i = 0; i < C.pages.length; i++) {
+      const P = C.pages[i];
+      if (P.next >= P.cap) continue;
+      const k = P.next++;
+      const s = { page: P, x: (k % C.cols) * C.sw, y: ((k / C.cols) | 0) * C.sh, tex: null, ver: -1, refs: 0, last: 0, uv: null };
+      P.slots.push(s);
+      return s;
+    }
+    return null;
+  }
+  // a slot nobody wears: an orphan (its source was disposed) first, then —
+  // only when every page is full — the one worn least recently
+  function reuseSlot(C, orphansOnly) {
+    let best = null;
+    for (let i = 0; i < C.pages.length; i++) {
+      const sl = C.pages[i].slots;
+      for (let j = 0; j < sl.length; j++) {
+        const c = sl[j];
+        if (c.refs > 0 || (orphansOnly && c.tex)) continue;
+        if (!best || (!c.tex && best.tex) || ((!c.tex) === (!best.tex) && c.last < best.last)) best = c;
+      }
+    }
+    if (best && best.tex) freeSlotOf(best.tex);
+    return best;
+  }
+  function slotFor(t) {
+    let s = slotOf.get(t.uuid);
+    if (s && s.tex === t) {
+      const im = t.image, C = s.page.cls;
+      if (!im || im.width !== C.w || im.height !== C.h) freeSlotOf(t);   // resized: re-slot below
+      else { if (s.ver !== t.version) paintSlot(s); return s; }
+    }
+    const C = pageClass(t);
+    if (!C) return null;
+    s = takeCell(C) || reuseSlot(C, true);
+    // grow before opening a new page: every page is a pool per shape
+    for (let i = 0; !s && i < C.pages.length; i++) if (growPage(C.pages[i])) s = takeCell(C);
+    if (!s && C.pages.length < PAGES_PER_CLASS && newPage(C)) s = takeCell(C);
+    if (!s) s = reuseSlot(C, false);
+    if (!s) return null;
+    s.tex = t;
+    s.uv = slotUv(s);
+    slotOf.set(t.uuid, s);
+    if (!t._cbzPageHooked) { t._cbzPageHooked = true; t.addEventListener("dispose", onSourceDispose); }
+    paintSlot(s);
+    return s;
+  }
+
+  // vUv lands in the slot: after uv_vertex (which already applied the page's
+  // identity uvTransform), scale+offset by this instance's pinUv
+  function pagePatch(shader) {
+    shader.vertexShader = "attribute vec4 pinUv;\n" + shader.vertexShader.replace(
+      "#include <uv_vertex>",
+      "#include <uv_vertex>\n#ifdef USE_UV\n\tvUv = vUv * pinUv.zw + pinUv.xy;\n#endif");
+  }
+  // the wrapper a paged pool draws: the (shared) base geometry's own buffers,
+  // plus this pool's own per-instance slot attribute
+  function pagedGeo(base) {
+    const g = new THREE.BufferGeometry();
+    for (const name in base.attributes) g.setAttribute(name, base.attributes[name]);
+    if (base.index) g.setIndex(base.index);
+    g.name = (base.name || "pedinst") + "~paged";
+    g._shared = true;
+    return g;
+  }
+
   let poolRoot = null;
   const pools = new Map();          // key -> pool
   const rigs = new Map();           // rig root Group -> rig record
@@ -284,10 +545,15 @@
     if (!g || !m || Array.isArray(m)) return false;
     if (m.visible === false || m.transparent === true) return false;
     if (g.morphAttributes && g.morphAttributes.position) return false;
-    // A geometry carrying its OWN vertex colours would be multiplied a second
-    // time by the pool material's vertexColors:true. Rare, and not worth a
-    // special case — leave it real.
-    if (g.attributes && g.attributes.color) return false;
+    // A geometry carrying its OWN vertex colours poolS only when its material
+    // already draws them (vertexColors:true): r128's color_vertex multiplies
+    // the attribute by instanceColor, and the pool's instance colour is the
+    // material colour — so a white-material vertex-coloured mesh (the police
+    // duty kit, entities/dutykit.js: one merged belt/holster/radio/badge per
+    // officer) draws byte-identical, and every officer of one body shape and
+    // kit shares a single draw. A colour attribute on a material that IGNORES
+    // it would be applied by the pool and not by the source: leave it real.
+    if (g.attributes && g.attributes.color && m.vertexColors !== true) return false;
     /* NOTE for the next reader: `g.groups.length > 1` is NOT a rejection.
        r128 BoxGeometry emits SIX groups (one per face) and every body box in
        this game is one, so testing it here rejected the entire population —
@@ -363,10 +629,10 @@
      "B" bucket): shape is carried by the instance matrix, so a toddler's arm
      and a soldier's chest share one pool if they share a material class.
      Everything else keeps the exact-geometry bucket ("G" + uuid). */
-  function keyOf(o, L) {
+  function keyOf(o, L, ps) {
     const g = o.geometry, m = o.material;
     return (L ? (g._cbzUnit ? "U" + g._cbzUnit.geo.uuid : "B") : "G" + g.uuid) + "|" + m.type +
-      "|" + (m.map ? m.map.uuid : "-") +
+      "|" + (ps ? "P" + ps.page.id : m.map ? m.map.uuid : "-") +
       "|" + (m.emissive ? m.emissive.getHex() : 0) +
       "|" + Math.round((m.emissiveIntensity != null ? m.emissiveIntensity : 1) * 10) +
       "|" + (m.roughness != null ? m.roughness : -1) +
@@ -391,7 +657,7 @@
     return poolRoot;
   }
 
-  function makePool(o, key, L) {
+  function makePool(o, key, L, ps) {
     if (pools.size >= MAX_POOLS) return null;
     const src = o.material;
     /* The pool material is a CLONE with colour forced white and
@@ -410,11 +676,21 @@
     if (mat.color) mat.color.setRGB(1, 1, 1);
     mat.vertexColors = true;
     mat._shared = false;              // ours alone; never handed to the caches
+    // A box pool draws the SHARED unit cube; every other pool draws the
+    // exact geometry its members carry. Both go through tintGeo so the
+    // instance tint has a white attribute to multiply (see above).
+    let geo = tintGeo(L ? (o.geometry._cbzUnit ? o.geometry._cbzUnit.geo : unitBox()) : o.geometry);
+    if (ps) {
+      // a PAGED pool (TEXTURE PAGES above): the page is the map, each
+      // instance's slot rides pinUv, and the geometry is this pool's own
+      // wrapper so the per-instance attribute is not shared with other pools
+      mat.map = ps.page.tex;
+      mat.onBeforeCompile = pagePatch;
+      mat.customProgramCacheKey = function () { return "pedinst-page"; };
+      geo = pagedGeo(geo);
+    }
     const p = {
-      // A box pool draws the SHARED unit cube; every other pool draws the
-      // exact geometry its members carry. Both go through tintGeo so the
-      // instance tint has a white attribute to multiply (see above).
-      key: key, geo: tintGeo(L ? (o.geometry._cbzUnit ? o.geometry._cbzUnit.geo : unitBox()) : o.geometry), mat: mat,
+      key: key, geo: geo, mat: mat, paged: !!ps, page: ps ? ps.page : null, uv: null, uDirty: false,
       box: !!L && !o.geometry._cbzUnit, unit: !!(L && o.geometry._cbzUnit),
       cast: !!o.castShadow, recv: !!o.receiveShadow, order: o.renderOrder | 0,
       mesh: null, cap: 0, next: 0, free: [],
@@ -435,6 +711,13 @@
     // Claim the parent BEFORE disposing anything: a half-grown pool with its
     // old mesh already destroyed would draw nothing at all.
     const r = root(); if (!r) return false;
+    if (p.paged) {
+      const a = new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4);
+      a.setUsage(THREE.DynamicDrawUsage);
+      if (p.uv) a.array.set(p.uv.array);
+      p.geo.setAttribute("pinUv", a);
+      p.uv = a; p.uDirty = true;
+    }
     const im = new THREE.InstancedMesh(p.geo, p.mat, cap);
     im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     im.castShadow = p.cast; im.receiveShadow = p.recv;
@@ -546,10 +829,11 @@
 
   function bind(rig, o) {
     const L = boxLocal(o.geometry);
-    const key = keyOf(o, L);
+    const ps = pageable(o.material) ? slotFor(o.material.map) : null;
+    const key = keyOf(o, L, ps);
     let p = pools.get(key);
     if (!p) {
-      p = makePool(o, key, L);
+      p = makePool(o, key, L, ps);
       // Pool table full. Don't rebuild this mesh's key string every frame
       // for the rest of its life — try again in a few seconds, in case a
       // pool frees up (a whole archetype despawning, a wardrobe change).
@@ -565,7 +849,9 @@
       eb: m.emissive ? m.emissive.b : 0,
       ei: m.emissiveIntensity != null ? m.emissiveIntensity : 1,
       pi: p.recs.length, ri: rig.recs.length,
+      ps: ps,                                                  // texture page slot (paged pools only)
     };
+    if (ps) { ps.refs++; ps.last = stamp; }
     o._pinst = rec;
     p.recs.push(rec);
     rig.recs.push(rec);
@@ -583,6 +869,7 @@
     if (!ensureCap(p, slot)) { if (reused) p.free.push(slot); return false; }
     if (!reused) p.next++;
     rec.slot = slot;
+    if (p.paged && rec.ps) { p.uv.array.set(rec.ps.uv, slot * 4); p.uDirty = true; }
     rec.cr = rec.cg = rec.cb = -1;    // force a colour upload on first write
     // NOT hidden here. A slot still holds its parked matrix until part()
     // writes this frame's pose into it, and a body that is hidden one frame
@@ -611,6 +898,7 @@
     last = r.recs.pop();
     if (last && last !== rec) { last.ri = rec.ri; r.recs[rec.ri] = last; }
     if (rec.mesh._pinst === rec) rec.mesh._pinst = null;
+    if (rec.ps) { rec.ps.refs--; rec.ps.last = stamp; }
     rec.dead = true;
   }
 
@@ -692,6 +980,11 @@
           rec.ei !== (m.emissiveIntensity != null ? m.emissiveIntensity : 1) ||
           (em && (em.r !== rec.er || em.g !== rec.eg || em.b !== rec.eb))) {
         release(rec); rec = null;
+      } else if (rec.ps && rec.ps.ver !== rec.map.version) {
+        // the source canvas was repainted: re-copy its slot (or re-bind if
+        // the slot no longer belongs to it)
+        if (rec.ps.tex === rec.map) paintSlot(rec.ps);
+        else { release(rec); rec = null; }
       }
     }
     if (!rec) {
@@ -895,6 +1188,11 @@
       a.updateRange.offset = 0; a.updateRange.count = p.next * 16;
       a.needsUpdate = true; p.mDirty = false;
     }
+    if (p.uDirty && p.uv) {
+      const u = p.uv;
+      u.updateRange.offset = 0; u.updateRange.count = p.next * 4;
+      u.needsUpdate = true; p.uDirty = false;
+    }
     if (p.cDirty && p.mesh.instanceColor) {
       const c = p.mesh.instanceColor;
       c.updateRange.offset = 0; c.updateRange.count = p.next * 3;
@@ -955,9 +1253,12 @@
      remap has stopped matching and every part is falling into its own
      exact-geometry pool again. */
   CBZ.pedInstanceAudit = function () {
-    let active = 0, capacity = 0, live = 0, boxPools = 0, unitPools = 0, blackPools = 0;
+    let active = 0, capacity = 0, live = 0, boxPools = 0, unitPools = 0, blackPools = 0, pagedPools = 0;
+    let pages = 0, pageSlots = 0, pageTexels = 0;
+    pageClasses.forEach(function (C) { if (!C) return; pages += C.pages.length; for (const P of C.pages) { pageSlots += P.next; pageTexels += C.PW * P.PH; } });
     pools.forEach(function (p) {
       capacity += p.cap;
+      if (p.paged && p.mesh && p.next > 0) pagedPools++;
       // THE BLACK-BODY GUARD: vertexColors with no `color` attribute paints
       // the whole pool black (see tintGeo). Must stay 0, forever.
       if (p.mat && p.mat.vertexColors && p.geo && p.geo.attributes && !p.geo.attributes.color) blackPools++;
@@ -973,6 +1274,10 @@
       pools: active,
       boxPools: boxPools,               // active pools drawing the shared unit cube
       unitPools: unitPools,             // active pools drawing a canonical limb loft (character.js LIMBS)
+      pagedPools: pagedPools,           // active pools sampling a texture PAGE (one pool per shape, not per outfit)
+      pages: pages, pageSlots: pageSlots, // page canvases and the source textures copied into them
+      pageMB: Math.round(pageTexels * 4 / 1e5) / 10, // level-0 RGBA bytes of every page (mips add a third)
+      pageCopies: pageCopies, pageFullUploads: pageFullUploads,
       blackPools: blackPools,           // RATCHET: pools that would render black. Pin at 0.
       poolsTotal: pools.size,
       instancesLive: live,

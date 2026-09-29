@@ -331,7 +331,8 @@ for (const sex of SEXES) for (const her of HERITAGES) for (let ri = 0; ri < ROLE
     CBZ.cityCops = [];
     for (let f = 0; f < 4; f++) tick[1](1 / 60);
     const audit = CBZ.pedInstanceAudit ? CBZ.pedInstanceAudit() : null;
-    let hidden = 0;
+    let hidden = 0, pagedPixelsOk = 0;
+    const pagedChecked = new Set();
     for (const p of CBZ.cityPeds) {
       const ch = p.char;
       ch.group.traverse((o) => {
@@ -341,8 +342,41 @@ for (const sex of SEXES) for (const her of HERITAGES) for (let ri = 0; ri < ROLE
         if (d !== true) { failures.push({ label: "pedinstance " + (o.name || o.userData._cbzPart || "part"), region: "pool", problem: "hidden without a live instance (" + d + ")" }); return; }
         const rec = o._pinst, pool = rec && rec.pool;
         if (!pool) return;
-        // the pool must sample the SAME texels the mesh would have
-        if (pool.mat.map !== (o.material.map || null)) failures.push({ label: "pedinstance", region: "pool", problem: "pool map differs from the part's" });
+        // the pool must sample the SAME texels the mesh would have: its own
+        // map, or (a PAGED pool, entities/pedinstance.js TEXTURE PAGES) a page
+        // slot holding a pixel-exact copy of that map, which this instance's
+        // pinUv points at
+        if (pool.paged) {
+          const ps = rec.ps;
+          if (!ps || pool.mat.map !== ps.page.tex || ps.tex !== o.material.map) failures.push({ label: "pedinstance", region: "pool", problem: "paged pool slot does not hold the part's texture" });
+          else {
+            const u = pool.uv && pool.uv.array, k = rec.slot * 4;
+            if (!u || Math.abs(u[k] - ps.uv[0]) > 1e-7 || Math.abs(u[k + 1] - ps.uv[1]) > 1e-7 || Math.abs(u[k + 2] - ps.uv[2]) > 1e-7 || Math.abs(u[k + 3] - ps.uv[3]) > 1e-7)
+              failures.push({ label: "pedinstance", region: "pool", problem: "instance pinUv is not its page slot" });
+            if (!pagedChecked.has(ps)) {
+              pagedChecked.add(ps);
+              const img = o.material.map.image, C = ps.page.cls, w = img.width, h = img.height;
+              const a = img.getContext("2d").getImageData(0, 0, w, h).data;
+              const b = ps.page.ctx.getImageData(ps.x + C.g, ps.y + C.g, w, h).data;
+              let bad = a.length !== b.length;
+              // a browser canvas is premultiplied: a texel with alpha 0 has no
+              // colour to copy (the source uploads as 0,0,0,0 too), so only
+              // its alpha is compared
+              for (let i = 0; !bad && i < a.length; i += 4) {
+                if (a[i + 3] !== b[i + 3]) bad = true;
+                else if (a[i + 3] > 0 && (a[i] !== b[i] || a[i + 1] !== b[i + 1] || a[i + 2] !== b[i + 2])) bad = true;
+              }
+              // the gutter repeats the edge texel (the left gutter of the top row)
+              const gut = ps.page.ctx.getImageData(ps.x, ps.y + C.g, C.g, 1).data;
+              for (let i = 0; !bad && i < gut.length; i += 4) for (let c = a[3] > 0 ? 0 : 3; c < 4; c++) if (gut[i + c] !== a[c]) bad = true;
+              // the slot's uv rect lands on the slot's pixels in a flipY upload
+              const PH = ps.page.PH, PW = C.PW;
+              if (Math.abs(ps.uv[0] * PW - (ps.x + C.g)) > 1e-3 || Math.abs((1 - ps.uv[1] - ps.uv[3]) * PH - (ps.y + C.g)) > 1e-3) bad = true;
+              if (bad) failures.push({ label: "pedinstance", region: "pool", problem: "page slot pixels differ from the part's texture" });
+              else pagedPixelsOk++;
+            }
+          }
+        } else if (pool.mat.map !== (o.material.map || null)) failures.push({ label: "pedinstance", region: "pool", problem: "pool map differs from the part's" });
         if ((pool.mat.alphaTest || 0) !== (o.material.alphaTest || 0)) failures.push({ label: "pedinstance", region: "pool", problem: "pool alphaTest differs" });
         const a = pool.geo.attributes.uv, b = o.geometry.attributes.uv;
         if (a && b && a.count === b.count) {
@@ -352,6 +386,7 @@ for (const sex of SEXES) for (const her of HERITAGES) for (let ri = 0; ri < ROLE
         }
       });
     }
+    if (audit) console.log(`pedinstance pages: ${audit.pages} pages, ${audit.pageSlots} slots, ${audit.pageMB} MB, ${audit.pagedPools} paged pools, ${pagedPixelsOk} slots pixel-checked`);
     // re-audit the crowd AFTER instancing (layer-30 parts must be carried)
     for (const p of CBZ.cityPeds) auditRig(p.char, "instanced " + p.char._auditLabel);
     // RE-DRESS WHILE INSTANCED — the live order of events: a body is spawned,
