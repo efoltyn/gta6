@@ -129,7 +129,7 @@
   // Called by city/world.js at the top of buildCity. The spawn is the city
   // centre (the rooftop / street spawn is downtown); reset() places the
   // player and the streamer re-centres on them from the first tick.
-  const RECENTRE = 0.5;               // the centre follows the player at r * RECENTRE
+  const RECENTRE = 0.3;               // the centre follows the player at r * RECENTRE (a 10 Hz tick re-centres cheaply)
   const lastP = { x: 0, z: 0, t: 0 };
   CBZ.streamBegin = function (cx, cz) {
     if (!streamWanted() || CBZ.slice) return false;
