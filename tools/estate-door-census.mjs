@@ -1,0 +1,439 @@
+#!/usr/bin/env node
+/* tools/estate-door-census.mjs — EVERY DOOR IN EVERY GOVERNMENT BUILDING,
+   OPENED, SHUT, AND WALKED THROUGH. Plain node, no browser.
+
+   OWNER (2026-09-29): "the president can't even leave the room that he spawns
+   in. Those doors are all fucked up" + "it's throughout the building".
+
+   The real three r128, systems/stairs.js, buildings_civic.js, buildings.js,
+   interior_programs.js, elevators.js, furniture.js, roombuild.js and
+   govcomplex.js run in a vm with only the engine globals stubbed, and the
+   whole govcomplex landmass pass is run on a stub city (the Capitol, the
+   Executive Mansion + West Wing, the Governor's house, the Bureau, Defence,
+   City Hall and the rest). Then, for every shell CBZ.govShells() publishes:
+
+   DOORS   every door record in the shell (the interior door kit,
+           CBZ.cityUnitDoors, and the street door leaves, CBZ.cityDoorsGet):
+             - REGISTERED: every door leaf's collider (door: true) belongs to
+               a record (a leaf with a collider and no record is a wall you
+               cannot open);
+             - the player standing 0.8 m either side of it, on its floor,
+               gets THIS door from the real [E] finder (CBZ.cityUnitDoors.at,
+               what the interaction zone asks), with room to stand there;
+             - standing right over or under it on another storey, [E] does
+               NOT find it (the Oval Office bug: the finder answered with the
+               Cabinet Room's door one floor down);
+             - open: its collider leaves CBZ.colliders and the doorway is
+               walkable for a 0.38 m body; shut (the swing tick run until it
+               settles): the collider is back and the doorway solid again;
+             - a street door opens for the player walking up (buildings.js's
+               real opener tick) and shuts after he leaves.
+   WALK    a 0.25 m grid over every storey, a cell walkable when a 0.38 m
+           body at its walk height meets no collider in its body band, flood-
+           filled with the player's own rules: a shut door opens when a cell
+           within its [E] reach is reached; a stair link joins its two ends;
+           the street doors swing for you. It must reach:
+             - OUTSIDE from the President's spawn (the chair behind the Oval
+               Office desk): the grade in front of the West Wing's door;
+             - every ROOM (CBZ.stateRoomsAll + each storey's fit-out rect) of
+               the spawn's shell from the spawn, and of every shell from its
+               own front door.
+
+   USAGE   node tools/estate-door-census.mjs [-v] [-t]   exit 1 on any failure
+           (-t prints phase timings; the whole run is ~8 s of CPU)
+*/
+import fs from "fs";
+const T0 = Date.now();
+const lap = (what) => { if (process.argv.includes("-t")) console.log("  [" + ((Date.now() - T0) / 1000).toFixed(1) + " s] " + what); };
+import vm from "vm";
+const ROOT = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+const VERBOSE = process.argv.includes("-v");
+const ctx = { console, Math, Date, JSON, Object, Array, Number, String, Set, Map, WeakMap, Float32Array, Uint16Array, Uint32Array, Int32Array, Uint8Array, Float64Array, ArrayBuffer, Symbol, Error, parseInt, parseFloat, isFinite, isNaN, Infinity, NaN, Proxy, Reflect, Promise, setTimeout, clearTimeout };
+ctx.window = ctx; ctx.self = ctx; ctx.globalThis = ctx; ctx.addEventListener = function () {}; ctx.removeEventListener = function () {}; ctx.performance = { now: () => Date.now() }; ctx.requestAnimationFrame = function () {};
+function ctx2d(c) {
+  const base = {
+    canvas: c,
+    getImageData(x, y, w, h) { return { data: new Uint8ClampedArray(w * h * 4).fill(128), width: w, height: h }; },
+    createImageData(w, h) { return { data: new Uint8ClampedArray(w * h * 4), width: w, height: h }; },
+    measureText(t) { return { width: String(t).length * 8 }; },
+    createLinearGradient() { return { addColorStop() {} }; },
+    createRadialGradient() { return { addColorStop() {} }; },
+    createPattern() { return {}; },
+  };
+  return new Proxy(base, { get(t, k) { if (k in t) return t[k]; return function () {}; }, set(t, k, v) { t[k] = v; return true; } });
+}
+ctx.document = {
+  createElement() { return { width: 300, height: 150, style: {}, getContext() { return this._c || (this._c = ctx2d(this)); }, addEventListener() {}, toDataURL() { return ""; } }; },
+  getElementById() { return null; }, querySelector() { return null; }, body: { appendChild() {} }, addEventListener() {},
+};
+ctx.Uint8ClampedArray = Uint8ClampedArray;
+vm.createContext(ctx);
+function load(rel) { vm.runInContext(fs.readFileSync(ROOT + "/" + rel, "utf8"), ctx, { filename: rel }); }
+load("src/vendor/three.r128.min.js");
+const THREE = ctx.THREE;
+const matCache = new Map();
+const updates = [];
+const CBZ = ctx.CBZ = {
+  CONFIG: {}, colliders: [], platforms: [], losBlockers: [], game: { mode: "city", state: "playing" },
+  player: { pos: new THREE.Vector3(0, 0, 0) },
+  cmat(c, o) { o = o || {}; const k = c + "|" + (o.emissive || 0) + "|" + (o.ei || 0); if (!matCache.has(k)) { const m = new THREE.MeshLambertMaterial({ color: c, emissive: o.emissive || 0 }); m._shared = true; matCache.set(k, m); } return matCache.get(k); },
+  boxGeom(w, h, d) { return new THREE.BoxGeometry(w, h, d); },
+  hash01(x, z, s) { const v = Math.sin(x * 12.9898 + z * 78.233 + (s || 0) * 0.123) * 43758.5453; return v - Math.floor(v); },
+  onUpdate(o, fn) { updates.push({ o, fn }); }, onAlways() {}, _lm: [], addLandmass(fn, order) { this._lm.push({ fn, order }); },
+  markCollidersDirty() {}, markPlatformsDirty() {},
+};
+CBZ.mat = CBZ.cmat;
+load("src/systems/stairs.js");
+load("src/city/buildings_civic.js");
+load("src/city/buildings.js");
+load("src/city/fitout.js");
+load("src/city/interior_programs.js");
+load("src/city/govcomplex.js");
+for (const rel of ["src/city/elevators.js", "src/city/furniture.js", "src/world/roombuild.js"]) {
+  try { load(rel); } catch (e) { console.log("load fail", rel, e.message); }
+}
+
+// ---- the govcomplex pass on a stub city ---------------------------------
+CBZ.colliders.length = 0; CBZ.platforms.length = 0;
+CBZ.registerCityRegion = function (city, r) { (city.regions = city.regions || []).push(r); return r; };
+CBZ.registerNoSpawnZone = function () {};
+const city = { root: new THREE.Group(), roads: [], lots: [], shopLots: [], regions: [], minX: -500, maxX: 500, minZ: -500, maxZ: 500, center: { x: 0, z: 0 } };
+CBZ.city = { arena: city };
+const errs = [];
+const oe = console.error; console.error = function () { errs.push([...arguments].map(String).join(" ").slice(0, 300)); };
+lap("loaded");
+for (const l of CBZ._lm.filter((q) => q.order === 42)) l.fn(city);
+lap("govcomplex built");
+console.error = oe;
+if (errs.length) console.log("build errors", errs.length, errs.slice(0, 5));
+
+let FAIL = 0;
+const fails = [];
+function fail(s) { FAIL++; if (fails.length < 400) fails.push(s); }
+
+const shells = (CBZ.govShells ? CBZ.govShells() : []).filter((s) => s.b && s.b.group && Array.isArray(s.b.floorTops));
+for (const sh of shells) {
+  const b = sh.b;
+  if ((b.storeys | 0) >= 2 && CBZ.cityStairCore) { try { CBZ.cityStairCore({ building: b }); } catch (e) { fail("stair core " + e.message); } }
+}
+const siteOf = (sh) => (typeof sh.site === "string" ? sh.site : (sh.site && sh.site.id)) || "?";
+const tagOf = (sh) => siteOf(sh) + "/" + (sh.name || "shell") + "@" + sh.b.ox.toFixed(0) + "," + sh.b.oz.toFixed(0);
+function inShell(b, x, z, pad) { return Math.abs(x - b.ox) <= b.w / 2 + (pad || 0) && Math.abs(z - b.oz) <= b.d / 2 + (pad || 0); }
+
+const UD = CBZ.cityUnitDoors;
+const allUnit = UD ? UD.all() : [];
+const street = CBZ.cityDoorsGet ? CBZ.cityDoorsGet() : [];
+
+// ---- the body --------------------------------------------------------------
+const R = 0.38, STEP_SOLID = 0.42, BODY_H = 1.75, STEP_UP = 0.45;
+// the colliders on a 2 m grid, built once; a door's collider is live while
+// it is in CBZ.colliders (the door kit splices it in and out), tracked in LIVE
+const GC = 2, GRID = new Map(), LIVE = new Set(CBZ.colliders);
+for (const c of [...CBZ.colliders, ...allUnitCols()]) {
+  if (!isFinite(c.minX + c.maxX + c.minZ + c.maxZ)) continue;
+  if (c.maxX - c.minX > 400 || c.maxZ - c.minZ > 400) { (GRID.get("big") || GRID.set("big", []).get("big")).push(c); continue; }
+  for (let i = Math.floor(c.minX / GC); i <= Math.floor(c.maxX / GC); i++) for (let j = Math.floor(c.minZ / GC); j <= Math.floor(c.maxZ / GC); j++) {
+    const k = i + "," + j; let a = GRID.get(k); if (!a) GRID.set(k, a = []); if (a.indexOf(c) < 0) a.push(c);
+  }
+}
+function allUnitCols() { return (CBZ.cityUnitDoors ? CBZ.cityUnitDoors.all() : []).map((d) => d.col).filter(Boolean); }
+function syncLive(c) { if (!c) return; if (CBZ.colliders.indexOf(c) >= 0) LIVE.add(c); else LIVE.delete(c); }
+const BIG = GRID.get("big") || [];
+function hitIn(L, x, z, feet, r) {
+  for (let q = 0; q < L.length; q++) {
+    const c = L[q];
+    if (x + r <= c.minX || x - r >= c.maxX || z + r <= c.minZ || z - r >= c.maxZ) continue;
+    if (c.y0 != null && (feet + BODY_H <= c.y0 || feet + STEP_SOLID >= c.y1)) continue;
+    if (!LIVE.has(c)) continue;
+    return c;
+  }
+  return null;
+}
+function blockedAt(x, z, feet, r) {
+  r = r == null ? R : r;
+  let c = hitIn(BIG, x, z, feet, r);
+  if (c) return c;
+  const i0 = Math.floor((x - r) / GC), i1 = Math.floor((x + r) / GC), j0 = Math.floor((z - r) / GC), j1 = Math.floor((z + r) / GC);
+  for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
+    const a = GRID.get(i + "," + j);
+    if (a && (c = hitIn(a, x, z, feet, r))) return c;
+  }
+  return null;
+}
+function colName(c) {
+  const m = c && c.ref;
+  const hex = m && m.material && m.material.color ? "#" + m.material.color.getHexString() : "?";
+  return hex + (m && m.scale ? " " + [m.scale.x, m.scale.y, m.scale.z].map((v) => v.toFixed(2)).join("x") : "");
+}
+// the door kit's swing tick (it returns a shut door's collider once the
+// doorway is clear): run it until nothing is moving
+const swingTick = updates.filter((u) => u.o === 34.31).map((u) => u.fn);
+CBZ.player.pos.set(1e6, 0, 1e6);
+function settle() { for (let i = 0; i < 40; i++) for (const f of swingTick) f(0.1); }
+const streetTick = updates.filter((u) => u.o === 34.3).map((u) => u.fn);
+if (!streetTick.length) fail("buildings.js street door opener not found (tick 34.3)");
+if (!swingTick.length) fail("interior_programs.js door swing tick not found (tick 34.31)");
+function setOpen(d, v) { UD.setOpen(d, v); if (!v) settle(); syncLive(d.col); if (d.pair) syncLive(d.pair.col); }
+// the platforms on a 4 m grid (they never move)
+const PG = new Map(), PGC = 4;
+for (const p of CBZ.platforms) {
+  if (!isFinite(p.minX + p.maxX + p.minZ + p.maxZ) || (p.maxX - p.minX) * (p.maxZ - p.minZ) > 1e6) { (PG.get("big") || PG.set("big", []).get("big")).push(p); continue; }
+  for (let i = Math.floor(p.minX / PGC); i <= Math.floor(p.maxX / PGC); i++) for (let j = Math.floor(p.minZ / PGC); j <= Math.floor(p.maxZ / PGC); j++) {
+    const k = i + "," + j; let a = PG.get(k); if (!a) PG.set(k, a = []); a.push(p);
+  }
+}
+const PG_BIG = PG.get("big") || [];
+function groundAt(x, z, fromY) {
+  let best = CBZ.estateGroundAt ? CBZ.estateGroundAt(x, z) : 0;
+  const reach = (fromY != null ? fromY : best) + STEP_UP;
+  const cell = PG.get(Math.floor(x / PGC) + "," + Math.floor(z / PGC)) || [];
+  for (const p of (PG_BIG.length ? PG_BIG.concat(cell) : cell)) {
+    if (x < p.minX || x > p.maxX || z < p.minZ || z > p.maxZ) continue;
+    if (p.obb) {
+      const o = p.obb, rx = x - o.cx, rz = z - o.cz;
+      const a = rx * o.ux + rz * o.uz, c = rx * o.uz - rz * o.ux;
+      if (a < -o.hl || a > o.hl || c < -o.hw || c > o.hw) continue;
+    }
+    let top = p.top;
+    if (p.ramp) {
+      const r = p.ramp;
+      let t = r.dir ? ((x - r.ox) * r.dx + (z - r.oz) * r.dz) / r.len : (r.axis === "x") ? (x - r.x0) / (r.x1 - r.x0) : (z - r.z0) / (r.z1 - r.z0);
+      t = Math.max(0, Math.min(1, t));
+      top = CBZ.rampTop(r, t);
+    }
+    if (top <= reach && top > best) best = top;
+  }
+  return best;
+}
+
+// ==========================================================================
+// 1. DOORS: registered, reachable by [E] from both faces, open clears, shut seals
+// ==========================================================================
+const perShellDoors = new Map();
+let nDoors = 0, nStreet = 0;
+for (const sh of shells) {
+  const b = sh.b, tag = tagOf(sh);
+  const mine = allUnit.filter((d) => inShell(b, d.x, d.z, 0.3) && d.floorY >= (b.group.position.y || 0) - 0.5 && d.floorY <= b.floorTops[b.floorTops.length - 1] + 0.5);
+  const st = street.filter((d) => inShell(b, d.wx, d.wz, 1.0));
+  perShellDoors.set(sh, { unit: mine, street: st });
+  const recCols = new Set(allUnit.map((d) => d.col));
+  for (const c of CBZ.colliders) if (c.door && !recCols.has(c) && inShell(b, (c.minX + c.maxX) / 2, (c.minZ + c.maxZ) / 2, 0) && c.y0 >= b.floorTops[0] - 0.3 && c.y0 <= b.floorTops[b.floorTops.length - 1] + 0.5)
+    fail(tag + " a door leaf's collider with no door record @" + ((c.minX + c.maxX) / 2 - b.ox).toFixed(1) + "," + ((c.minZ + c.maxZ) / 2 - b.oz).toFixed(1) + " y" + c.y0.toFixed(2));
+  for (const d of mine) {
+    nDoors++;
+    const c = d.col;
+    if (!c) { fail(tag + " door " + d.label + " has no collider"); continue; }
+    if (CBZ.colliders.indexOf(c) < 0) { fail(tag + " door " + d.label + " starts open / collider not in the world"); continue; }
+    // the leaf's thin axis is the wall normal
+    const alongX = (c.maxX - c.minX) >= (c.maxZ - c.minZ);
+    const nx = alongX ? 0 : 1, nz = alongX ? 1 : 0;
+    const w = alongX ? c.maxX - c.minX : c.maxZ - c.minZ;
+    if (w < 0.8) fail(tag + " door " + d.label + " leaf only " + w.toFixed(2) + " m wide: a body cannot pass");
+    for (const s of [-1, 1]) {
+      const px = d.x + nx * s * 0.8, pz = d.z + nz * s * 0.8;
+      const got = UD.at(px, pz, 1.9, d.floorY);
+      if (got !== d) fail(tag + " door " + d.label + " @" + (d.x - b.ox).toFixed(1) + "," + (d.z - b.oz).toFixed(1) + " y" + d.floorY.toFixed(2) + ": [E] from the " + (s < 0 ? "-" : "+") + " face finds " + (got ? got.label + " @" + (got.x - b.ox).toFixed(1) + "," + (got.z - b.oz).toFixed(1) : "nothing"));
+      if (blockedAt(px, pz, d.floorY, 0.2)) fail(tag + " door " + d.label + " @" + (d.x - b.ox).toFixed(1) + "," + (d.z - b.oz).toFixed(1) + " y" + d.floorY.toFixed(2) + ": the " + (s < 0 ? "-" : "+") + " face is blocked (nowhere to stand to open it)");
+    }
+    // the storeys above and below: standing right over / under the door,
+    // [E] must not find it (it used to: the Oval Office door answered with
+    // the Cabinet Room's, one floor down)
+    for (const t of b.floorTops) {
+      if (Math.abs(t - d.floorY) < 1.0) continue;
+      for (const s of [-1, 1]) {
+        const got = UD.at(d.x + nx * s * 0.6, d.z + nz * s * 0.6, 1.9, t);
+        if (got === d) fail(tag + " door " + d.label + " y" + d.floorY.toFixed(2) + ": [E] finds it from the floor at y" + t.toFixed(2));
+      }
+    }
+    if (!d.free && !UD.mayOpen(d)) continue;                 // a flat's door: a key's business, not this census
+    // open → collider out, the doorway walkable
+    setOpen(d, true);
+    if (CBZ.colliders.indexOf(c) >= 0) fail(tag + " door " + d.label + " open but its collider stayed");
+    const blk = blockedAt(d.x, d.z, d.floorY, R);
+    if (blk) fail(tag + " door " + d.label + " @" + (d.x - b.ox).toFixed(1) + "," + (d.z - b.oz).toFixed(1) + " y" + d.floorY.toFixed(2) + " open but the doorway is blocked by " + colName(blk) + " " + [(blk.minX - b.ox).toFixed(2), (blk.maxX - b.ox).toFixed(2), (blk.minZ - b.oz).toFixed(2), (blk.maxZ - b.oz).toFixed(2), blk.y0 != null ? blk.y0.toFixed(2) : "-", blk.y1 != null ? blk.y1.toFixed(2) : "-"].join(","));
+    setOpen(d, false);
+    if (CBZ.colliders.indexOf(c) < 0) fail(tag + " door " + d.label + " shut but its collider did not come back");
+    if (!blockedAt(d.x, d.z, d.floorY, R)) fail(tag + " door " + d.label + " shut but the doorway is not solid");
+  }
+  nStreet += st.length;
+  // the street doors swing for whoever walks up (buildings.js's opener, the
+  // real tick): walk up from outside, the collider leaves; walk away, it
+  // comes back
+  for (const d of st) {
+    const y0 = (d.doorY != null ? d.doorY - 1.5 : 0.14);
+    CBZ.player.pos.set(d.wx - d.inx * 1.2, y0, d.wz - d.inz * 1.2);
+    for (let i = 0; i < 30; i++) for (const f of streetTick) f(0.05);
+    if (CBZ.colliders.indexOf(d.col) >= 0) fail(tag + " street door @" + (d.wx - b.ox).toFixed(1) + "," + (d.wz - b.oz).toFixed(1) + " did not open for the player at it");
+    CBZ.player.pos.set(1e6, 0, 1e6);
+    for (let i = 0; i < 80; i++) for (const f of streetTick) f(0.05);
+    if (CBZ.colliders.indexOf(d.col) < 0) fail(tag + " street door @" + (d.wx - b.ox).toFixed(1) + "," + (d.wz - b.oz).toFixed(1) + " did not shut again");
+    syncLive(d.col);
+  }
+}
+
+lap("doors cycled");
+// ==========================================================================
+// 2. THE WALK: a flood fill per shell, doors opened by [E] as the player would
+// ==========================================================================
+const CELL = 0.25;
+function floodShell(sh, seeds) {
+  const b = sh.b, tops = b.floorTops, K = b.storeys | 0;
+  const pad = 6;                                            // the grade round the shell
+  const x0 = b.ox - b.w / 2 - pad, z0 = b.oz - b.d / 2 - pad;
+  const nx = Math.ceil((b.w + 2 * pad) / CELL), nz = Math.ceil((b.d + 2 * pad) / CELL);
+  const doors = perShellDoors.get(sh);
+  // the street doors swing for you: their colliders are out while you walk
+  const pulled = [];
+  for (const d of doors.street) { const i = CBZ.colliders.indexOf(d.col); if (i >= 0) { CBZ.colliders.splice(i, 1); pulled.push(d.col); syncLive(d.col); } }
+  // open every unit door we will open; all shut at the start
+  const opened = [];
+  const seen = new Map();                                   // key -> y
+  const key = (k, i, j) => (k * nx + i) * nz + j;
+  const q = [];
+  const cellY = (k, x, z) => {
+    if (k < 0) return groundAt(x, z, 0.3);                  // grade outside
+    return groundAt(x, z, tops[k] + 0.05);
+  };
+  function push(k, i, j, y) {
+    const kk = key(k + 1, i, j);
+    if (seen.has(kk)) return;
+    seen.set(kk, y);
+    q.push([k, i, j, y]);
+  }
+  function seed(k, x, z) {
+    const i = Math.round((x - x0) / CELL), j = Math.round((z - z0) / CELL);
+    const y = k < 0 ? groundAt(x, z, 0.3) : tops[k];
+    push(k, i, j, y);
+  }
+  for (const s of seeds) seed(s.k, s.x, s.z);
+  // stair links as portals between storeys: end cell -> other end cell
+  const links = CBZ.stairs.links().filter((L) => L.owner === b || (L.owner && L.owner.group === b.group));
+  const kOf = (y) => { let best = -1, bd = 0.3; for (let k = 0; k < K; k++) if (Math.abs(tops[k] - y) < bd) { bd = Math.abs(tops[k] - y); best = k; } return best; };
+  const portals = [];
+  for (const L of links) {
+    const a = L.path[0], c = L.path[L.path.length - 1];
+    const ka = kOf(a.y), kc = kOf(c.y);
+    if (ka < 0 || kc < 0) continue;
+    portals.push({ k: ka, x: a.x, z: a.z, tk: kc, tx: c.x, tz: c.z }, { k: kc, x: c.x, z: c.z, tk: ka, tx: a.x, tz: a.z });
+  }
+  const unitByFloor = doors.unit;
+  let guard = 0;
+  while (q.length && guard++ < 5e6) {
+    const [k, i, j, y] = q.pop();
+    const x = x0 + i * CELL, z = z0 + j * CELL;
+    // [E]: a closed door in reach from this cell opens
+    if (k >= 0) {
+      const d = UD.at(x, z, 1.9, y);
+      if (d && !d.open && unitByFloor.indexOf(d) >= 0 && (d.free || UD.mayOpen(d))) { setOpen(d, true); opened.push(d); }
+    }
+    for (const P of portals) if (P.k === k && Math.hypot(P.x - x, P.z - z) < 0.6) seed(P.tk, P.tx, P.tz);
+    for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const ii = i + di, jj = j + dj;
+      if (ii < 0 || jj < 0 || ii >= nx || jj >= nz) continue;
+      const xx = x0 + ii * CELL, zz = z0 + jj * CELL;
+      const ins = inShell(b, xx, zz, -0.05);
+      // a storey lives inside the shell; the grade (k -1) outside it
+      let kk = k;
+      if (k >= 0 && !ins) { if (k !== 0) continue; kk = -1; }
+      if (k < 0 && ins) kk = 0;
+      const yy = groundAt(xx, zz, y);
+      if (yy - y > STEP_UP + 1e-3) continue;
+      if (y - yy > 1.2) continue;                            // a drop: not a way anyone walks out
+      if (kk >= 0 && Math.abs(yy - tops[kk]) > 0.6) {
+        // a raised piece of floor (dais, stair) or the storey below: stay on the level we are on
+        if (yy < tops[kk] - 0.6) continue;
+      }
+      if (blockedAt(xx, zz, yy)) {
+        // standing here would open a door in front of us: re-test after [E]
+        if (kk >= 0) {
+          const d = UD.at(xx, zz, 1.9, yy);
+          if (d && !d.open && unitByFloor.indexOf(d) >= 0 && (d.free || UD.mayOpen(d))) { setOpen(d, true); opened.push(d); }
+          if (blockedAt(xx, zz, yy)) continue;
+        } else continue;
+      }
+      push(kk, ii, jj, yy);
+    }
+  }
+  const reached = (k, x, z) => {
+    const i = Math.round((x - x0) / CELL), j = Math.round((z - z0) / CELL);
+    return seen.has(key(k + 1, i, j));
+  };
+  const reachedRect = (k, rx0, rx1, rz0, rz1) => {
+    for (let x = rx0 + 0.4; x <= rx1 - 0.4; x += CELL) for (let z = rz0 + 0.4; z <= rz1 - 0.4; z += CELL) if (reached(k, x, z)) return true;
+    return false;
+  };
+  const cleanup = () => {
+    for (const d of opened) setOpen(d, false);
+    for (const c of pulled) { if (CBZ.colliders.indexOf(c) < 0) CBZ.colliders.push(c); syncLive(c); }
+  };
+  return { reached, reachedRect, cleanup, opened, seen, x0, z0 };
+}
+
+// the rooms each shell publishes: every room a state plan drew
+// (CBZ.stateRoomsAll) and every storey's declared fit-out rect
+function roomsOf(sh) {
+  const b = sh.b, out = [];
+  const tops = b.floorTops;
+  const kOf = (y) => { let best = 0, bd = 1e9; for (let k = 0; k < (b.storeys | 0); k++) if (Math.abs(tops[k] - y) < bd) { bd = Math.abs(tops[k] - y); best = k; } return best; };
+  const sr = CBZ.stateRoomsAll ? CBZ.stateRoomsAll() : [];
+  for (const r of sr) {
+    if (!inShell(b, (r.x0 + r.x1) / 2, (r.z0 + r.z1) / 2, 0)) continue;
+    if (r.floorY < tops[0] - 0.3 || r.floorY > tops[tops.length - 1] + 0.3) continue;
+    out.push({ name: r.key || r.name, k: kOf(r.floorY), x0: r.x0, x1: r.x1, z0: r.z0, z1: r.z1 });
+  }
+  const site = CBZ.fitoutSiteOf ? CBZ.fitoutSiteOf(b) : null;
+  if (site && site.floors) for (const k in site.floors) {
+    const f = site.floors[k];
+    const rc = f && (f.rect || (CBZ.interiorFloorRoom ? CBZ.interiorFloorRoom(b, +k) : null));
+    if (rc) out.push({ name: "storey " + k + " (" + f.prog + ")", k: +k, x0: b.ox + rc.x0, x1: b.ox + rc.x1, z0: b.oz + rc.z0, z1: b.oz + rc.z1 });
+  }
+  return out;
+}
+
+// ---- the President's spawn: the chair behind the Oval Office desk --------
+const rooms = CBZ.presidentInteriorRooms ? CBZ.presidentInteriorRooms() : [];
+const oval = rooms.find((r) => r.key === "ovaloffice" && r.landmarks && r.landmarks.presidentialDesk);
+let spawnReport = "no Oval Office published";
+if (!oval) fail("the Oval Office (presidential desk) is not published");
+else {
+  const d = oval.landmarks.presidentialDesk, A = oval.approach;
+  const THRONE_BACK = 0.9;
+  const sx = d.x + A.nx * THRONE_BACK, sz = d.z + A.nz * THRONE_BACK;
+  const sh = shells.find((s) => inShell(s.b, sx, sz, 0) && oval.floorY >= s.b.floorTops[0] - 0.3 && oval.floorY <= s.b.floorTops[s.b.floorTops.length - 1]);
+  if (!sh) fail("no shell holds the Oval Office desk");
+  else {
+    const b = sh.b, k = b.floorTops.findIndex((t) => Math.abs(t - oval.floorY) < 0.3);
+    const F = floodShell(sh, [{ k: k, x: sx, z: sz }]);
+    // outside: the grade in front of the shell's own street door
+    const dn = b.localDoor;
+    const out = dn ? { x: b.ox + dn.x - dn.nx * 3.0, z: b.oz + dn.z - dn.nz * 3.0 } : null;
+    let outOk = false;
+    if (out) for (let dx = -1; dx <= 1 && !outOk; dx += 0.25) for (let dz = -1; dz <= 1 && !outOk; dz += 0.25) outOk = F.reached(-1, out.x + dx, out.z + dz);
+    spawnReport = tagOf(sh) + " floor " + k + " desk @" + (sx - b.ox).toFixed(1) + "," + (sz - b.oz).toFixed(1) + ": " + F.seen.size + " cells walked, doors opened " + F.opened.length + ", out the front door " + (outOk ? "YES" : "NO");
+    if (!outOk) fail("SPAWN TRAP: from the Oval Office desk the President cannot walk out of " + tagOf(sh) + " (" + F.seen.size + " cells reached, " + F.opened.length + " doors opened)");
+    // every room of that shell from the spawn
+    for (const r of roomsOf(sh)) if (!F.reachedRect(r.k, r.x0, r.x1, r.z0, r.z1)) fail("from the spawn: " + tagOf(sh) + " room " + r.name + " (floor " + r.k + ") unreachable");
+    F.cleanup();
+  }
+}
+
+lap("spawn walk");
+// ---- every shell, from its own street door: every room ---------------------
+let nRooms = 0, nShellWalks = 0;
+for (const sh of shells) {
+  const b = sh.b, dn = b.localDoor;
+  if (!dn) continue;
+  nShellWalks++;
+  const F = floodShell(sh, [{ k: -1, x: b.ox + dn.x - dn.nx * 3.0, z: b.oz + dn.z - dn.nz * 3.0 }]);
+  const inside = F.reached(0, b.ox + dn.x + dn.nx * 1.6, b.oz + dn.z + dn.nz * 1.6);
+  if (!inside) fail(tagOf(sh) + ": cannot walk in the front door");
+  for (const r of roomsOf(sh)) { nRooms++; if (!F.reachedRect(r.k, r.x0, r.x1, r.z0, r.z1)) fail(tagOf(sh) + " room " + r.name + " (floor " + r.k + ") unreachable from the front door"); }
+  if (VERBOSE) console.log("  walk", tagOf(sh), "cells", F.seen.size, "doors opened", F.opened.length, "/", perShellDoors.get(sh).unit.length);
+  F.cleanup();
+}
+
+console.log("shells", shells.length, "interior doors", nDoors, "street doors", nStreet, "rooms", nRooms, "walks", nShellWalks);
+console.log("spawn:", spawnReport);
+if (fails.length) console.log("FAILURES\n  " + fails.join("\n  "));
+console.log(FAIL ? "\nESTATE DOOR CENSUS: " + FAIL + " failures" : "\nESTATE DOOR CENSUS: 100% clean");
+process.exit(FAIL ? 1 : 0);
