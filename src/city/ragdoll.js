@@ -74,7 +74,9 @@
   const MAX_LIFE = 7;         // hard cap on solve time (safety)
   const ITER = 3;             // constraint relaxation passes per substep
   const KICK_DT = 1 / 120, VK = 0.52;   // velocities live per-SUBSTEP (two substeps/frame)
-  function GRAV() { return (CBZ.TUNE && CBZ.TUNE.gravity) || 22; }
+  // people fall at the tuned gameplay rate; the one definition is CBZ.PHYS
+  // (systems/debris.js), read at runtime with the same default
+  function GRAV() { return (CBZ.PHYS && CBZ.PHYS.G_ACTOR) || (CBZ.TUNE && CBZ.TUNE.gravity) || 22; }
 
   // ---- WATER (flag declared here; we do not edit src/config.js) -------------
   const CFG = (CBZ.CONFIG = CBZ.CONFIG || {});
@@ -726,9 +728,82 @@
     return hit;
   }
 
+  /* EVERY POINT MEETS THE WALL — SWEPT, AT ANY SPEED.
+     wallPass (below) is a depenetration on the six extremities only: it
+     finds a hand or a foot INSIDE a box and pushes it out the nearest face.
+     The head-to-knee mass (shoulders, hips, elbows, knees) was never
+     wall-tested at all, on the theory the sticks would hold it; they do
+     not. Measured in tools/test-loose-bodies.mjs, a body kicked into a
+     0.2 m partition ended with its shoulders, hips or knees on the FAR side
+     in 9 of 9 throws, at 15 m/s as much as at 60 — the limbs caught, the
+     trunk folded through between them. And a point fast enough to cross a
+     wall's middle in one substep (0.25-0.45 m at blast speed) was pushed
+     out the wrong side.
+     Now, every substep with a collider near the body, EVERY point runs as a
+     segment (where it was -> where it is) against the colliders' side faces
+     grown by that point's own thickness (debris.js's CBZ.looseContact): it
+     stops on the first face it meets, loses its velocity into the face and
+     keeps a share of the slide along it (cloth on plaster). A point that
+     is already inside a grown box (the sticks pulled it a centimetre in) is
+     taken out by the shortest side, which after the sweep is always the
+     side it came from. The floor stays groundAt's job. No collider within
+     reach -> one broadphase lookup and out, so a body in the open street
+     pays nothing it did not before. */
+  const _sw = { t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0, c: null };
+  const _swCols = [], _swAll = [];
+  const SW_OPTS = { sides: true, padY: 0.1 };   // band slack = wallPass's feet/head 0.1
+  function wallSweep(p, q, p0, sk) {
+    const LC = CBZ.looseContact;
+    if (!LC || !CBZ.queryCollidersNear) return false;
+    // the swept body's box, grown by the thickest point: the broadphase disc
+    // is cut down to the colliders that box actually touches
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (let i = 0; i < 39; i += 3) {
+      const a = p[i], b = p0[i], c = p[i + 2], d = p0[i + 2], e = p[i + 1], f = p0[i + 1];
+      if (a < x0) x0 = a; if (a > x1) x1 = a; if (b < x0) x0 = b; if (b > x1) x1 = b;
+      if (c < z0) z0 = c; if (c > z1) z1 = c; if (d < z0) z0 = d; if (d > z1) z1 = d;
+      if (e < y0) y0 = e; if (e > y1) y1 = e; if (f < y0) y0 = f; if (f > y1) y1 = f;
+    }
+    const g = 0.3 * sk + 0.02;
+    x0 -= g; x1 += g; z0 -= g; z1 += g; y0 -= g; y1 += g;
+    let near;
+    try { near = CBZ.queryCollidersNear((x0 + x1) * 0.5, (z0 + z1) * 0.5, Math.hypot(x1 - x0, z1 - z0) * 0.5, _swAll); } catch (e) { return false; }
+    const cols = _swCols; cols.length = 0;
+    for (let k = 0; k < near.length; k++) {
+      const c = near[k];
+      if (c.minX == null || c.maxX < x0 || c.minX > x1 || c.maxZ < z0 || c.minZ > z1) continue;
+      if ((c.y1 != null && c.y1 < y0) || (c.y0 != null && c.y0 > y1)) continue;
+      cols.push(c);
+    }
+    if (!cols.length) return false;
+    let hit = false;
+    for (let i = 0; i < 13; i++) {
+      const ix = i * 3, iy = ix + 1, iz = ix + 2;
+      const pad = (RAD[i] < 0.3 ? RAD[i] : 0.3) * sk;
+      let got = LC.segment(p0[ix], p0[iy], p0[iz], p[ix], p[iy], p[iz], pad, cols, _sw, SW_OPTS);
+      if (!got) {
+        for (let k = 0; k < cols.length && !got; k++) {
+          const c = cols[k];
+          if (c.minX == null || p[ix] < c.minX - pad || p[ix] > c.maxX + pad || p[iz] < c.minZ - pad || p[iz] > c.maxZ + pad) continue;
+          got = LC.pushOut(p[ix], p[iy], p[iz], pad, c, _sw, SW_OPTS);
+        }
+      }
+      if (!got) continue;
+      hit = true;
+      // the velocity the point carried, minus its part into the face
+      let vx = p[ix] - q[ix], vy = p[iy] - q[iy], vz = p[iz] - q[iz];
+      const vn = vx * _sw.nx + vz * _sw.nz;
+      if (vn < 0) { vx -= _sw.nx * vn; vz -= _sw.nz * vn; }
+      p[ix] = _sw.x; p[iz] = _sw.z;
+      q[ix] = p[ix] - vx * WALL_SLIDE; q[iy] = p[iy] - vy * WALL_SLIDE; q[iz] = p[iz] - vz * WALL_SLIDE;
+    }
+    return hit;
+  }
+
   function solve(s, dt) {
     if (dt <= 0) return;
     const p = s.p, q = s.q, sk = s.k;
+    const p0 = s.p0 || (s.p0 = new Float32Array(39));
     // support columns at the two body ends — points use the nearer column, so a
     // body straddling a roof edge folds over it and a stair run reads per-tread.
     const hx = p[0], hz = p[2];
@@ -774,11 +849,12 @@
     const wet = s.wet, seaTop = s.seaY;
     let maxd2 = 0;
     for (let sub = 0; sub < 2; sub++) {
+      p0.set(p);
       for (let i = 0; i < 13; i++) {
         const ix = i * 3, iy = ix + 1, iz = ix + 2;
         let vx = (p[ix] - q[ix]) * drag, vy = (p[iy] - q[iy]) * drag, vz = (p[iz] - q[iz]) * drag;
         const sp2 = vx * vx + vy * vy + vz * vz;
-        if (sp2 > 0.2025) { const k = 0.45 / Math.sqrt(sp2); vx *= k; vy *= k; vz *= k; } // anti-tunnel step cap
+        if (sp2 > 0.2025) { const k = 0.45 / Math.sqrt(sp2); vx *= k; vy *= k; vz *= k; } // step cap (walls: wallSweep below)
         if (sp2 > maxd2) maxd2 = sp2;
         q[ix] = p[ix]; q[iy] = p[iy]; q[iz] = p[iz];
         // BUOYANCY — RAMPED over the point's own thickness, never stepped. A
@@ -848,6 +924,7 @@
       // walls, INSIDE the substep: pushed out after the sticks had their say,
       // so the next substep's sticks relax the rest of the body around the
       // contact instead of dragging the point back in for a whole frame
+      if (wallSweep(p, q, p0, sk)) s.wallT = 0.5;
       if (CBZ.collide && wallPass(p, q, sk)) s.wallT = 0.5;
       // the hold gets the LAST word of the substep — after the sticks and
       // after the ground, so nothing can drag the held point off the jaw.

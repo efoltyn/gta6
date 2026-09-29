@@ -615,14 +615,45 @@
   }
 
   // ---- the debris integrator (runs in survival AND city) ----------------
+  const QK_PAD = 0.18;                   // a slab's half-thickness against walls
+  const _qkHit = { t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0, c: null };
+  // rubble colliders don't stop a falling slab (it lands ON the pile via the
+  // floor); a collider with no y band is full height, as CBZ.collide reads it
+  const QK_OPTS = { skip: (c) => !!c.debris };
   function tickPieces(dt) {
-    const g = (CBZ.TUNE && CBZ.TUNE.gravity) || 22;
+    // A falling slab of cladding is not a person: it falls at the REAL rate
+    // (CBZ.PHYS.G_REAL, the same 9.81 debris.js's rigid pieces use, so two
+    // chunks off one facade no longer drop at two different speeds). It used
+    // to borrow the characters' tuned 22.
+    const g = (CBZ.PHYS && CBZ.PHYS.G_REAL) || 9.81;
+    const LC = CBZ.looseContact;
     for (let i = pieces.length - 1; i >= 0; i--) {
       const p = pieces[i];
       p.t += dt;
       if (!p.landed) {
         p.vy -= g * dt;
+        const ox = p.x, oy = p.y, oz = p.z;
         p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+        /* THE WORLD IS SOLID TO IT. This integrator knew the floor and
+           nothing else: a slab shed off a facade flew straight through the
+           shop awning, the neighbour's wall and the parked bus shelter, and
+           a ceiling slab fell through every storey to the street. Now the
+           step is a swept segment against the colliders (debris.js's
+           CBZ.looseContact): a side face stops it and it drops down the wall,
+           a top face (an awning, a roof, a ledge) is where it lands. The box
+           it was shed FROM is skipped for free: it starts inside it. */
+        if (LC && (ox !== p.x || oy !== p.y || oz !== p.z)) {
+          if (LC.sweep(ox, oy, oz, p.x, p.y, p.z, QK_PAD, _qkHit, QK_OPTS)) {
+            p.x = _qkHit.x; p.y = _qkHit.y; p.z = _qkHit.z;
+            if (_qkHit.ny > 0.5) { p.y -= QK_PAD; p.restY = p.y; }       // landed on a top face
+            else {
+              const vn = p.vx * _qkHit.nx + p.vz * _qkHit.nz;
+              if (vn < 0) { p.vx -= 1.25 * vn * _qkHit.nx; p.vz -= 1.25 * vn * _qkHit.nz; }
+              p.vx *= 0.6; p.vz *= 0.6;
+              if (_qkHit.ny < -0.5 && p.vy > 0) p.vy = 0;                // under a soffit
+            }
+          }
+        }
         p.mesh.position.set(p.x, p.y, p.z);
         p.mesh.rotation.x += p.sx * dt;
         p.mesh.rotation.z += p.sz * dt;
@@ -652,7 +683,10 @@
             if (CBZ.bodyWound) { try { CBZ.bodyWound(a, { x: self.x, y: ay + 1.5, z: self.z }, { melee: self.kind === "glass" ? "blade" : "blunt", fromX: self.x, fromZ: self.z }); } catch (e) {} }
           });
         }
-        const fl = floorAt(p.x, p.z) + 0.16;
+        // the floor it can actually reach: roofs/platforms/storey floors via
+        // groundAt from where it WAS (a ceiling slab lands on this storey's
+        // floor, not the street five floors down), or the top it just hit
+        const fl = (p.restY != null ? p.restY : (LC ? LC.ground(p.x, p.z, oy + 0.3) : floorAt(p.x, p.z))) + 0.16;
         if (p.y <= fl) {
           p.y = fl; p.mesh.position.y = fl; p.landed = p.t;
           p.mesh.rotation.x = (rnd() - 0.5) * 0.5;

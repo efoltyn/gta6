@@ -1472,6 +1472,11 @@
     try { if (CBZ.sfx && camDist(L.car.pos.x, L.car.pos.z) < 120) CBZ.sfx("whoosh"); } catch (e) {}
   }
 
+  const TW_PAD = 0.9;                    // a car's half-width against walls
+  const _twHit = { t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0, c: null };
+  // rubble colliders are knee-high piles the car tumbles over, not walls
+  const TW_OPTS = { skip: (c) => !!c.debris };
+  function spd0(L) { return Math.hypot(L.vx, L.vy, L.vz); }
   function stepLifted(t, dt) {
     for (let i = t.lifted.length - 1; i >= 0; i--) {
       const L = t.lifted[i], c = L.car;
@@ -1506,9 +1511,44 @@
       }
 
       // ---- THROWN: plain ballistics until it hits something ---------------
-      L.vy -= 19.2 * dt;
+      L.vy -= ((CBZ.PHYS && CBZ.PHYS.G_VEHICLE) || 19.2) * dt;
       const px = c.pos.x, pz = c.pos.z, py = L.y;
       c.pos.x += L.vx * dt; c.pos.z += L.vz * dt; L.y += L.vy * dt;
+      /* (0) THE WORLD'S COLLIDERS. The throw knew two things — a lot's
+         building footprint and the ground — so a car at 30 m/s went through
+         every wall, fence, bus shelter and parked-truck box that is not a
+         lot, and could never land on a roof. The step is now a swept box
+         (debris.js's CBZ.looseContact, grown by the car's half-width): a
+         side face at speed is the same kinetic impact a facade is, a slow
+         one is a bounce off it, and a top face is where it lands. */
+      const LC = CBZ.looseContact;
+      if (LC && LC.sweep(px, py, pz, c.pos.x, L.y, c.pos.z, TW_PAD, _twHit, TW_OPTS)) {
+        c.pos.x = _twHit.x; c.pos.z = _twHit.z; L.y = _twHit.y;
+        if (_twHit.ny > 0.5) {
+          // on a roof / a deck / a container: that is its ground now
+          L.y = _twHit.y - TW_PAD + 0.45; L.restY = _twHit.y - TW_PAD;
+          if (c.group) c.group.position.set(c.pos.x, L.y, c.pos.z);
+          impact(t, L, spd0(L), null, px, py, pz);
+          t.lifted.splice(i, 1);
+          continue;
+        }
+        const s0 = spd0(L);
+        if (s0 > 16) {
+          let lot = null;
+          try { if (CBZ.structure && CBZ.structure.lotAt) lot = CBZ.structure.lotAt(c.pos.x - _twHit.nx, c.pos.z - _twHit.nz, 1.2); } catch (e) {}
+          if (c.group) c.group.position.set(c.pos.x, L.y, c.pos.z);
+          impact(t, L, s0, lot && lot.building ? lot : null, px, py, pz);
+          t.lifted.splice(i, 1);
+          continue;
+        }
+        // a glancing / slow hit: off the wall, most of the energy gone
+        const vn = L.vx * _twHit.nx + L.vy * _twHit.ny + L.vz * _twHit.nz;
+        if (vn < 0) {
+          L.vx -= 1.3 * vn * _twHit.nx; L.vy -= 1.3 * vn * _twHit.ny; L.vz -= 1.3 * vn * _twHit.nz;
+        }
+        L.vx *= 0.55; L.vz *= 0.55;
+        L.sx *= -0.6; L.sz *= 0.6;
+      }
       L.rx += L.sx * dt * 1.6; L.rz += L.sz * dt * 1.6;
       if (c.group) {
         c.group.position.set(c.pos.x, L.y, c.pos.z);
@@ -1525,10 +1565,12 @@
           continue;
         }
       }
-      // (b) into the GROUND
-      const gy = floorAt(c.pos.x, c.pos.z);
+      // (b) into the GROUND — the surface it can reach from where it was
+      // (groundAt: a roof platform under it counts, the street under a roof
+      // does not)
+      const gy = LC ? LC.ground(c.pos.x, c.pos.z, py + 0.2) : floorAt(c.pos.x, c.pos.z);
       if (L.y <= gy + 0.45) {
-        L.y = gy + 0.45;
+        L.y = gy + 0.45; L.restY = gy;
         impact(t, L, spd, null, px, py, pz);
         t.lifted.splice(i, 1);
         continue;
@@ -1585,7 +1627,9 @@
     c._airborne = false; c._airY = 0; c._airVy = 0;
     c.abandoned = true;
     c.wreckT = 0;
-    const gy = floorAt(c.pos.x, c.pos.z);
+    // where it came down (a roof it landed on), else the ground under it
+    const gy = L.restY != null ? L.restY
+      : (CBZ.looseContact ? CBZ.looseContact.ground(c.pos.x, c.pos.z, (L.y != null ? L.y : 0) + 0.5) : floorAt(c.pos.x, c.pos.z));
     if (c.group) {
       c.group.position.set(c.pos.x, gy + 0.4, c.pos.z);
       if (!hard) {

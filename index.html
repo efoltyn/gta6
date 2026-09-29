@@ -976,7 +976,7 @@ document.body.appendChild(b);}}catch(e){}})();
      its world lazily, so the prison game above is untouched. Must load
      BEFORE loop.js so its frame-work is included in the sort. -->
 <script src="src/systems/fx.js?v=sharkmode1"></script>
-<script src="src/systems/debris.js?v=w09290242x"></script>
+<script src="src/systems/debris.js?v=loose1"></script>
 <!-- REAL LIGHTNING. Registers a `lightning` row + FX composer on the impact
      bus, so a cloud-to-ground strike draws a forked channel with return
      strokes, ground flashover, steam and a burn scar instead of falling
@@ -1013,7 +1013,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE QUAKE IS SHARED: systems/quake.js owns facade shedding, drop-cover,
      gas fires and downed lines for BOTH worlds (CITY_QUAKE for the city).
      Must precede systems/disasters.js so the roster finds CBZ.quake. -->
-<script src="src/systems/quake.js?v=quake1"></script>
+<script src="src/systems/quake.js?v=loose1"></script>
 <!-- ==== PER-DISASTER MODULE SEAM ==========================================
      One line per disaster in the survival roster, each owned by exactly that
      disaster and nobody else. A disaster whose behaviour outgrows its entry in
@@ -1510,7 +1510,7 @@ document.body.appendChild(b);}}catch(e){}})();
      severe weather, deterministic per in-game day. The survival-mode duplicate
      was deleted and migrated onto this file — WITHOUT THIS TAG the survival
      tornado is a silent no-op. Only needs config.js; no other ordering. -->
-<script src="src/systems/tornado.js?v=tornado1"></script>
+<script src="src/systems/tornado.js?v=loose1"></script>
 <script src="src/city/aircraftimpact.js?v=airimpact1"></script>
 <script src="src/city/shops.js?v=w09290219"></script>
 <script src="src/city/gunstore.js?v=boom2"></script>
@@ -1620,7 +1620,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/armored.js?v=deslop1"></script>
 <script src="src/city/death.js?v=vit3"></script>
 <script src="src/city/camera.js?v=shouldergun2"></script>
-<script src="src/city/ragdoll.js?v=vit3"></script>
+<script src="src/city/ragdoll.js?v=loose1"></script>
 <script src="src/city/leaderboard.js?v=nodash1"></script>
 <script src="src/city/zillow.js?v=onebet1"></script>
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
@@ -1878,7 +1878,7 @@ document.body.appendChild(b);}}catch(e){}})();
      evidence buildGaitRig reads), so there is no species table and the 46th
      animal ragdolls for free. Declines cleanly (snakes, fish, far kills, budget
      full) and the caller falls back to CBZ.wildlifeDeathTumble. -->
-<script src="src/systems/quadruped_ragdoll.js?v=quadrag1"></script>
+<script src="src/systems/quadruped_ragdoll.js?v=loose1"></script>
 <!-- The shark is thin on purpose: numbers, fin/wake proxy, locomotion. After
      predator.js AND wildlife.js so both seams exist. -->
 <script src="src/city/wildlife_shark.js?v=sharkfix3"></script>

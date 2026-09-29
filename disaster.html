@@ -866,7 +866,7 @@ document.body.appendChild(b);}}catch(e){}})();
      its world lazily, so the prison game above is untouched. Must load
      BEFORE loop.js so its frame-work is included in the sort. -->
 <script src="src/systems/fx.js?v=sharkmode1"></script>
-<script src="src/systems/debris.js?v=w09290242x"></script>
+<script src="src/systems/debris.js?v=loose1"></script>
 <!-- REAL LIGHTNING. Registers a `lightning` row + FX composer on the impact
      bus, so a cloud-to-ground strike draws a forked channel with return
      strokes, ground flashover, steam and a burn scar instead of falling
@@ -901,7 +901,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE QUAKE IS SHARED: systems/quake.js owns facade shedding, drop-cover,
      gas fires and downed lines for BOTH worlds (CITY_QUAKE for the city).
      Must precede systems/disasters.js so the roster finds CBZ.quake. -->
-<script src="src/systems/quake.js?v=quake1"></script>
+<script src="src/systems/quake.js?v=loose1"></script>
 <!-- ==== PER-DISASTER MODULE SEAM ==========================================
      One line per disaster in the survival roster, each owned by exactly that
      disaster and nobody else. A disaster whose behaviour outgrows its entry in
@@ -1276,7 +1276,7 @@ document.body.appendChild(b);}}catch(e){}})();
      severe weather, deterministic per in-game day. The survival-mode duplicate
      was deleted and migrated onto this file — WITHOUT THIS TAG the survival
      tornado is a silent no-op. Only needs config.js; no other ordering. -->
-<script src="src/systems/tornado.js?v=tornado1"></script>
+<script src="src/systems/tornado.js?v=loose1"></script>
 <!-- weapon attachments: scopes / bigger mags / suppressor / grips, sold at the
      gunsmith bench in the gun store (sights.js reads a fitted optic) -->
 <!-- AIMING DOWN THE SIGHTS: the gun's sight solved onto the eye in first

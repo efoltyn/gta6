@@ -118,7 +118,9 @@
   var KICK_DT = 1 / 120, VK = 0.52;
   var BUOY_G = -0.35, BUOY_DRAG = 0.86, FLOAT_BAND = 1.2;
   var RELIGHT_MAX = 5;        // times the roll may be re-armed on an upright corpse
-  function GRAV() { return (CBZ.TUNE && CBZ.TUNE.gravity) || 22; }
+  // bodies fall at the tuned gameplay rate; one definition in CBZ.PHYS
+  // (systems/debris.js), read at runtime with the same default
+  function GRAV() { return (CBZ.PHYS && CBZ.PHYS.G_ACTOR) || (CBZ.TUNE && CBZ.TUNE.gravity) || 22; }
 
   var MAXCOL = 4;             // columns actually simulated (see pickColumns)
   var MAXP = 7 + MAXCOL * 2;  // 15 points
@@ -772,8 +774,66 @@
     for (var i = 1; i < n3; i += 3) { p[i] += dy; q[i] += dy; }
   }
 
+  /* EVERY POINT MEETS THE WALL (the same law as city/ragdoll.js's
+     wallSweep). The extremity push-out below leaves the torso quad, the spine
+     and the knees untested, so a carcass kicked into a wall folded its trunk
+     through between its caught legs, and a point fast enough to cross a thin
+     wall's middle in one substep was pushed out the far side. Every substep
+     with a collider near the body, each point runs as a segment (where it was
+     -> where it is) against the colliders' side faces grown by that point's
+     radius (CBZ.looseContact): it stops on the first face, loses its velocity
+     into it, keeps a share of the slide; a point already inside a grown box
+     leaves by the shortest side. No collider near -> one lookup and out. */
+  var Q_SLIDE = 0.4;
+  var _qsw = { t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0, c: null };
+  var _qswCols = [], _qswAll = [];
+  var Q_SW_OPTS = { sides: true, padY: 0.1 };
+  function wallSweep(p, q, p0, n, rad, sc) {
+    var LC = CBZ.looseContact;
+    if (!LC || !CBZ.queryCollidersNear) return false;
+    var x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity, y0 = Infinity, y1 = -Infinity, big = 0, i, k;
+    for (i = 0; i < n; i++) {
+      var i3 = i * 3;
+      x0 = Math.min(x0, p[i3], p0[i3]); x1 = Math.max(x1, p[i3], p0[i3]);
+      y0 = Math.min(y0, p[i3 + 1], p0[i3 + 1]); y1 = Math.max(y1, p[i3 + 1], p0[i3 + 1]);
+      z0 = Math.min(z0, p[i3 + 2], p0[i3 + 2]); z1 = Math.max(z1, p[i3 + 2], p0[i3 + 2]);
+      if (rad[i] * sc > big) big = rad[i] * sc;
+    }
+    var g = big + 0.02;
+    x0 -= g; x1 += g; z0 -= g; z1 += g; y0 -= g; y1 += g;
+    var near;
+    try { near = CBZ.queryCollidersNear((x0 + x1) * 0.5, (z0 + z1) * 0.5, Math.hypot(x1 - x0, z1 - z0) * 0.5, _qswAll); } catch (e) { return false; }
+    var cols = _qswCols; cols.length = 0;
+    for (k = 0; k < near.length; k++) {
+      var c = near[k];
+      if (c.minX == null || c.maxX < x0 || c.minX > x1 || c.maxZ < z0 || c.minZ > z1) continue;
+      if ((c.y1 != null && c.y1 < y0) || (c.y0 != null && c.y0 > y1)) continue;
+      cols.push(c);
+    }
+    if (!cols.length) return false;
+    var hit = false;
+    for (i = 0; i < n; i++) {
+      var ix = i * 3, iy = ix + 1, iz = ix + 2, pad = rad[i] * sc;
+      var got = LC.segment(p0[ix], p0[iy], p0[iz], p[ix], p[iy], p[iz], pad, cols, _qsw, Q_SW_OPTS);
+      for (k = 0; k < cols.length && !got; k++) {
+        var cc = cols[k];
+        if (p[ix] < cc.minX - pad || p[ix] > cc.maxX + pad || p[iz] < cc.minZ - pad || p[iz] > cc.maxZ + pad) continue;
+        got = LC.pushOut(p[ix], p[iy], p[iz], pad, cc, _qsw, Q_SW_OPTS);
+      }
+      if (!got) continue;
+      hit = true;
+      var vx = p[ix] - q[ix], vy = p[iy] - q[iy], vz = p[iz] - q[iz];
+      var vn = vx * _qsw.nx + vz * _qsw.nz;
+      if (vn < 0) { vx -= _qsw.nx * vn; vz -= _qsw.nz * vn; }
+      p[ix] = _qsw.x; p[iz] = _qsw.z;
+      q[ix] = p[ix] - vx * Q_SLIDE; q[iy] = p[iy] - vy * Q_SLIDE; q[iz] = p[iz] - vz * Q_SLIDE;
+    }
+    return hit;
+  }
+
   function solve(s, dt) {
     if (dt <= 0) return;
+    var p0 = s.p0 || (s.p0 = new Float32Array(s.p.length));
     var p = s.p, q = s.q, rig = s.rig, sc = s.s, n = s.n, i, ix, iy, iz;
     var rad = rig.rad, st = rig.st, ns = rig.ns;
     // two support columns (front axle / rear axle) so a carcass draped over a
@@ -804,6 +864,7 @@
     var wet = s.wet, seaTop = s.seaY;
     var maxd2 = 0, sub, it, c;
     for (sub = 0; sub < 2; sub++) {
+      p0.set(p);
       for (i = 0; i < n; i++) {
         ix = i * 3; iy = ix + 1; iz = ix + 2;
         var vx = (p[ix] - q[ix]) * 0.992, vy = (p[iy] - q[iy]) * 0.992, vz = (p[iz] - q[iz]) * 0.992;
@@ -863,6 +924,7 @@
           }
         }
       }
+      wallSweep(p, q, p0, n, rad, sc);
       if (s.pin) applyPin(s);
     }
     // walls: only the EXTREMITIES get the shared circle-vs-box push (head,
