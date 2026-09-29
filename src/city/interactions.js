@@ -109,7 +109,6 @@
     return !!(P && P._aircraft);
   }
 
-  // ---- storage -------------------------------------------------------------
   const layers = Object.create(null);   // layer name -> [option, ...]
   const sources = [];                    // candidate finders (peds, cars, zones…)
   const zones = [];                      // point+radius interaction spots
@@ -197,6 +196,90 @@
     if (typeof need === "function") return !!need(ctx);
     return ((ctx.items && ctx.items[need]) | 0) > 0;
   }
+
+  /* ---- GATHER: every source and zone, asked about ONE point --------------
+     The detection pass asks about the player's feet. A TAP asks the same
+     finders about points along the finger's ray (tapPick below), so anything
+     that can be reached with E can be reached with a finger, from across the
+     room, with no second registry. `far` = a tap scan: gunpoint sources (an
+     aimed gun is not a tap) and your own car are left out. */
+  function gatherAt(qx, qz, ctx, out, far) {
+    const push = (src) => (t, d, extra) => {
+      if (!t) return;
+      if (dismissT > 0 && t === dismissedTarget) return;
+      out.push({
+        t, d: d == null ? 0 : d, kind: (extra && extra.kind) || src.kind,
+        layers: (extra && extra.layers) || src.layers || [], base: src.prio || 0,
+        gunpoint: !!src.gunpoint, zone: (extra && extra.zone) || null, src, qx, qz,
+      });
+    };
+    for (const s of sources) {
+      if (s.driving !== undefined && !!s.driving !== ctx.driving) continue;
+      if (far && (s.gunpoint || s.kind === "vehicle:inside")) continue;
+      try { s.find(qx, qz, ctx, push(s)); } catch (e) { if (!far) throw e; }
+    }
+    for (const z of zones) {
+      if (z.driving !== undefined && !!z.driving !== ctx.driving) continue;
+      let t = null;
+      try { t = z.find(qx, qz, ctx); } catch (e) { if (!far) throw e; }
+      if (!t) continue;
+      const tx = t.pos ? t.pos.x : (t.x != null ? t.x : qx), tz = t.pos ? t.pos.z : (t.z != null ? t.z : qz);
+      const d = Math.hypot(qx - tx, qz - tz);
+      if (z.radius != null && d > z.radius) continue;
+      out.push({ t, d, kind: z.kind || "zone", layers: z.layers || [], base: z.prio || 0, gunpoint: false, zone: z, src: z, qx, qz });
+    }
+  }
+
+  /* ---- AIMED: the keyboard's look gate, in one place ----------------------
+     A wall of guns, a row of display cases, three bank windows: on a keyboard
+     you choose one by LOOKING at it, so a fixture only offers itself inside
+     a cone. A finger chooses by touching it, so on touch (and for a tap scan)
+     the cone is off and every fixture in reach is a candidate. */
+  function aimed(ctx, x, z, minDot) {
+    if (ctx && ctx.tap) return true;
+    if (CBZ.touchMode) return true;
+    const P = (ctx && ctx.pos) || (CBZ.player && CBZ.player.pos);
+    if (!P) return false;
+    const dx = x - P.x, dz = z - P.z, d = Math.hypot(dx, dz);
+    if (d < 0.05) return true;
+    const yaw = CBZ.cam ? CBZ.cam.yaw : 0;
+    return (dx / d) * -Math.sin(yaw) + (dz / d) * -Math.cos(yaw) >= (minDot == null ? 0.55 : minDot);
+  }
+
+  /* ---- FIXTURES: the things in a room you choose between -----------------
+     The store counters (the gun wall, the racks, the cases, the bank windows,
+     the pawn desks, the shelves) each used to run a PRIVATE copy of the same
+     loop: a look-pick, a prompt div in the middle of the screen and a
+     capture-phase E listener that fought the card for the key. On touch they
+     had nothing but that div. They are candidates here now, like a person:
+       registerFixtures({ id, kind, prio, list(ctx, qx, qz) -> [fixture] | null,
+         reach(f)?, dot(f)?, name(f) -> card title, verbs: [option...] })
+     `list` returns the room's fixtures only while the room is live (built,
+     the point asked about is inside it); each fixture needs x, z. Verbs are ordinary options
+     on the layer `kind`: E is the best one, Q / a tap shows them all. */
+  function registerFixtures(spec) {
+    const kind = spec.kind || spec.id;
+    const reach = spec.reach || function () { return 3; };
+    const dot = spec.dot || function () { return 0.55; };
+    registerSource({
+      id: spec.id, kind: kind, layers: [kind], prio: spec.prio || 8, driving: spec.driving != null ? spec.driving : false,
+      find: function (px, pz, ctx, push) {
+        const list = spec.list(ctx, px, pz);
+        if (!list) return;
+        for (let i = 0; i < list.length; i++) {
+          const f = list[i];
+          if (!f || f.x == null) continue;
+          const d = Math.hypot(f.x - px, f.z - pz);
+          if (d > reach(f) || !aimed(ctx, f.x, f.z, dot(f))) continue;
+          push(f, d);
+        }
+      },
+    });
+    for (const o of spec.verbs || []) { if (o.campaignSafe == null) o.campaignSafe = true; register(kind, o); }
+    if (spec.name) describe(kind, function (t, ctx) { return { label: spec.name(t, ctx) || "" }; });
+    return spec.id;
+  }
+
 
   // The authored hitman campaign owns progression while it is active. Keep the
   // physical interaction fabric (vehicles, aircraft, doors, loot, counters,
@@ -569,28 +652,7 @@
     // gather candidates
     cands.length = 0;
     insideCand = null;
-    const push = (src) => (t, d, extra) => {
-      if (!t) return;
-      if (dismissT > 0 && t === dismissedTarget) return;
-      cands.push({
-        t, d: d == null ? 0 : d, kind: (extra && extra.kind) || src.kind,
-        layers: (extra && extra.layers) || src.layers || [], base: src.prio || 0,
-        gunpoint: !!src.gunpoint, zone: (extra && extra.zone) || null, src,
-      });
-    };
-    for (const s of sources) {
-      if (s.driving !== undefined && !!s.driving !== ctx.driving) continue;
-      s.find(px, pz, ctx, push(s));
-    }
-    for (const z of zones) {
-      if (z.driving !== undefined && !!z.driving !== ctx.driving) continue;
-      const t = z.find(px, pz, ctx);
-      if (!t) continue;
-      const tx = t.pos ? t.pos.x : (t.x != null ? t.x : px), tz = t.pos ? t.pos.z : (t.z != null ? t.z : pz);
-      const d = Math.hypot(px - tx, pz - tz);
-      if (z.radius != null && d > z.radius) continue;
-      cands.push({ t, d, kind: z.kind || "zone", layers: z.layers || [], base: z.prio || 0, gunpoint: false, zone: z, src: z });
-    }
+    gatherAt(px, pz, ctx, cands, false);
 
     if (!cands.length) { if (current) hidePanel(); return; }
 
@@ -825,34 +887,120 @@
     for (const o of pass) add(o, proposalOf(o, cand.t, ctx), o.bad);
     return out;
   }
-  // The live candidate whose screen anchor is nearest a finger (touch): the
-  // last detection pass's candidates, projected through the live camera.
+  /* ---- THE ONE TAP PIPELINE (touch) ---------------------------------------
+     OWNER (2026-09-29): "in touch you can't interact with enough things ...
+     When I touch something, I should see interaction options with it."
+
+     A tap is a question to the SAME registry the keys use. systems/touch.js
+     casts the finger's ray (and says which body, if any, it hit: a person, a
+     car, an animal); tapPick then
+       1. takes every live candidate (what is in reach right now), and
+       2. asks every source and zone about points ALONG the finger's ray, so
+          a counter across the shop, an ATM across the street or a dog down
+          the pavement is found exactly as E would find it standing there,
+     projects each one's anchor onto the glass and picks the one under the
+     finger: the body the ray hit wins outright, otherwise the nearest anchor
+     inside a thumb-sized radius (closer things break ties). The answer says
+     whether it is in reach now (live: open its verbs) or not (walk there,
+     then open them: touch.js). No module keeps a private tap path. */
   const _pp = window.THREE ? new THREE.Vector3() : null;
   function anchorOf(c) {
     const t = c && c.t;
     if (!t) return null;
-    const p = t.pos || (t.group && t.group.position) || (t.x != null ? t : null);
+    let p = t.pos || (t.group && t.group.position) || (t.x != null ? t : null);
+    // a zone that answers with a bare token has no place of its own: it is
+    // where it was found (the point it was asked about)
+    if (!p && c.qx != null) p = { x: c.qx, y: null, z: c.qz };
     if (!p) return null;
     const y = (p.y != null ? p.y : (CBZ.player && CBZ.player.pos ? CBZ.player.pos.y : 0));
     return { x: p.x, y: y + (c.layers && c.layers.indexOf("ped") >= 0 ? 1.2 : 0.9), z: p.z };
   }
-  function pickAt(sx, sy, radius) {
-    const cam = CBZ.camera;
-    if (!cam || !_pp) return null;
-    radius = radius || 64;
-    cam.updateMatrixWorld();
-    const w = window.innerWidth || 800, h = window.innerHeight || 600;
-    let best = null, bd = radius * radius;
-    for (let i = 0; i < cands.length; i++) {
-      const a = anchorOf(cands[i]);
-      if (!a) continue;
-      _pp.set(a.x, a.y, a.z).project(cam);
-      if (_pp.z > 1) continue;
-      const x = (_pp.x * 0.5 + 0.5) * w, y = (-_pp.y * 0.5 + 0.5) * h;
-      const d = (x - sx) * (x - sx) + (y - sy) * (y - sy);
-      if (d < bd) { bd = d; best = cands[i]; }
+  const TAP_RADIUS = 72;          // css px: a thumb, not a cursor
+  const TAP_STEPS = [2, 5, 9, 14, 20, 27, 35, 44];   // m along the ground under the finger's ray
+  const _tapPool = [], _tapTmp = [];
+  function rayPoints(ray, under) {
+    const pts = [];
+    if (under) pts.push({ x: under.x, z: under.z });
+    if (!ray || !ray.origin || !ray.direction) return pts;
+    const o = ray.origin, dv = ray.direction, P = CBZ.player && CBZ.player.pos;
+    const hz = Math.hypot(dv.x, dv.z);
+    if (hz < 1e-4) { pts.push({ x: o.x, z: o.z }); return pts; }
+    // the finger's ray stops at the floor you stand on (nothing past it is seen)
+    let tMax = Infinity;
+    if (P && dv.y < -1e-3) tMax = (P.y + 0.05 - o.y) / dv.y;
+    for (const h of TAP_STEPS) {
+      const t = h / hz;
+      if (t > tMax + 2 / hz) { pts.push({ x: o.x + dv.x * tMax, z: o.z + dv.z * tMax }); break; }
+      pts.push({ x: o.x + dv.x * t, z: o.z + dv.z * t });
     }
+    return pts;
+  }
+  function tapPick(sx, sy, o) {
+    o = o || {};
+    const cam = CBZ.camera, P = CBZ.player;
+    if (!cam || !_pp || !P || !P.pos) return null;
+    if (g.mode !== "city" || pilotingAircraft()) return null;
+    cam.updateMatrixWorld();
+    const ctx = buildCtx(); ctx.tap = true;
+    const pool = _tapPool; pool.length = 0;
+    const seen = new Set();
+    const add = function (c, live) {
+      if (!c || !c.t || seen.has(c.t)) return;
+      // a far token with no place of its own would sit exactly under the
+      // finger (it is anchored where it was asked about): only a live one,
+      // anchored on you, can be tapped
+      if (!live && !(c.t.pos || (c.t.group && c.t.group.position) || c.t.x != null)) return;
+      seen.add(c.t); pool.push({ c: c, live: live });
+    };
+    for (let i = 0; i < cands.length; i++) if (cands[i].kind !== "vehicle:inside") add(cands[i], true);
+    const pts = rayPoints(o.ray, o.underPoint);
+    for (let k = 0; k < pts.length; k++) {
+      _tapTmp.length = 0;
+      gatherAt(pts[k].x, pts[k].z, ctx, _tapTmp, true);
+      for (let i = 0; i < _tapTmp.length; i++) add(_tapTmp[i], false);
+    }
+    const w = window.innerWidth || 800, h = window.innerHeight || 600;
+    const R = o.radius || TAP_RADIUS;
+    let best = null, bs = Infinity;
+    for (let i = 0; i < pool.length; i++) {
+      const e = pool[i], c = e.c;
+      let s;
+      if (o.under && c.t === o.under) s = -1000;              // the body under the finger
+      else {
+        const a = anchorOf(c);
+        if (!a) continue;
+        _pp.set(a.x, a.y, a.z).project(cam);
+        if (_pp.z > 1) continue;
+        const x = (_pp.x * 0.5 + 0.5) * w, y = (-_pp.y * 0.5 + 0.5) * h;
+        const dpx = Math.hypot(x - sx, y - sy);
+        if (dpx > R) continue;
+        s = dpx;
+      }
+      const tp = c.t.pos || (c.t.group && c.t.group.position) || (c.t.x != null ? c.t : { x: c.qx, z: c.qz });
+      const dm = Math.hypot(tp.x - P.pos.x, tp.z - P.pos.z);
+      s += dm * 0.6;                                          // the nearer of two close pills
+      if (s >= bs) continue;
+      // it must have something to do (the same gate E reads)
+      if (!resolveRows(c, ctx)) continue;
+      bs = s; best = { cand: c, live: e.live, dist: dm };
+    }
+    pool.length = 0;
     return best;
+  }
+  // the live candidate for a tapped one now that you are there: the same
+  // thing, or (a zone's fresh token) the same finder answering at the same spot
+  function liveLike(c) {
+    if (!c) return null;
+    for (let i = 0; i < cands.length; i++) if (cands[i].t === c.t) return cands[i];
+    const a = anchorOf(c);
+    if (!a) return null;
+    for (let i = 0; i < cands.length; i++) {
+      const x = cands[i];
+      if (x.src !== c.src) continue;
+      const b = anchorOf(x);
+      if (b && Math.hypot(a.x - b.x, a.z - b.z) < 1.5) return x;
+    }
+    return null;
   }
   // the live candidate for a known world object (a ped / car / animal record)
   function candidateFor(obj) {
@@ -873,7 +1021,8 @@
     // what the Q wheel opens on: the looked-at thing, else (driving) your car
     wheelCand: function () { return current || insideCand; },
     hasSlot: hasSlot,
-    wheelOf: wheelOf, fireOn: fireOn, pickAt: pickAt, candidateFor: candidateFor, anchorOf: anchorOf,
+    wheelOf: wheelOf, fireOn: fireOn, tapPick: tapPick, liveLike: liveLike, candidateFor: candidateFor, anchorOf: anchorOf,
+    registerFixtures: registerFixtures, aimed: aimed,
     useOwner: useOwner,
     rowsFor: function () { return currentRows.map((r) => ({ key: r.key, hold: !!r.hold, id: r.opt && r.opt.id, label: r.label })); },
     refresh: function () { dirty = true; },

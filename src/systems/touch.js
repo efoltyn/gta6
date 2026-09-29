@@ -669,9 +669,8 @@
 
   // Any UI a tap should reach natively (buttons/options/panels) — so a touch on
   // one never starts the joystick / look-drag or a world tap. .screen already
-  // covers title/pause/win/lose overlays. The walk-up prompt divs are listed
-  // by id: on touch they carry tappable verb pills (several were click-wired
-  // all along), and #cRadar / #minimap taps open the full map (fullmap.js).
+  // covers title/pause/win/lose overlays. #verbWheel is the tap-a-thing verb
+  // column, and #cRadar / #minimap taps open the full map (fullmap.js).
   const UI_SEL = "#tbtns, #tveh, #interact, .screen, #pkgPanel, #cpPanel, #fullMap, " +
     "#raceBoard, #speedwayStandings, #betSlip, " +
     // #hotbar (systems/inventory.js) is a div bar of divs — no <button> in it —
@@ -679,9 +678,7 @@
     // joystick's corner anchor now sits over its left-hand cells. A slot tap
     // must reach the slot, not start a walk.
     "#hotbar, #weaponStrip, " +
-    "#phone, #dashboard, button, [data-act], .iopt, .tpill, #cRadar, #minimap, " +
-    "#bankPrompt, #pawnPrompt, #jewelryPrompt, #clothingPrompt, #gunstorePrompt, " +
-    "#shopliftPrompt, #cityStoragePrompt, #cityAircraftPrompt";
+    "#phone, #dashboard, button, [data-act], .iopt, .tpill, #cRadar, #minimap, #verbWheel";
   const inUI = (t) => t && t.closest && t.closest(UI_SEL);
 
   function setMove(nx, ny) {
@@ -970,13 +967,21 @@
 
   // ---- tap-to-interact target model ------------------------------------------
   function reachOf(kind) {
-    return kind === "car" ? 5.2 : kind === "machine" ? 6.2 : kind === "animal" ? 4.5 :
+    return kind === "cand" ? 0.5 : kind === "car" ? 5.2 : kind === "machine" ? 6.2 : kind === "animal" ? 4.5 :
       kind === "door" ? 3.2 : 3.0;
   }
   // How close the player is to actually USING a target. Vehicles/animals measure
   // to the VISIBLE box (a plane's origin can be dozens of metres from its hull);
   // peds measure centre-to-centre and sit inside interactions.js's own REACH.
   function reachDist(kind, rec) {
+    // A TAPPED THING (city/interactions.js tapPick): there once it is a live
+    // candidate within a stride, or right up against it
+    if (kind === "cand") {
+      const a = CBZ.interactions && CBZ.interactions.anchorOf(rec);
+      if (!a || !CBZ.player.pos) return Infinity;
+      const d = Math.hypot(a.x - CBZ.player.pos.x, a.z - CBZ.player.pos.z);
+      return (d <= 3.2 && CBZ.interactions.liveLike(rec)) || d <= 1.4 ? 0 : d;
+    }
     // A DOOR IS MEASURED ON THE FLOOR, never through its Box3: the yard leaf
     // slides 4.35 m straight up when it opens, so a Box3 distance would put an
     // open door out of reach of the man standing directly under it.
@@ -997,6 +1002,10 @@
   // Where to walk to reach it: the nearest point on a vehicle's footprint (so a
   // big hull is approached at its edge), or a ped's own position.
   function steerPoint(kind, rec) {
+    if (kind === "cand") {
+      const a = CBZ.interactions && CBZ.interactions.anchorOf(rec);
+      if (a) return { x: a.x, z: a.z };
+    }
     if (kind === "door" && rec && rec.at) {
       try { const p = rec.at(); if (p) return { x: p.x, z: p.z }; } catch (e) {}
     }
@@ -1016,6 +1025,7 @@
   }
   function recAlive(kind, rec) {
     if (!rec) return false;
+    if (kind === "cand") return !(rec.t && rec.t.dead);
     if (rec.dead) return false;
     if (kind === "car" && rec.player) return false;
     if (kind === "machine" && rec.taken) return false;
@@ -1035,6 +1045,10 @@
   }
   function triggerTarget(kind, rec) {
     if (!recAlive(kind, rec)) return false;
+    if (kind === "cand") {
+      const live = (CBZ.interactions && CBZ.interactions.liveLike(rec)) || rec;
+      return !!(CBZ.verbWheel && CBZ.verbWheel.openFor(live));
+    }
     if ((kind === "car" || kind === "machine") && CBZ.cityRideIntercept && CBZ.cityRideIntercept()) return true;
     if ((kind === "car" || kind === "machine" || kind === "animal") && wheelOn(rec)) return true;
     if (kind === "car") return !!(CBZ.cityEnterVehicle && CBZ.cityEnterVehicle(rec) !== false);
@@ -1145,12 +1159,22 @@
       CBZ.verbWheel.pickTarget(target.rec);
       return true;
     }
-    // NOTHING WITH A BODY UNDER THE FINGER: the counter, the mailbox, the
-    // pump. Every live interaction candidate is tested by where it sits on
-    // the screen, with a thumb-sized radius.
-    if (!target && CBZ.game.mode === "city" && CBZ.interactions && CBZ.interactions.pickAt && CBZ.verbWheel) {
-      const c = CBZ.interactions.pickAt(x, y, 70);
-      if (c && CBZ.verbWheel.openFor(c)) return true;
+    // THE ONE TAP PIPELINE (city/interactions.js tapPick): the registry the
+    // keys read is asked what is under the finger, near or across the room.
+    // A body the ray hit (a car, a person) keeps its own flow below (the
+    // President's column, walk-to-a-car); anything else in reach opens its
+    // verbs, and anything farther is walked to and opened on arrival.
+    if (CBZ.game.mode === "city" && CBZ.interactions && CBZ.interactions.tapPick && CBZ.verbWheel) {
+      const pk = CBZ.interactions.tapPick(x, y, {
+        ray: tapRay.ray, under: target ? target.rec : null, underPoint: target && hits.length ? hits[0].point : null,
+      });
+      if (pk && !(target && pk.cand.t === target.rec)) {
+        const t = pk.cand.t, tp = t && (t.pos || (t.group && t.group.position));
+        if (pk.live) {
+          if (tp && pk.cand.layers && pk.cand.layers.indexOf("ped") >= 0) faceToward(tp.x, tp.z);
+          if (CBZ.verbWheel.openFor(pk.cand)) return true;
+        } else if (pk.dist <= WALK_MAX) { startWalk("cand", pk.cand); return true; }
+      }
     }
 
     /* ---- A GRILLE IS MOSTLY HOLES -------------------------------------
@@ -1833,8 +1857,8 @@
   CBZ.touchVerbWired("roof-stash", "#interact zone-roofstash");
   CBZ.touchVerbWired("beach-loot", "#interact zone-beachbag");
   CBZ.touchVerbWired("adboard-lease", "#interact zone-adboard");
-  CBZ.touchVerbWired("chest-open", "#ci2Chip .tpill");
-  CBZ.touchVerbWired("fx-terminal", "#fxPrompt (its own click handler)");
+  CBZ.touchVerbWired("chest-open", "world tap: city/interactions.js tapPick (chest fixture)");
+  CBZ.touchVerbWired("fx-terminal", "world tap: city/interactions.js tapPick (fx-counter fixture)");
   CBZ.touchVerbWired("c4-plant", "hotbar charge cell, then hold #tfire");
   CBZ.touchVerbWired("c4-detonate", "hotbar detonator cell, then #tfire");
   CBZ.touchVerbWired("cam-zoom", "pinch");

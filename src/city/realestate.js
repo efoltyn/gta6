@@ -480,12 +480,25 @@
       if (pressKey(e.key)) e.preventDefault();
       return;
     }
-    // [H] at your own front door opens the safehouse menu
-    if (e.key.toLowerCase() === "h" && !CBZ.cityMenuOpen) {
-      const lot = CBZ.cityHomeNear(CBZ.player.pos.x, CBZ.player.pos.z);
-      if (lot) { e.preventDefault(); CBZ.cityOpenHome(); }
-    }
   });
+
+  // YOUR FRONT DOOR IS A THING (city/interactions.js): E at it, or a tap on it,
+  // opens the safehouse menu. It used to be [H], a private key with no touch
+  // path at all.
+  let zoned = false;
+  function wireZone() {
+    if (zoned || !CBZ.interactions || !CBZ.interactions.registerZone) return;
+    zoned = true;
+    CBZ.interactions.registerZone({
+      id: "zone-home-door", kind: "home-door", radius: 4.5, prio: 8,
+      find: function (px, pz) {
+        const lot = CBZ.cityHomeNear(px, pz);
+        return lot && lot.building && lot.building.door ? lot.building.door : null;
+      },
+      options: [{ id: "home-open", slot: "e", prio: 5, campaignSafe: true, label: "Go in", onSelect: () => CBZ.cityOpenHome() }],
+    });
+  }
+  CBZ.onUpdate(40.8, function () { if (g.mode === "city") wireZone(); });
 
   // ---- property-empire economy tick (Zillow owns the portfolio data) -------
   // We run the single rent/income/mortgage tick HERE (careers.js owns the wage

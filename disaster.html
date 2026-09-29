@@ -26,11 +26,11 @@
 <link rel="stylesheet" href="css/hud.css?v=flick1">
 <link rel="stylesheet" href="css/screens.css?v=pause1">
 <link rel="stylesheet" href="css/shark_title.css?v=pause1">
-<link rel="stylesheet" href="css/mobile.css?v=tui0929">
+<link rel="stylesheet" href="css/mobile.css?v=tap0929">
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
 <link rel="stylesheet" href="css/inventory.css?v=cuffs1">
-<link rel="stylesheet" href="css/city.css?v=tui0929">
-<link rel="stylesheet" href="css/campaign.css?v=tui0929">
+<link rel="stylesheet" href="css/city.css?v=tap0929">
+<link rel="stylesheet" href="css/campaign.css?v=tap0929">
 <link rel="stylesheet" href="css/interact_touch.css?v=flick1">
 <link rel="stylesheet" href="css/title_hub.css?v=end1">
 </head>
@@ -437,6 +437,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/config.js?v=w0929town"></script>
 <!-- CITY SLICES (?slice=name|x,z,r): one piece of Gang City booted as its own world.
      Parses the URL only; with no slice every helper answers "keep". -->
+<script src="src/core/bakecache.js?v=phonefit1"></script>
+<script src="src/core/rectgrid.js?v=phonefit1"></script>
 <script src="src/core/slice.js?v=slice0929b"></script>
 <!-- GANG CITY STREAMS: the live city is a slice that follows the player (?stream=0 = whole city). -->
 <script src="src/core/citystream.js?v=slice0929b"></script>
@@ -482,6 +484,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- 1. core engine -->
 <script src="src/core/scene.js?v=neutralhaze1"></script>
+<script src="src/core/prisonlazy.js?v=phonefit1"></script>
 <script src="src/core/renderer.js?v=w09290242x"></script>
 <!-- THE GROUND STOPS BEING DRAWN OVER A HOLE. Must load AFTER core/renderer.js:
      its installFog REPLACES THREE.ShaderChunk.fog_fragment wholesale, so a patch
@@ -855,7 +858,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/fixedstep.js?v=fixed1"></script>
 <!-- how a prison run ends: the run out past the wall, the fade, one line (after state.js and save.js) -->
 <script src="src/systems/escapeend.js?v=end1"></script>
-<script src="src/systems/touch.js?v=ekey2"></script>
+<script src="src/systems/touch.js?v=tap0929"></script>
 <!-- THE WAY OUT of any seat (car, boat, cockpit, armor, saddle, chair, bed):
      CBZ.seatState/seatExit, the key pinned on the door, the one touch EXIT. -->
 <!-- where a floating touch button may go (the verb column, the way out): pure rect math -->
@@ -1290,12 +1293,12 @@ document.body.appendChild(b);}}catch(e){}})();
      fire paths it feeds). Revert: CBZ.CONFIG.WEAPON_LOCKON = false. -->
 <!-- The word on every button is a verb (city/verbword.js CBZ.cityVerbWord);
      before interactions.js, whose row renderer prints through it. -->
-<script src="src/city/verbword.js?v=tui0929"></script>
-<script src="src/city/interactions.js?v=tui0929"></script>
+<script src="src/city/verbword.js?v=tap0929"></script>
+<script src="src/city/interactions.js?v=tap0929"></script>
 <!-- THE VERB WHEEL (Q / a touch tap): everything you can do to the thing you
      look at, laid round it; orders about a third person start here. Reads
      city/interactions.js's wheelOf/fireOn. -->
-<script src="src/city/verbwheel.js?v=tui0929"></script>
+<script src="src/city/verbwheel.js?v=tap0929"></script>
 <!-- FUEL. The world has been generating "Pump & Go Fuel" lots since long
      before this file — they just had nothing to sell, because no vehicle had
      a tank. Player vehicle only (a hundred NPC cars silently running dry is a
@@ -1510,7 +1513,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- The hitman's world is physical (2026-09-27): paper he reads, hands that
      hold it, the motel room that is his menu, the consequences of a kill. -->
 <script src="src/city/hitman_paper.js?v=inworld1"></script>
-<script src="src/city/hitman_hands.js?v=inworld1"></script>
+<script src="src/city/hitman_hands.js?v=tap0929"></script>
 <script src="src/city/hitman_room.js?v=w09290219"></script>
 <script src="src/city/dossier.js?v=inworld1"></script>
 <script src="src/city/hitman_fallout.js?v=w09290219"></script>

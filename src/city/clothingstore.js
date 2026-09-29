@@ -49,7 +49,7 @@
   function h01(x, z, salt) { return CBZ.hash01 ? CBZ.hash01(x, z, salt) : 0.5; }
 
   const S = { lot: null, cs: null, group: null, winGroup: null, slots: [], built: false,
-              cur: null, prompt: null, lastTxt: "", cx: 0, cz: 0, cols: [],
+              near: false, cx: 0, cz: 0, cols: [],
               arena: null, noLotArena: null, panelOpen: false, panel: null };
 
   function econ() { return CBZ.cityEcon || null; }
@@ -744,56 +744,32 @@
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
 
-  // ---- the look-pick + [E] prompt --------------------------------------------
-  function pickSlot() {
-    const P = CBZ.player, B = S.cs.bounds;
-    const px = P.pos.x, pz = P.pos.z;
-    if (px < B.minX - 1.5 || px > B.maxX + 1.5 || pz < B.minZ - 1.5 || pz > B.maxZ + 1.5) return null;
-    const yaw = CBZ.cam ? CBZ.cam.yaw : 0, fx = -Math.sin(yaw), fz = -Math.cos(yaw);
-    let best = null, bestScore = -1;
-    for (const s of S.slots) {
-      const dx = s.x - px, dz = s.z - pz, d = Math.hypot(dx, dz);
-      if (d > (s.reach || RACK_REACH) || d < 0.05) continue;
-      const dot = (dx / d) * fx + (dz / d) * fz;
-      if (dot < (s.dot || RACK_DOT)) continue;
-      const score = dot - d * 0.06;
-      if (score > bestScore) { bestScore = score; best = s; }
-    }
-    return best;
+  // ---- THE RACKS ARE CANDIDATES (city/interactions.js registerFixtures) -----
+  // Every garment, form and the mirror is a thing in the registry: E buys (or
+  // wears) the one you look at, Q / a tap on it shows its verbs. No private
+  // prompt and no private E listener.
+  function inStore(px, pz) {
+    const B = S.cs && S.cs.bounds;
+    return !!B && px >= B.minX - 1.5 && px <= B.maxX + 1.5 && pz >= B.minZ - 1.5 && pz <= B.maxZ + 1.5;
   }
-
-  function promptText(s) {
-    if (s.kind === "mirror")
-      return "<b style='color:#e2c2f4'>[E]</b> Open wardrobe <span style='color:#7f8794'>mix your fits" + (S.tux ? " or buy the tuxedo" : "") + "</span>";
-    const owned = CBZ.cityOwnsItem && CBZ.cityOwnsItem(s.visualId);
-    if (owned)
-      return "<b style='color:#9fe0ff'>[E]</b> Owned, wear the " + s.label + " <span style='color:#7f8794'>+" + (s.drip || 0) + " drip</span>";
-    return "<b style='color:#e2c2f4'>[E]</b> Buy the " + s.label + ", <span style='color:#d9a8ee'>" + fmt$(e_buy(s.name)) + "</span> <span style='color:#7f8794'>+" + (s.drip || 0) + " drip</span>";
-  }
-
-  function promptEl() {
-    if (S.prompt) return S.prompt;
-    if (typeof document === "undefined" || !document.body) return null;
-    const d = document.createElement("div");
-    d.id = "clothingPrompt";
-    d.style.cssText = "position:fixed;left:50%;bottom:150px;transform:translateX(-50%);z-index:46;display:none;" +
-      "background:rgba(13,16,21,.9);border:1px solid #3a4150;border-radius:12px;padding:7px 14px;color:#e8eef7;" +
-      "font-family:Fredoka,system-ui,sans-serif;font-size:15px;pointer-events:auto;cursor:pointer;text-align:center;max-width:78vw";
-    d.addEventListener("click", function () { if (S.cur) actOn(S.cur); });   // tap-to-act (mobile)
-    document.body.appendChild(d);
-    S.prompt = d;
-    return d;
-  }
-  function showPrompt(txt) {
-    const el = promptEl();
-    if (!el) return;
-    if (CBZ.touchPromptHTML) txt = CBZ.touchPromptHTML(txt);   // touch: [E] → tappable verb pill
-    if (txt !== S.lastTxt) { el.innerHTML = txt; S.lastTxt = txt; }
-    if (el.style.display !== "block") el.style.display = "block";
-  }
-  function hidePrompt() {
-    if (S.prompt && S.prompt.style.display !== "none") S.prompt.style.display = "none";
-    S.cur = null;
+  const owned = (s) => !!(CBZ.cityOwnsItem && CBZ.cityOwnsItem(s.visualId));
+  let fixturesWired = false;
+  function wireFixtures() {
+    if (fixturesWired || !CBZ.interactions || !CBZ.interactions.registerFixtures) return;
+    fixturesWired = true;
+    CBZ.interactions.registerFixtures({
+      id: "clothes-rack", kind: "clothes-rack", prio: 9,
+      list: function (ctx, px, pz) { return S.built && S.near && !S.panelOpen && inStore(px, pz) ? S.slots : null; },
+      reach: function (s) { return s.reach || RACK_REACH; },
+      dot: function (s) { return s.dot || RACK_DOT; },
+      name: function (s) { return s.kind === "mirror" ? "" : (s.label || s.name); },
+      verbs: [
+        { id: "clothes-wardrobe", slot: "e", prio: 5, label: "Try on", canShow: (s) => s.kind === "mirror", onSelect: () => openPanel() },
+        { id: "clothes-wear", slot: "e", prio: 5, label: "Wear", canShow: (s) => s.kind !== "mirror" && owned(s), onSelect: actOn },
+        { id: "clothes-buy", slot: "e", prio: 5, label: (s) => "Buy " + fmt$(e_buy(s.name)),
+          canShow: (s) => s.kind !== "mirror" && !owned(s), onSelect: actOn },
+      ],
+    });
   }
 
   // ============================================================
@@ -869,7 +845,6 @@
     CBZ.cityMenuOpen = true;
     renderPanel();
     d.style.display = "block";
-    hidePrompt();
   }
   function closePanel() {
     if (S.panel) S.panel.style.display = "none";
@@ -898,7 +873,7 @@
     const arena = CBZ.city && CBZ.city.arena;
     if (S.built) {
       if (S.arena === arena) return true;
-      S.built = false; S.group = null; S.winGroup = null; S.slots = []; S.cur = null; S.lot = null; S.cs = null; S.tux = null;
+      S.built = false; S.group = null; S.winGroup = null; S.slots = []; S.near = false; S.lot = null; S.cs = null; S.tux = null;
       S.cols = [];                                        // the old arena's collider list went with it
     }
     if (!arena || !econ() || !CBZ.cityComposableSpec) return false;
@@ -950,9 +925,10 @@
     if (!g || g.mode !== "city") {
       if (S.group && S.group.visible) S.group.visible = false;
       if (S.winGroup && S.winGroup.visible) S.winGroup.visible = false;
-      hidePrompt(); if (S.panelOpen) closePanel(); return;
+      S.near = false; if (S.panelOpen) closePanel(); return;
     }
     if (!ensure()) return;
+    wireFixtures();
     const P = CBZ.player;
     const dx = P.pos.x - S.cx, dz = P.pos.z - S.cz;
     // The racks may ONLY render when the player is actually INSIDE the store
@@ -977,34 +953,17 @@
       const winVis = near || (out > 0.2 && out < WIN_R && side < S.cs.halfTan + 4);
       if (S.winGroup.visible !== winVis) S.winGroup.visible = winVis;
     }
-    if (!near || g.state !== "playing" || P.dead || P.driving) { hidePrompt(); if (S.panelOpen && (!near || P.dead || P.driving)) closePanel(); return; }
-    if (S.panelOpen) { hidePrompt(); return; }           // panel up: in-world prompt yields
-    if (CBZ.cityMenuOpen) { hidePrompt(); return; }
-    const s = pickSlot();
-    if (!s) { hidePrompt(); return; }
-    S.cur = s;
-    showPrompt(promptText(s));
+    S.near = near;
+    if (S.panelOpen && (!near || g.state !== "playing" || P.dead || P.driving)) closePanel();
   });
 
-  // [E] acts on the fixture you're facing. CAPTURE phase so the store wins the
-  // key over interact.js's bubble listener; stopImmediatePropagation keeps one
-  // press from ALSO opening the clerk's counter menu (the gunstore pattern).
+  // the wardrobe panel is modal: it owns every key while it is up
   addEventListener("keydown", function (e) {
-    const k = (e.key || "").toLowerCase();
-    if (S.panelOpen) {
-      e.preventDefault();
-      if (e.stopImmediatePropagation) e.stopImmediatePropagation();
-      e.stopPropagation();
-      panelKey(k);
-      return;
-    }
-    if (!S.cur || !g || g.mode !== "city" || g.state !== "playing") return;
-    if (CBZ.cityMenuOpen || (CBZ.player && (CBZ.player.driving || CBZ.player.dead))) return;
-    if (k !== "e") return;
+    if (!S.panelOpen) return;
     e.preventDefault();
     if (e.stopImmediatePropagation) e.stopImmediatePropagation();
     e.stopPropagation();
-    actOn(S.cur);
+    panelKey((e.key || "").toLowerCase());
   }, true);
 
   // ---- public hooks (interact/shops feature-detect; harness drives) ----------
