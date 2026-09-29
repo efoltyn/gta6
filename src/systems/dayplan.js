@@ -118,7 +118,10 @@
     CBZ.dayness = Math.max(0, up);
     CBZ.duskness = Math.max(0, 1 - Math.abs(up) * 3);
     CBZ.sunHeight = up;
-    CBZ.nightAmount = 1 - CBZ.dayness;
+    // the same perceived-darkness curve core/daynight.js publishes (lamps on
+    // at dusk, not mid-afternoon), inlined because no daynight is loaded here
+    const k = Math.max(0, Math.min(1, (0.14 - up) / 0.34));
+    CBZ.nightAmount = k * k * (3 - 2 * k);
   }
 
   /* ==========================================================

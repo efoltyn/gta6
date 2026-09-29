@@ -125,7 +125,9 @@
       if (l._cbzPinDummy) continue;
       if (!wantsOn(l)) { l.layers.mask = 1; continue; }   // off lights: restore + skip
       l.getWorldPosition(_wp);
-      candidates.push([_wp.distanceToSquared(cam.position), l]);
+      // `userData.pinFirst` (the player's own torch) always makes the cut: a
+      // third-person camera can stand farther from it than from a searchlight
+      candidates.push([l.userData.pinFirst ? -1 : _wp.distanceToSquared(cam.position), l]);
     }
     candidates.sort((a, b) => a[0] - b[0]);
     let on = 0;

@@ -854,7 +854,9 @@
     const disc = torchDiscipline();
     if (disc && torchHandBusy(g)) return false;
     const dayness = CBZ.dayness == null ? 1 : CBZ.dayness;
-    const sunY = CBZ.sun && CBZ.sun.position ? CBZ.sun.position.y : 80;
+    // the SUN's height in the old light-position units (sin x 95). Not the key
+    // light's y: past twilight the key is the moon, above the horizon all night.
+    const sunY = Number.isFinite(CBZ.sunHeight) ? CBZ.sunHeight * 95 : (CBZ.sun && CBZ.sun.position ? CBZ.sun.position.y : 80);
     const nightAmount = CBZ.nightAmount == null ? (1 - dayness) : CBZ.nightAmount;
     const trueNight = (dayness < 0.045 && sunY < -8) || nightAmount > 0.965;
     const activeSearch = g.hunt > 0 || !!g._chase || (g.investigate && g.investigate.t > 0);
