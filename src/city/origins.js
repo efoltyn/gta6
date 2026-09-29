@@ -1418,15 +1418,11 @@
     const sp = (A && A.spawn) || { x: 0, z: 0 };
     return { x: sp.x, z: sp.z, y: CBZ.floorAt ? CBZ.floorAt(sp.x, sp.z) : 0.14, heading: 0 };
   }
+  // the speedway's front gate (island_speedway.js publishes it)
   function speedwaySpawn() {
-    const c = (CBZ.raceKit && CBZ.raceKit.course && CBZ.raceKit.course("speedway")) || CBZ.speedwayCourse;
-    if (!c || typeof c.line !== "function") return null;
-    const f = c.line(c.startT || 0), out = (c.trackHalf || 11) + 18;
-    const x = f.x + f.nx * out, z = f.z + f.nz * out;
-    return {
-      x: x, z: z, y: CBZ.floorAt ? CBZ.floorAt(x, z) : 0.14,
-      heading: f.heading + Math.PI,
-    };
+    const g0 = CBZ.speedwayGate ? CBZ.speedwayGate() : null;
+    if (!g0) return null;
+    return { x: g0.x, z: g0.z, y: CBZ.floorAt ? CBZ.floorAt(g0.x, g0.z) : 0.14, heading: g0.heading };
   }
 
   const AXES = {
@@ -1457,12 +1453,10 @@
       airborne:   { find: null,            feed: "The field is fogged in. You start on the apron with the keys in your hand." },
       corner:     { find: null,            feed: "" },   // the street IS the place — never fails
       motel:      { find: findMotelLot,    feed: "No room at the motel. You slept in the stairwell." },
-      // The racer does NOT start beside the track — placeComposition below
-      // intercepts `speedway` and hands off to CBZ.cityRaceStart, so the story
-      // opens on the back row with the lights counting down. `resolve` is now
-      // purely the DEGRADE path: a world that could not field a race stands
-      // you at the gate and prints the feed, which is the old opening.
-      speedway:   { resolve: speedwaySpawn, feed: "The paddock is closed. You wait at the Speedway gate." },
+      // The racer opens at the speedway gate and is put straight onto the grid
+      // of the racing game (games/race.html, via CBZ.cityRaceLaunch): the race
+      // is its own page now, the city is where you come back to.
+      speedway:   { resolve: speedwaySpawn, feed: "The speedway is dark tonight. You wait at the gate." },
       // never fails (internal degrade to the arena spawn — the seat is the story)
       mansion:    { resolve: mansionSpawn,  feed: "The Mansion is dark. The motorcade never came." },
     },
@@ -1539,10 +1533,6 @@
         id: "origin_settle", title: "Pay what you owe", goal: "custom", reward: { respect: 10 },
         done: function () { return (g.cityDebt || 0) <= 0; },
       },
-      racecareer: {
-        id: "origin_racer_career", title: "Rookie to APEX Champion", goal: "custom", reward: 0,
-        start: function () { return CBZ.cityRacerCareer && CBZ.cityRacerCareer.start(); },
-      },
       // the President: the verb IS taking office. presidencyBegin() runs the
       // swear-in through candidacy.js's own write path (the same bookkeeping
       // a won election performs) and arms the walk-to-the-Situation-Room
@@ -1593,7 +1583,7 @@
     hustler: { who: "hustler", where: "corner",    purse: "street",     arms: "none",     heat: "none",     verb: "earn" },
     debtor:  { who: "debtor",  where: "motel",     purse: "underwater", arms: "none",     heat: "shark",    verb: "settle" },
     wick:    { who: "wick",    where: "unit",      purse: "warchest",   arms: "full",     heat: "everyone", verb: "survive" },
-    racer:   { who: "racer",   where: "speedway",  purse: "rookie",     arms: "none",     heat: "none",     verb: "racecareer" },
+    racer:   { who: "racer",   where: "speedway",  purse: "rookie",     arms: "none",     heat: "none",     verb: "earn" },
     president: { who: "president", where: "mansion", purse: "wages",    arms: "none",     heat: "none",     verb: "govern" },
     captain: { who: "captain", where: "corner",    purse: "wages",      arms: "none",     heat: "none",     verb: "voyage" },
   };
@@ -1632,7 +1622,6 @@
     if (comp.verb === "descend" && comp.where !== "tower_top") comp.verb = "earn";
     if (comp.verb === "landit" && comp.where !== "airborne") comp.verb = "earn";
     if (comp.verb === "contract" && comp.arms === "none") comp.arms = "quiet";
-    if (comp.verb === "racecareer") { comp.who = "racer"; comp.where = "speedway"; }
     if (comp.verb === "govern") { comp.who = "president"; comp.where = "mansion"; }   // only a President governs
     if (comp.who === "captain" || comp.verb === "voyage") { comp.who = "captain"; comp.verb = "voyage"; }   // a captain sails, and only a captain has a boat waiting
     return comp;
@@ -1882,90 +1871,22 @@
     }
   }
 
-  /* THE GRID START, retried until the speedway can hold a race.
-
-     OWNER (2026-07-29): "the racer story is poorly built, like the pilot — it
-     should start in race." The pilot got a deferred launch and the racer never
-     did, so the two stories that both promise to open you INTO something read
-     completely differently: one opens at 1,750 m, the other opened standing on
-     the grass outside a closed paddock.
-
-     Same deferral, and for the SAME reason it was needed for the plane: the
-     RD field is built from cityRacing's standings and cityMakeCar's catalog,
-     and neither is guaranteed live at the frame a mode reset applies an
-     origin. So we do not race it — stand the player somewhere safe, arm a
-     pending grid start, and fire the moment the world can answer, which is
-     within a frame or two and long before the player has control.
-
-     The verb is NOT re-armed here (unlike tryAirborne, which double-fires it):
-     runComposition already called startVerb the moment the placement returned,
-     and racing.js's own 0.8 s career tick re-arms the card for any racer whose
-     story is unfinished — so a second start would only race that singleton.
-
-     RETRYING IS FREE NOW, AND IT WAS NOT. Every frame of the deferral used to
-     call cityRaceStart, which BUILT A LOANER CAR before it discovered it could
-     not race yet and then returned null with the car still standing on the
-     grid. Six seconds of that laid down one primer-grey car per frame — the
-     twenty-car scrapyard the owner saw. The speedway now publishes
-     CBZ.cityRaceReady(), a pure predicate, and this asks THAT every frame and
-     only spends a car when the answer is yes. The attempt is also capped: an
-     ask that answers "ready" and still fails is a real fault, not a timing
-     one, and repeating it is how one leak becomes twenty. */
-  const PENDING_RACE_SEC = 6;
-  const PENDING_RACE_TRIES = 3;
+  /* THE GRID START. The race is games/race.html now; the racer opens at the
+     speedway gate and, a beat after the world is up, CBZ.cityRaceLaunch()
+     puts him on the grid there. If the launcher is not published (a trimmed
+     page), he simply stays at the gate. */
   let pendingRace = null;
-  /* A DEFERRED START THAT NEVER FIRES LEAVES NO TRACE ANYWHERE, which is how
-     the racer origin could quietly stop opening on the grid and the only
-     symptom anyone ever saw was a player standing at a gate (and, before the
-     litter fix, twenty grey cars). These four counters are the whole history
-     of the deferral, and CBZ.cityOriginRaceDebug() hands them to a probe. */
-  const raceDbg = { armed: 0, ticks: 0, notReady: 0, tried: 0, started: 0, gaveUp: 0 };
-  CBZ.cityOriginRaceDebug = function () {
-    return Object.assign({ pending: !!pendingRace, t: pendingRace ? pendingRace.t : null }, raceDbg);
-  };
-
-  function tryRace() {
-    if (!pendingRace || !CBZ.cityRaceStart) return false;
-    // the world cannot answer yet — say so for free, spend nothing
-    if (CBZ.cityRaceReady && !CBZ.cityRaceReady()) { raceDbg.notReady++; return false; }
-    if (pendingRace.tries >= PENDING_RACE_TRIES) return false;
-    pendingRace.tries++; raceDbg.tried++;
-    const car = CBZ.cityRaceStart({ style: "muscle", number: 99 });
-    if (!car) return false;
-    pendingRace = null; raceDbg.started++;
-    if (CBZ.cityRacerStory && CBZ.cityRacerStory.open) CBZ.cityRacerStory.open();
-    return true;
-  }
-
   function tickRace(dt) {
     if (!pendingRace) return;
-    raceDbg.ticks++;
     pendingRace.t += dt;
-    if (tryRace()) return;
-    // every allowed attempt has been spent and none took — stop waiting on a
-    // clock that will not change the answer, fall through to the gate now.
-    if (pendingRace.tries >= PENDING_RACE_TRIES) pendingRace.t = PENDING_RACE_SEC + 1;
-    if (pendingRace.t > PENDING_RACE_SEC) {
-      pendingRace = null; raceDbg.gaveUp++;
-      // The world could not put a race together this seed. Fall back to the
-      // ORIGINAL opening — on foot at the gate — rather than hanging, and say
-      // so, because a silent fallback is how the old one went unnoticed.
-      const site = speedwaySpawn();
-      const P = CBZ.player;
-      if (site && P) {
-        P.pos.set(site.x, site.y != null ? site.y : 0.14, site.z);
-        P.vy = 0; P.grounded = true;
-        if (CBZ.playerChar) { CBZ.playerChar.group.position.copy(P.pos); CBZ.playerChar.group.rotation.set(0, site.heading || 0, 0); }
-        if (CBZ.cam) { CBZ.cam.yaw = site.heading || 0; CBZ.cam.pitch = 0.3; }
-      }
-    }
+    if (pendingRace.t < 1.2) return;
+    pendingRace = null;
+    if (CBZ.cityRaceLaunch) CBZ.cityRaceLaunch();
   }
 
   /* WHERE, made real. Returns the intro opts the camera wants, or null so the
      caller falls back to the street exactly as the originals do. */
   function placeComposition(comp, game) {
-    raceDbg.placed = (raceDbg.placed || 0) + 1;
-    raceDbg.where = comp && comp.where;          // the branch this run actually took
     const WH = AXES.where[comp.where] || AXES.where.corner;
 
     // AIRBORNE — the owner's headline: "you literally start the game in air in
@@ -1988,17 +1909,8 @@
       return { compact: false, aerial: true };
     }
 
-    // SPEEDWAY — the racer's answer to the pilot's opening. Delegated to
-    // island_speedway.js's CBZ.cityRaceStart so the grid geometry, the banking
-    // and the lights convention stay in the file that owns them. Deferred for
-    // the same reason the airframe registry is: the field is built from live
-    // standings and the car catalog, neither guaranteed up at reset.
-    if (comp.where === "speedway") {
-      genericSafeSpawn();
-      pendingRace = { comp: comp, t: 0, tries: 0 }; raceDbg.armed++;
-      if (!tryRace()) return { compact: false, onGrid: true, pending: true };
-      return { compact: false, onGrid: true };
-    }
+    // SPEEDWAY — the racer's opening: the gate, then the grid (tickRace).
+    if (comp.where === "speedway") pendingRace = { t: 0 };
 
     // GROUND — find the lot this story wants and stand the player in it.
     const site = WH.resolve ? WH.resolve() : null;
