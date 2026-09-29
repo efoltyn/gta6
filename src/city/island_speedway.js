@@ -757,12 +757,41 @@
   }
 
   // ====================================================================== //
+  //  WHERE THE CAUSEWAY LEAVES THE ANNEX                                    //
+  // ====================================================================== //
+  // The deck used to start at a typed z = -585, the island's turf rim, 7 m
+  // past the end of an avenue it only half overlapped: the island street ran
+  // out into grass and the 24 m deck began square in the grass beyond it —
+  // a road that ends abruptly, twice. The island's street network is planned
+  // now (expansion.js) and publishes its south shore street, so the deck
+  // runs up the beach and T's FLUSH onto that street's south edge, the way
+  // every highwaynet route docks. No annex street spanning the lane (no
+  // annex, a moved lane) keeps the authored rim point.
+  const CW_X = 348;                  // the causeway lane (x 336..360)
+  // the lane, published at parse time so expansion.js keeps its island
+  // corridor clear (trees) and its south street spanning it
+  CBZ.annexPorts = (CBZ.annexPorts || []).filter(function (p) { return p && p.name !== "Diamond Causeway"; });
+  CBZ.annexPorts.push({ name: "Diamond Causeway", side: "south", x: CW_X, half: 14.4 });
+  let CW_START_Z = -585, CW_REC_Z = -585;   // deck start / record start
+  function annexDock(city) {
+    CW_START_Z = CW_REC_Z = -585;
+    const S = city && city.annex && city.annex.streets && city.annex.streets.south;
+    if (!S || !isFinite(S.z) || !isFinite(S.hw)) return;
+    if (S.x0 > CW_X - 12 || S.x1 < CW_X + 12) return;          // street does not span the lane
+    CW_START_Z = S.z + S.hw;
+    // the record reaches the docked street's CENTRELINE (the highwaynet
+    // connector doctrine) so the T is a derived junction traffic can turn at
+    CW_REC_Z = S.z;
+  }
+
+  // ====================================================================== //
   //  LANDMASS BUILDER                                                       //
   // ====================================================================== //
   CBZ.addLandmass(function (city) {
     const root = city.root;
     if (!root) return;
     armRng();
+    annexDock(city);
     _root = root;
     const T = ensureTable();
     const L = T.L;
@@ -1612,11 +1641,11 @@
     // ---- regions: register the island + causeway -------------------------
     CBZ.registerCityRegion(city, { name: "Diamond Speedway", subtitle: "Motorsports Park", biome: "speedway", kind: "circle", cx: CX, cz: CZ, r: R, pad: 6, underlay: true, terrainGrade: true });
     const causewayZ = ACCESS_Z;
-    CBZ.registerCityRegion(city, { name: "Diamond Causeway", subtitle: "Motorsports Park", biome: "speedway", kind: "rect", minX: 336, maxX: 360, minZ: -585, maxZ: causewayZ + 12, pad: 1 });
+    CBZ.registerCityRegion(city, { name: "Diamond Causeway", subtitle: "Motorsports Park", biome: "speedway", kind: "rect", minX: CW_X - 12, maxX: CW_X + 12, minZ: CW_START_Z, maxZ: causewayZ + 12, pad: 1 });
     CBZ.registerCityRegion(city, { name: "Diamond Causeway", subtitle: "Motorsports Park", biome: "speedway", kind: "rect", minX: 336, maxX: ACCESS_X + 12, minZ: causewayZ - 12, maxZ: causewayZ + 12, pad: 1 });
     if (city.roads) {
       const endX = CBZ.CONFIG.SPEEDWAY_SITE !== false ? ROAD_END_X : ACCESS_X;
-      city.roads.push({ x: 348, z: (-585 + causewayZ) / 2, vertical: true, len: causewayZ - (-585), district: "highway", w: 24, lanesPerDir: 3, laneW: 3.6, median: true, medianW: 1.2 });
+      city.roads.push({ x: CW_X, z: (CW_REC_Z + causewayZ) / 2, vertical: true, len: causewayZ - CW_REC_Z, district: "highway", w: 24, lanesPerDir: 3, laneW: 3.6, median: true, medianW: 1.2 });
       // THE APPROACH NOW RUNS THROUGH THE GATE. It used to stop at ACCESS_X,
       // 22 m short of the campus boundary, on open apron — which is why the
       // arrival had no threshold: there was nothing for a gate to stand on.
@@ -1910,7 +1939,7 @@
     const endX = CBZ.CONFIG.SPEEDWAY_SITE !== false ? ROAD_END_X : ACCESS_X;
     if (CBZ.buildHighway) {
       CBZ.buildHighway(root, {
-        path: [{ x: 348, z: -585 }, { x: 348, z: joinZ }, { x: endX, z: joinZ }],
+        path: [{ x: CW_X, z: CW_START_Z }, { x: CW_X, z: joinZ }, { x: endX, z: joinZ }],
         width: 24, lanesPerDir: 3, median: true, medianW: 1.2, laneW: 3.6, theme: "asphalt",
         guardrail: false, elevated: false, rng: rng,
       });
@@ -1925,7 +1954,7 @@
       return m;
     }
     // vertical leg: annex north edge to the island join
-    deck(348, (-585 + joinZ) / 2, 14, joinZ - (-585) + 4);
+    deck(CW_X, (CW_START_Z + joinZ) / 2, 14, joinZ - CW_START_Z + 4);
     // horizontal leg: across to the speedway island
     deck((348 + ACCESS_X) / 2, joinZ, ACCESS_X - 348 + 4, 14);
     // pylons under the deck (visual support over water)

@@ -148,26 +148,51 @@
      cityWorldGeo runs any landmass builder, so the record exists). A
      hard-coded z is exactly what produced this bug. No rng, no Math.random,
      idempotent — a rebuild recomputes the same number.
+
+     AND THEN IT LANDS. Stopping at the shore left the deck ending square over
+     the bay, 36 m off the island's northernmost street — the owner's "roads
+     end abruptly", on the one causeway that brings the mountain down to the
+     city. The lane is published below (CBZ.annexPorts) so expansion.js runs
+     the island's north street east until the lane's whole deck width sits on
+     it, and the deck carries on across the beach to T FLUSH onto that
+     street's north edge (`annex.streets.north`). The island's avenue under
+     the lane stops at that same street, so nothing lies beneath the deck:
+     the ghost-city overlap above cannot come back. The snow berms still stop
+     at the waterline — the beach is not a snowfield.
      ========================================================================== */
   const ANNEX_SAND = 14;      // expansion.js's beach ring (terrainFlattenUnder R+14)
   const ANNEX_MARGIN = 8;     // shoulder between the deck's end and the sand
-  function causewayCut(city) {
+  const CW_DECK_HALF = CW_HW + 2.4;   // highways.js: 0.6 median + 3 x 3.6 lanes + 3 m shoulder
+  CBZ.annexPorts = (CBZ.annexPorts || []).filter(function (p) { return p && p.name !== "Mercy Causeway"; });
+  CBZ.annexPorts.push({ name: "Mercy Causeway", side: "north", x: CW_CX, half: CW_DECK_HALF });
+  // where the lane meets the island's sand (the old terminus), or null
+  function annexShoreZ(city) {
     const A = city && city.annex;
-    if (!A || A.radius == null || A.cx == null || A.cz == null) return CAUSEWAY_HANDOFF_Z;
+    if (!A || A.radius == null || A.cx == null || A.cz == null) return null;
     // The first part of the corridor that would touch the island is whichever
     // berm edge is nearest its centre — not the centreline.
     const x0 = CW_CX - CW_OUTER_HW, x1 = CW_CX + CW_OUTER_HW;
     const dx = A.cx < x0 ? (x0 - A.cx) : (A.cx > x1 ? (A.cx - x1) : 0);
     const RR = A.radius + ANNEX_SAND + ANNEX_MARGIN;
-    if (dx >= RR) return CAUSEWAY_HANDOFF_Z;          // the lane misses it entirely
-    const dz = Math.sqrt(RR * RR - dx * dx);
-    // south is +z here (the snow shore is the most negative), so "stop north
-    // of the island" is the SMALLER z of the two.
-    return Math.min(CAUSEWAY_HANDOFF_Z, A.cz - dz);
+    if (dx >= RR) return null;                        // the lane misses it entirely
+    // south is +z here (the snow shore is the most negative), so "north of
+    // the island" is the SMALLER z of the two.
+    return A.cz - Math.sqrt(RR * RR - dx * dx);
+  }
+  function causewayCut(city) {
+    const shore = annexShoreZ(city);
+    if (shore == null) return CAUSEWAY_HANDOFF_Z;
+    // land on the island's north street when it reaches the whole lane
+    const S = city.annex.streets && city.annex.streets.north;
+    if (S && S.x0 <= CW_CX - CW_DECK_HALF + 0.5 && S.x1 >= CW_CX + CW_DECK_HALF - 0.5 && S.z - S.hw > shore) {
+      return Math.min(CAUSEWAY_HANDOFF_Z, S.z - S.hw);
+    }
+    return Math.min(CAUSEWAY_HANDOFF_Z, shore);
   }
   // Re-derived at the top of the landmass builder; the parse-time value is the
   // degrade-safe fallback for a build with no annex at all.
   let CAUSEWAY_MAXZ = CAUSEWAY_HANDOFF_Z;
+  let BERM_MAXZ = CAUSEWAY_HANDOFF_Z;     // the snow berms stop at the annex waterline
   // Buildings are laid out before landmass builders run.  Keep a per-build
   // list of their occupied footprints so the terrain oracle can grade a real
   // shelf beneath them instead of letting a later mountain grow through a
@@ -1158,6 +1183,7 @@
     // (see causewayCut's block comment). Must run before the layout reserve,
     // the deck, the region record and the road record — all four read it.
     CAUSEWAY_MAXZ = causewayCut(city);
+    { const shore = annexShoreZ(city); BERM_MAXZ = shore == null ? CAUSEWAY_MAXZ : Math.min(CAUSEWAY_MAXZ, shore); }
     const mat = CBZ.mat, cmat = CBZ.cmat || CBZ.mat;
     // AUTHORED-FRAME SEEDING (WORLD_LAYOUT_V2). Everything in this file is
     // already authored in the stage-1 frame and mapped world<->authored at the
@@ -2703,11 +2729,11 @@
             berm.receiveShadow = true; root.add(berm);
           };
           if (CBZ.roadGapDefer) {
-            CBZ.roadGapDefer(ex, rMinZ, ex, rMaxZ,
+            CBZ.roadGapDefer(ex, rMinZ, ex, BERM_MAXZ,
               { id: "snow:mercy-berm", thick: 2.2 }, drawBerm);
           } else {
             // degrade path: the authored split this replaces, byte for byte
-            const runs = (ex > cxMid) ? [[rMinZ, -966], [-934, rMaxZ]] : [[rMinZ, rMaxZ]];
+            const runs = (ex > cxMid) ? [[rMinZ, -966], [-934, BERM_MAXZ]] : [[rMinZ, BERM_MAXZ]];
             for (const seg of runs) drawBerm({ z0: seg[0], z1: seg[1] });
           }
         }
