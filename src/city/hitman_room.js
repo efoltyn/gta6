@@ -1713,15 +1713,10 @@
     const curH = ((cur * 24 + 6) % 24 + 24) % 24;
     let dh = ((hour - curH) % 24 + 24) % 24;
     if (dh < 2) dh += 24;                          // "the next 07:00" is at least a real night away
-    const p = cur + dh / 24;
-    const wraps = Math.floor(p);
-    const np = p - wraps;
-    // the sky's calendar (daynight.js counts a day each time the phase wraps)
-    if (wraps > 0 && CBZ.dayCount) CBZ.dayCount(CBZ.dayCount() + wraps);
-    CBZ.dayPhase(np);                                // the one clock: cityHour reads phase*24 + 6
-    // polity.js's worldDay counts a wrap only when the phase DROPS by more
-    // than half a day between frames; a shorter drop would be missed
-    if (wraps > 0 && CBZ.worldDay && !(cur - np > 0.5)) { try { CBZ.worldDay(CBZ.worldDay() + 1); } catch (e) {} }
+    // THE one skip (core/daynight.js): the sun, the sky calendar and the PACE
+    // clock move together, and polity.js's worldDay follows the pace clock
+    // on its own, so nothing here bumps a counter by hand any more.
+    if (CBZ.advanceClock) CBZ.advanceClock(dh / 24);
     try { if (CBZ.renderer && CBZ.renderer.shadowMap) CBZ.renderer.shadowMap.needsUpdate = true; } catch (e) {}
   }
   function sleepUntil(hour, done) {

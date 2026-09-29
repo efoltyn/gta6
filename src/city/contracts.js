@@ -145,7 +145,7 @@
   function arena() { return (CBZ.city && CBZ.city.arena) || null; }
   function P() { return CBZ.player || null; }
   function d2(ax, az, bx, bz) { return Math.hypot(ax - bx, az - bz); }
-  function day() { return CBZ.dayCount ? CBZ.dayCount() : 0; }
+  function day() { return CBZ.paceDay ? CBZ.paceDay() : 0; }
   // stable-per-day pick so the board doesn't reshuffle every time you look at
   // it. Runtime-only (not a generation path) but the world hash is free and
   // makes the board deterministic per seed+day, which multiplayer will want.

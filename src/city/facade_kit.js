@@ -415,19 +415,15 @@
     // city-wide hash pick landed a Tudor manor on the Executive Mansion and a
     // pagoda on its West Wing, on top of the doric order and the dome.
     if (dress === false) return null;
-    let spec = dress || null;
-    // CITY-WIDE MODE (off by default): give an undressed building a style by
-    // position hash. Deterministic — lot #23's style is decidable without
-    // building lots 0..22 — and it never draws from the rng stream. The
-    // candidate pool is filtered to grammars that suit the building's HEIGHT,
-    // so a tower gets a tower facade and a shop does not.
-    if (!spec && on("FACADE_KIT_CITY") && REG.size && hash) {
-      const st = storeys || 1;
-      let ids = Array.from(REG.keys()).sort()
-        .filter(function (k) { const d = REG.get(k); return st >= d.minStoreys && st <= d.maxStoreys; });
-      if (!ids.length) ids = Array.from(REG.keys()).sort();
-      spec = { style: ids[Math.min(ids.length - 1, (hash(0x7ac1) * ids.length) | 0)] };
-    }
+    // No spec, no grammar. The old city-wide pick lived here: a position hash
+    // over ALL 31 registered grammars, per building, so a pagoda stood beside
+    // a mosque beside an adobe pueblo on one street (owner: "the facades feel
+    // random"). Every shell now arrives with an explicit spec: Gang City's
+    // lots from buildings.js's STREET_STYLE table, every other caller from
+    // CBZ.facadeAutoDress below (called once, in makeBuilding). `hash` and
+    // `storeys` stay in the signature for the callers that still pass them.
+    void hash; void storeys;
+    const spec = dress || null;
     if (!spec || !spec.style) return null;
     const def = REG.get(spec.style);
     return def ? { def: def, spec: spec } : null;
@@ -451,6 +447,36 @@
       function (salt) { return CBZ.hash01 ? CBZ.hash01(ox, oz, salt) : 0.42; },
       storeys);
     return r ? r.spec.style : null;
+  };
+
+  /* THE AUTOMATIC PICK, MADE COHERENT — for a shell whose caller wrote no
+     spec (town prefabs, island annexes, biome landmarks). A neighbourhood is
+     one FAMILY of buildings, not a lucky dip per building: the family is
+     hashed off a 360 m cell, so a whole street (and a whole mini-town) shares it, and inside the
+     family the grammar is fixed by the building's height band and use. The
+     exotic grammars (adobe, desert modern, pagoda, mosque, ziggurat, pyramid,
+     gothic, machiya, the supertall set) are in no automatic pool any more:
+     a call site that wants one names it. `use`: "shop" | "showroom" | other. */
+  const FAMILIES = [
+    { low: "brickhouse", mid: "brick",     tall: "artdeco", shop: "brick" },
+    { low: "queenanne",  mid: "victorian", tall: "artdeco", shop: "brick" },
+    { low: "manor",      mid: "stone",     tall: "artdeco", shop: "stone" },
+    { low: "techhouse",  mid: "brutalist", tall: "intl",    shop: "brick" },
+  ];
+  CBZ.facadeAutoDress = function (ox, oz, storeys, use) {
+    if (!on("FACADE_KIT") || !on("FACADE_KIT_CITY") || !REG.size) return null;
+    const CELL = 360;
+    const cx = Math.floor(ox / CELL) * CELL, cz = Math.floor(oz / CELL) * CELL;
+    const h = CBZ.hash01 ? CBZ.hash01(cx, cz, 0x7ac2) : 0.42;
+    const fam = FAMILIES[Math.min(FAMILIES.length - 1, (h * FAMILIES.length) | 0)];
+    const st = storeys || 1;
+    let id;
+    if (use === "showroom") id = st >= 2 ? fam.shop : null;   // a one-storey drive-in stays a glass showroom
+    else if (use === "shop") id = st >= 10 ? fam.tall : fam.shop;
+    else id = st >= 10 ? fam.tall : st >= 4 ? fam.mid : fam.low;
+    const def = id ? REG.get(id) : null;
+    if (!def || st < def.minStoreys || st > def.maxStoreys) return null;
+    return { style: id };
   };
 
   // WILL THIS FACADE TAKE THE ROOF? Asked BEFORE the shell is built, because

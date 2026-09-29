@@ -14,7 +14,7 @@
    Atmosphere:
    - fog darkens / desaturates a touch while it rains (restored when dry).
    - lightning: occasional bright flashes of CBZ.hemi + a rolling thunder
-     tone — but ONLY at night (CBZ.sun.position.y < 0), so daytime stays
+     tone — but ONLY at night (CBZ.sunHeight < 0), so daytime stays
      calm and the night storms feel genuinely ominous.
 
    Everything runs in onAlways so the weather keeps living on the title
@@ -412,7 +412,9 @@
     // A DRIVEN storm brings its own lightning: `lightning` is the driver
     // saying "this one throws bolts", which is what lets a daytime disaster
     // flash without loosening the ambient night-only rule below.
-    const night = !!(CBZ.sun && CBZ.sun.position.y < 0) || drv.lightning > 0.2;
+    // the SUN's height, not the key light's: past twilight the key is the
+    // moon (core/lights.js), which sits above the horizon all night
+    const night = (Number.isFinite(CBZ.sunHeight) ? CBZ.sunHeight < 0 : !!(CBZ.sun && CBZ.sun.position.y < 0)) || drv.lightning > 0.2;
     // STORM gate: night + storm-grade rain (rollWeather's "heavy storm"
     // branch targets 0.7+; 0.6 catches a storm easing in/out too) + a
     // deterministic (LCG, not Math.random) low-frequency roll + cooldown.

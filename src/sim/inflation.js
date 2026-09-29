@@ -119,8 +119,8 @@
 
    ============================================================
    COMPOUNDING — "priceIndex(country) ×= (1 + π/365) per game-day": a
-   GAME day is CBZ.onNewDay's own wrap unit (core/daynight.js's 150s
-   cycle), so this compounds in the SAME daily tick that just computed pi
+   GAME day is CBZ.onNewDay's own unit (core/daynight.js's 150 s PACE
+   day, not the 48-minute sky), so this compounds in the SAME daily tick that just computed pi
    (using pi as of THIS day, not yesterday's) — one state field, `level`,
    per country, starting at 1.0. At the seed pi (2%), the daily factor is
    1+0.02/365 ≈ 1.0000548 — "near-day-one-unchanged" by construction, same

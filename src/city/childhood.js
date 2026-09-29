@@ -32,9 +32,9 @@
       none of them stores an age at all. (crown.js already proved this shape
       for royals: a `born` field + a day counter, no aging pass anywhere.)
 
-      THE CLOCK: CBZ.dayTime() from core/daynight.js = dayCount() + dayPhase(),
-      a continuous monotonic days-elapsed counter whose BOTH halves already
-      ride the world save (net/netpersist.js:140-141 / 267-268). Not
+      THE CLOCK: CBZ.paceTime() from core/daynight.js — continuous PACE
+      days (150 real s each, NOT the 48-minute sky day), monotonic, and
+      carried by the world save (net/netpersist.js blob.pace). Not
       polity.js's CBZ.worldDay(): that one's own header says it "does NOT
       survive reset(): a fresh run is day 0, always", and it only exists once
       polity.js has loaded. See familytree.js's header for the full argument.
@@ -90,7 +90,7 @@
   // config.js value always wins and each one is a one-line revert.
   const C = CBZ.CONFIG || (CBZ.CONFIG = {});
   if (C.CHILD_AGING == null) C.CHILD_AGING = true;          // master: age + re-body + behaviour
-  if (C.CHILD_YEARS_PER_DAY == null) C.CHILD_YEARS_PER_DAY = 1;  // one world-day (150s) = one year of life
+  if (C.CHILD_YEARS_PER_DAY == null) C.CHILD_YEARS_PER_DAY = 1;  // one PACE day (150 real s) = one year of life
   if (C.CHILD_REBODY == null) C.CHILD_REBODY = true;        // rebuild the rig on a band change
   if (C.CHILD_CURFEW == null) C.CHILD_CURFEW = true;        // the no-kids-out-at-night law
   if (C.CHILD_ADULT_AGE == null) C.CHILD_ADULT_AGE = 18;    // matches character.js's CHILD_ADULT_AGE
@@ -112,12 +112,11 @@
   const rng = (CBZ.seedStream ? CBZ.seedStream("childhood") : function () { return 0.5; });
 
   const FT = () => CBZ.cityFamilyTree || null;
+  // GAMEPLAY PACE, not the sun: ageing counts PACE days (core/daynight.js,
+  // 150 real s each, persisted), so a child still grows a year every 150 s
+  // of play while the city's sky runs a 48-minute day.
   function dayNow() {
-    if (typeof CBZ.dayTime === "function") return CBZ.dayTime();
-    if (typeof CBZ.dayCount === "function") {
-      return CBZ.dayCount() + (typeof CBZ.dayPhase === "function" ? CBZ.dayPhase() : 0);
-    }
-    return 0;
+    return typeof CBZ.paceTime === "function" ? CBZ.paceTime() : 0;
   }
   function hourNow() { return CBZ.cityHour ? CBZ.cityHour() : 12; }
 

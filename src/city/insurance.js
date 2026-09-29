@@ -502,7 +502,7 @@
   CBZ.cityPolicyOf = policyOf;
 
   // A real property premium is a fraction of a percent of value per YEAR. This
-  // game's day is 150 s and a policy here is a ONE-OFF that runs until it pays,
+  // game has no premium calendar: a policy here is a ONE-OFF that runs until it pays,
   // so the rate is set where the trade is honest and not free: 4% of what the
   // market says the building is worth, floored so a shack still costs something.
   function premiumFor(lot) {

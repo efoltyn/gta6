@@ -798,38 +798,27 @@
     return TILL[kind] != null;
   }
 
-  // ---- the clock: HOURS SINCE MIDNIGHT, monotonic, anchored on the sun ------
-  // core/daynight.js runs a 150 s day (schedule.js's DAY_SECS mirrors it), so
-  // real seconds → game hours is a constant.
+  // ---- the clock: HOURS SINCE MIDNIGHT, monotonic, read straight off the sky -
+  // WORLD TIME: a till is "the day's takings so far" and the shutters follow
+  // the sky's hours, so this IS the sky calendar: core/daynight.js's
+  // CBZ.dayTime() (days since boot, 0 = sunrise) in hours. The city day is a
+  // 48-minute GTA day now; nothing here types a day length.
   //
-  // THIS USED TO BE `CBZ.now * T_HPS`, AND THAT WAS A REAL BUG — the one the
-  // first gate run caught. `CBZ.now` is time since LOAD, which is the wrong
-  // ORIGIN for a shop in two compounding ways:
-  //   (1) the drop-cycle lattice (boundary(), below) was anchored at load
-  //       time, so a freshly built world handed every register a window of
-  //       "however long this session has been running" — six minutes on a
-  //       headless gate — instead of a full drop cycle. Measured: the whole
-  //       city's fattest drawer read $29 against a modelled $593.
-  //   (2) a world that boots at 09:00 has ALREADY TRADED ALL MORNING. Its
-  //       registers must hold the morning's takings the instant you arrive,
-  //       exactly like the buildings are already standing when you get there.
-  // So the ledger runs on a DAY clock: capture the sun's hour ONCE at first
-  // use to fix the phase, then advance exactly with CBZ.now. Monotonic by
-  // construction (no midnight-wrap logic to get wrong, no accumulating
-  // drift), correct at t=0, and hour-of-day is just `% 24` — which also
-  // removes the old per-call sunPhase() re-derivation that could disagree
-  // with a stored clear mark as the two clocks drifted.
-  const T_DAY_SECS = 150, T_HPS = 24 / T_DAY_SECS;
-  let _t0 = -1, _n0 = 0;
+  // It used to be a private copy (`const T_DAY_SECS = 150`) advanced by
+  // CBZ.now — which is MILLISECONDS, so the till clock ran 1000x fast — and
+  // before that `CBZ.now * T_HPS` from load, which gave a fresh world empty
+  // drawers. Reading the sky directly fixes both: a world that boots at 09:00
+  // has ALREADY TRADED ALL MORNING, sleep/wait skips move the tills with the
+  // sun, and there is no second clock to drift. Monotonic: only a deliberate
+  // rewind of the sky (a preset / tool setting dayPhase back) re-anchors it.
+  let _lastH = -1;
   function absH() {
-    const n = CBZ.now || 0;
-    // first use, or a fresh run reset CBZ.now: re-anchor on the sky.
-    if (_t0 < 0 || n < _n0) { _t0 = (CBZ.citySunHour ? CBZ.citySunHour() : 12); _n0 = n; }
-    return _t0 + (n - _n0) * T_HPS;
+    const h = (CBZ.dayTime ? CBZ.dayTime() : 0) * 24 + 6;
+    if (h >= _lastH || h < _lastH - 1) _lastH = h;    // tiny backward jitter never reverses time
+    return _lastH;
   }
-  // exposed so a world rebuild can re-anchor deliberately rather than by
-  // waiting for CBZ.now to go backwards.
-  function tillClockReset() { _t0 = -1; _n0 = 0; }
+  // exposed so a world rebuild can re-anchor deliberately.
+  function tillClockReset() { _lastH = -1; }
 
   // ---- the TRADING CURVE ---------------------------------------------------
   // Footfall through the day, per trade CLASS (never per kind — a new trade is
@@ -1127,7 +1116,7 @@
 
   // ---- the cash points -----------------------------------------------------
   const DROP_H = 2;            // a keeper drops the drawer into the safe ~2-hourly
-  const HIT_FADE_DAYS = 3;     // how long a shop remembers being stuck up
+  const HIT_FADE_DAYS = 3;     // PACE days (core/daynight.js) a shop remembers being stuck up
   // `reg`/`safe`/`vault` are NULL until somebody actually empties that point.
   // They used to initialise to 0, which reads as "this drawer was emptied at
   // hour zero" and truncated every untouched shop's window — the second half
@@ -1149,7 +1138,10 @@
     const s = cashState(lot);
     if (!(s.hits > 0)) return 0;
     const age = absH() - s.hitAt;
-    const f = 1 - age / (24 * HIT_FADE_DAYS);
+    // GAMEPLAY PACE: the grudge fades over HIT_FADE_DAYS PACE days of real play
+    // (3 x 150 s), converted into the sky hours absH() counts in.
+    const fadeH = HIT_FADE_DAYS * CBZ.PACE_DAY_SECONDS / CBZ.hourSeconds();
+    const f = Math.min(1, 1 - age / fadeH);
     return f > 0 ? s.hits * f : 0;
   }
   function dropHours(lot) { return DROP_H / (1 + hitsNow(lot)); }

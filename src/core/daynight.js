@@ -46,52 +46,84 @@
   const rig = CBZ.lightRig;
 
   /* ============================================================
-     HOW LONG A DAY IS — and why it is not one number any more.
+     HOW LONG A DAY IS — one table, per mode, and nobody else types it.
 
-     150 s is a TOY day: the sun crosses the sky faster than a lap of the
-     prison yard, so "night" was a lighting effect that swept past rather
-     than a part of the world you could plan around. The city wants that
-     pace (you are driving; a whole day between two errands is the point).
-     The PRISON does not: time of day is the escape game's pillar — your
-     cell locks at lights-out, the block wakes for count, the yard opens
-     and closes — and none of that is playable at 6 seconds an hour.
+     THE CITY RUNS A GTA DAY: 48 real minutes = 2 s per game minute = 2 real
+     minutes per game hour. It used to be 150 s (6 s an hour), so dusk and
+     the blue hour flashed past in seconds and night was a lighting effect
+     sweeping by rather than a place you could be. Now dusk lasts minutes.
 
-     So the length of a day is a PER-MODE fact, stated here, once, where
-     the clock lives. `escape` gets a 12-minute day (30 s per in-game
-     hour), which gives ~3.5 real minutes of true lights-out night to
-     break out into and still turns the whole compound over twice in a
-     long session. Every other mode keeps the 150 s it shipped with, so
-     city/survival/gungame pacing is byte-identical.
+     THE PRISON (escape) keeps its 12-minute day (30 s per game hour): the
+     timetable (count, yard, lights-out) is the escape game's pillar and
+     systems/prisonschedule.js sizes every block off this table.
+     THE ISLAND (survival) keeps 15 min so a disaster round holds its hour.
+     Everything else (gungame, sharksim, menus) keeps the old 150 s.
 
-     NOTE: city/schedule.js's DAY_SECS mirrors the 150 literal for the
-     CITY only (it derives its hour from CBZ.sunAngle, which is correct
-     whatever the cycle is) — change them together if the city's changes.
+     Nobody may hard-code a day length: read CBZ.dayCycleSeconds() (the
+     current mode's), CBZ.hourSeconds(), or CBZ.DAY_SECONDS[mode].
+     ?daysecs=N overrides the current mode's day (tuning, frozen-loop tools;
+     ?daysecs=150 gives back the old toy city day).
      ============================================================ */
-  const CYCLE = 150;        // seconds for a full day — every mode but escape
-  // THE ISLAND DAY: 15 min, so a disaster round keeps the hour it started at
-  // (modes/survival.js picks it per round) and only drifts toward the next
-  const MODE_CYCLE = { escape: 720, survival: 900 };   // THE PRISON DAY: 12 min = 30 s/hour
+  const DEFAULT_CYCLE = 150;
+  const MODE_CYCLE = { city: 48 * 60, escape: 720, survival: 900 };
   CBZ.DAY_SECONDS = MODE_CYCLE;         // the dial, published where it is read
+  let urlDay = 0;
+  try {
+    const v = +new URLSearchParams((window.location && window.location.search) || "").get("daysecs");
+    if (v > 0 && isFinite(v)) urlDay = v;
+  } catch (e) {}
   function cycleSecs() {
+    if (urlDay > 0) return urlDay;
     const m = CBZ.game && CBZ.game.mode;
     const v = m ? MODE_CYCLE[m] : 0;
-    return v > 0 ? v : CYCLE;
+    return v > 0 ? v : DEFAULT_CYCLE;
   }
-  // "how long is a day here" — systems/prisonschedule.js turns block lengths
-  // in in-game hours into real seconds with this, so a change above moves the
-  // whole timetable and nothing has to be retyped.
+  // "how long is a day here" — systems/dayplan.js (the prison timetable) and
+  // city/schedule.js turn in-game hours into real seconds with this, so a
+  // change above moves every timetable and nothing has to be retyped.
   CBZ.dayCycleSeconds = cycleSecs;
+  CBZ.hourSeconds = function () { return cycleSecs() / 24; };
   let t = 0.18;             // start mid-morning
   // the sky clock, exposed for the multiplayer world save (net/netpersist.js):
   // no arg reads the phase 0..1; a number sets it (host restoring a saved day)
   CBZ.dayPhase = function (v) { if (v != null && isFinite(v)) t = (((+v) % 1) + 1) % 1; return t; };
-  // the CALENDAR: which day it is. The sun cycle above wraps and forgets;
-  // anything that must outlast a day (building rebuild timers, rent, …) counts
-  // in dayCount units. Persisted next to dayPhase in the world save, and
-  // fractional day-time reads as dayCount + dayPhase (dayTime below).
+  // the SKY CALENDAR: which day it is by the sun. Use it only for things
+  // that pair with the hour of day (schedules, the moon, "tomorrow morning").
+  // Gameplay rhythm (rent, faucets, ageing, elections) uses the PACE clock.
   let dayN = 0;
   CBZ.dayCount = function (v) { if (v != null && isFinite(v)) dayN = Math.max(0, Math.floor(+v)); return dayN; };
-  CBZ.dayTime = function () { return dayN + t; };   // continuous days-elapsed clock
+  CBZ.dayTime = function () { return dayN + t; };   // continuous sky-days-elapsed clock
+
+  /* ============================================================
+     THE PACE CLOCK — gameplay rhythm, not the sun.
+
+     Hunger, rent, pay cycles, loot faucets, elections, approval, ageing,
+     rebuild timers and restocks were all tuned when a day was 150 real
+     seconds. Stretching the sky to 48 minutes must not make the game 19x
+     slower, so those systems count PACE DAYS: one pace day is
+     CBZ.PACE_DAY_SECONDS (150) real seconds of play, whatever the sun does.
+     A plain real-time accumulator (persisted by net/netpersist.js), plus the
+     same fraction of any sky skip, so sleeping through the night still
+     moves the world on exactly as it used to.
+
+       CBZ.paceTime()          continuous pace-days elapsed (getter/setter)
+       CBZ.paceDay()           integer pace day
+       CBZ.advanceClock(days)  THE skip: moves the sun, the sky calendar and
+                               the pace clock together (sleep, wait, tools)
+     ============================================================ */
+  const PACE_DAY = 150;
+  CBZ.PACE_DAY_SECONDS = PACE_DAY;
+  let pace = 0;
+  CBZ.paceTime = function (v) { if (v != null && isFinite(v)) pace = Math.max(0, +v); return pace; };
+  CBZ.paceDay = function () { return Math.floor(pace); };
+  CBZ.advanceClock = function (days) {
+    days = +days;
+    if (!(days > 0) || !isFinite(days)) return;
+    const p = t + days;
+    dayN += Math.floor(p);
+    t = p - Math.floor(p);
+    pace += days;
+  };
 
   // fog keyframes across the day (0..1). The LIGHT keyframes moved to
   // core/lights.js (CBZ.lightRig.keys) so all three writers share one table;
@@ -105,6 +137,16 @@
   const FOG = { day: 0xb6c4c8, dusk: 0xf09a68, night: 0x16243f };
 
   const _a = new THREE.Color(), _b = new THREE.Color();
+  const _key = new THREE.Vector3();
+  function smooth(e0, e1, x) {
+    const k = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
+    return k * k * (3 - 2 * k);
+  }
+  // perceived darkness 0..1 from the sun's signed height (see nightAmount)
+  function nightCurve(up) { return smooth(0.14, -0.20, up); }
+  // how much of the daytime sky light is left (the haze follows this)
+  function skyLight(up) { return smooth(-0.20, 0.25, up); }
+  CBZ.nightCurve = nightCurve;
   function mixHex(h1, h2, k, out) { _a.setHex(h1); _b.setHex(h2); return out.copy(_a).lerp(_b, k); }
   // reused scratch colours — this runs every frame, so don't allocate here
   const sunC = new THREE.Color(), fogC = new THREE.Color();
@@ -124,11 +166,26 @@
     const cyc = cycleSecs();
     if (t + dt / cyc >= 1) dayN++;            // midnight wrap → next calendar day
     t = (t + dt / cyc) % 1;
+    if (dt > 0) pace += dt / PACE_DAY;        // gameplay pace: real seconds, never the sun
 
     // sun arcs across the sky; height drives "how day" it is
     const ang = t * Math.PI * 2;
+    const up = Math.sin(ang);                 // -1 night .. 1 noon
     CBZ.sunAngle = ang; // core/sky.js places the sun/moon discs from this
-    sun.position.set(Math.cos(ang) * 80, Math.sin(ang) * 95, -10);
+    // published BEFORE the rig runs: lights.js keys every term off it
+    CBZ.sunHeight = up;
+    /* THE KEY COMES FROM THE SKY, NEVER FROM UNDER THE GROUND. This used to be
+       (cos, sin, ...) straight through the night, i.e. a "sun" 95 m below the
+       prison lighting the undersides of the catwalks. Past twilight the key
+       is the MOON at the opposite point (where sky.js draws it), and either
+       body's elevation is floored at ~12 degrees so the 70 m shadow box never
+       has to hold a horizontal shadow. */
+    if (rig && rig.keyDir) {
+      rig.keyDir(ang, 0.2, _key);
+      sun.position.set(_key.x * 80, _key.y * 95, -10);
+    } else {
+      sun.position.set(Math.cos(ang) * 80, Math.max(0.2, Math.abs(up)) * 95, -10);
+    }
     if (sunTarget) sunTarget.position.set(0, 0, 18);
 
     // Re-center the frustum on the player (texel-snapped) instead of the
@@ -160,8 +217,7 @@
       _snapX = ox; _snapZ = oz; _snapWidth = width;
     }
 
-    const up = Math.sin(ang);                 // -1 night .. 1 noon
-    const dayness = Math.max(0, up);          // 0 at/under horizon
+    const dayness = Math.max(0, up);          // 0 at/under horizon (geometry)
     const duskness = Math.max(0, 1 - Math.abs(up) * 3); // glow near horizon
 
     // ---- the whole light rig in one call (sun colour+intensity, hemisphere
@@ -179,8 +235,16 @@
     }
 
     // ---- fog colour (the sky seam's source of truth — see sky.js @99) ----
-    mixHex(FOG.night, FOG.day, dayness, fogC);
-    if (duskness > 0) { _b.setHex(FOG.dusk); fogC.lerp(_b, duskness * 0.6); }
+    // The haze is lit by the SKY, and the sky stays bright long after the
+    // sun is low: blending it on raw sin(sun) turned the fog 70% midnight-blue
+    // an hour before sunset. Full day haze down to ~14 degrees, midnight haze
+    // once nautical twilight is over.
+    mixHex(FOG.night, FOG.day, skyLight(up), fogC);
+    // the warm haze is SUNLIT haze: it outlives the disc by a few degrees,
+    // then the blue hour owns the air (it was going brown at -7 degrees)
+    const warmAir = duskness * Math.max(0, Math.min(1, 1 + up / 0.07));
+    if (warmAir > 0) { _b.setHex(FOG.dusk); fogC.lerp(_b, warmAir * 0.6); }
+    if (up < 0 && up > -0.2) { _b.setHex(0x2a3c6e); fogC.lerp(_b, Math.max(0, 1 - Math.abs(up + 0.1) / 0.1) * 0.5); }
     // Aerial perspective is BLUER than the light that made it (Rayleigh
     // scattering is what fog IS). Pushing the daytime haze a few percent
     // toward the hemisphere's sky colour is what stops distant geometry
@@ -201,12 +265,18 @@
     // stop by whatever tint survives the frame, so the fog seam stays closed.
     if (dome) dome.material.color.setRGB(1, 1, 1);
 
-    // searchlights blaze after dark
-    const nightAmt = 1 - dayness;
+    /* HOW DARK IT LOOKS, not where the sun is. `nightAmount` is what ~80
+       consumers use to decide "lamps on" (street lights, windows, neon, car
+       lamps, the searchlights' gain, water, guards' torches). It was
+       1 - sin(sun), so it read 0.5 at 30 degrees of elevation: the lamps came
+       on mid-afternoon (world/island_roads.js even carried a note about noon
+       lamps). Now it is a twilight curve: 0 until the sun is ~8 degrees up,
+       ~0.37 at sunset, ~0.55 two degrees under (the neon threshold), 1 once
+       nautical twilight is over. Lights come on at dusk. */
+    const nightAmt = nightCurve(up);
     CBZ.dayness = dayness;
     CBZ.duskness = duskness;
     CBZ.nightAmount = nightAmt;
-    CBZ.sunHeight = up; // signed (-1 deep night .. 1 noon) — sky.js palettes
     for (const sl of CBZ.searchlights) {
       // A KNOCKED-OUT LIGHT STAYS OUT. entities/searchlight.js drops a
       // sabotaged beam to 0.15/0.02/0.04 in its own updater — and core/loop.js

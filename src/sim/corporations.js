@@ -115,7 +115,7 @@
   if (!CBZ) return;
   const g = CBZ.game;
 
-  const HOUR = 150 / 24;          // seconds per in-game hour — matches every sim/* module
+  const HOUR = CBZ.PACE_DAY_SECONDS / 24;          // one PACE hour in real s (core/daynight.js): gameplay pace, not the sun
   const WORKERS_PER_OUTLET = 3;
   const SHARES_OUTSTANDING = 1000000;
   const HIST_CAP = 48;             // revenueTTM/costsTTM ring length

@@ -142,7 +142,9 @@
       if (!l.parent && !l._cbzPinDummy) { reg[kind].delete(l); continue; }
       if (l._cbzPinDummy || !wantsOn(l)) continue;
       l.getWorldPosition(_wp);
-      candidates.push([_wp.distanceToSquared(cam.position), l]);
+      // `userData.pinFirst` (the player's own torch) always makes the cut: a
+      // third-person camera can stand farther from it than from a searchlight
+      candidates.push([l.userData.pinFirst ? -1 : _wp.distanceToSquared(cam.position), l]);
     }
     candidates.sort((a, b) => a[0] - b[0]);
     const set = ranked[kind];

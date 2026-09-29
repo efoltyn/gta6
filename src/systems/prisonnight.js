@@ -323,24 +323,37 @@
        a pool where it lands, and, for the two nearest, a real spotlight. The
        cone is parented to the flashlight group itself, so it points wherever
        the hand does and inherits the prop's own visibility. ---- */
-  const TORCH_LEN = 9;
+  /* THE BEAM STOPS AT WHAT IT HITS (2026-09-29). The pool used to be laid at
+     y = 0.05 wherever the axis crossed the floor, or 5.4 m out FLAT on the
+     floor when the torch pointed level — so a guard shining his light down a
+     corridor at a wall lit a disc on the ground in front of the wall, and the
+     air cone ran 9 m straight through it. Now the guards' torches ask the same
+     question the player's does (CBZ.torchBeam.cast, systems/playerflashlight.js:
+     floor under the beam or the first collider face), the pool is laid ON that
+     surface, the cone ends there, and the pooled spotlight is aimed at it. */
+  const TORCH_LEN = 11;              // m a guard's torch usefully reaches
+  const TORCH_SPREAD = 0.26;         // tan of the cone's visible half-angle
   const torchOrigin = new THREE.Vector3();
   const torchDirection = new THREE.Vector3();
   const torchQuaternion = new THREE.Quaternion();
+  const torchHit = { hit: false, wall: false, t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 1, nz: 0 };
   function torchCone(g) {
     if (g._torchCone || !g.flashlight || !g.flashlight.group) return;
-    const cone = beamMesh(0xdff2ff, 0.04);
+    const cone = beamMesh(0xdff2ff, 0.03);
     cone.rotation.x = Math.PI / 2;                 // unit +y down the prop's own +z
     const beamZ = g.flashlight.group.userData.beamOrigin ? g.flashlight.group.userData.beamOrigin.z : 0.32;
     cone.position.z = beamZ;
-    cone.scale.set(1.25, TORCH_LEN, 1.25);
+    cone.scale.set(TORCH_LEN * TORCH_SPREAD, TORCH_LEN, TORCH_LEN * TORCH_SPREAD);
     cone.userData.mover = true;
+    cone.frustumCulled = false;
     g.flashlight.group.add(cone);
     g._torchCone = cone;
-    const pool = new THREE.Mesh(new THREE.CircleGeometry(2.9, 20), poolMat(0xdff2ff));
+    // a unit (2 x 2) plane: CBZ.torchBeam.lay seats it on floor or wall
+    const pool = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), poolMat(0xdff2ff));
     pool.rotation.x = -Math.PI / 2;
     pool.position.y = 0.05;
     pool.userData.mover = true;
+    pool.frustumCulled = false;
     root.add(pool);
     g._torchPool = pool;
   }
@@ -348,34 +361,52 @@
   function driveTorches(dt) {
     const list = CBZ.guards || [];
     const dark = 1 - RIG.sky();
+    const TB = CBZ.torchBeam;
     for (let i = 0; i < list.length; i++) {
       const g = list[i];
       if (!g.flashlightOn) { if (g._torchPool) g._torchPool.material.opacity = 0; continue; }
       torchCone(g);
-      // The pool and assigned spotlight follow the ACTUAL reflector axis, not a
-      // second yaw-only guess. This keeps hand, lens, volumetric cone and ground
-      // contact welded together through a search pose or hit reaction.
+      // The pool, the cone and the assigned spotlight all follow the ACTUAL
+      // reflector axis (the world quaternion of the prop in his hand), so hand,
+      // lens, air and landing stay welded through a search pose or a hit
+      // reaction.
       const fg = g.flashlight.group;
       fg.updateWorldMatrix(true, false);
       torchOrigin.copy(fg.userData.beamOrigin || { x: 0, y: 0, z: 0.32 });
       fg.localToWorld(torchOrigin);
       fg.getWorldQuaternion(torchQuaternion);
       torchDirection.set(0, 0, 1).applyQuaternion(torchQuaternion).normalize();
-      let reach = 5.4;
-      if (torchDirection.y < -0.035) {
-        reach = Math.max(1.8, Math.min(TORCH_LEN, (0.05 - torchOrigin.y) / torchDirection.y));
-      }
-      const ax = torchOrigin.x + torchDirection.x * reach;
-      const az = torchOrigin.z + torchDirection.z * reach;
-      g._torchAim = g._torchAim || { x: 0, z: 0 };
+      const floorY = g.group ? g.group.position.y : 0;
+      let h = null;
+      if (TB) h = TB.cast(torchOrigin.x, torchOrigin.y, torchOrigin.z,
+        torchDirection.x, torchDirection.y, torchDirection.z, TORCH_LEN, floorY, torchHit);
+      let reach = h && h.hit ? h.t : TORCH_LEN;
+      if (!TB && torchDirection.y < -0.035) reach = Math.max(1.8, Math.min(TORCH_LEN, (floorY + 0.05 - torchOrigin.y) / torchDirection.y));
+      g._torchAim = g._torchAim || { x: 0, y: 0, z: 0 };
       g._torchOrigin = g._torchOrigin || { x: 0, y: 0, z: 0 };
-      g._torchAim.x = ax; g._torchAim.z = az;
+      g._torchAim.x = torchOrigin.x + torchDirection.x * reach;
+      g._torchAim.y = torchOrigin.y + torchDirection.y * reach;
+      g._torchAim.z = torchOrigin.z + torchDirection.z * reach;
       g._torchOrigin.x = torchOrigin.x; g._torchOrigin.y = torchOrigin.y; g._torchOrigin.z = torchOrigin.z;
       if (g._torchPool) {
-        g._torchPool.position.set(ax, 0.05, az);
-        g._torchPool.material.opacity = 0.08 + dark * 0.34;
+        const pool = g._torchPool;
+        if (h && h.hit && h.t > 0.3) {
+          const cosI = TB.lay(pool, h, torchDirection.x, torchDirection.y, torchDirection.z, Math.max(0.3, h.t * 0.31));
+          const fall = 1 / (1 + (h.t / 6) * (h.t / 6));
+          pool.material.opacity = (0.05 + dark * 0.40) * fall * (0.5 + 0.5 * cosI);
+        } else if (!TB) {
+          pool.position.set(g._torchAim.x, floorY + 0.05, g._torchAim.z);
+          pool.scale.setScalar(2.9);
+          pool.material.opacity = 0.08 + dark * 0.34;
+        } else pool.material.opacity = 0;         // pointed at open air: nothing to land on
       }
-      if (g._torchCone) g._torchCone.material.opacity = 0.03 + dark * 0.2;
+      if (g._torchCone) {
+        // the air cone ends where the light lands (the prop's own scale divided out)
+        const s = fg.matrixWorld.getMaxScaleOnAxis() || 1;
+        const len = Math.max(0.4, reach) / s;
+        g._torchCone.scale.set(len * TORCH_SPREAD, len, len * TORCH_SPREAD);
+        g._torchCone.material.opacity = 0.02 + dark * 0.2;
+      }
     }
     if (!dyn.built) return;
     for (let i = 0; i < dyn.torch.length; i++) {
@@ -384,7 +415,7 @@
       slot.light.visible = true;
       const origin = g._torchOrigin;
       slot.light.position.set(origin ? origin.x : g.group.position.x, origin ? origin.y : 1.45, origin ? origin.z : g.group.position.z);
-      slot.target.position.set(g._torchAim.x, 0, g._torchAim.z);
+      slot.target.position.set(g._torchAim.x, g._torchAim.y, g._torchAim.z);
       slot.light.intensity = 0.6 + dark * 1.5;
     }
   }

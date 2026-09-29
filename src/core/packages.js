@@ -564,9 +564,9 @@
           return CBZ.dayPhase ? CBZ.dayPhase(v) : 0.18;
         },
         hour() { return CBZ.cityHour ? CBZ.cityHour() : (CBZ.dayPhase ? (CBZ.dayPhase() * 24 + 6) % 24 : 12); },
-        // THE calendar day. polity.js's worldDay is the real one; dayCount is
-        // the sky's own midnight counter and the standing fallback.
-        day() { return CBZ.worldDay ? CBZ.worldDay() : (CBZ.dayCount ? CBZ.dayCount() : 0); },
+        // THE gameplay calendar day: polity.js's worldDay, which counts PACE
+        // days (150 real s); paceDay is the same clock before polity loads.
+        day() { return CBZ.worldDay ? CBZ.worldDay() : (CBZ.paceDay ? CBZ.paceDay() : 0); },
         isNight() {
           if (CBZ.nightAmount != null) return CBZ.nightAmount > 0.55;
           const h = ctx.time.hour(); return h < 6 || h >= 20;
@@ -583,11 +583,8 @@
         // sleeping off a night, waiting out a cooldown — all the same verb.
         advance(days) {
           if (!CBZ.CONFIG.PKG_WORLD_DRIVE || !isFinite(days) || days <= 0) return false;
-          if (CBZ.dayPhase) {
-            const p = CBZ.dayPhase() + days;
-            if (CBZ.dayCount) CBZ.dayCount(CBZ.dayCount() + Math.floor(p));  // midnight wraps the caller skipped
-            CBZ.dayPhase(p);
-          }
+          // THE one skip (core/daynight.js): sun, sky calendar and pace clock together
+          if (CBZ.advanceClock) CBZ.advanceClock(days);
           return true;
         },
       },

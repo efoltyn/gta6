@@ -276,8 +276,17 @@
   // clearCityPeds' cleanup contract but operates on one known-owned body, so a
   // short-lived taxi fare / destroyed aircraft cabin cannot slowly grow the
   // global roster.  Callers must never use this for a claimed citizen.
-  function destroyCity(actor) {
+  function destroyCity(actor, opts) {
     if (!actor) return false;
+    // A CORPSE BELONGS TO THE WORLD (the same rule as occupy.js
+    // cityUnpostNpc): a fare, a passenger or a scene extra that was killed is
+    // let go where he lies, never deleted with his role. Only a city teardown
+    // (resetCity / a population redefined) passes force.
+    if (actor.dead && !actor.collected && !(opts && opts.force)) {
+      if (actor._npcAttached) detach(actor, { parent: cityRoot() });
+      removeAttached(actor);
+      return false;
+    }
     removeAttached(actor);
     actor._npcAttached = null;
     if (actor._unit && CBZ.cityHomeRelease) {
@@ -323,7 +332,7 @@
     if (!pop) return false;
     for (let i = 0; i < pop.actors.length; i++) {
       const a = pop.actors[i];
-      if (a && CBZ.cityPeds && CBZ.cityPeds.indexOf(a) >= 0) destroyCity(a);
+      if (a && CBZ.cityPeds && CBZ.cityPeds.indexOf(a) >= 0) destroyCity(a, { force: true });
     }
     delete populations[id];
     const k = populationIds.indexOf(id);
@@ -612,7 +621,7 @@
         if (!a) continue;
         const spawned = !!a._aircraftCabinSpawned;
         a._aircraftCabin = null; a._aircraftSeat = -1; a._aircraftCabinSpawned = false;
-        if (spawned) destroyCity(a);
+        if (spawned) destroyCity(a, { force: true });
         else release(a);
       }
     }
@@ -630,7 +639,7 @@
       if (!pop) continue;
       for (let j = 0; j < pop.actors.length; j++) {
         const a = pop.actors[j];
-        if (a && CBZ.cityPeds && CBZ.cityPeds.indexOf(a) >= 0) destroyCity(a);
+        if (a && CBZ.cityPeds && CBZ.cityPeds.indexOf(a) >= 0) destroyCity(a, { force: true });
         pop.actors[j] = null;
       }
       pop.cursor = 0;

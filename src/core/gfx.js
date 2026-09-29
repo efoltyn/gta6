@@ -513,7 +513,21 @@
       const cityDark = g && g.mode === "city" && CBZ.CONFIG.CITY_STREET_REALISM_V1 !== false;
       const signedSun = Number(CBZ.sunHeight);
       const deepNight = Number.isFinite(signedSun) ? Math.max(0, Math.min(1, -signedSun)) : (1 - day);
-      const eye = cityDark ? (0.94 - 0.26 * deepNight) : (1.18 - 0.24 * day);
+      // THE PRISON DOES NOT GET A NIGHT-VISION LENS either. It opened to 1.18
+      // at midnight, lifting the whole lights-out block back toward grey and
+      // taking the torch's value with it. The eye still opens through the
+      // twilight (blue hour reads), then closes back to the noon calibration
+      // as the night deepens: the dark is dark, and lamps are islands.
+      // core/lights.js now runs daylight off the real sun height (full day
+      // light by ~35 degrees, not only at noon), so the old compensation that
+      // opened the lens all afternoon is gone too: the eye holds the noon
+      // calibration while the sun is up and opens only through twilight.
+      // Survival writes its own light table (@93) and keeps its own curve.
+      const survival = g && g.mode === "survival";
+      const twi = Number.isFinite(signedSun) ? 1 - clamp01((signedSun + 0.02) / 0.2) : (1 - day);
+      const eye = cityDark ? (0.94 - 0.26 * deepNight)
+        : survival ? (1.18 - 0.24 * day)
+        : (0.94 + 0.24 * twi * (1 - Math.min(1, deepNight * 3.3)));
       const want = (t.exposure != null ? t.exposure : 1) * eye;
       const rate = dt ? Math.min(1, dt * 0.9) : 1;
       expo += (want - expo) * rate;

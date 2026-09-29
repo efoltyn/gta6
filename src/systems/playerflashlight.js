@@ -16,43 +16,45 @@
    flashlight.js), the same factory the guards hold, the floor drop lies as
    and the inventory icon photographs.
 
-   IN A HAND, NEVER FLOATING. Owner: "the flashlight isn't held correctly
-   right now: it isn't in the hand." It was hung off a wrist socket beside a
-   hand that never closed on it (third person) and drawn nowhere at all in
-   first person (the light came from a point next to the camera). Now the
-   torch is a CHILD OF A HAND, seated by systems/fphands.js torchMount() in
-   the 'torch' grip — reverse fist, fingers round the 3 cm body, thumb on the
-   tail switch, lens out of the little-finger side — and the hand is posed
-   so the lens points where you look. Who holds it:
+   IN A HAND, NEVER FLOATING. The torch is a CHILD OF A HAND, seated by
+   systems/fphands.js torchMount() in the 'torch' grip — reverse fist,
+   fingers round the 3 cm body, thumb on the tail switch, lens out of the
+   little-finger side — and the hand is posed so the lens points where you
+   look. Who holds it:
      · nothing drawn          the RIGHT hand, carried forward at chest height;
      · a one-hand gun         the OFF (left) hand, Harries-style: the torch
        (pistol, taser)        fist tucked under the firing fist, both aimed
-                              down the same line (it leaves the two-hand cup);
-     · a long gun             the off hand is on the handguard, so the torch
-       (grips.hold: rifle,    goes on the gun's RAIL instead, under the bore
-       shotgun, launcher)     ahead of the handguard (a side rail on a tube
-                              launcher), glass behind the muzzle.
+                              down the same line;
+     · a long gun             the torch goes on the gun's RAIL, under the bore
+       (grips.hold)           ahead of the handguard, glass behind the muzzle.
    First person does the same in the viewmodel through fpsmode.js's hook
-   (CBZ.fpTorchHold, called right after its arms are posed): the right fist
-   or the gun's own support hand takes the 'torch' grip and its arm is
-   re-solved by fpsmode's own gunArm.
+   (CBZ.fpTorchHold, called right after its arms are posed).
 
-   THE BEAM LEAVES THE LENS. Every frame the SpotLight, its target and the
-   floor pool are synced to the held torch's lens (its world transform, all
-   scratch vectors, no allocation). In first person the viewmodel is a
-   ~2.5x world hung in front of the camera, so the lens point is pulled back
-   toward the eye by that scale: same point on screen, real distance.
+   ONE AIM, BOTH VIEWS (2026-09-29, owner: "3rd person flashlight looks dumb,
+   there's some 3rd/1st person disagreement"). The disagreement was real:
+     · first person pointed the torch at a point 12 m down the crosshair;
+     · third person pointed the hand PARALLEL to the camera's look, from a hand
+       half a metre left of and a metre in front of the camera, so the beam
+       and the crosshair never met, and a look down at the floor put the pool
+       a body-length off the reticle.
+   Now both views cast ONE ray down the crosshair (what you are actually
+   looking at: floor, wall, or 16 m of nothing) and both torches are pointed
+   AT THAT POINT from their own lens. Same origin rule (the lens of the torch
+   you can see), same aim point, same two lights, same falloff, same pool.
 
-   ONE LIGHT, BUILT ONCE. r128 compiles the light count into every lit
-   program, so adding a light mid-game (or flipping its `visible`) recompiles
-   every material in view: a hitch. The SpotLight is created the first time
-   you OWN a torch (the hitch lands on the pickup, not on the click) and is
-   never removed or hidden again; off is `intensity = 0`. Shadowless.
+   THE BEAM LEAVES THE LENS AND STOPS AT A SURFACE. Every frame the lights,
+   their target, the pool and the air cone are synced to the held torch's
+   lens (its world transform). In first person the viewmodel is a ~2.5x world
+   hung in front of the camera, so the lens point is pulled back toward the
+   eye by that scale: same point on screen, real distance. The beam is then
+   cast (CBZ.torchBeam.cast, below) into the world's floor and collider boxes:
+   the pool lands on the FIRST surface — a wall in front of you gets the
+   pool, not the floor behind it — and the lit-dust cone ends there too.
 
-   ONE POOL. Lambert in r128 is lit per VERTEX, and a prison floor is two
-   triangles across ten metres: a real spot on it is close to invisible. So,
-   exactly as prisonnight.js does for the guards' torches, the beam also lays
-   a soft pool where it meets the floor, and that is what you actually see.
+   BUILT ONCE, NEVER HIDDEN. r128 compiles the light count into every lit
+   program; the two SpotLights are made the first time you OWN a torch (the
+   hitch lands on the pickup, not on the click), are pinned by core/lightpin.js
+   (always inside the spot budget), and off is `intensity = 0`. Shadowless.
 
    YOU LIGHT YOURSELF UP. `CBZ.player.flashlightOn` is the same field a guard
    carries. systems/fixtures.js reads it twice: as a SENSOR the holder sees
@@ -61,7 +63,8 @@
 
    Contract (the hotbar toggles through this; do not rename):
      CBZ.playerFlashlight = { owned(), on(), toggle(), set(on) }
-   Audit: CBZ.playerFlashlightAudit() -> { owned, on, lightBuilt, intensity, holder }
+     CBZ.torchBeam = { cast(), lay() }        (see WHERE A BEAM LANDS)
+   Audit: CBZ.playerFlashlightAudit() -> { owned, on, lightBuilt, intensity, holder, aimDist, landsOn }
 ============================================================ */
 (function () {
   "use strict";
@@ -108,55 +111,184 @@
   };
 
   // ---- the numbers ----------------------------------------------------------
-  const COLOR = 0xfff1d6;      // warm white incandescent-ish LED
-  const ANGLE = 0.38;          // rad half-angle: a hand torch, not a flood
-  const PENUMBRA = 0.45;
-  const DIST = 24;             // m the light reaches at all
-  const DECAY = 1.6;
-  const AIM = 12;              // m out along the look the torch is pointed at
-  const POOL_MAX = 18;         // m: past this the floor pool has faded out
-  const DAY_I = 0.35, NIGHT_I = 2.1;   // intensity in daylight .. in true black
+  /* A REAL TORCH IS TWO LIGHTS. A reflector throws a tight HOT spot (the
+     emitter's image) inside a much wider, dimmer SPILL. One SpotLight with a
+     0.38 rad cone was neither: a flat disc with a soft edge. Now the hot spot
+     and the spill are two SpotLights sharing one origin and one aim.
+     Falloff: r128's legacy lights attenuate as (1 - d/distance)^decay, so a
+     decay of 2 over 26 m gives the near-square roll-off a real beam has (65%
+     at 5 m, 38% at 10 m, 18% at 15 m) and fades out instead of stopping. */
+  const COLOR = 0xfff1d6;      // warm white LED
+  const HOT = { angle: 0.19, pen: 0.55, day: 0.22, night: 1.75 };
+  const SPILL = { angle: 0.50, pen: 0.95, day: 0.07, night: 0.55 };
+  const DIST = 26;             // m the light reaches at all
+  const DECAY = 2.0;
+  const POOL_ANGLE = 0.34;     // rad: the visible pool's radius (the spill's body)
+  const REACH = 22;            // m the beam looks for the surface it lands on
+  const AIM_MAX = 30;          // m the crosshair ray looks for what you are looking at
+  const AIM_FAR = 16;          // m of focus when the crosshair looks at nothing
+  const BEAM_TP = 0.15, BEAM_FP = 0.06;  // lit-dust gain in the air (dark only)
+  const SNAP = Math.cos(12 * Math.PI / 180);  // a settled torch within 12 deg of the aim points AT it
   // appearance units per real metre (weapons/appearances/sidearm.js GUN_K):
   // a rail torch is drawn at the gun's own scale
   const RAIL_K = 2.0;
 
   // ---- the rig (built once, on first ownership) ---------------------------
   const R = {
-    built: false, light: null, target: null, pivot: null, pool: null,
+    built: false, hot: null, spill: null, target: null, pool: null, cone: null,
     world: null,        // the torch a BODY holds: a body hand, or the drawn gun's rail
     fp: null,           // the viewmodel's torch (own materials, viewmodel render queue)
     tpSide: 0,          // which body hand holds it: -1 left, 1 right, 0 none
     arm: 0,             // 0..1 the holding arm's blend onto its target
     fpSeen: false,      // fpsmode ran the hook this frame
     fpView: null, fpHand: null, holder: "none",
+    aimDist: AIM_FAR,   // camera -> what the crosshair is on (last frame), metres
+    lands: "none",      // floor | wall | air (audit)
   };
+  function spot(a) {
+    const s = new THREE.SpotLight(COLOR, 0, DIST, a.angle, a.pen, DECAY);
+    s.castShadow = false;
+    s.userData.mover = true;
+    s.userData.pinFirst = true;     // core/lightpin.js: always inside the spot budget
+    s.target = R.target;
+    CBZ.scene.add(s);
+    return s;
+  }
   function build() {
     if (R.built || !THREE || !CBZ.scene) return;
     R.built = true;
-    const s = new THREE.SpotLight(COLOR, 0, DIST, ANGLE, PENUMBRA, DECAY);
-    s.castShadow = false;
-    const t = new THREE.Object3D();
-    s.target = t;
-    s.userData.mover = true; t.userData.mover = true;
-    CBZ.scene.add(s); CBZ.scene.add(t);
-    R.light = s; R.target = t;
+    R.target = new THREE.Object3D();
+    R.target.userData.mover = true;
+    CBZ.scene.add(R.target);
+    R.hot = spot(HOT);
+    R.spill = spot(SPILL);
 
-    // The pool: a pivot yawed to the beam heading carrying a flat disc whose
-    // local Y (after the -PI/2 lay-down, world -Z of the pivot) is stretched
-    // along the heading, so a raking beam throws an ellipse, not a coin.
-    const pivot = new THREE.Group();
-    pivot.userData.mover = true;
-    const pool = new THREE.Mesh(new THREE.CircleGeometry(1, 24),
-      new THREE.MeshBasicMaterial({ color: COLOR, transparent: true, opacity: 0, depthWrite: false,
-        blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
-    pool.rotation.x = -Math.PI / 2;
+    // THE POOL: the searchlights' soft cookie (hot core, faint reflector
+    // rings, feathered edge), laid on WHATEVER the beam lands on and stretched
+    // along the beam into the ellipse a raking light really throws. r128
+    // Lambert is lit per VERTEX, so on a two-triangle floor the real spot is
+    // nearly invisible; the cookie is what you actually see.
+    const poolMat = CBZ.softPoolMaterial ? CBZ.softPoolMaterial(COLOR, 0)
+      : new THREE.MeshBasicMaterial({ color: COLOR, transparent: true, opacity: 0, depthWrite: false,
+        blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
+    const pool = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), poolMat);
     pool.renderOrder = 2;
     pool.frustumCulled = false;
-    pivot.add(pool);
-    pivot.visible = false;
-    CBZ.scene.add(pivot);
-    R.pivot = pivot; R.pool = pool;
+    pool.userData.mover = true;
+    pool.visible = false;
+    CBZ.scene.add(pool);
+    R.pool = pool;
+
+    // THE BEAM IN THE AIR: lit dust from the lens to where it lands, only when
+    // it is dark enough to see one. The shared soft-beam program fades at its
+    // silhouette, thins with distance, has no hard mouth and fades when the
+    // eye is inside it, so from behind your own torch it is a faint shaft.
+    if (CBZ.unitBeamGeometry && CBZ.softBeamMaterial) {
+      const cone = new THREE.Mesh(CBZ.unitBeamGeometry(0.012), CBZ.softBeamMaterial(COLOR, 0));
+      cone.renderOrder = 3;
+      cone.frustumCulled = false;
+      cone.userData.mover = true;
+      cone.visible = false;
+      CBZ.scene.add(cone);
+      R.cone = cone;
+    }
   }
+
+  /* ============================================================
+     WHERE A BEAM LANDS — CBZ.torchBeam. One answer for every hand torch in
+     the game (yours, and the guards' in systems/prisonnight.js): the first
+     thing a ray from the lens meets — the floor under it (the ground query,
+     so an upper tier or a stair counts) or a wall (the world's own collider
+     boxes; oriented ones in their own frame, height-limited ones only across
+     their span). Grid-walked through physics.js's segment query; nothing
+     allocated per call.
+       cast(ox,oy,oz, dx,dy,dz, maxT, floorY, out?) -> out
+         { hit, wall, t, x, y, z, nx, ny, nz }
+       lay(mesh, hit, dx,dy,dz, radius) -> |cos incidence|
+         seats a unit (2x2) plane on the hit surface, stretched along the
+         beam by 1/cos(incidence)
+     ============================================================ */
+  const HIT = { hit: false, wall: false, t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 1, nz: 0 };
+  const RAY = { ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0, best: 0, nx: 0, ny: 0, nz: 0, wall: false };
+  // one slab of the 3-D ray/box test; returns [tEnter, axis sign] through RAY
+  let _tmin = 0, _tmax = 0, _axis = -1, _sgn = 0;
+  function slab1(o, d, lo, hi, axis) {
+    if (Math.abs(d) < 1e-9) return !(o < lo || o > hi);
+    let ta = (lo - o) / d, tb = (hi - o) / d;
+    if (ta > tb) { const q = ta; ta = tb; tb = q; }
+    if (ta > _tmin) { _tmin = ta; _axis = axis; _sgn = d > 0 ? -1 : 1; }
+    if (tb < _tmax) _tmax = tb;
+    return _tmin <= _tmax;
+  }
+  function boxHit(c) {
+    let ox = RAY.ox, oz = RAY.oz, dx = RAY.dx, dz = RAY.dz, x0, x1, z0, z1, co = 1, si = 0;
+    const yawed = !!c.yaw && c.hw != null && c.cx != null;
+    if (yawed) {
+      // world -> the box's own frame (physics.js oriented-collider convention)
+      co = Math.cos(c.yaw); si = Math.sin(c.yaw);
+      const rx = ox - c.cx, rz = oz - c.cz;
+      ox = rx * co - rz * si; oz = rx * si + rz * co;
+      const ldx = dx * co - dz * si, ldz = dx * si + dz * co;
+      dx = ldx; dz = ldz;
+      x0 = -c.hw; x1 = c.hw; z0 = -c.hd; z1 = c.hd;
+    } else { x0 = c.minX; x1 = c.maxX; z0 = c.minZ; z1 = c.maxZ; }
+    _tmin = 0; _tmax = RAY.best; _axis = -1; _sgn = 0;
+    if (!slab1(ox, dx, x0, x1, 0)) return false;
+    if (!slab1(RAY.oy, RAY.dy, c.y0 != null ? c.y0 : -1e6, c.y1 != null ? c.y1 : 1e6, 1)) return false;
+    if (!slab1(oz, dz, z0, z1, 2)) return false;
+    // no entering face: the lens is INSIDE this box (a hand through a thin collider)
+    if (_axis < 0 || _tmin < 0.03 || _tmin >= RAY.best) return false;
+    RAY.best = _tmin; RAY.wall = true;
+    let nx = _axis === 0 ? _sgn : 0, nz = _axis === 2 ? _sgn : 0;
+    if (yawed) { const wx = nx * co + nz * si, wz = -nx * si + nz * co; nx = wx; nz = wz; }   // box -> world
+    RAY.nx = nx; RAY.ny = _axis === 1 ? _sgn : 0; RAY.nz = nz;
+    return false;                                   // keep walking: the nearest face wins
+  }
+  function cast(ox, oy, oz, dx, dy, dz, maxT, floorY, out) {
+    out = out || HIT;
+    out.hit = false; out.wall = false;
+    out.nx = 0; out.ny = 1; out.nz = 0;
+    let best = maxT;
+    if (dy < -1e-3 && floorY != null && isFinite(floorY)) {
+      let tf = (oy - floorY) / -dy;
+      if (tf > 0 && tf < best && CBZ.groundAt) {
+        try {
+          const gy = CBZ.groundAt(ox + dx * tf, oz + dz * tf, oy);
+          if (isFinite(gy) && Math.abs(gy - floorY) < 1.2 && gy < oy) tf = (oy - gy) / -dy;
+        } catch (e) {}
+      }
+      if (tf > 0 && tf < best) { best = tf; out.hit = true; }
+    }
+    if (CBZ.segmentHitsCollider && best > 0.05) {
+      RAY.ox = ox; RAY.oy = oy; RAY.oz = oz; RAY.dx = dx; RAY.dy = dy; RAY.dz = dz;
+      RAY.best = best; RAY.wall = false;
+      try { CBZ.segmentHitsCollider(ox, oz, ox + dx * best, oz + dz * best, 0, boxHit); } catch (e) {}
+      if (RAY.wall && RAY.best < best) {
+        best = RAY.best; out.hit = true; out.wall = true;
+        out.nx = RAY.nx; out.ny = RAY.ny; out.nz = RAY.nz;
+      }
+    }
+    out.t = best;
+    out.x = ox + dx * best; out.y = oy + dy * best; out.z = oz + dz * best;
+    return out;
+  }
+  const _ln = new THREE.Vector3(), _lu = new THREE.Vector3(), _lw = new THREE.Vector3(), _lm = new THREE.Matrix4();
+  function lay(mesh, h, dx, dy, dz, r) {
+    _ln.set(h.nx, h.ny, h.nz);
+    const dn = dx * h.nx + dy * h.ny + dz * h.nz;
+    _lu.set(dx, dy, dz).addScaledVector(_ln, -dn);            // the beam's run along the surface
+    if (_lu.lengthSq() < 1e-6) { _lu.set(0, 1, 0).addScaledVector(_ln, -_ln.y); if (_lu.lengthSq() < 1e-6) _lu.set(1, 0, 0); }
+    _lu.normalize();
+    _lw.crossVectors(_lu, _ln);                                // X = Y x Z: a right-handed frame
+    _lm.makeBasis(_lw, _lu, _ln);
+    mesh.quaternion.setFromRotationMatrix(_lm);
+    const cosI = Math.abs(dn);
+    const stretch = Math.min(3, 1 / Math.max(0.33, cosI));
+    mesh.scale.set(r, r * stretch, 1);
+    mesh.position.set(h.x + h.nx * 0.025, h.y + h.ny * 0.025, h.z + h.nz * 0.025);
+    return cosI;
+  }
+  CBZ.torchBeam = { cast: cast, lay: lay };
 
   // ---- the two torches (built on first use) --------------------------------
   function worldTorch() {
@@ -310,10 +442,22 @@
   const _right = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0), _C = new THREE.Vector3();
   const _dir = new THREE.Vector3(), _eh = new THREE.Vector3(), _camP = new THREE.Vector3();
   const _bf = new THREE.Vector3(), _br = new THREE.Vector3();
+  const _aimP = new THREE.Vector3(), _toAim = new THREE.Vector3(), _q = new THREE.Quaternion();
+  const AIM_HIT = { hit: false, wall: false, t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 1, nz: 0 };
+  const BEAM_HIT = { hit: false, wall: false, t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 1, nz: 0 };
 
   // systems/helditems.js puts a charge / frag / detonator in the RIGHT hand
   function itemInRight() {
     try { return !!(CBZ.heldItem && CBZ.heldItem.current && CBZ.heldItem.current()); } catch (e) { return false; }
+  }
+
+  // point the hand from grip centre C at the shared aim point, never behind the body
+  function aimFrom(C, bf) {
+    _dir.subVectors(_aimP, C);
+    if (_dir.lengthSq() < 0.04) _dir.copy(_fwd);
+    _dir.normalize();
+    if (_dir.x * bf.x + _dir.z * bf.z < 0.15) { _dir.set(bf.x, _dir.y, bf.z).normalize(); }
+    return _dir;
   }
 
   // third person: who holds it and where; returns the torch whose lens lights
@@ -338,15 +482,12 @@
     const yaw = ch.group ? ch.group.rotation.y : 0;
     _bf.set(Math.sin(yaw), 0, Math.cos(yaw));
     _br.set(-Math.cos(yaw), 0, Math.sin(yaw));             // the body's right
-    // pointed where you look, unless that is behind the body
-    _dir.copy(_fwd);
-    if (_dir.x * _bf.x + _dir.z * _bf.z < 0.15) _dir.set(_bf.x, _fwd.y, _bf.z);
-    _dir.normalize();
     if (prop) {
       // HARRIES: the torch fist under the firing fist, aimed down the same line
       const fg = prop.userData.fireGrip;
       if (fg && fg.at) { prop.updateWorldMatrix(true, false); prop.localToWorld(_C.set(0, fg.at[0], fg.at[1])); }
       else { const hr = bodyHand(ch, 1); if (hr) hr.getWorldPosition(_C); else _C.set(P.pos.x, P.pos.y + 1.25, P.pos.z).addScaledVector(_bf, 0.4); }
+      aimFrom(_C, _bf);
       _C.addScaledVector(_up, -0.09).addScaledVector(_dir, 0.03);
       _eh.copy(_br).multiplyScalar(-0.8).addScaledVector(_up, -0.6);
     } else {
@@ -355,6 +496,8 @@
       _C.set(P.pos.x, P.pos.y + 1.25, P.pos.z).addScaledVector(_bf, 0.40).addScaledVector(_br, 0.16 * side);
       _eh.copy(_up).negate().addScaledVector(_br, 0.35 * side).addScaledVector(_bf, -0.1);
     }
+    // THE LENS POINTS AT WHAT THE CROSSHAIR IS ON, not parallel to the camera
+    aimFrom(_C, _bf);
     const hand = holdInBodyHand(ch, side, _C, _dir, _eh, !busy);
     if (!hand) { t.visible = false; return null; }
     seatInHand(t, hand, side);
@@ -410,7 +553,9 @@
     const H = CBZ.fpHands;
     V.vm.updateMatrix();
     _vmInv.copy(V.vm.matrix).invert();
-    _aim.set(0, 0, -AIM).applyMatrix4(_vmInv);              // the crosshair's point, vm space
+    // the crosshair's point — the SAME one third person aims at (last frame's
+    // cast: this hook runs before the tick), in viewmodel space
+    _aim.set(0, 0, -Math.max(1.5, R.aimDist)).applyMatrix4(_vmInv);
     if (kind === "right" || kind === "left") {
       // nothing drawn: the right fist carries it (the left while a held item
       // has the right), wherever the fist table has that wrist
@@ -465,6 +610,9 @@
     if (m === "escape" && CBZ.prisonLights && CBZ.prisonLights.level) {
       try { return 1 - Math.max(0, Math.min(1, CBZ.prisonLights.level(x, z))); } catch (e) {}
     }
+    // the perceived-darkness clock (core/daynight.js), not 1 - sin(sun): a
+    // torch at four in the afternoon is not a torch at night
+    if (typeof CBZ.nightAmount === "number") return Math.max(0, Math.min(1, CBZ.nightAmount));
     const d = typeof CBZ.dayness === "number" ? CBZ.dayness : 1;
     return 1 - Math.max(0, Math.min(1, d));
   }
@@ -475,12 +623,33 @@
   }
 
   function hideAll() {
-    if (R.light) R.light.intensity = 0;
-    if (R.pivot) R.pivot.visible = false;
+    if (R.hot) R.hot.intensity = 0;
+    if (R.spill) R.spill.intensity = 0;
+    if (R.pool) R.pool.visible = false;
+    if (R.cone) R.cone.visible = false;
     if (R.world) R.world.visible = false;
     if (R.fp) R.fp.visible = false;
     releaseBodyHand(CBZ.playerChar);
     R.holder = "none";
+    R.lands = "none";
+  }
+
+  /* THE CROSSHAIR POINT. One ray down the camera's look, started level with
+     the player's head (in third person the stretch of ray behind the body
+     would otherwise find the floor under the camera boom). What it meets —
+     floor, wall, or AIM_FAR metres of nothing — is where every view's torch
+     is pointed. */
+  function castAim(P) {
+    let t0 = 0;
+    if (!firstPerson()) {
+      const hx = P.pos.x - _camP.x, hy = P.pos.y + 1.55 - _camP.y, hz = P.pos.z - _camP.z;
+      t0 = Math.max(0, hx * _fwd.x + hy * _fwd.y + hz * _fwd.z);
+    }
+    const ox = _camP.x + _fwd.x * t0, oy = _camP.y + _fwd.y * t0, oz = _camP.z + _fwd.z * t0;
+    cast(ox, oy, oz, _fwd.x, _fwd.y, _fwd.z, AIM_MAX, P.pos.y, AIM_HIT);
+    const t = AIM_HIT.hit ? Math.max(0.6, AIM_HIT.t) : AIM_FAR;
+    _aimP.set(ox + _fwd.x * t, oy + _fwd.y * t, oz + _fwd.z * t);
+    R.aimDist = t0 + t;
   }
 
   function tick(dt) {
@@ -503,13 +672,17 @@
     if (!R.built) return;
     const P = CBZ.player, cam = CBZ.camera;
     if (P && P.flashlightOn !== lit) P.flashlightOn = lit;
-    // a mode that swaps the scene root must not strand the one light
-    if (R.light.parent !== CBZ.scene && CBZ.scene) { CBZ.scene.add(R.light); CBZ.scene.add(R.target); CBZ.scene.add(R.pivot); }
+    // a mode that swaps the scene root must not strand the rig
+    if (R.hot.parent !== CBZ.scene && CBZ.scene) {
+      CBZ.scene.add(R.target); CBZ.scene.add(R.hot); CBZ.scene.add(R.spill); CBZ.scene.add(R.pool);
+      if (R.cone) CBZ.scene.add(R.cone);
+    }
     if (!lit || !P || !P.pos || !cam || P.dead) { hideAll(); return; }
 
     const fp = firstPerson();
     cam.getWorldDirection(_fwd);
     cam.getWorldPosition(_camP);
+    castAim(P);
     const ch = CBZ.playerChar;
 
     // ---- the hand ----------------------------------------------------------
@@ -524,64 +697,77 @@
       if (!src) { if (R.world) R.world.visible = false; releaseBodyHand(ch); R.holder = "none"; }
     }
 
-    // ---- the beam: out of the lens ----------------------------------------
+    // ---- the beam: out of the lens, at the crosshair's point ---------------
     if (src) {
       src.updateWorldMatrix(true, false);
       _org.copy(src.userData.beamOrigin);
       src.localToWorld(_org);
       if (fp) {
         // the viewmodel is a scaled world in front of the eye: bring the lens
-        // back to real distance along its own sight line, and aim at the
-        // crosshair's point the viewmodel torch is pointed at
+        // back to real distance along its own sight line
         const s = src.matrixWorld.getMaxScaleOnAxis() || 1;
         _org.sub(_camP).multiplyScalar(1 / s).add(_camP);
-        _v.copy(_camP).addScaledVector(_fwd, AIM);
-        _fwd.subVectors(_v, _org).normalize();
+        _fwd.subVectors(_aimP, _org).normalize();
       } else {
+        // the torch you can see decides where the light goes; once the arm has
+        // settled on the aim (it is posed at it) the last few degrees of IK
+        // slack snap to the exact point, so beam and crosshair agree
         _v.copy(src.userData.beamOrigin).add(src.userData.forward);
         src.localToWorld(_v);
-        _fwd.subVectors(_v, _org).normalize();
+        _v.sub(_org).normalize();
+        _toAim.subVectors(_aimP, _org).normalize();
+        if (_v.dot(_toAim) > SNAP && (R.holder === "rail" || R.arm > 0.85)) _fwd.copy(_toAim);
+        else _fwd.copy(_v);
       }
     } else if (fp) {
       // no hand in view (a car, a pickup beat): at the camera, a little right and below
       _right.crossVectors(_fwd, _up).normalize();
       _org.copy(_camP).addScaledVector(_right, 0.16).addScaledVector(_up, -0.2).addScaledVector(_fwd, 0.12);
+      _fwd.subVectors(_aimP, _org).normalize();
     } else {
       // no reachable hand (rig without hands): chest height, just ahead
       _org.set(P.pos.x + _fwd.x * 0.35, P.pos.y + 1.3, P.pos.z + _fwd.z * 0.35);
+      _fwd.subVectors(_aimP, _org).normalize();
     }
 
-    // ---- the light --------------------------------------------------------
+    // ---- the lights -----------------------------------------------------
     const dark = darkness(P.pos.x, P.pos.z);
-    R.light.position.copy(_org);
-    R.target.position.copy(_org).addScaledVector(_fwd, AIM);
-    R.light.intensity = DAY_I + (NIGHT_I - DAY_I) * dark;
-    R.light.updateMatrixWorld(); R.target.updateMatrixWorld();
+    R.hot.position.copy(_org);
+    R.spill.position.copy(_org);
+    R.target.position.copy(_org).addScaledVector(_fwd, 8);
+    R.hot.intensity = HOT.day + (HOT.night - HOT.day) * dark;
+    R.spill.intensity = SPILL.day + (SPILL.night - SPILL.day) * dark;
+    R.hot.updateMatrixWorld(); R.spill.updateMatrixWorld(); R.target.updateMatrixWorld();
     if (src && src.userData.lensMat) src.userData.lensMat.emissiveIntensity = 1.2 + dark * 0.8;
 
-    // ---- the pool where the beam meets the floor --------------------------
-    let shown = false;
-    if (_fwd.y < -0.03) {
-      let floor = P.pos.y;
-      const t0 = (_org.y - floor) / -_fwd.y;
-      if (t0 > 0.4 && t0 < POOL_MAX) {
-        const hx = _org.x + _fwd.x * t0, hz = _org.z + _fwd.z * t0;
-        if (CBZ.groundAt) {
-          try { const gy = CBZ.groundAt(hx, hz, _org.y); if (isFinite(gy) && Math.abs(gy - floor) < 1.2) floor = gy; } catch (e) {}
-        }
-        const t = Math.max(0.4, (_org.y - floor) / -_fwd.y);
-        if (t < POOL_MAX) {
-          const r = Math.max(0.25, t * Math.tan(ANGLE) * 0.95);
-          const stretch = Math.min(3, 1 / Math.max(0.2, -_fwd.y));
-          R.pivot.position.set(_org.x + _fwd.x * t, floor + 0.03, _org.z + _fwd.z * t);
-          R.pivot.rotation.set(0, Math.atan2(_fwd.x, _fwd.z), 0);
-          R.pool.scale.set(r, r * stretch, 1);
-          R.pool.material.opacity = (0.05 + 0.2 * dark) * (1 - t / POOL_MAX);
-          shown = true;
-        }
-      }
+    // ---- where it lands: the pool on the first surface, the dust up to it --
+    const h = cast(_org.x, _org.y, _org.z, _fwd.x, _fwd.y, _fwd.z, REACH, P.pos.y, BEAM_HIT);
+    R.lands = h.hit ? (h.wall ? "wall" : "floor") : "air";
+    if (h.hit && h.t > 0.25) {
+      const r = Math.max(0.18, h.t * Math.tan(POOL_ANGLE));
+      const cosI = lay(R.pool, h, _fwd.x, _fwd.y, _fwd.z, r);
+      // irradiance ~ cos(incidence) / distance^2, softened so arm's length is
+      // hot without whiting out, and nearly nothing in daylight
+      const fall = 1 / (1 + (h.t / 6) * (h.t / 6));
+      R.pool.material.opacity = (0.02 + 0.36 * Math.pow(dark, 1.3)) * fall * (0.5 + 0.5 * cosI);
+      R.pool.visible = R.pool.material.opacity > 0.004;
+    } else {
+      R.pool.visible = false;
     }
-    R.pivot.visible = shown;
+    if (R.cone) {
+      // lit dust needs a dark room to be seen at all
+      const k = Math.max(0, (dark - 0.35) / 0.65);
+      const op = (fp ? BEAM_FP : BEAM_TP) * k * k;
+      if (op > 0.003) {
+        const len = Math.max(0.5, h.hit ? h.t : REACH * 0.7);
+        const rEnd = len * Math.tan(POOL_ANGLE * 0.9);
+        R.cone.position.copy(_org);
+        R.cone.quaternion.copy(_q.setFromUnitVectors(_up, _fwd));
+        R.cone.scale.set(rEnd, len, rEnd);
+        R.cone.material.opacity = op;
+        R.cone.visible = true;
+      } else R.cone.visible = false;
+    }
   }
 
   // 54.7: after camera.js (50), fpsmode (52, which runs CBZ.fpTorchHold right
@@ -594,9 +780,11 @@
     return {
       owned: owned(),
       on: CBZ.playerFlashlight.on(),
-      lightBuilt: !!R.light,
-      intensity: R.light ? Math.round(R.light.intensity * 1000) / 1000 : 0,
+      lightBuilt: !!R.hot,
+      intensity: R.hot ? Math.round((R.hot.intensity + R.spill.intensity) * 1000) / 1000 : 0,
       holder: R.holder,
+      aimDist: Math.round(R.aimDist * 100) / 100,
+      landsOn: R.lands,
     };
   };
 

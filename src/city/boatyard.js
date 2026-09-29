@@ -463,7 +463,7 @@
      4) RUNNING COSTS — the sink. Wired into wealth.js's EXISTING tick.
      ------------------------------------------------------------
      §H: running costs ~10% of purchase price per YEAR; berth fees per FOOT of
-     LOA. Charged once per in-game DAY (CBZ.dayCount) so it is a felt rhythm,
+     LOA. Charged once per PACE day (CBZ.paceDay, 150 real s) so it is a felt rhythm,
      not a per-frame drip. Insufficient funds accrue ARREARS — we never seize
      the boat (see RISKS in the report).
      ============================================================ */
@@ -480,7 +480,7 @@
   function upkeepTick(dt) {
     if (C.BOAT_UPKEEP === false) return;
     const f = fleet(); if (!f.length) { _lastDay = null; return; }
-    const day = CBZ.dayCount ? CBZ.dayCount() : null;
+    const day = CBZ.paceDay ? CBZ.paceDay() : null;
     if (day == null) return;
     if (_lastDay == null) { _lastDay = day; return; }
     if (day <= _lastDay) { if (day < _lastDay) _lastDay = day; return; }   // a reset day rolls back cleanly

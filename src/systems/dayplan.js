@@ -41,7 +41,7 @@
 
    NO WORLD REQUIRED. With core/daynight.js present the clock is that sun
    (`CBZ.dayPhase`, `CBZ.dayCycleSeconds`); without it — a one-shot page with
-   six script tags — the plan runs its own 150-second day off whatever `dt`
+   six script tags — the plan runs its own DEFAULT_DAY off whatever `dt`
    the poll is handed. Either way `hour()` is 0..24 with sunrise at 6.
 
    AND WITH `sun: true` IT BECOMES THAT SUN. A self-clocked plan publishes
@@ -62,7 +62,7 @@
   if (CFG.DAY_PLAN_V1 == null) CFG.DAY_PLAN_V1 = true;
   if (CBZ.dayPlan) return;                       // idempotent (family guard idiom)
 
-  const DEFAULT_DAY = 150;                       // s — core/daynight.js's own default
+  const DEFAULT_DAY = 150;                       // s — ONLY for a page with no core/daynight.js
   const SUNRISE = 6;                             // the hour phase 0 lands on
 
   const plans = [];
@@ -118,7 +118,10 @@
     CBZ.dayness = Math.max(0, up);
     CBZ.duskness = Math.max(0, 1 - Math.abs(up) * 3);
     CBZ.sunHeight = up;
-    CBZ.nightAmount = 1 - CBZ.dayness;
+    // the same perceived-darkness curve core/daynight.js publishes (lamps on
+    // at dusk, not mid-afternoon), inlined because no daynight is loaded here
+    const k = Math.max(0, Math.min(1, (0.14 - up) / 0.34));
+    CBZ.nightAmount = k * k * (3 - 2 * k);
   }
 
   /* ==========================================================

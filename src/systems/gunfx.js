@@ -57,7 +57,7 @@
    WHY the holes: the evidence a firefight leaves is half its drama —
    a wall you magdumped must STAY pocked, and a 7.62 hole must read
    bigger than a 9mm (o.mm / o.size carries the caliber). What it must
-   NOT do is read bigger than the thing it hit: see holeSize() for the
+   NOT do is read bigger than the thing it hit: see boreMm()/SPREAD for the
    25-46 cm craters this used to stamp for a pistol round.
 
    `from`/`to` are any {x,y,z}. opts: {color, life, muzzle:false,
@@ -299,7 +299,7 @@
       if (to.y < GY && from.y > GY + 0.3) {
         const gt = (from.y - GY) / (from.y - to.y);
         const gp = { x: from.x + (to.x - from.x) * gt, y: GY, z: from.z + (to.z - from.z) * gt };
-        CBZ.bulletHole(gp, { x: 0, y: 1, z: 0 }, { size: 0.2, noProp: true });
+        CBZ.bulletHole(gp, { x: 0, y: 1, z: 0 }, { size: 0.2, noProp: true, surface: "asphalt" });
         CBZ.bulletImpact(gp, { x: 0, y: 1, z: 0 }, { kind: "dust", surface: "asphalt", power: 0.8 });
       }
     }
@@ -481,101 +481,292 @@
   };
 
   // ---- PERSISTENT BULLET HOLES — the world REMEMBERS the firefight ---------
-  // A pooled set of small dark pock decals (oldest recycled) stamped at
-  // the hit point along the surface normal. opts.size carries CALIBER (an AK
-  // pock reads visibly bigger than a 9mm), opts.parent mounts the decal on a
-  // moving body (a car group) so the hole rides the panel it punched —
-  // parented hits are SNAPPED onto the real bodywork by a short refinement
-  // ray (the caller's point/normal come off the car's bounding box) and
-  // capped per body (oldest on that body reused). LOD: a pock you can't
-  // see isn't worth a slot — skipped beyond the tier-scaled draw distance.
-  // The shared geo/material are flagged _shared so vehicles.js' teardown
-  // traversal (explodeCar/clearCars disposes non-shared resources) spares them.
-  // Pool cap, draw distance and per-car cap all ride the LIVE quality tier
-  // (pause-menu perf/quality slider) — read at use time so a mid-game slider
-  // move takes effect immediately. qScale may be absent in headless tests →
-  // fall back to the old fixed values.
-  function holeCap()    { return (CBZ.qScale ? CBZ.qScale(32, 128) : 64) | 0; }
+  //
+  //  BULLET_HOLE_MATERIALS (2026-09-29, owner: "bullet holes ... realness").
+  //  WHAT WAS FAKE: every surface in the game got the SAME grey smudge — one
+  //  radial gradient on one canvas — whether the round went into brick, a
+  //  steel lamp post, a pine door, a windscreen or asphalt. A hole is the
+  //  most material-specific mark a firefight leaves, and ours said nothing.
+  //  Worse, each pock was its own Mesh (one draw call per hole, up to 128),
+  //  lit by nothing (MeshBasic), so a pale crater in a shaded alley glowed at
+  //  full daylight brightness, and a wall hole took its normal from the SHOT
+  //  direction flattened to horizontal, so a hole at an angle on a wall
+  //  tilted off the surface by the angle of fire.
+  //
+  //  NOW:
+  //   • ONE ATLAS (4x2 tiles, painted once at load) — a hole per MATERIAL:
+  //       concrete  chipped pale crater, hairline cracks, grey dust halo
+  //       brick     same crater in fresh brick core, orange dust
+  //       metal     bright punched rim, bare-steel ring where the paint went
+  //       wood      torn pit elongated along the grain, raw splinters
+  //       glass     spider web: crushed white cone, radial + ring cracks
+  //       asphalt   dark gouge with a grey scuff of pulverised aggregate
+  //       carpaint  punched sheet: steel lip, bare-metal ring, primer halo
+  //                 (neutral, so it reads right on every paint colour)
+  //       soft      plastic / rubber / upholstery: torn hole, stress-white
+  //   • WORLD holes are ONE InstancedMesh (one draw call for all of them, so
+  //     the cap goes UP, not down — owner: perf via instancing, never looks).
+  //     A per-instance `aTile` attribute picks the atlas tile in the vertex
+  //     shader (onBeforeCompile on the uv chunk; r128 has no batched tiling).
+  //   • MOUNTED holes (car panels, opening doors) stay real meshes so they ride
+  //     the body; they share the SAME material through per-tile geometries
+  //     that carry aTile per vertex — one program, eight tiny buffers.
+  //   • LAMBERT, receiveShadow: the mark is lit and shadowed exactly like the
+  //     surface it sits on (same normal), so it never glows in the shade.
+  //   • FLUSH: offset 2-4 mm along the TRUE surface normal (callers pass the
+  //     struck face's normal now), polygonOffset does the z-fight work.
+  //
+  //  Surface is chosen by, in order: opts.surface (a kind named outright),
+  //  opts.material/opts.object (debris.js kindOf — the same classifier the
+  //  impact chips already use, so the hole and the chips can never disagree),
+  //  the snapped panel's own material for a mounted hole, else concrete.
+  function holeCap()    { return (CBZ.qScale ? CBZ.qScale(96, 384) : 192) | 0; }
+  const HOLE_MAX = 384;       // instanced capacity (the tier cap never exceeds it)
   function holeLod()    { return CBZ.qScale ? CBZ.qScale(30, 90) : 50; }
-  function holePerCar() { return (CBZ.qScale ? CBZ.qScale(6, 18) : 10) | 0; }
+  function holePerCar() { return (CBZ.qScale ? CBZ.qScale(8, 22) : 12) | 0; }
+  function mountCap()   { return (CBZ.qScale ? CBZ.qScale(40, 120) : 72) | 0; }
 
   // ---- HOW BIG IS A BULLET HOLE, ACTUALLY (WOUND_DECAL_V2) -----------------
-  //
-  //  MEASURED BUG, the world-side twin of the body-decal one systems/wounds.js
-  //  documents: `opts.size` is the quad's WIDTH IN METRES and fpsmode.js passes
-  //  `0.15 + cal*0.13` for walls and `0.12 + cal*0.1` for cars, then this
-  //  function jitters it up to another 1.15x. That is a 25-46 cm crater per
-  //  round on a wall and 20-36 cm on a car door — a mark the size of a human
-  //  HEAD, from a 9 mm. It is the same mistake in the same class: a decal sized
-  //  off the damage dial instead of off the projectile.
-  //
-  //  THE PHYSICAL TRUTH. A 9 mm bore leaves a ~9 mm hole. What you actually SEE
-  //  on masonry is the SPALL — the pale chipped crater and soot ring around it,
-  //  roughly 4-5 bore radii out. So the quad's width is the spall diameter,
-  //  about 10x the bore, and the dark core inside the texture is the hole
-  //  itself. 9 mm → a 9 cm mark with a ~3.5 cm black centre.
-  //
-  //  Two ways in, matching the wounds.js contract exactly: a caller that knows
-  //  its bore passes `mm` and gets the honest answer; a caller still on the
-  //  legacy `size` dial gets it scaled by HOLE_V2_MUL, which is not a taste
-  //  number — 0.36 is precisely the factor that lands fpsmode's 9 mm wall hole
-  //  (0.25) on the bore law's answer (0.090), so both doors agree.
-  //  CBZ.CONFIG.WOUND_DECAL_V2 = false restores the old craters.
+  //  A 9 mm bore leaves a ~9 mm hole; what you SEE is the spall / chip ring /
+  //  web around it, whose width depends on the MATERIAL. The quad's width is
+  //  bore x SPREAD[kind]. Concrete keeps the old 10x law exactly (a 9 mm wall
+  //  hole is still a 9 cm mark); metal punches clean (4x), glass webs wide.
+  //  Legacy `size` callers are rescaled by HOLE_V2_MUL onto the same law.
   CBZ.CONFIG = CBZ.CONFIG || {};
   if (CBZ.CONFIG.WOUND_DECAL_V2 == null) CBZ.CONFIG.WOUND_DECAL_V2 = true;
-  const HOLE_SPALL = 10;      // quad width ÷ bore
+  const HOLE_SPALL = 10;      // concrete: quad width ÷ bore
   const HOLE_V2_MUL = 0.36;   // legacy `size` dial → the same law
-  function holeSize(opts) {
+  const TILE = { concrete: 0, brick: 1, metal: 2, wood: 3, glass: 4, asphalt: 5, carpaint: 6, soft: 7 };
+  const SPREAD = { concrete: 10, brick: 11, metal: 4.4, wood: 8.5, glass: 34, asphalt: 9, carpaint: 5, soft: 5.5 };
+  function boreMm(opts) {
+    if (opts.mm != null) return Math.max(2, Math.min(30, opts.mm));
     const v2 = CBZ.CONFIG.WOUND_DECAL_V2 !== false;
-    if (opts.mm != null) return Math.max(0.02, opts.mm * 0.001 * HOLE_SPALL);
     const legacy = opts.size || 0.24;
-    return v2 ? legacy * HOLE_V2_MUL : legacy;
+    return (v2 ? legacy * HOLE_V2_MUL : legacy) * 1000 / HOLE_SPALL;
   }
-  const holes = [];
-  let holeIdx = 0, holeSeq = 0, holeGeo = null, holeMat = null;
-  const _zAxis = new THREE.Vector3(0, 0, 1);
-  const _hq = new THREE.Quaternion();
-  const _hp = new THREE.Vector3();
-  const _hn = new THREE.Vector3();
-  const _ray = new THREE.Raycaster();
-  const _nm = new THREE.Matrix3();
-  // The pock had no CRATER, only a dark smudge fading out — which is the other
-  // half of "it looks like a sticker": a hole in a surface is dark because you
-  // are looking INTO it, and it is ringed by the pale broken material the round
-  // knocked loose. Without that lip a decal is just a stain. The bore is now a
-  // tight near-opaque black core out to 0.22, then a PALE SPALL LIP, then soot
-  // dust dissolving to nothing — which reads correctly on light masonry and on
-  // dark car paint alike (chipped paint shows pale primer either way). 64px so
-  // the lip survives a close-up; still one shared texture for every hole in the
-  // game, so this costs one canvas at load and nothing per shot.
-  function makeHoleMat() {
-    const c = document.createElement("canvas"); c.width = c.height = 64;
+  // debris.js kinds (and our own) → an atlas tile
+  function tileKind(k) {
+    if (TILE[k] != null) return k;
+    if (k === "rock") return "concrete";
+    if (k === "dirt") return "asphalt";
+    if (k === "plastic" || k === "rubber" || k === "fabric" || k === "cloth") return "soft";
+    if (k === "foliage") return "wood";
+    return "concrete";
+  }
+  function kindFor(mat, obj) {
+    const D = CBZ.debris;
+    if (!mat && !obj) return null;
+    if (D && D.kindOf) { try { return D.kindOf(mat, obj || null); } catch (e) { /* fall through */ } }
+    return null;
+  }
+
+  // ---- the atlas: eight holes, painted once --------------------------------
+  const AT_COLS = 4, AT_ROWS = 2, AT_PX = 128;
+  function paintAtlas() {
+    const c = document.createElement("canvas");
+    c.width = AT_COLS * AT_PX; c.height = AT_ROWS * AT_PX;
     const x = c.getContext("2d");
-    const g = x.createRadialGradient(32, 32, 1, 32, 32, 31);
-    g.addColorStop(0.00, "rgba(4,4,6,0.98)");     // the bore
-    g.addColorStop(0.20, "rgba(9,9,11,0.94)");
-    g.addColorStop(0.30, "rgba(122,118,112,0.55)"); // spall lip — chipped material
-    g.addColorStop(0.48, "rgba(74,70,66,0.30)");
-    g.addColorStop(0.75, "rgba(46,44,42,0.12)");    // soot / dust halo
-    g.addColorStop(1.00, "rgba(30,30,30,0)");
-    x.fillStyle = g; x.fillRect(0, 0, 64, 64);
-    const m = new THREE.MeshBasicMaterial({
-      map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false,
+    let s = 7741;
+    const r = function () { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+    const R = AT_PX * 0.47;                       // usable radius (3 px clear margin: no mip bleed)
+    function blob(cx, cy, rad, n, jit, fill, sx, sy) {
+      x.beginPath();
+      for (let i = 0; i <= n; i++) {
+        const a = (i % n) / n * Math.PI * 2, k = rad * (1 - jit + r() * jit * 2);
+        const px = cx + Math.cos(a) * k * (sx || 1), py = cy + Math.sin(a) * k * (sy || 1);
+        if (i === 0) x.moveTo(px, py); else x.lineTo(px, py);
+      }
+      x.closePath(); x.fillStyle = fill; x.fill();
+    }
+    function halo(cx, cy, r0, r1, rgb, a0) {
+      const g = x.createRadialGradient(cx, cy, r0, cx, cy, r1);
+      g.addColorStop(0, "rgba(" + rgb + "," + a0 + ")"); g.addColorStop(1, "rgba(" + rgb + ",0)");
+      x.fillStyle = g; x.beginPath(); x.arc(cx, cy, r1, 0, Math.PI * 2); x.fill();
+    }
+    function bore(cx, cy, rad) {
+      const g = x.createRadialGradient(cx, cy, 0, cx, cy, rad);
+      g.addColorStop(0, "rgba(3,3,4,1)"); g.addColorStop(0.62, "rgba(6,6,7,0.97)"); g.addColorStop(1, "rgba(10,10,12,0)");
+      x.fillStyle = g; x.beginPath(); x.arc(cx, cy, rad, 0, Math.PI * 2); x.fill();
+    }
+    function crack(cx, cy, a, r0, r1, w, col) {
+      x.strokeStyle = col; x.lineWidth = w; x.lineCap = "round";
+      x.beginPath(); x.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
+      const steps = 5;
+      for (let i = 1; i <= steps; i++) {
+        const rr = r0 + (r1 - r0) * i / steps, aa = a + (r() - 0.5) * 0.22;
+        x.lineTo(cx + Math.cos(aa) * rr, cy + Math.sin(aa) * rr);
+      }
+      x.stroke();
+    }
+    function chips(cx, cy, n, r0, r1, sz, fill) {
+      for (let i = 0; i < n; i++) {
+        const a = r() * Math.PI * 2, d = r0 + r() * (r1 - r0);
+        blob(cx + Math.cos(a) * d, cy + Math.sin(a) * d, sz * (0.5 + r()), 5, 0.4, fill);
+      }
+    }
+    // a masonry crater: dust halo → chipped fresh face → shaded pit → bore
+    function masonry(cx, cy, dust, face, faceDark, chip) {
+      halo(cx, cy, R * 0.2, R * 0.98, dust, 0.30);
+      chips(cx, cy, 14, R * 0.38, R * 0.72, R * 0.045, chip);
+      blob(cx, cy, R * 0.44, 18, 0.28, face);
+      blob(cx, cy, R * 0.30, 14, 0.25, faceDark);
+      for (let i = 0; i < 4; i++) crack(cx, cy, r() * 6.28, R * 0.3, R * (0.62 + r() * 0.3), 1, "rgba(28,26,24,0.45)");
+      bore(cx, cy, R * 0.19);
+    }
+    for (let t = 0; t < 8; t++) {
+      const cx = (t % AT_COLS) * AT_PX + AT_PX / 2, cy = ((t / AT_COLS) | 0) * AT_PX + AT_PX / 2;
+      x.save();
+      x.beginPath(); x.rect(cx - AT_PX / 2 + 2, cy - AT_PX / 2 + 2, AT_PX - 4, AT_PX - 4); x.clip();
+      if (t === 0) {          // concrete
+        masonry(cx, cy, "70,67,62", "rgba(184,179,169,0.92)", "rgba(120,116,108,0.9)", "rgba(170,165,156,0.7)");
+      } else if (t === 1) {   // brick
+        masonry(cx, cy, "150,92,64", "rgba(196,112,78,0.94)", "rgba(126,62,40,0.92)", "rgba(186,106,72,0.75)");
+      } else if (t === 2) {   // bare / painted metal (poles, hydrants, propane)
+        halo(cx, cy, R * 0.3, R * 0.8, "22,20,18", 0.22);               // scorch / lead wipe
+        blob(cx, cy, R * 0.56, 20, 0.22, "rgba(196,200,206,0.95)");     // paint knocked off: bare steel
+        blob(cx, cy, R * 0.50, 20, 0.18, "rgba(168,172,178,0.95)");
+        x.strokeStyle = "rgba(235,238,242,1)"; x.lineWidth = R * 0.09;  // the punched lip, bright
+        x.beginPath(); x.arc(cx, cy, R * 0.25, 0, Math.PI * 2); x.stroke();
+        for (let i = 0; i < 7; i++) crack(cx, cy, i / 7 * 6.28 + r() * 0.4, R * 0.18, R * 0.3, 1.4, "rgba(60,62,66,0.8)"); // petals
+        bore(cx, cy, R * 0.22);
+      } else if (t === 3) {   // wood — the grain runs along the tile's Y
+        halo(cx, cy, R * 0.1, R * 0.7, "40,26,14", 0.22);
+        for (let i = 0; i < 16; i++) {                                   // splinters, along the grain
+          const up = i % 2 ? -1 : 1, off = (r() - 0.5) * R * 0.5, len = R * (0.35 + r() * 0.55);
+          const w = R * (0.03 + r() * 0.05);
+          x.fillStyle = r() < 0.7 ? "rgba(222,186,128,0.95)" : "rgba(160,118,70,0.9)";
+          x.beginPath(); x.moveTo(cx + off - w, cy); x.lineTo(cx + off + w, cy);
+          x.lineTo(cx + off + (r() - 0.5) * w * 2, cy + up * len); x.closePath(); x.fill();
+        }
+        blob(cx, cy, R * 0.22, 14, 0.3, "rgba(214,176,120,0.95)", 0.8, 1.5);   // raw torn fibre
+        blob(cx, cy, R * 0.15, 12, 0.3, "rgba(44,28,14,0.96)", 0.75, 1.6);
+        bore(cx, cy, R * 0.12);
+      } else if (t === 4) {   // glass — spider web
+        const n = 12, ang = [], len = [];
+        for (let i = 0; i < n; i++) { ang.push(i / n * 6.28 + (r() - 0.5) * 0.4); len.push(R * (0.55 + r() * 0.42)); }
+        for (let i = 0; i < n; i++) crack(cx, cy, ang[i], R * 0.04, len[i], 1.3, "rgba(236,244,247,0.85)");
+        const rings = [0.16, 0.3, 0.48];
+        x.strokeStyle = "rgba(226,236,240,0.6)"; x.lineWidth = 1;
+        for (let k = 0; k < rings.length; k++) {
+          x.beginPath();
+          for (let i = 0; i <= n; i++) {
+            const j = i % n; if (len[j] < R * rings[k] * 1.1) { x.moveTo(cx, cy); continue; }
+            const rr = R * rings[k] * (0.85 + r() * 0.3);
+            const px = cx + Math.cos(ang[j]) * rr, py = cy + Math.sin(ang[j]) * rr;
+            if (i === 0) x.moveTo(px, py); else x.lineTo(px, py);
+          }
+          x.stroke();
+        }
+        halo(cx, cy, 0, R * 0.13, "238,244,246", 0.9);                  // crushed cone
+        bore(cx, cy, R * 0.04);
+      } else if (t === 5) {   // asphalt / dirt
+        blob(cx, cy, R * 0.62, 16, 0.3, "rgba(118,113,104,0.35)", 1, 0.8); // pulverised aggregate
+        chips(cx, cy, 10, R * 0.3, R * 0.7, R * 0.04, "rgba(140,134,124,0.6)");
+        blob(cx, cy, R * 0.32, 14, 0.3, "rgba(22,22,22,0.92)");
+        bore(cx, cy, R * 0.18);
+      } else if (t === 6) {   // car paint over sheet steel
+        blob(cx, cy, R * 0.66, 22, 0.25, "rgba(146,146,140,0.85)");     // primer where the coat flaked
+        for (let i = 0; i < 6; i++) crack(cx, cy, r() * 6.28, R * 0.5, R * (0.72 + r() * 0.2), 1, "rgba(40,40,40,0.35)");
+        blob(cx, cy, R * 0.42, 18, 0.2, "rgba(204,208,212,0.97)");     // bare metal
+        x.strokeStyle = "rgba(90,92,96,0.9)"; x.lineWidth = R * 0.06;
+        x.beginPath(); x.arc(cx, cy, R * 0.24, 0, Math.PI * 2); x.stroke();   // lip turned in
+        bore(cx, cy, R * 0.2);
+      } else {                // soft: plastic, rubber, upholstery
+        blob(cx, cy, R * 0.5, 16, 0.3, "rgba(222,222,216,0.35)");       // stress whitening
+        blob(cx, cy, R * 0.3, 22, 0.45, "rgba(18,18,18,0.9)");          // torn, ragged
+        bore(cx, cy, R * 0.2);
+      }
+      x.restore();
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.anisotropy = 4;
+    return tex;
+  }
+
+  let holeMat = null, holeInst = null, aTileI = null;
+  const tileGeos = {};          // kind → PlaneGeometry carrying aTile per VERTEX (mounted holes)
+  function tileOff(kind, out, o) {
+    const t = TILE[kind] | 0;
+    out[o] = (t % AT_COLS) / AT_COLS;
+    out[o + 1] = 1 - (((t / AT_COLS) | 0) + 1) / AT_ROWS;   // canvas y runs down, uv v runs up
+  }
+  function ensureHoles() {
+    if (holeMat) return;
+    holeMat = new THREE.MeshLambertMaterial({
+      map: paintAtlas(), transparent: true, depthWrite: false,
       polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
     });
-    m._shared = true;
-    return m;
+    holeMat._shared = true;
+    holeMat.onBeforeCompile = function (sh) {
+      sh.vertexShader = "attribute vec2 aTile;\n" + sh.vertexShader.replace(
+        "#include <uv_vertex>",
+        "#include <uv_vertex>\n#ifdef USE_UV\n  vUv = vUv * vec2(0.25, 0.5) + aTile;\n#endif");
+    };
+    holeMat.customProgramCacheKey = function () { return "cbzHoleAtlas1"; };
+    const g = new THREE.PlaneGeometry(1, 1);
+    aTileI = new THREE.InstancedBufferAttribute(new Float32Array(HOLE_MAX * 2), 2);
+    aTileI.setUsage(THREE.DynamicDrawUsage);
+    g.setAttribute("aTile", aTileI);
+    g._shared = true;
+    holeInst = new THREE.InstancedMesh(g, holeMat, HOLE_MAX);
+    holeInst.count = 0;
+    holeInst.frustumCulled = false;            // holes are scattered city-wide
+    holeInst.receiveShadow = true;
+    holeInst.renderOrder = 4;
+    holeInst._bulletHole = true;
+    holeInst.userData.noHit = true;
+    holeInst.name = "bulletHoles";
+    scene.add(holeInst);
+    const ks = Object.keys(TILE);
+    for (let i = 0; i < ks.length; i++) {
+      const pg = new THREE.PlaneGeometry(1, 1);
+      const a = new Float32Array(pg.attributes.position.count * 2);
+      for (let v = 0; v < pg.attributes.position.count; v++) tileOff(ks[i], a, v * 2);
+      pg.setAttribute("aTile", new THREE.BufferAttribute(a, 2));
+      pg._shared = true;
+      tileGeos[ks[i]] = pg;
+    }
+  }
+  let instFill = 0, instIdx = 0;
+  const mounted = [];            // real meshes riding a car / door
+  let holeSeq = 0;
+  const _zAxis = new THREE.Vector3(0, 0, 1);
+  const _hq = new THREE.Quaternion();
+  const _spinQ = new THREE.Quaternion();
+  const _hp = new THREE.Vector3();
+  const _hn = new THREE.Vector3();
+  const _hy = new THREE.Vector3();
+  const _ht = new THREE.Vector3();
+  const _hs = new THREE.Vector3();
+  const _hm = new THREE.Matrix4();
+  const _ray = new THREE.Raycaster();
+  const _nm = new THREE.Matrix3();
+  const _UP = new THREE.Vector3(0, 1, 0);
+  // Orient +Z along the normal and spin in-plane. Wood keeps its splinters on
+  // the grain (the tile's Y to world-up); everything else spins freely so no
+  // two holes on a wall share a silhouette.
+  function orientHole(q, n, kind) {
+    q.setFromUnitVectors(_zAxis, n);
+    let spin = rng() * Math.PI * 2;
+    if (kind === "wood") {
+      _ht.copy(_UP).addScaledVector(n, -n.y);                 // world-up, in the surface
+      if (_ht.lengthSq() > 0.09) {
+        _ht.normalize();
+        _hy.set(0, 1, 0).applyQuaternion(q);
+        _hs.crossVectors(_hy, _ht);
+        spin = Math.atan2(_hs.dot(n), _hy.dot(_ht)) + (rng() - 0.5) * 0.25;
+      }
+    }
+    _spinQ.setFromAxisAngle(_zAxis, spin);
+    q.multiply(_spinQ);
+    return q;
   }
   let routingProps = false;   // re-entry guard: prop reactions stamp holes of their own
   CBZ.bulletHole = function (pos, normal, opts) {
     opts = opts || {};
     const cam = CBZ.camera;
-    // PLAYER-SHOT PROP ROUTING: fpsmode is the only caller that stamps holes,
-    // and the player's eye IS the camera — so camera→impact is the round's
-    // real path. Street furniture along it reacts (props.js cityShootProp:
-    // lamps die, hydrants geyser, cans fly). Runs BEFORE the tier-scaled
-    // decal-distance LOD so a sniped hydrant still pops. opts.noProp opts out (NPC ground stamps
-    // come in via CBZ.tracer, which already routed the true shooter→target line).
+    // PLAYER-SHOT PROP ROUTING (see props.js cityShootProp) — before the LOD,
+    // so a sniped hydrant still pops. opts.noProp opts out.
     if (!routingProps && !opts.noProp && CBZ.cityShootProp && CBZ.game && CBZ.game.mode === "city" && cam) {
       routingProps = true;
       try { CBZ.cityShootProp(cam.position, pos); } finally { routingProps = false; }
@@ -583,23 +774,17 @@
     const d = opts.dist != null ? opts.dist
       : (cam ? Math.hypot(pos.x - cam.position.x, pos.y - cam.position.y, pos.z - cam.position.z) : 0);
     if (d > holeLod()) return null;
-    if (!holeMat) {
-      holeMat = makeHoleMat();
-      holeGeo = new THREE.PlaneGeometry(1, 1);
-      holeGeo._shared = true;
-    }
+    ensureHoles();
     const parent = opts.parent || scene;
     _hn.set(normal ? normal.x : 0, normal ? normal.y : 0, normal ? normal.z : 1);
     if (_hn.lengthSq() < 1e-6) _hn.set(0, 0, 1); else _hn.normalize();
     _hp.set(pos.x, pos.y, pos.z);
-    // CAR SNAP: a parented hit point/normal comes off the car's BOUNDING-BOX
-    // slab test (fpsmode findCarHit) — on the real bodywork that point can
-    // float a metre off the hood/windshield (the filmed "plastic shield in
-    // front of the car"). Refine it: back outside the hull along the entry
-    // normal, fire a short ray back IN, and stamp on the first real panel
-    // mesh struck — true surface point + true face normal. Nothing visible
-    // along the ray means the slab test grazed past the bodywork: no panel,
-    // no hole (a floating disc is exactly the bug).
+    let kind = opts.surface || kindFor(opts.material, opts.object);
+    // CAR / DOOR SNAP: a parented point/normal comes off a bounding-box slab
+    // test; back out along the normal, fire a short ray back in, and stamp on
+    // the first REAL panel struck (true point + true face normal + that
+    // panel's own material). No panel on the ray = no hole: a floating disc
+    // is exactly the bug.
     if (parent !== scene) {
       if (parent.updateWorldMatrix) parent.updateWorldMatrix(true, true);
       _ray.ray.origin.copy(_hp).addScaledVector(_hn, 1.5);
@@ -607,8 +792,6 @@
       _ray.near = 0; _ray.far = 4;
       let best = null;
       parent.traverse(function (o) {
-        // meshes only (sprites need a camera + a smoke puff is not a panel);
-        // skip shattered/hidden parts and the decals we already stamped
         if (!o.isMesh || !o.visible || o._bulletHole) return;
         const its = _ray.intersectObject(o, false);
         if (its.length && its[0].face && (!best || its[0].distance < best.distance)) best = its[0];
@@ -618,64 +801,97 @@
       _nm.getNormalMatrix(best.object.matrixWorld);
       _hn.copy(best.face.normal).applyMatrix3(_nm).normalize();
       if (_hn.lengthSq() < 1e-6) _hn.set(0, 1, 0);
+      if (!opts.surface) {
+        let pm = best.object.material;
+        if (Array.isArray(pm)) pm = pm[(best.face && best.face.materialIndex) || 0] || pm[0];
+        const k = kindFor(pm, best.object);
+        if (k) kind = k;
+      }
+      // painted bodywork: the classifier's grey-default is sheet steel here
+      if (opts.car && (kind == null || kind === "concrete" || kind === "metal" || kind === "brick" || kind === "wood")) kind = "carpaint";
     }
+    kind = tileKind(kind || "concrete");
+    // street-level hit with a wall-style normal → the pock lies FLAT on the
+    // asphalt; mounted bodywork is exempt (a rocker-panel hole is vertical).
+    if (pos.y < 0.2 && Math.abs(_hn.y) < 0.5 && parent === scene) _hn.set(0, 1, 0);
+    const s = boreMm(opts) * 0.001 * SPREAD[kind] * (0.85 + rng() * 0.3);
+    // FLUSH: a hair along the TRUE normal (never a visible gap edge-on) and
+    // polygonOffset wins the depth test. Mounted panels lead the transform by
+    // a frame, so they keep a slightly larger floor.
+    const off = Math.max(parent !== scene ? 0.004 : 0.002, Math.min(0.006, s * 0.03));
+    _hp.addScaledVector(_hn, off);
+    const seq = ++holeSeq;
+    if (parent === scene) {
+      orientHole(_hq, _hn, kind);
+      _hm.compose(_hp, _hq, _hs.set(s, s, 1));
+      const cap = Math.min(HOLE_MAX, holeCap());
+      let slot;
+      if (instFill < cap) { slot = instFill++; }
+      else { slot = instIdx % cap; instIdx = (instIdx + 1) % cap; if (instFill > cap) instFill = cap; }
+      if (holeInst.parent !== scene) scene.add(holeInst);   // a world rebuild swept the scene
+      holeInst.setMatrixAt(slot, _hm);
+      tileOff(kind, aTileI.array, slot * 2);
+      holeInst.count = instFill;
+      holeInst.instanceMatrix.needsUpdate = true;
+      aTileI.needsUpdate = true;
+      return holeInst;
+    }
+    // ---- mounted: a real mesh on the moving body ----
     let m = null;
-    // PER-CAR CAP: one riddled sedan must not eat the whole pool — past the
-    // tier-scaled per-car cap, recycle ITS oldest pock instead of a slot.
-    if (parent !== scene) {
-      let count = 0, oldest = null;
-      for (let i = 0; i < holes.length; i++) {
-        const h = holes[i];
-        if (h.parent !== parent || !h.visible) continue;
-        count++;
-        if (!oldest || h._holeSeq < oldest._holeSeq) oldest = h;
-      }
-      if (count >= holePerCar()) m = oldest;
+    let count = 0, oldest = null, oldestAll = null;
+    for (let i = 0; i < mounted.length; i++) {
+      const h = mounted[i];
+      if (!h.visible) { if (!m) m = h; continue; }
+      if (!oldestAll || h._holeSeq < oldestAll._holeSeq) oldestAll = h;
+      if (h.parent !== parent) continue;
+      count++;
+      if (!oldest || h._holeSeq < oldest._holeSeq) oldest = h;
     }
+    if (count >= holePerCar()) m = oldest;          // one riddled sedan must not eat the pool
     if (!m) {
-      const cap = holeCap();   // live tier-scaled pool cap
-      if (holes.length < cap) {
-        m = new THREE.Mesh(holeGeo, holeMat);
+      if (mounted.length < mountCap()) {
+        m = new THREE.Mesh(tileGeos[kind], holeMat);
         m.renderOrder = 4;
+        m.receiveShadow = true;
         m._bulletHole = true;
-        holes.push(m);
-      } else {
-        m = holes[holeIdx];
-        holeIdx = (holeIdx + 1) % cap;
-      }
+        mounted.push(m);
+      } else m = oldestAll;
     }
-    m._holeSeq = ++holeSeq;
-    if (m.parent !== parent) parent.add(m);   // .add() detaches from any old parent
+    m.geometry = tileGeos[kind];
+    m._holeSeq = seq;
+    if (m.parent !== parent) parent.add(m);
     m.visible = true;
-    // street-level hit with a wall-style horizontal normal → the pock lies
-    // FLAT on the asphalt (same ground correction as bulletImpact); cars are
-    // exempt — a rocker-panel hole at y0.15 really is on a vertical surface.
-    if (pos.y < 0.2 && Math.abs(_hn.y) < 0.5 && (!opts.parent || opts.parent === scene)) _hn.set(0, 1, 0);
-    if (parent !== scene) {
-      // mount in the parent's LOCAL frame so the pock moves with the panel
-      parent.worldToLocal(_hp);
-      parent.getWorldQuaternion(_hq);
-      _hn.applyQuaternion(_hq.invert()).normalize();
-    }
-    const s = holeSize(opts) * (0.85 + rng() * 0.3);
-    // A FIXED 25 mm stand-off on a 90 mm mark is a chip floating in front of
-    // the wall the moment you look at it edge-on. Scale it with the mark and
-    // let polygonOffset (already on the material) win the depth test instead —
-    // same law as the body decals' proudFor(). Never below 4 mm: the car path
-    // mounts in a moving parent whose transform is a frame behind the panel.
-    m.position.copy(_hp).addScaledVector(_hn,
-      CBZ.CONFIG.WOUND_DECAL_V2 !== false ? Math.max(0.004, s * 0.05) : 0.025);
-    m.quaternion.setFromUnitVectors(_zAxis, _hn);
-    m.rotateZ(rng() * Math.PI);
+    parent.worldToLocal(_hp);
+    parent.getWorldQuaternion(_hq);
+    _hn.applyQuaternion(_hq.invert()).normalize();
+    orientHole(m.quaternion, _hn, kind);
+    m.position.copy(_hp);
     m.scale.set(s, s, 1);
     return m;
   };
-  // wipe every pock (new run / world rebuild) — pool survives, marks don't
+  // wipe every pock (new run / world rebuild) — pools survive, marks don't
   CBZ.bulletHolesReset = function () {
-    for (let i = 0; i < holes.length; i++) {
-      holes[i].visible = false;
-      if (holes[i].parent !== scene) scene.add(holes[i]);  // un-mount from dead cars
+    instFill = 0; instIdx = 0;
+    if (holeInst) holeInst.count = 0;
+    for (let i = 0; i < mounted.length; i++) {
+      mounted[i].visible = false;
+      if (mounted[i].parent !== scene) scene.add(mounted[i]);  // un-mount from dead cars
     }
+  };
+  // for the tools: how many marks of each surface are live
+  CBZ.bulletHoleAudit = function () {
+    const by = {};
+    if (aTileI) {
+      for (let i = 0; i < instFill; i++) {
+        const u = aTileI.array[i * 2], v = aTileI.array[i * 2 + 1];
+        const t = Math.round(u * AT_COLS) + (AT_ROWS - 1 - Math.round(v * AT_ROWS)) * AT_COLS;
+        const k = Object.keys(TILE)[t] || "?";
+        by[k] = (by[k] || 0) + 1;
+      }
+    }
+    let mountedLive = 0;
+    for (let i = 0; i < mounted.length; i++) if (mounted[i].visible) mountedLive++;
+    return { world: instFill, mounted: mountedLive, bySurface: by, drawCalls: (instFill ? 1 : 0) + mountedLive };
   };
 
   // one always-updater fades + recycles every transient (runs in all modes,
@@ -748,6 +964,9 @@
   // map NOW so the material carries one from birth and every later swap at
   // bulletImpact is texture↔texture (uniform rebind, never a program change).
   for (let i = 0; i < puffs.length; i++) puffs[i].spr.material.map = puffTex;
+  // the hole atlas + its one InstancedMesh: painted and parented at load, so
+  // the first pock of the session is a setMatrixAt, not a canvas bake.
+  try { ensureHoles(); } catch (e) { /* headless: built lazily on first hole */ }
   for (let i = 0; i < 2; i++) {
     const s = new THREE.Sprite(new THREE.SpriteMaterial({
       map: flashTex, transparent: true, depthTest: false, depthWrite: false,

@@ -44,7 +44,7 @@
   function d2(ax, az, bx, bz) { return Math.hypot(ax - bx, az - bz); }
   function distP(x, z) { const p = P(); return p && p.pos ? d2(p.pos.x, p.pos.z, x, z) : Infinity; }
   function floorY(x, z) { try { return CBZ.floorAt ? (CBZ.floorAt(x, z) || 0) : 0; } catch (e) { return 0; } }
-  function day() { return CBZ.dayCount ? (CBZ.dayCount() | 0) : 0; }
+  function day() { return CBZ.paceDay ? (CBZ.paceDay() | 0) : 0; }
   function clean(s) { return String(s == null ? "" : s).replace(/[—–]/g, ", ").replace(/[·•]/g, ","); }
   function unseen(x, z, minD) {
     if (!CBZ.npcTransitionSafe) return distP(x, z) > (minD || 60);

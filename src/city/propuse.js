@@ -726,11 +726,11 @@
   function skipToMorning() {
     // guests never write the shared world clock (host owns it — netpersist).
     if (CBZ.net && CBZ.net.active && CBZ.net.guest && CBZ.net.guest()) return false;
-    if (!CBZ.dayPhase || !CBZ.dayCount) return false;
+    if (!CBZ.dayPhase || !CBZ.advanceClock) return false;
     const MORNING = CBZ.CONFIG.PROPS_MORNING_PHASE;
     const cur = CBZ.dayPhase();
-    if (MORNING <= cur) CBZ.dayCount(CBZ.dayCount() + 1);   // wrapped past midnight
-    CBZ.dayPhase(MORNING);
+    // THE one skip (core/daynight.js): sun, sky calendar and pace clock move together
+    CBZ.advanceClock(((MORNING - cur) % 1 + 1) % 1 || 1);
     return true;
   }
   /* ---- IS THIS BED YOURS -------------------------------------------------

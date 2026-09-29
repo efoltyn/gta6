@@ -2770,9 +2770,18 @@
     const ch = ped.char || (ped.isPlayer ? CBZ.playerChar : null);
     if (!ch || !ch.skinSlots) return;
     eachBodyMesh(ch, STAIN_SLOTS, function (mesh) {
-      mesh.material = lambert(stainHex(mesh.material.color.getHex()));
+      const src = mesh.material;
+      // a painted outfit (texture-page or printed) keeps its print under the
+      // soak: tint a clone that still carries the map, shared per source
+      // material. The flat swap wiped every patterned corpse to one colour.
+      if (src.map) {
+        let m = stainTexCache.get(src);
+        if (!m) { m = src.clone(); m.color.setHex(stainHex(src.color.getHex())); stainTexCache.set(src, m); }
+        mesh.material = m;
+      } else mesh.material = lambert(stainHex(src.color.getHex()));
     });
   }
+  const stainTexCache = new Map();
   let stainT = 0;
   function stainRoster(list) {
     if (!list) return;

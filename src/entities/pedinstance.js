@@ -541,6 +541,10 @@
      (that is the point of a fallback: the worst case is the status quo). */
   function poolable(o) {
     if (!o.isMesh || o.isInstancedMesh || o.isSkinnedMesh) return false;
+    // an attachment that asks to draw itself (entities/jewelry_kit.js: a chain
+    // draped per body shape would take a pool per shape and push whole bodies
+    // out of instancing when the table fills)
+    if (o.userData && o.userData.pedInstSkip) return false;
     const g = o.geometry, m = o.material;
     if (!g || !m || Array.isArray(m)) return false;
     if (m.visible === false || m.transparent === true) return false;
