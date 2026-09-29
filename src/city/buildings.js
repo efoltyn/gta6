@@ -93,6 +93,7 @@
   // Mirrored by city/elevators.js (fire-escape flights); everything in this
   // file derives from FH — never hardcode a multiple of it.
   const FH = 3.2;      // floor-to-floor
+  const FH_STD = FH;   // makeBuilding shadows FH per shell (opts.fh); this is the default it falls back to
   // pedestrian DOORWAY/HEADER height — PERSON-scaled on purpose, so it does
   // NOT ride FH. 2.25m clears the 1.82m body and matches common real doors.
   const DOORH = 2.25;
@@ -3234,6 +3235,13 @@
   // ---- the enterable building (one group; switchback stairs to the roof) ----
   // opts: { boarded:bool (board windows instead of glass), grime:bool }
   function makeBuilding(root, ox, oz, w, d, storeys, color, doorSide, opts) {
+    // PER-SHELL STOREY HEIGHT. Every ordinary lot keeps the 3.2 m metre
+    // contract; a landmark that is MEANT to be taller per floor (a head of
+    // state's residence, whose state rooms stand 4-5 m) passes `opts.fh`.
+    // Shadowing FH here moves every derived dimension of this one shell with
+    // it, and the record carries it out as `FH`, which occupy.js, the stair
+    // core, the fitout, structural.js and the interior programs already read.
+    const FH = (opts && opts.fh > 2.4 && opts.fh < 8) ? +opts.fh : FH_STD;
     opts = opts || {};
     const bgroup = new THREE.Group();
     bgroup.position.set(ox, 0, oz);
@@ -4494,6 +4502,7 @@
       skin = { faces: [MPAL.wall, MPAL.wall, MPAL.wall, MPAL.wall], hex: MPAL.wall, pattern: mk,
         kind: mk === "ashlar" ? "rock" : "brick", masonry: VENEER_ON ? MPAL.id : null };
     }
+    let civicOrderRec = null;
     {
       const bhash = (salt) => (CBZ.hash01 ? CBZ.hash01(ox, oz, salt) : 0.42);
       const addMesh = (geo, col, lx, ly, lz, emissive) => {
@@ -4506,6 +4515,11 @@
       };
       const ctxC = {
         ox, oz, w, d, storeys, FH, WT, rTop, pp, doorSide,
+        // the civic order reports what it actually stood on the front (its
+        // column stations, entablature line, deck) so a host that hangs
+        // things on that front reads the built numbers instead of re-deriving
+        // them in a second file (the drift that floats banners).
+        publishOrder: function (rec) { civicOrderRec = rec; },
         slabCx, slabCz, slabW, slabD,
         garageGround: !!opts.garageGround,
         showroom: !!opts.showroom,
@@ -4724,6 +4738,7 @@
       wallColor: color, masonry: MASONRY ? (MPAL ? MPAL.id : true) : null,
       skin,                                          // the visible wall skin per face (CBZ.citySkin)   // the FINAL wall colour/colourway (masonry overrides the caller's), so exterior dressers match the shell
       boarded: !!opts.boarded, office: !!opts.office, parapetH: pp, roofCrown: crownRect, roofCrowned, colliders: cols, platforms: plats, windows, losMeshes, doors: doorRecs, lbox, FH,
+      civicOrder: civicOrderRec,                    // bldCivicOrder's built front (building-local), or null
       clearFloorPoint, wt: WT,                      // wt: exact wall thickness, so elevators.js seats rigs flush to the real facade
       localDoor,                                    // building-local doorway + INWARD normal (interior programs orient rooms off the way you arrive)
       floorSlabs,                                   // intermediate floor slabs, each a carvable list of pieces (CBZ.cityCarveShaft)
@@ -4874,7 +4889,14 @@
     }
     const hx0 = wx - hw, hx1 = wx + hw, hz0 = wz - hd, hz1 = wz + hd;
     let n = 0;
-    for (const fs of b.floorSlabs) if (carveSlab(b, fs, hx0, hx1, hz0, hz1)) n++;
+    // opts.levels: carve only the listed storey slabs (1 = the slab you stand
+    // on upstairs of the ground floor). A grand stair that rises one storey
+    // opens one slab, not a well through the whole house.
+    const lv = Array.isArray(opts.levels) ? opts.levels : null;
+    for (let i = 0; i < b.floorSlabs.length; i++) {
+      if (lv && lv.indexOf(i + 1) < 0) continue;
+      if (carveSlab(b, b.floorSlabs[i], hx0, hx1, hz0, hz1)) n++;
+    }
     if (opts.roof && b.roofSlab && carveSlab(b, b.roofSlab, hx0, hx1, hz0, hz1)) n++;
     if (n && CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
     return n;
@@ -4908,7 +4930,10 @@
     const depthSpan = along ? ixMax - ixMin : izMax - izMin;
     const latSpan = along ? izMax - izMin : ixMax - ixMin;
     const CW = Math.min(CORE_W, latSpan - 2.2);
-    const CD = Math.min(CORE_D, depthSpan - MOUTH_D - 3.0);   // leave the room a floor between door and core
+    // A taller storey needs a longer run for the same pitch: the core grows
+    // with the shell's own FH (x1 at the 3.2 m contract), capped by the plate.
+    const fhK = Math.max(1, (b.FH > 0 ? b.FH : FH) / FH);
+    const CD = Math.min(CORE_D * fhK, depthSpan - MOUTH_D - 3.0);   // leave the room a floor between door and core
     if (CW < CORE_WMIN || CD < CORE_DMIN) return null;
     const pt = function (dep, lat) { return { x: base.x + nx * dep + tx * lat, z: base.z + nz * dep + tz * lat }; };
     const rect = function (d0, d1, l0, l1) {
