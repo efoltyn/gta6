@@ -211,8 +211,15 @@
   };
 
   /* ---- park / unpark ------------------------------------------------------ */
+  // a geometry that dropped its CPU arrays after upload (metro far tiles) can
+  // never be uploaded again: it keeps its GPU buffers
+  function reuploadable(g) {
+    if (g.index && !g.index.array) return false;
+    for (const k in g.attributes) { const a = g.attributes[k]; if (a && !a.array && !(a.data && a.data.array)) return false; }
+    return true;
+  }
   function releaseGPU(o) {
-    o.traverse(function (c) { if (c.geometry && c.geometry.dispose) c.geometry.dispose(); });
+    o.traverse(function (c) { const g = c.geometry; if (g && g.dispose && g.attributes && reuploadable(g)) g.dispose(); });
   }
   function removeFrom(arr, list) {
     if (!arr || !list || !list.length) return;

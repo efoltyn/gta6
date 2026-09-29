@@ -139,7 +139,12 @@
     const R = s.keepR();
     const box = new THREE.Box3(), gb = new THREE.Box3(), v = new THREE.Vector3(), m4 = new THREE.Matrix4();
     const stats = { removed: 0, kept: 0, opened: 0, instTrimmed: 0, colliders: 0, platforms: 0 };
-    root.updateMatrixWorld(true);
+    // NOT updateMatrixWorld: core/matrixskip.js makes it return early for a
+    // hidden node, and the city root is hidden while it builds, so every
+    // matrixWorld stayed identity and the prune judged each building by its
+    // LOCAL bounds (all near the origin): the downtown streets were parked
+    // as "725 m away" (the same trap core/batch.js documents).
+    root.updateWorldMatrix(true, true);
     // world bounds of a subtree; null if it holds horizon (never removed whole)
     function boundsOf(o) {
       let horizon = false;

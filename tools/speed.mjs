@@ -50,6 +50,7 @@
      node tools/speed.mjs --root <dir>            # measure a directory (a snapshot, another tree)
      node tools/speed.mjs --url http://127.0.0.1:8000/   # an already-running server / other worktree
      node tools/speed.mjs --profile               # + V8 sampling profile: top functions (file:function)
+     node tools/speed.mjs --profile --profile-dir d  # ... and keep the raw .cpuprofile files
      node tools/speed.mjs --attribute             # + DIAGNOSTIC: what HD settings / vegetation cost
      node tools/speed.mjs --serial                # v1 frame model: readPixels every frame, frame = cpu + gpuWait
      node tools/speed.mjs --no-look               # skip the pixel grabs (A/B look guard off)
@@ -1103,6 +1104,8 @@ async function runCbz(B, base, m, withPlay, ctx = {}) {
     await P.close();
   }
   if (prof && Object.keys(prof).length) out.profile = summarizeProfiles(prof);
+  // --profile-dir <dir>: keep the raw .cpuprofile files (DevTools / custom rollups)
+  if (prof && opt("--profile-dir", "")) { const dir = path.resolve(opt("--profile-dir", "")); fs.mkdirSync(dir, { recursive: true }); for (const k in prof) fs.writeFileSync(path.join(dir, `${m}-${k}.cpuprofile`), JSON.stringify(prof[k])); }
   return out;
 }
 
