@@ -64,7 +64,16 @@
     const q = new URLSearchParams(location.search).get("seed");
     if (q != null && q !== "" && isFinite(+q)) seed = +q;
   } catch (e) {}
-  CBZ.WORLD_SEED = seed >>> 0;
+  // An accessor over a closure variable, so the hot hash below reads the seed
+  // from a local instead of looking it up on CBZ (hundreds of properties:
+  // a dictionary-mode object, i.e. a hash lookup per call, millions of calls
+  // per build). Assigning CBZ.WORLD_SEED still works exactly as before.
+  let seedRaw = seed >>> 0;
+  Object.defineProperty(CBZ, "WORLD_SEED", {
+    configurable: true, enumerable: true,
+    get: function () { return seedRaw; },
+    set: function (v) { seedRaw = v; },
+  });
 
   // ---- named deterministic stream (mulberry32) ----
   CBZ.seedStream = function (name) {
@@ -91,11 +100,10 @@
   // generated before (the determinism gate agrees).
   // 2026-09-28: the rounds are now inlined as well (squirrel was 0.68 s of
   // SELF time in a 14 s build next to hash01's own 0.75 s: V8 was not
-  // inlining it at these call counts). Same arithmetic, same order; the
-  // world seed is read once per call as before.
+  // inlining it at these call counts). Same arithmetic, same order.
   CBZ.hash01 = function (x, z, salt) {
     let m = Math.imul((Math.round(x * 10) | 0) >>> 0, N1) >>> 0;
-    m = (m + (CBZ.WORLD_SEED >>> 0)) >>> 0;
+    m = (m + (seedRaw >>> 0)) >>> 0;
     m ^= m >>> 8; m = (m + N2) >>> 0; m ^= (m << 8) >>> 0; m = Math.imul(m, N3) >>> 0; m ^= m >>> 8;
     let h = m >>> 0;
     m = Math.imul((Math.round(z * 10) | 0) >>> 0, N1) >>> 0;

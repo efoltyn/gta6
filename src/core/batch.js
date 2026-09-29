@@ -726,7 +726,7 @@
       if (i < 0) return null;                         // tangents, skin, custom: keep live
       const a = g.attributes[name];
       if (a.isInterleavedBufferAttribute) return null;
-      sig += name[0] + a.itemSize + (a.normalized ? "n" : "") + (a.array instanceof Float32Array ? "f" : a.array.constructor.name[0]);
+      sig += name + a.itemSize + (a.normalized ? "n" : "") + a.array.constructor.name + ";";
     }
     if (m.matrixWorld.determinant() < 0) return null;
     return mat.uuid + "|" + (m.castShadow ? 1 : 0) + (m.receiveShadow ? 1 : 0) + "|" + sig;

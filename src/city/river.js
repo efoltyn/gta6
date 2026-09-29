@@ -122,7 +122,23 @@
   let audit = { built: false, reason: "not run", length: 0, points: 0, bridges: 0, crossings: 0 };
 
   function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
-  function isLinkName(n) { return !!(n && /bridge|causeway|link/i.test(n)); }
+  // Memoized per NAME: the router asks these of every region for every grid
+  // cell it scores, and a regex per region per cell was a measurable slice of
+  // the world build (speed.mjs --profile, 2026-09-28). Names are strings, so
+  // a renamed region simply gets its own entry.
+  const _linkMemo = new Map(), _wildMemo = new Map();
+  function isLinkName(n) {
+    if (!n) return false;
+    let v = _linkMemo.get(n);
+    if (v === undefined) { v = /bridge|causeway|link/i.test(n); _linkMemo.set(n, v); }
+    return v;
+  }
+  function isWildName(n) {
+    if (!n) return false;
+    let v = _wildMemo.get(n);
+    if (v === undefined) { v = /backcountry|wilds/i.test(n); _wildMemo.set(n, v); }
+    return v;
+  }
 
   // ---- deterministic smooth noise, the shape continent.js/expansion.js use
   function sm01(t) { return t < 0 ? 0 : t > 1 ? 1 : t * t * (3 - 2 * t); }
@@ -177,7 +193,7 @@
         if (isLinkName(r.name)) continue;                 // decks are crossed, not avoided
         // The backcountry IS the open country this river is supposed to run
         // through; it is a label on the wilds, not a place with a wall.
-        if (r.name && /backcountry|wilds/i.test(r.name)) continue;
+        if (isWildName(r.name)) continue;
         if (r.kind === "circle") {
           if (Math.hypot(x - r.cx, z - r.cz) < r.r + (r.pad || 0) + m) return r;
         } else if (x > r.minX - m && x < r.maxX + m && z > r.minZ - m && z < r.maxZ + m) return r;
