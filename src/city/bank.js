@@ -549,7 +549,7 @@
   const LOOK_DOT = 0.5;      // you act on the station you're facing
 
   const S = { lot: null, bk: null, group: null, stations: [], built: false,
-              arena: null, noLotArena: null, cur: null, prompt: null, lastTxt: "",
+              arena: null, noLotArena: null, near: false,
               cx: 0, cz: 0, panel: null, panelOpen: false, mode: "personal",
               pAmt: 0, pTerm: TERMS.personal, vault: null };
 
@@ -762,24 +762,6 @@
     if (CBZ.interiorTrackFixture) CBZ.interiorTrackFixture("bank-lobby", lot.building, group);
   }
 
-  // ---- the look-pick (which station are you facing within reach) -------------
-  function pickStation() {
-    const P = CBZ.player, B = S.bk.bounds;
-    const px = P.pos.x, pz = P.pos.z;
-    if (px < B.minX - 1.5 || px > B.maxX + 1.5 || pz < B.minZ - 1.5 || pz > B.maxZ + 1.5) return null;
-    const yaw = CBZ.cam ? CBZ.cam.yaw : 0, fx = -Math.sin(yaw), fz = -Math.cos(yaw);
-    let best = null, bestScore = -1;
-    for (const st of S.stations) {
-      const dx = st.x - px, dz = st.z - pz, dd = Math.hypot(dx, dz);
-      if (dd > (st.reach || REACH) || dd < 0.05) continue;
-      const dot = (dx / dd) * fx + (dz / dd) * fz;
-      if (dot < LOOK_DOT) continue;
-      const score = dot - dd * 0.05;
-      if (score > bestScore) { bestScore = score; best = st; }
-    }
-    return best;
-  }
-
   // ============================================================
   //  TELLER + ATM actions (mirror shops.js deposit/withdraw/bribe exactly)
   // ============================================================
@@ -967,51 +949,36 @@
     }
   }
 
-  // ---- the in-world prompt for the looked-at station -------------------------
-  function promptText(st) {
-    // The physical teller window, ATM and loan desk already identify the
-    // station. Use only a quiet symbol—account details live in the bank panel
-    // and phone, not in a paragraph pasted over the world. On touch the symbol
-    // becomes a worded verb pill (tap fires the same [E] handler below).
-    if (st.kind === "teller") return CBZ.touchActionPrompt ? CBZ.touchActionPrompt("e", "Teller", "◆") : "◆";
-    if (st.kind === "atm") return CBZ.touchActionPrompt ? CBZ.touchActionPrompt("e", "ATM", "▣") : "▣";
-    if (st.kind === "loan") return CBZ.touchActionPrompt ? CBZ.touchActionPrompt("e", "Loan", "◇") : "◇";
-    return "";
+  // ---- THE STATIONS ARE CANDIDATES (city/interactions.js registerFixtures) ----
+  // The teller window, the ATM and the loan desk are things in the registry:
+  // E does the obvious one on the station you look at, Q / a tap shows the
+  // rest. No private prompt and no private E listener.
+  function inBank(px, pz) {
+    const B = S.bk && S.bk.bounds;
+    return !!B && px >= B.minX - 1.5 && px <= B.maxX + 1.5 && pz >= B.minZ - 1.5 && pz <= B.maxZ + 1.5;
   }
-  function actOn(st) {
-    if (!st) return;
-    if (st.kind === "teller") {
-      // teller does the multi-action: deposit primary, but if you're wanted the
-      // teller will pay it down (the shops.js bank semantics, one counter).
-      if ((num(g.wanted, 0) | 0) > 0 && num(g.cash, 0) <= 0) bribe();
-      else deposit();
-      return;
-    }
-    if (st.kind === "atm") { withdraw(500, true); return; }
-    if (st.kind === "loan") { openPanel(); return; }
-  }
-
-  function promptEl() {
-    if (S.prompt) return S.prompt;
-    if (typeof document === "undefined" || !document.body) return null;
-    const d = document.createElement("div");
-    d.id = "bankPrompt";
-    d.style.cssText = "position:fixed;left:50%;bottom:150px;transform:translateX(-50%);z-index:46;display:none;" +
-      "background:rgba(13,16,21,.9);border:1px solid #3a4150;border-radius:12px;padding:7px 14px;color:#e8eef7;" +
-      "font-family:Fredoka,system-ui,sans-serif;font-size:15px;pointer-events:auto;cursor:pointer;text-align:center;max-width:78vw";
-    d.addEventListener("click", function () { if (S.cur) actOn(S.cur); });   // tap-to-act (mobile)
-    document.body.appendChild(d);
-    S.prompt = d;
-    return d;
-  }
-  function showPrompt(txt) {
-    const el = promptEl(); if (!el) return;
-    if (txt !== S.lastTxt) { el.innerHTML = txt; S.lastTxt = txt; }
-    if (el.style.display !== "block") el.style.display = "block";
-  }
-  function hidePrompt() {
-    if (S.prompt && S.prompt.style.display !== "none") S.prompt.style.display = "none";
-    S.cur = null;
+  const cash = () => num(g.cash, 0), bal = () => num(g.cityBank, 0), stars = () => num(g.wanted, 0) | 0;
+  let fixturesWired = false;
+  function wireFixtures() {
+    if (fixturesWired || !CBZ.interactions || !CBZ.interactions.registerFixtures) return;
+    fixturesWired = true;
+    CBZ.interactions.registerFixtures({
+      id: "bank-station", kind: "bank-station", prio: 9,
+      list: function (ctx, px, pz) { return S.built && S.near && !S.panelOpen && inBank(px, pz) ? S.stations : null; },
+      reach: function (st) { return st.reach || REACH; },
+      dot: function () { return LOOK_DOT; },
+      verbs: [
+        { id: "bank-deposit", slot: "e", prio: 6, label: () => "Deposit " + fmt$(cash()),
+          canShow: (st) => st.kind === "teller" && cash() > 0, onSelect: deposit },
+        { id: "bank-payoff", prio: 5, label: "Pay off the heat",
+          canShow: (st) => st.kind === "teller" && stars() > 0, onSelect: bribe },
+        { id: "bank-withdraw", slot: "e", prio: 6, label: "Withdraw " + fmt$(500),
+          canShow: (st) => (st.kind === "atm" || st.kind === "teller") && bal() > 0, onSelect: (st) => withdraw(500, st.kind === "atm") },
+        { id: "bank-withdraw-small", prio: 4, label: "Withdraw " + fmt$(100),
+          canShow: (st) => (st.kind === "atm" || st.kind === "teller") && bal() > 0, onSelect: (st) => withdraw(100, st.kind === "atm") },
+        { id: "bank-loan", slot: "e", prio: 6, label: "Borrow", canShow: (st) => st.kind === "loan", onSelect: () => openPanel() },
+      ],
+    });
   }
 
   // ---- find the bank lot + build once (self-healing, gunstore pattern) -------
@@ -1020,7 +987,7 @@
     if (S.built) {
       if (S.arena === arena) return true;
       // arena rebuilt (new run) — the old group died with the old root
-      S.built = false; S.group = null; S.stations = []; S.cur = null; S.lot = null; S.bk = null;
+      S.built = false; S.group = null; S.stations = []; S.near = false; S.lot = null; S.bk = null;
     }
     if (!arena) return false;
     if (S.noLotArena === arena) return false;
@@ -1048,34 +1015,22 @@
 
   // ---- per-frame: vis-gate fixtures + drive the prompt -----------------------
   CBZ.onUpdate(38.4, function (dt) {
-    if (!g || g.mode !== "city") { if (S.group && S.group.visible) S.group.visible = false; hidePrompt(); if (S.panelOpen) closePanel(); return; }
+    if (!g || g.mode !== "city") { if (S.group && S.group.visible) S.group.visible = false; S.near = false; if (S.panelOpen) closePanel(); return; }
     if (!ensure()) return;
+    wireFixtures();
     const P = CBZ.player;
     const dx = P.pos.x - S.cx, dz = P.pos.z - S.cz;
     const near = (dx * dx + dz * dz) < VIS_R * VIS_R;
     if (S.group && S.group.visible !== near) S.group.visible = near;
-    if (!near || g.state !== "playing" || P.dead || P.driving) { hidePrompt(); if (S.panelOpen && (!near || P.dead || P.driving)) closePanel(); return; }
-    if (S.panelOpen) { hidePrompt(); return; }     // panel up: in-world prompt yields
-    if (CBZ.cityMenuOpen) { hidePrompt(); return; }
-    const st = pickStation();
-    if (!st) { hidePrompt(); return; }
-    S.cur = st;
-    showPrompt(promptText(st));
+    S.near = near;
+    if (S.panelOpen && (!near || g.state !== "playing" || P.dead || P.driving)) closePanel();
   });
 
-  // [E] acts on the station you're facing. CAPTURE phase so the bank wins the
-  // key over interact.js's bubble listener; stopImmediatePropagation keeps one
-  // press from ALSO opening the clerk's counter menu (the gunstore pattern).
+  // the loan panel is modal: E or Esc closes it
   addEventListener("keydown", function (e) {
+    if (!S.panelOpen) return;
     const k = (e.key || "").toLowerCase();
-    if (S.panelOpen) { if (k === "escape" || k === "e") { e.preventDefault(); if (e.stopImmediatePropagation) e.stopImmediatePropagation(); e.stopPropagation(); closePanel(); } return; }
-    if (!S.cur || !g || g.mode !== "city" || g.state !== "playing") return;
-    if (CBZ.cityMenuOpen || (CBZ.player && (CBZ.player.driving || CBZ.player.dead))) return;
-    if (k !== "e") return;
-    e.preventDefault();
-    if (e.stopImmediatePropagation) e.stopImmediatePropagation();
-    e.stopPropagation();
-    actOn(S.cur);
+    if (k === "escape" || k === "e") { e.preventDefault(); if (e.stopImmediatePropagation) e.stopImmediatePropagation(); e.stopPropagation(); closePanel(); }
   }, true);
 
   /* ==========================================================================

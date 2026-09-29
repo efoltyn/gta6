@@ -179,48 +179,68 @@
   /* ================================================================
      VERBS — the only prompt
      ================================================================ */
-  const V = { list: [], cur: null, tok: null, text: "", evalT: 0, inspectVerb: null };
-  const _dir = new THREE.Vector3();
+  /* THE VERBS ON THINGS ARE THE CITY'S VERBS. hmVerbs was a second registry:
+     its own look test, its own caption and its own E listener, and on touch
+     only that caption was a button. Each verb is now a zone in the one
+     interaction registry (city/interactions.js), so E, Q and a tap on the
+     thing all reach it, and nothing else fights for the key. The caption
+     below is only the inspect view's (a modal camera, its own verb). */
+  const V = { defs: new Map(), pending: [], text: "" };
+  function busy() {
+    const pl = P();
+    return !playing() || !pl || !pl.pos || pl.dead || pl.driving || (CBZ.fullMap && CBZ.fullMap.active) ||
+      CBZ.hmHold.isOpen() || I.active || bino.on || (CBZ.cineBusy && CBZ.cineBusy());
+  }
+  function wireDef(def) {
+    const II = CBZ.interactions;
+    if (!II || !II.registerZone) return false;
+    const w = { x: null, z: null, pos: null, tok: null };      // one stable target per verb
+    def._zone = II.registerZone({
+      id: "hm-" + def.id, kind: "hm", prio: 10 + (def.prio || 0),
+      find: function (px, pz, ctx) {
+        if (busy()) return null;
+        let tok = null;
+        try { tok = def.find(px, pz, P()); } catch (e) { tok = null; }
+        if (!tok) return null;
+        if (tok.x != null) {
+          const pl = P(), d = Math.hypot(tok.x - pl.pos.x, tok.z - pl.pos.z);
+          if (d > 1.1 && !II.aimed(ctx, tok.x, tok.z, 0.35)) return null;
+          w.x = tok.x; w.z = tok.z;
+          w.pos = tok.y != null ? tok : null;
+        } else { w.x = px; w.z = pz; w.pos = null; }
+        w.tok = tok;
+        return w;
+      },
+      options: [{
+        id: "hm-" + def.id + "-use", slot: "e", prio: 5, campaignSafe: true, forceYes: true,
+        label: function (t) { try { return typeof def.verb === "function" ? def.verb(t.tok) : def.verb; } catch (e) { return ""; } },
+        canShow: function (t) { let v = ""; try { v = typeof def.verb === "function" ? def.verb(t.tok) : def.verb; } catch (e) {} return !!v; },
+        onSelect: function (t) { try { def.onUse(t.tok); } catch (e) { if (window.console) console.error("[hmVerbs]", e); } },
+      }],
+    });
+    return true;
+  }
   function addVerb(def) {
     if (!def || !def.id) return;
     removeVerb(def.id);
-    V.list.push(def);
+    V.defs.set(def.id, def);
+    if (!wireDef(def)) V.pending.push(def);
   }
   function removeVerb(id) {
-    for (let i = V.list.length - 1; i >= 0; i--) if (V.list[i].id === id) V.list.splice(i, 1);
-    if (V.cur && V.cur.id === id) { V.cur = null; V.tok = null; }
+    const d = V.defs.get(id);
+    if (!d) return;
+    V.defs.delete(id);
+    const i = V.pending.indexOf(d); if (i >= 0) V.pending.splice(i, 1);
+    if (d._zone && CBZ.interactions) CBZ.interactions.unregister(d._zone);
   }
-  function inFront(tok, px, pz) {
-    if (tok.x == null) return true;
-    const dx = tok.x - px, dz = tok.z - pz, d = Math.hypot(dx, dz);
-    if (d < 1.1) return true;
-    const cam = CBZ.camera; if (!cam) return true;
-    cam.getWorldDirection(_dir);
-    const fm = Math.hypot(_dir.x, _dir.z) || 1;
-    return (dx * _dir.x + dz * _dir.z) / (d * fm) > 0.35;
+  function flushPending() {
+    while (V.pending.length && CBZ.interactions && CBZ.interactions.registerZone) wireDef(V.pending.shift());
   }
-  function evalVerbs() {
-    const pl = P();
-    let best = null, bestTok = null, bestScore = -Infinity;
-    const blocked = !playing() || !pl || !pl.pos || pl.dead || pl.driving || cuffed() || CBZ.cityMenuOpen ||
-      (CBZ.fullMap && CBZ.fullMap.active) || CBZ.hmHold.isOpen() || I.active || bino.on || (CBZ.cineBusy && CBZ.cineBusy());
-    if (!blocked) {
-      for (let i = 0; i < V.list.length; i++) {
-        const d = V.list[i];
-        let tok = null;
-        try { tok = d.find(pl.pos.x, pl.pos.z, pl); } catch (e) { tok = null; }
-        if (!tok || !inFront(tok, pl.pos.x, pl.pos.z)) continue;
-        const dist = tok.x != null ? Math.hypot(tok.x - pl.pos.x, tok.z - pl.pos.z) : 0;
-        const score = (d.prio || 0) * 100 - dist;
-        if (score > bestScore) { bestScore = score; best = d; bestTok = tok; }
-      }
-    }
-    V.cur = best; V.tok = bestTok;
-    let text = "";
-    if (best) { try { text = typeof best.verb === "function" ? best.verb(bestTok) : best.verb; } catch (e) { text = ""; } }
-    if (!text) { V.cur = null; V.tok = null; }
-    showVerb(text);
+  function curHm() {
+    const c = CBZ.interactions && CBZ.interactions.currentCand ? CBZ.interactions.currentCand() : null;
+    return c && c.kind === "hm" ? c : null;
   }
+  // the inspect view's caption (a modal camera; the world's verbs are the card's)
   function showVerb(text, key) {
     const D = ensureDom(); if (!D) return;
     text = clean(text || "");
@@ -234,14 +254,13 @@
   }
   function useVerb() {
     if (I.active) { inspectUse(); return true; }
-    if (!V.cur) return false;
-    const d = V.cur, tok = V.tok;
-    V.cur = null; V.tok = null; showVerb("");
-    try { d.onUse(tok); } catch (e) { if (window.console) console.error("[hmVerbs]", e); }
-    V.evalT = 0.25;
-    return true;
+    const c = curHm();
+    if (!c || !c.zone || !c.zone.options) return false;
+    return !!CBZ.interactions.fireOn(c, c.zone.options[0]);
   }
-  CBZ.hmVerbs = { add: addVerb, remove: removeVerb, current: function () { return V.cur ? { id: V.cur.id, verb: V.text } : null; }, use: useVerb };
+  CBZ.hmVerbs = { add: addVerb, remove: removeVerb,
+    current: function () { const c = curHm(); if (!c) return null; const d = c.zone.options[0]; return { id: String(c.zone.id).replace(/^hm-/, ""), verb: typeof d.label === "function" ? d.label(c.t) : d.label }; },
+    use: useVerb };
 
   /* ================================================================
      INSPECT — lean in and look
@@ -439,7 +458,6 @@
         swallow(e); return;
       }
     }
-    if (k === "e" && !e.repeat && V.cur && !CBZ.cityMenuOpen) { useVerb(); swallow(e); }
   }, true);
   window.addEventListener("keyup", function (e) {
     if (e.key === "Alt" || e.code === "AltLeft" || e.code === "AltRight") { bino.toggle(false); e.preventDefault(); }
@@ -481,11 +499,7 @@
     tickHold(dt);
     tickInspect(dt);
     tickBino();
-    V.evalT -= dt;
-    if (V.evalT <= 0) {
-      V.evalT = 0.1;
-      if (!I.active) evalVerbs();
-    }
+    if (V.pending.length) flushPending();
     void lastT;
   });
 })();

@@ -144,6 +144,55 @@ for (const s of SCREENS) {
 }
 console.log(`A. verb column: ${cases} placements; 0 allowed on a face; phone-only fallbacks: ${onBodyCases} crossed a body below the face, ${touchedControl} touched a control (an expanded list, a 375x667 phone, or a man taller than the screen; first: ${worst})`);
 
+// ---- A2. the verbs beside a THING ------------------------------------------------------------
+// Since the one tap pipeline (city/interactions.js tapPick) every counter, rack,
+// case, ATM, desk, chest, pump and dog opens the same column. city/verbwheel.js
+// bodyRect draws a thing as a squat box (1.2 m tall from 0.2 m, half-width 0.8
+// of its height): the column must stand beside it, never on it, on a tablet.
+const THING_VERBS = [
+  ["Buy $2,400", "Put on $350", "Modify"],
+  ["Deposit $1,200", "Withdraw $500", "Withdraw $100", "Pay off"],
+  ["Sell $300", "Sell all $1,200", "Pawn $450", "Redeem $520", "Redeem $610", "Redeem $90"],
+];
+let thingCases = 0, thingOnCtl = 0;
+for (const s of SCREENS) {
+  const m = { top: 12, right: 12, bottom: 24, left: 12 };
+  const avoid = footControls(s, false);
+  for (const words of THING_VERBS) {
+    const shown = words.length > 5 ? words.slice(0, 4).concat(["More"]) : words;
+    const sizes = shown.map((w, i) => pill(w, w === "More" ? "more" : i === 0 ? "lead" : ""));
+    for (const tall of [36, 90, 180]) {
+      for (let fx = 0.14; fx <= 0.86; fx += 0.12) {
+        for (let fy = 0.25; fy <= 0.7; fy += 0.15) {
+          const half = Math.max(22, tall * 0.8);
+          const cx = s.W * fx, top = s.H * fy - tall / 2;
+          const body = { x: cx - half, y: top, w: half * 2, h: tall };
+          if (avoid.some((r) => L.overlaps(body, r, 0))) continue;
+          thingCases++;
+          const out = L.verbColumn({ W: s.W, H: s.H, sizes, gap: 8, body, anchor: { x: cx, y: top + tall * 0.45 }, avoid, prefer: "right", margin: m });
+          const tag = `${s.name} thing n=${words.length} @${fx.toFixed(2)},${fy.toFixed(2)} h=${tall}`;
+          ok(!!out && out.rects.length === sizes.length, tag + ": laid out every pill");
+          if (!out) continue;
+          const R = out.rects;
+          let pp = 0, off = 0, on = 0, ctl = 0;
+          for (let i = 0; i < R.length; i++) {
+            if (!L.inside(R[i], s.W, s.H, m)) off++;
+            if (L.overlaps(R[i], body, 0)) on++;
+            for (const c of avoid) if (L.overlaps(R[i], c, 0)) ctl++;
+            for (let j = i + 1; j < R.length; j++) if (L.overlaps(R[i], R[j], 0)) pp++;
+          }
+          ok(pp === 0, tag + ": " + pp + " pill overlaps");
+          ok(off === 0, tag + ": " + off + " pills off screen");
+          if (!phoneish(s) && tall <= 90) ok(on === 0, tag + ": pills on the thing with room to spare");
+          if (!phoneish(s)) ok(ctl === 0, tag + ": pills on another control, side=" + out.side);
+          if (ctl) thingOnCtl++;
+        }
+      }
+    }
+  }
+}
+console.log(`A2. verbs beside a thing: ${thingCases} placements (${thingOnCtl} phone fallbacks touched a control)`);
+
 // ---- B. the way out ----------------------------------------------------------------------
 function vehicleControls(s, kind) {
   const cl = [], av = [{ x: 10, y: 8, w: 48, h: 48 }, { x: 10, y: 64, w: s.H <= 480 ? 108 : 128, h: s.H <= 480 ? 108 : 128 }];
@@ -197,5 +246,5 @@ for (const s of SCREENS) {
 }
 
 for (const f of fails) console.log("FAIL " + f);
-console.log(`VERB-CLUSTER-LAYOUT: ${fail ? "FAIL" : "OK"} ${pass} passed, ${fail} failed (${cases} person placements)`);
+console.log(`VERB-CLUSTER-LAYOUT: ${fail ? "FAIL" : "OK"} ${pass} passed, ${fail} failed (${cases} person placements, ${thingCases} thing placements)`);
 process.exit(fail ? 1 : 0);

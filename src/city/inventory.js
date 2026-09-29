@@ -558,6 +558,24 @@
     sfx("coin");
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
+  // TAKEN WITH A HAND (systems/verbs_pickup.js): it leaves the ground in the
+  // hand and is yours on the grab frame. Walking over it does this; so do E,
+  // Q and a tap on it (the "ground-item" fixture below), from arm's length.
+  function takeItemDrop(d) {
+    const P = CBZ.player;
+    if (!d || d._taking || !P) return;
+    d._taking = true;
+    const took = function () {
+      pickupItemDrop(d);
+      const j = CBZ.cityItemDrops.indexOf(d);
+      if (j >= 0) removeItemDrop(j);
+    };
+    const kind = d.cash > 0 ? "cash" : (d.weaponId ? "gun" : "box");
+    if (CBZ.verbs && CBZ.verbs.pickup) {
+      CBZ.verbs.pickup(P, d.mesh || { x: d.x, y: d.y0, z: d.z, kind: kind },
+        { pose: kind === "cash" ? "card" : "grip", keep: !!(d.weaponId || d.melee), onTaken: took });
+    } else took();
+  }
   function tickItemDrops(dt) {
     // Replace EVERY NPC gun placeholder. LAZY SWEEP, not just the
     // cityDropWeapon wrap: cityKillPed calls peds.js's INTERNAL dropWeapon()
@@ -581,19 +599,7 @@
       if (d._taking) continue;           // a hand is already on it
       if (P && !P.dead && !P.driving && !(CBZ.cuffedPlayer && CBZ.cuffedPlayer.on()) && Math.abs(P.pos.y - d.y0) < 2.5 &&
           Math.hypot(P.pos.x - d.x, P.pos.z - d.z) < 1.5) {
-        // TAKEN WITH A HAND (systems/verbs_pickup.js): it leaves the ground in
-        // the hand and is yours on the grab frame
-        d._taking = true;
-        const took = function () {
-          pickupItemDrop(d);
-          const j = CBZ.cityItemDrops.indexOf(d);
-          if (j >= 0) removeItemDrop(j);
-        };
-        const kind = d.cash > 0 ? "cash" : (d.weaponId ? "gun" : "box");
-        if (CBZ.verbs && CBZ.verbs.pickup) {
-          CBZ.verbs.pickup(P, d.mesh || { x: d.x, y: d.y0, z: d.z, kind: kind },
-            { pose: kind === "cash" ? "card" : "grip", keep: !!(d.weaponId || d.melee), onTaken: took });
-        } else took();
+        takeItemDrop(d);
         continue;
       }
       if (d.t > d.ttl) removeItemDrop(i);
@@ -956,11 +962,7 @@
       "#ci2Chest{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:130;display:none;flex-direction:column;gap:10px;" +
       "background:rgba(10,13,20,.94);border:1px solid rgba(232,236,242,.14);border-radius:16px;padding:16px 18px;" +
       "font-family:Fredoka,system-ui,sans-serif;color:#e8ecf2;box-shadow:0 18px 60px rgba(0,0,0,.6)}" +
-      "#ci2Chest .ttl{font-size:13px;font-weight:800;letter-spacing:1px;color:#9fb0c6;text-transform:uppercase}" +
-      // proximity chip (roofloot pattern)
-      "#ci2Chip{position:fixed;left:50%;transform:translateX(-50%);bottom:252px;z-index:24;display:none;padding:6px 12px;border-radius:9px;" +
-      "background:rgba(8,14,22,.78);border:1px solid rgba(255,209,102,.30);color:#ffe9bd;font:600 13px/1.2 'Fredoka',system-ui,sans-serif;" +
-      "pointer-events:none;text-shadow:0 1px 2px #000}";
+      "#ci2Chest .ttl{font-size:13px;font-weight:800;letter-spacing:1px;color:#9fb0c6;text-transform:uppercase}";
     document.head.appendChild(st);
   }
 
@@ -1282,64 +1284,44 @@
     if (!CBZ.touchMode && playing() && CBZ.requestLock) CBZ.requestLock();
   }
 
-  // [E] near a chest — document-capture (the roofloot.js pattern) so the
-  // window-level interact fallback never double-fires on the same press.
+  // THE CHEST IS A CANDIDATE (city/interactions.js registerFixtures): E opens
+  // the one you face, a tap on it opens it. The chest panel is modal: E or Esc
+  // closes it. No proximity chip and no private E listener.
   function onChestKey(e) {
-    if (openChestRef) {
-      const k = (e.key || "").toLowerCase();
-      if (k === "e" || k === "escape") { e.preventDefault(); e.stopPropagation(); closeChest(); }
-      return;
-    }
-    if (!on() || !cityNow() || !playing() || CBZ.cityMenuOpen || CBZ.invOpen) return;
-    const P = CBZ.player;
-    if (!P || P.dead || P.driving) return;
-    if ((e.key || "").toLowerCase() !== "e") return;
-    const c = chestNear(REACH);
-    if (!c) return;
-    // E is the verb on what you LOOK at: a chest beside you while you face a
-    // person or a counter is not the thing you meant (city/interactions.js).
-    if (CBZ.cam) {
-      const dx = c.x - P.pos.x, dz = c.z - P.pos.z, d = Math.hypot(dx, dz);
-      if (d > 0.8 && (dx / d) * -Math.sin(CBZ.cam.yaw) + (dz / d) * -Math.cos(CBZ.cam.yaw) < 0.55) return;
-    }
-    e.preventDefault(); e.stopPropagation();
-    openChest(c);
+    if (!openChestRef) return;
+    const k = (e.key || "").toLowerCase();
+    if (k === "e" || k === "escape") { e.preventDefault(); e.stopPropagation(); closeChest(); }
   }
   if (typeof document !== "undefined" && document.addEventListener) document.addEventListener("keydown", onChestKey);
-
-  // Your OWN chest, and on touch it could not be opened: the chip carrying the
-  // verb is in css/city.css's declutter list. Desktop string unchanged; touch
-  // gets the pill that fires the same [E] handler above.
-  function chestPrompt(c) {
-    const desktop = chestEmpty(c) ? "[E] Open chest (empty)" : "[E] Open chest";
-    return CBZ.touchActionPrompt
-      ? CBZ.touchActionPrompt("e", chestEmpty(c) ? "OPEN CHEST (EMPTY)" : "OPEN CHEST", desktop)
-      : desktop;
-  }
-
-  // proximity chip
-  let chip = null, _chipLast;
-  function chipText(t) {
-    if (t === _chipLast) return;
-    _chipLast = t;
-    if (!chip) {
-      if (typeof document === "undefined" || !document.body) return;
-      ensureCss();
-      chip = document.createElement("div"); chip.id = "ci2Chip";
-      document.body.appendChild(chip);
-    }
-    if (!t) { chip.style.display = "none"; return; }
-    if (CBZ.touchPromptChip) { CBZ.touchPromptChip(chip, t); return; }
-    chip.style.display = "block"; chip.innerHTML = t;
+  let chestWired = false;
+  function wireChests() {
+    if (chestWired || !CBZ.interactions || !CBZ.interactions.registerFixtures) return;
+    chestWired = true;
+    CBZ.interactions.registerFixtures({
+      id: "chest", kind: "chest", prio: 8,
+      list: function () { return on() && cityNow() && !openChestRef && !CBZ.invOpen ? chests : null; },
+      reach: function () { return REACH; },
+      dot: function () { return 0.55; },
+      verbs: [{ id: "chest-open", slot: "e", prio: 5, label: "Open", onSelect: openChest }],
+    });
+    CBZ.interactions.registerFixtures({
+      id: "ground-item", kind: "ground-item", prio: 7,
+      list: function () {
+        const P = CBZ.player;
+        return on() && cityNow() && P && !(CBZ.cuffedPlayer && CBZ.cuffedPlayer.on()) ? CBZ.cityItemDrops : null;
+      },
+      reach: function () { return 2.6; },
+      dot: function () { return 0.4; },
+      verbs: [{ id: "ground-pickup", slot: "e", prio: 5, forceYes: true, label: "Pick up",
+        canShow: (d) => !d._taking && Math.abs(CBZ.player.pos.y - d.y0) < 2.5, onSelect: takeItemDrop }],
+    });
   }
 
   // ============================================================
   //  PER-FRAME — chest prompts, item drops, arena-change hygiene
   // ============================================================
-  let _promptT = 0;
   CBZ.onUpdate(37.4, function (dt) {
     if (!on() || !cityNow()) {
-      chipText(null);
       if (openChestRef) closeChest();
       return;
     }
@@ -1359,17 +1341,7 @@
 
     tickItemDrops(dt);
     tickCorpseProps(dt);
-
-    // chest proximity chip at ~10 Hz
-    _promptT += dt;
-    if (_promptT >= 0.1) {
-      _promptT = 0;
-      const P = CBZ.player;
-      if (playing() && P && !P.dead && !P.driving && !CBZ.cityMenuOpen && !CBZ.invOpen) {
-        const c = chestNear(REACH);
-        chipText(c ? chestPrompt(c) : null);
-      } else chipText(null);
-    }
+    wireChests();
   });
 
   // fresh run / mode switch: same lazy reset-chain hook storage.js uses
@@ -1380,7 +1352,6 @@
     _chestRoot = null;
     cursor = null;
     if (openChestRef) closeChest();
-    chipText(null);
   }
   function bindResetChain() {
     if (CBZ.cityVehiclesReset && !CBZ.cityVehiclesReset._inv2Wrapped) {

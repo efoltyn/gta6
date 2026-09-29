@@ -2038,8 +2038,7 @@
     if (!P || P._aircraft || P.driving || g.mode !== "city" || g.state !== "playing") return false;
     const c = nearestBoardable(P.pos.x, P.pos.z, 6.5);
     if (!c) return false;
-    const doors = CBZ.aircraftDoorArc;
-    if (!(doors && !doors.active && doors.boardCraft(c, enterAircraft))) enterAircraft(c);
+    boardCraft(c);
     return true;
   };
 
@@ -2057,15 +2056,10 @@
   // ============================================================
   //  BUY THE F-22 (at the hangar)
   // ============================================================
-  function atHangar(x, z) {
-    const t = tower(); const h = t && t.hangar; if (!h) return false;
-    const hw = (h.w || 10) / 2 + 4, hd = (h.d || 10) / 2 + 4;
-    return Math.abs(x - h.x) <= hw && Math.abs(z - h.z) <= hd;
-  }
   // Is (x,z) inside an OWNED hangar's keep-zone? Two sources: the penthouse deck
   // hangar (g.cityOwnsHangar) and any hangar bought through storage.js (which
   // exposes CBZ.cityStorageHangarHit — feature-detected). Either one keeps a
-  // stolen jet. A roomier radius than atHangar so a fast jet doesn't skip past it.
+  // stolen jet. A roomy radius so a fast jet doesn't skip past it.
   function hangarKeepHit(x, z) {
     if (g.cityOwnsHangar) {
       const t = tower(); const h = t && t.hangar;
@@ -2075,13 +2069,6 @@
       }
     }
     if (CBZ.cityStorageHangarHit) { try { if (CBZ.cityStorageHangarHit(x, z)) return true; } catch (e) {} }
-    return false;
-  }
-  // Do you OWN a hangar anywhere? Either the penthouse deck hangar, or the
-  // airport Private Hangar bought through the [G] storage menu. Feature-detected.
-  function ownsAnyHangar() {
-    if (g.cityOwnsHangar) return true;
-    try { if (CBZ.cityStorage && CBZ.cityStorage.owns && CBZ.cityStorage.owns("hangar")) return true; } catch (e) {}
     return false;
   }
   // THE F-22 CANNOT BE BOUGHT. It's a trophy you STEAL from the military base
@@ -2099,37 +2086,36 @@
   CBZ.cityBuyJet = jetNotBuyable;
 
   // ============================================================
-  //  INPUT — [F] board/eject + buy, [B] also buys at the hangar
+  //  YOUR PARKED AIRCRAFT IS A RIDE (city/interactions.js): F boards the one
+  //  you look at, a tap on it opens its verbs (Board). Flying, F out is
+  //  systems/seat_exit.js's. The private [F] listener and the floating board
+  //  glyph that stood in for it on touch are gone.
   // ============================================================
-  function activeCtx() {
-    return g.mode === "city" && g.state === "playing" && document.pointerLockElement;
+  function boardCraft(c) {
+    const P = CBZ.player;
+    if (!c || !P || P._aircraft || P.driving) return;
+    const doors = CBZ.aircraftDoorArc;
+    if (!(doors && !doors.active && doors.boardCraft(c, enterAircraft))) enterAircraft(c);
   }
-  addEventListener("keydown", function (e) {
-    if (!activeCtx() || e.repeat) return;
-    const k = (e.key || "").toLowerCase();
-    const P = CBZ.player; if (!P) return;
-    if (k === "f") {
-      // flying → eject; on foot → board nearest owned aircraft if close.
-      // Both verbs run the elevator-grammar door arc when available: canopy
-      // pops open, you climb in/out through the opening, it closes.
-      // flying: [F] out is systems/seat_exit.js's (it consumes the press in the
-      // capture phase and calls cityPlayerAircraftExit, the same door arc).
-      if (P._aircraft) return;
-      if (P.driving) return;                // in a car — vehicles.js owns [F]
-      const c = nearestBoardable(P.pos.x, P.pos.z, 6.5);
-      if (c) {
-        e.preventDefault();
-        const doors = CBZ.aircraftDoorArc;
-        if (!(doors && !doors.active && doors.boardCraft(c, enterAircraft))) enterAircraft(c);
-      }
-    } else if (k === "b") {
-      // the F-22 is no longer buyable here — at the hangar without one, point the
-      // player at the steal-it path (storage.js owns the actual theft).
-      if (!P._aircraft && !P.driving && !g.cityOwnsJet && atHangar(P.pos.x, P.pos.z)) {
-        e.preventDefault(); jetNotBuyable();
-      }
-    }
-  });
+  let rideWired = false;
+  function wireRide() {
+    const II = CBZ.interactions;
+    if (rideWired || !II || !II.registerSource) return;
+    rideWired = true;
+    II.registerSource({
+      id: "src-owned-aircraft", kind: "owned-aircraft", layers: ["owned-aircraft"], prio: 8, driving: false,
+      find: function (px, pz, ctx, push) {
+        if (campaignActive()) return;
+        [heli, jet].forEach((c) => {
+          if (!c || !c.group || c === _aircraftFlying()) return;
+          const d = Math.hypot(c.pos.x - px, c.pos.z - pz);
+          if (d <= 6.5) push(c, d);
+        });
+      },
+    });
+    II.register("owned-aircraft", { id: "aircraft-board", slot: "e", ride: true, prio: 6, campaignSafe: true, label: "Board", onSelect: boardCraft });
+    II.describe("owned-aircraft", function (c) { return { label: c === jet ? "Jet" : "Helicopter" }; });
+  }
 
   // ============================================================
   //  FIRE MISSILES (left-click while flying)
@@ -3370,55 +3356,13 @@
   }
   function hideHud() { if (_hudEl) _hudEl.style.display = "none"; }
 
-  // A tiny icon-only proximity affordance. Boarding still uses the normal
-  // interaction key, but no control legend or mission prose floats in-world.
-  let _promptEl = null;
-  function promptEl() {
-    if (_promptEl) return _promptEl;
-    if (typeof document === "undefined" || !document.body) return null;
-    const d = document.createElement("div");
-    d.id = "cityAircraftPrompt";
-    d.style.cssText = "position:fixed;left:50%;bottom:140px;transform:translateX(-50%);" +
-      "font:700 15px/1.4 ui-sans-serif,system-ui,sans-serif;color:#ffe7a0;text-align:center;" +
-      "background:rgba(8,12,18,0.6);padding:7px 16px;border-radius:9px;border:1px solid rgba(255,210,120,0.35);" +
-      "pointer-events:none;z-index:60;display:none;text-shadow:0 1px 3px #000";
-    document.body.appendChild(d);
-    _promptEl = d;
-    return d;
-  }
-  function showPrompt(msg) {
-    const el = promptEl(); if (!el) return;
-    el.style.display = "block";
-    el.innerHTML = msg;
-  }
-  function hidePrompt() { if (_promptEl) _promptEl.style.display = "none"; }
-  // on-foot context: a board prompt near an owned craft, or a buy prompt at the
-  // hangar. Cheap distance checks; only runs when not flying / not driving.
-  function updatePrompt(P) {
-    if (campaignActive() || !P || P.dead || P._aircraft || P.driving || g.state !== "playing") { hidePrompt(); return; }
-    const x = P.pos.x, z = P.pos.z;
-    const c = nearestBoardable(x, z, 6.5);
-    // touch: the glyph becomes a BOARD pill (desktop keeps the bare "✈")
-    if (c) { showPrompt(CBZ.touchActionPrompt ? CBZ.touchActionPrompt("@cityAircraftBoardNearest", "BOARD", "") : ""); return; }
-    // A correct, in-place note ONLY when you're standing AT a hangar you OWN
-    // (penthouse deck OR the airport Private Hangar) but haven't bagged the jet
-    // yet — it tells you the next step. No persistent nag for the unowned case:
-    // the way to GET a hangar lives in the [P] phone / [G] storage menu, not a
-    // sticky on-screen prompt.
-    if (!g.cityOwnsJet && atHangar(x, z) && ownsAnyHangar()) {
-      showPrompt("◌");
-      return;
-    }
-    hidePrompt();
-  }
-
   // ============================================================
   //  SELF-HEAL + RESET
   // ============================================================
   // a light watchdog: re-place/refresh when a city is (re)built or ownership
   // flips, and tear down the jet meshes if a flag drops. Runs cheap.
   CBZ.onUpdate(13, function () {
-    if (g.mode !== "city") { hideHud(); hidePrompt(); return; }
+    if (g.mode !== "city") { hideHud(); return; }
     if (!arenaRoot()) return;
     const heliFlag = !!g.cityOwnsHeli, jetFlag = !!g.cityOwnsJet;
     // ownership flip (bought penthouse / jet, or a flag was cleared)
@@ -3434,7 +3378,7 @@
       if (!jet) placeJet();
     }
     if (!_aircraftFlying()) hideHud();
-    updatePrompt(CBZ.player);
+    wireRide();
   });
 
   function teardown() {
@@ -3467,7 +3411,7 @@
     }
     g.cityOwnsJet = false;          // heli/hangar flags belong to realestate's reset
     _lastHeliFlag = false; _lastJetFlag = false;
-    hideHud(); hidePrompt();
+    hideHud();
   }
   CBZ.cityPlayerAircraftReset = teardown;
 

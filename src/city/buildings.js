@@ -9384,7 +9384,6 @@
       drugs: "some product", hospital: "some meds", security: "some gear", bar: "a bottle",
       casino: "some chips", carlot: "a part", chop: "a part", barber: "supplies", gym: "supplies",
       cityhall: "some files" };
-    const S = { cur: null, curLot: null, prompt: null, lastTxt: "" };
 
     function G() { return CBZ.game; }
     function fmt$(n) { n = Math.round(n || 0); return "$" + String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
@@ -9416,31 +9415,42 @@
       return Math.round(band[0] + h * (band[1] - band[0]));
     }
 
-    // the shelf you're facing, within reach, of the nearest robbable shop.
-    function pick() {
+    // THE SHELVES ARE CANDIDATES (city/interactions.js registerFixtures): the
+    // shelves of every robbable shop near the point asked about. E pockets the
+    // one you face, a tap on one does the same. No private prompt, no private
+    // E listener. Each shelf remembers its lot for the clerk's eyes.
+    const _near = [];
+    function shelvesNear(px, pz) {
+      _near.length = 0;
       const arena = CBZ.city && CBZ.city.arena;
-      const lots = arena && arena.lots; if (!lots) { S.curLot = null; return null; }
-      const P = CBZ.player; if (!P) { S.curLot = null; return null; }
-      const px = P.pos.x, pz = P.pos.z;
-      const yaw = CBZ.cam ? CBZ.cam.yaw : 0, fx = -Math.sin(yaw), fz = -Math.cos(yaw);
-      let best = null, bestLot = null, bestScore = -1;
+      const lots = arena && arena.lots; if (!lots) return _near;
       for (let i = 0; i < lots.length; i++) {
         const lot = lots[i];
         if (!lot || !lot.building || lot.demolished) continue;
         const shs = lot.building.shoplift; if (!shs || !shs.length || flagship(lot)) continue;
         if (Math.abs(px - lot.cx) > 40 || Math.abs(pz - lot.cz) > 40) continue;   // cheap cull
-        for (let s = 0; s < shs.length; s++) {
-          const sh = shs[s];
-          const dx = sh.x - px, dz = sh.z - pz, d = Math.hypot(dx, dz);
-          if (d > REACH || d < 0.05) continue;
-          const dot = (dx / d) * fx + (dz / d) * fz;
-          if (dot < LOOK_DOT) continue;
-          const score = dot - d * 0.08;
-          if (score > bestScore) { bestScore = score; best = sh; bestLot = lot; }
-        }
+        for (let s = 0; s < shs.length; s++) { shs[s]._lot = lot; _near.push(shs[s]); }
       }
-      S.curLot = bestLot;
-      return best;
+      return _near;
+    }
+    let fixturesWired = false;
+    function wireFixtures() {
+      if (fixturesWired || !CBZ.interactions || !CBZ.interactions.registerFixtures) return;
+      fixturesWired = true;
+      CBZ.interactions.registerFixtures({
+        id: "shop-shelf", kind: "shop-shelf", prio: 7,
+        list: function (ctx, px, pz) { return isOn() ? shelvesNear(px, pz) : null; },
+        reach: function () { return REACH; },
+        dot: function () { return LOOK_DOT; },
+        verbs: [
+          { id: "shelf-pocket", slot: "e", prio: 5, bad: true, forceYes: true, label: "Pocket",
+            canShow: (sh) => remaining(sh) > 0, onSelect: (sh) => { grab(sh, sh._lot); } },
+        ],
+      });
+    }
+    function pick() {
+      const cur = CBZ.interactions && CBZ.interactions.currentCand ? CBZ.interactions.currentCand() : null;
+      return cur && cur.kind === "shop-shelf" ? cur.t : null;
     }
 
     function grab(sh, lot) {
@@ -9475,67 +9485,18 @@
       return { took: true, value: val, left: left };
     }
 
-    function promptEl() {
-      if (S.prompt) return S.prompt;
-      if (typeof document === "undefined" || !document.body) return null;
-      const d = document.createElement("div");
-      d.id = "shopliftPrompt";
-      d.style.cssText = "position:fixed;left:50%;bottom:186px;transform:translateX(-50%);z-index:46;display:none;" +
-        "background:rgba(13,16,21,.9);border:1px solid #3a4150;border-radius:12px;padding:7px 14px;color:#e8eef7;" +
-        "font-family:Fredoka,system-ui,sans-serif;font-size:15px;pointer-events:auto;cursor:pointer;text-align:center;max-width:78vw";
-      d.addEventListener("click", function () { if (S.cur) grab(S.cur, S.curLot); });   // tap-to-act (mobile)
-      document.body.appendChild(d);
-      S.prompt = d;
-      return d;
-    }
-    function showPrompt(txt) {
-      const el = promptEl(); if (!el) return;
-      if (CBZ.touchPromptHTML) txt = CBZ.touchPromptHTML(txt);   // touch: [E] → tappable verb pill
-      if (txt !== S.lastTxt) { el.innerHTML = txt; S.lastTxt = txt; }
-      if (el.style.display !== "block") el.style.display = "block";
-    }
-    function hidePrompt() { if (S.prompt && S.prompt.style.display !== "none") S.prompt.style.display = "none"; S.cur = null; }
-    function promptText(sh, lot) {
-      const left = remaining(sh);
-      if (left <= 0) return "<span style='color:#7f8794'>Picked clean.</span>";
-      if (clerkSees(lot, sh.x, sh.z))
-        return "<span style='color:#ff9e9e'>" + clerkName(lot) + " is watching this shelf.</span> <span style='color:#7f8794'>· wait for them to look away</span>";
-      return "<b style='color:#ffd166'>[E]</b> Pocket it <span style='color:#7f8794'>· " + left + " on the shelf · they're not looking</span>";
-    }
-
-    CBZ.onUpdate(38.5, function () {
-      const g = G();
-      if (!isOn() || !g || g.mode !== "city") { hidePrompt(); return; }
-      if (g.state !== "playing" || !CBZ.player || CBZ.player.dead || CBZ.player.driving || CBZ.cityMenuOpen) { hidePrompt(); return; }
-      const sh = pick();
-      if (!sh) { hidePrompt(); return; }
-      S.cur = sh;
-      showPrompt(promptText(sh, S.curLot));
-    });
-
-    // [E] pockets the shelf you're facing. CAPTURE phase + stopImmediatePropagation
-    // so one press doesn't ALSO open the clerk's counter menu (the gunstore/jewelry
-    // pattern); only fires when a shelf is actually targeted (S.cur set above).
-    addEventListener("keydown", function (e) {
-      const g = G();
-      if (!S.cur || !isOn() || !g || g.mode !== "city" || g.state !== "playing") return;
-      if (CBZ.cityMenuOpen || (CBZ.player && (CBZ.player.driving || CBZ.player.dead))) return;
-      if ((e.key || "").toLowerCase() !== "e") return;
-      e.preventDefault();
-      if (e.stopImmediatePropagation) e.stopImmediatePropagation();
-      e.stopPropagation();
-      grab(S.cur, S.curLot);
-    }, true);
+    wireFixtures();
+    if (!fixturesWired && CBZ.onUpdate) CBZ.onUpdate(38.5, function () { wireFixtures(); });
 
     // ---- headless / harness handles (gunstore-style) ----
     CBZ.cityShopliftState = function () {
-      const sh = S.cur;
+      const sh = pick();
       return { target: sh ? { x: sh.x, z: sh.z, kind: sh.kind, left: remaining(sh) } : null,
-               watched: !!(sh && S.curLot && clerkSees(S.curLot, sh.x, sh.z)) };
+               watched: !!(sh && sh._lot && clerkSees(sh._lot, sh.x, sh.z)) };
     };
     // grab from the shelf currently in reach/aim (same as pressing [E]); returns
     // {took, caught, value, left} so a probe can assert LOS + depletion.
-    CBZ.cityShopliftGrab = function () { const sh = pick(); return grab(sh, S.curLot); };
+    CBZ.cityShopliftGrab = function () { const sh = pick(); return grab(sh, sh && sh._lot); };
     // enumerate the robbable shelves of the nearest shop (probes / tools).
     CBZ.cityShopliftShelves = function () {
       const arena = CBZ.city && CBZ.city.arena, lots = arena && arena.lots;
