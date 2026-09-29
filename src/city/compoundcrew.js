@@ -158,7 +158,7 @@
   }
 
   // ---- persisted roster ---------------------------------------------------
-  function dayNow() { return CBZ.dayCount ? (CBZ.dayCount() | 0) : 0; }
+  function dayNow() { return CBZ.paceDay ? (CBZ.paceDay() | 0) : 0; }
   function crewData(plot) {
     if (!plot.data) plot.data = {};
     let d = plot.data.crew;

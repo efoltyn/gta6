@@ -3687,8 +3687,8 @@
 
   // ---- the crowd's HOUR is the sky's hour. There is ONE city clock:
   //      core/daynight.js (CBZ.dayPhase 0..1, sunrise at 0, CBZ.dayCount the
-  //      calendar). This file used to run its own 360 s loop next to the sky's
-  //      150 s one, so the peds' "10am errands", the hitman's watch and the
+  //      sky calendar; a 48-minute city day). This file used to run its own
+  //      360 s loop next to the sky's, so the peds' "10am errands", the hitman's watch and the
   //      broker's schedule (all cityHour) drifted off the sun and the morning
   //      paper (dayCount). cityHour is now a VIEW of the sky: hour = phase*24+6.
   //      Passing a number moves the sky itself, so there is nothing to sync.

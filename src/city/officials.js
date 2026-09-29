@@ -170,7 +170,7 @@
   const MAYOR_ID = "libertyville";   // still used to seed the founding mayor's identity wealth (see mintHolder) — P5 generalized the PHYSICAL PRESENCE section below off every office, not just this one
   const KIND_TERM_DAYS = { city: 7, state: 14, federal: 14, country: 28 };
   /* THE PLAYER'S PRESIDENCY IS A SHORT TERM. A 28-day country term is 70 real
-     minutes at the city's 150 s day — longer than any session, so the ballot
+     minutes at a 150 s PACE day (polity.js's worldDay) — longer than any session, so the ballot
      that could end a presidency never arrives and the mode has no clock. When
      the PLAYER holds a country seat (sworn in by origin or by winning) the
      term is PRESIDENT_TERM_DAYS (7 days ≈ 17 min; elections.js's 2-day

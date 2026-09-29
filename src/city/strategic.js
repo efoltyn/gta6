@@ -2480,7 +2480,7 @@
     R_KILL: 175,         // fallback only; nkKillR() below is the live answer
     R_PLAYER: 160,       // fallback only; nkPlayerR() below is the live answer
     RAD_R: 70,           // fallback only; nkRadR() below is the live answer
-    RAD_DAYS: 1.2,       // in-game days the zone stays hot
+    RAD_DAYS: 1.2,       // PACE days (150 real s each, CBZ.paceTime) the zone stays hot
     /* ---- THE PLANTED-DEVICE CLOCK, and why it is not 45 any more ---------
        RESEARCH. The real article is the SADM (Special Atomic Demolition
        Munition, W54) and its bigger brother the MADM (W45): hand-emplaced by
@@ -2646,7 +2646,7 @@
     // The shared airstrike/RPG near-field already lays one central blast stain.
     // Do not add evenly spaced scorch decals here: from altitude they merge
     // into the exact fake ground ring a real pressure front does not leave.
-    radZones.push({ x: x, z: z, r: nkRadR(), until: (CBZ.dayTime ? CBZ.dayTime() : 0) + NK.RAD_DAYS });
+    radZones.push({ x: x, z: z, r: nkRadR(), until: (CBZ.paceTime ? CBZ.paceTime() : 0) + NK.RAD_DAYS });
 
     // degrade path only — see whiteout()'s note. With nukefx.js loaded the
     // composer owns the flash, the fireball, the stem and the cap.
@@ -2963,7 +2963,7 @@
     _lastEl = el;
     // radiation zones tick even after the resolution finishes
     if (radZones.length) {
-      const now = CBZ.dayTime ? CBZ.dayTime() : 0;
+      const now = CBZ.paceTime ? CBZ.paceTime() : 0;
       const P = CBZ.player;
       for (let i = radZones.length - 1; i >= 0; i--) {
         const zn = radZones[i];

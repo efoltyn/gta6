@@ -2579,7 +2579,7 @@
   //  lockdown of the capital, and a junta when nobody legal is left to sit.
   // ============================================================
   const PLAYER_SID_ = (CBZ.officials && CBZ.officials.PLAYER_SID) || "player";
-  const LOCKDOWN_DAYS = 1.4;          // ~3.5 real minutes of roadblocks and closed gates
+  const LOCKDOWN_DAYS = 1.4;          // PACE days: ~3.5 real minutes of roadblocks and closed gates
   const SEAM = { subs: [], fired: {}, lock: { active: false, since: 0, until: 0, reason: null }, pollT: 0, lastSid: null, lastPed: null, wrapped: false };
   function dayTime() { return CBZ.dayTime ? CBZ.dayTime() : day(); }
   function presRec() {
@@ -2630,7 +2630,9 @@
   function setLockdown(active, reason) {
     const L = SEAM.lock;
     if (active) {
-      L.active = true; L.since = dayTime(); L.until = L.since + LOCKDOWN_DAYS; L.reason = reason || "assassination";
+      // stamped on the SKY clock (president_public.js compares it to the
+      // appearance timetable) but sized in PACE days of real play
+      L.active = true; L.since = dayTime(); L.until = L.since + LOCKDOWN_DAYS * CBZ.PACE_DAY_SECONDS / CBZ.dayCycleSeconds(); L.reason = reason || "assassination";
     } else {
       if (!L.active) return;
       L.active = false; L.reason = null;

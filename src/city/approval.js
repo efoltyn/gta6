@@ -200,7 +200,7 @@
   if (!CBZ) return;
   const g = CBZ.game;
 
-  const HOUR = 150 / 24;          // seconds per in-game hour — matches every other sim/*.js tick
+  const HOUR = CBZ.PACE_DAY_SECONDS / 24;          // one PACE hour in real s (core/daynight.js): gameplay pace, not the sun
   const TAU = 90;                 // V.3's convergence time constant (seconds)
   const HIST_SAMPLE = HOUR / 2;   // one sample every 30 in-game minutes
   const HIST_CAP = 48;            // 48 half-hourly samples = one full in-game day of sparkline

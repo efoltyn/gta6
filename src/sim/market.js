@@ -67,9 +67,9 @@
   };
   function categoryOfTag(tag) { return TAG2CAT[tag] || "goods"; }
 
-  // ---- tuning (VI.2: "one game hour ≈ 6.25s" — core/daynight.js's day
-  // cycle is CYCLE=150s / 24h = 6.25s/hr, matched here exactly) -----------
-  const HOUR = 150 / 24;     // seconds per in-game hour
+  // ---- tuning (VI.2: "one game hour ≈ 6.25s" — a PACE hour, 150 s / 24,
+  // which the economy keeps even though the city sky now runs 48 minutes) ---
+  const HOUR = CBZ.PACE_DAY_SECONDS / 24;     // one PACE hour in real s (core/daynight.js): gameplay pace, not the sun
   const REVERT = 0.05;       // /hr mean-reversion toward 1.0 (gentle)
   const NOISE = 0.02;        // /hr seeded-LCG noise amplitude (±)
   const CLAMP_LO = 0.6, CLAMP_HI = 1.8;   // gentle this wave; M-stage widens it

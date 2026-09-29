@@ -52,7 +52,14 @@
   // ---- the SUN HOUR: 0..24 derived from the sun's actual arc (sunrise 6,
   //      noon 12, sunset 18, midnight 0). Cached at 8Hz — every read below
   //      (proposer, fast-forward, vendor till) uses the cache. ----
-  const DAY_SECS = 150;            // mirrors core/daynight.js CYCLE
+  // TWO CLOCKS, on purpose (core/daynight.js owns both):
+  //  - WHICH activity an identity is doing is WORLD time: the sky hour, now a
+  //    48-minute GTA day (the vendor is at his stall at 10am, whatever pace).
+  //  - HOW MUCH it earns/eats per hour is GAMEPLAY pace: a PACE hour
+  //    (CBZ.PACE_DAY_SECONDS/24 real s) — the same hour hunger.js drains on,
+  //    so a paged-out identity lives exactly as fast as a live one.
+  function paceHourSecs() { return CBZ.PACE_DAY_SECONDS / 24; }
+  function skyHourSecs() { return CBZ.hourSeconds ? CBZ.hourSeconds() : paceHourSecs(); }
   let _h = 9, _hT = 0;
   function computeHour() {
     if (CBZ.sunAngle != null) return (((CBZ.sunAngle / (Math.PI * 2)) * 24) + 6) % 24;
@@ -305,10 +312,11 @@
   // the trap), so the window to rob a dealer fat is REAL, not cosmetic.
   function fastForward(e) {
     const t = wall();
-    let hrs = (t - (e.t || t)) / 1000 * (24 / DAY_SECS);
+    let hrs = (t - (e.t || t)) / 1000 / paceHourSecs();   // PACE hours lived off-page
     e.t = t;
     if (hrs > 0) {
-      if (hrs > 48) hrs = 48;                        // two city days max — no infinities
+      if (hrs > 48) hrs = 48;                        // two pace days max — no infinities
+      const skyPerPace = paceHourSecs() / skyHourSecs();   // sky hours per pace hour
       let cash = e.cash | 0;
       // X2: the ledger half of the hunger loop — a compact 0..100 hunger
       // rides beside cash and drains/auto-eats over the SAME offline hours,
@@ -318,7 +326,7 @@
       const n = Math.ceil(hrs);
       for (let i = 0; i < n; i++) {
         const span = Math.min(1, hrs - i);
-        const hh = (_h - hrs + i + 240) % 24;        // the hour this slice happened at
+        const hh = ((_h - (hrs - i) * skyPerPace) % 24 + 24) % 24;   // the SKY hour this slice happened at
         const act = actOf(e.k, hh, e.salt, e.job);
         if (act === "stash") cash = Math.min(cash, 40);
         else if (act === "work") cash += wageOf(e.job) * span * (0.6 + (e.wealth || 0.3) * 0.8);
@@ -476,7 +484,7 @@
       }
       let e = led[v._sid];
       if (!e) { CBZ.cityPedStash(v); e = led[v._sid]; if (!e) continue; }
-      const eHrs = Math.min(2, (t - (e.accT || t)) / 1000 * (24 / DAY_SECS));
+      const eHrs = Math.min(2, (t - (e.accT || t)) / 1000 / paceHourSecs());   // pace hours
       e.accT = t;
       if (actOf("vendor", _h, e.salt) === "stall") v.cash = Math.min(600, (v.cash | 0) + Math.round((RATE.stall || 0) * eHrs));
       CBZ.cityPedStash(v);                           // refresh the page from the live till

@@ -54,12 +54,11 @@
    instead of a rect scan). The cache is cleared whenever the roster
    changes (registerCity, reset).
 
-   WORLDDAY: daynight.js runs a continuous 0..1 CBZ.dayPhase() with NO
-   day counter (that file's own header says so). This adds one: a plain
-   onAlways tick (order 3 — one slot after daynight.js's own order-2 tick,
-   so it reads THIS frame's already-advanced phase) watches for the phase
-   wrapping (new < old − 0.5, i.e. a big backward jump = a lap of the
-   150s cycle) and increments a day counter + fires every CBZ.onNewDay(fn)
+   WORLDDAY: the political/economic calendar. A plain onAlways tick (order
+   3 — one slot after daynight.js's own order-2 tick) watches daynight.js's
+   PACE clock (CBZ.paceDay: one per 150 real seconds, NOT the sun, whose
+   city day is now 48 minutes) and on each new pace day increments a day
+   counter + fires every CBZ.onNewDay(fn)
    subscriber (each isolated in its own try/catch — one bad subscriber,
    e.g. a broken election check, must never wedge everyone else's tick).
    CBZ.worldDay() is exposed getter/setter-style like CBZ.dayPhase (no
@@ -407,7 +406,7 @@
   }
 
   // ============================================================
-  //  WORLDDAY — a monotonic counter on top of daynight.js's 0..1 phase
+  //  WORLDDAY — a monotonic counter of daynight.js's PACE days (150 real s)
   // ============================================================
   let day = 0;
   let lastPhase = null; // null = "haven't sampled a phase yet" (no wrap on frame 1)
@@ -429,12 +428,24 @@
     if (lastPhase != null && phase < lastPhase - 0.5) { day++; fireNewDay(); }
     lastPhase = phase;
   }
+  /* THE WORLD DAY IS A PACE DAY. Every onNewDay subscriber (elections,
+     approval, bonds, inflation, officials, the regime clock...) was tuned on
+     the old 150 s sky day. The city sky now runs a 48-minute GTA day, so this
+     counter follows core/daynight.js's PACE clock (CBZ.paceDay, 150 real s)
+     instead of the sun's midnight — the politics keep their real-time pace.
+     A skip (sleep) that crosses pace days fires each one. */
+  let lastPace = null;
   if (CBZ.onAlways) {
-    // order 3 — one slot after daynight.js's own order-2 tick, so `p` below
-    // is THIS frame's already-advanced (and already wrapped-mod-1) phase.
+    // order 3 — one slot after daynight.js's own order-2 tick (THIS frame's clock)
     CBZ.onAlways(3, function () {
-      if (!CBZ.dayPhase) return;
-      checkDayWrap(CBZ.dayPhase());
+      if (!CBZ.paceDay) return;
+      const pd = CBZ.paceDay();
+      // a jump of more than 3 is a clock RESTORE (netpersist loading a save's
+      // pace clock), not days lived: resync silently, never fire a backlog
+      if (lastPace != null && pd > lastPace && pd - lastPace <= 3) {
+        for (let k = pd - lastPace; k > 0; k--) { day++; fireNewDay(); }
+      }
+      lastPace = pd;
     });
   }
 
@@ -488,6 +499,7 @@
     buildRecords();
     day = 0;
     lastPhase = null;
+    lastPace = null;
   }
 
   buildRecords(); // boot-time build so CBZ.polity.of/get/etc. work immediately

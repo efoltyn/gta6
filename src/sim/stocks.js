@@ -145,7 +145,7 @@
   const PE_SECTOR = { food: 18, casino: 14, guns: 10, materials: 12, fuel: 11, luxury: 20, reit: 16, media: 13, default: 15 };
 
   // ---- tuning (E6 constants, all in one place) ---------------------------
-  const HOUR = 150 / 24;          // seconds per in-game hour — matches corporations.js exactly
+  const HOUR = CBZ.PACE_DAY_SECONDS / 24;          // one PACE hour in real s (core/daynight.js): gameplay pace, not the sun
   const ANCHOR_EPS_WINDOW = 7;    // trailing daily-earnings samples averaged into dailyEPS
   const ANCHOR_MULT = 30;         // "game-month multiple" stand-in for a real annualized P/E — see header
   const ANCHOR_FLOOR = 0.5, ANCHOR_CAP = 500;
@@ -518,7 +518,7 @@
   // (rec.ipo = true; see wealth.js's bizRate() guard) so the SAME dollars
   // don't double-pay through both systems from here on. ---------------------
   const IPO_PLAYER_FRAC = 0.40;
-  const IPO_DAY_SECONDS = 150;   // core/daynight.js's CYCLE — one real-clock game-day, wealth.js's bizRate() is $/real-sec
+  const IPO_DAY_SECONDS = CBZ.PACE_DAY_SECONDS;   // one PACE day (core/daynight.js) of real seconds; wealth.js's bizRate() is $/real-sec
   // wealth.js BIZ `kind` -> a stock sector (documented mapping; front/gig
   // fronts read as consumer "goods", supply chains as "materials", the two
   // vanity/high-roller kinds as "luxury", casino/invest map directly).

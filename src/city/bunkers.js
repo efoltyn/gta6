@@ -412,7 +412,7 @@
         id: "bunkercrate-take", slot: "e",
         label: function (t) {
           if (t.kind === "armory") {
-            const day = CBZ.dayCount ? CBZ.dayCount() : 0;
+            const day = CBZ.paceDay ? CBZ.paceDay() : 0;
             return day < t.nextRestock ? "Ordnance crate, restocks tomorrow" : "Take bunker-buster bombs (2)";
           }
           return t.taken ? "The cache is cleaned out" : "Crack open the supply cache";
@@ -428,7 +428,7 @@
                anyone on day one. */
             const L = CBZ.cityLock ? CBZ.cityLock({ id: "bunker-armory", verb: "armory", label: "The ordnance crate", orgs: ["army", "military"], wasOpen: true }) : { open: true };
             if (!L.open) { if (CBZ.city && CBZ.city.note) CBZ.city.note(L.line, 3.2); return; }
-            const day = CBZ.dayCount ? CBZ.dayCount() : 0;
+            const day = CBZ.paceDay ? CBZ.paceDay() : 0;
             if (day < t.nextRestock) { if (CBZ.city && CBZ.city.note) CBZ.city.note("The quartermaster restocks the penetrators daily.", 2); return; }
             t.nextRestock = day + 1;
             // the hands go into the crate (systems/verbs_pickup.js); loaded on the grab frame

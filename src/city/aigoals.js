@@ -202,10 +202,11 @@
   // of day (peds.js reads it off CBZ.dayPhase) — use it for WITHIN-day schedules.
   function nightAmt() { return CBZ.nightAmount == null ? 0 : CBZ.nightAmount; }
   function hourNow() { return CBZ.cityHour ? CBZ.cityHour() : 12; }
-  // a MONOTONIC city-DAY index: the sky's calendar (CBZ.dayCount, one per
-  // sunrise). Used purely as a once-per-day STAMP for rent (so a tenant pays on
-  // their FIRST home arrival each day, never every dusk loop).
-  function dayIndex() { return CBZ.dayCount ? (CBZ.dayCount() | 0) : Math.floor((CBZ.now || 0) / 150000); }
+  // a MONOTONIC PACE-day index (core/daynight.js: one per 150 real s, NOT the
+  // 48-minute sky day). Used purely as a once-per-day STAMP for rent (so a
+  // tenant pays on their FIRST home arrival each pace day, never twice in one)
+  // at the real-time rate rent was tuned on.
+  function dayIndex() { return CBZ.paceDay ? (CBZ.paceDay() | 0) : 0; }
 
   // nearest shop lot of the given kinds WITH a usable door (bounded scan)
   function lotNear(A, x, z, kinds, maxd) {

@@ -130,7 +130,7 @@
   function econ() { return CBZ.cityEcon || null; }
   function fmt$(n) { n = Math.round(n || 0); return "$" + String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
   function hash01(x, z, k) { return CBZ.hash01 ? CBZ.hash01(x, z, k) : 0.5; }
-  function today() { return (CBZ.dayCount ? CBZ.dayCount() : 0) | 0; }
+  function today() { return (CBZ.paceDay ? CBZ.paceDay() : 0) | 0; }
 
   /* ============================================================
      0. SHARED MATERIALS + THE LABEL ATLAS (built once, never freed)

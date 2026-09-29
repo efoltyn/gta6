@@ -4,7 +4,7 @@
    Pound a building with enough ordnance and it comes DOWN — and then the
    city visibly heals: smoking rubble → cleared lot behind barriers →
    scaffolding → rebuilt, advancing on the in-game calendar
-   (CBZ.dayCount/dayTime from core/daynight.js). No popups, no timers on
+   (CBZ.paceTime, core/daynight.js's gameplay pace clock). No popups, no timers on
    the HUD: you learn the state of a lot by looking at it.
 
    Architecture (mirrors city/fracture.js, its wall-scale ancestor):
@@ -52,7 +52,7 @@
   if (CBZ.CONFIG.DEMO_MORPH_V1 == null) CBZ.CONFIG.DEMO_MORPH_V1 = true;
 
   // ---- tuning ------------------------------------------------------------
-  // phases in in-game DAYS since collapse (1 day = 150s real — daynight.js)
+  // phases in in-game DAYS since collapse (PACE days: 150 real s each, CBZ.paceTime — the sky day is 48 min now)
   const T_CLEARED = 2.2;    // rubble sits smoking this long
   const T_SCAFFOLD = 4.2;   // then a cleared, barriered lot
   const T_REBUILT = 7.0;    // then scaffolding, then the building returns
@@ -693,7 +693,7 @@
     if (b.home) { b.home._demoListed = b.home.listed; b.home.listed = false; }
 
     const rec = {
-      k: keyOf(lot), lot, at: opts.at != null ? opts.at : (CBZ.dayTime ? CBZ.dayTime() : 0),
+      k: keyOf(lot), lot, at: opts.at != null ? opts.at : (CBZ.paceTime ? CBZ.paceTime() : 0),
       phase: 0, propGroup: null, propCols: [], rubbleDetailed: false,
       held: !!(opts.held || lot._plotHold),
     };
@@ -777,7 +777,7 @@
   }
 
   function phaseFor(rec) {
-    const now = CBZ.dayTime ? CBZ.dayTime() : 0;
+    const now = CBZ.paceTime ? CBZ.paceTime() : 0;
     const el = now - rec.at;
     if (rec.held) return el >= T_HELD_CLEAR ? 4 : 1;
     return el >= T_SCAFFOLD ? 3 : el >= T_CLEARED ? 2 : 1;
@@ -937,7 +937,7 @@
     spHydrate();
     stepTweens();                    // advance transition FX (a final rebuild's scaffold retracts even after the ledger empties)
     if (!ledger.size) return;
-    const now = CBZ.dayTime ? CBZ.dayTime() : 0;
+    const now = CBZ.paceTime ? CBZ.paceTime() : 0;
     const recs = Array.from(ledger.values());
     // A whole district heals in ONE tick after a load (or after a day-jump), and
     // each rebuild() otherwise builds its own O(city) membership Set. Count the
@@ -984,7 +984,7 @@
     if (!row) return false;
     const A = arena();
     if (!A || !A.lots) return false;
-    const now = CBZ.dayTime ? CBZ.dayTime() : 0;
+    const now = CBZ.paceTime ? CBZ.paceTime() : 0;
     if (!row.h && row.at != null && now - row.at >= T_REBUILT) return false;   // already healed
     let best = null, bd = 1e9;
     for (const lot of A.lots) {
@@ -1011,7 +1011,7 @@
     lot._plotHold = false;
     if (rec && rec.held) {
       rec.held = false;
-      const now = CBZ.dayTime ? CBZ.dayTime() : 0;
+      const now = CBZ.paceTime ? CBZ.paceTime() : 0;
       rec.at = now - T_CLEARED;
       setPhase(rec, phaseFor(rec));
     }
@@ -1103,7 +1103,7 @@
 
      THE ONE REAL BLOCKER, AND ITS FIX: the SP ledger does NOT persist the
      calendar. CBZ.dayCount/dayPhase ride only the MP world blob
-     (netpersist.js:140-141). Our rows are stamped in ABSOLUTE CBZ.dayTime()
+     (netpersist.js:140-141). Our rows are stamped in ABSOLUTE CBZ.paceTime()
      units, so a `at: 12.4` from a save made on day 12 is meaningless against a
      fresh-boot clock sitting at ~0 — phaseFor() would read el = -12 and freeze
      every pile at phase 1 for twelve in-game days before the arc even started.
@@ -1131,7 +1131,7 @@
     if (_spHydrated !== led) return;
     if (!ledger.size) { if (led.demo) led.demo = null; return; }   // a fully healed city stops carrying rows
     const blob = D.serialize();
-    blob.now = +(CBZ.dayTime ? CBZ.dayTime() : 0).toFixed(3);      // the clock these `at`s are relative to
+    blob.now = +(CBZ.paceTime ? CBZ.paceTime() : 0).toFixed(3);      // the clock these `at`s are relative to
     led.demo = blob;
   }
   let _spWrapped = false;
@@ -1167,7 +1167,7 @@
     if (CBZ.net && CBZ.net.active) return;
     const blob = led.demo;
     if (!blob || blob.v !== 1 || !Array.isArray(blob.list) || !blob.list.length) return;
-    const now = CBZ.dayTime ? CBZ.dayTime() : 0;
+    const now = CBZ.paceTime ? CBZ.paceTime() : 0;
     const base = (typeof blob.now === "number" && isFinite(blob.now)) ? blob.now : null;
     // REBASE (see the block comment): preserve each row's AGE, not its absolute
     // timestamp, because the SP ledger carries no clock. Without `blob.now` —

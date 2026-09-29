@@ -54,7 +54,9 @@
        off the SAME dayPhase wrap. It is deliberately NOT used here: its own
        header says "worldDay does NOT survive reset(): a fresh run is day 0,
        always", and it only exists once polity.js has loaded.
-   So the birth ledger below stamps CBZ.dayTime() — the one clock that is
+   So the birth ledger below stamps CBZ.paceTime() (daynight.js's PACE
+   clock — the sky's dayTime now runs a 48-minute city day, which would
+   have made everyone age 19x slower) — the one clock that is
    (a) continuous (a fraction of a day is a real fraction of a life at this
    scale), (b) monotonic, and (c) already persisted by the existing save.
 
@@ -93,7 +95,7 @@
   // ---- STATE -------------------------------------------------------------
   let edges = [];              // { k, a, b, since, end, why }
   let dead = Object.create(null); // sid -> true (the sole liveness authority — see header)
-  let born = Object.create(null); // sid -> bornDay (CBZ.dayTime() units — W13, see header)
+  let born = Object.create(null); // sid -> bornDay (CBZ.paceTime() units — W13, see header)
   let idx = null;               // sid -> edge[] (lazy, rebuilt on dirty)
   let idxDirty = true;
 
@@ -105,12 +107,11 @@
   // ---- W13: the CALENDAR read. Continuous days-elapsed, guarded three deep
   // so a load-order change (or a harness with no daynight.js) can only ever
   // make every birthday "day 0" — never throw. ----
+  // GAMEPLAY PACE, not the sun: ageing counts PACE days (core/daynight.js,
+  // 150 real s each, persisted), so a child still grows a year every 150 s
+  // of play while the city's sky runs a 48-minute day.
   function dayNow() {
-    if (typeof CBZ.dayTime === "function") return CBZ.dayTime();
-    if (typeof CBZ.dayCount === "function") {
-      return CBZ.dayCount() + (typeof CBZ.dayPhase === "function" ? CBZ.dayPhase() : 0);
-    }
-    return 0;
+    return typeof CBZ.paceTime === "function" ? CBZ.paceTime() : 0;
   }
   // How many YEARS of a life one world-day buys. city/childhood.js owns this
   // flag's real home and its documentation; read defensively here so a

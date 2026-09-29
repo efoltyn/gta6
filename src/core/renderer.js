@@ -492,7 +492,7 @@
   renderer.debug.checkShaderErrors = !!CBZ.CONFIG.GFX_SHADER_DIAGNOSTICS;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap; // softer shadow edges; res driven by core/quality.js
-  // The sun creeps across the sky over a 150s day/night cycle, so the shadow
+  // The sun creeps across the sky (core/daynight.js's per-mode day), so the shadow
   // map barely changes frame-to-frame. Re-rendering the entire scene from the
   // light's POV every frame is wasted work — instead we drive updates manually
   // (see the throttle below), which reclaims a full shadow pass on most frames.
