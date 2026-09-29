@@ -1089,6 +1089,14 @@
     }
     const K = massifAmp();
     if (K !== 1 && h > 0 && mtnHiGate) h *= 1 + (K - 1) * mtnHiGate(h);
+    // THE RANGE HAS NO WALLS (owner, of the flyover: "cone mountains standing
+    // on a flat square plate"). The field used to run at full height to the
+    // envelope's edge and stop, so the families on its rim ended in a cliff
+    // down to the plain. It now eases to nothing over the last 520 m, and
+    // city/continent.js's foothills (up to ~58 m within 2.8 km of this rect)
+    // rise to meet it: the range stands on its own apron.
+    const dIn = Math.min(x - GREAT_A_MINX, GREAT_A_MAXX - x, z - GREAT_A_MINZ, GREAT_A_MAXZ - z);
+    if (dIn < 520) { const t = dIn / 520; h *= t * t * (3 - 2 * t); }
     return Math.max(0, h);
   }
   CBZ.mtnGreatBounds = { minX: GREAT_MINX, maxX: GREAT_MAXX, minZ: GREAT_MINZ, maxZ: GREAT_MAXZ };
@@ -1602,7 +1610,13 @@
           // is what says "snow" outside the rect, and it is what the backdrop
           // ranges (world/terrain_overhaul.js snowSector) stand behind.
           spread: { west: 220 * FSC, east: 230 * FSC, north: 430 * FSC, south: 220 * FSC },
-          inner: 0xe1e8e8, outer: 0x9fb2a8, featherNorm: 0.30,
+          // ALPINE TURF, NOT SNOW. The plate out here is lowland at y ~ 0,
+          // where a noon world with green trees holds no snow; painted
+          // 0xe1e8e8 (decoded, 77% reflectance) it read as a pale mint-white
+          // apron round the massif. It now continues the massif's own
+          // tundra edge (tundraEdge 0x5e6f52): snow lies where the relief
+          // is high enough to hold it (the massif's own cover), not here.
+          inner: 0x646d55, outer: 0x5a6849, featherNorm: 0.30,
           y: 0.006, seed: 0x53170, owner: "snow",
         });
       }
@@ -1851,7 +1865,9 @@
             const scaled = Math.pow(m.s, 0.62);
             return { x: m.x + DX, z: m.z + DZ, rx: 350 + 180 * scaled, rz: 310 + 165 * scaled };
           }),
-          inner: 0xe8eef0, outer: 0xaebfba,
+          // alpine turf round the feet, as Mount Mercy's apron above (the
+          // snow is on the summits, the range's own cover)
+          inner: 0x676e58, outer: 0x5c684b,
           roundness: 2.75, featherNorm: 0.30, seed: 0x6a4e91,
         });
       }

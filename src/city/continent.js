@@ -71,13 +71,7 @@
   //   colour, and slope/treeline/clearing rejection sampling.
   if (CFG.CONTINENT_RELIEF_EROSION == null) CFG.CONTINENT_RELIEF_EROSION = true;
   if (CFG.CONTINENT_FOREST_V2 == null) CFG.CONTINENT_FOREST_V2 = true;
-  //  RELIEF_MACRO — one continent-wavelength (2.9km) uplift field organising
-  //   the backcountry hills into broad uplands/plains, tanh-saturated under
-  //   24u so it can never cross the math gate's 25u mountain threshold.
-  //   The measured backcountry mean was 8.7m on an ~11km plate — relief three
-  //   orders of magnitude under the horizontal scale reads as dead flat from
-  //   any altitude. `?cfg_CONTINENT_RELIEF_MACRO=0` reverts to that.
-  if (CFG.CONTINENT_RELIEF_MACRO == null) CFG.CONTINENT_RELIEF_MACRO = true;
+  //  (RELIEF_MACRO and the rim law are retired: see THE LANDFORM in the builder.)
   //  LANDCOVER_V2 — smooth multi-scale land-use fields replace the hashed
   //   22/90u colour cells whose hard edges dissolved into orange/green
   //   confetti from any altitude. `?cfg_CONTINENT_LANDCOVER_V2=0` reverts.
@@ -410,6 +404,7 @@
 
   CBZ.addLandmass(function (city) {
     if (CFG.CITY_CONTINENT === false) return;
+    const T_BUILD0 = (typeof performance !== "undefined" && performance.now) ? performance.now() : 0;
     const regs = (city.regions || []).slice();
     const waterBodies = (city.waterBodies || []).slice();
     if (!regs.length) return;
@@ -553,7 +548,15 @@
     // after noise was added. A broad corner radius changes the land silhouette
     // while the expanded margin keeps the full authored union untouched.
     const coastCX = (minX + maxX) * 0.5, coastCZ = (minZ + maxZ) * 0.5;
-    const coastRadius = Math.min(320, Math.min(W, D) * 0.12);
+    // THE FRONTIER LOOP'S SETBACK, declared once (the relief gate, the loop
+    // builder and the coast cap below all read it). It was 190 m, which left
+    // the coast room for 64 m of wobble: a ruled line round a rectangle.
+    // At 760 m the sea may bite real bays out of the belt and the loop still
+    // runs on dry land everywhere (coastInset is capped against it).
+    const FRONTIER_IN = COAST ? 760 : 36;
+    // Corner radius <= the setback: the rounded frame's inside distance is then
+    // exactly FRONTIER_IN along the whole loop, corners included.
+    const coastRadius = Math.min(FRONTIER_IN - 60, Math.min(W, D) * 0.12);
     function plateInsideDistance(x, z) {
       const qx = Math.abs(x - coastCX) - (W * 0.5 - coastRadius);
       const qz = Math.abs(z - coastCZ) - (D * 0.5 - coastRadius);
@@ -561,14 +564,23 @@
       const inside = Math.min(Math.max(qx, qz), 0);
       return -(outside + inside - coastRadius);
     }
-    // Broad headlands/bays plus a smaller notch field; these amplitudes remain
-    // below the relocated frontier loop's dry-land clearance.
+    // THE COASTLINE (owner: "the coast is a razor-straight line around a
+    // rectangular continent"). It was a 10-74 m wobble on a 17 km edge: from
+    // any height, a ruler. A real coast is organised at the scale of the land:
+    // broad bays and headlands kilometres apart (2.6 km field, sharpened so a
+    // bay is a bay and a headland a headland), coves inside them (900 m), and
+    // a ragged edge (160 m). Capped strictly inside the frontier loop so the
+    // road keeps >= 110 m of dry shoulder; every POI still holds its land
+    // through inSolidRegion below. Pure noise2: deterministic per seed.
+    const COAST_MAX_IN = FRONTIER_IN - 110;
     function coastInset(x, z) {
-      return 10 + (
-        noise2(x, z, 620, 8809) * 0.46 +
-        noise2(x, z, 220, 8810) * 0.36 +
-        noise2(x, z, 82, 8811) * 0.18
-      ) * 64;
+      const big = noise2(x + 3100, z - 1700, 2600, 8809);
+      const bay = smooth01((big - 0.34) / 0.44);
+      let v = 16 + bay * bay * 470
+        + (noise2(x, z, 900, 8810) - 0.5) * 160 * (0.35 + bay)
+        + (noise2(x, z, 160, 8811) - 0.5) * 36;
+      if (v < 10) v = 10;
+      return v > COAST_MAX_IN ? COAST_MAX_IN : v;
     }
     const BAY0 = 28, BAY1 = 95;          // bay ring: QUAY line → 95u out
     const hasCity = isFinite(city.minX);
@@ -613,12 +625,18 @@
        `b.pts` (a channel that tapers, which a real river does at both ends).
        Returns the signed distance to the channel's edge, so a caller cannot
        tell a river from a lake — which is the point. */
-    function pathBodyField(b, x, z) {
+    function pathBodyField(b, x, z, exact) {
       const bb = b.bbox;
-      if (bb) {
+      if (bb && !exact) {
         const ox = Math.max(bb.minX - x, 0, x - bb.maxX);
         const oz = Math.max(bb.minZ - z, 0, z - bb.maxZ);
-        if (ox > 0 || oz > 0) return Math.hypot(ox, oz);   // outside: cheap and exact enough
+        // Outside the box the box distance is only a LOWER BOUND on the
+        // channel distance — and it used to be returned as the answer, which
+        // drew a straight 26 m strip of sunken sand along every edge of every
+        // river's bounding box (x = -2140 read "13.8 m from water" 2 km from
+        // the Mercy River). Far out it is harmless (nothing reads the shore
+        // beyond the relief's 1.3 km valley ramp); nearer, measure properly.
+        if ((ox > 0 || oz > 0) && (ox > 1300 || oz > 1300)) return Math.hypot(ox, oz);
       }
       const p = b.pts;
       if (!p || p.length < 2) return Infinity;
@@ -642,7 +660,23 @@
     function waterBodyField(b, x, z) {
       if (!b) return Infinity;
       if (b.kind === "path") return pathBodyField(b, x, z);
-      if (b.kind === "circle") return Math.hypot(x - b.cx, z - b.cz) - b.r;
+      if (b.kind === "circle") {
+        // A LAKE IS NOT A COMPASS CIRCLE (owner: "Kings Lake is a perfect
+        // circle"). The registered radius is the basin's OUTER limit and the
+        // shore wanders inside it: two lobe fields (a third and a tenth of the
+        // radius) pull bays and points into the ring, never past it, so a
+        // lake can only give land back to whatever was planned round it.
+        const d = Math.hypot(x - b.cx, z - b.cz);
+        // only the big open lakes the plate itself carves: a small pond cut
+        // into a biome's own floor mesh (Redhollow) keeps that mesh's circle,
+        // or the water oracle and the drawn basin would disagree
+        if (d > b.r + 4 || b.r < 300) return d - b.r;
+        const k = (b.cx * 0.37 + b.cz * 0.11) | 0;
+        const lob = noise2(x + k, z - k, Math.max(50, b.r * 0.45), 8871) * 0.68
+                  + noise2(x - k, z + k, Math.max(20, b.r * 0.16), 8872) * 0.32;
+        const t = (lob - 0.22) / 0.56;
+        return d - b.r * (0.60 + 0.40 * (t < 0 ? 0 : (t > 1 ? 1 : t)));
+      }
       const dx = Math.max(b.minX - x, 0, x - b.maxX);
       const dz = Math.max(b.minZ - z, 0, z - b.maxZ);
       if (dx > 0 || dz > 0) return Math.hypot(dx, dz);
@@ -653,7 +687,8 @@
       for (let i = 0; i < waterBodies.length; i++) nearest = Math.min(nearest, waterBodyField(waterBodies[i], x, z));
       return nearest;
     }
-    function shoreField(x, z) {
+    function shoreField(x, z) { return shoreFieldWith(x, z, inlandWaterField(x, z)); }
+    function shoreFieldWith(x, z, inland) {
       const e = plateInsideDistance(x, z);
       let s = e - coastInset(x, z);
       if (HARBOR) {
@@ -665,7 +700,6 @@
       if (s < 12 && inSolidRegion(x, z, 8)) s = 12;   // POIs are never carved
       // Explicit inland water wins over its enclosing biome region. This same
       // signed result drives the sea cutout, swimmers, boats, wildlife and map.
-      const inland = inlandWaterField(x, z);
       if (inland < s) s = inland;
       return s;
     }
@@ -710,6 +744,24 @@
         // shader/highway consumers. Push here or the carve never happens.
         if (rb) waterBodies.push(rb);
       } catch (e) { console.error("[river]", e); }
+    }
+    // EVERY LARGE LAKE DRAINS (owner: "nothing flows to the sea"). Kings Lake
+    // took the Kings River in and let nothing out. The river router that
+    // found the harbour's way to the sea (city/river.js) finds each big
+    // lake's too, with the same bridges over whatever road it has to cross;
+    // a pond (< 300 m) may stay a pond.
+    if (CBZ.cityLakeOutletCarve) {
+      const lakes = waterBodies.filter(function (b) { return b && b.kind === "circle" && b.r >= 300; });
+      for (let i = 0; i < lakes.length; i++) {
+        try {
+          const L = lakes[i];
+          const ob = CBZ.cityLakeOutletCarve(city, {
+            shoreAt: coastOnly, plate: { minX: minX, maxX: maxX, minZ: minZ, maxZ: maxZ },
+          }, { cx: L.cx, cz: L.cz, r: L.r, name: (L.name || "Lake").replace(/\s*(Lake|Pond)$/i, "") + " River",
+               inside: function (x, z) { return waterBodyField(L, x, z) < -30; } });
+          if (ob) { ob.outletOf = L.name || null; waterBodies.push(ob); }
+        } catch (e) { console.error("[lake outlet]", e); }
+      }
     }
 
     // ================= CONTINUOUS COUNTRY RELIEF =========================
@@ -760,7 +812,7 @@
       }
       return sum;
     }
-    const FUTURE_ROUTE_IN = COAST ? 190 : 36;
+    const FUTURE_ROUTE_IN = FRONTIER_IN;
     const futureX0 = minX + FUTURE_ROUTE_IN, futureX1 = maxX - FUTURE_ROUTE_IN;
     const futureZ0 = minZ + FUTURE_ROUTE_IN, futureZ1 = maxZ - FUTURE_ROUTE_IN;
     function frontierDistance(x, z) {
@@ -770,39 +822,8 @@
       if (z >= futureZ0 - 28 && z <= futureZ1 + 28) best = Math.min(best, Math.abs(x - futureX0), Math.abs(x - futureX1));
       return best;
     }
-    // ---- THE RIM LAW (WORLD_LAYOUT_V2) ----------------------------------
-    // Owner: "the mountains … should be on the EDGES of the map"; the relief
-    // must read as a RIM, not as lumps scattered through the middle. The old
-    // field was flat in `rimT` — the same 0-22u hill country stood 200m from
-    // downtown and 5km out at the frontier, which is exactly the "cities and
-    // mountains are much too close together" complaint at ground level.
-    //
-    // rimT is a BOX metric (Chebyshev in normalised half-extents) over the
-    // plate rect: 0 dead centre, 1 at the plate edge. Using the box metric
-    // rather than a radius is deliberate — the plate is a rectangle, and a
-    // radial gate would put a circular bald spot in a rectangular map.
-    //
-    // The gate NEVER lifts a sample above RIM_CEIL, and RIM_CEIL is set
-    // strictly UNDER the 25u mountain threshold both the math gate and
-    // tools/terrain-map-audit.mjs test. That is a proof, not a hope: the
-    // backcountry is `wilds` biome, so a single 25u sample out here would be
-    // a mountains-outside-snow violation. This clamp makes it impossible —
-    // the doctrine gets MORE true, never less.
-    const RIM_IN = 0.42;      // inside this: quiet open country you drive across
-    const RIM_OUT = 0.88;     // by here: the full rim swell
-    const RIM_LO = 0.20;      // interior keeps a fifth of the swell (not a tabletop)
-    const RIM_HI = 1.85;      // the rim gets nearly 2x — then meets the ceiling
-    const RIM_CEIL = 23;      // hard ceiling, strictly under the 25u doctrine line
-    const rimCX = (minX + maxX) * 0.5, rimCZ = (minZ + maxZ) * 0.5;
-    const rimHX = Math.max(1, (maxX - minX) * 0.5), rimHZ = Math.max(1, (maxZ - minZ) * 0.5);
-    function rimT(x, z) {
-      const tx = Math.abs(x - rimCX) / rimHX, tz = Math.abs(z - rimCZ) / rimHZ;
-      return tx > tz ? tx : tz;
-    }
-    function rimGain(x, z) {
-      const g = smooth01((rimT(x, z) - RIM_IN) / (RIM_OUT - RIM_IN));
-      return RIM_LO + (RIM_HI - RIM_LO) * g;
-    }
+    // (THE RIM LAW — interior relief at 0.2x under a 23 m ceiling — is retired:
+    //  it is what made the inhabited core a tabletop. See THE LANDFORM below.)
     // ---- THE BUILT-GROUND GATE (TERRAIN_FLATTEN_UNDER_BUILT) -------------
     // PLATE_SEG must agree with the SEG used to build the plate below — the
     // whole point of the flat band is that it is at least one PLATE CELL wide,
@@ -1083,59 +1104,286 @@
     gradedN = gradedRegs.length;
     dgLive = dgCells > 0;      // the gate now sees the derived grid too
 
+    /* ==================================================================
+       THE LANDFORM (owner, 2026-09-29: "make the terrain realer").
+
+       WHAT WAS WRONG, measured on a 250 m sweep of the shipped world: the
+       whole inhabited core (x -5000..6000, z -4500..4700) sat on 0-10 m and
+       the only relief was a ring at the plate edge. Two laws did that on
+       purpose — a "rim law" that kept the interior at a fifth of the swell,
+       and a 23 m ceiling written to stay under the terrain audit's 25 m
+       "mountain" line — and between them the country was a tabletop with a
+       lip. Real land is organised by what made it: uplands and plains at the
+       scale of the country, valleys where water runs, a range that rises out
+       of foothills, and people who built on the flat land by the water.
+
+       So the relief is now composed from THREE questions per point, and the
+       third is the one that makes the others safe:
+
+         1. WHAT LANDFORM IS HERE. A continent-scale upland field (5.6 km +
+            2.3 km, domain-warped) sorts the country into plains (4-14 m of
+            rolling ground) and uplands (+16..72 m, ridged), over the same
+            eroded hill octaves as before. Near the Greater Mercy Range the
+            land rises into FOOTHILLS (up to +58 m within ~2.8 km), so the
+            range stands on its own apron instead of a flat floor.
+         2. WHERE THE WATER IS. Land falls toward every river and lake over
+            ~1.2 km (the Kings River, its outlet, the Mercy River run in real
+            valleys), and toward the sea over a coast ramp that varies from a
+            140 m bluff to a 520 m lowland.
+         3. HOW FAR TO THE NEAREST BUILT THING. Every road, highway, causeway,
+            the frontier loop, every lot, pad, town, metro and compound is
+            rasterised into three distance fields (48 m cells, one chamfer
+            pass each). The land is a PLAIN round what people built — full
+            relief only ~900 m from a place and ~380 m from a road — so towns
+            sit in the flat, roads run along the low ground, and nothing built
+            ever meets a slope. The old gates (built/lots, highway corridors,
+            frontier) still run last and still zero the ground under all of
+            it; this envelope is what stops them from having to dig trenches.
+
+       The same distance fields drive land use below (fields ring the towns,
+       hedgerows follow the field grid) — ONE question, asked once.
+
+       Determinism: noise2/hash only; the fields are rasterised from records
+       in registration order and the chamfer is order-independent.
+       Cost: 3 x ~122k-cell fields (48 m) + two chamfer passes each; the per-
+       vertex composition adds ~6 noise2 taps and three bilinear reads.
+    ================================================================== */
+    const LF = 48;
+    const lfNX = Math.max(2, Math.ceil(W / LF) + 1), lfNZ = Math.max(2, Math.ceil(D / LF) + 1);
+    const LF_BIG = 1e7;
+    const lfT0 = (typeof performance !== "undefined" && performance.now) ? performance.now() : 0;
+    const fRoad = new Float32Array(lfNX * lfNZ).fill(LF_BIG);    // roads, highways, decks, frontier loop
+    const fPlace = new Float32Array(lfNX * lfNZ).fill(LF_BIG);   // anything built or graded
+    const fTown = new Float32Array(lfNX * lfNZ).fill(LF_BIG);    // where people live (lots, towns, metros)
+    function lfRect(F, x0, x1, z0, z1) {
+      if (!(x1 >= x0) || !(z1 >= z0)) return;
+      let i0 = Math.floor((x0 - minX) / LF) - 1, i1 = Math.ceil((x1 - minX) / LF) + 1;
+      let j0 = Math.floor((z0 - minZ) / LF) - 1, j1 = Math.ceil((z1 - minZ) / LF) + 1;
+      if (i1 < 0 || j1 < 0 || i0 >= lfNX || j0 >= lfNZ) return;
+      if (i0 < 0) i0 = 0; if (j0 < 0) j0 = 0;
+      if (i1 >= lfNX) i1 = lfNX - 1; if (j1 >= lfNZ) j1 = lfNZ - 1;
+      for (let j = j0; j <= j1; j++) {
+        const pz = minZ + j * LF, row = j * lfNX;
+        for (let i = i0; i <= i1; i++) {
+          const d = outsideRectDist(minX + i * LF, pz, x0, x1, z0, z1);
+          if (d < F[row + i]) F[row + i] = d;
+        }
+      }
+    }
+    function lfCircle(F, cx, cz, r) { lfRect(F, cx - r, cx + r, cz - r, cz + r); }  // a disc's box: conservative (flatter), never steeper
+    function lfSeg(F, ax, az, bx, bz, half) {
+      const vx = bx - ax, vz = bz - az, L2 = vx * vx + vz * vz;
+      if (!(L2 > 0)) { lfRect(F, ax - half, ax + half, az - half, az + half); return; }
+      const m = half + LF * 1.5;
+      let i0 = Math.floor((Math.min(ax, bx) - m - minX) / LF), i1 = Math.ceil((Math.max(ax, bx) + m - minX) / LF);
+      let j0 = Math.floor((Math.min(az, bz) - m - minZ) / LF), j1 = Math.ceil((Math.max(az, bz) + m - minZ) / LF);
+      if (i1 < 0 || j1 < 0 || i0 >= lfNX || j0 >= lfNZ) return;
+      if (i0 < 0) i0 = 0; if (j0 < 0) j0 = 0;
+      if (i1 >= lfNX) i1 = lfNX - 1; if (j1 >= lfNZ) j1 = lfNZ - 1;
+      for (let j = j0; j <= j1; j++) {
+        const pz = minZ + j * LF, row = j * lfNX;
+        for (let i = i0; i <= i1; i++) {
+          const px = minX + i * LF;
+          let t = ((px - ax) * vx + (pz - az) * vz) / L2;
+          t = t < 0 ? 0 : (t > 1 ? 1 : t);
+          const dx = px - (ax + vx * t), dz = pz - (az + vz * t);
+          const d2 = dx * dx + dz * dz;
+          if (d2 > m * m) continue;
+          const d = Math.sqrt(d2) - half;
+          const v = d > 0 ? d : 0;
+          if (v < F[row + i]) F[row + i] = v;
+        }
+      }
+    }
+    // 3x3 chamfer (1, sqrt2) in metres: two passes, ~8% worst-case overestimate,
+    // which only ever makes the plain round a place slightly wider.
+    function lfChamfer(F) {
+      const a = LF, b = LF * 1.41421356;
+      for (let j = 0; j < lfNZ; j++) {
+        const row = j * lfNX;
+        for (let i = 0; i < lfNX; i++) {
+          const k = row + i; let v = F[k];
+          if (i > 0 && F[k - 1] + a < v) v = F[k - 1] + a;
+          if (j > 0) {
+            const u = k - lfNX;
+            if (F[u] + a < v) v = F[u] + a;
+            if (i > 0 && F[u - 1] + b < v) v = F[u - 1] + b;
+            if (i + 1 < lfNX && F[u + 1] + b < v) v = F[u + 1] + b;
+          }
+          F[k] = v;
+        }
+      }
+      for (let j = lfNZ - 1; j >= 0; j--) {
+        const row = j * lfNX;
+        for (let i = lfNX - 1; i >= 0; i--) {
+          const k = row + i; let v = F[k];
+          if (i + 1 < lfNX && F[k + 1] + a < v) v = F[k + 1] + a;
+          if (j + 1 < lfNZ) {
+            const u = k + lfNX;
+            if (F[u] + a < v) v = F[u] + a;
+            if (i + 1 < lfNX && F[u + 1] + b < v) v = F[u + 1] + b;
+            if (i > 0 && F[u - 1] + b < v) v = F[u - 1] + b;
+          }
+          F[k] = v;
+        }
+      }
+    }
+    function lfAt(F, x, z) {
+      let fx = (x - minX) / LF, fz = (z - minZ) / LF;
+      if (fx < 0) fx = 0; if (fz < 0) fz = 0;
+      if (fx > lfNX - 1.001) fx = lfNX - 1.001; if (fz > lfNZ - 1.001) fz = lfNZ - 1.001;
+      const i = fx | 0, j = fz | 0, tx = fx - i, tz = fz - j, k = j * lfNX + i;
+      const a = F[k] + (F[k + 1] - F[k]) * tx, c = F[k + lfNX] + (F[k + lfNX + 1] - F[k + lfNX]) * tx;
+      return a + (c - a) * tz;
+    }
+    const isMercyTerrain = function (b) { return /mount-mercy/i.test(b.name || ""); };
+    const TOWN_SURF = /mini-city|country-settlement|town-street|mainland-city/i;
+    (function seedLandform() {
+      // ---- roads: every record, every deck, every highway corridor, the frontier loop
+      const rds = Array.isArray(city.roads) ? city.roads : [];
+      for (let i = 0; i < rds.length; i++) {
+        const r = rds[i];
+        if (!r || !Number.isFinite(r.x) || !Number.isFinite(r.z)) continue;
+        const hl = Math.max(0, +r.len || 0) / 2, hw = Math.max(4, +r.w || 8) / 2 + 3;
+        if (r.vertical) lfRect(fRoad, r.x - hw, r.x + hw, r.z - hl, r.z + hl);
+        else lfRect(fRoad, r.x - hl, r.x + hl, r.z - hw, r.z + hw);
+      }
+      for (let i = 0; i < regs.length; i++) {
+        const r = regs[i];
+        if (!r || r.underlay || !isLinkReg(r)) continue;
+        if (r.kind === "circle") lfCircle(fRoad, r.cx, r.cz, r.r + (r.pad || 0));
+        else if ([r.minX, r.maxX, r.minZ, r.maxZ].every(Number.isFinite)) lfRect(fRoad, r.minX, r.maxX, r.minZ, r.maxZ);
+      }
+      const cor = CBZ.highwayNetCorridors ? CBZ.highwayNetCorridors() : null;
+      if (cor) for (let i = 0; i < cor.length; i++) {
+        const c = cor[i];
+        if (c && [c.x0, c.z0, c.x1, c.z1].every(Number.isFinite)) lfSeg(fRoad, c.x0, c.z0, c.x1, c.z1, (+c.half || 15) + 8);
+      }
+      if (CFG.CONTINENT_EXPANSION_V2 !== false && PAD > LEGACY_PAD + 80) {
+        const fx0 = minX + FRONTIER_IN, fx1 = maxX - FRONTIER_IN, fz0 = minZ + FRONTIER_IN, fz1 = maxZ - FRONTIER_IN;
+        if (fx1 - fx0 > 600 && fz1 - fz0 > 600) {
+          lfRect(fRoad, fx0 - 14, fx1 + 14, fz0 - 14, fz0 + 14); lfRect(fRoad, fx0 - 14, fx1 + 14, fz1 - 14, fz1 + 14);
+          lfRect(fRoad, fx0 - 14, fx0 + 14, fz0 - 14, fz1 + 14); lfRect(fRoad, fx1 - 14, fx1 + 14, fz0 - 14, fz1 + 14);
+          // the four lookouts stand 26 m inside the loop (buildFrontier's MID_IN)
+          const mcx = (minX + maxX) / 2, mcz = (minZ + maxZ) / 2;
+          lfRect(fPlace, mcx - 18, mcx + 18, fz0 + 26 - 14, fz0 + 26 + 14); lfRect(fPlace, mcx - 18, mcx + 18, fz1 - 26 - 14, fz1 - 26 + 14);
+          lfRect(fPlace, fx0 + 26 - 18, fx0 + 26 + 18, mcz - 14, mcz + 14); lfRect(fPlace, fx1 - 26 - 18, fx1 - 26 + 18, mcz - 14, mcz + 14);
+        }
+      }
+      // ---- places: every authored floor, graded pad, declared footprint, region, lot, deck
+      for (let i = 0; i < authoredSurfaceBounds.length; i++) {
+        const b = authoredSurfaceBounds[i];
+        // Mount Mercy's own heightfield is ground, not a pad: it only needs
+        // the land to meet its (zero-height) rim, i.e. a road-width ramp.
+        lfRect(isMercyTerrain(b) ? fRoad : fPlace, b.minX, b.maxX, b.minZ, b.maxZ);
+        if (TOWN_SURF.test(b.name || "")) lfRect(fTown, b.minX, b.maxX, b.minZ, b.maxZ);
+      }
+      for (let i = 0; i < gradedRegs.length; i++) {
+        const r = gradedRegs[i];
+        if (r.circle) lfCircle(fPlace, r.cx, r.cz, r.rad);
+        else lfRect(fPlace, r.minX, r.maxX, r.minZ, r.maxZ);
+      }
+      for (let i = 0; i < regs.length; i++) {
+        const r = regs[i];
+        if (!r || r.underlay || isLinkReg(r) || r.biome === "snow" || r.biome === "wilds") continue;
+        const F = fPlace;
+        if (r.kind === "circle") { if ([r.cx, r.cz, r.r].every(Number.isFinite)) lfCircle(F, r.cx, r.cz, r.r + (r.pad || 0)); continue; }
+        if (![r.minX, r.maxX, r.minZ, r.maxZ].every(Number.isFinite)) continue;
+        lfRect(F, r.minX, r.maxX, r.minZ, r.maxZ);
+        if (r.metro) lfRect(fTown, r.minX, r.maxX, r.minZ, r.maxZ);
+      }
+      const an = city.annex;
+      if (an && [an.cx, an.cz, an.radius].every(Number.isFinite)) { lfCircle(fPlace, an.cx, an.cz, an.radius); lfCircle(fTown, an.cx, an.cz, an.radius); }
+      if (isFinite(city.minX)) { lfRect(fPlace, city.minX, city.maxX, city.minZ, city.maxZ); lfRect(fTown, city.minX, city.maxX, city.minZ, city.maxZ); }
+      const lots = Array.isArray(city.lots) ? city.lots : [];
+      for (let i = 0; i < lots.length; i++) {
+        const L = lots[i];
+        if (!L || !Number.isFinite(L.cx) || !Number.isFinite(L.cz)) continue;
+        const hw = Math.max(1, (+L.w || 0) * 0.5), hd = Math.max(1, (+L.d || 0) * 0.5);
+        lfRect(fPlace, L.cx - hw, L.cx + hw, L.cz - hd, L.cz + hd);
+        lfRect(fTown, L.cx - hw, L.cx + hw, L.cz - hd, L.cz + hd);
+      }
+      const plats = Array.isArray(CBZ.platforms) ? CBZ.platforms : [];
+      for (let i = 0; i < plats.length; i++) {
+        const p = plats[i];
+        if (p && [p.minX, p.maxX, p.minZ, p.maxZ].every(Number.isFinite)) lfRect(fPlace, p.minX, p.maxX, p.minZ, p.maxZ);
+      }
+      lfChamfer(fRoad); lfChamfer(fPlace); lfChamfer(fTown);
+    })();
+    const landformMs = (typeof performance !== "undefined" && performance.now) ? performance.now() - lfT0 : 0;
+    // ---- the Greater Mercy Range's footprint (biome_snow.js publishes it, dial-mapped)
+    const GMB = CBZ.mtnGreatBounds || null;
+    const FOOT_REACH = 2800, FOOT_LIFT = 58;
+    const RELIEF_CAP = 92;           // soft ceiling: uplands top out in the 80s
+    // 0..1 how far from anything built the land is free to rise
+    function freedomAt(x, z) {
+      const eR = smooth01((lfAt(fRoad, x, z) - 20) / 360);
+      if (eR <= 0) return 0;
+      const eP = smooth01((lfAt(fPlace, x, z) - 30) / 880);
+      return eR < eP ? eR : eP;
+    }
+    CBZ.countryFreedomAt = freedomAt;
+    CBZ.countryTownDistAt = function (x, z) { return lfAt(fTown, x, z); };
+    CBZ.countryRoadDistAt = function (x, z) { return lfAt(fRoad, x, z); };
+    // THE UPLAND FIELD, shared by the relief and the land use (fields keep to
+    // the plains, woods climb the uplands). Memoised on the exact point: the
+    // plate loop asks the land use and then the relief at the same vertex.
+    const _mac = { x: NaN, z: NaN, wx: 0, wz: 0, upl: 0 };
+    function macroAt(x, z) {
+      if (x === _mac.x && z === _mac.z) return _mac;
+      const wx = x + (noise2(x + 211, z - 977, 2400, 8950) - 0.5) * 1100;
+      const wz = z + (noise2(x - 613, z + 419, 2400, 8951) - 0.5) * 1100;
+      const m = noise2(wx, wz, 5600, 8952) * 0.6 + noise2(wx, wz, 2300, 8953) * 0.4;
+      _mac.x = x; _mac.z = z; _mac.wx = wx; _mac.wz = wz; _mac.upl = smooth01((m - 0.45) / 0.24);
+      return _mac;
+    }
+    function uplandAt(x, z) { return macroAt(x, z).upl; }
+    // the raw landform, ungated: {h, upl, hills}
+    const _lf = { h: 0, upl: 0, hills: 0 };
+    function landformAt(x, z) {
+      const n = (CFG.CONTINENT_RELIEF_EROSION === false)
+        ? countryFbm(x + 1400, z - 900)
+        : countryErodedHills(x + 1400, z - 900);
+      let hills = n + 0.5; hills = hills < 0 ? 0 : (hills > 1 ? 1 : hills);
+      const M = macroAt(x, z), wx = M.wx, wz = M.wz, upl = M.upl;
+      const rg = 1 - Math.abs(2 * noise2(wx + 700, wz - 300, 760, 8954) - 1);
+      let h = 2 + 12 * hills + upl * (16 + 40 * rg * rg + 16 * hills);
+      if (GMB) {
+        const dOut = outsideRectDist(x, z, GMB.minX, GMB.maxX, GMB.minZ, GMB.maxZ);
+        if (dOut < FOOT_REACH) {
+          const f = 1 - smooth01(dOut / FOOT_REACH);
+          h += FOOT_LIFT * f * (0.7 + 0.3 * hills);
+        }
+      }
+      _lf.h = h; _lf.upl = upl; _lf.hills = hills;
+      return _lf;
+    }
+
     function countryHeightAt(x, z) {
       if (CFG.CONTINENT_RELIEF_V1 === false) return 0;
       if (x < minX || x > maxX || z < minZ || z > maxZ) return 0;
       const built = builtGate(x, z);
       if (built <= 0) return 0;
-      const shore = COAST ? shoreField(x, z) : 100;
+      const free = freedomAt(x, z);
+      if (free <= 0) return 0;
+      // ONE inland-water query serves both the shore and the valley term
+      const inland = inlandWaterField(x, z);
+      const shore = COAST ? shoreFieldWith(x, z, inland) : 100;
       if (shore <= 38) return 0;
-      const coastFade = smooth01((shore - 38) / 74);
-      const n = (CFG.CONTINENT_RELIEF_EROSION === false)
-        ? countryFbm(x + 1400, z - 900)
-        : countryErodedHills(x + 1400, z - 900);
-      const broad = noise2(x, z, 540, 8896);
-      const ridge = 1 - Math.abs(2 * noise2(x + 700, z - 300, 250, 8897) - 1);
-      let h = (2.0 + Math.max(0, n + 0.18) * 17 + Math.pow(ridge, 2.4) * broad * 8) * coastFade;
-      // ---- CONTINENT_RELIEF_MACRO: the missing octave -----------------------
-      // Nothing above had a wavelength over 540m on a ~11km plate, so from any
-      // altitude the backcountry read as a corduroy of same-sized 8m bumps —
-      // texture, not geography (a terrain with no octave near the map's own
-      // scale cannot have macro structure, by construction). One continent-
-      // wavelength uplift field now organises the same hills into broad
-      // uplands and plains. Deterministic (hash01 salt 8905), per-point, and
-      // zero wherever h is already 0, so every existing flat gate (coasts,
-      // pads, highways below) is untouched.
-      //
-      // ORDER MATTERS, and this is the merge of two laws that both scale h.
-      // The MACRO runs first: it decides the SHAPE of the backcountry — where
-      // the uplands and the plains are. WORLD_LAYOUT_V2's rim gain runs second,
-      // because it decides WHERE THAT SHAPE IS ALLOWED TO BE TALL (interior
-      // 0.20x, rim 1.85x). Reversing them would let the macro's tanh re-inflate
-      // the interior the rim law had just flattened, which is exactly the
-      // "hills as tall 200m from downtown as 5km out" the owner complained of.
-      //
-      // Both laws independently keep the result under the math gate's 25u
-      // mountain threshold — the macro soft-saturates at 24u, the rim law hard-
-      // ceilings at RIM_CEIL (23u). Applying the STRICTER of the two last means
-      // "mountains outside snow" stays impossible here by construction, not by
-      // luck, whichever flag is on.
-      if (CFG.CONTINENT_RELIEF_MACRO !== false && h > 0) {
-        const upl = noise2(x + 940, z - 2600, 2900, 8905);
-        h = 24 * Math.tanh((h * (1.25 + 2.15 * upl * upl)) / 24);
-      }
-      if (LAYOUT_V2()) {
-        h *= rimGain(x, z);
-        if (h > RIM_CEIL) h = RIM_CEIL;
-      }
+      // the coast ramp varies along the shore: a 140 m bluff here, a 520 m
+      // lowland there — never the same ruled bank all the way round
+      const coastFade = smooth01((shore - 38) / (140 + 380 * noise2(x, z, 1900, 8956)));
+      const L = landformAt(x, z);
+      // valleys: the land falls toward every river and lake over ~1.2 km
+      const valley = 0.28 + 0.72 * smooth01((inland - 60) / 1200);
+      let h = L.h * valley * coastFade * free;
+      h = RELIEF_CAP * Math.tanh(h / RELIEF_CAP);
       // Frontier highways are cut into the landscape with broad shoulders;
       // their visible planes never hover over a noisy heightfield.
       const fd = frontierDistance(x, z);
       h *= smooth01((fd - 10) / 36);
       // Same cut for the highway NETWORK (city/highwaynet.js): relief flattens
       // under every route corridor so the flat decks never hover over hills.
-      // The gate is 1 everywhere when the network is off/absent — identical
-      // relief to before.
       if (CBZ.highwayNetReliefGate) h *= CBZ.highwayNetReliefGate(x, z);
       // …and the same cut under every BUILT surface (lots, aprons, town
       // floors, graded pads). Applied last with the other two gates so all
@@ -1204,20 +1452,44 @@
     const cWood = new THREE.Color(0x3a4530);
     const CROPS = [0x455d31, 0x59693f, 0x8c7f59, 0x7f765d, 0x54493c, 0x61654b, 0x4d6434, 0x9c9345].map(function (h) { return new THREE.Color(h); });
     const FLOOK_N = CBZ.forestLook && CBZ.forestLook.noise;
-    const FA = 0.35, FCA = Math.cos(FA), FSA = Math.sin(FA);
     const hsh = CBZ.hash01 || function () { return 0.5; };
-    // -> farmland weight at (x,z); `out` gets that parcel's crop
-    function fieldAt(x, z, out) {
-      const zone = noise2(x + 1700, z - 900, 1400, 8840);
-      let w = smooth01((zone - 0.44) / 0.14);
+    // FARM COUNTRY RINGS THE PLACES PEOPLE LIVE (owner: "farmland is one
+    // square far from any town; towns end abruptly at the country"). The
+    // field weight used to be a 1.4 km noise blob that could fall anywhere;
+    // it is now a ring round every town, metro and lot (the town distance
+    // field above): fields start just past the last building and run out
+    // 1.2-2.3 km later into rough grazing and wood. Fields keep to the flat:
+    // they give way on uplands and steep ground (the landform's upland
+    // term) and on the plains beside rivers they run right to the bank.
+    // Parcels are the SAME 190 m grid the hedgerows are planted on, axis-
+    // aligned with the roads, some pairs merged into 380 m fields.
+    const FIELD_GRID = 190, FIELD_OX = minX + 37, FIELD_OZ = minZ + 61;
+    function fieldWeightAt(x, z, upl) {
+      const dT = lfAt(fTown, x, z);
+      if (dT > 3000) return 0;
+      const reach = 1200 + 1100 * noise2(x + 1700, z - 900, 1400, 8840);
+      let w = smooth01((dT - 30) / 80) * (1 - smooth01((dT - reach) / 450));
       if (w <= 0) return 0;
-      const u = x * FCA + z * FSA, v = -x * FSA + z * FCA;
-      const cu = Math.floor(u / 300), cv = Math.floor(v / 190);
-      let k = hsh(cu, cv, 8841);
-      if (hsh(cu, cv, 8842) < 0.55) k = hsh(cu * 2 + ((u / 300 - cu) < 0.5 ? 0 : 1), cv, 8843);   // a split parcel
-      const i = k < 0.04 ? 7 : Math.min(6, Math.floor((k - 0.04) / 0.96 * 7));
-      out.copy(CROPS[i]).multiplyScalar(0.94 + 0.12 * hsh(cu, cv, 8844));
+      w *= 1 - smooth01(((upl == null ? uplandAt(x, z) : upl) - 0.30) / 0.40);
       return w;
+    }
+    // -> farmland weight at (x,z); `out` gets that parcel's crop
+    function fieldAt(x, z, out, wIn) {
+      const w = wIn == null ? fieldWeightAt(x, z) : wIn;
+      if (w <= 0) return 0;
+      const cu = Math.floor((x - FIELD_OX) / FIELD_GRID), cv = Math.floor((z - FIELD_OZ) / FIELD_GRID);
+      // some neighbours share a crop: a 380 m field, split on alternate rows
+      const pu = hsh(cu >> 1, cv, 8842) < 0.5 ? cu >> 1 : cu;
+      const k = hsh(pu * 3 + (pu === cu ? 1 : 0), cv, 8841);
+      const i = k < 0.04 ? 7 : Math.min(6, Math.floor((k - 0.04) / 0.96 * 7));
+      out.copy(CROPS[i]).multiplyScalar(0.94 + 0.12 * hsh(pu, cv, 8844));
+      return w;
+    }
+    // Where woods want to be: the uplands and slopes (+), never the farm
+    // ring (-). Shared by the ground tone above and the tree stands below.
+    function woodBias(x, z, fw, upl) {
+      if (upl == null) upl = uplandAt(x, z);
+      return 0.16 * upl - 0.30 * (fw == null ? fieldWeightAt(x, z, upl) : fw);
     }
     const cField = new THREE.Color();
     const c = new THREE.Color(), c2 = new THREE.Color();
@@ -1303,9 +1575,12 @@
       c.lerp(cDry, Math.max(0, drift) * 0.5);
       c.lerp(cLush, Math.max(0, -drift) * 0.4);
       if (CFG.CONTINENT_LANDUSE_V1 !== false) {
-        const stand = FLOOK_N ? FLOOK_N(wx, wz, 760, 4441) : 0;
+        // the wood floor follows the same stand decision the trees do (see
+        // woodBias: woods climb the uplands and keep off the farm ring)
+        const upl = uplandAt(wx, wz), fw0 = fieldWeightAt(wx, wz, upl);
+        const stand = (FLOOK_N ? FLOOK_N(wx, wz, 760, 4441) : 0) - 0.19 + woodBias(wx, wz, fw0, upl);
         const wood = smooth01((stand - 0.34) / 0.2);
-        const fw = fieldAt(wx, wz, cField) * (1 - smooth01((stand - 0.22) / 0.12));
+        const fw = (fw0 > 0 ? fieldAt(wx, wz, cField, fw0) : 0) * (1 - smooth01((stand - 0.22) / 0.12));
         if (fw > 0) c.lerp(cField, fw * 0.9);
         if (wood > 0) c.lerp(cWood, wood * 0.75);
       }
@@ -1314,8 +1589,12 @@
       rGrid[i] = reliefY;
       let y = GROUND_Y + reliefY;
       if (COAST) {
-        const s = shoreField(wx, wz);
+        const inl = inlandWaterField(wx, wz);
+        const s = shoreFieldWith(wx, wz, inl);
         sGrid[i] = s;
+        // A RIVER OR LAKE HAS A BANK, NOT A BEACH (owner: "Kings Lake ... with
+        // a white rim"): sand is for the sea; fresh water meets mud and reeds.
+        const fresh = inl <= s + 0.5;
         if (s < 0) {
           // Underwater: begin below the lowest swell, then slope into a real
           // seabed. The former -0.44 start sat above the mean sea and caused
@@ -1328,7 +1607,12 @@
           // surface, then rises through wet/dry sand onto solid country. Wave
           // wash can cover the first metres without exposing a coplanar slab.
           y = SUBMERGED_Y + sm(Math.min(1, s / 26)) * (GROUND_Y + reliefY - SUBMERGED_Y);
-          if (s < 6) c.copy(cWet).lerp(cSand, sm(s / 6));
+          if (fresh) {
+            c2.copy(c).lerp(cLush, 0.45);
+            if (s < 7) c.copy(cWet).lerp(cDirt, sm(s / 7));
+            else c.copy(cDirt).lerp(c2, sm((s - 7) / 19));
+          }
+          else if (s < 6) c.copy(cWet).lerp(cSand, sm(s / 6));
           else if (s < 15) c.copy(cSand);
           else c2.copy(c), c.copy(cSand).lerp(c2, sm((s - 15) / 11));
         } else if (s < 52) {
@@ -1434,14 +1718,13 @@
     // grey because the grade re-saturates), so the plate, the ground skin on
     // every tier and CBZ.groundCover (which reads these colours) all see
     // the same real reflectance.
-    if (CFG.CONTINENT_LINEAR_ALBEDO !== false) {
+    // ONE decoder for all ground: world/textures_surface.js's CBZ.groundLinear.
+    if (CFG.CONTINENT_LINEAR_ALBEDO !== false && CBZ.groundLinear) {
+      const lc = new THREE.Color();
       for (let i = 0; i < colors.length; i += 3) {
-        let r = Math.max(0, colors[i]), g = Math.max(0, colors[i + 1]), b = Math.max(0, colors[i + 2]);
-        r = r * (r * (r * 0.305306011 + 0.682171111) + 0.012522878);
-        g = g * (g * (g * 0.305306011 + 0.682171111) + 0.012522878);
-        b = b * (b * (b * 0.305306011 + 0.682171111) + 0.012522878);
-        const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-        colors[i] = l + (r - l) * 0.8; colors[i + 1] = l + (g - l) * 0.8; colors[i + 2] = l + (b - l) * 0.8;
+        lc.setRGB(colors[i], colors[i + 1], colors[i + 2]);
+        CBZ.groundLinear(lc, lc);
+        colors[i] = lc.r; colors[i + 1] = lc.g; colors[i + 2] = lc.b;
       }
     }
     geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
@@ -1579,17 +1862,11 @@
       // the palette the LANDCOVER loop paints with, decoded exactly as the
       // plate is (CONTINENT_LINEAR_ALBEDO), and what each grows:
       //   g density, h height, dry straw share
-      const LIN = CFG.CONTINENT_LINEAR_ALBEDO !== false;
+      const LIN = CFG.CONTINENT_LINEAR_ALBEDO !== false && !!CBZ.groundLinear;
       function dec(col) {
-        let r = col.r, g = col.g, b = col.b;
-        if (LIN) {
-          r = r * (r * (r * 0.305306011 + 0.682171111) + 0.012522878);
-          g = g * (g * (g * 0.305306011 + 0.682171111) + 0.012522878);
-          b = b * (b * (b * 0.305306011 + 0.682171111) + 0.012522878);
-          const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-          r = l + (r - l) * 0.8; g = l + (g - l) * 0.8; b = l + (b - l) * 0.8;
-        }
-        return [r, g, b];
+        if (!LIN) return [col.r, col.g, col.b];
+        const o = CBZ.groundLinear(col, new THREE.Color());
+        return [o.r, o.g, o.b];
       }
       const PAL = [
         [cGrass, 1.0, 1.0, 0.2], [cLush, 1.0, 1.3, 0.0], [cScrub, 0.75, 0.85, 0.35], [cDry, 0.9, 0.9, 0.9],
@@ -1881,7 +2158,7 @@
     const WALK_IN = COAST ? 44 : -4;
     let frontier = null;
     if (CFG.CONTINENT_EXPANSION_V2 !== false && PAD > LEGACY_PAD + 80) frontier = (function buildFrontier() {
-      const ROAD_W = 12, ROUTE_IN = COAST ? 190 : 36;
+      const ROAD_W = 12, ROUTE_IN = FRONTIER_IN;
       const x0 = minX + ROUTE_IN, x1 = maxX - ROUTE_IN;
       const z0 = minZ + ROUTE_IN, z1 = maxZ - ROUTE_IN;
       if (!(x1 - x0 > 600 && z1 - z0 > 600)) return null;
@@ -1905,6 +2182,79 @@
         { x: (x0 + x1) / 2, z: z1, len: x1 - x0, vertical: false },
         { x: x0, z: (z0 + z1) / 2, len: z1 - z0, vertical: true },
       ];
+      // ---- WHERE A RIVER CROSSES THE LOOP, THE LOOP BRIDGES IT. Every river
+      // in this world now reaches the sea, and the loop runs all the way round
+      // inside the coast, so each one passes under it. Without a deck region
+      // the road plane lay on open water (cars "swam" on the frontier). A
+      // /bridge/ name makes waterfield read the span as a deck and continent
+      // keep the channel carved under it; river.js's channel oracle lets the
+      // hulls through. Piers and parapets make it read as a bridge.
+      const loopBridges = [];
+      const pathBodies = waterBodies.filter(function (b) { return b && b.kind === "path"; });
+      for (let i = 0; i < roadDefs.length && pathBodies.length; i++) {
+        const d = roadDefs[i];
+        // runs along this leg where a channel comes within 22 m of the
+        // carriageway (EXACT distance: the bbox reject is only a lower bound)
+        const runs = [];
+        let runA = null;
+        for (let t = -d.len / 2; t <= d.len / 2 + 8; t += 8) {
+          const px = d.vertical ? d.x : d.x + t, pz = d.vertical ? d.z + t : d.z;
+          let wetHere = false;
+          if (t <= d.len / 2) for (let k = 0; k < pathBodies.length && !wetHere; k++) {
+            for (const sd of [-ROAD_W / 2, 0, ROAD_W / 2]) {
+              if (pathBodyField(pathBodies[k], px + (d.vertical ? sd : 0), pz + (d.vertical ? 0 : sd), true) < 22) { wetHere = true; break; }
+            }
+          }
+          if (wetHere && runA == null) runA = t;
+          else if (!wetHere && runA != null) {
+            const last = runs[runs.length - 1];
+            if (last && runA - last[1] < 80) last[1] = t; else runs.push([runA, t]);
+            runA = null;
+          }
+        }
+        for (const rn of runs) {
+          // abutments reach 25 m further onto dry bank either side
+          const a = rn[0] - 25, b = rn[1] + 25, mid = (a + b) / 2, span = b - a, deckW = ROAD_W + 6;
+          const bx = d.vertical ? d.x : d.x + mid, bz = d.vertical ? d.z + mid : d.z;
+          const reg = {
+            name: "Frontier " + (["North", "East", "South", "West"][i] || "") + " Bridge " + (loopBridges.length + 1),
+            subtitle: "River Crossing", biome: "wilds", kind: "rect", pad: 0,
+            minX: d.vertical ? bx - deckW / 2 : bx - span / 2, maxX: d.vertical ? bx + deckW / 2 : bx + span / 2,
+            minZ: d.vertical ? bz - span / 2 : bz - deckW / 2, maxZ: d.vertical ? bz + span / 2 : bz + deckW / 2,
+          };
+          if (CBZ.registerCityRegion) CBZ.registerCityRegion(city, reg);
+          loopBridges.push({ x: bx, z: bz, vertical: d.vertical, span: span, w: deckW, region: reg });
+        }
+      }
+      if (loopBridges.length) {
+        const BGU = THREE.BufferGeometryUtils;
+        const piers = [], rails = [];
+        const boxAt = function (x, y, z, w, hh, dd) { const g = new THREE.BoxGeometry(w, hh, dd); g.translate(x, y, z); return g; };
+        for (const b of loopBridges) {
+          const half = b.span / 2;
+          for (let t = -half + 12; t <= half - 12; t += 24) for (const sd of [-1, 1]) {
+            piers.push(boxAt(b.vertical ? b.x + sd * (b.w / 2 - 1.2) : b.x + t, -1.4, b.vertical ? b.z + t : b.z + sd * (b.w / 2 - 1.2), 1.4, 3.0, 1.4));
+          }
+          for (const sd of [-1, 1]) {
+            const rx = b.vertical ? b.x + sd * b.w / 2 : b.x, rz = b.vertical ? b.z : b.z + sd * b.w / 2;
+            rails.push(boxAt(rx, 0.5, rz, b.vertical ? 0.35 : b.span, 0.85, b.vertical ? b.span : 0.35));
+            if (CBZ.colliders) CBZ.colliders.push({
+              minX: rx - (b.vertical ? 0.22 : half), maxX: rx + (b.vertical ? 0.22 : half),
+              minZ: rz - (b.vertical ? half : 0.22), maxZ: rz + (b.vertical ? half : 0.22), y0: 0, y1: 0.95, noCam: true,
+            });
+          }
+        }
+        const addMerged = function (list, hex) {
+          if (!list.length) return;
+          const mat = CBZ.cmat ? CBZ.cmat(hex) : new THREE.MeshLambertMaterial({ color: hex });
+          if (BGU && BGU.mergeBufferGeometries) {
+            const m = new THREE.Mesh(BGU.mergeBufferGeometries(list), mat);
+            m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix(); group.add(m);
+          } else for (const g of list) group.add(new THREE.Mesh(g, mat));
+        };
+        addMerged(piers, 0x8b9097); addMerged(rails, 0xb4b9bf);
+        if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+      }
       const roadRecords = [];
       for (let i = 0; i < roadDefs.length; i++) {
         const d = roadDefs[i];
@@ -2023,6 +2373,8 @@
         const t = -d.len / 2 + d.len * i / 64;
         for (const side of [-ROAD_W / 2, 0, ROAD_W / 2]) {
           const sx = d.x + (d.vertical ? side : t), sz = d.z + (d.vertical ? t : side);
+          // a bridge span is SUPPOSED to be over water (its abutments are not)
+          if (loopBridges.some(function (b) { const R = b.region; return sx >= R.minX && sx <= R.maxX && sz >= R.minZ && sz <= R.maxZ; })) continue;
           roadMinShore = Math.min(roadMinShore, shoreField(sx, sz));
         }
       }
@@ -2036,7 +2388,7 @@
         for (const l of landmarks) if (x >= l.minX - margin && x <= l.maxX + margin && z >= l.minZ - margin && z <= l.maxZ + margin) return true;
         return false;
       }
-      return { roads: roadRecords, landmarks, near, defs: roadDefs, loopMeters: roadDefs.reduce((s, d) => s + d.len, 0), roadMinShore };
+      return { roads: roadRecords, landmarks, near, defs: roadDefs, loopMeters: roadDefs.reduce((s, d) => s + d.len, 0), roadMinShore, bridges: loopBridges };
     })();
 
     const legacyW = authoredBounds.maxX - authoredBounds.minX;
@@ -2067,6 +2419,10 @@
           sources: b.sources ? b.sources.length : 0 };
       }),
       terrainVertices: pos.count,
+      // build cost up to here (shore field, landform, plate, frontier), and
+      // the landform distance fields' share of it
+      plateMs: Math.round(((typeof performance !== "undefined" && performance.now) ? performance.now() : 0) - T_BUILD0),
+      landformMs: Math.round(landformMs),
     };
 
     // ---- FOAM BREAKERS: marched along the true coast ----------------------
@@ -2196,6 +2552,12 @@
         }
       }
     }
+    // The ALTITUDE the ecology reads is against a real treeline, not against
+    // whatever the country happens to top out at: this is lowland country
+    // (uplands in the 80s), and measuring it against its own summit put a
+    // "treeline" on every 45 m hill and left the uplands bare — the reverse
+    // of where woods stand.
+    const altRef = Math.max(reliefTop, 320);
     const CELL = 46;
     const spots = [];
     for (let gx = minX + CELL / 2; gx < maxX; gx += CELL) {
@@ -2256,14 +2618,14 @@
             const curv = (reliefY - avg4) / Math.max(0.5, 0.05 * reliefTop);
             curvV = curv;
             closure = FLOOK.closure(jx, jz, {
-              relief: reliefY, top: reliefTop, slope: slope, curv: curv,
+              relief: reliefY, top: altRef, slope: slope, curv: curv,
               cover: coverHit && coverHit.biome, weight: coverHit && coverHit.weight,
               site: "continent",
             });
             storey = FLOOK.storey(jx, jz, closure);
             // "none" is NOT dropped any more: open meadow is where the plan
             // decides on a lone specimen or a hilltop clump (or nothing).
-            grad = { gx: sxg / (2 * e), gz: szg / (2 * e), alt: reliefTop > 1 ? reliefY / reliefTop : 0 };
+            grad = { gx: sxg / (2 * e), gz: szg / (2 * e), alt: reliefY / altRef };
           } else {
             const treeline = smooth01((22 - reliefY) / 7);    // canopy thins out on the high ridges
             const clearing = noise2(jx, jz, 240, 8815);       // low-freq meadow/clearing field
@@ -2406,9 +2768,26 @@
           L.push(x, z);
         }
         // ---- the river, for riparian lines and moisture
-        const RIV = CBZ.cityRiver && CBZ.cityRiver.exists && CBZ.cityRiver.exists() ? CBZ.cityRiver.info() : null;
+        // EVERY river, not just the harbour's: the Kings River, its outlet to
+        // the sea and the Mercy River all carry riparian woods, and every
+        // lake gets a broken ring of them (owner: "trees are random scatter"
+        // — along water is exactly where a tree has a reason to be).
+        const RIVS = waterBodies.filter(function (b) {
+          return b && b.kind === "path" && b.pts && b.pts.length > 1;
+        }).map(function (b) {
+          const hv = Array.isArray(b.half) ? b.half : b.pts.map(function () { return +b.half || 40; });
+          return { pts: b.pts, half: hv };
+        });
+        const LAKES = waterBodies.filter(function (b) { return b && b.kind === "circle" && b.r > 0; });
         function riverDist(x, z) {
-          if (!RIV || !RIV.pts || RIV.pts.length < 2) return Infinity;
+          let best = Infinity;
+          for (let r = 0; r < RIVS.length; r++) {
+            const d = oneRiverDist(RIVS[r], x, z);
+            if (d < best) best = d;
+          }
+          return best;
+        }
+        function oneRiverDist(RIV, x, z) {
           const P = RIV.pts, Hf = RIV.half;
           let best = Infinity;
           for (let i = 0; i + 1 < P.length; i++) {
@@ -2444,7 +2823,7 @@
           const sl = slopeAt(x, z);
           if (sl.s > 0.85) { planStats.rejected++; return false; }  // scree, not a tree
           const y = reliefAt(x, z);
-          const alt = reliefTop > 1 ? Math.max(0, y / reliefTop) : 0;
+          const alt = Math.max(0, y / altRef);
           let conifer = false;
           if (o.conifer != null) conifer = o.conifer;
           else conifer = FLOOK.species(x, z, { alt: alt, slope: sl.s, wet: o.wet || 0, site: "continent" }).conifer;
@@ -2461,11 +2840,14 @@
           if (s.steep) continue;
           if (s.cover && s.cover.biome === "desert" && (s.cover.weight || 0) > 0.5) continue;
           const alt = s.grad ? s.grad.alt : 0;
-          const rd = RIV ? riverDist(s.x, s.z) : Infinity;
+          const rd = RIVS.length ? riverDist(s.x, s.z) : Infinity;
           const wet = Math.max(Math.min(1, Math.max(0, -s.curv * 2)), rd < 200 ? 1 - rd / 200 : 0);
           const inside = FLOOK.stand(s.x, s.z, {
             cover: s.cover && s.cover.biome, weight: s.cover && s.cover.weight,
             alt: alt, slope: s.slope, curv: s.curv, wet: wet, area: "backcountry",
+            // woods are the uplands' and the slopes' (and the wet hollows'):
+            // open plain is meadow unless the stand field is strong there
+            bias: -0.19 + woodBias(s.x, s.z) + 0.09 * smooth01((s.slope - 0.06) / 0.20),
           });
           if (inside > 0) {
             // core: ~2.3 stems a cell (crowns ~25 m across at ~30 m pitch =
@@ -2508,8 +2890,8 @@
 
         // ---- 2. RIPARIAN: a broken line along each bank ---------------------
         const dRip = DEN("riparian");
-        if (RIV && RIV.pts && RIV.pts.length > 1 && dRip > 0) {
-          const P = RIV.pts, Hf = RIV.half;
+        for (let rv = 0; rv < RIVS.length && dRip > 0; rv++) {
+          const P = RIVS[rv].pts, Hf = RIVS[rv].half;
           const STEP_R = 16 / Math.max(0.25, Math.min(3, dRip));
           for (let i = 0; i + 1 < P.length; i++) {
             const ax = P[i].x, az = P[i].z, vx = P[i + 1].x - ax, vz = P[i + 1].z - az;
@@ -2526,6 +2908,51 @@
                 stem(cx + nx * off * side + tx * jit, cz + nz * off * side + tz * jit, "riparian",
                   { conifer: false, wet: 1, sep: 11, c: 0.5, sc: 0.85 + H01(cx, cz, 8853) * 0.2 });
               }
+            }
+          }
+        }
+
+        // ---- 2b. LAKESHORE: a broken ring of wet woodland round each lake ----
+        for (let lk = 0; lk < LAKES.length && dRip > 0; lk++) {
+          const Lb = LAKES[lk];
+          const nA = Math.max(24, Math.round(2 * Math.PI * Lb.r / (15 / Math.max(0.25, Math.min(3, dRip)))));
+          for (let a = 0; a < nA; a++) {
+            const ang = a / nA * Math.PI * 2, ca = Math.cos(ang), sa = Math.sin(ang);
+            // find the real (lobed) bank along this bearing
+            let bank = -1;
+            for (let rr = Lb.r * 0.72; rr <= Lb.r + 8; rr += 6) {
+              if (inlandWaterField(Lb.cx + ca * rr, Lb.cz + sa * rr) >= 0) { bank = rr; break; }
+            }
+            if (bank < 0) continue;
+            const bx = Lb.cx + ca * bank, bz = Lb.cz + sa * bank;
+            if (FLOOK.noise(bx, bz, 220, 8855) < 0.45) continue;     // reaches with and without trees
+            const off = 20 + H01(bx, bz, 8856) * 10;
+            stem(bx + ca * off, bz + sa * off, "riparian",
+              { conifer: false, wet: 1, sep: 11, c: 0.5, sc: 0.85 + H01(bx, bz, 8857) * 0.2 });
+          }
+        }
+
+        // ---- 2c. SHELTER BELTS round the country estates ----------------------
+        // A walled estate in open country is ringed by planted trees: the belt
+        // is what makes a lawn a property rather than a square cut out of a
+        // field (owner, of the presidential estate: "a square lawn").
+        for (let eb = 0; eb < authoredSurfaceBounds.length; eb++) {
+          const B = authoredSurfaceBounds[eb];
+          if (!/^gov-(execmansion|governor|capitol|finca|cliffhouse|compound|freeport|agency|defence)/.test(B.name || "")) continue;
+          const OFF = 18, BSTEP = 16;
+          const sides = [
+            [B.minX - OFF, B.minZ - OFF, B.maxX + OFF, B.minZ - OFF], [B.minX - OFF, B.maxZ + OFF, B.maxX + OFF, B.maxZ + OFF],
+            [B.minX - OFF, B.minZ - OFF, B.minX - OFF, B.maxZ + OFF], [B.maxX + OFF, B.minZ - OFF, B.maxX + OFF, B.maxZ + OFF],
+          ];
+          for (const sd of sides) {
+            const L = Math.hypot(sd[2] - sd[0], sd[3] - sd[1]), n = Math.floor(L / BSTEP);
+            for (let k = 0; k <= n; k++) {
+              const t = k / Math.max(1, n);
+              const px = sd[0] + (sd[2] - sd[0]) * t, pz = sd[1] + (sd[3] - sd[1]) * t;
+              if (H01(px, pz, 8858) < 0.10) continue;
+              const j = (H01(px, pz, 8859) - 0.5) * 4;
+              stem(px + (sd[0] === sd[2] ? j : 0), pz + (sd[1] === sd[3] ? j : 0), "hedgerow",
+                { conifer: H01(px, pz, 8867) < 0.35, sep: 9, c: 0.4, sc: 0.9 + H01(px, pz, 8868) * 0.2 });
             }
           }
         }
@@ -2547,9 +2974,12 @@
             for (let line = l0; line < l1; line += FIELD) {
               for (let seg = a0 - Math.ceil((a0 - aStart) / FIELD) * FIELD; seg < a1; seg += FIELD) {
                 const mx = axis === 0 ? line : seg + FIELD / 2, mz = axis === 0 ? seg + FIELD / 2 : line;
+                // farm country = the Coyle Valley's cover OR the field ring
+                // round every town (the same field weight the ground paints)
                 const cov = CBZ.biomeBlendDominantAt ? CBZ.biomeBlendDominantAt(biomeBlends, mx, mz) : null;
-                if (!cov || cov.biome !== "farmland" || (cov.weight || 0) < 0.45) continue;
-                if (H01(mx, mz, 8860 + axis) > pickP) continue;
+                const inFarm = cov && cov.biome === "farmland" && (cov.weight || 0) >= 0.45;
+                if (!inFarm && fieldWeightAt(mx, mz) < 0.55) continue;
+                if (H01(mx, mz, 8860 + axis) > (inFarm ? pickP : pickP * 0.25)) continue;
                 for (let u = HSTEP * 0.5; u < FIELD; u += HSTEP) {
                   const jit = (H01(mx + u, mz - u, 8862) - 0.5) * 3;
                   const px = axis === 0 ? line + jit : seg + u, pz = axis === 0 ? seg + u : line + jit;

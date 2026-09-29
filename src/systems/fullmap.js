@@ -733,17 +733,22 @@
       const P = mc.plan;
       if (!mInBox(P.bounds, box)) continue;
       // parks and the river first: streets and bridges draw over them
+      // the river under the parks (an island park sits in it); an island
+      // river is its channels, the arms round the island
+      const R = P.river;
+      if (R && R.pts && R.pts.length > 1 && R.pts.every(mOk)) {
+        ctx.strokeStyle = "rgba(39,126,143,.95)";
+        for (const ch of R.channels || [{ pts: R.pts }]) {
+          if (!ch.pts.every(mOk)) continue;
+          ctx.lineWidth = Math.max(2, ((ch.half ? Math.max.apply(null, ch.half) : R.half) || 30) * 2 * p.sc);
+          ctx.beginPath(); strokePoly(ch.pts, p); ctx.stroke();
+        }
+      }
       ctx.fillStyle = "rgba(76,153,82,.55)";
       mEach(mc, "parks", box, function (k) {
         if (![k.x0, k.x1, k.z0, k.z1].every(Number.isFinite)) return;
         ctx.fillRect(p.x(k.x0), p.z(k.z0), Math.max(1, (k.x1 - k.x0) * p.sc), Math.max(1, (k.z1 - k.z0) * p.sc));
       });
-      const R = P.river;
-      if (R && R.pts && R.pts.length > 1 && R.pts.every(mOk)) {
-        ctx.strokeStyle = "rgba(39,126,143,.95)";
-        ctx.lineWidth = Math.max(2, (R.half || 30) * 2 * p.sc);
-        ctx.beginPath(); strokePoly(R.pts, p); ctx.stroke();
-      }
       // streets: every casing, then every fill, so crossings knit. Arterials
       // (and country roads) read brighter and a touch wider than the locals.
       for (const pass of [0, 1]) {

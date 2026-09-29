@@ -130,6 +130,12 @@
       { id: "mill-brick",  grammar: "brick",      walls: [0x7a3a28, 0x6c3526], glass: 0x33404a },
     ],
     civic: [{ id: "civic-stone", grammar: "greekrev", walls: [0xd8d0bf, 0xc9c0ad], glass: 0x3a4650 }],
+    // the Detroit neighbourhoods (style "detroit"): the brick streets nearer
+    // the centre, the painted frame houses further out
+    hood: [
+      { id: "hood-brick", grammar: "queenanne", walls: [0x8a4a34, 0x7a3f2c, 0x9a5a40, 0x6e3a2a], roofs: [0x3a3634, 0x4a3b30, 0x2f2d2b], glass: 0x2b3238 },
+      { id: "hood-wood", grammar: "victorian", walls: [0xb9b3a4, 0xcfc2a6, 0x8a9a8c, 0xa9b4b8, 0xd8d2c2], roofs: [0x3d3a36, 0x4a4540, 0x55504a], glass: 0x2b3238 },
+    ],
   };
 
   const NAME_POOL = {
@@ -141,6 +147,8 @@
     industrial: ["The Yards", "Mill District", "Portside", "Foundry Row", "Canal Works", "South Terminal"],
     exurb: ["Hunter's Ridge", "Pleasant Hill", "Meadowbrook", "Cold Spring"],
     farm: ["Blue Creek Farms", "Ashby Fields", "Linden Acres"],
+    hood: ["Elmwood", "Maplewood", "Ashland Park", "Birch Hill", "Rosewood", "Parkside", "Hillcrest", "Woodlawn", "Kenwood", "Glenhurst",
+      "Cedar Heights", "Ivy Park", "Beechwood", "Grandview", "Oakdale", "Holbrook", "Laurel Park", "Westmoor", "Fenwick", "Sherwood"],
   };
 
   // ---------------------------------------------------------------------
@@ -167,7 +175,15 @@
   function plan(spec) {
     const T0 = Date.now();
     const tier = TIERS[spec.tier] || TIERS.metro;
-    const seed = (spec.seed | 0) ^ hashStr(spec.id || "metro");
+    // `seedKey` plans a city from another city's seed (a copy: city/metro.js
+    // plans it in the source's frame, so every position hash is the source's)
+    const seed = (spec.seed | 0) ^ hashStr(spec.seedKey || spec.id || "metro");
+    // STYLE. "legacy" is the planner as it stood on 2026-09-29 (Kingsport's
+    // plan the day the owner said "keep it as a communist place"): every line
+    // below that is not under DET runs for it, unchanged. "detroit" is the
+    // riverfront downtown, the radial avenues, the grid neighbourhoods of
+    // houses and the auto-plant industry (see THE DETROIT PLAN below).
+    const DET = spec.style === "detroit";
     const cx = spec.cx, cz = spec.cz;
     const A = spec.A || tier.A;
     const rx = spec.rx || 2000, rz = spec.rz || rx;
@@ -186,6 +202,7 @@
       trees: [], rail: [], stations: [], river: null, bridges: [], overpasses: [], interchanges: [],
       districts: [], landmarks: [], cells: [], xs: [], zs: [], obstacles: obstacles, corridors: corridors,
       walls: [], fields: [], parking: [], plazas: [], stats: null,
+      style: spec.style || "legacy", uniform: !!spec.uniform, vacant: [], structs: null,
     };
 
     // ---------------------------------------------------------------
@@ -305,7 +322,9 @@
       const base = rv.at;
       const STEP = 60, WAVE = rv.wave || 1100, AMP = rv.amp || 170;
       for (let a = a0; a <= a1 + 1e-6; a += STEP) {
-        const ph = (a - a0) / WAVE * Math.PI * 2;
+        // (phaseFrom: a river cut short at its head keeps the meanders of the
+        // whole river it was cut from; a copy's river starts downstream)
+        const ph = (a - (rv.phaseFrom != null ? rv.phaseFrom : a0)) / WAVE * Math.PI * 2;
         let off = Math.sin(ph + h01(seed, 3, 5, 61) * 6.28) * AMP * (0.7 + 0.3 * vnoise(seed, a, 0, 1500, 62))
                 + (vnoise(seed, a, 17, 700, 63) - 0.5) * AMP * 0.6;
         // pinned where the caller asks (a crossing the plan must honour)
@@ -317,6 +336,61 @@
         pts.push(p);
       }
       P.river = { pts: pts, half: half, along: along, name: rv.name || "River", bank: half + 16 };
+      if (rv.island) riverIsland(rv.island, pts, half, along, a0, STEP);
+    }
+    // AN ISLAND IN THE RIVER (the park island a riverfront downtown looks
+    // across at): the river splits into two arms round it. One bank (`keep`)
+    // does not move, so the riverfront avenue on it stays where it is; the
+    // island and the far arm push into the other bank. The water is then
+    // FOUR channels (main above, the two arms, main below), overlapping where
+    // the arms meet the main river, and riverDist() below measures to the
+    // nearest channel EDGE (returned as distance-to-centreline for a river
+    // of the plan's own half width, so every caller's `< half + pad` test is
+    // unchanged).
+    function riverIsland(I, pts, half, along, a0, STEP) {
+      const T = I.ramp || 150, arm = I.arm || 40, ih = I.half || 80;
+      const sg = (I.keep === "east" || I.keep === "south") ? 1 : -1;
+      const keptOff = sg * (half - arm), islandOff = keptOff - sg * (arm + ih), farOff = islandOff - sg * (ih + arm);
+      const aOf = function (p) { return along === "z" ? p.z : p.x; };
+      const perpOf = function (p) { return along === "z" ? p.x : p.z; };
+      const lo = aOf(pts[0]), hi = aOf(pts[pts.length - 1]);
+      if (!(I.a0 - T > lo + STEP && I.a1 + T < hi - STEP)) return;
+      function cAt(a) {
+        const f = clamp((a - a0) / STEP, 0, pts.length - 1.0001), i = Math.floor(f), t = f - i;
+        return lerp(perpOf(pts[i]), perpOf(pts[i + 1]), t);
+      }
+      function sAt(a) {
+        if (a <= I.a0 - T || a >= I.a1 + T) return 0;
+        if (a < I.a0) return smooth((a - (I.a0 - T)) / T);
+        if (a > I.a1) return smooth((I.a1 + T - a) / T);
+        return 1;
+      }
+      const P2 = function (a, off) { const c = cAt(a) + off; return along === "z" ? { x: r2(c), z: a } : { x: a, z: r2(c) }; };
+      const main1 = [], main2 = [];
+      for (const p of pts) { const a = aOf(p); if (a <= I.a0 - T + STEP) main1.push(p); if (a >= I.a1 + T - STEP) main2.push(p); }
+      const kept = [], far = [], hk = [], hf = [];
+      for (let a = I.a0 - T; a <= I.a1 + T + 1e-6; a += 30) {
+        const s = sAt(a);
+        kept.push(P2(a, s * keptOff)); hk.push(lerp(half, arm, s));
+        far.push(P2(a, s * farOff)); hf.push(lerp(half, arm, s));
+      }
+      const full = function (list) { return list.map(function () { return half; }); };
+      P.river.channels = [
+        { pts: main1, half: full(main1) }, { pts: kept, half: hk }, { pts: far, half: hf }, { pts: main2, half: full(main2) },
+      ];
+      P.river.island = { a0: I.a0, a1: I.a1, T: T, off: islandOff, half: ih, cAt: cAt, sAt: sAt, name: I.name || "Island" };
+    }
+    function islandHit(x0, z0, x1, z1, pad) {
+      const I = P.river && P.river.island;
+      if (!I) return null;
+      const al = P.river.along;
+      const A0 = al === "z" ? z0 : x0, A1 = al === "z" ? z1 : x1;
+      if (A1 < I.a0 - I.T || A0 > I.a1 + I.T) return null;
+      const a = clamp((A0 + A1) / 2, I.a0 - I.T, I.a1 + I.T);
+      const s = I.sAt(a); if (s <= 0.05) return null;
+      const c = I.cAt(a) + s * I.off, h = s * I.half + (pad || 0);
+      const Q0 = al === "z" ? x0 : z0, Q1 = al === "z" ? x1 : z1;
+      return (Q1 > c - h && Q0 < c + h) ? { name: I.name } : null;
     }
     // river query: distance to the centreline polyline (bucketed)
     const rBuckets = new Map();
@@ -332,8 +406,37 @@
         }
       }
     }
+    // an island river: the same buckets over every channel segment
+    const chBuckets = new Map();
+    if (P.river && P.river.channels) {
+      P.river.channels.forEach(function (ch, ci) {
+        const pts = ch.pts;
+        for (let i = 0; i < pts.length - 1; i++) {
+          const a = pts[i], b = pts[i + 1];
+          const minx = Math.floor((Math.min(a.x, b.x) - 400) / RB), maxx = Math.floor((Math.max(a.x, b.x) + 400) / RB);
+          const minz = Math.floor((Math.min(a.z, b.z) - 400) / RB), maxz = Math.floor((Math.max(a.z, b.z) + 400) / RB);
+          for (let ix = minx; ix <= maxx; ix++) for (let iz = minz; iz <= maxz; iz++) {
+            const k = ix * 100003 + iz; let l = chBuckets.get(k); if (!l) chBuckets.set(k, l = []); l.push(ci, i);
+          }
+        }
+      });
+    }
+    function channelDist(x, z) {
+      const l = chBuckets.get(Math.floor(x / RB) * 100003 + Math.floor(z / RB));
+      if (!l) return 1e9;
+      const C = P.river.channels; let best = 1e9;
+      for (let k = 0; k < l.length; k += 2) {
+        const ch = C[l[k]], i = l[k + 1], a = ch.pts[i], b = ch.pts[i + 1];
+        const dx = b.x - a.x, dz = b.z - a.z, L2 = dx * dx + dz * dz;
+        let t = L2 > 0 ? ((x - a.x) * dx + (z - a.z) * dz) / L2 : 0; t = clamp(t, 0, 1);
+        const d = Math.hypot(x - a.x - dx * t, z - a.z - dz * t) - lerp(ch.half[i], ch.half[i + 1], t);
+        if (d < best) best = d;
+      }
+      return best + P.river.half;
+    }
     function riverDist(x, z) {
       if (!P.river) return 1e9;
+      if (P.river.channels) return channelDist(x, z);
       const l = rBuckets.get(Math.floor(x / RB) * 100003 + Math.floor(z / RB));
       if (!l) return 1e9;
       const pts = P.river.pts; let best = 1e9;
@@ -353,6 +456,12 @@
       const at = rl.at;
       const a0 = axis === "x" ? B.minX : B.minZ, a1 = axis === "x" ? B.maxX : B.maxZ;
       P.rail.push({ axis: axis, at: at, a0: a0, a1: a1, half: rl.tracks ? rl.tracks * 2.5 + 4 : 9, tracks: rl.tracks || 2 });
+      // a freight YARD alongside the main line (many tracks over a stretch):
+      // a rail of its own to everything that reads P.rail, never a station
+      if (rl.yard) {
+        const Y = rl.yard, tr = Y.tracks || 6, yh = tr * 2.5 + 4, mh = P.rail[0].half;
+        P.rail.push({ axis: axis, at: at + (Y.side || -1) * (mh + yh + 3), a0: Math.max(a0, Y.from), a1: Math.min(a1, Y.to), half: yh, tracks: tr, yard: true });
+      }
     }
     function railHit(x0, z0, x1, z1, pad) {
       for (const r of P.rail) {
@@ -387,6 +496,7 @@
         || railHit(x0, z0, x1, z1, 2 + (pad || 0))
         || (P.river && boxWet(x0, z0, x1, z1, 12 + (pad || 0)))
         || (P.stations.length && stationHit(x0, z0, x1, z1, 4 + (pad || 0)))
+        || (P.river && P.river.island && islandHit(x0, z0, x1, z1, 10 + (pad || 0)))
         || (x0 < B.minX || x1 > B.maxX || z0 < B.minZ || z1 > B.maxZ ? { name: "bounds" } : null);
     }
     function boxWet(x0, z0, x1, z1, pad) {
@@ -404,6 +514,7 @@
     // THE STATION is placed before any street: the platforms own their ground
     // the station: where the rail passes closest to the CBD
     for (const r of P.rail) {
+      if (r.yard) continue;
       const sx = r.axis === "x" ? clamp(cx, r.a0 + 200, r.a1 - 200) : r.at, sz = r.axis === "x" ? r.at : clamp(cz, r.a0 + 200, r.a1 - 200);
       // slide it off any street and any freeway
       let best = null, bd = 1e9;
@@ -488,7 +599,7 @@
       const L = c.L, e = c.e;
       if (e > 1.45) { c.use = h01(seed, c.i, c.j, 73) < 0.75 ? "farm" : "void"; continue; }
       if (e > 1.12) { c.use = h01(seed, c.i, c.j, 74) < 0.55 ? "exurb" : "farm"; continue; }
-      if (spec.tier !== "town" && industrialScore(c) > 0.42) { c.use = "industrial"; continue; }
+      if (spec.tier !== "town" && industrialScore(c) > (DET ? 0.36 : 0.42)) { c.use = "industrial"; continue; }
       if (L > 0.80) c.use = "cbd";
       else if (L > 0.62) c.use = "midtown";
       else if (L > 0.47) c.use = "inner";
@@ -504,11 +615,14 @@
     // from the cells that satisfy it — never scattered.
     function pickCell(filter, score) {
       let best = null, bs = -1e9;
-      for (const c of cells) { if (!filter(c)) continue; const s = score(c); if (s > bs) { bs = s; best = c; } }
+      for (const c of cells) { if (c.spokes || !filter(c)) continue; const s = score(c); if (s > bs) { bs = s; best = c; } }
       return best;
     }
     const full = function (c) { return (c.x1 - c.x0) > A * 0.9 && (c.z1 - c.z0) > A * 0.9; };
     const isBuildUse = function (u) { return u === "cbd" || u === "midtown" || u === "inner" || u === "rows" || u === "suburb"; };
+    // THE DETROIT PLAN (1): the radial avenues claim their cells before any
+    // landmark does (pickCell skips a cell an avenue runs through)
+    if (DET) detroitSpokes();
     if (spec.tier === "metro") {
       const park = pickCell(function (c) { return full(c) && (c.use === "inner" || c.use === "midtown" || c.use === "rows") && c.free > 0.9 && c.e < 0.55; },
         function (c) { return -Math.abs(c.e - 0.34) + h01(seed, c.i, c.j, 81) * 0.1; });
@@ -535,7 +649,18 @@
     }
     // neighbourhood parks: one in about every eleventh built cell
     for (const c of cells) {
-      if ((c.use === "rows" || c.use === "inner") && c.free > 0.95 && full(c) && h01(seed, c.i, c.j, 91) < 0.07) { c.use = "park"; c.landmark = "park"; }
+      if (!c.spokes && (c.use === "rows" || c.use === "inner") && c.free > 0.95 && full(c) && h01(seed, c.i, c.j, 91) < 0.07) { c.use = "park"; c.landmark = "park"; }
+    }
+    // THE DETROIT PLAN (2): a city of houses. The rowhouse terraces and the
+    // curving subdivisions become the grid neighbourhood ("hood": long
+    // blocks of detached houses on narrow lots), and every cell an avenue
+    // runs through is one too, its avenue lined with a main street.
+    if (DET) for (const c of cells) {
+      if (c.use === "rows" || c.use === "suburb" || (c.spokes && (c.use === "inner" || c.use === "midtown"))) c.use = "hood";
+      // the island's superblocks are mostly water, but they are the city's:
+      // the arterials cross them (bridge, island, bridge) and the region
+      // holds the island's ground. Nothing else is built on them.
+      if (c.use === "void" && P.river && P.river.island && islandHit(c.x0, c.z0, c.x1, c.z1, 0)) c.use = "river";
     }
     P.cells = cells;
 
@@ -546,7 +671,7 @@
       if (u === "cbd") return "cbd"; if (u === "midtown") return "midtown";
       if (u === "inner" || u === "campus") return "inner"; if (u === "rows" || u === "park") return "rows";
       if (u === "suburb" || u === "mall") return "suburb"; if (u === "industrial" || u === "stadium") return "industrial";
-      if (u === "exurb") return "exurb"; if (u === "farm") return "farm"; return null;
+      if (u === "exurb") return "exurb"; if (u === "farm") return "farm"; if (u === "hood") return "hood"; return null;
     };
     const usedNames = {};
     for (const c of cells) {
@@ -571,7 +696,8 @@
       if (usedNames[name]) name = name + " " + ["North", "South", "East", "West"][(h01(seed, c.i, c.j, 102) * 4) | 0];
       usedNames[name] = true;
       const looks = LOOKS[cl] || LOOKS.inner;
-      const look = looks[(h01(seed, c.i, c.j, 103) * looks.length) | 0] || LOOKS.inner[0];
+      let look = looks[(h01(seed, c.i, c.j, 103) * looks.length) | 0] || LOOKS.inner[0];
+      if (DET) look = detroitLook(cl, members, look);
       P.districts.push({ id: id, name: name, kind: cl, cx: sx / members.length, cz: sz / members.length, cells: members.length, look: look, wealth: 0 });
     }
     for (const d of P.districts) {
@@ -684,6 +810,9 @@
       let big = -1, bn = 0; for (const r in n) if (n[r] > bn) { bn = n[r]; big = +r; }
       P.streets = S.filter(function (_, i) { return f(i) === big; });
     })();
+    // THE DETROIT PLAN (3): an avenue only runs on across an arterial that
+    // is really there (a compound's fence or a freeway can cut one)
+    if (DET) detroitSpokesCheck();
 
     // ---------------------------------------------------------------
     // 7. INSIDE EACH CELL: local grid or suburban curves, then parcels
@@ -758,8 +887,11 @@
         const lo = 18 + t * 14, hi = 30 + t * (coreStoreys - 30);
         return Math.round(lerp(lo, hi, Math.pow(r, 1.6)));
       }
-      if (use === "midtown") return Math.round(lerp(8, 12 + (L - 0.62) / 0.18 * 20, Math.pow(r, 1.4)));
-      if (use === "inner") return Math.round(lerp(4, 6 + (L - 0.47) / 0.15 * 4, r));
+      // (the upper bound never drops under the lower one: a midtown or inner
+      // parcel on land cheaper than its band's floor came out with zero or
+      // NEGATIVE storeys, a lot drawn as a bare parapet ring)
+      if (use === "midtown") return Math.round(lerp(8, Math.max(8, 12 + (L - 0.62) / 0.18 * 20), Math.pow(r, 1.4)));
+      if (use === "inner") return Math.round(lerp(4, Math.max(4, 6 + (L - 0.47) / 0.15 * 4), r));
       if (use === "rows") return 2 + Math.round(r * r * 2);
       if (use === "suburb") return r < 0.62 ? 1 : 2;
       return 1;
@@ -827,7 +959,7 @@
         const x = axis === "x" ? at : aa, z = axis === "x" ? aa : at;
         const blockedHere = !!(obstacleHit(x - pad, z - pad, x + pad, z + pad) || corridorHit(x - 1, z - 1, x + 1, z + 1, 6)
           || coreHit(x - 1, z - 1, x + 1, z + 1, 4) || wet(x, z, 8) || nearFreeway(x, z, 112)
-          || stationHit(x - 1, z - 1, x + 1, z + 1, 8) || railHit(x - 1, z - 1, x + 1, z + 1, 0) && axis !== (P.rail[0] && P.rail[0].axis === "x" ? "x" : "z"));
+          || stationHit(x - 1, z - 1, x + 1, z + 1, 8) || (P.river && P.river.island && islandHit(x - 1, z - 1, x + 1, z + 1, 6)) || railHit(x - 1, z - 1, x + 1, z + 1, 0) && axis !== (P.rail[0] && P.rail[0].axis === "x" ? "x" : "z"));
         if (!blockedHere) { if (s == null) s = aa; }
         else if (s != null) { out.push([s, aa - step]); s = null; }
       }
@@ -874,7 +1006,7 @@
       }
       if (u === "inner") { perimeterBlock(blk, x0, z0, x1, z1, c, "apt"); return; }
       if (u === "rows") { rowBlock(blk, x0, z0, x1, z1, c); return; }
-      if (u === "industrial") { industrialBlock(blk, x0, z0, x1, z1, c); return; }
+      if (u === "industrial") { if (DET) plantBlock(blk, x0, z0, x1, z1, c); else industrialBlock(blk, x0, z0, x1, z1, c); return; }
     }
     function splitRect(x0, z0, x1, z1, n, alongX) {
       if (n <= 1) return [{ x0: x0, z0: z0, x1: x1, z1: z1 }];
@@ -1319,7 +1451,16 @@
     function stadiumCell(c) {
       const x0 = c.x0 + artHalf, x1 = c.x1 - artHalf, z0 = c.z0 + artHalf, z1 = c.z1 - artHalf;
       P.pads.push({ x0: x0, x1: x1, z0: z0, z1: z1, use: "stadium", dist: c.dist, cell: c.i + "," + c.j });
-      const x = c.cx, z = c.cz;
+      let x = c.cx, z = c.cz;
+      // the bowl slides off a freeway that runs through its superblock
+      // (only ever when it would stand on one: a clear centre never moves)
+      if (blocked(x - 115, z - 95, x + 115, z + 95, 4)) {
+        search: for (let k = 1; k <= 12; k++) for (const o of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+          const qx = c.cx + o[0] * k * 10, qz = c.cz + o[1] * k * 10;
+          if (qx - 115 < x0 + 4 || qx + 115 > x1 - 4 || qz - 95 < z0 + 4 || qz + 95 > z1 - 4) continue;
+          if (!blocked(qx - 115, qz - 95, qx + 115, qz + 95, 4)) { x = qx; z = qz; break search; }
+        }
+      }
       addBldg({ x: x, z: z, w: 230, d: 190, rot: 0, h: 34, st: 1, fh: 34, type: "stadium", style: "stadium", wall: 0xc8c6c0, roof: "bowl", dist: c.dist });
       occupy(x, z, 150);
       P.parking.push({ x0: x0 + 6, x1: x1 - 6, z0: z0 + 6, z1: z - 100, kind: "lot", dist: c.dist });
@@ -1378,14 +1519,530 @@
       return !!(fw || railHit(x0, z0, x1, z1, 20) || (P.river && boxWet(x0, z0, x1, z1, 30)) || stationHit(x0, z0, x1, z1, 20)
         || obstacleHit(x0 + 60, z0 + 60, x1 - 60, z1 - 60));
     }
+    // =================================================================
+    //  THE DETROIT PLAN (style "detroit"; nothing below runs for "legacy").
+    //  Owner, 2026-09-29: "a real one that has diversity and real facades
+    //  and buildings, almost like a New York or Detroit. I like Detroit."
+    //  What makes Detroit read as Detroit, as plan:
+    //    * the downtown ON the river (the site puts the centre on the bank:
+    //      the riverfront avenue is the first arterial, the CBD hugs it);
+    //    * RADIAL AVENUES fanning out from downtown over the grid, lined
+    //      with two-to-five storey brick main streets (the one diagonal
+    //      element in an axis-aligned plan: they are pad streets, like the
+    //      suburbs' curving collectors, and their buildings are rotated);
+    //    * a city of HOUSES: long blocks of detached brick and frame houses
+    //      on narrow lots, elm-lined, with some lots empty and some houses
+    //      boarded;
+    //    * AUTO-PLANT INDUSTRY: one plant per superblock along the rail and
+    //      the river (a multi-storey concrete-and-brick factory on the
+    //      street, a sawtooth assembly hall behind it, the powerhouse and
+    //      its stacks), a freight yard, grain elevators by the water;
+    //    * a park ISLAND in the river, and an elevated downtown LOOP.
+    // =================================================================
+    const SPOKE_W = 26;
+    function cellOf(x, z) {
+      let i = -1, j = -1;
+      for (let k = 0; k + 1 < xs.length; k++) if (x >= xs[k] && x < xs[k + 1]) { i = k; break; }
+      for (let k = 0; k + 1 < zs.length; k++) if (z >= zs[k] && z < zs[k + 1]) { j = k; break; }
+      return i < 0 || j < 0 ? null : cellAt(i, j);
+    }
+    function nodeDist(p) {
+      // how far a crossing point sits from the nearest junction on its line
+      let onX = false;
+      for (const x of xs) if (Math.abs(p.x - x) < 0.01) onX = true;
+      let best = 1e9;
+      if (onX) for (const z of zs) best = Math.min(best, Math.abs(p.z - z));
+      else for (const x of xs) best = Math.min(best, Math.abs(p.x - x));
+      return best;
+    }
+    function spokeOK(c) {
+      const u = c.use;
+      return (u === "inner" || u === "midtown" || u === "rows" || u === "suburb") && c.free > 0.9
+        && (c.x1 - c.x0) > A * 0.8 && (c.z1 - c.z0) > A * 0.8 && !crossed(c);
+    }
+    function traceSpoke(hub, th) {
+      const dx = Math.cos(th), dz = -Math.sin(th);
+      const ts = [];
+      for (const x of xs) if (Math.abs(dx) > 1e-6) { const t = (x - hub.x) / dx; if (t > 1) ts.push(t); }
+      for (const z of zs) if (Math.abs(dz) > 1e-6) { const t = (z - hub.z) / dz; if (t > 1) ts.push(t); }
+      ts.sort(function (a, b) { return a - b; });
+      const segs = []; let clear = 1e9, len = 0, started = false;
+      for (let q = 0; q + 1 < ts.length; q++) {
+        const ta = ts[q], tb = ts[q + 1];
+        if (tb - ta < 1e-3) return null;                  // through a junction: no
+        const tm = (ta + tb) / 2, c = cellOf(hub.x + dx * tm, hub.z + dz * tm);
+        if (!c) break;
+        if (c.use === "cbd") { if (!started) continue; break; }
+        if (!spokeOK(c)) break;
+        if (tb - ta < 110) break;                          // a clipped corner is not a block
+        started = true;
+        const pa = { x: hub.x + dx * ta, z: hub.z + dz * ta }, pb = { x: hub.x + dx * tb, z: hub.z + dz * tb };
+        clear = Math.min(clear, nodeDist(pa), nodeDist(pb));
+        segs.push({ c: c, pa: pa, pb: pb });
+        len += tb - ta;
+      }
+      return segs.length ? { segs: segs, len: len, clear: clear } : null;
+    }
+    function detroitSpokes() {
+      const hub = spec.hub || { x: cx, z: cz };
+      const angs = spec.spokes || [72, 42, 12, -38, -68];
+      P.spokes = [];
+      angs.forEach(function (deg, k) {
+        let best = null;
+        for (let d = -9; d <= 9.001; d += 0.5) {
+          const tr = traceSpoke(hub, (deg + d) * Math.PI / 180);
+          if (!tr || tr.clear < 55) continue;
+          // the longest avenue, nearest the asked bearing, clear of junctions
+          const sc = tr.len - Math.abs(d) * 6 + Math.min(tr.clear, 120);
+          if (!best || sc > best.sc) { best = tr; best.sc = sc; best.deg = deg + d; }
+        }
+        if (!best || best.len < 380) return;
+        for (const sg of best.segs) (sg.c.spokes = sg.c.spokes || []).push({ pa: sg.pa, pb: sg.pb, k: k });
+        P.spokes.push({ k: k, deg: r2(best.deg), segs: best.segs });
+      });
+    }
+    function arterialAt(p) {
+      for (const s of P.streets) {
+        if ((s.k !== "art" && s.k !== "rural") || !s.axis) continue;
+        if (s.axis === "x" ? (Math.abs(p.x - s.at) < 0.5 && p.z >= s.a0 - 0.5 && p.z <= s.a1 + 0.5)
+                           : (Math.abs(p.z - s.at) < 0.5 && p.x >= s.a0 - 0.5 && p.x <= s.a1 + 0.5)) return s;
+      }
+      return null;
+    }
+    function detroitSpokesCheck() {
+      for (const sp of P.spokes || []) {
+        let n = 0;
+        while (n < sp.segs.length && arterialAt(sp.segs[n].pa) && arterialAt(sp.segs[n].pb)) n++;
+        for (let q = n; q < sp.segs.length; q++) {
+          const c = sp.segs[q].c;
+          c.spokes = c.spokes.filter(function (e) { return e.k !== sp.k; });
+          if (!c.spokes.length) delete c.spokes;
+        }
+        sp.segs = sp.segs.slice(0, n);
+      }
+      P.spokes = (P.spokes || []).filter(function (sp) { return sp.segs.length; }).map(function (sp) {
+        let len = 0; for (const g of sp.segs) len += Math.hypot(g.pb.x - g.pa.x, g.pb.z - g.pa.z);
+        return { k: sp.k, deg: sp.deg, len: Math.round(len), cells: sp.segs.length,
+          from: { x: r2(sp.segs[0].pa.x), z: r2(sp.segs[0].pa.z) }, to: { x: r2(sp.segs[sp.segs.length - 1].pb.x), z: r2(sp.segs[sp.segs.length - 1].pb.z) } };
+      });
+    }
+    function detroitLook(cl, members, look) {
+      const h = h01(seed, members[0].i, members[0].j, 104);
+      if (cl === "cbd") return LOOKS.cbd[2];                                   // stone and terracotta
+      if (cl === "midtown") return h < 0.5 ? LOOKS.midtown[1] : LOOKS.midtown[2];
+      if (cl === "inner") return h < 0.6 ? LOOKS.inner[0] : LOOKS.inner[1];     // brick and buff walk-ups
+      if (cl === "industrial") return LOOKS.industrial[1];
+      if (cl === "hood") {
+        let e = 0; for (const m of members) e += m.e;
+        return e / members.length < 0.74 ? LOOKS.hood[0] : LOOKS.hood[1];
+      }
+      return look;
+    }
+    // ---- a neighbourhood: long blocks, narrow lots, the avenue's main street
+    function hoodCell(c) {
+      const key = c.i + "," + c.j;
+      const x0 = c.x0 + artHalf, x1 = c.x1 - artHalf, z0 = c.z0 + artHalf, z1 = c.z1 - artHalf;
+      P.pads.push({ x0: x0, x1: x1, z0: z0, z1: z1, use: "hood", dist: c.dist, cell: key });
+      const avenues = [];
+      for (const sp of c.spokes || []) {
+        const s = addStreet("col", [{ x: r2(sp.pa.x), z: r2(sp.pa.z) }, { x: r2(sp.pb.x), z: r2(sp.pb.z) }], SPOKE_W,
+          { cell: key, mouth: true, avenue: true, spoke: sp.k });
+        hashStreet(s); avenues.push(s);
+      }
+      // the residential streets run the way the avenue crosses most squarely
+      let alongX = h01(seed, c.i, c.j, 801) < 0.5;
+      if (avenues.length) { const a = avenues[0].pts; alongX = Math.abs(a[1].z - a[0].z) > Math.abs(a[1].x - a[0].x); }
+      const span = alongX ? (c.z1 - c.z0) : (c.x1 - c.x0);
+      const n = Math.max(2, Math.round(span / lerp(76, 90, h01(seed, c.i, c.j, 802))));
+      const grid = [];
+      for (let k = 1; k < n; k++) {
+        const v = r2((alongX ? c.z0 : c.x0) + k * span / n);
+        const pts = alongX ? [{ x: c.x0, z: v }, { x: c.x1, z: v }] : [{ x: v, z: c.z0 }, { x: v, z: c.z1 }];
+        const s = addStreet("loc", pts, tier.locW - 1, { cell: key, mouth: true });
+        hashStreet(s); grid.push(s);
+      }
+      // the avenue's trees first (between kerb and sidewalk), then its shops
+      for (const s of avenues) {
+        const a = s.pts[0], b = s.pts[1], L = Math.hypot(b.x - a.x, b.z - a.z), tx = (b.x - a.x) / L, tz = (b.z - a.z) / L;
+        const off = s.w / 2 + 1.3;
+        for (let side = -1; side <= 1; side += 2) treesAlong(a.x + tx * 16 - tz * off * side, a.z + tz * 16 + tx * off * side,
+          b.x - tx * 16 - tz * off * side, b.z - tz * 16 + tx * off * side, 12, "avenue");
+      }
+      for (const s of avenues) mainStreet(s, c);
+      const brick = look(c).id === "hood-brick";
+      for (const s of grid) {
+        housesAlongD(s, c, brick);
+        const a = s.pts[0], b = s.pts[1], off = s.w / 2 + 1.1;
+        if (alongX) { treesAlong(a.x + 14, a.z - off, b.x - 14, b.z - off, 13, "street"); treesAlong(a.x + 14, a.z + off, b.x - 14, b.z + off, 13, "street"); }
+        else { treesAlong(a.x - off, a.z + 14, b.x - off, b.z - 14, 13, "street"); treesAlong(a.x + off, a.z + 14, b.x + off, b.z - 14, 13, "street"); }
+      }
+    }
+    const MAIN_WALLS = [0x8a3b26, 0x7a3524, 0x9b5a3a, 0xb59a74, 0x6b4535, 0xa8906c];
+    const mainList = [];
+    function mainStreet(s, c) {
+      const a = s.pts[0], b = s.pts[1], L = Math.hypot(b.x - a.x, b.z - a.z);
+      const tx = (b.x - a.x) / L, tz = (b.z - a.z) / L;
+      const lim = { x0: c.x0 + artHalf + PADIN, x1: c.x1 - artHalf - PADIN, z0: c.z0 + artHalf + PADIN, z1: c.z1 - artHalf - PADIN };
+      for (let side = -1; side <= 1; side += 2) {
+        const nx = -tz * side, nz = tx * side, rot = r2(Math.atan2(-nx, -nz));
+        let t = 6;
+        while (t < L - 10) {
+          const uw = lerp(8, 14, h01(seed, a.x + t, a.z + side, 811));
+          const dd = lerp(15, 20, h01(seed, a.z + t, a.x - side, 812));
+          const tm = t + uw / 2, off = s.w / 2 + 4.2 + dd / 2;
+          const x = a.x + tx * tm + nx * off, z = a.z + tz * tm + nz * off;
+          t += uw + 0.4;
+          const b0 = { x: x, z: z, w: uw, d: dd, rot: rot };
+          const cs = obbCorners(b0);
+          let inside = true;
+          for (const q of cs) if (q.x < lim.x0 || q.x > lim.x1 || q.z < lim.z0 || q.z > lim.z1) inside = false;
+          if (!inside) continue;
+          // clear of every other street (its edge) by a sidewalk: sample the
+          // footprint, the front edge is allowed against its own avenue
+          let clearOK = true;
+          for (const q of cs.concat([{ x: x, z: z }])) if (roadClearExcept(q.x, q.z, 2.5, s) < 0) clearOK = false;
+          if (!clearOK) continue;
+          const bx0 = Math.min(cs[0].x, cs[1].x, cs[2].x, cs[3].x), bx1 = Math.max(cs[0].x, cs[1].x, cs[2].x, cs[3].x);
+          const bz0 = Math.min(cs[0].z, cs[1].z, cs[2].z, cs[3].z), bz1 = Math.max(cs[0].z, cs[1].z, cs[2].z, cs[3].z);
+          if (blocked(bx0, bz0, bx1, bz1, 0)) continue;
+          let hitOther = false;
+          for (const o of mainList) if (Math.abs(o.x - x) < 30 && Math.abs(o.z - z) < 30 && obbOverlap(o, b0)) { hitOther = true; break; }
+          if (hitOther) continue;
+          const hv = h01(seed, x, z, 813);
+          if (hv < 0.09) { P.vacant.push({ x: r2(x), z: r2(z), w: r2(uw), d: r2(dd), rot: rot, kind: "lot" }); continue; }
+          const st = c.L > 0.47 ? 3 + ((h01(seed, x, z, 814) * 3) | 0) : 2 + ((h01(seed, x, z, 814) * 2) | 0);
+          const bb = addBldg({ x: x, z: z, w: uw, d: dd, rot: rot, h: st * 3.6 + 0.9, st: st, fh: 3.6, type: "row", style: "row",
+            wall: MAIN_WALLS[(h01(seed, x, z, 815) * MAIN_WALLS.length) | 0], glass: 0x2a333b, roof: "flat", shop: hv > 0.22,
+            face: "rot", kind: "mainstreet", era: 1905 + ((h01(seed, x, z, 816) * 26) | 0), vacant: hv < 0.17, dist: c.dist, street: s.id });
+          mainList.push(bb);
+          occupy(x, z, Math.hypot(uw, dd) / 2);
+        }
+      }
+    }
+    // the distance to the nearest street edge, ignoring one street
+    function roadClearExcept(x, z, r, skip) {
+      let best = 1e9;
+      const ix0 = Math.floor((x - r) / SH), ix1 = Math.floor((x + r) / SH), iz0 = Math.floor((z - r) / SH), iz1 = Math.floor((z + r) / SH);
+      for (let ix = ix0; ix <= ix1; ix++) for (let iz = iz0; iz <= iz1; iz++) {
+        const l = sHash.get(ix * 100003 + iz); if (!l) continue;
+        for (let k = 0; k < l.length; k++) {
+          const e = l[k]; if (e[0] === skip) continue;
+          const d = segDist(x, z, e[1].x, e[1].z, e[2].x, e[2].z) - e[0].w / 2;
+          if (d < best) best = d;
+        }
+      }
+      return best - r;
+    }
+    const PADIN = 4.6;                 // pad footway ring (3.3) + a step
+    const HOOD_BRICK = [0x8a4a34, 0x7a3f2c, 0x9a5a40, 0x6e3a2a, 0xa0826a], HOOD_WOOD = [0xb9b3a4, 0xcfc2a6, 0x8a9a8c, 0xa9b4b8, 0xd8d2c2, 0x9a8a6c, 0x7f8f98];
+    function housesAlongD(s, c, brick) {
+      const a = s.pts[0], b = s.pts[1], L = Math.hypot(b.x - a.x, b.z - a.z), half = s.w / 2;
+      const tx = (b.x - a.x) / L, tz = (b.z - a.z) / L, nx = -tz, nz = tx;
+      const front = lerp(11.5, 13.5, h01(seed, c.i, c.j, 820));
+      for (let t = front * 0.5; t < L; t += front) {
+        const px = a.x + tx * t, pz = a.z + tz * t;
+        for (let side = -1; side <= 1; side += 2) placeHouseD(px, pz, nx * side, nz * side, half, c, brick, s.id);
+      }
+    }
+    function placeHouseD(px, pz, nx, nz, half, c, brick, sid) {
+      const w = lerp(7.2, 9.6, h01(seed, px, pz, 822)), d = lerp(10, 12.5, h01(seed, pz, px, 823));
+      const setback = lerp(5, 7, h01(seed, px, pz, 824));
+      const off = half + setback + d / 2, x = px + nx * off, z = pz + nz * off;
+      const rad = Math.hypot(w, d) / 2 + 1.0;
+      if (roadClear(x, z, Math.hypot(w, d) / 2 + 2) < 0) return;
+      if (occupied(x, z, rad)) return;
+      const lx0 = c.x0 + artHalf + PADIN + 2, lx1 = c.x1 - artHalf - PADIN - 2, lz0 = c.z0 + artHalf + PADIN + 2, lz1 = c.z1 - artHalf - PADIN - 2;
+      if (x - rad < lx0 || x + rad > lx1 || z - rad < lz0 || z + rad > lz1) return;
+      if (blocked(x - rad, z - rad, x + rad, z + rad, 2)) return;
+      const rot = r2(Math.atan2(-nx, -nz));
+      const hv = h01(seed, x, z, 821);
+      // an empty lot: the house is gone, the yard trees stayed
+      if (hv < 0.11) {
+        P.vacant.push({ x: r2(x), z: r2(z), w: r2(w), d: r2(d), rot: rot, kind: "house" });
+        occupy(x, z, rad);
+        if (h01(seed, x, z, 825) < 0.5 && treeOK(x, z)) { addTree(x, z, "yard"); P.trees[P.trees.length - 1].street = sid; }
+        return;
+      }
+      const st = brick ? 2 : (h01(seed, x, z, 826) < 0.55 ? 2 : 1);
+      const walls = brick ? HOOD_BRICK : HOOD_WOOD, roofs = look(c).roofs || [0x3d3a36];
+      addBldg({ x: x, z: z, w: w, d: d, rot: rot, h: st * 3.0, st: st, fh: 3.0, type: "house", style: "house",
+        wall: walls[(h01(seed, x, z, 827) * walls.length) | 0], roofCol: roofs[(h01(seed, x, z, 828) * roofs.length) | 0],
+        roof: h01(seed, x, z, 829) < 0.78 ? "gable" : "hip", garage: false, face: "rot", dist: c.dist,
+        drive: { x: px + nx * (half + setback * 0.5), z: pz + nz * (half + setback * 0.5) }, street: sid,
+        kind: brick ? "house-brick" : "house-wood", era: brick ? 1915 + ((h01(seed, x, z, 830) * 14) | 0) : 1900 + ((h01(seed, x, z, 830) * 26) | 0),
+        vacant: hv < 0.18 });
+      occupy(x, z, rad);
+      const bx = x - nx * (d / 2 + 6), bz = z - nz * (d / 2 + 6);
+      if (h01(seed, bx, bz, 831) < 0.45 && treeOK(bx, bz)) { addTree(bx, bz, "yard"); P.trees[P.trees.length - 1].street = sid; }
+    }
+    // ---- a plant: the factory on the street, the assembly hall behind it,
+    //      the powerhouse and its stacks; by the water, grain elevators
+    let elevators = 0;
+    function plantBlock(blk, x0, z0, x1, z1, c) {
+      const W = x1 - x0, D = z1 - z0;
+      if (W < 140 || D < 140) { industrialBlock(blk, x0, z0, x1, z1, c); return; }
+      const alongX = W >= D, LA = alongX ? W : D, LB = alongX ? D : W, A0 = alongX ? x0 : z0, B0 = alongX ? z0 : x0;
+      const hh = h01(seed, x0, z0, 841);
+      const flip = hh < 0.5;                           // which long street the factory fronts
+      // (along a0..a1, across b0..b1) -> a building rect; across measured from the front
+      const put = function (a0, a1, b0, b1, extra) {
+        const bf0 = flip ? B0 + LB - b1 : B0 + b0, bf1 = flip ? B0 + LB - b0 : B0 + b1;
+        const r = alongX ? { x0: A0 + a0, x1: A0 + a1, z0: bf0, z1: bf1 } : { x0: bf0, x1: bf1, z0: A0 + a0, z1: A0 + a1 };
+        const b = Object.assign({ x: (r.x0 + r.x1) / 2, z: (r.z0 + r.z1) / 2, w: r.x1 - r.x0, d: r.z1 - r.z0, rot: 0, dist: c.dist }, extra);
+        if (blocked(r.x0, r.z0, r.x1, r.z1, 0)) return null;
+        addBldg(b); occupy(b.x, b.z, Math.hypot(b.w, b.d) / 2);
+        return b;
+      };
+      const nearWater = P.river && riverDist((x0 + x1) / 2, (z0 + z1) / 2) < P.river.half + 520;
+      const nearRail = !!railHit(x0 - 120, z0 - 120, x1 + 120, z1 + 120, 0);
+      let a = LA * 0.05;
+      if (nearWater && nearRail && elevators < 2) {
+        // GRAIN ELEVATORS: two rows of silos and the headhouse at their end
+        elevators++;
+        const n = 8, dS = 9, pitch = 9.3;
+        for (let r = 0; r < 2; r++) for (let k = 0; k < n; k++) {
+          put(a + k * pitch, a + k * pitch + dS, 8 + r * pitch, 8 + r * pitch + dS,
+            { h: 36, st: 1, fh: 36, type: "silo", style: "metal", wall: 0xc9c4b8, roof: "dome", kind: "elevator", era: 1924 });
+        }
+        put(a + n * pitch + 2, a + n * pitch + 16, 4, 30,
+          { h: 57.6, st: 12, fh: 4.8, type: "office", style: "concrete", wall: 0xbdb6a8, glass: 0x2c353e, roof: "flat", kind: "elevator-head", era: 1924 });
+        P.landmarks.push({ kind: "elevator", x: alongX ? A0 + a + 60 : B0 + 20, z: alongX ? B0 + 20 : A0 + a + 60, name: P.name + " Grain Elevator" });
+        a += n * pitch + 30;
+      } else {
+        // THE FACTORY: four to six storeys of concrete frame and brick on the street
+        const fl = Math.min(LA - a - LA * 0.05, LA * lerp(0.62, 0.86, hh)), fd = Math.min(62, LB * 0.18);
+        const st = 4 + ((h01(seed, x0, z0, 842) * 3) | 0);
+        put(a, a + fl, 0, fd, { h: st * 4.4, st: st, fh: 4.4, type: "office", style: "brick", wall: h01(seed, x0, z0, 843) < 0.5 ? 0x7a3a28 : 0x9a8f7c,
+          glass: 0x33404a, roof: "flat", kind: "factory", era: 1908 + ((h01(seed, x0, z0, 844) * 18) | 0) });
+      }
+      // THE ASSEMBLY HALL: one storey of sawtooth roof, a quarter-mile long
+      const fdU = Math.min(62, LB * 0.18);
+      const sa0 = LA * 0.06, sa1 = LA * lerp(0.7, 0.94, h01(seed, x1, z1, 845)), sb0 = fdU + 16, sb1 = sb0 + LB * lerp(0.36, 0.5, h01(seed, x1, z0, 846));
+      put(sa0, sa1, sb0, sb1, { h: lerp(11, 15, h01(seed, x0, z1, 847)), st: 1, fh: 13, type: "ware", style: "brick", wall: 0x8c6a52,
+        glass: 0x40505a, roof: "saw", kind: "plant-shed", era: 1920 + ((h01(seed, x0, z1, 848) * 20) | 0) });
+      // yards between the hall and the far street
+      if (LB - sb1 > 40) {
+        const ya = alongX ? { x0: A0 + sa0, x1: A0 + sa1 } : null;
+        const yb0 = flip ? B0 : B0 + sb1 + 6, yb1 = flip ? B0 + LB - sb1 - 6 : B0 + LB;
+        P.parking.push(alongX ? { x0: ya.x0, x1: ya.x1, z0: yb0, z1: yb1, kind: "yard", dist: c.dist } : { x0: yb0, x1: yb1, z0: A0 + sa0, z1: A0 + sa1, kind: "yard", dist: c.dist });
+      }
+      // THE POWERHOUSE and its stacks, in the far corner
+      if (h01(seed, x1, z1, 849) < 0.7 && LA - sa1 > 60) {
+        const pa = sa1 + 12, pb = LB - 44;
+        if (put(pa, pa + 36, pb, pb + 26, { h: 19.5, st: 3, fh: 6.5, type: "office", style: "brick", wall: 0x7a3a28, glass: 0x33404a, roof: "flat", kind: "powerhouse", era: 1916 })) {
+          const ns = 2 + ((h01(seed, x1, z1, 850) * 2) | 0);
+          for (let k = 0; k < ns; k++) put(pa + 4 + k * 10, pa + 9.5 + k * 10, pb - 12, pb - 6.5,
+            { h: lerp(46, 64, h01(seed, x1 + k, z1, 851)), st: 1, fh: 10, type: "tank", style: "metal", wall: 0x8a7e72, roof: "dome", kind: "stack", era: 1916 });
+        }
+      }
+    }
+    // ---- the park island: lawn, paths and woods between the two arms
+    function islandPark() {
+      const I = P.river.island, al = P.river.along;
+      let cmin = 1e9, cmax = -1e9;
+      for (let a = I.a0; a <= I.a1; a += 20) { const c = I.cAt(a) + I.off; cmin = Math.min(cmin, c); cmax = Math.max(cmax, c); }
+      const q0 = cmax - (I.half - 16), q1 = cmin + (I.half - 16);
+      if (q1 - q0 < 40) return;
+      // cut where an arterial crosses the island (it runs over it at grade)
+      const cuts = [];
+      for (const s of P.streets) if (s.k === "art" && s.axis === (al === "z" ? "z" : "x") && s.at > I.a0 - 20 && s.at < I.a1 + 20) cuts.push([s.at - s.w / 2 - 2, s.at + s.w / 2 + 2]);
+      cuts.sort(function (p, q) { return p[0] - q[0]; });
+      let a = I.a0 + 20; const pieces = [];
+      for (const k of cuts) { if (k[0] - a > 60) pieces.push([a, k[0]]); a = Math.max(a, k[1]); }
+      if (I.a1 - 20 - a > 60) pieces.push([a, I.a1 - 20]);
+      pieces.forEach(function (pc, k) {
+        const r = al === "z" ? { x0: q0, x1: q1, z0: pc[0], z1: pc[1] } : { x0: pc[0], x1: pc[1], z0: q0, z1: q1 };
+        const hc = cellOf((r.x0 + r.x1) / 2, (r.z0 + r.z1) / 2), dist = hc ? hc.dist : 0;
+        P.pads.push({ x0: r.x0, x1: r.x1, z0: r.z0, z1: r.z1, use: "park", dist: dist, cell: "island-" + k });
+        P.parks.push({ x0: r.x0, x1: r.x1, z0: r.z0, z1: r.z1, kind: "park", dist: dist });
+        const X0 = r.x0 + PADIN + 3, X1 = r.x1 - PADIN - 3, Z0 = r.z0 + PADIN + 3, Z1 = r.z1 - PADIN - 3;
+        // a tree-lined perimeter walk and a wood at each end
+        treesAlong(X0, Z0, X1, Z0, 12, "avenue"); treesAlong(X0, Z1, X1, Z1, 12, "avenue");
+        treesAlong(X0, Z0 + 12, X0, Z1 - 12, 12, "avenue"); treesAlong(X1, Z0 + 12, X1, Z1 - 12, 12, "avenue");
+        const long = al === "z" ? (Z1 - Z0) : (X1 - X0);
+        if (long > 140) {
+          const w0 = al === "z" ? { x0: X0 + 12, x1: X1 - 12, z0: Z0 + 14, z1: Z0 + 14 + long * 0.28 } : { x0: X0 + 14, x1: X0 + 14 + long * 0.28, z0: Z0 + 12, z1: Z1 - 12 };
+          treesInRect(w0.x0, w0.z0, w0.x1, w0.z1, 9, "park");
+        }
+      });
+      if (pieces.length) {
+        const m = (I.a0 + I.a1) / 2, c = I.cAt(m) + I.off;
+        P.landmarks.push({ kind: "park", x: al === "z" ? r2(c) : m, z: al === "z" ? m : r2(c), name: I.name });
+      }
+    }
+    // ---- kinds and years
+    function detroitTags() {
+      // the riverfront glass cluster: the five downtown towers nearest the water
+      // (on the downtown's own bank)
+      const bankOf = function (x, z) {
+        if (!P.river) return 0;
+        let best = null, bd = 1e9;
+        for (const p of P.river.pts) { const d = Math.hypot(p.x - x, p.z - z); if (d < bd) { bd = d; best = p; } }
+        return P.river.along === "z" ? Math.sign(x - best.x) : Math.sign(z - best.z);
+      };
+      const hubBank = bankOf(cx, cz);
+      const tw = P.bldgs.filter(function (b) { return b.type === "tower" && Math.hypot(b.x - cx, b.z - cz) < 560 && bankOf(b.x, b.z) === hubBank; });
+      tw.sort(function (p, q) { return riverDist(p.x, p.z) - riverDist(q.x, q.z); });
+      const cl = LOOKS.cbd[0];
+      for (const b of tw.slice(0, 5)) {
+        b.kind = "glass-cluster"; b.era = 1977; b.style = "glass"; b.wall = cl.walls[(h01(seed, b.x, b.z, 861) * cl.walls.length) | 0]; b.glass = cl.glass;
+        if (b.roof === "crown") b.roof = "flat";
+      }
+      for (const b of P.bldgs) {
+        if (b.kind) continue;
+        const r = h01(seed, b.x, b.z, 862);
+        if (b.type === "tower") { b.kind = "prewar-tower"; b.era = 1913 + ((r * 19) | 0); }
+        else if (b.type === "apt") { b.kind = "apartment"; b.era = 1912 + ((r * 18) | 0); }
+        else if (b.type === "office") b.era = 1920 + ((r * 12) | 0);
+        else if (b.type === "row") b.era = 1895 + ((r * 25) | 0);
+        else if (b.type === "ware" || b.type === "tank") { b.kind = b.type === "ware" ? "plant-shed" : "tank"; b.era = 1925 + ((r * 30) | 0); }
+        else if (b.type === "house") { b.kind = "house-wood"; b.era = 1920 + ((r * 30) | 0); }
+        else if (b.type === "civic" || b.type === "pavilion" || b.type === "clocktower") b.era = 1915 + ((r * 15) | 0);
+        else if (b.type === "strip" || b.type === "mall") b.era = 1962 + ((r * 25) | 0);
+        else if (b.type === "stadium") b.era = 2002;
+        else b.era = 1920;
+      }
+    }
+    // ---- the elevated downtown loop: a guideway over the kerb of the
+    //      arterials round the downtown, columns on the sidewalk, stations
+    function planMover() {
+      const hx = cx, hz = cz, M = spec.mover === true ? {} : spec.mover;
+      const near = function (list, v) { let b = null; for (const q of list) if (b == null || Math.abs(q - v) < Math.abs(b - v)) b = q; return b != null && Math.abs(b - v) < 30 ? b : null; };
+      // (in superblocks from the hub: the downtown the loop rings)
+      const xw = near(xs, hx - A * (M.west != null ? M.west : 0.5)), xe = near(xs, hx + A * (M.east != null ? M.east : 1.5)),
+        zn = near(zs, hz - A * (M.north != null ? M.north : 1.5)), zsv = near(zs, hz + A * (M.south != null ? M.south : 1.5));
+      if (xw == null || xe == null || zn == null || zsv == null) return;
+      // all four sides must be continuous arterial
+      const covered = function (axis, at, a0, a1) {
+        return P.streets.some(function (s) { return s.k === "art" && s.axis === axis && Math.abs(s.at - at) < 0.5 && s.a0 <= a0 + 0.5 && s.a1 >= a1 - 0.5; });
+      };
+      if (!covered("x", xw, zn, zsv) || !covered("x", xe, zn, zsv) || !covered("z", zn, xw, xe) || !covered("z", zsv, xw, xe)) return;
+      // THE GUIDEWAY RUNS OVER THE ARTERIALS' CENTRE LINES (the columns in
+      // the middle of the road, between the inner lanes, like a median),
+      // turning over the junctions on 14 m curves: over the centre it never
+      // meets a lamp (they stand at the kerbs), a street tree or a facade.
+      const CR = 14;
+      const X0 = xw, X1 = xe, Z0 = zn, Z1 = zsv, hx0 = (X0 + X1) / 2, hz0 = (Z0 + Z1) / 2;
+      const pts = [];
+      const corner = function (ccx, ccz, a0) { for (let k = 0; k <= 4; k++) { const a = a0 + (k / 4) * Math.PI / 2; pts.push({ x: r2(ccx + Math.cos(a) * CR), z: r2(ccz + Math.sin(a) * CR) }); } };
+      corner(X1 - CR, Z0 + CR, -Math.PI / 2); corner(X1 - CR, Z1 - CR, 0); corner(X0 + CR, Z1 - CR, Math.PI / 2); corner(X0 + CR, Z0 + CR, Math.PI);
+      // where something crosses or meets the ring, no column: every junction
+      // on it, and the mouth of every pad street (the radial avenues) on it
+      const keep = [];
+      const onRing = function (x, z) {
+        return ((Math.abs(x - X0) < 0.6 || Math.abs(x - X1) < 0.6) && z >= Z0 - 1 && z <= Z1 + 1) || ((Math.abs(z - Z0) < 0.6 || Math.abs(z - Z1) < 0.6) && x >= X0 - 1 && x <= X1 + 1);
+      };
+      for (const j of P.junctions) if (onRing(j.x, j.z)) keep.push({ x: j.x, z: j.z, r: Math.max(j.wa, j.wb) / 2 + 6 });
+      for (const st of P.streets) if (!st.axis) for (const e of [st.pts[0], st.pts[st.pts.length - 1]]) {
+        // a mouth ends on the arterial's centre line or its kerb
+        for (const q of [[X0, null], [X1, null], [null, Z0], [null, Z1]]) {
+          const d = q[0] != null ? Math.abs(e.x - q[0]) : Math.abs(e.z - q[1]);
+          if (d < tier.artW / 2 + 1 && onRing(q[0] != null ? q[0] : e.x, q[1] != null ? q[1] : e.z)) keep.push({ x: q[0] != null ? q[0] : e.x, z: q[1] != null ? q[1] : e.z, r: st.w / 2 + 8 });
+        }
+      }
+      const colFree = function (x, z) {
+        for (const k of keep) if (Math.abs(x - k.x) < k.r && Math.abs(z - k.z) < k.r) return false;
+        if (P.river && wet(x, z, 4)) return false;
+        return true;
+      };
+      const cols = [];
+      let total = 0, last = -1e9;
+      const n = pts.length;
+      for (let i = 0; i < n; i++) {
+        const p = pts[i], q = pts[(i + 1) % n], L = Math.hypot(q.x - p.x, q.z - p.z);
+        if (L < 1e-6) continue;
+        const straight = L > CR * 2;                     // the runs between the corner curves
+        const tx = (q.x - p.x) / L, tz = (q.z - p.z) / L;
+        if (straight) for (let s = 6; s < L - 6; s += 2) {
+          const x = p.x + tx * s, z = p.z + tz * s;
+          if (total + s - last >= 28 && colFree(x, z)) { cols.push({ x: r2(x), z: r2(z) }); last = total + s; }
+        }
+        total += L;
+      }
+      // the lamps metro_ground stands at the kerbs (its rule: every 36 m along
+      // an arterial, alternate sides) — a stair tower keeps clear of them
+      const lampNear = function (axis, at, along, side) {
+        const sp = 36, off = at % 7;
+        const k0 = Math.floor((along - off) / sp) - 1;
+        for (let k = k0; k <= k0 + 3; k++) {
+          const a = k * sp + off, sd = (k & 1) ? 1 : -1;
+          if (sd === side && Math.abs(a - along) < 2.6) return true;
+        }
+        return false;
+      };
+      // stations: the middle of the north, east and south runs, a glazed box
+      // round the track; its stair tower on the sidewalk beside it
+      const stations = [];
+      const mk = function (x, z, yaw, name) {
+        const along = { x: Math.sin(yaw), z: Math.cos(yaw) }, across = { x: along.z, z: -along.x };
+        const axis = Math.abs(along.x) < 0.5 ? "x" : "z", at = axis === "x" ? x : z;   // the arterial's fixed coordinate
+        const st = { x: r2(x), z: r2(z), yaw: r2(yaw), len: 32, wid: 7, stair: null, name: name };
+        const u = tier.artW / 2 + 1.6;
+        search: for (const d of [8, -8, 14, -14, 20, -20, 26, -26]) for (const side of [1, -1]) {
+          const sx = x + along.x * d + across.x * u * side, sz = z + along.z * d + across.z * u * side;
+          const al = axis === "x" ? sz : sx;
+          // which kerb (in metro_ground's sense: +1 = the +u side of the street)
+          const gside = (axis === "x" ? sx - at : sz - at) > 0 ? 1 : -1;
+          if (lampNear(axis, at, al, gside)) continue;
+          let clear = true;
+          for (const k of keep) if (Math.abs(sx - k.x) < k.r + 2 && Math.abs(sz - k.z) < k.r + 2) clear = false;
+          const hw = 2.1;
+          for (const b of P.bldgs) {
+            if (Math.abs(b.x - sx) > 90 || Math.abs(b.z - sz) > 90) continue;
+            const r = obbCorners({ x: sx, z: sz, w: 2.6, d: 4.2, rot: yaw });
+            if (obbOverlap({ x: sx, z: sz, w: 2.6 + 1, d: 4.2 + 1, rot: yaw }, b)) { clear = false; break; }
+            void r; void hw;
+          }
+          if (!clear) continue;
+          st.stair = { x: r2(sx), z: r2(sz), w: 2.6, d: 4.2 };
+          break search;
+        }
+        stations.push(st);
+      };
+      // a station stands where 40 m of the run are clear of every junction
+      // and mouth, as near the middle of its side as that allows
+      const place = function (x, z, yaw, lo, hi, name) {
+        const alongX = Math.abs(Math.sin(yaw)) > 0.5, c0 = alongX ? x : z;
+        for (let k = 0; k < 80; k++) for (const sg of [1, -1]) {
+          const c = c0 + sg * k * 5;
+          if (c - 20 < lo + CR + 4 || c + 20 > hi - CR - 4) continue;
+          const px = alongX ? c : x, pz = alongX ? z : c;
+          let ok = true;
+          for (const q of keep) {
+            const dAl = alongX ? Math.abs(q.x - px) : Math.abs(q.z - pz), dAc = alongX ? Math.abs(q.z - pz) : Math.abs(q.x - px);
+            if (dAc < q.r && dAl < q.r + 20) { ok = false; break; }
+          }
+          if (ok) { mk(px, pz, yaw, name); return; }
+        }
+      };
+      place(hx0, Z0, Math.PI / 2, X0, X1, "North");
+      place(X1, hz0, 0, Z0, Z1, "East");
+      place(hx0, Z1, Math.PI / 2, X0, X1, "South");
+      // no tree under the deck's edge or in a stair tower
+      P.trees = P.trees.filter(function (t) {
+        for (const st of stations) if (st.stair && Math.abs(t.x - st.stair.x) < 4.5 && Math.abs(t.z - st.stair.z) < 4.5) return false;
+        return true;
+      });
+      P.structs = P.structs || {};
+      P.structs.mover = { pts: pts, closed: true, deckY: 8.2, depth: 1.5, width: 5.0, cols: cols, stations: stations, length: Math.round(total),
+        rect: { x0: xw, x1: xe, z0: zn, z1: zsv } };
+      P.landmarks.push({ kind: "mover", x: r2(hx0), z: r2(hz0), name: P.name + " Downtown Loop" });
+    }
     // run the cells
     for (const c of cells) {
       if (c.use === "cbd") gridCell(c, tier.pitch, tier.pitch, "cbd");
       else if (c.use === "midtown") gridCell(c, tier.pitch, tier.pitch, "midtown");
       else if (c.use === "inner") gridCell(c, tier.pitch, tier.pitch * 1.3, "inner");
       else if (c.use === "rows") gridCell(c, tier.pitch, (c.z1 - c.z0) / 2, "rows");
-      else if (c.use === "industrial") gridCell(c, (c.x1 - c.x0) / 2, (c.z1 - c.z0) / 2, "industrial");
+      else if (c.use === "industrial") gridCell(c, (c.x1 - c.x0) / (DET ? 1 : 2), (c.z1 - c.z0) / (DET ? 1 : 2), "industrial");
     }
+    if (DET) for (const c of cells) if (c.use === "hood") {
+      // a neighbourhood a freeway, the rail or the river runs through is laid
+      // out as terraces on the grid (its streets clip at the cut)
+      if (!c.spokes && crossed(c)) gridCell(c, tier.pitch, (c.z1 - c.z0) / 2, "rows");
+      else hoodCell(c);
+    }
+    if (DET && P.river && P.river.island) islandPark();
     for (const c of cells) {
       if (c.use === "suburb" && crossed(c)) gridCell(c, tier.pitch, (c.z1 - c.z0) / 2, "rows");
       else if (c.use === "suburb") suburbCell(c);
@@ -1471,9 +2128,13 @@
         }
       }
     })();
+    // THE DETROIT PLAN (4): who built what, and when (plan data the facade
+    // pass reads: kind, era, vacant) — and the riverfront glass cluster,
+    // whose tallest tower is the skyline's crown
+    if (DET) detroitTags();
     // the tallest tower is the CBD's crown — tag it
     let tallest = null;
-    for (const b of P.bldgs) if (b.type === "tower" && (!tallest || b.h > tallest.h)) tallest = b;
+    for (const b of P.bldgs) if (b.type === "tower" && (!DET || b.kind === "glass-cluster") && (!tallest || b.h > tallest.h)) tallest = b;
     if (tallest && tallest.st < coreStoreys && spec.tier === "metro") {
       // the crown of the skyline is built to the city's full height
       const k = coreStoreys / tallest.st;
@@ -1536,7 +2197,114 @@
       P.interchanges = P.interchanges.filter(function (o) { return !gone.has(o.street); });
       P.pruned = gone.size;
     })();
+    // THE DETROIT PLAN (5): the elevated downtown loop
+    if (DET && spec.mover) planMover();
     P.ms = Date.now() - T0;
+    P.stats = stats(P);
+    return P;
+  }
+
+  // =====================================================================
+  //  TRANSLATE — a plan made in one frame, moved to another. A COPY of a
+  //  city (city/metro.js `frame`) is planned where its source stands, so
+  //  every position hash is the source's and the copy is the same city
+  //  wherever the land allows; this moves every coordinate the plan holds
+  //  by (dx, dz) and wraps its field queries. Axis conventions: a street,
+  //  bridge or overpass `axis` names the FIXED coordinate of its line (`at`),
+  //  a rail `axis` the one it runs along, a corridor's `ax` its fixed one.
+  // =====================================================================
+  function translatePlan(P, dx, dz) {
+    if (!dx && !dz) return P;
+    const pt = function (p) { if (p) { p.x += dx; p.z += dz; } };
+    const rect = function (r) { r.x0 += dx; r.x1 += dx; r.z0 += dz; r.z1 += dz; };
+    const mm = function (r) { r.minX += dx; r.maxX += dx; r.minZ += dz; r.maxZ += dz; };
+    const line = function (o, fixedAx) {           // fixedAx: the axis of `at`
+      if (fixedAx === "x") { o.at += dx; o.a0 += dz; o.a1 += dz; } else { o.at += dz; o.a0 += dx; o.a1 += dx; }
+    };
+    P.cx += dx; P.cz += dz; mm(P.bounds);
+    P.xs = P.xs.map(function (v) { return v + dx; }); P.zs = P.zs.map(function (v) { return v + dz; });
+    for (const s of P.streets) { for (const p of s.pts) pt(p); if (s.axis) line(s, s.axis); }
+    for (const b of P.bulbs || []) pt(b);                        // streets hold the same objects
+    for (const j of P.junctions) pt(j);
+    for (const k of ["blocks", "pads", "parks", "plazas", "parking", "fields", "walls", "lots", "cells"]) for (const r of P[k] || []) rect(r);
+    for (const c of P.cells) { c.cx += dx; c.cz += dz; }
+    for (const b of P.bldgs) {
+      b.x += dx; b.z += dz;
+      if (b.tiers) for (const t of b.tiers) { t.x += dx; t.z += dz; }
+      if (b.drive) pt(b.drive);
+    }
+    for (const t of P.trees) pt(t);
+    for (const v of P.vacant || []) pt(v);
+    for (const r of P.rail) line(r, r.axis === "x" ? "z" : "x");
+    for (const st of P.stations) pt(st);
+    for (const b of P.bridges) line(b, b.axis);
+    for (const o of P.overpasses) { line(o, o.axis); o.fwAt += o.fwAxis === "x" ? dx : dz; }
+    for (const i of P.interchanges) pt(i);
+    for (const d of P.districts) { d.cx += dx; d.cz += dz; }
+    for (const l of P.landmarks) pt(l);
+    for (const s of P.subcentres || []) pt(s);
+    for (const o of P.obstacles) mm(o);
+    for (const c of P.corridors) line(c, c.ax);
+    if (P.river) {
+      for (const p of P.river.pts) pt(p);
+      if (P.river.channels) for (const ch of P.river.channels) for (const p of ch.pts) if (P.river.pts.indexOf(p) < 0) pt(p);
+    }
+    if (P.structs) translateStructs(P.structs, dx, dz);
+    if (P.square) { P.square.x0 += dx; P.square.x1 += dx; P.square.z0 += dz; P.square.z1 += dz; }
+    const lv = P.landValue, ev = P.envelope, rd = P.riverDist, bl = P.blocked;
+    P.landValue = function (x, z) { return lv(x - dx, z - dz); };
+    P.envelope = function (x, z) { return ev(x - dx, z - dz); };
+    P.riverDist = function (x, z) { return rd(x - dx, z - dz); };
+    P.blocked = function (x0, z0, x1, z1, pad) { return bl(x0 - dx, z0 - dz, x1 - dx, z1 - dz, pad); };
+    P.frame = { dx: dx, dz: dz };
+    P.stats = stats(P);
+    return P;
+  }
+  function translateStructs(S, dx, dz) {
+    const pt = function (p) { p.x += dx; p.z += dz; };
+    if (S.mover) { for (const p of S.mover.pts) pt(p); for (const c of S.mover.cols) pt(c); for (const st of S.mover.stations) pt(st); }
+    for (const m of S.monuments || []) pt(m);
+  }
+
+  // =====================================================================
+  //  THE SQUARE — a copy's centre superblock cleared to one paved square
+  //  with an abstract monument in the middle (Karvel: "a planned capital";
+  //  a monument of no one: a stepped plinth and a tapering pylon, no
+  //  figure, no symbol, no text). The rest of the plan is untouched.
+  // =====================================================================
+  function ceremonialSquare(P, opt) {
+    let c = null;
+    for (const q of P.cells) if (P.cx >= q.x0 && P.cx < q.x1 && P.cz >= q.z0 && P.cz < q.z1) { c = q; break; }
+    if (!c || c.use !== "cbd") return P;
+    const key = c.i + "," + c.j, T = TIERS[P.tier] || TIERS.metro, ah = T.artW / 2;
+    const inside = function (x, z) { return x > c.x0 + ah && x < c.x1 - ah && z > c.z0 + ah && z < c.z1 - ah; };
+    const gone = new Set();
+    for (const st of P.streets) if (st.cell === key && st.k === "loc") gone.add(st.id);
+    P.streets = P.streets.filter(function (st) { return !gone.has(st.id); });
+    P.junctions = P.junctions.filter(function (j) { return !gone.has(j.a) && !gone.has(j.b); });
+    P.blocks = P.blocks.filter(function (b) { return b.cell !== key; });
+    P.bldgs = P.bldgs.filter(function (b) { return !inside(b.x, b.z); });
+    P.trees = P.trees.filter(function (t) { return !inside(t.x, t.z); });
+    P.plazas = P.plazas.filter(function (r) { return !inside((r.x0 + r.x1) / 2, (r.z0 + r.z1) / 2); });
+    P.parking = P.parking.filter(function (r) { return !inside((r.x0 + r.x1) / 2, (r.z0 + r.z1) / 2); });
+    P.landmarks = P.landmarks.filter(function (l) { return !(l.kind === "tower" && inside(l.x, l.z)); });
+    const blk = { x0: c.x0 + ah, x1: c.x1 - ah, z0: c.z0 + ah, z1: c.z1 - ah, use: "cbd", dist: c.dist, cell: key, sw: 4.5, r: 5, L: 1, square: true };
+    P.blocks.push(blk);
+    P.plazas.push({ x0: blk.x0 + blk.sw, x1: blk.x1 - blk.sw, z0: blk.z0 + blk.sw, z1: blk.z1 - blk.sw, dist: c.dist, square: true });
+    // one line of trees round the square, 10 m in: the middle stays open
+    const i0 = blk.x0 + 14, i1 = blk.x1 - 14, j0 = blk.z0 + 14, j1 = blk.z1 - 14;
+    const line = function (xa, za, xb, zb) {
+      const L = Math.hypot(xb - xa, zb - za), n = Math.max(1, Math.floor(L / 14));
+      for (let k = 0; k <= n; k++) P.trees.push({ x: r2(lerp(xa, xb, k / n)), z: r2(lerp(za, zb, k / n)), s: 1.1, k: "avenue" });
+    };
+    line(i0, j0, i1, j0); line(i0, j1, i1, j1); line(i0, j0 + 14, i0, j1 - 14); line(i1, j0 + 14, i1, j1 - 14);
+    const mx = (c.x0 + c.x1) / 2, mz = (c.z0 + c.z1) / 2;
+    if (opt && opt.monument) {
+      P.structs = P.structs || {};
+      (P.structs.monuments = P.structs.monuments || []).push({ x: mx, z: mz, kind: "pylon", base: 38, h: 82 });
+    }
+    P.landmarks.push({ kind: "square", x: mx, z: mz, name: P.name + " Square" });
+    P.square = { cell: key, x0: blk.x0, x1: blk.x1, z0: blk.z0, z1: blk.z1 };
     P.stats = stats(P);
     return P;
   }
@@ -1693,7 +2461,7 @@
     return out;
   }
 
-  const API = { plan: plan, stats: stats, audit: audit, TIERS: TIERS, LOOKS: LOOKS, h01: h01, vnoise: vnoise, segDist: segDist };
+  const API = { plan: plan, stats: stats, audit: audit, translatePlan: translatePlan, ceremonialSquare: ceremonialSquare, TIERS: TIERS, LOOKS: LOOKS, h01: h01, vnoise: vnoise, segDist: segDist };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   if (G && G.CBZ) {
     G.CBZ.metroPlan = plan; G.CBZ.metroPlanStats = stats; G.CBZ.metroPlanAudit = audit; G.CBZ.metroPlanLib = API;

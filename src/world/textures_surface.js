@@ -643,6 +643,29 @@
   const SRGB_GLSL =
     "vec3 gndLin( vec3 c ) { c = max( c, vec3( 0.0 ) ); c = c * ( c * ( c * 0.305306011 + 0.682171111 ) + 0.012522878 );\n" +
     "  return mix( vec3( dot( c, vec3( 0.2126, 0.7152, 0.0722 ) ) ), c, 0.8 ); }\n";
+  /* CBZ.groundLinear(x) — the SAME decode for ground that does not wear the
+     skin: pads, lawns, fields, airfields, estates. r128 hands a THREE.Color
+     hex and a CanvasTexture's bytes to the lights unconverted, so an authored
+     sRGB display colour arrives as linear reflectance: a 0x5d7c46 infield
+     reflected 49% green and every pad rendered pale mint from the air, a
+     wheat field pastel yellow, a 0x2c2f33 runway 18% (light grey).
+       Color / hex -> a NEW THREE.Color of linear albedo: gndLin exactly (the
+                      sRGB curve, eased 20% toward grey because the grade
+                      re-saturates), so a pad and the plate it sits on
+                      agree to the digit.
+       Texture     -> the texture, marked sRGB, so the GPU decodes the canvas
+                      (the painted layout keeps its per-texel colours).  */
+  CBZ.GROUND_LIN_GLSL = SRGB_GLSL;       // the same decode for a shader of its own (alpine_skin.js)
+  CBZ.groundLinear = function (x, out) {       // out: decode INTO this Color (no allocation)
+    if (x && x.isTexture) {
+      if (THREE.sRGBEncoding && x.encoding !== THREE.sRGBEncoding) { x.encoding = THREE.sRGBEncoding; x.needsUpdate = true; }
+      return x;
+    }
+    const c = out ? (x && x.isColor ? out.copy(x) : out.set(x)) : (x && x.isColor ? x.clone() : new THREE.Color(x));
+    const f = function (v) { v = Math.max(0, v); return v * (v * (v * 0.305306011 + 0.682171111) + 0.012522878); };
+    const r = f(c.r), g = f(c.g), b = f(c.b), l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    return c.setRGB(l + (r - l) * 0.8, l + (g - l) * 0.8, l + (b - l) * 0.8);
+  };
   // find the city under this pixel in the loop, sample ONCE outside it (a
   // texture read inside divergent flow has undefined mip derivatives)
   const CITY_GLSL = [

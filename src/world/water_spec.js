@@ -2074,9 +2074,13 @@
     { rings: 112, sectors: 192 },
   ];
   const INNER_R = 1.6;
-  // Outer radius comfortably clears both the city frustum (far = 1000) and the
-  // widened flight frustum (~2.8km), so the disc's rim is never on screen.
-  const OUTER_R = 4500;
+  // Outer radius clears the flight fog: from altitude city/mode.js closes the
+  // world at up to 11 km of view DEPTH, which at the frame's corners is ~14 km
+  // of radius, so the rim is always inside pure fog. (It was 4500 m while the
+  // flight fog ended at 4200 m.) The rings grow geometrically, so the reach
+  // costs rings only out there: RING_REF keeps every ring inside 4.5 km
+  // exactly where it was.
+  const OUTER_R = 15000, RING_REF_R = 4500;
 
   CBZ.waterTierParams = function (tier) {
     if (!Number.isFinite(tier)) tier = CBZ.qualityLevel != null ? CBZ.qualityLevel : 2;
@@ -2092,7 +2096,8 @@
   CBZ.waterBuildSurfaceGeometry = function (opts) {
     opts = opts || {};
     const p = CBZ.waterTierParams(opts.tier);
-    const NR = Math.max(8, (opts.rings | 0) || p.rings);
+    const NR = Math.max(8, (opts.rings | 0) ||
+      Math.round(p.rings * (opts.outerRadius > 0 ? 1 : Math.log(OUTER_R / INNER_R) / Math.log(RING_REF_R / INNER_R))));
     const NA = Math.max(8, (opts.sectors | 0) || p.sectors);
     const r0 = opts.innerRadius > 0 ? +opts.innerRadius : INNER_R;
     const r1 = opts.outerRadius > 0 ? +opts.outerRadius : OUTER_R;

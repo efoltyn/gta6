@@ -323,12 +323,18 @@
     "  vec2 afP = vec2( vUv.x * afSize.x, ( 1.0 - vUv.y ) * afSize.y );",
     "  vec2 afQ = afP - afXf.zw;",
     "  vec2 afLo = vec2( afXf.x * afQ.x - afXf.y * afQ.y, afXf.y * afQ.x + afXf.x * afQ.y );",
-    "  float afD = length( vAfW - cameraPosition );",
+    // the eye from viewMatrix: r128 never uploads cameraPosition to a
+    // Lambert program (it reads 0,0,0), so the near grain never switched on
+    "  float afD = length( vAfW + viewMatrix[3].xyz * mat3( viewMatrix ) );",
     "  float afNear = 1.0 - smoothstep( 50.0, 200.0, afD );",
     "  vec3 afC = diffuseColor.rgb;",
-    "  float afL = dot( afC, vec3( 0.299, 0.587, 0.114 ) );",
-    "  float afGr = smoothstep( 0.03, 0.09, afC.g - max( afC.r, afC.b ) );",
-    "  float afYe = smoothstep( 0.25, 0.45, afC.r - afC.b ) * ( 1.0 - afGr );",
+    // the map is decoded to linear albedo (painter.texture); the surface
+    // class is still read off the PAINTED (display) colour it was keyed on
+    "  vec3 afS = LinearTosRGB( vec4( afC, 1.0 ) ).rgb;",
+    "  float afL = dot( afS, vec3( 0.299, 0.587, 0.114 ) );",
+    "  float afLl = dot( afC, vec3( 0.299, 0.587, 0.114 ) );",
+    "  float afGr = smoothstep( 0.03, 0.09, afS.g - max( afS.r, afS.b ) );",
+    "  float afYe = smoothstep( 0.25, 0.45, afS.r - afS.b ) * ( 1.0 - afGr );",
     "  float afWh = smoothstep( 0.70, 0.80, afL ) * ( 1.0 - afYe );",
     "  float afPt = max( afWh, afYe );",
     "  float afCo = smoothstep( 0.40, 0.47, afL ) * ( 1.0 - smoothstep( 0.66, 0.74, afL ) ) * ( 1.0 - afGr ) * ( 1.0 - afYe );",
@@ -357,7 +363,7 @@
     "  float afWr = smoothstep( 0.52, 0.88, afN( afP * 1.9 + 4.0 ) * 0.7 + afF * 0.3 );",
     "  float afPk = ( 1.0 - afWr * 0.26 ) * ( 1.0 + ( afF - 0.5 ) * 0.10 * afNear );",
     "  float afK = 1.0 + afCo * ( afCk - 1.0 ) + afAs * ( afAk - 1.0 ) + afGr * ( afGk - 1.0 ) + afPt * ( afPk - 1.0 );",
-    "  afC = mix( afC, vec3( afL * 1.22, afL * 1.08, afL * 0.62 ), afDry );",
+    "  afC = mix( afC, vec3( afLl * 1.22, afLl * 1.08, afLl * 0.62 ), afDry );",
     "  afC = mix( afC, afC * vec3( 0.90, 0.88, 0.84 ), afSt * afCo * 0.6 );",
     // ---- runway rubber: black tyre deposits down the wheel tracks of both touchdown zones
     "  float afIn = step( afRwy.x, afLo.x ) * step( afLo.x, afRwy.y ) * step( abs( afLo.y - afRwy.z ), afRwy.w );",
@@ -398,7 +404,7 @@
         .replace("#include <common>", "#include <common>\n" + AF_FRAG_PARS)
         .replace("#include <map_fragment>", "#include <map_fragment>\n" + AF_FRAG);
     };
-    m.customProgramCacheKey = function () { return "airfield-surface-v1"; };
+    m.customProgramCacheKey = function () { return "airfield-surface-v2"; };
     m.userData.afUniforms = U;
     return m;
   };
@@ -476,6 +482,9 @@
         tex.minFilter = THREE.LinearMipmapLinearFilter;
         tex.generateMipmaps = true;
         tex.anisotropy = Math.min(8, CBZ.renderer && CBZ.renderer.capabilities ? CBZ.renderer.capabilities.getMaxAnisotropy() : 1);
+        // the canvas is painted in sRGB display colours; decoded, the infield
+        // is grass (it was pale mint) and the runway asphalt (light grey)
+        if (CBZ.groundLinear) CBZ.groundLinear(tex);
         return tex;
       },
     };

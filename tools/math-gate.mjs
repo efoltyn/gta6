@@ -51,7 +51,7 @@ const CALIBRATE = argv.includes("--calibrate");
 // merge adds ~150-250 arterial road records, so GOLDEN's road counts below are
 // stale until the next `--calibrate` run (both seeds) — re-run it after the
 // merge and paste its values; do not hand-edit the counts.
-const BIOMES_ALL = ["airport","annex","arena","capeharbor","city","cityborough","desert","farmland","forest","foundry","goldspire","kesh","kesh_east","kesh_north","keshtown","kingsport","lowport","mbeya","mbeya_east","mbeya_south","mbeya_west","mbeyacity","military","neonreef","snow","solara","solaracity","speedway","veridia","veridiacity","wilds"];
+const BIOMES_ALL = ["airport","annex","arena","capeharbor","city","cityborough","desert","farmland","forest","foundry","goldspire","karvel","kesh","kesh_east","kesh_north","keshtown","kingsport","lowport","mbeya","mbeya_east","mbeya_south","mbeya_west","mbeyacity","military","neonreef","snow","solara","solaracity","speedway","veridia","veridiacity","wilds"];
 // "frontier" is the four Frontier Lookout pads continent.js stands at the
 // midpoints of the plate's edges. They are 32 x 24 m and they have ALWAYS
 // existed; whether the sweep grid lands on one is a coincidence of where the

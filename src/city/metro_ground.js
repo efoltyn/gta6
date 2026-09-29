@@ -88,13 +88,19 @@
   // colours: stored as sqrt(linear) (the ground shader squares them back)
   function sq(c) { return [Math.sqrt(c[0]), Math.sqrt(c[1]), Math.sqrt(c[2])]; }
   const COL = {
-    lawn: sq([0.075, 0.135, 0.032]), lawnPark: sq([0.07, 0.145, 0.03]), lawnDry: sq([0.10, 0.13, 0.045]),
+    // TURF, NOT LIME. The old lawn (0.075, 0.135, 0.032) had g/b 4.2 and
+    // g/r 1.8: after the grade's +14% saturation the whole metro read neon
+    // from the air (owner's flyover). Measured summer turf sits near g/r 1.4-1.5,
+    // g/b 2.5-3 at the same ~0.11 luminance, the same family as the country
+    // meadow round the city (continent plate ~0.10/0.135/0.058). Mown
+    // lawn, the lusher irrigated park, and the yards' drier grass.
+    lawn: sq([0.086, 0.125, 0.047]), lawnPark: sq([0.076, 0.126, 0.042]), lawnDry: sq([0.112, 0.118, 0.056]),
     paving: sq([0.20, 0.195, 0.18]), concrete: sq([0.24, 0.232, 0.215]), concreteDark: sq([0.17, 0.165, 0.155]),
     ballast: sq([0.15, 0.14, 0.125]), gravel: sq([0.17, 0.15, 0.115]), dirt: sq([0.26, 0.135, 0.065]),
     metal: sq([0.045, 0.05, 0.055]), steel: sq([0.12, 0.10, 0.085]), railTop: sq([0.34, 0.34, 0.35]),
     truss: sq([0.075, 0.10, 0.095]), sleeper: sq([0.19, 0.18, 0.17]), rubber: sq([0.045, 0.045, 0.045]),
     lens: sq([0.45, 0.43, 0.38]), soundwall: sq([0.28, 0.25, 0.20]), mound: sq([0.28, 0.15, 0.075]),
-    crops: [sq([0.33, 0.25, 0.085]), sq([0.09, 0.17, 0.035]), sq([0.06, 0.12, 0.035]), sq([0.15, 0.095, 0.055])],
+    crops: [sq([0.30, 0.235, 0.09]), sq([0.075, 0.12, 0.04]), sq([0.055, 0.095, 0.035]), sq([0.15, 0.095, 0.055])],
   };
   const YELLOW = [1.0, 0.656, 0.083], WHITE = [1, 1, 1];
 

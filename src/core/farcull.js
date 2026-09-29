@@ -134,12 +134,16 @@
       seen.add(b.group);
       const x = Number.isFinite(b.ox) ? b.ox : ((lot && +lot.cx) || 0);
       const z = Number.isFinite(b.oz) ? b.oz : ((lot && +lot.cz) || 0);
-      proxyRecords.push({ lot, grp: b.group, x, z, w, d, h, r: Math.hypot(w, d) * 0.5, shown: false });
+      proxyRecords.push({ lot, grp: b.group, x, z, w, d, h, r: Math.hypot(w, d) * 0.5, shown: false, wall: b.wallColor });
     }
     if (!proxyRecords.length) { proxyArena = A; return; }
 
     const geo = new THREE.BoxGeometry(1, 1, 1);
-    const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, fog: true });
+    // NO vertexColors: BoxGeometry has no `color` attribute, and r128 then
+    // multiplies every instance colour by the attribute's default (0,0,0):
+    // every distant downtown and town building drew BLACK. instanceColor
+    // needs no flag (USE_INSTANCING_COLOR is set by the InstancedMesh itself).
+    const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, fog: true });
     proxyMesh = new THREE.InstancedMesh(geo, mat, proxyRecords.length);
     proxyMesh.name = "real-building-distance-lod";
     proxyMesh.userData.dynamic = true;       // batch/farcull must not consume its one draw
@@ -152,10 +156,15 @@
       proxyDummy.scale.set(0.001, 0.001, 0.001);
       proxyDummy.rotation.set(0, 0, 0); proxyDummy.updateMatrix();
       proxyMesh.setMatrixAt(i, proxyDummy.matrix);
-      // Cool glass/concrete variants keep the actual skyline readable without
-      // duplicating the full facade material graph in the distance pass.
-      const n = CBZ.hash01 ? CBZ.hash01(r.x, r.z, 0xd157) : ((i * 0.61803398875) % 1);
-      proxyColor.setHex(n < 0.34 ? 0x7899a2 : (n < 0.68 ? 0x8aa6aa : 0x71858f));
+      // THE BUILDING'S OWN WALL COLOUR (buildings.js `wallColor`, the final
+      // colourway the shell was painted with, read by the same Lambert
+      // pipeline), not an invented teal: one building, one colour, at every
+      // distance. A shell with no recorded colour keeps a concrete grey.
+      const wc = r.wall;
+      if (wc && wc.isColor) proxyColor.copy(wc);
+      else if (typeof wc === "number" && isFinite(wc)) proxyColor.setHex(wc);
+      else if (typeof wc === "string") { try { proxyColor.set(wc); } catch (_) { proxyColor.setHex(0x8a8a86); } }
+      else proxyColor.setHex(0x8a8a86);
       proxyMesh.setColorAt(i, proxyColor);
     }
     proxyMesh.instanceMatrix.needsUpdate = true;

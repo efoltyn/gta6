@@ -670,22 +670,27 @@
   // decorative shelf must make that identical decision. Draw order, a larger
   // vertical gap, or another polygon offset only moves the camera distance at
   // which two opaque owners collapse onto one depth value.
-  const _shelfLandMaskU = { value: null };
-  const _shelfLandBoundsU = { value: new THREE.Vector4(0, 0, 1, 1) };
-  const _shelfHasLandMaskU = { value: 0 };
-  function syncShelfLandMask() {
-    const tex = CBZ.citySeaFieldTexture || null;
-    _shelfLandMaskU.value = tex;
-    _shelfHasLandMaskU.value = tex ? 1 : 0;
-    if (CBZ.citySeaFieldBounds) _shelfLandBoundsU.value.copy(CBZ.citySeaFieldBounds);
-  }
+  //
+  // THE MASK IS READ LIVE (2026-09-29). These used to be plain values copied
+  // by a sync inside onBeforeCompile, but the tiles compile
+  // before city/world.js bakes the sea field (the sea runs LAST), and nothing
+  // copied it again: uCbzShelfHasLandMask stayed 0 all session and the seabed
+  // shelf (y ~ -1.9, shallow-bed sand) drew under EVERY dry region. From the
+  // air the continent plate's own depth bias (polygonOffset units 8) lets a
+  // surface 2 m under it win, so the country around each city rendered cream
+  // (252,246,234) instead of its ground (118,134,108 once the cut worked).
+  // r128 reads `uniform.value` at every upload, so a getter makes the cut
+  // exist the moment the sea field does, whatever the build order.
+  const _shelfBoundsTmp = new THREE.Vector4(0, 0, 1, 1);
+  const _shelfLandMaskU = { get value() { return CBZ.citySeaFieldTexture || null; }, set value(v) {} };
+  const _shelfLandBoundsU = { get value() { if (CBZ.citySeaFieldBounds) _shelfBoundsTmp.copy(CBZ.citySeaFieldBounds); return _shelfBoundsTmp; }, set value(v) {} };
+  const _shelfHasLandMaskU = { get value() { return CBZ.citySeaFieldTexture ? 1 : 0; }, set value(v) {} };
   function terrainShelfLandCutout(mat) {
     if (!mat || CFG.TERRAIN_SHELF_LAND_CUTOUT === false) return mat;
     chainKey(mat, "shelfCut");
     const prev = mat.onBeforeCompile;
     mat.onBeforeCompile = function (sh) {
       if (prev) prev.call(this, sh);
-      syncShelfLandMask();
       sh.uniforms.uCbzShelfLandMask = _shelfLandMaskU;
       sh.uniforms.uCbzShelfLandBounds = _shelfLandBoundsU;
       sh.uniforms.uCbzShelfHasLandMask = _shelfHasLandMaskU;
@@ -1613,6 +1618,14 @@
         const fld = v3Field(vx, vz, _fld);
         const wob = vn(vx * 0.012 + SW, vz * 0.012 - SW);
         bandColor3(vx, vz, y, slope, faceLight, wob, fld, _c);
+        // THE PALETTE IS sRGB DISPLAY COLOUR (every C3 stop was picked off a
+        // photograph); decoded to linear albedo like the plate and the pads
+        // (textures_surface.js groundLinear). Undecoded, the shallow bed's
+        // 0xc9b184 "shell sand" reflected 79%: under every lake, channel and
+        // translucent shallow it shone through the water as a cream-white
+        // band (Kings Lake, the downtown channels), and where the land cut
+        // failed it WAS the cream ground round every city.
+        if (CBZ.groundLinear) CBZ.groundLinear(_c, _c);
         // bake the aspect into the vertex value too, so a smooth-shaded face
         // still reads its own light direction under the flat backdrop lighting
         const shade = 0.86 + faceLight * 0.20;
@@ -1804,9 +1817,10 @@
   // oracle is intentionally flat over this visual shelf, so backdropAudit()
   // cannot detect whether its material still owns dry-land pixels.
   CBZ.terrainShelfAudit = function () {
-    syncShelfLandMask();
     let tiles = 0, protectedTiles = 0;
-    const root = CBZ.city && CBZ.city.root;
+    // (the tiles hang off the landmass root, which CBZ.city does not expose:
+    // walk the scene, or the audit counts nothing and "0 unprotected" lies)
+    const root = CBZ.scene;
     if (root && root.traverse) root.traverse(function (o) {
       if (!o.isMesh || !o.userData || !o.userData.terrainBackdropTile) return;
       tiles++;

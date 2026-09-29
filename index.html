@@ -416,7 +416,7 @@ document.body.appendChild(b);}}catch(e){}})();
      mountain heightfield (no hollow ridge sheets) + per-material fog scale.
      Must load right after terrain.js and before city/world.js.
      Revert: CBZ.CONFIG.TERRAIN_SOLID = false. -->
-<script src="src/world/terrain_overhaul.js?v=far0929"></script>
+<script src="src/world/terrain_overhaul.js?v=wreal0929"></script>
 <!-- Geology kit: shared Quilez erosion / ridged multifractal / drainage / strata /
      snow-cover / adaptive-mesh helpers, used by city/biome_snow (the real walkable
      mountains), world/terrain_overhaul (the backdrop range) and city/continent
@@ -427,7 +427,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/mountain_detail.js?v=w09290242x"></script>
 <!-- The massif SKIN: per-pixel snow/rock/forest shading on a lit Standard material.
      Reads CBZ.gfxRegisterPbr lazily; city/biome_snow.js calls CBZ.alpineSkin at build time. -->
-<script src="src/world/alpine_skin.js?v=skin1"></script>
+<script src="src/world/alpine_skin.js?v=wreal0929"></script>
 
 <!-- ============================================================
      Game modules — loaded in dependency order. Each is a tiny
@@ -471,7 +471,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- Shared scenery-scale vegetation archetypes. Biomes own ecology/placement;
      this owns mature wood, irregular crowns, canopy roof and thicket grammar. -->
 <script src="src/world/vegetation.js?v=trees0929"></script>
-<script src="src/world/forestlook.js?v=trees0929"></script>
+<script src="src/world/forestlook.js?v=wreal0929"></script>
 <script src="src/core/prio.js?v=arch2"></script>
 <script src="src/core/lightpin.js?v=w09290242x"></script>
 <script src="src/core/matrixskip.js?v=mskip1"></script>
@@ -517,7 +517,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (asphalt, concrete, plaster, metal, dirt, grass, sand, wood, glass grime).
      Needs core/seed.js for CBZ.hashN; bakes lazily on first request, so it only
      has to precede its first consumer — world/materials.js. -->
-<script src="src/world/textures_surface.js?v=far0929"></script>
+<script src="src/world/textures_surface.js?v=wreal0929"></script>
 <script src="src/world/materials.js?v=pbr1"></script>
 <script src="src/world/fuel_station.js?v=fuel1"></script>
 <script src="src/world/prisonkit.js?v=tow929b"></script>
@@ -1078,14 +1078,14 @@ document.body.appendChild(b);}}catch(e){}})();
      camera-centred radial sea geometry, the shared ripple normal map and the
      shared water shading chunks. MUST load before city/world.js (its buildSea
      reads this) and before city/waterfield.js (its surfaceY delegates here). -->
-<script src="src/world/water_spec.js?v=roadmerge1"></script>
+<script src="src/world/water_spec.js?v=wreal0929"></script>
 <!-- the tsunami kit shared by the island and the city: the entrained debris, the flood hitting buildings, the drawdown seabed and the aftermath mud -->
 <script src="src/world/tsunami_debris.js?v=tsureal1"></script>
 <script src="src/world/tsunami_flow.js?v=tsureal1"></script>
 <script src="src/world/tsunami_scene.js?v=tsureal1"></script>
 <!-- the grid street layer (road, kerbs, footways, markings) world.js builds -->
 <script src="src/city/streetkit.js?v=metro0929"></script>
-<script src="src/city/world.js?v=w0929town"></script>
+<script src="src/city/world.js?v=wreal0929"></script>
 <script src="src/city/interior_programs.js?v=pres0929b"></script>
 <!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
      inventory item; an NPC's keys live on the NPC and every existing way to
@@ -1103,7 +1103,7 @@ document.body.appendChild(b);}}catch(e){}})();
      register ONE style and must load after it. The generalisation of what
      govcomplex.js does to this same office shell: a spec at the call site.
      Inert until a caller passes {dress:{style}} (or ?cfg_FACADE_KIT_CITY=1). -->
-<script src="src/city/facade_kit.js?v=meshcol1"></script>
+<script src="src/city/facade_kit.js?v=wreal0929"></script>
 <script src="src/city/facades/brick.js?v=meshcol1"></script>
 <script src="src/city/facades/stone.js?v=fk1"></script>
 <script src="src/city/facades/mosque.js?v=fk1"></script>
@@ -1159,7 +1159,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/expansion.js?v=w0929road"></script>
 <!-- 4d-2. ARCHIPELAGO — worldmap registry + 3 islands + 4 biomes (worldmap.js
      MUST precede every island/biome; world.js runs them via CBZ.cityWorldGeo) -->
-<script src="src/city/worldmap.js?v=metro0929"></script>
+<script src="src/city/worldmap.js?v=wreal0929"></script>
 <!-- Shared signed shoreline/depth/current oracle. Loaded immediately after
      the landmass registry so rendering, swimmers, boats and aquatic wildlife
      all consult the same coast instead of inventing separate radius tests. -->
@@ -1173,7 +1173,7 @@ document.body.appendChild(b);}}catch(e){}})();
      builder. Loads right after the ribbon builder it drives; registers its
      own landmass pass (order 91 — after every causeway, before the
      continent plate reads its relief-corridor gate). -->
-<script src="src/city/highwaynet.js?v=w0929road"></script>
+<script src="src/city/highwaynet.js?v=wreal0929"></script>
 <!-- THE INTERCHANGE: the R5/R1 flyover (planned by highwaynet at order 91,
      built in highways.js's late pass at 97.5). -->
 <script src="src/city/interchange.js?v=flick1"></script>
@@ -1250,20 +1250,20 @@ document.body.appendChild(b);}}catch(e){}})();
      through it into the betting ledger. Before every venue that uses it. -->
 <script src="src/city/betslip.js?v=onebet1"></script>
 <script src="src/city/island_speedway.js?v=cd0929"></script>
-<script src="src/city/island_airport.js?v=cd0929"></script>
+<script src="src/city/island_airport.js?v=wreal0929"></script>
 <!-- THE AIRFIELD KIT + THE SECOND AIRPORT. buildAirfield() lays a complete
      field (runway, markings, edge lights, taxiway, apron, stands, terminal,
      tower, fence, kerb, access causeway) from one spec at any origin and any
      bearing, reusing island_airport.js's OWN airframe factories — which is
      why airport_capeharbor.js is a spec and a single call. Both load after
      island_airport.js: it is what publishes CBZ.airportKit. -->
-<script src="src/city/airport_kit.js?v=deslop1-st1"></script>
+<script src="src/city/airport_kit.js?v=wreal0929"></script>
 <script src="src/city/airport_capeharbor.js?v=nodash1"></script>
 <script src="src/city/island_military.js?v=cd0929"></script>
 <script src="src/city/biome_desert.js?v=lad1"></script>
-<script src="src/city/biome_forest.js?v=far0929"></script>
-<script src="src/city/biome_farmland.js?v=cd0929"></script>
-<script src="src/city/biome_snow.js?v=cd0929"></script>
+<script src="src/city/biome_forest.js?v=wreal0929"></script>
+<script src="src/city/biome_farmland.js?v=wreal0929"></script>
+<script src="src/city/biome_snow.js?v=wreal0929"></script>
 <script src="src/city/snowboard.js?v=cd0929"></script>
 <!-- STRATEGIC LAYER part 1 — hardened bunkers (Fort Brandt command shelter
      w/ the nuclear vault + mountain/desert finds). Landmass order 40: after
@@ -1326,7 +1326,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Right after propuse.js, whose CBZ.propArcActive / propLiePlace it backs. -->
 <script src="src/entities/moves_posture.js?v=w09290242x"></script>
 <script src="src/city/adboard.js?v=cd0929"></script>
-<script src="src/city/mode.js?v=sky0929"></script>
+<script src="src/city/mode.js?v=wreal0929"></script>
 <script src="src/city/economy.js?v=vit3"></script>
 <script src="src/city/clothes.js?v=body0929a"></script>
 <script src="src/city/outfits.js?v=w09290250"></script>
@@ -1377,7 +1377,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/sizeup.js?v=lvl1y"></script>
 <script src="src/city/bling.js?v=w09290232"></script>
 <script src="src/city/club.js?v=deslop1"></script>
-<script src="src/city/crowd.js?v=metro0929"></script>
+<script src="src/city/crowd.js?v=wreal0929"></script>
 <script src="src/city/blobshadows.js?v=cars1"></script>
 <!-- headlight pools + tail glow on the road at night (instanced ground decals,
      no dynamic lights); pushes the shared lamp emissives up after dark.
@@ -1698,14 +1698,15 @@ document.body.appendChild(b);}}catch(e){}})();
      metroplan.js is the pure urban planner (land value -> zoning -> arterials -> blocks -> parcels),
      metro_fabric.js draws its buildings, metro_ground.js its streets and ground, metro.js places the
      Kingsport metro + the city rings at landmass order 43 and streams their tiles by distance. -->
-<script src="src/city/metroplan.js?v=metro0929"></script>
-<script src="src/city/metro_fabric.js?v=far0929"></script>
+<script src="src/city/metroplan.js?v=wreal0929"></script>
+<script src="src/city/metro_fabric.js?v=wreal0929"></script>
 <!-- REAL GRASS (owner: "when you walk on grass it's just fucking green"): instanced lit blades round
      the camera on every grass surface, fed by CBZ.groundCover (the ONE land-use + ground-colour
      query: cityground 10, metro_ground 20, continent 90 register into it, so it loads before them). -->
 <script src="src/world/grassfield.js?v=grass0929c"></script>
-<script src="src/city/metro_ground.js?v=grass0929b"></script>
-<script src="src/city/metro.js?v=far0929"></script>
+<script src="src/city/metro_ground.js?v=wreal0929"></script>
+<script src="src/city/metro.js?v=wreal0929"></script>
+<script src="src/city/metro_structs.js?v=wreal0929"></script>
 <script src="src/city/spawnplaces.js?v=sim2"></script>
 <script src="src/city/scenedirector.js?v=w09290218"></script>
 <script src="src/city/race_livery.js?v=racepaint1"></script>
@@ -1733,7 +1734,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/aim_dossier.js?v=allmain1"></script>
 <script src="src/city/captives.js?v=nodash1"></script>
 <script src="src/city/millionaires.js?v=cd0929"></script>
-<script src="src/city/regionlife.js?v=metro0929"></script>
+<script src="src/city/regionlife.js?v=wreal0929"></script>
 <script src="src/city/modshop.js?v=cd0929"></script>
 <script src="src/city/stuntjumps.js?v=metro0929"></script>
 <script src="src/city/storage.js?v=cpd1"></script>
@@ -1798,7 +1799,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/gigs.js?v=w09290250y"></script>
 <script src="src/city/gigfleet.js?v=nodash1"></script>
 <script src="src/city/giglife.js?v=w09290250y"></script>
-<script src="src/city/hud.js?v=metro0929"></script>
+<script src="src/city/hud.js?v=wreal0929"></script>
 <!-- drinking/tipsy system (a sibling agent's file — provides CBZ.cityDrink;
      loads after shops.js/hud so it can hook the same HUD/economy surface) -->
 <script src="src/city/drinking.js?v=nodash1"></script>
@@ -1864,7 +1865,7 @@ document.body.appendChild(b);}}catch(e){}})();
      for over 1.5 s at a time. The window is 320 m around the player (peds stop
      drawing at 95 m), marked across frames so a rebuild is never a hitch. -->
 <script src="src/city/pednav.js?v=nav2"></script>
-<script src="src/systems/fullmap.js?v=metro0929"></script>
+<script src="src/systems/fullmap.js?v=wreal0929"></script>
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
      always-updater is in the sort -->
@@ -2104,10 +2105,10 @@ document.body.appendChild(b);}}catch(e){}})();
      the ocean, no second oracle. MUST load and run (order 96.5) BEFORE
      continent.js at 97, which snapshots city.waterBodies once.
      Revert with ?cfg_CITY_RIVER=0. -->
-<script src="src/city/river.js?v=w09290242x"></script>
+<script src="src/city/river.js?v=wreal0929"></script>
 <!-- THE CONTINENT: runs after every landmass builder (order 97) and fills the
      ocean between POIs with walkable backcountry — one world, not circles. -->
-<script src="src/city/continent.js?v=grass0929c"></script>
+<script src="src/city/continent.js?v=wreal0929"></script>
 <script src="src/city/demographics.js?v=world1"></script>
 <!-- X6: the affinity matrix (country/state/city relations) — after
      countries.js (CBZ.COUNTRIES) and officials.js/polity.js (both already
@@ -2268,7 +2269,7 @@ document.body.appendChild(b);}}catch(e){}})();
      staffs itself through power.js's protection layer rather than authoring
      guards. After power.js and the biome/continent builders whose empty land
      it claims. Revert with ?cfg_GOV_COMPLEX=0. -->
-<script src="src/city/govcomplex.js?v=pres0929b"></script>
+<script src="src/city/govcomplex.js?v=wreal0929"></script>
 
 <!-- THE PRESIDENCY — one spine over organs built above: the President origin
      (candidacy's swearIn fast-forward), the Situation Room inside govcomplex's
@@ -2433,7 +2434,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/street_furniture.js?v=deslop1"></script>
 <script src="src/world/world_grime.js?v=detail1"></script>
 <script src="src/world/building_dress.js?v=roof1-st1"></script>
-<script src="src/core/farcull.js?v=w09290242x"></script>
+<script src="src/core/farcull.js?v=wreal0929"></script>
 <!-- whole-building frustum hide before every draw (exact: view frustum + sun shadow frustum); also owns CBZ.subtreeSphere, which city/cctv.js's feed scope reuses -->
 <script src="src/core/viewscope.js?v=w09290242x"></script>
 <script src="src/core/losgrid.js?v=lg1"></script>

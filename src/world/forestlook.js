@@ -174,6 +174,9 @@
       default: break;
     }
     suit += 0.10 * clamp01(opts.wet || 0);
+    // the caller's land-use bias (continent.js: woods climb the uplands and
+    // keep off the farm ring round the towns)
+    if (Number.isFinite(opts.bias)) suit += opts.bias;
     if (CFG.FOREST_ALPINE_GRADIENT !== false) {
       const gully = clamp01(-(opts.curv || 0) * 2.2);
       suit -= 0.40 * smooth(clamp01(opts.alt || 0), 0.46 + gully * 0.18, 0.66 + gully * 0.20);

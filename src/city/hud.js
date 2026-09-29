@@ -316,9 +316,14 @@
         });
         const Rv = Pm.river;
         if (Rv && Rv.pts && Rv.pts.length > 1) {
-          ctx.strokeStyle = "#1d4a5c"; ctx.lineWidth = Math.max(3, (Rv.half || 30) * 2 * sc);
+          ctx.strokeStyle = "#1d4a5c";
           ctx.lineCap = "round"; ctx.lineJoin = "round";
-          ctx.beginPath(); poly(Rv.pts); ctx.stroke();
+          // an island river is its channels (the arms round the island)
+          for (const ch of Rv.channels || [{ pts: Rv.pts }]) {
+            const hw = ch.half ? Math.max.apply(null, ch.half) : Rv.half;
+            ctx.lineWidth = Math.max(3, (hw || 30) * 2 * sc);
+            ctx.beginPath(); poly(ch.pts); ctx.stroke();
+          }
         }
         ctx.lineCap = "round"; ctx.lineJoin = "round";
         for (let pass = 0; pass < 2; pass++) {

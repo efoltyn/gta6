@@ -90,6 +90,14 @@
   const HAZE_SCALE = 0.10, VIEW_MAX = 14000;
   // per-frame budget for all metro building work (sliced jobs)
   const BUDGET_MS = 3;
+  // THE FACADE CELLS (metro_fabric.js FACADE CELLS): the real facade kit on
+  // the buildings near the camera, one mesh per 100 m cell. Built inside
+  // KIT_R (distance from the camera to the cell's rect, height included),
+  // dropped past KIT_DROP; the level of detail is the fabric's KIT_LOD_R,
+  // with KIT_HYST of hysteresis so a cell on a level edge does not flip.
+  // Only cells up to level 1 (~110 m) cast shadows: the sun's shadow
+  // frustum is ~70 m round the player anyway. ?cfg_METRO_FACADES=0 = off.
+  const KIT_R = 250, KIT_DROP = 300, KIT_HYST = 15, KIT_SHADOW_LOD = 1;
 
   CBZ.metroCities = [];
 
@@ -105,18 +113,76 @@
     // the Southgate Spur (x -280) is its east edge, the Bureau's compound
     // (x -5120..-4812) its north-west corner. minX stays inside the settled
     // union (-5120) so the continent plate does not move a vertex.
+    //
+    // KINGSPORT IS DETROIT (owner, 2026-09-29: "a real one that has
+    // diversity and real facades and buildings, almost like a New York or
+    // Detroit. I like Detroit."). style "detroit" in metroplan.js. The
+    // downtown moved onto the river's WEST bank (cx -2780 -> -3705): the
+    // Loop's west leg (x -2380) and the rail (z 3720) hem the east bank in,
+    // and radial avenues need open country to fan into, which the west bank
+    // has (1.5 km to the west edge, 2 km to the north). The first arterial
+    // west of the water (x -3505) is the riverfront avenue and the downtown
+    // superblock hugs it; the river is pinned straight along the downtown
+    // (off +60 from x -3450: the water's west edge at x -3452 from z ~1500
+    // to ~3900) and splits round Kings Island north of the downtown (the
+    // west arm keeps the riverfront, the island and the east arm push into
+    // the east bank). Five radial avenues fan out west, north-west and
+    // north; the east bank across the bridges is the city's other side.
+    // rx grew 2150 -> 2500 so the land east of the Loop is still city (the
+    // centre moved 925 m west). A freight yard lies north of the main line
+    // east of the Loop, and the elevated Downtown Loop rings the downtown.
     out.push({
-      id: "kingsport", name: "Kingsport", tier: "metro", biome: "kingsport",
-      cx: -2780, cz: 3050, rx: 2150, rz: 1650,
+      id: "kingsport", name: "Kingsport", tier: "metro", biome: "kingsport", style: "detroit",
+      cx: -3705, cz: 3000, rx: 2500, rz: 1650,
       bounds: { minX: -5080, maxX: -330, minZ: 950, maxZ: 4660 },
-      river: { axis: "z", at: -3450, from: 1010, to: 5000, amp: 150, wave: 1300, name: "Kings River" },
+      river: { axis: "z", at: -3450, from: 1010, to: 5000, amp: 150, wave: 1300, name: "Kings River",
+        pins: [{ a: 1650, off: 60, r: 260 }, { a: 1950, off: 60, r: 260 }, { a: 2250, off: 60, r: 260 }, { a: 2600, off: 60, r: 300 },
+               { a: 3000, off: 60, r: 320 }, { a: 3400, off: 60, r: 300 }, { a: 3750, off: 60, r: 260 }],
+        island: { a0: 1650, a1: 2250, half: 70, arm: 40, keep: "west", name: "Kings Island" } },
       lakes: [
         { name: "Kings Pond", x: -3450, z: 1010, r: 125 },
         { name: "Kings Lake", x: -3450, z: 5260, r: 560 },
       ],
-      rail: { axis: "x", at: 3720, tracks: 2 },
+      rail: { axis: "x", at: 3720, tracks: 2, yard: { from: -2150, to: -900, tracks: 6, side: -1 } },
       port: { x: -3450, z: 4450, r: 900 },
+      spokes: [100, 128, 155, 180, -150], mover: { west: 1.5, east: 0.5, north: 1.5, south: 1.5 },
     });
+    // KARVEL — KINGSPORT AS IT WAS, KEPT. Owner, 2026-09-29, on the uniform
+    // Kingsport: "cool for a dystopian thing, like a communist dictatorship
+    // ... literally just copy-paste or duplicate it to keep it as a
+    // communist place". So this is that Kingsport, planned by the planner
+    // as it stood (style "legacy": none of the Detroit code runs) from
+    // Kingsport's own seed IN KINGSPORT'S FRAME (metro.js planSite: frame)
+    // and moved 7780 m east and 4550 m north, to the open country between
+    // Coyle Valley, the Saltlands and the Loop's east leg. `uniform` tells
+    // the facade pass to vary nothing: every block the same block. What
+    // the new land changed: the Loop's south leg crosses it (z -3400,
+    // where Kingsport had its west leg), so it has the overpasses and
+    // interchanges that tie it to the network; the bounds are clipped to
+    // the free land (Kingsport's x -4530..-1030, z 950..4130); the river
+    // rises south of that freeway (its head cut at Kingsport's z 1310,
+    // meanders kept) and ends in a pond-sized lake short of the Saltlands
+    // (under 300 m: no outlet river is routed across the desert); the rail
+    // runs 240 m further north so the lake does not sit on it. The centre
+    // superblock is a paved square with one abstract monument.
+    {
+      const KX = 7780, KZ = -4550;
+      out.push({
+        id: "karvel", name: "Karvel", tier: "metro", biome: "karvel", style: "legacy", uniform: true,
+        seedKey: "kingsport", frame: { dx: KX, dz: KZ },
+        cx: -2780 + KX, cz: 3050 + KZ, rx: 2150, rz: 1650,
+        bounds: { minX: -4530 + KX, maxX: -1030 + KX, minZ: 950 + KZ, maxZ: 4130 + KZ },
+        river: { axis: "z", at: -3450 + KX, from: 1310 + KZ, phaseFrom: 1010 + KZ, to: 3890 + KZ, amp: 150, wave: 1300, name: "Karvel River",
+          pins: [{ a: 1310 + KZ, off: 0, r: 150 }, { a: 3890 + KZ, off: 0, r: 250 }] },
+        lakes: [
+          { name: "Karvel Pond", x: -3450 + KX, z: 1340 + KZ, r: 100 },
+          { name: "Karvel Lake", x: -3450 + KX, z: 3950 + KZ, r: 250 },
+        ],
+        rail: { axis: "x", at: 3480 + KZ, tracks: 2 },
+        port: { x: -3450 + KX, z: 4450 + KZ, r: 900 },
+        square: { monument: true },
+      });
+    }
     // GANG CITY WEST: the land across the west harbour, between the Brandt
     // bridge and the West Shore Highway. The downtown is its core, so land
     // value falls away from the harbour: walk-ups on the water, rowhouses,
@@ -219,14 +285,49 @@
   function inside(a, b) { return a.minX >= b.minX && a.maxX <= b.maxX && a.minZ >= b.minZ && a.maxZ <= b.maxZ; }
 
   // one site -> one plan, from the live layout (shared with the node check)
+  // A COPY (site.frame = {dx, dz}: "the source city, moved by dx, dz") is
+  // planned WHERE ITS SOURCE STANDS: everything real round the copy's site
+  // (compounds, freeways, its own lakes and river) is moved back by
+  // (-dx, -dz), the source's seed is used (site.seedKey), the plan is made
+  // there — so every position hash is the source's and the copy is the same
+  // city wherever the land allows — and then moved out by (dx, dz)
+  // (metroplan.js translatePlan). Everything in a site entry is in REAL
+  // coordinates; only this function knows about the frame.
   function planSite(city, site, planned) {
     const C = worldConstraints(city, site, planned);
+    const F = site.frame || null, dx = F ? F.dx : 0, dz = F ? F.dz : 0;
+    const mv = function (r) { return F ? Object.assign({}, r, { minX: r.minX - dx, maxX: r.maxX - dx, minZ: r.minZ - dz, maxZ: r.maxZ - dz }) : r; };
+    const lakeObs = (site.lakes || []).map(function (l) { return { minX: l.x - l.r, maxX: l.x + l.r, minZ: l.z - l.r, maxZ: l.z + l.r, name: l.name, pad: 18 }; });
+    let corridors = C.corridors, river = site.river, rail = site.rail, port = site.port;
+    if (F) {
+      // (a corridor's `axis` is the one it RUNS along; a rail's too)
+      corridors = corridors.map(function (c) {
+        const alongZ = c.axis === "z";
+        return Object.assign({}, c, { at: c.at - (alongZ ? dx : dz), a0: c.a0 - (alongZ ? dz : dx), a1: c.a1 - (alongZ ? dz : dx) });
+      });
+      if (river) {
+        const alongZ = river.axis !== "x", da = alongZ ? dz : dx, dp = alongZ ? dx : dz;
+        const sh = function (v) { return v == null ? v : v - da; };
+        river = Object.assign({}, river, { at: river.at - dp, from: sh(river.from), to: sh(river.to), phaseFrom: sh(river.phaseFrom),
+          pins: river.pins && river.pins.map(function (p) { return Object.assign({}, p, { a: p.a - da }); }),
+          island: river.island && Object.assign({}, river.island, { a0: river.island.a0 - da, a1: river.island.a1 - da }) });
+      }
+      if (rail) {
+        const alongX = rail.axis === "x", da = alongX ? dx : dz;
+        rail = Object.assign({}, rail, { at: rail.at - (alongX ? dz : dx),
+          yard: rail.yard && Object.assign({}, rail.yard, { from: rail.yard.from - da, to: rail.yard.to - da }) });
+      }
+      if (port) port = Object.assign({}, port, { x: port.x - dx, z: port.z - dz });
+    }
     const P = CBZ.metroPlan({
-      id: site.id, name: site.name, tier: site.tier, seed: CBZ.WORLD_SEED | 0,
-      cx: site.cx, cz: site.cz, rx: site.rx, rz: site.rz, bounds: site.bounds,
-      obstacles: C.obstacles.concat((site.lakes || []).map(function (l) { return { minX: l.x - l.r, maxX: l.x + l.r, minZ: l.z - l.r, maxZ: l.z + l.r, name: l.name, pad: 18 }; })),
-      corridors: C.corridors, cores: site.cores || [], river: site.river, rail: site.rail, port: site.port,
+      id: site.id, name: site.name, tier: site.tier, seed: CBZ.WORLD_SEED | 0, seedKey: site.seedKey, style: site.style, uniform: site.uniform,
+      cx: site.cx - dx, cz: site.cz - dz, rx: site.rx, rz: site.rz, bounds: mv(site.bounds),
+      obstacles: C.obstacles.concat(lakeObs).map(mv),
+      corridors: corridors, cores: (site.cores || []).map(mv), river: river, rail: rail, port: port,
+      spokes: site.spokes, mover: site.mover,
     });
+    if (site.square && CBZ.metroPlanLib.ceremonialSquare) CBZ.metroPlanLib.ceremonialSquare(P, site.square);
+    if (F) CBZ.metroPlanLib.translatePlan(P, dx, dz);
     P.cores = site.cores || [];
     return P;
   }
@@ -316,7 +417,8 @@
           district: id, owner: id, litByTown: true, metro: id,
           // the boot fleet stays where the player starts; the recycler in
           // traffic.js brings cars to these streets when he is on them
-          trafficWeight: 0.25, speedLimit: s.k === "art" ? 40 : 45,
+          // (a uniform city, Karvel, is the planned capital: wide empty streets)
+          trafficWeight: P.uniform ? 0.08 : 0.25, speedLimit: s.k === "art" ? 40 : 45,
         };
         // the piece over a freeway carries its 90 m approach ramps
         // (CBZ.roadDeckY reads y/ramp: flat at y, straight ramps at the ends)
@@ -332,6 +434,32 @@
   // ------------------------------------------------------------------
   function riverBody(P) {
     if (!P.river) return null;
+    // AN ISLAND RIVER (metroplan.js riverIsland) is its channels: the main
+    // river above and below and the two arms round the island, each its own
+    // path body (the shore field takes the nearest, so they join where they
+    // overlap and the island between the arms stays land). The taper is the
+    // whole river's, read off each point's place along it.
+    if (P.river.channels) {
+      const al = P.river.along === "x" ? "x" : "z", src0 = P.river.pts;
+      const A0 = src0[0][al], A1 = src0[src0.length - 1][al];
+      const taper = function (a) {
+        const t = (a - A0) / ((A1 - A0) || 1);
+        return (t < 0.08 ? 0.75 + 0.25 * (t / 0.08) : 1) * (t > 0.92 ? 1 + 0.4 * ((t - 0.92) / 0.08) : 1);
+      };
+      return P.river.channels.map(function (ch, ci) {
+        const pts = [], halves = [];
+        for (let i = 0; i < ch.pts.length; i += 2) { pts.push({ x: ch.pts[i].x, z: ch.pts[i].z }); halves.push(ch.half[i] * taper(ch.pts[i][al])); }
+        const last = ch.pts.length - 1;
+        if (last % 2) { pts.push({ x: ch.pts[last].x, z: ch.pts[last].z }); halves.push(ch.half[last] * taper(ch.pts[last][al])); }
+        const bbox = { minX: 1e9, maxX: -1e9, minZ: 1e9, maxZ: -1e9 };
+        for (let i = 0; i < pts.length; i++) {
+          const h = halves[i] + 4;
+          bbox.minX = Math.min(bbox.minX, pts[i].x - h); bbox.maxX = Math.max(bbox.maxX, pts[i].x + h);
+          bbox.minZ = Math.min(bbox.minZ, pts[i].z - h); bbox.maxZ = Math.max(bbox.maxZ, pts[i].z + h);
+        }
+        return { kind: "path", pts: pts, half: halves, axis: al, bbox: bbox, name: P.river.name, metro: P.id, channel: ci };
+      });
+    }
     const pts = [], halves = [];
     const src = P.river.pts;
     // decimate to ~120 m (the field is evaluated per plate vertex and per
@@ -457,7 +585,7 @@
     //      region over every crossing
     city.waterBodies = city.waterBodies || [];
     const body = riverBody(P);
-    if (body) city.waterBodies.push(body);
+    if (body) for (const b of [].concat(body)) city.waterBodies.push(b);
     for (const l of M.lakes) {
       if (CBZ.registerCityWaterBody) CBZ.registerCityWaterBody(city, { id: id + "-" + l.name.toLowerCase().replace(/\s+/g, "-"), name: l.name, kind: "circle", cx: l.x, cz: l.z, r: l.r, inland: true, metro: id });
     }
@@ -602,13 +730,37 @@
   let _lastSweep = 0;
   const _pending = [];
   let _cur = null;                 // the building job in flight: { M, t, part, J }
-  function pump() {
-    let left = BUDGET_MS;
+  // a facade cell: level wanted at distance d, with hysteresis round the one it has
+  function kitLevel(c, d) {
+    const R = CBZ.metroFabric.KIT_LOD_R || [0];
+    let L = 0; while (L + 1 < R.length && d >= R[L + 1]) L++;
+    const b = c.built ? c.lodBuilt : -1;
+    if (b >= 0 && b !== L && d >= R[b] - KIT_HYST && (b + 1 >= R.length || d < R[b + 1] + KIT_HYST)) return b;
+    return L;
+  }
+  function kitDrop(c) {
+    if (_cur && _cur.t === c) _cur = null;
+    if (c.built || c.meshes) { try { CBZ.metroFabric.disposeKit(null, c); } catch (e) {} _audit.kitDrops++; }
+  }
+  function kitDone(c, r) {
+    _audit.kitBuilds++;
+    _audit.kitMsMax = Math.max(_audit.kitMsMax, r.stats.ms);
+    c.tris = r.stats.triangles;
+    CBZ.metroFabric.showKit(c, !r.empty, c.lodBuilt <= KIT_SHADOW_LOD);
+  }
+  function pump(budget) {
+    let left = budget > 0 ? budget : BUDGET_MS;
     while (left > 0.25) {
       if (!_cur) {
         const job = _pending.shift();
         if (!job) return;
         const t = job.t;
+        if (job.part === "kit") {
+          if (t.built && t.lodBuilt === job.lod && !job.rebuild) continue;
+          t.lod = job.lod; t.anchor = job.anchor;
+          _cur = { M: job.M, t: t, part: "kit", J: CBZ.metroFabric.job(job.M.plan, t, "kit"), t0: performance.now() };
+          continue;
+        }
         if (job.part === "gnd") {
           if (t.gndBuilt) continue;
           buildPart(job.M, t, "gnd");
@@ -625,6 +777,7 @@
       _audit.sliceMsMax = Math.max(_audit.sliceMsMax, ms);
       if (r) {
         const c = _cur; _cur = null;
+        if (c.part === "kit") { kitDone(c.t, r); continue; }
         note(r.stats.ms);
         if (c.part === "far") c.t.fab.farBuilt = true; else c.t.fabBuilt = true;
         fabDone(c.M, c.t, c.part, r);
@@ -768,13 +921,47 @@
       if (!w.t.gndBuilt) _pending.push({ M: w.M, t: w.t, part: "gnd" });
       if (!w.t.fabBuilt) _pending.push({ M: w.M, t: w.t, part: "fab" });
     }
+    // ---- facade cells: the close levels go before the distant skyline,
+    //      the rest after it
+    const kitNear = [], kitFar = [];
+    const kitOn = !!(CBZ.metroFabric && CBZ.metroFabric.disposeKit) && !(CBZ.CONFIG && CBZ.CONFIG.METRO_FACADES === false);
+    // the camera's height over the lots (GY 0.16): a cell under a flying
+    // camera is as far as the height, and a cell is rebuilt when the eye
+    // climbs or drops more than its slack (the kit's height bound)
+    const eyeH = Math.max(0, alt - 0.16);
+    for (const M of CBZ.metroCities) {
+      const cells = M.fabric && M.fabric.kit;
+      if (!cells || !cells.length) continue;
+      const Fp = M.plan.stats.footprint;
+      const far = !kitOn || !M.group || !M.group.visible || rectDist({ x0: Fp.minX, z0: Fp.minZ, x1: Fp.maxX, z1: Fp.maxZ }, x, z) > KIT_DROP + 200;
+      if (far && !M.kitLive) continue;
+      let live = 0;
+      for (const c of cells) {
+        const dh = rectDist(c, x, z), d = eyeH > 40 ? Math.hypot(dh, eyeH - 40) : dh;
+        if (far || d > KIT_DROP) { if (c.built || (_cur && _cur.t === c)) kitDrop(c); continue; }
+        if (c.built || d < KIT_R) live++;
+        if (d >= KIT_R) continue;
+        const lod = kitLevel(c, d);
+        const a = c.built ? c.anchor : null;
+        const moved = !!(a && Math.abs(alt - a.y) > a.slack);
+        if (c.built && c.lodBuilt === lod && !moved) continue;
+        const job = { M: M, t: c, part: "kit", lod: lod, rebuild: moved, d: d, anchor: { y: alt, slack: Math.max(15, 0.3 * eyeH) } };
+        (lod <= 1 ? kitNear : kitFar).push(job);
+      }
+      M.kitLive = live;
+    }
+    kitNear.sort(function (a, b) { return a.d - b.d; });
+    kitFar.sort(function (a, b) { return a.d - b.d; });
+    for (const j of kitNear) _pending.push(j);
     for (const w of wantFar) _pending.push({ M: w.M, t: w.t, part: "far" });
+    for (const j of kitFar) _pending.push(j);
   });
 
   // ------------------------------------------------------------------
   //  AUDIT — what the tools (and the report) read
   // ------------------------------------------------------------------
-  const _audit = { buildMs: 0, tileBuilds: 0, tileDrops: 0, tileMsMax: 0, tileMsSum: 0, sliceMsMax: 0, farBuilds: 0, farBytes: 0 };
+  const _audit = { buildMs: 0, tileBuilds: 0, tileDrops: 0, tileMsMax: 0, tileMsSum: 0, sliceMsMax: 0, farBuilds: 0, farBytes: 0,
+    kitBuilds: 0, kitDrops: 0, kitMsMax: 0 };
   CBZ.metroAudit = function () {
     return {
       buildMs: _audit.buildMs, tileBuilds: _audit.tileBuilds, tileDrops: _audit.tileDrops,
@@ -782,6 +969,19 @@
       sliceMsMax: Math.round(_audit.sliceMsMax * 10) / 10, farBuilds: _audit.farBuilds, farMB: +(_audit.farBytes / 1048576).toFixed(1),
       farMap: _mapsDone ? { MB: _audit.farMapMB || 0, ms: _audit.farMapMs || 0 } : null,
       viewFar: CBZ.metroViewFar || 0, viewR: Math.round(_viewR), showR: Math.round(_showR),
+      // the facade cells: built / drawn now, their triangles, and the work so far
+      facades: (function () {
+        let built = 0, drawn = 0, tris = 0, shadow = 0;
+        const lv = [0, 0, 0, 0];
+        for (const M of CBZ.metroCities) for (const c of (M.fabric && M.fabric.kit) || []) {
+          if (!c.built) continue;
+          built++; lv[c.lodBuilt | 0]++;
+          const m0 = c.meshes && c.meshes[0];
+          if (m0 && m0.visible) { drawn++; tris += c.tris || 0; if (m0.castShadow) shadow += c.tris || 0; }
+        }
+        return { built: built, drawn: drawn, perLevel: lv, tris: tris, shadowTris: shadow, builds: _audit.kitBuilds, drops: _audit.kitDrops,
+          buildMsMax: Math.round(_audit.kitMsMax * 10) / 10, R: KIT_R, drop: KIT_DROP };
+      })(),
       cities: CBZ.metroCities.map(function (M) {
         const S = M.plan.stats;
         return {
@@ -799,7 +999,10 @@
   };
 
   // tools force a build/drop without walking there (speed/probe scripts)
-  CBZ.metroStream = { buildPart: buildPart, dropTile: dropTile };
+  // pump(ms): run the queue with a bigger budget (a probe that cannot wait
+  // for a slow headless page); queue(): what is waiting, by part
+  CBZ.metroStream = { buildPart: buildPart, dropTile: dropTile, pump: function (ms) { pump(ms); return !!(_cur || _pending.length); },
+    queue: function () { const q = {}; for (const j of _pending) q[j.part] = (q[j.part] || 0) + 1; if (_cur) q.cur = _cur.part; return q; } };
   CBZ.metroLib = { siteTable: siteTable, planSite: planSite, worldConstraints: worldConstraints, planRegions: planRegions, roadRecords: roadRecords, riverBody: riverBody, TILE: TILE };
   if (THREE && CBZ.addLandmass) CBZ.addLandmass(function (city) {
     try { build(city); } catch (e) { console.error("[metro]", e); }

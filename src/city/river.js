@@ -93,7 +93,8 @@
      CBZ.CONFIG.CITY_RIVER         (true)  — carve it at all
      CBZ.CONFIG.CITY_RIVER_BRIDGES (true)  — the crossings' decks + regions
 
-   Exposes: CBZ.cityRiver, CBZ.cityRiverAudit.
+   Exposes: CBZ.cityRiver, CBZ.cityRiverAudit, CBZ.cityRivers, CBZ.cityChannelAt,
+   CBZ.cityLakeOutletCarve (a large lake's way to the sea, same router).
 ============================================================ */
 (function () {
   "use strict";
@@ -119,6 +120,11 @@
   const STEP = 165;           // polyline spacing (a plate cell is 38)
 
   let river = null;           // { pts, half[], side, bridges[], length }
+  const outlets = [];         // lake outlets, same record shape
+  let gridCache = null;       // the router's cost grid, shared within one build
+  // an outlet is a lowland river leaving a lake: a touch narrower than the
+  // harbour's, widening to an estuary where it meets the sea
+  const OUT_HEAD = 62, OUT_MID = 50, OUT_MOUTH = 88;
   let audit = { built: false, reason: "not run", length: 0, points: 0, bridges: 0, crossings: 0 };
 
   function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
@@ -171,12 +177,17 @@
        ctx.plate          { minX, maxX, minZ, maxZ } of the ground plate
      Returns the water body to carve, or null.
      ============================================================ */
-  CBZ.cityRiverCarve = function (city, ctx) {
-    river = null;
-    audit = { built: false, reason: "off", length: 0, points: 0, bridges: 0, crossings: 0 };
+  function carveImpl(city, ctx, lake) {
+    // `lake` null = THE harbour river (module state `river`/`audit`); a lake
+    // record {cx, cz, r, name} = that lake's OUTLET to the sea, which shares
+    // the router, the shaping, the bridges and the channel oracle but keeps
+    // the harbour's audit untouched.
+    const HARB = !lake;
+    const AUD = { built: false, reason: "off", length: 0, points: 0, bridges: 0, crossings: 0 };
+    if (HARB) { river = null; audit = AUD; outlets.length = 0; gridCache = null; }
     if (C.CITY_RIVER === false) return null;
-    if (!city || !isFinite(city.minX)) { audit.reason = "no city rect"; return null; }
-    if (!ctx || typeof ctx.shoreAt !== "function") { audit.reason = "no coastline oracle"; return null; }
+    if (!city || !isFinite(city.minX)) { AUD.reason = "no city rect"; return null; }
+    if (!ctx || typeof ctx.shoreAt !== "function") { AUD.reason = "no coastline oracle"; return null; }
 
     const regs = city.regions || [], roads = city.roads || [];
     // The bay ring's own numbers, from continent.js's harbour pass. Kept here
@@ -282,7 +293,7 @@
        other end of the pipe, asked here at build time: not "is there water
        at the head" but "is that water the water the boats are in".        */
     const ARC = new Set(), ARC_STEP = 20;
-    (function fillArc() {
+    if (HARB) (function fillArc() {
       const pad = BAY1 + 80;
       const lo = { x: city.minX - pad, z: city.minZ - pad };
       const hi = { x: city.maxX + pad, z: city.maxZ + pad };
@@ -345,9 +356,16 @@
     const N = GX * GZ;
     const cellX = function (i) { return P.minX + (i % GX + 0.5) * CELL; };
     const cellZ = function (i) { return P.minZ + ((i / GX) | 0 + 0) * CELL + CELL * 0.5; };
-    const blocked = new Uint8Array(N), priced = new Uint8Array(N), isSea = new Uint8Array(N);
-    let seaCells = 0;
-    for (let i = 0; i < N; i++) {
+    // THE COST GRID IS SHARED by every carve of one world build (the harbour
+    // river and each lake outlet ask the same coastline over the same
+    // regions): it is the ~100 ms part, the search itself is milliseconds.
+    const cacheOK = gridCache && gridCache.shore === ctx.shoreAt && gridCache.N === N &&
+      gridCache.minX === P.minX && gridCache.minZ === P.minZ;
+    const blocked = cacheOK ? gridCache.blocked : new Uint8Array(N);
+    const priced = cacheOK ? gridCache.priced : new Uint8Array(N);
+    const isSea = cacheOK ? gridCache.isSea : new Uint8Array(N);
+    let seaCells = cacheOK ? gridCache.seaCells : 0;
+    if (!cacheOK) for (let i = 0; i < N; i++) {
       const x = cellX(i), z = cellZ(i);
       if (regionAt(x, z, HALF_MID + 10)) { blocked[i] = 1; continue; }
       // A DECK IS A TOLL, NOT A WALL. It was a wall in the first working
@@ -364,7 +382,8 @@
       const cheb = Math.max(Math.max(city.minX - x, x - city.maxX), Math.max(city.minZ - z, z - city.maxZ));
       if (cheb > BAY1 + 400 && wet(x, z)) { isSea[i] = 1; seaCells++; }
     }
-    if (!seaCells) { audit.reason = "no open sea on the plate"; audit.arcCells = ARC.size; return null; }
+    if (!cacheOK) gridCache = { shore: ctx.shoreAt, N: N, minX: P.minX, minZ: P.minZ, blocked: blocked, priced: priced, isSea: isSea, seaCells: seaCells };
+    if (!seaCells) { AUD.reason = "no open sea on the plate"; AUD.arcCells = ARC.size; return null; }
 
     // starts: every grid cell the harbour arc touches
     const dist = new Float64Array(N).fill(Infinity);
@@ -372,7 +391,18 @@
     const heap = [];
     function push(i, d) { dist[i] = d; heap.push([d, i]); }
     let starts = 0;
-    ARC.forEach(function (k) {
+    if (!HARB) {
+      // a lake drains from its own water: every cell well inside the basin
+      const r0 = Math.max(CELL, lake.r - 30);
+      for (let i = 0; i < N; i++) {
+        if (blocked[i]) continue;
+        const x = cellX(i), z = cellZ(i);
+        // the lake's OWN shore when the caller has one (lobed basins), else its circle
+        const inLake = typeof lake.inside === "function" ? lake.inside(x, z) : Math.hypot(x - lake.cx, z - lake.cz) < r0;
+        if (inLake) { push(i, 0); starts++; }
+      }
+    }
+    if (HARB) ARC.forEach(function (k) {
       const c = k.split(","), ax = +c[0] * ARC_STEP, az = +c[1] * ARC_STEP;
       const gi = Math.floor((ax - P.minX) / CELL), gj = Math.floor((az - P.minZ) / CELL);
       if (gi < 0 || gj < 0 || gi >= GX || gj >= GZ) return;
@@ -380,7 +410,7 @@
       if (blocked[i] || dist[i] === 0) return;
       push(i, 0); starts++;
     });
-    if (!starts) { audit.reason = "harbour arc has no cell on the plate"; audit.arcCells = ARC.size; return null; }
+    if (!starts) { AUD.reason = HARB ? "harbour arc has no cell on the plate" : "lake has no open cell"; AUD.arcCells = ARC.size; return null; }
 
     // Dijkstra with a lazy binary heap — the graph is 45k nodes and 8-way,
     // so an unsorted scan would be O(n^2) and this is O(n log n).
@@ -408,7 +438,7 @@
         if (nd < dist[j]) { dist[j] = nd; from[j] = i; heap.push([nd, j]); siftUp(heap.length - 1); }
       }
     }
-    if (goal < 0) { audit.reason = "no navigable route from the harbour to open sea"; audit.arcCells = ARC.size; return null; }
+    if (goal < 0) { AUD.reason = "no navigable route from the harbour to open sea"; AUD.arcCells = ARC.size; return null; }
 
     // ---- unwind, then STRAIGHTEN: a grid path is a staircase, and a river
     // is not. Drop any waypoint whose neighbours can see each other over
@@ -454,7 +484,7 @@
       const L = Math.hypot(knots[i + 1].x - knots[i].x, knots[i + 1].z - knots[i].z);
       segLen.push(L); total += L;
     }
-    if (!(total > 400)) { audit.reason = "route too short to build"; audit.arcCells = ARC.size; return null; }
+    if (!(total > 400)) { AUD.reason = "route too short to build"; AUD.arcCells = ARC.size; return null; }
     function atDist(d) {
       let acc = 0;
       for (let i = 0; i < segLen.length; i++) {
@@ -475,7 +505,7 @@
       // no wander at either end: the head has to stay in the harbour it
       // drains, and the mouth has to stay pointed at the sea
       const taper = Math.sin(Math.PI * clamp(u * 1.15 - 0.05, 0, 1));
-      let off = wobble(d, 17) * MEANDER * taper;
+      let off = wobble(d, HARB ? 17 : 29 + Math.round(lake.cx + lake.cz) % 97) * MEANDER * taper;
       let x = base.x + base.nx * off, z = base.z + base.nz * off;
       let guard = 0;
       while (regionAt(x, z, HALF_MID + 10) && guard++ < 6) {
@@ -484,11 +514,12 @@
       if (regionAt(x, z, HALF_MID + 10)) { x = base.x; z = base.z; }
       pts.push({ x: x, z: z });
       // narrow where it leaves the harbour, widest where it meets the sea
-      halves.push(u < 0.08 ? HALF_HEAD + (HALF_MID - HALF_HEAD) * (u / 0.08)
-                : u > 0.86 ? HALF_MID + (HALF_MOUTH - HALF_MID) * ((u - 0.86) / 0.14)
-                : HALF_MID);
+      const hH = HARB ? HALF_HEAD : OUT_HEAD, hM = HARB ? HALF_MID : OUT_MID, hO = HARB ? HALF_MOUTH : OUT_MOUTH;
+      halves.push(u < 0.08 ? hH + (hM - hH) * (u / 0.08)
+                : u > 0.86 ? hM + (hO - hM) * ((u - 0.86) / 0.14)
+                : hM);
     }
-    if (pts.length < 3) { audit.reason = "route too short to build"; audit.arcCells = ARC.size; return null; }
+    if (pts.length < 3) { AUD.reason = "route too short to build"; AUD.arcCells = ARC.size; return null; }
 
     /* ---- REGISTER IT. One body, one kind, and the kind is new: a POLYLINE.
        Registering 43 separate rects would have worked and would also have
@@ -512,7 +543,7 @@
     const bearing = axis === "x" ? (bx < 0 ? "west" : "east") : (bz < 0 ? "north" : "south");
     const body = {
       kind: "path", pts: pts, half: halves, axis: axis, bbox: bbox,
-      name: "The " + (bearing === "west" ? "Kesh" : bearing === "east" ? "Veridia"
+      name: !HARB ? (lake.name || "The Outlet") : "The " + (bearing === "west" ? "Kesh" : bearing === "east" ? "Veridia"
             : bearing === "north" ? "Mercy" : "Solara") + " River",
     };
     if (CBZ.registerCityWaterBody) CBZ.registerCityWaterBody(city, body);
@@ -570,14 +601,16 @@
       }
     }
 
-    river = { pts: pts, half: halves, side: bearing, bridges: bridges,
+    const rec = { pts: pts, half: halves, side: bearing, bridges: bridges,
               length: Math.round(total), body: body, name: body.name };
-    audit = { built: true, reason: "", length: river.length, points: pts.length,
+    if (HARB) river = rec; else outlets.push(rec);
+    const fin = { built: true, reason: "", length: rec.length, points: pts.length,
               bridges: bridges.length, crossings: bridges.length, side: bearing,
               name: body.name,
               // the marina's arc, in 20 m cells. A ZERO here means the veto
               // that keeps the river on the harbour's own water was inert.
               arcCells: ARC.size, head: [Math.round(pts[0].x), Math.round(pts[0].z)] };
+    if (HARB) audit = fin; else rec.audit = fin;
 
     /* ---- AND THE THING YOU CAN SEE: piers and parapets at each crossing.
        Drawn LAST and drawn cheap — two merged meshes for the whole river —
@@ -664,6 +697,17 @@
 
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     return body;
+  }
+  CBZ.cityRiverCarve = function (city, ctx) { return carveImpl(city, ctx, null); };
+  /* CBZ.cityLakeOutletCarve(city, ctx, lake) — A LAKE THAT DRAINS. Called by
+     city/continent.js for every large inland lake (Kings Lake): the same
+     router finds the lake's way to the open sea, and the same crossings,
+     piers and channel oracle make it a river rather than a painted ditch.
+     Returns the path body to carve, or null (reason on the returned list's
+     audit via CBZ.cityRivers()). */
+  CBZ.cityLakeOutletCarve = function (city, ctx, lake) {
+    if (!lake || ![lake.cx, lake.cz, lake.r].every(Number.isFinite)) return null;
+    return carveImpl(city, ctx, lake);
   };
 
   /* ============================================================
@@ -765,10 +809,9 @@
 
      Deliberately NARROW: it is true only inside this river's own channel, so
      every other deck in the world keeps the old behaviour exactly. */
-  CBZ.cityChannelAt = function (x, z) {
-    if (!river) return false;
-    const p = river.pts, h = river.half;
-    const bb = river.body && river.body.bbox;
+  function inChannel(rv, x, z) {
+    const p = rv.pts, h = rv.half;
+    const bb = rv.body && rv.body.bbox;
     if (bb && (x < bb.minX || x > bb.maxX || z < bb.minZ || z > bb.maxZ)) return false;
     for (let i = 0; i + 1 < p.length; i++) {
       const ax = p[i].x, az = p[i].z, vx = p[i + 1].x - ax, vz = p[i + 1].z - az;
@@ -780,6 +823,11 @@
       if (dx * dx + dz * dz <= half * half) return true;
     }
     return false;
+  }
+  CBZ.cityChannelAt = function (x, z) {
+    if (river && inChannel(river, x, z)) return true;
+    for (let i = 0; i < outlets.length; i++) if (inChannel(outlets[i], x, z)) return true;
+    return false;
   };
 
   CBZ.cityRiver = {
@@ -789,4 +837,6 @@
     bridges: function () { return river ? river.bridges.slice() : []; },
     info: function () { return river; },
   };
+  // every carved river (the harbour's first, then each lake outlet)
+  CBZ.cityRivers = function () { return (river ? [river] : []).concat(outlets); };
 })();

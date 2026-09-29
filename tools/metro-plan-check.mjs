@@ -74,7 +74,7 @@ for (const site of L.siteTable(city)) {
     population: S.population, jobs: S.jobs, regions: regions.length, arterialRecords: roads.length,
     bridges: S.bridges, overpasses: S.overpasses, interchanges: S.interchanges, planMs: S.planMs,
     map: (function () {
-      const ch = { cbd: "C", midtown: "M", inner: "I", rows: "R", suburb: "s", exurb: "e", farm: "f", industrial: "X", park: "P", stadium: "S", campus: "U", mall: "L", void: "." };
+      const ch = { cbd: "C", midtown: "M", inner: "I", rows: "R", suburb: "s", exurb: "e", farm: "f", industrial: "X", park: "P", stadium: "S", campus: "U", mall: "L", hood: "H", river: "~", void: "." };
       const rows = [];
       for (let j = P.NZ - 1; j >= 0; j--) { let l = ""; for (let i = 0; i < P.NX; i++) l += ch[P.cellAt(i, j).use] || "?"; rows.push(l); }
       return rows;
