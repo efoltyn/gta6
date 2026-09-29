@@ -697,9 +697,11 @@
      shadow flags + attribute layout, bakes world matrices while copying, and
      draws each bucket once. Float32 normals are kept (Standard/Phong
      specular reads them), uv/uv2/colour copied as they are.
-     Runs AFTER localinst (city/mode.js): a prop repeated four times in a
-     672 m cell is one instanced draw there, and merging it here first would
-     turn that into one draw per 112 m tile instead.
+     Run by CBZ.ensurePrisonBatched (measured: 26,639 jail meshes into 188
+     draws; it replaced world/prisonkit.js's private merger). The city does
+     not call it: 9 buckets / 32 meshes, since nearly every textured city mesh
+     carries userData. A root that also uses localinst must run this AFTER it,
+     or a prop repeated in a 672 m cell becomes one draw per 112 m tile.
      Skipped, kept live: mirrored meshes (a negative determinant flips the
      winding), morph targets, custom onBeforeRender,
      renderOrder, frustumCulled=false, non-default layers, transparent.
