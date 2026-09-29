@@ -2315,6 +2315,7 @@
       (function forestBelt() {
         if (typeof CBZ.hash01 !== "function") return;
         const tN = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+        const FLK = CBZ.CONFIG && CBZ.CONFIG.FOREST_LOOK !== false ? CBZ.forestLook : null;
         function belt(o) {
           const tG = trunkG.clone(), cG = canopyG.clone(), kG = capG.clone();
           const tIM = new THREE.InstancedMesh(tG, mTrunk, o.count);
@@ -2338,12 +2339,20 @@
               o.normalAt(x, z, tN);
               if (tN.y < 0.60) continue;                       // cliff: bare rock
               if (o.reject && o.reject(x, z)) continue;
+              // GROVES, NOT A PELT (owner 2026-09-29, "too many trees"): a
+              // belt is stands of spruce with open avalanche paths and
+              // meadows between them, not one tree every 7.5 m to the
+              // treeline. Knob: TREE_DENSITY.mountain (world/forestlook.js).
+              if (FLK && FLK.grove && !FLK.grove("mountain", x, z, 0.5, { cell: 80, salt: o.salt + 9 })) continue;
               sites.push(i, j, x, z, gy);
             }
           }
-          const keep = Math.min(1, o.count / Math.max(1, sites.length / 5));
+          // the budget thins with the groves, or a belt that used to be
+          // capped would simply refill its quota from the kept groves
+          const budget = FLK && FLK.density ? Math.min(o.count, Math.round(o.count * 0.5 * FLK.density("mountain"))) : o.count;
+          const keep = Math.min(1, budget / Math.max(1, sites.length / 5));
           let k = 0;
-          for (let si = 0; si < sites.length && k < o.count; si += 5) {
+          for (let si = 0; si < sites.length && k < budget; si += 5) {
             const i = sites[si], j = sites[si + 1], x = sites[si + 2], z = sites[si + 3], gy = sites[si + 4];
             {
               if (keep < 1 && CBZ.hash01(i, j, o.salt + 6) > keep) continue;

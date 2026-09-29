@@ -100,18 +100,105 @@
     // 620 m stands with a 230 m sub-octave: sweeps big enough to fly over,
     // clumps small enough to walk around.
     const patch = vnoise2(x, z, 620, 4411);
-    // High ground and steep, poor ground favour conifer — the ecology reason
-    // the reference's spires cluster up the slopes and in the cold hollows.
+    // ECOLOGY, not dice: conifers take the high ground and the steep, thin
+    // soil; broadleaf takes the valleys and the wet ground along water. The
+    // caller passes what it knows (alt 0..1 of its relief, slope rise/run,
+    // wet 0..1); a caller that knows nothing gets the patch mask alone.
     const alt = clamp01(opts.alt == null ? 0 : opts.alt);
-    const bias = patch + alt * 0.26 + (opts.coniferBias || 0);
+    const slope = clamp01((opts.slope == null ? 0 : opts.slope) / 0.8);
+    const wet = clamp01(opts.wet == null ? 0 : opts.wet);
+    const bias = patch + alt * 0.40 + slope * 0.22 - wet * 0.30 + (opts.coniferBias || 0);
     const die = h01(x, z, 4412);
-    // A soft threshold, and the FLOOR is the point: a broadleaf sweep still
-    // carries the odd spruce (0.10) and a conifer stand is still not a
-    // plantation (0.82 at most), so neither species ever forms a clean edge.
-    // The individual tree's own hash decides inside those bounds, which is
-    // what breaks the seam between two stands.
-    const p = clamp01(0.10 + 0.62 * smooth(bias, 0.46, 0.78));
+    // GROUPS, NOT SALT AND PEPPER (owner: "rn they are just random
+    // scatter"). The band is narrow (0.50..0.60) and the floor/ceiling tight
+    // (3% / 97%), so a stand is one species with a short, broken seam where
+    // two stands meet — never an even alternation across a whole wood.
+    const p = clamp01(0.03 + 0.94 * smooth(bias, 0.50, 0.60));
     return { conifer: die < p, patch: patch, spire: p };
+  }
+
+  /* ---- THE TREE KNOBS (owner-facing, one place) ------------------------
+     Owner 2026-09-29: "theres too many trees lol" / "it can be much much
+     thinner but more intentional". Every builder asks HERE how dense its
+     trees are and how clumped, so "a bit more trees in the backcountry" is
+     one number: CBZ.CONFIG.TREE_DENSITY.backcountry = 1.3.
+
+       TREE_DENSITY[area]  1 = the designed look. 0 = none. ~1.3 = "a bit
+                           more", ~0.7 = "less". Scales COUNT only, never
+                           the model or its detail.
+       TREE_CLUSTER        0 = evenly spread .. 1 = tight groves with open
+                           glades between. Changes ARRANGEMENT, not count.
+
+     Areas: backcountry (the continent's stands of wood), riparian (tree
+     lines along the river), hedgerow (field-edge windbreaks on farm
+     country), avenue (rows along the frontier highway), specimen (lone
+     trees on rises and small clumps on hills), redhollow (the Redhollow
+     forest biome), mountain (the Mount Mercy conifer belts), street (city
+     street trees in pits).
+  --------------------------------------------------------------------- */
+  const DENSITY_DEFAULT = {
+    backcountry: 1, riparian: 1, hedgerow: 1, avenue: 1, specimen: 1,
+    redhollow: 1, mountain: 1, street: 1,
+  };
+  CFG.TREE_DENSITY = Object.assign({}, DENSITY_DEFAULT, CFG.TREE_DENSITY || {});
+  if (CFG.TREE_CLUSTER == null) CFG.TREE_CLUSTER = 0.65;
+  function density(area) {
+    const v = CFG.TREE_DENSITY && CFG.TREE_DENSITY[area];
+    return v == null || !Number.isFinite(+v) ? 1 : Math.max(0, +v);
+  }
+  function cluster() {
+    const v = +CFG.TREE_CLUSTER;
+    return Number.isFinite(v) ? clamp01(v) : 0.65;
+  }
+
+  /* ---- A STAND IS A PLACE WITH AN EDGE ----------------------------------
+     0 = open ground, 1 = the core of a wood; the band between is the
+     thinning margin (~one or two 46 m cells wide), which is what gives a
+     wood a readable edge instead of a gradient of sprinkles.
+     opts: cover/weight (land-cover biome + blend weight), alt (0..1 of the
+     caller's relief ceiling), slope (rise/run), curv (+ ridge, - gully),
+     wet (0..1: river, gully). The TREELINE is a shoulder in alt that gully
+     fingers push higher; steep faces shed the wood; wet ground holds it. */
+  function stand(x, z, opts) {
+    opts = opts || {};
+    if (!ON()) return 0;
+    const d = density(opts.area || "backcountry");
+    if (d <= 0) return 0;
+    let suit = vnoise2(x, z, 760, 4441);
+    const w = opts.weight == null ? 1 : clamp01(opts.weight);
+    switch (opts.cover) {
+      case "forest": suit += 0.22 * w; break;
+      case "snow": suit += 0.05 * w; break;
+      case "farmland": suit -= 0.26 * w; break;
+      case "desert": suit -= 0.90 * w; break;
+      default: break;
+    }
+    suit += 0.10 * clamp01(opts.wet || 0);
+    if (CFG.FOREST_ALPINE_GRADIENT !== false) {
+      const gully = clamp01(-(opts.curv || 0) * 2.2);
+      suit -= 0.40 * smooth(clamp01(opts.alt || 0), 0.46 + gully * 0.18, 0.66 + gully * 0.20);
+    }
+    suit -= 0.30 * smooth(opts.slope || 0, 0.50, 0.85);
+    // The edge: more density buys a little more wooded AREA as well as more
+    // stems inside it, so "a bit more" grows the woods, not only packs them.
+    const T = 0.635 - 0.07 * (d - 1);
+    return smooth(suit, T, T + 0.10);
+  }
+
+  /* ---- GROVES AND GLADES -------------------------------------------------
+     The one deterministic thinning every other builder uses: keep a tree
+     at (x,z) with probability base * TREE_DENSITY[area], redistributed by
+     TREE_CLUSTER into groves (kept) and glades (cleared) on a `cell`-metre
+     field. Mean count is the same at any cluster value; only the
+     arrangement changes. Position-hashed: no caller's rng stream moves. */
+  function grove(area, x, z, base, opts) {
+    opts = opts || {};
+    const d = density(area) * (base == null ? 1 : base);
+    if (d <= 0) return false;
+    const k = cluster();
+    const g = vnoise2(x, z, opts.cell || 90, opts.salt || 4471);
+    const p = d * ((1 - k) + k * 2.1 * smooth(g, 0.36, 0.64));
+    return h01(x, z, (opts.salt || 4471) + 1) < p;
   }
 
   /* ---- COLOUR ----------------------------------------------------------
@@ -285,6 +372,7 @@
   CBZ.forestLook = {
     species: species, tint: tint, bark: bark, closure: closure,
     storey: storey, stems: stems, noise: vnoise2, legacy: legacy,
+    density: density, cluster: cluster, stand: stand, grove: grove,
   };
   // One-word adoption aliases — a caller replacing a `col.setRGB(...)` line
   // should not have to reach through an object literal to do it.

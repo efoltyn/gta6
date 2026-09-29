@@ -478,6 +478,18 @@
     // before allocating the InstancedMesh buffers — InstancedMesh needs a
     // fixed capacity at construction).
     const trees = [], roundTrees = [];
+    // GROVES AND GLADES (owner 2026-09-29: "too many trees" / "much much
+    // thinner but more intentional"). The stand was wall-to-wall: one tree
+    // every 12.5 m across the whole biome. It stays a forest, but it now
+    // breaks into groves with glades between them on a 70 m field
+    // (world/forestlook.js grove(); knobs TREE_DENSITY.redhollow and
+    // TREE_CLUSTER). Decided by POSITION after every rng draw a tree takes,
+    // so the stream — every cabin, trail, tent and deer downstream — is
+    // untouched; only the push is skipped.
+    const RH_KEEP = 0.55;
+    function keepRH(x, z) {
+      return !(FLOOK && FLOOK.grove) || FLOOK.grove("redhollow", x, z, RH_KEEP, { cell: 70, salt: 0x4f90 });
+    }
     // The old sqrt(FSC) pitch quietly made every tree 20% farther apart when
     // the biome grew, causing a 31% local-density regression. Scene-scale trees
     // keep a fixed physical spacing. 12.5m is the upper end of a mature stand;
@@ -529,6 +541,7 @@
           const folH = SCENERY ? 0.72 + rng() * 0.36 : folR;
           const folY = SCENERY ? h - 0.65 : h * (0.66 + rng() * 0.1);
           colFoli.setRGB(0.28 + rng() * 0.12, 0.44 + rng() * 0.16, 0.16 + rng() * 0.08);
+          if (!keepRH(x, z)) continue;               // a glade (all draws already taken)
           roundTrees.push({ x, z, h, tr, rot, lean, folR, folH, folY });
           roundTrunkColors.push(colTrunk.r, colTrunk.g, colTrunk.b);
           roundColors.push(colFoli.r, colFoli.g, colFoli.b);
@@ -562,6 +575,7 @@
         else if (broad) colFoli.setRGB(0.30 + j0 * 0.18, 0.46 + j1 * 0.16, 0.16 + j2 * 0.10);
         else colFoli.setRGB(0.10 + j0 * 0.08, 0.30 + j1 * 0.14, 0.13 + j2 * 0.08);
 
+        if (!keepRH(x, z)) continue;                 // a glade (all draws already taken)
         trees.push({ x, z, h, tr, sc, rot, lean, folH, folR, folY, giant, conifer });
         trunkColors.push(colTrunk.r, colTrunk.g, colTrunk.b);
         foliColors.push(colFoli.r, colFoli.g, colFoli.b);
@@ -578,7 +592,12 @@
     let nSpire = 0;
     for (let i = 0; i < N; i++) if (trees[i].conifer) nSpire++;
     const spireGeo = (FMIX && nSpire) ? KIT.geometry("conifer-spire") : null;
-    const trunkInst = new THREE.InstancedMesh(trunkGeo, trunkMat, N);
+    // A spire stands on the limbless spruce bole: the mature-wood limbs reach
+    // 3.9-4.6 m out at 15-19 m, far past a 2-3 m wide spire — they were the
+    // owner's "weird sticks sticking out" of every evergreen here.
+    const cTrunkGeo = spireGeo && SCENERY ? KIT.geometry("conifer-wood") : null;
+    const nConBole = cTrunkGeo ? nSpire : 0;
+    const trunkInst = new THREE.InstancedMesh(trunkGeo, trunkMat, Math.max(1, N - nConBole));
     const treeShadows = !SCENERY || (CBZ.qualityLevel == null ? 2 : CBZ.qualityLevel) >= 2;
     trunkInst.castShadow = treeShadows;
     trunkInst.receiveShadow = true;
@@ -586,7 +605,29 @@
     trunkInst.frustumCulled = false;
     trunkInst.userData.vegetationLayer = "mature-wood";
     trunkInst.userData.sceneryScale = SCENERY;
-    trunkInst.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(trunkColors), 3);
+    const coniferTrunkInst = nConBole ? new THREE.InstancedMesh(cTrunkGeo, KIT.material("conifer-wood"), nConBole) : null;
+    if (coniferTrunkInst) {
+      coniferTrunkInst.castShadow = treeShadows;
+      coniferTrunkInst.receiveShadow = true;
+      coniferTrunkInst.name = "redhollow-conifer-wood";
+      coniferTrunkInst.frustumCulled = false;
+      coniferTrunkInst.userData.vegetationLayer = "conifer-wood";
+      coniferTrunkInst.userData.sceneryScale = SCENERY;
+    }
+    // colours follow the tree into whichever bole mesh it lands in
+    const tColB = new Float32Array(Math.max(1, N - nConBole) * 3), tColC = new Float32Array(Math.max(1, nConBole) * 3);
+    let nB = 0, nC = 0;
+    const boleOf = new Array(N);
+    for (let i = 0; i < N; i++) {
+      const toC = !!(coniferTrunkInst && trees[i].conifer);
+      const j = toC ? nC++ : nB++;
+      const dst = toC ? tColC : tColB;
+      dst[j * 3] = trunkColors[i * 3]; dst[j * 3 + 1] = trunkColors[i * 3 + 1]; dst[j * 3 + 2] = trunkColors[i * 3 + 2];
+      boleOf[i] = j * 2 + (toC ? 1 : 0);
+    }
+    trunkInst.count = nB;
+    trunkInst.instanceColor = new THREE.InstancedBufferAttribute(tColB, 3);
+    if (coniferTrunkInst) coniferTrunkInst.instanceColor = new THREE.InstancedBufferAttribute(tColC, 3);
 
     /* ---- ONE WOOD, MANY CROWNS ---------------------------------------
        This stand used to draw every one of its ~2,600 crowns from a SINGLE
@@ -662,6 +703,7 @@
       : null;
 
     const tbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(trunkGeo) : null;
+    const ctbb = cTrunkGeo && TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(cTrunkGeo) : null;
     for (let i = 0; i < N; i++) {
       const t = trees[i];
       // trunk (V2: base sunk V2SINK below the floor, top unchanged at t.h)
@@ -670,11 +712,13 @@
       if (SCENERY) dummy.scale.setScalar(t.sc);
       else dummy.scale.set(t.tr, TREES2 ? t.h + V2SINK : t.h, t.tr);
       dummy.updateMatrix();
-      trunkInst.setMatrixAt(i, dummy.matrix);
+      const onC = (boleOf[i] & 1) === 1;
+      (onC ? coniferTrunkInst : trunkInst).setMatrixAt(boleOf[i] >> 1, dummy.matrix);
       let parts = null;
-      if (TREES2 && tbb) {
+      const bbT = onC ? ctbb : tbb;
+      if (TREES2 && bbT) {
         parts = [];
-        CBZ.treeAabbPush(parts, dummy.matrix, tbb.min.x, tbb.min.y, tbb.min.z, tbb.max.x, tbb.max.y, tbb.max.z);
+        CBZ.treeAabbPush(parts, dummy.matrix, bbT.min.x, bbT.min.y, bbT.min.z, bbT.max.x, bbT.max.y, bbT.max.z);
       }
       // crown (rides above, same lean). The spire is authored 23 m tall with
       // its foliage running down the bole, so it is seated LOW and stretched
@@ -700,6 +744,7 @@
     }
     trunkInst.instanceMatrix.needsUpdate = true;
     root.add(trunkInst);
+    if (coniferTrunkInst) { coniferTrunkInst.instanceMatrix.needsUpdate = true; root.add(coniferTrunkInst); }
     foliPool.finish();
     if (spirePool) spirePool.finish();
 
@@ -791,7 +836,22 @@
       const c = 0.42 + 0.58 * vh(x, z, 10.4, 0x4f23);
       return a * b * c;
     }
+    // THE ROOF FOLLOWS THE TREES. It is trunkless by design, which only
+    // holds while real stems stand under it; with glades in the wood a roof
+    // patch over a glade would be the "green boulder in the sky" the
+    // backcountry roof was deleted for. A patch needs a kept trunk within
+    // 11 m.
+    const RB = 11, roofNear = new Set();
+    for (let i = 0; i < trees.length; i++) roofNear.add(Math.floor(trees[i].x / RB) + "|" + Math.floor(trees[i].z / RB));
+    for (let i = 0; i < roundTrees.length; i++) roofNear.add(Math.floor(roundTrees[i].x / RB) + "|" + Math.floor(roundTrees[i].z / RB));
+    function underTrees(x, z) {
+      const bx = Math.floor(x / RB), bz = Math.floor(z / RB);
+      let n = 0;
+      for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) if (roofNear.has((bx + i) + "|" + (bz + j))) n++;
+      return n >= 3;
+    }
     function roofAllowed(x, z, upper) {
+      if (!underTrees(x, z)) return false;
       if (x < MINX + 5 || x > MAXX - 5 || z < MINZ + 5 || z > MAXZ - 5) return false;
       // The lake stays a genuine hole in the roof. Human clearings retain a
       // controlled sky window, but upper crowns can lean over their margins.
@@ -878,7 +938,8 @@
     if (SOLID_TRUNKS) {
       for (let i = 0; i < N; i++) {
         const t = trees[i];
-        const r = SCENERY ? 0.82 * t.sc : t.tr * 0.42 + 0.06;
+        // the spruce bole's base is 0.76 m, the mature bole's 0.82 m
+        const r = SCENERY ? (coniferTrunkInst && t.conifer ? 0.76 : 0.82) * t.sc : t.tr * 0.42 + 0.06;
         CBZ.colliders.push({ minX: t.x - r, maxX: t.x + r, minZ: t.z - r, maxZ: t.z + r, y0: 0, y1: t.h, noCam: true });
         placed++;
       }
@@ -1061,7 +1122,7 @@
         physicalTreeSpacing: STEP,
         completeConeCrowns: SCENERY ? 0 : N,
         crownVariants: foliPool.K,
-        layers: [trunkInst].concat(foliPool.meshes, spirePool ? spirePool.meshes : [],
+        layers: [trunkInst, coniferTrunkInst].concat(foliPool.meshes, spirePool ? spirePool.meshes : [],
           [roundTrunkInst], roundPool.meshes, [lowerRoofMesh, upperRoofMesh, bushInst, farThicketMesh])
           .filter(function (m) { return m && m.parent; })
           .map(function (m) { return { name: m.name, count: m.count, visible: m.visible !== false }; }),
@@ -1078,7 +1139,7 @@
     //  is a tree line. `razorEdges` is the pinned number — see docs/claude.
     // ================================================================
     CBZ.forestRimAudit = function () {
-      const layers = [trunkInst, roundTrunkInst, bushInst, farThicketMesh].filter(Boolean);
+      const layers = [trunkInst, coniferTrunkInst, roundTrunkInst, bushInst, farThicketMesh].filter(Boolean);
       const m4 = new THREE.Matrix4(), v3 = new THREE.Vector3();
       const pts = [];
       for (const L of layers) {

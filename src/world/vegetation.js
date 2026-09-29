@@ -363,6 +363,28 @@
     return g;
   }
 
+  // THE SPRUCE BOLE. OWNER: "the evergreen tree has weird sticks sticking
+  // out of it." Those sticks were the broadleaf LIMBS: every conifer spire
+  // stood on `landscape-wood` (backcountry) or `mature-wood` (Redhollow),
+  // whose crown-bearing limbs reach 3.8-4.6 m out at 11-19 m up — built to
+  // hold a round crown. A spire is 2-3 m wide at that height and is drawn as
+  // crossed branch-layer cards, so every limb poked out past the silhouette
+  // and showed through the gaps between the cards. A spruce's branches ARE
+  // its foliage: the bole is a straight taper with roots and nothing else.
+  // Same 20 m height and 0.76 m base as landscape-wood, so seating, the
+  // collider radius and the audit chain are unchanged.
+  function coniferWood() {
+    const parts = [bole(0.14, 0.76, 20, 7)];
+    for (let i = 0; i < 4; i++) {
+      const a = i * GOLDEN + 0.7;
+      parts.push(cylinderBetween([0, 0.28, 0], [Math.cos(a) * 0.76, -0.08, Math.sin(a) * 0.76], 0.37, 0.06, 5, true));
+    }
+    const g = shadeByHeight(merged(parts, parts[0]), 0.50, 0.85);
+    g.name = "cbz-conifer-tree-wood";
+    g.userData.vegetationArchetype = "conifer-wood";
+    return g;
+  }
+
   /* ======================================================================
      THE LEAF CARD SET — one non-indexed buffer of quads, each written in
      both windings, with authored lighting normals and atlas uvs.
@@ -631,7 +653,7 @@
     rec.n += count == null ? 1 : count;
   }
 
-  const builders = { "mature-wood": matureWood, "landscape-wood": landscapeWood };
+  const builders = { "mature-wood": matureWood, "landscape-wood": landscapeWood, "conifer-wood": coniferWood };
 
   function geometry(kind, variant) {
     let v = variant == null ? 0 : (variant | 0);
