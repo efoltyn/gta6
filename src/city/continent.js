@@ -2848,6 +2848,12 @@
           let cone = 0;
           for (let i = 0; i < nT; i++) if (ch.stems[i].conifer) cone++;
           const broad = nT - cone;
+          forestChunks.push(ch);
+          // CITY SLICES: a chunk is the unit of the stream. Its stems are
+          // already decided (the plan above is position-hash only); planting
+          // them is what waits until the chunk can be seen.
+          const plant = function () {
+          ch.meshes.length = 0;
           const C = { ti: 0, bi: 0, ci: 0, cti: 0 };
           /* ---- A COUNTRY THAT IS NOT ONE TREE ---------------------------
              world/vegetation.js now grows K structurally different crowns per
@@ -2938,7 +2944,12 @@
             forestMeshes++;
           }
           ti += C.ti + C.cti;
-          forestChunks.push(ch);
+          };
+          if (CBZ.slice && CBZ.sliceAt) {
+            const h = CHUNK / 2 + 40;          // crowns overhang the chunk edge
+            CBZ.sliceAt({ minX: ch.cx - h, maxX: ch.cx + h, minZ: ch.cz - h, maxZ: ch.cz + h }, plant,
+              { name: "backcountry forest " + ch.cx + "," + ch.cz });
+          } else plant();
         });
         // ---- THE DISC. One throttled distance test per chunk, not per
         // tree: 90-odd numbers a few times a second against ~45k instances
