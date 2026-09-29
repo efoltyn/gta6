@@ -952,9 +952,35 @@
       bucketed = items.length;
       touched.forEach(function (l) { if (l.length > 1) l.sort(function (a, b) { return a.pri - b.pri; }); });
     }
+    /* THE BUCKETS ARE MADE BY THE FIRST QUESTION THAT LANDS IN THIS CITY.
+       A city nobody stands in (or queries) never builds them: they were
+       ~20 MB of heap for every metro on the continent at boot. Built in one
+       pass (items in order, each list sorted stably by priority), which is
+       the same order the old incremental passes produced. */
+    function growBB() {
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        if (it.minX < BB.minX) BB.minX = it.minX; if (it.maxX > BB.maxX) BB.maxX = it.maxX;
+        if (it.minZ < BB.minZ) BB.minZ = it.minZ; if (it.maxZ > BB.maxZ) BB.maxZ = it.maxZ;
+      }
+    }
+    // the bridge walks' own question, asked while the city is being solved:
+    // the land items near one bridge, in priority order (no buckets needed)
+    function scanProbe(list, x, z) {
+      K = FK.none; RIB = null;
+      for (let i = 0; i < list.length; i++) {
+        const it = list[i];
+        if (x < it.minX || x > it.maxX || z < it.minZ || z > it.maxZ) continue;
+        const y = it.f(x, z);
+        if (y !== undefined) return y;
+      }
+      K = FK.none;
+      return null;
+    }
     function probe(x, z) {
       K = FK.none; RIB = null;
       if (x < BB.minX || x > BB.maxX || z < BB.minZ || z > BB.maxZ) return null;
+      if (bucketed < items.length) rebucket();
       const l = buckets.get(Math.floor(x / CELL) * 65536 + Math.floor(z / CELL));
       if (!l) return null;
       for (let i = 0; i < l.length; i++) {
@@ -966,10 +992,19 @@
       K = FK.none;
       return null;
     }
-    rebucket();
     // bridge walks where no land footway already is
+    const landN = items.length;
     for (const br of S.bridges) {
       const s = br.s;
+      // the land items this bridge's walks could touch, in priority order
+      const reachW = s.h + br.walk + 2;
+      let bx0 = 1e9, bx1 = -1e9, bz0 = 1e9, bz1 = -1e9;
+      for (const a of [br.a0, br.a1 + 0.01]) for (const u of [-reachW, reachW]) {
+        const q = SP(s, a, u); if (q[0] < bx0) bx0 = q[0]; if (q[0] > bx1) bx1 = q[0]; if (q[1] < bz0) bz0 = q[1]; if (q[1] > bz1) bz1 = q[1];
+      }
+      const near = [];
+      for (let i = 0; i < landN; i++) { const it = items[i]; if (it.maxX >= bx0 && it.minX <= bx1 && it.maxZ >= bz0 && it.minZ <= bz1) near.push(it); }
+      near.sort(function (a, b) { return a.pri - b.pri; });
       for (let side = -1; side <= 1; side += 2) {
         let cur = null;
         for (let a = br.a0; a <= br.a1 + 0.01; a += 2) {
@@ -977,7 +1012,7 @@
           const p = SP(s, a, u);
           let ok = true;
           for (const nn of s.nodes) if (!nn.n.skip && Math.abs(a - nn.pos) < nn.hc + RJ + 1) ok = false;
-          if (ok) { probe(p[0], p[1]); if (K !== FK.none) ok = false; }
+          if (ok) { scanProbe(near, p[0], p[1]); if (K !== FK.none) ok = false; }
           if (ok) { if (!cur) cur = [a, a]; cur[1] = a; }
           else if (cur) { if (cur[1] - cur[0] >= 6) br.runs.push({ side: side, a0: cur[0], a1: cur[1] }); cur = null; }
         }
@@ -1003,7 +1038,7 @@
       };
       if (R.axis === "x") item(6, R.a0, R.a1, R.at - RAIL.toe, R.at + RAIL.toe, fn); else item(6, R.at - RAIL.toe, R.at + RAIL.toe, R.a0, R.a1, fn);
     }
-    rebucket();
+    growBB();                       // the buckets wait for the first question inside it
     S.heightAt = function (x, z) { return probe(x, z); };
     S.kindAt = function (x, z) { probe(x, z); return K; };
     S.ribbonAt = function (x, z) { probe(x, z); return RIB; };
@@ -1327,6 +1362,10 @@
       lamps: S.lamps.length, drives: S.drives.length, walls: S.walls.length, platforms: PL.length, colliders: CO.length, decks: S.decks.length,
       skippedNodes: S.nodes.filter(function (n) { return n.skip; }).length,
     };
+    // the solve itself needed the floor (lamps, drives, tile bins); the city
+    // may never be stood in: let the buckets go, the first question in it
+    // makes them again (probe above)
+    buckets = new Map(); bucketed = 0;
     if (CACHE) CACHE.set(P, S);
     return S;
 
