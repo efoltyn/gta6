@@ -73,7 +73,11 @@
     // PORT — south coast, south of the speedway, west of the desert.
     { id: "capeharbor", ax: 430,   az: 175,  cx: 430 + _OC.dx,   cz: 175 + _OC.dz,  hx: 120, hz: 120, road: { x: 470, z: -130 } },
     // CASINO — west plains, west of the military base.
-    { id: "neonreef",   ax: -1080, az: -260, cx: -1080 + _ON.dx, cz: -260 + _ON.dz, hx: 130, hz: 128, road: { x: _NR_PLUG_X, z: -260 + _ON.dz } },
+    // road "network": dock on the nearest highwaynet lane (the Continental
+    // Loop's west leg, 130 m off its west edge). Its old plug was the
+    // airport's west fence, where there is no road; kept only as the
+    // no-network fallback.
+    { id: "neonreef",   ax: -1080, az: -260, cx: -1080 + _ON.dx, cz: -260 + _ON.dz, hx: 130, hz: 128, road: "network", fallbackRoad: { x: _NR_PLUG_X, z: -260 + _ON.dz } },
     // FACTORY — SW plains, south of the casino strip.
     { id: "foundry",    ax: -1080, az: 225,  cx: -1080 + _OF.dx, cz: 225 + _OF.dz,  hx: 135, hz: 130, road: { x: -380, z: 225 + _OF.dz } },
   ];
@@ -163,6 +167,109 @@
     return m;
   }
 
+  /* ---- THE LINK: network plug -> the town's own street ---------------------
+     OWNER: "glitch where roads end abruptly in the gang city game."
+
+     Every mini-city link used to be a flat dark PLANE (no paint, no
+     shoulder) laid from the plug point to `cx +- hx` — the PLACEMENT's half
+     extent, a number that has nothing to do with where the generated town's
+     streets are. The town's grid is cols x (block + road) wide, so the link
+     stopped short of it on every city: 32 m of grass before Goldspire's
+     perimeter street, 28 m before Cape Harbor's, 22 m before Foundry Flats',
+     9 m before Neon Reef's main street. And Neon Reef's far end "plugged" the
+     airport's west fence, where no road has ever been: a causeway that ends
+     square against an airfield.
+
+     Now both ends dock on something real:
+       · the PLUG is the network lane the link meets (its deck edge, record to
+         its centreline) — authored per place, or, for `road: "network"`, the
+         nearest highwaynet leg the town's centreline can reach square-on;
+       · the TOWN END is the outer edge of the town's own perimeter street
+         facing the plug (record to that street's centreline), read from the
+         descriptor buildTown returned.
+     The deck is the shared highway builder's (lane paint, shoulders, junction
+     gaps where it meets the town street), not a bare plane. */
+  const LINK_W = 24, LINK_HALF = 14.4;       // highways.js deck half for a 24 m 3+3 record
+  function resolvePlug(place) {
+    if (place.road !== "network") return place.road ? { x: place.road.x, z: place.road.z, rx: place.road.x, rz: place.road.z } : null;
+    const table = CBZ.highwayNetTable ? CBZ.highwayNetTable() : [];
+    const HALF = CBZ.HIGHWAY_NET_HALF || 15.3;
+    let best = null;
+    for (const route of table) {
+      const pts = route.pts || [], fil = (route.fillet || 60) + HALF;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const A = pts[i], B = pts[i + 1];
+        const vertical = Math.abs(B.x - A.x) < 0.5;
+        const lo = vertical ? Math.min(A.z, B.z) : Math.min(A.x, B.x);
+        const hi = vertical ? Math.max(A.z, B.z) : Math.max(A.x, B.x);
+        const along = vertical ? place.cz : place.cx;          // where our centreline meets it
+        // square-on, clear of the fillet arcs at a leg's corners
+        if (along < lo + (i > 0 ? fil : 0) || along > hi - (i < pts.length - 2 ? fil : 0)) continue;
+        const line = vertical ? A.x : A.z, c = vertical ? place.cx : place.cz;
+        const edge = line + (c > line ? HALF : -HALF);           // deck edge facing the town
+        const d = Math.abs(edge - c);
+        if (!best || d < best.d) {
+          best = vertical ? { d: d, x: edge, z: place.cz, rx: line, rz: place.cz }
+                          : { d: d, x: place.cx, z: edge, rx: place.cx, rz: line };
+        }
+      }
+    }
+    return best || (place.fallbackRoad ? { x: place.fallbackRoad.x, z: place.fallbackRoad.z, rx: place.fallbackRoad.x, rz: place.fallbackRoad.z } : null);
+  }
+  function buildLink(city, root, place, tpl, town, plug) {
+    const cx = place.cx, cz = place.cz;
+    const horiz = Math.abs(plug.x - cx) >= Math.abs(plug.z - cz);
+    const sgn = horiz ? Math.sign(plug.x - cx) : Math.sign(plug.z - cz);   // plug side
+    // the town's perimeter street facing the plug, spanning the link's width
+    let dock = null, dockC = null;
+    for (const r of (town.roads || [])) {
+      if (!!r.vertical !== horiz) continue;                   // must cross our axis
+      const lat = horiz ? cz : cx;
+      const span0 = (horiz ? r.z : r.x) - r.len / 2, span1 = (horiz ? r.z : r.x) + r.len / 2;
+      if (lat - LINK_HALF < span0 - 0.5 || lat + LINK_HALF > span1 + 0.5) continue;
+      const c = horiz ? r.x : r.z;
+      if (dockC == null || (c - dockC) * sgn > 0) { dockC = c; dock = r; }
+    }
+    const R = town.rect || { minX: cx - place.hx, maxX: cx + place.hx, minZ: cz - place.hz, maxZ: cz + place.hz };
+    const townEdge = dock ? dockC + sgn * (dock.w || 12) / 2
+      : (horiz ? (sgn > 0 ? R.maxX : R.minX) : (sgn > 0 ? R.maxZ : R.minZ));
+    const recTown = dock ? dockC : townEdge;
+    const a = horiz ? plug.x : plug.z;                         // deck: plug edge -> street edge
+    if ((a - townEdge) * sgn <= 1) return;                     // already touching
+    const path = horiz ? [{ x: a, z: cz }, { x: townEdge, z: cz }] : [{ x: cx, z: a }, { x: cx, z: townEdge }];
+    if (CBZ.buildHighway) {
+      CBZ.buildHighway(root, {
+        path: path, width: LINK_W, lanesPerDir: 3, median: true, medianW: 1.2, laneW: 3.6,
+        theme: "asphalt", registerRoads: false, owner: place.id,
+      });
+    } else {
+      addPad(root, (path[0].x + path[1].x) / 2, (path[0].z + path[1].z) / 2,
+        horiz ? Math.abs(a - townEdge) : LINK_W, horiz ? LINK_W : Math.abs(a - townEdge),
+        (tpl.palette && tpl.palette.road != null ? tpl.palette.road : 0x3c3f46), 0.04, 1);
+    }
+    const lo = Math.min(a, townEdge), hi = Math.max(a, townEdge);
+    CBZ.registerCityRegion(city, {
+      name: tpl.name + " Causeway", subtitle: tpl.subtitle || "Mini-City", biome: place.id, kind: "rect",
+      minX: horiz ? lo : cx - LINK_W / 2, maxX: horiz ? hi : cx + LINK_W / 2,
+      minZ: horiz ? cz - LINK_W / 2 : lo, maxZ: horiz ? cz + LINK_W / 2 : hi, pad: 1,
+    });
+    if (city.roads) {
+      // the RECORD runs centreline to centreline (network lane -> town
+      // street), so both ends are derived junctions traffic can turn at
+      const r0 = horiz ? plug.rx : plug.rz;
+      const rl = Math.min(r0, recTown), rh = Math.max(r0, recTown);
+      const link = horiz
+        ? { x: (rl + rh) / 2, z: cz, vertical: false, len: rh - rl }
+        : { x: cx, z: (rl + rh) / 2, vertical: true, len: rh - rl };
+      Object.assign(link, { district: "highway", w: LINK_W, lanesPerDir: 3, laneW: 3.6, median: true, medianW: 1.2 });
+      // THE CLEARANCE LAW (city/roadrules.js): both ends are legitimate
+      // destinations, but nothing says the line between them is empty; the
+      // link docks at any place it would otherwise have driven through.
+      if (CBZ.roadClamp) CBZ.roadClamp(link, { owner: place.id });
+      city.roads.push(link);
+    }
+  }
+
   // ---- build ONE mini-city from a placement record + its template -----------
   function buildMiniCity(city, place) {
     const tpl = CBZ.CITY_TEMPLATES && CBZ.CITY_TEMPLATES[place.id];
@@ -203,57 +310,15 @@
     }));
     if (!town) return;
 
-    // (e) REGISTER the walkable region + a causeway toward the nearest road, so
-    //     the placement reads as a real landmass and you can drive there. The
+    // (e) REGISTER the walkable region + a causeway to the network, so the
+    //     placement reads as a real landmass and you can drive there. The
     //     biome string = the template id so crowd/regionlife flavour it.
     CBZ.registerCityRegion(city, {
       name: tpl.name, subtitle: tpl.subtitle || "Mini-City", biome: place.id, kind: "rect",
       minX: rect.minX, maxX: rect.maxX, minZ: rect.minZ, maxZ: rect.maxZ, pad: 8,
     });
-    // causeway: a thin walkable+drivable rect from the city edge toward `road`.
-    // Built along whichever axis the link runs (X or Z) so it stays a corridor.
-    if (place.road) {
-      const rx = place.road.x, rz = place.road.z;
-      const horiz = Math.abs(rx - cx) >= Math.abs(rz - cz);
-      const HW = 12;                                   // half-width ~ a 24m deck
-      let cMinX, cMaxX, cMinZ, cMaxZ, midX, midZ, vertical, len;
-      if (horiz) {
-        const x0 = Math.min(rx, cx + (rx > cx ? hx : -hx));
-        const x1 = Math.max(rx, cx + (rx > cx ? hx : -hx));
-        cMinX = Math.min(x0, x1); cMaxX = Math.max(x0, x1);
-        cMinZ = cz - HW; cMaxZ = cz + HW; midZ = cz; midX = (cMinX + cMaxX) / 2;
-        vertical = false; len = cMaxX - cMinX;
-      } else {
-        const z0 = Math.min(rz, cz + (rz > cz ? hz : -hz));
-        const z1 = Math.max(rz, cz + (rz > cz ? hz : -hz));
-        cMinZ = Math.min(z0, z1); cMaxZ = Math.max(z0, z1);
-        cMinX = cx - HW; cMaxX = cx + HW; midX = cx; midZ = (cMinZ + cMaxZ) / 2;
-        vertical = true; len = cMaxZ - cMinZ;
-      }
-      // deck plane + region + a traffic road segment down the corridor.
-      // The dark deck lies 1 cm over the town's ground pad (0.03) and 2.2 cm
-      // over the mini-city pad (0.018) along its first metres: pulled one step
-      // forward so it owns them. (Its far end runs under the highway it plugs
-      // into, 4.5 cm lower, which the highway still wins.)
-      addPad(root, midX, midZ, vertical ? HW * 2 : (cMaxX - cMinX), vertical ? (cMaxZ - cMinZ) : HW * 2,
-        (tpl.palette && tpl.palette.road != null ? tpl.palette.road : 0x3c3f46), 0.04, 1);
-      CBZ.registerCityRegion(city, {
-        name: tpl.name + " Causeway", subtitle: tpl.subtitle || "Mini-City", biome: place.id, kind: "rect",
-        minX: cMinX, maxX: cMaxX, minZ: cMinZ, maxZ: cMaxZ, pad: 1,
-      });
-      if (city.roads) {
-        const link = { x: midX, z: midZ, vertical: vertical, len: len, district: "highway", w: 24, lanesPerDir: 3, laneW: 3.6, median: true, medianW: 1.2 };
-        // THE CLEARANCE LAW (city/roadrules.js): this causeway runs from the
-        // mini-city's own edge out to an existing road, so both its ends are
-        // legitimate destinations — but nothing says the straight line between
-        // them is empty, and the ring placer above only checked the CITY rect,
-        // never the corridor. One line and the link docks at any place it
-        // would otherwise have driven through. Degrade-safe.
-        if (CBZ.roadClamp) CBZ.roadClamp(link, { owner: place.id });
-        city.roads.push(link);
-      }
-    }
-
+    const plug = resolvePlug(place);
+    if (plug) buildLink(city, root, place, tpl, town, plug);
     // (f) WORK-ANCHORS — the central shops are jobs people commute to (the SAME
     //     schedule/goal brain the mainland uses). Anchor the 1-2 most-central
     //     shop lots so the city actually staffs up. (No new geometry.)
