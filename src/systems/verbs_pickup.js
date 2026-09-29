@@ -1059,7 +1059,7 @@
     vm.position.set(0.12, -0.30, -0.66);
     LENS.hR = H.makeHand(1, "relaxed", skin); LENS.hL = H.makeHand(-1, "relaxed", skin);
     LENS.hR.scale.setScalar(1.9); LENS.hL.scale.setScalar(1.9);
-    LENS.aR = H.makeArm({ fore: fore, upper: upper }); LENS.aL = H.makeArm({ fore: fore, upper: upper });
+    LENS.aR = H.makeArm({ fore: fore, upper: upper }, 1); LENS.aL = H.makeArm({ fore: fore, upper: upper }, -1);
     vm.add(LENS.hR, LENS.hL, LENS.aR, LENS.aL);
     vm.traverse(function (o) {
       o.renderOrder = 1000; o.frustumCulled = false;

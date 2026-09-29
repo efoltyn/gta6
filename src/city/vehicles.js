@@ -1339,13 +1339,6 @@
     seat.armed = carHash(c.occ.hx, c.occ.hz, 660 + seat.row * 5 + (seat.side > 0 ? 1 : 0)) < p;
     return seat.armed;
   }
-  // where a seat SITS, in the car group's local frame — the one cabin query,
-  // so a blob, a promoted rig and a door-side step-out can never disagree.
-  function occSeatPose(c, seat) {
-    if (!c._occFrame) return null;
-    const S = SEATS() && SEATS().seat(c, seat.slot);
-    return S ? { x: S.x, y: S.cushionY, z: S.z } : null;
-  }
 
   function addOccupants(c) {
     if (CBZ.CONFIG && CBZ.CONFIG.VEHICLE_REAL_GLASS === false) return;
@@ -1415,16 +1408,54 @@
   const OCC_RIG_CARS = 3;
   let occRigCars = 0, occStat = { promoted: 0, claimed: 0, spawned: 0, jacks: 0, hostages: 0,
     react: { fight: 0, flee: 0, freeze: 0, beg: 0 } };
-  function occAnchorFor(c, seat) {
-    const p = occSeatPose(c, seat); if (!p) return null;
-    // A REAR passenger sits turned a few degrees into the cabin and a shotgun
-    // rider leans toward the window — the same anchor grammar gangs.js's
-    // DB_SEATS uses, which npclife re-asserts every frame.
+  /* WHERE A REAL BODY SITS, for ANY car seat — THE one placement. Traffic
+     occupants (below), a drive-by crew (gangs.js), a motorcade detail, a cab
+     driver and his fare (giglife.js), a gig rider (gigs.js) and a companion
+     (boarding.js) all seat through CBZ.carSeatPlacement, because every one
+     of them used to type its own and every one was wrong the same way.
+
+     OWNER: "NPC driver cars — you see them OUTSIDE the car, slightly behind
+     it." The old anchor was the bare cushion point, a 0.12 rad back pitch,
+     no seat geometry and no scale: character.js's legacy chair pose keeps
+     the hips a fixed height over the rig ROOT, so a full-size stylised adult
+     rooted on the cushion sat hips-on-the-belt-line with his crown ~0.4 m up
+     through the roof, leaning back through the pillar.
+
+     Now it is exactly how the player sits his own seat (seatDriver) and how
+     the door beats (boarding.js carSpec) land a body: rooted on the cabin
+     FLOOR, in the car VISUAL's frame (so the body rides the suspension with
+     the cabin), the cushion declared in the scaled group's units, and the
+     scale from CBZ.carSeatFit — the ONE seated-fit solve — evaluated for the
+     body actually claimed (npclife.js calls `fit(ch)` at attach, re-asserts
+     the scale every sync and hands the body back its own size on detach). */
+  function seatFrame(c) {
+    const grp = c && c.group;
+    return grp ? ((grp.userData && grp.userData.carVisual) || grp) : null;
+  }
+  function seatPlacement(c, S) {
+    const m = SEATS() && SEATS().of(c);
+    const ci = m && m.ci;
+    const parent = seatFrame(c);
+    if (!S || !ci || !parent) return null;
+    const id = S.id;
     return {
-      x: p.x, y: p.y, z: p.z,
-      pitch: 0.12, yaw: seat.row ? -seat.side * 0.16 : (seat.slot === "shotgun" ? -0.10 : 0),
-      roll: 0, pose: "sit", state: "sit",
+      parent: parent,
+      anchor: {
+        x: S.x, y: ci.floorY, z: S.z,
+        // square to the car: the door beats (boarding.js carSpec) land every
+        // body facing the seat's own heading, so the held seat must too
+        pitch: 0, roll: 0, yaw: 0,
+        pose: "sit", state: "sit",
+        cushionH: Math.max(0.05, S.cushionY - ci.floorY), floorBelow: 0,
+        seatKind: S.isDriver ? "car" : "carseat",
+        fit: function (ch) { const F = CBZ.carSeatFit ? CBZ.carSeatFit(ch, c, id) : null; return F ? F.fit : 0.6; },
+        carSeat: id,
+      },
     };
+  }
+  function occPlacementFor(c, seat) {
+    const S = SEATS() && SEATS().seat(c, seat.slot);
+    return S ? seatPlacement(c, S) : null;
   }
   function occDraftOk(p, c) {
     if (!CBZ.npcLife || !CBZ.npcLife.draftableCity) return false;
@@ -1445,9 +1476,9 @@
   // with the same reactions as any other occupied car.
   function occSeatPed(c, seat, ped, opts) {
     if (!c || !seat || !ped) return false;
-    const anchor = occAnchorFor(c, seat);
-    if (!anchor || !CBZ.npcLife || !CBZ.npcLife.attach) return false;
-    if (!CBZ.npcLife.attach(ped, c.group, anchor)) return false;
+    const place = occPlacementFor(c, seat);
+    if (!place || !CBZ.npcLife || !CBZ.npcLife.attach) return false;
+    if (!CBZ.npcLife.attach(ped, place.parent, place.anchor)) return false;
     seat.ped = ped; seat.spawned = !!(opts && opts.spawned);
     ped.inCar = c; ped.controlled = true;
     ped._occCar = c; ped._occSeat = seat;
@@ -1458,8 +1489,7 @@
   }
   function occPromoteSeat(c, seat) {
     if (seat.ped || !CBZ.npcLife) return false;
-    const anchor = occAnchorFor(c, seat); if (!anchor) return false;
-    const place = { parent: c.group, anchor: anchor };
+    const place = occPlacementFor(c, seat); if (!place) return false;
     let ped = null, spawned = false;
     if (CBZ.npcLife.claimCity) {
       try { ped = CBZ.npcLife.claimCity("carOccupant", place, function (p) { return occDraftOk(p, c); }); } catch (e) { ped = null; }
@@ -1473,7 +1503,7 @@
       if (seat.slot === "driver" && !c.npcDriver) { c.npcDriver = ped; c._occOwnsDriver = true; }
       occStat.claimed++;
     } else if (CBZ.npcLife.spawnCity) {
-      try { ped = CBZ.npcLife.spawnCity("carOccupant", { x: c.pos.x, z: c.pos.z, rng: rng, parent: c.group, anchor: anchor }); } catch (e) { ped = null; }
+      try { ped = CBZ.npcLife.spawnCity("carOccupant", { x: c.pos.x, z: c.pos.z, rng: rng, parent: place.parent, anchor: place.anchor }); } catch (e) { ped = null; }
       if (!ped) return false;
       spawned = true;
       seat.ped = ped; ped.inCar = c; ped.controlled = true;
@@ -3512,10 +3542,11 @@
     if (st.blob && st.blob.parent) { st.blob.parent.remove(st.blob); st.blob = null; }
     return occSeatPed(c, st, ped, opts);
   };
-  CBZ.carOccupancySeatAnchor = function (c, slotName) {
-    if (!c || !c._occFrame) return null;
-    const S = seatFor(c, slotName); if (!S) return null;
-    return occAnchorFor(c, { slot: S.id, side: S.side, row: S.row });
+  // { parent, anchor } for a named slot of THIS body (nearest real seat if
+  // the body has no such slot) — null for a car with no cabin (bike, boat)
+  CBZ.carSeatPlacement = function (c, slotName) {
+    if (!c) return null;
+    return seatPlacement(c, seatFor(c, slotName || "driver"));
   };
   // a named slot on THIS body: the seat itself, else the nearest thing to it
   // (a "rearR" asked of a two-seater is the passenger seat)
@@ -4778,13 +4809,293 @@
   // chassis step and the engine voice alike. modshop.js's Stage N still
   // reshapes a copy of the base table into car._perfGearTorque.
   CBZ.cityGearTorqueBase = CBZ.carDyn ? CBZ.carDyn.GEAR_TORQUE : null;
+  /* ==VEHCOL:BEGIN== ----------------------------------------------------
+     THE CAR IS A BOX. Until now the wall resolver treated every vehicle as a
+     CIRCLE ~1.2 m across plus a smaller circle poked out at the nose. A 16 m
+     semi was a 1.6 m disc with a nub: its flanks and tail went straight
+     through walls, and on a diagonal the nose disc caught corners the body
+     never touched (the phantom stop). The anti-tunnel sweep only ran for
+     steps under 12 m, at most 8 samples, resolving the same discs.
+
+     Now the body is its own oriented rectangle (vehicleDims: the SAME
+     width/length every other system reads — no second set of numbers)
+     tested against each collider box (AABB, or the oriented {cx,cz,hw,hd,yaw}
+     body physics.js stores for diagonal chords) by the separating-axis
+     theorem on the four face normals. Deepest contact is resolved first,
+     up to four passes. Every contact reports a normal and a contact POINT,
+     so crash damage lands where the metal met the wall (front / flank /
+     rear) and an off-centre clip yaws the car.
+
+     PURE: nothing in this block touches THREE, CBZ or the scene, so
+     tools/test-vehicle-collide.mjs loads exactly this text in a node vm. */
+  const VC = (function () {
+    // A box: centre, right axis u (local +x), forward axis f (local +z),
+    // half-width hw along u, half-length hl along f. For a car u/f come from
+    // heading exactly as THREE's rotation.y lays them: right (cos h, -sin h),
+    // forward (sin h, cos h) — the same frame physics.js's OBB colliders use.
+    function box() { return { cx: 0, cz: 0, ux: 1, uz: 0, fx: 0, fz: 1, hw: 1, hl: 1 }; }
+    function setCarBox(B, x, z, heading, hw, hl) {
+      const s = Math.sin(heading || 0), c = Math.cos(heading || 0);
+      B.cx = x; B.cz = z; B.ux = c; B.uz = -s; B.fx = s; B.fz = c; B.hw = hw; B.hl = hl;
+      return B;
+    }
+    function setColliderBox(B, col) {
+      if (col.yaw) {
+        const s = Math.sin(col.yaw), c = Math.cos(col.yaw);
+        B.cx = col.cx; B.cz = col.cz; B.ux = c; B.uz = -s; B.fx = s; B.fz = c;
+        B.hw = col.hw; B.hl = col.hd;
+      } else {
+        B.cx = (col.minX + col.maxX) * 0.5; B.cz = (col.minZ + col.maxZ) * 0.5;
+        B.ux = 1; B.uz = 0; B.fx = 0; B.fz = 1;
+        B.hw = (col.maxX - col.minX) * 0.5; B.hl = (col.maxZ - col.minZ) * 0.5;
+      }
+      return B;
+    }
+    function radiusOn(B, ax, az) {
+      const a = B.ux * ax + B.uz * az, b = B.fx * ax + B.fz * az;
+      return B.hw * (a < 0 ? -a : a) + B.hl * (b < 0 ? -b : b);
+    }
+    // is the collider inside the body's vertical band? (physics.js's gate,
+    // verbatim: a box with y0 is skipped when the body is wholly below or
+    // wholly above it; undefined feet/head = every collider full-height)
+    function inBand(col, feet, head) {
+      return col.y0 == null || !(head <= col.y0 || feet >= col.y1);
+    }
+    /* SAT on the four face normals. Returns penetration depth (> 0 overlap,
+       <= 0 separated) and fills out.{nx,nz} = the direction to move A out,
+       out.own = 0 when the axis is A's face, 1 when it is B's.
+       REF SIDE: when useRef is set the push side on each axis is chosen by
+       where A's centre WAS (refX,refZ — last frame's resolved position), not
+       where it is now. A body that got half-way through a thin wall is sent
+       BACK the way it came, never popped out the far side. B's own faces are
+       tried first and A's must beat them by 1 cm, so a car flush on a wall
+       reads the wall's normal, not its own flank's. */
+    function sat(A, B, useRef, refX, refZ, out) {
+      let best = Infinity, bnx = 0, bnz = 0, own = 1;
+      const dx = A.cx - B.cx, dz = A.cz - B.cz;
+      const rx = useRef ? refX - B.cx : dx, rz = useRef ? refZ - B.cz : dz;
+      for (let k = 0; k < 4; k++) {
+        const ax = k === 0 ? B.ux : k === 1 ? B.fx : k === 2 ? A.ux : A.fx;
+        const az = k === 0 ? B.uz : k === 1 ? B.fz : k === 2 ? A.uz : A.fz;
+        const d = dx * ax + dz * az;
+        const sr = rx * ax + rz * az;
+        const s = sr > 0 ? 1 : (sr < 0 ? -1 : (d >= 0 ? 1 : -1));
+        const pen = radiusOn(A, ax, az) + radiusOn(B, ax, az) - s * d;
+        if (pen <= 0) { out.pen = pen; return pen; }
+        const kOwn = k < 2 ? 1 : 0;
+        if (kOwn === 1 ? pen < best : pen < best - 0.01) { best = pen; bnx = ax * s; bnz = az * s; own = kOwn; }
+      }
+      out.pen = best; out.nx = bnx; out.nz = bnz; out.own = own;
+      return best;
+    }
+    /* Contact point for a SAT result, AFTER A has been pushed clear (so the
+       two faces coincide). The incident box is the one whose vertex is
+       deepest along the contact normal; if two of its vertices tie (a flank
+       flush on a face) the edge is clipped to the reference face's extent
+       and the midpoint taken — a truck's flank on a short wall stub reports
+       the stub, not the middle of the truck. */
+    function contact(A, B, nx, nz, own, out) {
+      // own 1: B's face is the reference, A's corners are incident (deepest along -n)
+      // own 0: A's face is the reference, B's corners are incident (deepest along +n)
+      const I = own === 1 ? A : B, R = own === 1 ? B : A, sg = own === 1 ? -1 : 1;
+      const tx = -nz, tz = nx;
+      let m = -Infinity, m2 = -Infinity, t1 = 0, t2 = 0;
+      for (let i = 0; i < 4; i++) {
+        const su = (i & 1) ? 1 : -1, sf = (i & 2) ? 1 : -1;
+        const vx = I.cx + I.ux * I.hw * su + I.fx * I.hl * sf;
+        const vz = I.cz + I.uz * I.hw * su + I.fz * I.hl * sf;
+        const depth = sg * (vx * nx + vz * nz), t = vx * tx + vz * tz;
+        if (depth > m) { m2 = m; t2 = t1; m = depth; t1 = t; }
+        else if (depth > m2) { m2 = depth; t2 = t; }
+      }
+      let tc = t1;
+      if (m - m2 < 0.05) {
+        const rc = R.cx * tx + R.cz * tz, rr = radiusOn(R, tx, tz);
+        let lo = t1 < t2 ? t1 : t2, hi = t1 < t2 ? t2 : t1;
+        if (lo < rc - rr) lo = rc - rr;
+        if (hi > rc + rr) hi = rc + rr;
+        tc = lo <= hi ? (lo + hi) * 0.5 : (t1 + t2) * 0.5;
+      }
+      // the reference face's plane along n
+      const face = own === 1 ? (B.cx * nx + B.cz * nz) + radiusOn(B, nx, nz)
+                             : (A.cx * nx + A.cz * nz) - radiusOn(A, nx, nz);
+      out.px = tx * tc + nx * face; out.pz = tz * tc + nz * face;
+      return out;
+    }
+    const _B = box(), _s = { pen: 0, nx: 0, nz: 0, own: 1 }, _bs = { pen: 0, nx: 0, nz: 0, own: 1 };
+    const SLOP = 0.004;                     // leave a hair of air so a flush car is not "in" next frame
+    /* Deepest-first world resolve. cols[0..n) are pre-filtered (band, self,
+       null boxes). A is moved in place. hit (optional) gets the FIRST (i.e.
+       deepest) contact: {count, nx, nz, px, pz, pen, col}. Returns the total
+       push length. Up to `passes` (<= 4) rounds: each round finds the single
+       deepest overlap among all candidates and resolves only that one, so an
+       inside corner settles instead of two walls fighting over one push. */
+    function resolve(A, cols, n, useRef, refX, refZ, hit, passes) {
+      const ox = A.cx, oz = A.cz;
+      if (hit) hit.count = 0;
+      const P = passes || 4;
+      for (let pass = 0; pass < P; pass++) {
+        const aex = radiusOn(A, 1, 0), aez = radiusOn(A, 0, 1);
+        let bestPen = 0, bestCol = null;
+        for (let i = 0; i < n; i++) {
+          const c = cols[i];
+          // cheap reject on the conservative AABB every collider carries
+          if (c.maxX < A.cx - aex || c.minX > A.cx + aex || c.maxZ < A.cz - aez || c.minZ > A.cz + aez) continue;
+          setColliderBox(_B, c);
+          const pen = sat(A, _B, useRef, refX, refZ, _s);
+          if (pen > bestPen) { bestPen = pen; bestCol = c; _bs.nx = _s.nx; _bs.nz = _s.nz; _bs.own = _s.own; }
+        }
+        if (!bestCol) break;
+        const push = bestPen + SLOP;
+        A.cx += _bs.nx * push; A.cz += _bs.nz * push;
+        if (hit) {
+          if (hit.count === 0) {
+            setColliderBox(_B, bestCol);
+            contact(A, _B, _bs.nx, _bs.nz, _bs.own, hit);
+            hit.nx = _bs.nx; hit.nz = _bs.nz; hit.pen = bestPen; hit.col = bestCol;
+          }
+          hit.count++;
+        }
+      }
+      const mx = A.cx - ox, mz = A.cz - oz;
+      return Math.sqrt(mx * mx + mz * mz);
+    }
+    function overlapsAny(A, cols, n, skipStamp) {
+      const aex = radiusOn(A, 1, 0), aez = radiusOn(A, 0, 1);
+      for (let i = 0; i < n; i++) {
+        const c = cols[i];
+        if (skipStamp && c._vcSkip === skipStamp) continue;
+        if (c.maxX < A.cx - aex || c.minX > A.cx + aex || c.maxZ < A.cz - aez || c.minZ > A.cz + aez) continue;
+        setColliderBox(_B, c);
+        if (sat(A, _B, false, 0, 0, _s) > 1e-3) return true;
+      }
+      return false;
+    }
+    /* CONTINUOUS: walk A (fixed orientation) from (x0,z0) to (x1,z1) and
+       return the fraction t of the FIRST touch (binary-refined), or -1 if the
+       path is clear. Sample spacing is 1.6x the box's own radius along the
+       motion, so no collider of any thickness fits between two samples —
+       a car going sideways samples tighter than one going forward. Up to 16
+       samples, no upper distance cap: 60 m/s at 10 fps is 6 m a step and is
+       still swept. Colliders the box ALREADY overlaps at the start are left
+       to the endpoint resolve (sweeping them would pin the car at t=0). */
+    let _stamp = 0;
+    function sweep(A, x0, z0, x1, z1, cols, n) {
+      const dx = x1 - x0, dz = z1 - z0, dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist < 1e-6 || !n) return -1;
+      const mx = dx / dist, mz = dz / dist;
+      const spacing = Math.max(0.2, 1.6 * radiusOn(A, mx, mz));
+      const steps = Math.min(16, Math.ceil(dist / spacing));
+      const sx = A.cx, sz = A.cz;
+      const stamp = ++_stamp;
+      A.cx = x0; A.cz = z0;
+      {
+        const aex = radiusOn(A, 1, 0), aez = radiusOn(A, 0, 1);
+        for (let i = 0; i < n; i++) {
+          const c = cols[i];
+          if (c.maxX < x0 - aex || c.minX > x0 + aex || c.maxZ < z0 - aez || c.minZ > z0 + aez) continue;
+          setColliderBox(_B, c);
+          if (sat(A, _B, false, 0, 0, _s) > 1e-3) c._vcSkip = stamp;
+        }
+      }
+      let tHit = -1, tLo = 0;
+      for (let i = 1; i <= steps; i++) {
+        const t = i / steps;
+        A.cx = x0 + dx * t; A.cz = z0 + dz * t;
+        if (overlapsAny(A, cols, n, stamp)) { tHit = t; break; }
+        tLo = t;
+      }
+      if (tHit >= 0) {
+        for (let k = 0; k < 7; k++) {
+          const tm = (tLo + tHit) * 0.5;
+          A.cx = x0 + dx * tm; A.cz = z0 + dz * tm;
+          if (overlapsAny(A, cols, n, stamp)) tHit = tm; else tLo = tm;
+        }
+      }
+      A.cx = sx; A.cz = sz;
+      return tHit;
+    }
+    /* WALL IMPULSE for a rigid box with unit mass: v (m/s), w (rad/s, the
+       heading rate: +w swings the nose toward +x at heading 0), contact lever
+       r = contact - centre, normal n OUT of the wall. Restitution e on the
+       normal speed, Coulomb friction mu on the tangential. The yaw comes out
+       of the same impulse (lever x normal / inertia), so a square hit on the
+       bumper centre does not spin and a corner clip does. Writes out.{vx,vz,
+       w,vn} (vn = speed INTO the wall before the hit, 0 if separating). */
+    function impulse(vx, vz, w, rx, rz, nx, nz, hw, hl, e, mu, out) {
+      const I = (4 * hw * hw + 4 * hl * hl) / 12;       // box inertia per unit mass
+      // point velocity: v + w x r, where w x r = w * (rz, -rx) in this frame
+      const pvx = vx + w * rz, pvz = vz - w * rx;
+      const vn = pvx * nx + pvz * nz;
+      out.vx = vx; out.vz = vz; out.w = w; out.vn = 0;
+      if (vn >= 0) return out;
+      const kn = nx * rz - nz * rx;
+      const jn = -(1 + e) * vn / (1 + kn * kn / I);
+      let tvx = pvx - nx * vn, tvz = pvz - nz * vn;
+      const vt = Math.sqrt(tvx * tvx + tvz * tvz);
+      let jt = 0, tx = 0, tz = 0;
+      if (vt > 1e-4) {
+        tx = tvx / vt; tz = tvz / vt;
+        const kt = tx * rz - tz * rx;
+        jt = -Math.min(mu * jn, vt / (1 + kt * kt / I));
+      }
+      const Jx = nx * jn + tx * jt, Jz = nz * jn + tz * jt;
+      out.vx = vx + Jx; out.vz = vz + Jz;
+      out.w = w + (Jx * rz - Jz * rx) / I;
+      out.vn = -vn;
+      return out;
+    }
+    /* ONE STEP of the world contact, the sequence collideVehicle runs:
+       A sits at this frame's integrated position; (ax,az) is last frame's
+       resolved position when `anchored`. Every caller integrates FIRST and
+       only then asks, so a fast frame can carry the body clean past a
+       bollard, a signal pole or a guardrail with both ends outside it — so
+       sweep the box from the anchor (any step over a quarter of the half-
+       width), stop it at the first touch, resolve THAT contact, spend the
+       rest of the step sliding along the face (the into-wall part of the
+       remainder is dropped, the along-wall part kept), then resolve the
+       endpoint deepest-first with the push side taken from the anchor.
+       hit gets the FIRST contact of the step (the one the crash is about). */
+    function move(A, anchored, ax, az, cols, n, hit, sweepOn) {
+      if (hit) hit.count = 0;
+      if (anchored && sweepOn) {
+        const dx = A.cx - ax, dz = A.cz - az, dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist > A.hw * 0.25) {
+          const ex = A.cx, ez = A.cz;
+          const t = sweep(A, ax, az, ex, ez, cols, n);
+          if (t >= 0) {
+            A.cx = ax + dx * t; A.cz = az + dz * t;
+            resolve(A, cols, n, true, ax, az, hit, 4);
+            if (hit && hit.count) {
+              let rx = dx * (1 - t), rz = dz * (1 - t);
+              const rn = rx * hit.nx + rz * hit.nz;
+              if (rn < 0) { rx -= hit.nx * rn; rz -= hit.nz * rn; }
+              A.cx += rx; A.cz += rz;
+            }
+          }
+        }
+      }
+      if (hit && hit.count) {
+        // the sweep owns the step's first contact; the endpoint only adds passes
+        const c0 = hit.count, nx = hit.nx, nz = hit.nz, px = hit.px, pz = hit.pz, pen = hit.pen, col = hit.col;
+        resolve(A, cols, n, anchored, ax, az, hit, 4);
+        const extra = hit.count;
+        hit.nx = nx; hit.nz = nz; hit.px = px; hit.pz = pz; hit.pen = pen; hit.col = col;
+        hit.count = c0 + extra;
+      } else {
+        resolve(A, cols, n, anchored, ax, az, hit, 4);
+      }
+      return A;
+    }
+    return { box, setCarBox, setColliderBox, radiusOn, inBand, sat, contact, resolve, sweep, overlapsAny, impulse, move };
+  })();
+  CBZ._vehCol = VC;
+  /* ==VEHCOL:END== */
   function wallRadius(car) {
     const d = vehicleDims(car);
     return Math.max(1.05, Math.min(1.6, d.width * 0.58));
   }
-  const _sweepPt = { x: 0, y: 0, z: 0 };   // scratch — zero per-call allocation
-  const _probePt = { x: 0, y: 0, z: 0 };   // ditto, the nose probe
-  const _agroundN = { x: 0, z: 0 };        // ditto, for the aground shore normal
+  const _agroundN = { x: 0, z: 0 };        // scratch for the aground shore normal
 
   /* ---- THE HEIGHT GATE A CAR NEVER HAD ---------------------------------
      THE OWNER'S BUG, AND IT IS ONLY A BUG WHEN YOU DRIVE. Every call below
@@ -4824,8 +5135,27 @@
     _span.head = base + (isFinite(h) && h > 0.8 ? h : 1.9) + 0.15;
     return _span;
   }
+  /* The per-car contact record collideVehicle leaves behind for whoever
+     decides what the hit MEANS (the player's crash ladder, the wreck path,
+     the lane AI). One object per car, made once, rewritten in place:
+       count  0 = no wall this call; else how many resolve passes touched
+       nx,nz  the wall normal, OUT of the wall (the direction the car moved)
+       px,pz  the contact point on the wall face (where the metal met it)
+       pen    depth of the deepest overlap before the push
+       f      the collide frame it was written on (stale = not this frame) */
+  let _vcFrame = 0;
+  CBZ.onUpdate(0.01, function () { _vcFrame++; });
+  const _carBox = VC.box();
+  const _vcQuery = [];                     // broadphase out (reused)
+  const _vcCand = [];                      // filtered candidates (reused)
+  const _vcImp = { vx: 0, vz: 0, w: 0, vn: 0 };
+  function wallHitOf(car) {
+    return car._wallHit || (car._wallHit = { count: 0, nx: 0, nz: 0, px: 0, pz: 0, pen: 0, f: -1, col: null });
+  }
   function collideVehicle(car) {
-    if (!CBZ.collide || !car || !car.pos) return 0;
+    if (!car || !car.pos) return 0;
+    const hit = wallHitOf(car);
+    hit.count = 0; hit.col = null; hit.f = _vcFrame;
     // MARINE: a boat out on open water has no buildings/seawall to bump — skip
     // the road-car wall resolver entirely so it can nose past the harbor's
     // knee-wall collider (height-gated for a JUMPING pedestrian, not a boat
@@ -4833,52 +5163,75 @@
     // hit a building. Still resolves normally over land (a beached/marooned
     // boat, or the moment it noses back toward the quay, behaves like any car).
     if (isMarineCar(car) && overWater(car.pos.x, car.pos.z)) {
-      car._sweepX = car.pos.x; car._sweepZ = car.pos.z;   // keep the sweep anchor fresh over water
+      car._sweepX = car.pos.x; car._sweepZ = car.pos.z; car._sweepF = _vcFrame;   // keep the sweep anchor fresh over water
       return 0;
     }
-    const ox = car.pos.x, oz = car.pos.z, radius = wallRadius(car);
-    const span = wallSpan(car);          // the car's own vertical band (above)
-    // ---- ANTI-TUNNEL SWEEP (VEH_COLLIDE_FIX): every caller integrates
-    // position FIRST and only then depenetrates here, so a frame whose
-    // displacement exceeds the body radius could jump clean over a thin
-    // collider (signal poles, lampposts — 0.5m boxes) with both endpoints
-    // outside it. Walk the segment from the LAST resolved position and stop
-    // the car at the first sample a collider pushes back. Skipped for small
-    // steps (can't tunnel) and huge ones (teleport/spawn/respawn, not motion).
-    if (!CBZ.CONFIG || CBZ.CONFIG.VEH_COLLIDE_FIX !== false) {
-      const px0 = car._sweepX, pz0 = car._sweepZ;
-      if (px0 != null) {
-        const sdx = ox - px0, sdz = oz - pz0;
-        const sdist = Math.hypot(sdx, sdz), step = radius * 0.8;
-        if (sdist > step && sdist < 12) {
-          const n = Math.min(8, Math.ceil(sdist / step));
-          for (let i = 1; i < n; i++) {
-            _sweepPt.x = px0 + sdx * (i / n); _sweepPt.z = pz0 + sdz * (i / n); _sweepPt.y = car.pos.y || 0;
-            const sx = _sweepPt.x, sz = _sweepPt.z;
-            CBZ.collide(_sweepPt, radius, span.feet, span.head);
-            if (_sweepPt.x !== sx || _sweepPt.z !== sz) {
-              car.pos.x = _sweepPt.x; car.pos.z = _sweepPt.z;   // hit mid-frame: stop AT the obstacle
-              break;
-            }
-          }
-        }
-      }
-    }
-    CBZ.collide(car.pos, radius, span.feet, span.head);
+    if (!CBZ.queryCollidersNear) return 0;
+    const ox = car.pos.x, oz = car.pos.z;
     const d = vehicleDims(car);
-    const reach = Math.max(0, d.length * 0.5 - radius * 0.45);
-    if (reach > 0.2) {
-      const sign = (car.v || 0) < -0.1 ? -1 : 1;
-      const fx = Math.sin(car.heading || 0) * sign, fz = Math.cos(car.heading || 0) * sign;
-      const probe = _probePt;              // scratch: this runs for every near car, every frame
-      probe.x = car.pos.x + fx * reach; probe.y = car.pos.y || 0; probe.z = car.pos.z + fz * reach;
-      const px = probe.x, pz = probe.z;
-      CBZ.collide(probe, radius * 0.75, span.feet, span.head);
-      car.pos.x += probe.x - px;
-      car.pos.z += probe.z - pz;
+    const hw = Math.max(0.3, (+d.width || 2) * 0.5), hl = Math.max(hw, (+d.length || 4.4) * 0.5);
+    const span = wallSpan(car);            // the car's own vertical band (above)
+    const A = VC.setCarBox(_carBox, ox, oz, car.heading || 0, hw, hl);
+    /* THE SWEEP ANCHOR is last frame's RESOLVED position — only if it really
+       is last frame's (a lane car far from the camera skips this resolver for
+       minutes; sweeping from where it was then would drag it back across the
+       map) and only if the jump is one a moving car could make in a frame
+       (respawn / teleport / hand-placed spawns are not motion). */
+    let ax = car._sweepX, az = car._sweepZ;
+    let anchored = ax != null && car._sweepF != null && _vcFrame - car._sweepF <= 1;
+    let sdx = 0, sdz = 0, sdist = 0;
+    if (anchored) {
+      sdx = ox - ax; sdz = oz - az; sdist = Math.sqrt(sdx * sdx + sdz * sdz);
+      const spd = Math.max(Math.abs(car.v || 0), Math.hypot(car.vx || 0, car.vz || 0));
+      if (sdist > Math.max(12, 4 + spd * 0.3)) anchored = false;
     }
-    car._sweepX = car.pos.x; car._sweepZ = car.pos.z;   // anchor for next frame's sweep
+    // ---- broadphase: one query covering the whole swept path + the body
+    const bound = Math.sqrt(hw * hw + hl * hl);
+    const qx = anchored ? (ox + ax) * 0.5 : ox, qz = anchored ? (oz + az) * 0.5 : oz;
+    CBZ.queryCollidersNear(qx, qz, bound + (anchored ? sdist * 0.5 : 0) + 0.5, _vcQuery);
+    let n = 0;
+    const self = car.group;
+    for (let i = 0; i < _vcQuery.length; i++) {
+      const c = _vcQuery[i];
+      if (c.minX == null) continue;
+      if (c._rb === car || (self && c.ref === self) || c.ref === car) continue;   // its own parked wall
+      if (!VC.inBand(c, span.feet, span.head)) continue;                        // bridge deck / gantry overhead
+      _vcCand[n++] = c;
+    }
+    // ---- CONTINUOUS (VEH_COLLIDE_FIX) + deepest-first resolve: VC.move.
+    const sweepOn = !CBZ.CONFIG || CBZ.CONFIG.VEH_COLLIDE_FIX !== false;
+    if (n) VC.move(A, anchored, ax, az, _vcCand, n, hit, sweepOn);
+    for (let i = 0; i < n; i++) _vcCand[i] = null;       // don't pin colliders past their life
+    car.pos.x = A.cx; car.pos.z = A.cz;
+    // MOVING WALLS (systems/platforms_moving.js: a boat's gunwales, a gangway)
+    // live outside CBZ.colliders and answer the body-circle contract only;
+    // the old CBZ.collide call carried them, so this one keeps them.
+    if (CBZ.mpCollide) CBZ.mpCollide(car.pos, wallRadius(car), span.feet, span.head);
+    car._sweepX = car.pos.x; car._sweepZ = car.pos.z; car._sweepF = _vcFrame;   // anchor for next frame's sweep
     return Math.hypot(car.pos.x - ox, car.pos.z - oz);
+  }
+  /* WALL SLIDE for anything that is not the player's crash ladder: take the
+     impulse off the contact collideVehicle just reported — only the speed
+     INTO the wall goes (restitution e), the rest glances on minus a little
+     Coulomb friction, and an off-centre contact yaws the body (yawGain
+     scales how much of the rigid-body yaw it takes; 0 = keep the heading).
+     Writes car.vx/vz; returns the scratch {vx,vz,vn,w} (w = the clamped yaw
+     change to add), or null if this frame had no wall. */
+  function wallSlide(car, e, mu, yawGain) {
+    const hit = car._wallHit;
+    if (!hit || !hit.count || hit.f !== _vcFrame) return null;
+    const d = vehicleDims(car);
+    const hw = Math.max(0.3, (+d.width || 2) * 0.5), hl = Math.max(hw, (+d.length || 4.4) * 0.5);
+    const h = car.heading || 0;
+    const vx = car.vx == null ? Math.sin(h) * (car.v || 0) : car.vx;
+    const vz = car.vz == null ? Math.cos(h) * (car.v || 0) : car.vz;
+    VC.impulse(vx, vz, 0, hit.px - car.pos.x, hit.pz - car.pos.z, hit.nx, hit.nz, hw, hl, e, mu, _vcImp);
+    if (_vcImp.vn <= 0) return _vcImp;
+    car.vx = _vcImp.vx; car.vz = _vcImp.vz;
+    let dw = _vcImp.w * (yawGain || 0);
+    if (dw > 2.5) dw = 2.5; else if (dw < -2.5) dw = -2.5;
+    _vcImp.w = dw;
+    return _vcImp;
   }
   CBZ.cityCollideVehicle = collideVehicle;
   // PUBLIC so an ALTERNATIVE vehicle controller (world/water_helm.js takes the
@@ -5127,13 +5480,37 @@
     const moved = car._airborne && car._airY > 0.55 ? 0 : collideVehicle(car);
     if (car._wallCD > 0) car._wallCD -= dt;
     if (car._scrapeAmt > 0) car._scrapeAmt = Math.max(0, car._scrapeAmt - dt * 3);
+    const wh = car._wallHit;
     if (moved > 0.03 && vmag > 1.5) {
-      let nwx = car.pos.x - bx0, nwz = car.pos.z - bz0;          // OUT of the wall
-      const nl = Math.hypot(nwx, nwz) || 1; nwx /= nl; nwz /= nl;
+      /* The OBB resolver reports the wall's own face normal and the point the
+         body met it (a corner, or the clipped middle of a flush flank), so the
+         crash ladder below grades the right speed and the dent, sparks and
+         debris land where the metal touched — a rear-corner clip crumples the
+         rear. Falls back to the push direction if a moving platform did it. */
+      let nwx, nwz, ix, iz;
+      if (wh && wh.count) { nwx = wh.nx; nwz = wh.nz; ix = wh.px; iz = wh.pz; }
+      else {
+        nwx = car.pos.x - bx0; nwz = car.pos.z - bz0;            // OUT of the wall
+        const nl = Math.hypot(nwx, nwz) || 1; nwx /= nl; nwz /= nl;
+        const sup = collisionSupport(car, nwx, nwz);
+        ix = car.pos.x - nwx * sup; iz = car.pos.z - nwz * sup;
+      }
       const vIn = -(car.vx * nwx + car.vz * nwz);                // speed INTO the wall
       const hfx = Math.sin(car.heading), hfz = Math.cos(car.heading);
-      const sup = collisionSupport(car, nwx, nwz);
-      const ix = car.pos.x - nwx * sup, iz = car.pos.z - nwz * sup;   // the contact patch
+      /* OFF-CENTRE HITS TURN THE CAR. The same rigid-box impulse the AI uses,
+         read for its yaw only (the ladder below keeps owning the speed): a
+         rear-quarter clip on a bollard kicks the tail out, a nose-corner clip
+         swings the car along the wall, a square bumper hit does not spin.
+         Fed into the chassis yaw rate so the tyres fight it like any other
+         slide; half the rigid-body value and capped, so it nudges, never flips. */
+      if (wh && wh.count && vIn > 0.5) {
+        const dd = vehicleDims(car);
+        const vhw = Math.max(0.3, (+dd.width || 2) * 0.5), vhl = Math.max(vhw, (+dd.length || 4.4) * 0.5);
+        VC.impulse(car.vx, car.vz, car._yawRate || 0, ix - car.pos.x, iz - car.pos.z, nwx, nwz, vhw, vhl, 0.15, 0.3, _vcImp);
+        let dw = (_vcImp.w - (car._yawRate || 0)) * 0.5;
+        dw = Math.max(-1.6, Math.min(1.6, dw));
+        car._yawRate = (car._yawRate || 0) + dw;
+      }
       if (vIn < 4) {
         // A SCRAPE. Kill the into-wall component, grind the rest down a bit.
         if (vIn > 0) { car.vx += nwx * vIn; car.vz += nwz * vIn; }
@@ -5167,10 +5544,14 @@
         // step clear of the face so next frame is not a second crash
         const sep = Math.min(0.6, 0.05 + vIn * 0.02);
         car.pos.x += nwx * sep; car.pos.z += nwz * sep;
-        // a glancing hit SPINS the car off the wall; a square one just shudders
-        const tMag = Math.hypot(tx, tz), glance = tMag / Math.max(1, tMag + vIn);
-        const tSide = (tx * hfz - tz * hfx) >= 0 ? 1 : -1;
-        car.heading += tSide * glance * Math.min(catastrophic ? 1.2 : 0.7, vIn * 0.035);
+        // a glancing hit SPINS the car off the wall; a square one just shudders.
+        // With a real contact point the yaw impulse above already did this from
+        // the lever arm; the canned snap stays only for platform pushes.
+        if (!(wh && wh.count)) {
+          const tMag = Math.hypot(tx, tz), glance = tMag / Math.max(1, tMag + vIn);
+          const tSide = (tx * hfz - tz * hfx) >= 0 ? 1 : -1;
+          car.heading += tSide * glance * Math.min(catastrophic ? 1.2 : 0.7, vIn * 0.035);
+        }
         // one crash per contact: a car still pinned against the same face next
         // frame is not a second crash unless it hit harder
         const fresh = (car._wallCD || 0) <= 0 || vIn > (car._wallLastIn || 0) * 1.5;
@@ -5453,7 +5834,7 @@
     c.spin = (c.spin || 0) + (Math.random() - 0.5) * spinMag + dir * Math.min(catastrophic ? 4.5 : 2.8, speed * 0.15);
     c.pullover = 0; c.turning = false;     // abandon whatever it was doing
   }
-  function carCrash(a, b, speed, nx, nz) {
+  function carCrash(a, b, speed, nx, nz, cpx, cpz) {
     const av = carVel(a), bv = carVel(b);
     const aSpeed = Math.hypot(av.x, av.z), bSpeed = Math.hypot(bv.x, bv.z);
     const am = Math.max(0.6, a.mass || 1), bm = Math.max(0.6, b.mass || 1);
@@ -5477,7 +5858,7 @@
     // panel craters at the actual contact point: each hull caves toward its
     // own centre (n points a→b), the rammed car the deeper of the two
     if (CBZ.cityCarImpact) {
-      const px = (a.pos.x + b.pos.x) / 2, pz = (a.pos.z + b.pos.z) / 2;
+      const px = cpx != null ? cpx : (a.pos.x + b.pos.x) / 2, pz = cpz != null ? cpz : (a.pos.z + b.pos.z) / 2;
       const py = Math.min(vehicleDims(a).height || 1.5, vehicleDims(b).height || 1.5) * 0.4;
       CBZ.cityCarImpact(a, { x: px, y: py, z: pz }, { x: -nx, y: 0, z: -nz }, severity * (aRammer ? 0.75 : 1));
       CBZ.cityCarImpact(b, { x: px, y: py, z: pz }, { x: nx, y: 0, z: nz }, severity * (aRammer ? 1 : 0.75));
@@ -5519,7 +5900,7 @@
     const bMassFac = Math.max(0.5, Math.min(1.8, am / bm));
     a.pos.x -= nx * kick * aMassFac; a.pos.z -= nz * kick * aMassFac;
     b.pos.x += nx * kick * bMassFac; b.pos.z += nz * kick * bMassFac;
-    const cx = (a.pos.x + b.pos.x) / 2, cz = (a.pos.z + b.pos.z) / 2;
+    const cx = cpx != null ? cpx : (a.pos.x + b.pos.x) / 2, cz = cpz != null ? cpz : (a.pos.z + b.pos.z) / 2;
     const cam = CBZ.camera.position, cd2 = (cx - cam.x) * (cx - cam.x) + (cz - cam.z) * (cz - cam.z);
     if (a.player || b.player || cd2 < 75 * 75) {
       if (a.player || b.player) {
@@ -5542,6 +5923,12 @@
   function collisionBound(car) {
     const d = vehicleDims(car);
     return Math.hypot(d.width, d.length) * 0.5;
+  }
+  const _rcA = VC.box(), _rcB = VC.box(), _rcS = { pen: 0, nx: 0, nz: 0, own: 1, px: 0, pz: 0 };
+  function carBox(car, B) {
+    const d = vehicleDims(car);
+    const hw = Math.max(0.3, (+d.width || 2) * 0.5), hl = Math.max(hw, (+d.length || 4.4) * 0.5);
+    return VC.setCarBox(B, car.pos.x, car.pos.z, car.heading || 0, hw, hl);
   }
   const CAR_GRID_CELL = 9;
   const carGrid = new Map();
@@ -5582,10 +5969,19 @@
           const dx = b.pos.x - a.pos.x, dz = b.pos.z - a.pos.z, d2 = dx * dx + dz * dz;
           const broadHit = collisionBound(a) + collisionBound(b);
           if (d2 > broadHit * broadHit) continue;
-          const d = Math.sqrt(Math.max(1e-6, d2));
-          const nx = d2 < 1e-6 ? (i & 1 ? 1 : -1) : dx / d, nz = d2 < 1e-6 ? 0 : dz / d;
-          const hit = collisionSupport(a, nx, nz) + collisionSupport(b, nx, nz);
-          if (d >= hit) continue;
+          /* BOX AGAINST BOX. The old narrow phase measured both hulls along the
+             line between their CENTRES — right for two cars nose to nose,
+             wrong for everything else: two saloons side by side, one a metre
+             ahead, touching by 20 cm, read as 1.9 m interpenetrated and were
+             popped apart by that much in one frame (tools/test-vehicle-
+             collide.mjs case 7), and a car nosed into a bus's flank near its
+             end was separated along the diagonal. SAT on the four face normals gives the real overlap
+             and the real contact normal; the mass-weighted split below is
+             unchanged. */
+          carBox(a, _rcA); carBox(b, _rcB);
+          const pen = VC.sat(_rcA, _rcB, false, 0, 0, _rcS);
+          if (pen <= 0) continue;
+          const nx = -_rcS.nx, nz = -_rcS.nz;                 // a -> b
           /* A CAR BEING DRIVEN INTO A TRAILER IS NOT CRASHING INTO IT. Once its
              nose is past the aperture it is standing INSIDE the truck's own OBB
              on purpose, and separating them is not just wrong-looking — a semi
@@ -5599,7 +5995,7 @@
              solve entirely — this clause covers only the drive-in itself.) */
           if ((a.hold && !a.hold.inert && a.hold.contains(b.pos.x, b.pos.y + 0.4, b.pos.z)) ||
               (b.hold && !b.hold.inert && b.hold.contains(a.pos.x, a.pos.y + 0.4, a.pos.z))) continue;
-          const overlap = hit - d;
+          const overlap = pen;
         // SOLID separation — they cannot occupy the same space
           const am = Math.max(0.6, a.mass || 1), bm = Math.max(0.6, b.mass || 1), tm = am + bm;
           const aw = bm / tm, bw = am / tm;
@@ -5608,7 +6004,12 @@
         // closing speed along the contact normal
           const va = carVel(a), vb = carVel(b);
           const closing = (va.x - vb.x) * nx + (va.z - vb.z) * nz;
-          if (closing > 2 && !a._husk && !b._husk && (a._crashCD || 0) <= 0 && (b._crashCD || 0) <= 0) carCrash(a, b, closing, nx, nz);
+          if (closing > 2 && !a._husk && !b._husk && (a._crashCD || 0) <= 0 && (b._crashCD || 0) <= 0) {
+            // where the two bodies actually met (after the split they touch)
+            carBox(a, _rcA); carBox(b, _rcB);
+            VC.contact(_rcA, _rcB, _rcS.nx, _rcS.nz, _rcS.own, _rcS);
+            carCrash(a, b, closing, nx, nz, _rcS.px, _rcS.pz);
+          }
           else if (closing > 0.25) {
             const imp = collisionImpulse(a, b, va, vb, nx, nz, closing, false, false);
             if (imp.deltaA < 0.01 && imp.deltaB < 0.01) { a.v *= 0.98; b.v *= 0.98; }
@@ -5870,7 +6271,9 @@
     // bleeds it off by surface grip over the following frames instead of the
     // car just snapping back onto its beeline next frame.
     if (pushed > 0.04 && car.v > 7) {
-      const nx = before - car.pos.x, nz = beforeZ - car.pos.z, nl = Math.hypot(nx, nz) || 1;
+      // kicked along the wall's real face normal when the resolver has one
+      const wh = car._wallHit, real = wh && wh.count;
+      const nx = real ? wh.nx : car.pos.x - before, nz = real ? wh.nz : car.pos.z - beforeZ, nl = Math.hypot(nx, nz) || 1;
       const kick = Math.min(car.v * 0.5, 6);
       car.vx += (nx / nl) * kick; car.vz += (nz / nl) * kick;
       car.spin = (car.spin || 0) + (rng() - 0.5) * Math.min(2.2, car.v * 0.12);
@@ -6271,30 +6674,46 @@
           seatCar(c, dt, -1.1, false);
           continue;
         }
-        // slammed a building / lamppost mid-spin: crumple the car (the structure
-        // only sheds some glass), and a fast hit kills whoever's driving.
-        if (pushed > 0.05 && c.v > 11) {
-          const catastrophic = c.v >= CRASH.npcDriverLethal, hard = c.v >= CRASH.wallHard;
-          crumpleCar(c, catastrophic ? 0.7 : (hard ? 0.42 : 0.16), { x: -Math.sin(c.heading), z: -Math.cos(c.heading) });
-          if (CBZ.cityCarImpact) {
-            const fx = Math.sin(c.heading), fz = Math.cos(c.heading), vd = vehicleDims(c);
-            CBZ.cityCarImpact(c, { x: c.pos.x + fx * vd.length * 0.45, y: (vd.height || 1.5) * 0.4, z: c.pos.z + fz * vd.length * 0.45 }, { x: -fx, y: 0, z: -fz }, c.v);
+        /* slammed a building / lamppost mid-spin. This used to grade the hit
+           by TOTAL speed and always cave the NOSE: a wreck sliding sideways
+           along a facade at 20 m/s was a head-on at 20. Now the contact the
+           resolver reports decides it — the impact is the speed INTO the
+           wall, the dent goes where the body touched (a tail-first slide
+           caves the tail), the rest of the slide glances on along the face,
+           and an off-centre contact feeds the spin. */
+        const wh = c._wallHit;
+        if (pushed > 0.02 && wh && wh.count) {
+          const vd = vehicleDims(c);
+          const slide = wallSlide(c, 0.12, 0.35, 0.6);
+          const vIn = slide ? slide.vn : 0;
+          if (slide && slide.vn > 0) {
+            c.spin = (c.spin || 0) + slide.w;
+            c.v = Math.hypot(c.vx, c.vz);
           }
-          // speed-scaled (NHTSA/IIHS ladder): a slow scrape barely dents the
-          // motor, only a fast slam disables it — and never an instant fireball
-          // (damageEngine routes the crash through the burn fuse).
-          damageEngine(c, catastrophic ? (50 + (c.v - CRASH.npcDriverLethal) * 3)
-                          : hard ? (24 + (c.v - CRASH.wallHard) * 2)
-                          : Math.max(0, (c.v - 5) * 0.6), false);
-          crashBurst(c.pos.x, c.pos.z, c.v, hard, catastrophic);
-          if (hard && CBZ.cityShatter) CBZ.cityShatter(c.pos.x, c.pos.z, catastrophic ? 8 : 4.5);
-          const cm = CBZ.camera.position;
-          if (((c.pos.x - cm.x) * (c.pos.x - cm.x) + (c.pos.z - cm.z) * (c.pos.z - cm.z)) < 80 * 80) {
-            if (CBZ.shake) CBZ.shake(0.12 + Math.min(0.6, c.v * 0.03));
-            if (CBZ.sfx) CBZ.sfx(c.v > 16 ? "ko" : "punch");
+          if (vIn > 9) {
+            const catastrophic = vIn >= CRASH.npcDriverLethal, hard = vIn >= CRASH.wallHard;
+            crumpleCar(c, catastrophic ? 0.7 : (hard ? 0.42 : 0.16), { x: -wh.nx, z: -wh.nz });
+            if (CBZ.cityCarImpact) {
+              CBZ.cityCarImpact(c, { x: wh.px, y: (vd.height || 1.5) * 0.4, z: wh.pz }, { x: wh.nx, y: 0, z: wh.nz }, vIn);
+            }
+            // speed-scaled (NHTSA/IIHS ladder): a slow scrape barely dents the
+            // motor, only a fast slam disables it — and never an instant fireball
+            // (damageEngine routes the crash through the burn fuse).
+            damageEngine(c, catastrophic ? (50 + (vIn - CRASH.npcDriverLethal) * 3)
+                            : hard ? (24 + (vIn - CRASH.wallHard) * 2)
+                            : Math.max(0, (vIn - 5) * 0.6), false);
+            crashBurst(wh.px, wh.pz, vIn, hard, catastrophic, { x: wh.nx, z: wh.nz });
+            if (hard && CBZ.cityShatter) CBZ.cityShatter(wh.px, wh.pz, catastrophic ? 8 : 4.5);
+            const cm = CBZ.camera.position;
+            if (((c.pos.x - cm.x) * (c.pos.x - cm.x) + (c.pos.z - cm.z) * (c.pos.z - cm.z)) < 80 * 80) {
+              if (CBZ.shake) CBZ.shake(0.12 + Math.min(0.6, vIn * 0.03));
+              if (CBZ.sfx) CBZ.sfx(vIn > 16 ? "ko" : "punch");
+            }
+            if (catastrophic && c.npcDriver && !c.abandoned) killNpcDriverInCar(c);
+            // the crumple zone eats energy the restitution model does not
+            const eat = catastrophic ? 0.3 : (hard ? 0.55 : 0.8);
+            c.vx *= eat; c.vz *= eat; c.v = Math.hypot(c.vx, c.vz);
           }
-          if (catastrophic && c.npcDriver && !c.abandoned) killNpcDriverInCar(c);
-          c.v *= catastrophic ? 0.08 : (hard ? 0.18 : 0.45);
         }
         seatCar(c, dt);
         rollWheels(c, dt);
@@ -6673,7 +7092,20 @@
       if ((!CBZ.CONFIG || CBZ.CONFIG.VEH_COLLIDE_FIX !== false) &&
           (_cdx * _cdx + _cdz * _cdz) < 110 * 110 && c.v > 0.5) {
         const pushedAI = collideVehicle(c);
-        if (pushedAI > 0.04) c.v *= Math.max(0.25, 1 - pushedAI * 2);
+        /* A lane car that clips something glances off it: only the speed
+           INTO the face goes (the impulse, projected back on its heading, since
+           lane driving owns the steering and steers it back out). A square
+           hit stops it; a brush along a kerb or a parked truck barely slows
+           it — the old version scaled speed by push DEPTH, so a 5 cm rub cost
+           10% and a deep square hit could keep 25%. */
+        if (pushedAI > 0.01) {
+          const slide = wallSlide(c, 0.1, 0.3, 0);
+          if (slide && slide.vn > 0) {
+            const hx = Math.sin(c.heading || 0), hz = Math.cos(c.heading || 0);
+            c.v = Math.max(0, slide.vx * hx + slide.vz * hz);
+            c.vx = hx * c.v; c.vz = hz * c.v;
+          }
+        }
       }
 
       // keep a carjacker's body riding with the car so cops chase the right spot

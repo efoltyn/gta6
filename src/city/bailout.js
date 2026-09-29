@@ -336,7 +336,7 @@
         m.scale.setScalar(HK);
         h.add(m);
         h.userData.handMesh = m;
-        const arm = FPH.makeArm({ fore: sleeve, upper: sleeve });
+        const arm = FPH.makeArm({ fore: sleeve, upper: sleeve }, side);
         FPH.poseArm(arm, new THREE.Vector3(0, 0, 0), new THREE.Vector3(side * 0.02, -0.03, 0.48), null, m.quaternion, HK, false);
         h.add(arm);
       } else {
