@@ -502,6 +502,26 @@
       }
     }
 
+    // THE AIRFRAME WORKS THE LEG (city/airframes.js): engines spool on the
+    // push, flaps out for the roll and the approach, gear up after a positive
+    // climb and down on the descent, strobes on the runway and aloft, beacon
+    // whenever the engines turn, landing lights low.
+    if (CBZ.airframes && CBZ.airframes.rig(s.grp)) {
+      const a = s._afs || (s._afs = { gear: 1, running: false, power: 0, lights: "nav", flap: 0 });
+      const air = s.phase === "air", alt = s.alt || 0, prev = s._afAlt == null ? alt : s._afAlt;
+      const climb = (alt - prev) / Math.max(1e-3, dt);
+      s._afAlt = alt;
+      a.running = s.phase !== "boarding" && s.phase !== "turn";
+      a.power = s.phase === "roll" ? 1 : (air ? (climb > 0.5 ? 0.9 : 0.45) : (a.running ? 0.12 : 0));
+      if (!air) a.gear = 1;
+      else if (alt > 45 && climb > 0.5) a.gear = 0;
+      else if (alt < 260 && climb < -0.5) a.gear = 1;
+      a.flap = s.phase === "roll" || s.phase === "lineup" || (air && alt < 300) || s.phase === "rollout" ? 0.6 : 0;
+      a.lights = air || s.phase === "roll" || s.phase === "lineup" || s.phase === "rollout" ? "on" : "nav";
+      a.landing = a.lights === "on" && alt < 300;
+      a.ail = Math.max(-1, Math.min(1, (s.bank || 0) * 1.5));
+      CBZ.airframes.animate(s.grp, a, dt);
+    }
     // keep the boardable record's own fields honest — 20 systems read these.
     rec.heading = s.grp.rotation.y;
     // AND CARRY WHOEVER IS IN THE CABIN. island_airport.js owns the room; this

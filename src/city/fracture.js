@@ -1,87 +1,72 @@
 /* ============================================================
-   city/fracture.js — STRUCTURAL WALL DAMAGE that PERSISTS. buildings.js owns
-   the carve primitive (CBZ.cityCarveWall: hide the storey wall box, rebuild
-   flank/sill/header remnants with real colliders + LOS, dress an interior
-   inset + fractured rim); this file owns the POLICY:
-     • blastAt(pt, r): explosions punch real holes (wired through the
-       cityExplosion wrap in buildings.js) — debris pours through the wave-21
-       facade avalanche, never a duplicate system;
-     • chewWall(x,y,z): >25 rifle-class rounds inside one 1.2u wall cell
-       quietly grind open a 1.1u murder hole — cover you MAKE, then shoot
-       through (fpsmode's wall-hit branch feeds it);
-     • caps: 24 live holes — overflow plywoods the OLDEST over
-       (CBZ.cityBoardHole restores its colliders/LOS, frees the slot);
+   city/fracture.js — WALL HOLES THAT PERSIST. buildings.js owns the carve
+   primitive (CBZ.cityCarveWall: pick the wall, ask the charge law, open it,
+   shed its material); this file owns the POLICY around it:
+     • blastAt(pt, opts): an explosion's one wall response. opts.charge (kg
+       TNT-equivalent) goes to the carve, which asks systems/breach.js's law
+       whether the wall breaches and how big the opening is — or opts.r for a
+       caller that already knows the opening (a structural failure, a ram).
+       The carve is deferred ONE frame for a live blast (the monolith is heavy;
+       the boom, dust and shake already fired this frame, which masks it).
+     • chewWall(x,y,z): >25 rifle-class rounds into one 1.2 m wall cell grind
+       a murder hole — cover you make, then shoot through.
+     • caps: MAX_HOLES live holes; overflow plywoods the OLDEST
+       (CBZ.cityBoardHole restores its colliders/LOS and frees the slot).
      • persistence: serialize()/apply()/applyOne() re-carve silently from a
-       stable address {b: building key, face, u, v, r} — coordinate-keyed, so
-       the ledger survives rng-draw-order drift across code versions;
-     • onHole(hole) fires on every NEW local carve so the net layer can
-       broadcast ({e:"frx", hole}); guests land them via applyOne.
-   WHY: an RPG that permanently remodels a bank facade is money ON the wall,
-   and holes the whole server keeps are the flex that outlives the fight.
+       stable address {b: building key, face, u, v, r, gw?, v0?, v1?} —
+       coordinate-keyed, so a streamed-out-and-back lot or a save replays the
+       same openings, and the net layer broadcasts new ones via onHole.
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
   if (!CBZ) return;
 
-  const MAX_HOLES = 24;     // overflow: the oldest wound gets boarded over
+  const MAX_HOLES = 32;     // overflow: the oldest wound gets boarded over
   const CHEW_N = 25;        // heavy rounds into one cell to open a murder hole
   const CHEW_CELL = 1.2;    // wall-cell quantum (metres)
+  const CHEW_TO_LEDGER = 4.5;
   const live = [];          // [{h:addr, rec}] un-boarded holes, oldest first
   const pending = [];       // ledger holes waiting for their wall to exist
   const chew = new Map();   // cellKey -> {n, t} heavy-round accumulation
-  let lastX = 0, lastZ = 0, lastT = -1e9;   // last LOCAL carve (dedupes the legacy ground-breach pass)
+  let lastX = 0, lastZ = 0, lastT = -1e9;   // last LOCAL blast at a wall (dedupes cityBreach)
   let applying = false;     // replaying a ledger — never re-broadcast
-
-  // ---- DEFERRED LOCAL CARVE (the rocket-frame de-spike) ---------------------
-  // The carve primitive (buildings.js carveHole) is a MONOLITH: it builds the
-  // remnant colliders + markCollidersDirty AND the whole cosmetic remodel
-  // (room shell, glass/roomDeco sweeps, fractured rim merge) inline in ONE call.
-  // We can't split colliders from cosmetics without editing buildings.js (the
-  // other session owns it), so we defer the ENTIRE carve by ONE frame for the
-  // LOCAL player/C4 blast — at ~200ms/frame on the weak Mac that 1-frame slip
-  // is inside the ~100-200ms audio-visual binding window (Nature srep05098), and
-  // the boom + dust + scorch + shake + sound all already fire SYNCHRONOUSLY at
-  // the call sites (cityExplosion/cityBreach), so the eye/ear bind the event NOW
-  // and the geometry catches up next frame — exactly the BF/UE5 mesh-swap-masked
-  // -by-particles pattern. KNOWN, accepted: a ≤1-frame COVER/LOS gap — the wall
-  // is still solid for that one frame, which on a 5 FPS Mac is the same ~200ms a
-  // player needs to even register the hole. recent() is still armed THIS frame
-  // (below) so the legacy ground-breach pass never double-carves.
-  // Flag-gated (CBZ.carveDefer, default true); off → the old inline carve.
-  if (CBZ.carveDefer === undefined) CBZ.carveDefer = true;
-  const deferQ = [];        // [{x,y,z,r,power,search}] one-shot local carves
+  const deferQ = [];        // one-shot local carves drained next frame
   const DEFER_CELL = 1.4;   // collapse near-coincident blasts (anti double-carve)
+  let storeyFx = 3;         // gut bays per drain that get the dust/rebar pour
 
   function nowS() { return performance.now() / 1000; }
+  function mayBreach() { return !!CBZ.game && (CBZ.modeHas ? CBZ.modeHas("breach") : CBZ.game.mode === "city"); }
 
   // ---- stable hole address -------------------------------------------------
-  // b = rounded building-group origin (the lot centre — island lots included),
-  // face = 0:-z 1:+z 2:-x 3:+x (the door-side convention), u = opening centre
-  // along the face axis RELATIVE to the building origin, v = world height of
-  // the opening centre, r = the carve radius. Coordinates, not rng order: the
-  // city is seeded, but any code change reshuffles the draw stream — addresses
-  // built from world positions replay correctly either way.
+  // b = rounded building-group origin, face = 0:-z 1:+z 2:-x 3:+x, u = opening
+  // centre along the face RELATIVE to the building origin, v = world height of
+  // the opening centre, r = the carve radius. A storey-wide gut opening also
+  // records its exact rect (gw, v0, v1) so it replays at the same size.
   function addrOf(rec, r) {
     const g = rec.gap;
     const uc = (g.u0 + g.u1) / 2, vc = (g.v0 + g.v1) / 2;
-    return {
+    const h = {
       b: Math.round(g.px) + "," + Math.round(g.pz),
       face: g.horiz ? (g.outS < 0 ? 0 : 1) : (g.outS < 0 ? 2 : 3),
       u: Math.round((uc - (g.horiz ? g.px : g.pz)) * 10) / 10,
       v: Math.round(vc * 10) / 10,
       r: Math.round(r * 100) / 100,
     };
+    if (rec.rect) {
+      h.gw = Math.round((g.u1 - g.u0) * 100) / 100;
+      h.v0 = Math.round(g.v0 * 100) / 100; h.v1 = Math.round(g.v1 * 100) / 100;
+    }
+    return h;
   }
 
-  // ledger a fresh carve: cap-evict (board the oldest), broadcast if local
   function adopt(rec, r, quiet) {
     const h = addrOf(rec, r);
     rec.addr = h;
     live.push({ h: h, rec: rec });
     if (live.length > MAX_HOLES) {
       const old = live.shift();
-      if (CBZ.cityBoardHole) CBZ.cityBoardHole(old.rec);   // plywood: colliders/LOS back, slot freed
+      if (CBZ.cityBoardHole) CBZ.cityBoardHole(old.rec);
     }
     if (!quiet && !applying && CBZ.cityFracture.onHole) {
       try { CBZ.cityFracture.onHole(h); } catch (e) {}
@@ -89,273 +74,118 @@
     return h;
   }
 
-  // ---- PER-FACADE CUMULATIVE WOUND TRACKING ---------------------------------
-  // Every carve so far was an independent event: a hole is a hole, capped/
-  // boarded on its own LRU, with no memory of how many times THIS WALL has
-  // already been hit. That made CBZ.cityAirstrikeCollapse a one-off the caller
-  // had to explicitly invoke (airstrike/tank agents only) rather than an
-  // emergent consequence of accumulated damage. This adds exactly that memory:
-  // a per-facade (building key `b` + `face`) wound score that every real carve
-  // (rocket/grenade/C4/airstrike via carveNow) AND every ground-out murder-hole
-  // (chewWall, weighted far lighter — sustained rifle fire alone shouldn't
-  // bring a wall down) bumps. Once a facade's score crosses WOUND_COLLAPSE from
-  // REPEATED hits — not necessarily one big hit — it escalates to a real
-  // partial collapse via CBZ.cityAirstrikeCollapse (crashfx.js), which already
-  // self-throttles per building (_collapseSeen) so a salvo only collapses once.
-  // Bounded: the Map only ever holds entries for walls that have been hit at
-  // least once, pruned alongside `chew` so a long session can't leak memory.
-  const wounds = new Map();     // "b|face" -> { score, t }
-  const WOUND_COLLAPSE = 6.0;   // cumulative score that triggers an escalation
-  const WOUND_DECAY_AFTER = 40; // seconds of quiet before a facade's score starts fading (a wall "heals" its memory, not its holes)
-  function woundKey(b, face) { return b + "|" + face; }
-  function pruneWounds(t) {
-    wounds.forEach(function (w, k) { if (t - w.t > 400 && w.score < 0.5) wounds.delete(k); });
-  }
-  // bump a facade's wound score and, once it crosses threshold, ESCALATE a real
-  // partial collapse — the emergent consequence this file was missing. amount
-  // is in the same rough units as a carve's `power` (a grenade ~1, RPG ~1.4-2,
-  // airstrike ~2+, a chewWall murder-hole ~0.35 — heavy sustained fire alone
-  // can still bring a wall down, just needs many more hits than one rocket).
-  // cx,cz = a world point on/near the wall (handed straight to
-  // CBZ.cityAirstrikeCollapse, which resolves the building's tallest wall from
-  // the live colliders itself — we don't need to track height/footprint here).
-  // ========================================================================
-  //  MIGRATED (BLOCK LAW): facade wound escalation now defers to the shared
-  //  structural ledger (city/structural.js).
-  //
-  //  The `wounds` Map below was the SECOND of three independent building-damage
-  //  accumulators (demolition.js's per-lot `hp` was the first, buildings.js's
-  //  per-wall `wallDmg` the third). Its job — "enough repeated hits on one wing
-  //  and the wing comes down" — is now a special case of the ledger's stage
-  //  machine, which additionally knows about floors, fire and a real load path.
-  //
-  //  IMPORTANT, AND THE WHOLE REASON THIS IS A `fromBlast` FLAG RATHER THAN A
-  //  BLANKET DELEGATION: a carve is USUALLY the downstream consequence of a
-  //  blast that has ALREADY been counted (cityExplosion -> structuralBlast ->
-  //  blastAt -> carveNow). Feeding the ledger again from here would double-count
-  //  every rocket. So blast-driven carves add NOTHING — the blast already paid.
-  //  Only chewWall (sustained rifle fire grinding a murder hole, which has no
-  //  blast behind it at all) contributes, because otherwise that damage would
-  //  vanish from the books entirely.
-  //
-  //  The legacy path is kept verbatim as the degrade-safe fallback.
-  // ========================================================================
-  function ledgerOn() { return !!(CBZ.CONFIG && CBZ.CONFIG.STRUCT_LEDGER && CBZ.structure && CBZ.structure.hit); }
-  const CHEW_TO_LEDGER = 4.5;   // a ground-out murder hole is real structural loss, just slow
-
-  function woundFacade(b, face, amount, cx, cz, fromBlast) {
-    if (ledgerOn()) {
-      if (fromBlast) return;                  // the blast that caused this carve already fed the ledger
-      try { CBZ.structure.hit(cx, 1.6, cz, amount * CHEW_TO_LEDGER, { kind: "chew" }); } catch (e) {}
-      return;
-    }
-    const t = nowS();
-    const k = woundKey(b, face);
-    let w = wounds.get(k);
-    if (!w) {
-      if (wounds.size > 96) pruneWounds(t);   // bound the map before growing it further
-      w = { score: 0, t: t };
-      wounds.set(k, w);
-    } else if (t - w.t > WOUND_DECAY_AFTER) {
-      // a facade that's sat quiet for a while fades its memory (a building
-      // that took one rocket a long time ago shouldn't collapse from a single
-      // unrelated tap today) — linear decay, floored at 0.
-      w.score = Math.max(0, w.score - (t - w.t - WOUND_DECAY_AFTER) * 0.05);
-    }
-    w.score += amount;
-    w.t = t;
-    if (w.score >= WOUND_COLLAPSE && CBZ.cityAirstrikeCollapse) {
-      // reset so the SAME facade needs to rebuild damage before collapsing
-      // again (cityAirstrikeCollapse's own 2.5s _collapseSeen throttle still
-      // guards a same-instant salvo; this guards the slower "rebuilds rubble
-      // forever" case across a long siege).
-      w.score = 0;
-      try { CBZ.cityAirstrikeCollapse({ x: cx, z: cz }, { power: Math.min(2.6, 1.6 + amount * 0.3) }); } catch (e) {}
-    }
-  }
-
-  // hole debris = the wave-22 facade RUIN (pooled chunks + dust sheeting down the
-  // wall + a PERSISTENT rubble heap at the base + dangling rebar + a soot ring),
-  // poured from the opening along its outward normal. The opening WIDTH drives
-  // the rubble-pile size so a big carve drops a big heap.
-  function debris(rec, power) {
+  /* What pours out of a real carve: the wall already shed its own material
+     (buildings.js cuts the removed volume into pieces of itself), so this adds
+     only what a blast adds on top — dust and smoke punching out of the wound,
+     dangling rebar off a broken header, and for a bomb-class charge the full
+     facade cascade. The tier is the CHARGE, not a power class. */
+  function debris(rec, W) {
     const g = rec.gap;
     const uc = (g.u0 + g.u1) / 2, vc = (g.v0 + g.v1) / 2;
     const x = g.horiz ? uc : g.fixed, z = g.horiz ? g.fixed : uc;
     const nx = g.horiz ? 0 : g.outS, nz = g.horiz ? g.outS : 0;
-    const width = Math.max(1.0, g.u1 - g.u0);
-    // cityWallRuin (crashfx.js) composes the whole REAL-blast read at once:
-    // avalanche + rubble heap + rebar + soot ring + dust/smoke. Falls back to
-    // the older avalanche, then the bare chunk burst, if a system is missing.
-    // HEAVY ORDNANCE (power>=2: airstrike/missile/tank, the self-couple path in
-    // cityAirstrikeExplosion hands us power≈3): compose the BIGGER cityHeavyWallRuin
-    // — a full-facade avalanche + collapse curtain + a taller dust column — so the
-    // read scales with the bomb, not just the rocket. Same pooled systems, so it's
-    // draw-call-neutral; falls straight back to the standard ruin if it's missing.
+    const width = Math.max(0.5, g.u1 - g.u0);
+    const L = CBZ.blastLaw;
+    const power = L ? Math.max(0.8, Math.min(2.6, 0.9 * L.cbrt(W || 0.7) + 0.4)) : 1.4;
     const ruinArgs = { power: power, width: width, top: g.v1, bottom: g.v0 };
-    if (power >= 2 && CBZ.cityHeavyWallRuin) {
-      CBZ.cityHeavyWallRuin(x + nx * 0.3, vc, z + nz * 0.3, nx, nz, ruinArgs);
-    } else if (CBZ.cityWallRuin) {
-      CBZ.cityWallRuin(x + nx * 0.3, vc, z + nz * 0.3, nx, nz, ruinArgs);
-    } else if (CBZ.cityFacadeAvalanche) {
-      CBZ.cityFacadeAvalanche(x + nx * 0.3, vc, z + nz * 0.3, nx, nz, Math.min(2.2, power));
-    } else if (CBZ.cityChunk) {
-      CBZ.cityChunk(x + nx * 0.4, vc, z + nz * 0.4, { count: 6, force: 4, dirx: nx, dirz: nz });
-    }
-    // SOOT framing the opening on the outer face: only for a real carve in a
-    // masonry wall (crashfx refuses glass/curtain walls and any overhang)
+    if ((W || 0) >= 20 && CBZ.cityHeavyWallRuin) CBZ.cityHeavyWallRuin(x + nx * 0.3, vc, z + nz * 0.3, nx, nz, ruinArgs);
+    else if (CBZ.cityWallRuin) CBZ.cityWallRuin(x + nx * 0.3, vc, z + nz * 0.3, nx, nz, ruinArgs);
     if (CBZ.cityBlastWallSoot) { try { CBZ.cityBlastWallSoot(rec, power); } catch (e) {} }
   }
 
-  // ---- blastAt: an explosion against a wall face carves a persistent hole --
-  // pt = {x,y,z} (or a raycast hit w/ .point), radius scaled UP so a direct
-  // rocket blows a ROOM-EXPOSING chunk out of the facade (owner-filmed: the old
-  // hole read as a dimple). Composes with the scar/avalanche/breach flow — the
-  // hole is the part that STAYS.
-  //
-  // REAL-DESTRUCTION SCALE-UP (carve gap width = r*2, vertical opening = ±r, so
-  // the visible hole is a 2r square): an RPG/airstrike (power ≳1.3) now carves
-  // r≈3.4–4.6 → a 7–9u-wide hole you read as a blown-open apartment; a grenade /
-  // car-burst (power <1.3) carves r≈2.2 → a ~4.4u hole. The caller in
-  // buildings.js still hands us a smaller r, so we floor it HERE (this file owns
-  // the policy; buildings.js owns only the carve primitive).
-  function blastAt(pt, radius, opts) {
+  /* ---- blastAt: THE wall response to one explosion ------------------------
+     pt   {x,y,z} (or a raycast hit with .point)
+     opts.charge   kg TNT-eq — the law decides breach/no-breach and the size
+     opts.contact  stuck to the wall (full coupling)
+     opts.standoff a known minimum standoff (m) when the seat is not the charge
+     opts.shaped, opts.jetPen   a shaped-charge jet (RPG, HEAT)
+     opts.r        explicit opening radius (no law: a structural failure / ram)
+     opts.gapW, opts.v0, opts.v1   explicit rect (a gutted storey's bay)
+     opts.search   how far off the wall the seat may be (default: the law's
+                   scar radius + 1 m, clamped 1.2..4 — a grenade in the middle
+                   of the street does not reach across it to open a facade)
+     opts.now      carve inline (breach.js's legacy seam, tools)
+     opts.quiet    replay: no debris, no broadcast */
+  function blastAt(pt, opts) {
     opts = opts || {};
     if (pt && pt.point) pt = pt.point;
-    // CAPABILITY, not scenario (systems/modecaps.js). Nothing below reads a city
-    // record: carveHole resolves the wall out of CBZ.colliders and its own
-    // registered mesh, and it already carries an explicit fallback for a wall
-    // with no building parent ("scene-level props"). The prison's walls became
-    // eligible the day carveHole learned to derive a band off the mesh; this is
-    // the policy layer catching up. Individual walls refuse with `noBreach`.
-    if (!pt || !CBZ.cityCarveWall || !CBZ.game) return null;
-    if (!(CBZ.modeHas ? CBZ.modeHas("breach") : CBZ.game.mode === "city")) return null;
-    const power = opts.power || 1.2;
-    let r = Math.max(0.5, radius || 2.6);
-    // floor the hole to a dramatic, room-exposing size by ordnance class
-    const floor = power >= 1.3 ? Math.min(4.6, 3.4 + (power - 1.3) * 0.9) : 2.2;
-    r = Math.max(r, floor);
+    if (!pt || !CBZ.cityCarveWall || !mayBreach()) return null;
     const py = pt.y == null ? 1.4 : pt.y;
-    // SEARCH SCALES WITH THE BLAST. A blast rarely detonates exactly ON the wall
-    // plane — a thrown grenade, a C4 on the kerb, an airstrike, or a rocket that
-    // crosses the street a few units shy of a facade all sit OFF the wall. A flat
-    // 3.2u search missed every one of those, so a blast clearly inside a building's
-    // radius left the facade untouched (owner-filmed "building unaffected"). We now
-    // reach out ~ the hole radius + a margin (capped so a huge airstrike can't grab
-    // a wall half a block away and carve the WRONG building). cityCarveWall takes
-    // the NEAREST wall within `search` at this height, so the closest facade wins.
-    const search = opts.search != null ? opts.search : Math.min(8, Math.max(3.6, r + 1.4));
-    // CORRECTNESS-CRITICAL, ALWAYS SYNCHRONOUS: arm recent() THIS frame so the
-    // legacy ground-breach pass (buildings.js cityBreach → recent(x,z)) sees the
-    // blast and never opens a SECOND hole in the same wall. This is independent
-    // of whether the carve itself defers — the dedup must hold on the impact
-    // frame either way. (It also primes the within-window double-carve guard.)
-    lastX = pt.x; lastZ = pt.z; lastT = nowS();
-    // DEFERRED PATH: enqueue the heavy carve to drain next frame. We can't return
-    // the real hole-addr yet (no rec until the carve runs), so callers that need
-    // it synchronously must keep the flag off — but the only caller is
-    // structuralBlast, which ignores the return value (it just wants the hole to
-    // appear). The net broadcast (onHole) still fires, just one frame later, off
-    // the real rec, so guests land the SAME hole.
-    if (CBZ.carveDefer && !opts.quiet) {
-      enqueueDefer(pt.x, py, pt.z, r, power, search);
-      return null;
+    const L = CBZ.blastLaw;
+    let search = opts.search;
+    if (search == null) {
+      search = opts.charge > 0 && L
+        ? Math.max(1.2, Math.min(4, L.breachRadius(opts.charge) * 1.6 + 1.0))
+        : Math.max(1.6, Math.min(4, (opts.r || 1) + 1.2));
     }
-    // INLINE PATH (flag off, or a quiet/replay carve that must land NOW): exactly
-    // the old behaviour.
-    return carveNow(pt.x, py, pt.z, r, power, search, !!opts.quiet);
+    // arm the dedup THIS frame whatever the carve decides (cityBreach asks)
+    lastX = pt.x; lastZ = pt.z; lastT = nowS();
+    const job = {
+      x: pt.x, y: py, z: pt.z, search: search,
+      charge: +opts.charge || 0, contact: !!opts.contact, standoff: +opts.standoff || 0, shaped: !!opts.shaped, jetPen: +opts.jetPen || 0,
+      r: +opts.r || 0, gapW: opts.gapW, v0: opts.v0, v1: opts.v1, byPlayer: !!opts.byPlayer, storey: !!opts.storey,
+    };
+    if (!opts.now && !opts.quiet) { enqueueDefer(job); return null; }
+    return carveNow(job, !!opts.quiet);
   }
 
-  // the actual carve+ledger+debris — shared by the inline path and the deferred
-  // drain. Re-resolves the wall from LIVE colliders every call, so if the
-  // wall/arena changed (already breached, mode swapped, building gone) carveHole
-  // returns null and we bail cleanly — a deferred carve self-cancels when stale.
-  function carveNow(x, y, z, r, power, search, quiet) {
-    // a wider collider search so a rocket landing a hair off the wall plane (or
-    // exactly point-blank) still finds the wall and carves, instead of missing.
-    const rec = CBZ.cityCarveWall(x, y, z, r, { search: search != null ? search : 3.2 });
+  function carveNow(j, quiet) {
+    const co = { search: j.search, byPlayer: j.byPlayer, quiet: quiet };
+    if (j.charge > 0) co.charge = { W: j.charge, contact: j.contact, standoff: j.standoff, shaped: j.shaped, jetPen: j.jetPen };
+    if (j.gapW != null) co.gapW = j.gapW;
+    if (j.v0 != null) co.v0 = j.v0;
+    if (j.v1 != null) co.v1 = j.v1;
+    if (j.storey) co.storey = true;
+    const rec = CBZ.cityCarveWall(j.x, j.y, j.z, j.r || 1, co);
     if (!rec) return null;
+    const r = rec.lawR || j.r || (rec.gap.u1 - rec.gap.u0) / 2;
     const h = adopt(rec, r, quiet);
-    if (!quiet) debris(rec, power);
-    // STRUCTURAL ESCALATION: every real (non-quiet/non-replay) carve feeds the
-    // facade's cumulative wound score — repeated rockets into the same wing of
-    // a building, not just one huge hit, can now bring it down for real.
-    if (!quiet) woundFacade(h.b, h.face, power, x, z, true);   // fromBlast: the blast already paid the ledger
+    // a gutted storey opens many bays in one frame: the first few pour dust
+    // and rebar, the rest just open (their own pieces still fall)
+    if (!quiet && (!j.storey || storeyFx-- > 0)) debris(rec, j.storey ? 1 : (j.charge || 16 * 0.35 * 1.8 * r * r * r));
     return h;
   }
 
-  // queue a one-shot LOCAL carve, collapsing a near-coincident pending blast into
-  // it (anti double-carve inside the 1-frame window: two rockets into the same
-  // wall cell before the drain would otherwise carve twice — the wall isn't
-  // _breached yet so carveHole wouldn't reject the second). Keep the bigger blast.
-  function enqueueDefer(x, y, z, r, power, search) {
+  function enqueueDefer(j) {
     for (let i = 0; i < deferQ.length; i++) {
       const d = deferQ[i];
-      if (Math.abs(d.x - x) < DEFER_CELL && Math.abs(d.y - y) < DEFER_CELL && Math.abs(d.z - z) < DEFER_CELL) {
-        if (r > d.r) { d.r = r; d.power = Math.max(d.power, power); }   // upgrade to the larger hole
+      if (Math.abs(d.x - j.x) < DEFER_CELL && Math.abs(d.y - j.y) < DEFER_CELL && Math.abs(d.z - j.z) < DEFER_CELL) {
+        // the same wall cell twice inside one frame: one carve, the bigger charge
+        if (j.charge > d.charge) { d.charge = j.charge; d.shaped = j.shaped; d.jetPen = j.jetPen; d.contact = d.contact || j.contact; }
+        if (j.r > d.r) d.r = j.r;
         return;
       }
     }
-    deferQ.push({ x: x, y: y, z: z, r: r, power: power, search: search });
+    deferQ.push(j);
   }
 
-  // drain the deferred local carves — runs every frame (the rocket-frame de-spike
-  // relies on this landing the carve on the VERY NEXT frame, not 0.5s later like
-  // the networked replay drain). Early-outs instantly when the queue is empty, so
-  // it costs nothing in the steady state. Guards mode + colliders so a carve that
-  // outlived its arena (mode exit / run reset mid-window) self-cancels.
   function drainDefer() {
     if (!deferQ.length) return;
-    // Same capability the enqueue was allowed under — a queue drained by a
-    // stricter test than the one that filled it silently eats every carve.
-    const may = CBZ.modeHas ? CBZ.modeHas("breach") : (CBZ.game && CBZ.game.mode === "city");
-    if (!CBZ.cityCarveWall || !CBZ.game || !may || !CBZ.colliders || !CBZ.colliders.length) {
-      deferQ.length = 0; return;        // arena gone — drop the stale carves
-    }
+    if (!CBZ.cityCarveWall || !mayBreach() || !CBZ.colliders || !CBZ.colliders.length) { deferQ.length = 0; return; }
     const todo = deferQ.splice(0, deferQ.length);
-    for (let i = 0; i < todo.length; i++) {
-      const d = todo[i];
-      // adopt() stays un-quiet → onHole still broadcasts this LOCAL hole to
-      // guests (one frame late, off the real rec, same address) — net-correct.
-      try { carveNow(d.x, d.y, d.z, d.r, d.power, d.search, false); } catch (e) {}
-    }
+    storeyFx = 3;
+    for (let i = 0; i < todo.length; i++) { try { carveNow(todo[i], false); } catch (e) {} }
   }
 
-  // did a fracture carve just land here? (buildings.js cityBreach asks, so the
-  // SAME rocket doesn't open a second hole through the legacy ground pass)
-  function recent(x, z) {
-    if (nowS() - lastT > 0.6) return false;
-    const dx = x - lastX, dz = z - lastZ;
-    return dx * dx + dz * dz < 64;
-  }
-  // GENERALIZED dedup window (additive — recent() above stays for its legacy
-  // 0.6s callers). A ram-breach and the heavy-ruin path BOTH want to ask "did a
-  // carve just land on this wall THIS impact frame?" but with their own window:
-  // the ram + the fireball that cooks off it can fire a few frames apart, so a
-  // shared, tunable `withinS` lets every caller use ONE dedup and never double-
-  // carve the same wall in the same event (the wall's _breached flag is the
-  // other backstop). withinS defaults to recent()'s 0.6s so an argless-ish call
-  // behaves identically; radius is the same 8m (64 = 8²) proximity recent() uses.
+  // did a blast just land at a wall here? (cityBreach asks, so the same event
+  // never opens a second hole through the legacy ground pass)
   function recentAt(x, z, withinS) {
     const w = withinS == null ? 0.6 : withinS;
     if (nowS() - lastT > w) return false;
     const dx = x - lastX, dz = z - lastZ;
     return dx * dx + dz * dz < 64;
   }
+  function recent(x, z) { return recentAt(x, z, 0.6); }
 
   // ---- murder holes: sustained heavy fire grinds through concrete ----------
   function prune(t) { chew.forEach(function (c, k) { if (t - c.t > 14) chew.delete(k); }); }
   function chewWall(x, y, z) {
-    // COVER YOU MAKE, in any mode. 25 rifle-class rounds into one wall cell
-    // grind a murder hole — the purest form of "the world reacts to the gun",
-    // and nothing in it reads a city record either.
-    if (!CBZ.cityCarveWall || !CBZ.game) return null;
-    if (!(CBZ.modeHas ? CBZ.modeHas("breach") : CBZ.game.mode === "city")) return null;
+    if (!CBZ.cityCarveWall || !mayBreach()) return null;
     const k = Math.round(x / CHEW_CELL) + "," + Math.round(y / CHEW_CELL) + "," + Math.round(z / CHEW_CELL);
     const t = nowS();
     let c = chew.get(k);
     if (!c) { if (chew.size > 64) prune(t); c = { n: 0, t: t }; chew.set(k, c); }
-    if (t - c.t > 14) c.n = 0;          // sustained fire only — cold cells reset
+    if (t - c.t > 14) c.n = 0;
     c.t = t; c.n++;
     if (c.n < CHEW_N) return null;
     chew.delete(k);
@@ -363,13 +193,11 @@
     if (!rec) return null;
     lastX = x; lastZ = z; lastT = t;
     const h = adopt(rec, 0.55, false);
-    // ground out, not blown out: a quiet crumble of chunks, no boom
     const g = rec.gap, nx = g.horiz ? 0 : g.outS, nz = g.horiz ? g.outS : 0;
     if (CBZ.cityChunk) CBZ.cityChunk(x + nx * 0.3, y, z + nz * 0.3, { count: 3, force: 2, dirx: nx, dirz: nz, material: rec.wall && rec.wall.material });
-    // sustained gunfire still feeds the same facade wound score, just at a
-    // much lighter weight than ordnance — many murder holes ground into one
-    // wing CAN bring it down, it just takes a lot more of them than a rocket.
-    woundFacade(h.b, h.face, 0.35, x, z, false);   // no blast behind a chewed hole — this is the one path that pays
+    // a ground-out hole is real structural loss with no blast behind it — the
+    // one path that pays the ledger from here
+    if (CBZ.structure && CBZ.structure.hit) { try { CBZ.structure.hit(x, 1.6, z, 0.35 * CHEW_TO_LEDGER, { kind: "chew" }); } catch (e) {} }
     return h;
   }
 
@@ -377,21 +205,15 @@
   function serialize() {
     const h = [];
     for (let i = 0; i < live.length; i++) h.push(live[i].h);
-    return { v: 1, h: h };
+    return { v: 2, h: h };
   }
+  function same(o, h) { return o.b === h.b && o.face === h.face && Math.abs(o.u - h.u) < 0.6 && Math.abs(o.v - h.v) < 0.8; }
   function has(h) {
-    for (let i = 0; i < live.length; i++) {
-      const o = live[i].h;
-      if (o.b === h.b && o.face === h.face && Math.abs(o.u - h.u) < 0.6 && Math.abs(o.v - h.v) < 0.8) return true;
-    }
-    for (let i = 0; i < pending.length; i++) { // a dupe can land while the original still queues
-      const o = pending[i];
-      if (o.b === h.b && o.face === h.face && Math.abs(o.u - h.u) < 0.6 && Math.abs(o.v - h.v) < 0.8) return true;
-    }
+    for (let i = 0; i < live.length; i++) if (same(live[i].h, h)) return true;
+    for (let i = 0; i < pending.length; i++) if (same(pending[i], h)) return true;
     return false;
   }
-  // resolve an address back to a world point on a CURRENT wall box (remnants
-  // of earlier replayed holes included, so stacked holes re-carve in order)
+  // resolve an address back to a world point on a CURRENT wall box
   function resolve(h) {
     const cols = CBZ.colliders;
     if (!cols || !cols.length) return null;
@@ -400,9 +222,9 @@
       const c = cols[i];
       if (c.y1 == null || !c.ref) continue;
       if (h.v < c.y0 - 0.4 || h.v > c.y1 + 0.4) continue;
-      if (c.y1 - c.y0 < 1.0) continue;
+      if (c.y1 - c.y0 < 0.4) continue;
       const ex = c.maxX - c.minX, ez = c.maxZ - c.minZ;
-      if (Math.min(ex, ez) > 0.9) continue;                 // walls only
+      if (Math.min(ex, ez) > 1.6) continue;
       const mt = c.ref.material; if (mt && mt.transparent) continue;
       const p = c.ref.parent;
       const px = p ? p.position.x : 0, pz = p ? p.position.z : 0;
@@ -414,10 +236,10 @@
       if (face !== h.face) continue;
       const u = (horiz ? px : pz) + h.u;
       const minU = horiz ? c.minX : c.minZ, maxU = horiz ? c.maxX : c.maxZ;
-      const s = u < minU ? minU - u : (u > maxU ? u - maxU : 0);   // distance outside the box extent
+      const s = u < minU ? minU - u : (u > maxU ? u - maxU : 0);
       if (s < bs) {
         bs = s;
-        best = { x: horiz ? u : fixed, z: horiz ? fixed : u, y: Math.max(c.y0 + 0.3, Math.min(c.y1 - 0.3, h.v)) };
+        best = { x: horiz ? u : fixed, z: horiz ? fixed : u, y: Math.max(c.y0 + 0.2, Math.min(c.y1 - 0.2, h.v)) };
       }
     }
     return bs <= 0.5 ? best : null;
@@ -431,21 +253,26 @@
       const pt = resolve(h);
       if (!pt) {
         h._tr = (h._tr || 0) + 1;
-        if (h._tr < 40) pending.push(h);    // city still building — retry on the tick
+        if (h._tr < 40) pending.push(h);    // city (or this slice) still building — retry
         continue;
       }
       applying = true;
       try {
-        const rec = CBZ.cityCarveWall(pt.x, pt.y, pt.z, h.r || 1.2, { search: 1.6 });
+        // an opening that exists was already legal: replay it whatever the
+        // wall's thickness (a charge may have opened a pier)
+        const o = { search: 1.6, quiet: true, maxThick: 3.0 };
+        if (h.gw != null) { o.gapW = h.gw; o.v0 = h.v0; o.v1 = h.v1; o.storey = true; }
+        const rec = CBZ.cityCarveWall(pt.x, pt.y, pt.z, h.r || 1.2, o);
         if (rec) adopt(rec, h.r || 1.2, true);
       } catch (e) {}
       applying = false;
     }
   }
-  // re-carve one hole silently (guests get these over the wire; loads replay them)
   function applyOne(h) {
     if (!h || h.b == null || has(h)) return;
-    pending.push({ b: h.b, face: h.face, u: h.u, v: h.v, r: h.r });
+    const p = { b: h.b, face: h.face, u: h.u, v: h.v, r: h.r };
+    if (h.gw != null) { p.gw = h.gw; p.v0 = h.v0; p.v1 = h.v1; }
+    pending.push(p);
     drain();
   }
   function apply(led) {
@@ -454,99 +281,64 @@
     if (!arr || !arr.length) return;
     for (let i = 0; i < arr.length; i++) applyOne(arr[i]);
   }
+  /* A lot streamed OUT drops its live holes from the books but keeps their
+     addresses pending, so the moment its walls exist again the same openings
+     re-carve (drain() retries at 2 Hz). `bkey` is the building key "x,z". */
+  function forgetLot(bkey) {
+    for (let i = live.length - 1; i >= 0; i--) {
+      if (live[i].h.b !== bkey) continue;
+      const h = live[i].h;
+      live.splice(i, 1);
+      pending.push({ b: h.b, face: h.face, u: h.u, v: h.v, r: h.r, gw: h.gw, v0: h.v0, v1: h.v1 });
+    }
+  }
 
-  // run-reset hook (buildings.js resetBreaches restored every wall already).
-  // Also drop any in-flight deferred carves — their target walls just got reset,
-  // so draining them next frame would carve into a fresh arena (stale).
-  function cleared() { live.length = 0; pending.length = 0; chew.clear(); deferQ.length = 0; lastT = -1e9; wounds.clear(); }
+  function cleared() { live.length = 0; pending.length = 0; chew.clear(); deferQ.length = 0; lastT = -1e9; }
 
-  // pending replays retry at 2Hz until their walls exist (drain early-outs
-  // when the queue is empty, so this costs nothing in the steady state)
   let acc = 0;
   if (CBZ.onUpdate) CBZ.onUpdate(8.6, function (dt) {
     if (!pending.length || CBZ.game.mode !== "city") return;
     acc += dt; if (acc < 0.5) return; acc = 0;
     drain();
   });
+  if (CBZ.onUpdate) CBZ.onUpdate(8.55, function () { if (deferQ.length) drainDefer(); });
 
-  // DEFERRED LOCAL CARVE drain — EVERY frame (the de-spike depends on the carve
-  // landing on the very next frame, not the 0.5s replay cadence above). The work
-  // that ballooned the rocket frame (~200→350ms) now runs on the frame AFTER the
-  // boom, off the impact frame's critical path. Early-outs when the queue is
-  // empty (steady-state cost ≈ one length check), and self-cancels if the arena
-  // vanished mid-window. Kept SEPARATE from the networked `pending`/drain() path
-  // so neither can corrupt the other. Order 8.55 → runs just before the replay
-  // drain, deterministically, within the same frame batch.
-  if (CBZ.onUpdate) CBZ.onUpdate(8.55, function () {
-    if (!deferQ.length) return;
-    drainDefer();
-  });
-
-  // ---- CBZ.cityFracture(pos, radius, dir) — the pooled DEBRIS BURST ----------
-  // The cross-module contract names cityFracture as a CALLABLE: "a pooled
-  // debris/rubble/scorch burst when something blows up". The traffic + buildings
-  // agents fire it at any detonation (a car cooks off, a prop blows) to throw a
-  // cheap, pooled spray of concrete shrapnel + a kicked-up dust puff + a road
-  // scorch — WITHOUT carving a wall (that's blastAt's job; this is the free
-  // ground-FX that sells the boom anywhere, even mid-street with no facade).
-  // WHY: a thing that explodes should leave a MARK and fling rubble — a blast
-  // that just flashes and vanishes reads fake. All work routes through the
-  // already-pooled crashfx systems (cityChunk recycles under CHUNK_CAP, scorch
-  // LRU-caps), so it adds ZERO steady cost and can't flood. Headless-safe: every
-  // sub-call is feature-detected, so a stub THREE / partial load never throws.
-  // pos = {x,y,z} (or a raycast hit w/ .point); radius scales the spray + scorch;
-  // dir (optional {x,z}/{x,y,z} unit-ish) biases the shrapnel DOWNRANGE of the hit.
+  // ---- CBZ.cityFracture(pos, radius, dir) — the pooled ground DEBRIS BURST ---
+  // A detonation away from any wall (a car cooks off, a prop blows): chips of
+  // the ground, a dust kick and the glass around it. Never carves.
   function fractureBurst(pos, radius, dir) {
     if (pos && pos.point) pos = pos.point;
     if (!pos || !CBZ.game || CBZ.game.mode !== "city") return;
     const x = pos.x, z = pos.z, y = pos.y == null ? 0.4 : pos.y;
     const r = Math.max(0.6, radius || 2.2);
-    // power read off the radius so a tiny pop and an RPG-class burst differ
     const power = Math.min(2.6, 0.7 + r * 0.35);
     let dx = dir ? dir.x : 0, dz = dir ? (dir.z != null ? dir.z : 0) : 0;
     const dl = Math.hypot(dx, dz);
     const biased = dl > 1e-3;
     if (biased) { dx /= dl; dz /= dl; }
-    // (1) pooled concrete SHRAPNEL flung from the seat (downrange if dir given) —
-    // cityChunk is the shared, recycled debris pool, so this is draw-call-cheap.
     if (CBZ.cityChunk) {
       try {
         CBZ.cityChunk(x, Math.max(0.4, y), z, {
-          count: Math.round(4 + power * 4), force: 4 + power * 3, hot: power > 1.2,
+          count: Math.round(4 + power * 4), force: 4 + power * 3,
           dirx: biased ? dx : null, dirz: biased ? dz : null,
         });
       } catch (e) {}
     }
-    // (2) a kicked-up DUST CLOUD at the base (the breath of pulverized debris) —
-    // crashfx owns the pooled puff/point-burst systems and exports cityDustKick
-    // for exactly this; guarded so a partial load never throws.
     if (CBZ.cityDustKick) { try { CBZ.cityDustKick(x, y, z, power); } catch (e) {} }
-    // (3) a road SCORCH stain so the blast leaves a permanent mark on the deck.
-    if (CBZ.cityScorch) { try { CBZ.cityScorch(x, z, 1.2 + r * 0.5); } catch (e) {} }
-    // (4) blow out nearby glass — a detonation should crack the windows around it.
     if (CBZ.cityShatter) { try { CBZ.cityShatter(x, z, 3.0 + r * 1.4); } catch (e) {} }
   }
 
-  // Export cityFracture as the CALLABLE burst, with every existing object method
-  // hung off it so NO existing caller (CBZ.cityFracture.blastAt / .apply / .onHole
-  // / .recent / net hooks) breaks — additive: the object's whole surface is
-  // preserved, we just made the namespace itself invokable.
   const api = fractureBurst;
   api.blastAt = blastAt;
   api.chewWall = chewWall;
   api.serialize = serialize;
   api.apply = apply;
   api.applyOne = applyOne;
+  api.forgetLot = forgetLot;
   api.onHole = null;          // net layer assigns: fn(hole) on every NEW local carve
   api.recent = recent;
-  api.recentAt = recentAt;    // generalized dedup window (additive)
-  // A caller that OPENED the wall itself (systems/breach.js's contact carve)
-  // owns the hole: it calls this to drop the carve the same blast deferred a
-  // frame earlier. Without it the deferred carve re-resolves against LIVE
-  // colliders — the struck box is spliced out by then — and lands its
-  // room-sized hole on a remnant flank or a neighbouring wall. Measured in
-  // the pen: one 5 lb brick made its doorway AND blew a second full-height
-  // hole in the doorway's own flank.
+  api.recentAt = recentAt;
+  // a caller that opened the wall itself drops the carve this blast deferred
   api.cancelPendingNear = function (x, z, r) {
     const rr = r == null ? DEFER_CELL : r;
     for (let i = deferQ.length - 1; i >= 0; i--) {
@@ -554,17 +346,9 @@
       if (Math.abs(d.x - x) <= rr && Math.abs(d.z - z) <= rr) deferQ.splice(i, 1);
     }
   };
-  api.burst = fractureBurst;  // explicit alias if a caller prefers a named method
+  api.burst = fractureBurst;
   api._adopt = function (rec, r) { return adopt(rec, r || (rec.gap ? (rec.gap.u1 - rec.gap.u0) / 2 : 1.6), false); };
   api._cleared = cleared;
-  // debug/QA accessor for the per-facade cumulative wound score (b+face key —
-  // see woundFacade above); not used by any gameplay path, additive only.
-  api._woundScore = function (b, face) { const w = wounds.get(woundKey(b, face)); return w ? w.score : 0; };
-  // RATCHET INPUT (CBZ.impactAudit, systems/impactbus.js): true while THIS file
-  // is still keeping its own independent structural books. Goes false the
-  // moment the shared ledger is in charge — the counter may only go down.
-  try {
-    Object.defineProperty(api, "_legacyAccum", { get: function () { return !ledgerOn(); }, configurable: true });
-  } catch (e) { api._legacyAccum = true; }
+  api.liveCount = function () { return live.length; };
   CBZ.cityFracture = api;
 })();

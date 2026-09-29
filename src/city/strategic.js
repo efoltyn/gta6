@@ -104,11 +104,8 @@
   /* ---- THE NUCLEAR REDRAW (2026-07-28). Both are also declared in
      config.js; the `== null` idiom is idempotent, so whichever file the page
      loads first wins and this module still degrades on its own. ---------- */
-  // NUKE_FX_V2 — the weapon AS SEEN. In this file: the real gravity-bomb
-  // body (CBZ.nukeWarhead — ogive nose, boat-tail, cruciform fins, arming
-  // band), the release tumble that settles nose-down, and the RETARDED FALL
-  // with its streamed ribbon parachute (see the retardFor block). false =>
-  // the generic 2.4 m drum on a plain parabola, exactly as before.
+  // NUKE_FX_V2 — the RETARDED FALL with its streamed ribbon parachute (see
+  // the retardFor block). false => a plain parabola, no canopy.
   if (CBZ.CONFIG.NUKE_FX_V2 == null) CBZ.CONFIG.NUKE_FX_V2 = true;
   // NUKE_GROUND_COUNTDOWN — the planted device runs a three-beat ARMING
   // sequence and then a clock derived from the escape distance (see NK).
@@ -710,22 +707,29 @@
     // an 11.2 m track (the real aeroplane's is 12.2). Every strut starts at the
     // belly height the loft actually has above it and ends on the tyre, so no
     // leg hangs in air and none is buried.
+    // round oleos, hubbed tyres, a drag brace per leg — not box posts
+    const HUB = cm(0x9aa0a8);
     function wheel(x, z, r) {
-      const w = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.32, 10), TIRE);
+      const w = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.32, 16), TIRE);
       w.rotation.z = Math.PI / 2; w.position.set(x, r, z);
       w.castShadow = true; gp.add(w);
+      const h = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.55, r * 0.55, 0.34, 12), HUB);
+      h.rotation.z = Math.PI / 2; h.position.set(x, r, z); gp.add(h);
     }
     function strut(x, z, w, d) {
-      const top0 = b2BotY(x, z);
-      const st = new THREE.Mesh(new THREE.BoxGeometry(w, top0 - 0.42, d), GEAR);
+      const top0 = b2BotY(x, z), len = top0 - 0.42;
+      const st = new THREE.Mesh(new THREE.CylinderGeometry(w * 0.42, w * 0.5, len, 12), GEAR);
       st.position.set(x, (top0 + 0.42) / 2, z); st.castShadow = true; gp.add(st);
+      const br = new THREE.Mesh(new THREE.CylinderGeometry(w * 0.22, w * 0.22, Math.hypot(len * 0.7, 1.4), 8), GEAR);
+      br.position.set(x, 0.42 + len * 0.62, z - 0.7); br.rotation.x = -Math.atan2(1.4, len * 0.7); gp.add(br);   // strut mid → belly aft
     }
     strut(0, 6.30, 0.34, 0.34);
     wheel(-0.30, 6.30, 0.42); wheel(0.30, 6.30, 0.42);
     for (let i = 0; i < 2; i++) {
       const s = i ? 1 : -1;
       strut(s * 5.60, -0.30, 0.46, 0.46);
-      const beam = new THREE.Mesh(new THREE.BoxGeometry(0.50, 0.26, 2.60), GEAR);
+      const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 2.60, 10), GEAR);
+      beam.rotation.x = Math.PI / 2;
       beam.position.set(s * 5.60, 0.62, -0.30); beam.castShadow = true; gp.add(beam);
       for (let a = 0; a < 2; a++) {
         const wz = -0.30 + (a ? 0.90 : -0.90);
@@ -754,6 +758,13 @@
     // extra is the gear that buys the walk-under). Ratio 2.50 — the reference's.
     const dims = { family: "B-2-stealth", length: 21, span: 52.4, height: 6.0 };
     gp.userData.aircraftDims = dims;
+    // one draw per material for everything that never moves (deck, fittings,
+    // inlets, gear): the doors, the hatch, the glass and the plumes keep theirs
+    if (CBZ.milAir && CBZ.milAir.kit.mergeStatic) {
+      CBZ.milAir.kit.mergeStatic(gp, function (o) {
+        return o === gp.userData.b2Glass || o === gp.userData.b2Hatch || (o.userData && o.userData.bayDoor);
+      });
+    }
     return { group: gp, dims };
   }
 
@@ -1058,76 +1069,40 @@
     if (_payFlash > 0 && _payTag) el.textContent = t + HUD_MARK + _payTag;
   }
 
-  // ---- the falling-ordnance pool (shared geo/mats — explosives.js idiom) ---
-  let BGEO = null, BMAT = null;
-  function bombAssets() {
-    if (BGEO) return;
-    BGEO = {
-      body: new THREE.CylinderGeometry(0.24, 0.28, 1.9, 8),
-      buster: new THREE.CylinderGeometry(0.26, 0.3, 3.4, 8),
-      nuke: new THREE.CylinderGeometry(0.42, 0.42, 2.4, 10),
-      fin: new THREE.BoxGeometry(0.7, 0.5, 0.08),
-    };
-    BMAT = {
-      body: new THREE.MeshLambertMaterial({ color: 0x3a4030 }),
-      buster: new THREE.MeshLambertMaterial({ color: 0x2b2e33 }),
-      nuke: new THREE.MeshLambertMaterial({ color: 0xb8bec6 }),
-      band: new THREE.MeshLambertMaterial({ color: 0xd4a017 }),
-    };
-    for (const k in BGEO) BGEO[k]._shared = true;
-    for (const k in BMAT) BMAT[k]._shared = true;
-  }
+  // ---- the falling ordnance: shapes + pools live in weapons/munitions.js ---
+  // Mk-84 for the iron bomb, the Mk-84 + JDAM kit for the guided round, the
+  // GBU-28 penetrator for the buster; each a pooled, one-draw-call body with
+  // its moving part (fuze vane / pop-out wings) dressed per frame below.
+  const MU = CBZ.munitions;
+  const BOMB_MUNITION = { bomb: "mk84", jdam: "jdam", buster: "gbu28" };
 
   /* ==========================================================================
      CBZ.nukeWarhead(opts) — WHAT A NUCLEAR GRAVITY BOMB LOOKS LIKE.
 
-     ONE model, TWO consumers, and that is the whole reason it is exported:
-     city/bunkers.js's vault rack and this file's falling round used to be two
-     unrelated piles of cylinders that disagreed about the shape of the same
-     object (the vault's was a 1.7 m sausage with a ball nose; the flight
-     body was a bare 2.4 m drum with two flat plates for fins). A weapon you
-     pick up and the weapon you drop must be the same weapon.
+     ONE model, THREE consumers (city/bunkers.js's vault rack, this file's
+     falling round and armed device, systems/ordnance.js's nuclear kind). A
+     weapon you pick up and the weapon you drop must be the same weapon.
 
-     PROPORTIONS ARE REAL, then scaled ONCE. The reference is the B61 family —
-     the US air-delivered gravity bomb, and the one that actually has the
-     parachute-retarded delivery this file models:
+     PROPORTIONS ARE REAL, then scaled ONCE. The reference is the B61 family:
 
-         B61      length 141.6 in = 3.58 m   diameter 13.3 in = 0.338 m
-                  mass ~700 lb = 320 kg      four tail fins
-                  fineness ratio L/D = 10.6
-         B83      length 3.7 m  diameter 0.46 m  L/D = 8.0
+         B61      length 3.58 m   diameter 0.338 m   ~320 kg   four tail fins
+         B83      length 3.7 m    diameter 0.46 m
 
-     A 10.6:1 pencil is unreadable at this game's scale (it is 0.34 m across
-     against a 0.55 m player capsule and the camera is usually 60 m up), so
-     the casing is drawn at L/D = 6.0 — between the B83 and Fat Man's 3.3:1 —
-     with the LENGTH honest at 2.52 m and the DIAMETER thickened. That is a
-     deliberate, named liberty; every other proportion below is off the real
-     article.
+     A 10.6:1 pencil is unreadable at this game's scale, so the casing is
+     drawn at L/D = 6.0 with the LENGTH 2.52 m and the DIAMETER thickened. That
+     is a deliberate, named liberty; every other proportion is off the real
+     article. The nose is a computed tangent ogive (munitions.kit.ogive).
 
-     THE NOSE IS A COMPUTED TANGENT OGIVE, not a taste. For nose length L and
-     base radius R the ogive radius is rho = (R^2 + L^2) / 2R, and the profile
-     measured from the tip is
-
-         r(x) = sqrt(rho^2 - (L - x)^2) + R - rho,   x in [0, L]
-
-     which is exactly 0 at the tip and exactly R at the shoulder. It is
-     evaluated at NOSE_SEG stations and drawn as that many CylinderGeometry
-     frusta. Frusta rather than a LatheGeometry on purpose: a lathe's face
-     winding depends on the profile's point order, the fix for a mis-wound
-     lathe is `side: DoubleSide`, and the only material this could take that
-     from is CBZ.cmat's CACHED SHARED one — mutating `.side` on a cached
-     material is the exact bug class CLAUDE.md records against boxGeom's
-     shared geometry. Four frusta cost four tiny meshes and cannot be wrong.
+     The casing is ONE cached, merged, vertex-coloured lathe + fins + bands +
+     lugs (one draw call, built once); a caller's `len`/`rad` scale the mesh.
 
      opts:
-       mat(hex, opts)  material factory. bunkers.js passes its cmat() so the
-                       static batcher can collapse the vault rack; this file
-                       passes its own pooled MeshLambertMaterials.
-       geo(w, h, d)    box-geometry factory (CBZ.boxGeom, or raw).
        len, rad        casing length / body radius (defaults below).
        chute           build the ribbon-parachute assembly as a hidden child
-                       (`group.userData.chute`). Flight only.
-       lugs            draw the two lifting lugs (a stowed weapon has them).
+                       (`group.userData.chute`) + its stowed pack. Flight only.
+       lugs            draw the two lifting lugs (default true).
+     (opts.mat / opts.geo are accepted and ignored: the body is one shared
+     material now.)
      Returns a Group with the NOSE ALONG +X and the origin at mid-length, so a
      caller only ever writes rotation.y (bearing) and rotation.x (dive).
   ========================================================================== */
@@ -1136,7 +1111,6 @@
     RAD: 0.21,          // body radius — L/D 6.0, see the note above
     NOSE: 0.62,         // ogive length: 0.246 of overall, the B61's own share
     TAIL: 0.30,         // boat-tail
-    NOSE_SEG: 4,        // frusta the ogive is drawn with
     FIN_N: 4,           // cruciform, like every B61 mod
     FIN_SWEEP: 0.22,    // rad of leading-edge sweep
   };
@@ -1149,166 +1123,95 @@
     chute: 0xd8d2c2,    // ribbon-chute canopy, undyed nylon/Kevlar
     chuteD: 0x8a8478,   // the woven ribbon slots
   };
-  function _defMat(hex) { return cm(hex); }
-  function _defGeo(w, h, d) { return bg(w, h, d); }
+  const _whGeo = {};
+  function warheadGeo(lugs) {
+    const key = lugs ? "lugs" : "bare";
+    if (_whGeo[key]) return _whGeo[key];
+    const K = MU.kit, L = WH.LEN, R = WH.RAD;
+    const noseL = WH.NOSE, tailL = WH.TAIL, bodyL = L - noseL - tailL;
+    const zt = -L / 2, zb = zt + tailL, zs = zb + bodyL;           // tail / body start / shoulder
+    const P = [];
+    P.push({ g: K.latheZ([[0, zt], [R * 0.78, zt], [R, zb]], 18), c: WH_COL.skinD });
+    P.push({ g: K.latheZ([[R, zb], [R, zs]], 20), c: WH_COL.skin });
+    P.push({ g: K.latheZ(K.ogive(R, noseL, zs, 10, 0.004).concat([[0, L / 2]]), 20), c: WH_COL.skin });
+    // the RED arming band forward over the physics package, the YELLOW
+    // handling band aft, the joint ring at the tail section
+    P.push({ g: K.band(R, zb + bodyL * 0.72 - 0.058, zb + bodyL * 0.72 + 0.058, 1.035), c: WH_COL.arm });
+    P.push({ g: K.band(R, zb + bodyL * 0.24 - 0.043, zb + bodyL * 0.24 + 0.043, 1.03), c: WH_COL.band });
+    P.push({ g: K.band(R, zb - 0.01, zb + 0.05, 1.02), c: WH_COL.skinD });
+    // the black stencil plate on the flank
+    P.push({ g: K.box(0.012, R * 0.62, bodyL * 0.30, R * 0.975, 0, zb + bodyL * 0.5), c: WH_COL.stencil });
+    // lifting lugs on the NATO 14 in spacing, scaled with the casing (±0.0497 L)
+    if (lugs) for (const s of [-0.0497, 0.0497]) P.push({ g: K.box(0.07, 0.13, 0.10, 0, R + 0.055, zb + bodyL * 0.5 + s * L), c: WH_COL.skinD });
+    // four swept fins in a cruciform, roots in the boat-tail
+    const finC = L * 0.155, finS = R * 1.30, zc = zt + tailL * 0.55, sw = finS * Math.tan(WH.FIN_SWEEP);
+    const r0 = R * 0.80, r1 = R * 0.86 + finS;
+    K.fins(WH.FIN_N, [[r0, zc - finC / 2], [r0, zc + finC / 2], [r1, zc + finC / 2 - sw], [r1, zc - finC / 2 - sw * 0.35]], 0.028, Math.PI / 2)
+      .forEach(function (g) { P.push({ g: g, c: WH_COL.skinD }); });
+    // the tail-kit hoop joining the fin tips
+    P.push({ g: K.latheZ([[R * 1.05, zt + 0.015], [R * 1.08, zt + 0.015], [R * 1.08, zt + 0.085], [R * 1.05, zt + 0.085]], 18), c: WH_COL.skinD });
+    const geo = K.merge(P);
+    geo.rotateY(Math.PI / 2);                 // nose +Z → +X
+    geo.computeBoundingBox(); geo.computeBoundingSphere();
+    _whGeo[key] = geo;
+    return geo;
+  }
+  // The ribbon chute's parts, built once. Canopy 1/3 true scale (2.4 m) so it
+  // reads beside a 2.5 m casing; the rate it falls at is solved in retardFor().
+  let _chute = null;
+  function chuteParts() {
+    if (_chute) return _chute;
+    const canR = 1.20, canH = 0.62, canX = -1.55;
+    const canMat = new THREE.MeshLambertMaterial({ color: WH_COL.chute, side: THREE.DoubleSide });
+    const ribMat = new THREE.MeshLambertMaterial({ color: WH_COL.chuteD, side: THREE.DoubleSide });
+    canMat._shared = ribMat._shared = true;
+    const lineRun = -canX, skirtR = canR * 0.46;
+    _chute = {
+      canR: canR, canH: canH, canX: canX, canMat: canMat, ribMat: ribMat, skirtR: skirtR,
+      splay: Math.atan2(skirtR, lineRun),
+      can: new THREE.SphereGeometry(canR, 14, 7, 0, Math.PI * 2, 0, Math.PI * 0.5),
+      hoops: [0.55, 0.85].map(function (k) {
+        const rr = canR * Math.sqrt(Math.max(0.02, 1 - k * k));
+        return { k: k, g: new THREE.CylinderGeometry(rr, rr, 0.05, 14, 1, true) };
+      }),
+      line: new THREE.BoxGeometry(Math.hypot(lineRun, skirtR), 0.022, 0.022),
+      pack: new THREE.CylinderGeometry(WH.RAD * 0.74, WH.RAD * 0.62, 0.24, 12),
+    };
+    _chute.can._shared = _chute.line._shared = _chute.pack._shared = true;
+    _chute.hoops.forEach(function (h) { h.g._shared = true; });
+    return _chute;
+  }
   CBZ.nukeWarhead = function (opts) {
     opts = opts || {};
-    const M = typeof opts.mat === "function" ? opts.mat : _defMat;
-    const B = typeof opts.geo === "function" ? opts.geo : _defGeo;
     const L = +opts.len > 0 ? +opts.len : WH.LEN;
     const R = +opts.rad > 0 ? +opts.rad : WH.RAD;
-    // The three casing sections must sum to L, so the nose/tail scale with it.
-    const noseL = WH.NOSE * (L / WH.LEN), tailL = WH.TAIL * (L / WH.LEN);
-    const bodyL = Math.max(0.1, L - noseL - tailL);
     const gp = new THREE.Group();
-    const x0 = -L / 2;                                   // tail end, local +X forward
-
-    function cyl(rTop, rBot, h, x, hex, seg) {
-      // CylinderGeometry is Y-axis; -90 deg about Z takes +Y to +X, so the
-      // frustum's "top" (rTop) ends up FORWARD. Nose-forward by construction.
-      const m = new THREE.Mesh(new THREE.CylinderGeometry(rTop, rBot, h, seg || 12), M(hex));
-      m.rotation.z = -Math.PI / 2;
-      m.position.x = x;
-      gp.add(m);
-      return m;
-    }
-
-    // ---- NOSE: the computed tangent ogive, tip at x0 + L -------------------
-    const rho = (R * R + noseL * noseL) / (2 * R);
-    function ogive(x) {                                  // x measured from the TIP
-      const s = noseL - Math.max(0, Math.min(noseL, x));
-      return Math.max(0.004, Math.sqrt(Math.max(0, rho * rho - s * s)) + R - rho);
-    }
-    const noseX0 = x0 + tailL + bodyL;                   // the shoulder
-    for (let i = 0; i < WH.NOSE_SEG; i++) {
-      const seg = noseL / WH.NOSE_SEG;
-      const xa = noseL - i * seg, xb = noseL - (i + 1) * seg;   // from shoulder forward
-      cyl(ogive(xb), ogive(xa), seg, noseX0 + i * seg + seg / 2, WH_COL.skin);
-    }
-
-    // ---- PARALLEL BODY + BOAT-TAIL ----------------------------------------
-    cyl(R, R, bodyL, x0 + tailL + bodyL / 2, WH_COL.skin, 14);
-    // A real gravity bomb tapers into its tail kit; the drum this replaces did
-    // not, which is most of why it read as a propane tank.
-    cyl(R, R * 0.78, tailL, x0 + tailL / 2, WH_COL.skinD, 14);
-
-    // ---- BANDS. Each is a hair proud of the skin so it reads as applied ----
-    // the RED arming band sits over the physics package, forward of centre —
-    // where the real stencil ring goes.
-    cyl(R * 1.035, R * 1.035, 0.115, x0 + tailL + bodyL * 0.72, WH_COL.arm, 14);
-    // the YELLOW handling/stencil band, aft
-    cyl(R * 1.03, R * 1.03, 0.085, x0 + tailL + bodyL * 0.24, WH_COL.band, 14);
-    // the joint ring between the physics package and the tail section
-    cyl(R * 1.02, R * 1.02, 0.06, x0 + tailL + 0.02, WH_COL.skinD, 14);
-
-    // Black stencil plate ON THE FLANK (markings, without a texture). The
-    // box is thin in Y, so RotX(90 deg) swaps Y and Z and makes it thin in Z
-    // — a plate lying against the side. It is seated at 0.975 R so its outer
-    // face stands 0.6 cm proud of the 0.21 m casing surface and reads as
-    // applied rather than sunk into it.
-    const st = new THREE.Mesh(B(bodyL * 0.30, 0.012, R * 0.62), M(WH_COL.stencil));
-    st.position.set(x0 + tailL + bodyL * 0.50, 0, R * 0.975);
-    st.rotation.x = Math.PI / 2;
-    gp.add(st);
-
-    // ---- LIFTING LUGS. The real article's suspension lugs are on the NATO
-    // 14-inch standard = 0.356 m, and this casing is drawn at 2.52 m against
-    // the B61's 3.58 m, so the scaled spacing is 0.356 * (2.52/3.58) =
-    // 0.2506 m — i.e. +/- 0.0497 of the overall length. Typed as the ratio
-    // rather than the answer so it survives a change of `len`.
-    if (opts.lugs !== false) {
-      const LUG_HALF = 0.0497;
-      for (const s of [-LUG_HALF, LUG_HALF]) {
-        const lug = new THREE.Mesh(B(0.10, 0.13, 0.07), M(WH_COL.skinD));
-        lug.position.set(x0 + tailL + bodyL * 0.5 + s * L, R + 0.055, 0);
-        gp.add(lug);
-      }
-    }
-
-    // ---- TAIL: four swept fins in a cruciform + the tail-kit ring ----------
-    const finC = L * 0.155, finS = R * 1.30, finT = 0.028;   // chord / span / thickness
-    const finX = x0 + tailL * 0.55;
-    const finGeo = B(finC, finS, finT);
-    for (let i = 0; i < WH.FIN_N; i++) {
-      const a = i * (Math.PI * 2 / WH.FIN_N);
-      const f = new THREE.Mesh(finGeo, M(WH_COL.skinD));
-      // rotation order XYZ => matrix RotX * RotY * RotZ: the fin is FIRST
-      // swept in its own plane (Z), THEN spun onto its cruciform arm (X).
-      f.rotation.set(a, 0, -WH.FIN_SWEEP);
-      const rMid = R * 0.86 + finS / 2;
-      f.position.set(finX, Math.cos(a) * rMid, Math.sin(a) * rMid);
-      gp.add(f);
-    }
-    // the tail-kit band that joins the fin roots (open-ended: it is a hoop,
-    // and an open cylinder in r128 draws only its wall).
-    const ring = new THREE.Mesh(
-      new THREE.CylinderGeometry(R * 1.08, R * 1.08, 0.07, 16, 1, true), M(WH_COL.skinD));
-    ring.rotation.z = -Math.PI / 2;
-    ring.position.x = x0 + 0.05;
-    gp.add(ring);
-
-    // ---- THE RIBBON PARACHUTE (flight only, stowed until it is streamed) ---
-    /* THE B61 REALLY DOES HAVE ONE, which is why it is drawn. Retarded and
-       laydown delivery stream a nylon/Kevlar RIBBON chute from the tail so
-       the delivery aircraft can escape; the mod-11 canopy is 24 ft = 7.3 m
-       across. Terminal velocity under it is the standard drag balance
-
-           v = sqrt( 2 m g / (rho Cd A) )
-             = sqrt( 2 * 320 * 9.81 / (1.225 * 0.52 * pi * 3.65^2) )
-             = sqrt( 6278 / 26.7 ) = 15.3 m/s
-
-       against a free-fall terminal near 340 m/s — a 22:1 retard. The canopy
-       here is drawn at 1/3 of true scale (2.4 m) so it stays legible beside a
-       2.5 m casing at the ranges this game views a bomb from; the RATE it
-       actually falls at is solved in retardFor(), not from this mesh. */
+    const body = new THREE.Mesh(warheadGeo(opts.lugs !== false), MU.material());
+    body.scale.set(L / WH.LEN, R / WH.RAD, R / WH.RAD);
+    body.castShadow = true; body.receiveShadow = true;
+    gp.add(body);
     if (opts.chute) {
+      const C = chuteParts(), x0 = -L / 2;
       const ch = new THREE.Group();
-      const canR = 1.20, canH = 0.62;
-      // canopy: an upper hemisphere. A parachute is seen from BELOW as often
-      // as above, so this one material genuinely needs DoubleSide — and this
-      // caller mints its own material rather than mutating a cached one.
-      const canMat = new THREE.MeshLambertMaterial({
-        color: WH_COL.chute, side: THREE.DoubleSide,
-      });
-      canMat._shared = true;
-      /* The chute group hangs off the TAIL (local -X, since the nose is +X),
-         so everything inside it has a NEGATIVE x. RotZ(+90 deg) maps the
-         hemisphere's +Y pole onto -X, i.e. the dome's convex side points
-         away from the weapon — which is the side the airstream is on. */
-      const canX = -1.55;
-      const can = new THREE.Mesh(
-        new THREE.SphereGeometry(canR, 14, 7, 0, Math.PI * 2, 0, Math.PI * 0.5), canMat);
-      can.scale.set(1, canH / canR, 1);
+      // canopy: an upper hemisphere whose dome faces the airstream (aft)
+      const can = new THREE.Mesh(C.can, C.canMat);
+      can.scale.set(1, C.canH / C.canR, 1);
       can.rotation.z = Math.PI / 2;
-      can.position.x = canX;
+      can.position.x = C.canX;
       ch.add(can);
-      // the RIBBON SLOTS — a ribbon chute is a woven grid, not a sheet. Two
-      // hoops of the darker weave read as that at any distance we see it from.
-      const ribMat = new THREE.MeshLambertMaterial({
-        color: WH_COL.chuteD, side: THREE.DoubleSide,
-      });
-      ribMat._shared = true;
-      for (const k of [0.55, 0.85]) {
-        const rr = canR * Math.sqrt(Math.max(0.02, 1 - k * k));
-        const hoop = new THREE.Mesh(
-          new THREE.CylinderGeometry(rr, rr, 0.05, 14, 1, true), ribMat);
+      // the RIBBON SLOTS — two hoops of the darker weave
+      for (let i = 0; i < C.hoops.length; i++) {
+        const hoop = new THREE.Mesh(C.hoops[i].g, C.ribMat);
         hoop.rotation.z = Math.PI / 2;
-        hoop.position.x = canX - canH * k;
+        hoop.position.x = C.canX - C.canH * C.hoops[i].k;
         ch.add(hoop);
       }
-      // rigging: six suspension lines splayed from the tail bridle (local 0)
-      // out to the canopy skirt. The splay angle is the geometry, not a guess:
-      // atan(skirt radius / line run).
-      const lineRun = -canX, skirtR = canR * 0.46;
-      const splay = Math.atan2(skirtR, lineRun);
-      const lineGeo = B(Math.hypot(lineRun, skirtR), 0.022, 0.022);
+      // six suspension lines splayed from the tail bridle to the skirt
       for (let i = 0; i < 6; i++) {
         const a = i * (Math.PI * 2 / 6);
-        const ln = new THREE.Mesh(lineGeo, M(WH_COL.chuteD));
-        // XYZ order => RotX(a) * RotZ(splay): splay the line outward in its own
-        // plane first, then spin it onto its bearing around the body axis.
-        ln.rotation.set(a, 0, Math.PI - splay);
-        ln.position.set(canX * 0.5, Math.cos(a) * skirtR * 0.5, Math.sin(a) * skirtR * 0.5);
+        const ln = new THREE.Mesh(C.line, C.ribMat);
+        ln.rotation.set(a, 0, Math.PI - C.splay);
+        ln.position.set(C.canX * 0.5, Math.cos(a) * C.skirtR * 0.5, Math.sin(a) * C.skirtR * 0.5);
         ch.add(ln);
       }
       ch.visible = false;
@@ -1317,37 +1220,21 @@
       gp.add(ch);
       gp.userData.chute = ch;
       // the stowed pack, which is what you see before it streams
-      const pack = new THREE.Mesh(
-        new THREE.CylinderGeometry(R * 0.74, R * 0.62, 0.24, 12), M(WH_COL.skinD));
+      const pack = new THREE.Mesh(C.pack, nukeMat(WH_COL.skinD));
       pack.rotation.z = -Math.PI / 2;
       pack.position.x = x0 - 0.10;
       gp.add(pack);
       gp.userData.chutePack = pack;
     }
-
-    gp.traverse(function (o) { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
     return gp;
   };
 
   function bombMesh(kind) {
-    bombAssets();
-    /* THE NUCLEAR ROUND IS NOT THE GENERIC CYLINDER ANY MORE. It gets the
-       shared warhead above — ogive, boat-tail, cruciform fins, arming band
-       and a stowed ribbon chute — while the Mk-84 and the GBU keep the cheap
-       pooled bodies they always had. One flag, one line back. */
-    if (kind === "nuke" && CBZ.CONFIG.NUKE_FX_V2 !== false) {
-      const w = CBZ.nukeWarhead({
-        mat: function (hex) { return nukeMat(hex); },
-        geo: bg, chute: true,
-      });
-      /* THE NOSE CONVENTION IS NOT NEGOTIABLE HERE. Every other round in this
-         file is built with its nose along +Z, and the flight loop's attitude
-         (rotation.y = atan2(vx,vz), rotation.x = atan2(-vy,hsp)) is written
-         for exactly that. CBZ.nukeWarhead builds nose-along-+X because that
-         is the axis a laid-down CylinderGeometry naturally takes. One outer
-         Group with a single yaw reconciles them — RotY(-90 deg) maps +X onto
-         +Z — so NOT ONE LINE of the flight attitude changes and there is no
-         second sign convention to get wrong later. */
+    if (kind === "nuke") {
+      /* CBZ.nukeWarhead builds nose-along-+X; every round in this file flies
+         nose +Z. One outer Group with a single yaw reconciles them —
+         RotY(-90 deg) maps +X onto +Z — so the flight attitude is unchanged. */
+      const w = CBZ.nukeWarhead({ chute: true });
       const outer = new THREE.Group();
       w.rotation.y = -Math.PI / 2;
       outer.add(w);
@@ -1356,23 +1243,13 @@
       outer.userData.chutePack = w.userData.chutePack || null;
       return outer;
     }
-    const gp = new THREE.Group();
-    const body = new THREE.Mesh(kind === "buster" ? BGEO.buster : kind === "nuke" ? BGEO.nuke : BGEO.body,
-      kind === "buster" ? BMAT.buster : kind === "nuke" ? BMAT.nuke : BMAT.body);
-    body.rotation.x = Math.PI / 2;                   // nose down the flight path
-    gp.add(body);
-    if (kind !== "bomb") {
-      const band = new THREE.Mesh(BGEO.fin, BMAT.band);
-      band.scale.set(0.9, 0.4, 1); band.position.z = 0.3; gp.add(band);
-    }
-    for (let i = 0; i < 2; i++) {
-      const f = new THREE.Mesh(BGEO.fin, BMAT.body);
-      f.rotation.z = i * Math.PI / 2;
-      f.position.z = -(kind === "buster" ? 1.6 : 1.0);
-      gp.add(f);
-    }
-    gp.traverse(function (o) { if (o.isMesh) o.castShadow = true; });
-    return gp;
+    return MU.acquire(BOMB_MUNITION[kind] || "mk84");
+  }
+  // a pooled body goes back to the pool; the nuclear round just leaves
+  function dropBombMesh(o) {
+    if (!o) return;
+    if (o.userData && o.userData.munition) MU.release(o);
+    else if (o.parent) o.parent.remove(o);
   }
   /* The flight body's own material pool. NOT CBZ.cmat: a cached city material
      is shared with static geometry the batcher may merge, and a falling bomb
@@ -2191,7 +2068,7 @@
       }
     }
     if (!g || g.mode !== "city") {                      // mode flip: sweep the sky
-      for (const b of bombs) if (b.mesh && b.mesh.parent) b.mesh.parent.remove(b.mesh);
+      for (const b of bombs) dropBombMesh(b.mesh);
       bombs.length = 0;
       stopBombCine();
       return;
@@ -2212,7 +2089,7 @@
         if (b.reaim <= 0) reaimGuided(b);
       }
       if (b.t >= b.sol.t) {
-        if (b.mesh && b.mesh.parent) b.mesh.parent.remove(b.mesh);
+        dropBombMesh(b.mesh);
         bombs.splice(i, 1);
         resolveImpact(b);
         continue;
@@ -2225,6 +2102,9 @@
       const hsp = Math.hypot(b.vx, b.vz);
       b.mesh.rotation.y = Math.atan2(b.vx, b.vz);
       b.mesh.rotation.x = Math.atan2(-_bp.vy, hsp > 0.001 ? hsp : 0.001);
+      // the fuze's arming vane windmills up with airspeed; a GBU-28's tail
+      // wings pop out of their slots a quarter second off the ejector
+      MU.dressBomb(b.mesh, b.age, dt, Math.hypot(hsp, _bp.vy));
       /* ---- RELEASE ATTITUDE. A store does not leave a bay already pointing
          where it is going: it pitches and yaws off the ejector, then the fins
          weathercock it nose-down within about a second. `tumble` is that
@@ -2951,7 +2831,7 @@
     if (el + 0.001 < _lastEl) {
       radZones.length = 0;
       pendingBusters.length = 0;
-      for (const b of bombs) if (b.mesh && b.mesh.parent) b.mesh.parent.remove(b.mesh);
+      for (const b of bombs) dropBombMesh(b.mesh);
       bombs.length = 0;
       for (const a of armed) if (a.mesh && a.mesh.parent) a.mesh.parent.remove(a.mesh);
       armed.length = 0;
@@ -3075,21 +2955,10 @@
     _ledRed._shared = _ledAmber._shared = _ledDark._shared = true;
   }
   function deviceMesh() {
-    bombAssets();
     ledMats();
-    if (CBZ.CONFIG.NUKE_FX_V2 === false || !CBZ.nukeWarhead) {
-      const gp0 = bombMesh("nuke");
-      gp0.rotation.x = 0;                             // lies flat on the ground
-      gp0.rotation.z = Math.PI / 2;
-      const led0 = new THREE.Mesh(bg(0.12, 0.12, 0.12), _ledRed);
-      led0.position.set(0, 0.55, 0);
-      gp0.add(led0);
-      gp0.userData.led = led0;
-      return gp0;
-    }
     const gp = new THREE.Group();
     // the weapon itself, lying on its side, nose along +X (no rotation needed)
-    const w = CBZ.nukeWarhead({ mat: nukeMat, geo: bg, chute: false });
+    const w = CBZ.nukeWarhead({ chute: false });
     gp.add(w);
     // a low transport skid so it is not floating on its own curvature
     const skid = new THREE.Mesh(bg(1.9, 0.10, 0.72), nukeMat(0x4a5058));
@@ -3550,7 +3419,7 @@
       const park = new THREE.Group();
       park.name = "strategic-fx-prewarm";
       park.visible = false;
-      park.add(bombMesh("bomb")); park.add(bombMesh("buster")); park.add(deviceMesh());
+      park.add(MU.build("mk84")); park.add(MU.build("jdam")); park.add(MU.build("gbu28")); park.add(deviceMesh());
       park.position.set(0, -400, 0);
       CBZ.scene.add(park);
     } catch (e) {}

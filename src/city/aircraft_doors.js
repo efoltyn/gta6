@@ -86,14 +86,13 @@
     }
     if (ud && ud.cabin && ud.cabin.panel) {
       const cab = ud.cabin;
-      // the airliner walk-in offsets track the up-scaled cabin (cab.scale,
-      // stashed by island_airport.js); doorX/doorZ/floorTop are already scaled.
-      const sc = cab.scale || 1;
+      // the airframe publishes where you stand outside the door and the first
+      // step inside it (city/airframes.js cabin spec, root frame)
       return {
         kind: "panel",
         doorLocal: { x: cab.doorX, z: cab.doorZ },
-        outLocal: { x: cab.doorX, z: cab.doorZ - 1.6 * sc },
-        inLocal: { x: cab.doorX - 1.1 * sc, z: -0.6 * sc },
+        outLocal: cab.doorOut || { x: cab.doorX, z: cab.doorZ - 1.6 },
+        inLocal: cab.doorIn || { x: cab.doorX - 1.1, z: -0.6 },
         inY: (grp.position.y || 0) + (cab.floorTop || 0),
       };
     }
@@ -147,13 +146,13 @@
   //  every heading and taxi movement for free. Deploys by rotating about its
   //  top hinge, exactly the way a real integrated airstair unfolds.
   // ======================================================================
-  const STAIR_STEPS = 7;
   function buildStair(grp, spec) {
     if (!window.THREE || !grp) return null;
     const THREE = window.THREE;
     const cmat = CBZ.cmat || CBZ.mat;
     const drop = Math.max(0.9, (spec.inY != null ? spec.inY - (grp.position.y || 0) : 1.6));
     const run = drop * 1.25;                       // ~38 degrees, a real airstair rake
+    const STAIR_STEPS = Math.max(5, Math.round(drop / 0.2));   // a real ~20 cm riser
     const W = 0.92;
     const g = new THREE.Group();
     // hinge at the door sill so the whole flight swings down from the doorway
@@ -199,6 +198,8 @@
   }
 
   function poseCanopy(grp, t) {
+    // an airframe's door swings on its own hinge (city/airframes.js)
+    if (CBZ.airframes && CBZ.airframes.rig(grp)) { CBZ.airframes.poseDoor(grp, grp.userData.canopyDoor || null, t); return; }
     const c = grp.userData.canopy;
     if (!c) return;
     if (!c.userData._doorBase) c.userData._doorBase = { y: c.position.y, z: c.position.z, rx: c.rotation.x };

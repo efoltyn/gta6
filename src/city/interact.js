@@ -1469,7 +1469,7 @@
     chop:        { verb: "Sell",    sub: "drive a hot car into the bay",     rich: false },
     modshop:     { verb: "Upgrade", sub: "paint, armor, boost, guns",        rich: false },
     casino:      { verb: "Gamble",  sub: "blackjack, roulette, slots",       rich: false },
-    raceway:     { verb: "Bet",     sub: "back a driver",                    rich: false },
+    raceway:     { verb: "Race",    sub: "a night at the Bullring",           rich: false },
     arena:       { verb: "Sign up", sub: "fights at Ironjaw Arena",          rich: false },
     paintball:   { verb: "Play",    sub: "team match",                       rich: false },
     transit:     { verb: "Ride",    sub: "bus and train",                    rich: false },

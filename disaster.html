@@ -4,7 +4,7 @@
 
        node tools/build-disaster-page.mjs
 
-     Natural Disaster Survival, standing alone: index.html minus the 446
+     Natural Disaster Survival, standing alone: index.html minus the 439
      script tags this game never runs, opening straight onto the island. This
      is the page the iOS build ships (tools/build-ios.mjs bundles it).
 ============================================================ -->
@@ -434,9 +434,11 @@ document.body.appendChild(b);}}catch(e){}})();
   window.CBZ = Object.assign(window.CBZ || {}, { START_MODE: "survival" });
 </script>
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=w0929town"></script>
+<script src="src/config.js?v=af0929m"></script>
 <!-- CITY SLICES (?slice=name|x,z,r): one piece of Gang City booted as its own world.
      Parses the URL only; with no slice every helper answers "keep". -->
+<script src="src/core/texfree.js?v=phonefit1"></script>
+<script src="src/core/drawcheck.js?v=phonefit1"></script>
 <script src="src/core/bakecache.js?v=phonefit1"></script>
 <script src="src/core/rectgrid.js?v=phonefit1"></script>
 <script src="src/core/slice.js?v=slice0929b"></script>
@@ -496,7 +498,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE ONE STAIR SYSTEM: flight walk surfaces + level links + AI routes. Before any world builder (the prison builds at parse time). -->
 <script src="src/systems/stairs.js?v=pres0929b"></script>
 <!-- ORDNANCE LEAVES THE GROUND CHANGED: a bomb digs a carving. -->
-<script src="src/systems/craters.js?v=crater1"></script>
+<script src="src/systems/craters.js?v=mil0929"></script>
 <!-- A ROOM UNDER AN INTACT STREET: a hole with a lid on it. -->
 <!-- A TUNNEL IS A HOLE LYING DOWN: a swept carving with its lid intact. -->
 <!-- GROUND YOU CAN TAKE AWAY A BUCKET AT A TIME (bare ground only). -->
@@ -631,7 +633,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/hud.js?v=m0927p"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
-<script src="src/weapons/appearances/c4.js?v=anchor1"></script>
+<script src="src/weapons/appearances/c4.js?v=mil0929"></script>
+<!-- MUNITIONS: every round's shape (after bazooka.js: the PG-7V profile), the shared smoke/flare clouds and the rocket plume. Before fpsmode (builds its RPG round on it), island_military (plumes), aircraft + strategic (missiles, bombs). -->
+<script src="src/weapons/munitions.js?v=mil0929"></script>
 <!-- ONE prison flashlight model: held guard tool, physical death drop and
      inventory thumbnail all consume this factory. -->
 <!-- THE OFF HAND ACTUALLY HOLDS THE GUN, AND RELOADS IT. Solves the
@@ -831,7 +835,7 @@ document.body.appendChild(b);}}catch(e){}})();
      before every consumer: systems/inventory.js, city/hud.js, charpanel.js,
      city/inventory.js. Only needs CBZ + CBZ.CONFIG. -->
 <script src="src/systems/hotbar_model.js?v=vit3"></script>
-<script src="src/systems/helditem_model.js?v=vit3"></script>
+<script src="src/systems/helditem_model.js?v=mil0929"></script>
 <!-- LOADING METER: the boot card's percentage, drawn on a worker thread so it
      keeps counting through the 20-30 s synchronous world build (the main
      thread cannot repaint during that). Must load BEFORE state.js, which
@@ -908,7 +912,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE QUAKE IS SHARED: systems/quake.js owns facade shedding, drop-cover,
      gas fires and downed lines for BOTH worlds (CITY_QUAKE for the city).
      Must precede systems/disasters.js so the roster finds CBZ.quake. -->
-<script src="src/systems/quake.js?v=loose1"></script>
+<script src="src/systems/quake.js?v=mil0929"></script>
 <!-- ==== PER-DISASTER MODULE SEAM ==========================================
      One line per disaster in the survival roster, each owned by exactly that
      disaster and nobody else. A disaster whose behaviour outgrows its entry in
@@ -945,7 +949,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- seam:sinkhole       — world/groundshaft.js, tagged above -->
 <!-- seam:nuke           — city/nukefx.js, tagged with the city systems -->
 <!-- ==== END PER-DISASTER MODULE SEAM ==================================== -->
-<script src="src/systems/disasters.js?v=boom2"></script>
+<script src="src/systems/disasters.js?v=mil0929"></script>
 <script src="src/systems/survival_interact.js?v=name1"></script>
 <script src="src/systems/survivalhud.js?v=name1"></script>
 <!-- THE SEAM A TRANSPORT PLUGS INTO. Not multiplayer — the three things that
@@ -1095,21 +1099,33 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- SETTLEMENT COMPOSITION — flavored anchor plan + registry + cityWorldGeo
      wrapper; loads before towngen.js (which consumes CBZ.settlementsCompose)
      and after worldmap.js (whose cityWorldGeo it wraps). -->
-<!-- DIAMOND SPEEDWAY, part 1 — the circuit's architecture: grandstands with real
-     raked seating, pit garages, scoring pylon, jumbotron, floodlight masts,
-     hoardings, marshal posts, tyre walls, paddock. Authored against the track
-     frame island_speedway.js publishes; both run at world-build time so either
-     order works — kept adjacent for readability. -->
 <!-- THE ONE BET SLIP (city/betslip.js): every wager in the city is written on
      it at the venue that takes it (Ironjaw ringside/pit, Southpaw bookmaker,
      APEX bookmaker, the Speedway race book, the racepark windows) and settled
      through it into the betting ledger. Before every venue that uses it. -->
+<!-- THE BULLRING: the racing game's own circuit + stadium modules (src/race/),
+     placed on the speedway island by city/island_speedway.js. The race itself
+     is games/race.html, opened over the city by CBZ.cityRaceLaunch. -->
+<script src="src/race/race_core.js?v=rg0929"></script>
+<script src="src/race/race_track.js?v=rg0929"></script>
+<script src="src/race/race_venue.js?v=rg0929"></script>
+<!-- CIVIL AIRFRAMES. The loft/aerofoil/lathe kit and every civil aircraft
+     type drawn from it at real dimensions (narrowbody, widebody, turboprop,
+     business jet, light single, helicopter variants), shared per type, with
+     their gear/surface/door/light animation and a distance LOD. Before every
+     module that parks, flies or boards one. -->
+<script src="src/city/airframe_kit.js?v=af0929b"></script>
+<script src="src/city/airframes.js?v=af0929b"></script>
 <!-- THE AIRFIELD KIT + THE SECOND AIRPORT. buildAirfield() lays a complete
      field (runway, markings, edge lights, taxiway, apron, stands, terminal,
      tower, fence, kerb, access causeway) from one spec at any origin and any
      bearing, reusing island_airport.js's OWN airframe factories — which is
      why airport_capeharbor.js is a spec and a single call. Both load after
      island_airport.js: it is what publishes CBZ.airportKit. -->
+<!-- MILITARY AIRFRAMES: lofted fighter / attack + utility helicopters / drone / bomber and the kit the cargo lifter is built with. Before island_military (its model factories call CBZ.milAir). -->
+<script src="src/city/mil_air.js?v=mil0929"></script>
+<!-- GROUND ARMOR: tank / IFV / 8x8 / 6x6 truck / light vehicle / rocket artillery / missile launcher at real dimensions, instanced running gear + turret/launcher rigs. Before island_military (makeTank/makeTruck/makePatriot delegate to CBZ.milArmor). -->
+<script src="src/city/mil_armor.js?v=mil0929"></script>
 <!-- STRATEGIC LAYER part 1 — hardened bunkers (Fort Brandt command shelter
      w/ the nuclear vault + mountain/desert finds). Landmass order 40: after
      the military island (22) and both biome height fields (30/31). -->
@@ -1264,7 +1280,7 @@ document.body.appendChild(b);}}catch(e){}})();
      building damage ledger (INTACT→SCARRED→WOUNDED→BURNING→CRITICAL→COLLAPSING→
      RUBBLE). nukefx + aircraftimpact register FX/consumers by name.
      MUST precede strategic.js, which now routes its B-2/nuke through the bus. -->
-<script src="src/systems/impactbus.js?v=boom2"></script>
+<script src="src/systems/impactbus.js?v=mil0929"></script>
 <!-- THE COLLAPSE ENGINE. The ONE answer to "what does a building look like
      while it is being destroyed", shared by the city ledger (structural.js),
      the disaster island (systems/disasters.js) and anything else that
@@ -1276,8 +1292,8 @@ document.body.appendChild(b);}}catch(e){}})();
      are still standing. Reverts: ?cfg_COLLAPSE_V2=0 (both callers fall back
      to the collapse they had) · ?cfg_COLLAPSE_FRAGMENTS=0 (motion without
      debris) · ?cfg_COLLAPSE_SKIN=0 (no wound dressing). -->
-<script src="src/city/collapse.js?v=cpd1"></script>
-<script src="src/city/structural.js?v=cpd1"></script>
+<script src="src/city/collapse.js?v=mil0929"></script>
+<script src="src/city/structural.js?v=mil0929"></script>
 <!-- CITY TORNADO: Rankine vortex, EF0-EF5, roof-first structural damage,
      thrown vehicles priced through the impact bus's kinetic row. Spawns from
      severe weather, deterministic per in-game day. The survival-mode duplicate
@@ -1419,7 +1435,6 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/metro_ground.js?v=wreal0929"></script>
 <script src="src/city/metro.js?v=wreal0929"></script>
 <script src="src/city/metro_structs.js?v=wreal0929"></script>
-<!-- THE RACING GAME: real driving opponents (one brain for oval + street) + race scorer + racing HUD -->
 <!-- custom dialogue + street talk (one contextual YES/NO decision) — after the registry -->
 <!-- 4d-3. this wave's feature modules (load after all deps they read) -->
 <!-- DIALOGUE IS TWO CHOICES — every talkable person answers with a line and

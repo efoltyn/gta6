@@ -22,7 +22,7 @@ vm.createContext(ctxG);
 vm.runInContext(readFileSync(path.join(root, "src/vendor/three.r128.min.js"), "utf8"), ctxG);
 const THREE = ctxG.THREE;
 ctxG.CBZ = { CONFIG: {} };
-for (const f of ["src/weapons/appearances/sidearm.js", "src/weapons/appearances/bazooka.js"])
+for (const f of ["src/weapons/appearances/sidearm.js", "src/weapons/appearances/bazooka.js", "src/weapons/munitions.js"])
   vm.runInContext(readFileSync(path.join(root, f), "utf8"), ctxG, { filename: f });
 const CBZ = ctxG.CBZ;
 
@@ -136,7 +136,8 @@ ok(asc && Math.abs(fp[fp.length - 1][1]) < 1e-9 && fp[0][1] <= -0.85, `flight ro
     let walls = null; function wallDistance() { return walls; }
     function shoulderActive() { return false; }
     ${src.slice(a0, a1)}
-    return { rockets, smokeCloud, fireCloud, launchFx, dressRocket, updateRocketSmoke, syncWarheads, fps, WEAPONS, weaponModels, carriedModels,
+    const C = CBZ.munitions._clouds();
+    return { rockets, smokeCloud: C.smoke, fireCloud: C.fire, launchFx, dressRocket, updateRocketSmoke, syncWarheads, fps, WEAPONS, weaponModels, carriedModels,
       setWall(w) { walls = w; }, setReload(v) { fps.reloading = v; } };
   })()`;
   ctxG.__T.box = box; ctxG.__T.cyl = cyl; ctxG.__T.mat = mat;
@@ -165,7 +166,7 @@ ok(asc && Math.abs(fp[fp.length - 1][1]) < 1e-9 && fp[0][1] <= -0.85, `flight ro
     H.dressRocket(r, dt, prev.distanceTo(r.mesh.position));
     if (r.lit && litAt < 0) litAt = r.flown;
     if (finsAt < 0 && Math.abs(r.fins[0].rotation.z + 1.5708) < 1e-3) finsAt = r.age;
-    H.updateRocketSmoke(dt);
+    H.updateRocketSmoke(dt); CBZ.munitions.step(dt);
     maxLive = Math.max(maxLive, H.smokeCloud.live);
   }
   ok(litAt >= 10 && litAt < 12, `sustainer lights at ${litAt.toFixed(1)} m`);

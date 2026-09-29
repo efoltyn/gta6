@@ -589,20 +589,87 @@
     if (!a) { a = []; UNIT_GRID.set(k, a); }
     a.push(d);
   }
-  function unitDoorsReset() { UNIT_DOORS.length = 0; UNIT_GRID.clear(); WALL_TALLY.solid = 0; WALL_TALLY.doors = 0; }
+  function unitDoorsReset() { DOOR_KEEP.refused.length = 0; SWINGING.length = 0; STATE_ROOMS.length = 0; UNIT_DOORS.length = 0; UNIT_GRID.clear(); WALL_TALLY.solid = 0; WALL_TALLY.doors = 0; }
+
+  // THE LEAF. Drawn through the host's lbox WITHOUT its own collider (lbox
+  // splits a box that crosses a stair hole into pieces and pushes one
+  // collider per piece, so "the last collider is this leaf's" was a guess:
+  // when it guessed wrong the door was drawn, solid, and never registered, a
+  // wall you could not open). The door's collider is made here, from the
+  // mesh the host actually drew, with ref = that mesh (core/batch.js's wall
+  // pass keeps a slice per referenced mesh, which is what hides it on open).
+  function doorLeaf(h, lx, ly, lz, bw, bh, bd, hex) {
+    const leaf = h.b.lbox(lx, ly, lz, bw, bh, bd, hex, { cast: false, _clipped: true });
+    if (!leaf || !leaf.position || !leaf.parent) return null;
+    const px = leaf.position.x, pz = leaf.position.z, sx = Math.abs(leaf.scale.x), sz = Math.abs(leaf.scale.z);
+    const col = { minX: h.ox + px - sx / 2, maxX: h.ox + px + sx / 2, minZ: h.oz + pz - sz / 2, maxZ: h.oz + pz + sz / 2,
+      ref: leaf, y0: leaf.position.y - leaf.scale.y / 2, y1: leaf.position.y + leaf.scale.y / 2, door: true };
+    if (CBZ.colliders) CBZ.colliders.push(col);
+    return { leaf: leaf, col: col };
+  }
+
+  // A DOOR ANYBODY MAY OPEN (a room of state, an office, a briefing room):
+  // the leaf in the doorway at local (lx, lz) on floor y, the wall running
+  // along x (runX) or z, `hinge` -1/+1 = the jamb on the -/+ side along the
+  // wall, `side` -1/+1 = the side of the wall the leaf swings to.
+  function freeDoor(h, y, lx, lz, runX, w, hh, hex, hinge, side, label, k) {
+    const L = doorLeaf(h, lx, y + hh / 2, lz, runX ? w - 0.02 : 0.06, hh - 0.01, runX ? 0.06 : w - 0.02, hex);
+    if (!L) return null;
+    const d = {
+      id: "door:" + Math.round((h.ox + lx) * 10) + ":" + Math.round((h.oz + lz) * 10) + ":" + (k != null ? k : Math.round(y * 10)),
+      label: label || "the door", open: false, free: true,
+      x: h.ox + lx, z: h.oz + lz, y: y + 0.2, floorY: y, top: y + 3,
+      mesh: L.leaf, col: L.col, b: h.b, ox: h.ox, oz: h.oz,
+      runX: runX, w: w, h: hh, hex: hex, hinge: hinge || -1, side: side || 1,
+    };
+    unitFile(d);
+    doorKeep(h, y, lx, lz, runX, w);
+    WALL_TALLY.doors++;
+    return d;
+  }
+  // THE DOOR'S FLOOR IS NOBODY'S FURNITURE. Every door files a keep-clear
+  // box on its building (the opening and 1.2 m either side of the wall, on
+  // its storey); a furnisher asks doorBlocked() before it sets a piece down,
+  // so a credenza is never parked across the door to the director's office.
+  const DOOR_KEEP = { refused: [] };
+  function doorKeep(h, y, lx, lz, runX, w) {
+    const b = h.b;
+    if (!b) return;
+    const a = w / 2 + 0.25, n = 1.2;
+    (b._doorKeep || (b._doorKeep = [])).push({ y: y,
+      x0: lx - (runX ? a : n), x1: lx + (runX ? a : n), z0: lz - (runX ? n : a), z1: lz + (runX ? n : a) });
+  }
+  function doorBlocked(h, y, lx, lz, pad) {
+    const K = h && h.b && h.b._doorKeep;
+    if (!K) return false;
+    for (let i = 0; i < K.length; i++) {
+      const k = K[i];
+      if (Math.abs(k.y - y) > 1.0) continue;
+      if (lx > k.x0 - pad && lx < k.x1 + pad && lz > k.z0 - pad && lz < k.z1 + pad) { DOOR_KEEP.refused.push({ x: h.ox + lx, z: h.oz + lz, y: y }); return true; }
+    }
+    return false;
+  }
+
+  // A WIDE OPENING GETS A PAIR: two leaves, each hinged on its own jamb and
+  // swinging the same way, one E opening both (a 1.7 m single leaf is a
+  // barn door). `hinge` picks the jamb of a single leaf.
+  function freeDoorway(h, y, lx, lz, runX, w, hh, hex, hinge, side, label, k) {
+    if (w < 1.6) return freeDoor(h, y, lx, lz, runX, w, hh, hex, hinge, side, label, k);
+    const ux = runX ? 1 : 0, uz = runX ? 0 : 1, q = w / 4;
+    const a = freeDoor(h, y, lx - ux * q, lz - uz * q, runX, w / 2, hh, hex, -1, side, label, k);
+    const b = freeDoor(h, y, lx + ux * q, lz + uz * q, runX, w / 2, hh, hex, 1, side, label, k);
+    if (a && b) { a.pair = b; b.pair = a; b.id += "b"; }
+    return a || b;
+  }
 
   // fill a partition's doorway with a locked leaf. `axis` is the axis the WALL
   // RUNS along ("x" → fixed z at `at`, doorway centred on `gap` in x).
   function unitDoor(h, y, axis, at, gap, gapW, wallH, id, label) {
     const alongX = axis === "x";
     const lx = alongX ? gap : at, lz = alongX ? at : gap;
-    const leaf = h.b.lbox(lx, y + DOOR_H / 2, lz,
-      alongX ? gapW : PWT, DOOR_H, alongX ? PWT : gapW, P.door, WALLOPT);
-    if (!leaf || !leaf.position) return null;
-    // the collider lbox just pushed for this exact mesh (solid:true pushes one)
-    const cols = CBZ.colliders || [];
-    const col = cols.length && cols[cols.length - 1].ref === leaf ? cols[cols.length - 1] : null;
-    if (!col) return null;
+    const L = doorLeaf(h, lx, y + DOOR_H / 2, lz, alongX ? gapW : PWT, DOOR_H, alongX ? PWT : gapW, P.door);
+    if (!L) return null;
+    const leaf = L.leaf, col = L.col;
     // the wall ABOVE the leaf, so a doorway is a hole in a wall and not a gap
     // in a fence. (The lintel the partition already drew sits over this.)
     const overH = wallH - 0.36 - DOOR_H;
@@ -615,33 +682,134 @@
       alongX ? 0.1 : PWT + 0.06, 0.06, alongX ? PWT + 0.06 : 0.1, P.gold, { cast: false });
     const d = {
       id: id, label: label, open: false,
-      x: h.ox + lx, z: h.oz + lz, floorY: y, top: y + wallH,
+      x: h.ox + lx, z: h.oz + lz, y: y + 0.2, floorY: y, top: y + wallH,
       mesh: leaf, col: col, b: h.b, ox: h.ox, oz: h.oz,
+      // the hinge: at the -run jamb, the leaf swinging to +normal
+      runX: alongX, w: gapW, h: DOOR_H, hex: P.door, hinge: -1, side: 1,
     };
     unitFile(d);
+    doorKeep(h, y, lx, lz, alongX, gapW);
     WALL_TALLY.doors++;
     return d;
   }
 
+  /* ---- OPEN / SHUT — the one door verb every interior door answers --------
+     Open: the closed leaf (merged into core/batch.js's buckets, or a plain
+     mesh for a door somebody built outside the batch) is hidden and its
+     collider leaves CBZ.colliders AT ONCE, so the doorway is walkable the
+     moment you press E; a real hinged leaf swings open on its jamb (built on
+     the first open, so a door nobody touches costs nothing). Shut: the leaf
+     swings back and the collider returns when nobody is standing in the
+     doorway (a door never closes on a body and shoves it through a wall). */
+  const SWINGING = [];
+  let swingGeo = null;
+  function swingPivot(d) {
+    if (d.pivot !== undefined) return d.pivot;
+    d.pivot = null;
+    if (!window.THREE || !(d.w > 0.3)) return null;
+    const A = CBZ.city && CBZ.city.arena;
+    const root = d.root || (A && A.root) || CBZ.scene;
+    if (!root) return null;
+    if (!swingGeo) swingGeo = new THREE.BoxGeometry(1, 1, 1);
+    const ux = d.runX ? 1 : 0, uz = d.runX ? 0 : 1;          // along the wall
+    const hs = d.hinge || -1;
+    const pivot = new THREE.Group();
+    pivot.name = "door-leaf";
+    pivot.position.set(d.x + ux * hs * d.w / 2, d.floorY, d.z + uz * hs * d.w / 2);
+    const leaf = new THREE.Mesh(swingGeo, CBZ.cmat ? CBZ.cmat(d.hex != null ? d.hex : 0x4a3524) : new THREE.MeshLambertMaterial({ color: d.hex || 0x4a3524 }));
+    const L = d.w - 0.04;
+    // the leaf lies from the hinge toward the doorway's centre
+    leaf.position.set(-ux * hs * L / 2, (d.h || DOOR_H) / 2, -uz * hs * L / 2);
+    leaf.scale.set(d.runX ? L : 0.05, (d.h || DOOR_H) - 0.02, d.runX ? 0.05 : L);
+    leaf.castShadow = false; leaf.receiveShadow = true;
+    pivot.add(leaf);
+    // a handle on both faces at the free edge
+    const hx = -ux * hs * (L - 0.12), hz = -uz * hs * (L - 0.12);
+    const knob = new THREE.Mesh(swingGeo, CBZ.cmat ? CBZ.cmat(0xb99347) : leaf.material);
+    knob.position.set(hx, 1.02, hz);
+    knob.scale.set(d.runX ? 0.1 : 0.16, 0.05, d.runX ? 0.16 : 0.1);
+    pivot.add(knob);
+    // the angle that carries the leaf (hinge -> centre, i.e. -u*hs) onto the
+    // swing side of the wall (+n*side), n = the wall normal
+    const nx = d.runX ? 0 : 1, nz = d.runX ? 1 : 0, sd = d.side || 1;
+    const a0 = Math.atan2(-ux * hs, -uz * hs), a1 = Math.atan2(nx * sd, nz * sd);
+    let da = a1 - a0;
+    while (da > Math.PI) da -= 2 * Math.PI;
+    while (da < -Math.PI) da += 2 * Math.PI;
+    d.swingTo = da * (84 / 90);                               // stops a hair off the wall
+    d.t = 0;
+    pivot.visible = false;
+    root.add(pivot);
+    d.pivot = pivot;
+    return pivot;
+  }
+  function bodyInDoorway(d) {
+    const c = d.col;
+    if (!c) return false;
+    const r = 0.42;
+    const hit = function (x, z, y) {
+      if (y != null && (y > d.floorY + 1.6 || y < d.floorY - 1.2)) return false;
+      return x > c.minX - r && x < c.maxX + r && z > c.minZ - r && z < c.maxZ + r;
+    };
+    const P = CBZ.player;
+    if (P && P.pos && !P.dead && hit(P.pos.x, P.pos.z, P.pos.y)) return true;
+    const peds = CBZ.cityPeds;
+    if (peds) for (let i = 0; i < peds.length; i++) {
+      const p = peds[i];
+      if (p && !p.dead && p.pos && hit(p.pos.x, p.pos.z, p.pos.y)) return true;
+    }
+    return false;
+  }
+  function colIn(d, on) {
+    const cols = CBZ.colliders || [];
+    const i = cols.indexOf(d.col);
+    if (on && i < 0) cols.push(d.col);
+    else if (!on && i >= 0) cols.splice(i, 1);
+    else return;
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+  }
   function unitSetOpen(d, open) {
     if (!d || !d.mesh || !!d.open === !!open) return false;
     d.open = !!open;
-    const cols = CBZ.colliders || [];
+    const pv = swingPivot(d);
     if (d.open) {
       if (!(CBZ.batchWallHide && CBZ.batchWallHide(d.mesh))) d.mesh.visible = false;
-      const i = cols.indexOf(d.col);
-      if (i >= 0) cols.splice(i, 1);
+      colIn(d, false);
+      d.pendingShut = false;
+      if (pv) pv.visible = true;
     } else {
-      if (!(CBZ.batchWallShow && CBZ.batchWallShow(d.mesh))) d.mesh.visible = true;
-      if (cols.indexOf(d.col) < 0) cols.push(d.col);
+      // the collider comes back once the doorway is clear (swingTick)
+      d.pendingShut = true;
+      if (!pv) shutNow(d);
     }
-    // a door that SWINGS (a room of state): the leaf standing open against
-    // the jamb is its own hidden box, shown while the doorway is clear
-    if (d.openMesh) d.openMesh.visible = d.open;
+    if (pv && SWINGING.indexOf(d) < 0) SWINGING.push(d);
+    if (d.pair && !!d.pair.open !== d.open) unitSetOpen(d.pair, d.open);
     if (CBZ.sfx && d.free) { try { CBZ.sfx(d.open ? "door_open" : "door_close", { volume: 0.7 }); } catch (e) {} }
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     return true;
   }
+  function shutNow(d) {
+    d.pendingShut = false;
+    if (!(CBZ.batchWallShow && CBZ.batchWallShow(d.mesh))) d.mesh.visible = true;
+    if (d.pivot) d.pivot.visible = false;
+    colIn(d, true);
+  }
+  if (CBZ.onUpdate) CBZ.onUpdate(34.31, function (dt) {
+    if (!doorVerbWired) wireDoorVerb();
+    if (!SWINGING.length) return;
+    const k = Math.min(1, (dt || 0.016) * 7);
+    for (let i = SWINGING.length - 1; i >= 0; i--) {
+      const d = SWINGING[i];
+      const pv = d.pivot;
+      if (!pv) { SWINGING.splice(i, 1); continue; }
+      const target = d.open ? 1 : 0;
+      d.t += (target - d.t) * k;
+      if (Math.abs(d.t - target) < 0.01) d.t = target;
+      pv.rotation.y = d.t * d.swingTo;
+      if (!d.open && d.pendingShut && d.t < 0.15 && !bodyInDoorway(d)) shutNow(d);
+      if (d.t === target && !d.pendingShut) SWINGING.splice(i, 1);
+    }
+  });
+
   // THE LOT AND THE BUILDING ARE NOT THE SAME OBJECT. buildings.js hands each
   // lot a SPREAD COPY of the building record (`lot.building = { ...b, name,
   // sign, side, door }`), so `lot.building === b` is FALSE for every building
@@ -686,9 +854,20 @@
       if (!a) continue;
       for (let i = 0; i < a.length; i++) {
         const d = a[i];
-        // the floor you are STANDING on, never the flat two storeys up
-        if (py != null && (py < d.floorY - 1.2 || py > d.top + 0.6)) continue;
-        const dx = d.x - px, dz = d.z - pz, q = dx * dx + dz * dz;
+        // the floor you are STANDING on. (The old window ran from 1.2 m under
+        // the door's floor to 0.6 m over its CEILING, so on every storey of a
+        // stacked plan E found the door directly UNDER your feet: upstairs in
+        // the West Wing the Oval Office door answered with the Cabinet Room's,
+        // one floor down, and the President was shut in.)
+        if (py != null && (py < d.floorY - 0.6 || py > d.floorY + 1.4)) continue;
+        const dx = px - d.x, dz = pz - d.z;
+        // in front of the doorway, not beside it through a wall: within the
+        // opening's width (plus an arm) along the wall
+        if (d.runX != null) {
+          const along = d.runX ? dx : dz;
+          if (Math.abs(along) > (d.w || 1) / 2 + 0.7) continue;
+        }
+        const q = dx * dx + dz * dz;
         if (q < bd) { bd = q; best = d; }
       }
     }
@@ -714,6 +893,31 @@
     setOpen: unitSetOpen,
     on: function (b, floorY, tol) { return CBZ.cityUnitDoorsOn(b, floorY, tol); },
     count: function () { return UNIT_DOORS.length; },
+    // the pieces a door's keep-clear box turned away (world x, z, floor y)
+    keptClear: function () { return DOOR_KEEP.refused.slice(); },
+    /* A DOOR BUILT BY SOMEBODY ELSE joins the same verb: `rec` is
+       { id, label, x, z, floorY, mesh, col (already in CBZ.colliders),
+         runX, w, h, hex, hinge, side, free (true | fn(d)), noForce, root }.
+       presidency.js's Situation Room door is one. Returns the record. */
+    add: function (rec) {
+      if (!rec || !rec.mesh || !rec.col) return null;
+      if (rec.open == null) rec.open = false;
+      if (rec.y == null) rec.y = rec.floorY + 0.2;
+      if (rec.top == null) rec.top = rec.floorY + 3;
+      unitFile(rec);
+      return rec;
+    },
+    remove: function (rec) {
+      if (!rec) return;
+      const i = UNIT_DOORS.indexOf(rec);
+      if (i >= 0) UNIT_DOORS.splice(i, 1);
+      const a = UNIT_GRID.get(unitCellKey(rec.x, rec.z));
+      if (a) { const j = a.indexOf(rec); if (j >= 0) a.splice(j, 1); }
+      const k = SWINGING.indexOf(rec);
+      if (k >= 0) SWINGING.splice(k, 1);
+      if (rec.pivot && rec.pivot.parent) rec.pivot.parent.remove(rec.pivot);
+      rec.pivot = undefined;
+    },
     openCount: function () { let n = 0; for (let i = 0; i < UNIT_DOORS.length; i++) if (UNIT_DOORS[i].open) n++; return n; },
   };
 
@@ -744,7 +948,7 @@
         label: function (d) { return d.open ? "Close" : (d.free ? "Open" : "Unlock"); },
         onSelect: function (d) {
           const note = (CBZ.city && CBZ.city.note) ? CBZ.city.note : function () {};
-          if (d.free) { unitSetOpen(d, !d.open); return; }
+          if (d.free) { if (d.open || unitMayOpen(d)) unitSetOpen(d, !d.open); return; }
           if (d.open) { unitSetOpen(d, false); note("Closed " + d.label + ".", 1.6); return; }
           if (!unitMayOpen(d)) { note("Locked. " + d.label + ".", 2.0); return; }
           // YOU OWN IT → you get the key, once, as a real item in the bag.
@@ -761,7 +965,7 @@
         // takes a few goes and the whole corridor hears every one. A forced
         // door stays forced (it shuts, it no longer locks).
         id: "unit-door-force", slot: "i",
-        canShow: function (d) { return !!d && !d.open && !unitMayOpen(d); },
+        canShow: function (d) { return !!d && !d.open && !d.noForce && !unitMayOpen(d); },
         label: function () {
           const E = CBZ.cityEcon;
           if (E && E.count && E.count("Lockpick") > 0) return "Pick";
@@ -2523,6 +2727,10 @@
   //  and protection.js hang their people and objects on.
   // ========================================================================
   const PRESIDENTIAL = { rooms: [], props: [], press: [], usable: 0, symbols: 0, emptyDecor: 0 };
+  // every room a state plan drew (world rect, floor), for the door census
+  // (tools/estate-door-census.mjs walks to each one)
+  const STATE_ROOMS = [];
+  CBZ.stateRoomsAll = function () { return STATE_ROOMS.slice(); };
 
   function presidentialReset() {
     PRESIDENTIAL.rooms.length = 0;
@@ -2544,6 +2752,7 @@
       box: h.b.lbox, ox: h.ox, oz: h.oz, oy: 0, lot: null,
     });
     const y = (opts && opts.atY != null) ? opts.atY : r.y;
+    if (doorBlocked(h, r.y, x, z, 0.5)) return null;
     try {
       return name === "lamp" ? fn(x, y, z, o) : fn(x, y, z, yaw || 0, o);
     } catch (e) { return null; }
@@ -2805,35 +3014,24 @@
      The ONE interior door system in the city is the unit door above (flats:
      a leaf with a collider, E to open, the collider leaves when it opens).
      A room of state is the same leaf with `free` set: nobody needs a key to
-     open the Cabinet Room. What it adds is the SWING: the open leaf is its
-     own box standing square to the wall against the jamb, hidden until the
-     door opens (a hidden mesh is never merged, so it costs nothing shut),
-     instead of the leaf simply vanishing. */
+     open the Cabinet Room, and it swings on its hinge to the `swing` side. */
   function stateDoor(F, axis, at, op) {
-    const w = op.w, T = ST_T;
+    const w = op.w;
     const p = axis === "d" ? F.P(at, op.c) : F.P(op.c, at);
     // does the wall run along local x?
     const runX = axis === "d" ? Math.abs(F.tx) > 0.5 : Math.abs(F.nx) > 0.5;
-    const leaf = F.h.b.lbox(p.x, F.Y + DOOR_H / 2, p.z, runX ? w - 0.02 : 0.06, DOOR_H - 0.01, runX ? 0.06 : w - 0.02, SP.walnut, SOLID);
-    if (!leaf || !leaf.position) return null;
-    const cols = CBZ.colliders || [];
-    const col = cols.length && cols[cols.length - 1].ref === leaf ? cols[cols.length - 1] : null;
-    if (!col) return null;
-    // the open leaf: hinged at the low-c jamb, square to the wall, on the
-    // `swing` side (+1 = toward +d / +l)
+    // the hinge: the low-c jamb; the leaf swings to the `swing` side
+    // (+1 = toward +d / +l). In world terms the wall runs along r and its
+    // normal is m (both unit, axis-aligned in this kit's frames).
     const sw = op.swing || 1;
-    const q = axis === "d" ? F.P(at + sw * (T / 2 + w / 2), op.c - w / 2 + 0.05) : F.P(op.c - w / 2 + 0.05, at + sw * (T / 2 + w / 2));
-    const open = F.h.b.lbox(q.x, F.Y + DOOR_H / 2, q.z, runX ? 0.06 : w - 0.02, DOOR_H - 0.01, runX ? w - 0.02 : 0.06, SP.walnut, NOCAST);
-    if (open) open.visible = false;
-    const d = {
-      id: op.id || ("state:" + Math.round(F.h.ox + p.x) + ":" + Math.round(F.h.oz + p.z) + ":" + F.k),
-      label: op.label || "the door", open: false, free: true,
-      x: F.h.ox + p.x, z: F.h.oz + p.z, floorY: F.Y, top: F.Y + F.CL,
-      mesh: leaf, col: col, openMesh: open || null, b: F.h.b, ox: F.h.ox, oz: F.h.oz,
-    };
-    unitFile(d);
-    WALL_TALLY.doors++;
+    const rX = axis === "d" ? F.tx : F.nx, rZ = axis === "d" ? F.tz : F.nz;
+    const mX = axis === "d" ? F.nx : F.tx, mZ = axis === "d" ? F.nz : F.tz;
+    const d = freeDoorway(F.h, F.Y, p.x, p.z, runX, w, DOOR_H, SP.walnut,
+      -Math.sign(runX ? rX : rZ) || -1, (Math.sign(runX ? mZ : mX) || 1) * sw, op.label, F.k);
+    if (!d) return null;
+    if (op.id) d.id = op.id;
     F.doors.push(d);
+    if (d.pair) F.doors.push(d.pair);
     return d;
   }
 
@@ -2868,6 +3066,8 @@
     F.fitRooms.push({ x0: R.x0, x1: R.x1, z0: R.z0, z1: R.z1, tint: room.ceil != null ? room.ceil : 0xf6f1e6 });
     room.rectL = R;
     F.rooms.push(room);
+    STATE_ROOMS.push({ key: room.key, name: room.name, b: F.b, floorY: F.Y,
+      x0: F.h.ox + R.x0, x1: F.h.ox + R.x1, z0: F.h.oz + R.z0, z1: F.h.oz + R.z1 });
     return room;
   }
   // a floor field, split round any hole it would cover
@@ -4534,14 +4734,16 @@
         if (alongLat) B(A.at(D, l + s * (gw / 2 + 0.04)), 0, 0.08, hd, PWT + 0.05, FED.steel);
         else B(A.at(D + s * (gw / 2 + 0.04), l), 0, PWT + 0.05, hd, 0.08, FED.steel);
       }
-      if (alongLat) {
-        B(A.at(D, l), hd, gw + 0.16, 0.08, PWT + 0.05, FED.steel);
-        // the leaf, swung 90 degrees into the room, hinged on the -lat jamb
-        B(A.at(D + into * (lf / 2 + 0.06), l - gw / 2 + 0.05), 0.02, 0.045, 2.18, lf, P.wood);
-      } else {
-        B(A.at(D, l), hd, PWT + 0.05, 0.08, gw + 0.16, FED.steel);
-        B(A.at(D - gw / 2 + 0.05, l + into * (lf / 2 + 0.06)), 0.02, lf, 2.18, 0.045, P.wood);
-      }
+      // the head, then a REAL door in the opening (it used to be a leaf
+      // painted standing open against the wall: a door you could not shut),
+      // hinged on the low jamb, swinging `into` the room, closed at first
+      B(A.at(D, l), hd, alongLat ? gw + 0.16 : PWT + 0.05, 0.08, alongLat ? PWT + 0.05 : gw + 0.16, FED.steel);
+      const c = A.at(D, l);
+      if (!inRect(r, c.x, c.z, 0.05)) return;
+      const runX = alongLat ? Math.abs(A.tx) > 0.5 : Math.abs(A.nx) > 0.5;
+      const hinge = alongLat ? -Math.sign(runX ? A.tx : A.tz) : -Math.sign(runX ? A.nx : A.nz);
+      const side = (alongLat ? Math.sign(runX ? A.nz : A.nx) : Math.sign(runX ? A.tz : A.tx)) * (into || 1);
+      freeDoor(h, r.y, c.x, c.z, runX, Math.min(gw - 0.04, lf + 0.14), hd - 0.03, P.wood, hinge || -1, side || 1, "the door");
     }
     // SOLID partitions from the floor to the slab, each doorway cased.
     // wallLat: runs laterally at depth D from lat l0..l1; gaps are lateral centres.
@@ -4619,13 +4821,13 @@
       const F = CBZ.furnish, fn = F && F[name];
       if (typeof fn !== "function") return null;
       const p = A.at(d, l);
-      if (!inRect(r, p.x, p.z, 0.6) || !h.clear(p.x, p.z, 0.5)) return null;
+      if (!inRect(r, p.x, p.z, 0.6) || !h.clear(p.x, p.z, 0.5) || doorBlocked(h, r.y, p.x, p.z, 0.9)) return null;
       const oo = Object.assign({ tone: "exec", solid: true }, o || {}, { box: h.b.lbox, ox: h.ox, oz: h.oz, oy: 0, lot: null });
       try { return name === "lamp" ? fn(p.x, r.y, p.z, oo) : fn(p.x, r.y, p.z, yaw || 0, oo); } catch (e) { return null; }
     }
     function planter(d, l, s) {
       const p = A.at(d, l);
-      if (!CBZ.furnish || !CBZ.furnish.planter || !inRect(r, p.x, p.z, 0.6) || !h.clear(p.x, p.z, 0.6)) return;
+      if (!CBZ.furnish || !CBZ.furnish.planter || !inRect(r, p.x, p.z, 0.6) || !h.clear(p.x, p.z, 0.6) || doorBlocked(h, r.y, p.x, p.z, 0.4)) return;
       try { CBZ.furnish.planter(p.x, r.y, p.z, 0, { box: h.b.lbox, ox: h.ox, oz: h.oz, kind: "tree", s: s || 1.0 }); } catch (e) {}
     }
     // an anchor straight off a furnish seat record (world coords in, lx/lz out)
@@ -5355,18 +5557,17 @@
           for (const e of [-1, 1]) wb(g.c + e * (g.w / 2 + 0.06), n, 0, CV_DOOR + 0.12, 0.12, 0.04, trim);
           wb(g.c, n, CV_DOOR, 0.12, g.w + 0.24, 0.04, trim);
         }
-        // the leaf, open 90 degrees against the reveal: panelled, with a knob
+        // THE DOOR. A real one in the opening, shut, E to open (it used to be
+        // a solid leaf painted standing open against the reveal, sticking a
+        // metre into the room, a door nobody could close). `leaf` names the
+        // side it swings to, `hinge` its jamb; a wide opening is a pair.
         if (g.leaf) {
-          const Lf = g.w - 0.08, hinge = g.hinge || 1, lt = g.c + hinge * (g.w / 2 - 0.05);
-          const n0 = g.leaf * (CV_WT / 2 + Lf / 2 + 0.02);
-          const leafBox = function (nn, y0, hh, len, thick, hx, oo) {
-            // the leaf lies ACROSS the wall: its long side runs in the wall's
-            // normal direction, its thickness along the run
-            return lat ? F.box(lt, at + nn, y0, hh, len, thick, hx, oo) : F.box(at + nn, lt, y0, hh, thick, len, hx, oo);
-          };
-          leafBox(n0, 0.02, CV_DOOR - 0.06, Lf, 0.05, g.hex || CV.panel, { solid: true });
-          for (const py of [0.35, 1.3]) leafBox(n0, py, 0.75, Lf - 0.3, 0.07, CV.panelL);
-          leafBox(g.leaf * (CV_WT / 2 + Lf - 0.08), 1.0, 0.06, 0.1, 0.1, CV.gold);
+          const dp = lat ? A.at(g.c, at) : A.at(at, g.c);
+          const runX = lat ? Math.abs(A.nx) > 0.5 : Math.abs(A.tx) > 0.5;
+          const rS = lat ? Math.sign(runX ? A.nx : A.nz) : Math.sign(runX ? A.tx : A.tz);
+          const mS = lat ? Math.sign(runX ? A.tz : A.tx) : Math.sign(runX ? A.nz : A.nx);
+          freeDoorway(h, y, dp.x, dp.z, runX, g.w - 0.04, CV_DOOR - 0.02, g.hex || CV.panel,
+            ((g.hinge || 1) * rS) || -1, (g.leaf * mS) || 1, g.label || "the door");
         }
         CIVIC.doors++;
       }

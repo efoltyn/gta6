@@ -468,6 +468,8 @@
       const k = CBZ.colliders ? CBZ.colliders.indexOf(ROOM.cols[i]) : -1;
       if (k >= 0) CBZ.colliders.splice(k, 1);
     }
+    if (ROOM.doorRec && CBZ.cityUnitDoors && CBZ.cityUnitDoors.remove) { try { CBZ.cityUnitDoors.remove(ROOM.doorRec); } catch (e) {} }
+    ROOM.doorRec = null;
     if (ROOM.doorCol && CBZ.colliders) {
       const k = CBZ.colliders.indexOf(ROOM.doorCol);
       if (k >= 0) CBZ.colliders.splice(k, 1);
@@ -574,16 +576,31 @@
         for (let a = sp[0] + 0.6; a < sp[1] - 0.3; a += 1.2) run(f, a - 0.04, a + 0.04, Y + 0.95, Y + 2.76, 0.06, STILE);
       }
     }
-    // ---- the door: a steel leaf that slides for the President, a frame, a reader
+    // ---- the door: a steel leaf on the city's ONE interior door system
+    // (interior_programs.js CBZ.cityUnitDoors): E opens it for the sitting
+    // head of state, and from the INSIDE for anyone (a push bar: losing the
+    // seat at the table never traps you); it swings on its hinge, its
+    // collider leaves while it stands open, and nobody kicks it in.
     const leafAt = dSide - outS * T / 2;
     const door = doorOnX ? addBox(grp, leafAt, Y + DH / 2, dC, 0.16, DH, GAP, STEEL) : addBox(grp, dC, Y + DH / 2, leafAt, GAP, DH, 0.16, STEEL);
     ROOM.door = door;
-    ROOM.doorHome = { x: door.position.x, z: door.position.z };
-    ROOM.doorSlide = doorOnX ? { x: 0, z: 1 } : { x: 1, z: 0 };
     ROOM.doorCol = doorOnX
-      ? { minX: leafAt - 0.2, maxX: leafAt + 0.2, minZ: dC - GAP / 2, maxZ: dC + GAP / 2, y0: Y, y1: Y + DH, ref: door }
-      : { minX: dC - GAP / 2, maxX: dC + GAP / 2, minZ: leafAt - 0.2, maxZ: leafAt + 0.2, y0: Y, y1: Y + DH, ref: door };
+      ? { minX: leafAt - 0.2, maxX: leafAt + 0.2, minZ: dC - GAP / 2, maxZ: dC + GAP / 2, y0: Y, y1: Y + DH, ref: door, door: true }
+      : { minX: dC - GAP / 2, maxX: dC + GAP / 2, minZ: leafAt - 0.2, maxZ: leafAt + 0.2, y0: Y, y1: Y + DH, ref: door, door: true };
     CBZ.colliders.push(ROOM.doorCol);
+    if (CBZ.cityUnitDoors && CBZ.cityUnitDoors.add) {
+      ROOM.doorRec = CBZ.cityUnitDoors.add({
+        id: "state:sitroom", label: "the Situation Room",
+        x: doorOnX ? leafAt : dC, z: doorOnX ? dC : leafAt, floorY: Y, top: H,
+        mesh: door, col: ROOM.doorCol, root: grp,
+        runX: !doorOnX, w: GAP, h: DH, hex: STEEL, hinge: -1, side: -outS,   // swings into the room
+        noForce: true,
+        free: function () {
+          const P = CBZ.player;
+          return doorOpensFor() || !!(P && P.pos && inRoom(P.pos.x, P.pos.z));
+        },
+      });
+    }
     ROOM.doorPt = doorOnX ? { x: dSide + outS * 1.2, z: dC } : { x: dC, z: dSide + outS * 1.2 };
     const fOut = dSide + outS * 0.02;
     for (const e of [-1, 1]) {
@@ -1156,23 +1173,6 @@
     if (ROOM.zonesWired || !CBZ.interactions || !CBZ.interactions.registerZone) return;
     ROOM.zonesWired = true;
     CBZ.interactions.registerZone({
-      id: "pres-door", kind: "presdoor", radius: 2.6, prio: 12,
-      find: function (px, pz) {
-        if (!on() || !CFG.PRESIDENCY_SITROOM || !ROOM.doorPt || doorOpensFor() || !onRoomFloor()) return null;
-        const dx = ROOM.doorPt.x - px, dz = ROOM.doorPt.z - pz;
-        return (dx * dx + dz * dz) < 2.6 * 2.6 ? { x: ROOM.doorPt.x, z: ROOM.doorPt.z, kind: "presdoor" } : null;
-      },
-      options: [{
-        id: "pres-door-try", slot: "e",
-        label: "Open",
-        onSelect: function () {
-          if (CBZ.sfx) { try { CBZ.sfx("click", { vol: 0.5 }); } catch (e) {} }
-          const d = ROOM.door, sl = ROOM.doorSlide || { x: 0, z: 1 };
-          if (d) { d.position.x += sl.x * 0.02; d.position.z += sl.z * 0.02; setTimeout(function () { if (ROOM.door) { ROOM.door.position.x -= sl.x * 0.02; ROOM.door.position.z -= sl.z * 0.02; } }, 90); }
-        },
-      }],
-    });
-    CBZ.interactions.registerZone({
       id: "pres-screen", kind: "presscreen", radius: 2.4, prio: 13,
       find: function (px, pz) {
         if (!on() || !CFG.PRESIDENCY_SITROOM || !ROOM.screenPt || !seat() || CONV || !onRoomFloor() || !briefer()) return null;
@@ -1187,7 +1187,6 @@
     });
     if (CBZ.interactions.describe) {
       try {
-        CBZ.interactions.describe("presdoor", function () { return { label: "", note: "" }; });
         CBZ.interactions.describe("presscreen", function () { return { label: "", note: "" }; });
       } catch (e) {}
     }
@@ -2634,27 +2633,13 @@
     tickOfficers(dt);
     tickSeam(dt);
     declareCell();
-    // the door — slides for the sitting head of state, seals behind anyone
-    // else. The collider IS the lock; there is no invisible wall.
+    // the door is the shared door kit's (see buildRoom); this tick only
+    // repaints the board while somebody is in the room (1s cadence)
     doorT -= dt;
     if (ROOM.door && doorT <= 0) {
       doorT = 0.12;
       const P = CBZ.player;
-      const nearDoor = P && P.pos && ROOM.doorPt && Math.hypot(P.pos.x - ROOM.doorPt.x, P.pos.z - ROOM.doorPt.z) < 3.4;
       const inside = P && P.pos && inRoom(P.pos.x, P.pos.z);
-      // the door always opens from the INSIDE (a push bar, not a cell) —
-      // losing the seat while standing at the table must never trap you.
-      const want = (inside || (nearDoor && doorOpensFor())) ? 1 : 0;
-      if (want !== ROOM.doorOpen) {
-        ROOM.doorOpen = want;
-        const sl = ROOM.doorSlide || { x: 0, z: 1 };
-        ROOM.door.position.x = ROOM.doorHome.x + sl.x * (want ? 2.25 : 0);
-        ROOM.door.position.z = ROOM.doorHome.z + sl.z * (want ? 2.25 : 0);
-        const ci = CBZ.colliders.indexOf(ROOM.doorCol);
-        if (want && ci >= 0) CBZ.colliders.splice(ci, 1);
-        else if (!want && ci < 0) CBZ.colliders.push(ROOM.doorCol);
-        if (CBZ.markCollidersDirty) { try { CBZ.markCollidersDirty(); } catch (e) {} }
-      }
       // repaint the board while somebody is in the room (1s cadence)
       boardT -= 0.12;
       if (inside && boardT <= 0) { boardT = 1.0; paintBoard(); }

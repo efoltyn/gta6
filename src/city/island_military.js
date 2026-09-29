@@ -13,8 +13,9 @@
      • AIRSTRIP w/ parked JETS + a BOMBER — this is an AIR base;
        the runway and the hardware on it are why it's here.
      • HELIPADS w/ HELICOPTERS — rotary wing alongside fixed wing.
-     • MOTOR POOL of TANKS + armored trucks — the ground fleet,
-       lined up the way real motor pools stage vehicles.
+     • MOTOR POOL — tanks, infantry carriers, light vehicles, rocket
+       artillery, missile launchers and cargo trucks (city/mil_armor.js
+       draws them), staged in ranks the way real motor pools do.
      • HANGARS — enterable sheds that shelter/repair the aircraft.
      • BARRACKS — soldiers have to sleep somewhere.
      • COMMAND HQ w/ ARMORY — the brain of the base, and the one
@@ -132,69 +133,8 @@
     return box(parent, x, y, z, s, s, s, hex, { matOpts: { emissive: hex, ei: 0.9 }, cast: false });
   }
 
-  // ONE reusable rocket exhaust component for every propelled machine in the
-  // game.  The military fighter defines it early; playeraircraft.js and the
-  // chop-shop booster consume the same geometry/power contract later.  A hot
-  // white core, translucent orange envelope, shock diamonds and nozzle light
-  // replace the old single opaque cone while keeping the cheap primitive look.
-  if (!CBZ.createRocketPlume) {
-    CBZ.createRocketPlume = function (opts) {
-      opts = opts || {};
-      const grp = new THREE.Group();
-      grp.name = opts.name || "rocket-exhaust";
-      grp.rotation.x = -Math.PI / 2; // local +Y extends aft along world/local -Z
-      const outerMat = new THREE.MeshBasicMaterial({
-        color: opts.outer == null ? 0xff7a24 : opts.outer,
-        transparent: true, opacity: 0, blending: THREE.AdditiveBlending,
-        depthWrite: false, side: THREE.DoubleSide,
-      });
-      const coreMat = new THREE.MeshBasicMaterial({
-        color: opts.core == null ? 0xfff4c7 : opts.core,
-        transparent: true, opacity: 0, blending: THREE.AdditiveBlending,
-        depthWrite: false,
-      });
-      // Base stays exactly on the nozzle; scaling Y only lengthens aft.
-      const outerGeo = new THREE.ConeGeometry(0.34, 1, 12, 1, true); outerGeo.translate(0, 0.5, 0);
-      const coreGeo = new THREE.ConeGeometry(0.16, 0.72, 10, 1, true); coreGeo.translate(0, 0.36, 0);
-      const outer = new THREE.Mesh(outerGeo, outerMat), core = new THREE.Mesh(coreGeo, coreMat);
-      grp.add(outer); grp.add(core);
-      const diamonds = [];
-      for (let i = 0; i < 3; i++) {
-        const d = new THREE.Mesh(new THREE.OctahedronGeometry(0.12 - i * 0.018, 0), coreMat);
-        d.position.y = 0.24 + i * 0.23; d.scale.y = 1.7; grp.add(d); diamonds.push(d);
-      }
-      const light = new THREE.PointLight(opts.light == null ? 0xff8a35 : opts.light, 0, opts.lightRange || 9, 2);
-      light.position.y = 0.08; grp.add(light);
-      grp.visible = false;
-      grp.userData.rocketPlume = true;
-      grp.userData.outer = outer; grp.userData.core = core; grp.userData.diamonds = diamonds;
-      grp.userData.outerMaterial = outerMat; grp.userData.coreMaterial = coreMat; grp.userData.light = light;
-      return grp;
-    };
-    CBZ.setRocketPlume = function (grp, power, time, lengthMul, radiusMul) {
-      if (!grp || !grp.userData || !grp.userData.rocketPlume) return false;
-      power = Math.max(0, Math.min(1, +power || 0));
-      grp.visible = power > 0.015;
-      const u = grp.userData;
-      if (!grp.visible) {
-        u.outerMaterial.opacity = 0; u.coreMaterial.opacity = 0; u.light.intensity = 0;
-        return true;
-      }
-      time = +time || 0;
-      const flick = 0.94 + Math.sin(time * 37) * 0.045 + Math.sin(time * 71) * 0.018;
-      const len = (0.42 + power * 1.58) * flick * (lengthMul || 1);
-      const rad = (0.62 + power * 0.42) * (radiusMul || 1);
-      grp.scale.set(rad, len, rad);
-      u.outerMaterial.opacity = 0.18 + power * 0.48;
-      u.coreMaterial.opacity = 0.34 + power * 0.62;
-      for (let i = 0; i < u.diamonds.length; i++) {
-        const d = u.diamonds[i];
-        d.scale.x = d.scale.z = 0.82 + Math.sin(time * 46 + i * 1.7) * 0.12;
-      }
-      u.light.intensity = 0.35 + power * 2.8;
-      return true;
-    };
-  }
+  // The rocket exhaust (CBZ.createRocketPlume / setRocketPlume) lives in
+  // weapons/munitions.js with every other munition flare and trail.
   // SHAPE HELPERS (r128 idiom — sculpt the position attribute, recompute
   // normals; same pattern as aircraft.js taperBox/bladeGeo). Fully constant
   // per inputs → deterministic worlds.
@@ -232,465 +172,32 @@
   }
 
   // ========================================================================
-  //   REUSABLE LOW-POLY MILITARY MODEL FUNCTIONS
-  //   Each returns a THREE.Group, built from boxes/cylinders on shared
-  //   materials. Caller positions/rotates it and registers the collider.
-  //   (Research idiom: low-poly hardware = primitives only, no external mesh.)
+  //   THE AIRCRAFT. Every airframe is a lofted surface from city/mil_air.js
+  //   (real metres, nose +Z, wheels on y = 0, built once and cloned per
+  //   placement). What stays here is the one airframe with a ROOM in it.
   // ========================================================================
-
-  // FIGHTER JET — sculpted swept/tapered wings (position-attribute wing slabs,
-  // not rotation-faked boxes), glass canopy, intake trunks, twin canted fins,
-  // FULL LANDING GEAR (the old jet had none and sat on its belly) and wingtip
-  // nav lights. ~12.5m long, nose +Z, parked on its wheels at y=0.
-  // returns {group, footW, footL, height} for collider sizing.
-  function makeJet() {
-    const g = new THREE.Group();
-    const cy = 1.15;                                        // body centreline (on gear)
-    const GLASS = vmat("glass", M.canopy), GUN = vmat("plastic", M.dark), RUBBER = vmat("tire", M.tire);
-    const RIM = vmat("rim", 0xb9bdc4), TRIM = vmat("interior", 0x0d0e10);
-    const SKIN = cm(M.jetGrey), SKIND = cm(M.jetGreyD), STORE = cm(0xd4d9df);
-
-    // ---- LOFT ---------------------------------------------------------------
-    // Skin a chain of cross-sections (each a ring of [x,y] in its own section
-    // plane) laid out along Z, NOSE FIRST. Rings wind CCW seen from +Z so every
-    // quad faces outward, and the result is de-indexed before computing normals
-    // so each facet shades FLAT. That flat shading is the whole point: it is what
-    // makes a CHINE read as a knife edge instead of a soft bulge, and it is why
-    // this jet no longer needs a cone stuck on the front. Pure function of its
-    // arguments (no rng, no external state) → determinism-safe.
-    function loft(rings, mat) {
-      const n = rings[0].p.length, m = rings.length, pos = [], idx = [];
-      for (let i = 0; i < m; i++) for (let j = 0; j < n; j++) pos.push(rings[i].p[j][0], rings[i].p[j][1], rings[i].z);
-      for (let i = 0; i < m - 1; i++) for (let j = 0; j < n; j++) {
-        const a = i * n + j, b = i * n + (j + 1) % n;
-        idx.push(a, a + n, b, b, a + n, b + n);
-      }
-      for (let e = 0; e < 2; e++) {                          // end caps: fan about the ring centroid
-        const r = rings[e ? m - 1 : 0], base = e ? (m - 1) * n : 0;
-        let sx = 0, sy = 0;
-        for (let j = 0; j < n; j++) { sx += r.p[j][0]; sy += r.p[j][1]; }
-        const c = pos.length / 3;
-        pos.push(sx / n, sy / n, r.z);
-        for (let j = 0; j < n; j++) {
-          const u = base + j, v = base + (j + 1) % n;
-          if (e) idx.push(c, v, u); else idx.push(c, u, v);  // tail cap faces -Z
-        }
-      }
-      const src = new THREE.BufferGeometry();
-      src.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-      src.setIndex(idx);
-      const geo = src.toNonIndexed();
-      geo.computeVertexNormals();
-      // core/batch.js concatenates position/normal/uv when it merges a bucket —
-      // hand it a real (zeroed) uv so this geometry is attribute-compatible.
-      geo.setAttribute("uv", new THREE.Float32BufferAttribute(new Float32Array(geo.attributes.position.count * 2), 2));
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.castShadow = true; mesh.receiveShadow = true; g.add(mesh);
-      return mesh;
-    }
-
-    // ---- FUSELAGE — CHINED, BLENDED FOREBODY --------------------------------
-    // ONE lofted skin from radome to boat-tail. Every station is a HEXAGON: a
-    // flat upper deck (tw), a flat keel (bw) and a sharp lateral CHINE (hw)
-    // where the two meet. Forward, hw is ~2.4x the deck half-width, so the
-    // forebody is a knife-edged wedge — an F-22 forebody, not a cone — and the
-    // chine sits BELOW the centreline (chy<0) exactly where a real one does.
-    // Aft, hw/tw converge so the chine dissolves and the body squares up into
-    // the nozzle pack. dy droops the whole radome, so the nose rakes down.
-    //             z      hw     top    bot    tw     bw     chy     dy
-    const FUS = [
-      [  6.30, 0.035, 0.040, 0.040, 0.018, 0.018,  0.000, -0.085],
-      [  5.72, 0.190, 0.145, 0.135, 0.075, 0.090, -0.010, -0.062],
-      [  5.02, 0.380, 0.255, 0.230, 0.155, 0.200, -0.030, -0.040],
-      [  4.18, 0.600, 0.345, 0.300, 0.245, 0.315, -0.055, -0.022],
-      [  3.22, 0.790, 0.415, 0.360, 0.330, 0.425, -0.065, -0.008],
-      [  2.15, 0.920, 0.460, 0.415, 0.400, 0.520, -0.055,  0.000],
-      [  0.95, 1.000, 0.490, 0.460, 0.450, 0.600, -0.030,  0.000],
-      [ -0.45, 1.020, 0.500, 0.500, 0.480, 0.640,  0.000,  0.000],
-      [ -2.05, 0.980, 0.490, 0.520, 0.480, 0.640,  0.030,  0.000],
-      [ -3.60, 0.885, 0.450, 0.490, 0.460, 0.580,  0.050,  0.000],
-      [ -4.90, 0.760, 0.380, 0.420, 0.420, 0.480,  0.060,  0.000],
-      [ -5.80, 0.660, 0.310, 0.330, 0.380, 0.400,  0.060,  0.000],
-    ];
-    loft(FUS.map(function (st) {
-      const c = st[6] + st[7], t = st[2] + st[7], b = -st[3] + st[7];
-      return { z: st[0], p: [[st[1], c], [st[4], t], [-st[4], t], [-st[1], c], [-st[5], b], [st[5], b]] };
-    }), SKIN).position.y = cy;
-    // chin sensor turret — a faceted gem under the forebody chine (the thing a
-    // player standing at the nose actually looks at).
-    const eots = new THREE.Mesh(new THREE.OctahedronGeometry(0.27, 0), GUN);
-    eots.position.set(0, cy - 0.40, 3.55); eots.scale.set(1.0, 0.60, 1.45);
-    eots.rotation.y = Math.PI / 4; eots.castShadow = true; eots.receiveShadow = true; g.add(eots);
-    // belly weapons-bay doors — twin recessed panels with a centreline seam
-    // (y/height chosen so the panel top stays ABOVE the keel line across the
-    // whole z-span — the keel rises from -0.508 aft to -0.428 forward — so the
-    // doors are proud of the belly everywhere and float nowhere.)
-    [-1, 1].forEach(function (s) { box(g, s * 0.31, cy - 0.46, 0.35, 0.52, 0.12, 2.9, M.jetGreyD); });
-
-    // ---- CHEEK INTAKES ------------------------------------------------------
-    // Trunks hung low and outboard, each with its OWN chine (top:0.62 narrows
-    // the upper face so the widest line is at mid height), a raked CARET mouth
-    // (yawed + pitched dark plate recessed behind the lip) and a boundary-layer
-    // diverter plate bridging trunk-to-flank so no daylight shows through.
-    [-1, 1].forEach(function (s) {
-      tbox(g, s * 1.28, cy - 0.34, 1.05, 0.68, 0.72, 4.30, { nz: 0.90, tz: 0.66, top: 0.62, bot: 0.82, segD: 6 }, SKIN);
-      const mo = mbox(g, s * 1.28, cy - 0.34, 3.04, 0.50, 0.60, 0.12, GUN);
-      mo.rotation.y = s * 0.34; mo.rotation.x = -0.20;
-      box(g, s * 0.96, cy - 0.28, 1.55, 0.09, 0.56, 3.10, M.jetGreyD);
-    });
-
-    // ---- WINGS / TAILS ------------------------------------------------------
-    // Trapezoidal planform: 43° swept leading edge, 0.32 tip/root taper, a
-    // separate FLAPERON slab hung off the trailing edge (a real control-surface
-    // step, not a painted seam), all-moving stabilators aft, and underwing
-    // pylons carrying finned stores. Roots sit at x=±0.80 — deep inside the
-    // flank — and emerge THROUGH the intake fairing, so there is no seam.
-    [-1, 1].forEach(function (s) {
-      wing(g, s * 0.80, cy + 0.04, -0.35, s, 3.70, 4.00, 0.30, 2.10, 0.68, 0.55, SKIND);
-      wing(g, s * 1.10, cy + 0.05, -2.66, s, 3.00, 0.62, 0.16, 0.51, 0.28, 0.45, SKIN);   // flaperon
-      wing(g, s * 0.66, cy + 0.06, -4.05, s, 1.90, 1.95, 0.20, 1.05, 0.58, 0.50, SKIND);  // stabilator
-      box(g, s * 2.70, cy - 0.22, -1.20, 0.13, 0.36, 1.35, M.jetGreyD);                   // pylon
-      mcyl(g, s * 2.70, cy - 0.44, -1.00, 0.105, 0.105, 1.90, STORE, 10).rotation.x = Math.PI / 2;
-      const og = new THREE.Mesh(new THREE.ConeGeometry(0.105, 0.46, 10), STORE);
-      og.rotation.x = -Math.PI / 2; og.position.set(s * 2.70, cy - 0.44, 0.18);
-      og.castShadow = true; og.receiveShadow = true; g.add(og);
-      box(g, s * 2.70, cy - 0.44, -1.72, 0.60, 0.035, 0.30, M.dark);
-      box(g, s * 2.70, cy - 0.44, -1.72, 0.035, 0.60, 0.30, M.dark);
-    });
-    // TWIN CANTED FINS — sculpted slabs stood on end (rotation.z) and raked out
-    // 23° from vertical, each rising out of a THICKER fairing on the same cant
-    // so the root is swallowed instead of stabbed into the spine.
-    [-1, 1].forEach(function (s) {
-      wing(g, s * 0.24, cy + 0.06, -3.45, s, 1.05, 3.00, 0.38, 0.85, 0.55, 0.55, SKIN).rotation.z = s * 1.16;
-      wing(g, s * 0.30, cy + 0.34, -3.55, s, 2.05, 2.50, 0.20, 1.45, 0.60, 0.50, SKIN).rotation.z = s * 1.16;
-    });
-
-    // ---- COCKPIT ------------------------------------------------------------
-    // A lofted one-piece bubble (5-point arc sections) whose sill sinks under
-    // the upper deck at every station, a torus canopy bow at the windscreen
-    // join, and a real interior — coaming, raked seat, headrest — because the
-    // shared vehicle glass is genuinely transparent and an empty tub shows.
-    //             z      w     base    h
-    const CAN = [
-      [  2.72, 0.120, 0.415, 0.115],
-      [  2.28, 0.280, 0.425, 0.290],
-      [  1.55, 0.405, 0.440, 0.455],
-      [  0.60, 0.435, 0.455, 0.480],
-      [ -0.40, 0.400, 0.460, 0.425],
-      [ -1.15, 0.295, 0.450, 0.235],
-    ];
-    mbox(g, 0, cy + 0.52, 2.02, 0.42, 0.16, 0.42, TRIM);                       // instrument coaming
-    tbox(g, 0, cy + 0.56, 0.88, 0.40, 0.58, 0.24, { top: 0.78, segD: 2 }, TRIM).rotation.x = -0.22;
-    mbox(g, 0, cy + 0.80, 0.70, 0.24, 0.15, 0.16, TRIM);                       // headrest
-    const canopy = loft(CAN.map(function (st) {
-      const w = st[1], b = st[2], t = st[2] + st[3];
-      return { z: st[0], p: [[w, b], [w * 0.86, b + st[3] * 0.62], [0, t], [-w * 0.86, b + st[3] * 0.62], [-w, b]] };
-    }), GLASS);
-    canopy.position.y = cy;
-    const bow = new THREE.Mesh(new THREE.TorusGeometry(0.31, 0.038, 6, 14, Math.PI), SKIND);
-    bow.position.set(0, cy + 0.425, 2.28); bow.scale.y = 0.95;
-    bow.castShadow = true; bow.receiveShadow = true; g.add(bow);
-    // dorsal spine fairing — carries the canopy line aft into the fin roots
-    tbox(g, 0, cy + 0.44, -1.60, 0.62, 0.42, 4.40, { nz: 0.75, tz: 0.45, top: 0.55, segD: 5 }, SKIND);
-
-    // ---- NOZZLES — twin 2D THRUST-VECTORING PACK ----------------------------
-    // Not round cones: rectangular convergent housings with a dark throat and
-    // upper/lower vectoring paddles that pinch shut going aft. Two plumes, one
-    // per engine (the userData.plume contract is an array).
-    const plumes = [];
-    [-1, 1].forEach(function (s) {
-      tbox(g, s * 0.40, cy + 0.02, -5.55, 0.66, 0.66, 1.10, { tz: 0.68, top: 0.88, bot: 0.88, segD: 3 }, SKIND);
-      mbox(g, s * 0.40, cy + 0.02, -6.02, 0.42, 0.42, 0.14, GUN);
-      box(g, s * 0.40, cy + 0.28, -5.95, 0.58, 0.08, 0.62, M.steelD).rotation.x = 0.22;
-      box(g, s * 0.40, cy - 0.24, -5.95, 0.58, 0.08, 0.62, M.steelD).rotation.x = -0.22;
-      const p = CBZ.createRocketPlume({ name: "fighter-afterburner", lightRange: 13 });
-      p.position.set(s * 0.40, cy + 0.02, -6.18); g.add(p); CBZ.setRocketPlume(p, 0, 0);
-      plumes.push(p);
-    });
-    g.userData.plume = plumes; g.userData.plumeMat = plumes[0].userData.outerMaterial;
-
-    // ---- LANDING GEAR — oleo struts, hubbed wheels, hanging doors -----------
-    mcyl(g, 0, 0.56, 3.40, 0.065, 0.075, 0.62, GUN, 8);                        // nose oleo
-    mcyl(g, 0, 0.26, 3.40, 0.26, 0.26, 0.22, RUBBER, 12).rotation.z = Math.PI / 2;
-    mcyl(g, 0, 0.26, 3.40, 0.13, 0.13, 0.24, RIM, 10).rotation.z = Math.PI / 2;
-    box(g, 0.22, 0.68, 3.40, 0.05, 0.50, 1.15, M.jetGreyD);                    // nose bay door
-    [-1, 1].forEach(function (s) {
-      mcyl(g, s * 1.05, 0.60, -0.25, 0.075, 0.088, 0.58, GUN, 8);              // main oleo
-      mcyl(g, s * 1.05, 0.34, -0.25, 0.34, 0.34, 0.26, RUBBER, 12).rotation.z = Math.PI / 2;
-      mcyl(g, s * 1.05, 0.34, -0.25, 0.17, 0.17, 0.28, RIM, 10).rotation.z = Math.PI / 2;
-      box(g, s * 0.86, 0.72, -0.25, 0.06, 0.62, 1.50, M.jetGreyD);             // main bay door
-    });
-
-    // nav lights: red port wingtip, green starboard, white tail
-    navBox(g, -4.42, cy + 0.04, -2.20, 0.15, 0xff4a3d);
-    navBox(g, 4.42, cy + 0.04, -2.20, 0.15, 0x37d67a);
-    navBox(g, 0, cy + 0.40, -5.05, 0.13, 0xf2f4ff);
-    // Exact visible launch socket. The generic fallback multiplied the already
-    // world-sized footprint by this group's 1.5 scale and spawned missiles far
-    // in front of the jet, which looked like no rocket left the aircraft.
-    // Sits on the drooped radome boresight, just clear of the loft's tip.
-    const muzzle = new THREE.Object3D(); muzzle.position.set(0, cy - 0.06, 6.42); g.add(muzzle);
-    g.userData.muzzle = muzzle; g.userData.muzzleLocal = muzzle.position.clone();
-    const scale = 1.5;
-    const dims = { family: "F-22-class", length: 18.6, span: 13.5, height: 5.25 };
-    g.scale.setScalar(scale); g.userData.aircraftDims = dims;
-    return { group: g, footW: dims.span, footL: dims.length, height: dims.height, aircraftDims: dims };
-  }
-
-  // HEAVY BOMBER — a SCULPTED airframe, not a tube with cones on both ends
-  // (which is exactly what it used to be). Four hexagonal-section fuselage
-  // stations with a waist and a keel; a blunt drooped forebody with chines, a
-  // raised flight deck and an overhanging graphite brow; a beaver-tail aft
-  // body that sweeps UP onto an armoured bulkhead carrying a remote tail
-  // barbette; shoulder wings with hard sweep and real anhedral; four podded
-  // turbofans with rolled intake lips, recessed fan faces and spinners; a
-  // bulged bomb bay; and long-legged gear on two four-wheel bogies.
-  // ~82 meshes. Nose +Z, tyres on y=0.
-  function makeBomber() {
-    const g = new THREE.Group();
-    const cy = 2.7;                                         // body centreline y — it stands TALL on its legs
-    const GLASS = vmat("glass", M.canopy), GUN = vmat("plastic", M.dark), RUBBER = vmat("tire", M.tire);
-    // Deliberately DARKER than the fighter: low-vis strategic-bomber grey.
-    // Three cached tones only — hull / shadowed fairings / lighter surfaces.
-    const HULL = cm(M.jetGreyD), SHADE = cm(0x464d56), PANEL = cm(M.jetGrey);
-
-    // ===================== FUSELAGE =====================
-    // FOUR sculpted stations, each a hexagonal-section taperBox (top/bot
-    // narrowing fakes a round-shouldered hull in low-poly). There is no tube
-    // and no cone anywhere on this airframe: the body has a real waist, real
-    // shoulders and a keel line that sweeps UP into the tail.
-    tbox(g, 0, cy, -0.10, 3.00, 3.20, 9.20, { nz: 0.99, tz: 0.86, top: 0.56, bot: 0.64, segD: 6 }, HULL);       // centre / wing box
-    tbox(g, 0, cy + 0.06, 7.45, 2.97, 3.17, 6.10, { nz: 0.66, tz: 0.99, top: 0.54, bot: 0.62, segD: 8 }, HULL); // forebody
-
-    // NOSE — the cone is GONE. The forebody keeps real width and real depth
-    // all the way forward, DROOPS a couple of degrees so it looks down at you,
-    // and finishes on a blunt oval radome instead of resolving to a point.
-    const noseCap = tbox(g, 0, cy - 0.06, 11.85, 1.96, 2.09, 3.00, { nz: 0.34, tz: 1.0, top: 0.50, bot: 0.60, segD: 8 }, HULL);
-    noseCap.rotation.x = 0.04;
-    const radome = new THREE.Mesh(new THREE.SphereGeometry(0.52, 10, 6), SHADE);
-    radome.scale.set(0.95, 1.0, 1.35); radome.position.set(0, cy - 0.10, 12.90);
-    radome.castShadow = true; radome.receiveShadow = true; g.add(radome);
-    // forebody CHINES — half-buried strakes carrying the flank line forward,
-    // sweeping inboard as they go. This is what stops the front reading as a
-    // separate shape stuck on the end of a pipe.
-    [-1, 1].forEach(function (s) {
-      const chine = tbox(g, s * 0.88, cy - 0.25, 10.25, 0.50, 0.34, 3.50, { nz: 0.42, tz: 0.85, top: 0.4, bot: 0.4, segD: 6 }, HULL);
-      chine.rotation.y = -s * 0.13;
-    });
-    // CHIN — a bomb-aiming/sensor blister under the forebody ending in a
-    // manned BARBETTE. Walk under the nose on the apron and two cannon are
-    // pointed at you; that is why the front of this thing reads as hostile.
-    tbox(g, 0, cy - 1.05, 10.10, 1.85, 0.95, 4.00, { nz: 0.42, tz: 0.80, bot: 0.50, segD: 6 }, SHADE);
-    tbox(g, 0, cy - 1.42, 11.30, 1.10, 0.80, 1.20, { nz: 0.72, top: 0.78, bot: 0.62, segD: 4 }, cm(M.steelD));
-    [-1, 1].forEach(function (s) {
-      mcyl(g, s * 0.26, cy - 1.50, 12.35, 0.075, 0.085, 1.70, GUN, 8).rotation.x = Math.PI / 2;
-    });
-
-    // ===================== FLIGHT DECK =====================
-    // A raised deck shell standing proud of the roofline, a raked wrap-around
-    // windscreen, quarter lights down the flanks — and a heavy graphite BROW
-    // overhanging the glass. That overhang is the scowl: seen from the tarmac
-    // the aeroplane is frowning at you.
-    //
-    // THE WINDSCREEN IS AN APERTURE NOW, NOT A SKIN, AND THE FOREBODY IS WHY
-    // THAT TOOK TWO CHANGES. Measured before: the deck was ONE solid tbox over
-    // z 6.90-10.80 with the glass block laid across its forward metre, and the
-    // volume behind that pane was 92.4% hull — a 0.06 m³ sliver of air. You saw
-    // the tint and nothing through it. island_airport.js's buildCabin solved
-    // exactly this for the airliner and the technique transfers: split the shell
-    // into a ROOF slab and a BELLY slab with SIDE BAND-CAPS around an OPEN
-    // window band, then furnish the room the split creates.
-    //
-    // But splitting the shell alone bought nothing here, and the arithmetic says
-    // why: the forebody is a taperBox with nz 0.66, so its ROOF runs from y 4.34
-    // at z 7.05 down to 3.89 at z 10.02, and the old shell's interior band
-    // (3.80-4.30) sat almost entirely INSIDE it. The room has to be above the
-    // forebody or it is not a room. So the band is lifted to 4.30-4.82 — 0.52
-    // model / 0.78 world metres of genuine air, ~9 m³ against 0.06 — and the
-    // glass, the brow and the quarter lights are lifted with it so they still
-    // frame it. The deck crown goes 4.48 -> 5.00 model (+0.78 world), which is a
-    // taller greenhouse standing 1.0 world m over the spine: what a strategic
-    // bomber's flight deck actually looks like from the apron, and still 27%
-    // below the fin tip so the silhouette's hierarchy is unchanged.
-    // Revert: CBZ.CONFIG.MIL_BOMBER_DECK = false restores the solid shell.
-    if (CBZ.CONFIG && CBZ.CONFIG.MIL_BOMBER_DECK == null) CBZ.CONFIG.MIL_BOMBER_DECK = true;
-    const deckV2 = !CBZ.CONFIG || CBZ.CONFIG.MIL_BOMBER_DECK !== false;
-    const BAND0 = 4.30, BAND1 = 4.82;                       // the open window band, model-local
-    if (deckV2) {
-      tbox(g, 0, (BAND1 + 5.00) / 2, 8.85, 2.05, 0.18, 3.90, { nz: 0.60, tz: 0.90, top: 0.62, segD: 6 }, HULL);   // roof slab
-      tbox(g, 0, (3.48 + BAND0) / 2, 8.85, 2.05, BAND0 - 3.48, 3.90, { nz: 0.60, tz: 0.90, segD: 6 }, HULL);      // belly slab / deck sole
-      tbox(g, 0, (BAND0 + BAND1) / 2, 7.05, 2.00, BAND1 - BAND0, 0.30, { nz: 0.88, tz: 0.90, segD: 3 }, HULL);    // rear bulkhead
-      [-1, 1].forEach(function (s) {                        // side band-caps, AFT of the quarter lights only
-        tbox(g, s * 0.72, (BAND0 + BAND1) / 2, 7.75, 0.22, BAND1 - BAND0, 1.60, { nz: 0.86, tz: 0.96, segD: 3 }, HULL);
-      });
-    } else {
-      tbox(g, 0, cy + 1.28, 8.85, 2.05, 1.00, 3.90, { nz: 0.60, tz: 0.90, top: 0.62, segD: 6 }, HULL);
-    }
-    const GY = deckV2 ? (BAND0 + BAND1) / 2 : cy + 1.30;    // glazing centreline
-    tbox(g, 0, GY, 10.40, 1.40, 0.72, 1.00, { nz: 0.72, tz: 1.0, top: 0.66, bot: 0.92, segD: 4 }, GLASS);
-    const brow = tbox(g, 0, GY + 0.32, 10.35, 1.42, 0.26, 1.50, { nz: 0.72, tz: 1.0, top: 0.60, segD: 4 }, SHADE);
-    brow.rotation.x = 0.10;                                 // the lip tips DOWN over the glass
-    [-1, 1].forEach(function (s) { mbox(g, s * 0.80, GY + 0.05, 9.40, 0.14, 0.44, 1.70, GLASS); });
-    // ---- WHAT IS BEHIND THE GLASS -------------------------------------------
-    // The SAME minimal set and the SAME rules as the helicopter tub below —
-    // static boxes in the TRIM bucket, no collider, no new material, no rng —
-    // because that is this file's established idiom bar and a flight deck built
-    // to a different one would read as a second grammar. What is here is what
-    // you can actually see through a bomber's windscreen, front to back: the
-    // raked main panel at the base of the screen, the glareshield capping it,
-    // two multifunction faces flanking the centreline, the pedestal between the
-    // crew and the two seat backs standing against the bulkhead. Every part is
-    // sized against the band above (worst clearance: the seat backs top out at
-    // 4.74 against a roof underside of 4.82).
-    if (deckV2) {
-      const DECK = vmat("interior", 0x0d0e10);
-      const GLOW = cm(0x0c1a1c, { emissive: 0x2f6f6a, ei: 0.5 });   // phosphor instrument faces
-      mbox(g, 0, BAND0 + 0.20, 10.02, 1.28, 0.38, 0.09, GLOW).rotation.x = -0.30;    // main panel, raked to the crew
-      mbox(g, 0, BAND0 + 0.44, 9.84, 1.24, 0.10, 0.30, DECK);                        // glareshield coaming
-      [-1, 1].forEach(function (s) {
-        mbox(g, s * 0.40, BAND0 + 0.22, 9.93, 0.34, 0.20, 0.06, GLOW).rotation.x = -0.30;   // MFD / stores bezels
-      });
-      mbox(g, 0, BAND0 + 0.16, 9.28, 0.30, 0.30, 0.70, DECK);                        // centre pedestal
-      mbox(g, 0, BAND0 + 0.34, 9.55, 0.24, 0.08, 0.24, GLOW).rotation.x = -0.20;     // throttle quadrant face
-      [-1, 1].forEach(function (s) {
-        mbox(g, s * 0.36, BAND0 + 0.22, 8.66, 0.44, 0.52, 0.12, DECK).rotation.x = -0.14;   // crew seat backs
-      });
-    }
-
-    // ===================== SPINE & DORSAL FILLET =====================
-    // A raised spine running back from the deck, then a fillet that RISES aft
-    // into the fin root. From above the aircraft has a backbone, not a pipe.
-    tbox(g, 0, cy + 1.42, 2.20, 1.55, 0.90, 9.60, { nz: 0.55, tz: 0.90, top: 0.55, segD: 8 }, HULL);
-    tbox(g, 0, cy + 1.28, -4.00, 1.25, 1.30, 6.40, { nz: 0.35, tz: 0.98, top: 0.35, segD: 8 }, HULL);
-
-    // ===================== AFT BODY & TAIL BARBETTE =====================
-    // The classic bomber "beaver tail": instead of pinching into a cone the
-    // hull sweeps UP and boat-tails onto a flat armoured bulkhead carrying a
-    // remote turret. The rear three-quarter view gets a real shoulder line.
-    const aft = tbox(g, 0, cy + 0.28, -7.60, 2.55, 2.80, 6.20, { nz: 0.98, tz: 0.66, top: 0.55, bot: 0.60, segD: 8 }, HULL);
-    aft.rotation.x = 0.09;
-    const boat = tbox(g, 0, cy + 0.68, -12.00, 1.72, 1.89, 2.80, { nz: 0.98, tz: 0.60, top: 0.60, bot: 0.55, segD: 6 }, HULL);
-    boat.rotation.x = 0.09;
-    tbox(g, 0, cy + 0.83, -13.75, 1.03, 1.13, 1.00, { tz: 0.78, top: 0.72, bot: 0.72, segD: 4 }, cm(M.steelD));
-    mbox(g, 0, cy + 0.93, -14.28, 0.58, 0.30, 0.10, GLASS);       // gunner's vision slit
-    [-1, 1].forEach(function (s) {
-      mcyl(g, s * 0.26, cy + 0.70, -14.10, 0.085, 0.095, 1.40, GUN, 8).rotation.x = Math.PI / 2;
-    });
-    // ===================== TAIL GROUP =====================
-    // Tall raked fin growing OUT of the dorsal fillet (not planted on a tube),
-    // capped by an ECM fairing; hard-swept stabilizers with anhedral echoing
-    // the wings so the whole tail reads as one family of shapes.
-    wing(g, 0, cy + 0.50, -9.00, 1, 3.70, 4.40, 0.46, 2.60, 0.55, 0.40, PANEL).rotation.z = Math.PI / 2;
-    tbox(g, 0, 6.68, -11.55, 0.44, 0.42, 2.20, { nz: 0.50, tz: 0.45, top: 0.7, bot: 0.7, segD: 4 }, SHADE);
-    [-1, 1].forEach(function (s) {
-      wing(g, s * 0.55, cy + 0.62, -10.20, s, 4.30, 3.40, 0.34, 2.30, 0.55, 0.40, PANEL, 0.30);
-    });
-
-    // ===================== WINGS =====================
-    // 27m of shoulder-mounted wing (40.5m at world scale): hard sweep, strong
-    // taper, thinning tips and real ANHEDRAL — the tips HANG, the way a laden
-    // heavy's wings do. Roots buried inside the wing-body fairings so the slab
-    // grows out of a blister instead of being stuck on a flank.
-    [-1, 1].forEach(function (s) {
-      tbox(g, s * 1.40, cy + 0.10, 0.70, 1.90, 2.00, 10.40, { nz: 0.34, tz: 0.50, top: 0.55, bot: 0.60, segD: 8 }, SHADE);
-      wing(g, s * 0.95, cy + 0.92, 0.90, s, 12.55, 6.40, 0.66, 4.40, 0.62, 0.50, HULL, 0.62);
-      // flap-track fairings under the trailing edge — the detail you actually
-      // see when you are standing underneath it on the apron
-      tbox(g, s * 5.90, 3.24, -2.75, 0.50, 0.48, 3.20, { nz: 0.80, tz: 0.20, top: 0.7, bot: 0.7, segD: 4 }, SHADE);
-      // wingtip ECM/fuel pod straddling the tip chord
-      tbox(g, s * 13.15, cy + 0.30, -3.50, 0.62, 0.55, 3.60, { nz: 0.45, tz: 0.40, top: 0.7, bot: 0.7, segD: 6 }, SHADE);
-    });
-
-    // ===================== ENGINES =====================
-    // Four big turbofans podded FORWARD of and UNDER the wing on swept pylons.
-    // Every one is a real engine — a rolled intake lip (a torus, not a washer),
-    // a dark recessed fan face with a spinner, a boat-tailed cowl and a
-    // converging nozzle. No drums with cones glued on the back.
-    const ENG = [
-      // x, y, z, length, radius, pylonY, pylonZ, pylonHeight
-      [4.30, 2.16, 3.30, 3.70, 0.70, 2.92, 2.35, 1.55],
-      [7.95, 2.02, 1.45, 3.35, 0.64, 2.76, 0.60, 1.45],
-    ];
-    [-1, 1].forEach(function (s) {
-      ENG.forEach(function (e) {
-        const ex = s * e[0], ey = e[1], ez = e[2], eL = e[3], er = e[4];
-        const fz = ez + eL / 2, az = ez - eL / 2;           // cowl front / aft faces
-        tbox(g, ex, e[5], e[6], 0.42, e[7], 2.50, { nz: 0.55, tz: 0.70, top: 0.80, bot: 0.85, segD: 4 }, SHADE);
-        cyl(g, ex, ey, ez, er, er * 0.84, eL, M.jetGrey, 14).rotation.x = Math.PI / 2;
-        const lip = new THREE.Mesh(new THREE.TorusGeometry(er * 0.90, er * 0.16, 6, 16), cm(M.steelD));
-        lip.position.set(ex, ey, fz - er * 0.10); lip.castShadow = true; lip.receiveShadow = true; g.add(lip);
-        mcyl(g, ex, ey, fz - er * 0.55, er * 0.85, er * 0.85, 0.12, GUN, 14).rotation.x = Math.PI / 2;
-        const hub = new THREE.Mesh(new THREE.ConeGeometry(er * 0.22, er * 0.80, 8), cm(M.steelD));
-        hub.rotation.x = Math.PI / 2; hub.position.set(ex, ey, fz - er * 0.55);
-        hub.castShadow = true; hub.receiveShadow = true; g.add(hub);
-        mcyl(g, ex, ey, az + 0.10, er * 0.80, er * 0.62, 0.72, GUN, 12).rotation.x = Math.PI / 2;
-      });
-    });
-
-    // ===================== BOMB BAY =====================
-    // A long bulged bay with twin door leaves — the reason the aeroplane
-    // exists, and the first thing you see looking up from underneath.
-    box(g, 0, cy - 1.62, 1.40, 1.85, 0.50, 9.00, M.dark);
-    [-1, 1].forEach(function (s) { box(g, s * 0.62, cy - 1.72, 1.40, 0.62, 0.16, 8.80, M.jetGreyD); });
-
-    // ===================== LANDING GEAR =====================
-    // Long-legged: a twin-wheel nose leg braced up into the chin bay, and TWO
-    // FOUR-WHEEL BOGIES tucked into the wing-body fairings. Tyres on y=0.
-    box(g, 0, 1.20, 9.00, 0.40, 2.05, 0.36, M.steelD);                          // nose oleo
-    box(g, 0, 1.45, 8.72, 0.22, 1.40, 0.22, M.steel).rotation.x = -0.45;        // drag brace
-    [-1, 1].forEach(function (s) {
-      mcyl(g, s * 0.30, 0.58, 9.00, 0.58, 0.58, 0.30, RUBBER, 12).rotation.z = Math.PI / 2;
-    });
-    [-1, 1].forEach(function (s) {
-      box(g, s * 1.72, 1.55, 0.40, 0.46, 2.60, 0.48, M.steelD);                 // main oleo
-      box(g, s * 1.72, 2.00, 0.95, 0.26, 1.70, 0.26, M.steel).rotation.x = 0.42; // drag stay
-      box(g, s * 1.72, 0.68, 0.40, 0.54, 0.30, 3.00, M.steelD);                 // bogie beam
-      [-1.05, 1.05].forEach(function (wz) {
-        [-1, 1].forEach(function (ws) {
-          mcyl(g, s * 1.72 + ws * 0.40, 0.68, 0.40 + wz, 0.68, 0.68, 0.34, RUBBER, 12).rotation.z = Math.PI / 2;
-        });
-      });
-    });
-    // nav lights: red port wingtip, green starboard, white on the fin tip
-    navBox(g, -13.35, cy + 0.30, -3.50, 0.22, 0xff4a3d);
-    navBox(g, 13.35, cy + 0.30, -3.50, 0.22, 0x37d67a);
-    navBox(g, 0, 6.72, -12.75, 0.20, 0xf2f4ff);
-    const scale = 1.5;
-    const dims = { family: "heavy-bomber", length: 42, span: 40.5, height: 10.35 };
-    g.scale.setScalar(scale); g.userData.aircraftDims = dims;
-    return { group: g, footW: dims.span, footL: dims.length, height: dims.height, aircraftDims: dims };
-  }
+  function makeJet() { return CBZ.milAir.make("fighter"); }
+  function makeBomber() { return CBZ.milAir.make("bomber"); }
+  function makeHeli() { return CBZ.milAir.make("utilityHeli"); }
+  function makeAttackHeli() { return CBZ.milAir.make("attackHeli"); }
+  function makeDrone() { return CBZ.milAir.make("drone"); }
 
   // ========================================================================
-  //  CARGO LIFTER — the first airframe in this game with a ROOM in it.
+  //  CARGO LIFTER — A400M-class, built from the INSIDE OUT.
   //
   //  OWNER: "a cargo plane where you can open and close the back and even a
   //  tank can drive into the back — but like elevators it must actually have a
   //  back of plane that exists, so other players can be inside the plane like a
-  //  room."
-  //
-  //  So the modelling brief is unusual and it drives every number below: this
-  //  airframe is built from the INSIDE OUT. The hold is authored first as a
-  //  4.4 m × 19 m × 3.0 m room — sized off makeTank()'s real footprint (3.5 m
-  //  wide, 6.4 m long, 2.7 m tall) with 0.45 m of shoulder each side and 0.3 m
-  //  over the turret — and the aeroplane is then wrapped around it. That is why
-  //  the fuselage is a four-slab box (floor · two walls · roof) instead of one
-  //  solid taperBox like every other model in this file: a solid hull would
-  //  make the interior a lie you can only look at through the back.
-  //
-  //  Consequences of building it that way, all deliberate:
-  //   · the wing is SHOULDER-mounted on the roof, because a wing spar through
-  //     the middle of the room is exactly what a real lifter refuses to have;
-  //   · the main gear lives in SPONSONS blistered onto the flanks rather than
-  //     retracting into the belly, which is what keeps the cargo deck at a flat
-  //     1.35 m and lets the ramp make a 17.5-degree slope a tank can climb;
-  //   · the aft fuselage SWEEPS UP so the ramp has sky to swing into.
+  //  room." The hold is authored first as a 4.4 x 19 x 3.0 m room sized off
+  //  the tank (3.5 wide, 6.4 long, 2.7 tall) and the aeroplane is wrapped
+  //  around it: a 5.6 m lofted fuselage (the real A400M's), a high wing so no
+  //  spar crosses the room, gear in sponsons so the deck stays flat at 1.35 m,
+  //  an aft body that is an OPEN-BOTTOMED shell so the ramp has somewhere to
+  //  stow, four turboprops with eight-blade props, and a T-tail.
   //
   //  The ramp is its own group (userData.cargoRamp) hinged at the deck sill, so
-  //  city/vehicle_hold.js poses it by rotating ONE node and the walkable slope
-  //  is solved from that node's live angle. Nose +Z, tyres on y=0, scale 1 —
-  //  the hold's local coordinates ARE metres, which is the whole reason this
-  //  model is not scaled like the bomber beside it.
+  //  city/vehicle_hold.js poses it by rotating ONE node and solves the walkable
+  //  slope from its live angle.
   // ========================================================================
   const CARGO = {
     deckY: 1.35,          // cargo floor top, model+world metres
@@ -701,274 +208,173 @@
     rampLen: 3.7,
     rampW: 3.9,
     rampOpenRx: -0.3648,  // toe on the tarmac: asin((1.35-0.03)/3.7) = 20.9°
-    rampClosedRx: 1.24,   // stood up across the aperture (71°)
+    rampClosedRx: 1.24,   // stood up across the aperture (71°); toe ends 1.2 m aft, 3.5 m up, inside the aft shell
   };
-  /* WHY 3.7 m AND NOT 4.2, WHICH IS WHAT A 17-DEGREE SLOPE WANTED.
-     Because a door has to have somewhere to GO. Stowed, this ramp swings up
-     through the aperture and its toe ends up 3.5 m above the sill and a metre
-     aft of it — i.e. inside the upswept tail — and the tail is now a hollow
-     shell precisely so that volume exists (see AFT UPSWEEP below). At 4.2 m
-     the toe came out through the crown of the aeroplane. Trading 2.6 degrees
-     of slope (18.3 → 20.9, still half of a tank's 40% gradeability) for a door
-     that closes into its own structure is the right trade, and it is the kind
-     of number that only falls out once the room is modelled instead of faked. */
-  function makeCargoPlane() {
-    const g = new THREE.Group();
-    const GLASS = vmat("glass", M.canopy), RUBBER = vmat("tire", M.tire), GUN = vmat("plastic", M.dark);
+  if (CBZ.milAir) CBZ.milAir.define("cargo", function () {
+    const K$ = CBZ.milAir.kit, B = new K$.Build("cargo");
+    const loft = K$.loft, wingG = K$.wing, xf = K$.xf, mir = K$.mir, bx = K$.box;
     const HULL = cm(0x6d7681), SHADE = cm(0x4d545c), PANEL = cm(M.jetGrey);
-    // A HOLD IS A LIT ROOM, NOT A CAVE. There is no global illumination here,
-    // so an emissive strip does not brighten what is under it — the liner has
-    // to be painted as though it were lit, which is the same trick every
-    // interior in this repo uses. Measured on the third plate: the shipped
-    // greys read as a dark tunnel through the open ramp.
-    const BAY = cm(0x9aa1a9);                                    // lit cargo-bay interior grey
-    const DECKM = cm(0x666c74);                                  // deck plate
-    // A CEILING FACES DOWN, so no sun ever reaches it and a plain liner up
-    // there stays black however pale you paint it. The overhead panel carries
-    // its own emissive — the one place in this room where "lit" has to be in
-    // the material rather than in the light.
-    const CEIL = cm(0xb4bbc2, { emissive: 0x39434b, ei: 0.85 });
-    const STRIP = cm(0xeef3f6, { emissive: 0xcfe2ec, ei: 0.9 });  // overhead light strip
-    const WEB = cm(0x8a3f34);                                     // red troop webbing
-    const Z0 = CARGO.holdZ0, Z1 = CARGO.holdZ1;
-    const DY = CARGO.deckY, RY = CARGO.roofY, HW = CARGO.halfW;
+    const GLASS = vmat("glass", M.canopy), RUBBER = vmat("tire", M.tire), GUN = vmat("plastic", M.dark);
+    // A HOLD IS A LIT ROOM: painted as lit, the ceiling carries its own
+    // emissive (a downward face never sees the sun).
+    const BAY = cm(0x9aa1a9), DECKM = cm(0x666c74), CEIL = cm(0xb4bbc2, { emissive: 0x39434b, ei: 0.85 });
+    const STRIP = cm(0xeef3f6, { emissive: 0xcfe2ec, ei: 0.9 }), WEB = cm(0x8a3f34);
+    const DECKI = vmat("interior", 0x0d0e10), GLOW = cm(0x0c1a1c, { emissive: 0x2f6f6a, ei: 0.5 });
+    const WARN = cm(M.warn), STEELD = cm(M.steelD), BLADE = cm(0x23272c);
+    const Z0 = CARGO.holdZ0, Z1 = CARGO.holdZ1, DY = CARGO.deckY, RY = CARGO.roofY, HW = CARGO.halfW;
     const holdMidZ = (Z0 + Z1) / 2, holdLen = Z1 - Z0;
+    const K = B.main;
+    const S = function (z, y, w, t, b, p, pb, open) { const s = { z: z, y: y, w: w, t: t, b: b, p: p || 2, pb: pb || p || 2 }; if (open != null) s.open = open; return s; };
 
-    // ===================== FUSELAGE — FOUR SLABS AROUND A ROOM =============
-    // Outer skin sits 0.4 m outboard of the interior wall so the hull has real
-    // thickness where you see the cut at the aperture.
-    tbox(g, 0, (0.92 + DY) / 2, holdMidZ, 5.2, DY - 0.92, holdLen, { nz: 0.94, tz: 0.94, bot: 0.72, segD: 6 }, HULL);   // underfloor / keel
-    tbox(g, 0, (RY + 4.95) / 2, holdMidZ, 5.2, 0.60, holdLen, { nz: 0.94, tz: 0.94, top: 0.74, segD: 6 }, HULL);        // crown
-    [-1, 1].forEach(function (s) {
-      tbox(g, s * (HW + 0.2), (DY + RY) / 2, holdMidZ, 0.40, RY - DY, holdLen, { nz: 0.98, tz: 0.98, segD: 6 }, HULL);  // flank
-      // longeron strake down the outside — the line that stops a slab-sided
-      // fuselage reading as a shipping container
-      tbox(g, s * (HW + 0.42), 3.55, holdMidZ, 0.20, 0.26, holdLen - 1.2, { nz: 0.9, tz: 0.9, segD: 6 }, SHADE);
-    });
-
-    // ===================== THE HOLD ITSELF =================================
-    // Deck plate, roller rails, tie-downs, ribbed walls, fold-down webbing
-    // benches and two overhead light strips. This is the room; everything above
-    // is the aeroplane wrapped around it.
-    mbox(g, 0, DY - 0.06, holdMidZ, HW * 2, 0.12, holdLen, DECKM);              // deck plate
-    mbox(g, 0, DY + 0.012, holdMidZ, 0.30, 0.02, holdLen - 0.4, cm(M.warn));    // centreline load line
-    [-1.55, -0.55, 0.55, 1.55].forEach(function (rx) {
-      mbox(g, rx, DY + 0.035, holdMidZ, 0.16, 0.07, holdLen - 0.6, cm(M.steelD));   // roller/lock rails
-    });
-    for (let i = 0; i < 10; i++) {                                              // tie-down rings down both rails
-      const tz = Z0 + 1.2 + i * ((holdLen - 2.4) / 9);
-      [-1.9, 1.9].forEach(function (tx) { mbox(g, tx, DY + 0.05, tz, 0.20, 0.10, 0.20, GUN); });
-    }
-    [-1, 1].forEach(function (s) {
-      mbox(g, s * (HW - 0.03), (DY + RY) / 2, holdMidZ, 0.06, RY - DY, holdLen, BAY);      // inner wall liner
-      for (let i = 0; i < 11; i++) {                                            // frame ribs
-        const rz = Z0 + 0.9 + i * ((holdLen - 1.8) / 10);
-        mbox(g, s * (HW - 0.09), (DY + RY) / 2 + 0.1, rz, 0.10, RY - DY - 0.4, 0.16, SHADE);
-      }
-      // fold-down webbing bench + its back, the detail that says PEOPLE RIDE HERE
-      mbox(g, s * (HW - 0.32), DY + 0.50, holdMidZ + 0.5, 0.56, 0.09, holdLen - 4.5, WEB);
-      mbox(g, s * (HW - 0.07), DY + 0.92, holdMidZ + 0.5, 0.07, 0.75, holdLen - 4.5, WEB);
-      mbox(g, s * 1.02, RY - 0.09, holdMidZ, 0.30, 0.08, holdLen - 1.6, STRIP);            // overhead light strip
-      mbox(g, s * (HW - 0.04), RY - 0.30, holdMidZ, 0.10, 0.20, holdLen - 1.6, cm(0x3b4148)); // cable/duct run
-    });
-    mbox(g, 0, RY - 0.03, holdMidZ, HW * 2 - 0.1, 0.06, holdLen, CEIL);         // ceiling liner
-    
-    // forward bulkhead with a real doorway through to the flight deck, plus the
-    // loadmaster's station beside the ramp
-    mbox(g, 0, (DY + RY) / 2, Z1 + 0.18, HW * 2, RY - DY, 0.36, cm(0x767d85));
-    mbox(g, -1.25, DY + 1.0, Z1 - 0.02, 0.90, 2.0, 0.10, cm(0x2b3037));         // doorway aperture
-    mbox(g, 0.85, DY + 1.4, Z1 - 0.02, 1.5, 1.1, 0.10, cm(0x565d66));           // stowed pallet against it
-    mbox(g, -(HW - 0.14), DY + 1.5, Z0 + 1.6, 0.14, 0.60, 0.45, cm(0x2f353c));  // loadmaster panel
-    mbox(g, -(HW - 0.20), DY + 1.5, Z0 + 1.6, 0.04, 0.34, 0.30, cm(0x14343a, { emissive: 0x2f8f8a, ei: 0.55 }));
-
-    // aperture collar — the cut edge of the fuselage, so the opening reads as a
-    // door in a hull instead of a hole in a box
-    [-1, 1].forEach(function (s) { mbox(g, s * (HW + 0.20), (DY + RY) / 2, Z0 - 0.18, 0.42, RY - DY, 0.36, SHADE); });
-    mbox(g, 0, RY + 0.18, Z0 - 0.18, HW * 2 + 0.84, 0.42, 0.36, SHADE);
-    mbox(g, 0, DY - 0.20, Z0 - 0.18, HW * 2 + 0.84, 0.30, 0.36, SHADE);         // sill lip the ramp seats on
-
-    // ===================== AFT UPSWEEP + TAIL ==============================
-    // The hull sweeps UP behind the aperture so the ramp has sky to swing into
-    // and the tail clears the ground on rotation.
-    //
-    // AND IT IS A SHELL, NOT A SLAB — which is the whole difference between a
-    // cargo door and a picture of one. This was ONE solid tapered box, and a
-    // solid box immediately behind a cargo door is a PLUGGED cargo door:
-    // measured on the first plate of this feature, the box's front face stood
-    // across the entire 3 m aperture, so from the cargo deck the "open back"
-    // was a grey wall two metres away and from outside the room was invisible.
-    // Same silhouette, same taper, now built as a crown and two flanks around
-    // an OPEN TUNNEL — the identical four-slabs-around-a-room grammar the
-    // fuselage above is built with, and for the identical reason. The stowed
-    // ramp lives in that tunnel; with the ramp down you see sky through the
-    // back of the aeroplane from inside it.
-    //
-    // The flanks are hinged at the aperture and rotated inboard rather than
-    // slid inboard, because a taperBox tapers about its OWN centre: a slab
-    // that has been moved off the centreline cannot narrow toward the tail by
-    // tapering, only by turning. Their inner faces stand at ±2.11 m, which is
-    // what keeps the 3.9 m ramp clear of them through its whole swing.
-    const aftShell = new THREE.Group();
-    aftShell.position.set(0, 2.85, Z0);
-    aftShell.rotation.x = 0.34;
-    g.add(aftShell);
-    tbox(aftShell, 0, 1.945, -3.25, 5.00, 0.65, 6.60, { nz: 0.98, tz: 0.72, top: 0.62, segD: 8 }, HULL);   // upswept crown
-    [-1, 1].forEach(function (s) {
-      const fl = new THREE.Group();
-      fl.position.set(s * 2.36, 0, 0);
-      fl.rotation.y = s * 0.055;
-      aftShell.add(fl);
-      tbox(fl, 0, 0, -3.30, 0.50, 3.40, 6.60, { nz: 1.0, tz: 0.62, top: 0.66, bot: 0.70, segD: 8 }, HULL);
-    });
-    const aft2 = tbox(g, 0, 5.95, -18.10, 2.60, 2.20, 3.40, { nz: 0.90, tz: 0.45, top: 0.66, bot: 0.66, segD: 6 }, HULL);
-    aft2.rotation.x = 0.34;
-    mbox(g, 0, 6.60, -19.35, 0.90, 0.70, 0.60, SHADE);                           // tail-cone APU fairing
-
-    // T-TAIL: fin growing out of the upswept boom, stabilizer on top of it —
-    // the silhouette that says "this thing loads from the back".
-    wing(g, 0, 5.30, -15.60, 1, 6.90, 5.60, 0.58, 3.30, 0.52, 0.45, PANEL).rotation.z = Math.PI / 2;
-    tbox(g, 0, 12.35, -17.20, 1.20, 0.70, 3.60, { nz: 0.70, tz: 0.50, top: 0.7, bot: 0.7, segD: 4 }, SHADE);  // tip fairing
-    [-1, 1].forEach(function (s) {
-      wing(g, s * 0.55, 12.30, -17.10, s, 6.40, 3.60, 0.34, 2.10, 0.52, 0.45, PANEL, 0.0);
-    });
-
-    // ===================== FORWARD FUSELAGE + FLIGHT DECK ==================
-    tbox(g, 0, 2.95, 11.40, 5.10, 4.10, 7.30, { nz: 0.98, tz: 0.74, top: 0.60, bot: 0.70, segD: 8 }, HULL);
-    const noseCap = tbox(g, 0, 2.80, 16.20, 3.30, 3.10, 3.10, { nz: 0.72, tz: 0.36, top: 0.56, bot: 0.66, segD: 8 }, HULL);
-    noseCap.rotation.x = -0.05;                                                  // the nose droops a touch
-    const radome = new THREE.Mesh(new THREE.SphereGeometry(0.78, 10, 6), SHADE);
-    radome.scale.set(0.92, 0.94, 1.25); radome.position.set(0, 2.68, 17.55);
-    radome.castShadow = true; radome.receiveShadow = true; g.add(radome);
-    // the flight deck rides ON TOP — split roof/belly slabs around an OPEN
-    // window band (island_airport's buildCabin technique, the same one the
-    // bomber uses two hundred lines up), so there is genuine air behind the glass
-    // THE GREENHOUSE IS TALL ENOUGH FOR THIS GAME'S PEOPLE, and that is not a
-    // styling choice. `city/cockpit.js` DERIVES the design eye from what the
-    // artist modelled, in a fixed order of sources, and its last resort is the
-    // BOUNDING BOX — which on a 13-metre-tall T-tail freighter put the pilot's
-    // eye roughly ten metres above the aeroplane. `cockpitSightAudit()` counts
-    // exactly that failure as `eyeGuessed` and it may only go DOWN, so a brand
-    // new flyable airframe must not add one. The fix is the one the audit's
-    // own header names: model the chair. Two real crew seats are published on
-    // `userData.cabin.seats` (the highest-priority source, the same shape the
-    // airliner's flight deck uses) and the window band was opened from 0.70 m
-    // to 1.40 m so the eye that falls out of them — 0.83 m above the cushion,
-    // because this game's humans are big — is actually behind glass.
-    const BAND0 = 4.55, BAND1 = 5.95, ROOFT = 6.22;
-    tbox(g, 0, (BAND1 + ROOFT) / 2, 13.30, 2.90, ROOFT - BAND1, 4.60, { nz: 0.80, tz: 0.88, top: 0.66, segD: 6 }, HULL);   // deck roof
-    tbox(g, 0, (4.05 + BAND0) / 2, 13.30, 2.90, BAND0 - 4.05, 4.60, { nz: 0.80, tz: 0.88, segD: 6 }, HULL);      // deck sole
-    tbox(g, 0, (BAND0 + BAND1) / 2, 11.10, 2.80, BAND1 - BAND0, 0.34, { nz: 0.92, tz: 0.92, segD: 3 }, HULL);    // rear bulkhead
-    [-1, 1].forEach(function (s) {
-      tbox(g, s * 1.16, (BAND0 + BAND1) / 2, 12.10, 0.24, BAND1 - BAND0, 2.20, { nz: 0.9, tz: 0.96, segD: 3 }, HULL);
-      mbox(g, s * 1.24, (BAND0 + BAND1) / 2 + 0.10, 14.10, 0.14, 0.86, 1.90, GLASS);        // quarter lights
-    });
-    tbox(g, 0, (BAND0 + BAND1) / 2 + 0.06, 15.10, 2.10, 1.14, 1.10, { nz: 0.74, tz: 1.0, top: 0.62, bot: 0.90, segD: 4 }, GLASS);
-    tbox(g, 0, (BAND0 + BAND1) / 2 + 0.74, 15.05, 2.12, 0.26, 1.50, { nz: 0.74, tz: 1.0, top: 0.60, segD: 4 }, SHADE).rotation.x = 0.10;
-    // what you see through it — glareshield, coaming, pedestal…
-    const GLOW = cm(0x0c1a1c, { emissive: 0x2f6f6a, ei: 0.5 }), DECKI = vmat("interior", 0x0d0e10);
-    mbox(g, 0, BAND0 + 0.62, 14.72, 1.70, 0.40, 0.09, GLOW).rotation.x = -0.28;
-    mbox(g, 0, BAND0 + 0.88, 14.52, 1.66, 0.10, 0.32, DECKI);
-    mbox(g, 0, BAND0 + 0.38, 13.90, 0.34, 0.52, 0.72, DECKI);
-    // …AND TWO CHAIRS. Cushion top at SEATY; the eye cockpit.js derives from
-    // them lands at 5.73, which is 1.18 m over the flight-deck sole and inside
-    // the glass — a pilot looking out, not a pilot inside the floor.
-    const SEATY = 4.90;
-    [-1, 1].forEach(function (s) {
-      mbox(g, s * 0.46, SEATY - 0.06, 13.55, 0.52, 0.12, 0.54, DECKI);                        // cushion
-      mbox(g, s * 0.46, SEATY + 0.38, 13.24, 0.52, 0.86, 0.11, DECKI).rotation.x = -0.12;     // back
-      mbox(g, s * 0.46, SEATY - 0.28, 13.55, 0.18, 0.32, 0.18, cm(M.steelD));                 // pedestal
-    });
-    g.userData.cabin = {
-      seats: [
-        { id: "seat-captain", role: "pilot", cockpit: true, x: -0.46, y: SEATY, z: 13.55 },
-        { id: "seat-firstofficer", role: "copilot", cockpit: true, x: 0.46, y: SEATY, z: 13.55 },
-      ],
-    };
-    // crew door on the port side, forward — the way people who are not freight
-    // get in, and the reason the nose reads as inhabited
-    mbox(g, -2.58, 2.30, 9.60, 0.08, 2.00, 0.95, SHADE);
-    mbox(g, -2.63, 2.30, 9.60, 0.04, 1.70, 0.06, cm(M.dark));
-
-    // ===================== WINGS (SHOULDER-MOUNTED) ========================
-    [-1, 1].forEach(function (s) {
-      tbox(g, s * 1.70, 5.05, 1.60, 2.20, 1.70, 10.60, { nz: 0.42, tz: 0.52, top: 0.58, bot: 0.64, segD: 8 }, SHADE); // wing-body fairing
-      wing(g, s * 1.10, 5.45, 1.80, s, 19.60, 6.30, 0.74, 2.60, 0.52, 0.48, HULL, 0.34);
-      tbox(g, s * 20.10, 5.30, 0.20, 0.55, 1.60, 2.60, { nz: 0.55, tz: 0.40, top: 0.6, bot: 0.6, segD: 4 }, PANEL).rotation.z = -s * 0.16; // winglet
-      tbox(g, s * 8.40, 4.55, -2.60, 0.55, 0.52, 3.20, { nz: 0.80, tz: 0.20, top: 0.7, bot: 0.7, segD: 4 }, SHADE);   // flap-track fairing
-      tbox(g, s * 14.20, 4.60, -2.20, 0.48, 0.46, 2.80, { nz: 0.80, tz: 0.20, top: 0.7, bot: 0.7, segD: 4 }, SHADE);
-    });
-
-    // ===================== ENGINES — four pylon-hung turbofans =============
-    const ENG = [
-      // x, y, z, length, radius, pylonY, pylonZ, pylonH
-      [6.20, 3.85, 3.40, 4.30, 1.00, 4.70, 2.60, 1.60],
-      [11.60, 3.95, 2.30, 3.90, 0.88, 4.75, 1.60, 1.45],
+    // ===================== FUSELAGE — nose to aperture ======================
+    // 5.6 m wide, 0.95-6.2 m tall; the squared bottom (pb 4.5) is what keeps
+    // the deck corners inside the skin. Windscreen and flight-deck side
+    // windows are the hull's own quads re-emitted as glass.
+    const FUS = [
+      S(19.6, 3.35, 0.25, 0.25, 0.25, 2),
+      S(19.0, 3.40, 1.20, 1.15, 1.10, 2.2),
+      S(17.8, 3.50, 2.05, 1.95, 1.75, 2.4, 3.0),
+      S(16.2, 3.55, 2.60, 2.50, 2.10, 2.7, 3.6),
+      S(14.2, 3.55, 2.80, 2.65, 2.30, 3.0, 4.2),
+      S(11.0, 3.45, 2.80, 2.75, 2.50, 3.0, 4.5),
+      S(Z1, 3.45, 2.80, 2.75, 2.50, 3.0, 4.5),
+      S(Z0, 3.45, 2.80, 2.75, 2.50, 3.0, 4.5),
     ];
-    [-1, 1].forEach(function (s) {
-      ENG.forEach(function (e) {
-        const ex = s * e[0], ey = e[1], ez = e[2], eL = e[3], er = e[4];
-        const fz = ez + eL / 2, az = ez - eL / 2;
-        tbox(g, ex, e[5], e[6], 0.46, e[7], 2.70, { nz: 0.55, tz: 0.70, top: 0.80, bot: 0.85, segD: 4 }, SHADE);
-        cyl(g, ex, ey, ez, er, er * 0.82, eL, M.jetGrey, 14).rotation.x = Math.PI / 2;
-        const lip = new THREE.Mesh(new THREE.TorusGeometry(er * 0.90, er * 0.16, 6, 16), cm(M.steelD));
-        lip.position.set(ex, ey, fz - er * 0.10); lip.castShadow = true; lip.receiveShadow = true; g.add(lip);
-        mcyl(g, ex, ey, fz - er * 0.55, er * 0.85, er * 0.85, 0.12, GUN, 14).rotation.x = Math.PI / 2;
-        const hub = new THREE.Mesh(new THREE.ConeGeometry(er * 0.22, er * 0.80, 8), cm(M.steelD));
-        hub.rotation.x = Math.PI / 2; hub.position.set(ex, ey, fz - er * 0.55);
-        hub.castShadow = true; hub.receiveShadow = true; g.add(hub);
-        mcyl(g, ex, ey, az + 0.12, er * 0.78, er * 0.60, 0.80, GUN, 12).rotation.x = Math.PI / 2;
-      });
+    const fus = loft(FUS, {
+      n: 32, capBack: false, split: function (z, th) {
+        const s = Math.sin(th);
+        if (z > 15.4 && z < 18.2) return s > 0.5;
+        if (z > 13.0 && z < 15.2) return s > 0.42 && s < 0.78;
+        return false;
+      },
     });
-
-    // ===================== GEAR — nose leg + sponson bogies ================
-    box(g, 0, 1.35, 13.20, 0.42, 2.20, 0.38, M.steelD);
-    box(g, 0, 1.70, 12.90, 0.24, 1.50, 0.24, M.steel).rotation.x = -0.42;
-    [-1, 1].forEach(function (s) {
-      mcyl(g, s * 0.32, 0.62, 13.20, 0.62, 0.62, 0.32, RUBBER, 12).rotation.z = Math.PI / 2;
-    });
-    [-1, 1].forEach(function (s) {
-      // the SPONSON: the blister that keeps the cargo deck flat and low
-      tbox(g, s * 3.05, 1.55, 1.20, 1.20, 1.90, 7.40, { nz: 0.62, tz: 0.62, top: 0.70, bot: 0.74, segD: 8 }, HULL);
-      box(g, s * 3.05, 0.98, 1.20, 0.60, 0.90, 6.20, M.steelD, { cast: false });
-      [-2.10, 0.00, 2.10].forEach(function (wz) {
-        mcyl(g, s * 3.42, 0.70, 1.20 + wz, 0.70, 0.70, 0.36, RUBBER, 12).rotation.z = Math.PI / 2;
-        mcyl(g, s * 2.68, 0.70, 1.20 + wz, 0.70, 0.70, 0.36, RUBBER, 12).rotation.z = Math.PI / 2;
-      });
-    });
-
-    // ===================== THE RAMP ========================================
-    // Hinged at the deck sill so vehicle_hold.js only ever rotates ONE node and
-    // solves the walkable slope from its live angle. Built lying flat aft
-    // (rotation.x 0 = horizontal) and stowed upright by the hold on declaration.
-    const ramp = new THREE.Group();
-    ramp.position.set(0, DY, Z0);
-    const RL = CARGO.rampLen, RW = CARGO.rampW;
-    mbox(ramp, 0, -0.10, -RL / 2, RW, 0.20, RL, DECKM);                        // the slab
-    mbox(ramp, 0, 0.02, -RL / 2, 0.30, 0.02, RL - 0.3, cm(M.warn));            // centre load line
-    [-1, 1].forEach(function (s) {
-      mbox(ramp, s * (RW / 2 - 0.14), 0.06, -RL / 2, 0.16, 0.10, RL - 0.2, cm(M.steelD));  // rails
-      mbox(ramp, s * (RW / 2 + 0.03), 0.14, -RL / 2, 0.08, 0.36, RL - 0.6, SHADE);         // side rail/guard
-      for (let i = 0; i < 4; i++) {                                            // underside ribs
-        mbox(ramp, s * 0.85, -0.24, -0.6 - i * 0.90, 0.14, 0.20, 0.80, SHADE);
-      }
-    });
-    for (let i = 0; i < 6; i++) {                                              // non-skid tread bands
-      mbox(ramp, 0, 0.015, -0.42 - i * 0.60, RW - 0.5, 0.02, 0.20, cm(0x3f454c));
+    K.add(fus[0], HULL); if (fus[1]) K.add(fus[1], GLASS);
+    // flight-deck liner so the glass looks into a room, not out the far side
+    K.add(loft(FUS.slice(1, 6).map(function (s) { return S(s.z, s.y, s.w - 0.1, s.t - 0.1, s.b - 0.1, s.p, s.pb); }), { n: 32, caps: false, flipped: true }), DECKI);
+    // ===================== AFT BODY — the open-bottomed ramp tunnel ==========
+    const AFT = [
+      S(Z0, 3.45, 2.80, 2.75, 2.50, 3.0, 4.5, 0.9),
+      S(-14.0, 4.00, 2.62, 2.20, 2.10, 3.0, 3.6, 0.9),
+      S(-17.0, 4.70, 2.10, 1.55, 1.45, 2.8, 3.0, 0.9),
+      S(-19.5, 5.20, 1.40, 0.95, 0.80, 2.5, 2.5, 0.55),
+      S(-22.0, 5.60, 0.70, 0.55, 0.45, 2.2, 2.2, 0.2),
+      S(-23.3, 5.80, 0.12, 0.12, 0.10, 2, 2, 0.2),
+    ];
+    K.add(loft(AFT, { n: 32 }), HULL);
+    K.add(loft(AFT.slice(0, 4).map(function (s) { return S(s.z, s.y, s.w - 0.12, s.t - 0.12, s.b - 0.12, s.p, s.pb, s.open); }), { n: 32, flipped: true }), BAY);
+    // the cut face at the aperture: hull ring down to the hold's doorway
+    K.add(K$.annulus(FUS[FUS.length - 1], S(Z0, (DY + RY) / 2, HW + 0.02, (RY - DY) / 2 + 0.02, (RY - DY) / 2 + 0.25, 8), 32, [0, 0, -1]), SHADE);
+    // ===================== THE HOLD ITSELF ==================================
+    K.add(xf(bx(HW * 2, 0.12, holdLen), 0, DY - 0.06, holdMidZ), DECKM);
+    K.add(xf(bx(0.30, 0.02, holdLen - 0.4), 0, DY + 0.012, holdMidZ), WARN);
+    [-1.55, -0.55, 0.55, 1.55].forEach(function (rx) { K.add(xf(bx(0.16, 0.07, holdLen - 0.6), rx, DY + 0.035, holdMidZ), STEELD); });
+    for (let i = 0; i < 10; i++) {
+      const tz = Z0 + 1.2 + i * ((holdLen - 2.4) / 9);
+      [-1.9, 1.9].forEach(function (tx) { K.add(xf(bx(0.20, 0.10, 0.20), tx, DY + 0.05, tz), GUN); });
     }
-    mbox(ramp, 0, -0.13, -RL - 0.12, RW - 0.2, 0.10, 0.30, cm(M.steelD));      // toe lip
+    [-1, 1].forEach(function (s) {
+      K.add(xf(bx(0.06, RY - DY, holdLen), s * (HW - 0.03), (DY + RY) / 2, holdMidZ), BAY);             // wall liner
+      for (let i = 0; i < 11; i++) {
+        const rz = Z0 + 0.9 + i * ((holdLen - 1.8) / 10);
+        K.add(xf(bx(0.10, RY - DY - 0.4, 0.16), s * (HW - 0.09), (DY + RY) / 2 + 0.1, rz), SHADE);     // frames
+      }
+      K.add(xf(bx(0.56, 0.09, holdLen - 4.5), s * (HW - 0.32), DY + 0.50, holdMidZ + 0.5), WEB);         // troop bench
+      K.add(xf(bx(0.07, 0.75, holdLen - 4.5), s * (HW - 0.07), DY + 0.92, holdMidZ + 0.5), WEB);
+      K.add(xf(bx(0.30, 0.08, holdLen - 1.6), s * 1.02, RY - 0.09, holdMidZ), STRIP);                   // light strip
+      K.add(xf(bx(0.10, 0.20, holdLen - 1.6), s * (HW - 0.04), RY - 0.30, holdMidZ), cm(0x3b4148));      // duct run
+    });
+    K.add(xf(bx(HW * 2 - 0.1, 0.06, holdLen), 0, RY - 0.03, holdMidZ), CEIL);
+    K.add(xf(bx(HW * 2, RY - DY, 0.36), 0, (DY + RY) / 2, Z1 + 0.18), cm(0x767d85));                    // fwd bulkhead
+    K.add(xf(bx(0.90, 2.0, 0.10), -1.25, DY + 1.0, Z1 - 0.02), cm(0x2b3037));                             // doorway to the flight deck
+    K.add(xf(bx(1.5, 1.1, 0.10), 0.85, DY + 1.4, Z1 - 0.02), cm(0x565d66));                               // stowed pallet
+    K.add(xf(bx(0.14, 0.60, 0.45), -(HW - 0.14), DY + 1.5, Z0 + 1.6), cm(0x2f353c));                     // loadmaster panel
+    K.add(xf(bx(0.04, 0.34, 0.30), -(HW - 0.20), DY + 1.5, Z0 + 1.6), cm(0x14343a, { emissive: 0x2f8f8a, ei: 0.55 }));
+    K.add(xf(bx(HW * 2 + 0.6, DY - 0.95, 0.2), 0, (DY + 0.95) / 2, Z0 + 0.1), SHADE);                     // under-deck bulkhead
+    // ===================== FLIGHT DECK ======================================
+    // Two real chairs: city/cockpit.js derives the pilot's eye from them
+    // (0.72 m over the cushion → 5.62, inside the windscreen band).
+    const SEATY = 4.90;
+    K.add(xf(bx(2.6, 0.5, 4.4), 0, 4.30, 13.3), DECKI);                                                    // deck sole
+    K.add(xf(bx(2.8, 1.8, 0.2), 0, 5.45, 11.1), DECKI);                                                    // rear bulkhead
+    K.add(xf(bx(1.70, 0.40, 0.09), 0, 5.17, 15.05, -0.28), GLOW);                                         // main panel
+    K.add(xf(bx(1.66, 0.10, 0.32), 0, 5.43, 14.85), DECKI);                                                // glareshield
+    K.add(xf(bx(0.34, 0.52, 0.72), 0, 4.93, 14.2), DECKI);                                                 // pedestal
+    [-1, 1].forEach(function (s) {
+      K.add(xf(bx(0.52, 0.12, 0.54), s * 0.46, SEATY - 0.06, 13.55), DECKI);
+      K.add(xf(bx(0.52, 0.86, 0.11), s * 0.46, SEATY + 0.38, 13.24, -0.12), DECKI);
+    });
+    B.ud.cabin = { seats: [
+      { id: "seat-captain", role: "pilot", cockpit: true, x: 0.46, y: SEATY, z: 13.55 },
+      { id: "seat-firstofficer", role: "copilot", cockpit: true, x: -0.46, y: SEATY, z: 13.55 },
+    ] };
+    // crew door, port (+X) side forward
+    K.add(xf(bx(0.08, 2.0, 0.95), 2.74, 2.4, 9.6), SHADE);
+    // ===================== HIGH WING + FAIRING ==============================
+    const WK = [{ x: 0, le: 3.6, te: -2.4, tc: 0.15, y: 6.25 }, { x: 2.9, le: 3.4, te: -2.35, tc: 0.15, y: 6.28 }, { x: 21.2, le: -1.4, te: -3.9, tc: 0.11, y: 6.85 }];
+    const W = wingG([K$.planAt(WK, 0), K$.planAt(WK, 2.9), K$.planAt(WK, 21.2)], { K: 7 });
+    K.add([W, mir(W)], HULL);
+    K.add(loft([S(5.8, 6.0, 0.3, 0.2, 0.2), S(4.6, 6.05, 1.8, 0.55, 0.3, 2.6), S(-3.2, 6.05, 1.8, 0.5, 0.3, 2.6), S(-5.0, 6.0, 0.4, 0.2, 0.2)], { n: 20 }), SHADE);
+    // ===================== FOUR TURBOPROPS ==================================
+    const ENG = [[6.6, 5.95, 7.4, -2.2], [12.2, 6.2, 5.9, -2.9]];
+    let pi = 0;
+    ENG.forEach(function (e) {
+      const x = e[0], y = e[1], zf = e[2], za = e[3];
+      const nac = loft([S(zf, y, 0.55, 0.55, 0.62, 2, 2), S(zf - 1.0, y, 0.68, 0.7, 0.95, 2.2, 2.6), S(zf - 4.2, y + 0.05, 0.66, 0.72, 0.9, 2.2, 2.6), S(za + 1.2, y + 0.2, 0.46, 0.45, 0.55, 2.2, 2.2), S(za, y + 0.3, 0.12, 0.12, 0.12)].map(function (s) { s.x = x; return s; }), { n: 18 });
+      K.add([nac, mir(nac)], PANEL);
+      const inl = xf(new THREE.CircleGeometry(0.28, 10), x, y - 0.6, zf - 0.5);
+      K.add([inl, mir(inl)], GUN);
+      [1, -1].forEach(function (s) {
+        const prop = B.node("prop" + pi, s * x, y, zf + 0.25); B.ud.milAir.props.push("prop" + pi); pi++;
+        const PK = B.kit(prop);
+        PK.add(loft([K$.rnd(zf + 1.35, 0.03, y, s * x), K$.rnd(zf + 0.9, 0.36, y, s * x), K$.rnd(zf + 0.1, 0.55, y, s * x)], { n: 14 }), SHADE);  // spinner
+        for (let b = 0; b < 8; b++) {
+          const bl = xf(wingG([{ x: 0.45, le: 0.2, c: 0.42, tc: 0.12 }, { x: 1.8, le: 0.16, c: 0.4, tc: 0.08 }, { x: 2.65, le: -0.18, c: 0.2, tc: 0.07 }], { K: 3 }), 0, 0, 0, 1.2);
+          PK.add(xf(bl, s * x, y, zf + 0.25, 0, 0, b * Math.PI / 4 + (s > 0 ? 0 : Math.PI / 8)), BLADE);
+        }
+      });
+    });
+    // ===================== T-TAIL ===========================================
+    K.add(xf(wingG([{ x: 0, le: -15.2, c: 7.0, tc: 0.12 }, { x: 7.45, le: -19.6, c: 3.4, tc: 0.10 }], { K: 6 }), 0, 5.9, 0, 0, 0, Math.PI / 2), PANEL);
+    const TP = wingG([{ x: 0.2, le: -19.4, c: 3.7, tc: 0.10, y: 13.35 }, { x: 9.75, le: -21.4, c: 1.8, tc: 0.09, y: 13.5 }], { K: 5 });
+    K.add([TP, mir(TP)], PANEL);
+    K.add(loft([S(-18.6, 13.35, 0.05, 0.05, 0.05), S(-19.3, 13.36, 0.42, 0.4, 0.34), S(-22.6, 13.36, 0.42, 0.4, 0.34), S(-23.9, 13.36, 0.06, 0.06, 0.06)], { n: 14 }), SHADE);
+    // ===================== GEAR — sponsons + nose leg =======================
+    [-1, 1].forEach(function (s) {
+      K.add(loft([S(5.4, 1.55, 0.12, 0.12, 0.12), S(4.4, 1.6, 0.8, 1.0, 0.8, 2.6, 3.2), S(-1.8, 1.6, 0.8, 1.0, 0.8, 2.6, 3.2), S(-3.0, 1.6, 0.12, 0.12, 0.12)].map(function (q) { q.x = s * 2.95; return q; }), { n: 16 }), HULL);
+      [-0.9, 1.2, 3.3].forEach(function (wz) {
+        [3.42, 2.68].forEach(function (wx) {
+          const w = K$.wheel(0.70, 0.36);
+          K.add(xf(w.tire, s * wx, 0.70, wz), RUBBER).add(xf(w.hub, s * wx, 0.70, wz), STEELD);
+        });
+      });
+    });
+    K.add(K$.rod([0, 1.4, 13.2], [0, 0.55, 13.25], 0.12), STEELD).add(K$.rod([0, 1.35, 12.2], [0, 0.7, 13.2], 0.07), STEELD);
+    [-1, 1].forEach(function (s) { const w = K$.wheel(0.55, 0.3); K.add(xf(w.tire, s * 0.3, 0.55, 13.25), RUBBER).add(xf(w.hub, s * 0.3, 0.55, 13.25), STEELD); });
+    // ===================== THE RAMP =========================================
+    // Hinged at the deck sill; built lying flat aft (rotation.x 0 =
+    // horizontal) and stowed upright by the hold on declaration.
+    const ramp = B.node("cargoRamp", 0, DY, Z0); B.refs.cargoRamp = "cargoRamp";
+    const RK = B.kit(ramp);
+    const RL = CARGO.rampLen, RW = CARGO.rampW;
+    RK.add(xf(bx(RW, 0.20, RL), 0, DY - 0.10, Z0 - RL / 2), DECKM);
+    RK.add(xf(bx(0.30, 0.02, RL - 0.3), 0, DY + 0.02, Z0 - RL / 2), WARN);
+    [-1, 1].forEach(function (s) {
+      RK.add(xf(bx(0.16, 0.10, RL - 0.2), s * (RW / 2 - 0.14), DY + 0.06, Z0 - RL / 2), STEELD);
+      RK.add(xf(bx(0.08, 0.36, RL - 0.6), s * (RW / 2 + 0.03), DY + 0.14, Z0 - RL / 2), SHADE);
+      for (let i = 0; i < 4; i++) RK.add(xf(bx(0.14, 0.20, 0.80), s * 0.85, DY - 0.24, Z0 - 0.6 - i * 0.90), SHADE);
+    });
+    for (let i = 0; i < 6; i++) RK.add(xf(bx(RW - 0.5, 0.02, 0.20), 0, DY + 0.015, Z0 - 0.42 - i * 0.60), cm(0x3f454c));
+    RK.add(xf(bx(RW - 0.2, 0.10, 0.30), 0, DY - 0.13, Z0 - RL - 0.12), STEELD);
+    K$.navLights(B, [[21.2, 6.85, -2.2, 0xff4a3d], [-21.2, 6.85, -2.2, 0x37d67a], [0, 5.85, -23.35, 0xf2f4ff], [0, 6.15, 15.4, 0xf2f4ff]]);
+    B.finish({ family: "A400M-class", length: 43.5, span: 42.4, height: 13.9 });
+    // the ramp is posed per placement, so it is stowed on the template
     ramp.rotation.x = CARGO.rampClosedRx;
-    g.add(ramp);
-    g.userData.cargoRamp = ramp;
-
-    // nav lights: red port, green starboard, white on the tail cone
-    navBox(g, -20.30, 5.30, 0.20, 0.24, 0xff4a3d);
-    navBox(g, 20.30, 5.30, 0.20, 0.24, 0x37d67a);
-    navBox(g, 0, 6.70, -19.70, 0.22, 0xf2f4ff);
-    navBox(g, 0, 5.62, 15.05, 0.18, 0xf2f4ff);
-
-    const dims = { family: "cargo-lifter", length: 37.5, span: 42, height: 13.4 };
-    g.userData.aircraftDims = dims;
-    return { group: g, footW: dims.span, footL: dims.length, height: dims.height, aircraftDims: dims, ramp: ramp };
+    return B;
+  });
+  function makeCargoPlane() {
+    const r = CBZ.milAir.make("cargo");
+    r.ramp = r.group.userData.cargoRamp;
+    return r;
   }
 
   // ---- PLACE ONE, AND DECLARE ITS HOLD ------------------------------------
@@ -1053,248 +459,18 @@
     return rec;
   }
 
-  // HELICOPTER — sculpted cabin + glass greenhouse nose, tapered tail boom,
-  // rotor mast/hub with 4 sculpted drooped blades in ONE spinnable group
-  // (userData.rotor), a crossed tail rotor group (userData.tailRotor), skids,
-  // a door gun stub and nav lights. Parked rotors DON'T spin — the flyable
-  // path (playeraircraft citySpawnFlyableFromProp) drives the tagged groups.
-  function makeHeli() {
-    const g = new THREE.Group();
-    const GLASS = vmat("glass", M.canopy), GUN = vmat("plastic", M.dark);
-    // cabin (nose narrows, keel tucks) + glass greenhouse + chin block
-    tbox(g, 0, 1.55, 0.2, 1.9, 1.6, 4.4, { nz: 0.75, tz: 0.8, bot: 0.85 }, cm(M.olive));
-    tbox(g, 0, 1.5, 2.5, 1.6, 1.2, 1.8, { nz: 0.5, top: 0.6 }, GLASS);
-    box(g, 0, 0.95, 2.6, 1.2, 0.55, 1.2, M.oliveD);       // chin/avionics block
-    // COCKPIT — the greenhouse is REAL glass now, and forward of the cabin's
-    // front face (z 2.4) it enclosed a metre of nothing: from the tarmac you
-    // looked through the windscreen and out the far side of its own inner wall.
-    // Same cure and the same TRIM bucket as the fighter tub above — static
-    // boxes, no collider, no new material, no rng. What is here is what you
-    // actually see through a helicopter windscreen, front to back: a raked
-    // instrument panel at the base of the screen, the glareshield capping it,
-    // the centre pedestal between the seats, and the crew seat backs standing
-    // against the cabin bulkhead. Every box is sized against the canopy's own
-    // taper (half-width 0.8·zt·(1−0.4·vy), zt = 1−0.5f) so nothing pokes out
-    // through the glass it is meant to sit behind.
-    const TRIM = vmat("interior", 0x0d0e10);
-    mbox(g, 0, 1.55, 2.92, 0.90, 0.44, 0.09, TRIM).rotation.x = -0.25;   // instrument panel, raked toward the crew
-    mbox(g, 0, 1.84, 2.78, 0.86, 0.08, 0.26, TRIM);                      // glareshield coaming
-    mbox(g, 0, 1.36, 2.60, 0.24, 0.30, 0.52, TRIM);                      // centre pedestal (sits on the chin block)
-    [-1, 1].forEach(function (s) { mbox(g, s * 0.30, 1.66, 2.48, 0.40, 0.56, 0.10, TRIM); });   // crew seat backs
-    // engine deck + twin exhaust stubs
-    box(g, 0, 2.55, -0.3, 1.5, 0.55, 2.8, M.oliveD);
-    [-1, 1].forEach(function (s) { mcyl(g, s * 0.62, 2.62, -1.5, 0.15, 0.15, 0.5, GUN, 8).rotation.x = Math.PI / 2; });
-    // tapered tail boom (front buried in the cabin) + fin + stab
-    tbox(g, 0, 2.0, -3.5, 0.72, 0.72, 4.8, { tz: 0.5 }, cm(M.olive));
-    box(g, 0, 2.8, -5.7, 0.22, 1.5, 0.9, M.oliveD);       // tail fin
-    box(g, 0, 2.15, -5.3, 1.7, 0.16, 0.6, M.oliveD);      // horizontal stab
-    // MAIN ROTOR — static mast on the deck; hub + 4 tapered drooped blades in
-    // ONE group so the flyable path can spin it (rotation.y).
-    cyl(g, 0, 2.95, -0.2, 0.15, 0.17, 0.7, M.steelD, 8);  // mast
-    const rotor = new THREE.Group();
-    rotor.position.set(0, 3.32, -0.2);
-    const hub = new THREE.Mesh(bg(0.5, 0.26, 0.5), cm(M.steelD));
-    hub.castShadow = true; rotor.add(hub);
-    for (let i = 0; i < 4; i++) {
-      const bl = wing(rotor, 0, 0.02, 0, 1, 4.8, 0.42, 0.09, 0.12, 0.55, 0.3, M.dark, 0.14);
-      bl.rotation.y = i * Math.PI / 2;
-    }
-    g.add(rotor);
-    g.userData.rotor = rotor;                             // flyable contract: spin .rotation.y
-    // TAIL ROTOR — hub + crossed blade bars on the fin's starboard cheek, its
-    // own group on a short shaft so the flyable path can spin it (rotation.x).
-    mcyl(g, 0.18, 2.75, -5.75, 0.07, 0.07, 0.28, GUN, 8).rotation.z = Math.PI / 2; // shaft
-    const trot = new THREE.Group();
-    trot.position.set(0.32, 2.75, -5.75);
-    const thub = new THREE.Mesh(bg(0.22, 0.22, 0.22), cm(M.steelD));
-    thub.castShadow = true; trot.add(thub);
-    const tb1 = new THREE.Mesh(bg(0.09, 1.7, 0.26), cm(M.dark));
-    tb1.castShadow = true; trot.add(tb1);
-    const tb2 = new THREE.Mesh(bg(0.09, 1.7, 0.26), cm(M.dark));
-    tb2.rotation.x = Math.PI / 2; tb2.castShadow = true; trot.add(tb2);
-    g.add(trot);
-    g.userData.tailRotor = trot;                          // flyable contract: spin .rotation.x
-    // SKIDS — chunky rails + 4 struts rising into the cabin floor
-    [-1, 1].forEach(function (s) {
-      box(g, s * 0.85, 0.18, 0.2, 0.16, 0.16, 4.0, M.steelD);
-      [1.4, -1.0].forEach(function (z) { box(g, s * 0.8, 0.55, z, 0.16, 0.75, 0.16, M.steelD); });
-    });
-    // DOOR GUN stub on the starboard door: pintle post + receiver + barrel
-    box(g, 0.95, 1.3, 0.6, 0.12, 0.4, 0.12, M.steelD);
-    mbox(g, 1.08, 1.5, 0.75, 0.24, 0.24, 0.6, GUN);
-    mcyl(g, 1.08, 1.5, 1.25, 0.06, 0.06, 0.55, GUN, 8).rotation.x = Math.PI / 2;
-    // nav lights: red port cheek, green starboard, white tail fin
-    navBox(g, -0.84, 1.7, 1.5, 0.14, 0xff4a3d);
-    navBox(g, 0.84, 1.7, 1.5, 0.14, 0x37d67a);
-    navBox(g, 0, 3.4, -6.05, 0.14, 0xf2f4ff);
-    const scale = 1.45;
-    const dims = { family: "utility-helicopter", length: 17.55, span: 13.92, height: 5.22 };
-    g.scale.setScalar(scale); g.userData.aircraftDims = dims;
-    return { group: g, footW: dims.span, footL: dims.length, height: dims.height, aircraftDims: dims };
-  }
-
-  // MAIN BATTLE TANK — hull with side skirts over rubber track runs, road
-  // wheels + drive sprocket/idler, tow hooks; angular sculpted turret with
-  // mantlet, barrel + chunky muzzle end block, commander cupola w/ MG, smoke
-  // launcher clusters, stowage basket and antenna.
-  function makeTank() {
-    const g = new THREE.Group();
-    const GUN = vmat("plastic", M.dark), RUBBER = vmat("tire", M.tire);
-    // hull — upper + lower, sloped glacis, rear plate + exhausts
-    box(g, 0, 1.05, 0, 3.0, 0.8, 5.6, M.olive);
-    box(g, 0, 0.6, 0, 2.4, 0.45, 5.8, M.oliveD);
-    const glacis = box(g, 0, 0.88, 2.72, 2.4, 0.72, 1.1, M.oliveD);
-    glacis.rotation.x = 0.5;
-    box(g, 0, 0.95, -2.75, 2.4, 0.65, 0.5, M.oliveD);     // rear plate
-    [-1, 1].forEach(function (s) { mbox(g, s * 0.85, 1.2, -2.9, 0.5, 0.3, 0.3, GUN); }); // exhausts
-    // tow hooks — two on the glacis toe, one on the rear plate
-    [-1, 1].forEach(function (s) { box(g, s * 0.7, 0.62, 3.2, 0.2, 0.2, 0.35, M.steelD); });
-    box(g, 0, 0.7, -3.05, 0.2, 0.2, 0.3, M.steelD);
-    // RUNNING GEAR — side skirt over a rubber track run; 4 road wheels roll
-    // beneath it with a dark-steel drive sprocket (rear) + idler (front)
-    [-1, 1].forEach(function (s) {
-      box(g, s * 1.42, 1.08, 0, 0.22, 0.5, 5.9, M.oliveD);          // side skirt
-      mbox(g, s * 1.42, 0.55, 0, 0.68, 0.7, 6.1, RUBBER);           // track run
-      [-1.8, -0.6, 0.6, 1.8].forEach(function (wz) {
-        mcyl(g, s * 1.44, 0.44, wz, 0.44, 0.44, 0.5, RUBBER, 10).rotation.z = Math.PI / 2;
-      });
-      [-2.75, 2.75].forEach(function (wz) {
-        mcyl(g, s * 1.44, 0.5, wz, 0.5, 0.5, 0.46, GUN, 10).rotation.z = Math.PI / 2;
-      });
-    });
-    // TURRET — its OWN sub-group so the player tank can SLEW it independently of
-    // the hull (militaryvehicles.js eases turret.rotation.y toward the aim, then
-    // fires a shell from userData.muzzleLocal via turret.localToWorld). The turret
-    // pivots about the ring centre at hull-top; every child keeps the exact local
-    // transform it had on the hull, just re-parented to the turret + offset by the
-    // pivot so the parked look is byte-identical. WHY a real turret: a tank you
-    // can drive but can't aim is half a tank — the felt power is laying the gun.
-    const turret = new THREE.Group();
-    const TPY = 1.65;                                     // turret ring pivot height
-    turret.position.set(0, TPY, 0);
-    g.add(turret);
-    g.userData.turret = turret;
-    // local-space muzzle node (barrel tip, in TURRET space): the gun fires here.
-    g.userData.muzzleLocal = new THREE.Vector3(0, 1.62 - TPY, 6.6);
-    // angular turret body (narrows to the face) + mantlet + barrel + muzzle block
-    tbox(turret, 0, 1.65 - TPY, -0.2, 2.3, 0.8, 3.0, { nz: 0.72, tz: 0.92 }, cm(M.olive));
-    box(turret, 0, 1.62 - TPY, 1.4, 1.15, 0.6, 0.6, M.oliveD);      // gun mantlet
-    mcyl(turret, 0, 1.62 - TPY, 3.85, 0.12, 0.16, 4.4, GUN, 10).rotation.x = Math.PI / 2;
-    mbox(turret, 0, 1.62 - TPY, 6.2, 0.36, 0.36, 0.55, GUN);        // muzzle end block
-    // commander cupola + hatch + pintle MG (all turn with the turret)
-    cyl(turret, 0.55, 2.15 - TPY, -0.75, 0.34, 0.36, 0.28, M.oliveD, 10);
-    box(turret, 0.55, 2.31 - TPY, -0.75, 0.5, 0.08, 0.5, M.olive);
-    box(turret, 0.55, 2.43 - TPY, -0.55, 0.1, 0.22, 0.1, M.steelD); // MG post
-    mbox(turret, 0.55, 2.55 - TPY, -0.25, 0.14, 0.14, 0.85, GUN);   // MG
-    // smoke launcher clusters angled off both turret cheeks
-    [-1, 1].forEach(function (s) {
-      const base = box(turret, s * 0.98, 1.75 - TPY, 0.55, 0.5, 0.24, 0.24, M.oliveD);
-      base.rotation.y = s * 0.55;
-      const tubes = mbox(turret, s * 1.12, 1.75 - TPY, 0.78, 0.44, 0.18, 0.18, GUN);
-      tubes.rotation.y = s * 0.55;
-    });
-    cyl(turret, -0.85, 2.25 - TPY, -1.35, 0.03, 0.03, 1.3, M.dark, 6); // antenna
-    box(turret, 0, 1.67 - TPY, -1.95, 1.9, 0.55, 0.6, M.oliveD);       // stowage basket
-    return { group: g, footW: 3.5, footL: 6.4, height: 2.7 };
-  }
-
-  // ARMY TRUCK (6x6) — glass cab with sloped hood, brush guard + bumper +
-  // grille + headlights, mirrors, canvas bed with visible rib bows and a
-  // tailgate, fenders over every axle, jerry cans on the bed side, exhaust
-  // stack. Chunky voxel blocks in olive two-tone.
-  function makeTruck(opts) {
-    opts = opts || {};
-    const g = new THREE.Group();
-    const GLASS = vmat("glass", M.glassDark), GUN = vmat("plastic", M.dark), RUBBER = vmat("tire", M.tire);
-    box(g, 0, 0.55, 0.2, 1.9, 0.35, 7.4, M.steelD);       // chassis rails
-    // CAB — body + sculpted sloped hood + raked windshield + door glass
-    box(g, 0, 1.4, 2.1, 2.2, 1.3, 1.6, M.oliveD);
-    tbox(g, 0, 1.0, 3.45, 2.0, 0.7, 1.2, { nz: 0.85, top: 0.75 }, cm(M.oliveD));
-    const ws = mbox(g, 0, 1.75, 2.95, 1.85, 0.6, 0.12, GLASS);
-    ws.rotation.x = -0.1;                                 // raked back
-    [-1, 1].forEach(function (s) { mbox(g, s * 1.11, 1.62, 2.1, 0.08, 0.5, 0.85, GLASS); });
-    // FRONT END — bumper, dark grille, headlights, brush guard over it all
-    box(g, 0, 0.6, 4.1, 2.1, 0.4, 0.3, M.steelD);         // bumper
-    mbox(g, 0, 1.1, 4.07, 1.3, 0.5, 0.12, GUN);           // grille
-    [-1, 1].forEach(function (s) {
-      box(g, s * 0.82, 1.1, 4.06, 0.22, 0.22, 0.1, 0xffe9b0, { matOpts: { emissive: 0xffe9b0, ei: 0.35 }, cast: false });
-      box(g, s * 0.65, 1.05, 4.12, 0.12, 0.85, 0.12, M.steelD); // guard upright
-    });
-    box(g, 0, 1.35, 4.12, 1.7, 0.14, 0.12, M.steelD);     // guard cross bar
-    // mirrors off the cab front corners
-    [-1, 1].forEach(function (s) { box(g, s * 1.25, 1.8, 2.8, 0.36, 0.3, 0.08, M.steelD); });
-    // COVERED BED — omitted only by the Patriot factory below, which uses this
-    // exact cab/chassis/wheel owner and replaces the rear with a launcher deck.
-    if (!opts.flatbed) {
-      box(g, 0, 1.0, -1.35, 2.3, 0.6, 3.6, M.oliveD);       // bed sides
-      box(g, 0, 1.05, -3.22, 2.3, 0.7, 0.14, M.oliveD);     // tailgate
-      box(g, 0, 1.95, -1.35, 2.26, 1.3, 3.5, M.olive);      // canvas cover
-      [-0.35, -1.35, -2.35].forEach(function (z) { box(g, 0, 2.62, z, 2.34, 0.1, 0.14, M.oliveL); });
-      box(g, -1.21, 1.05, -2.6, 0.14, 0.5, 0.34, M.sand);   // jerry can (flush on the side wall)
-      box(g, -1.21, 1.05, -3.0, 0.14, 0.5, 0.34, M.red);    // fuel can (red = petrol)
-    }
-    // fenders over every axle + 6 wheels (single front, paired rear)
-    [-1, 1].forEach(function (s) {
-      box(g, s * 1.08, 1.0, 2.5, 0.4, 0.3, 1.4, M.oliveD);
-      box(g, s * 1.18, 0.95, -1.5, 0.42, 0.28, 2.9, M.oliveD);
-      [2.5, -0.7, -2.3].forEach(function (z) {
-        mcyl(g, s * 1.05, 0.55, z, 0.55, 0.55, 0.44, RUBBER, 12).rotation.z = Math.PI / 2;
-      });
-    });
-    mcyl(g, 1.02, 1.75, 1.24, 0.09, 0.09, 1.5, GUN, 8);   // exhaust stack behind the cab
-    return { group: g, footW: 2.8, footL: 7.7, height: 2.7 };
-  }
-
-  // PATRIOT LAUNCHER TRUCK — the army truck's real shared chassis carrying an
-  // exposed four-round elevating rack. Local -Z is aft, so rotating the rack
-  // +45° lifts its rear mouths into the launch direction. Muzzle nodes are real
-  // transform children consumed by militaryvehicles.js; the projectile never
-  // guesses a duplicate position from the truck's heading.
-  function makePatriot() {
-    const made = makeTruck({ flatbed: true });
-    const g = made.group;
-    const GUN = vmat("plastic", M.dark);
-    box(g, 0, 1.02, -1.40, 2.42, 0.30, 4.05, M.oliveD);     // launcher deck
-    box(g, 0, 1.34, -0.10, 2.18, 0.42, 0.72, M.steelD);    // turntable pedestal
-    const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.86, 0.94, 0.24, 14), cm(M.steelD));
-    ring.position.set(0, 1.55, -0.10); ring.castShadow = true; g.add(ring);
-
-    const rack = new THREE.Group();
-    rack.position.set(0, 1.62, -0.35);
-    rack.rotation.x = Math.PI / 4;
-    g.add(rack);
-    g.userData.patriotLauncher = rack;
-    g.userData.patriotMuzzles = [];
-    g.userData.patriotRounds = [];
-
-    // cradle/backplate makes the four long tubes one readable weapon rather
-    // than decorative sticks balanced above a truck bed.
-    box(rack, 0, 0, 0.45, 2.05, 1.08, 0.18, M.steelD);
-    const slots = [[-0.53, -0.29], [0.53, -0.29], [-0.53, 0.29], [0.53, 0.29]];
-    for (let i = 0; i < slots.length; i++) {
-      const sx = slots[i][0], sy = slots[i][1];
-      const tube = box(rack, sx, sy, -0.14, 0.44, 0.44, 5.08, M.oliveL);
-      tube.userData.patriotTube = i;
-      // dark end bands and a visible pale missile nose just proud of the aft
-      // mouth: there is no ambiguity about what the rack carries.
-      box(rack, sx, sy, -2.50, 0.48, 0.48, 0.18, M.steelD);
-      box(rack, sx, sy, 2.22, 0.48, 0.48, 0.18, M.steelD);
-      const nose = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.42, 10), cm(0xe7e4d2));
-      nose.rotation.x = -Math.PI / 2; nose.position.set(sx, sy, -2.72);
-      nose.castShadow = true; rack.add(nose);
-      const muzzle = new THREE.Object3D(); muzzle.position.set(sx, sy, -2.94); rack.add(muzzle);
-      g.userData.patriotRounds.push(nose);
-      g.userData.patriotMuzzles.push(muzzle);
-    }
-    // two braced hydraulic rams visibly explain why this several-ton rack can
-    // hold its angle instead of floating over the deck.
-    [-0.72, 0.72].forEach(function (x) {
-      const ram = mcyl(g, x, 1.58, -1.20, 0.07, 0.09, 1.35, GUN, 8);
-      ram.rotation.x = -0.62; ram.rotation.z = x < 0 ? -0.12 : 0.12;
-    });
-    g.userData.patriotAmmo = 4;
-    return { group: g, footW: made.footW, footL: made.footL, height: 5.25 };
-  }
+  // GROUND ARMOR lives in city/mil_armor.js (real-dimension plate-lofted
+  // hulls, instanced running gear, turret/gun/launcher rigs). These are the
+  // names the base, CBZ.milModels, world/airbase.js and the warlord wrecks
+  // already call, so they stay — as one line each.
+  function armor(kind, opts) { return CBZ.milArmor[kind](opts); }
+  function makeTank() { return armor("tank"); }
+  function makeTruck(opts) { return armor("truck", opts); }
+  function makePatriot() { return armor("patriot"); }
+  function makeIFV() { return armor("ifv"); }
+  function makeAPC() { return armor("apc"); }
+  function makeLUV() { return armor("luv"); }
+  function makeMLRS() { return armor("mlrs"); }
 
   // ========================================================================
   //   PERIMETER FENCE — InstancedMesh posts (the draw-call-frugal repeat)
@@ -1681,8 +857,11 @@
     // Height is PER MODEL (each maker measures itself): the old flat y1=3.0
     // let you jump straight through the bomber's ~7m tail fin.
     const fw = made.footW * (footScale || 1), fl = made.footL * (footScale || 1);
+    // a rotor disc or a glider wing is not a wall: airframes publish the
+    // solid body they actually have (colliderW/L); footW stays the true span
+    const bw = (made.colliderW || made.footW) * (footScale || 1), bl = (made.colliderL || made.footL) * (footScale || 1);
     const sideways = Math.abs(Math.sin(rotY || 0)) > 0.5;
-    const cw = sideways ? fl : fw, cd = sideways ? fw : fl;
+    const cw = sideways ? bl : bw, cd = sideways ? bw : bl;
     const solid = col(wx, wz, cw, cd, 0, made.height != null ? made.height : 3.0, made.group);
     if (kind) {
       made.group.userData.milKind = kind;
@@ -1737,9 +916,15 @@
     bomber: makeBomber,
     cargo: makeCargoPlane,
     heli: makeHeli,
+    attackHeli: makeAttackHeli,
+    drone: makeDrone,
     tank: makeTank,
     truck: makeTruck,
     patriot: makePatriot,
+    ifv: makeIFV,
+    apc: makeAPC,
+    luv: makeLUV,
+    mlrs: makeMLRS,
   };
 
   // ========================================================================
@@ -1787,6 +972,9 @@
     // about. Placed by its own function — it declares a walk-in HOLD and
     // deliberately pushes no full-footprint collider (see placeCargoPlane).
     placeCargoPlane(root, MAXX - 150, jetZ - 34, 0, "Cargo Lifter");
+    // TWO RECON DRONES in the second row behind the fighters: nobody climbs
+    // into a drone, so they are solid scenery, not boardables.
+    for (let i = 0; i < 2; i++) placeModel(root, makeDrone, MINX + 100 + i * 36, jetZ - 30, Math.PI, 1);
 
     // ---- HELIPADS: a row, each with a parked helicopter ----
     const padZ = CEN_Z + 30;
@@ -1802,17 +990,28 @@
       box(root, px - 1.4, 0.075, padZ, 0.02 + 2.8, 0.03, 0.8, M.paint, { cast: false }); // H crossbar
       const ring = new THREE.Mesh(new THREE.TorusGeometry(6.2, 0.12, 6, 24), cm(M.paint));
       ring.rotation.x = Math.PI / 2; ring.position.set(px, 0.05, padZ); root.add(ring);
-      placeModel(root, makeHeli, px, padZ, rng() * 0.4 - 0.2, 1, "heli", "Helicopter");
+      // the two nearest the strip carry the ATTACK helicopters: the wanted-level
+      // gunship scrambles from these (aircraft.js prefers rec.attackHeli)
+      const attack = i < 2;
+      placeModel(root, attack ? makeAttackHeli : makeHeli, px, padZ, rng() * 0.4 - 0.2, 1, "heli", attack ? "Attack Helicopter" : "Helicopter");
+      if (attack) placed[placed.length - 1].attackHeli = true;
     }
 
-    // ---- MOTOR POOL: a line of tanks + armored trucks ----
+    // ---- MOTOR POOL: three ranks staged nose-east toward the gate --------
+    //   front rank: the tanks; middle: the infantry carriers + the light
+    //   vehicles; rear: the launchers and the cargo trucks.
     const mpZ = CEN_Z - 70;
     for (let i = 0; i < 5; i++) placeModel(root, makeTank, MINX + 70 + i * 26, mpZ, Math.PI / 2, 1, "tank", "Main Battle Tank");
-    for (let i = 0; i < 4; i++) {
-      const patriot = (!CBZ.CONFIG || CBZ.CONFIG.PATRIOT_V1 !== false) && i < 2;
-      placeModel(root, patriot ? makePatriot : makeTruck, MINX + 70 + i * 26, mpZ - 18,
-        Math.PI / 2, 1, patriot ? "patriot" : "ground", patriot ? "MIM-104 Patriot" : "Armored Truck");
-    }
+    [
+      [makeIFV, "Infantry Fighting Vehicle"], [makeIFV, "Infantry Fighting Vehicle"],
+      [makeAPC, "Armored Personnel Carrier"], [makeAPC, "Armored Personnel Carrier"],
+      [makeLUV, "Light Utility Vehicle"], [makeLUV, "Light Utility Vehicle"],
+    ].forEach(function (v, i) { placeModel(root, v[0], MINX + 70 + i * 22, mpZ + 18, Math.PI / 2, 1, "ground", v[1]); });
+    [
+      [makePatriot, "patriot", "Missile Launcher"], [makePatriot, "patriot", "Missile Launcher"],
+      [makeMLRS, "mlrs", "Rocket Artillery"],
+      [makeTruck, "ground", "Cargo Truck"], [makeTruck, "ground", "Cargo Truck"],
+    ].forEach(function (v, i) { placeModel(root, v[0], MINX + 70 + i * 26, mpZ - 18, Math.PI / 2, 1, v[1], v[2]); });
 
     // ---- HANGARS: big enterable sheds (engine building shells) ----
     // door faces -Z toward the apron/runway. Single big storey.

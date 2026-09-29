@@ -3231,21 +3231,13 @@
 
   CBZ.cityPlayerCarStyles = STYLE_ORDER.slice();
   CBZ.cityPlayerCarStyleLabels = Object.assign({}, STYLE_LABEL);
-  CBZ.cityBuildPlayerCarVisual = function (style, color, livery, model) {
+  CBZ.cityBuildPlayerCarVisual = function (style, color, _unused, model) {
     // The gallery uses the lightweight fallback so auditing all styles never
     // blocks on the optional high-poly GLB/network decoder. `color` (optional)
     // paints THIS instance's body without touching the shared style template.
     // `model` (optional catalog record) selects the BRAND face + model trim —
     // omitted, the silhouette's home marque is used (gallery/style-cycler).
     const v = makeProcedural(style, color, model);
-    // RACE LIVERY (optional, additive seam): when a livery descriptor is passed,
-    // paint a number + scheme onto THIS instance before it's returned/merged, so
-    // both the showroom/AI field and ambient race cars opt in here with no change
-    // to makeProcedural's body code. null/undefined livery = the byte-identical
-    // no-op path for the whole street fleet. (race_livery.js publishes the layer.)
-    if (livery && CBZ.cityApplyRaceLivery) {
-      try { CBZ.cityApplyRaceLivery(v, livery); } catch (e) { /* never break a build */ }
-    }
     return v;
   };
   // THE VEHICLE ART KIT. These cached builders — one chrome, one glass, one

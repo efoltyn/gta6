@@ -408,7 +408,7 @@
       gives: "the shipped military models: fighter jet, bomber, cargo plane, " +
              "helicopter, tank, truck, and the B-2. Real geometry, not boxes",
       needs: ["look"],
-      files: ["city/island_military.js", "city/strategic.js"],
+      files: ["city/mil_air.js", "city/island_military.js", "city/strategic.js"],
       publishes: ["milModels", "strategicModels"],
     },
 
@@ -476,7 +476,7 @@
              "Same files as `military`, named separately so a page that only " +
              "wants the MODELS never raises an island by accident",
       needs: ["military"],
-      files: ["city/island_military.js"],
+      files: ["city/mil_air.js", "city/island_military.js"],
       publishes: [],
     },
     airport: {
@@ -543,11 +543,11 @@
       publishes: ["buildAirfield", "airportKit", "registerAirport"],
     },
     speedway: {
-      gives: "the REAL speedway island: banked oval with a measured centreline, " +
-             "grandstands and the pit lane. The track surface is a genuine " +
-             "height field, which makes it the one venue where flat ground lies",
+      gives: "the speedway island: the Bullring stadium (the racing game's own " +
+             "track + venue modules), the causeway and the gate that opens " +
+             "games/race.html over the city",
       needs: ["look"],
-      files: ["city/island_speedway.js"],
+      files: ["race/race_core.js", "race/race_track.js", "race/race_venue.js", "city/island_speedway.js"],
       publishes: [],
     },
     bank: {
