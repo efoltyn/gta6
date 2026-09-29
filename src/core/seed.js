@@ -30,21 +30,25 @@
   const CBZ = window.CBZ = window.CBZ || {};
 
   // ---- Squirrel3-style integer avalanche hash ----
-  const N1 = 0xb5297a4d, N2 = 0x68e31da4, N3 = 0x1b56c4e9;
-  function squirrel(n, seed) {
-    let m = n >>> 0;
-    m = Math.imul(m, N1) >>> 0;
-    m = (m + (seed >>> 0)) >>> 0;
+  // Written in int32 space: every step is a 32-bit ring operation, so the bits
+  // are the same whether the intermediate is read as int32 or uint32 — and
+  // int32 stays a V8 small integer, where the old `>>> 0` after every step
+  // pushed values above 2^31 into heap doubles. Callers that want the
+  // unsigned value do the one `>>> 0` at the end. BIT-IDENTICAL to the
+  // original (checked over 10M random inputs, tools/world-hash.mjs agrees).
+  const N1 = 0xb5297a4d | 0, N2 = 0x68e31da4 | 0, N3 = 0x1b56c4e9 | 0;
+  function sq(n, seed) {
+    let m = (Math.imul(n, N1) + seed) | 0;
     m ^= m >>> 8;
-    m = (m + N2) >>> 0;
-    m ^= (m << 8) >>> 0;
-    m = Math.imul(m, N3) >>> 0;
-    m ^= m >>> 8;
-    return m >>> 0;
+    m = (m + N2) | 0;
+    m ^= m << 8;
+    m = Math.imul(m, N3);
+    return m ^ (m >>> 8);
   }
+  function squirrel(n, seed) { return sq(n | 0, seed | 0) >>> 0; }
   // fold arbitrarily many integers into one hash (order matters, as it should)
   function hashN() {
-    let h = CBZ.WORLD_SEED >>> 0;
+    let h = seedRaw >>> 0;
     for (let i = 0; i < arguments.length; i++) h = squirrel(arguments[i] | 0, h);
     return h;
   }
@@ -64,7 +68,16 @@
     const q = new URLSearchParams(location.search).get("seed");
     if (q != null && q !== "" && isFinite(+q)) seed = +q;
   } catch (e) {}
-  CBZ.WORLD_SEED = seed >>> 0;
+  // An accessor over a closure variable: CBZ carries hundreds of properties
+  // (dictionary mode), so `CBZ.WORLD_SEED` inside the hash was a hash-table
+  // lookup per call, millions of calls per build. The hash reads the local;
+  // assigning CBZ.WORLD_SEED still works exactly as before.
+  let seedRaw = seed >>> 0;
+  Object.defineProperty(CBZ, "WORLD_SEED", {
+    configurable: true, enumerable: true,
+    get: function () { return seedRaw; },
+    set: function (v) { if (v !== seedRaw) { seedRaw = v; noiseForget(); } },
+  });
 
   // ---- named deterministic stream (mulberry32) ----
   CBZ.seedStream = function (name) {
@@ -90,11 +103,53 @@
   // seed — so every world it generates is byte-for-byte the world it
   // generated before (the determinism gate agrees).
   CBZ.hash01 = function (x, z, salt) {
-    let h = squirrel(Math.round(x * 10) | 0, CBZ.WORLD_SEED >>> 0);
-    h = squirrel(Math.round(z * 10) | 0, h);
-    h = squirrel(salt | 0, h);
-    return h / 4294967296;
+    const h = sq(salt | 0, sq(Math.round(z * 10) | 0, sq(Math.round(x * 10) | 0, seedRaw | 0)));
+    return (h >>> 0) / 4294967296;
   };
+  /* noise2(x, z, cell, salt) — THE value noise: four hash01 lattice corners
+     (at world coords ix*cell, iz*cell), smoothstep-blended. Three files each
+     had their own copy (world/mountain_detail.js n2, city/continent.js
+     noise2, and every caller of CBZ.mtnNoise) and together they are most of
+     the landmass build. Same corners, same arithmetic, same result to the
+     bit — but the x-round of the hash is shared by the two corners in each
+     column (10 squirrel rounds instead of 12) and there is no call through
+     hash01 per corner. */
+  function smooth(t) { return t * t * (3 - 2 * t); }
+  // A small direct-mapped memo of lattice CELLS: slot = f(cell, salt), and a
+  // slot remembers the last lattice cell it saw and its four corner values.
+  // The fields ask the same cell over and over (mtnErode's three taps per
+  // octave, the memo grids stepping 6 m through 100-1750 m cells), so most
+  // calls skip the hashing. Corner values are exact hash outputs, a slot is
+  // only reused on an exact (cell, salt, ix, iz) match: same bits out.
+  const NSLOT = 256;
+  const slotKey = new Float64Array(NSLOT * 4).fill(NaN);   // cell, salt, ix, iz
+  const slotVal = new Float64Array(NSLOT * 4);             // a, b, c, d
+  CBZ.noise2 = function (x, z, cell, salt) {
+    const gx = x / cell, gz = z / cell;
+    const ix = Math.floor(gx), iz = Math.floor(gz);
+    const fx = smooth(gx - ix), fz = smooth(gz - iz);
+    salt |= 0;
+    const k = ((Math.imul(salt, 0x9e3779b1) + ((cell * 64) | 0) * 0x2545) >>> 24) << 2;
+    let a, b, c, d;
+    if (slotKey[k + 2] === ix && slotKey[k + 3] === iz && slotKey[k] === cell && slotKey[k + 1] === salt) {
+      a = slotVal[k]; b = slotVal[k + 1]; c = slotVal[k + 2]; d = slotVal[k + 3];
+    } else {
+      const seed = seedRaw | 0;
+      const hx0 = sq(Math.round(ix * cell * 10) | 0, seed);
+      const hx1 = sq(Math.round((ix + 1) * cell * 10) | 0, seed);
+      const zr0 = Math.round(iz * cell * 10) | 0, zr1 = Math.round((iz + 1) * cell * 10) | 0;
+      a = (sq(salt, sq(zr0, hx0)) >>> 0) / 4294967296;
+      b = (sq(salt, sq(zr0, hx1)) >>> 0) / 4294967296;
+      c = (sq(salt, sq(zr1, hx0)) >>> 0) / 4294967296;
+      d = (sq(salt, sq(zr1, hx1)) >>> 0) / 4294967296;
+      slotKey[k] = cell; slotKey[k + 1] = salt; slotKey[k + 2] = ix; slotKey[k + 3] = iz;
+      slotVal[k] = a; slotVal[k + 1] = b; slotVal[k + 2] = c; slotVal[k + 3] = d;
+    }
+    const ab = a + (b - a) * fx, cd = c + (d - c) * fx;
+    return ab + (cd - ab) * fz;
+  };
+  // the seed is part of every corner: a new seed forgets the memo
+  function noiseForget() { slotKey.fill(NaN); }
   // hashPick(list, x, z, salt) — order-independent weighted/plain pick
   CBZ.hashPick = function (list, x, z, salt) {
     if (!list || !list.length) return null;

@@ -176,8 +176,10 @@
   // grows a DIFFERENT mountain), with a self-contained fallback for the window
   // before seed.js has parsed — nothing samples the fields that early, the
   // fallback only exists so a stray probe can never throw.
+  let _hash01 = null;
   function h01(x, z, salt) {
-    if (CBZ.hash01) return CBZ.hash01(x, z, salt);
+    const H = _hash01 || (_hash01 = CBZ.hash01 || null);
+    if (H) return H(x, z, salt);
     let h = ((Math.round(x * 10) * 374761393) ^ (Math.round(z * 10) * 668265263) ^ (salt * 1442695041)) | 0;
     h = Math.imul(h ^ (h >>> 13), 1274126177);
     return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
@@ -187,7 +189,10 @@
   // Value noise: 4 corner hashes, smoothstep-interpolated. `cell` is the
   // feature wavelength in WORLD UNITS, so every call site reads as a physical
   // scale ("240u bedding", "900u drainage basin") instead of a magic frequency.
+  let _noise2 = null;                   // core/seed.js's CBZ.noise2, bound on first use
   function n2(x, z, cell, salt) {
+    const f = _noise2 || (_noise2 = CBZ.noise2 || null);   // (seed.js parses after this file)
+    if (f) return f(x, z, cell, salt);
     const gx = x / cell, gz = z / cell;
     const ix = Math.floor(gx), iz = Math.floor(gz);
     const fx = sm(gx - ix), fz = sm(gz - iz);

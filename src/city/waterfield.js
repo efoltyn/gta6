@@ -107,8 +107,16 @@
      terrain-identity check. Far-out-of-band queries (|cell| ≥ 8000, i.e.
      ±32km) skip the cache rather than aliasing keys. */
   const COAST_GRID = 4;
-  const COAST_CACHE_MAX = 130000;            // ~few MB worst case, then reset
-  let coastCache = new Map(), coastCacheTerrain = null;
+  /* The corner memo is TILED: 8x8 corners per Float64Array (NaN = not yet
+     asked, +Infinity = the raw field had no answer), tiles in a Map keyed by
+     tile. One Map hit per tile instead of per corner, no boxed values, and
+     the build's ~millions of corner reads become typed-array loads (tiles stay
+     small because the terrain build touches a sparse lattice). Values
+     are exact field values either way, so this is the same answer bit for
+     bit. Bounded like before: past COAST_TILES_MAX tiles (~4 MB) it resets. */
+  const COAST_TILE = 8, COAST_TILES_MAX = 8192;
+  let coastTiles = new Map(), coastCacheTerrain = null;
+  let _ctKey = -1, _ctArr = null;
   function coastRaw(terrain, x, z) {
     try {
       const s = +terrain.shoreAt(x, z);
@@ -116,22 +124,35 @@
     } catch (e) {}
     return null;
   }
+  function coastClear() { coastTiles.clear(); _ctKey = -1; _ctArr = null; }
   function coastCorner(terrain, ix, iz) {
-    const key = (ix + 8192) * 16384 + (iz + 8192);
-    let v = coastCache.get(key);
-    if (v === undefined) {
-      if (coastCache.size >= COAST_CACHE_MAX) coastCache.clear();
-      v = coastRaw(terrain, ix * COAST_GRID, iz * COAST_GRID);
-      coastCache.set(key, v);
+    const ux = ix + 8192, uz = iz + 8192;                // both in [192, 16192]
+    const key = (ux >> 3) * 4096 + (uz >> 3);
+    let t = _ctArr;
+    if (key !== _ctKey) {
+      t = coastTiles.get(key);
+      if (t === undefined) {
+        if (coastTiles.size >= COAST_TILES_MAX) coastTiles.clear();
+        t = new Float64Array(COAST_TILE * COAST_TILE).fill(NaN);
+        coastTiles.set(key, t);
+      }
+      _ctKey = key; _ctArr = t;
     }
-    return v;
+    const k = ((ux & 7) << 3) | (uz & 7);
+    let v = t[k];
+    if (v !== v) {
+      const r = coastRaw(terrain, ix * COAST_GRID, iz * COAST_GRID);
+      t[k] = r === null ? Infinity : r;
+      return r;
+    }
+    return v === Infinity ? null : v;
   }
   let _lcIx = null, _lcIz = 0, _lc00 = 0, _lc10 = 0, _lc01 = 0, _lc11 = 0;
   function coastAt(x, z) {
     const A = arena();
     const terrain = A && A.mapTerrain;
     if (terrain && typeof terrain.shoreAt === "function") {
-      if (coastCacheTerrain !== terrain) { coastCacheTerrain = terrain; coastCache.clear(); _lcIx = null; }
+      if (coastCacheTerrain !== terrain) { coastCacheTerrain = terrain; coastClear(); _lcIx = null; }
       const gx = x / COAST_GRID, gz = z / COAST_GRID;
       const ix = Math.floor(gx), iz = Math.floor(gz);
       if (ix > -8000 && ix < 7999 && iz > -8000 && iz < 7999) {
