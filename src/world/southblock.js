@@ -9,6 +9,9 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  // Built when the prison is first needed, as if at this script's parse
+  // point (core/prisonlazy.js). Body left at its old indent.
+  CBZ.definePrison("world/southblock.js", function () {
   if (!CBZ || !CBZ.addBox || !CBZ.roomShell || !CBZ.scene) return;
   const { addBox, roomShell } = CBZ;
   const scene = CBZ.prisonRoot || CBZ.scene;
@@ -925,4 +928,5 @@
     PD.shell({ id: "laundry", x0: -42, x1: -26, z0: 88, z1: 104, h: 6, door: "E", dc: 96, dw: 4.0, tone: 0x8a929c, face: "E" });
     PD.shell({ id: "south-dorm", x0: -42, x1: -24, z0: 106, z1: 124, h: 6, door: "N", dc: -33, dw: 3.4, tone: 0x76818c, face: "N", quiet: true });
   }
+  });
 })();

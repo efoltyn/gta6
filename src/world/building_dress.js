@@ -640,16 +640,16 @@
   // nothing here reaches into a shell another file owns — no cell block, no
   // armory, no guard hut. A room opts in with one line.
   //
-  // TIMING: this runs at PARSE, not inside a DK pass. index.html parses the
-  // prison at :383-:450 and this file at :1408, so every shell already exists
-  // and core/batch.js (:1413, fires on `load`) still merges the result.
+  // TIMING: this runs with the prison build (core/prisonlazy.js replays it at
+  // this file's parse point), after every shell above has registered; the
+  // prison batch (core/batch.js ensurePrisonBatched) merges the result.
   //
   // WIRE: none. world/razorwire.js owns every coil in the compound and crowns
   // the PERIMETER on purpose — a 6 m room roof inside the wire is not a
   // climbing risk, so wiring it would be decoration pretending to be security.
   // What these roofs get instead is the thing they were actually missing: a
   // coping band, so the top of the wall reads as an edge.
-  (function prisonFacade() {
+  CBZ.definePrison("world/building_dress.js#prisonFacade", function prisonFacade() {
     const CFG = CBZ.CONFIG || {};
     if (CFG.PRISON_DRESS_V2 === false) return;
     const shells = CBZ.prisonShells;
@@ -733,5 +733,5 @@
     CBZ.prisonFacadeAudit = function () {
       return { shells: shells.length, windows: nWin, downpipes: nPipe, copings: nBand };
     };
-  })();
+  });
 })();

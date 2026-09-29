@@ -93,16 +93,21 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  // This file's CONFIG defaults are published at parse: other files read
+  // them before (or without) the prison ever being built.
+  if (CBZ.CONFIG.PRISON_SCHEDULE_V1 == null) CBZ.CONFIG.PRISON_SCHEDULE_V1 = true;
+  if (CBZ.CONFIG.PRISON_SCHEDULE_DOORS == null) CBZ.CONFIG.PRISON_SCHEDULE_DOORS = true;
+  if (CBZ.CONFIG.PRISON_SCHEDULE_PA == null) CBZ.CONFIG.PRISON_SCHEDULE_PA = true;
+  if (CBZ.CONFIG.PRISON_LIGHTSOUT_V2 == null) CBZ.CONFIG.PRISON_LIGHTSOUT_V2 = true;
+  // Built when the prison is first needed, as if at this script's parse
+  // point (core/prisonlazy.js). Body left at its old indent.
+  CBZ.definePrison("systems/prisonschedule.js", function () {
   // systems/dayplan.js owns the CLOCK; this file owns the TIMETABLE. Tagged
   // before us in index.html, so its absence is a mis-wired page, not a mode.
   if (!CBZ || typeof CBZ.onUpdate !== "function" || !CBZ.dayPlan) return;
   const CFG = (CBZ.CONFIG = CBZ.CONFIG || {});
-  if (CFG.PRISON_SCHEDULE_V1 == null) CFG.PRISON_SCHEDULE_V1 = true;
-  if (CFG.PRISON_SCHEDULE_DOORS == null) CFG.PRISON_SCHEDULE_DOORS = true;
-  if (CFG.PRISON_SCHEDULE_PA == null) CFG.PRISON_SCHEDULE_PA = true;
   // one flag for the whole 2026-08-16 lights-out wave, shared with
   // systems/prisonrest.js and entities/npc.js — see the header
-  if (CFG.PRISON_LIGHTSOUT_V2 == null) CFG.PRISON_LIGHTSOUT_V2 = true;
   function v2() { return CFG.PRISON_LIGHTSOUT_V2 !== false; }
 
   const root = CBZ.prisonRoot || CBZ.scene;
@@ -1243,4 +1248,5 @@
       heldOpenCells: waiting.length,
     };
   };
+  });
 })();

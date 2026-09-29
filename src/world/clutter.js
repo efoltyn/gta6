@@ -16,6 +16,9 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  // Built when the prison is first needed, as if at this script's parse
+  // point (core/prisonlazy.js). Body left at its old indent.
+  CBZ.definePrison("world/clutter.js", function () {
   if (!CBZ || !CBZ.scene) return;
 
   // `cushion` = cushion top above the floor (propuse's 7th `geom` argument).
@@ -54,4 +57,5 @@
   bench(-28.6, 4, -1);
   bench(-28.6, 38, -1);
   bench(28.6, 14, 1);          // z 20 stood the solid bench in the east yard gate (z 19..25)
+  });
 })();

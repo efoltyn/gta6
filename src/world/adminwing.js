@@ -84,6 +84,13 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  // This file's CONFIG defaults are published at parse: other files read
+  // them before (or without) the prison ever being built.
+  if (CBZ.CONFIG.PRISON_ADMIN_WING == null) CBZ.CONFIG.PRISON_ADMIN_WING = true;
+  if (CBZ.CONFIG.PRISON_WARDEN_SEATED == null) CBZ.CONFIG.PRISON_WARDEN_SEATED = true;
+  // Built when the prison is first needed, as if at this script's parse
+  // point (core/prisonlazy.js). Body left at its old indent.
+  CBZ.definePrison("world/adminwing.js", function () {
   if (!CBZ || !CBZ.addBox || !CBZ.WORLD) return;
   const { addBox } = CBZ;
   const ROOT = CBZ.prisonRoot || CBZ.scene;
@@ -91,7 +98,6 @@
   const HALF = Math.PI / 2;
 
   CBZ.CONFIG = CBZ.CONFIG || {};
-  if (CBZ.CONFIG.PRISON_ADMIN_WING == null) CBZ.CONFIG.PRISON_ADMIN_WING = true;
   /* HE SITS DOWN (owner 2026-08-11: "the warden should be seated at his own
      locked office"). He had the office, the lock and the routine, and then
      PACED it: POST.office was a three-point walking cycle, so the man whose
@@ -105,7 +111,6 @@
      `ch.sitting` branch owns the whole body). Nothing new is authored here:
      this finds his own chair and puts him in it. Flag off -> the pacing cycle
      returns byte for byte. */
-  if (CBZ.CONFIG.PRISON_WARDEN_SEATED == null) CBZ.CONFIG.PRISON_WARDEN_SEATED = true;
   if (!CBZ.CONFIG.PRISON_ADMIN_WING) return;
 
   const AW = CBZ.WORLD.adminWing || { x0: -20, x1: 20, z0: -64, z1: -44 };
@@ -1862,4 +1867,5 @@
       },
     };
   };
+  });
 })();

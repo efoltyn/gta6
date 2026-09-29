@@ -696,6 +696,10 @@
     for (let i = 0; i < q.length; i++) { const L = add(q[i]); if (L && q[i].onAdd) { try { q[i].onAdd(L); } catch (e) {} } }
   }
   drain();
+  // The prison's ladders (towers, wings, grounds) are queued by builders that
+  // now run lazily (core/prisonlazy.js); they were drained right here at
+  // parse, so the build drains them at this same point.
+  if (CBZ.definePrison) CBZ.definePrison("systems/climb.js#drain", drain);
   let runE = 0;
   CBZ.onUpdate(20.3, function (dt) {
     drain();

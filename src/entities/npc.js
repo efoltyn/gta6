@@ -10,6 +10,9 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  // Built when the prison is first needed, as if at this script's parse
+  // point (core/prisonlazy.js). Body left at its old indent.
+  CBZ.definePrison("entities/npc.js", function () {
   const scene = CBZ.prisonRoot || CBZ.scene;
   const { makeCharacter, animChar, econ } = CBZ;
 
@@ -822,5 +825,6 @@
       if (CBZ.climb && CBZ.climb.owns(npcs[i])) continue;                     // a body on a ladder is the ladder's
       updateNpc(npcs[i], dt, cx, cz);
     }
+  });
   });
 })();

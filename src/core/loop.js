@@ -7,9 +7,47 @@
   const CBZ = window.CBZ;
   const g = CBZ.game;
 
-  // sort once so update order is deterministic
-  CBZ.updaters.sort((a, b) => a.order - b.order);
-  CBZ.always.sort((a, b) => a.order - b.order);
+  // Sort once so update order is deterministic: by order, ties by registration
+  // sequence (config.js) — the same result as the stable sort by order this
+  // always was, because every list is appended in sequence order.
+  const bySeq = (a, b) => (a.order - b.order) || ((a.seq || 0) - (b.seq || 0));
+  CBZ.updaters.sort(bySeq);
+  CBZ.always.sort(bySeq);
+  for (const u of CBZ.updaters) u._loadSorted = true;
+  for (const a of CBZ.always) a._loadSorted = true;
+
+  /* LATE PARSE-TIME WORK (core/prisonlazy.js). The prison is built when it is
+     first needed, but its frame work must run exactly where it ran when it was
+     registered during the page parse. frameListsAdd() takes that work and, at
+     the top of the next frame (never mid-iteration), slots each entry into the
+     load-sorted part of its list by (order, seq). Entries registered at run
+     time were appended after the load sort and stay where they are, as they
+     always did. */
+  const pendingU = [], pendingA = [];
+  CBZ.frameListsAdd = function (ups, alws) {
+    for (let i = 0; i < (ups || []).length; i++) pendingU.push(ups[i]);
+    for (let i = 0; i < (alws || []).length; i++) pendingA.push(alws[i]);
+  };
+  function slotIn(list, add) {
+    add.sort(bySeq);
+    for (let i = 0; i < add.length; i++) {
+      const e = add[i];
+      let at = -1, lastSorted = -1;
+      for (let j = 0; j < list.length; j++) {
+        if (!list[j]._loadSorted) continue;
+        if (bySeq(list[j], e) > 0) { at = j; break; }
+        lastSorted = j;
+      }
+      if (at < 0) at = lastSorted + 1;
+      e._loadSorted = true;
+      list.splice(at, 0, e);
+    }
+    add.length = 0;
+  }
+  function settleFrameLists() {
+    if (pendingU.length) slotIn(CBZ.updaters, pendingU);
+    if (pendingA.length) slotIn(CBZ.always, pendingA);
+  }
 
   let last = performance.now();
   let lastTimer = "";   // cache so the timer DOM only writes when it changes
@@ -61,6 +99,7 @@
                           // honour an owner-set value (don't clobber a toggle)
 
   function loop(t) {
+    if (pendingU.length || pendingA.length) settleFrameLists();
     /* LOOP HOLD (tools only — inert in play, undefined by default). While
        CBZ.loopHold is true the loop keeps scheduling itself but runs NOTHING:
        no updaters, no always-chain, no render. It exists for the storyboard
@@ -230,6 +269,7 @@
   // phases) actually progress across a burst.
   CBZ.stepSim = function (dt) {
     dt = dt || 1 / 60;
+    if (pendingU.length || pendingA.length) settleFrameLists();
     CBZ._matrixOwnStamp = (CBZ._matrixOwnStamp || 0) + 1;   // same contract as loop()
     CBZ.now = (CBZ.now || performance.now()) + dt * 1000;
     CBZ.wallDt = dt;

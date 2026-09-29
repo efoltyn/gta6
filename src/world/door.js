@@ -28,6 +28,9 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  // Built when the prison is first needed, as if at this script's parse
+  // point (core/prisonlazy.js). Body left at its old indent.
+  CBZ.definePrison("world/door.js", function () {
   const { addBox } = CBZ;
   const CK = CBZ.corridorKit;
   const K = CBZ.prisonKit || null;
@@ -225,5 +228,6 @@
       if (CBZ.worldSfx) CBZ.worldSfx("door_close", 0, WZ, { ref: 12 });
       return !door.open;
     },
+  });
   });
 })();

@@ -62,6 +62,13 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  // This file's CONFIG defaults are published at parse: other files read
+  // them before (or without) the prison ever being built.
+  if (CBZ.CONFIG.PRISON_ROOFS_V1 == null) CBZ.CONFIG.PRISON_ROOFS_V1 = true;
+  if (CBZ.CONFIG.PRISON_ROOF_LIGHTS == null) CBZ.CONFIG.PRISON_ROOF_LIGHTS = true;
+  // Built when the prison is first needed, as if at this script's parse
+  // point (core/prisonlazy.js). Body left at its old indent.
+  CBZ.definePrison("world/roofs.js", function () {
   if (!CBZ || !CBZ.addBox) return;
   const { addBox } = CBZ;
   const WORLD = CBZ.WORLD || {};
@@ -69,8 +76,6 @@
   const KIT = CBZ.prisonKit || null;
 
   CBZ.CONFIG = CBZ.CONFIG || {};
-  if (CBZ.CONFIG.PRISON_ROOFS_V1 == null) CBZ.CONFIG.PRISON_ROOFS_V1 = true;
-  if (CBZ.CONFIG.PRISON_ROOF_LIGHTS == null) CBZ.CONFIG.PRISON_ROOF_LIGHTS = true;
   const ON = CBZ.CONFIG.PRISON_ROOFS_V1 !== false;
   const LIT = CBZ.CONFIG.PRISON_ROOF_LIGHTS !== false;
 
@@ -374,4 +379,5 @@
       losBlockers: laid.length,
     };
   };
+  });
 })();

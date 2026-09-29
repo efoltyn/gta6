@@ -1765,8 +1765,23 @@
     }
     return "";
   }
-  CBZ.onUpdate = function (order, fn) { CBZ.updaters.push({ order, fn, source: frameSource() }); };
-  CBZ.onAlways = function (order, fn) { CBZ.always.push({ order, fn, source: frameSource() }); };
+  // REGISTRATION SEQUENCE. core/loop.js orders the frame lists by (order,
+  // seq), which is exactly the stable sort by order it always did — plus it
+  // lets work registered LATE take the place it would have had if it had been
+  // registered at its script's parse point. The one user is the lazily built
+  // prison (core/prisonlazy.js): a builder that runs at mode entry stamps its
+  // registrations with its parse-time sequence (_frameSeqBase), so the guards'
+  // brain still runs before the same systems it ran before at load.
+  let frameSeq = 0;
+  function nextFrameSeq() {
+    const base = CBZ._frameSeqBase;
+    if (base == null) return ++frameSeq;
+    CBZ._frameSeqSub = (CBZ._frameSeqSub || 0) + 1;
+    return base + CBZ._frameSeqSub * 1e-6;
+  }
+  CBZ.frameSeqMark = function () { return frameSeq + 0.5; };
+  CBZ.onUpdate = function (order, fn) { CBZ.updaters.push({ order, fn, source: frameSource(), seq: nextFrameSeq() }); };
+  CBZ.onAlways = function (order, fn) { CBZ.always.push({ order, fn, source: frameSource(), seq: nextFrameSeq() }); };
 
   // ---- THE ONE QUALITY KNOB (owner rule: NO hardcoded content budgets). ----
   // Every content system (decal pools, gore counts, rain density, LOD draw
