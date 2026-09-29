@@ -551,8 +551,11 @@
     // ---------- FLAGPOLES ----------
     for (const sg of [-1, 1]) {
       const t = sg * (Math.min(f.span / 2 - 0.9, terrW / 2 - 0.9));
-      const px = f.horiz ? t : f.out * (halfN + terrD * 0.55);
-      const pz = f.horiz ? f.out * (halfN + terrD * 0.55) : t;
+      // IN FRONT of the corner column, never inside it: the pole used to
+      // stand at the column's own station, through its shaft
+      const poleN = halfN + Math.max(terrD * 0.55, 2 * R + 0.5);
+      const px = f.horiz ? t : f.out * poleN;
+      const pz = f.horiz ? f.out * poleN : t;
       ctx.column(px, colBase, pz, 0.075, 7.2, 0xb9bec6, 8);
       ctx.dbox(px, colBase + 0.16, pz, 0.42, 0.32, 0.42, shade(STONE, 0.88));    // pole base
       ctx.ball(px, colBase + 7.34, pz, 0.11, 0xd8c98a);                          // gold truck

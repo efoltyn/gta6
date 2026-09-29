@@ -336,11 +336,19 @@
   // from under us instead of z-fighting through, and `terrain` so the far-
   // distance culler never disposes the floor a player is standing on. This
   // is the ONE mesh per complex that deliberately carries userData.
-  function pad(root, rect, hex, name) {
+  // `surf` (optional): an estate surface kind (§1b) — the pad then wears
+  // that textured material with its UVs in world metres, so the lawn's grain
+  // runs continuously under every path and bed laid on it.
+  function pad(root, rect, hex, name, surf) {
     const w = rect.maxX - rect.minX, d = rect.maxZ - rect.minZ;
-    const g = new THREE.PlaneGeometry(w, d);
+    const g = new THREE.PlaneGeometry(w, d, surf ? 8 : 1, surf ? 8 : 1);
     g.rotateX(-Math.PI / 2);
-    const m = new THREE.Mesh(g, cm(hex));
+    if (surf && SURF[surf] && SURF[surf].tile) {
+      const P = g.attributes.position, U = g.attributes.uv, t = SURF[surf].tile;
+      const ox = (rect.minX + rect.maxX) / 2, oz = (rect.minZ + rect.maxZ) / 2;
+      for (let i = 0; i < P.count; i++) U.setXY(i, (P.getX(i) + ox) / t, -(P.getZ(i) + oz) / t);
+    }
+    const m = new THREE.Mesh(g, surf ? estateMat(surf) : cm(hex));
     m.position.set((rect.minX + rect.maxX) / 2, 0.02, (rect.minZ + rect.maxZ) / 2);
     m.receiveShadow = true; m.castShadow = false;
     m.matrixAutoUpdate = false; m.updateMatrix();
@@ -465,15 +473,13 @@
   // Mansion's checkpoint, §2b) keeps the booth and drops the two parked arms
   // and their pivots, so there is one barrier at the gate and it moves.
   function gatehouse(root, x, z, laneAlongZ, hex, o) {
-    const bx = laneAlongZ ? x - 8 : x, bz = laneAlongZ ? z : z - 8;
-    box(root, bx, 1.5, bz, 3.4, 3.0, 3.2, hex);
-    box(root, bx, 3.12, bz, 3.9, 0.28, 3.7, M.concreteD);
-    // FRESH material: transparent glass must stay out of the shared cache
-    // (and core/batch.js skips transparent from the merge anyway).
-    const win = new THREE.Mesh(bg(laneAlongZ ? 0.12 : 2.6, 1.1, laneAlongZ ? 2.6 : 0.12),
-      new THREE.MeshLambertMaterial({ color: 0xbfe9f7, emissive: 0x3f8aa6, emissiveIntensity: 0.5, transparent: true, opacity: 0.6 }));
-    win.position.set(bx + (laneAlongZ ? 1.75 : 0), 1.8, bz + (laneAlongZ ? 0 : 1.65));
-    win.castShadow = false; root.add(win);
+    // `o.booth`: how far off the lane centre the booth stands (8 m on the
+    // wide state gates; a narrower gate keeps it inside its own opening)
+    const off = (o && o.booth != null) ? o.booth : 8;
+    const bx = laneAlongZ ? x - off : x, bz = laneAlongZ ? z : z - off;
+    // the booth watches the lane: its big window faces it, its door is on
+    // the far side, away from the traffic
+    lodge(root, bx, bz, 3.4, 3.2, 3.0, hex, laneAlongZ ? { x: 1, z: 0 } : { x: 0, z: 1 });
     col(bx, bz, 3.4, 3.2, 0, 3.0);
     if (o && o.noArms) return;
     const L = 9.0, A = 1.15;                       // arm length / parked angle
@@ -489,6 +495,48 @@
         : box(root, px, 0.9 + lift, pz + toward * reach, 0.16, 0.16, L, M.warn);
       if (laneAlongZ) arm.rotation.z = toward * A; else arm.rotation.x = -toward * A;
     }
+  }
+
+  /* A MASONRY LODGE — the gatehouse booth and the estate's sentry boxes. It
+     was one 3.4 m cube with a transparent slab stuck to it. A guard lodge is a
+     plinth, walls, a cornice and a flat roof you could stand a searchlight on
+     (president_regime.js does: the roof top stays at h + 0.26), glazing on
+     the three faces a guard watches from, and a door on the fourth. Every
+     piece is a plain static box in the shared colour pool, so the batcher
+     folds the whole lodge into the city's buckets. `face` = the outward unit
+     normal (axis-aligned) of the watching side. No collider: the caller
+     owns that (the gatehouse's is the one president_regime.js measures). */
+  function lodge(root, x, z, w, d, h, hex, face) {
+    const n = face || { x: 0, z: 1 };
+    box(root, x, 0.2, z, w + 0.24, 0.4, d + 0.24, M.stoneDk, { cast: false });
+    box(root, x, 0.4 + (h - 0.7) / 2, z, w, h - 0.7, d, hex);
+    box(root, x, h - 0.2, z, w + 0.36, 0.2, d + 0.36, M.stoneD);          // cornice
+    box(root, x, h + 0.08, z, w + 0.18, 0.36, d + 0.18, M.stone);          // roof slab, top h + 0.26
+    const glass = cm(0x2b3a44, { emissive: 0xffd9a0, ei: 0.28 });
+    // one window per watched face, the widest on the lane; a panelled door
+    // on the back face, under a stone lintel
+    const faces = [n, { x: -n.z, z: n.x }, { x: n.z, z: -n.x }];
+    for (let i = 0; i < faces.length; i++) {
+      const f = faces[i];
+      const spanW = Math.abs(f.x) > 0.5 ? d : w, off = (Math.abs(f.x) > 0.5 ? w : d) / 2;
+      const ww = Math.min(spanW - 0.9, i === 0 ? 2.4 : 1.2), wh = Math.min(1.25, h - 1.9);
+      const wy = 0.4 + 0.95 + wh / 2;
+      const along = Math.abs(f.z) > 0.5;       // the face spans x
+      // stone surround proud of the wall, then the pane just proud of that
+      const sx = x + f.x * (off + 0.04), sz = z + f.z * (off + 0.04);
+      box(root, sx, wy, sz, along ? ww + 0.3 : 0.08, wh + 0.3, along ? 0.08 : ww + 0.3, M.stone, { cast: false });
+      const gm = new THREE.Mesh(bg(along ? ww : 0.04, wh, along ? 0.04 : ww), glass);
+      gm.position.set(x + f.x * (off + 0.09), wy, z + f.z * (off + 0.09));
+      gm.castShadow = false; root.add(gm);
+      box(root, x + f.x * (off + 0.1), wy - wh / 2 - 0.2, z + f.z * (off + 0.1),
+        along ? ww + 0.46 : 0.2, 0.1, along ? 0.2 : ww + 0.46, M.stoneD, { cast: false });  // sill
+    }
+    const b = { x: -n.x, z: -n.z }, boff = (Math.abs(b.x) > 0.5 ? w : d) / 2;
+    const alongB = Math.abs(b.z) > 0.5, dh = Math.min(2.1, h - 0.95);
+    box(root, x + b.x * (boff + 0.05), 0.4 + (dh + 0.16) / 2, z + b.z * (boff + 0.05),
+      alongB ? 1.3 : 0.1, dh + 0.16, alongB ? 0.1 : 1.3, M.stone, { cast: false });        // door surround
+    box(root, x + b.x * (boff + 0.1), 0.4 + dh / 2, z + b.z * (boff + 0.1),
+      alongB ? 0.92 : 0.04, dh, alongB ? 0.04 : 0.92, 0x3a2c22, { cast: false });           // the leaf
   }
 
   /* ------------------------------------------------------------------
@@ -712,29 +760,442 @@
     }
   }
 
-  function flagpole(root, x, z, h) {
-    cyl(root, x, h / 2, z, 0.1, 0.13, h, M.steel, 8);
-    box(root, x + 1.0, h - 1.2, z, 2.0, 1.3, 0.05, M.flagBlue, { cast: false });
-    box(root, x + 1.5, h - 1.75, z, 3.0, 0.42, 0.05, M.flagRed, { cast: false });
-    box(root, x + 1.5, h - 0.85, z, 3.0, 0.42, 0.05, M.flagWhite, { cast: false });
-    col(x, z, 0.5, 0.5, 0, h);
+  /* A FLAG ON A POLE. It was three coloured boxes hung a metre off a bare
+     tube. Now: a stepped stone base, a tapered pole, a gilt truck, and the
+     cloth as three waved strips (one geometry, three colours) that start AT
+     the pole, so nothing hangs in the air beside it. */
+  const FLAG_M = {};
+  function flagMat(hex) {
+    return FLAG_M[hex] || (FLAG_M[hex] = new THREE.MeshLambertMaterial({ color: hex, side: THREE.DoubleSide }));
+  }
+  let _flagGeo = null;
+  function flagGeo() {
+    if (_flagGeo) return _flagGeo;
+    const L = 2.7, H = 0.6;
+    const g = new THREE.PlaneGeometry(L, H, 18, 1);
+    g.translate(L / 2, 0, 0);                              // hoist edge at x = 0
+    const p = g.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const x = p.getX(i), t = x / L;
+      p.setZ(i, Math.sin(x * 2.3 + 0.4) * 0.16 * t);      // the fly end moves, the hoist does not
+      p.setY(i, p.getY(i) - 0.05 * t * t);                // and droops a touch
+    }
+    g.computeVertexNormals();
+    return (_flagGeo = g);
+  }
+  function flagpole(root, x, z, h, colours) {
+    box(root, x, 0.2, z, 1.2, 0.4, 1.2, M.stoneD);
+    box(root, x, 0.55, z, 0.8, 0.3, 0.8, M.stone);
+    cyl(root, x, 0.7 + (h - 0.7) / 2, z, 0.055, 0.105, h - 0.7, 0xc6c9cc, 12);
+    const truck = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 8), cm(0xb99347));
+    truck.position.set(x, h + 0.1, z); truck.castShadow = false; root.add(truck);
+    const cs = colours || [M.flagWhite, M.flagBlue, M.flagRed];
+    for (let i = 0; i < cs.length; i++) {
+      const m = new THREE.Mesh(flagGeo(), flagMat(cs[i]));
+      m.position.set(x + 0.07, h - 0.45 - i * 0.6, z);
+      m.castShadow = false;
+      root.add(m);
+    }
+    col(x, z, 1.2, 1.2, 0, 0.7);
+    col(x, z, 0.3, 0.3, 0, h);
   }
 
-  // an avenue of lamp standards — posts instanced, heads instanced + emissive
-  // (the cached-material factory takes the emissive kit, so all the heads in
-  // the world still share ONE material and ONE draw call).
+  // Concatenate geometries (indexed or not) into one non-indexed geometry with
+  // position/normal/uv, so a multi-part fixture is ONE instanced draw.
+  function mergeGeos(list) {
+    const pos = [], nor = [], uv = [];
+    for (let k = 0; k < list.length; k++) {
+      let g = list[k];
+      if (!g) continue;
+      if (g.index) g = g.toNonIndexed();
+      if (!g.attributes.normal) g.computeVertexNormals();
+      const p = g.attributes.position, n = g.attributes.normal, u = g.attributes.uv;
+      for (let i = 0; i < p.count; i++) {
+        pos.push(p.getX(i), p.getY(i), p.getZ(i));
+        nor.push(n.getX(i), n.getY(i), n.getZ(i));
+        uv.push(u ? u.getX(i) : 0, u ? u.getY(i) : 0);
+      }
+    }
+    const out = new THREE.BufferGeometry();
+    out.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    out.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
+    out.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+    out.computeBoundingSphere(); out.computeBoundingBox();
+    return out;
+  }
+  function lathe(profile, seg) {
+    const pts = profile.map(function (p) { return new THREE.Vector2(p[0], p[1]); });
+    const g = new THREE.LatheGeometry(pts, seg || 16);
+    g.computeVertexNormals();
+    return g;
+  }
+
+  /* A LANTERN STANDARD — the lamp that lines a ceremonial drive. It was a
+     6 m square stick with a flat box on top. Now: a moulded cast base, a
+     tapered fluted-read post, a collar, a hexagonal lantern that is the only
+     lit part, and its cap. Iron is ONE instanced draw for every standard in
+     the world; the glass is a second. */
+  let _lampG = null;
+  function lampGeos() {
+    if (_lampG) return _lampG;
+    const iron = mergeGeos([
+      lathe([[0, 0], [0.26, 0], [0.26, 0.12], [0.2, 0.2], [0.17, 0.62], [0.12, 0.7], [0, 0.7]], 12),
+      (function () { const g = new THREE.CylinderGeometry(0.06, 0.095, 3.5, 10); g.translate(0, 0.7 + 1.75, 0); return g; })(),
+      lathe([[0, 4.18], [0.1, 4.18], [0.15, 4.28], [0.15, 4.34], [0, 4.34]], 10),
+      (function () { const g = new THREE.CylinderGeometry(0.02, 0.23, 0.3, 6); g.translate(0, 4.99, 0); return g; })(),
+      (function () { const g = new THREE.SphereGeometry(0.05, 8, 6); g.translate(0, 5.18, 0); return g; })(),
+    ]);
+    const glass = (function () { const g = new THREE.CylinderGeometry(0.2, 0.15, 0.5, 6); g.translate(0, 4.59, 0); return g; })();
+    return (_lampG = { iron: iron, glass: glass, top: 5.23 });
+  }
   function lampRow(root, pts) {
     if (!pts.length) return;
-    repeat(root, bg(0.18, 6.0, 0.18), M.steelD, pts, function () { return 3.0; });
-    repeat(root, bg(0.7, 0.24, 0.7), M.lampHead, pts, function () { return 6.15; }, null,
-      { emissive: M.lampHead, ei: 0.8 });
+    const G = lampGeos();
+    repeat(root, G.iron, 0x24282c, pts, function () { return 0; });
+    repeat(root, G.glass, M.lampHead, pts, function () { return 0; }, null, { emissive: M.lampHead, ei: 0.85 });
     // SOLID. Every OTHER standing object this kit makes — the flagpole, the
     // watchtower legs, the comms tower, the floodlight masts — takes a col();
-    // the 42 lamp standards lining the ceremonial approaches never did, so the
-    // avenue you drive up was the one thing on the estate you could drive
-    // through. city/towngen.js already collides its own 0.36 m town lamp posts.
-    for (let i = 0; i < pts.length; i++) col(pts[i].x, pts[i].z, 0.4, 0.4, 0, 6.0);
+    // the lamp standards lining the ceremonial approaches never did, so the
+    // avenue you drove up was the one thing on the estate you could drive
+    // through. city/towngen.js already collides its own town lamp posts.
+    for (let i = 0; i < pts.length; i++) col(pts[i].x, pts[i].z, 0.52, 0.52, 0, 4.4);
   }
+
+  /* ====================================================================
+     PAINTED SURFACES — the ground an estate is built from. The world texture
+     library (world/textures_surface.js) ships grass and asphalt; granite
+     setts, York-stone flags, gravel, a planted bed and a helipad deck it does
+     not, so they are painted here ONCE per session into canvases (colour +
+     a height field turned into a normal map), deterministic, no Math.random.
+     Headless (no document) every painter returns null and the surface falls
+     back to its flat shared colour, so node checks and tier 0 still build.
+     ==================================================================== */
+  function hsh(i, salt) {
+    const s = Math.sin(i * 12.9898 + salt * 78.233) * 43758.5453;
+    return s - Math.floor(s);
+  }
+  function mkCanvas(n) {
+    if (typeof document === "undefined" || !document.createElement) return null;
+    try { const c = document.createElement("canvas"); c.width = n; c.height = n; return c.getContext ? c : null; } catch (e) { return null; }
+  }
+  function heightToNormal(hc, strength) {
+    const n = hc.width, src = hc.getContext("2d").getImageData(0, 0, n, n).data;
+    const out = mkCanvas(n); if (!out) return null;
+    const ctx = out.getContext("2d"), img = ctx.createImageData(n, n), d = img.data;
+    const H = function (x, y) { x = (x + n) % n; y = (y + n) % n; return src[(y * n + x) * 4] / 255; };
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      const dx = (H(x + 1, y) - H(x - 1, y)) * strength, dy = (H(x, y + 1) - H(x, y - 1)) * strength;
+      const l = Math.hypot(dx, dy, 1);
+      const i = (y * n + x) * 4;
+      d[i] = (-dx / l * 0.5 + 0.5) * 255; d[i + 1] = (dy / l * 0.5 + 0.5) * 255; d[i + 2] = (1 / l * 0.5 + 0.5) * 255; d[i + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+    return out;
+  }
+  function rgb(r, g, b) { return "rgb(" + (r | 0) + "," + (g | 0) + "," + (b | 0) + ")"; }
+  // each painter fills a colour canvas `c` and a height canvas `h` (white =
+  // proud) of the same size; both must tile seamlessly.
+  const PAINT = {
+    // granite setts, 100 x 200 mm in stretcher bond: 32 courses x 16 per
+    // course over a 3.2 m tile
+    sett: function (c, h, N) {
+      c.fillStyle = "#4a4843"; c.fillRect(0, 0, N, N);
+      h.fillStyle = "#1a1a1a"; h.fillRect(0, 0, N, N);
+      const rows = 32, per = 16, rh = N / rows, sw = N / per, j = 1.6;
+      let k = 0;
+      for (let r = 0; r < rows; r++) {
+        const off = (r % 2) ? sw / 2 : 0;
+        for (let i = -1; i < per; i++) {
+          const x = i * sw + off, y = r * rh, t = hsh(k++, 3);
+          const g = 118 + t * 46 + (hsh(k, 5) - 0.5) * 14;
+          c.fillStyle = rgb(g, g * 0.98, g * 0.94);
+          c.fillRect(x + j, y + j, sw - 2 * j, rh - 2 * j);
+          // a lighter face with a darker arris reads as a dressed stone
+          c.fillStyle = "rgba(255,255,255," + (0.04 + t * 0.05).toFixed(3) + ")";
+          c.fillRect(x + j + 2, y + j + 2, sw - 2 * j - 4, rh - 2 * j - 4);
+          h.fillStyle = rgb(170 + t * 50, 170 + t * 50, 170 + t * 50);
+          h.fillRect(x + j, y + j, sw - 2 * j, rh - 2 * j);
+          h.fillStyle = "rgb(240,240,240)";
+          h.fillRect(x + j + 3, y + j + 3, sw - 2 * j - 6, rh - 2 * j - 6);
+        }
+      }
+    },
+    // York-stone flags: four 0.8 m courses of random-length slabs
+    flag: function (c, h, N) {
+      c.fillStyle = "#6a6358"; c.fillRect(0, 0, N, N);
+      h.fillStyle = "#202020"; h.fillRect(0, 0, N, N);
+      const rows = 4, rh = N / rows, lens = [[0.3, 0.45, 0.25], [0.2, 0.35, 0.45], [0.4, 0.3, 0.3], [0.25, 0.25, 0.5]];
+      let k = 0;
+      for (let r = 0; r < rows; r++) {
+        let x = hsh(r, 11) * N;
+        const L = lens[r];
+        for (let i = 0; i < L.length; i++) {
+          const w = L[i] * N, t = hsh(k++, 7);
+          const base = [196 + t * 22, 186 + t * 18, 166 + t * 14];
+          for (const ox of [0, -N]) {
+            c.fillStyle = rgb(base[0], base[1], base[2]);
+            c.fillRect(x + ox + 2, r * rh + 2, w - 4, rh - 4);
+            h.fillStyle = rgb(200 + t * 40, 200 + t * 40, 200 + t * 40);
+            h.fillRect(x + ox + 2, r * rh + 2, w - 4, rh - 4);
+          }
+          x += w; if (x >= N) x -= N;
+        }
+      }
+      // weathering: faint mottles, deterministic
+      for (let i = 0; i < 900; i++) {
+        const px = hsh(i, 21) * N, py = hsh(i, 22) * N, r = 2 + hsh(i, 23) * 6;
+        c.fillStyle = hsh(i, 24) < 0.5 ? "rgba(60,55,45,0.06)" : "rgba(255,250,235,0.06)";
+        c.fillRect(px, py, r, r);
+      }
+    },
+    // raked gravel: a buff ground and a few thousand pebbles, each drawn
+    // wrapped across the tile edge so the tile never seams
+    gravel: function (c, h, N) {
+      c.fillStyle = "#a39679"; c.fillRect(0, 0, N, N);
+      h.fillStyle = "#5a5a5a"; h.fillRect(0, 0, N, N);
+      for (let i = 0; i < 5200; i++) {
+        const x = hsh(i, 31) * N, y = hsh(i, 32) * N, r = 1.4 + hsh(i, 33) * 3.2, t = hsh(i, 34);
+        const col = t < 0.33 ? [196, 186, 162] : t < 0.66 ? [150, 138, 116] : [120, 112, 98];
+        for (const ox of [0, -N, N]) for (const oy of [0, -N, N]) {
+          if (x + ox < -8 || x + ox > N + 8 || y + oy < -8 || y + oy > N + 8) continue;
+          c.fillStyle = rgb(col[0], col[1], col[2]);
+          c.beginPath(); c.ellipse(x + ox, y + oy, r, r * 0.75, t * 3, 0, Math.PI * 2); c.fill();
+          h.fillStyle = rgb(150 + t * 100, 150 + t * 100, 150 + t * 100);
+          h.beginPath(); h.ellipse(x + ox, y + oy, r, r * 0.75, t * 3, 0, Math.PI * 2); h.fill();
+        }
+      }
+    },
+    // a planted bed: dark tilth with low bedding plants in flower
+    bed: function (c, h, N) {
+      c.fillStyle = "#3a2d22"; c.fillRect(0, 0, N, N);
+      h.fillStyle = "#303030"; h.fillRect(0, 0, N, N);
+      for (let i = 0; i < 1500; i++) {
+        const x = hsh(i, 41) * N, y = hsh(i, 42) * N, r = 3 + hsh(i, 43) * 6, t = hsh(i, 44);
+        for (const ox of [0, -N, N]) for (const oy of [0, -N, N]) {
+          if (x + ox < -12 || x + ox > N + 12 || y + oy < -12 || y + oy > N + 12) continue;
+          c.fillStyle = t < 0.62 ? rgb(52 + t * 30, 86 + t * 40, 44) : t < 0.8 ? rgb(176, 46, 58) : t < 0.92 ? rgb(236, 228, 214) : rgb(222, 170, 60);
+          c.beginPath(); c.arc(x + ox, y + oy, r * (t < 0.62 ? 1 : 0.55), 0, Math.PI * 2); c.fill();
+          h.fillStyle = rgb(120 + t * 110, 120 + t * 110, 120 + t * 110);
+          h.beginPath(); h.arc(x + ox, y + oy, r, 0, Math.PI * 2); h.fill();
+        }
+      }
+    },
+    // the helipad deck: NOT a tile. One square of brushed concrete with its
+    // expansion joints, the white perimeter, the yellow touchdown circle and
+    // the H, painted at 1024 so the markings are crisp from the approach.
+    helipad: function (c, h, N) {
+      c.fillStyle = "#77797a"; c.fillRect(0, 0, N, N);
+      for (let i = 0; i < 9000; i++) {
+        const t = hsh(i, 51);
+        c.fillStyle = t < 0.5 ? "rgba(40,40,40,0.10)" : "rgba(235,235,230,0.08)";
+        c.fillRect(hsh(i, 52) * N, hsh(i, 53) * N, 1 + (i % 3), 1);
+      }
+      h.fillStyle = "#b0b0b0"; h.fillRect(0, 0, N, N);
+      c.strokeStyle = "rgba(40,40,40,0.35)"; c.lineWidth = 2;
+      h.strokeStyle = "#303030"; h.lineWidth = 3;
+      for (let k = 1; k < 4; k++) {
+        for (const g of [c, h]) {
+          g.beginPath(); g.moveTo(k * N / 4, 0); g.lineTo(k * N / 4, N); g.stroke();
+          g.beginPath(); g.moveTo(0, k * N / 4); g.lineTo(N, k * N / 4); g.stroke();
+        }
+      }
+      c.strokeStyle = "rgba(240,240,234,0.97)"; c.lineWidth = N * 0.022;
+      c.strokeRect(N * 0.03, N * 0.03, N * 0.94, N * 0.94);
+      c.strokeStyle = "rgba(236,188,36,0.97)"; c.lineWidth = N * 0.036;
+      c.beginPath(); c.arc(N / 2, N / 2, N * 0.335, 0, Math.PI * 2); c.stroke();
+      c.fillStyle = "rgba(242,242,236,0.98)";
+      const hw = N * 0.105, hh = N * 0.15, st = N * 0.045;
+      c.fillRect(N / 2 - hw, N / 2 - hh, st, hh * 2);
+      c.fillRect(N / 2 + hw - st, N / 2 - hh, st, hh * 2);
+      c.fillRect(N / 2 - hw, N / 2 - st / 2, hw * 2, st);
+      for (let i = 0; i < 7; i++) {
+        c.fillStyle = "rgba(18,18,18,0.09)";
+        c.save(); c.translate(N * (0.34 + hsh(i, 55) * 0.32), N * (0.34 + hsh(i, 56) * 0.32)); c.rotate(hsh(i, 57) * 3);
+        c.fillRect(-N * 0.07, -N * 0.008, N * 0.14, N * 0.016); c.restore();
+      }
+    },
+  };
+  const PAINTED = {};
+  function paintedTex(kind) {
+    if (PAINTED[kind] !== undefined) return PAINTED[kind];
+    PAINTED[kind] = null;
+    const N = kind === "helipad" ? 1024 : 512;
+    const cc = mkCanvas(N), hc = mkCanvas(N);
+    if (!cc || !hc || !PAINT[kind]) return null;
+    try {
+      PAINT[kind](cc.getContext("2d"), hc.getContext("2d"), N);
+      const aniso = (function () { try { return Math.min(8, CBZ.renderer.capabilities.getMaxAnisotropy()); } catch (e) { return 4; } })();
+      const map = new THREE.CanvasTexture(cc);
+      map.wrapS = map.wrapT = kind === "helipad" ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
+      map.anisotropy = aniso;
+      if (THREE.sRGBEncoding) map.encoding = THREE.sRGBEncoding;
+      let normal = null;
+      // the normal map only feeds the PBR path (Lambert has no normalMap in
+      // r128), and the helipad deck is paint on a slab, not a relief
+      const wantN = kind !== "helipad" && !!(CBZ.pbrMaterialsOn && CBZ.pbrMaterialsOn());
+      const nc = wantN ? heightToNormal(hc, kind === "gravel" ? 3.0 : 4.0) : null;
+      if (nc) {
+        normal = new THREE.CanvasTexture(nc);
+        normal.wrapS = normal.wrapT = map.wrapS;
+        normal.anisotropy = aniso;
+      }
+      PAINTED[kind] = { map: map, normal: normal };
+    } catch (e) { PAINTED[kind] = null; }
+    return PAINTED[kind];
+  }
+
+  /* THE ESTATE SURFACES. `tile` is metres per texture repeat (0 = a decal
+     mapped 0..1 over its own square). `flat` is the shared colour a surface
+     wears when textures are unavailable (headless, tier 0). */
+  const SURF = {
+    lawn:    { lib: "grass", tint: 0x587f45, tile: 3.2, flat: 0x4f7445 },
+    lawnB:   { lib: "grass", tint: 0x6a9651, tile: 3.2, flat: 0x5b8250 },
+    asphalt: { lib: "asphalt", tint: 0x3d4043, tile: 5.0, flat: 0x33373b },
+    sett:    { paint: "sett", tint: 0xffffff, tile: 3.2, flat: 0x8f8b82 },
+    settD:   { paint: "sett", tint: 0x9a968e, tile: 3.2, flat: 0x6c6962 },
+    flag:    { paint: "flag", tint: 0xffffff, tile: 3.2, flat: 0xb8b0a0 },
+    gravel:  { paint: "gravel", tint: 0xffffff, tile: 2.0, flat: 0xa99d82 },
+    bed:     { paint: "bed", tint: 0xffffff, tile: 2.4, flat: 0x43362a },
+    heli:    { paint: "helipad", tint: 0xffffff, tile: 0, flat: 0x6f7274 },
+  };
+  const EMAT = {};
+  function estateMat(kind) {
+    if (EMAT[kind]) return EMAT[kind];
+    const d = SURF[kind];
+    let m = null;
+    try {
+      const pbr = !!(CBZ.pbrMaterialsOn && CBZ.pbrMaterialsOn());
+      let map = null, normal = null, rough = null, tint = d.tint;
+      if (d.lib && CBZ.surfaceMaps) {
+        const mp = CBZ.surfaceMaps(d.lib, { repeat: 1 });
+        if (mp) {
+          map = mp.map; normal = mp.normalMap; rough = mp.roughnessMap;
+          // the library map carries its own brightness; divide it back out so
+          // the lawn is the green authored here and the map adds only grain
+          const mean = CBZ.surfaceMapMean ? CBZ.surfaceMapMean(map) : [1, 1, 1];
+          const c = new THREE.Color(d.tint);
+          c.r /= Math.max(0.05, mean[0]); c.g /= Math.max(0.05, mean[1]); c.b /= Math.max(0.05, mean[2]);
+          tint = c;
+        }
+      } else if (d.paint) {
+        const t = paintedTex(d.paint);
+        if (t) { map = t.map; normal = t.normal; }
+      }
+      if (map) {
+        m = pbr
+          ? new THREE.MeshStandardMaterial({ color: tint, map: map, normalMap: normal, roughnessMap: rough, roughness: 0.94, metalness: 0, envMap: CBZ.ENV || null })
+          : new THREE.MeshLambertMaterial({ color: tint, map: map });
+        if (pbr && normal && m.normalScale) m.normalScale.set(0.8, 0.8);
+        m._shared = true;
+        m.name = "estate-" + kind;
+      }
+    } catch (e) { m = null; }
+    if (!m) m = cm(d.flat);
+    EMAT[kind] = m;
+    return m;
+  }
+
+  /* A SHEET: every flat piece of one surface on one estate, accumulated in
+     WORLD metres and emitted as ONE mesh. A textured material is the one
+     thing core/batch.js will not merge, so the merge happens here instead:
+     the whole ground of a head of state's estate is a handful of draws. UVs
+     are world metres / tile, so a path and the forecourt it joins share one
+     continuous pattern. Every triangle is wound to face up. */
+  function Sheet(kind) { this.kind = kind; this.pos = []; this.uv = []; this.idx = []; this.n = 0; this.tile = SURF[kind].tile; }
+  Sheet.prototype.v = function (x, y, z, u, w) {
+    this.pos.push(x, y, z);
+    if (u != null) this.uv.push(u, w);
+    else if (this.tile) this.uv.push(x / this.tile, -z / this.tile);
+    else this.uv.push(0, 0);
+    return this.n++;
+  };
+  Sheet.prototype.tri = function (a, b, c) {
+    const P = this.pos;
+    const ux = P[b * 3] - P[a * 3], uz = P[b * 3 + 2] - P[a * 3 + 2];
+    const wx = P[c * 3] - P[a * 3], wz = P[c * 3 + 2] - P[a * 3 + 2];
+    if (uz * wx - ux * wz < 0) this.idx.push(a, c, b); else this.idx.push(a, b, c);
+  };
+  Sheet.prototype.quad = function (x0, z0, x1, z1, y) {
+    if (!(Math.abs(x1 - x0) > 0.01 && Math.abs(z1 - z0) > 0.01)) return;
+    const a = this.v(x0, y, z0), b = this.v(x1, y, z0), c = this.v(x1, y, z1), d = this.v(x0, y, z1);
+    this.tri(a, b, c); this.tri(a, c, d);
+  };
+  Sheet.prototype.rect = function (r, y) { this.quad(r.minX, r.minZ, r.maxX, r.maxZ, y); };
+  // an oriented strip of width w from p0 to p1 (a path at any angle)
+  Sheet.prototype.strip = function (p0, p1, w, y) {
+    const dx = p1.x - p0.x, dz = p1.z - p0.z, L = Math.hypot(dx, dz);
+    if (L < 0.05) return;
+    const nx = -dz / L * w / 2, nz = dx / L * w / 2;
+    const a = this.v(p0.x + nx, y, p0.z + nz), b = this.v(p1.x + nx, y, p1.z + nz);
+    const c = this.v(p1.x - nx, y, p1.z - nz), d = this.v(p0.x - nx, y, p0.z - nz);
+    this.tri(a, b, c); this.tri(a, c, d);
+  };
+  Sheet.prototype.disc = function (cx, cz, r, y, seg) {
+    seg = seg || 40;
+    const c = this.v(cx, y, cz);
+    let prev = this.v(cx + r, y, cz);
+    for (let i = 1; i <= seg; i++) {
+      const a = i / seg * Math.PI * 2;
+      const q = this.v(cx + Math.cos(a) * r, y, cz + Math.sin(a) * r);
+      this.tri(c, prev, q); prev = q;
+    }
+  };
+  Sheet.prototype.ring = function (cx, cz, r0, r1, y, seg) {
+    seg = seg || 48;
+    for (let i = 0; i < seg; i++) {
+      const a0 = i / seg * Math.PI * 2, a1 = (i + 1) / seg * Math.PI * 2;
+      const p = this.v(cx + Math.cos(a0) * r0, y, cz + Math.sin(a0) * r0);
+      const q = this.v(cx + Math.cos(a0) * r1, y, cz + Math.sin(a0) * r1);
+      const s = this.v(cx + Math.cos(a1) * r1, y, cz + Math.sin(a1) * r1);
+      const t = this.v(cx + Math.cos(a1) * r0, y, cz + Math.sin(a1) * r0);
+      this.tri(p, q, s); this.tri(p, s, t);
+    }
+  };
+  // a rectangle with a round hole (a forecourt round its island): a polar fan
+  // from the hole's edge out to the rectangle, the four corners always sampled
+  Sheet.prototype.rectHole = function (r, hx, hz, hr, y, seg) {
+    seg = seg || 64;
+    const angs = [];
+    for (let i = 0; i < seg; i++) angs.push(i / seg * Math.PI * 2);
+    for (const c of [[r.maxX, r.maxZ], [r.minX, r.maxZ], [r.minX, r.minZ], [r.maxX, r.minZ]]) {
+      let a = Math.atan2(c[1] - hz, c[0] - hx); if (a < 0) a += Math.PI * 2; angs.push(a);
+    }
+    angs.sort(function (a, b) { return a - b; });
+    const edge = function (a) {
+      const dx = Math.cos(a), dz = Math.sin(a);
+      let t = Infinity;
+      if (dx > 1e-6) t = Math.min(t, (r.maxX - hx) / dx); else if (dx < -1e-6) t = Math.min(t, (r.minX - hx) / dx);
+      if (dz > 1e-6) t = Math.min(t, (r.maxZ - hz) / dz); else if (dz < -1e-6) t = Math.min(t, (r.minZ - hz) / dz);
+      return { x: hx + dx * t, z: hz + dz * t };
+    };
+    for (let i = 0; i < angs.length; i++) {
+      const a0 = angs[i], a1 = i + 1 < angs.length ? angs[i + 1] : angs[0] + Math.PI * 2;
+      if (a1 - a0 < 1e-5) continue;
+      const e0 = edge(a0), e1 = edge(a1);
+      const p = this.v(hx + Math.cos(a0) * hr, y, hz + Math.sin(a0) * hr);
+      const q = this.v(e0.x, y, e0.z), s = this.v(e1.x, y, e1.z);
+      const t = this.v(hx + Math.cos(a1) * hr, y, hz + Math.sin(a1) * hr);
+      this.tri(p, q, s); this.tri(p, s, t);
+    }
+  };
+  Sheet.prototype.finish = function (root, name) {
+    if (!this.idx.length) return null;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(this.pos, 3));
+    const nor = new Float32Array(this.n * 3);
+    for (let i = 0; i < this.n; i++) nor[i * 3 + 1] = 1;
+    g.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
+    g.setAttribute("uv", new THREE.Float32BufferAttribute(this.uv, 2));
+    g.setIndex(this.idx);
+    g.computeBoundingSphere(); g.computeBoundingBox();
+    const m = new THREE.Mesh(g, estateMat(this.kind));
+    m.receiveShadow = true; m.castShadow = false;
+    m.matrixAutoUpdate = false; m.updateMatrix();
+    m.name = name || ("estate-" + this.kind);
+    root.add(m);
+    return m;
+  }
+
 
   // A BOLLARD LINE IS A VEHICLE BARRIER OR IT IS DECORATION. The Capitol and
   // City Hall both declare in their own comments that bollards ARE their
@@ -767,14 +1228,68 @@
     col(x, z, 0.7, 0.7, 0, h);
   }
 
-  // HELIPAD — the disc, the ring and a painted H, on the shared paint colour.
-  function helipad(root, x, z, r) {
-    disc(root, x, z, r, M.asphalt, YG, 24);
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(r - 0.9, 0.14, 6, 26), cm(M.paint));
-    ring.rotation.x = Math.PI / 2; ring.position.set(x, YM, z); ring.castShadow = false; root.add(ring);
-    box(root, x - 1.5, YM, z, 0.7, 0.02, r * 0.9, M.paint, { cast: false });
-    box(root, x + 1.5, YM, z, 0.7, 0.02, r * 0.9, M.paint, { cast: false });
-    box(root, x, YM, z, 3.0, 0.02, 0.7, M.paint, { cast: false });
+  /* HELIPAD — a raised concrete TLOF slab you can stand on, the painted deck
+     (the H, the yellow touchdown circle, the white perimeter) as ONE decal,
+     green edge lights on the slab lip (one instanced draw), and, when the
+     caller gives it room, a windsock clear of the approach. It was an asphalt
+     disc with a torus lying on it and three grey boxes for an H. */
+  const HELI_TOP = 0.15;
+  let _heliLightG = null, _sockM = null;
+  function helipad(root, x, z, r, o) {
+    o = o || {};
+    const S = r * 2;
+    box(root, x, HELI_TOP / 2, z, S + 0.5, HELI_TOP, S + 0.5, 0x8c8e8d, { cast: false });
+    box(root, x, 0.02, z, S + 1.1, 0.04, S + 1.1, M.concreteD, { cast: false });   // the mowing strip round it
+    plat(x, z, S + 0.5, S + 0.5, HELI_TOP);
+    const deck = new Sheet("heli");
+    const a = deck.v(x - r, HELI_TOP + 0.004, z - r, 0, 1), b = deck.v(x + r, HELI_TOP + 0.004, z - r, 1, 1);
+    const c = deck.v(x + r, HELI_TOP + 0.004, z + r, 1, 0), d = deck.v(x - r, HELI_TOP + 0.004, z + r, 0, 0);
+    deck.tri(a, b, c); deck.tri(a, c, d);
+    deck.finish(root, "helipad-deck");
+    if (!_heliLightG) {
+      _heliLightG = mergeGeos([
+        (function () { const g = new THREE.CylinderGeometry(0.12, 0.14, 0.05, 10); g.translate(0, 0.025, 0); return g; })(),
+        (function () { const g = new THREE.SphereGeometry(0.075, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2); g.translate(0, 0.05, 0); return g; })(),
+      ]);
+    }
+    const lp = [], per = Math.max(3, Math.round(S / 4.5));
+    for (let i = 0; i < per; i++) {
+      const t = -r + (i + 0.5) * S / per;
+      lp.push({ x: x + t, z: z - r - 0.12 }, { x: x + t, z: z + r + 0.12 }, { x: x - r - 0.12, z: z + t }, { x: x + r + 0.12, z: z + t });
+    }
+    repeat(root, _heliLightG, 0x2fbf55, lp, function () { return HELI_TOP; }, null, { emissive: 0x3dff72, ei: 0.9 });
+    if (o.sock) windsock(root, o.sock.x, o.sock.z, o.sock.yaw || 0);
+  }
+  function windsock(root, x, z, yaw) {
+    box(root, x, 0.15, z, 0.9, 0.3, 0.9, M.concreteD, { cast: false });
+    cyl(root, x, 0.3 + 2.9, z, 0.045, 0.075, 5.8, 0xd8dadc, 10);
+    col(x, z, 0.5, 0.5, 0, 6.0);
+    if (!_sockM) {
+      // five hard bands, orange / white, coloured per TRIANGLE so the band
+      // edges are crisp rather than smeared across a shared vertex
+      const g = new THREE.CylinderGeometry(0.34, 0.14, 2.4, 14, 5, true).toNonIndexed();
+      const p = g.attributes.position, colr = new Float32Array(p.count * 3);
+      for (let i = 0; i < p.count; i += 3) {
+        const ym = (p.getY(i) + p.getY(i + 1) + p.getY(i + 2)) / 3;
+        const band = Math.max(0, Math.min(4, Math.floor((1.2 - ym) / 2.4 * 5)));
+        const orange = band % 2 === 0;
+        for (let k = 0; k < 3; k++) {
+          colr[(i + k) * 3] = 0.95; colr[(i + k) * 3 + 1] = orange ? 0.42 : 0.94; colr[(i + k) * 3 + 2] = orange ? 0.12 : 0.92;
+        }
+      }
+      g.setAttribute("color", new THREE.BufferAttribute(colr, 3));
+      g.rotateZ(-Math.PI / 2);                    // the wide mouth to +x...
+      g.translate(-1.1, 0, 0);                    // ...and sat on the hoop at x 0.1; the tail runs to -x
+      g.computeVertexNormals();
+      _sockM = { g: g, m: new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }) };
+    }
+    const hoop = new THREE.Mesh(new THREE.TorusGeometry(0.35, 0.025, 6, 16), cm(0xd8dadc));
+    const sock = new THREE.Mesh(_sockM.g, _sockM.m);
+    const grp = new THREE.Group();
+    grp.position.set(x, 5.75, z); grp.rotation.y = yaw;
+    hoop.rotation.y = Math.PI / 2; hoop.position.x = 0.1; grp.add(hoop);
+    sock.rotation.z = 0.22; grp.add(sock);                  // a light breeze: the tail droops
+    root.add(grp);
   }
 
   /* --------------------------------------------------------------------
@@ -891,6 +1406,938 @@
   }
 
   /* ====================================================================
+     §1b  THE ESTATE KIT — land a rich man owns, drawn as a place.
+
+     OWNER (on the Executive Mansion): "the entire presidential lot is
+     horrible slop — the ground and the helicopter, all slop." It was: one
+     flat green plane 248 m square, a grey disc for a motor court, NO DRIVE
+     AT ALL between the gate and the house (the lamps stood in the grass), a
+     helipad that was an asphalt disc with a torus lying on it, thirty-two
+     hedge-coloured boxes for a garden, and a 3.4 m blank wall all round.
+
+     A head of state's residence is read from the gate inwards, so this kit
+     builds it in that order and every piece answers what it is FOR:
+       the perimeter    stone plinth + iron railing on piers (you can see the
+                        house from the road, you cannot walk in), a gate
+                        framed by lantern piers, sliding leaves parked open
+       the drive        asphalt between sett bands and granite kerbs, lit by
+                        lantern standards, under an allee of trees
+       the forecourt    granite setts with a darker border, round a kerbed
+                        lawn island and its fountain: the carriage ring the
+                        motorcade actually drives
+       the house        the civic shell at a real storey height, its wings,
+                        a covered colonnade from the office wing to the court
+       the grounds      clipped lawns (mown stripes), flank walks to a rear
+                        terrace, a central walk to a rondel and basin, two
+                        parterres of box hedge, beds and topiary
+       the working bits a raised, lit helipad with its windsock off to one
+                        side, a staff car park by the office wing, sentry
+                        lodges in the corners, flags on the court
+
+     ONE KIT, EVERY RICH MAN. Nothing here knows it is the President's. A row
+     hands `estate(c, spec)` a spec (footprint comes from the row's hx/hz,
+     everything else is metres in a GATE-UP frame: v runs from the house to
+     the gate, u across), and the tier fills whatever the spec leaves out.
+     A warlord's villa is a smaller house, a wall instead of railings, a
+     gravel court and watchtowers; a millionaire's is tier 3 and no helipad.
+     `CBZ.estateKit.register(row)` adds such a row before the world builds.
+
+     THE GROUND IS A HANDFUL OF DRAWS. Every flat piece of one surface on one
+     estate is one mesh (Sheet, above): textured materials never merge, so
+     the merge is done here. Kerbs, piers, lodges and plinths are plain
+     static boxes in the shared colour pool that core/batch.js folds away.
+     Repeats (railing panels, pickets' gilt, lamps, hedges, trees, urns) are
+     InstancedMesh. Nothing floats: every piece stands on y = 0, the pad, a
+     kerb or the slab it names, and the node check in the commit measures it.
+     ==================================================================== */
+  const EST = {
+    iron: 0x1c1f23, gilt: 0xb99347, kerb: 0xc2beb3, hedge: 0x2d4a29, hedgeD: 0x274225,
+    topiary: 0x315530, urn: 0xcfc8b8, bark: 0x6b5a48,
+  };
+  // what a tier gets when its spec does not say
+  const EST_TIER = {
+    5: { perimeter: "railing", h: 3.4, gateW: 26, lodges: 4, flags: 2, lamps: true, allee: true },
+    4: { perimeter: "railing", h: 3.0, gateW: 24, lodges: 2, flags: 1, lamps: true, allee: true },
+    3: { perimeter: "wall", h: 2.8, gateW: 18, lodges: 0, flags: 0, lamps: true, allee: false },
+    2: { perimeter: "wall", h: 3.2, gateW: 16, lodges: 0, flags: 0, lamps: false, allee: false },
+    1: { perimeter: "fence", h: 3.0, gateW: 14, lodges: 0, flags: 0, lamps: false, allee: false },
+  };
+
+  /* THE FRAME. Local (u, v) with +v toward the gate. The four gate sides are
+     quarter turns of the same frame, so an axis-aligned local box is an
+     axis-aligned world box with its extents swapped on the quarter turns. */
+  function estateFrame(c, side) {
+    const R = c.rect, cx = c.cx, cz = c.cz;
+    const s = side == null ? 1 : side;
+    const rot = s === 3 ? Math.PI / 2 : s === 0 ? Math.PI : s === 2 ? -Math.PI / 2 : 0;
+    const swap = s === 2 || s === 3;
+    function p(u, v) {
+      if (s === 1) return { x: cx + u, z: cz + v };
+      if (s === 0) return { x: cx - u, z: cz - v };
+      if (s === 3) return { x: cx + v, z: cz - u };
+      return { x: cx - v, z: cz + u };
+    }
+    function sideOf(du, dv) {
+      const a = p(du, dv), dx = a.x - cx, dz = a.z - cz;
+      if (Math.abs(dz) >= Math.abs(dx)) return dz < 0 ? 0 : 1;
+      return dx < 0 ? 2 : 3;
+    }
+    const root = c.root;
+    return {
+      s: s, rot: rot, swap: swap, cx: cx, cz: cz, rect: R, root: root, p: p, sideOf: sideOf,
+      hu: swap ? (R.maxZ - R.minZ) / 2 : (R.maxX - R.minX) / 2,
+      hv: swap ? (R.maxX - R.minX) / 2 : (R.maxZ - R.minZ) / 2,
+      wr: function (u0, v0, u1, v1) {
+        const a = p(u0, v0), b = p(u1, v1);
+        return { minX: Math.min(a.x, b.x), maxX: Math.max(a.x, b.x), minZ: Math.min(a.z, b.z), maxZ: Math.max(a.z, b.z) };
+      },
+      box: function (u, y, v, wu, h, wv, hex, o) {
+        const q = p(u, v);
+        return box(root, q.x, y, q.z, swap ? wv : wu, h, swap ? wu : wv, hex, o);
+      },
+      col: function (u, v, wu, wv, y0, y1) {
+        const q = p(u, v);
+        return col(q.x, q.z, swap ? wv : wu, swap ? wu : wv, y0, y1);
+      },
+      plat: function (u, v, wu, wv, top) {
+        const q = p(u, v);
+        return plat(q.x, q.z, swap ? wv : wu, swap ? wu : wv, top);
+      },
+      // a local rect onto a sheet
+      fill: function (sh, u0, v0, u1, v1, y) { sh.rect(this.wr(u0, v0, u1, v1), y); },
+    };
+  }
+
+  // instanced repeats that need a per-instance yaw AND scale (railing panels,
+  // hedges, trees): items {x, y, z, ry, sx, sy, sz}
+  function instances(root, geo, mat, items, cast) {
+    if (!items.length) return null;
+    const im = new THREE.InstancedMesh(geo, mat, items.length);
+    im.castShadow = cast !== false; im.receiveShadow = true;
+    const d = new THREE.Object3D();
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      d.position.set(it.x, it.y || 0, it.z);
+      d.rotation.set(0, it.ry || 0, 0);
+      d.scale.set(it.sx || 1, it.sy || 1, it.sz || 1);
+      d.updateMatrix(); im.setMatrixAt(i, d.matrix);
+    }
+    im.instanceMatrix.needsUpdate = true;
+    im.computeBoundingSphere && im.computeBoundingSphere();
+    root.add(im);
+    return im;
+  }
+
+  /* ---- THE RAILING ----------------------------------------------------- */
+  const _railG = {};
+  function railGeos(H) {
+    const k = H.toFixed(2);
+    if (_railG[k]) return _railG[k];
+    const L = 2.0, n = 14, pitch = L / n, iron = [], gold = [];
+    for (let i = 0; i < n; i++) {
+      const x = -L / 2 + (i + 0.5) * pitch;
+      const g = new THREE.BoxGeometry(0.026, H - 0.14, 0.026); g.translate(x, (H - 0.14) / 2, 0); iron.push(g);
+      const f = new THREE.ConeGeometry(0.036, 0.14, 4); f.translate(x, H - 0.07, 0); gold.push(f);
+    }
+    for (const y of [0.1, H - 0.36, H - 0.46]) {
+      const g = new THREE.BoxGeometry(L, 0.045, 0.042); g.translate(0, y, 0); iron.push(g);
+    }
+    return (_railG[k] = { iron: mergeGeos(iron), gold: mergeGeos(gold) });
+  }
+  let _pierG = null;
+  function pierGeos() {
+    if (_pierG) return _pierG;
+    const cap = mergeGeos([
+      (function () { const g = new THREE.BoxGeometry(1.04, 0.16, 1.04); g.translate(0, 0.08, 0); return g; })(),
+      (function () { const g = new THREE.BoxGeometry(0.5, 0.14, 0.5); g.translate(0, 0.23, 0); return g; })(),
+      (function () { const g = new THREE.SphereGeometry(0.2, 12, 8); g.translate(0, 0.49, 0); return g; })(),
+    ]);
+    return (_pierG = { cap: cap });
+  }
+  // perimeter with a gate gap on the frame's gate edge; returns the gate
+  // piers' world points. Plinth and piers are masonry boxes (batched), the
+  // railing two instanced draws for the whole estate.
+  function railingPerimeter(F, o) {
+    const R = F.rect, root = F.root;
+    const h = o.h, plH = o.plinth || 0.9, T = 0.7, gw = o.gateW;
+    const g = F.p(0, F.hv);
+    const edges = [
+      [R.minX, R.minZ, R.maxX, R.minZ, 0], [R.minX, R.maxZ, R.maxX, R.maxZ, 1],
+      [R.minX, R.minZ, R.minX, R.maxZ, 2], [R.maxX, R.minZ, R.maxX, R.maxZ, 3],
+    ];
+    const piers = [], panels = [], seen = Object.create(null), gatePts = [];
+    const railH = h - plH - 0.12;
+    function pierAt(x, z) {
+      const k = Math.round(x * 10) + ":" + Math.round(z * 10);
+      if (seen[k]) return; seen[k] = true;
+      piers.push({ x: x, z: z });
+    }
+    for (const e of edges) {
+      const horiz = e[4] < 2, a = horiz ? e[0] : e[1], b = horiz ? e[2] : e[3], fixed = horiz ? e[1] : e[0];
+      const gapC = horiz ? g.x : g.z;
+      const gated = e[4] === F.s && gw > 0;
+      const spans = gated ? [[a, gapC - gw / 2, 1], [gapC + gw / 2, b, 0]] : [[a, b, -1]];
+      for (const sp of spans) {
+        let s0 = sp[0], s1 = sp[1];
+        if (s1 - s0 < 1.0) continue;
+        const mid = (s0 + s1) / 2, len = s1 - s0;
+        const x = horiz ? mid : fixed, z = horiz ? fixed : mid;
+        box(root, x, plH / 2, z, horiz ? len : T, plH, horiz ? T : len, M.stoneD);
+        box(root, x, plH + 0.06, z, horiz ? len + 0.1 : T + 0.16, 0.12, horiz ? T + 0.16 : len + 0.1, M.stone, { cast: false });
+        col(x, z, horiz ? len : T, horiz ? T : len, 0, h);
+        // the gate end of a span carries the big gate pier instead of a plain one
+        const gEnd = sp[2];
+        if (gEnd === 1) { const gp = horiz ? { x: s1 - 0.65, z: fixed } : { x: fixed, z: s1 - 0.65 }; gatePts.push(gp); s1 -= 1.3; }
+        if (gEnd === 0) { const gp = horiz ? { x: s0 + 0.65, z: fixed } : { x: fixed, z: s0 + 0.65 }; gatePts.push(gp); s0 += 1.3; }
+        const L2 = s1 - s0;
+        const nb = Math.max(1, Math.round(L2 / 8.4)), step = L2 / nb;
+        const stations = [];
+        for (let i = 0; i <= nb; i++) {
+          const t = s0 + i * step;
+          const atGate = (gEnd === 1 && i === nb) || (gEnd === 0 && i === 0);
+          if (!atGate) pierAt(horiz ? t : fixed, horiz ? fixed : t);
+          stations.push({ t: t, half: atGate ? 0 : 0.4 });
+        }
+        for (let i = 0; i < nb; i++) {
+          const b0 = stations[i].t + stations[i].half, b1 = stations[i + 1].t - stations[i + 1].half;
+          const bl = b1 - b0;
+          if (bl < 0.4) continue;
+          const k = Math.max(1, Math.round(bl / 2)), sc = bl / k / 2;
+          for (let j = 0; j < k; j++) {
+            const t = b0 + (j + 0.5) * bl / k;
+            panels.push({ x: horiz ? t : fixed, y: plH + 0.12, z: horiz ? fixed : t, ry: horiz ? 0 : Math.PI / 2, sx: sc });
+          }
+        }
+      }
+    }
+    const G = railGeos(railH), PG = pierGeos();
+    instances(root, G.iron, cm(EST.iron), panels);
+    instances(root, G.gold, cm(EST.gilt), panels, false);
+    const ph = h + 0.2;
+    repeat(root, bg(0.8, ph, 0.8), M.stoneD, piers, function () { return ph / 2; });
+    repeat(root, PG.cap, M.stone, piers, function () { return ph; });
+    for (let i = 0; i < piers.length; i++) col(piers[i].x, piers[i].z, 0.8, 0.8, 0, ph);
+    // THE GATE PIERS: rusticated, capped, a lantern on each
+    for (const gp of gatePts) {
+      const H = h + 1.0;
+      box(root, gp.x, H / 2, gp.z, 1.3, H, 1.3, M.stone);
+      for (let k = 1; k <= 4; k++) box(root, gp.x, k * (H / 5), gp.z, 1.36, 0.06, 1.36, M.stoneD, { cast: false });
+      box(root, gp.x, H + 0.1, gp.z, 1.6, 0.2, 1.6, M.stoneD);
+      box(root, gp.x, H + 0.3, gp.z, 0.6, 0.2, 0.6, M.stone);
+      const lg = lampGeos();
+      const lan = { x: gp.x, z: gp.z };
+      // just the lantern and its cap off the standard, sat on the pier
+      repeat(root, lg.glass, M.lampHead, [lan], function () { return H + 0.4 - 4.34; }, null, { emissive: M.lampHead, ei: 0.85 });
+      box(root, gp.x, H + 0.96, gp.z, 0.56, 0.12, 0.56, EST.iron, { cast: false });       // the lantern cap
+      col(gp.x, gp.z, 1.3, 1.3, 0, H);
+    }
+    return gatePts;
+  }
+  // chain-link and masonry keep the existing kit (perimeter()); this picks
+  function estatePerimeter(F, T) {
+    if (T.perimeter === "railing") return railingPerimeter(F, { h: T.h, gateW: T.gateW });
+    perimeter(F.root, F.rect, { style: T.perimeter === "fence" ? "fence" : "wall", h: T.h, thick: 0.6, hex: M.stoneD, gate: F.s, gateW: T.gateW });
+    return [];
+  }
+  // the gate leaves, SLID OPEN along the inside of the railing (a real
+  // compound gate runs on a track; the working barrier is the checkpoint)
+  function gateLeaves(F, gw, h) {
+    const G = railGeos(h - 0.3), items = [];
+    for (const sgn of [-1, 1]) {
+      const u0 = sgn * (gw / 2 + 1.5), u1 = sgn * (gw / 2 + 1.5 + gw / 2);
+      const k = Math.max(1, Math.round(Math.abs(u1 - u0) / 2)), sc = Math.abs(u1 - u0) / k / 2;
+      const v = F.hv - 1.1;
+      for (let j = 0; j < k; j++) {
+        const u = u0 + (u1 - u0) * (j + 0.5) / k, q = F.p(u, v);
+        items.push({ x: q.x, y: 0.12, z: q.z, ry: F.rot, sx: sc });
+      }
+      const um = (u0 + u1) / 2, len = Math.abs(u1 - u0);
+      F.box(um, 0.06, v, len + 0.2, 0.12, 0.18, 0x3a3e42, { cast: false });                 // the track
+      F.box(um, 0.12 + (h - 0.3) - 0.2, v, len, 0.12, 0.09, EST.iron);                      // head rail
+      F.box(u1 + sgn * 0.05, 0.12 + (h - 0.3) / 2, v, 0.12, h - 0.3, 0.12, EST.iron);        // stile
+      F.col(um, v, len, 0.3, 0, h - 0.2);
+    }
+    instances(F.root, G.iron, cm(EST.iron), items);
+    instances(F.root, G.gold, cm(EST.gilt), items, false);
+  }
+
+  /* ---- KERB, HEDGE, URN, TREE, TOPIARY ----------------------------------- */
+  // a granite kerb along a local segment (axis-aligned), 0.3 wide, 0.24 tall
+  function kerb(F, u0, v0, u1, v1) {
+    const alongU = Math.abs(u1 - u0) > Math.abs(v1 - v0);
+    const len = alongU ? Math.abs(u1 - u0) : Math.abs(v1 - v0);
+    if (len < 0.2) return;
+    F.box((u0 + u1) / 2, 0.12, (v0 + v1) / 2, alongU ? len : 0.3, 0.24, alongU ? 0.3 : len, EST.kerb, { cast: false });
+    // a kerb is ground you step up onto, not a wall: it joins the estate's
+    // height oracle at its top instead of taking a collider
+    if (F.eg) {
+      const r = alongU ? F.wr(Math.min(u0, u1), (v0 + v1) / 2 - 0.15, Math.max(u0, u1), (v0 + v1) / 2 + 0.15)
+                       : F.wr((u0 + u1) / 2 - 0.15, Math.min(v0, v1), (u0 + u1) / 2 + 0.15, Math.max(v0, v1));
+      r.y = 0.24; F.eg.rects.push(r);
+    }
+  }
+  // kerb a local rect's edges, leaving named openings: gaps = [{edge:"n"|"s"|"e"|"w", c, w}]
+  // n = +v (toward the gate), s = -v, e = +u, w = -u. `inset` puts the kerb just outside the rect.
+  function kerbRect(F, u0, v0, u1, v1, gaps, skip) {
+    const G = gaps || [], SK = skip || [];
+    const run = function (edge, a0, a1, fixed, alongU) {
+      if (SK.indexOf(edge) >= 0) return;
+      let cuts = G.filter(function (g) { return g.edge === edge; }).map(function (g) { return [g.c - g.w / 2, g.c + g.w / 2]; });
+      cuts.sort(function (p, q) { return p[0] - q[0]; });
+      let a = a0;
+      for (const ct of cuts) {
+        if (ct[0] > a) alongU ? kerb(F, a, fixed, ct[0], fixed) : kerb(F, fixed, a, fixed, ct[0]);
+        a = Math.max(a, ct[1]);
+      }
+      if (a < a1) alongU ? kerb(F, a, fixed, a1, fixed) : kerb(F, fixed, a, fixed, a1);
+    };
+    run("n", u0 - 0.3, u1 + 0.3, v1 + 0.15, true);
+    run("s", u0 - 0.3, u1 + 0.3, v0 - 0.15, true);
+    run("e", v0, v1, u1 + 0.15, false);
+    run("w", v0, v1, u0 - 0.15, false);
+  }
+  // a clipped hedge: a box whose top edges are rounded off (an extruded
+  // rounded profile), unit size, instanced with per-run length/height/depth
+  let _hedgeG = null;
+  function hedgeGeo() {
+    if (_hedgeG) return _hedgeG;
+    const sh = new THREE.Shape(), r = 0.16;
+    sh.moveTo(-0.5, 0); sh.lineTo(0.5, 0); sh.lineTo(0.5, 1 - r);
+    sh.quadraticCurveTo(0.5, 1, 0.5 - r, 1); sh.lineTo(-0.5 + r, 1);
+    sh.quadraticCurveTo(-0.5, 1, -0.5, 1 - r); sh.lineTo(-0.5, 0);
+    const g = new THREE.ExtrudeGeometry(sh, { depth: 1, bevelEnabled: false, curveSegments: 4 });
+    g.translate(0, 0, -0.5);
+    g.rotateY(Math.PI / 2);                 // the run is local +x, the profile across z
+    g.computeVertexNormals();
+    return (_hedgeG = g);
+  }
+  // hedge runs: list of {u0, v0, u1, v1, h, w} (axis-aligned); collected, then one draw
+  function hedgeRuns(F, runs, hex) {
+    const items = [];
+    for (const r of runs) {
+      const alongU = Math.abs(r.u1 - r.u0) >= Math.abs(r.v1 - r.v0);
+      const len = alongU ? Math.abs(r.u1 - r.u0) : Math.abs(r.v1 - r.v0);
+      if (len < 0.3) continue;
+      const q = F.p((r.u0 + r.u1) / 2, (r.v0 + r.v1) / 2);
+      items.push({ x: q.x, y: 0, z: q.z, ry: F.rot + (alongU ? 0 : Math.PI / 2), sx: len, sy: r.h, sz: r.w });
+      F.col((r.u0 + r.u1) / 2, (r.v0 + r.v1) / 2, alongU ? len : r.w, alongU ? r.w : len, 0, r.h);
+    }
+    instances(F.root, hedgeGeo(), cm(hex || EST.hedge), items);
+  }
+  let _urnG = null;
+  function urnGeos() {
+    if (_urnG) return _urnG;
+    const urn = mergeGeos([
+      (function () { const g = new THREE.BoxGeometry(0.8, 0.5, 0.8); g.translate(0, 0.25, 0); return g; })(),
+      (function () { const g = new THREE.BoxGeometry(0.9, 0.08, 0.9); g.translate(0, 0.54, 0); return g; })(),
+      lathe([[0, 0.58], [0.26, 0.58], [0.26, 0.64], [0.14, 0.72], [0.12, 0.84], [0.3, 0.94], [0.44, 1.12], [0.47, 1.3], [0.52, 1.34], [0.52, 1.4], [0.4, 1.4], [0, 1.36]], 18),
+    ]);
+    const shrub = new THREE.SphereGeometry(0.46, 12, 9); shrub.translate(0, 1.66, 0);
+    return (_urnG = { urn: urn, shrub: shrub });
+  }
+  function urns(F, pts) {
+    if (!pts.length) return;
+    const G = urnGeos(), W = pts.map(function (p) { return F.p(p[0], p[1]); });
+    repeat(F.root, G.urn, EST.urn, W, function () { return 0; });
+    repeat(F.root, G.shrub, EST.topiary, W, function () { return 0; });
+    for (const w of W) col(w.x, w.z, 0.8, 0.8, 0, 1.4);
+  }
+  function topiary(F, pts) {
+    if (!pts.length) return;
+    const g = new THREE.ConeGeometry(0.42, 1.5, 12); g.translate(0, 0.75, 0);
+    const W = pts.map(function (p) { return F.p(p[0], p[1]); });
+    repeat(F.root, g, EST.topiary, W, function () { return 0; });
+    for (const w of W) col(w.x, w.z, 0.6, 0.6, 0, 1.5);
+  }
+  // TREES from the shared vegetation kit (leaf-card crowns, painted bark) —
+  // the same trees the streets use, instanced, each with a trunk collider.
+  function trees(F, pts, big) {
+    if (!pts.length || !CBZ.treeTrunkGeo || !CBZ.treeCrownGeo) return 0;
+    const VK = CBZ.vegetationKit;
+    let trunk = null, crown = null;
+    try {
+      trunk = CBZ.treeTrunkGeo({ rTop: 0.14, rBase: 0.24, h: big ? 4.2 : 3.2, seg: 8, roots: 5, rise: 0.2, dip: 0.04, spread: 1.8, flare: 1.4, uvRepeat: 3, site: "estate" });
+      crown = CBZ.treeCrownGeo({ tiers: 3, r: big ? 2.9 : 2.1, h: big ? 5.6 : 4.2, seg: 8, taper: 0.72, site: "estate", leaf: !!VK, cards: 18 });
+    } catch (e) { return 0; }
+    if (!trunk || !crown) return 0;
+    const tm = VK ? VK.material("wood", 0x8c6a48) : cm(EST.bark);
+    const crm = VK ? VK.material("foliage", 0x5a8a45) : cm(0x3f6e38);
+    const ti = [], ci = [], base = big ? 3.6 : 2.7;
+    for (const p of pts) {
+      const q = F.p(p[0], p[1]);
+      const sc = 0.92 + h01(q.x, q.z, 0x7e5) * 0.22, ry = h01(q.x, q.z, 0x7e6) * 6.283;
+      ti.push({ x: q.x, y: 0, z: q.z, ry: ry, sx: sc, sy: sc, sz: sc });
+      ci.push({ x: q.x, y: base * sc, z: q.z, ry: ry, sx: sc, sy: sc, sz: sc });
+      col(q.x, q.z, 0.5, 0.5, 0, 3.0);
+    }
+    const a = instances(F.root, trunk, tm, ti);
+    const b = instances(F.root, crown, crm, ci);
+    if (VK && VK.depthMaterial && b) { const dm = VK.depthMaterial("foliage"); if (dm) b.customDepthMaterial = dm; }
+    return ti.length;
+  }
+
+  /* ---- THE FOUNTAIN ------------------------------------------------------
+     A basin with a moulded rim, a baluster pedestal, an upper dish and a jet.
+     The two water surfaces stay at y 0.59 (r 3.45) and 1.63 (r 1.15): the
+     regime dressing tints exactly those, and they are published on layout. */
+  let _fountG = null;
+  function fountain(root, x, z) {
+    if (!_fountG) {
+      _fountG = {
+        basin: lathe([[3.45, 0.62], [3.62, 0.62], [3.95, 0.58], [4.12, 0.5], [4.12, 0.12], [4.3, 0.06], [4.3, 0], [3.2, 0], [3.2, 0.5], [3.45, 0.5]], 40),
+        stem: lathe([[0, 0.5], [0.8, 0.5], [0.8, 0.62], [0.56, 0.72], [0.42, 0.9], [0.5, 1.15], [0.36, 1.36], [0.3, 1.48], [0, 1.48]], 24),
+        dish: lathe([[0, 1.48], [0.3, 1.48], [0.9, 1.52], [1.3, 1.6], [1.42, 1.7], [1.42, 1.74], [1.15, 1.72], [1.15, 1.64], [0, 1.64]], 32),
+        spout: lathe([[0, 1.63], [0.3, 1.63], [0.26, 1.8], [0.14, 2.1], [0.2, 2.34], [0.08, 2.46], [0, 2.52]], 16),
+      };
+    }
+    for (const k of ["basin", "stem", "dish", "spout"]) {
+      const m = new THREE.Mesh(_fountG[k], cm(k === "basin" ? M.stone : k === "dish" ? M.marble : M.stoneD));
+      m.position.set(x, 0, z); m.castShadow = true; m.receiveShadow = true;
+      m.matrixAutoUpdate = false; m.updateMatrix(); root.add(m);
+    }
+    disc(root, x, z, 3.45, M.pool, 0.59, 36);
+    disc(root, x, z, 1.15, M.pool, 1.63, 24);
+    for (const q of [[-0.7, 0], [0.7, 0], [0, -0.7], [0, 0.7]])
+      cyl(root, x + q[0], 1.95, z + q[1], 0.04, 0.07, 0.8, 0xbfe3ee, 7);
+    col(x, z, 8.4, 8.4, 0, 0.62);
+    return { x: x, z: z, pools: [{ y: 0.59, r: 3.45 }, { y: 1.63, r: 1.15 }] };
+  }
+
+  /* ---- THE COLONNADE: a covered walk, columns both sides, flat roof ----- */
+  let _colG = null;
+  function colonnade(F, a, b, w) {
+    if (!_colG) _colG = lathe([[0, 0], [0.34, 0], [0.34, 0.14], [0.26, 0.24], [0.22, 0.32], [0.2, 2.9], [0.24, 3.0], [0.3, 3.12], [0.34, 3.2], [0, 3.2]], 16);
+    const alongU = Math.abs(b[0] - a[0]) >= Math.abs(b[1] - a[1]);
+    const len = alongU ? Math.abs(b[0] - a[0]) : Math.abs(b[1] - a[1]);
+    const n = Math.max(1, Math.round(len / 3.2)), pts = [];
+    for (let i = 0; i <= n; i++) {
+      const t = i / n, u = a[0] + (b[0] - a[0]) * t, v = a[1] + (b[1] - a[1]) * t;
+      for (const s of [-1, 1]) {
+        const q = F.p(alongU ? u : u + s * (w / 2 - 0.35), alongU ? v + s * (w / 2 - 0.35) : v);
+        pts.push(q);
+      }
+    }
+    repeat(F.root, _colG, M.marble, pts, function () { return 0; });
+    for (const q of pts) col(q.x, q.z, 0.6, 0.6, 0, 3.2);
+    const um = (a[0] + b[0]) / 2, vm = (a[1] + b[1]) / 2;
+    F.box(um, 3.36, vm, alongU ? len + 0.8 : w + 0.2, 0.32, alongU ? w + 0.2 : len + 0.8, M.stone);          // architrave + roof
+    F.box(um, 3.6, vm, alongU ? len + 1.1 : w + 0.5, 0.16, alongU ? w + 0.5 : len + 1.1, M.stoneD, { cast: false }); // cornice
+  }
+
+  /* ---- A SENTRY LODGE -------------------------------------------------- */
+  function sentry(F, u, v, faceU, faceV) {
+    const q = F.p(u, v), f = F.p(faceU, faceV);
+    const n = { x: Math.sign(Math.round(f.x - F.cx)), z: Math.sign(Math.round(f.z - F.cz)) };
+    if (n.x && n.z) n.z = 0;
+    lodge(F.root, q.x, q.z, 2.0, 2.0, 2.6, M.stone, n.x || n.z ? n : { x: 0, z: 1 });
+    col(q.x, q.z, 2.0, 2.0, 0, 2.6);
+  }
+
+  /* ====================================================================
+     estate(c, spec) — the whole estate from one spec. Returns
+     { gate, main, wings, layout }: `gate` and `main` are the registry's
+     { gate, seat }, `layout` is published on the site for every consumer
+     that hangs things on this ground (motorcade, regime dressing, balcony,
+     situation room, helicopter).
+     ==================================================================== */
+  function estate(c, spec) {
+    const root = c.root;
+    const T = Object.assign({}, EST_TIER[spec.tier || 3] || EST_TIER[3], spec.security || {});
+    const F = estateFrame(c, spec.gateSide != null ? spec.gateSide : ((c.site && c.site.def && c.site.def.gateSide != null) ? c.site.def.gateSide : 1));
+    const hu = F.hu, hv = F.hv;
+    const SH = {};
+    const sheet = function (k) { return SH[k] || (SH[k] = new Sheet(k)); };
+    // THE GROUND YOU STAND ON IS THE GROUND YOU SEE. Every drawn surface
+    // enters this estate's height record at the height it is drawn, and the
+    // one provider below (§1c) answers CBZ.cityGroundHeightAt from it — the
+    // query the player, the peds, the cars and the projectiles all read.
+    const EG = { rect: c.rect, base: YG, rects: [], discs: [] };
+    ESTATE_GROUND.push(EG);
+    F.eg = EG;
+    const hard = function (k, u0, v0, u1, v1, y) {
+      F.fill(sheet(k), u0, v0, u1, v1, y);
+      const r = F.wr(Math.min(u0, u1), Math.min(v0, v1), Math.max(u0, u1), Math.max(v0, v1));
+      r.y = y; EG.rects.push(r);
+    };
+    const layout = { frame: { side: F.s, rot: F.rot }, tier: spec.tier || 3 };
+
+    // ---- THE GROUND ------------------------------------------------------
+    const padM = pad(root, c.rect, M.lawn, spec.name || (c.site && c.site.id) || "estate", "lawn");
+    layout.pad = padM ? padM.name : null;
+    // clipped lawn: mown stripes running from the house to the gate
+    if (spec.stripes !== false) {
+      const SW = 6.0;
+      for (let u = -hu, i = 0; u < hu - 0.5; u += SW, i++) {
+        if (i % 2) F.fill(sheet("lawnB"), u, -hv + 0.6, Math.min(hu - 0.6, u + SW), hv - 0.6, YG);
+      }
+    }
+
+    // ---- THE HOUSE -------------------------------------------------------
+    const H = spec.house;
+    const hp = F.p(H.u || 0, H.v);
+    const front = F.sideOf(0, 1);
+    const main = civic(root, hp.x, hp.z, F.swap ? H.d : H.w, F.swap ? H.w : H.d, H.storeys, H.hex || M.marble, front,
+      H.civic || null, H.name || "Residence", H.fh ? { fh: H.fh } : null);
+    const facadeV = H.v + H.d / 2;
+    const perronD = H.perron == null ? 9 : H.perron;
+    if (perronD > 0) {
+      const fp = F.p(H.u || 0, facadeV);
+      const axis = F.swap ? "x" : undefined, dir = (F.s === 1 || F.s === 3) ? 1 : -1;
+      perron(root, fp.x, fp.z, H.w, perronD, M.stone, dir, axis);
+    }
+    layout.house = { u: H.u || 0, v: H.v, w: H.w, d: H.d, facadeV: facadeV, facade: F.p(H.u || 0, facadeV), perronD: perronD };
+
+    // ---- THE WINGS -------------------------------------------------------
+    const wings = [];
+    for (const W of (spec.wings || [])) {
+      const wp = F.p(W.u, W.v);
+      const toHouse = Math.sign((H.u || 0) - W.u) || 1;
+      const side = W.face === "front" ? front : F.sideOf(toHouse, 0);
+      let b = null;
+      if (W.civic) b = civic(root, wp.x, wp.z, F.swap ? W.d : W.w, F.swap ? W.w : W.d, W.storeys, W.hex || M.stone, side, W.civic, W.name || null, W.fh ? { fh: W.fh } : null);
+      else {
+        const raw = block(root, wp.x, wp.z, F.swap ? W.d : W.w, F.swap ? W.w : W.d, W.storeys, W.hex || M.stoneD, side, Object.assign({ facade: "office" }, W.opts || {}, W.fh ? { fh: W.fh } : {}));
+        b = raw ? { b: raw } : null;
+      }
+      wings.push(b);
+      // the covered walk from the wing's door to the house flank path
+      if (W.colonnade && b) {
+        const doorU = W.u + toHouse * W.w / 2, cv = W.v;
+        const nearU = (H.u || 0) - toHouse * (H.w / 2 + 2.0);
+        colonnade(F, [doorU + toHouse * 0.4, cv], [nearU, cv], 3.6);
+        hard("sett", Math.min(doorU, nearU), cv - 1.8, Math.max(doorU, nearU), cv + 1.8, YS);
+      }
+    }
+
+    // ---- THE FORECOURT -----------------------------------------------------
+    const FC = Object.assign({ v0: facadeV + perronD - 0.2, v1: facadeV + perronD + 55, hw: H.w / 2 + 4, island: 13, fountain: true, band: 0.9 }, spec.forecourt || {});
+    const islandV = FC.islandV != null ? FC.islandV : (FC.v0 + FC.v1) / 2 - 1.5;
+    const ic = F.p(0, islandV);
+    const fieldR = F.wr(-FC.hw + FC.band, FC.v0, FC.hw - FC.band, FC.v1 - FC.band);
+    sheet("sett").rectHole(fieldR, ic.x, ic.z, FC.island, YS, 72);
+    { const r = F.wr(-FC.hw, FC.v0, FC.hw, FC.v1); r.y = YS; EG.rects.push(r); }
+    EG.discs.push({ x: ic.x, z: ic.z, r: FC.island, y: 0.24, r0: FC.island - 0.32, y0: 0.17 });
+    // the darker border band on the three open sides
+    hard("settD", -FC.hw, FC.v0, -FC.hw + FC.band, FC.v1, YS);
+    hard("settD", FC.hw - FC.band, FC.v0, FC.hw, FC.v1, YS);
+    hard("settD", -FC.hw + FC.band, FC.v1 - FC.band, FC.hw - FC.band, FC.v1, YS);
+    // the island: a stone kerb ring, a raised lawn, a ring of bedding, the fountain
+    {
+      const ringOuter = new THREE.CylinderGeometry(FC.island, FC.island, 0.24, 64, 1, true); ringOuter.translate(0, 0.12, 0);
+      const ringTop = new THREE.RingGeometry(FC.island - 0.32, FC.island, 64, 1); ringTop.rotateX(-Math.PI / 2); ringTop.translate(0, 0.24, 0);
+      const ringIn = new THREE.CylinderGeometry(FC.island - 0.32, FC.island - 0.32, 0.08, 64, 1, true); ringIn.translate(0, 0.2, 0);
+      const km = new THREE.Mesh(mergeGeos([ringOuter, ringTop, ringIn]), cm(EST.kerb));
+      km.material = cm(EST.kerb); km.position.set(ic.x, 0, ic.z); km.receiveShadow = true; km.castShadow = false;
+      km.matrixAutoUpdate = false; km.updateMatrix(); root.add(km);
+      sheet("lawn").disc(ic.x, ic.z, FC.island - 0.3, 0.17, 64);
+      if (FC.island > 8) {
+        sheet("bed").ring(ic.x, ic.z, 4.9, 6.3, 0.2, 56);
+        EG.discs.push({ x: ic.x, z: ic.z, r: 6.3, y: 0.2, r0: 4.9, y0: 0.17 });
+      }
+      layout.fountain = FC.fountain ? fountain(root, ic.x, ic.z) : null;
+      if (!FC.fountain) col(ic.x, ic.z, FC.island * 1.4, FC.island * 1.4, 0, 0.24);
+    }
+    layout.court = { center: ic, r: FC.island, rect: F.wr(-FC.hw, FC.v0, FC.hw, FC.v1), v0: FC.v0, v1: FC.v1, hw: FC.hw };
+    // a garage wing's doors open onto a real apron that runs to the court
+    const aprons = [];
+    for (const W of (spec.wings || [])) {
+      if (!W.apron) continue;
+      const toHouse = Math.sign((H.u || 0) - W.u) || 1;
+      const doorU = W.u + toHouse * W.w / 2, edgeU = toHouse > 0 ? -FC.hw : FC.hw;
+      const half = Math.min(W.d / 2 - 0.5, 4.0);
+      hard("asphalt", Math.min(doorU, edgeU), W.v - half, Math.max(doorU, edgeU), W.v + half, YS);
+      kerb(F, Math.min(doorU, edgeU), W.v + half + 0.15, Math.max(doorU, edgeU), W.v + half + 0.15);
+      kerb(F, Math.min(doorU, edgeU), W.v - half - 0.15, Math.max(doorU, edgeU), W.v - half - 0.15);
+      aprons.push({ edge: toHouse > 0 ? "w" : "e", c: W.v, w: half * 2 + 0.1 });
+    }
+
+    // ---- THE DRIVE ---------------------------------------------------------
+    const DW = spec.driveW || 11;
+    const dv0 = FC.v1, dv1 = hv - 0.4;
+    hard("asphalt", -DW / 2, dv0, DW / 2, dv1, YS);
+    for (const s of [-1, 1]) hard("settD", s > 0 ? DW / 2 : -DW / 2 - 0.45, dv0, s > 0 ? DW / 2 + 0.45 : -DW / 2, dv1 - 9.5, YS);
+    const gw = T.gateW;
+    // the gate apron: the drive opens out to the gate, the pedestrian lane
+    // (east, where the checkpoint's walk-through arch stands) is setts
+    const ped = spec.pedLane || [DW / 2 + 1.0, Math.min(gw / 2 - 0.6, DW / 2 + 7.0)];
+    hard("asphalt", -Math.min(gw / 2 - 0.6, DW / 2 + 0.6), hv - 9.5, ped[0], dv1, YS);
+    hard("sett", ped[0], hv - 9.5, ped[1], dv1, YS);
+    const footU = [ped[0] + 1.6, ped[0] + 3.8];
+    hard("sett", footU[0], dv0, footU[1], hv - 9.5, YS);
+    // kerbs: along both drive edges, stopping at the apron; the forecourt's
+    // front kerb leaves the drive mouth and the footpath open
+    for (const s of [-1, 1]) kerb(F, s * (DW / 2 + 0.6), dv0 + 0.2, s * (DW / 2 + 0.6), hv - 9.6);
+    kerb(F, footU[1] + 0.15, dv0 + 0.2, footU[1] + 0.15, hv - 9.6);
+    layout.drive = { a: F.p(0, dv0), b: F.p(0, dv1), w: DW, lane: [F.p(-DW / 4, 0), F.p(DW / 4, 0)] };
+
+    // ---- FLANK WALKS, REAR TERRACE, CENTRAL WALK, RONDEL --------------------
+    const backV = H.v - H.d / 2;
+    const flank0 = H.w / 2 + 1.2, flank1 = H.w / 2 + 4.0;
+    for (const s of [-1, 1]) hard("sett", s > 0 ? flank0 : -flank1, backV, s > 0 ? flank1 : -flank0, FC.v0 + 0.01, YS);
+    hard("flag", -flank1, backV - 7, flank1, backV, YS);
+    const flankC = (flank0 + flank1) / 2, flankW = flank1 - flank0 + 0.1;
+    kerbRect(F, -flank1, backV - 7, flank1, backV, [{ edge: "s", c: 0, w: 5.2 }, { edge: "s", c: -flankC, w: flankW }, { edge: "s", c: flankC, w: flankW }], ["n", "e", "w"]);
+    const rear = spec.rear || {};
+    const rondelV = rear.rondelV != null ? rear.rondelV : Math.max(-hv + 16, backV - 48);
+    // the rear walk and its rondel only where no parterre already is
+    const rearClear = (spec.parterres || []).every(function (P) {
+      return P.u - P.w / 2 > 8.6 || P.u + P.w / 2 < -8.6 || P.v - P.d / 2 > backV - 7 || P.v + P.d / 2 < rondelV - 8.6;
+    });
+    if (rearClear && rondelV < backV - 16) {
+      hard("gravel", -2.4, rondelV + 8, 2.4, backV - 7, YS);
+      const rc = F.p(0, rondelV);
+      sheet("gravel").disc(rc.x, rc.z, 8.2, YS, 48);
+      EG.discs.push({ x: rc.x, z: rc.z, r: 8.2, y: YS });
+      // a low round basin in the rondel, one stone ring and its water
+      const basin = new THREE.Mesh(lathe([[2.6, 0.5], [3.0, 0.5], [3.0, 0.05], [3.1, 0], [2.4, 0], [2.4, 0.42], [2.6, 0.42]], 36), cm(M.stone));
+      basin.position.set(rc.x, 0, rc.z); basin.matrixAutoUpdate = false; basin.updateMatrix(); root.add(basin);
+      disc(root, rc.x, rc.z, 2.45, M.pool, 0.38, 32);
+      col(rc.x, rc.z, 6.0, 6.0, 0, 0.5);
+      layout.rondel = rc;
+    }
+
+    // ---- PARTERRES -----------------------------------------------------------
+    const PT = spec.parterres || [];
+    const hedgeList = [], lowList = [], topi = [], urnPts = [];
+    for (const P of PT) {
+      const u0 = P.u - P.w / 2, u1 = P.u + P.w / 2, v0 = P.v - P.d / 2, v1 = P.v + P.d / 2;
+      hard("gravel", u0, v0, u1, v1, YS);
+      // the border hedge, opened at the middle of each side for the walks
+      const gap = 3.2;
+      hedgeList.push({ u0: u0, v0: v1, u1: P.u - gap / 2, v1: v1, h: 0.95, w: 0.8 }, { u0: P.u + gap / 2, v0: v1, u1: u1, v1: v1, h: 0.95, w: 0.8 });
+      hedgeList.push({ u0: u0, v0: v0, u1: P.u - gap / 2, v1: v0, h: 0.95, w: 0.8 }, { u0: P.u + gap / 2, v0: v0, u1: u1, v1: v0, h: 0.95, w: 0.8 });
+      hedgeList.push({ u0: u0, v0: v0 + 0.4, u1: u0, v1: P.v - gap / 2, h: 0.95, w: 0.8 }, { u0: u0, v0: P.v + gap / 2, u1: u0, v1: v1 - 0.4, h: 0.95, w: 0.8 });
+      hedgeList.push({ u0: u1, v0: v0 + 0.4, u1: u1, v1: P.v - gap / 2, h: 0.95, w: 0.8 }, { u0: u1, v0: P.v + gap / 2, u1: u1, v1: v1 - 0.4, h: 0.95, w: 0.8 });
+      // four beds, each edged in low box, cross walks between them
+      const bw = (P.w - 2.4 - 3.0) / 2, bd = (P.d - 2.4 - 3.0) / 2;
+      for (const su of [-1, 1]) for (const sv of [-1, 1]) {
+        const bu = P.u + su * (1.5 + bw / 2), bvc = P.v + sv * (1.5 + bd / 2);
+        const a0 = bu - bw / 2, a1 = bu + bw / 2, b0 = bvc - bd / 2, b1 = bvc + bd / 2;
+        hard("bed", a0 + 0.3, b0 + 0.3, a1 - 0.3, b1 - 0.3, YS + 0.04);
+        lowList.push({ u0: a0, v0: b0, u1: a1, v1: b0, h: 0.5, w: 0.45 }, { u0: a0, v0: b1, u1: a1, v1: b1, h: 0.5, w: 0.45 });
+        lowList.push({ u0: a0, v0: b0 + 0.22, u1: a0, v1: b1 - 0.22, h: 0.5, w: 0.45 }, { u0: a1, v0: b0 + 0.22, u1: a1, v1: b1 - 0.22, h: 0.5, w: 0.45 });
+        topi.push([P.u + su * 2.45, P.v + sv * 2.45]);       // a cone in each bed's inner corner
+      }
+      urnPts.push([P.u, P.v]);
+      // the walk from the house flank to this parterre's inner gap
+      const inner = P.u > 0 ? u0 : u1, fl = P.u > 0 ? flank1 : -flank1;
+      hard("gravel", Math.min(inner, fl), P.v - 1.3, Math.max(inner, fl), P.v + 1.3, YS);
+    }
+    // the flank walks carry on past the terrace to the parterres' cross walks
+    if (PT.length) {
+      let far = backV - 7;
+      for (const P of PT) far = Math.min(far, P.v - 1.3);
+      if (far < backV - 7) for (const s of [-1, 1]) hard("sett", s > 0 ? flank0 : -flank1, far, s > 0 ? flank1 : -flank0, backV - 7, YS);
+    }
+    hedgeRuns(F, hedgeList, EST.hedge);
+    hedgeRuns(F, lowList, EST.hedgeD);
+    topiary(F, topi);
+
+    // ---- THE HELIPAD ----------------------------------------------------------
+    if (spec.helipad) {
+      const HP = spec.helipad, hc = F.p(HP.u, HP.v);
+      const sock = F.p(HP.u + HP.r + 7, HP.v + HP.r + 3);
+      helipad(root, hc.x, hc.z, HP.r, { sock: { x: sock.x, z: sock.z, yaw: F.rot + 0.6 } });
+      { const r = { minX: hc.x - HP.r - 0.25, maxX: hc.x + HP.r + 0.25, minZ: hc.z - HP.r - 0.25, maxZ: hc.z + HP.r + 0.25, y: HELI_TOP }; EG.rects.push(r); }
+      // the walk from the court to the pad: along the court's side, then out
+      const s = Math.sign(HP.u) || 1, pv = Math.min(FC.v1 - 6, Math.max(FC.v0 + 6, HP.v));
+      hard("sett", s > 0 ? FC.hw : HP.u - 1.4, pv - 1.4, s > 0 ? HP.u + 1.4 : -FC.hw, pv + 1.4, YS);
+      const edgeV = HP.v > pv ? HP.v - HP.r - 0.6 : HP.v + HP.r + 0.6;
+      hard("sett", HP.u - 1.4, Math.min(pv, edgeV), HP.u + 1.4, Math.max(pv, edgeV), YS);
+      const hh = F.p(H.u || 0, H.v);
+      layout.helipad = { x: hc.x, z: hc.z, r: HP.r, top: HELI_TOP, yaw: Math.atan2(hh.x - hc.x, hh.z - hc.z), pathV: pv };
+    }
+
+    // ---- THE STAFF CAR PARK ------------------------------------------------------
+    if (spec.parking) {
+      const PK = spec.parking;
+      const u0 = PK.u - PK.w / 2, u1 = PK.u + PK.w / 2, v0 = PK.v - PK.d / 2, v1 = PK.v + PK.d / 2;
+      hard("asphalt", u0, v0, u1, v1, YS);
+      // the lane from the court's side into it
+      const s = Math.sign(PK.u) || -1, laneV = PK.v;
+      const cEdge = s < 0 ? -FC.hw : FC.hw, lEdge = s < 0 ? u1 : u0;
+      hard("asphalt", Math.min(cEdge, lEdge), laneV - 3.6, Math.max(cEdge, lEdge), laneV + 3.6, YS);
+      kerbRect(F, u0, v0, u1, v1, [{ edge: s < 0 ? "e" : "w", c: laneV, w: 7.4 }]);
+      kerb(F, Math.min(cEdge, lEdge), laneV + 3.75, Math.max(cEdge, lEdge), laneV + 3.75);
+      kerb(F, Math.min(cEdge, lEdge), laneV - 3.75, Math.max(cEdge, lEdge), laneV - 3.75);
+      // two rows of ULI stalls facing a 7.3 m aisle along u
+      const SWd = P_STALL_W, SD = P_STALL_D, AI = P_AISLE;
+      const n = Math.floor((PK.w - 4) / SWd), gu0 = PK.u - n * SWd / 2;
+      const rowV = [PK.v - AI / 2 - SD / 2, PK.v + AI / 2 + SD / 2];
+      const stripes = [], slots = [];
+      for (let r = 0; r < 2; r++) for (let i = 0; i <= n; i++) {
+        const q = F.p(gu0 + i * SWd, rowV[r]); stripes.push(q);
+        if (i < n) { const m = F.p(gu0 + (i + 0.5) * SWd, rowV[r]); slots.push({ x: m.x, z: m.z, heading: F.rot + (r ? Math.PI : 0) }); }
+      }
+      repeat(root, bg(0.14, 0.02, SD), M.paint, stripes, function () { return YM; }, function () { return F.rot; });
+      if (_curSite) _bays.push({ site: _curSite, slots: slots, stalls: slots.length });
+      layout.parking = { rect: F.wr(u0, v0, u1, v1), stalls: slots.length };
+    }
+
+    // ---- KERBS ROUND THE COURT (openings where anything joins it) ------------
+    {
+      const gaps = [{ edge: "n", c: 0, w: DW + 1.3 }, { edge: "n", c: (footU[0] + footU[1]) / 2, w: footU[1] - footU[0] + 0.1 }];
+      if (spec.parking) gaps.push({ edge: spec.parking.u < 0 ? "w" : "e", c: spec.parking.v, w: 7.4 });
+      for (const a of aprons) gaps.push(a);
+      if (layout.helipad) gaps.push({ edge: spec.helipad.u < 0 ? "w" : "e", c: layout.helipad.pathV, w: 2.9 });
+      kerbRect(F, -FC.hw, FC.v0 + 0.3, FC.hw, FC.v1, gaps, ["s"]);
+    }
+
+    // ---- THE PERIMETER, THE GATE, THE LODGES -----------------------------------
+    estatePerimeter(F, T);
+    if (T.perimeter === "railing") gateLeaves(F, T.gateW, T.h);
+    const gq = F.p(0, hv - 6);
+    if (spec.gatehouse !== false) {
+      // the parked boom arms pivot 11 m off the lane: only a gate wide enough
+      // to clear its own piers carries them; a narrow one is the booth alone
+      const boothOff = Math.min(8, gw / 2 - 1.9);
+      gatehouse(root, gq.x, gq.z, !F.swap, M.stone, { noArms: !!spec.checkpoint || gw < 23.5, booth: boothOff });
+      // where gatehouse() actually stood the booth, so a consumer never re-derives it
+      layout.gatehouse = { x: F.swap ? gq.x : gq.x - boothOff, z: F.swap ? gq.z - boothOff : gq.z, roofY: 3.26 };
+    }
+    const lodgeAt = [[hu - 4, -hv + 4], [-hu + 4, -hv + 4], [hu - 4, hv - 5], [-hu + 4, hv - 5]];
+    for (let i = 0; i < Math.min(T.lodges | 0, 4); i++) sentry(F, lodgeAt[i][0], lodgeAt[i][1], 0, Math.sign(lodgeAt[i][1]) * -1);
+    layout.lodges = lodgeAt.slice(0, Math.min(T.lodges | 0, 4)).map(function (q) { return F.p(q[0], q[1]); });
+
+    // ---- LIGHT, TREES, URNS, FLAGS -------------------------------------------------
+    if (T.lamps) {
+      const lp = [];
+      for (let v = dv0 + 6; v < hv - 12; v += 12) for (const s of [-1, 1]) lp.push(F.p(s * (DW / 2 + 1.7), v));
+      // round the court, clear of every opening a car or a walker uses
+      const open = [];
+      if (spec.parking) open.push({ s: Math.sign(spec.parking.u) || -1, v: spec.parking.v, w: 7.4 });
+      if (layout.helipad) open.push({ s: Math.sign(spec.helipad.u) || 1, v: layout.helipad.pathV, w: 2.9 });
+      for (let v = FC.v0 + 5; v < FC.v1 - 8; v += 12) for (const s of [-1, 1]) {
+        if (open.some(function (o) { return o.s === s && Math.abs(o.v - v) < o.w / 2 + 2.0; })) continue;
+        lp.push(F.p(s * (FC.hw - 1.3), v));
+      }
+      lampRow(root, lp);
+    }
+    const tp = [];
+    if (T.allee) for (let v = dv0 + 12; v < hv - 16; v += 12) for (const s of [-1, 1]) tp.push([s * (DW / 2 + 8.5), v]);
+    for (const t of (spec.trees || [])) tp.push(t);
+    layout.trees = trees(F, tp, true);
+    const up = [];
+    for (const s of [-1, 1]) { up.push([s * (FC.hw - 2.2), FC.v1 - 2.2]); up.push([s * (DW / 2 + 1.9), FC.v1 + 2.4]); }
+    urns(F, up.concat(urnPts));
+    const nf = T.flags | 0;
+    if (nf) for (let i = 0; i < Math.min(2, nf); i++) {
+      const s = i ? 1 : -1, q = F.p(s * (FC.hw - 5.5), FC.v1 - 3.0);
+      flagpole(root, q.x, q.z, 13);
+    }
+
+    // ---- EMIT THE GROUND ---------------------------------------------------------
+    for (const k in SH) SH[k].finish(root, "estate-" + ((c.site && c.site.id) || "x") + "-" + k);
+    layout.gate = F.p(0, hv);
+    layout.frameFn = F.p;
+    return { gate: layout.gate, main: main, wings: wings, layout: layout, F: F };
+  }
+
+  /* ====================================================================
+     §1c  THE ESTATES' GROUND, answered where everything asks.
+
+     OWNER: the lot "literally has no colliders". The height the world
+     reported inside a compound was the graded country, y 0, while the
+     drive, the court and the terrace were drawn 6-24 cm above it: feet in
+     the setts, tyres in the asphalt, a kerb you walked through. Every
+     estate files what it drew (above) and this ONE provider answers
+     CBZ.cityGroundHeightAt from it — the oracle world.js's groundHeightAt
+     already folds in, i.e. the floor physics.js, the peds, the car
+     suspension and the projectiles read. No second ground system.
+     ==================================================================== */
+  const ESTATE_GROUND = [];
+  let _egReg = false;
+  function estateGroundAt(x, z) {
+    let best = 0;
+    for (let i = 0; i < ESTATE_GROUND.length; i++) {
+      const E = ESTATE_GROUND[i], R = E.rect;
+      if (x < R.minX || x > R.maxX || z < R.minZ || z > R.maxZ) continue;
+      let h = E.base;
+      const rs = E.rects;
+      for (let k = 0; k < rs.length; k++) {
+        const r = rs[k];
+        if (r.y > h && x >= r.minX && x <= r.maxX && z >= r.minZ && z <= r.maxZ) h = r.y;
+      }
+      const ds = E.discs;
+      for (let k = 0; k < ds.length; k++) {
+        const d = ds[k], dd = Math.hypot(x - d.x, z - d.z);
+        if (dd > d.r) continue;
+        const y = (d.r0 != null && dd <= d.r0) ? d.y0 : d.y;
+        if (y > h) h = y;
+      }
+      if (h > best) best = h;
+    }
+    return best;
+  }
+  function registerEstateGround() {
+    if (_egReg || !CBZ.registerCityGroundHeight) return;
+    _egReg = true;
+    CBZ.registerCityGroundHeight(estateGroundAt, { owner: "govcomplex-estates" });
+  }
+  CBZ.estateGroundAt = estateGroundAt;
+
+  /* ====================================================================
+     §1d  THE GRAND STAIR — how a head of state goes upstairs.
+
+     The Mansion's only way to the family floor was the service core: a
+     boxed switchback in the back corner, the same one every office tower in
+     the city gets. A state entrance hall has a STAIR IN IT. This one is a
+     straight flight of 26 marble risers (0.17 m on a 0.46 m going: a 20
+     degree ceremonial pitch) along the west wall of the hall, rising toward
+     the back to a landing on the first floor that opens onto the service
+     core's own landing — so the two stairs meet on one floor.
+
+     Everything it stands on is the shared kit: CBZ.stairs.flight is the walk
+     surface (ramp + underside + AI link), CBZ.cityCarveShaft opens exactly
+     ONE slab (levels:[1]) and reserves the footprint so no program furnishes
+     the stairwell, CBZ.interiorPartition is the wall that closes the stair
+     hall off the family floor. The treads are a SOLID stepped mass (no
+     floating risers, nothing to see under), the balustrade is posts and a
+     rail on the open side, and that rail is solid, banded to the flight.
+
+     Authored for the shell this row builds (door on the +z face); any other
+     shell returns null and keeps the service core as its only stair.
+     ==================================================================== */
+  function grandStair(main, layout) {
+    const b = main && main.b;
+    if (!b || typeof b.lbox !== "function" || !CBZ.stairs || !CBZ.stairs.flight) return null;
+    const dn = b.localDoor;
+    if (!dn || !(dn.nz < -0.5) || !Array.isArray(b.floorTops) || b.floorTops.length < 3) return null;
+    const wt = b.wt != null ? b.wt : 0.4, ox = b.ox, oz = b.oz;
+    const xW = -b.w / 2 + wt;                 // inner face of the west wall
+    const x0 = xW + 0.5, W = 3.2, x1 = x0 + W, xc = (x0 + x1) / 2;
+    const zBot = 9.0, zTop = -3.0;            // it climbs toward the back
+    const y0 = b.floorTops[0], y1 = b.floorTops[1];
+    const xPart = x1 + 0.45;                  // the stair hall's wall on the first floor
+    // 1. open the first-floor slab over the flight (and only that slab)
+    if (CBZ.cityCarveShaft) {
+      CBZ.cityCarveShaft(b, ox + (xW + xPart - 0.1) / 2, oz + (zTop + zBot + 0.4) / 2,
+        (xPart - 0.1 - xW) / 2, (zBot + 0.4 - zTop) / 2, { levels: [1], reserve: true });
+    }
+    // ...and fix where the SERVICE core goes now, on the far (west) side of
+    // the plan, so the stair hall's wall can meet it. This is exactly the
+    // reservation elevators.js's cityStairCore makes when it plans a core
+    // itself; planning it here only decides the side first (both records —
+    // the shell and the lot's shallow copy — carry the same plan).
+    if (!b.stairPlan && CBZ.cityStairPlan) {
+      const P = CBZ.cityStairPlan(b, -1);
+      if (P) {
+        b.stairPlan = P;
+        if (b.shaftRects) b.shaftRects.push(P.rect);
+        if (b.keepRects) b.keepRects.push(P.mouth);
+        if (main.lot && main.lot.building) main.lot.building.stairPlan = P;
+      }
+    }
+    // 2. the walk surface
+    const fl = CBZ.stairs.flight({
+      bottom: { x: ox + xc, y: y0, z: oz + zBot }, top: { x: ox + xc, y: y1, z: oz + zTop },
+      width: W, overlap: 0.35, owner: b, plats: b.platforms || undefined, cols: b.colliders || undefined,
+      underside: true, kind: "stair",
+    });
+    // 3. the stair you see: a stepped marble mass with a lighter nosing and a
+    // runner up the middle
+    const n = Math.max(8, Math.round((y1 - y0) / 0.17));
+    const rise = (y1 - y0) / n, go = (zBot - zTop) / n;
+    const MARBLE = 0xe4e0d6, NOSE = 0xf1eee6, RUN = 0x7a2c2e, BRASS = 0xb99347;
+    for (let i = 1; i <= n; i++) {
+      const top = y0 + i * rise, zc = zBot - (i - 0.5) * go;
+      b.lbox(xc, top / 2, zc, W, top, go + 0.01, MARBLE, { cast: i === n });
+      b.lbox(xc, top - 0.012, zBot - (i - 1) * go - 0.03, W + 0.04, 0.03, 0.07, NOSE, { cast: false });
+      b.lbox(xc, top + 0.006, zc, 1.9, 0.014, go - 0.02, RUN, { cast: false });
+    }
+    // the wall string: a skirting that follows the flight against the panelling
+    // 4. the balustrade on the open (east) side: turned posts, a sloped rail,
+    //    newels at both ends
+    const railX = x1 - 0.1, RH = 0.95;
+    for (let i = 0; i < n; i++) {
+      const zz = zBot - (i + 0.5) * go, base = y0 + (i + 1) * rise;
+      b.lbox(railX, base + (RH - 0.05) / 2, zz, 0.06, RH - 0.05, 0.06, MARBLE, { cast: false });
+    }
+    for (const e of [[zBot + 0.1, y0], [zTop - 0.25, y1]]) {
+      b.lbox(railX, e[1] + 0.6, e[0], 0.3, 1.2, 0.3, MARBLE);
+      b.lbox(railX, e[1] + 1.25, e[0], 0.36, 0.1, 0.36, NOSE, { cast: false });
+    }
+    if (b.group) {
+      const len = Math.hypot(zBot - zTop, y1 - y0);
+      const rail = new THREE.Mesh(bg(0.1, 0.08, len + 0.2), cm(BRASS));
+      rail.position.set(railX, (y0 + y1) / 2 + RH + 0.02, (zBot + zTop) / 2);
+      rail.rotation.x = Math.atan2(y1 - y0, zBot - zTop);     // rises toward -z
+      rail.castShadow = false; rail.matrixAutoUpdate = false; rail.updateMatrix();
+      b.group.add(rail);
+    }
+    // the rail is SOLID: a banded collider per half metre of run holds a body
+    // on the flight and stops one walking off its open side
+    const segs = Math.ceil((zBot - zTop) / 0.5), railCols = [];
+    for (let i = 0; i < segs; i++) {
+      const za = zBot - i * (zBot - zTop) / segs, zb = zBot - (i + 1) * (zBot - zTop) / segs;
+      const ya = y0 + (y1 - y0) * (i / segs), yb = y0 + (y1 - y0) * ((i + 1) / segs);
+      const c = { minX: ox + x1 - 0.14, maxX: ox + x1 + 0.02, minZ: oz + zb, maxZ: oz + za, y0: ya + 0.1, y1: yb + RH + 0.05, ref: null };
+      CBZ.colliders.push(c); railCols.push(c);
+      if (b.colliders) b.colliders.push(c);
+    }
+    // 5. upstairs: a balustrade across the far end of the opening, and the
+    //    wall that makes the stair hall a room with one door onto the landing
+    b.lbox((xW + xPart - 0.1) / 2, y1 + RH / 2, zBot + 0.52, xPart - 0.1 - xW, RH, 0.22, MARBLE, { solid: true });
+    b.lbox((xW + xPart - 0.1) / 2, y1 + RH + 0.04, zBot + 0.52, xPart - 0.1 - xW + 0.1, 0.08, 0.3, NOSE, { cast: false });
+    const room1 = CBZ.interiorFloorRoom ? CBZ.interiorFloorRoom(b, 1) : null;
+    const landingZ = zTop - 2.2;
+    // it starts at the service core's front face: behind that the core's own
+    // shaft wall closes the stair hall
+    const core = b.stairPlan || null;
+    let zFrom = -b.d / 2 + wt;
+    if (core && core.rect && core.rect.x1 > xPart - 0.6 && core.rect.x0 < xPart) zFrom = core.rect.z1;
+    if (room1 && CBZ.interiorPartition) {
+      CBZ.interiorPartition(room1, { b: b, opts: {} }, { axis: "z", at: xPart, from: zFrom, to: b.d / 2 - wt, gap: landingZ, gapW: 2.6 });
+    } else {
+      const zs = [[zFrom, landingZ - 1.3], [landingZ + 1.3, b.d / 2 - wt]];
+      for (const q of zs) b.lbox(xPart, y1 + (b.FH - 0.3) / 2, (q[0] + q[1]) / 2, 0.2, b.FH - 0.3, q[1] - q[0], 0xd9d4c8, { solid: true, los: true });
+    }
+    // the first-floor programme furnishes the plate EAST of that wall
+    const trim = { x0: xPart + 0.15 };
+    b._roomTrim = { 1: trim };
+    if (main.lot && main.lot.building) main.lot.building._roomTrim = b._roomTrim;
+    const W2 = function (x, y, z) { return { x: ox + x, y: y, z: oz + z }; };
+    return {
+      bottom: W2(xc, y0, zBot), top: W2(xc, y1, zTop), landing: W2((xW + xPart) / 2, y1, landingZ),
+      width: W, risers: n, link: fl && fl.link ? fl.link.id : null, railColliders: railCols.length,
+    };
+  }
+
+  /* THE MANSION'S PUBLISHED FRAME. Four files hang things on this front and
+     ground — the balcony (president_public.js), the regime's banners
+     (president_regime.js), the Situation Room (presidency.js) and Executive
+     One (motorcade.js) — and each used to re-derive the numbers from a copy
+     of this file's constants in a comment. They read these instead. World
+     metres; the row's frame is gate-up on +z, so "front" is +z. */
+  function publishMansionLayout(site, E) {
+    const L = E.layout, main = E.main, b = main && main.b;
+    const o = b && b.civicOrder;
+    L.facadeZ = L.house.facade.z;
+    L.storeyH = b ? b.FH : null;
+    L.floorTops = b && b.floorTops ? b.floorTops.slice() : null;
+    L.roofY = b ? b.h : null;
+    if (o && o.horiz) {
+      const cols = o.cols.slice().sort(function (p, q) { return p - q; });
+      const mids = [];
+      for (let i = 0; i + 1 < cols.length; i++) {
+        if (cols[i] < 0 && cols[i + 1] > 0) continue;          // the door bay
+        mids.push((cols[i] + cols[i + 1]) / 2);
+      }
+      L.order = {
+        deck: o.deck, entY: o.entY, archUnder: o.archUnder, corniceTop: o.corniceTop, R: o.R,
+        colZ: b.oz + o.out * o.colN, colsX: cols.map(function (t) { return b.ox + t; }),
+        midsDX: mids,                                         // offsets from the centre line
+        doorHead: o.doorHead,
+      };
+    } else L.order = null;
+    // the Situation Room: the east bay at the back of the state floor
+    L.sitRoom = { minX: site.cx + 12.5, maxX: site.cx + 25.5, minZ: site.cz - 47.5, maxZ: site.cz - 34.5, wallH: b ? b.FH - 0.2 : 3.0 };
+    if (L.helipad) L.heli = { x: L.helipad.x, z: L.helipad.z, y: L.helipad.top, heading: Math.PI };
+    L.barrierZ = site.cz + 40;
+    return L;
+  }
+
+  /* ====================================================================
      §2  THE REGISTRY — footprint, silhouette, and WHO SITS AT THE TOP.
 
      Every entry answers three questions and nothing else:
@@ -1000,6 +2447,7 @@
     box(root, tx, 1.15, tz, 0.84, 0.66, 1.1, M.blank);                              // the tunnel
     box(root, tx, 1.15, tz, 0.86, 0.5, 0.9, M.dark, { cast: false });               // its mouth
     box(root, tx + 0.55, 1.2, tz - 1.1, 0.08, 0.4, 0.5, M.dark);                    // the operator's screen
+    box(root, tx + 0.55, 0.5, tz - 1.1, 0.1, 1.0, 0.1, M.steelD, { cast: false });   // ...on its stand
     col(tx, tz, 0.84, 2.8, 0, 1.5);
 
     // ---- the sentry kiosk just inside the pedestrian lane
@@ -1181,6 +2629,52 @@
     mayor: function () { return firstOffice("city", false); },
   };
 
+  /* THE TWO STATE RESIDENCES AS ESTATE SPECS (§1b). Gate-up frame, metres
+     from the site centre: v toward the gate, u across. Everything the kit is
+     not told, the tier decides. */
+  const MANSION_ESTATE = {
+    tier: 5, name: "execmansion", checkpoint: true,
+    // A real head-of-state house: 56 x 34 m on plan (the White House is
+    // 51 x 26), THREE storeys at 4.5 m (state rooms, the family floor, the
+    // private floor) under a colossal doric order and the dome: 13.5 m to
+    // the roof instead of the 6.4 m dollhouse two 3.2 m office storeys made.
+    house: {
+      v: -34, w: 56, d: 34, storeys: 3, fh: 4.5, hex: M.marble, name: "Executive Mansion", perron: 9,
+      civic: { kind: "mansion", crown: "dome", order: "doric", stone: true, monumental: true, externalPerron: true },
+    },
+    // the office wing, its door on the house side, a colonnade to the court
+    wings: [{
+      u: -58, v: -30, w: 34, d: 22, storeys: 2, fh: 4.2, hex: M.stone, name: "West Wing", colonnade: true,
+      civic: { kind: "federal", crown: "flat", order: "pilaster", stone: true, monumental: true },
+    }],
+    // the carriage court: the motorcade's ring (motorcade.js §3) runs at
+    // 22-26 m round the island at v 18 and stops at the steps at v -4.5
+    forecourt: { v0: -8.2, v1: 46, hw: 32, island: 13, islandV: 18 },
+    driveW: 11,
+    pedLane: [6.4, 12.4],                 // the checkpoint's walk-through lane (§2b)
+    helipad: { u: 74, v: 62, r: 12 },      // the east lawn, 42 m clear of the court
+    parking: { u: -72, v: 12, w: 50, d: 26 },
+    parterres: [{ u: -81, v: -66, w: 38, d: 26 }, { u: 81, v: -66, w: 38, d: 26 }],
+    rear: { rondelV: -104 },
+    // specimen trees on the lawns, none within 45 m of the helipad's approach
+    trees: [[-60, 70], [-92, 58], [-78, 100], [-108, 84], [-48, 104], [44, 100], [108, 106],
+      [-40, -100], [40, -100], [-110, -20], [110, -22], [-110, -100], [110, -100], [-104, -44], [60, -24], [100, 12]],
+  };
+  const GOVERNOR_ESTATE = {
+    tier: 4, name: "governor",
+    house: {
+      v: -26, w: 42, d: 28, storeys: 2, fh: 4.2, hex: M.stone, name: "Governor's Residence", perron: 7,
+      civic: { kind: "cityannex", crown: "clock", order: "pilaster", stone: true, monumental: true, externalPerron: true },
+    },
+    // the garage block, doors toward the house
+    wings: [{ u: -54, v: 2, w: 22, d: 16, storeys: 1, hex: M.stoneD, apron: true, opts: { facade: "office", garageGround: true } }],
+    forecourt: { v1: 40, hw: 25, island: 9 },
+    driveW: 9,
+    parterres: [{ u: -36, v: -62, w: 26, d: 20 }, { u: 36, v: -62, w: 26, d: 20 }],
+    rear: { rondelV: -74 },
+    trees: [[-60, 60], [60, 60], [-70, -20], [70, -20], [-40, 76], [40, 76]],
+  };
+
   // EVERY SILHOUETTE BELOW STAYS INSIDE ITS OWN HALF-EXTENTS. That is not a
   // style note: the whole reason this file exists is that a complex which
   // spills past its declared footprint is a complex that overlaps something,
@@ -1258,7 +2752,10 @@
       // "residence AND workplace", made literal: the house is a state entrance
       // hall under the family's floor, and the WEST WING is the work — a real
       // office over the ground floor's staff room, both laid out by roomPlan.
-      interiors: { main: ["statehall", "stateresidence"], aux: ["cabinetroom", "ovaloffice"] },
+      interiors: { main: ["statehall", "stateresidence", "room:bedroom"], aux: ["cabinetroom", "ovaloffice"] },
+      // the service stair takes the WEST back corner: the Situation Room
+      // (presidency.js) owns the east bay and the grand stair the west flank
+      stairSide: -1,
       // THE RESIDENCE HALF OF "residence AND workplace". Five words per job,
       // no coordinates — §5b derives every station from the rect, the gate
       // and the threshold this builder already published.
@@ -1271,63 +2768,21 @@
       ],
       build: function (c) {
         const R = c.rect, root = c.root, cx = c.cx, cz = c.cz;
-        pad(root, R, M.lawn, "execmansion");
-        perimeter(root, R, { style: "wall", h: 3.4, thick: 0.7, hex: M.stoneD, gate: 1, gateW: 24 });
-        gatehouse(root, cx, R.maxZ - 6, true, M.stone, { noArms: true });
-        const mansionSpec = {
-          kind: "mansion", crown: "dome", order: "doric", motto: "EXECUTIVE MANSION", stone: true,
-          monumental: true,       // landmark opt-in; ordinary masonry stays disabled
-          externalPerron: true,   // this builder's 9 m state stair remains authoritative
-        };
-        const main = civic(root, cx, cz - 34, 56, 34, 2, M.marble, 1, mansionSpec, "Executive Mansion");
+        const E = estate(c, MANSION_ESTATE);
+        const main = E.main, wing = E.wings[0];
         c.main = main;
-        // THE STYLOBATE IS AS WIDE AS THE ORDER. bldCivicOrder stands its
-        // eleven columns and two flagpoles on a 0.30 m deck across the whole
-        // 56 m front; a 30 m deck left the outer six columns and both poles
-        // on plinths floating over the lawn.
-        perron(root, cx, cz - 17, 56, 9, M.stone, 1);              // facade z -17, out to -8
-        // the WEST WING: the office half of "residence and workplace"
-        const wingSpec = { kind: "federal", crown: "flat", order: "pilaster", motto: "WEST WING", stone: true, monumental: true };
-        const wing = civic(root, cx - 58, cz - 30, 34, 22, 2, M.stone, 3, wingSpec, "West Wing");
-        // the motor court — a ring of paving round a fountain, which is what
-        // the front of a state residence actually is
-        disc(root, cx, cz + 18, 34, M.paving, YS, 28);
-        disc(root, cx, cz + 18, 9, M.lawn, YM, 20);
-        // A low, tiered state fountain: it terminates the arrival axis but
-        // never hides the Mansion behind a 3.8 m stone stump.
-        cyl(root, cx, 0.28, cz + 18, 3.8, 4.1, 0.56, M.stone, 20);
-        disc(root, cx, cz + 18, 3.45, M.pool, 0.59, 24);
-        cyl(root, cx, 0.88, cz + 18, 0.62, 0.78, 1.18, M.stoneD, 14);
-        cyl(root, cx, 1.52, cz + 18, 1.36, 1.55, 0.18, M.marble, 18);
-        disc(root, cx, cz + 18, 1.15, M.pool, 1.63, 20);
-        cyl(root, cx, 2.08, cz + 18, 0.28, 0.42, 1.10, M.stoneD, 12);
-        // four water arcs read as jets from the approach, while remaining
-        // low enough to preserve the ceremonial facade sightline.
-        for (const q of [[-0.7, 0], [0.7, 0], [0, -0.7], [0, 0.7]])
-          cyl(root, cx + q[0], 1.95, cz + 18 + q[1], 0.055, 0.075, 1.0, M.pool, 7);
-        col(cx, cz + 18, 8.2, 8.2, 0, 0.58);
-        // formal parterre gardens either flank of the house — instanced hedge,
-        // set back to z -78..-51 so the west wing (which reaches cz-19) is clear
-        const hedge = [];
-        for (let r = 0; r < 4; r++) for (let i = 0; i < 8; i++) {
-          hedge.push({ x: cx - 100 + i * 5.4, z: cz - 78 + r * 9 });   // x -100..-62
-          hedge.push({ x: cx + 62 + i * 5.4, z: cz - 78 + r * 9 });    // x +62..+100
-        }
-        repeat(root, bg(4.6, 1.5, 1.5), M.hedge, hedge, function () { return 0.75; });
-        // the lawn a helicopter lands on. Every real one has this.
-        helipad(root, cx + 74, cz + 62, 12);
-        // (no loose flagpole: the order's own pair stands on the stylobate)
-        const lamps = [];
-        for (let i = 0; i < 5; i++) { lamps.push({ x: cx - 16, z: cz + 58 + i * 11 }); lamps.push({ x: cx + 16, z: cz + 58 + i * 11 }); }
-        lampRow(root, lamps);
-        // THE SECRET SERVICE'S GROUND (§2b): the checkpoint at the gate, the
-        // counter-sniper stands on the roof, the wall walk. Geometry here;
-        // every body and every decision is protection.js's.
         if (c.site) {
+          c.site.layout = E.layout;
+          publishMansionLayout(c.site, E);
+          try { c.site.grandStair = grandStair(main, E.layout); }
+          catch (e) { console.error("[govcomplex] grand stair", e); }
+          // THE SECRET SERVICE'S GROUND (§2b): the checkpoint at the gate, the
+          // counter-sniper stands on the roof, the wall walk. Geometry here;
+          // every body and every decision is protection.js's.
           try { c.site.security = mansionSecurity(root, R, cx, cz, main, wing); }
           catch (e) { console.error("[govcomplex] mansion security", e); }
         }
-        return { gate: { x: cx, z: R.maxZ }, seat: main };
+        return { gate: E.gate, seat: main };
       },
     },
     /* ================================================================
@@ -1347,22 +2802,10 @@
         { job: "groundskeeper", at: "garden", outfit: 0x4f6a3a },
       ],
       build: function (c) {
-        const R = c.rect, root = c.root, cx = c.cx, cz = c.cz;
-        pad(root, R, M.lawn, "governor");
-        perimeter(root, R, { style: "wall", h: 3.0, thick: 0.6, hex: M.stoneD, gate: 1, gateW: 20 });
-        gatehouse(root, cx, R.maxZ - 6, true, M.stone);
-        const main = civic(root, cx, cz - 26, 42, 28, 2, M.stone, 1,
-          { kind: "cityannex", crown: "clock", order: "pilaster", motto: "GOVERNOR'S RESIDENCE", stone: true }, "Governor's Residence");
-        c.main = main;
-        perron(root, cx, cz - 12, 22, 7, M.stone, 1);              // facade z -12, out to -5
-        disc(root, cx, cz + 16, 24, M.paving, YS, 24);
-        disc(root, cx, cz + 16, 7, M.lawn, YM, 18);
-        block(root, cx - 54, cz + 2, 22, 16, 1, M.stoneD, 3, { facade: "office", garageGround: true });
-        const hedge = [];
-        for (let i = 0; i < 11; i++) { hedge.push({ x: cx - 56 + i * 5.2, z: cz - 62 }); hedge.push({ x: cx - 56 + i * 5.2, z: cz - 54 }); }
-        repeat(root, bg(4.4, 1.4, 1.4), M.hedge, hedge, function () { return 0.7; });
-        flagpole(root, cx + 28, cz - 2, 12);
-        return { gate: { x: cx, z: R.maxZ }, seat: main };
+        const E = estate(c, GOVERNOR_ESTATE);
+        c.main = E.main;
+        if (c.site) c.site.layout = E.layout;
+        return { gate: E.gate, seat: E.main };
       },
     },
     /* ================================================================
@@ -2125,6 +3568,52 @@
     },
   ];
 
+  /* CBZ.estateKit — AN ESTATE FOR ANY RICH MAN, IN ONE CALL.
+
+       CBZ.estateKit.register({
+         id: "villa-marchetti", name: "Villa Marchetti", subtitle: "Private Estate",
+         hx: 90, hz: 80,                       // footprint half-extents (m)
+         bearing: 120,                         // compass bearing to search along (optional)
+         principal: { key: null, tier: 3, org: "private", role: "Owner", wealth: 0.9, family: true },
+         household: [{ job: "housekeeper", at: "door" }, { job: "groundskeeper", at: "garden" }],
+         interiors: { main: ["room:lounge", "bosssuite"] },
+         estate: {                             // §1b; everything omitted, the tier decides
+           tier: 3,                            // 5 head of state .. 1 compound
+           house: { v: -22, w: 30, d: 20, storeys: 2, fh: 3.8, civic: { crown: "pediment", order: "ionic", stone: true, monumental: true, externalPerron: true } },
+           helipad: { u: 50, v: 40, r: 10 },   // or omit
+           security: { perimeter: "wall", lodges: 2 },
+         },
+       });
+
+     Call it at script load, before the world builds (landmass order 42): the
+     row joins the same placement search, land claim, road, staff and
+     interior passes as the ten seats of power, and its principal is seated
+     by power.js like every other. The Executive Mansion is this kit's tier-5
+     instance and the Governor's Residence its tier-4 one. */
+  CBZ.govComplexDefs = COMPLEXES;          // the registry rows, for probes and node checks
+  CBZ.estateKit = {
+    build: estate,
+    frame: estateFrame,
+    tiers: EST_TIER,
+    register: function (row) {
+      if (!row || !row.id || !row.estate) return null;
+      for (let i = 0; i < COMPLEXES.length; i++) if (COMPLEXES[i].id === row.id) return null;
+      let hsh = 0;
+      for (let i = 0; i < row.id.length; i++) hsh = (hsh * 31 + row.id.charCodeAt(i)) >>> 0;
+      const def = Object.assign({ hx: 90, hz: 80, bearing: hsh % 360, keepOut: "civ", gateSide: 1 }, row);
+      if (typeof def.build !== "function") {
+        def.build = function (c) {
+          const E = estate(c, def.estate);
+          c.main = E.main;
+          if (c.site) c.site.layout = E.layout;
+          return { gate: E.gate, seat: E.main };
+        };
+      }
+      COMPLEXES.push(def);
+      return def;
+    },
+  };
+
   /* ====================================================================
      §3  PLACEMENT — the no-overlap search.
      ==================================================================== */
@@ -2808,6 +4297,13 @@
     // of a room the lobby cannot reach (and is why the vault is carved before
     // anything is dressed rather than stamped over a finished floor).
     if (vault && vault.floor === k) room.x1 = vault.lobbyX1;
+    // a floor that gave part of its plate to something built INTO it (the
+    // Mansion's stair hall, §1d) hands its programme only the rest
+    const trim = bld._roomTrim && bld._roomTrim[k];
+    if (trim) {
+      if (trim.x0 != null) room.x0 = Math.max(room.x0, trim.x0);
+      if (trim.x1 != null) room.x1 = Math.min(room.x1, trim.x1);
+    }
     const rect = { x0: room.x0, x1: room.x1, z0: room.z0, z1: room.z1, y: room.y };
     const ctx = { b: bld, opts: { door: arriveOn(bld, k), inset: insetOn(bld, room) } };
     if (name.slice(0, 5) === "room:") {
@@ -2889,7 +4385,7 @@
     let n = 0;
     if (mainB && plan.main) {
       if (CFG.OCCUPY_STAIRS !== false && CBZ.cityStairCore) {
-        try { CBZ.cityStairCore(site.lot); } catch (e) {}
+        try { CBZ.cityStairCore(site.lot, site.def.stairSide ? { side: site.def.stairSide } : undefined); } catch (e) {}
       }
       // THE STRONGROOM IS RESERVED BEFORE ANYTHING IS FURNISHED and built after,
       // for the same reason the stair core is asked for first: the bay it takes
@@ -3462,7 +4958,8 @@
 
     // a rebuild re-runs this builder; start from an empty ledger so stale
     // records can never be counted by the audit or re-staffed by the tick.
-    SITES.length = 0; _bays.length = 0; _shells.length = 0;
+    SITES.length = 0; _bays.length = 0; _shells.length = 0; ESTATE_GROUND.length = 0;
+    registerEstateGround();
     // …and the same rule for the two ledgers this wave added: a stale flight or
     // a strongroom whose building left the scene must never be measured, and a
     // spliced-out door collider from the last world must never be spliced again.
@@ -3751,7 +5248,7 @@
           try {
             // heading 0 = nose down the bay, which is the axis the painted
             // stalls run on (stripes 5.49 m long in Z, 2.74 m apart in X)
-            const c = CBZ.cityMakeCar(s.x, s.z, 0, true, model, 0);
+            const c = CBZ.cityMakeCar(s.x, s.z, s.heading || 0, true, model, 0);
             if (c) { c.ai = false; c.v = 0; c.baseV = 0; c.road = null; c._govParked = true; _parked++; }
           } catch (e) { /* no vehicle path in this build — the stalls stay empty */ }
         }
