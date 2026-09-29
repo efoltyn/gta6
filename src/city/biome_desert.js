@@ -448,9 +448,15 @@
   // The two decks above are parse-time constants and therefore identical to
   // the bake and to every later query.
 
+  // the mesa term of the last in-basin desertHeightAt call: the tiled bake
+  // keeps it per grid point so the vertex colour never evaluates it twice
+  let _lastMesa = NaN;
   function desertHeightAt(x, z) {
+    _lastMesa = NaN;
     if (x < MINX || x > MAXX || z < MINZ || z > MAXZ) return 0;
-    let h = Math.max(desertDuneHeightAt(x, z), desertMesaHeightAt(x, z));
+    const mesa = desertMesaHeightAt(x, z);
+    _lastMesa = mesa;
+    let h = Math.max(desertDuneHeightAt(x, z), mesa);
 
     // Roads and settlements sit on broad graded benches, not on hovering
     // planes.  The terrain eases into every bench over tens of metres.
@@ -682,8 +688,8 @@
     // The colour of one erg vertex, given its world position, its height and
     // its surface normal. Identical maths in both bakes — only where `n` comes
     // from differs, and that is the whole point of (2) above.
-    function ergVertexColor(wx, wz, y, n, out) {
-      const mesaY = desertMesaHeightAt(wx, wz);
+    function ergVertexColor(wx, wz, y, n, out, mesaKnown) {
+      const mesaY = mesaKnown === mesaKnown && mesaKnown != null ? mesaKnown : desertMesaHeightAt(wx, wz);
       const light = Math.max(0, n.dot(ergSun)), slope = 1 - n.y;
       if (mesaY > 2.2) {
         out.copy(ergRed).lerp(ergRedDk, smooth01((slope - 0.08) / 0.5));
@@ -735,6 +741,7 @@
       const out = [];
       const hw = GSEG_X + 3, hh = GSEG_Z + 3;      // halo grid: one ring outside
       const H = new Float32Array(hw * hh);
+      const MG = new Float64Array(hw * hh);      // the mesa term at each grid point (NaN outside)
       for (let tj = 0; tj < ERG_TILES; tj++) {
         for (let ti = 0; ti < ERG_TILES; ti++) {
           const g0 = ti * GSEG_X, h0 = tj * GSEG_Z;        // this tile's origin in global cells
@@ -743,6 +750,7 @@
             const wz = MINZ + (h0 + b - 1) * STEP_Z;
             for (let a = 0; a < hw; a++) {
               H[b * hw + a] = desertHeightAt(MINX + (g0 + a - 1) * STEP_X, wz);
+              MG[b * hw + a] = _lastMesa;
             }
           }
           const geo = new THREE.PlaneGeometry(HX * 2 / ERG_TILES, HZ * 2 / ERG_TILES, GSEG_X, GSEG_Z);
@@ -764,7 +772,7 @@
                        -(H[hI + hw] - H[hI - hw]) / (2 * STEP_Z)).normalize();
               normals.setXYZ(i, ergN.x, ergN.y, ergN.z);
               ua.setXY(i, gi / GRID_X, 1 - gj / GRID_Z);
-              ergVertexColor(wx, wz, y, ergN, ergC);
+              ergVertexColor(wx, wz, y, ergN, ergC, MG[hI]);
               colors[i * 3] = ergC.r; colors[i * 3 + 1] = ergC.g; colors[i * 3 + 2] = ergC.b;
             }
           }
