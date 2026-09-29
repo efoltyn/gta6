@@ -183,7 +183,7 @@ body.full-map-open #speech, body.sim-view #speech{ display:none !important; }
 </div></div>
 
 <!-- ONE TAG for the engine. Everything this game draws, Gang City already draws. -->
-<script src="../src/core/studio.js?v=physpack2"></script>
+<script src="../src/core/studio.js?v=town0929"></script>
 <!-- the sea, the quays, the light and the smoke: this game's own scene layer -->
 <script src="bomb-survivor-scene.js?v=1"></script>
 <script>
@@ -276,7 +276,12 @@ let   TOWN_RECT = { minX: -180, maxX: 180, minZ: -880, maxZ: -520 };
 
 function inRect(r, x, z) { return x >= r.minX && x <= r.maxX && z >= r.minZ && z <= r.maxZ; }
 function groundAt(x, z) {
-  if (inRect(TOWN_RECT, x, z)) return 0.03;
+  if (inRect(TOWN_RECT, x, z)) {
+    // the town's streets are the street kit's cross-section (road, kerb,
+    // footway, lot pads): stand on what is drawn
+    const sy = CBZ.streetKit && CBZ.streetKit.heightAt ? CBZ.streetKit.heightAt(x, z) : null;
+    return sy != null ? Math.max(0.03, sy) : 0.03;
+  }
   if (inRect(BASE_RECT, x, z) || inRect(BASE_CW, x, z)) return 0.05;
   if (WANT_AIRPORT && (inRect(PORT_RECT, x, z) || inRect(PORT_CW, x, z))) return 0.05;
   return -2.2;
