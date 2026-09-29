@@ -770,6 +770,180 @@
     CBZ.cityWorkAnchors.length = 0;
   };
 
+  /* =====================================================================
+     CITY SLICES — the landmass half (core/slice.js has the whole story).
+
+     A slice boot skips every landmass builder whose drawn footprint misses
+     the slice's keep circle. Two things make that safe:
+       1. TERRAIN ALWAYS RUNS. A builder that registers a ground-height
+          oracle or draws a far-fogged surface shapes the horizon (the
+          continent plate reads every oracle), so it is never skipped.
+       2. DATA IS REPLAYED. A skipped builder's registrations (regions,
+          roads, water bodies, no-spawn zones, biome blends, frontier
+          records) are replayed from the manifest, so the continent's plate,
+          coast and relief, the map and the road graph are the full city's.
+     The footprint and the data are MEASURED by tools/city-slice-trace.mjs
+     (a full boot with ?sliceTrace=1 runs the recorder below) and written to
+     src/city/slice_manifest.js. A manifest for another seed is ignored and
+     every builder runs: slow, never wrong.
+     ===================================================================== */
+  const SLICE_CELL = 400;                         // footprint grid, metres
+  // three terrain builders push onto the list without addLandmass (no bootKey)
+  const bkey = function (b) { return b.bootKey || ("order:" + b.order); };
+  // passes that run OTHER builders' deferred work (roadrules' gap pass draws
+  // the queued kerb/rail runs of whoever queued them): never skipped
+  const SLICE_ALWAYS = new Set(["lm:roadrules.js#2"]);
+  const REPLAY_ARRAYS = ["regions", "roads", "waterBodies", "noSpawn", "frontierRoads", "frontierLandmarks"];
+
+  // A JSON-safe copy: plain numbers/strings/arrays/objects only. Drops
+  // functions, THREE objects and cycles. Depth-limited (road point lists sit
+  // at depth 2-3).
+  function sliceClone(v, depth, seen) {
+    if (v == null || typeof v === "number" || typeof v === "string" || typeof v === "boolean") {
+      return (typeof v === "number" && !Number.isFinite(v)) ? null : v;
+    }
+    if (typeof v !== "object" || depth > 5) return undefined;
+    if (v.isObject3D || v.isMaterial || v.isBufferGeometry || v.isTexture || v.isGeometry) return undefined;
+    if (seen.has(v)) return undefined;
+    seen.add(v);
+    if (Array.isArray(v) || ArrayBuffer.isView(v)) {
+      const out = [];
+      for (let i = 0; i < v.length; i++) { const c = sliceClone(v[i], depth + 1, seen); out.push(c === undefined ? null : c); }
+      seen.delete(v);
+      return out;
+    }
+    if (v.isVector3) { seen.delete(v); return { x: v.x, y: v.y, z: v.z }; }
+    if (v.isVector2) { seen.delete(v); return { x: v.x, y: v.y }; }
+    const o = {};
+    for (const k of Object.keys(v)) {
+      if (k === "_openCache" || k === "_qSeen") continue;       // live caches, not data
+      const c = sliceClone(v[k], depth + 1, seen); if (c !== undefined) o[k] = c;
+    }
+    seen.delete(v);
+    return o;
+  }
+
+  function slicePlan(list) {
+    const M = CBZ.SLICE_MANIFEST;
+    const seedOk = M && (M.seed == null || M.seed === (CBZ.WORLD_SEED != null ? CBZ.WORLD_SEED : (CBZ.CONFIG && CBZ.CONFIG.WORLD_SEED)));
+    const plan = { skip: new Set(), recs: {}, always: [], manifest: !!(M && seedOk) };
+    if (!plan.manifest) { console.warn("[slice] no manifest for this seed — every landmass builder runs (node tools/city-slice-trace.mjs)"); return plan; }
+    for (const b of list) {
+      const rec = M.builders[bkey(b)];
+      if (!rec) continue;                           // unknown builder: run it
+      if (rec.terrain || SLICE_ALWAYS.has(bkey(b))) { plan.always.push(bkey(b)); continue; }
+      // no drawn footprint = a logic/data pass (road rules, the water field,
+      // the store shelves): cheap, and other systems need it. Always runs.
+      if (!rec.cells.length && !rec.wide) continue;
+      let hit = false;
+      for (const c of rec.cells) {
+        const minX = c[0] * SLICE_CELL, minZ = c[1] * SLICE_CELL;
+        if (CBZ.sliceKeepsRect(minX, minX + SLICE_CELL, minZ, minZ + SLICE_CELL)) { hit = true; break; }
+      }
+      if (!hit) for (const r of (rec.data.regions || [])) {
+        if (r && CBZ.sliceKeepsRect(r.minX, r.maxX, r.minZ, r.maxZ)) { hit = true; break; }
+      }
+      if (!hit && rec.wide) hit = true;             // spans the map: run it, prune later
+      if (!hit) { plan.skip.add(bkey(b)); plan.recs[bkey(b)] = rec; }
+    }
+    return plan;
+  }
+
+  function sliceReplay(city, rec) {
+    const d = rec && rec.data; if (!d) return;
+    for (const r of (d.regions || [])) CBZ.registerCityRegion(city, Object.assign({}, r));
+    for (const w of (d.waterBodies || [])) CBZ.registerCityWaterBody(city, Object.assign({}, w));
+    for (const k of ["roads", "noSpawn", "frontierRoads", "frontierLandmarks"]) {
+      if (!d[k] || !d[k].length) continue;
+      const arr = (city[k] = city[k] || []);
+      for (const x of d[k]) arr.push(Object.assign({}, x));
+    }
+    for (const bl of (d.biomeBlends || [])) CBZ._biomeBlendSpecs.push(Object.assign({}, bl));
+  }
+
+  /* THE RECORDER (?sliceTrace=1, tools/city-slice-trace.mjs only). After
+     every builder: which objects are new under city.root and the scene,
+     where they are (400 m cells), whether any of it is terrain, and the
+     plain data it registered. Costs a full tree walk per builder — a trace
+     boot is slow on purpose; a normal boot never runs this. */
+  function sliceTraceBegin(city) {
+    const THREE = window.THREE;
+    const seen = new WeakSet();
+    const out = (CBZ.SLICE_TRACE_OUT = { seed: CBZ.WORLD_SEED != null ? CBZ.WORLD_SEED : (CBZ.CONFIG && CBZ.CONFIG.WORLD_SEED), cell: SLICE_CELL, builders: {} });
+    const box = new THREE.Box3(), v = new THREE.Vector3(), m4 = new THREE.Matrix4();
+    function mark(root) { if (root) root.traverse(function (o) { seen.add(o); }); }
+    mark(CBZ.scene);
+    let lens = null, provN = 0, blendN = 0, colN = 0, platN = 0;
+    function isTerrain(o) {
+      const u = o.userData || {};
+      if (u.worldSurface || u.terrain || u.terrainFar || u.horizon || u.metroFar || u.farLod != null) return true;
+      const m = Array.isArray(o.material) ? o.material[0] : o.material;
+      return !!(m && m.userData && m.userData._cbzFogScaled);
+    }
+    return {
+      before: function () {
+        lens = {};
+        for (const k of REPLAY_ARRAYS) lens[k] = city[k] ? city[k].length : 0;
+        provN = CBZ._cityGroundHeightProviders.length; blendN = CBZ._biomeBlendSpecs.length;
+        colN = (CBZ.colliders || []).length; platN = (CBZ.platforms || []).length;
+      },
+      after: function (b, ms) {
+        const cells = new Set(); let wide = false, surface = false, meshes = 0, tris = 0;
+        const addRect = function (minX, maxX, minZ, maxZ) {
+          if (!(maxX >= minX) || !(maxZ >= minZ)) return;
+          const x0 = Math.floor(minX / SLICE_CELL), x1 = Math.floor(maxX / SLICE_CELL);
+          const z0 = Math.floor(minZ / SLICE_CELL), z1 = Math.floor(maxZ / SLICE_CELL);
+          if ((x1 - x0 + 1) * (z1 - z0 + 1) > 400) { wide = true; return; }
+          for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) cells.add(x + "," + z);
+        };
+        CBZ.scene.updateMatrixWorld(true);
+        CBZ.scene.traverse(function (o) {
+          if (seen.has(o)) return;
+          seen.add(o);
+          if (!o.isMesh && !o.isInstancedMesh && !o.isPoints && !o.isLine) return;
+          meshes++;
+          const g = o.geometry; if (!g) return;
+          if (!g.boundingBox) { try { g.computeBoundingBox(); } catch (e) { return; } }
+          if (!g.boundingBox) return;
+          const pos = g.attributes && g.attributes.position;
+          if (pos) tris += (g.index ? g.index.count : pos.count) / 3;
+          if (isTerrain(o)) { surface = true; return; }
+          if (o.isInstancedMesh) {
+            const r = g.boundingBox.min.distanceTo(g.boundingBox.max) / 2;
+            for (let i = 0; i < o.count; i++) {
+              o.getMatrixAt(i, m4); v.setFromMatrixPosition(m4).applyMatrix4(o.matrixWorld);
+              addRect(v.x - r, v.x + r, v.z - r, v.z + r);
+            }
+            return;
+          }
+          box.copy(g.boundingBox).applyMatrix4(o.matrixWorld);
+          addRect(box.min.x, box.max.x, box.min.z, box.max.z);
+        });
+        const cols = CBZ.colliders || [];
+        for (let i = colN; i < cols.length; i++) { const c = cols[i]; if (c) addRect(c.minX, c.maxX, c.minZ, c.maxZ); }
+        const pl = CBZ.platforms || [];
+        for (let i = platN; i < pl.length; i++) { const p = pl[i]; if (p) addRect(p.minX, p.maxX, p.minZ, p.maxZ); }
+        // TERRAIN = never skipped. A ground-height oracle shapes the horizon
+        // (the continent plate samples every oracle), and a builder that
+        // draws ONLY far-fogged surface is pure horizon. A builder that draws
+        // a pad under its town is not terrain: skipped, the continent plate
+        // and the replayed biome blends paint that ground from afar.
+        const oracle = CBZ._cityGroundHeightProviders.length > provN;
+        const terrain = oracle || (surface && cells.size === 0);
+        const data = {};
+        for (const k of REPLAY_ARRAYS) {
+          const arr = city[k] || [];
+          if (arr.length > lens[k]) data[k] = arr.slice(lens[k]).map(function (x) { return sliceClone(x, 0, new WeakSet()); });
+        }
+        if (CBZ._biomeBlendSpecs.length > blendN) data.biomeBlends = CBZ._biomeBlendSpecs.slice(blendN).map(function (x) { return sliceClone(x, 0, new WeakSet()); });
+        out.builders[bkey(b)] = {
+          order: b.order, ms: Math.round(ms), terrain: terrain, oracle: oracle, surface: surface, wide: wide, meshes: meshes, tris: Math.round(tris),
+          colliders: cols.length - colN, cells: [...cells].map(function (s) { return s.split(",").map(Number); }), data: data,
+        };
+      },
+    };
+  }
+
   // world.js calls this once, after the original expansion island. Runs every
   // registered landmass builder in order; each is independently try/caught so
   // one bad biome can never take down the rest of the world.
@@ -794,11 +968,20 @@
     // runs (core/fxwarm.js). Ground slabs wait: the fog sweep below rewrites
     // their shaders, and mode.js queues the finished world after the batch.
     const deferSurface = function (o) { return !!(o.userData && o.userData.worldSurface); };
+    // CITY SLICES (core/slice.js): which builders this boot runs. With no
+    // slice, sliceDecide says "run" for every one and nothing below changes.
+    const trace = CBZ.SLICE_TRACE ? sliceTraceBegin(city) : null;
+    const plan = CBZ.slice ? slicePlan(list) : null;
     for (const b of list) {
       if (boot) boot(b.bootKey);          // the loading meter's per-builder tick
+      if (plan && plan.skip.has(bkey(b))) { sliceReplay(city, plan.recs[bkey(b)]); continue; }
+      const t0 = trace ? performance.now() : 0;
+      if (trace) trace.before(b);
       try { b.fn(city); } catch (e) { console.error("[landmass]", e); }
+      if (trace) trace.after(b, performance.now() - t0);
       if (CBZ.shaderQueue && city.root) CBZ.shaderQueue(city.root, { skip: deferSurface });
     }
+    if (plan) CBZ.slicePlanResult = { ran: list.length - plan.skip.size, skipped: [...plan.skip], always: plan.always, manifest: !!plan.manifest };
     // ---- FOG-RATE HARMONY SWEEP (owner, from the air: "city areas look
     // bright and rendered while the ground around them is grayer… the same
     // with mountains — computer generated and dumb") ------------------------

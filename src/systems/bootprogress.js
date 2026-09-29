@@ -54,7 +54,9 @@
   const CFG = CBZ.CONFIG || (CBZ.CONFIG = {});
   if (CFG.BOOT_METER == null) CFG.BOOT_METER = true;
 
-  const LS_KEY = "cbz.bootmeter.v1";
+  // a slice boot (core/slice.js) skips most builders: it learns its own
+  // weights, so a sliced run never teaches the full city a 0 ms continent
+  const LS_KEY = "cbz.bootmeter.v1" + (CBZ.slice ? ".slice." + CBZ.slice.name : "");
   const BG = "#0f1622", INK = "#fff7ec", HOT = "#ff7a1a";
 
   // ---- seed weights (ms) ------------------------------------------------
@@ -286,6 +288,7 @@
     const list = (CBZ._landmassBuilders || []).slice().sort(function (a, b) { return a.order - b.order; });
     for (let i = 0; i < list.length; i++) out.push(list[i].bootKey || ("lm:#" + i));
     out.push("city:props", "city:beach", "city:finish");
+    if (CBZ.slice) out.push("city:slice");
     return out;
   }
   // the per-life part: static batching, then the population

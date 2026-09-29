@@ -281,7 +281,14 @@
   function build() {
     if (city.built) return;
     const colStart = CBZ.colliders ? CBZ.colliders.length : 0;
+    const platStart = CBZ.platforms ? CBZ.platforms.length : 0;
     city.arena = CBZ.buildCity();
+    // CITY SLICES (core/slice.js): drop what was drawn past the keep circle
+    // before the batch pass ever sees it. No-op without ?slice=.
+    if (CBZ.slice && CBZ.slicePrune) {
+      if (CBZ.bootStep) CBZ.bootStep("city:slice");
+      try { CBZ.slicePrune(city.arena.root, colStart, platStart); } catch (e) { console.error("[slice prune]", e); }
+    }
     // CITY COLLIDER STAMP: the airport rect (x -370..290, z -280..40) — and
     // potentially other city content — OVERLAPS the prison arena's coordinate
     // space around the origin. The meshes hide on mode switch but these AABBs
@@ -713,7 +720,11 @@
       const observePeds = campaignLayerObserved("peds");
       const observeCrowd = campaignLayerObserved("crowd");
       const observeTraffic = campaignLayerObserved("traffic");
-      if (!netGuest && observePeds && CBZ.spawnCityPeds) CBZ.spawnCityPeds(CBZ.CITY.peds);
+      // CITY SLICES: the downtown roster lives on the downtown sidewalks. A
+      // slice that does not hold downtown spawns none of it (towns, the metro
+      // and the countryside populate themselves around the player).
+      const sliceDowntown = !CBZ.slice || CBZ.sliceKeepsRect(A.minX, A.maxX, A.minZ, A.maxZ, -(CBZ.slice.view() - 40));
+      if (!netGuest && observePeds && CBZ.spawnCityPeds && sliceDowntown) CBZ.spawnCityPeds(CBZ.CITY.peds);
       else if (!netGuest && !observePeds) {
         // Cancels an in-flight sliced spawn as well as clearing a prior roster.
         // The peds module rehydrates automatically if observation opens without
@@ -723,12 +734,12 @@
       }
       // the instanced ambient crowd is COSMETIC and stays local on guests too
       // (crowd.js skips promotion-to-real-peds when net.noSim())
-      if (CBZ.spawnCityCrowd) CBZ.spawnCityCrowd(observeCrowd ? (CBZ.CITY.crowd != null ? CBZ.CITY.crowd : 280) : 0);
+      if (CBZ.spawnCityCrowd) CBZ.spawnCityCrowd(observeCrowd && sliceDowntown ? (CBZ.CITY.crowd != null ? CBZ.CITY.crowd : 280) : 0);
       if (CBZ.clearCityCops) CBZ.clearCityCops();
       if (CBZ.bootStep) CBZ.bootStep("city:traffic");
       if (!netGuest && CBZ.spawnCityTraffic) {
         campaignTrafficDeferred = !observeTraffic;
-        CBZ.spawnCityTraffic(observeTraffic ? CBZ.CITY.traffic : 0);
+        CBZ.spawnCityTraffic(observeTraffic ? (CBZ.slice && CBZ.sliceTrafficCount ? CBZ.sliceTrafficCount(A, CBZ.CITY.traffic) : CBZ.CITY.traffic) : 0);
       } else {
         campaignTrafficDeferred = false;
       }
@@ -872,6 +883,11 @@
       // stray click is a punch and cops do not see a drawn weapon. A number
       // key (or the hotbar) draws.
       if (!campaignMode && !jailbreakEntry) game.cityHolstered = true;
+      // CITY SLICES: whatever the origin, save or airport said, a slice
+      // starts you in the slice (on its nearest street, facing open space).
+      if (CBZ.slice && CBZ.slicePlacePlayer) {
+        try { if (CBZ.slicePlacePlayer(A, P) && CBZ.cityFaceOpen) CBZ.cityFaceOpen(P); } catch (e) { console.error("[slice spawn]", e); }
+      }
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     },
     winStats(game) {

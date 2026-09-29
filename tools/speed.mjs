@@ -40,6 +40,9 @@
      node tools/speed.mjs --return                # + a RETURN VISIT load (same profile, reload)
      node tools/speed.mjs --modes all             # every mode + the games/ pages
      node tools/speed.mjs --modes city,escape     # a list
+     node tools/speed.mjs --slice kingsport-downtown   # ONE piece of the city as its own world
+     node tools/speed.mjs --slice -2900,3050,450       # ... any x,z,r (src/core/slice.js)
+     node tools/speed.mjs --slice-spots estate         # whole city, measured at that slice's spots
      node tools/speed.mjs --load | --play         # one half only
      node tools/speed.mjs --runs 3                # repeats (fresh page each)
      node tools/speed.mjs --save tools/speed-baseline.json
@@ -206,6 +209,13 @@ const WARM = Math.max(0, +opt("--warm", 8));
 const GPU = opt("--gpu", "real");
 const DEVICE = opt("--device", "desktop");
 const QUERY = opt("--query", "");
+/* CITY SLICES (src/core/slice.js): --slice boots ONE piece of Gang City as
+   its own world (a name from CBZ.SLICES, or "x,z,r"); the play spots move
+   into the slice (its spawn street, its centre, an aerial over it).
+   --slice-spots boots the WHOLE city but measures at that slice's spots:
+   the fair frame comparison, same place, full world vs slice. */
+const SLICE = opt("--slice", "");
+const SLICE_SPOTS = opt("--slice-spots", "") || SLICE;
 const PROFILE = has("--profile");
 const ATTRIBUTE = has("--attribute");
 const SAVE = opt("--save", "");
@@ -676,6 +686,21 @@ S.spots = function(){
     out.aerial = { x: f.x, y: fy, z: f.z, n: f.n, cam: { x: f.x - 160, y: fy + 110, z: f.z - 160, lx: f.x, ly: fy, lz: f.z } }; }
   return out;
 };
+/* CITY SLICES: the slice's own three places. spawn = where a slice boot puts
+   the player (its nearest street to the centre); downtown = the slice centre
+   at street level (the "in the thick of it" spot, named downtown so the
+   table lines up with the whole city's); aerial = 110 m over it. The same
+   spots are computed on a whole-city boot (--slice-spots) for the pair. */
+S.sliceSpots = function(name){
+  var s = C.slice || (C.sliceParse && C.sliceParse(name)); if (!s) return S.spots();
+  var A = C.city && C.city.arena, tmp = { pos: new THREE.Vector3() }, saved = C.slice;
+  C.slice = s; try { C.slicePlacePlayer(A, tmp); } finally { C.slice = saved; }
+  var out = { spawn: { x: tmp.pos.x, y: tmp.pos.y, z: tmp.pos.z, player: true, slice: s.name } };
+  var gy = ground(s.x, s.z); if (gy == null) gy = 0;
+  out.downtown = { x: s.x, y: gy, z: s.z, player: true, slice: s.name };
+  out.aerial = { x: s.x, y: gy, z: s.z, cam: { x: s.x - 160, y: gy + 110, z: s.z - 160, lx: s.x, ly: gy, lz: s.z } };
+  return out;
+};
 S.applyPose = function(cam){ var q = S.pose; cam.position.set(q.x, q.y, q.z); cam.lookAt(q.lx, q.ly, q.lz); cam.updateMatrixWorld(true);
   try { var rig = C.skyDome && C.skyDome.parent; if (rig && rig.position) rig.position.set(q.x, 0, q.z); } catch (_) {} };
 S.place = function(s){
@@ -746,6 +771,7 @@ function modeUrl(base, m) {
   q.push("seed=" + SEED);
   if (DEVICE !== "desktop") q.push("device=" + DEVICE);
   if (QUERY) q.push(QUERY.replace(/^[?&]/, ""));
+  if (SLICE && d.mode === "city") q.push("slice=" + encodeURIComponent(SLICE));
   return base.replace(/\/?$/, "/") + d.page + "?" + q.join("&");
 }
 
@@ -942,7 +968,7 @@ async function measureFrames(B, P, n, pathExpr, grab) {
 
 async function playSpots(B, P, m, ctx = {}) {
   const tS = Date.now();
-  const spots = ctx.spots || (m === "city" ? await P.ev("window.__speed.spots()", 120000) : await P.ev("(function(){ var p = CBZ.player; return p && p.pos ? { spawn: { x: p.pos.x, y: p.pos.y, z: p.pos.z, player: true } } : { spawn: { x: 0, y: 0, z: 0 } }; })()"));
+  const spots = ctx.spots || (m === "city" ? await P.ev(SLICE_SPOTS ? `window.__speed.sliceSpots(${JSON.stringify(SLICE_SPOTS)})` : "window.__speed.spots()", 120000) : await P.ev("(function(){ var p = CBZ.player; return p && p.pos ? { spawn: { x: p.pos.x, y: p.pos.y, z: p.pos.z, player: true } } : { spawn: { x: 0, y: 0, z: 0 } }; })()"));
   const res = { spots: {}, spotsMs: Date.now() - tS, spotsAt: spots };
   log(`[speed ${since()}]   spots ${ctx.spots ? "given (A/B: located once, on the base)" : "located in " + res.spotsMs + " ms"}`);
   const order = Object.keys(spots);
@@ -1363,6 +1389,7 @@ function table(res) {
   const L = [];
   const p = (s) => L.push(s);
   p("");
+  if (res.slice || res.sliceSpots) p(`CITY SLICE  ${res.slice ? "booted: " + res.slice : "whole city"}${res.sliceSpots ? "  spots: " + res.sliceSpots : ""}  (src/core/slice.js)`);
   p(`SPEED v2  ${res.commit || res.url}  seed ${res.seed}  gpu ${res.gpu}  ${res.device} ${res.viewport}  runs ${res.runs}  shaders ${res.shaders}  frame ${res.frameModel}  load avg ${res.uptimeStart.load1}→${res.uptimeEnd.load1} (${res.uptimeStart.cpus} cpu)  tool ${res.toolWallS}s`);
   for (const m of res.modes) {
     const r = res.detail[m] && res.detail[m][0]; if (!r) continue;
@@ -1438,7 +1465,7 @@ function takeShots(r, into) {
 function resultShell(extra) {
   return { tool: "speed.mjs", version: 2, at: new Date().toISOString(), commit, url: URL_ARG || null, seed: SEED, gpu: GPU, device: DEVICE,
     viewport: `${VIEW.w}x${VIEW.h}@${VIEW.dpr}`, frames: FRAMES, warm: WARM, modes: MODES, shaders: SHADERS, frameModel: SERIAL ? "serial" : "pipelined",
-    returnVisit: RETURN, lockWaitS: +LOCK_WAIT_S.toFixed(1), host: os.hostname(), cpu: os.cpus()[0].model, ...extra };
+    returnVisit: RETURN, slice: SLICE || undefined, sliceSpots: SLICE_SPOTS || undefined, lockWaitS: +LOCK_WAIT_S.toFixed(1), host: os.hostname(), cpu: os.cpus()[0].model, ...extra };
 }
 function lookOf(detail, k) { return Object.fromEntries(MODES.map((m) => [m, detail[m] && detail[m][0] && detail[m][0][k]]).filter((x) => x[1])); }
 
@@ -1451,7 +1478,7 @@ function lookOf(detail, k) { return Object.fromEntries(MODES.map((m) => [m, deta
    queue makes that a short wait). A query notices edited files under the
    served tree and reloads the page first, so it never answers for stale code.
    The world exits after --idle seconds (default 1200) without a query. */
-const WORLD_KEY = crypto.createHash("md5").update(URL_ARG || ROOT).digest("hex").slice(0, 10);
+const WORLD_KEY = crypto.createHash("md5").update((URL_ARG || ROOT) + (SLICE ? "#slice=" + SLICE : "")).digest("hex").slice(0, 10);
 const WORLD_FILE = opt("--world", "") || `/tmp/cbz-speed-world-${WORLD_KEY}.json`;
 const IDLE_S = Math.max(60, +opt("--idle", 1200) || 1200);
 function readWorld() { try { const w = JSON.parse(fs.readFileSync(WORLD_FILE, "utf8")); return w && pidAlive(w.pid) ? w : null; } catch (_) { return null; } }
@@ -1610,7 +1637,7 @@ async function askMain() {
     if (ASK === "stop" || ASK === "info") { console.log("no warm world for this tree"); process.exit(0); }
     // start one, detached, with the same serving flags
     const logf = WORLD_FILE.replace(/\.json$/, ".log");
-    const pass = []; for (const f of ["--root", "--url", "--ref", "--seed", "--device", "--gpu", "--shaders", "--mode", "--modes", "--idle", "--world", "--query"]) { const v = opt(f, null); if (v != null) pass.push(f, v); }
+    const pass = []; for (const f of ["--root", "--url", "--ref", "--seed", "--device", "--gpu", "--shaders", "--mode", "--modes", "--idle", "--world", "--query", "--slice", "--slice-spots"]) { const v = opt(f, null); if (v != null) pass.push(f, v); }
     const fd = fs.openSync(logf, "a");
     const ch = spawn(process.execPath, [fileURLToPath(import.meta.url), "--serve", ...pass], { detached: true, stdio: ["ignore", fd, fd], cwd: ROOT0 });
     ch.unref();
