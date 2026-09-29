@@ -621,53 +621,32 @@
     const ped = a.ped, veh = a.veh, seat = a.seat;
     const NL = CBZ.npcLife;
     if (!NL || !NL.attach) return false;
-    const anchor = {
-      x: seat.x, y: seat.y, z: seat.z, yaw: seat.yaw || 0,
-      pose: seat.pose || "sit", state: seat.pose === "stand" ? "idle" : "sit",
-    };
-    if (seat.cushionH != null) anchor.cushionH = seat.cushionH;
-    if (seat.floorBelow != null) anchor.floorBelow = seat.floorBelow;
-    /* A CAR SEAT IS SAT LIKE THE PLAYER SITS IT. This anchor used to put the
-       root ON the cushion top and then hand the seat solve the cushion height
-       AGAIN (unscaled, in a group scaled to ~0.6), so every companion sat a
-       cushion's height above his cushion with his crown in the headliner.
-       The player's seat (vehicles.js seatDriver) roots on the cabin FLOOR,
-       in the car's visual frame, with the cushion divided by the fit — and
-       the door beats (carSpec) land every body in exactly that pose. */
-    const SF = (carSeatKind(seat) && seat.hinge && CBZ.carSeatFit) ? CBZ.carSeatFit(ped.char, veh, seat.id) : null;
-    if (SF) {
-      anchor.y = SF.floorY;
-      anchor.cushionH = Math.max(0.05, seat.y - SF.floorY) / SF.fit;
-      anchor.floorBelow = 0;
+    /* A CAR SEAT IS SAT LIKE THE PLAYER SITS IT — through the ONE placement
+       (vehicles.js CBZ.carSeatPlacement): rooted on the cabin FLOOR in the
+       car's visual frame, cushion declared in the scaled group's units, and
+       the rig fitted by CBZ.carSeatFit for THIS body. That is exactly the
+       pose the door beats (carSpec below) land a body in, so the hand-off
+       from the last beat to the held seat does not move. npclife applies the
+       fit, re-asserts it every frame and hands the body back its own size on
+       detach — this file no longer scales the rig itself (it used to, after
+       the attach, with a second cheaper fit for seats without a hinge).
+       Aircraft rows and holds keep their own authored records. */
+    const pl = (carSeatKind(seat) && CBZ.carSeatPlacement) ? CBZ.carSeatPlacement(veh, seat.id) : null;
+    let anchor, parent;
+    if (pl) { anchor = pl.anchor; parent = pl.parent; }
+    else {
+      anchor = {
+        x: seat.x, y: seat.y, z: seat.z, yaw: seat.yaw || 0,
+        pose: seat.pose || "sit", state: seat.pose === "stand" ? "idle" : "sit",
+      };
+      if (seat.cushionH != null) anchor.cushionH = seat.cushionH;
+      if (seat.floorBelow != null) anchor.floorBelow = seat.floorBelow;
+      parent = (seat.kind === "hold" && seat.hold && seat.hold.group) || (veh.group || veh);
     }
-    const parent = (seat.kind === "hold" && seat.hold && seat.hold.group) || (SF && frameOf(veh)) || (veh.group || veh);
     ped._seatHold = true;
     let ok = false;
     try { ok = !!NL.attach(ped, parent, anchor); } catch (e) { ok = false; }
     if (!ok) return false;
-    /* THE RIG IS STYLISED AND THE CABIN IS NOT. vehicles.js solves ONE uniform
-       scale backwards so the seated eye lands on the cabin's authored eye
-       height (`fitSeatedRig`); an unscaled adult in a sedan puts his crown
-       0.2 m through the headliner. That solve is private, so we do the cheap
-       honest version of the same thing: the ratio of the cabin's own
-       cushion-to-roof clearance to a standing torso. A hold is a room with
-       full standing height and gets left alone. */
-    if (SF && ped.group) {
-      ped._cbzFit = SF.fit;
-      ped.group.scale.setScalar(SF.fit);
-      if (ped.char) {
-        ped.char.seatRef = { cushion: anchor.cushionH, floorBelow: 0, kind: seat.kind === "driver" ? "car" : "carseat",
-          _fit: SF.fit, _seat: seat.id };
-      }
-    } else if (seat.kind !== "hold" && seat.kind !== "cabin") {
-      const ci = cabin(veh);
-      if (ci && ped.group) {
-        const clear = Math.max(0.30, ci.roofY - ci.cushionY);
-        const fit = Math.max(0.50, Math.min(1, clear / 0.95));
-        ped._cbzFit = fit;
-        ped.group.scale.setScalar(fit);
-      }
-    }
     ped.inCar = veh;
     ped.controlled = true;
     ped._spawnHidden = false;
@@ -692,17 +671,7 @@
     const ped = a.ped, veh = a.veh, seat = a.seat;
     const w = worldOf(veh, seat.doorX, 0, seat.doorZ, _v);
     const gy = (w && CBZ.floorAt) ? (+CBZ.floorAt(w.x, w.z) || 0) : 0;
-    /* UNDO THE CABIN FIT BEFORE THE DETACH, AND MAKE THE MATRIX AGREE.
-       npclife's `detach` writes the DECOMPOSED WORLD pose back onto the group —
-       scale included — so a rig still carrying its 0.6 cabin fit walks away
-       from the car permanently shrunk. Resetting the scalar is not enough on
-       its own: the decomposition reads `matrixWorld`, which still holds last
-       frame's numbers until something forces it. */
-    if (ped.group && ped._cbzFit) {
-      ped.group.scale.setScalar(1);
-      ped._cbzFit = 0;
-      if (ped.group.updateMatrixWorld) ped.group.updateMatrixWorld(true);
-    }
+    // (the cabin fit is npclife's: detach hands the body back at its own size)
     if (ped._npcAttached && CBZ.cityUnseat) {
       // the ONE sanctioned exit — a detach at the door, not a shove
       try { CBZ.cityUnseat(ped, { x: w.x, z: w.z, y: gy, ground: true, state: "walk" }); } catch (e) {}
@@ -1818,7 +1787,6 @@
           if (c && c[s.id] === p) c[s.id] = null;
           if (s.veh && s.seat) releaseSeat(s.veh, s.seat, p);
           if (s.seat && s.seat.seatRef && s.seat.seatRef.occupant === p) s.seat.seatRef.occupant = null;
-          if (p.group && p._cbzFit) { p.group.scale.setScalar(1); p._cbzFit = 0; }
           p._cbzSeat = null; p.inCar = false;
         }
         continue;

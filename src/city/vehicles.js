@@ -1339,13 +1339,6 @@
     seat.armed = carHash(c.occ.hx, c.occ.hz, 660 + seat.row * 5 + (seat.side > 0 ? 1 : 0)) < p;
     return seat.armed;
   }
-  // where a seat SITS, in the car group's local frame — the one cabin query,
-  // so a blob, a promoted rig and a door-side step-out can never disagree.
-  function occSeatPose(c, seat) {
-    if (!c._occFrame) return null;
-    const S = SEATS() && SEATS().seat(c, seat.slot);
-    return S ? { x: S.x, y: S.cushionY, z: S.z } : null;
-  }
 
   function addOccupants(c) {
     if (CBZ.CONFIG && CBZ.CONFIG.VEHICLE_REAL_GLASS === false) return;
@@ -1415,16 +1408,54 @@
   const OCC_RIG_CARS = 3;
   let occRigCars = 0, occStat = { promoted: 0, claimed: 0, spawned: 0, jacks: 0, hostages: 0,
     react: { fight: 0, flee: 0, freeze: 0, beg: 0 } };
-  function occAnchorFor(c, seat) {
-    const p = occSeatPose(c, seat); if (!p) return null;
-    // A REAR passenger sits turned a few degrees into the cabin and a shotgun
-    // rider leans toward the window — the same anchor grammar gangs.js's
-    // DB_SEATS uses, which npclife re-asserts every frame.
+  /* WHERE A REAL BODY SITS, for ANY car seat — THE one placement. Traffic
+     occupants (below), a drive-by crew (gangs.js), a motorcade detail, a cab
+     driver and his fare (giglife.js), a gig rider (gigs.js) and a companion
+     (boarding.js) all seat through CBZ.carSeatPlacement, because every one
+     of them used to type its own and every one was wrong the same way.
+
+     OWNER: "NPC driver cars — you see them OUTSIDE the car, slightly behind
+     it." The old anchor was the bare cushion point, a 0.12 rad back pitch,
+     no seat geometry and no scale: character.js's legacy chair pose keeps
+     the hips a fixed height over the rig ROOT, so a full-size stylised adult
+     rooted on the cushion sat hips-on-the-belt-line with his crown ~0.4 m up
+     through the roof, leaning back through the pillar.
+
+     Now it is exactly how the player sits his own seat (seatDriver) and how
+     the door beats (boarding.js carSpec) land a body: rooted on the cabin
+     FLOOR, in the car VISUAL's frame (so the body rides the suspension with
+     the cabin), the cushion declared in the scaled group's units, and the
+     scale from CBZ.carSeatFit — the ONE seated-fit solve — evaluated for the
+     body actually claimed (npclife.js calls `fit(ch)` at attach, re-asserts
+     the scale every sync and hands the body back its own size on detach). */
+  function seatFrame(c) {
+    const grp = c && c.group;
+    return grp ? ((grp.userData && grp.userData.carVisual) || grp) : null;
+  }
+  function seatPlacement(c, S) {
+    const m = SEATS() && SEATS().of(c);
+    const ci = m && m.ci;
+    const parent = seatFrame(c);
+    if (!S || !ci || !parent) return null;
+    const id = S.id;
     return {
-      x: p.x, y: p.y, z: p.z,
-      pitch: 0.12, yaw: seat.row ? -seat.side * 0.16 : (seat.slot === "shotgun" ? -0.10 : 0),
-      roll: 0, pose: "sit", state: "sit",
+      parent: parent,
+      anchor: {
+        x: S.x, y: ci.floorY, z: S.z,
+        // square to the car: the door beats (boarding.js carSpec) land every
+        // body facing the seat's own heading, so the held seat must too
+        pitch: 0, roll: 0, yaw: 0,
+        pose: "sit", state: "sit",
+        cushionH: Math.max(0.05, S.cushionY - ci.floorY), floorBelow: 0,
+        seatKind: S.isDriver ? "car" : "carseat",
+        fit: function (ch) { const F = CBZ.carSeatFit ? CBZ.carSeatFit(ch, c, id) : null; return F ? F.fit : 0.6; },
+        carSeat: id,
+      },
     };
+  }
+  function occPlacementFor(c, seat) {
+    const S = SEATS() && SEATS().seat(c, seat.slot);
+    return S ? seatPlacement(c, S) : null;
   }
   function occDraftOk(p, c) {
     if (!CBZ.npcLife || !CBZ.npcLife.draftableCity) return false;
@@ -1445,9 +1476,9 @@
   // with the same reactions as any other occupied car.
   function occSeatPed(c, seat, ped, opts) {
     if (!c || !seat || !ped) return false;
-    const anchor = occAnchorFor(c, seat);
-    if (!anchor || !CBZ.npcLife || !CBZ.npcLife.attach) return false;
-    if (!CBZ.npcLife.attach(ped, c.group, anchor)) return false;
+    const place = occPlacementFor(c, seat);
+    if (!place || !CBZ.npcLife || !CBZ.npcLife.attach) return false;
+    if (!CBZ.npcLife.attach(ped, place.parent, place.anchor)) return false;
     seat.ped = ped; seat.spawned = !!(opts && opts.spawned);
     ped.inCar = c; ped.controlled = true;
     ped._occCar = c; ped._occSeat = seat;
@@ -1458,8 +1489,7 @@
   }
   function occPromoteSeat(c, seat) {
     if (seat.ped || !CBZ.npcLife) return false;
-    const anchor = occAnchorFor(c, seat); if (!anchor) return false;
-    const place = { parent: c.group, anchor: anchor };
+    const place = occPlacementFor(c, seat); if (!place) return false;
     let ped = null, spawned = false;
     if (CBZ.npcLife.claimCity) {
       try { ped = CBZ.npcLife.claimCity("carOccupant", place, function (p) { return occDraftOk(p, c); }); } catch (e) { ped = null; }
@@ -1473,7 +1503,7 @@
       if (seat.slot === "driver" && !c.npcDriver) { c.npcDriver = ped; c._occOwnsDriver = true; }
       occStat.claimed++;
     } else if (CBZ.npcLife.spawnCity) {
-      try { ped = CBZ.npcLife.spawnCity("carOccupant", { x: c.pos.x, z: c.pos.z, rng: rng, parent: c.group, anchor: anchor }); } catch (e) { ped = null; }
+      try { ped = CBZ.npcLife.spawnCity("carOccupant", { x: c.pos.x, z: c.pos.z, rng: rng, parent: place.parent, anchor: place.anchor }); } catch (e) { ped = null; }
       if (!ped) return false;
       spawned = true;
       seat.ped = ped; ped.inCar = c; ped.controlled = true;
@@ -3512,10 +3542,11 @@
     if (st.blob && st.blob.parent) { st.blob.parent.remove(st.blob); st.blob = null; }
     return occSeatPed(c, st, ped, opts);
   };
-  CBZ.carOccupancySeatAnchor = function (c, slotName) {
-    if (!c || !c._occFrame) return null;
-    const S = seatFor(c, slotName); if (!S) return null;
-    return occAnchorFor(c, { slot: S.id, side: S.side, row: S.row });
+  // { parent, anchor } for a named slot of THIS body (nearest real seat if
+  // the body has no such slot) — null for a car with no cabin (bike, boat)
+  CBZ.carSeatPlacement = function (c, slotName) {
+    if (!c) return null;
+    return seatPlacement(c, seatFor(c, slotName || "driver"));
   };
   // a named slot on THIS body: the seat itself, else the nearest thing to it
   // (a "rearR" asked of a two-seater is the passenger seat)
