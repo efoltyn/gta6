@@ -411,12 +411,17 @@
     groundAt = buildField(cx, cz, groundAt);
 
     // the cover boxes become real colliders — for the bullets, the bodies and
-    // combat_iq's cover search alike
+    // combat_iq's cover search alike. ONCE: when desert.js raised the field it
+    // already registered the cover it drew (props.coverField's boxes, turned
+    // with each rock). Registering c.w x c.d here as well laid an UNTURNED
+    // box over every turned rock — an invisible slab a metre past the stone.
     for (let i = 0; i < cover.length; i++) {
+      if (raised) break;
       const c = cover[i];
       const y = groundAt(c.x, c.z) + (c.h || 1.4) / 2;
-      addedCols.push(micro.addBoxCollider(c.x, y, c.z, c.w || 2, c.h || 1.4, c.d || 2));
-      if (!raised) rockMesh(c, groundAt);
+      const m = rockMesh(c, groundAt);
+      addedCols.push(micro.addBoxCollider(c.x, y, c.z, c.w || 2, c.h || 1.4, c.d || 2,
+        { yaw: (m && m.rotation) ? m.rotation.y : 0 }));
     }
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
 
@@ -458,6 +463,7 @@
     m.castShadow = m.receiveShadow = true;
     scene.add(m);
     addedMeshes.push(m);
+    return m;
   }
   /* THE SURFACE. One displaced plane over the fight and one flat skirt out to
      the fog. 3 m cells: a man walking a 300 m dune wavelength never rises more

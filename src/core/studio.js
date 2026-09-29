@@ -144,8 +144,13 @@
       }
     }
     const cut = u.indexOf("core/studio.js");
+    const q = /[?&]v=([^&#]+)/.exec(u);
+    BUST = q ? "?v=" + q[1] : "";
     return cut >= 0 ? u.slice(0, cut) : "src/";
   }
+  // Pack files ride studio.js's own ?v= key: bumping it on a page re-fetches
+  // every file it loads, so a phone never mixes a new core with stale packs.
+  let BUST = "";
   const ROOT = srcRoot();
 
   /* ---- THE LANDMASS COLLECTOR ---------------------------------------------
@@ -214,7 +219,25 @@
              "uses, so engine files loaded afterwards find what they expect",
       needs: ["three", "seed"],
       files: ["core/microboot.js"],
-      publishes: ["micro"],
+      /* THE PHYSICS CORE IS IN HERE, not in its own pack. systems/physics.js
+         cannot come to a slice page (it reads the player, the city and the
+         mode at load), so microboot answers the same names over the same
+         record: oriented boxes, y-bands, a deepest-first disc resolve, a
+         swept disc, a ray. Shared consumers (ragdolls, debris, bodyfall,
+         verbs) call CBZ.collide & co. and get one answer in both worlds. */
+      publishes: ["micro", "colliders", "collide", "collideSlide", "sweepCircle", "rayColliders", "queryCollidersNear"],
+    },
+    meshcol: {
+      gives: "colliders cut from the real mesh instead of a hand-typed box: " +
+             "CBZ.meshCollider.fromMesh(obj) returns oriented, height-banded " +
+             "records that microboot's (and physics.js's) resolver reads as is",
+      needs: ["boot"],
+      files: ["systems/meshcollider.js"],
+      publishes: ["meshCollider", "solidFromMesh"],
+      /* OPTIONAL: a page that asks for it still boots if the file is missing
+         (the prop then keeps its typed box). need() warns instead of failing
+         the whole page over a refinement. */
+      optional: true,
     },
 
     // ---- what a world is made of ------------------------------------------
@@ -800,7 +823,7 @@
     if (alreadyInDocument(rel)) { loaded[rel] = 1; return Promise.resolve(); }
     const p = new Promise(function (resolve, reject) {
       const s = document.createElement("script");
-      s.src = ROOT + rel;
+      s.src = ROOT + rel + BUST;
       s.async = false;                            // order is the contract
       // Files load one at a time (need() awaits each), so whatever calls
       // addLandmass while this file executes belongs to this file. That stamp
@@ -812,6 +835,14 @@
     });
     inflight[rel] = p;
     return p;
+  }
+
+  function optionalFile(rel) {
+    for (const id in PACKS) {
+      const P = PACKS[id];
+      if (P.optional && P.files.indexOf(rel) >= 0) return true;
+    }
+    return false;
   }
 
   function planFor(names, seen, out) {
@@ -866,7 +897,7 @@
       if (!rel || loaded[rel] || inflight[rel] || warmed[rel] || alreadyInDocument(rel)) continue;
       warmed[rel] = 1;
       const l = document.createElement("link");
-      l.rel = "preload"; l.as = "script"; l.href = ROOT + rel;
+      l.rel = "preload"; l.as = "script"; l.href = ROOT + rel + BUST;
       document.head.appendChild(l);
       n++;
     }
@@ -907,7 +938,11 @@
     let done = 0;
     let chain = Promise.resolve();
     plan.files.forEach(function (f) {
-      chain = chain.then(function () { return loadFile(f); }).then(function () {
+      chain = chain.then(function () {
+        const p = loadFile(f);
+        // an OPTIONAL pack's file failing is a warning, never a dead page
+        return optionalFile(f) ? p.catch(function (e) { console.warn("[studio] optional:", e && e.message); }) : p;
+      }).then(function () {
         done++;
         tellProgress({ file: f, done: done, total: total, frac: total ? done / total : 1 });
       });

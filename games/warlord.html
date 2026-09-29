@@ -631,7 +631,7 @@ body.full-map-open #speech, body.sim-view #speech{ display:none !important; }
 <div id="verbs"></div>
 <div id="toasts"></div>
 
-<script src="../src/core/studio.js?v=warlord1"></script>
+<script src="../src/core/studio.js?v=physpack2"></script>
 <script>
 "use strict";
 (function () {
@@ -686,7 +686,7 @@ if (CBZ.CONFIG.RAGDOLL_ACTIVE == null) CBZ.CONFIG.RAGDOLL_ACTIVE = 28;
 if (CBZ.CONFIG.RAGDOLL_POOL == null) CBZ.CONFIG.RAGDOLL_POOL = 110;
 CBZ.ragdollDriven = true;
 
-const NEED = ["caps", "speech", "people", "verbs", "ragdoll", "fx", "damage", "sound", "batch"];
+const NEED = ["caps", "speech", "people", "verbs", "ragdoll", "fx", "damage", "sound", "batch", "meshcol"];
 const ARMOURY = [
   "weapons/weapon-data.js",
   "weapons/weapon-scale.js",
@@ -807,16 +807,14 @@ function start() {
   const W = CBZ.warlord;
   if (!W) { bootst("warlord/core.js did not load"); return; }
 
-  /* ---- the shims that let the shared combat brain run out here ----
-     Identical in kind to games/battle.html's three, and for the identical
-     reason: combat_iq, ordnance and the two ragdoll solvers ask the CITY for
-     services (colliders, the floor, a circle resolve) and the city is not on
-     a slice page. Route the NAME to microboot's equivalent; never fork the
-     file that asks. Which ground `floorAt` means depends on the phase, so it
-     asks the modules rather than closing over one. */
-  if (!CBZ.queryCollidersNear) {
-    CBZ.queryCollidersNear = function (x, z, r, out) { return CBZ.micro.queryColliders(x, z, r, out); };
-  }
+  /* ---- the names the shared combat brain asks this page for ----
+     Colliders and the disc resolve (CBZ.queryCollidersNear / collide /
+     collideSlide / sweepCircle / rayColliders) come from microboot itself
+     since 2026-09-29: physics.js's names and answers over the same record,
+     oriented boxes included, so the translation shims are gone. What is
+     left is the frame stamp and the floor; which ground `floorAt` means
+     depends on the phase, so it asks the modules rather than closing over
+     one. */
   if (CBZ.now == null) CBZ.now = performance.now();
   if (!CBZ.floorAt) {
     CBZ.floorAt = function (x, z) {
@@ -824,12 +822,6 @@ function start() {
       if (B && B.live && B.live() && B.groundAt) return B.groundAt(x, z);
       if (W.desert && W.desert.heightAt) return W.desert.heightAt(x, z);
       return 0;
-    };
-  }
-  if (!CBZ.collide) {
-    CBZ.collide = function (p, r, yLo, yHi) {
-      return CBZ.micro.resolveCircle(p, r || 0.2, yLo == null ? p.y : yLo,
-        Math.max(0.1, (yHi == null ? p.y + 0.2 : yHi) - (yLo == null ? p.y : yLo)));
     };
   }
   const COARSE = CBZ.studio.touchDevice;

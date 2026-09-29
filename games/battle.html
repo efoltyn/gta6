@@ -418,7 +418,7 @@ body.full-map-open #speech, body.sim-view #speech{ display:none !important; }
   skips files a page already carries, so the day a "guns" pack ships,
   these lines simply stop being needed.
 ============================================================ -->
-<script src="../src/core/studio.js?v=nodash1"></script>
+<script src="../src/core/studio.js?v=physpack2"></script>
 <script>
 "use strict";
 (function () {
@@ -658,7 +658,7 @@ const SWIM_PUNCH = Math.max(0, Math.min(1, parseFloat(Q.get("swimpunch") || "0.2
    city/ragdoll.js is the original of the method the animals' solver copied —
    13 points, sticks, joint limits, a ground clamp — writing back onto the same
    rig meshes, so the wounds and the dropped rifle ride along for free. */
-const NEED = ["caps", "speech", "people", "ragdoll", "fx", "damage", "sound", "batch", "bestiary", "beasts"];
+const NEED = ["caps", "speech", "people", "ragdoll", "fx", "damage", "sound", "batch", "bestiary", "beasts", "meshcol"];
 // ?marine=0 refuses the marine pack even on OPEN WATER (the revert). Its
 // absence is what shipped: models with no hunt, no fin, no blood, no prey.
 const MARINE_Q = Q.get("marine");
@@ -768,31 +768,19 @@ CBZ.studio.need(NEED).then(function () {
 }).then(function () {
   const THREE = window.THREE;
 
-  /* ---- the two shims that let the shared combat brain run out here ----
-     combat_iq's cover search reads CBZ.queryCollidersNear (physics.js, not
-     loaded on a slice page). microboot's own grid query returns the exact
-     same box shape, so route the name. CBZ.now is the frame stamp
-     combat_iq keys its timers on; this page advances it on SIM time, which
-     is what makes fire discipline follow the speed dial. */
-  if (!CBZ.queryCollidersNear) {
-    CBZ.queryCollidersNear = function (x, z, r, out) { return CBZ.micro.queryColliders(x, z, r, out); };
-  }
+  /* ---- the two names the shared combat brain asks this page for ----
+     CBZ.now is the frame stamp combat_iq keys its timers on; this page
+     advances it on SIM time, which is what makes fire discipline follow the
+     speed dial. */
   if (CBZ.now == null) CBZ.now = performance.now();
   // creature_combat's rest height asks CBZ.floorAt (the mainland's ground);
-  // out here the ground is whatever venue this battle raised. Same shim
-  // pattern as queryCollidersNear above — route the name, never fork the file.
+  // out here the ground is whatever venue this battle raised.
   if (!CBZ.floorAt) CBZ.floorAt = function (x, z) { return MAP ? MAP.groundAt(x, z) : 0; };
-  /* quadruped_ragdoll.js pushes a corpse's EXTREMITIES (head, tail, feet) out
-     of walls with CBZ.collide(point, radius, yLo, yHi) — physics.js's name, and
-     physics.js is not on a slice page. microboot's grid resolver answers the
-     same question in the same world; route the name rather than let a dead
-     lion's head lie inside a shop front. Same shim pattern as the two above. */
-  if (!CBZ.collide) {
-    CBZ.collide = function (p, r, yLo, yHi) {
-      return CBZ.micro.resolveCircle(p, r || 0.2, yLo == null ? p.y : yLo,
-        Math.max(0.1, (yHi == null ? p.y + 0.2 : yHi) - (yLo == null ? p.y : yLo)));
-    };
-  }
+  /* CBZ.queryCollidersNear / collide / collideSlide / sweepCircle /
+     rayColliders (combat_iq's cover search, quadruped_ragdoll's extremities)
+     come from microboot itself now (2026-09-29): physics.js's names and
+     answers over the same record, oriented boxes included. The translation
+     shims that lived here are gone. */
 
   const COARSE = CBZ.studio.touchDevice;
   if (COARSE) document.body.classList.add("coarse");
@@ -2713,8 +2701,7 @@ CBZ.studio.need(NEED).then(function () {
     const cols = CBZ.micro.queryColliders(x, z, 0.9, _fs);
     for (let c = 0; c < cols.length; c++) {
       const b = cols[c];
-      if (x < b.minX - 0.55 || x > b.maxX + 0.55) continue;
-      if (z < b.minZ - 0.55 || z > b.maxZ + 0.55) continue;
+      if (!CBZ.micro.colliderContains(b, x, z, 0.55)) continue;   // exact on a turned box
       if (b.y0 != null && b.y1 != null && (b.y1 < 0.35 || b.y0 > 1.7)) continue;  // a kerb is not a wall
       return true;
     }
@@ -4876,7 +4863,7 @@ CBZ.studio.need(NEED).then(function () {
       const cols = CBZ.micro.queryColliders(x, z, 0.4, _mq);
       for (let c = 0; c < cols.length; c++) {
         const b = cols[c];
-        if (x < b.minX || x > b.maxX || z < b.minZ || z > b.maxZ) continue;
+        if (!CBZ.micro.colliderContains(b, x, z)) continue;
         if (b.y0 != null && (y < b.y0 || y > b.y1)) continue;
         _v2.set(x, y, z);
         const nx = Math.abs(x - b.minX) < Math.abs(x - b.maxX) ? -1 : 1;
@@ -4929,7 +4916,7 @@ CBZ.studio.need(NEED).then(function () {
         const cols = CBZ.micro.queryColliders(r.pos.x, r.pos.z, 0.5, _mq);
         for (let c = 0; c < cols.length; c++) {
           const b = cols[c];
-          if (r.pos.x < b.minX || r.pos.x > b.maxX || r.pos.z < b.minZ || r.pos.z > b.maxZ) continue;
+          if (!CBZ.micro.colliderContains(b, r.pos.x, r.pos.z)) continue;
           if (b.y0 != null && (r.pos.y < b.y0 || r.pos.y > b.y1)) continue;
           boom = true; break;
         }
@@ -7190,7 +7177,7 @@ CBZ.studio.need(NEED).then(function () {
       const cols = CBZ.micro.queryColliders(m.pos.x, m.pos.z, 0.1, buf);
       for (let c = 0; c < cols.length; c++) {
         const b = cols[c];
-        if (m.pos.x < b.minX || m.pos.x > b.maxX || m.pos.z < b.minZ || m.pos.z > b.maxZ) continue;
+        if (!CBZ.micro.colliderContains(b, m.pos.x, m.pos.z)) continue;
         if (b.y0 != null && (m.pos.y + 0.9 < b.y0 || m.pos.y + 0.9 > b.y1)) continue;
         embedded++; break;
       }
