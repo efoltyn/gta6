@@ -731,17 +731,6 @@
   // doors/interiors/stairs/roof gameplay are untouched. Deterministic per lot
   // (CBZ.hash01, never rng()). Flip false to restore the flat-top box massing.
   if (CBZ.CONFIG.BUILDING_MASSING_V2 == null) CBZ.CONFIG.BUILDING_MASSING_V2 = true;
-  // BLASTED REINFORCED CONCRETE: a carved RPG/missile opening is dressed with
-  // persistent jagged slab teeth, torn steel and contact-stacked angular rubble.
-  // The old rectangular hole + box-rubble aftermath remains available for the
-  // matched visual baseline with ?cfg_STRUCT_RPG_RUIN_V2=0.
-  if (CBZ.CONFIG.STRUCT_RPG_RUIN_V2 == null) CBZ.CONFIG.STRUCT_RPG_RUIN_V2 = true;
-  // A CURTAIN WALL IS AN ASSEMBLY, NOT A BOX. A glass office storey's face is
-  // a 0.55 m sill course, a 0.45 m header course, two corner jambs and a pane
-  // grid — and carveHole's "a wall is at least 1.6 m tall and opaque" rule
-  // refused every one of them, so no ordnance in the game could open the most
-  // common building type in the city. Off restores that refusal exactly.
-  if (CBZ.CONFIG.STRUCT_CURTAIN_BREACH_V1 == null) CBZ.CONFIG.STRUCT_CURTAIN_BREACH_V1 = true;
   // CONSERVATION OF MATTER (owner: "I HATE FAKE DEBRIS ... IT MUST COME FROM
   // SOMEWHERE"). Every fragment a blast throws is diced out of a solid the
   // carve is removing in the same breath and carries that solid's own material;

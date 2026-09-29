@@ -840,8 +840,7 @@
   // cityShatterRay. fracture.js already deferred blastAt's single carve for
   // exactly this cost (see its DEFERRED LOCAL CARVE header — the same monolith
   // ballooned the impact frame ~200→350ms); the window-opening storm was the
-  // remaining synchronous copy of that work, ~8x over. Same fix, same flag
-  // (CBZ.carveDefer, fracture.js defaults it true): the panes still BURST on
+  // remaining synchronous copy of that work, ~8x over. Same fix: the panes still BURST on
   // the impact frame (the visible feedback), only the cosmetic room-reveal
   // carve drains at 1/frame afterwards — the boom/dust/shards mask the slip,
   // and the openings appearing one-per-frame reads as progressive collapse.
@@ -853,7 +852,6 @@
   const WINOPENQ_CAP = 24;         // a multi-blast salvo can't grow it unbounded
   function queueWindowOpening(gp) {
     if (!gp) return;
-    if (CBZ.carveDefer === false) { tryWindowOpening(gp); return; }   // flag off → old inline behaviour
     if (winOpenQ.length >= WINOPENQ_CAP || winOpenQ.indexOf(gp) !== -1) return;
     winOpenQ.push(gp);
   }
@@ -1546,26 +1544,25 @@
   // full-height flanks + partial-height SILL/HEADER remnants — CBZ.collide's
   // y-gating makes a chest-high murder hole shoot-through but not walk-through,
   // while a floor-level hole drops its sill and reads as a blasted doorway.
-  // Dressing per hole: a room-dark inset pocket (hides the merged SKY/trim
-  // slabs that would float across the gap, warm spill after dusk) + a fractured
-  // concrete rim of jittered prism chunks (merged to ONE mesh, fake-AO shaded).
+  // Dressing per hole: see WHAT IS BEHIND THE HOLE inside carveHole.
   // city/fracture.js drives this primitive and owns ledger/caps/persistence.
   let holeDebrisSeq = 0;
-  let _insetMat = null, _spillMat = null, _plyMat = null, _plyBatMat = null;
-  let _roomBackMat = null, _roomFloorMat = null, _roomFurnMat = null, _rebarMat = null, _roomCeilMat = null, _warmLightMat = null;
-  // INTERIOR REVEAL palette — light, showroom-grade tones so a shot-open window
-  // OR a blast hole reads as a real LIT ROOM, never a dark gray crater. (MeshBasic
-  // = self-lit, so these show full-bright wherever the sun is; distinct warm-wall /
-  // cool-floor / white-ceiling tones + a warm ceiling light give the pocket real
-  // depth and a "lived-in" read — the same thing that makes the showroom pop.)
-  function insetMat() { return _insetMat || (_insetMat = new THREE.MeshBasicMaterial({ color: 0xbcb4a4, side: THREE.BackSide })); }   // pocket liner (warm light)
-  function roomBackMat() { return _roomBackMat || (_roomBackMat = new THREE.MeshBasicMaterial({ color: 0xc9c0ad })); }   // back + side walls (warm drywall)
-  function roomFloorMat() { return _roomFloorMat || (_roomFloorMat = new THREE.MeshBasicMaterial({ color: 0xbfc3ca })); }   // floor (light cool)
-  function roomCeilMat() { return _roomCeilMat || (_roomCeilMat = new THREE.MeshBasicMaterial({ color: 0xe0e2e6 })); }   // ceiling (bright)
-  function roomFurnMat() { return _roomFurnMat || (_roomFurnMat = new THREE.MeshBasicMaterial({ color: 0x5b554c })); }   // furniture (mid, reads vs light walls)
-  function warmLightMat() { return _warmLightMat || (_warmLightMat = new THREE.MeshBasicMaterial({ color: 0xffe9c2 })); }   // glowing ceiling light = the room reads LIT
-  function rebarMat() { return _rebarMat || (_rebarMat = new THREE.MeshBasicMaterial({ color: 0x41434a })); }
-  function spillMat() { return _spillMat || (_spillMat = new THREE.MeshBasicMaterial({ color: 0xffb45e, transparent: true, opacity: 0.08, depthWrite: false })); }
+  let _insetMat = null, _plyMat = null, _plyBatMat = null, _sootMat = null;
+  let _roomFloorMat = null, _rebarMat = null, _warmLightMat = null;
+  // Every surface behind a hole is LIT BY THE SCENE (Lambert). A window's
+  // empty unit carries a low emissive fill — the building's own interior
+  // light — so it reads as a room by day and a dim one at night; a blast
+  // pocket carries none, because a charred hole is dark.
+  function lit(color, fill, side) {
+    const m = new THREE.MeshLambertMaterial({ color: color, side: side || THREE.FrontSide });
+    if (fill > 0) m.emissive = new THREE.Color(color).multiplyScalar(fill);
+    return m;
+  }
+  function insetMat() { return _insetMat || (_insetMat = lit(0xbcb4a4, 0.28, THREE.BackSide)); }   // an empty unit's walls/ceiling
+  function roomFloorMat() { return _roomFloorMat || (_roomFloorMat = lit(0xbfc3ca, 0.22)); }
+  function sootMat() { return _sootMat || (_sootMat = lit(0x2e2a26, 0, THREE.BackSide)); }        // a blast pocket: charred, unlit by itself
+  function warmLightMat() { return _warmLightMat || (_warmLightMat = new THREE.MeshBasicMaterial({ color: 0xffe9c2 })); }   // a real ceiling fixture
+  function rebarMat() { return _rebarMat || (_rebarMat = lit(0x41434a, 0)); }
   function plyMat() { return _plyMat || (_plyMat = new THREE.MeshLambertMaterial({ color: 0x9a7b4f })); }
   function plyBatMat() { return _plyBatMat || (_plyBatMat = new THREE.MeshLambertMaterial({ color: 0x6f5636 })); }
 
@@ -1601,16 +1598,13 @@
      widest is a barrel), so 1.2 m clears the largest offender by 43% while
      sitting well under the 2.5 m the probe itself uses to recognise a wall.
      City facades never reach this test at all — they declare y0/y1. */
-  const POST_SPAN = 1.2;
+  const POST_SPAN = (CBZ.blastLaw && CBZ.blastLaw.PROP_SPAN) || 1.2;
   // The shell a wall/course belongs to — one hop through the mesh's parent
   // group (makeBuilding stamps userData.bld). Null for scene-level props, the
   // prison's world root, and anything not raised by makeBuilding.
   function shellOf(c) {
     const p = c && c.ref && c.ref.parent;
     return (p && p.userData && p.userData.bld) || null;
-  }
-  function curtainBreachOn() {
-    return !(CBZ.CONFIG && CBZ.CONFIG.STRUCT_CURTAIN_BREACH_V1 === false);
   }
   function wallBandOf(c) {
     if (c.y0 != null && c.y1 != null && isFinite(c.y0) && isFinite(c.y1)) return c;   // zero-alloc hot path
@@ -1645,8 +1639,13 @@
     carveDbg.calls = (carveDbg.calls || 0) + 1;
     carveDbg.at = [Math.round(x), +(+y).toFixed(2), Math.round(z)];
     carveDbg.r = r; carveDbg.result = "searching";
-    const maxThick = opts.maxThick > 0 ? opts.maxThick : 0.9;
+    // A CHARGE lets the law price the wall (systems/breach.js): any thickness
+    // is a candidate and the breaching radius decides. Without one (a ram, a
+    // structural failure, a window) a single event never opens a pier.
+    const charge = opts.charge && opts.charge.W > 0 && CBZ.blastLaw ? opts.charge : null;
+    const maxThick = opts.maxThick > 0 ? opts.maxThick : (charge ? 3.0 : 0.9);
     carveDbg.maxThick = maxThick;
+    carveDbg.law = null;
     // --- nearest WALL box whose y-span contains the hit ---
     const sr = opts.search != null ? opts.search : 2.6, sr2 = sr * sr;
     let best = null, bestD = 1e9, bestY0 = 0, bestY1 = 0, bestSy0 = 0, bestSy1 = 0;
@@ -1699,10 +1698,9 @@
          hole then runs floor-to-ceiling like a blown-open bay instead of being
          clamped into a 0.55 m letterbox. Remnants stay clamped to the struck
          COURSE, so the sill still survives left and right of the hole.
-         Flip STRUCT_CURTAIN_BREACH_V1 false → the exact old refusal. */
+*/
       let cSy0 = 0, cSy1 = 0;                               // storey band, curtain courses only
       if (cy1 - cy0 < 1.6) {
-        if (!curtainBreachOn()) continue;                   // sills / furniture slabs aren't walls
         const shell = shellOf(c);
         if (!shell) continue;                               // not a course of anything
         // a course SPANS (same principle as A POST IS NOT A WALL below)
@@ -1741,7 +1739,7 @@
          wall boxes and the heavy-explosive test wall still pass. The blast
          still scars, shakes, shatters glass and throws its debris at a post;
          it just no longer remodels one into an apartment. */
-      if (band.derived && Math.max(c.maxX - c.minX, c.maxZ - c.minZ) < POST_SPAN) continue;
+      if (CBZ.blastLaw ? CBZ.blastLaw.isProp(c, !band.derived) : (band.derived && Math.max(c.maxX - c.minX, c.maxZ - c.minZ) < POST_SPAN)) continue;
       const mt = c.ref.material; if (mt && mt.transparent) continue;    // glass/doors keep their own systems
       const sx = Math.max(c.minX, Math.min(c.maxX, x)), sz = Math.max(c.minZ, Math.min(c.maxZ, z));
       const dx = x - sx, dz = z - sz, dd = dx * dx + dz * dz;
@@ -1752,6 +1750,41 @@
     const wall = best && best.ref;
     if (!wall) { carveDbg.result = "no eligible wall"; return null; }
     if (wall._breached) { carveDbg.result = "already breached"; return null; }
+    /* ---- THE CHARGE LAW DECIDES (systems/breach.js) -----------------------
+       The wall is known now: its thickness, what it is made of, and how far
+       the charge sat off it. Ask the law. A wall that holds keeps what it
+       took (the bank) and sheds a few chips off its face; a wall that breaches
+       opens exactly ~2 R_b across — an RPG ~0.7 m, a tank round ~1.5 m, a
+       bomb several metres — never a room-sized constant. */
+    let lawHole = null;
+    if (charge) {
+      const L = CBZ.blastLaw;
+      const bThick = Math.min(best.maxX - best.minX, best.maxZ - best.minZ);
+      const bShell = shellOf(best);
+      const hint = bShell ? bShell.facade : null;
+      const standoff = charge.contact ? 0 : Math.max(Math.sqrt(bestD), charge.standoff || 0);
+      const prior = CBZ.breachBanked ? CBZ.breachBanked(x, y, z) : 0;
+      lawHole = L.hole(charge.W, { thick: bThick, hint: hint, standoff: standoff,
+        shaped: !!charge.shaped, jetPen: charge.jetPen || 0, banked: prior });
+      if (CBZ.breachBank) CBZ.breachBank(x, y, z, lawHole.Weff);
+      carveDbg.law = { W: +charge.W.toFixed(3), thick: +bThick.toFixed(2), k: lawHole.k, standoff: +standoff.toFixed(2),
+        Rb: +lawHole.Rb.toFixed(3), r: +lawHole.r.toFixed(3), jet: lawHole.jet, banked: +(prior + lawHole.Weff).toFixed(3) };
+      if (!lawHole.breach) {
+        carveDbg.result = "held";
+        // the face still loses its skin: chips of THIS wall, thrown back at the charge
+        const bhz = (best.maxX - best.minX) >= (best.maxZ - best.minZ);
+        const bfix = bhz ? (best.minZ + best.maxZ) / 2 : (best.minX + best.maxX) / 2;
+        const side = ((bhz ? z : x) - bfix) >= 0 ? 1 : -1;
+        const fx = bhz ? Math.max(best.minX, Math.min(best.maxX, x)) : bfix + side * bThick / 2;
+        const fz = bhz ? bfix + side * bThick / 2 : Math.max(best.minZ, Math.min(best.maxZ, z));
+        CBZ.cityChunk(fx, Math.max(bestY0 + 0.2, Math.min(bestY1 - 0.2, y)), fz, {
+          count: Math.max(1, Math.round(1 + 4 * lawHole.scarR)), force: 3 + 4 * lawHole.scarR,
+          dirx: bhz ? 0 : side, dirz: bhz ? side : 0, material: wall.material,
+        });
+        return null;
+      }
+      r = lawHole.r;
+    }
     wall._breached = true;
     carveDbg.result = "carved";
     carveDbg.band = [+bestY0.toFixed(2), +bestY1.toFixed(2)];
@@ -1830,9 +1863,13 @@
     // explicit vertical rect (window openings keep their sill + header exactly)
     if (opts.v0 != null) v0 = Math.max(vy0, opts.v0);
     if (opts.v1 != null) v1 = Math.min(vy1, opts.v1);
-    if (v1 - v0 < 1.0) { const vm = (v0 + v1) / 2; v0 = Math.max(vy0, vm - 0.5); v1 = Math.min(vy1, vm + 0.5); }
-    if (v0 - vy0 < 0.55) v0 = vy0;      // no ankle lip — clean walk-through bottom
-    if (vy1 - v1 < 0.35) v1 = vy1;
+    // A law-sized hole keeps the size the law gave it (an RPG's 0.7 m wound is
+    // not a doorway); only a WALKABLE breach reaches the floor and the slab.
+    const walkOpen = !lawHole || lawHole.walkable;
+    const minH = lawHole ? Math.max(0.4, 2 * r) : 1.0;
+    if (v1 - v0 < minH) { const vm = (v0 + v1) / 2; v0 = Math.max(vy0, vm - minH / 2); v1 = Math.min(vy1, vm + minH / 2); }
+    if (walkOpen && v0 - vy0 < 0.55) v0 = vy0;      // no ankle lip — clean walk-through bottom
+    if (walkOpen && vy1 - v1 < 0.35) v1 = vy1;
     /* THE ANKLE LIP ACROSS A STACKED FACADE. The line above has always meant
        "a breach near the bottom should reach the floor", but it measures
        against THIS BOX's own y0 — and a city facade is a stack of courses, so
@@ -1846,7 +1883,7 @@
        four courses and 1.4 m, and only courses whose TOP is the current bottom
        — a breach two storeys up finds nothing under it and is unchanged. */
     const v0Lip = v0;
-    if (v0 > 0.02) {
+    if (walkOpen && v0 > 0.02) {
       let openBottom = v0;
       for (let pass = 0; pass < 4; pass++) {
         let stepTo = null;
@@ -1881,6 +1918,7 @@
 
     const wmat = wall.material;
     const rec = { wall, col: c, remnCols: [], extras: [], wallWasLos: false, curtain: curtain,
+      lawR: lawHole ? lawHole.r : 0, rect: !!opts.storey,
       gap: { horiz, fixed, thick, u0, u1, v0, v1, y0, y1, px, pz, outS, parent, minU, maxU } };
 
     // hide the solid wall mesh + remove it from LOS (cops can see/shoot through).
@@ -2034,7 +2072,7 @@
          band-less collider that does not SPAN is street furniture, and street
          furniture is not part of the wall it happens to stand near. */
       if (o.y0 == null && o.y1 == null &&
-          Math.max(o.maxX - o.minX, o.maxZ - o.minZ) < POST_SPAN) continue;
+          (CBZ.blastLaw ? CBZ.blastLaw.isProp(o, false) : Math.max(o.maxX - o.minX, o.maxZ - o.minZ) < POST_SPAN)) continue;
       const oFixed = horiz ? (o.minZ + o.maxZ) / 2 : (o.minX + o.maxX) / 2;
       if (Math.abs(oFixed - fixed) > planeTol) continue;
       // a heightless collider is full-height, so it always overlaps
@@ -2160,7 +2198,29 @@
       for (const b of rec.shed) vol += (b.maxX - b.minX) * (b.maxY - b.minY) * (b.maxZ - b.minZ);
       const TOTAL = 44;
       const outN = { x: horiz ? 0 : outS, y: 0.15, z: horiz ? outS : 0 };
-      const P = Math.min(2.6, Math.max(0.7, (r || 1.3) * 0.7));
+      const P = lawHole ? Math.min(2.6, Math.max(0.7, 0.9 * CBZ.blastLaw.cbrt(charge.W) + 0.5))
+                        : Math.min(2.6, Math.max(0.7, (r || 1.3) * 0.7));
+      /* A BLAST HAS TWO FACES. The skin the charge hit craters BACK toward it
+         (near-face spall), and the far skin scabs off and is blown THROUGH
+         (the jet, the shock, the gas). So a charged hole's solids are cut at
+         the wall's mid-plane and each half flies its own way: some chunks land
+         in the street at the shooter's feet, more inside the room. */
+      const bSide = ((horiz ? z : x) - fixed) >= 0 ? 1 : -1;
+      const nearN = { x: horiz ? 0 : bSide, y: 0.3, z: horiz ? bSide : 0 };
+      const farN = { x: horiz ? 0 : -bSide, y: 0.12, z: horiz ? -bSide : 0 };
+      const shedOne = function (b, budget, dir, skinMat) {
+        CBZ.debris.shatterBox(b, skinMat || b.mat, {
+          at: { x, y, z }, dir: dir, power: P,
+          // what the wall is MADE of: a brick building sheds brick; civic /
+          // fortified shells are stone and concrete; glass is glass
+          kind: b.glass ? "glass" : skinMat ? undefined : (shedFacade === "brick" ? "brick" : (shedFacade === "civic" ? "rock" : undefined)),
+          // the rim of surviving wall stays welded: a broken edge, not a saw cut
+          keepEdge: b.glass ? 0 : 0.35,
+          maxPieces: b.glass ? Math.min(budget, 14) : budget,
+          owner: rec.debrisKey,
+          grit: b.glass ? 1 : 0.8,
+        });
+      };
       for (const b of rec.shed) {
         const v = (b.maxX - b.minX) * (b.maxY - b.minY) * (b.maxZ - b.minZ);
         const share = vol > 0 ? v / vol : 0;
@@ -2172,18 +2232,14 @@
         if (!b.glass && shedBld && CBZ.cityIsShellMat(shedBld, b.mat)) {
           try { skinMat = CBZ.citySkin(shedBld, (b.minX + b.maxX) / 2, (b.minZ + b.maxZ) / 2); } catch (e) { skinMat = null; }
         }
-        CBZ.debris.shatterBox(b, skinMat || b.mat, {
-          at: { x, y, z }, dir: outN, power: P,
-          // what the wall is MADE of: a brick building sheds brick; civic /
-          // fortified shells are stone and concrete; glass is glass
-          // (a skin says what it is itself: brick, ashlar, stucco, adobe)
-          kind: b.glass ? "glass" : skinMat ? undefined : (shedFacade === "brick" ? "brick" : (shedFacade === "civic" ? "rock" : undefined)),
-          // the rim of surviving wall stays welded: a broken edge, not a saw cut
-          keepEdge: b.glass ? 0 : 0.35,
-          maxPieces: b.glass ? Math.min(budget, 14) : budget,
-          owner: rec.debrisKey,
-          grit: b.glass ? 1 : 0.8,
-        });
+        const lo = horiz ? b.minZ : b.minX, hi = horiz ? b.maxZ : b.maxX;
+        if (!lawHole || b.glass || hi - lo < 0.12) { shedOne(b, budget, lawHole ? farN : outN, skinMat); continue; }
+        const mid = (lo + hi) / 2;
+        const nearB = Object.assign({}, b), farB = Object.assign({}, b);
+        if (horiz) { if (bSide > 0) { nearB.minZ = mid; farB.maxZ = mid; } else { nearB.maxZ = mid; farB.minZ = mid; } }
+        else { if (bSide > 0) { nearB.minX = mid; farB.maxX = mid; } else { nearB.maxX = mid; farB.minX = mid; } }
+        shedOne(nearB, Math.max(1, Math.round(budget * 0.4)), nearN, skinMat);
+        shedOne(farB, Math.max(1, Math.round(budget * 0.6)), farN, skinMat);
       }
     }
     /* TELL THE LEDGER WHAT IS PHYSICALLY GONE.
@@ -2204,7 +2260,7 @@
        caused this carve was already priced by the bus, and this call carries
        amount 0 and geometry only. */
     const shell = (parent && parent.userData && parent.userData.bld) || null;
-    if (shell && CBZ.structure && CBZ.structure.hit && !opts.quiet) {
+    if (shell && CBZ.structure && CBZ.structure.hit && !opts.quiet && !opts.storey) {
       const sFH = shell.FH > 0 ? shell.FH : 4.1;
       const vMid = (v0 + v1) / 2;
       const k = Math.max(0, Math.floor(vMid / sFH));
@@ -2243,159 +2299,79 @@
       } catch (e) {}
     }
 
-    // --- DRESS: a room-deep dark INSET pocket (BackSide box — you look INTO
-    //     it) with a warm spill quad at its back that glows after dusk, so an
-    //     upper-storey wound reads as a blown-open room, not a paper cutout. ---
-    const gapU = u1 - u0, gapV = v1 - v0, gapCen = (u0 + u1) / 2, vCen = (v0 + v1) / 2;
-    // --- THE ROOM BEHIND THE WALL (user-filmed: the old pass was one near-
-    //     black box — "a hole in a paper building"). A blast hole now opens
-    //     into a real-looking ROOM: mid-tone walls/ceiling you can read in
-    //     daylight, a darker back wall for depth, a concrete floor slab at the
-    //     storey line (walls are one box per storey, so y0 IS the floor),
-    //     blown-about furniture silhouettes, and rebar hanging off the header.
-    //     Window vaults (opts.dep≈1) keep the shallow pass — their room is the
-    //     real furnished interior you climb into. ---
-    const dep = opts.dep != null ? opts.dep : (v0 === y0 ? 1.0 : 2.6);
-    // opts.open = a TRUE opening (window carves): both sides of this wall are
-    // real — the furnished room inside, the street outside — so ANY pocket
-    // dress would block the view (USER-FILMED: shooting a window from inside
-    // showed a gray panel instead of the street). Skip the dress entirely.
-    // A CURTAIN-WALL BAY ALREADY HAS A ROOM BEHIND IT. The pocket dress below
-    // exists for a wall with nothing behind it but a building volume; an office
-    // storey has real floor slabs, real furniture and a real interior glow that
-    // you can already see THROUGH THE GLASS from the street. Building a 2.6 m
-    // prefab room inside that would put a box inside a box and z-fight the slab
-    // it is standing on. Same reasoning as opts.open, reached from the geometry
-    // rather than from the caller.
+    /* ---- WHAT IS BEHIND THE HOLE ------------------------------------------
+       (1) opts.open (a window carve) and a curtain-wall bay: a real interior is
+           already behind it — no dress at all.
+       (2) a free-standing slab or anything prop-sized: nothing is behind it —
+           no dress (gta6-props-are-not-walls: the lamp-post "glowing room").
+       (3) opts.revealRoom (a shot-out upper window): the empty unit behind the
+           glass, lit by the SCENE with a low baked fill, plus its ceiling
+           fixture — never a self-lit box.
+       (4) a BLAST hole: a charred pocket. One soot-lined box you look into,
+           Lambert-lit like the wall around it (dark at night, because it is),
+           and the reinforcement the blast exposed hanging off the header. The
+           old prefab — full-bright cream liner, glowing ceiling slab, box
+           furniture, warm spill — is gone: the owner filmed it as a "glowing
+           fake wall" and it was never what a blast leaves. */
+    const gapU = u1 - u0, gapCen = (u0 + u1) / 2;
     if (opts.open || curtain) {
       cityBreaches.push(rec);
       return rec;
     }
-    /* THE HOUSE THE ROCKET BUILT (user-filmed, prison yard). Everything in
-       the dress below — pocket liner, back wall, concrete floor slab, glowing
-       ceiling lamp, furniture — is a CITY INTERIOR, authored to be swallowed
-       by the building volume behind a facade. A free-standing wall has no
-       behind: built there, the prefab stands proud in the open as a lit
-       little house on the spot the rocket cleared. A lone slab keeps only
-       what blasted concrete leaves — the remnant flanks, the fractured rim,
-       the scorch and the debris the fracture chain already throws.
-
-       AND `freeStanding` DOES NOT CATCH EVERY LONE SLAB. It infers "there is a
-       volume behind this wall" from the parent group being TRANSLATED — but
-       every street prop in the city is a group translated to its own kerb, so
-       a lamp mast, a sign post or a fence panel reads as facade and gets the
-       whole prefab built in the open air (owner-filmed: an RPG into a street
-       lamp). The collider gates above stop props being picked as walls at all
-       now; this is the second wall of that fence, and it asks the question
-       directly instead of inferring it — a building is metres across in BOTH
-       horizontal axes, a prop group is its own pole. Only walls too short to
-       be architecture on their own pay for the bounds traversal, so the
-       common city-facade path is untouched. */
     if (freeStanding || propSized()) {
-      buildRim();
       cityBreaches.push(rec);
       return rec;
     }
-    // revealRoom (a shot-open upper window) reads as an EMPTY LIT ROOM — same
-    // shell as a blast (inset pocket + back wall + floor slab) but NO damage
-    // (no furniture, rebar, rubble) plus closing side walls + a ceiling, so a
-    // vacant unit shows a clean concrete box, never gray paper.
     const revealRoom = !!opts.revealRoom;
-    const deepRoom = dep > 1.6 || revealRoom;
-    const floorY = deepRoom ? y0 : v0;                 // show the slab down to the storey floor
+    // a blast pocket is as deep as the wound is wide (a 0.7 m rocket hole does
+    // not open onto a 2.6 m stage set); a gutted bay or a window shows the room
+    const dep = opts.dep != null ? opts.dep
+      : (revealRoom || opts.storey ? 2.6 : Math.min(2.6, Math.max(0.9, gapU * 1.3)));
+    const floorY = (revealRoom || opts.storey) ? y0 : v0;
     const podV0 = Math.min(v0, floorY), podV1 = v1 + 0.2;
     const podCen = (podV0 + podV1) / 2, podH = podV1 - podV0;
     const inCtr = fixed - outS * (dep - thick) / 2;    // pocket centred inward from the outer plane
-    const ig = new THREE.BoxGeometry(horiz ? gapU + 0.2 : dep, podH, horiz ? dep : gapU + 0.2);
-    const im = new THREE.Mesh(ig, insetMat());
+    const addPart = function (m) {
+      m.castShadow = false; m.receiveShadow = false;
+      if (parent) parent.add(m); else CBZ.scene.add(m);
+      rec.extras.push(m);
+      return m;
+    };
+    const im = addPart(new THREE.Mesh(
+      new THREE.BoxGeometry(horiz ? gapU + 0.2 : dep, podH, horiz ? dep : gapU + 0.2),
+      revealRoom ? insetMat() : sootMat()));
     im.position.set((horiz ? gapCen : inCtr) - px, podCen, (horiz ? inCtr : gapCen) - pz);
-    im.castShadow = false; im.receiveShadow = false;
-    if (parent) parent.add(im); else CBZ.scene.add(im);
-    rec.extras.push(im);
-    const backN = fixed + outS * (thick / 2 - dep + 0.06);
-    if (deepRoom) {
-      // darker back wall = depth you can read at a glance
-      const bw = new THREE.Mesh(new THREE.PlaneGeometry(gapU + 0.2, podH), roomBackMat());
-      bw.position.set((horiz ? gapCen : backN + outS * 0.02) - px, podCen, (horiz ? backN + outS * 0.02 : gapCen) - pz);
-      aimDecal(bw, horiz ? 0 : outS, 0, horiz ? outS : 0);
-      if (parent) parent.add(bw); else CBZ.scene.add(bw);
-      rec.extras.push(bw);
-      // concrete floor slab — the room has a FLOOR, not a void
-      const fl = new THREE.Mesh(new THREE.BoxGeometry(horiz ? gapU + 0.2 : dep - 0.1, 0.08, horiz ? dep - 0.1 : gapU + 0.2), roomFloorMat());
+    if (revealRoom) {
+      // the unit's floor and its ceiling fixture — the room reads as a room
+      const fl = addPart(new THREE.Mesh(new THREE.BoxGeometry(horiz ? gapU + 0.2 : dep - 0.1, 0.08, horiz ? dep - 0.1 : gapU + 0.2), roomFloorMat()));
       fl.position.set((horiz ? gapCen : inCtr) - px, floorY + 0.05, (horiz ? inCtr : gapCen) - pz);
-      if (parent) parent.add(fl); else CBZ.scene.add(fl);
-      rec.extras.push(fl);
-      // a warm GLOWING ceiling light near the back — what makes the showroom read
-      // "lit room" not "flat box"; a cheap self-lit slab (no real light added).
       const lgW = horiz ? Math.min(1.8, (gapU + 0.2) * 0.6) : 0.5, lgD = horiz ? 0.5 : Math.min(1.8, (gapU + 0.2) * 0.6);
-      const lg = new THREE.Mesh(new THREE.BoxGeometry(lgW, 0.07, lgD), warmLightMat());
+      const lg = addPart(new THREE.Mesh(new THREE.BoxGeometry(lgW, 0.07, lgD), warmLightMat()));
       lg.position.set((horiz ? gapCen : inCtr) - px, v1 - 0.2, (horiz ? inCtr : gapCen) - pz);
-      lg.castShadow = false; lg.receiveShadow = false;
-      if (parent) parent.add(lg); else CBZ.scene.add(lg);
-      rec.extras.push(lg);
-      if (!revealRoom) {
-        // blast-shoved furniture: a couple of dark silhouettes, randomly placed
-        // and yawed, sitting on that floor (cheap boxes — they read as the room's
-        // contents surviving the hit, which is what makes it a ROOM)
-        const nFurn = gapU > 1.6 ? 2 : 1;
-        for (let fi = 0; fi < nFurn; fi++) {
-          const fw = 0.5 + Math.random() * 0.7, fh = 0.5 + Math.random() * 1.1, fd = 0.4 + Math.random() * 0.4;
-          const fg = new THREE.Mesh(new THREE.BoxGeometry(fw, fh, fd), roomFurnMat());
-          const along = (Math.random() - 0.5) * Math.max(0.2, gapU - fw);
-          const inward = thick / 2 + 0.5 + Math.random() * (dep - thick - 1.0);
-          const fx = horiz ? gapCen + along : fixed - outS * inward;
-          const fz = horiz ? fixed - outS * inward : gapCen + along;
-          fg.position.set(fx - px, floorY + 0.08 + fh / 2, fz - pz);
-          fg.rotation.y = Math.random() * Math.PI;
-          fg.rotation.z = Math.random() < 0.3 ? (Math.random() - 0.5) * 0.5 : 0;   // one knocked over
-          if (parent) parent.add(fg); else CBZ.scene.add(fg);
-          rec.extras.push(fg);
-        }
-        // rebar hanging from the header into the gap — broken concrete shows its bones
-        const nBar = 2 + ((Math.random() * 2) | 0);
-        for (let bi = 0; bi < nBar; bi++) {
-          const bl = 0.4 + Math.random() * 0.6;
-          const bg = new THREE.Mesh(new THREE.BoxGeometry(0.035, bl, 0.035), rebarMat());
-          const along = (Math.random() - 0.5) * gapU * 0.8;
-          const bx = horiz ? gapCen + along : fixed + outS * (thick / 2 - 0.1);
-          const bz = horiz ? fixed + outS * (thick / 2 - 0.1) : gapCen + along;
-          bg.position.set(bx - px, v1 - bl / 2 + 0.05, bz - pz);
-          bg.rotation.x = (Math.random() - 0.5) * 0.35;
-          bg.rotation.z = (Math.random() - 0.5) * 0.35;
-          if (parent) parent.add(bg); else CBZ.scene.add(bg);
-          rec.extras.push(bg);
-        }
-      } else {
-        // REVEAL ROOM: close the pocket into a real box. Two side walls (left +
-        // right of the gap, ~dep deep) and a ceiling slab at the header line —
-        // shared self-lit MeshBasic singletons (no per-hole materials, no light
-        // churn) so the empty unit reads as a constant concrete mid-tone room.
-        // ceiling at the top of the opening, spanning the gap × pocket depth
-        const cg = new THREE.Mesh(new THREE.BoxGeometry(horiz ? gapU + 0.2 : dep - 0.1, 0.06, horiz ? dep - 0.1 : gapU + 0.2), roomCeilMat());
-        cg.position.set((horiz ? gapCen : inCtr) - px, v1 - 0.05, (horiz ? inCtr : gapCen) - pz);
-        if (parent) parent.add(cg); else CBZ.scene.add(cg);
-        rec.extras.push(cg);
-        // two side walls closing the pocket left/right (thin BOXES ~dep × podH
-        // so they read from any angle — the player can stand inside ground-level
-        // holes; a single-sided plane would vanish from the back)
-        for (const sgn of [-1, 1]) {
-          const sg = new THREE.BoxGeometry(horiz ? 0.05 : dep - 0.1, podH, horiz ? dep - 0.1 : 0.05);
-          const sw = new THREE.Mesh(sg, roomBackMat());
-          if (horiz) sw.position.set(gapCen + sgn * gapU / 2 - px, podCen, inCtr - pz);
-          else sw.position.set(inCtr - px, podCen, gapCen + sgn * gapU / 2 - pz);
-          if (parent) parent.add(sw); else CBZ.scene.add(sw);
-          rec.extras.push(sw);
-        }
+    } else {
+      // exposed reinforcement: bars torn out of the broken header, sized to the
+      // wound (a small hole shows one or two, a gutted bay a row of them) —
+      // merged into ONE mesh, so a hole costs two draws (pocket + steel)
+      const nBar = Math.max(1, Math.min(5, Math.round(gapU * 1.4)));
+      const pos = [], nrm = [];
+      const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _v = new THREE.Vector3(), _s = new THREE.Vector3(1, 1, 1);
+      for (let bi = 0; bi < nBar; bi++) {
+        const bl = 0.25 + Math.random() * Math.min(0.8, gapU * 0.5);
+        const along = (Math.random() - 0.5) * gapU * 0.8;
+        const bx = horiz ? gapCen + along : fixed + outS * (thick / 2 - 0.08);
+        const bz = horiz ? fixed + outS * (thick / 2 - 0.08) : gapCen + along;
+        const g = new THREE.BoxGeometry(0.03, bl, 0.03).toNonIndexed();
+        _e.set((Math.random() - 0.5) * 0.5, 0, (Math.random() - 0.5) * 0.5);
+        g.applyMatrix4(_m4.compose(_v.set(bx - px, v1 - bl / 2 + 0.04, bz - pz), _q.setFromEuler(_e), _s));
+        const pa = g.attributes.position.array, na = g.attributes.normal.array;
+        for (let k = 0; k < pa.length; k++) { pos.push(pa[k]); nrm.push(na[k]); }
+        g.dispose();
       }
+      const bars = new THREE.BufferGeometry();
+      bars.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+      bars.setAttribute("normal", new THREE.Float32BufferAttribute(nrm, 3));
+      addPart(new THREE.Mesh(bars, rebarMat()));
     }
-    const sq = new THREE.Mesh(new THREE.PlaneGeometry(gapU * 0.9, gapV * 0.9), spillMat());
-    sq.position.set((horiz ? gapCen : backN) - px, vCen, (horiz ? backN : gapCen) - pz);
-    aimDecal(sq, horiz ? 0 : outS, 0, horiz ? outS : 0);
-    sq.renderOrder = 2;
-    if (parent) parent.add(sq); else CBZ.scene.add(sq);
-    rec.extras.push(sq);
-
-    buildRim();
 
     cityBreaches.push(rec);
     return rec;
@@ -2432,10 +2408,6 @@
       } catch (e) { return false; }
     }
 
-    // The ragged rim is the wall's own surviving material: the shed above
-    // keeps its edge cells welded in place (CBZ.debris keepEdge). No invented
-    // concrete teeth are added around an opening.
-    function buildRim() {}
   }
   // PUBLIC primitive for city/fracture.js (ledger/caps/persistence live there)
   CBZ.cityCarveWall = carveHole;
@@ -2456,7 +2428,6 @@
       remn += (b.extras ? b.extras.length : 0);
     }
     return {
-      flag: curtainBreachOn(),
       openings: cityBreaches.length,
       curtainOpenings: curtainN,
       openArea: +area.toFixed(1),
@@ -2541,9 +2512,9 @@
       // EVERY storey reveals a clean LIT ROOM. The raw hollow interior reads as
       // dim GRAY (the inside faces of the walls ARE the gray exterior box, barely
       // lit), so a true open:true hole just showed "gray building" (filmed).
-      // revealRoom lines the opening with a bright showroom-grade pocket — light
-      // walls, cool floor, white ceiling, a warm ceiling light — so you SEE A
-      // ROOM through a shot-out window, the same way the showroom front reads.
+      // revealRoom lines the opening with the empty unit — light walls and a
+      // cool floor, lit by the scene plus the building's own low interior fill,
+      // and its ceiling fixture — so you SEE A ROOM through a shot-out window.
       revealRoom: true, dep: 2.6,
     });
     if (!rec) return;                          // open air / wall already breached
@@ -2685,88 +2656,82 @@
     return audit;
   };
 
-  // PUBLIC: blast a passable hole through the nearest ground-floor wall to (x,z).
-  // `r` ~ the breach half-reach in metres (an RPG blastRadius 13 → r≈3.6, a
-  // satisfying car-sized hole). Returns true if a wall actually opened. Now a
-  // thin wrapper over the generalized carve (chest height, legacy 5m search) so
-  // every ground breach lands in the fracture ledger (persistence + guests) —
-  // and a no-op when this same blast's fracture pass already opened the wall.
+  // PUBLIC: open the nearest ground-floor wall to (x,z) with a KNOWN opening
+  // radius — a vehicle through a shopfront, a scripted breach. No charge law
+  // here (nothing exploded); the size is the caller's. A no-op when a blast
+  // at this spot already asked the wall this frame (fracture.recent).
   CBZ.cityBreach = function (x, z, r) {
-    r = r || 1.6;
-    if (!CBZ.scene || !CBZ.colliders) return false;
     const fr = CBZ.cityFracture;
-    if (fr && fr.recent && fr.recent(x, z)) return true;    // this rocket already opened the wall
-    const rec = carveHole(x, 1.2, z, r, { search: 5 });
-    // Nothing to breach (open air, or the wall was already opened).
-    if (!rec) return false;
-    if (fr && fr._adopt) fr._adopt(rec, r);
-    // rubble blown INWARD through the hole, burst nearby panes, feedback
-    const g = rec.gap;
-    const off = g.horiz ? (z - g.fixed) : (x - g.fixed);
-    const inN = off >= 0 ? 1 : -1;                          // push debris away from the side the rocket came from
-    const dxr = g.horiz ? 0 : -inN, dzr = g.horiz ? -inN : 0;
-    const gapCen = (g.u0 + g.u1) / 2;
-    const rubX = g.horiz ? gapCen : g.fixed, rubZ = g.horiz ? g.fixed : gapCen;
-    CBZ.cityChunk(rubX, (g.v0 + g.v1) / 2 - (g.v1 - g.v0) * 0.2, rubZ,
-      { count: 5 + ((Math.random() * 4) | 0), force: 5, dirx: dxr, dirz: dzr, material: rec.wall && rec.wall.material });
-    CBZ.cityShatter(x, z, r * 2 + 4);
-    if (CBZ.shake) CBZ.shake(0.6);
-    return true;
+    if (!fr || !fr.blastAt || !CBZ.scene || !CBZ.colliders) return false;
+    if (fr.recent && fr.recent(x, z)) return true;
+    const gy = CBZ.floorAt ? CBZ.floorAt(x, z) : 0;
+    return !!fr.blastAt({ x: x, y: gy + 1.2, z: z }, { r: r || 1.6, search: 5, now: true });
   };
 
-  // DECORATE the explosion with physical structural damage without touching
-  // crashfx.js. We wrap once, lazily, the first time the city updates (after all
-  // modules load), preserving the original behaviour exactly. Idempotent.
-  // The STRUCTURAL pass shared by every blast: outward concrete chunks, the
-  // facade-damage sweep, and — for a hard hit against a
-  // wall — a real persistent carved HOLE at the impact height that opens onto
-  // the LIT interior room (fracture.js owns ledger/caps/debris; carveHole's
-  // deepRoom dress + the brightened reveal palette make it read as a room you
-  // can see INTO, not a gray crater). Radius maps the ordnance — RPG/airstrike
-  // ~2.6-3.4, grenade/car-burst ~1.6, anything weaker just scars.
-  function structuralBlast(x, z, opts) {
+  /* ============================================================
+     CBZ.blastBuildings(x, y, z, opts) — WHAT ONE EXPLOSION DOES TO THE BUILT
+     WORLD. Called once per detonation by the explosion itself (crashfx.js
+     cityExplosion / cityAirstrikeExplosion), in every mode. Everything is
+     derived from ONE number, the charge W (kg TNT-equivalent), through
+     systems/breach.js's law:
+       1. glass     every pane inside Z_GLASS . W^(1/3)
+       2. a target  a declared door/vault in reach is paid (and the wall left)
+       3. the wall  fracture.blastAt -> carveHole asks the law: breach or hold,
+                    and how big (shaped charges perforate on their jet)
+       4. the ledger (city/structural.js S.charge) for a blast the ordnance bus
+                    did not route — the bus feeds the ledger itself, with the
+                    same law, for everything it detonates.
+     W comes from opts.charge (the bus and C4 always pass it), else from the
+     reference charge of the named ordnance, else from `power` (legacy callers;
+     W = 0.1 . power^3, so an RPG-power blast is an RPG-sized charge).
+     ============================================================ */
+  CBZ.blastBuildings = function (x, y, z, opts) {
+    opts = opts || {};
+    const L = CBZ.blastLaw;
+    if (opts.noDamage || !L) return null;
+    const ref = L.CHARGES[opts.ordnance] || L.CHARGES[opts.kind] || null;
+    const W = opts.charge > 0 ? +opts.charge : (ref ? ref.W : L.chargeOfPower(opts.power || 1));
+    if (!(W > 0)) return null;
+    const shaped = opts.shaped != null ? !!opts.shaped : !!(ref && ref.shaped);
+    const jetPen = opts.jetPen > 0 ? +opts.jetPen : (ref && ref.jetPen) || 0;
+    const out = { W: W, glassR: L.glassR(W), target: null };
     try {
-      const power = (opts && opts.power) || 1;
-      const groundY = CBZ.floorAt ? CBZ.floorAt(x, z) : 0;
-      const impactY = opts && opts.y != null ? +opts.y : groundY + 1.4;
-      const elevated = impactY > groundY + 3;
-      // A rocket 30m up a tower must not damage a phantom ground-floor wall.
-      // Debris and building damage stay at the actual impact seat.
-      // (no generic chunk spray here: a wall that is hit sheds its own
-      // pieces through the carve, and the ground under an open-air blast
-      // throws its own chips in crashfx)
-      CBZ.cityDamageBuilding(x, impactY, z, Math.min(3, power));
-      if (CBZ.cityFracture && CBZ.cityFracture.blastAt && power >= 0.85 && !(opts && opts.noDamage)) {
-        const hy = impactY;
-        const hr = power >= 1.3 ? Math.min(3.4, 2.6 + (power - 1.3) * 0.7) : 1.6;
-        CBZ.cityFracture.blastAt({ x: x, y: hy, z: z }, hr, { power: power });
-      }
+      if (!CBZ.game || CBZ.game.mode === "city") {
+        CBZ.cityShatter(x, z, out.glassR, { power: Math.min(2.2, 0.8 + 0.45 * L.cbrt(W)) });
+      } else if (CBZ.shatterGlass) CBZ.shatterGlass(x, z, out.glassR);
     } catch (e) {}
-  }
-  // Wrap a blast entry point ONCE (idempotent per-fn) so it also does structural
-  // damage. BOTH the ground blast (cityExplosion: RPG/C4/grenade/car) AND the
-  // air blast (cityAirstrikeExplosion: planes/helicopters/missiles/airstrikes)
-  // get it — so ANYTHING that hits a building opens it to the interior, not just
-  // the hand-thrown RPG. (Was: only cityExplosion wrapped, so aircraft hits left
-  // a fake crater that didn't show inside — user-filmed.)
-  function wrapBlast(name) {
-    const orig = CBZ[name];
-    if (typeof orig !== "function" || orig._structWrapped) return;
-    const wrapped = function (x, z, opts) { const r = orig.call(this, x, z, opts); structuralBlast(x, z, opts); return r; };
-    wrapped._structWrapped = true;
-    CBZ[name] = wrapped;
-  }
-  function wrapExplosion() {
-    wrapBlast("cityExplosion");
-    wrapBlast("cityAirstrikeExplosion");
-  }
+    const dup = L.recent(x, y, z);
+    if (!dup && (!CBZ.modeHas || CBZ.modeHas("breach"))) {
+      let t = null;
+      if (!opts.noWallCarve && CBZ.breachTargetStrike) {
+        try { t = CBZ.breachTargetStrike(x, y, z, W, !!opts.contact, opts); } catch (e) { t = null; }
+      }
+      out.target = t;
+      if (!t && !opts.noWallCarve && !opts.airburst && CBZ.cityFracture && CBZ.cityFracture.blastAt) {
+        try {
+          CBZ.cityFracture.blastAt({ x: x, y: y, z: z }, {
+            charge: W, contact: !!opts.contact, shaped: shaped, jetPen: jetPen, byPlayer: !!opts.byPlayer,
+          });
+        } catch (e) {}
+      }
+    }
+    L.stamp(x, y, z);
+    const busOwned = opts._impact || (CBZ.impact && CBZ.impact.inBusBlast && CBZ.impact.inBusBlast());
+    if (!busOwned && !dup && CBZ.structure && CBZ.structure.charge) {
+      try {
+        CBZ.structure.charge(x, y, z, W, { kind: opts.ordnance || opts.kind || "explosion",
+          byPlayer: !!opts.byPlayer, fire: opts.fire || 0 });
+      } catch (e) {}
+    }
+    return out;
+  };
+
   CBZ.onUpdate(0.01, function () {
     if (CBZ.game.mode !== "city") {
       if (glassNightOn) CBZ.cityGlassNight(false);
       if (winOpenQ.length) winOpenQ.length = 0;   // arena gone — drop queued window carves
       return;
     }
-    wrapExplosion();
     // fold any freshly-registered panes into instanced pools (first city frame
     // for the main build; later generations for the expansion island).
     if (pendingGlass.length) buildGlassPools();
@@ -2783,9 +2748,6 @@
     // view.js's emissive night pass so the whole night look lands together.
     const n = CBZ.nightAmount == null ? 0 : CBZ.nightAmount;
     CBZ.cityGlassNight(glassNightOn ? n > 0.45 : n > 0.6);
-    // warm light spilling out of carved wall holes — one shared material, so
-    // every hole in the city breathes with the same dusk
-    if (_spillMat) _spillMat.opacity = 0.08 + n * 0.5;
     // PLAYER CLIMBING THROUGH a shot-out window: crossing the wall plane inside
     // a live opening, street→room, fires the burglary hook. buildings.js only
     // REPORTS the route — shops/wanted own the crime (after-hours register/case

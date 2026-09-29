@@ -1440,7 +1440,8 @@
         for (let i = 0; i < n; i++) {
           const a = (i / n) * 6.2832 + rnd() * 0.4;
           const r = 0.6 + rnd() * 0.7;
-          CBZ.cityDustKick(d.ox + Math.cos(a) * p.w * r, d.gy + 0.5, d.oz + Math.sin(a) * p.d * r, 2.6 * p.m.dust, dc);
+          CBZ.cityDustKick(d.ox + Math.cos(a) * p.w * r, d.gy + 0.5, d.oz + Math.sin(a) * p.d * r, 2.6 * p.m.dust, dc,
+            { dirx: Math.cos(a), dirz: Math.sin(a), speed: 3 + Math.min(5, p.h * 0.08) });
         }
       }
       if (CBZ.cityChunk) CBZ.cityChunk(d.ox, d.gy + 1.4, d.oz, { count: 16, force: 10, material: sh && sh.wallMat });
@@ -1497,10 +1498,73 @@
     if (rec.carved < 2) spots.push([0, 0], [bay, 0]);
     if (want >= 4) spots.push([-bay, 0], [bay * 2, 0], [0, FH], [bay, FH]);
     rec.carved = want;
+    const fr = CBZ.cityFracture;
     for (const sp of spots) {
-      try { CBZ.cityCarveWall(at.x + tx * sp[0], at.y + sp[1], at.z + tz * sp[0], 1.3); } catch (e) {}
+      // through the fracture ledger, so the wound persists and replays
+      try {
+        if (fr && fr.blastAt) fr.blastAt({ x: at.x + tx * sp[0], y: at.y + sp[1], z: at.z + tz * sp[0] }, { r: 1.3 });
+        else CBZ.cityCarveWall(at.x + tx * sp[0], at.y + sp[1], at.z + tz * sp[0], 1.3);
+      } catch (e) {}
     }
     return rec;
+  };
+
+  /* ---- C.gut — A STOREY BLOWN OUT --------------------------------------------
+     city/structural.js calls this when a charge guts floors (the law's
+     Z_GUT . W^(1/3) >= a room). For each gutted storey, every facade bay the
+     gut sphere reaches is opened FLOOR TO CEILING through the same carve a
+     rocket uses — the bay's own wall leaves as pieces of itself, the charred
+     pocket stands behind, the ledger remembers it. Nearest bays first, capped
+     per blast by quality so a Mk-84 costs a bounded number of openings.
+       desc   { ox, oz, w, d, FH, key }
+       floors [{ f, r }]  storey index + the gut radius at that storey's height
+       at     the charge's seat
+     Returns the vents [{x,y,z,nx,nz,f}] the fire plumes leave through. */
+  const GUT_BAY = 3.2;
+  C.gut = function (desc, floors, at, opts) {
+    const fr = CBZ.cityFracture;
+    if (!fr || !fr.blastAt || !floors || !floors.length) return [];
+    const FH = desc.FH || 3.2, hw = (desc.w || 10) / 2, hd = (desc.d || 10) / 2;
+    const cand = [];
+    // the four faces: a point on the face line, its outward normal, its axis
+    const faces = [
+      { nx: 0, nz: -1, fx: 0, fz: -hd, horiz: true }, { nx: 0, nz: 1, fx: 0, fz: hd, horiz: true },
+      { nx: -1, nz: 0, fx: -hw, fz: 0, horiz: false }, { nx: 1, nz: 0, fx: hw, fz: 0, horiz: false },
+    ];
+    for (const fl of floors) {
+      for (const F of faces) {
+        const px = desc.ox + F.fx, pz = desc.oz + F.fz;
+        const off = F.horiz ? Math.abs(at.z - pz) : Math.abs(at.x - px);
+        if (off > fl.r) continue;
+        const half = Math.sqrt(fl.r * fl.r - off * off);
+        const c = F.horiz ? at.x : at.z, lo0 = F.horiz ? desc.ox - hw : desc.oz - hd, hi0 = F.horiz ? desc.ox + hw : desc.oz + hd;
+        const lo = Math.max(lo0 + 0.5, c - half), hi = Math.min(hi0 - 0.5, c + half);
+        if (hi - lo < 1.0) continue;
+        const n = Math.max(1, Math.round((hi - lo) / GUT_BAY));
+        const bw = (hi - lo) / n;
+        for (let i = 0; i < n; i++) {
+          const u = lo + bw * (i + 0.5);
+          const x = F.horiz ? u : px, z = F.horiz ? pz : u;
+          cand.push({ x: x, z: z, f: fl.f, nx: F.nx, nz: F.nz, bw: bw, d: Math.hypot(x - at.x, z - at.z) + Math.abs(fl.f * FH + FH / 2 - at.y) });
+        }
+      }
+    }
+    cand.sort(function (a, b) { return a.d - b.d; });
+    const cap = Math.round(qs(4, 10));
+    const vents = [];
+    for (let i = 0; i < cand.length && i < cap; i++) {
+      const c = cand[i];
+      const y0 = c.f * FH, yMid = y0 + FH * 0.5;
+      try {
+        // seat just inside the face so the carve resolves THIS wall, not a neighbour's
+        fr.blastAt({ x: c.x - c.nx * 0.15, y: yMid, z: c.z - c.nz * 0.15 }, {
+          r: Math.min(1.8, c.bw * 0.45), gapW: c.bw * 0.86, v0: y0 + 0.02, v1: y0 + FH - 0.02,
+          storey: true, search: 1.2, byPlayer: !!(opts && opts.byPlayer),
+        });
+      } catch (e) {}
+      vents.push({ x: c.x, y: yMid, z: c.z, nx: c.nx, nz: c.nz, f: c.f });
+    }
+    return vents;
   };
 
   C.skinClear = function (desc) {

@@ -214,6 +214,7 @@
     const A = CBZ.city && CBZ.city.arena;
     if (A && A.clampToCity) { try { A.clampToCity(pos, r); } catch (e) {} }
   }
+  function wrapA(a) { while (a > Math.PI) a -= Math.PI * 2; while (a < -Math.PI) a += Math.PI * 2; return a; }
   function vehName(rec) { return (rec && rec.model && rec.model.name) || (rec && rec.name) || "Vehicle"; }
   function activeCtx() { return g.mode === "city" && g.state === "playing"; }
   function aircraftFlying() { const P = CBZ.player; return !!(P && P._aircraft); }
@@ -331,6 +332,7 @@
           note: (civil ? (airliner ? "Hijack this commercial flight" : "Steal this aircraft")
             : v.kind === "tank" ? "Commandeer the tank"
             : v.kind === "patriot" ? "Commandeer the missile battery"
+            : v.kind === "mlrs" ? "Commandeer the rocket launcher"
             : v.kind === "heli" ? "Steal the helicopter"
             : v.kind === "plane" ? "Steal the aircraft"
             : "Steal the vehicle") + " · expect heat",
@@ -342,7 +344,7 @@
         id: "milveh-take", slot: "e", ride: true, bad: true, campaignSafe: true,
         label: function (v) {
           return v.civilian ? (v.flightKind === "airliner" ? "Hijack" : "Steal")
-            : (v.kind === "tank" || v.kind === "patriot") ? "Commandeer"
+            : (v.kind === "tank" || v.kind === "patriot" || v.kind === "mlrs") ? "Commandeer"
             : "Steal";
         },
         onSelect: function (v) { boardVehicle(v); },
@@ -437,7 +439,7 @@
     // THEFT + HEAT (mirror storage.js stealBaseJet): grand theft of military
     // hardware is instant, loud, and pins a hard manhunt. Ground = 3★, air = 4★.
     if (CBZ.cityCrime) { try { CBZ.cityCrime(120, { type: rec.civilian ? "aircraft-hijacking" : "grand-theft-military", x: rec.pos.x, z: rec.pos.z, instant: true }); } catch (e) {} }
-    if (CBZ.cityForceStars) { try { CBZ.cityForceStars(rec.kind === "ground" || rec.kind === "tank" || rec.kind === "patriot" ? 3 : 4); } catch (e) {} }
+    if (CBZ.cityForceStars) { try { CBZ.cityForceStars(rec.kind === "heli" || rec.kind === "plane" ? 4 : 3); } catch (e) {} }
     big(rec.civilian ? "Tower reports a " + name + " departing with no clearance, owner not aboard." : "Base alert: a " + name + " just rolled off the reservation. Units scrambling.");
     // No abstract bell for the theft flag. The visible base response, wanted
     // escalation and dispatch message carry the event without a sound following
@@ -458,16 +460,21 @@
   let armor = null;          // the ground craft currently under player control, or null
   let _restoreChar = false;  // did we hide the player rig on board?
 
-  // per-kind ground feel (top speeds owner-specified: tank ~14, truck ~20)
+  // Ground feel comes from the machine (city/mil_armor.js spec.tune): the
+  // owner's tank ~14 / truck ~20 m/s, and the rest at their real class —
+  // a light utility vehicle is quicker than an 8x8, which is quicker than an
+  // IFV. A hull without a rig (the airport's tugs, whatever registers later)
+  // drives like a truck.
+  function rigOf(rec) { const ud = rec && rec.group && rec.group.userData; return (ud && ud.rig) || null; }
   function armorTuning(rec) {
-    const tank = rec.kind === "tank";
+    const rig = rigOf(rec), t = (rig && rig.spec.tune) || {};
     return {
-      accel: 10,                                   // m/s^2 toward top
-      top: tank ? 14 : 20,                          // forward top speed
-      rev: tank ? 6 : 9,                            // reverse top speed
+      accel: t.accel || 9,                         // m/s^2 toward top
+      top: t.top || 20,                            // forward top speed
+      rev: t.rev || 9,                             // reverse top speed
       brake: 18,
-      turn: tank ? 0.9 : 1.05,                      // rad/s hull rotation from A/D
-      drag: 1.4,                                    // coast-down bleed
+      turn: t.turn || 1.05,                        // rad/s hull rotation from A/D
+      drag: 1.4,                                   // coast-down bleed
     };
   }
 
@@ -504,13 +511,14 @@
     }
     // point the chase-cam down the hull's nose (cam frames behind cam.yaw)
     if (CBZ.cam) CBZ.cam.yaw = rec.heading + Math.PI;
+    rec._lastHeading = rec.heading;
+    rec._ripple = null; rec._burst = null;
     if (CBZ.city && CBZ.city.note) {
-      const ctrl = rec.kind === "tank"
-        ? "W/S drive · A/D turn hull · mouse aims turret · L-click FIRE · [F] out"
-        : rec.kind === "patriot"
-          ? "W/S drive · A/D turn · [M] designate target · L-click LAUNCH · [F] out"
-          : "W/S drive · A/D turn · mouse look · [F] out";
-      note("Driving the " + vehName(rec) + " — " + ctrl, 3.2);
+      const w = weaponOf(rec);
+      const ctrl = w === "patriot" ? "[M] target · click LAUNCH"
+        : w === "mlrs" ? "aim the pod · click RIPPLE"
+          : w ? "mouse aims · click FIRE" : "";
+      note(vehName(rec) + (ctrl ? " · " + ctrl : ""), 2.6);
     }
     return true;
   }
@@ -525,6 +533,9 @@
     if (P) { P.driving = false; P._aircraft = null; }
     if (rec) {
       rec.v = 0;
+      rec._ripple = null; rec._burst = null;
+      const rig = rigOf(rec);
+      if (rig) rig.settle();
       rec.group.rotation.set(0, rec.heading, 0);
       const gy = floorY(rec.pos.x, rec.pos.z, rec.pos.y);
       rec.pos.y = gy;
@@ -578,11 +589,18 @@
   // player's position against every record (its own `armorIs` comment says so);
   // cityArmorRec is the honest answer whenever that file is next opened.
   CBZ.cityArmorRec = function () { return armor; };
-  function armedArmor(rec) { return !!(rec && (rec.kind === "tank" || rec.kind === "patriot")); }
+  // What a hull can shoot is the machine's own answer (spec.weapon): cannon,
+  // autocannon, hmg, patriot, mlrs — or nothing (the cargo truck).
+  function weaponOf(rec) { const rig = rigOf(rec); return (rig && rig.spec.weapon) || null; }
+  function armedArmor(rec) { return !!weaponOf(rec); }
   CBZ.cityArmorCanFire = function () { return armedArmor(armor); };
   CBZ.cityArmorFire = function () {
-    if (!armedArmor(armor)) return false;
-    return armor.kind === "patriot" ? firePatriot(armor) : fireTank(armor);
+    const w = weaponOf(armor);
+    if (!w) return false;
+    if (w === "patriot") return firePatriot(armor);
+    if (w === "mlrs") return fireMLRS(armor);
+    if (w === "cannon") return fireTank(armor);
+    return fireGun(armor, w);
   };
 
   // One input route for every stealable machine. Pressing F (pad Y) exits the
@@ -628,7 +646,8 @@
   // one (see aircraft.js's ordnance law).
   if (CBZ.ordnanceSite) {
     try { CBZ.ordnanceSite("armor:tank-main", "missile"); } catch (e) {}
-    try { CBZ.ordnanceSite("armor:patriot-map", "rpg"); } catch (e) {}
+    try { CBZ.ordnanceSite("armor:patriot-map", "patriot"); } catch (e) {}
+    try { CBZ.ordnanceSite("armor:mlrs", "rocket227"); } catch (e) {}
   }
 
   // L-click fires whichever real weapon the commanded ground hull owns. A
@@ -641,51 +660,68 @@
     CBZ.cityArmorFire();
   });
 
-  // fire one main-gun shell from the turret muzzle, forward along the turret. A
-  // real missile through CBZ.cityFireMissile (reuses the military missile pool +
-  // blast); if the pool is saturated, a forward explosion so the gun still bites.
+  // THE MAIN GUN. The shell leaves the real muzzle along the real bore — the
+  // turret's traverse AND the gun's elevation — through CBZ.cityFireMissile
+  // (the one ordnance law: red lock ⇒ homing, else dead straight). Pool
+  // saturated ⇒ the "tank" row detonates 30 m down the bore so the gun still
+  // bites. Then the machine answers: tube recoils, hull rocks, muzzle blast.
+  const _mz = new THREE.Vector3(), _md = new THREE.Vector3();
   function fireTank(rec) {
-    if (!rec || rec.fireCD > 0) return false;
-    const ud = rec.group.userData;
-    const turret = ud && ud.turret;
-    const mLocal = (ud && ud.muzzleLocal) || new THREE.Vector3(0, 1.62, 5.7);
-    // world muzzle position via the turret's live transform (so it points where
-    // the barrel points), then forward = the turret's world heading.
-    let wp;
-    if (turret && turret.localToWorld) { wp = turret.localToWorld(mLocal.clone()); }
-    else { wp = new THREE.Vector3(rec.pos.x, (rec.pos.y || 0) + 1.6, rec.pos.z); }
-    const turWorldY = rec.heading + (turret ? turret.rotation.y : 0);
-    const dx = Math.sin(turWorldY), dz = Math.cos(turWorldY), dy = 0;
-    // The main gun acquires through aircraft.js's ONE ordnance law — the same
-    // sentence the RPG and the jet rails speak (lockon.js red lock ⇒ homing, no
-    // lock ⇒ a dead-straight shell). Declaring the site by name is the whole
-    // adoption; CBZ.ordnanceAudit() counts this launcher because of this word.
+    const rig = rigOf(rec);
+    if (!rig || rec.fireCD > 0) return false;
+    const wp = rig.muzzleWorld(_mz), d = rig.gunDirWorld(_md);
     let fired = false;
     if (CBZ.cityFireMissile) {
-      try { fired = !!CBZ.cityFireMissile(wp.x, wp.y, wp.z, dx, dy, dz, { byPlayer: true, site: "armor:tank-main" }); } catch (e) { fired = false; }
+      try { fired = !!CBZ.cityFireMissile(wp.x, wp.y, wp.z, d.x, d.y, d.z, { byPlayer: true, site: "armor:tank-main" }); } catch (e) { fired = false; }
     }
-    if (!fired) {
-      const reach = 30;
-      const tx = wp.x + dx * reach, tz = wp.z + dz * reach;
-      // THE MAIN GUN NAMES ITS ORDNANCE (systems/impactbus.js). The "tank" row
-      // IS this fallback's numbers — 2.2 power / 10 radius, corrected UP from
-      // the row's stale 9 to match what actually fires here — and adds the
-      // penetration a sabot round has and a bare cityExplosion never could.
-      // `dirx/dirz` is the shell's travel, which the ledger turns into the
-      // ejecta axis. Degrade: flag off => the exact old line.
-      if (CBZ.detonate && CBZ.CONFIG && CBZ.CONFIG.ORDNANCE_BUS_ALL !== false) {
-        try {
-          CBZ.detonate(tx, CBZ.blastSeatY ? CBZ.blastSeatY(tx, tz) : 1.0, tz, "tank",
-            { byPlayer: true, dirx: dx, dirz: dz });
-        } catch (e) {}
-      } else if (CBZ.cityExplosion) { try { CBZ.cityExplosion(tx, tz, { power: 2.2, radius: 10, byPlayer: true, y: 0 }); } catch (e) {} }
+    if (!fired && CBZ.detonate) {
+      const tx = wp.x + d.x * 30, tz = wp.z + d.z * 30;
+      try { CBZ.detonate(tx, CBZ.blastSeatY ? CBZ.blastSeatY(tx, tz) : 1.0, tz, "tank", { byPlayer: true, dirx: d.x, dirz: d.z }); } catch (e) {}
     }
+    rig.fired(1);
     rec.fireCD = 0.85;
     if (CBZ.shake) { try { CBZ.shake(0.6); } catch (e) {} }
     sfx("whoosh");
-    // a tank shell in the city is a crime → heat (guarded)
     if (CBZ.cityCrime) { try { CBZ.cityCrime(140, { x: rec.pos.x, z: rec.pos.z, type: "shots-fired" }); } catch (e) {} }
     return true;
+  }
+
+  // AUTOCANNON / HEAVY MG: a short burst per click, each round a real ray
+  // down the bore against the collider grid and the ground, a tracer, and the
+  // warhead the calibre deserves (30 mm HE = the grenade row, .50 = kinetic).
+  const BURST = {
+    autocannon: { n: 3, gap: 0.14, kind: "grenade", range: 900, cd: 0.55, flash: 0.45 },
+    hmg: { n: 6, gap: 0.075, kind: "kinetic", range: 700, cd: 0.45, flash: 0.22 },
+  };
+  const _hit = { hit: false };
+  function fireGun(rec, w) {
+    const B = BURST[w];
+    if (!B || rec.fireCD > 0 || rec._burst) return false;
+    rec._burst = { left: B.n, t: 0, B: B, k: 0 };
+    rec.fireCD = B.cd;
+    if (CBZ.cityCrime) { try { CBZ.cityCrime(90, { x: rec.pos.x, z: rec.pos.z, type: "shots-fired" }); } catch (e) {} }
+    return true;
+  }
+  // deterministic dispersion pattern (mils), no Math.random in a weapon
+  const DISP = [[0, 0], [1.2, -0.8], [-1.0, 0.9], [0.6, 1.3], [-1.4, -0.5], [0.9, -1.2]];
+  function burstRound(rec, rig, B) {
+    const wp = rig.muzzleWorld(_mz), d = rig.gunDirWorld(_md);
+    const dd = DISP[rec._burst.k++ % DISP.length];
+    d.x += dd[0] * 0.002; d.y += dd[1] * 0.002; d.normalize();
+    let t = B.range;
+    if (CBZ.rayColliders) { try { const c = CBZ.rayColliders(wp.x, wp.y, wp.z, d.x, d.y, d.z, B.range, _hit); if (c) t = _hit.t; } catch (e) {} }
+    if (d.y < -1e-3) {
+      const gy = floorY(wp.x + d.x * t, wp.z + d.z * t);
+      const tg = (wp.y - gy) / -d.y;
+      if (tg > 0 && tg < t) t = tg;
+    }
+    const hx = wp.x + d.x * t, hy = wp.y + d.y * t, hz = wp.z + d.z * t;
+    if (CBZ.tracer) { try { CBZ.tracer({ x: wp.x, y: wp.y, z: wp.z }, { x: hx, y: hy, z: hz }, { byPlayer: true }); } catch (e) {} }
+    if (t < B.range - 1 && CBZ.detonate) {
+      try { CBZ.detonate(hx, hy, hz, B.kind, { byPlayer: true, dirx: d.x, dirz: d.z }); } catch (e) {}
+    }
+    rig.fired(B.flash);
+    if (CBZ.shake) { try { CBZ.shake(0.12); } catch (e) {} }
   }
 
   const _patriotMuzzle = new THREE.Vector3();
@@ -771,35 +807,83 @@
   }
   function firePatriot(rec) {
     if (!rec || rec.fireCD > 0 || !CBZ.cityFireMissileAt) return false;
+    const rig = rigOf(rec);
+    if (!rig) return false;
     const wp = patriotWaypoint();
     if (!wp) {
       note("Open the map and designate a Patriot impact point.", 2.4);
       if (CBZ.fullMap && CBZ.fullMap.open) { try { CBZ.fullMap.open(); } catch (e) {} }
       return false;
     }
-    const ud = rec.group && rec.group.userData;
-    const muzzles = ud && ud.patriotMuzzles;
-    const rounds = ud && ud.patriotRounds;
-    if (rec.patriotAmmo == null) rec.patriotAmmo = ud && ud.patriotAmmo != null ? ud.patriotAmmo : 4;
-    if (rec.patriotAmmo <= 0) { note("Patriot rack empty.", 1.8); return false; }
-    const slot = Math.max(0, Math.min((muzzles && muzzles.length ? muzzles.length : 4) - 1, 4 - rec.patriotAmmo));
-    const muzzle = muzzles && muzzles[slot];
-    if (muzzle && muzzle.getWorldPosition) {
-      rec.group.updateWorldMatrix(true, true);
-      muzzle.getWorldPosition(_patriotMuzzle);
-    } else {
-      _patriotMuzzle.set(rec.pos.x, (rec.pos.y || 0) + 4.0, rec.pos.z);
-    }
+    if (rig.loaded <= 0) { note("Launcher empty.", 1.8); return false; }
+    if (!rig.launcherReady()) { note("Raising the launcher.", 1.2); return false; }
+    let slot = -1;
+    for (let i = 0; i < rig.muzzles.length; i++) if (rig.roundLoaded(i)) { slot = i; break; }
+    if (slot < 0) return false;
+    rig.launcherMuzzle(slot, _patriotMuzzle);
     const fired = CBZ.cityFireMissileAt(_patriotMuzzle.x, _patriotMuzzle.y, _patriotMuzzle.z,
-      patriotTarget(wp), { byPlayer: true, site: "armor:patriot-map", scale: 1.35 });
-    if (!fired) { note("Patriot launch rail busy.", 1.4); return false; }
-    if (rounds && rounds[slot]) rounds[slot].visible = false;
-    rec.patriotAmmo--;
+      patriotTarget(wp), { byPlayer: true, site: "armor:patriot-map" });
+    if (!fired) { note("Launch rail busy.", 1.4); return false; }
+    rig.spend(slot);
     rec.fireCD = 1.55;
     if (CBZ.shake) { try { CBZ.shake(0.45); } catch (e) {} }
     if (CBZ.cityCrime) { try { CBZ.cityCrime(180, { x: rec.pos.x, z: rec.pos.z, type: "missile-launch" }); } catch (e) {} }
-    note("Patriot away — target " + Math.round(Math.hypot(wp.x - rec.pos.x, wp.z - rec.pos.z)) + "m.", 1.8);
+    note("Missile away · " + Math.round(Math.hypot(wp.x - rec.pos.x, wp.z - rec.pos.z)) + " m", 1.8);
     return true;
+  }
+
+  // ROCKET ARTILLERY. The pod aims where you look (the map waypoint wins if
+  // one is set): azimuth to the point, elevation from its range. A click
+  // RIPPLES every loaded tube, one round every 0.4 s, each onto its own spot
+  // of a fixed spread pattern round the aim point, through the same lofted
+  // cityFireMissileAt flight and detonate() the Patriot uses. Empty pod
+  // reloads after spec.launcher.reload seconds in the seat.
+  const SPREAD = [[0, 0], [11, 5], [-9, 7], [5, -10], [-6, -8], [12, -4]];
+  // Without a waypoint the pod lays on the camera: bearing from cam.yaw,
+  // RANGE from how far up you look — the default chase framing is ~150 m,
+  // the horizon is 1.4 km. (A ground ray off a chase cam lands a few metres
+  // in front of the truck, which is not an artillery range.)
+  function mlrsAimPoint(rec) {
+    const wp = patriotWaypoint();
+    if (wp) return { x: wp.x, z: wp.z, map: true };
+    if (!CBZ.cam) return null;
+    const yaw = CBZ.cam.yaw + Math.PI, pitch = CBZ.cam.pitch || 0;
+    const up = 1 - Math.max(0, Math.min(1, pitch / 0.55));
+    const r = 120 + Math.pow(up, 1.5) * 1280;
+    return { x: rec.pos.x + Math.sin(yaw) * r, z: rec.pos.z + Math.cos(yaw) * r, map: false };
+  }
+  function fireMLRS(rec) {
+    const rig = rigOf(rec);
+    if (!rig || rec._ripple || rec.fireCD > 0 || !CBZ.cityFireMissileAt) return false;
+    if (rig.loaded <= 0) { note(rec._reloadT > 0 ? "Reloading · " + Math.ceil(rec._reloadT) + " s" : "Pod empty.", 1.6); return false; }
+    if (!rig.launcherReady(0.25)) { note("Elevating the pod.", 1.2); return false; }
+    const aim = mlrsAimPoint(rec);
+    if (!aim) return false;
+    rec._ripple = { t: 0, k: 0, aim: aim };
+    if (CBZ.cityCrime) { try { CBZ.cityCrime(200, { x: rec.pos.x, z: rec.pos.z, type: "missile-launch" }); } catch (e) {} }
+    note("Ripple · " + rig.loaded + " rockets · " + Math.round(Math.hypot(aim.x - rec.pos.x, aim.z - rec.pos.z)) + " m", 1.8);
+    return true;
+  }
+  const _rk = new THREE.Vector3();
+  function rippleStep(rec, rig) {
+    const R = rec._ripple;
+    let slot = -1;
+    for (let i = 0; i < rig.muzzles.length; i++) if (rig.roundLoaded(i)) { slot = i; break; }
+    if (slot < 0) { rec._ripple = null; rec._reloadT = rig.spec.launcher.reload; rec.fireCD = 0.8; return; }
+    const off = SPREAD[R.k % SPREAD.length];
+    const range = Math.hypot(R.aim.x - rec.pos.x, R.aim.z - rec.pos.z), k = Math.max(0.5, Math.min(2.2, range / 500));
+    const tx = R.aim.x + off[0] * k, tz = R.aim.z + off[1] * k;
+    let ty = 0.8;
+    try { ty = Math.max(0.8, (CBZ.floorAt ? +CBZ.floorAt(tx, tz) || 0 : 0) + 0.65); } catch (e) {}
+    rig.launcherMuzzle(slot, _rk);
+    const ok = CBZ.cityFireMissileAt(_rk.x, _rk.y, _rk.z, { x: tx, y: ty, z: tz },
+      { byPlayer: true, site: "armor:mlrs", fxKind: "rpg" });
+    if (!ok) { R.t = 0.12; return; }            // pool full: the next tube waits a beat
+    rig.spend(slot);
+    R.k++;
+    R.t = rig.spec.launcher.ripple || 0.4;
+    if (CBZ.shake) { try { CBZ.shake(0.3); } catch (e) {} }
+    sfx("whoosh");
   }
 
   CBZ.cityPatriotAudit = function () {
@@ -807,9 +891,10 @@
     const flight = CBZ.cityPatriotMissileAudit ? CBZ.cityPatriotMissileAudit() : null;
     let tubes = 0, visibleRounds = 0;
     for (let i = 0; i < trucks.length; i++) {
-      const ud = trucks[i].group && trucks[i].group.userData;
-      tubes += ud && ud.patriotMuzzles ? ud.patriotMuzzles.length : 0;
-      if (ud && ud.patriotRounds) for (let j = 0; j < ud.patriotRounds.length; j++) if (ud.patriotRounds[j].visible !== false) visibleRounds++;
+      const rig = rigOf(trucks[i]);
+      if (!rig) continue;
+      tubes += rig.muzzles.length;
+      visibleRounds += rig.loaded;
     }
     return {
       flag: !CBZ.CONFIG || CBZ.CONFIG.PATRIOT_V1 !== false,
@@ -876,49 +961,61 @@
     rec.group.position.set(rec.pos.x, gy, rec.pos.z);
     rec.group.rotation.set(0, rec.heading, 0);
 
-    // TURRET (tank only) — the mouse aims it independently of the hull. The chase
-    // cam frames behind cam.yaw, so the turret eases toward the camera's look
-    // heading: turret world-heading target = cam.yaw + PI; subtract the hull
-    // heading to get the LOCAL turret angle. Slew-limited so it swings, not snaps.
-    const ud = rec.group.userData;
-    if (rec.kind === "tank" && ud && ud.turret && CBZ.cam) {
-      const targetWorld = CBZ.cam.yaw + Math.PI;          // where the camera looks
-      let want = targetWorld - rec.heading;               // local turret angle
-      let cur = ud.turret.rotation.y;
-      let d = want - cur;
-      while (d > Math.PI) d -= Math.PI * 2;
-      while (d < -Math.PI) d += Math.PI * 2;
-      const maxStep = 1.4 * dt;                            // ~1.4 rad/s slew
-      if (d > maxStep) d = maxStep; else if (d < -maxStep) d = -maxStep;
-      ud.turret.rotation.y = cur + d;
+    // THE MACHINE MOVES WITH ITSELF: tracks/wheels roll by the distance and
+    // the heading change this frame (inside track slower, pivot = opposite),
+    // front axles steer, the hull squats and rocks on its own pivot.
+    const rig = rigOf(rec);
+    const omega = dt > 0 ? wrapA(rec.heading - (rec._lastHeading == null ? rec.heading : rec._lastHeading)) / dt : 0;
+    rec._lastHeading = rec.heading;
+    if (rig) rig.update(dt, rec.v, omega, steer);
+
+    // AIM. A turret follows where the camera looks: yaw from cam.yaw, and the
+    // gun ELEVATES with the look (cam.pitch is DOWN-positive — systems/camera
+    // .js — so looking up from the default framing raises the barrel).
+    if (rig && rig.turret && CBZ.cam) {
+      const def = CBZ.CAM_DEFAULT_PITCH != null ? CBZ.CAM_DEFAULT_PITCH : 0.46;
+      rig.aimTurret(wrapA(CBZ.cam.yaw + Math.PI - rec.heading), (def - (CBZ.cam.pitch || 0)) * 0.9, dt);
     } else {
-      // The launcher rack slews toward the one canonical map point. Its fixed
-      // 45° elevation is authored in the model; this writes only local azimuth.
-      if (rec.kind === "patriot" && ud && ud.patriotLauncher) {
+      // Launchers: the rack slews to its target and stands up to fire.
+      const w = weaponOf(rec);
+      if (rig && w === "patriot") {
         const wp = patriotWaypoint();
-        if (wp) {
-          let want = Math.atan2(wp.x - rec.pos.x, wp.z - rec.pos.z) - rec.heading;
-          let d = want - ud.patriotLauncher.rotation.y;
-          while (d > Math.PI) d -= Math.PI * 2;
-          while (d < -Math.PI) d += Math.PI * 2;
-          const step = Math.max(-0.75 * dt, Math.min(0.75 * dt, d));
-          ud.patriotLauncher.rotation.y += step;
+        rig.aimLauncher(wp ? Math.atan2(wp.x - rec.pos.x, wp.z - rec.pos.z) - rec.heading : null,
+          wp ? rig.spec.launcher.elevMax : 0, dt);
+      } else if (rig && w === "mlrs") {
+        const aim = rec._ripple ? rec._ripple.aim : mlrsAimPoint(rec);
+        if (aim) {
+          const range = Math.hypot(aim.x - rec.pos.x, aim.z - rec.pos.z);
+          rig.aimLauncher(Math.atan2(aim.x - rec.pos.x, aim.z - rec.pos.z) - rec.heading,
+            0.30 + Math.min(1, range / 1400) * 0.65, dt);
         }
       }
-      if (CBZ.cam && CBZ.lerpAngle && Math.abs(rec.v) > 0.3 &&
+      if (CBZ.cam && CBZ.lerpAngle && Math.abs(rec.v) > 0.3 && w !== "mlrs" &&
           !(CBZ.camRecenterSuspended && CBZ.camRecenterSuspended())) {
-      // NON-TURRET ground (the armored truck): no independent gun, so frame it
-      // like a car — gently ease the chase cam back BEHIND the hull as it rolls,
-      // so you read the road ahead. Only while moving, and lazily, so the mouse
-      // can still glance around when stopped.
-      // CLAUDE.md law: "vehicle-recenter writers must respect
-      // camRecenterSuspended()". This was the LAST holdout — cars, aircraft,
-      // boats and the cockpit head all honour it and this line did not, so a
-      // deliberate glance (a mouse look, or a touch look-drag, which is the
-      // only way to look around at all on an iPad) was fought back every frame
-      // while the truck was rolling.
+        // no turret: frame it like a car — ease the chase cam back BEHIND the
+        // hull while it rolls (CLAUDE.md: recenter writers respect
+        // camRecenterSuspended, so a deliberate glance is never fought).
         CBZ.cam.yaw = CBZ.lerpAngle(CBZ.cam.yaw, rec.heading + Math.PI, 1 - Math.pow(0.2, dt));
       }
+    }
+
+    // bursts and ripples run on the sim clock, one round per beat
+    if (rec._burst && rig) {
+      rec._burst.t -= dt;
+      while (rec._burst && rec._burst.t <= 0) {
+        burstRound(rec, rig, rec._burst.B);
+        rec._burst.left--;
+        if (rec._burst.left <= 0) rec._burst = null;
+        else rec._burst.t += rec._burst.B.gap;
+      }
+    }
+    if (rec._ripple && rig) {
+      rec._ripple.t -= dt;
+      if (rec._ripple.t <= 0) rippleStep(rec, rig);
+    }
+    if (rec._reloadT > 0 && rig) {
+      rec._reloadT -= dt;
+      if (rec._reloadT <= 0) { rec._reloadT = 0; rig.reload(); note("Pod reloaded.", 1.4); }
     }
 
     if (rec.fireCD > 0) rec.fireCD = Math.max(0, rec.fireCD - dt);

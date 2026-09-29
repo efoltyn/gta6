@@ -132,6 +132,7 @@
      feature-detected CBZ.* names at CALL time, never at load, so none of the
      three can be broken by arriving second. */
   const ENGINE = [
+    "weapons/munitions.js",  // the rocket round, its smoke + motor flare (fpsmode builds on it at load)
     "systems/fpsmode.js",    // THE gun: spread, recoil pattern, ADS, reload,
                              // falloff, headshots, hit marker, reticle, tracers
     "systems/holsterprops.js", // the gun IN HIS HANDS in third person: the one held

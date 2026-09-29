@@ -70,7 +70,7 @@
   // explicitly by the helipad/hangar test below, so the proxy only cost us the
   // spectacle. Default is now effectively "no storey ceiling"; set
   // ?cfg_DEMO_MAX_STOREYS=11 to restore the old behaviour in one line.
-  // NOTE: this makes tall buildings ELIGIBLE, not easy — hpMax() still scales
+  // NOTE: this makes tall buildings ELIGIBLE, not easy — the structural capacity scales
   // with storeys, so a 12-storey block needs ~18 damage (an airliner crash
   // currently delivers ~3.2). Kinetic impact damage is the other half.
   if (CBZ.CONFIG.DEMO_MAX_STOREYS == null) CBZ.CONFIG.DEMO_MAX_STOREYS = 64;
@@ -121,7 +121,6 @@
      of this file. false = the old per-row path, verbatim, and no SP section.  */
   if (CBZ.CONFIG.DEMO_LOAD_V1 == null) CBZ.CONFIG.DEMO_LOAD_V1 = true;
   // ~3 rockets for a small shop, ~5-6 for a fat 4-storey block (RPG power 1.9)
-  function hpMax(b) { return 2 + b.storeys * 1.2 + (b.w * b.d) / 300; }
 
   /* The shared one-pass compaction, resolved AT CALL TIME (see DEMO_FAST_PURGE
      above for why it can never be captured at module scope). Returns null when
@@ -132,7 +131,6 @@
   }
 
   const ledger = new Map();      // key "x,z" -> rec
-  const hp = new Map();          // lot -> accumulated blast damage (session-local)
   const D = CBZ.cityDemolition = { onEvent: null };
 
   function keyOf(lot) { return Math.round(lot.cx) + "," + Math.round(lot.cz); }
@@ -733,7 +731,6 @@
     if (anim && rec.propGroup) { retire = rec.propGroup; releasePropCols(rec); rec.propGroup = null; }
     else clearPhaseProps(rec);
     ledger.delete(rec.k);
-    hp.delete(lot);
     // any piece of the old building still lying on the lot goes before it stands again
     if (CBZ.debris) { try { CBZ.debris.clear(rec.k); } catch (e) {} }
     lot.demolished = false;
@@ -784,128 +781,14 @@
   }
 
   // ========================================================================
-  //  MIGRATED (BLOCK LAW): structural HP now lives in ONE place.
-  //
-  //  This file used to keep its own `hp` Map<lot, number> — one of THREE
-  //  independent "how hurt is this building" accumulators in the codebase
-  //  (the others: fracture.js's per-facade `wounds`, buildings.js's per-wall
-  //  `wallDmg`). They could not see each other, so a tower could be condemned
-  //  on one system's books and pristine on another's, and a plane strike had
-  //  no way to express "this is worse than three rockets" beyond raw power.
-  //
-  //  city/structural.js now owns the ledger, the stage machine (scarred ->
-  //  wounded -> burning -> critical -> collapsing), the per-floor load-path
-  //  check and the collapse choreography. It calls THIS file's destroy() at
-  //  the end of the collapse, because the AFTERMATH — the deterministic
-  //  rubble pile, the in-game-calendar rebuild arc, the save blob, the net
-  //  relay — is machinery this file already owns and does well. Neither side
-  //  duplicates the other.
-  //
-  //  The legacy accumulator below is kept intact as the DEGRADE-SAFE
-  //  fallback: with CBZ.CONFIG.STRUCT_LEDGER off, or structural.js simply not
-  //  loaded, blasts accumulate here exactly as they always did. `_legacyAccum`
-  //  reports live which of the two is in charge, and CBZ.impactAudit() counts
-  //  it as a remaining duplicate whenever it is the legacy one.
+  //  STRUCTURAL DAMAGE IS NOT THIS FILE'S. city/structural.js owns the ledger
+  //  (fed by the charge law for every blast, through the ordnance bus and
+  //  buildings.js blastBuildings) and calls destroy() below when a building
+  //  comes down. This file owns the AFTERMATH only: the rubble pile, the
+  //  rebuild calendar, the save blob and the net relay. (It used to also wrap
+  //  every explosion and keep its own hp Map as a "fallback" ledger; that was
+  //  a second accumulator nobody needed — deleted.)
   // ========================================================================
-  function ledgerOn() { return !!(CBZ.CONFIG.STRUCT_LEDGER && CBZ.structure && CBZ.structure.sweep); }
-  try {
-    Object.defineProperty(D, "_legacyAccum", { get: function () { return !ledgerOn(); }, configurable: true });
-  } catch (e) { D._legacyAccum = true; }
-
-  // Damage conversion for a legacy blast entering the shared ledger. The old
-  // curve was `hpMax = 2 + storeys*1.2 + (w*d)/300` against an accumulation of
-  // `power * prox`; the ledger's capacity is `12 + storeys*7 + (w*d)/26`,
-  // ~6x larger, so a legacy blast is scaled 6x to land on the SAME number of
-  // rockets it always took. Checked against both ends of the range:
-  //   1-storey shop  (w*d~100): old 3.5 hp / 1.9-power RPG => 2 hits.
-  //                             new 22.8 cap / 11.4 per hit => 2 hits.
-  //   4-storey block (w*d~400): old 8.1 hp => 5 hits. new 55.4 cap => 4.9.
-  const LEGACY_TO_LEDGER = 6;
-
-  // ---- the blast hook: HP accumulation at the single ordnance chokepoint ----
-  function onBlast(x, z, opts) {
-    if (!CBZ.CONFIG.CITY_DEMOLITION) return;
-    if (opts && opts.noDamage) return;                 // cosmetic (heli embers)
-    // multiplayer: the HOST is the only authority on structural HP. A guest's
-    // local blast is FX-only — networld forwards it to the host, whose
-    // destroy decision comes back as a bldx event (fracture's frx pattern).
-    if (CBZ.net && CBZ.net.active && !CBZ.net.isHost() && !(opts && opts._fromHost)) return;
-    // the wrap chain (buildings/armored/us) can end up layered more than once
-    // when siblings re-wrap without copying each other's markers — the SAME
-    // opts object flows through every layer, so tag it: one blast, one count.
-    if (opts) { if (opts._demoSeen) return; opts._demoSeen = true; }
-    const A = arena();
-    if (!A || !A.lots) return;
-    const power = (opts && opts.power) || 1, R = ((opts && opts.radius) || 6);
-    const y = opts && opts.y != null ? opts.y : 1.4;
-
-    // ---- DELEGATION: the shared ledger owns structural HP ------------------
-    if (ledgerOn()) {
-      // A blast that came through CBZ.detonate already fed the ledger with the
-      // ordnance row's own struct/pen/fire — counting it again here would make
-      // every bus-routed warhead twice as strong as its table row says.
-      // TWO guards, because one of them is a convention and the other is not:
-      //   • opts._impact — the tag the bus's own composers set.
-      //   • inBusBlast() — true for the whole duration of ANY composer the bus
-      //     is running, including third-party ones (city/nukefx.js registers
-      //     its own) that cannot be relied on to remember the tag.
-      if (opts && (opts._impact || opts._airImpact)) return;
-      if (CBZ.impact && CBZ.impact.inBusBlast && CBZ.impact.inBusBlast()) return;
-      // `_airImpact` above is city/aircraftimpact.js's claim: it recognised
-      // this blast as an aircraft crash and already priced it through the bus
-      // with the right ordnance row (penetration, fuel fire, ejecta). Its wrap
-      // sits INSIDE ours, so by the time we run it has already decided.
-      // A LEGACY blast (fpsmode's rocket, a grenade, a cooking car, an
-      // airstrike from a file that has not adopted the bus) still has to wound
-      // the city. Same footprint the loop below used — full damage inside,
-      // fading to zero at 0.6R — expressed as one ring sweep.
-      try {
-        CBZ.structure.sweep(x, z, 0, R * 0.6, power * LEGACY_TO_LEDGER, {
-          kind: "explosion", byPlayer: !!(opts && opts.byPlayer), fire: 0,
-          // HEIGHT MATTERS — the legacy loop below carried `if (y > b.h + 4)
-          // continue;` and dropping it on the way to the sweep meant an
-          // airburst 300m up wounded every footprint under its ground
-          // projection. Hand the seat through so the ledger can apply the
-          // same test per building.
-          y: y,
-        });
-      } catch (e) {}
-      return;
-    }
-
-    // ---- LEGACY ACCUMULATOR (flag off / structural.js absent) --------------
-    for (const lot of A.lots) {
-      const b = lot.building;
-      if (!b || lot.demolished || !eligible(lot)) continue;
-      // distance from blast to the building's XZ box; full damage inside,
-      // fading to zero half a blast-radius out
-      const dx = Math.max(0, Math.abs(x - b.ox) - b.w / 2);
-      const dz = Math.max(0, Math.abs(z - b.oz) - b.d / 2);
-      const dist = Math.hypot(dx, dz);
-      if (dist > R * 0.6) continue;
-      if (y > b.h + 4) continue;                       // detonated way above the roof
-      const prox = 1 - dist / (R * 0.6);
-      const dmg = power * prox;
-      if (dmg <= 0.05) continue;
-      const cur = (hp.get(lot) || 0) + dmg;
-      hp.set(lot, cur);
-      if (cur >= hpMax(b)) destroy(lot);
-    }
-  }
-  // wrap the same entry points buildings.js/armored.js already wrap — each
-  // wrapper calls through, so order doesn't matter. Installed lazily (the base
-  // fns don't exist until crashfx has run).
-  function wrapBoom(name) {
-    const orig = CBZ[name];
-    if (typeof orig !== "function" || orig._demoWrapped) return;
-    const wrapped = function (x, z, opts) { const r = orig.call(this, x, z, opts); try { onBlast(x, z, opts); } catch (e) {} return r; };
-    // carry forward EVERY sibling wrap marker (struct/armored/…) so their
-    // idempotence guards hold — copying only one flag is how the chain ends
-    // up re-wrapping itself in layers (each layer re-counting damage).
-    for (const k in orig) if (k.endsWith("Wrapped")) wrapped[k] = orig[k];
-    wrapped._demoWrapped = true;
-    CBZ[name] = wrapped;
-  }
 
   // ---- ticking: phase advancement (cheap — ledger is tiny, early-out when 0) --
   CBZ.onUpdate(34.5, function () {
@@ -927,10 +810,8 @@
       if (tweens.length) killAllTweens();
       return;
     }
-    wrapBoom("cityExplosion");
-    wrapBoom("cityAirstrikeExplosion");
     // Single-player save wiring — the same lazy, idempotent, marker-guarded
-    // install the wrapBoom lines above use, for the same reason (worldstate.js
+    // install idiom, for the same reason (worldstate.js
     // may or may not have mounted yet). Both are a handful of comparisons per
     // frame once installed; see the SP PERSISTENCE block below.
     spWrapSaves();
@@ -968,7 +849,8 @@
     });
     return { detailed: detailed, light: light, detailCap: RUBBLE_DETAIL_CAP };
   };
-  D.hp = function (lot) { const b = lot && lot.building; return b ? { cur: hp.get(lot) || 0, max: hpMax(b) } : null; };
+  // how hurt is it — read from the one ledger (city/structural.js)
+  D.hp = function (lot) { const st = lot && lot.building && CBZ.structure ? CBZ.structure.state(lot) : null; return st ? { cur: st.dmg, max: st.cap } : null; };
   D.list = function () { return Array.from(ledger.values()).map((r) => ({ k: r.k, at: r.at, phase: r.phase })); };
   // tooling accessor (tools/demolition-check.mjs floating-geometry invariant)
   D.propGroup = function (lot) { const rec = ledger.get(keyOf(lot)); return rec ? rec.propGroup : null; };
@@ -1060,7 +942,13 @@
     rebuild(rec, { silent: true });
     return true;
   };
-  D.netBlast = function (x, z, opts) { try { onBlast(x, z, opts || {}) } catch (e) {} };
+  D.netBlast = function (x, z, opts) {
+    opts = opts || {};
+    const L = CBZ.blastLaw;
+    if (!L || !CBZ.structure || !CBZ.structure.charge) return;
+    const W = opts.charge > 0 ? +opts.charge : L.chargeOfPower(opts.power || 1);
+    try { CBZ.structure.charge(x, opts.y != null ? opts.y : 1.4, z, W, { kind: "explosion", byPlayer: false }); } catch (e) {}
+  };
   // full restore for a new run (called from cityGlassReset)
   D.reset = function () {
     killAllTweens();
@@ -1071,7 +959,6 @@
     const owned = (recs.length > 1 && fastPurge()) ? reSetsBegin() : false;
     try { for (const rec of recs) rebuild(rec, { silent: true }); }
     finally { reSetsEnd(owned); }
-    hp.clear();
   };
 
   /* ========================================================================

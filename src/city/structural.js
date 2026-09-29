@@ -85,17 +85,6 @@
   if (CBZ.structure) return;                       // idempotent family guard
 
   CBZ.CONFIG = CBZ.CONFIG || {};
-  // Master flag. false => hit()/sweep() become no-ops and the game behaves
-  // exactly as it did before this file existed (demolition.js keeps its own
-  // legacy accumulator alive as a fallback — see the _legacyAccum note there).
-  if (CBZ.CONFIG.STRUCT_LEDGER == null) CBZ.CONFIG.STRUCT_LEDGER = true;
-  // The animated pancake. false => a condemned building snaps to rubble via
-  // demolition.js exactly as it did before (one-line revert of the spectacle
-  // without losing the damage model).
-  if (CBZ.CONFIG.STRUCT_COLLAPSE_V1 == null) CBZ.CONFIG.STRUCT_COLLAPSE_V1 = true;
-  // Fire spread + burn-down. false => buildings take damage and collapse but
-  // never catch light.
-  if (CBZ.CONFIG.STRUCT_FIRE == null) CBZ.CONFIG.STRUCT_FIRE = true;
 
   /* ============================================================
      TUNING — every magic number in one block, with its reason.
@@ -528,7 +517,7 @@
        call arrives with amount 0 and a severWidth, and refusing it here is why
        `sever` read 0.000 after eighteen rockets through a tower's base. */
     const severOnly = !(amount > 0) && (opts.severWidth > 0 || opts.sever > 0);
-    if (!CBZ.CONFIG.STRUCT_LEDGER || !inCity() || (!(amount > 0) && !severOnly)) return null;
+    if (!inCity() || (!(amount > 0) && !severOnly)) return null;
     if (severOnly) amount = 0;
     // The legacy bridge (systems/impactbus.js's cityDamageBuilding wrapper) is
     // suppressed for the duration of a blast — see CBZ.impact.inBlast() there
@@ -611,6 +600,30 @@
       }
     }
 
+    // ---- GUT ---------------------------------------------------------------
+    // A charge whose gut radius (systems/breach.js: Z_GUT . W^(1/3)) is at least
+    // a room guts the storeys it reaches: the partitions, the fit-out and the
+    // facade infill inside that sphere are gone, and the floor plate inside it
+    // has lost half its capacity. Vertically the slabs confine it, so it
+    // reaches 0.4 gutR up and down; horizontally each storey loses the disc
+    // the sphere cuts through it, as a fraction of its plan.
+    let gutted = null;
+    if (opts.gutR > 0 && !opts.legacy) {
+      const plan = planOf(b);
+      const span = Math.max(0, Math.floor(opts.gutR * 0.4 / FH));
+      gutted = [];
+      for (let d = -span; d <= span; d++) {
+        const f = hitFloor + d;
+        if (f < 0 || f >= nF) continue;
+        const dy = d * FH, rh = Math.sqrt(Math.max(0, opts.gutR * opts.gutR - dy * dy));
+        const frac = Math.min(1, Math.PI * rh * rh / plan);
+        rec.floors[f] = Math.min(rec.floors[f], 1 - 0.5 * frac);
+        gutted.push({ f: f, r: rh, frac: frac });
+      }
+      rec.gutted = rec.gutted || {};
+      for (let i = 0; i < gutted.length; i++) rec.gutted[gutted[i].f] = Math.max(rec.gutted[gutted[i].f] || 0, gutted[i].frac);
+    }
+
     rec.dmg += amount;
     if (severed > rec.sever) rec.sever = severed;
     if (opts.by && !rec.by) rec.by = opts.by;
@@ -637,9 +650,17 @@
     // ---- FIRE ------------------------------------------------------------
     // Fuel-carrying ordnance lights the floors it reached. This is the beat
     // that converts an impact into a catastrophe over the following minute.
-    if (CBZ.CONFIG.STRUCT_FIRE && opts.fire >= FIRE_IGNITE_MIN && !opts.legacy) {
+    if (opts.fire >= FIRE_IGNITE_MIN && !opts.legacy) {
       const nLit = opts.fire >= 0.7 ? 3 : opts.fire >= 0.3 ? 2 : 1;
       for (let i = 0; i < nLit; i++) ignite(rec, hitFloor + i - ((nLit / 2) | 0));
+    }
+    // A GUTTED STOREY BURNS. Whatever the warhead carried, the fit-out it just
+    // shredded is fuel, and it goes up — so the gutted floors smoke and burn out
+    // of the openings the blast made (the vents below) for the next minute.
+    if (gutted && gutted.length) {
+      gutted.sort(function (a, c) { return c.frac - a.frac; });
+      for (let i = 0; i < gutted.length && i < 3; i++) ignite(rec, gutted[i].f);
+      gutBeat(rec, gutted, x, y, z, opts);
     }
 
     // ---- PENETRATION EXIT ------------------------------------------------
@@ -654,6 +675,95 @@
     advance(rec, opts);
     return rec;
   };
+
+  /* ============================================================
+     CBZ.structure.charge(x, y, z, W, opts) — AN EXPLOSIVE OF W kg TNT-eq.
+     The ledger's side of THE CHARGE LAW (systems/breach.js), used by the
+     ordnance bus for every row that carries a charge and by the blast chain
+     for bare explosions. From W alone:
+       deposit   DEPOSIT_K . W^(2/3) — damage is an area quantity
+       gut       Z_GUT . W^(1/3) >= a room: the struck storeys are gutted
+       sever     a gutting charge takes the frame inside Z_FRAME . W^(1/3),
+                 as a fraction of the building's width across the blast
+     The struck building takes it in full at contact, falling off as the
+     square of footprint distance over the gut radius; a bomb big enough to gut
+     also wounds every OTHER footprint inside that radius (no gut, no sever —
+     the blast wave, not the charge in the room). An RPG therefore wounds one
+     wall's building and can never gut or collapse anything by itself.
+     opts: kind, fire, pen, dirx, dirz, by, byPlayer, lot, severWidth (kinetic
+     rows: an airframe's cut, added on top), scale (the kinetic multiplier).
+     ============================================================ */
+  S.charge = function (x, y, z, W, opts) {
+    opts = opts || {};
+    const L = CBZ.blastLaw;
+    if (!L || !(W > 0) || !inCity()) return null;
+    const gR = L.gutR(W), fR = L.frameR(W), guts = L.guts(W);
+    const A = arena();
+    const primary = opts.lot || lotAt(x, z, opts.pen > 0 ? 6 : Math.max(3, Math.min(gR, 8)));
+    let out = null;
+    if (primary && primary.building) {
+      const b = primary.building;
+      const d = footDist(b, x, z);
+      const fall = d <= 0.5 ? 1 : Math.pow(Math.max(0, 1 - d / Math.max(1, gR)), 2);
+      // the width the blast has to cut across: perpendicular to travel when
+      // the round had one, else the building's wider side
+      let cross = Math.max(b.w || 10, b.d || 10);
+      const al = Math.hypot(opts.dirx || 0, opts.dirz || 0);
+      if (al > 1e-3) cross = (Math.abs(opts.dirx) * (b.d || 10) + Math.abs(opts.dirz) * (b.w || 10)) / al;
+      const sev = d < fR ? L.sever(W, cross) * (1 - d / fR) : 0;
+      const o = {
+        kind: opts.kind, fire: opts.fire || 0, pen: opts.pen || 0, sudden: true,
+        dirx: opts.dirx, dirz: opts.dirz, by: opts.by, byPlayer: opts.byPlayer, lot: primary,
+        gutR: guts && d < gR - 1 ? gR - d : 0,
+      };
+      if (opts.severWidth > 0) o.severWidth = opts.severWidth;
+      else if (sev > 0) o.sever = sev;
+      out = S.hit(x, y, z, L.deposit(W) * fall * (opts.scale > 0 ? opts.scale : 1), o);
+    }
+    // the blast wave on the NEIGHBOURS of a bomb-class charge
+    if (guts && A && A.lots) {
+      for (let i = 0; i < A.lots.length; i++) {
+        const lot = A.lots[i], b = lot.building;
+        if (!b || lot === primary || lot.demolished) continue;
+        if (y > (b.h || 12) + 4) continue;
+        const d = footDist(b, x, z);
+        if (!(d < gR)) continue;
+        const k = Math.pow(1 - d / gR, 2);
+        if (k < 0.02) continue;
+        S.hit(b.ox, Math.max(0.5, Math.min((b.h || 12) - 0.5, y)), b.oz, L.deposit(W) * 0.5 * k, {
+          kind: opts.kind, fire: 0, sudden: true, by: opts.by, byPlayer: opts.byPlayer, lot: lot,
+          dirx: b.ox - x, dirz: b.oz - z,
+        });
+      }
+    }
+    return out;
+  };
+  function footDist(b, x, z) {
+    const dx = Math.max(0, Math.abs(x - b.ox) - (b.w || 10) / 2);
+    const dz = Math.max(0, Math.abs(z - b.oz) - (b.d || 10) / 2);
+    const d = Math.hypot(dx, dz);
+    return d >= 0 ? d : 1e9;
+  }
+
+  /* THE GUT, SEEN. The storeys the charge reached lose their facade inside the
+     gut sphere — whole bays, floor to ceiling, blown out through the same carve
+     every hole uses (their own material on the pavement, a charred pocket
+     behind) — and those openings are where the fire and smoke come out.
+     city/collapse.js resolves the bays (C.gut); the openings are remembered on
+     the rec as VENTS for the fire plumes. */
+  function gutBeat(rec, gutted, x, y, z, opts) {
+    if (!CBZ.collapse || !CBZ.collapse.gut) return;
+    const b = rec.b;
+    let vents = null;
+    try {
+      vents = CBZ.collapse.gut({ ox: b.ox, oz: b.oz, w: b.w, d: b.d, FH: b.FH || 3.2, key: rec.key },
+        gutted, { x: x, y: y, z: z }, { byPlayer: !!opts.byPlayer });
+    } catch (e) { vents = null; }
+    if (vents && vents.length) {
+      rec.vents = (rec.vents || []).concat(vents);
+      if (rec.vents.length > 12) rec.vents.splice(0, rec.vents.length - 12);
+    }
+  }
 
   /* ============================================================
      CBZ.structure.sweep(x, z, r0, r1, amount, opts)
@@ -705,7 +815,7 @@
      queue. impactbus still calls S.hit for the actual state transition, so this
      function exposes admission only and does not become a second ledger. */
   S.radialTargets = function (x, y, z, radius) {
-    if (!CBZ.CONFIG.STRUCT_LEDGER || !inCity() || !(radius > 0)) return [];
+    if (!inCity() || !(radius > 0)) return [];
     const A = arena(), out = [];
     if (!A || !A.lots) return out;
     for (let i = 0; i < A.lots.length; i++) {
@@ -724,7 +834,7 @@
 
   S.sweep = function (x, z, r0, r1, amount, opts) {
     opts = opts || {};
-    if (!CBZ.CONFIG.STRUCT_LEDGER || !inCity() || !(amount > 0)) return 0;
+    if (!inCity() || !(amount > 0)) return 0;
     const A = arena();
     if (!A || !A.lots) return 0;
     // Partial-load safety: without the shared updater there is nobody to drain
@@ -986,7 +1096,6 @@
      and the more dramatic read).
      ============================================================ */
   function ignite(rec, floor) {
-    if (!CBZ.CONFIG.STRUCT_FIRE) return;
     const nF = rec.floors.length;
     if (floor < 0 || floor >= nF) return;
     for (let i = 0; i < rec.fires.length; i++) if (rec.fires[i].f === floor) return;
@@ -998,7 +1107,21 @@
   S.ignite = function (lot, floor) { const r = lot && ledger.get(lot); if (r) ignite(r, floor | 0); };
 
   let fireAcc = 0;
-  function emitFirePlume(b, FH, f) {
+  function emitFirePlume(b, FH, f, rec) {
+    // a gutted storey burns OUT OF ITS OPENINGS: flame licks and smoke leave
+    // through the bays the blast made, not through an intact wall
+    const vents = rec && rec.vents;
+    if (vents && vents.length) {
+      let v = null;
+      for (let i = 0, k = (Math.random() * vents.length) | 0; i < vents.length; i++) {
+        const c = vents[(k + i) % vents.length];
+        if (c.f === f.f) { v = c; break; }
+      }
+      if (v) {
+        try { CBZ.cityCrashSmoke(v.x + v.nx * 1.1, v.y, v.z + v.nz * 1.1, { flame: true, count: 2 }); } catch (e) {}
+        return;
+      }
+    }
     const side = Math.random() < 0.5 ? -1 : 1;
     const horiz = Math.random() < 0.5;
     // Start strictly outside the facade. cityCrashSmoke jitters each puff by
@@ -1072,7 +1195,7 @@
         advance(rec, {});
       }
       if (!rec.fires.length) burningRecs.delete(rec);
-      else if (plumeFloor) plumeCandidates.push({ b: b, FH: FH, f: plumeFloor, d2: d2 });
+      else if (plumeFloor) plumeCandidates.push({ b: b, FH: FH, f: plumeFloor, d2: d2, rec: rec });
     });
     // At Best this is three receipts per 0.25 s tick: 48 sprite requests/sec,
     // globally, rather than 112/sec for EACH fully burning building. Nearest
@@ -1082,7 +1205,7 @@
     for (let i = 0; i < plumeCandidates.length && i < plumeBudget; i++) {
       const p = plumeCandidates[i];
       p.f.puff = 0;
-      emitFirePlume(p.b, p.FH, p.f);
+      emitFirePlume(p.b, p.FH, p.f, p.rec);
     }
   }
 
@@ -1126,8 +1249,7 @@
     // budget the old hand-rolled nuke used to enforce with its own "2 lots per
     // frame" loop before that loop was (correctly) deleted as duplication.
     // The budget belongs HERE, once, for every condemnation source.
-    if (!CBZ.CONFIG.STRUCT_COLLAPSE_V1 || !CBZ.collapse || !CBZ.CONFIG.COLLAPSE_V2
-        || collapsing.length >= maxCollapses()) {
+    if (!CBZ.collapse || !CBZ.CONFIG.COLLAPSE_V2 || collapsing.length >= maxCollapses()) {
       if (!condemnedSet.has(rec)) { condemnedSet.add(rec); condemned.push(rec); }
       return;
     }
@@ -1369,29 +1491,10 @@
     if (snap) hideReal(rec);                    // the un-animated path still has to clear the block
 
     if (!snap) {
-      try {
-        // the biggest ground beat in the game short of the nuke
-        if (CBZ.shake) CBZ.shake(4.0);
-        if (CBZ.sfx) { CBZ.sfx("collapse"); CBZ.sfx("rumble", { delay: 0.35 }); }
-        if (CBZ.cityScorch) CBZ.cityScorch(b.ox, b.oz, Math.max(b.w, b.d) * 0.6);
-        const wm = wallMatOf(b);
-        if (CBZ.cityDustKick) {
-          // the pall rolls out along the streets — dust volume many times the
-          // building's own footprint is the signature of a real collapse, and
-          // it is the colour of what came down
-          const dc = wm && wm.color ? wm.color.clone().lerp(new THREE.Color(0xb3ada2), 0.5).getHex() : undefined;
-          const n = Math.round(CBZ.qScale ? CBZ.qScale(4, 10) : 8);
-          for (let i = 0; i < n; i++) {
-            const a = (i / n) * 6.2832;
-            CBZ.cityDustKick(b.ox + Math.cos(a) * b.w * 0.7, 0.5, b.oz + Math.sin(a) * b.d * 0.7, 2.6, dc);
-          }
-        }
-        if (CBZ.cityChunk) {
-          CBZ.cityChunk(b.ox, 1.4, b.oz, { count: 20, force: 10, material: wm });
-        }
-        if (CBZ.cityShatter) CBZ.cityShatter(b.ox, b.oz, Math.max(b.w, b.d) + 14);   // the block's windows go
-      } catch (e) {}
-
+      // The ground beat — shake, the collapse report, the pall rolling out, the
+      // block's glass — is city/collapse.js's groundImpact, which ran on this
+      // same frame. It used to run here AS WELL: every collapse shook, boomed
+      // and dusted twice.
       /* THE DEBRIS FIELD. A tower does not land inside its own footprint.
          killInside() ran at the SWAP, seven seconds ago, and took whoever was
          standing in the building; this takes the street. Reach scales with
@@ -1551,7 +1654,7 @@
       if (!rec || rec.stage === STAGE.RUBBLE) continue;
       // Promote back to the animated path if a slot has opened since — the
       // spectacle is free when the budget allows it.
-      if (CBZ.CONFIG.STRUCT_COLLAPSE_V1 && collapsing.length < maxCollapses()) {
+      if (collapsing.length < maxCollapses()) {
         rec.stage = STAGE.CRITICAL;                  // let beginCollapse re-enter cleanly
         beginCollapse(rec, rec.wound ? rec.wound.floor : 0);
       } else {
@@ -1567,7 +1670,7 @@
     if (deferredSweepCount) drainDeferredSweeps();
     if (condemned.length) drainCondemned();
     stepYields(d);
-    if (CBZ.CONFIG.STRUCT_FIRE) stepFires(d);
+    stepFires(d);
   });
 
   /* ============================================================
@@ -1590,6 +1693,45 @@
       by: rec.by || null, byPlayer: !!rec.byPlayer,
     };
   };
+  /* PERSISTENCE — damage is DATA keyed by lot ("x,z" of the lot centre), so a
+     save, a guest joining, or a streamed slice coming back can re-apply it.
+     Openings live in city/fracture.js's ledger (same keying); this carries the
+     structure: damage, per-floor integrity, sever, which floors are gutted.
+     Stages below COLLAPSING only — a collapsed lot is demolition.js's rubble
+     record, which already persists. Burning is not restored (a fire is an
+     event, not a state). */
+  S.serialize = function () {
+    const out = [];
+    ledger.forEach(function (rec) {
+      if (rec.stage >= STAGE.COLLAPSING) return;
+      out.push({ k: rec.key, dmg: +rec.dmg.toFixed(2), sev: +(rec.sever || 0).toFixed(3),
+        fl: Array.prototype.map.call(rec.floors, function (v) { return +v.toFixed(3); }),
+        g: rec.gutted || null });
+    });
+    return { v: 1, r: out };
+  };
+  S.apply = function (blob) {
+    const A = arena();
+    if (!blob || !blob.r || !A || !A.lots) return 0;
+    const byKey = new Map();
+    for (let i = 0; i < A.lots.length; i++) { const l = A.lots[i]; byKey.set(Math.round(l.cx) + "," + Math.round(l.cz), l); }
+    let n = 0;
+    for (let i = 0; i < blob.r.length; i++) {
+      const row = blob.r[i], lot = byKey.get(row.k);
+      if (!lot || !lot.building || lot.demolished) continue;
+      const rec = recFor(lot);
+      rec.dmg = Math.max(rec.dmg, +row.dmg || 0);
+      rec.sever = Math.max(rec.sever || 0, +row.sev || 0);
+      if (row.fl) for (let f = 0; f < rec.floors.length && f < row.fl.length; f++) rec.floors[f] = Math.min(rec.floors[f], +row.fl[f]);
+      if (row.g) rec.gutted = Object.assign(rec.gutted || {}, row.g);
+      const frac = rec.dmg / rec.cap;
+      rec.stage = frac >= T_CRITICAL ? STAGE.CRITICAL : frac >= T_WOUNDED ? STAGE.WOUNDED : frac >= T_SCARRED ? STAGE.SCARRED : STAGE.INTACT;
+      n++;
+    }
+    return n;
+  };
+  // a lot streamed out: drop its live record (the blob above is the memory)
+  S.forgetLot = function (lot) { const rec = ledger.get(lot); if (rec && rec.stage < STAGE.COLLAPSING) { ledger.delete(lot); burningRecs.delete(rec); yielding.delete(rec); } };
   S.stateAt = function (x, z) { const lot = lotAt(x, z, 6); return lot ? S.state(lot) : null; };
   S.burning = function () {                                   // mission/HUD seam: every building on fire
     const out = [];
@@ -1646,7 +1788,6 @@
       queued: condemned.length, waveHitsPending: deferredSweepCount,
       maxConcurrent: maxCollapses(), burning: burningRecs.size, yielding: yielding.size,
       maxStoreys: maxCollapseStoreys(),
-      flags: { ledger: !!CBZ.CONFIG.STRUCT_LEDGER, collapse: !!CBZ.CONFIG.STRUCT_COLLAPSE_V1, fire: !!CBZ.CONFIG.STRUCT_FIRE },
     };
   };
 
