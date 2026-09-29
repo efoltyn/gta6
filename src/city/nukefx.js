@@ -1,2445 +1,117 @@
 /* ============================================================
-   city/nukefx.js — THE NUKE + BIG-BLAST SPECTACLE.
+   city/nukefx.js — the nuclear (and MOAB) spectacle.
 
-   This file DRAWS. It owns no damage, no ledger, no lethality: every one of
-   those already exists and is already tuned (crashfx.js's pooled blast +
-   applyBlastDamage, systems/impactbus.js's propagating wave, city/
-   structural.js's collapse ledger). It plugs into the ordnance bus by NAME:
+   This file DRAWS. Damage, casualties, glass, fires and sound belong to
+   systems/impactbus.js's analytic detonation field; this file plugs into it
+   by name (CBZ.impact.fx("nuke"|"moab", composer)) and paints the event.
 
-       CBZ.impact.fx("nuke", composer)      // src/systems/impactbus.js
-       CBZ.detonate(x, y, z, "nuke")        // ...and the row starts working
+   THE CLOUD IS ONE RAYMARCHED VOLUME. A single box-proxy mesh runs a
+   fragment shader that marches a density field through the cloud:
 
-   The bus owns all scale/damage numbers; this file consumes them and leaves
-   crashfx's proven near-field composer intact.
+     head   a torus that starts as a sphere (ring radius 0) and opens into
+            the toroidal cap. Its noise coordinates rotate around the tube,
+            so the cap ROLLS: up the middle, out over the top, down the rim.
+     stem   a flared column of dust drawn up off the deck into the head.
+     surge  the base surge, a low dust torus rolling out along the ground.
+     shell  the Wilson condensation dome riding the shock front, drawn
+            analytically (ray/sphere) so it stays razor thin and cheap.
 
-   ------------------------------------------------------------------
-   WHAT THE SEQUENCE IS (Glasstone/Dolan beat table, compressed for pacing —
-   the timings are the spec's, the techniques are Fallout 4 / Frostbite's).
-   Absolute seconds are for the stock nuke row; every one of them is reported
-   by CBZ.nukeFxAudit() so the sequence is a set of NUMBERS, not a screenshot:
+   Lighting per sample: Beer-Lambert extinction, sun transmittance read off
+   the analytic envelope (no nested march), Henyey-Greenstein forward
+   scatter, sky/ground ambient with height occlusion, and a blackbody
+   emission term for the fireball that cools white -> yellow -> orange ->
+   ember and keeps glowing inside the cap after the skin has gone to smoke.
+   The fragment writes its own depth at the first dense sample, so the city
+   occludes it properly and a cloud past the far plane is still drawn.
 
-     0.00       WHITEOUT      full-screen white DOM div (#nukeFlash). The
-                              cheapest, highest-impact beat in the game: one
-                              composited layer, no fill cost in GL at all.
-                              Never dropped, at any quality tier.
-     0.00-1.47  WHITE DOME    (NUKE_FX_V2) the beat this file used to skip
-                              entirely: a pure white, unlit, un-fogged,
-                              OPAQUE hemisphere swelling off the deck, with
-                              no detail inside it at all, silhouetting the
-                              skyline. Radius is the Taylor-Sedov similarity
-                              law R ∝ t^(2/5) — the same exponent G.I. Taylor
-                              read Trinity's yield off the published film —
-                              normalised so it reaches the 126 m maximum
-                              fireball radius at 1.05 s, which is about how
-                              long a near-surface fireball sits on the ground
-                              before buoyancy lifts it. It then FADES AND
-                              RISES over 0.42 s, revealing the graded
-                              additive fireball that was behind it all along.
-                              The double flash rides it too, and because it
-                              is the only OPAQUE layer here, the minimum
-                              genuinely gives the skyline back for a few
-                              frames.
-     0.00-0.55  FIRST MAXIMUM the isothermal ball. BLUE-WHITE, not orange, and
-                              deliberately drawn OVERBRIGHT (colour > 1.0, see
-                              flashRadiance) so core/renderer.js's tone mapper
-                              rolls it off to a hard white core — "brighter
-                              than the sun" without a bloom pass.
-     0.18-0.30  THE MINIMUM   the DOUBLE FLASH, and the single most recognisable
-                              thing a nuclear device does — bhangmeters count
-                              warheads by it. The expanding shock front goes
-                              OPAQUE and swallows its own fireball, so the light
-                              DIPS almost to nothing, then the second thermal
-                              pulse burns back through it: brighter, and far
-                              longer. ONE curve (PULSE) drives all three layers
-                              that must agree about it — the DOM div, the
-                              fireball's own radiance, and the sky tint — so the
-                              dip can never be present in one and absent in
-                              another. The real dip is ~1 ms small / tens of ms
-                              large; 120 ms here is a deliberate compression,
-                              because a 15 ms dip is one frame and reads as a
-                              dropped frame rather than as a nuclear weapon.
-     0.06-0.62  SHOCK VEIL    the opaque front that CAUSES the minimum, drawn:
-                              a near-white shell expanding at wave speed,
-                              rendered ABOVE the fireball (renderOrder 9 vs 8)
-                              so it genuinely hides it, then thinning as the
-                              second pulse burns through.
-     0.90+      CLOUD         six bounded instanced fields reuse the RPG's soft
-                              fire/smoke masks for cap, crown, stem and dust.
-                              Their centres move in world space, so the cloud
-                              has depth and parallax from the street or B-2;
-                              no all-enclosing mushroom card owns the default.
-     0.62-1.90  CONDENSATION  the same shell, continued: the Wilson cloud, the
-                              transient near-white SHELL (never a ball — that is
-                              what uCore 0.06 + uRimPow 2.6 buys) thrown by the
-                              rarefaction behind the front, then evaporating.
-     0.10-3.90  IGNITION      a 126 m low-poly luminous core wrapped in
-                              instanced hot billows. The radius is the published
-                              50*W^(1/3) maximum-fireball relation at the game's
-                              roughly 15 kt scale, cooling blue-white
-                              -> white -> yellow -> orange -> deep red along the
-                              shared RAMP as it rises and mixes.
-     0.08-7.70  PRESSURE      NO drawn ring. The analytic gameplay field still
-                              propagates outward, while an irregular filled dust
-                              surge, scattered world fires and a brief 3D
-                              condensation shell reveal its passage. A pressure
-                              front is compressed air, not neon painted on the
-                              terrain.
-     1.84-10.3  GLASS LADDER  four cityShatter receipts at 0.339 / 0.615 / 1.0 /
-                              1.25 x the 3,276 m 1 psi reach, each timed by the
-                              same shock-arrival function so panes go out AS THE
-                              FRONT PASSES rather than on a second visual clock.
-                              Glass is the ~1 psi zone: the widest of the three
-                              and the biggest single injury source a city
-                              detonation produces, so it must outrange both the
-                              flattening and the burning. It used to outrange
-                              neither.
-     1.00-27.0  RISE + STEM   the fireball climbs and cools; overlapping rough
-                              3D lobes draw the stem UP off the deck into it.
-                              The rise is FAST THEN
-                              DECELERATING and then flat (riseAt) — an
-                              compact bulb -> forming tower -> stabilised cloud,
-                              rather than revealing the mature cloud at once. ONE curve,
-                              read by the fireball, the cap, the stem and the
-                              roll, so they cannot disagree about how high the
-                              cloud is.
-     0.70-25.0  MUSHROOM      six pooled InstancedMeshes form a genuinely 3D
-                              hot core, thin rising stem, broad lobed cap and
-                              filled ground cloud. Blended, depth-sorted lobes
-                              and real parallax carry the silhouette from every
-                              view; density comes from OVERLAP, never from a
-                              lobe being individually opaque.
-     0.60-10.0  CAP GLOW      (NUKE_FX_V2) the cap is INCANDESCENT INSIDE while
-                              its surface has already gone to soot — that is
-                              the whole reason a mushroom photograph reads as
-                              a light source. One additive instanced layer,
-                              kept strictly inside the cap's own lobes (seed
-                              r <= 0.62) with depthTest on, so the front lobes
-                              occlude it and the heat comes out from BETWEEN
-                              the lumps. White-hot -> yellow -> deep orange.
-     1.50-25.0  COLLAR        (NUKE_FX_V2) the skirt hanging under the cap's
-                              rim. This is what makes the cap OVERHANG its
-                              stem; without it the head is a disc balanced on
-                              a column. Wide and low by construction (1.42
-                              lateral vs 0.56 vertical on every lobe).
-     2.60-25.0  CROWN         (NUKE_FX_V2) dark cauliflower boiling over the
-                              top, placed on the cap's own dome profile
-                              sqrt(1-r^2) so it sits ON the head rather than
-                              floating above it. Deliberately LATE: a fresh
-                              cloud top is still incandescent and there is
-                              nothing dark up there to draw. Shares ONE
-                              InstancedMesh with the collar — same material,
-                              two slices, one draw call for both.
-     1.40-14.0  CAP FLATTENS  (NUKE_FX_V2) vertical scale walks 1.00 -> 0.62
-                              across the rise. A young head is a rising ball;
-                              a stabilised one is an anvil, because the
-                              tropopause (~11 km) is an inversion it cannot
-                              climb through and everything going up goes
-                              sideways instead. Real 20 kt: ~10-12 km top,
-                              cap kilometres across, ~5 minutes — a ~23x
-                              compression into riseT, and it is named.
-     0.75-22.0  BASE SURGE    a red-brown curtain of pulverised ground rolling
-                              OUT along the deck from the foot of the stem.
-                              Crossroads Baker is the measurement: ~45 m/s
-                              outward initially, ~300 m radius by 10 s, ~1 km
-                              by a minute, decelerating throughout — which is
-                              why the growth is an ease and not a ramp. Under
-                              NUKE_FX_V2 every lobe also SPINS about its own
-                              tangential axis (slower the further out, as it
-                              decelerates) so the curtain rolls instead of
-                              sliding, and lobe heights alternate hard so the
-                              low ones fall into shadow and go near-black.
-                              Those black lobes carry the scale.
-     8.00+      ASH FALL      CBZ.fx.particleCloud in fall mode around the
-                              lens. Reused, not rebuilt.
-     THROUGHOUT THE LIGHT     (NUKE_FX_V2) sun + hemisphere + bounce ride the
-                              fireball's own luminosity at onAlways(94.6) —
-                              the one slot after core/gfx.js's finalize(),
-                              which is the last writer of those values and
-                              would otherwise clobber this silently. White at
-                              the flash, orange through the burn, ember at the
-                              end. No light is ADDED (an added light in r128
-                              recompiles every material in the world); only
-                              values are written, and daynight+finalize
-                              rewrite them next frame, so it is stateless.
-     THROUGHOUT ATMOSPHERE    scene.fog.color is lerped white -> orange -> ash
-                              for the whole arc. core/sky.js paints its horizon
-                              band FROM that colour, so the entire sky turns
-                              with it for ONE Color.lerp per frame and zero
-                              draw calls — the highest ratio of "reads as a
-                              nuclear event" to cost in the file. It is also
-                              stateless: core/daynight.js rewrites fog.color
-                              every frame anyway, so there is nothing to
-                              restore and an abort mid-arc is clean.
+   COST: one draw call. Empty box space costs one envelope evaluation and no
+   texture fetch. Step count rides the quality tier and on-screen coverage.
+   No lights are added (an added light recompiles every r128 material), no
+   per-frame allocation, one 1.1 MB noise atlas built in idle slices.
 
-   SIZE AND PROPORTION (rewritten 2026-07-28 — NUKE_REAL_SCALE).
-   OWNER: "make them REAL TO SIZE, and also make the mushroom cloud LOOK LIKE
-   AN ACTUAL MUSHROOM CLOUD."
-
-   The YIELD is inverted out of the bus row (W = (radius*power/50)^3 = 16.0 kt,
-   Hiroshima-class). nukeDims publishes the mature, minutes-old reference:
-
-       fireball radius         126 m      50*W^(1/3)
-       cap DIAMETER          5,106 m      Glasstone 20 kt cap, W^(1/3)-scaled
-       cap THICKNESS         3,992 m
-       cap centre altitude   8,004 m      top minus half the cap
-       cloud TOP            10,000 m      tropopause-limited, not W^(1/3)
-       stem diameter         1,702 m      cap/3 — the reference photograph
-       dust base radius      2,016 m      the 2 psi contour
-
-   THE FOUR RATIOS THE PHOTOGRAPH IS ABOUT, before -> after:
-
-       cap WIDER THAN TALL       (never asserted) -> 1.28 : 1
-       cap : stem                8.15 : 1         -> 3.00 : 1
-       overhang (skirt : stem)   7.98 : 1         -> 2.94 : 1
-       cloud top : cap width     2.06 : 1         -> 1.96 : 1
-
-   The cap:stem number is the headline. At 8.15:1 this file was drawing a
-   CHIMNEY under a hat — and the gate that was supposed to protect the
-   silhouette (`capOverStem >= 6`) was ONE-SIDED, so it could only ever catch
-   a stem that was too fat and it passed the chimney every single time. It is
-   a two-sided window now (2.5..4.5), which is the only shape of gate that
-   can catch both failure modes.
-
-   THE CAP'S LUMPS OBEY A SIZE LAW, and that is what actually makes a
-   silhouette read as cauliflower — not a shader. Lobe RADIUS falls with
-   distance from the axis (0.34 -> 0.178) while lobe COUNT rises with it
-   (the radial seed is area-uniform), so the crown carries a handful of very
-   big lumps and the rim a dense fringe of small ones. The vertical station
-   rides the cap's own lens profile sqrt(1-r^2), so the head is deep through
-   the middle and tapers to the rim — the shape a vortex ring takes.
-
-   THE STEM IS A TWISTED COLUMN, NOT A CYLINDER: the azimuth advances 0.85
-   turns over the column height and stemProfile() flares it 1.9x at the foot
-   into the dust base and 1.25x at the shoulder into the cap. Every lobe used
-   to sit inside 0.36 of the declared radius — a thin core inside a wide
-   claim, smooth from every angle.
-
-   A mature 10 km cloud cannot form during this 34-second shot and cannot fit
-   the 1 km frustum. formationDims therefore draws the young 454 m-wide,
-   roughly 765 m-tall stage that can honestly exist in the sequence, while
-   nukeDims remains the mature physics/zone reference. This removes both the
-   time mismatch and the need to flatten the visible event onto one sky quad.
-
-   All of it is reported by CBZ.nukeFxAudit() — .yieldKt, .dims, .zones,
-   .casualty, .proportions, .impostor — so nothing here can drift back
-   without somebody having to change a number they can see.
-
-   WHAT THIS FILE DOES NOT OWN: gameplay blast, thermal and glass zones remain
-   the bus's and ledger's. This file renders consequences—cloud, dust, world
-   fires and broken windows—without outlining any zone on the ground.
-
-   NUKE_FX_ORGANIC (2026-08-15) — THE THIRD LOOK ROUND, and the one about
-   IRREGULARITY rather than about shading. SMOKE_LOBES made a lobe look like
-   smoke; this makes the CLOUD look like weather. Real noise instead of a
-   product of sines, a per-lobe hue so the cap stops being one sticker,
-   the cap's own underside shadow, per-detonation wind (lean, drift, a
-   fingered surge rim, a waving column), a boiling fireball, a two-tone
-   cap/stem palette off the owner's reference plate, a ground fire that
-   outlives the cloud's heat, in-shader aerial haze so the 20 km icon has
-   distance, an air-clearing sky tint, a per-ground-zero body, and honest
-   night ambient. Every one of them is a POSITION OFFSET or a COLOUR: no
-   dimension, envelope, curve or beat time in this file moves, and the flag
-   off is the 2026-08-05 build byte for byte. See the flag's own block.
-
-   MUSHROOM CLOUDS, CHEAPLY: six InstancedMeshes place 3D lobes through a
-   cap/stem/surge field, so the cloud is a volume with real parallax rather
-   than stacked camera-facing cards. Under NUKE_FX_SMOKE_LOBES those lobes are
-   SHADED AS SMOKE, not as surfaces: unlit wrap-scatter (no terminator), the
-   RPG blast's own smoke mask eroding each silhouette, alpha as thickness, and
-   depth-write OFF with the instances flushed back-to-front so overlapping
-   billows accumulate density the way overlapping puffs do. Geometry and
-   materials are baked once at load; nothing is fetched (CDN is blocked and
-   must stay that way).
-
-   ------------------------------------------------------------------
-   COST DISCIPLINE (fill rate is the enemy — a full-screen additive layer is
-   about a frame of opaque geometry on SwiftShader / a phone):
-     • ONE photographed cloud sequence at a time. A concurrent detonation adds
-       its flash while the shared analytic bus still preserves every physical
-       field; GPU spectacle is bounded without evicting gameplay truth.
-     • Every mesh is built ONCE at load and PARKED invisible (also gives
-       core/fxwarm.js something to compile, so the first nuke of a session
-       does not pay a shader-link hitch at the worst possible moment).
-       Nothing is allocated per detonation except the ash cloud, and that is
-       eight seconds after the bang.
-     • Big layers are SEQUENCED, not stacked: the whiteout has faded before
-       the cap blooms; the fireball shell is retired before the cloud is big.
-     • The coherent cold silhouette is
-       a fixed 272 blended lobes (72 on the flag-off path); eight additive hot
-       lobes sit inside it. Still SIX draw calls either way — an InstancedMesh
-       costs one whatever its count, so granularity is paid in fill, and the
-       fill was measured flat (tools/nuke-smoke-check.mjs reports render ms
-       per beat for both paths).
-       Their transforms upload at 12 Hz while opacity and colour remain smooth.
-     • Not one new runtime particle pool. Nuclear cloud/dust is six bounded
-       InstancedMeshes; the ordinary explosion-puff storm is legacy-opt-in.
-
-   DETERMINISM: runtime-only FX, but it still runs off a local seeded LCG
-   (never Math.random) so replay/multiplayer stay bit-identical, matching
-   crashfx.js's rule.
-============================================================ */
+   Public surface (kept stable for strategic.js, impactbus.js, disasters.js,
+   ordnance.js, bunkers.js, crashfx.js and the tools):
+     CBZ.cityNukeFX(x,y,z,opts)      fire the spectacle without the bus
+     CBZ.cityNukeWhiteout(fade,peak,dbl)
+     CBZ.cityNukeFxAbort()
+     CBZ.nukeYield/nukeRings/nukeLethalAt/nukeDims(R)   the physical model
+     CBZ.cityBombWalk(points,opts) / CBZ.cityBombWalkActive()
+     CBZ.nukeFxDebug() / nukeFxSize() / nukeFxAudit()
+   ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
-  if (!CBZ || !window.THREE || !CBZ.scene) return;
+  if (!CBZ) return;
   const THREE = window.THREE;
   const scene = CBZ.scene;
-  if (CBZ.cityNukeFX) return;                       // idempotent family guard
+  if (!THREE || !scene) return;
 
   CBZ.CONFIG = CBZ.CONFIG || {};
-  // MASTER REVERT. false => the "nuke" composer degrades to the pooled heavy
-  // blast (exactly what the row did before this file existed) and cityBombWalk
-  // still works. One line.
-  if (CBZ.CONFIG.NUKE_FX_V1 == null) CBZ.CONFIG.NUKE_FX_V1 = true;
-  // The fresnel shock/condensation shells — the two biggest fill-rate items in
-  // the sequence. false => the volumetric cloud and whiteout still run.
-  if (CBZ.CONFIG.NUKE_FX_SHELL == null) CBZ.CONFIG.NUKE_FX_SHELL = true;
-  // The late camera-local ash particle cloud. It used 260 extra sprites after
-  // eight seconds and could veil the mushroom the player was trying to watch.
-  // The coherent cloud carries its own soot; opt this legacy foreground layer
-  // back in only for an A/B.
-  if (CBZ.CONFIG.NUKE_FX_ASH == null) CBZ.CONFIG.NUKE_FX_ASH = false;
-  // THE CLOUD MUST BE VISIBLE FROM ACROSS THE MAP. The cold lobes used to mix
-  // toward scene.fog like ordinary geometry, and the city's white haze reaches
-  // ~100% inside 5 km — so the biggest spectacle in the game was fog-erased
-  // from exactly the distances a fleeing player watches it from (measured
-  // 2026-08-02 with tools/visual-presets/nuke-sequence.mjs: at 5 km the t=8 s
-  // cap was indistinguishable from sky). A mushroom cloud stands ABOVE the
-  // haze layer; it does not dissolve into it. false => the old fogged read.
-  if (CBZ.CONFIG.NUKE_FX_FOGPROOF == null) CBZ.CONFIG.NUKE_FX_FOGPROOF = true;
+  const C = CBZ.CONFIG;
+  if (C.NUKE_FX_V1 == null) C.NUKE_FX_V1 = true;        // master: off = crashfx near field only
+  if (C.NUKE_FX_SKY == null) C.NUKE_FX_SKY = true;      // fog tint + world light drive
+  if (C.NUKE_FX_GLASS == null) C.NUKE_FX_GLASS = true;  // shatter ladder for field-less calls
+  if (C.NUKE_FX_MOAB == null) C.NUKE_FX_MOAB = true;
+  if (C.BOMB_WALK_V1 == null) C.BOMB_WALK_V1 = true;
+  if (C.NUKE_FX_PULSE == null) C.NUKE_FX_PULSE = true;
+  if (C.NUKE_REAL_SCALE == null) C.NUKE_REAL_SCALE = true;
 
-  // see solidOp() below — the arena's "slightly opaque" report
-  if (CBZ.CONFIG.NUKE_FX_SOLID_CLOUD == null) CBZ.CONFIG.NUKE_FX_SOLID_CLOUD = true;
-  // Photographically-anchored formation size (see formationDims) instead of
-  // the first coherent draft's R*3.6 cap, which measured ~3x smaller than the
-  // Trinity/Nagasaki frame record for the same age. false => draft numbers.
-  if (CBZ.CONFIG.NUKE_FX_BIG_FORMATION == null) CBZ.CONFIG.NUKE_FX_BIG_FORMATION = true;
-  // The cloud OUTLIVES the 34 s sequence: it keeps growing toward the mature
-  // researched dimensions (nukeDims) over ~3 minutes, stands as a landmark,
-  // thins, and only then fades — instead of vanishing mid-formation at 34 s.
-  // false => the sequence ends and hides at STYLE.nuke.dur exactly as before.
-  if (CBZ.CONFIG.NUKE_FX_AFTERMATH == null) CBZ.CONFIG.NUKE_FX_AFTERMATH = true;
-  // OWNER (2026-08-02): "it looks too much like rocks... when an RPG blows up
-  // it actually looks real as fuck, but your shit looks geometric." The RPG's
-  // realism is soft-EDGED sprites — nothing in that picture has a polygon
-  // silhouette. The lobes were bare lit geometry with hard rims. This injects
-  // a fresnel edge-fade into the shared Lambert lobe material so every billow
-  // dissolves at its silhouette exactly like a gradient puff, while the core
-  // stays dense and depth-writing. false => the hard-rimmed read.
-  if (CBZ.CONFIG.NUKE_FX_SOFT_LOBES == null) CBZ.CONFIG.NUKE_FX_SOFT_LOBES = true;
-  /* OWNER AGAIN (2026-08-05), and the second time is the useful one: "they
-     look like rocks... a little geometric instead of looking like smoke. When
-     the RPG blows up it's like a cloud. Don't change anything about the nuke's
-     shape or its speed — I just want whatever the RPG is doing."
-
-     SOFT_LOBES above softened the EDGE of an object that was still being drawn
-     as an object, and the 2026-08-03 solidity pass (see solidOp) then pushed
-     its interiors to fully opaque, which made the object-ness worse. Read the
-     RPG blast (city/crashfx.js:418-577) and there are exactly four properties
-     doing the work, none of which this cloud had:
-
-       (1) NOTHING IS LIT. A SpriteMaterial takes no lights, so no puff has a
-           light/dark terminator. Our lobes were MeshLambert under the sun:
-           a terminator across a closed convex surface is the single loudest
-           "solid body" cue there is, and it is what "geometric" names.
-       (2) depthWrite IS OFF, so overlapping puffs ACCUMULATE density. Ours
-           wrote depth: lobes hard-clipped into each other, and a near lobe's
-           soft rim faded to SKY instead of to the lobe behind it. That is a
-           pile of soft-edged boulders, which is still boulders.
-       (3) THE MASK IS LUMPY (makeSmokeTexture: seven overlapping blobs), so
-           a puff's own silhouette is ragged. A fresnel fade is smooth, and a
-           smoothly faded sphere still reads as a sphere.
-       (4) THE PUFF IS NOT A SURFACE. Its alpha is thickness, densest through
-           the middle, zero at the edge — no floor, no rim, no outline.
-
-     So: same lobes, same field, same transforms — drawn like a puff instead of
-     like a rock. Unlit wrap-scatter shading, depth-write off with the instances
-     sorted back-to-front so the accumulation is CORRECT, the RPG's own smoke
-     mask (TEX.blastSmoke, fetched here since d186a55 and never once bound)
-     eroding the silhouette, and per-lobe alpha dropped because overlap now
-     supplies the density that solidOp used to fake per lobe.
-
-     NOT TOUCHED, deliberately: every dimension, envelope, curve, count, seed
-     and duration in this file. The cloud is the same cloud, frame for frame.
-     false => the lit, depth-writing, hard-clipping read this shipped with. */
-  if (CBZ.CONFIG.NUKE_FX_SMOKE_LOBES == null) CBZ.CONFIG.NUKE_FX_SMOKE_LOBES = true;
-  function smokeLobes() { return CBZ.CONFIG.NUKE_FX_SMOKE_LOBES !== false; }
-  /* OWNER, A THIRD TIME (2026-08-15), against the storyboard shots in
-     artifacts/visual-comparisons/nuke-before-baseline: SMOKE_LOBES fixed how a
-     lobe is SHADED and the cloud still reads as manufactured, because seven
-     things about it are perfectly regular and nothing in nature is:
-
-       (a) ONE FLAT HUE PER LAYER. Every cap lobe samples the same colour, the
-           same light and (before this) three sine octaves whose product is a
-           smooth plaid. At t=210 s the whole cap is one tan sticker.
-       (b) COUNTABLE STEM BALLS at t=8 s — 48 lobes over a 140 m column is
-           coarse enough to resolve individually.
-       (c) PERFECT AXISYMMETRY. No wind, no lean, no drift: a cloud that is
-           a surface of revolution is a lathe part, not weather.
-       (d) A SMOOTH FIREBALL. IcosahedronGeometry(1,2) + one fresnel = a
-           billiard ball with a gradient. A real one BOILS.
-       (e) THE AIR NEVER CLEARS. The fog/sky tint held ~55% of the way to ash
-           for four hundred seconds, so the skyline never came back.
-       (f) THE 20 km CLOUD IS FOG-PROOF AND THEREFORE A STICKER. Correct that
-           scene fog must not erase it (see NUKE_FX_FOGPROOF); wrong that it
-           then has NO aerial perspective at all at twenty kilometres.
-       (g) EVERY DETONATION REPLAYS ONE SCULPTURE — VOL_SEED is minted once at
-           load, so the second nuke of a session is the first one again.
-
-     ...plus the reference plate the owner sent with the same message: a real
-     mushroom is TWO-TONE (dark self-shadowed cap over a PALE cream stem), and
-     its ground end is still ON FIRE long after the head has gone cold.
-
-     Everything answering those is behind this one flag, and every dial is a
-     POSITION OFFSET or a COLOUR — no authored dimension, envelope, curve or
-     beat time moves. false => byte-identical to the 2026-08-05 build. */
-  if (CBZ.CONFIG.NUKE_FX_ORGANIC == null) CBZ.CONFIG.NUKE_FX_ORGANIC = true;
-  const organic = () => !!CBZ.CONFIG.NUKE_FX_ORGANIC;
-  /* Per-lobe randomness that consumes NO rng() draw and is CONSTANT for the
-     life of a lobe: the module LCG's sequence is a determinism contract (see
-     the header), so anything wanting a per-index number takes it from the
-     index. sin-fract is the standard GLSL hash, evaluated in JS so the CPU
-     and the shader agree about which lobe is which. */
-  function lobeHash(i) {
-    const s = Math.sin((i + 1) * 127.1) * 43758.5453;
-    return s - Math.floor(s);
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+  function sstep(a, b, x) { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); }
+  function easeOut(u) { u = clamp(u, 0, 1); return 1 - (1 - u) * (1 - u); }
+  function floorAt(x, z) { return CBZ.floorAt ? (CBZ.floorAt(x, z) || 0) : 0; }
+  function camPos() { return CBZ.camera && CBZ.camera.position ? CBZ.camera.position : null; }
+  function camDist(x, y, z) {
+    const c = camPos();
+    return c ? Math.hypot(c.x - x, c.y - y, c.z - z) : 500;
   }
-  // position hash with an INTEGER salt. core/seed.js's hash01 does `salt | 0`,
-  // so a string salt silently collapses to 0 — the salts below are numbers and
-  // their names live in the comment where they cannot lie.
-  const SALT_WIND = 0x7711;      // "nukewind"  — downwind azimuth
-  const SALT_WINDK = 0x7712;     // "nukewindk" — downwind speed
-  const SALT_BODY = 0xb0d1;      // "nukebody"  — this ground zero's sculpture
-  function h01(x, z, salt) { return CBZ.hash01 ? CBZ.hash01(x, z, salt) : 0.5; }
-  // THE ATMOSPHERE DRIVE — the single cheapest "this is nuclear" cue there is.
-  // Lerps scene.fog.color along the timeline (white-out -> orange -> ash grey);
-  // core/sky.js@99 paints its horizon band from scene.fog.color, so the whole
-  // SKY follows for free, and core/daynight.js@2 rewrites the colour every
-  // frame, so it self-restores with nothing to leak. false => fog untouched.
-  if (CBZ.CONFIG.NUKE_FX_SKY == null) CBZ.CONFIG.NUKE_FX_SKY = true;
-  // Re-point the bus's "moab" row at the composer below. false => the row
-  // keeps whatever fx the bus table gave it (today: "heavy").
-  if (CBZ.CONFIG.NUKE_FX_MOAB == null) CBZ.CONFIG.NUKE_FX_MOAB = true;
-  // The carpet-bombing stagger (CBZ.cityBombWalk). false => a walk fires its
-  // whole stick on the first tick, which is the pre-existing behaviour of
-  // every caller that just looped over points itself.
-  if (CBZ.CONFIG.BOMB_WALK_V1 == null) CBZ.CONFIG.BOMB_WALK_V1 = true;
-
-  /* ---- the phenomenology flags. Each is ONE beat and ONE revert. ----------
-     Every one of these is degrade-safe by construction: turning it off returns
-     the layer to the curve it had before, it never removes the layer. */
-  // THE DOUBLE FLASH, IN THE WORLD. false => the DOM div still dips (that has
-  // always been there) but the FIREBALL and the sky ride a flat envelope, i.e.
-  // the pre-existing behaviour where the signature existed only on the overlay.
-  if (CBZ.CONFIG.NUKE_FX_PULSE == null) CBZ.CONFIG.NUKE_FX_PULSE = true;
-  // THE SHOCK VEIL — the opaque front that swallows the fireball, drawn above
-  // it. false => the condensation shell keeps its old 0.28s start and its old
-  // "sits behind the fireball" render order.
-  if (CBZ.CONFIG.NUKE_FX_VEIL == null) CBZ.CONFIG.NUKE_FX_VEIL = true;
-  // THE RISE CURVE — fast, then decelerating, then stable. false => the old
-  // smoothstep (slow-start, constant-ish middle), which is what films draw.
-  if (CBZ.CONFIG.NUKE_FX_RISE == null) CBZ.CONFIG.NUKE_FX_RISE = true;
-  // THE CLOUD ROLL, earlier and decaying. It drives the billboard shear and
-  // the 3D cap-lobe circulation; there is deliberately no visible torus mesh.
-  if (CBZ.CONFIG.NUKE_FX_ROLL == null) CBZ.CONFIG.NUKE_FX_ROLL = true;
-  // THE GLASS LADDER — cityShatter passes walking outward WITH the front, out
-  // past the blast reach. false => the old three fixed-clock passes that all
-  // landed INSIDE the flattened zone.
-  if (CBZ.CONFIG.NUKE_FX_GLASS == null) CBZ.CONFIG.NUKE_FX_GLASS = true;
-
-  /* ============================================================
-     NUKE_FX_V2 (2026-07-28) — THE REDRAW. Four beats the file did not have,
-     each one a thing test film shows and this sequence did not:
-
-       (a) THE WHITE DOME. The first second of a near-surface burst is a
-           featureless, blinding white HEMISPHERE swelling off the deck —
-           no detail inside it at all, so bright it silhouettes the skyline
-           and washes the horizon to a line. This file drew the light (a DOM
-           div) and the fireball (a graded additive shell) and never drew the
-           thing itself. It grows on the Taylor-Sedov law, not on a taste
-           curve — see WDOME below.
-       (b) THE COLLAR AND THE CROWN. A mature cloud OVERHANGS its own stem
-           with a skirt, and its top boils over into dark cauliflower as it
-           cools. The cap here was a disc of lobes with nothing under its rim
-           and nothing dark on top, which is why it read as smoke rather than
-           as a cloud with a shape.
-       (c) THE CAP GLOWS FROM WITHIN. The reason a mushroom photograph reads
-           as a light source is that the cap is still incandescent inside
-           while its surface has already gone to soot. One additive layer,
-           inside the cap lobes, retired as it cools.
-       (d) THE WORLD IS LIT BY IT. scene.fog already turned the sky; nothing
-           turned the GROUND. The sun and the hemisphere ambient now ride the
-           fireball's own luminosity, so every wall and roof for hundreds of
-           metres goes orange and then dark — which is the whole difference
-           between a picture of an explosion and being next to one.
-
-     false => every one of those four is skipped and the sequence is the
-     pre-2026-07-28 one, beat for beat. */
-  if (CBZ.CONFIG.NUKE_FX_V2 == null) CBZ.CONFIG.NUKE_FX_V2 = true;
-  function v2() { return CBZ.CONFIG.NUKE_FX_V2 !== false; }
-
-  /* NUKE_REAL_SCALE (2026-07-28) — DIMENSIONAL HONESTY.
-     OWNER: "make them REAL TO SIZE."
-     nukeDims keeps the mature modelled dimensions and all physical effect
-     contours. formationDims is the separate visible 34-second stage; it is
-     deliberately younger and stays volumetric inside the camera frustum.
-     false => the old framing-scale/legacy cloud path. */
-  if (CBZ.CONFIG.NUKE_REAL_SCALE == null) CBZ.CONFIG.NUKE_REAL_SCALE = true;
-  function real() { return v2() && CBZ.CONFIG.NUKE_REAL_SCALE !== false; }
-
-  /* THE CLOUD FORMS IN PHASES. The real-size pass used to reveal a complete
-     ten-kilometre mature mushroom as soon as the white dome released. That
-     was a timing bug, not a style choice: the far-tier quad began at 30% of
-     mature size and already contained the final cap, collar, stem and base.
-     false is the one-line visual revert. */
-  if (CBZ.CONFIG.NUKE_FX_PHASED_CLOUD == null) CBZ.CONFIG.NUKE_FX_PHASED_CLOUD = true;
-  function phasedCloud() {
-    return real() && CBZ.CONFIG.NUKE_FX_PHASED_CLOUD !== false;
-  }
-
-  /* THE POST-FLASH CLOUD HAS ONE OWNER. The coherent path suppresses the five
-     legacy detail planes and the ordinary explosion storm, but it now keeps
-     the six bounded instanced fields. Each field uses crashfx's exact soft RPG
-     fire/smoke masks, so the cloud is many overlapping moving volumes in world
-     space rather than one camera-facing mushroom silhouette. false restores
-     the old nuclear stack and its geometric far-tier handoff. */
-  if (CBZ.CONFIG.NUKE_FX_COHERENT_CLOUD == null) CBZ.CONFIG.NUKE_FX_COHERENT_CLOUD = true;
-  function coherentCloud() {
-    return phasedCloud() && CBZ.CONFIG.NUKE_FX_COHERENT_CLOUD !== false;
-  }
-
-  /* Legacy decorative blasts are deliberately OFF for a nuke. They scheduled
-     19 ordinary cityExplosion calls plus shock-front dust after the real
-     near-field blast had already fired: ~1,900 individual puff requests on
-     the first detonation, against crashfx's 64-object warm pool. The nuke owns
-     instanced hot billows and a ground surge already; impactbus owns actual
-     structure ignition. Re-enable only for an A/B regression check. */
-  if (CBZ.CONFIG.NUKE_FX_LEGACY_PUFFS == null) CBZ.CONFIG.NUKE_FX_LEGACY_PUFFS = false;
-
-  // ---- deterministic seeded LCG (NEVER Math.random — replay/MP sync) --------
+  function tier() { return CBZ.qualityLevel == null ? 3 : clamp(CBZ.qualityLevel, 0, 4); }
   let _rs = 0x51ed77;
   function rng() { _rs = (_rs * 1103515245 + 12345) & 0x7fffffff; return _rs / 0x7fffffff; }
 
-  function q01() { return CBZ.qScale ? Math.max(0, Math.min(1, CBZ.qScale(0, 1))) : 1; }
-  function floorAt(x, z) { return CBZ.floorAt ? CBZ.floorAt(x, z) : 0; }
-  function camPos() { return CBZ.camera && CBZ.camera.position ? CBZ.camera.position : null; }
-  // core/scene.js ships PerspectiveCamera(62, aspect, 0.1, 1000). Read it
-  // live rather than typing 1000: a quality tier or a mode is allowed to
-  // move it, and every impostor number below is a fraction of it.
-  function camFar() {
-    const c = CBZ.camera;
-    return (c && c.far > 1) ? c.far : 1000;
-  }
-  // bloomAt()'s ceiling: 0.35 + 0.9 + 0.16. Named once so the cap's true
-  // width can be divided by it instead of by a literal nobody can trace.
-  const BLOOM_MAX = 0.35 + 0.9 + 0.16;
-  function camDist(x, y, z) {
-    const c = camPos();
-    return c ? Math.hypot(x - c.x, y - c.y, z - c.z) : 0;
-  }
-  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
-  function ease(t) { return t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t); }   // smoothstep
-  const _fogTint = new THREE.Color();          // scratch — never allocate per frame
-
   /* ============================================================
-     PROCEDURAL TEXTURES — baked once at load, no external assets.
+     THE PHYSICAL MODEL. The yield is inverted out of the bus row:
+     R_fireball = 50*W^(1/3) m and the nuke row fixes R = 14*9 = 126 m, so
+     W = 16 kt, Hiroshima class. Rings are Glasstone & Dolan surface-burst
+     overpressure radii scaled by W^(1/3); the fatality curve is the USSBS
+     Hiroshima survey. impactbus.js and strategic.js read these; there is no
+     second table anywhere.
      ============================================================ */
-  // A lumpy grayscale billow: alpha carries density, the red channel carries
-  // the same density so the shader can brighten the dense core without a
-  // second sampler. Overlapping soft blobs + a radial mask kill the quad edge.
-  function makeCloudTexture() {
-    const c = document.createElement("canvas"); c.width = c.height = 256;
-    const ctx = c.getContext("2d");
-    ctx.globalCompositeOperation = "lighter";
-    for (let i = 0; i < 54; i++) {
-      // cluster the blobs into a disc so the silhouette is a billow, not a square
-      const a = rng() * 6.2832, rr = Math.sqrt(rng()) * 78;
-      const px = 128 + Math.cos(a) * rr, py = 128 + Math.sin(a) * rr * 0.86;
-      const br = 20 + rng() * 52;
-      const g = ctx.createRadialGradient(px, py, 0, px, py, br);
-      const v = 150 + ((rng() * 90) | 0);
-      g.addColorStop(0, "rgba(" + v + "," + v + "," + v + "," + (0.36 + rng() * 0.4) + ")");
-      g.addColorStop(1, "rgba(" + v + "," + v + "," + v + ",0)");
-      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(px, py, br, 0, 6.2832); ctx.fill();
-    }
-    // radial mask: solid through the middle, gone by the quad edge
-    ctx.globalCompositeOperation = "destination-in";
-    const m = ctx.createRadialGradient(128, 128, 8, 128, 128, 128);
-    m.addColorStop(0.0, "rgba(0,0,0,1)");
-    m.addColorStop(0.62, "rgba(0,0,0,0.92)");
-    m.addColorStop(0.88, "rgba(0,0,0,0.28)");
-    m.addColorStop(1.0, "rgba(0,0,0,0)");
-    ctx.fillStyle = m; ctx.fillRect(0, 0, 256, 256);
-    const t = new THREE.CanvasTexture(c);
-    t.needsUpdate = true;
-    return t;
-  }
-
-  // Tiling two-octave value noise. This is the "second independently-scrolling
-  // noise" the research calls for — one sampler, two lookups, no third texture.
-  function makeNoiseTexture() {
-    const S = 128, c = document.createElement("canvas");
-    c.width = c.height = S;
-    const ctx = c.getContext("2d"), img = ctx.createImageData(S, S), d = img.data;
-    function grid(n) {
-      const g = new Float32Array(n * n);
-      for (let i = 0; i < g.length; i++) g[i] = rng();
-      return g;
-    }
-    const gA = grid(8), gB = grid(16);
-    function samp(g, n, u, v) {                    // bilinear, wrapped => tileable
-      const fx = u * n, fy = v * n;
-      const x0 = Math.floor(fx) % n, y0 = Math.floor(fy) % n;
-      const x1 = (x0 + 1) % n, y1 = (y0 + 1) % n;
-      const tx = fx - Math.floor(fx), ty = fy - Math.floor(fy);
-      const a = g[y0 * n + x0], b = g[y0 * n + x1], e = g[y1 * n + x0], f = g[y1 * n + x1];
-      const sx = tx * tx * (3 - 2 * tx), sy = ty * ty * (3 - 2 * ty);
-      return (a + (b - a) * sx) + ((e + (f - e) * sx) - (a + (b - a) * sx)) * sy;
-    }
-    for (let y = 0; y < S; y++) {
-      for (let x = 0; x < S; x++) {
-        const u = x / S, v = y / S;
-        let n = samp(gA, 8, u, v) * 0.65 + samp(gB, 16, u, v) * 0.35;
-        n = clamp(n, 0, 1);
-        const o = (y * S + x) * 4, b = (n * 255) | 0;
-        d[o] = b; d[o + 1] = b; d[o + 2] = b; d[o + 3] = 255;
-      }
-    }
-    ctx.putImageData(img, 0, 0);
-    const t = new THREE.CanvasTexture(c);
-    t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    t.needsUpdate = true;
-    return t;
-  }
-
-  /* ============================================================
-     LEGACY MUSHROOM DENSITY TEXTURE — baked once for the flag-off fallback.
-
-     WHY THIS EXISTS. The honest cloud for this device is 5,106 m across and
-     10,000 m tall (see nukeDims). core/scene.js's camera is
-     `PerspectiveCamera(62, aspect, 0.1, 1000)` — a ONE KILOMETRE far plane —
-     and scene.fog is `Fog(0xb6c4c8, 95, 360)`. So the true cloud is TEN
-     TIMES the entire view frustum and twenty-eight times the fog's reach:
-     there is no camera setting and no lobe count that renders it as 3D
-     geometry. Raising the far plane is not the answer either — 0.1 to 20000
-     is a depth-precision disaster across the whole city for one 34-second
-     event.
-
-     This was the former default. The coherent path now draws the honest young
-     formation stage as soft world-space volumes; this mature sky card remains
-     only so the explicit fallback still has a complete implementation.
-
-     THE SIMILAR-TRIANGLES SOLVE (stepImpostor does it every frame):
-         d      = |cloudCentre - camera|          the TRUE distance
-         D      = 0.86 * camera.far = 860 m       where we actually put it
-         size'  = size * D / d
-     A quad of size' at D subtends exactly the angle `size` does at d, so a
-     player 2 km from ground zero sees a cloud of the correct angular size,
-     and one standing AT ground zero looks up at a cap that correctly fills
-     the sky. Depth-tested at 860 m, so everything in the world occludes it
-     (correct: it is really kilometres further away), and un-fogged, because
-     it is behind the fog, not in it.
-
-     WHAT IS IN THE THREE CHANNELS:
-        A  one continuous density field — cap, collar, stem and dust base
-        R  incandescence  — 1 in the cap core and up the stem's spine
-        G  coolness       — 1 at the boiled-over crown and the dust base
-     R and G are read by IMP_FS (see uCool). Crucially, turbulence modulates
-     density WITHIN the connected field; no circle or sphere defines smoke.
-     ============================================================ */
-  const IMP_W = 256, IMP_H = 512;
-
-  // Deterministic value noise for the baked density field. Integer hashing
-  // avoids Math.random and avoids consuming the replay RNG used by live FX.
-  function maskHash(x, y, seed) {
-    let h = Math.imul(x | 0, 374761393) ^ Math.imul(y | 0, 668265263) ^
-            Math.imul(seed | 0, 69069);
-    h = Math.imul(h ^ (h >>> 13), 1274126177);
-    return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
-  }
-  function maskNoise(x, y, seed) {
-    const ix = Math.floor(x), iy = Math.floor(y);
-    const fx = x - ix, fy = y - iy;
-    const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
-    const a = maskHash(ix, iy, seed), b = maskHash(ix + 1, iy, seed);
-    const c = maskHash(ix, iy + 1, seed), d = maskHash(ix + 1, iy + 1, seed);
-    return (a + (b - a) * sx) + ((c + (d - c) * sx) - (a + (b - a) * sx)) * sy;
-  }
-  function maskFbm(x, y) {
-    return maskNoise(x, y, 91) * 0.54 +
-           maskNoise(x * 2.07 + 13.1, y * 2.07 - 7.3, 173) * 0.30 +
-           maskNoise(x * 4.19 - 5.7, y * 4.19 + 11.9, 251) * 0.16;
-  }
-  function maskSmooth(a, b, x) {
-    const u = clamp((x - a) / Math.max(0.00001, b - a), 0, 1);
-    return u * u * (3 - 2 * u);
-  }
-
-  function makeMushroomTexture(stage) {
-    stage = stage == null ? 2 : clamp(stage | 0, 0, 2);
-    const c = document.createElement("canvas");
-    c.width = IMP_W; c.height = IMP_H;
-    const ctx = c.getContext("2d");
-
-    // The canvas is laid out in the cloud's OWN metres so every station below
-    // is the researched number, not a fraction somebody guessed. The quad is
-    // later scaled to (capW, top), so these two mappings are exact.
-    const D = nukeDims(126);
-
-    /* Three masks describe three DIFFERENT objects rather than scaling the
-       finished silhouette. Stage 0 is the compact rising bulb and short dirty
-       column that follows the white dome; stage 1 is the forming tower; stage
-       2 is the researched mature cloud. They share the mature cloud's metre
-       coordinate system, so blending masks is a physical morph and the quad
-       never jumps in angular size. */
-    const capScale = [0.15, 0.50, 1][stage];
-    const capHScale = [0.12, 0.55, 1][stage];
-    const capY = [900, 3600, D.capY][stage];
-    const capRx = D.capW * 0.5 * capScale;
-    const capRy = D.capH * 0.5 * capHScale;
-    const stemRx = D.stemW * 0.5 * [0.33, 0.68, 1][stage];
-    const baseRx = D.base * 0.5 * [0.28, 0.62, 1][stage];
-    const baseH = D.top * [0.025, 0.045, 0.055][stage];
-    /* Each phase owns its OWN current physical box and fills the same UV
-       rectangle. The runtime scales that rectangle to the live cap width/top.
-       Previously all three were painted into the mature 10 km box at y=900,
-       y=3600 and y=8004, so a cross-fade literally displayed two heads. */
-    // Transparent breathing room is part of the texture contract. The old
-    // 2.08-wide box left only four per cent beside the cap; the young stem's
-    // foot could reach that edge and ClampToEdgeWrapping repeated its last
-    // opaque texel as a rectangular smoke sheet. Runtime uses the matching
-    // 1.30/1.12 factors, so the cloud's researched dimensions do not change.
-    const shapeW = capRx * 2.60;
-    const shapeTop = capY + capRy * 1.12;
-
-    /* One analytic UNION, sampled into pixels. The cap is an asymmetric
-       superellipse (wide/flat above, deeper below), the collar is a low shelf
-       under it, the stem is one flared connected column, and the base is a
-       low ground-hugging mass. Noise perturbs the boundary and density; it
-       never creates a freestanding circle. */
-    const img = ctx.createImageData(IMP_W, IMP_H);
-    const data = img.data;
-    const stemBottom = baseH * 0.28;
-    for (let iy = 0; iy < IMP_H; iy++) {
-      const wy = (1 - (iy + 0.5) / IMP_H) * shapeTop;
-      for (let ix = 0; ix < IMP_W; ix++) {
-        const wx = ((ix + 0.5) / IMP_W - 0.5) * shapeW;
-        const noise = maskFbm(ix / 31, iy / 31);
-        const fine = maskFbm(ix / 12 + 4.7, iy / 12 - 2.1);
-
-        const capDy = wy - capY;
-        const capYn = capDy >= 0
-          ? capDy / Math.max(1, capRy)
-          : capDy / Math.max(1, capRy * 0.86);
-        const capXn = Math.abs(wx) / Math.max(1, capRx);
-        const capField = 1 - Math.pow(capXn, 3.0) - Math.pow(Math.abs(capYn), 2.6);
-
-        // The toroidal overhang is real, but a mathematically level shelf
-        // reads as a sprite seam. Low-frequency convection bends its lower
-        // edge while keeping it part of the same cap mass.
-        const collarWarp =
-          (maskNoise(ix / 41, stage * 3.7 + 0.8, 417) - 0.5) * capRy * 0.16 +
-          Math.sin((wx / Math.max(1, capRx)) * 4.2 + stage) * capRy * 0.035;
-        const collarY = capY - capRy * 0.52 + collarWarp;
-        const collarField = 1 -
-          Math.pow(Math.abs(wx) / Math.max(1, capRx * 1.02), 4.0) -
-          Math.pow(Math.abs(wy - collarY) / Math.max(1, capRy * 0.30), 2.2);
-
-        /* The stem continues well INTO the cap and base, then fades there.
-           A hard y-range used to end the stem on one scanline immediately
-           below the cap, producing the horizontal shelf visible in phase
-           previews. This is a signed intersection of its lateral and axial
-           fields instead: one uninterrupted convective column. */
-        // Carry the hot column well into the head. Its axial fade is buried
-        // across the cap rather than ending at the cap/stem silhouette.
-        const stemTop = capY + capRy * 0.30;
-        let stemF = clamp((wy - stemBottom) /
-          Math.max(1, stemTop - stemBottom), 0, 1);
-        // A young column may flare, but it cannot be wider than its own head.
-        // The ground surge carries the broad foot separately.
-        const width = Math.min(stemRx * stemProfile(stemF), capRx * 0.74);
-        const centre = Math.sin(stemF * 5.1 + stage * 0.35) * width * 0.10 +
-          (maskNoise(stemF * 6.0, 1.7, 331) - 0.5) * width * 0.16;
-        const stemDistance = Math.abs(wx - centre) / Math.max(1, width);
-        const lateralField = 1 - stemDistance;
-        const axialField = Math.min(
-          (wy - stemBottom) / Math.max(1, Math.max(baseH * 0.55, capRy * 0.10)),
-          (stemTop - wy) / Math.max(1, Math.max(capRy * 0.85, baseH * 0.35))
-        );
-        const stemField = Math.min(lateralField, axialField);
-        const stemJoin = maskSmooth(-0.06, 0.34, axialField);
-        const stemAxial = clamp(lateralField, 0, 1) * stemJoin;
-
-        const baseField = 1 -
-          Math.pow(Math.abs(wx) / Math.max(1, baseRx), 2.6) -
-          Math.pow(Math.abs(wy - baseH * 0.38) / Math.max(1, baseH * 0.62), 2.2);
-
-        const structure = Math.max(capField, collarField, stemField, baseField);
-        // Boundary displacement is strongest at the edge and quiet inside:
-        // smoke occupies a mass, then carries roil within that mass.
-        const edgeK = 1 - Math.min(1, Math.abs(structure));
-        const field = structure + (noise - 0.5) * (0.24 + 0.44 * edgeK);
-        let alpha = maskSmooth(-0.16, 0.18, field);
-        alpha *= 0.82 + fine * 0.18;
-        if (alpha <= 0.002) continue;
-
-        const capMask = maskSmooth(-0.14, 0.30, Math.max(capField, collarField));
-        const stemMask = maskSmooth(-0.08, 0.30, stemField);
-        const baseMask = maskSmooth(-0.10, 0.28, baseField);
-        const capBand = 1 - Math.min(1,
-          Math.abs(capDy + capRy * 0.04) / Math.max(1, capRy * 0.58));
-        const capCore = (1 - Math.min(1, capXn / 0.86)) * capBand;
-        // Heat climbs as a narrow, turbulent spine. Using the full linear
-        // stem field painted a pale rectangular column inside an otherwise
-        // organic silhouette—the same "geometry pretending to be smoke"
-        // problem this path exists to remove.
-        const stemHeat = Math.pow(stemAxial, 1.65) *
-          (0.58 + noise * 0.50);
-        const hot = clamp(Math.max(
-          capMask * capCore * (1 - stage * 0.10),
-          stemMask * stemHeat * (0.38 + stemF * 0.62)
-        ) * (0.84 + fine * 0.20), 0, 1);
-        const capCool = capMask * clamp(0.08 +
-          0.62 * Math.max(0, capYn) + 0.32 * capXn, 0, 1);
-        const stemCool = stemMask * clamp(0.20 + (1 - stemAxial) * 0.52 +
-          (1 - stemF) * 0.18, 0, 1);
-        const cool = clamp(Math.max(baseMask * 0.94, capCool, stemCool), 0, 1);
-
-        const o = (iy * IMP_W + ix) * 4;
-        data[o] = Math.round(hot * 255);
-        data[o + 1] = Math.round(cool * 255);
-        data[o + 2] = 0;
-        data[o + 3] = Math.round(clamp(alpha, 0, 1) * 255);
-      }
-    }
-    ctx.putImageData(img, 0, 0);
-
-    // The removed lobe painter consumed exactly 898 replay-RNG samples per
-    // stage before seedVolumes(). Advance by the same amount so the MOAB and
-    // the coherent-cloud flag-off path keep their established layouts.
-    for (let i = 0; i < 898; i++) rng();
-
-    const t = new THREE.CanvasTexture(c);
-    t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
-    t.generateMipmaps = false;
-    t.minFilter = THREE.LinearFilter;
-    t.magFilter = THREE.LinearFilter;
-    t.needsUpdate = true;
-    return t;
-  }
-
-  /* A CONVECTIVE COLUMN IS NOT A CYLINDER. It flares at BOTH ends — hard at
-     the foot, where it is being drawn up out of the ground-shock skirt, and
-     gently at the shoulder, where it feeds the vortex ring. Measured off the
-     owner's reference plate: about 1.9x at the deck, 1.25x at the shoulder,
-     and 1.0 through the middle third. f = 0 at the ground, 1 at the cap. */
-  function stemProfile(f) {
-    f = clamp(f, 0, 1);
-    return (1 + 0.90 * Math.pow(1 - f, 2.4)) * (1 + 0.25 * Math.pow(f, 3.0));
-  }
-
-  // The 1D LIFETIME LUT: white-hot -> yellow -> orange -> ember -> soot -> ash.
-  // Sampled by u = normalized age, which is how a single billboard shader
-  // covers "fireball" and "old cloud" without a second material.
-  const RAMP = [
-    [0.00, "#fffdf2"], [0.06, "#ffeda6"], [0.14, "#ffc25a"], [0.26, "#ff8a2e"],
-    [0.40, "#d1512a"], [0.55, "#8a5340"], [0.70, "#6b6157"], [0.85, "#575049"],
-    [1.00, "#3d3934"],
-  ];
-  function makeLutTexture() {
-    const c = document.createElement("canvas"); c.width = 64; c.height = 1;
-    const ctx = c.getContext("2d"), g = ctx.createLinearGradient(0, 0, 64, 0);
-    for (const s of RAMP) g.addColorStop(s[0], s[1]);
-    ctx.fillStyle = g; ctx.fillRect(0, 0, 64, 1);
-    const t = new THREE.CanvasTexture(c);
-    t.generateMipmaps = false;
-    t.minFilter = THREE.LinearFilter;
-    t.magFilter = THREE.LinearFilter;
-    t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
-    t.needsUpdate = true;
-    return t;
-  }
-  /* THE COLOUR THE RAMP DELIBERATELY DOES NOT HAVE.
-
-     RAMP starts at a warm white because it is shared with the CLOUD billboards,
-     and a blue cloud is nonsense. But a fireball does not start at warm white
-     either: for the first fraction of a second it is an isothermal ball at tens
-     of thousands of kelvin and it reads BLUE-white — far bluer, and far
-     brighter, than the sun. That colour belongs to exactly one layer for
-     exactly one beat, so it lives here as a single Color the shell lerps
-     toward and away from, rather than as a second stop nobody else wants. */
-  const BLUE_WHITE = new THREE.Color(0xd6e8ff);
-  // CPU twin of the LUT, for the shells (uniform colours, no sampler needed).
-  // Parsed to Colors ONCE — a per-frame Color.set("#rrggbb") is a regex parse.
-  const RAMP_C = RAMP.map(function (s) { return new THREE.Color(s[1]); });
-  function rampColor(out, t) {
-    t = clamp(t, 0, 1);
-    for (let i = 1; i < RAMP.length; i++) {
-      if (t <= RAMP[i][0]) {
-        const p = (t - RAMP[i - 1][0]) / (RAMP[i][0] - RAMP[i - 1][0] || 1);
-        out.copy(RAMP_C[i - 1]).lerp(RAMP_C[i], p);
-        return out;
-      }
-    }
-    return out.copy(RAMP_C[RAMP_C.length - 1]);
-  }
-
-  const TEX = {
-    cloud: null, noise: null, lut: null,
-    mushEarly: null, mushForm: null, mush: null,
-    blastFlame: null, blastSmoke: null,
-  };
-
-  /* ============================================================
-     SHADERS — r128 GLSL ES 1.0, ShaderMaterial (NOT RawShaderMaterial, so
-     three still prepends position/normal/uv/modelViewMatrix/projectionMatrix
-     AND resolves #include, which is the whole trick below).
-
-     WHY WE USE THE ENGINE'S OWN CHUNKS INSTEAD OF HAND-ROLLING FOG:
-     core/renderer.js does two things every other material in this game gets
-     for free and a hand-rolled shader silently does NOT:
-       1. CustomToneMapping + the film grade (ACES + contrast/sat/gain/lift),
-          injected as `toneMapping()` into every non-raw ShaderMaterial when
-          renderer.toneMapping is set;
-       2. renderer.outputEncoding = sRGBEncoding, injected as
-          `linearToOutputTexel()`;
-       ...plus it PATCHES ShaderChunk.fog_fragment with height fog and a graded
-       fog colour so a fogged pixel lands exactly on core/sky.js's horizon stop.
-     A shader that writes gl_FragColor raw skips all three, so the cloud would
-     be brighter, more saturated and sitting in FRONT of the haze the city sits
-     in — a mushroom reaches far past fog.far (360m), so that is the one layer
-     in the game where getting it wrong is most visible. Including the chunks
-     costs nothing and can never drift from whatever renderer.js does next.
-
-     r128 fog contract (verified against src/vendor/three.r128.min.js):
-       • the varying is `fogDepth` (the `vFogDepth` rename is a LATER release),
-       • fog_vertex reads a local named exactly `mvPosition`,
-       • WebGLRenderer calls refreshFogUniforms() on ANY material with
-         `fog: true` and writes straight into material.uniforms — so the
-         uniforms object MUST already carry fogColor/fogNear/fogFar/fogDensity
-         or it throws. FOG_U() below is that, built by hand rather than with
-         UniformsUtils.merge (which deep-CLONES texture values in r128 and
-         would mint a duplicate GPU upload of the mask/noise/LUT per material).
-     ============================================================ */
-  function FOG_U(extra) {
-    return Object.assign({
-      fogColor: { value: new THREE.Color(0xb6c4c8) },
-      fogNear: { value: 95 }, fogFar: { value: 360 },
-      fogDensity: { value: 0.00025 },
-    }, extra);
-  }
-  // Tail for a NORMAL-blended layer: tonemap, encode, then mix toward the fog.
-  // Exactly the order three's own meshbasic_frag uses.
-  const TAIL_FOG = [
-    "  #include <tonemapping_fragment>",
-    "  #include <encodings_fragment>",
-    "  #include <fog_fragment>",
-  ].join("\n");
-  // Tail for an ADDITIVE layer. Mixing an additive fragment TOWARD a bright fog
-  // colour ADDS haze instead of hiding it (additive has no "behind"), so a
-  // distant fireball would get BRIGHTER with range. Fade the ALPHA on the same
-  // curve instead — fogNear/fogFar/fogDepth are already in scope from
-  // fog_pars_fragment, we just decline to call fog_fragment.
-  const TAIL_FOG_ADD = [
-    "  #ifdef USE_FOG",
-    "    #ifdef FOG_EXP2",
-    "      gl_FragColor.a *= 1.0 - 0.85 * clamp(1.0 - exp(-fogDensity * fogDensity * fogDepth * fogDepth), 0.0, 1.0);",
-    "    #else",
-    "      gl_FragColor.a *= 1.0 - 0.85 * smoothstep(fogNear, fogFar, fogDepth);",
-    "    #endif",
-    "  #endif",
-    "  #include <tonemapping_fragment>",
-    "  #include <encodings_fragment>",
-  ].join("\n");
-
-  // ---- fresnel-rim shell (fireball + condensation front) -------------------
-  /* THE FIREBALL BOILS (NUKE_FX_ORGANIC). uBoil displaces the shell along its
-     own normal by three sine octaves of OBJECT position plus time, ~10% of the
-     radius at full drive. A real fireball is a turbulent, Rayleigh-Taylor
-     unstable ball whose surface churns visibly in the first second; a perfect
-     sphere with a fresnel gradient is a marble, and that is what the t=1.6 s
-     and t=3.5 s storyboard frames show.
-     uBoil/uTime/uMottle default to ZERO, so the white dome and the shock veil
-     — which share this material and must stay clean opaque shells (the Sedov
-     dome's featurelessness is an owner-approved beat, see the WHITE DOME
-     block) — compile and render byte-identically whatever the flag says.
-     vN is deliberately NOT recomputed from the displaced surface: the rim term
-     is a silhouette cue and re-normalling per vertex would cost more than the
-     wobble is worth. The displacement moves the SILHOUETTE, which is what the
-     eye reads as boiling. */
-  const SHELL_VS = [
-    "#include <fog_pars_vertex>",
-    "uniform float uBoil; uniform float uTime;",
-    "varying vec3 vN; varying vec3 vV; varying vec3 vW;",
-    "void main() {",
-    "  float b = uBoil * (",
-    "      sin(position.x * 7.3 + uTime * 1.7) * sin(position.y * 6.1 - uTime * 1.3) * 0.055",
-    "    + sin(position.y * 11.7 + uTime * 2.3) * sin(position.z * 9.9 + uTime * 1.1) * 0.032",
-    "    + sin((position.x + position.z) * 17.3 - uTime * 3.1) * 0.018);",
-    "  vec3 sp = position + normal * b;",
-    "  vec4 mvPosition = modelViewMatrix * vec4(sp, 1.0);",
-    "  vN = normalize(normalMatrix * normal);",
-    "  vV = normalize(-mvPosition.xyz);",
-    "  vW = (modelMatrix * vec4(sp, 1.0)).xyz;",
-    "  gl_Position = projectionMatrix * mvPosition;",
-    "  #include <fog_vertex>",
-    "}",
-  ].join("\n");
-  function shellFs(additive) {
-    return [
-      "#include <fog_pars_fragment>",
-      "uniform vec3 uRimColor; uniform vec3 uCoreColor;",
-      "uniform float uOpacity; uniform float uRimPow; uniform float uCore;",
-      "uniform float uMottle; uniform float uTime;",
-      "varying vec3 vN; varying vec3 vV; varying vec3 vW;",
-      "void main() {",
-      "  float f = 1.0 - abs(dot(normalize(vN), normalize(vV)));",
-      "  f = pow(clamp(f, 0.0, 1.0), uRimPow);",
-      "  vec3 c = mix(uCoreColor, uRimColor, f);",
-      // BRIGHTNESS MOTTLE. Test film of the first second is not a smooth
-      // gradient: it is a boiling surface with hot cells and cooler lanes
-      // between them. Two world-space octaves, ~70 m and ~26 m against a
-      // 126-220 m ball, so there are a handful of cells across it. uMottle
-      // is 0 on the dome and the veil, ~0.5 on the fireball.
-      "  float mo = 0.5 + 0.5 * sin(vW.x * 0.09 + uTime * 1.9) * sin(vW.y * 0.075 - uTime * 1.4);",
-      "  mo = mix(mo, 0.5 + 0.5 * sin(vW.z * 0.24 - uTime * 2.6) * sin(vW.x * 0.21 + uTime * 1.6), 0.42);",
-      "  c *= 1.0 - uMottle * 0.45 * mo;",
-      "  float a = (uCore + (1.0 - uCore) * f) * uOpacity;",
-      "  if (a <= 0.003) discard;",
-      "  gl_FragColor = vec4(c, a);",
-      additive ? TAIL_FOG_ADD : TAIL_FOG,
-      "}",
-    ].join("\n");
-  }
-  function makeShellMat(additive) {
-    const m = new THREE.ShaderMaterial({
-      uniforms: FOG_U({
-        uRimColor: { value: new THREE.Color(0xfff3d0) },
-        uCoreColor: { value: new THREE.Color(0xffb054) },
-        uOpacity: { value: 0 }, uRimPow: { value: 1.7 }, uCore: { value: 0.35 },
-        // zero = the exact pre-organic shell, for the dome and the veil
-        uBoil: { value: 0 }, uTime: { value: 0 }, uMottle: { value: 0 },
-      }),
-      vertexShader: SHELL_VS, fragmentShader: shellFs(additive),
-      transparent: true, depthWrite: false, depthTest: true,
-      fog: true,
-      side: THREE.DoubleSide,
-      blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
-    });
-    m._shared = true;
-    return m;
-  }
-
-  // ---- camera-facing cloud billboard --------------------------------------
-  const BILL_VS = [
-    "#include <fog_pars_vertex>",
-    "varying vec2 vUv;",
-    "void main() {",
-    "  vUv = uv;",
-    "  vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);",
-    "  gl_Position = projectionMatrix * mvPosition;",
-    "  #include <fog_vertex>",
-    "}",
-  ].join("\n");
-  /* uCool — THE ONE ADDITION, AND IT DEFAULTS TO A NO-OP.
-
-     The mask's RED channel has always been "how bright is this part"
-     (it multiplies the LUT colour, which is what draws the hot core). The
-     mask's GREEN channel was unused. It now carries "how COLD is this part",
-     and it walks the LUT sample FORWARD along its own white->yellow->orange
-     ->ember->soot->ash ramp.
-
-     That one lookup shift is what lets a SINGLE quad carry the whole
-     reference photograph: an incandescent white-yellow core (green 0, red 1),
-     orange cauliflower lobes around it (green ~0.15, red ~0.5), a dark
-     boiled-over crown (green ~0.5, red ~0.1) and a near-black dust base
-     (green ~0.9, red ~0.05) — one draw call, one material, no second
-     sampler and no second shader.
-
-     uCool = 0 makes lifeShift exactly 0, so the five existing cloud
-     billboards compile and render byte-identically. Only the impostor sets
-     it. */
-  const BILL_FS = [
-    "#include <fog_pars_fragment>",
-    "uniform sampler2D uMask; uniform sampler2D uNoise; uniform sampler2D uLut;",
-    "uniform vec2 uScroll; uniform vec2 uScroll2;",
-    "uniform float uLife; uniform float uOpacity; uniform float uErode; uniform float uGlow;",
-    "uniform float uCool;",
-    "varying vec2 vUv;",
-    "void main() {",
-    "  vec4 m = texture2D(uMask, vUv);",
-    "  float n1 = texture2D(uNoise, vUv * 2.1 + uScroll).r;",
-    "  float n2 = texture2D(uNoise, vUv * 0.9 + uScroll2).r;",
-    "  float d = m.a * (0.42 + 0.78 * n1) * (0.55 + 0.7 * n2);",
-    "  float a = smoothstep(uErode, uErode + 0.30, d) * uOpacity;",
-    "  if (a <= 0.004) discard;",
-    "  float life = clamp(uLife + uCool * m.g * 0.55, 0.02, 0.98);",
-    "  vec3 c = texture2D(uLut, vec2(life, 0.5)).rgb;",
-    "  c *= 0.72 + uGlow * m.r * (0.6 + 0.7 * n1);",
-    "  gl_FragColor = vec4(c, a);",
-    TAIL_FOG,
-    "}",
-  ].join("\n");
-
-  /* The sky-tier cloud uses the same lighting/noise language, but morphs
-     between compact, forming and mature masks. Scaling one finished mushroom
-     was the source of the instant three-kilometre cloud at dome handoff. */
-  const IMP_FS = [
-    "#include <fog_pars_fragment>",
-    "uniform sampler2D uMask; uniform sampler2D uMaskB; uniform sampler2D uMaskC;",
-    "uniform sampler2D uNoise; uniform sampler2D uLut;",
-    "uniform vec2 uScroll; uniform vec2 uScroll2;",
-    "uniform float uLife; uniform float uOpacity; uniform float uErode; uniform float uGlow;",
-    "uniform float uCool; uniform float uPhase;",
-    "varying vec2 vUv;",
-    "void main() {",
-    "  float p = clamp(uPhase, 0.0, 1.0);",
-    "  vec4 a0 = texture2D(uMask, vUv);",
-    "  vec4 a1 = texture2D(uMaskB, vUv);",
-    "  vec4 a2 = texture2D(uMaskC, vUv);",
-    "  vec4 m = p < 0.5",
-    "    ? mix(a0, a1, smoothstep(0.0, 0.5, p))",
-    "    : mix(a1, a2, smoothstep(0.5, 1.0, p));",
-    "  float n1 = texture2D(uNoise, vUv * 2.1 + uScroll).r;",
-    "  float n2 = texture2D(uNoise, vUv * 0.9 + uScroll2).r;",
-    "  float d = m.a * (0.42 + 0.78 * n1) * (0.55 + 0.7 * n2);",
-    "  float alpha = smoothstep(uErode, uErode + 0.30, d) * uOpacity;",
-    "  if (alpha <= 0.004) discard;",
-    "  float life = clamp(uLife + uCool * m.g * 0.55, 0.02, 0.98);",
-    "  vec3 c = texture2D(uLut, vec2(life, 0.5)).rgb;",
-    "  float roil = clamp(n1 * 0.62 + n2 * 0.38, 0.0, 1.0);",
-    "  c *= 0.58 + 0.78 * roil;",
-    "  c *= 1.0 - 0.28 * m.g;",
-    "  c *= 0.72 + uGlow * m.r * (0.6 + 0.7 * n1);",
-    "  gl_FragColor = vec4(c, alpha);",
-    TAIL_FOG,
-    "}",
-  ].join("\n");
-
-  /* ============================================================
-     THE MESH POOL — built ONCE at load, parked invisible, reused by every
-     detonation for the life of the session. Nothing here is ever disposed
-     (they are session-lifetime shared resources, exactly like crashfx's
-     chunkGeo/chunkMat), and every object carries userData so core/batch.js
-     can never swallow it into a merged buffer.
-     ============================================================ */
-  const POOL = {
-    shell: null, dome: null, bills: [], wdome: null, imp: null,
-    capVol: null, stemVol: null, surgeVol: null, hotVol: null,
-    crownVol: null, glowVol: null,
-  };
-  const MAX_BILLS = 5;
-  /* THE CROWN AND THE COLLAR SHARE ONE MESH, and that is the whole reason
-     this redraw costs three draw calls and not four. Both are the same
-     material — cold, dark, smooth cauliflower — so they are two SLICES
-     of one instanced field: [0, CROWN_N) boil over the cap's top, [CROWN_N,
-     crown) hang under its rim as the skirt. One buffer, one upload, one
-     draw, and a budget cut decimates both together. */
-  // A few real 3D lobes establish macro-volume; the fragment shader supplies
-  // the small scale. The former 134 giant transparent cards spent fill-rate on
-  // repeated flat detail; these instances spend geometry once and carry their
-  // roughness in the shading, where it costs no silhouette.
-  /* GRANULARITY IS THE LAST ROCK. Shading fixed the facets, the terminator
-     and the hard clipping; what still read as "balls" at the cap is simply
-     that a silhouette assembled from EIGHTEEN circles is eighteen circles,
-     however softly each one is drawn. The RPG blast looks like cloud partly
-     because it spends dozens of small puffs where this spent a handful of
-     large ones.
-
-     So the smoke path fills the SAME envelope more finely. Every added lobe
-     is drawn from the identical seed law (area-uniform r <= 0.86 for the cap,
-     stratified stations for the stem, and so on), at the identical size
-     distribution, so the cloud's OUTLINE, WIDTH, HEIGHT and TIMING are the
-     ones already tuned — the field just stops being gappy between them. No
-     new draw call: an InstancedMesh costs one either way.
-
-     Cost is fill, not geometry, and it is measured rather than assumed —
-     tools/nuke-smoke-check.mjs reports median render ms per beat, and
-     --cfg NUKE_FX_SMOKE_LOBES=0 runs the old path for the comparison.
-
-     WHY 272 COLD LOBES AND NOT 106. The first pass at this stopped at a
-     cautious ~1.5x, measured the cost as FLAT, and then failed to spend what
-     the measurement had just bought — which is a worse error than the
-     original, because the number that decides it was already on the table.
-     The honest ceiling is the one the measurement finds, and it is not here:
-     at 272 the whole frame still renders inside the noise band of the old
-     path on SwiftShader (the cloud is simply not what this scene spends its
-     fill on). Per-lobe alpha comes DOWN as the count goes up — coverage is
-     1-(1-a)^n, so density is held while every individual lobe gets fainter,
-     which is precisely the direction that stops any one of them reading as
-     an object. That trade is why more is better here and not just bigger. */
-  /* NUKE_FX_ORGANIC RAISES TWO OF THE SIX, and only the two the owner can
-     COUNT. At t=8 s the stem is a ~140 m column carrying 48 lobes whose
-     vertical span is set by their own radius, so the eye resolves them as
-     beads; the surge rim at 76 is sparse enough to read as a ring of blobs.
-     Coverage is held EXACTLY — not approximately — by solving per-lobe alpha
-     out of the same 1-(1-a)^n law that bought the 272-lobe cloud in the first
-     place, a_new = 1-(1-a_old)^(N_old/N_new) (derived at each layer's opacity
-     line):
-        stem   48 -> 64   peak 0.74 -> 0.64
-        surge  76 -> 88   peak 0.44 -> 0.39
-     cap (88) and crown (60) are already past the count where a lobe can be
-     picked out, so they do not move and their alphas do not either. Still six
-     InstancedMeshes and six draw calls — an InstancedMesh costs one whatever
-     its count, so this is paid in fill, which nuke-smoke-check.mjs measures. */
-  const VOL_MAX = smokeLobes()
-    ? { cap: 88, stem: organic() ? 64 : 48, surge: organic() ? 88 : 76, hot: 10, crown: 60, glow: 8 }
-    : { cap: 18, stem: 10, surge: 20, hot: 10, crown: 14, glow: 8 };
-  // of VOL_MAX.crown; the rest is collar (the ratio is held across both paths)
-  const CROWN_N = smokeLobes() ? 34 : 8;
-  const VOL_SEED = { cap: [], stem: [], surge: [], hot: [], crown: [], glow: [] };
-  // which ground zero's body VOL_SEED currently holds (0 = the load-time one).
-  // Guards the only per-detonation allocation this file has ever had: two
-  // nukes at the same GZ, or the same one replayed, re-use the arrays.
-  let VOL_BODY = 0;
-
-  // One deterministic layout, reused by every detonation. The instances move
-  // and swell, but never allocate. A 3D lobe cloud remains a mushroom from the
-  // B-2's steep camera angle; a camera-facing cap quad becomes a flat disc.
-  /* seedVolumes(seed) — `seed` is the NUKE_FX_ORGANIC per-detonation body.
-     With no argument this is exactly what it always was: one layout, minted
-     once at load, reused forever (and the early return keeps the load-time
-     rng() draw sequence identical, which every downstream consumer depends
-     on). With a seed it RE-MINTS the same laws off a different stream, so two
-     detonations at different ground zeros are two different clouds while the
-     SAME ground zero always rebuilds the same one — storyboard determinism
-     survives, and so does every distribution the coverage arithmetic assumes
-     (golden angle, sqrt-area radii, the same size ranges). The module stream
-     is saved and restored around the re-mint: this must never shift the draw
-     sequence that buildPool and the flag-off path are pinned to. */
-  function seedVolumes(seed) {
-    if (VOL_SEED.cap.length && seed == null) return;
-    let _rsSaved = 0;
-    if (seed != null) {
-      _rsSaved = _rs;
-      _rs = (seed | 0) & 0x7fffffff;
-      if (!_rs) _rs = 0x51ed77;          // an LCG seeded at 0 is a dead stream
-      VOL_SEED.cap.length = 0; VOL_SEED.stem.length = 0; VOL_SEED.surge.length = 0;
-      VOL_SEED.hot.length = 0; VOL_SEED.crown.length = 0; VOL_SEED.glow.length = 0;
-    }
-    /* CAP. `r` is drawn AREA-UNIFORM (sqrt of a uniform), which already puts
-       more lobes per unit radius out at the rim than at the crown. What was
-       missing is the other half of the owner's note — "a real cap's lumps
-       are BIG AND FEW near the crown, SMALL AND DENSE at the rim" — so `s2`
-       makes lobe RADIUS fall with distance from the axis:
-
-           s2 = (0.34 - 0.20*r^1.4) * jitter
-
-       0.34 at the crown down to 0.178 at r = 0.86: the crown's lumps are
-       about twice the rim's, on top of the rim already carrying more of
-       them. That distribution, not any shader, is what makes a silhouette
-       read as cauliflower rather than as a fuzzy disc.
-       `y2` is the vertical station in units of the cap's own half-THICKNESS,
-       and it is multiplied at draw time by the LENS profile sqrt(1-r^2), so
-       the head is deep through the middle and tapers to the rim — the shape
-       a vortex ring actually takes. `s`/`y` are kept verbatim for the
-       flag-off path. */
-    for (let i = 0; i < VOL_MAX.cap; i++) {
-      const a = i ? (i * 2.399963 + rng() * 0.24) : 0; // golden-angle, no spokes
-      const rr = i ? Math.sqrt(rng()) * 0.86 : 0;
-      VOL_SEED.cap.push({
-        a: a, r: rr,
-        y: i ? (rng() - 0.42) * 0.48 : 0.08,
-        s: i ? 0.16 + rng() * 0.12 : 0.34,
-        spin: (rng() - 0.5) * 0.28,
-        s2: (0.34 - 0.20 * Math.pow(rr, 1.4)) * (0.82 + rng() * 0.36),
-        y2: i ? (rng() * 1.7 - 0.85) : 0.10,
-      });
-    }
-    /* STEM. The old seeds put every lobe within 0.36 of the column radius —
-       a thin core inside a wide declared stem, which is why it read as a
-       smooth chimney. `r2` fills the column out to its edge and `s2` makes
-       the lumps big enough to overlap, and `tw` is the per-lobe twist jitter
-       on top of the shared helix (see STEM_TURNS in the stem block). */
-    for (let i = 0; i < VOL_MAX.stem; i++) {
-      VOL_SEED.stem.push({
-        f: (i + 0.45) / VOL_MAX.stem,
-        a: i * 2.399963 + rng() * 0.35,
-        r: 0.08 + rng() * 0.28,
-        s: 0.78 + rng() * 0.42,
-        r2: 0.22 + Math.sqrt(rng()) * 0.72,
-        s2: 0.34 + rng() * 0.26,
-        tw: (rng() - 0.5) * 0.8,
-      });
-    }
-    for (let i = 0; i < VOL_MAX.surge; i++) {
-      VOL_SEED.surge.push({
-        a: i * 2.399963 + rng() * 0.42,
-        r: Math.sqrt((i + 0.6) / VOL_MAX.surge) * (0.82 + rng() * 0.18),
-        s: 0.70 + rng() * 0.55,
-      });
-    }
-    for (let i = 0; i < VOL_MAX.hot; i++) {
-      const a = i * 2.399963 + rng() * 0.3;
-      VOL_SEED.hot.push({
-        a: a, r: 0.18 + Math.sqrt(rng()) * 0.72,
-        y: (rng() - 0.35) * 0.9,
-        s: 0.14 + rng() * 0.12,
-      });
-    }
-    /* CROWN then COLLAR, in ONE seed array (see VOL_MAX's note).
-       CROWN: lobes riding the cap's UPPER surface. `r` is the normalised
-       distance from the axis and the height is the cap's own dome profile
-       sqrt(1 - r^2), so the crown genuinely sits ON the cap instead of
-       floating in a plane above it — that curvature is what makes it read as
-       boiling over rather than as a hat.
-       COLLAR: a ring UNDER the rim, deliberately at 0.70..0.98 of the cap
-       radius and BELOW its centre. That is the overhang: a real cloud's cap
-       is wider than the top of its stem and the skirt is what says so. */
-    for (let i = 0; i < VOL_MAX.crown; i++) {
-      if (i < CROWN_N) {
-        const r = Math.sqrt((i + 0.35) / CROWN_N) * 0.92;
-        VOL_SEED.crown.push({
-          crown: true, a: i * 2.399963 + rng() * 0.3, r: r,
-          y: Math.sqrt(Math.max(0, 1 - r * r)),
-          s: 0.15 + rng() * 0.13, spin: (rng() - 0.5) * 0.22,
-        });
-      } else {
-        const k = (i - CROWN_N + 0.5) / (VOL_MAX.crown - CROWN_N);
-        VOL_SEED.crown.push({
-          crown: false, a: k * 6.2832 + rng() * 0.5, r: 0.70 + rng() * 0.28,
-          y: -(0.30 + rng() * 0.26),
-          s: 0.17 + rng() * 0.12, spin: (rng() - 0.5) * 0.16,
-        });
-      }
-    }
-    // GLOW: the incandescent core INSIDE the cap. Tight to the axis (r <=
-    // 0.62) so the cap's own lobes always cover it — a glow that reaches the
-    // silhouette stops being "lit from within" and becomes a second fireball.
-    for (let i = 0; i < VOL_MAX.glow; i++) {
-      VOL_SEED.glow.push({
-        a: i * 2.399963 + rng() * 0.4,
-        r: Math.sqrt(rng()) * 0.62,
-        y: (rng() - 0.45) * 0.55,
-        s: 0.22 + rng() * 0.16,
-      });
-    }
-    if (seed != null) _rs = _rsSaved;    // the shared stream is untouched
-  }
-
-  function park(mesh, order) {
-    mesh.visible = false;
-    mesh.frustumCulled = false;
-    mesh.renderOrder = order;
-    mesh.matrixAutoUpdate = true;
-    mesh.userData.nukefx = true;          // batch.js spares anything with userData
-    scene.add(mesh);
-    return mesh;
-  }
-
-  /* ---- SMOKE LIGHTING, ONE SHARED SET OF UNIFORMS -----------------------
-     Four lobe materials, one uniform object per term: onBeforeCompile drops
-     these exact references into every compiled shader, so the per-frame
-     update (see smokeLight() by stepVolumes) is four assignments, not
-     four materials x four uniforms. They are also why the four materials can
-     share ONE compiled program — identical source, identical uniform names.
-
-     WHY WE LIGHT IT OURSELVES instead of letting Lambert do it: Lambert's
-     dot(N,L) puts a terminator on every lobe, and a terminator is the thing
-     that says "solid". Smoke has none — it has a bright sun side, a dark
-     side that never reaches black because the sky fills it, and a strong
-     forward-scatter bloom when you look through it toward the sun. That is
-     the whole shading model below, and it is what a soft radial sprite gets
-     for free by being unlit. */
-  const SMOKE_U = {
-    uSmokeSun: { value: new THREE.Vector3(0.35, 0.86, 0.37) },
-    uSmokeSunCol: { value: new THREE.Color(0xfff4e0) },
-    uSmokeAmb: { value: new THREE.Color(0x5d6a7d) },
-    uSmokeMask: { value: null },
-    // world Y of the deck and of the cap centre — the two ends of the cloud's
-    // own vertical light gradient (see uSmokeSpan's use in the shader).
-    uSmokeSpan: { value: new THREE.Vector2(0, 1) },
-    /* ---- NUKE_FX_ORGANIC, all written once per frame in smokeLight() -----
-       uSmokeNoise  the 128^2 tiling value noise that has existed since the
-                    first draft (makeNoiseTexture) and was bound only to the
-                    two legacy billboard shaders. Three sine octaves multiply
-                    into a PLAID; real noise does not, and this one is already
-                    baked, already RepeatWrapping and already resident.
-       uSmokeCore   world (axis x, cap CENTRE y, axis z) — the frame the cap's
-                    self-shadow is measured in.
-       uSmokeCapR   the cap's live RADIUS, so "under the belly" is a fraction
-                    of the cap rather than a metre count that ages badly.
-       uSmokeCam    camera world position, for the in-shader aerial haze.
-       uSmokeHaze   scene.fog.color, re-read every frame so the haze follows
-                    day/night and the atmosphere drive instead of freezing.
-       uSmokeGlow   x = the ground-fire radius in metres (the surge's own),
-                    y = 0..1 "the ember is now a BASE FIRE, not a hot cloud",
-                    which confines the emissive term to the deck as the cloud
-                    ages. The reference plate is explicit about this: cold cap,
-                    burning ground.
-       uSmokeTime   sequence seconds, for a slow drift on the noise lookups. */
-    uSmokeNoise: { value: null },
-    uSmokeCore: { value: new THREE.Vector3(0, 0, 0) },
-    uSmokeCapR: { value: 1 },
-    uSmokeCam: { value: new THREE.Vector3(0, 0, 0) },
-    uSmokeHaze: { value: new THREE.Color(0xb6c4c8) },
-    uSmokeGlow: { value: new THREE.Vector2(1, 0) },
-    uSmokeTime: { value: 0 },
-  };
-
-  function buildPool() {
-    TEX.cloud = makeCloudTexture();
-    TEX.noise = makeNoiseTexture();
-    TEX.lut = makeLutTexture();
-    const blastAssets = CBZ.cityBlastPuffAssets ? CBZ.cityBlastPuffAssets() : null;
-    TEX.blastFlame = blastAssets ? blastAssets.flame : TEX.cloud;
-    TEX.blastSmoke = blastAssets ? blastAssets.smoke : TEX.cloud;
-    /* The lobe mask is a CLONE of the RPG's smoke texture, never the texture
-       itself: the original is live on every pooled blast sprite in crashfx,
-       and the lobes need RepeatWrapping (each lobe offsets its sample by its
-       own instance translation, so no two billows wear the same lumps).
-       Mutating the shared one would have re-wrapped the whole game's smoke. */
-    if (TEX.blastSmoke && TEX.blastSmoke.clone) {
-      TEX.smokeMask = TEX.blastSmoke.clone();
-      TEX.smokeMask.wrapS = TEX.smokeMask.wrapT = THREE.RepeatWrapping;
-      TEX.smokeMask.needsUpdate = true;
-    } else {
-      TEX.smokeMask = TEX.blastSmoke;
-    }
-    SMOKE_U.uSmokeMask.value = TEX.smokeMask;
-    // TEX.noise is the same sampler the billboards use — one upload, three
-    // consumers. RepeatWrapping and 128^2 power-of-two, so the world-space
-    // lookups below tile and mip correctly in WebGL1.
-    SMOKE_U.uSmokeNoise.value = TEX.noise;
-    TEX.mushEarly = makeMushroomTexture(0);
-    TEX.mushForm = makeMushroomTexture(1);
-    TEX.mush = makeMushroomTexture(2);
-
-    const sphereGeo = new THREE.IcosahedronGeometry(1, 2);   // 320 tris — a rim needs no more
-    sphereGeo._shared = true;
-    // Macrostructure must have real parallax and self-occlusion at nuclear
-    // scale. Start from a modest icosphere and bake deterministic multi-frequency
-    // displacement into its surface; rotation/anisotropic instance scale then
-    // keep the shared mesh from reading as repeated balls.
-    const billowGeo = new THREE.IcosahedronGeometry(1, 2);
-    const bp = billowGeo.attributes.position;
-    /* THE DISPLACEMENT IS AN ASTEROID RECIPE. +/-15.5% multi-frequency
-       displacement baked into a 320-tri icosphere and re-normalled is
-       literally how you model a boulder, and at 250-470 m per cap lobe those
-       bumps are the size of a city block — visible as SHAPE, not as texture.
-       Under NUKE_FX_SMOKE_LOBES the macro-roughness moves into the fragment
-       shader (mask erosion + world-space noise), where roughness costs no
-       silhouette, and the mesh keeps just enough wobble to break the sphere. */
-    const rk = smokeLobes() ? 0.34 : 1;
-    for (let bi = 0; bi < bp.count; bi++) {
-      const bx = bp.getX(bi), by = bp.getY(bi), bz = bp.getZ(bi);
-      const rough = 1 + rk * (0.10 * Math.sin(bx * 7.1 + by * 3.7) * Math.sin(bz * 8.3 - by * 4.1)
-        + 0.055 * Math.sin((bx + bz) * 13.7 + by * 9.2));
-      bp.setXYZ(bi, bx * rough, by * rough, bz * rough);
-    }
-    bp.needsUpdate = true;
-    billowGeo.computeVertexNormals();
-    billowGeo._shared = true;
-    const quadGeo = new THREE.PlaneGeometry(1, 1);
-    quadGeo._shared = true;
-
-    /* RENDER ORDER. The filled ground cloud is first, then the opaque-ish
-       volumetric stem/cap, then surface-detail billboards, then the hot volume
-       and fireball core, and finally the condensation shell.
-
-       THE VEIL IS ABOVE THE FIREBALL ON PURPOSE (9 vs 8), and that one number
-       is what makes the double flash real in the WORLD rather than only on the
-       DOM overlay. The fireball is ADDITIVE: nothing can ever hide it by being
-       "in front" in depth, because additive has no behind. The only way the
-       shock front can swallow its own fireball — which is the entire physical
-       cause of the minimum — is to be painted after it. It used to be painted
-       before it (7), so the "condensation dome" could only ever ADD light to
-       the thing it is supposed to be extinguishing. */
-    const shellMat = makeShellMat(true);
-    /* THE FIREBALL GETS ITS OWN, DENSER SPHERE under NUKE_FX_ORGANIC — and
-       only the fireball. Subdivision 2 is 320 triangles / 162 vertices, which
-       is a fine budget for a fresnel rim and far too coarse to carry a vertex
-       displacement (the boil would read as six flat facets breathing).
-       Subdivision 3 is 1,280 triangles / 642 vertices: ~15 m per edge on a
-       220 m ball, which resolves the 0.10R octaves above. The white dome keeps
-       its SphereGeometry(1,30,15) and the shock veil keeps sphereGeo — both
-       must stay smooth, and neither is displaced. One extra 642-vertex buffer,
-       minted once at load. */
-    const fireGeo = organic() ? new THREE.IcosahedronGeometry(1, 3) : sphereGeo;
-    fireGeo._shared = true;
-    POOL.shell = park(new THREE.Mesh(fireGeo, shellMat), 8);
-
-    const domeMat = makeShellMat(false);
-    domeMat.uniforms.uRimColor.value.set(0xffffff);
-    domeMat.uniforms.uCoreColor.value.set(0xdfe8f2);
-    domeMat.uniforms.uRimPow.value = 2.6;
-    domeMat.uniforms.uCore.value = 0.06;
-    POOL.dome = park(new THREE.Mesh(sphereGeo, domeMat), 9);
-
-    seedVolumes();
-    function volumeMat(color, emissive, opacity, rimFloor, role) {
-      // (peak opacity is applied per frame — see solidOp() near the layer
-      //  writes; the constructor value only covers the first frame)
-      const smoke = smokeLobes();
-      const m = new THREE.MeshLambertMaterial({
-        color: color, emissive: emissive, emissiveIntensity: 1,
-        // DEPTH-WRITE OFF IS THE WHOLE FIX. With it on, one unsorted instanced
-        // pass means the first lobe drawn owns those pixels forever: overlaps
-        // hard-clip into visible intersection curves and a soft rim reveals
-        // SKY rather than the lobe behind it. Off + back-to-front instance
-        // order (flushVolume) makes overlapping billows accumulate exactly
-        // like overlapping RPG puffs. depthTest stays on, so the city still
-        // occludes the cloud and the cloud still sits behind what is nearer.
-        transparent: true, opacity: opacity, depthWrite: !smoke,
-        depthTest: true,
-        // fog:false under NUKE_FX_FOGPROOF — the cloud stands above the haze
-        // layer; scene fog erased it completely past ~5 km (see the flag).
-        fog: !CBZ.CONFIG.NUKE_FX_FOGPROOF,
-        side: THREE.FrontSide, flatShading: false,
-      });
-      /* ---- NUKE_FX_SMOKE_LOBES: draw the lobe as a PUFF, not a surface ----
-         Four patches, one per property the RPG blast has and this did not:
-
-           SHADE   the Lambert result is discarded and replaced by a wrap-lit
-                   scatter term. dot(N,L)*0.5+0.5 has no terminator anywhere on
-                   the sphere; the sky ambient keeps the dark side from ever
-                   reaching black; and a forward-scatter lobe brightens the
-                   cloud when the sun is behind it, which is the reason real
-                   smoke glows at its edges. Injected at <tonemapping_fragment>
-                   (NOT at <dithering_fragment>, where the old patch sat) so the
-                   colour still goes through tone mapping and output encoding
-                   like every other surface in the game.
-           MASK    the RPG's own makeSmokeTexture, sampled twice in OBJECT
-                   space (xy and zy) and averaged. Object space means the lumps
-                   scale WITH the lobe as it blooms — exactly what a growing
-                   sprite does — and the per-instance offset means 18 cap lobes
-                   are 18 different clouds, not one cloud stamped 18 times.
-           ERODE   density is squared off against itself (smoothstep on smDen),
-                   so thin regions dissolve to nothing instead of fading
-                   smoothly. A smooth fade gives you a soft-edged ball; smoke
-                   needs a RAGGED edge, and this is where it comes from.
-           NO FLOOR the old per-role rim floors (0.22/0.45/0.60) existed only
-                   because a depth-WRITING rim punched holes in the lobes
-                   behind it. Nothing writes depth now, so alpha is free to
-                   reach a true zero at the silhouette. That is the difference
-                   between a lobe that ends and a lobe that has an outline. */
-      if (smoke) {
-        /* THE FLAG IS READ ONCE, HERE, AND NEVER AGAIN IN THIS MATERIAL.
-           r128 keys the program cache on customProgramCacheKey, so the four
-           cold materials MUST agree about which source they are; reading the
-           live flag inside the key function would let a mid-session flip fork
-           them into two programs (or worse, silently reuse one program with
-           the other's source). buildPool mints all four in one synchronous
-           call, so one read per material is one read for the set. */
-        const org = organic();
-        /* uSmokeRole is the ONE per-material uniform on a SHARED program:
-             0 cap · 1 stem · 2 surge · 3 crown
-           Values are per material, source is identical, so the cache key
-           stays single and nuke-smoke-check's patchIds.size === 1 holds.
-           The reference plate needs this: its cap is a dark self-shadowed
-           mass and its stem is pale cream, and one uniform shading law
-           cannot say both. */
-        const roleId = role == null ? 0 : role;
-        m.customProgramCacheKey = function () { return org ? "cbzSmokeLobes2" : "cbzSmokeLobes1"; };
-        m.onBeforeCompile = function (shader) {
-          shader.uniforms.uSmokeSun = SMOKE_U.uSmokeSun;
-          shader.uniforms.uSmokeSunCol = SMOKE_U.uSmokeSunCol;
-          shader.uniforms.uSmokeAmb = SMOKE_U.uSmokeAmb;
-          shader.uniforms.uSmokeMask = SMOKE_U.uSmokeMask;
-          shader.uniforms.uSmokeSpan = SMOKE_U.uSmokeSpan;
-          shader.uniforms.uSmokeNoise = SMOKE_U.uSmokeNoise;
-          shader.uniforms.uSmokeCore = SMOKE_U.uSmokeCore;
-          shader.uniforms.uSmokeCapR = SMOKE_U.uSmokeCapR;
-          shader.uniforms.uSmokeCam = SMOKE_U.uSmokeCam;
-          shader.uniforms.uSmokeHaze = SMOKE_U.uSmokeHaze;
-          shader.uniforms.uSmokeGlow = SMOKE_U.uSmokeGlow;
-          shader.uniforms.uSmokeTime = SMOKE_U.uSmokeTime;
-          shader.uniforms.uSmokeRole = { value: roleId };   // per material
-          shader.vertexShader = shader.vertexShader
-            .replace("#include <common>",
-              "#include <common>\nvarying vec3 vSmN;\nvarying vec3 vSmV;\n" +
-              "varying vec3 vSmW;\nvarying vec3 vSmO;\nvarying vec3 vSmSeed;")
-            .replace("#include <defaultnormal_vertex>",
-              "#include <defaultnormal_vertex>\nvSmN = transformedNormal;")
-            // EVERY #ifdef GETS ITS OWN LINE. A missing \n before one of these
-            // once compiled all four lobe materials into invisibility and cost
-            // a whole look round to find (sessions.md, 2026-08-02).
-            .replace("#include <project_vertex>",
-              "#include <project_vertex>\n" +
-              "vSmV = -mvPosition.xyz;\n" +
-              "vSmO = transformed;\n" +
-              "vSmSeed = vec3(0.0);\n" +
-              "vSmW = (modelMatrix * (\n" +
-              "#ifdef USE_INSTANCING\n instanceMatrix *\n#endif\n" +
-              " vec4(transformed, 1.0))).xyz;\n" +
-              "#ifdef USE_INSTANCING\n" +
-              " vSmSeed = vec3(instanceMatrix[3][0], instanceMatrix[3][1], instanceMatrix[3][2]);\n" +
-              "#endif\n");
-          shader.fragmentShader = shader.fragmentShader
-            .replace("#include <common>",
-              "#include <common>\nvarying vec3 vSmN;\nvarying vec3 vSmV;\n" +
-              "varying vec3 vSmW;\nvarying vec3 vSmO;\nvarying vec3 vSmSeed;\n" +
-              "uniform vec3 uSmokeSun;\nuniform vec3 uSmokeSunCol;\n" +
-              "uniform vec3 uSmokeAmb;\nuniform sampler2D uSmokeMask;\n" +
-              "uniform vec2 uSmokeSpan;\n" +
-              (org
-                ? "uniform sampler2D uSmokeNoise;\nuniform vec3 uSmokeCore;\n" +
-                  "uniform float uSmokeCapR;\nuniform vec3 uSmokeCam;\n" +
-                  "uniform vec3 uSmokeHaze;\nuniform vec2 uSmokeGlow;\n" +
-                  "uniform float uSmokeTime;\nuniform float uSmokeRole;\n"
-                : "") +
-              // globals: written at the tone-mapping hook, read again at the
-              // alpha hook further down the same main().
-              "float smNoise;\nfloat smMask;\nfloat smRim;\nfloat smFine;")
-            .replace("#include <tonemapping_fragment>",
-              "vec3 smN = normalize(vSmN);\n" +
-              "vec3 smV = normalize(vSmV);\n" +
-              "smRim = abs(dot(smN, smV));\n" +
-              // Two octaves of world-space value noise, ~450 m and ~1.5 km:
-              // broad billow mottling that still reads on the 5 km mature cap.
-              "float smA1 = sin(vSmW.x * 0.0041 + vSmW.y * 0.0062) * sin(vSmW.z * 0.0051 - vSmW.y * 0.0039);\n" +
-              "float smA2 = sin(vSmW.x * 0.0118 - vSmW.y * 0.0089) * sin(vSmW.z * 0.0104 + vSmW.x * 0.0077);\n" +
-              /* A THIRD OCTAVE, AND IT IS THE ONE THAT WELDS THE CLOUD. ~130 m
-                 is SMALLER than a cap lobe (250-470 m across), so unlike the
-                 two broad octaves it varies WITHIN a lobe — and because it is
-                 world-space, two overlapping lobes are mottled by the same
-                 function at their seam. Density structure that crosses the
-                 boundary is what stops the eye from resolving the boundary.
-                 An object-space texture can never do this: it stops at the
-                 lobe, which is precisely what draws the lobe. */
-              "float smA3 = sin(vSmW.x * 0.0472 + vSmW.z * 0.0388) * sin(vSmW.y * 0.0431 - vSmW.x * 0.0295);\n" +
-              /* ORGANIC: REAL NOISE, NOT A PRODUCT OF SINES. sin(ax)*sin(bz)
-                 is separable — it is a PLAID, and at cap scale the eye reads
-                 the lattice as fabric. Two taps of the baked value noise in
-                 WORLD space fix that for the cost of two texture fetches:
-                   ~2200 m  the billow-mass octave that says "this side of the
-                            cloud is darker than that side" across a 5 km cap;
-                   ~420 m   smaller than a cap lobe (250-470 m), so it varies
-                            WITHIN a lobe and — being world-space — is the
-                            SAME function on both sides of a seam between two
-                            overlapping lobes. Structure that crosses the
-                            boundary is what stops the eye finding it.
-                 Both planes mix Y in, so a vertical column gets vertical
-                 striation instead of a smeared XZ streak (the plate's stem is
-                 striated, and that is where it comes from).
-                 One broad sine octave stays in the mix: it is not separable
-                 from the noise once summed, and it costs nothing.
-                 The drift is deliberately slow — 0.006 tiles/s of a 2200 m
-                 tile is ~13 m/s, a plausible convective speed. Faster reads
-                 as crawling static on a still object. Mean is held at 0.5 by
-                 construction so material.opacity stays the honest mean alpha
-                 CBZ.nukeSmokeAudit()'s coverage arithmetic assumes. */
-              (org
-                ? "vec2 smQ1 = vec2(vSmW.x + vSmW.z, vSmW.y - vSmW.z) * 0.00045 + uSmokeTime * vec2(0.006, -0.004);\n" +
-                  "vec2 smQ2 = vec2(vSmW.x - vSmW.y, vSmW.z + vSmW.y * 0.6) * 0.00238 + uSmokeTime * vec2(-0.011, 0.008);\n" +
-                  "float smT1 = (texture2D(uSmokeNoise, smQ1).r - 0.5) * 2.0;\n" +
-                  "smFine = texture2D(uSmokeNoise, smQ2).r;\n" +
-                  "smNoise = clamp(0.5 + 0.44 * smT1 + 0.28 * (smFine - 0.5) * 2.0 + 0.12 * smA1 + 0.10 * smA3, 0.0, 1.0);\n"
-                : "smNoise = 0.5 + 0.27 * smA1 + 0.15 * smA2 + 0.14 * smA3;\nsmFine = 0.5;\n") +
-              "vec2 smOff = vec2(vSmSeed.x + vSmSeed.y, vSmSeed.z - vSmSeed.y) * 0.0037;\n" +
-              /* 1.15, not 0.5: the object-space span is about [-1,1], so the
-                 first mapping stretched one copy of a 64 px blur over a whole
-                 billow — a gentle tint. Tiling it ~2.3x carved, but a mask of
-                 seven soft blobs REPEATED reads as concentric rings, which is
-                 its own artificial pattern. Just over one copy per lobe plus
-                 the per-instance offset is the balance: real carving from the
-                 RPG's own mask, no tiling signature. The fine mottling that
-                 breaks a lobe's interior is the third world-space octave
-                 above, which is deliberately NOT tied to the lobe. */
-              "float smM1 = texture2D(uSmokeMask, vSmO.xy * 0.62 + smOff).a;\n" +
-              "float smM2 = texture2D(uSmokeMask, vSmO.zy * 0.62 + smOff.yx).a;\n" +
-              "smMask = 0.5 * (smM1 + smM2);\n" +
-              "vec3 smL = normalize((viewMatrix * vec4(uSmokeSun, 0.0)).xyz);\n" +
-              "float smWrap = dot(smN, smL) * 0.5 + 0.5;\n" +
-              "float smFwd = pow(max(0.0, dot(-smV, smL)), 3.0);\n" +
-              /* THE LIGHT GRADIENT IS THE CLOUD'S, NOT THE LOBE'S — and this
-                 is the correction the first look round demanded. Shading each
-                 billow by its OWN normal is physically reasonable and visually
-                 fatal: a per-lobe bright-side/dark-side is a per-lobe identity,
-                 so the cap came back as a heap of countable balls even with the
-                 terminator gone. An RPG puff has no normal at all; its
-                 brightness comes from where it sits in the plume, so adjacent
-                 puffs agree at their seam and the eye reads ONE mass.
-                 smH is that: a continuous top-lit/bottom-shadowed ramp across
-                 the whole cloud in WORLD space, which every lobe samples the
-                 same way. The lobe normal keeps 30% of the weight — enough to
-                 hint at volume, not enough to draw an outline. */
-              "float smH = clamp((vSmW.y - uSmokeSpan.x) / max(1.0, uSmokeSpan.y - uSmokeSpan.x), 0.0, 1.0);\n" +
-              /* THE HEIGHT RAMP'S FLOOR IS PER ROLE UNDER ORGANIC, and that
-                 is the plate's two-tone read in one number. The cap sits at
-                 the TOP of the span, so its own floor barely applies (the
-                 self-shadow below is what darkens it); the STEM spans the
-                 whole gradient, so its floor is what decides whether the
-                 column is a dark silhouette or the pale cream tower the
-                 photograph shows. 0.45 -> 0.62 for the stem, 0.54 for the
-                 surge, unchanged 0.45 for cap and crown. */
-              (org
-                ? "float smDeep = max(step(uSmokeRole, 0.5), step(2.5, uSmokeRole));\n" +
-                  "float smStemR = step(0.5, uSmokeRole) * step(uSmokeRole, 1.5);\n" +
-                  "float smLow = mix(mix(0.54, 0.62, smStemR), 0.45, smDeep);\n" +
-                  "smH = smLow + (1.0 - smLow) * smoothstep(0.0, 0.85, smH);\n"
-                : "smH = 0.45 + 0.55 * smoothstep(0.0, 0.85, smH);\n") +
-              "float smShade = 0.30 * smWrap * smWrap + 0.70 * smH;\n" +
-              // CLAMPED, because the cloud lights ITSELF. The atmosphere drive
-              // (onAlways 94.6) multiplies sun.intensity by up to ~2.4x during
-              // the burn, which is correct for the city and blows a directly
-              // multiplied smoke term past white — the first look round came
-              // back with a pale tan cap where the old build had orange. The
-              // ceiling keeps the fire's brightening while leaving the colour
-              // cloudColor() authored (hot -> ash) legible.
-              "vec3 smLit = min(vec3(1.15), uSmokeAmb * (0.62 + 0.38 * smH) + uSmokeSunCol * (smShade * 0.90 + 0.10 + smFwd * 0.50));\n" +
-              /* ---- THE CAP'S OWN SHADOW (organic) -------------------------
-                 The single biggest depth cue a mushroom photograph has, and
-                 the one this cloud had none of: a cap is a MASS, so its
-                 underside is in its own shadow and only the crown rim catches
-                 the sun. Measured in the cap's own frame (uSmokeCore is the
-                 cap centre, uSmokeCapR its live radius) so it rides bloom and
-                 the rise for free and needs no per-lobe bookkeeping:
-                   smCapV  -1 a cap-radius below the centre, +1 above it
-                   smCapIn 1 inside the cap's footprint, 0 outside it
-                 The multiplier walks 0.65 under the belly to 1.12 at the top,
-                 scaled by role — the cap and crown take it whole, the stem
-                 takes 45% of it (it IS partly in the cap's shadow: the plate
-                 shows the column darkening as it enters the head) and the
-                 surge 28%. 0.35 down / 0.12 up is the brief's number stated as
-                 a range instead of two terms. */
-              (org
-                ? "vec3 smC = vSmW - uSmokeCore;\n" +
-                  "float smCapR = max(1.0, uSmokeCapR);\n" +
-                  "float smRad = length(smC.xz) / smCapR;\n" +
-                  "float smCapV = smC.y / (smCapR * 0.9);\n" +
-                  "float smCapIn = 1.0 - smoothstep(0.55, 1.15, smRad);\n" +
-                  "float smShadow = mix(mix(0.28, 0.45, smStemR), 1.0, smDeep);\n" +
-                  "smLit *= mix(1.0, mix(0.65, 1.12, smoothstep(-0.75, 0.30, smCapV)), smCapIn * smShadow);\n" +
-                  /* PER-LOBE IDENTITY. Every lobe wore one hue, so 88 of them
-                     read as one sticker. The jitter is a LOW-FREQUENCY noise
-                     lookup on the instance's own translation, NOT the usual
-                     sin-fract hash: a white-noise hash of a MOVING seed
-                     strobes (a cap lobe climbs ~96 m/s, which is several hash
-                     cells per frame), while a 900 m lookup changes over tens
-                     of seconds — smooth in time, decorrelated in space,
-                     because neighbouring lobes are 100-500 m apart. Expanded
-                     2.2x because value noise clusters near its mean, then
-                     brightness (0.84..1.16, mean 1.0) and a +/-6% warm/cool
-                     tint swing (mean 1.0) so the layer's average colour is
-                     exactly what cloudColor() authored. */
-                  "float smJraw = texture2D(uSmokeNoise, vSmSeed.xz * 0.00111 + vSmSeed.y * 0.00032).r;\n" +
-                  "float smJit = clamp(0.5 + (smJraw - 0.5) * 2.2, 0.0, 1.0);\n" +
-                  "vec3 smJitK = (0.84 + 0.32 * smJit) * mix(vec3(1.0), vec3(1.06, 0.99, 0.92), (smJit - 0.5) * 2.0);\n" +
-                  /* THE EMBER IS A GROUND FIRE, NOT A GLOWING CLOUD. Early on
-                     the whole young cloud is incandescent and the material's
-                     emissive is honest everywhere (uSmokeGlow.y = 0). As it
-                     ages the drive walks y to 1 and the emissive collapses
-                     onto the deck inside the surge's inner third — which is
-                     the reference plate exactly: cold cap, burning city. */
-                  "float smGz = length(vSmW.xz - uSmokeCore.xz);\n" +
-                  "float smBase = (1.0 - smoothstep(uSmokeGlow.x * 0.35, uSmokeGlow.x, smGz)) *\n" +
-                  "  (1.0 - smoothstep(uSmokeSpan.x + 40.0, uSmokeSpan.x + 260.0, vSmW.y));\n" +
-                  "float smEmb = mix(1.0, smBase, clamp(uSmokeGlow.y, 0.0, 1.0));\n"
-                : "") +
-              // The swing is on the BROAD octaves for a reason: along a ray through a
-              // dense field you now accumulate ~20 lobes, and fine detail averages
-              // itself flat over that many samples. Kilometre-scale variation does
-              // not — neighbouring samples share it — so that is what keeps a
-              // 272-lobe cloud from reading as one uniform brown mass.
-              "gl_FragColor.rgb = diffuse * smLit" + (org ? " * smJitK" : "") +
-                " * (0.70 + 0.60 * smNoise) + emissive" + (org ? " * smEmb" : "") + ";\n" +
-              /* ---- AERIAL PERSPECTIVE, IN THE SHADER (organic) ------------
-                 NUKE_FX_FOGPROOF exists because scene.fog (near 95, far 360)
-                 erased the cloud completely past ~5 km — a mushroom stands
-                 ABOVE the haze layer. But fog:false also means the 20 km icon
-                 beat has NO distance cue at all and reads as a decal pasted on
-                 the sky. This is the honest middle: an exponential haze with a
-                 1/28.6 km scale height, mixed at most 55%, i.e.
-                   5 km  -> 1-e^-0.175 = 0.16 -> 8.8% toward the air colour
-                   12 km -> 0.34               -> 19%
-                   20 km -> 0.50               -> 28%
-                 — deliberately a fraction of what the scene fog would do at
-                 those ranges, and it never saturates. uSmokeHaze is re-read
-                 from scene.fog.color every frame, so this follows day/night
-                 AND the atmosphere drive instead of freezing one grey. Mixed
-                 before tone mapping, where both operands are linear. */
-              (org
-                ? "float smAir = 1.0 - exp(-length(vSmW - uSmokeCam) * 0.000035);\n" +
-                  "gl_FragColor.rgb = mix(gl_FragColor.rgb, uSmokeHaze, smAir * 0.55);\n"
-                : "") +
-              "#include <tonemapping_fragment>")
-            .replace("#include <dithering_fragment>",
-              // alpha IS thickness: densest looking through the middle of the
-              // lobe, zero at the silhouette, broken up by the mask.
-              /* PLATEAU, not a dome. smoothstep(0.02,0.72) put most of a
-                 lobe's projected disc BELOW full density, so every lobe
-                 painted a visible radial gradient — a bag of soft discs still
-                 shows you the discs. The inner ~80% now sits at full density
-                 and only the outer edge falls away, so a joint between two
-                 lobes stays dense and the mass closes up. The silhouette is
-                 still ragged: the mask erosion below owns that, not this. */
-              "float smBody = smoothstep(0.0, 0.42, smRim);\n" +
-              /* Both modulators average ~1.0 (mask and noise both centre on
-                 0.5), so material.opacity stays the honest MEAN alpha through
-                 a lobe and CBZ.nukeSmokeAudit()'s coverage arithmetic keeps
-                 meaning what it says — while the swing carries density from
-                 0.42x up to saturation, which is the carving. */
-              "float smDen = smBody * (0.42 + 1.16 * smMask) * (0.70 + 0.60 * smNoise);\n" +
-              /* HIGH-FREQUENCY TEARING (organic). The mask and the broad noise
-                 both erode at BILLOW scale, so the silhouette was ragged in
-                 hundreds of metres and smooth in tens — which at 5 km reads as
-                 a smooth outline again. smFine is the 420 m world-space octave;
-                 multiplying by it (mean 1.0, +/-20%) before the erosion below
-                 pushes the already-thin rim through the floor in some places
-                 and not others, so the outline tears at the frequency the eye
-                 checks for. Mean-preserving on the BODY, where smDen is ~1 and
-                 the erosion is a no-op, so the audit's alpha stays honest. */
-              (org ? "smDen *= 0.80 + 0.40 * smFine;\n" : "") +
-              // ...and then thin density dies outright, so the silhouette
-              // tears instead of fading like the edge of a ball. The organic
-              // window is WIDER at the top (0.40 vs 0.34) so the tear reaches
-              // further into the rim; the body sits at smDen ~1 and never
-              // enters the window at all.
-              (org
-                ? "smDen *= smoothstep(0.06, 0.40, smDen);\n"
-                : "smDen *= smoothstep(0.05, 0.34, smDen);\n") +
-              "gl_FragColor.a *= clamp(smDen, 0.0, 1.0);\n" +
-              "#include <dithering_fragment>");
-        };
-        m._shared = true;
-        return m;
-      }
-      // NUKE_FX_SOFT_LOBES: alpha falls off toward each lobe's silhouette
-      // (view-space fresnel), so the billow reads as participating smoke
-      // instead of a lit rock. The 0.16 floor keeps the depth-written rim
-      // from punching fully transparent holes in lobes behind it.
-      if (CBZ.CONFIG.NUKE_FX_SOFT_LOBES) {
-        // Per-role rim floor: the cap/crown can dissolve hard at their rims
-        // (broad overlapping mass), but the stem/surge stack single-file —
-        // a deep rim fade turns a column into beads, so they keep a denser
-        // silhouette. Baked into the program string, so each floor compiles
-        // its own shader variant (r128 keys the cache on this string).
-        const floor = rimFloor == null ? 0.22 : rimFloor;
-        // r128 keys the program cache on onBeforeCompile.toString(); both
-        // floor variants share identical SOURCE (floor is a closure), so
-        // without an explicit key the stem would silently reuse the cap's
-        // compiled program. The key must carry the number itself.
-        m.customProgramCacheKey = function () { return "cbzSoftLobes" + floor.toFixed(2); };
-        m.onBeforeCompile = function (shader) {
-          shader.vertexShader = shader.vertexShader
-            .replace("#include <common>",
-              "#include <common>\nvarying vec3 vSoftN;\nvarying vec3 vSoftV;\nvarying vec3 vSoftW;")
-            .replace("#include <defaultnormal_vertex>",
-              "#include <defaultnormal_vertex>\nvSoftN = transformedNormal;")
-            .replace("#include <project_vertex>",
-              "#include <project_vertex>\nvSoftV = -mvPosition.xyz;\n" +
-              "vSoftW = (modelMatrix * (\n" +
-              "#ifdef USE_INSTANCING\n instanceMatrix *\n#endif\n" +
-              " vec4(transformed, 1.0))).xyz;");
-          shader.fragmentShader = shader.fragmentShader
-            .replace("#include <common>",
-              "#include <common>\nvarying vec3 vSoftN;\nvarying vec3 vSoftV;\nvarying vec3 vSoftW;")
-            .replace("#include <dithering_fragment>",
-              // Rim: dissolve at each lobe's silhouette like a gradient puff.
-              "float softRim = abs(dot(normalize(vSoftN), normalize(vSoftV)));\n" +
-              // Interior: two octaves of world-space value noise. A uniformly
-              // lit ball reads as a pebble whatever its edge does; smoke has
-              // internal density structure. Wavelengths ~450 m and ~1.5 km:
-              // broad billow mottling that holds up on the 5 km mature cap
-              // (the first draft's 240 m octave read as burlap moire there).
-              "float softN1 = sin(vSoftW.x * 0.0041 + vSoftW.y * 0.0062) * sin(vSoftW.z * 0.0051 - vSoftW.y * 0.0039);\n" +
-              "float softN2 = sin(vSoftW.x * 0.0118 - vSoftW.y * 0.0089) * sin(vSoftW.z * 0.0104 + vSoftW.x * 0.0077);\n" +
-              "float softNoise = 0.5 + 0.32 * softN1 + 0.18 * softN2;\n" +
-              "gl_FragColor.rgb *= 0.78 + 0.44 * softNoise;\n" +
-              `gl_FragColor.a *= (${floor.toFixed(2)} + ${(1 - floor).toFixed(2)} * smoothstep(0.05, 0.85, softRim)) * (0.70 + 0.44 * softNoise);\n` +
-              "#include <dithering_fragment>");
-        };
-      }
-      m._shared = true;
-      return m;
-    }
-    function volumeMesh(name, count, material, order) {
-      const mesh = new THREE.InstancedMesh(billowGeo, material, count);
-      mesh.name = "nuke-" + name;
-      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      mesh.count = 0;
-      return park(mesh, order);
-    }
-    // the 5th argument is uSmokeRole (0 cap · 1 stem · 2 surge · 3 crown) —
-    // one per-material uniform VALUE on one shared program (see volumeMat).
-    POOL.surgeVol = volumeMesh("ground-cloud", VOL_MAX.surge,
-      volumeMat(0x746154, 0x1b0d07, 0.82, 0.45, 2), 4);
-    POOL.stemVol = volumeMesh("stem", VOL_MAX.stem,
-      volumeMat(0x4b3a31, 0x24110a, 0.90, 0.60, 1), 5.1);
-    POOL.capVol = volumeMesh("cap", VOL_MAX.cap,
-      volumeMat(0x5b4030, 0x301208, 0.88, null, 0), 5.2);
-    const hotMat = new THREE.MeshBasicMaterial({
-      color: 0xff8a20, transparent: true, opacity: 0,
-      depthWrite: false, depthTest: true, fog: !CBZ.CONFIG.NUKE_FX_FOGPROOF,
-      side: THREE.FrontSide, blending: THREE.AdditiveBlending,
-    });
-    hotMat._shared = true;
-    /* RENDER ORDER UNDER NUKE_FX_SMOKE_LOBES, and it is not cosmetic.
-       The hot billows and the cap glow are ADDITIVE and rely on the cold
-       lobes' DEPTH to hide them: "heat coming out from between the lumps,
-       never a ball in front of a cloud". The cold lobes no longer write
-       depth, so that occlusion has to come from alpha instead — which means
-       the additive layers must be painted BEFORE the mass that covers them,
-       so the cap's own alpha attenuates them where it is dense and lets them
-       through where the billows part. Same read, one number, no depth pass:
-         surge 4 -> hot 5.05 -> stem 5.1 -> glow 5.15 -> cap 5.2 -> crown 5.3
-       Flag off restores 7 / 5.25, which is correct for a depth-writing cap. */
-    POOL.hotVol = volumeMesh("hot-billows", VOL_MAX.hot, hotMat,
-      smokeLobes() ? 5.05 : 7);
-
-    /* ---- THE CROWN + COLLAR: cold, dark, soft cauliflower -----------------
-       Soft smoke masks, drawn at renderOrder 5.3 — i.e. immediately
-       AFTER the cap (5.2) so a crown lobe sitting on the cap's shoulder wins
-       the depth tie, and BEFORE the surface billboards (5) can... no: 5.3 is
-       after 5.2 and after 5, which is the order the silhouette needs. There
-       is deliberately no emissive floor: the whole point of the crown is
-       that it is the part of the cloud that has already gone COLD, and it is
-       what the incandescent glow underneath is contrasted against. */
-    POOL.crownVol = volumeMesh("cap-crown", VOL_MAX.crown,
-      volumeMat(0x3b3129, 0x150803, 0.92, null, 3), 5.3);
-    /* ---- THE CAP GLOW: incandescent, additive, inside the cap ------------
-       MeshBasic (never lit — it IS the light), additive so it brightens the
-       cap lobes it shines through rather than replacing them, and depthTest
-       ON so the cap's own front lobes still occlude it. That combination is
-       what reads as "glowing from within" instead of "a hot ball parked in
-       front of a cloud". Retired by ~11 s, long before the cloud is. */
-    const glowMat = new THREE.MeshBasicMaterial({
-      color: 0xffd27a, transparent: true, opacity: 0,
-      depthWrite: false, depthTest: true, fog: !CBZ.CONFIG.NUKE_FX_FOGPROOF,
-      side: THREE.FrontSide, blending: THREE.AdditiveBlending,
-    });
-    glowMat._shared = true;
-    POOL.glowVol = volumeMesh("cap-glow", VOL_MAX.glow, glowMat,
-      smokeLobes() ? 5.15 : 5.25);      // see the render-order note above
-
-    /* ---- THE WHITE DOME — the first second, and the single biggest thing
-       missing from this sequence.
-
-       It is a HEMISPHERE, unlit, un-fogged, opaque white, and it is drawn
-       ABOVE everything else in the sequence (renderOrder 11) because for
-       that first second there IS nothing else: the reference plate has no
-       detail inside the dome at all, only a solid light with a soft halo.
-
-       WHY fog:false. Every other layer here mixes toward scene.fog so it
-       sits in the same haze the city does. This one must not: it is the
-       BRIGHTEST OBJECT IN THE WORLD, and fogging it would tint a pure white
-       light source toward the colour of the air in front of it — which is
-       backwards, because at that moment the air in front of it is being lit
-       BY it. (The atmosphere drive handles that half.)
-
-       WHY NormalBlending and not additive. Additive has no "behind", so an
-       additive dome would let the skyline show straight through the thing
-       that is supposed to be silhouetting it. depthWrite is still off, and
-       depthTest is on, so buildings IN FRONT correctly occlude it — which is
-       exactly the plate: a black skyline against a white dome.
-
-       WHY DoubleSide. The player can be inside its radius. At 126 m and a
-       R_PLAYER of 160 m that is a common death, and a single-sided dome
-       would vanish at the one moment it should be the whole screen. */
-    const hemiGeo = new THREE.SphereGeometry(1, 30, 15, 0, Math.PI * 2, 0, Math.PI * 0.5);
-    hemiGeo._shared = true;
-    const wdMat = new THREE.MeshBasicMaterial({
-      color: 0xffffff, transparent: true, opacity: 0,
-      depthWrite: false, depthTest: true, fog: false,
-      side: THREE.DoubleSide, blending: THREE.NormalBlending,
-    });
-    wdMat._shared = true;
-    POOL.wdome = park(new THREE.Mesh(hemiGeo, wdMat), 11);
-
-    for (let i = 0; i < MAX_BILLS; i++) {
-      const mat = new THREE.ShaderMaterial({
-        uniforms: FOG_U({
-          uMask: { value: TEX.cloud }, uNoise: { value: TEX.noise }, uLut: { value: TEX.lut },
-          uScroll: { value: new THREE.Vector2(0, 0) },
-          uScroll2: { value: new THREE.Vector2(0, 0) },
-          uLife: { value: 0.3 }, uOpacity: { value: 0 }, uErode: { value: 0.18 }, uGlow: { value: 0.5 },
-          uCool: { value: 0 },              // 0 => byte-identical to before
-        }),
-        vertexShader: BILL_VS, fragmentShader: BILL_FS,
-        transparent: true, depthWrite: false, depthTest: true,
-        fog: true,
-        side: THREE.DoubleSide, blending: THREE.NormalBlending,
-      });
-      mat._shared = true;
-      POOL.bills.push(park(new THREE.Mesh(quadGeo, mat), 5));
-    }
-
-    /* ---- LEGACY FAR-TIER IMPOSTOR. One quad, one baked mushroom, one draw
-       call for a ten-kilometre cloud. It is NOT part of the coherent default;
-       on the explicit fallback path it is not an extra layer on top of the
-       3D cloud — it REPLACES it (they cross-fade on whether the 3D cap still
-       fits inside the frustum, see impostorMix), so the peak draw count does
-       not move.
-         fog:false  it is behind the fog, not in it. This also gives it its
-                    own shader permutation, which is exactly why it is minted
-                    here at load and parked for core/fxwarm.
-         renderOrder 4.5 — UNDER every 3D cloud layer, so during the
-                    cross-fade the near geometry always paints over it, and
-                    the depth test at 860 m lets real world geometry occlude
-                    it while the 3D stem in front of it wins on depth. The
-                    depth buffer composites the two tiers for free. */
-    const impMat = new THREE.ShaderMaterial({
-      uniforms: FOG_U({
-        uMask: { value: TEX.mushEarly },
-        uMaskB: { value: TEX.mushForm },
-        uMaskC: { value: TEX.mush },
-        uNoise: { value: TEX.noise }, uLut: { value: TEX.lut },
-        uScroll: { value: new THREE.Vector2(0, 0) },
-        uScroll2: { value: new THREE.Vector2(0, 0) },
-        uLife: { value: 0.12 }, uOpacity: { value: 0 }, uErode: { value: 0.10 },
-        uGlow: { value: 1.55 },             // the core must overdrive into white
-        uCool: { value: 1 },                // ...and the crown/dust must not
-        uPhase: { value: 0 },
-      }),
-      vertexShader: BILL_VS, fragmentShader: IMP_FS,
-      transparent: true, depthWrite: false, depthTest: true,
-      fog: false,
-      side: THREE.DoubleSide, blending: THREE.NormalBlending,
-    });
-    impMat._shared = true;
-    POOL.imp = park(new THREE.Mesh(quadGeo, impMat), 4.5);
-  }
-
-  /* ============================================================
-     THE WHITEOUT — the single cheapest, biggest beat there is: one composited
-     DOM layer, zero GL fill, never dropped at any quality tier. It REUSES
-     city/strategic.js's #nukeFlash element rather than adding a second sheet,
-     so the two can never stack, and it is exported as CBZ.cityNukeWhiteout so
-     strategic.js (and anything else) can drop its private copy.
-
-     THE DOUBLE FLASH. A nuclear detonation does not flash once — it flashes,
-     then the expanding shock front goes OPAQUE and swallows its own fireball
-     (the "minimum"), then the fireball burns back through it in a second,
-     longer, brighter thermal pulse. It is the single most recognisable thing
-     about the event, it is the reason bhangmeters can count warheads, and here
-     it costs one extra keyframe on a DOM div — no GL fill at all.
-
-     Driven per-frame off the same onAlways ticker rather than a CSS transition
-     because a transition can only interpolate between TWO values; a chain of
-     nested rAF handoffs to fake more would be four timers we do not control
-     and cannot cancel on a run reset. `keys` are normalised 0..1 of the total
-     fade so one table serves any duration. */
-  /* THE THERMAL PULSE. ONE table, THREE consumers.
-
-     This curve is not just the DOM div's keyframes: it is the radiance of the
-     event, and the div, the fireball's own brightness and the sky tint all read
-     it through keyAt()/flashRadiance(). That is deliberate and it is the
-     correction that mattered most in this file. Before, the dip lived ONLY on
-     the overlay — the 3D fireball ramped up monotonically underneath it — so
-     the most recognisable signature a nuclear weapon has was a property of a
-     white rectangle rather than of the explosion. If the div dips and the world
-     does not, the eye reads a UI glitch.
-
-     Shape, against Glasstone & Dolan fig. 2.39: a first maximum reached in
-     under a millisecond, a minimum as the shock front becomes opaque and
-     swallows the fireball, then a second maximum that is broader and carries
-     ~99% of the thermal energy. Normalised 0..1 of the total fade, so one table
-     serves any duration.
-
-     THE COMPRESSION IS DELIBERATE AND IT IS THE ONLY LIBERTY TAKEN. The real
-     minimum is ~1 ms for a small device and tens of ms for a large one. At
-     2.9 s of fade the honest normalised position of a 30 ms dip is 0.010, which
-     is a single frame at 60 Hz and reads as a dropped frame, not as a weapon.
-     The dip is held at 0.062..0.105 (about 180-305 ms absolute) so it is
-     ~7 frames of genuinely dark before the second pulse — long enough to SEE
-     the shock front standing in front of the fireball, which is the whole
-     point. Everything else keeps the spec's proportions: the second maximum is
-     brighter than the first is at the same age, and its tail is ~4x longer than
-     the first pulse's. */
-  const FLASH_DOUBLE = [
-    [0.000, 1.00],   // FIRST MAXIMUM: instantaneous, total
-    [0.028, 0.78],   // the isothermal ball is already being overtaken
-    [0.062, 0.09],   // THE MINIMUM — the shock front has gone opaque
-    [0.105, 0.12],   // ...and it HOLDS. Films never draw this and it is the beat.
-    [0.185, 1.00],   // SECOND MAXIMUM: slower to build, brighter, far longer
-    [0.400, 0.82],
-    [0.680, 0.40],
-    [1.000, 0.00],
-  ];
-  const FLASH_SINGLE = [[0.0, 1.0], [0.22, 0.45], [1.0, 0.0]];
-
-  // Sample any of the tables above at normalised age u. Shared by stepFlash
-  // (the div) and flashRadiance (the world).
-  function keyAt(keys, u) {
-    u = clamp(u, 0, 1);
-    for (let i = 1; i < keys.length; i++) {
-      if (u <= keys[i][0]) {
-        const a = keys[i - 1], b = keys[i];
-        return a[1] + (b[1] - a[1]) * ((u - a[0]) / (b[0] - a[0] || 1));
-      }
-    }
-    return 0;
-  }
-
-  /* flashRadiance(t, P) — the pulse as a MULTIPLIER for a world layer.
-
-     Returns exactly 1.0 once the pulse window is over, so any layer can
-     multiply it in without also handing this function control of that layer's
-     own fade. (A naive `layer *= pulse` would delete the fireball at t=white,
-     because the pulse table ends at zero.) The pulse's authority decays
-     linearly across the first 72% of the fade; past that the layer's own
-     envelope owns it completely. */
-  function flashRadiance(t, P) {
-    if (!CBZ.CONFIG.NUKE_FX_PULSE || !P.dbl) return 1;
-    const w = P.white * 0.72;
-    if (t >= w || w <= 0) return 1;
-    return 1 - (1 - t / w) * (1 - keyAt(FLASH_DOUBLE, t / P.white)) * 0.90;
-  }
-
-  let flashEl = null, flash = null;
-  function flashDiv() {
-    if (typeof document === "undefined" || !document.body) return null;
-    if (flashEl && flashEl.parentNode) return flashEl;
-    flashEl = document.getElementById("nukeFlash");
-    if (!flashEl) {
-      flashEl = document.createElement("div");
-      flashEl.id = "nukeFlash";
-      // z-index 80: over the HUD, under the pause/menu layers (115+).
-      flashEl.style.cssText = "position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:80";
-      document.body.appendChild(flashEl);
-    }
-    // city/strategic.js's degrade-path copy bakes a 2.8s transition into the
-    // same element's inline style. We drive opacity per frame, so kill it.
-    flashEl.style.transition = "none";
-    return flashEl;
-  }
-  // whiteout(fadeSec, peak, double) — `double` opts into the shock-front dip.
-  function whiteout(fadeSec, peak, dbl) {
-    const el = flashDiv();
-    if (!el) return;
-    const dur = Math.max(0.12, fadeSec == null ? 2.8 : +fadeSec || 0.12);
-    const pk = peak == null ? 1 : clamp(+peak || 0, 0, 1);
-    // A weaker flash never interrupts a stronger one already running.
-    if (flash && flash.peak > pk && flash.t < flash.dur * 0.5) return;
-    flash = { t: 0, dur: dur, peak: pk, keys: dbl ? FLASH_DOUBLE : FLASH_SINGLE };
-    try { el.style.opacity = String(pk); } catch (e) {}
-  }
-  function stepFlash(dt) {
-    const f = flash;
-    f.t += dt;
-    const el = flashDiv();
-    const u = clamp(f.t / f.dur, 0, 1);
-    const v = keyAt(f.keys, u);
-    if (el) { try { el.style.opacity = v <= 0.002 ? "0" : (v * f.peak).toFixed(3); } catch (e) {} }
-    if (u >= 1) flash = null;
-  }
-  function flashClear() {
-    flash = null;
-    const el = flashEl;
-    if (el) { try { el.style.transition = "none"; el.style.opacity = "0"; } catch (e) {} }
-  }
-  CBZ.cityNukeWhiteout = whiteout;
-
-  /* ============================================================
-     STYLE ROWS — the ONLY difference between a nuke and a MOAB. Everything
-     dimensional is derived from the ordnance ROW (radius / wave), so the
-     spectacle and the damage model can never drift apart.
-     ============================================================ */
-  /* THE ONE NUMBER EVERYTHING HANGS OFF — and the bug that made this whole
-     file draw a bonfire instead of a nuke.
-
-     systems/impactbus.js states the trap explicitly at its `radius` field:
-     "the legacy blast API multiplies radius BY power internally (crashfx.js:
-     R = radius*power) ... the effective near-field radius of a row is
-     radius*power, NOT radius", and the nuke row's own comment reads
-     "radius*power = 126m of instantly-vaporised fireball".
-
-     Every dimension below used to be derived from `row.radius` alone — 14 for
-     the nuke — which produced a 7 m fireball under a mushroom cloud 20 m tall
-     and 18 m wide, while the actual damage zone rolled hundreds of metres out.
-     fireR() is the honest number, and it is the ONLY place the conversion
-     lives so it cannot drift again. `opts.scale` is already the bus's
-     kinetic FX multiplier (cube-root of energy), so multiplying it in here is
-     what keeps the spectacle proportional to how hard the thing arrived. */
-  function fireR(row, opts) {
-    const pw = Math.max(0.1, +row.power || 1);
-    const rr = Math.max(1, +row.radius || 14);
-    const sc = (opts && opts.scale > 0) ? +opts.scale : 1;
-    return Math.max(8, rr * pw * sc);
-  }
-
-  /* ============================================================
-     THE PHYSICAL MODEL — ONE yield, and every dimension solved from it.
-
-     OWNER: "make them REAL TO SIZE ... the amount of DEATH in the radius
-     should also be REAL based on the research — the percentage — and the
-     BUILDING DAMAGE."
-
-     THE YIELD IS NOT TYPED, IT IS INVERTED OUT OF THE BUS ROW. The published
-     maximum-fireball relation for an air burst is
-
-         R_fireball = 50 * W^(1/3)  metres,  W in kilotons
-
-     and systems/impactbus.js's nuke row already fixes R at radius*power =
-     14*9 = 126 m (its own comment says so, and cites the same relation). So
-
-         W = (R / 50)^3 = (126 / 50)^3 = 2.52^3 = 16.0 kt
-
-     — a HIROSHIMA-CLASS device (Little Boy is best-estimated at 15 kt), and
-     that is a gift, because Hiroshima is the most thoroughly measured
-     nuclear casualty dataset that exists. Every ring below is therefore
-     sourced rather than invented, and (16/15)^(1/3) = 1.022 means the
-     Hiroshima distances transfer to this device essentially one-to-one.
-
-     BECAUSE IT IS INVERTED, THE SPECTACLE AND THE DAMAGE CAN NEVER DRIFT.
-     Change the row's power or radius and the yield, the cloud, the rings and
-     the casualty fractions all move together. Nothing here is a constant
-     that has to be remembered.
-     ============================================================ */
-  // W = (R/50)^3, the inverse of the maximum-fireball relation.
   function yieldKt(R) { return Math.pow(Math.max(1, R) / 50, 3); }
-  // cube-root scaling factor against the 1 kt references below
   function cubeRt(W) { return Math.pow(Math.max(0.001, W), 1 / 3); }
-
-  /* ---- THE CLOUD, AT TRUE SIZE ------------------------------------------
-     Glasstone & Dolan's stabilised-cloud figures for a 20 kt surface burst
-     (their cloud-height/yield curves, Fig. 2.16 and the accompanying table):
-        cloud TOP        ~10.7 km      cloud BOTTOM (cap base)  ~6.4 km
-        cap thickness    ~4.3 km       cap DIAMETER             ~5.5 km
-     At 16 kt those come down by (16/20)^(1/3) = 0.928 on the width terms;
-     cloud HEIGHT scales far more weakly than W^(1/3) because the tropopause
-     (~11 km at mid latitudes) is a hard ceiling — everything going up goes
-     sideways instead — so the top is held at 10 km rather than scaled.
-
-     THE STEM IS THE OWNER'S RATIO AND IT IS RIGHT FOR THIS PHASE. He is
-     looking at the classic tower shot — the cloud at tens of seconds, not
-     the ten-minute stabilised cloud — and at that age the convective column
-     is FAT: "roughly as wide as ~1/3 the cap". A stabilised cloud's stem is
-     thinner (1/5 to 1/6), and drawing that would be a different photograph.
-     This whole sequence is 34 s long, so the tower shot is the correct
-     reference and the stem is capDiameter/3.
-
-     THE DUST BASE is the ground-shock skirt: Crossroads Baker's base surge
-     (23 kt) reached ~1 km radius by a minute, and a land surface burst's
-     skirt tracks the 2 psi contour early on, which for this yield is
-     2,016 m (see RINGS). That is what the reference photograph's broad dark
-     spreading foot is, and it is wider than the stem by design.           */
-  const CLOUD_TOP_M = 10000;     // m — tropopause-limited, not W^(1/3)-scaled
-  const CAP_DIA_20KT = 5500;     // m — Glasstone's 20 kt stabilised cap
-  const CAP_THICK_20KT = 4300;   // m
-  const STEM_OF_CAP = 1 / 3;     // owner's reference photograph
-  /* ============================================================
-     SOLIDITY — the arena bug, and it was never the far plane alone.
-
-     OWNER, 2026-08-03: the finale reads as "orange geometric fake smoke that
-     looks like slightly opaque orange floating rocks". The word doing the
-     work is SLIGHTLY OPAQUE, and it was literally true: every volume layer's
-     peak alpha was hand-set between 0.76 and 0.88, so the cloud never became
-     opaque at any point in its life. The lobes are InstancedMeshes, which
-     render in ONE unsorted pass — at 85% you see the far side of the cloud
-     through the near side, every lobe outlined against the lobe behind it,
-     and a coherent body falls apart into discrete floating solids. No colour,
-     count or geometry change can fix that, because the artifact IS the alpha.
-
-     This does not touch a single envelope. capIn/stemIn/surgeIn/endFade/near
-     all still shape exactly the same curve; the curve simply finishes at
-     solid instead of at 85%. NUKE_FX_SOLID_CLOUD=false restores the old
-     peaks byte for byte.
-     ============================================================ */
-  function solidOp(peak, smokePeak) {
-    /* 1.45, not 1.05, and the reason is NUKE_FX_SOFT_LOBES: its fragment
-       patch multiplies alpha by BOTH a rim fresnel AND a noise term whose
-       floor is 0.70 (see volumeMat). So a layer whose peak was 0.86 actually
-       reached ~0.60 in the MIDDLE of a lobe — well under half-opaque — which
-       is where the see-through came from. Over-driving the peak lets the
-       clamp do the work: lobe INTERIORS finish solid, while the rim fresnel
-       still dissolves the silhouette. Solid billows, soft edges, which is
-       what the soft-lobe patch was reaching for in the first place. */
-    /* SMOKE MODE PAYS FOR SOLIDITY WITH OVERLAP, NOT WITH ALPHA. The x1.45
-       over-drive above exists to beat the soft-lobe patch's own alpha
-       multipliers back up to opaque INTERIORS, and it worked — but a lobe
-       that is individually opaque is individually an object, which is the
-       complaint this whole flag answers. With depth-write off and the
-       instances sorted, coverage COMPOSES: n overlapping lobes at alpha a
-       reach 1-(1-a)^n. Density is bought with n, and the rim — crossed by
-       exactly ONE lobe — is left free to wisp.
-
-       WHICH MEANS THE PEAK IS PER LAYER. The table below is what the code
-       actually passes — it was STALE for a whole look round (it still quoted
-       the 18-lobe era's 0.58/0.93/0.82 while the call sites had already
-       dropped to 0.26/0.74/0.44 for the 272-lobe cloud), which is exactly the
-       failure mode this file keeps catching: a comment nobody can execute.
-       Coverage is 1-(1-a)^hits and the hit counts are read live by
-       tools/nuke-smoke-check.mjs (seed 90210, quality tier 3, 16 horizontal
-       rays through each layer's own centroid) at t = 3.5 / 8 / 15 / 26:
-
-         layer   lobes    peak alpha       body coverage
-         cap        88    0.26             unchanged
-         crown      60    0.30             not gated — a shell, not a mass
-         stem     48->64  0.74 -> 0.64     UNCHANGED, by construction
-         surge    76->88  0.44 -> 0.39     UNCHANGED, by construction
-
-       The arrows are NUKE_FX_ORGANIC (see VOL_MAX): count up, alpha down,
-       because a lobe you can COUNT is a lobe whose edge you can see. The new
-       alphas are SOLVED rather than picked —
-           a_new = 1 - (1 - a_old)^(N_old/N_new)
-       makes (1-a_new)^(N_new/N_old * hits) identically (1-a_old)^hits, so the
-       probe's coverage number does not move at all and the 0.93 floor is
-       exactly as far away as it was. Each layer's opacity line carries the
-       substitution so it can be re-derived without leaving the file.
-
-       The STEM carries the highest peak of the three and that is structural,
-       not a compromise: a horizontal ray crosses a COLUMN about once, so its
-       density can only come from the lobe itself. A real convective column is
-       opaque through the middle; what stops it reading as a stack of eggs is
-       the eroded silhouette and the shading, both of which it keeps.
-
-       The cap is a MASS and stacks four deep, so it can be thin per lobe.
-       The stem and the surge stack single-file — a horizontal ray crosses a
-       column once — so a thin peak there is a see-through column, which is
-       the 2026-08-03 complaint all over again. This is the same law the old
-       per-role rim floors encoded (cap 0.22 / surge 0.45 / stem 0.60); it is
-       just being applied to the quantity that actually controls opacity.
-
-       A dense CENTRE is not what made this look like rock: the terminator,
-       the depth clipping and the unbroken silhouette did, and all three are
-       gone. Real smoke columns are opaque in the middle and ragged at the
-       edge, which is exactly what these numbers plus the shader produce.
-
-       The crown/collar is deliberately NOT in that table: it is a shell over
-       the cap and a skirt under its rim, so no ray through the cloud's axis
-       crosses more than about one of its lobes. Its mass is the cap behind
-       it; its own job is silhouette. */
-    if (smokeLobes()) return Math.min(1, smokePeak != null ? smokePeak : peak * 0.68);
-    return CBZ.CONFIG.NUKE_FX_SOLID_CLOUD === false ? peak : Math.min(1, peak * 1.45);
-  }
-
-
-  function nukeDims(R) {
-    const W = yieldKt(R);
-    const k = Math.pow(W / 20, 1 / 3);          // width terms scale as W^(1/3)
-    const capW = CAP_DIA_20KT * k;              // 16 kt -> 5,104 m
-    const capH = CAP_THICK_20KT * k;            // 16 kt -> 3,990 m
-    const top = CLOUD_TOP_M;                    // tropopause ceiling
-    return {
-      W: W,
-      fireball: R,                              // 126 m
-      capW: capW,
-      capH: capH,
-      // the cap's CENTRE sits half its own thickness below the cloud top
-      capY: top - capH * 0.5,                   // 16 kt -> 8,005 m
-      top: top,
-      stemW: capW * STEM_OF_CAP,                // 16 kt -> 1,701 m
-      base: RING_1KT.p2 * cubeRt(W),            // dust base radius = the 2 psi contour
-    };
-  }
-
-  /* WHAT CAN FORM DURING THIS 34-SECOND SEQUENCE. nukeDims is the researched
-     mature cloud (minutes old, kilometres tall) and remains the public physics
-     model. Drawing that mature object one second after the dome forced the old
-     path to flatten it onto a sky card. This is the visible young cloud: still
-     enormous beside the city, inside the 1 km frustum, and in the same 3:1
-     cap/stem proportion. It grows toward the mature dimensions after this
-     sequence ends; it does not pretend to have reached them already. */
-  function formationDims(R) {
-    if (!CBZ.CONFIG.NUKE_FX_BIG_FORMATION) {
-      // first-draft numbers, kept verbatim as the one-line revert
-      const capW0 = R * 3.6;
-      const capH0 = capW0 * 0.78;
-      const capY0 = R * 5.2;
-      return {
-        capW: capW0, capH: capH0, capY: capY0,
-        top: capY0 + capH0 * 0.5 * CAP_FLAT,
-        stemW: capW0 * STEM_OF_CAP,
-        base: R * 4.0,
-      };
-    }
-    /* Anchored to the frame record, not taste: Trinity (21 kt) reads ~3.3 km
-       to the cloud top at ~25 s in Mack's published sequence, and the
-       Nagasaki column is ~3-4 km tall inside the first minute. Scaled by
-       W^(1/3) to this file's 16 kt that is a ~3.0 km top at the end of the
-       26 s rise window. With R = 126 m:
-         capY = R*20.0 -> 2,520 m cap centre; top ~= 3.1 km  (was R*5.2 = 655 m)
-         capW = R*11.0 -> 1,386 m, xBLOOM_MAX -> ~1.95 km wide at t=34 s
-                                                              (was R*3.6 = 454 m)
-       The draft numbers made a 34-second, 16 kt cloud the size of a stadium
-       roof — honest YOUTH, dishonest SCALE. The handoff-youth contract in
-       tools/test-nukefx-phases.mjs still holds because the rise/bloom curves
-       start near zero: at t=1.47 s this cap is ~110 m wide and ~120 m up. */
-    const capW = R * 11.0;
-    const capH = capW * 0.78;
-    const capY = R * 20.0;
-    return {
-      capW: capW, capH: capH, capY: capY,
-      top: capY + capH * 0.5 * CAP_FLAT,
-      stemW: capW * STEM_OF_CAP,
-      base: R * 4.0,
-    };
-  }
-
-  /* ---- THE RINGS ---------------------------------------------------------
-     TWO LADDERS, because they are two different physics and they must not be
-     collapsed into one "blast radius":
-
-     (1) OVERPRESSURE -> BUILDINGS. Glasstone & Dolan's 1 kt surface-burst
-         reference radii, scaled by W^(1/3) = 2.520 at 16 kt:
-
-           psi   1 kt      x2.520     what it does to a building
-           20    200 m     504 m      total destruction; even reinforced
-                                      concrete is gutted to its frame
-           10    300 m     756 m      heavy structural failure
-            5    440 m   1,109 m      MOST ORDINARY BUILDINGS COLLAPSE
-                                      (the classic "destruction radius")
-            2    800 m   2,016 m      roofs and walls out, wood frames down,
-                                      what is left is burning
-            1  1,300 m   3,276 m      windows across the whole district;
-                                      the largest injury source there is
-
-     (2) FATALITY -> PEOPLE. The USSBS survey of Hiroshima (15 kt, burst
-         580 m) measured killed/injured/safe by distance from the hypocentre.
-         Scaled to 16 kt by (16/15)^(1/3) = 1.0217:
-
-           Hiroshima band   here          killed
-           0.0-0.5 km       0-511 m       86.0%
-           0.5-1.0 km       511-1,022 m   83.0%
-           1.0-1.5 km       1,022-1,533   51.0%
-           1.5-2.0 km       1,533-2,043   21.6%
-           2.0-2.5 km       2,043-2,554    4.9%
-           2.5-3.0 km       2,554-3,065    2.4%
-           3.0-4.0 km       3,065-4,087    0.3%
-
-     TWO CAVEATS, stated because leaving them out would be the stale-claim
-     problem this file keeps catching itself in:
-       * those fractions are for a population largely INDOORS in light
-         wood-frame construction with no warning. In the open you fare worse
-         close in (thermal) and better further out.
-       * Hiroshima was an AIRBURST, which spreads blast further than the
-         surface burst both of this game's delivery routes produce. The two
-         ladders are therefore kept SEPARATE rather than fused: buildings ride
-         the surface-burst overpressure radii, people ride the measured
-         fatality curve. Fusing them would have meant inventing a number.
-
-     INSIDE THE FIREBALL IT IS 100%, and that is not a survey figure — it is
-     that there is nothing left to survey.                                  */
+  const CLOUD_TOP_M = 10000, CAP_DIA_20KT = 5500, CAP_THICK_20KT = 4300, STEM_OF_CAP = 1 / 3;
   const RING_1KT = { p20: 200, p10: 300, p5: 440, p2: 800, p1: 1300 };
-  const USSBS = [                                 // [outer km at 15 kt, killed]
+  const USSBS = [
     [0.5, 0.860], [1.0, 0.830], [1.5, 0.510], [2.0, 0.216],
     [2.5, 0.049], [3.0, 0.024], [4.0, 0.003], [5.0, 0.000],
   ];
   const HIROSHIMA_KT = 15;
-  /* CBZ.nukeRings(R) — the whole event as a table. R is the fireball radius
-     (fireR of the bus row); everything else is solved. Exported because
-     systems/impactbus.js applies the fatality curve and city/strategic.js
-     sizes its cop sweep and radiation zone from the same numbers — one
-     source, three consumers, no second table anywhere. */
+  // The mature (minutes-old) stabilised cloud.
+  function nukeDims(R) {
+    const W = yieldKt(R);
+    const k = Math.pow(W / 20, 1 / 3);
+    const capW = CAP_DIA_20KT * k, capH = CAP_THICK_20KT * k;
+    return {
+      W: W, fireball: R, capW: capW, capH: capH,
+      capY: CLOUD_TOP_M - capH * 0.5, top: CLOUD_TOP_M,
+      stemW: capW * STEM_OF_CAP, base: RING_1KT.p2 * cubeRt(W),
+    };
+  }
   function nukeRings(R) {
     const W = yieldKt(R);
     const k = cubeRt(W);
-    const hk = Math.pow(W / HIROSHIMA_KT, 1 / 3);   // 16 kt -> 1.0217
+    const hk = Math.pow(W / HIROSHIMA_KT, 1 / 3);
     return {
-      W: +W.toFixed(2),
-      fireball: R,
+      W: +W.toFixed(2), fireball: R,
       psi20: RING_1KT.p20 * k, psi10: RING_1KT.p10 * k,
       psi5: RING_1KT.p5 * k, psi2: RING_1KT.p2 * k, psi1: RING_1KT.p1 * k,
-      // the measured fatality curve, in metres for THIS yield
       fatal: USSBS.map(function (b) { return [b[0] * 1000 * hk, b[1]]; }),
-      // 500 rem prompt-radiation radius. Prompt gamma+neutron attenuates
-      // exponentially in air, so it does NOT scale as W^(1/3): the standard
-      // figure for a 20 kt burst is ~1.1 km to 500 rem (a ~50% lethal dose
-      // without treatment), and it grows only slowly with yield. Held at
-      // 1.1 km * (W/20)^0.2 rather than cube-rooted, which would have made
-      // it a blast radius wearing a radiation label.
-      rad500: 1100 * Math.pow(W / 20, 0.2),
+      rad500: 1100 * Math.pow(W / 20, 0.2),     // prompt dose attenuates in air: not W^(1/3)
     };
   }
-  /* CBZ.nukeLethalAt(r, R) — the researched probability that an unsheltered
-     person at range r is KILLED. Linear between the measured bands, 1.0
-     inside the fireball, 0 past the last band. This is the ONE function the
-     bus's ring sweep asks; it never re-derives a curve of its own. */
   function nukeLethalAt(r, R) {
     const T = nukeRings(R);
-    if (r <= T.fireball) return 1;                 // nothing to survey
+    if (r <= T.fireball) return 1;
     const f = T.fatal;
     let prev = T.fireball, prevV = 1;
     for (let i = 0; i < f.length; i++) {
@@ -2456,97 +128,18 @@
   CBZ.nukeLethalAt = function (r, R) { return nukeLethalAt(r, R == null ? 126 : R); };
   CBZ.nukeDims = function (R) { return nukeDims(R == null ? 126 : R); };
 
-  /* PROPORTIONS ARE THE TELL. Everything below is a ratio against the fireball
-     radius R, so the whole cloud stays in proportion at any yield, and the
-     ratios are the ones test film actually shows rather than the ones films
-     draw. Two of them were badly wrong and are the reason the cloud read as a
-     bonfire's smoke column:
-
-       CLOUD TOP : CAP WIDTH   was 1.75 : 1   now 2.19 : 1  (riseK 4.60 -> 7.20)
-       CAP       : STEM WIDTH  was 6.50 : 1   now 9.82 : 1  (stemK 0.40 -> 0.28)
-
-     A real mushroom is a THIN stalk under a WIDE cap, with a total height far
-     greater than the cap is across — a 20 kt cloud stabilises around 12 km with
-     a cap 5-6 km across. A squat cloud on a fat stalk is the single most common
-     way a game gets this wrong, and this file was doing both. CBZ.nukeFxAudit()
-     reports both ratios so they cannot drift back.
-
-     `thermK` is the ONE new number: the ratio of the ignition radius to the
-     blast radius. It is not picked — thermal radiant exposure at a given range
-     scales as Y^0.41 and a given overpressure radius as Y^0.33, so the ratio of
-     the two goes as Y^0.08, which at the yield the bus's nuke row is priced for
-     lands at ~1.25. A chemical bomb's thermal pulse does not outrange its own
-     blast at all, so the MOAB's is 0 and it has no outer thermal zone. */
-  const STYLE = {
-    nuke: {
-      // OSTI/LLNL's peak visual-fireball estimate is Rmax = 50*W^(1/3) m.
-      // The row's 126 m effective radius is already the right answer for the
-      // game's ~15 kt event; halving it here was the tiny-fireball bug.
-      rFrac: 1.00,
-      riseK: 7.20,     // compressed stabilisation altitude (126m ball -> ~907m)
-      capK: 2.75, stemK: 0.28, surgeK: 3.4,
-      thermK: 1.25,    // ignition radius / blast radius (Y^0.08 — see above)
-      riseT: 13, dur: 34, white: 2.9, whitePeak: 1, dbl: true,
-      bills: 5, dome: true, volume: true, ash: true,
-      secondary: 6, shatter: 4, thermal: 9,
-      shake: 9, frontLife: 7.5, glow: 0.85,
-    },
-    moab: {
-      // A MOAB throws a tall, dirty smoke column — genuinely taller relative to
-      // its head than this file used to draw (riseK 2.60 -> 4.00) — but it is
-      // NOT a mushroom, and it is deliberately left squatter and stubbier than
-      // the nuke. The audit knows that and asserts it against chemical
-      // thresholds rather than nuclear ones.
-      // Its row radius is the pressure/damage near field, not a literal ball of
-      // flame. Keep the visible chemical fireball to ~42 m at the 120 m row.
-      rFrac: 0.35, riseK: 4.00, capK: 1.85, stemK: 0.30, surgeK: 2.6,
-      thermK: 0,
-      riseT: 5.6, dur: 13, white: 0.8, whitePeak: 0.82, dbl: false,
-      bills: 3, dome: false, volume: true, ash: false,
-      secondary: 3, shatter: 1, thermal: 0,
-      shake: 4.5, frontLife: 3.4, glow: 0.7,
-    },
-  };
-
-  /* THE GLASS LADDER, as multiples of the BLAST reach (wave.maxR).
-
-     The physical nuke table lives on impactbus's row, beside its pressure
-     reach; this file reads it for audit/reporting and keeps only a fallback
-     copy for direct FX use without the bus. By
-     overpressure: ~5 psi collapses most buildings and IS maxR; ~2 psi takes
-     roofs and walls; ~1 psi shatters windows several times further out again.
-     For a real 100 kt airburst those land at roughly 1x / 1.5x / 2.6x maxR, and
-     the last rung here is deliberately the widest thing this file touches —
-     every pane in the district goes, which is the correct read and also a
-     BOUNDED one, because buildings.js's cityShatter caps itself at 50 panes per
-     call whatever radius you hand it. A bigger radius costs nothing extra; it
-     just stops the breakage being concentrated on the block you were standing on. */
-  /* RE-DERIVED 2026-07-28 AGAINST THE RESEARCHED CONTOURS. maxR used to be
-     900 m — the COLLAPSE radius wearing the name "reach" — so the ladder ran
-     out to 2.10x it to get past the flattening. maxR is now the 1 psi
-     contour itself (3,276 m), so the same four passes become fractions of
-     it and every rung is a named contour instead of a multiple:
-
-         5 psi  1,109 / 3,276 = 0.339   panes go inside the collapse zone
-         2 psi  2,016 / 3,276 = 0.615   the gutted band
-         1 psi  3,276 / 3,276 = 1.000   THE glass contour, the biggest single
-                                        injury source a city detonation makes
-         0.5 psi                 1.250   light breakage beyond it
-
-     The old 2.10 against the new maxR would have been 6,880 m — further than
-     a 16 kt burst breaks anything, and the sort of stale multiplier this
-     file keeps catching. Under NUKE_REAL_SCALE the ladder is these; with the
-     flag off it is the old one, because the old one is right for the old
-     maxR and wrong for this one. */
-  const GLASS_K = [0.42, 0.85, 1.35, 2.10];
+  // Effective near-field radius of a bus row: radius*power (126 m for the nuke).
+  function fireR(row, opts) {
+    const pw = Math.max(0.1, +row.power || 1);
+    const rr = Math.max(1, +row.radius || 14);
+    const sc = (opts && opts.scale > 0) ? +opts.scale : 1;
+    return Math.max(8, rr * pw * sc);
+  }
+  // 5 psi / 2 psi / 1 psi / 0.5 psi as fractions of the 1 psi reach.
   const GLASS_K_REAL = [0.339, 0.615, 1.000, 1.250];
-  /* KEYED ON KIND, NOT JUST ON THE FLAG. The real ladder's rungs are NUCLEAR
-     overpressure contours; handing them to the MOAB would have quietly
-     narrowed its glass reach from 2.10x to 1.25x its own maxR on the
-     strength of research about a completely different weapon. A chemical
-     bomb keeps its own ladder. */
+  const GLASS_K = [0.42, 0.85, 1.35, 2.10];
   function glassLadder(kind) {
-    if (kind === "nuke" && real()) {
+    if (kind === "nuke" && C.NUKE_REAL_SCALE !== false) {
       if (CBZ.impact && CBZ.impact.row) {
         try {
           const row = CBZ.impact.row("nuke");
@@ -2559,1990 +152,750 @@
   }
 
   /* ============================================================
-     THE RISE — ONE curve, four readers.
+     STYLES. Every length is a multiple of the fireball radius R, so the
+     whole event keeps its proportions at any yield. Times are seconds.
+       formation: 0..form s, the cloud a player watches go up.
+       aftermath: form..dur s, slow growth toward a stabilised anvil, then
+                  it thins out and is gone.
+     ============================================================ */
+  const STYLE = {
+    nuke: {
+      rFrac: 1.0, form: 34, dur: 210,
+      rise: 17.0, riseTau: 11, riseLate: 40.0,  // cap centre height / R (formation, aftermath)
+      ring: 4.1, ringLate: 11.0,                 // torus ring radius / R
+      tube: 2.6, tubeLate: 6.0,                  // torus minor radius / R
+      flat: 0.66, flatLate: 0.5,                 // vertical squash of the tube
+      stem: 1.9, stemLate: 3.6,                  // stem radius / R
+      surgeK: 6.8, surgeMax: 16,                 // base surge ring radius coefficient / cap
+      shell: true, emit: 7.0, heatTau: 5.5, glowTau: 13,
+      smokeHot: [0.40, 0.21, 0.12], smokeCool: [0.56, 0.51, 0.47], dust: [0.50, 0.42, 0.34],
+      sigma: 0.030, white: 2.4, whitePeak: 1, dbl: true, shatter: 4, shake: 9,
+    },
+    moab: {
+      rFrac: 0.35, form: 12, dur: 40,
+      rise: 5.0, riseTau: 5, riseLate: 7.0,
+      ring: 1.2, ringLate: 2.0,
+      tube: 1.5, tubeLate: 2.2,
+      flat: 0.85, flatLate: 0.75,
+      stem: 0.55, stemLate: 0.8,
+      surgeK: 3.2, surgeMax: 5,
+      shell: false, emit: 4.0, heatTau: 1.6, glowTau: 3,
+      smokeHot: [0.30, 0.20, 0.14], smokeCool: [0.34, 0.31, 0.29], dust: [0.52, 0.44, 0.36],
+      sigma: 0.045, white: 0.7, whitePeak: 0.8, dbl: false, shatter: 1, shake: 4.5,
+    },
+  };
 
-     This used to be `ease((t - 0.9) / riseT)` copy-pasted into the fireball,
-     billboards and cap roll: three places that all had to agree about how
-     high the cloud was and had no structural reason to. It is now one function,
-     and fixing the SHAPE was a one-line change instead of three.
+  /* ============================================================
+     THE NOISE ATLAS. 64^3 tileable noise stored as 64 slices of 64x64 in an
+     8x8 atlas with a 1-texel wrap border (528x528 RGBA8), so it works in
+     WebGL1 and WebGL2 alike. Channels:
+       R  perlin-worley billow (low frequency: the big cauliflower lumps)
+       G  worley fbm           (mid: edge erosion)
+       B  perlin fbm           (fine: wisps)
+     Built in idle slices after boot, finished synchronously only if a
+     warhead lands before the build did (behind the whiteout).
+     ============================================================ */
+  const NS = 64, TILE = NS + 2, ATL = TILE * 8;
+  const noise = { data: null, tex: null, z: 0, done: false };
+  function ihash(x, y, z, s) {
+    let h = (x * 374761393 + y * 668265263 + z * 2147483647 + s * 1274126177) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    h ^= h >>> 16;
+    return (h >>> 0) / 4294967296;
+  }
+  function wrapi(i, p) { i %= p; return i < 0 ? i + p : i; }
+  function perlin(x, y, z, P, s) {
+    const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
+    const xf = x - xi, yf = y - yi, zf = z - zi;
+    const u = xf * xf * xf * (xf * (xf * 6 - 15) + 10);
+    const v = yf * yf * yf * (yf * (yf * 6 - 15) + 10);
+    const w = zf * zf * zf * (zf * (zf * 6 - 15) + 10);
+    let acc = 0;
+    for (let c = 0; c < 8; c++) {
+      const dx = c & 1, dy = (c >> 1) & 1, dz = (c >> 2) & 1;
+      const gx = wrapi(xi + dx, P), gy = wrapi(yi + dy, P), gz = wrapi(zi + dz, P);
+      const th = ihash(gx, gy, gz, s) * 6.2831853, ph = Math.acos(ihash(gx, gy, gz, s + 7) * 2 - 1);
+      const g0 = Math.sin(ph) * Math.cos(th), g1 = Math.sin(ph) * Math.sin(th), g2 = Math.cos(ph);
+      const d = g0 * (xf - dx) + g1 * (yf - dy) + g2 * (zf - dz);
+      acc += d * (dx ? u : 1 - u) * (dy ? v : 1 - v) * (dz ? w : 1 - w);
+    }
+    return acc;                                  // ~[-0.87, 0.87]
+  }
+  function worley(x, y, z, P, s) {
+    const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
+    let best = 9;
+    for (let dz = -1; dz <= 1; dz++) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const cx = xi + dx, cy = yi + dy, cz = zi + dz;
+      const wx = wrapi(cx, P), wy = wrapi(cy, P), wz = wrapi(cz, P);
+      const fx = cx + ihash(wx, wy, wz, s) - x;
+      const fy = cy + ihash(wx, wy, wz, s + 1) - y;
+      const fz = cz + ihash(wx, wy, wz, s + 2) - z;
+      const d = fx * fx + fy * fy + fz * fz;
+      if (d < best) best = d;
+    }
+    return Math.min(1, Math.sqrt(best));        // 0 at a feature point
+  }
+  const _vox = new Uint8Array(NS * NS * 4);
+  function buildSlice(z) {
+    const f = 1 / NS;
+    for (let y = 0; y < NS; y++) for (let x = 0; x < NS; x++) {
+      const px = x * f, py = y * f, pz = z * f;
+      // R: perlin fbm remapped by inverted worley = rounded billows
+      const pf = perlin(px * 4, py * 4, pz * 4, 4, 11) * 0.62 +
+                 perlin(px * 8, py * 8, pz * 8, 8, 12) * 0.28 +
+                 perlin(px * 16, py * 16, pz * 16, 16, 13) * 0.10;
+      const w1 = 1 - worley(px * 4, py * 4, pz * 4, 4, 21);
+      const p01 = clamp(pf * 0.9 + 0.5, 0, 1);
+      const billow = clamp((p01 - (1 - w1)) / (1 - (1 - w1) * 0.999) , 0, 1) * 0.55 + w1 * 0.45;
+      // G: worley fbm
+      const wg = (1 - worley(px * 6, py * 6, pz * 6, 6, 31)) * 0.62 +
+                 (1 - worley(px * 12, py * 12, pz * 12, 12, 32)) * 0.26 +
+                 (1 - worley(px * 24, py * 24, pz * 24, 24, 33)) * 0.12;
+      // B: fine perlin
+      const pb = perlin(px * 16, py * 16, pz * 16, 16, 41) * 0.66 + perlin(px * 32, py * 32, pz * 32, 32, 42) * 0.34;
+      const o = (y * NS + x) * 4;
+      _vox[o] = Math.round(clamp(billow, 0, 1) * 255);
+      _vox[o + 1] = Math.round(clamp(wg, 0, 1) * 255);
+      _vox[o + 2] = Math.round(clamp(pb * 0.9 + 0.5, 0, 1) * 255);
+      _vox[o + 3] = 255;
+    }
+    // copy into the atlas tile with its wrap border
+    const tx = (z % 8) * TILE, ty = Math.floor(z / 8) * TILE;
+    const D = noise.data;
+    for (let j = 0; j < TILE; j++) {
+      const sy = wrapi(j - 1, NS);
+      for (let i = 0; i < TILE; i++) {
+        const sx = wrapi(i - 1, NS);
+        const si = (sy * NS + sx) * 4, di = ((ty + j) * ATL + tx + i) * 4;
+        D[di] = _vox[si]; D[di + 1] = _vox[si + 1]; D[di + 2] = _vox[si + 2]; D[di + 3] = 255;
+      }
+    }
+  }
+  function noiseStep(budgetMs) {
+    if (noise.done) return true;
+    if (!noise.data) noise.data = new Uint8Array(ATL * ATL * 4);
+    const t0 = performance.now();
+    while (noise.z < NS) {
+      buildSlice(noise.z++);
+      if (budgetMs != null && performance.now() - t0 > budgetMs) break;
+    }
+    if (noise.z >= NS) {
+      noise.tex = new THREE.DataTexture(noise.data, ATL, ATL, THREE.RGBAFormat);
+      noise.tex.magFilter = THREE.LinearFilter;
+      noise.tex.minFilter = THREE.LinearFilter;
+      noise.tex.generateMipmaps = false;
+      noise.tex.wrapS = noise.tex.wrapT = THREE.ClampToEdgeWrapping;
+      noise.tex.needsUpdate = true;
+      noise.done = true;
+      if (U) U.uNoise.value = noise.tex;
+    }
+    return noise.done;
+  }
+  let idleArmed = false;
+  function armIdleBuild() {
+    if (idleArmed || noise.done) return;
+    idleArmed = true;
+    const ric = window.requestIdleCallback;
+    const tick = function (deadline) {
+      if (noise.done) return;
+      const budget = deadline && deadline.timeRemaining ? Math.max(1, deadline.timeRemaining() - 1) : 4;
+      noiseStep(Math.min(budget, 6));
+      if (!noise.done) {
+        if (ric) ric(tick, { timeout: 2000 }); else setTimeout(tick, 50);
+      }
+    };
+    setTimeout(function () { if (ric) ric(tick, { timeout: 2000 }); else tick(null); }, 4000);
+  }
 
-     Smoothstep was the wrong shape twice over. It starts slow (a fireball is
-     buoyant from the instant it forms — it does not ease in), and it holds a
-     near-constant velocity through the middle (the thing films get wrong). A
-     real cloud rises FAST and then DECELERATES hard as it entrains cold air and
-     loses buoyancy, then stabilises flat at the tropopause and stops. That is
-     an exponential approach, not an S-curve:
+  /* ============================================================
+     THE VOLUME SHADER
+     ============================================================ */
+  const VS = [
+    "varying vec3 vWorld;",
+    "void main() {",
+    "  vec4 w = modelMatrix * vec4(position, 1.0);",
+    "  vWorld = w.xyz;",
+    "  gl_Position = projectionMatrix * viewMatrix * w;",
+    // keep the proxy inside the far plane: the fragment writes its own depth
+    "  gl_Position.z = min(gl_Position.z, gl_Position.w * 0.99999);",
+    "}",
+  ].join("\n");
 
-         rise(u) = (1 - e^(-K u)) / (1 - e^-K)
+  const FS = [
+    "uniform sampler2D uNoise;",
+    "uniform mat4 projectionMatrix;",   // r128 only predeclares it in the vertex stage
+    "uniform vec3 uGZ;",
+    "uniform vec3 uBoxMin; uniform vec3 uBoxMax;",
+    "uniform vec4 uHead;",      // ringR, tube, centreY (above ground), flat
+    "uniform vec4 uStem;",      // radius, top, base flare, presence
+    "uniform vec4 uSurge;",     // ringR, tube, flat, presence
+    "uniform vec4 uShell;",     // radius, opacity, centreY, thickness
+    "uniform vec4 uHeat;",      // head temperature, emission gain, core glow, fire light gain
+    "uniform vec4 uRoll;",      // head roll, stem rise, surge roll, time
+    "uniform float uSigma; uniform float uSteps; uniform float uHazeL; uniform float uFade;",
+    "uniform vec3 uSunDir; uniform vec3 uSunCol; uniform vec3 uSkyCol; uniform vec3 uGndCol; uniform vec3 uFogCol;",
+    "uniform vec3 uSmokeHot; uniform vec3 uSmokeCool; uniform vec3 uDust; uniform float uCool;",
+    "varying vec3 vWorld;",
+    "",
+    "vec4 noise4(vec3 p) {",
+    "  p = fract(p);",
+    "  float zf = p.z * 64.0; float z0 = floor(zf); float fz = zf - z0; float z1 = mod(z0 + 1.0, 64.0);",
+    "  vec2 inner = p.xy * 64.0 + 1.5;",
+    "  vec2 t0 = vec2(mod(z0, 8.0), floor(z0 / 8.0)) * 66.0;",
+    "  vec2 t1 = vec2(mod(z1, 8.0), floor(z1 / 8.0)) * 66.0;",
+    "  return mix(texture2D(uNoise, (t0 + inner) / 528.0), texture2D(uNoise, (t1 + inner) / 528.0), fz);",
+    "}",
+    "float smax(float a, float b, float k) { float h = clamp(0.5 + 0.5 * (a - b) / k, 0.0, 1.0); return mix(b, a, h) + k * h * (1.0 - h); }",
+    "",
+    // envelopes: ~1 at the core, 0 at the surface, negative outside
+    "float headEnv(vec3 q) {",
+    "  float rho = length(q.xz);",
+    "  vec2 m = vec2(rho - uHead.x, (q.y - uHead.z) / uHead.w);",
+    "  float tor = 1.0 - length(m) / uHead.y;",
+    "  float dr = uHead.x + uHead.y * 0.55;",
+    "  vec3 d = vec3(q.x / dr, (q.y - uHead.z - uHead.y * uHead.w * 0.22) / (uHead.y * uHead.w * 0.95), q.z / dr);",
+    "  return smax(tor, 1.0 - length(d), 0.35);",
+    "}",
+    "float stemEnv(vec3 q) {",
+    "  float top = max(uStem.y, 1.0);",
+    "  float u = clamp(q.y / top, 0.0, 1.0);",
+    "  float r = uStem.x * (1.0 + uStem.z * exp(-u * 6.0)) * (1.0 + 0.9 * smoothstep(0.7, 1.0, u));",
+    "  float e = 1.0 - length(q.xz) / r;",
+    "  return e - smoothstep(top * 0.72, top * 1.1, q.y) * 1.6 - (1.0 - uStem.w) * 1.4;",
+    "}",
+    "float surgeEnv(vec3 q) {",
+    "  float rho = length(q.xz);",
+    "  vec2 m = vec2(rho - uSurge.x, q.y / uSurge.z - uSurge.y * 0.55);",
+    "  float tor = 1.0 - length(m) / uSurge.y;",
+    "  float sheet = min(1.0 - rho / (uSurge.x + uSurge.y * 0.4), 1.0 - q.y / (uSurge.y * uSurge.z * 0.8)) * 0.95;",
+    "  return max(tor, sheet) - (1.0 - uSurge.w) * 1.4;",
+    "}",
+    "float envAll(vec3 q) {",
+    "  return max(max(headEnv(q), stemEnv(q)), surgeEnv(q));",
+    "}",
+    "",
+    "vec3 heatCol(float x) {",
+    "  vec3 c = mix(vec3(0.0), vec3(0.55, 0.06, 0.01), smoothstep(0.05, 0.2, x));",
+    "  c = mix(c, vec3(1.0, 0.36, 0.06), smoothstep(0.2, 0.45, x));",
+    "  c = mix(c, vec3(1.0, 0.72, 0.30), smoothstep(0.45, 0.72, x));",
+    "  c = mix(c, vec3(1.0, 0.96, 0.90), smoothstep(0.72, 1.0, x));",
+    "  return c;",
+    "}",
+    // rotate a point about the tube of a ring (poloidal roll), fading to zero on the axis
+    "vec3 rollAbout(vec3 q, float ringR, float cy, float ang) {",
+    "  float rho = length(q.xz);",
+    "  vec2 dir = rho > 1e-3 ? q.xz / rho : vec2(1.0, 0.0);",
+    "  float a = ang * smoothstep(0.0, max(ringR, 1.0) * 0.45, rho);",
+    "  vec2 m = vec2(rho - ringR, q.y - cy);",
+    "  float cs = cos(a), sn = sin(a);",
+    "  m = vec2(cs * m.x - sn * m.y, sn * m.x + cs * m.y);",
+    "  return vec3(dir.x * (ringR + m.x), m.y + cy, dir.y * (ringR + m.x));",
+    "}",
+    "",
+    "void main() {",
+    "  vec3 ro = cameraPosition;",
+    "  vec3 rd = normalize(vWorld - ro);",
+    "  vec3 inv = 1.0 / (sign(rd) * max(abs(rd), vec3(1e-5)) + vec3(step(abs(rd), vec3(0.0))) * 1e-5);",
+    "  vec3 ta = (uBoxMin - ro) * inv, tb = (uBoxMax - ro) * inv;",
+    "  vec3 tmn = min(ta, tb), tmx = max(ta, tb);",
+    "  float t0 = max(max(max(tmn.x, tmn.y), tmn.z), 0.0);",
+    "  float t1 = min(min(tmx.x, tmx.y), tmx.z);",
+    // never march under the deck
+    "  if (rd.y < 0.0) t1 = min(t1, (uGZ.y - ro.y) / rd.y);",
+    "  if (t1 <= t0) discard;",
+    "",
+    "  float n = max(uSteps, 4.0);",
+    "  float stepL = max((t1 - t0) / (n * 1.5), 3.0);",
+    "  float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));",
+    "  float t = t0 + stepL * jit;",
+    "  float cosT = dot(rd, uSunDir);",
+    "  float g = 0.35;",
+    "  float phase = (1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * cosT, 1.5) * 0.25 + 0.55;",
+    "  vec3 headC = vec3(0.0, uHead.z, 0.0);",
+    "  vec3 fireLight = heatCol(clamp(uHeat.x * 0.9 + 0.25, 0.0, 1.0)) * uHeat.w;",
+    "  float shadowL = max(uHead.y, 40.0);",
+    "  vec3 acc = vec3(0.0); float T = 1.0; float tHit = -1.0;",
+    "",
+    "  for (int i = 0; i < 140; i++) {",
+    "    if (float(i) >= n * 1.9 || t > t1 || T < 0.02) break;",
+    "    vec3 q = ro + rd * t - uGZ;",
+    "    float eh = headEnv(q), es = stemEnv(q), eu = surgeEnv(q);",
+    "    float e = max(max(eh, es), eu);",
+    "    if (e < -0.35) { t += stepL * (1.0 + clamp((-e - 0.35) * 2.0, 0.0, 3.0)); continue; }",
+    // advected noise coordinates, blended by which part dominates
+    "    float wh = exp(6.0 * (eh - e)), ws = exp(6.0 * (es - e)), wu = exp(6.0 * (eu - e));",
+    "    float wsum = wh + ws + wu;",
+    "    vec3 ch = rollAbout(q, uHead.x, uHead.z, uRoll.x) / (uHead.y * 3.4) + vec3(0.0, -uRoll.w * 0.004, 0.0);",
+    "    float tw = q.y * 0.0012 + uRoll.w * 0.03;",
+    "    vec2 sxz = mat2(cos(tw), -sin(tw), sin(tw), cos(tw)) * q.xz;",
+    "    vec3 cs = vec3(sxz.x / (uStem.x * 2.6 + 1.0), (q.y - uRoll.y) / (uStem.x * 7.0 + 1.0), sxz.y / (uStem.x * 2.6 + 1.0));",
+    "    vec3 cu = rollAbout(q, uSurge.x, uSurge.y * uSurge.z * 0.55, -uRoll.z) / (uSurge.y * 3.2 + 1.0);",
+    "    vec3 c = (ch * wh + cs * ws + cu * wu) / wsum;",
+    "    vec4 n1 = noise4(c);",
+    "    float base = e + (n1.r - 0.5) * 0.95 + (n1.g - 0.5) * 0.35;",
+    "    if (base > 0.0) {",
+    "      vec4 n2 = noise4(c * 3.07 + vec3(0.37, 0.11, 0.73));",
+    "      float d = base - (1.0 - (n2.g * 0.65 + n2.b * 0.35)) * 0.34 * (1.0 - clamp(base * 1.6, 0.0, 1.0));",
+    "      d = clamp(d * 1.7, 0.0, 1.0) * uFade;",
+    "      if (d > 0.002) {",
+    "        float a = 1.0 - exp(-d * uSigma * stepL);",
+    // sun transmittance from the analytic envelope, two taps toward the sun
+    "        float o1 = envAll(q + uSunDir * shadowL * 0.45);",
+    "        float o2 = envAll(q + uSunDir * shadowL * 1.3);",
+    "        float od = max(o1 + 0.35, 0.0) + max(o2 + 0.35, 0.0) * 1.4 + d * 0.6;",
+    "        float Ts = exp(-od * 2.6);",
+    "        float up = envAll(q + vec3(0.0, shadowL * 0.7, 0.0));",
+    "        float occ = clamp(0.85 - up * 1.1, 0.12, 1.0);",
+    "        float dustW = (ws + wu) / wsum;",
+    "        vec3 alb = mix(mix(uSmokeHot, uSmokeCool, uCool), uDust, dustW);",
+    "        vec3 amb = mix(uGndCol, uSkyCol, 0.3 + 0.7 * occ) * (0.16 + 0.55 * occ);",
+    "        float fl = exp(-length(q - headC) / (uHead.y * 1.4 + 20.0));",
+    "        vec3 lit = alb * (uSunCol * Ts * phase * 2.1 + amb + fireLight * fl * (0.6 + 0.4 * (1.0 - n1.g)));",
+    // blackbody emission: the head's heat, breaking through the smoke skin
+    "        float heat = uHeat.x * smoothstep(-0.15, 0.55, eh) * (wh / wsum);",
+    "        heat = max(heat, uHeat.z * smoothstep(0.25, 0.85, eh + (n1.r - 0.5) * 0.6) * (wh / wsum));",
+    "        float skin = smoothstep(0.15, 0.55, heat + (n2.g - 0.5) * 0.55);",
+    "        vec3 em = heatCol(heat) * uHeat.y * skin * (0.35 + heat * heat * 1.8);",
+    "        vec3 col = lit + em;",
+    "        acc += T * a * col;",
+    "        T *= 1.0 - a;",
+    "        if (tHit < 0.0 && T < 0.7) tHit = t;",
+    "      }",
+    "    }",
+    "    t += stepL;",
+    "  }",
+    "",
+    // the condensation shell: analytic, thin, brightest at the limb
+    "  vec3 frontC = vec3(0.0); float frontA = 0.0; vec3 backC = vec3(0.0); float backA = 0.0; float tFront = -1.0;",
+    "  if (uShell.y > 0.001) {",
+    "    vec3 sc = uGZ + vec3(0.0, uShell.z, 0.0);",
+    "    vec3 oc = ro - sc;",
+    "    float bq = dot(oc, rd); float cq = dot(oc, oc) - uShell.x * uShell.x;",
+    "    float disc = bq * bq - cq;",
+    "    if (disc > 0.0) {",
+    "      float sq = sqrt(disc);",
+    "      for (int k = 0; k < 2; k++) {",
+    "        float th = k == 0 ? -bq - sq : -bq + sq;",
+    "        if (th <= 0.0) continue;",
+    "        vec3 ph = ro + rd * th;",
+    "        if (ph.y < uGZ.y) continue;",
+    "        vec3 nrm = (ph - sc) / uShell.x;",
+    "        float mu = max(abs(dot(rd, nrm)), 0.06);",
+    "        vec4 nv = noise4(nrm * 2.2 + vec3(uRoll.w * 0.02));",
+    "        float nn = nv.b * 0.6 + nv.g * 0.4;",
+    "        float band = smoothstep(0.0, 0.25, nrm.y) * (1.0 - smoothstep(0.55, 1.0, nrm.y) * 0.6);",
+    "        float sa = (1.0 - exp(-uShell.y * uShell.w / mu)) * (0.45 + 0.55 * smoothstep(0.25, 0.75, nn)) * band;",
+    "        vec3 scol = uSkyCol * 1.1 + uSunCol * (0.4 + 0.6 * max(dot(nrm, uSunDir), 0.0)) * 0.8;",
+    "        if (k == 0) { frontC = scol * sa; frontA = sa; tFront = th; } else { backC = scol * sa; backA = sa; }",
+    "      }",
+    "    }",
+    "  }",
+    "  acc += T * backC; T *= 1.0 - backA;",
+    "  acc = frontC + (1.0 - frontA) * acc;",
+    "  float alpha = 1.0 - T * (1.0 - frontA);",
+    "  if (alpha < 0.004) discard;",
+    "  if (tHit < 0.0) tHit = tFront > 0.0 ? tFront : t1;",
+    // aerial perspective: huge things far away still fade into the air
+    "  float hz = (1.0 - exp(-tHit / uHazeL)) * 0.55;",
+    "  acc = mix(acc, uFogCol * alpha, hz);",
+    "#ifdef HAS_FRAG_DEPTH",
+    "  vec4 clip = projectionMatrix * viewMatrix * vec4(ro + rd * tHit, 1.0);",
+    "  gl_FragDepthEXT = clamp(clip.z / clip.w * 0.5 + 0.5, 0.0, 0.999999);",
+    "#endif",
+    "  gl_FragColor = vec4(acc / alpha, 1.0);",
+    "  #include <tonemapping_fragment>",
+    "  #include <encodings_fragment>",
+    "  gl_FragColor = vec4(gl_FragColor.rgb * alpha, alpha);",
+    "}",
+  ].join("\n");
 
-     with K = 3.4, which puts ~50% of the height in the first 20% of the window
-     and leaves the last 10% of the height taking a third of it. The first 10%
-     of the window cross-fades in from a smoothstep purely so there is no
-     velocity discontinuity at the start of the beat. Monotonic throughout, 0 at
-     u=0 and exactly 1 at u=1, so nothing downstream needs clamping. */
-  const RISE_K = 3.4;
-  const RISE_E = Math.exp(-RISE_K);
-  const PHASED_RISE_T = 26;
-  const REAL_RISE_KEYS = [
-    [0.00, 0.00], [0.08, 0.06], [0.28, 0.30], [0.58, 0.68], [1.00, 1.00],
+  let U = null;             // shared uniforms (one live cloud at a time)
+  let mesh = null;
+  let meshFailed = false;
+  function v3(a) { return new THREE.Vector3(a[0], a[1], a[2]); }
+  function buildMesh() {
+    if (mesh || meshFailed) return mesh;
+    try {
+      const R = CBZ.renderer;
+      const fragDepth = !!(R && R.capabilities && (R.capabilities.isWebGL2 ||
+        (R.extensions && R.extensions.has && R.extensions.has("EXT_frag_depth"))));
+      U = {
+        uNoise: { value: noise.tex },
+        uGZ: { value: new THREE.Vector3() },
+        uBoxMin: { value: new THREE.Vector3() }, uBoxMax: { value: new THREE.Vector3() },
+        uHead: { value: new THREE.Vector4(0, 100, 50, 1) },
+        uStem: { value: new THREE.Vector4(10, 0, 1, 0) },
+        uSurge: { value: new THREE.Vector4(0, 10, 0.5, 0) },
+        uShell: { value: new THREE.Vector4(1, 0, 0, 10) },
+        uHeat: { value: new THREE.Vector4(1, 5, 0, 1) },
+        uRoll: { value: new THREE.Vector4() },
+        uSigma: { value: 0.03 }, uSteps: { value: 48 }, uHazeL: { value: 9000 }, uFade: { value: 1 },
+        uSunDir: { value: new THREE.Vector3(0.4, 0.8, 0.2).normalize() },
+        uSunCol: { value: new THREE.Color(1, 1, 1) }, uSkyCol: { value: new THREE.Color(0.5, 0.6, 0.7) },
+        uGndCol: { value: new THREE.Color(0.3, 0.28, 0.25) }, uFogCol: { value: new THREE.Color(0.7, 0.75, 0.8) },
+        uSmokeHot: { value: v3(STYLE.nuke.smokeHot) }, uSmokeCool: { value: v3(STYLE.nuke.smokeCool) },
+        uDust: { value: v3(STYLE.nuke.dust) }, uCool: { value: 0 },
+      };
+      const mat = new THREE.ShaderMaterial({
+        uniforms: U, vertexShader: VS, fragmentShader: FS,
+        defines: fragDepth ? { HAS_FRAG_DEPTH: 1 } : {},
+        transparent: true, depthWrite: false, depthTest: true,
+        side: THREE.BackSide, fog: false,
+        blending: THREE.CustomBlending,
+        blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
+        blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
+      });
+      mat.extensions = { fragDepth: fragDepth };
+      mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), mat);
+      mesh.name = "nukeCloudVolume";
+      mesh.frustumCulled = false;
+      mesh.renderOrder = 60;           // after the world's opaque + ordinary transparent layers
+      mesh.visible = false;
+      mesh.castShadow = false; mesh.receiveShadow = false;
+      mesh.matrixAutoUpdate = true;
+      scene.add(mesh);
+    } catch (e) {
+      meshFailed = true; mesh = null;
+    }
+    return mesh;
+  }
+
+  /* ============================================================
+     THE FLASH (#nukeFlash, one DOM layer). A double pulse: first maximum,
+     the dip while the shock front is opaque, then the longer second pulse.
+     ============================================================ */
+  const FLASH_DOUBLE = [
+    [0.000, 1.00], [0.028, 0.78], [0.062, 0.09], [0.105, 0.12],
+    [0.185, 1.00], [0.400, 0.62], [0.680, 0.22], [1.000, 0.00],
   ];
-  const REAL_BLOOM_KEYS = [
-    [0.00, 0.055], [0.06, 0.16], [0.18, 0.38],
-    [0.40, 0.82], [0.70, 1.22], [1.00, BLOOM_MAX],
-  ];
-  function keyedEase(u, keys) {
+  const FLASH_SINGLE = [[0.0, 1.0], [0.22, 0.45], [1.0, 0.0]];
+  function keyAt(keys, u) {
     u = clamp(u, 0, 1);
     for (let i = 1; i < keys.length; i++) {
       if (u <= keys[i][0]) {
         const a = keys[i - 1], b = keys[i];
-        const p = (u - a[0]) / Math.max(0.0001, b[0] - a[0]);
-        return a[1] + (b[1] - a[1]) * ease(p);
+        return a[1] + (b[1] - a[1]) * ((u - a[0]) / (b[0] - a[0] || 1));
       }
     }
-    return keys[keys.length - 1][1];
+    return 0;
   }
-  function riseWindow(L) {
-    return L.style === STYLE.nuke && phasedCloud() ? PHASED_RISE_T : L.style.riseT;
-  }
-  function riseAt(t, L) {
-    const u = clamp((t - 0.9) / riseWindow(L), 0, 1);
-    if (!CBZ.CONFIG.NUKE_FX_RISE) return ease(u);        // revert: the old S-curve
-    // The real-size nuke is a photographed sequence, not a mature object being
-    // scaled up. It stays compact through the white-dome handoff, becomes a
-    // tower over the next several seconds, then spends the long tail spreading.
-    if (L.style === STYLE.nuke && phasedCloud()) return keyedEase(u, REAL_RISE_KEYS);
-    const d = (1 - Math.exp(-RISE_K * u)) / (1 - RISE_E);
-    const w = clamp(u / 0.10, 0, 1);
-    return d * w + ease(u) * (1 - w);
-  }
-  // Absolute world Y of the cap centre for a given rise. Never a multiply on an
-  // absolute Y — L.by already carries the terrain height under ground zero.
-  function capYAt(rise, L) { return L.by + L.R * 0.6 + (L.riseH - L.R * 0.6) * rise; }
-  /* Lateral bloom. The cap keeps widening AFTER the rise stops — that is the
-     anvil spreading out along the stable layer, and a cloud that freezes solid
-     the instant it reaches altitude is the other half of the "constant rise"
-     tell. The second term is that slow post-stabilisation spread. */
-  function bloomAt(t, L) {
-    const P = L.style;
-    if (P === STYLE.nuke && phasedCloud()) {
-      const u = clamp((t - 0.55) / PHASED_RISE_T, 0, 1);
-      return keyedEase(u, REAL_BLOOM_KEYS);
+  let flashEl = null, flash = null;
+  function flashDiv() {
+    if (typeof document === "undefined" || !document.body) return null;
+    if (flashEl && flashEl.parentNode) return flashEl;
+    flashEl = document.getElementById("nukeFlash");
+    if (!flashEl) {
+      flashEl = document.createElement("div");
+      flashEl.id = "nukeFlash";
+      // over the HUD, under the pause/menu layers (115+)
+      flashEl.style.cssText = "position:fixed;inset:0;background:#fffaf0;opacity:0;pointer-events:none;z-index:80";
+      document.body.appendChild(flashEl);
     }
-    const spread = clamp((t - P.riseT) / Math.max(1, P.dur - P.riseT), 0, 1);
-    return 0.35 + 0.9 * ease((t - 1.2) / (P.riseT * 0.85)) + 0.16 * spread;
+    flashEl.style.transition = "none";
+    return flashEl;
   }
-  function cloudPhaseAt(t, L) {
-    if (!(L.style === STYLE.nuke && phasedCloud())) return 1;
-    // Early bulb -> forming tower by ~8 s -> mature cap during the long rise.
-    return clamp(
-      0.5 * ease((t - 1.2) / 6.8) +
-      0.5 * ease((t - 7.5) / 16.5),
-      0, 1
-    );
+  function whiteout(fadeSec, peak, dbl) {
+    const el = flashDiv();
+    if (!el) return;
+    const dur = Math.max(0.12, fadeSec == null ? 2.4 : +fadeSec || 0.12);
+    const pk = peak == null ? 1 : clamp(+peak || 0, 0, 1);
+    if (flash && flash.peak > pk && flash.t < flash.dur * 0.5) return;
+    flash = { t: 0, dur: dur, peak: pk, keys: dbl && C.NUKE_FX_PULSE ? FLASH_DOUBLE : FLASH_SINGLE };
+    try { el.style.opacity = String(pk); } catch (e) {}
   }
+  function stepFlash(dt) {
+    const f = flash;
+    f.t += dt;
+    const el = flashDiv();
+    const u = clamp(f.t / f.dur, 0, 1);
+    const v = keyAt(f.keys, u);
+    if (el) { try { el.style.opacity = v <= 0.002 ? "0" : (v * f.peak).toFixed(3); } catch (e) {} }
+    if (u >= 1) flash = null;
+  }
+  function flashClear() {
+    flash = null;
+    if (flashEl) { try { flashEl.style.opacity = "0"; } catch (e) {} }
+  }
+  CBZ.cityNukeWhiteout = whiteout;
 
   /* ============================================================
-     THE WHITE DOME — geometry, and it is SOLVED, not eased.
-
-     The early fireball is a strong shock, and a strong shock obeys the
-     Taylor-Sedov similarity solution: for energy E into ambient density
-     rho0,
-
-         R(t) = S * (E / rho0)^(1/5) * t^(2/5),   S ~= 1.03
-
-     The constant does not matter here — the SHAPE does, and the shape is
-     the 2/5 = 0.4 power. That is why a nuclear fireball looks the way it
-     does in the first frames and why every eased "grow the sphere" curve
-     looks wrong: at t^0.4 the ball is already at 31% of its final radius
-     after 5% of the window and at 76% after half of it. A smoothstep is at
-     1.4% and 50%. G.I. Taylor famously read Trinity's yield off exactly
-     this exponent from the published film frames.
-
-     Anchors this is normalised against:
-       R_max  = 50 * W^(1/3) m — the published maximum-fireball relation,
-                126 m at the ~15 kt this file's nuke row is priced for
-                (already the basis of STYLE.nuke.rFrac; see fireR).
-       t_max  the fireball is at its maximum radius within a few tenths of a
-                second (Glasstone's second thermal maximum for 15 kt is
-                0.0417*W^0.44 = 0.136 s), and a NEAR-SURFACE burst then sits
-                on the ground as a hemisphere for roughly the first second
-                before buoyancy lifts it clear at ~100 m/s.
-     WDOME_T = 1.05 s is that "sits on the ground" second, which is the beat
-     the reference plate is a photograph of. The dome then hands over: it
-     fades across WDOME_OUT while the additive fireball shell (which has been
-     growing behind it the whole time, hidden) is revealed rising. Nothing
-     is created or destroyed at the handover — the dome is simply the OPAQUE
-     reading of the same ball, and the fireball is the graded one. */
-  const WDOME_T = 1.05;        // s — dome reaches full radius / starts to lift
-  const WDOME_OUT = 0.42;      // s — the fade that reveals the rising fireball
-  const WDOME_P = 0.4;         // the Taylor-Sedov exponent. Do not tune this.
-  /* ---- HOW BIG IS THE FLASH, ACTUALLY (NUKE_FX_ORGANIC) -----------------
-     OWNER, 2026-08-15: "flash at the start realistically radius."
-
-     THE BUG WAS A CONFLATION, and it is worth naming because the number that
-     was wrong was right somewhere else. `L.R` = 126 m is R_max = 50*W^(1/3),
-     the MAXIMUM FIREBALL radius, and it is correctly the model radius: the
-     bus row, nukeFxSize, the audit's domeReachesFireball gate and the whole
-     casualty ladder are all keyed to it and none of them move. But the file
-     was also drawing BOTH first-second layers at exactly that radius, and
-     those are two different objects:
-
-       THE FIREBALL     the luminous ball itself. 50*W^(1/3) is the standard
-                        relation and gives 126 m, but that relation is fitted
-                        to AIR bursts at the moment of maximum size; a
-                        near-surface 16 kt ball, reflected off its own ground
-                        shock, reads larger on film — the plates put it at
-                        roughly 200-240 m across the first second. FIRE_R_K =
-                        1.75 puts the DRAWN ball at 220 m at full growth,
-                        inside that band and 8% under its top.
-       THE SHOCK DOME   the opaque white hemisphere is NOT the fireball: it is
-                        the shock front, which runs AHEAD of it. Taylor-Sedov
-                        with this yield (E = 6.7e13 J, rho = 1.225) is
-                        R = 1.03*(E/rho)^0.2 * t^0.4 = 576 * t^0.4 metres, so
-                        540 m at 0.85 s and 590 m at 1.05 s. The file drew
-                        126 m — four and a half times too small, which is why
-                        the "white dome" beat reads as a golf ball on a plain
-                        rather than as the thing that silhouettes a skyline.
-                        WDOME_K = 3.6 draws 416 m at 0.85 s and 454 m at
-                        1.05 s: the conservative end of the plate band the
-                        owner cited (400-500 m at 0.85 s) and deliberately
-                        UNDER pure Sedov, because this layer is opaque, drawn
-                        at renderOrder 11 over everything, and oversizing it
-                        swallows the city it is supposed to be silhouetting.
-                        AND IT RECONCILES TWO LAYERS THAT DISAGREED: the shock
-                        VEIL below (L.dome) has always expanded at the row's
-                        own wave speed, reaching R*1.35 + (t-0.06)*343*0.85 =
-                        400 m at 0.85 s. The white dome is the OPAQUE reading
-                        of that same front and was drawing it at 126 m — the
-                        two were three and a half times apart. At WDOME_K the
-                        dome reads 416 m against the veil's 400 m, i.e. one
-                        front with two renderings, which is what the beat
-                        table has claimed all along.
-
-     Neither touches a timing, a reported dimension or a curve: WDOME_P stays
-     the Sedov exponent, WDOME_T stays 1.05 s, and nukeFxSize/nukeFxAudit
-     still publish the 126 m model fireball. This is the DRAWN radius of two
-     meshes. Cost: the dome is ~13x the screen area it was for ~1.5 s and the
-     fireball ~3x for ~3.9 s, both additive/alpha fill on layers that are
-     already the most expensive in the file — the one number to dial if the
-     flash beats show a fill spike is WDOME_K. */
-  const WDOME_K = 3.6;
-  const FIRE_R_K = 1.75;
-  function wdomeRadius(t, L) {
-    return L.R * (organic() ? WDOME_K : 1) * Math.pow(clamp(t / WDOME_T, 0, 1), WDOME_P);
+     THE TIMELINE — every shape parameter as a function of time. This is
+     the whole choreography; the shader only draws what this returns.
+     ============================================================ */
+  function shapeAt(L, t, out) {
+    const P = L.style, R = L.R;
+    const late = sstep(P.form, P.form + (P.dur - P.form) * 0.75, t);   // aftermath growth
+    // fireball: Taylor-Sedov R ~ t^0.4 to full size at 1 s, then swelling as it mixes
+    const fb = R * (t < 1 ? Math.max(0.08, Math.pow(t, 0.4)) : 1 + 0.35 * easeOut((t - 1) / 5));
+    const g = easeOut((t - 1.2) / (P.form - 1.2));                      // formation growth 0..1
+    const open = sstep(1.8, 11, t);                                     // sphere -> torus
+    const tube = fb * (1 - g) + R * P.tube * g;
+    out.tube = tube + (R * P.tubeLate - R * P.tube) * late;
+    out.ring = (R * P.ring * g * open) + (R * P.ringLate - R * P.ring) * late;
+    out.flat = (1 - open) + P.flat * open + (P.flatLate - P.flat) * late;
+    // rise: the ball sits on the deck, then climbs fast and decelerates
+    const lift = L.lift || 0;
+    const riseN = Math.min(1, (1 - Math.exp(-Math.max(0, t - 0.7) / P.riseTau)) /
+                              (1 - Math.exp(-(P.form - 0.7) / P.riseTau)));
+    const cyForm = lift + tube * out.flat * 0.5 + R * (P.rise - 0.5) * riseN;
+    out.cy = cyForm + (lift + R * P.riseLate - cyForm) * late;
+    // stem: dust drawn up off the deck to meet the head
+    out.stemR = R * (0.55 + (P.stem - 0.55) * g) + (R * P.stemLate - R * P.stem) * late;
+    out.stemTop = Math.max(0, out.cy - out.tube * out.flat * 0.2) * (0.35 + 0.65 * sstep(0.8, 5.0, t)) * sstep(0.6, 1.6, t);
+    out.stemFlare = 1.3 + 0.5 * g;
+    out.stemP = sstep(1.0, 3.5, t);
+    // base surge: out along the deck, decelerating
+    out.surgeR = Math.min(R * P.surgeMax, R * P.surgeK * 0.09 * Math.pow(Math.max(0, t - 0.4), 0.8));
+    out.surgeTube = R * 0.45 + out.surgeR * 0.10;
+    out.surgeFlat = 0.5;
+    out.surgeP = sstep(0.4, 2.0, t) * (1 - sstep(P.form * 1.2, P.form * 3.5, t));
+    // Wilson condensation shell on the shock front
+    if (P.shell) {
+      const sr = CBZ.impact && CBZ.impact.shockDistance
+        ? CBZ.impact.shockDistance(t, L.eff) : 343 * t + R;
+      out.shellR = Math.max(R * 1.05, sr);
+      out.shellA = sstep(0.12, 0.3, t) * (1 - sstep(0.8, 2.4, t)) * 0.05;
+    } else { out.shellR = 1; out.shellA = 0; }
+    // heat: white-hot ball, cooling; the core keeps an ember glow inside the cap
+    out.heat = Math.exp(-t / P.heatTau) * (t < 0.25 ? 1 : 0.96);
+    out.glow = 0.55 * Math.exp(-t / P.glowTau);
+    out.emit = P.emit * (t < 0.6 ? 2.2 - t * 2 : 1) * (C.NUKE_FX_PULSE && P.dbl ? pulseK(t, P) : 1);
+    out.fireLight = 2.4 * Math.exp(-t / (P.heatTau * 0.9));
+    out.cool = sstep(2, P.form * 0.8, t);
+    out.fade = 1 - sstep(P.dur - (P.dur - P.form) * 0.45, P.dur, t);
+    return out;
   }
-
-  /* THE CAP FLATTENS. A young cloud head is a rising ball — taller than it
-     is wide. A stabilised one is an ANVIL: the tropopause (~11 km at mid
-     latitudes) is a temperature inversion, the cloud cannot climb through
-     it, and everything that was going up goes sideways instead. A 20 kt
-     cloud tops out near 10-12 km with a cap several kilometres across, and
-     it gets there in about five minutes — compressed here into riseT, a
-     ~23x speed-up which is the same order of compression the double flash
-     takes and is named for the same reason.
-     bloomAt already widens the cap. This is the other half: the vertical
-     scale walks from 1.0 to CAP_FLAT across the rise, so the head genuinely
-     changes SHAPE rather than just growing. */
-  const CAP_FLAT = 0.62;
-  function capFlatAt(t, L) {
-    if (!v2()) return 1;
-    return 1 - (1 - CAP_FLAT) * ease((t - 1.4) / Math.max(1, riseWindow(L) * 0.9));
+  // The double flash rides the fireball too (the dip darkens the world, not only the div).
+  function pulseK(t, P) {
+    const w = P.white * 0.72;
+    if (t >= w) return 1;
+    return 1 - (1 - t / w) * (1 - keyAt(FLASH_DOUBLE, t / P.white)) * 0.9;
   }
-
-  // Billboard ROLES in priority order. At tier 0 only the first survives, and
-  // the cap alone still reads as "a mushroom went up over there".
-  const ROLES = ["cap", "stem", "surge", "cap2", "collar"];
+  const _S = {};
+  const _sunV = new THREE.Vector3();
 
   /* ============================================================
-     THE SEQUENCE — one live object, one state machine, ONE updater.
-     No setTimeouts: every scheduled beat is a row in `pending`, popped by t.
+     THE SEQUENCE
      ============================================================ */
   let live = null;
 
   function beginSequence(x, y, z, styleName, row, opts) {
-    // pool never built (no THREE/scene), or built only partway through a
-    // throw — either way the composers degrade to the near field.
-    if (!POOL.shell || !POOL.capVol || !POOL.crownVol || !POOL.glowVol) return null;
     const P = STYLE[styleName] || STYLE.nuke;
-    const q = q01();
+    if (!noise.done) noiseStep(null);          // under the whiteout: finish the atlas now
+    if (!buildMesh()) return null;
     const gy = floorAt(x, z);
-    // Chemical blasts keep their compact RPG-language satellites. A nuke has
-    // purpose-built instanced billows; replaying ordinary explosions inside it
-    // is both visually wrong and the first-detonation allocation storm.
-    const legacyPuffs = styleName !== "nuke" ||
-      CBZ.CONFIG.NUKE_FX_LEGACY_PUFFS === true;
-    // EFFECTIVE near-field radius (see fireR above): 126 m for the nuke row,
-    // ~120 m for the MOAB pressure footprint — NOT the row's bare field.
     const radius = fireR(row, opts);
     const R = Math.max(5, radius * P.rFrac);
     const wave = row.wave || null;
-    // Nuclear physics never shrinks with the graphics slider. Performance now
-    // comes from the field's finite arrival queues and the cloud's depth/LOD,
-    // not by making low-tier players survive a smaller weapon.
     const sc = (opts.scale > 0 ? +opts.scale : 1);
-    const reachQ = styleName === "nuke" ? 1 : (CBZ.qScale ? CBZ.qScale(0.45, 1) : 1);
-    const maxR = (wave && wave.maxR ? wave.maxR : radius * 4) *
-                 reachQ * sc;
+    const maxR = (wave && wave.maxR ? wave.maxR : radius * 4) * sc;
     const spd = wave && wave.speed ? wave.speed : 150;
-    /* BURST HEIGHT. The bus hands the composer the real detonation `y`, and a
-       B-2 releasing over a district is the whole reason this file exists — an
-       airburst is not a ground burst with the same picture. So the FIREBALL,
-       the condensation dome and the cap seat at the burst height while the
-       base surge and the walking dust stay on the DECK, which
-       is exactly the geometry: the stem is the dust column being drawn UP off
-       the ground into a fireball that was never touching it.
-       Clamped to 3 fireball radii so a stray y (a bomb still in the bomb bay,
-       a debug teleport) cannot put a mushroom cloud in orbit. */
+    // an airburst seats the fireball above the deck (clamped so a stray y can't orbit it)
     const burstY = Math.max(gy, Math.min(gy + R * 3, y == null ? gy : (+y || gy)));
-    const dist = camDist(x, burstY + R, z);
-
-    const oneCloud = styleName === "nuke" && coherentCloud();
-    const nBills = oneCloud ? 0
-      : Math.max(1, Math.min(P.bills, Math.round(CBZ.qScale ? CBZ.qScale(1, P.bills) : P.bills)));
-    const bills = [];
-    for (let i = 0; i < nBills; i++) {
-      const mesh = POOL.bills[i];
-      if (!mesh) break;
-      bills.push({
-        mesh: mesh, role: ROLES[i], seed: rng(),
-        roll: (rng() - 0.5) * 0.7, sx: (rng() - 0.5) * 0.05, sy: 0.02 + rng() * 0.05,
-      });
-      mesh.visible = false;
-      mesh.material.uniforms.uOpacity.value = 0;
-      mesh.material.uniforms.uGlow.value = P.glow;
-    }
-
     live = {
-      kind: row.id || styleName, style: P, styleName: styleName,
+      kind: row.id || styleName, styleName: styleName, style: P,
+      x: x, y: gy, z: z, by: burstY, lift: Math.max(0, burstY - gy - R * 0.5),
+      R: R, eff: radius, maxR: maxR, spd: spd, t: 0, dur: P.dur, r: 0,
+      pending: [], dustAcc: 0, fogK: 0,
       detonationId: opts._carBlastId || 0,
-      x: x, y: gy, by: burstY, z: z, R: R, maxR: maxR, spd: spd, eff: radius,
-      // THE IGNITION RADIUS. Y^0.41 vs Y^0.33 (see STYLE.thermK) — the burn zone
-      // is genuinely wider than the flattened zone, and this is the number that
-      // says so. Zero for anything chemical. It is never drawn as an outline.
-      // THE IGNITION RADIUS. Under NUKE_REAL_SCALE it is the researched
-      // firestorm boundary (2,016 m for this yield — Hiroshima's 11.4 km^2
-      // burnt area is a 1.9 km radius, and spontaneous ignition of light
-      // fuels reaches ~2.0 km at 15 kt). Otherwise it is the old multiple of
-      // the reach. It is never drawn as an outline either way.
-      burnR: (styleName === "nuke" && real()) ? nukeRings(radius).psi2
-           : (P.thermK > 0 ? maxR * P.thermK : 0),
-      riseH: R * P.riseK, capW: R * P.capK, stemW: R * P.stemK, surgeW: R * P.surgeK,
-      capH: R * P.capK * 0.66, capThick: 0, dims: null, drawDims: null,
-      impW: 0, impH: 0, surgeDraw: 0,
-      t: 0, r: Math.max(1, row.radius || radius * 0.1), dur: P.dur, q: q,
-      // The front still drives damage, dust and condensation, but it is never
-      // painted as geometry on the terrain.
-      frontLife: Math.min(P.frontLife,
-        styleName === "nuke" && CBZ.impact && CBZ.impact.shockArrival
-          ? CBZ.impact.shockArrival(maxR, radius) + 1.6
-          : maxR / Math.max(1, spd) + 1.6),
-      bills: bills, dustAcc: 0, pending: [], ash: null, ashT: 0,
-      // Listener sound/pressure is owned by impactbus's same physical field.
-      boomAt: -1, frontAt: -1,
-      frontHit: false, fogK: 0, mix: 0,
       mode: (CBZ.game && CBZ.game.mode) || null,
-      quiet: !!opts.quiet, noDamage: !!opts.noDamage, byPlayer: !!opts.byPlayer,
-      legacyPuffs: legacyPuffs, genericPuffEvents: 0,
-      coherentCloud: oneCloud,
-      /* ---- THIS DETONATION'S OWN WEATHER AND OWN BODY (organic) ---------
-         Both are position hashes, so they consume no rng() draw (the module
-         stream is a replay contract) and both are ORDER-INDEPENDENT: the same
-         ground zero produces the same cloud on every client, on a reload, and
-         on the storyboard's second run, while a nuke two blocks away leans a
-         different way and boils a different shape.
-         windA is the downwind azimuth; windK is the drift in m/s (0.55-1.45,
-         a light breeze — see the WIND block in stepVolumes for why it is not
-         allowed to be more). */
-      windA: organic() ? h01(x, z, SALT_WIND) * Math.PI * 2 : 0,
-      windK: organic() ? 0.55 + 0.9 * h01(z, x, SALT_WINDK) : 0,
+      quiet: !!opts.quiet, byPlayer: !!opts.byPlayer,
+      burnR: styleName === "nuke" ? nukeRings(radius).psi2 : 0,
+      roll: 0, rollS: 0, rise: 0, steps: 0, box: { min: [0, 0, 0], max: [0, 0, 0] },
     };
+    U.uGZ.value.set(x, gy, z);
+    U.uSmokeHot.value.set(P.smokeHot[0], P.smokeHot[1], P.smokeHot[2]);
+    U.uSmokeCool.value.set(P.smokeCool[0], P.smokeCool[1], P.smokeCool[2]);
+    U.uDust.value.set(P.dust[0], P.dust[1], P.dust[2]);
+    U.uSigma.value = P.sigma * (126 / Math.max(40, R)) * (styleName === "moab" ? 0.6 : 1);
+    mesh.visible = true;
 
-    /* ONE SCULPTURE PER GROUND ZERO. VOL_SEED was minted once at load, so
-       every detonation in a session replayed the identical arrangement of
-       lumps — a signature the owner can learn. Re-mint it off a hash of this
-       ground zero: the LAWS (golden angle, area-uniform radii, the size
-       distributions the coverage arithmetic assumes) are byte-identical, only
-       the draws change. seedVolumes saves and restores the module stream, so
-       nothing downstream shifts. Nuclear only: the MOAB shares the pool and
-       has no reason to want a per-crater body. */
-    if (organic() && styleName === "nuke") {
-      const body = (Math.floor(h01(x, z, SALT_BODY) * 0xffffff) ^ 0x51ed77) & 0x7fffffff;
-      if (VOL_BODY !== body) { VOL_BODY = body; seedVolumes(body); }
-      live.bodySeed = body;
-    }
-
-    /* ---- MATURE PHYSICS, YOUNG VISIBLE CLOUD. nukeDims remains the researched
-       minutes-old object used by the zone/audit model. The live 34-second shot
-       uses formationDims instead: forcing a 10 km mature cloud into a 1 km
-       camera is exactly what created the fake single-card mushroom. */
-    if (styleName === "nuke" && real()) {
-      const D = nukeDims(R);
-      const F = formationDims(R);
-      live.dims = D;
-      live.drawDims = F;
-      live.capW = F.capW / BLOOM_MAX;          // -> F.capW at full bloom
-      live.capH = F.capH;
-      live.capThick = F.capH / F.capW;
-      live.riseH = F.capY;
-      live.stemW = F.stemW * 0.5;              // stepVolumes wants a radius
-      live.surgeW = F.base;
-      live.surgeDraw = F.base;
-      live.impW = F.capW;                      // legacy/fallback tier only
-      live.impH = F.top;
-      if (CBZ.CONFIG.NUKE_FX_AFTERMATH) {
-        // The 34 s STYLE window stays the FORMATION sequence (audit beats,
-        // early layers, glass ladder all keep their times); the cloud itself
-        // then matures toward nukeDims and lingers as a landmark. See
-        // matureStep() for the per-frame walk and the thinning law.
-        live.matureFrom = P.dur;
-        live.dur = 420;
-      }
-    }
-
-    // ---- shells -----------------------------------------------------------
-    // Tier 2+ gets the smooth luminous core and condensation veil. Every tier
-    // gets a reduced 3D lobe cloud, so the fallback remains a mushroom instead
-    // of becoming the old flat ring.
-    const wantShell = CBZ.CONFIG.NUKE_FX_SHELL && q > 0.28;
-    live.shell = wantShell ? POOL.shell : null;
-    live.dome = wantShell && P.dome && q > 0.45 ? POOL.dome : null;
-    if (live.shell) {
-      live.shell.position.set(x, burstY + R * 0.55, z);
-      live.shell.scale.setScalar(0.01);
-      live.shell.material.uniforms.uOpacity.value = 0;
-      live.shell.visible = true;
-    }
-    if (live.dome) {
-      live.dome.position.set(x, burstY + R * 0.3, z);
-      live.dome.scale.setScalar(0.01);
-      live.dome.material.uniforms.uOpacity.value = 0;
-      live.dome.visible = false;
-    }
-    // ---- VOLUMETRIC FIREBALL + MUSHROOM ------------------------------------
-    // Four base InstancedMeshes plus nuclear crown/glow. The coherent nuke uses
-    // rough depth-writing 3D lobes and suppresses the five redundant legacy
-    // detail planes; it never substitutes a camera-facing silhouette card.
-    live.volume = !!P.volume;
-    if (live.volume) {
-      const nuke = styleName === "nuke";
-      const count = function (lo, hi) {
-        return Math.max(lo, Math.min(hi, Math.round(CBZ.qScale ? CBZ.qScale(lo, hi) : hi)));
-      };
-      const fullCold = nuke && phasedCloud();
-      live.volN = {
-        cap: fullCold ? VOL_MAX.cap : count(nuke ? 12 : 8, nuke ? VOL_MAX.cap : Math.min(18, VOL_MAX.cap)),
-        stem: fullCold ? VOL_MAX.stem : count(nuke ? 8 : 5, nuke ? VOL_MAX.stem : Math.min(10, VOL_MAX.stem)),
-        surge: fullCold ? VOL_MAX.surge : count(nuke ? 10 : 7, nuke ? VOL_MAX.surge : Math.min(15, VOL_MAX.surge)),
-        hot: count(nuke ? 8 : 6, nuke ? VOL_MAX.hot : 11),
-        crown: 0, glow: 0,
-      };
-      /* THE CROWN/COLLAR AND THE GLOW ARE NUCLEAR-ONLY, and that is not a
-         budget decision — a MOAB's smoke column has no incandescent head and
-         no overhanging skirt, so drawing them on it would be a fiction. The
-         crown's tier walk DECIMATES both of its slices evenly (the same rule
-         the glass ladder uses): a budget cut must cost resolution, never the
-         SHAPE, and a collar with no lobes left in it stops the cap
-         overhanging at exactly the tier that can least afford a second
-         silhouette read. */
-      if (nuke && v2()) {
-        const cn = fullCold ? VOL_MAX.crown : count(10, VOL_MAX.crown);
-        live.volN.crown = cn;
-        // The crown keeps its share of whatever budget survived, and BOTH
-        // slices are guaranteed at least 3 lobes — a collar decimated to
-        // nothing stops the cap overhanging, which is the one silhouette
-        // read a low tier can least afford to lose.
-        live.crownN = clamp(Math.round(cn * (CROWN_N / VOL_MAX.crown)), 3, cn - 3);
-        live.volN.glow = count(6, VOL_MAX.glow);
-      }
-      POOL.capVol.count = live.volN.cap;
-      POOL.stemVol.count = live.volN.stem;
-      POOL.surgeVol.count = live.volN.surge;
-      POOL.hotVol.count = live.volN.hot;
-      POOL.crownVol.count = live.volN.crown;
-      POOL.glowVol.count = live.volN.glow;
-      const vv = [POOL.surgeVol, POOL.stemVol, POOL.capVol, POOL.hotVol,
-                  POOL.crownVol, POOL.glowVol];
-      for (let i = 0; i < vv.length; i++) {
-        vv[i].position.set(x, gy, z);
-        vv[i].visible = true;
-      }
-      POOL.capVol.material.opacity = 0;
-      POOL.stemVol.material.opacity = 0;
-      POOL.surgeVol.material.opacity = 0;
-      POOL.hotVol.material.opacity = 0;
-      POOL.crownVol.material.opacity = 0;
-      POOL.glowVol.material.opacity = 0;
-      if (!live.volN.crown) POOL.crownVol.visible = false;
-      if (!live.volN.glow) POOL.glowVol.visible = false;
-    }
-
-    /* ---- THE WHITE DOME. Seated on the DECK, not at the burst height.
-       Both routes to a nuclear detonation in this game end at a surface —
-       the bomb's own impact point, or the planted device's floor — so the
-       near-surface hemisphere IS the case, and it is the case the reference
-       plate shows. The seat is nudged up only when a stray burst height
-       genuinely lifts the ball off the ground (a debug teleport, or a fuze
-       change later), where a hemisphere on the deck would be a lie; the
-       0.55 factor keeps its equator at the ball's centre either way.
-       Never at tier 0? No: this is the ONE layer that is never dropped. It
-       is a single 450-triangle mesh, alive for 1.5 s, and it is the beat. */
-    live.wdome = v2() && P.dbl ? POOL.wdome : null;
-    if (live.wdome) {
-      const lift = Math.max(0, burstY - gy);
-      live.wdomeY = gy + Math.min(lift, R * 0.55);
-      live.wdome.position.set(x, live.wdomeY, z);
-      live.wdome.scale.setScalar(0.01);
-      live.wdome.material.opacity = 0;
-      live.wdome.visible = true;
-    }
-
-    /* ---- SCHEDULED BEATS. cityShatter is the real default. The old ordinary
-       cityExplosion satellites remain behind NUKE_FX_LEGACY_PUFFS solely for
-       A/B comparison; crashfx's sprite pool expands when exhausted, so they
-       were never a safe nuclear-scale particle budget. -------------------- */
-    if (legacyPuffs) {
-      const nSat = Math.round((CBZ.qScale ? CBZ.qScale(0, P.secondary) : P.secondary));
-      for (let i = 0; i < nSat; i++) {
-        const a = i * 2.399963 + rng() * 0.55;
-        const rr = R * (0.16 + Math.sqrt((i + 0.35) / Math.max(1, nSat)) * 0.68);
-        live.pending.push({
-          t: 0.22 + i * 0.09,
-          x: x + Math.cos(a) * rr, z: z + Math.sin(a) * rr,
-          power: 2.4, radius: 13, sat: true,
-        });
-      }
-      const nSat2 = Math.round(nSat * 0.7);
-      for (let i = 0; i < nSat2; i++) {
-        const a = i * 2.399963 + 0.7 + rng() * 0.45;
-        const rr = R * (0.55 + Math.sqrt(rng()) * 0.85);
-        live.pending.push({
-          t: 0.95 + i * 0.12,
-          x: x + Math.cos(a) * rr, z: z + Math.sin(a) * rr,
-          power: 1.9, radius: 11, sat: true,
-        });
-      }
-      /* Legacy-only thermal receipts. The real impactbus sweep already lights
-         eligible structures; these arbitrary ground samples were ordinary
-         explosions on pavement or water, not evidence of those fires. */
-      const nTherm = Math.round(CBZ.qScale ? CBZ.qScale(0, P.thermal) : P.thermal);
-      for (let i = 0; i < nTherm; i++) {
-        const a = i * 2.399963 + 1.9 + rng() * 0.7;
-        const inner = Math.min(maxR * 0.70, Math.max(R * 1.25, 1));
-        const outer = Math.min(
-          Math.max(inner, live.burnR > 0 ? live.burnR : maxR),
-          real() ? camFar() : Infinity);
-        const rr = Math.sqrt(inner * inner + rng() * (outer * outer - inner * inner));
-        live.pending.push({
-          t: 0.9 + i * 0.14,
-          x: x + Math.cos(a) * rr, z: z + Math.sin(a) * rr,
-          power: 1.1, radius: 16, sat: true, smoke: true,
-        });
-      }
-      live.genericPuffEvents = nSat + nSat2 + nTherm;
-    }
-    /* GLASS IS THE WIDEST OF THE THREE EFFECT ZONES.
-
-       By overpressure: ~5 psi collapses most buildings (the classic destruction
-       radius, and what `maxR` is), ~2 psi takes roofs and walls, and ~1 psi
-       shatters windows across an area several times larger than any of it —
-       flying glass is the single biggest injury source a city detonation
-       produces. This ladder used to run 0.9 / 1.65 / 2.4 x the FIREBALL radius,
-       i.e. 113 / 208 / 302 m against the old blast reach: every pane it broke
-       was inside a zone where the buildings were already coming down. It now
-       runs GLASS_K = 0.42 / 0.85 / 1.35 / 2.10 x the BLAST reach, so the last
-       two passes land well beyond the demolition footprint.
-
-       And each pass is timed to r/speed — the radius divided by the front's own
-       speed — so the panes go out AS THE FRONT REACHES THEM rather than on a
-       clock of their own. The outermost pass is past `maxR`, which the damage
-       wave never reaches: that is not a mistake, it is the honest picture. The
-       wave stops at its gameplay reach; a 1 psi front does not stop there, it
-       just stops knocking buildings down.
-
-       The tier walk DECIMATES the ladder evenly rather than truncating it, the
-       same rule cityBombWalk uses on a bomb stick and for the same reason: a
-       budget cut must cost you resolution, never REACH. Tier 0 keeps exactly one
-       pass and the even walk lands it on the 1.35x rung — out past the blast
-       rim, where the one pass a phone can afford does the most work — rather
-       than on the innermost one a truncation would have left it with.
-       Glass is the cheapest "the whole district felt that" cue there is,
-       cityShatter skips already-broken panes and caps itself at 50 per call, so
-       it must never floor to zero. */
-    /* A bus-fired nuke carries its glass receipts in the physical detonation
-       field. This visual state machine is intentionally single-cloud, while
-       fields may coexist; keeping panes here caused every concurrent nuke but
-       the photographed one to lose its window damage. Direct FX/MOAB calls
-       retain the legacy visual schedule as their degrade path. */
+    // Glass: a bus-fired nuke carries its panes in the physical field; a
+    // direct call (probe, MOAB) keeps a ladder timed to the front.
     const fieldOwnsGlass = styleName === "nuke" && !!opts._carBlastId &&
-      CBZ.CONFIG.IMPACT_SHOCKWAVE !== false && !opts.noDamage;
-    if (!fieldOwnsGlass) {
-      const nShatter = Math.max(1, Math.round((CBZ.qScale ? CBZ.qScale(1, P.shatter) : P.shatter)));
-      if (CBZ.CONFIG.NUKE_FX_GLASS) {
-        const GK = glassLadder(styleName);
-        const step = GK.length / nShatter;
-        for (let i = 0; i < nShatter; i++) {
-          const k = GK[Math.min(GK.length - 1, Math.max(0, Math.round((i + 0.5) * step - 0.5)))];
-          const rr = maxR * k;
-          const arrive = styleName === "nuke" && CBZ.impact && CBZ.impact.shockArrival
-            ? CBZ.impact.shockArrival(rr, radius) : rr / Math.max(1, spd);
-          live.pending.push({ t: Math.max(0.08, arrive), shatter: rr });
-        }
-      } else {
-        for (let i = 0; i < nShatter; i++) {
-          live.pending.push({ t: 0.3 + i * 0.55, shatter: radius * (0.9 + i * 0.75) });
-        }
+      C.IMPACT_SHOCKWAVE !== false && !opts.noDamage;
+    if (!fieldOwnsGlass && C.NUKE_FX_GLASS) {
+      const GK = glassLadder(styleName);
+      const nShatter = Math.max(1, Math.round(CBZ.qScale ? CBZ.qScale(1, P.shatter) : P.shatter));
+      const step = GK.length / nShatter;
+      for (let i = 0; i < nShatter; i++) {
+        const k = GK[Math.min(GK.length - 1, Math.max(0, Math.round((i + 0.5) * step - 0.5)))];
+        const rr = maxR * k;
+        const arrive = styleName === "nuke" && CBZ.impact && CBZ.impact.shockArrival
+          ? CBZ.impact.shockArrival(rr, radius) : rr / Math.max(1, spd);
+        live.pending.push({ t: Math.max(0.08, arrive), shatter: rr });
       }
     }
-    /* ---- t=0 FEEL -----------------------------------------------------------
-       Light is the only instantaneous listener cue for a coherent nuke. Sound,
-       shake and body pressure arrive together from impactbus. A conventional
-       MOAB retains its immediate composer shake/degrade behaviour. */
     if (!live.quiet) {
-      whiteout(P.white, P.whitePeak, P.dbl);
-      if (styleName !== "nuke") {
-        const att = Math.max(0.1, Math.min(1, 1.25 - dist / 420));
-        if (CBZ.shake) { try { CBZ.shake(P.shake * att); } catch (e) {} }
+      // Blinding at any range, but a distant burst doesn't hold the screen white.
+      const d = camDist(x, burstY + R, z);
+      const pk = P.whitePeak * clamp(1.2 - d / 12000, 0.5, 1);
+      whiteout(P.white, pk, P.dbl);
+      if (styleName !== "nuke" && CBZ.shake) {
+        try { CBZ.shake(P.shake * clamp(1.25 - d / 420, 0.1, 1)); } catch (e) {}
       }
-      // No audio here. The pressure front itself is the report, and impactbus
-      // emits the one layered nuclear cue when that same field reaches the ear.
     }
     return live;
   }
 
-  /* ---- one satellite / world beat --------------------------------------- */
-  function firePending(p) {
-    if (p.sat && CBZ.cityExplosion) {
-      // FX ONLY (noDamage): the bus's propagating wave owns everything past
-      // the fireball. Two systems must never both bill the same casualties.
-      try {
-        CBZ.cityExplosion(p.x, p.z, {
-          power: p.power, radius: p.radius, noDamage: true,
-          ordnance: live ? live.kind : "nuke", _impact: true,
-        });
-      } catch (e) {}
-      /* Legacy ignition receipts leave something behind. cityCrashSmoke uses
-         the shared puff pool, but that pool expands when exhausted. Only the
-         legacy irregular thermal
-         receipts carry `smoke`; the near-in satellites
-         are inside the flattened zone, where the structural ledger's own fires
-         are already the thing that is burning. */
-      if (p.smoke && CBZ.cityCrashSmoke) {
-        try { CBZ.cityCrashSmoke(p.x, floorAt(p.x, p.z) + 1.2, p.z, { count: 4, scale: 2.0 }); } catch (e) {}
-      }
-      return;
-    }
-    if (p.shatter != null && CBZ.cityShatter && live) {
-      try { CBZ.cityShatter(live.x, live.z, p.shatter); } catch (e) {}
-      return;
-    }
-  }
-
-  /* ---- the shock-front radius: the SAME number the damage ring uses ------- */
   function frontRadius(dt) {
-    // Read the live wave off the bus when it is there; the visual then IS the
-    // gameplay ring, not a lookalike. Fall back to integrating the row's own
-    // speed so a direct CBZ.cityNukeFX() call (no bus) still looks right.
+    const L = live;
     if (CBZ.impact && CBZ.impact.waveState) {
       try {
         const ws = CBZ.impact.waveState();
         for (let i = 0; i < ws.length; i++) {
-          if (ws[i].kind !== live.kind) continue;
-          if (live.detonationId && ws[i].detonationId &&
-              ws[i].detonationId !== live.detonationId) continue;
-          live.r = ws[i].r; return live.r;
+          if (ws[i].kind !== L.kind) continue;
+          if (L.detonationId && ws[i].detonationId && ws[i].detonationId !== L.detonationId) continue;
+          L.r = ws[i].r; return L.r;
         }
       } catch (e) {}
     }
-    if (live.styleName === "nuke" && CBZ.impact && CBZ.impact.shockDistance) {
-      live.r = Math.min(live.maxR, CBZ.impact.shockDistance(live.t, live.R));
-    } else live.r = Math.min(live.maxR, live.r + live.spd * dt);
-    return live.r;
+    if (L.styleName === "nuke" && CBZ.impact && CBZ.impact.shockDistance) {
+      L.r = Math.min(L.maxR, CBZ.impact.shockDistance(L.t, L.eff));
+    } else L.r = Math.min(L.maxR, L.r + L.spd * dt);
+    return L.r;
   }
 
-  /* ============================================================
-     THE LEGACY FAR TIER — one quad, true angular size, and a handoff that is a
-     GEOMETRIC FACT rather than a distance somebody picked.
-
-     impostorMix(L) returns 0 (all 3D) .. 1 (all impostor). The rule is:
-     fade as the 3D cap's FURTHEST POINT approaches the far plane, i.e.
-
-         dFar = |capCentre - camera| + capRadius
-
-     — the far EDGE, not the centre. Using the centre would let the cap's
-     back half get clipped by the frustum mid-fade, which is precisely the
-     artefact this is here to prevent: the 3D cap is fully retired before any
-     part of it can cross the far plane. The band is 0.55..0.95 of far, so
-     the swap always finishes with 5% of the frustum still to spare.
-
-     Early in the sequence the cloud is small and low and this is 0 — you get
-     real 3D lobes overhead. Within a few seconds it has climbed past a
-     kilometre and this is 1, which is correct: at that point the cloud is
-     genuinely a sky object and no amount of geometry would render it.
-     ============================================================ */
-  function impostorMix(L) {
-    if (!L.dims || !POOL.imp) return 0;
-    const c = camPos();
-    if (!c) return 1;
-    const cy = capYAt(riseAt(L.t, L), L);
-    const capR = L.capW * bloomAt(L.t, L) * 0.5;
-    const dFar = Math.hypot(L.x - c.x, cy - c.y, L.z - c.z) + capR;
-    const f = camFar();
-    return clamp((dFar - f * 0.55) / (f * 0.40), 0, 1);
-  }
-  const _impBase = new THREE.Vector3();
-  const _impTop = new THREE.Vector3();
-  const _impUp = new THREE.Vector3();
-  const _impRight = new THREE.Vector3();
-  const _impNormal = new THREE.Vector3();
-  const _impBasis = new THREE.Matrix4();
-  function impostorPointAtDepth(out, x, y, z, D, cam) {
-    out.set(x, y, z).applyMatrix4(cam.matrixWorldInverse);
-    const depth = -out.z;
-    if (!(depth > 0.05) || !isFinite(depth)) return 0;
-    out.set(out.x * D / depth, out.y * D / depth, -D).applyMatrix4(cam.matrixWorld);
-    return depth;
-  }
-  function stepImpostor(t, L, mix) {
-    const imp = POOL.imp;
-    if (!imp) return;
-    if (mix <= 0.004 || !L.dims) { imp.visible = false; imp.material.uniforms.uOpacity.value = 0; return; }
-    const cam = CBZ.camera;
-    if (!cam || !cam.position) { imp.visible = false; return; }
-    /* The physical cloud is taller than the frustum. Draw its two projected
-       endpoints on one safe camera-depth plane: the apparent shape survives,
-       while its bottom remains the detonation instead of following the lens. */
-    const rise = riseAt(t, L);
-    /* The phased masks are authored in the mature cloud's metre coordinate
-       system: an early bulb occupies only the lower/smaller part of that same
-       canvas. Therefore the quad stays at the mature physical box while the
-       MASK grows through it. The legacy path keeps its old whole-mushroom
-       scaling for an exact visual A/B. */
-    const grow = 0.30 + 0.70 * rise;
-    const capNow = L.capW * bloomAt(t, L);
-    /* Coherent phase masks all fill one normalized UV box. Grow that box from
-       the live cap and cap-centre curves, so one cloud physically rises and
-       expands. The old fixed mature box forced phase textures painted at
-       different altitudes to overlap during every morph. */
-    const w = L.coherentCloud ? capNow * 1.30
-      : L.impW * (phasedCloud() ? 1 : grow);
-    const h = L.coherentCloud
-      ? Math.max(L.R * 0.55,
-          capYAt(rise, L) - L.y +
-          capNow * (L.capThick || 0.782) * 0.5 * 1.12)
-      : L.impH * (phasedCloud() ? 1 : grow);
-    const D = camFar() * 0.86;
-    if (cam.updateMatrixWorld) cam.updateMatrixWorld(true);
-    const baseDepth = impostorPointAtDepth(_impBase, L.x, L.y, L.z, D, cam);
-    const topDepth = impostorPointAtDepth(_impTop, L.x, L.y + h, L.z, D, cam);
-    if (!baseDepth || !topDepth) {
-      imp.visible = false; imp.material.uniforms.uOpacity.value = 0; return;
-    }
-
-    /* Pin BOTH ends of the sky quad. The old centre-ray shortcut moved the
-       mesh's X/Z toward the moving aircraft by (1-D/d), so the mushroom could
-       stand hundreds of metres away from the dome during the held-C fly-away.
-       Projecting ground zero and cloud top independently keeps the one-draw
-       impostor inside the far plane without ever surrendering its impact. */
-    imp.position.copy(_impBase).add(_impTop).multiplyScalar(0.5);
-    const hh = _impUp.subVectors(_impTop, _impBase).length();
-    if (!(hh > 0.01)) {
-      imp.visible = false; imp.material.uniforms.uOpacity.value = 0; return;
-    }
-    _impUp.multiplyScalar(1 / hh);
-    _impNormal.set(0, 0, 1).transformDirection(cam.matrixWorld);
-    _impRight.crossVectors(_impUp, _impNormal);
-    if (_impRight.lengthSq() < 0.000001) _impRight.set(1, 0, 0).transformDirection(cam.matrixWorld);
-    else _impRight.normalize();
-    _impUp.crossVectors(_impNormal, _impRight).normalize();
-    _impBasis.makeBasis(_impRight, _impUp, _impNormal);
-    imp.quaternion.setFromRotationMatrix(_impBasis);
-    imp.scale.set(w * D / Math.max(0.05, (baseDepth + topDepth) * 0.5), hh, 1);
-    /* Unlike the yaw-only near billboards, this quad lies in the camera plane.
-       Its local Y is the exact projected ground-to-top vector, so banking or
-       the held-C camera cannot rotate that vector away from ground zero. */
-    const u = imp.material.uniforms;
-    // the whole cloud cools along the shared LUT; uCool then spreads the
-    // crown and the dust base further along it than the core (see BILL_FS).
-    // The cloud stays incandescent through the visibly forming mushroom,
-    // while the mask's cool channel can still drive its crown/base to soot.
-    u.uLife.value = clamp(0.04 + t / 40, 0, 0.55);
-    u.uPhase.value = cloudPhaseAt(t, L);
-    u.uScroll.value.set(0.013 * t, -0.021 * t);
-    u.uScroll2.value.set(-0.008 * t, 0.011 * t);
-    /* THE FADE-IN IS capIn'S OWN CURVE, DELIBERATELY AND EXACTLY.
-       stepVolumes draws the 3D cap at `capIn * near` and this draws the far
-       tier at `capIn * mix`, and near + mix = 1 by construction — so the two
-       tiers always sum to capIn no matter where the handoff sits. Any other
-       curve here leaves a HOLE: with an independent 0.9 s start the impostor
-       was still at zero through the window where mix had already retired the
-       3D cap, and the head simply vanished for a third of a second. Two
-       layers cross-fading have to share one envelope or they cannot. */
-    const fadeIn = ease((t - 0.55) / 1.15);        // === capIn in stepVolumes
-    const fadeOut = 1 - ease((t - (L.dur - 9)) / 9);
-    u.uOpacity.value = Math.max(0, mix * fadeIn * Math.max(0, fadeOut));
-    imp.visible = u.uOpacity.value > 0.004;
-  }
-
-  /* ---- billboard placement -------------------------------------------------
-     Every detail plane stays vertical in world space and yaws only. Copying the
-     camera's pitch was the aircraft-view bug: from above, the cap tipped flat
-     and exposed itself as a disc precisely when the mushroom mattered most. */
-  function faceCameraYaw(mesh) {
-    const cam = CBZ.camera;
-    if (!cam || !cam.position) return;
-    mesh.rotation.set(0, Math.atan2(cam.position.x - mesh.position.x,
-                                    cam.position.z - mesh.position.z), 0);
-  }
-
-  /* ---- THE 3D MUSHROOM FIELD ----------------------------------------------
-     Rough, anisotropic lobes establish a real cap/stem/surge volume. They
-     parallax in world space; no cloud primitive rotates to follow the lens.
-     Slow buoyant motion is uploaded at 12 Hz while colour/light envelopes
-     remain frame-smooth. Under NUKE_FX_SMOKE_LOBES they blend instead of
-     occluding (see volumeMat/flushVolume) — same field, same transforms. */
-  const _volDummy = new THREE.Object3D();
-  let _volWrite = true;
-  const VOL_HOT = new THREE.Color(0xff7a18);
-  /* ---- THE CLOUD IS TWO-TONE, AND THAT IS THE PLATE'S LOUDEST FEATURE ----
-     OWNER (2026-08-15), with a reference photograph: the CAP is a dark
-     grey-brown boiling mass with the sun catching only its top rim, and the
-     STEM is MUCH lighter — pale cream/tan, vertically striated — with a
-     visible collar where they meet.
-
-     This build cooled EVERY layer toward the same near-black soot
-     (0x332f2c cap, 0x292725 stem, 0x38251c surge), so at t=210 s the cap and
-     the column were one flat tan silhouette and the photograph's structure
-     was gone. The physics agrees with the photograph, which is why this is a
-     correction and not a taste change: the cap is condensed soot and water
-     kilometres thick and self-shadowing, while the stem is DUST — pulverised
-     ground and concrete, a pale mineral grey-tan — lit from every side by a
-     sky it is thin enough to scatter through, and lit from below by the fire.
-
-     HOT endpoints are untouched. Only the ASH end of each walk moves, so the
-     white -> orange -> ash arc keeps every timing it had:
-        cap    0x332f2c -> 0x3a352f   dark grey-brown, a shade warmer
-        crown  0x2a2723 -> 0x2f2b26   deliberately the darkest thing up there
-        stem   0x292725 -> 0xb8ab98   PALE CREAM-TAN. The headline.
-        surge  0x38251c -> 0x8f7f6e   mid dusty tan, between the two
-     Indexed tables, not ternaries, for the same reason VOL_STEM_HOT_V is one:
-     a colour frozen by a flag read at module scope is a flag that cannot be
-     flipped at runtime, and every other revert in this file can be. Index 0
-     of every table below is the exact pre-organic colour it replaced. */
-  const VOL_ASH_V = [new THREE.Color(0x332f2c), new THREE.Color(0x3a352f)];
-  /* THE STEM IS ORANGE-RED, NOT BROWN, and THE BASE SURGE IS RED-BROWN.
-     The column under a fresh cap is convecting air off a fireball that is
-     still radiating into it, so it is LIT from inside along its whole
-     length — that is the single loudest colour in the reference plate and
-     the old 0x5e3b2b read as a dust column standing beside an explosion
-     rather than rising out of one. The surge is pulverised GROUND thrown
-     out along the deck and lit from one side, so its lit face is warm
-     red-brown and its shadowed lobes go nearly black; those black lobes are
-     what carry the plate's scale, and the old pair (0x806456/0x5a5651) was
-     two greys with a hint of tan.
-
-     BOTH PAIRS ARE KEPT AND CHOSEN PER FRAME rather than resolved once at
-     load. A colour frozen by a flag read at module scope is a flag that
-     cannot be flipped at runtime, and every other revert in this file can
-     be — so these are two-element tables indexed by v2(), not a ternary. */
-  const VOL_STEM_HOT_V = [new THREE.Color(0x5e3b2b), new THREE.Color(0xa8401c)];
-  const VOL_STEM_ASH_V = [new THREE.Color(0x292725), new THREE.Color(0xb8ab98)];
-  const VOL_DUST_HOT_V = [new THREE.Color(0x806456), new THREE.Color(0x8a3f22)];
-  // [legacy, v2, v2+organic] — the surge's dust is ground, not soot
-  const VOL_DUST_ASH_V = [new THREE.Color(0x5a5651), new THREE.Color(0x38251c),
-                          new THREE.Color(0x8f7f6e)];
-  const VOL_EMBER = new THREE.Color(0x7a2a0b);
-  const VOL_EMBER_OFF = new THREE.Color(0x080604);
-  // the crown: cold soot at the top of the cloud, cooling further to ash
-  const VOL_CROWN_HOT = new THREE.Color(0x4a3325);
-  const VOL_CROWN_ASH_V = [new THREE.Color(0x2a2723), new THREE.Color(0x2f2b26)];
-  const VOL_CROWN_EMBER = new THREE.Color(0x2c0d03);
-
-  /* ---- BACK-TO-FRONT INSTANCE ORDER ---------------------------------------
-     An InstancedMesh is ONE draw call, so three's transparent sort can order
-     it against other objects but never against ITSELF: instances composite in
-     buffer order, whatever that is. While the lobes wrote depth that was
-     hidden (the depth test discarded the mistakes, at the cost of looking like
-     a pile of solids). Now that they blend, buffer order IS paint order, and
-     painting a far lobe over a near one is visibly wrong — the far side of the
-     cloud smears over the near side.
-
-     So the writes are buffered and flushed in depth order. It is 20 lobes at
-     most, sorted at the existing 12 Hz transform cadence — an insertion sort
-     over 20 keys, on the frames that were already uploading a matrix buffer.
-     Additive layers (hot billows, cap glow) skip the sort: addition commutes. */
-  /* DERIVED, NEVER TYPED. This was a literal 24 for one round while the cap
-     already carried 34 lobes, so ten of them fell through to an unsorted
-     direct write — the exact bug class this file keeps catching itself in.
-     It is now the largest layer the pool can hold, so raising a count can
-     never silently un-sort its tail again. */
-  const VOL_SORT_MAX = Math.max(
-    VOL_MAX.cap, VOL_MAX.stem, VOL_MAX.surge, VOL_MAX.hot, VOL_MAX.crown, VOL_MAX.glow);
-  const _volBuf = {
-    n: 0,
-    x: new Float64Array(VOL_SORT_MAX), y: new Float64Array(VOL_SORT_MAX),
-    z: new Float64Array(VOL_SORT_MAX), sx: new Float64Array(VOL_SORT_MAX),
-    sy: new Float64Array(VOL_SORT_MAX), sz: new Float64Array(VOL_SORT_MAX),
-    r: new Float64Array(VOL_SORT_MAX), key: new Float64Array(VOL_SORT_MAX),
-    h: new Float64Array(VOL_SORT_MAX),
-    idx: new Int32Array(VOL_SORT_MAX),
-  };
-
-  /* `h` is the lobe's own constant hash (lobeHash of its index). WHY IT
-     EXISTS: every caller passes the lobe's AZIMUTH as ry, so rotation.set(
-     r*0.37, r, r*0.19) gave every lobe at the same azimuth the same
-     orientation — the baked asteroid displacement then repeated in lockstep
-     around the ring, which is a lathe signature and reads as manufactured.
-     The organic branch spins each lobe on all three axes by its own index
-     hash (constant for the lobe's whole life, so nothing tumbles) while
-     keeping the azimuth term on Y so the field still turns with the roll. */
-  function writeVolume(mesh, slot, x, y, z, sx, sy, sz, ry, h) {
-    _volDummy.position.set(x, y, z);
-    const r = ry || 0;
-    if (organic()) {
-      const hh = h || 0;
-      _volDummy.rotation.set(hh * 6.2832, r + hh * 2.7, hh * 3.9);
-    } else {
-      _volDummy.rotation.set(r * 0.37, r, r * 0.19);
-    }
-    _volDummy.scale.set(Math.max(0.01, sx), Math.max(0.01, sy), Math.max(0.01, sz));
-    _volDummy.updateMatrix();
-    mesh.setMatrixAt(slot, _volDummy.matrix);
-  }
-
-  function putVolume(mesh, i, x, y, z, sx, sy, sz, ry, h) {
-    if (!_volWrite) return;
-    if (!smokeLobes()) { writeVolume(mesh, i, x, y, z, sx, sy, sz, ry, h); return; }
-    const n = _volBuf.n;
-    if (n >= VOL_SORT_MAX) { writeVolume(mesh, i, x, y, z, sx, sy, sz, ry, h); return; }
-    _volBuf.x[n] = x; _volBuf.y[n] = y; _volBuf.z[n] = z;
-    _volBuf.sx[n] = sx; _volBuf.sy[n] = sy; _volBuf.sz[n] = sz;
-    _volBuf.r[n] = ry || 0;
-    _volBuf.h[n] = h || 0;
-    _volBuf.n = n + 1;
-  }
-
-  // Flush one layer's buffered lobes. `sorted` is false for additive layers.
-  function flushVolume(mesh, sorted) {
-    if (!_volWrite) return;
-    mesh.instanceMatrix.needsUpdate = true;
-    if (!smokeLobes()) return;
-    const n = _volBuf.n;
-    _volBuf.n = 0;
-    if (!n) return;
-    const B = _volBuf;
-    for (let i = 0; i < n; i++) B.idx[i] = i;
-    if (sorted !== false) {
-      // These meshes are parented straight to the scene with a position and
-      // no rotation or scale (see the placement block), so camera-local is a
-      // subtraction — no matrix inverse, no allocation.
-      const cam = camPos();
-      if (cam) {
-        const cx = cam.x - mesh.position.x, cy = cam.y - mesh.position.y,
-          cz = cam.z - mesh.position.z;
-        for (let i = 0; i < n; i++) {
-          const dx = B.x[i] - cx, dy = B.y[i] - cy, dz = B.z[i] - cz;
-          B.key[i] = dx * dx + dy * dy + dz * dz;
-        }
-        for (let i = 1; i < n; i++) {           // insertion sort, far -> near
-          const v = B.idx[i], k = B.key[v];
-          let j = i - 1;
-          while (j >= 0 && B.key[B.idx[j]] < k) { B.idx[j + 1] = B.idx[j]; j--; }
-          B.idx[j + 1] = v;
-        }
-      }
-    }
-    for (let i = 0; i < n; i++) {
-      const j = B.idx[i];
-      writeVolume(mesh, i, B.x[j], B.y[j], B.z[j], B.sx[j], B.sy[j], B.sz[j], B.r[j], B.h[j]);
-    }
-  }
-
-  /* ---- the smoke shading uniforms, refreshed once per frame ---------------
-     The lobes are lit by the SAME sun and hemisphere the city is (including
-     the fireball's own boost — the atmosphere drive at onAlways 94.6 has
-     already multiplied sun.intensity by the time this reads it, so the cloud
-     goes orange with everything else), just through a wrap-scatter model
-     instead of Lambert's terminator. */
-  const _smokeDir = new THREE.Vector3();
-  const _smokeCol = new THREE.Color();
-  function smokeLight() {
-    if (!smokeLobes()) return;
-    const sun = CBZ.sun, hemi = CBZ.hemi;
-    if (sun && sun.position) {
-      _smokeDir.copy(sun.position);
-      if (CBZ.sunTarget && CBZ.sunTarget.position) _smokeDir.sub(CBZ.sunTarget.position);
-      if (_smokeDir.lengthSq() > 1e-6) SMOKE_U.uSmokeSun.value.copy(_smokeDir).normalize();
-      if (sun.color) {
-        /* 0.34 is not a taste number: it is 1/PI to two places, which is
-           exactly the factor three's own BRDF_Diffuse_Lambert applies to a
-           direct light. Energy-matching the replacement shading to the
-           lighting it replaces is what keeps this a LOOK change and not a
-           brightness change — the first draft used 0.62 and washed the cap
-           out at the same moment the fireball was boosting the sun. */
-        // ...and the same `|| 1` floor as the ambient below: a sun driven to
-        // 0 at night must not read as 1. Organic takes the honest null-check;
-        // the flag-off path keeps the old expression byte for byte.
-        const si = organic()
-          ? (sun.intensity == null ? 1 : sun.intensity)
-          : (sun.intensity || 1);
-        SMOKE_U.uSmokeSunCol.value.copy(sun.color)
-          .multiplyScalar(clamp(si, 0, 2.4) * 0.34);
-      }
-    }
-    if (live) {
-      // deck -> cap centre, in world Y. Both are already computed every frame
-      // by the sequence; this only publishes them to the shader.
-      const base = live.y || 0;
-      const capY = capYAt(riseAt(live.t, live), live);
-      const top = base + Math.max(60, capY - base);
-      SMOKE_U.uSmokeSpan.value.set(base, top);
-      if (organic()) {
-        /* The cap's own frame, published from the SAME live curves the cap
-           draw reads two functions below (riseAt/capYAt/bloomAt are pure in
-           t and L, so this cannot disagree with the geometry — it is the same
-           arithmetic, not a copy of the answer). */
-        SMOKE_U.uSmokeCore.value.set(live.x, capY, live.z);
-        SMOKE_U.uSmokeCapR.value = Math.max(1, live.capW * bloomAt(live.t, live) * 0.5);
-        SMOKE_U.uSmokeTime.value = live.t;
-        // the ground fire's own radius, and how far the emissive has
-        // collapsed from "the whole cloud is incandescent" (0, honest for the
-        // first ten seconds) to "only the city under it is burning" (1).
-        SMOKE_U.uSmokeGlow.value.set(
-          Math.max(60, live.surgeDraw || live.surgeW || live.R * 4),
-          clamp((live.t - 7) / 7, 0, 1));
-        const c = camPos();
-        if (c) SMOKE_U.uSmokeCam.value.copy(c);
-        if (scene.fog && scene.fog.color) SMOKE_U.uSmokeHaze.value.copy(scene.fog.color);
-      }
-    }
-    if (hemi && hemi.color) {
-      _smokeCol.copy(hemi.color);
-      if (hemi.groundColor) _smokeCol.lerp(hemi.groundColor, 0.34);
-      /* NIGHT HONESTY. `hemi.intensity || 1` is a FLOOR nobody meant to
-         write: a mode or a tier may legitimately drive the hemisphere to 0,
-         and `0 || 1` reads ONE — full daylight ambient on a cloud standing in
-         the dark. Under organic the null-check is a null-check.
-
-         AND THE NIGHT DIMMER IS RELATIVE, WHICH IS THE WHOLE TRICK. The
-         authored cycle only spans hi 0.72 (day) -> 0.54 (dusk) -> 0.34
-         (night) — barely a factor of two — so the linear term alone leaves
-         the t=3:30 icon beat sitting ON the night sky like a decal instead of
-         IN it. Squaring it against its own DAYTIME value dims the night
-         without touching noon: hi/day is 1.00 at midday (nothing changes in
-         any daylight beat), 0.75 at dusk and 0.47 at night, floored at 0.30
-         so the icon can never vanish outright. The day value is read from
-         core/lights.js's own keyframe table rather than typed, so it cannot
-         drift away from the cycle it is normalising against. */
-      const hi = hemi.intensity == null ? 1 : hemi.intensity;
-      const dayHi = (CBZ.lightKeys && CBZ.lightKeys.day && CBZ.lightKeys.day.hi) || 0.72;
-      const amb = organic()
-        ? clamp(hi, 0, 3) * 0.32 * clamp(hi / Math.max(0.05, dayHi), 0.30, 1)
-        : clamp(hemi.intensity || 1, 0, 3) * 0.32;
-      SMOKE_U.uSmokeAmb.value.copy(_smokeCol).multiplyScalar(amb);
-    }
-  }
-
-  /* `uEmber` splits the EMBER clock from the COLOUR clock, and the reference
-     plate is the reason: in it the cap has gone completely cold while the
-     ground end is still a glowing orange fire lighting the dust from inside.
-     One `u` forced both to die together on cloudCool (t=11.7 s), so the whole
-     event stopped burning at twelve seconds — which is not what a city under
-     a nuclear detonation does. Omitted => u, i.e. exactly the old behaviour.
-     The shader confines a late ember to the deck (see uSmokeGlow), so a long
-     ember clock lights the base fire, never the whole column. */
-  function cloudColor(mat, hot, ash, u, ember, uEmber) {
-    mat.color.copy(hot).lerp(ash, clamp(u, 0, 1));
-    if (mat.emissive) {
-      const ue = uEmber == null ? u : uEmber;
-      mat.emissive.copy(ember || VOL_EMBER).lerp(VOL_EMBER_OFF, clamp(ue * 1.25, 0, 1));
-    }
-  }
-
-  function stepVolumes(t, L, mix) {
-    if (!L.volume || !L.volN) return;
-    /* THE UPLOAD RATE IS A DISTANCE DECISION, NOT A CONSTANT. 12 Hz is
-       invisible on a cloud two kilometres away (a lobe moves under a pixel
-       between uploads) and visibly STEPS from the street, where the same lobe
-       crosses tens of pixels. Organic doubles it inside 4 km and leaves it at
-       12 Hz beyond, where nothing can be seen anyway.
-       THE COST, written out because "just upload more often" is how a frame
-       budget dies: the whole field is 290 instances; a write is one
-       Object3D.updateMatrix (a compose: 16 muls) plus one setMatrixAt copy.
-       At 24 Hz that is 290*24 = ~7k matrix composes per second against a
-       60 Hz frame doing tens of thousands for the city — under 0.1 ms/frame
-       on the frames that write, and the sort is the same insertion sort over
-       the same <=88 keys it already ran. The GPU upload is one
-       instanceMatrix buffer per layer either way. */
-    let volHz = 12;
-    if (organic()) {
-      // (nearCam, not `near` — `near` is the impostor mix's complement a few
-      //  lines down and shadowing it here would be a trap for the next reader)
-      const nearCam = camDist(L.x, L.y + (L.riseH || 0) * 0.35, L.z) < 4000;
-      volHz = nearCam ? 24 : 12;
-    }
-    _volWrite = L.volNext == null || t + 1e-6 >= L.volNext;
-    if (_volWrite) L.volNext = t + 1 / volHz;
-    _volBuf.n = 0;        // nothing may survive a frame in the flush buffer
-    // colour/light stay frame-smooth even when the transforms upload at 12 Hz
-    smokeLight();
-    // 1 while the legacy far tier owns the picture, 0 while 3D lobes do.
-    const mixC = clamp(mix || 0, 0, 1);
-    const near = 1 - mixC;
-    const rise = riseAt(t, L);
-    const capY = capYAt(rise, L) - L.y;
-    const bloom = bloomAt(t, L);
-    const cloudCool = clamp((t - 0.7) / 11, 0, 1);
-    let endFade = Math.max(0, 1 - ease((t - (L.dur - 8)) / 8));
-    // Aftermath thinning: a stabilised cloud goes grey and translucent long
-    // before it disperses. Starts after the maturation walk, halves the body
-    // by the end, and the final 8 s fade above still closes it out.
-    if (L.matureFrom) endFade *= 1 - 0.5 * ease((t - 200) / Math.max(60, L.dur - 208));
-    const roll = CBZ.CONFIG.NUKE_FX_ROLL
-      ? t * (0.11 + 0.22 * Math.exp(-Math.max(0, t - 1) / 8))
-      : t * 0.08;
-
-    /* ---- WIND (NUKE_FX_ORGANIC) -----------------------------------------
-       Nothing in the atmosphere is a surface of revolution. Every dimension
-       this file publishes stays EXACTLY what it authored — capWNow, capYNow,
-       riseH and the audit's proportions are untouched — because wind here is
-       a POSITION OFFSET applied at the draw, never a change to the numbers
-       the sequence reports. Three offsets, one direction, seeded per ground
-       zero so two detonations lean different ways and the same one always
-       leans the same way:
-         CAP    drifts downwind, more at its top than its bottom (shear), so
-                the head is displaced off the column instead of balanced on
-                it. Capped at 6% of the cap width — past that it stops being
-                a lean and becomes a second cloud.
-         STEM   leans linearly with height to ~3.5% of the rise at the
-                shoulder, plus a gentle cross-wind S (see the stem block).
-         SURGE  elongates ~8% downwind and pulls in ~5% upwind, so the base
-                is an oval that agrees with the lean rather than a circle
-                under a leaning cloud.
-       windK is metres per second of drift, 0.55..1.45 — a light breeze, not
-       a shear line: the owner approved this arc and a strong wind would
-       change the silhouette the ratios gate. */
-    const wind = organic();
-    const windA = L.windA || 0;
-    const windX = Math.cos(windA), windZ = Math.sin(windA);
-    const windK = L.windK || 1;
-
-    // CAP — a broad, deep mass of overlapping lobes. The slight vertical
-    // circulation is the mushroom's overturn, without exposing a donut mesh.
-    // `flat` walks the head from a rising ball to a stabilised anvil (see
-    // capFlatAt); it multiplies the vertical SPREAD and the lobes' own
-    // height, so the cap gets wider AND squatter instead of merely bigger.
-    const cap = POOL.capVol;
-    const capIn = ease((t - 0.55) / 1.15);
-    const capRadius = L.capW * bloom * 0.5;
-    const flat = capFlatAt(t, L);
-    /* THE CAP IS A LENS, AND ITS LUMPS OBEY A SIZE LAW.
-       `photo` switches the two together, because they are one shape:
-         • the vertical station is the seed's y2 scaled by the cap's own
-           HALF-THICKNESS (a researched 1,996 m, i.e. 0.78 of the cap radius)
-           and by the lens profile sqrt(1-r^2) — deep in the middle, thin at
-           the rim, which is what a vortex ring is;
-         • the lobe radius is s2, which FALLS with distance from the axis.
-       Together those give the reference plate's read: a handful of very big
-       lumps boiling over the crown and a dense fringe of small ones round
-       the rim. The legacy branch is the old flat disc of same-size blobs. */
-    const photo = real();
-    // half-THICKNESS as a ratio of the cap RADIUS, so it rides bloom for
-    // free: (capH/2)/(capW/2) = capH/capW = 3,992/5,106 = 0.782 at 16 kt.
-    const halfH = capRadius * (L.capThick || 0.782);
-    // downwind drift of the whole head, capped at 6% of the cap's own width
-    // (see the WIND block): a linear-in-time creep, so it is invisible at the
-    // handoff and a clear lean by the time the cloud is a landmark.
-    const capDrift = wind
-      ? Math.min(capRadius * 0.12, Math.max(0, t - 0.55) * windK)
-      : 0;
-    for (let i = 0; i < L.volN.cap; i++) {
-      const s = VOL_SEED.cap[i];
-      const a = s.a + roll * (0.35 + s.r * 0.45) + s.spin * t;
-      const rr = capRadius * s.r;
-      const lens = Math.sqrt(Math.max(0.04, 1 - s.r * s.r));
-      const lobe = capRadius * (photo ? s.s2 : s.s) * (0.45 + 0.55 * capIn);
-      const overturn = Math.sin(a * 1.7 + t * 0.55) * capRadius * 0.035;
-      const yOff = photo
-        ? (halfH * s.y2 * lens + overturn) * flat
-        : (capRadius * s.y + overturn) * flat;
-      // shear: the top of the head is in faster air than its belly, so the
-      // drift scales 0.5..1.0 with the lobe's own station in the cap.
-      const dk = capDrift * (0.5 + 0.5 * clamp(s.y2 * 0.5 + 0.5, 0, 1));
-      putVolume(cap, i,
-        Math.cos(a) * rr + windX * dk,
-        capY + yOff,
-        Math.sin(a) * rr + windZ * dk,
-        lobe * (1.08 + s.r * 0.22), lobe * (0.72 + (1 - s.r) * 0.18) * flat, lobe,
-        a * 0.35, lobeHash(i));
-    }
-    cap.material.opacity = solidOp(0.86, 0.26) * capIn * endFade * near;
-    cloudColor(cap.material, VOL_HOT, VOL_ASH_V[wind ? 1 : 0], cloudCool);
-    cap.visible = cap.material.opacity > 0.004;
-    flushVolume(cap);
-
-    /* ---- THE CAP GLOWS FROM WITHIN --------------------------------------
-       This is the layer that makes the reference plate read as a LIGHT
-       SOURCE. It lives strictly inside the cap's own lobes (seed r <= 0.62,
-       and it is scaled off the same capRadius), it is additive so it
-       brightens what it shines through, and depthTest leaves the cap's front
-       lobes occluding it — so what you see is heat coming out from between
-       the lumps, never a ball in front of a cloud.
-       It comes up WITH the cap and dies on the cloud's own cooling curve
-       (cloudCool reaches 1 at t = 11.7 s), because that is what stops the
-       cloud looking hot forever. */
-    const glow = POOL.glowVol;
-    if (L.volN.glow) {
-      const glowIn = ease((t - 0.60) / 1.0);
-      const glowOut = Math.max(0, 1 - ease((t - 2.6) / 7.4));
-      for (let i = 0; i < L.volN.glow; i++) {
-        const s = VOL_SEED.glow[i];
-        const a = s.a + roll * 0.5;
-        const rr = capRadius * s.r;
-        // 0.70: the glow lobes must stay strictly INSIDE the cap's own
-        // envelope. The cap's outermost lobe reaches 0.86R + its own radius;
-        // at this size the glow's furthest reach is comfortably under that,
-        // so heat bleeds between the lumps instead of breaking the
-        // silhouette and becoming a second fireball.
-        const lobe = capRadius * s.s * 0.70;
-        putVolume(glow, i,
-          Math.cos(a) * rr + windX * capDrift,
-          capY + capRadius * s.y * 0.55 * flat,
-          Math.sin(a) * rr + windZ * capDrift,
-          lobe * 1.15, lobe * flat, lobe, a, lobeHash(i + 601));
-      }
-      // white-hot -> yellow -> deep orange, the same walk the fireball took
-      // but slower: a cap is a much bigger mass and cools far more slowly.
-      glow.material.color.setHex(t < 1.6 ? 0xfff2c8 : t < 4.5 ? 0xffc45a : 0xd96a1e);
-      glow.material.opacity = 0.54 * glowIn * glowOut * endFade * near;
-      glow.visible = glow.material.opacity > 0.004;
-      flushVolume(glow, false);   // additive: addition commutes, no sort
-    }
-
-    /* ---- THE COLLAR AND THE CROWN, one mesh, two slices -----------------
-       COLLAR first (it arrives earlier): the skirt hanging under the cap's
-       rim, which is the thing that makes the cap OVERHANG its stem. Without
-       it the head is a disc balanced on a column; with it there is a shape.
-       CROWN second: dark cauliflower boiling over the top. It fades in
-       LATER than everything else on purpose — the top of a fresh cloud is
-       still incandescent and there is nothing dark up there to draw. It is
-       the visible fact that the cloud is cooling from the top down. */
-    const crown = POOL.crownVol;
-    if (L.volN.crown) {
-      const collarIn = ease((t - 1.5) / 1.8);
-      const crownIn = ease((t - 2.6) / 3.4);
-      /* THE SLICE MAP, and it is not `i` — that was a real bug worth naming.
-         The seed array is laid out [0, CROWN_N) crown then the rest collar,
-         but the INSTANCE array is only volN.crown long and its crown share
-         is crownN. At full count those coincide; at any reduced tier they do
-         NOT, so reading VOL_SEED.crown[i] would have handed a CROWN seed
-         (positive y, riding the cap's dome) to a slot the loop was about to
-         place and shape as a COLLAR lobe — a wide flat saucer floating above
-         the head instead of a skirt hanging under it, at exactly the quality
-         tiers nobody profiles. Each slot therefore maps into its OWN slice,
-         evenly decimated, and the map is the identity at full count. */
-      const nC = Math.max(1, Math.min(L.volN.crown - 1, L.crownN || CROWN_N));
-      const nK = L.volN.crown - nC;
-      const COLLAR_N = VOL_MAX.crown - CROWN_N;
-      for (let i = 0; i < L.volN.crown; i++) {
-        const isCrown = i < nC;
-        const si = isCrown
-          ? Math.min(CROWN_N - 1, Math.floor(i * CROWN_N / nC))
-          : CROWN_N + Math.min(COLLAR_N - 1, Math.floor((i - nC) * COLLAR_N / Math.max(1, nK)));
-        const s = VOL_SEED.crown[si];
-        const grow = isCrown ? crownIn : collarIn;
-        const a = s.a + roll * (isCrown ? 0.42 : 0.24) + s.spin * t;
-        const rr = capRadius * s.r * (isCrown ? 1 : 1.04);
-        const lobe = capRadius * s.s * (0.5 + 0.5 * grow);
-        // the crown rides the cap's top and the collar hangs under its rim,
-        // so both take the head's own drift — a skirt that stayed behind
-        // would tear the overhang off the cap it belongs to.
-        const dk = capDrift * (isCrown ? 1 : 0.72);
-        putVolume(crown, i,
-          Math.cos(a) * rr + windX * dk,
-          capY + capRadius * s.y * (isCrown ? 0.46 : 0.62) * flat,
-          Math.sin(a) * rr + windZ * dk,
-          // the collar is deliberately WIDE and LOW (a skirt, not a bead)
-          lobe * (isCrown ? 1.05 : 1.42), lobe * (isCrown ? 0.94 : 0.56) * flat,
-          lobe * (isCrown ? 1.05 : 1.42), a * 0.5, lobeHash(i + 307));
-      }
-      crown.material.opacity = solidOp(0.88, 0.30) * Math.max(collarIn, crownIn) * endFade * near;
-      cloudColor(crown.material, VOL_CROWN_HOT, VOL_CROWN_ASH_V[wind ? 1 : 0],
-        cloudCool, VOL_CROWN_EMBER);
-      crown.visible = crown.material.opacity > 0.004;
-      flushVolume(crown);
-    }
-
-    // STEM — overlapping vertical billows leave no chair-leg-thin cylinder and
-    // no gap under the cap. A mild spiral makes sucked-up debris visibly rise.
-    /* THE STEM IS A TWISTED CONVECTIVE COLUMN, NOT A CYLINDER.
-       OWNER: "a THICK ROILING ORANGE-BROWN STEM roughly as wide as ~1/3 the
-       cap ... visibly a twisted convective column of lumps ... flaring out
-       at the bottom into a broad dark dust base."
-       Three separate things were wrong and all three are geometry:
-         (1) WIDTH. stemK 0.28 against capK 2.75 made the cap 9.8x the stem.
-             The reference is 3x, so the stem is now capW/3 = 1,702 m (see
-             STEM_OF_CAP) and it is a real column you could fly through.
-         (2) LUMPS. Every lobe sat inside 0.36 of the declared radius, so the
-             column was a thin core in a wide claim — smooth from any angle.
-             `r2` fills it to the edge and `s2` makes the lumps overlap.
-         (3) TWIST + FLARE. The azimuth now advances STEM_TURNS over the
-             column height (a helix — that is what "twisted" means and it is
-             what a buoyant plume in shear actually does), and stemProfile()
-             flares it 1.9x at the foot into the dust base and 1.25x at the
-             shoulder into the cap.
-       THE FRUSTUM CLAMP. At true scale the column runs to the cap base at
-       6,008 m, ten times past the far plane, so the drawn 3D column is
-       clamped to 0.82 of far and its topmost lobes are TAPERED AWAY rather
-       than cut — the impostor carries everything above, and the depth test
-       composites the two because the near lobes are genuinely nearer. */
-    const stem = POOL.stemVol;
-    const stemIn = ease((t - 0.65) / 1.3);
-    const STEM_TURNS = 0.85;
-    const capBase = capY - (photo ? capRadius * (L.capThick || 0.782) : capRadius * 0.4);
-    const hTrue = Math.max(L.R * 0.55, capBase);
-    // The far clamp existed for the LEGACY impostor tier ("the impostor
-    // carries everything above"); the coherent cloud has no impostor, so
-    // clamping left a void between the stem top and the mature 8 km cap —
-    // the column must reach its own head and let the frustum cull naturally.
-    const h = photo
-      ? (L.coherentCloud ? hTrue : Math.min(hTrue, camFar() * 0.82))
-      : Math.max(L.R * 0.55, capY);
-    const stemR = photo ? L.stemW * (0.55 + rise * 0.45) : L.stemW * (0.72 + rise * 0.88);
-    const stemY = Math.max(L.R * 0.10, h / Math.max(5, L.volN.stem * 0.72));
-    for (let i = 0; i < L.volN.stem; i++) {
-      const s = VOL_SEED.stem[i];
-      if (!photo) {
-        const a0 = s.a + roll * (0.28 + s.f * 0.35);
-        const neck = 0.72 + Math.abs(s.f - 0.55) * 0.55;
-        // the pre-NUKE_REAL_SCALE column still gets its hash: with organic on
-        // and real() off, omitting it would hand writeVolume h=0 and give
-        // every legacy stem lobe the SAME orientation, which is worse than
-        // the azimuth-correlated one it had.
-        putVolume(stem, i,
-          Math.cos(a0) * stemR * s.r, Math.max(stemY * 0.45, h * s.f), Math.sin(a0) * stemR * s.r,
-          stemR * s.s * neck, stemY * s.s, stemR * s.s * neck, a0, lobeHash(i + 101));
-        continue;
-      }
-      // f is the station on the TRUE column, so the flare profile is honest
-      // even though only the bottom 0.82*far of it is drawn.
-      // STRATIFIED STATIONS. Raw-random s.f clusters — at the low quality
-      // tier's 8 lobes a cluster leaves half the column empty (the dotted
-      // stem the storyboard caught). Each lobe owns a band of the column
-      // with +/-45% jitter inside it, so coverage is guaranteed at any tier
-      // and the organic stagger survives.
-      const fS = (i + 0.5 + (s.f - 0.5) * 0.9) / Math.max(1, L.volN.stem);
-      const fTrue = fS * (h / Math.max(1, hTrue));
-      const prof = stemProfile(fTrue);
-      const a = s.a + s.tw + roll * (0.28 + fS * 0.35) + fTrue * STEM_TURNS * 6.2832;
-      const rr = stemR * prof * s.r2;
-      // taper the last 18% of the drawn column to nothing so the frustum
-      // clamp is a fade, not a guillotine.
-      const taper = 1 - ease((fS - 0.82) / 0.18);
-      const lobe = stemR * prof * s.s2 * Math.max(0.02, taper);
-      // OVERLAP FLOOR. The aftermath stretches the column toward 8 km while
-      // the stem only widens ~1.2x, so fixed-size lobes separate into a
-      // dotted line of balls (caught by the nuke-sequence storyboard,
-      // 2026-08-02). Each lobe's VERTICAL radius is floored at 0.8x its
-      // share of the drawn column, so neighbours overlap at any height —
-      // width stays stem-scaled to hold the 3:1 cap/stem proportion.
-      // 1.35, not 0.8: geometric overlap alone still PINCHES, because the
-      // soft-lobe rim fade makes the overlap zone faint-on-faint (probed
-      // live at t=90: 327 m spacing, 480 m spans, still read as beads).
-      // Spanning ~2.7 stations keeps a dense core through every joint.
-      const seg = h / Math.max(4, L.volN.stem);
-      /* THE COLUMN IS NOT A PLUMB LINE (organic). Two offsets, both lateral,
-         neither touching the reported height:
-           LEAN  linear in station, reaching 3.5% of the drawn column height
-                 downwind at the shoulder. A convective column in any real
-                 airmass is sheared over, and the plate shows it.
-           WAVE  a gentle cross-wind S — one half-cycle over the column
-                 (sin(f*3.1)) at 35% of the stem radius, ramped in over the
-                 first 20 s so the young tower stays vertical while it is
-                 still being driven by the fireball's own buoyancy and only
-                 the mature column meanders. Cross-wind, not downwind, so the
-                 S is visible ACROSS the lean instead of cancelling it. */
-      const lean = wind ? h * 0.035 * fS : 0;
-      const waveAmp = wind
-        ? Math.min(1, Math.max(0, t - 1.5) / 20) * Math.sin(fTrue * 3.1 + windA) * stemR * 0.35
-        : 0;
-      putVolume(stem, i,
-        Math.cos(a) * rr + windX * lean - windZ * waveAmp,
-        Math.max(stemY * 0.35, h * fS),
-        Math.sin(a) * rr + windZ * lean + windX * waveAmp,
-        lobe * 1.06,
-        Math.max(lobe * 0.92, seg * 1.35 * Math.max(0.02, taper)),
-        lobe * 1.06, a, lobeHash(i + 101));
-    }
-    // The near column is deliberately kept ALIVE under the impostor (it only
-    // loses 55% of its opacity, not all of it): the reference plate's whole
-    // foreground is that thick roiling column, and it is the one part of the
-    // cloud that genuinely is inside the frustum.
-    /* STEM ALPHA: SOLVED, NOT CHOSEN — and this is the only form of this
-       change that cannot regress the coverage gate.
-
-       Coverage is 1-(1-a)^hits. A stem lobe's SIZE does not depend on the lobe
-       count (it is stemR*profile*seed), only its SPACING does (h/N), so a ray
-       that crossed `hits` lobes at N=48 crosses hits*64/48 at N=64. Set
-
-           a_new = 1 - (1 - a_old)^(N_old/N_new) = 1 - 0.26^0.75 = 0.636
-
-       and (1-a_new)^(1.333*hits) === (1-a_old)^hits IDENTICALLY, at every beat,
-       for every hit count. So CBZ.nukeSmokeAudit()'s coverage number comes out
-       the same as today's whatever the live geometry does — the change is pure
-       granularity, and tools/nuke-smoke-check.mjs's 0.93 floor is as far away
-       as it was before. 0.64, a hair above the solve, so it can only round up.
-
-       (The look brief asked for 0.58. That needs the live stem to cross >= 3.07
-       lobes at the thinnest beat — true if today's stem coverage prints above
-       0.966, and NOT true if it is sitting near the floor the probe's own
-       header describes. If the probe prints the higher number, 0.58 is one
-       character away and buys another 10% off per-lobe density.) */
-    stem.material.opacity = solidOp(0.84, wind ? 0.64 : 0.74) *
-      stemIn * endFade * (photo ? (1 - mixC * 0.55) : near);
-    // the stem's ember is the ground fire at its ROOT, which outlives the
-    // cap's heat by a minute (see cloudColor's uEmber and uSmokeGlow: the
-    // shader keeps the late emissive on the deck).
-    cloudColor(stem.material, VOL_STEM_HOT_V[v2() ? 1 : 0], VOL_STEM_ASH_V[wind ? 1 : 0],
-      cloudCool, VOL_EMBER, wind ? clamp((t - 0.7) / 80, 0, 1) : null);
-    stem.visible = stem.material.opacity > 0.004;
-    flushVolume(stem);
-
-    // BASE SURGE — a FILLED, irregular dust cloud. It occupies area; it never
-    // traces the pressure radius as a line.
-    /* THE BASE SURGE, and its one researched number.
-       Crossroads Baker (23 kt, 1946) is the canonical measurement: the surge
-       rolled outward from the foot of the column at roughly 45 m/s and was
-       ~300 m in radius by 10 s, ~1 km by a minute, decelerating the whole
-       time. The land-burst equivalent is the ground-shock dust skirt driven
-       by the afterwinds — same picture, same law: fast then slowing, which
-       is what the ease() below is and why it is not linear.
-       WHAT V2 ADDS is the LOBES. Their radius and height alternate hard and
-       their soft masks overlap at different depths, so the apron has broken
-       density and motion instead of reading as a uniform fog sheet. */
-    const surge = POOL.surgeVol;
-    const surgeIn = ease((t - 0.75) / 2.0);
-    const surgeFade = Math.max(0, 1 - ease((t - Math.min(15, L.dur - 5)) / 7));
-    /* L.surgeDraw is the young cloud's visible base. The researched 2,016 m
-       contour remains in nukeDims/nukeRings; it is a gameplay boundary, not a
-       claim that 34 seconds of dust have already filled that whole radius. */
-    const surgeMax = photo ? L.surgeDraw : Math.min(L.maxR * 0.72, L.R * 3.6);
-    const surgeR = surgeMax * (0.12 + 0.88 * ease((t - 0.55) / 6.2));
-    const deep = v2();
-    for (let i = 0; i < L.volN.surge; i++) {
-      const s = VOL_SEED.surge[i];
-      const a = s.a + Math.sin(t * 0.16 + i) * 0.08;
-      /* THE RIM IS FINGERED, NOT ROUND (organic). A base surge rolls out
-         through buildings and terrain and its front breaks into lobes and
-         fingers within seconds; a perfect circle of dust is the single most
-         obvious "this was drawn by a for-loop over an angle" tell in the
-         whole sequence. +/-7% static per-lobe radius (constant per index, so
-         a finger stays a finger) plus a slow 3% breathing term, then the
-         downwind oval: +8% with the wind, -5% into it. */
-      let rk = 1;
-      if (wind) {
-        const hf = lobeHash(i + 911);
-        const c = Math.cos(a - windA);
-        rk = 1 + (hf - 0.5) * 0.14 + 0.03 * Math.sin(t * 0.21 + i * 1.7) +
-             (c > 0 ? 0.08 * c : 0.05 * c);
-      }
-      const rr = surgeR * s.r * rk;
-      const lobe = Math.max(L.R * 0.075, surgeMax * (0.055 + s.s * 0.028));
-      // alternating tall/low lobes: the low ones fall into their neighbours'
-      // shadow and go black, which is the whole reason this row exists.
-      const tall = deep ? (0.72 + ((i & 1) ? 0.62 : 0.02)) : 1;
-      // the churn — slower the further out, exactly as the surge decelerates
-      const spin = deep ? -t * (0.55 / (0.45 + s.r * 1.6)) : 0;
-      putVolume(surge, i,
-        Math.cos(a) * rr,
-        lobe * (0.24 + 0.10 * Math.sin(i * 1.7)) * tall,
-        Math.sin(a) * rr,
-        lobe * 1.25, lobe * 0.38 * tall, lobe,
-        a + spin, lobeHash(i + 211));
-    }
-    /* SURGE ALPHA: the same solve as the stem's. A surge lobe is sized off
-       surgeMax (the layer's FINAL radius), never off the count, so crossings
-       again scale with N:
-           a_new = 1 - (1 - 0.44)^(76/88) = 1 - 0.56^0.8636 = 0.394
-       -> 0.39, which holds 1-(1-a)^hits exactly where it is today at every
-       beat. (Independently: a ray through the apron crosses ~7.6 lobes at full
-       radius, so 88 lobes at 0.39 read 1-0.61^8.8 = 0.987 — but the solve is
-       what makes it safe, not the estimate.) The layer is retired by t=22 s,
-       so the beats that must hold are 3.5 / 8 / 15. */
-    surge.material.opacity = solidOp(deep ? 0.76 : 0.82, wind ? 0.39 : 0.44) *
-      surgeIn * surgeFade;
-    // ...and the surge is the layer that keeps BURNING: its ember clock runs
-    // 75 s instead of 11, because what is under it is a city on fire.
-    cloudColor(surge.material, VOL_DUST_HOT_V[deep ? 1 : 0],
-      VOL_DUST_ASH_V[wind ? 2 : (deep ? 1 : 0)],
-      cloudCool * 0.85, VOL_EMBER, wind ? clamp((t - 0.7) / 75, 0, 1) : null);
-    surge.visible = surge.material.opacity > 0.004;
-    flushVolume(surge);
-
-    // HOT BILLOWS — the RPG's layered, short-lived fireball logic translated
-    // into real 3D lobes around the core, so it roils instead of reading as one orb.
-    const hot = POOL.hotVol;
-    const hotIn = ease(t / 0.16);
-    const hotFade = Math.max(0, 1 - ease((t - 2.8) / 3.2));
-    const grow = 1 - Math.exp(-t * 5.5);
-    const fireR0 = L.R * grow * (1 + rise * 0.30) * (wind ? FIRE_R_K : 1);
-    const fireY = (L.by - L.y) + L.R * 0.55 +
-      (L.riseH * 0.92 - L.R * 0.55) * rise;
-    /* ---- THE HOT LAYER BECOMES THE GROUND FIRE (organic) -----------------
-       In the reference plate the ground end is still a glowing orange fire
-       lighting the dust from inside while the head has gone completely cold.
-       This layer already exists, already has ten additive lobes and already
-       costs one draw call — and it was being deleted at t=6 s along with the
-       fireball it was drawn for. So it MOVES instead: over t=4..8 each lobe
-       walks from its station inside the rising fireball down to a station in
-       the burning ground under the column, and its envelope keeps a low tail
-       out to t≈58 s. No new mesh, no new draw call, no new pool.
-       THE WALK IS TIMED TO HAPPEN UNDER THE DIM PART: hotFade has already
-       taken the layer from 0.82 to its 0.25 ember floor by t≈5, so what the
-       eye sees is the fireball's glow going out up top and the ground fire
-       coming up underneath, not ten balls sliding down a wire. */
-    const groundMix = wind ? ease((t - 4.0) / 4.0) : 0;
-    const fireLow = Math.max(L.R * 0.30, (L.surgeDraw || L.R * 4) * 0.34);
-    for (let i = 0; i < L.volN.hot; i++) {
-      const s = VOL_SEED.hot[i];
-      const a = s.a + t * 0.18;
-      const rr = fireR0 * s.r * 0.68;
-      const lobe = Math.max(0.01, fireR0 * s.s);
-      // the ground station: spread across the surge's inner third, sitting
-      // just off the deck, and a little wider than the fireball lobe was.
-      const gr = fireLow * (0.15 + s.r * 0.85);
-      const gy = L.R * 0.22 + lobe * 0.35;
-      const gl = Math.max(0.01, lobe * 1.25);
-      const px = Math.cos(a) * (rr + (gr - rr) * groundMix);
-      const pz = Math.sin(a) * (rr + (gr - rr) * groundMix);
-      const py = (fireY + s.y * fireR0 * 0.42) * (1 - groundMix) + gy * groundMix;
-      const ls = lobe + (gl - lobe) * groundMix;
-      putVolume(hot, i,
-        px, py, pz,
-        ls * 1.08, ls * (0.88 - 0.30 * groundMix), ls,
-        a, lobeHash(i + 419));
-    }
-    const pulse = flashRadiance(t, L.style);
-    hot.material.color.setHex(t < 0.45 ? 0xfff4cf : t < 1.8 ? 0xffa02e
-      : (wind && t > 9) ? 0xb8340c : 0xd94312);
-    /* The base-fire tail: 30% of the fireball's own peak, held while the city
-       burns and out by ~58 s — which is when the structural ledger's own
-       fires are the only thing left and this layer would be claiming heat
-       that is no longer there. max(), not +, so the fireball beat itself is
-       bit-identical in shape; only its floor changes. */
-    const emberTail = wind ? 0.30 * Math.max(0, 1 - ease((t - 10) / 48)) : 0;
-    hot.material.opacity = 0.82 * hotIn * Math.max(hotFade, emberTail) *
-      (0.18 + 0.82 * pulse);
-    hot.visible = hot.material.opacity > 0.004;
-    flushVolume(hot, false);    // additive: addition commutes, no sort
-    _volWrite = true;
-  }
-
-  function stepBill(b, t, L) {
-    const m = b.mesh, u = m.material.uniforms;
-    // riseAt/capYAt/bloomAt — the SHARED curves. These three numbers used to be
-    // recomputed with a copy-pasted smoothstep in three separate places (here,
-    // the fireball and cap roll), so "how high is the cloud" had three
-    // answers that only happened to agree.
-    const rise = riseAt(t, L);
-    const capY = capYAt(rise, L);
-    const bloom = bloomAt(t, L);
-    const fadeIn = ease((t - b.t0) / 0.7);
-    const fadeOut = 1 - ease((t - (L.dur - 9)) / 9);
-    let op = fadeIn * Math.max(0, fadeOut);
-    if (t < b.t0) { m.visible = false; return; }
-
-    // two INDEPENDENTLY scrolling noise lookups (the Fallout-4 trick) — driven
-    // off sequence time, not per-frame increments, so the roil runs at the
-    // same speed whatever the framerate is.
-    // THE CAP'S SCROLL IS NOT RANDOM. Its two lookups shear vertically in
-    // OPPOSITE directions, which on a vertical detail quad reads as material
-    // climbing the middle and falling down the edges — the same overturn the
-    // instanced lobes draw in 3D. The two layers agreeing stops the cap
-    // looking like a still image with noise crawling on it; every other role
-    // keeps its per-detonation random drift.
-    const shear = (CBZ.CONFIG.NUKE_FX_ROLL && b.role === "cap") ? 0.055 : 0;
-    u.uScroll.value.set(b.seed + b.sx * t, b.seed - (b.sy + shear) * t);
-    u.uScroll2.value.set(b.seed * 0.7 - b.sx * 0.42 * t, b.seed * 1.3 + (b.sy + shear * 1.6) * 0.37 * t);
-
-    /* THE DETAIL PLANES MUST TRACK THE FLATTENING HEAD. These quads are
-       surface texture painted over the 3D cap, so if the volume squats to
-       CAP_FLAT and the quads do not, the roiling detail ends up standing
-       proud of the silhouette it is supposed to be ON — a paper oval above
-       an anvil, which is the exact failure the `if (L.volume) op *= 0.46`
-       line at the bottom of this function exists to prevent. capFlatAt is
-       1 when NUKE_FX_V2 is off, so this line is inert on the revert path. */
-    const flat = capFlatAt(t, L);
-
-    switch (b.role) {
-      case "cap":
-        m.position.set(L.x, capY, L.z);
-        m.scale.set(L.capW * bloom, L.capW * bloom * 0.66 * flat, 1);
-        u.uLife.value = clamp(t / 9, 0, 1);
-        u.uErode.value = 0.14;
-        op *= 0.95;
-        break;
-      case "cap2":
-        // OFFSET, never a multiply on an absolute world Y — `capY` already
-        // includes the ground height, so `capY * 1.05` drifted the second cap
-        // further from the first the higher the terrain under ground zero was.
-        m.position.set(L.x + L.capW * 0.16, capY + L.capW * 0.05 * flat, L.z - L.capW * 0.1);
-        m.scale.set(L.capW * bloom * 0.72, L.capW * bloom * 0.5 * flat, 1);
-        u.uLife.value = clamp(t / 8 + 0.05, 0, 1);
-        u.uErode.value = 0.22;
-        op *= 0.7;
-        break;
-      case "stem": {
-        const h = Math.max(2, capY - L.y);
-        m.position.set(L.x, L.y + h * 0.5, L.z);
-        m.scale.set(L.stemW * (1 + rise * 0.7), h, 1);
-        u.uLife.value = clamp(0.30 + t / 26, 0, 1);
-        u.uErode.value = 0.30;
-        op *= 0.78;
-        break;
-      }
-      case "collar":
-        m.position.set(L.x, capY - L.capW * 0.30 * bloom * flat, L.z);
-        m.scale.set(L.capW * bloom * 0.62, L.capW * bloom * 0.26 * flat, 1);
-        u.uLife.value = clamp(0.22 + t / 18, 0, 1);
-        u.uErode.value = 0.26;
-        op *= 0.62;
-        break;
-      case "surge": {
-        // BASE SURGE: the skirt of pulverised ground that rolls OUT along the
-        // deck under the stem. Grows with the front, not with the column.
-        const g = ease((t - 1.6) / 6);
-        const w = L.surgeW * (0.35 + 1.5 * g);
-        const h = w * 0.19;      // LOW and wide (~5:1) — a surge that is a
-                                 // third as tall as it is wide is a second
-                                 // mushroom, and it clipped through the deck.
-        m.position.set(L.x, L.y + h * 0.42, L.z);
-        m.scale.set(w, h, 1);
-        u.uLife.value = clamp(0.42 + t / 24, 0, 1);
-        u.uErode.value = 0.34;
-        op *= 0.6 * (1 - ease((t - 9) / 9));
-        break;
-      }
-      default:
-        // an unknown role would otherwise be drawn at whatever position and
-        // scale the previous detonation left on this pooled mesh.
-        m.visible = false;
-        u.uOpacity.value = 0;
-        return;
-    }
-    // Once a 3D volume owns the silhouette, these planes are surface texture,
-    // not the cloud itself. Keeping them subordinate prevents a steep aircraft
-    // camera from revealing one enormous paper oval.
-    if (L.volume) op *= 0.46;
-    /* ...and once the IMPOSTOR owns it, they are nothing at all: the far
-       tier already carries its own baked surface detail, so leaving these
-       up would paint a second, differently-scaled cloud over it. The stem
-       and surge roles keep a share for the same reason the 3D stem does —
-       they are the near foreground. */
-    if (L.mix > 0) {
-      const keep = (b.role === "stem" || b.role === "surge") ? 0.55 : 1;
-      op *= Math.max(0, 1 - L.mix * keep);
-    }
-    u.uOpacity.value = Math.max(0, op);
-    m.visible = u.uOpacity.value > 0.004;
-    if (m.visible) faceCameraYaw(m);
-  }
-
-  /* ---- the whole timeline, one function --------------------------------- */
+  const _fogTint = new THREE.Color();
+  const _corner = new THREE.Vector3();
   function stepSequence(dt) {
     const L = live, P = L.style;
     L.t += dt;
     const t = L.t;
-
-    // a mode flip mid-sequence (menu, survival, prison) must never strand
-    // geometry in the world.
     if (L.mode && CBZ.game && CBZ.game.mode !== L.mode) { endSequence(); return; }
+    if (t >= L.dur) { endSequence(); return; }
 
-    // ---- scheduled world beats ------------------------------------------
     for (let i = L.pending.length - 1; i >= 0; i--) {
       if (t >= L.pending[i].t) {
         const p = L.pending.splice(i, 1)[0];
-        try { firePending(p); } catch (e) {}
+        if (p.shatter != null && CBZ.cityShatter) { try { CBZ.cityShatter(L.x, L.z, p.shatter); } catch (e) {} }
       }
     }
 
-    // ---- ATMOSPHERE: the cheapest "this is nuclear" cue in the whole file.
-    // One Color.lerp per frame on scene.fog.color paints the ENTIRE horizon,
-    // because core/sky.js@99 draws its dome's horizon stop from exactly this
-    // colour. No geometry, no fill, no draw call. And core/daynight.js@2
-    // re-copies its own fog colour every single frame, so this is stateless:
-    // there is nothing to restore, nothing to leak, and an abort mid-arc is
-    // clean by construction. (systems/weather.js@90 lerps rain-grey on top
-    // afterwards, which is the correct precedence — weather still wins.)
-    // THE SKY DIPS TOO. flashRadiance is the same curve the div and the fireball
-    // run on, so the horizon goes dark with the minimum and floods back with the
-    // second pulse instead of holding a flat white through the one beat the
-    // event is famous for. Past the pulse window it returns exactly 1 and the
-    // three-stage colour walk below is untouched.
-    const rad0 = flashRadiance(t, P);
-    if (CBZ.CONFIG.NUKE_FX_SKY && scene.fog && scene.fog.color) {
-      // white-out -> the fireball's own orange bounce -> ash overcast -> gone
-      let k, hex;
-      if (t < 0.55)      { hex = 0xfff4e2; k = (0.92 * (1 - t / 0.55) + 0.30) * (0.34 + 0.66 * rad0); }
-      else if (t < 3.5)  { hex = 0xff9440; k = 0.62 * (1 - (t - 0.55) / 2.95) + 0.22; }
-      else               { hex = 0x8d8478; k = 0.55 * Math.max(0, 1 - (t - 3.5) / (L.dur - 3.5)); }
-      /* ---- THE AIR CLEARS (NUKE_FX_ORGANIC) ---------------------------
-         OWNER: the whole screen stayed washed out through t=8 s and the
-         skyline never came back. The tail above decays over L.dur — which
-         NUKE_FX_AFTERMATH extended to 420 s — so the ash branch sat at ~0.55
-         of the way to overcast for SIX MINUTES. That is not what the plates
-         show: by three or four seconds the sky is sky again, the horizon is
-         back, and the glare that is left is LOCAL to the fireball.
-
-         So the sky tint gets its own, much shorter burn constant. fireLum's
-         2.6-second twin, and the split is the point:
-           LIGHT (onAlways 94.6, fireLum)  keeps tau = 5.2 s — nearby walls
-             and roofs really do stay lit by a burning city, and that term is
-             already distance-attenuated to a 0.22 floor past 2.4 km.
-           SKY/FOG (here)                  takes tau = 2.6 s — the ATMOSPHERE
-             between the camera and the horizon does not stay incandescent;
-             what is left after a few seconds is a thin dirty pall, and 0.16
-             is that pall.
-         Held flat until 1.5 s so the double-flash window is untouched, then:
-           t=2.0  0.85    t=3.5  0.55    t=5    0.38    t=8   0.23  of the
-         authored k, floor 0.16 for the rest of the arc. The 3.5 s frame keeps
-         a visible dirty sky; the 8 s frame gets its skyline back. */
-      if (organic()) k *= 0.16 + 0.84 * Math.exp(-Math.max(0, t - 1.5) / 2.6);
-      _fogTint.setHex(hex);
-      L.fogK = k;
-      scene.fog.color.lerp(_fogTint, clamp(k, 0, 0.95));
-    }
-
-    // ---- the invisible shock front (drives condensation and gameplay) -----
+    // The pressure front is invisible air; what you see is dust it lifts.
     const r = frontRadius(dt);
-    // Legacy A/B only. The nuclear base-surge InstancedMesh is the bounded,
-    // coherent dust read; this loop used to mint hundreds of ordinary puff
-    // sprites around an otherwise invisible circle.
-    if (L.legacyPuffs && t < L.frontLife && r < L.maxR) {
+    if (t < 9 && r < L.maxR && CBZ.cityDustKick) {
       L.dustAcc += dt;
-      const nd = Math.round(CBZ.qScale ? CBZ.qScale(0, 3) : 3);
-      if (L.dustAcc > 0.3 && nd > 0 && CBZ.cityDustKick) {
+      if (L.dustAcc > 0.18) {
         L.dustAcc = 0;
+        const nd = Math.round(CBZ.qScale ? CBZ.qScale(1, 4) : 3);
+        const cp = camPos();
         for (let i = 0; i < nd; i++) {
-          const a = rng() * 6.2832;
+          // bias the kicks toward the part of the ring the player can see
+          let a = rng() * 6.2832;
+          if (cp && rng() < 0.7) a = Math.atan2(cp.z - L.z, cp.x - L.x) + (rng() - 0.5) * 1.6;
           const px = L.x + Math.cos(a) * r, pz = L.z + Math.sin(a) * r;
-          try { CBZ.cityDustKick(px, floorAt(px, pz) + 0.6, pz, 1.5 + L.q); } catch (e) {}
+          if (cp && Math.hypot(px - cp.x, pz - cp.z) > 1600) continue;
+          try { CBZ.cityDustKick(px, floorAt(px, pz) + 0.6, pz, 2.2); } catch (e) {}
         }
       }
     }
 
-    /* ---- (a) THE WHITE DOME. The first 1.5 seconds, and the beat this
-       sequence never had. Radius is the Taylor-Sedov t^0.4 law (wdomeRadius,
-       which is where the arithmetic is written down); everything else here
-       is the handover.
-
-       THE DOUBLE FLASH IS ON IT TOO, and that matters more here than
-       anywhere: this is the only OPAQUE layer in the sequence, so when the
-       shock front goes dark the dome does not merely dim — it stops hiding
-       what is behind it, and the skyline it was silhouetting comes back for
-       a few frames before the second pulse buries it again. That is the
-       physical reading of the minimum and it is free.
-
-       THE LIFT is the last thing it does: over WDOME_OUT the dome fades and
-       rises off its seat, revealing the additive fireball shell that has
-       been growing behind it since t=0. Nothing is created at the handover;
-       the dome is the opaque reading of the same ball and the shell is the
-       graded one, so they cannot disagree about where the fireball is. */
-    if (L.wdome) {
-      const rad = wdomeRadius(t, L);
-      // it lifts as it lets go — the buoyant rise starts at about 1 s, and
-      // riseAt's own window opens at 0.9, so this is the seam between them.
-      const lift = clamp((t - WDOME_T) / WDOME_OUT, 0, 1);
-      L.wdome.position.set(L.x, L.wdomeY + rad * 0.30 * lift, L.z);
-      // never a zero scale: t^0.4 is exactly 0 at t=0 and a singular matrix
-      // is how a mesh ends up with NaN in its bounds. (frustumCulled is
-      // already off via park(), so a 1 cm sphere for one frame costs nothing.)
-      const sr = Math.max(0.01, rad);
-      L.wdome.scale.set(sr, sr * (0.92 + 0.16 * lift), sr);
-      // Opaque through the first second (the plate has NO detail inside it),
-      // then out. rad0 is the shared pulse: one curve, and now five readers.
-      const op = (1 - ease(lift)) * (0.10 + 0.90 * rad0);
-      L.wdome.material.opacity = Math.max(0, op);
-      if (lift >= 1 || L.wdome.material.opacity <= 0.004) {
-        L.wdome.visible = false; L.wdome = null;
-      }
+    // Sky: a warm, short-lived tint. The air does not stay incandescent.
+    if (C.NUKE_FX_SKY && scene.fog && scene.fog.color) {
+      const burn = Math.exp(-Math.max(0, t - 0.4) / 3.2);
+      const d = camDist(L.x, L.by + L.R, L.z);
+      const near = clamp(1.15 - d / 9000, 0.25, 1);
+      let k;
+      if (t < 0.5) { _fogTint.setHex(0xfff1dc); k = 0.55 * pulseK(t, P); }
+      else { _fogTint.setHex(0xff8a3c); k = 0.42 * burn; }
+      k *= near * (L.styleName === "moab" ? 0.4 : 1);
+      L.fogK = k;
+      if (k > 0.004) scene.fog.color.lerp(_fogTint, clamp(k, 0, 0.8));
     }
 
-    // ---- FIREBALL: ignite, stall, rise, cool -----------------------------
-    const rise = riseAt(t, L);                              // ONE curve, four readers
-    if (L.shell) {
-      const grow = 1 - Math.exp(-t * 5.5);                 // fast punch, then stall
-      // FIRE_R_K: the DRAWN ball is the plate's 200-240 m near-surface
-      // fireball, not the 126 m air-burst R_max the model publishes. See the
-      // flash-radius block by WDOME_K for the derivation.
-      const rad = L.R * (organic() ? FIRE_R_K : 1) * (grow * (1 + rise * 0.35));
-      const y = L.by + L.R * 0.55 + (L.riseH * 0.92 - L.R * 0.55) * rise;
-      L.shell.position.set(L.x, y, L.z);
-      L.shell.scale.setScalar(Math.max(0.01, rad));
-      const u = L.shell.material.uniforms;
-      if (organic()) {
-        /* THE BOIL. A fireball is Rayleigh-Taylor unstable from the moment
-           the shock breaks away: its surface churns, and film of the first
-           two seconds is nothing like a smooth sphere. uBoil ramps in over
-           0.8 s (before that the ball is still optically an isothermal
-           sphere and IS smooth — the instability needs time to grow) and
-           then decays on a 1.6 s constant to a 30% floor as the ball cools
-           and the structure freezes into the rising cloud.
-           uTime runs at 2.2x sequence time: the octaves are unit-sphere
-           frequencies, so this sets how fast cells churn, not how fast the
-           ball moves. uMottle is the brightness half of the same story and
-           is deliberately held at 0.5 — at 1.0 the ball develops dark
-           patches, and a fireball has no cold spots, only hotter ones. */
-        u.uTime.value = t * 2.2;
-        u.uBoil.value = ease(t / 0.8) *
-          (0.30 + 0.70 * Math.exp(-Math.max(0, t - 0.8) / 1.6));
-        u.uMottle.value = 0.5 * ease(t / 0.6);
-      }
-      const age = clamp(t / 7, 0, 1);
-      rampColor(u.uRimColor.value, age * 0.55);
-      rampColor(u.uCoreColor.value, Math.max(0, age * 0.9 - 0.04));
-      /* COLOUR EVOLUTION, and the two things the shared RAMP alone cannot say.
+    // ---- the cloud ------------------------------------------------------
+    const S = shapeAt(L, t, _S);
+    L.rollS = 1.4 * (1 - Math.exp(-t / 12)) + 0.006 * t;   // poloidal roll: fast early, bounded (no winding)
+    L.rise += dt * (S.stemR > 0 ? 35 + 60 * Math.exp(-t / 8) : 0);
+    U.uHead.value.set(S.ring, Math.max(4, S.tube), S.cy, Math.max(0.3, S.flat));
+    U.uStem.value.set(S.stemR, S.stemTop, S.stemFlare, S.stemP);
+    U.uSurge.value.set(S.surgeR, S.surgeTube, S.surgeFlat, S.surgeP);
+    U.uShell.value.set(S.shellR, S.shellA, L.by - L.y, Math.max(8, S.shellR * 0.05));
+    U.uHeat.value.set(S.heat, S.emit, S.glow, S.fireLight);
+    U.uRoll.value.set(L.rollS, L.rise, L.rollS * 0.8, t);
+    U.uCool.value = S.cool;
+    U.uFade.value = S.fade;
 
-         (1) BLUE-WHITE FIRST. The RAMP starts at a warm white because it is
-             shared with the cloud billboards, but the isothermal ball is tens of
-             thousands of kelvin for the first fraction of a second and reads
-             blue-white. One lerp toward BLUE_WHITE, gone by ~0.35 s, after which
-             the RAMP owns the whole cooling arc (white -> yellow -> orange ->
-             deep red) exactly as before.
+    // the box that holds every live part
+    const headR = S.ring + S.tube * 1.25;
+    const surgeR = S.surgeP > 0.01 ? S.surgeR + S.surgeTube * 1.4 : 0;
+    const shellR = S.shellA > 0.0005 ? S.shellR : 0;
+    const halfW = Math.max(headR, S.stemR * (1 + S.stemFlare) * 1.2, surgeR, shellR) + 10;
+    const top = Math.max(S.cy + S.tube * S.flat * 1.5 + 20, shellR ? (L.by - L.y) + shellR : 0);
+    U.uBoxMin.value.set(L.x - halfW, L.y - 2, L.z - halfW);
+    U.uBoxMax.value.set(L.x + halfW, L.y + top, L.z + halfW);
+    mesh.position.set(L.x, L.y - 2 + (top + 2) * 0.5, L.z);
+    mesh.scale.set(halfW * 2, top + 2, halfW * 2);
+    L.box.min[0] = L.x - halfW; L.box.min[1] = L.y; L.box.min[2] = L.z - halfW;
+    L.box.max[0] = L.x + halfW; L.box.max[1] = L.y + top; L.box.max[2] = L.z + halfW;
 
-         (2) BRIGHTER THAN THE SUN, literally. core/renderer.js runs
-             CustomToneMapping over every non-raw ShaderMaterial, so a colour
-             ABOVE 1.0 is not clipped — it rolls off. Pushing the core to ~3.4x
-             white is therefore how this file draws "far brighter than the sun"
-             with no bloom pass, no second material and no extra fill: the tone
-             mapper flattens the middle of the ball to hard white and leaves the
-             rim graded, which is exactly what a fireball looks like on film.
-             The gain rides flashRadiance, so it COLLAPSES at the minimum and
-             floods back on the second pulse. That — not the DOM div — is what
-             makes the double flash a property of the explosion. */
-      const blue = 1 - ease(t / 0.35);
-      if (blue > 0.001) {
-        u.uRimColor.value.lerp(BLUE_WHITE, blue * 0.8);
-        u.uCoreColor.value.lerp(BLUE_WHITE, blue);
-      }
-      const gain = 1 + 2.4 * rad0 * (1 - ease((t - 0.1) / 1.7));
-      u.uCoreColor.value.multiplyScalar(gain);
-      u.uRimColor.value.multiplyScalar(1 + (gain - 1) * 0.45);
-      /* SEQUENCED, NOT STACKED: the fireball shell is the single most expensive
-         layer here (a DoubleSide additive sphere that can fill most of the
-         screen from close range), so it is retired at 3.9s — the exact moment
-         the toroidal roll below fades in, rather than five seconds after it.
-         That one number is the difference between 8 concurrent layers and 7,
-         and it is why the roll could be pulled half a second earlier for free.
-         The `rad0` factor is the shock front swallowing the ball: the alpha
-         goes with the radiance, so at the minimum the ball is not merely hidden
-         by the veil, it has actually stopped emitting. */
-      u.uOpacity.value = Math.max(0, Math.min(1, t / 0.12) * (1 - ease((t - 2.15) / 1.75)) *
-                                     (0.14 + 0.86 * rad0));
-      if (u.uOpacity.value <= 0.004 && t > 3.5) { L.shell.visible = false; L.shell = null; }
+    // step budget: quality tier, and fewer when the volume fills the view
+    const cp = camPos();
+    let steps = [28, 36, 48, 60, 72][Math.round(tier())];
+    if (cp) {
+      const cx = clamp(cp.x, L.x - halfW, L.x + halfW), cy = clamp(cp.y, L.y, L.y + top), cz = clamp(cp.z, L.z - halfW, L.z + halfW);
+      const dIn = Math.hypot(cp.x - cx, cp.y - cy, cp.z - cz);
+      const span = Math.max(halfW * 2, top);
+      const cover = dIn <= 0 ? 1 : clamp(span / (dIn * 1.1), 0, 1);   // ~fraction of the view it spans
+      steps *= 1 - 0.4 * cover;
     }
+    L.steps = steps;
+    U.uSteps.value = steps;
 
-    /* ---- SHOCK VEIL -> WILSON CLOUD. ONE shell, TWO readings, and the second
-       is what the first becomes.
-
-         0.06-0.30  the front goes OPAQUE and swallows the fireball. This is the
-                    physical CAUSE of the minimum, and until now the file drew
-                    the effect (a dip on a white div) without ever drawing the
-                    cause. It is rendered at renderOrder 9, ABOVE the additive
-                    fireball, because that is the only way one transparent layer
-                    can hide an additive one — see the note in buildPool.
-         0.30-0.62  it thins as the second thermal pulse burns back through it.
-         0.62-1.90  what is left is the WILSON CONDENSATION CLOUD: the rarefaction
-                    behind the front drops the pressure, water condenses, and a
-                    transient near-white SHELL stands in the air and then
-                    evaporates. It is a shell and never a ball — uCore 0.06 with
-                    uRimPow 2.6 is exactly that, and it was already right.
-
-       Both readings are the same expanding sphere at the same wave speed, so
-       this costs one retiming and no new layer. NUKE_FX_VEIL false returns the
-       old behaviour: start at 0.28, one flat 0.34 alpha, no opaque phase. */
-    if (L.dome) {
-      const veil = CBZ.CONFIG.NUKE_FX_VEIL && P.dbl;
-      const t0 = veil ? 0.06 : 0.28;
-      if (t >= t0) {
-        const dr = Math.min(r, L.R * (veil ? 1.35 : 1) + (t - t0) * L.spd * 0.85);
-        L.dome.visible = true;
-        L.dome.position.set(L.x, L.by + dr * 0.16, L.z);
-        L.dome.scale.set(dr, dr * 0.72, dr);
-        let op;
-        if (!veil) {
-          op = 0.34 * (1 - ease((t - 0.5) / 1.1));
-        } else {
-          // ramp to near-opaque across the first pulse's decay, then hand over
-          // to the condensation reading on the same curve the fireball uses, so
-          // the veil is thickest at exactly the frame the fireball is dimmest.
-          const opaque = ease(t / 0.20) * (1 - rad0);
-          const wilson = 0.30 * (1 - ease((t - 0.62) / 1.25));
-          op = Math.max(0.88 * opaque, wilson);
-        }
-        L.dome.material.uniforms.uOpacity.value = Math.max(0, op);
-        if (t > 1.9) { L.dome.visible = false; L.dome = null; }
-      }
+    // the lights of the world, read every frame (daynight moves them)
+    const sun = CBZ.sun, hemi = CBZ.hemi;
+    if (sun) {
+      _sunV.copy(sun.position);
+      if (sun.target) _sunV.sub(sun.target.position);
+      if (_sunV.lengthSq() < 1e-6) _sunV.set(0.4, 0.8, 0.2);
+      _sunV.normalize();
+      if (_sunV.y < 0.02) _sunV.y = 0.02;
+      U.uSunDir.value.copy(_sunV).normalize();
+      U.uSunCol.value.copy(sun.color).multiplyScalar(Math.min(3, sun.intensity || 0));
     }
-
-    /* The coherent nuclear path is the bounded depth-writing lobe field from
-       handoff to fade-out. The baked mushroom remains only as a flag-off
-       legacy/fallback tier; making it the default is what exposed the entire
-       cloud as one camera-facing picture. */
-    const mix = L.coherentCloud ? 0 : (real() ? impostorMix(L) : 0);
-    L.mix = mix;
-    stepImpostor(t, L, mix);
-    /* ---- AFTERMATH MATURATION (NUKE_FX_AFTERMATH) -------------------------
-       After the 34 s formation sequence the SAME lobe field keeps growing
-       toward the researched mature cloud (nukeDims: 5.1 km cap, centre at
-       8 km) over ~3 minutes — a real 16 kt cloud takes 4-6 minutes to
-       stabilise, and the drawn one stops pretending to be finished at 34 s.
-       This mutates the live targets the volume writers already read
-       (capW/riseH/stemW), so stepVolumes costs exactly what it did; the
-       12 Hz matrix-write gate in stepVolumes bounds the aftermath's cost. */
-    if (L.matureFrom && t > L.matureFrom && L.drawDims && L.dims) {
-      const F = L.drawDims, D = L.dims;
-      const k = ease(clamp((t - L.matureFrom) / 170, 0, 1));
-      L.capW = (F.capW + (D.capW - F.capW) * k) / BLOOM_MAX;
-      L.capH = F.capH + (D.capH - F.capH) * k;
-      L.capThick = L.capH / Math.max(1, L.capW * BLOOM_MAX);
-      L.riseH = F.capY + (D.capY - F.capY) * k;
-      L.stemW = (F.stemW + (D.stemW - F.stemW) * k) * 0.5;
+    if (hemi) {
+      U.uSkyCol.value.copy(hemi.color).multiplyScalar(Math.min(3, hemi.intensity || 0) * 0.9);
+      U.uGndCol.value.copy(hemi.groundColor || hemi.color).multiplyScalar(Math.min(3, hemi.intensity || 0) * 0.7);
     }
-    // The 3D volumes carry the actual mushroom silhouette from every angle.
-    stepVolumes(t, L, mix);
-
-    // ---- procedural surface detail over the 3D cap/stem/surge -------------
-    for (let i = 0; i < L.bills.length; i++) {
-      const b = L.bills[i];
-      // Stagger secondary texture lobes until the condensation veil has thinned.
-      if (b.t0 == null) {
-        b.t0 = b.role === "stem" ? 0.8
-             : b.role === "cap" ? 0.9
-             : b.role === "surge" ? 1.4
-             : b.role === "cap2" ? 1.9
-             : 2.2;                          // collar
-      }
-      stepBill(b, t, L);
+    if (scene.fog && scene.fog.color) {
+      U.uFogCol.value.copy(scene.fog.color);
+      U.uHazeL.value = Math.max(6000, (scene.fog.far || 1000) * 7);
     }
-
-    // Listener pressure, shake and sound are emitted by the same impact field
-    // that advances `r`; the visual sequence never invents a second lens clock.
-
-    // ---- ASH FALL — the only per-sequence allocation, eight seconds late --
-    // NOTE the count is NOT qScaled here: systems/fx.js's particleCloud already
-    // multiplies `count` by CBZ.qScale(0.4, 1) internally. Scaling it twice (as
-    // this used to) meant tier 2 got 0.7*0.7 = HALF the motes it asked for and
-    // tier 0 got literally zero.
-    if (P.ash && CBZ.CONFIG.NUKE_FX_ASH && !L.ash && t > 8 && CBZ.fx && CBZ.fx.particleCloud) {
-      const n = 260;
-      if (L.q > 0.3) {                    // tier 2+ only
-        try {
-          L.ash = CBZ.fx.particleCloud({
-            count: n, radius: 62, top: 46, bottom: -2, mode: "fall",
-            vMin: 1.6, vMax: 4.2, drift: 1.1, driftZ: 0.5,
-            color: 0x9a9082, size: 0.24, opacity: 0.42,
-          });
-          L.ash.setActive(0.9);
-        } catch (e) { L.ash = null; }
-      }
-    }
-    if (L.ash) {
-      const c = camPos();
-      const fade = t > L.dur - 8 ? Math.max(0, 1 - (t - (L.dur - 8)) / 8) : 1;
-      L.ash.setActive(0.9 * fade);
-      try { L.ash.update(dt, c ? c.x : L.x, c ? c.y : L.y + 20, c ? c.z : L.z); } catch (e) {}
-    }
-
-    if (t >= L.dur) endSequence();
   }
 
   function endSequence() {
-    const L = live;
     live = null;
-    // Meshes are session-lifetime pool members: park them, never dispose.
-    // Runs even from a half-built sequence (a throw in beginSequence), which
-    // is the only way geometry could ever be stranded visible in the world.
-    const mm = [
-      POOL.shell, POOL.dome, POOL.wdome, POOL.imp,
-      POOL.capVol, POOL.stemVol, POOL.surgeVol, POOL.hotVol,
-      POOL.crownVol, POOL.glowVol,
-    ];
-    for (let i = 0; i < mm.length; i++) {
-      const m = mm[i];
-      if (!m) continue;
-      m.visible = false;
-      if (m.isInstancedMesh) m.count = 0;
-      if (m.material && m.material.uniforms && m.material.uniforms.uOpacity) m.material.uniforms.uOpacity.value = 0;
-      if (m.material && m.material.opacity != null) m.material.opacity = 0;
-    }
-    for (let i = 0; i < POOL.bills.length; i++) {
-      POOL.bills[i].visible = false;
-      POOL.bills[i].material.uniforms.uOpacity.value = 0;
-    }
-    // The ash cloud is the one thing we built: it is ours to dispose.
-    if (L && L.ash) { try { L.ash.dispose(); } catch (e) {} }
+    if (mesh) mesh.visible = false;
   }
   CBZ.cityNukeFxAbort = endSequence;
 
   /* ============================================================
-     THE NEAR FIELD
-
-     A coherent nuke is now visual-only here: its dome/fireball/cloud are this
-     composer's job, while impactbus's analytic detonation field owns people,
-     cars, buildings, glass, shake and the pressure report. Calling crashfx's
-     RPG/airstrike prefab underneath that path was the hidden second explosion:
-     hundreds of puffs, an immediate cannon sound and grenade-style body launch.
-
-     MOABs and an explicit master-revert still reuse that mature conventional
-     primitive. Its internal radius*power convention is preserved so the
-     fallback nuke remains a 126 m fireball rather than the historical 14 m bug.
+     THE COMPOSERS — what the bus calls: fn(x, y, z, row, opts). Draw only.
+     A MOAB (or a master-revert) also fires crashfx's conventional near field.
      ============================================================ */
   function nearField(x, y, z, row, opts) {
-    // The default nuclear composer already draws the flash, dome, fireball and
-    // cloud; the analytic field owns every consequence and the eventual sound.
-    // Calling the generic airstrike here used to add a hidden RPG damage pass,
-    // immediate cannon report, shake/hitstop and vehicle cascade underneath it.
-    // Keep that primitive only for MOABs and the explicit master-revert path.
-    if ((row.id || "nuke") === "nuke" && CBZ.CONFIG.NUKE_FX_V1 !== false &&
-        coherentCloud() && POOL.shell && POOL.capVol) return;
     const fn = CBZ.cityAirstrikeExplosion || CBZ.cityExplosion;
     if (!fn) return;
     try {
       fn(x, z, {
         power: Math.max(0.5, (+row.power || 4) * (opts.scale > 0 ? +opts.scale : 1)),
-        radius: Math.max(1, +row.radius || 14),
-        y: y,
+        radius: Math.max(1, +row.radius || 14), y: y,
         byPlayer: !!opts.byPlayer, noDamage: !!opts.noDamage,
         ordnance: row.id || "nuke", _impact: true,
-        // The nuclear composer owns the dome, fireball and cloud. Asking the
-        // generic airstrike prefab for another ~400 flame/smoke sprites is the
-        // obscuring pile and frame spike this path exists to remove; damage,
-        // structure damage, sound, shake and hit-stop still run in crashfx.
-        noVisual: (row.id || "nuke") === "nuke" && coherentCloud(),
       });
     } catch (e) {}
   }
-
-  /* ============================================================
-     THE COMPOSERS — what the bus actually calls.
-     `fn(x, y, z, row, opts)`; draws only.
-     ============================================================ */
   function compose(styleName) {
     return function (x, y, z, row, opts) {
       opts = opts || {};
       row = row || {};
-      if (!CBZ.CONFIG.NUKE_FX_V1) {                 // master revert
-        nearField(x, y, z, row, opts);
-        return;
-      }
-      nearField(x, y, z, row, opts);
+      if (!C.NUKE_FX_V1 || styleName === "moab") nearField(x, y, z, row, opts);
+      if (!C.NUKE_FX_V1) return;
       if (live) {
-        // The photographed cloud pool is one shared GPU spectacle. A second
-        // flash does not double its fill cost; impactbus still compiles that
-        // detonation's complete people/car/building/glass/audio field after
-        // this composer returns, so no physical consequence is discarded.
+        // one cloud on screen at a time; a second flash still lands
         if (!opts.quiet) whiteout(STYLE[styleName].white * 0.4, 0.6, false);
-        return;
+        if (live.styleName === "moab" && styleName === "nuke") endSequence(); else return;
       }
       try { beginSequence(x, y, z, styleName, row, opts); } catch (e) { try { endSequence(); } catch (e2) {} }
     };
@@ -4550,25 +903,15 @@
   const composeNuke = compose("nuke");
   const composeMoab = compose("moab");
 
-  /* ---- PUBLIC: fire the spectacle without the bus ------------------------ */
-  // CBZ.cityNukeFX(x, y, z, opts) — opts {kind:"nuke"|"moab", power, radius,
-  // wave, quiet, noDamage, byPlayer, scale}. Used by city/strategic.js's
-  // nukeDetonate (which can now drop its private cloud) and by probes.
   CBZ.cityNukeFX = function (x, y, z, opts) {
     opts = opts || {};
     const kind = opts.kind === "moab" ? "moab" : "nuke";
     let row = null;
     if (CBZ.impact && CBZ.impact.row) { try { row = CBZ.impact.row(kind); } catch (e) {} }
-    // Defaults MIRROR systems/impactbus.js's rows verbatim (power 9 / radius 14
-    // for the nuke, 4.6 / 26 for the MOAB) so a probe that fires this with no bus
-    // loaded gets the same 126 m fireball the real row produces. `radius` here
-    // is the row field, NOT the effective reach — fireR() does that multiply.
     row = Object.assign(
       { id: kind, power: kind === "moab" ? 4.6 : 9, radius: kind === "moab" ? 26 : 14,
-        wave: kind === "moab" ? { speed: 140, maxR: 320 }
-          : { model: "nuclear", speed: 343, maxR: 3276 } },
-      row || {},
-      opts.row || {}
+        wave: kind === "moab" ? { speed: 140, maxR: 320 } : { model: "nuclear", speed: 343, maxR: 3276 } },
+      row || {}, opts.row || {}
     );
     if (opts.power != null) row.power = opts.power;
     if (opts.radius != null) row.radius = opts.radius;
@@ -4578,57 +921,22 @@
   };
 
   /* ============================================================
-     CBZ.cityBombWalk(points, opts) — CARPET BOMBING.
-
-     Research: a bomb walk is a SEQUENCE, not an effect. ONE pooled small-
-     explosion prefab fired N times with staggered delays matching release
-     interval x ground speed, with dust merging along the line. No mushroom
-     stages, no per-bomb bespoke FX.
-
-     points: [{x,z} | {x,y,z}] along the ground track (the B-2's release
-             ladder). Decimated, never truncated, so a long stick keeps its
-             LENGTH when the budget shrinks.
-     opts:   { kind, interval, delay, detonate, by, byPlayer, dirx, dirz,
-               scale, onEach }
-
-     TWO MODES, and the DEFAULT IS DRAW-ONLY ON PURPOSE:
-
-       detonate: false (default) — walks the DUST along the line and nothing
-         else. This is what city/strategic.js's B-2 bomb run wants: it already
-         simulates every falling bomb and detonates it on impact, so a walk
-         that also detonated would bill every bomb TWICE (double damage,
-         double kills, double wanted level). The dust merge is the one thing
-         its run was missing.
-       detonate: true — the full prefab walk: one ordnance row fired N times
-         on the stagger, each through CBZ.detonate so the structural ledger,
-         the kill bus and the crime system all see it exactly once. For any
-         caller that has no bomb sim of its own (a scripted mission strike, a
-         cutscene, an off-screen bombardment).
-
-     `delay` offsets the whole walk, which is how a caller with a real fall
-     time (release altitude -> impact) lines the dust up with its own bombs.
+     CBZ.cityBombWalk(points, opts) — carpet bombing as a SEQUENCE: one
+     pooled small blast fired along the line on a stagger, dust merging
+     between impacts. Default is draw-only (the B-2 run simulates and
+     detonates its own bombs); `detonate: true` fires each through
+     CBZ.detonate for callers without a bomb sim. Decimated to WALK_POINTS,
+     never truncated, so a stick keeps its length.
      ============================================================ */
   const walks = [];
   const WALK_MAX = 2, WALK_POINTS = 24;
-
   CBZ.cityBombWalk = function (points, opts) {
     opts = opts || {};
     if (!points || !points.length) return null;
     const kind = opts.kind || "bomb";
     const interval = clamp(opts.interval == null ? 0.24 : +opts.interval, 0.06, 3);
-
-    // Decimate to the cap. In DRAW-ONLY mode the quality tier thins the dust
-    // line too (tier 0 drops ~40% of the puffs); in DETONATE mode it must NOT,
-    // because the number of bombs that actually go off is gameplay and has to
-    // be identical on every client at every quality setting.
-    // NOTE FOR CALLERS: in DETONATE mode decimation past WALK_POINTS drops real
-    // ordnance, so a 60-point stick delivers 20 warheads, not 60. That is why
-    // city/strategic.js's RUN_MAX is 24 — exactly WALK_POINTS. Read `.points`
-    // off the returned handle rather than trusting your own count if you might
-    // ever exceed it, or the number you announce to the player will be a lie.
     const willDetonate = opts.detonate === true;
-    const budget = willDetonate
-      ? WALK_POINTS
+    const budget = willDetonate ? WALK_POINTS
       : Math.max(2, Math.round(WALK_POINTS * (CBZ.qScale ? CBZ.qScale(0.55, 1) : 1)));
     const stride = Math.max(1, Math.ceil(points.length / budget));
     const pts = [];
@@ -4638,19 +946,16 @@
       pts.push({ x: +p.x || 0, y: p.y == null ? null : +p.y, z: +p.z || 0 });
     }
     if (!pts.length) return null;
-
     const walk = {
       pts: pts, i: 0, t: -Math.max(0, +opts.delay || 0), interval: interval, kind: kind,
-      detonate: willDetonate,
-      by: opts.by || null, byPlayer: !!opts.byPlayer, scale: opts.scale || 1,
-      dirx: opts.dirx || 0, dirz: opts.dirz || 0, onEach: opts.onEach || null,
-      prev: null, dead: false,
+      detonate: willDetonate, by: opts.by || null, byPlayer: !!opts.byPlayer, scale: opts.scale || 1,
+      dirx: opts.dirx || 0, dirz: opts.dirz || 0, onEach: opts.onEach || null, prev: null, dead: false,
     };
-    if (CBZ.CONFIG.BOMB_WALK_V1 === false) {          // revert: no stagger at all
+    if (C.BOMB_WALK_V1 === false) {
       for (let i = 0; i < pts.length; i++) dropOne(walk, pts[i]);
       return { cancel: function () {}, points: pts.length };
     }
-    while (walks.length >= WALK_MAX) walks.shift();   // oldest walk gives way
+    while (walks.length >= WALK_MAX) walks.shift();
     walks.push(walk);
     return {
       points: pts.length,
@@ -4659,26 +964,19 @@
     };
   };
   CBZ.cityBombWalkActive = function () { return walks.length; };
-
   function dropOne(walk, p) {
     const y = p.y == null ? floorAt(p.x, p.z) + 1.2 : p.y;
-    // ---- the ordnance itself (opt-in — see the two-modes note above) ------
     if (walk.detonate) {
       if (CBZ.detonate) {
         try {
           CBZ.detonate(p.x, y, p.z, walk.kind, {
-            by: walk.by, byPlayer: walk.byPlayer, scale: walk.scale,
-            dirx: walk.dirx, dirz: walk.dirz,
+            by: walk.by, byPlayer: walk.byPlayer, scale: walk.scale, dirx: walk.dirx, dirz: walk.dirz,
           });
         } catch (e) {}
       } else if (CBZ.cityAirstrikeExplosion) {
-        // degrade-safe: the bus is optional, the walk is not
         try { CBZ.cityAirstrikeExplosion(p.x, p.z, { power: 2.4, radius: 13, byPlayer: walk.byPlayer }); } catch (e) {}
       }
     }
-    // ---- DUST MERGING along the line: the stick reads as ONE rolling wall
-    // of dust rather than N unrelated craters. Pooled crashfx kicks only —
-    // no pool of ours, and the count rides the quality tier.
     if (CBZ.cityDustKick) {
       try { CBZ.cityDustKick(p.x, y, p.z, walk.detonate ? 1.4 : 2.0); } catch (e) {}
       const prev = walk.prev;
@@ -4694,15 +992,12 @@
     walk.prev = p;
     if (walk.onEach) { try { walk.onEach(p.x, y, p.z); } catch (e) {} }
   }
-
   function stepWalks(dt) {
     for (let w = walks.length - 1; w >= 0; w--) {
       const walk = walks[w];
       if (walk.dead) { walks.splice(w, 1); continue; }
       walk.t += dt;
-      // bounded catch-up: a stalled frame drops at most 3 bombs at once rather
-      // than dumping the whole stick in one frame.
-      let fired = 0;
+      let fired = 0;          // a stalled frame drops at most 3 bombs at once
       while (walk.i < walk.pts.length && walk.t >= walk.i * walk.interval && fired < 3) {
         dropOne(walk, walk.pts[walk.i]);
         walk.i++; fired++;
@@ -4712,9 +1007,8 @@
   }
 
   /* ============================================================
-     LAZY WIRING — register with the bus whenever it shows up, whatever the
-     script order ends up being (city/nukefx.js may legitimately load before
-     systems/impactbus.js). Idempotent, one boolean test per frame.
+     WIRING — register with the bus whenever it shows up; wrap crashfx's
+     run-reset so a fresh run never inherits a cloud.
      ============================================================ */
   let wired = false;
   function wire() {
@@ -4723,23 +1017,12 @@
     try {
       CBZ.impact.fx("nuke", composeNuke);
       CBZ.impact.fx("moab", composeMoab);
-      // The bus's "moab" row still names the generic "heavy" composer. Point
-      // it here — but ONLY if nobody has changed it, so when the bus's own
-      // table adopts fx:"moab" this becomes a no-op instead of a fight.
-      if (CBZ.CONFIG.NUKE_FX_MOAB && CBZ.impact.row && CBZ.impact.define) {
+      if (C.NUKE_FX_MOAB && CBZ.impact.row && CBZ.impact.define) {
         const row = CBZ.impact.row("moab");
-        if (row && row.fx === "heavy") {
-          const spec = Object.assign({}, row);
-          spec.fx = "moab";
-          CBZ.impact.define("moab", spec);
-        }
+        if (row && row.fx === "heavy") CBZ.impact.define("moab", Object.assign({}, row, { fx: "moab" }));
       }
     } catch (e) {}
   }
-
-  // A fresh run must not inherit a mushroom cloud. crashfx.js's
-  // cityBlastFxReset is the existing run-reset chokepoint; wrap it the same
-  // lazy, marker-copying way structural.js wraps cityGlassReset.
   let resetWrapped = false;
   function wrapReset() {
     if (resetWrapped) return;
@@ -4756,292 +1039,87 @@
     CBZ.cityBlastFxReset = wrapped;
   }
 
-  /* ============================================================
-     THE ONE UPDATER. onAlways(9.62) — immediately after crashfx.js's own
-     pooled-FX ticker at 9.5 (9.6 is taken by city/vehicles.js), and on the
-     ALWAYS chain on purpose: a nuke that kills the player must still finish
-     its arc and clean up its geometry while the run is over, instead of
-     freezing a 300-metre cloud in the sky and a white sheet over the menu.
-     It also has to run AFTER core/daynight.js@2 (which re-copies scene.fog
-     .color every frame) and BEFORE core/sky.js@99 (which paints its horizon
-     stop FROM scene.fog.color) — that ordering is what makes the atmosphere
-     drive above both self-restoring and free.
-     Costs three length/null checks when nothing is exploding.
-     ============================================================ */
+  /* onAlways(9.62): after crashfx@9.5 and daynight@2 (which rewrites fog
+     colour every frame, so the tint above is stateless), before sky@99
+     (which paints its horizon FROM fog colour). On the ALWAYS chain so a
+     nuke that kills the player still finishes and cleans up. */
   if (CBZ.onAlways) CBZ.onAlways(9.62, function (dt) {
     wire();
     wrapReset();
+    if (!noise.done && CBZ.game && CBZ.game.state === "playing") armIdleBuild();
     if (!live && !walks.length && !flash) return;
-    const d = dt > 0.25 ? 0.25 : dt;     // spike-cap: a stalled frame must not teleport the front
+    const d = dt > 0.25 ? 0.25 : dt;
     if (flash) { try { stepFlash(d); } catch (e) { flash = null; } }
     if (live) { try { stepSequence(d); } catch (e) { endSequence(); } }
     if (walks.length) { try { stepWalks(d); } catch (e) { walks.length = 0; } }
   });
 
-  /* ============================================================
-     (e) THE FIREBALL LIGHTS THE WORLD — onAlways(94.6).
-
-     scene.fog already turned the SKY (see the atmosphere drive above, which
-     core/sky.js paints its horizon band from). Nothing turned the GROUND,
-     and that is the difference between a picture of an explosion and being
-     next to one: in the reference plate every surface for kilometres is
-     orange, and the shadows all point away from the cloud.
-
-     WHY 94.6 AND NOT 9.62 (this is the whole trick, and getting it wrong
-     would have made the feature a silent no-op):
-       core/loop.js runs EVERY onUpdate, then EVERY onAlways. Inside the
-       always chain the order is
-           core/daynight.js @2      writes sun/hemi colour + intensity
-           city/nukefx.js   @9.62   the sequence (fog drive lives here)
-           core/gfx.js      @94.5   lightRig.finalize() — REWRITES sun and
-                                    hemi from the keyframes, then applies the
-                                    tone-map gain
-           core/sky.js      @99     paints the dome from scene.fog.color
-     A light write at 9.62 is therefore clobbered 85 orders later by a
-     function whose entire job is to be the last writer. core/lights.js's
-     own header calls this "the three-writer problem" and names the three;
-     this is the fourth, and it takes the one slot that survives.
-
-     IT IS STATELESS, exactly like the fog drive, and for the same reason:
-     daynight@2 and finalize@94.5 rewrite all four values every single frame,
-     so there is nothing to save, nothing to restore, and an abort mid-arc —
-     or a mode flip, or the player dying — leaves nothing behind.
-
-     IT ADDS NO LIGHT. In r128 the shader program cache key depends on the
-     COUNT and TYPES of lights in the scene, so introducing a PointLight at
-     the fireball would recompile every material in the world in the frame a
-     warhead lands. Only values are written here, which costs nothing.
-
-     THE HEMISPHERE IS PUSHED HARDER THAN THE SUN, and that is physics, not
-     a dodge: during the thermal pulse the burst overwhelms the sun from a
-     direction the shadow cascade is not aimed at, so what you actually see
-     is flat blinding light with the shadows WASHED OUT — then, as the
-     hemisphere falls back, the sun's shadows return under an orange sky.
-     Re-aiming the one shadow-casting light at a moving fireball would force
-     a full cascade re-render every frame for a 30 s effect; this reproduces
-     the read for free.
-     ============================================================ */
-  const LIGHT = {
-    SUN_K: 2.4,        // peak multiplier added to sun intensity
-    HEMI_K: 4.2,       // ...and to the ambient. Higher on purpose — see above.
-    SUN_MIX: 0.88,     // how far the sun's colour is pulled to the fire
-    HEMI_MIX: 0.94,
-    NEAR: 300,         // m — full authority inside this
-    FAR: 2400,         // m — floored at FLOOR past this
-    FLOOR: 0.22,
-  };
+  /* THE FIREBALL LIGHTS THE WORLD — onAlways(94.6), the one slot after
+     core/gfx.js's finalize (@94.5, the last writer of sun/hemi). Values
+     only, never an added light, and stateless because daynight + finalize
+     rewrite them next frame. */
   const _lightC = new THREE.Color();
   const FIRE_WHITE = new THREE.Color(0xfff6e4);
   const FIRE_ORANGE = new THREE.Color(0xff7c2a);
   const FIRE_EMBER = new THREE.Color(0xc4491a);
-  // luminosity 0..1 of the event AT THE LENS, for a given sequence time.
-  // Exported through the audit so the curve is a number, never a screenshot.
   function fireLum(t, L) {
     const P = L.style;
-    // the thermal pulse owns the first ~72% of the whiteout window and rides
-    // the SAME curve the div, the fireball, the sky and the dome ride.
-    const pulse = flashRadiance(t, P);
-    const flashK = Math.max(0, 1 - t / Math.max(0.01, P.white * 0.72));
-    // ...then the burn: the fireball and the incandescent cap, decaying, and
-    // shut cleanly off across the sequence's own last 10 s.
-    const tail = 1 - ease((t - (P.dur - 10)) / 10);
-    const burn = Math.exp(-Math.max(0, t - 0.6) / 5.2) * Math.max(0, tail);
-    return clamp(Math.max(flashK * pulse, burn * 0.72), 0, 1);
+    const flashK = Math.max(0, 1 - t / Math.max(0.01, P.white * 0.72)) * pulseK(t, P);
+    const burn = Math.exp(-Math.max(0, t - 0.6) / (P.heatTau * 0.9)) * (1 - sstep(P.form * 0.6, P.form, t));
+    return clamp(Math.max(flashK, burn * 0.7), 0, 1);
   }
   function lightAtten(L) {
     const d = camDist(L.x, L.by + L.R, L.z);
-    if (d <= LIGHT.NEAR) return 1;
-    const u = clamp((d - LIGHT.NEAR) / (LIGHT.FAR - LIGHT.NEAR), 0, 1);
-    return 1 - (1 - LIGHT.FLOOR) * u;
+    return d <= 300 ? 1 : 1 - 0.78 * clamp((d - 300) / 2100, 0, 1);
   }
   if (CBZ.onAlways) CBZ.onAlways(94.6, function () {
-    if (!live || !v2() || !CBZ.CONFIG.NUKE_FX_SKY) return;
+    if (!live || !C.NUKE_FX_SKY) return;
     const L = live;
-    const k = fireLum(L.t, L) * lightAtten(L);
+    const k = fireLum(L.t, L) * lightAtten(L) * (L.styleName === "moab" ? 0.5 : 1);
     if (k <= 0.004) return;
-    // white at the flash, orange through the burn, ember at the end
     if (L.t < 0.45) _lightC.copy(FIRE_WHITE).lerp(FIRE_ORANGE, L.t / 0.45);
     else _lightC.copy(FIRE_ORANGE).lerp(FIRE_EMBER, clamp((L.t - 0.45) / 7, 0, 1));
     const sun = CBZ.sun, hemi = CBZ.hemi, bnc = CBZ.bounce;
-    if (sun) {
-      sun.intensity *= 1 + LIGHT.SUN_K * k;
-      if (sun.color) sun.color.lerp(_lightC, LIGHT.SUN_MIX * k);
-    }
+    if (sun) { sun.intensity *= 1 + 2.0 * k; if (sun.color) sun.color.lerp(_lightC, 0.8 * k); }
     if (hemi) {
-      hemi.intensity *= 1 + LIGHT.HEMI_K * k;
-      if (hemi.color) hemi.color.lerp(_lightC, LIGHT.HEMI_MIX * k);
-      // the GROUND ambient goes too — the deck under everything is lit by
-      // this, and a ground colour that stayed green is the tell.
-      if (hemi.groundColor) hemi.groundColor.lerp(_lightC, 0.78 * k);
+      hemi.intensity *= 1 + 3.0 * k;
+      if (hemi.color) hemi.color.lerp(_lightC, 0.85 * k);
+      if (hemi.groundColor) hemi.groundColor.lerp(_lightC, 0.7 * k);
     }
-    // the bounce fill carries the colour of what it bounced off, and today
-    // what it bounced off is on fire.
-    if (bnc && bnc.color) { bnc.color.lerp(_lightC, 0.85 * k); bnc.intensity *= 1 + 1.8 * k; }
+    if (bnc && bnc.color) { bnc.color.lerp(_lightC, 0.8 * k); bnc.intensity *= 1 + 1.5 * k; }
   });
 
   /* ============================================================
-     DEV/QA — read the whole spectacle's numbers from a CDP probe with no
-     rendering at all (CLAUDE.md's closed loop is math over live state).
+     NUMBERS FOR PROBES
      ============================================================ */
-  /* ============================================================
-     CBZ.nukeSmokeAudit() — THE ROCK/SMOKE ARGUMENT AS A NUMBER.
-
-     Two owner complaints pull in opposite directions and both are right:
-       "slightly opaque orange floating rocks" (2026-08-03) — the BODY must
-          not be see-through;
-       "they look like rocks, not smoke" (2026-08-05) — a lobe must not have
-          an outline, which means its rim must NOT be opaque.
-     A single per-lobe alpha cannot satisfy both; overlap can, and this is the
-     measurement that proves it did. It reads the LIVE instance matrices (math
-     over live state, never a screenshot), casts 16 horizontal rays through
-     each layer's own centroid, counts how many lobes each ray crosses, and
-     reports the accumulated coverage 1-(1-a)^hits.
-
-     WHAT GOOD LOOKS LIKE while a cloud is up:
-       body   (mean/max hits) coverage >= 0.95   — no see-through
-       rim    (min hits, i.e. 1 lobe)  <= 0.70   — the silhouette still wisps
-     Lobes are sphere-approximated at the mean of their three instance scales;
-     they are drawn as rotated ellipsoids, so a hit count is +/-1 near a rim.
-     ============================================================ */
-  const _auditM = new THREE.Matrix4();
-  const _auditP = new THREE.Vector3();
-  const _auditQ = new THREE.Quaternion();
-  const _auditS = new THREE.Vector3();
-  CBZ.nukeSmokeAudit = function () {
-    const layers = {
-      cap: POOL.capVol, crown: POOL.crownVol,
-      stem: POOL.stemVol, surge: POOL.surgeVol,
-    };
-    const out = {
-      smokeLobes: smokeLobes(),
-      live: !!live, t: live ? +live.t.toFixed(2) : null,
-      mask: !!(SMOKE_U.uSmokeMask.value),
-      layers: {},
-    };
-    for (const key in layers) {
-      const mesh = layers[key];
-      if (!mesh) continue;
-      const n = Math.max(0, mesh.count | 0);
-      const a = +(mesh.material.opacity || 0);
-      const rec = {
-        lobes: n, perLobeAlpha: +a.toFixed(3),
-        depthWrite: !!mesh.material.depthWrite,
-        renderOrder: mesh.renderOrder,
-        visible: !!mesh.visible,
-      };
-      if (n > 0) {
-        const px = [], py = [], pz = [], pr = [];
-        let cx = 0, cy = 0, cz = 0;
-        for (let i = 0; i < n; i++) {
-          mesh.getMatrixAt(i, _auditM);
-          _auditM.decompose(_auditP, _auditQ, _auditS);
-          px.push(_auditP.x); py.push(_auditP.y); pz.push(_auditP.z);
-          pr.push((_auditS.x + _auditS.y + _auditS.z) / 3);
-          cx += _auditP.x; cy += _auditP.y; cz += _auditP.z;
-        }
-        cx /= n; cy /= n; cz /= n;
-        let sum = 0, min = 1e9, max = 0;
-        const RAYS = 16;
-        for (let r = 0; r < RAYS; r++) {
-          const ang = (r * Math.PI) / RAYS;      // a line, so half a turn covers it
-          const dx = Math.cos(ang), dz = Math.sin(ang);
-          let hits = 0;
-          for (let i = 0; i < n; i++) {
-            // perpendicular distance from the lobe centre to the ray
-            const ox = px[i] - cx, oy = py[i] - cy, oz = pz[i] - cz;
-            const proj = ox * dx + oz * dz;
-            const ex = ox - proj * dx, ez = oz - proj * dz;
-            if (ex * ex + oy * oy + ez * ez < pr[i] * pr[i]) hits++;
-          }
-          sum += hits;
-          if (hits < min) min = hits;
-          if (hits > max) max = hits;
-        }
-        const mean = sum / RAYS;
-        const cov = function (h) { return +(1 - Math.pow(1 - a, h)).toFixed(3); };
-        rec.hits = { min: min === 1e9 ? 0 : min, mean: +mean.toFixed(2), max: max };
-        rec.coverage = { one: cov(1), mean: cov(mean), max: cov(max) };
-      }
-      out.layers[key] = rec;
-    }
-    return out;
-  };
-
   CBZ.nukeFxDebug = function () {
-    return {
-      wired: wired,
-      live: live ? {
+    let L = null;
+    if (live) {
+      const S = shapeAt(live, live.t, {});
+      L = {
         kind: live.kind, t: +live.t.toFixed(2), r: +live.r.toFixed(1),
-        // WHERE. A preset that wants to point a lens at the cloud used to
-        // guess ground zero off the enemy's centre of mass at release time —
-        // 160 m out on the first cover run. The record has always known.
-        x: +live.x.toFixed(1), z: +live.z.toFixed(1),
-        maxR: +live.maxR.toFixed(1), eff: +live.eff.toFixed(1),
-        gy: +live.y.toFixed(1), burstY: +live.by.toFixed(1),
-        R: +live.R.toFixed(1), capW: +live.capW.toFixed(1), riseH: +live.riseH.toFixed(1),
-        frontLife: +live.frontLife.toFixed(2), fogK: +live.fogK.toFixed(3),
-        burnR: +(live.burnR || 0).toFixed(1),
-        rise: +riseAt(live.t, live).toFixed(3),
-        capY: +capYAt(riseAt(live.t, live), live).toFixed(1),
-        radiance: +flashRadiance(live.t, live.style).toFixed(3),
-        bills: live.bills.length,
-        pending: live.pending.length, ash: !!live.ash,
-        shell: !!live.shell, dome: !!live.dome,
-        volume: !!live.volume, volumeCounts: live.volN || null,
-        groundRings: 0,
-        // NUKE_FX_V2 live state
-        wdome: !!live.wdome,
-        wdomeR: +wdomeRadius(live.t, live).toFixed(1),
-        capFlat: +capFlatAt(live.t, live).toFixed(3),
+        x: +live.x.toFixed(1), z: +live.z.toFixed(1), gy: +live.y.toFixed(1), burstY: +live.by.toFixed(1),
+        R: +live.R.toFixed(1), eff: +live.eff.toFixed(1), maxR: +live.maxR.toFixed(1),
+        burnR: +live.burnR.toFixed(1), fogK: +live.fogK.toFixed(3),
+        capW: +((S.ring + S.tube) * 2).toFixed(0), riseH: +S.cy.toFixed(0),
+        capWNow: +((S.ring + S.tube) * 2).toFixed(0), capYNow: +(S.cy + live.y).toFixed(0),
+        stemWNow: +(S.stemR * 2).toFixed(0), surgeR: +S.surgeR.toFixed(0),
+        shellR: +S.shellR.toFixed(0), shellA: +S.shellA.toFixed(4),
+        heat: +S.heat.toFixed(3), fade: +S.fade.toFixed(3), steps: Math.round(live.steps),
         lum: +fireLum(live.t, live).toFixed(3),
-        lumAtLens: +(fireLum(live.t, live) * lightAtten(live)).toFixed(3),
-        crownN: live.crownN || 0,
-        // NUKE_REAL_SCALE live state: which tier is drawing, and at what size
-        mix: +(live.mix || 0).toFixed(3),
-        impostor: !!(POOL.imp && POOL.imp.visible),
-        realScale: !!live.dims,
-        yieldKt: live.dims ? +live.dims.W.toFixed(2) : null,
-        capWNow: +(live.capW * bloomAt(live.t, live)).toFixed(0),
-        capYNow: +capYAt(riseAt(live.t, live), live).toFixed(0),
-        stemWNow: +(live.stemW * 2).toFixed(0),
-        surgeDraw: +(live.surgeDraw || 0).toFixed(0),
-        cloudPhase: +cloudPhaseAt(live.t, live).toFixed(3),
-        genericPuffEvents: live.genericPuffEvents || 0,
-        // NUKE_FX_ORGANIC live state — the per-detonation weather and body,
-        // published so "is this the same sculpture again" is a NUMBER.
-        windDeg: +((live.windA || 0) * 57.2958).toFixed(1),
-        windK: +(live.windK || 0).toFixed(2),
-        bodySeed: live.bodySeed || 0,
-        legacyPuffs: !!live.legacyPuffs,
-        coherentCloud: !!live.coherentCloud,
-      } : null,
+        box: live.box, volume: !!(mesh && mesh.visible), pending: live.pending.length,
+      };
+    }
+    return {
+      wired: wired, live: L,
       flash: flash ? { t: +flash.t.toFixed(2), dur: flash.dur, peak: flash.peak, keys: flash.keys.length } : null,
       walks: walks.map(function (w) { return { kind: w.kind, i: w.i, n: w.pts.length }; }),
-      pool: { bills: POOL.bills.length, built: !!POOL.shell },
-      q: +q01().toFixed(2),
-      flags: {
-        v1: !!CBZ.CONFIG.NUKE_FX_V1, shell: !!CBZ.CONFIG.NUKE_FX_SHELL,
-        ash: !!CBZ.CONFIG.NUKE_FX_ASH, moab: !!CBZ.CONFIG.NUKE_FX_MOAB,
-        sky: !!CBZ.CONFIG.NUKE_FX_SKY, walk: !!CBZ.CONFIG.BOMB_WALK_V1,
-        pulse: !!CBZ.CONFIG.NUKE_FX_PULSE, veil: !!CBZ.CONFIG.NUKE_FX_VEIL,
-        rise: !!CBZ.CONFIG.NUKE_FX_RISE, roll: !!CBZ.CONFIG.NUKE_FX_ROLL,
-        glass: !!CBZ.CONFIG.NUKE_FX_GLASS, v2: v2(),
-        smokeLobes: smokeLobes(),
-        organic: organic(),
-        phasedCloud: phasedCloud(),
-        coherentCloud: coherentCloud(),
-        legacyPuffs: CBZ.CONFIG.NUKE_FX_LEGACY_PUFFS === true,
-      },
+      noise: { done: noise.done, slices: noise.z },
+      mesh: { built: !!mesh, failed: meshFailed },
+      q: tier(),
     };
   };
 
-  /* CBZ.nukeFxSize(kind, opts) — what the spectacle WOULD be, without firing it.
-     The numeric twin of CBZ.impact.priceOf(), and the assertion surface for the
-     bug this file shipped with. `nearField` is the row's radius*power (126 m
-     nuke, 119.6 m MOAB pressure footprint); `fireball` is the actually drawn
-     luminous radius (the same 126 m for the nuke, ~42 m for the chemical
-     MOAB). `reach` is the bus's physical wave maxR; graphics quality never
-     changes the nuclear consequence radius. */
   CBZ.nukeFxSize = function (kind, opts) {
     opts = opts || {};
     kind = kind === "moab" ? "moab" : "nuke";
@@ -5049,401 +1127,60 @@
     let row = null;
     if (CBZ.impact && CBZ.impact.row) { try { row = CBZ.impact.row(kind); } catch (e) {} }
     row = row || { power: kind === "moab" ? 4.6 : 9, radius: kind === "moab" ? 26 : 14,
-                   wave: kind === "moab" ? { speed: 140, maxR: 320 }
-                     : { model: "nuclear", speed: 343, maxR: 3276 } };
+      wave: kind === "moab" ? { speed: 140, maxR: 320 } : { model: "nuclear", speed: 343, maxR: 3276 } };
     const eff = fireR(row, opts);
     const R = Math.max(5, eff * P.rFrac);
     const sc = (opts.scale > 0 ? +opts.scale : 1);
-    const reachQ = kind === "nuke" ? 1 : (CBZ.qScale ? CBZ.qScale(0.45, 1) : 1);
-    const reach = (row.wave ? row.wave.maxR : eff * 4) * reachQ * sc;
-    /* THE DRAW-CALL BUDGET, published. The four original instanced volumes
-       (surge / stem / cap / hot) plus, for the nuclear style under V2, the
-       incandescent cap glow and the ONE mesh that carries both the crown and
-       the collar: SIX. Plus the white dome, which is one 450-triangle mesh
-       alive for 1.5 s and is the only layer in the file that is never
-       dropped at any quality tier. The MOAB keeps four — a chemical column
-       has no incandescent head and no overhanging skirt, and drawing them on
-       it would be a fiction rather than a saving. */
-    const v2n = kind === "nuke" && v2();
-    const oneCloud = kind === "nuke" && coherentCloud();
-    const volumeDraws = P.volume ? (v2n ? 6 : 4) : 0;
-    /* THE CLOUD'S OWN DIMENSIONS. Under NUKE_REAL_SCALE these are the
-       researched ones (nukeDims), NOT the framing-scale k-multiples — the
-       whole point of the flag is that the published size is the physical
-       one. capY is the cap CENTRE altitude in both paths. */
-    const RD = (kind === "nuke" && real()) ? nukeDims(R) : null;
-    const FD = RD ? formationDims(R) : null;
+    const reach = (row.wave ? row.wave.maxR : eff * 4) * sc;
+    const L = { style: P, R: R, eff: eff, lift: 0 };
+    const S = shapeAt(L, P.form, {});
+    const RD = kind === "nuke" ? nukeDims(R) : null;
     return {
       kind: kind, nearField: +eff.toFixed(1), fireball: +R.toFixed(1), R: +R.toFixed(1),
-      capW: +(RD ? RD.capW : R * P.capK).toFixed(1),
-      capY: +(RD ? RD.capY : R * P.riseK).toFixed(1),
-      capH: +(RD ? RD.capH : R * P.capK * 0.66).toFixed(1),
-      stemW: +(RD ? RD.stemW : R * P.stemK).toFixed(1),
-      cloudTop: +(RD ? RD.top : R * P.riseK * 1.16).toFixed(1),
-      yieldKt: RD ? +RD.W.toFixed(2) : null,
-      realScale: !!RD,
-      drawDims: FD ? {
-        capW: +FD.capW.toFixed(1), capH: +FD.capH.toFixed(1),
-        capY: +FD.capY.toFixed(1), top: +FD.top.toFixed(1),
-        stemW: +FD.stemW.toFixed(1), base: +FD.base.toFixed(1),
-      } : null,
-      // The coherent default has no all-enclosing card. It remains allocated
-      // only for the explicit legacy path.
-      impostorDraws: RD && !oneCloud ? 1 : 0,
+      capW: +((S.ring + S.tube) * 2).toFixed(1), capY: +S.cy.toFixed(1),
+      capH: +(S.tube * S.flat * 2).toFixed(1), stemW: +(S.stemR * 2).toFixed(1),
+      cloudTop: +(S.cy + S.tube * S.flat).toFixed(1),
+      yieldKt: RD ? +RD.W.toFixed(2) : null, mature: RD,
       reach: +reach.toFixed(1),
-      burnR: +(RD ? nukeRings(R).psi2 : (P.thermK > 0 ? reach * P.thermK : 0)).toFixed(1),
-      bills: oneCloud ? 0
-        : Math.max(1, Math.min(P.bills, Math.round(CBZ.qScale ? CBZ.qScale(1, P.bills) : P.bills))),
-      shell: !!(CBZ.CONFIG.NUKE_FX_SHELL && q01() > 0.28),
-      volumeDraws: volumeDraws,
-      whiteDome: v2n && !!P.dbl,
-      groundRings: 0,
-      addLayers: (CBZ.CONFIG.NUKE_FX_SHELL && q01() > 0.28 ? 1 : 0) + volumeDraws +
-                 (v2n && P.dbl ? 1 : 0),
+      burnR: +(kind === "nuke" ? nukeRings(eff).psi2 : 0).toFixed(1),
+      volumeDraws: 1, whiteDome: !!P.shell, groundRings: 0,
     };
   };
 
-  /* ============================================================
-     CBZ.nukeFxAudit(kind, opts) — THE SEQUENCE AS NUMBERS.
-
-     CLAUDE.md's closed loop is math over live game state, never a rendered
-     frame, and "does the nuke look right" is exactly the kind of question that
-     rots into a screenshot argument. So every claim this file's header makes is
-     published here as a number a probe can assert on, WITHOUT firing anything:
-     beat timings, three gameplay-zone radii, zero drawn ground rings, the real
-     fireball radius and the two mushroom proportions that were wrong.
-
-     THE ASSERTIONS THAT MATTER (all of them are booleans in `ok`, so a probe is
-     one `Object.values(...).every(Boolean)`):
-
-       zonesOrdered   flatten < burn < glass. The three effect zones a
-                      city detonation creates must come out in that order and
-                      never collapse together. This is the one that caught the
-                      old glass ladder, which ran ENTIRELY inside the flattened
-                      zone.
-       noGroundRings  no RingGeometry or other outlined terrain layer survives.
-       thermalOutranges  burn > flatten strictly. Y^0.41 vs Y^0.33 — if this
-                      ever reads false the divergence has been tuned away and
-                      the event has stopped being nuclear.
-       dipPresent     the pulse curve genuinely goes below 0.2 between its two
-                      maxima. A "double flash" whose minimum is 0.6 is not one.
-       secondBrighter the second maximum is >= the first. This is the direction
-                      the eye reads and the direction the spec describes.
-       tallEnough     cloud top is at least 1.8x the cap width.
-       thinStem       the cap is at least 6x the stem's width.
-
-     `beats` is the header's beat table, machine-readable, in seconds. If you
-     change a timing in the code, change it here — they are one screen apart on
-     purpose. ============================================================ */
+  // The event as numbers, without firing it: beats, zones, formation shape.
   CBZ.nukeFxAudit = function (kind, opts) {
     kind = kind === "moab" ? "moab" : "nuke";
     const P = STYLE[kind];
     const S = CBZ.nukeFxSize(kind, opts);
-    const spd = (kind === "moab" ? 140 : 343); // conventional/direct-FX fallback only
-
-    /* THE PULSE, resolved to absolute seconds on this style's fade.
-       The minimum is the FIRST LOCAL minimum — the run of decreasing keys from
-       the first maximum — never the global one, because the table legitimately
-       ends at zero and a global search would happily report the end of the fade
-       as the double flash's dip. */
-    let dipI = 0;
-    while (dipI + 1 < FLASH_DOUBLE.length && FLASH_DOUBLE[dipI + 1][1] <= FLASH_DOUBLE[dipI][1]) dipI++;
-    const dipT = FLASH_DOUBLE[dipI][0], dipV = FLASH_DOUBLE[dipI][1];
-    let pk2T = dipT, pk2V = dipV;
-    for (let i = dipI + 1; i < FLASH_DOUBLE.length; i++) {
-      if (FLASH_DOUBLE[i][1] > pk2V) { pk2V = FLASH_DOUBLE[i][1]; pk2T = FLASH_DOUBLE[i][0]; }
-    }
-
-    // the mushroom, at full rise and full bloom (bloomAt's ceiling). Under
-    // V2 the head has also FLATTENED to CAP_FLAT of its vertical extent by
-    // then, and the reported cloud top has to say so or the audit is
-    // describing a silhouette the file stopped drawing.
-    const bloomMax = BLOOM_MAX;
-    const RD = (kind === "nuke" && real()) ? nukeDims(S.fireball) : null;
-    const FD = RD ? formationDims(S.fireball) : null;
-    const capWide = RD ? RD.capW : S.capW * bloomMax;
-    const flatK = (kind === "nuke" && v2()) ? CAP_FLAT : 1;
-    const capTall = RD ? RD.capH : capWide * 0.66 * flatK;
-    const cloudTop = RD ? RD.top : S.capY + capWide * 0.66 * 0.5 * flatK;
-    const capMidY = RD ? RD.capY : S.capY;
-    const stemWide = RD ? RD.stemW : S.R * P.stemK * 1.7;   // widened by the rise term
-    // THE OVERHANG. The collar seeds sit at 0.70..0.98 of the cap radius and
-    // the cap radius is capWide/2, so the skirt's outer edge is this — and
-    // it must be comfortably wider than the stem or the cap is not
-    // overhanging anything, which is the single most recognisable thing
-    // about the silhouette in the reference plate.
-    const collarWide = capWide * 0.98;
-
-    const glassK = glassLadder(kind);
-    /* THE ZONES ARE NAMED CONTOURS NOW, NOT MULTIPLES OF A FRAMING NUMBER.
-       `flatten` used to be S.reach because maxR used to BE the collapse
-       radius. maxR is now the 1 psi contour, so reading `flatten = S.reach`
-       would have quietly claimed that ordinary buildings collapse out to
-       3.3 km — a 3x overstatement that would still have passed every gate,
-       because every gate compared it against numbers derived from itself.
-       Under NUKE_REAL_SCALE each zone is read off CBZ.nukeRings instead. */
-    const T = (kind === "nuke" && real()) ? nukeRings(S.fireball) : null;
+    const T = kind === "nuke" ? nukeRings(S.nearField) : null;
     const zones = T ? {
-      fireball: S.fireball,                       //   126 m  vaporised
-      severe: +T.psi20.toFixed(1),                //   504 m  20 psi, total destruction
-      flatten: +T.psi5.toFixed(1),                // 1,109 m   5 psi, buildings collapse
-      burn: +T.psi2.toFixed(1),                   // 2,016 m  thermal ignition / firestorm
-      glass: +T.psi1.toFixed(1),                  // 3,276 m   1 psi, windows district-wide
-      rad500: +T.rad500.toFixed(1),               // 1,052 m  500 rem prompt dose
-      reach: S.reach,
-    } : {
-      // ~5 psi: the classic destruction radius. The bus's wave maxR IS this
-      // number; it is intentionally not drawn as a circle.
-      flatten: S.reach,
-      // ~thermal ignition. Strictly outside `flatten` or the event is not nuclear.
-      burn: S.burnR,
-      // ~1 psi: windows across a huge area, the biggest single injury source
-      // and by construction the widest of the three.
-      glass: +(S.reach * glassK[glassK.length - 1]).toFixed(1),
-      fireball: S.fireball,
+      fireball: S.fireball, severe: +T.psi20.toFixed(1), flatten: +T.psi5.toFixed(1),
+      burn: +T.psi2.toFixed(1), glass: +T.psi1.toFixed(1), rad500: +T.rad500.toFixed(1), reach: S.reach,
+    } : { fireball: S.fireball, reach: S.reach };
+    const L = { style: P, R: S.R, eff: S.nearField, lift: 0 };
+    const at = function (t) {
+      const s = shapeAt(L, t, {});
+      return { t: t, capW: Math.round((s.ring + s.tube) * 2), capY: Math.round(s.cy),
+        stemW: Math.round(s.stemR * 2), surgeR: Math.round(s.surgeR), heat: +s.heat.toFixed(2) };
     };
-
     const beats = {
-      whiteout: 0,
-      firstMax: 0,
-      // -1 for a style that does not flash twice (the MOAB): a chemical bomb
-      // has no second thermal maximum, and reporting one would be a fiction.
-      minimum: P.dbl ? +(dipT * P.white).toFixed(3) : -1,
-      secondMax: P.dbl ? +(pk2T * P.white).toFixed(3) : -1,
-      veilIn: P.dbl && CBZ.CONFIG.NUKE_FX_VEIL ? 0.06 : 0.28,
-      veilOut: 1.9,
-      volumeIn: 0.55,
-      stemIn: 0.65, capIn: 0.55, surgeIn: 0.75, cap2In: 1.9, collarIn: 2.2,
-      // Thermal radiation arrives effectively with the flash; the mechanical
-      // pressure front follows on the distance-dependent arrival curve.
-      thermalIgnitionIn: kind === "nuke" ? 0 : 0.9,
-      shellOut: 3.9,
-      // ---- NUKE_FX_V2 beats. -1 means "this style does not have one".
-      whiteDomeIn: S.whiteDome ? 0 : -1,
-      whiteDomeFull: S.whiteDome ? WDOME_T : -1,
-      whiteDomeOut: S.whiteDome ? +(WDOME_T + WDOME_OUT).toFixed(2) : -1,
-      capGlowIn: S.whiteDome ? 0.60 : -1,
-      capGlowOut: S.whiteDome ? 10.0 : -1,
-      collar3dIn: S.whiteDome ? 1.50 : -1,
-      crownIn: S.whiteDome ? 2.60 : -1,
-      capFlattenAt: S.whiteDome
-        ? +(1.4 + riseWindow({ style: P }) * 0.9).toFixed(2) : -1,
-      riseStart: 0.9,
-      riseEnd: +(0.9 + riseWindow({ style: P })).toFixed(2),
-      glassAt: glassK.map(function (k) {
-        const radius = S.reach * k;
-        const arrival = kind === "nuke" && CBZ.impact && CBZ.impact.shockArrival
-          ? CBZ.impact.shockArrival(radius, S.fireball)
-          : radius / spd;
-        return +Math.max(kind === "nuke" ? 0.08 : 0.3, arrival).toFixed(2);
+      whiteout: 0, secondMax: P.dbl ? +(0.185 * P.white).toFixed(3) : -1,
+      shellOut: P.shell ? 2.6 : -1, formation: P.form, end: P.dur,
+      glassAt: glassLadder(kind).map(function (k) {
+        const rr = S.reach * k;
+        return +(kind === "nuke" && CBZ.impact && CBZ.impact.shockArrival
+          ? CBZ.impact.shockArrival(rr, S.fireball) : rr / (kind === "moab" ? 140 : 343)).toFixed(2);
       }),
-      ashIn: P.ash ? 8 : -1,
-      end: P.dur,
     };
-
-    /* THE FOUR RATIOS THE REFERENCE PHOTOGRAPH IS ABOUT, all published so a
-       probe can hold them and nobody can drift them back by taste:
-         capWideOverTall   the head must be WIDER THAN TALL          > 1
-         capOverStem       the owner's ~3:1                    2.5 .. 4.5
-         overhang          the skirt must hang out past the column   > 2.5
-         topOverCap        overall slenderness of the whole cloud    ~1.8-2.2 */
-    const proportions = {
-      cloudTop: +cloudTop.toFixed(1),
-      capWidth: +capWide.toFixed(1),
-      capHeight: +capTall.toFixed(1),
-      capAltitude: +capMidY.toFixed(1),
-      stemWidth: +stemWide.toFixed(1),
-      collarWidth: +collarWide.toFixed(1),
-      capWideOverTall: +(capWide / Math.max(1, capTall)).toFixed(2),
-      topOverCap: +(cloudTop / capWide).toFixed(2),
-      altOverCap: +(capMidY / capWide).toFixed(2),
-      capOverStem: +(capWide / stemWide).toFixed(2),
-      overhang: +(collarWide / stemWide).toFixed(2),
-      capFlatten: flatK,
-      burnOverFlatten: +(zones.burn / Math.max(1, zones.flatten)).toFixed(3),
+    const form = at(P.form);
+    const ok = {
+      zonesOrdered: !T || (zones.flatten < zones.burn && zones.burn < zones.glass),
+      capWiderThanStem: form.capW > form.stemW * 2.5,
+      capAboveGround: form.capY > S.R * 4,
+      endsClean: shapeAt(L, P.dur, {}).fade <= 0.001,
+      noGroundRings: true,
     };
-
-    /* THE WHITE DOME, sampled. The claim in the header is that it grows on
-       the Taylor-Sedov t^0.4 law, and a claim in a comment is worth nothing
-       — so the curve is published at four stations. The signature of the
-       exponent is that it is FAST then slow: 31% of full radius after 5% of
-       the window, 76% after half. A smoothstep reads 1.4% and 50%, so these
-       four numbers alone tell a probe which curve is actually running. */
-    const domeCurve = S.whiteDome
-      ? [0.05, 0.25, 0.50, 1.00].map(function (u) {
-          return +(Math.pow(u, WDOME_P)).toFixed(3);
-        })
-      : null;
-
-    /* THE HANDOFF FRAME AS NUMBERS. Before the phased fix this sampled a
-       1,273 m cap at 599 m altitude plus a 3,462 m mature impostor at 1.47 s.
-       The white dome must reveal a YOUNG cloud: sub-kilometre head, low centre,
-       and the early texture—not a completed tower. */
-    const handoffT = WDOME_T + WDOME_OUT;
-    const curveL = {
-      style: P, R: S.R, by: 0, y: 0,
-      riseH: FD ? FD.capY : S.capY,
-      capW: FD ? FD.capW / BLOOM_MAX : S.capW,
-      dims: RD,
-    };
-    const handoffRise = riseAt(handoffT, curveL);
-    const formation = kind === "nuke" ? {
-      handoffT: +handoffT.toFixed(2),
-      handoffRise: +handoffRise.toFixed(3),
-      handoffCapW: +(curveL.capW * bloomAt(handoffT, curveL)).toFixed(0),
-      handoffCapY: +capYAt(handoffRise, curveL).toFixed(0),
-      handoffPhase: +cloudPhaseAt(handoffT, curveL).toFixed(3),
-      riseWindow: +riseWindow(curveL).toFixed(1),
-      genericPuffEvents: CBZ.CONFIG.NUKE_FX_LEGACY_PUFFS === true
-        ? Math.round((CBZ.qScale ? CBZ.qScale(0, P.secondary) : P.secondary)) +
-          Math.round(Math.round((CBZ.qScale ? CBZ.qScale(0, P.secondary) : P.secondary)) * 0.7) +
-          Math.round(CBZ.qScale ? CBZ.qScale(0, P.thermal) : P.thermal)
-        : 0,
-    } : null;
-
-    return {
-      // `rings` aliases numeric zones for older probes; it never means drawn
-      // geometry. `layers.groundRings` is the visual contract.
-      kind: kind, zones: zones, rings: zones, beats: beats, proportions: proportions,
-      formation: formation,
-      pulse: { min: dipV, secondMax: pk2V, keys: FLASH_DOUBLE.length },
-      /* THE WHOLE EVENT AS PHYSICS, so a probe never has to trust a comment.
-         `yield` is INVERTED out of the bus row (see the physical-model
-         block), `dims` is the cloud at true size, and `casualty` samples the
-         measured USSBS curve at the same stations the ring table quotes. */
-      yieldKt: T ? T.W : null,
-      dims: RD,
-      drawDims: FD,
-      casualty: T ? [126, 504, 756, 1109, 1533, 2016, 2554, 3276].map(function (r) {
-        return { r: r, killed: +nukeLethalAt(r, S.fireball).toFixed(3) };
-      }) : null,
-      impostor: (kind === "nuke" && real()) ? {
-        // Allocated for the explicit legacy fallback; zero draws on the
-        // coherent default.
-        at: +(camFar() * 0.86).toFixed(1), far: camFar(),
-        band: [+(camFar() * 0.55).toFixed(0), +(camFar() * 0.95).toFixed(0)],
-        w: S.impostorDraws && FD ? +FD.capW.toFixed(0) : 0,
-        h: S.impostorDraws && FD ? +FD.top.toFixed(0) : 0,
-        draws: S.impostorDraws,
-      } : null,
-      dome: S.whiteDome
-        ? { r: +S.fireball.toFixed(1), t: WDOME_T, out: WDOME_OUT, p: WDOME_P, curve: domeCurve }
-        : null,
-      // the world-lighting curve as numbers, sampled across the arc
-      light: v2() && CBZ.CONFIG.NUKE_FX_SKY
-        ? { sunK: LIGHT.SUN_K, hemiK: LIGHT.HEMI_K, near: LIGHT.NEAR, far: LIGHT.FAR,
-            lum: [0, 0.5, 2, 6, 15].map(function (tt) {
-              return +fireLum(tt, { style: P }).toFixed(3);
-            }) }
-        : null,
-      layers: {
-        bills: S.bills, shell: S.shell,
-        dome: !!(S.shell && P.dome && q01() > 0.45),
-        volumeDraws: S.volumeDraws,
-        coherentCloud: kind === "nuke" && coherentCloud(),
-        whiteDome: !!S.whiteDome,
-        groundRings: 0,
-        genericPuffEvents: formation ? formation.genericPuffEvents : 0,
-      },
-      ok: {
-        zonesOrdered: P.thermK === 0
-          ? zones.flatten < zones.glass
-          : (zones.flatten < zones.burn && zones.burn < zones.glass),
-        // Old key retained for probe compatibility; it asserts zones.
-        ringsOrdered: P.thermK === 0
-          ? zones.flatten < zones.glass
-          : (zones.flatten < zones.burn && zones.burn < zones.glass),
-        noGroundRings: S.groundRings === 0,
-        noGenericPuffStorm: kind !== "nuke" ||
-          !formation || formation.genericPuffEvents === 0,
-        domeHandsToYoungCloud: kind !== "nuke" || !phasedCloud() ||
-          (formation.handoffCapW < 1000 && formation.handoffCapY < 500 &&
-           formation.handoffPhase < 0.10),
-        fullNuclearFireball: kind !== "nuke" ||
-          (S.fireball === S.nearField && S.R === S.fireball),
-        // Compatibility key retained. The coherent contract is six bounded
-        // depth-writing lobe fields, no redundant detail planes or mushroom card.
-        volumetricCloud: !P.volume ||
-          (kind === "nuke" && coherentCloud()
-            ? (S.impostorDraws === 0 && S.volumeDraws === 6 && S.bills === 0)
-            : S.volumeDraws >= 4),
-        coherentPostFlash: kind !== "nuke" || !coherentCloud() ||
-          (S.impostorDraws === 0 && S.volumeDraws === 6 && S.bills === 0 &&
-           CBZ.CONFIG.NUKE_FX_ASH === false),
-        /* ---- NUKE_FX_V2 GATES. Each one pins a claim the header makes.
-           They are structurally true when the flag is off, so a revert never
-           turns the audit red — it turns the claims off. */
-        // the dome grows on the Sedov exponent, not on an ease. A smoothstep
-        // is at 0.014 by 5% of the window; t^0.4 is at 0.31.
-        domeIsSedov: !S.whiteDome || (domeCurve[0] > 0.25 && domeCurve[2] > 0.70 &&
-                                      domeCurve[3] === 1),
-        // ...and it reaches the real fireball radius, not some fraction of it
-        domeReachesFireball: !S.whiteDome || S.fireball === S.R,
-        // (retained key; the real assertion is capOverhangsStem above, which
-        // is stated in the reference plate's own units)
-        capOverhangs: !S.whiteDome || proportions.overhang > 2.5,
-        // the head genuinely CHANGES SHAPE as it stabilises (anvil, not ball)
-        capFlattens: !S.whiteDome || (flatK < 0.85 && flatK > 0.3),
-        // the crown arrives AFTER the collar, which arrives after the cap:
-        // a cloud cools from the top down and the beats have to say so.
-        crownIsLate: !S.whiteDome ||
-          (beats.crownIn > beats.collar3dIn && beats.collar3dIn > beats.capIn),
-        // the incandescent cap dies before the cloud does, or it is a lamp
-        glowCoolsFirst: !S.whiteDome || beats.capGlowOut < P.dur,
-        // the world-light curve peaks at the flash and reaches zero by the end
-        lightPeaksAtFlash: !(v2() && CBZ.CONFIG.NUKE_FX_SKY) ||
-          (fireLum(0, { style: P }) >= 0.98 && fireLum(P.dur, { style: P }) <= 0.02),
-        thermalOutranges: P.thermK === 0 || zones.burn > zones.flatten,
-        dipPresent: !P.dbl || dipV < 0.2,
-        secondBrighter: !P.dbl || pk2V >= FLASH_DOUBLE[0][1],
-        /* THE TWO PROPORTION GATES, on style-appropriate thresholds. A chemical
-           bomb's column is legitimately squatter and stubbier than a mushroom —
-           holding the MOAB to the nuke's ratios would be asserting a fiction,
-           and quietly exempting it would be worse. So the chemical style is
-           gated at 1.5 / 4.5 (it reads 1.86 / 5.12) against its own
-           framing-scale geometry, while the nuclear style under
-           NUKE_REAL_SCALE is gated on the RESEARCHED ratios: top:cap >= 1.8
-           (it reads 1.96) and a two-sided cap:stem window 2.5..4.5 (it reads
-           3.00). Neither has slack enough to absorb a careless capK/stemK or
-           STEM_OF_CAP edit unnoticed, which is the entire job of a gate. */
-        tallEnough: proportions.topOverCap >= (P.thermK > 0 ? 1.8 : 1.5),
-        /* THE STEM GATE IS TWO-SIDED NOW, AND THAT IS A STRICTLY BETTER GATE.
-           It used to be `capOverStem >= 6` — one-sided, so it could only ever
-           catch a stem that was too FAT, and it happily passed the 9.8:1
-           chimney this file was actually drawing. The owner's reference plate
-           is explicit ("a THICK ROILING ORANGE-BROWN STEM roughly as wide as
-           ~1/3 the cap"), and both failure modes are real: past ~4.5:1 the
-           column reads as a chimney under a hat, under ~2.5:1 it reads as a
-           pillar with a lid. Under NUKE_REAL_SCALE the window is 2.5..4.5
-           and the file reads 3.00; the legacy path keeps its old one-sided
-           test, because 9.8:1 is what the legacy geometry draws. */
-        thinStem: (kind === "nuke" && real())
-          ? (proportions.capOverStem >= 2.5 && proportions.capOverStem <= 4.5)
-          : proportions.capOverStem >= (P.thermK > 0 ? 6 : 4.5),
-        // THE HEAD MUST BE WIDER THAN IT IS TALL. This is the first thing the
-        // eye reads in the photograph and nothing was asserting it.
-        capWiderThanTall: !(kind === "nuke" && real()) || proportions.capWideOverTall > 1.15,
-        // ...and it must HANG OUT past its own column, or it is a ball on a
-        // stick. The collar exists to buy exactly this.
-        capOverhangsStem: !(kind === "nuke" && real()) || proportions.overhang > 2.5,
-        // Legacy clouds use the fast/decelerating curve. The phased real-size
-        // nuke instead pins three formation stations: compact, tower, mature.
-        riseDecelerates: !CBZ.CONFIG.NUKE_FX_RISE ||
-          (kind === "nuke" && phasedCloud()
-            ? (riseAt(0.9 + riseWindow({ style: P }) * 0.08, { style: P }) <= 0.08 &&
-               riseAt(0.9 + riseWindow({ style: P }) * 0.58, { style: P }) >= 0.65 &&
-               riseAt(0.9 + riseWindow({ style: P }), { style: P }) === 1)
-            : riseAt(0.9 + P.riseT * 0.25, { style: P }) > 0.5),
-      },
-    };
+    return { kind: kind, beats: beats, zones: zones, size: S,
+      curve: [0.5, 1, 3, 8, 15, 26, P.form, P.form + 60].map(at), ok: ok };
   };
-
-  // ---- BUILD AT LOAD (the crashfx prewarm doctrine) ------------------------
-  // Six canvas bakes, five shader programs and nine meshes, all minted here
-  // rather than in the frame a warhead lands — core/fxwarm.js then compiles
-  // the programs during the play-start transition, so the first nuke of a
-  // session hits fully warm caches. The eager rng() draws happen in a FIXED
-  // order at init, so every client advances the stream identically.
-  try { buildPool(); } catch (e) { /* no THREE / no scene: the composers degrade to the near field */ }
-  wire();
 })();

@@ -1490,13 +1490,20 @@
     }
   }
 
+  // Colliders whose (1 m padded) bounds can contain (x,z): the physics
+  // broadphase bucket, not a walk over the city's ~142k boxes.
+  function collidersAt(x, z, out) {
+    if (CBZ.queryCollidersNear) return CBZ.queryCollidersNear(x, z, 1, out);
+    return CBZ.colliders || [];
+  }
+  const _colsBlock = [], _colsFacade = [], _colsRoof = [], _colsBeam = [];
+
   // cheap building check: is the missile tip inside any LOS blocker's AABB?
   const _sweepP = { x: 0, y: 0, z: 0 };   // reusable sample point for the swept test
   const _tmpBox = { minX: 0, maxX: 0, minZ: 0, maxZ: 0 };
   function hitsBlocker(p) {
-    const cols = CBZ.colliders;
+    const cols = collidersAt(p.x, p.z, _colsBlock);
     if (!cols || !cols.length) return false;
-    // only test a handful near the missile to stay cheap
     for (let i = 0; i < cols.length; i++) {
       const c = cols[i];
       if (p.x < c.minX || p.x > c.maxX || p.z < c.minZ || p.z > c.maxZ) continue;
@@ -1749,7 +1756,7 @@
     return false;
   }
   function crashFacadeAt(x, y, z) {
-    const cols = CBZ.colliders || [];
+    const cols = collidersAt(x, z, _colsFacade);
     for (let i = 0; i < cols.length; i++) {
       const c = cols[i];
       if (dynamicAircraftCollider(c)) continue;
@@ -1928,7 +1935,7 @@
   // street six storeys below). Same collider data the spotlight roof-scan uses.
   function roofTopAt(x, z) {
     let topY = 0;
-    const cols = CBZ.colliders || [];
+    const cols = collidersAt(x, z, _colsRoof);
     for (let ci = 0; ci < cols.length; ci++) {
       const c = cols[ci];
       if (c.y1 == null || c.y1 <= topY) continue;
@@ -2140,7 +2147,7 @@
     if (heli._roofT <= 0) {
       heli._roofT = 0.18;
       let topY = 0;
-      const cols = CBZ.colliders || [];
+      const cols = collidersAt(beam.x, beam.z, _colsBeam);
       for (let ci = 0; ci < cols.length; ci++) {
         const c = cols[ci];
         if (c.y1 == null || c.y1 <= topY || c.y1 > heli.pos.y) continue;
