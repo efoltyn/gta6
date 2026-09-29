@@ -145,49 +145,140 @@
     return true;
   }
 
+  /* ---------------- THE DAY, KEYED ON WHERE THE SUN ACTUALLY IS --------
+     daylight() used to blend three keyframes on `dayness` = max(0, sin(sun)),
+     which is GEOMETRY, not light, and it had three real faults:
+       · the key never left the sun. At night the "sun" kept 0.20 of intensity
+         from UNDER the ground (daynight.js put it at sin(ang) * 95 < 0), so in
+         the prison it lit only the undersides of things and no moon ever lit
+         the yard;
+       · there was no twilight. The instant the sun touched the horizon the
+         whole rig was on its midnight keyframe: no afterglow, no blue hour;
+       · colour temperature was one dusk orange smeared across |sin| < 0.33.
+     Now every term is read off the sun's SIGNED height `up` (CBZ.sunHeight):
+       · the SUN is the key while it is up. Its light dies over the last two
+         degrees (extinction through the long air path) and its colour runs a
+         temperature curve: ~1900 K red-orange on the horizon, ~3300 K gold at
+         10 degrees, ~5500 K white by 35 degrees;
+       · then a TWILIGHT with no key at all: shadowless sky light only, the
+         ambient going mauve, then deep blue (the blue hour, sun 4..8 degrees
+         down), then night;
+       · then the MOON takes the key, from the opposite point of the sky
+         (exactly where core/sky.js draws its disc), its strength set by the
+         PHASE: an 8-day lunation off CBZ.dayTime, so some nights are moonlit
+         and some are genuinely black, which is what a torch is for.
+     KEY above stays as the published noon/night reference (nukefx reads it). */
+  const SKYKEYS = [
+    //  up      hemi   sky       ground
+    [-0.40,   0.34, 0x2c3c62, 0x161c2c],   // night (the old KEY.night)
+    [-0.17,   0.35, 0x2e4172, 0x171d2d],   // nautical twilight: the dome still faintly blue
+    [-0.08,   0.40, 0x4862a4, 0x1c2337],   // THE BLUE HOUR
+    [ 0.00,   0.47, 0xc49aa4, 0x4b4044],   // sunset: mauve-peach dome, the burn at the horizon
+    [ 0.10,   0.52, 0xffc9a0, 0x6d5a4c],   // golden hour (the old KEY.dusk sky)
+    [ 0.30,   0.60, 0xe8eeff, 0x86836c],
+    [ 0.60,   0.68, 0xdcecff, 0x8b8a72],
+    [ 1.00,   0.72, 0xdcecff, 0x8b8a72],   // noon (the old KEY.day, unchanged)
+  ];
+  const SUNKEYS = [
+    //  up      key    colour (blackbody through the air path)
+    [-0.035,  0.00, 0xff4a14],
+    [ 0.00,   0.14, 0xff5e1f],   // ~1900 K, the disc on the horizon
+    [ 0.06,   0.36, 0xff8a3a],   // ~2500 K (the old dusk key colour)
+    [ 0.17,   0.58, 0xffbd78],   // ~3300 K golden hour
+    [ 0.35,   0.82, 0xffe4bf],   // ~4600 K
+    [ 0.60,   1.04, 0xfff4e0],   // ~5500 K
+    [ 1.00,   1.18, 0xfff4e0],   // noon (the old KEY.day, unchanged)
+  ];
+  const MOON = { color: 0x7d93c8, key: 0.20, from: 0.04, full: 0.30 };
+  const LUNATION = 8;           // in-game days, new moon -> new moon
+  const TWILIGHT_KEY = -0.035;  // below this the sun no longer lights anything
+
+  function smooth(e0, e1, x) {
+    const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0)));
+    return t * t * (3 - 2 * t);
+  }
+  // piecewise-linear lookup in one of the tables above (value + optional colour)
+  function keyAt(table, up, col, outC) {
+    const n = table.length;
+    if (!(up > table[0][0])) { if (outC) outC.setHex(table[0][col]); return table[0][1]; }
+    if (up >= table[n - 1][0]) { if (outC) outC.setHex(table[n - 1][col]); return table[n - 1][1]; }
+    for (let i = 1; i < n; i++) {
+      const b = table[i];
+      if (up > b[0]) continue;
+      const a = table[i - 1], k = (up - a[0]) / (b[0] - a[0]);
+      if (outC) { outC.setHex(a[col]); _c2.setHex(b[col]); outC.lerp(_c2, k); }
+      return a[1] + (b[1] - a[1]) * k;
+    }
+    return table[n - 1][1];
+  }
+  /* The moon's lit fraction, 0 (new) .. 1 (full). Offset so the first night of
+     a fresh session is a bright moon, and the black nights come a few days in,
+     once you have had the chance to find a torch. */
+  function moonIllum() {
+    const d = CBZ.dayTime ? +CBZ.dayTime() : 0;
+    if (!Number.isFinite(d)) return 0.8;
+    return 0.5 - 0.5 * Math.cos(((d + 2) / LUNATION) * Math.PI * 2);
+  }
+  function signedUp(dayness) {
+    const u = Number(CBZ.sunHeight);
+    if (Number.isFinite(u)) return u;
+    return dayness > 0 ? dayness : -0.5;
+  }
+  // THE KEY IS THE MOON once the sun has stopped lighting anything
+  function keyIsMoon(up) {
+    if (up == null) up = signedUp(CBZ.dayness != null ? CBZ.dayness : 1);
+    return up < TWILIGHT_KEY;
+  }
+  /* keyDir(angle, minUp, out) -> out = (cos, sin) of whichever body is the key
+     (the sun, or the moon at the opposite point once twilight is over), its
+     sin floored at `minUp` so the single ortho shadow map never renders a
+     shadow a hundred metres long. Not normalised: each caller scales x/y into
+     its own proportions. The disc core/sky.js draws stays at its true place;
+     the floor only matters near the horizon, where the key is fading anyway. */
+  function keyDir(ang, minUp, out) {
+    const a = keyIsMoon(Math.sin(ang)) ? ang + Math.PI : ang;
+    return out.set(Math.cos(a), Math.max(minUp, Math.sin(a)), 0);
+  }
+
   /* daylight(dayness, duskness, sunColorOut)
-     Blends night→day→dusk across the authored keyframes above and writes
-     sun colour/intensity, hemisphere intensity + sky/ground colours, and the
-     bounce fill's colour/intensity. Returns the blended sun colour so the
-     caller can publish it (core/sky.js reads CBZ.sunTint, not sun.color,
-     because a mode override may have clobbered the light).                */
+     Writes sun colour/intensity, hemisphere intensity + sky/ground colours,
+     and the bounce fill's colour/intensity for the current sun height.
+     Returns the key's colour so the caller can publish it (core/sky.js reads
+     CBZ.sunTint, not sun.color, because a mode override may have clobbered
+     the light). `duskness` stays in the signature for old callers; the
+     elevation tables above already carry the dusk. */
+  let _illum = 1;
   function daylight(dayness, duskness, out) {
-    const k = dayness < 0 ? 0 : dayness > 1 ? 1 : dayness;
-    const d = duskness < 0 ? 0 : duskness > 1 ? 1 : duskness;
-    const N = KEY.night, D = KEY.day, K = KEY.dusk;
-
-    // sun colour
-    _c1.setHex(N.sun); _c2.setHex(D.sun);
+    const up = signedUp(dayness < 0 ? 0 : dayness > 1 ? 1 : dayness);
+    _illum = moonIllum();
+    CBZ.moonIllum = _illum;
     const sc = out || _c3;
-    sc.copy(_c1).lerp(_c2, k);
-    if (d > 0) { _c1.setHex(K.sun); sc.lerp(_c1, d * 0.7); }
+    let si;
+    if (!keyIsMoon(up)) {
+      si = keyAt(SUNKEYS, up, 2, sc);
+    } else {
+      const mk = smooth(MOON.from, MOON.full, -up);
+      sc.setHex(MOON.color);
+      si = MOON.key * mk * (0.18 + 0.82 * _illum);
+    }
     sun.color.copy(sc);
-
-    // logical intensities (gfx.finalize() applies the tone-map gain)
-    let si = N.si + (D.si - N.si) * k;
-    if (d > 0) si += (K.si - si) * (d * 0.45);   // the low sun is dimmer AND warmer
     sun.intensity = si;
-    let hi = N.hi + (D.hi - N.hi) * k;
-    if (d > 0) hi += (K.hi - hi) * (d * 0.4);
-    hemi.intensity = hi;
 
-    // sky/ground ambient colour across the cycle — this is the cheap
-    // "sky-tinted GI" term: at dusk the up-facing ambient goes peach and the
-    // down-facing goes warm brown, so every roof and every kerb shifts with
-    // the sky instead of staying the same two constants all day.
+    // THE SKY. A moonless sky is darker than a moonlit one, and so is the
+    // light it throws: the night end of the table is scaled by the phase.
+    let hi = keyAt(SKYKEYS, up, 2, CBZ.CONFIG.GFX_SKY_AMBIENT ? _c1 : null);
+    const nightW = smooth(-0.10, -0.30, up);
+    hi *= 1 - nightW * 0.38 * (1 - _illum);
+    hemi.intensity = hi;
     if (CBZ.CONFIG.GFX_SKY_AMBIENT) {
-      _c1.setHex(N.sky); _c2.setHex(D.sky);
-      hemi.color.copy(_c1).lerp(_c2, k);
-      if (d > 0) { _c1.setHex(K.sky); hemi.color.lerp(_c1, d * 0.6); }
-      _c1.setHex(N.gnd); _c2.setHex(D.gnd);
-      hemi.groundColor.copy(_c1).lerp(_c2, k);
-      if (d > 0) { _c1.setHex(K.gnd); hemi.groundColor.lerp(_c1, d * 0.55); }
+      hemi.color.copy(_c1);
+      keyAt(SKYKEYS, up, 3, hemi.groundColor);
     }
 
-    // bounce: the ground throwing the sun back up. Tinted by the hemisphere's
-    // ground colour (which IS the local ground) warmed toward the sun colour,
+    // bounce: the ground throwing the key back up. Tinted by the hemisphere's
+    // ground colour (which IS the local ground) warmed toward the key colour,
     // because bounced light carries the colour of what it bounced off.
-    const bi = N.bi + (D.bi - N.bi) * k;
+    const bi = 0.34 * (si / 1.18);
     bounce.color.copy(hemi.groundColor).lerp(sc, 0.45);
     bounce.intensity = CBZ.CONFIG.GFX_BOUNCE_LIGHT ? bi * (tier().bounce != null ? tier().bounce : 1) : 0;
     return sc;
@@ -226,21 +317,8 @@
     const k = CBZ.dayness != null ? CBZ.dayness : 1;
     const d = CBZ.duskness || 0;
     daylight(k, d, CBZ.sunTint || (CBZ.sunTint = new THREE.Color()));
-    // GOLDEN HOUR (city only). The shared keys only warm the light inside
-    // |sunHeight| < 0.33, and only by a third there, so the last hour of the
-    // city's day photographed as a flat grey noon. A low sun is gold: ramp a
-    // warm key and a peach sky fill in as the sun drops under ~27 degrees,
-    // full strength from ~13 degrees down to the horizon.
-    const upG = Number(CBZ.sunHeight);
-    if (Number.isFinite(upG)) {
-      const w = Math.max(0, Math.min(1, (0.45 - upG) / 0.25)) * Math.max(0, Math.min(1, (upG + 0.06) / 0.1));
-      if (w > 0) {
-        sun.color.lerp(_c1.setHex(0xffa04a), w * 0.6);
-        sun.intensity *= 1 + 0.12 * w;
-        hemi.color.lerp(_c1.setHex(0xffc9a0), w * 0.3);
-        hemi.groundColor.lerp(_c1.setHex(0x8a6448), w * 0.25);
-      }
-    }
+    // GOLDEN HOUR used to be a city-only patch here; daylight() now runs the
+    // real colour-temperature curve for every mode, so it is not repeated.
     if (CBZ.CONFIG.CITY_STREET_REALISM_V1 !== false) {
       // Preserve the noon keyframe exactly. As the sun falls, remove the flat
       // global fill that made midnight asphalt as legible as daytime; street
@@ -262,8 +340,8 @@
     // Elevation is floored at ~15 degrees so a building's shadow stays inside
     // the tier's shadow box instead of streaking off to the horizon.
     const ang = Number.isFinite(CBZ.sunAngle) ? CBZ.sunAngle : 1.1;
-    const a2 = Math.sin(ang) >= 0 ? ang : ang + Math.PI;
-    const sx = Math.cos(a2), sy = Math.max(0.27, Math.sin(a2)), sz = -0.42;
+    keyDir(ang, 0.27, _sunDir);                  // sun by day, the moon once twilight is over
+    const sx = _sunDir.x, sy = _sunDir.y, sz = -0.42;
     const sl = 170 / Math.hypot(sx, sy, sz);
     aimSun(focus.x, 4, focus.z, sx * sl, sy * sl, sz * sl);
     setShadowFrustum(tier().shadowHalf || 190, (tier().shadowHalf || 190) * 2.6 + 40);
@@ -274,6 +352,9 @@
     sun: sun, hemi: hemi, bounce: bounce, target: sunTarget,
     keys: KEY,
     daylight: daylight,
+    keyIsMoon: keyIsMoon,
+    keyDir: keyDir,
+    moonIllum: function () { return _illum; },
     aimSun: aimSun,
     aimBounce: aimBounce,
     cityFrame: cityFrame,

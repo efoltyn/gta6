@@ -149,6 +149,15 @@
       ringFar: new THREE.Color(0x4d3c52),  // one haze step lighter
       win: new THREE.Color(0xffa45e),      // window dots warm up
     },
+    /* THE BLUE HOUR: sun 4..8 degrees down, the burn gone from the horizon,
+       and the whole dome a deep saturated blue before it goes black. The
+       palette used to fall from the dusk mauve straight to the night table
+       the moment the sun crossed the horizon. */
+    blue: {
+      top: new THREE.Color(0x0a1334),
+      zen: new THREE.Color(0x152b62),
+      mid: new THREE.Color(0x2c4a8c),
+    },
     night: {
       top: new THREE.Color(0x02030a),
       zen: new THREE.Color(0x05080f),
@@ -999,6 +1008,13 @@
     _top.copy(PAL.night.top).lerp(PAL.day.top, kDay).lerp(PAL.dusk.top, duskness * 0.6);
     _zen.copy(PAL.night.zen).lerp(PAL.day.zen, kDay).lerp(PAL.dusk.zen, duskness * 0.6);
     _mid.copy(PAL.night.mid).lerp(PAL.day.mid, kDay).lerp(PAL.dusk.mid, duskness * 0.85);
+    // the blue hour: a bell centred ~6 degrees below the horizon
+    const blueK = clamp01(1 - Math.abs(up + 0.10) / 0.09);
+    if (blueK > 0) {
+      _top.lerp(PAL.blue.top, blueK * 0.8);
+      _zen.lerp(PAL.blue.zen, blueK * 0.85);
+      _mid.lerp(PAL.blue.mid, blueK * 0.75);
+    }
     // the deck: authored, dimmed into the night with the rest of the sky, then
     // nudged toward the live fog so the disaster's own mood carries into it
     const stLum = 0.12 + 0.88 * kDay;
@@ -1202,7 +1218,10 @@
     }
     _p.set(Math.cos(a + Math.PI) * 80, Math.sin(a + Math.PI) * 95, -10).normalize();
     moonSpr.position.copy(_p).multiplyScalar(795);
-    let mop = Math.min(1, Math.max(0, (night - 0.12) * 1.25));
+    // the PHASE (core/lights.js, 8-day lunation) sets how bright the disc is;
+    // a new moon is a faint ashen disc, not a lamp
+    const illum = fin(CBZ.moonIllum, 1);
+    let mop = Math.min(1, Math.max(0, (night - 0.12) * 1.25)) * (0.12 + 0.88 * illum);
     if (_p.y < -0.02) mop = 0;
     moonSpr.visible = mop > 0.01;
     if (moonSpr.visible) moonSpr.material.opacity = mop;

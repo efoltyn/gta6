@@ -321,20 +321,32 @@
     function darken(floorSpec, order) {
       if (!CBZ.onAlways) return;
       const get = typeof floorSpec === "function" ? floorSpec : function () { return floorSpec; };
-      CBZ.onAlways(order != null ? order : 93.6, function () {
+      let inside = 1;            // smoothed interior sky share at the eye (1 = outdoors)
+      CBZ.onAlways(order != null ? order : 93.6, function (dt) {
         if (!enabled()) return;
         const night = 1 - sky();
+        /* INDOORS AT NIGHT IS DARKER THAN OUTDOORS. The hemisphere light has
+           no shadow, so a sealed room at lights-out was lit exactly like the
+           open yard. Where the player stands inside a region, the sky light
+           that reaches him is only what its windows admit — unless the room's
+           own lamps are on (its ambient). Eased over ~0.5 s so walking through
+           a door is a transition, not a pop. Day is untouched (x night). */
+        const p = CBZ.player && CBZ.player.pos;
+        const r = p ? regionAt(p.x, p.z) : null;
+        const want = r ? Math.min(1, Math.max(windowOf(r), ambientOf(r))) : 1;
+        inside += (want - inside) * Math.min(1, (dt > 0 ? dt : 0.016) * 4);
         if (night <= 0.002) return;
         const floor = get();
         if (floor == null || floor >= 1) return;
         const f = 1 - night * (1 - floor);
+        const fin = 1 - night * (1 - inside);
         if (CBZ.sun) CBZ.sun.intensity *= f;
         if (CBZ.hemi) {
-          CBZ.hemi.intensity *= f;
+          CBZ.hemi.intensity *= f * fin;
           CBZ.hemi.color.multiplyScalar(0.55 + 0.45 * (1 - night));
           CBZ.hemi.groundColor.multiplyScalar(0.5 + 0.5 * (1 - night));
         }
-        if (CBZ.bounce) CBZ.bounce.intensity *= f;
+        if (CBZ.bounce) CBZ.bounce.intensity *= f * fin;
         // fog too, or the horizon glows brighter than the ground under it
         if (CBZ.scene && CBZ.scene.fog) CBZ.scene.fog.color.multiplyScalar(1 - night * 0.5);
       });
