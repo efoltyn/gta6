@@ -1105,7 +1105,17 @@
       const r = rigOf(g);
       r.stamp = stamp;
       if (a.culled || !g.parent || !chainVisible(g)) { parkRig(r); continue; }
-      if (_stagger && !r.parked && (stamp + g.id) % SYNC_K !== 0) {
+      /* A BODY RIDING SOMETHING NEVER HOLDS A POSE. The held pose is a WORLD
+         pose, and a rig attached to a car/boat/plane (npclife.js) is carried
+         by a parent that moves every frame — so on the two skipped frames of
+         three a traffic driver was drawn where the car WAS, 0.3-0.9 m behind
+         the moving cabin (owner: "you see them outside the car, slightly
+         behind it"). Worse, the distance test below reads g.position, which
+         for an attached rig is the seat offset in the car's frame (~0.5 m),
+         i.e. the player's distance from the world ORIGIN — so every seated
+         body in the city was being staggered, near or far. Attached rigs walk
+         every frame; there are only ever a handful in view. */
+      if (_stagger && !r.parked && !a._npcAttached && (stamp + g.id) % SYNC_K !== 0) {
         const dx = g.position.x - _px, dz = g.position.z - _pz;
         if (dx * dx + dz * dz > FAR_SYNC_D2) {
           r.skipStamp = stamp;

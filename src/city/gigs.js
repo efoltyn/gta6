@@ -541,7 +541,17 @@
     if (!p || !car || !car.group || !CBZ.npcLife) return false;
     if (p._npcAttached && p._npcAttached.parent === car.group) return true;
     if (p._npcAttached) CBZ.npcLife.detach(p, { parent: (arena() && arena().root) || CBZ.scene, state: "walk" });
-    if (!CBZ.npcLife.attach(p, car.group, RIDER_SEAT)) return false;
+    // the car's own free back seat (vehicles.js carSeatAnchor), else the typed one
+    let seat = null;
+    if (CBZ.carSeatAnchor) {
+      const ids = ["rearR", "rearL", "shotgun"];
+      for (let i = 0; i < ids.length && !seat; i++) {
+        if (CBZ.carSeats && !CBZ.carSeats.free(car, ids[i])) continue;
+        seat = CBZ.carSeatAnchor(car, ids[i]);
+      }
+      if (!seat) seat = CBZ.carSeatAnchor(car, "rearR");
+    }
+    if (!CBZ.npcLife.attach(p, car.group, seat || RIDER_SEAT)) return false;
     p.inCar = car; p.controlled = true;
     if (p.group) p.group.visible = true;
     gig.passengerCar = car;

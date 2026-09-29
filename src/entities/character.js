@@ -8387,6 +8387,28 @@
       topOverHip: (neckOverHip + P.headSize) * hs,
     };
   };
+  /* THE SEATED FIT — the one uniform scale that lands THIS body's seated eye
+     on `eyeH` and keeps its crown under `roofH` (both metres over the seat's
+     floor, cushion `cushH` over it too), inverted from the seat solve's own
+     arithmetic above. A car cabin is a real-sized room and this rig is
+     stylised, so 1:1 puts the crown ~0.2 m through the headliner: every
+     body seated in a car (the player at his wheel, a traffic driver, a cab
+     fare, a companion) is sized by this, and nothing else. Clamped 0.5..1;
+     0.6 when the body cannot be measured. */
+  CBZ.charSeatFit = function (ch, cushH, eyeH, roofH) {
+    const m = CBZ.charSeatMetrics(ch);
+    if (!m) return 0.6;
+    const cush = Math.max(0.02, cushH);
+    function solve(target, over) {
+      if (!(target > 0)) return 1;
+      // world hip = max(cush + hipPad*s, hipFloor*s); world eye/top = hip + over*s
+      const a = (target - cush) / (m.hipPad + over);          // cushion branch
+      if (a > 0 && cush >= (m.hipFloor - m.hipPad) * a) return a;
+      return target / (m.hipFloor + over);                    // low-clamp branch
+    }
+    const s = Math.min(solve(eyeH, m.eyeOverHip), solve(roofH, m.topOverHip));
+    return Math.max(0.50, Math.min(1.0, s));
+  };
   CBZ.charBands = { CHILD_ADULT_AGE, bandOf };
   // One cheap question every other system asks: "is this a child?" Answers for
   // a rig, a ped, or a bare Object3D (the root carries userData.charBand), and

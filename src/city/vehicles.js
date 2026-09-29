@@ -1339,13 +1339,6 @@
     seat.armed = carHash(c.occ.hx, c.occ.hz, 660 + seat.row * 5 + (seat.side > 0 ? 1 : 0)) < p;
     return seat.armed;
   }
-  // where a seat SITS, in the car group's local frame — the one cabin query,
-  // so a blob, a promoted rig and a door-side step-out can never disagree.
-  function occSeatPose(c, seat) {
-    if (!c._occFrame) return null;
-    const S = SEATS() && SEATS().seat(c, seat.slot);
-    return S ? { x: S.x, y: S.cushionY, z: S.z } : null;
-  }
 
   function addOccupants(c) {
     if (CBZ.CONFIG && CBZ.CONFIG.VEHICLE_REAL_GLASS === false) return;
@@ -1415,16 +1408,50 @@
   const OCC_RIG_CARS = 3;
   let occRigCars = 0, occStat = { promoted: 0, claimed: 0, spawned: 0, jacks: 0, hostages: 0,
     react: { fight: 0, flee: 0, freeze: 0, beg: 0 } };
-  function occAnchorFor(c, seat) {
-    const p = occSeatPose(c, seat); if (!p) return null;
-    // A REAR passenger sits turned a few degrees into the cabin and a shotgun
-    // rider leans toward the window — the same anchor grammar gangs.js's
-    // DB_SEATS uses, which npclife re-asserts every frame.
+  /* THE ANCHOR A REAL BODY SITS ON, for ANY car seat — traffic occupants,
+     a drive-by crew, a motorcade detail, a cab driver and his fare all come
+     through here (CBZ.carSeatAnchor), because every one of them used to type
+     its own and every one of them was wrong the same way.
+
+     OWNER: "NPC driver cars — you see them OUTSIDE the car, slightly behind
+     it." The old anchor was the bare cushion point with a 0.12 rad backward
+     pitch, no seat geometry and no scale: character.js's legacy chair pose
+     keeps the hips a fixed height over the rig's ROOT, so a full-size
+     stylised adult rooted on the cushion sat with his hips on the belt line,
+     his crown ~0.3 m up through the roof and his shoulders pitched back
+     through the rear pillar. From outside that IS a man sitting on the car.
+
+     Now the anchor is the seat itself, in the grammar the aircraft rows and
+     the player's own wheel already use: root on the cushion top, the cushion
+     and the floor DECLARED (so the V2 seat solve sinks the hips onto the
+     cushion and puts the soles on the floor pan), the driver in the "car"
+     posture (hands out to the rim), and a `fit` that npclife.js resolves to
+     this body's own scale (charSeatFit — eye on the seat's eye, crown under
+     the roof over ITS row). Frame: the car visual's local frame, which is the
+     group's at rest (the visual sits at the group origin). */
+  function seatAnchor(c, S) {
+    const m = SEATS() && SEATS().of(c);
+    const ci = m && m.ci;
+    if (!S || !ci) return null;
+    const floorY = ci.floorY != null ? ci.floorY : S.cushionY - 0.28;
+    const cushH = Math.max(0.05, S.cushionY - floorY);
+    const eyeY = S.eye && S.eye.y != null ? S.eye.y : S.cushionY + 0.62;
     return {
-      x: p.x, y: p.y, z: p.z,
-      pitch: 0.12, yaw: seat.row ? -seat.side * 0.16 : (seat.slot === "shotgun" ? -0.10 : 0),
-      roll: 0, pose: "sit", state: "sit",
+      x: S.x, y: S.cushionY, z: S.z,
+      // a REAR passenger sits turned a few degrees into the cabin and a
+      // shotgun rider leans toward the window
+      pitch: 0, roll: 0,
+      yaw: S.row ? -S.side * 0.16 : (S.isDriver ? 0 : S.side * 0.10),
+      pose: "sit", state: "sit",
+      cushionH: cushH, floorBelow: cushH,
+      seatKind: S.isDriver ? "car" : "seat",
+      fit: { eyeH: eyeY - floorY, roofH: (S.roofY != null ? S.roofY : ci.roofY) - 0.05 - floorY },
+      carSeat: S.id,
     };
+  }
+  function occAnchorFor(c, seat) {
+    const S = SEATS() && SEATS().seat(c, seat.slot);
+    return S ? seatAnchor(c, S) : null;
   }
   function occDraftOk(p, c) {
     if (!CBZ.npcLife || !CBZ.npcLife.draftableCity) return false;
@@ -1667,20 +1694,8 @@
      eyeballing a constant — except this one is derived, and it is per-body, so
      a woman or a teenager gets her own. */
   function fitSeatedRig(ch, ci) {
-    const m = CBZ.charSeatMetrics ? CBZ.charSeatMetrics(ch) : null;
-    if (!m) return 0.6;
-    const cush = Math.max(0.02, ci.cushionY - ci.floorY);
-    function solve(target, over) {
-      if (!(target > 0)) return 1;
-      // world hip = max(cush + hipPad*s, hipFloor*s); world eye/top = hip + over*s
-      const a = (target - cush) / (m.hipPad + over);          // cushion branch
-      if (a > 0 && cush >= (m.hipFloor - m.hipPad) * a) return a;
-      return target / (m.hipFloor + over);                    // low-clamp branch
-    }
-    const s = Math.min(
-      solve(ci.eye.y - ci.floorY, m.eyeOverHip),
-      solve((ci.roofY - 0.05) - ci.floorY, m.topOverHip));
-    return Math.max(0.50, Math.min(1.0, s));
+    if (!CBZ.charSeatFit) return 0.6;
+    return CBZ.charSeatFit(ch, ci.cushionY - ci.floorY, ci.eye.y - ci.floorY, (ci.roofY - 0.05) - ci.floorY);
   }
 
   function driverWanted(car) {
@@ -3483,11 +3498,13 @@
     if (st.blob && st.blob.parent) { st.blob.parent.remove(st.blob); st.blob = null; }
     return occSeatPed(c, st, ped, opts);
   };
-  CBZ.carOccupancySeatAnchor = function (c, slotName) {
-    if (!c || !c._occFrame) return null;
-    const S = seatFor(c, slotName); if (!S) return null;
-    return occAnchorFor(c, { slot: S.id, side: S.side, row: S.row });
+  // the anchor for a named slot of THIS body (nearest real seat if the body
+  // has no such slot) — null for a car with no cabin (a bike, a boat)
+  CBZ.carSeatAnchor = function (c, slotName) {
+    if (!c) return null;
+    return seatAnchor(c, seatFor(c, slotName || "driver"));
   };
+  CBZ.carOccupancySeatAnchor = CBZ.carSeatAnchor;
   // a named slot on THIS body: the seat itself, else the nearest thing to it
   // (a "rearR" asked of a two-seater is the passenger seat)
   function seatFor(c, id) {

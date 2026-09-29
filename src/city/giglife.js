@@ -255,7 +255,11 @@
   }
   function addFareActor(car, driver) {
     if (!car || car._gigFare || !car.group || !CBZ.npcLife) return null;
-    const anchor = { x: 0.42, y: 0.55, z: -0.35, pitch: 0.18, yaw: 0, pose: "sit", state: "sit" };
+    // THE REAL REAR SEAT of this body (vehicles.js carSeatAnchor: cushion,
+    // floor pan, fitted scale), kerb side — not a typed point that floated a
+    // full-size fare half out through the roof
+    const anchor = (CBZ.carSeatAnchor && (CBZ.carSeatAnchor(car, "rearR") || CBZ.carSeatAnchor(car, "shotgun"))) ||
+      { x: -0.42, y: 0.55, z: -0.35, yaw: 0, pose: "sit", state: "sit" };
     const placement = { parent: car.group, anchor: anchor };
     let fare = CBZ.npcLife.claimCity("cabPassenger", placement, function (p) { return safeFareDraft(p, driver); });
     let spawned = false;
@@ -328,7 +332,15 @@
     // Ride the real driver: controlled so aigoals/peds won't fight us for it,
     // but visibly attached at the wheel instead of hidden while the car moves.
     ped.inCar = car; ped.controlled = true;
-    if (CBZ.npcLife && CBZ.npcLife.attach(ped, car.group, { x: -0.42, y: 0.55, z: 0.38, yaw: 0, pose: "sit", state: "sit" })) {
+    // THE DRIVER'S SEAT, at the wheel (+X, LHD) — the old typed anchor sat him
+    // at -X, the passenger side, full size with his head out of the roof,
+    // next to the traffic blob vehicles.js had already put at the wheel. This
+    // car carries exactly the people this file put in it, so the ambient
+    // crew comes out first (gangs.js's drive-by car does the same).
+    if (CBZ.carOccupancyClear) CBZ.carOccupancyClear(car);
+    const drvSeat = (CBZ.carSeatAnchor && CBZ.carSeatAnchor(car, "driver")) ||
+      { x: 0.42, y: 0.55, z: 0.38, yaw: 0, pose: "sit", state: "sit" };
+    if (CBZ.npcLife && CBZ.npcLife.attach(ped, car.group, drvSeat)) {
       if (ped.group) ped.group.visible = true;
     } else if (ped.group) ped.group.visible = false;
     // the visible cargo / fare

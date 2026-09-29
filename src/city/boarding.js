@@ -209,7 +209,7 @@
         id: st.id, kind: st.isDriver ? "driver" : (st.row ? "rear" : "front"),
         side: side, col: st.col, row: st.row,
         x: st.x, y: st.cushionY, z: st.z, yaw: 0,
-        cushionH: Math.max(0.10, st.cushionY - ci.floorY), floorBelow: 0,
+        cushionH: Math.max(0.10, st.cushionY - ci.floorY), floorBelow: Math.max(0.10, st.cushionY - ci.floorY),
         doorId: st.doorId || null,
         doorX: side * halfW, doorZ: zc,
         outX: side * (halfW + 0.92), outZ: zc + 0.02,
@@ -602,33 +602,26 @@
     const ped = a.ped, veh = a.veh, seat = a.seat;
     const NL = CBZ.npcLife;
     if (!NL || !NL.attach) return false;
-    const anchor = {
+    /* A CAR SEAT IS THE CAR'S (vehicles.js carSeatAnchor): cushion and floor
+       pan declared, the rig fitted to THIS body by the one seated-fit solve
+       npclife applies, re-asserts and hands back at the door. This file used
+       to scale the rig itself AFTER the attach, with the seat solve still
+       told world clearances (and a floor at the cushion), so a companion rode
+       with his hips over the cushion and a shrunken body nobody re-asserted.
+       Aircraft rows and holds keep their own authored records. */
+    const anchor = (carSeatKind(seat) && CBZ.carSeatAnchor && CBZ.carSeatAnchor(veh, seat.id)) || {
       x: seat.x, y: seat.y, z: seat.z, yaw: seat.yaw || 0,
       pose: seat.pose || "sit", state: seat.pose === "stand" ? "idle" : "sit",
     };
-    if (seat.cushionH != null) anchor.cushionH = seat.cushionH;
-    if (seat.floorBelow != null) anchor.floorBelow = seat.floorBelow;
+    if (!anchor.carSeat) {
+      if (seat.cushionH != null) anchor.cushionH = seat.cushionH;
+      if (seat.floorBelow != null) anchor.floorBelow = seat.floorBelow;
+    }
     const parent = (seat.kind === "hold" && seat.hold && seat.hold.group) || (veh.group || veh);
     ped._seatHold = true;
     let ok = false;
     try { ok = !!NL.attach(ped, parent, anchor); } catch (e) { ok = false; }
     if (!ok) return false;
-    /* THE RIG IS STYLISED AND THE CABIN IS NOT. vehicles.js solves ONE uniform
-       scale backwards so the seated eye lands on the cabin's authored eye
-       height (`fitSeatedRig`); an unscaled adult in a sedan puts his crown
-       0.2 m through the headliner. That solve is private, so we do the cheap
-       honest version of the same thing: the ratio of the cabin's own
-       cushion-to-roof clearance to a standing torso. A hold is a room with
-       full standing height and gets left alone. */
-    if (seat.kind !== "hold" && seat.kind !== "cabin") {
-      const ci = cabin(veh);
-      if (ci && ped.group) {
-        const clear = Math.max(0.30, ci.roofY - ci.cushionY);
-        const fit = Math.max(0.50, Math.min(1, clear / 0.95));
-        ped._cbzFit = fit;
-        ped.group.scale.setScalar(fit);
-      }
-    }
     ped.inCar = veh;
     ped.controlled = true;
     ped._spawnHidden = false;
@@ -653,17 +646,7 @@
     const ped = a.ped, veh = a.veh, seat = a.seat;
     const w = worldOf(veh, seat.doorX, 0, seat.doorZ, _v);
     const gy = (w && CBZ.floorAt) ? (+CBZ.floorAt(w.x, w.z) || 0) : 0;
-    /* UNDO THE CABIN FIT BEFORE THE DETACH, AND MAKE THE MATRIX AGREE.
-       npclife's `detach` writes the DECOMPOSED WORLD pose back onto the group —
-       scale included — so a rig still carrying its 0.6 cabin fit walks away
-       from the car permanently shrunk. Resetting the scalar is not enough on
-       its own: the decomposition reads `matrixWorld`, which still holds last
-       frame's numbers until something forces it. */
-    if (ped.group && ped._cbzFit) {
-      ped.group.scale.setScalar(1);
-      ped._cbzFit = 0;
-      if (ped.group.updateMatrixWorld) ped.group.updateMatrixWorld(true);
-    }
+    // (the cabin fit is npclife's: detach hands the body back at its own size)
     if (ped._npcAttached && CBZ.cityUnseat) {
       // the ONE sanctioned exit — a detach at the door, not a shove
       try { CBZ.cityUnseat(ped, { x: w.x, z: w.z, y: gy, ground: true, state: "walk" }); } catch (e) {}
@@ -1596,7 +1579,6 @@
           if (c && c[s.id] === p) c[s.id] = null;
           if (s.veh && s.seat) releaseSeat(s.veh, s.seat, p);
           if (s.seat && s.seat.seatRef && s.seat.seatRef.occupant === p) s.seat.seatRef.occupant = null;
-          if (p.group && p._cbzFit) { p.group.scale.setScalar(1); p._cbzFit = 0; }
           p._cbzSeat = null; p.inCar = false;
         }
         continue;
