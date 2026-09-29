@@ -344,6 +344,22 @@
   const mtnSlopeAt = CBZ.mtnSlopeAt;
   const mtnSnowCover = CBZ.mtnSnowCover;
   const mtnStrataTint = CBZ.mtnStrataTint;
+  /* THE SAME SAMPLE, ONCE. A mountain vertex asks its height, then the
+     concavity stencil asks the centre again plus four points at +-e, then
+     the slope stencil asks those same four points again: 14 field reads where
+     9 are distinct. This remembers the last 8 exact (x, z) it answered for
+     one vertex, so a repeat is a lookup. Same function, same doubles in, same
+     double out: the mesh is bit-identical, it just stops paying twice. */
+  function vertexMemo(fn) {
+    const X = new Float64Array(8).fill(NaN), Z = new Float64Array(8).fill(NaN), V = new Float64Array(8);
+    let w = 0;
+    return function (x, z) {
+      if (x !== 0 && z !== 0) for (let i = 0; i < 8; i++) if (X[i] === x && Z[i] === z) return V[i];
+      const v = fn(x, z);
+      X[w] = x; Z[w] = z; V[w] = v; w = (w + 1) & 7;
+      return v;
+    };
+  }
   const mtnTalus = CBZ.mtnTalus;
   const mtnTerrace = CBZ.mtnTerrace;
   const HAS_KIT = !!(mtnErode && mtnRidgeMF && mtnDrainage &&
@@ -1407,9 +1423,10 @@
       const STRATA = HAS_KIT && CFGS.MOUNT_STRATA_V1 !== false;
       const _mixOut = { v: 0 };
       const n = new THREE.Vector3(), light = new THREE.Vector3(-0.35, 0.82, 0.45).normalize();
+      const mH = vertexMemo(mountainHeightAt);
       for (let i = 0; i < pa.count; i++) {
         const wx = CX + pa.getX(i), wz = CZ + pa.getZ(i);
-        const y = mountainHeightAt(wx, wz);
+        const y = mH(wx, wz);
         pa.setY(i, y);
         snowTerrainNormalAt(wx, wz, n);
         const slope = 1 - n.y;
@@ -1456,7 +1473,7 @@
           // is the SAME memoised field the mesh is displaced by (mtnGridCache), so
           // the four extra samples are array reads and the white lands in the
           // gullies that are actually cut here.
-          const conc = mtnConcavity ? mtnConcavity(mountainHeightAt, wx, wz, 14, 0.055) : 0;
+          const conc = mtnConcavity ? mtnConcavity(mH, wx, wz, 14, 0.055) : 0;
           // Same correction as the Greater Range, one scale down: 24 m put the
           // snowline barely above the valley floor of a 260 m massif.
           // THE SHED TEST READS THE LANDFORM, NOT THE CRAGS. `slope` above
@@ -1465,7 +1482,7 @@
           // so the shed term was stripping cover off benches whose LANDFORM is
           // a 25 degree shelf. Same 14 m stencil the concavity above already
           // walks, so it is four more reads on the same memo.
-          const sHold = mtnSlopeAt ? mtnSlopeAt(mountainHeightAt, wx, wz, 14) : null;
+          const sHold = mtnSlopeAt ? mtnSlopeAt(mH, wx, wz, 14) : null;
           const cover = mtnSnowCover(wx - DX, wz - DZ, y, slope, faceLight, {
             // Retuned for the arete massif (2026-09-28): its faces are far
             // steeper than the old dome's, and the old line 58 / shed 0.13-0.50
@@ -1666,9 +1683,10 @@
       const STRATA_G = HAS_KIT && CFGS.MOUNT_STRATA_V1 !== false;
       const _mixG = { v: 0 };
       const n = new THREE.Vector3(), light = new THREE.Vector3(-0.36, 0.83, 0.43).normalize();
+      const gH = vertexMemo(greaterMercyHeightAt);
       for (let i = 0; i < pa.count; i++) {
         const wx = gcx + pa.getX(i), wz = gcz + pa.getZ(i);
-        const y = greaterMercyHeightAt(wx, wz);
+        const y = gH(wx, wz);
         pa.setY(i, y);
         greaterMercyNormalAt(wx, wz, n);
         const slope = 1 - n.y;
@@ -1696,7 +1714,7 @@
           // Same couloir/spine law one scale up (bigger stencil, deeper drop):
           // this range is the far panorama, and a far range that wears a flat
           // white cap is the single most artificial thing in the skyline.
-          const gconc = mtnConcavity ? mtnConcavity(greaterMercyHeightAt, wx, wz, 30, 0.05) : 0;
+          const gconc = mtnConcavity ? mtnConcavity(gH, wx, wz, 30, 0.05) : 0;
           // The line was 46 m on a range whose summits stand past 400: seven
           // eighths of every flank was already under the snow ramp, which is
           // why the whole massif photographed as one white cardboard cutout
@@ -1704,7 +1722,7 @@
           // the upper THIRD, where the reference photographs put it, and the
           // gully term then walks it back down the couloirs to ~22 m — snow
           // running down the concavities past bare rock, which is the look.
-          const gHold = mtnSlopeAt ? mtnSlopeAt(greaterMercyHeightAt, wx, wz, 30) : null;
+          const gHold = mtnSlopeAt ? mtnSlopeAt(gH, wx, wz, 30) : null;
           const cover = mtnSnowCover(wx - DX, wz - DZ, y, slope, faceLight, {
             // gully 38 (was 74), shed1 0.74 (was 0.54), line 88: the ridged range (see
             // RIDGES, NOT DOMES) has deeper gullies and steeper crests; the old
