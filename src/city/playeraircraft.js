@@ -1126,6 +1126,7 @@
   const _craftEuler = new THREE.Euler();
   const _craftYawQ = new THREE.Quaternion();
   const _craftUp = new THREE.Vector3(0, 1, 0);
+  const _milDrive = { thr: 0 };
   function setCraftRotation(craft, pitch, heading, roll) {
     if (!craft || !craft.group) return;
     const off = craft.modelYawOffset || 0;
@@ -3241,6 +3242,9 @@
     // prop-spin hook: any craft whose builder tags a spinner (userData.prop,
     // spins about local Z) gets throttle-proportional prop animation for free
     if (ud && ud.prop) ud.prop.rotation.z += dt * (6 + 55 * (craft.thr || 0));
+    // military airframes (city/mil_air.js): control surfaces follow the
+    // attitude, the nozzle glows with the throttle, every prop spins
+    if (CBZ.milAirDrive && craft.group._milRt) { _milDrive.thr = craft.thr || 0; CBZ.milAirDrive(craft.group, _milDrive, dt); }
     craft.group.position.set(craft.pos.x, craft.pos.y, craft.pos.z);
     setCraftRotation(craft, craft.pitch || 0, craft.heading, craft.roll || 0);
   }

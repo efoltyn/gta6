@@ -11,7 +11,7 @@
 
      city/aircraft.js wreckImpact:   cityExplosion + cityDamageBuilding
                                      + cityShatter + cityCrashSmoke
-     city/buildings.js structuralBlast: cityScorch + cityChunk
+     city/buildings.js blastBuildings: cityScorch + cityChunk
                                      + cityDamageBuilding + fracture.blastAt
      city/demolition.js destroy:     cityScorch + cityChunk x3 + sfx
      city/playeraircraft.js:         cityDamageBuilding x3
@@ -84,30 +84,10 @@
   if (CBZ.impact) return;                     // idempotent (family guard idiom)
 
   CBZ.CONFIG = CBZ.CONFIG || {};
-  // Master switch. false => CBZ.detonate degenerates to a bare cityExplosion
-  // with the row's power/radius and nothing else, which is byte-identical to
-  // what every legacy caller did before this file existed. One-line revert.
-  if (CBZ.CONFIG.IMPACT_BUS == null) CBZ.CONFIG.IMPACT_BUS = true;
-  // The propagating blast WAVE (nuke/MOAB class): damage arrives as an
-  // expanding annulus over seconds instead of instantly at t=0. Off => the
-  // classic instant radius query.
-  if (CBZ.CONFIG.IMPACT_SHOCKWAVE == null) CBZ.CONFIG.IMPACT_SHOCKWAVE = true;
-  // Let ordnance rows escalate structural damage through city/structural.js.
-  // Off => blasts still do FX + people damage, buildings behave as before.
-  if (CBZ.CONFIG.IMPACT_STRUCTURAL == null) CBZ.CONFIG.IMPACT_STRUCTURAL = true;
-  // EVERY PAYLOAD SPEAKS THE BUS. The consumer-side switch that the migrated
-  // hand-rolled detonations (fpsmode's rocket, combat's grenade, the tank
-  // fallback, the aircraft missile pool, playeraircraft's fallback, the car
-  // cook-off) read before choosing `CBZ.detonate(...)` over their own inline
-  // cityExplosion call. Off => every one of them runs its ORIGINAL line,
-  // byte-for-byte. It lives HERE rather than in config.js because this file is
-  // what the callers already feature-detect (`CBZ.detonate ? … : …`), so one
-  // null-check answers both questions.
-  if (CBZ.CONFIG.ORDNANCE_BUS_ALL == null) CBZ.CONFIG.ORDNANCE_BUS_ALL = true;
-  // A blast reaching the PARKED CARS around it (the 8th cityExplosion wrapper,
-  // near the bottom of this file). Off => only the wave-carrying rows touch
-  // vehicles, exactly as before.
-  if (CBZ.CONFIG.IMPACT_CAR_BLAST == null) CBZ.CONFIG.IMPACT_CAR_BLAST = true;
+  // (The IMPACT_BUS / IMPACT_STRUCTURAL / IMPACT_SHOCKWAVE / IMPACT_CAR_BLAST /
+  // ORDNANCE_BUS_ALL revert switches are gone: their off-paths were dead
+  // weight. Callers that still read ORDNANCE_BUS_ALL see `undefined`, which is
+  // `!== false`, i.e. the bus. Git is the undo.)
 
   const I = (CBZ.impact = {});
 
@@ -199,15 +179,32 @@
     wave: null, shake: null, quake: 0, sfx: null, flashbang: false,
     // debris/dust multiplier — the one knob a quality tier scales.
     debris: 1,
+    // THE CHARGE (see I.define): kg TNT-equivalent; 0 = not chemistry.
+    charge: 0, shaped: null, jetPen: null,
     // THE KINETIC LAW (see the block below the table). 0 = chemistry-driven.
     refE: 0, kmin: 0.25, kmax: 6,
   };
 
   const TABLE = Object.create(null);
 
+  /* THE CHARGE. Every row that is chemistry carries `charge`, kg of
+     TNT-equivalent — the ONE number systems/breach.js's law turns into the
+     hole in the wall, the windows, the gutted storey, the severed frame and
+     the crater. A row that does not state one inherits the law's reference
+     table by id (CBZ.blastLaw.CHARGES), so a row another file defines —
+     strategic.js's "buster" — is priced the same way. `shaped`/`jetPen`: a
+     shaped-charge jet that perforates `jetPen` m of concrete. Rows with no
+     charge (the nuke's field, the kinetic crash rows, weather) keep their own
+     structural path. */
   I.define = function (id, spec) {
     const row = Object.assign({}, DEFAULTS, spec || {});
     row.id = id;
+    const ref = CBZ.blastLaw && CBZ.blastLaw.CHARGES[id];
+    if (!(row.charge > 0) && ref) {
+      row.charge = ref.W;
+      if (row.shaped == null) row.shaped = !!ref.shaped;
+      if (row.jetPen == null) row.jetPen = ref.jetPen || 0;
+    }
     TABLE[id] = row;
     return row;
   };
@@ -239,24 +236,34 @@
      fireball 15 m instead of 25 m is not a migration, it is a nerf wearing a
      refactor's coat.
 
-     `struct: 6` ON ALL SIX IS ARITHMETIC, NOT TASTE. Until now these blasts
-     reached buildings through city/demolition.js's onBlast hook, which
-     delegates `power * LEGACY_TO_LEDGER` (=6) per building into the structural
-     ledger. The moment a caller routes through CBZ.detonate, demolition.js
-     stands down (it checks `opts._impact` / `inBusBlast()`) and the ROW is the
-     only thing feeding the ledger. So a row carrying anything less than 6
-     would have silently made every migrated warhead weaker against the city
-     than the un-migrated version of itself. 6 is the number that makes the
-     per-building deposit identical — which is exactly what "migrate, don't
-     retune" is supposed to mean. What the bus ADDS on top is the part the
-     legacy path never had: penetration, fuel fire, the ejecta direction, and a
-     seat height that is not a guess.
+     WHAT A ROW DOES TO BUILDINGS IS ITS CHARGE, not its `struct`. Every row
+     below that is chemistry carries `charge` (kg TNT-eq, from
+     CBZ.blastLaw.CHARGES by id), and systems/breach.js's law prices the hole,
+     the glass, the gut, the sever and the ledger deposit from it. `struct` is
+     read only by rows with no charge (kinetic crashes, weather) and by the
+     heavy-facade gate; on a charged row it is inert.
      ------------------------------------------------------------------------ */
   I.define("grenade",   { power: 1.0, radius: 6,  struct: 6,   fire: 0.05 });
   I.define("c4",        { power: 1.4, radius: 7,  struct: 1.6, fire: 0.10 });
   I.define("rpg",       { power: 1.9, radius: 13, struct: 6,   fire: 0.12 });
   I.define("tank",      { power: 2.2, radius: 10, struct: 6,   pen: 3,  fire: 0.05 });
   I.define("missile",   { power: 3.0, radius: 16, struct: 6,   pen: 5,  fire: 0.15, fx: "heavy" });
+  /* NAMED MUNITIONS. The charge column is the whole point: every building
+     effect below is derived from it by the law (systems/breach.js), so these
+     rows only have to say how big the FIREBALL is. Look/FX numbers sit on the
+     same cube-root curve the conventional rows already follow. */
+  I.define("tankHeat",  { power: 2.0, radius: 10, struct: 6,   pen: 3,  fire: 0.05 });
+  I.define("hellfire",  { power: 2.6, radius: 12, struct: 6,   pen: 4,  fire: 0.15, fx: "heavy" });
+  I.define("rocket227", { power: 3.0, radius: 16, struct: 6,   pen: 2,  fire: 0.25, fx: "heavy", quake: 1.0 });
+  I.define("mk82",      { power: 3.0, radius: 16, struct: 6,   pen: 3,  fire: 0.30, fx: "heavy", quake: 1.0 });
+  I.define("mk84",      { power: 2.4, radius: 20, struct: 6,   pen: 6,  fire: 0.30, fx: "heavy", quake: 1.2 });
+  // the missile pool's munition types (city/aircraft.js MUNITION_BY_SITE), so a
+  // round can name its own row: detonate(.., m.type) prices its real warhead
+  I.define("atgm",      { power: 2.6, radius: 12, struct: 6,   pen: 4,  fire: 0.15, fx: "heavy" });
+  I.define("shell",     { power: 2.0, radius: 10, struct: 6,   pen: 3,  fire: 0.05 });
+  I.define("hydra",     { power: 1.6, radius: 10, struct: 6,   pen: 1,  fire: 0.10 });
+  I.define("aam",       { power: 2.2, radius: 11, struct: 6,   pen: 1,  fire: 0.10 });
+  I.define("patriot",   { power: 2.8, radius: 14, struct: 6,   pen: 1,  fire: 0.20, fx: "heavy" });
   I.define("airstrike", { power: 3.0, radius: 16, struct: 6,   fire: 0.20, fx: "heavy" });
   /* THE CAR COOK-OFF IS THE ONE CHEMICAL ROW THAT KNOWS ITS OWN SIZE.
      Every car in the game detonated with the identical 1.15 / 6.5 — a hatchback
@@ -518,6 +525,7 @@
       // but a "volcano" picture).
       kind: (opts.fx && opts.fx.kind) || opts.kind || row.id,
       dirx: opts.dirx, dirz: opts.dirz, normal: opts.normal || null,
+      charge: opts.charge, shaped: opts.shaped, jetPen: opts.jetPen, contact: opts.contact,
       _impact: true,
     });
   }
@@ -533,6 +541,7 @@
       ordnance: row.id,
       kind: (opts.fx && opts.fx.kind) || opts.kind || row.id,
       dirx: opts.dirx, dirz: opts.dirz,
+      charge: opts.charge, shaped: opts.shaped, jetPen: opts.jetPen, contact: opts.contact,
       _impact: true,
     });
   }
@@ -692,16 +701,6 @@
     }
     if (y == null) y = (CBZ.floorAt ? CBZ.floorAt(x, z) : 0) + 1.2;
 
-    // MASTER REVERT: behave exactly like a pre-bus caller.
-    if (!CBZ.CONFIG.IMPACT_BUS) {
-      try { fxBlast(x, y, z, row, opts); } catch (e) {}
-      // Same SHAPE as the live path — a caller must not have to branch on a
-      // config flag to read the result. (This returned `struct: 0` where every
-      // other exit returns `stage`, so `r.stage` was undefined on the revert
-      // path only: a null-check that passes for a year and then doesn't.)
-      return { kind: kind, x: x, y: y, z: z, lot: null, stage: 0 };
-    }
-
     // ---- 0) PRICE THE MOTION. One resolve, used by every stage below, so the
     //        FX, the ledger and the wave can never disagree about how hard this
     //        one arrived. Null (the overwhelmingly common case) means the
@@ -713,10 +712,19 @@
     const fxScale = userScale * (kin ? kin.pow : 1);
     const strScale = userScale * (kin ? kin.str : 1);
     const sever = severOf(row, opts, kin);
-    // The composers read `opts.scale`. Hand them the FX-side number rather than
-    // teaching two more functions about kinetics — one substitution, and any
-    // third-party composer registered by another file gets it for free.
-    const fxOpts = (fxScale === userScale) ? opts : Object.assign({}, opts, { scale: fxScale });
+    /* THE CHARGE of this detonation, kg TNT-eq — what the law prices every
+       building effect with. A chemical row states it (scaled by the cube of
+       `scale`, since `scale` multiplies power and power is a cube-root
+       quantity); a kinetic row's is its impact energy in TNT (E / 4.184 MJ),
+       so an airliner opens an airliner-sized wound. */
+    let W = 0;
+    if (row.charge > 0) W = row.charge * userScale * userScale * userScale;
+    else if (row.refE > 0) W = (kin ? kin.E : row.refE) * userScale / TNT_J;
+    if (opts.charge > 0) W = +opts.charge;                 // a caller that knows its own fill (C4 by the pound)
+    // The composers read `opts.scale` (the FX-side number) and carry the
+    // charge down the blast chain to buildings.js blastBuildings.
+    const fxOpts = Object.assign({}, opts, { scale: fxScale, charge: W,
+      shaped: row.shaped, jetPen: row.jetPen, ordnance: row.id });
 
     // ---- 1) DRAW. The composer owns every particle; we own no geometry. ---
     // The composer is raised inside the BUS SCOPE (see busDepth below). The
@@ -777,82 +785,49 @@
       }
     }
 
-    // ---- 2b) GLASS. Ordinary blasts already blow out the windows near them
-    //         (buildings.js's structuralBlast wrap -> cityDamageBuilding ->
-    //         cityShatter, ~11m for a rocket). HEAVY ordnance should take the
-    //         whole block's glass, and that read belongs HERE rather than
-    //         re-hand-rolled at each ordnance site — which is exactly the
-    //         duplication the migrated callers just deleted. cityShatter skips
-    //         panes that are already shattered, so overlapping calls are free.
-    //         THE GATE MOVED OFF `struct` (2026-07-27). It used to read
-    //         `struct >= 4`, which was a fine proxy while `struct` was a
-    //         per-row character number — but the six migrated conventional
-    //         rows now all carry 6 (see the block above the table: it is
-    //         demolition.js's LEGACY_TO_LEDGER, not a character), so `struct`
-    //         had stopped saying anything about how HEAVY the round was and a
-    //         hand grenade would have started blowing out a block of glass.
-    //         POWER is the honest axis, with a struct escape hatch for the
-    //         genuine building-killers whose power is modest (an airliner into
-    //         a facade is 2.6). Every row that shattered before still does;
-    //         "missile" and "airstrike" — the two 3.0-power rows — are new.
-    const heavy = row.power >= 2.4 || row.struct >= 8;
-    if (!opts.noDamage && heavy && row.id !== "nuke" && CBZ.cityShatter) {
-      try { CBZ.cityShatter(x, z, row.radius * row.power * fxScale * 0.8); } catch (e) {}
-    }
+    // (Glass, the wall and any door in reach were already answered inside the
+    //  composer's blast by buildings.js blastBuildings, from the charge.)
 
     // ---- 3) STRUCTURE. One call. city/structural.js owns the ledger, the
     //        stage machine, the fire and the collapse choreography; this file
-    //        only tells it what hit and how hard. Absent => no-op (rule 2).
+    //        only tells it what hit and how hard.
+    //        A CHEMICAL row is priced by the charge law (S.charge): deposit,
+    //        gut and sever all from W. A kinetic/weather row keeps its row
+    //        number (struct x power, scaled by THE KINETIC LAW) and the
+    //        airframe's geometric sever.
     let structResult = 0;
-    if (CBZ.CONFIG.IMPACT_STRUCTURAL && !opts.noDamage && row.struct > 0 &&
-        row.id !== "nuke" && CBZ.structure) {
+    if (!opts.noDamage && row.id !== "nuke" && CBZ.structure) {
       try {
-        structResult = CBZ.structure.hit(x, y, z, row.struct * row.power * strScale, {
-          kind: kind, fire: row.fire,
-          // Penetration DEPTH rides the cube root too. Newton's impact-depth
-          // limit for an eroding penetrator is P/L = sqrt(rho_p / rho_t) — the
-          // honest result is that penetration saturates hard with speed rather
-          // than growing with it, so a warhead going twice as fast does NOT
-          // go twice as deep. A compressed exponent is the whole lesson.
-          pen: row.pen * (kin ? Math.min(2.2, kin.pow) : 1),
-          // SEVER — the severed WIDTH IN METRES of the struck floor's
-          // cross-section. Only geometry-carrying callers (an airframe, a
-          // flung vehicle) set `frontal`, so this is 0 for every warhead and
-          // the ledger's behaviour is unchanged for them.
-          severWidth: sever,
-          // A strike is a SUDDEN load; fire is a gradual one. NIST's number:
-          // an intact floor survives ~6 floors' worth of suddenly-applied load
-          // where it would have survived ~11 applied gradually — a dynamic
-          // amplification factor of about 1.8. The ledger uses this to decide
-          // whether the load path fails NOW or merely sits at its limit.
-          sudden: true,
-          dirx: opts.dirx, dirz: opts.dirz,
-          by: opts.by, byPlayer: opts.byPlayer, lot: opts.lot,
-        });
+        const pen = row.pen * (kin ? Math.min(2.2, kin.pow) : 1);
+        if (row.charge > 0 && W > 0 && CBZ.structure.charge) {
+          structResult = CBZ.structure.charge(x, y, z, W, {
+            kind: kind, fire: row.fire, pen: pen, severWidth: sever,
+            dirx: opts.dirx, dirz: opts.dirz, by: opts.by, byPlayer: opts.byPlayer, lot: opts.lot,
+          });
+        } else if (row.struct > 0) {
+          structResult = CBZ.structure.hit(x, y, z, row.struct * row.power * strScale, {
+            kind: kind, fire: row.fire,
+            // Penetration DEPTH rides the cube root (Newton's impact-depth
+            // limit: penetration saturates with speed rather than growing).
+            pen: pen,
+            // SEVER — the severed WIDTH IN METRES of the struck floor (only
+            // geometry-carrying callers set `frontal`)
+            severWidth: sever,
+            // a strike is a SUDDEN load (NIST dynamic amplification ~1.8)
+            sudden: true,
+            dirx: opts.dirx, dirz: opts.dirz,
+            by: opts.by, byPlayer: opts.byPlayer, lot: opts.lot,
+          });
+        }
       } catch (e) {}
     }
 
-    // ---- 3b) THE FACADE REACTS. The RPG has had `CBZ.cityBlastWall` since the
-    //          owner filmed a rocket hit a tower and "a few windows popped" —
-    //          a debris avalanche pouring down the face, a wound that smokes
-    //          for a minute, a parapet block knocked loose near the roofline.
-    //          NOTHING BIGGER THAN A ROCKET HAD IT. A JDAM into the same tower
-    //          drew a fireball and left the wall serene, because that call
-    //          lived at ONE call site (fpsmode's rocket branch) instead of on
-    //          the shared verb, and every heavier warhead was authored in a
-    //          file that had never read fpsmode.
-    //
-    //          THE SURFACE INFO IS CHEAP AND ALREADY HERE — no raycast is
-    //          invented. `facadeAt` below is the SAME collider-AABB scan
-    //          cityBlastWall itself runs to find the roofline, and the same one
-    //          cityBreach/cityScorch use; it answers "did this detonation land
-    //          on a wall, and which way does that wall face" by snapping to the
-    //          nearest face of the box it is inside/beside. If the answer is
-    //          "open air", we skip — a scar hanging four metres off a building
-    //          is exactly the floating-decal failure this repo keeps catching.
-    //          HEAVY ONLY, so a grenade never pays for the scan.
-    if (!opts.noDamage && heavy && row.id !== "nuke" && CBZ.cityBlastWall &&
-        CBZ.CONFIG.IMPACT_STRUCTURAL) {
+    // ---- 3b) THE FACADE REACTS. A bomb-class charge (or a building-killer
+    //          row) that lands on a wall pours a debris avalanche down the face
+    //          from the wound — the same collider-AABB scan cityBlastWall runs
+    //          (facadeAt), skipped in open air so nothing floats off a building.
+    const heavy = W >= 20 || row.struct >= 8;
+    if (!opts.noDamage && heavy && row.id !== "nuke" && CBZ.cityBlastWall) {
       const face = facadeAt(x, y, z, 1.6);
       if (face) {
         try { CBZ.cityBlastWall(face, face.n, { power: row.power * fxScale }); } catch (e) {}
@@ -862,7 +837,7 @@
     // ---- 4) WAVE. Big ordnance arrives over TIME. The ring below applies
     //        the far-field damage as it sweeps; the composer already covered
     //        the near field at t=0. Queued, tick-bounded, quality-capped.
-    if (row.wave && CBZ.CONFIG.IMPACT_SHOCKWAVE && !opts.noDamage) {
+    if (row.wave && !opts.noDamage) {
       queueWave(x, y, z, row, opts, fxScale, strScale);
     }
 
@@ -1175,7 +1150,7 @@
       try { w.crowd = CBZ.cityCrowdBlastTargets(x, z, maxR) || []; } catch (e) { w.crowd = []; }
       for (let i = 0; i < w.crowd.length; i++) w.crowd[i].at = nuclearShockArrival(w.crowd[i].d, fireR);
     }
-    if (CBZ.CONFIG.IMPACT_STRUCTURAL && CBZ.structure && CBZ.structure.radialTargets) {
+    if (CBZ.structure && CBZ.structure.radialTargets) {
       try { w.structures = CBZ.structure.radialTargets(x, y, z,
         Math.max(w.structR, w.thermal)) || []; } catch (e) { w.structures = []; }
       for (let i = 0; i < w.structures.length; i++) {
@@ -1592,7 +1567,7 @@
     // sweep either way, which is what stops it being a stat fiction.
     if (w.thermal > w.maxR && !w.burned && r1 >= w.maxR) {
       w.burned = true;
-      if (CBZ.CONFIG.IMPACT_STRUCTURAL && CBZ.structure && CBZ.structure.sweep) {
+      if (CBZ.structure && CBZ.structure.sweep) {
         try {
           CBZ.structure.sweep(w.x, w.z, w.maxR, w.thermal, 0.001, {
             kind: w.kind, fire: w.fire * 0.5, by: w.by, byPlayer: w.byPlayer,
@@ -1824,7 +1799,7 @@
     //     people keep the gentler linear curve so the far rim still knocks
     //     them down rather than sparing them outright.
     const structR = Math.min(w.maxR, w.structR || w.maxR);
-    if (r0 < structR && CBZ.CONFIG.IMPACT_STRUCTURAL && CBZ.structure && CBZ.structure.sweep) {
+    if (r0 < structR && CBZ.structure && CBZ.structure.sweep) {
       try {
         /* THE IGNITION BOUNDARY IS A CEILING NOW, NOT ONLY A FLOOR — and
            this is a real fault the maxR retune exposed rather than caused.
@@ -1906,7 +1881,7 @@
     if (typeof orig !== "function" || orig._impactWrapped) return;
     const wrapped = function (x, y, z, power) {
       const r = orig.apply(this, arguments);
-      if (CBZ.CONFIG.IMPACT_BUS && CBZ.CONFIG.IMPACT_STRUCTURAL && CBZ.structure) {
+      if (CBZ.structure) {
         try {
           CBZ.structure.hit(x, y, z, (power || 1) * 1.0, { kind: "impact", legacy: true });
         } catch (e) {}
@@ -1925,7 +1900,7 @@
      of a blast that the ledger is already counting:
 
        cityExplosion(...)                      <- one rocket
-         -> [buildings.js structuralBlast wrap] -> cityDamageBuilding(...)   (a)
+         -> [buildings.js blastBuildings wrap] -> cityDamageBuilding(...)   (a)
          -> [demolition.js onBlast wrap]        -> structure.sweep(...)      (b)
 
      (a) and (b) are the SAME rocket. Letting both through makes every warhead
@@ -2138,7 +2113,7 @@
     const wrapped = function (x, z, opts) {
       const r = orig.apply(this, arguments);
       try {
-        if (CBZ.CONFIG.IMPACT_CAR_BLAST && CBZ.cityCars &&
+        if (CBZ.cityCars &&
             (!CBZ.game || CBZ.game.mode === "city") &&
             !(opts && (opts.noDamage || opts._carSeen))) {
           if (opts) opts._carSeen = true;          // one blast, one bill (demolition's idiom)
@@ -2207,10 +2182,11 @@
      only ever DECREASE — copying CBZ.treeAudit()'s contract exactly.
      ============================================================ */
   CBZ.impactAudit = function () {
+    // demolition.js's hp Map and fracture.js's facade wounds are DELETED (the
+    // charge law + structural.js are the only books). What remains is
+    // buildings.js's per-wall wound map for non-blast hits (rams, gunfire).
     let n = 0;
-    if (CBZ.cityDemolition && CBZ.cityDemolition._legacyAccum) n++;
-    if (CBZ.cityFracture && CBZ.cityFracture._legacyAccum) n++;
-    if (CBZ._cityWoundWallRec) n++;      // buildings.js per-wall wound map (not this domain's to move yet)
+    if (CBZ._cityWoundWallRec) n++;
     return n;
   };
 
@@ -2311,7 +2287,12 @@
       kind: kind, E: kin ? Math.round(kin.E) : 0,
       tnt: kin ? +(kin.E / TNT_J).toFixed(2) : 0,
       fxScale: +fx.toFixed(3), strScale: +st.toFixed(3),
-      amount: +(row.struct * row.power * st).toFixed(2),
+      charge: row.charge > 0 ? +(row.charge * us * us * us).toFixed(2) : 0,
+      amount: row.charge > 0 && CBZ.blastLaw
+        ? +CBZ.blastLaw.deposit(row.charge * us * us * us).toFixed(2)
+        : +(row.struct * row.power * st).toFixed(2),
+      law: row.charge > 0 && CBZ.blastLaw ? CBZ.blastLaw.outcome(row.charge * us * us * us,
+        { wall: { thick: 0.4, shaped: !!row.shaped, jetPen: row.jetPen || 0 } }) : null,
       fireball: +(row.radius * row.power * fx).toFixed(1),
       pen: +(row.pen * (kin ? Math.min(2.2, kin.pow) : 1)).toFixed(2),
       severWidth: +severOf(row, opts, kin).toFixed(2),
@@ -2327,11 +2308,6 @@
       waves: I.waveState(),
       rumble: I.rumbling(),
       audit: CBZ.impactAudit(),
-      flags: {
-        bus: !!CBZ.CONFIG.IMPACT_BUS,
-        wave: !!CBZ.CONFIG.IMPACT_SHOCKWAVE,
-        struct: !!CBZ.CONFIG.IMPACT_STRUCTURAL,
-      },
     };
   };
 })();

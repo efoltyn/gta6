@@ -734,7 +734,7 @@
     if (!B) return false;
     o = o || {};
     // --- the shared road: a real lot, a real BURNING state ---
-    if (B.lot && CBZ.structure && CBZ.structure.hit && CBZ.CONFIG.STRUCT_LEDGER !== false) {
+    if (B.lot && CBZ.structure && CBZ.structure.hit) {
       const storeys = Math.max(1, (B.lot.building && B.lot.building.storeys) || 1);
       const fl = Math.min(storeys - 1, o.floor != null ? o.floor : ((rnd() * Math.min(3, storeys)) | 0));
       const FH = (B.lot.building && B.lot.building.FH) || 3.2;

@@ -178,7 +178,19 @@
           // an air burst 30 m up does not dig — the ground has to be what was hit
           const gy = CBZ.groundBaseAt ? CBZ.groundBaseAt(x, z) : 0;
           if (o.y == null || o.y <= gy + 6) {
-            const dug = CBZ.groundCrater(x, z, { power: o.power, radius: o.radius });
+            // SIZED BY THE CHARGE (systems/breach.js law): apparent crater
+            // radius 0.8 . W^(1/3). Anything under 1.5 m (W < ~6.6 kg: every
+            // grenade, rocket and tank round) is a scorch and a scuff, not a
+            // hole in the map; a Hellfire digs 1.7 m, a Mk-84 6 m.
+            const L = CBZ.blastLaw;
+            let co = { power: o.power, radius: o.radius };
+            if (L) {
+              const ref = L.CHARGES[o.ordnance] || L.CHARGES[o.kind];
+              const W = o.charge > 0 ? +o.charge : (ref ? ref.W : L.chargeOfPower(o.power || 1));
+              const cr = L.craterR(W);
+              co = cr >= 1.5 ? { force: true, r: Math.min(18, cr), depth: Math.min(6, cr * 0.45) } : null;
+            }
+            const dug = co ? CBZ.groundCrater(x, z, co) : null;
             CBZ.craterPenetrate(x, z, +o.power || 0, dug ? dug.r : null);
           }
         }
