@@ -613,17 +613,36 @@
       } catch (e) { console.error("[metro ground solve] " + id, e); }
     }
     // ---- tiles (no geometry yet: a near and a far mesh each) + trees
-    M.fabric = null; M.ground = null;
-    if (CBZ.metroFabric && CBZ.metroFabric.prepare) {
-      try { M.fabric = CBZ.metroFabric.prepare(P, { root: g, tile: TILE, name: id }); } catch (e) { console.error("[metro fabric prepare] " + id, e); }
-    }
-    if (CBZ.metroGround && CBZ.metroGround.prepare) {
-      try { M.ground = CBZ.metroGround.prepare(P, { root: g, tile: TILE, name: id }); } catch (e) { console.error("[metro ground prepare] " + id, e); }
-    }
-    M.tiles = mergeTiles(M);
-    // trees hang from the ARENA root (core/farcull.js deals root-level
-    // scenery pools into cells)
-    try { M.trees = trees(city.root, P, M.solve && M.solve.heightAt); } catch (e) { console.error("[metro trees] " + id, e); M.trees = []; }
+    M.fabric = null; M.ground = null; M.tiles = []; M.trees = [];
+    const heavy = function () {
+      if (M.fabric || M.ground) return;             // once per world
+      if (CBZ.metroFabric && CBZ.metroFabric.prepare) {
+        try { M.fabric = CBZ.metroFabric.prepare(P, { root: g, tile: TILE, name: id }); } catch (e) { console.error("[metro fabric prepare] " + id, e); }
+      }
+      if (CBZ.metroGround && CBZ.metroGround.prepare) {
+        try { M.ground = CBZ.metroGround.prepare(P, { root: g, tile: TILE, name: id }); } catch (e) { console.error("[metro ground prepare] " + id, e); }
+      }
+      M.tiles = mergeTiles(M);
+      // trees hang from the ARENA root (core/farcull.js deals root-level
+      // scenery pools into cells)
+      try { M.trees = trees(city.root, P, M.solve && M.solve.heightAt); } catch (e) { console.error("[metro trees] " + id, e); M.trees = []; }
+    };
+    /* A CITY PAST THE HORIZON IS PLANNED, NOT DRESSED. Its plan, regions,
+       roads, water and ground (the height oracle the continent reads) are
+       registered now; its tile set, its facade kit and its street trees are
+       prepared when the player comes within its view distance (the haze
+       horizon: fog / HAZE_SCALE, where its far tiles would first be drawn).
+       Streamed city only; otherwise now, as before. On the phone at the
+       downtown spawn that is Kingsport and Karvel, ~4-5 km off. */
+    const S = CBZ.slice;
+    if (S && S.stream && CBZ.sliceAt) {
+      const F = P.stats && P.stats.footprint;
+      const horizon = Math.min(VIEW_MAX, ((CBZ.cityFogFar || 760)) / HAZE_SCALE);
+      const pad = Math.max(0, horizon - S.keepR());
+      const job = F ? CBZ.sliceAt({ minX: F.minX - pad, maxX: F.maxX + pad, minZ: F.minZ - pad, maxZ: F.maxZ + pad }, heavy, { name: "metro " + id }) : null;
+      if (job) job.noFree = true;                    // its meshes live under the city's own group, which stays
+      else if (!F) heavy();
+    } else heavy();
   }
 
   // one streaming record per tile key, holding both halves
