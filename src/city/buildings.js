@@ -3333,15 +3333,10 @@
     const landmarkCivic = FACADE === "civic" && opts.civic && opts.civic.monumental === true;
     if (!MASONRY_ON && !landmarkCivic &&
         (FACADE === "brick" || FACADE === "civic" || FACADE === "fortified")) FACADE = "office";
-    // Callers that express NO facade preference at all — town/village prefabs
-    // routed through towngen.js, island annex shells, minicity fill — get a
-    // deterministic masonry SHARE, so the brick vocabulary reaches the whole
-    // world instead of only the mainland lots that ask for it by name. Every
-    // caller with an opinion (retail / showroom / office / garage / an explicit
-    // opts.facade) is untouched; low-rise only, position-hashed, no rng draw.
-    if (MASONRY_ON && !opts.facade && !opts.retail && !opts.showroom && !opts.office
-        && !opts.garageGround && !opts.boarded && storeys <= 5
-        && CBZ.hash01 && CBZ.hash01(ox, oz, 0xb21f) < 0.45) FACADE = "brick";
+    // (A 45% position-hashed "masonry share" for callers with no facade
+    // preference used to flip town shells to punched brick one by one. The
+    // facade kit's neighbourhood pick — facadeAutoDress, below — now decides
+    // what a street is built of, for the whole street at once.)
     const punched = FACADE === "brick";
     const civicF = FACADE === "civic";
     const fortified = FACADE === "fortified";
@@ -3356,8 +3351,15 @@
     // its own setback crown and corner finials long before dressFacade() runs.
     // A dome, a minaret, a mansard or a setback tower must not have the host's
     // own spire growing up through it.
-    const facadeTakesRoof = !!(CBZ.facadeCrownsRoof && CBZ.facadeCrownsRoof(
-      opts.dress === false ? false : (opts.dress || null),
+    // THE GRAMMAR THIS SHELL WEARS, decided once, here. An explicit spec (or
+    // `false`) from the call site wins; otherwise facade_kit.js's coherent
+    // neighbourhood pick. Recorded on the built record as `dress`, so
+    // structural.js / collapse.js ask facadePick the same question and get
+    // the same answer.
+    const DRESS = opts.dress === false ? false
+      : (opts.dress || (CBZ.facadeAutoDress ? CBZ.facadeAutoDress(ox, oz, storeys,
+          opts.showroom || opts.garageGround ? "showroom" : opts.retail ? "shop" : null) : null));
+    const facadeTakesRoof = !!(CBZ.facadeCrownsRoof && CBZ.facadeCrownsRoof(DRESS,
       function (salt) { return CBZ.hash01 ? CBZ.hash01(ox, oz, salt) : 0.42; }, storeys));
     let MPAL = null;
     if (MASONRY && CBZ.masonryPalette) {
@@ -4519,7 +4521,7 @@
     // merge). The helper module owns the vocabulary; this block owns the
     // plumbing — a small ctx of closures + the building's real dimensions, so
     // buildings_civic.js never touches the scene graph, colliders or rng.
-    let roofCrowned = false;
+    let roofCrowned = false, dressedId = null;
     // the visible wall skin (see THE SKIN). A masonry shell with its textured
     // veneer: every face is that brick/ashlar; the facade kit overrides below.
     let skin = null;
@@ -4547,11 +4549,28 @@
         // THE FACADE KIT's spec, written at the CALL SITE exactly the way
         // govcomplex.js writes {crown, order, motto} for the Capitol. Absent on
         // every existing caller, so the kit is inert until someone asks for it.
-        dress: opts.dress === false ? false : (opts.dress || null),   // false = explicit opt-out
+        dress: DRESS || (DRESS === false ? false : null),   // false = explicit opt-out
         // volumes (building-local {x0,x1,y0,y1,z0,z1}) the facade kit must leave
         // open: dressFacade re-emits any grammar box through one as the pieces
         // around it. The mega-tower hands in its executive storey here.
-        keepClear: Array.isArray(opts.keepClear) && opts.keepClear.length ? opts.keepClear : null,
+        keepClear: (function () {
+          const kc = Array.isArray(opts.keepClear) ? opts.keepClear.slice() : [];
+          // THE STOREFRONT BAY. A shop's ground storey on its door face
+          // belongs to the shop: the shell's clear glazing, its door, and the
+          // fascia + awning signAwning hangs on the header band. No grammar
+          // ornament may clad over it — every box a facade lays there is
+          // re-emitted around this volume (corner piers survive, 0.7 m each end).
+          if (opts.storefront === true || (opts.storefront !== false && (opts.retail || opts.showroom))) {
+            const hz = doorSide === 0 || doorSide === 1;
+            const span = hz ? w : d, half = (hz ? d : w) / 2;
+            const sgn = (doorSide === 0 || doorSide === 2) ? -1 : 1;
+            const n0 = sgn > 0 ? half - 0.05 : -half - 40, n1 = sgn > 0 ? half + 40 : -half + 0.05;
+            const t0 = -span / 2 + 0.7, t1 = span / 2 - 0.7;
+            kc.push(hz ? { x0: t0, x1: t1, y0: -1, y1: FH - 0.02, z0: n0, z1: n1 }
+                       : { x0: n0, x1: n1, y0: -1, y1: FH - 0.02, z0: t0, z1: t1 });
+          }
+          return kc.length ? kc : null;
+        })(),
         pal: MPAL || { wall: color, stone: TRIM, dirt: 0x2a2420, kind: "brick", id: null },
         color, TRIM, BASE, PIL, MULL,
         hash: bhash,
@@ -4630,6 +4649,39 @@
           m.renderOrder = 3; bgroup.add(m);
         },
       };
+      /* THE PARCEL LINE. opts.reach = how far past the wall the parcel runs
+         before the footway starts (Gang City: the lot's front setback). All
+         dressing — masonry trim, the civic order and its steps, the facade
+         kit, the door reveal — goes through ctxC, so this one fence keeps
+         every piece of it off the pavement: a box that crosses the line is
+         cut back to it, one wholly outside is dropped, a round piece (column,
+         ball, dome) outside it is dropped, a walk platform is clamped. */
+      if (opts.reach != null && opts.reach >= 0) {
+        const LX = w / 2 + opts.reach, LZ = d / 2 + opts.reach;
+        const clipBox = function (fn) {
+          return function (x, y, z, bw, bh, bd) {
+            const x0 = Math.max(-LX, x - bw / 2), x1 = Math.min(LX, x + bw / 2);
+            const z0 = Math.max(-LZ, z - bd / 2), z1 = Math.min(LZ, z + bd / 2);
+            if (x1 - x0 < 0.02 || z1 - z0 < 0.02) return;
+            const a = Array.prototype.slice.call(arguments);
+            a[0] = (x0 + x1) / 2; a[2] = (z0 + z1) / 2; a[3] = x1 - x0; a[5] = z1 - z0;
+            return fn.apply(this, a);
+          };
+        };
+        const inside = function (x, z, r) { return Math.abs(x) + r <= LX + 1e-3 && Math.abs(z) + r <= LZ + 1e-3; };
+        ctxC.dbox = clipBox(ctxC.dbox);
+        ctxC.lbox = clipBox(ctxC.lbox);
+        for (const nm of ["ball", "column", "cone", "dome", "lamp"]) {
+          const fn0 = ctxC[nm];
+          ctxC[nm] = function (x, y, z, r) { if (inside(x, z, r || 0)) return fn0.apply(this, arguments); };
+        }
+        const plat0 = ctxC.plat;
+        ctxC.plat = function (x0, x1, z0, z1, top, ramp) {
+          const a0 = Math.max(-LX, x0), a1 = Math.min(LX, x1), b0 = Math.max(-LZ, z0), b1 = Math.min(LZ, z1);
+          if (a1 - a0 < 0.05 || b1 - b0 < 0.05) return;
+          return plat0.call(this, a0, a1, b0, b1, top, ramp);
+        };
+      }
       if (MASONRY) {
         // BRICK/STONE VENEER — the spandrel band under every storey's sills plus
         // the header band under each floor line (never the TOP one: the corbelled
@@ -4673,6 +4725,7 @@
         return hostLbox.apply(this, arguments);
       };
       const dressed = CBZ.dressFacade ? CBZ.dressFacade(ctxC) : null;
+      if (dressed) dressedId = dressed.id;
       ctxC.dbox = hostDbox; ctxC.lbox = hostLbox;
       if (dressed) {
         const pk = skinPick(skinAcc, w, d, storeys * FH);
@@ -4715,7 +4768,9 @@
       shaftRects,                                   // reserved shaft footprints (building-local), so clearFloorPoint keeps later furniture/props out of the chase
       keepRects,                                    // reserved walk-through floor (the stair core's landing mouth)
       stairPlan: null,                              // where this shell's stair core goes (cityStairPlan), built lazily by elevators.js
-      dress: opts.dress === false ? false : (opts.dress || null),   // the facade-kit spec this shell was built with (false = opted out); structural.js asks facadePick with it
+      dress: DRESS || (DRESS === false ? false : null),   // the facade-kit spec this shell was built with (false = opted out); structural.js asks facadePick with it
+      dressStyle: dressedId,                         // the grammar actually worn (null = bare shell)
+      reach: opts.reach != null ? opts.reach : null, // parcel depth past the wall (the footway starts there)
       roofCx: ox + slabCx, roofCz: oz + slabCz };   // world centre of the solid roof slab (clear of the -x stairwell)
     // A swinging entrance only speaks when this player caused its cycle or is
     // physically inside THIS shell. Keep the ownership link on the mechanism,
@@ -7590,32 +7645,61 @@
       const dd = Math.hypot((lot.cx || 0) - city.center.x, (lot.cz || 0) - city.center.z);
       return Math.max(0, Math.min(1, dd / _maxR));
     }
-    function coreBonus(lot, kind) {
-      const t = coreT(lot);                                      // 0 at centre → 1 at rim
-      const peak = kind === "core" ? 5 : kind === "commercial" ? 3 : 2;
-      // PROCGEN #3 — blend the pure concentric falloff with the land-value
-      // field (world.js: distance + waterfront + low-freq noise) so height
-      // gradients aren't a perfect bullseye: a waterfront lot or a lucky
-      // noise bump can out-value a purely-closer one, and vice versa. Still
-      // geometry-only (landValue() is a pure function of x,z — no rng draw),
-      // so the world build stays byte-identical. Falls back to the old pure-
-      // distance shape if landValue is absent (older world.js / headless test).
-      const lv = city.landValue ? city.landValue(lot.cx || 0, lot.cz || 0) : (1 - t);
-      const score = (1 - t) * 0.6 + lv * 0.4;
-      return Math.round(score * peak);                          // fades to 0 at the edge
+    /* ---- STREET IDENTITY: the deterministic district style table ---------
+       OWNER: "many facades suck ... they take up street in gang life, and the
+       facades feel random. Make it very not random."
+
+       What was here: every lot rolled its own height (rng 4-8 + a land-value
+       bonus), its own wall colour (TOWER_PALETTE / the shop's sign colour),
+       brick-or-glass off a position hash, and then facade_kit.js dealt it one
+       of 31 grammars off another position hash. Four independent dice per
+       building, so no two neighbours agreed on anything.
+
+       Now each district (config.js CITY.districts, 2x2 blocks each) is ONE
+       street identity: one grammar family, one material pair, one height
+       pair, one front setback. Neighbours vary DELIBERATELY: the checkerboard
+       parity (i + j) picks the A or B entry of each pair, so a street reads
+       A-B-A-B with a shared cornice rhythm instead of noise.
+
+         grammar  facade kit style for homes/towers/hideouts ([A, B] or one)
+         shop     style for storefront trades (ground storey kept clear for
+                  the shop's glass, door, fascia and awning)
+         storeys  [A, B] for towers/homes; shopSt = minimum for a shop
+         setback  metres from the wall to the footway's back edge. Everything
+                  a building dresses itself with stays inside it (makeBuilding
+                  opts.reach); residential gets a front yard for its porches.
+         walls    [A, B] wall tones (the grammar derives its trim from these)
+
+       rng() draws are kept where the old code drew them (the value is simply
+       no longer used), so the rest of the deterministic build is unchanged. */
+    const STREET_STYLE = {
+      Midtown:    { grammar: "artdeco",                 shop: "artdeco", storeys: [8, 10], shopSt: 4, setback: 1.5, walls: [0xcfc2a4, 0xbdb096] },
+      Eastgate:   { grammar: "brick",                   shop: "brick",   storeys: [5, 4],  shopSt: 3, setback: 1.5, walls: [0x8a3b26, 0x7d3624] },
+      Westend:    { grammar: "stone",                   shop: "stone",   storeys: [4, 5],  shopSt: 3, setback: 1.5, walls: [0xcab99a, 0xb9a887] },
+      Harborside: { grammar: "brick",                   shop: "brick",   storeys: [4, 3],  shopSt: 3, setback: 1.5, walls: [0x6e4634, 0x62402f] },
+      Northpoint: { grammar: "brickhouse",              shop: "brick",   storeys: [3, 3],  shopSt: 2, setback: 3.5, walls: [0x98482e, 0x8c432c] },
+      Crownhill:  { grammar: ["queenanne", "victorian"], shop: "stone",  storeys: [3, 3],  shopSt: 2, setback: 3.5, walls: [0x6f8ea4, 0xb09a78] },
+      Southside:  { grammar: "brutalist",               shop: "brick",   storeys: [5, 6],  shopSt: 2, setback: 3.0, walls: [0x8c8983, 0x807d77] },
+      Ironworks:  { grammar: "brick",                   shop: "brick",   storeys: [3, 3],  shopSt: 2, setback: 2.0, walls: [0x5c3a2c, 0x543428] },
+      Dockyard:   { grammar: "brutalist",               shop: "brick",   storeys: [3, 4],  shopSt: 2, setback: 2.0, walls: [0x77746c, 0x6b6861] },
+    };
+    const KIND_STYLE = { core: "Midtown", commercial: "Eastgate", residential: "Northpoint", projects: "Southside", industrial: "Ironworks" };
+    function streetStyle(lot) {
+      const D = (city.districts && city.districts[lot.district]) || null;
+      return (D && STREET_STYLE[D.name]) || STREET_STYLE[KIND_STYLE[D && D.kind] || "Eastgate"];
     }
+    function lotParity(lot) { return ((lot.i | 0) + (lot.j | 0)) & 1; }
+    function pick2(v, lot) { return Array.isArray(v) ? v[lotParity(lot) % v.length] : v; }
+    function streetDress(lot, storeys, asShop) {
+      const id = asShop ? streetStyle(lot).shop : pick2(streetStyle(lot).grammar, lot);
+      const def = CBZ.facadeDef ? CBZ.facadeDef(id) : null;
+      if (!def || storeys < (def.minStoreys || 0) || storeys > (def.maxStoreys || Infinity)) return null;
+      return { style: id };
+    }
+    function streetWall(lot) { return pick2(streetStyle(lot).walls, lot); }
     function districtStoreys(lot) {
-      const kind = districtKind(lot);
-      // draw the EXISTING rng() exactly as before (preserve RNG order), THEN add
-      // the geometry-only core bonus and clamp so non-flagship towers never rival
-      // the 52-storey mega-tower.
-      let base;
-      if (kind === "core") base = 4 + ((rng() * 5) | 0);          // 4-8
-      else if (kind === "commercial") base = 3 + ((rng() * 3) | 0);    // 3-5
-      else if (kind === "projects" || kind === "industrial") base = 1 + ((rng() * 3) | 0);  // 1-3
-      else if (kind === "residential") base = 2 + ((rng() * 4) | 0);   // 2-5
-      else base = 2 + ((rng() * 3) | 0);
-      return Math.max(1, Math.min(12, base + coreBonus(lot, kind)));   // base is a FLOOR, +centre bonus, capped
+      rng();   // the old per-lot height roll, drawn and discarded (RNG order preserved)
+      return pick2(streetStyle(lot).storeys, lot);
     }
 
     // ---- LOT-KIND GRADIENT (CH-PLAN). WHY: height already falls away from the
@@ -7864,7 +7948,14 @@
         placed.push(lot); continue;
       }
 
-      const w = lot.w - 2, d = lot.d - 2;
+      // THE SETBACK is the street's, not the lot's accident: every building
+      // on a district's blocks stands the same distance behind the footway.
+      // A civic anchor's portico + steps are 2.5 m deep, so it stands back
+      // far enough to keep them on its own parcel. The flagship tower keeps
+      // its build-to-line 1 m (its podium deck is drive-in on every side).
+      const SS = streetStyle(lot);
+      const setback = isLux ? 1 : (isCivic || civicShop) ? Math.max(SS.setback, 3.2) : SS.setback;
+      const w = lot.w - 2 * setback, d = lot.d - 2 * setback;
       const toCx = city.center.x - lot.cx, toCz = city.center.z - lot.cz;
       const side = Math.abs(toCx) > Math.abs(toCz) ? (toCx > 0 ? 3 : 2) : (toCz > 0 ? 1 : 0);
       const door = doorInfo(lot.cx, lot.cz, w, d, side);
@@ -7885,16 +7976,14 @@
         // shops like Cluckin' Diner / The Trap House and made good glass blocks feel
         // cluttered. A hideout is now just another windowed city building that a
         // crew happens to control.
+        // A crew's building is a building OF ITS STREET — the same grammar,
+        // walls and setback as its neighbours (a hideout that looks different
+        // is a hideout the cops can spot). Capped at 4 storeys.
         const storeys = Math.max(1, Math.min(4, districtStoreys(lot)));
-        const color = TOWER_PALETTE[(rng() * TOWER_PALETTE.length) | 0];
-        rng(); // preserve the old facade-variant draw so later shop placement stays stable
-        // A gang hideout reads best as a run-down BRICK walk-up (soot streaks,
-        // a peeling ghost sign, a corbelled cornice missing chunks) rather than
-        // another glass box. Position-hashed, no rng draw; low-rise only.
-        // same leak as the residential brick below — honour the purge flag
-        const hideBrick = !(CBZ.CONFIG && CBZ.CONFIG.BLD_MASONRY_V1 === false)
-          && CBZ.hash01 && storeys <= 4 && CBZ.hash01(lot.cx, lot.cz, 0xb21e) < 0.62;
-        const b = makeBuilding(root, lot.cx, lot.cz, w, d, storeys, color, side, { facade: hideBrick ? "brick" : "office", district: districtKind(lot) });
+        rng(); rng();   // the old palette + facade-variant draws (RNG order preserved)
+        const color = streetWall(lot);
+        const b = makeBuilding(root, lot.cx, lot.cz, w, d, storeys, color, side,
+          { facade: "office", district: districtKind(lot), dress: streetDress(lot, storeys, false) || false, reach: setback });
         lot.kind = "abandoned";
         lot.building = { ...b, name: "Gang Hideout", sign: color, side, door: doorPt, abandoned: true, gang: null };
         makeStash(b, lot);
@@ -7929,16 +8018,19 @@
       }
 
       if (shop) {
-        const color = lightenWall(shop.sign);
-        // shops rise with their district: core trades get storeys of homes
-        // over the storefront (city blocks read dense downtown), commercial a
-        // floor or two; everywhere else keeps the catalogue height. Interior
-        // stamps (counter/rack/cases) gate through clearFloorPoint, which keeps
-        // them off the stair core every multi-storey shell reserves.
+        // The shell wears its STREET's walls; the trade's colour lives on its
+        // fascia and awning, where a shop's colour actually is.
+        const color = streetWall(lot);
+        // shops rise to their street's storefront height (homes over the
+        // shop), so a row of shopfronts shares one cornice line. Drive-in
+        // trades (gas, car lot, chop) keep the catalogue height outside the
+        // two dense district kinds. Interior stamps gate through
+        // clearFloorPoint, which keeps them off the stair core.
         const dk = districtKind(lot);
-        const shopStoreys = dk === "core" ? Math.max(shop.storeys, 3 + ((rng() * 3) | 0))
-          : dk === "commercial" ? Math.max(shop.storeys, 2 + ((rng() * 2) | 0))
-          : shop.storeys;
+        if (dk === "core" || dk === "commercial") rng();   // the old height roll (RNG order preserved)
+        const driveIn = !!(shop.gas || shop.carlot || shop.chop || shop.showroom);
+        const shopStoreys = (driveIn && dk !== "core" && dk !== "commercial") ? shop.storeys
+          : Math.max(shop.storeys, SS.shopSt);
         // FACADE POLICY BY TRADE. Still NO deliberately sealed facades — the
         // owner's blank-block complaint stands. What changes: the civic trades
         // (and the bank / security firm, which have always been civic in
@@ -7951,17 +8043,26 @@
         const wantCivic = !!(CBZ.CIVIC_FACADE_KINDS && CBZ.CIVIC_FACADE_KINDS.has(shop.kind));
         const specialFacade = wantCivic ? "civic"
           : (shop.kind === "bank" || shop.kind === "security") ? "office" : undefined;
-        const b = makeBuilding(root, lot.cx, lot.cz, w, d, shopStoreys, color, side, {
-          showroom: !!(shop.gas || shop.carlot || shop.chop || shop.showroom),
-          retail: !!shop.retail, facade: specialFacade, district: dk,
-          civic: civicSpec,
-        });
         // A colonnaded courthouse does not wear a diner awning: when the
         // monumental portico is live it already carries carved lettering (the
         // plaque) and the civic seal, so the storefront kit stands down. The
         // trade name still lives on lot.building.name for HUD/map/interactions.
         const porticoLive = !!(civicSpec && civicSpec.civic && CBZ.bldCivicOrder
           && !(CBZ.CONFIG && (CBZ.CONFIG.BLD_CIVIC_PODIUM === false || CBZ.CONFIG.BLD_MASONRY_V1 === false)));
+        // WHICH GRAMMAR: a live portico IS the grammar (no kit on top of it);
+        // the bank and the security firm wear the ashlar bank front; every
+        // other trade wears its street's storefront style. A one-storey
+        // drive-in stays a clean glass showroom.
+        const shopDress = porticoLive ? false
+          : (shop.kind === "bank" || shop.kind === "security") ? ({ style: "stone" })
+          : (driveIn && shopStoreys < 2) ? false
+          : (streetDress(lot, shopStoreys, true) || false);
+        const b = makeBuilding(root, lot.cx, lot.cz, w, d, shopStoreys, color, side, {
+          showroom: driveIn,
+          retail: !!shop.retail, facade: specialFacade, district: dk,
+          civic: civicSpec, dress: shopDress, reach: setback,
+          storefront: !porticoLive,
+        });
         if (!porticoLive) signAwning(b, side, w, d, shop.sign, shop.name, shop.kind);
         // Counter toward the back, vendor behind it. The back wall is also
         // where the shell reserved its stair core (a back corner), so the
@@ -8167,7 +8268,8 @@
         // Heights ride the district field (core 4-8 … projects low-rise);
         // floor of 2 so every HOME keeps an upstairs to furnish.
         const storeys = Math.max(2, districtStoreys(lot));
-        const color = TOWER_PALETTE[(rng() * TOWER_PALETTE.length) | 0];   // drawn for BOTH paths so RNG stays stable
+        rng();   // the old palette draw (RNG order preserved)
+        const color = streetWall(lot);
         const dk = districtKind(lot);
         // OFFICE TOWER? world.js owns the policy (city.officeLot): a downtown/
         // midtown subset of TALL, NON-listed towers become workplaces, not homes.
@@ -8179,7 +8281,7 @@
           // a glass OFFICE shell — clear curtain wall so the seated workers READ
           // through it from the street (the living-floor "why"). Same enterable/
           // climbable rig; upper floors get desks instead of flats.
-          const b = makeBuilding(root, lot.cx, lot.cz, w, d, storeys, color, side, { office: true, glassKind: "clear", district: dk });
+          const b = makeBuilding(root, lot.cx, lot.cz, w, d, storeys, color, side, { office: true, glassKind: "clear", district: dk, dress: streetDress(lot, storeys, false) || false, reach: setback });
           // dress EVERY storey above the lobby with a working office floor and
           // collect the seat anchors building-wide, then register them ONCE so
           // city/officejobs.js can seat a payroll of workers (witnesses + cash).
@@ -8250,31 +8352,13 @@
           placed.push(lot);
           continue;
         }
-        // ---- BRICK WALK-UPS / TENEMENTS (BLD_MASONRY_V1) ------------------
-        // A residential block is masonry in every real city, not curtain wall.
-        // Which lots go brick is a POSITION HASH (CBZ.hash01) weighted by
-        // district — heavy in residential/projects, rare downtown where the
-        // glass core belongs — so it costs no rng() draw and cannot reorder the
-        // deterministic build. Height-capped: an 8-storey-plus tower stays glass
-        // (load-bearing brick does not go that high, and the skyline read the
-        // owner likes downtown is the glass one).
-        const brickOdds = dk === "residential" ? 0.74 : dk === "projects" ? 0.68
-          : dk === "industrial" ? 0.46 : dk === "commercial" ? 0.26 : 0.08;
-        // THE PURGE HAS TO BITE HERE (owner, with a screenshot: "do you see how
-        // there are weird building types overlapping with our beautiful glass
-        // building towns that we designed"). This line was the leak: it decided
-        // brick from a position hash ALONE and never consulted BLD_MASONRY_V1,
-        // so turning the masonry flag off still left every residential lot
-        // ASKING for a brick facade and relying on a downstream collapse that
-        // did not reach the shell. The flag is now read at the source, which is
-        // the only place that can actually stop a brick building existing.
-        const brickAllowed = !(CBZ.CONFIG && CBZ.CONFIG.BLD_MASONRY_V1 === false);
-        const wantBrick = brickAllowed && storeys <= 7 && CBZ.hash01 && CBZ.hash01(lot.cx, lot.cz, 0xb21d) < brickOdds;
-        // NOTE the explicit "office" on the else branch: leaving it undefined
-        // would fall through to makeBuilding's no-preference masonry share and
-        // silently override this district weighting.
+        // ---- HOMES: the street's grammar, the street's walls, the street's
+        // setback. (A per-lot hash used to flip each home between a punched
+        // brick shell and a glass one, and the facade kit then rolled a third
+        // die on top; STREET_STYLE owns that decision now.) Explicit "office"
+        // shell: it is the base the facade kit's grammars are drawn against.
         const b = makeBuilding(root, lot.cx, lot.cz, w, d, storeys, color, side,
-          { district: dk, facade: wantBrick ? "brick" : "office" });
+          { district: dk, facade: "office", dress: streetDress(lot, storeys, false) || false, reach: setback });
         const listed = !!forcedTier;                 // only reserved lots are on the market
         const tierDef = forcedTier || GENERIC;
         // THE HOME lives on the TOP floor — home.floorY below — which is where
@@ -8440,23 +8524,18 @@
   function signFaceTex(name, signHex) {
     const key = name + "|" + signHex;
     let t = signTexCache.get(key); if (t) return t;
-    const c = document.createElement("canvas"); c.width = 512; c.height = 128;
+    // LETTERS ONLY, on a transparent 6:1 ground: the painted fascia behind
+    // is the sign board, so the name reads as lettering applied to it (and,
+    // drawn unlit, as lit letters after dark) instead of a second panel
+    // stuck on the first.
+    const c = document.createElement("canvas"); c.width = 768; c.height = 128;
     const x = c.getContext("2d");
-    // sign panel ground = the trade colour, with a subtle vignette
-    const base = "#" + ("000000" + signHex.toString(16)).slice(-6);
-    x.fillStyle = base; x.fillRect(0, 0, 512, 128);
-    const grad = x.createLinearGradient(0, 0, 0, 128);
-    grad.addColorStop(0, "rgba(255,255,255,0.18)"); grad.addColorStop(0.5, "rgba(0,0,0,0)"); grad.addColorStop(1, "rgba(0,0,0,0.28)");
-    x.fillStyle = grad; x.fillRect(0, 0, 512, 128);
-    // a thin bright border so the board pops
-    x.strokeStyle = readableText(signHex) === "#ffffff" ? "rgba(255,255,255,0.6)" : "rgba(0,0,0,0.5)";
-    x.lineWidth = 6; x.strokeRect(6, 6, 500, 116);
-    // the NAME, auto-shrunk to fit, with a hard drop shadow for legibility
-    let fs = 62; x.textAlign = "center"; x.textBaseline = "middle";
+    x.clearRect(0, 0, 768, 128);
+    let fs = 78; x.textAlign = "center"; x.textBaseline = "middle";
     // a sign-maker's face (a heavy grotesque), not the game's rounded UI font
-    do { x.font = "800 " + fs + "px 'Helvetica Neue', Helvetica, Arial, sans-serif"; fs -= 4; } while (x.measureText(name).width > 470 && fs > 22);
-    x.fillStyle = "rgba(0,0,0,0.55)"; x.fillText(name, 258, 68);     // shadow
-    x.fillStyle = readableText(signHex); x.fillText(name, 256, 64);  // face text
+    do { x.font = "800 " + fs + "px 'Helvetica Neue', Helvetica, Arial, sans-serif"; fs -= 4; } while (x.measureText(name).width > 720 && fs > 22);
+    x.fillStyle = "rgba(0,0,0,0.45)"; x.fillText(name, 386, 68);     // shadow
+    x.fillStyle = readableText(signHex); x.fillText(name, 384, 64);  // face text
     t = new THREE.CanvasTexture(c); signTexCache.set(key, t); return t;
   }
 
@@ -8512,34 +8591,54 @@
     // the city. Now: a striped canvas sheet pitched down to the street from a
     // header rail on the facade, with a solid valance hanging off its front
     // edge. Nothing on it glows; the street lights and the shop window light it.
-    const AW = DOORW + 2.4, AD = 1.25, PITCH = 0.35;
-    const cOff = Math.cos(PITCH) * AD / 2, cY = DOORH + 0.2;
-    const awn = new THREE.Mesh(new THREE.BoxGeometry(...fx(AW, 0.025, AD)), awningMat(awnCol, along));
-    awn.position.set(di.x + onx * cOff, cY, di.z + onz * cOff);
-    awn.rotation[along ? "z" : "x"] = along ? PITCH * di.nx : -PITCH * di.nz;   // street edge dips
-    b.group.add(awn);
-    const vOff = Math.cos(PITCH) * AD, vY = cY - Math.sin(PITCH) * AD / 2 - 0.12;
-    const val = new THREE.Mesh(new THREE.BoxGeometry(...fx(AW, 0.24, 0.018)), mat(shadeHex(awnCol, 0.78)));
-    val.position.set(di.x + onx * vOff, vY, di.z + onz * vOff);
-    b.group.add(val);
-    const rail = new THREE.Mesh(new THREE.BoxGeometry(...fx(AW + 0.1, 0.07, 0.08)), mat(0x2b2e33));
-    rail.position.set(di.x + onx * 0.04, cY + Math.sin(PITCH) * AD / 2 + 0.02, di.z + onz * 0.04);
-    b.group.add(rail);
+    // THE SHOPFRONT, as a shopfitter builds one on a 3.2 m ground storey:
+    //   glazing + door   0 .. 2.2   (the shell's clear panes and real door)
+    //   FASCIA           2.3 .. 3.12, the full width between the corner piers,
+    //                    painted in the trade colour, the name centred on it
+    //   AWNING           hung from a rail under the fascia over the glazing,
+    //                    shallow enough to stay on the shop's own parcel
+    // The old board hung at FH + 0.45, straddling the first-floor sill line,
+    // so every grammar's upper windows ran behind it. The facade kit keeps
+    // this whole ground-storey bay clear on a shop (makeBuilding's
+    // opts.storefront), so the fascia sits on the shell's own header band.
+    const runW = Math.max(sw, facade - 1.5);                     // corner pier to corner pier
+    const reach = b.reach != null ? b.reach : 1.0;
+    const driveIn = kind === "gas" || kind === "carlot" || kind === "chop";
+    // awning: over the glazing, never deeper than the parcel in front of it
+    const AD = Math.max(0.6, Math.min(1.1, reach - 0.2)), PITCH = 0.26;
+    const railY = 2.28, drop = Math.sin(PITCH) * AD;
+    if (!driveIn) {                                             // a drive-in bay has no awning over it
+      const AW = runW - 0.2;
+      const cOff = Math.cos(PITCH) * AD / 2, cY = railY - drop / 2;
+      const awn = new THREE.Mesh(new THREE.BoxGeometry(...fx(AW, 0.025, AD)), awningMat(awnCol, along));
+      awn.position.set(di.x + onx * cOff, cY, di.z + onz * cOff);
+      awn.rotation[along ? "z" : "x"] = along ? PITCH * di.nx : -PITCH * di.nz;   // street edge dips
+      b.group.add(awn);
+      const vOff = Math.cos(PITCH) * AD, vY = railY - drop - 0.10;
+      const val = new THREE.Mesh(new THREE.BoxGeometry(...fx(AW, 0.20, 0.018)), mat(shadeHex(awnCol, 0.78)));
+      val.position.set(di.x + onx * vOff, vY, di.z + onz * vOff);
+      b.group.add(val);
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(...fx(AW + 0.1, 0.07, 0.08)), mat(0x2b2e33));
+      rail.position.set(di.x + onx * 0.04, railY, di.z + onz * 0.04);
+      b.group.add(rail);
+    }
     void accent;
-    // LIT SIGN BOARD across the facade above the awning — a glowing backing panel
-    // (the trade colour) with the NAME painted on its street face. Board back
-    // face rides 0.03 PROUD of the facade (real separation, no depth aliasing).
-    const signH = 1.2, signY = FH + 0.45;
-    // the LIGHTBOX: a dark aluminium casing (the name panel below is the lit
-    // face). The whole 0.22 m box used to glow on every side like a lamp.
-    const sign = new THREE.Mesh(new THREE.BoxGeometry(...fx(sw, signH, 0.22)), mat(0x2b2e33));
-    sign.position.set(di.x + onx * 0.14, signY, di.z + onz * 0.14);
-    b.group.add(sign);
-    // the painted name plate just proud of the board's street face. ONE plate:
-    // with the board out on the facade there is no walkable side behind it.
+    // FASCIA: one painted board the width of the shopfront, a dark cap and
+    // sill rail framing it, the name centred (never stretched across 20 m).
+    const fasY0 = 2.34, fasY1 = 3.12, fasH = fasY1 - fasY0, fasC = (fasY0 + fasY1) / 2;
+    const fascia = new THREE.Mesh(new THREE.BoxGeometry(...fx(runW, fasH, 0.16)), mat(color));
+    fascia.position.set(di.x + onx * 0.1, fasC, di.z + onz * 0.1);
+    b.group.add(fascia);
+    for (const ry of [fasY0 - 0.03, fasY1 + 0.03]) {
+      const cap = new THREE.Mesh(new THREE.BoxGeometry(...fx(runW + 0.08, 0.06, 0.22)), mat(0x2b2e33));
+      cap.position.set(di.x + onx * 0.11, ry, di.z + onz * 0.11);
+      b.group.add(cap);
+    }
+    // the name, painted on the fascia's street face (6:1 canvas, drawn at 6:1)
+    const plH = fasH - 0.16, plW = Math.min(runW - 0.4, plH * 6);
     const nameMat = new THREE.MeshBasicMaterial({ map: signFaceTex(name, color), transparent: true });
-    const plate = new THREE.Mesh(new THREE.PlaneGeometry(sw - 0.2, signH - 0.18), nameMat);
-    plate.position.set(di.x + onx * 0.27, signY, di.z + onz * 0.27);
+    const plate = new THREE.Mesh(new THREE.PlaneGeometry(plW, plH), nameMat);
+    plate.position.set(di.x + onx * 0.185, fasC, di.z + onz * 0.185);
     if (along) plate.rotation.y = di.nx > 0 ? -Math.PI / 2 : Math.PI / 2;
     else if (di.nz > 0) plate.rotation.y = Math.PI;
     plate.renderOrder = 2; b.group.add(plate);
@@ -8626,6 +8725,11 @@
   // addCityGlass for any glass so panes stay shatterable. Kept modest (a handful
   // of meshes), all hung in the building group at the door face.
   function resFacade(b, side, w, d, color, lot) {
+    // A dressed home already has its entrance: the grammar's porch / stoop /
+    // doorcase plus the kit's reveal around the real door. This generic
+    // grey stoop + black canopy + posts bolted on top of it was a second,
+    // unrelated entrance stuck through the first one.
+    if (b.dressStyle) return;
     const di = doorInfo(0, 0, w, d, side);
     const along = Math.abs(di.nx) > 0.5;          // door faces ±X → facade spans Z
     const tx = along ? 0 : 1, tz = along ? 1 : 0; // facade tangent
@@ -9077,12 +9181,6 @@
       if (REG) CBZ.treeRegisterTree("park", Y, [x - 0.22, Y - 0.05, z - 0.22, x + 0.22, Y + trunkH, z + 0.22,
         x - r0, Y + th - 0.3, z - r0, x + r0, Y + th - 0.3 + h0, z + r0]);
     }
-  }
-
-  function lightenWall(hex) {
-    const r = (hex >> 16) & 255, g = (hex >> 8) & 255, b = hex & 255;
-    const lr = Math.round(r * 0.4 + 170 * 0.6), lg = Math.round(g * 0.4 + 174 * 0.6), lb = Math.round(b * 0.4 + 180 * 0.6);
-    return (lr << 16) | (lg << 8) | lb;
   }
 
   // ============================================================
