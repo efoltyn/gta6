@@ -3740,10 +3740,19 @@
           const p = tryAt(L * 0.64, 0.62, 0.45, 4, 2.6);
           if (p) mailbox(p.x, p.z, bx, bz);
         }
-        // 6) STREET TREES in grates between the lamps
-        const treeP = dk === "residential" ? 0.85 : busy ? 0.6 : dk === "projects" ? 0.3 : 0.0;
-        if (GRAM && H1(0x6a) < treeP) {
-          const n = Math.max(1, Math.floor(L / 8.5));
+        // 6) STREET TREES in grates between the lamps. A city plants a
+        // STREET, not a block face: the choice is made once per street line
+        // (both kerbs, every block along it), so a tree-lined street reads as
+        // one — the old per-face coin made a patchwork of planted and bare
+        // faces, and 8.5 m pits filled every gap. Pits now sit at a regular
+        // ~11 m (TREE_DENSITY.street, world/forestlook.js).
+        const FLs = CBZ.forestLook;
+        const dStreet = FLs && FLs.density ? FLs.density("street") : 1;
+        const treeP = (dk === "residential" ? 0.62 : busy ? 0.38 : dk === "projects" ? 0.25 : 0.0) * dStreet;
+        const lineKey = (F.vertical ? 1 : 2) * 7919 + F.line * 131;
+        if (GRAM && dStreet > 0 && hsh(lineKey, lineKey * 0.37, 0x6a) < treeP) {
+          const pitch = 11 / Math.min(1.6, Math.max(0.5, dStreet));
+          const n = Math.max(1, Math.floor(L / pitch));
           for (let k = 0; k < n; k++) {
             const p = tryAt((k + 0.5) * (L / n), 0.85, 0.75, 2, 2.4);
             if (p) tree(p.x, p.z);

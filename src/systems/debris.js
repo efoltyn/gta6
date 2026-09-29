@@ -625,17 +625,33 @@
     return b;
   }
   // signed volume + centroid of a closed soup
+  // Signed tetrahedra are measured from a point ON the solid, not the world
+  // origin: at city coordinates (~2 km) a 1 cm glass shard's volume is the
+  // difference of numbers ~10^10 apart, and the centroid it divides by came
+  // out hundreds of metres off the shard (a "700 m" glass piece whose hull
+  // points dragged a 72 s support query through the collider grid).
   function volumeOf(t) {
+    if (!t.length) return { V: 0, cx: 0, cy: 0, cz: 0 };
+    const rx = t[0], ry = t[1], rz = t[2];
     let V = 0, cx = 0, cy = 0, cz = 0;
+    let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+    for (let i = 0; i < t.length; i += S) {
+      const x = t[i], y = t[i + 1], z = t[i + 2];
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; if (z < z0) z0 = z; if (z > z1) z1 = z;
+    }
     for (let i = 0; i < t.length; i += 3 * S) {
-      const ax = t[i], ay = t[i + 1], az = t[i + 2];
-      const bx = t[i + S], by = t[i + S + 1], bz = t[i + S + 2];
-      const qx = t[i + 2 * S], qy = t[i + 2 * S + 1], qz = t[i + 2 * S + 2];
+      const ax = t[i] - rx, ay = t[i + 1] - ry, az = t[i + 2] - rz;
+      const bx = t[i + S] - rx, by = t[i + S + 1] - ry, bz = t[i + S + 2] - rz;
+      const qx = t[i + 2 * S] - rx, qy = t[i + 2 * S + 1] - ry, qz = t[i + 2 * S + 2] - rz;
       const v = (ax * (by * qz - bz * qy) - ay * (bx * qz - bz * qx) + az * (bx * qy - by * qx)) / 6;
       V += v; cx += v * (ax + bx + qx) / 4; cy += v * (ay + by + qy) / 4; cz += v * (az + bz + qz) / 4;
     }
-    if (Math.abs(V) < 1e-9) return { V: 0, cx: 0, cy: 0, cz: 0 };
-    return { V: Math.abs(V), cx: cx / V, cy: cy / V, cz: cz / V };
+    const mx = (x0 + x1) / 2, my = (y0 + y1) / 2, mz = (z0 + z1) / 2;
+    if (Math.abs(V) < 1e-12) return { V: 0, cx: mx, cy: my, cz: mz };
+    let ox = rx + cx / V, oy = ry + cy / V, oz = rz + cz / V;
+    // a centroid can never leave its own bounds; if it did, the volume was noise
+    if (!(ox >= x0 - 1e-3 && ox <= x1 + 1e-3 && oy >= y0 - 1e-3 && oy <= y1 + 1e-3 && oz >= z0 - 1e-3 && oz <= z1 + 1e-3)) { ox = mx; oy = my; oz = mz; }
+    return { V: Math.abs(V), cx: ox, cy: oy, cz: oz };
   }
 
   /* Voronoi sites for one component. Returned with the anisotropic metric
@@ -911,7 +927,8 @@
     let f = floorAt(p.x, p.z, p.y + b.radius);
     if (CBZ.queryCollidersNear) {
       try {
-        for (const c of CBZ.queryCollidersNear(p.x, p.z, b.radius, _cols)) {
+        // point query: only a collider under the centre can hold it up
+        for (const c of CBZ.queryCollidersNear(p.x, p.z, 0.25, _cols)) {
           if (c.y1 == null || c.debris) continue;
           if (b.ignore && b.ignore.has(c)) continue;
           if (p.x < c.minX || p.x > c.maxX || p.z < c.minZ || p.z > c.maxZ) continue;

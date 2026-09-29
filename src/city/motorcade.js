@@ -1975,31 +1975,66 @@
 
   /* ============================================================
      §10  THE HELICOPTER — Executive One on the Mansion helipad, the fast
-     option for far trips. playeraircraft.js's heli airframe registered on
+     option for far trips. playeraircraft.js's VIP airframe (the lofted
+     transport, not the missile gunship it used to borrow) registered on
      militaryvehicles.js's boardable registry; boarding it is not a theft.
+     WHERE it parks is govcomplex.js's published layout (site.layout.heli):
+     the raised pad's centre and deck height, nose toward the house.
      ============================================================ */
   const HELI = { rec: null, forArena: null, forSites: null };
   function buildHeli() {
     const root = arenaRoot(), site = mansion();
-    if (!root || !site || !CBZ.cityRegisterMilitaryVehicle || !CBZ.debugBuildAircraft || !CBZ.debugBuildAircraft.heli) return false;
+    const AB = CBZ.debugBuildAircraft;
+    const make = AB && (AB.vip || AB.heli);
+    if (!root || !site || !CBZ.cityRegisterMilitaryVehicle || !make) return false;
     let grp = null;
-    try { grp = CBZ.debugBuildAircraft.heli(); } catch (e) { grp = null; }
+    try { grp = make(); } catch (e) { grp = null; }
     if (!grp) return false;
-    const x = site.cx + 74, z = site.cz + 62;
+    const L = site.layout && site.layout.heli;
+    const x = L ? L.x : site.cx + 74, z = L ? L.z : site.cz + 62;
     const belly = (grp.userData && +grp.userData.belly) || 1.2;
     grp.position.set(x, floorY(x, z) + belly, z);
-    grp.rotation.y = Math.atan2(site.cx - x, site.cz - z);
+    grp.rotation.y = L ? L.heading : Math.atan2(site.cx - x, site.cz - z);
     grp.userData.dynamic = true;
     root.add(grp);
+    // THE AIRFRAME IS SOLID while it stands on the pad: one collider round the
+    // fuselage (not the rotor disc), on the shared parked-collider protocol so
+    // boarding it lifts the solid off and a re-park puts it back.
+    const FW = 2.8, FL = 10.6, top = grp.position.y + 2.2;
+    const a = grp.rotation.y, ca = Math.abs(Math.cos(a)), sa = Math.abs(Math.sin(a));
+    const ex = ca * FW / 2 + sa * FL / 2, ez = sa * FW / 2 + ca * FL / 2;
+    const solid = { minX: x - ex, maxX: x + ex, minZ: z - ez, maxZ: z + ez, y0: floorY(x, z), y1: top, ref: null, _city: true };
+    // parked nose-to-house on a quarter turn, the hull's REAL fore/aft extent
+    // (the tail boom runs past the rotor mast) replaces the centred guess
+    if (sa < 1e-3 || ca < 1e-3) {
+      try {
+        grp.updateMatrixWorld(true);
+        const bb = new THREE.Box3().setFromObject(grp);
+        if (ca < 1e-3) { solid.minX = bb.min.x + 0.3; solid.maxX = bb.max.x - 0.3; }
+        else { solid.minZ = bb.min.z + 0.3; solid.maxZ = bb.max.z - 0.3; }
+      } catch (e) { /* keep the centred footprint */ }
+    }
+    if (CBZ.colliders) { CBZ.colliders.push(solid); if (CBZ.markCollidersDirty) { try { CBZ.markCollidersDirty(); } catch (e) {} } }
     let rec = null;
     try {
       rec = CBZ.cityRegisterMilitaryVehicle({
         group: grp, kind: "heli", name: "Executive One",
         model: { name: "Executive One", value: 9000000, rarity: 0.02, body: "heli" },
         footW: 4.0, footL: 12.0, hot: false,
+        // an unarmed transport: the flyable craft carries no missiles
+        armed: false,
+        collider: solid, colliderW: FW, colliderL: FL,
+        // the group's origin rides `belly` over its wheels; the flight path
+        // re-seats it on the ground by this, not by 0
+        groundOffset: belly, modelYawOffset: 0,
       });
     } catch (e) { rec = null; }
-    if (!rec) { if (grp.parent) grp.parent.remove(grp); return false; }
+    if (!rec) {
+      if (grp.parent) grp.parent.remove(grp);
+      const i = CBZ.colliders ? CBZ.colliders.indexOf(solid) : -1;
+      if (i >= 0) CBZ.colliders.splice(i, 1);
+      return false;
+    }
     rec._motorcade = true;
     HELI.rec = rec; HELI.forArena = arena(); HELI.forSites = CBZ.govComplexes;
     return true;
@@ -2014,6 +2049,10 @@
     if (!r || r.taken) return;
     const L = CBZ.cityMilitaryVehicles;
     if (Array.isArray(L)) { const i = L.indexOf(r); if (i >= 0) L.splice(i, 1); }
+    if (r.collider && CBZ.colliders) {
+      const i = CBZ.colliders.indexOf(r.collider);
+      if (i >= 0) { CBZ.colliders.splice(i, 1); if (CBZ.markCollidersDirty) { try { CBZ.markCollidersDirty(); } catch (e) {} } }
+    }
     if (r.group && r.group.parent) r.group.parent.remove(r.group);   // shared assets: detach, never dispose
   }
   function ensureHeli() {

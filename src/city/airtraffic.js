@@ -215,6 +215,34 @@
   //  short mast; wide low skids. Bold single body colour + white belly.
   // ============================================================
   function buildLightHeli(body) {
+    // THE LOFTED AIRFRAME. playeraircraft.js owns the one helicopter builder
+    // (a smooth lofted hull, aerofoil fin/blades, tube skids); a civil light
+    // heli is that airframe unarmed on skids in the fleet's body colour over a
+    // white belly. This file spins ONE rotor group and ONE tail group, so the
+    // airframe's crossed second bars are re-hung under them (same 90 degree
+    // phase, same hub), and the fleet seats its own pilot below.
+    if (CBZ.buildHeliAirframe) {
+      let grp = null;
+      try {
+        grp = CBZ.buildHeliAirframe({ armed: false, wheels: false, pilot: false, name: "Light Heli",
+          livery: { body: body && body.color ? body.color.getHex() : 0xb33636, belly: 0xe8e8e4, stripe: 0x1c2026 } });
+      } catch (e) { grp = null; }
+      if (grp) {
+        const ud = grp.userData;
+        const nest = function (parent, child, axis) {
+          if (!parent || !child) return;
+          grp.remove(child); child.position.set(0, 0, 0);
+          child.rotation.set(0, 0, 0); child.rotation[axis] = Math.PI / 2;
+          parent.add(child);
+        };
+        nest(ud.rotor, ud.rotor2, "y");
+        nest(ud.trotor, ud.trotor2, "x");
+        ud.rotorGroup = ud.rotor; ud.tailRotorGroup = ud.trotor;
+        ud.rotor2 = null; ud.trotor2 = null;
+        if (ud.rotorDisc) { grp.remove(ud.rotorDisc); ud.rotorDisc.material.dispose(); ud.rotorDisc.geometry.dispose(); ud.rotorDisc = null; }
+        return grp;
+      }
+    }
     const a = assets();
     const grp = new THREE.Group();
     // rounded cabin pod — abrupt taper into the boom (pod-on-a-stick read)

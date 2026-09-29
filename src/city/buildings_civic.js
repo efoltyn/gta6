@@ -461,10 +461,16 @@
     const round = spec.order === "doric" || spec.order === "ionic";
     const nCol = Math.max(4, Math.min(10, Math.round(f.span / 3.0)));
     const colStep = (f.span - 1.6) / nCol;
-    const R = Math.min(0.42, colStep * 0.20);
+    // THE SHAFT KEEPS ITS PROPORTION. 0.42 m is right for a one- or two-
+    // storey order; a colossal order two tall storeys high on that radius is
+    // a broom handle (1:13). Past ~8 m the radius follows the height at a
+    // doric-to-corinthian 1:8.5, still capped by the intercolumniation.
+    const R = Math.min(colStep * 0.20, Math.max(0.42, (orderH - 1.0) / 17));
+    const colTs = [];
     for (let i = 0; i <= nCol; i++) {
       const t = -(f.span - 1.6) / 2 + i * colStep;
       if (Math.abs(t) < doorGap / 2 - 0.1) continue;          // keep the doorway clear
+      colTs.push(t);
       const cx = f.horiz ? t : f.out * (halfN + R + 0.06);
       const cz = f.horiz ? f.out * (halfN + R + 0.06) : t;
       // plinth block
@@ -494,6 +500,17 @@
 
     // ---------- ENTABLATURE (architrave / frieze / cornice) ----------
     const entY = colBase + 0.40 + (orderH - 1.0) + 0.34;
+    // Publish the front as built (building-local: `t` runs along the door
+    // face, `n` is the distance out from the shell centre), so a host that
+    // hangs cloth or a balcony on it reads these numbers, never a copy.
+    if (typeof ctx.publishOrder === "function") {
+      ctx.publishOrder({
+        face: doorSide, horiz: !!f.horiz, out: f.out, halfN: halfN, span: f.span,
+        cols: colTs, R: R, colN: halfN + R + 0.06, colStep: colStep,
+        deck: colBase, orderH: orderH, entY: entY, archUnder: entY + 0.05,
+        corniceTop: entY + 1.06, doorGap: doorGap, doorHead: DOOR_HEAD,
+      });
+    }
     faceBox(ctx, f, 0, entY + 0.18, f.span + 0.5, 0.26, 0.34, shade(STONE, 1.00));   // architrave
     faceBox(ctx, f, 0, entY + 0.56, f.span + 0.5, 0.46, 0.30, shade(STONE, 0.94));   // frieze
     faceBox(ctx, f, 0, entY + 0.94, f.span + 0.9, 0.24, 0.52, shade(STONE, 1.08));   // cornice
@@ -545,8 +562,11 @@
     // ---------- FLAGPOLES ----------
     for (const sg of [-1, 1]) {
       const t = sg * (Math.min(f.span / 2 - 0.9, terrW / 2 - 0.9));
-      const px = f.horiz ? t : f.out * (halfN + terrD * 0.55);
-      const pz = f.horiz ? f.out * (halfN + terrD * 0.55) : t;
+      // IN FRONT of the corner column, never inside it: the pole used to
+      // stand at the column's own station, through its shaft
+      const poleN = halfN + Math.max(terrD * 0.55, 2 * R + 0.5);
+      const px = f.horiz ? t : f.out * poleN;
+      const pz = f.horiz ? f.out * poleN : t;
       ctx.column(px, colBase, pz, 0.075, 7.2, 0xb9bec6, 8);
       ctx.dbox(px, colBase + 0.16, pz, 0.42, 0.32, 0.42, shade(STONE, 0.88));    // pole base
       ctx.ball(px, colBase + 7.34, pz, 0.11, 0xd8c98a);                          // gold truck

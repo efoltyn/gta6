@@ -295,13 +295,24 @@
     if (B.group && B.builtFor === CBZ.govComplexes) return true;
     teardownBalcony();
     const cx = s.cx, cz = s.cz;
-    const fy = residenceFloorY();
-    B.floorY = fy != null && fy > 2.4 && fy < 4.2 ? fy : 3.2;
+    // the family floor and the front as govcomplex.js BUILT them (site.layout):
+    // the house now stands at 4.5 m a storey under a colossal order, so the
+    // deck is wherever that floor is, and it fits BETWEEN the door-bay
+    // columns whatever their radius (a 9.8 m deck clipped the thicker shafts)
+    const LY = s.layout || null, O = LY && LY.order;
+    const fy = residenceFloorY() != null ? residenceFloorY() : (LY && LY.floorTops && LY.floorTops[1]);
+    B.floorY = fy != null && fy > 2.4 && fy < 7.0 ? fy : 3.2;
     B.deckY = B.floorY + 0.15;                       // one threshold step up from the floor inside
-    B.facadeZ = cz - 17;
+    B.facadeZ = LY && isFinite(LY.facadeZ) ? LY.facadeZ : cz - 17;
     B.cx = cx;
     const D = B.deckY, F = B.facadeZ;
-    const W = 9.8, DEP = 3.5;
+    let W = 9.8;
+    if (O && O.colsX && O.colsX.length) {
+      let inner = Infinity;
+      for (let i = 0; i < O.colsX.length; i++) inner = Math.min(inner, Math.abs(O.colsX[i] - cx));
+      if (isFinite(inner)) W = Math.min(9.8, 2 * (inner - O.R - 0.12));
+    }
+    const DEP = 3.5;
     const x0 = cx - W / 2, x1 = cx + W / 2, z0 = F, z1 = F + DEP;
     // the man at the lectern stands 1.65 m off the wall: clear of the 0.52 m
     // cornice band by more than a metre, so no head is ever inside the stone
