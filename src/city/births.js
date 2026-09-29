@@ -105,7 +105,7 @@
    the baby is minted with `age: 0` and the body is built at real infant
    proportions by entities/character.js. Its BIRTHDAY is stamped by the
    bearChild() call this function already made — familytree.js records
-   born[sid] = CBZ.dayTime() (core/daynight.js's continuous calendar, already
+   born[sid] = CBZ.paceTime() (core/daynight.js's continuous pace clock, already
    carried by the world save), and AGE IS DERIVED ON READ. Nothing here ticks
    an age, which is precisely why a baby that gets parked by crowd.js, stashed
    to an offline ledger page, or saved and reloaded still comes back older.
@@ -288,7 +288,7 @@
     if (CBZ.cityPeds) CBZ.cityPeds.push(kid);
     // family tree + household + the offline book, in that order.
     // bearChild() also stamps the PERSISTED BIRTHDAY (familytree.js W13): the
-    // birth day comes off CBZ.dayTime(), the one monotonic calendar the world
+    // birth day comes off CBZ.paceTime(), the one monotonic pace clock the world
     // save already carries, so this baby keeps ageing while it's parked, while
     // its identity sits on an offline ledger page, and across a reload. Age is
     // derived on read (today − bornDay), so nothing has to tick it.

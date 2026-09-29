@@ -67,7 +67,7 @@
   /* ---------------------------------------------------------------- basics */
   function econ() { return CBZ.cityEcon || null; }
   function now() { return (typeof CBZ.now === "number") ? CBZ.now : (Date.now ? Date.now() : 0); }
-  function dayNow() { return (typeof CBZ.dayCount === "function") ? CBZ.dayCount() : -1; }
+  function dayNow() { return (typeof CBZ.paceDay === "function") ? CBZ.paceDay() : -1; }
   function money(n) { n = Math.round(n || 0); return n >= 1000 ? "$" + (n / 1000).toFixed(1) + "k" : "$" + n; }
   function note(s, t) { if (CBZ.city && CBZ.city.note && s) CBZ.city.note(s, t || 2); }
   function say(p, line) { if (CBZ.citySay && p && !p.dead && line) CBZ.citySay(p, line, "#cfe6ff", 2.2); }

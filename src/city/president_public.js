@@ -75,8 +75,14 @@
   // ============================================================
   //  §0  SMALL THINGS
   // ============================================================
-  const DAY_S = 150;                         // city day length (core/daynight.js CYCLE)
-  function sec(s) { return s / DAY_S; }      // real seconds -> dayTime units
+  // THE CLOCK IS THE SKY (CBZ.dayTime, days): appearances are a timetable
+  // keyed to the hour — the 8am balcony speech happens at 8am. Durations are
+  // stated in REAL seconds and converted with sec(). Memory windows (how long
+  // a crackdown is remembered, how long a protest lasts) are GAMEPLAY pace,
+  // stated in PACE days (core/daynight.js, 150 real s each) via pace(), so the
+  // city's 48-minute sky day does not make the street 19x slower to forget.
+  function sec(s) { return s / CBZ.dayCycleSeconds(); }        // real seconds -> dayTime units
+  function pace(d) { return sec(d * CBZ.PACE_DAY_SECONDS); }   // pace days -> dayTime units
   function now() { return CBZ.dayTime ? CBZ.dayTime() : 0; }
   function clockHour(t) { const f = ((t % 1) + 1) % 1; return (f * 24 + 6) % 24; } // phase 0 = 06:00
   function h01(a, b, salt) { return CBZ.hash01 ? CBZ.hash01(a, b, salt) : ((Math.sin(a * 12.9898 + b * 78.233 + salt) * 43758.5453) % 1 + 1) % 1; }
@@ -608,12 +614,13 @@
       t1 = t0 + durFor(k0, 55, 85);
       out.push(item(D, 0, k0, p0, t0, t1));
     } else {
-      // a day is only 150 real seconds: two appearances fill most of it
-      t0 = D + 0.02 + 0.03 * h01(D, 5, 0x51ad);                   // 06:30 .. 07:10
+      // a morning appearance and an afternoon one (the old 150 s day had to
+      // cram them back to back at dawn; the 48-minute day has room)
+      t0 = D + 0.06 + 0.10 * h01(D, 5, 0x51ad);                   // 07:30 .. 09:50
       t1 = t0 + durFor(k0, 40, 46);
       out.push(item(D, 0, k0, p0, t0, t1));
       const k1 = kindFor(1), p1 = placeFor(k1, 1);
-      const s0 = t1 + sec(8 + 5 * h01(D, 6, 0x51ae));
+      const s0 = Math.max(t1 + sec(8 + 5 * h01(D, 6, 0x51ae)), D + 0.33 + 0.12 * h01(D, 6, 0x51ae));   // 14:00 .. 16:50
       const e1 = Math.min(s0 + durFor(k1, 40, 46), D + 0.74);      // done before midnight
       if (p1 && e1 - s0 >= sec(38)) out.push(item(D, 1, k1, p1, s0, e1));
     }
@@ -797,14 +804,14 @@
     const out = [];
     const T = now();
     const S = status();
-    const recent = function (k, days) { return ORD[k] != null && T - ORD[k] < (days || 1.6); };
+    const recent = function (k, days) { return ORD[k] != null && T - ORD[k] < pace(days || 1.6); };
     const dep = deployments();
     if (curfewLive() || recent("curfew")) out.push("NO CURFEW", "OUR STREETS AT NIGHT");
     if (dep.martial || recent("martial")) out.push("SOLDIERS OUT", "NO TANKS ON OUR STREETS");
     if (recent("crackdown")) out.push("STOP THE CRACKDOWN");
     if ((S.emergency || 0) >= 40 || recent("emergency") || recent("fascism") || recent("crown")) out.push("NO DICTATOR", "RESTORE THE REPUBLIC");
     if (recent("taxup") || (S.seat && (S.treasury || 0) < 20000)) out.push("WHERE IS THE MONEY", "TAX THE PALACE");
-    if (ATTACK.t != null && T - ATTACK.t < 1.5) out.push("KEEP US SAFE", "NEVER AGAIN");
+    if (ATTACK.t != null && T - ATTACK.t < pace(1.5)) out.push("KEEP US SAFE", "NEVER AGAIN");
     if (recent("bureau", 2) || recent("martial", 3)) out.push("BRING THEM HOME");
     if (approval() < 35) out.push("RESIGN", "NOT MY PRESIDENT", "ENOUGH");
     if (!out.length) out.push("HEAR US", "RESIGN");
@@ -1114,8 +1121,8 @@
   function anger() {
     const T = now();
     let a = Math.max(0, (35 - approval()) / 35);
-    for (const k in UNPOPULAR) if (ORD[k] != null && T - ORD[k] < 1.5) a += UNPOPULAR[k];
-    if (ATTACK.t != null && T - ATTACK.t < 1.0) a += 0.2;
+    for (const k in UNPOPULAR) if (ORD[k] != null && T - ORD[k] < pace(1.5)) a += UNPOPULAR[k];
+    if (ATTACK.t != null && T - ATTACK.t < pace(1.0)) a += 0.2;
     return clamp(a, 0, 1.5);
   }
   function curfewLive() {
@@ -1320,10 +1327,10 @@
     const T = now();
     const a = approval();
     const dep = deployments();
-    const recentAttack = (ATTACK.t != null && T - ATTACK.t < 1.5) || !!(S.threat && S.threat.armed);
+    const recentAttack = (ATTACK.t != null && T - ATTACK.t < pace(1.5)) || !!(S.threat && S.threat.armed);
     const threat = S.threat && S.threat.members > 0;
     const broke = S.seat && (S.treasury || 0) < 20000;
-    const taxed = ORD.taxup != null && T - ORD.taxup < 2;
+    const taxed = ORD.taxup != null && T - ORD.taxup < pace(2);
     const beats = [];
     if (recentAttack) beats.push({
       line: "They came for us. They came for this city, for your streets, for your children.",
@@ -1457,7 +1464,7 @@
     const good = Math.random() < clamp(a / 100 + 0.15, 0.2, 0.9);
     setTimeout(function () { if (APP.live === L) react(good ? "cheer" : "boo"); }, 1400);
     sp.i++;
-    sp.t = Math.max(8, ((L.item.t1 - L.item.t0) * DAY_S - 12) / 3);
+    sp.t = Math.max(8, ((L.item.t1 - L.item.t0) * CBZ.dayCycleSeconds() - 12) / 3);
   }
 
   // ---- the per-tick run of the diary -------------------------------------
@@ -1623,7 +1630,7 @@
     PROT.size = clamp(Math.round(size != null ? size : 6 + a * 14), 4, 22);
     PROT.at = { x: gp.x, z: gp.z + 13 };            // +z is out of the compound: the approach road, never inside
     PROT.startT = now();
-    PROT.until = now() + (size != null ? 1.6 : 1.0 + 0.6 * h01(Math.floor(now()), PROT.size, 0x5c1));
+    PROT.until = now() + pace(size != null ? 1.6 : 1.0 + 0.6 * h01(Math.floor(now()), PROT.size, 0x5c1));
     PROT.slogans = slogansNow();
     PROT.slots = null;
     PROT.chantT = 3;
@@ -1702,7 +1709,7 @@
     for (let i = 0; i < PROT.police.length; i++) dropBody(PROT.police[i]);
     PROT.police.length = 0;
     PROT.slots = null;
-    PROT.cooldownUntil = now() + 0.8;
+    PROT.cooldownUntil = now() + pace(0.8);
     emit("protest", { phase: phase || "end", size: PROT.size, at: PROT.at ? { x: PROT.at.x, z: PROT.at.z } : null });
     if (flee) news("Police break up the protest outside the Executive Mansion.");
   }

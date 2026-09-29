@@ -688,7 +688,7 @@
       r.member = true; r.org = opts.org || id;
       r.rank = opts.rank || (f.ranks[0] ? f.ranks[0].key : "member");
       r.standing = num(opts.standing, 0.25);
-      r.joinedDay = CBZ.dayCount ? CBZ.dayCount() : 0;
+      r.joinedDay = CBZ.paceDay ? CBZ.paceDay() : 0;
       r.how = how || "walk-in";
       r.owner = !!opts.owner;
       r.paidDay = r.joinedDay;

@@ -143,7 +143,7 @@ await shot("demo-e2e-1-rubble.png");
 await floatCheck("rubble");
 
 // day-jump to CLEARED
-const p2 = await evl(`(() => { CBZ.dayCount(CBZ.dayCount() + 3); return "day=" + CBZ.dayTime().toFixed(2); })()`);
+const p2 = await evl(`(() => { CBZ.paceTime(CBZ.paceTime() + 3); return "day=" + CBZ.paceTime().toFixed(2); })()`);
 await sleep(1600);  // > one 0.7s tick even at crawling sim time? ticks are real-dt based — 1.6s covers 2 ticks
 console.log("jump:", p2, "phase:", await evl("JSON.stringify(CBZ.cityDemolition.list())"));
 await aimAtLot("cleared");
@@ -151,7 +151,7 @@ await shot("demo-e2e-2-cleared.png");
 await floatCheck("cleared");
 
 // day-jump to SCAFFOLD
-await evl("CBZ.dayCount(CBZ.dayCount() + 2)");
+await evl("CBZ.paceTime(CBZ.paceTime() + 2)");
 await sleep(1600);
 console.log("phase:", await evl("JSON.stringify(CBZ.cityDemolition.list())"));
 await aimAtLot("scaffold");
@@ -159,7 +159,7 @@ await shot("demo-e2e-3-scaffold.png");
 await floatCheck("scaffold");
 
 // day-jump past REBUILT
-const fin = await evl(`(() => { window.__colsBefore = CBZ.colliders.length; CBZ.dayCount(CBZ.dayCount() + 3); return true; })()`);
+const fin = await evl(`(() => { window.__colsBefore = CBZ.colliders.length; CBZ.paceTime(CBZ.paceTime() + 3); return true; })()`);
 await sleep(1800);
 const done = await evl(`(() => {
   const lot = window.__lot, b = lot.building, D = CBZ.cityDemolition;
@@ -204,7 +204,7 @@ const interp = await evl(`(() => {
   D.reset();                                           // clean intact
   const on = !!CBZ.CONFIG.DEMO_MORPH_V1;
   D.destroy(lot, { quiet: true, silent: true });       // -> phase 1 (snap, from 0)
-  CBZ.dayCount(CBZ.dayCount() + 3);                     // age so phaseFor==2 → the ticker keeps our forced phase
+  CBZ.paceTime(CBZ.paceTime() + 3);                     // age (PACE days) so phaseFor==2 → the ticker keeps our forced phase
   D._tweenPause(true);
   D._forcePhase(lot, 2);                                // start rubble→cleared (paused at t≈0)
   const s0 = D._tweenState(lot);

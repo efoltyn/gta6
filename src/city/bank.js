@@ -827,7 +827,7 @@
   // the service run: a machine is restocked on the same daily cadence the
   // rest of the ledger banks on. No timer of its own — it reads the clock.
   function atmService(box) {
-    const day = (CBZ.dayCount ? CBZ.dayCount() : 0) | 0;
+    const day = (CBZ.paceDay ? CBZ.paceDay() : 0) | 0;
     if (box._atmSvc !== day) { box._atmSvc = day; box._atmBal = box._atmOf; }
   }
   function withdraw(amount, atMachine) {
@@ -1912,7 +1912,7 @@
       amount: function () {
         // a drawer is counted out fresh each trading day — it reads the same
         // clock the rest of the ledger banks on, never a timer of its own.
-        const day = (CBZ.dayCount ? CBZ.dayCount() : 0) | 0;
+        const day = (CBZ.paceDay ? CBZ.paceDay() : 0) | 0;
         if (box2._drawDay !== day) { box2._drawDay = day; box2._drawBal = box2._drawOf; }
         return box2._drawBal;
       },

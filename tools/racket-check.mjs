@@ -44,6 +44,7 @@ function makeWorld() {
   CBZ.now = 0;
   let day = 10;
   CBZ.dayCount = () => day;
+  CBZ.paceDay = () => day;          // racket.js counts PACE days (core/daynight.js)
   CBZ.setDay = (d) => { day = d; };
   CBZ.player = { pos: { x: 0, y: 0, z: 0 }, dead: false };
   const playerActor = { isPlayerActor: true, pos: CBZ.player.pos };

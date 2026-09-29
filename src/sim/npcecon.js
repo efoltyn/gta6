@@ -96,7 +96,7 @@
   if (!CBZ) return;
   const g = CBZ.game;
 
-  const HOUR = 150 / 24;   // seconds per in-game hour — matches market.js/econstate.js exactly
+  const HOUR = CBZ.PACE_DAY_SECONDS / 24;   // one PACE hour in real s (core/daynight.js): gameplay pace, not the sun
 
   // ---- the 5 districts (city/economy.js's DISTRICTS keys, duplicated here
   // as a fixed list per VI.4's "5 districts" — this file has no hard

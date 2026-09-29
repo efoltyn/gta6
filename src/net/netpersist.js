@@ -138,7 +138,8 @@
     if (CBZ.cityNpcLedger && CBZ.cityNpcLedger.serialize) try { blob.npc = CBZ.cityNpcLedger.serialize(); } catch (e) {}
     if (CBZ.cityIdentities && CBZ.cityIdentities.serialize) try { blob.identities = CBZ.cityIdentities.serialize(); } catch (e) {}
     if (CBZ.dayPhase) blob.day = CBZ.dayPhase();
-    if (CBZ.dayCount) blob.dayN = CBZ.dayCount();   // calendar day (rebuild timers count in these)
+    if (CBZ.dayCount) blob.dayN = CBZ.dayCount();   // sky calendar day
+    if (CBZ.paceTime) blob.pace = +CBZ.paceTime().toFixed(4);   // gameplay pace clock (rebuild timers, ageing, rent count in these)
     if (CBZ.cityFamilyTree && CBZ.cityFamilyTree.serialize) try { blob.fam = CBZ.cityFamilyTree.serialize(); } catch (e) {}
     if (CBZ.building && CBZ.building.serialize) try { blob.bld = CBZ.building.serialize(); } catch (e) {}
     // B6: BaseRecords ride their OWN rider (NOT folded into blob.bld) so a
@@ -263,7 +264,7 @@
     if (w.fracture && CBZ.cityFracture && CBZ.cityFracture.apply) try { CBZ.cityFracture.apply(w.fracture); } catch (e) { console.error("[netpersist]", e); }
     /* THE CLOCK GOES BACK BEFORE THE DEMOLITION LEDGER — order is load-bearing.
        These two lines used to sit BELOW w.demo, and blob.demo's rows are stamped
-       in CBZ.dayTime() units (blob.dayN is literally commented "rebuild timers
+       in CBZ.paceTime() units (blob.pace, the clock the "rebuild timers
        count in these"). Applied against a FRESH-BOOT clock, every timing test in
        city/demolition.js reads the wrong number twice over:
          • applyOne()'s healed check, `now - row.at >= T_REBUILT` — a row saved
@@ -278,6 +279,8 @@
        (schedule.js's ledger) and w.identities are pure id/roster restores.  */
     if (w.day != null && CBZ.dayPhase) CBZ.dayPhase(w.day);
     if (w.dayN != null && CBZ.dayCount) CBZ.dayCount(w.dayN);
+    // a pre-pace save stamped everything in the old 150 s sky days, which WERE pace days
+    if (CBZ.paceTime) CBZ.paceTime(w.pace != null ? w.pace : (w.dayN || 0) + (w.day || 0));
     if (w.demo && CBZ.cityDemolition && CBZ.cityDemolition.apply) try { CBZ.cityDemolition.apply(w.demo); } catch (e) { console.error("[netpersist]", e); }
     if (w.npc && CBZ.cityNpcLedger && CBZ.cityNpcLedger.apply) try { CBZ.cityNpcLedger.apply(w.npc); } catch (e) { console.error("[netpersist]", e); }
     if (w.identities && CBZ.cityIdentities && CBZ.cityIdentities.apply) try { CBZ.cityIdentities.apply(w.identities); } catch (e) { console.error("[netpersist]", e); }

@@ -182,7 +182,7 @@ async function stageCompound(input) {
     // lot A is still mid-fall from the teardown subject: let it land
     for (let i = 0; i < 60 && (!lotA.demolished || (CBZ.collapse && CBZ.collapse.active && CBZ.collapse.active() > 0)); i++) tick(30);
     for (const lot of S.pair) {
-      if (!lot.demolished) { try { D.hold(lot, true); D.destroy(lot, { held: true, quiet: true, at: (CBZ.dayTime ? CBZ.dayTime() : 0) - 1 }); } catch (e) { notes.push("destroy " + e.message); } }
+      if (!lot.demolished) { try { D.hold(lot, true); D.destroy(lot, { held: true, quiet: true, at: (CBZ.paceTime ? CBZ.paceTime() : 0) - 1 }); } catch (e) { notes.push("destroy " + e.message); } }
       try { D.hold(lot, true); if (D._forcePhase) D._forcePhase(lot, 4); } catch (_) {}
     }
     try { CBZ.cityPlots.sync(); } catch (_) {}

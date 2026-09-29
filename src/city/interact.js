@@ -419,7 +419,7 @@
   // keyed to a LETTERBOX: mostly junk flavor, sometimes a cash envelope ($5–40),
   // and rarely a scrap of street intel naming a nearby shop/crew (flavor only —
   // a single feed line, no new system). Bounded ONCE PER MAILBOX PER DAY
-  // (CBZ.dayCount) so a row of boxes isn't a faucet; falls back to once-per-
+  // (CBZ.paceDay, 150 real s) so a row of boxes isn't a faucet; falls back to once-per-
   // session when the day clock is absent. Reuses propRng() (the same city-RNG-
   // with-Math.random-fallback searchStreetProp uses). Flag: PROPS_WIRED_V1.
   const MAIL_JUNK = [
@@ -452,7 +452,7 @@
     return "A tip-off scrawled on a napkin, but the ink's too smeared to read.";
   }
   function checkMailbox(sp) {
-    const day = (typeof CBZ.dayCount === "function") ? CBZ.dayCount() : -1;
+    const day = (typeof CBZ.paceDay === "function") ? CBZ.paceDay() : -1;
     if (day >= 0) {
       if (sp._mailDay === day) { CBZ.city.note("Already cleared this box today.", 1.6); return; }
       sp._mailDay = day;

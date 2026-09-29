@@ -85,7 +85,7 @@
 
   // ---- shims (every cross-module read feature-detected) --------------------
   function nowSec() { return (typeof CBZ.now === "number" ? CBZ.now : Date.now()) / 1000; }
-  function day() { return CBZ.dayCount ? CBZ.dayCount() : 0; }
+  function day() { return CBZ.paceDay ? CBZ.paceDay() : 0; }
   function money(n) { n = Math.round(n || 0); return n >= 1000 ? "$" + Math.round(n / 1000) + "k" : "$" + n; }
   function pick(a) { return a[(Math.random() * a.length) | 0]; }
   function sayP(p, text, color, secs) { if (CBZ.citySay && p) CBZ.citySay(p, text, color || "#dfe7ff", secs == null ? 2.4 : secs); }

@@ -68,11 +68,11 @@
   function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
   function money(n) { n = Math.round(n || 0); return n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1000 ? "$" + Math.round(n / 1000) + "k" : "$" + n; }
 
-  // the day clock: worldDay (polity) when up, else daynight's dayCount — both
-  // integer days; stamps from either compare fine within one run+save lane.
+  // the day clock: worldDay (polity) when up, else daynight's paceDay — both
+  // count PACE days (150 real s), so stamps from either compare fine.
   function dayNow() {
     if (typeof CBZ.worldDay === "function") { try { return CBZ.worldDay() | 0; } catch (e) {} }
-    if (typeof CBZ.dayCount === "function") { try { return CBZ.dayCount() | 0; } catch (e) {} }
+    if (typeof CBZ.paceDay === "function") { try { return CBZ.paceDay() | 0; } catch (e) {} }
     return 0;
   }
 

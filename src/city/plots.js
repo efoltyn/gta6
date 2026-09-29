@@ -184,7 +184,7 @@
     const D = CBZ.cityDemolition; if (!D || !D.destroy) return;
     const lot = plot.lot;
     if (D.hold) D.hold(lot, true);
-    const now = CBZ.dayTime ? CBZ.dayTime() : 0;
+    const now = CBZ.paceTime ? CBZ.paceTime() : 0;
     try { D.destroy(lot, { quiet: true, silent: true, held: true, at: now - 1 }); } catch (e) {}
     plot.cleared = !!lot.demolished;
   }

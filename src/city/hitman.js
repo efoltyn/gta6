@@ -131,7 +131,7 @@
     // dossier real instead of prose.
     const roled = pool.filter(function (p) { return p.job && CBZ.cityJobs && CBZ.cityJobs[p.job]; });
     const from = roled.length ? roled : pool;
-    const day = CBZ.dayCount ? CBZ.dayCount() : 0;
+    const day = CBZ.paceDay ? CBZ.paceDay() : 0;
     const r = CBZ.hash01 ? CBZ.hash01(day, ((recs() || {}).completed | 0) + ((opts && opts.salt) | 0), 0x417) : Math.random();
     const ped = from[Math.min(from.length - 1, (r * from.length) | 0)];
     return { tier: 0, ped: ped, name: ped.name || "the mark", facts: streetFacts(ped), pay: TIERS[0].pay };
@@ -177,7 +177,7 @@
       out.push(p);
     }
     if (!out.length) return null;
-    const day = CBZ.dayCount ? CBZ.dayCount() : 0;
+    const day = CBZ.paceDay ? CBZ.paceDay() : 0;
     const r = CBZ.hash01 ? CBZ.hash01(day, (recs() || {}).completed | 0, 0x418) : Math.random();
     const ped = out[Math.min(out.length - 1, (r * out.length) | 0)];
     let guards = 0, org = null;
