@@ -38,6 +38,9 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  // Built when the prison is first needed, as if at this script's parse
+  // point (core/prisonlazy.js). Body left at its old indent.
+  CBZ.definePrison("world/corridors.js", function () {
   const THREE = window.THREE;
   if (!CBZ || !CBZ.prisonKit || !CBZ.corridorKit || !CBZ.buildSallyPort || !CBZ.addBox) return;
   const K = CBZ.prisonKit, CK = CBZ.corridorKit;
@@ -335,4 +338,5 @@
       segmentsList: SEG.map((s) => ({ id: s.id, r: s.r })),
     };
   };
+  });
 })();

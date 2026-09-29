@@ -342,6 +342,11 @@
       g.setAttribute("asphaltLane", new THREE.BufferAttribute(al, 3));
     }
     g.computeBoundingSphere();
+    // the plain-number arrays are copied into the attributes above: drop them
+    // (a highway record's closures keep its chunk accumulators reachable, and
+    // these JS arrays were 113 MB of live heap across the continent)
+    this.p = []; this.n = []; this.c = [];
+    if (this.sec) { this.sec = []; this.lane = []; }
     const m = new THREE.Mesh(g, mat);
     m.matrixAutoUpdate = false; m.updateMatrix();
     m.userData.hwy = true;            // batch-exempt: custom shader / polygonOffset survive
@@ -1051,6 +1056,7 @@
       chunks = []; colliders = []; want = null;
       walk();
       emit(chunks, colliders, rec.group);
+      chunks = colliders = null;
     } else {
       // A SLICE: each chunk is a CBZ.sliceAt job over its own rect. The chunks
       // the slice sees are drawn by one walk now; the rest are queued (the

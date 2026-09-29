@@ -76,13 +76,18 @@ const CBZ = globalThis.CBZ = {
   mat: (c, o) => { const m = new THREE.MeshLambertMaterial({ color: c }); if (o && o.emissive != null) { m.emissive = new THREE.Color(o.emissive); m.emissiveIntensity = o.ei == null ? 1 : o.ei; } return m; },
   seedStream: () => { let s = 0x51a1a0; return () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }; },
   interactions: null,
+  cityRegisterVehicle: (grp, o) => ({ pos: grp.position, heading: o.heading || 0, dims: o.dims, group: grp }),
+  cityCars: [],
 };
 CBZ.cmat = CBZ.mat;
 load("src/systems/airports.js");
+let airframes = true;
+try { load("src/city/airframe_kit.js"); load("src/city/airframes.js"); } catch (e) { airframes = false; fails.push("airframes failed to load: " + e.message); }
 load("src/city/airport_kit.js");
 let halloranLoaded = true;
 try { load("src/city/island_airport.js"); } catch (e) { halloranLoaded = false; fails.push("island_airport.js failed to load: " + e.message); }
 load("src/city/airport_capeharbor.js");
+load("src/city/airside.js");
 
 const city = { root: new THREE.Group(), roads: [], regions: [], noSpawn: [] };
 CBZ.city = { arena: city };
@@ -131,10 +136,10 @@ for (const ap of aps) {
   // taxiway + holding position
   ok(L.taxiW === 23, tag + " taxiway " + L.taxiW);
   ok(L.holdZ >= ap.runway.w / 2 + 20 && L.holdZ <= L.taxiZ - L.taxiW / 2, tag + " holding position " + L.holdZ);
-  // stands
-  const E = P.aircraftEnvelope();
+  // stands: code E MARS stands (a widebody fits every one)
+  const E = P.aircraftEnvelope("widebody");
   const xs = L.stands.map((s) => s.lx).sort((a, b) => a - b);
-  for (let i = 1; i < xs.length; i++) ok(xs[i] - xs[i - 1] >= E.span + 7.5 - 0.01, tag + " stand pitch " + (xs[i] - xs[i - 1]).toFixed(1) + " < span+7.5");
+  for (let i = 1; i < xs.length; i++) ok(xs[i] - xs[i - 1] >= E.span + 7.5 - 0.01, tag + " stand pitch " + (xs[i] - xs[i - 1]).toFixed(1) + " < widebody span + 7.5");
   ok(L.stand.tailClear >= 7.5 - 0.01, tag + " tail clearance " + L.stand.tailClear.toFixed(2));
   ok(ap.gates.every((g) => Math.abs(g.heading + Math.PI / 2) < 1e-6), tag + " stands must be nose-in");
   // bridges
@@ -161,8 +166,10 @@ for (const ap of aps) {
   ok((ap.doors || []).length >= 3, tag + " sliding doors registered " + (ap.doors || []).length);
   const cost = countMeshes(ap.group);
   const surf = ap.surface ? 1 : 0;
-  rows.push({ field: tag, runway: ap.runway.len + "x" + ap.runway.w, stands: ap.gates.length, bridges: (ap.bridges || []).length,
+  rows.push({ field: tag, runway: ap.runway.len + "x" + ap.runway.w, stands: ap.gates.length, bridges: (ap.bridges || []).length, docked: (ap.bridges || []).filter((b) => b.docked).length, parked: ap.parked.length,
     fieldMeshes: cost.meshes + surf, fieldVerts: cost.verts, instances: cost.inst, approach: JSON.stringify(ap.approach || []), fire: ap.fire ? ap.fire.bays.length : 0 });
+  ok(ap.parked.length >= 1, tag + " nothing parked (airframes did not build)");
+  ok((ap.bridges || []).every((b) => !!b.docked === !!b.gate.occupant), tag + " a bridge is docked to an empty stand or retracted from a full one");
   ok(cost.meshes < 260, tag + " field mesh count " + cost.meshes + " (budget 260)");
   ok(ap.fire && ap.fire.bays.length >= 3, tag + " fire station bays");
   ok(ap.approach && ap.approach.length >= 1 && ap.approach[0].stations >= 4, tag + " approach lights");
@@ -173,6 +180,74 @@ for (const ap of aps) {
   for (const c of city.root.children) if (c.name && c.name.indexOf("airfield-dressing") === 0) { const k = countMeshes(c); dm += k.meshes; dv += k.verts; }
   rows.push({ dressingMeshes: dm, dressingVerts: dv, colliders: CBZ.colliders.length, platforms: CBZ.platforms.length, staff: posts, seats });
   ok(dm > 0, "no dressing built");
+}
+// the airside fleet: every field has its own, nothing parks on a runway
+{
+  const a = CBZ.airsideAudit ? CBZ.airsideAudit() : null;
+  ok(!!a, "no airsideAudit");
+  if (a) {
+    rows.push({ airside: { fields: a.fields, vehicles: a.vehicles, onRunway: a.onRunway, driverless: a.driverless, perField: a.perField } });
+    ok(a.fields === 2, "airside fields " + a.fields);
+    ok(a.onRunway === 0, "airside vehicles on a runway: " + a.onRunway);
+    ok(a.vehicles >= 10, "airside vehicles " + a.vehicles);
+    for (const f of a.perField) ok(f.routes >= 6, "airside routes at " + f.id + ": " + f.routes);
+  }
+}
+// no service-road waypoint stands inside a building
+{
+  const cols = CBZ.colliders.filter((c) => (c.y0 == null || c.y0 < 1) && (c.y1 == null || c.y1 > 1));
+  let bad = [];
+  for (const f of CBZ.airsideRoutes()) for (const k in f.routes) for (const n of f.routes[k].pts) {
+    if (n.dock) continue;
+    for (const c of cols) if (n.x > c.minX - 1 && n.x < c.maxX + 1 && n.z > c.minZ - 1 && n.z < c.maxZ + 1) { bad.push(f.id + ":" + k + "@" + n.lx.toFixed(0) + "," + n.lz.toFixed(0)); break; }
+  }
+  // ...and no leg drives through one
+  for (const f of CBZ.airsideRoutes()) for (const k in f.routes) {
+    const r = f.routes[k], pts = r.pts, n = r.loop === false ? pts.length - 1 : pts.length;
+    for (let i = 0; i < n; i++) {
+      const a = pts[i], b = pts[(i + 1) % pts.length];
+      if (a.dock || b.dock) continue;
+      const L = Math.hypot(b.x - a.x, b.z - a.z);
+      for (let t = 0; t <= L; t += 2) {
+        const x = a.x + (b.x - a.x) * t / L, z = a.z + (b.z - a.z) * t / L;
+        const c = cols.find((c) => x > c.minX - 0.8 && x < c.maxX + 0.8 && z > c.minZ - 0.8 && z < c.maxZ + 0.8);
+        if (c) { bad.push(f.id + ":" + k + " leg " + i + " @" + x.toFixed(0) + "," + z.toFixed(0) + " hits " + (c.airfield || "?") + " y" + c.y0 + ".." + c.y1); break; }
+      }
+    }
+  }
+  ok(bad.length === 0, "route nodes inside colliders: " + bad.slice(0, 8).join(" "));
+}
+// drive the fleet for two simulated minutes: everybody moves, nobody
+// strays onto a runway, no waypoint sits inside a building
+{
+  CBZ.game.state = "playing";
+  CBZ.camera = { position: new THREE.Vector3(aps[0].x, 50, aps[0].z) };
+  const hooks = updates.filter((u) => u.order === 37.32 || u.order === 37.35).sort((a, b) => a.order - b.order);
+  const start = new Map();
+  const V0 = [];
+  city.root.traverse((o) => { if (o.userData && o.userData.airsideVehicle) { V0.push(o); start.set(o, o.position.clone()); } });
+  let maxOn = 0;
+  for (let i = 0; i < 2400; i++) {
+    for (const h of hooks) h.fn(0.05);
+    if (i % 100 === 0) { const a = CBZ.airsideAudit(); maxOn = Math.max(maxOn, a.onRunway); }
+  }
+  let moved = 0;
+  for (const o of V0) if (o.position.distanceTo(start.get(o)) > 5) moved++;
+  rows.push({ drive: { vehicles: V0.length, moved: moved, maxOnRunway: maxOn } });
+  ok(moved >= V0.length - 2, "airside vehicles that never moved: " + (V0.length - moved));
+  ok(maxOn === 0, "a vehicle entered a runway uncleared");
+}
+// the aircraft table matches the live airframes (city/airframes.js)
+if (airframes && CBZ.airframes) {
+  for (const t of ["narrowbody", "widebody"]) {
+    const g = CBZ.airframes.build(t, { noseX: true });
+    g.updateMatrixWorld(true);
+    const b = new THREE.Box3().setFromObject(g);
+    const c = CBZ.airframes.cabin(g);
+    const R = P.AIRCRAFT[t];
+    ok(Math.abs(b.max.x - R.noseTip) < 0.5 && Math.abs(-b.min.x - R.tail) < 0.5, t + " nose/tail table vs airframe " + b.max.x.toFixed(2) + "/" + (-b.min.x).toFixed(2));
+    ok(c && c.door && Math.abs(c.door.x - R.doorX) < 0.3 && Math.abs(-c.door.z - R.doorLat) < 0.3 && Math.abs(c.door.sillY - R.sill) < 0.05, t + " L1 door table vs airframe " + JSON.stringify(c && c.door));
+  }
 }
 // tower cab rake
 {
@@ -230,4 +305,26 @@ if (process.env.AF_DUMP) {
     });
   }
   fs.writeFileSync(process.env.AF_DUMP, JSON.stringify(out));
+}
+if (process.env.AF_COST) {
+  for (const ap of aps) {
+    const rows2 = [];
+    for (const c of ap.group.children) {
+      let v = 0, m = 0; c.traverse((o) => { if (o.isMesh && o.geometry.attributes.position) { v += o.geometry.attributes.position.count; m++; } });
+      rows2.push([c.name || c.type, m, v]);
+    }
+    rows2.sort((a, b) => b[2] - a[2]);
+    console.log(ap.code, JSON.stringify(rows2.slice(0, 12)));
+  }
+  for (const c of city.root.children) if (c.name && c.name.indexOf("airfield-dressing") === 0) {
+    const rows3 = [];
+    for (const k of c.children) { let v = 0, m = 0; k.traverse((o) => { if (o.isMesh && o.geometry.attributes.position) { v += o.geometry.attributes.position.count; m++; } }); rows3.push([k.name || k.type, m, v]); }
+    rows3.sort((a, b) => b[2] - a[2]);
+    console.log(c.name, JSON.stringify(rows3.slice(0, 12)));
+  }
+}
+if (process.env.AF_COST) {
+  const t = aps[0].terminal.group; const r = [];
+  t.traverse((o) => { if (o.isMesh) r.push([o.material.color ? o.material.color.getHexString() : "?", o.isInstancedMesh ? "inst" + o.count : "", o.geometry.attributes.position.count]); });
+  r.sort((a, b) => b[2] - a[2]); console.log("TERM", JSON.stringify(r.slice(0, 10)));
 }

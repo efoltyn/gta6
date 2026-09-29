@@ -282,12 +282,6 @@
   // PLACEMENT — deferred until the city exists, runs once, city mode only.
   // -------------------------------------------------------------------------
   let built = false;
-  function regionByBiome(A, biome) {
-    const rs = (A && A.regions) || [];
-    for (let i = 0; i < rs.length; i++) if (rs[i] && rs[i].biome === biome) return rs[i];
-    return null;
-  }
-
   function placeAll(A) {
     if (built) return;
     if (!A || !A.root) return;
@@ -295,25 +289,13 @@
     const root = A.root;
 
     try {
-      // ---- AIRPORT TERMINAL concourse ------------------------------------
-      // The terminal is a long low glass shell at roughly x=-40, z=24 inside
-      // the 'airport' region. We place a criss-cross bank inside that footprint
-      // (ground → a low mezzanine height). We derive a safe interior spot from
-      // the region if the exact terminal isn't queryable.
-      const air = regionByBiome(A, "airport");
-      if (air) {
-        // terminal interior is well inside the region's south-centre; use the
-        // documented terminal centre (-40, 24) ON the airport's world-layout
-        // dial (world/layout.js — the terminal itself is built at -40+dx),
-        // then clamp to the region. Clamping alone can NOT correct a stale
-        // literal: the old spot stays inside the moved region's rect, so a
-        // fixed -40 would put the bank on open apron 220u east of the shell.
-        const w = (CBZ.worldOff && CBZ.worldOff("airport")) || { dx: 0, dz: 0 };
-        let tx = -40 + w.dx, tz = 24 + w.dz;
-        if (tx < air.minX + 8) tx = air.minX + 8; if (tx > air.maxX - 8) tx = air.maxX - 8;
-        if (tz < air.minZ + 8) tz = air.minZ + 8; if (tz > air.maxZ - 8) tz = air.maxZ - 8;
-        // a Z-aligned criss-cross bank along the concourse depth
-        makeBank({ root, bankX: tx + 34, bankZ: tz, run: 8, riseY: 4.2, y0: 0, width: 1.9, dirZ: 1 });
+      // ---- AIRPORT TERMINAL: the bank between the check-in hall and the
+      // gate floor. The terminal (city/airport_kit.js) publishes where it
+      // goes and how high the gate floor is, so the bank lands ON the floor
+      // it serves instead of a literal spot guessed from the region.
+      const esc = A.airportTerminal && A.airportTerminal.escalator;
+      if (esc) {
+        makeBank({ root, bankX: esc.x, bankZ: esc.z, run: esc.run, riseY: esc.riseY, y0: 0, width: esc.width, dirZ: esc.dirZ });
       }
 
       // ---- DOWNTOWN CORE flagship bank -----------------------------------

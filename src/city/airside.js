@@ -25,12 +25,12 @@
        damageable, solid to other cars, choppable. Owner law, no dumb props.
        Stealing a baggage tug off a live apron works, and the service loop
        lets go of it the moment you do.
-     • the ROUTES are derived from the airfield the world already built. The
-       runway rectangle and island bounds come out of CBZ.city.arena
-       .airportAudit; the gate stops come from the ACTUAL parked aircraft
-       groups discovered in the arena (their real x/z), not from a second copy
-       of island_airport.js's gate maths. If somebody moves the airport with
-       the worldOff dial, this file moves with it and nobody edits a number.
+     • the ROUTES are derived from each airport's RECORD (systems/airports.js
+       + the layout city/airport_kit.js publishes on it): service roads in the
+       field's own local metres, projected through its frame. Every field the
+       kit builds — Halloran and Cape Harbor today — gets its own fleet
+       (pushback tug, baggage train, catering lift, bowser, airstairs truck,
+       follow-me), and crash tenders stand in its fire station's bays.
      • the KERB traffic is ordinary cars: CBZ.cityAddParkedCar builds them, so
        the landside frontage gets the real catalogue models, real occupants,
        the real damage model — not five more boxes authored here.
@@ -1406,6 +1406,10 @@
   //  without the inspection clearance, measured in each runway's own frame)
   //  and reads 0; `driverless` (a machine with a seat and no post) reads 0.
   // ============================================================
+  // the live network, for the node check and a plan view
+  CBZ.airsideRoutes = function () {
+    return FIELDS.map(function (f) { return { id: f.id, routes: f.routes }; });
+  };
   CBZ.airsideAudit = function () {
     let vehicles = 0, onRunway = 0, raw = 0, holding = 0, released = 0, kerb = 0, dwelling = 0, tenders = 0;
     let seats = 0, driverless = 0, crewed = 0, dormant = 0, driverDown = 0;

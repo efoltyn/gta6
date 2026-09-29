@@ -93,6 +93,12 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  // This file's CONFIG defaults are published at parse: other files read
+  // them before (or without) the prison ever being built.
+  if (CBZ.CONFIG.PRISON_WINGS_V1 == null) CBZ.CONFIG.PRISON_WINGS_V1 = true;
+  // Built when the prison is first needed, as if at this script's parse
+  // point (core/prisonlazy.js). Body left at its old indent.
+  CBZ.definePrison("world/prisonwings.js", function () {
   if (!CBZ || !CBZ.addBox || !CBZ.WORLD || !CBZ.roomShell) return;
   const THREE = window.THREE;
   const { addBox } = CBZ;
@@ -103,7 +109,6 @@
   // Declared with the idempotent `== null` idiom world/southblock.js documents:
   // world/yard.js parses BEFORE this file and reads the same flag for its gate
   // gaps, so whichever runs first sets it and the other no-ops.
-  if (CBZ.CONFIG.PRISON_WINGS_V1 == null) CBZ.CONFIG.PRISON_WINGS_V1 = true;
   if (!CBZ.CONFIG.PRISON_WINGS_V1) return;
 
   const OUT = CBZ.WORLD.wings || { x0: -124, x1: 124, z0: -116, z1: 128 };
@@ -1870,4 +1875,5 @@
       openNow: doors.filter(function (d) { return d.open; }).length,
     };
   };
+  });
 })();

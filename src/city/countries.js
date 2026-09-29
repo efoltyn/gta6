@@ -427,12 +427,8 @@
     }
   }
 
-  function buildCountry(city, cd) {
+  function countryEnvelope(city, cd) {
     const settlements = cd.settlements || [];
-    for (let i = 0; i < settlements.length; i++) {
-      try { buildSettlement(city, cd, settlements[i]); }
-      catch (e) { try { console.error("[countries]", cd.id, settlements[i].id, e); } catch (e2) {} }
-    }
     // whole-country landmass region (registered LAST, after every settlement's
     // own precise region, so cityAnyRegion's linear scan still returns the
     // SPECIFIC settlement biome for a point that's inside one — this region
@@ -451,12 +447,21 @@
     }
   }
 
-  // register ALL 4 countries as ONE landmass builder, order 35 (after
-  // minicities.js's own 34) — each country independently try/caught so one
-  // bad nation can never sink the rest of the world (worldmap contract).
-  CBZ.addLandmass(function (city) {
-    for (const cd of COUNTRIES) {
-      try { buildCountry(city, cd); } catch (e) { try { console.error("[countries]", cd.id, e); } catch (e2) {} }
+  // order 35 (after minicities.js's own 34); each builder independently
+  // try/caught so one bad town can never sink the world (worldmap contract).
+  // ONE BUILDER PER SETTLEMENT, then the country's envelope region, in the
+  // same sequence as before: a slice / the streamed city (core/slice.js)
+  // skips a builder it cannot see, and one builder for four nations made the
+  // phone build every town (~34k meshes) to see one.
+  for (const cd of COUNTRIES) {
+    for (const st of (cd.settlements || [])) {
+      CBZ.addLandmass(function (city) {
+        try { buildSettlement(city, cd, st); }
+        catch (e) { try { console.error("[countries]", cd.id, st.id, e); } catch (e2) {} }
+      }, 35);
     }
-  }, 35);
+    CBZ.addLandmass(function (city) {
+      try { countryEnvelope(city, cd); } catch (e) { try { console.error("[countries]", cd.id, e); } catch (e2) {} }
+    }, 35);
+  }
 })();

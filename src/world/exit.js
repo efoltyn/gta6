@@ -28,12 +28,17 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  // This file's CONFIG defaults are published at parse: other files read
+  // them before (or without) the prison ever being built.
+  if (CBZ.CONFIG.PRISON_GATE_PACE == null) CBZ.CONFIG.PRISON_GATE_PACE = true;
+  // Built when the prison is first needed, as if at this script's parse
+  // point (core/prisonlazy.js). Body left at its old indent.
+  CBZ.definePrison("world/exit.js", function () {
   const { WORLD } = CBZ;
   const EX = WORLD.exit.x, EZ = WORLD.exit.z;
   // the win point: through the inner door, at the outer door
   CBZ.EXIT = new THREE.Vector3(EX, 0, EZ + 10.2);
 
-  if (CBZ.CONFIG.PRISON_GATE_PACE == null) CBZ.CONFIG.PRISON_GATE_PACE = true;
   const GLOW = (CBZ.COL && CBZ.COL.GLOW) || 0x39ff88;
   const PACE_HEX = 0xffd166;                       // css --gold, the record colour
   const DENY_HEX = 0xff3b3b;
@@ -65,5 +70,6 @@
       if (m.color) m.color.setHex(hex);
       if (m.emissive) m.emissive.setHex(hex);
     }
+  });
   });
 })();

@@ -731,17 +731,6 @@
   // doors/interiors/stairs/roof gameplay are untouched. Deterministic per lot
   // (CBZ.hash01, never rng()). Flip false to restore the flat-top box massing.
   if (CBZ.CONFIG.BUILDING_MASSING_V2 == null) CBZ.CONFIG.BUILDING_MASSING_V2 = true;
-  // BLASTED REINFORCED CONCRETE: a carved RPG/missile opening is dressed with
-  // persistent jagged slab teeth, torn steel and contact-stacked angular rubble.
-  // The old rectangular hole + box-rubble aftermath remains available for the
-  // matched visual baseline with ?cfg_STRUCT_RPG_RUIN_V2=0.
-  if (CBZ.CONFIG.STRUCT_RPG_RUIN_V2 == null) CBZ.CONFIG.STRUCT_RPG_RUIN_V2 = true;
-  // A CURTAIN WALL IS AN ASSEMBLY, NOT A BOX. A glass office storey's face is
-  // a 0.55 m sill course, a 0.45 m header course, two corner jambs and a pane
-  // grid — and carveHole's "a wall is at least 1.6 m tall and opaque" rule
-  // refused every one of them, so no ordnance in the game could open the most
-  // common building type in the city. Off restores that refusal exactly.
-  if (CBZ.CONFIG.STRUCT_CURTAIN_BREACH_V1 == null) CBZ.CONFIG.STRUCT_CURTAIN_BREACH_V1 = true;
   // CONSERVATION OF MATTER (owner: "I HATE FAKE DEBRIS ... IT MUST COME FROM
   // SOMEWHERE"). Every fragment a blast throws is diced out of a solid the
   // carve is removing in the same breath and carries that solid's own material;
@@ -1200,22 +1189,6 @@
   // planes are byte-identical. The military gunship (140hp vs 90/rocket) was
   // already a two-hit bird and is untouched. Flip false → one-shot helis.
   if (CBZ.CONFIG.AIR_HELI_TWO_BLAST == null) CBZ.CONFIG.AIR_HELI_TWO_BLAST = true;
-  // REAL COCKPIT DOOR (city/island_airport.js): the airliner cockpit becomes
-  // a room you physically enter — the bulkhead gets a genuine doorway with a
-  // sliding pocket-door leaf that eases open as you approach (elevator
-  // grammar), the boarding doorway becomes a true hull aperture you can see
-  // through from both sides, the walkable cabin deck extends into the
-  // cockpit, and the captain's chair seats a live uniformed pilot NPC.
-  // Flip false to restore the painted bulkhead door + solid hull.
-  if (CBZ.CONFIG.COCKPIT_REAL_DOOR == null) CBZ.CONFIG.COCKPIT_REAL_DOOR = true;
-  // COCKPIT GLASS V2 (city/island_airport.js): the airliner cockpit gets the
-  // SAME building-grade see-through glass the cabin strips use — real
-  // windscreen panes + side quarter windows over OPEN hull/liner apertures
-  // (no opaque windscreen band, no opaque cockpit-room side walls), so the
-  // uniformed pilot is visible from the apron exactly like the seated
-  // passengers and the runway is visible from the pilot seats. Flip false to
-  // restore the opaque dark windscreen band + solid cockpit shell.
-  if (CBZ.CONFIG.AIRLINER_COCKPIT_GLASS_V2 == null) CBZ.CONFIG.AIRLINER_COCKPIT_GLASS_V2 = true;
   // COCKPIT DOOR SOLID (city/island_airport.js): the (owner-approved) sliding
   // cockpit-bulkhead leaf gets a real physical collider that tracks its
   // open/close easing — a closed cockpit door now physically stops you and
@@ -1228,12 +1201,6 @@
   // the seats — reuses the npclife cabin fill + lifecycle (spawned fresh via the
   // flight-crew profile, attached → frozen). Flip false to remove.
   if (CBZ.CONFIG.AIRLINER_CABIN_CREW == null) CBZ.CONFIG.AIRLINER_CABIN_CREW = true;
-  // AIRLINER SCALE (city/island_airport.js): a single up-scale for the walk-in
-  // airliner (fuselage, window bands, door aperture, cabin rows, cockpit — every
-  // derived interior coordinate follows this one number, and the parked planes
-  // shift south so the longer tails stay clear of the terminal). 1.0 reverts to
-  // the original size; the shipped default makes it a genuinely large airliner.
-  if (CBZ.CONFIG.AIRLINER_SCALE == null) CBZ.CONFIG.AIRLINER_SCALE = 1.45;
 
   // NPC SCHEDULES (owner's rule: "at night they should almost all be in bed
   // except maybe gangsters and homeless… simple math and schedules… to give
@@ -1765,8 +1732,23 @@
     }
     return "";
   }
-  CBZ.onUpdate = function (order, fn) { CBZ.updaters.push({ order, fn, source: frameSource() }); };
-  CBZ.onAlways = function (order, fn) { CBZ.always.push({ order, fn, source: frameSource() }); };
+  // REGISTRATION SEQUENCE. core/loop.js orders the frame lists by (order,
+  // seq), which is exactly the stable sort by order it always did — plus it
+  // lets work registered LATE take the place it would have had if it had been
+  // registered at its script's parse point. The one user is the lazily built
+  // prison (core/prisonlazy.js): a builder that runs at mode entry stamps its
+  // registrations with its parse-time sequence (_frameSeqBase), so the guards'
+  // brain still runs before the same systems it ran before at load.
+  let frameSeq = 0;
+  function nextFrameSeq() {
+    const base = CBZ._frameSeqBase;
+    if (base == null) return ++frameSeq;
+    CBZ._frameSeqSub = (CBZ._frameSeqSub || 0) + 1;
+    return base + CBZ._frameSeqSub * 1e-6;
+  }
+  CBZ.frameSeqMark = function () { return frameSeq + 0.5; };
+  CBZ.onUpdate = function (order, fn) { CBZ.updaters.push({ order, fn, source: frameSource(), seq: nextFrameSeq() }); };
+  CBZ.onAlways = function (order, fn) { CBZ.always.push({ order, fn, source: frameSource(), seq: nextFrameSeq() }); };
 
   // ---- THE ONE QUALITY KNOB (owner rule: NO hardcoded content budgets). ----
   // Every content system (decal pools, gore counts, rain density, LOD draw

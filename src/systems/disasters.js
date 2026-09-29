@@ -541,7 +541,7 @@
        so a load-order slip or a master revert would have quietly put the RPG
        back. Such a caller therefore only reaches for the bus when the bus can
        actually route its row, and its own draw is the fallback. */
-    const busRoutes = !o.draw || !!(CBZ.CONFIG.IMPACT_BUS !== false &&
+    const busRoutes = !o.draw || !!(
       CBZ.impact && CBZ.impact.row && CBZ.impact.row(kind));
     if (busRoutes && CBZ.CONFIG.SURV_SHARED_STRUCTURE !== false && CBZ.detonate) {
       try {

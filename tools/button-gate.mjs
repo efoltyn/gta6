@@ -123,8 +123,10 @@ for (const file of walk(path.join(ROOT, "src"))) {
   const rel = path.relative(ROOT, file).split(path.sep).join("/");
   const panel = src.includes("innerHTML") && /createElement\("div"\)/.test(src);
   const keyed = src.includes('addEventListener("keydown"');
-  const clicky = /addEventListener\("(click|pointerdown|mousedown|touchstart)"/.test(src);
-  const zoned = src.includes("registerZone");
+  const clicky = /addEventListener\("(click|pointerdown|mousedown|touchstart)"|\.onclick\s*=/.test(src);
+  // a registered zone, source or fixture set: the registry turns it into a
+  // tap target (city/interactions.js tapPick) and a card with a button
+  const zoned = /\.register(Zone|Source|Fixtures)\(/.test(src);
   if (panel && keyed && !clicky && !zoned) keyboardOnly.push(rel);
 }
 
@@ -132,10 +134,10 @@ for (const file of walk(path.join(ROOT, "src"))) {
    Measured 2026-08-18 after the sweep. These may only ever go DOWN. */
 const BUDGET = { label: 0, sub: 0, desc: 0 };
 const COPY_BARS = 0;        // rule 5: never again
-/* rule 6. The two left are HUD overlays with nothing to press: the swim meter
-   and a killstreak banner. Anything else appearing here is a verb or a menu
-   that a tablet cannot reach. */
-const KEYBOARD_ONLY = 2;
+/* rule 6. The one left is a HUD overlay with nothing to press (the swim
+   meter). Anything else appearing here is a verb or a menu that a tablet
+   cannot reach. */
+const KEYBOARD_ONLY = 1;
 
 const byKind = { label: 0, sub: 0, desc: 0 };
 for (const f of findings) byKind[f.kind]++;

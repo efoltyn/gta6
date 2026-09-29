@@ -1148,136 +1148,37 @@
   //      paints you with a searchlight, keeping cops fed your position. Dispatch
   //      now takes a real spin-up beat + a pushed-out launch distance (config:
   //      POLICE_HELI_SLOW_RESPONSE) before it ever reaches "orbit". -------------
-  // r128 sculpt helper — LOCAL copy of aircraft.js's taperBox (builders stay
-  // self-contained per file). Scales each vertex's X/Y by a factor of its Z
-  // (nose=+Z → nz, tail=-Z → tz) with optional roofline/keel narrowing.
-  function chopTaperBox(w, h, d, opt) {
-    opt = opt || {};
-    const nz = opt.nz != null ? opt.nz : 1, tz = opt.tz != null ? opt.tz : 1;
-    const top = opt.top != null ? opt.top : 1, bot = opt.bot != null ? opt.bot : 1;
-    const geo = new THREE.BoxGeometry(w, h, d, opt.segW || 2, opt.segH || 2, opt.segD || 6);
-    const pos = geo.attributes.position, hd = d / 2, hh = h / 2;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
-      const f = z / hd, zt = f >= 0 ? (1 + (nz - 1) * f) : (1 + (tz - 1) * -f);
-      let sx = zt, sy = zt;
-      const vy = hh > 0 ? y / hh : 0;
-      if (vy > 0) sx *= (1 + (top - 1) * vy);
-      if (vy < 0) sx *= (1 + (bot - 1) * -vy);
-      pos.setX(i, x * sx); pos.setY(i, y * sy);
-    }
-    pos.needsUpdate = true; geo.computeVertexNormals();
-    return geo;
-  }
-  // one thin tapered/drooped rotor blade rooted at the hub, extending +X
-  function chopBladeGeo(len, droop) {
-    const geo = new THREE.BoxGeometry(len, 0.06, 0.34, 6, 1, 1);
-    const pos = geo.attributes.position, hl = len / 2;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i), t = (x + hl) / len;
-      pos.setX(i, x + hl);
-      pos.setZ(i, pos.getZ(i) * (1 - 0.45 * t));
-      pos.setY(i, pos.getY(i) - (droop || 0) * t * t);
-    }
-    pos.needsUpdate = true; geo.computeVertexNormals();
-    return geo;
-  }
-  // env-mapped vehicle materials (carfx.js) with the module's Lambert fallback.
-  // The chopper spawns at RUNTIME (3★), so carfx is always loaded by then.
-  function chopMat(role, color, opts) {
-    if (CBZ.vehicleMat) { try { return CBZ.vehicleMat(role, color, opts); } catch (e) {} }
-    return CBZ.mat ? CBZ.mat(color, opts) : new THREE.MeshLambertMaterial({ color: color });
-  }
   function makeChopper() {
     const A = CBZ.city.arena; if (!A) return null;
-    const grp = new THREE.Group();
-    // BLACK-AND-WHITE UNIT LIVERY — the same palette rbDecorate() puts on the
-    // ground cruisers (white panels over a near-black hull, red/blue flashers),
-    // through the env-mapped vehicle roles so the hull sheen matches the cars.
-    const matWhite = chopMat('paint', 0xe9edf2);
-    const matNavy  = chopMat('paint', 0x161a24);
-    const matTrim  = chopMat('metal', 0x2a2e36);
-    const matGlass = chopMat('glass', 0x101a24); // was 0x10161c — cleared crashdeform's frost window by half an 8-bit step; same near-black read, real margin
-    const matBlade = chopMat('metal', 0x1c2229);
-    // sculpted white cab over a navy belly band — cruiser doors in the sky
-    const body = new THREE.Mesh(chopTaperBox(1.9, 1.25, 4.2, { nz: 0.5, tz: 0.45, top: 0.7, bot: 0.62, segD: 8 }), matWhite);
-    body.castShadow = false; grp.add(body);
-    const belly = new THREE.Mesh(chopTaperBox(1.95, 0.5, 3.4, { nz: 0.55, tz: 0.5, bot: 0.55 }), matNavy);
-    belly.position.set(0, -0.42, 0.15); grp.add(belly);
-    // GLASS bubble canopy — a real windshield (it used to share the skid metal)
-    const canopy = new THREE.Mesh(chopTaperBox(1.55, 0.85, 1.9, { nz: 0.5, tz: 0.95, top: 0.55 }), matGlass);
-    canopy.position.set(0, 0.42, 1.15); grp.add(canopy);
-    // tapered tail boom (white) with a navy cheatline + swept navy fin
-    const boom = new THREE.Mesh(chopTaperBox(0.5, 0.5, 3.0, { tz: 0.45, top: 0.8, bot: 0.8 }), matWhite);
-    boom.position.set(0, 0.3, -3.3); grp.add(boom);
-    const band = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.2, 1.6), matNavy);
-    band.position.set(0, 0.34, -2.6); grp.add(band);
-    const fin = new THREE.Mesh(chopTaperBox(0.16, 1.0, 0.7, { tz: 0.5, top: 0.55 }), matNavy);
-    fin.position.set(0, 0.72, -4.35); grp.add(fin);
-    const stab = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.1, 0.5), matWhite);
-    stab.position.set(0, 0.3, -4.05); grp.add(stab);
-    // skids: tapered rails on angled cross-brace struts into the belly
-    for (const sx of [-1, 1]) {
-      const skid = new THREE.Mesh(chopTaperBox(0.15, 0.15, 3.3, { nz: 0.45, tz: 0.45 }), matTrim);
-      skid.position.set(sx * 0.72, -1.02, 0.15); grp.add(skid);
-      for (const sz of [1.0, -0.75]) {
-        const st = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.55, 0.11), matTrim);
-        st.position.set(sx * 0.66, -0.78, sz + 0.15); st.rotation.z = sx * 0.5; grp.add(st);
-      }
-    }
-    // rotor head: engine cowl + swashplate + mast hub + two REAL tapered blades
-    // + a translucent blur disc (group still spun by updateChopper — unchanged)
-    const cowl = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.3, 1.4), matWhite);
-    cowl.position.set(0, 0.68, -0.3); grp.add(cowl);
-    const plate = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.38, 0.1, 8), matTrim);
-    plate.position.y = 0.88; grp.add(plate);
-    const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.26, 0.24, 8), matTrim);
-    hub.position.y = 1.0; grp.add(hub);
-    const bladeG = chopBladeGeo(3.9, 0.12);
-    const rotor = new THREE.Group(); rotor.position.y = 1.06;
-    rotor.add(new THREE.Mesh(bladeG, matBlade));                    // +X blade
-    const opp = new THREE.Group(); opp.rotation.y = Math.PI;
-    opp.add(new THREE.Mesh(bladeG, matBlade)); rotor.add(opp);      // -X blade
-    grp.add(rotor);
-    const disc = new THREE.Mesh(new THREE.CircleGeometry(4.0, 18),
-      new THREE.MeshBasicMaterial({ color: 0x101216, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false }));
-    disc.rotation.x = -Math.PI / 2; disc.position.y = 1.04; grp.add(disc);
-    // TAIL ROTOR on the fin's starboard side (this bird finally has one)
-    const trotor = new THREE.Group(); trotor.position.set(0.17, 0.72, -4.5);
-    const tgeo = new THREE.BoxGeometry(0.05, 1.3, 0.24);
-    const tb1 = new THREE.Mesh(tgeo, matBlade); trotor.add(tb1);
-    const tb2 = new THREE.Mesh(tgeo, matBlade); tb2.rotation.x = Math.PI / 2; trotor.add(tb2);
-    const thub = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.12, 6), matTrim);
-    thub.rotation.z = Math.PI / 2; trotor.add(thub);
-    grp.add(trotor);
-    // nav lights + strobes — beads like the cruiser lightbar (visibility-flip)
-    const beadG = new THREE.BoxGeometry(0.16, 0.16, 0.16);
-    const mkLight = (color, x, y, z) => {
-      const b = new THREE.Mesh(beadG, new THREE.MeshBasicMaterial({ color }));
-      b.position.set(x, y, z); grp.add(b); return b;
-    };
-    mkLight(0xff2a22, -0.9, -0.35, 0.4);            // port red (steady)
-    mkLight(0x18ff3a, 0.9, -0.35, 0.4);             // stbd green (steady)
-    mkLight(0xeaf4ff, 0, 1.25, -4.35);              // white fin bead (steady)
-    const flashR = mkLight(0xff2d3e, -0.2, 0.9, -0.3);   // roof strobe pair — red/blue,
-    const flashB = mkLight(0x2d6bff, 0.2, 0.9, -0.3);    // flips like the cruiser bar
-    // The tail rotor + strobes are DRIVEN state: updateChopper only spins the
-    // main rotor, so a per-render hook on the always-visible body gears the
-    // tail disc to it (5.6:1) and flips the strobe pair — no update-loop edit,
-    // and it idles for free when the chopper is off-screen or despawned.
+    // THE AIRFRAME is city/airframes.js's light twin in the police fit:
+    // white over near-black (the cruisers' palette), belly searchlight, chin
+    // camera ball, loudspeaker, real window holes you see the crew through.
+    const grp = CBZ.airframes.build("heli", { variant: "police", livery: { body: 0xe9edf2, belly: 0x161a24, accent: 0x161a24 } });
+    const rig = CBZ.airframes.rig(grp);
+    const rotor = rig.rotors[0];
+    // the roof light bar flips red/blue like the cruiser bar
+    const beadG = new THREE.BoxGeometry(0.16, 0.12, 0.16);
+    const flashR = new THREE.Mesh(beadG, new THREE.MeshBasicMaterial({ color: 0xff2d3e })); flashR.position.set(0.16, 1.0, -2.3); grp.add(flashR);
+    const flashB = new THREE.Mesh(beadG, new THREE.MeshBasicMaterial({ color: 0x2d6bff })); flashB.position.set(-0.16, 1.0, -2.3); grp.add(flashB);
+    // updateChopper spins only `rotor`; one per-render hook on the always-drawn
+    // hull gears the second bar, the tail rotor, the blur disc, the airframe's
+    // nav/strobe/beacon lights and the flashers to it.
+    let body = null;
+    grp.traverse(function (o) { if (!body && o.isMesh && o.userData.lod === "all" && o.userData.mk === "paint") body = o; });
+    let lastT = null;
+    const AFS = { rotor: false, power: 1, lights: "on", running: true };
     body.onBeforeRender = function () {
-      trotor.rotation.x = rotor.rotation.y * 5.6;
+      const now = CBZ.now || 0, dt = lastT == null ? 0 : Math.max(0, Math.min(0.1, now - lastT)); lastT = now;
+      const r = rotor.rotation.y;
+      if (rig.rotors[1]) rig.rotors[1].rotation.y = r + Math.PI / 2;
+      for (let i = 0; i < rig.trotors.length; i++) rig.trotors[i].rotation.x = r * 5.6 + i * Math.PI / 2;
+      if (rig.disc) rig.disc.material.opacity = 0.26;
+      CBZ.airframes.animate(grp, AFS, dt);
       const on = ((((CBZ.now || 0) * 3) | 0) % 2) === 0;
       flashR.visible = on; flashB.visible = !on;
     };
-    // belly SEARCHLIGHT — now hangs from a real gimbal housing + lens. The cone
-    // + pool refs and updateChopper's aim/stretch math are UNCHANGED: the cone
-    // still runs from this belly point down to whatever surface the beam lands on.
-    const gim = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.2, 0.26, 8), matTrim);
-    gim.position.set(0, -0.68, 0); grp.add(gim);
-    const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.23, 0.12, 8),
-      new THREE.MeshBasicMaterial({ color: 0xfff3c0 }));
-    lens.position.set(0, -0.8, 0); grp.add(lens);
+    // the searchlight beam hangs from the airframe's belly gimbal: the cone +
+    // pool refs and updateChopper's aim/stretch math are unchanged
     const cone = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 5.5, 1, 16, 1, true),
       new THREE.MeshBasicMaterial({ color: 0xfff3c0, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false }));
     grp.add(cone);
@@ -1353,15 +1254,15 @@
   // ============================================================
   if (CBZ.CONFIG && CBZ.CONFIG.POLICE_HELI_CREW == null) CBZ.CONFIG.POLICE_HELI_CREW = true;
   function heliCrewOn() { return !CBZ.CONFIG || CBZ.CONFIG.POLICE_HELI_CREW !== false; }
-  // Seat anchors in metres, aircraft-local, +Z is the nose. makeChopper's hull
-  // is authored at scale 1 so these are already world metres: cabin floor sits
-  // 0.66 below the origin, cushion 0.36 above the floor, which puts a 1.82 m
-  // officer's head at y≈+0.69 — inside the glass canopy (top +0.845), which is
-  // the whole point: you can see them through the windscreen.
+  // Seat anchors in metres, aircraft-local, +Z is the nose — the airframe's
+  // own crew seats (city/airframes.js heli: cabin floor 0.50 below the origin,
+  // cushion 0.42 above it). The pilot flies from the right-hand seat, the TFO
+  // sits left with the optics, the gunner on the cabin bench by the sliding
+  // door (port), facing out of it. Their heads sit inside the real glazing.
   const CHOP_SEATS = [
-    { job: "Pilot",                    x: -0.42, y: -0.30, z: 1.30, yaw: 0,           cushionH: 0.36, floorBelow: 0.36 },
-    { job: "Tactical Flight Officer",  x:  0.42, y: -0.30, z: 1.30, yaw: 0,           cushionH: 0.36, floorBelow: 0.36 },
-    { job: "Door Gunner",              x:  0.55, y: -0.30, z: -0.35, yaw: Math.PI / 2, cushionH: 0.36, floorBelow: 0.36 },
+    { job: "Pilot",                    x: -0.42, y: -0.08, z: 1.55, yaw: 0,           cushionH: 0.42, floorBelow: 0.42 },
+    { job: "Tactical Flight Officer",  x:  0.42, y: -0.08, z: 1.55, yaw: 0,           cushionH: 0.42, floorBelow: 0.42 },
+    { job: "Door Gunner",              x:  0.50, y: -0.08, z: -0.75, yaw: Math.PI / 2, cushionH: 0.42, floorBelow: 0.42 },
   ];
   function chopCrewNode() {
     if (!chopper || !chopper.group) return null;
@@ -2410,7 +2311,7 @@
     const c = CBZ.cityMakeCar(x, z, heading, r.vertical, CRUISER_MODEL, 0.28);
     if (!c) return null;
     // dress it as a black-and-white (guarded — rbDecorate no-ops on a box rig)
-    try { rbDecorate(c); } catch (e) { /* box rig / headless — skip livery, still drives */ }
+    try { if (CBZ.cityWhenCarBuilt) CBZ.cityWhenCarBuilt(c, rbDecorate); else rbDecorate(c); } catch (e) { /* box rig / headless — skip livery, still drives */ }
     // routine patrol = lightbar DARK (not responding). The flash is reserved for
     // an active roadblock/response, so a cruising unit reads as on-the-beat, not
     // mid-call. (rbUpdate only flashes RB.cars, never our patrol pool, so these
@@ -2576,7 +2477,7 @@
     const heading = r.vertical ? (dir > 0 ? 0 : Math.PI) : (dir > 0 ? Math.PI / 2 : -Math.PI / 2);
     const van = CBZ.cityMakeCar(x, z, heading, r.vertical, SWAT_VAN_MODEL, 0.2);
     if (!van) return;
-    try { dressSwatVan(van); } catch (e) { /* livery is cosmetic — never lose the van */ }
+    try { if (CBZ.cityWhenCarBuilt) CBZ.cityWhenCarBuilt(van, dressSwatVan); else dressSwatVan(van); } catch (e) { /* livery is cosmetic — never lose the van */ }
     van.road = r; van.lane = lane; van.dirSign = dir;
     van.laneIdx = lanesPerDirP(r) - 1; van.vertical = !!r.vertical;
     van.baseV = Math.max(13, ((TRP().cruise && TRP().cruise[1]) || 12) + 2);
@@ -2993,7 +2894,7 @@
       let c = null;
       while (RB.carPool.length && !c) { const r = RB.carPool.pop(); if (rbCarUsable(r)) c = r; else rbDispose(r.group); }
       if (c) { CBZ.cityCars.push(c); A.root.add(c.group); }
-      else { c = CBZ.cityMakeCar ? CBZ.cityMakeCar(cx, cz, heading, uz !== 0, CRUISER_MODEL, 0) : null; if (c) rbDecorate(c); }
+      else { c = CBZ.cityMakeCar ? CBZ.cityMakeCar(cx, cz, heading, uz !== 0, CRUISER_MODEL, 0) : null; if (c) { if (CBZ.cityWhenCarBuilt) CBZ.cityWhenCarBuilt(c, rbDecorate); else rbDecorate(c); } }
       if (!c) { rbAbort(); return false; }
       c.pos.set(cx, 0, cz); c.heading = heading;
       c.group.position.set(cx, 0, cz); c.group.rotation.set(0, heading, 0);

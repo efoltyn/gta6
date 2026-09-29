@@ -742,9 +742,9 @@
       // lead-in off the taxiway centreline, both directions, then straight to the stop
       leadArcs(PA, st.lx, tz, 1, R, TL, Y);
       PA.line([[st.lx, tz + R], [st.lx, st.stopZ]], TL, Y);
-      // nose-wheel stop bar + a short type bar behind it
-      PA.rect(st.lx, st.stopZ, 5, 0.3, Y);
-      PA.rect(st.lx, st.stopZ - 1.5, 2.5, 0.3, Y);
+      // a nose-wheel stop bar per type (a MARS stand: the short bar for the
+      // narrowbody, the long one for the widebody)
+      for (const sp of st.stops || [{ z: st.stopZ }]) PA.rect(st.lx, sp.z, sp.type === "narrowbody" ? 3 : 5, 0.3, Y);
       // stand number, read from the taxiway, on its black box
       PA.rect(st.lx + 5, tz + R + 6, 4.2, 4.8, C.BLACK);
       PA.text(st.num, st.lx + 5, tz + R + 6, 3.2, Math.PI, Y);
@@ -1765,7 +1765,7 @@
       white.push(put(new THREE.ConeGeometry(r + 0.15, r * 0.2, 36, 1), x, h + r * 0.1, z));
       conc.push(put(new THREE.CylinderGeometry(r + 0.5, r + 0.6, 0.4, 36), x, 0.2, z));
       // stiffener rings
-      for (let y = 2.4; y < h; y += 2.4) steel.push(put(new THREE.TorusGeometry(r + 0.02, 0.05, 4, 36), x, y, z, 0, Math.PI / 2));
+      for (let y = 2.4; y < h; y += 2.4) steel.push(put(new THREE.TorusGeometry(r + 0.02, 0.05, 3, 28), x, y, z, 0, Math.PI / 2));
       // spiral stair: stringer + treads up one quarter of the shell
       const turns = 0.32, steps = Math.ceil(h / 0.22);
       let prev = null;
@@ -1778,15 +1778,18 @@
         tr.translate(px, y, pz);
         steel.push(tr);
         const ox = x + Math.cos(a) * (r + 1.0), oz = z + Math.sin(a) * (r + 1.0);
-        if (prev) {
-          steel.push(member(prev[0], prev[1] + 1.0, prev[2], ox, y + 1.0, oz, 0.04));
-          steel.push(member(prev[3], prev[1] - 0.1, prev[4], ox, y - 0.1, oz, 0.05, 0.2));
+        // handrail + stringer as chords every third step (a helix in segments)
+        if (i % 3 === 0 || i === steps) {
+          if (prev) {
+            steel.push(member(prev[0], prev[1] + 1.0, prev[2], ox, y + 1.0, oz, 0.04));
+            steel.push(member(prev[0], prev[1] - 0.1, prev[2], ox, y - 0.1, oz, 0.05, 0.2));
+          }
+          steel.push(put(new THREE.BoxGeometry(0.04, 1.0, 0.04), ox, y + 0.5, oz));
+          prev = [ox, y, oz];
         }
-        if (i % 4 === 0) steel.push(put(new THREE.BoxGeometry(0.04, 1.0, 0.04), ox, y + 0.5, oz));
-        prev = [ox, y, oz, ox, oz];
       }
       // roof handrail
-      steel.push(put(new THREE.TorusGeometry(r - 0.2, 0.03, 4, 36), x, h + 1.0, z, 0, Math.PI / 2));
+      steel.push(put(new THREE.TorusGeometry(r - 0.2, 0.03, 3, 28), x, h + 1.0, z, 0, Math.PI / 2));
       for (let k = 0; k < 18; k++) {
         const a = (k / 18) * Math.PI * 2;
         steel.push(put(new THREE.BoxGeometry(0.04, 1.0, 0.04), x + Math.cos(a) * (r - 0.2), h + 0.5, z + Math.sin(a) * (r - 0.2)));
@@ -2415,7 +2418,7 @@
       }
       ctx.plat(cx, (z0 + zm) / 2 - 0.15, W - 0.6, zm - z0 - 0.3, MY + 0.06);
       // soffit lights under the gate floor
-      for (let x = x0 + 4; x < x1 - 2; x += 6) for (let z = z0 + 3; z < zm - 1; z += 6) lit.push(put(new THREE.BoxGeometry(1.0, 0.04, 1.0), x, MY - 0.46, z));
+      for (let x = x0 + 4; x < x1 - 2; x += 6) for (let z = z0 + 3; z < zm - 1; z += 6) lit.push(put(new THREE.PlaneGeometry(1.0, 1.0), x, MY - 0.45, z, 0, Math.PI / 2));
       // columns carrying the gate floor
       for (let x = x0 + 9; x < x1 - 4; x += 18) for (const z of [z0 + (zm - z0) * 0.5]) {
         steel.push(put(new THREE.CylinderGeometry(0.3, 0.3, MY - 0.44, 14), x, (MY - 0.44) / 2, z));
@@ -2449,7 +2452,7 @@
       }
       // downlights on a 4.5 m grid across the whole soffit
       for (let x = x0 - 1; x < x1 + 2; x += 4.5) for (let z = rz0 + 1.5; z < rz1 - 0.5; z += 4.5) {
-        lit.push(put(new THREE.CylinderGeometry(0.22, 0.22, 0.04, 10), x, ySof(z) - 0.03, z));
+        lit.push(put(new THREE.PlaneGeometry(0.42, 0.42), x, ySof(z) - 0.03, z, 0, Math.PI / 2));   // facing down
       }
       // rooflights: a strip of glazing along the crown
       const crown = (rz0 + rz1) / 2;
@@ -2789,23 +2792,31 @@
        noSpawn [...] (world rects, optional), road {x, z} (a link out)
        paint(PA, L) extra local paint
      ============================================================== */
-  const AL = function () { return (CBZ.airportKit && CBZ.airportKit.scale) || (+CBZ.CONFIG.AIRLINER_SCALE || 1.45); };
-  const DIM = function () {
-    const d = (CBZ.airportKit && CBZ.airportKit.dims && CBZ.airportKit.dims.airliner) || { length: 37.57, span: 35.8, height: 11.76, fuselage: 3.95 };
-    const s = AL();
-    return { length: d.length * s, span: d.span * s, fuselage: d.fuselage * s, noseTip: 18.1 * s, tail: 19.5 * s, noseGear: 10 * s, doorX: 10.5 * s, sill: 2.5 * s };
+  /* THE AEROPLANES, measured. city/airframes.js draws real types at real
+     dimensions (no scale dial). These are its hulls in the airport frame
+     (nose +X): nose tip and tail cone from the origin, the L1 door on the
+     port skin (-Z) and its sill, the nose gear. tools/airfield-check.mjs
+     measures the live airframes against this table. A stand is laid out for
+     the WIDEBODY (a MARS stand: any airliner fits, each type has its own
+     nose-gear stop bar), so an arriving flight of either type can take it. */
+  const TYPES = {
+    narrowbody: { length: 37.57, span: 35.80, fuselage: 3.95, noseTip: 18.78, tail: 19.04, noseGear: 13.7, doorX: 12.94, doorLat: 1.97, sill: 3.40 },
+    widebody: { length: 62.81, span: 60.12, fuselage: 5.77, noseTip: 31.41, tail: 32.54, noseGear: 24.4, doorX: 22.0, doorLat: 2.90, sill: 4.72 },
   };
+  P.AIRCRAFT = TYPES;
+  function DIM(type) { return TYPES[type] || TYPES.widebody; }
   P.aircraftEnvelope = DIM;
 
   // where a nose-in stand puts things, from the terminal face (local z)
   P.standPlan = function (termZ0, taxiZ) {
-    const E = DIM();
-    const standZ = termZ0 - 11 - E.noseTip;            // 11 m from the nose to the glass
+    const W = TYPES.widebody, N = TYPES.narrowbody;
+    const standZ = termZ0 - 11 - W.noseTip;            // a widebody's nose 11 m from the glass
     return {
-      standZ: standZ, noseTipZ: standZ + E.noseTip, tailZ: standZ - E.tail,
-      stopZ: standZ + E.noseGear,
-      tailClear: (standZ - E.tail) - (taxiZ + E.span / 2),     // parked tail to a taxiing wingtip
-      doorZ: standZ + E.doorX, doorLat: E.fuselage / 2,
+      standZ: standZ, noseTipZ: standZ + W.noseTip, tailZ: standZ - W.tail,
+      stops: [{ type: "narrowbody", z: standZ + N.noseGear }, { type: "widebody", z: standZ + W.noseGear }],
+      stopZ: standZ + W.noseGear,
+      tailClear: (standZ - W.tail) - (taxiZ + W.span / 2),     // parked tail to a taxiing wingtip
+      pitch: W.span + 7.5,                                       // code E stand width
     };
   };
 
@@ -2814,7 +2825,7 @@
   CBZ.buildAirfield = function (city, spec) {
     if (!city || !spec || !city.root || !CBZ.registerAirport) return null;
     const root = city.root;
-    const E = DIM();
+    const E = DIM("widebody"), NB = DIM("narrowbody");
     const RW = (spec.runway && spec.runway.w) || REAL.runwayW;
     const H0 = ((spec.runway && spec.runway.len) || 900) / 2;
     const TW = REAL.taxiW;
@@ -2827,14 +2838,14 @@
     const stands = (spec.stands || []).map(function (s, i) {
       return {
         id: s.id, num: s.num || String(i + 1), lx: s.lx, lz: SP.standZ, bridge: !!s.bridge && two,
-        stopZ: SP.stopZ, headZ: T.z0 - 1.5, erlZ: SP.tailZ - 3,
+        stopZ: SP.stopZ, stops: SP.stops, headZ: T.z0 - 1.5, erlZ: SP.tailZ - 3,
       };
     });
     // bridge rotundas: a bridge per contact stand, on the gate floor
     // (the rotunda hangs on the facade, so it is kept 4 m inside the gables)
-    if (two) for (const s of stands) if (s.bridge) s.bridge = { doorX: Math.max(T.x0 + 4, Math.min(T.x1 - 4, s.lx + E.fuselage / 2 + 14)), num: s.num };
+    if (two) for (const s of stands) if (s.bridge) s.bridge = { doorX: Math.max(T.x0 + 4, Math.min(T.x1 - 4, s.lx + NB.doorLat + 14)), num: s.num };
     T.bridges = stands.filter(function (s) { return s.bridge; }).map(function (s) { return s.bridge; });
-    if (!two && !T.gateDoors) T.gateDoors = stands.map(function (s) { return s.lx + 12; });
+    if (!two && !T.gateDoors) T.gateDoors = stands.map(function (s) { return s.lx + 8; });
 
     // ---- the extent + world bounds
     const X = spec.extent || { x0: -H0 - 80, x1: H0 + 80, z0: -RW / 2 - 70, z1: (spec.kerbZ || T.z1 + 8) + 60 };
@@ -3163,29 +3174,48 @@
     const K = CBZ.airportKit;
     const liveries = [0x2d5fb0, 0xb33636, 0x1f7a4d, 0xc78a1f, 0x7a4ea8, 0x2b6f7a];
     ap.parked = [];
-    const parkedSet = new Set(spec.parked || []);
+    // spec.parked: ["ID"] or ["ID:widebody"]
+    const parkedType = {};
+    for (const pk of spec.parked || []) { const q = String(pk).split(":"); parkedType[q[0]] = q[1] || "narrowbody"; }
     const standDress = { cones: [], chocks: [], gpus: [] };
+    // the L1 door of the aeroplane on a stand, in field-local metres, read off
+    // its own cabin record (any type, any position the airline left it in)
+    function doorOf(grp) {
+      const cab = grp && grp.userData && grp.userData.cabin;
+      if (!cab || cab.doorX == null) return null;
+      const th = grp.rotation.y, c = Math.cos(th), sn = Math.sin(th);
+      const wx = grp.position.x + cab.doorX * c + cab.doorZ * sn, wz = grp.position.z - cab.doorX * sn + cab.doorZ * c;
+      const l = ap.toLocal(wx, wz);
+      return { lx: l.lx, lz: l.lz, y: (grp.position.y || 0) + (cab.floorTop || 3.4) };
+    }
+    ap.doorOf = doorOf;
     for (let i = 0; i < ap.gates.length; i++) {
       const g = ap.gates[i], st = stands[i];
       st.gate = g;
       g.stand = st;
       g.nose = "in";
       g.pushZ = L.taxiZ;                                 // where a pushback ends (local z)
-      // the L1 door, where it will be when an aeroplane is on this stand
-      g.doorL = { lx: st.lx + E.fuselage / 2, lz: SP.doorZ, y: E.sill };
-      if (K && K.airliner && K.boardable && parkedSet.has(g.id)) {
+      // where a narrowbody's L1 door stands on this stand (retracted bridges
+      // park against it; a docking bridge reads the real door)
+      g.doorL = { lx: st.lx + NB.doorLat, lz: SP.standZ + NB.doorX, y: NB.sill };
+      const type = parkedType[g.id];
+      if (K && K.airliner && K.boardable && type) {
         try {
-          const grp = K.airliner(g.x, g.z, g.worldHeading, liveries[(i + ap.code.charCodeAt(0)) % liveries.length]);
-          K.boardable(grp, g.x, g.z, g.worldHeading, 30, 22, "Airliner");
+          const livery = liveries[(i + ap.code.charCodeAt(0)) % liveries.length];
+          const grp = (type === "widebody" && K.widebody) ? K.widebody(g.x, g.z, g.worldHeading, livery) : K.airliner(g.x, g.z, g.worldHeading, livery);
+          const env = DIM(type === "widebody" ? "widebody" : "narrowbody");
+          K.boardable(grp, g.x, g.z, g.worldHeading, env.span * 0.6, env.length * 0.6, type === "widebody" ? "Widebody Airliner" : "Airliner");
           g.occupant = "parked";
+          g.parkedGroup = grp;
           ap.parked.push(grp);
-          const cab = grp.userData && grp.userData.cabin;
-          if (cab && cab.doorX != null) g.doorL = { lx: st.lx - cab.doorZ + 0.35, lz: SP.standZ + cab.doorX, y: cab.floorTop };
+          const d = doorOf(grp);
+          if (d) g.doorL = d;
+          // chocks at the nose gear, cones off the wingtips and at the tail, a GPU at the nose
+          const gz = SP.standZ + env.noseGear;
+          standDress.chocks.push([st.lx, gz + 0.9, 0], [st.lx, gz - 0.9, 0]);
+          standDress.cones.push([st.lx - env.span / 2 - 1.2, SP.standZ - 3], [st.lx + env.span / 2 + 1.2, SP.standZ - 3], [st.lx, SP.standZ - env.tail - 3]);
+          standDress.gpus.push([st.lx - 6, SP.standZ + env.noseTip - 3, Math.PI / 2]);
         } catch (e) { try { console.error("[airfield] parked airliner", ap.id, e); } catch (e2) {} }
-        // chocks at the nose gear, cones off the wingtips and at the tail, a GPU at the nose
-        standDress.chocks.push([st.lx, SP.stopZ + 0.9, 0], [st.lx, SP.stopZ - 0.9, 0]);
-        standDress.cones.push([st.lx - E.span / 2 - 1.2, SP.standZ - 2], [st.lx + E.span / 2 + 1.2, SP.standZ - 2], [st.lx, SP.tailZ - 3]);
-        standDress.gpus.push([st.lx - 6, SP.noseTipZ - 3, Math.PI / 2]);
       }
     }
     P.cones(F, standDress.cones);
@@ -3203,12 +3233,12 @@
         // head-of-stand road that runs under the bridges
         ax: st.bridge.doorX, az: T.z0 - 2.4, ya: tplan.mezzY + 0.06,
       };
-      b.build = function (dock) {
+      b.build = function (dock, door) {
         if (b.group) { F.remove(b.group); b.group.traverse(function (o) { if (o.geometry) o.geometry.dispose(); }); b.group = null; }
         for (const c of b.cols) { const k = CBZ.colliders.indexOf(c); if (k >= 0) CBZ.colliders.splice(k, 1); }
         for (const p of b.plats) { const k = CBZ.platforms ? CBZ.platforms.indexOf(p) : -1; if (k >= 0) CBZ.platforms.splice(k, 1); }
         b.cols = []; b.plats = [];
-        const dl = b.gate.doorL;
+        const dl = door || b.gate.doorL;
         // retracted: the cab parked 5 m short of where a door would be
         const pull = dock ? 0.35 : 5.5;
         const o = {
@@ -3225,7 +3255,7 @@
         b.docked = dock;
         if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
       };
-      b.build(!!(b.gate.occupant));
+      b.build(!!b.gate.occupant, b.gate.parkedGroup ? doorOf(b.gate.parkedGroup) : null);
       ap.bridges.push(b);
     }
     // the dock watcher: an aeroplane standing still on the stand, nose in
@@ -3239,17 +3269,16 @@
         for (const b of ap.bridges) {
           const occ = b.gate.occupant;
           let here = false;
-          const grp = occ && occ.group ? occ.group : (occ === "parked" ? true : null);
-          if (grp === true) here = true;
-          else if (grp && grp.parent && (grp.position.y || 0) < 0.3) {
+          const grp = occ && occ.group ? occ.group : (occ === "parked" ? b.gate.parkedGroup : null);
+          if (grp && grp.parent && (grp.position.y || 0) < 0.3) {
             const d = Math.hypot(grp.position.x - b.gate.x, grp.position.z - b.gate.z);
             let dh = grp.rotation.y - b.gate.worldHeading;
             dh = Math.atan2(Math.sin(dh), Math.cos(dh));
             here = d < 1.5 && Math.abs(dh) < 0.1;
           }
-          if (here !== !!b.docked) b.build(here);
+          if (here !== !!b.docked) b.build(here, here ? doorOf(grp) : null);
           // where a passenger stepping off the aeroplane lands: the bridge cab
-          if (grp && grp !== true) grp.userData.bridgeDock = here ? { x: toW(b.jb.cab.x, b.jb.cab.z).x, z: toW(b.jb.cab.x, b.jb.cab.z).z, y: b.jb.cab.y } : null;
+          if (grp) grp.userData.bridgeDock = here ? { x: toW(b.jb.cab.x, b.jb.cab.z).x, z: toW(b.jb.cab.x, b.jb.cab.z).z, y: b.jb.cab.y } : null;
         }
       };
       CBZ.onUpdate(41.7, watch);

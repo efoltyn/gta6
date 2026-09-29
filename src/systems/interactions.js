@@ -9,7 +9,9 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
-  const { player, el, keycard, door } = CBZ;
+  // CBZ.door (world/door.js) is read at call time: the prison is built
+  // lazily (core/prisonlazy.js), long after this file parses.
+  const { player, el } = CBZ;
   const g = CBZ.game;
 
   const fadeEl = document.getElementById("fade");
@@ -1299,6 +1301,7 @@
     // ---- door ----
     // the unit's sally port: 4 m of its inner door, or at its out door's
     // reader on the yard face (world/door.js publishes both faces)
+    const door = CBZ.door;
     const ddx = player.pos.x, ddz = player.pos.z + 8;
     const oz = door.outer ? player.pos.z - door.outer.z : 99;
     const nearDoor = ddx * ddx + ddz * ddz < 16 || (door.outer && ddx * ddx + oz * oz < 2.6 * 2.6);

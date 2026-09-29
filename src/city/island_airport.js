@@ -15,9 +15,8 @@
 
    CABIN LIFE (2026-07-27, owner's two bugs): the airliner cabin is a ROOM
    with ordinary game NPCs in it, not a diorama. Seats are authored in REAL
-   metres (0.79 m pitch, 0.44 m width, 0.43 m cushion — see SEAT/R() below)
-   instead of in AIRLINER_SCALE units, so the furniture fits the 1.8 m people
-   rather than the 1.45x hull; the seat's plane-local facing is re-asserted
+   metres (0.79 m pitch, 0.46 m width, 0.43 m cushion) in a real-size hull
+   (city/airframes.js); the seat's plane-local facing is re-asserted
    every frame by cabinPassengerHold() instead of being a one-shot write ~40
    world-space yaw writers could stomp; the gate lounge is real benches with
    real propuse SEAT anchors; and every person this island places carries the
@@ -32,8 +31,10 @@
    aircraft share materials across the fleet. Deterministic seeded rng so
    the field is identical every run.
 
-   FOOTPRINT: rect centre (-40,-120), half (330,160)
-     → minX=-370 maxX=290 minZ=-280 maxZ=40   (region 'airport')
+   THE FIELD ITSELF (ground, paint, lights, terminal, bridges, hangars, fuel,
+   fire station, radar, ILS, approach lights) is drawn by city/airport_kit.js
+   from the spec in the landmass builder below.
+   FOOTPRINT: x[-900,290] z[-280,40] + the world-layout dial (region 'Halloran Field')
    CAUSEWAY: rect minX=-7 maxX=7 minZ=-566 maxZ=-280  (region 'airport-causeway')
 ============================================================ */
 (function () {
@@ -43,104 +44,33 @@
   const THREE = window.THREE;
   const mat = CBZ.mat;
   const cmat = CBZ.cmat || CBZ.mat;
-  // One unit is one metre. The airliner follows the published A320 envelope;
-  // business-jet values describe the actual low-poly model below. Keeping the
-  // dimensions on the group gives boarding, collision, flight and audit code a
-  // single source of truth instead of five unrelated footprint literals.
-  const AIRCRAFT_DIMS = Object.freeze({
-    airliner: Object.freeze({ family: "A320-class", length: 37.57, span: 35.80, height: 11.76, fuselage: 3.95 }),
-    privatejet: Object.freeze({ family: "business-jet", length: 21.50, span: 13.50, height: 6.35, fuselage: 2.00 }),
-  });
-  CBZ.CITY_AIRCRAFT_DIMS = AIRCRAFT_DIMS;
+  // THE AEROPLANES ARE city/airframes.js's (real types at real dimensions:
+  // lofted hulls, window holes, hinged surfaces, retracting gear, hollow
+  // cabins). This file parks them, boards them and fills them with people;
+  // it does not draw them. One metre is one metre — there is no scale dial.
+  const AF = CBZ.airframes;
+  const AIRCRAFT_DIMS = CBZ.CITY_AIRCRAFT_DIMS;
 
-  // AIRLINER up-scale — ONE factor every derived airliner coordinate follows
-  // (owner: "make the plane a bit bigger"). It bakes into the airliner geometry
-  // (via a scale-wrapping part kit), the cabin/cockpit walkable boxes, the seat
-  // anchors, the boarding door-arc waypoints (stashed on cab.scale) and the
-  // external-facing dims copy on the group — so flight collision, hijack reach
-  // and targeting all track without touching the frozen AIRCRAFT_DIMS envelope.
-  // CBZ.CONFIG.AIRLINER_SCALE = 1.0 reverts to the original size.
-  const AL_SC = (function () {
-    const v = CBZ.CONFIG && +CBZ.CONFIG.AIRLINER_SCALE;
-    return v > 0 ? v : 1;
-  })();
-
-  // ---- CABIN LIFE V2 flags ---------------------------------------------------
-  // config.js parses first and applies ?cfg_X=… overrides before this file runs,
-  // so a `== null` default here is still URL-flippable (aim_dossier.js does the
-  // same). They belong in config.js proper; that file is not this agent's to
-  // edit, so they self-default at the point of use.
   CBZ.CONFIG = CBZ.CONFIG || {};
   // CABIN_SEATED_V2 — the per-frame seat HOLD. A passenger's facing used to be a
   // ONE-SHOT write (npclife.attach → group.rotation.set) into a field ~40 other
   // systems write in WORLD space; on → the airport re-asserts each occupied
   // seat's plane-LOCAL transform every frame, after those systems have run.
   if (CBZ.CONFIG.CABIN_SEATED_V2 == null) CBZ.CONFIG.CABIN_SEATED_V2 = true;
-  // CABIN_REAL_SEATS — cabin furniture authored in REAL metres (31" pitch, 17.5"
-  // width, 0.43 m cushion) instead of in AIRLINER_SCALE units. Off → the legacy
-  // 1.4-unit-pitch bench rows that grew 45% with the hull while the people did not.
-  if (CBZ.CONFIG.CABIN_REAL_SEATS == null) CBZ.CONFIG.CABIN_REAL_SEATS = true;
   // AIRPORT_STAFF_ROLES — every person this island places carries the job they
   // actually do, and the flight deck/cabin crew get theirs stamped on the body
   // npclife cast into the seat.
   if (CBZ.CONFIG.AIRPORT_STAFF_ROLES == null) CBZ.CONFIG.AIRPORT_STAFF_ROLES = true;
   // TERMINAL_GATE_SEATS — the concourse gate benches are SITTABLE: each seat
   // registers a propuse SEAT anchor with a declared cushion, and a handful of
-  // travellers are seated on them. Off → the benches are still drawn at real
-  // furniture dimensions (that part is not a behaviour change and stays), but
-  // nothing registers and nobody sits — the pre-change state where the gate
-  // lounge was scenery. One line, no second code path.
+  // travellers are seated on them.
   if (CBZ.CONFIG.TERMINAL_GATE_SEATS == null) CBZ.CONFIG.TERMINAL_GATE_SEATS = true;
 
-  // ONE REAL METRE, expressed in the units the airliner part-kit expects.
-  //
-  // WHY THIS EXISTS: `K.put()` inside buildAirliner multiplies every coordinate
-  // AND scales every geometry by AL_SC (CBZ.CONFIG.AIRLINER_SCALE, 1.45 today).
-  // That is exactly right for the HULL — the owner's dial is meant to grow the
-  // aeroplane. It is exactly WRONG for anything a 1.8 m human sits in: at 1.45
-  // the old seat rows were a 2.03 m pitch with a 0.65 m cushion, i.e. bar stools
-  // two metres apart, which is what made the cabin read as a scale model with
-  // dolls in it. R(m) converts a published real-world dimension into the
-  // authoring unit K.put wants, so the seats stay human-sized at any AIRLINER_SCALE
-  // and the surplus tube width simply becomes a wider aisle.
-  // CABIN_REAL_SEATS=false is the one-line revert: R() becomes the identity, so
-  // every cabin dimension below is read as a HULL unit again and the furniture
-  // grows with AIRLINER_SCALE exactly as it used to. (It restores the old
-  // BEHAVIOUR — furniture tied to the hull dial — not the old bench layout,
-  // which is gone on purpose.)
-  function R(m) { return (CBZ.CONFIG.CABIN_REAL_SEATS === false) ? m : m / AL_SC; }
-  // …and the WORLD-METRE size R(m) actually produced. The rig's chair solve
-  // (entities/character.js) reads cushion heights in world metres, so a seat
-  // must DECLARE Rm(h), not h: with the flag on that is h exactly, with it off
-  // it is h·AIRLINER_SCALE — which keeps the declaration honest in both modes
-  // instead of quietly lying to the pose in one of them.
-  function Rm(m) { return R(m) * AL_SC; }
-
-  // Published economy-cabin geometry (all metres). Seat pitch and width are the
-  // 31"/17.5" narrowbody standard; the cushion/back/armrest heights are the
-  // furniture-metric numbers propuse.js's SEAT_H table is built from.
-  const SEAT = Object.freeze({
-    pitch: 0.79,        // front-to-back between rows (31 in)
-    width: 0.44,        // per-seat width across the cabin (17.5 in)
-    cushionY: 0.43,     // cushion TOP above the cabin floor
-    cushionT: 0.10,     // cushion slab thickness
-    cushionD: 0.48,     // cushion depth, fore-aft
-    backH: 0.55,        // seat back height above the cushion
-    backT: 0.09,
-    armY: 0.18,         // armrest height above the cushion
-    aisleMin: 0.48,     // narrowbody centre aisle
-    abreast: 3,         // 3-3
-    recline: 0.14,      // radians the back leans aft
-  });
-  // The cushion height the seat is DRAWN at and the body is POSED against —
-  // ONE number, resolved at BUILD time from propuse.js's SEAT_H table (the
-  // kit's source of truth for "how high is a seat of this kind"). Resolved
-  // late on purpose: propuse.js parses AFTER this file, so a parse-time read
-  // would always miss and silently fork the number in two. Degrade-safe: no
-  // propuse, no problem — SEAT.cushionY is the same published value.
+  // The cushion height the seat is POSED against — propuse.js's SEAT_H table
+  // (resolved late: propuse parses after this file).
   function seatCushion() {
     const h = CBZ.propSeatHeight ? +CBZ.propSeatHeight("aircraft-seat") : 0;
-    return h > 0 ? h : SEAT.cushionY;
+    return h > 0 ? h : 0.43;
   }
 
   // Real passenger hookup. Aircraft geometry only owns seats and cabin bounds;
@@ -242,10 +172,10 @@
       // point down local +X while the shared flight model treats local +Z as
       // forward, hence the -90deg visual yaw offset.
       civilian: true,
-      flightKind: (name === "Airliner") ? "airliner" : "privatejet",
+      flightKind: grp.userData.flightKind || ((name === "Airliner") ? "airliner" : "privatejet"),
       modelYawOffset: -Math.PI / 2,
       groundOffset: 0,
-      collider: grp.userData.worldCollider || null,
+      collider: null,
       aircraftDims: dims,
       footW: dims ? dims.length : (footW || 18),
       footL: dims ? dims.span : (footL || 18),
@@ -268,7 +198,7 @@
         id: "airport-airliner-" + passengerCabins.length,
         provider: "airport", kind: "airliner", group: grp, rec,
         active: true, state: "parked", floorTop: cab.floorTop,
-        bounds: { minX: -12.2 * AL_SC, maxX: 11.8 * AL_SC, minZ: -1.42 * AL_SC, maxZ: 1.42 * AL_SC },
+        bounds: { minX: cab.walk.aft, maxX: cab.walk.wall - 0.2, minZ: -cab.walk.halfW, maxZ: cab.walk.halfW },
         door: { x: cab.doorX, z: cab.doorZ },
         seats: cab.seats,
         passengerSeats: cab.seats.filter(function (seat) { return !!seat.reservedForNpc; }),
@@ -307,15 +237,15 @@
   function civilBodyBounds(rec) {
     const dims = rec && (rec.aircraftDims || (rec.group && rec.group.userData && rec.group.userData.aircraftDims));
     if (!dims) return null;
-    const liner = rec.flightKind === "airliner";
+    // Landing gear is not a span-wide target: this brackets the body barrel
+    // the airframe itself publishes (belly to crown).
+    const cab = rec.group && rec.group.userData && rec.group.userData.cabin;
+    const by = cab && cab.bodyY;
     return {
       hx: Math.max(1, dims.length * 0.5),
       hz: Math.max(1.1, (dims.fuselage + 0.45) * 0.5),
-      // Landing gear is not a span-wide target. This brackets the actual body
-      // barrel (airliner CY=3.5/FH=3.95; private jet CY=2.1/FH=2.2). The
-      // airliner band follows AL_SC so the up-scaled hull is fully bracketed.
-      minY: liner ? 1.45 * AL_SC : 0.9,
-      maxY: liner ? 5.55 * AL_SC : 3.25,
+      minY: by ? by[0] - 0.05 : 0.9,
+      maxY: by ? by[1] + 0.05 : 3.25,
     };
   }
 
@@ -439,6 +369,8 @@
     group.userData.charred = true;
     group.traverse(function (o) {
       if (!o.material) return;
+      // a prop/rotor blur disc is air, not skin: a wreck has none
+      if (o.userData && o.userData.mk === "blur") { o.visible = false; return; }
       function charOne(src) {
         const m = src && src.clone ? src.clone() : src;
         if (m && m.color) m.color.multiplyScalar(0.22);
@@ -1108,13 +1040,12 @@
     const cab = rec.group.userData.cabin;
     const th = rec.group.rotation.y;
     const ca = Math.abs(Math.cos(th)), sa = Math.abs(Math.sin(th));
-    // cabin local half-extents; with the real cockpit door the standable deck
-    // runs on through the bulkhead doorway to the cockpit front (local
-    // x -12.8..14.6 instead of -12.6..12.2 — the wall clamp elsewhere is what
-    // actually shapes the rooms, the platform just has to underlie them)
-    const cock = !!cab.cockpitLeaf;
-    const hx = (cock ? 13.7 : 12.4) * AL_SC, hz = 1.6 * AL_SC;
-    const ctr = cabinWorld(rec, (cock ? 0.9 : -0.2) * AL_SC, 0);
+    // the standable deck runs from the aft galley through the bulkhead doorway
+    // to the flight-deck front (the wall clamp elsewhere shapes the rooms; the
+    // platform just has to underlie them)
+    const W = cab.walk;
+    const hx = (W.front - W.aft) / 2 + 0.3, hz = W.halfW + 0.3;
+    const ctr = cabinWorld(rec, (W.front + W.aft) / 2, 0);
     const ex = ca * hx + sa * hz, ez = sa * hx + ca * hz;
     const p = into || {};
     p.minX = ctr.x - ex; p.maxX = ctr.x + ex;
@@ -1180,7 +1111,7 @@
     cabinState.platform = cabinSolvePlatform(rec, null);
     if (CBZ.platforms) CBZ.platforms.push(cabinState.platform);
     // step in at the door row
-    const inPt = cabinWorld(rec, 9.4 * AL_SC, -0.6 * AL_SC);
+    const inPt = cabinWorld(rec, cab.entry.x, cab.entry.z);
     P.pos.set(inPt.x, cabinState.platform.top, inPt.z);
     P.vy = 0; P.grounded = true;
     if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.copy(P.pos);
@@ -1204,7 +1135,7 @@
     const P = CBZ.player;
     if (CBZ.propStand && P && P._propSeat) { try { CBZ.propStand(P); } catch (e) {} }
     if (P && rec && rec.group) {
-      const out = cabinWorld(rec, rec.group.userData.cabin.doorX, -4.4 * AL_SC);
+      const out = cabinWorld(rec, rec.group.userData.cabin.exit.x, rec.group.userData.cabin.exit.z);
       const hullY = rec.group.position.y || 0;
       // DOCKED AT A JET BRIDGE (city/airport_kit.js stamps the cab's deck on
       // the hull while it is docked): you step off into the bridge, level with
@@ -1258,17 +1189,18 @@
     const want = insideThis && !rec.taken && !rec.destroyed && rec.group && rec.group.parent;
     if (!want) { if (cab._cockpitColOn) cockpitDoorDetach(cab); return; }
     if (!cab._cockpitCol) {
-      // doorway box in cabin-local space (AL_SC-scaled): thin across the
-      // bulkhead at x≈12.1, spanning the leaf width in z, deck→header in y.
+      // doorway box in cabin-local space: thin across the bulkhead, spanning
+      // the leaf width in z, deck→header in y.
       // Baked to a world AABB via the parked-heading transform (stable for the
       // whole aboard session — the plane never moves while you're standing in it).
-      const S = AL_SC, bx = 12.1 * S, thk = 0.13 * S, hz = 0.5 * S;
+      const bx = cab.walk.wall, thk = 0.13, hz = cab.walk.doorHalfW + 0.08;
       const cs = [cabinWorld(rec, bx - thk, -hz), cabinWorld(rec, bx + thk, -hz),
                   cabinWorld(rec, bx - thk, hz), cabinWorld(rec, bx + thk, hz)];
       let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
       for (const c of cs) { if (c.x < minX) minX = c.x; if (c.x > maxX) maxX = c.x; if (c.z < minZ) minZ = c.z; if (c.z > maxZ) maxZ = c.z; }
-      cab._cockpitCol = { minX, maxX, minZ, maxZ, y0: 2.5 * S, y1: 4.4 * S };
-      cab._cockpitColYSolid = [2.5 * S, 4.4 * S];
+      const y0 = rec.group.position.y + cab.floorTop, y1 = y0 + 1.95;
+      cab._cockpitCol = { minX, maxX, minZ, maxZ, y0: y0, y1: y1 };
+      cab._cockpitColYSolid = [y0, y1];
     }
     const col = cab._cockpitCol;
     if (!cab._cockpitColOn) {
@@ -1767,7 +1699,7 @@
         trackPhysicalDoorSound(rig, rig.t, rt, rigPlayerCause);
         if (Math.abs(rig.t - rt) > 0.001) {
           rig.t += (rt - rig.t) * Math.min(1, dt * 2.8);
-          rig.panel.rotation.x = rig.closedRot + (rig.openRot - rig.closedRot) * rig.t;
+          rig.pose(rig.t);
         }
       }
       if (!cab || !cab.panel) continue;
@@ -1803,7 +1735,7 @@
       trackPhysicalDoorSound(cab, cab.doorT, tgt, cabinPlayerCause);
       if (Math.abs(cab.doorT - tgt) > 0.001) {
         cab.doorT += (tgt - cab.doorT) * Math.min(1, dt * 3.2);
-        cab.panel.position.x = cab.doorX - 1.18 * AL_SC * cab.doorT;   // slide aft along the hull
+        cab.poseDoor(cab.doorT);            // plug door: out, then forward on its arm
       }
       // cockpit pocket door: eases open as the boarded player nears the
       // bulkhead (~2u out), holds while they stand anywhere on the flight
@@ -1814,13 +1746,13 @@
         let wantCock = false;
         if (insideThis) {
           const lp = cabinLocal(rec, P.pos.x, P.pos.z);
-          wantCock = lp.x > 10.1 * AL_SC && lp.x < 14.5 * AL_SC && Math.abs(lp.z) < 1.6 * AL_SC;
+          wantCock = lp.x > cab.walk.wall - 2.0 && lp.x < cab.walk.front + 0.5 && Math.abs(lp.z) < cab.walk.halfW + 0.2;
         }
         const tc = wantCock ? 1 : 0;
         trackPhysicalDoorSound(cab.cockpitLeaf, cab.cockpitT, tc, insideThis);
         if (Math.abs(cab.cockpitT - tc) > 0.001) {
           cab.cockpitT += (tc - cab.cockpitT) * Math.min(1, dt * 5.5);
-          cab.cockpitLeaf.position.z = 0.98 * AL_SC * cab.cockpitT;   // pocket into the starboard bulkhead
+          cab.poseCockpitDoor(cab.cockpitT);  // hinged leaf swings into the flight deck
         }
         // REAL cockpit-door collider (owner: a closed cockpit door must
         // physically stop you, like every other real door). Present ONLY while
@@ -1855,18 +1787,20 @@
         // band (x 11.9..12.3) you can only cross through the door aperture
         // (|z| ≤ 0.34) while the leaf is mostly open — the walls are real.
         const cabU = rec.group.userData.cabin;
-        const cock = cabU && cabU.cockpitLeaf;
-        let lx = Math.max(-12.2 * AL_SC, Math.min((cock ? 13.4 : 11.8) * AL_SC, l.x));
+        const W = cabU.walk;
+        const cock = !!cabU.cockpitLeaf;
+        const w0 = W.wall - W.wallT - 0.1, w1 = W.wall + W.wallT + 0.1;   // the bulkhead band
+        let lx = Math.max(W.aft, Math.min(cock ? W.front : w0, l.x));
         let lz;
-        if (!cock || lx < 11.9 * AL_SC) {
-          lz = Math.max(-1.42 * AL_SC, Math.min(1.42 * AL_SC, l.z));           // cabin aisle box
-        } else if (lx > 12.3 * AL_SC) {
-          lz = Math.max(-1.28 * AL_SC, Math.min(1.28 * AL_SC, l.z));           // cockpit room (narrower shell)
-        } else if (Math.abs(l.z) <= 0.34 * AL_SC && cabU.cockpitT > 0.5) {
-          lz = l.z;                                            // clean pass through the open leaf
+        if (!cock || lx < w0) {
+          lz = Math.max(-W.halfW, Math.min(W.halfW, l.z));                 // cabin aisle box
+        } else if (lx > w1) {
+          lz = Math.max(-W.deckHalfW, Math.min(W.deckHalfW, l.z));         // flight deck (narrower)
+        } else if (Math.abs(l.z) <= W.doorHalfW - 0.06 && cabU.cockpitT > 0.5) {
+          lz = l.z;                                                        // clean pass through the open leaf
         } else {
-          lx = l.x < 12.1 * AL_SC ? 11.9 * AL_SC : 12.3 * AL_SC;               // solid bulkhead / shut leaf
-          lz = Math.max(-1.42 * AL_SC, Math.min(1.42 * AL_SC, l.z));
+          lx = l.x < W.wall ? w0 : w1;                                     // solid bulkhead / shut leaf
+          lz = Math.max(-W.halfW, Math.min(W.halfW, l.z));
         }
         if (lx !== l.x || lz !== l.z) {
           const w = cabinWorld(rec, lx, lz);
@@ -1935,13 +1869,6 @@
       CBZ.colliders.push(c);
       return c;
     }
-    function aircraftSolid(group, dims) {
-      // No broad-phase rectangle around parked aircraft. It was necessarily
-      // larger than the tapered visual hull, blocking the player before they
-      // reached the door and catching bullets in mid-air. Boarding uses the
-      // oriented footprint and gunfire now raycasts the actual meshes.
-      return null;
-    }
     // a flat painted quad lying on the ground (collected for merging)
     function quadGeo(x, z, w, d, y) {
       const g = new THREE.PlaneGeometry(w, d);
@@ -1989,9 +1916,9 @@
     const ADX = _WOFF.dx, ADZ = _WOFF.dz;
     const RWY_X0 = -850 + ADX, RWY_X1 = 240 + ADX, RWY_LEN = RWY_X1 - RWY_X0;
     const RWY_CX = (RWY_X0 + RWY_X1) / 2;
-    const RWY_Z = -203 + ADZ, RWY_W = 45;
+    const RWY_Z = -220 + ADZ, RWY_W = 45;
     const TAX_Z = RWY_Z + 95;
-    const TERM_X0 = -115 + ADX, TERM_X1 = 35 + ADX;
+    const TERM_X0 = -115 + ADX, TERM_X1 = 60 + ADX;
     const TERM_Z0 = -9 + ADZ, TERM_FRONT = 37 + ADZ;          // airside glass / landside doors
     const TERM_W = TERM_X1 - TERM_X0, TERM_D = TERM_FRONT - TERM_Z0, TERM_Z = (TERM_Z0 + TERM_FRONT) / 2;
     const APRON_X = -40 + ADX, APRON_Z = -60 + ADZ;
@@ -2007,8 +1934,8 @@
     const LX = function (x) { return x - RWY_CX; }, LZ = function (z) { return z - RWY_Z; };
     // three contact stands, 60 m apart, under the terminal; two remote stands
     // on the east ramp (the airline needs free stands to arrive at)
-    const CONTACT_XS = [-100 + ADX, -40 + ADX, 20 + ADX];
-    const REMOTE_XS = [110 + ADX, 175 + ADX];
+    const CONTACT_XS = [-95 + ADX, -27 + ADX, 41 + ADX];
+    const REMOTE_XS = [125 + ADX, 193 + ADX];
 
 
     // =====================================================================
@@ -2281,792 +2208,113 @@
     })();
 
     // =====================================================================
-    //  7) AIRCRAFT — airliner + private-jet builders. These are the EXACT
-    //     groups the player flies (the civil steal path in playeraircraft.js
-    //     attaches the flight state to the parked group), so the airframes
-    //     are sculpted properly: position-attribute tapered noses/tailcones
-    //     (the aircraft.js taperBox pattern adapted to these +X-nosed
-    //     models), real two-tone liveries, nacelles with intake rings,
-    //     bogie gear and nav lights. CONTRACT KEPT: group root at ground
-    //     level (wheels touch y=0, groundOffset 0), nose down local +X,
-    //     same footprint/centreline heights, worldCollider via solid().
-    //     Draw discipline: every material's parts merge into ONE child mesh
-    //     (~12 draws per plane — fewer than the old loose-box builders).
+    //  7) AIRCRAFT — the parked fleet. The airframe (hull, cabin furniture,
+    //     doors, gear, lights) is CBZ.airframes'; this turns it into a ROOM
+    //     the game can use: seat anchors npclife casts real people into, the
+    //     crew posts, the boarding door and the walkable boxes. CONTRACT:
+    //     group root at ground level (wheels on y = 0), nose down local +X,
+    //     port = local -Z (the L1 door side).
     // =====================================================================
-    // ---- local sculpt helpers (aircraft.js:44 taperBox pattern, r128) ----
-    // fuseGeo: box whose Y/Z cross-section lerps from `tail` scale (-X end)
-    // to `nose` scale (+X end); noseY/tailY shift those ends vertically
-    // (quadratic — droops a cockpit, upsweeps a tailcone).
-    function fuseGeo(len, h, d, o) {
-      o = o || {};
-      const sN = o.nose != null ? o.nose : 1, sT = o.tail != null ? o.tail : 1;
-      const yN = o.noseY || 0, yT = o.tailY || 0;
-      const geo = new THREE.BoxGeometry(len, h, d, o.seg || 5, 2, 2);
-      const pos = geo.attributes.position, hl = len / 2;
-      for (let i = 0; i < pos.count; i++) {
-        const t = (pos.getX(i) + hl) / len;              // 0 tail end → 1 nose end
-        const s = sT + (sN - sT) * t;
-        pos.setY(i, pos.getY(i) * s + yN * t * t + yT * (1 - t) * (1 - t));
-        pos.setZ(i, pos.getZ(i) * s);
-      }
-      pos.needsUpdate = true; geo.computeVertexNormals();
-      return geo;
+    function seatHash(PX, PZ, x, z, salt) {
+      return CBZ.hash01 ? CBZ.hash01(PX + x * 7.13, PZ + z * 11.71, salt) : 0.5;
     }
-    // wingGeo: ONE symmetric wing pair — chord tapers root→tip, tips sweep
-    // aft (-X) and rise (dihedral). Also used for tailplanes.
-    function wingGeo(span, rootC, tipC, th, sweep, dihedral) {
-      const geo = new THREE.BoxGeometry(rootC, th, span, 2, 1, 6);
-      const pos = geo.attributes.position, hs = span / 2;
-      for (let i = 0; i < pos.count; i++) {
-        const t = Math.abs(pos.getZ(i)) / hs;            // 0 root → 1 tip
-        pos.setX(i, pos.getX(i) * (1 + (tipC / rootC - 1) * t) - sweep * t);
-        pos.setY(i, pos.getY(i) + (dihedral || 0) * t);
-      }
-      pos.needsUpdate = true; geo.computeVertexNormals();
-      return geo;
-    }
-    // finGeo: vertical stabiliser — chord tapers with height, sweeps aft.
-    function finGeo(h, rootC, tipC, th, sweep) {
-      const geo = new THREE.BoxGeometry(rootC, h, th, 2, 6, 1);
-      const pos = geo.attributes.position, hh = h / 2;
-      for (let i = 0; i < pos.count; i++) {
-        const t = (pos.getY(i) + hh) / h;                // 0 base → 1 tip
-        pos.setX(i, pos.getX(i) * (1 + (tipC / rootC - 1) * t) - sweep * t);
-      }
-      pos.needsUpdate = true; geo.computeVertexNormals();
-      return geo;
-    }
-    // fleet materials — carfx vehicle roles when available (metal sheen and
-    // reflective glass beat flat Lambert on an airframe), pooled mat()
-    // fallback. carfx's shared roles are _shared-flagged against disposal;
-    // paint roles are per-colour and live as long as the airport root.
-    function vmat(role, color, opts) {
-      if (CBZ.vehicleMat) { try { return CBZ.vehicleMat(role, color, opts); } catch (e) {} }
-      return mat(color != null ? color : C_METAL, opts);
-    }
-    const FLEET = {
-      white:  vmat("paint", 0xf2f4f6, { roughness: 0.5, metalness: 0.3 }),
-      navy:   vmat("paint", 0x1b2438, { roughness: 0.55 }),
-      glass:  vmat("glass", 0x101a24), // was 0x10161c — that cleared crashdeform's frost window (b-r>0.045) by 0.002, half an 8-bit step; this clears by 0.033 with the same near-black read
-      metal:  vmat("metal", 0xc8ccd2),
-      dark:   vmat("plastic", 0x14181d),
-      tire:   vmat("tire", 0x1a1d21),
-      navR:   mat(0xff3524, { emissive: 0xff3524, ei: 0.95 }),
-      navG:   mat(0x2fd45c, { emissive: 0x2fd45c, ei: 0.95 }),
-      navW:   mat(0xf4f8ff, { emissive: 0xf4f8ff, ei: 0.9 }),
-      beacon: mat(0xff2a2a, { emissive: 0xff2a2a, ei: 1.0 }),
-      accents: {},
-    };
-    function accentMat(c) {
-      const k = "a" + c;
-      if (!FLEET.accents[k]) FLEET.accents[k] = vmat("paint", c, { roughness: 0.45 });
-      return FLEET.accents[k];
-    }
-    // per-plane part collector: geometries bucket by material and each
-    // bucket merges into ONE child mesh (loose meshes without BGU). The
-    // children carry no userData/colliders, so the batcher/freezer treat
-    // the parent group exactly as before (collider-ref = live group).
-    function partKit() {
-      const byMat = new Map();
-      return {
-        put: function (m, geo, x, y, z, rx, ry, rz) {
-          if (rz) geo.rotateZ(rz);
-          if (rx) geo.rotateX(rx);
-          if (ry) geo.rotateY(ry);
-          geo.translate(x, y, z);
-          let arr = byMat.get(m);
-          if (!arr) { arr = []; byMat.set(m, arr); }
-          arr.push(geo);
-        },
-        bake: function (g) {
-          byMat.forEach(function (geos, m) {
-            if (geos.length > 1 && BGU && BGU.mergeBufferGeometries) {
-              const mesh = new THREE.Mesh(BGU.mergeBufferGeometries(geos), m);
-              mesh.castShadow = true; mesh.receiveShadow = true; g.add(mesh);
-            } else {
-              for (const gm of geos) {
-                const mesh = new THREE.Mesh(gm, m);
-                mesh.castShadow = true; mesh.receiveShadow = true; g.add(mesh);
-              }
-            }
-          });
-        },
-      };
-    }
-    // tiny static emissive marker (nav lights / beacons)
-    function navBox(g, m, x, y, z, s) {
-      const b = new THREE.Mesh(new THREE.BoxGeometry(s || 0.26, s || 0.26, s || 0.26), m);
-      b.position.set(x, y, z); g.add(b);
-      return b;
-    }
-
-    // =====================================================================
-    //  CABIN INTERIOR (owner: "planes should, like elevators, have a door
-    //  and a real place inside, and real passengers sitting"). Every
-    //  airliner gets a real cabin baked into the same merged part-kit:
-    //  BackSide liner shell (visible only from inside), a raised deck over the
-    //  wing carry-through, ~36 rows of REAL 3-3 economy seating at a 0.79 m
-    //  pitch with an overwing exit row, LIVE-NPC seat anchors (occupancy from a
-    //  position hash, never the shared build stream), overhead bins at human
-    //  reach height, an aft pressure wall and a cockpit bulkhead with door + a
-    //  two-seat flight deck behind it. The
-    //  boarding door is a separate SLIDING panel mesh (animated by the
-    //  boarding system below — tagged dynamic so the freezer spares it).
-    //  Costs a handful of merged draws per plane; zero per-frame work when
-    //  nobody is near.
-    // =====================================================================
-    const CABIN_FLOOR = 2.5;             // deck top (clears the wing box at 2.42)
-    const CABIN_DOOR_X = 10.5;           // door local x (forward, port side)
-    const linerMat = new THREE.MeshLambertMaterial({ color: 0xe8eaee, side: THREE.BackSide });
-    const cabinFloorMat = mat(0x33383f);
-    const cabinLightMat = mat(0xfff2d8, { emissive: 0xffe9b8, ei: 0.75 });
-
-    function buildCabin(K, g, acc) {
-      // liner shell + deck + aisle carpet — the MERGE of two truths:
-      //  • REAL WINDOWS (vehicles pass): the liner leaves the hull's open
-      //    window band at y 3.99..4.41, so sightlines pass hull pane →
-      //    cavity → cabin in BOTH directions (no fake dark strips).
-      //  • REAL DOORS (cockpit pass): OPEN-ENDED planes, outward normals
-      //    (BackSide renders inward) — no +x face (the cockpit doorway
-      //    lives there) and the -z wall splits around the true boarding
-      //    aperture carved in the hull.
-      const realDoor = !!CBZ.CONFIG.COCKPIT_REAL_DOOR;
-      const glassV2 = realDoor && !(CBZ.CONFIG && CBZ.CONFIG.AIRLINER_COCKPIT_GLASS_V2 === false);
-      if (realDoor) {
-        K.put(linerMat, new THREE.PlaneGeometry(3.2, 2.9), -12.8, 3.9, 0, 0, -Math.PI / 2);   // aft end cap
-        K.put(linerMat, new THREE.PlaneGeometry(24.9, 3.2), -0.35, 2.45, 0, Math.PI / 2, 0);  // floor shell
-        K.put(linerMat, new THREE.PlaneGeometry(24.9, 3.2), -0.35, 5.35, 0, -Math.PI / 2, 0); // ceiling shell
-        // +z side: belly + crown bands leave the window band open (3.99..4.41)
-        K.put(linerMat, new THREE.PlaneGeometry(24.9, 1.54), -0.35, 3.22, 1.6);               // belly band
-        K.put(linerMat, new THREE.PlaneGeometry(24.9, 0.94), -0.35, 4.88, 1.6);               // crown band
-        K.put(linerMat, new THREE.PlaneGeometry(2.35, 0.44), -11.625, 4.2, 1.6);              // aft band cap
-        K.put(linerMat, new THREE.PlaneGeometry(0.65, 0.44), 11.775, 4.2, 1.6);               // fwd band cap
-        // -z side: same bands, split around the boarding-door aperture
-        // (x 9.95..11.05, y 2.5..4.4) so the open door is an opening.
-        K.put(linerMat, new THREE.PlaneGeometry(22.75, 1.54), -1.425, 3.22, -1.6, 0, Math.PI); // belly aft of door
-        K.put(linerMat, new THREE.PlaneGeometry(1.05, 1.54), 11.575, 3.22, -1.6, 0, Math.PI);  // belly fwd of door
-        K.put(linerMat, new THREE.PlaneGeometry(24.9, 0.94), -0.35, 4.88, -1.6, 0, Math.PI);   // crown band (above door top 4.4)
-        K.put(linerMat, new THREE.PlaneGeometry(2.35, 0.44), -11.625, 4.2, -1.6, 0, Math.PI);  // aft band cap
-        K.put(linerMat, new THREE.PlaneGeometry(0.65, 0.44), 11.775, 4.2, -1.6, 0, Math.PI);   // fwd band cap
-      } else {
-        // legacy liner (real-windows split, boxes): belly/crown + band caps
-        K.put(linerMat, new THREE.BoxGeometry(25.2, 1.54, 3.2), -0.2, 3.22, 0);    // liner belly (2.45..3.99)
-        K.put(linerMat, new THREE.BoxGeometry(25.2, 0.94, 3.2), -0.2, 4.88, 0);    // liner crown (4.41..5.35)
-        K.put(linerMat, new THREE.BoxGeometry(2.35, 0.44, 3.2), -11.625, 4.2, 0);  // aft band cap
-        K.put(linerMat, new THREE.BoxGeometry(0.95, 0.44, 3.2), 11.925, 4.2, 0);   // fwd band cap
-      }
-      K.put(cabinFloorMat, new THREE.BoxGeometry(25.2, 0.14, 3.1), -0.2, CABIN_FLOOR - 0.07, 0);
-      K.put(FLEET.navy, new THREE.BoxGeometry(23.4, 0.03, 0.8), -0.2, CABIN_FLOOR + 0.02, 0);
-      // aft pressure wall + cockpit bulkhead
-      K.put(cabinFloorMat, new THREE.BoxGeometry(0.14, 2.9, 3.1), -12.7, 3.9, 0);
-      let cockpitLeaf = null;
-      if (realDoor) {
-        // REAL bulkhead doorway (0.9 wide, deck to 4.4) + a sliding pocket
-        // LEAF that tucks into the starboard bulkhead segment when open. The
-        // leaf is a live dynamic mesh (batcher/freezer spare it), eased open
-        // by the cabin updater below exactly like the boarding panel. Widened
-        // to z ±1.62 so the segments seal against the liner walls at ±1.6.
-        K.put(cabinFloorMat, new THREE.BoxGeometry(0.14, 2.9, 1.17), 12.1, 3.9, -1.035);
-        K.put(cabinFloorMat, new THREE.BoxGeometry(0.14, 2.9, 1.17), 12.1, 3.9, 1.035);
-        K.put(cabinFloorMat, new THREE.BoxGeometry(0.14, 0.95, 0.94), 12.1, 4.875, 0);
-        cockpitLeaf = new THREE.Mesh(new THREE.BoxGeometry(0.09, 1.95, 0.98), FLEET.dark);
-        if (AL_SC !== 1) cockpitLeaf.geometry.scale(AL_SC, AL_SC, AL_SC);   // same leaf, up-scaled with the hull
-        cockpitLeaf.position.set(12.1 * AL_SC, 3.425 * AL_SC, 0);
-        cockpitLeaf.userData.dynamic = true;
-        g.add(cockpitLeaf);
-        // COCKPIT ROOM behind the doorway — its own smaller BackSide shell,
-        // open toward the bulkhead so the sight-line runs room-to-room both
-        // ways. Sized (y 2.45..4.8, z ±1.5, front wall x 14.45) to stay well
-        // inside the tapering nose hull; the exterior windshield glass band
-        // pokes through the top front and reads as the windshield from
-        // inside. Deck-height floor + a short ceiling light strip.
-        if (glassV2) {
-          // cockpit FRONT: drop the windscreen height — keep only a low
-          // glareshield/dash panel, so from the pilot seats the view runs
-          // forward out the glass windscreen band (bidirectional see-through).
-          //
-          // THE HEIGHT IS SOLVED, NOT PICKED. Captain's eye sits at model y
-          // 3.585, x 13.218; this wall is at x 14.45, i.e. 1.232 ahead of him.
-          // At the old y 3.0 the panel's top edge was 3.55 — thirty-five
-          // MILLIMETRES below his eye — which is 1.6 degrees of down-vision and
-          // is why the owner's screenshot has no forward view at all. The
-          // certification floor (FAR/CS 25.773) is ~15 degrees below the
-          // horizon, so the top must sit at most 1.232·tan(15°) = 0.330 below
-          // the eye: y_top <= 3.255, hence a 1.1-tall panel centred at 2.70.
-          // Measured after: 15.2 degrees. Root cause of the original number is
-          // that AIRLINER_SCALE (1.45) grew the room, the furniture and the
-          // seat anchors — but a seated human's eye height is a human
-          // constant, so the pilot ended up below his own console.
-          K.put(linerMat, new THREE.PlaneGeometry(3.0, 1.1), 14.45, 2.70, 0, 0, Math.PI / 2);
-        } else {
-          K.put(linerMat, new THREE.PlaneGeometry(3.0, 2.35), 14.45, 3.625, 0, 0, Math.PI / 2);
-        }
-        K.put(linerMat, new THREE.PlaneGeometry(2.35, 3.0), 13.275, 4.8, 0, -Math.PI / 2, 0);
-        if (glassV2) {
-          // cockpit SIDES: split each wall into belly + crown leaving the SAME
-          // window band (y 3.99..4.41) open as the cabin, so the flight deck and
-          // the seated pilot read through the side quarter-windows from outside.
-          for (const csn of [1, -1]) {
-            const ry = csn > 0 ? 0 : Math.PI;
-            K.put(linerMat, new THREE.PlaneGeometry(2.35, 1.54), 13.275, 3.22, csn * 1.5, 0, ry);   // belly band
-            K.put(linerMat, new THREE.PlaneGeometry(2.35, 0.39), 13.275, 4.605, csn * 1.5, 0, ry);  // crown band
-          }
-        } else {
-          K.put(linerMat, new THREE.PlaneGeometry(2.35, 2.35), 13.275, 3.625, 1.5);
-          K.put(linerMat, new THREE.PlaneGeometry(2.35, 2.35), 13.275, 3.625, -1.5, 0, Math.PI);
-        }
-        K.put(cabinFloorMat, new THREE.BoxGeometry(2.5, 0.14, 3.0), 13.3, CABIN_FLOOR - 0.07, 0);
-        K.put(cabinLightMat, new THREE.BoxGeometry(1.0, 0.05, 0.24), 12.8, 4.77, 0);
-      } else {
-        // legacy: solid bulkhead with a painted dark cockpit door
-        K.put(cabinFloorMat, new THREE.BoxGeometry(0.14, 2.9, 3.1), 12.1, 3.9, 0);
-        K.put(FLEET.dark, new THREE.BoxGeometry(0.08, 1.78, 0.8), 12.0, 3.42, 0);
-      }
-      // ceiling light strips (interior fake window strips removed — the real
-      // hull panes + open liner band replace them)
-      for (const sgn of [-1, 1]) {
-        K.put(cabinLightMat, new THREE.BoxGeometry(22, 0.05, 0.28), -0.5, 5.24, sgn * 0.5);
-      }
-      // ================================================================
-      //  THE CABIN — REAL SEATING (CABIN_REAL_SEATS)
-      //
-      //  OWNER: "PLANE PASSENGERS SIT SIDEWAYS NOT LIKE NPCS JUST SITTING. SO
-      //  MANY THINGS ARE LIKE DIORAMA ABOUT PLANES AND NOT LIKE JUST A FEATURE,
-      //  A THING BUILD THAT OUR GAME NPCS CAN INTERACT WITH."
-      //
-      //  MEASURED, not guessed. Two separate defects produced that screenshot:
-      //
-      //  (1) FACING was a ONE-SHOT WRITE. npclife.attach() writes the seat yaw
-      //      into `group.rotation` once, at attach time, and syncAttached()
-      //      re-asserts speed/state/sitting every frame but NEVER the transform.
-      //      A cabin passenger stays a full member of CBZ.cityPeds, and 41 files
-      //      in this repo iterate cityPeds and write `group.rotation.y` with no
-      //      `_npcAttached` guard (peds.js is the ONLY file that guards). Those
-      //      writes are WORLD-space bearings (Math.atan2(target.x - ped.pos.x,
-      //      …) — and ped.pos IS world space for an attached actor) landing on a
-      //      group whose parent is the airliner, so the body ends up at
-      //      worldBearing − planeHeading: pointing at a shop across the map,
-      //      rotated by the parked heading. aigoals.js's face() and social.js's
-      //      couple/friend vignettes (which fire on anyone within 30 m of the
-      //      player, i.e. exactly when you are standing in the cabin) are the two
-      //      that reach a seated tourist. The cure is the per-frame hold below
-      //      (cabinPassengerHold, CABIN_SEATED_V2) — facing becomes a TRUTH the
-      //      airport re-asserts after those systems run, not a value they can win.
-      //
-      //  (2) SCALE. K.put multiplies every coordinate and scales every geometry
-      //      by AIRLINER_SCALE (1.45). The hull is MEANT to grow; the humans are
-      //      not, and nobody had re-derived the furniture. The old rows were a
-      //      1.4-unit pitch = 2.03 m between rows, a 0.65 m cushion and 0.81 m
-      //      between neighbours — bar stools two metres apart. That is the
-      //      diorama: correct-looking geometry at the wrong scale for the only
-      //      thing in the room with a real size, the person. Every dimension
-      //      below is now the published economy number passed through R().
-      //
-      //  What we author is only what is genuinely new: the seat SHAPE and where
-      //  the anchors go. Bodies, brains, damage, death and the kill feed come
-      //  from the ordinary ped path (npclife casts real CBZ.cityPeds into these
-      //  anchors), and the pose comes from character.js's declared-cushion chair
-      //  solve — the same one propuse.js hands a bed or a deck chair.
-      // ================================================================
-      // cockpit behind the bulkhead: console block + two pilot seats, both at
-      // human scale (a flight-deck seat is a chair, not a sofa).
-      K.put(FLEET.dark, new THREE.BoxGeometry(R(0.72), R(0.62), R(1.75)), 14.2, CABIN_FLOOR + R(0.52), 0);
-      const PIL_Z = R(0.55);                    // half the side-by-side seat spacing
-      for (const sgn of [-1, 1]) {
-        K.put(FLEET.navy, new THREE.BoxGeometry(R(0.50), R(SEAT.cushionT), R(0.50)),
-          13.13, CABIN_FLOOR + R(0.45 - SEAT.cushionT / 2), sgn * PIL_Z);              // cushion
-        K.put(FLEET.navy, new THREE.BoxGeometry(R(0.10), R(0.60), R(0.50)),
-          13.13 - R(0.29), CABIN_FLOOR + R(0.75), sgn * PIL_Z, 0, 0, SEAT.recline);   // back
-      }
-      const seats = [];
-      let seatId = 0;
-      // Occupancy is a POSITION HASH, never a draw on the shared build stream.
-      // The private-jet club-four already does this ("order-safe for the airport
-      // build") and it is strictly better than the rng() draws this loop used to
-      // consume: adding or removing a row can no longer shift every later
-      // airport decision, so the seat map is stable under edits AND identical
-      // per seed across clients (determinism law).
+    // the cabin record every consumer reads (boarding, npclife, cockpit, doors)
+    function cabinRecord(g, spec, opts) {
       const PX = g.position.x, PZ = g.position.z;
-      function seatHash(x, z, salt) {
-        return CBZ.hash01 ? CBZ.hash01(PX + x * 7.13, PZ + z * 11.71, salt) : 0.5;
-      }
-      // COCKPIT CREW SEATS — real seat records the shared NPC life system can
-      // claim. The captain's chair (port/left, -z) is reserved so a live pilot is
-      // cast there (seat.role "pilot" → npclife's aircraftPilot profile,
-      // uniformed via the job-cast wardrobe); the first officer's chair stays
-      // free for the player to take. `job` is the truth about what they DO — the
-      // hold below stamps it onto whichever body gets cast here, and level.js's
-      // cityTitle() turns it into the overhead "Lv.N Pilot" pill with no string
-      // hardcoded anywhere near the HUD.
-      // cockpit.js reads these anchors for the pilot EYE point, so the cushion-top
-      // convention (anchor y == cushion top) must not drift.
-      if (realDoor) {
+      const CUSH = seatCushion();
+      const seats = [];
+      // COCKPIT CREW SEATS — the captain (port) and first officer. Both are
+      // crewed; the player takes a chair by DISPLACING its occupant
+      // (CBZ.cityVacateFlightDeck). cockpit.js reads these anchors for the
+      // pilot EYE point, so the anchor stays ON the cushion top.
+      for (const p of spec.pilots) {
         seats.push({
-          id: "seat-captain", x: 13.13 * AL_SC, y: (CABIN_FLOOR + R(0.45)) * AL_SC, z: -PIL_Z * AL_SC,
-          heading: Math.PI / 2, kind: "cockpit-seat", role: "pilot", job: "pilot", cockpit: true,
-          reservedForNpc: true, occupant: null,
-          cushionH: Rm(0.45), floorBelow: Rm(0.45),   // world metres above the deck (see Rm)
-        });
-        // TWO PILOTS PER AIRCRAFT (owner, 2026-07-27). This chair used to carry
-        // `reservedForNpc: false` with a note that it stayed free for the
-        // player — but an airliner with one pilot aboard is wrong, and the
-        // player takes a seat by DISPLACING its occupant now
-        // (CBZ.cityVacateFlightDeck), exactly as he does the captain's. So the
-        // first officer is crewed like every other flight deck.
-        seats.push({
-          id: "seat-firstofficer", x: 13.13 * AL_SC, y: (CABIN_FLOOR + R(0.45)) * AL_SC, z: PIL_Z * AL_SC,
-          heading: Math.PI / 2, kind: "cockpit-seat", role: "pilot", job: "co-pilot", cockpit: true,
-          reservedForNpc: true, occupant: null,
-          cushionH: Rm(0.45), floorBelow: Rm(0.45),
+          id: p.id, x: p.x, y: p.y, z: p.z, heading: p.heading, kind: "cockpit-seat", role: "pilot", job: p.job,
+          cockpit: true, reservedForNpc: opts.crew !== false, occupant: null,
+          cushionH: spec.pilotCushion, floorBelow: spec.pilotCushion,
         });
       }
-      // ---- the economy cabin: 3-3, 0.79 m pitch, 0.44 m seats ----------------
-      // Block centre is pinned OUTBOARD against the liner wall (|z| = 1.6 in
-      // authoring units) so the window seat sits by the window at any
-      // AIRLINER_SCALE and every surplus centimetre of the up-scaled tube goes to
-      // the aisle instead of to dead space behind the last seat. At AL_SC = 1
-      // that lands the real 0.48 m narrowbody aisle exactly; at 1.45 it opens to
-      // ~1.9 m, which is the honest consequence of the owner's hull dial and
-      // reads as a widebody aisle rather than as oversized furniture.
-      const HALF_W = R(SEAT.width * SEAT.abreast / 2);            // half a 3-abreast block
-      const BLOCK_Z = Math.max(HALF_W + R(SEAT.aisleMin / 2), 1.6 - HALF_W - R(0.03));
-      const X_AFT = -11.8, X_FWD = 8.8;                           // seating zone (clear of both bulkheads)
-      const PITCH = R(SEAT.pitch);
-      const CUSH = seatCushion();                                 // metres above the deck (propuse's table)
-      const CUSH_Y = CABIN_FLOOR + R(CUSH - SEAT.cushionT / 2);
-      const ANCHOR_Y = CABIN_FLOOR + R(CUSH);
-      // Overwing EXIT ROW: two rows omitted mid-cabin. Real, free (it is a skip,
-      // not geometry) and it breaks the corridor read of an unbroken seat run.
-      const EXIT_X0 = -1.0, EXIT_X1 = -1.0 + PITCH * 2;
-      // Boarding load: reserved seats fill FRONT-TO-BACK under a hard cap, which
-      // is both what a boarding aircraft looks like and what keeps the rig count
-      // sane — the old map reserved ~90% of every row (≈54 live rigs per plane,
-      // 216 across the gate line). The rest of the cabin stays genuinely empty so
-      // the player has somewhere to sit.
-      const NPC_CAP = 26;
-      let reservedN = 0;
-      const rowsX = [];
-      for (let rx = X_FWD; rx >= X_AFT - 1e-6; rx -= PITCH) {
-        if (rx < EXIT_X1 && rx > EXIT_X0) continue;
-        rowsX.push(rx);
-      }
-      for (let r = 0; r < rowsX.length; r++) {
-        const rx = rowsX[r];
-        // forward rows board first: 0.62 at the bulkhead decaying to 0.10 aft
-        const fill = 0.62 - 0.52 * (r / Math.max(1, rowsX.length - 1));
-        for (const side of [-1, 1]) {
-          const zc = side * BLOCK_Z;
-          // CUSHION — one slab per 3-abreast block; the armrests below are what
-          // divide it into seats, exactly as a real bench-built economy block is
-          // built. Depth is the real 0.48 m squab.
-          K.put(FLEET.navy, new THREE.BoxGeometry(R(SEAT.cushionD), R(SEAT.cushionT), R(SEAT.width * SEAT.abreast)),
-            rx, CUSH_Y, zc);
-          // RECLINED BACK. `-X` is aft, and K.put's rz rotates the geometry
-          // BEFORE translating it, so a positive angle carries the top of the
-          // back aft. (The old code assigned rotation.z to K.put's return value,
-          // which is undefined — the recline had never actually run.)
-          K.put(FLEET.navy, new THREE.BoxGeometry(R(SEAT.backT), R(SEAT.backH), R(SEAT.width * SEAT.abreast)),
-            rx - R(SEAT.cushionD / 2 + SEAT.backT / 2), CABIN_FLOOR + R(CUSH + SEAT.backH / 2), zc,
-            0, 0, SEAT.recline);
-          // PEDESTAL — the boxed underseat leg, floor to cushion underside.
-          K.put(FLEET.dark, new THREE.BoxGeometry(R(0.30), R(CUSH - SEAT.cushionT), R(SEAT.width * SEAT.abreast - 0.14)),
-            rx, CABIN_FLOOR + R((CUSH - SEAT.cushionT) / 2), zc);
-          // ARMRESTS — one per seat division (4 across a 3-abreast block). This
-          // is what a seated body's forearms land on, and without them the
-          // passengers read as sitting on a shelf.
-          for (let a = 0; a <= SEAT.abreast; a++) {
-            K.put(FLEET.dark, new THREE.BoxGeometry(R(0.42), R(0.05), R(0.06)),
-              rx + R(0.02), CABIN_FLOOR + R(CUSH + SEAT.armY), zc + side * R((a - SEAT.abreast / 2) * SEAT.width));
-          }
-          // SEATS + HEADRESTS, outboard (window) to inboard (aisle).
-          for (let k = 1; k >= -1; k--) {
-            const sz = zc + side * R(k * SEAT.width);
-            K.put(FLEET.dark, new THREE.BoxGeometry(R(0.10), R(0.20), R(0.28)),
-              rx - R(SEAT.cushionD / 2 + SEAT.backT + Math.sin(SEAT.recline) * SEAT.backH * 0.5),
-              CABIN_FLOOR + R(CUSH + SEAT.backH - 0.02), sz);
-            // A body sits a hair FORWARD of the cushion centre (backside against
-            // the squab's rear third), so the anchor leads the cushion centre.
-            const ax = rx + R(0.04);
-            const reserve = reservedN < NPC_CAP && seatHash(ax, sz, 0x5EA7) < fill;
-            if (reserve) reservedN++;
-            seats.push({
-              id: "seat-" + (seatId++), x: ax * AL_SC, y: ANCHOR_Y * AL_SC, z: sz * AL_SC,
-              heading: Math.PI / 2,                       // plane-LOCAL yaw: +X is the nose
-              // NO `job` here on purpose: npclife's aircraftPassenger profile
-              // already casts these bodies with job "traveller", and a seat only
-              // overrides the profile where the SEAT knows better (the flight
-              // deck and the crew post, below).
-              kind: "aircraft-seat",
-              row: r, col: k, window: k === 1,
-              reservedForNpc: reserve, occupant: null,
-              // Declared geometry for the V2 chair sit (entities/character.js via
-              // CBZ.propSeatRef): the anchor sits ON the cushion top and the
-              // cushion top is that same height above the deck. Both are REAL
-              // METRES because the rig that reads them is real-metre sized — this
-              // pair is the one place R() must NOT be applied.
-              cushionH: Rm(CUSH), floorBelow: Rm(CUSH),
-            });
-          }
-        }
-      }
-      // OVERHEAD BINS — dropped to real reach height (underside ~1.62 m above the
-      // deck) so the furniture band, not the 4 m up-scaled ceiling, is what your
-      // eye measures the room against. The bin lip carries the reading-light rail,
-      // which is the second-strongest cabin cue after the armrests.
-      {
-        const runL = X_FWD - X_AFT + R(1.2), runC = (X_FWD + X_AFT) / 2;
-        for (const side of [-1, 1]) {
-          K.put(FLEET.navy, new THREE.BoxGeometry(runL, R(0.34), R(0.50)),
-            runC, CABIN_FLOOR + R(1.79), side * (1.6 - R(0.27)));
-          K.put(cabinLightMat, new THREE.BoxGeometry(runL, R(0.03), R(0.10)),
-            runC, CABIN_FLOOR + R(1.60), side * (1.6 - R(0.48)));
-        }
-      }
-      // ONE standing uniformed crew member in the forward vestibule, facing AFT
-      // over the seated cabin (heading -pi/2 → local -X, the mirror of the
-      // passengers' +X). A "stand" anchor (attach sets sitting=false) spawned
-      // fresh through the flight-crew profile, so it reuses the npclife cabin
-      // fill + lifecycle (pruneCabins releases it on theft/crash) with NO change
-      // to the verified attach path. Its JOB is a flight attendant's, not a
-      // pilot's — `role:"pilot"` here only selects npclife's uniformed
-      // aircraftPilot CASTING profile; the hold stamps the truthful job on the
-      // body afterwards. Flip AIRLINER_CABIN_CREW false to remove.
-      if (!CBZ.CONFIG || CBZ.CONFIG.AIRLINER_CABIN_CREW !== false) {
+      // PASSENGERS. Occupancy is a POSITION HASH, never a draw on the shared
+      // build stream (stable under edits, identical per seed across clients).
+      // Forward rows board first under a hard cap: that is what a boarding
+      // aircraft looks like and it keeps the rig count sane.
+      const cap = opts.npcCap != null ? opts.npcCap : 26;
+      const rows = Math.max(1, spec.rows || 1);
+      let reservedN = 0, id = 0;
+      for (const s of spec.seats) {
+        const fill = spec.rows ? 0.62 - 0.52 * ((s.row || 0) / Math.max(1, rows - 1)) : 0.62;
+        const reserve = reservedN < cap && seatHash(PX, PZ, s.x, s.z, 0x5EA7) < fill;
+        if (reserve) reservedN++;
         seats.push({
-          id: "seat-crew", x: 9.8 * AL_SC, y: CABIN_FLOOR * AL_SC, z: 0,
-          heading: -Math.PI / 2, kind: "cabin-crew", role: "pilot", job: "flight attendant",
-          pose: "stand", state: "idle",
-          reservedForNpc: true, occupant: null,
+          id: "seat-" + (id++), x: s.x, y: s.y, z: s.z, heading: s.heading,
+          // no `job`: npclife's aircraftPassenger profile casts "traveller"
+          kind: "aircraft-seat", row: s.row, col: s.col, window: !!s.window,
+          reservedForNpc: reserve, occupant: null,
+          // declared chair geometry (entities/character.js via propSeatRef),
+          // real metres: the anchor sits ON the cushion top
+          cushionH: CUSH, floorBelow: CUSH,
         });
       }
-      // DOORWAY (port, forward): with the real hull aperture the old dark
-      // recess box would blank the opening, so it exists only in the legacy
-      // branch; the warm sill light tucks under the aperture header instead.
-      // (The flight crew is the captain/FO pair pushed above — the older
-      // unconditional pilot anchors are superseded by that richer pair.)
-      if (realDoor) {
-        K.put(cabinLightMat, new THREE.BoxGeometry(1.0, 0.05, 0.05), CABIN_DOOR_X, 4.31, -1.79);
-      } else {
-        K.put(FLEET.dark, new THREE.BoxGeometry(1.14, 1.92, 0.1), CABIN_DOOR_X, 3.46, -1.64);
-        K.put(cabinLightMat, new THREE.BoxGeometry(1.0, 0.06, 0.06), CABIN_DOOR_X, 4.48, -1.68);
+      // ONE standing flight attendant in the forward galley, facing aft
+      if (spec.crew && CBZ.CONFIG.AIRLINER_CABIN_CREW !== false && opts.crew !== false) {
+        seats.push({
+          id: "seat-crew", x: spec.crew.x, y: spec.crew.y, z: spec.crew.z,
+          heading: spec.crew.heading, kind: "cabin-crew", role: "pilot", job: "flight attendant",
+          pose: "stand", state: "idle", reservedForNpc: true, occupant: null,
+        });
       }
-      // sliding DOOR PANEL — a separate live mesh the boarding system eases
-      // aft along the hull; dynamic-tagged so batcher/freezer leave it alone
-      const panel = new THREE.Mesh(new THREE.BoxGeometry(1.06, 1.86, 0.1), FLEET.white);
-      if (AL_SC !== 1) panel.geometry.scale(AL_SC, AL_SC, AL_SC);
-      panel.position.set(CABIN_DOOR_X * AL_SC, 3.45 * AL_SC, -1.73 * AL_SC);
-      panel.userData.dynamic = true;
-      const panelBand = new THREE.Mesh(new THREE.BoxGeometry(1.06, 0.3, 0.04), acc);
-      if (AL_SC !== 1) panelBand.geometry.scale(AL_SC, AL_SC, AL_SC);
-      panelBand.position.set(0, -0.35 * AL_SC, -0.04 * AL_SC);
-      panel.add(panelBand);
-      g.add(panel);
-      g.userData.cabin = {
-        floorTop: CABIN_FLOOR * AL_SC,
-        doorX: CABIN_DOOR_X * AL_SC, doorZ: -1.7 * AL_SC,
-        scale: AL_SC,                                  // read by aircraft_doors.js to scale the walk-in arc offsets
-        seats, panel, doorT: 0,
-        rows: rowsX.length, abreast: SEAT.abreast,     // read by cabinAudit
-        cockpitLeaf, cockpitT: 0,
-        // WHERE THE FLIGHT DECK IS — the standing point between the two pilot
-        // chairs, plane-local. aircraft_doors.js walks the player here for the
-        // short "already aboard" hijack beat instead of marching him back out
-        // of the fuselage and replaying the airstairs (CBZ.cityCabinFlightDeck).
-        deckX: 12.7 * AL_SC, deckZ: 0,
+      const rig = AF.rig(g);
+      const cab = {
+        floorTop: spec.floorTop,
+        doorX: spec.door.x, doorZ: spec.door.z, doorOut: spec.doorOut, doorIn: spec.doorIn,
+        entry: spec.entry, exit: spec.exit,
+        seats: seats, doorT: 0, cockpitT: 0,
+        rows: spec.rows, abreast: spec.abreast,
+        walk: spec.walk || null, bodyY: spec.bodyY,
+        // the flight deck brought its own room: cockpit.js dresses only the
+        // live instruments and hides the airframe's static panel
+        flightDeck: true,
+        // WHERE THE FLIGHT DECK IS — the standing point between the pilot
+        // chairs (aircraft_doors.js walks the player here for the "already
+        // aboard" hijack beat)
+        deckX: spec.deckStand ? spec.deckStand.x : 0, deckZ: spec.deckStand ? spec.deckStand.z : 0,
+        poseDoor: function (t) { AF.poseDoor(g, "L1", t); },
+        poseCockpitDoor: function (t) { AF.poseCockpitDoor(g, t); },
       };
+      // the door hardware aircraft_doors.js and the easing below look for
+      if (rig && rig.doors.L1) cab.panel = rig.doors.L1.node;
+      if (rig && rig.cdoor) cab.cockpitLeaf = rig.cdoor;
+      return cab;
     }
 
-    function buildAirliner(x, z, heading, livery) {
-      const g = new THREE.Group();
-      // The complete airframe is one movable object. Without this root tag the
-      // static batcher descends into the plane, extracts eligible cabin meshes,
-      // and bakes them into world space at the gate. Flying the remaining group
-      // then leaves that cabin shell behind.
+    // (x, z, heading, livery[, type]) -> group; type "narrowbody" | "widebody"
+    function buildAirliner(x, z, heading, livery, type) {
+      const g = AF.build(type || "narrowbody", { livery: livery, noseX: true });
+      // The complete airframe is one movable object: without this tag the
+      // static batcher would bake the cabin into world space at the gate.
       g.userData.dynamic = true;
       g.position.set(x, 0, z); g.rotation.y = heading;
-      const acc = accentMat(livery || 0x2d5fb0);
-      // scale-baking part kit: every geometry the airliner and its cabin submit
-      // is uniformly scaled by AL_SC and its placement multiplied through, so the
-      // whole airframe grows by ONE factor while group.scale stays 1 — flight,
-      // collision, batching and the human-sized passenger rigs are all untouched.
-      const K0 = partKit();
-      const K = AL_SC === 1 ? K0 : {
-        put: function (m, geo, px, py, pz, rx, ry, rz) {
-          geo.scale(AL_SC, AL_SC, AL_SC);
-          return K0.put(m, geo, px * AL_SC, py * AL_SC, pz * AL_SC, rx, ry, rz);
-        },
-        bake: function (gg) { return K0.bake(gg); },
-      };
-      const DIMS = AIRCRAFT_DIMS.airliner;
-      // COCKPIT GLASS V2: swap the opaque windscreen band + fwd hull band-caps
-      // for real see-through glass (only meaningful with the real cockpit room).
-      const glassV2 = !!CBZ.CONFIG.COCKPIT_REAL_DOOR && !(CBZ.CONFIG && CBZ.CONFIG.AIRLINER_COCKPIT_GLASS_V2 === false);
-      // 27.9m centre barrel + 4.2m nose + 5.6m tail = 37.55m end-to-end.
-      const L = 27.9, R = 1.9;
-      const FH = DIMS.fuselage, FW = DIMS.fuselage;
-      const CY = R + 1.6;         // fuselage centreline height — UNCHANGED (flight/camera anchors)
-      const BELLY = CY - FH / 2;  // 1.6 — struts rise to here, wheels touch y=0
-
-      // fuselage: white barrel + sculpted drooped nose + upswept tailcone.
-      // TWO merged truths: REAL WINDOWS (an OPEN band at cabin-window height —
-      // the clear pane strip genuinely looks into the lit cabin and out of it)
-      // and a REAL BOARDING DOOR (hollow tube so the doorway is an aperture
-      // seen through from both sides, panel pocketing into the wall cavity).
-      const WIN_Y0 = CY + 0.49, WIN_Y1 = CY + 0.91;          // band 3.99..4.41 (pane strip is CY+0.7 ± 0.21)
-      const WIN_X0 = 0.5 - (L - 6) / 2, WIN_X1 = 0.5 + (L - 6) / 2;   // pane strip x extent
-      const HULL_Y0 = CY - FH / 2, HULL_Y1 = CY + FH / 2;
-      if (CBZ.CONFIG.COCKPIT_REAL_DOOR) {
-        // HOLLOW barrel: roof + belly slabs, and SIDE WALLS split into
-        // belly/crown bands leaving the window band open (inner faces hide
-        // behind the BackSide liner). Port wall also splits around the door
-        // hole (x 9.95..11.05, y 2.5..4.4, matching the liner aperture).
-        const WZ = (FW - 0.355) / 2;                              // wall centre |z|
-        K.put(FLEET.white, new THREE.BoxGeometry(L, HULL_Y1 - 5.37, FW), 0, (HULL_Y1 + 5.37) / 2, 0);  // roof
-        K.put(FLEET.white, new THREE.BoxGeometry(L, 2.43 - HULL_Y0, FW), 0, (2.43 + HULL_Y0) / 2, 0);  // belly
-        // starboard wall: belly band + crown band + fore/aft band caps
-        K.put(FLEET.white, new THREE.BoxGeometry(L, WIN_Y0 - 2.43, 0.355), 0, (WIN_Y0 + 2.43) / 2, WZ);
-        K.put(FLEET.white, new THREE.BoxGeometry(L, 5.37 - WIN_Y1, 0.355), 0, (5.37 + WIN_Y1) / 2, WZ);
-        K.put(FLEET.white, new THREE.BoxGeometry(WIN_X0 + L / 2, 0.44, 0.355), (-L / 2 + WIN_X0) / 2, CY + 0.7, WZ);
-        // fwd band cap → cockpit STARBOARD quarter-window: clear glass at the
-        // hull surface over the open band (same pane grammar as the cabin strip)
-        // when GLASS V2 is on; opaque white cap is the pre-V2 fallback.
-        if (glassV2) K.put(FLEET.glass, new THREE.BoxGeometry(L / 2 - WIN_X1, 0.42, 0.1), (WIN_X1 + L / 2) / 2, CY + 0.7, FW / 2 + 0.02);
-        else K.put(FLEET.white, new THREE.BoxGeometry(L / 2 - WIN_X1, 0.44, 0.355), (WIN_X1 + L / 2) / 2, CY + 0.7, WZ);
-        // port wall: same bands, belly band split around the door hole
-        K.put(FLEET.white, new THREE.BoxGeometry(23.9, WIN_Y0 - 2.43, 0.355), -2.0, (WIN_Y0 + 2.43) / 2, -WZ);   // aft of door
-        K.put(FLEET.white, new THREE.BoxGeometry(2.9, WIN_Y0 - 2.43, 0.355), 12.5, (WIN_Y0 + 2.43) / 2, -WZ);    // fwd of door
-        K.put(FLEET.white, new THREE.BoxGeometry(L, 5.37 - WIN_Y1, 0.355), 0, (5.37 + WIN_Y1) / 2, -WZ);         // crown band
-        K.put(FLEET.white, new THREE.BoxGeometry(WIN_X0 + L / 2, 0.44, 0.355), (-L / 2 + WIN_X0) / 2, CY + 0.7, -WZ);  // aft band cap
-        // fwd band cap → cockpit PORT quarter-window (glass) when GLASS V2 is on.
-        if (glassV2) K.put(FLEET.glass, new THREE.BoxGeometry(L / 2 - WIN_X1, 0.42, 0.1), (WIN_X1 + L / 2) / 2, CY + 0.7, -(FW / 2 + 0.02));
-        else K.put(FLEET.white, new THREE.BoxGeometry(L / 2 - WIN_X1, 0.44, 0.355), (WIN_X1 + L / 2) / 2, CY + 0.7, -WZ);   // fwd band cap
-        K.put(FLEET.white, new THREE.BoxGeometry(1.1, 0.07, 0.355), 10.5, 2.465, -WZ);                            // door sill
-      } else {
-        // legacy split barrel (real windows, solid walls — no door aperture)
-        K.put(FLEET.white, new THREE.BoxGeometry(L, WIN_Y0 - HULL_Y0, FW, 2, 1, 1), 0, (WIN_Y0 + HULL_Y0) / 2, 0);   // belly slab
-        K.put(FLEET.white, new THREE.BoxGeometry(L, HULL_Y1 - WIN_Y1, FW, 2, 1, 1), 0, (HULL_Y1 + WIN_Y1) / 2, 0);   // crown slab
-        K.put(FLEET.white, new THREE.BoxGeometry(WIN_X0 + L / 2, WIN_Y1 - WIN_Y0 + 0.02, FW), (-L / 2 + WIN_X0) / 2, CY + 0.7, 0);  // aft band cap
-        K.put(FLEET.white, new THREE.BoxGeometry(L / 2 - WIN_X1, WIN_Y1 - WIN_Y0 + 0.02, FW), (WIN_X1 + L / 2) / 2, CY + 0.7, 0);   // fwd band cap
-      }
-      K.put(FLEET.white, fuseGeo(4.2, FH, FW, { nose: 0.24, noseY: -1.0 }), L / 2 + 2.05, CY, 0);
-      K.put(FLEET.white, fuseGeo(5.6, FH, FW, { tail: 0.16, tailY: 1.25 }), -L / 2 - 2.75, CY, 0);
-      // cockpit WINDSCREEN: GLASS V2 makes it real see-through glass (the SAME
-      // tint as the cabin strips) wrapping the flight-deck front, so the lit
-      // cockpit and the uniformed pilot read from the apron and the runway shows
-      // from the pilot seats. The opaque dark band is the pre-V2 fallback (kept
-      // for the solid-nose legacy build where there is no cockpit room behind).
-      if (glassV2) K.put(FLEET.glass, new THREE.BoxGeometry(2.4, 0.95, FW + 0.02), L / 2 + 0.6, CY + 0.8, 0);
-      else K.put(FLEET.dark, new THREE.BoxGeometry(2.4, 0.95, FW + 0.1), L / 2 + 0.6, CY + 0.8, 0);
-      // livery: coloured belly stripe wrapping under the white upper fuselage,
-      // and the cabin windows as ONE long CLEAR pane strip per side over the
-      // open band, with white window-frame pillars at seat pitch behind it.
-      K.put(acc, new THREE.BoxGeometry(L, 0.95, FW + 0.12), 0, BELLY + 0.42, 0);
-      if (CBZ.CONFIG.COCKPIT_REAL_DOOR) {
-        // starboard: one clear strip; port: split around the doorway aperture.
-        // White frame pillars at seat pitch sit behind the panes on BOTH
-        // sides (skipping the door span on port) so the strip reads as a row
-        // of windows, not one long slit.
-        K.put(FLEET.glass, new THREE.BoxGeometry(L - 6, 0.42, 0.1), 0.5, CY + 0.7, FW / 2 + 0.02);
-        K.put(FLEET.glass, new THREE.BoxGeometry(20.4, 0.42, 0.1), -0.25, CY + 0.7, -(FW / 2 + 0.02));
-        K.put(FLEET.glass, new THREE.BoxGeometry(0.4, 0.42, 0.1), 11.25, CY + 0.7, -(FW / 2 + 0.02));
-        for (let px = WIN_X0 + 0.25; px < WIN_X1 - 0.2; px += 2.0) {
-          K.put(FLEET.white, new THREE.BoxGeometry(0.34, WIN_Y1 - WIN_Y0 + 0.04, 0.12), px, CY + 0.7, FW / 2 - 0.015);
-          if (px < 9.8 || px > 11.2) {
-            K.put(FLEET.white, new THREE.BoxGeometry(0.34, WIN_Y1 - WIN_Y0 + 0.04, 0.12), px, CY + 0.7, -(FW / 2 - 0.015));
-          }
-        }
-      } else {
-        for (const sgn of [-1, 1]) {
-          K.put(FLEET.glass, new THREE.BoxGeometry(L - 6, 0.42, 0.1), 0.5, CY + 0.7, sgn * (FW / 2 + 0.02));
-          for (let px = WIN_X0 + 0.25; px < WIN_X1 - 0.2; px += 2.0) {
-            K.put(FLEET.white, new THREE.BoxGeometry(0.34, WIN_Y1 - WIN_Y0 + 0.04, 0.12), px, CY + 0.7, sgn * (FW / 2 - 0.015));
-          }
-        }
-      }
-
-      // ONE swept tapered wing pair + upturned accent winglets
-      K.put(FLEET.white, wingGeo(DIMS.span, 5.5, 2.2, 0.55, 4.5, 0.9), 0.5, BELLY + 0.55, 0);
-      for (const sgn of [-1, 1]) K.put(acc, new THREE.BoxGeometry(1.5, 2.1, 0.32), -4.2, 3.95, sgn * (DIMS.span / 2 - 0.2));
-
-      // underwing engines: sculpted nacelle + accent intake lip ring + dark
-      // inlet disc + dark exhaust + pylon up into the wing
-      for (const sgn of [-1, 1]) {
-        const nz = sgn * 5.6;
-        K.put(FLEET.white, fuseGeo(4.0, 1.5, 1.5, { nose: 0.94, tail: 0.66 }), 2.2, 1.4, nz);
-        K.put(acc, new THREE.BoxGeometry(0.34, 1.68, 1.68), 4.15, 1.4, nz);
-        K.put(FLEET.dark, new THREE.BoxGeometry(0.2, 1.22, 1.22), 4.3, 1.4, nz);
-        K.put(FLEET.dark, new THREE.BoxGeometry(0.5, 0.92, 0.92), 0.28, 1.42, nz);
-        K.put(FLEET.white, new THREE.BoxGeometry(1.9, 1.0, 0.42), 1.4, 2.25, nz);
-      }
-
-      // tail: swept accent fin + two-tone geometric logo block + tailplane
-      K.put(acc, finGeo(6.2, 5.2, 2.6, 0.5, 2.6), -16.5, 8.65, 0);
-      K.put(FLEET.white, new THREE.BoxGeometry(1.6, 1.6, 0.62), -18.3, 10.05, 0);
-      K.put(FLEET.navy, new THREE.BoxGeometry(0.95, 0.95, 0.7), -17.9, 9.65, 0);
-      K.put(FLEET.white, wingGeo(11, 3.4, 1.5, 0.4, 1.8, 0.35), -17.6, CY + 1.1, 0);
-
-      // gear: 2-wheel nose leg + two 4-wheel main bogies, chunky struts.
-      // Wheel pairs are axle-spanning cylinders; every wheel bottoms at y=0.
-      K.put(FLEET.metal, new THREE.BoxGeometry(0.36, 1.4, 0.36), 10, 1.0, 0);
-      for (const sgn of [-1, 1]) K.put(FLEET.tire, new THREE.CylinderGeometry(0.42, 0.42, 0.3, 10), 10, 0.42, sgn * 0.34, Math.PI / 2);
-      for (const sgn of [-1, 1]) {
-        const mz = sgn * 3.1;
-        K.put(FLEET.metal, new THREE.BoxGeometry(0.42, 1.2, 0.42), -2.2, 1.15, mz);   // strut into the belly
-        K.put(FLEET.metal, new THREE.BoxGeometry(2.6, 0.4, 0.5), -2.2, 0.72, mz);     // bogie beam
-        for (const bx of [-3.05, -1.35]) K.put(FLEET.tire, new THREE.CylinderGeometry(0.55, 0.55, 1.34, 10), bx, 0.55, mz, Math.PI / 2);
-      }
-      buildCabin(K, g, acc);        // real interior + sliding boarding door
-      K.bake(g);
-
-      // nav lights: port red / starboard green wingtips, white tail, beacon
-      // (positions follow AL_SC so they ride the up-scaled wingtips/tail/nose)
-      navBox(g, FLEET.navR, -4.0 * AL_SC, 3.1 * AL_SC, -DIMS.span / 2 * AL_SC);
-      navBox(g, FLEET.navG, -4.0 * AL_SC, 3.1 * AL_SC, DIMS.span / 2 * AL_SC);
-      navBox(g, FLEET.navW, -19.35 * AL_SC, 11.55 * AL_SC, 0);
-      navBox(g, FLEET.beacon, -2 * AL_SC, 5.55 * AL_SC, 0, 0.3 * AL_SC);
-
+      g.userData.cabin = cabinRecord(g, AF.cabin(g), {});
       root.add(g);
-      // external-facing size (flight collision, hijack reach, targeting, camera
-      // foot) tracks the up-scale via a per-plane copy; the frozen shared
-      // AIRCRAFT_DIMS envelope is never mutated.
-      g.userData.aircraftDims = AL_SC === 1 ? DIMS : {
-        family: DIMS.family, length: DIMS.length * AL_SC, span: DIMS.span * AL_SC,
-        height: DIMS.height * AL_SC, fuselage: DIMS.fuselage * AL_SC,
-      };
-      g.userData.worldCollider = aircraftSolid(g, DIMS);
       return g;
     }
-
+    // the business jet: airstair door, club four + divan, crewed flight deck
     function buildPrivateJet(x, z, heading, livery) {
-      const g = new THREE.Group();
-      // Keep the mini-cabin and exterior under the same movable transform.
+      const g = AF.build("bizjet", { livery: livery, noseX: true });
       g.userData.dynamic = true;
       g.position.set(x, 0, z); g.rotation.y = heading;
-      const acc = accentMat(livery || 0x355c8a);
-      const K = partKit();
-      const L = 11, R = 1.1;      // barrel length / legacy radius (collider height stays R+3)
-      const FH = 2.2, FW = 2.0;   // fuselage box cross-section
-      const CY = R + 1.0;         // centreline height — UNCHANGED (2.1)
-      const BELLY = CY - FH / 2;  // 1.0
-
-      // fuselage: white barrel + LOW drooped nose taper + upswept tailcone.
-      // REAL WINDOWS (airliner pattern, scaled down): the barrel splits into
-      // belly + crown slabs with an OPEN band at window height (x -2.7..2.7),
-      // so the clear pane strip looks into a real lit mini-cabin.
-      const JW_Y0 = CY + 0.4, JW_Y1 = CY + 0.7;              // band 2.5..2.8
-      const JW_X0 = -2.7, JW_X1 = 2.7;
-      const JH_Y0 = CY - FH / 2, JH_Y1 = CY + FH / 2;
-      K.put(FLEET.white, new THREE.BoxGeometry(L, JW_Y0 - JH_Y0, FW, 2, 1, 1), 0, (JW_Y0 + JH_Y0) / 2, 0);   // belly slab
-      K.put(FLEET.white, new THREE.BoxGeometry(L, JH_Y1 - JW_Y1, FW, 2, 1, 1), 0, (JH_Y1 + JW_Y1) / 2, 0);   // crown slab
-      K.put(FLEET.white, new THREE.BoxGeometry(JW_X0 + L / 2, JW_Y1 - JW_Y0 + 0.02, FW), (-L / 2 + JW_X0) / 2, CY + 0.55, 0);  // aft band cap
-      K.put(FLEET.white, new THREE.BoxGeometry(L / 2 - JW_X1, JW_Y1 - JW_Y0 + 0.02, FW), (JW_X1 + L / 2) / 2, CY + 0.55, 0);   // fwd band cap
-      K.put(FLEET.white, fuseGeo(3.6, FH, FW, { nose: 0.22, noseY: -0.62 }), L / 2 + 1.75, CY, 0);
-      K.put(FLEET.white, fuseGeo(3.8, FH, FW, { tail: 0.18, tailY: 0.8 }), -L / 2 - 1.85, CY, 0);
-      // cockpit band: opaque-dark on purpose (solid sculpted nose behind it)
-      K.put(FLEET.dark, new THREE.BoxGeometry(1.5, 0.72, FW + 0.08), L / 2 + 0.55, CY + 0.42, 0);
-      // MINI CABIN behind the panes: split BackSide liner (visible only from
-      // outside-through-glass / inside), floor, and a club-four of seats.
-      K.put(linerMat, new THREE.BoxGeometry(5.8, 1.25, 1.7), 0, 1.875, 0);       // liner belly (1.25..2.5)
-      K.put(linerMat, new THREE.BoxGeometry(5.8, 0.25, 1.7), 0, 2.925, 0);       // liner crown (2.8..3.05)
-      K.put(linerMat, new THREE.BoxGeometry(0.2, 0.32, 1.7), -2.8, 2.65, 0);     // aft band cap
-      K.put(linerMat, new THREE.BoxGeometry(0.2, 0.32, 1.7), 2.8, 2.65, 0);      // fwd band cap
-      K.put(cabinFloorMat, new THREE.BoxGeometry(5.6, 0.1, 1.6), 0, 1.32, 0);    // deck
-      const jetSeats = [];
-      let jsIdx = 0;
-      // club-four: two facing pairs, port and starboard. Occupancy by position-
-      // hash (never the shared rng stream — order-safe for the airport build).
-      for (const side of [-1, 1]) {
-        for (const fx of [-1, 1]) {
-          const sx = fx * 1.2, sz = side * 0.45;
-          K.put(FLEET.navy, new THREE.BoxGeometry(0.5, 0.14, 0.5), sx, 1.44, sz);                 // cushion
-          K.put(FLEET.navy, new THREE.BoxGeometry(0.14, 0.62, 0.5), sx + fx * 0.28, 1.78, sz);    // back (facing inward)
-          const occ = (CBZ.hash01 ? CBZ.hash01(x + jsIdx, z - jsIdx, 9101) : ((jsIdx * 0.37) % 1)) < 0.62;
-          jetSeats.push({
-            id: "jetseat-" + (jsIdx++), x: sx, y: 1.32 + 0.42, z: sz,
-            heading: fx > 0 ? -Math.PI / 2 : Math.PI / 2, kind: "aircraft-seat",
-            reservedForNpc: occ, occupant: null,
-            // V2 chair-sit geometry: exec recliner — the cushion mesh tops out
-            // just 0.14 above the 1.37 deck, and this anchor floats 0.37 above
-            // it. Declaring the truth lets the pose pick its low-lounger solve
-            // (knees above hips, feet planted forward) instead of a squat.
-            cushionH: 0.14, floorBelow: 0.37,
-          });
-        }
-      }
-      // exec livery: angled accent swoosh rising to the nose + thin midnight
-      // echo line under it; the cabin windows are a CLEAR pane strip over the
-      // open band with white frame pillars behind it.
-      for (const sgn of [-1, 1]) {
-        const fz = sgn * (FW / 2 + 0.02);
-        K.put(acc, new THREE.BoxGeometry(7.5, 0.5, 0.06), 0.8, CY - 0.25, fz, 0, 0, 0.09);
-        K.put(FLEET.navy, new THREE.BoxGeometry(6.2, 0.16, 0.05), 0.2, CY - 0.62, fz, 0, 0, 0.09);
-        K.put(FLEET.glass, new THREE.BoxGeometry(5.4, 0.3, 0.06), 0, CY + 0.55, fz);
-        for (let px = -2.0; px <= 2.0; px += 1.0) {
-          K.put(FLEET.white, new THREE.BoxGeometry(0.24, 0.34, 0.1), px, CY + 0.55, sgn * (FW / 2 - 0.02));
-        }
-      }
-      // AIRSTAIR DOOR (port, forward): a REAL hinged panel that tips outward-
-      // down into boarding stairs (aircraft_doors.js eases it via doorRig).
-      // Dark recess behind it = the doorway; dynamic-tagged for the freezer.
-      K.put(FLEET.dark, new THREE.BoxGeometry(0.95, 1.3, 0.07), 3.5, CY - 0.1, -(FW / 2 + 0.03));
-      const stairGeo = new THREE.BoxGeometry(0.95, 1.3, 0.07);
-      stairGeo.translate(0, 0.65, 0);                          // pivot at the sill (bottom edge)
-      const stair = new THREE.Mesh(stairGeo, FLEET.white);
-      stair.position.set(3.5, CY - 0.75, -(FW / 2 + 0.06));
-      stair.userData.dynamic = true;
-      for (const sy of [0.35, 0.75, 1.1]) {                    // tread strips on the inner face
-        const tread = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.07, 0.05), FLEET.dark);
-        tread.position.set(0, sy, 0.05);
-        stair.add(tread);
-      }
-      g.add(stair);
+      const spec = AF.cabin(g);
+      const cab = cabinRecord(g, spec, { npcCap: 4 });
+      // an airstair is not a walk-in deck: the stair rig below owns the door
+      const rig = AF.rig(g);
+      cab.panel = null;
+      g.userData.cabin = cab;
       g.userData.doorRig = {
-        panel: stair, t: 0, mode: "stair",
-        closedRot: 0, openRot: -1.72,                          // tips outboard-down into a stair
-        doorX: 3.5, doorZ: -(FW / 2 + 0.06),
+        panel: rig.doors.L1.node, t: 0, mode: "stair",
+        doorX: spec.door.x, doorZ: spec.door.z,
+        pose: function (t) { AF.poseDoor(g, "L1", t); },
       };
-      g.userData.cabin = g.userData.cabin || { floorTop: 1.37, doorX: 3.5, doorZ: -(FW / 2 + 0.06), seats: jetSeats, panel: null, doorT: 0 };
-
-      // low swept wing pair + accent winglets
-      K.put(FLEET.white, wingGeo(13.5, 3.0, 1.2, 0.32, 2.4, 0.5), -0.6, BELLY + 0.35, 0);
-      for (const sgn of [-1, 1]) K.put(acc, new THREE.BoxGeometry(0.8, 1.05, 0.3), -3.0, 2.2, sgn * 6.65);
-
-      // aft-mounted twin engine pods: sculpted pod + accent intake lip +
-      // dark inlet disc + dark exhaust, on a stub pylon off the tail barrel
-      for (const sgn of [-1, 1]) {
-        const ez = sgn * (FW / 2 + 0.62);
-        K.put(FLEET.white, fuseGeo(2.6, 1.0, 1.0, { nose: 0.92, tail: 0.6 }), -5.2, CY + 0.55, ez);
-        K.put(acc, new THREE.BoxGeometry(0.26, 1.12, 1.12), -4.0, CY + 0.55, ez);
-        K.put(FLEET.dark, new THREE.BoxGeometry(0.16, 0.8, 0.8), -3.9, CY + 0.55, ez);
-        K.put(FLEET.dark, new THREE.BoxGeometry(0.4, 0.6, 0.6), -6.4, CY + 0.55, ez);
-        K.put(FLEET.white, new THREE.BoxGeometry(1.3, 0.5, 0.5), -5.1, CY + 0.35, sgn * (FW / 2 + 0.18));
-      }
-
-      // refined T-tail: swept accent fin, white logo block, tailplane on top
-      K.put(acc, finGeo(3.4, 2.6, 1.2, 0.3, 1.4), -8.0, 4.4, 0);
-      K.put(FLEET.white, new THREE.BoxGeometry(0.55, 0.55, 0.42), -8.95, 5.25, 0);
-      K.put(FLEET.white, wingGeo(4.6, 1.5, 0.9, 0.3, 0.7, 0), -9.0, 6.2, 0);
-
-      // tricycle gear with belly cover plates; wheels bottom at y=0
-      K.put(FLEET.metal, new THREE.BoxGeometry(0.24, 0.8, 0.24), 4.4, 0.7, 0);
-      K.put(FLEET.tire, new THREE.CylinderGeometry(0.3, 0.3, 0.3, 10), 4.4, 0.3, 0, Math.PI / 2);
-      K.put(FLEET.white, new THREE.BoxGeometry(0.8, 0.6, 0.08), 4.4, 0.78, 0.24);      // nose gear door
-      for (const sgn of [-1, 1]) {
-        K.put(FLEET.metal, new THREE.BoxGeometry(0.28, 0.7, 0.28), -1.7, 0.75, sgn * 1.05);
-        K.put(FLEET.tire, new THREE.CylinderGeometry(0.35, 0.35, 0.32, 10), -1.7, 0.35, sgn * 1.05, Math.PI / 2);
-        K.put(FLEET.white, new THREE.BoxGeometry(0.85, 0.65, 0.08), -1.7, 0.75, sgn * 1.34); // gear covers
-      }
-      K.bake(g);
-
-      // nav lights: port red / starboard green wingtips, white tail, beacon
-      navBox(g, FLEET.navR, -3.0, 1.95, -6.6, 0.2);
-      navBox(g, FLEET.navG, -3.0, 1.95, 6.6, 0.2);
-      navBox(g, FLEET.navW, -10.0, 5.9, 0, 0.2);
-      navBox(g, FLEET.beacon, 0.4, 3.32, 0, 0.22);
-
       root.add(g);
-      g.userData.aircraftDims = AIRCRAFT_DIMS.privatejet;
-      g.userData.worldCollider = aircraftSolid(g, AIRCRAFT_DIMS.privatejet);
       return g;
     }
 
@@ -3076,11 +2324,11 @@
        what makes a group a member of `placed`, and `placed` is what the gun
        path, the blast path, the boarding arc and the flight hand-off read. */
     CBZ.airportKit = {
-      airliner: buildAirliner,        // (x, z, heading, livery) -> group
+      airliner: buildAirliner,        // (x, z, heading, livery[, "widebody"]) -> group
+      widebody: function (x, z, h, l) { return buildAirliner(x, z, h, l, "widebody"); },
       jet: buildPrivateJet,           // (x, z, heading, livery) -> group
       boardable: boardablePlane,      // (group, x, z, heading, footW, footL, name)
       dims: AIRCRAFT_DIMS,
-      scale: AL_SC,
       records: function () { return placed; },
     };
 
@@ -3096,21 +2344,21 @@
       terminal: {
         x0: LX(TERM_X0), x1: LX(TERM_X1), z0: LZ(TERM_Z0), z1: LZ(TERM_FRONT),
         levels: 2, mezzY: 4.5, islands: 4, canopy: 7, name: "Halloran Field",
-        entrances: [LX(-95 + ADX), LX(-40 + ADX), LX(15 + ADX)],
+        entrances: [LX(-95 + ADX), LX(-30 + ADX), LX(35 + ADX)],
       },
       kerbZ: LZ(KERB_Z),
       stands: CONTACT_XS.map(function (x, i) { return { id: "HLR-" + (i + 1), num: String(i + 1), lx: LX(x), bridge: true }; })
         .concat(REMOTE_XS.map(function (x, i) { return { id: "HLR-R" + (i + 1), num: "R" + (i + 1), lx: LX(x) }; })),
-      parked: ["HLR-1", "HLR-2", "HLR-3"],
-      jets: [{ lx: LX(215 + ADX), lz: LZ(-53 + ADZ), heading: -Math.PI / 2 + 0.2 }, { lx: LX(240 + ADX), lz: LZ(-38 + ADZ), heading: -Math.PI / 2 - 0.3 }],
+      parked: ["HLR-1", "HLR-2", "HLR-3:widebody"],
+      jets: [{ lx: LX(240 + ADX), lz: LZ(-64 + ADZ), heading: -Math.PI / 2 + 0.2 }, { lx: LX(240 + ADX), lz: LZ(-32 + ADZ), heading: -Math.PI / 2 - 0.3 }],
       aprons: [{ x0: LX(-175 + ADX), z0: TAX_Z - RWY_Z + 11.5, x1: LX(255 + ADX), z1: LZ(TERM_Z0) }],
       paved: [
-        { x0: 75, z0: 106.5, x1: 125, z1: 140, color: 0x3c3f44 },       // fire station apron
-        { x0: -45, z0: 106.5, x1: 55, z1: 126, color: 0x8f8d87 },       // maintenance hangar apron
-        { x0: -155, z0: 106.5, x1: -55, z1: 148, color: 0x3c3f44 },     // GA hangars
-        { x0: -255, z0: 106.5, x1: -175, z1: 145, color: 0x8f8d87 },    // cargo apron
-        { x0: -575, z0: 193, x1: 130, z1: 199, color: 0x3c3f44 },       // airside service road
-        { x0: -278, z0: 150, x1: -266, z1: 199, color: 0x3c3f44 },      // fuel fill stand access
+        { x0: 75, z0: 106.5, x1: 125, z1: 157.0, color: 0x3c3f44 },       // fire station apron
+        { x0: -45, z0: 106.5, x1: 55, z1: 143.0, color: 0x8f8d87 },       // maintenance hangar apron
+        { x0: -155, z0: 106.5, x1: -55, z1: 165.0, color: 0x3c3f44 },     // GA hangars
+        { x0: -255, z0: 106.5, x1: -175, z1: 162.0, color: 0x8f8d87 },    // cargo apron
+        { x0: -575, z0: 210.0, x1: 130, z1: 216.0, color: 0x3c3f44 },       // airside service road
+        { x0: -278, z0: 167.0, x1: -266, z1: 216.0, color: 0x3c3f44 },      // fuel fill stand access
       ],
       tower: { external: true },           // the climbable tower is built below
       noSpawn: [
@@ -3141,22 +2389,22 @@
       },
       dressing: {
         hangars: [
-          { lx: 5, lz: 158, yaw: Math.PI, w: 90, d: 66, h: 24, type: "portal", open: 0.5 },
-          { lx: -80, lz: 166, yaw: Math.PI, w: 44, d: 38, h: 15, type: "arch", open: 0.5 },
-          { lx: -130, lz: 166, yaw: Math.PI, w: 44, d: 38, h: 15, type: "arch", open: 0 },
+          { lx: 5, lz: 175.0, yaw: Math.PI, w: 90, d: 66, h: 24, type: "portal", open: 0.5 },
+          { lx: -80, lz: 183.0, yaw: Math.PI, w: 44, d: 38, h: 15, type: "arch", open: 0.5 },
+          { lx: -130, lz: 183.0, yaw: Math.PI, w: 44, d: 38, h: 15, type: "arch", open: 0 },
         ],
-        sheds: [{ lx: -215, lz: 162, yaw: Math.PI, w: 70, d: 36, h: 10, airside: 4, docks: 6 }],
-        fuel: { lx: -330, lz: 160, yaw: 0, tanks: [[-26, -2, 8, 11], [0, -2, 8, 11], [26, -2, 8, 11]], bund: { x0: -38, z0: -14, x1: 38, z1: 12 } },
-        fire: { lx: 100, lz: 151, yaw: Math.PI, bays: 4 },
+        sheds: [{ lx: -215, lz: 179.0, yaw: Math.PI, w: 70, d: 36, h: 10, airside: 4, docks: 6 }],
+        fuel: { lx: -330, lz: 177.0, yaw: 0, tanks: [[-26, -2, 8, 11], [0, -2, 8, 11], [26, -2, 8, 11]], bund: { x0: -38, z0: -14, x1: 38, z1: 12 } },
+        fire: { lx: 100, lz: 168.0, yaw: Math.PI, bays: 4 },
         carpark: { lx: LX(-266 + ADX), lz: LZ(18 + ADZ), w: 68, d: 28, levels: 3 },
         rental: { lx: LX(-340 + ADX), lz: LZ(18 + ADZ), w: 44, d: 14 },
-        asr: { lx: -500, lz: 160, h: 20 },
-        radome: { lx: -560, lz: 185, h: 16 },
+        asr: { lx: -500, lz: 177.0, h: 20 },
+        radome: { lx: -560, lz: 202.0, h: 16 },
         ils: { end: 1, locDist: 40, gsOffset: 30, gsSide: 1 },
         approach: [{ end: 1, len: 420, flashers: 5 }, { end: 0, len: 420, flashers: 0 }],
-        masts: [[170, 140], [235, 140], [295, 140], [370, 140], [447, 140], [515, 140], [-10, 118], [-200, 125]],
+        masts: [[LX(-129 + ADX), 152], [LX(-61 + ADX), 152], [LX(7 + ADX), 152], [LX(83 + ADX), 152], [LX(159 + ADX), 152], [LX(227 + ADX), 152], [-10, 130], [-200, 140]],
         windsocks: [[-295, 55, 0.9], [295, 55, 0.9]],
-        ulds: [[-245, 132, 0, 1], [-242, 128, 0, 1], [-239, 124, 0, 1], [-205, 132, Math.PI / 2, 1], [-201, 132, Math.PI / 2, 0], [-197, 132, Math.PI / 2, 1], [-193, 132, Math.PI / 2, 1]],
+        ulds: [[-245, 149, 0, 1], [-242, 145, 0, 1], [-239, 141, 0, 1], [-205, 149, Math.PI / 2, 1], [-201, 149, Math.PI / 2, 0], [-197, 149, Math.PI / 2, 1], [-193, 149, Math.PI / 2, 1]],
       },
     }) : null;
     const gateZ = AP ? AP.gates[0].z : -46 + ADZ;

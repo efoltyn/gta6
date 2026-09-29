@@ -34,6 +34,9 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  // Built when the prison is first needed, as if at this script's parse
+  // point (core/prisonlazy.js). Body left at its old indent.
+  CBZ.definePrison("entities/keycard.js", function () {
   const scene = CBZ.prisonRoot || CBZ.scene;
   const { mat } = CBZ;
   const addBox = CBZ.addBox;
@@ -281,4 +284,5 @@
       collected: !!CBZ.keycard.collected,
     };
   };
+  });
 })();
