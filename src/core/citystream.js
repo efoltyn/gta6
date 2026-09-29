@@ -429,10 +429,15 @@
     root.traverse(function (o) {
       if (!o.isMesh || o.isInstancedMesh || !o.geometry) return;
       const u = o.userData || {};
-      // (batch-merged meshes keep theirs: core/farcull.js evicts them from the
-      // GPU when they are far, and three re-uploads them from these arrays)
-      if (!(u.terrain || u.worldSurface)) return;
+      // Batch-merged meshes: on the desktop they keep theirs (core/farcull.js
+      // evicts them from the GPU when far and three re-uploads from these
+      // arrays). In the streamed (phone) city the streamer frees far content
+      // anyway, so one copy wins: normals + colours go (the wall / group hide
+      // writes position only), and the mesh is no longer evictable.
       const g = o.geometry;
+      const merged = g._evictable && CFG.CITY_STREAM === true;
+      if (!(u.terrain || u.worldSurface || merged)) return;
+      if (merged) g._evictable = false;
       if (g._cbzFreed) return;
       g._cbzFreed = true;
       for (const k in g.attributes) {

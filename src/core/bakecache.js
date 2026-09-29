@@ -44,10 +44,11 @@
       r.onerror = function () { rej(r.error); };
     });
   }
-  let dbp = null;
+  let dbp = null, dbOpen = null;
   if (!OFF) {
     const t0 = performance.now();
     dbp = open();
+    dbp.then(function (db) { dbOpen = db; }, function () {});
     dbp.then(function (db) {
       if (mode === "clear") { try { db.transaction(STORE, "readwrite").objectStore(STORE).clear(); } catch (e) {} stats.ready = true; return; }
       const tx = db.transaction(STORE, "readonly"), st = tx.objectStore(STORE);
@@ -132,11 +133,20 @@
       if (bad) { stats.mismatch = (stats.mismatch || 0) + 1; stats.log.push("MISMATCH " + key); } else { stats.verified = (stats.verified || 0) + 1; }
       return;
     }
-    // own copies: the builder keeps (and may later edit) its arrays
+    stats.puts++;
+    /* The database is open (it opens at parse, long before any build): put
+       NOW. IndexedDB's structured clone snapshots the arrays synchronously
+       inside put(), so the builder may edit its arrays afterwards, and no
+       second copy of 15 MB terrain arrays sits in the heap for 3 s at the
+       build's peak (first visit). */
+    if (dbOpen) {
+      try { dbOpen.transaction(STORE, "readwrite").objectStore(STORE).put({ sig: sig, arrays: arrays, at: Date.now() }, key); return; }
+      catch (e) { stats.err = String(e); }
+    }
+    // not open yet: own copies (the builder keeps, and may later edit, its arrays)
     const copy = {};
     for (const k in arrays) copy[k] = arrays[k] && arrays[k].slice ? arrays[k].slice() : arrays[k];
     const rec = { sig: sig, arrays: copy, at: Date.now() };
-    stats.puts++;
     // written after the frame that needs the CPU: never inside the build
     setTimeout(function () {
       dbp.then(function (db) {

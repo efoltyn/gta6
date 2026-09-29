@@ -248,7 +248,10 @@ const PROFILE = has("--profile");
    after the forced GC, the LIVE V8 bytes are listed by allocating game site
    (nearest src/ frame) and by file. ArrayBuffer backing stores are not V8
    heap objects: --preload tools/preload/abtrack.js lists those. */
-const HEAP_SITES = has("--heap-sites");
+// --heap-garbage: the same sampler over the load, INCLUDING what the GC
+// collected (who makes the build's garbage, not only who holds the heap)
+const HEAP_GARBAGE = has("--heap-garbage");
+const HEAP_SITES = has("--heap-sites") || HEAP_GARBAGE;
 const ATTRIBUTE = has("--attribute");
 const SAVE = opt("--save", "");
 const JSON_OUT = opt("--json", "");
@@ -980,7 +983,7 @@ const SCRIPT_TABLE = String.raw`(function(){
 async function measureLoad(B, P, url, out, prof) {
   const sn0 = await cpuSnap(B, P);
   const tNav = Date.now();
-  if (HEAP_SITES) { await P.s("HeapProfiler.enable"); await P.s("HeapProfiler.startSampling", { samplingInterval: 32768 }); }
+  if (HEAP_SITES) { await P.s("HeapProfiler.enable"); await P.s("HeapProfiler.startSampling", HEAP_GARBAGE ? { samplingInterval: 524288, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true } : { samplingInterval: 32768 }); }
   await P.s("Page.navigate", { url });
   await waitFor(P.ev, "!!(window.CBZ && CBZ.bootComplete && CBZ.startRun && window.__speed && document.readyState === 'complete')", 240, "bootComplete");
   await P.ev(PAGE_LIB);
@@ -1031,7 +1034,7 @@ async function measureLoad(B, P, url, out, prof) {
   /* MEMORY: peak over the whole load (script eval, build, first frames:
      sampled in-page through all of it), and the steady value after settle */
   const ms = await memSnap(P);
-  if (HEAP_SITES) { try { const { profile } = await P.s("HeapProfiler.getSamplingProfile", {}, 120000); await P.s("HeapProfiler.stopSampling", {}, 120000); out.heapSites = heapSites(profile); } catch (e) { out.heapSites = { err: String(e).slice(0, 200) }; } }
+  if (HEAP_SITES) { try { const { profile } = await P.s("HeapProfiler.getSamplingProfile", {}, 300000); await P.s("HeapProfiler.stopSampling", {}, 120000); out.heapSites = heapSites(profile); } catch (e) { out.heapSites = { err: String(e).slice(0, 200) }; } }
   if (ms) out.mem = { boot: ms.peak, steady: { heap: ms.heap, heapTotal: ms.heapTotal, gpu: ms.gpu, buf: ms.buf, tex: ms.tex, rb: ms.rb, db: ms.db, phone: ms.phone, cv2d: ms.cv2d, cdpHeap: ms.cdpHeap, cdpHeapTotal: ms.cdpHeapTotal, arrayBuffers: ms.arrayBuffers, liveHeap: ms.liveHeap, liveV8: ms.liveV8, liveArrayBuffers: ms.liveArrayBuffers, livePhone: ms.livePhone, cdpRaw: ms.cdpRaw, cdpMetrics: ms.cdpMetrics },
     objects: { buffers: ms.nBuf, textures: ms.nTex, renderbuffers: ms.nRb }, subDataMB: ms.subMB, samples: ms.samples, precise: ms.precise, budgetMB: MEM_BUDGET_MB,
     atTitle: memTitle && { heap: memTitle.heap, gpu: memTitle.gpu, phone: memTitle.phone, peakPhone: memTitle.peak.phone },
@@ -1594,8 +1597,8 @@ function table(res) {
     pm("load.programs", "  programs compiled", "n");
     if (r.mem) { const b = r.mem.boot || {}, st = r.mem.steady || {};
       p(`  MEMORY (MB)  JS heap peak ${fmt(b.heap, 0)} / steady ${fmt(st.heap, 0)}${st.cdpHeap != null ? ` (= V8 heap ${fmt(st.cdpHeap, 0)} + ArrayBuffers ${fmt(st.arrayBuffers, 0)})` : ""}   GPU peak ${fmt(b.gpu, 0)} / steady ${fmt(st.gpu, 0)} [textures ${fmt(st.tex, 0)} buffers ${fmt(st.buf, 0)} renderbuffers ${fmt(st.rb, 0)} drawing buffer ${fmt(st.db, 0)}]   2D canvases ${fmt(st.cv2d, 0)}`);
-      if (r.heapSites && r.heapSites.files) { p(`  LIVE V8 BY FILE (sampled, ${r.heapSites.totalMB} MB): ` + r.heapSites.files.slice(0, 25).map(([f, mb]) => `${f} ${mb}`).join(" · "));
-        p(`  LIVE V8 BY SITE: ` + r.heapSites.sites.slice(0, 30).map(([f, mb]) => `${f} ${mb}`).join(" · ")); }
+      if (r.heapSites && r.heapSites.files) { p(`  ${HEAP_GARBAGE ? "ALLOCATED (incl. garbage)" : "LIVE"} V8 BY FILE (sampled, ${r.heapSites.totalMB} MB): ` + r.heapSites.files.slice(0, 25).map(([f, mb]) => `${f} ${mb}`).join(" · "));
+        p(`  ${HEAP_GARBAGE ? "ALLOCATED" : "LIVE"} V8 BY SITE: ` + r.heapSites.sites.slice(0, 30).map(([f, mb]) => `${f} ${mb}`).join(" · ")); }
       if (st.liveHeap != null) p(`  LIVE after a forced GC: JS heap ${fmt(st.liveHeap, 0)} (V8 ${fmt(st.liveV8, 0)} + ArrayBuffers ${fmt(st.liveArrayBuffers, 0)})   phone live ${fmt(st.livePhone, 0)} MB ${memVerdict(st.livePhone)}`);
       p(`  PHONE TOTAL (heap + GPU)  peak ${fmt(b.phone, 0)} MB ${memVerdict(b.phone)}   steady ${fmt(st.phone, 0)} MB ${memVerdict(st.phone)}   (budget ${r.mem.budgetMB || MEM_BUDGET_MB} MB; iOS kills a tab near 1-1.5 GB)${r.mem.precise === false ? "  [heap NOT precise]" : ""}`); }
     if (g("load.cpu.main")) p(`  CPU time (Chrome): main thread ${fmt(g("load.cpu.main").v, 0)} ms (build ${fmt(g("load.cpu.mainBuild") && g("load.cpu.mainBuild").v, 0)}, first frames ${fmt(g("load.cpu.mainFirstFrames") && g("load.cpu.mainFirstFrames").v, 0)}, V8 compile ${fmt(g("load.cpu.v8Compile") && g("load.cpu.v8Compile").v, 0)})  GPU process ${fmt(g("load.cpu.gpuProc") && g("load.cpu.gpuProc").v, 0)} ms (first frames ${fmt(g("load.cpu.gpuProcFirstFrames") && g("load.cpu.gpuProcFirstFrames").v, 0)})`);

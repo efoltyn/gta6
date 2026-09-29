@@ -8,7 +8,7 @@
    is printed beside Chrome's ArrayBuffers figure. */
 (function () {
   "use strict";
-  var sites = new Map(), live = 0, n = 0;
+  var sites = new Map(), live = 0, n = 0, allocTot = 0;
   var reg = new FinalizationRegistry(function (h) { var e = sites.get(h[0]); if (e) { e.b -= h[1]; e.n--; } live -= h[1]; });
   var MIN = 1024;
   function site() {
@@ -22,7 +22,8 @@
   }
   function track(buf, arr) {
     var b = buf.byteLength; if (b < MIN) return;
-    var k = site(), e = sites.get(k); if (!e) sites.set(k, e = { b: 0, n: 0, s: [] });
+    var k = site(), e = sites.get(k); if (!e) sites.set(k, e = { b: 0, n: 0, s: [], tot: 0 });
+    e.tot += b; allocTot += b;
     if (e.s.length < 64) e.s.push(new WeakRef(arr || buf));
     e.b += b; e.n++; live += b; n++;
     reg.register(buf, [k, b]);
@@ -68,6 +69,13 @@
     return JSON.stringify({ samples: want.size, nodes: nodes, found: found });
   };
   window.CBZ_AB_SAMPLES = function (sub) { var out = []; sites.forEach(function (e, k) { if (k.indexOf(sub) >= 0) e.s.forEach(function (w) { var a = w.deref(); if (a) out.push(a); }); }); return out; };
+  // CBZ_AB_CHURN(): bytes ALLOCATED per site since load (dead + live): where
+  // the build's garbage comes from
+  window.CBZ_AB_CHURN = function (top) {
+    var rows = []; sites.forEach(function (e, k) { rows.push([k, +(e.tot / 1048576).toFixed(1), +((e.tot - e.b) / 1048576).toFixed(1), e.n]); });
+    rows.sort(function (a, b) { return b[2] - a[2]; });
+    return JSON.stringify({ allocMB: +(allocTot / 1048576).toFixed(0), liveMB: +(live / 1048576).toFixed(0), cols: "site, allocated MB, dead MB, live count", top: rows.slice(0, top || 40) });
+  };
   window.CBZ_AB = function (top) {
     var rows = []; sites.forEach(function (e, k) { if (e.b > 0) rows.push([k, +(e.b / 1048576).toFixed(1), e.n]); });
     rows.sort(function (a, b) { return b[1] - a[1]; });

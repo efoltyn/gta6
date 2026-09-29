@@ -711,17 +711,56 @@
     }
     return k;
   }
+  /* The same result as toNonIndexed()/clone() + applyMatrix4 per part and
+     mergeGeometryCopies, written straight into the merged arrays: no per-part
+     copies (they were ~16 MB of garbage per city build, all at the build's peak). */
+  const _mnm = new THREE.Matrix3(), _mv = new THREE.Vector3();
+  function mergeTransformed(parts) {
+    let vertices = 0, anyColor = false;
+    for (const p of parts) {
+      vertices += p.g.index ? p.g.index.count : p.g.attributes.position.count;
+      if (p.g.attributes.color) anyColor = true;
+    }
+    const pos = new Float32Array(vertices * 3), nrm = new Float32Array(vertices * 3);
+    const col = anyColor ? new Float32Array(vertices * 3) : null;
+    let o = 0;
+    for (const p of parts) {
+      const g = p.g, idx = g.index ? g.index.array : null;
+      const P = g.attributes.position, N = g.attributes.normal, C = g.attributes.color;
+      const n = idx ? idx.length : P.count;
+      const e = p.m.elements;
+      _mnm.getNormalMatrix(p.m);
+      const ne = _mnm.elements;
+      for (let i = 0; i < n; i++, o += 3) {
+        const v = idx ? idx[i] : i;
+        const x = P.getX(v), y = P.getY(v), z = P.getZ(v);
+        const w = 1 / (e[3] * x + e[7] * y + e[11] * z + e[15]);
+        pos[o] = (e[0] * x + e[4] * y + e[8] * z + e[12]) * w;
+        pos[o + 1] = (e[1] * x + e[5] * y + e[9] * z + e[13]) * w;
+        pos[o + 2] = (e[2] * x + e[6] * y + e[10] * z + e[14]) * w;
+        if (N) {
+          const a = N.getX(v), b = N.getY(v), c = N.getZ(v);
+          _mv.set(ne[0] * a + ne[3] * b + ne[6] * c, ne[1] * a + ne[4] * b + ne[7] * c, ne[2] * a + ne[5] * b + ne[8] * c).normalize();
+          nrm[o] = _mv.x; nrm[o + 1] = _mv.y; nrm[o + 2] = _mv.z;
+        }
+        if (col) {
+          if (C && C.itemSize === 3) { col[o] = C.getX(v); col[o + 1] = C.getY(v); col[o + 2] = C.getZ(v); }
+          else { col[o] = 1; col[o + 1] = 1; col[o + 2] = 1; }
+        }
+      }
+    }
+    const out = new THREE.BufferGeometry();
+    out.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    out.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
+    if (col) out.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    out.computeBoundingSphere();
+    return out;
+  }
   function sharedMerge(parts) {
     const key = mergeKey(parts);
     let geo = _mergeCache.get(key);
     if (geo) return geo;
-    const copies = parts.map(function (p) {
-      const c = p.g.index ? p.g.toNonIndexed() : p.g.clone();
-      c.applyMatrix4(p.m);
-      return c;
-    });
-    geo = mergeGeometryCopies(copies);
-    copies.forEach(function (c) { if (c.dispose) c.dispose(); });
+    geo = mergeTransformed(parts);
     geo._shared = true;
     _mergeCache.set(key, geo);
     return geo;

@@ -280,9 +280,16 @@
   let _detail = null;
   function bakeDetail(N) {
     const t0 = Date.now();
+    /* A pure function of N and this file: kept in the bake cache
+       (core/bakecache.js), since the ten 1 MB float fields it builds on the
+       way were ~20 MB of garbage at the city build's heap peak. */
+    const sig = CBZ.bakeSig ? CBZ.bakeSig("detail:" + N) : null;
+    const hit = sig && CBZ.bakeGet ? CBZ.bakeGet("city-ground-detail", sig) : null;
+    if (hit && hit.T1 && hit.T1.length === N * N * 4) { stats.bakeMs = Date.now() - t0; return { N, T1: hit.T1, T2: hit.T2, T3: hit.T3 }; }
     const g = grassField(N), e = earthField(N), a = asphaltField(N), c = concreteField(N), p = paverField(N);
     const dry = field(N, 5, 3, 601), weed = field(N, 24, 2, 603);
     const out = { N, T1: pack(N, g[0], g[1], e[0], e[1]), T2: pack(N, a[0], a[1], dry, weed), T3: pack(N, c[0], c[1], p[0], p[1]) };
+    if (sig && CBZ.bakePut) CBZ.bakePut("city-ground-detail", sig, { T1: out.T1, T2: out.T2, T3: out.T3 });
     stats.bakeMs = Date.now() - t0;
     return out;
   }
