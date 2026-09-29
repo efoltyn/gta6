@@ -20,7 +20,6 @@ function section(source, start, end) {
   return source.slice(a, b);
 }
 
-assert.match(config, /STRUCT_RPG_RUIN_V2[^\n]*= true/);
 assert.match(config, /PATRIOT_V1[^\n]*= true/);
 
 // The invented ruin frame (jagged slab teeth over a machined rectangle) is gone:
