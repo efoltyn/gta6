@@ -1111,12 +1111,12 @@ document.body.appendChild(b);}}catch(e){}})();
      companion system (both self-register as high-order landmasses). -->
 <script src="src/city/wildlife_rig.js?v=sharkfix3"></script>
 <script src="src/city/wildlife_species.js?v=attach1"></script>
-<script src="src/city/wildlife/aquatic.js?v=sharkfix3"></script>
+<script src="src/city/wildlife/aquatic.js?v=sweep0929"></script>
 <!-- EVERY ANIMAL IS AN INDIVIDUAL: the per-individual size draw and the
      hunger scalar wildlife.js spends. Must load BEFORE the engine (it
      binds CBZ.wildlifeTraits once, at load); absent, the engine falls
      straight back to the species constant. -->
-<script src="src/city/wildlife.js?v=sharkfix3"></script>
+<script src="src/city/wildlife.js?v=sweep0929"></script>
 <!-- 4d-5. FIGHTING — shared creature-combat (animal fight anims), trait-driven
      companion defense, and the walk-in Fight Arena venue (boxing/MMA/beast pit). -->
 <!-- THE ANGLE LAW loads first because it is the one thing all three biters
@@ -1546,7 +1546,7 @@ document.body.appendChild(b);}}catch(e){}})();
      full) and the caller falls back to CBZ.wildlifeDeathTumble. -->
 <!-- The shark is thin on purpose: numbers, fin/wake proxy, locomotion. After
      predator.js AND wildlife.js so both seams exist. -->
-<script src="src/city/wildlife_shark.js?v=sharkfix3"></script>
+<script src="src/city/wildlife_shark.js?v=sweep0929"></script>
 <!-- THE ORCA. Re-registers id:"orca" over city/wildlife/aquatic.js's build
      (defineSpecies is last-write-wins) so the markings that actually identify
      the animal exist: the white post-ocular eye patch, the grey saddle, the

@@ -988,7 +988,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/grapple.js?v=vit3"></script>
 <script src="src/entities/survivorbot.js?v=m0928a-st1"></script>
 <script src="src/modes/survival.js?v=vit3"></script>
-<script src="src/modes/shark_sim.js?v=pause1"></script>
+<script src="src/modes/shark_sim.js?v=sweep0929"></script>
 <!-- SHARK SIM's own front door: hides the shared card in shark mode, lays
      PLAY over the live sea, proxies every original control by id. -->
 <script src="src/modes/shark_title.js?v=uicut1"></script>
@@ -1156,7 +1156,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- Shared signed shoreline/depth/current oracle. Loaded immediately after
      the landmass registry so rendering, swimmers, boats and aquatic wildlife
      all consult the same coast instead of inventing separate radius tests. -->
-<script src="src/city/waterfield.js?v=w09290242x"></script>
+<script src="src/city/waterfield.js?v=sweep0929"></script>
 <!-- Reflective-ocean FX: swaps CBZ.citySea for a THREE.WaterReflect plane when
      CBZ.CONFIG.WATER_REFLECT is on (default). Reads the sea lazily at runtime,
      so load order past config.js + WaterReflect.js is all it needs. -->
@@ -1281,13 +1281,13 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/wildlife/snow_ungulates.js?v=attach1"></script>
 <script src="src/city/wildlife/small_game.js?v=attach1"></script>
 <script src="src/city/wildlife/snakes.js?v=wild1"></script>
-<script src="src/city/wildlife/aquatic.js?v=sharkfix3"></script>
+<script src="src/city/wildlife/aquatic.js?v=sweep0929"></script>
 <!-- EVERY ANIMAL IS AN INDIVIDUAL: the per-individual size draw and the
      hunger scalar wildlife.js spends. Must load BEFORE the engine (it
      binds CBZ.wildlifeTraits once, at load); absent, the engine falls
      straight back to the species constant. -->
 <script src="src/city/wildlife_traits.js?v=indiv1"></script>
-<script src="src/city/wildlife.js?v=sharkfix3"></script>
+<script src="src/city/wildlife.js?v=sweep0929"></script>
 <script src="src/city/wildlife_tame.js?v=ekey2"></script>
 <script src="src/city/dogs.js?v=cd0929"></script>
 <!-- 4d-5. FIGHTING — shared creature-combat (animal fight anims), trait-driven
@@ -1299,7 +1299,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (predatorKit, marineGape, marineHurt) is asked for at CALL time, so its
      position here is about readability, not load order. -->
 <script src="src/systems/bite_angles.js?v=biteangles1"></script>
-<script src="src/city/creature_combat.js?v=sharkmouth2"></script>
+<script src="src/city/creature_combat.js?v=sweep0929"></script>
 <script src="src/city/companions.js?v=allmain1"></script>
 <!-- IRONJAW ARENA. arena_venue.js is the BUILDING (raked bowl, concourse,
      vomitories, roof truss, light rig, jumbotron, instanced crowd);
@@ -1864,7 +1864,7 @@ document.body.appendChild(b);}}catch(e){}})();
      predatorHunt (stalking FSM w/ menace gauge), predatorSeize (the grab),
      predatorDread (tension bus). Medium-agnostic, so a shark and a bear run the
      same brain. After wounds.js (routes through CBZ.bodyBite). -->
-<script src="src/systems/predator.js?v=w09290332s"></script>
+<script src="src/systems/predator.js?v=sweep0929"></script>
 <!-- The LAND sibling of the swim rig. Land animals had no jaw articulation and
      no spine bend at all — a bear grabbing you moved nothing. Discovery is
      geometric (no species table), so all 45 species animate from one change.
@@ -1888,7 +1888,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/quadruped_ragdoll.js?v=loose1"></script>
 <!-- The shark is thin on purpose: numbers, fin/wake proxy, locomotion. After
      predator.js AND wildlife.js so both seams exist. -->
-<script src="src/city/wildlife_shark.js?v=sharkfix3"></script>
+<script src="src/city/wildlife_shark.js?v=sweep0929"></script>
 <!-- THE ORCA. Re-registers id:"orca" over city/wildlife/aquatic.js's build
      (defineSpecies is last-write-wins) so the markings that actually identify
      the animal exist: the white post-ocular eye patch, the grey saddle, the
@@ -1913,7 +1913,7 @@ document.body.appendChild(b);}}catch(e){}})();
      it declines falls through to the shark's own player hunt), and after
      predator.js + creature_combat.js whose drivers it ticks rather than
      duplicating. Reverts whole with CBZ.CONFIG.MARINE_PREDATION = false. -->
-<script src="src/city/marine_predation.js?v=sharkfix3"></script>
+<script src="src/city/marine_predation.js?v=sweep0929"></script>
 <!-- WHAT A KILL LOOKS LIKE FROM A MILE AWAY: the bait ball that tightens, is
      driven up against the surface and collapses as it is eaten; the gulls
      working it (the only part of a marine kill visible ABOVE the water, and
@@ -2366,7 +2366,7 @@ document.body.appendChild(b);}}catch(e){}})();
      field, splash/wake FX. After core/quality.js so CBZ.onQualityChange exists
      at parse time; before core/loop.js so their updaters make the boot sort.
      No dependency on each other — any order among these three works. -->
-<script src="src/world/water_underwater.js?v=snow1"></script>
+<script src="src/world/water_underwater.js?v=sweep0929"></script>
 <script src="src/world/water_buoyancy.js?v=waterv2"></script>
 <!-- Roll and capsize. A shark can now put a boat on its beam ends and roll it
      over, and a hull that goes over stays over — inverted, keel up, its people
@@ -2396,7 +2396,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (publishes the bathymetry pair); it retries on the update bus if either is
      still missing, so a future reorder degrades to a late install rather than a
      silent no-op. Revert with ?cfg_SURV_SHARED_WATER_FX=0. -->
-<script src="src/world/water_survival.js?v=sharkmode1"></script>
+<script src="src/world/water_survival.js?v=sweep0929"></script>
 
 <!-- WORLD DRESSING (5 layers) — the "lived-in" pass: street furniture, power
      poles + catenary-sagging wires, road wear/paint/puddles, and rooftop and
