@@ -51,6 +51,7 @@
     "test:c4-held": "node tools/check-c4-held.mjs",
     "test:elevator": "node tools/elevator-machine-test.mjs",
     "test:seat-exit": "node tools/seat-exit-check.mjs",
+    "test:verb-cluster-layout": "node tools/verb-cluster-layout-check.mjs",
     "test:gunhands": "node tools/gunhands-check.mjs",
     "test:tattoo": "node tools/tattoo-check.mjs",
     "test:ads": "node tools/ads-check.mjs",

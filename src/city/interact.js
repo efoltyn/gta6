@@ -1397,7 +1397,7 @@
     canShow: (p) => !p.recruited && !p.gang && !hatesYou(p) && canAfford100() && !(CBZ.presidentStaff && CBZ.presidency && CBZ.presidency.seat && CBZ.presidency.seat()),
     label: "Hire", onSelect: (p) => CBZ.cityRecruit(p),
   });
-  I.register("ped:civ", { id: "ped-flirt", slot: "k", prio: 36, canShow: (p) => !hatesYou(p) && CBZ.cityIsRomance && CBZ.cityIsRomance(p), label: "Chat up", onSelect: (p) => CBZ.cityFlirt(p) });
+  I.register("ped:civ", { id: "ped-flirt", slot: "k", prio: 36, canShow: (p) => !hatesYou(p) && CBZ.cityIsRomance && CBZ.cityIsRomance(p), label: "Flirt", onSelect: (p) => CBZ.cityFlirt(p) });
   I.register("ped:civ", { id: "ped-talk", slot: "k", prio: 5, label: "Talk", onSelect: (p) => { if (CBZ.cityMeet) CBZ.cityMeet(p); talk(p); } });
 
   // ---- LIVING PED, slot L ----

@@ -26,11 +26,11 @@
 <link rel="stylesheet" href="css/hud.css?v=flick1">
 <link rel="stylesheet" href="css/screens.css?v=pause1">
 <link rel="stylesheet" href="css/shark_title.css?v=pause1">
-<link rel="stylesheet" href="css/mobile.css?v=pause1">
+<link rel="stylesheet" href="css/mobile.css?v=tui0929">
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
 <link rel="stylesheet" href="css/inventory.css?v=cuffs1">
-<link rel="stylesheet" href="css/city.css?v=cd0929">
-<link rel="stylesheet" href="css/campaign.css?v=onecall1">
+<link rel="stylesheet" href="css/city.css?v=tui0929">
+<link rel="stylesheet" href="css/campaign.css?v=tui0929">
 <link rel="stylesheet" href="css/interact_touch.css?v=flick1">
 <link rel="stylesheet" href="css/title_hub.css?v=end1">
 </head>
@@ -745,7 +745,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/prisonvoice.js?v=voice1"></script>
 <script src="src/systems/input.js"></script>
 <script src="src/systems/spatialgrid.js?v=scale3"></script>
-<script src="src/systems/camera.js?v=me6f1ee"></script>
+<script src="src/systems/camera.js?v=tui0929"></script>
 <script src="src/systems/physics.js?v=colcore1"></script>
 <script src="src/systems/meshcollider.js?v=meshcol1"></script>
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
@@ -853,6 +853,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/touch.js?v=ekey2"></script>
 <!-- THE WAY OUT of any seat (car, boat, cockpit, armor, saddle, chair, bed):
      CBZ.seatState/seatExit, the key pinned on the door, the one touch EXIT. -->
+<!-- where a floating touch button may go (the verb column, the way out): pure rect math -->
+<script src="src/systems/touch_layout.js?v=tui0929"></script>
 <!-- Xbox / gamepad support (GTA-style scheme). Loads before loop.js so its
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
@@ -1283,12 +1285,12 @@ document.body.appendChild(b);}}catch(e){}})();
      fire paths it feeds). Revert: CBZ.CONFIG.WEAPON_LOCKON = false. -->
 <!-- The word on every button is a verb (city/verbword.js CBZ.cityVerbWord);
      before interactions.js, whose row renderer prints through it. -->
-<script src="src/city/verbword.js?v=cd0929"></script>
-<script src="src/city/interactions.js?v=ekey2"></script>
+<script src="src/city/verbword.js?v=tui0929"></script>
+<script src="src/city/interactions.js?v=tui0929"></script>
 <!-- THE VERB WHEEL (Q / a touch tap): everything you can do to the thing you
      look at, laid round it; orders about a third person start here. Reads
      city/interactions.js's wheelOf/fireOn. -->
-<script src="src/city/verbwheel.js?v=ekey2"></script>
+<script src="src/city/verbwheel.js?v=tui0929"></script>
 <!-- FUEL. The world has been generating "Pump & Go Fuel" lots since long
      before this file — they just had nothing to sell, because no vehicle had
      a tank. Player vehicle only (a hundred NPC cars silently running dry is a

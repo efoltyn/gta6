@@ -407,7 +407,7 @@
   I.register("ped:civ", {
     id: "rich-k-way", slot: "k", prio: 7,
     canShow: (p) => isStrangerish(p) && !isYours(p) && !hatesYou(p) && !isVip(p),
-    label: "Ask",
+    label: "Ask the way",
     onSelect: (p) => pointTheWay(p),
   });
 
@@ -433,7 +433,7 @@
   I.register("ped:civ", {
     id: "rich-j-smoke", slot: "j", prio: 11,
     canShow: (p) => isStrangerish(p) && !isYours(p) && !readsMeAsSmaller(p),
-    label: "Bum one",
+    label: "Ask for a smoke",
     onSelect: (p) => bumSmoke(p),
   });
 

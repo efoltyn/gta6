@@ -378,6 +378,7 @@ function labelVerdict(s) {
 const require = createRequire(import.meta.url);
 const verbWord = require(path.join(ROOT, "src/city/verbword.js"));
 for (const r of labels) {
+  if (verbWord.WHOLE.includes(r.s.trim())) continue;   // a verb that needs its object, printed as authored
   const why = labelVerdict(r.s);
   if (why) { flag("label", r, why); continue; }
   const whole = r.s.trim();

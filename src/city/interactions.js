@@ -453,23 +453,23 @@
   CBZ.cityInteractRowsHTML = rowsHTML;
 
   /* ---- THE CLUSTER (for the tap-a-person surface) -----------------------
-     CBZ.cityVerbCluster(rows, { ring }) -> HTML for every verb a person or
-     thing offers, around it: `.vcluster` holding `.vpill` buttons, the first
-     row (the likely one) as `.vpill.lead`. With ring:true each pill carries
-     --i/--n and css/city.css lays them on a circle around the anchor. The
-     caller positions the `.vcluster` element (left/top) and routes the tap
-     by data-i. Styling lives entirely in css/city.css. */
+     CBZ.cityVerbCluster(rows, { placed }) -> HTML for the verbs a person or
+     thing offers: `.vcluster` holding `.vpill` buttons, the first row (the
+     likely one) as `.vpill.lead`, a row with { more: true } as `.vpill.more`.
+     With placed:true every pill is absolutely positioned by the caller
+     (city/verbwheel.js measures the pills and lays them out through
+     systems/touch_layout.js); without it the pills stack in a column.
+     Styling lives entirely in css/city.css. */
   CBZ.cityVerbCluster = function (rows, opts) {
     rows = rows || [];
-    const ring = !!(opts && opts.ring);
-    const n = rows.length;
+    const placed = !!(opts && opts.placed);
     const pills = rows.map((r, i) => {
-      const word = esc(verbText(r));
-      const cls = "vpill" + (i === 0 ? " lead" : "") + (r.bad ? " bad" : "");
+      const word = r.more ? "More" : esc(verbText(r));
+      const cls = "vpill" + (i === 0 && !r.more ? " lead" : "") + (r.bad ? " bad" : "") + (r.more ? " more" : "");
       const key = r.key ? `<span class="vkey">${esc(String(r.key).toUpperCase())}</span>` : "";
-      return `<button type="button" class="${cls}" data-i="${i}" style="--i:${i};--n:${n}" aria-label="${word}">${key}<span class="vword">${word}</span></button>`;
+      return `<button type="button" class="${cls}" data-i="${i}" aria-label="${word}">${key}<span class="vword">${word}</span></button>`;
     }).join("");
-    return `<div class="vcluster${ring ? " ring" : ""}" style="--n:${n}">${pills}</div>`;
+    return `<div class="vcluster${placed ? " placed" : ""}">${pills}</div>`;
   };
 
   // NOTE: #interact's base style is opacity:0; only `.show` lifts it to 1.

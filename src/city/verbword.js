@@ -28,9 +28,17 @@
   const PARTICLES = /^(up|in|out|off|on|down|away|over|back|along|around|through|to|with|for|at|by|it|one|open|shut|follow|wait|go|run|home|here|guard|me|quiet|loose|free|still|cover|rob|scare|tail|hide)$/i;
   const PREPS = /^(on|at|to|with|for|by|through|along|around|over)$/i;
   const PRICE = /\$\s?\d[\d,.]*\s?[kKmM]?\b/;
+  /* A FEW VERBS NEED THEIR OBJECT. The rule above strips the noun because the
+     noun is the thing the button sits on. When the object is NOT that thing
+     (the cigarette you ask him for, the way you ask him for) the bare verb
+     is a riddle: "Ask" meant three different things and "Bum one" was the
+     slang that stood in for "ask for a smoke" (owner 2026-09-29: verbs in
+     plain words). These whole phrases print as authored. Keep it short. */
+  const WHOLE = ["Ask for a smoke", "Ask the way"];
   function verbWord(text) {
     let s = String(text == null ? "" : text).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
     if (!s) return "";
+    for (let i = 0; i < WHOLE.length; i++) if (s.toLowerCase() === WHOLE[i].toLowerCase()) return WHOLE[i];
     const price = (s.match(PRICE) || [""])[0].replace(/\s+/g, "");
     // an order prefix ("Order: take the helm") is the verb's own frame
     s = s.replace(/^(order|tell|ask)\s*:\s*/i, "");
@@ -58,6 +66,7 @@
     else if (count) v += " " + count;
     return v;
   }
+  verbWord.WHOLE = WHOLE;
   if (typeof module === "object" && module && module.exports) module.exports = verbWord;
   if (root) {
     const CBZ = root.CBZ || (root.CBZ = {});

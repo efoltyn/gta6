@@ -45,9 +45,15 @@
        other walk-up verb uses. When the door is off the frame (a first-person
        seat looks forward, the door is beside you) the label drops to the
        prompt band instead of vanishing.
-     - TOUCH: ONE button, #tExit, in ONE place (top centre, clear of the left
-       stick, the right thumb cluster and the vehicle column) in every seat
-       in every game. It wears the same verb and calls the same exit.
+     - TOUCH: ONE button, #tExit, in every seat in every game, where the
+       right thumb already is: stacked on top of the live right-hand cluster
+       (the on-foot buttons, the car's pedal column, the boat or aircraft
+       column), right-aligned with it, the same pill as the vehicle buttons.
+       On a screen too short for that it stands just left of the cluster at
+       thumb height. The spot is MEASURED off the controls that are actually
+       on the glass (systems/touch_layout.js exitSlot), so it follows every
+       layout and never lands on another button. (It was top centre: owner
+       2026-09-29, "really high on the screen and weirdly placed".)
 ============================================================ */
 (function () {
   "use strict";
@@ -240,11 +246,43 @@
     document.body.appendChild(btn);
     return btn;
   }
+  // THE SPOT: on top of (or beside) the right-thumb cluster that is live now.
+  const CLUSTER = ["#tbtns .tbtn", "#tveh .tvbtn", "#tveh #tvDial"];
+  const AVOID = ["#tstick", "#cWpn", "#hudPauseBtn", "#cRadar", "#cTopRight", "#cCluster"];
+  function rectsOf(sels) {
+    const out = [];
+    for (const sel of sels) {
+      let els = [];
+      try { els = document.querySelectorAll(sel); } catch (e) {}
+      for (let i = 0; i < els.length; i++) {
+        const r = els[i].getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) out.push({ x: r.left, y: r.top, w: r.width, h: r.height });
+      }
+    }
+    return out;
+  }
+  let placeAt = 0;
+  function placeBtn(force) {
+    const L = CBZ.touchLayout;
+    if (!btn || !L || typeof window === "undefined") return;
+    const t = Date.now();
+    if (!force && t - placeAt < 200) return;       // the cluster changes with the context, not per frame
+    placeAt = t;
+    const W = window.innerWidth || 800, H = window.innerHeight || 600;
+    const size = { w: Math.ceil(btn.offsetWidth) || 120, h: Math.ceil(btn.offsetHeight) || 54 };
+    const slot = L.exitSlot({ W: W, H: H, size: size, gap: 12, cluster: rectsOf(CLUSTER), avoid: rectsOf(AVOID),
+      margin: { top: 12, right: 12, bottom: 12, left: 12 } });
+    if (!slot) return;
+    btn.style.left = slot.x + "px";
+    btn.style.top = slot.y + "px";
+  }
   function showBtn(verb) {
     if (!buildBtn()) return;
     const label = String(verb).toUpperCase();
-    if (btnVerb !== label) { btnVerb = label; btn.textContent = label; }
-    if (!btnShown) { btnShown = true; btn.style.display = ""; }
+    let changed = false;
+    if (btnVerb !== label) { btnVerb = label; btn.textContent = label; changed = true; }
+    if (!btnShown) { btnShown = true; btn.style.display = ""; changed = true; }
+    placeBtn(changed);
   }
   function hideBtn() {
     if (btn && btnShown) { btnShown = false; btn.style.display = "none"; btn.classList.remove("on"); }

@@ -1804,7 +1804,18 @@
     const hit = CBZ.losRaycast ? CBZ.losRaycast(raycaster, CBZ.losBlockers) : raycaster.intersectObjects(CBZ.losBlockers, false);
     if (hit.length > 0 && hit[0].distance < occ) occ = hit[0].distance;
     occ = Math.min(occ, sweepColliders(baseX, baseY, baseZ, _rd.x, _rd.y, _rd.z, rayDist, 0.34));
-    occ = Math.min(occ, sweepActors(baseX, baseY, baseZ, _rd.x, _rd.y, _rd.z, rayDist, 0.30));
+    // A PERSON behind you may pull the lens in only to a spot IN FRONT of him.
+    // The floor below (1.6 m in the city) is longer than the gap to a crew
+    // member following at your back, so the old clamp parked the lens behind
+    // HIS head at 1.6 m: on the owner's iPad (2026-09-29) two followers' heads
+    // filled the lower half of the screen and the player was a blob. When the
+    // lens cannot land in front of the person, it keeps its full boom and the
+    // person is simply a person standing between you and the camera.
+    const occActor = sweepActors(baseX, baseY, baseZ, _rd.x, _rd.y, _rd.z, rayDist, 0.30);
+    if (occActor < occ) {
+      const floorNow = (CBZ.game.mode === "city" && !player.driving) ? 1.5 : 0.28;
+      if (occActor - 0.25 >= floorNow) occ = occActor;
+    }
     if (occ < rayDist) {
       // The DENSE city boxes the camera in on all sides; with a 0.28 floor it
       // slammed to your back every step (a broken first-person feel). Keep a

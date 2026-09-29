@@ -803,23 +803,28 @@ body.touch #cCluster.handoff {
 }
 
 /* ============================================================
-   THE WAY OUT (#tExit, systems/seat_exit.js). ONE button, ONE place, in
-   every seat in every game: car, passenger seat, boat, cockpit, tank,
-   saddle, chair, bed. Top centre: clear of the radar (top-left), the money
-   and minimap stack (top-right), the left stick and the right thumb column.
-   It wears the verb the tap will do (GET OUT, JUMP, STAND UP, GET UP).
+   THE WAY OUT (#tExit, systems/seat_exit.js). ONE button in every seat in
+   every game: car, passenger seat, boat, cockpit, tank, saddle, chair, bed.
+   It is the SAME pill as the vehicle buttons (#tveh .tvbtn) and it stands
+   on top of the live right-thumb cluster; seat_exit.js measures the cluster
+   (systems/touch_layout.js exitSlot) and writes left/top. It wears the verb
+   the tap will do (GET OUT, JUMP, STAND UP, GET UP).
    Only ever built on touch; hidden whenever you are not seated.
 ============================================================ */
 #tExit {
-  position: fixed; z-index: 26; left: 50%; transform: translateX(-50%);
-  top: calc(12px + env(safe-area-inset-top, 0px));
-  min-width: 132px; min-height: 52px; padding: 8px 22px;
+  position: fixed; z-index: 26;
+  left: auto; top: auto;
+  right: calc(14px + env(safe-area-inset-right, 0px));
+  bottom: calc(260px + env(safe-area-inset-bottom, 0px));
+  min-width: 108px; min-height: 54px; padding: 8px 18px;
   display: flex; align-items: center; justify-content: center;
-  border-radius: 16px; border: 2px solid rgba(255,255,255,.55);
-  background: rgba(20,30,46,.72); color: #fff;
+  border-radius: 16px; border: 2px solid rgba(255,255,255,.4);
+  background: rgba(20,30,46,.6); color: #fff;
   font: 800 17px/1 Fredoka, system-ui, sans-serif; letter-spacing: 1.2px;
   -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
-  box-shadow: 0 5px 0 rgba(0,0,0,.35);
+  box-shadow: 0 5px 0 rgba(0,0,0,.35); transition: transform .06s, background .1s;
   pointer-events: auto; touch-action: none; -webkit-tap-highlight-color: transparent;
 }
-#tExit.on { transform: translateX(-50%) translateY(4px); box-shadow: 0 1px 0 rgba(0,0,0,.35); background: rgba(255,122,26,.62); }
+/* once placed, left/top are inline and the fallback corner lets go */
+#tExit[style*="left:"] { right: auto; bottom: auto; }
+#tExit.on { transform: translateY(4px); box-shadow: 0 1px 0 rgba(0,0,0,.35); background: rgba(255,122,26,.62); }

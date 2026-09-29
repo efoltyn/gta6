@@ -151,6 +151,12 @@ async function boot(seed, quiet) {
   const c = client(page.webSocketDebuggerUrl);
   await c.ready;
   await c.send("Runtime.enable"); await c.send("Page.enable");
+  // CBZ_VIEWPORT=WxH: boot at a real device's CSS size (an iPad is 820x1180
+  // portrait). The default 480x300 window answers no layout question.
+  if (process.env.CBZ_VIEWPORT) {
+    const m = /^(\d+)x(\d+)$/.exec(process.env.CBZ_VIEWPORT);
+    if (m) await c.send("Emulation.setDeviceMetricsOverride", { width: +m[1], height: +m[2], deviceScaleFactor: 1, mobile: false });
+  }
   // Install the headless frame budget BEFORE any game script can capture rAF.
   // Six hundred title/world frames leave ample room for startup and one
   // settled view, but prevent SwiftShader from spending minutes redrawing the

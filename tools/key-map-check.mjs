@@ -79,7 +79,19 @@ class El {
     this.parentNode = null; this.textContent = ""; this._html = ""; this.listeners = {};
     const cl = new Set(); this.classList = { add: (c) => cl.add(c), remove: (c) => cl.delete(c), contains: (c) => cl.has(c), toggle: (c, on) => { if (on === undefined) on = !cl.has(c); on ? cl.add(c) : cl.delete(c); } };
   }
-  set innerHTML(v) { this._html = v; this.children = []; }
+  // the verb column's markup (CBZ.cityVerbCluster) becomes real child pills,
+  // so city/verbwheel.js can measure and wire them like the page does
+  set innerHTML(v) {
+    this._html = v; this.children = [];
+    const m = /^<div class="([^"]*)">/.exec(String(v || ""));
+    if (m) {
+      const box = new El("div"); box.classList.add(m[1]);
+      const re = /<button type="button" class="([^"]*)"[^>]*>/g; let b;
+      while ((b = re.exec(v))) { const pill = new El("button"); pill.className = b[1]; pill.offsetWidth = 96; pill.offsetHeight = 44; box.children.push(pill); }
+      box.querySelectorAll = () => box.children.slice();
+      this.children.push(box);
+    }
+  }
   get innerHTML() { return this._html; }
   get firstElementChild() { return this.children[0] || null; }
   appendChild(c) { c.parentNode = this; this.children.push(c); return c; }
@@ -120,7 +132,7 @@ function makePage() {
   sb.window = sb; sb.window.CBZ = CBZ;
   let T = 0;
   vm.createContext(sb);
-  for (const f of ["src/systems/interactions.js", "src/systems/seat_exit.js", "src/city/interactions.js", "src/city/verbwheel.js"]) {
+  for (const f of ["src/systems/touch_layout.js", "src/systems/interactions.js", "src/systems/seat_exit.js", "src/city/interactions.js", "src/city/verbwheel.js"]) {
     vm.runInContext(read(f), sb, { filename: f });
   }
   const I = CBZ.interactions;
@@ -185,6 +197,10 @@ function look(W, x, z) { const P = W.P.pos; W.CBZ.cam.yaw = Math.atan2(-(x - P.x
   ok(a.length === 0, "I is not an interaction key any more: " + a);
   W.press("q");
   ok(W.CBZ.verbWheel.isOpen(), "Q opens the wheel on the man");
+  const few = W.CBZ.verbWheel.audit().verbs;
+  ok(few.length <= 5 && few[0] === "Talk", "a few verbs first, the likely one on top: " + few.join(", "));
+  if (few.includes("More")) W.press(String(few.indexOf("More") + 1));
+  ok(W.CBZ.verbWheel.isOpen(), "More opens the rest in place");
   const verbs = W.CBZ.verbWheel.audit().verbs;
   ok(verbs.includes("Hire") && verbs.includes("Talk") && verbs.includes("Mug") && verbs.includes("Attack"), "the wheel holds every verb he has: " + verbs.join(", "));
   const hireAt = verbs.indexOf("Hire") + 1;
@@ -259,7 +275,8 @@ function look(W, x, z) { const P = W.P.pos; W.CBZ.cam.yaw = Math.atan2(-(x - P.x
   W.CBZ.cityPeds = [W.man, mark];
   look(W, 0, -3);
   W.press("q");
-  const verbs = W.CBZ.verbWheel.audit().verbs;
+  let verbs = W.CBZ.verbWheel.audit().verbs;
+  if (!verbs.includes("Attack") && verbs.includes("More")) { W.press(String(verbs.indexOf("More") + 1)); verbs = W.CBZ.verbWheel.audit().verbs; }
   const n = verbs.indexOf("Attack") + 1;
   let a = W.press(String(n));
   ok(a.length === 0 && W.CBZ.verbWheel.ordering(), "choosing an order does not fire yet: it waits for who: " + a);

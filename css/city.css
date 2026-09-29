@@ -224,9 +224,9 @@ body.touch .lbBtn { min-height: 52px; display: flex; align-items: center; justif
      desktop card   a small dark glass plate: the name, then [E] Verb rows
      touch rows     one thumb-sized glass pill per verb
      iPad dock      the same pill on the right rail
-     .vcluster      the tap-a-person cluster (CBZ.cityVerbCluster): pills
-                    around the thing, the likely verb first and biggest,
-                    optional .ring layout on a circle (--i / --n per pill)
+     .vcluster      the tap-a-person verbs (CBZ.cityVerbCluster): a column
+                    beside the thing, the likely verb first and biggest,
+                    .placed = every pill positioned by city/verbwheel.js
    Hostile verbs (.ibad / .bad) wear a warm rim, never a red paragraph.
    Text is never forced to capitals; the verb is written the way it is said.
 ============================================================ */
@@ -294,16 +294,22 @@ body.touch.mode-city #interact .itouch-act{
 body.touch.mode-city #interact .itouch-act.ibad{ border-color:var(--verb-bad-rim); color:var(--verb-bad-ink); }
 body.touch.mode-city #interact .itouch-act:active{ background:var(--verb-press); transform:scale(.98); box-shadow:none; }
 
-/* ---- the cluster around a person or a thing (CBZ.cityVerbCluster) ----
-   The caller sets left/top on .vcluster at the thing's screen point. */
+/* ---- the verbs beside a person or a thing (CBZ.cityVerbCluster) ----
+   OWNER 2026-09-29: "look how stupid the buttons look when you press
+   someone". A ring of eight pills overlapped itself and his face. Now: one
+   column BESIDE him (city/verbwheel.js + systems/touch_layout.js place each
+   pill from its measured size), four verbs at most plus More. One size on
+   iPad and phone: thumb-high (44 px), not huge. */
 .vcluster{
   position:fixed; z-index:31; left:0; top:0;
-  display:flex; flex-direction:column; align-items:center; gap:8px;
-  transform:translate(-50%, -100%); pointer-events:none;
+  display:flex; flex-direction:column; align-items:flex-start; gap:8px;
+  pointer-events:none;
 }
+.vcluster.placed{ display:block; width:0; height:0; }
+.vcluster.placed .vpill{ position:absolute; left:0; top:0; }
 .vpill{
   pointer-events:auto; display:inline-flex; align-items:center; justify-content:center; gap:7px;
-  min-height:44px; min-width:84px; padding:0 18px;
+  box-sizing:border-box; min-height:44px; min-width:88px; max-width:240px; padding:0 18px;
   border-radius:22px; border:1.5px solid var(--verb-rim, rgba(127,231,255,.5));
   background:var(--verb-bg, rgba(9,14,21,.8)); color:var(--verb-ink, #edf5fc);
   font:var(--verb-font, 600 15px/1.15 Fredoka, system-ui, sans-serif); letter-spacing:.3px;
@@ -313,29 +319,22 @@ body.touch.mode-city #interact .itouch-act:active{ background:var(--verb-press);
   touch-action:manipulation; -webkit-tap-highlight-color:transparent; cursor:pointer;
   transition:transform .08s ease, background .12s ease;
 }
+.vpill .vword{ overflow:hidden; text-overflow:ellipsis; }
+/* the likely verb: first, a step bigger, the bright rim */
 .vpill.lead{
-  min-height:52px; padding:0 24px; font-size:17px;
+  min-height:50px; padding:0 22px; font-size:17px; font-weight:700;
   border-color:var(--verb-rim-lead, rgba(127,231,255,.85)); background:var(--verb-bg-lead, rgba(12,34,50,.88));
 }
 .vpill.bad{ border-color:var(--verb-bad-rim, rgba(255,150,130,.62)); color:var(--verb-bad-ink, #ffd6cc); }
+/* More: quiet, the rest of the verbs behind it */
+.vpill.more{ min-height:38px; min-width:72px; padding:0 14px; font-size:13px; border-style:dashed; opacity:.9; }
 .vpill:active{ background:var(--verb-press, rgba(127,231,255,.26)); transform:scale(.96); }
+/* keyboard/mouse/pad steering: one visible state */
+.vpill.on{ border-color:var(--verb-rim-lead, #7fe7ff); box-shadow:0 0 0 2px var(--verb-rim-lead, #7fe7ff), 0 2px 12px rgba(0,0,0,.38); }
 .vpill .vkey{
   min-width:20px; height:20px; padding:0 4px; border-radius:5px;
   border:1px solid rgba(125,231,255,.6); background:rgba(125,231,255,.08); color:#c4f4ff;
   font:700 11px/18px Fredoka, system-ui, sans-serif; text-align:center; text-shadow:none;
 }
 body.touch .vpill .vkey{ display:none; }
-/* a ring: every pill on a circle around the anchor, the lead one on top */
-.vcluster.ring{ display:block; width:0; height:0; transform:none; --r:84px; }
-.vcluster.ring .vpill{
-  position:absolute; left:0; top:0;
-  --a:calc(var(--i) / var(--n) * 360deg - 90deg);
-  transform:translate(-50%, -50%) rotate(var(--a)) translate(var(--r)) rotate(calc(0deg - var(--a)));
-}
-.vcluster.ring .vpill:active{ transform:translate(-50%, -50%) rotate(var(--a)) translate(var(--r)) rotate(calc(0deg - var(--a))) scale(.96); }
-@media (max-width: 480px){
-  .vcluster.ring{ --r:72px; }
-  .vpill{ min-height:44px; padding:0 14px; font-size:15px; }
-  .vpill.lead{ font-size:16px; }
-}
 body.full-map-open .vcluster, body.sim-view .vcluster{ display:none !important; }
