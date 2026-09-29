@@ -437,6 +437,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/config.js?v=w0929town"></script>
 <!-- CITY SLICES (?slice=name|x,z,r): one piece of Gang City booted as its own world.
      Parses the URL only; with no slice every helper answers "keep". -->
+<script src="src/core/bakecache.js?v=phonefit1"></script>
+<script src="src/core/rectgrid.js?v=phonefit1"></script>
 <script src="src/core/slice.js?v=slice0929b"></script>
 <!-- GANG CITY STREAMS: the live city is a slice that follows the player (?stream=0 = whole city). -->
 <script src="src/core/citystream.js?v=slice0929b"></script>
@@ -482,6 +484,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- 1. core engine -->
 <script src="src/core/scene.js?v=neutralhaze1"></script>
+<script src="src/core/prisonlazy.js?v=phonefit1"></script>
 <script src="src/core/renderer.js?v=w09290242x"></script>
 <!-- THE GROUND STOPS BEING DRAWN OVER A HOLE. Must load AFTER core/renderer.js:
      its installFog REPLACES THREE.ShaderChunk.fog_fragment wholesale, so a patch
