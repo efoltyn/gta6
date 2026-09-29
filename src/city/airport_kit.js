@@ -1179,7 +1179,7 @@
       }
       // a parked airliner is coned: one off each wingtip and one at the tail
       const cones = [];
-      const halfSpan = (CBZ.CITY_AIRCRAFT_DIMS ? CBZ.CITY_AIRCRAFT_DIMS.airliner.span / 2 : 18) * ((CBZ.CONFIG && +CBZ.CONFIG.AIRLINER_SCALE) || 1) + 1.2;
+      const halfSpan = CBZ.CITY_AIRCRAFT_DIMS.airliner.span / 2 + 1.2;
       for (let i = 0; i < nPark && i < ap.gates.length; i++) {
         const g = ap.gates[i];
         cones.push([g.lx - halfSpan, g.lz + 1], [g.lx + halfSpan, g.lz + 1], [g.lx + 2.5, g.lz - (g.lz > ap.taxiZ ? 1 : -1) * 30]);
