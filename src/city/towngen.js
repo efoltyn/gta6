@@ -727,6 +727,8 @@
           // a late parcel's canopy is merged with it (the town's merge ran long
           // ago), and a late shop's shelves are planned now (city/storegoods.js)
           if (late) { flushCanopies(); if (isShop && CBZ.storeGoodsPlan) CBZ.storeGoodsPlan(lotRec); }
+          // a casino shell that landed after the order-90 dress pass
+          if (late && kind === "casino" && CBZ.dressCasino) CBZ.dressCasino(root, lotRec);
         };
         let lateShell = false;
         if (CBZ.sliceAt) {

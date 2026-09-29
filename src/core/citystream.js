@@ -353,9 +353,15 @@
           if (!m) continue;
           for (const k in m) {
             const t = m[k];
-            if (!t || !t.isTexture || texDone.has(t) || t._cbzFreed || t.isRenderTargetTexture) continue;
+            // ONLY a canvas texture whose canvas is intact: a render target's
+            // texture (the environment map, a feed) has no pixels to upload
+            // again, and disposing one made every later render throw (the
+            // world stopped drawing after a drive: orchestrator, 8540e9bc)
+            if (!t || !t.isCanvasTexture || texDone.has(t) || t._cbzFreed) continue;
+            const im = t.image;
+            if (!im || typeof im.getContext !== "function" || !(im.width > 1)) continue;
             texDone.add(t);
-            if (t.image && (t.isCanvasTexture || t.isDataTexture || t.image.width)) t.dispose();
+            t.dispose();
           }
         }
       });

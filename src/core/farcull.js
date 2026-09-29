@@ -375,7 +375,7 @@
        fog's end; the measured LOD box only ever stands in past it, where the
        fog has already made the difference invisible (the airborne radius
        stays wider, as before). */
-    const RV = R0 ? Math.max(R0, fogEnd) : 0;
+    const RV = R0 ? (fogEnd > R0 ? fogEnd : R0) : 0;      // a NaN fog far falls back to R0, never hides the world
     if (!root) return;
     const kids = root.children;
     // amortize: at most ~1/4 of the children measured/tested per sweep → the

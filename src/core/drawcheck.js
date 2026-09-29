@@ -45,8 +45,7 @@
   // always answerable: "off" until the check is on (the URL flag, or
   // CBZ.drawCheckOn() in a live world: frames drawn after it are checked)
   CBZ.drawCheckAudit = function () { return installed ? found.slice() : "off (load with &debugInstanced=1 or call CBZ.drawCheckOn())"; };
-  CBZ.drawCheckOn = function () { if (!installed) install(); return "on"; };
-  if (on) install();
+  CBZ.drawCheckOn = function (mode) { if (mode === "gl") { withGL = true; wrapGL(); } if (!installed) install(); return "on" + (withGL ? " (+gl errors)" : ""); };
   let current = null, glWrapped = false;
   // the GL's own verdict: after every draw call, gl.getError() (a sync read:
   // debug only), charged to the object three was drawing
@@ -65,9 +64,13 @@
       };
     });
   }
+  // the per-draw gl.getError() read is opt-in on top (CBZ.drawCheckOn("gl")):
+  // a sync read per draw call, and nothing the draw checker does may ever be
+  // able to change what renders
+  let withGL = /[?&]debugGL=1\b/.test(location.search || "");
   function install() {
   installed = true;
-  wrapGL();
+  if (withGL) wrapGL();
   const maxIndex = new WeakMap();
   function chain(o) { const a = []; for (let p = o; p && a.length < 6; p = p.parent) a.push(p.name || p.type); return a.join(" < "); }
   function report(o, why) {
@@ -87,7 +90,7 @@
   const orig = THREE.Mesh.prototype.onBeforeRender;
   THREE.Mesh.prototype.onBeforeRender = function (renderer, scene, camera, geometry) {
     current = this;
-    if (!glWrapped) wrapGL();
+    if (withGL && !glWrapped) wrapGL();
     try {
       const g = geometry || this.geometry;
       if (g && g.attributes) {
@@ -114,4 +117,5 @@
     return orig.apply(this, arguments);
   };
   }
+  if (on) install();                 // last: every binding above is initialised
 })();

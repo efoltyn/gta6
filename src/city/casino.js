@@ -462,6 +462,11 @@
 
   function dressCasino(root, lot) {
     if (!lot || !lot.building || lot._casinoDressed) return;
+    // a town parcel's record exists before its shell (city/towngen.js builds
+    // the shell as a slice job): no size yet = nothing to dress against (the
+    // frame came out NaN). The shell dresses it when it lands.
+    const bw = lot.building.w, bd = lot.building.d;
+    if (!(bw > 0) || !(bd > 0)) return;
     lot._casinoDressed = true;
     try { dressExterior(root, lot); } catch (e) {}
     // a game package (core/packages.js, order-88 claim) owns this interior
