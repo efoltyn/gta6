@@ -54,11 +54,11 @@
   let q = null;
   try { q = new URLSearchParams(location.search); } catch (e) { q = null; }
   const streamParam = q ? q.get("stream") : null;
-  // OPT-IN until it wins memory (measured 2026-09-29: at the downtown spawn the
-  // keep circle still holds ~all of the heavy builders, so a streamed boot is
-  // the full city's heap plus parking; see docs/plan/city-streaming.md).
-  // ?stream=1 turns it on; flip this default when the builders are split.
-  if (CFG.CITY_STREAM == null) CFG.CITY_STREAM = streamParam === "1" || streamParam === "true";
+  // (history: opt-in until it won memory; measured on phone-fit it takes the
+  // phone profile from 1909 to ~970 MB live at the downtown spawn)
+  // ON by default on a phone / tablet (core/slice.js CBZ.STREAM_WANTED, which
+  // also decided whether the manifest loads), opt-in elsewhere with ?stream=1
+  if (CFG.CITY_STREAM == null) CFG.CITY_STREAM = CBZ.STREAM_WANTED != null ? !!CBZ.STREAM_WANTED : (streamParam === "1" || streamParam === "true");
 
   /* THE JAIL BUDGET. Measured with tools/speed.mjs --modes escape (seed 90210,
      2026-09-29): 11,334 meshes, 2.29M visible tris, 64 programs, build 439 ms

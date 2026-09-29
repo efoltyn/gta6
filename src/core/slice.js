@@ -337,7 +337,14 @@
      document.write from a parser-inserted script inserts a parser-blocking
      tag right here, before worldmap.js reads it. */
   // a streamed city boot (core/citystream.js, ?stream=1) needs it too
-  const wantManifest = S || !!(q && (q.get("stream") === "1" || q.get("stream") === "true"));
+  /* STREAMING IS THE PHONE'S CITY. On a phone or tablet (config.js
+     deviceClass) Gang City streams by default: the whole continent at once
+     is ~2.8 GB on the phone profile, the streamed city under half of it.
+     ?stream=0 turns it off there, ?stream=1 turns it on anywhere. */
+  const sp = q ? q.get("stream") : null;
+  const mobile = CBZ.deviceClass === "phone" || CBZ.deviceClass === "tablet";
+  CBZ.STREAM_WANTED = sp === "1" || sp === "true" || (mobile && sp !== "0" && sp !== "false");
+  const wantManifest = S || CBZ.STREAM_WANTED;
   if (wantManifest && typeof document !== "undefined" && document.readyState === "loading") {
     try {
       const me = document.currentScript && document.currentScript.src;
