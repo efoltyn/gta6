@@ -369,7 +369,13 @@
         missing++;
       } else if (pools.get(key).warmUntil) missing++;
     }
-    if (missing) { _found.length = 0; return false; }
+    // Its pools are still warming (3 frames) or not made yet (2 per frame).
+    // Nothing this walk found can change before a pool warms, so ask again
+    // then, not on every frame in between: the retry re-walked the whole car,
+    // re-composed its world matrices and rebuilt a key string per mesh, for
+    // every waiting car, every frame (the top cost under vehicles.js's
+    // traffic pass while driving). The car draws itself meanwhile, as before.
+    if (missing) { _found.length = 0; c._proxyRetry = frame + 3; return false; }
     const view = frustumReady();
     const rec = newRec();
     rec.car = c;
