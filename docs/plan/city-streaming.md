@@ -4,6 +4,58 @@ Owner, 2026-09-29: "The point is that jail opens on my phone and runs on my phon
 and Gang City doesn't." And: "the jail game is more real than any other game by 1000x",
 "it should be in sizes that are the same as fast as the jail game."
 
+## Phone fit (branch phone-fit, 2026-09-29)
+
+Measured on the phone profile (tools/speed.mjs --device phone, 390x844@3, iOS UA), streamed
+city (`?stream=1`) at the downtown spawn, live = after a forced GC:
+
+| | before | after (last measured) |
+|---|---|---|
+| streamed boot, phone live (heap + GPU) | 1909 MB | 974 MB |
+| streamed boot, load (first visit / return visit) | 17.4-18.8 s / - | 11.8-12.8 s / 10.7 s (build 5.5 s, terrain baked) |
+| 60 s drive at 40 m/s, phone peak | 2108 MB | 1528 MB |
+| drive pop-ins (objects appearing in view inside the fog) | 116-133 | 48, then the farcull fix |
+| jail (unchanged) | 324 MB live, 4.5 s | same |
+
+What changed, biggest first:
+- **The prune judged local coordinates.** `slicePrune` and the manifest tracer called
+  `updateMatrixWorld`, which `core/matrixskip.js` skips for the hidden city root, so every
+  building was judged at its local bounds near the origin: downtown was parked as "725 m
+  away" and re-attached. Both use `updateWorldMatrix(true, true)` now (-590 MB).
+- **Landmass builders are per town** (minicities, countries), town parcels are data at once and
+  shells when seen (child jobs), far generic mainland apartment blocks likewise, far metros
+  are planned but not dressed, far parked cars are records until seen.
+- **Jobs are freed, not just parked**: `runCaptured` records every list a job grows (CBZ and
+  arena arrays, `CBZ.streamBus` module lists, placement via `CBZ.streamBusHook`) and
+  `freeJob` takes it all back 700 m past the keep circle; world data (regions, roads, water)
+  stays and is swapped on a re-run. Nested jobs (a town's parcels) go with their parent.
+  `tools/stream-jobs-check.js` (plain node) checks build / free / re-run / nested.
+- **The prison is not built in a city-first page** (`core/prisonlazy.js`, eager otherwise).
+- **Leaks**: highway accumulators (113 MB), pruned LOS blockers, placement keys and refs.
+- **One copy of static data**: terrain keeps only positions in JS after upload; building trim
+  keeps its box list and writes vertices on first read, and the batch pass merges it straight
+  from the boxes (no per-building arrays; `tools/trimbox-merge-check.js`); big canvas textures
+  give their canvas back once on the GPU (`core/texfree.js`); a lean Object3D in the vendored
+  three (matrices, up, uuid on first use: -53 MB of V8 in the city).
+- **Terrain is baked once per version** into IndexedDB (`core/bakecache.js`): the continent
+  plate (loop and finished passes), the backdrop, Mount Mercy, the Greater Range, the desert
+  erg, the snow forest belts. `?bake=verify` recomputes and compares byte for byte;
+  `?bake=0` turns it off.
+- **Driving**: farcull evicts far merged meshes from the GPU; the keep circle is
+  `0.3 r + view + speed lead`; the streamer ticks at 10 Hz and builds anything in sight at
+  once, with a larger budget while something will come into sight.
+- **No pop-ins**: parked and moving cars past their old 150 m cull are drawn by carinstances'
+  pools out to the fog; farcull holds groups with no LOD stand-in to the fog's end.
+- **Context loss**: the watchdog runs on a timer and reloads at the player's position if the
+  context does not come back (or comes back with CPU copies released).
+- Tools: speed.mjs `--heap-sites`, `--preload tools/preload/abtrack.js`, LIVE-after-GC
+  memory, `--profile-dir`, `--ask prof`, `--ask drive [--allocs]`; `?debugInstanced=1` /
+  `CBZ.drawCheckOn()` (core/drawcheck.js).
+
+Still open: streaming is still behind `?stream=1`; the city core's shops, offices and
+hideouts are built at boot; a building's LOD box stands in from 230 m on the phone (a swap
+inside the fog); the drive's heap sawtooth (build garbage) sets the peak.
+
 ## What is built (branch city-slice)
 
 - **Tool slices** (`src/core/slice.js`): `?mode=city&slice=<name>|x,z,r`. Everything visible
