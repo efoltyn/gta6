@@ -5541,7 +5541,10 @@
       }
       forward(fwd);
       buildBasis(fwd);
-      eye.set(p.pos.x, p.pos.y + eyeH + bobY, p.pos.z).addScaledVector(right, bobX);
+      // a car door beat (CBZ.moves board/alight) carries the head down into
+      // the cabin and back out: the lens rides the head, not a fixed 1.65 m
+      const carEye = CBZ.moves && CBZ.moves.eyeY ? CBZ.moves.eyeY(p) : null;
+      eye.set(p.pos.x, carEye != null ? carEye : p.pos.y + eyeH + bobY, p.pos.z).addScaledVector(right, bobX);
       CBZ.camera.position.copy(eye);
       tmp.copy(eye).add(fwd);
       CBZ.camera.lookAt(tmp);

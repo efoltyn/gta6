@@ -1890,6 +1890,22 @@
     return true;
   }
   CBZ.carDriverRelease = releaseDriver;
+  /* THE SEATED NUMBERS FOR ANY BODY IN ANY SEAT — the fit, the floor the
+     root sits on and the cushion — exactly as seatDriver solves them, so the
+     door beats (boarding.js) land a body in the pose the seat then holds. */
+  CBZ.carSeatFit = function (ch, car, seatId) {
+    const ci = cabinFrame(car);
+    if (!ci || !ch) return null;
+    const S = CBZ.carSeats;
+    const seat = S ? S.seat(car, seatId || "driver") : null;
+    const fit = fitSeatedRig(ch, seat
+      ? { cushionY: seat.cushionY, floorY: ci.floorY, eye: seat.eye, roofY: seat.roofY }
+      : ci);
+    return {
+      fit: fit, floorY: ci.floorY, cushionY: seat ? seat.cushionY : ci.cushionY,
+      x: seat ? seat.x : ci.seatX, z: seat ? seat.z : ci.seatZ,
+    };
+  };
   CBZ.carDriverSeated = function () { return !!drv.car; };
   /* THE SEAT SOLVE, FOR A FRAME THIS LOOP DID NOT RUN. When somebody else is
      driving (city/boarding.js's companion errand) the player loop stands down,
@@ -3092,6 +3108,9 @@
     const spot = occDoorSpot(c, seat.side, seat.row, null, seat.slot);
     if (SEATS()) SEATS().release(c, seat.slot);
     const gy = CBZ.floorAt ? CBZ.floorAt(spot.x, spot.z) : 0;
+    // (a bolter was already detached by cityScare, but he was IN this seat)
+    const wasSeated = !!(p.group && (p._npcAttached || p._occCar === c));
+    const exitAt = { x: spot.x, z: spot.z, y: gy };
     if (p._npcAttached && CBZ.cityUnseat) {
       try { CBZ.cityUnseat(p, { x: spot.x, z: spot.z, y: gy, state: p.dead ? "dead" : (opts.state || "walk") }); } catch (e) {}
     } else if (p.pos && p.pos.set) {
@@ -3115,6 +3134,13 @@
     // OUT OF BALANCE, not teleported: a body shoved out of a seat needs a beat
     // to find its feet before its brain takes over.
     if (!p.dead) { p.speed = 0; p.pause = Math.max(p.pause || 0, opts.stumble === false ? 0.2 : 0.42); }
+    /* HE GETS OUT, HE IS NOT PUT OUT. The detach above stands him at his
+       door in one frame; a seated body the camera can see instead climbs
+       out through that door on the shared car beats (boarding.js ->
+       CBZ.moves.alight), ending on the same kerb spot. */
+    if (wasSeated && !p.dead && CBZ.boardingAlight) {
+      try { CBZ.boardingAlight(p, c, seat.slot, { fast: true, exit: exitAt }); } catch (e) {}
+    }
     return p;
   }
 
@@ -3333,6 +3359,9 @@
     const gy = CBZ.floorAt ? CBZ.floorAt(spot.x, spot.z) : 0;
     if (ped._npcAttached && CBZ.cityUnseat) {
       try { CBZ.cityUnseat(ped, { x: spot.x, z: spot.z, y: gy, state: ped.dead ? "dead" : "walk" }); } catch (e) {}
+      if (!ped.dead && CBZ.boardingAlight) {
+        try { CBZ.boardingAlight(ped, car, "driver", { fast: true, exit: { x: spot.x, z: spot.z, y: gy } }); } catch (e) {}
+      }
     } else {
       if (ped.group) ped.group.visible = !ped._spawnHidden;
       ped.pos.set(spot.x, gy, spot.z);
@@ -4333,7 +4362,9 @@
     // real body, runs each one's decision, and puts the ones who leave beside
     // their OWN door. It degrades to the old single-driver eject when the flag
     // is off or the car never carried an occupancy record.
-    const jacked = occJack(car, (CBZ.city && CBZ.city.playerActor) || null);
+    // (a door arc that already dragged them out at the pull did the jack)
+    const jacked = car._jackDone ? 0 : occJack(car, (CBZ.city && CBZ.city.playerActor) || null);
+    car._jackDone = false;
     if (car.npcDriver) ejectNpcDriver(car);
     const P = CBZ.player;
     P.driving = true; P._vehicle = car;
@@ -4359,7 +4390,10 @@
       }
     }
     car.v = 0;
-    CBZ.playerChar.group.visible = false;
+    // A car with a cabin SEATS the rig (CAR_DRIVER_VISIBLE, seatDriver on the
+    // next tick); hiding it here blinked the body out for the frame between
+    // the door beat landing him in the seat and the seat taking him.
+    if (!(driverWanted(car) && cabinFrame(car))) CBZ.playerChar.group.visible = false;
     if (CBZ.cityPromotePlayerCar) CBZ.cityPromotePlayerCar(car);
     if (CBZ.carAudio) CBZ.carAudio.start();   // the motor turns over the moment you're in
     const worth = car.model ? ": " + car.model.name : "";   // value stays hidden until you chop it
@@ -4377,6 +4411,18 @@
       ? "At the helm" + worth + "   [SPACE] get up  [V] wheel view"
       : "Driving" + worth + "   [E] out  [C] car style" + seatHint, 1.8);
     return true;
+  };
+  /* THE JACK, AT THE DOOR. A carjack is not "sit down, then they leave":
+     the door is pulled, the people in the car answer and get out through it,
+     and only THEN do you get in. boarding.js calls this at the end of its
+     pull beat; the seat commit (cityEnterVehicle) then skips its own jack. */
+  CBZ.cityJackNow = function (car) {
+    if (!car || car.dead || car.player) return 0;
+    wakeCar(car);
+    const n = occJack(car, (CBZ.city && CBZ.city.playerActor) || null);
+    if (car.npcDriver) ejectNpcDriver(car);
+    car._jackDone = true;
+    return n;
   };
   CBZ.cityExitVehicle = function () {
     const P = CBZ.player, car = P._vehicle;
