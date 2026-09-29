@@ -360,7 +360,7 @@
   // a thin tube tracing a closed (z, th) outline on the skin (seams, frames)
   function seam(B, poly, off, r) {
     const pts = poly.map(function (p) { const q = B.at(p[0], p[1], off); return new THREE.Vector3(q[0], q[1], q[2]); });
-    return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, true), Math.max(12, poly.length * 2), r || 0.012, 4, true);
+    return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, true), Math.max(12, poly.length), r || 0.012, 3, true);
   }
   // an open (z, th) path on the skin as a tube (cheat lines of a set width are
   // patches; this is for piping and the door gap)

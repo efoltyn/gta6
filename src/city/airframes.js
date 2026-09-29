@@ -1528,7 +1528,7 @@
     const C = new Ctx("heli-" + variant);
     const H = KT.body(heliStations(vip));
     // skin: cockpit glass as holes, cabin windows, the rest solid; livery split
-    const opts = { zStep: 0.15, tStep: TAU / 72, wall: 0.04 };
+    const opts = { zStep: 0.2, tStep: TAU / 60, wall: 0.04 };
     const SPLIT = -0.22;
     const regions = [];
     const W = KT.quadHole([[3.1, 0.54], [3.1, HP - 0.03], [2.2, HP - 0.03], [2.2, 0.36]], 0.22);
