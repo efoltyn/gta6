@@ -209,41 +209,11 @@
          beam by 1/cos(incidence)
      ============================================================ */
   const HIT = { hit: false, wall: false, t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 1, nz: 0 };
-  const RAY = { ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0, best: 0, nx: 0, ny: 0, nz: 0, wall: false };
-  // one slab of the 3-D ray/box test; returns [tEnter, axis sign] through RAY
-  let _tmin = 0, _tmax = 0, _axis = -1, _sgn = 0;
-  function slab1(o, d, lo, hi, axis) {
-    if (Math.abs(d) < 1e-9) return !(o < lo || o > hi);
-    let ta = (lo - o) / d, tb = (hi - o) / d;
-    if (ta > tb) { const q = ta; ta = tb; tb = q; }
-    if (ta > _tmin) { _tmin = ta; _axis = axis; _sgn = d > 0 ? -1 : 1; }
-    if (tb < _tmax) _tmax = tb;
-    return _tmin <= _tmax;
-  }
-  function boxHit(c) {
-    let ox = RAY.ox, oz = RAY.oz, dx = RAY.dx, dz = RAY.dz, x0, x1, z0, z1, co = 1, si = 0;
-    const yawed = !!c.yaw && c.hw != null && c.cx != null;
-    if (yawed) {
-      // world -> the box's own frame (physics.js oriented-collider convention)
-      co = Math.cos(c.yaw); si = Math.sin(c.yaw);
-      const rx = ox - c.cx, rz = oz - c.cz;
-      ox = rx * co - rz * si; oz = rx * si + rz * co;
-      const ldx = dx * co - dz * si, ldz = dx * si + dz * co;
-      dx = ldx; dz = ldz;
-      x0 = -c.hw; x1 = c.hw; z0 = -c.hd; z1 = c.hd;
-    } else { x0 = c.minX; x1 = c.maxX; z0 = c.minZ; z1 = c.maxZ; }
-    _tmin = 0; _tmax = RAY.best; _axis = -1; _sgn = 0;
-    if (!slab1(ox, dx, x0, x1, 0)) return false;
-    if (!slab1(RAY.oy, RAY.dy, c.y0 != null ? c.y0 : -1e6, c.y1 != null ? c.y1 : 1e6, 1)) return false;
-    if (!slab1(oz, dz, z0, z1, 2)) return false;
-    // no entering face: the lens is INSIDE this box (a hand through a thin collider)
-    if (_axis < 0 || _tmin < 0.03 || _tmin >= RAY.best) return false;
-    RAY.best = _tmin; RAY.wall = true;
-    let nx = _axis === 0 ? _sgn : 0, nz = _axis === 2 ? _sgn : 0;
-    if (yawed) { const wx = nx * co + nz * si, wz = -nx * si + nz * co; nx = wx; nz = wz; }   // box -> world
-    RAY.nx = nx; RAY.ny = _axis === 1 ? _sgn : 0; RAY.nz = nz;
-    return false;                                   // keep walking: the nearest face wins
-  }
+  // the wall half is physics.js's one collider ray (oriented boxes in their
+  // own frame, bands honoured, grid-walked). A box the lens is INSIDE (a hand
+  // through a thin collider) or entered within 3 cm has no face to light.
+  const WRAY = { hit: false, c: null, t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0 };
+  const WRAY_OPTS = { minT: 0.03 };
   function cast(ox, oy, oz, dx, dy, dz, maxT, floorY, out) {
     out = out || HIT;
     out.hit = false; out.wall = false;
@@ -259,13 +229,12 @@
       }
       if (tf > 0 && tf < best) { best = tf; out.hit = true; }
     }
-    if (CBZ.segmentHitsCollider && best > 0.05) {
-      RAY.ox = ox; RAY.oy = oy; RAY.oz = oz; RAY.dx = dx; RAY.dy = dy; RAY.dz = dz;
-      RAY.best = best; RAY.wall = false;
-      try { CBZ.segmentHitsCollider(ox, oz, ox + dx * best, oz + dz * best, 0, boxHit); } catch (e) {}
-      if (RAY.wall && RAY.best < best) {
-        best = RAY.best; out.hit = true; out.wall = true;
-        out.nx = RAY.nx; out.ny = RAY.ny; out.nz = RAY.nz;
+    if (CBZ.rayColliders && best > 0.05) {
+      let c = null;
+      try { c = CBZ.rayColliders(ox, oy, oz, dx, dy, dz, best, WRAY, WRAY_OPTS); } catch (e) {}
+      if (c && WRAY.t < best) {
+        best = WRAY.t; out.hit = true; out.wall = true;
+        out.nx = WRAY.nx; out.ny = WRAY.ny; out.nz = WRAY.nz;
       }
     }
     out.t = best;

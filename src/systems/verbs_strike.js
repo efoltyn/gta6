@@ -224,22 +224,16 @@
     return segDist2(P, Z.fL, Z.wL) <= ar * ar || segDist2(P, Z.fR, Z.wR) <= ar * ar;
   }
   // is there a wall between the attacker's chest and the contact point?
-  let _wy = 0, _wax = 0, _waz = 0, _wbx = 0, _wbz = 0;
-  function segBox(c) {
-    if (c.maxY != null && c.minY != null && (_wy < c.minY || _wy > c.maxY)) return false;
-    // slab test of segment a→b against the box in x/z
-    let t0 = 0, t1 = 1;
-    const dx = _wbx - _wax, dz = _wbz - _waz;
-    if (Math.abs(dx) < 1e-9) { if (_wax < c.minX || _wax > c.maxX) return false; }
-    else { let ta = (c.minX - _wax) / dx, tb = (c.maxX - _wax) / dx; if (ta > tb) { const s = ta; ta = tb; tb = s; } t0 = Math.max(t0, ta); t1 = Math.min(t1, tb); if (t0 > t1) return false; }
-    if (Math.abs(dz) < 1e-9) { if (_waz < c.minZ || _waz > c.maxZ) return false; }
-    else { let ta = (c.minZ - _waz) / dz, tb = (c.maxZ - _waz) / dz; if (ta > tb) { const s = ta; ta = tb; tb = s; } t0 = Math.max(t0, ta); t1 = Math.min(t1, tb); if (t0 > t1) return false; }
-    return true;
-  }
+  // physics.js's one collider ray, chest -> contact as a 3-D segment: a box's
+  // y0/y1 band is honoured (the old XZ slab test read `c.minY/maxY`, fields no
+  // collider has, so a knee-high table between two men stopped a punch), and
+  // an oriented wall is its real body, not its bounding box. A box the
+  // attacker's chest is already inside still counts as in the way.
+  const _wHit = { hit: false, c: null, t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0 };
+  const _wOpts = { any: true, inside: true };
   function walled(ax, ay, az, bx, by, bz) {
-    if (CBZ.segmentHitsCollider) {
-      _wax = ax; _waz = az; _wbx = bx; _wbz = bz; _wy = (ay + by) * 0.5;
-      try { if (CBZ.segmentHitsCollider(ax, az, bx, bz, 0, segBox)) return true; } catch (e) { /* no grid on this page */ }
+    if (CBZ.rayColliders) {
+      try { if (CBZ.rayColliders(ax, ay, az, bx - ax, by - ay, bz - az, 1, _wHit, _wOpts)) return true; } catch (e) { /* no grid on this page */ }
     }
     if (CBZ.clearLineOfFire && CBZ.game && CBZ.game.mode === "city") {
       try { if (!CBZ.clearLineOfFire(ax, ay, az, bx, by, bz)) return true; } catch (e) { /* los not built */ }

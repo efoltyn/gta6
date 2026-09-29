@@ -393,23 +393,14 @@
   // CBZ.clearLineOfFire only knows CBZ.losBlockers, which the island never
   // registers, so on the island everybody used to see (and shoot) through
   // towers and wrecks. The walk grid's collider list IS the solid world.
-  function segBlocked(cols, ax, ay, az, bx, by, bz) {
-    const dx = bx - ax, dz = bz - az;
-    for (let n = 0; n < cols.length; n++) {
-      const c = cols[n];
-      let t0 = 0, t1 = 1;
-      if (Math.abs(dx) < 1e-9) { if (ax < c.minX || ax > c.maxX) continue; }
-      else { let ta = (c.minX - ax) / dx, tb = (c.maxX - ax) / dx; if (ta > tb) { const q = ta; ta = tb; tb = q; } if (ta > t0) t0 = ta; if (tb < t1) t1 = tb; if (t0 > t1) continue; }
-      if (Math.abs(dz) < 1e-9) { if (az < c.minZ || az > c.maxZ) continue; }
-      else { let ta = (c.minZ - az) / dz, tb = (c.maxZ - az) / dz; if (ta > tb) { const q = ta; ta = tb; tb = q; } if (ta > t0) t0 = ta; if (tb < t1) t1 = tb; if (t0 > t1) continue; }
-      if (c.y0 != null && c.y1 != null) {
-        // the ray's height across the box: blocked only if some of it is inside the slab
-        const ya = ay + (by - ay) * t0, yb = ay + (by - ay) * t1;
-        if (Math.max(ya, yb) < c.y0 || Math.min(ya, yb) > c.y1) continue;
-      }
-      return true;
-    }
-    return false;
+  // physics.js's one collider ray (grid-walked, oriented walls exact, y0/y1
+  // bands honoured, a box the eye is inside counts): the same boxes the walk
+  // grid was built from, plus anything registered since the match began —
+  // not a linear scan of a match-start snapshot per sight line.
+  const _ggHit = { hit: false, c: null, t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0 };
+  const GG_RAY = { any: true, inside: true };
+  function segBlocked(ax, ay, az, bx, by, bz) {
+    return !!CBZ.rayColliders(ax, ay, az, bx - ax, by - ay, bz - az, 1, _ggHit, GG_RAY);
   }
   function eyeY(a) { return (a.pos.y || 0) + (a.isPlayer ? ((CBZ.player && CBZ.player.crouch) ? 1.05 : 1.55) : 1.5); }
   function chestY(a) { return (a.pos.y || 0) + (a.isPlayer && CBZ.player && CBZ.player.crouch ? 0.85 : 1.25); }
@@ -421,7 +412,7 @@
      no range) that spawn safety, cover and the trigger ask. */
   function ggOcclusion(ox, oy, oz, tx, ty, tz) {
     const N = gg.nav;
-    return !!N && segBlocked(N.cols, ox, oy, oz, tx, ty, tz);
+    return !!N && segBlocked(ox, oy, oz, tx, ty, tz);
   }
   function sees(a, b) {
     return !BR.perception.occluded(a.pos.x, eyeY(a), a.pos.z, b.pos.x, chestY(b), b.pos.z);
@@ -1533,7 +1524,7 @@
       const k = cellOf(N, x, z);
       if (k < 0 || !N.walk[k]) continue;
       _probe.pos.x = x; _probe.pos.z = z; _probe.pos.y = N.floor[k];
-      if (!segBlocked(N.cols, foe.pos.x, eyeY(foe), foe.pos.z, x, _probe.pos.y + 1.2, z)) continue;
+      if (!segBlocked(foe.pos.x, eyeY(foe), foe.pos.z, x, _probe.pos.y + 1.2, z)) continue;
       const d = Math.hypot(x - b.pos.x, z - b.pos.z) - Math.hypot(x - foe.pos.x, z - foe.pos.z) * 0.3;
       if (d < bd) { bd = d; best = { x, z }; }
     }

@@ -612,7 +612,7 @@ document.body.appendChild(b);}}catch(e){}})();
      size), the cuffs the cuff verb closes on a wrist, the open pair in an
      officer's hand and the case on a cop's / prison officer's duty belt. -->
 <script src="src/entities/handcuffs.js?v=mc5ae55"></script>
-<script src="src/systems/verbs.js?v=mce86a5"></script>
+<script src="src/systems/verbs.js?v=colcore1"></script>
 <!-- CBZ.arrest: getting arrested is a contest, not a cutscene. The one rule
      (compliant / subdued / outnumbered-from-behind), the struggle's odds, the
      committed tackle lunge, the taser, and the one physical take of the
@@ -624,7 +624,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/cuffedplayer.js?v=cuffs1"></script>
 <script src="src/entities/verbposes.js?v=verbs1"></script>
 <script src="src/entities/meleeposes.js?v=fallreal1"></script>
-<script src="src/systems/verbs_strike.js?v=ba1"></script>
+<script src="src/systems/verbs_strike.js?v=colcore1"></script>
 <script src="src/systems/bodyfall.js?v=vit3"></script>
 <!-- CBZ.vitals: ONE body that can be hurt, in every game. Blunt trauma knocks a
      man out (and he comes to, groggy); a bullet or a blade opens a bleed that
@@ -789,7 +789,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (city) buys one shadowless SpotLight + floor pool, toggled through
      CBZ.playerFlashlight. After weapons/flashlight.js (the model) and
      prisonnight.js (CBZ.prisonLights.level prices the dark). -->
-<script src="src/systems/playerflashlight.js?v=w09290204"></script>
+<script src="src/systems/playerflashlight.js?v=colcore1"></script>
 <script src="src/world/prisonlook.js?v=look1"></script>
 <!-- BODIES USE THE FURNITURE. The bunks in this wing had never once become
      propuse anchors (city/propuse.js loads 337 tags after world/cellblock.js,
@@ -825,7 +825,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/reality.js?v=support1"></script>
 <script src="src/systems/npcgrid.js?v=scale2"></script>
 <script src="src/systems/camera.js?v=me6f1ee"></script>
-<script src="src/systems/physics.js?v=w09290242x"></script>
+<script src="src/systems/physics.js?v=colcore1"></script>
 <script src="src/systems/meshcollider.js?v=meshcol1"></script>
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
 <script src="src/systems/climb.js?v=lad1"></script>
@@ -843,7 +843,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Next adopters are one line each — elevators.js (the teleporting cab is
      the reason this exists) and the airliner cabin deck. -->
 <script src="src/systems/platforms_moving.js?v=mp2late"></script>
-<script src="src/systems/actorcollide.js?v=bodyphys1-st1"></script>
+<script src="src/systems/actorcollide.js?v=colcore1"></script>
 <!-- A DEAD MAN LIES ON THE FLOOR, IN THE ROOM. Owns every prison corpse's
      transform: clear lie direction, wall depenetration at both ends of the
      body, limb sprawl. entities/npc.js + entities/guards.js call its tick
@@ -862,7 +862,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (whose LOS/search/flank primitives it composes and never re-implements)
      and BEFORE every consumer: gangs.js, peds.js, police.js, city/combat.js.
      Revert with ?cfg_NPC_COMBAT_IQ=0. -->
-<script src="src/systems/combat_iq.js?v=iq1"></script>
+<script src="src/systems/combat_iq.js?v=colcore1"></script>
 <!-- ONE TASER VISUAL OWNER. Player fire and the prison capture escalation both
      launch its pooled twin probes/wires and electrical body arc; it also draws
      the shared taser appearance in a guard's real weapon socket for that beat. -->
@@ -998,7 +998,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/title_hub.js?v=end1"></script>
 <!-- GUN GAME borrows worlds it never builds: the prison (escape), the disaster
      island (survival). Loads AFTER both so their builders exist. -->
-<script src="src/modes/gungame.js?v=w09290242x"></script>
+<script src="src/modes/gungame.js?v=colcore1"></script>
 <!-- THE SHAFT IS SHARED: world/groundshaft.js owns every hole in the ground
      (survival sinkholes today, CITY_SINKHOLES tomorrow). Must precede
      systems/disasters.js so the roster finds CBZ.groundShaft at load. -->
@@ -1184,7 +1184,7 @@ document.body.appendChild(b);}}catch(e){}})();
      above. chunks.js first (pieces.js registers pieces into it), though
      either load order works. -->
 <script src="src/systems/chunks.js?v=arch2"></script>
-<script src="src/systems/pieces.js?v=arch2-st1"></script>
+<script src="src/systems/pieces.js?v=colcore1"></script>
 <!-- B1 — the wood-tier build catalog + CBZ.building.place() (no UI yet;
      B2 lands the ghost preview/hotbar). Loads right after pieces.js
      (needs spawnPiece/despawnPiece/findSupport) and after placement.js

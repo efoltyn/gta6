@@ -147,19 +147,49 @@
     }
   };
 
-  function nearbyColliders(pos) {
-    if (colDirty || colCount !== CBZ.colliders.length) rebuildColliderGrid();
-    return colBuckets.get(colKey(Math.floor(pos.x / COL_CELL), Math.floor(pos.z / COL_CELL))) || EMPTY_COLS;
+  function gridFresh() { if (colDirty || colCount !== CBZ.colliders.length) rebuildColliderGrid(); }
+
+  // Dedup across grid cells by stamping the collider with the query id — a
+  // property compare instead of a Set hash per candidate. Every multi-cell
+  // walk in this file (queries, the big-body gather, sweeps, rays) shares it.
+  let colQueryId = 0;
+
+  /* CANDIDATES FOR A BODY OF ANY SIZE. The grid files every box into each
+     cell its bounds reach PLUS COL_PAD, so the one bucket under a point holds
+     every box within COL_PAD of that point. That is plenty for a person
+     (0.38-0.55 m) and NOT for the cars (1.0-1.3 m), the truck-spot probes and
+     everything else that calls collide() with a bigger radius: a wall 1.1 m
+     from a 1.3 m hull sat in the next cell's bucket and the hull drove into
+     it. `reach` = how far from (x,z) a box may be and still matter. Up to
+     COL_PAD this is the old single Map lookup (no stamp, no copy, no cost);
+     past it the neighbouring cells are unioned into a scratch list. */
+  const _gather = [];
+  function gatherColliders(x, z, reach) {
+    gridFresh();
+    const ext = reach - COL_PAD;
+    if (ext <= 0) return colBuckets.get(colKey(Math.floor(x / COL_CELL), Math.floor(z / COL_CELL))) || EMPTY_COLS;
+    const out = _gather;
+    out.length = 0;
+    const qid = ++colQueryId;
+    const gx0 = Math.floor((x - ext) / COL_CELL), gx1 = Math.floor((x + ext) / COL_CELL);
+    const gz0 = Math.floor((z - ext) / COL_CELL), gz1 = Math.floor((z + ext) / COL_CELL);
+    for (let gx = gx0; gx <= gx1; gx++) for (let gz = gz0; gz <= gz1; gz++) {
+      const bucket = colBuckets.get(colKey(gx, gz));
+      if (!bucket) continue;
+      for (let i = 0; i < bucket.length; i++) {
+        const c = bucket[i];
+        if (c._qSeen === qid) continue;
+        c._qSeen = qid;
+        out.push(c);
+      }
+    }
+    return out;
   }
 
   // Broadphase query for systems that need to inspect nearby world geometry
   // without resolving a collision. Callers own/reuse `out`; results are the
   // same collider objects from CBZ.colliders, deduplicated across grid cells.
-  // Dedup across grid cells by stamping the collider with the query id — a
-  // property compare instead of a Set hash per candidate. Same results; this
-  // query runs for every steering ped and crowd agent every frame and the Set
-  // overhead alone profiled at several % of the sim tick.
-  let colQueryId = 0;
+  // This runs for every steering ped and crowd agent every frame.
   CBZ.queryCollidersNear = function (x, z, radius, out) {
     if (colDirty || colCount !== CBZ.colliders.length) rebuildColliderGrid();
     out = out || [];
@@ -224,121 +254,187 @@
   //  SHARED WALL RESOLVER — CBZ.collide  (THE entry every moving
   //  body, player AND NPC, calls each frame to slide out of walls)
   // ============================================================
-  // Generic circle-vs-box depenetration against the world colliders.
-  // MUTATES pos.{x,z} in place; pos.y is untouched. Grid-accelerated
-  // (nearbyColliders → one 8m bucket), so the cost is O(local walls),
-  // not O(all ~5000 colliders): cheap enough to call for EVERY NPC every
-  // frame. Zero per-call allocation.
-  //
-  //   CBZ.collide(pos, radius, feetY, headY)
-  //     pos    — {x,z(,y)} mutated in place (the moving body's centre).
-  //     radius — the body's collision radius. THE PLAYER IS 0.38, NOT 0.55:
-  //              TUNE.playerRadius (config.js) has shipped 0.38 the whole time
-  //              and three comments in this file said 0.55, including one the
-  //              substep sizing below reasons from. Peds/crowd are 0.5.
+  //   CBZ.collide(pos, radius, feetY, headY) -> moved:boolean
+  //     pos    — {x,z(,y)} mutated in place (the moving body's centre);
+  //              pos.y is never touched.
+  //     radius — the body's collision radius. The player is 0.38
+  //              (TUNE.playerRadius), peds/crowd 0.5, cars 1.0-1.3. ANY
+  //              radius is exact: past COL_PAD the candidate gather widens
+  //              to the neighbouring cells (gatherColliders above).
   //     feetY  — optional bottom of the body's vertical span.
   //     headY  — optional top of the body's vertical span.
+  //   Returns true iff a WORLD collider pushed the body (the old version
+  //   returned nothing, and no caller reads it).
   //
   // feetY/headY gate HEIGHT-LIMITED colliders (windows, upper floors,
-  // shot-open sill remnants): a box with c.y0!=null is skipped when the
-  // body is entirely below it (headY<=y0) or entirely above it
-  // (feetY>=y1). Omit both args and EVERY collider acts full-height
-  // (prison / jail behaviour — byte-identical to before).
+  // shot-open sill remnants, furniture): a box with c.y0!=null is skipped
+  // when the body is entirely below it (headY<=y0) or entirely above it
+  // (feetY>=y1). Omit both args and EVERY collider acts full-height.
   //
-  // SINGLE-PASS: one shortest-exit push per collider per call. A body
-  // wedged into an inside corner can need 2–3 passes to fully clear; for
-  // that, prefer CBZ.collideSlide (below) which loops to convergence in
-  // one call. Per the cross-agent contract this function is shared with
-  // the PLAYER — do NOT change its math/signature; add new helpers
-  // instead.
+  // ---- CONVERGED, DEEPEST-FIRST (2026-09-29) ----------------------------
+  // This used to be ONE Gauss-Seidel pass in array order: each box pushed
+  // the body in turn, and a push out of box 7 could shove it into box 3,
+  // which had already been tested. That is the inside-corner bug — a body
+  // wedged into two walls came out of one and sat inside the other until
+  // next frame, and a narrow wedge pumped it through. Every NPC mover that
+  // noticed wrapped it in collideSlide's 3-pass loop; the player never did.
+  // Now each pass collects the contacts, resolves them DEEPEST FIRST (each
+  // one re-measured from the body's updated position, so a contact the
+  // first push already cleared costs nothing), and repeats until a pass
+  // finds no contact (cap MAX_PASSES). A body in open air costs exactly one
+  // scan, as before; a body on one wall costs one scan plus a re-check of
+  // the handful of boxes within reach (the `near` list), not the bucket.
   //
   // ---- ORIENTED COLLIDERS (c.yaw) -----------------------------------
-  // An AABB CANNOT DESCRIBE A DIAGONAL WALL, and pretending otherwise is
-  // where this game's invisible walls came from. A 5 m chord 0.24 m thick
-  // laid at 45 deg has an axis-aligned bounding box 3.7 m square: the
-  // player is stopped 2.5 m from a handrail they can see through. Measured
-  // on the shipped world the worst case was the speedway perimeter fence —
-  // a 0.32 m chain-link with a 12.7 m collider box, a NINE METRE invisible
-  // wall. Every curved ring in the game (arena bowl rails, the facade,
-  // the beast pit, venue fences, grandstands) walks its arc as short
-  // rotated chords and then re-typed each one as its own AABB.
+  // An AABB cannot describe a diagonal wall (the speedway fence once had a
+  // NINE METRE invisible wall). A collider may carry an oriented body
+  // {cx, cz, hw, hd, yaw}: half-extents along the box's own local +x/+z.
+  // minX..maxZ stay on the record as the CONSERVATIVE outer AABB, so every
+  // broadphase keeps bucketing exactly as before; only the resolve is exact.
+  // Build one with CBZ.orientedCollider (below), never by hand.
   //
-  // A collider may now carry an ORIENTED body: {cx, cz, hw, hd, yaw} where
-  // hw/hd are half-extents along the box's own local +x/+z. minX..maxZ
-  // stay on the record and stay the CONSERVATIVE outer AABB, so the
-  // broadphase, the camera sweep and the traversal probe are untouched and
-  // keep bucketing exactly as before — only the final resolve is exact.
-  // A record with no `yaw` takes the identical path it always did.
-  const oriHit = { x: 0, z: 0 };
-  function oriPush(pos, radius, c) {
-    // clamp the body centre inside the box, IN THE BOX'S OWN FRAME
-    // THREE's rotation.y sends local +x -> world (cos,-sin) and local +z ->
-    // world (sin,cos), so the inverse (this one) is its transpose. Getting
-    // these two the wrong way round is silently wrong at every angle except
-    // multiples of 45 deg, which is exactly the range a corner arc lives in.
-    const co = Math.cos(c.yaw), si = Math.sin(c.yaw);
-    const rx = pos.x - c.cx, rz = pos.z - c.cz;
-    const lx = rx * co - rz * si;            // world -> local
-    const lz = rx * si + rz * co;
-    const qx = lx < -c.hw ? -c.hw : (lx > c.hw ? c.hw : lx);
-    const qz = lz < -c.hd ? -c.hd : (lz > c.hd ? c.hd : lz);
-    let dx = lx - qx, dz = lz - qz;
+  // THREE's rotation.y sends local +x -> world (cos,-sin) and local +z ->
+  // world (sin,cos); world -> local is its transpose. Getting these the
+  // wrong way round is silently wrong at every angle except multiples of
+  // 45 deg, which is exactly the range a corner arc lives in.
+  const PH = { x: 0, z: 0, d: 0 };       // pushOut's answer: world push + depth
+  function oriTrig(c) {
+    if (c._triYaw !== c.yaw) { c._triYaw = c.yaw; c._co = Math.cos(c.yaw); c._si = Math.sin(c.yaw); }
+  }
+  // Minimum-translation push of a circle (x,z,radius) out of collider c.
+  // rr = the contact threshold (radius minus a hair, so a body resolved to
+  // exactly `radius` is not re-counted as a contact on the next pass).
+  // Centre INSIDE the box: out through the nearest face (min-penetration
+  // axis), never along a degenerate zero-length normal.
+  function pushOut(x, z, radius, rr, c) {
+    let lx, lz, hw, hd, co = 1, si = 0, ori = false;
+    if (c.yaw) {
+      oriTrig(c); co = c._co; si = c._si; ori = true;
+      const rx = x - c.cx, rz = z - c.cz;
+      lx = rx * co - rz * si;              // world -> local
+      lz = rx * si + rz * co;
+      hw = c.hw; hd = c.hd;
+    } else {
+      hw = (c.maxX - c.minX) * 0.5; hd = (c.maxZ - c.minZ) * 0.5;
+      lx = x - (c.minX + hw); lz = z - (c.minZ + hd);
+    }
+    const qx = lx < -hw ? -hw : (lx > hw ? hw : lx);
+    const qz = lz < -hd ? -hd : (lz > hd ? hd : lz);
+    const dx = lx - qx, dz = lz - qz;
     const d2 = dx * dx + dz * dz;
-    if (d2 >= radius * radius) return false;
+    if (!(d2 < rr)) return false;          // also rejects NaN records
     let px, pz;
     if (d2 < 1e-8) {
-      // centre is INSIDE the box: shortest exit through the nearest face,
-      // solved on the local axes (the AABB branch below, one frame over)
-      const penX = c.hw - (lx < 0 ? -lx : lx), penZ = c.hd - (lz < 0 ? -lz : lz);
-      if (penX < penZ) { px = (lx < 0 ? -1 : 1) * (penX + radius); pz = 0; }
-      else { px = 0; pz = (lz < 0 ? -1 : 1) * (penZ + radius); }
+      const penX = hw - (lx < 0 ? -lx : lx), penZ = hd - (lz < 0 ? -lz : lz);
+      if (penX < penZ) { px = (lx < 0 ? -1 : 1) * (penX + radius); pz = 0; PH.d = penX + radius; }
+      else { px = 0; pz = (lz < 0 ? -1 : 1) * (penZ + radius); PH.d = penZ + radius; }
     } else {
-      const d = Math.sqrt(d2), push = (radius - d) / d;
-      px = dx * push; pz = dz * push;
+      const d = Math.sqrt(d2), k = (radius - d) / d;
+      px = dx * k; pz = dz * k; PH.d = radius - d;
     }
-    oriHit.x = px * co + pz * si;             // local -> world
-    oriHit.z = -px * si + pz * co;
+    if (ori) { PH.x = px * co + pz * si; PH.z = -px * si + pz * co; }   // local -> world
+    else { PH.x = px; PH.z = pz; }
     return true;
   }
+
+  const MAX_PASSES = 4;
+  const CT_MAX = 16, NEAR_MAX = 32;
+  const PEN_EPS = 1e-4;                  // 0.1 mm: below this a contact is resolved
+  const _ctC = new Array(CT_MAX), _ctD = new Float64Array(CT_MAX);
+  const _ctX = new Float64Array(CT_MAX), _ctZ = new Float64Array(CT_MAX);   // each contact's push
+  const _near = new Array(NEAR_MAX);
   function collide(pos, radius, feetY, headY) {
-    const cols = nearbyColliders(pos);
     // city-owned colliders (stamped by city/mode.js's build) are only solid in
     // city mode: the airport/military rects overlap the prison's coordinate
     // space, and their hidden geometry must not wall off jail rooms.
     const cityOn = !CBZ.game || CBZ.game.mode === "city";
-    for (let i = 0; i < cols.length; i++) {
-      const c = cols[i];
-      if (c._city && !cityOn) continue;
-      if (c.y0 != null && (headY <= c.y0 || feetY >= c.y1)) continue; // body clears this wall
-      if (c.yaw) {                        // oriented body — resolve in its own frame
-        if (oriPush(pos, radius, c)) { pos.x += oriHit.x; pos.z += oriHit.z; }
-        continue;
+    const rr = radius > PEN_EPS ? (radius - PEN_EPS) * (radius - PEN_EPS) : 0;
+    // how far the body may be pushed before its candidate set is stale: the
+    // rest of COL_PAD for a person (so the gather stays ONE bucket), a flat
+    // quarter metre for anything bigger
+    const slack = radius < COL_PAD - 0.25 ? COL_PAD - radius : 0.25;
+    const reach = radius + slack;
+    let gx = pos.x, gz = pos.z;            // where `cols` was gathered
+    let cols = gatherColliders(gx, gz, reach);
+    let nearN = -1;                         // -1: scan the whole gathered list
+    let moved = false;
+    for (let pass = 0; pass < MAX_PASSES; pass++) {
+      const x = pos.x, z = pos.z;
+      if (pass && (x - gx > slack || gx - x > slack || z - gz > slack || gz - z > slack)) {
+        gx = x; gz = z; cols = gatherColliders(x, z, reach); nearN = -1;
       }
-      const cx = Math.max(c.minX, Math.min(pos.x, c.maxX));
-      const cz = Math.max(c.minZ, Math.min(pos.z, c.maxZ));
-      let dx = pos.x - cx, dz = pos.z - cz;
-      const d2 = dx * dx + dz * dz;
-      if (d2 < radius * radius) {
-        const d = Math.sqrt(d2);
-        if (d < 0.0001) {
-          const penX = Math.min(pos.x - c.minX, c.maxX - pos.x);
-          const penZ = Math.min(pos.z - c.minZ, c.maxZ - pos.z);
-          if (penX < penZ) pos.x += (pos.x < (c.minX + c.maxX) / 2 ? -1 : 1) * (penX + radius);
-          else pos.z += (pos.z < (c.minZ + c.maxZ) / 2 ? -1 : 1) * (penZ + radius);
-        } else {
-          const push = (radius - d) / d;
-          pos.x += dx * push; pos.z += dz * push;
+      let n = 0;
+      if (nearN < 0) {
+        // FULL SCAN: find the contacts, and remember the few boxes within
+        // `reach` — the only ones a later pass can possibly touch
+        let nn = 0, over = false;
+        for (let i = 0; i < cols.length; i++) {
+          const c = cols[i];
+          if (c._city && !cityOn) continue;
+          if (c.y0 != null && (headY <= c.y0 || feetY >= c.y1)) continue; // body clears this box
+          if (!(x >= c.minX - reach && x <= c.maxX + reach && z >= c.minZ - reach && z <= c.maxZ + reach)) continue;
+          if (nn < NEAR_MAX) _near[nn++] = c; else over = true;
+          if (!(x >= c.minX - radius && x <= c.maxX + radius && z >= c.minZ - radius && z <= c.maxZ + radius)) continue;
+          if (n < CT_MAX && pushOut(x, z, radius, rr, c)) { _ctC[n] = c; _ctD[n] = PH.d; _ctX[n] = PH.x; _ctZ[n] = PH.z; n++; }
+        }
+        nearN = over ? -1 : nn;
+      } else {
+        for (let i = 0; i < nearN; i++) {
+          const c = _near[i];
+          if (!(x >= c.minX - radius && x <= c.maxX + radius && z >= c.minZ - radius && z <= c.maxZ + radius)) continue;
+          if (n < CT_MAX && pushOut(x, z, radius, rr, c)) { _ctC[n] = c; _ctD[n] = PH.d; _ctX[n] = PH.x; _ctZ[n] = PH.z; n++; }
         }
       }
+      if (!n) break;
+      // deepest first (insertion sort, n is tiny)
+      for (let i = 1; i < n; i++) {
+        const c = _ctC[i], d = _ctD[i], hx = _ctX[i], hz = _ctZ[i];
+        let j = i - 1;
+        while (j >= 0 && _ctD[j] < d) { _ctC[j + 1] = _ctC[j]; _ctD[j + 1] = _ctD[j]; _ctX[j + 1] = _ctX[j]; _ctZ[j + 1] = _ctZ[j]; j--; }
+        _ctC[j + 1] = c; _ctD[j + 1] = d; _ctX[j + 1] = hx; _ctZ[j + 1] = hz;
+      }
+      let from = 0;
+      if (n >= 2) {
+        // TWO-PLANE SOLVE. Sequential pushes zig-zag down an acute wedge (at
+        // 30 deg each pass only closes ~25% of the remaining error), so the
+        // two deepest contacts are solved together: each is a half-plane
+        // n.p >= b (b = where its push would leave the body), project onto
+        // the deepest, then onto the second, and if that breaks the first
+        // the answer is where the two lines cross — the one spot that
+        // clears both. Exact for two flat faces; a corner contact is its
+        // tangent line, and the next pass re-measures anyway.
+        const d1 = _ctD[0], d2 = _ctD[1];
+        const n1x = _ctX[0] / d1, n1z = _ctZ[0] / d1, n2x = _ctX[1] / d2, n2z = _ctZ[1] / d2;
+        const b1 = n1x * x + n1z * z + d1, b2 = n2x * x + n2z * z + d2;
+        let px = x, pz = z;
+        const v1 = b1 - (n1x * px + n1z * pz);
+        if (v1 > 0) { px += n1x * v1; pz += n1z * v1; }
+        const v2 = b2 - (n2x * px + n2z * pz);
+        if (v2 > 0) {
+          const qx = px + n2x * v2, qz = pz + n2z * v2;
+          const det = n1x * n2z - n1z * n2x;
+          if (b1 - (n1x * qx + n1z * qz) > PEN_EPS && det * det > 1e-6) {
+            const ix = (b1 * n2z - n1z * b2) / det, iz = (n1x * b2 - n2x * b1) / det;
+            const lim = 4 * radius + d1 + d2;
+            if ((ix - x) * (ix - x) + (iz - z) * (iz - z) < lim * lim) { px = ix; pz = iz; }
+            else { px = qx; pz = qz; }
+          } else { px = qx; pz = qz; }
+        }
+        pos.x = px; pos.z = pz; moved = true; from = 2;
+      }
+      for (let i = from; i < n; i++) {
+        // re-measured from where the earlier (deeper) pushes left the body
+        if (pushOut(pos.x, pos.z, radius, rr, _ctC[i])) { pos.x += PH.x; pos.z += PH.z; moved = true; }
+      }
     }
+    if (cols === _gather) _gather.length = 0;   // do not pin removed boxes in the scratch
     // MOVING WALLS (systems/platforms_moving.js): same shortest-exit resolver,
     // run in a moving parent's LOCAL frame (a boat's gunwales, a gangway's
-    // handrails). Feature-detected + flagged; the signature and the math above
-    // are untouched, exactly as this function's contract requires.
+    // handrails). Feature-detected + flagged.
     if (CBZ.mpCollide) CBZ.mpCollide(pos, radius, feetY, headY);
+    return moved;
   }
   CBZ.collide = collide;
-
   // ---- THE ONE PLACE A ROTATED WALL BECOMES A COLLIDER ----------------
   // Builds the record `collide()` reads above: the oriented body PLUS the
   // conservative AABB the broadphase needs. Every ring-walking builder in
@@ -380,93 +476,335 @@
     return (ex * as + ez * ac) - hd;   // AABB support along the wall normal, minus the wall
   };
 
-  // ---- CBZ.collideSlide — robust multi-pass form for NPC movers --------
-  // The convenience entry the peds / crowd / gang movement should call to
-  // slide a moving body fully out of building walls each frame. It loops
-  // CBZ.collide a few times so a body wedged into an inside corner (two
-  // walls at once) is depenetrated in ONE call instead of every caller
-  // re-implementing the 2–3-pass loop. Early-outs the instant a pass moves
-  // the body less than CONVERGE_EPS (the common case: 0 or 1 wall touched →
-  // one pass), so a body in open street pays a single grid lookup + a
-  // handful of box tests. Returns true iff the body was pushed at all this
-  // frame (callers use that to re-pick a waypoint so they don't grind back
-  // into the wall — mirrors the existing crowd/ped think-tick logic).
-  //
-  //   CBZ.collideSlide(pos, radius, feetY, headY, passes?) -> moved:boolean
-  //     passes defaults to 3 (matches peds.js's gold-standard loop); pass 1
-  //     for the cheap off-tick form (a tiny dead-reckoned step needs only
-  //     one push). pos.{x,z} mutated in place; pos.y untouched.
-  const CONVERGE_EPS = 0.002;     // a pass that moves <2mm has converged
-  function collideSlide(pos, radius, feetY, headY, passes) {
-    const n = passes > 0 ? passes : 3;
-    let moved = false;
-    for (let p = 0; p < n; p++) {
-      const bx = pos.x, bz = pos.z;
-      collide(pos, radius, feetY, headY);
-      const dx = pos.x - bx, dz = pos.z - bz;
-      if (dx * dx + dz * dz < CONVERGE_EPS * CONVERGE_EPS) break; // nothing more to push out of
-      moved = true;
-    }
-    return moved;
+  // ---- CBZ.collideSlide — kept name for the NPC movers ------------------
+  //   CBZ.collideSlide(pos, radius, feetY, headY) -> moved:boolean
+  // collide() now converges on its own (deepest-first, up to MAX_PASSES), so
+  // this is collide() plus a "did it actually move" answer: true iff the body
+  // was displaced >= CONVERGE_EPS this call (moving walls included). Callers
+  // use that to re-pick a waypoint instead of grinding the wall. The old
+  // 5th `passes` argument is accepted and ignored.
+  const CONVERGE_EPS = 0.002;
+  function collideSlide(pos, radius, feetY, headY) {
+    const bx = pos.x, bz = pos.z;
+    collide(pos, radius, feetY, headY);
+    const dx = pos.x - bx, dz = pos.z - bz;
+    return dx * dx + dz * dz >= CONVERGE_EPS * CONVERGE_EPS;
   }
   CBZ.collideSlide = collideSlide;
 
-  // ---- CBZ.npcStepLedge — bounded auto-step over a LOW obstacle --------
-  // SECONDARY (owner: optional). CITY-ONLY. When a moving body is walking
-  // INTO a collider whose TOP is only a low ledge above its feet — a window
-  // sill, a shot-open window's remnant, a low planter — let it climb ON TOP
-  // instead of grinding the face, so running at a shot-out window steps in
-  // like going up a stair. Strictly bounded: only ledges whose top sits
-  // between just-above-feet and STEP_UP_NPC (~1.0m) qualify, and only when
-  // the body is actually moving toward that ledge — never a flying boost up
-  // a sheer wall, never a tall wall, never the ground floor of a closed box.
+  // ============================================================
+  //  CONTINUOUS COLLISION — CBZ.sweepCircle
+  // ============================================================
+  //   CBZ.sweepCircle(from, to, radius, feetY, headY, out?) -> hit:boolean
+  //     from/to — {x,z}: the body centre last settled / now (not mutated)
+  //     out     — { hit, t, x, z, nx, nz, c } (a module scratch if omitted)
+  //       t     — fraction of from->to at first contact (1 = no hit)
+  //       x,z   — the safe centre: the contact point backed off SKIN metres
+  //               along the path (== to when nothing is hit)
+  //       nx,nz — unit outward surface normal at the contact
+  //       c     — the collider hit
   //
-  //   CBZ.npcStepLedge(pos, radius, feetY, headY, moveX, moveZ) -> newFeetY
-  //     pos               — body centre (NOT mutated — XZ resolution stays
-  //                         with CBZ.collide/collideSlide; this only reports
-  //                         a Y to step up to).
-  //     feetY/headY       — current vertical span.
-  //     moveX/moveZ       — this frame's intended horizontal move (heading);
-  //                         only a ledge the body is heading toward lifts it.
-  //     returns the feetY the caller should adopt (== feetY if no step), so
-  //     the caller stays in control of its own Y. Off CITY mode it always
-  //     returns feetY unchanged (jail/survival byte-identical).
-  const STEP_UP_NPC = 0.9;        // max ledge an NPC auto-climbs (curb/window sill ~0.5–0.9m)
-  const STEP_MIN_NPC = 0.08;      // ignore ~flat/terrain-level boxes
-  function npcStepLedge(pos, radius, feetY, headY, moveX, moveZ) {
-    // CAPABILITY, not scenario (systems/modecaps.js). NOTE FOR THE NEXT
-    // READER: as of 2026-08-06 this block has ZERO callers anywhere in the
-    // repo — it was written city-only, nobody adopted it, and the header
-    // above still describes it as SECONDARY. That is the Block Law's own
-    // failure mode ("a block with zero consumers is prose"), and un-gating it
-    // does not fix that; only a mover calling it would. It is migrated here so
-    // that when a mover does adopt it, it is not born city-only for a third
-    // time. Off-capability it returns feetY unchanged, exactly as before.
-    if (!(CBZ.modeHas ? CBZ.modeHas("stepLedge") : CBZ.game.mode === "city")) return feetY;
-    const ml = moveX * moveX + moveZ * moveZ;
-    if (ml < 1e-6) return feetY;                        // not moving → nothing to climb
-    const cols = nearbyColliders(pos);
-    let bestTop = feetY;
-    for (let i = 0; i < cols.length; i++) {
-      const c = cols[i];
-      if (c.y0 == null) continue;                       // full-height wall: never step over it
-      const top = c.y1;
-      // ledge must be a real lift (above feet) but no taller than STEP_UP_NPC,
-      // and the body's head must clear standing on top of it (cheap sanity).
-      if (top <= feetY + STEP_MIN_NPC || top > feetY + STEP_UP_NPC) continue;
-      // only step a box we're heading INTO: the body's centre must be within
-      // grabbing range of the box face AND the move vector must point at it.
-      const cx = Math.max(c.minX, Math.min(pos.x, c.maxX));
-      const cz = Math.max(c.minZ, Math.min(pos.z, c.maxZ));
-      const dx = pos.x - cx, dz = pos.z - cz;
-      const near = radius + 0.25;
-      if (dx * dx + dz * dz > near * near) continue;     // not up against this ledge
-      if (dx * moveX + dz * moveZ > 0) continue;         // moving AWAY from it (face normal aligns with move → skip)
-      if (top > bestTop) bestTop = top;                  // climb onto the highest qualifying ledge
+  // collide() is a POSITION resolver: it only sees where a body ended up. A
+  // body that moved further in one frame than its radius plus half a wall
+  // (a sprint at 10 fps, a thrown corpse, a launched bot) ends up with its
+  // centre past the wall's middle, and the shortest exit is out the FAR
+  // side — it tunnelled. This sweeps the circle analytically along the step
+  // (ray vs the box's Minkowski rounded rectangle: two slabs plus four
+  // corner circles, in the box's own frame for oriented colliders), so there
+  // is no substep count to get wrong: the exact first contact, any speed.
+  // Same gates as collide() (city stamp, y0/y1 band vs feetY/headY). A box
+  // the body already overlaps at `from` is collide()'s business and is
+  // ignored — unless the step drives deeper into it, which counts as t=0.
+  const SWEEP = { hit: false, t: 1, x: 0, z: 0, nx: 0, nz: 0, c: null };
+  const SW = { t: 0, nx: 0, nz: 0 };
+  const SW_SKIN = 0.01;
+  // first contact t in [0,tMax) of circle (ax,az)+v*t radius r vs collider c
+  function sweepBox(ax, az, vx, vz, r, c, tMax) {
+    let ox, oz, lvx, lvz, hw, hd, co = 1, si = 0, ori = false;
+    if (c.yaw) {
+      oriTrig(c); co = c._co; si = c._si; ori = true;
+      const rx = ax - c.cx, rz = az - c.cz;
+      ox = rx * co - rz * si; oz = rx * si + rz * co;
+      lvx = vx * co - vz * si; lvz = vx * si + vz * co;
+      hw = c.hw; hd = c.hd;
+    } else {
+      hw = (c.maxX - c.minX) * 0.5; hd = (c.maxZ - c.minZ) * 0.5;
+      ox = ax - (c.minX + hw); oz = az - (c.minZ + hd);
+      lvx = vx; lvz = vz;
     }
-    return bestTop;
+    let t = -1, nx = 0, nz = 0;
+    // already touching at the start?
+    const qx = ox < -hw ? -hw : (ox > hw ? hw : ox), qz = oz < -hd ? -hd : (oz > hd ? hd : oz);
+    const sx = ox - qx, sz = oz - qz, s2 = sx * sx + sz * sz;
+    if (s2 < r * r) {
+      if (s2 < 1e-10) return false;                      // centre inside: collide()'s job
+      if (sx * lvx + sz * lvz >= 0) return false;        // leaving (or sliding along) it
+      t = 0; const s = Math.sqrt(s2); nx = sx / s; nz = sz / s;
+    } else {
+      // ray vs the rectangle grown by r on both axes
+      const ex = hw + r, ez = hd + r;
+      let t0 = -Infinity, t1 = Infinity, axis = -1;
+      if (lvx > -1e-12 && lvx < 1e-12) { if (ox < -ex || ox > ex) return false; }
+      else {
+        let ta = (-ex - ox) / lvx, tb = (ex - ox) / lvx;
+        if (ta > tb) { const q = ta; ta = tb; tb = q; }
+        if (ta > t0) { t0 = ta; axis = 0; }
+        if (tb < t1) t1 = tb;
+      }
+      if (lvz > -1e-12 && lvz < 1e-12) { if (oz < -ez || oz > ez) return false; }
+      else {
+        let ta = (-ez - oz) / lvz, tb = (ez - oz) / lvz;
+        if (ta > tb) { const q = ta; ta = tb; tb = q; }
+        if (ta > t0) { t0 = ta; axis = 1; }
+        if (tb < t1) t1 = tb;
+      }
+      if (t0 > t1 || t1 < 0 || t0 >= tMax) return false;
+      let cxn, czn;                                      // the corner to test, if any
+      if (t0 < 0) {
+        // starts inside the grown rect but clear of the rounded one: it is
+        // in a corner square, and only that corner's circle can be met first
+        cxn = ox < 0 ? -hw : hw; czn = oz < 0 ? -hd : hd;
+      } else {
+        const px = ox + lvx * t0, pz = oz + lvz * t0;
+        if (axis === 0 && pz >= -hd && pz <= hd) { t = t0; nx = lvx > 0 ? -1 : 1; }
+        else if (axis === 1 && px >= -hw && px <= hw) { t = t0; nz = lvz > 0 ? -1 : 1; }
+        else { cxn = px < 0 ? -hw : hw; czn = pz < 0 ? -hd : hd; }
+      }
+      if (t < 0) {
+        // ray vs the corner circle (a miss here is a miss: the circle covers
+        // the corner square's inner edges, so the face slabs are never
+        // reached without meeting it first)
+        const mx = ox - cxn, mz = oz - czn;
+        const a = lvx * lvx + lvz * lvz, b = mx * lvx + mz * lvz, cc = mx * mx + mz * mz - r * r;
+        if (cc > 0 && b > 0) return false;
+        const disc = b * b - a * cc;
+        if (disc < 0 || a < 1e-18) return false;
+        t = (-b - Math.sqrt(disc)) / a;
+        if (t < 0) t = 0;
+        nx = (mx + lvx * t) / r; nz = (mz + lvz * t) / r;
+        const nl = Math.sqrt(nx * nx + nz * nz) || 1; nx /= nl; nz /= nl;
+      }
+    }
+    if (t >= tMax) return false;
+    SW.t = t;
+    if (ori) { SW.nx = nx * co + nz * si; SW.nz = -nx * si + nz * co; }
+    else { SW.nx = nx; SW.nz = nz; }
+    return true;
   }
-  CBZ.npcStepLedge = npcStepLedge;
+  function sweepCircle(from, to, radius, feetY, headY, out) {
+    out = out || SWEEP;
+    const ax = from.x, az = from.z, bx = to.x, bz = to.z;
+    const vx = bx - ax, vz = bz - az;
+    out.hit = false; out.t = 1; out.x = bx; out.z = bz; out.nx = 0; out.nz = 0; out.c = null;
+    const len2 = vx * vx + vz * vz;
+    if (!(len2 > 1e-12)) return false;
+    gridFresh();
+    const cityOn = !CBZ.game || CBZ.game.mode === "city";
+    const ext = radius > COL_PAD ? radius - COL_PAD : 0;
+    const minX = (ax < bx ? ax : bx) - radius, maxX = (ax > bx ? ax : bx) + radius;
+    const minZ = (az < bz ? az : bz) - radius, maxZ = (az > bz ? az : bz) + radius;
+    const gx0 = Math.floor(((ax < bx ? ax : bx) - ext) / COL_CELL), gx1 = Math.floor(((ax > bx ? ax : bx) + ext) / COL_CELL);
+    const gz0 = Math.floor(((az < bz ? az : bz) - ext) / COL_CELL), gz1 = Math.floor(((az > bz ? az : bz) + ext) / COL_CELL);
+    const qid = ++colQueryId;
+    let best = 1, bnx = 0, bnz = 0, bc = null;
+    for (let gx = gx0; gx <= gx1; gx++) for (let gz = gz0; gz <= gz1; gz++) {
+      const bucket = colBuckets.get(colKey(gx, gz));
+      if (!bucket) continue;
+      for (let i = 0; i < bucket.length; i++) {
+        const c = bucket[i];
+        if (c._qSeen === qid) continue;
+        c._qSeen = qid;
+        if (c._city && !cityOn) continue;
+        if (c.y0 != null && (headY <= c.y0 || feetY >= c.y1)) continue;
+        if (!(c.maxX >= minX && c.minX <= maxX && c.maxZ >= minZ && c.minZ <= maxZ)) continue;
+        if (sweepBox(ax, az, vx, vz, radius, c, best)) { best = SW.t; bnx = SW.nx; bnz = SW.nz; bc = c; }
+      }
+    }
+    if (!bc) return false;
+    const tb = Math.max(0, best - SW_SKIN / Math.sqrt(len2));
+    out.hit = true; out.t = best; out.c = bc;
+    out.x = ax + vx * tb; out.z = az + vz * tb; out.nx = bnx; out.nz = bnz;
+    return true;
+  }
+  CBZ.sweepCircle = sweepCircle;
+
+  // ============================================================
+  //  ONE RAY FOR THE COLLIDER WORLD — CBZ.rayColliders
+  // ============================================================
+  //   CBZ.rayColliders(ox,oy,oz, dx,dy,dz, maxT, out?, opts?) -> collider|null
+  //     ray p(t) = o + d*t, t in [0, maxT]; d need NOT be unit (t is in
+  //     units of |d|: pass b-a and maxT 1 for a segment a->b).
+  //     out  — { hit, c, t, x,y,z, nx,ny,nz } (a module scratch if omitted):
+  //            the NEAREST box's entry, the entry point, and the unit
+  //            outward normal of the face entered (world frame).
+  //     opts — { any, inside, minT, noCam, skip, filter, y0, y1 }
+  //       any    — return the FIRST hit met, not the nearest (LOS "blocked?")
+  //       inside — a box CONTAINING the origin counts as a hit at t=0
+  //                (normal = -d). Default: skipped (it has no entry face).
+  //       minT   — entries nearer than this are ignored (the whole box)
+  //       noCam  — skip boxes flagged c.noCam
+  //       skip   — one collider to ignore (the caller's own)
+  //       filter — fn(c) -> false to ignore c; asked only of a box the ray
+  //                actually enters nearer than the current best
+  //       y0/y1  — the vertical span given to a box WITHOUT a band
+  //                (default: unbounded, a full-height wall)
+  //
+  // Exact 3-D slab test, oriented boxes in their own frame, y0/y1 bands
+  // honoured, the same city stamp gate as collide(). Walked through the
+  // broadphase grid cell by cell along the ray (Amanatides-Woo DDA) and
+  // stopped as soon as the nearest hit lies inside the cells already
+  // walked, so a long ray that hits a wall 2 m out reads one or two buckets.
+  const RAYHIT = { hit: false, c: null, t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0 };
+  const NO_OPTS = {};
+  const R3 = { ax: -1, sg: 0, co: 1, si: 0, ori: false };
+  // entry t of the ray into c (>= 0), -1 on a miss, -2 if the origin is inside
+  function rayBox3(c, ox, oy, oz, dx, dy, dz, tMax, y0d, y1d) {
+    let lox = ox, loz = oz, ldx = dx, ldz = dz, x0, x1, z0, z1;
+    R3.ori = false;
+    if (c.yaw) {
+      oriTrig(c);
+      const co = c._co, si = c._si, rx = ox - c.cx, rz = oz - c.cz;
+      lox = rx * co - rz * si; loz = rx * si + rz * co;
+      ldx = dx * co - dz * si; ldz = dx * si + dz * co;
+      x0 = -c.hw; x1 = c.hw; z0 = -c.hd; z1 = c.hd;
+      R3.ori = true; R3.co = co; R3.si = si;
+    } else {
+      x0 = c.minX; x1 = c.maxX; z0 = c.minZ; z1 = c.maxZ;
+    }
+    const y0 = c.y0 != null ? c.y0 : y0d, y1 = c.y1 != null ? c.y1 : y1d;
+    let t0 = -Infinity, t1 = tMax, ax = -1, sg = 0;
+    if (ldx > -1e-12 && ldx < 1e-12) { if (!(lox >= x0 && lox <= x1)) return -1; }
+    else {
+      let ta = (x0 - lox) / ldx, tb = (x1 - lox) / ldx;
+      if (ta > tb) { const q = ta; ta = tb; tb = q; }
+      if (ta > t0) { t0 = ta; ax = 0; sg = ldx > 0 ? -1 : 1; }
+      if (tb < t1) t1 = tb;
+      if (t0 > t1) return -1;
+    }
+    if (dy > -1e-12 && dy < 1e-12) { if (!(oy >= y0 && oy <= y1)) return -1; }
+    else {
+      let ta = (y0 - oy) / dy, tb = (y1 - oy) / dy;
+      if (ta > tb) { const q = ta; ta = tb; tb = q; }
+      if (ta > t0) { t0 = ta; ax = 1; sg = dy > 0 ? -1 : 1; }
+      if (tb < t1) t1 = tb;
+      if (t0 > t1) return -1;
+    }
+    if (ldz > -1e-12 && ldz < 1e-12) { if (!(loz >= z0 && loz <= z1)) return -1; }
+    else {
+      let ta = (z0 - loz) / ldz, tb = (z1 - loz) / ldz;
+      if (ta > tb) { const q = ta; ta = tb; tb = q; }
+      if (ta > t0) { t0 = ta; ax = 2; sg = ldz > 0 ? -1 : 1; }
+      if (tb < t1) t1 = tb;
+      if (t0 > t1) return -1;
+    }
+    if (t1 < 0) return -1;
+    if (t0 < 0 || ax < 0) return -2;
+    R3.ax = ax; R3.sg = sg;
+    return t0;
+  }
+  CBZ.rayColliders = function (ox, oy, oz, dx, dy, dz, maxT, out, opts) {
+    out = out || RAYHIT;
+    opts = opts || NO_OPTS;
+    out.hit = false; out.c = null; out.t = maxT;
+    out.x = ox + dx * maxT; out.y = oy + dy * maxT; out.z = oz + dz * maxT;
+    out.nx = 0; out.ny = 0; out.nz = 0;
+    if (!(maxT > 0)) return null;
+    gridFresh();
+    const any = !!opts.any, inside = !!opts.inside, minT = opts.minT || 0;
+    const noCam = !!opts.noCam, skip = opts.skip || null, filter = opts.filter || null;
+    const y0d = opts.y0 != null ? opts.y0 : -1e9, y1d = opts.y1 != null ? opts.y1 : 1e9;
+    const cityOn = !CBZ.game || CBZ.game.mode === "city";
+    const qid = ++colQueryId;
+    let best = maxT, bc = null, bax = -1, bsg = 0, bori = false, bco = 1, bsi = 0, bIn = false;
+    // DDA over the 8 m cells the ray's XZ shadow crosses
+    let gx = Math.floor(ox / COL_CELL), gz = Math.floor(oz / COL_CELL);
+    const adx = dx < 0 ? -dx : dx, adz = dz < 0 ? -dz : dz;
+    const stepX = adx > 1e-12 ? (dx > 0 ? 1 : -1) : 0, stepZ = adz > 1e-12 ? (dz > 0 ? 1 : -1) : 0;
+    const tdX = stepX ? COL_CELL / adx : Infinity, tdZ = stepZ ? COL_CELL / adz : Infinity;
+    let tmX = stepX ? (stepX > 0 ? (gx + 1) * COL_CELL - ox : ox - gx * COL_CELL) / adx : Infinity;
+    let tmZ = stepZ ? (stepZ > 0 ? (gz + 1) * COL_CELL - oz : oz - gz * COL_CELL) / adz : Infinity;
+    for (let guard = 0; guard < 100000; guard++) {
+      const tExit = tmX < tmZ ? tmX : tmZ;
+      const bucket = colBuckets.get(colKey(gx, gz));
+      if (bucket) {
+        for (let i = 0; i < bucket.length; i++) {
+          const c = bucket[i];
+          if (c._qSeen === qid) continue;
+          c._qSeen = qid;
+          if (c._city && !cityOn) continue;
+          if (c === skip || (noCam && c.noCam) || c.minX == null) continue;
+          const t = rayBox3(c, ox, oy, oz, dx, dy, dz, best, y0d, y1d);
+          if (t === -1) continue;
+          if (t === -2) {
+            if (!inside) continue;
+            if (filter && filter(c) === false) continue;
+            best = 0; bc = c; bIn = true;
+            break;                          // nothing is nearer than t=0
+          }
+          if (t < minT || t >= best) continue;
+          if (filter && filter(c) === false) continue;
+          best = t; bc = c; bax = R3.ax; bsg = R3.sg; bori = R3.ori; bco = R3.co; bsi = R3.si; bIn = false;
+          if (any) break;
+        }
+      }
+      if (bc && (any || bIn || best <= tExit)) break;   // nothing in a later cell can be nearer
+      if (tExit >= best || tExit >= maxT) break;
+      if (tmX < tmZ) { gx += stepX; tmX += tdX; } else { gz += stepZ; tmZ += tdZ; }
+    }
+    if (!bc) return null;
+    out.hit = true; out.c = bc; out.t = best;
+    out.x = ox + dx * best; out.y = oy + dy * best; out.z = oz + dz * best;
+    if (bIn) {
+      const l = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+      out.nx = -dx / l; out.ny = -dy / l; out.nz = -dz / l;
+    } else {
+      let nx = bax === 0 ? bsg : 0, nz = bax === 2 ? bsg : 0;
+      if (bori) { const wx = nx * bco + nz * bsi, wz = -nx * bsi + nz * bco; nx = wx; nz = wz; }
+      out.nx = nx; out.ny = bax === 1 ? bsg : 0; out.nz = nz;
+    }
+    return bc;
+  };
+
+  // ---- CBZ.colliderRayT2 — the per-box 2-D primitive -------------------
+  //   CBZ.colliderRayT2(c, ox, oz, dx, dz, pad?, maxT?) -> t | -1
+  // Entry t (units of |d|) of the XZ ray o + d*t, t in [0, maxT] (default
+  // unbounded), into collider c grown by `pad` on every side (in its own
+  // frame when oriented). Origin inside the grown box -> 0. Miss -> -1.
+  // No band, no gates: the caller filters. For code that already holds its
+  // own candidate list (a queryCollidersNear result, a map snapshot).
+  CBZ.colliderRayT2 = function (c, ox, oz, dx, dz, pad, maxT) {
+    pad = pad || 0;
+    if (maxT == null) maxT = 1e9;
+    let lox = ox, loz = oz, ldx = dx, ldz = dz, x0, x1, z0, z1;
+    if (c.yaw && c.hw != null) {
+      oriTrig(c);
+      const co = c._co, si = c._si, rx = ox - c.cx, rz = oz - c.cz;
+      lox = rx * co - rz * si; loz = rx * si + rz * co;
+      ldx = dx * co - dz * si; ldz = dx * si + dz * co;
+      x0 = -c.hw - pad; x1 = c.hw + pad; z0 = -c.hd - pad; z1 = c.hd + pad;
+    } else {
+      if (c.minX == null) return -1;
+      x0 = c.minX - pad; x1 = c.maxX + pad; z0 = c.minZ - pad; z1 = c.maxZ + pad;
+    }
+    let t0 = 0, t1 = maxT;
+    if (ldx > -1e-12 && ldx < 1e-12) { if (!(lox >= x0 && lox <= x1)) return -1; }
+    else {
+      let ta = (x0 - lox) / ldx, tb = (x1 - lox) / ldx;
+      if (ta > tb) { const q = ta; ta = tb; tb = q; }
+      if (ta > t0) t0 = ta;
+      if (tb < t1) t1 = tb;
+      if (t0 > t1) return -1;
+    }
+    if (ldz > -1e-12 && ldz < 1e-12) { if (!(loz >= z0 && loz <= z1)) return -1; }
+    else {
+      let ta = (z0 - loz) / ldz, tb = (z1 - loz) / ldz;
+      if (ta > tb) { const q = ta; ta = tb; tb = q; }
+      if (ta > t0) t0 = ta;
+      if (tb < t1) t1 = tb;
+      if (t0 > t1) return -1;
+    }
+    return t0;
+  };
 
   // ============================================================
   //  SHARED CHARACTER TRAVERSAL — jump, vault, mantle

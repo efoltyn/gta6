@@ -40,6 +40,14 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const SRC = readFileSync(path.join(ROOT, "src/systems/combat_iq.js"), "utf8");
 const VERBOSE = process.argv.includes("--verbose");
+// the REAL per-box segment primitive combat_iq's segBox calls (physics.js)
+const PHYS = (() => {
+  const noop = () => {};
+  const P = { colliders: [], platforms: [], TUNE: {}, CONFIG: {}, keys: {}, player: { pos: { x: 0, y: 0, z: 0 } },
+    playerChar: {}, lerpAngle: (a) => a, animChar: noop, onUpdate: noop, game: { mode: "city" } };
+  new Function("window", readFileSync(path.join(ROOT, "src/systems/physics.js"), "utf8"))({ CBZ: P });
+  return P;
+})();
 
 let fails = 0, passes = 0;
 function ok(name, cond, detail) {
@@ -69,6 +77,7 @@ function boot(opts) {
     hash01,
     cityPeds: [], cityCops: [],
     onUpdate: function () {},
+    colliderRayT2: PHYS.colliderRayT2,
     queryCollidersNear: function (x, z, r, out) {
       out = out || []; out.length = 0;
       for (const c of boxes) {

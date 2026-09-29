@@ -541,7 +541,10 @@
     return false;
   }
   // ray (px,pz)+(dx,dz)t vs a collider footprint padded by `pad`; entry t or -1
+  // (physics.js's per-box primitive: oriented boxes in their own frame)
+  // (studio pages run without physics.js — the local slab below is the same math)
   function rayHit(c, px, pz, dx, dz, pad) {
+    if (CBZ.colliderRayT2) return CBZ.colliderRayT2(c, px, pz, dx, dz, pad, 1e9);
     let ox = px, oz = pz, vx = dx, vz = dz, minX, maxX, minZ, maxZ;
     if (c.yaw && c.hw != null) {
       const co = Math.cos(c.yaw), si = Math.sin(c.yaw);
