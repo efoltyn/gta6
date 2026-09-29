@@ -803,7 +803,12 @@
     // preserved and the shared vehicle registrar makes it stealable/drivable.
     // The procedural tractor/combine remain because they are different farm
     // machines, not placeholders for this road truck.
-    if (CBZ.spawnOfficialFarmTruck) CBZ.spawnOfficialFarmTruck(root, HX + 11, HZ - 8, Math.PI * 0.08);
+    // the 3MF truck (a download + ~7 MB of parsed geometry) loads when the
+    // yard can be seen (core/citystream.js; with no streaming, right now)
+    if (CBZ.spawnOfficialFarmTruck) {
+      const tx = HX + 11, tz = HZ - 8, spawnTruck = function () { CBZ.spawnOfficialFarmTruck(root, tx, tz, Math.PI * 0.08); };
+      if (CBZ.sliceAt) CBZ.sliceAt({ minX: tx - 6, maxX: tx + 6, minZ: tz - 6, maxZ: tz + 6 }, spawnTruck, { name: "farm truck" }); else spawnTruck();
+    }
 
     // =====================================================================
     // 8b) HARVEST MARKET — the farm county's market town, grown from the
