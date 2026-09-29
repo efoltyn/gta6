@@ -9107,15 +9107,25 @@
     const STONE = 0xb9b2a3, EDGE = 0x8f8a80;
     // LAWN inside a stone edging kerb (whatever the district's lot pad is)
     const lw = w - 1.6, ld = d - 1.6;
-    add(flat(lw, ld, 3.2), parkMat(0x9fc07e, "grass", { off: 1 }), cx, Y + 0.012, cz, { rx: -Math.PI / 2 });
+    // THE GROUND IS PAINTED, NOT STACKED. city/cityground.js lays the lawn,
+    // the decomposed-granite paths, the paved plaza and rim, mulch rings at
+    // the trunks and bald turf at the benches straight into the lot surface
+    // from this same layout (lw/ld, PW, plazaR, the tree list below). The
+    // three tinted overlay planes that used to sit here are only drawn when
+    // that system is missing.
+    const PAINTED = !!(CBZ.cityGround && lot.grid);    // only the grid's pads carry the splat
+    lot.groundTrees = [];
+    if (!PAINTED) add(flat(lw, ld, 3.2), parkMat(0x9fc07e, "grass", { off: 1 }), cx, Y + 0.012, cz, { rx: -Math.PI / 2 });
     for (const s of [-1, 1]) {
       add(new THREE.BoxGeometry(lw + 0.3, 0.1, 0.15), parkMat(EDGE), cx, Y + 0.05, cz + s * (ld / 2 + 0.075));
       add(new THREE.BoxGeometry(0.15, 0.1, ld), parkMat(EDGE), cx + s * (lw / 2 + 0.075), Y + 0.05, cz);
     }
     // PATHS: gravel with steel edging strips, meeting on a paved plaza
     const PW = 2.2, GRAVEL = 0xdac7a0;          // tan decomposed granite
-    add(flat(lw, PW, 2), parkMat(GRAVEL, "concrete", { off: 2 }), cx, Y + 0.018, cz, { rx: -Math.PI / 2 });
-    add(flat(PW, ld, 2), parkMat(GRAVEL, "concrete", { off: 2 }), cx, Y + 0.018, cz, { rx: -Math.PI / 2 });
+    if (!PAINTED) {
+      add(flat(lw, PW, 2), parkMat(GRAVEL, "concrete", { off: 2 }), cx, Y + 0.018, cz, { rx: -Math.PI / 2 });
+      add(flat(PW, ld, 2), parkMat(GRAVEL, "concrete", { off: 2 }), cx, Y + 0.018, cz, { rx: -Math.PI / 2 });
+    }
     const edgeM = parkMat(0x3a3834);
     for (const s of [-1, 1]) {
       add(new THREE.BoxGeometry(lw, 0.03, 0.035), edgeM, cx, Y + 0.02, cz + s * PW / 2);
@@ -9124,7 +9134,7 @@
     const plazaR = Math.min(w, d) * 0.17;
     const plazaG = new THREE.CircleGeometry(plazaR, 28);
     uvMetres(plazaG, plazaR * 2 / 1.2, plazaR * 2 / 1.2);
-    add(plazaG, parkMat(0xcfc8b8, "concrete", { off: 3 }), cx, Y + 0.022, cz, { rx: -Math.PI / 2 });
+    if (!PAINTED) add(plazaG, parkMat(0xcfc8b8, "concrete", { off: 3 }), cx, Y + 0.022, cz, { rx: -Math.PI / 2 });
     const ringG = new THREE.RingGeometry(plazaR - 0.02, plazaR + 0.18, 28);
     add(ringG, parkMat(EDGE, null, { off: 4 }), cx, Y + 0.024, cz, { rx: -Math.PI / 2 });
 
@@ -9240,6 +9250,7 @@
     for (const [qx, qz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
       const x = cx + qx * w * 0.28 + (rng() - 0.5) * 2.0;
       const z = cz + qz * d * 0.28 + (rng() - 0.5) * 2.0;
+      lot.groundTrees.push({ x, z });                    // the painted mulch ring (city/cityground.js)
       const th = 2.2 + rng() * 1.0;                     // trunk height to the crown
       const hv = CBZ.hash01 ? CBZ.hash01(x, z, 9103) : 0.5;
       const conifer = (vi++ % 2 === 0);
