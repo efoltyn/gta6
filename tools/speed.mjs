@@ -22,6 +22,7 @@
      node tools/speed.mjs --ask eval 'CBZ.treeAudit()'       # anything, in the live world
      node tools/speed.mjs --ask prof 'CBZ.startRun()'        # ... under the CPU profiler: self + inclusive tops
      node tools/speed.mjs --ask drive [--mps 40 --secs 60 --route x,z;x,z]  # fast drive: peak memory per second + POP-INS in view
+     node tools/speed.mjs --ask drive --allocs     # ... + who ALLOCATED during it (incl. collected garbage), by site
      node tools/speed.mjs --ask reload                       # rebuild from edited sources (measured load)
      node tools/speed.mjs --ask info | stop
      node tools/speed.mjs --serve                            # run the world in the foreground instead
@@ -1739,6 +1740,9 @@ async function serveMain() {
        rule: nothing may assemble itself in view). Target 0. */
     if (op === "drive") {
       const route = q.route || null, mps = q.mps || 40, secs = q.secs || 60;
+      // --allocs: V8's sampling heap profiler over the drive, INCLUDING what
+      // the collector already took (the churn behind the sawtooth), by site
+      if (q.allocs) { await P.s("HeapProfiler.enable"); await P.s("HeapProfiler.startSampling", { samplingInterval: 65536, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true }); }
       res.value = await P.ev(`(function(route, MPS, SECS){
         var S = window.__speed, C = window.CBZ, T = window.THREE, Pl = C.player; if (!Pl || !Pl.pos) return { err: "no player" };
         var A = C.city && C.city.arena; var root = A && A.root;
@@ -1788,6 +1792,7 @@ async function serveMain() {
         return { km: +(Math.min(d, tot) / 1000).toFixed(2), wallS: +((performance.now() - t0) / 1000).toFixed(1), peak: { heap: Math.round(hp), gpu: Math.round(gp), phone: Math.round(php) },
           pops: popN, popChecks: checks, popSamples: pops, cols: "s heap gpu phone built parked queued keepR", samples: samples };
       })(${JSON.stringify(route)}, ${+mps}, ${+secs})`, 1800000);
+      if (q.allocs) { try { const { profile } = await P.s("HeapProfiler.getSamplingProfile", {}, 120000); await P.s("HeapProfiler.stopSampling", {}, 60000); res.allocs = heapSites(profile); } catch (e) { res.allocs = { err: String(e).slice(0, 200) }; } }
       res.ms = Date.now() - t0; return res;
     }
     // --ask prof '<expr>': the expression under V8's CPU profiler (1 ms), the
@@ -1921,7 +1926,7 @@ async function askMain() {
   if (has("--leave-on")) q.leave = "on";
   const tg = opt("--toggle", ""), tgf = opt("--toggle-file", "");
   if (tg || tgf) q.toggle = tgf ? fs.readFileSync(tgf, "utf8") : tg;
-  if (ASK === "drive") { const r = opt("--route", ""); q.route = r ? r.split(";").map((p) => p.split(",").map(Number)) : null; q.mps = +opt("--mps", 40); q.secs = +opt("--secs", 60); }
+  if (ASK === "drive") { const r = opt("--route", ""); q.route = r ? r.split(";").map((p) => p.split(",").map(Number)) : null; q.mps = +opt("--mps", 40); q.secs = +opt("--secs", 60); q.allocs = has("--allocs"); }
   if (ASK === "prof") { const f = opt("--eval-file", ""); q.expr = f ? fs.readFileSync(f, "utf8") : argv.filter((a, i) => !a.startsWith("--") && argv[i - 1] !== "--ask" && !/^--(spot|spots|frames|warm|world|root|url|eval-file|toggle|toggle-file|look-dir|pairs|min-pairs|settle-frames|idle|seed|device|preload|query|slice|slice-spots|gpu|shaders|mode|modes|ref|mem-budget|route|mps|secs)$/.test(argv[i - 1] || "")).join(" "); }
   if (ASK === "eval") { const f = opt("--eval-file", ""); q.expr = f ? fs.readFileSync(f, "utf8") : argv.filter((a, i) => !a.startsWith("--") && argv[i - 1] !== "--ask" && !/^--(spot|spots|frames|warm|world|root|url|eval-file|toggle|toggle-file|look-dir|pairs|min-pairs|settle-frames|idle|seed|device|preload|query|slice|slice-spots|gpu|shaders|mode|modes|ref|mem-budget|route|mps|secs)$/.test(argv[i - 1] || "")).join(" "); }
   let r;
