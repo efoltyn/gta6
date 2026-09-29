@@ -615,6 +615,7 @@
       // a merged-per-building shell (or per-tile bucket) needs a bounding
       // sphere or frustum culling can't reject it.
       merged.computeBoundingSphere();
+      merged._evictable = true;                   // owned by this one mesh: core/farcull.js may drop its GPU copy when far
       target.add(mesh);                           // baked to world space; target is identity
       if (b.hide) {
         // WALL pass: KEEP the originals (LOS raycasts hit visible=false meshes in

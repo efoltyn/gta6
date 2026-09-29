@@ -236,6 +236,7 @@
     for (const k in g.attributes) { const a = g.attributes[k]; if (a && !hasArray(a)) return false; }
     return true;
   }
+  CBZ.geoReuploadable = reuploadable;
   function releaseGPU(o) {
     o.traverse(function (c) { const g = c.geometry; if (g && g.dispose && g.attributes && reuploadable(g)) g.dispose(); });
   }
@@ -304,10 +305,9 @@
   /* ---- ONE COPY OF STATIC GEOMETRY, NOT TWO -------------------------------
      three keeps every attribute's array in JS after it uploads it, so a static
      mesh costs its bytes twice (heap + GPU). For the world's static surfaces
-     (terrain, ground skins: userData.terrain / worldSurface) and the batch
-     pass's merged meshes, nothing reads the NON-POSITION arrays again after
-     the build: raycasts and the batch slice ledgers (batchWallHide /
-     batchHideGroup) touch position and index only. So once an attribute is
+     (terrain, ground skins: userData.terrain / worldSurface), nothing reads
+     the NON-POSITION arrays again after the build: raycasts touch position
+     and index only. So once an attribute is
      on the GPU its normal / colour / uv / material arrays are dropped. A lost
      GL context cannot re-upload them: systems/glcontext.js reloads the page
      at the player's position instead (CBZ.freedStaticArrays says so). */
@@ -319,7 +319,9 @@
     root.traverse(function (o) {
       if (!o.isMesh || o.isInstancedMesh || !o.geometry) return;
       const u = o.userData || {};
-      if (!(u.terrain || u.worldSurface || o.name === "batch-inert" || o.name === "batch-wall")) return;
+      // (batch-merged meshes keep theirs: core/farcull.js evicts them from the
+      // GPU when they are far, and three re-uploads them from these arrays)
+      if (!(u.terrain || u.worldSurface)) return;
       const g = o.geometry;
       if (g._cbzFreed) return;
       g._cbzFreed = true;
