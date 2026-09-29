@@ -17,8 +17,15 @@
   if (!CBZ || !THREE) return;
   let on = false;
   try { on = /[?&]debugInstanced=1\b/.test(location.search); } catch (e) {}
-  if (!on) return;
   const seen = new WeakSet(), found = [];
+  let installed = false;
+  // always answerable: "off" until the check is on (the URL flag, or
+  // CBZ.drawCheckOn() in a live world: frames drawn after it are checked)
+  CBZ.drawCheckAudit = function () { return installed ? found.slice() : "off (load with &debugInstanced=1 or call CBZ.drawCheckOn())"; };
+  CBZ.drawCheckOn = function () { if (!installed) install(); return "on"; };
+  if (on) install();
+  function install() {
+  installed = true;
   const maxIndex = new WeakMap();
   function chain(o) { const a = []; for (let p = o; p && a.length < 6; p = p.parent) a.push(p.name || p.type); return a.join(" < "); }
   function report(o, why) {
@@ -62,5 +69,5 @@
     } catch (e) {}
     return orig.apply(this, arguments);
   };
-  CBZ.drawCheckAudit = function () { return found.slice(); };
+  }
 })();
