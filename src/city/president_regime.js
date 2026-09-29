@@ -27,7 +27,11 @@
    what city/presidency.js's buildRoom() already does for the Situation Room,
    so this is that shape, not a new one.
 
-   THE GEOMETRY IS DERIVED, NOT TYPED. Every offset below is solved from the
+   THE GEOMETRY IS READ FROM THE BUILT HOUSE (site.layout, see frame()). The
+   derivation below is the history of why, and the fallback numbers for a
+   build without that layout (a 2 x 3.2 m shell; the house is now 3 x 4.5 m
+   under a colossal order, which is exactly why these can no longer be typed).
+   Every offset below was solved from the
    two calls govcomplex.js's execmansion builder actually makes:
 
      civic(root, cx, cz-34, 56, 34, 2, M.marble, 1, {order:"doric",
@@ -372,33 +376,57 @@
   }
   // `R` in every hang*() below is the REGIME palette row, so the site rect is
   // deliberately NOT called R here.
+  // THE FRAME IS READ, NOT RE-DERIVED. govcomplex.js publishes the front it
+  // actually built (site.layout: the facade plane, the civic order's deck,
+  // entablature and column stations, the gatehouse, the court) — the numbers
+  // this header used to solve by hand from a copy of that file's constants,
+  // which is how the banners came to float the day the house grew. The
+  // literals below are only the fallback for a build without that layout.
   function frame(s) {
     const cx = s.cx, cz = s.cz, rect = s.rect;
+    const L = s.layout || null, O = L && L.order;
+    const FACADE = L && isFinite(L.facadeZ) ? L.facadeZ : cz - 17;
+    const DECK = O ? O.deck : 0.30;
+    const BAN_TOP = O ? O.archUnder - 0.05 : 4.24;
+    const G = L && L.gatehouse;
     return {
       cx: cx, cz: cz, rect: rect,
-      FACADE: cz - 17,          // the mansion's front wall plane
-      DECK: 0.30,               // PERRON_TOP — the ground a banner must reach
-      BAN_TOP: 4.24,            // architrave underside is 4.29
-      BAN_Z: cz - 16.80,        // 0.20 proud of the wall, 0.70 clear of the shafts
-      PLATE_Z: cz - 16.30,      // clear of the 0.52 cornice, behind the columns
-      GX: cx - 8,               // gatehouse booth centre (gatehouse() offsets -8 on x)
-      GZ: rect.maxZ - 6,
-      GROOF: 3.26,              // booth roof slab top
-      BARRIER_Z: cz + 40,       // inside the gate, on the motor-court paving
-      FOUNT_Z: cz + 18,
+      FACADE: FACADE,           // the mansion's front wall plane
+      DECK: DECK,               // PERRON_TOP — the ground a banner must reach
+      BAN_TOP: BAN_TOP,         // just under the architrave
+      // a colossal order carries a long banner; never longer than reaches the deck
+      BAN_H: Math.min(8.0, BAN_TOP - DECK - 0.06),
+      BAN_Z: FACADE + 0.20,     // 0.20 proud of the wall, clear of the shafts
+      PLATE_Z: FACADE + 0.70,   // clear of the cornice, behind the columns
+      // the plate hangs ABOVE the balcony's door (president_public.js stands
+      // the deck on the first floor, 0.15 over it) and under the architrave;
+      // on the old two-storey front there was no room above, so it sat over
+      // the entrance at 4.95 as before
+      PLATE_Y: (function () {
+        const f1 = L && L.floorTops && L.floorTops[1];
+        if (!(f1 > 0) || !O) return 4.95;
+        const lo = f1 + 3.2, hi = O.archUnder - 0.15;
+        return hi - lo > 3.1 ? (lo + hi) / 2 : 4.95;
+      })(),
+      BAN_T: O && O.midsDX && O.midsDX.length ? O.midsDX : BAN_T_FALLBACK,
+      GX: G ? G.x : cx - 8,     // gatehouse booth centre
+      GZ: G ? G.z : rect.maxZ - 6,
+      GROOF: G ? G.roofY : 3.26,   // booth roof slab top
+      BARRIER_Z: L && isFinite(L.barrierZ) ? L.barrierZ : cz + 40,
+      FOUNT_Z: L && L.fountain ? L.fountain.z : cz + 18,
     };
   }
-  // the eight mid-intercolumniation tangents (column t + half a colStep)
-  const BAN_T = [-24.48, -19.04, -13.60, -8.16, 8.16, 13.60, 19.04, 24.48];
+  // the eight mid-intercolumniation tangents of the 56 m front (fallback)
+  const BAN_T_FALLBACK = [-24.48, -19.04, -13.60, -8.16, 8.16, 13.60, 19.04, 24.48];
 
   // ============================================================
   //  §6  THE FITTINGS
   // ============================================================
   function hangBanners(F, R) {
-    const H = 4.0, W = 1.2, T = 0.10;
+    const H = F.BAN_H, W = 1.2, T = 0.10;
     const cy = F.BAN_TOP - H / 2;
-    for (let i = 0; i < BAN_T.length; i++) {
-      const x = F.cx + BAN_T[i];
+    for (let i = 0; i < F.BAN_T.length; i++) {
+      const x = F.cx + F.BAN_T[i];
       box(x, cy, F.BAN_Z, W, H, T, R.cloth);
       // a valance at the head and a weighted hem, so the cloth has ends
       box(x, F.BAN_TOP - 0.10, F.BAN_Z - 0.015, W + 0.16, 0.20, T + 0.05, R.band);
@@ -519,8 +547,8 @@
         : kind === "emblem" ? "THE PEOPLE" : name;
     const board = kind === "martial" ? "BY ORDER OF THE JUNTA"
       : kind === "emblem" ? "THE PEOPLE'S STATE" : name;
-    box(F.cx, 4.95, F.PLATE_Z - 0.06, 3.56, 3.02, 0.10, R.band);
-    facePlate(F.cx, 4.95, F.PLATE_Z + 0.02, 3.2, 2.7, plateTex(kind, title, board, R));
+    box(F.cx, F.PLATE_Y, F.PLATE_Z - 0.06, 3.56, 3.02, 0.10, R.band);
+    facePlate(F.cx, F.PLATE_Y, F.PLATE_Z + 0.02, 3.2, 2.7, plateTex(kind, title, board, R));
     // and the name board directly over the doorway, between the inner pair of
     // columns (t = +/-5.44, R = 0.42) — 2.4 m spans +/-1.2 and clears both.
     // 2.4 x 0.45 is civicPlaqueTex's own 512x96, so the capitals are not

@@ -2775,13 +2775,18 @@
     // processional gallery while preserving a 5 m clear presidential axis.
     const pierLat = Math.min(half - 2.0, 4.45);
     const bays = [6.5, 13.2, 19.9, 26.6];
+    // THE PIER CARRIES THE BEAM. Its height is solved from the storey: the
+    // capital meets the tie beam's underside at any floor height (a fixed
+    // 2.9 m pier left a 1.3 m gap under the beam once the Mansion's state
+    // floor stood 4.5 m tall, and at 3.2 m it poked through the beam).
+    const tieBot = h.fh - CEIL - 0.22, capY = tieBot - 0.08, shaftTop = capY - 0.08;
     for (const d of bays) {
       if (d > dep - 3.0) continue;
       for (const s of [-1, 1]) {
         const pp = A.at(d, s * pierLat);
         A.obox(pp, 0.15, 0.82, 0.18, 0.82, P.marble, { pad: 0.36 });
-        A.obox(pp, 1.55, 0.52, 2.62, 0.52, P.marble, { pad: 0.30 });
-        A.obox(pp, 2.86, 0.88, 0.16, 0.88, P.gold, { pad: 0.32 });
+        A.obox(pp, (0.24 + shaftTop) / 2, 0.52, shaftTop - 0.24, 0.52, P.marble, { pad: 0.30 });
+        A.obox(pp, capY, 0.88, 0.16, 0.88, P.gold, { pad: 0.32 });
       }
       // the tie beam sits UNDER the slab (h.fh - CEIL), not inside it
       A.fitbox(A.at(d, 0), h.fh - CEIL - 0.11, pierLat * 2 + 1.0, 0.22, 0.34, P.marble);

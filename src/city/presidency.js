@@ -496,17 +496,20 @@
     // ground floor spans x cx±28, z cz-51..cz-17, front door on +z. The room
     // takes the west end of that hall. All offsets fixed => deterministic.
     const cx = site.cx, cz = site.cz;
-    // A real 13x13 command room in the shell's clear east bay, entirely
-    // inside the published 56x34 mansion floorplate.
-    const x0 = cx + 12.5;
-    const x1 = cx + 25.5;
-    const z0 = cz - 47.5;
-    const z1 = cz - 34.5;
+    // A real 13x13 command room in the shell's clear east bay. WHERE and HOW
+    // TALL come from govcomplex.js's published layout (site.layout.sitRoom):
+    // the state floor stands 4.5 m now, so the walls run to its ceiling
+    // instead of stopping at 3 m in a taller hall.
+    const SR = site.layout && site.layout.sitRoom;
+    const x0 = SR ? SR.minX : cx + 12.5;
+    const x1 = SR ? SR.maxX : cx + 25.5;
+    const z0 = SR ? SR.minZ : cz - 47.5;
+    const z1 = SR ? SR.maxZ : cz - 34.5;
     const zc = (z0 + z1) / 2;
     ROOM.rect = { minX: x0, maxX: x1, minZ: z0, maxZ: z1 };
     const grp = new THREE.Group();
     root.add(grp); ROOM.group = grp;
-    const H = 3.0, T = 0.24;
+    const H = SR && SR.wallH > 2.6 ? SR.wallH : 3.0, T = 0.24;
 
     // A fitted floor and a waist-height acoustic wainscot make the room read
     // as deliberately embedded in the state residence, not a gray box that
@@ -540,8 +543,8 @@
     const northA = gz1 + 0.08, northB = z1 - 0.30;
     if (southB > southA) addBox(grp, x0 + T + 0.035, 0.72, (southA + southB) / 2, 0.07, 1.22, southB - southA, NAVY);
     if (northB > northA) addBox(grp, x0 + T + 0.035, 0.72, (northA + northB) / 2, 0.07, 1.22, northB - northA, NAVY);
-    // lintel over the gap
-    addBox(grp, doorX - doorOut * T / 2, 2.8, zc, T, 0.4, 2.4, WALLC);
+    // the wall over the door, from the door head to the ceiling
+    addBox(grp, doorX - doorOut * T / 2, 2.6 + (H - 2.6) / 2, zc, T, H - 2.6, 2.4, WALLC);
 
     // THE DOOR — a steel slab that slides north for the President and stays
     // shut for everyone else. Its collider is added/removed as it moves.
@@ -680,7 +683,7 @@
     ROOM.stateSymbols += 3;
     // Recessed warm strips establish a ceiling rhythm without spawning
     // point lights or adding an unrelated decorative object to the floor.
-    for (const lx of [-3.4, 0, 3.4]) addBox(grp, tx + lx, 2.83, tz, 1.75, 0.05, 0.18, 0xffe6b0);
+    for (const lx of [-3.4, 0, 3.4]) addBox(grp, tx + lx, H - 0.06, tz, 1.75, 0.05, 0.18, 0xffe6b0);   // under the hall ceiling
     ROOM.builtFor = CBZ.govComplexes;
     wireZones();
     paintBoard();
