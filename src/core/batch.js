@@ -717,6 +717,8 @@
     if (m.onBeforeRender !== _defaultOBR) return null;
     const g = m.geometry;
     if (!g || !g.isBufferGeometry || !g.attributes.position || !g.attributes.normal) return null;
+    // positions/normals are re-baked as float; a quantized source is left alone
+    if (!(g.attributes.position.array instanceof Float32Array) || !(g.attributes.normal.array instanceof Float32Array)) return null;
     if (g.groups && g.groups.length) return null;
     if (g.drawRange.start !== 0 || g.drawRange.count !== Infinity) return null;
     if (g.morphAttributes && Object.keys(g.morphAttributes).length) return null;

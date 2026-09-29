@@ -49,6 +49,7 @@
   if (CBZ.CONFIG.LIGHT_BUDGET_SPOT == null) CBZ.CONFIG.LIGHT_BUDGET_SPOT = 8;
 
   const reg = { point: new Set(), spot: new Set() };
+  let pinnedAt = -1, addsSincePin = 0;   // render-wrap dedupe (see wrapRender)
   const OrigPoint = THREE.PointLight, OrigSpot = THREE.SpotLight;
   function wrap(name, kind) {
     THREE[name] = new Proxy(THREE[name], {
@@ -93,8 +94,8 @@
     const wrappedAdd = function (o) {
       const r = origAdd.apply(this, arguments);
       if (o && !o._cbzPinDummy) {
-        if (o.isPointLight) reg.point.add(o);
-        else if (o.isSpotLight) reg.spot.add(o);
+        if (o.isPointLight) { reg.point.add(o); addsSincePin++; }
+        else if (o.isSpotLight) { reg.spot.add(o); addsSincePin++; }
       }
       return r;
     };
@@ -154,6 +155,7 @@
   // a program no frame will ever ask for.
   function pin() {
     if (!CBZ.CONFIG.LIGHT_COUNT_PIN || !CBZ.scene || !CBZ.camera) return;
+    pinnedAt = performance.now(); addsSincePin = 0;
     if (!pool) {
       pool = new THREE.Group();
       pool.name = "lightpin-pool";
@@ -175,6 +177,27 @@
   }
   CBZ.lightPinApply = pin;
   CBZ.onAlways(97, pin);
+  /* EVERY render sees pinned counts, not just the main one. Render-to-texture
+     passes run from UPDATERS (city/cctv.js at 92, scope views), i.e. before
+     this always-pass in the same frame; on the first frame after a build the
+     world's new lamps still carry the default layer there, and each such
+     render keyed (and compiled) a program per material no later frame uses.
+     The pass is a few dozen lights and a sort: cheap enough to run per call. */
+  function wrapRender() {
+    const r = CBZ.renderer;
+    if (!r || !r.render || r.render._cbzLightPinWrapped) return;
+    const real = r.render;
+    let depth = 0;
+    const wrapped = function () {
+      // the always-pass pinned moments ago and no light arrived since: skip
+      if (depth++ === 0 && (addsSincePin || performance.now() - pinnedAt > 8)) { try { pin(); } catch (e) {} }
+      try { return real.apply(this, arguments); } finally { depth--; }
+    };
+    for (const k in real) if (k.endsWith("Wrapped")) wrapped[k] = real[k];
+    wrapped._cbzLightPinWrapped = true;
+    r.render = wrapped;
+  }
+  CBZ.onAlways(97.01, wrapRender);
 
   // probe seam: live/culled/pinned counts for gates and perf probes
   CBZ.lightPinAudit = function () {
