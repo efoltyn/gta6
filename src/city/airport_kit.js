@@ -3142,8 +3142,11 @@
         if (!doors) { for (const l of leaves) l.g.position.x = l.x0 + l.s * lw * 0.95; return null; }
         const wp = toW(lx, lz);
         const inx = nx * cY + nz * sY, inz = -nx * sY + nz * cY;
-        const col = { minX: 0, maxX: 0, minZ: 0, maxZ: 0, y0: 0, y1: 2.7, ref: null };
-        obb(lx, lz, w, 0.4, 0, function (a, b, c, d) { col.minX = a; col.maxX = b; col.minZ = c; col.maxZ = d; });
+        const col = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity, y0: 0, y1: 2.7, ref: null };
+        obb(lx, lz, w, 0.4, 0, function (a, b, c, d) {
+          col.minX = Math.min(col.minX, a); col.maxX = Math.max(col.maxX, b);
+          col.minZ = Math.min(col.minZ, c); col.maxZ = Math.max(col.maxZ, d);
+        });
         CBZ.colliders.push(col);
         const pivot = { rotation: {} };
         let tv = 0;
