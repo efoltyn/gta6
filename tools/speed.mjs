@@ -55,6 +55,8 @@
      node tools/speed.mjs --no-look               # skip the pixel grabs (A/B look guard off)
      node tools/speed.mjs --look-dir <dir>        # where the A/B look diff PNGs go (default: tmp)
      node tools/speed.mjs --device tablet         # iPad viewport + touch preload (absorbs ipad-perf)
+     node tools/speed.mjs --device phone          # iPhone: 390x844 @3x, touch, iOS Safari UA (the game picks its tier)
+     node tools/speed.mjs --mem-budget 600        # the phone-total budget in MB (default 600)
      node tools/speed.mjs --gpu swiftshader       # software GL (default is the real GPU)
      node tools/speed.mjs --json out.json         # write the full result anywhere
      node tools/speed.mjs --seed 90210 --frames 90 --warm 20
@@ -86,6 +88,22 @@
        under-weighted every GPU win (--serial brings that model back).
        Median and p95 over the stepped frames; per-spot main-thread and
        GPU-process CPU ms per frame from Chrome.
+     MEMORY, as a phone feels it (every load, every play spot; MB). iOS
+       Safari kills a tab near 1-1.5 GB of JS heap + GPU memory together.
+       JS heap: performance.memory (Chrome runs with
+       --enable-precise-memory-info), sampled in-page at every script load,
+       bootStep, landmass builder, stepped frame, GL allocation and every
+       100 ms. Chrome's figure is the V8 heap PLUS ArrayBuffer backing
+       stores (typed arrays: geometry kept in JS after upload), both real
+       memory on a phone; CDP's split is printed beside it. mem.heapPeak over the whole load, mem.heap steady after settle
+       (CDP Runtime.getHeapUsage beside it). GPU: accounted at the GL level
+       (bufferData, texImage2D/3D, texStorage2D/3D, compressedTexImage2D,
+       copyTexImage2D, generateMipmap, renderbufferStorage[Multisample],
+       and the deletes; bytes per GL object in a WeakMap) plus the drawing
+       buffer (w*h*(4+4)*MSAA samples + resolve): live, peak, split into
+       textures / buffers / renderbuffers. PHONE TOTAL = heap + GPU, its
+       peak and steady value, printed OK / OVER against --mem-budget (600).
+       2D canvases (w*h*4 of live ones) beside it: iOS caps those too.
      SHADERS, COLD OR WARM. macOS keeps compiled Metal shaders in a SYSTEM
        cache that survives a fresh Chrome profile (40 programs: 4.4 s cold,
        0.37 s warm), so v1's compile numbers were bimodal: warm usually, cold
@@ -368,6 +386,15 @@ function startServer(root) {
 /* ---------------- Chrome + CDP (one browser, flat sessions) ---------------- */
 const CHROME = process.env.CBZ_CHROME || (process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/opt/pw-browsers/chromium");
 const VIEW = DEVICE === "tablet" ? { w: 1180, h: 820, dpr: 2 } : DEVICE === "phone" ? { w: 390, h: 844, dpr: 3 } : { w: 1512, h: 982, dpr: 2 };
+if (!/^(desktop|tablet|phone)$/.test(DEVICE)) { console.error("--device is desktop, tablet or phone"); process.exit(2); }
+/* --device phone: an iPhone 14/15-class Safari (390x844 CSS @3x, touch, iOS
+   UA). The game reads the UA itself (config.js: /iPhone/ → phone), so no
+   ?device= is forced: the tier is whatever the game picks for that phone. */
+const PHONE_UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1";
+/* iOS Safari kills a tab near 1-1.5 GB (JS heap + GPU together); past
+   "reload at 99%" reports were exactly that. The phone total is judged
+   against this hard budget. */
+const MEM_BUDGET_MB = +opt("--mem-budget", 600);
 async function launchChrome() {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), "cbz-speed-chrome-"));
   const gl = GPU === "swiftshader" ? ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"]
@@ -376,6 +403,7 @@ async function launchChrome() {
     `--window-size=${VIEW.w},${VIEW.h}`, `--force-device-scale-factor=${VIEW.dpr}`,
     "--disable-background-timer-throttling", "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows",
     "--disable-background-networking", "--disable-component-update", "--no-first-run", "--no-default-browser-check", "--disable-extensions",
+    "--enable-precise-memory-info",   // performance.memory live, not bucketed (the memory accounting)
     "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
   const wsUrl = await new Promise((res, rej) => {
     let buf = "";
@@ -410,7 +438,7 @@ document.addEventListener("load", function(e){ var t = e.target; if (t && t.tagN
   /* prisonRoot's child count after each script: the scripts that grow it are
      the prison being built at parse time, in EVERY mode */
   var pr = -1; try { pr = window.CBZ && CBZ.prisonRoot ? CBZ.prisonRoot.children.length : -1; } catch (_) {}
-  S.scripts.push([t.src, now(), pr]); } }, true);
+  S.scripts.push([t.src, now(), pr]); if (S.memSample) S.memSample(); } }, true);
 /* window "load" handlers (core/batch.js batches + freezes the prison there): time each */
 S.loadHandlers = [];
 var wael = window.addEventListener;
@@ -450,6 +478,80 @@ S.compileMs = 0;
   ["compileShader","linkProgram","getProgramParameter","getShaderParameter","getActiveUniform","getActiveAttrib","getUniformLocation","getAttribLocation","getProgramInfoLog","getShaderInfoLog"].forEach(function(n){
     var f = p[n]; if (!f) return; p[n] = function(){ var s = now(); try { return f.apply(this, arguments); } finally { S.compileMs += now() - s; } }; }); });
 var ANGLE = window.ANGLEInstancedArrays; if (ANGLE) { hook(ANGLE.prototype, "drawArraysInstancedANGLE", 2, 3); hook(ANGLE.prototype, "drawElementsInstancedANGLE", 1, 4); }
+/* ---- MEMORY, the way a phone feels it (iOS kills a tab near 1-1.5 GB of
+   JS heap + GPU allocations together). GPU bytes are accounted at the GL
+   level: every allocating call records bytes per GL object in a WeakMap,
+   every delete takes them back; live totals + peaks. RGB / RGB16F / RGB32F
+   count as 4 channels (Metal has no 3-channel formats; the driver pads).
+   The drawing buffer: w*h*(4 color + 4 depth-stencil) * MSAA samples, plus
+   the 4-byte resolve buffer when antialiased. JS heap: performance.memory
+   (live with --enable-precise-memory-info), sampled at every script load,
+   bootStep, landmass builder, stepped frame, GL allocation (throttled) and a
+   100 ms timer; the combined "phone" peak is taken at the same instants. */
+var M = S.mem = { buf: 0, tex: 0, rb: 0, db: 0, peak: { buf: 0, tex: 0, rb: 0, gpu: 0, heap: 0, heapTotal: 0, phone: 0, cv2d: 0 },
+  win: null, nBuf: 0, nTex: 0, nRb: 0, subBytes: 0, samples: 0, lastHeapAt: 0, heap: 0, heapTotal: 0 };
+var OBJ = new WeakMap(), cv2d = [];
+var BIND = { 34962: 34964, 34963: 34965, 35345: 35368, 36662: 36662, 36663: 36663, 35051: 35053, 35052: 35055, 35982: 35983 };
+var TEXB = { 3553: 32873, 32879: 32874, 35866: 35869, 34067: 34068 };
+function texBinding(t){ return (t >= 34069 && t <= 34074) ? 34068 : TEXB[t]; }
+var SIZED = { 33321: 1, 33323: 2, 32849: 4, 32856: 4, 35905: 4, 35907: 4, 33325: 2, 33327: 4, 34843: 8, 34842: 8, 33326: 4, 33328: 8, 34837: 16, 34836: 16,
+  35898: 4, 32857: 4, 33189: 2, 33190: 4, 36012: 4, 35056: 4, 36013: 8, 32854: 2, 36194: 2, 32855: 2, 36168: 1, 33330: 1, 33336: 2, 33334: 4, 33340: 8, 36220: 4, 36208: 16 };
+var BASEC = { 6408: 4, 6407: 4, 6410: 2, 6409: 1, 6406: 1, 6402: 1, 34041: 1, 6403: 1, 33319: 2 };
+var TYPEB = { 5121: 1, 5120: 1, 5123: 2, 5122: 2, 5125: 4, 5124: 4, 5126: 4, 5131: 2, 36193: 2 };
+function bpp(ifmt, type){ if (SIZED[ifmt]) return SIZED[ifmt];
+  if (type === 33635 || type === 32819 || type === 32820) return 2; if (type === 34042) return 4;
+  return (BASEC[ifmt] || 4) * (TYPEB[type] || 1); }
+function srcWH(s){ if (!s) return [0, 0]; var w = s.naturalWidth || s.videoWidth || s.displayWidth || s.width || 0, h = s.naturalHeight || s.videoHeight || s.displayHeight || s.height || 0; return [w, h]; }
+function heapNow(force){ var t = now(); if (!force && t - M.lastHeapAt < 4) return; M.lastHeapAt = t; var pm = performance.memory; if (!pm) return;
+  M.heap = pm.usedJSHeapSize; M.heapTotal = pm.totalJSHeapSize; M.samples++; }
+function dbBytes(){ var sum = 0; for (var i = 0; i < S.gls.length; i++) { var g = S.gls[i]; try { var a = g.__cbzAttr || (g.__cbzAttr = g.getContextAttributes() || {});
+    var w = g.drawingBufferWidth, h = g.drawingBufferHeight, per = 4 + (a.depth || a.stencil ? 4 : 0), smp = a.antialias ? 4 : 1;
+    sum += w * h * per * smp + (a.antialias ? w * h * 4 : 0); } catch (_) {} } return sum; }
+function cv2dBytes(){ var sum = 0, keep = []; for (var i = 0; i < cv2d.length; i++) { var c = cv2d[i].deref ? cv2d[i].deref() : cv2d[i]; if (!c) continue; keep.push(cv2d[i]); sum += (c.width || 0) * (c.height || 0) * 4; } cv2d = keep; return sum; }
+function bump(){ var P = M.peak, gpu = M.buf + M.tex + M.rb + M.db, ph = gpu + M.heap;
+  if (M.buf > P.buf) P.buf = M.buf; if (M.tex > P.tex) P.tex = M.tex; if (M.rb > P.rb) P.rb = M.rb; if (gpu > P.gpu) P.gpu = gpu; if (M.heap > P.heap) P.heap = M.heap;
+  if (M.heapTotal > P.heapTotal) P.heapTotal = M.heapTotal; if (ph > P.phone) P.phone = ph;
+  var W = M.win; if (W) { if (gpu > W.gpu) W.gpu = gpu; if (M.heap > W.heap) W.heap = M.heap; if (ph > W.phone) W.phone = ph; } }
+S.memSample = function(force){ heapNow(force !== false); M.db = dbBytes(); bump(); };
+function setObj(o, kind, key, bytes){ if (!o) return; var r = OBJ.get(o); if (!r) { r = { kind: kind, total: 0, parts: {} }; OBJ.set(o, r); if (kind === "buf") M.nBuf++; else if (kind === "tex") M.nTex++; else M.nRb++; }
+  var old = r.parts[key] || 0; r.parts[key] = bytes; r.total += bytes - old; M[kind] += bytes - old; heapNow(false); bump(); }
+function freeObj(o){ var r = o && OBJ.get(o); if (!r) return; M[r.kind] -= r.total; if (r.kind === "buf") M.nBuf--; else if (r.kind === "tex") M.nTex--; else M.nRb--; OBJ.delete(o); }
+function wrapGL(p, name, fn){ var f = p[name]; if (!f) return; p[name] = function(){ var r = f.apply(this, arguments); try { fn.call(this, arguments); } catch (_) {} return r; }; }
+[window.WebGLRenderingContext, window.WebGL2RenderingContext].forEach(function(C){ if (!C) return; var p = C.prototype;
+  wrapGL(p, "bufferData", function(a){ var t = a[0], b = this.getParameter(BIND[t] || 34964), d = a[1], n = 0;
+    if (typeof d === "number") n = d; else if (d && d.byteLength != null) { var bpe = d.BYTES_PER_ELEMENT || 1, off = a[3] || 0; n = a[4] ? a[4] * bpe : d.byteLength - off * bpe; }
+    setObj(b, "buf", "d", n); });
+  wrapGL(p, "bufferSubData", function(a){ var d = a[2]; if (d && d.byteLength != null) M.subBytes += a[4] ? a[4] * (d.BYTES_PER_ELEMENT || 1) : d.byteLength; });
+  wrapGL(p, "deleteBuffer", function(a){ freeObj(a[0]); });
+  wrapGL(p, "texImage2D", function(a){ var t = a[0], tex = this.getParameter(texBinding(t)), w, h, bp;
+    if (a.length >= 8 && typeof a[5] === "number") { w = a[3]; h = a[4]; bp = bpp(a[2], a[7]); }
+    else { var wh = srcWH(a[5]); w = wh[0]; h = wh[1]; bp = bpp(a[2], a[4]); }
+    setObj(tex, "tex", t + ":" + a[1], w * h * bp); });
+  wrapGL(p, "texImage3D", function(a){ var tex = this.getParameter(texBinding(a[0])); setObj(tex, "tex", a[0] + ":" + a[1], a[3] * a[4] * a[5] * bpp(a[2], a[8])); });
+  wrapGL(p, "copyTexImage2D", function(a){ var tex = this.getParameter(texBinding(a[0])); setObj(tex, "tex", a[0] + ":" + a[1], a[5] * a[6] * bpp(a[2], 5121)); });
+  wrapGL(p, "compressedTexImage2D", function(a){ var tex = this.getParameter(texBinding(a[0])), d = a[6]; var n = typeof d === "number" ? d : (a[8] ? a[8] * (d.BYTES_PER_ELEMENT || 1) : d ? d.byteLength : 0);
+    setObj(tex, "tex", a[0] + ":" + a[1], n); });
+  wrapGL(p, "texStorage2D", function(a){ var tex = this.getParameter(texBinding(a[0])), faces = a[0] === 34067 ? 6 : 1, w = a[3], h = a[4], n = 0;
+    for (var l = 0; l < a[1]; l++) { n += Math.max(1, w >> l) * Math.max(1, h >> l) * bpp(a[2], 0); } setObj(tex, "tex", "storage", n * faces); });
+  wrapGL(p, "texStorage3D", function(a){ var tex = this.getParameter(texBinding(a[0])), n = 0;
+    for (var l = 0; l < a[1]; l++) n += Math.max(1, a[3] >> l) * Math.max(1, a[4] >> l) * (a[0] === 32879 ? Math.max(1, a[5] >> l) : a[5]) * bpp(a[2], 0); setObj(tex, "tex", "storage", n); });
+  wrapGL(p, "generateMipmap", function(a){ var tex = this.getParameter(texBinding(a[0])), r = tex && OBJ.get(tex); if (!r || r.parts.storage) return;
+    var base = 0; for (var k in r.parts) if (/:0$/.test(k)) base += r.parts[k]; setObj(tex, "tex", "mips", Math.round(base / 3)); });
+  wrapGL(p, "deleteTexture", function(a){ freeObj(a[0]); });
+  wrapGL(p, "renderbufferStorage", function(a){ var rb = this.getParameter(36007); setObj(rb, "rb", "s", a[2] * a[3] * (a[1] === 34041 ? 4 : bpp(a[1], 5121))); });
+  wrapGL(p, "renderbufferStorageMultisample", function(a){ var rb = this.getParameter(36007); setObj(rb, "rb", "s", Math.max(1, a[1]) * a[3] * a[4] * (a[2] === 34041 ? 4 : bpp(a[2], 5121))); });
+  wrapGL(p, "deleteRenderbuffer", function(a){ freeObj(a[0]); });
+});
+/* 2D canvases: iOS caps total canvas memory too (a past bug). Live = still referenced. */
+[window.HTMLCanvasElement, window.OffscreenCanvas].forEach(function(K){ if (!K) return; var g2 = K.prototype.getContext;
+  K.prototype.getContext = function(type){ var c = g2.apply(this, arguments); if (c && type === "2d" && !this.__cbz2d) { this.__cbz2d = 1; cv2d.push(window.WeakRef ? new WeakRef(this) : this); } return c; }; });
+S.memWin = function(){ S.memSample(); M.win = { gpu: M.buf + M.tex + M.rb + M.db, heap: M.heap, phone: M.buf + M.tex + M.rb + M.db + M.heap }; };
+S.memRead = function(){ S.memSample(); var c2 = cv2dBytes(); if (c2 > M.peak.cv2d) M.peak.cv2d = c2; var MB = function(x){ return +(x / 1048576).toFixed(1); }, P = M.peak, W = M.win;
+  return { heap: MB(M.heap), heapTotal: MB(M.heapTotal), gpu: MB(M.buf + M.tex + M.rb + M.db), buf: MB(M.buf), tex: MB(M.tex), rb: MB(M.rb), db: MB(M.db),
+    phone: MB(M.buf + M.tex + M.rb + M.db + M.heap), cv2d: MB(c2), nBuf: M.nBuf, nTex: M.nTex, nRb: M.nRb, subMB: MB(M.subBytes), samples: M.samples, precise: !!(performance.memory && performance.memory.usedJSHeapSize % 4096),
+    peak: { heap: MB(P.heap), heapTotal: MB(P.heapTotal), gpu: MB(P.gpu), buf: MB(P.buf), tex: MB(P.tex), rb: MB(P.rb), phone: MB(P.phone), cv2d: MB(P.cv2d) },
+    win: W ? { heap: MB(W.heap), gpu: MB(W.gpu), phone: MB(W.phone) } : null }; };
+setInterval(function(){ S.memSample(); }, 100);
 /* COLD SHADERS: rename main() with this run's nonce and call it from a new
    main(). Same GPU code after the driver inlines it, but new source text, so
    macOS's system Metal cache and Chrome's program cache both miss (verified:
@@ -517,11 +619,11 @@ try { Object.defineProperty(window, "CBZ", { configurable: true, enumerable: tru
 /* ---- the build: checkpoints + landmass builders (armed before startRun) ---- */
 S.armBuild = function(){
   var C = window.CBZ; if (!C || S.buildArmed) return; S.buildArmed = 1;
-  var bs = C.bootStep; C.bootStep = function(k){ S.steps.push([k == null ? "?" : String(k), now()]); if (bs) return bs.apply(this, arguments); };
+  var bs = C.bootStep; C.bootStep = function(k){ S.steps.push([k == null ? "?" : String(k), now()]); S.memSample(); if (bs) return bs.apply(this, arguments); };
   (C._landmassBuilders || []).forEach(function(b, i){ if (b.__sp) return; b.__sp = 1; var f = b.fn;
     var name = String(b.bootKey || b.file || (f && f.name) || ("builder#" + i)).replace(/^lm:/, "").replace(/^.*\//, "");
     b.fn = function(){ var st = S.steps[S.steps.length - 1]; if (st && st[0] === "?") st[0] = "lm:" + name;
-      var s = now(); try { return f.apply(this, arguments); } finally { S.builders.push([name, now() - s]); } }; });
+      var s = now(); try { return f.apply(this, arguments); } finally { S.builders.push([name, now() - s]); S.memSample(); } }; });
 };
 /* ---- per-frame accounting ---- */
 function keyOf(e, kind){ return kind + "@" + e.order + " " + (e.__src || e.source || (e.fn && e.fn.name) || "?"); }
@@ -582,6 +684,7 @@ S.step = function(n, o){
     var s = now();
     for (var j = 0; j < cbs.length; j++) { try { cbs[j](S.t); } catch (e) { S.errN++; if (S.errs.length < 12) S.errs.push("[step] " + (e && e.message)); } }
     var cpu = now() - s, fin = 0;
+    S.memSample();
     if (useTq) { S.tqPop(); S.tq.on = false; S.tq.stack.length = 0; }
     /* GPU proxy: a 1-pixel readback cannot return until the GPU has finished
        the frame (gl.finish() is a no-op wait in Chrome: measured 0.0 ms). */
@@ -769,7 +872,7 @@ function modeUrl(base, m) {
   if (d.kind === "cbz") q.push("mode=" + d.mode);
   if (d.query) q.push(d.query);
   q.push("seed=" + SEED);
-  if (DEVICE !== "desktop") q.push("device=" + DEVICE);
+  if (DEVICE === "tablet") q.push("device=" + DEVICE);   // phone: the game detects it from the UA
   if (QUERY) q.push(QUERY.replace(/^[?&]/, ""));
   if (SLICE && d.mode === "city") q.push("slice=" + encodeURIComponent(SLICE));
   return base.replace(/\/?$/, "/") + d.page + "?" + q.join("&");
@@ -794,6 +897,7 @@ async function newPage(B, salt = newNonce()) {
     try { pre = fs.readFileSync(path.join(ROOT0, "tools/preload/ipad.js"), "utf8") + "\n;" + pre; } catch (_) {}
     await s("Emulation.setDeviceMetricsOverride", { width: VIEW.w, height: VIEW.h, deviceScaleFactor: VIEW.dpr, mobile: DEVICE === "phone" });
     await s("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+    if (DEVICE === "phone") await s("Emulation.setUserAgentOverride", { userAgent: PHONE_UA, platform: "iPhone", acceptLanguage: "en-US" });
   }
   await s("Page.addScriptToEvaluateOnNewDocument", { source: pre });
   return { s, ev, salt, close: async () => { try { await B.send("Target.closeTarget", { targetId }); } catch (_) {} try { await B.send("Target.disposeBrowserContext", { browserContextId }); } catch (_) {} } };
@@ -809,6 +913,17 @@ async function cpuSnap(B, P) {
   try { const { processInfo } = await B.send("SystemInfo.getProcessInfo", {}, undefined, 10000); let g = null; for (const p of processInfo) if (p.type === "GPU") g = (g || 0) + p.cpuTime; if (g != null) o.gpuProc = g; } catch (_) {}
   return o;
 }
+/* MEMORY snapshot: the preload's in-page accounting (JS heap via
+   performance.memory, GPU bytes at the GL level, 2D canvases) plus CDP's own
+   heap numbers as a cross-check. MB throughout. */
+async function memSnap(P) {
+  let o = null;
+  try { o = await P.ev("window.__speed.memRead()", 30000); } catch (_) {}
+  try { const h = await P.s("Runtime.getHeapUsage", {}, 10000); if (o) { o.cdpHeap = +(h.usedSize / 1048576).toFixed(1); o.cdpHeapTotal = +(h.totalSize / 1048576).toFixed(1); if (h.backingStorageSize != null) o.arrayBuffers = +(h.backingStorageSize / 1048576).toFixed(1); o.cdpRaw = h; } } catch (_) {}
+  try { const { metrics } = await P.s("Performance.getMetrics", {}, 10000); if (o) o.cdpMetrics = Object.fromEntries(metrics.filter((x) => /Heap|Nodes|Documents|Frames/.test(x.name)).map((x) => [x.name, x.value])); } catch (_) {}
+  return o;
+}
+const memVerdict = (mb) => (mb == null ? "-" : mb <= MEM_BUDGET_MB ? "OK" : "OVER");
 const cpuD = (a, b, k) => (a && b && a[k] != null && b[k] != null ? (b[k] - a[k]) * 1000 : null);
 
 async function waitFor(ev, expr, budgetS, what) {
@@ -852,6 +967,7 @@ async function measureLoad(B, P, url, out, prof) {
   out.calibs = [await P.ev("window.__speed.calib()")];
   out.scripts = scr;
   out.tool = { booted: Date.now() - tNav };
+  const memTitle = await memSnap(P);
   const sn1 = await cpuSnap(B, P);
   if (prof) { await P.s("Profiler.enable"); await P.s("Profiler.setSamplingInterval", { interval: 1000 }); await P.s("Profiler.start"); }
   // THE BUILD: one synchronous task. Timed in-page.
@@ -862,6 +978,7 @@ async function measureLoad(B, P, url, out, prof) {
   if (b.err) throw new Error("startRun threw: " + b.err);
   if (prof) { const { profile } = await P.s("Profiler.stop", {}, 240000); prof.build = profile; }
   const sn2 = await cpuSnap(B, P);
+  const memBuild = await memSnap(P);
   out.buildMs = b.t1 - b.t0;
   out.buildCompileMs = b.compile;
   out.state = b.state;
@@ -889,6 +1006,13 @@ async function measureLoad(B, P, url, out, prof) {
     return rows; })()`, 600000);
   if (prof) { const { profile } = await P.s("Profiler.stop", {}, 240000); prof.first = profile; }
   const sn3 = await cpuSnap(B, P);
+  /* MEMORY: peak over the whole load (script eval, build, first frames:
+     sampled in-page through all of it), and the steady value after settle */
+  const ms = await memSnap(P);
+  if (ms) out.mem = { boot: ms.peak, steady: { heap: ms.heap, heapTotal: ms.heapTotal, gpu: ms.gpu, buf: ms.buf, tex: ms.tex, rb: ms.rb, db: ms.db, phone: ms.phone, cv2d: ms.cv2d, cdpHeap: ms.cdpHeap, cdpHeapTotal: ms.cdpHeapTotal, arrayBuffers: ms.arrayBuffers, cdpRaw: ms.cdpRaw, cdpMetrics: ms.cdpMetrics },
+    objects: { buffers: ms.nBuf, textures: ms.nTex, renderbuffers: ms.nRb }, subDataMB: ms.subMB, samples: ms.samples, precise: ms.precise, budgetMB: MEM_BUDGET_MB,
+    atTitle: memTitle && { heap: memTitle.heap, gpu: memTitle.gpu, phone: memTitle.phone, peakPhone: memTitle.peak.phone },
+    afterBuild: memBuild && { heap: memBuild.heap, gpu: memBuild.gpu, phone: memBuild.phone, peakPhone: memBuild.peak.phone } };
   const top1 = (r) => { let w = "", v = 0; for (const k in r.u || {}) if (r.u[k] > v) { v = r.u[k]; w = k; } return w ? `${w} ${v.toFixed(0)}` : ""; };
   out.firstFrames = first.map((r) => ({ cpu: +r.cpu.toFixed(1), fin: +r.fin.toFixed(1), render: +r.render.toFixed(1), rOther: +r.rOther.toFixed(1), sim: +r.sim.toFixed(1), newPrograms: r.newPrograms, calls: r.calls, top: top1(r) }));
   const settled = first.length < SETTLE_MAX ? first.length - 5 : first.length;
@@ -966,6 +1090,8 @@ async function measureFrames(B, P, n, pathExpr, grab) {
   return o;
 }
 
+/* per play spot: the value after its frames, and the peak over the spot's window (place + warm + measured frames) */
+const spotMem = (x) => x && { heap: x.heap, gpu: x.gpu, buf: x.buf, tex: x.tex, rb: x.rb, db: x.db, phone: x.phone, cv2d: x.cv2d, cdpHeap: x.cdpHeap, peak: x.win, runPeakPhone: x.peak.phone };
 async function playSpots(B, P, m, ctx = {}) {
   const tS = Date.now();
   const spots = ctx.spots || (m === "city" ? await P.ev(SLICE_SPOTS ? `window.__speed.sliceSpots(${JSON.stringify(SLICE_SPOTS)})` : "window.__speed.spots()", 120000) : await P.ev("(function(){ var p = CBZ.player; return p && p.pos ? { spawn: { x: p.pos.x, y: p.pos.y, z: p.pos.z, player: true } } : { spawn: { x: 0, y: 0, z: 0 } }; })()"));
@@ -974,18 +1100,20 @@ async function playSpots(B, P, m, ctx = {}) {
   const order = Object.keys(spots);
   for (const name of order) {
     const sp = JSON.stringify(spots[name]);
-    const cal = await P.ev(`(function(){ var S = window.__speed; S.place(${sp}); var cal = S.calib(); S.step(${WARM}, { finish: ${SERIAL}, path: S.pin(${sp}) }); return cal; })()`, 300000);
+    const cal = await P.ev(`(function(){ var S = window.__speed; S.memWin(); S.place(${sp}); var cal = S.calib(); S.step(${WARM}, { finish: ${SERIAL}, path: S.pin(${sp}) }); return cal; })()`, 300000);
     const r = await measureFrames(B, P, FRAMES, `S.pin(${sp})`, LOOK_PIX && ctx.grab !== false);
     r.spot = spots[name];
     r.look = await P.ev("window.__speed.look()");
+    r.mem = spotMem(await memSnap(P));
     r.calib = (cal + await P.ev("window.__speed.calib()")) / 2;
     res.spots[name] = r;
     log(`[speed ${since()}]   ${m}/${name}: frame ${fmt(r.frame.med)} ms (cpu ${fmt(r.cpu.med)}, gpu ${r.gpu ? fmt(r.gpu.med) : "-"}${r.gpu ? ` = main ${fmt(r.gMain.med)} shadow ${fmt(r.gShadow.med)} rt ${fmt(r.gRt.med)}` : ""}${SERIAL ? `, wait ${fmt(r.fin.med)}` : ""}; sim ${fmt(r.sim.med)}, render ${fmt(r.render.med)}) calls ${r.calls && r.calls.med} tris ${r.tris && r.tris.med}`);
   }
   if (m === "city" && spots.spawn && spots.downtown) {
-    await P.ev(`(function(){ var S = window.__speed; S.pose = null; S.place(${JSON.stringify(spots.spawn)}); return 1; })()`);
+    await P.ev(`(function(){ var S = window.__speed; S.memWin(); S.pose = null; S.place(${JSON.stringify(spots.spawn)}); return 1; })()`);
     const r = await measureFrames(B, P, FRAMES * 2, `S.pathFn(${JSON.stringify(spots.spawn)}, ${JSON.stringify(spots.downtown)})`, false);
     r.spot = { path: "spawn->downtown @25m/s" };
+    r.mem = spotMem(await memSnap(P));
     res.spots.drive = r;
     log(`[speed ${since()}]   ${m}/drive: frame ${fmt(r.frame.med)} ms (cpu ${fmt(r.cpu.med)}, gpu ${r.gpu ? fmt(r.gpu.med) : "-"}; sim ${fmt(r.sim.med)}, render ${fmt(r.render.med)}) calls ${r.calls && r.calls.med}`);
   }
@@ -1059,13 +1187,15 @@ async function runPage(B, base, m, withPlay) {
     out.entryToFirstDraw = t.firstDraw - entryAt;
     out.firstFrames = t.frames;
     out.loadMs = (d.entry ? readyAt : 0) + (t.cheapAt - (d.entry ? entryAt : 0));
+    { const ms = await memSnap(P); if (ms) out.mem = { boot: ms.peak, steady: { heap: ms.heap, heapTotal: ms.heapTotal, gpu: ms.gpu, buf: ms.buf, tex: ms.tex, rb: ms.rb, db: ms.db, phone: ms.phone, cv2d: ms.cv2d, cdpHeap: ms.cdpHeap }, budgetMB: MEM_BUDGET_MB }; }
     out.phases = [["script eval + page ready", readyAt], ["entry → first draw", t.firstDraw - entryAt], ["first draw → frames cheap", t.cheapAt - t.firstDraw]];
     out.ok = true;
     if (withPlay) {
       await P.ev("(function(){ var S = window.__speed; S.hold_(); return new Promise(function(r){ setTimeout(r, 60); }); })()");
       await P.ev(PAGE_LIB.replace("var S = window.__speed, C = window.CBZ", "var S = window.__speed, C = window.CBZ || {}"));
-      await P.ev(`(function(){ var S = window.__speed; S.wrapUpdaters && window.CBZ && window.CBZ.updaters && S.wrapUpdaters(); window.CBZ && window.CBZ.renderer && S.wrapRender(); S.step(${WARM}, { finish: ${SERIAL} }); return 1; })()`, 300000);
+      await P.ev(`(function(){ var S = window.__speed; S.memWin(); S.wrapUpdaters && window.CBZ && window.CBZ.updaters && S.wrapUpdaters(); window.CBZ && window.CBZ.renderer && S.wrapRender(); S.step(${WARM}, { finish: ${SERIAL} }); return 1; })()`, 300000);
       const r = await measureFrames(B, P, FRAMES, "null", false);
+      r.mem = spotMem(await memSnap(P));
       out.play = { spots: { live: r } };
       log(`[speed ${since()}]   ${m}/live: frame ${fmt(r.frame.med)} ms (cpu ${fmt(r.cpu.med)}, gpu ${r.gpu ? fmt(r.gpu.med) : "-"}), draws ${r.draws && r.draws.med}`);
     }
@@ -1138,6 +1268,13 @@ function flatten(r) {
     if (r.programs != null) put(`${m}.load.programs`, r.programs, 0, "n");
     if (r.phases && PAGE_MODES[m].kind === "cbz") for (const [k, v] of r.phases) put(`${m}.build.${k}`, v);
     if (r.builders) for (const [k, v] of r.builders) put(`${m}.builder.${k}`, v);
+    if (r.mem) {   // MB: the load's peak (script eval + build + first frames) and the steady value after settle
+      const b = r.mem.boot || {}, st = r.mem.steady || {};
+      put(`${m}.mem.heapPeak`, b.heap, 0, "MB"); put(`${m}.mem.heap`, st.heap, 0, "MB");
+      put(`${m}.mem.gpuPeak`, b.gpu, 0, "MB"); put(`${m}.mem.gpu`, st.gpu, 0, "MB");
+      put(`${m}.mem.gpuTex`, st.tex, 0, "MB"); put(`${m}.mem.gpuBuf`, st.buf, 0, "MB"); put(`${m}.mem.gpuRb`, st.rb, 0, "MB");
+      put(`${m}.mem.phonePeak`, b.phone, 0, "MB"); put(`${m}.mem.phone`, st.phone, 0, "MB"); put(`${m}.mem.canvas2d`, st.cv2d, 0, "MB");
+    }
     if (r.cpu) {   // Chrome's CPU counters (ms): contention-proof load cost
       put(`${m}.load.cpu.main`, r.cpu.main); put(`${m}.load.cpu.mainBuild`, r.cpu.mainBuild); put(`${m}.load.cpu.mainFirstFrames`, r.cpu.mainFirstFrames);
       put(`${m}.load.cpu.gpuProc`, r.cpu.gpuProc); put(`${m}.load.cpu.gpuProcFirstFrames`, r.cpu.gpuProcFirstFrames); put(`${m}.load.cpu.v8Compile`, r.cpu.v8Compile);
@@ -1162,6 +1299,8 @@ function flatten(r) {
       put(`${m}.play.${s}.gpuShadow`, o.gShadow.med, nz(o.gShadow)); put(`${m}.play.${s}.gpuRt`, o.gRt.med, nz(o.gRt)); }
     if (o.gpuPasses) for (const [k, v] of o.gpuPasses) put(`${m}.play.${s}.gpuPass.${k}`, v);
     if (o.cpuThread != null) put(`${m}.play.${s}.cpuThread`, o.cpuThread);
+    if (o.mem) { put(`${m}.play.${s}.mem.heap`, o.mem.heap, 0, "MB"); put(`${m}.play.${s}.mem.gpu`, o.mem.gpu, 0, "MB"); put(`${m}.play.${s}.mem.phone`, o.mem.phone, 0, "MB");
+      if (o.mem.peak) put(`${m}.play.${s}.mem.phonePeak`, o.mem.peak.phone, 0, "MB"); }
     if (o.gpuProcCpu != null) put(`${m}.play.${s}.gpuProcCpu`, o.gpuProcCpu);
     if (o.frame || o.cpu) put(`${m}.play.${s}.frameP95`, o.frame ? o.frame.p95 : o.cpu.p95 + (o.fin ? o.fin.p95 : 0), 2 * nz(o.frame || o.cpu));
     if (o.sim) put(`${m}.play.${s}.sim`, o.sim.med, nz(o.sim));
@@ -1204,6 +1343,7 @@ const SUBKEY = /\.upd\.|\.builder\.|\.build\.|\.gpuPass\./;
 function epsRel(k, unit, baseMed) {
   const b = Math.max(1e-9, Math.abs(baseMed));
   if (unit === "n") return Math.max(0.02, 1 / Math.max(1, b));
+  if (unit === "MB") return Math.max(0.03, 5 / b);
   if (SUBKEY.test(k)) return Math.max(0.15, (/\.builder\.|\.build\./.test(k) ? 30 : 0.3) / b);
   if (/\.load\./.test(k)) return Math.max(0.03, 150 / b);
   return Math.max(0.03, 0.5 / b);
@@ -1223,7 +1363,8 @@ function pairedTest(k, unit, bs, cs) {
   const lo90 = mean - tq(T95, m - 1, 1.645) * se, hi90 = mean + tq(T95, m - 1, 1.645) * se;
   let verdict = "unsure";
   if (m >= Math.min(MIN_PAIRS, 2) && m >= 2) {
-    if ((lo99 > 0 || hi99 < 0) && Math.abs(mean) > eL) verdict = mean > 0 ? (unit === "n" ? "MORE" : "SLOWER") : (unit === "n" ? "fewer" : "faster");
+    const cnt = unit === "n" || unit === "MB";
+    if ((lo99 > 0 || hi99 < 0) && Math.abs(mean) > eL) verdict = mean > 0 ? (cnt ? "MORE" : "SLOWER") : (cnt ? "fewer" : "faster");
     else if (lo90 > -eL && hi90 < eL) verdict = "same";
   }
   const pct = (x) => +((Math.exp(x) - 1) * 100).toFixed(2);
@@ -1411,6 +1552,9 @@ function table(res) {
     pm("load.warmFrames", "  settle (frames 2..steady)");
     pm("load.entryToFirstDraw", "  entry → first draw");
     pm("load.programs", "  programs compiled", "n");
+    if (r.mem) { const b = r.mem.boot || {}, st = r.mem.steady || {};
+      p(`  MEMORY (MB)  JS heap peak ${fmt(b.heap, 0)} / steady ${fmt(st.heap, 0)}${st.cdpHeap != null ? ` (= V8 heap ${fmt(st.cdpHeap, 0)} + ArrayBuffers ${fmt(st.arrayBuffers, 0)})` : ""}   GPU peak ${fmt(b.gpu, 0)} / steady ${fmt(st.gpu, 0)} [textures ${fmt(st.tex, 0)} buffers ${fmt(st.buf, 0)} renderbuffers ${fmt(st.rb, 0)} drawing buffer ${fmt(st.db, 0)}]   2D canvases ${fmt(st.cv2d, 0)}`);
+      p(`  PHONE TOTAL (heap + GPU)  peak ${fmt(b.phone, 0)} MB ${memVerdict(b.phone)}   steady ${fmt(st.phone, 0)} MB ${memVerdict(st.phone)}   (budget ${r.mem.budgetMB || MEM_BUDGET_MB} MB; iOS kills a tab near 1-1.5 GB)${r.mem.precise === false ? "  [heap NOT precise]" : ""}`); }
     if (g("load.cpu.main")) p(`  CPU time (Chrome): main thread ${fmt(g("load.cpu.main").v, 0)} ms (build ${fmt(g("load.cpu.mainBuild") && g("load.cpu.mainBuild").v, 0)}, first frames ${fmt(g("load.cpu.mainFirstFrames") && g("load.cpu.mainFirstFrames").v, 0)}, V8 compile ${fmt(g("load.cpu.v8Compile") && g("load.cpu.v8Compile").v, 0)})  GPU process ${fmt(g("load.cpu.gpuProc") && g("load.cpu.gpuProc").v, 0)} ms (first frames ${fmt(g("load.cpu.gpuProcFirstFrames") && g("load.cpu.gpuProcFirstFrames").v, 0)})`);
     if (g("load.return.total")) p(`  RETURN VISIT ${fmt(g("load.return.total").v, 0)} ms = title ${fmt(g("load.return.title") && g("load.return.title").v, 0)} (script eval ${fmt(g("load.return.scriptEval") && g("load.return.scriptEval").v, 0)}) + build ${fmt(g("load.return.build") && g("load.return.build").v, 0)} + first frame ${fmt(g("load.return.firstFrame") && g("load.return.firstFrame").v, 0)} (compile ${fmt(g("load.return.firstFrameCompile") && g("load.return.firstFrameCompile").v, 0)}) + settle ${fmt(g("load.return.warmFrames") && g("load.return.warmFrames").v, 0)}; GPU process ${fmt(g("load.return.cpu.gpuProc") && g("load.return.cpu.gpuProc").v, 0)} ms`);
     if (r.firstFrames && r.firstFrames.length && r.firstFrames[0].top != null) p("  settle frames: " + r.firstFrames.slice(0, 12).map((f) => `${fmt(f.cpu + f.fin, 0)}${f.newPrograms ? "/" + f.newPrograms + "p" : ""}`).join(" ") + `  (${r.settleFrames} to steady; worst: ${r.firstFrames.slice().sort((a, b) => b.cpu - a.cpu)[0].top})`);
@@ -1425,6 +1569,7 @@ function table(res) {
       const o = r.play.spots[s];
       const gv = (k) => g(`play.${s}.${k}`);
       p(`  PLAY ${s.padEnd(9)} frame ${fmt(gv("frame") && gv("frame").v)} ms ±${fmt(gv("frame") && gv("frame").noise, 2)} (p95 ${fmt(gv("frameP95") && gv("frameP95").v)}, mean ${fmt(o.meanFrame)})  cpu ${fmt(o.cpu && o.cpu.med)} [sim ${fmt(o.sim && o.sim.med)} always ${fmt(o.alw && o.alw.med)} render ${fmt(o.render && o.render.med)}]  gpu ${o.gpu ? fmt(o.gpu.med) + ` [main ${fmt(o.gMain.med)} shadow ${fmt(o.gShadow.med)} rt ${fmt(o.gRt.med)}]` : "-"}${o.fin && o.fin.med ? "  wait " + fmt(o.fin.med) : ""}  calls ${o.calls ? o.calls.med : "-"}  tris ${o.tris ? (o.tris.med / 1e6).toFixed(2) + "M" : "-"}${o.emptyFrames ? "  EMPTY " + o.emptyFrames : ""}`);
+      if (o.mem) p(`     memory (MB): heap ${fmt(o.mem.heap, 0)} GPU ${fmt(o.mem.gpu, 0)} [tex ${fmt(o.mem.tex, 0)} buf ${fmt(o.mem.buf, 0)} rb ${fmt(o.mem.rb, 0)}]  phone ${fmt(o.mem.phone, 0)} ${memVerdict(o.mem.phone)}${o.mem.peak ? `, peak here ${fmt(o.mem.peak.phone, 0)} ${memVerdict(o.mem.peak.phone)}` : ""}`);
       if (o.cpuThread != null || o.gpuPasses) p(`     CPU/frame (Chrome): main thread ${fmt(o.cpuThread)} ms, GPU process ${fmt(o.gpuProcCpu)} ms${o.gpuPasses ? "   GPU passes (mean ms/frame): " + o.gpuPasses.slice(0, 6).map(([k, v]) => `${k.replace(/src\//, "")} ${fmt(v, 2)}`).join(" · ") : ""}${o.gpuDisjoint ? "  (GPU DISJOINT: timings suspect)" : ""}`);
       if (o.updaters && o.updaters.length) p("     top updaters (mean/median ms): " + o.updaters.slice(0, 8).map((u) => `${u[0].replace(/^([ua])@/, "$1").replace(/^([ua][0-9.]+) src\//, "$1 ")} ${fmt(u[3], 1)}/${fmt(u[1], 1)}`).join(" · "));
       if (o.hitches && o.hitches.length) p("     hitches [frame, ms, worst, its ms, new programs]: " + o.hitches.slice(0, 5).map((h) => JSON.stringify(h)).join(" "));
