@@ -439,6 +439,12 @@
         ctx.dbox(f.out * (halfN + cD / 2), 0.34, t, cD, 0.68, 0.55, shade(STONE, 0.90));
         ctx.dbox(f.out * (halfN + cD - 0.4), 0.74, t, 0.66, 0.14, 0.62, CAP);
       }
+      // 0.81 m of stone is over the 0.45 STEP_UP: a cheek wall you step
+      // AROUND, not through (its finial rides on top, deco)
+      if (ctx.solid) {
+        if (f.horiz) ctx.solid(t, 0.405, f.out * (halfN + cD / 2), 0.55, 0.81, cD);
+        else ctx.solid(f.out * (halfN + cD / 2), 0.405, t, cD, 0.81, 0.55);
+      }
       ctx.ball(f.horiz ? t : f.out * (halfN + cD - 0.4), 0.98,
         f.horiz ? f.out * (halfN + cD - 0.4) : t, 0.24, CAP);
     }
@@ -472,6 +478,11 @@
       }
       // capital (abacus + echinus) and, for ionic, two volute blocks
       const capY = colBase + 0.40 + (orderH - 1.0);
+      // THE ORDER IS SOLID. An 8 m column standing proud of the wall on the
+      // front walk was walk-through (merged deco has no body). The body is
+      // the plinth's footprint (R*2.5 square, the widest drawn part below the
+      // capital) from the ground to the capital's top.
+      if (ctx.solid) ctx.solid(cx, (capY + 0.34) / 2, cz, R * 2.5, capY + 0.34, R * 2.5, { noCam: true });
       ctx.dbox(cx, capY + 0.10, cz, R * 2.4, 0.20, R * 2.4, CAP);
       ctx.dbox(cx, capY + 0.26, cz, R * 2.9, 0.16, R * 2.9, shade(CAP, 1.04));
       if (spec.order === "ionic") for (const sg of [-1, 1]) {

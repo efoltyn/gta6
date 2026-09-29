@@ -67,25 +67,6 @@
     const minZ = zLines[0] - ROAD / 2, maxZ = zLines[N] + ROAD / 2;
     const spanX = maxX - minX, spanZ = maxZ - minZ;
 
-    // PHOTO LAYER: when assets/textures/*.jpg exist, draw the photo into an
-    // existing procedural canvas texture, then let `after` re-tint it so the
-    // game palette survives the photo grain. Missing file / tainted canvas →
-    // the procedural pattern simply stays. Full fallback, no error path.
-    function photoLayer(tex, url, after) {
-      if (!tex || !tex.image || !tex.image.getContext) return;
-      const img = new Image();
-      img.onload = function () {
-        try {
-          const c = tex.image, g2 = c.getContext("2d");
-          g2.drawImage(img, 0, 0, c.width, c.height);
-          if (after) after(g2, c);
-          tex.magFilter = THREE.LinearFilter;
-          tex.needsUpdate = true;
-        } catch (e) { /* keep the procedural fallback */ }
-      };
-      img.src = url;
-    }
-
     // ---- ground: the whole street layer (road, harbour apron, kerbs,
     //      footways, markings, lot pads) is ONE solved cross-section built by
     //      city/streetkit.js further down, once the lots exist. There is no
@@ -221,10 +202,10 @@
 
     // ---- blocks: lots + a DISTRICT-flavoured lot pad ----
     // GROUND IDENTITY (why: you should know WHERE you are — and where the
-    // money is — without the map): residential + projects keep grass yards
-    // wearing the island's exact checker (the two landmasses read as one
-    // world), the core + commercial blocks get poured concrete plazas and
-    // industrial gets a dusty work yard.
+    // money is — without the map): city/cityground.js reads the district off
+    // each lot — lawns and planting beds on the residential streets, trampled
+    // turf and perimeter walks in the projects, pavers downtown, poured slabs
+    // on the shopping streets, cracked yard asphalt in the industrial blocks.
     // (district field hoisted here — the lot pads need it at build time;
     // the spawn-weight pickers further down reuse these same definitions)
     const DISTRICTS = (C.districts && C.districts.length) ? C.districts : [];
@@ -233,28 +214,15 @@
       const di = Math.min(2, (i / dSpan) | 0), dj = Math.min(2, (j / dSpan) | 0);
       return dj * 3 + di;
     }
-    const grassTex = CBZ.checkerTex ? CBZ.checkerTex(CBZ.COL.GRASS_A, CBZ.COL.GRASS_B, 2) : null;
-    if (grassTex) photoLayer(grassTex, "assets/textures/grass512.jpg", function (g2, c) {
-      // keep the island's checker identity visible over the photo grain
-      const s = c.width / 2; g2.globalAlpha = 0.38;
-      for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) {
-        g2.fillStyle = (i + j) % 2 ? CBZ.COL.GRASS_A : CBZ.COL.GRASS_B;
-        g2.fillRect(i * s, j * s, s, s);
-      }
-      g2.globalAlpha = 1;
-    });
-    const grassMat = grassTex ? new THREE.MeshLambertMaterial({ map: grassTex })
-                              : new THREE.MeshLambertMaterial({ color: 0x55903f });
     // The footway is 2 m inside the block envelope (BLK), so the lot pad is
     // BLK - 4 and the full 18 m of carriageway shows between kerbs.
     const LOT_HALF = (BLK - 4) / 2;
-    const lots = [], padKind = [];
+    const lots = [], lotPads = [];
     for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
       const bx = (xLines[i] + xLines[i + 1]) / 2;
       const bz = (zLines[j] + zLines[j + 1]) / 2;
       const dq = districtQ(i, j);
-      const dk = (DISTRICTS[dq] && DISTRICTS[dq].kind) || "";
-      padKind.push({ bi: i, bj: j, kind: (dk === "core" || dk === "commercial") ? "plaza" : (dk === "industrial" ? "yard" : "grass") });
+      lotPads.push({ bi: i, bj: j });
       // `grid` (additive): this parcel's kerb, footway and driveway mouth are
       // drawn by the street kit; approach.js only surfaces the lot side.
       lots.push({ cx: bx, cz: bz, w: BLK - 4, d: BLK - 4, i, j, district: dq, kind: null, building: null, grid: true });
@@ -286,15 +254,17 @@
     }) : null;
     if (!street) console.error("[city] city/streetkit.js did not load: the grid has no streets");
     const SP = street ? street.profile : { yRoad: 0, yWalk: 0, yLot: 0 };
-    // lot pads: one mesh per surface, each a fan to the footway's own back edge
+    // lot pads: ONE mesh for every parcel, a fan to the footway's own back
+    // edge, wearing THE CITY GROUND (city/cityground.js): what each parcel is
+    // made of (lawn, beds, driveway, pavers, poured slabs, yard asphalt,
+    // gravel, park paths) is a splat baked from the real lot, not a tile.
+    // Was: a two-tone checker lawn under a photo, a flat-colour yard and a
+    // 6 m slab canvas, one per district, three draw calls.
     if (street) {
-      const byKind = { grass: [], plaza: [], yard: [] };
-      for (const pk of padKind) byKind[pk.kind].push(pk);
-      street.lotMesh("lot-grass", byKind.grass, grassMat, 1 / 8);
-      street.lotMesh("lot-plaza", byKind.plaza, street.plazaMaterial(), 1 / 6);
-      const yardMat = new THREE.MeshLambertMaterial();
-      yardMat.color.setRGB(0.20, 0.19, 0.165);     // dusty work yard, linear
-      street.lotMesh("lot-yard", byKind.yard, yardMat, 1 / 8);
+      const gmat = CBZ.cityGround
+        ? CBZ.cityGround.material({ lots, districts: DISTRICTS, xLines, zLines })
+        : new THREE.MeshLambertMaterial({ color: 0x77766f });
+      street.lotMesh("lot-ground", lotPads, gmat, 1 / 8);
     }
     // the raised concrete MEDIAN on the two avenues, stopping short of the
     // stop bars so the crosswalk and the junction stay open (one merged mesh)

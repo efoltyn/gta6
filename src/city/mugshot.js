@@ -136,6 +136,9 @@
       age: spec.age !== undefined ? spec.age : (p ? p.ageYears : null),
       cap: cap, capColor: capHex, capKind: wornKind || (rec && rec.hat) || undefined,
       shortSleeve: spec.shortSleeve !== undefined ? !!spec.shortSleeve : shortSleeveOf(ch),
+      // his ink (entities/tattoo.js): the booth rig wears the SUBJECT's pieces
+      inkSrc: ch || null,
+      inkSig: (ch && CBZ.tattoo) ? CBZ.tattoo.sigOf(ch) : "",
     };
   }
 
@@ -151,7 +154,7 @@
     const r = L.rec || {};
     const comp = (r.composite && Array.isArray(r.composite.items)) ? r.composite.items.join(",") : "";
     return bodySigOf(L) + "#" + [r.id || "-", colorSig(r.colors), r.gang || "-", r.cop ? 1 : 0,
-      r.pattern || "-", r.style != null ? r.style : "-", comp].join("|") + "@" + w + "x" + h;
+      r.pattern || "-", r.style != null ? r.style : "-", comp].join("|") + "@" + w + "x" + h + "~" + (L.inkSig || "");
   }
 
   /* ---------------- the shot -------------------------------------------- */
@@ -201,9 +204,10 @@
     // DRESS THE BODY through the one wardrobe. `iso` clones the garment
     // material for this rig alone, so photographing somebody can never repaint
     // the people sharing that cached atlas out in the street.
+    rig._inkFrom = L.inkSrc || null;
     if (L.rec && L.rec.colors && CBZ.cityRecolorRig) {
       try_(function () { CBZ.cityRecolorRig(rig, L.rec.colors, L.rec, { iso: true }); });
-    }
+    } else if (CBZ.tattoo) CBZ.tattoo.refresh(rig);
 
     // a calm standing 3/4 — the fit reads, the face reads, nothing is posed
     rig.group.rotation.y = -0.34;

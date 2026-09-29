@@ -539,9 +539,19 @@
   const RIDER_SEAT = { x: 0.42, y: 0.55, z: -0.35, pitch: 0.18, yaw: 0, pose: "sit", state: "sit" };
   function seatPassenger(gig, p, car) {
     if (!p || !car || !car.group || !CBZ.npcLife) return false;
-    if (p._npcAttached && p._npcAttached.parent === car.group) return true;
+    if (p._npcAttached && (p._npcAttached.parent === car.group || p._npcAttached.parent === (car.group.userData && car.group.userData.carVisual))) return true;
     if (p._npcAttached) CBZ.npcLife.detach(p, { parent: (arena() && arena().root) || CBZ.scene, state: "walk" });
-    if (!CBZ.npcLife.attach(p, car.group, RIDER_SEAT)) return false;
+    // the car's own free back seat (vehicles.js carSeatPlacement), else the typed one
+    let place = null;
+    if (CBZ.carSeatPlacement) {
+      const ids = ["rearR", "rearL", "shotgun"];
+      for (let i = 0; i < ids.length && !place; i++) {
+        if (CBZ.carSeats && !CBZ.carSeats.free(car, ids[i])) continue;
+        place = CBZ.carSeatPlacement(car, ids[i]);
+      }
+      if (!place) place = CBZ.carSeatPlacement(car, "rearR");
+    }
+    if (!CBZ.npcLife.attach(p, place ? place.parent : car.group, place ? place.anchor : RIDER_SEAT)) return false;
     p.inCar = car; p.controlled = true;
     if (p.group) p.group.visible = true;
     gig.passengerCar = car;
