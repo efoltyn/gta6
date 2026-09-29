@@ -287,10 +287,44 @@
       }
     }
     for (const it of job.objs || []) {
+      try { CBZ.freeStaticArrays(it.o); } catch (e) {}
       try { if (CBZ.freezeStaticUnder) CBZ.freezeStaticUnder(it.o); } catch (e) {}
       try { if (CBZ.shaderQueue) CBZ.shaderQueue(it.o, { full: true }); } catch (e) {}
     }
   }
+
+  /* ---- ONE COPY OF STATIC GEOMETRY, NOT TWO -------------------------------
+     three keeps every attribute's array in JS after it uploads it, so a static
+     mesh costs its bytes twice (heap + GPU). For the world's static surfaces
+     (terrain, ground skins: userData.terrain / worldSurface) and the batch
+     pass's merged meshes, nothing reads the NON-POSITION arrays again after
+     the build: raycasts and the batch slice ledgers (batchWallHide /
+     batchHideGroup) touch position and index only. So once an attribute is
+     on the GPU its normal / colour / uv / material arrays are dropped. A lost
+     GL context cannot re-upload them: systems/glcontext.js reloads the page
+     at the player's position instead (CBZ.freedStaticArrays says so). */
+  function dropArray() { this.array = null; CBZ.freedStaticArrays = true; }
+  const KEEP = { position: 1 };
+  CBZ.freeStaticArrays = function (root) {
+    if (!root || (CBZ.CONFIG && CBZ.CONFIG.FREE_STATIC_ARRAYS === false)) return 0;
+    let n = 0;
+    root.traverse(function (o) {
+      if (!o.isMesh || o.isInstancedMesh || !o.geometry) return;
+      const u = o.userData || {};
+      if (!(u.terrain || u.worldSurface || o.name === "batch-inert" || o.name === "batch-wall")) return;
+      const g = o.geometry;
+      if (g._cbzFreed) return;
+      g._cbzFreed = true;
+      for (const k in g.attributes) {
+        if (KEEP[k]) continue;
+        const a = g.attributes[k];
+        if (!a || a.isInterleavedBufferAttribute || !a.array) continue;
+        if (a._cbzUploaded) { a.array = null; CBZ.freedStaticArrays = true; } else a.onUpload(dropArray);
+        n++;
+      }
+    });
+    return n;
+  };
 
   /* ---- the pruned downtown/world content (core/slice.js slicePrune) ------
      In a streamed boot the prune parks instead of discarding: each removed

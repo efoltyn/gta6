@@ -130,6 +130,10 @@
 
   function onRestored() {
     contextLost = false; A.restored++;
+    // the world's static surfaces gave their CPU copies away (core/
+    // citystream.js): they cannot be re-uploaded, so come back by reload,
+    // at the same spot, instead of with holes in the ground
+    if (CBZ.freedStaticArrays) { reloadHere(); return; }
     dropFreedGeometry();
     say(wasPlaying ? "Ready. Tap to continue." : "");
     /* STAY PAUSED. The world is intact and three has rebuilt every GL resource,
@@ -173,14 +177,17 @@
       const r = CBZ.renderer;
       if (r && typeof r.forceContextRestore === "function") { A.forced++; try { r.forceContextRestore(); } catch (e) {} }
     }
-    if (t >= GIVE_UP) {
-      contextLost = false;                          // once
-      say("Reloading where you were…");
-      try { if (CBZ.game && CBZ.game.mode === "city" && CBZ.cityWorldCommit) CBZ.cityWorldCommit(); } catch (e) {}
-      try { sessionStorage.setItem("cbz.resume", (CBZ.game && CBZ.game.mode) || ""); } catch (e) {}
-      setTimeout(function () { try { location.reload(); } catch (e) {} }, 400);
-    }
+    if (t >= GIVE_UP) { contextLost = false; reloadHere(); }
   }, 1000);
+
+  let reloading = false;
+  function reloadHere() {
+    if (reloading) return; reloading = true;
+    say("Reloading where you were…");
+    try { if (CBZ.game && CBZ.game.mode === "city" && CBZ.cityWorldCommit) CBZ.cityWorldCommit(); } catch (e) {}
+    try { sessionStorage.setItem("cbz.resume", (CBZ.game && CBZ.game.mode) || ""); } catch (e) {}
+    setTimeout(function () { try { location.reload(); } catch (e) {} }, 400);
+  }
 
   /* ---- the resume after that reload: straight back into the game ---------- */
   (function resume() {
