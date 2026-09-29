@@ -498,7 +498,6 @@
   // ============================================================
   //  THE LATE PASS
   // ============================================================
-  const _chunks = [];            // {center:Vector3, detail:[mesh...]} for the distance pass
   const _bends = [];             // banked bend zones for the ground provider
   let _signAcc = null, _gantryAcc = null, _atlas = null;
 
@@ -555,6 +554,10 @@
     const gaps = junctionGaps(rec, st, runs, roads);
     const totalS = st[st.length - 1].s;
     const half = S.half;
+    // what the interchange pass attached to this record, as it stood when the
+    // highway was built: a chunk built later (city streaming) must draw the
+    // same furniture gaps the full-city build drew
+    const CUTS = rec.cuts.slice(), PIERS = rec.barrierGaps.slice();
 
     // ---- banking: per-station cross slope e and the outer side ------------
     for (const p of st) { p.e = 0; p.out = 0; }
@@ -562,10 +565,19 @@
       const arc = st.map(function (p) { return Math.abs(p.dn) > 1e-3 ? (p.dn > 0 ? -1 : 1) : 0; });   // outer side
       // arc stations are the fillet's own vertices; a station within 6 m of
       // one (the midpoints stationize adds) is on the arc too
+      // only arc stations within reach can win: s rises along st, so a
+      // sliding window over the arc list visits exactly the j the full scan
+      // did not skip, in the same order (same winner, same ties) — the full
+      // scan was stations² per highway
+      const arcIdx = [];
+      for (let j = 0; j < st.length; j++) if (arc[j]) arcIdx.push(j);
+      let lo = 0;
       for (let i = 0; i < st.length; i++) {
         let best = 0, side = 0;
-        for (let j = 0; j < st.length; j++) {
-          if (!arc[j]) continue;
+        while (lo < arcIdx.length && st[arcIdx[lo]].s < st[i].s - (RUNOFF + 6) - 1e-9) lo++;
+        for (let q = lo; q < arcIdx.length; q++) {
+          const j = arcIdx[q];
+          if (st[j].s > st[i].s + RUNOFF + 6 + 1e-9) break;
           const d = Math.abs(st[j].s - st[i].s);
           if (d > RUNOFF + 6) continue;
           const v = d <= 6 ? BANK : BANK * (1 - (d - 6) / RUNOFF);
@@ -614,9 +626,9 @@
       return false;
     }
     function isCut(p, side) {
-      if (!rec.cuts.length) return false;
+      if (!CUTS.length) return false;
       const x = p.x + p.nx * side * (S.trav + 0.6), z = p.z + p.nz * side * (S.trav + 0.6);
-      for (const c of rec.cuts) if (x >= c.minX && x <= c.maxX && z >= c.minZ && z <= c.maxZ) return true;
+      for (const c of CUTS) if (x >= c.minX && x <= c.maxX && z >= c.minZ && z <= c.maxZ) return true;
       return false;
     }
     function waterSide(p, side) {
@@ -657,13 +669,51 @@
     }
 
     // ---- chunks ------------------------------------------------------------
-    const chunks = [];
+    // CITY SLICES (core/slice.js + core/citystream.js). Every 400 m chunk is
+    // its own unit: walk() below draws the deck, paint and furniture of the
+    // chunks in `want` only (null = all, the whole-city build) and hands the
+    // rest a sink that keeps nothing. The walk is otherwise the same walk, in
+    // the same order, over the same stations, so a chunk drawn alone holds
+    // exactly the triangles and colliders it holds in the full build.
+    const LASTK = Math.floor(totalS / CHUNK);
+    const NULL_ACC = { tri: function () {}, quad: function () {}, box: function () {} };
+    const NULL_CHUNK = { deck: NULL_ACC, paint: NULL_ACC, furn: NULL_ACC, s0: 0, off: true };
+    let chunks = null, colliders = null, want = null;
     function chunkOf(s) {
-      const k = Math.max(0, Math.min(Math.floor(totalS / CHUNK), Math.floor(s / CHUNK)));
+      const k = Math.max(0, Math.min(LASTK, Math.floor(s / CHUNK)));
+      if (want && !want[k]) return NULL_CHUNK;
       let c = chunks[k];
       if (!c) c = chunks[k] = { deck: new Acc(true), paint: new Acc(false), furn: new Acc(false), s0: k * CHUNK };
       return c;
     }
+    // the interval scans (edge lines, rails, rip-rap, sound walls) are the
+    // expensive part of a walk (water and ground oracles every 2-4 m) and do
+    // not depend on `want`: the first walk records them in call order, every
+    // later walk of this highway replays them
+    let runMemo = null, runN = 0;
+    function runsWhere(test, s0, s1, step) {
+      if (runMemo && runMemo.done) return runMemo[runN++];
+      // contiguous s-intervals where test(s) holds, at `step` resolution
+      const out = []; let a = null;
+      for (let s = s0; s <= s1 + 1e-6; s += step) {
+        const ok = test(s);
+        if (ok && a == null) a = s;
+        if (!ok && a != null) { out.push([a, s - step]); a = null; }
+      }
+      if (a != null) out.push([a, s1]);
+      if (runMemo) runMemo.push(out);
+      return out;
+    }
+    // the towns a sound wall answers to, as registered when this was built
+    const towns = (!S.isDirt && S.lanesPerDir >= 2 && city && city.regions) ? city.regions.filter(function (r) {
+      if (!r || r.kind !== "rect" || r.underlay) return false;
+      if (/bridge|causeway|link|approach/i.test(r.name || "")) return false;
+      const area = (r.maxX - r.minX) * (r.maxZ - r.minZ);
+      return area < 900 * 900 && /city|town|district|strip|flats|port|village|harbor/i.test((r.subtitle || "") + " " + (r.name || ""));
+    }) : null;
+
+    function walk() {
+    runN = 0;
 
     // ---- DECK --------------------------------------------------------------
     const laneAttr = [S.isDirt ? 0 : S.medHalf, S.laneW, S.isDirt ? 0 : S.lanesPerDir, half];
@@ -691,6 +741,7 @@
     }
     for (let i = 0; i < deckPts.length - 1; i++) {
       const a = deckPts[i], b = deckPts[i + 1], C = chunkOf((a.s + b.s) / 2);
+      if (C.off) continue;
       const eN_a = a.cutN ? S.trav : half, eP_a = a.cutP ? S.trav : half;
       const eN_b = b.cutN ? S.trav : half, eP_b = b.cutP ? S.trav : half;
       const aL = P3(a, -eN_a), aR = P3(a, eP_a), bL = P3(b, -eN_b), bR = P3(b, eP_b);
@@ -712,19 +763,9 @@
       pts.push(at(s1));
       for (let i = 0; i < pts.length - 1; i++) {
         const a = pts[i], b = pts[i + 1], C = chunkOf((a.s + b.s) / 2);
+        if (C.off) continue;
         C.paint.quad(P3(a, lat - w / 2, 0.012), P3(a, lat + w / 2, 0.012), P3(b, lat + w / 2, 0.012), P3(b, lat - w / 2, 0.012), color, true);
       }
-    }
-    function runsWhere(test, s0, s1, step) {
-      // contiguous s-intervals where test(s) holds, at `step` resolution
-      const out = []; let a = null;
-      for (let s = s0; s <= s1 + 1e-6; s += step) {
-        const ok = test(s);
-        if (ok && a == null) a = s;
-        if (!ok && a != null) { out.push([a, s - step]); a = null; }
-      }
-      if (a != null) out.push([a, s1]);
-      return out;
     }
     function cutAtS(s, side) { const p = at(s); return isCut(p, side); }
     if (S.markings && !S.isDirt) {
@@ -744,6 +785,7 @@
           for (let s = 6; s + 3 < totalS - endPad; s += 12) {
             if (inBox(s) || inBox(s + 3)) continue;
             const a = at(s), b = at(s + 3), C = chunkOf(s + 1.5);
+            if (C.off) continue;
             C.paint.quad(P3(a, lat - 0.075, 0.012), P3(a, lat + 0.075, 0.012), P3(b, lat + 0.075, 0.012), P3(b, lat - 0.075, 0.012), WHITE, true);
             if (((s / 12) | 0) % 2 === 0) {
               const m = at(s + 7.5);
@@ -758,6 +800,7 @@
           for (let s = 12; s < totalS - 2; s += 24) {
             if (inGap(s, 0, true) || inBox(s)) continue;
             const m = at(s), lat = side * (S.medHalf + 0.12), C = chunkOf(s);
+            if (C.off) continue;
             const q0 = P3(m, lat - 0.06, 0.03), q1 = P3(m, lat + 0.06, 0.03);
             C.paint.quad(q0, q1, [q1[0] + m.tx * 0.12, q1[1], q1[2] + m.tz * 0.12], [q0[0] + m.tx * 0.12, q0[1], q0[2] + m.tz * 0.12], RPMY, true);
           }
@@ -785,6 +828,7 @@
       pts.push(at(s1));
       for (let i = 0; i < pts.length - 1; i++) {
         const a = pts[i], b = pts[i + 1], C = acc || chunkOf((a.s + b.s) / 2);
+        if (C.off) continue;
         const A = C.furn || C;
         for (let k = 0; k < profile.length - 1 + (closed ? 1 : 0); k++) {
           const p0 = profile[k], p1 = profile[(k + 1) % profile.length];
@@ -802,7 +846,6 @@
       pendingCushions.push([Math.min(s, s + dir * 2.3), Math.max(s, s + dir * 2.3), lat]);
     }
     const pendingCushions = [];
-    const colliders = [];
     function addWallColliders(s0, s1, lat, hwid, h, yOff) {
       // honest boxes on straight axis-aligned runs only (see header)
       for (const run of runs) {
@@ -810,21 +853,24 @@
         const a0 = Math.max(s0, ra), b0 = Math.min(s1, rb);
         if (b0 - a0 < 0.5) continue;
         for (let s = a0; s < b0 - 0.01; s += 40) {
-          const e = Math.min(b0, s + 40), m = at((s + e) / 2);
+          const e = Math.min(b0, s + 40), ck = chunkOf((s + e) / 2);
+          if (ck.off) continue;
+          const m = at((s + e) / 2);
           const cx = m.x + m.nx * lat, cz = m.z + m.nz * lat;
           const y = yAt(m, lat) + (yOff || 0);
           const c = CBZ.orientedCollider
             ? CBZ.orientedCollider(cx, cz, hwid, (e - s) / 2, Math.atan2(m.tx, m.tz), y - 0.3, y + h)
             : { minX: cx - hwid, maxX: cx + hwid, minZ: cz - (e - s) / 2, maxZ: cz + (e - s) / 2, y0: y - 0.3, y1: y + h };
           colliders.push(c);
+          colliders.push(ck);
         }
       }
     }
     if (S.median && !S.isDirt && S.medianW >= 0.8) {
       const pierHit = function (s) {
-        if (!rec.barrierGaps.length) return false;
+        if (!PIERS.length) return false;
         const p = at(s);
-        for (const g of rec.barrierGaps) if (Math.hypot(p.x - g.x, p.z - g.z) < g.r) return true;
+        for (const g of PIERS) if (Math.hypot(p.x - g.x, p.z - g.z) < g.r) return true;
         return false;
       };
       for (const r of runsWhere(function (s) { return !inGap(s, 0, true) && !pierHit(s); }, 3, totalS - 3, 2)) {
@@ -869,6 +915,7 @@
       }
       for (let i = 0; i < fine.length - 1; i++) {
         const a = fine[i], b = fine[i + 1], C = chunkOf((a.s + b.s) / 2);
+        if (C.off) continue;
         for (let r = 0; r < rows.length - 1; r++) {
           const h = CBZ.hash01 ? CBZ.hash01(Math.round(a.s * 2), r, 5 + side) : 0.5;
           C.furn.quad(V(a, r), V(a, r + 1), V(b, r + 1), V(b, r), STONE[(h * STONE.length) | 0]);
@@ -880,6 +927,7 @@
       const beamProf = W_BEAM.map(function (q) { return [side * q[0], q[1]]; });
       extrude(null, s0, s1, lat, beamProf, STEEL, 0.62, false);
       for (let s = s0; s <= s1 + 0.01; s += 1.905) {
+        if (chunkOf(s).off) continue;
         const p = at(Math.min(s, s1)), C = chunkOf(s), y = yAt(p, lat);
         const x = p.x + p.nx * (lat + side * 0.12), z = p.z + p.nz * (lat + side * 0.12);
         C.furn.box(x, y + 0.36, z, p.tx, p.tz, 0.05, 0.4, 0.075, POST);
@@ -915,6 +963,7 @@
         const p = at(s);
         if (inGap(s, side, false) || isCut(p, side)) continue;
         if (waterSide(p, side) || (p.e > 0 && p.out === side)) continue;
+        if (chunkOf(s).off) continue;
         const lat = side * (half + 0.7), x = p.x + p.nx * lat, z = p.z + p.nz * lat, g = groundAt(x, z), C = chunkOf(s);
         C.furn.box(x, g + 0.55, z, p.tx, p.tz, 0.06, 0.55, 0.04, DEL_W, true);
         C.furn.box(x - p.tx * 0.001, g + 0.95, z - p.tz * 0.001, p.tx, p.tz, 0.065, 0.09, 0.045, DEL_A, true);
@@ -927,6 +976,7 @@
         if (!(a.e > 0 || b.e > 0)) continue;
         const side = a.out || b.out; if (!side) continue;
         const C = chunkOf((a.s + b.s) / 2);
+        if (C.off) continue;
         const ha = yAt(a, side * half) - S.deckY, hb = yAt(b, side * half) - S.deckY;
         const aT = P3(a, side * half, -0.01), bT = P3(b, side * half, -0.01);
         const aB = [a.x + a.nx * side * (half + 2 * ha + 0.3), -0.02, a.z + a.nz * side * (half + 2 * ha + 0.3)];
@@ -936,13 +986,7 @@
     }
 
     // ---- SOUND WALLS near towns --------------------------------------------
-    if (!S.isDirt && S.lanesPerDir >= 2 && city && city.regions) {
-      const towns = city.regions.filter(function (r) {
-        if (!r || r.kind !== "rect" || r.underlay) return false;
-        if (/bridge|causeway|link|approach/i.test(r.name || "")) return false;
-        const area = (r.maxX - r.minX) * (r.maxZ - r.minZ);
-        return area < 900 * 900 && /city|town|district|strip|flats|port|village|harbor/i.test((r.subtitle || "") + " " + (r.name || ""));
-      });
+    if (towns) {
       if (towns.length) {
         const wallLat = half + 5;
         for (const side of [-1, 1]) {
@@ -967,6 +1011,7 @@
               const lat = side * wallLat;
               for (let s = r[0]; s < r[1] - 0.5; s += 4) {
                 const e = Math.min(r[1], s + 4), m = at((s + e) / 2), C = chunkOf(m.s);
+                if (C.off) continue;
                 const x = m.x + m.nx * lat, z = m.z + m.nz * lat, g = groundAt(x, z);
                 const tone = (((s / 4) | 0) % 3 === 0) ? WALL_B : WALL_A;
                 C.furn.box(x, g + 2.25, z, m.tx, m.tz, (e - s) / 2 - 0.12, 2.25, 0.12, tone);
@@ -980,30 +1025,94 @@
       }
     }
 
+    }   // walk()
+
     // ---- emit chunk meshes ---------------------------------------------------
     const deckMat = deckLayer(S.isDirt ? "dirt" : (S.theme === "concrete" ? "concrete" : "asphalt"), S.layer || 0);
-    for (const C of chunks) {
-      if (!C) continue;
-      const d = C.deck.mesh(deckMat);
-      if (d) { d.receiveShadow = true; rec.group.add(d); }
-      const detail = [];
-      const pm = C.paint.mesh(M.paint);
-      if (pm) { pm.renderOrder = 1; pm.userData.roadPaint = true; rec.group.add(pm); detail.push(pm); }
-      const fm = C.furn.mesh(M.furn);
-      if (fm) { fm.castShadow = false; fm.receiveShadow = true; rec.group.add(fm); detail.push(fm); }
-      if (detail.length && d) registerChunk(d, detail);
+    function emit(list, cols, group) {
+      for (const C of list) {
+        if (!C) continue;
+        const d = C.deck.mesh(deckMat);
+        if (d) { d.receiveShadow = true; group.add(d); }
+        const detail = [];
+        const pm = C.paint.mesh(M.paint);
+        if (pm) { pm.renderOrder = 1; pm.userData.roadPaint = true; group.add(pm); detail.push(pm); }
+        const fm = C.furn.mesh(M.furn);
+        if (fm) { fm.castShadow = false; fm.receiveShadow = true; group.add(fm); detail.push(fm); }
+        if (detail.length && d) registerChunk(d, detail);
+      }
+      if (CBZ.colliders) for (let i = 0; i < cols.length; i += 2) CBZ.colliders.push(cols[i]);
     }
-    if (CBZ.colliders) for (const c of colliders) CBZ.colliders.push(c);
+    const SL = !!(CBZ.slice && CBZ.sliceAt && CBZ.sliceKeepsRect && city && city.root &&
+      (!S.heightAt || S.heightAt !== CBZ.terrainHeight));
+    if (!SL) {
+      // the whole city (or a relief-following road, whose ground oracle is only
+      // final for the build it is drawn in): every chunk now, as always
+      chunks = []; colliders = []; want = null;
+      walk();
+      emit(chunks, colliders, rec.group);
+    } else {
+      // A SLICE: each chunk is a CBZ.sliceAt job over its own rect. The chunks
+      // the slice sees are drawn by one walk now; the rest are queued (the
+      // streamer walks again when one comes into range, replaying the scans).
+      const reach = half + 12;            // rip-rap, sound walls, fill, delineators
+      const rects = [];
+      for (let k = 0; k <= LASTK; k++) {
+        // strips on a flat straight run only keep every 8th station (64 m),
+        // so a quad owned by this chunk can reach 32 m past its end
+        const s0 = k * CHUNK - 72, s1 = (k + 1) * CHUNK + 72;
+        let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
+        for (const p of st) {
+          if (p.s < s0 || (p.s > s1 && k < LASTK)) continue;
+          if (p.x < x0) x0 = p.x; if (p.x > x1) x1 = p.x; if (p.z < z0) z0 = p.z; if (p.z > z1) z1 = p.z;
+        }
+        rects.push(x0 <= x1 ? { minX: x0 - reach, maxX: x1 + reach, minZ: z0 - reach, maxZ: z1 + reach } : null);
+      }
+      runMemo = [];
+      let boot = null, bootCols = null;
+      const bootWant = rects.map(function (r) { return !!(r && CBZ.sliceKeepsRect(r.minX, r.maxX, r.minZ, r.maxZ)); });
+      if (bootWant.indexOf(true) >= 0) {
+        chunks = []; colliders = []; want = bootWant;
+        walk(); runMemo.done = true;
+        boot = chunks; bootCols = colliders;
+      }
+      const parent = city.root;
+      rects.forEach(function (r, k) {
+        if (!r) return;
+        CBZ.sliceAt(r, function () {
+          let list, cols;
+          if (bootWant[k]) {
+            // drawn by the boot walk (consumed once: a freed chunk re-walks)
+            bootWant[k] = false;
+            list = boot[k] ? [boot[k]] : []; cols = [];
+            if (boot[k]) for (let i = 0; i < bootCols.length; i += 2) if (bootCols[i + 1] === boot[k]) cols.push(bootCols[i], null);
+            boot[k] = null;
+          } else {
+            chunks = []; colliders = []; want = []; want[k] = true;
+            walk(); runMemo.done = true;
+            list = chunks; cols = colliders;
+          }
+          chunks = colliders = null;
+          const g = new THREE.Group();
+          g.name = "highway"; g.userData.terrain = true;
+          emit(list, cols, g);
+          if (g.children.length || cols.length) parent.add(g);
+        }, { name: "highway " + (S.route || "") + " chunk " + k, pure: true });
+      });
+      chunks = colliders = null; want = null;
+    }
     rec.stations = st;
     rec.at = at;
     rec.yAt = yAt;
     // open water on BOTH sides along a straight run: bridge-landmark candidates
     rec.waterRuns = [];
+    const memo = runMemo; runMemo = null;
     if (!S.isDirt) for (const run of runs) {
       for (const r of runsWhere(function (sq) { const p = at(sq); return waterSide(p, -1) && waterSide(p, 1); }, st[run.i0].s, st[run.i1].s, 4)) {
         if (r[1] - r[0] >= 150) rec.waterRuns.push({ s0: st[run.i0].s, s1: st[run.i1].s, wet: r[1] - r[0] });
       }
     }
+    runMemo = memo;
   }
 
   // ============================================================
@@ -1375,7 +1484,6 @@
   }
   function registerChunk(deckMesh, detail) {
     const k = { c: deckMesh.geometry.boundingSphere.center.clone(), r: deckMesh.geometry.boundingSphere.radius, detail: detail, on: true };
-    _chunks.push(k);
     deckMesh.onBeforeRender = detailCull(k);
   }
 
@@ -1390,7 +1498,7 @@
       // pending was registered for THIS one (a caller outside the pipeline)
       _highways = _highways.filter(function (r) { return !r.built; });
       _lateDone = false;
-      _bends.length = 0; _chunks.length = 0;
+      _bends.length = 0;
       _signAcc = null; _gantryAcc = null; _slot = 0;
       if (_atlas) { _atlas.g.fillStyle = "#1f6b3a"; _atlas.g.fillRect(0, 0, ATLAS_W, ATLAS_H); _atlas.tex.needsUpdate = true; }
     }, -1000);
