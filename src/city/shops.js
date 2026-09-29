@@ -492,10 +492,10 @@
     if (kind === "bar") s.push({ key: "k", label: "Round $12", fn: buyDrink });
     // The casino, the tracks and the fight card are VENUES: the counter hands
     // you to the one game that lives there (games/casino.js, the racepark
-    // windows on city/betslip.js, the speedway book in island_speedway.js,
+    // windows on city/betslip.js, the racing game (games/race.html),
     // the Ironjaw Arena card), never to a menu copy of it.
     if (kind === "casino") s.push({ key: "g", label: "Tables", fn: () => { close(); if (CBZ.cityOpenCasino) CBZ.cityOpenCasino(); } });
-    if (kind === "raceway") s.push({ key: "r", label: "Race book", fn: () => CBZ.cityOpenRaceBook && CBZ.cityOpenRaceBook() });
+    if (kind === "raceway") s.push({ key: "r", label: "Race", fn: () => { close(); if (CBZ.cityRaceLaunch) CBZ.cityRaceLaunch(); } });
     if (kind === "racepark") {
       s.push({ key: "r", label: "Horse window", fn: () => CBZ.cityTrackBook && CBZ.cityTrackBook("horses") });
       s.push({ key: "g", label: "Dog window", fn: () => CBZ.cityTrackBook && CBZ.cityTrackBook("dogs") });

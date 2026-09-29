@@ -101,13 +101,6 @@
   }
   function whyOf(p, loot) {
     if (p.bounty) return "bounty in " + districtOf(p);
-    // a PRO RACER (racing.js) reads by their championship standing, not turf. The
-    // _racer branch wins over _milli/whale so a racer is never mislabeled a tycoon.
-    if (p._racer && CBZ.cityRacing) {
-      const r = p._racer;
-      const pos = CBZ.cityRacing.positionOf ? CBZ.cityRacing.positionOf(r) : 0;
-      return "P" + pos + " in the championship · " + (r.wins || 0) + " wins";
-    }
     if (p.gang) return rankName(p.rank) + " of " + gangName(p.gang) + " - " + protectionOf(p);
     if (p.vipTitle) return p.vipTitle + " - " + protectionOf(p);
     if (WHALE_ARCH[p.archetype]) return titleOf(p) + " in " + districtOf(p);
@@ -148,20 +141,6 @@
       const tycoons = R.byKind("tycoon").filter(function (r) { return r.status === "dead"; });
       for (const rec of vips) out.push(hofRowFromIdentity(rec));
       for (const rec of tycoons) out.push(hofRowFromIdentity(rec));
-    }
-    const RC = CBZ.cityRacing;
-    if (RC && RC.deceased) {
-      const dead = RC.deceased();
-      for (const racer of dead) {
-        const worth = RC.netWorthOf ? RC.netWorthOf(racer) : 0;
-        out.push({
-          actor: null, name: racer.name, title: "Racer #" + racer.number, level: 0,
-          loot: worth,
-          score: worth * 0.35 + (racer.wins || 0) * 900 * 0.35,
-          why: "DECEASED. Racer #" + racer.number + " · " + (racer.wins || 0) + " career wins", where: "city",
-          protection: "none (dead)", you: false, dead: true,
-        });
-      }
     }
     out.sort(function (a, b) { return b.score - a.score; });
     return out.slice(0, HOF_CAP);
@@ -390,32 +369,6 @@
     return h;
   }
 
-  // ---- compact CHAMPIONSHIP standings block (racing.js). Read-only of
-  // CBZ.cityRacing; fully guarded so a headless/partial load just skips it. ----
-  function renderChampionship() {
-    const RC = CBZ.cityRacing;
-    if (!RC || !RC.standings) return "";
-    const rows = RC.standings().slice(0, 6);
-    if (!rows.length) return "";
-    const cols = "24px 28px 1.4fr 56px 46px";
-    let h = "<div style='margin-top:10px'>" +
-      "<div style='font-size:13px;font-weight:700;margin-bottom:3px'>Racing Championship " +
-      "<span style='font-size:11px;color:#8a93a3;font-weight:400'>· S" + RC.season + " R" + (RC.round + 1) + "/" + RC.ROUNDS + "</span></div>" +
-      "<div style='display:grid;grid-template-columns:" + cols + ";gap:6px;font-size:10px;color:#8a93a3;border-bottom:1px solid #2c3140;padding-bottom:2px;margin-bottom:2px'>" +
-      "<span>#</span><span>Car</span><span>Driver</span><span style='text-align:right'>Pts</span><span style='text-align:right'>Wins</span></div>";
-    rows.forEach(function (r, i) {
-      h += "<div style='display:grid;grid-template-columns:" + cols + ";gap:6px;align-items:center;font-size:12px;padding:2px 4px'>" +
-        "<span style='color:" + (i === 0 ? "#ffd166" : "#8a93a3") + "'>" + (i + 1) + "</span>" +
-        "<span style='text-align:center;font-weight:700;color:" + hex6(r.teamColor != null ? r.teamColor : 0x8a93a3) + "'>" + r.number + "</span>" +
-        "<span style='white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#e3e9f2'>" + esc(r.name) + "</span>" +
-        "<span style='text-align:right;color:#7ed957;font-weight:700'>" + r.points + "</span>" +
-        "<span style='text-align:right;color:#9fe6c8'>" + r.wins + "</span>" +
-        "</div>";
-    });
-    h += "</div>";
-    return h;
-  }
-
   function fitToScreen(el) {
     el.style.fontSize = "";
     let guard = 0, fs = 100;
@@ -443,7 +396,6 @@
       "</div></div>";
     html += renderGangs(gangStandings());
     html += renderTargets(rows, me);
-    html += renderChampionship();
     const tier = CBZ.cityEcon && CBZ.cityEcon.wealthTier ? CBZ.cityEcon.wealthTier(me.score) : null;
     html += "<div style='font-size:11px;color:#6b7480;margin-top:8px;border-top:1px solid #2c3140;padding-top:6px;display:flex;justify-content:space-between;gap:10px'>" +
       "<span>You: Lv." + me.level + " " + esc(me.title) + " · " + money(me.score) + (tier ? " · " + esc(tier.name) : "") + "</span>" +

@@ -217,6 +217,7 @@ const PAGE_MODES = {
   battle: { kind: "page", page: "games/battle.html", ready: "!!(window.__battle && document.getElementById('start'))", entry: "document.getElementById('start').click()" },
   warlord: { kind: "page", page: "games/warlord.html", query: "go=1", ready: "!!window.__warlordReady", entry: "" },
   bomb: { kind: "page", page: "games/bomb-survivor.html", ready: "!!(window.__bomb && document.getElementById('go'))", entry: "document.getElementById('go').click()" },
+  race: { kind: "page", page: "games/race.html", query: "go=1", ready: "!!window.__raceReady", entry: "" },
 };
 const ALL_MODES = Object.keys(PAGE_MODES);
 const modesArg = opt("--modes", opt("--mode", "city"));

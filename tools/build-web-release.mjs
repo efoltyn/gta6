@@ -42,6 +42,7 @@ const GAMES=[
   {slug:'npc-war',          page:'games/battle.html',        name:'NPC War',        hook:'Two armies. Any size. You hold the clock.', desc:'Two armies of any size fight with the city\'s own combat brain while you fly the camera and run the clock.'},
   {slug:'bomb-survivor',    page:'games/bomb-survivor.html', name:'Bomb Survivor',  hook:'6 v 6 over the real city.', desc:'Six against six, the real island and the real downtown, three minutes each way.'},
   {slug:'desert-warlord',   page:'games/warlord.html',       name:'Desert Warlord', hook:'Your army. Your dead stay dead.', desc:'The men of NPC War, but they are yours: paid for or frightened into joining, and the ones who die stay dead.'},
+  {slug:'bullring',         page:'games/race.html',          name:'Bullring',       hook:'Ten stock cars. A half-mile bowl. Under the lights.', desc:'A night stock car race on a banked concrete short track: ten cars, drafting, contact, and a crowd on every side.'},
 ];
 
 if(existsSync(output)&&readdirSync(output).length)throw new Error('Output must be empty; use a fresh release directory');
@@ -128,7 +129,7 @@ if(!portal){
   put('index.html',`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Play</title>
-<meta name="description" content="Free browser games, all one engine: Shark Sim, Disaster Survival, Prison Escape, Gang City, Gun Game, NPC War, Bomb Survivor, Desert Warlord.">
+<meta name="description" content="Free browser games, all one engine: Shark Sim, Disaster Survival, Prison Escape, Gang City, Gun Game, NPC War, Bomb Survivor, Desert Warlord, Bullring.">
 <link rel="stylesheet" href="css/fonts.css">
 <style>
 :root{color-scheme:dark}

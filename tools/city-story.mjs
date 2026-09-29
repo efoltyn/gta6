@@ -12,8 +12,8 @@
    with /step, photograph with /shot, repeat — then stitch the frames into
    one labelled strip. Same world, same run, real timestamps.
 
-   Needs a running host:   node tools/cityhost.mjs [--origin racer] &
-   Then:                   node tools/city-story.mjs race
+   Needs a running host:   node tools/cityhost.mjs &
+   Then:                   node tools/city-story.mjs bullring
                            node tools/city-story.mjs <file.json>
 
    A story file is JSON: { "id": "...", "cam": {...}, "look": {...},
@@ -27,9 +27,8 @@
    {x,y,z}, for subjects that MOVE. A race storyboard aims at where the pack
    IS, not where it was when the beats were typed.
 
-   The built-in "race" story is both the demo and the racer mode's working
-   storyboard: the grid, lights out, the field into turn one, mid-race, and
-   the closing laps — with the live positions table probed under each frame.
+   The built-in "bullring" story frames the stadium from its gate plaza. (The
+   race itself left the city for games/race.html in wave 0929b.)
 ============================================================ */
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
@@ -38,7 +37,7 @@ import { stripPNGs } from "./lib/pngjoin.mjs";
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const argv = process.argv.slice(2);
-const which = argv[0] || "race";
+const which = argv[0] || "bullring";
 const t0 = Date.now();
 const log = (s) => process.stdout.write(`[story ${((Date.now() - t0) / 1000).toFixed(1)}s] ${s}\n`);
 
@@ -46,82 +45,18 @@ const log = (s) => process.stdout.write(`[story ${((Date.now() - t0) / 1000).toF
    Each one is exactly the JSON a story FILE would hold — the built-ins are
    examples of the format, not a second code path. */
 const BUILTINS = {
-  race: {
-    id: "race",
-    cam: { t: 0, s: -70, u: 9, h: 6 },
-    look: { t: 0, s: 0, u: 0, h: 1.5 },
-    fov: 52,
+  // the Bullring from its own plaza (the race itself is games/race.html)
+  bullring: {
+    id: "bullring",
+    fov: 58,
     beats: [
       {
-        label: "the grid — a loaner on the back row", at: 0,
-        setup: `
-          // a fresh racer run if one is not already on the grid
-          var R = CBZ.speedwayRaceState ? CBZ.speedwayRaceState() : null;
-          if (!R || !R.active) { if (CBZ.cityRaceStart) CBZ.cityRaceStart({ style: "muscle", number: 99 }); }
-          return true;`,
-        probe: `var R=CBZ.speedwayRaceState(); return { phase:R.phase, field:R.drivers.length, driving:!!CBZ.player.driving };`,
-      },
-      {
-        label: "lights out", at: 5,
-        probe: `var R=CBZ.speedwayRaceState(); return { phase:R.phase };`,
-      },
-      {
-        label: "the field into turn one", at: 12,
-        cam: { t: 0.10, s: 0, u: 24, h: 5 },
-        look: { t: 0.13, s: 0, u: 0, h: 1.2 },
-        probe: `var R=CBZ.speedwayRaceState(); return { phase:R.phase };`,
-      },
-      {
-        label: "mid-race — on the pack", at: 40,
-        // aim at where the field actually IS: centroid of the running cars,
-        // camera pulled outboard of the wall at that same track angle
-        /* BEHIND the pack, ON the track, looking along it. Across-track
-           framing puts the SAFER wall, the catch fence and sixty metres of
-           hoardings between the lens and the cars — the first cut of this
-           beat photographed sponsor boards. From the racing line behind the
-           field nothing can be in the way, which is also how the
-           race-stadium preset frames its running shot. */
-        camExpr: `
-          var R = CBZ.speedwayRaceState(), sx=0, sz=0, n=0;
-          for (var i=0;i<R.drivers.length;i++){ var c=R.drivers[i].car; if (c && !c.dead){ sx+=c.pos.x; sz+=c.pos.z; n++; } }
-          if (!n) return { x: 0, y: 40, z: 0 };
-          var L = CBZ.speedwayTrackLen();
-          var t = CBZ.speedwayCourse.paramAt(sx/n, sz/n);
-          var tb = ((t - 38 / L) % 1 + 1) % 1;
-          var f = CBZ.speedwayFrame(tb);
-          return { x: f.x, y: (CBZ.speedwaySurfaceY(f.x, f.z) || 0) + 7, z: f.z };`,
-        lookExpr: `
-          var R = CBZ.speedwayRaceState(), sx=0, sz=0, sy=0, n=0;
-          for (var i=0;i<R.drivers.length;i++){ var c=R.drivers[i].car; if (c && !c.dead){ sx+=c.pos.x; sz+=c.pos.z; n++; } }
-          if (!n) return { x:0, y:0, z:0 };
-          return { x:sx/n, y:(CBZ.speedwaySurfaceY(sx/n,sz/n)||0)+1.5, z:sz/n };`,
-        probe: `
-          var R = CBZ.speedwayRaceState();
-          var rows = (R.kit && R.kit.order || []).slice(0,4).map(function(e){ return e.pos + " " + e.name; });
-          return { phase: R.phase, top4: rows };`,
-      },
-      {
-        label: "closing laps — the leader", at: 75,
-        camExpr: `
-          var R = CBZ.speedwayRaceState(), lead = null;
-          var ord = R.kit && R.kit.order || [];
-          for (var i=0;i<ord.length;i++){ var d=ord[i].driver; if (d && d.car && !d.car.dead){ lead=d.car; break; } }
-          if (!lead) return { x:0, y:40, z:0 };
-          var L = CBZ.speedwayTrackLen();
-          var t = CBZ.speedwayCourse.paramAt(lead.pos.x, lead.pos.z);
-          var tb = ((t - 22 / L) % 1 + 1) % 1;
-          var f = CBZ.speedwayFrame(tb);
-          return { x: f.x, y: (CBZ.speedwaySurfaceY(f.x, f.z) || 0) + 4.5, z: f.z };`,
-        lookExpr: `
-          var R = CBZ.speedwayRaceState(), lead = null;
-          var ord = R.kit && R.kit.order || [];
-          for (var i=0;i<ord.length;i++){ var d=ord[i].driver; if (d && d.car && !d.car.dead){ lead=d.car; break; } }
-          if (!lead) return { x:0, y:0, z:0 };
-          return { x: lead.pos.x, y: (CBZ.speedwaySurfaceY(lead.pos.x,lead.pos.z)||0)+1.2, z: lead.pos.z };`,
-        probe: `
-          var R = CBZ.speedwayRaceState();
-          var rows = (R.kit && R.kit.order || []).slice(0,4).map(function(e){ return e.pos + " " + e.name + " L" + Math.max(0,Math.floor(e.total)+1); });
-          return { phase: R.phase, top4: rows };`,
+        label: "the Bullring from the gate plaza", at: 0,
+        camExpr: `var G = CBZ.speedwayGate && CBZ.speedwayGate(); if (!G) return { x: 0, y: 40, z: 0 };
+          return { x: G.x - Math.sin(G.heading) * 40, y: 9, z: G.z - Math.cos(G.heading) * 40 };`,
+        lookExpr: `var G = CBZ.speedwayGate && CBZ.speedwayGate(); if (!G) return { x: 0, y: 0, z: 0 };
+          return { x: G.x + Math.sin(G.heading) * 30, y: 14, z: G.z + Math.cos(G.heading) * 30 };`,
+        probe: `return { gate: CBZ.speedwayGate ? CBZ.speedwayGate() : null, launch: typeof CBZ.cityRaceLaunch };`,
       },
     ],
   },
@@ -129,7 +64,7 @@ const BUILTINS = {
 /* ---- host ------------------------------------------------------------------ */
 let port;
 try { port = JSON.parse(await readFile(path.join(ROOT, "tools/.cityhost.json"), "utf8")).port; }
-catch (_) { console.error("no host — start one first:  node tools/cityhost.mjs --origin racer"); process.exit(2); }
+catch (_) { console.error("no host — start one first:  node tools/cityhost.mjs"); process.exit(2); }
 const call = async (pathName, bodyObj) => {
   const r = await fetch(`http://127.0.0.1:${port}${pathName}`, {
     method: "POST", headers: { "content-type": "application/json" },

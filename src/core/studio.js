@@ -543,11 +543,11 @@
       publishes: ["buildAirfield", "airportKit", "registerAirport"],
     },
     speedway: {
-      gives: "the REAL speedway island: banked oval with a measured centreline, " +
-             "grandstands and the pit lane. The track surface is a genuine " +
-             "height field, which makes it the one venue where flat ground lies",
+      gives: "the speedway island: the Bullring stadium (the racing game's own " +
+             "track + venue modules), the causeway and the gate that opens " +
+             "games/race.html over the city",
       needs: ["look"],
-      files: ["city/island_speedway.js"],
+      files: ["race/race_core.js", "race/race_track.js", "race/race_venue.js", "city/island_speedway.js"],
       publishes: [],
     },
     bank: {
