@@ -546,7 +546,7 @@
       // a neglected yard (projects, abandoned lots) runs to seed and weeds
       out.wild = wear > 0.5 ? 0.35 + wear * 0.5 : 0;
       out.h = 1 + wear * 0.5;
-      out.flw = 0.02 + 0.08 * wear;
+      out.flw = 0.015 + 0.05 * wear;
       const ys = SK && SK.heightAt ? SK.heightAt(x, z) : null;
       out.y = ys != null ? ys : (typeof CBZ.floorAt === "function" ? CBZ.floorAt(x, z) : 0.16);
       return true;

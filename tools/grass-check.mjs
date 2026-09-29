@@ -152,11 +152,11 @@ function tone(c, exposure) {
 // (1-t)^0.8 for a blade), mirrored in JS from grassfield.js VERT_BEGIN
 function bladeMean(col, a, type) {
   let s = [0, 0, 0], w = 0;
-  const heads = [[0.78, 0.78, 0.72], [0.82, 0.56, 0.035], [0.32, 0.15, 0.48], [0.42, 0.33, 0.17]];
+  const heads = [[0.62, 0.62, 0.56], [0.66, 0.44, 0.03], [0.26, 0.12, 0.38]];
   for (let k = 0; k < 64; k++) {
     const t = (k + 0.5) / 64;
     let prof = Math.pow(1 - t, 0.8), y = t, head = 0, dy = 1;
-    if (type >= 1 && type <= 3) { dy = t < 0.4 ? 2.1 : 0.27; y = t < 0.4 ? t * 2.1 : 0.84 + (t - 0.4) * 0.27; prof = t < 0.2 ? 0.35 : t < 0.9 ? 1.5 : 0; head = t >= 0.2 ? 1 : 0; }
+    if (type >= 1 && type <= 3) { dy = t < 0.5 ? 1.74 : 0.26; y = t < 0.5 ? t * 1.74 : 0.87 + (t - 0.5) * 0.26; prof = t < 0.5 ? 0.3 : t < 0.9 ? 1.1 : 0; head = t >= 0.5 ? 1 : 0; }
     else if (type === 4) { prof = t < 0.5 ? 0.55 : t < 0.9 ? 1.25 : 0; head = Math.min(1, Math.max(0, (t - 0.45) / 0.15)); head = head * head * (3 - 2 * head); }
     else if (type === 5) { prof = Math.sin(Math.PI * Math.min(1, t * 0.9 + 0.1)) * 1.4; y = t * 0.6; dy = 0.6; }
     prof *= dy;                                     // area along the blade, not along t
@@ -172,9 +172,9 @@ function bladeMean(col, a, type) {
 }
 const cases = [
   ["city lawn (cityground)", { wild: 0, dry: 0.25, flw: 0.03, col: null }],
-  ["neglected yard", { wild: 0.7, dry: 0.5, flw: 0.08, col: null }],
+  ["neglected yard", { wild: 0.7, dry: 0.5, flw: 0.05, col: null }],
   ["metro lawn", { wild: 0, dry: 0.1, flw: 0.025, col: [0.075 * 0.95, 0.135 * 0.95, 0.032 * 0.95] }],
-  ["backcountry meadow", { wild: 1, dry: 0.3, flw: 0.1, col: [0.31, 0.455, 0.27] }],
+  ["backcountry meadow", { wild: 1, dry: 0.3, flw: 0.03, col: [0.31, 0.455, 0.27] }],
 ];
 const lin = (h) => [(h >> 16) & 255, (h >> 8) & 255, h & 255].map((c) => { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); });
 const LAWN = lin(0x5f7e37), STRAW = lin(0x958a52);

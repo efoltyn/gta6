@@ -1698,7 +1698,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- REAL GRASS (owner: "when you walk on grass it's just fucking green"): instanced lit blades round
      the camera on every grass surface, fed by CBZ.groundCover (the ONE land-use + ground-colour
      query: cityground 10, metro_ground 20, continent 90 register into it, so it loads before them). -->
-<script src="src/world/grassfield.js?v=grass0929"></script>
+<script src="src/world/grassfield.js?v=grass0929c"></script>
 <script src="src/city/metro_ground.js?v=grass0929b"></script>
 <script src="src/city/metro.js?v=far0929"></script>
 <script src="src/city/spawnplaces.js?v=sim2"></script>
@@ -1756,7 +1756,7 @@ document.body.appendChild(b);}}catch(e){}})();
      pad + the footway breakup (city/cityground.js). Runtime-only: world.js
      and streetkit.js call it inside buildCity; it registers its paint pass
      at landmass order 68, so it loads after worldmap.js and approach.js. -->
-<script src="src/city/cityground.js?v=grass0929"></script>
+<script src="src/city/cityground.js?v=grass0929c"></script>
 <!-- FISHING (owner: the world had a "Fisherman" title and nobody wearing it;
      a mackerel was harvested by SHOOTING it through the hunting pipeline).
      Registers water-side spots that SELF-VALIDATE against CBZ.cityWaterAt — a
@@ -2102,7 +2102,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/river.js?v=w09290242x"></script>
 <!-- THE CONTINENT: runs after every landmass builder (order 97) and fills the
      ocean between POIs with walkable backcountry — one world, not circles. -->
-<script src="src/city/continent.js?v=grass0929b"></script>
+<script src="src/city/continent.js?v=grass0929c"></script>
 <script src="src/city/demographics.js?v=world1"></script>
 <!-- X6: the affinity matrix (country/state/city relations) — after
      countries.js (CBZ.COUNTRIES) and officials.js/polity.js (both already

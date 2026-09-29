@@ -1653,7 +1653,7 @@
         out.h = (verge > 0.5 ? 1.3 : 1) * (1 + 0.35 * moist);
         out.dry = Math.max(0, Math.min(1, LU.dry - moist * 0.3));
         out.h *= LU.h;
-        out.flw = verge > 0.5 ? 0.05 : 0.07 + 0.05 * noise2(x, z, 23, 0x6a13);
+        out.flw = verge > 0.5 ? 0.02 : 0.015 + 0.03 * noise2(x, z, 23, 0x6a13);
         return true;
       };
       if (CBZ.groundCover) CBZ.groundCover.register("continent", CBZ.continentCoverAt, 90);

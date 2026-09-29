@@ -168,7 +168,7 @@
      shader below) is exactly the ground colour. tools/grass-check.mjs
      re-derives it independently through the tone map.
      ================================================================== */
-  const HEADS = [null, [0.78, 0.78, 0.72], [0.82, 0.56, 0.035], [0.32, 0.15, 0.48], null, null];
+  const HEADS = [null, [0.62, 0.62, 0.56], [0.66, 0.44, 0.03], [0.26, 0.12, 0.38], null, null];
   // per type: I = area per (height x width unit), A = mean non-head colour
   // coefficient (gradient), Hs = head share of the area — the shader's own
   // profile / height remap / gradient, integrated
@@ -178,7 +178,7 @@
     for (let k = 0; k < N; k++) {
       const t = (k + 0.5) / N;
       let prof = Math.pow(1 - t, 0.8), dy = 1, y = t, head = 0;
-      if (type >= 1 && type <= 3) { dy = t < 0.4 ? 2.1 : 0.27; y = t < 0.4 ? t * 2.1 : 0.84 + (t - 0.4) * 0.27; prof = t < 0.2 ? 0.35 : t < 0.9 ? 1.5 : 0; head = t >= 0.2 ? 1 : 0; }
+      if (type >= 1 && type <= 3) { dy = t < 0.5 ? 1.74 : 0.26; y = t < 0.5 ? t * 1.74 : 0.87 + (t - 0.5) * 0.26; prof = t < 0.5 ? 0.3 : t < 0.9 ? 1.1 : 0; head = t >= 0.5 ? 1 : 0; }
       else if (type === 4) { prof = t < 0.5 ? 0.55 : t < 0.9 ? 1.25 : 0; head = Math.min(1, Math.max(0, (t - 0.45) / 0.15)); head = head * head * (3 - 2 * head); }
       else if (type === 5) { prof = Math.sin(Math.PI * Math.min(1, t * 0.9 + 0.1)) * 1.4; dy = 0.6; y = t * 0.6; }
       const w = prof * dy / N;
@@ -196,7 +196,7 @@
       const f = Math.min(1, flw * 0.9) / 0.9;
       w[0] = (1 - 0.9 * f) * 1.0 * 1.05; w[1] = 0.55 * f * 0.8 * 1.05; w[5] = 0.2 * f * 0.55 * 2.2; w[2] = 0.15 * f * 1.3 * 1.05;
     } else {
-      const sd = Math.min(1, 0.12 + 0.2 * dry), f = Math.min(1 - sd, flw);
+      const sd = Math.min(1, 0.04 + 0.08 * dry), f = Math.min(1 - sd, flw);
       w[0] = (1 - sd - f) * 1.25; w[4] = sd * 1.25;
       w[1] = 0.4 * f * 1.25; w[2] = 0.35 * f * 1.25; w[3] = 0.15 * f * 1.25; w[5] = 0.1 * f * 0.35 * 2.6;
     }
@@ -296,7 +296,7 @@
           h = (0.2 + 0.25 * hr + 0.3 * clump * clump) * hk * (0.5 + 0.5 * wild);
           wm = 0.9 + 0.7 * hash(i, j, 41);
           bend = 0.25 + 0.55 * hash(i, j, 43);
-          const seed = 0.12 + 0.2 * dry;
+          const seed = 0.04 + 0.08 * dry;
           if (hf < seed) type = T_SEED;
           else if (hf < seed + flw) {
             const q = (hf - seed) / mmax(1e-4, flw);
@@ -366,9 +366,11 @@
     "  float gfY = gfT;",
     "  float gfHead = 0.0;",
     "  if ( gfType > 0.5 && gfType < 3.5 ) {",               // flowers
-    "    gfY = gfT < 0.4 ? gfT * 2.1 : 0.84 + ( gfT - 0.4 ) * 0.27;",
-    "    gfProf = gfT < 0.2 ? 0.35 : ( gfT < 0.9 ? 1.5 : 0.0 );",
-    "    gfHead = step( 0.2, gfT );",
+    // a thin stalk to 87 % of the height, then a small head (the verts at
+    // t .33/.66/1 land on the stalk, the head's widest point and the tip)
+    "    gfY = gfT < 0.5 ? gfT * 1.74 : 0.87 + ( gfT - 0.5 ) * 0.26;",
+    "    gfProf = gfT < 0.5 ? 0.3 : ( gfT < 0.9 ? 1.1 : 0.0 );",
+    "    gfHead = step( 0.5, gfT );",
     "    gfW = 0.013 * gfWm;",
     "  } else if ( gfType > 3.5 && gfType < 4.5 ) {",        // seed head
     "    gfProf = gfT < 0.5 ? 0.55 : ( gfT < 0.9 ? 1.25 : 0.0 );",
@@ -414,7 +416,7 @@
     "  gfC *= 1.0 + gfTv * vec3( 0.30, 0.06, -0.40 );",
     "  gfC *= gfGrad;",
     "  if ( gfHead > 0.0 ) {",
-    "    vec3 gfHc = gfType < 1.5 ? vec3( 0.78, 0.78, 0.72 ) : ( gfType < 2.5 ? vec3( 0.82, 0.56, 0.035 ) : ( gfType < 3.5 ? vec3( 0.32, 0.15, 0.48 ) : aGfCol.rgb * aGfCol.rgb * vec3( 1.5, 1.2, 0.7 ) ) );",
+    "    vec3 gfHc = gfType < 1.5 ? vec3( 0.62, 0.62, 0.56 ) : ( gfType < 2.5 ? vec3( 0.66, 0.44, 0.03 ) : ( gfType < 3.5 ? vec3( 0.26, 0.12, 0.38 ) : aGfCol.rgb * aGfCol.rgb * vec3( 1.5, 1.2, 0.7 ) ) );",
     "    gfC = mix( gfC, gfHc, gfHead );",
     "  }",
     "  vGfCol = gfC;",
