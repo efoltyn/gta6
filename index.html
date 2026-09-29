@@ -391,7 +391,9 @@ document.body.appendChild(b);}}catch(e){}})();
      migration spike — verified pixel-identical on its branch but NOT yet
      re-verified against this tree's newest THREE usage, so r128 stays the
      loaded build for now. -->
-<script src="src/vendor/three.r128.min.js"></script>
+<script src="src/vendor/three.r128.min.js?v=w09290242x"></script>
+<!-- real frustum culling for InstancedMesh pools (every camera, shadow pass included); must precede every InstancedMesh -->
+<script src="src/core/instcull.js?v=w09290242x"></script>
 <!-- Slayvin flat-mirror reflective water (ported to r128 as THREE.WaterReflect;
      wired onto the ocean by src/world/waterfx.js). Must follow the THREE tag. -->
 <script src="src/vendor/WaterReflect.js"></script>
@@ -417,7 +419,7 @@ document.body.appendChild(b);}}catch(e){}})();
      mountain heightfield (no hollow ridge sheets) + per-material fog scale.
      Must load right after terrain.js and before city/world.js.
      Revert: CBZ.CONFIG.TERRAIN_SOLID = false. -->
-<script src="src/world/terrain_overhaul.js?v=seabed2"></script>
+<script src="src/world/terrain_overhaul.js?v=w09290242x"></script>
 <!-- Geology kit: shared Quilez erosion / ridged multifractal / drainage / strata /
      snow-cover / adaptive-mesh helpers, used by city/biome_snow (the real walkable
      mountains), world/terrain_overhaul (the backdrop range) and city/continent
@@ -425,7 +427,7 @@ document.body.appendChild(b);}}catch(e){}})();
      rockscliffs.js's fractured boulders on the mountains you can actually walk on.
      MUST load AFTER terrain_overhaul.js (reads CBZ.terrainFogScale) and BEFORE
      city/biome_snow.js, which reads CBZ.mtn* at PARSE time. -->
-<script src="src/world/mountain_detail.js?v=geology1"></script>
+<script src="src/world/mountain_detail.js?v=w09290242x"></script>
 <!-- The massif SKIN: per-pixel snow/rock/forest shading on a lit Standard material.
      Reads CBZ.gfxRegisterPbr lazily; city/biome_snow.js calls CBZ.alpineSkin at build time. -->
 <script src="src/world/alpine_skin.js?v=skin1"></script>
@@ -437,8 +439,8 @@ document.body.appendChild(b);}}catch(e){}})();
 ============================================================ -->
 
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=w09290218"></script>
-<script src="src/core/seed.js"></script>
+<script src="src/config.js?v=spd0929"></script>
+<script src="src/core/seed.js?v=w09290242x"></script>
 <!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
      Turns "is this the city?" into "may I vault / may I blow up here?", so the
      prison, gun game and the disaster island reuse Gang City's engine instead
@@ -469,7 +471,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/vegetation.js?v=allmain1"></script>
 <script src="src/world/forestlook.js?v=allmain1"></script>
 <script src="src/core/prio.js?v=arch2"></script>
-<script src="src/core/lightpin.js?v=w09290204"></script>
+<script src="src/core/lightpin.js?v=w09290242x"></script>
 <script src="src/core/matrixskip.js?v=mskip1"></script>
 <!-- core/interfaces.js is NO LONGER LOADED (2026-07-29). It is 316 lines of
      which ~290 are the contracts index's prose and the rest is a single
@@ -485,7 +487,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- 1. core engine -->
 <script src="src/core/scene.js?v=neutralhaze1"></script>
-<script src="src/core/renderer.js?v=w09290219"></script>
+<script src="src/core/renderer.js?v=w09290242x"></script>
 <!-- THE GROUND STOPS BEING DRAWN OVER A HOLE. Must load AFTER core/renderer.js:
      its installFog REPLACES THREE.ShaderChunk.fog_fragment wholesale, so a patch
      installed before it is erased in silence. groundmask.js asserts CBZ.renderer
@@ -516,7 +518,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/textures_surface.js?v=surf2"></script>
 <script src="src/world/materials.js?v=pbr1"></script>
 <script src="src/world/fuel_station.js?v=fuel1"></script>
-<script src="src/world/prisonkit.js?v=m489457-st1"></script>
+<script src="src/world/prisonkit.js?v=w09290242x"></script>
 <!-- THE LADDER, DRAWN (world/ladderkit.js): stiles, rungs and a cage built
      off the same numbers systems/climb.js climbs, + railed landings. Every
      tower ladder in every game is made here and registered with climb.js. -->
@@ -739,8 +741,8 @@ document.body.appendChild(b);}}catch(e){}})();
      so it borrows the same CBZ.jailBoost run watcher; and it must follow
      world/yard.js, which cuts the four gate gaps this file stands gates in. -->
 <script src="src/world/prisonwings.js?v=dsl3"></script>
-<script src="src/world/prisongrounds.js?v=lad1-st1"></script>
-<script src="src/world/corridors.js?v=m489457"></script>
+<script src="src/world/prisongrounds.js?v=w09290242x"></script>
+<script src="src/world/corridors.js?v=w09290242x"></script>
 
 <!-- ============ THE ENGINE LAYER THE PRISON WAVE PROVED WAS MISSING ==========
      Four services promoted OUT of the prison files below, because a hospital,
@@ -821,7 +823,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/reality.js?v=support1"></script>
 <script src="src/systems/npcgrid.js?v=scale2"></script>
 <script src="src/systems/camera.js?v=me6f1ee"></script>
-<script src="src/systems/physics.js?v=m489457-st1"></script>
+<script src="src/systems/physics.js?v=w09290242x"></script>
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
 <script src="src/systems/climb.js?v=lad1"></script>
 <!-- The tower post officers (entities/towerwatch.js): after guards.js, prisonkit.js (CBZ.prisonTowers) and climb.js. -->
@@ -930,7 +932,7 @@ document.body.appendChild(b);}}catch(e){}})();
      thread cannot repaint during that). Must load BEFORE state.js, which
      shows it, and before the city modules that call CBZ.bootStep(). -->
 <script src="src/systems/bootprogress.js?v=meter1"></script>
-<script src="src/systems/state.js?v=end1"></script>
+<script src="src/systems/state.js?v=w09290242x"></script>
 <!-- AN APP GETS INTERRUPTED AND A TAB DOES NOT. WKWebView drops the WebGL
      context under memory pressure and hands it back later; three.js rebuilds
      its own GL resources, but nothing told the GAME, so a hundred survivors
@@ -962,7 +964,7 @@ document.body.appendChild(b);}}catch(e){}})();
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
 <script src="src/systems/gamepad.js?v=exit1"></script>
-<script src="src/systems/fpsmode.js?v=w09290201"></script>
+<script src="src/systems/fpsmode.js?v=w09290242x"></script>
 <script src="src/systems/gunfx.js?v=w09290201"></script>
 <script src="src/systems/intimidate.js?v=cop1"></script>
 
@@ -971,7 +973,7 @@ document.body.appendChild(b);}}catch(e){}})();
      its world lazily, so the prison game above is untouched. Must load
      BEFORE loop.js so its frame-work is included in the sort. -->
 <script src="src/systems/fx.js?v=sharkmode1"></script>
-<script src="src/systems/debris.js?v=debris1"></script>
+<script src="src/systems/debris.js?v=w09290242x"></script>
 <!-- REAL LIGHTNING. Registers a `lightning` row + FX composer on the impact
      bus, so a cloud-to-ground strike draws a forked channel with return
      strokes, ground flashover, steam and a burn scar instead of falling
@@ -993,7 +995,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/title_hub.js?v=end1"></script>
 <!-- GUN GAME borrows worlds it never builds: the prison (escape), the disaster
      island (survival). Loads AFTER both so their builders exist. -->
-<script src="src/modes/gungame.js?v=vit3"></script>
+<script src="src/modes/gungame.js?v=w09290242x"></script>
 <!-- THE SHAFT IS SHARED: world/groundshaft.js owns every hole in the ground
      (survival sinkholes today, CITY_SINKHOLES tomorrow). Must precede
      systems/disasters.js so the roster finds CBZ.groundShaft at load. -->
@@ -1088,7 +1090,7 @@ document.body.appendChild(b);}}catch(e){}})();
      city/buildings.js, which reads CBZ.CIVIC_SHOPS and CBZ.CIVIC_ACCT_SEED at
      parse time and the bld* helpers at build time. -->
 <script src="src/city/buildings_civic.js?v=deslop1"></script>
-<script src="src/city/buildings.js?v=w09290211"></script>
+<script src="src/city/buildings.js?v=w09290242x"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
@@ -1150,11 +1152,11 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/expansion.js?v=flick1"></script>
 <!-- 4d-2. ARCHIPELAGO — worldmap registry + 3 islands + 4 biomes (worldmap.js
      MUST precede every island/biome; world.js runs them via CBZ.cityWorldGeo) -->
-<script src="src/city/worldmap.js?v=nodash1"></script>
+<script src="src/city/worldmap.js?v=w09290242x"></script>
 <!-- Shared signed shoreline/depth/current oracle. Loaded immediately after
      the landmass registry so rendering, swimmers, boats and aquatic wildlife
      all consult the same coast instead of inventing separate radius tests. -->
-<script src="src/city/waterfield.js?v=tsuedge1"></script>
+<script src="src/city/waterfield.js?v=w09290242x"></script>
 <!-- Reflective-ocean FX: swaps CBZ.citySea for a THREE.WaterReflect plane when
      CBZ.CONFIG.WATER_REFLECT is on (default). Reads the sea lazily at runtime,
      so load order past config.js + WaterReflect.js is all it needs. -->
@@ -1252,9 +1254,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/airport_capeharbor.js?v=nodash1"></script>
 <script src="src/city/island_military.js?v=lad1-st1"></script>
 <script src="src/city/biome_desert.js?v=lad1"></script>
-<script src="src/city/biome_forest.js?v=allmain1-st1"></script>
+<script src="src/city/biome_forest.js?v=w09290242x"></script>
 <script src="src/city/biome_farmland.js?v=lad1-st1"></script>
-<script src="src/city/biome_snow.js?v=nodash1"></script>
+<script src="src/city/biome_snow.js?v=w09290242x"></script>
 <script src="src/city/snowboard.js?v=nodash1"></script>
 <!-- STRATEGIC LAYER part 1 — hardened bunkers (Fort Brandt command shelter
      w/ the nuclear vault + mountain/desert finds). Landmass order 40: after
@@ -1315,9 +1317,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- CBZ.moves POSTURE: the one sit / lie / stand / kneel / crouch / top-bunk
      climb sequencer for every game (propuse's verbs and the cell bunks call it).
      Right after propuse.js, whose CBZ.propArcActive / propLiePlace it backs. -->
-<script src="src/entities/moves_posture.js?v=posture1"></script>
+<script src="src/entities/moves_posture.js?v=w09290242x"></script>
 <script src="src/city/adboard.js?v=onecall1"></script>
-<script src="src/city/mode.js?v=raceabort1"></script>
+<script src="src/city/mode.js?v=w09290242x"></script>
 <script src="src/city/economy.js?v=vit3"></script>
 <script src="src/city/clothes.js?v=fit1"></script>
 <script src="src/city/outfits.js?v=fit1"></script>
@@ -1347,7 +1349,7 @@ document.body.appendChild(b);}}catch(e){}})();
      brain.rep. After peds.js (fleeFrom / markGunpoint / the report visuals it
      drives) and systems/brain.js; nothing here runs at parse. -->
 <script src="src/city/brain_city.js?v=armed1"></script>
-<script src="src/entities/pedinstance.js?v=w09290232"></script>
+<script src="src/entities/pedinstance.js?v=w09290242x"></script>
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and
      after interior_programs.js. This is what puts a boss on the top floor. -->
@@ -1388,7 +1390,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- city/carseats.js: the ONE seat model (layouts per body, doors, the
      per-car occupancy map). Before playercars.js (dressCabin upholsters its
      seats) and vehicles.js / boarding.js / passengerseat.js (all read it). -->
-<script src="src/city/carseats.js?v=cars1"></script>
+<script src="src/city/carseats.js?v=w09290242x"></script>
 <script src="src/city/playercars.js?v=mce86a5"></script>
 <script src="src/city/crashfx.js?v=boom2"></script>
 <script src="src/city/crashdeform.js?v=boom2"></script>
@@ -1398,9 +1400,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- city/carlod.js: the far-car LOD (one simplified twin per shared car
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
-<script src="src/city/carlod.js?v=lod1"></script>
-<script src="src/city/vehicles.js?v=mce86a5"></script>
-<script src="src/city/carinstances.js?v=cars2"></script>
+<script src="src/city/carlod.js?v=w09290242x"></script>
+<script src="src/city/vehicles.js?v=w09290242x"></script>
+<script src="src/city/carinstances.js?v=w09290242x"></script>
 <script src="src/city/playerair.js?v=nodash1"></script>
 <script src="src/city/playeraircraft.js?v=hats1"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
@@ -1458,7 +1460,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Reverts: ?cfg_COMPANION_BOARDING_V1=0 (the arcs) ·
      ?cfg_FOLLOWER_ORDERS_V1=0 (the verbs) · ?cfg_CAR_DOOR_ARC=0 (just the
      player's own car door beat, leaving companions boarding). -->
-<script src="src/city/boarding.js?v=mce86a5"></script>
+<script src="src/city/boarding.js?v=w09290242x"></script>
 <!-- THE OTHER SEAT (owner: "a button should move me to passenger ... and then
      if I go to the door I can even jump out"). [G] / the SEAT pill slides the
      player across to the shotgun seat of a car or back from a boat's helm: the
@@ -1479,7 +1481,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- ambient civilian air traffic (GA prop planes + a light heli orbiting the
      city, banking into their turns) — pure atmosphere, deterministic, gated by
      CBZ.CONFIG.AIR_TRAFFIC_AMBIENT -->
-<script src="src/city/airtraffic.js?v=boom2"></script>
+<script src="src/city/airtraffic.js?v=w09290242x"></script>
 <!-- ORDNANCE + STRUCTURE. impactbus.js: CBZ.detonate(x,y,z,kind,opts) — new
      ordnance is a TABLE ROW, not a file. structural.js: CBZ.structure, the ONE
      building damage ledger (INTACT→SCARRED→WOUNDED→BURNING→CRITICAL→COLLAPSING→
@@ -1812,7 +1814,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/campaign_ui.js?v=markphoto1"></script>
 <script src="src/city/campaign.js?v=me6f1ee"></script>
 <script src="src/city/cinematics.js?v=nodash1"></script>
-<script src="src/systems/humancontact.js?v=bodyphys1"></script>
+<script src="src/systems/humancontact.js?v=w09290242x"></script>
 <script src="src/systems/navigation.js?v=sharkmode1"></script>
 <!-- THE PRISON WALKS TO DOORS. Owner: "Instead of flickering when walking into
      a wall falling real physics and then finding door etc". The mover is a
@@ -2068,10 +2070,10 @@ document.body.appendChild(b);}}catch(e){}})();
      the ocean, no second oracle. MUST load and run (order 96.5) BEFORE
      continent.js at 97, which snapshots city.waterBodies once.
      Revert with ?cfg_CITY_RIVER=0. -->
-<script src="src/city/river.js?v=river2bank"></script>
+<script src="src/city/river.js?v=w09290242x"></script>
 <!-- THE CONTINENT: runs after every landmass builder (order 97) and fills the
      ocean between POIs with walkable backcountry — one world, not circles. -->
-<script src="src/city/continent.js?v=allmain2river"></script>
+<script src="src/city/continent.js?v=w09290242x"></script>
 <script src="src/city/demographics.js?v=world1"></script>
 <!-- X6: the affinity matrix (country/state/city relations) — after
      countries.js (CBZ.COUNTRIES) and officials.js/polity.js (both already
@@ -2298,7 +2300,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- 4b. game packages: engine registry first, then each packaged venue game
      (after every city system they facade: interactions, worldmap, economy) -->
-<script src="src/core/packages.js?v=w09290219"></script>
+<script src="src/core/packages.js?v=w09290242x"></script>
 <script src="src/games/casino.js?v=onebet1"></script>
 <script src="src/games/ocean.js?v=nodash1"></script>
 <script src="src/games/racing.js?v=onebet1"></script>
@@ -2393,13 +2395,13 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/street_furniture.js?v=deslop1"></script>
 <script src="src/world/world_grime.js?v=detail1"></script>
 <script src="src/world/building_dress.js?v=roof1-st1"></script>
-<script src="src/core/farcull.js?v=fc2z"></script>
+<script src="src/core/farcull.js?v=w09290242x"></script>
 <!-- whole-building frustum hide before every draw (exact: view frustum + sun shadow frustum); also owns CBZ.subtreeSphere, which city/cctv.js's feed scope reuses -->
-<script src="src/core/viewscope.js?v=vs1"></script>
+<script src="src/core/viewscope.js?v=w09290242x"></script>
 <script src="src/core/losgrid.js?v=lg1"></script>
 <script src="src/core/staticfreeze.js?v=sf1"></script>
 <script src="src/systems/settings.js?v=nodash1"></script>
-<script src="src/core/batch.js?v=flick1"></script>
+<script src="src/core/batch.js?v=w09290242x"></script>
 <!-- Render-realism layer: light-writer arbiter, world PBR promotion, env reach,
      exposure, contact AO. MUST load after core/quality.js (reads
      CBZ.onQualityChange) AND after core/batch.js — it wraps CBZ.batchStaticUnder
@@ -2408,8 +2410,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/core/gfx.js?v=w09290204"></script>
 <script src="src/city/localinst.js?v=li2"></script>
 <script src="src/core/profile.js"></script>
-<script src="src/core/fxwarm.js?v=racerstory1"></script>
-<script src="src/city/cctv.js?v=cars1"></script>
+<script src="src/core/fxwarm.js?v=w09290242x"></script>
+<script src="src/city/cctv.js?v=w09290242x"></script>
 <script src="src/core/loop.js?v=scale1"></script>
 <script src="src/main.js?v=sharkmode1"></script>
 </body>

@@ -290,6 +290,11 @@
       const tMat = CBZ.groundSkin
         ? CBZ.groundSkin({ name: "redhollow-trail", far: 300, sandY: [-9, -8], extra: tOff })
         : new THREE.MeshLambertMaterial(tOff);
+      // the trails lie ON the floor, so they recede into the fog with it: the
+      // floor takes terrainFogScale 0.10 from worldmap.js's worldSurface sweep
+      // (the trails are not a worldSurface), and a decal fogged at a different
+      // depth than the ground under it reads as pale lines from the air
+      if (CBZ.groundSkin && CBZ.terrainFogScale) CBZ.terrainFogScale(tMat, 0.10);
       const trails = new THREE.Mesh(tg, tMat);
       trails.name = "redhollow-trails";
       trails.receiveShadow = true;

@@ -66,6 +66,9 @@
      CBZ.moves.stand(actor, opts)        from whatever posture (sit, lie, kneel)
      CBZ.moves.kneel(actor, opts|false)  opts {face, at:{x,z}}
      CBZ.moves.crouch(actor, on)
+     CBZ.moves.board(actor, carSpec, opts) / .alight(actor, carSpec, opts)
+                                         through a car door (section 4); .skip,
+                                         .carBeat, .carAbort, .eyeY
      CBZ.moves.posture(actor)            "stand"|"sit"|"lie"|"kneel"|"crouch"|"transition"
      CBZ.moves.busy(actor)               true while a transition owns the body
      opts: instant (commit now, no sequence), onDone(actor, spot),
@@ -601,6 +604,9 @@
     if (!g) return;
     g.position.x = R.x; g.position.y = R.y; g.position.z = R.z;
     g.rotation.y = R.yaw; g.rotation.z = R.roll; g.rotation.x = 0;
+    // a vehicle seat shrinks the stylised rig to its cabin (vehicles.js
+    // fitSeatedRig): the car beats carry that scale as part of the pose
+    if (R.scale != null && g.scale && g.scale.x !== R.scale) g.scale.setScalar(R.scale);
     if (a.pos && a.pos !== g.position) { if (a.pos.set) a.pos.set(R.x, R.y, R.z); else { a.pos.x = R.x; a.pos.y = R.y; a.pos.z = R.z; } }
     if (a === CBZ.player) { a.vy = 0; a.grounded = true; a.stun = Math.max(a.stun || 0, 0.15); }
     if (ch) {
@@ -632,6 +638,31 @@
     const cbDone = R.onDone, spot = R.spot;
     R.onDone = null;
     if (Q.abandon) { abort(R, true); return; }
+    if (Q.kind === "board") {
+      /* IN THE SEAT. Whoever owns a seated body from here (vehicles.js's
+         seatDriver for the player, npclife's attach for an NPC) holds the
+         SAME pose this beat ended on — same root, same fit, same seatRef —
+         so the rig is handed over with its fold intact, not re-sat. */
+      R.state = "stand"; R.b = null; R.sink = null; R.lean = 0; R.feet = null; R.scale = null; R.V = null;
+      if (ch) { ch.seatBlend = null; ch.postureSink = null; ch.seatLean = 0; ch.crouch = false; }
+      if (a === CBZ.player) a.stun = 0;
+      untrack(R);
+      R.spot = null;
+      if (cbDone) { try { cbDone(a, spot); } catch (e) {} }
+      return;
+    }
+    if (Q.kind === "alight") {
+      R.state = "stand"; R.b = null; R.sink = null; R.lean = 0; R.feet = null; R.roll = 0;
+      const g = groupOf(a);
+      if (g && g.scale && R.scale != null) g.scale.setScalar(1);
+      R.scale = null; R.V = null;
+      if (ch) { rigStand(ch); ch.crouch = false; }
+      handBack(R);
+      untrack(R);
+      R.spot = null;
+      if (cbDone) { try { cbDone(a, spot); } catch (e) {} }
+      return;
+    }
     if (Q.kind === "sit") {
       R.state = "sit"; R.b = null; R.lean = 0;
       if (ch) { ch.seatBlend = null; ch.seatLean = 0; ch.crouch = false; }
@@ -668,6 +699,8 @@
     R.state = "stand"; R.b = null; R.sink = null; R.lean = 0; R.kb = 0;
     if (ch) { rigStand(ch); ch.crouch = false; }
     if (g) { g.rotation.z = 0; g.rotation.x = 0; }
+    if (g && g.scale && R.scale != null) g.scale.setScalar(1);
+    R.scale = null; R.feet = null; R.V = null;
     if (a === CBZ.player) a.stun = 0;
     if (stall) handBack(R);
     untrack(R);
@@ -711,9 +744,11 @@
         const f = PH[Q.names[Q.i]];
         let done = !f;
         R.hipOwn = false;
+        // a skipped car beat plays out fast instead of snapping (MV.skip)
+        const qdt = dt * (Q.ff || 1);
         if (f) {
-          const fin = f(R, Q, dt);
-          Q.t += dt;
+          const fin = f(R, Q, qdt);
+          Q.t += qdt;
           if (Q.abandon) done = true;
           else if (fin) {
             Q.i++;
@@ -722,7 +757,8 @@
           }
         }
         apply(R);
-        animate(R, dt);
+        animate(R, qdt);
+        if (R.feet) footIK(R);
         if (done) finish(R);
       } else hold(R);
     }
@@ -1015,6 +1051,339 @@
   };
 
   /* STAND — out of whatever posture, the way in reversed, and a walk clear. */
+  /* ==========================================================
+     4. A CAR SEAT — in through the door, out through the door.
+
+     Owner, 2026-09-29: "fix getting into cars" / "the human animation of it
+     is bad." It was not an animation at all: the body GLIDED to the door at
+     4.6 m/s, slid upright into the aperture for half a second, then popped
+     into the seat folded and shrunk to the cabin fit in ONE frame; getting
+     out was the same pop in reverse (the seated rig gone, a full-size man
+     standing on the kerb). These are the beats a person actually does, on
+     the ONE posture layer every other sit in the game uses:
+
+       IN   cwalk   walk (real gait, the shared motor) to the handle
+            cpull   face the door, hand on the handle, pull it open
+            cwait   (a carjack) stand back while the occupant comes out
+            cswing  step round the free edge into the gap, turning in
+            cin     the inboard leg goes in over the sill first, the head
+                    ducks under the roofline, a hand on the roof rail, the
+                    hips turn and drop onto the cushion (the cabin fit and
+                    floor blending in with the hips), the outer leg last
+       OUT  aopen   hand to the inner handle, door open
+            aout    outer leg out first and planted, hand on the frame,
+                    duck, rise and slide out, the inboard leg out last
+            astep   step clear, round the door's free edge
+            ashut   push it shut
+     The feet are PLANTED through the shared leg IK (meleeposes solveLeg):
+     a foot on the ground stays put while the hips move, a moving foot goes
+     over the sill, never through the door skin.
+
+     Pure math again: the vehicle frame comes in as callbacks (the caller,
+     city/boarding.js, owns THREE and the car); the foot IK is
+     feature-detected so a node sim runs the timeline without a rig.
+
+     spec V (car-local metres: +Z forward, +X the car's LEFT):
+       toWorld(lx,ly,lz,out)  yaw()   the car frame, sampled every frame
+       side                   +1 left flank / -1 right
+       H {x,z}  where you stand to pull the handle (behind the free edge)
+       A {x,z}  the gap between the open door and the body
+       S {x,y,z} the seat ROOT (y = cabin floor)    C {x,z} out: clear spot
+       yawH yawA yawS yawOut yawShut   local facings for the beats
+       doorX sillY            the flank plane and the sill top
+       fit ref                the cabin rig scale + the seatRef the holder
+                              of the seated body uses (same numbers, so the
+                              handover is exact)
+       groundY                world ground under the standing beats
+       beat(name,u,R)         door leaf + hands (boarding.js)
+       jack() clear()         a carjack: drag them out at the pull, wait
+       run fast               jog to the door / a shoved-out victim
+     ========================================================== */
+  const CAR_WALK = { speed: 2.4, stop: 0.08, accel: 6.0, decel: 5.5 };
+  const CAR_JOG = { speed: 3.8, stop: 0.08, accel: 7.5, decel: 6.5 };
+  function mix(a, b, t) { return a + (b - a) * t; }
+  function yawMix(a, b, t) { return a + wrap(b - a) * t; }
+  const _c0 = { x: 0, y: 0, z: 0 }, _c1 = { x: 0, y: 0, z: 0 }, _c2 = { x: 0, y: 0, z: 0 }, _c3 = { x: 0, y: 0, z: 0 };
+  function cw(V, lx, ly, lz, out) { return V.toWorld(lx, ly, lz, out); }
+  function beatOf(R, name, u) {
+    const V = R.V;
+    if (V && V.beat) { try { V.beat(name, u, R); } catch (e) {} }
+  }
+  // an authored move the legs still walk: the gait reads the real displacement
+  function glide(R, x, z, dt) {
+    const d = Math.hypot(x - R.x, z - R.z);
+    R.x = x; R.z = z;
+    R.spd = Math.min(3, d / Math.max(dt, 1e-4));
+  }
+  function carSeated(R, Q, ch, b) {
+    R.b = b; R.sink = Q.legs ? Q.legs.sink * b : null;
+    rigSit(R, ch, R.V.ref, b);
+  }
+  // the two feet: where they are planted, where they go, over the sill between
+  function bez(o, a, c, b, k) {
+    const i = 1 - k, w0 = i * i, w1 = 2 * k * i, w2 = k * k;
+    o.x = a.x * w0 + c.x * w1 + b.x * w2; o.y = a.y * w0 + c.y * w1 + b.y * w2; o.z = a.z * w0 + c.z * w1 + b.z * w2;
+    return o;
+  }
+  function carFeet(R, Q, u, dirIn) {
+    const V = R.V, s = V.side, L = Q.legs, ch = charOf(R.actor);
+    const lat = 0.10 * hsOf(ch);
+    const reach = (L ? clamp(L.reach, 0.1, 0.8) : 0.40) * V.fit;
+    const fy = (L ? Math.max(0, L.footY) : 0) * V.fit;
+    const F = R.feet || (R.feet = [
+      { sgn: 0, x: 0, y: 0, z: 0, w: 0 }, { sgn: 0, x: 0, y: 0, z: 0, w: 0 }]);
+    const apZ = mix(V.A.z, V.S.z + reach, 0.5);
+    for (let i = 0; i < 2; i++) {
+      const lead = i === 0, sg = lead ? -s : s;        // the lead leg is the inboard one
+      const g = cw(V, V.A.x + sg * lat, 0, V.A.z + (lead ? 0.04 : -0.04), _c0); g.y = Q.gy;
+      const c = cw(V, V.doorX - s * 0.04, V.sillY + 0.30, apZ, _c1);
+      const f = cw(V, V.S.x + sg * lat * V.fit, V.S.y + fy, V.S.z + reach, _c2);
+      let k, w;
+      if (dirIn) {
+        k = lead ? smooth(u / 0.45) : smooth((u - 0.42) / 0.43);
+        w = smooth(u / 0.08) * (1 - smooth((u - 0.84) / 0.16));
+        bez(_c3, g, c, f, k);
+      } else {
+        k = lead ? smooth((u - 0.48) / 0.40) : smooth(u / 0.42);
+        w = smooth(u / 0.10) * (1 - smooth((u - 0.88) / 0.12));
+        bez(_c3, f, c, g, k);
+      }
+      F[i].sgn = sg; F[i].x = _c3.x; F[i].y = _c3.y; F[i].z = _c3.z; F[i].w = w;
+    }
+  }
+  ENTER.cwalk = function (R, Q) {
+    MV.reset(Q.m, R); Q.m.yaw = R.yaw;
+    const am = R.actor._mv;
+    if (am && Math.hypot(am.vx || 0, am.vz || 0) < 4) { Q.m.vx = am.vx || 0; Q.m.vz = am.vz || 0; }
+  };
+  Object.assign(PH, {
+    cwalk(R, Q, dt) {
+      const V = R.V;
+      const w = cw(V, V.H.x, 0, V.H.z, _c0);
+      const d = walkTo(R, Q, w.x, w.z, dt, Q.wo);
+      R.y = Q.gy;
+      beatOf(R, "walk", d);
+      if (Q.m.arrived || d < 0.12) { R.spd = 0; return true; }
+      if (Q.t > Q.wcap) { if (d > 1.6) Q.abandon = true; R.spd = 0; return true; }
+      return false;
+    },
+    cpull(R, Q, dt) {
+      const V = R.V;
+      const u = Math.min(1, Q.t / 0.30), e = smooth(u / 0.6);
+      const w = cw(V, V.H.x, 0, V.H.z, _c0);
+      glide(R, mix(Q.sx, w.x, e), mix(Q.sz, w.z, e), dt);
+      R.y = Q.gy;
+      R.yaw = MV.turnToward(R.yaw, V.yaw() + V.yawH, TURN * 1.3 * dt);
+      beatOf(R, "pull", u);
+      if (u >= 1) {
+        if (V.jack && !Q.jacked) { Q.jacked = true; try { V.jack(); } catch (e) {} }
+        return true;
+      }
+      return false;
+    },
+    // somebody is coming out of this door: stand back off the free edge
+    cwait(R, Q, dt) {
+      const V = R.V;
+      const u = Math.min(1, Q.t / 0.25);
+      const w = cw(V, V.H.x + V.side * 0.10, 0, V.H.z - 0.30, _c0);
+      glide(R, mix(Q.sx, w.x, smooth(u)), mix(Q.sz, w.z, smooth(u)), dt);
+      R.y = Q.gy;
+      R.yaw = MV.turnToward(R.yaw, V.yaw() + V.yawH, TURN * dt);
+      beatOf(R, "wait", u);
+      return Q.t > 0.3 && (!V.clear || V.clear() || Q.t > 1.8);
+    },
+    cswing(R, Q, dt) {
+      const V = R.V;
+      const u = Math.min(1, Q.t / 0.30), e = smooth(u);
+      const a = cw(V, V.A.x, 0, V.A.z, _c0);
+      glide(R, mix(Q.sx, a.x, e), mix(Q.sz, a.z, e), dt);
+      R.y = Q.gy;
+      R.yaw = yawMix(Q.syaw, V.yaw() + V.yawA, e);
+      beatOf(R, "swing", u);
+      return u >= 1;
+    },
+    cin(R, Q, dt) {
+      const V = R.V, ch = charOf(R.actor);
+      const u = Math.min(1, Q.t / 0.62);
+      const hb = smooth((u - 0.12) / 0.72), ty = smooth((u - 0.20) / 0.70);
+      const a = cw(V, V.A.x, 0, V.A.z, _c0), sw = cw(V, V.S.x, V.S.y, V.S.z, _c1);
+      R.x = mix(a.x, sw.x, hb); R.z = mix(a.z, sw.z, hb); R.y = mix(Q.gy, sw.y, hb);
+      R.scale = mix(1, V.fit, hb);
+      R.yaw = V.yaw() + yawMix(V.yawA, V.yawS || 0, ty);
+      R.lean = 0.5 * Math.sin(PI * clamp(u / 0.92, 0, 1));      // the duck under the roofline
+      R.spd = 0;
+      carSeated(R, Q, ch, hb);
+      carFeet(R, Q, u, true);
+      beatOf(R, "in", u);
+      return u >= 1;
+    },
+    aopen(R, Q, dt) {
+      const V = R.V, ch = charOf(R.actor);
+      const u = Math.min(1, Q.t / 0.26);
+      const sw = cw(V, V.S.x, V.S.y, V.S.z, _c1);
+      R.x = sw.x; R.y = sw.y; R.z = sw.z; R.yaw = V.yaw() + (V.yawS || 0);
+      R.scale = V.fit; R.lean = 0; R.spd = 0;
+      carSeated(R, Q, ch, 1);
+      beatOf(R, "open", u);
+      return u >= 1;
+    },
+    aout(R, Q, dt) {
+      const V = R.V, ch = charOf(R.actor);
+      const u = Math.min(1, Q.t / 0.58);
+      const hb = 1 - smooth((u - 0.16) / 0.70), ty = smooth((u - 0.04) / 0.66);
+      const a = cw(V, V.A.x, 0, V.A.z, _c0), sw = cw(V, V.S.x, V.S.y, V.S.z, _c1);
+      R.x = mix(a.x, sw.x, hb); R.z = mix(a.z, sw.z, hb); R.y = mix(Q.gy, sw.y, hb);
+      R.scale = mix(1, V.fit, hb);
+      R.yaw = V.yaw() + yawMix(V.yawS || 0, V.yawOut, ty);
+      R.lean = 0.5 * Math.sin(PI * clamp((u - 0.08) / 0.90, 0, 1));
+      R.spd = 0;
+      if (u < 1) { carSeated(R, Q, ch, hb); carFeet(R, Q, u, false); }
+      else { rigStand(ch); R.b = null; R.sink = null; R.lean = 0; R.feet = null; R.scale = 1; }
+      beatOf(R, "out", u);
+      return u >= 1;
+    },
+    astep(R, Q, dt) {
+      const V = R.V;
+      const u = Math.min(1, Q.t / 0.34), e = smooth(u);
+      const c = cw(V, V.C.x, 0, V.C.z, _c0);
+      glide(R, mix(Q.sx, c.x, e), mix(Q.sz, c.z, e), dt);
+      R.y = Q.gy;
+      R.yaw = yawMix(Q.syaw, V.yaw() + V.yawShut, e);
+      beatOf(R, "step", u);
+      return u >= 1;
+    },
+    ashut(R, Q, dt) {
+      const u = Math.min(1, Q.t / 0.30);
+      R.spd = 0;
+      beatOf(R, "shut", u);
+      return u >= 1;
+    },
+  });
+
+  /* THE FEET, PLANTED. After the rig has posed (animate), each foot with a
+     weight is pulled onto its target by the shared two-bone leg solve. */
+  let _fv = null, _fpole = null;
+  function legPart(ch, sgn) {
+    const l = ch.parts && ch.parts.ll, r = ch.parts && ch.parts.rl;
+    if (!l || !r) return null;
+    return l.position.x * sgn >= r.position.x * sgn ? l : r;
+  }
+  function footIK(R) {
+    const F = R.feet, ch = charOf(R.actor), MP = CBZ.meleePoses;
+    const T3 = typeof window !== "undefined" ? window.THREE : null;
+    if (!F || !ch || !ch.parts || !MP || !MP.solveLeg || !T3) return;
+    if (!_fv) { _fv = new T3.Vector3(); _fpole = new T3.Vector3(0, 0.35, 1); }
+    const g = groupOf(R.actor);
+    if (!g) return;
+    g.updateMatrixWorld(true);
+    const ankle = 0.08 * (R.scale || 1) * hsOf(ch);
+    for (let i = 0; i < F.length; i++) {
+      const f = F[i];
+      if (!(f.w > 0.002)) continue;
+      const part = legPart(ch, f.sgn);
+      if (!part || !part.parent) continue;
+      _fv.set(f.x, f.y + ankle, f.z);
+      part.parent.worldToLocal(_fv);
+      try { MP.solveLeg(ch, part === ch.parts.rl ? "L" : "R", _fv, _fpole, Math.min(1, f.w)); } catch (e) {}
+    }
+  }
+
+  // the end state of a car sequence, now (a skip from far off, a menu)
+  function carEndNow(R) {
+    const Q = R.seq, V = R.V, a = R.actor, ch = charOf(a);
+    if (!Q || !V) return;
+    if (Q.kind === "board") {
+      const sw = cw(V, V.S.x, V.S.y, V.S.z, _c1);
+      R.x = sw.x; R.y = sw.y; R.z = sw.z; R.yaw = V.yaw() + (V.yawS || 0); R.roll = 0;
+      R.scale = V.fit; R.lean = 0; R.feet = null;
+      if (ch) carSeated(R, Q, ch, 1);
+    } else {
+      const c = cw(V, V.C.x, 0, V.C.z, _c0);
+      R.x = c.x; R.y = Q.gy; R.z = c.z; R.yaw = V.yaw() + V.yawShut; R.roll = 0;
+      R.scale = 1; R.lean = 0; R.feet = null; R.b = null; R.sink = null;
+      if (ch) rigStand(ch);
+      if (V.beat) { try { V.beat("shut", 1, R); } catch (e) {} }
+    }
+    apply(R);
+    finish(R);
+  }
+
+  MV.board = function (a, V, opts) {
+    opts = opts || {};
+    if (!a || !V || !ready(a)) return false;
+    const R = recOf(a), ch = charOf(a);
+    if (R.seq) return false;
+    if (R.state !== "stand" && R.state !== "crouch") return false;
+    readPose(R);
+    const h = cw(V, V.H.x, 0, V.H.z, _c0);
+    const dH = Math.hypot(R.x - h.x, R.z - h.z);
+    if (dH > (opts.walkMax || 14)) return false;
+    ch.crouch = false;
+    R.V = V; R.spot = null; R.scale = 1; R.feet = null;
+    R.onDone = opts.onDone || null; R.onAbort = opts.onAbort || null;
+    const Q = {
+      V: V, gy: V.groundY != null ? V.groundY : R.y,
+      legs: seatLegs(ch, V.ref, postOf(V.ref), {}),
+      wo: (V.run || dH > 5) ? CAR_JOG : CAR_WALK, wcap: 1.0 + dH / 1.5, ff: 1,
+    };
+    const names = [];
+    if (dH > 0.15) names.push("cwalk");
+    names.push("cpull");
+    if (V.jack) names.push("cwait");
+    names.push("cswing", "cin");
+    begin(R, "board", names, Q);
+    return true;
+  };
+  MV.alight = function (a, V, opts) {
+    opts = opts || {};
+    const ch = charOf(a);
+    if (!a || !V || !ch || !groupOf(a) || stale(a) || a.driving) return false;
+    const R = recOf(a);
+    if (R.seq) abort(R);
+    const Q = { V: V, legs: seatLegs(ch, V.ref, postOf(V.ref), {}), ff: V.fast ? 1.45 : 1 };
+    R.V = V; R.spot = null; R.feet = null;
+    R.onDone = opts.onDone || null; R.onAbort = opts.onAbort || null;
+    // from the seat THIS frame: never one frame of a full-size man on the kerb
+    const sw = cw(V, V.S.x, V.S.y, V.S.z, _c1);
+    R.x = sw.x; R.y = sw.y; R.z = sw.z; R.yaw = V.yaw() + (V.yawS || 0); R.roll = 0;
+    R.scale = V.fit; R.lean = 0;
+    Q.gy = V.groundY != null ? V.groundY : sw.y - V.S.y;
+    R.state = "stand";
+    carSeated(R, Q, ch, 1);
+    begin(R, "alight", V.fast ? ["aopen", "aout", "astep"] : ["aopen", "aout", "astep", "ashut"], Q);
+    apply(R);
+    return true;
+  };
+  /* SKIP: the player pressed again or moved. A body still walking to the
+     door is put straight in the seat (he asked for the car); a body at the
+     door plays the rest fast, never a snap. */
+  MV.skip = function (a, k) {
+    const R = a && a._pz, Q = R && R.seq;
+    if (!Q || (Q.kind !== "board" && Q.kind !== "alight")) return false;
+    if (Q.names[Q.i] === "cwalk") { carEndNow(R); return true; }
+    Q.ff = Math.max(Q.ff || 1, k || 4);
+    return true;
+  };
+  // something else took this body mid-door (a scare, a death): hand it back
+  MV.carAbort = function (a) {
+    const R = a && a._pz, Q = R && R.seq;
+    if (Q && (Q.kind === "board" || Q.kind === "alight")) abort(R, true);
+  };
+  MV.carBeat = function (a) {
+    const R = a && a._pz, Q = R && R.seq;
+    if (!Q || (Q.kind !== "board" && Q.kind !== "alight")) return null;
+    return Q.names[Q.i];
+  };
+  /* The first-person eye while a car beat owns the body: it ducks and sits
+     with the head instead of riding 1.65 m over a root that is going into a
+     cabin (which put the lens through the roof). */
+  MV.eyeY = function (a) {
+    const R = a && a._pz, Q = R && R.seq;
+    if (!Q || (Q.kind !== "board" && Q.kind !== "alight")) return null;
+    const sc = R.scale || 1, ln = R.lean || 0;
+    return R.y + sc * (1.62 + (R.sink || 0)) - sc * 0.9 * (1 - Math.cos(ln));
+  };
+
   MV.stand = function (a, opts) {
     opts = opts || {};
     if (!a) return false;
@@ -1029,6 +1398,7 @@
     if (Q0) {
       const nm = Q0.names[Q0.i];
       if (Q0.kind === "stand") return true;                   // already getting up
+      if (Q0.kind === "board" || Q0.kind === "alight") return true;   // a car door owns this body
       if (nm === "walk" || nm === "turn" || nm === "back" || nm === "toRung") {
         R.seq = null; freePlayer(a);
         R.state = "stand"; if (ch) rigStand(ch);
@@ -1154,6 +1524,7 @@
       const ch = charOf(P); if (ch) { ch.sitting = false; ch.seatBlend = null; setLying(P); }
       R.sink = null; apply(R);
       const cb = R.onDone; R.onDone = null; if (cb) { try { cb(P, spot); } catch (e) {} }
-    } else instantStand(R);
+    } else if (kind === "board" || kind === "alight") carEndNow(R);
+    else instantStand(R);
   });
 })();

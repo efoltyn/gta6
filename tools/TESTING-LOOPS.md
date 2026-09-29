@@ -23,21 +23,57 @@ node tools/smoke-play.mjs        # ~206s, the ONLY loop that forces a real rende
 
 `node --check <file>` on every touched file first — free, always.
 
-## SPEED — the load/frame regression loop (`tools/speed.mjs`)
+## SPEED — the load/frame loop (`tools/speed.mjs`, v2)
+
+**Fast path: ask a warm world** (one per tree; the first `--ask` boots it in the
+background, once; later answers take seconds):
 
 ```
-node tools/speed.mjs --against tools/speed-baseline.json   # Gang City load + in-game vs the saved main baseline
-node tools/speed.mjs --modes all                           # every mode + games/ pages
-node tools/speed.mjs --ref origin/main --save before.json  # measure another commit the same way
-node tools/speed.mjs --profile --attribute                 # + V8 top functions, + HD/tree share (diagnostic)
+node tools/speed.mjs --ask frames [--spot spawn] [--frames 12]   # frame / real GPU per pass / updaters at the fixed spots
+node tools/speed.mjs --ask ab --toggle 'CBZ.myThing = on' [--spot aerial]
+#   IN-PAGE A/B in the one live world: blocks ABBA, paired t verdict, stops when
+#   decisive; then a frozen-time pixel check (LOOK REGRESSION on a visible change)
+node tools/speed.mjs --ask eval '<expr>'   |   --ask reload   |   --ask stop
+```
+
+A query reloads the world first if a served file changed (no stale answers).
+Build the candidate behind a runtime switch (a global the toggle flips) and
+`--ask ab` answers "is it faster, and does it look the same" without a reboot.
+
+**Full run** (fresh browser, every number — the verdict before a merge):
+
+```
+node tools/speed.mjs --against origin/main   # PAIRED A/B vs a commit: interleaved runs, one lock window, early stop
+node tools/speed.mjs                         # Gang City load + in-game, one run
+node tools/speed.mjs --shaders cold --return # first-time player (cold shader cache) + returning player
+node tools/speed.mjs --modes all             # every mode + games/ pages
+node tools/speed.mjs --against baseline      # vs tools/speed-baseline.json (unpaired, weaker)
+node tools/speed.mjs --profile --attribute   # + V8 top functions, + HD/tree share (diagnostic)
 ```
 
 Real GPU headless (ANGLE Metal on this Mac), HD viewport (1512x982 @2x, the tier
-the game picks), rAF held and frames stepped by hand at fixed spots, per-updater
-ms, noise per metric, `uptime` in every result, machine lock `/tmp/cbz-speed.lock`.
-It replaced boot-health, boot-trace, load-profile, ipad-perf (`--device tablet`)
-and the perf-ab harnesses. Any "faster" that lowered pixel ratio, tier, shadows,
-trees or textures is printed as a LOOK REGRESSION, not a win.
+the game picks), rAF held and frames stepped by hand at fixed spots. Per frame:
+updater ms, CPU, and REAL GPU ms per pass from timer queries (main / shadow /
+each render-target pass such as `rt:city/cctv.js:530`); frame = max(CPU, GPU)
+(v1 serialized the two with a readback; `--serial` keeps that model). Chrome's
+own CPU counters (main-thread ThreadTime, GPU-process cpuTime) beside the wall
+numbers. Machine lock `/tmp/cbz-speed.lock` with a FIFO ticket queue
+(`/tmp/cbz-speed.q/`), `uptime` in every result.
+
+Verdicts: `--against <ref|url>` alternates base and candidate (ABBA) in one
+browser and one lock window, at spots located once on the base; per-pair
+log-ratios, CHANGED when the 99% t-interval excludes 0 and |Δ| > ε (3% / 150 ms
+load / 0.5 ms frame), SAME when the 90% interval sits inside ±ε; stops after 3
+pairs when every headline metric is decided, else at 5. LOOK: block SSIM of the
+last frame at each spot vs base run 1, with base re-runs as the mask (moving
+things) and the floor; a candidate that changes more of the stable picture than
+a re-run does is a LOOK REGRESSION (PNG: before | after | heat map | diff).
+Settings (pixel ratio, buffer, tier, shadow map, fog) dropping is a LOOK
+REGRESSION too; tree/instance counts are notes only (culling lowers them).
+
+`--shaders cold` renames every shader's `main()` with a per-run nonce, so the
+macOS Metal cache (which survives a fresh profile: 4.4 s vs 0.37 s for 40
+programs) can't serve it. Never delete that cache: the owner's Chrome shares it.
 
 ## Ranked loops (measured, this tree, WORLD_ENLARGE_V2)
 

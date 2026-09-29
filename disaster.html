@@ -395,7 +395,9 @@ document.body.appendChild(b);}}catch(e){}})();
      migration spike — verified pixel-identical on its branch but NOT yet
      re-verified against this tree's newest THREE usage, so r128 stays the
      loaded build for now. -->
-<script src="src/vendor/three.r128.min.js"></script>
+<script src="src/vendor/three.r128.min.js?v=w09290242x"></script>
+<!-- real frustum culling for InstancedMesh pools (every camera, shadow pass included); must precede every InstancedMesh -->
+<script src="src/core/instcull.js?v=w09290242x"></script>
 <!-- Slayvin flat-mirror reflective water (ported to r128 as THREE.WaterReflect;
      wired onto the ocean by src/world/waterfx.js). Must follow the THREE tag. -->
 <script src="src/vendor/BufferGeometryUtils.js"></script>
@@ -435,7 +437,7 @@ document.body.appendChild(b);}}catch(e){}})();
   window.CBZ = Object.assign(window.CBZ || {}, { START_MODE: "survival" });
 </script>
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=w09290218"></script>
+<script src="src/config.js?v=spd0929"></script>
 <!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
      Turns "is this the city?" into "may I vault / may I blow up here?", so the
      prison, gun game and the disaster island reuse Gang City's engine instead
@@ -478,7 +480,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- 1. core engine -->
 <script src="src/core/scene.js?v=neutralhaze1"></script>
-<script src="src/core/renderer.js?v=w09290219"></script>
+<script src="src/core/renderer.js?v=w09290242x"></script>
 <!-- THE GROUND STOPS BEING DRAWN OVER A HOLE. Must load AFTER core/renderer.js:
      its installFog REPLACES THREE.ShaderChunk.fog_fragment wholesale, so a patch
      installed before it is erased in silence. groundmask.js asserts CBZ.renderer
@@ -505,7 +507,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/textures_surface.js?v=surf2"></script>
 <script src="src/world/materials.js?v=pbr1"></script>
 <script src="src/world/fuel_station.js?v=fuel1"></script>
-<script src="src/world/prisonkit.js?v=m489457-st1"></script>
+<script src="src/world/prisonkit.js?v=w09290242x"></script>
 <!-- THE LADDER, DRAWN (world/ladderkit.js): stiles, rungs and a cage built
      off the same numbers systems/climb.js climbs, + railed landings. Every
      tower ladder in every game is made here and registered with climb.js. -->
@@ -673,8 +675,8 @@ document.body.appendChild(b);}}catch(e){}})();
      and cafeteria.js (CBZ.prisonDress fittings); AFTER guards.js + adminwing.js
      so it borrows the same CBZ.jailBoost run watcher; and it must follow
      world/yard.js, which cuts the four gate gaps this file stands gates in. -->
-<script src="src/world/prisongrounds.js?v=lad1-st1"></script>
-<script src="src/world/corridors.js?v=m489457"></script>
+<script src="src/world/prisongrounds.js?v=w09290242x"></script>
+<script src="src/world/corridors.js?v=w09290242x"></script>
 
 <!-- ============ THE ENGINE LAYER THE PRISON WAVE PROVED WAS MISSING ==========
      Four services promoted OUT of the prison files below, because a hospital,
@@ -745,7 +747,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/input.js"></script>
 <script src="src/systems/spatialgrid.js?v=scale3"></script>
 <script src="src/systems/camera.js?v=me6f1ee"></script>
-<script src="src/systems/physics.js?v=m489457-st1"></script>
+<script src="src/systems/physics.js?v=w09290242x"></script>
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
 <script src="src/systems/climb.js?v=lad1"></script>
 <!-- The tower post officers (entities/towerwatch.js): after guards.js, prisonkit.js (CBZ.prisonTowers) and climb.js. -->
@@ -827,7 +829,7 @@ document.body.appendChild(b);}}catch(e){}})();
      thread cannot repaint during that). Must load BEFORE state.js, which
      shows it, and before the city modules that call CBZ.bootStep(). -->
 <script src="src/systems/bootprogress.js?v=meter1"></script>
-<script src="src/systems/state.js?v=end1"></script>
+<script src="src/systems/state.js?v=w09290242x"></script>
 <!-- AN APP GETS INTERRUPTED AND A TAB DOES NOT. WKWebView drops the WebGL
      context under memory pressure and hands it back later; three.js rebuilds
      its own GL resources, but nothing told the GAME, so a hundred survivors
@@ -861,7 +863,7 @@ document.body.appendChild(b);}}catch(e){}})();
      its world lazily, so the prison game above is untouched. Must load
      BEFORE loop.js so its frame-work is included in the sort. -->
 <script src="src/systems/fx.js?v=sharkmode1"></script>
-<script src="src/systems/debris.js?v=debris1"></script>
+<script src="src/systems/debris.js?v=w09290242x"></script>
 <!-- REAL LIGHTNING. Registers a `lightning` row + FX composer on the impact
      bus, so a cloud-to-ground strike draws a forked channel with return
      strokes, ground flashover, steam and a burn scar instead of falling
@@ -1021,7 +1023,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/facades/brickhouse.js?v=fk3"></script>
 <!-- 4d-2. ARCHIPELAGO — worldmap registry + 3 islands + 4 biomes (worldmap.js
      MUST precede every island/biome; world.js runs them via CBZ.cityWorldGeo) -->
-<script src="src/city/worldmap.js?v=nodash1"></script>
+<script src="src/city/worldmap.js?v=w09290242x"></script>
 <!-- Shared signed shoreline/depth/current oracle. Loaded immediately after
      the landmass registry so rendering, swimmers, boats and aquatic wildlife
      all consult the same coast instead of inventing separate radius tests. -->
@@ -1136,7 +1138,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- CBZ.moves POSTURE: the one sit / lie / stand / kneel / crouch / top-bunk
      climb sequencer for every game (propuse's verbs and the cell bunks call it).
      Right after propuse.js, whose CBZ.propArcActive / propLiePlace it backs. -->
-<script src="src/entities/moves_posture.js?v=posture1"></script>
+<script src="src/entities/moves_posture.js?v=w09290242x"></script>
 <script src="src/entities/dutykit.js?v=me18753"></script>
 <!-- THE CITY'S LAW over CBZ.brain: cop perception/hearing, the authority
      ladder (warn/order/cuff), witness reports -> wanted, and the "city-law"
@@ -1172,13 +1174,13 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- city/carseats.js: the ONE seat model (layouts per body, doors, the
      per-car occupancy map). Before playercars.js (dressCabin upholsters its
      seats) and vehicles.js / boarding.js / passengerseat.js (all read it). -->
-<script src="src/city/carseats.js?v=cars1"></script>
+<script src="src/city/carseats.js?v=w09290242x"></script>
 <script src="src/city/cardyn.js?v=cars1"></script>
 <!-- city/carlod.js: the far-car LOD (one simplified twin per shared car
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
-<script src="src/city/carlod.js?v=lod1"></script>
-<script src="src/city/carinstances.js?v=cars2"></script>
+<script src="src/city/carlod.js?v=w09290242x"></script>
+<script src="src/city/carinstances.js?v=w09290242x"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
      spec generator derives ~40 numbers from what already exists, taking the
      eye point from geometry the artists already placed (the modelled captain's
@@ -1890,7 +1892,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- 4b. game packages: engine registry first, then each packaged venue game
      (after every city system they facade: interactions, worldmap, economy) -->
-<script src="src/core/packages.js?v=w09290219"></script>
+<script src="src/core/packages.js?v=w09290242x"></script>
 <!-- games/warband.js DELETED 2026-07-29. OWNER: "the whole war band code — it
      was a dumb idea, but it's really what this whole game's point is: get
      enough people recruited, or get enough money, or enough guns, or somehow
@@ -1962,12 +1964,12 @@ document.body.appendChild(b);}}catch(e){}})();
        - detail_kit.js FIRST; the other four only register passes into it.
        - street_furniture.js before building_dress.js — it owns the shared sign
          atlas texture the house-number plates reuse. -->
-<script src="src/core/farcull.js?v=fc2z"></script>
+<script src="src/core/farcull.js?v=w09290242x"></script>
 <!-- whole-building frustum hide before every draw (exact: view frustum + sun shadow frustum); also owns CBZ.subtreeSphere, which city/cctv.js's feed scope reuses -->
-<script src="src/core/viewscope.js?v=vs1"></script>
+<script src="src/core/viewscope.js?v=w09290242x"></script>
 <script src="src/core/staticfreeze.js?v=sf1"></script>
 <script src="src/systems/settings.js?v=nodash1"></script>
-<script src="src/core/batch.js?v=flick1"></script>
+<script src="src/core/batch.js?v=w09290242x"></script>
 <!-- Render-realism layer: light-writer arbiter, world PBR promotion, env reach,
      exposure, contact AO. MUST load after core/quality.js (reads
      CBZ.onQualityChange) AND after core/batch.js — it wraps CBZ.batchStaticUnder

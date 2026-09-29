@@ -76,7 +76,12 @@
     // its JAIL map is chosen, the disaster island when ISLAND is (the match
     // reset re-applies this per the picker; CBZ.gungameWorlds is the truth).
     const ggw = g.mode === "gungame" && CBZ.gungameWorlds ? CBZ.gungameWorlds() : null;
-    if (CBZ.prisonRoot) CBZ.prisonRoot.visible = g.mode === "escape" || !!(ggw && ggw.jail);
+    if (CBZ.prisonRoot) {
+      CBZ.prisonRoot.visible = g.mode === "escape" || !!(ggw && ggw.jail);
+      // batched on first show (core/batch.js); before the page's load event
+      // the load pass does it, so only a later switch needs the nudge
+      if (CBZ.prisonRoot.visible && CBZ.ensurePrisonBatched && document.readyState === "complete") CBZ.ensurePrisonBatched();
+    }
     if (!CBZ.islandModeOn(g.mode) && CBZ.surv && CBZ.surv.arena) CBZ.surv.arena.root.visible = !!(ggw && ggw.island);
     if (g.mode !== "city" && CBZ.city && CBZ.city.arena) CBZ.city.arena.root.visible = false;
     // leaving city cleanly cancels any in-progress WASTED/spectate state so the

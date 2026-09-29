@@ -60,7 +60,9 @@
    WHAT THIS FILE DOES NOT OWN — and the seams it consumes instead:
      • seating a body            `CBZ.npcLife.attach` / `syncAttached`
      • getting one out           `CBZ.cityUnseat` (the ONE sanctioned exit)
-     • the player's door beats   the grammar of `city/aircraft_doors.js`
+     • a body through a car door  `CBZ.moves.board` / `.alight` (entities/
+                                 moves_posture.js): this file gives it the
+                                 car (carSpec), the leaf and the hands
      • a room inside a vehicle   `CBZ.vehicleHold`
      • money on the ground       `CBZ.cashBags`
      • fear                      `CBZ.cityScare` — a terrified companion
@@ -442,7 +444,7 @@
     // rig-disposal traversals treat them like the transient props they are.
     g.userData.transient = true;
     g.userData._cbzDoorLeaf = seat.id;
-    g.userData.handleMesh = handle;                 // where a hand closes on this leaf (carHands)
+    g.userData.handleMesh = handle;                 // where a hand closes on this leaf (carHand)
     skin.userData._cbzDoorLeaf = seat.id;
     pane.userData._cbzDoorLeaf = seat.id;
     handle.userData._cbzDoorLeaf = seat.id;
@@ -535,6 +537,9 @@
   function endArc(a, ok) {
     const i = arcs.indexOf(a); if (i >= 0) arcs.splice(i, 1);
     const ped = a.ped;
+    if (!ok && ped && CBZ.moves && CBZ.moves.carBeat && CBZ.moves.carBeat(ped) && CBZ.moves.carAbort) {
+      try { CBZ.moves.carAbort(ped); } catch (e) {}
+    }
     if (ped) {
       ped._cbzArc = null;
       ped._boardRun = false;
@@ -598,6 +603,20 @@
     return o;
   }
 
+  function startCarBeats(a) {
+    const ped = a.ped, veh = a.veh, seat = a.seat;
+    if (!seat || !seat.hinge || !CBZ.moves || !CBZ.moves.board) return false;
+    const V = carSpec(veh, seat, ped, { run: a.run });
+    if (!V) return false;
+    a.mvDone = 0;
+    const ok = CBZ.moves.board(ped, V, {
+      onDone: function () { a.mvDone = 1; }, onAbort: function () { a.mvDone = -1; },
+    });
+    if (!ok) return false;
+    a.phase = "mv"; a.t = 0;
+    return true;
+  }
+
   function sit(a) {
     const ped = a.ped, veh = a.veh, seat = a.seat;
     const NL = CBZ.npcLife;
@@ -608,7 +627,20 @@
     };
     if (seat.cushionH != null) anchor.cushionH = seat.cushionH;
     if (seat.floorBelow != null) anchor.floorBelow = seat.floorBelow;
-    const parent = (seat.kind === "hold" && seat.hold && seat.hold.group) || (veh.group || veh);
+    /* A CAR SEAT IS SAT LIKE THE PLAYER SITS IT. This anchor used to put the
+       root ON the cushion top and then hand the seat solve the cushion height
+       AGAIN (unscaled, in a group scaled to ~0.6), so every companion sat a
+       cushion's height above his cushion with his crown in the headliner.
+       The player's seat (vehicles.js seatDriver) roots on the cabin FLOOR,
+       in the car's visual frame, with the cushion divided by the fit — and
+       the door beats (carSpec) land every body in exactly that pose. */
+    const SF = (carSeatKind(seat) && seat.hinge && CBZ.carSeatFit) ? CBZ.carSeatFit(ped.char, veh, seat.id) : null;
+    if (SF) {
+      anchor.y = SF.floorY;
+      anchor.cushionH = Math.max(0.05, seat.y - SF.floorY) / SF.fit;
+      anchor.floorBelow = 0;
+    }
+    const parent = (seat.kind === "hold" && seat.hold && seat.hold.group) || (SF && frameOf(veh)) || (veh.group || veh);
     ped._seatHold = true;
     let ok = false;
     try { ok = !!NL.attach(ped, parent, anchor); } catch (e) { ok = false; }
@@ -620,7 +652,14 @@
        honest version of the same thing: the ratio of the cabin's own
        cushion-to-roof clearance to a standing torso. A hold is a room with
        full standing height and gets left alone. */
-    if (seat.kind !== "hold" && seat.kind !== "cabin") {
+    if (SF && ped.group) {
+      ped._cbzFit = SF.fit;
+      ped.group.scale.setScalar(SF.fit);
+      if (ped.char) {
+        ped.char.seatRef = { cushion: anchor.cushionH, floorBelow: 0, kind: seat.kind === "driver" ? "car" : "carseat",
+          _fit: SF.fit, _seat: seat.id };
+      }
+    } else if (seat.kind !== "hold" && seat.kind !== "cabin") {
       const ci = cabin(veh);
       if (ci && ped.group) {
         const clear = Math.max(0.30, ci.roofY - ci.cushionY);
@@ -765,6 +804,24 @@
           a.phase = "approach"; a.t = 0; a.appT = 0;
           ped._boardRun = false;
           ped._boardOwn = true;                    // peds.js hands the body over
+          startCarBeats(a);                        // a car door: the posture layer's beats
+        }
+        continue;
+      }
+      /* ---- a CAR door: CBZ.moves.board / .alight own the body (walk to the
+         handle, pull, step in, sit — or out and clear) and call back when
+         the body is in the seat or on the kerb. */
+      if (a.phase === "mv") {
+        if (!a.mvDone) { if (a.t > 12) endArc(a, false); continue; }
+        if (a.mvDone < 0) { endArc(a, false); continue; }
+        if (a.dir === "in") {
+          if (!sit(a)) { endArc(a, false); continue; }
+          a.phase = "close"; a.t = 0;
+        } else {
+          ped._boardOwn = false;
+          ped.state = "walk";
+          if (ped.target && ped.target.set) ped.target.set(ped.pos.x, 0, ped.pos.z);
+          endArc(a, true);
         }
         continue;
       }
@@ -797,6 +854,18 @@
       // ---- IN/OUT: the door stands open, and you can see in ------------------
       if (a.phase === "open") {
         if (a.leaf) poseLeaf(a.leaf, seat, Math.min(1, 0.35 + a.t / 0.4));
+        if (a.dir === "out" && !a.unseated && seat.hinge && CBZ.moves && CBZ.moves.alight) {
+          a.unseated = true;
+          standUp(a);
+          ped._boardOwn = true;
+          const V = carSpec(veh, seat, ped, { alight: true });
+          a.mvDone = 0;
+          if (V && CBZ.moves.alight(ped, V, {
+            onDone: function () { a.mvDone = 1; }, onAbort: function () { a.mvDone = -1; },
+          })) { a.phase = "mv"; a.t = 0; continue; }
+          a.phase = "step"; a.t = 0; a.u = 0;
+          continue;
+        }
         if (a.dir === "out" && !a.unseated) {
           if (a.t >= 0.34) {
             a.unseated = true;
@@ -1117,17 +1186,86 @@
   //  vehicles.js still commits, synchronously, at the handover.
   // ============================================================
   let pArc = null;
+  /* THE BODY GOES THROUGH THE DOOR ON THE ONE POSTURE LAYER.
+     Owner, 2026-09-29: "fix getting into cars" — "the human animation of it
+     is bad." What ran here was a GLIDE (4.6 m/s, legs cycling over a lerp)
+     to a point off the flank, half a second sliding upright into the
+     aperture, and then vehicles.js popping the rig into the seat folded and
+     shrunk to its cabin fit in one frame. Getting out was the same pop
+     backwards. The beats now live where every other sit lives,
+     entities/moves_posture.js CBZ.moves.board / .alight: walk to the
+     handle, pull, step round the door, inboard leg in over the sill, duck,
+     hips down onto the cushion, outer leg in — and the reverse. This file
+     hands it the car (carSpec: the frame, the door, the seat, the fit the
+     seat will hold) and does what only it knows: the door leaf and the
+     hands on the car. Same beats for the player, a companion, a captive, a
+     driver being dragged out. */
+  const _cm = new THREE.Matrix4();
+  function carSpec(veh, seat, actor, opts) {
+    opts = opts || {};
+    const MV = CBZ.moves;
+    if (!seat || !seat.hinge || !MV || !MV.board || !actor) return null;
+    const f = frameOf(veh), ci = cabin(veh);
+    if (!f || !ci) return null;
+    const P = CBZ.player;
+    const ch = actor === P ? CBZ.playerChar : actor.char;
+    if (!ch) return null;
+    const SF = CBZ.carSeatFit ? CBZ.carSeatFit(ch, veh, seat.id) : null;
+    const floorY = SF ? SF.floorY : ci.floorY;
+    const fit = SF ? SF.fit : Math.max(0.5, Math.min(1, Math.max(0.30, ci.roofY - ci.cushionY) / 0.95));
+    const cushionY = seat.y;
+    const s = seat.side < 0 ? -1 : 1, H = seat.hinge;
+    const halfW = Math.abs(seat.doorX), len = H.len, z1 = H.z, z0 = z1 - len;
+    const aZ = Math.max(z0 + 0.22, Math.min(z1 - 0.30, seat.z + 0.05));
+    // the open leaf's middle (poseLeaf swings the free edge out ~1 rad)
+    const lmx = s * (halfW + 0.43 * len), lmz = z1 - 0.26 * len;
+    const C = opts.victim ? { x: s * (halfW + 1.0), z: z0 - 0.15 } : { x: s * (halfW + 0.62), z: z0 - 0.38 };
+    // THE SEAT THE HOLDER WILL HOLD: the player's is vehicles.js seatDriver's
+    // own record (same fields, so it keeps ours); an NPC's is sit()'s below.
+    const kind = (actor === P || seat.kind === "driver") ? "car" : "carseat";
+    const ref = { cushion: Math.max(0.05, cushionY - floorY) / fit, floorBelow: 0, kind: kind, _fit: fit, _seat: seat.id };
+    const V = {
+      side: s,
+      toWorld: function (lx, ly, lz, out) {
+        f.updateWorldMatrix(true, false);
+        _v.set(lx, ly, lz).applyMatrix4(f.matrixWorld);
+        out.x = _v.x; out.y = _v.y; out.z = _v.z;
+        return out;
+      },
+      yaw: function () { return yawOf(veh); },
+      H: { x: s * (halfW + 0.46), z: z0 - 0.02 },
+      A: { x: s * (halfW + 0.26), z: aZ },
+      S: { x: seat.x, y: floorY, z: seat.z },
+      C: C,
+      yawH: -s * (Math.PI / 2 - 0.30),       // square to the car, a touch toward the handle
+      yawA: -s * Math.PI / 4,                // forward and in: the inboard leg leads
+      yawS: seat.yaw || 0,
+      yawOut: s * 0.95,
+      yawShut: Math.atan2(lmx - C.x, lmz - C.z),
+      doorX: s * halfW, sillY: floorY + 0.06,
+      fit: fit, ref: ref,
+      run: !!opts.run, fast: !!opts.fast, victim: !!opts.victim,
+      jack: opts.jack || null, clear: opts.clear || null,
+      groundY: null,
+      beat: null,
+    };
+    if (opts.alight) {
+      const w = V.toWorld(C.x, 0, C.z, {});
+      V.groundY = CBZ.floorAt ? (+CBZ.floorAt(w.x, w.z) || 0) : ((veh.group && veh.group.position.y) || 0);
+    }
+    V.beat = doorBeat(actor, veh, seat, V);
+    return V;
+  }
+
   /* HANDS ON THE CAR (systems/verbs_pickup.js CBZ.verbs.touch — the plant
      solver every hand on the world goes through):
-       walk/open  the hand CLOSES ON THE DOOR HANDLE (the pull bar playercars.js
-                  lofts onto the skin; the fallback leaf's own handle box) and
-                  rides it while the leaf swings open;
-       step       the palm goes on the ROOF RAIL over the opening (the top of
-                  the door aperture, seat.hinge.y1) while the body ducks in;
-       close      getting out: the palm pushes the open leaf shut, flat on its
-                  outer skin by the free edge.
-     All read off the car's own door data in the car's frame, live every
-     frame (the leaf is swinging). */
+       handle  the hand closes on the outside door handle (the pull bar
+               playercars.js lofts onto the skin; the fallback leaf's own
+               handle box) and rides it while the leaf swings
+       inner   seated: the hand on the door card's pull, inside the leaf
+       frame   the palm on the ROOF RAIL over the opening while the body ducks
+       shut    the palm flat on the leaf by its free edge, pushing it to
+     All read off the car's own door data, live every frame (the leaf moves). */
   const _chP = new THREE.Vector3(), _chN = new THREE.Vector3(), _chA = new THREE.Vector3();
   const _chM = new THREE.Matrix4();
   // the door leaf's frame -> world (a shut real door is detached from the car, so compose it)
@@ -1145,14 +1283,20 @@
     leaf.updateWorldMatrix(true, false);
     return { m: _chM.copy(leaf.matrixWorld), door: null, g: leaf };
   }
-  function carHands(a, P) {
+  function carHand(actor, car, seat, leaf, what) {
     const V = CBZ.verbs;
-    if (!V || !V.touch || !a || !a.seat || !P) return;
-    const car = a.car, seat = a.seat, side = seat.side < 0 ? -1 : 1, H = seat.hinge;
-    if (a.phase === "walk" || a.phase === "open") {
-      const L = leafMatrix(car, a.leaf);
+    if (!V || !V.touch || !actor || !seat) return;
+    const side = seat.side < 0 ? -1 : 1, H = seat.hinge;
+    if (what === "handle" || what === "inner") {
+      const L = leafMatrix(car, leaf);
       if (!L) return;
-      if (L.door && L.door.handle) {
+      const len = (L.door && L.door.len) || (H && H.len) || 1;
+      const belt = (L.door && L.door.belt) || (H && H.belt) || 0.9;
+      if (what === "inner") {
+        // the pull on the door card, inboard of the skin, forward of the free edge
+        _chP.set(-side * 0.07, belt - 0.10, -len * 0.62).applyMatrix4(L.m);
+        _chN.set(-side, 0, 0).transformDirection(L.m);
+      } else if (L.door && L.door.handle) {
         const h = L.door.handle, t = h.tilt || 0;
         _chP.set(h.x, h.y, h.z).applyMatrix4(L.m);
         _chN.set(side * Math.cos(t), side * Math.sin(t), 0).transformDirection(L.m);
@@ -1163,119 +1307,164 @@
         _chN.set(side, 0, 0).transformDirection(L.m);
       } else return;
       _chA.set(0, 0, 1).transformDirection(L.m);
-      V.touch(P, { point: _chP, normal: _chN, axis: _chA, kind: "handle", sustain: true, key: "car-handle" });
+      V.touch(actor, { point: _chP, normal: _chN, axis: _chA, kind: "handle", sustain: true, key: "car-handle", inCar: true, step: false });
       return;
     }
-    if (a.phase === "step" && H) {
+    if (what === "frame" && H) {
       // the roof rail over the aperture, a little inboard of the flank, behind the hinge
       const w = worldOf(car, H.x - side * 0.10, (H.y1 || 1.2) + 0.02, H.z - (H.len || 1) * 0.55, _chP);
       if (!w) return;
       const f = frameOf(car);
       _chN.set(0, 1, 0);
       _chA.set(-side, 0, 0).transformDirection(f.matrixWorld);   // fingers over the roof
-      V.touch(P, { point: _chP, normal: _chN, along: _chA, kind: "palm", sustain: true, key: "car-frame" });
+      V.touch(actor, { point: _chP, normal: _chN, along: _chA, kind: "palm", sustain: true, key: "car-frame", inCar: true, step: false });
       return;
     }
-    if (a.phase === "close" && a.t < 0.2) {
-      const L = leafMatrix(car, a.leaf);
+    if (what === "shut") {
+      const L = leafMatrix(car, leaf);
       if (!L) return;
       const len = (L.door && L.door.len) || (H && H.len) || 1;
       const belt = (L.door && L.door.belt) || (H && H.belt) || 0.9;
-      // the face of the leaf the player is on: the outer skin, or (stood in
+      // the face of the leaf the body is on: the outer skin, or (stood in
       // the aperture behind the open door) the door card inside it
+      const ap = actor === CBZ.player ? CBZ.player.pos : actor.pos;
       _chP.set(side * 0.03, belt - 0.06, -len * 0.75).applyMatrix4(L.m);
       _chN.set(side, 0, 0).transformDirection(L.m);
-      if ((P.pos.x - _chP.x) * _chN.x + (P.pos.z - _chP.z) * _chN.z < 0) {
+      if (ap && (ap.x - _chP.x) * _chN.x + (ap.z - _chP.z) * _chN.z < 0) {
         _chP.set(-side * 0.08, belt - 0.06, -len * 0.75).applyMatrix4(L.m);
         _chN.negate();
       }
-      V.touch(P, { point: _chP, normal: _chN, kind: "palm", sustain: true, key: "car-shut" });
+      V.touch(actor, { point: _chP, normal: _chN, kind: "palm", sustain: true, key: "car-shut", inCar: true, step: false });
     }
   }
-  function playerGuide(P, tx, tz, dt, speed) {
-    const dx = tx - P.pos.x, dz = tz - P.pos.z;
-    const d = Math.hypot(dx, dz);
-    if (d < 0.24) return true;
-    const step = Math.min(d, (speed || 4.4) * dt);
-    P.pos.x += (dx / d) * step;
-    P.pos.z += (dz / d) * step;
-    const ch = CBZ.playerChar;
-    if (ch && ch.group) {
-      ch.group.position.x = P.pos.x;
-      ch.group.position.z = P.pos.z;
-      ch.group.rotation.y = Math.atan2(dx, dz);
-      if (CBZ.animChar) { try { CBZ.animChar(ch, step / Math.max(dt, 1e-4), dt); } catch (e) {} }
-    }
-    return false;
+  /* THE DOOR FOLLOWS THE BODY. One callback per boarding body, called by the
+     posture beats every frame with (beat, u): the leaf opens as the hand
+     pulls, stands open while the body goes through, and shuts behind it. */
+  function doorBeat(actor, veh, seat, V) {
+    const leaf = leafFor(veh, seat);
+    let t = 0;
+    return function (name, u) {
+      let hand = null;
+      if (name === "walk") { t = 0; if (u < 0.9) hand = "handle"; }
+      else if (name === "pull") { t = 0.55 * u; hand = "handle"; }
+      else if (name === "wait") { t = Math.max(t, 0.55 + 0.45 * u); if (u < 0.6) hand = "handle"; }
+      else if (name === "swing") { t = Math.max(t, 0.55 + 0.45 * u); hand = u < 0.35 ? "handle" : "frame"; }
+      else if (name === "in") { t = 1; if (u < 0.72) hand = "frame"; }
+      else if (name === "open") { t = V.victim ? 1 : Math.max(t, u); if (!V.victim) hand = "inner"; }
+      else if (name === "out") { t = 1; if (u > 0.12 && u < 0.86) hand = "frame"; }
+      else if (name === "step") { t = 1; }
+      else if (name === "shut") {
+        t = 1 - u; if (u < 0.7) hand = "shut";
+        if (u >= 1 && !V._shutSfx && actor === CBZ.player && CBZ.sfx) { V._shutSfx = true; try { CBZ.sfx("door_close"); } catch (e) {} }
+      }
+      if (leaf) poseLeaf(leaf, seat, t);
+      if (hand) { try { carHand(actor, veh, seat, leaf, hand); } catch (e) {} }
+    };
   }
-  function endPlayerArc(commit) {
-    if (!pArc) return;
+
+  /* SKIP: moving, or pressing the verb again. A key already held when the
+     beat started (a thumb still on the stick as it tapped the car) has to
+     be let go first, so walking up to a car and tapping it never skips. */
+  function moveKeysDown() {
+    const k = CBZ.keys;
+    return !!(k && (k.w || k.a || k.s || k.d));
+  }
+  function endPlayerArc() {
     const a = pArc; pArc = null;
-    const P = CBZ.player;
-    if (P && P._doorArcOwner === "car") { P._doorArc = false; P._doorArcOwner = null; }
-    if (a.leaf) poseLeaf(a.leaf, a.seat, 0);
-    if (commit && a.commit) { try { a.commit(); } catch (e) {} }
+    if (a && a.leaf) poseLeaf(a.leaf, a.seat, 0);
   }
-  function beginPlayerArc(car, commit, seatId) {
+  function beginPlayerArc(car, commit, seatId, jack) {
     if (!carArcOn() || pArc) return false;
     if (CBZ.aircraftDoorArc && CBZ.aircraftDoorArc.active) return false;
-    const P = CBZ.player;
-    if (!P || P.dead || P.driving || P._aircraft) return false;
+    const P = CBZ.player, MV = CBZ.moves;
+    if (!P || P.dead || P.driving || P._aircraft || !MV || !MV.board) return false;
     if (P._doorArc) return false;                 // propuse / aircraft owns the body
     const seat = seatById(car, seatId || "driver");
     if (!seat || !seat.hinge) return false;
-    pArc = { car: car, seat: seat, leaf: leafFor(car, seat), phase: "walk", t: 0, walkT: 0, commit: commit };
-    P._doorArc = true; P._doorArcOwner = "car";
+    const doorId = seat.doorId || seat.id;
+    const V = carSpec(car, seat, P, {
+      jack: jack ? function () { return CBZ.cityJackNow && CBZ.cityJackNow(car); } : null,
+      clear: jack ? function () { return !doorBusy(car, doorId); } : null,
+    });
+    if (!V) return false;
+    const a = { car: car, seat: seat, leaf: leafFor(car, seat), phase: "seq", t: 0, commit: commit, armed: !moveKeysDown() };
+    pArc = a;
+    const ok = MV.board(P, V, {
+      onDone: function () {
+        if (pArc === a) { a.phase = "close"; a.t = 0; }
+        const c = a.commit; a.commit = null;
+        if (c) { try { c(); } catch (e) {} }
+        if (CBZ.sfx) { try { CBZ.sfx("door_close"); } catch (e) {} }
+      },
+      onAbort: function () {
+        if (pArc === a) endPlayerArc();
+        // never swallow the input: he asked to get in, so let him in
+        const c = a.commit; a.commit = null;
+        if (c && !P.dead && !P.driving && inCity()) { try { c(); } catch (e) {} }
+      },
+    });
+    if (!ok) { if (pArc === a) pArc = null; return false; }
     if (CBZ.sfx) { try { CBZ.sfx("door_open"); } catch (e) {} }
     return true;
   }
   CBZ.onUpdate(33.45, function (dt) {
     if (!pArc) return;
     const a = pArc, P = CBZ.player, car = a.car;
-    if (!inCity() || !P || P.dead || !car || car.dead || !(car.group && car.group.parent)) {
-      // never swallow the input: the player asked to get in, so let him in
-      endPlayerArc(true);
+    if (a.phase === "seq" || a.phase === "out") {
+      const MV = CBZ.moves;
+      if (!P || !MV || !MV.carBeat || !MV.carBeat(P)) { if (a.phase === "out" || !a.commit) pArc = null; return; }
+      const k = moveKeysDown();
+      if (!k) a.armed = true;
+      else if (a.armed) MV.skip(P, 4);
       return;
     }
+    if (!inCity() || !P || P.dead || !car || car.dead || !(car.group && car.group.parent)) { endPlayerArc(); return; }
     a.t += dt;
-    if (a.phase === "walk") {
-      a.walkT += dt;
-      const w = worldOf(car, a.seat.outX, 0, a.seat.outZ, _v);
-      const arrived = playerGuide(P, w.x, w.z, dt, 4.6);
-      const d = Math.hypot(w.x - P.pos.x, w.z - P.pos.z);
-      if (a.leaf) poseLeaf(a.leaf, a.seat, Math.max(0, Math.min(1, (2.6 - d) / 1.9)));
-      if (d < 1.6) { try { carHands(a, P); } catch (e) {} }
-      if (arrived || a.walkT > 2.4) { a.phase = "open"; a.t = 0; }
-      return;
-    }
-    if (a.phase === "open") {
-      if (a.leaf) poseLeaf(a.leaf, a.seat, 1);
-      try { carHands(a, P); } catch (e) {}
-      if (a.t >= 0.36) { a.phase = "step"; a.t = 0; a.from = { x: P.pos.x, z: P.pos.z }; }
-      return;
-    }
-    if (a.phase === "step") {
-      const u = Math.min(1, a.t / 0.5);
-      const L = stepLocal(a.seat, u * 0.55, _v2);       // to the aperture, not the seat:
-      const w = worldOf(car, L.x, 0, L.z, _v);          // vehicles.js owns the seat itself
-      P.pos.x = w.x; P.pos.z = w.z;
-      const ch = CBZ.playerChar;
-      if (ch && ch.group) { ch.group.position.x = P.pos.x; ch.group.position.z = P.pos.z; }
-      try { carHands(a, P); } catch (e) {}
-      if (u >= 1) {
-        a.phase = "close"; a.t = 0;
-        if (a.commit) { try { a.commit(); } catch (e) {} a.commit = null; }
-        if (CBZ.sfx) { try { CBZ.sfx("door_close"); } catch (e) {} }
-      }
-      return;
-    }
     if (a.phase === "close") {
+      // seated: reach out and pull it shut
       if (a.leaf) poseLeaf(a.leaf, a.seat, Math.max(0, 1 - a.t / 0.4));
-      if (!P.driving) { try { carHands(a, P); } catch (e) {} }
-      if (a.t >= 0.4) endPlayerArc(false);
+      if (a.t >= 0 && a.t < 0.3 && P.driving && !(CBZ.carFpActive && CBZ.carFpActive())) {
+        try { carHand(P, car, a.seat, a.leaf, "inner"); } catch (e) {}
+      }
+      if (a.t >= 0.4) endPlayerArc();
       return;
     }
+    endPlayerArc();
   });
+
+  /* WHO IS GOING THROUGH A DOOR RIGHT NOW. A body alighting (a carjack
+     victim, a companion) owns its aperture until it has stepped clear of it;
+     a jacker waits for that instead of sitting down on him. */
+  const alighting = [];
+  function doorBusy(car, doorId) {
+    const MV = CBZ.moves;
+    for (let i = alighting.length - 1; i >= 0; i--) {
+      const r = alighting[i];
+      const nm = MV && MV.carBeat ? MV.carBeat(r.ped) : null;
+      if (!nm || r.ped.dead) { alighting.splice(i, 1); continue; }
+      if (r.car === car && r.doorId === doorId && (nm === "aopen" || nm === "aout")) return true;
+    }
+    return false;
+  }
+  /* ANY SEATED BODY OUT OF ANY CAR SEAT, on its legs (vehicles.js calls this
+     for everybody a jack or a bail puts out of a car). Only for a car the
+     camera is near: a far one has nobody watching the door. */
+  CBZ.boardingAlight = function (p, car, slotId, opts) {
+    opts = opts || {};
+    if (!carArcOn() || !inCity() || !p || p.dead || !car || car.dead || !CBZ.moves || !CBZ.moves.alight) return false;
+    const cam = CBZ.camera && CBZ.camera.position;
+    if (cam) { const dx = car.pos.x - cam.x, dz = car.pos.z - cam.z; if (dx * dx + dz * dz > 70 * 70) return false; }
+    const seat = seatById(car, slotId || "driver");
+    if (!seat || !seat.hinge) return false;
+    const V = carSpec(car, seat, p, { fast: opts.fast !== false, victim: true, alight: true });
+    if (!V) return false;
+    if (opts.exit && opts.exit.y != null) V.groundY = opts.exit.y;
+    const rec = { ped: p, car: car, doorId: seat.doorId || seat.id };
+    const done = function () { const i = alighting.indexOf(rec); if (i >= 0) alighting.splice(i, 1); };
+    if (!CBZ.moves.alight(p, V, { onDone: done, onAbort: done })) return false;
+    alighting.push(rec);
+    return true;
+  };
 
   /* WHICH SEAT A PRESS MEANS. The door you are nearest decides it (city/
      carseats.js nearestDoor: the first free seat that door serves).
@@ -1333,31 +1522,51 @@
     if (!car || car.dead || !CBZ.cityEnterVehicle) return false;
     return CBZ.cityEnterVehicle(car) !== false;
   };
+  /* WHICH CAR. The door you are standing at, not the car whose CENTRE is
+     nearest: two cars parked nose to tail put the next car's middle closer
+     to you than the door you walked up to, and the old nearest-centre pick
+     then found no door in range and showed nothing at all (or pinned the
+     verb on the wrong car). Every stopped car within reach offers its own
+     door; the nearest DOOR wins. */
+  const _dwT = { x: 0, y: 0, z: 0 };
   CBZ.onUpdate(33.3, function () {
     doorCar = null;
     if (!carArcOn() || !inCity() || !CBZ.prisonPrompt || pArc) return;
     const P = CBZ.player;
     if (!P || P.dead || P.driving || P._aircraft || P._doorArc) return;
-    const car = CBZ.cityNearestCar ? CBZ.cityNearestCar(P.pos.x, P.pos.z, 4.8) : null;
-    if (!car || car.dead || car._cineLocked || Math.abs(car.v || 0) > 2.4) return;
-    const pick = choosePlayerSeat(car, null);
-    if (!pick || !pick.door) return;
-    const S = CBZ.carSeats;
-    const w = S.doorWorld(car, pick.door, _dw);
-    const dx = w.x - P.pos.x, dz = w.z - P.pos.z;
-    const d2 = dx * dx + dz * dz;
-    if (d2 > 3.2 * 3.2) return;
+    const S = CBZ.carSeats, list = CBZ.cityCars;
+    if (!S || !list) return;
+    let car = null, pick = null, d2 = 3.2 * 3.2;
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i];
+      if (!c || c.player || c.dead || c._cineLocked || !c.pos) continue;
+      const cx = c.pos.x - P.pos.x, cz = c.pos.z - P.pos.z;
+      if (cx * cx + cz * cz > 49 || Math.abs(c.v || 0) > 2.4) continue;
+      const pk = choosePlayerSeat(c, null);
+      if (!pk || !pk.door) continue;
+      S.doorWorld(c, pk.door, _dwT);
+      const dx = _dwT.x - P.pos.x, dz = _dwT.z - P.pos.z;
+      const dd = dx * dx + dz * dz;
+      if (dd < d2) { d2 = dd; car = c; pick = pk; _dw.x = _dwT.x; _dw.y = _dwT.y; _dw.z = _dwT.z; }
+    }
+    if (!car) return;
     let verb, sub = "";
     if (pick.mode === "drive") {
-      const o = S.occupant(car, "driver");
-      verb = (o && o.kind === "npc") || (CBZ.carOccupied && CBZ.carOccupied(car)) ? "Drag out" : "Drive";
+      verb = jackable(car) ? "Drag out" : "Drive";
     } else {
       verb = pick.mode === "ride" ? "Ride" : "Sit";
       sub = seatWords(pick.seat);
     }
     doorCar = car;
-    CBZ.prisonPrompt("car-door", "@cityDoorEnter", verb, { at: w, sub: sub, d2: d2, city: true });
+    CBZ.prisonPrompt("car-door", "@cityDoorEnter", verb, { at: _dw, sub: sub, d2: d2, city: true });
   });
+  // somebody is at the wheel (or aboard) who has to be got out first
+  function jackable(car) {
+    const S = CBZ.carSeats;
+    const o = S ? S.occupant(car, "driver") : null;
+    return !!((o && o.kind === "npc") || (car.npcDriver && !car.npcDriver.dead) ||
+      (CBZ.carOccupied && CBZ.carOccupied(car)));
+  }
   // the prompt census (systems/interactions.js prisonPromptAudit) counts this site
   (CBZ._prisonPromptSites || (CBZ._prisonPromptSites = [])).push(
     { id: "car-door", act: "@cityDoorEnter", was: "no prompt at all: E on a car always took the driver's seat" }
@@ -1396,7 +1605,8 @@
          press, which is every call that does not pass the flag. */
       if (opts && opts.instant) return orig.apply(this, arguments);
       if (!carArcOn() || !car || car.player) return orig.apply(this, arguments);
-      if (pArc) return true;                    // arc already playing: swallow the re-press
+      // pressed again while the beat plays: play the rest of it fast
+      if (pArc) { if (CBZ.moves && CBZ.moves.skip) CBZ.moves.skip(CBZ.player, 4); return true; }
       const self = this, args = arguments;
       const pick = choosePlayerSeat(car, opts);
       const mode = pick ? pick.mode : "drive";
@@ -1410,7 +1620,7 @@
           return r;
         };
       } else commit = function () { return orig.apply(self, args); };
-      const started = beginPlayerArc(car, commit, seatId);
+      const started = beginPlayerArc(car, commit, seatId, mode === "drive" && jackable(car));
       if (!started) return commit();
       // THE CREW COMES WITH YOU — to their OWN doors. A car you sat in the
       // passenger side of gets a driver from the crew when there is somewhere
@@ -1426,11 +1636,14 @@
   }
   if (!wrapEnter()) { const iv = setInterval(function () { if (wrapEnter()) clearInterval(iv); }, 0); }
 
-  /* EXIT runs the real exit FIRST and plays the door behind it. Callers of
+  /* EXIT runs the real exit FIRST and then climbs out. Callers of
      cityExitVehicle (networld.js wraps it, the pause menu calls it, death
      calls it) expect `P.driving === false` when it returns, and deferring
-     that would be a lie they cannot see. The beat is still honest: the leaf
-     is open while you climb out and shuts once you are clear. */
+     that would be a lie they cannot see. So the state is torn down at once
+     and the BODY starts in the seat it just left (CBZ.moves.alight writes
+     the seated pose the same frame): door open, outer leg out, hand on the
+     frame, stand, step clear, shut it. A car still rolling (a bail), a
+     hull, a death: no climb, the old door beat. */
   function wrapExit() {
     if (typeof CBZ.cityExitVehicle !== "function") return false;
     if (CBZ.cityExitVehicle._boardWrapped) return true;
@@ -1440,17 +1653,26 @@
       const car = P && P._vehicle;
       const mine = car && CBZ.carSeats ? CBZ.carSeats.playerSeat(car) : null;
       const npcRide = !!(car && CBZ.cityPaxNpcRide && CBZ.cityPaxNpcRide(car));
+      const spd = car ? (Number.isFinite(car.v) ? Math.abs(car.v) : Math.hypot(car.vx || 0, car.vz || 0)) : 0;
       const r = orig.apply(this, arguments);
       // YOU GOT OUT, SO THEY GET OUT — through their own doors, on their own
       // legs. Not the captive: see squadAlight's note.
       if (on() && car && !car.dead && !npcRide) { try { squadAlight(car, { freeOnly: true }); } catch (e) {} }
-      if (carArcOn() && car && !car.dead && car.group && car.group.parent) {
+      if (carArcOn() && car && !car.dead && car.group && car.group.parent && P && !P.driving) {
         const seat = seatById(car, mine ? mine.id : "driver");
         if (seat && seat.hinge) {
-          const leaf = leafFor(car, seat);
-          if (leaf) {
-            pArc = { car: car, seat: seat, leaf: leaf, phase: "close", t: -0.45, commit: null };
-            P._doorArc = false;                 // he is out and walking; only the door is busy
+          if (pArc) endPlayerArc();
+          const V = (!P.dead && spd < 1.5 && CBZ.moves && CBZ.moves.alight) ? carSpec(car, seat, P, { alight: true }) : null;
+          const a = { car: car, seat: seat, leaf: leafFor(car, seat), phase: "out", t: 0, commit: null, armed: !moveKeysDown() };
+          const clear = function () { if (pArc === a) pArc = null; };
+          if (V && CBZ.moves.alight(P, V, { onDone: clear, onAbort: function () { clear(); if (a.leaf) poseLeaf(a.leaf, seat, 0); } })) {
+            pArc = a;
+            if (CBZ.sfx) { try { CBZ.sfx("door_open"); } catch (e) {} }
+          } else if (a.leaf) {
+            // no body to climb out (a bail at speed, a death): the door just
+            // swings shut behind wherever the exit put him
+            a.phase = "close"; a.t = -0.45;
+            pArc = a;
             if (CBZ.sfx) { try { CBZ.sfx("door_close"); } catch (e) {} }
           }
         }

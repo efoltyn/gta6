@@ -60,6 +60,93 @@
 
   CBZ.markCollidersDirty = function () { colDirty = true; };
 
+  /* INCREMENTAL EDITS. The city holds ~142k colliders; a full rebuild costs
+     tens of ms, and it used to run once per EDIT whenever a query landed
+     between two edits. An aircraft crash bursts up to 50 panes, and each
+     burst spliced one pane collider out and then spawned glass debris whose
+     birth query (queryCollidersNear) rebuilt the whole grid — dozens of
+     rebuilds in one frame, a multi-second hitch. Every settled solid debris
+     piece and every carved window then cost one more rebuild on later frames.
+     These three edit the grid in place (the cells the box covers) instead.
+     They produce the grid a full rebuild would: an added box is appended to
+     the end of its buckets exactly as it is appended to the array, a removed
+     one leaves each bucket in order, and a shrink only drops the cells the
+     box no longer reaches. If the grid was already stale (someone pushed or
+     spliced without these), they fall back to the old lazy full rebuild. */
+  function cellRange(c) {
+    return [Math.floor((c.minX - COL_PAD) / COL_CELL), Math.floor((c.maxX + COL_PAD) / COL_CELL),
+            Math.floor((c.minZ - COL_PAD) / COL_CELL), Math.floor((c.maxZ + COL_PAD) / COL_CELL)];
+  }
+  function gridInsert(c) {
+    const r = cellRange(c);
+    for (let gx = r[0]; gx <= r[1]; gx++) for (let gz = r[2]; gz <= r[3]; gz++) {
+      const key = colKey(gx, gz);
+      let bucket = colBuckets.get(key);
+      if (!bucket) { bucket = []; colBuckets.set(key, bucket); }
+      bucket.push(c);
+    }
+  }
+  function bucketDrop(gx, gz, c) {
+    const key = colKey(gx, gz), bucket = colBuckets.get(key);
+    const i = bucket ? bucket.indexOf(c) : -1;
+    if (i < 0) return false;
+    bucket.splice(i, 1);
+    if (!bucket.length) colBuckets.delete(key);
+    return true;
+  }
+  // `r` = the cell range the box was indexed under (its bounds at index time)
+  function gridRemove(c, r) {
+    let ok = true;
+    for (let gx = r[0]; gx <= r[1]; gx++) for (let gz = r[2]; gz <= r[3]; gz++) if (!bucketDrop(gx, gz, c)) ok = false;
+    return ok;
+  }
+  function gridInSync() { return !colDirty && colCount === CBZ.colliders.length; }
+  // push one collider onto CBZ.colliders and index it
+  CBZ.colliderAdd = function (c) {
+    const sync = gridInSync();
+    CBZ.colliders.push(c);
+    if (sync) { gridInsert(c); colCount++; }
+    return c;
+  };
+  // splice one collider out of CBZ.colliders and unindex it. `at` is an
+  // optional known array index (a caller already walking the array).
+  CBZ.colliderRemove = function (c, at) {
+    const cols = CBZ.colliders;
+    const i = at != null && cols[at] === c ? at : cols.indexOf(c);
+    if (i < 0) return false;
+    const sync = gridInSync();
+    cols.splice(i, 1);
+    if (sync) { if (gridRemove(c, cellRange(c))) colCount--; else colDirty = true; }
+    return true;
+  };
+  // PROOF for probes: is the in-place-edited grid bucket-for-bucket, in
+  // order, the grid a full rebuild makes right now? (Leaves it rebuilt.)
+  CBZ.colliderGridAudit = function () {
+    if (!gridInSync()) { rebuildColliderGrid(); return { ok: true, stale: true }; }
+    const before = new Map();
+    for (const [k, b] of colBuckets) before.set(k, b.slice());
+    rebuildColliderGrid();
+    let bad = 0;
+    if (before.size !== colBuckets.size) bad++;
+    for (const [k, b] of colBuckets) {
+      const o = before.get(k);
+      if (!o || o.length !== b.length) { bad++; continue; }
+      for (let i = 0; i < b.length; i++) if (o[i] !== b[i]) { bad++; break; }
+    }
+    return { ok: bad === 0, mismatched: bad, buckets: colBuckets.size };
+  };
+  // a collider's footprint was clipped SMALLER in place; old* = its bounds
+  // before the clip. Growth is not a shrink: that takes the full rebuild.
+  CBZ.colliderShrunk = function (c, oMinX, oMaxX, oMinZ, oMaxZ) {
+    if (!gridInSync()) return;
+    if (c.minX < oMinX || c.maxX > oMaxX || c.minZ < oMinZ || c.maxZ > oMaxZ) { colDirty = true; return; }
+    const o = cellRange({ minX: oMinX, maxX: oMaxX, minZ: oMinZ, maxZ: oMaxZ }), n = cellRange(c);
+    for (let gx = o[0]; gx <= o[1]; gx++) for (let gz = o[2]; gz <= o[3]; gz++) {
+      if (gx >= n[0] && gx <= n[1] && gz >= n[2] && gz <= n[3]) continue;
+      if (!bucketDrop(gx, gz, c)) { colDirty = true; return; }
+    }
+  };
+
   function nearbyColliders(pos) {
     if (colDirty || colCount !== CBZ.colliders.length) rebuildColliderGrid();
     return colBuckets.get(colKey(Math.floor(pos.x / COL_CELL), Math.floor(pos.z / COL_CELL))) || EMPTY_COLS;

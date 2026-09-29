@@ -623,6 +623,20 @@
     }
   });
 
+  // Only an on-screen render may refresh the sun map. The CCTV feed and the
+  // water mirror render into targets with parts of the scene hidden (cctv.js
+  // hides every arena subtree outside its lens); a refresh that happened to
+  // land inside one of those wrote a map missing those buildings' shadows,
+  // and the main view then used it until the next refresh. needsUpdate stays
+  // set, so the next on-screen render does the refresh instead.
+  (function onScreenShadowPassOnly() {
+    const sm = renderer.shadowMap, pass = sm.render;
+    sm.render = function (lights, scene, camera) {
+      if (!sm.autoUpdate && renderer.getRenderTarget() !== null) return;
+      return pass.call(this, lights, scene, camera);
+    };
+  })();
+
   addEventListener("resize", () => {
     CBZ.camera.aspect = innerWidth / innerHeight;
     CBZ.camera.updateProjectionMatrix();

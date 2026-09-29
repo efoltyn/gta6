@@ -855,9 +855,13 @@
   // local collider-top scan (aircraft.js roofTopAt, per the builders-stay-
   // self-contained convention): a falling craft detonates ON the roof it
   // lands on, never the street six storeys below it.
+  // Through the collider broadphase (the 8 m cell under the wreck holds every
+  // box whose footprint + 1 m pad covers it — the same set the old walk of all
+  // ~142k colliders found, every frame of every fall).
+  const roofCols = [];
   function trafficRoofTop(x, z) {
     let topY = 0;
-    const cols = CBZ.colliders || [];
+    const cols = CBZ.queryCollidersNear(x, z, 0, roofCols);
     for (let i = 0; i < cols.length; i++) {
       const c = cols[i];
       if (!c || c.y1 == null || c.y1 <= topY || c.y1 > 310) continue;

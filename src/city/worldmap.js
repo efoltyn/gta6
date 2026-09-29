@@ -643,9 +643,14 @@
     }
     const list = CBZ._landmassBuilders.slice().sort((a, b) => a.order - b.order);
     const boot = CBZ.bootStep;
+    // queue each builder's new programs for the GPU while the next builder
+    // runs (core/fxwarm.js). Ground slabs wait: the fog sweep below rewrites
+    // their shaders, and mode.js queues the finished world after the batch.
+    const deferSurface = function (o) { return !!(o.userData && o.userData.worldSurface); };
     for (const b of list) {
       if (boot) boot(b.bootKey);          // the loading meter's per-builder tick
       try { b.fn(city); } catch (e) { console.error("[landmass]", e); }
+      if (CBZ.shaderQueue && city.root) CBZ.shaderQueue(city.root, { skip: deferSurface });
     }
     // ---- FOG-RATE HARMONY SWEEP (owner, from the air: "city areas look
     // bright and rendered while the ground around them is grayer… the same

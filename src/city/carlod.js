@@ -73,10 +73,12 @@
        copy-on-write dent) is never touched; crashdeform itself swaps a
        twin back to its source before it dents.
 
-   BUILT OVER FRAMES, NEVER IN ONE: vehicles.js buildCar queues a style's
-   geometries (CBZ.carLodPrepare); the runner works the queue ~2 ms a frame
-   through the decimator's generator slices (~0.2 s of work per new style).
-   Until a twin lands that mesh simply draws at full detail. Only
+   BUILT OFF THE FRAME: vehicles.js buildCar queues a style's geometries
+   (CBZ.carLodPrepare); a Web Worker runs the decimator (~0.2 s of work per
+   new style) and the main thread only wraps the result. Without a Worker
+   the runner falls back to working the queue ~2 ms a frame through the
+   decimator's generator slices. Until a twin lands that mesh simply draws
+   at full detail. Only
    fleet-shared (`_shared`) geometries get twins: a per-car geometry's twin
    would outlive the car's teardown on the GPU.
 
@@ -90,15 +92,23 @@
   const EPS = 0.03;                 // m: max geometric deviation of a LOD surface
   const LOD_IN_PX = 0.75;           // EPS projects below this -> LOD
   const LOD_OUT_PX = 1.0;           // EPS projects above this -> full detail again
-  const EDGE_WEIGHT = 16;            // borders + attribute seams move <= EPS/4: a lamp strip thinner than that is < 0.25 px
-  const SEAM_NORMAL_DOT = 0.9;       // a wedge may be re-homed across a seam onto a normal within 25 deg...
-  const SEAM_COLOR_TOL = 0.06;       // ...and a vertex colour within 6% per channel (tread vs groove rubber, not rubber vs alloy)
   const MIN_SAVE = 0.1;             // a LOD that saves < 10% of the tris is not worth a buffer (and a far-tier pool)
   const DEFAULT_K = 1080 / (2 * Math.tan(Math.PI / 6));   // 1080p / 60 deg, before a camera exists
 
   /* ================================================================
-     THE DECIMATOR (pure: BufferGeometry in, BufferGeometry out)
+     THE DECIMATOR (pure: geometry-shaped data in, plain arrays out)
+
+     Self-contained ON PURPOSE: DECIMATOR is shipped to a Web Worker as its
+     own source text (see THE WORKER below), so nothing in it may reach the
+     enclosing scope. Its input is anything shaped like a BufferGeometry
+     (attributes {array,itemSize,count,normalized}, index {array}, groups,
+     drawRange) — a real one on the main thread, a structured clone in the
+     worker — and its output is plain typed arrays that toGeo() wraps.
      ================================================================ */
+  function DECIMATOR() {
+  const EDGE_WEIGHT = 16;            // borders + attribute seams move <= EPS/4: a lamp strip thinner than that is < 0.25 px
+  const SEAM_NORMAL_DOT = 0.9;       // a wedge may be re-homed across a seam onto a normal within 25 deg...
+  const SEAM_COLOR_TOL = 0.06;       // ...and a vertex colour within 6% per channel (tread vs groove rubber, not rubber vs alloy)
   function qAddPlane(Q, o, a, b, c, d, w) {
     Q[o] += w * a * a; Q[o + 1] += w * a * b; Q[o + 2] += w * a * c; Q[o + 3] += w * a * d;
     Q[o + 4] += w * b * b; Q[o + 5] += w * b * c; Q[o + 6] += w * b * d;
@@ -539,7 +549,7 @@
     const outOfWedge = new Int32Array(wedgeSrc.length).fill(-1);
     const order = [];
     const ngroups = groups ? groups.length : 1;
-    const out = new THREE.BufferGeometry();
+    const out = { attrs: [], index: null, groups: [], userData: null };
     const idx = [];
     for (let g = 0; g < ngroups; g++) {
       const start = idx.length;
@@ -551,7 +561,7 @@
           idx.push(outOfWedge[w]);
         }
       }
-      if (groups) out.addGroup(start, idx.length - start, groups[g].materialIndex);
+      if (groups) out.groups.push({ start: start, count: idx.length - start, materialIndex: groups[g].materialIndex });
     }
     const nv = order.length;
     for (let i = 0; i < names.length; i++) {
@@ -561,26 +571,43 @@
         const ai = wedgeSrc[order[j]];
         for (let k = 0; k < s; k++) dst[j * s + k] = arr[ai * s + k];
       }
-      out.setAttribute(names[i], new THREE.BufferAttribute(dst, s, src.normalized));
+      out.attrs.push({ name: names[i], array: dst, itemSize: s, normalized: !!src.normalized });
     }
-    out.setIndex(new THREE.BufferAttribute(nv > 65535 ? new Uint32Array(idx) : new Uint16Array(idx), 1));
-    if (geo.boundingSphere) out.boundingSphere = geo.boundingSphere.clone();   // same car, same cull sphere
-    else out.computeBoundingSphere();
-    if (geo.boundingBox) out.boundingBox = geo.boundingBox.clone();
+    out.index = nv > 65535 ? new Uint32Array(idx) : new Uint16Array(idx);
     let nb = 0, nl = 0, nseam = 0;
     for (let i = 0; i < nP; i++) { if (border[i]) nb++; if (locked[i]) nl++; }
     out.userData = { carLod: true, srcTris: nTri0, tris: nTri, eps: eps, dropped: dropped, collapses: collapses, nP: nP, nW: wedgeSrc.length, border: nb, locked: nl };
     return out;
   }
+  return decimateSteps;
+  }
+  const decimateSteps = DECIMATOR();
+
+  // the decimator's plain output -> a BufferGeometry that culls like its source
+  function toGeo(o, src) {
+    if (!o) return null;
+    const g = new THREE.BufferGeometry();
+    for (let i = 0; i < o.attrs.length; i++) {
+      const a = o.attrs[i];
+      g.setAttribute(a.name, new THREE.BufferAttribute(a.array, a.itemSize, a.normalized));
+    }
+    g.setIndex(new THREE.BufferAttribute(o.index, 1));
+    for (let i = 0; i < o.groups.length; i++) g.addGroup(o.groups[i].start, o.groups[i].count, o.groups[i].materialIndex);
+    if (src.boundingSphere) g.boundingSphere = src.boundingSphere.clone();   // same car, same cull sphere
+    else g.computeBoundingSphere();
+    if (src.boundingBox) g.boundingBox = src.boundingBox.clone();
+    g.userData = o.userData;
+    return g;
+  }
   function decimate(geo, eps, opt) {
     const it = decimateSteps(geo, eps, opt);
-    for (;;) { const r = it.next(); if (r.done) return r.value; }
+    for (;;) { const r = it.next(); if (r.done) return toGeo(r.value, geo); }
   }
 
   /* ================================================================
      THE CACHE: one LOD per (geometry, world scale, uv-matters). The value
      is the LOD geometry, or the source itself when simplifying does not
-     pay. Built by a time-sliced worker (BUDGET_MS a frame), never in one
+     pay. Built in a Web Worker (THE WORKER below; BUDGET_MS a frame on the main thread without one), never in one
      go: until a geometry's LOD lands, cars draw that mesh at full detail.
      ================================================================ */
   const BUDGET_MS = 2;
@@ -657,10 +684,96 @@
         do { r = job.it.next(); } while (!r.done && now() < end);
         if (!r.done) break;
         jobs.shift();
-        finish(job, r.value);
+        finish(job, toGeo(r.value, job.geo));
       } catch (e) { jobs.shift(); finish(job, null); }
     }
     workMs += now() - t0;
+  }
+
+  /* ---- THE WORKER --------------------------------------------------------
+     The queue above used to be worked ON THE MAIN THREAD, 2 ms of every
+     frame, for as long as it held anything — and a city boot queues every
+     style the fleet spawns with (~0.2 s of decimation each), so the first
+     minutes of play paid a flat 2+ ms a frame for twins nobody could see
+     yet. The decimator is pure arithmetic on typed arrays, so it runs in a
+     Web Worker built from DECIMATOR's own source: the main thread only
+     copies a geometry's arrays out (structured clone) and wraps the result
+     (toGeo). Same function, same output, off the frame — and the twins land
+     sooner, since a worker is not capped at 2 ms per frame. No Worker (node
+     checks, a sandbox that refuses blob: workers, a worker that errors) and
+     the time-sliced main-thread path above takes the queue exactly as before. */
+  // Jobs are small (~3 ms of decimation each, measured: 197 twins in 532 ms),
+  // so the worker is kept a few deep: results only come back when the main
+  // thread is between tasks, and a shallow pipe would leave it idle for a
+  // whole frame after every pair. Each dispatch structured-clones one car
+  // part's arrays (tens of KB), so a pump sends at most PER_PUMP.
+  const MAX_INFLIGHT = 8, PER_PUMP = 4;
+  let worker = null, workerDead = false, inflight = 0, jobSeq = 0, workerJobs = 0;
+  const inFlight = new Map();             // id -> job
+  function failWorker() {
+    workerDead = true;
+    if (worker) { try { worker.terminate(); } catch (e) {} worker = null; }
+    inFlight.forEach(function (job) { job.it = null; jobs.unshift(job); });   // the main thread redoes them
+    inFlight.clear(); inflight = 0;
+  }
+  function getWorker() {
+    if (worker || workerDead) return worker;
+    try {
+      if (typeof Worker === "undefined" || typeof Blob === "undefined" || typeof URL === "undefined" || !URL.createObjectURL) { workerDead = true; return null; }
+      const src = "var decimateSteps = (" + DECIMATOR.toString() + ")();\n" +
+        "onmessage = function (e) { var j = e.data, out = null;\n" +
+        "  try { var it = decimateSteps(j.geo, j.eps, j.opt), r; do { r = it.next(); } while (!r.done); out = r.value; } catch (err) { out = null; }\n" +
+        "  var tr = []; if (out) { for (var i = 0; i < out.attrs.length; i++) tr.push(out.attrs[i].array.buffer); tr.push(out.index.buffer); }\n" +
+        "  postMessage({ id: j.id, out: out }, tr); };\n";
+      const url = URL.createObjectURL(new Blob([src], { type: "text/javascript" }));
+      worker = new Worker(url);
+      URL.revokeObjectURL(url);
+      worker.onmessage = onWorkerDone;
+      worker.onerror = function (e) { if (e && e.preventDefault) e.preventDefault(); failWorker(); };
+    } catch (e) { workerDead = true; worker = null; }
+    return worker;
+  }
+  // the geometry as the decimator reads it, with arrays the clone can copy
+  // cheaply (a view into a bigger buffer would ship the whole buffer)
+  function plainGeo(geo) {
+    const attrs = {};
+    for (const k in geo.attributes) {
+      const a = geo.attributes[k];
+      if (!a || a.isInterleavedBufferAttribute || !a.array) return null;
+      const arr = a.array, own = arr.byteOffset === 0 && arr.byteLength === arr.buffer.byteLength;
+      attrs[k] = { array: own ? arr : arr.slice(), itemSize: a.itemSize, count: a.count, normalized: !!a.normalized };
+    }
+    const ia = geo.index && geo.index.array;
+    const mp = geo.morphAttributes && geo.morphAttributes.position;
+    return {
+      attributes: attrs,
+      index: ia ? { array: ia.byteOffset === 0 && ia.byteLength === ia.buffer.byteLength ? ia : ia.slice() } : null,
+      groups: geo.groups ? geo.groups.map(function (g) { return { start: g.start, count: g.count, materialIndex: g.materialIndex }; }) : [],
+      drawRange: geo.drawRange ? { start: geo.drawRange.start, count: geo.drawRange.count } : null,
+      morphAttributes: mp && mp.length ? { position: [0] } : {},
+    };
+  }
+  function onWorkerDone(e) {
+    const d = e.data, job = d && inFlight.get(d.id);
+    if (!job) return;
+    inFlight.delete(d.id); inflight--; workerJobs++;
+    try { finish(job, toGeo(d.out, job.geo)); } catch (err) { finish(job, null); }
+    if (jobs.length && inflight < MAX_INFLIGHT / 2) pump();   // refill between frames too, not only at the next tick
+  }
+  function pump() {
+    const w = getWorker();
+    if (!w) { work(BUDGET_MS); return; }
+    let sent = 0;
+    while (inflight < MAX_INFLIGHT && jobs.length && sent++ < PER_PUMP) {
+      const job = jobs.shift();
+      if (job.it) { jobs.unshift(job); work(BUDGET_MS); return; }   // a main-thread job already half done: finish it there
+      const pg = plainGeo(job.geo);
+      if (!pg) { finish(job, null); continue; }
+      job.id = ++jobSeq;
+      inFlight.set(job.id, job); inflight++;
+      try { w.postMessage({ id: job.id, geo: pg, eps: EPS / Math.max(1e-3, job.s), opt: job.tex ? null : { ignore: ["uv", "uv2"] } }); }
+      catch (err) { inFlight.delete(job.id); inflight--; jobs.unshift(job); failWorker(); return; }
+    }
   }
 
   /* PREPARE (vehicles.js buildCar, with the car's GROUP): queue every geometry this car draws. */
@@ -738,7 +851,7 @@
   function tick() {
     frame++;
     swapsLast = 0;
-    if (jobs.length) work(BUDGET_MS);
+    if (jobs.length) pump();
     const g = CBZ.game;
     const cars = CBZ.cityCars;
     if (!g || g.mode !== "city" || !cars || !CBZ.camera) return;
@@ -770,7 +883,7 @@
   CBZ.carLod = {
     EPS: EPS, LOD_IN_PX: LOD_IN_PX, LOD_OUT_PX: LOD_OUT_PX,
     decimate: decimate,
-    steps: decimateSteps,               // the same work as a generator (one yield per slice)
+    steps: decimateSteps,               // the same work as a generator (one yield per slice; plain-array output, see toGeo)
     lodOf: lodOf,                       // (geo, scale, material) -> LOD geo | the geo itself | null (queued)
     work: work,                         // (budgetMs) run the build queue (node checks, a loading screen)
     relScale: relScale,
@@ -785,7 +898,7 @@
     const sd = CBZ.carLod.switchDistances();
     return { geometries: built, keptFull: kept, srcTris: srcTrisTotal, lodTris: lodTrisTotal,
       ratio: srcTrisTotal ? +(lodTrisTotal / srcTrisTotal).toFixed(3) : null, buildMs: Math.round(workMs),
-      trackedCars: tracked, lodCars: lodCars, swapsLastFrame: swapsLast, queued: jobs.length,
+      trackedCars: tracked, lodCars: lodCars, swapsLastFrame: swapsLast, queued: jobs.length, inWorker: inflight, workerJobs: workerJobs, worker: !!worker,
       lodIn: +sd.lodIn.toFixed(1), lodOut: +sd.lodOut.toFixed(1) };
   };
 })();

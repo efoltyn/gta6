@@ -393,6 +393,255 @@
   });
 
   /* ==================================================================
+     SCENERY POOLS ARE DEALT INTO CELLS (2026-09-28, the "too many trees"
+     wave).
+
+     MEASURED (Metal GPU headless, Medium tier, Gang City spawn): 5.5 M of
+     the 9.6 M triangles in a frame were trees, drawn whatever the camera
+     looked at, and the shadow casters among them (Redhollow's mature wood,
+     Mount Mercy's crowns: 1.5 M) went into every sun-map refresh as well.
+     r128 tests an InstancedMesh by its prototype's sphere, so every forest
+     pool is built `frustumCulled = false`.
+
+     core/instcull.js makes every InstancedMesh cullable by the union box of
+     its instances, for every camera. That is exact, but a pool is as big as
+     its builder made it: continent.js deals the backcountry in 1.6 km
+     chunks, Redhollow is one pool per species for the whole biome, and a box
+     that size meets almost any frustum. So each scenery pool is re-dealt,
+     once, into CELL-sized children: the same geometry and material, the
+     same instance matrices and colours, split by position. Each cell's box
+     is then tight, and the view and the sun draw only the cells they can
+     see. No pixel changes.
+
+     The original pool object stays exactly where it was, matrices and all,
+     as the cells' parent: every reference other code holds (collider refs,
+     continent.js's chunk disc toggling `.visible`, tier code flipping
+     `castShadow`) still points at the thing it always did. It is taken off
+     the draw list with layers (mask 0; children keep their own), and ray
+     hits on a cell come back as hits on the original pool with the original
+     instance index. Kept honest every second: flags are mirrored onto the
+     cells; a pool that rewrites its matrices or colours or changes count or
+     geometry is re-dealt; one that keeps doing it is an actor pool, not
+     scenery, and is handed back whole.
+  ================================================================== */
+  const CELL = 600;                    // metres: the widest a cell may be (420/700/1000 measured: same GPU, fewer calls wider)
+  const CELL_MIN = 48;                 // ...unless it is already this sparse
+  // A pool that casts shadows is dealt finer: the sun's box is ~300 m across,
+  // and a caster cell that clips it sends every tree it holds to the shadow map.
+  const CELL_CASTER = 240;
+  const splitPools = new Set();
+  const HIDDEN_LAYER_MASK = 0;
+  const _cellSphereC = new THREE.Vector3();
+  // What the BUILDER set. core/instcull.js turns InstancedMesh.frustumCulled
+  // into an accessor that answers true for any pool it can bound, and keeps
+  // the owner's own value in _cbzFrustumCulled.
+  function ownerCulled(o) { return o._cbzFrustumCulled !== undefined ? o._cbzFrustumCulled : o.frustumCulled; }
+  function scenic(o) {
+    const ud = o.userData || {};
+    return !!(ud.vegetationLayer || ud.forestBelt || ud.sceneryScale || ud.terrain);
+  }
+  function cellRaycast(raycaster, hits) {
+    const pool = this.userData.cellOf;
+    const before = hits.length;
+    THREE.InstancedMesh.prototype.raycast.call(this, raycaster, hits);
+    const map = this.userData.cellIndex;
+    for (let i = before; i < hits.length; i++) {
+      const h = hits[i];
+      h.object = pool;
+      if (h.instanceId != null) h.instanceId = map[h.instanceId];
+    }
+  }
+  function syncFlags(o) {
+    const cells = o.userData.cells;
+    for (let i = 0; i < cells.length; i++) {
+      const c = cells[i];
+      c.material = o.material;
+      c.castShadow = o.castShadow;
+      c.receiveShadow = o.receiveShadow;
+      c.customDepthMaterial = o.customDepthMaterial;
+      c.customDistanceMaterial = o.customDistanceMaterial;
+      c.renderOrder = o.renderOrder;
+    }
+  }
+  function unsplit(o) {
+    const cells = o.userData.cells || [];
+    for (let i = 0; i < cells.length; i++) o.remove(cells[i]);
+    o.userData.cells = null;
+    o.userData.cellSplit = 0;
+    o.layers.mask = o.userData.cellLayerMask == null ? 1 : o.userData.cellLayerMask;
+    splitPools.delete(o);
+  }
+  function split(o) {
+    const n = o.count | 0, g = o.geometry;
+    const a = o.instanceMatrix.array, col = o.instanceColor ? o.instanceColor.array : null;
+    if (!g.boundingSphere) g.computeBoundingSphere();
+    const ps = g.boundingSphere;
+    // THE DEAL: a k-d split on the instance positions, longer axis at the
+    // median, until a cell is no wider than CELL or holds no more than
+    // 2 x CELL_MIN trees. A dense wood comes out as CELL-sized blocks; a
+    // sparse scatter (forty rocks across the country) stays a few big cells
+    // instead of forty one-rock draw calls.
+    const all = new Array(n);
+    for (let i = 0; i < n; i++) all[i] = i;
+    const groups = [], W = o.castShadow ? CELL_CASTER : CELL;
+    (function deal(idx) {
+      let mnx = 1e9, mxx = -1e9, mnz = 1e9, mxz = -1e9;
+      for (let j = 0; j < idx.length; j++) {
+        const q = idx[j] * 16, x = a[q + 12], z = a[q + 14];
+        if (x < mnx) mnx = x; if (x > mxx) mxx = x;
+        if (z < mnz) mnz = z; if (z > mxz) mxz = z;
+      }
+      const wx = mxx - mnx, wz = mxz - mnz;
+      if ((wx <= W && wz <= W) || idx.length <= CELL_MIN * 2) { groups.push(idx); return; }
+      const off = wx >= wz ? 12 : 14;
+      idx.sort(function (p, q) { return a[p * 16 + off] - a[q * 16 + off]; });
+      const h = idx.length >> 1;
+      deal(idx.slice(0, h)); deal(idx.slice(h));
+    })(all);
+    const cells = [];
+    groups.forEach(function (idx) {
+      const m = idx.length;
+      const im = new THREE.InstancedMesh(g, o.material, m);
+      const dst = im.instanceMatrix.array;
+      const cc = col ? new Float32Array(m * 3) : null;
+      // the cell's sphere: prototype sphere centre through each instance
+      // matrix, radius = prototype radius x that instance's largest scale
+      let mnx = 1e9, mny = 1e9, mnz = 1e9, mxx = -1e9, mxy = -1e9, mxz = -1e9;
+      const cs = new Array(m * 4);
+      for (let j = 0; j < m; j++) {
+        const q = idx[j] * 16;
+        for (let k = 0; k < 16; k++) dst[j * 16 + k] = a[q + k];
+        if (cc) { const s = idx[j] * 3; cc[j * 3] = col[s]; cc[j * 3 + 1] = col[s + 1]; cc[j * 3 + 2] = col[s + 2]; }
+        const cx = ps.center.x, cy = ps.center.y, cz = ps.center.z;
+        const x = a[q] * cx + a[q + 4] * cy + a[q + 8] * cz + a[q + 12];
+        const y = a[q + 1] * cx + a[q + 5] * cy + a[q + 9] * cz + a[q + 13];
+        const z = a[q + 2] * cx + a[q + 6] * cy + a[q + 10] * cz + a[q + 14];
+        const s = Math.max(Math.hypot(a[q], a[q + 1], a[q + 2]), Math.hypot(a[q + 4], a[q + 5], a[q + 6]), Math.hypot(a[q + 8], a[q + 9], a[q + 10]));
+        const r = ps.radius * s;
+        cs[j * 4] = x; cs[j * 4 + 1] = y; cs[j * 4 + 2] = z; cs[j * 4 + 3] = r;
+        if (x - r < mnx) mnx = x - r; if (x + r > mxx) mxx = x + r;
+        if (y - r < mny) mny = y - r; if (y + r > mxy) mxy = y + r;
+        if (z - r < mnz) mnz = z - r; if (z + r > mxz) mxz = z + r;
+      }
+      _cellSphereC.set((mnx + mxx) / 2, (mny + mxy) / 2, (mnz + mxz) / 2);
+      let R = 0;
+      for (let j = 0; j < m; j++) {
+        const d = Math.hypot(cs[j * 4] - _cellSphereC.x, cs[j * 4 + 1] - _cellSphereC.y, cs[j * 4 + 2] - _cellSphereC.z) + cs[j * 4 + 3];
+        if (d > R) R = d;
+      }
+      if (cc) im.instanceColor = new THREE.InstancedBufferAttribute(cc, 3);
+      im.instanceMatrix.needsUpdate = true;
+      im.name = o.name;
+      // Culling is core/instcull.js's: it bounds the cell by its own
+      // instances. The owner value stays what the scenery builders set.
+      im.frustumCulled = false;
+      im.matrixAutoUpdate = false;
+      im.matrixWorldNeedsUpdate = true;    // one world multiply under the (frozen) pool, then static
+      im.userData = {
+        cellOf: o, cellIndex: idx, sphere: new THREE.Sphere(_cellSphereC.clone(), R),
+        vegetationLayer: o.userData.vegetationLayer, sceneryScale: o.userData.sceneryScale,
+      };
+      im.raycast = cellRaycast;
+      cells.push(im);
+      o.add(im);
+    });
+    o.userData.cells = cells;
+    o.userData.cellSplit = cells.length;
+    o.userData.cellStamp = { iv: o.instanceMatrix.version, cv: o.instanceColor ? o.instanceColor.version : -1, n: n, g: g };
+    if (o.userData.cellLayerMask == null) o.userData.cellLayerMask = o.layers.mask;
+    o.layers.mask = HIDDEN_LAYER_MASK;
+    syncFlags(o);
+    splitPools.add(o);
+  }
+  /* Dealing ~430 pools (~136k instances) takes a noticeable slice of a
+     frame, so it is done under a per-frame BUDGET from a queue: the first
+     second of play never hitches for it, and a pool simply draws the old
+     way until its turn comes. */
+  const SPLIT_BUDGET_MS = 3;
+  const queue = [];
+  let lastPoolScan = 0, scannedKids = -1, scannedRoot = null;
+  let cellsOn = true;                   // tools' in-page A/B handle only (CBZ.sceneryCells.set)
+  function honest(root) {
+    // a rebuilt city is a new root: let go of the old one's pools
+    if (root !== scannedRoot && splitPools.size) splitPools.forEach(unsplit);
+    // keep the split pools honest (cheap: a handful of number compares each)
+    splitPools.forEach(function (o) {
+      const st = o.userData.cellStamp;
+      if (o.parent !== root) { unsplit(o); return; }
+      if (o.instanceMatrix.version !== st.iv || (o.instanceColor ? o.instanceColor.version : -1) !== st.cv ||
+          (o.count | 0) !== st.n || o.geometry !== st.g) {
+        unsplit(o);
+        o.userData.cellResplits = (o.userData.cellResplits || 0) + 1;
+        if (o.userData.cellResplits <= 3) queue.push(o);
+        return;
+      }
+      syncFlags(o);
+    });
+  }
+  function scan(root) {
+    // Cells only pay off when something culls them: core/instcull.js. Without
+    // it they would be the same triangles in more draw calls.
+    if (!root || !THREE.InstancedMesh.cbzCull) return;
+    if (root === scannedRoot && root.children.length === scannedKids) return;
+    if (root !== scannedRoot) queue.length = 0;
+    scannedRoot = root; scannedKids = root.children.length;
+    const kids = root.children;
+    for (let i = 0; i < kids.length; i++) {
+      const o = kids[i];
+      if (!o.isInstancedMesh || ownerCulled(o) !== false || splitPools.has(o) || queue.indexOf(o) >= 0) continue;
+      if (!scenic(o) || (o.userData && o.userData.dynamic) || (o.userData.cellResplits || 0) > 3) continue;
+      if ((o.count | 0) < 8 || !o.instanceMatrix || o.geometry.morphAttributes.position) continue;
+      queue.push(o);
+    }
+  }
+  function drain(budgetMs) {
+    const t0 = performance.now();
+    while (queue.length && performance.now() - t0 < budgetMs) {
+      const o = queue.shift();
+      if (o.parent === scannedRoot && !splitPools.has(o)) split(o);
+    }
+  }
+  CBZ.onAlways(3.59, function () {
+    if (!cellsOn) return;
+    drain(SPLIT_BUDGET_MS);
+    const now = performance.now();
+    if (now - lastPoolScan < 1000) return;
+    lastPoolScan = now;
+    const root = CBZ.city && CBZ.city.arena && CBZ.city.arena.root;
+    honest(root);
+    scan(root);
+  });
+
+  CBZ.sceneryCells = {
+    audit: function () {
+      let pools = 0, cells = 0, instances = 0;
+      const byName = Object.create(null);
+      splitPools.forEach(function (o) {
+        pools++; cells += o.userData.cellSplit; instances += o.count;
+        const k = o.name || "?", r = byName[k] || (byName[k] = { pools: 0, cells: 0, instances: 0 });
+        r.pools++; r.cells += o.userData.cellSplit; r.instances += o.count;
+      });
+      return { on: cellsOn, cell: CELL, min: CELL_MIN, pools: pools, queued: queue.length, cells: cells, instances: instances, byName: byName };
+    },
+    // IN-PAGE A/B for tools (the way core/instcull.js exposes `on`): applied
+    // at once, so a probe can time both sides in the same world, same frame.
+    set: function (o) {
+      o = o || {};
+      // off = the pools draw themselves again and their cells stand aside
+      // (no re-deal either way, so flipping costs microseconds)
+      if (o.on != null && !!o.on !== cellsOn) {
+        cellsOn = !!o.on;
+        splitPools.forEach(function (p) {
+          p.layers.mask = cellsOn ? HIDDEN_LAYER_MASK : p.userData.cellLayerMask;
+          for (let i = 0; i < p.userData.cells.length; i++) p.userData.cells[i].visible = cellsOn;
+        });
+      }
+      if (cellsOn && queue.length) drain(1e9);
+      return cellsOn;
+    },
+  };
+
+  /* ==================================================================
      CBZ.farcullAudit() — WHAT IS EXEMPT FROM DISTANCE CULLING, AND WHY.
 
      The ghost city was not a coordinate bug: it was a shell that culled
@@ -563,14 +812,7 @@
       const reach = fog.far * 1.8 + Math.max(0, cam.position.y) * 2;
       const kids = root.children;
       let cands = 0;
-      for (let i = 0; i < kids.length; i++) {
-        const o = kids[i];
-        const ud = o.userData || {};
-        if (!(o.isInstancedMesh || ud.vegetationLayer || ud.sceneryScale)) continue;
-        if (o.frustumCulled !== false && !o.isInstancedMesh) continue;   // r128 already culls it
-        if (ud.dynamic) continue;
-        const b = reachSphere(o);
-        if (!b.ok || b.moving) continue;
+      const hold = function (o, b) {
         cands++;
         const d = Math.hypot(b.x - cam.position.x, b.y - cam.position.y, b.z - cam.position.z) - b.r;
         if (d > reach) {
@@ -578,6 +820,26 @@
         } else if (reachHidden.has(o)) {
           o.layers.mask = 1; reachHidden.delete(o);
         }
+      };
+      for (let i = 0; i < kids.length; i++) {
+        const o = kids[i];
+        const ud = o.userData || {};
+        // A pool dealt into frustum cells (above) is held back cell by cell:
+        // its own layer mask is the split's, never this pass's.
+        if (ud.cellSplit && ud.cells) {
+          if (reachHidden.has(o)) reachHidden.delete(o);
+          for (let k = 0; k < ud.cells.length; k++) {
+            const c = ud.cells[k], s = c.userData.sphere;
+            hold(c, { x: s.center.x + o.position.x, y: s.center.y + o.position.y, z: s.center.z + o.position.z, r: s.radius });
+          }
+          continue;
+        }
+        if (!(o.isInstancedMesh || ud.vegetationLayer || ud.sceneryScale)) continue;
+        if (o.frustumCulled !== false && !o.isInstancedMesh) continue;   // r128 already culls it
+        if (ud.dynamic) continue;
+        const b = reachSphere(o);
+        if (!b.ok || b.moving) continue;
+        hold(o, b);
       }
       reachStat.cands = cands; reachStat.reach = reach; reachStat.camY = cam.position.y;
     });

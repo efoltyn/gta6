@@ -1910,7 +1910,10 @@
     const map = curMap();
     if (!map.ensure()) console.error("[gungame] map failed to build:", map.id);
     installFloor();
-    if (CBZ.prisonRoot) CBZ.prisonRoot.visible = map.id === "jail";
+    if (CBZ.prisonRoot) {
+      CBZ.prisonRoot.visible = map.id === "jail";
+      if (CBZ.prisonRoot.visible && CBZ.ensurePrisonBatched && document.readyState === "complete") CBZ.ensurePrisonBatched();
+    }
     const A = CBZ.surv && CBZ.surv.arena;
     if (A) {
       A.root.visible = map.id === "island";
