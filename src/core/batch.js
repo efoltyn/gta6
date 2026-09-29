@@ -701,7 +701,7 @@
      672 m cell is one instanced draw there, and merging it here first would
      turn that into one draw per 112 m tile instead.
      Skipped, kept live: mirrored meshes (a negative determinant flips the
-     winding), geometry groups, morph targets, custom onBeforeRender,
+     winding), morph targets, custom onBeforeRender,
      renderOrder, frustumCulled=false, non-default layers, transparent.
      Originals are removed and ledgered per top group exactly like the inert
      pass, so demolition's batchHideGroup still zeroes a building's slice. */
@@ -719,7 +719,9 @@
     if (!g || !g.isBufferGeometry || !g.attributes.position || !g.attributes.normal) return null;
     // positions/normals are re-baked as float; a quantized source is left alone
     if (!(g.attributes.position.array instanceof Float32Array) || !(g.attributes.normal.array instanceof Float32Array)) return null;
-    if (g.groups && g.groups.length) return null;
+    // geometry groups only matter to an ARRAY material; a single material draws
+    // the whole range (r128 renderObject with group null), so a BoxGeometry's
+    // six face groups are no reason to keep it live
     if (g.drawRange.start !== 0 || g.drawRange.count !== Infinity) return null;
     if (g.morphAttributes && Object.keys(g.morphAttributes).length) return null;
     let sig = "";
