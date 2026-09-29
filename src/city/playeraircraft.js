@@ -38,16 +38,6 @@
   // one-line revert for the military-theft swap fix (commandeered base jets/
   // bombers/helis fly their REAL parked model instead of a generic stand-in)
   if (CBZ.CONFIG && CBZ.CONFIG.AIR_MILITARY_REUSE == null) CBZ.CONFIG.AIR_MILITARY_REUSE = true;
-  // CAM_AIRCRAFT_FIT — derive the flyer's chase-camera boom from the craft's
-  // ACTUAL published envelope so a rescaled airframe reframes itself. The civilian
-  // chase constants (spawnFlyableFromProp) were tuned for the ORIGINAL airliner;
-  // the airframe pass up-scaled the airliner (AIRLINER_SCALE, 1.45x) and it now
-  // publishes a per-plane userData.aircraftDims copy, so the enlarged tail fin
-  // filled the frame. Under this flag the boom scales by live-dims / frozen-table-
-  // dims (=1 for any craft at stock size, so the business jet / military / owned
-  // craft stay byte-for-byte on their old booms). false restores the old fixed
-  // constants.
-  if (CBZ.CONFIG && CBZ.CONFIG.CAM_AIRCRAFT_FIT == null) CBZ.CONFIG.CAM_AIRCRAFT_FIT = true;
   // ---- NEW MATERIAL API (carfx.js) — fake-reflection env-mapped vehicle mats
   // for instant shine. Falls back to the flat cached cmat() if carfx hasn't
   // loaded, so nothing here breaks at worldgen and it auto-upgrades at runtime.
@@ -314,549 +304,59 @@
     grp.userData.muzzleLocal = new THREE.Vector3(x, y, z);
   }
 
-  /* ---- HELICOPTER AIRFRAME — ONE LOFTED HULL, TWO AIRCRAFT -------------------
-     The old chopper was eleven taperBoxes and a stack of plain boxes: a cabin
-     brick, a nose brick, a glass brick, a boom brick, box skids, box struts and
-     box cross-tubes. Every one of them read as a prism from the pad.
-
-     Now the fuselage is SURFACE, not parts. `heliBody(sections)` is a smooth
-     superellipse loft: each station is (z, centre height, half width, top and
-     bottom half heights, squareness), the stations are Catmull-Rom blended, and
-     every panel that belongs on the skin — the two-tone livery, the cheat line,
-     the windscreen, the cabin windows, the doors — is cut out of THAT SAME
-     parametric surface at a small outward offset. So glass follows the hull's
-     curvature exactly and nothing is a slab glued on. The boom is the same loft
-     carried on past the cabin, so there is no seam where a tail used to be
-     pushed into a box. Fin, stabiliser, stub wings and blades are aerofoil
-     plates (a closed section swept along a span), skids and cross-tubes are
-     real tubes.
-
-     `buildHeliAirframe(opts)` is the one builder; `buildHeli` (the armed player
-     gunship) and `buildVipHeli` (the head-of-state transport) are presets.
-     Static parts merge per material into a handful of draw calls; the rotors,
-     the tail rotor, the rotor blur disc, the door (`userData.canopy`) and the
-     pilot silhouette stay separate because they move.
-     ------------------------------------------------------------------------- */
-  const _heliLivery = new Map();
-  function liveryMat(hex, role) {
-    const key = (role || "paint") + ":" + hex;
-    let m = _heliLivery.get(key);
-    if (!m) {
-      const r = ((hex >> 16) & 255) * 0.22, gch = ((hex >> 8) & 255) * 0.22, b = (hex & 255) * 0.22;
-      m = vmat(role || "paint", hex, { emissive: ((r | 0) << 16) | ((gch | 0) << 8) | (b | 0), ei: 0.18 });
-      if (m) m._shared = true;
-      _heliLivery.set(key, m);
-    }
-    return m;
-  }
-
-  // Catmull-Rom on a list of numbers, u in [0, n-1]
-  function crAt(arr, u) {
-    const n = arr.length;
-    const i = Math.max(0, Math.min(n - 2, Math.floor(u)));
-    const t = Math.max(0, Math.min(1, u - i));
-    const p0 = arr[Math.max(0, i - 1)], p1 = arr[i], p2 = arr[i + 1], p3 = arr[Math.min(n - 1, i + 2)];
-    const t2 = t * t, t3 = t2 * t;
-    return 0.5 * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
-  }
-  function spow(v, e) { return v < 0 ? -Math.pow(-v, e) : Math.pow(v, e); }
-
-  // A lofted body along -Z. sections: [z, cy, halfW, hTop, hBot, n], nose first.
-  function heliBody(sections, cx) {
-    cx = cx || 0;
-    const col = function (k) { return sections.map(function (s) { return s[k]; }); };
-    const Z = col(0), CY = col(1), W = col(2), HT = col(3), HB = col(4), N = col(5);
-    const last = sections.length - 1;
-    const st = function (u) {
-      return { z: crAt(Z, u), cy: crAt(CY, u), w: Math.max(0, crAt(W, u)), ht: Math.max(0, crAt(HT, u)),
-        hb: Math.max(0, crAt(HB, u)), n: Math.max(1.6, crAt(N, u)) };
-    };
-    function raw(s, th) {
-      const c = Math.cos(th), sn = Math.sin(th), e = 2 / s.n;
-      return [cx + s.w * spow(c, e), s.cy + (sn >= 0 ? s.ht : s.hb) * spow(sn, e)];
-    }
-    function P(u, th, off) {
-      const s = st(u), p = raw(s, th);
-      if (off) {
-        const a = raw(s, th - 0.01), b = raw(s, th + 0.01);
-        let nx = b[1] - a[1], ny = -(b[0] - a[0]);
-        const l = Math.hypot(nx, ny) || 1; nx /= l; ny /= l;
-        if (nx * (p[0] - cx) + ny * (p[1] - s.cy) < 0) { nx = -nx; ny = -ny; }
-        p[0] += nx * off; p[1] += ny * off;
-      }
-      return [p[0], p[1], s.z];
-    }
-    function uOfZ(z) {
-      let lo = 0, hi = last;
-      if (z >= Z[0]) return 0;
-      if (z <= Z[last]) return last;
-      for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2; if (crAt(Z, m) > z) lo = m; else hi = m; }
-      return (lo + hi) / 2;
-    }
-    return { P: P, st: st, uOfZ: uOfZ, last: last, cx: cx };
-  }
-
-  // an indexed grid from f(i/nu, j/nv) -> [x,y,z]; oriented so faces point AWAY
-  // from inside(i/nu, j/nv) -> [x,y,z] (tested on the middle quad)
-  function heliGrid(nu, nv, f, inside) {
-    const pos = [], uv = [], idx = [];
-    for (let i = 0; i <= nu; i++) for (let j = 0; j <= nv; j++) {
-      const p = f(i / nu, j / nv);
-      pos.push(p[0], p[1], p[2]); uv.push(i / nu, j / nv);
-    }
-    const V = function (i, j) { return i * (nv + 1) + j; };
-    for (let i = 0; i < nu; i++) for (let j = 0; j < nv; j++) {
-      idx.push(V(i, j), V(i + 1, j), V(i, j + 1), V(i + 1, j), V(i + 1, j + 1), V(i, j + 1));
-    }
-    if (inside) {
-      const mi = nu >> 1, mj = nv >> 1;
-      const a = V(mi, mj), b = V(mi + 1, mj), c = V(mi, mj + 1);
-      const ax = pos[a * 3], ay = pos[a * 3 + 1], az = pos[a * 3 + 2];
-      const e1 = [pos[b * 3] - ax, pos[b * 3 + 1] - ay, pos[b * 3 + 2] - az];
-      const e2 = [pos[c * 3] - ax, pos[c * 3 + 1] - ay, pos[c * 3 + 2] - az];
-      const nrm = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
-      const q = inside((mi + 0.5) / nu, (mj + 0.5) / nv);
-      if (nrm[0] * (ax - q[0]) + nrm[1] * (ay - q[1]) + nrm[2] * (az - q[2]) < 0) {
-        for (let k = 0; k < idx.length; k += 3) { const t = idx[k + 1]; idx[k + 1] = idx[k + 2]; idx[k + 2] = t; }
-      }
-    }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-    g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
-    g.setIndex(idx);
-    g.computeVertexNormals();
-    return g;
-  }
-  // a patch of a body's skin: z0..z1 (z0 nearer the nose), th0..th1 (functions
-  // of t along z allowed), pushed `off` outward
-  function skinPatch(body, z0, z1, th0, th1, off, nu, nv) {
-    const u0 = body.uOfZ(z0), u1 = body.uOfZ(z1);
-    const T0 = typeof th0 === "function" ? th0 : function () { return th0; };
-    const T1 = typeof th1 === "function" ? th1 : function () { return th1; };
-    return heliGrid(nu || 24, nv || 16, function (a, b) {
-      const u = u0 + (u1 - u0) * a;
-      return body.P(u, T0(a) + (T1(a) - T0(a)) * b, off || 0);
-    }, function (a) {
-      const s = body.st(u0 + (u1 - u0) * a);
-      return [body.cx, s.cy, s.z];
-    });
-  }
-  // a rounded-rectangle decal (window, grille) centred at (zc, thc) on the skin:
-  // half extents dz (metres along the body) and dth (radians), superellipse
-  // corners; built as a polar fan so its edge is one smooth curve.
-  function skinDecal(body, zc, thc, dz, dth, off, sq) {
-    const e = 2 / (sq || 4);
-    return heliGrid(4, 28, function (r, p) {
-      const ph = p * Math.PI * 2;
-      const z = zc + dz * r * spow(Math.cos(ph), e);
-      const th = thc + dth * r * spow(Math.sin(ph), e);
-      return body.P(body.uOfZ(z), th, off);
-    }, function () {
-      const s = body.st(body.uOfZ(zc));
-      return [body.cx, s.cy, s.z];
-    });
-  }
-  // the outline of such a decal as a thin tube (door seams, frames)
-  function skinOutline(body, zc, thc, dz, dth, off, r, sq) {
-    const e = 2 / (sq || 4), pts = [];
-    for (let i = 0; i < 40; i++) {
-      const ph = i / 40 * Math.PI * 2;
-      const p = body.P(body.uOfZ(zc + dz * spow(Math.cos(ph), e)), thc + dth * spow(Math.sin(ph), e), off);
-      pts.push(new THREE.Vector3(p[0], p[1], p[2]));
-    }
-    return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, true), 60, r, 5, true);
-  }
-  // a line on the skin at constant theta from z0 to z1 as a tube (pillars)
-  function skinLine(body, z0, z1, th, off, r) {
-    const pts = [];
-    for (let i = 0; i <= 10; i++) {
-      const z = z0 + (z1 - z0) * i / 10;
-      const p = body.P(body.uOfZ(z), typeof th === "function" ? th(i / 10) : th, off);
-      pts.push(new THREE.Vector3(p[0], p[1], p[2]));
-    }
-    return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 16, r, 6, false);
-  }
-  // an aerofoil PLATE swept along a span: stations [{o:[x,y,z], c: chord,
-  // t: thickness}], chord direction C (leading edge +C), thickness direction T.
-  // The two end stations collapse to a sliver, which closes the tip and root.
-  function heliPlate(stations, C, T) {
-    const S = stations.slice();
-    const f = S[0], l = S[S.length - 1];
-    S.unshift({ o: f.o, c: f.c * 0.92, t: f.t * 0.05 });
-    S.push({ o: l.o, c: l.c * 0.92, t: l.t * 0.05 });
-    const ring = function (s, ph) {
-      const cc = Math.cos(ph), sn = Math.sin(ph);
-      const a = s.c * 0.5 * cc;                                     // chordwise
-      const b = s.t * 0.5 * sn * (1 + 0.32 * cc) * Math.sqrt(Math.max(0, 1 - 0.1 * cc));
-      return [s.o[0] + C[0] * a + T[0] * b, s.o[1] + C[1] * a + T[1] * b, s.o[2] + C[2] * a + T[2] * b];
-    };
-    return heliGrid(S.length - 1, 18, function (i, j) {
-      const k = Math.round(i * (S.length - 1));
-      return ring(S[k], j * Math.PI * 2);
-    }, function (i) {
-      const k = Math.min(S.length - 1, Math.round(i * (S.length - 1)));
-      return S[k].o;
-    });
-  }
-  function tubeAlong(pts, r, seg) {
-    return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts.map(function (p) { return new THREE.Vector3(p[0], p[1], p[2]); })),
-      seg || 24, r, 8, false);
-  }
-  function xfGeo(g, x, y, z, rx, ry, rz, sx, sy, sz) {
-    const m = new THREE.Matrix4();
-    m.compose(new THREE.Vector3(x || 0, y || 0, z || 0),
-      new THREE.Quaternion().setFromEuler(new THREE.Euler(rx || 0, ry || 0, rz || 0)),
-      new THREE.Vector3(sx || 1, sy || 1, sz || 1));
-    g.applyMatrix4(m);
-    return g;
-  }
-  // merge a list of geometries (position/normal/uv) into one non-indexed geometry
-  function heliMerge(list) {
-    let n = 0;
-    const flat = list.map(function (g) {
-      const q = g.index ? g.toNonIndexed() : g;
-      if (!q.attributes.normal) q.computeVertexNormals();
-      n += q.attributes.position.count;
-      return q;
-    });
-    const P = new Float32Array(n * 3), Nn = new Float32Array(n * 3), U = new Float32Array(n * 2);
-    let o = 0;
-    for (const q of flat) {
-      const c = q.attributes.position.count;
-      P.set(q.attributes.position.array.subarray(0, c * 3), o * 3);
-      Nn.set(q.attributes.normal.array.subarray(0, c * 3), o * 3);
-      if (q.attributes.uv) U.set(q.attributes.uv.array.subarray(0, c * 2), o * 2);
-      o += c;
-    }
-    for (const g of list) g.dispose();
-    const out = new THREE.BufferGeometry();
-    out.setAttribute("position", new THREE.BufferAttribute(P, 3));
-    out.setAttribute("normal", new THREE.BufferAttribute(Nn, 3));
-    out.setAttribute("uv", new THREE.BufferAttribute(U, 2));
-    return out;
-  }
-
-  // fuselage stations for the two airframes: [z, cy, halfW, hTop, hBot, n]
-  function heliStations(vip) {
-    const L = vip ? 0.55 : 0;          // the VIP cabin is one window bay longer
-    return [
-      [3.62, 0.06, 0.03, 0.03, 0.03, 2.0],
-      [3.45, 0.06, 0.40, 0.34, 0.38, 2.2],
-      [3.05, 0.14, 0.76, 0.62, 0.62, 2.5],
-      [2.45, 0.24, 0.98, 0.84, 0.72, 3.0],
-      [1.60, 0.27, 1.08, 0.90, 0.76, 3.6],
-      [0.40, 0.27, 1.10, 0.90, 0.77, 3.8],
-      [-0.70 - L, 0.27, 1.08, 0.88, 0.75, 3.6],
-      [-1.55 - L, 0.36, 0.86, 0.74, 0.56, 3.0],
-      [-2.35 - L, 0.52, 0.48, 0.44, 0.30, 2.4],
-      [-3.10 - L, 0.60, 0.29, 0.28, 0.22, 2.1],
-      [-4.60 - L * 0.5, 0.66, 0.21, 0.20, 0.17, 2.0],
-      [-6.05, 0.72, 0.15, 0.15, 0.13, 2.0],
-      [-6.42, 0.74, 0.09, 0.10, 0.08, 2.0],
-      [-6.52, 0.74, 0.02, 0.02, 0.02, 2.0],
-    ];
-  }
-
+  /* ---- HELICOPTERS are city/airframes.js's: one lofted light twin with
+     real window holes, doors, cabin seats, rotor blur and lights, in civil,
+     police, news, medical, VIP and this file's armed variant. Here we only
+     add what a FLYABLE craft needs on top: the hidden pilot silhouette the
+     cockpit eye solver reads, the muzzle, the measured belly and the door
+     the boarding arc opens. ------------------------------------------------- */
+  const _heliBelly = new Map();
   function buildHeliAirframe(opts) {
     opts = opts || {};
+    const variant = opts.variant || (opts.vip ? "vip" : (opts.armed === false ? "civil" : "gunship"));
+    const grp = CBZ.airframes.build("heli", { variant: variant, livery: opts.livery });
+    grp.name = opts.name || variant + "-heli";
+    const rig = CBZ.airframes.rig(grp);
     const a = assets();
-    const armed = opts.armed !== false;
-    const vip = !!opts.vip;
-    const wheels = opts.wheels != null ? !!opts.wheels : vip;
-    const lv = Object.assign({ body: 0x2b3340, belly: 0x1d232c, stripe: null }, opts.livery || {});
-    const mUpper = lv.body === 0x2b3340 ? a.mBody : liveryMat(lv.body);
-    const mLower = liveryMat(lv.belly);
-    const mStripe = lv.stripe != null ? liveryMat(lv.stripe) : null;
-    const grp = new THREE.Group();
-    grp.name = opts.name || (vip ? "vip-heli" : "heli");
-    const parts = new Map();
-    const add = function (mat, g) { let L = parts.get(mat); if (!L) parts.set(mat, L = []); L.push(g); };
-
-    // ---- the hull: livery split just below the waist, belly colour under it
-    const H = heliBody(heliStations(vip));
-    const Z0 = 3.62, Z1 = -6.52;
-    const SPLIT = -0.22;                      // livery line (radians below the waist)
-    add(mUpper, skinPatch(H, Z0, Z1, SPLIT, Math.PI - SPLIT, 0, 72, 30));
-    add(mLower, skinPatch(H, Z0, Z1, Math.PI - SPLIT, 2 * Math.PI + SPLIT, 0, 72, 22));
-    // the cheat line rides the livery seam, which is also what hides it
-    const stripeMat = mStripe || a.mDark;
-    for (const s of [1, -1]) {
-      const th = s > 0 ? SPLIT : Math.PI - SPLIT;
-      add(stripeMat, skinPatch(H, 3.2, -5.6, th - 0.05, th + 0.05, 0.006, 56, 2));
-    }
-
-    // ---- GLASS: windscreen, chin windows and the cockpit side windows are all
-    // cut from the hull surface. Frames are tubes on the same surface.
-    const gl = a.mGlass, off = 0.012;
-    // windscreen: two panes either side of a centre post
-    add(gl, skinPatch(H, 3.12, 2.18, function (t) { return 0.52 - 0.18 * t; }, Math.PI / 2 - 0.03, off, 16, 10));
-    add(gl, skinPatch(H, 3.12, 2.18, Math.PI / 2 + 0.03, function (t) { return Math.PI - 0.52 + 0.18 * t; }, off, 16, 10));
-    // chin windows under the nose, one per side (visibility for landing)
-    add(gl, skinDecal(H, 2.95, -0.62, 0.30, 0.34, off, 3));
-    add(gl, skinDecal(H, 2.95, Math.PI + 0.62, 0.30, 0.34, off, 3));
-    // frames
-    add(a.mDark, skinLine(H, 3.14, 2.16, Math.PI / 2, off + 0.006, 0.028));
-    for (const s of [1, -1]) {
-      add(a.mDark, skinLine(H, 3.14, 2.16, function (t) { const b = 0.52 - 0.18 * t; return s > 0 ? b : Math.PI - b; }, off + 0.006, 0.034));
-    }
-    // the roof bow across the top of the windscreen
-    add(a.mDark, heliGrid(1, 20, function (i, j) {
-      const th = 0.30 + (Math.PI - 0.60) * j;
-      return H.P(H.uOfZ(2.18 - i * 0.05), th, off + 0.004);
-    }, function () { return [0, 0.27, 2.15]; }));
-
-    // ---- the pilot's door (-X side: aircraft_doors walks you to x = -1.3):
-    // a hull-matched panel with its window, a seam and a grab handle. It is its
-    // own mesh on `userData.canopy` because the boarding arc animates it.
-    const DZ = 1.72, DTH = Math.PI - 0.30, DDZ = 0.46, DDTH = 0.50;
-    const doorGeo = skinDecal(H, DZ, DTH, DDZ, DDTH, 0.016, 6);
-    doorGeo.computeBoundingBox();
-    const dc = new THREE.Vector3(); doorGeo.boundingBox.getCenter(dc);
-    doorGeo.translate(-dc.x, -dc.y, -dc.z);
-    const door = new THREE.Mesh(doorGeo, mUpper);
-    door.position.copy(dc);
-    const dwin = new THREE.Mesh(skinDecal(H, DZ + 0.02, DTH - 0.2, DDZ * 0.72, DDTH * 0.46, 0.03, 5).translate(-dc.x, -dc.y, -dc.z), gl);
-    door.add(dwin);
-    const dseam = new THREE.Mesh(skinOutline(H, DZ, DTH, DDZ, DDTH, 0.02, 0.014, 6).translate(-dc.x, -dc.y, -dc.z), a.mDark);
-    door.add(dseam);
-    grp.add(door);
-    grp.userData.canopy = door;
-    // the matching left cockpit window + seam (the co-pilot side)
-    add(gl, skinDecal(H, DZ + 0.02, Math.PI - (DTH - 0.2), DDZ * 0.72, DDTH * 0.46, 0.02, 5));
-    add(a.mDark, skinOutline(H, DZ, Math.PI - DTH, DDZ, DDTH, 0.014, 0.014, 6));
-
-    // ---- the cabin: passenger windows (VIP: three bays each side + a sliding
-    // door on the left), gunship: one small window behind the cockpit door
-    const winZ = vip ? [0.88, 0.02, -0.84] : [0.62];
-    for (const z of winZ) {
-      add(gl, skinDecal(H, z, 0.26, 0.26, 0.24, off, 3.2));
-      add(gl, skinDecal(H, z, Math.PI - 0.26, 0.26, 0.24, off, 3.2));
-    }
-    if (vip) {
-      // sliding cabin door outline on the right (+X... the passenger side, the
-      // left of a pilot facing forward), its track and a step under it
-      add(a.mDark, skinOutline(H, 0.45, -0.02, 0.62, 0.56, 0.012, 0.013, 7));
-      add(a.mDark, skinLine(H, 1.1, -1.35, 0.62, 0.014, 0.018));
-      add(a.mGrey, xfGeo(new THREE.BoxGeometry(0.34, 0.035, 0.9), 1.1, -0.36, 0.45));
-    }
-
-    // ---- ENGINE DECK: a lofted doghouse over twin engines, intakes, exhausts
-    const DH = heliBody([
-      [1.25, 1.02, 0.02, 0.02, 0.02, 2.2],
-      [1.05, 1.06, 0.42, 0.30, 0.20, 2.6],
-      [0.30, 1.10, 0.62, 0.42, 0.24, 3.2],
-      [-0.90, 1.10, 0.62, 0.40, 0.24, 3.2],
-      [-1.80 - (vip ? 0.4 : 0), 1.02, 0.44, 0.28, 0.20, 2.8],
-      [-2.40 - (vip ? 0.45 : 0), 0.90, 0.08, 0.08, 0.08, 2.2],
-    ]);
-    add(mUpper, skinPatch(DH, 1.25, -2.40 - (vip ? 0.45 : 0), -0.25, Math.PI + 0.25, 0, 30, 18));
-    for (const s of [1, -1]) {
-      add(a.mDark, skinDecal(DH, 0.62, s > 0 ? 0.35 : Math.PI - 0.35, 0.26, 0.30, 0.01, 3));      // intake grille
-      // exhaust stub angled out and aft
-      const ex = new THREE.CylinderGeometry(0.13, 0.16, 0.5, 14, 1, true);
-      add(a.mDark, xfGeo(ex, s * 0.52, 1.20, -1.55 - (vip ? 0.4 : 0), Math.PI / 2 + 0.25, 0, -s * 0.55));
-    }
-    // mast fairing (the dome the mast rises out of)
-    add(mUpper, xfGeo(new THREE.SphereGeometry(0.42, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2), 0, 1.40, 0.05, 0, 0, 0, 1, 0.55, 1.15));
-    const HUBY = 1.86;
-    add(a.mDark, xfGeo(new THREE.CylinderGeometry(0.11, 0.14, HUBY - 1.40, 12), 0, (HUBY + 1.40) / 2, 0.05));
-    add(a.mGrey, xfGeo(new THREE.CylinderGeometry(0.30, 0.30, 0.06, 20), 0, 1.66, 0.05));   // swashplate
-    add(a.mGrey, xfGeo(new THREE.CylinderGeometry(0.22, 0.26, 0.05, 20), 0, 1.60, 0.05));
-    for (let k = 0; k < 3; k++) {                                                            // pitch links
-      const ang = k * Math.PI * 2 / 3;
-      add(a.mDark, xfGeo(new THREE.CylinderGeometry(0.018, 0.018, 0.2, 6), Math.cos(ang) * 0.24, 1.76, 0.05 + Math.sin(ang) * 0.24));
-    }
-
-    // ---- TAIL: vertical fin (swept aerofoil), ventral fin + bumper, the
-    // stabiliser with endplates, the tail-rotor gearbox
-    const FZ = -6.02;
-    add(mUpper, heliPlate([
-      { o: [0, 0.78, FZ + 0.05], c: 1.05, t: 0.15 },
-      { o: [0, 1.35, FZ - 0.28], c: 0.82, t: 0.12 },
-      { o: [0, 1.92, FZ - 0.58], c: 0.56, t: 0.08 },
-    ], [0, 0, 1], [1, 0, 0]));
-    add(mLower, heliPlate([
-      { o: [0, 0.62, FZ + 0.1], c: 0.7, t: 0.1 },
-      { o: [0, 0.18, FZ - 0.12], c: 0.42, t: 0.07 },
-    ], [0, 0, 1], [1, 0, 0]));
-    add(a.mDark, tubeAlong([[0, 0.24, FZ + 0.05], [0, 0.04, FZ - 0.15], [0, 0.05, FZ - 0.45]], 0.028, 10));    // tail bumper
-    const SZ = -5.05 + (vip ? 0.15 : 0);
-    add(mUpper, heliPlate([
-      { o: [-1.12, 0.70, SZ], c: 0.46, t: 0.06 },
-      { o: [0, 0.70, SZ + 0.04], c: 0.60, t: 0.09 },
-      { o: [1.12, 0.70, SZ], c: 0.46, t: 0.06 },
-    ], [0, 0, 1], [0, 1, 0]));
-    for (const s of [1, -1]) add(mUpper, heliPlate([
-      { o: [s * 1.13, 0.55, SZ - 0.04], c: 0.34, t: 0.04 },
-      { o: [s * 1.13, 0.94, SZ - 0.12], c: 0.26, t: 0.03 },
-    ], [0, 0, 1], [1, 0, 0]));
-    const TRX = 0.30, TRY = 1.42, TRZ = FZ - 0.36;
-    add(mUpper, xfGeo(new THREE.SphereGeometry(0.16, 14, 10), 0.07, TRY, TRZ, 0, 0, 0, 1, 1, 1.3));   // gearbox fairing
-    add(a.mDark, xfGeo(new THREE.CylinderGeometry(0.035, 0.035, 0.16, 8), TRX - 0.06, TRY, TRZ, 0, 0, Math.PI / 2));
-
-    // ---- LANDING GEAR
-    if (!wheels) {
-      // SKIDS: two tubes with up-swept toes, two curved cross-tubes arching
-      // from each skid into the belly, a shoe at each contact
-      const SY = -1.02, SX = 1.02;
-      for (const s of [1, -1]) {
-        add(a.mDark, tubeAlong([[s * SX, SY + 0.02, -1.55], [s * SX, SY, -0.8], [s * SX, SY, 1.2], [s * SX, SY + 0.05, 1.85], [s * SX * 0.98, SY + 0.28, 2.2]], 0.055, 30));
-        add(a.mDark, xfGeo(new THREE.SphereGeometry(0.055, 10, 8), s * SX, SY + 0.02, -1.55));
-        add(a.mDark, xfGeo(new THREE.SphereGeometry(0.055, 10, 8), s * SX * 0.98, SY + 0.28, 2.2));
-      }
-      for (const cz of [1.05, -0.95]) {
-        add(a.mGrey, tubeAlong([[-SX, SY, cz], [-0.99, -0.72, cz], [-0.74, -0.51, cz], [0, -0.55, cz], [0.74, -0.51, cz], [0.99, -0.72, cz], [SX, SY, cz]], 0.06, 36));
-      }
-    } else {
-      // WHEELED VIP: faired sponsons carry the mains, a nose leg under the chin
-      for (const s of [1, -1]) {
-        const SP = heliBody([
-          [0.95, -0.32, 0.02, 0.02, 0.02, 2.2],
-          [0.70, -0.30, 0.20, 0.20, 0.22, 2.6],
-          [-0.10, -0.26, 0.26, 0.26, 0.28, 3.0],
-          [-1.10, -0.20, 0.22, 0.22, 0.22, 2.8],
-          [-1.60, -0.12, 0.02, 0.02, 0.02, 2.2],
-        ], s * 1.08);
-        add(mLower, skinPatch(SP, 0.95, -1.60, 0, Math.PI * 2, 0, 26, 18));
-        add(a.mDark, xfGeo(new THREE.CylinderGeometry(0.06, 0.07, 0.42, 10), s * 1.08, -0.62, -0.30));      // oleo
-        const wheel = new THREE.CylinderGeometry(0.30, 0.30, 0.20, 22);
-        add(liveryMat(0x16181b, 'tire'), xfGeo(wheel, s * 1.08, -0.84, -0.30, 0, 0, Math.PI / 2));
-        add(a.mGrey, xfGeo(new THREE.CylinderGeometry(0.17, 0.17, 0.215, 16), s * 1.08, -0.84, -0.30, 0, 0, Math.PI / 2));
-      }
-      add(a.mDark, xfGeo(new THREE.CylinderGeometry(0.05, 0.06, 0.62, 10), 0, -0.66, 2.55));
-      for (const s of [1, -1]) {
-        add(liveryMat(0x16181b, 'tire'), xfGeo(new THREE.CylinderGeometry(0.19, 0.19, 0.13, 18), s * 0.09, -0.95, 2.55, 0, 0, Math.PI / 2));
-      }
-    }
-
-    // ---- WEAPONS (the gunship only): stub wings, faired rocket pods, the chin
-    // turret the muzzle hangs off
-    if (armed) {
-      for (const s of [1, -1]) {
-        add(a.mGrey, heliPlate([
-          { o: [s * 0.95, 0.00, 0.35], c: 0.95, t: 0.16 },
-          { o: [s * 1.95, 0.08, 0.28], c: 0.70, t: 0.11 },
-        ], [0, 0, 1], [0, 1, 0]));
-        const POD = heliBody([
-          [1.30, -0.28, 0.03, 0.03, 0.03, 2],
-          [1.05, -0.28, 0.22, 0.22, 0.22, 2],
-          [-0.30, -0.28, 0.25, 0.25, 0.25, 2],
-          [-0.55, -0.28, 0.20, 0.20, 0.20, 2],
-        ], s * 1.62);
-        add(a.mDark, skinPatch(POD, 1.30, -0.55, 0, Math.PI * 2, 0, 16, 14));
-        add(a.mDark, xfGeo(new THREE.BoxGeometry(0.1, 0.22, 0.6), s * 1.62, -0.08, 0.35));       // pylon
-      }
-      add(a.mDark, xfGeo(new THREE.SphereGeometry(0.24, 16, 12), 0, -0.48, 2.85));
-      add(a.mGrey, xfGeo(new THREE.CylinderGeometry(0.045, 0.05, 0.9, 10), 0, -0.52, 3.3, Math.PI / 2, 0, 0));
-    }
-
-    // ---- lights: port red (+X), starboard green (-X), white tail, red beacon
-    navLight(grp, a.navR, armed ? 2.0 : 1.12, armed ? 0.08 : 0.55, armed ? 0.28 : -0.3);
-    navLight(grp, a.navG, armed ? -2.0 : -1.12, armed ? 0.08 : 0.55, armed ? 0.28 : -0.3);
-    navLight(grp, a.navW, 0, 1.0, -6.5);
-    navLight(grp, a.navR, 0, 1.2, -2.15 - (vip ? 0.45 : 0));
-
-    // ---- merge every static part per material: a handful of draw calls
-    parts.forEach(function (list, mat) {
-      const m = new THREE.Mesh(heliMerge(list), mat);
-      m.castShadow = true; m.receiveShadow = true;
-      grp.add(m);
-    });
-
-    // ---- the pilot silhouette (eye reference for city/cockpit.js; hidden)
-    const heliSeat = new THREE.Mesh(boxGeo(0.5, 0.5, 0.14), a.mDark);
-    heliSeat.position.set(0, 0.14, 1.62); grp.add(heliSeat);
+    // the pilot silhouette (eye reference for city/cockpit.js; hidden) in the
+    // right-hand seat, where the pilot in command of a helicopter sits
+    const pil = rig.meta.cabin.pilots[0];
     const heliPilot = new THREE.Group();
-    const hpTorso = new THREE.Mesh(boxGeo(0.42, 0.46, 0.26), a.mDark); hpTorso.position.set(0, 0.38, 1.86); heliPilot.add(hpTorso);
-    const hpHead = new THREE.Mesh(boxGeo(0.22, 0.22, 0.22), a.mGrey); hpHead.position.set(0, 0.78, 1.86); heliPilot.add(hpHead);
-    const hpStick = new THREE.Mesh(boxGeo(0.05, 0.34, 0.05), a.mGrey); hpStick.position.set(0, 0.16, 2.2); hpStick.rotation.x = 0.35; heliPilot.add(hpStick);
+    const hpTorso = new THREE.Mesh(boxGeo(0.42, 0.46, 0.26), a.mDark); hpTorso.position.set(pil.x, -0.5 + 0.42 + 0.3, pil.z + 0.05); heliPilot.add(hpTorso);
+    const hpHead = new THREE.Mesh(boxGeo(0.22, 0.22, 0.22), a.mGrey); hpHead.position.set(pil.x, -0.5 + 0.42 + 0.72, pil.z + 0.05); heliPilot.add(hpHead);
     heliPilot.visible = false;
     grp.add(heliPilot);
     grp.userData.pilot = heliPilot;
-
-    // ---- MAIN ROTOR (spins about Y): hub plate + grips + two aerofoil blades
-    // per bar, the second bar 90 degrees on (spinRotors keeps the phase).
-    const R = 4.72;
-    const disc = new THREE.Mesh(new THREE.CircleGeometry(R, 40),
-      new THREE.MeshBasicMaterial({ color: 0x10131a, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
-    disc.rotation.x = -Math.PI / 2; disc.position.set(0, HUBY, 0.05); grp.add(disc);
-    grp.userData.rotorDisc = disc;
-    const bladeGeo = function () {
-      const st = [];
-      for (let i = 0; i <= 8; i++) {
-        const x = 0.42 + (R - 0.42) * i / 8, t = i / 8;
-        const tip = t > 0.9 ? (t - 0.9) / 0.1 : 0;
-        st.push({ o: [x, -0.07 * t * t - 0.02 * tip, -0.04 * tip], c: 0.38 * (1 - 0.25 * tip), t: 0.055 * (1 - 0.35 * t) });
-      }
-      return heliPlate(st, [0, 0, 1], [0, 1, 0]);
-    };
-    function rotorBar(withHub) {
-      const bar = new THREE.Group(); bar.position.set(0, HUBY, 0.05);
-      const L = [];
-      for (const s of [1, -1]) {
-        const bg2 = bladeGeo(); if (s < 0) bg2.rotateY(Math.PI);
-        L.push(bg2);
-        // blade grip + damper
-        L.push(xfGeo(new THREE.CylinderGeometry(0.07, 0.085, 0.5, 10), s * 0.36, 0, 0, 0, 0, Math.PI / 2));
-      }
-      if (withHub) {
-        L.push(new THREE.CylinderGeometry(0.30, 0.30, 0.09, 4).rotateY(Math.PI / 4));   // hub plate
-        L.push(xfGeo(new THREE.CylinderGeometry(0.12, 0.18, 0.18, 14), 0, 0.12, 0));    // hub cap
-      }
-      bar.add(new THREE.Mesh(heliMerge(L), a.bladeMat));
-      return bar;
-    }
-    const rotor = rotorBar(true); grp.add(rotor);
-    const rotor2 = rotorBar(false); rotor2.rotation.y = Math.PI / 2; grp.add(rotor2);
-    // TAIL ROTOR (spins about X) on the port side of the fin
-    function tailBar() {
-      const bar = new THREE.Group(); bar.position.set(TRX, TRY, TRZ);
-      const L = [];
-      for (const s of [1, -1]) {
-        L.push(heliPlate([
-          { o: [0, s * 0.10, 0], c: 0.17, t: 0.03 },
-          { o: [0, s * 0.80, 0], c: 0.12, t: 0.02 },
-        ], [0, 0, 1], [1, 0, 0]));
-      }
-      L.push(xfGeo(new THREE.CylinderGeometry(0.08, 0.08, 0.1, 12), 0, 0, 0, 0, 0, Math.PI / 2));
-      bar.add(new THREE.Mesh(heliMerge(L), a.bladeMat));
-      return bar;
-    }
-    const trotor = tailBar(); grp.add(trotor);
-    const trotor2 = tailBar(); trotor2.rotation.x = Math.PI / 2; grp.add(trotor2);
-    grp.userData.rotor = rotor; grp.userData.rotor2 = rotor2;
-    grp.userData.trotor = trotor; grp.userData.trotor2 = trotor2;
-
-    if (armed) addMuzzle(grp, 0, -0.52, 3.78);
+    // the pilot's door is the "canopy" the boarding arc swings open
+    if (rig.doors.R) { grp.userData.canopy = rig.doors.R.node; grp.userData.canopyDoor = "R"; }
+    if (variant === "gunship") addMuzzle(grp, 0, -0.52, 3.78);
     else { grp.userData.unarmed = true; grp.userData.muzzleLocal = new THREE.Vector3(0, -0.2, 3.7); }
-
-    // BELLY IS MEASURED, NOT TYPED: the distance from the group origin to the
-    // lowest point of the built model, so the craft sits exactly on its gear.
-    const bb = new THREE.Box3();
-    grp.updateMatrixWorld(true);
-    grp.traverse(function (o) {
-      if (!o.isMesh || o === disc) return;
-      if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
-      bb.union(o.geometry.boundingBox.clone().applyMatrix4(o.matrixWorld));
-    });
-    grp.userData.belly = Math.round(-bb.min.y * 1000) / 1000;
+    // BELLY IS MEASURED, NOT TYPED: origin to the lowest point of the model
+    if (!_heliBelly.has(variant)) {
+      const bb = new THREE.Box3(), tb = new THREE.Box3();
+      grp.updateMatrixWorld(true);
+      grp.traverse(function (o) {
+        if (!o.isMesh || o.userData.mk === "blur") return;
+        if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+        tb.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld); bb.union(tb);
+      });
+      _heliBelly.set(variant, Math.round(-bb.min.y * 1000) / 1000);
+    }
+    grp.userData.belly = _heliBelly.get(variant);
     // `pilot:false` — the caller seats its own crew (airtraffic.js does)
-    if (opts.pilot !== false) seatCosmeticPilot(grp, "heli", opts.name || (armed ? "Missile Helicopter" : "Helicopter"));
+    if (opts.pilot !== false) seatCosmeticPilot(grp, "heli", opts.name || (variant === "gunship" ? "Missile Helicopter" : "Helicopter"));
     return grp;
   }
 
-  // the player's armed gunship
+  // the player's armed gunship: gunmetal over charcoal
   function buildHeli() {
-    return buildHeliAirframe({ armed: true, name: "Missile Helicopter" });
+    return buildHeliAirframe({ variant: "gunship", name: "Missile Helicopter", livery: { body: 0x2b3340, belly: 0x1d232c, accent: 0x3a4250 } });
   }
-  // the head-of-state transport: unarmed, wheeled, longer cabin, two-tone
-  // livery (deep green over white) with a gold cheat line
+  // the head-of-state transport: deep green over white, gold cheat line
   function buildVipHeli(opts) {
     opts = opts || {};
-    return buildHeliAirframe({
-      armed: false, vip: true, wheels: true, name: opts.name || "Executive One",
-      livery: Object.assign({ body: 0x1f3b2d, belly: 0xe9e8e2, stripe: 0xc9a24a }, opts.livery || {}),
-    });
+    return buildHeliAirframe({ variant: "vip", name: opts.name || "Executive One",
+      livery: Object.assign({ body: 0x1f3b2d, belly: 0xe9e8e2, accent: 0xc9a24a }, opts.livery || {}) });
   }
 
   // ---- F-22 RAPTOR: angular delta-wing fuselage, twin tails, canopy, missiles
@@ -1014,7 +514,6 @@
   // ---- studio hook: pure mesh builders for tools/studio.mjs expr shots
   // (no arena/scene dependency — returns a fresh Object3D). Dev-only cost: nil.
   CBZ.debugBuildAircraft = { heli: buildHeli, jet: buildJet, vip: buildVipHeli };
-  CBZ.buildHeliAirframe = buildHeliAirframe;
 
   // ============================================================
   //  SPAWN / PLACEMENT
@@ -1364,25 +863,10 @@
     // camera pull-back scales with the airframe footprint, so a bomber gets the
     // airliner-style frame while a fighter keeps the tight default chase cam.
     const foot = Math.max(rec.footW || 3, rec.footL || 5);
-    // CAM_AIRCRAFT_FIT: the civilian chase booms below are tuned for each class's
-    // STOCK envelope (airliner 30/14/18, business jet 16/10/10). Scale them by how
-    // far the LIVE airframe deviates from its frozen CITY_AIRCRAFT_DIMS entry — the
-    // up-scaled airliner (AIRLINER_SCALE) publishes a larger per-plane aircraftDims,
-    // so length→boom/look-ahead and height→camera-height both grow with it (the
-    // 1.45x craft frames exactly as the original did, tail fin dropping back below
-    // the sightline). A stock-size craft (the business jet, whose aircraftDims IS
-    // the frozen table entry — or any craft with no per-plane copy → fall back to
-    // the table) divides to 1.0 and is byte-identical; fit stays 1 when the flag is
-    // off too. Military / owned craft carry no aircraftDims and keep their own booms.
-    let fitBack = 1, fitUp = 1;
-    if (civil && (!CBZ.CONFIG || CBZ.CONFIG.CAM_AIRCRAFT_FIT !== false)) {
-      const dimTbl = CBZ.CITY_AIRCRAFT_DIMS && CBZ.CITY_AIRCRAFT_DIMS[rec.flightKind];
-      const dimLive = rec.aircraftDims || dimTbl;
-      if (dimLive && dimTbl && dimTbl.length > 0 && dimTbl.height > 0) {
-        if (dimLive.length > 0) fitBack = dimLive.length / dimTbl.length;   // boom + look-ahead ∝ length
-        if (dimLive.height > 0) fitUp = dimLive.height / dimTbl.height;     // camera height ∝ tail height
-      }
-    }
+    // the civil chase boom comes straight off the airframe's real envelope:
+    // back ~0.8 lengths, up ~1.2 fin heights, look-ahead ~half a length
+    const dimLive = rec.aircraftDims || (rec.group && rec.group.userData && rec.group.userData.aircraftDims) || null;
+    const dimL = dimLive ? dimLive.length : 20, dimH = dimLive ? dimLive.height : 6;
     const craft = makeCraft(kind, civil ? {
       group: rec.group,
       sourceRec: rec,
@@ -1394,9 +878,9 @@
       groundOffset: rec.groundOffset != null ? rec.groundOffset : 0,
       speed: 0,
       throttle: 0,
-      cameraBack: (rec.flightKind === "airliner" ? 30 : 16) * fitBack,
-      cameraUp: (rec.flightKind === "airliner" ? 14 : 10) * fitUp,
-      cameraAhead: (rec.flightKind === "airliner" ? 18 : 10) * fitBack,
+      cameraBack: Math.max(12, dimL * 0.8),
+      cameraUp: Math.max(7, dimH * 1.2),
+      cameraAhead: Math.max(8, dimL * 0.48),
     } : milGroup ? {
       group: milGroup,
       sourceRec: rec,
@@ -2473,6 +1957,47 @@
     powerJetPlumes(ud, 0.08 + plumePower * 0.92, craft.rotorSpin, 1.55, 0.92);
   }
 
+  // THE AIRFRAME MOVES WITH THE FLYING. Real gear cycles (up after a positive
+  // climb, down on a slow descent), control surfaces follow the attitude
+  // RATES the flight model produces, flaps run out slow and low, props/fans
+  // spool with the throttle, beacon on with the engines, strobes airborne,
+  // landing lights low. City/airframes.js does the posing; this reads state.
+  function animateAirframe(craft, agl, dt) {
+    const grp = craft.group, ud = grp.userData;
+    const AF = CBZ.airframes;
+    if (!AF || !AF.rig(grp)) {
+      // another module's model (military, the Raptor): its own simple hooks
+      if (ud && ud.gear) ud.gear.visible = agl < 9;
+      if (ud && ud.prop) ud.prop.rotation.z += dt * (6 + 55 * (craft.thr || 0));
+      // military airframes (city/mil_air.js): control surfaces follow the
+      // attitude, the nozzle glows with the throttle, every prop spins
+      if (CBZ.milAirDrive && grp._milRt) { _milDrive.thr = craft.thr || 0; CBZ.milAirDrive(grp, _milDrive, dt); }
+      return;
+    }
+    const st = craft._afs || (craft._afs = { gear: 1, running: true, _r: craft.roll || 0, _p: craft.pitch || 0, _h: craft.heading || 0 });
+    const idt = 1 / Math.max(1e-3, dt);
+    let dh = (craft.heading || 0) - st._h;
+    while (dh > Math.PI) dh -= Math.PI * 2;
+    while (dh < -Math.PI) dh += Math.PI * 2;
+    const rr = ((craft.roll || 0) - st._r) * idt, pr = ((craft.pitch || 0) - st._p) * idt, hr = dh * idt;
+    st._r = craft.roll || 0; st._p = craft.pitch || 0; st._h = craft.heading || 0;
+    const C = WING_V2[craft.airClass] || null;
+    const vs = C ? C.vstall : 20;
+    const as = craft.airspeed != null ? craft.airspeed : (craft.speed || 0);
+    if (craft.onGround || agl < 30) st.gear = 1;
+    else if (agl > 45 && (craft.vy || 0) > 0.5) st.gear = 0;
+    else if (agl < 160 && (craft.vy || 0) < -1.5 && as < vs * 1.7) st.gear = 1;
+    st.ail = Math.max(-1, Math.min(1, rr * 1.2 + (craft.roll || 0) * 0.4));
+    st.elev = Math.max(-1, Math.min(1, pr * 1.5));
+    st.rud = Math.max(-1, Math.min(1, craft.onGround ? hr * 1.2 : hr * 0.6));
+    st.flap = (craft.onGround && as < (C ? C.vr : 30) * 1.1) || (!craft.onGround && agl < 300 && as < vs * 1.8) ? 0.65 : 0;
+    st.power = craft.kind === "heli" ? 1 : (craft.thr != null ? craft.thr : 0.5);
+    st.lights = agl > 2 ? "on" : "nav";
+    st.landing = agl < 250;
+    st.rotor = false;                              // spinRotors owns a helicopter's rotor
+    AF.animate(grp, st, dt);
+  }
+
   function integrate(craft, dt) {
     craft.pos.x += craft.vx * dt;
     craft.pos.y += craft.vy * dt;
@@ -2495,10 +2020,7 @@
       // a jet that bottoms out keeps cruising level (no stall-crash); a heli rests
       if (craft.kind === "jet" && craft.pitch < 0) craft.pitch = 0;
     }
-    // retractable landing gear (jet): legs drop when skimming low, tuck away
-    // with altitude — driven off the same AGL this integrator already knows.
-    const udI = craft.group.userData;
-    if (udI && udI.gear) udI.gear.visible = (craft.pos.y - gy) < 9;
+    animateAirframe(craft, craft.pos.y - gy, dt);
     // apply transform
     craft.group.position.set(craft.pos.x, craft.pos.y, craft.pos.z);
     setCraftRotation(craft, craft.pitch || 0, craft.heading, craft.roll || 0);
@@ -2789,6 +2311,8 @@
     group.userData.charred = true;
     group.traverse(function (o) {
       if (!o.material) return;
+      // a prop/rotor blur disc is air, not skin: a wreck has none
+      if (o.userData && o.userData.mk === "blur") { o.visible = false; return; }
       function charOne(src) {
         const m = src && src.clone ? src.clone() : src;
         if (m && m.color) m.color.multiplyScalar(0.22);
@@ -3237,14 +2761,7 @@
       if (craft.vy < 0) craft.vy = 0;
       craft.onGround = true;
     }
-    const ud = craft.group.userData;
-    if (ud && ud.gear) ud.gear.visible = (craft.pos.y - surfY) < 9;
-    // prop-spin hook: any craft whose builder tags a spinner (userData.prop,
-    // spins about local Z) gets throttle-proportional prop animation for free
-    if (ud && ud.prop) ud.prop.rotation.z += dt * (6 + 55 * (craft.thr || 0));
-    // military airframes (city/mil_air.js): control surfaces follow the
-    // attitude, the nozzle glows with the throttle, every prop spins
-    if (CBZ.milAirDrive && craft.group._milRt) { _milDrive.thr = craft.thr || 0; CBZ.milAirDrive(craft.group, _milDrive, dt); }
+    animateAirframe(craft, craft.pos.y - surfY, dt);
     craft.group.position.set(craft.pos.x, craft.pos.y, craft.pos.z);
     setCraftRotation(craft, craft.pitch || 0, craft.heading, craft.roll || 0);
   }

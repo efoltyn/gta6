@@ -498,7 +498,10 @@
       // the same volume. When the airframe brought its own room we dress only
       // what it is missing — the live instrument panel, the glareshield over
       // it, and the controls — and let the existing geometry be the cockpit.
-      minimal: !!(grp && grp.userData && grp.userData.cabin && grp.userData.cabin.cockpitLeaf),
+      // (city/airframes.js marks every airframe that models its own flight
+      // deck with cabin.flightDeck; helicopters and light planes carry the
+      // same room as `userData.flightDeck`)
+      minimal: !!(grp && grp.userData && ((grp.userData.cabin && grp.userData.cabin.flightDeck) || grp.userData.flightDeck)),
     };
     if (spec.minimal) { spec.tub = null; spec.frame = null; spec.overhead = null; spec.seat = null; }
     // `type` strings must survive scaleBlock (it only touches numbers) —
@@ -828,6 +831,9 @@
     craft._cockpit = rec;
     live.push(rec);
     attachCount++;
+    // the airframe's own static panel/glareshield/pedestal gives way to the
+    // live instruments while you sit there
+    if (spec.minimal && CBZ.airframes && craft.group) { try { CBZ.airframes.hideDeck(craft.group, true); } catch (e) {} }
     return rec;
   };
 
@@ -997,6 +1003,7 @@
       try { CBZ.cockpitShapes.dispose(rec.root); } catch (e) { disposeTree(rec.root); }
     } else disposeTree(rec.root);
     rec.canvas = rec.ctx = rec.tex = rec.hudCanvas = rec.hudCtx = rec.hudTex = null;
+    if (CBZ.airframes && craft.group) { try { CBZ.airframes.hideDeck(craft.group, false); } catch (e) {} }
     craft._cockpit = null;
   };
   function disposeTree(o) {

@@ -436,7 +436,7 @@ document.body.appendChild(b);}}catch(e){}})();
 ============================================================ -->
 
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=mil0929"></script>
+<script src="src/config.js?v=af0929m"></script>
 <!-- CITY SLICES (?slice=name|x,z,r): one piece of Gang City booted as its own world.
      Parses the URL only; with no slice every helper answers "keep". -->
 <script src="src/core/texfree.js?v=phonefit1"></script>
@@ -1257,14 +1257,21 @@ document.body.appendChild(b);}}catch(e){}})();
      through it into the betting ledger. Before every venue that uses it. -->
 <script src="src/city/betslip.js?v=onebet1"></script>
 <script src="src/city/island_speedway.js?v=cd0929"></script>
-<script src="src/city/island_airport.js?v=wreal0929"></script>
+<!-- CIVIL AIRFRAMES. The loft/aerofoil/lathe kit and every civil aircraft
+     type drawn from it at real dimensions (narrowbody, widebody, turboprop,
+     business jet, light single, helicopter variants), shared per type, with
+     their gear/surface/door/light animation and a distance LOD. Before every
+     module that parks, flies or boards one. -->
+<script src="src/city/airframe_kit.js?v=af0929b"></script>
+<script src="src/city/airframes.js?v=af0929b"></script>
+<script src="src/city/island_airport.js?v=af0929"></script>
 <!-- THE AIRFIELD KIT + THE SECOND AIRPORT. buildAirfield() lays a complete
      field (runway, markings, edge lights, taxiway, apron, stands, terminal,
      tower, fence, kerb, access causeway) from one spec at any origin and any
      bearing, reusing island_airport.js's OWN airframe factories — which is
      why airport_capeharbor.js is a spec and a single call. Both load after
      island_airport.js: it is what publishes CBZ.airportKit. -->
-<script src="src/city/airport_kit.js?v=wreal0929"></script>
+<script src="src/city/airport_kit.js?v=af0929"></script>
 <script src="src/city/airport_capeharbor.js?v=nodash1"></script>
 <!-- MILITARY AIRFRAMES: lofted fighter / attack + utility helicopters / drone / bomber and the kit the cargo lifter is built with. Before island_military (its model factories call CBZ.milAir). -->
 <script src="src/city/mil_air.js?v=mil0929"></script>
@@ -1398,7 +1405,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/medics.js?v=fit1"></script>
 <script src="src/city/security.js?v=seawave1"></script>
 <script src="src/city/vips.js?v=cd0929"></script>
-<script src="src/city/police.js?v=ekey2"></script>
+<script src="src/city/police.js?v=af0929"></script>
 <script src="src/city/aircraftphysics.js?v=aero1"></script>
 <script src="src/city/aircraft.js?v=mil0929"></script>
 <script src="src/city/traffic.js?v=metro0929"></script>
@@ -1422,7 +1429,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/vehicles.js?v=metro0929"></script>
 <script src="src/city/carinstances.js?v=w09290242x"></script>
 <script src="src/city/playerair.js?v=nodash1"></script>
-<script src="src/city/playeraircraft.js?v=mil0929"></script>
+<script src="src/city/playeraircraft.js?v=af0929b"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
      spec generator derives ~40 numbers from what already exists, taking the
      eye point from geometry the artists already placed (the modelled captain's
@@ -1435,7 +1442,7 @@ document.body.appendChild(b);}}catch(e){}})();
      must precede cockpit.js; cockpit_view.js must be last of the four. -->
 <script src="src/city/cockpit_panel.js?v=cockpit1"></script>
 <script src="src/city/cockpit_shapes.js?v=cockpit1x0"></script>
-<script src="src/city/cockpit.js?v=cockpit1w9"></script>
+<script src="src/city/cockpit.js?v=af0929"></script>
 <script src="src/city/cockpit_view.js?v=me6f1ee"></script>
 <!-- BAILOUT: stepping out of a FLYING aircraft. exitAircraft() was written for
      a parked machine — it zeroes attitude and velocity and forces onGround, so
@@ -1454,7 +1461,7 @@ document.body.appendChild(b);}}catch(e){}})();
      control hands over (and the reverse on exit). Wired behind the existing
      board/enter APIs — militaryvehicles.js + playeraircraft.js call into it,
      island_airport.js panel/airstair easing honours its open flag. -->
-<script src="src/city/aircraft_doors.js?v=doorarc2ramp"></script>
+<script src="src/city/aircraft_doors.js?v=af0929"></script>
 <!-- THE WALK-IN HOLD: CBZ.vehicleHold(vehicle, spec) — a real ROOM inside a
      moving vehicle (cargo plane today, semi trailer / van next), built on
      systems/platforms_moving.js for the floor+ramp+walls and npclife for the
@@ -1499,7 +1506,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- ambient civilian air traffic (GA prop planes + a light heli orbiting the
      city, banking into their turns) — pure atmosphere, deterministic, gated by
      CBZ.CONFIG.AIR_TRAFFIC_AMBIENT -->
-<script src="src/city/airtraffic.js?v=w0929est"></script>
+<script src="src/city/airtraffic.js?v=af0929"></script>
 <!-- ORDNANCE + STRUCTURE. impactbus.js: CBZ.detonate(x,y,z,kind,opts) — new
      ordnance is a TABLE ROW, not a file. structural.js: CBZ.structure, the ONE
      building damage ledger (INTACT→SCARRED→WOUNDED→BURNING→CRITICAL→COLLAPSING→
@@ -1598,7 +1605,7 @@ document.body.appendChild(b);}}catch(e){}})();
      and the flight is cancelled. Then ticketing.js sells you a seat on it:
      [E] at any check-in counter, the flight holds its doors for you, and you
      ride the cabin the whole way. After the fields that register themselves. -->
-<script src="src/systems/airline.js?v=nodash1"></script>
+<script src="src/systems/airline.js?v=af0929"></script>
 <script src="src/city/ticketing.js?v=cd0929"></script>
 <!-- HIGHWAY CHECKPOINTS. Permanent policed shoulders, as opposed to the
      dynamic roadblock police.js already stages across your lane at 3 stars.
