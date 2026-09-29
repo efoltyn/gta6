@@ -1077,7 +1077,7 @@
   const _goreOpts = { amount: 1, dir: _goreDir, medium: "air", player: false, sfx: true, melee: "blade" };
   const _woundP = { x: 0, y: 0, z: 0 };
   const _woundDir = { x: 1, y: 0, z: 0 };
-  const _woundOpts = { head: false, cal: 1.5, melee: "blade", fromX: 0, fromZ: 0 };
+  const _woundOpts = { head: false, cal: 1.5, melee: "bite", jaw: 0.3, sev: 0.7, fromX: 0, fromZ: 0 };
   const _sfxOpts = { volume: 1 };
   // the QTE tick must NEVER be eaten by the sample bank's per-name cooldown —
   // a missed instruction cue reads as an unfair death.
@@ -1323,6 +1323,14 @@
       _woundP.x = _jaw.x; _woundP.y = _jaw.y; _woundP.z = _jaw.z;
       _woundOpts.cal = 1.2 + amount * 0.4;
       _woundOpts.fromX = ap ? ap.x : 0; _woundOpts.fromZ = ap ? ap.z : 0;
+      /* A JAW LEAVES A JAW PRINT, not a knife slit. This was melee:"blade",
+         which since WOUND_REAL_V3 draws a stab SLIT — so a shark worrying a
+         swimmer left knife cuts. "bite" routes to CBZ.bodyBite: both tooth
+         rows sized from THIS mouth (creature_combat's jaw law: 0.10 + 0.16 x
+         the attacker's live scale), bounded by the body it closed on. */
+      const jaw0 = 0.10 + (actorScale(h.attacker) || 1) * 0.16;
+      _woundOpts.jaw = (typeof CBZ.creatureWoundR === "function") ? CBZ.creatureWoundR(jaw0, target) : jaw0;
+      _woundOpts.sev = Math.min(1, 0.5 + amount * 0.4);
       try { CBZ.bodyWound(target, _woundP, _woundOpts); } catch (e) {}
     }
     /* AND IF THE THING IN THE JAWS IS NOT A PERSON.
