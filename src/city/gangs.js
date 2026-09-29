@@ -1481,8 +1481,9 @@
     if (CBZ.carOccupancySeat) {
       if (CBZ.carOccupancySeat(car, DB_SLOT[seatKey] || "rearR", ped, { armed: true, spawned: false })) return true;
     }
-    const a = CBZ.carSeatAnchor ? CBZ.carSeatAnchor(car, DB_SLOT[seatKey] || "rearR") : null;
-    return CBZ.npcLife.attach(ped, car.group, a || DB_SEATS[seatKey] || DB_SEATS.rear);
+    const pl = CBZ.carSeatPlacement ? CBZ.carSeatPlacement(car, DB_SLOT[seatKey] || "rearR") : null;
+    if (pl) return CBZ.npcLife.attach(ped, pl.parent, pl.anchor);
+    return CBZ.npcLife.attach(ped, car.group, DB_SEATS[seatKey] || DB_SEATS.rear);
   }
 
   function spawnRealDriveby(gang, aim, victimGang) {

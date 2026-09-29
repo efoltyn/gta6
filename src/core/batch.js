@@ -686,20 +686,212 @@
     return run(root, true);
   };
 
+  /* ---- TEXTURED STATICS: merge per MATERIAL per tile ----------------------
+     Everything above refuses a mesh with a map (a merged V2 bucket shares ONE
+     white vertex-colour material, and a texture cannot ride a vertex colour).
+     But two static meshes that already share the SAME material object — the
+     same map, the same shader, the same uniforms — draw identically from one
+     buffer: nothing is re-coloured, the material is the one they had. So this
+     pass buckets what batch and localinst LEFT (visible, unreferenced, no
+     userData, single material with a map, opaque) by material + 112 m tile +
+     shadow flags + attribute layout, bakes world matrices while copying, and
+     draws each bucket once. Float32 normals are kept (Standard/Phong
+     specular reads them), uv/uv2/colour copied as they are.
+     Run by CBZ.ensurePrisonBatched (measured: 26,639 jail meshes into 188
+     draws; it replaced world/prisonkit.js's private merger). The city does
+     not call it: 9 buckets / 32 meshes, since nearly every textured city mesh
+     carries userData. A root that also uses localinst must run this AFTER it,
+     or a prop repeated in a 672 m cell becomes one draw per 112 m tile.
+     Skipped, kept live: mirrored meshes (a negative determinant flips the
+     winding), morph targets, custom onBeforeRender,
+     renderOrder, frustumCulled=false, non-default layers, transparent.
+     Originals are removed and ledgered per top group exactly like the inert
+     pass, so demolition's batchHideGroup still zeroes a building's slice. */
+  const _texAttrs = ["position", "normal", "uv", "uv2", "color"];
+  const _defaultOBR = THREE.Object3D.prototype.onBeforeRender;
+  function texKey(m) {
+    const mat = m.material;
+    if (!mat || Array.isArray(mat) || !mat.map) return null;
+    // cut-out alpha (alphaTest + depth writes: the jail's chain-link) sorts
+    // like an opaque surface; real blending does not survive a merge
+    if ((mat.transparent && !(mat.alphaTest > 0 && mat.depthWrite)) || mat.opacity < 1) return null;
+    if (m.renderOrder || m.frustumCulled === false || m.layers.mask !== 1) return null;
+    if (m.onBeforeRender !== _defaultOBR) return null;
+    const g = m.geometry;
+    if (!g || !g.isBufferGeometry || !g.attributes.position || !g.attributes.normal) return null;
+    // positions/normals are re-baked as float; a quantized source is left alone
+    if (!(g.attributes.position.array instanceof Float32Array) || !(g.attributes.normal.array instanceof Float32Array)) return null;
+    // geometry groups only matter to an ARRAY material; a single material draws
+    // the whole range (r128 renderObject with group null), so a BoxGeometry's
+    // six face groups are no reason to keep it live
+    if (g.drawRange.start !== 0 || g.drawRange.count !== Infinity) return null;
+    if (g.morphAttributes && Object.keys(g.morphAttributes).length) return null;
+    let sig = "";
+    for (const name in g.attributes) {
+      const i = _texAttrs.indexOf(name);
+      if (i < 0) return null;                         // tangents, skin, custom: keep live
+      const a = g.attributes[name];
+      if (a.isInterleavedBufferAttribute) return null;
+      sig += name + a.itemSize + (a.normalized ? "n" : "") + a.array.constructor.name + ";";
+    }
+    if (m.matrixWorld.determinant() < 0) return null;
+    return mat.uuid + "|" + (m.castShadow ? 1 : 0) + (m.receiveShadow ? 1 : 0) + "|" + sig;
+  }
+  const _tn3 = new THREE.Matrix3();
+  function bakeMergeTextured(meshes) {
+    const g0 = meshes[0].geometry;
+    const names = Object.keys(g0.attributes);
+    let nPos = 0, nIdx = 0;
+    const counts = new Array(meshes.length);
+    for (let i = 0; i < meshes.length; i++) {
+      const g = meshes[i].geometry, pc = g.attributes.position.count;
+      counts[i] = pc; nPos += pc; nIdx += g.index ? g.index.count : pc;
+    }
+    const out = new THREE.BufferGeometry();
+    const dst = {};
+    for (const name of names) {
+      const a = g0.attributes[name];
+      const Arr = name === "position" || name === "normal" ? Float32Array : a.array.constructor;
+      dst[name] = new Arr(nPos * a.itemSize);
+      out.setAttribute(name, new THREE.BufferAttribute(dst[name], a.itemSize, name === "position" || name === "normal" ? false : a.normalized));
+    }
+    const idx = nPos > 65535 ? new Uint32Array(nIdx) : new Uint16Array(nIdx);
+    let vo = 0, io = 0;
+    for (let mi = 0; mi < meshes.length; mi++) {
+      const m = meshes[mi], g = m.geometry, pc = counts[mi];
+      const e = m.matrixWorld.elements;
+      const ne = _tn3.getNormalMatrix(m.matrixWorld).elements;
+      const p = g.attributes.position.array, P = dst.position;
+      for (let s = 0, o = vo * 3; s < pc * 3; s += 3, o += 3) {
+        const x = p[s], y = p[s + 1], z = p[s + 2];
+        P[o] = e[0] * x + e[4] * y + e[8] * z + e[12];
+        P[o + 1] = e[1] * x + e[5] * y + e[9] * z + e[13];
+        P[o + 2] = e[2] * x + e[6] * y + e[10] * z + e[14];
+      }
+      const n = g.attributes.normal.array, N = dst.normal;
+      for (let s = 0, o = vo * 3; s < pc * 3; s += 3, o += 3) {
+        const a = n[s], b = n[s + 1], c = n[s + 2];
+        let nx = ne[0] * a + ne[3] * b + ne[6] * c, ny = ne[1] * a + ne[4] * b + ne[7] * c, nz = ne[2] * a + ne[5] * b + ne[8] * c;
+        const l = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+        N[o] = nx / l; N[o + 1] = ny / l; N[o + 2] = nz / l;
+      }
+      for (const name of names) {
+        if (name === "position" || name === "normal") continue;
+        const a = g.attributes[name];
+        dst[name].set(a.array.subarray(0, pc * a.itemSize), vo * a.itemSize);
+      }
+      if (g.index) {
+        const ia = g.index.array;
+        for (let k = 0; k < ia.length; k++) idx[io + k] = ia[k] + vo;
+        io += ia.length;
+      } else {
+        for (let k = 0; k < pc; k++) idx[io + k] = vo + k;
+        io += pc;
+      }
+      vo += pc;
+    }
+    out.setIndex(new THREE.BufferAttribute(idx, 1));
+    return { geometry: out, counts };
+  }
+  CBZ.batchTexturedUnder = function (target) {
+    if (!target || target.userData._texBatched) return null;
+    target.userData._texBatched = true;
+    const losSet = new Set(CBZ.losBlockers || []);
+    const refSet = new Set(), liveGroups = new Set();
+    for (const c of (CBZ.colliders || [])) if (c && c.ref) { refSet.add(c.ref); if (c.ref.isGroup) liveGroups.add(c.ref); }
+    for (const p of (CBZ.platforms || [])) if (p && p.ref) refSet.add(p.ref);
+    const buckets = new Map();
+    function topOf(m) {
+      let o = m, prev = m;
+      while (o && o.parent && o.parent !== target) { prev = o; o = o.parent; }
+      return (o && o.parent === target) ? o : prev;
+    }
+    function walk(o) {
+      if (o.visible === false) return;                 // hidden stays hidden, live (localinst originals too)
+      if (o.userData && (o.userData.dynamic || o.userData.mover)) return;
+      if (liveGroups.has(o)) return;
+      if (o.isMesh) {
+        if (o.isInstancedMesh || o.isSkinnedMesh) return;
+        if (o.userData && Object.keys(o.userData).length > 0) return;
+        if (losSet.has(o) || refSet.has(o)) return;
+        const k = texKey(o);
+        if (!k) return;
+        const e = o.matrixWorld.elements;
+        const key = "X" + Math.floor(e[12] / TILE) + "," + Math.floor(e[14] / TILE) + "|" + k;
+        let b = buckets.get(key);
+        if (!b) { b = { meshes: [], tops: [] }; buckets.set(key, b); }
+        b.meshes.push(o); b.tops.push(topOf(o));
+        return;
+      }
+      const kids = o.children;
+      for (let i = 0; i < kids.length; i++) walk(kids[i]);
+    }
+    target.updateWorldMatrix(true, true);
+    for (const c of target.children.slice()) walk(c);
+    let merged = 0, removed = 0;
+    const doomed = new Set();
+    buckets.forEach(function (b) {
+      const meshes = b.meshes;
+      if (meshes.length < 2) return;
+      const r = bakeMergeTextured(meshes);
+      r.geometry.computeBoundingSphere();
+      const proto = meshes[0];
+      const mesh = new THREE.Mesh(r.geometry, proto.material);
+      mesh.name = "batch-tex";
+      mesh.castShadow = proto.castShadow;
+      mesh.receiveShadow = proto.receiveShadow;
+      mesh.matrixAutoUpdate = false;
+      target.add(mesh);
+      let off = 0, runTop = null, runStart = 0;
+      for (let i = 0; i < r.counts.length; i++) {
+        const top = b.tops[i];
+        if (top !== runTop) {
+          if (runTop && off > runStart) addRange(runTop, { mesh, start: runStart, count: off - runStart });
+          runTop = top; runStart = off;
+        }
+        off += r.counts[i];
+      }
+      if (runTop && off > runStart) addRange(runTop, { mesh, start: runStart, count: off - runStart });
+      // geometry is NOT disposed: textured kit geometry is often shared with
+      // live meshes elsewhere; the detached originals simply go to the GC
+      for (const m of meshes) { if (m.parent) doomed.add(m); removed++; }
+      merged++;
+    });
+    if (doomed.size) {
+      const parents = new Set();
+      doomed.forEach((m) => parents.add(m.parent));
+      parents.forEach((p) => { p.children = p.children.filter((c) => !doomed.has(c)); });
+      doomed.forEach((m) => { m.parent = null; m.dispatchEvent({ type: "removed" }); });
+    }
+    const st = CBZ.batchStats || (CBZ.batchStats = {});
+    st.texMerged = (st.texMerged || 0) + merged;
+    st.texRemoved = (st.texRemoved || 0) + removed;
+    return { merged, removed };
+  };
+
   // Run after every load-time world/entity module has populated the scene.
   // The window 'load' event fires once all scripts have executed, so the
   // scene is fully built. Guard so it can only ever collapse once.
   let done = false;
+  // The jail is a real mode root, so it is recursed exactly like the lazily-
+  // built city: dynamic inmate/guard subtrees carry userData.dynamic and are
+  // skipped; static prison decoration is merged, then matrix-frozen. It is
+  // batched when it is first SHOWN, not at page load: a Gang City, island or
+  // shark start never draws the prison, so paying its batch on the way to
+  // the title was pure load time. systems/state.js (setMode) and
+  // modes/gungame.js (the JAIL map) call this when they unhide it; the load
+  // pass below still does it at once when the page opens on the prison.
+  CBZ.ensurePrisonBatched = function () {
+    const R = CBZ.prisonRoot;
+    if (!R || R.userData._batched) return;
+    CBZ.batchStaticUnder(R);
+    CBZ.batchTexturedUnder(R);            // the kit's textured pieces (world/prisonkit.js stat)
+    if (CBZ.freezeStaticUnder) CBZ.freezeStaticUnder(R);
+  };
   function runOnce() {
     if (done) return;
     done = true;
-    // The jail is a real mode root now, so recurse through it exactly like the
-    // lazily-built city. Dynamic inmate/guard subtrees carry userData.dynamic
-    // and are skipped; static prison decoration is merged, then matrix-frozen.
-    if (CBZ.prisonRoot) {
-      CBZ.batchStaticUnder(CBZ.prisonRoot);
-      if (CBZ.freezeStaticUnder) CBZ.freezeStaticUnder(CBZ.prisonRoot);
-    }
+    if (CBZ.prisonRoot && CBZ.prisonRoot.visible !== false) CBZ.ensurePrisonBatched();
     // Keep the conservative top-level pass for shared/global scene objects.
     run();
   }

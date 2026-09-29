@@ -30,6 +30,17 @@
    hidden); a group that moves is an actor and is blacklisted, exactly like
    farcull does.
 
+   LIGHTS HIDE WITH THEIR SUBTREE, AND THAT IS FINE. A hidden group takes its
+   lights out of the frame, but core/lightpin.js pins the shader light COUNT
+   at render time (dummies top the budget up), so no program is re-keyed.
+   Every group this pass hides is flagged `_cbzScopeHidden` so lightpin can
+   rank lights exactly as if this pass had not run (the look the light
+   budget always had), then keep only the ones still drawn. (A 2026-09-28
+   rule that never hid a lit subtree made MORE far lamps real shader lights:
+   Gouraud-lit terrain triangles hundreds of metres wide paled the aerial
+   horizon. It is gone here; the pin covers what it was for. `b.lit` is
+   still measured: city/cctv.js keeps lit subtrees in its feed.)
+
    CBZ.subtreeSphere(o) is the ONE 3-D subtree measurement (moved here from
    city/cctv.js, which now calls it): a cached world-space sphere per top-level
    arena child, instanced pools measured over their instances, world-spanning
@@ -58,7 +69,7 @@
     // the version counter is the measurement's own receipt (farcull's trick).
     if (b && b.iv != null && o.instanceMatrix && o.instanceMatrix.version !== b.iv) b = null;
     if (b) return b;
-    b = { x: 0, y: 0, z: 0, r: 0, px: o.position.x, pz: o.position.z, iv: null, dyn: false, loose: false };
+    b = { x: 0, y: 0, z: 0, r: 0, px: o.position.x, pz: o.position.z, iv: null, dyn: false, loose: false, lit: false };
     try {
       if (o.userData && o.userData.dynamic) b.dyn = true;
       else if (o.isInstancedMesh) {
@@ -97,6 +108,7 @@
         }
       }
       else if (o.isMesh && o.geometry) {
+        if (o.children.length) o.traverse(function (x) { if (x.isLight) b.lit = true; });
         // O(1): batch.js/buildings.js already computed these spheres.
         if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
         const s = o.geometry.boundingSphere;
@@ -117,7 +129,10 @@
         // Either one inside this subtree makes the group unscopeable for the
         // main camera. `loose` is separate from `dyn` because the CCTV feed
         // (city/cctv.js) accepts that approximation for its 256 px monitor.
-        o.traverse(function (x) { if (x.isMesh && (x.frustumCulled === false || x.isInstancedMesh)) b.loose = true; });
+        o.traverse(function (x) {
+          if (x.isMesh && (x.frustumCulled === false || x.isInstancedMesh)) b.loose = true;
+          if (x.isLight) b.lit = true;
+        });
         if (isFinite(_box.min.x) && isFinite(_box.max.x)) {
           _box.getCenter(_v);
           b.x = _v.x; b.y = _v.y; b.z = _v.z;
@@ -143,7 +158,7 @@
   const MEASURES_PER_FRAME = 24;   // fresh Box3 subtree walks allowed per frame (the 30-50 ms hitch-stack farcull budgets against)
 
   function restore() {
-    for (let i = hidden.length - 1; i >= 0; i--) hidden[i].visible = true;
+    for (let i = hidden.length - 1; i >= 0; i--) { hidden[i].visible = true; hidden[i]._cbzScopeHidden = false; }
     hidden.length = 0;
   }
   // Both chains: updaters do not run while paused, the always chain does.
@@ -193,7 +208,7 @@
       _s.center.set(b.x, b.y, b.z); _s.radius = b.r + PAD;
       if (viewF.intersectsSphere(_s)) continue;
       if (shadowFrame && sunF.intersectsSphere(_s)) continue;
-      o.visible = false; hidden.push(o); n++;
+      o.visible = false; o._cbzScopeHidden = true; hidden.push(o); n++;
     }
     A.frames++; A.hidden += n; A.lastHidden = n;
   }

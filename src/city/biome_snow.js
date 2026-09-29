@@ -194,6 +194,10 @@
   }
   function flatRectFactor(x, z, cx, cz, hx, hz, feather) {
     const dx = Math.abs(x - cx) - hx, dz = Math.abs(z - cz) - hz;
+    // a whole feather clear of the rect on either axis: fully outside (the
+    // hypot below is >= that axis, so smooth01 would clamp to exactly 1)
+    const F = Math.max(1, feather);
+    if (dx >= F || dz >= F) return 1;
     const outside = Math.hypot(Math.max(0, dx), Math.max(0, dz));
     const inside = Math.max(dx, dz);
     return inside <= 0 ? 0 : smooth01(outside / Math.max(1, feather));
@@ -301,8 +305,24 @@
   if (CFGS.TERRAIN_PEAKS_V2 == null) CFGS.TERRAIN_PEAKS_V2 = true;
   const PEAKS_V2 = function () { return CFGS.TERRAIN_PEAKS_V2 !== false; };
 
-  const HAS_KIT = !!(CBZ.mtnErode && CBZ.mtnRidgeMF && CBZ.mtnDrainage &&
-                     CBZ.mtnTerrace && CBZ.mtnCirque && CBZ.mtnTalus && CBZ.mtnHiGate);
+  /* The mountain kit (world/mountain_detail.js, parsed before this file),
+     bound ONCE. CBZ holds hundreds of properties and is a dictionary-mode
+     object, so every `CBZ.mtnX(...)` in the field code was a hash-table
+     lookup per call, tens of millions of calls per build. Same functions. */
+  const mtnNoise = CBZ.noise2 || CBZ.mtnNoise;       // core/seed.js's value noise IS mtnNoise
+  const mtnCirque = CBZ.mtnCirque;
+  const mtnConcavity = CBZ.mtnConcavity;
+  const mtnDrainage = CBZ.mtnDrainage;
+  const mtnErode = CBZ.mtnErode;
+  const mtnHiGate = CBZ.mtnHiGate;
+  const mtnRidgeMF = CBZ.mtnRidgeMF;
+  const mtnSlopeAt = CBZ.mtnSlopeAt;
+  const mtnSnowCover = CBZ.mtnSnowCover;
+  const mtnStrataTint = CBZ.mtnStrataTint;
+  const mtnTalus = CBZ.mtnTalus;
+  const mtnTerrace = CBZ.mtnTerrace;
+  const HAS_KIT = !!(mtnErode && mtnRidgeMF && mtnDrainage &&
+                     mtnTerrace && mtnCirque && mtnTalus && mtnHiGate);
   const EROSION_V4 = function () { return HAS_KIT && CFGS.MOUNT_EROSION_V4 !== false; };
   // ---- THE MASSIF, AS RIDGES (authored frame) ---------------------------
   // [ax, az, ha,  bx, bz, hb]: a straight crest whose height falls from the
@@ -357,7 +377,7 @@
   const _drO = { carve: 0, bed: 0, terrace: 0, bank: 0, t: 1 };
   const _tlO = { smooth: 0, fill: 0 };
   function mNoise(x, z, cell, salt) {
-    return CBZ.mtnNoise ? CBZ.mtnNoise(x, z, cell, salt) : noiseAt(x / cell + salt * 0.013, z / cell - salt * 0.007);
+    return mtnNoise ? mtnNoise(x, z, cell, salt) : noiseAt(x / cell + salt * 0.013, z / cell - salt * 0.007);
   }
   // polynomial smooth-max: max(a,b) plus at most k/4 where they are within k
   function smax(a, b, k) {
@@ -421,6 +441,16 @@
   // (no piste, no lift, no building pads, no edge feather). Memoised below:
   // the mesh vertex loop and the registered physics provider both read the
   // memo through ONE function, so they cannot fork.
+  // the kit's option records for the Mount Mercy field, built once (they were
+  // object literals allocated per sample: ~1M objects of garbage per build)
+  const MERCY_ERODE_O = {
+    oct: 5, cell: 210, lac: 2.03, gain: 0.5, damp: 1.35,
+    warp: 90, warpCell: 620, salt: S_ERODE,
+    strike: MERCY_STRIKE, aniso: 1 + (MERCY_ANISO - 1) * 0.55,
+  };
+  const MERCY_DRAIN_O = { oct: 4, cell: 760, width: 0.34, warp: 190, salt: S_RIVER };
+  const MERCY_TALUS_O = { alt: 0, steep: 0, cell: 124, salt: S_TALUS };
+  const MERCY_CIRQUE_O = { depth: 0.12, shadeDir: -2.15 };
   function mercyMacroA(x, z) {
     // the resort valley stays a valley; the north foot runs down into the
     // trough between this massif and the Greater Mercy Range (and a third of
@@ -451,17 +481,11 @@
     if (!HAS_KIT || m <= 0.01) return Math.max(0, m);
 
     const highFace = smooth01((m - 20) / 105);
-    const er = CBZ.mtnErode(x, z, {
-      oct: 5, cell: 210, lac: 2.03, gain: 0.5, damp: 1.35,
-      warp: 90, warpCell: 620, salt: S_ERODE,
-      strike: MERCY_STRIKE, aniso: 1 + (MERCY_ANISO - 1) * 0.55,
-    }, _erO);
-    const dr = CBZ.mtnDrainage(x, z, {
-      oct: 4, cell: 760, width: 0.34, warp: 190, salt: S_RIVER,
-    }, _drO);
+    const er = mtnErode(x, z, MERCY_ERODE_O, _erO);
+    const dr = mtnDrainage(x, z, MERCY_DRAIN_O, _drO);
     // fine rock-face relief, ~11-27u, on steep high ground only
-    const chipA = CBZ.mtnNoise(x, z, 27, S_FINE);
-    const chipB = CBZ.mtnNoise(x, z, 11, S_FINE + 3);
+    const chipA = mtnNoise(x, z, 27, S_FINE);
+    const chipB = mtnNoise(x, z, 11, S_FINE + 3);
     const chip = (1 - Math.abs(2 * chipA - 1)) * 0.6 + (1 - Math.abs(2 * chipB - 1)) * 0.4;
     const faceRough = highFace * smooth01((er.slope - 0.08) / 0.32);
     let f = 1
@@ -478,10 +502,11 @@
     }
     if (guard > 0) f += (1 - f) * guard;
     // TALUS: rockfall refills the carve at the foot of every cliff
-    const tl = CBZ.mtnTalus(x, z, { alt: clamp01(m / 240), steep: er.slope, cell: 124, salt: S_TALUS }, _tlO);
-    f += (1 - f) * clamp01(0.60 * tl.fill + 0.28 * tl.smooth) * CBZ.mtnHiGate(m);
+    MERCY_TALUS_O.alt = clamp01(m / 240); MERCY_TALUS_O.steep = er.slope;
+    const tl = mtnTalus(x, z, MERCY_TALUS_O, _tlO);
+    f += (1 - f) * clamp01(0.60 * tl.fill + 0.28 * tl.smooth) * mtnHiGate(m);
     // cirque headwalls on the shaded flank of every summit
-    f *= CBZ.mtnCirque(x, z, MERCY_PEAKS, { depth: 0.12, shadeDir: -2.15 });
+    f *= mtnCirque(x, z, MERCY_PEAKS, MERCY_CIRQUE_O);
     // No geometric strata benches any more: bedding cut into a pyramid's
     // faces quantises its CONTOURS, and on these steep faces that read as
     // concentric rings round every summit (a ziggurat). The skin still paints
@@ -500,7 +525,7 @@
   function mercyFineA(x, z, h) {
     if (!(h > 8) || !HAS_KIT || !EROSION_V4()) return 1;
     const alt = smooth01((h - 22) / 95);
-    const a = CBZ.mtnNoise(x, z, 6.5, S_FINE + 7);
+    const a = mtnNoise(x, z, 6.5, S_FINE + 7);
     return 1 - 0.012 * alt * (1 - Math.abs(2 * a - 1));
   }
 
@@ -824,10 +849,10 @@
       // along-coordinate by depth lets each one meander instead of ruling
       // a straight stripe down the flank
       const dist = r * l.sig;
-      const warp = (CBZ.mtnNoise(along * 0.5, dist, l.gsp * 3, S_GRIDGE + 53 + i) - 0.5) * l.gsp * 1.4;
+      const warp = (mtnNoise(along * 0.5, dist, l.gsp * 3, S_GRIDGE + 53 + i) - 0.5) * l.gsp * 1.4;
       const aw = (along + warp) / (0.55 + 0.9 * rn);
-      c = 2 * CBZ.mtnNoise(aw, dist * 0.12, l.gsp, S_GRIDGE + 31 + i) - 1;
-      c = c * 1.7 + 0.55 * (2 * CBZ.mtnNoise(aw, 0, l.gsp * 0.43, S_GRIDGE + 97 + i) - 1) * (1 - rn);
+      c = 2 * mtnNoise(aw, dist * 0.12, l.gsp, S_GRIDGE + 31 + i) - 1;
+      c = c * 1.7 + 0.55 * (2 * mtnNoise(aw, 0, l.gsp * 0.43, S_GRIDGE + 97 + i) - 1) * (1 - rn);
       c = c < 0 ? -Math.pow(Math.min(1, -c), 1.6) : 0.45 * Math.pow(Math.min(1, c), 0.75);
     }
     // tiny masses stay smooth; a big flank is cut a quarter deep
@@ -853,6 +878,21 @@
   // crest line, so this is where the anisotropy earns the most.
   const GREAT_STRIKE = CBZ.mtnStrikeOf ? CBZ.mtnStrikeOf(GREAT_MACRO_PEAKS) : 0;
   const GREAT_ANISO = 1.85;
+  // the kit's option records for this field, built once (see Mount Mercy's)
+  const GREAT_RIDGE_O = {
+    oct: 5, cell: 600, lac: 2.07, gain: 0.55, sharp: 1.7,
+    warp: 300, warpCell: 1700, salt: S_GRIDGE,
+    strike: GREAT_STRIKE, aniso: GREAT_ANISO,
+  };
+  const GREAT_ERODE_O = {
+    oct: 5, cell: 470, lac: 2.03, gain: 0.5, damp: 1.25,
+    warp: 210, warpCell: 1400, salt: S_GERODE,
+    strike: GREAT_STRIKE, aniso: 1 + (GREAT_ANISO - 1) * 0.55,
+  };
+  const GREAT_DRAIN_O = { oct: 4, cell: 1750, width: 0.32, warp: 430, salt: S_GRIVER };
+  const GREAT_TALUS_O = { alt: 0, steep: 0, cell: 280, salt: S_GTALUS };
+  const GREAT_CIRQUE_O = { depth: 0.15, shadeDir: -2.15 };
+  const GREAT_TERRACE_O = { amount: 0, step: 34, dip: 52, dipCell: 1250, dipCell2: 340, salt: S_GSTRATA };
   function greaterMercyMacroA(x, z) {
     let sum2 = 0;
     if (PEAKS_V2()) {
@@ -913,21 +953,11 @@
     }
 
     const highFace = smooth01((h - 40) / 220);
-    const ridge = CBZ.mtnRidgeMF(x, z, {
-      oct: 5, cell: 600, lac: 2.07, gain: 0.55, sharp: 1.7,
-      warp: 300, warpCell: 1700, salt: S_GRIDGE,
-      strike: GREAT_STRIKE, aniso: GREAT_ANISO,
-    });
-    const er = CBZ.mtnErode(x, z, {
-      oct: 5, cell: 470, lac: 2.03, gain: 0.5, damp: 1.25,
-      warp: 210, warpCell: 1400, salt: S_GERODE,
-      strike: GREAT_STRIKE, aniso: 1 + (GREAT_ANISO - 1) * 0.55,
-    }, _erO);
-    const dr = CBZ.mtnDrainage(x, z, {
-      oct: 4, cell: 1750, width: 0.32, warp: 430, salt: S_GRIVER,
-    }, _drO);
-    const gchipA = CBZ.mtnNoise(x, z, 76, S_GFINE);
-    const gchipB = CBZ.mtnNoise(x, z, 30, S_GFINE + 3);
+    const ridge = mtnRidgeMF(x, z, GREAT_RIDGE_O);
+    const er = mtnErode(x, z, GREAT_ERODE_O, _erO);
+    const dr = mtnDrainage(x, z, GREAT_DRAIN_O, _drO);
+    const gchipA = mtnNoise(x, z, 76, S_GFINE);
+    const gchipB = mtnNoise(x, z, 30, S_GFINE + 3);
     const gchip = (1 - Math.abs(2 * gchipA - 1)) * 0.6 + (1 - Math.abs(2 * gchipB - 1)) * 0.4;
     const gFace = highFace * smooth01((er.slope - 0.08) / 0.32);
     let f = 0.80                                     // ~ the legacy `erosion` mean
@@ -947,15 +977,14 @@
     if (gguard > 0) f = f + (0.80 - f) * gguard;
     // talus aprons — same fill-the-carve-back-in formulation as Mount Mercy,
     // so the factor stays <= 1 and no additive gate is needed
-    const tl = CBZ.mtnTalus(x, z, { alt: clamp01(h / 380), steep: er.slope, cell: 280, salt: S_GTALUS }, _tlO);
-    f = f + (0.80 - f) * clamp01(0.60 * tl.fill + 0.28 * tl.smooth) * CBZ.mtnHiGate(h);
-    f *= CBZ.mtnCirque(x, z, GREAT_MACRO_PEAKS, { depth: 0.15, shadeDir: -2.15 });
+    GREAT_TALUS_O.alt = clamp01(h / 380); GREAT_TALUS_O.steep = er.slope;
+    const tl = mtnTalus(x, z, GREAT_TALUS_O, _tlO);
+    f = f + (0.80 - f) * clamp01(0.60 * tl.fill + 0.28 * tl.smooth) * mtnHiGate(h);
+    f *= mtnCirque(x, z, GREAT_MACRO_PEAKS, GREAT_CIRQUE_O);
     h = Math.max(0, h * f * skirt);
     // strata benches, one scale up from Mount Mercy's
-    h = CBZ.mtnTerrace(h, x, z, {
-      amount: 0.30 * highFace * smooth01((er.slope - 0.05) / 0.28),
-      step: 34, dip: 52, dipCell: 1250, dipCell2: 340, salt: S_GSTRATA,
-    });
+    GREAT_TERRACE_O.amount = 0.30 * highFace * smooth01((er.slope - 0.05) / 0.28);
+    h = mtnTerrace(h, x, z, GREAT_TERRACE_O);
     return h;
   }
   // Fine face relief for the range — 26-70u, the scale its ~7u/vertex mesh
@@ -963,7 +992,7 @@
   function greaterFineA(x, z, h) {
     if (!(h > 14) || !HAS_KIT || !EROSION_V4()) return 1;
     const alt = smooth01((h - 30) / 220);
-    const a = CBZ.mtnNoise(x, z, 15, S_GFINE + 7);
+    const a = mtnNoise(x, z, 15, S_GFINE + 7);
     let f = 1 - 0.014 * alt * (1 - Math.abs(2 * a - 1));
     // crest crags (2026-09-05): from the coast this range was a row of smooth
     // cones with radial pleats. Ridged relief at 64 m and 27 m, up to ~6% of
@@ -971,8 +1000,8 @@
     // teeth the way a real crest line is broken. Multiplier <= 1 (LAW 1).
     const crag = smooth01((h - 120) / 260);
     if (crag > 0) {
-      const r1 = 1 - Math.abs(2 * CBZ.mtnNoise(x, z, 64, S_GFINE + 11) - 1);
-      const r2 = 1 - Math.abs(2 * CBZ.mtnNoise(x, z, 27, S_GFINE + 13) - 1);
+      const r1 = 1 - Math.abs(2 * mtnNoise(x, z, 64, S_GFINE + 11) - 1);
+      const r2 = 1 - Math.abs(2 * mtnNoise(x, z, 27, S_GFINE + 13) - 1);
       f *= 1 - crag * (0.040 * (1 - r1) + 0.024 * (1 - r2));
     }
     return f;
@@ -1018,7 +1047,7 @@
       h *= flatRectFactor(x, z, c.cx, c.cz, c.hx, c.hz, c.feather);
     }
     const K = massifAmp();
-    if (K !== 1 && h > 0 && CBZ.mtnHiGate) h *= 1 + (K - 1) * CBZ.mtnHiGate(h);
+    if (K !== 1 && h > 0 && mtnHiGate) h *= 1 + (K - 1) * mtnHiGate(h);
     return Math.max(0, h);
   }
   CBZ.mtnGreatBounds = { minX: GREAT_MINX, maxX: GREAT_MAXX, minZ: GREAT_MINZ, maxZ: GREAT_MAXZ };
@@ -1369,7 +1398,7 @@
           // bedding field mtnTerrace used to cut the actual benches, so the
           // colour bands land ON the geometric risers instead of floating
           // across them like the old sin(y*0.19) ripple did.
-          const bare = CBZ.mtnStrataTint(rc, wx - DX, wz - DZ, y, slope, faceLight, {
+          const bare = mtnStrataTint(rc, wx - DX, wz - DZ, y, slope, faceLight, {
             rock: granite, rockDark: graniteDark,
             // bedding bands as colour only (mercyMacroA cuts no benches now)
             step: 16, dip: 24, dipCell: 560, dipCell2: 155,
@@ -1401,7 +1430,7 @@
           // is the SAME memoised field the mesh is displaced by (mtnGridCache), so
           // the four extra samples are array reads and the white lands in the
           // gullies that are actually cut here.
-          const conc = CBZ.mtnConcavity ? CBZ.mtnConcavity(mountainHeightAt, wx, wz, 14, 0.055) : 0;
+          const conc = mtnConcavity ? mtnConcavity(mountainHeightAt, wx, wz, 14, 0.055) : 0;
           // Same correction as the Greater Range, one scale down: 24 m put the
           // snowline barely above the valley floor of a 260 m massif.
           // THE SHED TEST READS THE LANDFORM, NOT THE CRAGS. `slope` above
@@ -1410,8 +1439,8 @@
           // so the shed term was stripping cover off benches whose LANDFORM is
           // a 25 degree shelf. Same 14 m stencil the concavity above already
           // walks, so it is four more reads on the same memo.
-          const sHold = CBZ.mtnSlopeAt ? CBZ.mtnSlopeAt(mountainHeightAt, wx, wz, 14) : null;
-          const cover = CBZ.mtnSnowCover(wx - DX, wz - DZ, y, slope, faceLight, {
+          const sHold = mtnSlopeAt ? mtnSlopeAt(mountainHeightAt, wx, wz, 14) : null;
+          const cover = mtnSnowCover(wx - DX, wz - DZ, y, slope, faceLight, {
             // Retuned for the arete massif (2026-09-28): its faces are far
             // steeper than the old dome's, and the old line 58 / shed 0.13-0.50
             // left it 9% white. Lower line, deeper gully drop, a shed window
@@ -1623,7 +1652,7 @@
         if (STRATA_G) {
           // rock first (banded, warped, aspect-shaded), snow laid over it by a
           // real coverage model — same grammar as Mount Mercy, one scale up.
-          const bare = CBZ.mtnStrataTint(rc, wx - DX, wz - DZ, y, slope, faceLight, {
+          const bare = mtnStrataTint(rc, wx - DX, wz - DZ, y, slope, faceLight, {
             rock: granite, rockDark: graniteDark,
             // identical bedding params to greaterMercyMacroA's mtnTerrace call
             step: 34, dip: 52, dipCell: 1250, dipCell2: 340,
@@ -1641,7 +1670,7 @@
           // Same couloir/spine law one scale up (bigger stencil, deeper drop):
           // this range is the far panorama, and a far range that wears a flat
           // white cap is the single most artificial thing in the skyline.
-          const gconc = CBZ.mtnConcavity ? CBZ.mtnConcavity(greaterMercyHeightAt, wx, wz, 30, 0.05) : 0;
+          const gconc = mtnConcavity ? mtnConcavity(greaterMercyHeightAt, wx, wz, 30, 0.05) : 0;
           // The line was 46 m on a range whose summits stand past 400: seven
           // eighths of every flank was already under the snow ramp, which is
           // why the whole massif photographed as one white cardboard cutout
@@ -1649,8 +1678,8 @@
           // the upper THIRD, where the reference photographs put it, and the
           // gully term then walks it back down the couloirs to ~22 m — snow
           // running down the concavities past bare rock, which is the look.
-          const gHold = CBZ.mtnSlopeAt ? CBZ.mtnSlopeAt(greaterMercyHeightAt, wx, wz, 30) : null;
-          const cover = CBZ.mtnSnowCover(wx - DX, wz - DZ, y, slope, faceLight, {
+          const gHold = mtnSlopeAt ? mtnSlopeAt(greaterMercyHeightAt, wx, wz, 30) : null;
+          const cover = mtnSnowCover(wx - DX, wz - DZ, y, slope, faceLight, {
             // gully 38 (was 74), shed1 0.74 (was 0.54), line 88: the ridged range (see
             // RIDGES, NOT DOMES) has deeper gullies and steeper crests; the old
             // numbers filled every low valley white and stripped the summits

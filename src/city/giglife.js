@@ -255,12 +255,11 @@
   }
   function addFareActor(car, driver) {
     if (!car || car._gigFare || !car.group || !CBZ.npcLife) return null;
-    // THE REAL REAR SEAT of this body (vehicles.js carSeatAnchor: cushion,
-    // floor pan, fitted scale), kerb side — not a typed point that floated a
-    // full-size fare half out through the roof
-    const anchor = (CBZ.carSeatAnchor && (CBZ.carSeatAnchor(car, "rearR") || CBZ.carSeatAnchor(car, "shotgun"))) ||
-      { x: -0.42, y: 0.55, z: -0.35, yaw: 0, pose: "sit", state: "sit" };
-    const placement = { parent: car.group, anchor: anchor };
+    // THE REAL REAR SEAT of this body, kerb side (vehicles.js
+    // carSeatPlacement: floor-rooted, fitted, in the cabin's frame) — not a
+    // typed point that floated a full-size fare half out through the roof
+    const placement = (CBZ.carSeatPlacement && (CBZ.carSeatPlacement(car, "rearR") || CBZ.carSeatPlacement(car, "shotgun"))) ||
+      { parent: car.group, anchor: { x: -0.42, y: 0.55, z: -0.35, yaw: 0, pose: "sit", state: "sit" } };
     let fare = CBZ.npcLife.claimCity("cabPassenger", placement, function (p) { return safeFareDraft(p, driver); });
     let spawned = false;
     if (!fare) {
@@ -338,9 +337,9 @@
     // car carries exactly the people this file put in it, so the ambient
     // crew comes out first (gangs.js's drive-by car does the same).
     if (CBZ.carOccupancyClear) CBZ.carOccupancyClear(car);
-    const drvSeat = (CBZ.carSeatAnchor && CBZ.carSeatAnchor(car, "driver")) ||
-      { x: 0.42, y: 0.55, z: 0.38, yaw: 0, pose: "sit", state: "sit" };
-    if (CBZ.npcLife && CBZ.npcLife.attach(ped, car.group, drvSeat)) {
+    const drvSeat = (CBZ.carSeatPlacement && CBZ.carSeatPlacement(car, "driver")) ||
+      { parent: car.group, anchor: { x: 0.42, y: 0.55, z: 0.38, yaw: 0, pose: "sit", state: "sit" } };
+    if (CBZ.npcLife && CBZ.npcLife.attach(ped, drvSeat.parent, drvSeat.anchor)) {
       if (ped.group) ped.group.visible = true;
     } else if (ped.group) ped.group.visible = false;
     // the visible cargo / fare

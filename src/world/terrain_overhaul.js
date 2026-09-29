@@ -609,6 +609,22 @@
      tint. Surfacing restores every consumer's authored scale exactly. One
      value per distinct scale, so world.js / worldmap.js / biome_snow.js /
      continent.js keep their own dials. */
+  /* ---- a wrapper that edits the SOURCE must also edit the program KEY ----
+     r128 shares one compiled program between every material whose cache key
+     matches, and a material with its own customProgramCacheKey (the ground
+     skin's "cbzGroundSkin1") is keyed by that ALONE, not by its
+     onBeforeCompile. So the four wrappers below, which add code to the
+     shader, left every ground-skin material on one key whatever they added:
+     whichever adopter compiled first at a given light count supplied the
+     source for all of them. With 9 point lights the continent plate won
+     (fog scaled); pinned at 16 a bare trail decal won, and the whole
+     Redhollow floor and continent plate lost `fogDepth *= uFogScale`: the
+     aerial horizon fogged out pale (tools/speed.mjs look guard, 2026-09-29).
+     Each wrapper appends its tag to the key it found. */
+  function chainKey(mat, tag) {
+    const prevKey = mat.customProgramCacheKey;   // own, or r128's default (onBeforeCompile source)
+    mat.customProgramCacheKey = function () { return (prevKey ? prevKey.call(this) : "") + "|" + tag; };
+  }
   const _fogScaleU = new Map();
   function fogScaleUniform(scale) {
     const k = scale == null ? FOG_SCALE : scale;
@@ -629,6 +645,7 @@
     mat.userData._cbzFogScaled = true;
     // chain-safe like terrainDayTint/terrainAerial below: a material that
     // already carries its own onBeforeCompile (world/alpine_skin.js) keeps it
+    chainKey(mat, "fogScale");
     const prev = mat.onBeforeCompile;
     mat.onBeforeCompile = function (sh) {
       if (prev) prev.call(this, sh);
@@ -657,6 +674,7 @@
   }
   function terrainShelfLandCutout(mat) {
     if (!mat || CFG.TERRAIN_SHELF_LAND_CUTOUT === false) return mat;
+    chainKey(mat, "shelfCut");
     const prev = mat.onBeforeCompile;
     mat.onBeforeCompile = function (sh) {
       if (prev) prev.call(this, sh);
@@ -717,6 +735,7 @@
   }
   CBZ.terrainDayTint = function (mat) {
     if (!mat) return mat;
+    chainKey(mat, "dayTint");
     const prev = mat.onBeforeCompile;
     mat.onBeforeCompile = function (sh) {
       if (prev) prev.call(this, sh);
@@ -809,6 +828,7 @@
       };
       _aerRangeU.set(key, u);
     }
+    chainKey(mat, "aerial");
     const prev = mat.onBeforeCompile;
     mat.onBeforeCompile = function (sh) {
       if (prev) prev.call(this, sh);

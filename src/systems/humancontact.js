@@ -785,9 +785,10 @@
     downed.length = 0;
     const P = CBZ.player && CBZ.player.pos;
     function take(a) {
-      if (!a || a.culled || a.inCar || a.collected || a._npcAttached || !lying(a)) return;
+      if (!a || a.culled || a.inCar || a.collected || a._npcAttached) return;
       const p = posOf(a); if (!p) return;
-      if (P) { const dx = p.x - P.x, dz = p.z - P.z; if (dx * dx + dz * dz > 40 * 40) return; }
+      if (P) { const dx = p.x - P.x, dz = p.z - P.z; if (dx * dx + dz * dz > 40 * 40) return; }   // cheap reject first
+      if (!lying(a)) return;
       if (a._phys && a._phys.heldBy) return;
       if (CBZ.verbs && CBZ.verbs.held) { try { if (CBZ.verbs.held(a)) return; } catch (e) { /* no verbs */ } }
       downed.push(a);
@@ -824,9 +825,9 @@
     downGrid.rebuild(downed, posOf);
     for (let i = 0; i < list.length; i++) {
       const S = list[i];
-      if (S._remote || S._bcDown || S._bcSkip || swimming(S)) continue;
+      if (S._remote || S._bcDown || S._bcSkip) continue;
       const sp = speedOf(S);
-      if (sp < 0.6) continue;
+      if (sp < 0.6 || swimming(S)) continue;          // a standing man steps on nothing: skip the swim test
       const p = posOf(S); if (!p) continue;
       const gx = downGrid.cellIndex(p.x), gz = downGrid.cellIndex(p.z);
       for (let cx = gx - 1; cx <= gx + 1; cx++) for (let cz = gz - 1; cz <= gz + 1; cz++) {
@@ -881,6 +882,7 @@
       a._bcSess = S;
       if (heldTarget(a, S)) { a._bcSkip = true; a._bcFresh = false; continue; }
       measure(a, p);
+      a._bcX0 = p.x; a._bcZ0 = p.z;     // where this pass found him (the city clamp skips the unmoved)
       a._contactIndex = _live.length;
       _live.push(a);
     }
@@ -1025,6 +1027,13 @@
   function clampCity(a) {
     if (a && (a._traversal || (a._p && CBZ.player._traversal))) return;
     const p = posOf(a); if (!p) return;
+    /* NOT PUSHED, NOT CLAMPED. Every city body collides itself in its own
+       mover (peds.js, the cop and player controllers) before this pass, so a
+       body this pass did not move is exactly where its owner already made it
+       legal. Only a push can put someone into a wall; re-running the collider
+       broadphase + region clamp for the whole standing crowd on every pass
+       bought nothing. */
+    if (p.x === a._bcX0 && p.z === a._bcZ0) return;
     if (CBZ.collide) CBZ.collide(p, radiusOf(a), p.y, (p.y || 0) + 1.7);
     if (p === CBZ.player.pos && CBZ.cityWaterAt && CBZ.cityWaterAt(p.x, p.z)) return;
     if (CBZ.city && CBZ.city.arena) CBZ.city.arena.clampToCity(p, radiusOf(a));

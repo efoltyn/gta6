@@ -35,10 +35,9 @@
                                           across segments — the collider, the
                                           LOS blocker and the ref all survive
      CBZ.prisonKit.stat(geo, mat, x,y,z) a static textured piece; merged per
-                                          material + 40 m cell at window load
-                                          (core/batch.js refuses mapped and
-                                          Standard materials, so the kit
-                                          merges its own)
+                                          material + 112 m tile by
+                                          core/batch.js batchTexturedUnder
+                                          when the prison is first shown
      CBZ.guardTower(x, z, opts)          the tower. Concrete shaft, steel deck
                                           with a rail, glazed octagonal cabin,
                                           hipped roof, a caged ladder, the
@@ -350,13 +349,14 @@
   }
 
   /* ==========================================================
-     3. THE MERGER. Textured static pieces, per material and 40 m cell.
-        Flushed at window load, BEFORE core/batch.js's own pass (listeners
-        fire in registration order and this file parses first), and on
-        demand.
+     3. STATIC TEXTURED PIECES. stat() used to keep its own merger here (per
+        material per 40 m cell, flushed at window load) because core/batch.js
+        refused anything with a map. batch.js now merges textured statics per
+        material per tile itself (batchTexturedUnder, run by
+        CBZ.ensurePrisonBatched when the prison is first shown), so a piece
+        is simply a mesh: one merger for the city and the jail, not two.
      ========================================================== */
-  const buckets = new Map();
-  let merged = 0;
+  let pieces = 0;
   function stat(geo, mat, x, y, z, o) {
     o = o || {};
     if (o.rz) geo.rotateZ(o.rz);
@@ -364,42 +364,12 @@
     if (o.ry) geo.rotateY(o.ry);
     geo.translate(x, y, z);
     if (o.uv) worldUV(geo, o.uv);
-    const cast = o.cast !== false;
-    const key = mat.uuid + ":" + Math.floor(x / 40) + ":" + Math.floor(z / 40) + ":" + (cast ? 1 : 0);
-    let b = buckets.get(key);
-    if (!b) { b = { mat: mat, cast: cast, geos: [] }; buckets.set(key, b); }
-    b.geos.push(geo);
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = o.cast !== false; mesh.receiveShadow = true;
+    root().add(mesh);
+    pieces++;
     return geo;
   }
-  function flush() {
-    const BGU = THREE.BufferGeometryUtils;
-    for (const b of buckets.values()) {
-      if (!b.geos.length) continue;
-      let geo;
-      if (b.geos.length === 1) geo = b.geos[0];
-      else {
-        // every kit geometry is indexed with position/normal/uv; strip any
-        // extra attribute so mergeBufferGeometries sees one layout
-        for (const g of b.geos) for (const name of Object.keys(g.attributes)) {
-          if (name !== "position" && name !== "normal" && name !== "uv") g.deleteAttribute(name);
-        }
-        const same = b.geos.every((g) => !!g.index === !!b.geos[0].index);
-        const list = same ? b.geos : b.geos.map((g) => g.index ? g.toNonIndexed() : g);
-        geo = BGU && BGU.mergeBufferGeometries ? BGU.mergeBufferGeometries(list, false) : null;
-        if (!geo) { geo = list[0]; }
-        else for (const g of list) if (g !== geo) g.dispose();
-      }
-      const mesh = new THREE.Mesh(geo, b.mat);
-      mesh.castShadow = b.cast; mesh.receiveShadow = true;
-      mesh.userData.prisonKit = true;
-      root().add(mesh);
-      merged++;
-      b.geos = [];
-    }
-    buckets.clear();
-  }
-  if (document.readyState === "complete") setTimeout(flush, 0);
-  else addEventListener("load", flush);
 
   /* ==========================================================
      4. SMALL SHAPES the builders share.
@@ -1519,7 +1489,7 @@
     for (const p of programs) programmed += p.m2;
     const open = Math.max(0, ring - rooms);
     return {
-      fenceM: fenceM, masts: masts, towers: towerRecs.length, mergedMeshes: merged,
+      fenceM: fenceM, masts: masts, towers: towerRecs.length, statPieces: pieces,
       texturedWalls: texturedWalls, programmedM2: Math.round(programmed),
       ringM2: ring, ringRoomsM2: Math.round(rooms), ringOpenM2: Math.round(open),
       ringOpenShare: open > 0 ? Math.max(0, 1 - programmed / open) : 0,
@@ -1528,7 +1498,7 @@
   };
 
   CBZ.prisonKit = {
-    skin, skinBox, worldUV, stat, flush, octRing, post, coilRun, fence, floodMast, ground, paint, program, sign: signPlate, toneUp,
+    skin, skinBox, worldUV, stat, octRing, post, coilRun, fence, floodMast, ground, paint, program, sign: signPlate, toneUp,
     tube, rbox, rtube, picnicTable, hoop, canopy, drum, pallet,
     courtHalf, bleacher, profileGeo, vehicle, dumpster, workbench, combi,
     TOWER_DECK, TILE,

@@ -311,5 +311,79 @@ function clearOfFrame(p) {
   a.ko = 0;
 }
 
+// ---- A CAR DOOR (CBZ.moves.board / .alight): a sedan at (10, 0) heading
+// 0.6 rad, driver seat on the left (+X local), the door plane at x 0.92 ----
+{
+  const CX = 10, CZ = 0, HD = 0.6;
+  function carSpec(extra) {
+    const s = 1, halfW = 0.92, z1 = 0.55, len = 1.1, z0 = z1 - len;
+    const V = {
+      side: s,
+      toWorld(lx, ly, lz, o) {
+        o.x = CX + lx * Math.cos(HD) + lz * Math.sin(HD);
+        o.z = CZ - lx * Math.sin(HD) + lz * Math.cos(HD);
+        o.y = ly; return o;
+      },
+      yaw: () => HD,
+      H: { x: s * (halfW + 0.46), z: z0 - 0.02 }, A: { x: s * (halfW + 0.26), z: -0.10 },
+      S: { x: 0.40, y: 0.30, z: -0.15 }, C: { x: s * (halfW + 0.62), z: z0 - 0.38 },
+      yawH: -s * (Math.PI / 2 - 0.3), yawA: -s * Math.PI / 4, yawS: 0, yawOut: s * 0.95, yawShut: 0.4,
+      doorX: s * halfW, sillY: 0.36, fit: 0.62,
+      ref: { cushion: (0.52 - 0.30) / 0.62, floorBelow: 0, kind: "car" },
+      groundY: 0, beats: [], beat(n, u) { if (this.beats[this.beats.length - 1] !== n) this.beats.push(n); },
+    };
+    return Object.assign(V, extra || {});
+  }
+  const a = actor(CX + 4, CZ - 3, 0);
+  a.group.scale = { x: 1, y: 1, z: 1, setScalar(v) { this.x = this.y = this.z = v; } };
+  const V = carSpec();
+  let done = 0;
+  const ok = M.board(a, V, { onDone: () => { done = 1; } });
+  check("car: board starts", ok && M.busy(a));
+  let minScale = 1, t = 0;
+  const st = run(a, 8, () => done, () => { minScale = Math.min(minScale, a.group.scale.x); t += DT; });
+  const seatW = V.toWorld(V.S.x, V.S.y, V.S.z, {});
+  const g = a.group.position;
+  check("car: sat in the seat", done && Math.hypot(g.x - seatW.x, g.z - seatW.z) < 0.02 && Math.abs(g.y - seatW.y) < 0.01,
+    `at ${f3(g.x)},${f3(g.y)},${f3(g.z)} seat ${f3(seatW.x)},${f3(seatW.y)},${f3(seatW.z)}`);
+  check("car: beats in order", V.beats.join(",") === "walk,pull,swing,in", V.beats.join(","));
+  check("car: never a teleport (<= 0.12 m/frame)", st.maxJump <= 0.12, `max ${f3(st.maxJump)}`);
+  check("car: never a yaw snap (<= 7 rad/s)", st.maxYawRate <= 7, `max ${st.maxYawRate.toFixed(2)}`);
+  check("car: shrinks to the cabin fit, ends on it", Math.abs(a.group.scale.x - V.fit) < 1e-6 && minScale >= V.fit - 1e-6);
+  check("car: seated rig on the seat's ref", a.char.sitting && a.char.seatRef === V.ref && a.char.seatBlend == null);
+  check("car: door part quick (walk + ~1.2 s)", t < 4, `${t.toFixed(2)} s total`);
+
+  // OUT: from this seat, same frame
+  const V2 = carSpec();
+  let out = 0;
+  check("car: alight starts IN the seat", M.alight(a, V2, { onDone: () => { out = 1; } }) &&
+    Math.hypot(a.group.position.x - seatW.x, a.group.position.z - seatW.z) < 0.01);
+  let t2 = 0;
+  const st2 = run(a, 5, () => out, () => { t2 += DT; });
+  const cW = V2.toWorld(V2.C.x, 0, V2.C.z, {});
+  check("car: stood clear of the door", out && Math.hypot(a.group.position.x - cW.x, a.group.position.z - cW.z) < 0.02 && a.group.position.y === 0);
+  check("car: out beats", V2.beats.join(",") === "open,out,step,shut", V2.beats.join(","));
+  check("car: out never a teleport", st2.maxJump <= 0.12, `max ${f3(st2.maxJump)}`);
+  check("car: full size again, standing", a.group.scale.x === 1 && !a.char.sitting && !M.busy(a));
+  check("car: out takes 1-1.6 s", t2 > 1.0 && t2 < 1.6, `${t2.toFixed(2)} s`);
+
+  // SKIP: a second press plays the rest fast
+  const V3 = carSpec();
+  let d3 = 0; M.board(a, V3, { onDone: () => { d3 = 1; } });
+  run(a, 0.2);
+  M.skip(a, 4);
+  let t3 = 0; run(a, 3, () => d3, () => { t3 += DT; });
+  check("car: skip finishes seated", d3 === 1, `${t3.toFixed(2)} s after skip`);
+  const V4 = carSpec();
+  let d4 = 0; M.alight(a, V4, { onDone: () => { d4 = 1; } });
+  // a carjack: the pull drags them out and the door waits for the aperture
+  let jacked = 0, clearAt = 0.8, tj = 0;
+  run(a, 5, () => d4);
+  const V5 = carSpec({ jack: () => { jacked++; }, clear: () => tj > clearAt });
+  let d5 = 0; M.board(a, V5, { onDone: () => { d5 = 1; } });
+  run(a, 8, () => d5, () => { tj += DT; });
+  check("car: jack fires once at the pull, then waits", jacked === 1 && V5.beats.indexOf("wait") > 0 && d5 === 1, V5.beats.join(","));
+}
+
 console.log(fails ? `\n${fails} FAILED` : "\nall posture scenarios pass");
 process.exit(fails ? 1 : 0);

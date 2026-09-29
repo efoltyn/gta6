@@ -1408,50 +1408,54 @@
   const OCC_RIG_CARS = 3;
   let occRigCars = 0, occStat = { promoted: 0, claimed: 0, spawned: 0, jacks: 0, hostages: 0,
     react: { fight: 0, flee: 0, freeze: 0, beg: 0 } };
-  /* THE ANCHOR A REAL BODY SITS ON, for ANY car seat — traffic occupants,
-     a drive-by crew, a motorcade detail, a cab driver and his fare all come
-     through here (CBZ.carSeatAnchor), because every one of them used to type
-     its own and every one of them was wrong the same way.
+  /* WHERE A REAL BODY SITS, for ANY car seat — THE one placement. Traffic
+     occupants (below), a drive-by crew (gangs.js), a motorcade detail, a cab
+     driver and his fare (giglife.js), a gig rider (gigs.js) and a companion
+     (boarding.js) all seat through CBZ.carSeatPlacement, because every one
+     of them used to type its own and every one was wrong the same way.
 
      OWNER: "NPC driver cars — you see them OUTSIDE the car, slightly behind
-     it." The old anchor was the bare cushion point with a 0.12 rad backward
-     pitch, no seat geometry and no scale: character.js's legacy chair pose
-     keeps the hips a fixed height over the rig's ROOT, so a full-size
-     stylised adult rooted on the cushion sat with his hips on the belt line,
-     his crown ~0.3 m up through the roof and his shoulders pitched back
-     through the rear pillar. From outside that IS a man sitting on the car.
+     it." The old anchor was the bare cushion point, a 0.12 rad back pitch,
+     no seat geometry and no scale: character.js's legacy chair pose keeps
+     the hips a fixed height over the rig ROOT, so a full-size stylised adult
+     rooted on the cushion sat hips-on-the-belt-line with his crown ~0.4 m up
+     through the roof, leaning back through the pillar.
 
-     Now the anchor is the seat itself, in the grammar the aircraft rows and
-     the player's own wheel already use: root on the cushion top, the cushion
-     and the floor DECLARED (so the V2 seat solve sinks the hips onto the
-     cushion and puts the soles on the floor pan), the driver in the "car"
-     posture (hands out to the rim), and a `fit` that npclife.js resolves to
-     this body's own scale (charSeatFit — eye on the seat's eye, crown under
-     the roof over ITS row). Frame: the car visual's local frame, which is the
-     group's at rest (the visual sits at the group origin). */
-  function seatAnchor(c, S) {
+     Now it is exactly how the player sits his own seat (seatDriver) and how
+     the door beats (boarding.js carSpec) land a body: rooted on the cabin
+     FLOOR, in the car VISUAL's frame (so the body rides the suspension with
+     the cabin), the cushion declared in the scaled group's units, and the
+     scale from CBZ.carSeatFit — the ONE seated-fit solve — evaluated for the
+     body actually claimed (npclife.js calls `fit(ch)` at attach, re-asserts
+     the scale every sync and hands the body back its own size on detach). */
+  function seatFrame(c) {
+    const grp = c && c.group;
+    return grp ? ((grp.userData && grp.userData.carVisual) || grp) : null;
+  }
+  function seatPlacement(c, S) {
     const m = SEATS() && SEATS().of(c);
     const ci = m && m.ci;
-    if (!S || !ci) return null;
-    const floorY = ci.floorY != null ? ci.floorY : S.cushionY - 0.28;
-    const cushH = Math.max(0.05, S.cushionY - floorY);
-    const eyeY = S.eye && S.eye.y != null ? S.eye.y : S.cushionY + 0.62;
+    const parent = seatFrame(c);
+    if (!S || !ci || !parent) return null;
+    const id = S.id;
     return {
-      x: S.x, y: S.cushionY, z: S.z,
-      // a REAR passenger sits turned a few degrees into the cabin and a
-      // shotgun rider leans toward the window
-      pitch: 0, roll: 0,
-      yaw: S.row ? -S.side * 0.16 : (S.isDriver ? 0 : S.side * 0.10),
-      pose: "sit", state: "sit",
-      cushionH: cushH, floorBelow: cushH,
-      seatKind: S.isDriver ? "car" : "seat",
-      fit: { eyeH: eyeY - floorY, roofH: (S.roofY != null ? S.roofY : ci.roofY) - 0.05 - floorY },
-      carSeat: S.id,
+      parent: parent,
+      anchor: {
+        x: S.x, y: ci.floorY, z: S.z,
+        // square to the car: the door beats (boarding.js carSpec) land every
+        // body facing the seat's own heading, so the held seat must too
+        pitch: 0, roll: 0, yaw: 0,
+        pose: "sit", state: "sit",
+        cushionH: Math.max(0.05, S.cushionY - ci.floorY), floorBelow: 0,
+        seatKind: S.isDriver ? "car" : "carseat",
+        fit: function (ch) { const F = CBZ.carSeatFit ? CBZ.carSeatFit(ch, c, id) : null; return F ? F.fit : 0.6; },
+        carSeat: id,
+      },
     };
   }
-  function occAnchorFor(c, seat) {
+  function occPlacementFor(c, seat) {
     const S = SEATS() && SEATS().seat(c, seat.slot);
-    return S ? seatAnchor(c, S) : null;
+    return S ? seatPlacement(c, S) : null;
   }
   function occDraftOk(p, c) {
     if (!CBZ.npcLife || !CBZ.npcLife.draftableCity) return false;
@@ -1472,9 +1476,9 @@
   // with the same reactions as any other occupied car.
   function occSeatPed(c, seat, ped, opts) {
     if (!c || !seat || !ped) return false;
-    const anchor = occAnchorFor(c, seat);
-    if (!anchor || !CBZ.npcLife || !CBZ.npcLife.attach) return false;
-    if (!CBZ.npcLife.attach(ped, c.group, anchor)) return false;
+    const place = occPlacementFor(c, seat);
+    if (!place || !CBZ.npcLife || !CBZ.npcLife.attach) return false;
+    if (!CBZ.npcLife.attach(ped, place.parent, place.anchor)) return false;
     seat.ped = ped; seat.spawned = !!(opts && opts.spawned);
     ped.inCar = c; ped.controlled = true;
     ped._occCar = c; ped._occSeat = seat;
@@ -1485,8 +1489,7 @@
   }
   function occPromoteSeat(c, seat) {
     if (seat.ped || !CBZ.npcLife) return false;
-    const anchor = occAnchorFor(c, seat); if (!anchor) return false;
-    const place = { parent: c.group, anchor: anchor };
+    const place = occPlacementFor(c, seat); if (!place) return false;
     let ped = null, spawned = false;
     if (CBZ.npcLife.claimCity) {
       try { ped = CBZ.npcLife.claimCity("carOccupant", place, function (p) { return occDraftOk(p, c); }); } catch (e) { ped = null; }
@@ -1500,7 +1503,7 @@
       if (seat.slot === "driver" && !c.npcDriver) { c.npcDriver = ped; c._occOwnsDriver = true; }
       occStat.claimed++;
     } else if (CBZ.npcLife.spawnCity) {
-      try { ped = CBZ.npcLife.spawnCity("carOccupant", { x: c.pos.x, z: c.pos.z, rng: rng, parent: c.group, anchor: anchor }); } catch (e) { ped = null; }
+      try { ped = CBZ.npcLife.spawnCity("carOccupant", { x: c.pos.x, z: c.pos.z, rng: rng, parent: place.parent, anchor: place.anchor }); } catch (e) { ped = null; }
       if (!ped) return false;
       spawned = true;
       seat.ped = ped; ped.inCar = c; ped.controlled = true;
@@ -1694,8 +1697,20 @@
      eyeballing a constant — except this one is derived, and it is per-body, so
      a woman or a teenager gets her own. */
   function fitSeatedRig(ch, ci) {
-    if (!CBZ.charSeatFit) return 0.6;
-    return CBZ.charSeatFit(ch, ci.cushionY - ci.floorY, ci.eye.y - ci.floorY, (ci.roofY - 0.05) - ci.floorY);
+    const m = CBZ.charSeatMetrics ? CBZ.charSeatMetrics(ch) : null;
+    if (!m) return 0.6;
+    const cush = Math.max(0.02, ci.cushionY - ci.floorY);
+    function solve(target, over) {
+      if (!(target > 0)) return 1;
+      // world hip = max(cush + hipPad*s, hipFloor*s); world eye/top = hip + over*s
+      const a = (target - cush) / (m.hipPad + over);          // cushion branch
+      if (a > 0 && cush >= (m.hipFloor - m.hipPad) * a) return a;
+      return target / (m.hipFloor + over);                    // low-clamp branch
+    }
+    const s = Math.min(
+      solve(ci.eye.y - ci.floorY, m.eyeOverHip),
+      solve((ci.roofY - 0.05) - ci.floorY, m.topOverHip));
+    return Math.max(0.50, Math.min(1.0, s));
   }
 
   function driverWanted(car) {
@@ -1905,6 +1920,22 @@
     return true;
   }
   CBZ.carDriverRelease = releaseDriver;
+  /* THE SEATED NUMBERS FOR ANY BODY IN ANY SEAT — the fit, the floor the
+     root sits on and the cushion — exactly as seatDriver solves them, so the
+     door beats (boarding.js) land a body in the pose the seat then holds. */
+  CBZ.carSeatFit = function (ch, car, seatId) {
+    const ci = cabinFrame(car);
+    if (!ci || !ch) return null;
+    const S = CBZ.carSeats;
+    const seat = S ? S.seat(car, seatId || "driver") : null;
+    const fit = fitSeatedRig(ch, seat
+      ? { cushionY: seat.cushionY, floorY: ci.floorY, eye: seat.eye, roofY: seat.roofY }
+      : ci);
+    return {
+      fit: fit, floorY: ci.floorY, cushionY: seat ? seat.cushionY : ci.cushionY,
+      x: seat ? seat.x : ci.seatX, z: seat ? seat.z : ci.seatZ,
+    };
+  };
   CBZ.carDriverSeated = function () { return !!drv.car; };
   /* THE SEAT SOLVE, FOR A FRAME THIS LOOP DID NOT RUN. When somebody else is
      driving (city/boarding.js's companion errand) the player loop stands down,
@@ -3107,6 +3138,9 @@
     const spot = occDoorSpot(c, seat.side, seat.row, null, seat.slot);
     if (SEATS()) SEATS().release(c, seat.slot);
     const gy = CBZ.floorAt ? CBZ.floorAt(spot.x, spot.z) : 0;
+    // (a bolter was already detached by cityScare, but he was IN this seat)
+    const wasSeated = !!(p.group && (p._npcAttached || p._occCar === c));
+    const exitAt = { x: spot.x, z: spot.z, y: gy };
     if (p._npcAttached && CBZ.cityUnseat) {
       try { CBZ.cityUnseat(p, { x: spot.x, z: spot.z, y: gy, state: p.dead ? "dead" : (opts.state || "walk") }); } catch (e) {}
     } else if (p.pos && p.pos.set) {
@@ -3130,6 +3164,13 @@
     // OUT OF BALANCE, not teleported: a body shoved out of a seat needs a beat
     // to find its feet before its brain takes over.
     if (!p.dead) { p.speed = 0; p.pause = Math.max(p.pause || 0, opts.stumble === false ? 0.2 : 0.42); }
+    /* HE GETS OUT, HE IS NOT PUT OUT. The detach above stands him at his
+       door in one frame; a seated body the camera can see instead climbs
+       out through that door on the shared car beats (boarding.js ->
+       CBZ.moves.alight), ending on the same kerb spot. */
+    if (wasSeated && !p.dead && CBZ.boardingAlight) {
+      try { CBZ.boardingAlight(p, c, seat.slot, { fast: true, exit: exitAt }); } catch (e) {}
+    }
     return p;
   }
 
@@ -3348,6 +3389,9 @@
     const gy = CBZ.floorAt ? CBZ.floorAt(spot.x, spot.z) : 0;
     if (ped._npcAttached && CBZ.cityUnseat) {
       try { CBZ.cityUnseat(ped, { x: spot.x, z: spot.z, y: gy, state: ped.dead ? "dead" : "walk" }); } catch (e) {}
+      if (!ped.dead && CBZ.boardingAlight) {
+        try { CBZ.boardingAlight(ped, car, "driver", { fast: true, exit: { x: spot.x, z: spot.z, y: gy } }); } catch (e) {}
+      }
     } else {
       if (ped.group) ped.group.visible = !ped._spawnHidden;
       ped.pos.set(spot.x, gy, spot.z);
@@ -3498,13 +3542,12 @@
     if (st.blob && st.blob.parent) { st.blob.parent.remove(st.blob); st.blob = null; }
     return occSeatPed(c, st, ped, opts);
   };
-  // the anchor for a named slot of THIS body (nearest real seat if the body
-  // has no such slot) — null for a car with no cabin (a bike, a boat)
-  CBZ.carSeatAnchor = function (c, slotName) {
+  // { parent, anchor } for a named slot of THIS body (nearest real seat if
+  // the body has no such slot) — null for a car with no cabin (bike, boat)
+  CBZ.carSeatPlacement = function (c, slotName) {
     if (!c) return null;
-    return seatAnchor(c, seatFor(c, slotName || "driver"));
+    return seatPlacement(c, seatFor(c, slotName || "driver"));
   };
-  CBZ.carOccupancySeatAnchor = CBZ.carSeatAnchor;
   // a named slot on THIS body: the seat itself, else the nearest thing to it
   // (a "rearR" asked of a two-seater is the passenger seat)
   function seatFor(c, id) {
@@ -4350,7 +4393,9 @@
     // real body, runs each one's decision, and puts the ones who leave beside
     // their OWN door. It degrades to the old single-driver eject when the flag
     // is off or the car never carried an occupancy record.
-    const jacked = occJack(car, (CBZ.city && CBZ.city.playerActor) || null);
+    // (a door arc that already dragged them out at the pull did the jack)
+    const jacked = car._jackDone ? 0 : occJack(car, (CBZ.city && CBZ.city.playerActor) || null);
+    car._jackDone = false;
     if (car.npcDriver) ejectNpcDriver(car);
     const P = CBZ.player;
     P.driving = true; P._vehicle = car;
@@ -4376,7 +4421,10 @@
       }
     }
     car.v = 0;
-    CBZ.playerChar.group.visible = false;
+    // A car with a cabin SEATS the rig (CAR_DRIVER_VISIBLE, seatDriver on the
+    // next tick); hiding it here blinked the body out for the frame between
+    // the door beat landing him in the seat and the seat taking him.
+    if (!(driverWanted(car) && cabinFrame(car))) CBZ.playerChar.group.visible = false;
     if (CBZ.cityPromotePlayerCar) CBZ.cityPromotePlayerCar(car);
     if (CBZ.carAudio) CBZ.carAudio.start();   // the motor turns over the moment you're in
     const worth = car.model ? ": " + car.model.name : "";   // value stays hidden until you chop it
@@ -4394,6 +4442,18 @@
       ? "At the helm" + worth + "   [SPACE] get up  [V] wheel view"
       : "Driving" + worth + "   [E] out  [C] car style" + seatHint, 1.8);
     return true;
+  };
+  /* THE JACK, AT THE DOOR. A carjack is not "sit down, then they leave":
+     the door is pulled, the people in the car answer and get out through it,
+     and only THEN do you get in. boarding.js calls this at the end of its
+     pull beat; the seat commit (cityEnterVehicle) then skips its own jack. */
+  CBZ.cityJackNow = function (car) {
+    if (!car || car.dead || car.player) return 0;
+    wakeCar(car);
+    const n = occJack(car, (CBZ.city && CBZ.city.playerActor) || null);
+    if (car.npcDriver) ejectNpcDriver(car);
+    car._jackDone = true;
+    return n;
   };
   CBZ.cityExitVehicle = function () {
     const P = CBZ.player, car = P._vehicle;
@@ -5659,7 +5719,10 @@
     // one-per-call latch so a car that clips SEVERAL bodies this frame still
     // fires exactly ONE hit-stop / impact voice / "catch" (never stack N).
     let juiced = false;
-    for (const p of CBZ.cityPeds) {
+    bodyGrids();
+    const near = bodiesNear(_pedBodyGrid, _pedCand, car.pos.x, car.pos.z, 6);   // near-miss ring: d2 < 34
+    for (let ni = 0; ni < near.length; ni++) {
+      const p = near[ni];
       if (p.dead || p.inCar) continue;
       const dx = p.pos.x - car.pos.x, dz = p.pos.z - car.pos.z;
       const _d2 = dx * dx + dz * dz;
@@ -5774,8 +5837,8 @@
     const _wcam = CBZ.camera && CBZ.camera.position;
     const _wdx = _wcam ? car.pos.x - _wcam.x : 0, _wdz = _wcam ? car.pos.z - _wcam.z : 0;
     if (CBZ.cityWildlife && CBZ.cityWildlifeCarHit &&
-        (!_wcam || _wdx * _wdx + _wdz * _wdz < 240 * 240)) {
-      const wl = CBZ.cityWildlife;
+        (!_wcam || _wdx * _wdx + _wdz * _wdz < WILD_SWEEP * WILD_SWEEP)) {
+      const wl = bodiesNear(wildGrid(), _wildCand, car.pos.x, car.pos.z, _wildReach);
       for (let wi = 0; wi < wl.length; wi++) {
         const an = wl[wi];
         if (!an || an.dead || an.ridden || !an.pos) continue;
@@ -5979,6 +6042,80 @@
     _carGrid.rebuild(CBZ.cityCars, _carVec);
   }
 
+  /* ---- BODIES NEAR A CAR (runOver + the brake-for-a-pedestrian scan) ------
+     Both used to walk the WHOLE roster per car per frame: runOver swept every
+     ped and all ~985 wild animals for every moving car within 240 m of the
+     camera, and every calm lane car swept every ped again to find one in its
+     lane. That is cars x (peds + animals) property reads a frame, for an
+     answer that only ever involves bodies within ~20 m. One spatial hash of
+     peds and one of animals per frame (built lazily on the first query of
+     the frame, so a call from the player-car step before this pass gets the
+     same fresh index), and each query visits only the cells its radius can
+     reach, padded by BODY_MARGIN for anything that moved since the rebuild.
+     Candidates come back IN ROSTER ORDER (insertion by the index stamped at
+     rebuild), so first-match/early-out scans and every side effect that
+     draws from the seeded rng fire in exactly the order the full scan did.
+     The per-candidate tests read LIVE positions, byte-identical to before. */
+  const BODY_CELL = 8, BODY_MARGIN = 3;
+  let _pedBodyGrid = null, _wildBodyGrid = null, _bodyStamp = -1;
+  const _pedCand = [], _wildCand = [], _laneCand = [];
+  function _bodyVec(o) { return o.pos; }
+  const _wildLive = [];
+  let _wildReach = 2.3;
+  let _wildStamp = -1;
+  function bodyGrids() {
+    const st = CBZ._matrixOwnStamp || 0;
+    if (st === _bodyStamp && _pedBodyGrid) return;
+    _bodyStamp = st;
+    if (!_pedBodyGrid) _pedBodyGrid = CBZ.makeGrid(BODY_CELL);
+    const peds = CBZ.cityPeds;
+    for (let i = 0; i < peds.length; i++) peds[i]._vgi = i;
+    _pedBodyGrid.rebuild(peds, _bodyVec);
+  }
+  // The wildlife index is built only on a frame that actually sweeps for
+  // animals, and only holds the ones a sweeping car can reach: runOver sweeps
+  // wildlife only for cars within WILD_SWEEP of the camera, so an animal
+  // further than that plus its reach can never be hit this frame.
+  const WILD_SWEEP = 240;
+  function wildGrid() {
+    const st = CBZ._matrixOwnStamp || 0;
+    if (st === _wildStamp && _wildBodyGrid) return _wildBodyGrid;
+    _wildStamp = st;
+    if (!_wildBodyGrid) _wildBodyGrid = CBZ.makeGrid(BODY_CELL);
+    _wildLive.length = 0;
+    const wl = CBZ.cityWildlife, cam = CBZ.camera && CBZ.camera.position;
+    let ms = 1;
+    if (wl) for (let i = 0; i < wl.length; i++) {
+      const an = wl[i]; if (!an || !an.pos) continue;
+      const sc = (an.species && an.species.scale) || 1; if (sc > ms) ms = sc;
+      if (cam) {
+        const dx = an.pos.x - cam.x, dz = an.pos.z - cam.z, R = WILD_SWEEP + 1.55 + sc * 0.75 + BODY_MARGIN;
+        if (dx * dx + dz * dz > R * R) continue;
+      }
+      an._vgi = i; _wildLive.push(an);
+    }
+    _wildReach = 1.55 + ms * 0.75;          // runOver's widest per-animal reach this frame
+    _wildBodyGrid.rebuild(_wildLive, _bodyVec);
+    return _wildBodyGrid;
+  }
+  // every body whose cell can hold a hit within `r` of (x,z), in roster order
+  function bodiesNear(grid, buf, x, z, r) {
+    buf.length = 0;
+    const C = Math.ceil((r + BODY_MARGIN) / BODY_CELL);
+    const gx = grid.cellIndex(x), gz = grid.cellIndex(z);
+    for (let cx = gx - C; cx <= gx + C; cx++) for (let cz = gz - C; cz <= gz + C; cz++) {
+      const cell = grid.bucket(cx, cz); if (!cell) continue;
+      for (let i = 0; i < cell.length; i++) {
+        const p = cell[i];
+        let at = buf.length;
+        buf.push(p);
+        while (at > 0 && buf[at - 1]._vgi > p._vgi) { buf[at] = buf[at - 1]; at--; }
+        buf[at] = p;
+      }
+    }
+    return buf;
+  }
+
   /* ---- TRAFFIC HEARS GUNFIRE ---------------------------------------------
      Before this, a firefight in the middle of an avenue was invisible to the
      cars on it: they queued politely at the red with rounds going past the
@@ -6038,6 +6175,7 @@
     const camx = CBZ.camera.position.x, camz = CBZ.camera.position.z;
     _vframe++;
     rebuildCarGrid();   // ONE rebuild per frame; carAhead queries it per car
+    bodyGrids();        // the ped index for the lane-brake scan and runOver (wildGrid builds on demand)
     wakeSlice(camx, camz);
     for (const c of CBZ.cityCars) {
       if (c._sleep || c._proxy) continue;
@@ -6373,8 +6511,12 @@
         const dangerGap = 2.5 + c.v * 0.22;
         let brake = 0;
         brakeAt = 1e9;                       // distance to the nearest body in lane
-        for (let i = 0; i < CBZ.cityPeds.length && brake < 1; i++) {
-          const p = CBZ.cityPeds[i]; if (p.dead || p.inCar) continue;
+        // candidates around the middle of the lane box (ahead 0.5..look, 2 m either side)
+        const midA = (0.5 + pedLookahead) * 0.5;
+        const lane = bodiesNear(_pedBodyGrid, _laneCand, c.pos.x + fwx * midA, c.pos.z + fwz * midA,
+          Math.sqrt((pedLookahead - midA) * (pedLookahead - midA) + 4));
+        for (let i = 0; i < lane.length && brake < 1; i++) {
+          const p = lane[i]; if (p.dead || p.inCar) continue;
           const dx = p.pos.x - c.pos.x, dz = p.pos.z - c.pos.z, ah = dx * fwx + dz * fwz;
           if (ah > 0.5 && ah < pedLookahead && Math.abs(dx * -fwz + dz * fwx) < 2.0) {
             brake = ah < dangerGap ? 1 : Math.max(brake, 0.5);

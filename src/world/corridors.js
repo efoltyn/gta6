@@ -329,5 +329,4 @@
       segmentsList: SEG.map((s) => ({ id: s.id, r: s.r })),
     };
   };
-  K.flush();
 })();
