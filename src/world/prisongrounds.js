@@ -586,5 +586,4 @@
      ========================================================== */
   // the city's interiors (built later) keep their own flat walls
   K.defaultSkin = null;
-  K.flush();
 })();
