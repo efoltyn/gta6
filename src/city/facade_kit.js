@@ -369,8 +369,8 @@
     const e = F.entrance(ctx);
     if (e.driveIn) return;                     // a vehicle bay is its own opening
     const f = e.f;
-    const W = opts.width || F.DOOR_W;
-    const H = opts.height || F.DOOR_H;
+    const W = opts.width || ctx.doorW || F.DOOR_W;
+    const H = opts.height || ctx.doorH || F.DOOR_H;
     const P = opts.proj || 0.30;
     // The reveal is the wall's own colour, darkened — the shading of a return
     // face turned away from the sun. Never a contrast trim: this is the wall
@@ -749,8 +749,8 @@
     const face = F.face(ctx, ctx.doorSide);
     const halfN = face.halfN, horiz = face.horiz, out = face.out;
     const e0 = F.entrance(ctx);
-    const HW = (e0.driveIn ? e0.gap : F.DOOR_W) / 2 + 0.16;   // half the hole
-    const HH = (e0.driveIn ? e0.head : F.DOOR_H) + 0.12;      // its head
+    const HW = (e0.driveIn ? e0.gap : (ctx.doorW || F.DOOR_W)) / 2 + 0.16;   // half the hole
+    const HH = (e0.driveIn ? e0.head : (ctx.doorH || F.DOOR_H)) + 0.12;      // its head
     let deepest = 0;
     /* THE WALL'S OWN COLOUR, taken from the wall we cut through. ctx.color is
        the shell's base tone, but every grammar repaints its walls in its own
@@ -765,7 +765,7 @@
        one tone shared by all 31 grammars. */
     const palette = new Map();
     const realDbox = ctx.dbox;
-    ctx.dbox = function (x, y, z, w, h, d, col) {
+    ctx.dbox = ctx.noDoor ? realDbox : function (x, y, z, w, h, d, col) {
       const tC = horiz ? x : z, tH = (horiz ? w : d) / 2;      // along the face
       const nC = horiz ? z : x, nH = (horiz ? d : w) / 2;      // across it
       const y0 = y - h / 2, y1 = y + h / 2;
@@ -798,7 +798,7 @@
       if (y0 < 0) put(Math.max(t0, -HW), Math.min(t1, HW), y0, 0);     // under the sill
     };
 
-    try { r.def.build(ctx, F, r.spec); }
+    try { r.def.build(ctx, ctx.grid ? gridF(ctx) : F, r.spec); }
     catch (e) { if (window.console) console.warn("facade " + r.spec.style + ": " + e.message); }
     // the carves are build-time only
     ctx.dbox = origDbox;
@@ -846,9 +846,41 @@
     // drew its own called F.door (which latches ctx.__kitDoor) or declared
     // ownDoor, and everything else gets the kit's surround here. Emitted
     // AFTER build so it lands on top of whatever cladding the facade laid.
-    if (!r.def.ownDoor) {
+    if (!r.def.ownDoor && !ctx.noDoor) {
       try { F.door(ctx, { proj: doorProj, wall: wallCol }); } catch (e) {}
     }
     return r.def;
   };
+
+  /* A HOST'S OWN BAY GRID. ctx.grid = [n0, n1, n2, n3], bays per face (0 -z,
+     1 +z, 2 -x, 3 +x), corner to corner. A host whose wall already HAS
+     windows (city/metro_fabric.js paints them per pixel) hands its grid in,
+     so the grammar's piers, reveals and sills land on the windows that are
+     there instead of on a rhythm of their own: whenever a grammar asks for
+     that many bays on that face, it gets the host's bays, margin 0. A
+     grammar that asks for a different count keeps its own. Opt-in: every
+     host without ctx.grid gets the plain vocabulary. Also on ctx, same
+     opt-in: doorW / doorH (the host's door opening) and noDoor (this face
+     set has no entrance: no carve, no reveal). */
+  function gridF(ctx) {
+    const G = ctx.grid, FF = Object.create(F);
+    const n0 = function (f) { const n = G[f.s] | 0; return n > 0 ? n : 0; };
+    // the host's grid may be finer than the grammar's rhythm (a deco tower
+    // paints a window every 1.8 m, the grammar wants a pier every ~3.5 m):
+    // the grammar gets every k-th host line, k the whole divisor nearest its
+    // own bay width, so its piers still stand between the host's windows
+    const want = new Map();
+    FF.bayCount = function (f, per, lo, hi) {
+      const n = n0(f);
+      if (!n) return F.bayCount(f, per, lo, hi);
+      let k = Math.max(1, Math.round((per || 3.4) / (f.span / n)));
+      while (k > 1 && n % k) k--;
+      want.set(f.s, n / k);
+      return n / k;
+    };
+    const fit = function (f, n) { const m = want.get(f.s); return n === n0(f) || n === m; };
+    FF.bays = function (f, n, margin) { return F.bays(f, n, fit(f, n) ? 0 : margin); };
+    FF.bayLines = function (f, n, margin) { return F.bayLines(f, n, fit(f, n) ? 0 : margin); };
+    return FF;
+  }
 })();

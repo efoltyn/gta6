@@ -167,6 +167,9 @@
     // is the same city's working streets, the everyday rack alone (0-9).
     // Their rings reuse their mini-city's own biome id, so no entry.
     kingsport: [0, 14], cityborough: [0, 9],
+    // Karvel (Kingsport as it was, the planned capital): the everyday rack
+    // only, the muted half of it
+    karvel: [0, 6],
   };
   const HAIRS = [0x1a1410, 0x2a2018, 0x3b2a1a, 0x6b4a2a, 0x8a6a3a, 0x101010, 0x55524e, 0x4a3520];
   // WHO wears WHAT, by district kind (indexes into SHIRTS): downtown reads
@@ -256,7 +259,7 @@
   // pinecrest ride the existing farmland/snow shares (sparse, by design).
   const BIOME_DENSITY = { speedway: 1.0, airport: 0.85, military: 0.45, farmland: 0.4, forest: 0.35, desert: 0.3, snow: 0.3,
                           capeharbor: 0.7, goldspire: 0.9, neonreef: 1.0, foundry: 0.6,
-                          kingsport: 1.0, cityborough: 0.9 };
+                          kingsport: 1.0, cityborough: 0.9, karvel: 0.35 };
   // per-tick cache of the player's active region/biome (set in the onUpdate tick,
   // NEVER per-agent). _activeBiome 'city' = mainland or a link → bubble disabled.
   let _activeReg = null, _activeBiome = "city";

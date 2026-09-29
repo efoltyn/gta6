@@ -85,6 +85,7 @@
     // the crowd bubble carries the mass, these are the few full rigs with a
     // job. A metro is the biggest place in the world, so it gets the most.
     kingsport: 5, cityborough: 4,
+    karvel: 2,              // the planned capital: wide streets, few people on them
   };
 
   // ---- TIME-OF-DAY DENSITY (GTA popcycle pattern, PROCGEN.md roadmap #4/5) --
@@ -241,6 +242,16 @@
                              kind: "civilian", outfit: pickCol(r, OUT_CITY) };
       return { job: r() < 0.5 ? "construction worker" : "warehouse worker", archetype: "resident",
                kind: "civilian", outfit: pickCol(r, OUT_WORK) };
+    },
+    // KARVEL — Kingsport as it was, kept as a planned capital: guards on the
+    // doors, clerks, and the men who keep the concrete up
+    karvel: function (r) {
+      const k = r();
+      if (k < 0.25) return { job: "security guard", archetype: "resident", kind: "civilian",
+                             armed: r() < 0.6, weapon: "Pistol", aggr: 0.45, outfit: 0x2a2d33 };
+      if (k < 0.7) return { job: r() < 0.6 ? "office worker" : "clerk", archetype: "resident",
+                            kind: "civilian", outfit: pickCol(r, OUT_SUIT) };
+      return { job: "construction worker", archetype: "resident", kind: "civilian", outfit: pickCol(r, OUT_WORK) };
     },
     // THE WEST BOROUGH — the Gang City's own working streets: shop hands and
     // tradesmen, and the corner boys the rest of Gang City already has.

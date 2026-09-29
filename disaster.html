@@ -419,7 +419,7 @@ document.body.appendChild(b);}}catch(e){}})();
      city/biome_snow.js, which reads CBZ.mtn* at PARSE time. -->
 <!-- The massif SKIN: per-pixel snow/rock/forest shading on a lit Standard material.
      Reads CBZ.gfxRegisterPbr lazily; city/biome_snow.js calls CBZ.alpineSkin at build time. -->
-<script src="src/world/alpine_skin.js?v=skin1"></script>
+<script src="src/world/alpine_skin.js?v=wreal0929"></script>
 
 <!-- ============================================================
      Game modules — loaded in dependency order. Each is a tiny
@@ -501,7 +501,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (asphalt, concrete, plaster, metal, dirt, grass, sand, wood, glass grime).
      Needs core/seed.js for CBZ.hashN; bakes lazily on first request, so it only
      has to precede its first consumer — world/materials.js. -->
-<script src="src/world/textures_surface.js?v=far0929"></script>
+<script src="src/world/textures_surface.js?v=wreal0929"></script>
 <script src="src/world/materials.js?v=pbr1"></script>
 <script src="src/world/fuel_station.js?v=fuel1"></script>
 <script src="src/world/prisonkit.js?v=tow929b"></script>
@@ -960,7 +960,7 @@ document.body.appendChild(b);}}catch(e){}})();
      camera-centred radial sea geometry, the shared ripple normal map and the
      shared water shading chunks. MUST load before city/world.js (its buildSea
      reads this) and before city/waterfield.js (its surfaceY delegates here). -->
-<script src="src/world/water_spec.js?v=roadmerge1"></script>
+<script src="src/world/water_spec.js?v=wreal0929"></script>
 <!-- the tsunami kit shared by the island and the city: the entrained debris, the flood hitting buildings, the drawdown seabed and the aftermath mud -->
 <script src="src/world/tsunami_debris.js?v=tsureal1"></script>
 <script src="src/world/tsunami_flow.js?v=tsureal1"></script>
@@ -981,7 +981,7 @@ document.body.appendChild(b);}}catch(e){}})();
      register ONE style and must load after it. The generalisation of what
      govcomplex.js does to this same office shell: a spec at the call site.
      Inert until a caller passes {dress:{style}} (or ?cfg_FACADE_KIT_CITY=1). -->
-<script src="src/city/facade_kit.js?v=meshcol1"></script>
+<script src="src/city/facade_kit.js?v=wreal0929"></script>
 <script src="src/city/facades/brick.js?v=meshcol1"></script>
 <script src="src/city/facades/stone.js?v=fk1"></script>
 <script src="src/city/facades/mosque.js?v=fk1"></script>
@@ -1025,7 +1025,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/facades/brickhouse.js?v=fk3"></script>
 <!-- 4d-2. ARCHIPELAGO — worldmap registry + 3 islands + 4 biomes (worldmap.js
      MUST precede every island/biome; world.js runs them via CBZ.cityWorldGeo) -->
-<script src="src/city/worldmap.js?v=metro0929"></script>
+<script src="src/city/worldmap.js?v=wreal0929"></script>
 <!-- Shared signed shoreline/depth/current oracle. Loaded immediately after
      the landmass registry so rendering, swimmers, boats and aquatic wildlife
      all consult the same coast instead of inventing separate radius tests. -->
@@ -1402,14 +1402,15 @@ document.body.appendChild(b);}}catch(e){}})();
      metroplan.js is the pure urban planner (land value -> zoning -> arterials -> blocks -> parcels),
      metro_fabric.js draws its buildings, metro_ground.js its streets and ground, metro.js places the
      Kingsport metro + the city rings at landmass order 43 and streams their tiles by distance. -->
-<script src="src/city/metroplan.js?v=metro0929"></script>
-<script src="src/city/metro_fabric.js?v=far0929"></script>
+<script src="src/city/metroplan.js?v=wreal0929"></script>
+<script src="src/city/metro_fabric.js?v=wreal0929"></script>
 <!-- REAL GRASS (owner: "when you walk on grass it's just fucking green"): instanced lit blades round
      the camera on every grass surface, fed by CBZ.groundCover (the ONE land-use + ground-colour
      query: cityground 10, metro_ground 20, continent 90 register into it, so it loads before them). -->
 <script src="src/world/grassfield.js?v=grass0929c"></script>
-<script src="src/city/metro_ground.js?v=grass0929b"></script>
-<script src="src/city/metro.js?v=far0929"></script>
+<script src="src/city/metro_ground.js?v=wreal0929"></script>
+<script src="src/city/metro.js?v=wreal0929"></script>
+<script src="src/city/metro_structs.js?v=wreal0929"></script>
 <!-- THE RACING GAME: real driving opponents (one brain for oval + street) + race scorer + racing HUD -->
 <!-- custom dialogue + street talk (one contextual YES/NO decision) — after the registry -->
 <!-- 4d-3. this wave's feature modules (load after all deps they read) -->
@@ -1522,7 +1523,7 @@ document.body.appendChild(b);}}catch(e){}})();
      metre 683 pedestrians tried to walk went into geometry, 37 of them grinding
      for over 1.5 s at a time. The window is 320 m around the player (peds stop
      drawing at 95 m), marked across frames so a rebuild is never a hitch. -->
-<script src="src/systems/fullmap.js?v=metro0929"></script>
+<script src="src/systems/fullmap.js?v=wreal0929"></script>
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
      always-updater is in the sort -->

@@ -685,7 +685,8 @@
     });
     if (hit) return false;
     const R = P.river;
-    if (R && ptsOk(R.pts) && polyD(R.pts, x, z) < (R.half || 0) + 4 + p) return false;
+    // (the plan's own riverDist knows an island river's arms; the centreline does not)
+    if (R && ptsOk(R.pts) && (P.riverDist ? P.riverDist(x, z) : polyD(R.pts, x, z)) < (R.half || 0) + 4 + p) return false;
     return true;
   };
   // A PAVEMENT point in a ring [rMin, rMax] around (x,z): a nearby street,
