@@ -390,11 +390,8 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- Three.js (vendored locally — same r128 build the CDN served; local files load
      offline, deterministically, and inside the headless screenshot harness).
-     NOTE: an r164 IIFE bundle + legacy compat shim exist on disk
-     (src/vendor/three-r164/ + src/compat/three-legacy.js) from the O3
-     migration spike — verified pixel-identical on its branch but NOT yet
-     re-verified against this tree's newest THREE usage, so r128 stays the
-     loaded build for now. -->
+     (The r164 IIFE spike and its compat shim were deleted 2026-09-29: never
+     loaded, recoverable from git history if a migration is ever attempted.) -->
 <script src="src/vendor/three.r128.min.js?v=w09290242x"></script>
 <!-- real frustum culling for InstancedMesh pools (every camera, shadow pass included); must precede every InstancedMesh -->
 <script src="src/core/instcull.js?v=w09290242x"></script>
