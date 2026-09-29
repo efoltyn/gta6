@@ -345,17 +345,40 @@
     const P_ = CBZ.player;
     const chuting = !!(CBZ.cityChuteState && CBZ.cityChuteState());
     const highUp = !!(P_ && P_.pos && P_.pos.y > 24 && !P_.grounded);
-    const airborne = !!(P_ && P_.pos && P_.pos.y > 24 && (P_._aircraft || chuting || highUp));
+    // THE AIR IS AROUND THE EYE, NOT THE BODY. A camera hanging far above a
+    // player on the ground (a drone / photo / cinematic lens, every aerial
+    // tool shot) used to get the GROUND fog: fog.far 760 with the aerial
+    // melt (core/renderer.js) at full strength, so everything past ~400 m
+    // went to the horizon white: the metro tour's "washed white" frames.
+    const camY = CBZ.camera ? CBZ.camera.position.y : -1e9;
+    const lifted = !!(P_ && P_.pos && camY - P_.pos.y > 60);
+    const airborne = !!(P_ && P_.pos && ((P_.pos.y > 24 && (P_._aircraft || chuting || highUp)) || lifted));
+    // HOW FAR A CLEAR DAY SEES FROM UP THERE. Real air on a clear day has a
+    // meteorological visibility of 25-40 km; the kilometres in between are
+    // carried by the physical haze on the ground, the metro and the plate
+    // (terrain_overhaul.js aerialHaze: Koschmieder extinction through a
+    // 1.4 km haze layer, 7.5 km e-folding along the ground). THREE.Fog here
+    // only closes the world where it ends, and the aerial melt forces it to
+    // the horizon colour from fog.far/2 on. At 4200 m flat that put a white
+    // wall 2-4 km out from any altitude (owner's flyover: "colors look weird
+    // from a distance"), where real air still shows the ground at 60-70%
+    // contrast. So the closing distance grows with the eye's height, from
+    // 4200 m skimming the roofs to 11 km at 760 m and above (the far side of
+    // the continent from its middle); the ocean disc (world/water_spec.js)
+    // reaches past it.
+    const eyeY = Math.max(camY, P_ && P_.pos ? P_.pos.y : 0);
+    const airT = Math.max(0, Math.min(1, (eyeY - 60) / 700));
+    const airFar = 4200 + 6800 * airT * airT * (3 - 2 * airT);
     if (CBZ.scene.fog) {
       // A 1.8km fog wall is inside the authored Mercy range and painted dry
       // land into a uniform cyan sheet. Aircraft need continental visibility;
       // static detail still obeys farcull/LOD, so this mostly reveals the one
       // country mesh, one ocean mesh and the landmark terrain draws.
-      const ff = airborne ? Math.max(CBZ.cityFogFar || 1000, 4200) : (CBZ.cityFogFar || 1000);
+      const ff = airborne ? Math.max(CBZ.cityFogFar || 1000, airFar) : (CBZ.cityFogFar || 1000);
       CBZ.scene.fog.near = Math.max(90, Math.round(ff * 0.16)); CBZ.scene.fog.far = ff;
     }
     if (CBZ.camera) {
-      const ff = airborne ? Math.max(CBZ.cityFogFar || 1000, 4200) : (CBZ.cityFogFar || 1000);
+      const ff = airborne ? Math.max(CBZ.cityFogFar || 1000, airFar) : (CBZ.cityFogFar || 1000);
       // Distant landmarks may request projection room without widening city
       // fog or the full-detail cull bubble. Mount Mercy is a single terrain
       // draw; keeping it through the airfield view has negligible scene cost.

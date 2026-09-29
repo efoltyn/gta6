@@ -1920,7 +1920,7 @@
   // ---- shared palette (one bucket per colour → batcher collapses them) ----
   const C_TARMAC = 0x3c3f44;   // apron / taxiway asphalt
   const C_RUNWAY = 0x2c2f33;   // darker runway asphalt
-  const C_GRASS  = 0x5d7c46;   // infield grass
+  const C_GRASS  = 0x566a3c;   // infield grass (sRGB; decoded with the canvas to ~0.09/0.14/0.045 turf)
   const C_PAINT  = 0xeef1f4;   // white runway paint
   const C_YELLOW = 0xd8b53a;   // taxiway centreline / hold lines
   const C_CONC   = 0x9aa0a6;   // concrete kerb / terminal slab
@@ -2181,7 +2181,7 @@
         };
       } else {
         city.airportPaint = null;
-        mat0 = new THREE.MeshLambertMaterial({ color: C_GRASS });
+        mat0 = new THREE.MeshLambertMaterial({ color: CBZ.groundLinear ? CBZ.groundLinear(C_GRASS) : C_GRASS });
       }
       const grass = new THREE.Mesh(new THREE.PlaneGeometry(gw, gd), mat0);
       grass.rotation.x = -Math.PI / 2;

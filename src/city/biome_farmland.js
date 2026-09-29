@@ -123,26 +123,6 @@
     chick: mat(0xcf4633),
   };
 
-  // a generated striped texture for a field's bulk quad (rows of crop colour
-  // on soil) — this is the trick that makes a giant field cost ONE draw call.
-  const _texCache = {};
-  function stripeTex(base, row, gap, period) {
-    const key = base + "|" + row + "|" + gap + "|" + period;
-    if (_texCache[key]) return _texCache[key];
-    const px = 64, c = document.createElement("canvas"); c.width = c.height = px;
-    const g = c.getContext("2d");
-    g.fillStyle = "#" + (base >>> 0).toString(16).padStart(6, "0");
-    g.fillRect(0, 0, px, px);
-    g.fillStyle = "#" + (row >>> 0).toString(16).padStart(6, "0");
-    const bandW = Math.max(2, Math.floor(px / period * gap));
-    for (let x = 0; x < px; x += Math.floor(px / period)) g.fillRect(x, 0, bandW, px);
-    const t = new THREE.CanvasTexture(c);
-    t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    t.magFilter = THREE.NearestFilter;
-    _texCache[key] = t;
-    return t;
-  }
-
   CBZ.addLandmass(function (city) {
     const root = city.root;
     if (!root) return;
@@ -242,12 +222,17 @@
     //    a single striped bulk quad (ONE draw call) + ONE InstancedMesh of
     //    close-up plants. Lanes between parcels stay bare soil.
     // =====================================================================
+    // sRGB display colours, decoded with the canvas (CBZ.groundLinear below)
+    // to real reflectance: a green canopy ~0.04/0.10/0.03, ripe wheat
+    // ~0.30/0.24/0.10, bare soil ~0.10-0.15, the same family as the continent
+    // plate's crops round the county. (The rows used to be 0xc9a93f / 0x6f8a32
+    // lime, taken as linear: pastel yellow and mint from the air.)
     const CROPS = [
-      { name: "corn", base: 0x5a4a30, row: 0x4e7d2c, period: 16, gap: 0.45, h: 2.1, plant: "corn", green: M.cornGreen },
-      { name: "wheat", base: 0x8a6f34, row: 0xc9a93f, period: 22, gap: 0.55, h: 0.95, plant: "wheat", green: M.wheat },
-      { name: "plowed", base: 0x5b4029, row: 0x46301e, period: 14, gap: 0.4, h: 0, plant: null, green: null },
-      { name: "pasture", base: 0x4f7a36, row: 0x5d8b3f, period: 10, gap: 0.5, h: 0, plant: "grass", green: M.leafGreen },
-      { name: "soy", base: 0x55582c, row: 0x6f8a32, period: 18, gap: 0.5, h: 0.7, plant: "wheat", green: M.leafGreen },
+      { name: "corn", base: 0x57483a, row: 0x42592e, period: 16, gap: 0.45, h: 2.1, plant: "corn", green: M.cornGreen },
+      { name: "wheat", base: 0x7a6746, row: 0x9a8a55, period: 22, gap: 0.55, h: 0.95, plant: "wheat", green: M.wheat },
+      { name: "plowed", base: 0x5b4331, row: 0x4a3526, period: 14, gap: 0.4, h: 0, plant: null, green: null },
+      { name: "pasture", base: 0x4e6239, row: 0x566a3f, period: 10, gap: 0.5, h: 0, plant: "grass", green: M.leafGreen },
+      { name: "soy", base: 0x514f33, row: 0x55682f, period: 18, gap: 0.5, h: 0.7, plant: "wheat", green: M.leafGreen },
     ];
 
     // a coarse grid of parcels with a dirt lane gutter between them.
@@ -317,17 +302,19 @@
       // Pastoral verge matches the continent's organic farm influence. Fields
       // remain intentionally rectangular inside it (real agriculture is), but
       // the COUNTY no longer ends at one giant square soil border.
-      ctx.fillStyle = css(0x647847); ctx.fillRect(0, 0, canvas.width, canvas.height);
-      rect(CX, CZ, (MAXX - MINX) - 14, (MAXZ - MINZ) - 14, 0x6b4f33);
-      rect(CX, CZ, (MAXX - MINX) - 40, (MAXZ - MINZ) - 40, 0x5f8248);
+      // (the verge is the continent's own meadow, 0x56683a, so the county
+      // runs into the country round it without a seam)
+      ctx.fillStyle = css(0x56683a); ctx.fillRect(0, 0, canvas.width, canvas.height);
+      rect(CX, CZ, (MAXX - MINX) - 14, (MAXZ - MINZ) - 14, 0x6b5641);
+      rect(CX, CZ, (MAXX - MINX) - 40, (MAXZ - MINZ) - 40, 0x51663a);
       // real dirt access lanes
       for (let c = 1; c < COLS; c++) {
         const x = fieldArea.minX + c * cellW + (c - 0.5) * LANE;
-        rect(x, CZ, LANE, fieldArea.maxZ - fieldArea.minZ, 0x6b4f33);
+        rect(x, CZ, LANE, fieldArea.maxZ - fieldArea.minZ, 0x6b5641);
       }
       for (let r = 1; r < ROWS; r++) {
         const z = fieldArea.minZ + r * cellD + (r - 0.5) * LANE;
-        rect(CX, z, fieldArea.maxX - fieldArea.minX, LANE, 0x6b4f33);
+        rect(CX, z, fieldArea.maxX - fieldArea.minX, LANE, 0x6b5641);
       }
       // crop bodies + rows
       for (const p of parcels) {
@@ -341,12 +328,15 @@
         }
       }
       // irrigation is part of the same farm skin, not a second blue plane
-      rect(CX, fieldArea.minZ + cellD + LANE / 2, MAXX - MINX - 80, 1.4, 0x3f8196);
-      rect(fieldArea.minX + cellW + LANE / 2, CZ, 1.4, MAXZ - MINZ - 80, 0x3f8196);
+      rect(CX, fieldArea.minZ + cellD + LANE / 2, MAXX - MINX - 80, 1.4, 0x3a5a5e);
+      rect(fieldArea.minX + cellW + LANE / 2, CZ, 1.4, MAXZ - MINZ - 80, 0x3a5a5e);
       const tex = new THREE.CanvasTexture(canvas);
       tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearMipmapLinearFilter;
       tex.generateMipmaps = true;
       tex.anisotropy = Math.min(8, CBZ.renderer && CBZ.renderer.capabilities ? CBZ.renderer.capabilities.getMaxAnisotropy() : 1);
+      // painted in sRGB display colours: decoded, a wheat field is wheat and
+      // soil is soil (undecoded the valley read pastel yellow and mint)
+      if (CBZ.groundLinear) CBZ.groundLinear(tex);
       const mesh = new THREE.Mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshLambertMaterial({ color: 0xffffff, map: tex }));
       mesh.rotation.x = -Math.PI / 2; mesh.position.set(CX, 0, CZ);
       mesh.receiveShadow = true;

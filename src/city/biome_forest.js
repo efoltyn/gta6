@@ -144,7 +144,10 @@
           fc.copy(cLakeShore).lerp(cMoss, t);
         }
         const edgeDist = Math.min(wx - (MINX - 8), (MAXX + 8) - wx, wz - (MINZ - 8), (MAXZ + 8) - wz);
-        edgeColor.copy(cForestEdge).lerp(fc, Math.max(0, Math.min(1, edgeDist / 82)));
+        // the duff starts where the wood does: behind the same wandering
+        // meadow line the trees are cut back to (raggedEdge), not a ruled band
+        const rn = vh(wx, wz, 230, 0x4fa1), rimLine = 25 + 165 * rn * rn;
+        edgeColor.copy(cForestEdge).lerp(fc, Math.max(0, Math.min(1, (edgeDist - 8 - rimLine * 0.7) / 70)));
         fc.copy(edgeColor);
         const shade = 0.9 + h2 * 0.14;
         fcol[i * 3] = fc.r * shade; fcol[i * 3 + 1] = fc.g * shade; fcol[i * 3 + 2] = fc.b * shade;
@@ -488,7 +491,24 @@
     // untouched; only the push is skipped.
     const RH_KEEP = 0.55;
     function keepRH(x, z) {
+      if (raggedEdge(x, z)) return false;
       return !(FLOOK && FLOOK.grove) || FLOOK.grove("redhollow", x, z, RH_KEEP, { cell: 70, salt: 0x4f90 });
+    }
+    // THE WOOD HAS NO RULER EDGE (owner, of the flyover: "a square of trees on
+    // a square floor"). The margin is cut back by a meadow line that wanders
+    // 25-190 m in from the rect (a 230 m lobe field + a scatter ramp across
+    // it), so the forest ends in bays and tongues; outside the rect the
+    // backcountry's own stands (forest cover weight) carry it on irregularly.
+    // A POSITION hash applied after every rng draw, like the glades: the
+    // stream (cabins, tents, deer) is untouched.
+    function raggedEdge(x, z) {
+      const d = Math.min(x - MINX, MAXX - x, z - MINZ, MAXZ - z);
+      if (d > 200) return false;
+      const n = vh(x, z, 230, 0x4fa1);
+      const line = 25 + 165 * n * n;
+      if (d >= line) return false;
+      const t = d / line;                       // 0 at the rect .. 1 at the line
+      return (CBZ.hash01 ? CBZ.hash01(x, z, 0x4fa2) : 1) > t * t;
     }
     // The old sqrt(FSC) pitch quietly made every tree 20% farther apart when
     // the biome grew, causing a 31% local-density regression. Scene-scale trees
@@ -852,6 +872,7 @@
     }
     function roofAllowed(x, z, upper) {
       if (!underTrees(x, z)) return false;
+      if (raggedEdge(x, z)) return false;
       if (x < MINX + 5 || x > MAXX - 5 || z < MINZ + 5 || z > MAXZ - 5) return false;
       // The lake stays a genuine hole in the roof. Human clearings retain a
       // controlled sky window, but upper crowns can lean over their margins.
@@ -1021,7 +1042,8 @@
           const x = gx + (rng() - 0.5) * step * 0.9;
           const z = gz + (rng() - 0.5) * step * 0.9;
           if (inClearing(x, z) || !openNature(x, z, 0.9)) continue;
-          arr.push({ x, z, s: 0.5 + rng() * 1.0, rot: rng() * 6.28 });
+          const it = { x, z, s: 0.5 + rng() * 1.0, rot: rng() * 6.28 };
+          if (!raggedEdge(x, z)) arr.push(it);        // draws taken either way: stream unchanged
         }
       }
     }
@@ -1076,7 +1098,7 @@
           const jx = (CBZ.hash01 ? CBZ.hash01(gx, gz, 0x4f51) : 0.5) - 0.5;
           const jz = (CBZ.hash01 ? CBZ.hash01(gx, gz, 0x4f52) : 0.5) - 0.5;
           const x = gx + jx * step * 0.82, z = gz + jz * step * 0.82;
-          if (inClearing(x, z) || nearTrail(x, z)) continue;
+          if (inClearing(x, z) || nearTrail(x, z) || raggedEdge(x, z)) continue;
           const cl = forestClump(x, z);
           const die = CBZ.hash01 ? CBZ.hash01(x, z, 0x4f53) : 0.5;
           if (die > Math.min(0.91, 0.16 + cl * 1.16)) continue;

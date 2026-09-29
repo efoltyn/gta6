@@ -144,6 +144,8 @@
     mat.userData.alpineSkin = true;
 
     mat.onBeforeCompile = function (sh) {
+      const LIN_GLSL = CBZ.GROUND_LIN_GLSL || "";
+      const LIN_CALL = LIN_GLSL ? "  diffuseColor.rgb = gndLin( diffuseColor.rgb );\n" : "";
       sh.uniforms.uAlpDetail = _detailU;
       sh.uniforms.uAlpStep = { value: step };
       sh.uniforms.uAlpScale = { value: scale };
@@ -170,7 +172,7 @@
         "#include <common>\n" +
         "varying vec4 vAlpMat;\nvarying vec3 vAlpWPos;\nvarying vec3 vAlpWNrm;\n" +
         "uniform float uAlpDetail;\nuniform float uAlpStep;\nuniform float uAlpScale;\n" +
-        "uniform vec3 uAlpSnow;\nuniform vec2 uAlpFar;\n" + GLSL_NOISE + "\n" +
+        "uniform vec3 uAlpSnow;\nuniform vec2 uAlpFar;\n" + GLSL_NOISE + "\n" + LIN_GLSL +
         // shared per-fragment scratch, filled in the albedo pass, read by the
         // normal and roughness passes further down the same main()
         "float alpSnowMask = 0.0; float alpFine = 1.0; float alpMid = 1.0; vec2 alpG = vec2( 0.0 ); vec3 alpRn = vec3( 0.0 );");
@@ -179,6 +181,13 @@
       fs = fs.replace("#include <color_fragment>",
         "#include <color_fragment>\n" +
         "{\n" +
+        // THE VERTEX COLOURS ARE sRGB DISPLAY COLOURS (biome_snow.js's
+        // palette). Taken as linear the flanks reflected ~43% green, pale
+        // mint over the plate at their foot, which reads its own palette
+        // decoded (continent.js): the massif looked lit from inside. Decoded
+        // with the ground's own gndLin (textures_surface.js). The snow is
+        // uAlpSnow, already a linear albedo, and is not touched.
+        LIN_CALL +
         "  float alpD = length( vViewPosition );\n" +
         "  alpFine = ( 1.0 - smoothstep( uAlpFar.x * 0.25, uAlpFar.x, alpD ) ) * min( uAlpDetail, 1.0 );\n" +
         "  alpMid = ( 1.0 - smoothstep( uAlpFar.y * 0.20, uAlpFar.y, alpD ) ) * min( uAlpDetail, 1.0 );\n" +

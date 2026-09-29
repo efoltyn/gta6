@@ -224,7 +224,7 @@
   const M = {
     stone: 0xd6d2c4, stoneD: 0xb8b3a3, stoneDk: 0x8f8b7d, marble: 0xe6e3d8,
     paving: 0x9a9a94, concrete: 0xa8aaa6, concreteD: 0x86888a, asphalt: 0x33373b,
-    lawn: 0x4f7445, lawnD: 0x3e5d38, hedge: 0x33512f, gravel: 0x7d7767,
+    lawn: 0x55693b, lawnD: 0x46583a, hedge: 0x33512f, gravel: 0x7d7767,
     dirt: 0x7f6a4c, water: 0x2f6f9e, pool: 0x3fa4c8, paint: 0xd8d8c8,
     steel: 0x5a6068, steelD: 0x3c4046, fence: 0x9aa0a6, fenceP: 0x6a7077,
     dark: 0x202327, warn: 0xd4a017, red: 0xb43a32, glassSteel: 0x39444f,
@@ -247,6 +247,16 @@
   const YS = 0.10;    // hard surfacing over ground cover — paving, plaza, court
   const YM = 0.14;    // paint, markings, water
   function cm(hex, o) { return CBZ.cmat ? CBZ.cmat(hex, o) : (CBZ.mat ? CBZ.mat(hex, o) : new THREE.MeshLambertMaterial({ color: hex })); }
+  // GROUND is decoded (CBZ.groundLinear): the lawns, forecourts, aprons and
+  // pools every complex lays flat are seen from the air beside the continent
+  // plate, which reads its colours as real reflectance. Taken as linear a
+  // 0x4f7445 lawn reflected 45% (pale lime) and a 0x9a9a94 forecourt 32%
+  // (chalk). One shared material per colour, so core/batch.js still merges.
+  const GMAT = {};
+  function gm(hex) {
+    if (!CBZ.groundLinear) return cm(hex);
+    return GMAT[hex] || (GMAT[hex] = new THREE.MeshLambertMaterial({ color: CBZ.groundLinear(hex) }));
+  }
   function bg(w, h, d) { return CBZ.boxGeom ? CBZ.boxGeom(w, h, d) : new THREE.BoxGeometry(w, h, d); }
   function h01(x, z, salt) { return CBZ.hash01 ? CBZ.hash01(x, z, salt) : 0.5; }
 
@@ -285,7 +295,7 @@
   function slab(root, x, z, w, d, hex, y) {
     const g = new THREE.PlaneGeometry(w, d);
     g.rotateX(-Math.PI / 2);
-    const m = new THREE.Mesh(g, cm(hex));
+    const m = new THREE.Mesh(g, gm(hex));
     m.position.set(x, y == null ? 0.05 : y, z);
     m.receiveShadow = true; m.castShadow = false;
     m.matrixAutoUpdate = false; m.updateMatrix();
@@ -295,7 +305,7 @@
   function disc(root, x, z, r, hex, y, seg) {
     const g = new THREE.CircleGeometry(r, seg || 24);
     g.rotateX(-Math.PI / 2);
-    const m = new THREE.Mesh(g, cm(hex));
+    const m = new THREE.Mesh(g, gm(hex));
     m.position.set(x, y == null ? 0.06 : y, z);
     m.receiveShadow = true; m.castShadow = false;
     m.matrixAutoUpdate = false; m.updateMatrix();
@@ -362,7 +372,10 @@
       const ox = (rect.minX + rect.maxX) / 2, oz = (rect.minZ + rect.maxZ) / 2;
       for (let i = 0; i < P.count; i++) U.setXY(i, (P.getX(i) + ox) / t, -(P.getZ(i) + oz) / t);
     }
-    const m = new THREE.Mesh(g, surf ? estateMat(surf) : cm(hex));
+    // a plain pad is GROUND: its display hex decoded to real reflectance
+    // (CBZ.groundLinear), as the plate round it is. Taken as linear, a 0x9a9a92
+    // forecourt reflected 32% and read chalk white from the air.
+    const m = new THREE.Mesh(g, surf ? estateMat(surf) : gm(hex));
     m.position.set((rect.minX + rect.maxX) / 2, 0.02, (rect.minZ + rect.maxZ) / 2);
     m.receiveShadow = true; m.castShadow = false;
     m.matrixAutoUpdate = false; m.updateMatrix();
@@ -1267,8 +1280,10 @@
      mapped 0..1 over its own square). `flat` is the shared colour a surface
      wears when textures are unavailable (headless, tier 0). */
   const SURF = {
-    lawn:    { lib: "grass", tint: 0x587f45, tile: 3.2, flat: 0x4f7445 },
-    lawnB:   { lib: "grass", tint: 0x6a9651, tile: 3.2, flat: 0x5b8250 },
+    // (decoded: a mown lawn ~0.09/0.14/0.05 and its lighter mowing stripe;
+    // 0x587f45/0x6a9651 were lime even once decoded, g/b 3.6)
+    lawn:    { lib: "grass", tint: 0x586a42, tile: 3.2, flat: 0x586a42 },
+    lawnB:   { lib: "grass", tint: 0x62744a, tile: 3.2, flat: 0x62744a },
     asphalt: { lib: "asphalt", tint: 0x3d4043, tile: 5.0, flat: 0x33373b },
     sett:    { paint: "sett", tint: 0xffffff, tile: 3.2, flat: 0x8f8b82 },
     settD:   { paint: "sett", tint: 0x9a968e, tile: 3.2, flat: 0x6c6962 },
@@ -1287,7 +1302,11 @@
     let m = null;
     try {
       const pbr = !!(CBZ.pbrMaterialsOn && CBZ.pbrMaterialsOn());
-      let map = null, normal = null, rough = null, tint = d.tint;
+      // THE AUTHORED COLOURS ARE sRGB DISPLAY HEXES; decoded to reflectance
+      // (CBZ.groundLinear). The lawn's 0x587f45 used to reach the lights as
+      // 50% green: pale lime stripes from the air. (0xffffff tints: no-op.)
+      const lin = function (h) { return CBZ.groundLinear ? CBZ.groundLinear(h) : new THREE.Color(h); };
+      let map = null, normal = null, rough = null, tint = lin(d.tint);
       if (d.lib && CBZ.surfaceMaps) {
         const mp = CBZ.surfaceMaps(d.lib, { repeat: 1 });
         if (mp) {
@@ -1295,7 +1314,7 @@
           // the library map carries its own brightness; divide it back out so
           // the lawn is the green authored here and the map adds only grain
           const mean = CBZ.surfaceMapMean ? CBZ.surfaceMapMean(map) : [1, 1, 1];
-          const c = new THREE.Color(d.tint);
+          const c = lin(d.tint);
           c.r /= Math.max(0.05, mean[0]); c.g /= Math.max(0.05, mean[1]); c.b /= Math.max(0.05, mean[2]);
           tint = c;
         }
@@ -1312,7 +1331,7 @@
         m.name = "estate-" + kind;
       }
     } catch (e) { m = null; }
-    if (!m) m = cm(d.flat);
+    if (!m) m = gm(d.flat);
     EMAT[kind] = m;
     return m;
   }

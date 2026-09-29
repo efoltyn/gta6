@@ -975,11 +975,13 @@
         seaLandBounds.set(mb.minX, mb.minZ, mb.maxX, mb.maxZ);
         const MS = 640;
         const mask = new Uint8Array(MS * MS * 4);
+        const sgn = new Float32Array(MS * MS);
         for (let mz = 0; mz < MS; mz++) {
           const wz = mb.minZ + (mb.maxZ - mb.minZ) * (mz + 0.5) / MS;
           for (let mx = 0; mx < MS; mx++) {
             const wx = mb.minX + (mb.maxX - mb.minX) * (mx + 0.5) / MS;
             const signed = +shoreAt(wx, wz);
+            sgn[mz * MS + mx] = signed;
             const land = Math.max(0, Math.min(1, 0.5 + (signed - 1.5) / 9));
             // Surf is a narrow waterline treatment, not a wide second pale
             // band — a wider field used to cover most of Redhollow Lake and
@@ -993,6 +995,59 @@
             mask[q + 3] = Math.round(Math.max(0, Math.min(1, inlandAt(wx, wz))) * 255);
           }
         }
+        /* SURF NEEDS OPEN WATER. The waterline band (G) drove a breaking-
+           surf ribbon along EVERY shore, so each quay of the downtown
+           channels and the Kings River wore a 20 m white stripe (measured
+           186-219 grey-white on both walls from 160 m up; hiding the plate
+           and the bed under it changed nothing: it was the foam). Waves that
+           break are built over open water; a 60 m channel has none. So the
+           band is scaled by the water's reach straight out from that shore:
+           the deepest this field gets within 200 m along the shore normal
+           (half a channel's width; hundreds of metres off a coast or across
+           a lake). Read off the samples just taken: no extra shore queries. */
+        (function surfExposure() {
+          const tx = (mb.maxX - mb.minX) / MS, tz = (mb.maxZ - mb.minZ) / MS;
+          const at = function (ix, iz) {
+            ix = ix < 0 ? 0 : ix >= MS ? MS - 1 : ix; iz = iz < 0 ? 0 : iz >= MS ? MS - 1 : iz;
+            return sgn[iz * MS + ix];
+          };
+          const expo = new Float32Array(MS * MS).fill(1);
+          for (let mz = 0; mz < MS; mz++) for (let mx = 0; mx < MS; mx++) {
+            const s0 = sgn[mz * MS + mx];
+            if (!(s0 < 0 && s0 > -40)) continue;
+            // the field rises onto land: -grad points out over the water
+            let gx = (at(mx + 1, mz) - at(mx - 1, mz)) / tx, gz = (at(mx, mz + 1) - at(mx, mz - 1)) / tz;
+            const L = Math.hypot(gx, gz);
+            if (!(L > 1e-6)) continue;
+            gx /= L; gz /= L;
+            let reach = -s0;
+            for (let d = 20; d <= 200; d += 20) {
+              const v = at(Math.round(mx - gx * d / tx), Math.round(mz - gz * d / tz));
+              if (v >= 0) break;
+              if (-v > reach) reach = -v;
+            }
+            const t = Math.max(0, Math.min(1, (reach - 35) / 85));
+            expo[mz * MS + mx] = t * t * (3 - 2 * t);
+          }
+          for (let mz = 0; mz < MS; mz++) for (let mx = 0; mx < MS; mx++) {
+            const i = mz * MS + mx;
+            let e = expo[i];
+            // a land texel's G bleeds into the waterline under bilinear
+            // filtering: it takes its water neighbours' exposure
+            if (sgn[i] >= 0) {
+              let m = -1;
+              for (let k = 0; k < 4; k++) {
+                const jx = mx + (k === 0 ? 1 : k === 1 ? -1 : 0), jz = mz + (k === 2 ? 1 : k === 3 ? -1 : 0);
+                if (jx < 0 || jz < 0 || jx >= MS || jz >= MS) continue;
+                const j = jz * MS + jx;
+                if (sgn[j] < 0 && expo[j] > m) m = expo[j];
+              }
+              if (m < 0) continue;
+              e = m;
+            }
+            if (e < 1) mask[i * 4 + 1] = Math.round(mask[i * 4 + 1] * e);
+          }
+        })();
         seaLandMaskTex = new THREE.DataTexture(mask, MS, MS, THREE.RGBAFormat);
         seaLandMaskTex.wrapS = seaLandMaskTex.wrapT = THREE.ClampToEdgeWrapping;
         seaLandMaskTex.magFilter = seaLandMaskTex.minFilter = THREE.LinearFilter;

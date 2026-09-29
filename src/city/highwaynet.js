@@ -94,6 +94,10 @@
   let _netBox = null;                    // fast whole-network reject
   let _routes = null;                    // the built table (debug/audit)
   CBZ.cityHighwayNet = function () { return _routes; };
+  // the filleted corridor segments themselves ({x0,z0,x1,z1,half}), read-only:
+  // continent.js rasterises them into its road-clearance field so the land
+  // lies low along a highway instead of being cut away in a 40 m trench
+  CBZ.highwayNetCorridors = function () { return _corridors; };
 
   function sm01(v) { v = v < 0 ? 0 : (v > 1 ? 1 : v); return v * v * (3 - 2 * v); }
 
