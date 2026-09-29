@@ -2311,7 +2311,7 @@
     const c = CBZ.cityMakeCar(x, z, heading, r.vertical, CRUISER_MODEL, 0.28);
     if (!c) return null;
     // dress it as a black-and-white (guarded — rbDecorate no-ops on a box rig)
-    try { rbDecorate(c); } catch (e) { /* box rig / headless — skip livery, still drives */ }
+    try { if (CBZ.cityWhenCarBuilt) CBZ.cityWhenCarBuilt(c, rbDecorate); else rbDecorate(c); } catch (e) { /* box rig / headless — skip livery, still drives */ }
     // routine patrol = lightbar DARK (not responding). The flash is reserved for
     // an active roadblock/response, so a cruising unit reads as on-the-beat, not
     // mid-call. (rbUpdate only flashes RB.cars, never our patrol pool, so these
@@ -2477,7 +2477,7 @@
     const heading = r.vertical ? (dir > 0 ? 0 : Math.PI) : (dir > 0 ? Math.PI / 2 : -Math.PI / 2);
     const van = CBZ.cityMakeCar(x, z, heading, r.vertical, SWAT_VAN_MODEL, 0.2);
     if (!van) return;
-    try { dressSwatVan(van); } catch (e) { /* livery is cosmetic — never lose the van */ }
+    try { if (CBZ.cityWhenCarBuilt) CBZ.cityWhenCarBuilt(van, dressSwatVan); else dressSwatVan(van); } catch (e) { /* livery is cosmetic — never lose the van */ }
     van.road = r; van.lane = lane; van.dirSign = dir;
     van.laneIdx = lanesPerDirP(r) - 1; van.vertical = !!r.vertical;
     van.baseV = Math.max(13, ((TRP().cruise && TRP().cruise[1]) || 12) + 2);
@@ -2894,7 +2894,7 @@
       let c = null;
       while (RB.carPool.length && !c) { const r = RB.carPool.pop(); if (rbCarUsable(r)) c = r; else rbDispose(r.group); }
       if (c) { CBZ.cityCars.push(c); A.root.add(c.group); }
-      else { c = CBZ.cityMakeCar ? CBZ.cityMakeCar(cx, cz, heading, uz !== 0, CRUISER_MODEL, 0) : null; if (c) rbDecorate(c); }
+      else { c = CBZ.cityMakeCar ? CBZ.cityMakeCar(cx, cz, heading, uz !== 0, CRUISER_MODEL, 0) : null; if (c) { if (CBZ.cityWhenCarBuilt) CBZ.cityWhenCarBuilt(c, rbDecorate); else rbDecorate(c); } }
       if (!c) { rbAbort(); return false; }
       c.pos.set(cx, 0, cz); c.heading = heading;
       c.group.position.set(cx, 0, cz); c.group.rotation.set(0, heading, 0);

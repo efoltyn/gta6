@@ -55,6 +55,9 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  // Built when the prison is first needed, as if at this script's parse
+  // point (core/prisonlazy.js). Body left at its old indent.
+  CBZ.definePrison("entities/towerwatch.js", function () {
   if (!CBZ || !CBZ.spawnGuard || !CBZ.prisonTowers) return;
   const player = CBZ.player;
   const PI = Math.PI;
@@ -558,4 +561,5 @@
       };
     },
   };
+  });
 })();

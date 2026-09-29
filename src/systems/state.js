@@ -5,7 +5,7 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
-  const { player, playerChar, el, keycard, cam } = CBZ;
+  const { player, playerChar, el, cam } = CBZ;
   const g = CBZ.game;
 
   let pausedAt = 0;   // when the pause card came up (resumeGame's double-tap guard)
@@ -76,6 +76,9 @@
     // its JAIL map is chosen, the disaster island when ISLAND is (the match
     // reset re-applies this per the picker; CBZ.gungameWorlds is the truth).
     const ggw = g.mode === "gungame" && CBZ.gungameWorlds ? CBZ.gungameWorlds() : null;
+    // The prison is built the first time a mode shows it (core/prisonlazy.js).
+    // Synchronous: every caller that goes on to startRun() gets a built jail.
+    if ((g.mode === "escape" || (ggw && ggw.jail)) && CBZ.ensurePrison) CBZ.ensurePrison();
     if (CBZ.prisonRoot) {
       CBZ.prisonRoot.visible = g.mode === "escape" || !!(ggw && ggw.jail);
       // batched on first show (core/batch.js); before the page's load event
@@ -164,6 +167,7 @@
     if (CBZ.fpsResetWeapons) CBZ.fpsResetWeapons();
     if (CBZ.killstreakReset) CBZ.killstreakReset();
 
+    const keycard = CBZ.keycard;   // built with the prison (core/prisonlazy.js)
     keycard.collected = false; keycard.group.visible = true;
     keycard.group.scale.setScalar(1); keycard.ring.visible = true;
     if (CBZ.escapePlan) CBZ.escapePlan.reset();   // grate welded, nothing carried over (systems/escapeplan.js)
@@ -643,7 +647,9 @@
   // into an unbuilt heavy world now gets the same meter.
   function presentModeSwitch(id) {
     if (bootBusy) return;
-    const heavy = id === "city" && CBZ.modes && CBZ.modes.city && !(CBZ.city && CBZ.city.built);
+    // an unbuilt prison is a ~1 s build: it goes behind the card like the city
+    const prisonHeavy = CBZ.prisonNeededBy && CBZ.prisonNeededBy(id);
+    const heavy = prisonHeavy || (id === "city" && CBZ.modes && CBZ.modes.city && !(CBZ.city && CBZ.city.built));
     if (!heavy || !bootMeterOn()) { setMode(id); return; }
     present(id, true, function () { setMode(id); });
   }

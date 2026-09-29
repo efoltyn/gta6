@@ -49,15 +49,20 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  // This file's CONFIG defaults are published at parse: other files read
+  // them before (or without) the prison ever being built.
+  if (CBZ.CONFIG.PRISON_NIGHT_V1 == null) CBZ.CONFIG.PRISON_NIGHT_V1 = true;
+  if (CBZ.CONFIG.PRISON_NIGHT_REALLIGHTS == null) CBZ.CONFIG.PRISON_NIGHT_REALLIGHTS = true;
+  if (CBZ.CONFIG.PRISON_NIGHT_DARK == null) CBZ.CONFIG.PRISON_NIGHT_DARK = 0.34;
+  // Built when the prison is first needed, as if at this script's parse
+  // point (core/prisonlazy.js). Body left at its old indent.
+  CBZ.definePrison("systems/prisonnight.js", function () {
   // systems/fixtures.js owns the REGISTRY, the region arithmetic and the
   // sensor curve; this file owns which fittings exist, what they answer to and
   // what a torch is worth. Tagged before us in index.html.
   if (!CBZ || typeof CBZ.onUpdate !== "function" || !CBZ.fixtures) return;
   const CFG = (CBZ.CONFIG = CBZ.CONFIG || {});
-  if (CFG.PRISON_NIGHT_V1 == null) CFG.PRISON_NIGHT_V1 = true;
-  if (CFG.PRISON_NIGHT_REALLIGHTS == null) CFG.PRISON_NIGHT_REALLIGHTS = true;
   // how much of the shared night rig survives in the prison (1 = stock)
-  if (CFG.PRISON_NIGHT_DARK == null) CFG.PRISON_NIGHT_DARK = 0.34;
 
   const root = CBZ.prisonRoot || CBZ.scene;
   const WORLD = CBZ.WORLD || { cellBlock: { x0: -16, x1: 16, z0: -44, z1: -8 } };
@@ -526,4 +531,5 @@
       torchCones: (CBZ.guards || []).filter(function (g) { return !!g._torchCone; }).length,
     };
   };
+  });
 })();

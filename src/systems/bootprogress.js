@@ -309,6 +309,8 @@
     if (mode === "city" && !worldOnly) {
       for (let i = 0; i < CITY_RUN_STEPS.length; i++) keys.push(CITY_RUN_STEPS[i]);
     }
+    // the prison is built on first entry (core/prisonlazy.js)
+    if (CBZ.prisonNeededBy && CBZ.prisonNeededBy(mode)) keys.push("prison:build");
     keys.push("boot:frames");
     return keys;
   }

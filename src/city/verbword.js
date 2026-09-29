@@ -25,7 +25,7 @@
 (function (root) {
   "use strict";
   // words that may follow the verb and still leave a verb
-  const PARTICLES = /^(up|in|out|off|on|down|away|over|back|along|around|through|to|with|for|at|by|it|one|open|shut|follow|wait|go|run|home|here|guard|me|quiet|loose|free|still|cover|rob|scare|tail|hide)$/i;
+  const PARTICLES = /^(up|in|out|off|on|down|away|over|back|along|around|through|to|with|for|at|by|it|one|open|shut|follow|wait|go|run|home|here|guard|me|quiet|loose|free|still|cover|rob|scare|tail|hide|all)$/i;
   const PREPS = /^(on|at|to|with|for|by|through|along|around|over)$/i;
   const PRICE = /\$\s?\d[\d,.]*\s?[kKmM]?\b/;
   /* A FEW VERBS NEED THEIR OBJECT. The rule above strips the noun because the

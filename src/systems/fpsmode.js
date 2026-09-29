@@ -1564,31 +1564,24 @@
   // and a dense smoke trail laid down BY DISTANCE (a fast rocket leaves no
   // gaps) that billows, drifts downwind and hangs for seconds. The body spins
   // and corkscrews slightly the way a spin-stabilised RPG does.
-  // Two pooled GPU point clouds carry every particle (one draw call each).
-  const RR = CBZ.rpgRound || null;
-  const FLY_K = 1.3;                          // drawn 1.3x real: readable at street range
-  const ROUND_LEN = 0.90 * FLY_K;             // fuze tip → nozzle
-  const roundGeo = (function () {
-    const prof = RR ? RR.flightProfile() : [[0, -0.9], [0.03, -0.9], [0.03, -0.3], [0.0425, -0.2], [0.0425, -0.1], [0, 0]];
-    const g = new THREE.LatheGeometry(prof.map((p) => new THREE.Vector2(p[0] * FLY_K, p[1] * FLY_K)), 14);
-    g.computeVertexNormals();
-    return g;
-  })();
-  const roundMat = new THREE.MeshPhongMaterial({ color: 0x4d5337, shininess: 12, specular: 0x23261b });
-  // 40 mm grenade (the launcher's plain flight): a short blunt shell, not a rocket
-  const shellGeo = (function () {
-    const P = [[0, -0.11], [0.021, -0.11], [0.021, -0.045], [0.020, -0.036], [0.017, -0.020], [0.011, -0.007], [0.005, 0], [0, 0]];
-    const g = new THREE.LatheGeometry(P.map((p) => new THREE.Vector2(p[0] * 1.5, p[1] * 1.5)), 12);
-    g.computeVertexNormals();
-    return g;
-  })();
-  const shellMat = new THREE.MeshPhongMaterial({ color: 0x6b6f52, shininess: 20, specular: 0x333322 });
-  // a fin: a thin blade hinged at its root (local origin), length up +Y, chord +X
-  const FIN_L = 0.105 * FLY_K, FIN_C = 0.032 * FLY_K;
-  const finGeo = new THREE.BoxGeometry(FIN_C, FIN_L, 0.0035 * FLY_K);
+  // weapons/munitions.js's two pooled GPU point clouds carry every particle.
+  // The round's shape, the smoke and the fire all come from ONE shared
+  // system (weapons/munitions.js): the PG-7V and the 40 mm shell are its
+  // cached geometries, every puff/flare rides its two pooled point clouds
+  // (one draw call each, shared with every missile in the game).
+  const MU = CBZ.munitions;
+  const fxr = MU.rand;                        // cosmetic stream, never the gameplay rng
+  const ROUND_LEN = MU.spec("pg7").L;         // fuze tip → nozzle, real 0.90 m
+  const SHELL_LEN = MU.spec("g40").L;
+  // a fin: a thin blade hinged at its root (local origin), length up +Y, chord +X.
+  // PG-7V: four folding fins on the sustainer nozzle, ~105 mm long.
+  const FIN_L = 0.105, FIN_C = 0.032;
+  const finGeo = new THREE.BoxGeometry(FIN_C, FIN_L, 0.0035);
   finGeo.translate(FIN_C / 2, FIN_L / 2, 0);
+  finGeo._shared = true;
   const finMat = new THREE.MeshLambertMaterial({ color: 0x2c3024 });
-  const FIN_HINGE_Y = -0.86 * FLY_K, FIN_HINGE_R = 0.0195 * FLY_K, FIN_OPEN = 1.5708;
+  const FIN_HINGE_Y = -0.86, FIN_HINGE_R = 0.0195, FIN_OPEN = 1.5708;
+  const SUSTAIN_M = 500;                      // PG-7V sustainer burns out ~500 m downrange
   const rockets = [];
   // Pool of 6: the old pool of 3 round-robined onto ACTIVE slots — fire 4
   // rockets at long range (5 carried; a 450u shot flies ~4s) and the first
@@ -1600,9 +1593,12 @@
     const root = new THREE.Group();         // flies the path; +Y is the travel direction
     const spin = new THREE.Group();         // rolls + corkscrews inside it
     root.add(spin);
-    const body = new THREE.Mesh(roundGeo, roundMat);
+    // munition geometry is nose +Z, centred: tip it onto +Y, nose at y=0
+    const body = MU.build("pg7");
+    body.rotation.x = -Math.PI / 2; body.position.y = -ROUND_LEN / 2;
     spin.add(body);
-    const shell = new THREE.Mesh(shellGeo, shellMat);
+    const shell = MU.build("g40");
+    shell.rotation.x = -Math.PI / 2; shell.position.y = -SHELL_LEN / 2;
     shell.visible = false;
     spin.add(shell);
     const fins = [];
@@ -1619,6 +1615,7 @@
     CBZ.scene.add(root);
     rockets.push({
       mesh: root, spin: spin, body: body, shell: shell, fins: fins, slot: i,
+      flare: MU.claimFlares(2),                    // core + halo, rewritten per frame
       active: false, t: 0, dur: 0.3, plain: false,
       ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0,   // origin + impact point (straight-line endpoints)
       sagY: 0,                                     // peak mid-flight gravity sag (world units, visual only)
@@ -1629,142 +1626,11 @@
       dir: new THREE.Vector3(0, 0, -1), lastEmit: new THREE.Vector3(),
     });
   }
-
-  // ---- the particle clouds ----------------------------------------------------
-  // cosmetic randomness on its own stream: rng() is the gameplay stream and a
-  // smoke puff must never shift a spread cone
-  let _fxs = 0x2f6b9d1;
-  function fxr() { _fxs = (_fxs * 1664525 + 1013904223) >>> 0; return _fxs / 4294967296; }
-  const puffTex = (function () {
-    const c = document.createElement("canvas"); c.width = c.height = 64;
-    const x = c.getContext("2d");
-    // a billow: a soft core with a few lumps round it, not a perfect disc
-    const blob = (cx, cy, r, a) => {
-      const g = x.createRadialGradient(cx, cy, 0, cx, cy, r);
-      g.addColorStop(0, "rgba(255,255,255," + a + ")"); g.addColorStop(0.55, "rgba(255,255,255," + (a * 0.55) + ")");
-      g.addColorStop(1, "rgba(255,255,255,0)");
-      x.fillStyle = g; x.fillRect(0, 0, 64, 64);
-    };
-    blob(32, 32, 26, 0.75);
-    blob(22, 26, 14, 0.45); blob(42, 24, 13, 0.4); blob(38, 42, 15, 0.45); blob(24, 40, 12, 0.35);
-    return new THREE.CanvasTexture(c);
-  })();
-  const PUFF_VS = [
-    "attribute float aSize; attribute float aAlpha; attribute float aRot; attribute vec3 aCol;",
-    "uniform float uScale; varying float vA; varying float vR; varying vec3 vC;",
-    "#include <fog_pars_vertex>",
-    "void main() {",
-    "  vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);",
-    "  gl_Position = projectionMatrix * mvPosition;",
-    "  gl_PointSize = aAlpha > 0.001 ? aSize * uScale / max(0.05, -mvPosition.z) : 0.0;",
-    "  vA = aAlpha; vR = aRot; vC = aCol;",
-    "  #include <fog_vertex>",
-    "}",
-  ].join("\n");
-  const PUFF_FS = [
-    "uniform sampler2D map; uniform float uLight; varying float vA; varying float vR; varying vec3 vC;",
-    "#include <fog_pars_fragment>",
-    "void main() {",
-    "  vec2 p = gl_PointCoord - 0.5; float c = cos(vR), s = sin(vR);",
-    "  p = vec2(c * p.x - s * p.y, s * p.x + c * p.y) + 0.5;",
-    "  vec4 t = texture2D(map, p);",
-    "  gl_FragColor = vec4(vC * uLight, t.a * vA);",
-    "  if (gl_FragColor.a < 0.004) discard;",
-    "  #include <fog_fragment>",
-    "}",
-  ].join("\n");
-  function makeCloud(n, additive) {
-    const geo = new THREE.BufferGeometry();
-    const A = {
-      pos: new Float32Array(n * 3), col: new Float32Array(n * 3),
-      size: new Float32Array(n), alpha: new Float32Array(n), rot: new Float32Array(n),
-    };
-    geo.setAttribute("position", new THREE.BufferAttribute(A.pos, 3));
-    geo.setAttribute("aCol", new THREE.BufferAttribute(A.col, 3));
-    geo.setAttribute("aSize", new THREE.BufferAttribute(A.size, 1));
-    geo.setAttribute("aAlpha", new THREE.BufferAttribute(A.alpha, 1));
-    geo.setAttribute("aRot", new THREE.BufferAttribute(A.rot, 1));
-    const mat = new THREE.ShaderMaterial({
-      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uScale: { value: 500 }, uLight: { value: 1 }, map: { value: null } }]),
-      vertexShader: PUFF_VS, fragmentShader: PUFF_FS,
-      transparent: true, depthWrite: false, depthTest: true, fog: !additive,
-      blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
-    });
-    mat.uniforms.map.value = puffTex;
-    const pts = new THREE.Points(geo, mat);
-    pts.frustumCulled = false;
-    pts.renderOrder = additive ? 3 : 2;
-    CBZ.scene.add(pts);
-    return {
-      n: n, A: A, geo: geo, mat: mat, next: 0, live: 0,
-      life: new Float32Array(n), max: new Float32Array(n),
-      vel: new Float32Array(n * 3), s0: new Float32Array(n), s1: new Float32Array(n),
-      a0: new Float32Array(n), drag: new Float32Array(n), rise: new Float32Array(n),
-      spinV: new Float32Array(n), windK: new Float32Array(n), fadeIn: new Float32Array(n),
-    };
-  }
-  // smoke/dust: capped 220 (a long shot's trail + two backblasts), oldest recycled
-  const smokeCloud = makeCloud(220, false);
-  // fire: slots 0..11 are the six rockets' motor flares (core + halo), rewritten
-  // every frame; the rest cycle for muzzle flashes, booster kicks, backblast flame
-  const FLARE_SLOTS = 12;
-  const fireCloud = makeCloud(FLARE_SLOTS + 60, true);
-  fireCloud.next = FLARE_SLOTS;
-  const WIND_X = 0.9, WIND_Z = 0.45;          // a light breeze the smoke drifts on (m/s)
-  function puff(C, x, y, z, vx, vy, vz, s0, s1, life, a0, r, g, b, o) {
-    let i = C.next;
-    C.next = i + 1 >= C.n ? (C === fireCloud ? FLARE_SLOTS : 0) : i + 1;   // oldest recycled
-    const A = C.A, i3 = i * 3;
-    A.pos[i3] = x; A.pos[i3 + 1] = y; A.pos[i3 + 2] = z;
-    A.col[i3] = r; A.col[i3 + 1] = g; A.col[i3 + 2] = b;
-    A.size[i] = s0; A.alpha[i] = 0; A.rot[i] = fxr() * 6.283;
-    C.vel[i3] = vx; C.vel[i3 + 1] = vy; C.vel[i3 + 2] = vz;
-    C.s0[i] = s0; C.s1[i] = s1; C.a0[i] = a0; C.life[i] = C.max[i] = life;
-    C.drag[i] = o && o.drag != null ? o.drag : 1.6;
-    C.rise[i] = o && o.rise != null ? o.rise : 0.22;
-    C.windK[i] = o && o.wind != null ? o.wind : 1;
-    C.fadeIn[i] = o && o.fadeIn != null ? o.fadeIn : 0.06;
-    C.spinV[i] = (fxr() - 0.5) * 0.8;
-    return i;
-  }
-  function stepCloud(C, dt) {
-    const A = C.A;
-    let live = 0;
-    for (let i = (C === fireCloud ? FLARE_SLOTS : 0); i < C.n; i++) {
-      if (C.life[i] <= 0) { if (A.alpha[i] !== 0) A.alpha[i] = 0; continue; }
-      live++;
-      C.life[i] -= dt;
-      const i3 = i * 3, k = 1 - Math.max(0, C.life[i]) / C.max[i];     // 0 → 1 over its life
-      const dg = Math.max(0, 1 - C.drag[i] * dt);
-      C.vel[i3] *= dg; C.vel[i3 + 1] = C.vel[i3 + 1] * dg + C.rise[i] * dt; C.vel[i3 + 2] *= dg;
-      const wk = C.windK[i] * Math.min(1, k * 3);
-      A.pos[i3] += (C.vel[i3] + WIND_X * wk) * dt;
-      A.pos[i3 + 1] += C.vel[i3 + 1] * dt;
-      A.pos[i3 + 2] += (C.vel[i3 + 2] + WIND_Z * wk) * dt;
-      // grows fast then slows (a billow), fades in, holds, fades slowly out
-      A.size[i] = C.s0[i] + (C.s1[i] - C.s0[i]) * (1 - (1 - k) * (1 - k));
-      const fin = C.fadeIn[i] > 0 ? Math.min(1, k * C.max[i] / C.fadeIn[i]) : 1;
-      A.alpha[i] = C.a0[i] * fin * (1 - k) * (1 - k * 0.35);
-      A.rot[i] += C.spinV[i] * dt;
-      if (C.life[i] <= 0) A.alpha[i] = 0;
-    }
-    C.live = live;
-  }
-  function flushCloud(C) {
-    const a = C.geo.attributes;
-    a.position.needsUpdate = true; a.aSize.needsUpdate = true; a.aAlpha.needsUpdate = true;
-    a.aRot.needsUpdate = true; a.aCol.needsUpdate = true;
-  }
-  // point sprites are sized in pixels: world size × (buffer height / 2·tan(fov/2))
-  function cloudScale() {
-    const cam = CBZ.camera, r = CBZ.renderer;
-    const h = r && r.domElement ? r.domElement.height : 900;
-    const fov = cam && cam.fov ? cam.fov : 70;
-    return h / (2 * Math.tan(fov * Math.PI / 360));
-  }
+  const smokePuff = MU.smoke, firePuff = MU.fire;
 
   // ---- launch: booster kick, muzzle cloud, backblast ------------------------
   const _bbDir = new THREE.Vector3(), _bbSide = new THREE.Vector3(), _bbUp = new THREE.Vector3(), _bbP = new THREE.Vector3();
+  const _bbBack = new THREE.Vector3();
   function coneDir(axis, spread, out) {
     // a random direction within `spread` (radians-ish) of axis
     _bbSide.set(axis.z, 0, -axis.x);
@@ -1777,28 +1643,27 @@
   function launchFx(muzzle, dir, tail) {
     // BOOSTER KICK at the muzzle: a hard white-orange flash and a grey cloud
     // blown forward and out (the booster burns out inside the first metres)
-    puff(fireCloud, muzzle.x + dir.x * 0.3, muzzle.y + dir.y * 0.3, muzzle.z + dir.z * 0.3, dir.x * 4, dir.y * 4, dir.z * 4, 0.9, 1.6, 0.07, 1, 1, 0.92, 0.7, { drag: 6, rise: 0, wind: 0, fadeIn: 0 });
+    firePuff(muzzle.x + dir.x * 0.3, muzzle.y + dir.y * 0.3, muzzle.z + dir.z * 0.3, dir.x * 4, dir.y * 4, dir.z * 4, 0.9, 1.6, 0.07, 1, 1, 0.92, 0.7, { drag: 6, rise: 0, wind: 0, fadeIn: 0 });
     for (let i = 0; i < 4; i++) {
       coneDir(dir, 0.35, _bbDir);
       const v = 10 + fxr() * 12;
-      puff(fireCloud, muzzle.x, muzzle.y, muzzle.z, _bbDir.x * v, _bbDir.y * v, _bbDir.z * v, 0.35, 0.9, 0.06 + fxr() * 0.05, 0.9, 1, 0.55 + fxr() * 0.2, 0.18, { drag: 9, rise: 0, wind: 0, fadeIn: 0 });
+      firePuff(muzzle.x, muzzle.y, muzzle.z, _bbDir.x * v, _bbDir.y * v, _bbDir.z * v, 0.35, 0.9, 0.06 + fxr() * 0.05, 0.9, 1, 0.55 + fxr() * 0.2, 0.18, { drag: 9, rise: 0, wind: 0, fadeIn: 0 });
     }
     for (let i = 0; i < 9; i++) {
       coneDir(dir, 0.9, _bbDir);
       const v = 2 + fxr() * 5, sh = 0.62 + fxr() * 0.12;
-      puff(smokeCloud, muzzle.x, muzzle.y, muzzle.z, _bbDir.x * v, _bbDir.y * v + 0.3, _bbDir.z * v, 0.35, 1.8 + fxr() * 1.2, 2.2 + fxr() * 1.6, 0.5, sh, sh, sh * 0.97, { drag: 2.4 });
+      smokePuff(muzzle.x, muzzle.y, muzzle.z, _bbDir.x * v, _bbDir.y * v + 0.3, _bbDir.z * v, 0.35, 1.8 + fxr() * 1.2, 2.2 + fxr() * 1.6, 0.5, sh, sh, sh * 0.97, { drag: 2.4 });
     }
     // BACKBLAST: a cone of flame and a wall of dust out of the venturi, 2-4 m
     // behind the shooter. If a wall is right behind him it slaps back off it.
     if (!tail) return;
-    _bbP.copy(dir).negate();
-    const back = _bbP.clone();
+    const back = _bbBack.copy(dir).negate();
     const wall = wallDistance(tail, back, 3.2);
     const reach = wall && wall.distance < 3.2 ? Math.max(0.25, wall.distance - 0.15) : 3.4;
     for (let i = 0; i < 14; i++) {
       coneDir(back, 0.32, _bbDir);
       const d = fxr() * Math.min(reach, 2.4), v = 6 + fxr() * 14;
-      puff(fireCloud, tail.x + _bbDir.x * d, tail.y + _bbDir.y * d, tail.z + _bbDir.z * d,
+      firePuff(tail.x + _bbDir.x * d, tail.y + _bbDir.y * d, tail.z + _bbDir.z * d,
         _bbDir.x * v, _bbDir.y * v, _bbDir.z * v, 0.35 + d * 0.25, 1.1 + d * 0.5, 0.09 + fxr() * 0.12, 0.95,
         1, 0.45 + fxr() * 0.35, 0.12, { drag: 10, rise: 0.5, wind: 0, fadeIn: 0 });
     }
@@ -1807,7 +1672,7 @@
       const d = fxr() * reach, v = 2 + fxr() * 7;
       // dust kicked off the ground reads warmer than the propellant smoke
       const dust = fxr() < 0.5, g0 = dust ? 0.56 + fxr() * 0.08 : 0.66 + fxr() * 0.1;
-      puff(smokeCloud, tail.x + _bbDir.x * d, tail.y + _bbDir.y * d - (dust ? 0.4 : 0), tail.z + _bbDir.z * d,
+      smokePuff(tail.x + _bbDir.x * d, tail.y + _bbDir.y * d - (dust ? 0.4 : 0), tail.z + _bbDir.z * d,
         _bbDir.x * v, _bbDir.y * v + (dust ? 0.2 : 0.6), _bbDir.z * v, 0.5, 2.2 + fxr() * 1.8, 2.6 + fxr() * 2.2, dust ? 0.42 : 0.5,
         g0 * (dust ? 1.06 : 1), g0 * (dust ? 0.98 : 1), g0 * (dust ? 0.86 : 0.98), { drag: 2.2 });
     }
@@ -1818,19 +1683,20 @@
       for (let i = 0; i < 12; i++) {
         coneDir(dir, 1.1, _bbDir);
         const v = 3 + fxr() * 5;
-        puff(smokeCloud, hp.x, hp.y, hp.z, _bbDir.x * v, _bbDir.y * v + 0.4, _bbDir.z * v, 0.6, 2.4 + fxr() * 1.4, 2.2 + fxr() * 1.8, 0.52, 0.62, 0.6, 0.55, { drag: 2.6 });
+        smokePuff(hp.x, hp.y, hp.z, _bbDir.x * v, _bbDir.y * v + 0.4, _bbDir.z * v, 0.6, 2.4 + fxr() * 1.4, 2.2 + fxr() * 1.8, 0.52, 0.62, 0.6, 0.55, { drag: 2.6 });
       }
       for (let i = 0; i < 6; i++) {
         coneDir(dir, 1.2, _bbDir);
         const v = 4 + fxr() * 6;
-        puff(fireCloud, hp.x, hp.y, hp.z, _bbDir.x * v, _bbDir.y * v, _bbDir.z * v, 0.5, 1.4, 0.1 + fxr() * 0.08, 0.8, 1, 0.5, 0.15, { drag: 9, rise: 0, wind: 0, fadeIn: 0 });
+        firePuff(hp.x, hp.y, hp.z, _bbDir.x * v, _bbDir.y * v, _bbDir.z * v, 0.5, 1.4, 0.1 + fxr() * 0.08, 0.8, 1, 0.5, 0.15, { drag: 9, rise: 0, wind: 0, fadeIn: 0 });
       }
     }
   }
 
   // ---- per-frame dressing of a flying round -----------------------------------
-  const IGNITE_AT = 10;                       // m: the sustainer lights clear of the shooter
+  const IGNITE_AT = 11;                       // m: the sustainer lights clear of the shooter (PG-7V: ~11 m)
   const _trTail = new THREE.Vector3(), _trSeg = new THREE.Vector3(), _trP = new THREE.Vector3();
+  function burning(r) { return r.lit && r.flown < SUSTAIN_M; }
   function dressRocket(r, dt, stepLen) {
     r.age += dt;
     r.flown += stepLen;
@@ -1841,7 +1707,7 @@
     // spin + a slight corkscrew (the round is spin-stabilised, not a dart)
     r.spinA += dt * 6.283 * 4.5;
     r.spin.rotation.y = r.spinA;
-    const wob = Math.min(1, r.flown / 12) * 0.035 * FLY_K;
+    const wob = Math.min(1, r.flown / 12) * 0.035;
     r.spin.position.set(Math.cos(r.spinA * 0.5) * wob, 0, Math.sin(r.spinA * 0.5) * wob);
     // the tail, in world
     _trTail.copy(r.spin.position).setY(-ROUND_LEN);
@@ -1849,9 +1715,11 @@
     if (!r.lit && r.flown >= IGNITE_AT) {
       r.lit = true;
       // ignition: a bright pop and a small knot of smoke where it caught
-      puff(fireCloud, _trTail.x, _trTail.y, _trTail.z, 0, 0, 0, 0.5, 1.3, 0.08, 1, 1, 0.9, 0.6, { drag: 0, rise: 0, wind: 0, fadeIn: 0 });
-      for (let i = 0; i < 4; i++) puff(smokeCloud, _trTail.x, _trTail.y, _trTail.z, (fxr() - 0.5) * 2, (fxr() - 0.5) * 2, (fxr() - 0.5) * 2, 0.3, 1.6, 2.5 + fxr() * 1.5, 0.5, 0.74, 0.73, 0.7);
+      firePuff(_trTail.x, _trTail.y, _trTail.z, 0, 0, 0, 0.5, 1.3, 0.08, 1, 1, 0.9, 0.6, { drag: 0, rise: 0, wind: 0, fadeIn: 0 });
+      for (let i = 0; i < 4; i++) smokePuff(_trTail.x, _trTail.y, _trTail.z, (fxr() - 0.5) * 2, (fxr() - 0.5) * 2, (fxr() - 0.5) * 2, 0.3, 1.6, 2.5 + fxr() * 1.5, 0.5, 0.74, 0.73, 0.7);
     }
+    // burnt out: the round coasts clean, no more trail
+    if (r.lit && !burning(r)) { r.lastEmit.copy(_trTail); return; }
     // the trail, laid by distance from the last puff to the tail now
     _trSeg.copy(_trTail).sub(r.lastEmit);
     const segLen = _trSeg.length();
@@ -1864,33 +1732,23 @@
         const j = (fxr() - 0.5) * 0.25;
         if (r.lit) {
           const sh = 0.70 + fxr() * 0.12;
-          puff(smokeCloud, _trP.x + j, _trP.y + j * 0.5, _trP.z - j,
+          smokePuff(_trP.x + j, _trP.y + j * 0.5, _trP.z - j,
             -r.dir.x * 1.2 + (fxr() - 0.5) * 0.6, -r.dir.y * 1.2 + (fxr() - 0.5) * 0.5, -r.dir.z * 1.2 + (fxr() - 0.5) * 0.6,
             0.28, 1.7 + fxr() * 1.5, 3 + fxr() * 3, 0.55, sh, sh, sh * 0.97, { drag: 1.2, rise: 0.25 });
         } else {
           // the coast before ignition: a thin grey wisp off the spent booster
-          puff(smokeCloud, _trP.x + j, _trP.y, _trP.z - j, 0, 0, 0, 0.18, 0.7, 1.2 + fxr() * 0.8, 0.3, 0.7, 0.7, 0.68, { drag: 1, rise: 0.15 });
+          smokePuff(_trP.x + j, _trP.y, _trP.z - j, 0, 0, 0, 0.18, 0.7, 1.2 + fxr() * 0.8, 0.3, 0.7, 0.7, 0.68, { drag: 1, rise: 0.15 });
         }
       }
       r.lastEmit.copy(_trP);
     }
   }
-  // the motor flare: two reserved additive slots per rocket, rewritten per frame
+  // the motor flare: the round's two reserved additive slots, rewritten per frame
   function flareRocket(r) {
-    const A = fireCloud.A, i0 = r.slot * 2, i1 = i0 + 1;
-    const on = r.active && r.lit && !r.plain;
-    if (!on) { A.alpha[i0] = 0; A.alpha[i1] = 0; return; }
+    if (!(r.active && !r.plain && burning(r))) { MU.flareOff(r.flare, 2); return; }
     _trTail.copy(r.spin.position).setY(-ROUND_LEN - 0.06);
     r.mesh.localToWorld(_trTail);
-    const fl = 0.75 + fxr() * 0.5;
-    for (let s = 0; s < 2; s++) {
-      const i = s ? i1 : i0, i3 = i * 3;
-      A.pos[i3] = _trTail.x - r.dir.x * 0.12 * s; A.pos[i3 + 1] = _trTail.y - r.dir.y * 0.12 * s; A.pos[i3 + 2] = _trTail.z - r.dir.z * 0.12 * s;
-      A.size[i] = (s ? 1.25 : 0.45) * fl;
-      A.alpha[i] = s ? 0.75 * fl : 1;
-      A.col[i3] = 1; A.col[i3 + 1] = s ? 0.55 : 0.95; A.col[i3 + 2] = s ? 0.16 : 0.8;
-      A.rot[i] = fxr() * 6.283;
-    }
+    MU.motorFlare(r.flare, _trTail.x, _trTail.y, _trTail.z, r.dir.x, r.dir.y, r.dir.z, 1.25);
   }
 
   // ---- the round on the launcher: gone when fired, back when reloaded ----------
@@ -1931,25 +1789,13 @@
     return _tailW.copy(muzzle).addScaledVector(dir, -1.45).clone();
   }
 
-  // the old API name the frame loop calls: all the rocket FX that live past a flight
+  // the old API name the frame loop calls: the launcher's round + the motor
+  // flares (the clouds themselves are stepped by munitions.js at 52.3)
   function updateRocketSmoke(dt) {
     syncWarheads();
     for (let i = 0; i < rockets.length; i++) flareRocket(rockets[i]);
-    stepCloud(smokeCloud, dt);
-    stepCloud(fireCloud, dt);
-    const sc = cloudScale();
-    smokeCloud.mat.uniforms.uScale.value = sc;
-    fireCloud.mat.uniforms.uScale.value = sc;
-    // smoke is unlit paint: take the day/night rig's level so it isn't a grey
-    // glow at midnight (fire is its own light and keeps 1)
-    const sun = CBZ.sun, hemi = CBZ.hemi;
-    smokeCloud.mat.uniforms.uLight.value = (sun || hemi)
-      ? Math.max(0.3, Math.min(1.2, 0.25 + (sun ? sun.intensity : 0.6) * 0.45 + (hemi ? hemi.intensity : 0.5) * 0.6))
-      : 1;
-    flushCloud(smokeCloud);
-    flushCloud(fireCloud);
   }
-  CBZ.rpgFxStats = function () { return { smoke: smokeCloud.live, smokeCap: smokeCloud.n, fire: fireCloud.live, fireCap: fireCloud.n - FLARE_SLOTS }; };
+  CBZ.rpgFxStats = function () { const s = MU.stats(); return { smoke: s.smoke, smokeCap: s.smokeCap, fire: s.fire, fireCap: s.fireCap }; };
   let rocketIdx = 0;
   // launch a projectile from `from`→`to` over `dur` seconds, sagging under
   // `sag` world-units of (visual) gravity at the midpoint, then call `onArrive`.

@@ -93,7 +93,7 @@
   const RING_RESTOCK_ODDS = 0.35;   // the $5M rock returns to the vault this often
 
   const S = { lot: null, jw: null, group: null, cases: [], built: false,
-              cur: null, pry: null, alarmT: 0, beepT: 0, prompt: null, lastTxt: "", cx: 0, cz: 0 };
+              near: false, pry: null, alarmT: 0, beepT: 0, cx: 0, cz: 0 };
 
   function econ() { return CBZ.cityEcon || null; }
   function fmt$(n) { n = Math.round(n || 0); return "$" + String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
@@ -557,83 +557,37 @@
     }
   }
 
-  // ---- the look-pick + [E] prompt ---------------------------------------------
-  function pickCase() {
-    const P = CBZ.player, B = S.jw.bounds;
-    const px = P.pos.x, pz = P.pos.z;
-    if (px < B.minX - 1.5 || px > B.maxX + 1.5 || pz < B.minZ - 1.5 || pz > B.maxZ + 1.5) return null;
-    const yaw = CBZ.cam ? CBZ.cam.yaw : 0, fx = -Math.sin(yaw), fz = -Math.cos(yaw);
-    let best = null, bestScore = -1;
-    for (const cs of S.cases) {
-      const dx = cs.x - px, dz = cs.z - pz, d = Math.hypot(dx, dz);
-      if (d > REACH || d < 0.05) continue;
-      const dot = (dx / d) * fx + (dz / d) * fz;
-      if (dot < LOOK_DOT) continue;
-      const score = dot - d * 0.06;
-      if (score > bestScore) { bestScore = score; best = cs; }
-    }
-    return best;
+  // ---- THE CASES ARE CANDIDATES (city/interactions.js registerFixtures) -----
+  // Each case is a thing in the registry: E does the obvious verb on the case
+  // you look at (grab the loose ice, buy the piece, pry the lock), Q / a tap
+  // shows every verb it has. No private prompt and no private E listener.
+  function inStore(px, pz) {
+    const B = S.jw && S.jw.bounds;
+    return !!B && px >= B.minX - 1.5 && px <= B.maxX + 1.5 && pz >= B.minZ - 1.5 && pz <= B.maxZ + 1.5;
   }
-
-  function promptText(cs) {
-    const left = piecesLeft(cs);
-    const broken = cs.pane && cs.pane.shattered;
-    if (broken && left > 0)
-      return "<b style='color:#ffd166'>[E]</b> Grab the ice <span style='color:#7f8794'>" + left + " piece" + (left > 1 ? "s" : "") + " loose in the glass</span>";
-    if (left === 0)
-      return "<span style='color:#7f8794'>Cleaned out, the insurance re-stock is coming.</span>";
-    if (S.pry && S.pry.cs === cs)
-      return "<span style='color:#7f8794'>Don't move</span>";
-    // OPEN-STORE BUY: clerk posted + intact case + a buyable piece in your aim →
-    // pay the counter and it goes ON YOU (then pawn it later). The WHY hint says
-    // it: a wearable asset. (If you'd rather take it, the glass is right there.)
-    const buy = buyTarget(cs);
-    if (buy) {
-      const can = affordPrice() >= (buy.value | 0);
-      const why = "<span style='color:#7f8794'>" + dripWord(buy.drip) + ", pawn it later</span>";
-      if (can)
-        return "<b style='color:#9be37a'>[E]</b> Buy the " + buy.label + ", <b style='color:#ffd166'>" + fmt$(buy.value) + "</b> " + why;
-      return "<span style='color:#ff9e9e'>" + buy.label + ", " + fmt$(buy.value) + "</span> <span style='color:#7f8794'>short on cash + bank, the glass, though…</span>";
-    }
-    if (pryEligible(cs))
-      return "<b style='color:#9fe0ff'>[E]</b> Pry the case <span style='color:#7f8794'>slow + silent, one piece, the clerk might turn</span>";
-    if (!isNight())
-      return "<span style='color:#7f8794'>Locked case, too many eyes in daylight. The glass, though…</span>";
-    return "<span style='color:#ff9e9e'>The " + clerkName() + " is watching this case.</span> <span style='color:#7f8794'>the glass, though…</span>";
-  }
-
-  function promptEl() {
-    if (S.prompt) return S.prompt;
-    if (typeof document === "undefined" || !document.body) return null;
-    const d = document.createElement("div");
-    d.id = "jewelryPrompt";
-    d.style.cssText = "position:fixed;left:50%;bottom:150px;transform:translateX(-50%);z-index:46;display:none;" +
-      "background:rgba(13,16,21,.9);border:1px solid #3a4150;border-radius:12px;padding:7px 14px;color:#e8eef7;" +
-      "font-family:Fredoka,system-ui,sans-serif;font-size:15px;pointer-events:auto;cursor:pointer;text-align:center;max-width:78vw";
-    d.addEventListener("click", function () { if (S.cur) actOn(S.cur); });   // tap-to-act (mobile)
-    document.body.appendChild(d);
-    S.prompt = d;
-    return d;
-  }
-  function showPrompt(txt) {
-    const el = promptEl();
-    if (!el) return;
-    if (CBZ.touchPromptHTML) txt = CBZ.touchPromptHTML(txt);   // touch: [E] → tappable verb pill
-    if (txt !== S.lastTxt) { el.innerHTML = txt; S.lastTxt = txt; }
-    if (el.style.display !== "block") el.style.display = "block";
-  }
-  function hidePrompt() {
-    if (S.prompt && S.prompt.style.display !== "none") S.prompt.style.display = "none";
-    S.cur = null;
-  }
-
-  function actOn(cs) {
-    if (S.pry) return;                                 // hands are busy
-    const broken = cs.pane && cs.pane.shattered;
-    if (broken && piecesLeft(cs) > 0) { scoop(cs); return; }
-    const buy = buyTarget(cs);
-    if (buy) { buyPiece(cs, buy); return; }            // open store → pay the clerk
-    if (pryEligible(cs)) { startPry(cs); return; }
+  const loose = (cs) => !!(cs.pane && cs.pane.shattered) && piecesLeft(cs) > 0;
+  let fixturesWired = false;
+  function wireFixtures() {
+    if (fixturesWired || !CBZ.interactions || !CBZ.interactions.registerFixtures) return;
+    fixturesWired = true;
+    CBZ.interactions.registerFixtures({
+      id: "jewel-case", kind: "jewel-case", prio: 9,
+      list: function (ctx, px, pz) { return S.built && S.near && !S.pry && inStore(px, pz) ? S.cases : null; },
+      reach: function () { return REACH; },
+      dot: function () { return LOOK_DOT; },
+      verbs: [
+        { id: "jewel-grab", slot: "e", prio: 7, label: "Grab", forceYes: true, canShow: loose, onSelect: scoop },
+        { id: "jewel-buy", slot: "e", prio: 6,
+          label: (cs) => { const p = buyTarget(cs); return p ? "Buy " + fmt$(p.value) : "Buy"; },
+          canShow: (cs) => { const p = buyTarget(cs); return !!p && affordPrice() >= (p.value | 0); },
+          onSelect: (cs) => { if (!S.pry) { const p = buyTarget(cs); if (p) buyPiece(cs, p); } } },
+        { id: "jewel-pry", slot: "e", prio: 5, bad: true, label: "Pry", canShow: pryEligible, onSelect: (cs) => { if (!S.pry) startPry(cs); } },
+        // the bat's swing, for a thumb: the glass goes, the alarm follows
+        { id: "jewel-smash", prio: 3, bad: true, label: "Smash",
+          canShow: (cs) => !(cs.pane && cs.pane.shattered) && piecesLeft(cs) > 0,
+          onSelect: smashCase },
+      ],
+    });
   }
 
   // ---- find the lot + build once (self-healing, gunstore pattern) ------------
@@ -656,8 +610,9 @@
 
   // ---- per-frame ---------------------------------------------------------------
   CBZ.onUpdate(38, function (dt) {
-    if (!g || g.mode !== "city") { if (S.group && S.group.visible) S.group.visible = false; hidePrompt(); S.pry = null; return; }
+    if (!g || g.mode !== "city") { if (S.group && S.group.visible) S.group.visible = false; S.near = false; S.pry = null; return; }
     if (!ensure()) return;
+    wireFixtures();
     const P = CBZ.player;
 
     for (const cs of S.cases) {
@@ -681,7 +636,8 @@
     const dx = P.pos.x - S.cx, dz = P.pos.z - S.cz;
     const near = (dx * dx + dz * dz) < VIS_R * VIS_R;
     if (S.group && S.group.visible !== near) S.group.visible = near;
-    if (!near || g.state !== "playing" || P.dead || P.driving || CBZ.cityMenuOpen) { hidePrompt(); cancelPry(); return; }
+    S.near = near;
+    if (!near || g.state !== "playing" || P.dead || P.driving || CBZ.cityMenuOpen) { cancelPry(); return; }
 
     // a live pry: stand still, stay close, and the case must stay intact
     if (S.pry) {
@@ -697,27 +653,8 @@
         if (CBZ.workLine) CBZ.workLine("jewel-pry", { x: cs.x, y: P.pos.y + 1.25, z: cs.z }, pr.t / PRY_TIME);
         if (pr.t >= PRY_TIME) finishPry(cs);
       }
-      if (S.pry) { S.cur = cs; showPrompt(promptText(cs)); return; }
     }
-
-    const cs = pickCase();
-    if (!cs) { hidePrompt(); return; }
-    S.cur = cs;
-    showPrompt(promptText(cs));
   });
-
-  // [E] acts on the case you're looking at. CAPTURE phase so the case wins the
-  // key over interact.js's bubble listener; stopImmediatePropagation keeps one
-  // press from ALSO opening the clerk's counter menu (the gunstore pattern).
-  addEventListener("keydown", function (e) {
-    if (!S.cur || !g || g.mode !== "city" || g.state !== "playing") return;
-    if (CBZ.cityMenuOpen || (CBZ.player && (CBZ.player.driving || CBZ.player.dead))) return;
-    if ((e.key || "").toLowerCase() !== "e") return;
-    e.preventDefault();
-    if (e.stopImmediatePropagation) e.stopImmediatePropagation();
-    e.stopPropagation();
-    actOn(S.cur);
-  }, true);
 
   // a MELEE swing (fists/bat/knife — no gun drawn) on the case you're facing
   // smashes its glass: bullets already break it through fpsmode's
@@ -726,17 +663,19 @@
     if (e.button !== 0 || !S.built || !g || g.mode !== "city" || g.state !== "playing") return;
     if (CBZ.cityMenuOpen || !CBZ.player || CBZ.player.driving || CBZ.player.dead) return;
     if (CBZ.cityHasGun && CBZ.cityHasGun()) return;        // gunfire path handles glass itself
-    const cs = pickCase();
+    const cur = CBZ.interactions && CBZ.interactions.currentCand ? CBZ.interactions.currentCand() : null;
+    const cs = cur && cur.kind === "jewel-case" ? cur.t : null;
     if (!cs || (cs.pane && cs.pane.shattered)) return;
     // OPEN STORE: a left-click at a clerk-watched, intact case you can BUY from is
     // a purchase, NOT a smash — browsing the counter shouldn't frame you for
     // burglary. Robbing in daylight still works via a GUN; the bat smashes when
     // the clerk can't see (night / their blind side) or is down. (E-key buys too.)
-    if (buyTarget(cs) && clerkSees(cs.x, cs.z)) { actOn(cs); return; }
-    // pop just THIS case's pane through the shared glass system (sfx + shards
-    // + the alarm transition above all follow from the pane state change)
-    if (CBZ.cityShatter) CBZ.cityShatter(cs.x, cs.z, 0.8, { directPlayer: true });
+    if (buyTarget(cs) && clerkSees(cs.x, cs.z)) { const p = buyTarget(cs); if (p && !S.pry) buyPiece(cs, p); return; }
+    smashCase(cs);
   });
+  // pop just THIS case's pane through the shared glass system (sfx + shards
+  // + the alarm transition above all follow from the pane state change)
+  function smashCase(cs) { if (CBZ.cityShatter) CBZ.cityShatter(cs.x, cs.z, 0.8, { directPlayer: true }); }
 
   // ---- public hooks (headless/harness handles, gunstore-style) ----------------
   // FEATURE-DETECT (contract [F], mirrors cityGunWallLive): interact.js trims the
