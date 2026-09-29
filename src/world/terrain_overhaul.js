@@ -633,9 +633,11 @@
     return u;
   }
   // 0 = the authored above-water scale, 1 = fully submerged (no scaling).
+  let _hazeWet = 0;               // the air (aerialHaze below) is an above-water idea too
   CBZ.terrainFogScaleSubmerged = function (k01) {
     const t = k01 > 1 ? 1 : (k01 > 0 ? k01 : 0);
     _fogScaleU.forEach(function (u) { u.value = u.base + (1 - u.base) * t; });
+    _hazeWet = t;
     return t;
   };
   CBZ.terrainFogScale = function (mat, scale) {
@@ -654,6 +656,11 @@
         .replace("#include <fog_vertex>",
           "#include <fog_vertex>\n#ifdef USE_FOG\n\tfogDepth *= uFogScale;\n#endif");
     };
+    // A surface whose fog is scaled down has had its atmosphere taken away
+    // for kilometres; the air (aerialHaze, below) gives the physical part
+    // back. Every adopter gets it, so land, streets and the far city share
+    // ONE air and no swap line shows between them.
+    if (CBZ.aerialHaze) CBZ.aerialHaze(mat);
     return mat;
   };
 
@@ -860,6 +867,108 @@
     mat.userData._cbzAerialU = u;
     mat.userData._cbzAerialColU = _aerColU;
     if (!_aerHooked && CBZ.onAlways) { _aerHooked = true; CBZ.onAlways(91.6, aerialTick); }
+    return mat;
+  };
+
+  /* ---- AIR: the haze between the eye and a city or a plain kilometres off --
+     Owner, 2026-09-29, of Gang City from a distance: "why do they look white
+     from far away? ... the ground from far away just looks like boring
+     green." Measured through the real pipeline (lights, graded ACES, sRGB,
+     fog): the land and the metro buildings run terrainFogScale 0.08-0.10,
+     so they get NO atmosphere at all for 3-5 km, and then the fog slams them
+     onto the pale horizon colour (232,234,233) — a whitening, never a depth.
+
+     Real air does two things along a line of sight (Koschmieder):
+         L = L0 * T + Lair * (1 - T),   T = exp( -tau )
+     it EXTINGUISHES the object's own light (contrast and colour drop) and
+     ADDS in-scattered sky light. This is that, in LINEAR light before the
+     tone map (so it composes with exposure and the grade like a real
+     medium), with the path's optical depth through an exponential haze
+     layer (scale height H): looking down from an aircraft the air is clear,
+     along the ground it is thick:
+         tau = d / L0 * H * ( e^(-h_lo/H) - e^(-h_hi/H) ) / ( h_hi - h_lo )
+     Lair is a blue-grey drawn from the live sky (the fog horizon pulled
+     toward the zenith and held well under the horizon's brightness), so a
+     city 4 km out goes steel blue-grey with its contrast cut, not white. A
+     forward-scatter lobe warms and brightens it toward the sun. At night the
+     fog is navy, so the air is too, and lit windows dim with distance.
+     The fog still lands on top (sky.js's seam law is untouched): this only
+     fills the kilometres the scaled fog never reaches.
+     Shared uniforms, one tick; chain-safe like the wrappers above.
+     `?cfg_AERIAL_HAZE_V1=0` reverts. */
+  if (CFG.AERIAL_HAZE_V1 == null) CFG.AERIAL_HAZE_V1 = true;
+  const HAZE = { L0: 7500, H: 1400, dark: 0.42, blue: 0.65, glow: 0.9 };
+  const _hazeU = {
+    uCbzHazeCol: { value: new THREE.Color(0.22, 0.26, 0.33) },
+    uCbzHazeSun: { value: new THREE.Vector3(0.5, 0.8, -0.3) },
+    uCbzHazeSunCol: { value: new THREE.Color(1, 0.96, 0.88) },
+    uCbzHazePar: { value: new THREE.Vector4(1 / HAZE.L0, HAZE.H, HAZE.glow, 1) },
+  };
+  const _hzTmp = new THREE.Color();
+  let _hazeHooked = false;
+  function hazeTick() {
+    const fog = CBZ.scene && CBZ.scene.fog;
+    const c = _hazeU.uCbzHazeCol.value;
+    if (fog && fog.color) {
+      // the zenith the metro glass reflects (fog x (0.62, 0.76, 1.02)): the
+      // air between you and a far city is the sky's own blue, not its glare
+      const f = fog.color, m = HAZE.blue, k = HAZE.dark;
+      _hzTmp.setRGB(f.r * (1 - m + m * 0.62), f.g * (1 - m + m * 0.76), f.b * (1 - m + m * 1.02));
+      c.setRGB(_hzTmp.r * k, _hzTmp.g * k, _hzTmp.b * k);
+    }
+    const sun = CBZ.sun, tgt = CBZ.sunTarget;
+    if (sun && sun.position) {
+      const v = _hazeU.uCbzHazeSun.value.copy(sun.position);
+      if (tgt && tgt.position) v.sub(tgt.position);
+      if (v.lengthSq() > 1e-6) v.normalize();
+      // the lobe carries the key's colour and strength (dusk warms it, the
+      // moon barely lifts it)
+      const s = Math.max(0, Math.min(1.2, +sun.intensity || 0)) / 1.18;
+      _hazeU.uCbzHazeSunCol.value.copy(sun.color).multiplyScalar(s);
+    }
+    _hazeU.uCbzHazePar.value.w = CFG.AERIAL_HAZE_V1 === false ? 0 : 1 - _hazeWet;
+  }
+  CBZ.aerialHazeUniforms = _hazeU;
+  CBZ.aerialHazeParams = HAZE;
+  CBZ.aerialHaze = function (mat) {
+    if (!mat || CFG.AERIAL_HAZE_V1 === false) return mat;
+    if (mat.userData && mat.userData._cbzHaze) return mat;
+    chainKey(mat, "haze");
+    const prev = mat.onBeforeCompile;
+    mat.onBeforeCompile = function (sh) {
+      if (prev) prev.call(this, sh);
+      // the mountain ranges carry their own authored recession
+      // (terrainAerial above); the air is not laid twice
+      if (this && this.userData && this.userData._cbzAerial) return;
+      if (sh.fragmentShader.indexOf("#include <tonemapping_fragment>") < 0 ||
+          sh.vertexShader.indexOf("#include <fog_vertex>") < 0) return;
+      Object.assign(sh.uniforms, _hazeU);
+      // world-space eye->fragment vector (row-vector product = R^T v; exact
+      // under instancing, and needs no cameraPosition, which r128 leaves at
+      // zero on Lambert) and the eye's height, both from viewMatrix
+      sh.vertexShader = "varying vec4 vCbzHaze;\n" + sh.vertexShader.replace("#include <fog_vertex>",
+        "#include <fog_vertex>\n" +
+        "vCbzHaze = vec4( mvPosition.xyz * mat3( viewMatrix ), -dot( viewMatrix[1].xyz, viewMatrix[3].xyz ) );");
+      sh.fragmentShader = "varying vec4 vCbzHaze;\nuniform vec3 uCbzHazeCol;\nuniform vec3 uCbzHazeSun;\nuniform vec3 uCbzHazeSunCol;\nuniform vec4 uCbzHazePar;\n" +
+        sh.fragmentShader.replace("#include <tonemapping_fragment>", [
+          "{",
+          "  float hzD = length( vCbzHaze.xyz );",
+          "  float hzH = uCbzHazePar.y;",
+          "  float hz0 = max( vCbzHaze.w, 0.0 ), hz1 = max( vCbzHaze.w + vCbzHaze.y, 0.0 );",
+          "  float hzLo = min( hz0, hz1 ), hzHi = max( hz0, hz1 );",
+          "  float hzDen = hzHi - hzLo < 1.0 ? exp( -hzLo / hzH ) : hzH * ( exp( -hzLo / hzH ) - exp( -hzHi / hzH ) ) / ( hzHi - hzLo );",
+          "  float hzT = exp( -hzD * uCbzHazePar.x * hzDen );",
+          "  float hzMu = max( dot( vCbzHaze.xyz / max( hzD, 1e-3 ), uCbzHazeSun ), 0.0 );",
+          "  vec3 hzAir = uCbzHazeCol * ( vec3( 1.0 ) + uCbzHazePar.z * pow( hzMu, 6.0 ) * uCbzHazeSunCol );",
+          "  gl_FragColor.rgb = mix( gl_FragColor.rgb, hzAir, ( 1.0 - hzT ) * uCbzHazePar.w );",
+          "}",
+          "#include <tonemapping_fragment>",
+        ].join("\n"));
+    };
+    mat.needsUpdate = true;
+    mat.userData = mat.userData || {};
+    mat.userData._cbzHaze = true;
+    if (!_hazeHooked && CBZ.onAlways) { _hazeHooked = true; CBZ.onAlways(91.7, hazeTick); }
     return mat;
   };
 

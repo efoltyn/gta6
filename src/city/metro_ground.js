@@ -2763,8 +2763,181 @@
     return { meshes: meshes, heightAt: S.heightAt, platforms: S.platforms, colliders: S.colliders, stats: st, tiles: R.tiles, solve: S };
   }
 
+  /* ==================================================================
+     THE FAR GROUND — what this city's ground looks like from kilometres off.
+     Past the near/far swap the tiles above are dropped and the far skyline
+     (metro_fabric.js) stands on the continent plate, which used to paint it
+     country: the whole distant city stood on green meadow. This rasterises
+     the plan's land use into one small RGBA map (~4.5 m a texel): asphalt
+     streets, sidewalk rings, paved downtown blocks, courtyard blocks, yards,
+     suburban lawn/driveway/shade mix, parks, plazas, parking with parked
+     cars, crop strips, rail ballast. RGB = sqrt(linear albedo) from the SAME
+     COL table the near tiles use (so the swap agrees), A = 0 nothing (the
+     plate's own country shows) / 128 ground / 150 unlit road / 255 lamp-lit
+     street. city/metro.js packs the maps into one mipmapped atlas that the
+     plate's ground skin samples (world/textures_surface.js cityMap): zero
+     geometry, zero draw calls. Pure and deterministic (position hashes);
+     sliced: farMap(P).step(ms) returns true when done.
+     ================================================================== */
+  const FARMAP_CELL = 4.5, FARMAP_MAX = 1024;
+  function lin(c) { return [c[0] * c[0], c[1] * c[1], c[2] * c[2]]; }   // COL is sqrt(linear)
+  function mul(c, k) { return [c[0] * k[0], c[1] * k[1], c[2] * k[2]]; }
+  /* ONE WORLD, SEEN FROM FURTHER AWAY (owner: "long distance and short
+     distance should look the same; what changes is the horizon you can see,
+     not what's in it"). Every far colour is the MEAN of what the near tile
+     draws there, never a tint of its own: the COL albedo times the mean of
+     mgSurface's per-pixel pattern for that surface (MG_MEAN, the averages of
+     its mottle / joints / stains / dry patches / crop rows), the street
+     kit's own asphalt (materials.js asphaltDetail base) and footway (the
+     decoded ~122 sRGB slab canvas). tools/metro-far-ground-check.mjs holds
+     it to that: per 100 m cell, far map vs the near tile's area-weighted
+     mean. */
+  const MG_MEAN = { lawn: [1.0, 0.965, 0.915], paving: [0.94, 0.94, 0.94], crop: 0.97, soil: [0.085, 0.06, 0.04], rowK: 0.62, dirt: 0.96, gravel: 0.99, concrete: 0.9 };
+  const FM = {
+    asphalt: [0.068, 0.067, 0.066], walk: [0.19, 0.186, 0.176],
+    paving: mul(lin(COL.paving), MG_MEAN.paving), concrete: lin(COL.concrete).map(function (v) { return v * MG_MEAN.concrete; }),
+    lawn: mul(lin(COL.lawn), MG_MEAN.lawn), park: mul(lin(COL.lawnPark), MG_MEAN.lawn), dry: mul(lin(COL.lawnDry), MG_MEAN.lawn),
+    gravel: lin(COL.gravel).map(function (v) { return v * MG_MEAN.gravel; }), ballast: lin(COL.ballast).map(function (v) { return v * MG_MEAN.gravel; }),
+    pavers: mul(lin(COL.paving), MG_MEAN.paving).map(function (v) { return v * 1.25; }), shade: [0.035, 0.055, 0.028], lot: [0.068, 0.067, 0.066],
+    crops: COL.crops.map(function (c) { const b = lin(c), k = MG_MEAN.rowK, s = MG_MEAN.soil;
+      return [(s[0] * (1 - k) + b[0] * k) * MG_MEAN.crop, (s[1] * (1 - k) + b[1] * k) * MG_MEAN.crop, (s[2] * (1 - k) + b[2] * k) * MG_MEAN.crop]; }),
+    dirt: lin(COL.dirt).map(function (v) { return v * MG_MEAN.dirt; }),
+    cars: [[0.62, 0.62, 0.6], [0.36, 0.37, 0.38], [0.03, 0.03, 0.035], [0.15, 0.15, 0.16], [0.32, 0.035, 0.03], [0.04, 0.08, 0.2]],
+  };
+  function nextPow2(n) { let p = 1; while (p < n) p *= 2; return p; }
+  function farMap(P, opts) {
+    opts = opts || {};
+    // bounds: everything the plan paints on the ground
+    let x0 = 1e9, z0 = 1e9, x1 = -1e9, z1 = -1e9;
+    function grow(a, b, c, d) { if (a < x0) x0 = a; if (b < z0) z0 = b; if (c > x1) x1 = c; if (d > z1) z1 = d; }
+    const R = [].concat(P.blocks || [], P.pads || [], P.parks || [], P.plazas || [], P.parking || [], P.fields || []);
+    for (const r of R) grow(r.x0, r.z0, r.x1, r.z1);
+    for (const st of P.streets || []) for (const q of st.pts) grow(q.x - st.w, q.z - st.w, q.x + st.w, q.z + st.w);
+    if (!(x1 > x0)) return null;
+    x0 -= 24; z0 -= 24; x1 += 24; z1 += 24;
+    const cellWant = opts.cell || FARMAP_CELL, maxN = opts.max || FARMAP_MAX;
+    const w = Math.min(maxN, nextPow2(Math.ceil((x1 - x0) / cellWant)));
+    const cell = Math.max(cellWant, (x1 - x0) / w, (z1 - z0) / maxN);
+    const h = Math.min(maxN, nextPow2(Math.ceil((z1 - z0) / cell)));
+    const data = new Uint8Array(w * h * 4);
+    const out = { w: w, h: h, x0: x0, z0: z0, cell: cell, data: data, ms: 0 };
+    function put(i, j, c, a, k) {
+      const o = (j * w + i) * 4;
+      if (k < 1 && data[o + 3]) {             // edge coverage: blend over what is there
+        const r0 = data[o] / 255, g0 = data[o + 1] / 255, b0 = data[o + 2] / 255;
+        data[o] = Math.round(255 * Math.sqrt(r0 * r0 * (1 - k) + c[0] * k));
+        data[o + 1] = Math.round(255 * Math.sqrt(g0 * g0 * (1 - k) + c[1] * k));
+        data[o + 2] = Math.round(255 * Math.sqrt(b0 * b0 * (1 - k) + c[2] * k));
+        data[o + 3] = Math.max(data[o + 3], Math.round(a * Math.min(1, k * 2)));
+        return;
+      }
+      if (k < 0.5) return;
+      data[o] = Math.round(255 * Math.sqrt(c[0])); data[o + 1] = Math.round(255 * Math.sqrt(c[1])); data[o + 2] = Math.round(255 * Math.sqrt(c[2]));
+      data[o + 3] = a;
+    }
+    const tmp = [0, 0, 0];
+    function vary(c, v) { tmp[0] = c[0] * v; tmp[1] = c[1] * v; tmp[2] = c[2] * v; return tmp; }
+    // fill a world rect; pick(x, z) -> linear colour for that texel
+    function rect(ax, az, bx, bz, a, pick) {
+      const i0 = Math.max(0, Math.floor((ax - x0) / cell)), i1 = Math.min(w - 1, Math.ceil((bx - x0) / cell));
+      const j0 = Math.max(0, Math.floor((az - z0) / cell)), j1 = Math.min(h - 1, Math.ceil((bz - z0) / cell));
+      for (let j = j0; j <= j1; j++) {
+        const cz = z0 + (j + 0.5) * cell;
+        const kz = Math.max(0, Math.min(1, (Math.min(bz, cz + cell / 2) - Math.max(az, cz - cell / 2)) / cell));
+        if (kz <= 0) continue;
+        for (let i = i0; i <= i1; i++) {
+          const cx = x0 + (i + 0.5) * cell;
+          const kx = Math.max(0, Math.min(1, (Math.min(bx, cx + cell / 2) - Math.max(ax, cx - cell / 2)) / cell));
+          if (kx <= 0) continue;
+          put(i, j, pick(cx, cz), a, kx * kz);
+        }
+      }
+    }
+    function ring(r, wd, a, c) {                 // a band of width wd just inside a rect's edge
+      rect(r.x0, r.z0, r.x1, r.z0 + wd, a, c); rect(r.x0, r.z1 - wd, r.x1, r.z1, a, c);
+      rect(r.x0, r.z0 + wd, r.x0 + wd, r.z1 - wd, a, c); rect(r.x1 - wd, r.z0 + wd, r.x1, r.z1 - wd, a, c);
+    }
+    function seg(ax, az, bx, bz, half, a, pick) {
+      const i0 = Math.max(0, Math.floor((Math.min(ax, bx) - half - x0) / cell)), i1 = Math.min(w - 1, Math.ceil((Math.max(ax, bx) + half - x0) / cell));
+      const j0 = Math.max(0, Math.floor((Math.min(az, bz) - half - z0) / cell)), j1 = Math.min(h - 1, Math.ceil((Math.max(az, bz) + half - z0) / cell));
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+        const cx = x0 + (i + 0.5) * cell, cz = z0 + (j + 0.5) * cell;
+        const d = segDist(cx, cz, ax, az, bx, bz);
+        const k = Math.max(0, Math.min(1, (half - d) / cell + 0.5));
+        if (k > 0) put(i, j, pick(cx, cz), a, k);
+      }
+    }
+    function disc(x, z, r, a, pick) { seg(x, z, x + 0.01, z, r, a, pick); }
+    const hv = function (x, z, salt) { return 0.94 + 0.12 * hsh(Math.floor(x / 9), Math.floor(z / 9), salt); };
+    const flat = function (c, salt) { return function (x, z) { return vary(c, hv(x, z, salt)); }; };
+    const tone = function (c, k) { return [c[0] * k, c[1] * k, c[2] * k]; };
+    // EXACTLY what emitters() draws for each record (block(), pad(), lots),
+    // as its mean: footway rings at the kerb, then the lot surface
+    const ops = [];
+    // a big rect is painted in 160 m bands, one slice each (no slice may
+    // cost a frame)
+    function bandRect(b, a, pick) {
+      for (let zb = b.z0; zb < b.z1; zb += 160) {
+        const zt = Math.min(b.z1, zb + 160);
+        ops.push(function () { rect(b.x0, zb, b.x1, zt, a, pick); });
+      }
+    }
+    for (const b of P.pads || []) {
+      bandRect(b, 128, flat(b.use === "park" ? FM.park : FM.lawn, 901));
+      ops.push(function () { ring(b, PAD_SW, 128, flat(tone(FM.walk, 0.95), 902)); });
+    }
+    // which blocks are a plaza or a whole parking lot (the solve's own test)
+    const lotAll = new Set(), plazaB = new Set();
+    for (const b of P.blocks || []) {
+      const ix0 = b.x0 + b.sw, ix1 = b.x1 - b.sw, iz0 = b.z0 + b.sw, iz1 = b.z1 - b.sw;
+      for (const pz of P.plazas || []) if (pz.x0 < ix1 && pz.x1 > ix0 && pz.z0 < iz1 && pz.z1 > iz0) plazaB.add(b);
+      for (const pk of P.parking || []) if (pk.kind === "lot" && pk.x0 >= ix0 - 1 && pk.x1 <= ix1 + 1 && pk.z0 >= iz0 - 1 && pk.z1 <= iz1 + 1 &&
+        (pk.x1 - pk.x0) * (pk.z1 - pk.z0) > (ix1 - ix0) * (iz1 - iz0) * 0.8) lotAll.add(b);
+    }
+    for (const b of P.blocks || []) {
+      const inner = { x0: b.x0 + b.sw, x1: b.x1 - b.sw, z0: b.z0 + b.sw, z1: b.z1 - b.sw };
+      const c = plazaB.has(b) ? tone(FM.walk, 0.97)
+        : (b.use === "industrial" || lotAll.has(b)) ? FM.asphalt
+        : (b.use === "cbd" || b.use === "midtown") ? FM.paving
+        : b.use === "rows" ? FM.lawn : FM.dry;
+      bandRect(inner, 128, flat(c, 903));
+      const tk = b.use === "cbd" ? 1.0 : b.use === "industrial" ? 0.9 : 0.96;
+      ops.push(function () { ring(b, b.sw, 128, flat(tone(FM.walk, tk), 904)); });
+    }
+    for (const b of P.fields || []) ops.push(function () {
+      const c = b.ballfield ? FM.park : FM.crops[(b.crop | 0) % FM.crops.length];
+      rect(b.x0, b.z0, b.x1, b.z1, 128, function (x, z) { return vary(c, 0.95 + 0.1 * hsh(Math.floor(x / 30), Math.floor(z / 30), 915)); });
+    });
+    // lots that do not fill a block (yards in industrial blocks are the
+    // block's own asphalt already)
+    for (const pk of P.parking || []) {
+      if (pk.kind === "yard") continue;
+      bandRect(pk, 128, flat(FM.asphalt, 916));
+    }
+    for (const r of P.rail || []) ops.push(function () {
+      const ax = r.axis === "x" ? r.at : r.a0, az = r.axis === "x" ? r.a0 : r.at, bx = r.axis === "x" ? r.at : r.a1, bz = r.axis === "x" ? r.a1 : r.at;
+      seg(ax, az, bx, bz, Math.max(4, (r.half || 9) * 0.6), 128, function (x, z) { return vary(FM.ballast, hv(x, z, 919)); });
+    });
+    for (const st of P.streets || []) ops.push(function () {
+      const lit = st.k !== "rural" ? 255 : 150;
+      const pk = function (x, z) { return vary(FM.asphalt, 0.95 + 0.1 * hsh(x, z, 920)); };
+      for (let k = 0; k + 1 < st.pts.length; k++) seg(st.pts[k].x, st.pts[k].z, st.pts[k + 1].x, st.pts[k + 1].z, st.w / 2, lit, pk);
+      if (st.closed && st.pts.length > 2) { const a = st.pts[st.pts.length - 1], b = st.pts[0]; seg(a.x, a.z, b.x, b.z, st.w / 2, lit, pk); }
+      if (st.bulb && st.bulb.r) disc(st.bulb.x, st.bulb.z, st.bulb.r, lit, pk);
+    });
+    let k = 0;
+    out.step = function (budgetMs) {
+      const t0 = now(), end = t0 + (budgetMs > 0 ? budgetMs : Infinity);
+      while (k < ops.length) { ops[k++](); if (now() >= end) break; }
+      out.ms += now() - t0;
+      return k >= ops.length;
+    };
+    out.ops = ops.length;
+    return out;
+  }
+
   const API = { solve: solve, prepare: prepare, buildTile: buildTile, disposeTile: disposeTile, build: build, tileArrays: tileArrays,
-    Y: Y, GK: GK, FK: FK };
+    farMap: farMap, FARMAP_COLOURS: FM, Y: Y, GK: GK, FK: FK };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   if (CBZ) CBZ.metroGround = API;
 })(typeof window !== "undefined" ? window : globalThis);

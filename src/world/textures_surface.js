@@ -589,6 +589,17 @@
        opts.chroma    how much of the maps' own colour survives (0.35)
        opts.mottle    strength of the 23/61 m patch mottle (1)
        opts.extra     extra MeshLambertMaterial params (polygonOffset, side)
+       opts.srgb      the vertex colours are sRGB DISPLAY colours (THREE.Color
+                      hexes, which r128 hands over unconverted): decode them
+                      to linear reflectance and ease them 20% toward grey (the
+                      grade re-saturates). Without it a 0x4f7445 meadow
+                      reflected 45% green and the whole backcountry rendered
+                      as one pale mint (214,230,201) from the air. Applied on
+                      every tier, maps or not.
+       opts.cityMap   paint the far metro cities' ground (streets, blocks,
+                      lawns, lots, fields, lamps at night) from the land-use
+                      atlas city/metro.js rasterises (CBZ.farCityMap) — the
+                      continent plate under the distant skyline
      ================================================================== */
   const GND_GLSL = [
     "float gndH( vec2 p ) { p = fract( p * vec2( 443.897, 441.423 ) ); p += dot( p, p.yx + 19.19 ); return fract( ( p.x + p.y ) * p.x ); }",
@@ -602,8 +613,48 @@
     "  vec3 c = mix( a, b, 0.25 + 0.5 * w );",
     "  return c * ( c * ( c * 0.305306011 + 0.682171111 ) + 0.012522878 ); }",
   ].join("\n");
+  /* THE FAR CITY MAP. One RGBA atlas holding every metro's ground as seen
+     from kilometres off (RGB = sqrt of linear albedo, A = 0 none / 0.5 ground
+     / 1 lamp-lit street), and per city a world rect + its atlas rect.
+     city/metro.js fills it (after load, in sliced jobs); until then the count
+     is 0 and the plate draws its own country. */
+  const CITY_MAX = 8;
+  const _cityU = {
+    uGndCity: { value: null },
+    uGndCityN: { value: 0 },
+    uGndCityR: { value: [] },
+    uGndCityA: { value: [] },
+    uGndNight: { value: 0 },
+  };
+  for (let i = 0; i < CITY_MAX; i++) { _cityU.uGndCityR.value.push(new THREE.Vector4(0, 0, 1, 1)); _cityU.uGndCityA.value.push(new THREE.Vector4(0, 0, 0, 0)); }
+  let _cityHooked = false;
+  CBZ.farCityMap = { uniforms: _cityU, max: CITY_MAX };
+  const SRGB_GLSL =
+    "vec3 gndLin( vec3 c ) { c = max( c, vec3( 0.0 ) ); c = c * ( c * ( c * 0.305306011 + 0.682171111 ) + 0.012522878 );\n" +
+    "  return mix( vec3( dot( c, vec3( 0.2126, 0.7152, 0.0722 ) ) ), c, 0.8 ); }\n";
+  // find the city under this pixel in the loop, sample ONCE outside it (a
+  // texture read inside divergent flow has undefined mip derivatives)
+  const CITY_GLSL = [
+    "vec4 gndCity( vec2 xz ) {",
+    "  vec2 uv = vec2( 0.0 ); float hit = 0.0;",
+    "  for ( int i = 0; i < " + CITY_MAX + "; i++ ) {",
+    "    if ( float( i ) >= uGndCityN ) break;",
+    "    vec4 r = uGndCityR[ i ];",
+    "    vec2 t = ( xz - r.xy ) * r.zw;",
+    "    if ( hit < 0.5 && t.x > 0.0 && t.y > 0.0 && t.x < 1.0 && t.y < 1.0 ) { vec4 a = uGndCityA[ i ]; uv = a.xy + t * a.zw; hit = 1.0; }",
+    "  }",
+    "  return texture2D( uGndCity, uv ) * hit;",
+    "}",
+  ].join("\n");
+  function cityHook() {
+    if (_cityHooked || !CBZ.onAlways) return;
+    _cityHooked = true;
+    CBZ.onAlways(95, function () { _cityU.uGndNight.value = Math.max(0, Math.min(1, +CBZ.nightAmount || 0)); });
+  }
   CBZ.groundSkin = function (opts) {
     opts = opts || {};
+    const SRGB = !!opts.srgb, CITY = !!opts.cityMap;
+    if (CITY) cityHook();
     const tile = Object.assign({ grass: 3.2, dirt: 2.6, sand: 2.6, rock: 5.5 }, opts.tile || {});
     const rockSlope = opts.rockSlope || [0.30, 0.55];
     const sandY = opts.sandY || [0.6, 2.2];
@@ -614,7 +665,17 @@
     // decodes; these are the SAME cached maps the island volcano reads
     const mg = surfaceMaps("grass", { repeat: 1 }), md = surfaceMaps("dirt", { repeat: 1 });
     const ms = surfaceMaps("sand", { repeat: 1 }), mr = surfaceMaps("rock", { repeat: 1 });
-    if (!mg || !md || !ms || !mr) return mat;            // tier 0 / textures off: plain vertex colour
+    if (!mg || !md || !ms || !mr) {                       // tier 0 / textures off: plain vertex colour
+      if (!SRGB) return mat;
+      // ...still decoded: the colour of the land must not depend on the tier
+      mat.onBeforeCompile = function (sh) {
+        if (sh.fragmentShader.indexOf("#include <color_fragment>") < 0) return;
+        sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>\n" + SRGB_GLSL)
+          .replace("#include <color_fragment>", "#include <color_fragment>\n  diffuseColor.rgb = gndLin( diffuseColor.rgb );");
+      };
+      mat.customProgramCacheKey = function () { return "cbzGroundSkinLin"; };
+      return mat;
+    }
     function inv(t) { const m = surfaceMapMean(t); return new THREE.Vector3(1 / Math.max(0.02, m[0]), 1 / Math.max(0.02, m[1]), 1 / Math.max(0.02, m[2])); }
     const U = {
       uGndG: { value: mg.map }, uGndD: { value: md.map }, uGndS: { value: ms.map }, uGndR: { value: mr.map },
@@ -624,11 +685,14 @@
       uGndFar: { value: far },
       uGndMix: { value: new THREE.Vector2(opts.chroma == null ? 0.35 : +opts.chroma, opts.mottle == null ? 1 : +opts.mottle) },
     };
+    if (CITY) Object.assign(U, _cityU);
+    U.uGndOpt = { value: new THREE.Vector2(SRGB ? 1 : 0, CITY ? 1 : 0) };
     mat.userData.groundSkin = true;
     mat.onBeforeCompile = function (sh) {
       const vs = sh.vertexShader, fs0 = sh.fragmentShader;
       if (vs.indexOf("#include <project_vertex>") < 0 || fs0.indexOf("#include <color_fragment>") < 0) return;
       Object.assign(sh.uniforms, U);
+      if (!CITY) Object.assign(sh.uniforms, _cityU);      // declared in every variant (one program), inert at N = 0
       sh.vertexShader = vs
         .replace("#include <common>", "#include <common>\nvarying vec3 vGndW;\nvarying vec3 vGndN;\nvarying float vGndD;")
         .replace("#include <project_vertex>", "#include <project_vertex>\n" +
@@ -639,11 +703,16 @@
         .replace("#include <common>", "#include <common>\nvarying vec3 vGndW;\nvarying vec3 vGndN;\nvarying float vGndD;\n" +
           "uniform sampler2D uGndG;\nuniform sampler2D uGndD;\nuniform sampler2D uGndS;\nuniform sampler2D uGndR;\n" +
           "uniform vec3 uGndKG;\nuniform vec3 uGndKD;\nuniform vec3 uGndKS;\nuniform vec3 uGndKR;\n" +
-          "uniform vec4 uGndTile;\nuniform vec4 uGndPar;\nuniform float uGndFar;\nuniform vec2 uGndMix;\n" + GND_GLSL)
-        .replace("#include <color_fragment>", "#include <color_fragment>\n{\n" +
-          "  vec3 vc = diffuseColor.rgb;\n" +
+          "uniform vec4 uGndTile;\nuniform vec4 uGndPar;\nuniform float uGndFar;\nuniform vec2 uGndMix;\nuniform vec2 uGndOpt;\n" +
+          "uniform sampler2D uGndCity;\nuniform float uGndCityN;\nuniform vec4 uGndCityR[ " + CITY_MAX + " ];\nuniform vec4 uGndCityA[ " + CITY_MAX + " ];\nuniform float uGndNight;\n" +
+          GND_GLSL + "\n" + SRGB_GLSL + CITY_GLSL)
+        .replace("#include <color_fragment>", "#include <color_fragment>\nvec3 gndLamp = vec3( 0.0 );\n{\n" +
+          // grass/dirt/sand are told apart on the AUTHORED hue (g/r of the
+          // display colour), so the decode comes after the classification
+          "  vec3 vc0 = diffuseColor.rgb;\n" +
+          "  vec3 vc = uGndOpt.x > 0.5 ? gndLin( vc0 ) : vc0;\n" +
           "  vec2 xz = vGndW.xz;\n" +
-          "  float gr = vc.g / max( vc.r, 1e-4 );\n" +
+          "  float gr = vc0.g / max( vc0.r, 1e-4 );\n" +
           "  float grassW = smoothstep( 0.88, 1.22, gr );\n" +
           "  float slope = 1.0 - clamp( normalize( vGndN ).y, 0.0, 1.0 );\n" +
           // rock: steepness, frayed by a 7 m noise so the edge is a band of
@@ -675,10 +744,22 @@
           "  float mott = 1.0 + uGndMix.y * ( 0.28 * ( m1 * 0.55 + m2 * 0.45 ) - 0.14 );\n" +
           "  float dry = smoothstep( 0.55, 0.85, m2 ) * grassW * ( 1.0 - rockW );\n" +
           "  base *= mix( vec3( 1.0 ), vec3( 1.16, 1.04, 0.72 ), dry * 0.55 * uGndMix.y );\n" +
-          "  diffuseColor.rgb = base * det * mott;\n" +
-          "}");
+          "  vec3 gOut = base * det * mott;\n" +
+          // THE FAR CITY: where a metro stands, its own ground (streets,
+          // blocks, lawns, lots, fields) replaces the country's; mipmapped,
+          // so kilometres off it averages instead of shimmering
+          "  if ( uGndOpt.y > 0.5 && uGndCityN > 0.5 ) {\n" +
+          "    vec4 cm = gndCity( xz );\n" +
+          "    float cw = smoothstep( 0.12, 0.4, cm.a );\n" +
+          "    vec3 cc = cm.rgb * cm.rgb * ( 0.94 + 0.12 * m1 );\n" +
+          "    gOut = mix( gOut, cc, cw );\n" +
+          "    gndLamp = vec3( 1.0, 0.62, 0.26 ) * smoothstep( 0.55, 1.0, cm.a ) * uGndNight * 0.55;\n" +
+          "  }\n" +
+          "  diffuseColor.rgb = gOut;\n" +
+          "}")
+        .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\n  totalEmissiveRadiance += gndLamp;");
     };
-    mat.customProgramCacheKey = function () { return "cbzGroundSkin1"; };
+    mat.customProgramCacheKey = function () { return "cbzGroundSkin2"; };
     return mat;
   };
 })();
