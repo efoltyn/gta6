@@ -15,6 +15,29 @@
   "use strict";
   const CBZ = window.CBZ, THREE = window.THREE;
   if (!CBZ || !THREE) return;
+  /* NaN GEOMETRY (always on, cheap): three logs "computeBoundingSphere():
+     Computed radius is NaN" and names nothing. The first time a geometry
+     computes a NaN sphere, say WHO asked (the calling stack) and which
+     attribute holds the NaN; CBZ.nanGeometryAudit() lists them. */
+  const nanSeen = new WeakSet(), nanFound = [];
+  const cbs = THREE.BufferGeometry.prototype.computeBoundingSphere;
+  THREE.BufferGeometry.prototype.computeBoundingSphere = function () {
+    const out = cbs.apply(this, arguments);
+    const bs = this.boundingSphere;
+    if (bs && bs.radius !== bs.radius && !nanSeen.has(this)) {
+      nanSeen.add(this);
+      const p = this.attributes && this.attributes.position;
+      let first = -1;
+      if (p && p.array) for (let i = 0; i < p.array.length; i++) if (p.array[i] !== p.array[i]) { first = i; break; }
+      const st = (new Error().stack || "").split("\n").slice(2, 7).map(function (l) { return l.trim().replace(/^at /, "").replace(/\?[^:)]*/, ""); });
+      const r = { name: this.name || this.type, verts: p ? p.count : 0, firstNaN: first, from: st };
+      nanFound.push(r);
+      console.error("[nan geometry]", JSON.stringify(r));
+    }
+    return out;
+  };
+  CBZ.nanGeometryAudit = function () { return nanFound.slice(); };
+
   let on = false;
   try { on = /[?&]debugInstanced=1\b/.test(location.search); } catch (e) {}
   const seen = new WeakSet(), found = [];

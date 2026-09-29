@@ -664,9 +664,6 @@
         // the bucket key is per-building ("W<gi>|…") — the whole merged copy
         // belongs to ONE top group; register it for batchHideGroup/ShowGroup.
         addRange(b.tops[0], { mesh, whole: true });
-        // core/farcull.js: culled with its building (and its LOD box). Not in
-        // userData (a THREE object there breaks every JSON clone of it)
-        Object.defineProperty(mesh, "_cbzOwner", { value: b.tops[0], writable: true, configurable: true, enumerable: false });
         wallMerged++;
       } else {
         // INERT deco: nothing references these — remove + dispose outright.

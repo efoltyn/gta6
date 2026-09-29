@@ -7927,6 +7927,22 @@
     // unconditionally regardless of t — this only weights the EXTRA shops).
     function extraShopMulFor(lot) { return lerp01(coreT(lot), 1.3, 0.7); }
     let chopShop = null, realtor = null, luxury = null, luxBuilding = null, clubLot = null, gunLot = null, jewelryLot = null;
+    /* THE APARTMENT BLOCKS ARE STREAMED BY CELL (streamed city only). A generic
+       home's shell carries no rng draws, so it is queued here, per 200 m cell,
+       and every cell becomes ONE job after the lot loop: a cell in sight runs
+       at once (and is still a job the streamer can park and free when the
+       player drives away, with its glass/deco/veneer pools its own); a cell
+       out of sight waits until it is. The lot records (kind, door, home) are
+       all written in the loop, in the same order as always. */
+    const HOME_CELL = 200, homeCells = new Map();
+    function homeCell(lot, fn) {
+      const k = Math.floor(lot.cx / HOME_CELL) + "," + Math.floor(lot.cz / HOME_CELL);
+      let c = homeCells.get(k);
+      if (!c) homeCells.set(k, c = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity, fns: [] });
+      c.minX = Math.min(c.minX, lot.cx - lot.w / 2); c.maxX = Math.max(c.maxX, lot.cx + lot.w / 2);
+      c.minZ = Math.min(c.minZ, lot.cz - lot.d / 2); c.maxZ = Math.max(c.maxZ, lot.cz + lot.d / 2);
+      c.fns.push(fn);
+    }
 
     // shuffle the shop list, then float the gameplay-critical trades to the
     // front so they ALWAYS get placed; the rest fill in only sometimes, leaving
@@ -8560,7 +8576,7 @@
            so every later lot gets exactly the draws it always did. Listed
            homes (the property ladder) are always built. */
         const HS = CBZ.slice;
-        if (!listed && HS && HS.stream && CBZ.sliceAt && !CBZ.sliceKeepsRect(lot.cx - lot.w / 2, lot.cx + lot.w / 2, lot.cz - lot.d / 2, lot.cz + lot.d / 2)) {
+        if (!listed && HS && HS.stream && CBZ.sliceAt) {
           lot.kind = "tower";
           lot.building = { name: "Apartments", sign: color, side, door: doorPt, storeys: storeys, h: storeys * FH, deferred: true };
           lot.building.home = {
@@ -8569,7 +8585,7 @@
             listed: false, owned: false, floorY: (storeys - 1) * FH, blurb: tierDef.blurb, door: doorPt,
           };
           const lotRef = lot, stC = storeys, colC = color, sideC = side, dkC = dk, sbC = setback, wC = w, dC = d, tierC = tierDef;
-          CBZ.sliceAt({ minX: lot.cx - lot.w / 2, maxX: lot.cx + lot.w / 2, minZ: lot.cz - lot.d / 2, maxZ: lot.cz + lot.d / 2 }, function () {
+          homeCell(lot, function () {
             const bb = makeBuilding(root, lotRef.cx, lotRef.cz, wC, dC, stC, colC, sideC,
               { district: dkC, facade: "office", dress: streetDress(lotRef, stC, false) || false, reach: sbC });
             const topY2 = (stC - 1) * FH;
@@ -8589,7 +8605,7 @@
             Object.assign(rec, bb, keep);
             rec.deferred = false;
             if (pool2 >= 1) rec.poolY = pool2 * FH;
-          }, { name: "lot home" });
+          });
           homeLots.push(lot);
           placed.push(lot);
           continue;
@@ -8629,6 +8645,13 @@
       }
       placed.push(lot);
     }
+
+    // the streamed apartment cells (see homeCell): one job each
+    homeCells.forEach(function (c, k) {
+      CBZ.sliceAt({ minX: c.minX, maxX: c.maxX, minZ: c.minZ, maxZ: c.maxZ }, function () {
+        for (const fn of c.fns) { try { fn(); } catch (e) { console.error("[home cell " + k + "]", e); } }
+      }, { name: "homes " + k });
+    });
 
     // OWNERSHIP POST-PASS: give EVERY building an owner (shop→business,
     // home/tower→landlord(→player when owned), abandoned→gang, park→city).

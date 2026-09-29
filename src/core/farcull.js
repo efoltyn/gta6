@@ -115,7 +115,6 @@
   // proxy is already present. Nothing is invented: position, footprint and
   // height all come from the live lot.building record.
   let proxyArena = null, proxyMesh = null, proxyRecords = [];
-  let proxiedGroups = new WeakSet();   // groups a measured LOD box stands in for past the cull radius
   const proxyDummy = new THREE.Object3D();
   const proxyColor = new THREE.Color();
 
@@ -123,7 +122,7 @@
     if (proxyMesh && proxyMesh.parent) proxyMesh.parent.remove(proxyMesh);
     if (proxyMesh && proxyMesh.geometry) proxyMesh.geometry.dispose();
     if (proxyMesh && proxyMesh.material) proxyMesh.material.dispose();
-    proxyMesh = null; proxyRecords = []; proxyArena = null; proxiedGroups = new WeakSet();
+    proxyMesh = null; proxyRecords = []; proxyArena = null;
   }
 
   function ensureProxy(A) {
@@ -167,7 +166,6 @@
       const x = Number.isFinite(b.ox) ? b.ox : ((lot && +lot.cx) || 0);
       const z = Number.isFinite(b.oz) ? b.oz : ((lot && +lot.cz) || 0);
       proxyRecords.push({ lot, grp: b.group, x, z, w, d, h, r: Math.hypot(w, d) * 0.5, shown: false, wall: b.wallColor });
-      proxiedGroups.add(b.group);
     }
     if (!proxyRecords.length) { proxyArena = A; return; }
 
@@ -371,6 +369,13 @@
       ? (CBZ.cityCullRadius || 0) : 0;
     const R0 = airborne && baseR ? Math.max(700, baseR + 180) : baseR;
     const fogEnd = ((CBZ.scene && CBZ.scene.fog && CBZ.scene.fog.far) || CBZ.cityFogFar || R0) + 30;
+    /* NO SWAP INSIDE THE FOG (owner: "nothing may visibly generate or pop
+       within view", "near and far look the same, only the horizon changes").
+       Every group, a lot building included, is drawn as itself out to the
+       fog's end; the measured LOD box only ever stands in past it, where the
+       fog has already made the difference invisible (the airborne radius
+       stays wider, as before). */
+    const RV = R0 ? Math.max(R0, fogEnd) : 0;
     if (!root) return;
     const kids = root.children;
     // amortize: at most ~1/4 of the children measured/tested per sweep → the
@@ -380,7 +385,7 @@
     const slice = Math.max(64, Math.ceil(kids.length / 4));
     // measure the viewer BEFORE anything reads hysBand() this tick
     trackViewer(P, now, kids.length, slice);
-    updateProxy(CBZ.city && CBZ.city.arena, P, R0);
+    updateProxy(CBZ.city && CBZ.city.arena, P, RV);
     if (!R0) {                      // OFF (high tiers / flag) — restore and idle
       if (hidByUs.size) { hidByUs.forEach(function (o) { o.visible = true; }); hidByUs.clear(); }
       return;
@@ -419,15 +424,8 @@
       }
       const dx = b.x - P.x, dz = b.z - P.z;
       const d = Math.sqrt(dx * dx + dz * dz) - b.r;   // nearest possible point
-      /* NOTHING APPEARS INSIDE THE FOG. A lot building past R is drawn by its
-         measured LOD box (the proxy above), so it may go at R; anything else
-         (an arena, a marina, a casino, a compound) has no stand-in, and hiding
-         it at R (230 m on the phone, inside a 380 m fog) made it pop into
-         view there. It is held to the fog's end instead. A building's merged
-         shell goes with its building; the merged trim tiles (window frames,
-         sills: sub-pixel by then) go at R as they always did. */
-      const standIn = proxiedGroups.has(o) || (o._cbzOwner && proxiedGroups.has(o._cbzOwner)) || o.name === "batch-inert";
-      const R = standIn ? R0 : Math.max(R0, fogEnd);
+      // (RV: see above. Everything is held to the fog's end.)
+      const R = RV;
       if (d > R) {
         // no `!hidByUs.has(o)` guard: if another system handed visibility back
         // (a quality tier restoring the masonry veneer), the sweep must be able
