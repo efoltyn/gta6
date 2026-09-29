@@ -6693,7 +6693,12 @@
       // and belong to the same build pass the shells did, so mode.js's one-shot
       // batch swallows them. The bodies arrive later, through power.js, and
       // land in these rooms because of the ledger dressComplex stamps.
-      try { dressComplex(site); } catch (e) { console.error("[govcomplex] interiors " + def.id, e); }
+      // A slice / the streamed city (core/citystream.js) furnishes a complex
+      // only when it comes within sight: the rooms were most of the builder's
+      // ~51k meshes, and a phone at the downtown spawn built all ten sites'.
+      // With no slice, sliceAt runs it right here, exactly as before.
+      const dressIt = function () { try { dressComplex(site); } catch (e) { console.error("[govcomplex] interiors " + def.id, e); } };
+      if (CBZ.sliceAt) CBZ.sliceAt(site.rect, dressIt, { name: "gov interiors " + def.id }); else dressIt();
 
       // ---- keep-out ------------------------------------------------------
       // hard  → nobody at all (the Agency, the Defence HQ)

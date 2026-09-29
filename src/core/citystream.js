@@ -249,9 +249,26 @@
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
   }
   function settle(job) {
-    // late content: freeze its matrices and queue its shaders (the batch pass
-    // is a once-per-world step; late content keeps its own draws, like the
-    // metro's streamed tiles)
+    // LATE CONTENT IS BATCHED LIKE BOOT CONTENT. What the job added under the
+    // city root moves into one identity group, and that group gets the same
+    // passes the boot world got (core/batch.js merge, local instancing): a
+    // streamed town draws in a handful of calls, not one per box, and parks
+    // and returns as one unit. Only after the world's own batch ran (a job
+    // that runs during the build is batched with everything else).
+    const root = cityRoot();
+    if (root && root.userData && root.userData._batched && job.objs && job.objs.length && CBZ.batchStaticUnder && window.THREE) {
+      const mine = job.objs.filter(function (it) { return it.parent === root && it.o.parent === root; });
+      if (mine.length) {
+        const G = new window.THREE.Group();
+        G.name = "stream-job";
+        root.add(G);
+        for (const it of mine) { root.remove(it.o); G.add(it.o); }
+        try { CBZ.batchStaticUnder(G); } catch (e) { console.error("[stream batch " + (job.name || "?") + "]", e); }
+        try { if (CBZ.instanceStaticUnder) CBZ.instanceStaticUnder(G); } catch (e) {}
+        job.objs = job.objs.filter(function (it) { return mine.indexOf(it) < 0; });
+        job.objs.push({ o: G, parent: root });
+      }
+    }
     for (const it of job.objs || []) {
       try { if (CBZ.freezeStaticUnder) CBZ.freezeStaticUnder(it.o); } catch (e) {}
       try { if (CBZ.shaderQueue) CBZ.shaderQueue(it.o, { full: true }); } catch (e) {}
