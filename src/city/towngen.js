@@ -561,6 +561,14 @@
     // canopies are collected here and merged after the lot loop: every canopy
     // in a town is one draw, every lit soffit another, every post a third.
     const canopyGeo = [], soffitGeo = [], postGeo = [];
+    // merge what the shop canopies queued (the town's end-of-fill merge, and
+    // a streamed parcel's own when it is built later)
+    function flushCanopies() {
+      const CANOPY = cfg.canopyColor != null ? cfg.canopyColor : (kit ? 0x3a3d42 : WOOD);
+      if (canopyGeo.length) mergeAdd(root, canopyGeo.splice(0), cmat(CANOPY), { cast: true });
+      if (postGeo.length) mergeAdd(root, postGeo.splice(0), cmat(CANOPY), { cast: true });
+      if (soffitGeo.length) mergeAdd(root, soffitGeo.splice(0), cmat(0xfff0d2, { emissive: 0xfff0d2, ei: 0.5 }), {});
+    }
     function frontBox(list, x, y, z, w, h, d) { const g = new THREE.BoxGeometry(w, h, d); g.translate(x, y, z); list.push(g); }
     function shopCanopy(lt, bw, bd, trade) {
       const f = frontOf(lt, bw, bd), er = trade === "hospital";
@@ -607,14 +615,11 @@
         const isShop = (pick.lotKind || (lt.zone === "residential" ? "home" : "shop")) === "shop";
         const storeys = storeysFor(pick.storeys, lt.ring, lt, isShop); // one shell, final height
         const color = pick.color != null ? pick.color : WOOD;
-        let b = null;
         // V2: numeric door side (see SIDE_IDX finding). Homes use the shared
         // clean glass shell; buildings.js deliberately normalizes the removed
         // residential/fortified punched-window archetypes to office glass.
         const sideArg = V2 && SIDE_IDX[lt.doorSide] != null ? SIDE_IDX[lt.doorSide] : lt.doorSide;
         const shellOpts = pick.opts || (V2 && !isShop ? { stairs: true } : { retail: true });
-        try { b = mk(root, lt.cx, lt.cz, w, d, storeys, color, sideArg, shellOpts); } catch (e) { b = null; }
-        if (!b) continue;
         const doorPt = { x: lt.door.x + lt.door.nx * 1.6, z: lt.door.z + lt.door.nz * 1.6, nx: lt.door.nx, nz: lt.door.nz };
         // is this a commercial lot or a home? (zone default, prefab override)
         // CONTRACT: shops.js reads lot.kind DIRECTLY (no b.shop.kind fallback) and
@@ -624,11 +629,20 @@
         // shop defaults to a buyable 'food' diner — never a typeless lot.
         const sk = isShop ? (pick.shopKind || inferShopKind(pick.name) || "food") : null;
         const kind = isShop ? sk : "home";
+        /* THE LOT IS DATA NOW, THE BUILDING WHEN IT CAN BE SEEN. Everything a
+           system asks of a town lot (its kind, door, shop, owner, home, where the
+           vendor stands) is decided here, in the same order with the same draws
+           as always (the shell never drew from the town rng). The shell, its
+           counter, its furnished floors, its sign and canopy are one
+           CBZ.sliceAt job over the parcel: with no streaming it runs right here
+           exactly as before; in the streamed city a far parcel of a big town
+           is built only when the player comes within sight of it (and goes
+           with the town when the town is freed). */
         const lotRec = {
           cx: lt.cx, cz: lt.cz, w, d, kind, district,
           ring: lt.ring, zone: lt.zone, town: cfg.name,
           skylineStoreys: skylinePlan.get(lt) || null,
-          building: { ...b, name: pick.name || "Building", sign: color, side: lt.doorSide, door: doorPt, shop: isShop },
+          building: { name: pick.name || "Building", sign: color, side: lt.doorSide, door: doorPt, shop: isShop, storeys: storeys },
           // the street this parcel fronts, as drawn: approach.js reads it to
           // stop its crossing at the footway (the kit owns the kerb) and to
           // leave the driveway to the painted lot ground
@@ -648,50 +662,77 @@
           if (sk === "hospital") bb.hospital = true;
           if (sk === "realtor") bb.realtor = true;
           stampShopOwner(bb, sk, storeys);
-          // V2 — NO HOLLOW SHELLS: a real sales counter just inside the back
-          // wall (buildings.js's mainland counter math, slid clear of the stair
-          // core the shell reserved) + the full trade-specific interior dresser + dressed
-          // upper floors. Town shops were bare boxes before this.
-          if (V2 && b.lbox) {
-            const inx = -lt.door.nx, inz = -lt.door.nz;              // inward unit
-            const wt = b.wt != null ? b.wt : 0.6;
-            let ccx = inx * (w / 2 - 2.8), ccz = inz * (d / 2 - 2.8);
-            let cw = inx ? 0.8 : Math.min(w - 2, 4.5);
-            const cdp = inz ? 0.8 : Math.min(d - 2, 4.5);
-            let cdp2 = cdp;
-            if (CBZ.cityFitCounter) ({ ccx, ccz, cw, cd: cdp2 } = CBZ.cityFitCounter(b, inx, ccx, ccz, cw, cdp));
-            const drawCounter = function () {
-              return b.lbox(ccx, 0.6, ccz, cw, 1.2, cdp2, 0x6b4a2a, { solid: true });
-            };
-            if (CBZ.interiorBounded) CBZ.interiorBounded(b, drawCounter, "town-counter");
-            else drawCounter();
-            // vendor stands BEHIND the real counter (replaces the estimate above)
-            bb.vendorSpot = { x: lt.cx + ccx + inx * 1.2, z: lt.cz + ccz + inz * 1.2, face: Math.atan2(lt.door.nx, lt.door.nz) };
-            if (CBZ.cityFurnishInterior) { try { CBZ.cityFurnishInterior(b, sk, { nx: inx, nz: inz }); } catch (e) {} }
-            if (CBZ.cityFurnishApartment) {
-              const fh = b.FH || 3.2;
-              for (let k = 1; k < (b.storeys || storeys); k++) {
-                try { CBZ.cityFurnishApartment(b, k * fh, (((lt.cx | 0) * 7 + (lt.cz | 0)) ^ k) & 0x7fffffff); } catch (e) {}
-              }
-            }
-          }
         } else {
           // cheap MICRO-unit home so a town resident can actually afford one;
           // listed:false → off the buy-ladder by default, but still a real home
           // with a landlord float whose owner getter flips on home.owned (T2).
           bb.home = { tier: 0, name: pick.name || "Home", price: 0, rent: pick.rent != null ? pick.rent : 90, listed: false, owned: false, floorY: 0, door: doorPt };
           stampHomeOwner(bb, storeys);
-          // V2 — a LIVED-IN home: every storey dressed as a real flat, which
-          // auto-registers sleepable beds/sittable seats (propRegisterBed/Seat
-          // → the generic "Sleep til morning"/sit prompts). Minecraft-village
-          // rule: a house is a place with a bed, not a decorated box.
-          if (V2 && CBZ.cityFurnishApartment) {
+        }
+        const buildShell = function (late) {
+          let b = null;
+          try { b = mk(root, lt.cx, lt.cz, w, d, storeys, color, sideArg, shellOpts); } catch (e) { b = null; }
+          if (!b) return;
+          // the shell's record under the data decided above (which wins, as the
+          // object spread used to make it)
+          const keep = {};
+          for (const k in bb) keep[k] = bb[k];
+          Object.assign(bb, b, keep);
+          bb.storeys = b.storeys != null ? b.storeys : storeys;
+          if (isShop) {
+            // V2 — NO HOLLOW SHELLS: a real sales counter just inside the back
+            // wall (buildings.js's mainland counter math, slid clear of the stair
+            // core the shell reserved) + the full trade-specific interior dresser + dressed
+            // upper floors. Town shops were bare boxes before this.
+            if (V2 && b.lbox) {
+              const inx = -lt.door.nx, inz = -lt.door.nz;              // inward unit
+              let ccx = inx * (w / 2 - 2.8), ccz = inz * (d / 2 - 2.8);
+              let cw = inx ? 0.8 : Math.min(w - 2, 4.5);
+              const cdp = inz ? 0.8 : Math.min(d - 2, 4.5);
+              let cdp2 = cdp;
+              if (CBZ.cityFitCounter) ({ ccx, ccz, cw, cd: cdp2 } = CBZ.cityFitCounter(b, inx, ccx, ccz, cw, cdp));
+              const drawCounter = function () {
+                return b.lbox(ccx, 0.6, ccz, cw, 1.2, cdp2, 0x6b4a2a, { solid: true });
+              };
+              if (CBZ.interiorBounded) CBZ.interiorBounded(b, drawCounter, "town-counter");
+              else drawCounter();
+              // vendor stands BEHIND the real counter (replaces the estimate above)
+              bb.vendorSpot = { x: lt.cx + ccx + inx * 1.2, z: lt.cz + ccz + inz * 1.2, face: Math.atan2(lt.door.nx, lt.door.nz) };
+              if (CBZ.cityFurnishInterior) { try { CBZ.cityFurnishInterior(b, sk, { nx: inx, nz: inz }); } catch (e) {} }
+              if (CBZ.cityFurnishApartment) {
+                const fh = b.FH || 3.2;
+                for (let k = 1; k < (b.storeys || storeys); k++) {
+                  try { CBZ.cityFurnishApartment(b, k * fh, (((lt.cx | 0) * 7 + (lt.cz | 0)) ^ k) & 0x7fffffff); } catch (e) {}
+                }
+              }
+            }
+          } else if (V2 && CBZ.cityFurnishApartment) {
+            // V2 — a LIVED-IN home: every storey dressed as a real flat, which
+            // auto-registers sleepable beds/sittable seats (propRegisterBed/Seat
+            // → the generic "Sleep til morning"/sit prompts). Minecraft-village
+            // rule: a house is a place with a bed, not a decorated box.
             const fh = b.FH || 3.2;
             for (let k = 0; k < (b.storeys || storeys); k++) {
               try { CBZ.cityFurnishApartment(b, k * fh, (((lt.cx | 0) + (lt.cz | 0) * 3) ^ (k * 7)) & 0x7fffffff); } catch (e) {}
             }
           }
-        }
+          // CH3 — NO floating per-shop name sprite hovering at storeys*4 in the sky.
+          // A real town announces a shop on its STOREFRONT: a thin lit sign board
+          // mounted FLUSH on the facade above the door, with the (cached, draw-call
+          // neutral) name plate seated tight against the wall facing the street.
+          // cityMakeBuilding does NOT hang signAwning (that lives in the mainland
+          // shop pass), so the town mounts its own compact facade board here.
+          if (isShop && pick.name) mountShopSign(lt, color, pick.name, w, d);
+          if (isShop) shopCanopy(lt, w, d, sk);
+          // a late parcel's canopy is merged with it (the town's merge ran long ago)
+          if (late) flushCanopies();
+        };
+        let lateShell = false;
+        if (CBZ.sliceAt) {
+          const hw = w / 2 + 6, hd = d / 2 + 6;
+          CBZ.sliceAt({ minX: lt.cx - hw, maxX: lt.cx + hw, minZ: lt.cz - hd, maxZ: lt.cz + hd }, function () { buildShell(lateShell); }, { name: "town lot " + (cfg.name || "") });
+        } else buildShell(false);
+        lateShell = true;
         // T1 — expose to the REAL arena arrays so Zillow/shops/careers/vendor
         // staffing/minimap all see the town's lots (guarded; A may be null in a
         // headless build, in which case the descriptor still returns the lot).
@@ -700,14 +741,6 @@
           if (isShop) (A.shopLots = A.shopLots || []).push(lotRec);
           else (A.homeLots = A.homeLots || []).push(lotRec);
         }
-        // CH3 — NO floating per-shop name sprite hovering at storeys*4 in the sky.
-        // A real town announces a shop on its STOREFRONT: a thin lit sign board
-        // mounted FLUSH on the facade above the door, with the (cached, draw-call
-        // neutral) name plate seated tight against the wall facing the street.
-        // cityMakeBuilding does NOT hang signAwning (that lives in the mainland
-        // shop pass), so the town mounts its own compact facade board here.
-        if (isShop && pick.name) mountShopSign(lt, color, pick.name, w, d);
-        if (isShop) shopCanopy(lt, w, d, sk);
         filled.push(lotRec);
         lt._rec = lotRec;
       } else if (pick.asset && CBZ.assets && CBZ.assets.has && CBZ.assets.has(pick.asset)) {
@@ -750,10 +783,7 @@
         }
       }
     }
-    const CANOPY = cfg.canopyColor != null ? cfg.canopyColor : (kit ? 0x3a3d42 : WOOD);
-    if (canopyGeo.length) mergeAdd(root, canopyGeo, cmat(CANOPY), { cast: true });
-    if (postGeo.length) mergeAdd(root, postGeo, cmat(CANOPY), { cast: true });
-    if (soffitGeo.length) mergeAdd(root, soffitGeo, cmat(0xfff0d2, { emissive: 0xfff0d2, ei: 0.5 }), {});
+    flushCanopies();
 
     // =====================================================================
     //  5) THE TOWN SQUARE — the nav anchor. A paved/sand pad + a central

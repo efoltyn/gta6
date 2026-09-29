@@ -45,3 +45,32 @@ console.log("back", JSON.stringify(stat()));
 CBZ.player.pos.set(9000, 0, 9000); CBZ.streamTick(true);
 CBZ.player.pos.set(0, 0, 0); CBZ.streamTick(true);
 console.log("home", JSON.stringify(stat()));
+// ---- nested: a "town" job whose parcels are child jobs (built when seen)
+let lotsBuilt = 0;
+function townWithLots(x0) { return function () {
+  CBZ.city.arena.shops.push({ town: x0 });
+  for (let i = 0; i < 6; i++) {
+    const lx = x0 + i * 300;
+    CBZ.sliceAt({ minX: lx - 10, maxX: lx + 10, minZ: -10, maxZ: 10 }, function () {
+      lotsBuilt++;
+      const m = new THREE.Mesh(new THREE.BoxGeometry(5, 5, 5), new THREE.MeshBasicMaterial()); m.position.set(lx, 0, 0); root.add(m);
+      CBZ.colliders.push({ minX: lx - 2, maxX: lx + 2, minZ: -2, maxZ: 2, ref: m });
+    }, { name: "lot" });
+  }
+}; }
+CBZ.sliceAt({ minX: 20000, maxX: 21600, minZ: -10, maxZ: 10 }, townWithLots(20000), { name: "town" });
+CBZ.player.pos.set(20000, 0, 0); CBZ.streamTick(true);
+const lotJobs = () => CBZ.streamJobs.filter(j => j.name === "lot");
+console.log("town near its west end", JSON.stringify({ lotsBuilt, lotJobs: lotJobs().map(j => j.state).join(","), cols: CBZ.colliders.length }));
+const inline = lotsBuilt;
+CBZ.player.pos.set(21500, 0, 0); CBZ.streamTick(true);
+console.log("drive to the east end", JSON.stringify({ lotsBuilt, lotJobs: lotJobs().map(j => j.state).join(","), cols: CBZ.colliders.length }));
+CBZ.player.pos.set(0, 0, 0); CBZ.streamTick(true);
+const left = { lotJobs: lotJobs().length, cols: CBZ.colliders.length, kids: root.children.length, shops: CBZ.city.arena.shops.length };
+console.log("home again", JSON.stringify(left));
+let nfail = 0;
+if (inline < 1 || inline >= 6) { nfail++; console.log("FAIL: only the parcels in sight build with the town"); }
+if (lotsBuilt <= inline) { nfail++; console.log("FAIL: far parcels never built on approach"); }
+if (left.lotJobs !== 0) { nfail++; console.log("FAIL: freed town left child jobs"); }
+console.log(nfail ? "NESTED FAIL" : "NESTED OK");
+if (nfail) process.exit(1);

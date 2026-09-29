@@ -209,7 +209,9 @@
     const buses = busList();
     const marks = busHooks.map(function (h) { try { return h.mark(); } catch (e) { return null; } });
     const t0 = performance.now();
+    const outer = capturing; capturing = job;
     try { job.fn(); } catch (e) { console.error("[stream job " + (job.name || "?") + "]", e); }
+    capturing = outer;
     // late pools (glass, room deco, masonry) of what it built: now, so they are this job's
     if (CBZ.cityFlushPools) { try { CBZ.cityFlushPools(); } catch (e) {} }
     job.ms = performance.now() - t0;
@@ -230,11 +232,17 @@
     job.state = "built";
   }
 
+  /* NESTED JOBS. A job's builder may itself defer parts (a town defers each
+     parcel's shell). Inside a running job, a part that is in sight runs
+     inline and belongs to that job; one that is not is queued as the job's
+     CHILD: it builds when seen, and goes when its parent is parked or freed. */
+  let capturing = null;
   CBZ.sliceAt = function (rect, fn, opts) {
     if (typeof fn !== "function") return null;
     const s = CBZ.slice;
     if (!s) { fn(); return null; }
-    const job = { rect: rect, fn: fn, name: (opts && opts.name) || "", pure: !!(opts && opts.pure), state: "queued" };
+    if (s.stream && capturing && rectKeeps(rect)) { fn(); return null; }
+    const job = { rect: rect, fn: fn, name: (opts && opts.name) || "", pure: !!(opts && opts.pure), state: "queued", parent: s.stream ? capturing : null };
     if (rectKeeps(rect)) {
       if (s.stream) { jobs.push(job); runCaptured(job); } else fn();
       return job;
@@ -310,6 +318,7 @@
     L.length = w;
   }
   function park(job) {
+    for (const k of childrenOf(job)) if (k.state === "built" && k.objs) park(k);
     takeLos(job);
     for (const it of job.objs) { if (it.o.parent) it.o.parent.remove(it.o); releaseGPU(it.o); }
     removeFrom(CBZ.colliders, job.cols); removeFrom(CBZ.platforms, job.plats);
@@ -319,7 +328,15 @@
   }
   /* FREE a far job: everything it made goes, and it is queued to run again.
      Materials are left alone (they are cached and shared across builds). */
+  function childrenOf(job) { const out = []; for (const j of jobs) if (j.parent === job) out.push(j); return out; }
   function freeJob(job) {
+    // its children first (built ones are freed; queued ones simply leave: the
+    // parent's next run queues them again)
+    const kids = childrenOf(job);
+    if (kids.length) {
+      for (const k of kids) if (k.state !== "queued") freeJob(k);
+      removeFrom(jobs, kids);
+    }
     if (job.state === "built") park(job);
     for (const it of job.objs || []) {
       if (it.o.parent) it.o.parent.remove(it.o);
@@ -470,10 +487,15 @@
     // nearest first
     const order = jobs.filter(function (j) { return j.state !== "built" && rectKeeps(j.rect); });
     order.sort(function (a, b) { return dist(a.rect, s) - dist(b.rect, s); });
+    // A job the player could already SEE (its rect inside the view distance
+    // of where the player stands) is built now, whatever the budget: nothing
+    // may assemble itself in view. The rest spend STEP_MS a tick, nearest first.
+    const VIEW = s.view(), V2 = VIEW * VIEW;
     for (const j of order) {
+      const urgent = distTo(j.rect, P.pos.x, P.pos.z) < V2;
+      if (!force && !urgent && performance.now() - t0 > STEP_MS) break;
       if (j.state === "parked") unpark(j);
-      else { runCaptured(j); settle(j); CBZ.streamStats.lastJobMs = Math.round(j.ms); CBZ.streamStats.maxJobMs = Math.max(CBZ.streamStats.maxJobMs, Math.round(j.ms)); }
-      if (performance.now() - t0 > STEP_MS && !force) break;
+      else { runCaptured(j); settle(j); CBZ.streamStats.lastJobMs = Math.round(j.ms); CBZ.streamStats.maxJobMs = Math.max(CBZ.streamStats.maxJobMs, Math.round(j.ms)); if (urgent) CBZ.streamStats.urgent = (CBZ.streamStats.urgent || 0) + 1; }
     }
     for (const j of jobs) if (j.state === "built" && j.objs && !rectKeeps(j.rect, HYST)) park(j);
     // a parked job this far out is freed outright (it re-runs if the player
@@ -483,6 +505,10 @@
     for (const j of jobs) { if (j.state === "built") b++; else if (j.state === "parked") p++; else qd++; }
     CBZ.streamStats.built = b; CBZ.streamStats.parked = p; CBZ.streamStats.queued = qd;
   };
+  function distTo(r, x, z) {
+    const cx = Math.max(r.minX, Math.min(x, r.maxX)), cz = Math.max(r.minZ, Math.min(z, r.maxZ));
+    return (cx - x) * (cx - x) + (cz - z) * (cz - z);
+  }
   function dist(r, s) {
     const cx = Math.max(r.minX, Math.min(s.x, r.maxX)), cz = Math.max(r.minZ, Math.min(s.z, r.maxZ));
     return (cx - s.x) * (cx - s.x) + (cz - s.z) * (cz - s.z);
@@ -496,7 +522,7 @@
     CBZ.onUpdate(0.05, function (dt) {
       if (!CBZ.slice || !CBZ.slice.stream || !CBZ.game || CBZ.game.mode !== "city") return;
       acc += dt || 0;
-      if (acc < 0.5) return;
+      if (acc < 0.1) return;           // 10 Hz: a fast car covers 4 m a tick
       acc = 0;
       CBZ.streamTick(false);
     });
