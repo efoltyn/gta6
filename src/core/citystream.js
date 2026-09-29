@@ -338,11 +338,26 @@
       removeFrom(jobs, kids);
     }
     if (job.state === "built") park(job);
+    // (its textures leave the GPU too: three uploads a texture again from its
+    // image the next time anything draws it, so this is safe for a shared one;
+    // a texture whose canvas core/texfree.js already released is left alone,
+    // it could only come back as 1x1)
+    const texDone = new Set();
     for (const it of job.objs || []) {
       if (it.o.parent) it.o.parent.remove(it.o);
       it.o.traverse(function (c) {
         const g = c.geometry;
         if (g && g.dispose && !g._shared && !(g.userData && g.userData._shared)) g.dispose();
+        const mats = c.material ? (Array.isArray(c.material) ? c.material : [c.material]) : null;
+        if (mats) for (const m of mats) {
+          if (!m) continue;
+          for (const k in m) {
+            const t = m[k];
+            if (!t || !t.isTexture || texDone.has(t) || t._cbzFreed || t.isRenderTargetTexture) continue;
+            texDone.add(t);
+            if (t.image && (t.isCanvasTexture || t.isDataTexture || t.image.width)) t.dispose();
+          }
+        }
       });
     }
     for (const b of job.bus || []) dropItems(b.arr, b.items);
