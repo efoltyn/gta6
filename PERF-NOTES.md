@@ -1,5 +1,11 @@
 # PERF NOTES — round-3 city teardown (branch `claude/game-perf-profiling-1x05fa`)
 
+> **2026-09-28: the numbers below are HISTORY (SwiftShader, older tools that no
+> longer exist).** The live instrument is `node tools/speed.mjs` (real GPU, HD
+> viewport, per-phase load + per-updater frame cost, noise per metric); the
+> current main numbers are in `tools/speed-baseline.json`. Measure there before
+> trusting anything in this file.
+
 **Status:** everything below is on THIS BRANCH only. NOT merged. `main` (the live
 GitHub Pages game) is untouched — nothing here changes what you play until it lands
 on `main`, and even then all three levers default OFF (opt-in per URL). Full A/B

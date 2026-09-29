@@ -1,5 +1,11 @@
 # LOAD NOTES — why the city takes minutes and the jail takes a second
 
+> **2026-09-28: the numbers below are HISTORY (SwiftShader, older tools that no
+> longer exist).** The live instrument is `node tools/speed.mjs` (real GPU, HD
+> viewport, per-phase load + per-updater frame cost, noise per metric); the
+> current main numbers are in `tools/speed-baseline.json`. Measure there before
+> trusting anything in this file.
+
 **Question that started this (owner, 2026-08-04):** *"Figure out why the prison
 escape game loads fucking amazing, I can literally play it on my phone. And why
 the gang city game is so heavy and takes so long to load even on a computer."*
