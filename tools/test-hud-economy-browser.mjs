@@ -219,9 +219,9 @@ try {
     // Every independent walk-up module may still write display:block inline,
     // but city policy wins without removing any input handlers or actions.
     const passiveIds = [
-      "hint", "toast", "interact", "cityStoragePrompt", "roofStashChip", "beachLootChip",
-      "clothingPrompt", "gunstorePrompt", "elevChip", "adChip", "realtyPrompt", "pawnPrompt",
-      "jewelryPrompt", "ci2Chip", "fxPrompt", "modshopHud", "cityOrders", "cityHeistHud",
+      "hint", "toast", "interact", "roofStashChip", "beachLootChip",
+      "elevChip", "adChip", "realtyPrompt",
+      "modshopHud", "cityOrders", "cityHeistHud",
       "cFeed", "cKill", "cKillFeed", "cRel", "cMemb", "cTurfMeta",
       "streakHud", "streakMeter"
     ];

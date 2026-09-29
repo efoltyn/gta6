@@ -640,6 +640,9 @@
       // (core/staticfreeze.js) — after the batch pass (its merged output is
       // already frozen), before actors spawn (they arrive with live matrices).
       if (CBZ.freezeStaticUnder) CBZ.freezeStaticUnder(A.root);
+      // static surfaces + merged meshes keep one copy (the GPU's) of their
+      // non-position arrays (core/citystream.js)
+      if (CBZ.freeStaticArrays) { try { CBZ.freeStaticArrays(A.root); } catch (e) { console.error("[free arrays]", e); } }
       A.root.visible = true;
       // the finished, batched world: queue whatever programs the builders'
       // queue (core/fxwarm.js) has not, so the GPU links them during pop /

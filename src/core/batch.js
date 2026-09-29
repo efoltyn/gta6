@@ -291,6 +291,7 @@
      batchHideGroup to zero a slice's positions) mean exactly what they did. */
   const _nm3 = new THREE.Matrix3();
   function q8(v) { v = Math.round(v * 255); return v < 0 ? 0 : v > 255 ? 255 : v; }
+  const _SP = new Float32Array(72), _SN = new Float32Array(72);   // one trim box (city/buildings.js _cbzBoxSource)
   function bakeMergeV2(meshes) {
     let nPos = 0, nIdx = 0;
     const counts = new Array(meshes.length);
@@ -307,9 +308,11 @@
       const m = meshes[mi], g = m.geometry;
       const e = m.matrixWorld.elements;      // fresh: run() updated the whole subtree once
       const ne = _nm3.getNormalMatrix(m.matrixWorld).elements;
-      const pa = g.attributes.position, p = pa.array, pc = pa.count;
-      const na = g.attributes.normal, n = na ? na.array : null;
-      const ca = g.attributes.color, c = ca ? ca.array : null;
+      // (a trim-box source is read box by box below: never touch its arrays)
+      const BS = g._cbzBoxSource && !g._cbzBoxSource.built() && !g.attributes.color ? g._cbzBoxSource : null;
+      const pa = g.attributes.position, p = BS ? null : pa.array, pc = pa.count;
+      const na = g.attributes.normal, n = BS ? null : (na ? na.array : null);
+      const ca = g.attributes.color, c = BS ? null : (ca ? ca.array : null);
       // a source colour attribute may itself be 8-bit normalized
       const cs = ca && ca.normalized && !(c instanceof Float32Array) && !(c instanceof Float64Array) ? 1 / 255 : 1;
       const tint = m.material && m.material.color;
@@ -322,6 +325,35 @@
         Math.abs(ne[3] * ne[3] + ne[4] * ne[4] + ne[5] * ne[5] - 1) < 1e-4 &&
         Math.abs(ne[6] * ne[6] + ne[7] * ne[7] + ne[8] * ne[8] - 1) < 1e-4;
       const o0 = vo * 3, o1 = (vo + pc) * 3;
+      // A TRIM-BOX SOURCE whose arrays were never built is read box by box
+      // (identical float32 values to its own arrays, no allocation), then the
+      // colour fill and the vertex offset below as for any source.
+      if (BS) {
+        for (let b = 0; b < BS.n; b++) {
+          const ti = BS.box(b, _SP, _SN), ob = o0 + b * 72;
+          for (let sIdx = 0, o = ob; sIdx < 72; sIdx += 3, o += 3) {
+            const x = _SP[sIdx], y = _SP[sIdx + 1], z = _SP[sIdx + 2];
+            pos[o]     = e[0] * x + e[4] * y + e[8] * z + e[12];
+            pos[o + 1] = e[1] * x + e[5] * y + e[9] * z + e[13];
+            pos[o + 2] = e[2] * x + e[6] * y + e[10] * z + e[14];
+            const nx0 = _SN[sIdx], ny0 = _SN[sIdx + 1], nz0 = _SN[sIdx + 2];
+            let nx = ne[0] * nx0 + ne[3] * ny0 + ne[6] * nz0;
+            let ny = ne[1] * nx0 + ne[4] * ny0 + ne[7] * nz0;
+            let nz = ne[2] * nx0 + ne[5] * ny0 + ne[8] * nz0;
+            if (!ortho) { const l = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1; nx /= l; ny /= l; nz /= l; }
+            nrm[o] = (nx * 127 + (nx < 0 ? -0.5 : 0.5)) | 0;
+            nrm[o + 1] = (ny * 127 + (ny < 0 ? -0.5 : 0.5)) | 0;
+            nrm[o + 2] = (nz * 127 + (nz < 0 ? -0.5 : 0.5)) | 0;
+          }
+          const ib = io + b * 36, vb = vo + b * 24;
+          for (let j = 0; j < 36; j++) idx[ib + j] = ti[j] + vb;
+        }
+        const r8 = q8(tr), g8 = q8(tg), b8 = q8(tb);
+        for (let o = o0; o < o1; o += 3) { col[o] = r8; col[o + 1] = g8; col[o + 2] = b8; }
+        io += BS.n * 36;
+        vo += pc;
+        continue;
+      }
       // positions: affine transform, unrolled
       for (let sIdx = 0, o = o0; o < o1; sIdx += 3, o += 3) {
         const x = p[sIdx], y = p[sIdx + 1], z = p[sIdx + 2];
@@ -615,6 +647,7 @@
       // a merged-per-building shell (or per-tile bucket) needs a bounding
       // sphere or frustum culling can't reject it.
       merged.computeBoundingSphere();
+      merged._evictable = true;                   // owned by this one mesh: core/farcull.js may drop its GPU copy when far
       target.add(mesh);                           // baked to world space; target is identity
       if (b.hide) {
         // WALL pass: KEEP the originals (LOS raycasts hit visible=false meshes in

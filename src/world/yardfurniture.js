@@ -58,6 +58,9 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  // Built when the prison is first needed, as if at this script's parse
+  // point (core/prisonlazy.js). Body left at its old indent.
+  CBZ.definePrison("world/yardfurniture.js", function () {
   if (!CBZ || !CBZ.addBox) return;
   const { addBox } = CBZ;
   const ROOT = CBZ.prisonRoot || CBZ.scene;
@@ -347,4 +350,5 @@
       containers: 0,                      // MUST be 0 — nothing here opens
     };
   };
+  });
 })();

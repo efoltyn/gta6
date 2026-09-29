@@ -51,7 +51,9 @@
   var P = (CBZ.placement = {});
 
   // hash: "ix,iz" → array of reserved rects.
-  var hash = {};
+  // numeric cell keys in a Map (a string key per cell was most of this
+  // module's heap: ~16 MB in the streamed city)
+  var hash = new Map();
   // Canonical reservation list. The spatial hash stores the same rectangle in
   // every touched cell, which is ideal for collision queries but unusable for
   // diagnostics (a large runway can appear hundreds of times). Keep each
@@ -64,13 +66,33 @@
   // changed the amount of work a later placement had to do.  Track the actual
   // collider objects so seeding is idempotent until an explicit reset.
   var seededColliders = new WeakSet();
-  function ck(ix, iz) { return ix + ',' + iz; }
+  function ck(ix, iz) { return ix * 1048576 + iz; }
   function ci(v) { return Math.floor(v / CELL); }
 
   P.cellSize = CELL;
 
+  // what a streamed job reserved leaves with it (core/citystream.js)
+  P.dropReservations = function (items) {
+    if (!items || !items.length) return;
+    var drop = new Set(items);
+    reservations = reservations.filter(function (r) { return !drop.has(r); });
+    items.forEach(function (r) {
+      forCells(r, function (key) {
+        var b = hash.get(key); if (!b) return false;
+        var w = 0; for (var i = 0; i < b.length; i++) if (!drop.has(b[i])) b[w++] = b[i];
+        b.length = w; if (!w) hash.delete(key);
+        return false;
+      });
+    });
+  };
+  if (CBZ.streamBusHook) CBZ.streamBusHook({
+    mark: function () { return { arr: reservations, n: reservations.length }; },
+    since: function (m) { return m.arr === reservations ? reservations.slice(m.n) : []; },
+    drop: function (items) { P.dropReservations(items); },
+  });
+
   P.reset = function () {
-    hash = {};
+    hash = new Map();
     reservations = [];
     seededColliders = new WeakSet();
   };
@@ -108,7 +130,7 @@
     var zoneOnly = !!opts.zoneOnly;
     var zone = rect.zone || null;
     return !forCells(rect, function (key) {
-      var bucket = hash[key];
+      var bucket = hash.get(key);
       if (!bucket) return false;
       for (var i = 0; i < bucket.length; i++) {
         var r = bucket[i];
@@ -145,7 +167,7 @@
       id: rect.id || null, kind: rect.kind || null, source: rect.source || null
     };
     reservations.push(r);
-    forCells(r, function (key) { (hash[key] || (hash[key] = [])).push(r); });
+    forCells(r, function (key) { var b = hash.get(key); if (!b) hash.set(key, b = []); b.push(r); });
     return r;
   };
 
@@ -173,7 +195,7 @@
       var c = cols[i];
       if (c.minX == null || seededColliders.has(c)) continue;
       P.reserve({ minX: c.minX, maxX: c.maxX, minZ: c.minZ, maxZ: c.maxZ,
-                  stackable: false, zone: 'world', ref: c });
+                  stackable: false, zone: 'world', source: 'collider' });
       seededColliders.add(c);
       n++;
     }
@@ -542,8 +564,8 @@
     var grp = new THREE.Group();
     var mat = new THREE.LineBasicMaterial({ color: 0xff3366 });
     var seen = {};
-    Object.keys(hash).forEach(function (key) {
-      hash[key].forEach(function (r) {
+    hash.forEach(function (bucket) {
+      bucket.forEach(function (r) {
         var id = r.minX + ':' + r.minZ + ':' + r.maxX + ':' + r.maxZ;
         if (seen[id]) return; seen[id] = 1;
         var w = r.maxX - r.minX, d = r.maxZ - r.minZ;

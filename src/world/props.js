@@ -18,6 +18,9 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  // Built when the prison is first needed, as if at this script's parse
+  // point (core/prisonlazy.js). Body left at its old indent.
+  CBZ.definePrison("world/props.js", function () {
   const { addBox } = CBZ;
   /* THE ROOT IS THE PRISON, NOT THE SCENE. addBox parents into prisonRoot on
      its own, but spawnPiece defaults to a CHUNK root (systems/chunks.js), and
@@ -268,4 +271,5 @@
   }
   drumPallet(-19.3, 43.6, [0x2f5e8a, 0x2f5e8a, 0x3f6f4a, 0x2f5e8a]);
   drumPallet(-19.3, 45.0, [0x3f6f4a, 0x2f5e8a, 0x3f6f4a, 0x3f6f4a]);
+  });
 })();

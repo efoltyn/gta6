@@ -28,6 +28,10 @@
        applied. */
     CBZ.setMode(CBZ.START_MODE);
   }
+  // A page that opened on the prison asked for it while the scripts were
+  // still parsing (state.js's first setMode); build it now, before the title,
+  // which shows the live compound behind the card.
+  if (CBZ.prisonWanted && CBZ.prisonWanted()) CBZ.ensurePrison();
   CBZ.setState("title");
   CBZ.startLoop();
 })();

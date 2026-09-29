@@ -178,6 +178,16 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  // This file's CONFIG defaults are published at parse: other files read
+  // them before (or without) the prison ever being built.
+  if (CBZ.CONFIG.PRISON_BUNK_PERCH == null) CBZ.CONFIG.PRISON_BUNK_PERCH = true;
+  if (CBZ.CONFIG.PRISON_BUNK_HEADROOM == null) CBZ.CONFIG.PRISON_BUNK_HEADROOM = true;
+  if (CBZ.CONFIG.PRISON_ADMIN_WING == null) CBZ.CONFIG.PRISON_ADMIN_WING = true;
+  if (CBZ.CONFIG.PRISON_PROP_HONESTY_V1 == null) CBZ.CONFIG.PRISON_PROP_HONESTY_V1 = true;
+  if (CBZ.CONFIG.PRISON_REAL_PROPS == null) CBZ.CONFIG.PRISON_REAL_PROPS = true;
+  // Built when the prison is first needed, as if at this script's parse
+  // point (core/prisonlazy.js). Body left at its old indent.
+  CBZ.definePrison("world/cellblock.js", function () {
   const { COL, DIM } = CBZ;
   /* ONE LIFT FOR THE WHOLE FILE. Every helper below places geometry against
      a floor at y = 0 — bunk tops, toilet bands, door colliders, lamp heights,
@@ -208,8 +218,6 @@
   // (the geometry, see bunkRig). Declared together and up here because the
   // rack is BUILT at parse time — a default written further down the file
   // would arrive after the bunk it governs.
-  if (CFG.PRISON_BUNK_PERCH == null) CFG.PRISON_BUNK_PERCH = true;
-  if (CFG.PRISON_BUNK_HEADROOM == null) CFG.PRISON_BUNK_HEADROOM = true;
 
   /* ==========================================================
      0. THE SHELL — identical on BOTH paths. The footprint never moves,
@@ -237,7 +245,6 @@
      escape game. The flag is declared with the same idempotent `== null`
      idiom world/southblock.js documents, so whichever of the two files
      parses first sets it and the other no-ops. */
-  if (CFG.PRISON_ADMIN_WING == null) CFG.PRISON_ADMIN_WING = true;
   const SG = CFG.PRISON_ADMIN_WING !== false ? { x0: -4.2, x1: -2.2, z: -44, h: 2.6, t: 1 } : null;
   CBZ.cellblockStaffGap = SG;
   if (!SG) {
@@ -280,7 +287,6 @@
      tools/prison-beds-check.mjs sleepGap <= 0 and bunkStanders 0.
      Measured by tools/visual-presets/prison-wing-props.mjs.
      ========================================================== */
-  if (CFG.PRISON_PROP_HONESTY_V1 == null) CFG.PRISON_PROP_HONESTY_V1 = true;
   const HONEST = CFG.PRISON_PROP_HONESTY_V1 !== false;
 
   /* ==========================================================
@@ -359,7 +365,6 @@
      it was. Counted on CBZ._prisonProps so one audit can answer for the whole
      wave (games/jail.js's CBZ.prisonPropAudit merges it).
      ========================================================== */
-  if (CFG.PRISON_REAL_PROPS == null) CFG.PRISON_REAL_PROPS = true;
   const PP = (CBZ._prisonProps = CBZ._prisonProps || { props: 0, seats: 0, beds: 0, plain: 0 });
   function propsOn() { return CFG.PRISON_REAL_PROPS !== false; }
 
@@ -3183,4 +3188,5 @@
       lamps: lamps.length + 1,
     };
   };
+  });
 })();

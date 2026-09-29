@@ -40,6 +40,9 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  // Built when the prison is first needed, as if at this script's parse
+  // point (core/prisonlazy.js). Body left at its old indent.
+  CBZ.definePrison("world/prisongrounds.js", function () {
   const THREE = window.THREE;
   if (!CBZ || !CBZ.prisonKit || !CBZ.WORLD || !CBZ.addBox) return;
   const K = CBZ.prisonKit;
@@ -589,4 +592,5 @@
      ========================================================== */
   // the city's interiors (built later) keep their own flat walls
   K.defaultSkin = null;
+  });
 })();

@@ -5,11 +5,91 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  // ---- CBZ.jailBoost — ONE shared ledger (EAGER: a dozen jail systems take
+  // newRunWatcher()/onStateExit() handles from it while the page parses, long
+  // before the prison itself is built) for "temporarily boost an actor's
+  // fields, restore the exact bases later", plus the run-lifecycle watchers
+  // every jail system used to hand-roll (lockdown / difficulty /
+  // reinforcements each kept private lastElapsed + lastState copies of the
+  // same bookkeeping; difficulty.js even carried a "mirrors reinforcements"
+  // comment). Pure refactor home — semantics preserved by each caller.
+  //   apply(tag, obj, {field: value}) — set absolute values (base saved once)
+  //   scale(tag, obj, {field: mult})  — set base*mult, recomputed from the
+  //                                     SNAPSHOT every call (never compounds)
+  //   held(tag, obj) / count(tag)     — ledger queries
+  //   restore(tag, obj) / restoreAll(tag) — put the saved bases back
+  //   newRunWatcher(eps)              — returns poll(): true once when
+  //                                     game.elapsed falls back (a new run)
+  //   onStateExit(fn, states)         — fn(state) whenever play is left
+  //                                     (one shared onAlways(91) dispatcher;
+  //                                     hooks run in registration order)
+  CBZ.jailBoost = (function () {
+    const ledgers = Object.create(null);       // tag -> Map(obj -> {field: base})
+    function ledger(tag) { return ledgers[tag] || (ledgers[tag] = new Map()); }
+    function put(tag, obj, fields, fromBase) {
+      if (!obj || !fields) return;
+      const led = ledger(tag);
+      let saved = led.get(obj);
+      if (!saved) { saved = {}; led.set(obj, saved); }
+      for (const f in fields) {
+        if (!(f in saved)) saved[f] = obj[f];  // snapshot the base exactly once
+        obj[f] = fromBase ? saved[f] * fields[f] : fields[f];
+      }
+    }
+    const exitHooks = [];
+    let lastState = CBZ.game ? CBZ.game.state : "title";
+    CBZ.onAlways(91, function () {
+      const s = CBZ.game.state;
+      if (s === lastState) return;
+      if (s !== "playing") {
+        for (const h of exitHooks) {
+          if (h.states && h.states.indexOf(s) === -1) continue;
+          try { h.fn(s); } catch (e) {}
+        }
+      }
+      lastState = s;
+    });
+    return {
+      apply(tag, obj, fields) { put(tag, obj, fields, false); },
+      scale(tag, obj, fields) { put(tag, obj, fields, true); },
+      held(tag, obj) { const led = ledgers[tag]; return !!(led && led.has(obj)); },
+      count(tag) { const led = ledgers[tag]; return led ? led.size : 0; },
+      restore(tag, obj) {
+        const led = ledgers[tag]; if (!led) return;
+        const saved = led.get(obj); if (!saved) return;
+        for (const f in saved) obj[f] = saved[f];
+        led.delete(obj);
+      },
+      restoreAll(tag) {
+        const led = ledgers[tag]; if (!led) return;
+        led.forEach(function (saved, obj) { for (const f in saved) obj[f] = saved[f]; });
+        led.clear();
+      },
+      newRunWatcher(eps) {
+        const e0 = eps == null ? 0.5 : eps;
+        let last = (CBZ.game && CBZ.game.elapsed) || 0;
+        return function poll() {
+          const e = (CBZ.game && CBZ.game.elapsed) || 0;
+          const fell = e + e0 < last;
+          last = e;
+          return fell;
+        };
+      },
+      onStateExit(fn, states) { exitHooks.push({ fn: fn, states: states || null }); },
+    };
+  })();
+
+  // This file's CONFIG defaults are published at parse: other files read
+  // them before (or without) the prison ever being built.
+  if (CBZ.CONFIG.JAIL_GUARD_BARKS == null) CBZ.CONFIG.JAIL_GUARD_BARKS = true;
+  if (CBZ.CONFIG.GUARD_TORCH_DISCIPLINE == null) CBZ.CONFIG.GUARD_TORCH_DISCIPLINE = true;
+  // Built when the prison is first needed, as if at this script's parse
+  // point (core/prisonlazy.js). Body left at its old indent.
+  CBZ.definePrison("entities/guards.js", function () {
   const { makeCharacter, animChar, visionWedge, player } = CBZ;
 
   // jail feature flag (self-defaulting — one-line revert via CBZ.CONFIG):
   // guards call out their state changes ("STOP RIGHT THERE!") near the player.
-  if (CBZ.CONFIG && CBZ.CONFIG.JAIL_GUARD_BARKS == null) CBZ.CONFIG.JAIL_GUARD_BARKS = true;
 
   let guardNo = 0;
   const CO_NAMES = ["Diaz", "Kowalski", "Brennan", "Okafor", "Reyes", "Haskell", "Morrow", "Pruitt", "Nguyen", "Castellano",
@@ -804,7 +884,6 @@
        animator, so the torch swings at his side while he closes instead of
        being held out at your face. Sticky radii, so a distance jittering
        across the boundary cannot twitch the arm. */
-  if (CBZ.CONFIG && CBZ.CONFIG.GUARD_TORCH_DISCIPLINE == null) CBZ.CONFIG.GUARD_TORCH_DISCIPLINE = true;
   const TORCH_CQ_IN = 3.4;    // m — closing to grab you: the arm comes down
   const TORCH_CQ_OUT = 5.6;   // m — and does not go back up until here
   const TORCH_DARK = 0.62;    // light level under which a beam is worth carrying
@@ -1989,77 +2068,6 @@
     return null;
   }
 
-  // ---- CBZ.jailBoost — ONE shared ledger for "temporarily boost an actor's
-  // fields, restore the exact bases later", plus the run-lifecycle watchers
-  // every jail system used to hand-roll (lockdown / difficulty /
-  // reinforcements each kept private lastElapsed + lastState copies of the
-  // same bookkeeping; difficulty.js even carried a "mirrors reinforcements"
-  // comment). Pure refactor home — semantics preserved by each caller.
-  //   apply(tag, obj, {field: value}) — set absolute values (base saved once)
-  //   scale(tag, obj, {field: mult})  — set base*mult, recomputed from the
-  //                                     SNAPSHOT every call (never compounds)
-  //   held(tag, obj) / count(tag)     — ledger queries
-  //   restore(tag, obj) / restoreAll(tag) — put the saved bases back
-  //   newRunWatcher(eps)              — returns poll(): true once when
-  //                                     game.elapsed falls back (a new run)
-  //   onStateExit(fn, states)         — fn(state) whenever play is left
-  //                                     (one shared onAlways(91) dispatcher;
-  //                                     hooks run in registration order)
-  CBZ.jailBoost = (function () {
-    const ledgers = Object.create(null);       // tag -> Map(obj -> {field: base})
-    function ledger(tag) { return ledgers[tag] || (ledgers[tag] = new Map()); }
-    function put(tag, obj, fields, fromBase) {
-      if (!obj || !fields) return;
-      const led = ledger(tag);
-      let saved = led.get(obj);
-      if (!saved) { saved = {}; led.set(obj, saved); }
-      for (const f in fields) {
-        if (!(f in saved)) saved[f] = obj[f];  // snapshot the base exactly once
-        obj[f] = fromBase ? saved[f] * fields[f] : fields[f];
-      }
-    }
-    const exitHooks = [];
-    let lastState = CBZ.game ? CBZ.game.state : "title";
-    CBZ.onAlways(91, function () {
-      const s = CBZ.game.state;
-      if (s === lastState) return;
-      if (s !== "playing") {
-        for (const h of exitHooks) {
-          if (h.states && h.states.indexOf(s) === -1) continue;
-          try { h.fn(s); } catch (e) {}
-        }
-      }
-      lastState = s;
-    });
-    return {
-      apply(tag, obj, fields) { put(tag, obj, fields, false); },
-      scale(tag, obj, fields) { put(tag, obj, fields, true); },
-      held(tag, obj) { const led = ledgers[tag]; return !!(led && led.has(obj)); },
-      count(tag) { const led = ledgers[tag]; return led ? led.size : 0; },
-      restore(tag, obj) {
-        const led = ledgers[tag]; if (!led) return;
-        const saved = led.get(obj); if (!saved) return;
-        for (const f in saved) obj[f] = saved[f];
-        led.delete(obj);
-      },
-      restoreAll(tag) {
-        const led = ledgers[tag]; if (!led) return;
-        led.forEach(function (saved, obj) { for (const f in saved) obj[f] = saved[f]; });
-        led.clear();
-      },
-      newRunWatcher(eps) {
-        const e0 = eps == null ? 0.5 : eps;
-        let last = (CBZ.game && CBZ.game.elapsed) || 0;
-        return function poll() {
-          const e = (CBZ.game && CBZ.game.elapsed) || 0;
-          const fell = e + e0 < last;
-          last = e;
-          return fell;
-        };
-      },
-      onStateExit(fn, states) { exitHooks.push({ fn: fn, states: states || null }); },
-    };
-  })();
 
   /* THE THREE COUNTERS THAT NAME THE BUG. `torchAsWeapon` is the whole of the
      owner's complaint reduced to a number: a torch lit and held out in front
@@ -2142,4 +2150,5 @@
     }
   });
   CBZ.onUpdate(20.5, function (dt) { if (CBZ.game.mode !== "escape") return; updateRacketPressure(dt); });
+  });
 })();

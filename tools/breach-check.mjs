@@ -19,7 +19,6 @@
 
    Usage: node tools/breach-check.mjs            (city)
           node tools/breach-check.mjs --escape   (the prison)
-          node tools/breach-check.mjs --off      (BREACH_TABLE_V1=0 control)
    Exit 0 = ok.                                                             */
 import { spawn } from "node:child_process";
 import { rm } from "node:fs/promises";
@@ -28,7 +27,8 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const ESCAPE = process.argv.includes("--escape");
-const OFF = process.argv.includes("--off");
+// (the --off revert mode is gone with BREACH_TABLE_V1: the charge law has no off switch)
+const OFF = false;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function claimPort(lo, n, probe) { for (let p = lo; p < lo + n; p++) { try { await probe(p); } catch (_) { return p; } } throw new Error("no port"); }
 const port = await claimPort(9450, 150, (p) => fetch(`http://127.0.0.1:${p}/`));
@@ -43,7 +43,7 @@ const CHROME_BIN = process.env.CBZ_CHROME || (process.platform === "darwin"
 const chrome = spawn(CHROME_BIN, ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage",
   "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--enable-webgl",
   "--mute-audio", "--window-size=480,300", `--remote-debugging-port=${dbg}`,
-  `--user-data-dir=${profile}`, `${origin}?seed=90210${OFF ? "&cfg_BREACH_TABLE_V1=0" : ""}`], { stdio: "ignore" });
+  `--user-data-dir=${profile}`, `${origin}?seed=90210`], { stdio: "ignore" });
 let page = null;
 for (let i = 0; i < 240 && !page; i++) { try { const ps = await (await fetch(`http://127.0.0.1:${dbg}/json/list`)).json(); page = ps.find((p) => p.type === "page" && p.url.startsWith(origin)); } catch (_) {} if (!page) await sleep(100); }
 if (!page) { console.error("FAIL no page"); process.exit(1); }
