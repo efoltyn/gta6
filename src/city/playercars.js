@@ -1756,6 +1756,10 @@
     g.userData.carDoor = {
       id: d.id, side: side, row: d.row, z0: d.z0, z1: d.z1, len: len,
       hx: hx, hz: hz, y0: D.y0, belt: D.belt, y1: D.y1,
+      // the pull bar's axis centre in THIS group's frame (it swings with the
+      // leaf), its run (the car's length) and the skin's outward lean there:
+      // where a hand closes on it (city/boarding.js, CBZ.verbs.touch "handle")
+      handle: { x: H.x + side * 0.014 - hx, y: H.y, z: H.z - hz, tilt: tilt },
     };
     root.add(g);
     return g;

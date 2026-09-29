@@ -346,6 +346,13 @@
         pad: { x: ox + pad.x, z: oz + pad.z },
         btnAt: { x: ox + pb.x, y: RBASE + 1.42, z: oz + pb.z },
         panelAt: { x: ox + ip.x, y: RBASE + 1.45, z: oz + ip.z },
+        // where a finger meets them (CBZ.verbs.touch "press"): the call
+        // button's lobby face (it stands 0.05 proud, facing out of the cab),
+        // and the floor panel's face toward the middle of the car (0.04 thick)
+        btnN: { x: -f.nx, y: 0, z: -f.nz },
+        btnFace: { x: ox + pb.x - f.nx * 0.025, y: RBASE + 1.42, z: oz + pb.z - f.nz * 0.025 },
+        panelN: { x: -Math.sign(SIDE - 0.1) * f.tx, y: 0, z: -Math.sign(SIDE - 0.1) * f.tz },
+        panelFace: { x: ox + ip.x - Math.sign(SIDE - 0.1) * f.tx * 0.02, y: RBASE + 1.45, z: oz + ip.z - Math.sign(SIDE - 0.1) * f.tz * 0.02 },
       };
     }
     // the served levels, bottom to top: the lobby, the Spire's penthouse loft
@@ -513,7 +520,7 @@
     };
     const stops = cabs.map(function (c) {
       return { name: c.name, base: c.base, floor: c.floor, rig: c.rig, btn: c.btn, lamp: c.lamp, pad: c.pad,
-        btnAt: c.btnAt, panelAt: c.panelAt, loc: gLoc, pt: gPt, door: GDOOR, half: 0.9, fwd: { x: -f.nx, z: -f.nz },
+        btnAt: c.btnAt, panelAt: c.panelAt, btnN: c.btnN, btnFace: c.btnFace, panelN: c.panelN, panelFace: c.panelFace, loc: gLoc, pt: gPt, door: GDOOR, half: 0.9, fwd: { x: -f.nx, z: -f.nz },
         roof: c.roof, no: floorOf(c.base) };
     });
     const xl = b.execOffice && b.execOffice.liftLanding;
@@ -1073,15 +1080,32 @@
   // both land in these named functions (a pill must name a CBZ function).
   let callArm = null;
   const goArm = [];
+  /* A BUTTON IS PRESSED BY A FINGER (systems/verbs_pickup.js CBZ.verbs.touch
+     "press"): the index pad goes onto the button's own face, pressing along
+     its normal. A landing that published no normal (an older record) is
+     pressed facing the player. */
+  function liftPress(face, at, n, P, key) {
+    const V = CBZ.verbs;
+    const pt = face || at;
+    if (!V || !V.touch || !pt || !P || !P.pos) return;
+    let nx = n ? n.x : P.pos.x - pt.x, nz = n ? n.z : P.pos.z - pt.z;
+    const l = Math.hypot(nx, nz) || 1;
+    nx /= l; nz /= l;
+    try { V.touch(P, { point: pt, normal: { x: nx, y: 0, z: nz }, kind: "press", key: key, again: true }); } catch (e) {}
+  }
   CBZ.cityLiftCall = function () {
     const a = callArm, P = CBZ.player;
     if (!a || !P || P.dead || P.driving) return false;
+    const st = a.el.stops[a.i];
+    if (st) liftPress(st.btnFace, st.btnAt, st.btnN || st.fwd, P, "lift-call");
     return LiftCore.call(a.el.m, a.i, ioFor(a.el, P));
   };
   for (let r = 0; r < ROW_KEYS.length; r++) {
     CBZ["cityLiftGo" + r] = function () {
       const a = goArm[r], P = CBZ.player;
       if (!a || !P || P.dead || P.driving) return false;
+      const here = a.el.stops[a.el.m.at];
+      if (here) liftPress(here.panelFace, here.panelAt, here.panelN, P, "lift-go");
       return LiftCore.go(a.el.m, a.j, ioFor(a.el, P));
     };
   }

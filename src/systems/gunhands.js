@@ -42,11 +42,11 @@
    player stood still holding a gun that silently refilled itself.
 
    A reload is the off hand's job, and the off hand is now solvable — so it is
-   choreographed as a path THROUGH the same anchors: handguard → magwell →
-   belt → magwell → charging handle → handguard, with the real magazine
-   falling out of the gun on the way and a fresh one carried up in the fist.
-   Five styles, picked from the weapon's own `grips.style`, because a belt-fed
-   M249, a pump shotgun, a revolver and an RPG are not reloaded alike.
+   choreographed as a path THROUGH the gun's own parts (CBZ.gunReload, the
+   block below: the magazine, the slide, the bolt, the cylinder, the feed
+   cover all move, and the hands go to them). Six styles, picked from the
+   weapon's own `grips.style`, because a belt-fed M249, a pump shotgun, a
+   revolver, a bolt rifle and an RPG are not reloaded alike.
 
    Everything is driven off fps.reloading, which fpsmode.js already owns — no
    second timer, so the animation cannot desync from the ammo count.
@@ -59,6 +59,682 @@
      (NPC hands: systems/actorweapons.js CBZ.gunHold.ready — solved once per
       body and gun, both hands, no budget.)
 ============================================================ */
+/* ==== CBZ.gunReload — THE RELOAD, ONE TABLE, BOTH VIEWS =====================
+   Owner: "reload hand paths for every gun (FP and 3P): support hand goes to
+   the real magazine / pump / bolt / shell, mag comes out and goes in,
+   bolt-action works the bolt."
+
+   Before this, a reload walked the off hand through three authored POINTS
+   per gun (grips.mag / grips.charge / a typed pouch offset) while nothing on
+   the gun moved: the magazine never left the well (a separate grey box fell
+   out of the air under it, another rode the fist), the M4's charging handle,
+   the Glock's slide, the M24's bolt, the revolver's cylinder and the M249's
+   feed cover were all welded shut, and the sniper — a BOLT gun — was
+   reloaded like an M4 by the support hand.
+
+   Now the gun's own parts are the reload:
+     · the appearance NAMES its moving parts (a name tag, no geometry:
+       "part_mag", "part_slide", "part_charge", "part_bolt"/"part_boltKnob",
+       "part_cylinder", "part_cover", "part_box"; reference parts "part_action",
+       "part_receiver", "part_guard", "part_shell"). CBZ.holds' contract works
+       too: an anchors[name] / "anchor_<name>" Object3D WITH meshes under it is
+       a moving part; one without is a point.
+     · rig(model) gathers each part once, measures it off its own vertices
+       (centroid, box, the way out of the gun) and hangs it on a runtime pivot
+       at its real joint: a magazine at its centroid, a slide/handle along the
+       bore, the bolt on the bore axis, a revolver cylinder on its crane below
+       and left of it, the M249 cover on its front hinge.
+     · every anchor a hand goes to is a point ON a part, mapped through that
+       part's live pivot, so a hand dwelling on the bolt knob travels with it.
+     · RECIPES below is the one table: per reload style, the path of each
+       hand as [pStart, pEnd, fromAnchor, toAnchor, arc] rows plus the part
+       events (eject / grab / seat / charge / open / close). p is fpsmode's own
+       reload clock (fps.reloading), so the animation cannot desync from the
+       ammo count. The bolt gun also has a CYCLE: the firing hand works the
+       bolt between shots off CBZ.fpsBoltCycle.
+     · pose(model, p, o) puts every part where p says: the empty drops (first
+       person: it falls out of the well; third person the caller hands a copy
+       to the debris sim), the fresh one rides the carrying hand from the
+       pouch and seats, the handle comes back and slams home.
+   Third person (below, systems/gunhands.js) solves the body's arms to these
+   anchors in world space with the pouch on the belt; first person
+   (systems/fpsmode.js fpReloadHands) moves the viewmodel hands to the same
+   anchors in model space with the pouch below the lens. Same rows, same
+   parts, same events. Measured by tools/reload-hands-check.mjs. */
+(function () {
+  "use strict";
+  const CBZ = window.CBZ;
+  if (!CBZ || !window.THREE) return;
+  const THREE = window.THREE;
+  const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+  const smooth = (u) => u * u * (3 - 2 * u);
+
+  /* ---- THE TABLE --------------------------------------------------------
+     l = the support (off) hand, r = the firing hand. Anchor names:
+       support / grip  the hand's own hold (its home: on the gun, or for a
+                       one-handed gun in third person wherever the free arm is)
+       pouch           the belt / chest pouch (the view decides where)
+       well, below     the magazine seated, and a hand's length out of the well
+       charge          the charging handle / the slide's rear serrations (live)
+       bolt            the bolt knob (live)
+       port, portBelow, portAbove   the loading / ejection port
+       cyl, cylFace, cylBack        the cylinder (live): its side, its chamber face, behind it
+       latch, tray     the M249 feed-cover latch (live) and the feed tray under it
+       box, boxBelow   the ammo box seated, and under it
+       round, roundOut the rocket's bulb seated in the muzzle, and ahead of it
+     p events: eject (the empty leaves), grab (fresh one in the hand), seat
+     (it is in), charge [from, to] (the handle / slide comes back and home),
+     open / cover [open0, open1, close0, close1], bolt [lift0, lift1, back0,
+     back1, fwd0, fwd1, down0, down1]. Third person only: at = where the
+     firing hand brings the gun for the work (body space, at torso scale 1;
+     the player's right is -X), work = which way the muzzle points meanwhile
+     (body space; systems/holsterprops.js turns the gun onto it). First
+     person: fp = [dx, dy, dz, yaw, roll] the viewmodel comes by for the work
+     (in toward the chest, turned and canted toward the off hand; fpsmode
+     eases it in with the reload envelope, RL.fpWork). A shotgun
+     re-arms fps.reloading per shell, so its whole row set runs again for
+     each shell. */
+  const RECIPES = {
+    // box magazine: rifles, SMGs, pistols (the empty drops free, a fresh one
+    // comes up from the pouch, the handle or slide is run)
+    mag: {
+      l: [
+        [0.00, 0.14, "support", "well", 0.05],
+        [0.14, 0.24, "well", "well", 0],            // thumb the release: the empty drops
+        [0.24, 0.44, "well", "pouch", 0.14],
+        [0.44, 0.54, "pouch", "pouch", 0],          // a fresh one out of the pouch
+        [0.54, 0.74, "pouch", "below", 0.12],
+        [0.74, 0.82, "below", "well", 0],           // up into the well and seated
+        [0.82, 0.87, "well", "charge", 0.05],
+        [0.87, 0.93, "charge", "charge", 0],        // the handle / slide back, and home
+        [0.93, 1.00, "charge", "support", 0.04],
+      ],
+      eject: 0.18, grab: 0.50, seat: 0.82, charge: [0.87, 0.93], carry: "l", fresh: "mag",
+      at: [0.00, 1.53, 0.62], atCharge: [0.05, 1.46, 0.74], work: [0.50, -0.30, 0.81], fp: [-0.14, 0, 0.10, 0.30, 0.30],
+    },
+    // pump gun: one shell at a time up into the loading port under the
+    // receiver; the pump racks when the last one is in (fpsmode pumpT)
+    shell: {
+      l: [
+        [0.00, 0.26, "support", "pouch", 0.10],
+        [0.26, 0.40, "pouch", "pouch", 0],          // pinch a shell
+        [0.40, 0.68, "pouch", "portBelow", 0.09],
+        [0.68, 0.84, "portBelow", "port", 0],       // thumbed into the tube
+        [0.84, 1.00, "port", "support", 0.05],
+      ],
+      grab: 0.34, seat: 0.82, carry: "l", fresh: "shell",
+      at: [-0.08, 1.54, 0.58], work: [0.42, -0.22, 0.88], fp: [-0.06, 0, 0.04, 0.15, 0.35],
+    },
+    // revolver / revolving drum: swing it out, dump the empties, speedloader
+    // into the chambers, swing it shut
+    cylinder: {
+      l: [
+        [0.00, 0.12, "support", "cyl", 0.04],
+        [0.12, 0.28, "cyl", "cyl", 0],              // swing out, rod: the empties fall
+        [0.28, 0.46, "cyl", "pouch", 0.13],
+        [0.46, 0.56, "pouch", "pouch", 0],          // speedloader / a round
+        [0.56, 0.76, "pouch", "cylBack", 0.11],
+        [0.76, 0.84, "cylBack", "cylFace", 0],      // into the chambers
+        [0.84, 0.92, "cylFace", "cyl", 0],          // and shut
+        [0.92, 1.00, "cyl", "support", 0.04],
+      ],
+      eject: 0.24, grab: 0.50, seat: 0.82, open: [0.12, 0.20, 0.84, 0.90], carry: "l", fresh: "loader",
+      at: [-0.18, 1.50, 0.62], work: [0.45, -0.12, 0.88], fp: [-0.10, 0.02, 0.08, 0.25, 0.45],
+    },
+    // belt-fed: cover up, empty box off, full box on, belt laid in, cover down
+    belt: {
+      l: [
+        [0.00, 0.10, "support", "latch", 0.04],
+        [0.10, 0.20, "latch", "latch", 0],          // feed cover up
+        [0.20, 0.30, "latch", "box", 0.05],
+        [0.30, 0.40, "box", "box", 0],              // the empty box off
+        [0.40, 0.54, "box", "pouch", 0.15],
+        [0.54, 0.62, "pouch", "pouch", 0],
+        [0.62, 0.76, "pouch", "boxBelow", 0.13],
+        [0.76, 0.82, "boxBelow", "box", 0],         // the full one on
+        [0.82, 0.88, "box", "tray", 0.05],          // belt laid in the tray
+        [0.88, 0.90, "tray", "latch", 0.02],
+        [0.90, 0.95, "latch", "latch", 0],          // cover down under the palm
+        [0.95, 1.00, "latch", "support", 0.04],
+      ],
+      eject: 0.36, grab: 0.58, seat: 0.82, cover: [0.10, 0.20, 0.90, 0.95], carry: "l", fresh: "box",
+      at: [-0.06, 1.40, 0.70], work: [0.40, -0.18, 0.90], fp: [-0.06, 0, 0.04, 0.12, 0.15],
+    },
+    // a rocket goes in the FRONT of the tube
+    rocket: {
+      l: [
+        [0.00, 0.26, "support", "pouch", 0.12],
+        [0.26, 0.40, "pouch", "pouch", 0],
+        [0.40, 0.74, "pouch", "roundOut", 0.16],
+        [0.74, 0.86, "roundOut", "round", 0],       // shoved home
+        [0.86, 1.00, "round", "support", 0.06],
+      ],
+      grab: 0.36, seat: 0.84, carry: "l", fresh: "spare",
+      at: [-0.22, 1.40, 0.40], work: [0.82, -0.30, 0.49], fp: [-0.30, -0.04, 0.30, 1.25, 0.10],
+    },
+    // BOLT ACTION (the M24): the support hand keeps the rifle; the FIRING
+    // hand leaves the grip, lifts the bolt and draws it back, thumbs the
+    // rounds down through the open action, runs the bolt home and down
+    bolt: {
+      l: [[0.00, 1.00, "support", "support", 0]],
+      r: [
+        [0.00, 0.08, "grip", "bolt", 0.03],   // (l: the off hand keeps the rifle while the gun is brought in)
+        [0.08, 0.20, "bolt", "bolt", 0],            // up, back
+        [0.20, 0.40, "bolt", "pouch", 0.12],
+        [0.40, 0.50, "pouch", "pouch", 0],          // rounds out of the pouch
+        [0.50, 0.70, "pouch", "portAbove", 0.10],
+        [0.70, 0.80, "portAbove", "port", 0],       // pressed into the magazine
+        [0.80, 0.86, "port", "bolt", 0.02],
+        [0.86, 0.94, "bolt", "bolt", 0],            // forward, down
+        [0.94, 1.00, "bolt", "grip", 0.03],
+      ],
+      grab: 0.45, seat: 0.78, bolt: [0.08, 0.13, 0.13, 0.20, 0.86, 0.91, 0.91, 0.94], carry: "r", fresh: "clip",
+      at: [-0.08, 1.46, 0.76], work: [0.25, -0.25, 0.93], fp: [0, 0, 0.04, 0, -0.20],
+    },
+  };
+  // between shots (CBZ.fpsBoltCycle, 0..1): up, back, forward, down
+  const CYCLES = {
+    bolt: {
+      r: [
+        [0.00, 0.18, "grip", "bolt", 0.03],
+        [0.18, 0.74, "bolt", "bolt", 0],
+        [0.74, 1.00, "bolt", "grip", 0.03],
+      ],
+      bolt: [0.18, 0.30, 0.30, 0.48, 0.48, 0.64, 0.64, 0.74],
+    },
+  };
+  // a mag-fed gun whose magazine is not tagged still reloads (the old
+  // points), and an unknown style is a magazine
+  function styleOf(model) {
+    const g = model && model.userData && model.userData.grips;
+    const s = g && g.style;
+    return RECIPES[s] ? s : "mag";
+  }
+
+  /* ---- finding and measuring the parts ---------------------------------- */
+  const _M = new THREE.Matrix4(), _v = new THREE.Vector3();
+  function toModel(o, model, out) {
+    out.identity();
+    for (let p = o; p && p !== model; p = p.parent) { p.updateMatrix(); out.premultiply(p.matrix); }
+    return out;
+  }
+  function hasMesh(o) {
+    let any = false;
+    o.traverse(function (m) { if (m.isMesh) any = true; });
+    return any;
+  }
+  // every object carrying this part's name (outermost only), or the
+  // hold engine's named anchor when it is a real piece of the gun
+  function partObjects(model, name) {
+    const out = [];
+    const tags = { ["part_" + name]: 1, ["part:" + name]: 1 };
+    model.traverse(function (o) {
+      if (!tags[o.name]) return;
+      for (let p = o.parent; p && p !== model; p = p.parent) if (tags[p.name]) return;
+      out.push(o);
+    });
+    if (!out.length) {
+      const an = model.userData.anchors && model.userData.anchors[name];
+      if (an && an.isObject3D && hasMesh(an)) out.push(an);
+      else {
+        const byName = model.getObjectByName("anchor_" + name);
+        if (byName && hasMesh(byName)) out.push(byName);
+      }
+    }
+    return out;
+  }
+  function gather(list, model, pts) {
+    pts = pts || [];
+    for (const o of list) {
+      o.traverse(function (m) {
+        if (!m.isMesh || !m.geometry || !m.geometry.attributes.position) return;
+        const pos = m.geometry.attributes.position;
+        toModel(m, model, _M);
+        const step = Math.max(1, Math.floor(pos.count / 600));
+        for (let i = 0; i < pos.count; i += step) pts.push(new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(_M));
+      });
+    }
+    return pts;
+  }
+  function stats(pts) {
+    if (!pts.length) return null;
+    const box = new THREE.Box3(), c = new THREE.Vector3();
+    for (const p of pts) { box.expandByPoint(p); c.add(p); }
+    c.multiplyScalar(1 / pts.length);
+    return { box: box, c: c, size: box.getSize(new THREE.Vector3()), n: pts.length };
+  }
+  // hang the part's meshes on a pivot at `at` (model space), world poses kept
+  function pivotFor(model, list, at, name) {
+    const pv = new THREE.Group();
+    pv.name = "reload:" + name;
+    pv.position.copy(at);
+    model.add(pv);
+    pv.updateMatrix();
+    const inv = new THREE.Matrix4().copy(pv.matrix).invert(), M = new THREE.Matrix4();
+    for (const o of list) {
+      toModel(o, model, M).premultiply(inv);
+      if (o.parent) o.parent.remove(o);
+      M.decompose(o.position, o.quaternion, o.scale);
+      pv.add(o);
+    }
+    pv.userData.homeP = pv.position.clone();
+    pv.userData.homeQ = pv.quaternion.clone();
+    pv.userData.homeInv = inv;
+    return pv;
+  }
+  // a point measured on a part at home, where that part is NOW (model space)
+  function live(pv, home, out) {
+    out.copy(home);
+    if (!pv) return out;
+    pv.updateMatrix();
+    return out.applyMatrix4(pv.userData.homeInv).applyMatrix4(pv.matrix);
+  }
+  function brassMat() {
+    if (!brassMat.m) { brassMat.m = new THREE.MeshLambertMaterial({ color: 0xc9a14a }); brassMat.m._shared = true; }
+    return brassMat.m;
+  }
+  function roundMesh(r, len, mat) {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 10), mat);
+    m.rotation.x = -Math.PI / 2;                 // along the bore
+    m.castShadow = true;
+    return m;
+  }
+  // the reload's own props, built only where the gun has nothing to lend:
+  // a speedloader / a 40 mm round sized off the measured cylinder, a stripper
+  // clip of 7.62 for the bolt gun, a magazine body for a pistol whose drawn
+  // magazine is only its baseplate (sized to the drawn grip it sits in)
+  function makeLoader(r) {
+    const g = new THREE.Group();
+    if (r > 0.09) {
+      // a drum this fat is a 40 mm launcher: one grenade at a time
+      g.add(roundMesh(0.026, 0.11, brassMat()));
+      const nose = new THREE.Mesh(new THREE.SphereGeometry(0.026, 10, 6), new THREE.MeshLambertMaterial({ color: 0x9d2523 }));
+      nose.position.z = -0.055; g.add(nose);
+    } else {
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2, m = roundMesh(r * 0.17, r * 1.1, brassMat());
+        m.position.set(Math.cos(a) * r * 0.56, Math.sin(a) * r * 0.56, 0);
+        g.add(m);
+      }
+      const knob = roundMesh(r * 0.30, r * 0.9, new THREE.MeshLambertMaterial({ color: 0x1c1f23 }));
+      knob.position.z = r * 0.6;
+      g.add(knob);
+    }
+    return g;
+  }
+  function makeClip() {
+    const g = new THREE.Group();
+    for (let i = 0; i < 5; i++) {
+      const m = roundMesh(0.012, 0.14, brassMat());
+      m.position.set(0, -i * 0.022, 0);
+      g.add(m);
+    }
+    const strip = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.12, 0.020), new THREE.MeshLambertMaterial({ color: 0x55585c }));
+    strip.position.set(0, -0.044, 0.07);
+    g.add(strip);
+    return g;
+  }
+
+  /* rig(model): measured once per model, cached on it. */
+  function rig(model) {
+    const ud = model.userData;
+    if (ud._reloadRig) return ud._reloadRig;
+    const g = ud.grips || {};
+    const A = (CBZ.holds && CBZ.holds.anchors) ? CBZ.holds.anchors(model) : {};
+    const R = { style: styleOf(model), pts: {}, pv: {}, fresh: null, freshGrab: null, made: false, dropDir: new THREE.Vector3(0, -1, 0) };
+    ud._reloadRig = R;
+    model.updateMatrix();
+    const pt = function (key, v, pv) { if (v) R.pts[key] = { p: v.clone(), pv: pv || null }; };
+    const authored = function (k) { return A[k] || g[k] || null; };
+    // the appearance's own anchor RECORDS (weapons/appearances/sidearm.js
+    // contract: { pos, quat, well, ... } in model space): the remodelled guns
+    // name where the magazine body, its well, the bolt knob and the charging
+    // handle ARE, so those win over anything measured here
+    const AR = ud.anchors || {};
+    const rec = function (k) { return AR[k] && AR[k].pos && AR[k].pos.isVector3 ? AR[k] : null; };
+    pt("support", g.support || A.support || null);
+    const INSERT = 0.12;                        // a hand's length out of the well, model units (~6 cm)
+    // the gun without the part: which way is OUT of it
+    const outOf = function (part, st) {
+      const rest = [];
+      model.traverse(function (m) {
+        if (!m.isMesh || !m.geometry || /^fp_hand/.test(m.name)) return;
+        for (let p = m; p && p !== model; p = p.parent) if (part.indexOf(p) >= 0 || /^reload:/.test(p.name)) return;
+        rest.push(m);
+      });
+      const sr = stats(gather(rest, model));
+      const d = sr ? st.c.clone().sub(sr.c) : new THREE.Vector3(0, -1, 0);
+      if (d.lengthSq() < 1e-6) d.set(0, -1, 0);
+      return d.normalize();
+    };
+    // a magazine-like part: dropped, carried, seated
+    const magLike = function (name, below) {
+      let list = partObjects(model, name);
+      if (!list.length) return null;
+      let st = stats(gather(list, model));
+      if (!st) return null;
+      let base = null;                   // a pistol's baseplate: where the palm goes
+      // a pistol draws only its baseplate: give the magazine its body, up
+      // the drawn grip to the frame (hidden inside the grip while seated)
+      if (name === "mag" && st.size.y < 0.09) {
+        let owner = null;
+        model.traverse(function (o) { if (!owner && o.userData && o.userData.fireGrip) owner = o; });
+        const h = owner && owner.userData.fireGrip;
+        if (h) {
+          base = st.c.clone();
+          toModel(owner, model, _M);
+          const top = new THREE.Vector3(0, h.at[0], h.at[1]).applyMatrix4(_M);
+          const len = top.distanceTo(st.c);
+          const m0 = list[0].isMesh ? list[0] : null;
+          const body = new THREE.Mesh(new THREE.BoxGeometry(h.gripW * 0.72, len, h.gripD * 0.66), (m0 && m0.material) || brassMat());
+          body.position.copy(top).add(st.c).multiplyScalar(0.5);
+          body.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), top.clone().sub(st.c).normalize());
+          body.name = "part_mag";
+          body.castShadow = true;
+          (list[0].parent || model).add(body);
+          list = list.concat([body]);
+          st = stats(gather(list, model));
+        }
+      }
+      // the way OUT of the gun: the anchor's own insertion axis (+Y up into
+      // the well, reversed), else measured from the rest of the gun
+      const mr = rec("mag");
+      const dir = mr && mr.quat ? new THREE.Vector3(0, -1, 0).applyQuaternion(mr.quat).normalize() : outOf(list, st);
+      const pv = pivotFor(model, list, st.c, name);
+      // where the hand holds it: a pistol's magazine is inside the grip, so
+      // the palm is on its BASEPLATE (it slaps it home); an ammo box is taken
+      // by its left side; a rifle magazine by its body (the anchor's centre)
+      const grab = base ? base.clone()
+        : name === "box" ? new THREE.Vector3(st.box.min.x, mr ? mr.pos.y : st.c.y, mr ? mr.pos.z : st.c.z)
+        : mr ? mr.pos.clone() : new THREE.Vector3(st.box.min.x, st.c.y, st.c.z);
+      pt(name === "mag" ? "well" : name, grab);
+      pt(below, grab.clone().addScaledVector(dir, INSERT));
+      R.pv[name] = pv;
+      R.dropDir.copy(dir);
+      R.fresh = pv; R.freshGrab = grab.clone(); R.made = false;
+      return st;
+    };
+    const style = R.style;
+    if (style === "mag") {
+      if (!magLike("mag", "below")) {
+        const w = authored("mag") || g.support;
+        pt("well", w); pt("below", w && w.clone().add(new THREE.Vector3(0, -INSERT, 0)));
+      }
+      let list = partObjects(model, "slide"), kind = "slide";
+      if (!list.length) { list = partObjects(model, "charge"); kind = "charge"; }
+      const st = list.length ? stats(gather(list, model)) : null;
+      if (st) {
+        const pv = pivotFor(model, list, st.c, kind);
+        const len = st.size.z;
+        R.pv.charge = pv;
+        R.chargeTravel = kind === "slide" ? 0.16 * len : 0.10;
+        // a slide is grabbed over its rear serrations, a handle by itself
+        const cr = rec("charge");
+        pt("charge", cr ? cr.pos : kind === "slide" ? new THREE.Vector3(st.box.min.x, (st.c.y + st.box.max.y) / 2, st.box.max.z - 0.22 * len) : st.c, pv);
+      } else pt("charge", authored("charge") || (R.pts.well && R.pts.well.p));
+    } else if (style === "belt") {
+      const cov = partObjects(model, "cover");
+      const opt = model.getObjectByName("_baseOptic");
+      const cst = cov.length ? stats(gather(cov, model)) : null;
+      if (cst) {
+        // the M145 rides the feed cover's rail: it lifts with it
+        if (opt && opt.parent === model) {
+          const o = stats(gather([opt], model));
+          if (o && o.c.z < cst.box.max.z && o.c.z > cst.box.min.z) cov.push(opt);
+        }
+        const pv = pivotFor(model, cov, new THREE.Vector3(cst.c.x, cst.box.max.y, cst.box.min.z), "cover");   // hinged at the front
+        R.pv.cover = pv;
+        pt("latch", new THREE.Vector3(cst.c.x, cst.box.max.y, cst.box.max.z), pv);
+        // the feed tray: the belt's own well (the anchor), else under the cover's left edge
+        pt("tray", rec("mag") && rec("mag").well ? rec("mag").well : new THREE.Vector3(cst.box.min.x, cst.box.min.y, cst.c.z));
+      } else { pt("latch", authored("charge")); pt("tray", authored("charge")); }
+      if (!magLike("box", "boxBelow")) {
+        const w = authored("mag");
+        pt("box", w); pt("boxBelow", w && w.clone().add(new THREE.Vector3(0, -INSERT, 0)));
+      }
+    } else if (style === "cylinder") {
+      const list = partObjects(model, "cylinder");
+      const st = list.length ? stats(gather(list, model)) : null;
+      let r = 0.06;
+      if (st) {
+        r = st.size.y / 2;
+        // the crane: below and left of the cylinder, parallel to the bore
+        const pv = pivotFor(model, list, new THREE.Vector3(st.c.x - r, st.c.y - 0.9 * r, st.c.z), "cylinder");
+        R.pv.cylinder = pv;
+        pt("cyl", new THREE.Vector3(st.box.min.x, st.c.y, st.c.z), pv);
+        pt("cylFace", new THREE.Vector3(st.c.x, st.c.y, st.box.max.z), pv);
+        pt("cylBack", new THREE.Vector3(st.c.x, st.c.y, st.box.max.z + INSERT), pv);
+      } else {
+        const m = authored("mag");
+        pt("cyl", m); pt("cylFace", m); pt("cylBack", m && m.clone().add(new THREE.Vector3(0, 0, INSERT)));
+      }
+      const ld = makeLoader(r);
+      ld.name = "reload:loader";
+      ld.visible = false;
+      model.add(ld);
+      R.fresh = ld; R.made = true; R.loaderR = r;
+    } else if (style === "shell") {
+      const rec = stats(gather(partObjects(model, "receiver"), model));
+      const grd = stats(gather(partObjects(model, "guard"), model));
+      // the loading port: under the receiver, between the trigger plate and its front
+      const port = A.shellPort || A.port ||
+        (rec && grd ? new THREE.Vector3(0, rec.box.min.y, (grd.box.min.z + rec.box.min.z) / 2) : authored("mag"));
+      pt("port", port);
+      pt("portBelow", port && port.clone().add(new THREE.Vector3(-0.04, -INSERT, 0.03)));
+      const tpl = partObjects(model, "shell")[0];
+      let sh = null;
+      if (tpl && tpl.isMesh) {
+        sh = new THREE.Mesh(tpl.geometry, tpl.material);
+        sh.rotation.x = -Math.PI / 2;            // lying along the tube, brass back
+      } else sh = roundMesh(0.016, 0.086, brassMat());
+      const holder = new THREE.Group();
+      holder.name = "reload:shell";
+      holder.add(sh);
+      holder.visible = false;
+      model.add(holder);
+      R.fresh = holder; R.made = true;
+    } else if (style === "rocket") {
+      const wh = ud.warhead;
+      let spare = ud.reloadWarhead || null;
+      if (wh && !spare) {
+        spare = wh.clone();
+        spare.visible = false;
+        model.add(spare);
+      }
+      if (wh) {
+        // the bulb: the fattest band of the round's own lathe
+        const pts = gather([wh], model);
+        const ax = wh.position;
+        let maxR = 0;
+        for (const p of pts) maxR = Math.max(maxR, Math.hypot(p.x - ax.x, p.y - ax.y));
+        const c = new THREE.Vector3(); let n = 0;
+        for (const p of pts) if (Math.hypot(p.x - ax.x, p.y - ax.y) >= 0.92 * maxR) { c.add(p); n++; }
+        c.multiplyScalar(1 / Math.max(1, n));
+        const under = new THREE.Vector3(ax.x, ax.y - maxR, c.z);   // the palm under the bulb
+        pt("round", under);
+        pt("roundOut", under.clone().add(new THREE.Vector3(0, 0, -0.22)));
+        R.freshGrab = under.clone();
+      } else {
+        const m = authored("mag");
+        pt("round", m); pt("roundOut", m && m.clone().add(new THREE.Vector3(0, 0, -0.30)));
+      }
+      R.fresh = spare; R.made = false; R.spareHome = wh ? wh.position.clone() : null;
+    } else if (style === "bolt") {
+      const bolt = partObjects(model, "bolt"), knob = partObjects(model, "boltKnob");
+      const act = stats(gather(partObjects(model, "action"), model));
+      const all = bolt.concat(knob);
+      const ks = knob.length ? stats(gather(knob, model)) : null;
+      const bs = all.length ? stats(gather(all, model)) : null;
+      if (bs) {
+        const axisY = ud.muzzle ? ud.muzzle.y : (act ? act.c.y : bs.c.y);
+        const knobC = ks ? ks.c : bs.c;
+        const at = new THREE.Vector3(0, axisY, knobC.z);
+        const travel = act ? 0.45 * act.size.z : 0.17;
+        // the bolt body the handle drags out of the action (hidden inside it at home)
+        const r = act ? act.size.y * 0.5 * 0.62 : 0.018;
+        const body = roundMesh(r, travel + 0.04, new THREE.MeshPhongMaterial({ color: 0x8d969f, shininess: 40 }));
+        body.position.set(0, axisY, knobC.z - (travel + 0.04) / 2 + 0.02);
+        body.name = "part_bolt";
+        model.add(body);
+        all.push(body);
+        const pv = pivotFor(model, all, at, "bolt");
+        R.pv.bolt = pv;
+        R.boltTravel = travel;
+        pt("bolt", rec("bolt") ? rec("bolt").pos : knobC, pv);
+        // the port on top of the action, in front of the handle where the bolt body lies
+        const port = A.port || new THREE.Vector3(act ? act.c.x + act.size.x * 0.15 : 0.01, act ? act.box.max.y : axisY + 0.03, knobC.z - travel * 0.55);
+        pt("port", port);
+        pt("portAbove", port.clone().add(new THREE.Vector3(0.03, INSERT, 0.02)));
+      } else {
+        pt("bolt", authored("charge")); pt("port", authored("mag")); pt("portAbove", authored("mag"));
+      }
+      const clip = makeClip();
+      clip.name = "reload:clip";
+      clip.visible = false;
+      model.add(clip);
+      R.fresh = clip; R.made = true;
+    }
+    return R;
+  }
+
+  /* point(model, key, out) -> model space, or null for the view's own keys
+     (support / grip / pouch) and anything this gun does not have */
+  function point(model, key, out) {
+    const R = rig(model);
+    const d = R.pts[key];
+    if (!d || !d.p) return null;
+    live(d.pv, d.p, out);
+    if (key === "support" && model.userData.pump) out.z += model.userData.pump.position.z - (model.userData.pumpBaseZ || 0);
+    return out;
+  }
+  /* seg(rows, u): the row p is in, eased, with the arc bow */
+  const _seg = { row: null, a: null, b: null, u: 0, arc: 0, dwell: false, i: -1 };
+  function seg(rows, p) {
+    let i = 0;
+    while (i < rows.length - 1 && p > rows[i][1]) i++;
+    const r = rows[i];
+    const u = smooth(clamp01((p - r[0]) / Math.max(1e-4, r[1] - r[0])));
+    _seg.row = r; _seg.i = i; _seg.a = r[2]; _seg.b = r[3]; _seg.u = u;
+    _seg.arc = r[4] * Math.sin(Math.PI * u); _seg.dwell = r[2] === r[3];
+    return _seg;
+  }
+  // 0..1 over [a, b], held, back over [c, d]
+  function openAt(p, k) {
+    if (p < k[0]) return 0;
+    if (p < k[1]) return smooth((p - k[0]) / (k[1] - k[0]));
+    if (p < k[2]) return 1;
+    if (p < k[3]) return 1 - smooth((p - k[2]) / (k[3] - k[2]));
+    return 0;
+  }
+  const _q = new THREE.Quaternion(), _ax = new THREE.Vector3();
+  function home(pv) {
+    if (!pv) return;
+    pv.position.copy(pv.userData.homeP);
+    pv.quaternion.copy(pv.userData.homeQ);
+    pv.visible = true;
+  }
+  function turn(pv, axis, ang) {
+    pv.position.copy(pv.userData.homeP);
+    pv.quaternion.copy(pv.userData.homeQ).multiply(_q.setFromAxisAngle(_ax.copy(axis), ang));
+  }
+  const X = new THREE.Vector3(1, 0, 0), Z = new THREE.Vector3(0, 0, 1);
+  function boltTo(R, keys, p) {
+    const pv = R.pv.bolt;
+    if (!pv) return;
+    const lift = openAt(p, [keys[0], keys[1], keys[6], keys[7]]);
+    const back = openAt(p, [keys[2], keys[3], keys[4], keys[5]]);
+    turn(pv, Z, 1.05 * lift);                         // the handle swings up off its notch
+    pv.position.z += R.boltTravel * back;              // and the bolt comes back out of the action
+  }
+  const FALL_P = 0.12;
+  /* pose(model, p, o): every part where reload progress p (0..1, <0 = not
+     reloading) puts it. o.hand = where the carrying hand is (model space),
+     o.drop = "fall" (first person: the empty falls out of the well and is
+     gone) or "hide" (third person: the caller drops a real copy),
+     o.cycle = the bolt cycle 0..1 between shots (-1 none). */
+  function pose(model, p, o) {
+    const R = rig(model), rec = RECIPES[R.style];
+    o = o || {};
+    // everything home first
+    for (const k in R.pv) home(R.pv[k]);
+    if (R.made && R.fresh) R.fresh.visible = false;
+    if (R.style === "rocket" && R.fresh) R.fresh.visible = false;
+    const cyc = o.cycle != null ? o.cycle : -1;
+    if (!(p >= 0)) {
+      if (cyc >= 0 && R.style === "bolt" && CYCLES.bolt) boltTo(R, CYCLES.bolt.bolt, cyc);
+      return R;
+    }
+    // moving parts
+    if (rec.charge && R.pv.charge) {
+      const k = rec.charge, u = clamp01((p - k[0]) / (k[1] - k[0]));
+      const back = p < k[0] || p > k[1] ? 0 : u < 0.55 ? smooth(u / 0.55) : u < 0.8 ? 1 : 1 - smooth((u - 0.8) / 0.2);
+      R.pv.charge.position.z += R.chargeTravel * back;
+    }
+    if (rec.open && R.pv.cylinder) turn(R.pv.cylinder, Z, 1.6 * openAt(p, rec.open));
+    if (rec.cover && R.pv.cover) turn(R.pv.cover, X, -0.95 * openAt(p, rec.cover));
+    if (rec.bolt) boltTo(R, rec.bolt, p);
+    // the fresh one (and, for a magazine / box, the empty before it)
+    const f = R.fresh;
+    if (!f) return R;
+    if (!R.made && R.style !== "rocket") {
+      // the gun's own magazine / box
+      if (rec.eject != null && p >= rec.eject && p < rec.grab) {
+        const t = (p - rec.eject) / FALL_P;
+        if (o.drop === "fall" && t < 1) {
+          f.position.copy(f.userData.homeP).addScaledVector(R.dropDir, 0.02 + 1.4 * t * t);
+        } else f.visible = false;
+      } else if (p >= rec.grab && p < rec.seat) {
+        if (o.hand) f.position.copy(f.userData.homeP).add(o.hand).sub(R.freshGrab);
+        else f.position.copy(f.userData.homeP).addScaledVector(R.dropDir, 0.12);
+      }
+      return R;
+    }
+    if (p >= rec.grab && p < rec.seat) {
+      f.visible = true;
+      if (R.style === "rocket") {
+        if (R.spareHome && R.freshGrab && o.hand) f.position.copy(R.spareHome).add(o.hand).sub(R.freshGrab);
+        else if (R.spareHome) f.position.copy(R.spareHome);
+      } else if (o.hand) f.position.copy(o.hand);
+      else f.visible = false;
+    }
+    return R;
+  }
+  /* the empties, placed where they leave the gun, for the caller to hand to
+     a physics body (third person) — null when nothing falls out */
+  function ejectObject(model) {
+    const R = rig(model), rec = RECIPES[R.style];
+    if (rec.eject == null) return null;
+    if (R.style === "cylinder") {
+      const f = R.fresh;
+      if (!f) return null;
+      point(model, "cylFace", f.position);
+      f.visible = true;
+      return f;
+    }
+    return R.fresh && !R.made ? R.fresh : null;
+  }
+
+  CBZ.gunReload = {
+    RECIPES: RECIPES, CYCLES: CYCLES,
+    styleOf: styleOf,
+    recipe: function (model) { return model ? RECIPES[styleOf(model)] : null; },
+    cycle: function (model) { return model ? CYCLES[styleOf(model)] || null : null; },
+    rig: rig, point: point, seg: seg, pose: pose, ejectObject: ejectObject,
+    // the viewmodel's reload offset at progress p: [dx, dy, dz, yaw, roll]
+    // scaled by the same 12% ease the third-person envelope uses
+    fpWork: function (model, p, out) {
+      const r = RECIPES[styleOf(model)], f = r && r.fp;
+      const w = p >= 0 ? smooth(clamp01(Math.min(p / 0.12, (1 - p) / 0.12))) : 0;
+      for (let i = 0; i < 5; i++) out[i] = f ? f[i] * w : 0;
+      return out;
+    },
+    // the pump's stroke at rack phase t (0..1): back and home (shotgun.js contract)
+    rackAt: function (t) { return Math.sin(clamp01(t) * Math.PI) * 0.22; },
+    // parts actually found on this model, by name (for the checks)
+    parts: function (model) { return rig(model).pv; },
+  };
+})();
+
 (function () {
   "use strict";
   const CBZ = window.CBZ;
@@ -107,89 +783,22 @@
     return out;
   }
 
-  /* ---- THE CHOREOGRAPHY -------------------------------------------------
-     Each row is [pStart, pEnd, fromAnchor, toAnchor, arc]. Anchors are
-     resolved live: "support"/"mag"/"charge" are points ON THE GUN (so they
-     travel with it while the player keeps moving and aiming), "pouch" is a
-     point on the BODY. `arc` bows the path outward so a hand going to the
-     belt swings clear of the ribs instead of through them. from === to is a
-     dwell — the beat where the thing actually happens.
-
-     p runs 0..1 across ONE reload step. The shotgun re-arms its timer per
-     shell, so its whole table runs again for each shell it feeds. */
-  const CHOREO = {
-    // box mag: rifles, SMGs, pistols, the bolt gun
-    mag: [
-      [0.00, 0.15, "support", "mag", 0.05],
-      [0.15, 0.24, "mag", "mag", 0],                 // thumb the catch — mag falls
-      [0.24, 0.45, "mag", "pouch", 0.14],
-      [0.45, 0.56, "pouch", "pouch", 0],             // pull a fresh one
-      [0.56, 0.79, "pouch", "mag", 0.12],
-      [0.79, 0.87, "mag", "mag", 0],                 // seat it, slap the base
-      [0.87, 0.94, "mag", "charge", 0.06],
-      [0.94, 1.00, "charge", "support", 0.04],
-    ],
-    // one shell at a time through the loading port; the pump racks at the end
-    shell: [
-      [0.00, 0.30, "support", "pouch", 0.10],
-      [0.30, 0.44, "pouch", "pouch", 0],
-      [0.44, 0.74, "pouch", "mag", 0.09],
-      [0.74, 0.86, "mag", "mag", 0],
-      [0.86, 1.00, "mag", "support", 0.05],
-    ],
-    // swing the cylinder/drum out, dump the brass, speedloader in
-    cylinder: [
-      [0.00, 0.16, "support", "mag", 0.05],
-      [0.16, 0.30, "mag", "mag", 0],                 // out and eject
-      [0.30, 0.48, "mag", "pouch", 0.13],
-      [0.48, 0.60, "pouch", "pouch", 0],
-      [0.60, 0.82, "pouch", "mag", 0.11],
-      [0.82, 0.92, "mag", "mag", 0],                 // snap it closed
-      [0.92, 1.00, "mag", "support", 0.04],
-    ],
-    // belt-fed: cover up, box off, box on, belt laid in, cover down
-    belt: [
-      [0.00, 0.12, "support", "charge", 0.04],
-      [0.12, 0.22, "charge", "charge", 0],           // feed cover open
-      [0.22, 0.34, "charge", "mag", 0.05],
-      [0.34, 0.44, "mag", "mag", 0],                 // empty box off
-      [0.44, 0.60, "mag", "pouch", 0.15],
-      [0.60, 0.70, "pouch", "pouch", 0],
-      [0.70, 0.84, "pouch", "mag", 0.13],
-      [0.84, 0.92, "mag", "charge", 0.05],           // lay the belt in
-      [0.92, 1.00, "charge", "support", 0.04],
-    ],
-    // a rocket goes in the FRONT of the tube — the longest reach in the game
-    rocket: [
-      [0.00, 0.28, "support", "pouch", 0.12],
-      [0.28, 0.42, "pouch", "pouch", 0],
-      [0.42, 0.76, "pouch", "mag", 0.16],
-      [0.76, 0.88, "mag", "mag", 0],
-      [0.88, 1.00, "mag", "support", 0.06],
-    ],
-  };
-  // the same choreography, read by fpsmode.js so the FIRST-PERSON off hand
-  // walks the identical path through the viewmodel's anchors (one table, two views)
-  CBZ.gunReloadChoreo = function (style) { return CHOREO[style] || CHOREO.mag; };
-  // when the old magazine physically leaves the gun, per style (null = never)
-  const EJECT_AT = { mag: 0.20, cylinder: 0.26, belt: 0.40, shell: null, rocket: null };
-  // when a fresh one is in the fist: [grabbed, seated]
-  const CARRY = {
-    mag: [0.52, 0.84], cylinder: [0.56, 0.88], belt: [0.66, 0.88],
-    shell: [0.38, 0.80], rocket: [0.36, 0.84],
-  };
-
-  /* ---- reload state, read straight off fpsmode's own timer -------------- */
+  /* ---- THE RELOAD, THIRD PERSON -------------------------------------------
+     The table, the parts and their anchors are CBZ.gunReload (the block at
+     the top of this file, shared with first person). This side owns the
+     body: the pouch on the belt, the arms solved to the anchors in world
+     space, the empty handed to the debris sim. */
+  const RL = CBZ.gunReload;
   const R = {
     active: false, style: "mag", total: 1, last: 0, p: 0, w: 0,
-    cant: 0, dip: 0, carry: 0, ejected: false, id: null, step: 0,
+    cant: 0, dip: 0, ejected: false, id: null, step: 0, work: null,
   };
   /* Published for systems/holsterprops.js, which owns the drawn gun's world
      orientation: a gun being reloaded is not a gun being aimed. */
   CBZ.gunReloadPose = function () {
     return R.active
-      ? { active: true, p: R.p, weight: R.w, cant: R.cant, dip: R.dip, style: R.style }
-      : { active: false, p: 0, weight: 0, cant: 0, dip: 0, style: null };
+      ? { active: true, p: R.p, weight: R.w, cant: R.cant, dip: R.dip, style: R.style, work: R.work }
+      : { active: false, p: 0, weight: 0, cant: 0, dip: 0, style: null, work: null };
   };
 
   function reloadRow() {
@@ -203,13 +812,16 @@
     const left = fps && fps.reloading > 0 ? fps.reloading : 0;
     if (!left || CBZ.CONFIG.CHAR_RELOAD_ANIM === false ||
         !CBZ.player || CBZ.player.dead) {
-      R.active = false; R.w = 0; R.p = 0; R.cant = 0; R.dip = 0; R.carry = 0;
+      R.active = false; R.w = 0; R.p = 0; R.cant = 0; R.dip = 0;
       R.last = 0;
       return;
     }
-    // the STYLE is the drawn weapon's own, read before the envelope needs it
+    // the STYLE is the drawn weapon's own (a pistol with no third-person gun
+    // drawn, first person, still has its row's appearance to read)
     const drawn = CBZ.tpHandWeapon && CBZ.tpHandWeapon();
-    if (drawn) R.style = gripsOf(drawn).style || "mag";
+    const fpM = CBZ.fpsWeaponModels && fps ? CBZ.fpsWeaponModels[fps.weapon] : null;
+    R.style = RL.styleOf(drawn || fpM);
+    R.work = (RL.RECIPES[R.style] && RL.RECIPES[R.style].work) || null;
     const row = reloadRow();
     // A NEW STEP is a timer that went UP: either the reload just started, or
     // the shotgun re-armed for the next shell. Either way the path restarts.
@@ -224,120 +836,251 @@
     R.p = clamp01(1 - left / R.total);
     // ease the whole layer in and out so a reload never snaps on
     R.w = smooth(clamp01(Math.min(R.p / 0.12, (1 - R.p) / 0.12)));
-    // The gun cants toward the body to present its own magwell — that roll is
-    // most of what makes a reload READ from the chase camera, more than the
-    // hand does. Cylinder guns cant hardest (you look into the chambers), a
-    // belt gun barely at all (it is fed from the top and it is 7.5 kg).
+    // The gun cants toward the body to present the part being worked — that
+    // roll is most of what makes a reload READ from the chase camera. A
+    // cylinder cants hardest (you look into the chambers), the bolt gun to
+    // show its open action, a belt gun barely (fed from the top, 7.5 kg).
     const rollK = R.style === "cylinder" ? 1.35 : R.style === "belt" ? 0.45
-      : R.style === "rocket" ? 0.30 : 1;
+      : R.style === "rocket" ? 0.30 : R.style === "bolt" ? 0.6 : 1;
     R.cant = 0.62 * rollK * R.w;
     R.dip = 0.30 * R.w;
-    const car = CARRY[R.style] || CARRY.mag;
-    R.carry = R.p > car[0] && R.p < car[1] ? 1 : 0;
   }
 
-  /* ---- anchors ---------------------------------------------------------- */
+  /* ---- the body's anchors ------------------------------------------------ */
   function torsoScale(ch) {
     const pf = ch.profile;
     return pf && pf.torsoH ? (pf.legUp + pf.legLo + pf.torsoH) / 1.90 : 1;
   }
-  // Magazines ride the LEFT front hip; a rocket comes off the left shoulder.
-  // (makeCharacter mirrors the arm roots, so the player's LEFT is body +X.)
+  // Magazines ride the LEFT front hip, shells the left side of the belt, a
+  // rocket comes off the left shoulder, rifle rounds from the RIGHT chest
+  // (the firing hand fetches them). makeCharacter mirrors the arm roots, so
+  // the player's LEFT is body +X.
   function pouchLocal(ch, style, out) {
     const s = torsoScale(ch);
     if (style === "rocket") return out.set(0.30 * s, 1.28 * s, -0.14 * s);
     if (style === "shell") return out.set(0.30 * s, 1.10 * s, 0.06 * s);
+    if (style === "bolt") return out.set(-0.24 * s, 1.24 * s, 0.14 * s);
     return out.set(0.31 * s, 1.01 * s, 0.11 * s);
   }
+  // "support" is the grip the off hand holds; every other gun anchor is a
+  // point on the gun's own parts (CBZ.gunReload), carried into world space
   function anchorWorld(key, ch, prop, grips, out) {
     if (key === "pouch") {
-      pouchLocal(ch, grips.style, out);
+      pouchLocal(ch, RL.styleOf(prop), out);
       return ch.body.localToWorld(out);
     }
-    const v = grips[key] || grips.support;
-    if (!v) return null;
-    out.copy(v);
+    if (key === "support") {
+      if (!grips.support) return null;
+      out.copy(grips.support);
+      if (prop.userData._pumpDz) out.z += prop.userData._pumpDz;
+      return prop.localToWorld(out);
+    }
+    if (!RL.point(prop, key, out)) return null;
     return prop.localToWorld(out);
   }
 
-  /* ---- the falling magazine --------------------------------------------
+  /* ---- the empty, handed to the debris sim --------------------------------
      A reload you can only see in the arms is half an animation; the piece
-     that sells it is the empty mag hitting the pavement behind you. It is
-     the SAME magazine model the fist carries, handed to CBZ.debris.adopt:
-     the one rigid-body sim gives it real gravity, a bounce off its own
-     corner, a tumble onto its side, and then it lies there as settled
-     debris (capped and recycled by debris.js). No private pool or
-     integrator here any more. */
-  let magMat = null;
-  function magMesh(style) {
-    if (!magMat) {
-      magMat = new THREE.MeshLambertMaterial({ color: 0x22262b });
-      magMat.name = "magazine";
-      magMat._shared = true;
-    }
-    const d = style === "belt" ? [0.15, 0.20, 0.26] : style === "cylinder" ? [0.07, 0.05, 0.07]
-      : [0.07, 0.21, 0.10];
-    const m = new THREE.Mesh(new THREE.BoxGeometry(d[0], d[1], d[2]), magMat);
-    m.castShadow = true;
-    return m;
+     that sells it is the empty mag hitting the pavement behind you. It is a
+     copy of the gun's OWN magazine / ammo box / the revolver's empties, baked
+     into one mesh where it left the gun and handed to CBZ.debris.adopt: the
+     one rigid-body sim gives it gravity, a bounce, a tumble onto its side,
+     and then it lies there as settled debris (capped and recycled there). */
+  const _dv = new THREE.Vector3(), _dw = new THREE.Vector3(), _dp = new THREE.Vector3();
+  function bakedCopy(obj) {
+    obj.updateWorldMatrix(true, true);
+    const arrays = [];
+    let mat = null, n = 0;
+    obj.traverse(function (m) {
+      if (!m.isMesh || !m.geometry || !m.geometry.attributes.position) return;
+      for (let a = m; a && a !== obj.parent; a = a.parent) if (a.visible === false && a !== obj) return;
+      const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry;
+      const pos = g.attributes.position, out = new Float32Array(pos.count * 3);
+      for (let i = 0; i < pos.count; i++) {
+        _dp.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld);
+        out[i * 3] = _dp.x; out[i * 3 + 1] = _dp.y; out[i * 3 + 2] = _dp.z;
+      }
+      if (g !== m.geometry) g.dispose();
+      arrays.push(out); n += out.length;
+      if (!mat) mat = Array.isArray(m.material) ? m.material[0] : m.material;
+    });
+    if (!n) return null;
+    const all = new Float32Array(n);
+    let o = 0;
+    for (const a of arrays) { all.set(a, o); o += a.length; }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(all, 3));
+    geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = true;
+    return mesh;
   }
-  const _magV = new THREE.Vector3(), _magW = new THREE.Vector3();
-  function dropMag(pos, style) {
+  function dropEmpty(prop) {
+    const obj = RL.ejectObject(prop);
     const root = CBZ.scene;
-    if (!root || !CBZ.debris) return;
-    const m = magMesh(style);
-    m.position.copy(pos);
-    m.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+    if (!obj || !root || !CBZ.debris || !CBZ.debris.adopt) return;
+    const m = bakedCopy(obj);
+    if (!m) return;
     root.add(m);
     m.updateMatrixWorld(true);
     const p = CBZ.player;
-    _magV.set((p && p.vx ? p.vx * 0.5 : 0) + (Math.random() - 0.5) * 0.5, -0.4,
+    _dv.set((p && p.vx ? p.vx * 0.5 : 0) + (Math.random() - 0.5) * 0.5, -0.4,
       (p && p.vz ? p.vz * 0.5 : 0) + (Math.random() - 0.5) * 0.5);
-    _magW.set((Math.random() - 0.5) * 7, (Math.random() - 0.5) * 7, (Math.random() - 0.5) * 7);
+    _dw.set((Math.random() - 0.5) * 7, (Math.random() - 0.5) * 7, (Math.random() - 0.5) * 7);
     // kind plastic: a polymer/steel mag body that must not be "bent" like torn sheet metal
-    CBZ.debris.adopt(m, { velocity: _magV, angular: _magW, owner: "mags", kind: "plastic" });
+    CBZ.debris.adopt(m, { velocity: _dv, angular: _dw, owner: "mags", kind: "plastic" });
     // the body carries its own copy of the geometry; the template goes
     root.remove(m);
     m.geometry.dispose();
     if (CBZ.sfx) setTimeout(function () { try { CBZ.sfx("shell"); } catch (e) {} }, 380);
   }
 
-  /* ---- the fresh magazine, carried in the fist -------------------------- */
-  /* A ROCKET is not a magazine: the fresh round in the fist is a copy of the
-     launcher's own PG-7V (weapons/appearances/bazooka.js userData.warhead),
-     held round the bulb, nose along the fingers, at the launcher's own size.
-     The launcher shows its seated round again from the same 84% at which
-     this one leaves the hand (fpsmode.js syncWarheads). */
-  let carried = null, carriedStyle = null, carriedSrc = null;
-  const _wsA = new THREE.Vector3(), _wsB = new THREE.Vector3();
-  function showCarried(ch, style, on, prop) {
-    if (!on) { if (carried) carried.visible = false; return; }
-    const socket = ch.sockets && ch.sockets.leftHand;
-    if (!socket) return;
-    const round = style === "rocket" && prop && prop.userData.warhead ? prop.userData.warhead : null;
-    if (!carried || carriedStyle !== style || (round && carriedSrc !== round)) {
-      if (carried && carried.parent) carried.parent.remove(carried);
-      if (carried && carried.isMesh) carried.geometry.dispose();   // a round's geometry is shared
-      carried = round ? round.clone() : magMesh(style);
-      carriedStyle = style;
-      carriedSrc = round;
+  /* ---- the reload walks the OFF hand through the gun's anchors ------------
+     Runs before the hold solve and owns the off hand while the envelope is
+     up — for a two-hand gun AND a one-hand one (a handgun in third person
+     keeps its off arm free, CBZ.holds; its reload still needs that hand: it
+     comes from wherever the free arm is, and goes back there). */
+  const _hm = new THREE.Vector3(), _ra = new THREE.Vector3(), _rb = new THREE.Vector3();
+  function armWeight() { return smooth(clamp01(Math.min(R.p, 1 - R.p) / 0.05)); }
+  function oneHanded(prop, spec) {
+    if (!gripsOf(prop).support || !(spec && spec.sup)) return true;
+    return !!(CBZ.holds && CBZ.holds.hands && CBZ.holds.hands(prop, { view: "tp" }) < 2);
+  }
+  function pathWorld(ch, prop, grips, rows, p, homeW, out, side) {
+    const s = RL.seg(rows, p);
+    const a = s.a === "support" || s.a === "grip" ? _ra.copy(homeW) : (anchorWorld(s.a, ch, prop, grips, _ra) || _ra.copy(homeW));
+    const b = s.b === "support" || s.b === "grip" ? _rb.copy(homeW) : (anchorWorld(s.b, ch, prop, grips, _rb) || _rb.copy(homeW));
+    out.lerpVectors(a, b, s.u);
+    // bow the path away from the ribs (body +X is the player's LEFT; the
+    // firing hand bows out to its own side, -X)
+    if (s.arc > 0) {
+      ch.body.getWorldQuaternion(_bodyQ);
+      out.add(_tmp.set(side * s.arc, -s.arc * 0.35, 0).applyQuaternion(_bodyQ));
     }
-    if (carried.parent !== socket) socket.add(carried);
-    if (round) {
-      // the launcher's world scale over the hand's: the same size as the tube's round
-      prop.getWorldScale(_wsA); socket.getWorldScale(_wsB);
-      const k = _wsA.x / (_wsB.x || 1);
-      carried.scale.setScalar(k);
-      carried.rotation.set(-Math.PI / 2, 0, 0);          // nose (-Z) along the fingers (socket -Y)
-      const bulb = (CBZ.rpgRound && CBZ.rpgRound.bulbZ) || -0.32;
-      carried.position.set(0, -0.10 - bulb * k, 0.02);   // the bulb in the palm
-    } else {
-      const s = (ch.group && ch.group.userData && ch.group.userData.humanScale) || 1;
-      carried.scale.setScalar(1 / (s || 1));
-      carried.position.set(0, -0.10, 0.02);
-      carried.rotation.set(0.4, 0, 0.15);
+    const fl = floorUnder(out);
+    if (fl != null && out.y < fl) out.y = fl;
+    return s;
+  }
+  function reloadOffHand(ch, prop, dt, spec) {
+    if (!R.active || !(R.w > 0)) return false;
+    const rec = RL.recipe(prop);
+    if (!rec || !rec.l) return false;
+    const grips = gripsOf(prop);
+    seen.drive++; seen.why = "reload";
+    drove = true;
+    blend += (1 - blend) * Math.min(1, 9 * (dt || 0.016));
+    ch.body.updateWorldMatrix(true, false);
+    // (the path starts and ends on the hand's home, so it needs no envelope of
+    // its own; the arms are eased in over the first and last few percent only)
+    const aw = armWeight();
+    /* THE GUN COMES IN TO THE CHEST. This rig's shoulders are 1.24 apart
+       against 0.91 arms (rig units): with the gun out on the firing arm, as
+       the aim or the one-hand carry holds it, the magazine well is a metre
+       from the off shoulder and no reload anchor is in reach. So the firing
+       hand brings the gun in for the work (rec.at, chest height a little to
+       the firing side, body space) and holsterprops turns it across the body
+       and cants it (rec.work, gunReloadPose), which is what a real reload
+       does: the well comes to the hand, not the hand out to the well. */
+    if (rec.at && ch.parts.ra && aw > 0) {
+      const sc = torsoScale(ch);
+      // (the charging handle sits back by the face: the gun goes out and
+      // left for it, eased across the charge window)
+      const k = rec.atCharge && rec.charge ? smooth(clamp01(Math.min((R.p - rec.charge[0] + 0.05) / 0.05, (rec.charge[1] + 0.04 - R.p) / 0.04))) : 0;
+      const A0 = rec.at, A1 = rec.atCharge || rec.at;
+      _t.set((A0[0] + (A1[0] - A0[0]) * k) * sc, (A0[1] + (A1[1] - A0[1]) * k) * sc, (A0[2] + (A1[2] - A0[2]) * k) * sc);
+      ch.body.localToWorld(_t);
+      CBZ.charArmTo.rest(ch, "r", 0);
+      CBZ.charArmTo(ch, _t, "r", aw);
+      if (CBZ.tpHandWeaponRelock) CBZ.tpHandWeaponRelock();
     }
-    carried.visible = true;
+    prop.updateWorldMatrix(true, false);
+    const one = oneHanded(prop, spec);
+    // home: on the gun's own support grip, or where the free arm hangs now
+    if (one || !anchorWorld("support", ch, prop, grips, _hm)) {
+      ch.sockets.leftHand.updateWorldMatrix(true, false);
+      ch.sockets.leftHand.getWorldPosition(_hm);
+    }
+    // the parts where p has them (a hand dwelling on the cover latch rides it down)
+    RL.pose(prop, R.p, { drop: "hide" });
+    const s = pathWorld(ch, prop, grips, rec.l, R.p, _hm, _t, 1);
+    // The body squares up for the work even if the player never raised the
+    // sights: animChar reads these, and fpsmode rewrites them each frame
+    // from its own state the moment the reload is done.
+    ch.aimingPose = true;
+    ch.carryPose = false;
+    // The reload owns the hand, and its waypoints are deliberately OFF the
+    // weapon (the belt pouch most of all) — never walked back onto the gun.
+    CBZ.charArmTo.rest(ch, "l", 0);
+    seen.resid0 = seen.residual = CBZ.charArmTo(ch, _t, "l", one ? aw : Math.min(aw, blend));
+    seen.slid = 0; seen.placed = 0;
+    if (!one) GH.supportOrient(ch, prop, R.w);        // off its grip frame and back, no snap
+    else if (ch.setHandPose) ch.setHandPose("l", s.dwell || (R.p >= rec.grab && R.p < rec.seat) ? "grip" : "relaxed");
+    return true;
+  }
+  /* ---- the FIRING hand works the bolt, and the parts follow the hands ------
+     After the hold solve (54.6). The firing hand leaves the grip for the bolt
+     knob (between shots and through a bolt gun's reload) while the gun stays
+     exactly where the fist had it — the support hand has it — and the fresh
+     magazine / shell / speedloader / round is put in the hand carrying it. */
+  const _gw = new THREE.Matrix4(), _gl = new THREE.Matrix4(), _gs = new THREE.Vector3();
+  let partsProp = null;
+  function reloadParts(dt) {
+    const ch = CBZ.playerChar;
+    const prop = CBZ.tpHandWeapon && CBZ.tpHandWeapon();
+    if (partsProp && partsProp !== prop && partsProp.userData._reloadRig) RL.pose(partsProp, -1);   // interrupted: parts home
+    partsProp = prop;
+    if (!prop || !ch || !ch.sockets || !ch.body || !ch.parts || prop.userData.weaponMelee || !prop.userData.grips) return;
+    const rec = RL.recipe(prop);
+    const fps = CBZ.fps;
+    const reloading = !!(R.active && R.w > 0 && rec);
+    // the rocket on the tube is the ammo: gone when fired, back when seated
+    const wh = prop.userData.warhead;
+    if (wh && fps && fps.rounds && CBZ.FPS_WEAPONS) {
+      const row = CBZ.FPS_WEAPONS[fps.weapon];
+      if (row && row.id === prop.userData.weaponId) wh.visible = (fps.rounds[fps.weapon] || 0) > 0 || (reloading && R.p >= rec.seat);
+    }
+    const cyc = !reloading && CBZ.fpsBoltCycle != null && CBZ.fpsBoltCycle >= 0 ? CBZ.fpsBoltCycle : -1;
+    const cycle = cyc >= 0 ? RL.cycle(prop) : null;
+    if (!reloading && !cycle) {
+      if (prop.userData._reloadRig) RL.pose(prop, -1);
+      return;
+    }
+    const p = reloading ? R.p : -1;
+    // the empty leaves as a real body, from where it sits in the gun this frame
+    if (reloading && !R.ejected && rec.eject != null && R.p >= rec.eject) {
+      R.ejected = true;
+      dropEmpty(prop);
+    }
+    // parts first: the bolt knob a hand is going to is where the bolt IS
+    RL.pose(prop, p, { cycle: cyc, drop: "hide" });
+    const rows = reloading ? rec.r : cycle.r;
+    const handsBusy = ch.slidePose || ch.cuffed || ch.surrender || ch.handsUp || ch.verbHold ||
+      (CBZ.player && CBZ.player.dead) || !CBZ.charArmTo;
+    if (rows && !handsBusy && ch.parts.ra) {
+      prop.updateWorldMatrix(true, false);
+      _gw.copy(prop.matrixWorld);
+      ch.sockets.rightHand.updateWorldMatrix(true, false);
+      ch.sockets.rightHand.getWorldPosition(_hm);          // the fist on the grip: this hand's home
+      const s = pathWorld(ch, prop, gripsOf(prop), rows, reloading ? R.p : cyc, _hm, _t, -1);
+      CBZ.charArmTo.rest(ch, "r", 0);
+      CBZ.charArmTo(ch, _t, "r", reloading ? armWeight() : 1);
+      if (ch.setHandPose) ch.setHandPose("r", s.dwell ? "grip" : "relaxed");
+      // the gun does not follow the hand off its grip: it stays where it was
+      if (prop.parent) {
+        prop.parent.updateWorldMatrix(true, false);
+        _gl.copy(prop.parent.matrixWorld).invert().multiply(_gw);
+        _gl.decompose(prop.position, prop.quaternion, _gs);
+        prop.updateWorldMatrix(false, false);
+      }
+      seen.bolt = s.i;
+    }
+    if (!reloading) return;
+    // the fresh one rides the hand that fetched it
+    const sock = rec.carry === "r" ? ch.sockets.rightHand : ch.sockets.leftHand;
+    sock.updateWorldMatrix(true, false);
+    prop.updateWorldMatrix(true, false);
+    const hand = prop.worldToLocal(sock.getWorldPosition(_hm));
+    RL.pose(prop, p, { hand: hand, drop: "hide", cycle: cyc });
   }
 
   /* ---- the pass: put the off hand where the gun is ----------------------
@@ -354,7 +1097,6 @@
   const _rt = new THREE.Vector3(), _ext = new THREE.Vector3(), _sp = new THREE.Vector3();
   function release(ch) {
     blend = 0;
-    if (carried) carried.visible = false;
     // hand the off hand back ONCE: a per-frame "relaxed" here fought every
     // other owner of that hand (the flashlight's torch grip, a verb) each frame
     if (drove && ch && ch.setHandPose) ch.setHandPose("l", "relaxed");
@@ -378,17 +1120,42 @@
     // off arm free — that is a fact about the weapon, not a missing anchor.
     const grips = own ? gripsOf(prop) : null;
     const spec = own ? GH.specOf(prop) : null;
-    if (!grips || !grips.support || !spec || !spec.sup) {
+    // A RELOAD OWNS THE OFF HAND, one-hand gun or two (CBZ.gunReload)
+    if (own && reloadOffHand(ch, prop, dt, spec)) return;
+    // HOW MANY HANDS the aim pose raises (character.js animChar reads it next
+    // frame): the hold engine's answer for this gun in a body's hands
+    if (ch && prop && CBZ.holds) ch.aimHands = CBZ.holds.hands(prop, { view: "tp", aimed: !!ch.aimingPose });
+    // A ONE-HAND gun (CBZ.holds: a handgun in a body's hands) still brings the
+    // off hand in to reload it: that is the magazine's hand, not the hold's
+    const reloading1H = !!(spec && !spec.sup && grips && grips.support && R.active && R.w > 0);
+    // ONE OWNER PER ARM: a hand on a door, a car handle, a lift button
+    // (CBZ.verbs.touch / pickup) has the off hand this beat, and a long gun
+    // is a one-hand carry until it lets go (CBZ.holds, offBusy)
+    const offBusy = !!(own && CBZ.verbs && CBZ.verbs.handBusy && CBZ.player && CBZ.verbs.handBusy(CBZ.player, "l"));
+    if (!grips || !grips.support || !spec || (!spec.sup && !reloading1H) || (offBusy && CBZ.holds.hands(prop, { view: "tp", offBusy: true }) < 2)) {
       // Hand the arm back. Nothing to unwind: every channel this pass writes
       // is one that animChar damps home on its own the next frame — the same
       // contract entities/poses.js and the reach layer rely on.
       release(ch);
+      /* ONE HAND, PRESENTING: the gun arm out on the SAME cached solve every
+         armed NPC uses (gunHold.pitchNpc: solved once per body + gun + pitch
+         level in the chest's frame, the off arm left alone), then the barrel
+         trimmed onto the crosshair. animChar's Euler aim pose under the
+         fist's IK swung the elbow between two branches mid-stride (a 2.5 cm
+         jump in the chest frame, gun-hold-check aim-walk). */
+      if (spec && !spec.sup && ch.aimingPose && Math.abs(ch.body.rotation.x || 0) < 0.8 && !ch.pronePose) {
+        GH.pitchNpc(ch, prop, chestPitch(ch), true);
+        aimTrim(ch, prop);
+        seen.why = "one hand, presenting";
+        return;
+      }
       seen.why = !prop ? "no drawn weapon"
         : !ch ? "no player rig"
         : ch.slidePose ? "slide pose owns the rig"
         : (ch.cuffed || ch.surrender || ch.handsUp || ch.verbHold) ? "hands are busy"
         : (CBZ.player && CBZ.player.dead) ? "dead"
         : (CBZ.weaponTransferState && CBZ.weaponTransferState().active) ? "stowing"
+        : offBusy ? "off hand busy (a touch / pickup)"
         : grips ? "one-handed weapon" : "no rig parts";
       return;
     }
@@ -400,60 +1167,6 @@
     prop.updateWorldMatrix(true, false);
     ch.body.updateWorldMatrix(true, false);
 
-    // ---- a reload carries the hand OFF the gun, through its anchors ------
-    const reloadSeg = (R.active && R.w > 0)
-      ? (function () {
-          const table = CHOREO[R.style] || CHOREO.mag;
-          for (let i = 0; i < table.length; i++) if (R.p <= table[i][1]) return table[i];
-          return table[table.length - 1];
-        })()
-      : null;
-    if (reloadSeg) {
-      const computeTarget = function () {
-        let t = anchorWorld("support", ch, prop, grips, _t);
-        const span = Math.max(1e-4, reloadSeg[1] - reloadSeg[0]);
-        const u = smooth(clamp01((R.p - reloadSeg[0]) / span));
-        const from = anchorWorld(reloadSeg[2], ch, prop, grips, _a);
-        const to = anchorWorld(reloadSeg[3], ch, prop, grips, _b);
-        if (from && to) {
-          _tmp.lerpVectors(from, to, u);
-          // bow the path away from the ribs (body +X is the player's LEFT)
-          const arc = reloadSeg[4] * Math.sin(Math.PI * u);
-          if (arc > 0) {
-            ch.body.getWorldQuaternion(_bodyQ);
-            _tmp.add(_a.set(arc, -arc * 0.35, 0).applyQuaternion(_bodyQ));
-          }
-          t = _t.lerpVectors(t, _tmp, R.w);
-        }
-        // A HAND MAY NOT GO THROUGH THE FLOOR (prone: the rig is at ankle height)
-        const fl = floorUnder(t);
-        if (fl != null && t.y < fl) t.y = fl;
-        return t;
-      };
-      let target = computeTarget();
-      if (!R.ejected && EJECT_AT[R.style] != null && R.p >= EJECT_AT[R.style]) {
-        R.ejected = true;
-        const mp = anchorWorld("mag", ch, prop, grips, _a);
-        if (mp) dropMag(mp, R.style);
-        target = computeTarget();      // _a was the scratch the drop just used
-      }
-      showCarried(ch, R.style, R.carry > 0, prop);
-      // The body squares up for the work even if the player never raised the
-      // sights: animChar reads these, and fpsmode rewrites them each frame
-      // from its own state the moment the reload is done.
-      ch.aimingPose = true;
-      ch.carryPose = false;
-      // The reload owns the hand, and its waypoints are deliberately OFF the
-      // weapon (the belt pouch most of all) — never walked back onto the gun.
-      CBZ.charArmTo.rest(ch, "l", 0);
-      seen.resid0 = seen.residual = CBZ.charArmTo(ch, target, "l", blend);
-      seen.slid = 0; seen.placed = 0;
-      // the hand leaves its grip frame for its own rest frame as the reload
-      // takes it, and comes back the same way — no snap at either end
-      GH.supportOrient(ch, prop, R.w);
-      return;
-    }
-    showCarried(ch, R.style, false);
 
     /* ---- THE ONE HOLD: THE SAME SOLVE EVERY ARMED NPC USES ----------------
        Standing, crouched or walking (the torso upright), the player's hold IS
@@ -471,21 +1184,7 @@
     if (upright && (ch.aimingPose || GH.isLong(prop))) {
       const aimed = !!ch.aimingPose;
       if (aimed) {
-        if (CBZ.playerAimDir) CBZ.playerAimDir(_fwd); else _fwd.set(0, 0, 1);
-        /* THE PITCH IS THE AIM IN THE CHEST'S OWN FRAME. The cached solves
-           are body-relative (arms, gun and hands all hang off ch.body), so a
-           torso that leans — the crouch hunches 0.16 rad forward, a walk or a
-           run leans into its pace — tips the solved gun down by exactly that
-           much. Reading the level off the WORLD aim left aimTrim to turn the
-           gun back up by several degrees about its own origin, which carried
-           the grip out of the fist (2.3 cm) and the handguard off the support
-           hand (5 cm) in every crouch (tools/gun-hold-check.mjs, crouch/walk
-           stances). Express the aim in the body frame and the table answers
-           the lean itself; standing upright this is the old number exactly. */
-        ch.body.getWorldQuaternion(_bodyQ);
-        _tmp.copy(_fwd).applyQuaternion(_bodyQ.invert());
-        const pitch = -Math.asin(Math.max(-1, Math.min(1, _tmp.y / (_tmp.length() || 1))));
-        GH.pitchNpc(ch, prop, pitch);
+        GH.pitchNpc(ch, prop, chestPitch(ch), true);
       } else {
         GH.lowReady(ch, prop);
         seen.why = "low ready";
@@ -518,21 +1217,7 @@
          between two cached pitch levels the wrist finishes the aim
          (actorweapons.js seatBlended) and that turn can tip the stock 1-2 cm
          into the chest on a steep down-aim (gun-hold-check, aim-down). */
-      for (let i = 0; i < 6; i++) {
-        const gp = GH.gunInBody(ch, prop);
-        if (gp < 0.003) break;
-        CBZ.charArmTo.crease(ch, "r", _a);
-        ch.body.getWorldQuaternion(_bodyQ);
-        const bs = ch.body.matrixWorld.getMaxScaleOnAxis() || 0.7;
-        if (prop.userData.shoulderZ != null) _b.set(0, (gp + 0.008) * bs, 0);
-        else _b.set(0, 0, (gp + 0.008) * bs).applyQuaternion(_bodyQ);
-        _a.add(_b);
-        const hr = ch.parts.ra.userData.cap;
-        if (hr) { hr.getWorldQuaternion(_eq); _t.set(0, 0, 1).applyQuaternion(_eq); }
-        CBZ.charArmTo.wrist(ch, _a, "r", hr ? _t : null, 1);
-        GH.fire(ch, prop, aimed, 0);
-        if (aimed) aimTrim(ch, prop);
-      }
+      gunOffBody(ch, prop, aimed, false);
       /* THE SUPPORT HAND STAYS WHERE THE SOLVE PUT IT unless the gun really
          moved (the trim is a fraction of a degree: the hand is still on the
          gun). Only a stand-off off the chest re-lands it: a fresh solve from
@@ -608,12 +1293,11 @@
            wrist = pocket + barrelForward x (grip-to-butt length)
        measured off the weapon's own model. PLACED, not nudged — an earlier
        pass moved the hand by the shortfall each frame and animChar's damp
-       simply ate it (42 cm requested bought 10 cm). Only fires when the hand
-       actually missed, so a pistol whose cup is already in reach never moves.
-       At the port-arms CARRY "down the barrel's own axis" is the up-across
-       diagonal (it would drive the wrist into the neck), so that case is the
-       release above instead; the pistol inboard tuck below stays at carry — it
-       is what makes a two-hand low ready reachable at all. */
+       simply ate it (42 cm requested bought 10 cm). At the port-arms CARRY
+       "down the barrel's own axis" is the up-across diagonal (it would drive
+       the wrist into the neck), so that case is the release above instead.
+       (Only long guns get here: a handgun is one hand in third person,
+       CBZ.holds, and publishes no support grip to the body.) */
     const stock = buttLen(prop);
     // Presenting, the gun is ALWAYS placed (a placement gated on "did the
     // hand miss" switches on and off as the miss hovers at the threshold,
@@ -624,41 +1308,7 @@
       _fwd.set(0, 0, -1).applyQuaternion(_bodyQ);          // the barrel's own axis
       shoulderWorld(ch, "r", _rt, true);                    // the firing shoulder
       prop.getWorldPosition(_ext);                          // where the gun is now
-      if (stock <= 0.18 && ch.aimingPose) {
-        /* NO STOCK TO SHOULDER — a pistol, held at full arm's length out to
-           the firing side, 81 cm from the off shoulder: unreachable for the
-           same shoulder-width reason a rifle's handguard is. Both arms come
-           to the CENTRELINE and meet there; keep the extension exactly as the
-           aim pose set it and only move it inboard. */
-        _tmp.copy(_ext).sub(_rt);                               // the arm's own reach
-        _rt.lerp(_sh, ch.pronePose ? 0.5 : 0.42).add(_tmp);          // prone: both elbows on the deck, hands meet on the centreline
-        // a compact with its support grip AHEAD of the fist (the Uzi's
-        // receiver) comes back toward the chest by that much, elbows bending
-        GH.supportPoint(ch, prop, _sp);
-        const ahead = _sp.sub(_ext).dot(_fwd);
-        if (ahead > 0.06) _rt.addScaledVector(_fwd, -(ahead - 0.06));
-        /* …and within the off arm's reach. Standing, the aim pose's own
-           extension already is; prone, the elbows-on-the-deck pose pushes the
-           pistol 0.46 m out ahead of a chest lying on the ground and the off
-           shoulder is 0.69 m from the cup against a 0.63 m arm (gun-hold-check,
-           aim-prone: 8.5 cm short). Bring the gun back toward the face by what
-           is missing — a prone pistol is held with the elbows bent, close in. */
-        if (CBZ.charArmTo.span) {
-          const reach = CBZ.charArmTo.span(ch, "l") * 0.95;
-          _sp.add(_rt).sub(_sh);                 // (_sp held the grip's offset from the gun)
-          const d = _sp.length();
-          if (d > reach) _rt.addScaledVector(_fwd, -Math.min(0.30, (d - reach) * 1.2));
-        }
-        seen.butt = 0;
-      } else if (stock <= 0.18) {
-        /* A PISTOL AT LOW READY, two hands: in front of the belly, arms angled
-           down and forward. (The old tuck took the hanging arm's own
-           extension inboard, which parked the gun and both forearms INSIDE
-           the belly — tools/gun-hold-check.mjs, chest box.) */
-        ch.body.getWorldQuaternion(_bodyQ);
-        _rt.lerp(_sh, 0.42).add(_tmp.set(0, -0.40, 0.34).applyQuaternion(_bodyQ));
-        seen.butt = 0;
-      } else {
+      {
         /* TOWARD THE CENTRELINE, not into the firing shoulder pocket: the
            shoulders sit ~0.87 m apart and the arm is 0.63 m, so a gun parked
            in one pocket is unreachable by the other hand by construction.
@@ -686,6 +1336,9 @@
       // The gun rode the wrist back: re-aim it (parallax from its new
       // position) and re-seat it in the fist — both in holsterprops.
       if (CBZ.tpHandWeaponRelock) CBZ.tpHandWeaponRelock();
+      // prone, a launcher laid on the shoulder can sink into the kit on the
+      // back (a woman's plate carrier: 5 cm, gun-hold-check aim-prone)
+      if (ch.pronePose) gunOffBody(ch, prop, true, true);
       prop.updateWorldMatrix(true, false);
       GH.supportPoint(ch, prop, _sp);
       floorY = floorUnder(_sp);
@@ -715,6 +1368,49 @@
      the wrist centimetres every frame). */
   const _tp = new THREE.Vector3(), _td = new THREE.Vector3(), _tb = new THREE.Vector3();
   const _tqa = new THREE.Quaternion(), _tqg = new THREE.Quaternion(), _tqp = new THREE.Quaternion();
+  /* THE GUN IS NEVER INSIDE THE BODY. A cached solve can leave a pitched-down
+     stock's toe in the chest (or its plate carrier), a prone launcher on the
+     shoulder in the kit: carry the fist, and the gun in it, out by exactly
+     what is inside — along the chest's facing, or UP for a launcher (it rests
+     on the shoulder) and for anything prone (the chest faces the ground). */
+  function gunOffBody(ch, prop, aimed, prone) {
+    for (let i = 0; i < 6; i++) {
+      const gp = GH.gunInBody(ch, prop);
+      if (gp < 0.003) break;
+      CBZ.charArmTo.crease(ch, "r", _a);
+      ch.body.getWorldQuaternion(_bodyQ);
+      const bs = ch.body.matrixWorld.getMaxScaleOnAxis() || 0.7;
+      if (prone || prop.userData.shoulderZ != null) _b.set(0, (gp + 0.008) * bs, 0);
+      else _b.set(0, 0, (gp + 0.008) * bs).applyQuaternion(_bodyQ);
+      _a.add(_b);
+      const hr = ch.parts.ra.userData.cap;
+      if (hr) { hr.getWorldQuaternion(_eq); _t.set(0, 0, 1).applyQuaternion(_eq); }
+      CBZ.charArmTo.wrist(ch, _a, "r", hr ? _t : null, 1);
+      // prone, onto the crosshair from the new place and THEN the gun seated
+      // in the fist as it now points (a trim after the seat turned a prone
+      // launcher's grip out of the hand: its origin is a tube-length away);
+      // upright the trim is a fraction of a degree and the seat goes first
+      if (prone && aimed) aimTrim(ch, prop);
+      GH.fire(ch, prop, aimed, 0);
+      if (!prone && aimed) aimTrim(ch, prop);
+    }
+  }
+  function chestPitch(ch) {
+    /* THE PITCH IS THE AIM IN THE CHEST'S OWN FRAME. The cached solves
+       are body-relative (arms, gun and hands all hang off ch.body), so a
+       torso that leans — the crouch hunches 0.16 rad forward, a walk or a
+       run leans into its pace — tips the solved gun down by exactly that
+       much. Reading the level off the WORLD aim left aimTrim to turn the
+       gun back up by several degrees about its own origin, which carried
+       the grip out of the fist (2.3 cm) and the handguard off the support
+       hand (5 cm) in every crouch (tools/gun-hold-check.mjs, crouch/walk
+       stances). Express the aim in the body frame and the table answers
+       the lean itself; standing upright this is the old number exactly. */
+    if (CBZ.playerAimDir) CBZ.playerAimDir(_fwd); else _fwd.set(0, 0, 1);
+    ch.body.getWorldQuaternion(_bodyQ);
+    _tmp.copy(_fwd).applyQuaternion(_bodyQ.invert());
+    return -Math.asin(Math.max(-1, Math.min(1, _tmp.y / (_tmp.length() || 1))));
+  }
   function aimTrim(ch, prop) {
     if (!CBZ.camera || !prop.parent) return;
     prop.updateWorldMatrix(true, false);
@@ -903,7 +1599,11 @@
   // 54.6: after holsterprops has finished placing and aiming the gun — the
   // support hand is solved to where the weapon ACTUALLY ended up this frame,
   // which is the whole point.
-  CBZ.onAlways(54.6, poseHands);
+  CBZ.onAlways(54.6, function (dt) {
+    poseHands(dt);
+    // then the firing hand's bolt work and the reload's moving parts
+    reloadParts(dt);
+  });
 
   /* Test/measurement surface — tools/visual-presets/gun-hold-reload.mjs
      reports the residual in centimetres, so "the hand is on the gun" is a

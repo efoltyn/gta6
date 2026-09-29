@@ -3272,7 +3272,17 @@
               srNote("Steel. The reader wants a card.", 2.6);
               return;
             }
-            srOpen(v);
+            // THE FOB GOES ON THE READER (systems/verbs_pickup.js CBZ.verbs.touch
+            // "card"): the reader's lobby face (the box 0.10 deep under the lamp,
+            // facing -x), and the bolts go back on the touch
+            if (CBZ.verbs && CBZ.verbs.touch && v.lamp && v.lamp.parent) {
+              const par = v.lamp.parent;
+              par.updateWorldMatrix(true, false);
+              const lp = par.localToWorld(v.lamp.position.clone().add(new THREE.Vector3(0.02, -0.12, 0)));
+              const ln = new THREE.Vector3(-1, 0, 0).transformDirection(par.matrixWorld);
+              CBZ.verbs.touch(CBZ.player, { point: lp, normal: ln,
+                kind: "card", key: "gov-reader", onTouch: function () { srOpen(v); } });
+            } else srOpen(v);
             return;
           }
           if (t.what === "rack") {

@@ -85,9 +85,12 @@
   "use strict";
   const CBZ = window.CBZ = window.CBZ || {};
 
+  // holdClass: how many hands (systems/actorweapons.js CBZ.holds). "handgun"
+  // = one hand in third person, two only aimed in first person; "long" = two
+  // hands always; "melee" = one fist. The MP5 (smg) has a fixed stock: long.
   CBZ.FPS_WEAPONS = [
     {
-      id: "sidearm", key: "sidearm", label: "9MM SIDEARM", short: "9MM", slot: "pistol",
+      id: "sidearm", key: "sidearm", holdClass: "handgun", label: "9MM SIDEARM", short: "9MM", slot: "pistol",
       appearanceFactory: "sidearm", magSize: 17, fireMode: "semi", fireDelay: 0.145, reloadTime: 1.05,
       mag: 17, reserve: 85, reload: 1.05, interval: 0.145, range: 82,
       damage: 36, headMult: 2.6, dropStart: 44, minDamage: 0.58, falloff: "flat",
@@ -103,7 +106,7 @@
       settle: 0.06,
     },
     {
-      id: "shotgun", key: "shotgun", label: "12G PUMP", short: "12G", slot: "long",
+      id: "shotgun", key: "shotgun", holdClass: "long", label: "12G PUMP", short: "12G", slot: "long",
       appearanceFactory: "shotgun", magSize: 6, fireMode: "pump", fireDelay: 0.78, reloadTime: 0.42,
       mag: 6, reserve: 30, reload: 0.42, interval: 0.78, range: 44,
       damage: 18, headMult: 1.35, dropStart: 14, minDamage: 0.34, falloff: "pellet",
@@ -120,7 +123,7 @@
       settle: 0.24,
     },
     {
-      id: "carbine", key: "carbine", label: "M4 CARBINE", short: "556", slot: "rifle",
+      id: "carbine", key: "carbine", holdClass: "long", label: "M4 CARBINE", short: "556", slot: "rifle",
       appearanceFactory: "carbine", magSize: 30, fireMode: "auto", fireDelay: 0.084, reloadTime: 1.45,
       mag: 30, reserve: 120, reload: 1.45, interval: 0.084, range: 118,
       damage: 28, headMult: 2.25, dropStart: 72, minDamage: 0.62, falloff: "rifle",
@@ -136,7 +139,7 @@
       settle: 0.09, spray: [0, 0, 0.06, 0.14, 0.24, 0.30, 0.24, 0.10, -0.08, -0.22, -0.30, -0.24, -0.10, 0.08, 0.22],
     },
     {
-      id: "smg", key: "smg", label: "COMPACT SMG", short: "SMG", slot: "auto",
+      id: "smg", key: "smg", holdClass: "long", label: "COMPACT SMG", short: "SMG", slot: "auto",
       appearanceFactory: "smg", magSize: 32, fireMode: "auto", fireDelay: 0.064, reloadTime: 1.25,
       mag: 32, reserve: 128, reload: 1.25, interval: 0.064, range: 72,
       damage: 21, headMult: 2.05, dropStart: 36, minDamage: 0.50, falloff: "smg",
@@ -152,8 +155,8 @@
       settle: 0.06, spray: [0, 0.10, -0.12, 0.16, -0.18, 0.20, -0.22, 0.18, -0.14, 0.22, -0.20, 0.16, -0.18, 0.14, -0.10],
     },
     {
-      id: "revolver", key: "revolver", label: ".357 MAGNUM", short: "357", slot: "pistol",
-      appearanceFactory: "revolver",   // own silhouette: cylinder + hammer + underlug (was sharing the 9mm's) magSize: 6, fireMode: "semi", fireDelay: 0.5, reloadTime: 1.6,
+      id: "revolver", key: "revolver", holdClass: "handgun", label: ".357 MAGNUM", short: "357", slot: "pistol",
+      appearanceFactory: "revolver", magSize: 6, fireMode: "semi", fireDelay: 0.5, reloadTime: 1.6,   // own silhouette: cylinder + hammer + underlug (was sharing the 9mm's)
       mag: 6, reserve: 36, reload: 1.6, interval: 0.5, range: 92,
       damage: 64, headMult: 2.8, dropStart: 50, minDamage: 0.66, falloff: "flat",
       spread: 0.004, bodyRadius: 0.62, headRadius: 0.33,
@@ -168,8 +171,8 @@
       settle: 0.16,
     },
     {
-      id: "deagle", key: "deagle", label: ".50 DESERT EAGLE", short: "50AE", slot: "pistol",
-      appearanceFactory: "deagle",     // own silhouette: massive slab slide + .50 bore (was sharing the 9mm's) magSize: 7, fireMode: "semi", fireDelay: 0.4, reloadTime: 1.35,
+      id: "deagle", key: "deagle", holdClass: "handgun", label: ".50 DESERT EAGLE", short: "50AE", slot: "pistol",
+      appearanceFactory: "deagle", magSize: 7, fireMode: "semi", fireDelay: 0.4, reloadTime: 1.35,   // own silhouette: massive slab slide + .50 bore (was sharing the 9mm's)
       mag: 7, reserve: 49, reload: 1.35, interval: 0.4, range: 90,
       damage: 75, headMult: 2.7, dropStart: 48, minDamage: 0.64, falloff: "flat",
       spread: 0.0045, bodyRadius: 0.62, headRadius: 0.33,
@@ -187,7 +190,7 @@
       // The status rifle: out-damages the carbine per round but handles LAZY —
       // slow to bring up (equip), slow to feed (reload), and run-and-gun throws
       // shots wide (moveSpread). Plant your feet and it earns its price tag.
-      id: "ak47", key: "ak47", label: "AK-47", short: "762", slot: "rifle",
+      id: "ak47", key: "ak47", holdClass: "long", label: "AK-47", short: "762", slot: "rifle",
       appearanceFactory: "ak47", magSize: 30, fireMode: "auto", fireDelay: 0.097, reloadTime: 1.8,
       mag: 30, reserve: 120, reload: 1.8, interval: 0.097, range: 112,
       damage: 34, headMult: 2.3, dropStart: 64, minDamage: 0.6, falloff: "rifle",
@@ -203,8 +206,8 @@
       settle: 0.13, spray: [0, 0.05, 0.18, 0.34, 0.48, 0.55, 0.42, 0.10, -0.28, -0.52, -0.60, -0.45, -0.15, 0.20, 0.45],
     },
     {
-      id: "uzi", key: "uzi", label: "MICRO UZI", short: "UZI", slot: "auto",
-      appearanceFactory: "uzi",        // own silhouette: mag-in-grip stub + wire stock (was sharing the MP5's) magSize: 25, fireMode: "auto", fireDelay: 0.052, reloadTime: 1.15,
+      id: "uzi", key: "uzi", holdClass: "handgun", label: "MICRO UZI", short: "UZI", slot: "auto",
+      appearanceFactory: "uzi", magSize: 25, fireMode: "auto", fireDelay: 0.052, reloadTime: 1.15,   // own silhouette: mag-in-grip stub + wire stock (was sharing the MP5's)
       mag: 25, reserve: 125, reload: 1.15, interval: 0.052, range: 56,
       damage: 16, headMult: 1.9, dropStart: 26, minDamage: 0.45, falloff: "smg",
       spread: 0.016, bodyRadius: 0.63, headRadius: 0.33,
@@ -219,8 +222,8 @@
       settle: 0.05, spray: [0, 0.22, -0.26, 0.30, -0.34, 0.28, -0.30, 0.36, -0.24, 0.32, -0.36, 0.26, -0.28, 0.34, -0.30],
     },
     {
-      id: "sniper", key: "sniper", label: "BOLT SNIPER", short: "SNIP", slot: "rifle",
-      appearanceFactory: "sniper",     // own silhouette: scope + bolt + long barrel (was sharing the M4's) magSize: 5, fireMode: "bolt", fireDelay: 1.25, reloadTime: 2.0,
+      id: "sniper", key: "sniper", holdClass: "long", label: "BOLT SNIPER", short: "SNIP", slot: "rifle",
+      appearanceFactory: "sniper", magSize: 5, fireMode: "bolt", fireDelay: 1.25, reloadTime: 2.0,   // own silhouette: scope + bolt + long barrel (was sharing the M4's)
       mag: 5, reserve: 25, reload: 2.0, interval: 1.25, range: 240,
       damage: 130, headMult: 3.0, dropStart: 180, minDamage: 0.85, falloff: "sniper",
       spread: 0.0015, bodyRadius: 0.6, headRadius: 0.34,
@@ -235,8 +238,8 @@
       settle: 0.34,
     },
     {
-      id: "lmg", key: "lmg", label: "M249 LMG", short: "LMG", slot: "auto",
-      appearanceFactory: "lmg",        // own silhouette: ammo box + bipod + feed cover (was sharing the M4's) magSize: 100, fireMode: "auto", fireDelay: 0.075, reloadTime: 3.2,
+      id: "lmg", key: "lmg", holdClass: "long", label: "M249 LMG", short: "LMG", slot: "auto",
+      appearanceFactory: "lmg", magSize: 100, fireMode: "auto", fireDelay: 0.075, reloadTime: 3.2,   // own silhouette: ammo box + bipod + feed cover (was sharing the M4's)
       mag: 100, reserve: 200, reload: 3.2, interval: 0.075, range: 120,
       damage: 27, headMult: 2.0, dropStart: 60, minDamage: 0.58, falloff: "rifle",
       spread: 0.014, bodyRadius: 0.62, headRadius: 0.32,
@@ -254,7 +257,7 @@
       settle: 0.15, spray: [0, 0.08, 0.20, 0.36, 0.46, 0.44, 0.30, 0.06, -0.22, -0.40, -0.48, -0.42, -0.24, 0.02, 0.26],
     },
     {
-      id: "bazooka", key: "bazooka", label: "RPG / ROCKET LAUNCHER", short: "RPG", slot: "long",
+      id: "bazooka", key: "bazooka", holdClass: "long", label: "RPG / ROCKET LAUNCHER", short: "RPG", slot: "long",
       appearanceFactory: "bazooka", magSize: 1, fireMode: "single", fireDelay: 1.4, reloadTime: 1.4,
       mag: 1, reserve: 4, reload: 1.4, interval: 1.4, range: 200,
       damage: 1, headMult: 1.0, dropStart: 200, minDamage: 1.0, falloff: "flat",
@@ -300,7 +303,7 @@
       optic: "pgo7",
     },
     {
-      id: "taser", key: "taser", label: "X26 TASER", short: "TASER", slot: "utility",
+      id: "taser", key: "taser", holdClass: "handgun", label: "X26 TASER", short: "TASER", slot: "utility",
       appearanceFactory: "taser", magSize: 2, fireMode: "stun", fireDelay: 0.92, reloadTime: 1.05,
       mag: 2, reserve: 10, reload: 1.05, interval: 0.92, range: 22,
       damage: 10, headMult: 1.0, dropStart: 18, minDamage: 0.85, falloff: "flat",
@@ -345,7 +348,7 @@
          like a pistol" in setReadyPose / holsterprops / buildActorWeapon's
          scale. That is a shank's carry exactly. A new slot value would have
          meant auditing every `slot ===` branch in the tree for no gain. */
-      id: "shank", key: "shank", label: "PRISON SHANK", short: "SHANK", slot: "utility",
+      id: "shank", key: "shank", holdClass: "melee", label: "PRISON SHANK", short: "SHANK", slot: "utility",
       appearanceFactory: "shank", melee: true,
       mag: 0, reserve: 0, reload: 0, interval: 0.42, range: 2.12,
       damage: 26, headMult: 1.9, dropStart: 2.12, minDamage: 1.0, falloff: "flat",
@@ -379,7 +382,7 @@
       // rocketAmmoSpec's DEFAULT_ROCKET_SPEC (homing:true) from adopting it.
       // projPlain strips the shared projectile mesh's exhaust flame + fins for
       // this weapon's flights — a launched shell, not a burning rocket.
-      id: "glauncher", key: "glauncher", label: "GRENADE LAUNCHER", short: "40MM", slot: "long",
+      id: "glauncher", key: "glauncher", holdClass: "long", label: "GRENADE LAUNCHER", short: "40MM", slot: "long",
       appearanceFactory: "glauncher",
       mag: 6, reserve: 18, reload: 2.3, interval: 0.72, range: 200,
       damage: 1, headMult: 1.0, dropStart: 200, minDamage: 1.0, falloff: "flat",

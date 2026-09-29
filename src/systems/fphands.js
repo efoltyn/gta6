@@ -159,10 +159,17 @@
        stub 0 like a gun hold: the hand bends at the crease, it does not slide. */
     plant:   { flex: [[0.10, 0.12, 0.08], [0.09, 0.11, 0.07], [0.10, 0.12, 0.08], [0.12, 0.14, 0.09]], splay: 1.6,
                thumb: [[-0.85, 0.00, -0.52], [-0.72, 0.03, -0.69], [-0.58, 0.03, -0.81]], cup: 0.0015, stub: 0 },
+    /* ONE FINGER ON A BUTTON (a lift call, a floor button, a keypad): the
+       index straight out, the other three closed into the palm and the thumb
+       laid over them. CBZ.verbs.touch puts the index PAD (contactOf "point")
+       on the button with the finger pressing along the button's normal. */
+    point:   { flex: [[0.06, 0.10, 0.06], [1.52, 1.84, 0.95], [1.52, 1.84, 0.95], [1.50, 1.80, 0.95]], thumb: T_FIST, cup: 0.005, stub: 0, lone: 0 },
   };
   // the plane a planted palm rests on: under the heel and the finger pads
   // (hand metres, right-hand frame: y below the palm centre, z = the palm's middle)
   const PLANT_CONTACT = [0, -0.0224, -0.050];
+  // the thumb-to-index pinch a card / a note / cash sits in (card pose)
+  const CARD_PINCH = [-0.030, -0.022, -0.100];
   /* BODY GUN HOLDS, SIZED TO WHAT IS HELD (systems/gunhands.js CBZ.gunHold).
      A body hand closes round a gun drawn at 1.45-1.75x real size (weapon-
      scale.js READ) with a hand drawn at 1.1x, so the part it wraps is, in the
@@ -219,6 +226,32 @@
     const pose = resolvePose(p);
     const R = pose.wrap || 0.02;
     return (out || new THREE.Vector3()).set(-0.006, -(PALM.th * 0.5 + R), FINGERS[1].z + 0.012);
+  }
+  /* WHERE A POSED HAND TOUCHES THE WORLD (hand frame, right hand, metres at
+     size 1; mirror x for the left). One table for every contact the body
+     makes (character.js charArmTo.plant lays this point on the surface):
+       plant  the palm's contact plane (heel + finger pads)
+       point  the index finger's pad, at the very tip of the straight finger
+       card   the pinch a card is held in
+       a wrap pose (grip, wheel, support...)  the axis of what it closes round */
+  let _pointTip = null;
+  function contactOf(p, out) {
+    out = out || new THREE.Vector3();
+    if (p === "plant" || p == null) return out.set(PLANT_CONTACT[0], PLANT_CONTACT[1], PLANT_CONTACT[2]);
+    if (p === "card") return out.set(CARD_PINCH[0], CARD_PINCH[1], CARD_PINCH[2]);
+    if (p === "point") {
+      if (!_pointTip) {
+        const f = FINGERS[0], ch = resolvePose("point")._joints.fingers[0];
+        const a = ch[2], b = ch[3];
+        const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2], L = Math.hypot(dx, dy, dz) || 1;
+        // the pad: the tip joint carried on by the finger's own radius
+        _pointTip = [b[0] + dx / L * f.r, b[1] + dy / L * f.r, b[2] + dz / L * f.r];
+      }
+      return out.set(_pointTip[0], _pointTip[1], _pointTip[2]);
+    }
+    const pose = typeof p === "string" ? POSES[p] : p;
+    if (pose && pose.wrap) return gripCentre(p, out);
+    return out.set(PLANT_CONTACT[0], PLANT_CONTACT[1], PLANT_CONTACT[2]);
   }
 
   // ------------------------------------------------------------ geometry
@@ -573,16 +606,26 @@
         tube(parts, [root].concat(pts), rs, 6, Math.PI / 6, f.r * 0.70);
       });
     } else {
-      // THE MITTEN: the averaged chain, index..little wide, a finger thick
+      // THE MITTEN: the averaged chain, index..little wide, a finger thick.
+      // A pose with one finger held out (`lone`: the pointing index) keeps
+      // that finger its own thin tube, so a far hand on a button still
+      // points; the mitten is the other three.
+      const lone = p.lone != null ? p.lone : -1, i0 = lone === 0 ? 1 : 0, nf = lone === 0 ? 3 : 4;
+      if (lone === 0) {
+        const c = chains[0], r = FINGERS[0].r * 1.3;
+        tube(parts, [c[0], c[3]], [[r, r], [r * 0.8, r * 0.8]], 3, Math.PI / 2, FINGERS[0].r * 0.6);
+      }
       const pts = [], rs = [];
       for (let j = 0; j < 4; j++) {
         let x = 0, y = 0, z = 0;
-        for (let i = 0; i < 4; i++) { x += chains[i][j][0]; y += chains[i][j][1]; z += chains[i][j][2]; }
-        pts.push([x / 4, y / 4, z / 4]);
-        const a = chains[0][j], b = chains[3][j];
+        for (let i = i0; i < 4; i++) { x += chains[i][j][0]; y += chains[i][j][1]; z += chains[i][j][2]; }
+        pts.push([x / nf, y / nf, z / nf]);
+        const a = chains[i0][j], b = chains[3][j];
         const w = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) * 0.5 + 0.009;
         rs.push([w * (1 - 0.12 * j) * SQ2 * 0.85, 0.0092 * (1 - 0.1 * j) * SQ2 * 0.9]);
       }
+      // three curled fingers are a knuckle roll: one ring fewer pays for the lone finger
+      if (lone === 0) { pts.splice(1, 1); rs.splice(1, 1); }
       tube(parts, pts, rs, 4, Math.PI / 4, 0);
     }
     const tpts = p._joints.thumb;
@@ -1429,8 +1472,8 @@
 
   CBZ.fpHands = {
     version: 2,
-    POSES, PALM, FINGERS, THUMB, PLANT_CONTACT,
-    handGeometry, bodyHandGeometry, makeHand, setPose, attachGrip, placeGrip, gripCentre,
+    POSES, PALM, FINGERS, THUMB, PLANT_CONTACT, CARD_PINCH,
+    handGeometry, bodyHandGeometry, makeHand, setPose, attachGrip, placeGrip, gripCentre, contactOf,
     orientGrip, orientAlong, makeArm, poseArm, dressOf, resolvePose,
     grasp, graspHand, regraspWithSolids, solidsOf, solidsSdf, prismSdf, holdPose, HOLD_RADII, TORCH, torchMount,
     math: { solveElbow, flexForWrap, fingerChain, segDist, clampFore, foreHalf, stubRings },

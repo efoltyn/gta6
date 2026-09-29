@@ -57,8 +57,8 @@
     // COCKING TUBE forward over the barrel, lever out on the left
     K.tube(g, 0.018, 0.018, 0.300, 12, steel, 0, 0.086, -0.560);
     // (axis-z profiles mirror x: drawn at +x, it lands on the LEFT)
-    K.prof(g, "mp5.lever", [[0.008, 0.080], [0.014, 0.090], [0.046, 0.104], [0.056, 0.104], [0.058, 0.112], [0.048, 0.117],
-      [0.040, 0.112], [0.010, 0.098], [0.004, 0.090]], 0.014, mat.black, { axis: "z", bevel: 0.002, z: -0.500 });
+    K.tag(K.prof(g, "mp5.lever", [[0.008, 0.080], [0.014, 0.090], [0.046, 0.104], [0.056, 0.104], [0.058, 0.112], [0.048, 0.117],
+      [0.040, 0.112], [0.010, 0.098], [0.004, 0.090]], 0.014, mat.black, { axis: "z", bevel: 0.002, z: -0.500 }), "part_charge");
     // slim polymer handguard with a front lip
     K.prof(g, "mp5.hg", [[0.410, 0.066], [0.610, 0.066], [0.620, 0.050], [0.620, -0.010], [0.600, -0.016], [0.410, 0.006]],
       0.070, poly, { bevel: 0.008 });
@@ -146,7 +146,7 @@
       mf.push([cx + nx * D / 2, cy + ny * D / 2]);
       mb.push([cx - nx * D / 2, cy - ny * D / 2]);
     }
-    K.prof(g, "mp5.mag", mf.concat(mb.reverse()), 0.040, mat.dark, { bevel: 0.003 });
+    K.tag(K.prof(g, "mp5.mag", mf.concat(mb.reverse()), 0.040, mat.dark, { bevel: 0.003 }), "part_mag");
 
     // POLYMER TRIGGER GROUP: housing + the big wrap-around guard + grip
     K.prof(g, "mp5.tgroup", [

@@ -42,7 +42,8 @@
         real milliradians (fpsmode's playerSwayRad) applied to the ACTUAL aim
         while sighted; Shift / CBZ.fpsHoldBreath steadies a magnified optic
         for four seconds and then the body takes it back.
-     5. THIRD PERSON: CBZ.playerChar.adsK (0..1) + adsOneHand. character.js
+     5. THIRD PERSON: CBZ.playerChar.adsK (0..1) (+ aimHands from the hold
+        engine, systems/actorweapons.js CBZ.holds). character.js
         raises a long gun to a cheek weld (stock up, head down and over onto
         the comb) and pushes a pistol / Uzi out to a locked arm, one-handed.
         A magnified scope still takes you to the eye (first person) while it
@@ -763,11 +764,9 @@
     const ch = CBZ.playerChar;
     const tpWant = !!(CBZ.isADS && CBZ.isADS() && !fpOn());
     tpK = Math.max(0, Math.min(1, tpK + (tpWant ? 1 : -1.6) * dt / 0.28));
-    if (ch) {
-      const w = gun();
-      ch.adsK = smoother(tpK);
-      ch.adsOneHand = !!(w && stubby(w));
-    }
+    // (one hand or two is the hold engine's, systems/actorweapons.js CBZ.holds:
+    // gunhands.js publishes it to the rig as aimHands)
+    if (ch) ch.adsK = smoother(tpK);
     const sighted = fpOn() && adsE > 0.85 && (CBZ.isADS && CBZ.isADS());
     // BREATH recovers even with the gun down
     const r = sighted ? sightRec() : null;

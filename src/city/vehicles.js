@@ -843,6 +843,13 @@
     }
     return true;
   };
+  // the live door leaf group (hinge origin, swings with carDoorPose), or null
+  CBZ.carDoorGroup = function (car, id) {
+    const rig = doorRigOf(car);
+    if (!rig) return null;
+    for (let i = 0; i < rig.doors.length; i++) if (rig.doors[i].userData.carDoor.id === id) return rig.doors[i];
+    return null;
+  };
   CBZ.carDoorOpenT = function (car, id) {
     const rig = doorRigOf(car);
     if (!rig) return null;

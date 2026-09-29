@@ -59,8 +59,8 @@
   const src = await (await fetch("../src/systems/fpsmode.js")).text();
   const gh = await (await fetch("../src/systems/gunhands.js")).text();
   const block = (s, a, b) => { const i = s.indexOf(a), j = s.indexOf(b, i + 1); if (i < 0 || j < 0) throw new Error("marker " + a); return s.slice(i, j); };
-  const choreo = new Function(block(gh, "  const CHOREO = {", "  // the same choreography") + "; return CHOREO;")();
-  CBZ.gunReloadChoreo = (st) => choreo[st] || choreo.mag;
+  // the reload table + parts (CBZ.gunReload, gunhands.js's first block; its body pass bails here)
+  new Function(gh)();
   CBZ.gunReloadPose = () => poseName === "reload" ? { active: true, p: rp, style: CBZ._style || "mag" } : { active: false };
 
   const body = `
@@ -79,7 +79,7 @@
     const vm = new THREE.Group(); CBZ.camera.add(vm);
     const gun = new THREE.Group();
     const weaponModels = [];
-    let ddT = -1; const fps = { weapon: 0 };
+    let ddT = -1; const fps = { weapon: 0 }; const WEAPONS = [];
     let punchT = 0, vmPunch = 0, guardK = 0;
     const fistT = [{ vis: false }, { vis: false }];
   ` + block(src, "  const FPH = CBZ.fpHands || null;", "  WEAPONS.forEach((w, i) => {")

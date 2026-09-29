@@ -435,6 +435,7 @@
     const fire = model.userData.fpFire;
     const k = fire ? V.worldScaleInVm(fire) : V.HAND_K;
     let hand = model.userData.fpSupport;
+    if (hand) hand.visible = true;       // (at the hip a handgun's off hand is out of frame: the torch brings it up)
     if (!hand) {
       // a gun with no support hand (the taser): the fist rig's left hand
       hand = V.handL;

@@ -60,9 +60,9 @@
       [-0.030, 0.111], [-0.030, 0.103], [-0.042, 0.100]], 0.372, steel, { axis: "z", bevel: 0.0015, z: -0.214 });
     box(g, 0.012, 0.004, 0.240, mat.black, 0, 0.1045, -0.230);        // the cocking slot
     // COCKING KNOB: stem up out of the slot, a serrated cap on top
-    K.lathe(g, "uzi.knobStem", [[0, 0], [0.0075, 0], [0.0075, 0.018], [0, 0.018]], 12, blued, 0, 0.100, -0.336, { axis: "y" });
-    K.prof(g, "uzi.knobCap", K.ribs(0.0165, 0.0140, 12), 0.016, blued, { axis: "z", bevel: 0.002, y: 0.122, z: -0.336, rx: Math.PI / 2 });
-    K.lathe(g, "uzi.knobTop", [[0, 0.008], [0.013, 0.008], [0.0145, 0.003], [0.0145, 0]], 16, edge, 0, 0.126, -0.336, { axis: "y" });
+    K.tag(K.lathe(g, "uzi.knobStem", [[0, 0], [0.0075, 0], [0.0075, 0.018], [0, 0.018]], 12, blued, 0, 0.100, -0.336, { axis: "y" }), "part_charge");
+    K.tag(K.prof(g, "uzi.knobCap", K.ribs(0.0165, 0.0140, 12), 0.016, blued, { axis: "z", bevel: 0.002, y: 0.122, z: -0.336, rx: Math.PI / 2 }), "part_charge");
+    K.tag(K.lathe(g, "uzi.knobTop", [[0, 0.008], [0.013, 0.008], [0.0145, 0.003], [0.0145, 0]], 16, edge, 0, 0.126, -0.336, { axis: "y" }), "part_charge");
 
     /* ---------------------------------------------------------- SIGHTS
        rear: an L flip aperture between two ears; front: a post in a hood */
@@ -117,9 +117,9 @@
     /* ---------------------------------------------------------- MAGAZINE
        straight double stack running up inside the grip, base out the bottom */
     const MD = 0.080, MI = (GD - MD) / 2, M0 = GL * 0.80, M1 = GL + 0.070;
-    K.prof(g, "uzi.mag", [gp(M0, MI), gp(M1, MI), gp(M1, MI + MD), gp(M0, MI + MD)], 0.050, blued, { bevel: 0.003 });
-    K.prof(g, "uzi.magBase", [gp(M1 - 0.004, MI - 0.006), gp(M1 + 0.012, MI - 0.006), gp(M1 + 0.012, MI + MD + 0.006),
-      gp(M1 - 0.004, MI + MD + 0.006)], 0.058, steel, { bevel: 0.003 });
+    K.tag(K.prof(g, "uzi.mag", [gp(M0, MI), gp(M1, MI), gp(M1, MI + MD), gp(M0, MI + MD)], 0.050, blued, { bevel: 0.003 }), "part_mag");
+    K.tag(K.prof(g, "uzi.magBase", [gp(M1 - 0.004, MI - 0.006), gp(M1 + 0.012, MI - 0.006), gp(M1 + 0.012, MI + MD + 0.006),
+      gp(M1 - 0.004, MI + MD + 0.006)], 0.058, steel, { bevel: 0.003 }), "part_mag");
 
     /* ---------------------------------------------------------- STOCK
        folded along the right flank: hinge knuckle at the rear, the skeleton

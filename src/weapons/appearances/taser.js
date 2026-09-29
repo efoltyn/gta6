@@ -65,13 +65,13 @@
 
     // THE CARTRIDGE: a separate grey block in the bay, ribbed release tabs
     // on both sides, a black blast-door face with two stacked probe doors
-    K.prof(g, "x26.cart", PS([[143.5, -2.5], [183, -2.5], [185, -5], [185, -31], [183, -33], [143.5, -33]]), 30 * S, grey, { bevel: 1 * S });
+    K.tag(K.prof(g, "x26.cart", PS([[143.5, -2.5], [183, -2.5], [185, -5], [185, -31], [183, -33], [143.5, -33]]), 30 * S, grey, { bevel: 1 * S }), "part_mag");
     const tabs = [];
     for (let i = 0; i < 5; i++) { const f = 150 + i * 3.4; tabs.push(PS([[f, -11], [f + 1.6, -11], [f + 1.6, -25], [f, -25]])); }
-    K.prof(g, "x26.tabs", tabs, 33 * S, black, { bevel: 0 });
-    K.prof(g, "x26.face", MM([[-12, -4.5], [12, -4.5], [12, -31], [-12, -31]]), 1 * S, black, { axis: "z", bevel: 0, y: Y0, z: Z(185.6) });
-    K.prof(g, "x26.doors", [MM([[-8, -6.5], [8, -6.5], [8, -14.5], [-8, -14.5]]), MM([[-8, -20.5], [8, -20.5], [8, -28.5], [-8, -28.5]])],
-      0.8 * S, grey, { axis: "z", bevel: 0, y: Y0, z: Z(186.2) });
+    K.tag(K.prof(g, "x26.tabs", tabs, 33 * S, black, { bevel: 0 }), "part_mag");
+    K.tag(K.prof(g, "x26.face", MM([[-12, -4.5], [12, -4.5], [12, -31], [-12, -31]]), 1 * S, black, { axis: "z", bevel: 0, y: Y0, z: Z(185.6) }), "part_mag");
+    K.tag(K.prof(g, "x26.doors", [MM([[-8, -6.5], [8, -6.5], [8, -14.5], [-8, -14.5]]), MM([[-8, -20.5], [8, -20.5], [8, -28.5], [-8, -28.5]])],
+      0.8 * S, grey, { axis: "z", bevel: 0, y: Y0, z: Z(186.2) }), "part_mag");
 
     // the firing hand closed on the swept grip
     const R = 0.384, gTop = P(28, -34), trig = P(93.4, -44);

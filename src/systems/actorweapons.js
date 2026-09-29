@@ -28,6 +28,154 @@
   CBZ.CONFIG = CBZ.CONFIG || {};
   if (CBZ.CONFIG.WEAPON_GROUND_PHYSICS == null) CBZ.CONFIG.WEAPON_GROUND_PHYSICS = true;
 
+  /* ==== CBZ.holds — WHAT IS IN THE HAND, AND HOW MANY HANDS IT TAKES =======
+     Owner (2026-09-28): "two-handed small guns look stupid and don't work" at
+     this body's proportions (short arms, a big head: both forearms folded into
+     the chest, the fists merged, the gun vanished between them), and "make
+     this a smarter engine of the way hands hold things".
+
+     ONE ANSWER for every held thing, by CLASS, not by weapon id or by stance
+     special case scattered through the solvers:
+       handgun  pistols, revolvers, the Desert Eagle, machine pistols (Uzi),
+                the taser: ONE hand in third person, always (carry, walk, hip,
+                aimed with the arm out, the off hand free for a torch, a door,
+                a radio, cuffs). First person: two hands only when aimed
+                (down the sights, like every shooter), one at the hip.
+       long     anything with a stock in the shoulder or a tube on it (rifles,
+                the shotgun, the sniper, the LMG, the stocked MP5, launchers):
+                two hands always. With the off hand taken by something else
+                (a door, a ladder rung) it is a one-hand carry for that beat.
+       melee    a blade or a bat in one fist.
+       small    a torch, a keycard, a phone, a detonator, a bandage roll, a
+                paper, a grenade, a C4 brick: one hand.
+       bulky    a crate, a body: two hands.
+     The weapon row names its class (weapon-data.js `holdClass`); a row without
+     one is classed off its slot. Items name theirs in ITEM_CLASS.
+
+     ANCHORS. Every held thing's grip points come from the MODEL, never from a
+     per-gun table here: CBZ.holds.anchors(prop) reads the appearance's own
+     anchor record (userData.anchors, the contract at the top of
+     weapons/appearances/sidearm.js: { pos, quat } per grip, trigger,
+     support, muzzle, mag (+ well), stock, bolt, charge, sight, lens; also a
+     Vector3 / Object3D, or a child named "anchor_<name>"), and only falls
+     back to older data (the kit's K.hand grip spec, userData.grips) for a
+     point a model does not name. Positions come back here; the frames
+     (quat) are CBZ.gunAnchors.world's. The solvers (CBZ.gunHold below,
+     fpsmode's grasped hands, gunhands' reload paths) take their points from
+     here. */
+  const HOLD_CLASS = {
+    handgun: { tp: 1, fpAimed: 2, fpHip: 1 },
+    long: { tp: 2, fpAimed: 2, fpHip: 2 },
+    melee: { tp: 1, fpAimed: 1, fpHip: 1 },
+    small: { tp: 1, fpAimed: 1, fpHip: 1 },
+    bulky: { tp: 2, fpAimed: 2, fpHip: 2 },
+  };
+  const ITEM_CLASS = {
+    flashlight: "small", torch: "small", keycard: "small", card: "small", phone: "small", radio: "small",
+    detonator: "small", bandage: "small", roll: "small", paper: "small", note: "small", grenade: "small",
+    frag: "small", c4: "small", charge: "small", key: "small", cigarette: "small",
+    crate: "bulky", box: "bulky", body: "bulky",
+  };
+  function holdRow(x) {
+    if (!x) return null;
+    if (typeof x === "string") return (CBZ.weaponById && CBZ.weaponById(x)) || { id: x, item: ITEM_CLASS[x] ? x : null };
+    if (x.isObject3D) {
+      const ud = x.userData || {};
+      if (ud.holdClass) return { holdClass: ud.holdClass };
+      if (ud.weaponId) return (CBZ.weaponById && CBZ.weaponById(ud.weaponId)) || { id: ud.weaponId, slot: ud.weaponSlot, melee: ud.weaponMelee };
+      if (ud.heldKind) return { id: ud.heldKind, item: ud.heldKind };
+      return null;
+    }
+    return x;                                       // a weapon row / item record
+  }
+  function holdClassOf(x) {
+    const r = holdRow(x);
+    if (!r) return "small";
+    if (r.holdClass && HOLD_CLASS[r.holdClass]) return r.holdClass;
+    if (r.item || ITEM_CLASS[r.id]) return ITEM_CLASS[r.item || r.id] || "small";
+    if (r.melee) return "melee";
+    const slot = r.slot || "pistol";
+    return slot === "pistol" || slot === "utility" ? "handgun" : "long";
+  }
+  /* hands(x, o): 1 or 2.
+       o.view    "tp" (default: a body in the world) or "fp" (the viewmodel)
+       o.aimed   presenting / down the sights
+       o.offBusy the off hand is doing something else (a door, a torch, a rung) */
+  function holdHands(x, o) {
+    o = o || {};
+    const C = HOLD_CLASS[holdClassOf(x)] || HOLD_CLASS.small;
+    let n = o.view === "fp" ? (o.aimed ? C.fpAimed : C.fpHip) : C.tp;
+    if (n === 2 && o.offBusy) n = 1;
+    return n;
+  }
+  const _anV = new THREE.Vector3();
+  function anchorLocal(prop, v, out) {
+    if (!v) return null;
+    if (v.isVector3) return out.copy(v);
+    if (v.isObject3D) {
+      // an Object3D anchor anywhere under the prop: its origin in prop space
+      out.set(0, 0, 0);
+      for (let o = v; o && o !== prop; o = o.parent) { o.updateMatrix(); out.applyMatrix4(o.matrix); }
+      return out;
+    }
+    if (Array.isArray(v) && v.length >= 3) return out.set(v[0], v[1], v[2]);
+    if (v.pos && v.pos.isVector3) return out.copy(v.pos);         // the appearance contract's { pos, quat }
+    return null;
+  }
+  /* anchors(prop) -> { name: Vector3 in prop (model) space }, cached on the
+     prop (a model never changes shape; a moving part like a pump is read
+     live by its own driver, not from here). */
+  function holdAnchors(prop) {
+    const ud = prop && prop.userData;
+    if (!ud) return {};
+    if (ud._anchors) return ud._anchors;
+    const A = {};
+    // 1. the appearance's own named anchors
+    const auth = ud.anchors;
+    if (auth) for (const k in auth) {
+      const v = auth[k];
+      if (!v || typeof v !== "object") continue;                  // k (units per metre)
+      const p = anchorLocal(prop, v, new THREE.Vector3());
+      if (p) A[k] = p;
+      if (v.well && v.well.isVector3 && !A.well) A.well = v.well.clone();       // the mag's mouth
+      else if (v.well && v.well.pos && !A.well) A.well = v.well.pos.clone();
+    }
+    prop.traverse(function (o) {
+      const m = o.name && /^anchor[_:]?(\w+)$/.exec(o.name);
+      if (m && !A[m[1]]) A[m[1]] = anchorLocal(prop, o, new THREE.Vector3());
+    });
+    // 2. what the older models publish
+    let owner = null;
+    prop.traverse(function (o) { if (!owner && o.userData && o.userData.fireGrip) owner = o; });
+    if (owner && (!A.grip || !A.trigger)) {
+      const h = owner.userData.fireGrip, M = new THREE.Matrix4();
+      for (let o = owner; o && o !== prop; o = o.parent) { o.updateMatrix(); M.premultiply(o.matrix); }
+      if (!A.grip) A.grip = new THREE.Vector3(0, h.at[0], h.at[1]).applyMatrix4(M);
+      if (!A.trigger && h.trigger) A.trigger = new THREE.Vector3(0, h.trigger[0], h.trigger[1]).applyMatrix4(M);
+    }
+    const g = ud.grips;
+    if (g) {
+      if (!A.support && g.support && g.support.isVector3) A.support = g.support.clone();
+      if (!A.mag && g.mag && g.mag.isVector3) A.mag = g.mag.clone();
+      if (!A.charge && g.charge && g.charge.isVector3) A.charge = g.charge.clone();
+    }
+    if (!A.muzzle && ud.muzzle && ud.muzzle.isVector3) A.muzzle = ud.muzzle.clone();
+    if (!A.pump && ud.pump && ud.pump.isObject3D) A.pump = anchorLocal(prop, ud.pump, new THREE.Vector3());
+    ud._anchors = A;
+    return A;
+  }
+  CBZ.holds = {
+    CLASS: HOLD_CLASS, ITEM_CLASS: ITEM_CLASS,
+    classOf: holdClassOf, hands: holdHands, anchors: holdAnchors,
+    // world position of a named anchor (null if the model has none)
+    anchorWorld: function (prop, name, out) {
+      const a = holdAnchors(prop)[name];
+      if (!a) return null;
+      prop.updateWorldMatrix(true, false);
+      return prop.localToWorld((out || _anV).copy(a));
+    },
+  };
+
   /* ==== CBZ.gunHold — THE BODY'S HANDS CLOSED ON THE GUN'S OWN GRIPS =======
      Owner: "the hands during gun holding [need to be] fixed."
 
@@ -71,10 +219,9 @@
      Pure maths is on CBZ.gunHold.math for tools/gun-hold-check.mjs. */
   const GH = (function () {
     const BEND_MAX = 0.70;            // rad the wrist may bend off the forearm line (~40°)
-    const TILT = { fire: 0.30, guard: 0.45, vgrip: 0.25, cup: 0.30 };   // fist axis off the part axis
-    const ROLL = { fire: 0.30, guard: 1.10, vgrip: 0.50, cup: 0.75 };   // round the part, off the preferred side
+    const TILT = { fire: 0.30, guard: 0.45, vgrip: 0.25 };   // fist axis off the part axis
+    const ROLL = { fire: 0.30, guard: 1.10, vgrip: 0.50 };   // round the part, off the preferred side
     const WEB = 0.040;                // m (hand): grip centre below the web / top of a grip
-    const FINGERS_THICK = 0.020;      // m (hand): what a cupping hand wraps over the firing fingers
 
     const _x = new THREE.Vector3(), _y = new THREE.Vector3(), _z = new THREE.Vector3();
     const _t1 = new THREE.Vector3(), _t2 = new THREE.Vector3(), _m = new THREE.Matrix4();
@@ -195,16 +342,15 @@
         const fwd = V(0, 0, 0).crossVectors(ax, u);
         sup = { kind: "vgrip", o: V(0, hold.y, hold.z), axis: ax, x0: ax.clone(),
           n: u.clone().negate().addScaledVector(fwd, -0.22).normalize(), hw: hold.w / 2, hh: hold.d / 2 };
-      } else if (fire && g && g.support) {
-        // THUMBS FORWARD on a pistol: the off hand wraps the firing fist
-        sup = { kind: "cup", o: fire.top.clone(), axis: fire.axis.clone(), x0: fire.axis.clone(),
-          n: fire.u.clone().negate().addScaledVector(fire.fwd, -0.30).normalize(), hw: fire.hw, hh: fire.hh };
       } else if (g && g.support) {
         // authored point only: a handguard just above it, along the bore
         sup = { kind: "guard", o: g.support.clone().add(V(0, 0.04, 0)), axis: V(0, 0, -1),
           n: V(-0.30, -1, 0).normalize(), hw: 0.04, hh: 0.04 };
         sup.x0 = sup.axis.clone();
       }
+      // HOW MANY HANDS is the hold engine's call (CBZ.holds): a handgun in a
+      // body's hands is one-handed, so it has no support grip to solve
+      if (sup && CBZ.holds.hands(prop, { view: "tp" }) < 2) sup = null;
       const spec = fire ? { fire, sup } : null;
       ud._holdSpec = spec;
       return spec;
@@ -220,14 +366,9 @@
       z.fc.copy(f.top).addScaledVector(f.axis, -WEB * k);
       z.fPose = H && H.holdPose ? H.holdPose("trig", Math.sqrt(f.hw * f.hh) / k) : "pistol";
       if (s) {
-        if (s.kind === "cup") {
-          z.sc.copy(z.fc).addScaledVector(s.axis, -0.012 * k);
-          z.sPose = H && H.holdPose ? H.holdPose("hold", Math.sqrt((s.hw / k + FINGERS_THICK) * (s.hh / k + FINGERS_THICK * 0.8))) : "cupover";
-        } else {
-          z.sc.copy(s.o);
-          if (s.kind === "vgrip") z.sc.addScaledVector(s.axis, -(WEB + 0.010) * k);
-          z.sPose = H && H.holdPose ? H.holdPose("hold", Math.sqrt(s.hw * s.hh) / k) : "support";
-        }
+        z.sc.copy(s.o);
+        if (s.kind === "vgrip") z.sc.addScaledVector(s.axis, -(WEB + 0.010) * k);
+        z.sPose = H && H.holdPose ? H.holdPose("hold", Math.sqrt(s.hw * s.hh) / k) : "support";
       }
       spec._k = k; spec._z = z;
       return z;
@@ -363,14 +504,14 @@
          · a LONG gun is shouldered: the body BLADED (support shoulder forward,
            the neck turned back onto the sights), the butt at the shoulder
            pocket toward the chest, the barrel straight down-range;
-         · a PISTOL is a two-hand isosceles at the chest, pushed inboard so the
-           cup hand can meet it;
+         · a HANDGUN is one hand (CBZ.holds): the arm out from its shoulder,
+           elbow soft, the off arm free;
          · the firing arm is solved so the fist wraps the grip, the gun seated
-           in it; the off arm is solved onto the handguard / foregrip / fist.
+           in it; a long gun's off arm is solved onto the handguard / foregrip.
        Per frame this is copies — no solve, for every armed NPC, not a
        budgeted few. */
     const BLADE = 0.60, BLADE_NECK = 0.85;
-    const PISTOL_AT = new THREE.Vector3(0, -0.21, 0.56);    // body units, off the inboard shoulder point
+    const ONE_HAND_REACH = 0.93;      // share of the arm (shoulder to crease) a one-hand aim holds out
     const _rd = new THREE.Vector3(), _ro = new THREE.Vector3(), _rc = new THREE.Vector3();
     const _rbq = new THREE.Quaternion(), _rwq = new THREE.Quaternion(), _rm = new THREE.Matrix4();
     const _r0 = new THREE.Vector3(0, 0, 0), _rUp = new THREE.Vector3(0, 1, 0), _rX = new THREE.Vector3(1, 0, 0), _rpa = new THREE.Vector3();
@@ -433,29 +574,36 @@
        stock still in the shoulder pocket and both hands on the gun, the muzzle
        dropped ~37 degrees and turned a touch across the body, the torso only
        lightly bladed so a walk still reads as a walk. A pistol keeps its one-
-       hand carry beside the thigh (the arm hangs; nothing to solve). */
+       hand carry beside the thigh (the arm hangs; nothing to solve).
+       CROUCHED ("lowc") the muzzle drops only half as far: the compressed low
+       ready. At 37 degrees a crouched teen's rifle muzzle was in the ground,
+       the ground rest lifted the whole gun 30 cm up into the chest and the
+       off arm, walked back along the receiver after it, went 2 cm into the
+       ribs (gun-hold-check, carry-crouch). */
     const LOW = { pitch: 0.45, yaw: 0.30, blade: 0.26 };
-    function solveReady(ch, prop, spec, C, pitch, mode) {
-      const low0 = mode === "low";
-      const elev = -(low0 ? LOW.pitch : (pitch || 0));          // combat's convention: negative pitch = barrel up
+    const LOW_CROUCH = { pitch: 0.22, yaw: 0.30, blade: 0.26 };
+    function solveReady(ch, prop, spec, C, pitch, mode, force) {
+      const low0 = mode === "low" || mode === "lowc";
+      const LW = mode === "lowc" ? LOW_CROUCH : LOW;
+      const elev = -(low0 ? LW.pitch : (pitch || 0));          // combat's convention: negative pitch = barrel up
       const body = ch.body, ra = ch.parts.ra, la = ch.parts.la;
       const hr = handOf(ch, 1), fit = hr.userData.fit;
       const z = sized(spec, fit.s / (prop.scale.x || 1));
       const stock = stockZ(prop) * (prop.scale.x || 1);        // rig (body) units
       const long = stock > 0.26;
-      const blade = long ? (low0 ? LOW.blade : BLADE) : 0;
+      const blade = long ? (low0 ? LW.blade : BLADE) : 0;
       // a one-handed gun leaves the off arm to whoever had it: put it back after
       const laKeep = [la.quaternion.clone(), la.position.z, la.userData.low.rotation.clone(), la.userData._armRestZ];
       ra.position.z = 0; la.position.z = 0;
       if (CBZ.charArmTo.rest) { CBZ.charArmTo.rest(ch, "r", 0); CBZ.charArmTo.rest(ch, "l", 0); }
       // the gun in the BODY frame: down-range once the body is bladed
-      const yaw = blade + (low0 ? LOW.yaw : 0);
+      const yaw = blade + (low0 ? LW.yaw : 0);
       _rd.set(Math.sin(yaw) * Math.cos(elev), Math.sin(elev), Math.cos(yaw) * Math.cos(elev));
       _rm.lookAt(_r0, _rd, _rUp);
       _rbq.setFromRotationMatrix(_rm);
       let fireBend = 0;
       const low = hr.parent;
-      const attempt = function (pull, inb, fwd, prot, lift) {
+      const attempt = function (inb, fwd, prot, lift) {
         // every attempt starts from the same hanging arms, so the answer is a
         // function of the body and the gun alone. `prot` rolls both shoulders
         // forward (scapular protraction: what a man in a plate carrier spends
@@ -470,18 +618,17 @@
         // at the shoulder joint's centre inside the torso
         if (long) { _ro.y -= 0.07; _ro.z = pocketZ(ch, _ro.x, _ro.y); _ro.addScaledVector(_rd, stock + (fwd || 0)); }
         else {
-          // the arms swing up/down from the shoulders — but a pistol lowered
-          // stays out in FRONT (the shoulders protract), or both straight arms
-          // would cut through the chest's corners on the way to it
-          _rpa.copy(PISTOL_AT).applyAxisAngle(_rX, -elev);
-          if (_rpa.z < PISTOL_AT.z) _rpa.z = PISTOL_AT.z;
+          /* ONE HAND (CBZ.holds: a handgun in a body's hands). The arm goes
+             OUT from its own shoulder down the aim, a touch inboard so the
+             sights come under the eye, the elbow soft (ONE_HAND_REACH of the
+             arm), the off arm left to whoever has it. Pitched, the arm swings
+             from the shoulder like a boom: the gun stays at arm's length. */
+          // the crease at ONE_HAND_REACH of the arm, the grip a fist ahead of it
+          gripCentreOf(z.fPose, 1, _rpa);
+          const reach = (-ra.userData.low.position.y - fit.wristY) * ONE_HAND_REACH + _rpa.length() * fit.s;
+          _rpa.copy(_rd).multiplyScalar(reach + (fwd || 0));
           _ro.add(_rpa);
-          // a compact's support grip ahead of the fist (the Uzi's receiver):
-          // the gun comes back toward the chest by that much
-          const ahead = spec.sup ? -z.sc.z * (prop.scale.x || 1) : 0;
-          if (ahead > 0.09) _ro.addScaledVector(_rd, -(ahead - 0.09) * pull);
-          _ro.z += fwd || 0;
-          _ro.y += lift || 0;                                     // up toward the eyes: arms over the kit
+          _ro.y += lift || 0;
         }
         body.updateWorldMatrix(true, false);
         body.getWorldQuaternion(_rwq);
@@ -542,14 +689,14 @@
         return supportLand(ch, prop, 1, 0.03, 4, null);
       };
       /* THE BEST HOLD THIS BODY CAN MAKE, AS WORN. The first attempt is the
-         textbook one (the butt in the pocket / the pistol at the chest); if
-         the arms then run into the body or its kit, or a two-hand pistol's
-         cup can't be reached, the gun is tried further out from the chest
-         (fwd), further inboard (inb) and, for a compact, back toward it
-         (pull), and the attempt that leaves the least arm inside the body
-         and the support hand on the gun wins. Solved once per body + gun +
+         textbook one (the butt in the pocket / a handgun at arm's length);
+         if the arms then run into the body or its kit, or the support hand
+         can't reach, the gun is tried further out (fwd), further inboard
+         (inb), up over the kit (lift, one hand) and with the shoulders
+         rolled forward (prot), and the attempt that leaves the least arm
+         inside the body and the support hand on the gun wins. Solved once per body + gun +
          pitch level, so the search costs nothing per frame. */
-      const inb0 = long ? 0.38 : 0.42;
+      const inb0 = long ? 0.38 : 0.10;
       const inBody = function () {
         // (a one-handed gun's off arm is not this solve's: it goes back after)
         const ar = CBZ.charArmTo.armPen ? Math.max(spec.sup ? CBZ.charArmTo.armPen(ch, "l") : 0, CBZ.charArmTo.armPen(ch, "r")) : 0;
@@ -558,48 +705,55 @@
       // the support hand ON the gun is not negotiable (a miss costs more than
       // any amount of arm in the body); then the least arm/gun inside the
       // body; then the textbook placement
-      const score = function (g, pen, fwd, inb, pull, prot, lift) {
+      const score = function (g, pen, fwd, inb, prot, lift) {
         return (g != null && spec.sup && g > 0.02 ? 10 + g * 20 : 0) + (fireBend > BEND_MAX + 0.005 ? 5 : 0) +
-          pen * 12 + fwd * 0.08 + Math.abs(inb - inb0) * 0.05 + Math.abs(pull - 0.25) * 0.004 + prot * 0.10 + lift * 0.06;
+          pen * 12 + Math.abs(fwd) * 0.08 + Math.abs(inb - inb0) * 0.05 + prot * 0.10 + Math.abs(lift) * 0.06;
       };
-      const place = { pull: 0.25, inb: inb0, fwd: 0, prot: 0, lift: 0 };
-      let gap = attempt(0.25, inb0, 0, 0, 0);
+      const place = { inb: inb0, fwd: 0, prot: 0, lift: 0 };
+      // `force`: this placement and no search (a split between two levels,
+      // pitchNpc's bracket(): the same hold as its neighbours, at its pitch)
+      if (force) Object.assign(place, force);
+      let gap = attempt(place.inb, place.fwd, place.prot, place.lift);
+
       const PEN_OK = 0.004;
-      let best = { s: score(gap, inBody(), 0, inb0, 0.25, 0, 0), pull: 0.25, inb: inb0, fwd: 0, prot: 0, lift: 0 };
+      let best = { s: score(gap, inBody(), place.fwd, place.inb, place.prot, place.lift), inb: place.inb, fwd: place.fwd, prot: place.prot, lift: place.lift };
       const GOOD = PEN_OK * 12 + 0.03;
-      if (best.s > GOOD) {
+      if (!force && best.s > GOOD) {
         /* COORDINATE DESCENT, cheapest change first (a full grid is hundreds of
            arm solves: a hitch the first time a squad draws): how far out from
            the chest; how far inboard; (a compact) how far back; (a pistol) up
            toward the eyes so the arms run over the kit; and last the shoulders
            rolled forward. Each axis is swept holding the best of the others,
            twice round. */
-        const ahead = !long && -z.sc.z * (prop.scale.x || 1) > 0.09;
-        const AX = [
+        // (one hand: nearer the body is a more bent elbow; up is the arm over
+        // a plate carrier's shoulder)
+        const AX = long ? [
           ["fwd", [0, 0.04, 0.08, 0.13, 0.19, 0.26]],
-          ["inb", long ? [0.38, 0.30, 0.46, 0.22, 0.14] : [0.42, 0.5, 0.56, 0.62, 0.34]],
+          ["inb", [0.38, 0.30, 0.46, 0.22, 0.14]],
+        ] : [
+          ["fwd", [0, -0.03, -0.06, 0.02]],
+          ["inb", [0.10, 0.04, 0.16, 0.22, 0]],
+          ["lift", [0, 0.04, 0.08, -0.04]],
         ];
-        if (ahead) AX.push(["pull", [0.25, 0.5, 0.75, 1, 1.25, 1.5]]);
-        if (!long) AX.push(["lift", [0, 0.08, 0.15]]);
         AX.push(["prot", [0, 0.05, 0.10]]);
-        const tried = new Set([[best.fwd, best.inb, best.pull, best.lift, best.prot].join()]);
+        const tried = new Set([[best.fwd, best.inb, best.lift, best.prot].join()]);
         for (let round = 0; round < 2 && best.s > GOOD; round++) {
           for (const [k, vals] of AX) {
             for (const v of vals) {
               const c = Object.assign({}, best);
               c[k] = v;
-              const id = [c.fwd, c.inb, c.pull, c.lift, c.prot].join();
+              const id = [c.fwd, c.inb, c.lift, c.prot].join();
               if (tried.has(id)) continue;
               tried.add(id);
-              const g = attempt(c.pull, c.inb, c.fwd, c.prot, c.lift);
-              c.s = score(g, inBody(), c.fwd, c.inb, c.pull, c.prot, c.lift);
+              const g = attempt(c.inb, c.fwd, c.prot, c.lift);
+              c.s = score(g, inBody(), c.fwd, c.inb, c.prot, c.lift);
               if (c.s < best.s - 1e-4) best = c;
             }
             if (best.s <= GOOD) break;
           }
         }
-        gap = attempt(best.pull, best.inb, best.fwd, best.prot, best.lift);
-        place.pull = best.pull; place.inb = best.inb; place.fwd = best.fwd; place.prot = best.prot; place.lift = best.lift;
+        gap = attempt(best.inb, best.fwd, best.prot, best.lift);
+        place.inb = best.inb; place.fwd = best.fwd; place.prot = best.prot; place.lift = best.lift;
       }
       C = C || { raQ: new THREE.Quaternion(), laQ: new THREE.Quaternion(), raL: new THREE.Vector3(), laL: new THREE.Vector3(),
         hrQ: new THREE.Quaternion(), hrP: new THREE.Vector3(), hlQ: new THREE.Quaternion(), hlP: new THREE.Vector3(),
@@ -620,7 +774,7 @@
       }
       C.fireBend = fireBend; C.supBend = last.supBend; C.supGap = gap; C.slide = last.slide;
       C.hasSupport = !!(spec.sup && hl && gap != null);
-      C.inb = place.inb; C.fwd = place.fwd; C.pull = place.pull; C.prot = place.prot;
+      C.inb = place.inb; C.fwd = place.fwd; C.prot = place.prot; C.lift = place.lift;
       if (!C.hasSupport) {
         la.quaternion.copy(laKeep[0]); la.position.z = laKeep[1]; la.userData.low.rotation.copy(laKeep[2]);
         la.userData._armRestZ = laKeep[3];
@@ -808,9 +962,10 @@
       const hr = handOf(ch, 1);
       let C = prop.userData._low;
       const vid = CBZ.charArmTo && CBZ.charArmTo.bodyVolume ? (CBZ.charArmTo.bodyVolume(ch) || {}).id : 0;
-      if (!C || prop.userData._lowCh !== ch || C.s !== hr.userData.fit.s || prop.userData._lowVol !== vid) {
-        prop.userData._lowVol = vid;
-        C = getReady(ch, prop, specOf(prop), hr, 0, true, "low");
+      const mode = ch.crouch ? "lowc" : "low";
+      if (!C || prop.userData._lowCh !== ch || C.s !== hr.userData.fit.s || prop.userData._lowVol !== vid || prop.userData._lowMode !== mode) {
+        prop.userData._lowVol = vid; prop.userData._lowMode = mode;
+        C = getReady(ch, prop, specOf(prop), hr, 0, true, mode);
         prop.userData._low = C; prop.userData._lowCh = ch;
       }
       applyReady(ch, prop, C, null, 0, true);
@@ -818,23 +973,93 @@
     }
     // is this a long gun (a stock to shoulder), in the body's own units
     function isLong(prop) { return stockZ(prop) * (prop.scale.x || 1) > 0.26; }
-    function pitchNpc(ch, prop, pitch) {
+    // rawBlend: blend the two neighbouring levels as they are (the player's
+    // pass, systems/gunhands.js, stands its gun off the body itself every
+    // frame); otherwise a pair that would blend through the body is split
+    function pitchNpc(ch, prop, pitch, rawBlend) {
       if (!ready(ch, prop, true)) return false;
       if (!(Math.abs(pitch) > 1e-4)) return true;
       const hr = handOf(ch, 1), spec = specOf(prop);
       const p = Math.max(-0.75, Math.min(0.75, pitch)) / PITCH_STEP;
-      const lo = Math.floor(p), t = p - lo;
       // this prop's own level table first: a tracking NPC looks its levels up
       // every frame, and the shared key is a string
       const L = prop.userData._readyLv || (prop.userData._readyLv = new Map());
-      let A = L.get(lo);
-      if (!A) { A = getReady(ch, prop, spec, hr, lo, true); L.set(lo, A); }
-      let B = null;
-      if (t > 1e-3) { B = L.get(lo + 1); if (!B) { B = getReady(ch, prop, spec, hr, lo + 1, true); L.set(lo + 1, B); } }
+      if (p === Math.floor(p)) { applyReady(ch, prop, levelOf(ch, prop, spec, hr, L, p), null, 0, true); return true; }
+      if (rawBlend) _br.set(Math.floor(p), Math.floor(p) + 1);
+      else bracket(ch, prop, spec, hr, L, p);
+      const a = _br.x, b = _br.y, t = (p - a) / (b - a);
+      const A = levelOf(ch, prop, spec, hr, L, a);
+      const B = t > 1e-3 ? levelOf(ch, prop, spec, hr, L, b) : null;
       applyReady(ch, prop, A, B, t, true);
       return true;
     }
-
+    /* BETWEEN TWO LEVELS THE GUN MUST STAY OUT OF THE KIT. Each level is
+       solved clear of the body as worn, but the blend of two clear holds is
+       not always clear: the arms' joints and the fist are slerped, the gun
+       rides the blended fist, and on the way the stock can pass through the
+       edge of a plate carrier (a woman's sniper butt 1.2-2.3 cm inside hers
+       between two up-levels with the SAME placement, gun-hold-check npc-up).
+       So the first time an aim blends across a pair of levels, the blend is
+       sampled against the body as worn; if it touches, the pair is SPLIT: the
+       midpoint pitch gets its own exact solve and each half is checked the
+       same way (down to an eighth of a level). Every blend then runs between
+       two real holds close enough not to cut the body. Per prop, once per
+       pair: no per-frame cost beyond a lookup. */
+    const PAIR_N = 6, SPLIT_MAX = 3;
+    function blendWorst(ch, prop, A, B) {
+      let worst = 0;
+      for (let i = 1; i < PAIR_N; i++) {
+        applyReady(ch, prop, A, B, i / PAIR_N, true);
+        worst = Math.max(worst, gunInBody(ch, prop));
+      }
+      return worst;
+    }
+    function levelOf(ch, prop, spec, hr, L, lv) {
+      let C = L.get(lv);
+      if (!C) { C = getReady(ch, prop, spec, hr, lv, true); L.set(lv, C); }
+      return C;
+    }
+    // the midpoint of a split: the neighbours' own placement, halfway, solved
+    // exactly at its pitch (arms put back after: this is a lookup, not a pose).
+    // Null when that is not as good a hold as its neighbours (the support
+    // hand walked back, a wrist past the cap, the gun or an arm in the body):
+    // a worse hold in the middle of a sweep is a jump, not a fix.
+    function splitLevel(ch, prop, spec, L, a, b) {
+      const m = (a + b) / 2;
+      let C = L.get(m);
+      if (C !== undefined) return C;
+      const A = L.get(a), B = L.get(b), mix = (k) => ((A[k] || 0) + (B[k] || 0)) / 2;
+      const ra = ch.parts.ra, la = ch.parts.la;
+      const keep = [ra.quaternion.clone(), ra.position.z, ra.userData.low.rotation.clone(), la.quaternion.clone(), la.position.z, la.userData.low.rotation.clone(),
+        ra.userData._armRestZ, la.userData._armRestZ, Object.assign({}, last)];
+      C = solveReady(ch, prop, spec, null, m * PITCH_STEP, undefined, { inb: mix("inb"), fwd: mix("fwd"), prot: mix("prot"), lift: mix("lift") });
+      const pen = Math.max(gunInBody(ch, prop), CBZ.charArmTo.armPen ? Math.max(C.hasSupport ? CBZ.charArmTo.armPen(ch, "l") : 0, CBZ.charArmTo.armPen(ch, "r")) : 0);
+      ra.quaternion.copy(keep[0]); ra.position.z = keep[1]; ra.userData.low.rotation.copy(keep[2]);
+      la.quaternion.copy(keep[3]); la.position.z = keep[4]; la.userData.low.rotation.copy(keep[5]);
+      ra.userData._armRestZ = keep[6]; la.userData._armRestZ = keep[7]; Object.assign(last, keep[8]);
+      const good = pen < 0.003 && C.hasSupport === A.hasSupport && C.fireBend <= Math.max(A.fireBend, B.fireBend, BEND_MAX) + 0.005 &&
+        (!C.hasSupport || (C.supGap < 0.02 && C.slide <= Math.max(A.slide || 0, B.slide || 0) + 0.05));
+      L.set(m, good ? C : null);
+      return good ? C : null;
+    }
+    // the bracket [a, b] of blendable levels round p (b - a = 1, 1/2, 1/4...)
+    function bracket(ch, prop, spec, hr, L, p) {
+      let a = Math.floor(p), b = a + 1;
+      for (let depth = 0; ; depth++) {
+        const key = "pair" + a + ":" + b;
+        let st = L.get(key);
+        if (st === undefined) {
+          const w = depth >= SPLIT_MAX ? 0 : blendWorst(ch, prop, levelOf(ch, prop, spec, hr, L, a), levelOf(ch, prop, spec, hr, L, b));
+          // 1 = blend it; 2 = split it (only if the midpoint is a good hold)
+          st = w < 0.006 || !splitLevel(ch, prop, spec, L, a, b) ? 1 : 2;
+          L.set(key, st);
+        }
+        if (st === 1) return _br.set(a, b);
+        const m = (a + b) / 2;
+        if (p < m) b = m; else a = m;
+      }
+    }
+    const _br = new THREE.Vector2();
     /* ---- THE SUPPORT HAND: to the gun ---------------------------------------
        slide 0..1 walks a handguard grip back toward the firing grip (the
        honest fallback when the handguard is out of the arm's reach). The
@@ -849,7 +1074,7 @@
       // back ALONG THE BORE LINE, under the gun, to just ahead of the firing
       // hand — the hand stays on the weapon's underside the whole way
       // (a foregrip out of reach: the hand takes the tube behind it the same way)
-      if (slide > 0 && spec.sup.kind !== "cup") out.z += (Math.max(out.z, z.fc.z - 0.11 * spec._k) - out.z) * slide;
+      if (slide > 0) out.z += (Math.max(out.z, z.fc.z - 0.11 * spec._k) - out.z) * slide;
       return prop.localToWorld(out);
     }
     function frameSupport(spec, low) {
@@ -902,7 +1127,7 @@
       last.slide = 0;
       let gap = support(ch, prop, blend, 0, 3, floorY);
       const spec = specOf(prop);
-      if (gap == null || gap <= tol || !spec.sup || spec.sup.kind === "cup") return gap;
+      if (gap == null || gap <= tol || !spec.sup) return gap;
       let lo = 0, hi = 1;
       for (let i = 0; i < steps; i++) {
         const mid = (lo + hi) / 2;
@@ -1752,23 +1977,17 @@
       ch.parts.ra.position.z = 0.14;
       elbow(ch.parts.ra, shoulder ? -0.28 : (longGun ? -0.10 - heavy * 0.12 : -0.16));
     }
-    // Every firearm is a two-hand object while presented. Pistols meet at the
-    // firing wrist; long guns move the left hand forward by the weapon's own
-    // support measurement. A shoulder launcher stays close to the receiver.
-    if (ch.parts.la) {
-      if (longGun) {
-        ch.parts.la.rotation.set(
-          (shoulder ? -1.38 : -1.55) - heavy * 0.10,
-          shoulder ? -0.18 : -0.34 - heavy * 0.08,
-          shoulder ? -0.34 : -0.42 - support * 0.18
-        );
-        ch.parts.la.position.z = (shoulder ? 0.16 : 0.24) + support * 0.5;
-        elbow(ch.parts.la, shoulder ? -0.48 : -0.72 - heavy * 0.26);
-      } else {
-        ch.parts.la.rotation.set(-1.56, -0.32, -0.68);
-        ch.parts.la.position.z = 0.20;
-        elbow(ch.parts.la, -0.22 - heavy * 0.12);
-      }
+    // A long gun is a two-hand object: the left hand forward by the weapon's
+    // own support measurement (a shoulder launcher close to the receiver). A
+    // handgun is one hand (CBZ.holds): the off arm is left to the walk.
+    if (ch.parts.la && CBZ.holds.hands(prop || ud.weaponId, { view: "tp" }) >= 2) {
+      ch.parts.la.rotation.set(
+        (shoulder ? -1.38 : -1.55) - heavy * 0.10,
+        shoulder ? -0.18 : -0.34 - heavy * 0.08,
+        shoulder ? -0.34 : -0.42 - support * 0.18
+      );
+      ch.parts.la.position.z = (shoulder ? 0.16 : 0.24) + support * 0.5;
+      elbow(ch.parts.la, shoulder ? -0.48 : -0.72 - heavy * 0.26);
     }
   }
 

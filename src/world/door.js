@@ -103,6 +103,10 @@
     collider: mesh.userData.collider,
     open: false, closedY: CLOSED_Y, travel: TRAVEL, t: 0,
     readerPos: { x: RX, y: RY + 0.045, z: RF - 0.045 },
+    // the read pad's face (0.002 thick at RF - 0.0425) and the way it faces:
+    // where a card is held to it (systems/interactions.js, CBZ.verbs.touch)
+    padPos: { x: RX, y: RY - 0.02, z: RF - 0.0435 },
+    padN: { x: 0, y: 0, z: -1 },
   };
 
   CBZ.door = door;

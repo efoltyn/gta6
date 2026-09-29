@@ -903,11 +903,11 @@
       a._aimElevCur = (a._aimElevCur || 0) + (want - (a._aimElevCur || 0)) * k;
     }
     const cur = a._aimElevCur || 0;
-    // A GUN HELD IN BOTH HANDS (systems/actorweapons.js CBZ.gunHold): the ready
-    // pose is a solved 3D pose, not the flat -1.45 these constants assume, so
-    // hard-setting rotation.x on it would tear the hands off the gun. The hold
-    // re-asserts its pose, pitches the gun arm by the elevation and re-solves
-    // the off hand onto the pitched gun.
+    // A GUN HELD BY THE HOLD ENGINE (systems/actorweapons.js CBZ.gunHold): the
+    // ready pose is a solved 3D pose, not the flat -1.45 these constants
+    // assume, so hard-setting rotation.x on it would tear the hands off the
+    // gun. The hold re-asserts its pose, pitches the gun arm by the elevation
+    // and (a long gun) re-solves the off hand onto the pitched gun.
     if (CBZ.gunHold && a._weaponProp && CBZ.gunHold.pitchNpc(a.char, a._weaponProp, cur)) return;
     const parts = a.char.parts;
     const isLong = slotOf(a) === "long";   // poseList's narrow test — its base is what we offset

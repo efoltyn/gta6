@@ -355,6 +355,7 @@
 
     const list = collectPushers(px, pz);
     movingCount = 0;
+    let pushing = null, pushNx = 0, pushNz = 0;
 
     for (let i = 0; i < props.length; i++) {
       const r = props[i];
@@ -388,6 +389,7 @@
           if (want < MIN_V) continue;           // too heavy for a body on foot
           const wx = -nx * want, wz = -nz * want;
           if (wx * wx + wz * wz > r.vx * r.vx + r.vz * r.vz) { r.vx = wx; r.vz = wz; }
+          if (q.a === P) { pushing = r; pushNx = nx; pushNz = nz; }
         }
       }
 
@@ -429,7 +431,35 @@
     }
 
     flushDirty();
+    if (pushing) pushHands(P, pushing, pushNx, pushNz);
   });
+
+  /* THE HANDS DO THE PUSHING. A body walking a crate across a room leans on
+     it with both palms flat on the face it is driving (CBZ.verbs.touch, the
+     plant solver): the face the player's drive is pressing (the contact
+     normal above), a shoulder's width apart along it, at the crate's top edge
+     or chest height, whichever is lower. Held while the push lasts (sustained
+     touches let go ~0.15 s after the last push frame). Anything below the
+     knee is pushed with the shins, not the hands. */
+  function pushHands(P, r, nx, nz) {
+    const V = CBZ.verbs;
+    if (!V || !V.touch || P.driving) return;
+    const py = P.pos.y || 0;
+    if (r.y1 < py + 0.55) return;
+    // the face: the prop's own box side the player stands off, after this frame's move
+    const ax = Math.abs(nx) >= Math.abs(nz);
+    const fx = ax ? r.x + Math.sign(nx) * r.hx : Math.max(r.x - r.hx, Math.min(P.pos.x, r.x + r.hx));
+    const fz = ax ? Math.max(r.z - r.hz, Math.min(P.pos.z, r.z + r.hz)) : r.z + Math.sign(nz) * r.hz;
+    const Nx = ax ? Math.sign(nx) : 0, Nz = ax ? 0 : Math.sign(nz);
+    const tx = -Nz, tz = Nx, half = ax ? r.hz : r.hx;
+    const y = Math.min(r.y1 - 0.07, py + 1.08);
+    for (let s = -1; s <= 1; s += 2) {
+      // facing the crate (-N), the body's left is +tangent: that palm is the left hand's
+      const lat = Math.max(-half + 0.06, Math.min(half - 0.06, s * 0.19));
+      V.touch(P, { point: { x: fx + tx * lat, y: y, z: fz + tz * lat }, normal: { x: Nx, y: 0, z: Nz }, kind: "palm",
+        arm: s > 0 ? "l" : "r", sustain: true, key: s > 0 ? "push-l" : "push-r" });
+    }
+  }
 
   // both broadphases, at most once per frame no matter how many props moved
   function flushDirty() {

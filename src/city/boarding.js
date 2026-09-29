@@ -442,6 +442,7 @@
     // rig-disposal traversals treat them like the transient props they are.
     g.userData.transient = true;
     g.userData._cbzDoorLeaf = seat.id;
+    g.userData.handleMesh = handle;                 // where a hand closes on this leaf (carHands)
     skin.userData._cbzDoorLeaf = seat.id;
     pane.userData._cbzDoorLeaf = seat.id;
     handle.userData._cbzDoorLeaf = seat.id;
@@ -1116,6 +1117,81 @@
   //  vehicles.js still commits, synchronously, at the handover.
   // ============================================================
   let pArc = null;
+  /* HANDS ON THE CAR (systems/verbs_pickup.js CBZ.verbs.touch — the plant
+     solver every hand on the world goes through):
+       walk/open  the hand CLOSES ON THE DOOR HANDLE (the pull bar playercars.js
+                  lofts onto the skin; the fallback leaf's own handle box) and
+                  rides it while the leaf swings open;
+       step       the palm goes on the ROOF RAIL over the opening (the top of
+                  the door aperture, seat.hinge.y1) while the body ducks in;
+       close      getting out: the palm pushes the open leaf shut, flat on its
+                  outer skin by the free edge.
+     All read off the car's own door data in the car's frame, live every
+     frame (the leaf is swinging). */
+  const _chP = new THREE.Vector3(), _chN = new THREE.Vector3(), _chA = new THREE.Vector3();
+  const _chM = new THREE.Matrix4();
+  // the door leaf's frame -> world (a shut real door is detached from the car, so compose it)
+  function leafMatrix(car, leaf) {
+    if (!leaf) return null;
+    if (leaf.real) {
+      const g = CBZ.carDoorGroup ? CBZ.carDoorGroup(car, leaf.id) : null;
+      if (!g) return null;
+      const f = g.parent || frameOf(car);
+      if (!f) return null;
+      f.updateWorldMatrix(true, false);
+      g.updateMatrix();
+      return { m: _chM.multiplyMatrices(f.matrixWorld, g.matrix), door: g.userData.carDoor };
+    }
+    leaf.updateWorldMatrix(true, false);
+    return { m: _chM.copy(leaf.matrixWorld), door: null, g: leaf };
+  }
+  function carHands(a, P) {
+    const V = CBZ.verbs;
+    if (!V || !V.touch || !a || !a.seat || !P) return;
+    const car = a.car, seat = a.seat, side = seat.side < 0 ? -1 : 1, H = seat.hinge;
+    if (a.phase === "walk" || a.phase === "open") {
+      const L = leafMatrix(car, a.leaf);
+      if (!L) return;
+      if (L.door && L.door.handle) {
+        const h = L.door.handle, t = h.tilt || 0;
+        _chP.set(h.x, h.y, h.z).applyMatrix4(L.m);
+        _chN.set(side * Math.cos(t), side * Math.sin(t), 0).transformDirection(L.m);
+      } else if (L.g && L.g.userData.handleMesh) {
+        const hm = L.g.userData.handleMesh;
+        hm.updateWorldMatrix(true, false);
+        hm.getWorldPosition(_chP);
+        _chN.set(side, 0, 0).transformDirection(L.m);
+      } else return;
+      _chA.set(0, 0, 1).transformDirection(L.m);
+      V.touch(P, { point: _chP, normal: _chN, axis: _chA, kind: "handle", sustain: true, key: "car-handle" });
+      return;
+    }
+    if (a.phase === "step" && H) {
+      // the roof rail over the aperture, a little inboard of the flank, behind the hinge
+      const w = worldOf(car, H.x - side * 0.10, (H.y1 || 1.2) + 0.02, H.z - (H.len || 1) * 0.55, _chP);
+      if (!w) return;
+      const f = frameOf(car);
+      _chN.set(0, 1, 0);
+      _chA.set(-side, 0, 0).transformDirection(f.matrixWorld);   // fingers over the roof
+      V.touch(P, { point: _chP, normal: _chN, along: _chA, kind: "palm", sustain: true, key: "car-frame" });
+      return;
+    }
+    if (a.phase === "close" && a.t < 0.2) {
+      const L = leafMatrix(car, a.leaf);
+      if (!L) return;
+      const len = (L.door && L.door.len) || (H && H.len) || 1;
+      const belt = (L.door && L.door.belt) || (H && H.belt) || 0.9;
+      // the face of the leaf the player is on: the outer skin, or (stood in
+      // the aperture behind the open door) the door card inside it
+      _chP.set(side * 0.03, belt - 0.06, -len * 0.75).applyMatrix4(L.m);
+      _chN.set(side, 0, 0).transformDirection(L.m);
+      if ((P.pos.x - _chP.x) * _chN.x + (P.pos.z - _chP.z) * _chN.z < 0) {
+        _chP.set(-side * 0.08, belt - 0.06, -len * 0.75).applyMatrix4(L.m);
+        _chN.negate();
+      }
+      V.touch(P, { point: _chP, normal: _chN, kind: "palm", sustain: true, key: "car-shut" });
+    }
+  }
   function playerGuide(P, tx, tz, dt, speed) {
     const dx = tx - P.pos.x, dz = tz - P.pos.z;
     const d = Math.hypot(dx, dz);
@@ -1168,11 +1244,13 @@
       const arrived = playerGuide(P, w.x, w.z, dt, 4.6);
       const d = Math.hypot(w.x - P.pos.x, w.z - P.pos.z);
       if (a.leaf) poseLeaf(a.leaf, a.seat, Math.max(0, Math.min(1, (2.6 - d) / 1.9)));
+      if (d < 1.6) { try { carHands(a, P); } catch (e) {} }
       if (arrived || a.walkT > 2.4) { a.phase = "open"; a.t = 0; }
       return;
     }
     if (a.phase === "open") {
       if (a.leaf) poseLeaf(a.leaf, a.seat, 1);
+      try { carHands(a, P); } catch (e) {}
       if (a.t >= 0.36) { a.phase = "step"; a.t = 0; a.from = { x: P.pos.x, z: P.pos.z }; }
       return;
     }
@@ -1183,6 +1261,7 @@
       P.pos.x = w.x; P.pos.z = w.z;
       const ch = CBZ.playerChar;
       if (ch && ch.group) { ch.group.position.x = P.pos.x; ch.group.position.z = P.pos.z; }
+      try { carHands(a, P); } catch (e) {}
       if (u >= 1) {
         a.phase = "close"; a.t = 0;
         if (a.commit) { try { a.commit(); } catch (e) {} a.commit = null; }
@@ -1192,6 +1271,7 @@
     }
     if (a.phase === "close") {
       if (a.leaf) poseLeaf(a.leaf, a.seat, Math.max(0, 1 - a.t / 0.4));
+      if (!P.driving) { try { carHands(a, P); } catch (e) {} }
       if (a.t >= 0.4) endPlayerArc(false);
       return;
     }

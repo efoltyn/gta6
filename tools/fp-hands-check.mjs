@@ -199,10 +199,10 @@ console.log("ARMED (every weapon: hip, sights, reload; the real poseFpArms)");
 const box = (parent, sx, sy, sz, m, x, y, z, rx, ry, rz) => { const o = new T.Mesh(new T.BoxGeometry(sx, sy, sz), m); o.position.set(x || 0, y || 0, z || 0); o.rotation.set(rx || 0, ry || 0, rz || 0); parent.add(o); return o; };
 const cyl = (parent, r, len, m, x, y, z, rx, ry, rz) => { const o = new T.Mesh(new T.CylinderGeometry(r, r, len, 8), m); o.position.set(x || 0, y || 0, z || 0); o.rotation.set(rx || 0, ry || 0, rz || 0); parent.add(o); return o; };
 {
-  const GH = read("src/systems/gunhands.js");
-  const choreo = vm.runInContext("(function(){" + block(GH, "  const CHOREO = {", "  // the same choreography") + "; return CHOREO;})()", ctx);
+  // the reload table + parts (CBZ.gunReload): gunhands.js's first block; its
+  // body pass bails out here (no CBZ.gunHold), the shared rig stays
+  vm.runInContext(read("src/systems/gunhands.js"), ctx, { filename: "src/systems/gunhands.js" });
   let reloadP = -1;
-  CBZ.gunReloadChoreo = (st) => choreo[st] || choreo.mag;
   CBZ.gunReloadPose = () => reloadP >= 0 ? { active: true, p: reloadP, style: CBZ._style || "mag" } : { active: false };
   const armSrc = `
     const THREE = window.THREE; const CBZ = window.CBZ;
@@ -211,7 +211,7 @@ const cyl = (parent, r, len, m, x, y, z, rx, ry, rz) => { const o = new T.Mesh(n
     const vm = new THREE.Group(); camera.add(vm);
     const gun = new THREE.Group();
     const weaponModels = [];
-    let ddT = -1; const fps = { weapon: 0 };
+    let ddT = -1; const fps = { weapon: 0 }; const WEAPONS = [];
     let punchT = 0, vmPunch = 0, guardK = 0;
     const fistT = [{ vis: false }, { vis: false }];
   ` + block(FPS, "  const FPH = CBZ.fpHands || null;", "  WEAPONS.forEach((w, i) => {")
@@ -447,6 +447,69 @@ const cyl = (parent, r, len, m, x, y, z, rx, ry, rz) => { const o = new T.Mesh(n
     }
     reloadP = -1;
   }
+  /* 10. THE PUMP RACK, FIRST PERSON: the stroke is CBZ.gunReload.rackAt (the
+     one fpsmode applies to the viewmodel and publishes to the third-person
+     gun). Through the whole rack the off hand stays ON the fore-end (its palm
+     rides the pump: the same point on the pump, within 1 mm, and on the drawn
+     wood within 1 cm), the pump really travels back and comes home, and the
+     arm keeps its wrist limit. */
+  {
+    const model = CBZ.weaponAppearance.shotgun(actx);
+    model.scale.setScalar(1.28);
+    A.fitOffHand(model, {});
+    A.weaponModels.length = 0; A.weaponModels.push(model);
+    A.gun.children.slice().forEach((c) => A.gun.remove(c)); A.gun.add(model);
+    A.vm.position.set(0.36, -0.34, -0.72); A.vm.rotation.set(-0.10, 0, 0);
+    const pump = model.userData.pump, sup = model.userData.fpSupport, base = model.userData.pumpBaseZ;
+    check(!!pump && !!sup && sup.parent === pump, "shotgun: the first-person off hand rides the pump");
+    const PALM = [0, -0.026, -0.052];
+    const toModel = (o) => { const m = new T.Matrix4(); for (let p = o; p && p !== model; p = p.parent) { p.updateMatrix(); m.premultiply(p.matrix); } return m; };
+    const palm = () => new T.Vector3(sup.userData.side * PALM[0], PALM[1], PALM[2]).applyMatrix4(toModel(sup));
+    const wood = [];
+    pump.traverse((o) => {
+      if (!o.isMesh || /^fp_hand/.test(o.name) || !o.geometry) return;
+      const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry, pa = g.attributes.position;
+      wood.push({ o, g, n: pa.count });
+    });
+    const woodDist = (m) => {
+      let d = Infinity; const cp = new T.Vector3();
+      for (const w of wood) {
+        const Mm = toModel(w.o), pa = w.g.attributes.position;
+        for (let i = 0; i + 2 < pa.count; i += 3) {
+          const t = new T.Triangle(new T.Vector3().fromBufferAttribute(pa, i).applyMatrix4(Mm), new T.Vector3().fromBufferAttribute(pa, i + 1).applyMatrix4(Mm), new T.Vector3().fromBufferAttribute(pa, i + 2).applyMatrix4(Mm));
+          if (t.getArea() < 1e-12) continue;
+          t.closestPointToPoint(m, cp); d = Math.min(d, cp.distanceTo(m));
+        }
+      }
+      return d;
+    };
+    const kReal = (() => { let k = 1; for (let p = sup; p && p !== model; p = p.parent) k *= p.scale.x; return k; })();
+    let drift = 0, off = 0, travel = 0, wrist = 0, rel0 = null;
+    for (let t = 0; t <= 1.0001; t += 0.05) {
+      const dz = CBZ.gunReload.rackAt(Math.min(1, t));
+      pump.position.z = base + dz;
+      A.poseFpArms(1 / 60);
+      const pm = palm();
+      const rel = pm.clone().sub(pump.position);
+      if (!rel0) rel0 = rel.clone();
+      drift = Math.max(drift, rel.distanceTo(rel0));
+      off = Math.max(off, woodDist(pm) / kReal);
+      travel = Math.max(travel, pump.position.z - base);
+      // the wrist limit, as 8. above
+      const q = new T.Quaternion(); let o = sup; const chain = [];
+      while (o && o !== A.vm) { chain.push(o); o = o.parent; }
+      for (let i = chain.length - 1; i >= 0; i--) q.multiply(chain[i].quaternion);
+      const P = A.armL.userData.parts;
+      const want = sup.userData.foreLocal.clone().applyQuaternion(q);
+      wrist = Math.max(wrist, want.angleTo(P.elbow.position.clone().sub(P.fore.position)));
+    }
+    check(travel > 0.2, `shotgun rack: the pump travels back (${travel.toFixed(3)} model units)`);
+    check(Math.abs(pump.position.z - base) < 1e-9, "shotgun rack: the pump comes home");
+    check(drift < 1e-3, `shotgun rack: the off hand rides the pump (${(drift * 1000).toFixed(2)} mm drift on it)`);
+    check(off < 0.010, `shotgun rack: the palm stays on the fore-end (${(off * 1000).toFixed(1)} mm off the wood)`);
+    check(wrist <= A.WRIST_DEV[1] + 1e-3, `shotgun rack: support wrist within its limit (${(wrist * 57.3).toFixed(0)} deg)`);
+    thumbRows.push(`shotgun rack: pump ${travel.toFixed(3)} back and home, palm drift ${(drift * 1000).toFixed(2)} mm, ${(off * 1000).toFixed(1)} mm off the wood`);
+  }
   for (const r of thumbRows.concat(watchRows)) console.log("  " + r);
   console.log(`  the player's watch on the support arm: widest ${(watchWorst * 100).toFixed(1)}% of the lens`);
   // 6. one hand size
@@ -582,7 +645,7 @@ console.log("HANDS ON THE LEDGE (fpPlants -> poseFpArms)");
     vm.position.set(0.12, -0.30, -0.66);
     const gun = new THREE.Group();
     const weaponModels = [];
-    let ddT = -1; const fps = { weapon: 0 };
+    let ddT = -1; const fps = { weapon: 0 }; const WEAPONS = [];
     let punchT = 0, vmPunch = 0, guardK = 0;
     const fistT = [
       { x: 0.10, y: -0.12, z: 0.20, roll: 0.9, bend: -0.2, vis: true, curl: "relaxed", hook: 0 },
