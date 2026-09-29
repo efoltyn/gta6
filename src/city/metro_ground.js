@@ -1208,6 +1208,111 @@
       S.drives.push({ x0: sx + tx * off, z0: sz + tz * off, nx: nx, nz: nz, tx: tx, tz: tz, L: L, w: dw, y: y });
     }
 
+
+    /* ---------------- coverAt: THE GRASS FIELD'S QUESTION ----------------
+       (world/grassfield.js) Where this metro's floor is lawn (pads, lawn
+       blocks, parks, campus), blades grow; everything drawn ON the lawn
+       (houses, driveways, park paths, parking lots, row-house stoops) is
+       cut out of it, from the same plan data the meshes are laid from. The
+       colour handed back is the lawn's own linear albedo with the shader's
+       dry-patch shift, so the blades average to the ground under them.
+       Owns every point on this metro's floor. Built on first use. */
+    let covIx = null;
+    function coverIndex() {
+      const CB = 16, map = new Map();
+      function add(minX, maxX, minZ, maxZ, sh) {
+        for (let ix = Math.floor(minX / CB); ix <= Math.floor(maxX / CB); ix++)
+          for (let iz = Math.floor(minZ / CB); iz <= Math.floor(maxZ / CB); iz++) {
+            const k = ix * 100003 + iz; let l = map.get(k); if (!l) map.set(k, l = []); l.push(sh);
+          }
+      }
+      function rect(x0, x1, z0, z1) { add(x0, x1, z0, z1, { t: 0, x0: x0, x1: x1, z0: z0, z1: z1 }); }
+      function orect(cx, cz, c, s, hw, hd) {
+        const ex = Math.abs(c) * hw + Math.abs(s) * hd, ez = Math.abs(s) * hw + Math.abs(c) * hd;
+        add(cx - ex, cx + ex, cz - ez, cz + ez, { t: 1, x: cx, z: cz, c: c, s: s, hw: hw, hd: hd });
+      }
+      // houses and every other building standing on a lawn
+      for (const b of P.bldgs || []) {
+        const r = b.rot || 0;
+        orect(b.x, b.z, Math.cos(r), Math.sin(r), b.w / 2 + 0.35, b.d / 2 + 0.35);
+      }
+      // driveways (n along, t across)
+      for (const v of S.drives) {
+        const cx = v.x0 + v.nx * v.L / 2, cz = v.z0 + v.nz * v.L / 2;
+        // local axes: u along t (tx,tz), w along n (nx,nz) -> as a rotation c/s
+        orect(cx, cz, v.tx, -v.tz, v.w / 2 + 0.25, v.L / 2 + 0.3);
+      }
+      for (const l of S.lots) rect(l.x0 - 0.3, l.x1 + 0.3, l.z0 - 0.3, l.z1 + 0.3);
+      // park paths: the ring just inside the inset + the cross (park())
+      for (const pk of S.parks) {
+        const inset = pk.kind === "pocket" ? 2 : pk.kind === "quad" ? 0 : PAD_SW + 6;
+        const wdt = (pk.kind === "pocket" ? 2.0 : 2.8) + 0.2;
+        const x0 = pk.x0 + inset, x1 = pk.x1 - inset, z0 = pk.z0 + inset, z1 = pk.z1 - inset;
+        if (x1 - x0 < 12 || z1 - z0 < 12) continue;
+        rect(x0, x1, z0, z0 + wdt); rect(x0, x1, z1 - wdt, z1); rect(x0, x0 + wdt, z0, z1); rect(x1 - wdt, x1, z0, z1);
+        if (pk.kind === "central" || pk.kind === "quad" || pk.kind === "park") {
+          const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, hw = wdt / 2;
+          rect(x0, x1, cz - hw, cz + hw); rect(cx - hw, cx + hw, z0, z1);
+        }
+      }
+      // lawn blocks (and their row-house stoop strips)
+      for (const b of S.blocks) {
+        if (b.plaza || b.lotAll || b.use === "industrial" || b.use === "cbd" || b.use === "midtown") continue;
+        add(b.x0, b.x1, b.z0, b.z1, { t: 2, b: b });
+        if (b.use === "rows") {
+          const alongX = (b.x1 - b.x0) >= (b.z1 - b.z0), i0 = b.sw - 0.2, i1 = b.sw + 1.7;
+          if (alongX) { rect(b.x0 + b.sw + 1.8, b.x1 - b.sw - 1.8, b.z0 + i0, b.z0 + i1); rect(b.x0 + b.sw + 1.8, b.x1 - b.sw - 1.8, b.z1 - i1, b.z1 - i0); }
+          else { rect(b.x0 + i0, b.x0 + i1, b.z0 + b.sw + 1.8, b.z1 - b.sw - 1.8); rect(b.x1 - i1, b.x1 - i0, b.z0 + b.sw + 1.8, b.z1 - b.sw - 1.8); }
+        }
+      }
+      return { CB: CB, map: map };
+    }
+    function mgHashJ(px, py) {
+      const fr = function (v) { return v - Math.floor(v); };
+      let x = fr(px * 0.1031), y = fr(py * 0.1031), z = fr(px * 0.1031);
+      const d = x * (y + 33.33) + y * (z + 33.33) + z * (x + 33.33);
+      x += d; y += d; z += d;
+      return fr((x + y) * z);
+    }
+    function mgNoiseJ(px, py) {
+      const ix = Math.floor(px), iy = Math.floor(py);
+      let fx = px - ix, fy = py - iy;
+      fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy);
+      const a = mgHashJ(ix, iy), b = mgHashJ(ix + 1, iy), c = mgHashJ(ix, iy + 1), d = mgHashJ(ix + 1, iy + 1);
+      return (a + (b - a) * fx) + ((c + (d - c) * fx) - (a + (b - a) * fx)) * fy;
+    }
+    S.coverAt = function (x, z, out) {
+      const y = probe(x, z);
+      if (y == null) return false;
+      out.g = 0;
+      const k = K;
+      if (k !== FK.lawn && k !== FK.lot) return true;
+      if (!covIx) covIx = coverIndex();
+      const l = covIx.map.get(Math.floor(x / covIx.CB) * 100003 + Math.floor(z / covIx.CB));
+      let col = COL.lawn, lawnBlock = k === FK.lawn;
+      if (l) for (let i = 0; i < l.length; i++) {
+        const sh = l[i];
+        if (sh.t === 0) { if (x >= sh.x0 && x <= sh.x1 && z >= sh.z0 && z <= sh.z1) return true; }
+        else if (sh.t === 1) {
+          const dx = x - sh.x, dz = z - sh.z;
+          if (Math.abs(dx * sh.c - dz * sh.s) <= sh.hw && Math.abs(dx * sh.s + dz * sh.c) <= sh.hd) return true;
+        } else if (k === FK.lot && x >= sh.b.x0 && x <= sh.b.x1 && z >= sh.b.z0 && z <= sh.b.z1) {
+          lawnBlock = true; col = sh.b.use === "rows" ? COL.lawn : COL.lawnDry;
+        }
+      }
+      if (!lawnBlock) return true;
+      if (k === FK.lawn) for (const p of S.pads) if (x >= p.x0 && x <= p.x1 && z >= p.z0 && z <= p.z1) { if (p.use === "park") col = COL.lawnPark; break; }
+      // the shader's lawn: base^2 x its mottle, and the dry-patch shift
+      const dp = Math.max(0, Math.min(1, (mgNoiseJ(x * 0.031 + 7.3, z * 0.031 + 7.3) - 0.6) / 0.22));
+      const dry = dp * dp * (3 - 2 * dp) * 0.55;
+      const t = 0.95;
+      out.r = col[0] * col[0] * t * (1 + 0.55 * dry);
+      out.gr = col[1] * col[1] * t * (1 + 0.25 * dry);
+      out.b = col[2] * col[2] * t * (1 - 0.28 * dry);
+      out.g = 1; out.y = y; out.dry = dry; out.wild = 0; out.h = 1; out.flw = 0.025;
+      return true;
+    };
+
     // ================= tile bins =================
     binAll(S, S.tile);
     S.stats = {
@@ -2549,7 +2654,10 @@
     "  if (k < 0.5) {",                                   // LAWN: mottle, mow stripes, dry patches, blades
     "    t = 0.80 + 0.30 * mgN(p * 0.043 + 1.7) + 0.14 * (mgN(p * 0.21 + 3.1) - 0.5);",
     "    if (pr < 1.5) { float ax = pr > 0.5 ? p.y : p.x; float band = step(0.5, fract(ax * 0.2273)); t *= 1.0 + 0.10 * (band - 0.5) * mid; }",
-    "    t *= 1.0 + fine * (mgH(floor(p * 7.0)) - 0.5) * 0.28;",
+    // near grain: soil and thatch between the blades (world/grassfield.js
+    // stands the blades up) — was one hash per 14 cm SQUARE, a pixel mosaic
+    // up close; now smooth multi-scale grain, still zero-mean (MG_MEAN holds)
+    "    t *= 1.0 + fine * ((mgN(p * 9.0) - 0.5) * 0.22 + (mgN(p * 31.0 + 5.1) - 0.5) * 0.14 + (mgN(p * 2.3 + 1.9) - 0.5) * 0.12);",
     "    col = mix(col, col * vec3(1.55, 1.25, 0.72), smoothstep(0.60, 0.82, mgN(p * 0.031 + 7.3)) * 0.55);",
     "  } else if (k < 1.5) {",                            // PAVING: 4.5 m slabs, joints, stains
     "    vec2 g = abs(fract(p / 4.5 + 0.5) - 0.5) * 4.5; float jd = min(g.x, g.y);",
@@ -2940,4 +3048,10 @@
     farMap: farMap, FARMAP_COLOURS: FM, Y: Y, GK: GK, FK: FK };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   if (CBZ) CBZ.metroGround = API;
+  // the grass field asks every metro in turn (world/grassfield.js)
+  if (CBZ && CBZ.groundCover) CBZ.groundCover.register("metro", function (x, z, out) {
+    const L = CBZ.metroCities || [];
+    for (let i = 0; i < L.length; i++) { const S = L[i] && L[i].solve; if (S && S.coverAt && S.coverAt(x, z, out)) return true; }
+    return false;
+  }, 20);
 })(typeof window !== "undefined" ? window : globalThis);

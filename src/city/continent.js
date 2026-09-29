@@ -1518,6 +1518,146 @@
     // how a 1441 m backdrop range ended up standing on driveable backcountry.
     CBZ.CONTINENT_PLATE = { minX: minX, maxX: maxX, minZ: minZ, maxZ: maxZ, seg: SEG };
     CBZ.CONTINENT_PLATE_SEG = SEG;
+    /* ---- continentCoverAt: THE GRASS FIELD'S QUESTION (world/grassfield.js)
+       The plate's own vertex colour decides where the backcountry is grass
+       (the same green test groundSkin uses: g/r through 0.88..1.22), and the
+       blades take that colour as-is (it is what the plate's shader
+       multiplies), so a meadow averages to the ground it grows out of, and
+       any land use painted into the vertex colours is what the grass follows.
+       Surface height and colour are read off the plate's OWN triangles (the
+       split reliefSample uses). Cut out: every authored surface (towns, POIs,
+       metros, biomes), the road records (a mown 5 m verge either side), the
+       sand rim and the water. Wild meadow everywhere else, lusher and taller
+       on the moist band behind a shore. */
+    (function continentCover() {
+      const cAttr = geo.attributes.color, pAttr = geo.attributes.position;
+      let roadIx = null;
+      function roads() {
+        if (roadIx) return roadIx;
+        const B = 32, map = new Map();
+        for (const r of city.roads || []) {
+          if (!r || !isFinite(r.x) || !isFinite(r.z) || !isFinite(r.len)) continue;
+          const hw = (r.w || 12) / 2 + 1.2, hl = r.len / 2;
+          const R = r.vertical ? { x0: r.x - hw, x1: r.x + hw, z0: r.z - hl, z1: r.z + hl } : { x0: r.x - hl, x1: r.x + hl, z0: r.z - hw, z1: r.z + hw };
+          for (let ix = Math.floor((R.x0 - 9) / B); ix <= Math.floor((R.x1 + 9) / B); ix++)
+            for (let iz = Math.floor((R.z0 - 9) / B); iz <= Math.floor((R.z1 + 9) / B); iz++) {
+              const k = ix * 100003 + iz; let l = map.get(k); if (!l) map.set(k, l = []); l.push(R);
+            }
+        }
+        return (roadIx = { B: B, map: map });
+      }
+      function roadDist(x, z) {
+        const I = roads(), l = I.map.get(Math.floor(x / I.B) * 100003 + Math.floor(z / I.B));
+        if (!l) return 99;
+        let d = 99;
+        for (let i = 0; i < l.length; i++) {
+          const R = l[i];
+          const dx = Math.max(R.x0 - x, 0, x - R.x1), dz = Math.max(R.z0 - z, 0, z - R.z1);
+          const e = (dx > 0 || dz > 0) ? Math.hypot(dx, dz) : -1;
+          if (e < d) d = e;
+        }
+        return d;
+      }
+      // authoredSurfaceBounds, bucketed (the plain list is walked per query)
+      let authIx = null;
+      function authoredAt(x, z) {
+        if (!authIx) {
+          authIx = new Map();
+          for (const b of authoredSurfaceBounds) {
+            for (let ix = Math.floor((b.minX - 1) / 64); ix <= Math.floor((b.maxX + 1) / 64); ix++)
+              for (let iz = Math.floor((b.minZ - 1) / 64); iz <= Math.floor((b.maxZ + 1) / 64); iz++) {
+                const k = ix * 100003 + iz; let l = authIx.get(k); if (!l) authIx.set(k, l = []); l.push(b);
+              }
+          }
+        }
+        const an = city.annex;
+        if (an && Number.isFinite(an.cx) && Number.isFinite(an.radius) && Math.hypot(x - an.cx, z - an.cz) <= an.radius + 2.5) return true;
+        const l = authIx.get(Math.floor(x / 64) * 100003 + Math.floor(z / 64));
+        if (l) for (let i = 0; i < l.length; i++) { const b = l[i]; if (x >= b.minX - 0.5 && x <= b.maxX + 0.5 && z >= b.minZ - 0.5 && z <= b.maxZ + 0.5) return true; }
+        return false;
+      }
+      // the palette the LANDCOVER loop paints with, decoded exactly as the
+      // plate is (CONTINENT_LINEAR_ALBEDO), and what each grows:
+      //   g density, h height, dry straw share
+      const LIN = CFG.CONTINENT_LINEAR_ALBEDO !== false;
+      function dec(col) {
+        let r = col.r, g = col.g, b = col.b;
+        if (LIN) {
+          r = r * (r * (r * 0.305306011 + 0.682171111) + 0.012522878);
+          g = g * (g * (g * 0.305306011 + 0.682171111) + 0.012522878);
+          b = b * (b * (b * 0.305306011 + 0.682171111) + 0.012522878);
+          const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+          r = l + (r - l) * 0.8; g = l + (g - l) * 0.8; b = l + (b - l) * 0.8;
+        }
+        return [r, g, b];
+      }
+      const PAL = [
+        [cGrass, 1.0, 1.0, 0.2], [cLush, 1.0, 1.3, 0.0], [cScrub, 0.75, 0.85, 0.35], [cDry, 0.9, 0.9, 0.9],
+        [cWood, 0.2, 0.7, 0.3], [cDirt, 0.06, 0.6, 0.6], [cSand, 0, 1, 0], [cWet, 0, 1, 0], [cBed, 0, 1, 0],
+      ].filter(function (e) { return e[0] && e[0].isColor; }).map(function (e) {
+        const c = dec(e[0]), l = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2] + 1e-5;
+        return { cr: c[0] / l, cg: c[1] / l, cb: c[2] / l, ll: Math.log(l), g: e[1], h: e[2], dry: e[3] };
+      });
+      const LU = { g: 0, h: 1, dry: 0 };
+      function landUse(r, g, b) {
+        const l = 0.2126 * r + 0.7152 * g + 0.0722 * b + 1e-5, cr = r / l, cg = g / l, cb = b / l, ll = Math.log(l);
+        let W = 0, G = 0, H = 0, Dr = 0;
+        for (let i = 0; i < PAL.length; i++) {
+          const p = PAL[i];
+          const d2 = (cr - p.cr) * (cr - p.cr) + (cg - p.cg) * (cg - p.cg) + (cb - p.cb) * (cb - p.cb) + 0.5 * (ll - p.ll) * (ll - p.ll);
+          const w = Math.exp(-d2 / 0.004);
+          W += w; G += w * p.g; H += w * p.h; Dr += w * p.dry;
+        }
+        // a colour the palette doesn't know (a biome's blend, a strata tint):
+        // green enough to be grass by its hue alone, blended in as W fades
+        const gh = Math.max(0, Math.min(1, (g / Math.max(r, 1e-4) - 1.0) / 0.3));
+        const k = W / (W + 1e-3);
+        LU.g = W > 0 ? k * (G / W) + (1 - k) * gh : gh;
+        LU.h = W > 0 ? k * (H / W) + (1 - k) : 1;
+        LU.dry = W > 0 ? k * (Dr / W) + (1 - k) * 0.3 : 0.3;
+        return LU;
+      }
+      CBZ.continentLandUse = function (r, g, b) { const o = landUse(r, g, b); return { g: o.g, h: o.h, dry: o.dry }; };
+      const PMINX = cx0 - W / 2, PMINZ = cz0 - D / 2, IDX = SEG / W, IDZ = SEG / D, ST = SEG + 1;
+      CBZ.continentCoverAt = function (x, z, out) {
+        const fx = (x - PMINX) * IDX, fz = (z - PMINZ) * IDZ;
+        if (!(fx >= 0 && fz >= 0 && fx < SEG && fz < SEG)) return false;
+        if (authoredAt(x, z)) return false;                          // someone else's floor
+        out.g = 0;
+        const s = shoreField(x, z);
+        if (!(s > 16)) return true;                                   // sand rim and water
+        const rd = roadDist(x, z);
+        if (rd < 0) return true;                                      // on a road
+        const i0 = fx | 0, j0 = fz | 0, tx = fx - i0, tz = fz - j0, base = j0 * ST + i0;
+        let a, b, c, wa, wb, wc;                                      // the plate's own triangle split
+        if (tx + tz <= 1) { a = base; b = base + 1; c = base + ST; wa = 1 - tx - tz; wb = tx; wc = tz; }
+        else { a = base + ST + 1; b = base + ST; c = base + 1; wa = tx + tz - 1; wb = 1 - tx; wc = 1 - tz; }
+        const C = cAttr.array;
+        const r = C[a * 3] * wa + C[b * 3] * wb + C[c * 3] * wc;
+        const g = C[a * 3 + 1] * wa + C[b * 3 + 1] * wb + C[c * 3 + 1] * wc;
+        const bl = C[a * 3 + 2] * wa + C[b * 3 + 2] * wb + C[c * 3 + 2] * wc;
+        // WHICH land cover is this? The nearest entries of the plate's OWN
+        // palette (decoded like the plate), soft-weighted in chroma+log-lum
+        landUse(r, g, bl);
+        const gw = LU.g;
+        if (gw < 0.05) return true;                                   // dirt, sand, rock, bed
+        const Y = pAttr.array;
+        out.y = (Y[a * 3 + 1] * wa + Y[b * 3 + 1] * wb + Y[c * 3 + 1] * wc) + (COAST ? 0 : -0.06);
+        // meadow, patchy at 7 m; a mown verge along every road
+        const patch = 0.55 + 0.45 * noise2(x, z, 7.3, 0x6a11);
+        const verge = rd < 5 ? 1 : rd < 9 ? 1 - (rd - 5) / 4 : 0;
+        const moist = s < 52 ? 1 - (s - 16) / 36 : 0;
+        out.g = gw * (verge > 0.5 ? 1 : patch) * (1 - 0.35 * Math.max(0, (24 - s) / 8));
+        out.r = r; out.gr = g; out.b = bl;
+        out.wild = verge > 0.5 ? 0 : 1;
+        out.h = (verge > 0.5 ? 1.3 : 1) * (1 + 0.35 * moist);
+        out.dry = Math.max(0, Math.min(1, LU.dry - moist * 0.3));
+        out.h *= LU.h;
+        out.flw = verge > 0.5 ? 0.02 : 0.015 + 0.03 * noise2(x, z, 23, 0x6a13);
+        return true;
+      };
+      if (CBZ.groundCover) CBZ.groundCover.register("continent", CBZ.continentCoverAt, 90);
+    })();
     plate.receiveShadow = true;
     plate.name = "continent-underlay";
     plate.renderOrder = -10;
