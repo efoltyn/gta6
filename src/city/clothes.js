@@ -54,6 +54,25 @@
   function shortSleeve(A, hem, skin) {
     for (const col of ["front", "back", "side"]) { A.rect(col, 0, SLEEVE_HEM - 0.035, 1, 0.035, hem); A.rect(col, 0, SLEEVE_HEM, 1, 1 - SLEEVE_HEM, skin); }
   }
+  /* WHERE THE SHAPED BODY PUTS THINGS ON THE TORSO ROW (entities/character.js
+     TORSO block). v still runs the old box span (row 0 = column top, 1 = the
+     hip line), but the body under it is not a box any more. Measured off the
+     real rigs (men, women, heavy, children 3-15):
+       · the COLLAR BAND stands over the neck base down to ~0.11 (0.21 on a
+         toddler): whatever is painted above that at the front centre is only
+         seen through the band's own atlas (yokeCanvas samples it);
+       · shoulder line ~0.12, pecs / bust ~0.45-0.49;
+       · the natural WAIST (narrowest ring) ~0.79;
+       · the shirt TUCKS INTO THE PELVIS from ~0.82 (0.77 at seven, 0.74 on a
+         toddler). Every old hem at 0.86-1.0 was painted inside the trousers
+         and never seen once — the box torso ran to the hip, this one doesn't.
+     So a hem sits just above the tuck and a waist seam on the waist. A child's
+     garment (kid atlases are only ever cast on children) hems higher still,
+     above the toddler's 0.74. */
+  const TORSO_ROW = { waist: 0.765, hem: 0.755, hemH: 0.07, kidHem: 0.685 };
+  function hemBand(R, css, y, h) {
+    for (const col of ["front", "back", "side"]) R.rect(col, 0, y != null ? y : TORSO_ROW.hem, 1, h != null ? h : TORSO_ROW.hemH, css);
+  }
   const DIMS = { torso: [0.92, 0.95, 0.5], jacket: [0.98, 1.0, 0.6], arm: [0.3, 0.92, 0.3], leg: [0.34, 0.95, 0.34] };
 
   // ---- the PLAIN-CIVVIE switch (owner's "plain civilians" rule) -------------
@@ -207,34 +226,6 @@
       if (Math.abs(d - head) < 2 * clear) d = head + 2 * clear;
     }
     return { dims: [P.jacketW, P.jacketH, d], y: y };
-  }
-  // COMPOSITE items (collar/tie/bow meshes) are authored in the adult-male
-  // torso frame (a 0.92 x 0.95 x 0.50 box centred on the origin). On a female
-  // or child chest that frame is both smaller AND shifted up, so a tie would
-  // float above the collarbone. One scale+offset node puts the authored
-  // coordinates back on the body. Adult male → 1,1,1 / 0 (identity).
-  function compFrame(ch) {
-    const P = ch && ch.profile;
-    if (!P || !bodyFit()) return null;
-    const sp = torsoSplit(P);
-    const f = {
-      sx: P.torsoW / 0.92, sy: sp.colH / 0.95, sz: P.torsoD / 0.50,
-      y: -sp.waistH / 2,
-    };
-    /* UNDER THE CHIN, MEASURED (tools/overlap-audit.mjs: a teen's bow tie
-       sat 29 mm up inside his chin). The frame was authored against the adult
-       male, whose neck pivot — the jaw line — is 0.46 above his chest centre,
-       exactly where the knot tops out; a younger body's neck sits LOWER on its
-       chest than the scaled frame puts the knot. So the frame's neck line is
-       held at least a clearance under THIS rig's neck pivot (read off the rig,
-       so a reshaped torso or neck carries it along). */
-    const host = ch.skinSlots && ch.skinSlots.torso && ch.skinSlots.torso[0];
-    if (host && ch.neck && host.parent === ch.neck.parent) {
-      const clear = (CBZ.CHAR_YOKE_CLEAR != null) ? CBZ.CHAR_YOKE_CLEAR : 0.01;
-      const neckRel = ch.neck.position.y - host.position.y;
-      f.y = Math.min(f.y, neckRel - 0.46 * f.sy - 4 * clear);   // a seated nod (0.04 rad) still clears
-    }
-    return f;
   }
 
   // ---- color helpers --------------------------------------------------------
@@ -397,234 +388,206 @@
     ctx.restore();
   }
 
-  // shared formal-wear front: white shirt V + studs/tie + open jacket shell.
-  // opts may carry: bow, tie(hex), belt, square, gap, lapel(width), lapelType
-  // ('notch'|'peak'|'shawl'), pattern, db(double-breasted), vest(hex|true),
-  // vTop (V2 half-opening at the collar), ctx (canvas ctx for pattern
-  // overlays). Under CLOTH_FORMAL_NECK_V2 it RETURNS the neckwear record the
-  // yoke atlas must draw ({tie,w} / {bow}) — the caller attaches it to its
-  // parts return; null (and the exact old paint) when the flag is off.
-  function formalTorso(T, J, jacketHex, lapelCss, opts) {
-    const jc = hx(jacketHex), shirt = "#f1f2ec", shirtLow = "#dddfd6";
-    const ctx = opts.ctx, lt = opts.lapelType || "notch";
-    const v2 = neckV2(), db = !!opts.db;
-    T.fill(jc);
-    // 3-PIECE: the open jacket reveals a buttoned WAISTCOAT, not bare shirt.
-    if (opts.vest) {
-      const vhex = opts.vest === true ? jacketHex : opts.vest;
-      const vest = hx(vhex);
-      if (v2) {
-        // the reference three-piece: shirt V at the collar, and the TIE runs
-        // DOWN THE WAISTCOAT (drawn later, over the buttons) instead of the
-        // old jacket-colour wedge that severed it at the chest.
-        T.rect("front", 0.28, 0, 0.44, 0.9, vest);                 // vest panel
-        T.poly("front", [[0.35, 0], [0.5, 0.32], [0.65, 0]], shirt); // shirt V above the vest
-        T.rect("front", 0.49, 0.34, 0.02, 0.5, tone(vhex, -0.25)); // vest button placket
-        for (let i = 0; i < 4; i++) T.dot("front", 0.5, 0.4 + i * 0.12, 0.012, tone(vhex, 0.25));
-      } else {
-        T.rect("front", 0.28, 0, 0.44, 0.9, vest);                 // vest panel
-        // narrow shirt sliver + collar above the vest
-        T.rect("front", 0.42, 0, 0.16, 0.18, shirt);
-        T.rect("front", 0.49, 0.5, 0.02, 0.4, tone(vhex, -0.25)); // vest button placket
-        for (let i = 0; i < 4; i++) T.dot("front", 0.5, 0.34 + i * 0.13, 0.012, tone(vhex, 0.25)); // buttons
-        T.poly("front", [[0.34, 0], [0.5, 0.34], [0.66, 0]], jc);  // vest V opening (jacket-color gap above buttons)
-        T.rect("front", 0.42, 0, 0.16, 0.16, shirt);               // shirt at the very top
-      }
-    } else {
-      // the shirt panel the open jacket reveals (full front — the gap crops it)
-      T.rect("front", 0.3, 0, 0.4, 0.84, shirt);
-      T.rect("front", 0.47, 0.02, 0.06, 0.82, shirtLow);          // placket seam
-    }
-    // THE COLLAR LEAVES. A shirt front with no collar is a white strip; two
-    // small angled facets at the throat are what make it read as a SHIRT at
-    // three metres. Under V2 the collar a camera can SEE lives on the yoke
-    // slab (these chest rows hide behind it on every body) — the facets stay
-    // for any rig without a yoke slot, and they cost nothing.
-    T.poly("front", [[0.395, 0], [0.5, 0.105], [0.452, 0.012]], shirtLow);
-    T.poly("front", [[0.605, 0], [0.5, 0.105], [0.548, 0.012]], shirtLow);
-    if (opts.bow) {
-      if (!v2) {                                                   // black bow tie at the collar line
-        T.rect("front", 0.38, 0.025, 0.24, 0.085, "#0b0c10");      // (V2 draws the bow on the yoke —
-        T.rect("front", 0.465, 0.035, 0.07, 0.065, "#15161c");     //  this chest bow was behind the slab)
-      }
-      T.dot("front", 0.5, 0.21, 0.018, "#15161a");                // stud dots
-      T.dot("front", 0.5, 0.33, 0.018, "#15161a");
-      T.dot("front", 0.5, 0.45, 0.018, "#15161a");
-    } else if (opts.tie && !opts.vest) {
-      if (v2) {
-        // BLADE ONLY — the knot lives on the yoke (the slab IS the collar
-        // zone). Starting at row 0 keeps the blade continuous under the slab
-        // on every body profile, so it emerges below the seam with no gap.
-        T.rect("front", 0.455, 0, 0.09, 0.58, hx(opts.tie));
-        T.poly("front", [[0.455, 0.58], [0.545, 0.58], [0.5, 0.68]], hx(opts.tie)); // pointed tip at the button stance
-      } else {
-        // THE KNOT IS THE READ. It is wider than the blade and a shade darker,
-        // with a dimple under it: three flat values, no gradient, still a tie
-        // when the body is 3 m away and 40 px tall.
-        T.poly("front", [[0.43, 0.015], [0.57, 0.015], [0.545, 0.115], [0.455, 0.115]], tone(opts.tie, -0.3));
-        T.rect("front", 0.487, 0.052, 0.026, 0.05, tone(opts.tie, -0.5));   // the dimple
-        T.rect("front", 0.455, 0.11, 0.09, 0.5, hx(opts.tie));              // blade
-        T.rect("front", 0.455, 0.11, 0.09, 0.02, tone(opts.tie, 0.2));      // fold catches the light
-        T.poly("front", [[0.455, 0.61], [0.545, 0.61], [0.5, 0.7]], hx(opts.tie));  // pointed tip
-      }
-    } else if (opts.tie && opts.vest) {
-      if (v2) {                                                    // the tie lies ON the waistcoat (ref look)
-        T.rect("front", 0.455, 0, 0.09, 0.4, hx(opts.tie));
-        T.poly("front", [[0.455, 0.4], [0.545, 0.4], [0.5, 0.48]], hx(opts.tie));
-      } else T.rect("front", 0.47, 0.04, 0.06, 0.22, hx(opts.tie)); // a glimpse of tie at the vest V
-    }
-    if (!opts.belt && !opts.vest) T.rect("front", 0.3, 0.78, 0.4, 0.1, "#0d0e12"); // tux cummerbund break
-    if (ctx) patternRow(T, ctx, jacketHex, opts.pattern);
-    T.shade();
-    // ---- the OPEN JACKET shell: alpha-cut V gap + satin lapel wedges ----
-    J.fill(jc);
-    J.clear("cap", 0, 0, 1, 1);                                    // open top/bottom — see the shirt inside
-    if (v2) {
-      // THE REFERENCE V: wide open at the collar, converging to the fastened
-      // button — the reverse of the old cut, and the whole reason a collar
-      // and a knot can now read through it. Single-breasted keeps a relaxed
-      // slit below the button; a double-breasted front fastens FLAT.
-      const tw = opts.vTop != null ? opts.vTop : 0.115;             // half-opening at the collar
-      const bw = db ? 0.012 : 0.03;                                 // half-opening at the button stance
-      const yb = db ? 0.52 : (opts.bow || opts.vest ? 0.68 : 0.62); // where the front fastens
-      const hw = 0.05;                                              // the relaxed slit below (sb only)
-      if (db) J.clearPoly("front", [[0.5 - tw, 0], [0.5 + tw, 0], [0.5 + bw, yb], [0.5 - bw, yb]]);
-      else J.clearPoly("front", [[0.5 - tw, 0], [0.5 + tw, 0], [0.5 + bw, yb], [0.5 + hw, 1], [0.5 - hw, 1], [0.5 - bw, yb]]);
-      // lapels run ALONGSIDE the V from the shoulder line to the fastening,
-      // with a rolled kink just above the button.
-      const lwT = lt === "notch" ? 0.12 : lt === "peak" ? 0.14 : 0.15;
-      const lwB = 0.05;
-      const xit = 0.5 - tw, xot = xit - lwT, xib = 0.5 - bw, xob = xib - lwB, yk = yb - 0.12;
-      const mirror = (pts) => pts.map((p) => [1 - p[0], p[1]]);
-      if (lt === "shawl") {
-        // one continuous facet, outer edge bowed outward, and NO notch at all
-        // — which is exactly what makes a shawl read as a shawl.
-        const shl = [[xot, 0], [xit, 0], [xib, yb], [xob - 0.012, yk - 0.03], [xot - 0.014, 0.34]];
-        J.poly("front", shl, lapelCss);
-        J.poly("front", mirror(shl), lapelCss);
-      } else {
-        const lap = [[xot, 0], [xit, 0], [xib, yb], [xob, yk]];
-        J.poly("front", lap, lapelCss);
-        J.poly("front", mirror(lap), lapelCss);
-        if (lt === "peak") {
-          // the peak sweeps UP AND OUT past the collar line
-          const pk = [[xit - lwT * 0.25, 0.055], [xot - 0.055, 0.02], [xot - 0.02, 0.16]];
-          J.poly("front", pk, lapelCss);
-          J.poly("front", mirror(pk), lapelCss);
-        } else {
-          // THE NOTCH — the step where collar meets lapel, cut back out in
-          // jacket colour, high on the chest where a real gorge sits.
-          const ny = 0.11, xe = xot + (xob - xot) * (ny / yk);
-          const nc = [[xe - 0.014, ny - 0.065], [xe + lwT * 0.5, ny + 0.005], [xe - 0.014, ny + 0.075]];
-          J.poly("front", nc, jc);
-          J.poly("front", mirror(nc), jc);
-        }
-      }
-      if (opts.satin) {
-        // SATIN FACING — one lighter strip down the fold of the lapel; still
-        // the only distance-read difference between a tuxedo and a black suit.
-        const sc = tone(jacketHex, 0.34);
-        const st = [[xit - lwT * 0.45, 0], [xit, 0], [xib, yb], [xob + lwB * 0.45, yk - 0.02]];
-        J.poly("front", st, sc);
-        J.poly("front", mirror(st), sc);
-      }
-      if (db) {                                                    // six buttons on the flat wrap + its edge seam
-        for (let i = 0; i < 3; i++) {
-          J.dot("front", 0.4, 0.4 + i * 0.16, 0.018, lapelCss);
-          J.dot("front", 0.6, 0.4 + i * 0.16, 0.018, lapelCss);
-        }
-        J.rect("front", 0.615, yb, 0.012, 1 - yb, tone(jacketHex, -0.2));
-      } else if (opts.bow) {                                       // dinner jacket: the one-button stance
-        J.dot("front", 0.5 + hw + 0.028, yb + 0.06, 0.02, tone(jacketHex, -0.45));
-      } else {                                                     // the two-button stance, below the V point
-        J.dot("front", 0.5 + hw + 0.028, yb + 0.05, 0.02, tone(jacketHex, -0.45));
-        J.dot("front", 0.5 + hw + 0.028, yb + 0.17, 0.02, tone(jacketHex, -0.45));
-      }
-    } else {
-    const g = opts.gap || 0.13;                                    // half-width of the gap at the hem
-    const overlap = db ? 0.07 : 0.035;                             // double-breasted = wider overlap
-    J.clearPoly("front", [[0.5 - overlap, 0], [0.5 + overlap, 0], [0.5 + g, 1], [0.5 - g, 1]]);
-    // lapels: notch (default angled wedge), peak (an upswept point), shawl
-    // (one smooth continuous curve-ish facet, tux). width at the shoulder.
-    const lw = opts.lapel || 0.13;
-    if (lt === "shawl") {
-      J.poly("front", [[0.5 - overlap - lw, 0], [0.5 - overlap, 0], [0.5 - g + 0.01, 0.5], [0.5 - g - 0.07, 0.46]], lapelCss);
-      J.poly("front", [[0.5 + overlap, 0], [0.5 + overlap + lw, 0], [0.5 + g + 0.07, 0.46], [0.5 + g - 0.01, 0.5]], lapelCss);
-    } else if (lt === "peak") {
-      J.poly("front", [[0.5 - overlap - lw, 0.06], [0.5 - overlap, 0], [0.5 - g, 0.44], [0.5 - g - 0.04, 0.34], [0.5 - overlap - lw - 0.04, 0.16]], lapelCss);
-      J.poly("front", [[0.5 + overlap, 0], [0.5 + overlap + lw, 0.06], [0.5 + overlap + lw + 0.04, 0.16], [0.5 + g + 0.04, 0.34], [0.5 + g, 0.44]], lapelCss);
-    } else {                                                       // notch
-      J.poly("front", [[0.5 - overlap - lw, 0], [0.5 - overlap + 0.001, 0], [0.5 - g + 0.005, 0.46], [0.5 - g - 0.05, 0.4]], lapelCss);
-      J.poly("front", [[0.5 + overlap - 0.001, 0], [0.5 + overlap + lw, 0], [0.5 + g + 0.05, 0.4], [0.5 + g - 0.005, 0.46]], lapelCss);
-    }
-    if (opts.satin) {
-      // SATIN FACING — one lighter strip down the fold of the lapel. At any
-      // distance the game actually shows a person at, this strip IS the only
-      // difference between a tuxedo and a black suit, so it is worth 2 polys.
-      const sc = tone(jacketHex, 0.34);
-      J.poly("front", [[0.5 - overlap - lw * 0.5, 0], [0.5 - overlap, 0], [0.5 - g + 0.008, 0.47], [0.5 - g - 0.03, 0.43]], sc);
-      J.poly("front", [[0.5 + overlap, 0], [0.5 + overlap + lw * 0.5, 0], [0.5 + g + 0.03, 0.43], [0.5 + g - 0.008, 0.47]], sc);
-    }
-    // THE NOTCH is the whole reason a notch lapel is called one: the STEP where
-    // the collar ends and the lapel begins. Cut it back out of the wedge in
-    // jacket colour. A peak carries the same cut higher and sharper; a shawl
-    // has none at all, which is exactly what makes a shawl read as a shawl.
-    if (lt !== "shawl") {
-      const ny = lt === "peak" ? 0.1 : 0.17, ox = 0.5 - overlap - lw, oy = 0.09;
-      J.poly("front", [[ox - 0.012, ny - oy], [ox + lw * 0.6, ny], [ox - 0.012, ny + oy]], jc);
-      J.poly("front", [[1 - ox + 0.012, ny - oy], [1 - ox - lw * 0.6, ny], [1 - ox + 0.012, ny + oy]], jc);
-    }
-    if (db) {                                                      // a second column of buttons
-      for (let i = 0; i < 3; i++) { J.dot("front", 0.5 - g + 0.03, 0.4 + i * 0.16, 0.018, lapelCss); J.dot("front", 0.5 + g - 0.03, 0.4 + i * 0.16, 0.018, lapelCss); }
-    } else {                                                       // single-breasted: the two-button stance
-      J.dot("front", 0.5 + g - 0.025, 0.5, 0.02, tone(jacketHex, -0.45));
-      J.dot("front", 0.5 + g - 0.025, 0.66, 0.02, tone(jacketHex, -0.45));
-    }
-    }
-    // A JACKET HAS POCKETS, and a welt is one dark line — the cheapest possible
-    // structure and the one that survives mipping. Breast welt high on the
-    // chest, two hip welts at the hem, both clear of the alpha-cut gap.
-    J.rect("front", 0.15, 0.26, 0.15, 0.035, tone(jacketHex, -0.34));
-    J.rect("front", 0.08, 0.7, 0.2, 0.04, tone(jacketHex, -0.34));
-    J.rect("front", 0.72, 0.7, 0.2, 0.04, tone(jacketHex, -0.34));
-    J.rect("side", 0, 0, 1, 0.07, tone(jacketHex, -0.16));         // shoulder seam
-    J.rect("back", 0, 0, 1, 0.09, tone(jacketHex, -0.16));         // back collar band
-    J.rect("back", 0.2, 0.42, 0.6, 0.025, tone(jacketHex, -0.12)); // back yoke seam
-    // VENTS: a double-breasted coat is side-vented, everything else centre.
-    if (db) {
-      J.rect("back", 0.24, 0.55, 0.05, 0.45, tone(jacketHex, -0.25));
-      J.rect("back", 0.71, 0.55, 0.05, 0.45, tone(jacketHex, -0.25));
-    } else J.rect("back", 0.47, 0.55, 0.06, 0.45, tone(jacketHex, -0.25));
-    if (opts.square) J.rect("front", 0.16, 0.21, 0.12, 0.04, "#f1f2ec"); // square sits ON the welt
-    if (ctx) patternRow(J, ctx, jacketHex, opts.pattern);
-    J.shade();
-    // V2: hand the caller the neckwear the YOKE must now draw (the collar zone
-    // is the slab's, not the chest's). Flag off → null → old yoke, old paint.
-    if (!v2) return null;
-    if (opts.bow) return { bow: 0x0b0c10 };
-    return opts.tie != null ? { tie: opts.tie | 0, w: 0.09 } : null;
+  /* ==== TAILORING — one suit, cut for the SHAPED body ======================
+     Every formal look is ONE garment in three layers that must agree: the
+     shirt (torso row), the jacket SHELL (jacket row, an offset of the torso
+     surface, alpha-cut at the V) and the collar band round the neck base (the
+     yoke atlas: shirt collar + knot). All three declare parts.fp, so their
+     FRONT columns are addressed in BODY units (see TAILORING at fpPainter):
+     u = 0.5 + x / (2 XR), XR = the jacket's front half-width at the chest
+     line, so X = u - 0.5 is "fraction of the chest", the same on a woman, a
+     child and a heavy man. Rows are the old box span, whose landmarks were
+     MEASURED on the real rig (tools/lib/rig-vm.mjs, every sex / physique /
+     age, spread <= 0.03):
+                  collarbone  shoulder  chest  nat.waist  trouser top  hip joint
+       jacket row    0.09       0.14    0.45     0.775       0.84        0.97
+       torso row     0.065      0.12    0.46     0.79        0.855       0.99
+     Below the trouser top the torso tucks inside the pelvis, so a belt lives
+     on the PELVIS (parts.hips: it wears the top sliver of the leg row). The
+     neck opening is the collar band's width (X ~0.21 on every adult), so
+     the shirt collar and the knot show through the jacket instead of behind
+     a slit in its stand collar. Wearer's LEFT is +x (the weapon hand is the
+     -x arm), which is where a breast pocket and its square go. */
+  const TAILOR = { jNotch: 0.09, jChest: 0.45, jWaist: 0.775, tWaist: 0.79, tBelt: 0.855, tHem: 0.765, neck: 0.215 };
+  const SHIRT_HEX = 0xf1f2ec;
+  const fx = (x) => 0.5 + x;                                   // front column, body-centred units
+  const fpts = (pts) => pts.map((p) => [fx(p[0]), p[1]]);
+  const fmir = (pts) => pts.map((p) => [fx(-p[0]), p[1]]);
+  function fboth(R, pts, css) { R.poly("front", fpts(pts), css); R.poly("front", fmir(pts), css); }
+  // A TIE: the knot's lower half (its top is on the collar band, yokeTailored,
+  // meeting it at the same width), 3.5 cm under the knot broadening down the
+  // blade, the tip at the belt (or tucked into a waistcoat at its V).
+  // A BOW TIE: its lower half on the chest (the collar band shows only its
+  // top 2-3 cm above the collarbone notch; yokeTailored draws the top half)
+  function paintBow(T, hex) {
+    const wing = [[0.13, 0], [0.02, 0.03], [0.02, 0.085], [0.13, 0.115]];
+    T.poly("front", fpts(wing), hx(hex)); T.poly("front", fmir(wing), hx(hex));
+    T.poly("front", fpts([[-0.024, 0], [0.024, 0], [0.024, 0.09], [-0.024, 0.09]]), tone(hex, 0.2));
   }
+  // buttons that read on any cloth: lighter on a dark suit, darker on a pale one
+  function buttonTone(hex) {
+    const l = 0.3 * ((hex >> 16) & 255) + 0.59 * ((hex >> 8) & 255) + 0.11 * (hex & 255);
+    return l < 70 ? tone(hex, 0.3) : tone(hex, -0.45);
+  }
+  function paintTie(T, hex, y1, clipV) {
+    const c = hx(hex), a = 0.032, b = 0.052, tipH = 0.05, kn = 0.105;
+    T.poly("front", fpts([[-0.05, 0], [0.05, 0], [0.034, kn], [-0.034, kn]]), tone(hex, -0.16));
+    T.poly("front", fpts([[-0.004, 0], [0.004, 0], [0.003, kn * 0.6], [-0.003, kn * 0.6]]), tone(hex, -0.45));   // the dimple runs out of the knot
+    if (clipV) {                                               // tucked into a waistcoat at its V (apex y1, top half-width clipV)
+      const yc = y1 * (1 - a / clipV);
+      T.poly("front", fpts([[-a, kn], [a, kn], [a, yc], [0, y1], [-a, yc]]), c);
+      return;
+    }
+    T.poly("front", fpts([[-a, kn], [a, kn], [b, y1 - tipH], [0, y1], [-b, y1 - tipH]]), c);
+    T.poly("front", fpts([[a - 0.008, kn], [a, kn], [b, y1 - tipH], [b - 0.01, y1 - tipH]]), tone(hex, -0.25));   // one edge in shadow
+  }
+
+  // formalTorso(T, J, jacketHex, lapelCss, opts) — the shirt row and the open
+  // jacket shell. opts: tie(hex) | bow, vest(hex|true), db, lapelType
+  // ('notch'|'peak'|'shawl'), satin (tux facings), square, belt, close (a
+  // server's higher gorge), pattern, ctx. Returns the neckwear the collar band
+  // draws ({tie|bow, fp:1}).
+  function formalTorso(T, J, jacketHex, lapelCss, opts) {
+    const shirtHex = opts.shirt != null ? opts.shirt : SHIRT_HEX;           // white unless a closet recipe says
+    const jc = hx(jacketHex), shirt = hx(shirtHex), shirtLo = tone(shirtHex, -0.1);
+    const ctx = opts.ctx, lt = opts.lapelType || "notch", db = !!opts.db;
+    const vhex = opts.vest ? (opts.vest === true ? jacketHex : opts.vest) : null;
+    // ---- the SHIRT (torso row): shirt everywhere the shell covers, the
+    //      jacket's skirt below its swept hem (THE SKIRT, below).
+    T.fill(shirt);
+    T.rect("front", fx(-0.012), 0.08, 0.024, TAILOR.tBelt - 0.08, shirtLo);   // placket
+    if (vhex != null) {
+      // THE WAISTCOAT: a deep V to mid-chest, five buttons, two welts, and
+      // the points below the waist that a waistcoat is recognised by.
+      const vc = hx(vhex), vV = 0.17, vY = 0.36;
+      T.rect("front", 0, 0, 1, TAILOR.tBelt - 0.02, vc);
+      T.poly("front", fpts([[-vV, 0], [vV, 0], [0, vY]]), shirt);
+      T.poly("front", fpts([[-0.14, TAILOR.tBelt - 0.03], [0, TAILOR.tBelt - 0.03], [-0.05, TAILOR.tBelt + 0.045]]), vc);
+      T.poly("front", fmir([[-0.14, TAILOR.tBelt - 0.03], [0, TAILOR.tBelt - 0.03], [-0.05, TAILOR.tBelt + 0.045]]), vc);
+      T.rect("front", fx(-0.006), vY, 0.012, TAILOR.tBelt - vY - 0.02, tone(vhex, -0.3));
+      for (let i = 0; i < 5; i++) T.dot("front", fx(0), vY + 0.06 + i * 0.085, 0.011, tone(vhex, 0.3));
+      T.rect("front", fx(-0.3), 0.64, 0.13, 0.016, tone(vhex, -0.35));
+      T.rect("front", fx(0.17), 0.64, 0.13, 0.016, tone(vhex, -0.35));
+      if (opts.tie != null) paintTie(T, opts.tie, vY, vV);
+      else if (opts.bow) { for (let i = 0; i < 2; i++) T.dot("front", fx(0), 0.17 + i * 0.09, 0.011, "#15161a"); paintBow(T, 0x0b0c10); }
+    } else if (opts.bow) {
+      // the dress shirt's pleated bib, three studs, and the cummerbund at the
+      // natural waist (what the single button opens onto)
+      for (const px of [-0.1, -0.06, 0.06, 0.1]) T.rect("front", fx(px) - 0.004, 0.1, 0.008, 0.5, shirtLo);
+      for (let i = 0; i < 3; i++) T.dot("front", fx(0), 0.2 + i * 0.12, 0.012, "#15161a");
+      paintBow(T, 0x0b0c10);
+      const cb = "#0d0e12";
+      T.rect("front", 0, TAILOR.tWaist - 0.05, 1, TAILOR.tBelt - TAILOR.tWaist + 0.05, cb);
+      for (let i = 1; i < 4; i++) T.rect("front", 0, TAILOR.tWaist - 0.05 + i * 0.026, 1, 0.005, tone(0x0d0e12, 0.2));
+    } else if (opts.tie != null) {
+      paintTie(T, opts.tie, TAILOR.tBelt - 0.025, 0);
+    }
+    // THE SKIRT OF THE JACKET. The shell's front hem is swept up to the seated
+    // lap line (entities/character.js partRings: hip joint + half a thigh),
+    // which standing is the natural waist (torso row 0.77-0.81 on every body),
+    // so a shell alone ends there and shows a band of shirt and the belt. What
+    // a camera sees below that hem is the jacket's own lower front, so it is
+    // painted on the body under it, down over the pelvis (which wears these
+    // same rows): cloth all round, the quarters falling open below the button
+    // over the fly and belt (a DB laps flat), the hip-pocket flaps (a dinner
+    // jacket's are jetted). Seated, the thighs cover all of it.
+    const h0 = TAILOR.tHem;
+    // (sides and back from higher up: the swept hem lifts partway round the flank)
+    T.rect("side", 0, 0.62, 1, 0.38, jc); T.rect("back", 0, 0.62, 1, 0.38, jc);
+    T.rect("back", 0.494, TAILOR.tBelt + 0.04, 0.012, 1 - TAILOR.tBelt - 0.04, tone(jacketHex, -0.3));   // the vent
+    if (db) {
+      T.rect("front", 0, h0, 1, 1 - h0, jc);
+      T.rect("front", fx(-0.07), h0, 0.008, 1 - h0, tone(jacketHex, -0.3));          // the lap's edge
+    } else {
+      const panel = [[-0.004, h0], [0.5, h0], [0.5, 1], [0.1, 1], [0.05, TAILOR.tBelt], [-0.004, h0 + 0.02]];
+      T.poly("front", fpts(panel), jc);
+      T.poly("front", fpts(panel.map((p) => [-p[0], p[1]])), jc);
+    }
+    for (const s of [1, -1]) {
+      const x0 = s > 0 ? 0.1 : -0.34, fy = TAILOR.tBelt - 0.04;
+      if (!opts.bow) T.rect("front", fx(x0), fy, 0.24, 0.034, tone(jacketHex, -0.08));   // the flap
+      T.rect("front", fx(x0), fy, 0.24, 0.008, tone(jacketHex, -0.38));                   // the welt
+      if (!opts.bow) T.rect("front", fx(x0), fy + 0.034, 0.24, 0.006, "rgba(0,0,0,0.3)");
+    }
+    T.shade();
+
+    // ---- the JACKET SHELL (jacket row) ----
+    J.fill(jc);
+    if (ctx) patternRow(J, ctx, jacketHex, opts.pattern);    // cloth first: lapels/pockets draw over it
+    const yb = db ? 0.66 : opts.bow ? 0.76 : vhex != null ? 0.72 : 0.74;   // the fastening (V apex)
+    const g0 = opts.close ? 0.19 : TAILOR.neck, gy = 0.1;   // neck opening, straight down to the gorge
+    const shadow = "rgba(0,0,0,0.28)", sheen = "rgba(255,255,255,0.12)";
+    // THE COLLAR: jacket cloth round the neck and down to the gorge, a shade
+    // darker than the chest (it stands off it) so the notch below reads.
+    const collar = tone(jacketHex, -0.1);
+    if (lt !== "shawl") fboth(J, [[g0 - 0.01, 0], [g0 + 0.09, 0], [0.36, 0.13], [0.31, 0.126], [g0 - 0.01, 0.07]], collar);
+    // THE LAPEL (wearer's left, mirrored): from the gorge out to its point,
+    // down the belly to the fastening; the inner edge is the V itself.
+    let lap;
+    if (lt === "peak") lap = [[g0 - 0.02, 0.06], [0.31, 0.126], [0.455, 0.08], [0.375, 0.27], [0.02, yb]];
+    else if (lt === "shawl") lap = [[g0 - 0.02, 0], [g0 + 0.085, 0], [0.33, 0.14], [0.35, 0.26], [0.27, 0.44], [0.02, yb]];
+    else lap = [[g0 - 0.02, 0.06], [0.31, 0.126], [0.3, 0.162], [0.385, 0.176], [0.335, 0.27], [0.02, yb]];
+    fboth(J, lap, lapelCss);
+    // the lapel stands proud: a shadow along its outer edge, a sheen along the ROLL
+    const out = lap.slice(lt === "notch" ? 3 : 2);
+    for (let i = 0; i < out.length - 1; i++) {
+      const p = out[i], q = out[i + 1];
+      fboth(J, [p, q, [q[0] + 0.012, q[1] + 0.004], [p[0] + 0.012, p[1] + 0.004]], shadow);
+    }
+    fboth(J, [[g0, gy], [g0 + 0.02, gy], [0.022, yb - 0.01], [0, yb]], sheen);
+    if (lt !== "shawl") fboth(J, [[g0 - 0.01, 0.07], [0.31, 0.126], [0.31, 0.134], [g0 - 0.01, 0.078]], shadow);  // the gorge seam
+    if (opts.satin) fboth(J, [[g0, gy], [g0 + 0.035, gy], [0.03, yb - 0.02], [0, yb]], "rgba(255,255,255,0.10)");  // satin catches light at the roll
+    // THE BREAST POCKET: a welt high on the left chest, clear of the lapel
+    // (the hip pockets are on the skirt, below the shell's swept hem)
+    J.poly("front", fpts([[0.285, 0.375], [0.43, 0.36], [0.43, 0.382], [0.285, 0.397]]), tone(jacketHex, -0.32));
+    if (opts.square) J.poly("front", fpts([[0.305, 0.377], [0.325, 0.343], [0.35, 0.366], [0.372, 0.346], [0.392, 0.369]]), hx(SHIRT_HEX));
+    // BUTTONS: one fastened at the waist (the lower one of a two-button sits
+    // under the swept hem, unbuttoned, where nobody sees it); a DB's 2x3
+    const btn = buttonTone(jacketHex);
+    if (db) {
+      for (const y of [yb - 0.1, yb + 0.02]) { J.dot("front", fx(-0.13), y, 0.016, btn); J.dot("front", fx(0.13), y, 0.016, btn); }
+      J.poly("front", fpts([[0, yb], [0.008, yb], [-0.062, yb + 0.07], [-0.062, 1], [-0.07, 1], [-0.07, yb + 0.066]]), tone(jacketHex, -0.3));  // the lap's edge
+    } else J.dot("front", fx(0), yb + 0.02, 0.017, btn);
+    // back and sides: the collar from behind, a centre seam, the vent(s), side seams
+    J.rect("back", 0, 0, 1, 0.08, collar);
+    J.rect("back", 0.494, 0.1, 0.012, 0.7, tone(jacketHex, -0.14));
+    if (db || opts.bow) { J.rect("back", 0.2, 0.8, 0.012, 0.2, tone(jacketHex, -0.3)); J.rect("back", 0.788, 0.8, 0.012, 0.2, tone(jacketHex, -0.3)); }
+    else J.rect("back", 0.494, 0.8, 0.012, 0.2, tone(jacketHex, -0.3));
+    J.rect("side", 0.494, 0.2, 0.012, 0.8, tone(jacketHex, -0.14));
+    // THE CUT: the open neck and the V to the fastening; single-breasted
+    // quarters fall away below the button. Last, so nothing paints into it.
+    J.clear("cap", 0, 0, 1, 1);
+    J.clearPoly("front", fpts([[-g0, 0], [g0, 0], [g0, gy], [0, yb], [-g0, gy]]));
+    if (!db) J.clearPoly("front", fpts([[0, yb + 0.045], [0.1, 1], [-0.1, 1]]));
+    J.shade();
+    return opts.bow ? { bow: 0x0b0c10, fp: 1 } : (opts.tie != null ? { tie: opts.tie | 0, fp: 1 } : { fp: 1 });
+  }
+  // formalLimbs: sleeves with a shirt cuff and surgeon's cuff buttons; creased
+  // trousers that break on the shoe; a satin braid down a dinner suit's outseam;
+  // the belt on the leg row's top sliver, which the pelvis wears (parts.hips).
   function formalLimbs(A, L, jacketHex, legHex, cuff, opts) {
     opts = opts || {};
     const jc = hx(jacketHex), ctx = opts.ctx;
     A.fill(jc);
-    A.rect("front", 0, 0, 1, 0.07, tone(jacketHex, -0.16));        // the shoulder seam runs onto the sleeve head
-    A.rect("side", 0, 0, 1, 0.07, tone(jacketHex, -0.16));
-    if (cuff) { A.rect("front", 0, 0.86, 1, 0.07, "#f1f2ec"); A.rect("side", 0, 0.86, 1, 0.07, "#f1f2ec"); A.rect("back", 0, 0.86, 1, 0.07, "#e3e4dc"); }
-    // surgeon's cuff: three buttons, not one. Three small marks in a column is
-    // a tailoring signal a single dot cannot carry.
-    for (let i = 0; i < 3; i++) A.dot("front", 0.8, 0.74 + i * 0.06, 0.028, tone(jacketHex, -0.4));
     if (ctx) patternRow(A, ctx, jacketHex, opts.pattern);
+    A.rect("front", 0, 0.03, 1, 0.012, tone(jacketHex, -0.2));     // the sleeve head seam
+    A.rect("side", 0, 0.03, 1, 0.012, tone(jacketHex, -0.2));
+    A.rect("side", 0.64, 0.86, 0.12, 0.09, tone(jacketHex, -0.4));   // the cuff vent and its buttons
+    // a centimetre of shirt cuff past the sleeve, a satin-cuffed dinner shirt a touch more
+    const cw = cuff ? 0.045 : 0.03;
+    const sh = opts.shirt != null ? opts.shirt : SHIRT_HEX;
+    for (const col of ["front", "side", "back"]) A.rect(col, 0, 1 - cw, 1, cw, col === "back" ? tone(sh, -0.06) : hx(sh));
     A.shade();
     L.fill(hx(legHex));
-    L.rect("front", 0.46, 0, 0.08, 0.94, tone(legHex, 0.18));      // sharp crease line
-    if (opts.stripe) {                                             // the tuxedo's satin braid down the outseam
-      L.rect("side", 0.4, 0, 0.2, 0.94, tone(legHex, 0.32));
-      L.rect("side", 0.46, 0, 0.08, 0.94, tone(legHex, 0.5));
-    }
-    L.rect("front", 0, 0.94, 1, 0.06, tone(legHex, -0.3));         // gloss shoe break
-    L.rect("side", 0, 0.94, 1, 0.06, tone(legHex, -0.3));
     if (ctx) patternRow(L, ctx, legHex, opts.pattern);
+    L.rect("front", 0.49, 0.02, 0.02, 0.88, tone(legHex, 0.14));   // the pressed crease
+    L.rect("back", 0.49, 0.02, 0.02, 0.88, tone(legHex, 0.08));
+    if (opts.stripe) L.rect("side", 0.44, 0, 0.12, 1, tone(legHex, 0.22));   // the satin braid
+    // THE BREAK: the crease dies in one soft fold where the hem meets the shoe
+    for (const col of ["front", "side", "back"]) {
+      L.rect(col, 0, 0.9, 1, 0.022, "rgba(0,0,0,0.22)");
+      L.rect(col, 0, 0.922, 1, 0.012, "rgba(255,255,255,0.06)");
+    }
     L.shade();
   }
 
@@ -634,11 +597,10 @@
     st = st || {};
     const body = st.body != null ? st.body : 0x16171c;            // lifted off true black so shading reads
     const lapel = st.lapelCss || tone(body, 0.16);
-    const nk = formalTorso(P.T, P.J, body, lapel, { bow: true, square: true, satin: st.satin !== false, gap: 0.12, lapel: 0.15, lapelType: st.lapel || "shawl", db: !!st.db, ctx: P.ctx, pattern: st.pattern });
-    formalLimbs(P.A, P.L, body, st.legs != null ? st.legs : 0x14151a, true, { ctx: P.ctx, pattern: st.pattern, stripe: true });
-    const parts = { torso: 1, arms: 1, legs: 1, jacket: 1 };
-    if (nk) parts.neck = nk;
-    return parts;
+    const legs = st.legs != null ? st.legs : 0x14151a;
+    const neck = formalTorso(P.T, P.J, body, lapel, { bow: true, square: true, satin: st.satin !== false, lapelType: st.lapel || "shawl", db: !!st.db, ctx: P.ctx, pattern: st.pattern });
+    formalLimbs(P.A, P.L, body, legs, true, { ctx: P.ctx, pattern: st.pattern, stripe: true });
+    return { torso: 1, arms: 1, legs: 1, jacket: 1, fp: 1, neck: neck, skirt: { hex: body } };
   };
   // suit accepts a STYLE record (SUIT_STYLES entry) OR a raw colors record. The
   // style drives pattern/db/vest/lapel/tie; raw {torso,legs} still works.
@@ -648,9 +610,8 @@
     const body = st.body != null ? st.body : (c && c.torso != null ? c.torso : 0x1c2030);
     const legs = st.legs != null ? st.legs : ((c && c.legs != null) ? c.legs : tone2(body, -0.08));
     const lapelCss = st.lapelCss || tone(body, st.pattern && st.pattern !== "solid" ? 0.1 : 0.16);
-    const nk = formalTorso(P.T, P.J, body, lapelCss, {
-      tie: st.tie != null ? st.tie : 0x7a1f2b, belt: !st.vest && !st.db, gap: st.db ? 0.13 : 0.1,
-      lapel: st.lapel === "peak" ? 0.12 : 0.09, lapelType: st.lapel || "notch",
+    const neck = formalTorso(P.T, P.J, body, lapelCss, {
+      tie: st.tie != null ? st.tie : 0x7a1f2b, lapelType: st.lapel || "notch",
       pattern: st.pattern, db: !!st.db, vest: st.vest, ctx: P.ctx,
       // a pocket square is a DRESSIER stance, so the styles that already carry
       // one (waistcoat, double-breasted, shawl dinner jacket) get it without
@@ -658,50 +619,122 @@
       square: st.square != null ? !!st.square : (!!st.vest || !!st.db || st.lapel === "shawl"),
     });
     formalLimbs(P.A, P.L, body, legs, false, { ctx: P.ctx, pattern: st.pattern });
-    const parts = { torso: 1, arms: 1, legs: 1, jacket: 1 };
-    if (nk) parts.neck = nk;
-    return parts;
+    return { torso: 1, arms: 1, legs: 1, jacket: 1, fp: 1, neck: neck, skirt: { hex: body } };
   };
 
-  PAINT.police = function (P, c) {
-    const uni = (c && c.torso != null) ? c.torso : 0x24407a, uc = hx(uni);
-    const shirt = tone(uni, 0.3), T = P.T, J = P.J, A = P.A, L = P.L;
-    // torso = the SHIRT layer (shows through the duty jacket's open front)
-    T.fill(uc);
-    T.rect("front", 0.3, 0, 0.4, 0.86, shirt);
-    if (neckV2()) T.rect("front", 0.47, 0, 0.06, 0.62, hx(0x16264a)); // dark tie — blade from row 0, knot on the yoke
-    else T.rect("front", 0.47, 0.02, 0.06, 0.6, hx(0x16264a));     // dark tie
+  // ============================================================
+  //  THE DUTY UNIFORM — one garment on the shaped body.
+  //
+  //  Owner: "a weird mix of geometric and paint, made for the old body." A
+  //  cop wore an OPEN duty-jacket shell over a lighter shirt (it read as a
+  //  sports coat), a painted gold badge AND a gold cube, a painted "holster
+  //  block" and a painted radio rectangle. Now each detail is ONE thing:
+  //    • CLOTH is paint, here, laid out for the shaped torso (character.js
+  //      TORSO block: u is a planar projection across each face, v the old box
+  //      span, so a fraction here is a fraction of the real chest). Measured
+  //      on the profiles: the pectoral / bust apex sits at row ~0.45-0.49 and
+  //      |x| ~0.41 of the section, i.e. u ~0.245 / 0.755 on the front face —
+  //      the breast pockets are centred there and hang from a flap at 0.30, so
+  //      on a woman they sit on the upper slope of the bust, where a uniform
+  //      shirt's pockets are cut. Pockets are SEAMS and FLAPS in the shirt's
+  //      own cloth, not tone blocks: a real pocket is the same fabric.
+  //    • everything HARD is entities/dutykit.js geometry: belt, buckle,
+  //      holster + grip, pouches, radio, torch, cuff case, epaulette straps,
+  //      the metal badge. Nothing here paints a belt, a holster or a radio.
+  //    • no jacket shell: a duty shirt is worn tucked, under the belt.
+  //  o: {shirt, legs, tie, open (undershirt hex), stripe [w, hex], cargo,
+  //      patch [body, border, inner], tape (nameplate css), shade}
+  // ============================================================
+  function dutyShirt(P, o) {
+    const T = P.T, A = P.A, L = P.L, sh = o.shirt, sc = hx(sh);
+    const seam = tone(sh, -0.2), deep = tone(sh, -0.34);
+    T.fill(sc);
+    let placketTop = 0.1;
+    if (o.tie != null) {
+      // blade from row 0 (the knot is on the collar band, clothes.js yoke atlas)
+      T.rect("front", 0.47, 0, 0.06, 0.62, hx(o.tie));
+      T.poly("front", [[0.47, 0.62], [0.53, 0.62], [0.5, 0.68]], hx(o.tie));
+      placketTop = 0.68;
+    } else if (o.open != null) {
+      // open collar: the undershirt V and the two collar points lying open
+      T.poly("front", [[0.41, 0], [0.59, 0], [0.5, 0.13]], hx(o.open));
+      T.poly("front", [[0.35, 0], [0.43, 0], [0.5, 0.135], [0.42, 0.1]], seam);
+      T.poly("front", [[0.65, 0], [0.57, 0], [0.5, 0.135], [0.58, 0.1]], seam);
+      placketTop = 0.13;
+    }
+    T.rect("front", 0.487, placketTop, 0.026, 0.95 - placketTop, tone(sh, -0.12));       // button placket
+    for (let y = 0.2; y < 0.9; y += 0.13) if (y > placketTop + 0.02) T.dot("front", 0.5, y, 0.011, deep);
+    for (const cx of [0.245, 0.755]) {                                                   // the breast pockets
+      const x0 = cx - 0.11, x1 = cx + 0.11;
+      T.rect("front", x0, 0.335, 0.012, 0.145, seam);
+      T.rect("front", x1 - 0.012, 0.335, 0.012, 0.145, seam);
+      T.rect("front", x0, 0.468, 0.22, 0.012, seam);
+      T.rect("front", cx - 0.004, 0.36, 0.008, 0.11, tone(sh, -0.14));                  // box pleat
+      T.poly("front", [[x0 - 0.005, 0.3], [x1 + 0.005, 0.3], [x1 + 0.005, 0.338], [cx, 0.36], [x0 - 0.005, 0.338]], tone(sh, -0.08));
+      T.rect("front", x0 - 0.005, 0.3, 0.23, 0.008, seam);                               // flap top seam
+      T.dot("front", cx, 0.342, 0.011, deep);                                           // flap button
+    }
+    // the nameplate over the RIGHT pocket (u < 0.5 is the wearer's right). Blank:
+    // no invented names.
+    if (o.tape) T.rect("front", 0.16, 0.262, 0.17, 0.026, o.tape);
+    T.rect("back", 0, 0.12, 1, 0.012, seam);                                             // back yoke seam
+    T.rect("back", 0.28, 0.13, 0.01, 0.4, tone(sh, -0.1));                               // back pleats
+    T.rect("back", 0.71, 0.13, 0.01, 0.4, tone(sh, -0.1));
+    T.rect("side", 0.49, 0.1, 0.02, 0.9, tone(sh, -0.12));                               // side seam
     T.shade();
-    // duty jacket: badge, breast pockets w/ flap lines, belt + holster block
-    J.fill(uc);
-    J.clear("cap", 0, 0, 1, 1);
-    J.clearPoly("front", [[0.5 - 0.03, 0], [0.5 + 0.03, 0], [0.5 + 0.08, 1], [0.5 - 0.08, 1]]);
-    J.rect("front", 0.12, 0.26, 0.26, 0.13, tone(uni, -0.18));     // pocket bodies
-    J.rect("front", 0.62, 0.26, 0.26, 0.13, tone(uni, -0.18));
-    J.rect("front", 0.12, 0.26, 0.26, 0.045, tone(uni, -0.4));     // flap lines
-    J.rect("front", 0.62, 0.26, 0.26, 0.045, tone(uni, -0.4));
-    J.poly("front", [[0.21, 0.1], [0.29, 0.1], [0.29, 0.17], [0.25, 0.21], [0.21, 0.17]], "#e8c454"); // badge shield
-    J.dot("front", 0.25, 0.135, 0.028, "#fadf8e");                 // badge dot
-    J.rect("front", 0.66, 0.13, 0.16, 0.04, "#cfd6e2");            // name tape
-    J.rect("side", 0.15, 0.78, 0.7, 0.2, "#15181f");               // holster block at the hip
-    J.shade();
-    A.fill(uc);
-    A.rect("front", 0.2, 0.05, 0.6, 0.2, tone(uni, -0.3));         // shoulder patch
-    A.rect("front", 0.2, 0.05, 0.6, 0.035, "#e8c454");             //   gold border
-    A.rect("side", 0.2, 0.05, 0.6, 0.2, tone(uni, -0.3));
+    // SLEEVES: long, a shoulder seam at the sleeve head, the agency patch on
+    // the outer upper arm, a buttoned cuff at the wrist
+    A.fill(sc);
+    for (const col of ["front", "back", "side"]) {
+      A.rect(col, 0, 0, 1, 0.03, seam);
+      A.rect(col, 0, 0.9, 1, 0.07, tone(sh, -0.07));
+      A.rect(col, 0, 0.9, 1, 0.01, seam);
+    }
+    A.dot("front", 0.72, 0.935, 0.03, deep);
+    if (o.patch) {
+      const pb = o.patch;
+      A.poly("side", [[0.22, 0.065], [0.78, 0.065], [0.78, 0.17], [0.5, 0.215], [0.22, 0.17]], pb[1]);  // border
+      A.poly("side", [[0.27, 0.074], [0.73, 0.074], [0.73, 0.165], [0.5, 0.203], [0.27, 0.165]], pb[0]);
+      A.poly("side", [[0.4, 0.1], [0.6, 0.1], [0.6, 0.15], [0.5, 0.17], [0.4, 0.15]], pb[2]);
+    }
     A.shade();
-    L.fill(hx((c && c.legs != null) ? c.legs : 0x1b2a44));
-    L.rect("side", 0.35, 0, 0.3, 1, tone(uni, -0.35));             // trouser side stripe
+    // TROUSERS: a pressed crease, the agency's stripe down the outseam, a
+    // cargo pocket if the agency wears one, and the break over the boot
+    const lg = o.legs;
+    L.fill(hx(lg));
+    L.rect("front", 0.494, 0, 0.012, 0.93, tone(lg, 0.12));
+    L.rect("back", 0.494, 0, 0.012, 0.93, tone(lg, 0.06));
+    if (o.stripe) L.rect("side", 0.5 - o.stripe[0] / 2, 0, o.stripe[0], 0.95, o.stripe[1]);
+    else L.rect("side", 0.492, 0, 0.016, 0.95, tone(lg, -0.2));
+    if (o.cargo) {
+      L.rect("side", 0.2, 0.26, 0.6, 0.012, tone(lg, -0.25));
+      L.rect("side", 0.2, 0.26, 0.012, 0.17, tone(lg, -0.25));
+      L.rect("side", 0.788, 0.26, 0.012, 0.17, tone(lg, -0.25));
+      L.rect("side", 0.2, 0.42, 0.6, 0.012, tone(lg, -0.25));
+    }
+    for (const col of ["front", "back", "side"]) L.rect(col, 0, 0.93, 1, 0.07, tone(lg, -0.22));
     L.shade();
-    const parts = { torso: 1, arms: 1, legs: 1, jacket: 1 };
-    if (neckV2()) parts.neck = { tie: 0x16264a, w: 0.06 };
+    const parts = { torso: 1, arms: 1, legs: 1 };
+    if (o.tie != null && neckV2()) parts.neck = { tie: o.tie, w: 0.06 };
     return parts;
+  }
+
+  // city patrol: navy long-sleeve shirt and tie, silver nameplate, a thin
+  // dark stripe down the trousers (entities/dutykit.js: silver shield, pistol)
+  PAINT.police = function (P, c) {
+    const uni = (c && c.torso != null) ? c.torso : 0x24407a;
+    return dutyShirt(P, {
+      shirt: uni, legs: (c && c.legs != null) ? c.legs : 0x1b2a44, tie: 0x16264a,
+      stripe: [0.07, tone((c && c.legs != null) ? c.legs : 0x1b2a44, -0.5)],
+      patch: [tone(uni, -0.32), "#d4b04e", "#b9c6da"], tape: "#c4cad3",
+    });
   };
+  PAINT.precinct = PAINT.police;             // the desk officer's (non-cop) copy of the patrol uniform
 
   function paintSwat(P, c, wordmarks) {
     // SWAT REDESIGN — police-parity detail. Two-tone: graphite fatigues under a
-    // dark-OLIVE plate carrier painted on the inflated JACKET shell (the same
-    // silhouette trick the police duty jacket uses), so a SWAT reads as a
+    // dark-OLIVE plate carrier painted on the JACKET shell (a shell of the
+    // body's own surface, character.js humanShellSpec), so a SWAT reads as a
     // bulked-up carrier over a working uniform instead of a near-black smudge.
     // Contrast trims (pale SWAT placards, differentiated pouches, silver
     // buckle) keep it READABLE while staying tactical-dark. This painter is
@@ -712,14 +745,12 @@
     const fc = hx(fat), cc = hx(carr);
     const pouch = tone(carr, -0.26), strap = tone(carr, -0.45), plate = tone(carr, 0.09);
     const T = P.T, J = P.J, A = P.A, L = P.L, ctx = P.ctx;
-    // ---- torso = the uniform SHIRT + duty belt under the carrier ----
+    // ---- torso = the combat shirt under the carrier. The battle belt, the
+    //      holster, the mag and cuff pouches are entities/dutykit.js geometry
+    //      (they used to be painted blocks here, under a real belt nobody had) ----
     T.fill(fc);
     T.rect("front", 0.46, 0, 0.08, 0.3, tone(fat, -0.35));          // zip placket
-    T.rect("back", 0, 0.84, 1, 0.16, "#101218");
-    T.rect("side", 0, 0.84, 1, 0.16, "#101218");
-    T.rect("side", 0.15, 0.76, 0.7, 0.22, "#15181f");               // holster block at the hip
-    T.rect("front", 0.08, 0.86, 0.14, 0.11, "#1a1d24");             // cuff case
-    T.rect("front", 0.74, 0.86, 0.15, 0.11, "#1a1d24");             // spare-mag case
+    T.rect("side", 0.49, 0.1, 0.02, 0.9, tone(fat, -0.2));          // side seam
     T.shade();
     // ---- the PLATE CARRIER rides the jacket shell (real bulk) ----
     J.fill(cc);
@@ -767,14 +798,15 @@
     A.rect("front", 0.26, 0.08, 0.48, 0.11, tone(carr, -0.35));     // subdued unit patch
     A.rect("front", 0.14, 0.64, 0.72, 0.09, tone(fat, -0.3));       // elbow-pad strap
     A.shade();
-    // ---- legs: subtle camo tone break + knee-pad blocks + thigh rig ----
+    // ---- legs: subtle camo tone break + cargo pocket + knee pads (the
+    //      holster is the belt kit's; no painted thigh rig beside it) ----
     L.fill(fc);
     L.rect("front", 0, 0.1, 1, 0.14, tone(fat, 0.08));              // camo-ish tone break
     L.rect("front", 0.42, 0.26, 0.58, 0.1, tone(fat, -0.14));
     L.rect("back", 0, 0.14, 1, 0.16, tone(fat, 0.08));
     L.rect("side", 0, 0.18, 1, 0.12, tone(fat, -0.14));
-    L.rect("side", 0.2, 0.36, 0.6, 0.26, "#1d2026");                // thigh rig
-    L.rect("side", 0.2, 0.36, 0.6, 0.05, strap);
+    L.rect("side", 0.2, 0.3, 0.6, 0.16, tone(fat, -0.1));           // cargo pocket
+    L.rect("side", 0.2, 0.3, 0.6, 0.03, strap);                     //   its flap
     L.rect("front", 0.14, 0.46, 0.72, 0.2, "#23262c");              // knee-pad block
     L.rect("front", 0.22, 0.5, 0.56, 0.11, "#31353d");              //   pad face
     L.rect("front", 0, 0.92, 1, 0.08, tone(fat, -0.35));            // boot break
@@ -794,142 +826,182 @@
   // These painters deliberately use this atlas rather than adding geometry in
   // entities/player|guards|npc: one shared texture per fit, identical draw-call
   // cost, and the same yoke/body-fit guarantees as every City outfit.
-  PAINT.inmate = function (P, c) {
-    const orange = (c && c.torso != null) ? c.torso : 0xf27a1f;
-    const oc = hx(orange), seam = tone(orange, -0.30), hi = tone(orange, 0.16);
-    const T = P.T, A = P.A, L = P.L;
-    T.fill(oc);
-    // one-piece coverall: undershirt, zip, chest/seat pockets, waist and ID.
-    T.poly("front", [[0.39, 0], [0.61, 0], [0.5, 0.14]], "#e8e2d4");
-    T.rect("front", 0.48, 0.08, 0.04, 0.72, seam);
-    T.rect("front", 0.12, 0.33, 0.23, 0.16, tone(orange, -0.12));
-    T.rect("front", 0.65, 0.33, 0.23, 0.16, tone(orange, -0.12));
-    T.rect("front", 0.12, 0.33, 0.23, 0.035, seam);
-    T.rect("front", 0.65, 0.33, 0.23, 0.035, seam);
-    T.rect("front", 0, 0.80, 1, 0.055, seam);
-    T.rect("back", 0.12, 0.63, 0.28, 0.17, tone(orange, -0.12));
-    T.rect("back", 0.60, 0.63, 0.28, 0.17, tone(orange, -0.12));
-    T.shade();
-    A.fill(oc);
-    A.rect("front", 0.08, 0.09, 0.84, 0.055, hi);                   // shoulder seam
-    A.rect("side", 0.08, 0.09, 0.84, 0.055, hi);
-    A.rect("front", 0, 0.88, 1, 0.12, seam);                        // coverall cuff
-    A.shade();
-    inmateLegs(L, c, orange, seam);
-    return { torso: 1, arms: 1, legs: 1 };
-  };
-  PAINT.inmate_cap = PAINT.inmate;
-  function inmateLegs(L, c, orange, seam) {
-    const leg = (c && c.legs != null) ? c.legs : tone2(orange, -0.04);
-    L.fill(hx(leg));
-    L.rect("side", 0.46, 0, 0.08, 1, seam);                         // outside seam
-    L.rect("front", 0.13, 0.44, 0.74, 0.22, tone(leg, -0.14));      // reinforced knee
-    L.rect("side", 0.16, 0.18, 0.68, 0.18, tone(leg, -0.12));      // thigh pocket
-    L.rect("front", 0, 0.92, 1, 0.08, seam);                       // ankle break
-    L.shade();
+  // ============================================================
+  //  WORK-WEAR KIT on the shaped body. The landmarks are TORSO_ROW's (top of
+  //  file) plus two more, measured the same way off men and women of every
+  //  physique, children 7-15 and elders (all agree within 0.04):
+  //    · the armpit ~0.25-0.31 on the torso row (side seams start there, and
+  //      a vest's armhole ends there);
+  //    · a man's pec peaks at 0.45, a woman's bust at 0.49 and is flat again
+  //      by ~0.38 above it — so a CHEST POCKET at 0.24-0.38 sits on the upper
+  //      chest of both, never across a bust;
+  //    · arm row: elbow 0.64, wrist crease 1. Leg row: 0-0.12 is inside the
+  //      pelvis, knee 0.505, ankle (the shoe) 1.
+  //  Every band that goes round a body is painted on front, back AND side
+  //  (TORSO_ROW's hemBand): a stripe on one face is a sticker, not a stripe.
+  // ============================================================
+  const WORK_ROW = { pocket: 0.24, pocketH: 0.14, armpit: 0.30 };
+  // retroreflective trim: an edge colour with a silver core (NFPA triple trim /
+  // the ANSI vest tape), round the body
+  function tape(R, y, h, edge, core) { hemBand(R, edge, y, h); hemBand(R, core, y + h * 0.3, h * 0.4); }
+  // a flapped patch pocket: bag, flap, and the flap's shadow line
+  function flapPocket(R, col, x, y, w, h, body) {
+    R.rect(col, x, y, w, h, tone(body, -0.1));
+    R.rect(col, x, y, w, h * 0.3, tone(body, -0.2));
+    R.rect(col, x, y + h * 0.3, w, 0.012, tone(body, -0.4));
+  }
+  // a cuff / trouser hem at the bottom of a limb row, with its stitch line
+  function limbHem(R, y, body) { hemBand(R, tone(body, -0.12), y, 1 - y); hemBand(R, tone(body, -0.34), y, 0.012); }
+  // trousers on the pelvis (THE SEAT): fly, slash pockets, seat pockets, seams
+  function trouserSeat(J, legs) {
+    J.fill(hx(legs));
+    J.rect("front", 0.49, 0, 0.02, 0.62, tone(legs, -0.3));                     // fly
+    J.poly("front", [[0.04, 0.04], [0.1, 0.04], [0.22, 0.4], [0.16, 0.4]], tone(legs, -0.24));   // slash pockets
+    J.poly("front", [[0.96, 0.04], [0.9, 0.04], [0.78, 0.4], [0.84, 0.4]], tone(legs, -0.24));
+    J.rect("back", 0.12, 0.1, 0.28, 0.34, tone(legs, -0.1)); J.rect("back", 0.6, 0.1, 0.28, 0.34, tone(legs, -0.1));
+    J.rect("back", 0.49, 0, 0.02, 1, tone(legs, -0.22));                        // centre-back seam
+    J.rect("side", 0.48, 0, 0.04, 1, tone(legs, -0.22));
+    hemBand(J, tone(legs, -0.16), 0, 0.04);                                       // waistband
   }
 
-  // THE JUMPSUIT TIED AT THE WAIST. The way half a real yard wears the issue
-  // coverall: top peeled off, sleeves knotted round the waist, a tank under
-  // it — and BARE ARMS, which is the only place arm ink is ever seen. Skin-
-  // keyed (the arms are the wearer's tone) and ink-keyed (entities/heritage.js
-  // paints the sleeve set into the same row). Legs are the ordinary coverall.
-  PAINT.inmate_tank = function (P, c) {
-    const orange = (c && c.legs != null) ? c.legs : 0xe76518;
-    const white = 0xe6e3d9, skin = (c && c.skin != null) ? c.skin : 0xcf9a72;
-    const oc = hx(orange), seam = tone(orange, -0.30), wc = hx(white), sk = hx(skin), rib = tone(white, -0.09);
-    const T = P.T, A = P.A, L = P.L;
-    T.fill(wc);
-    T.poly("front", [[0.36, 0], [0.64, 0], [0.5, 0.20]], sk);          // the tank's neckline
-    T.poly("back", [[0.40, 0], [0.60, 0], [0.5, 0.12]], sk);
-    for (const col of ["front", "back", "side"]) for (let x = 0.08; x < 1; x += 0.11) T.rect(col, x, 0.20, 0.014, 0.52, rib);
-    T.rect("front", 0.2, 0.42, 0.16, 0.08, "rgba(40,34,24,0.14)");   // yard grime
-    // the knotted sleeves: an orange band round the hips with the knot in front
-    for (const col of ["front", "back", "side"]) { T.rect(col, 0, 0.74, 1, 0.26, oc); T.rect(col, 0, 0.74, 1, 0.03, seam); }
-    T.poly("front", [[0.30, 0.74], [0.50, 0.66], [0.70, 0.74], [0.62, 1], [0.38, 1]], tone(orange, 0.10));   // the knot
-    T.rect("front", 0.46, 0.70, 0.08, 0.30, seam);
-    T.poly("front", [[0.20, 0.80], [0.36, 0.80], [0.30, 1], [0.12, 1]], tone(orange, -0.14));   // a sleeve hanging
+  /* THE ONE-PIECE. A jumpsuit/coverall is one garment on four rows: the same
+     cloth, one zip from the collarbone notch through the waist to the fork of
+     the seat, chest pockets on the upper chest, an elastic waist at the real
+     waist, seat pockets on the SEAT (the pelvis — they used to be painted on
+     the small of the back), sleeves hemmed at the wrist crease, legs hemmed at
+     the ankle. o.under: the tee in the open neck. o.panel: a racing suit's
+     side panel colour, run shoulder to ankle. o.legStripe: a trustee's leg
+     stripe, waistband to hem. */
+  function jumpsuit(P, body, o) {
+    o = o || {};
+    const T = P.T, J = P.J, A = P.A, L = P.L, bc = hx(body);
+    const seam = tone(body, -0.32), stitch = tone(body, -0.16);
+    T.fill(bc);
+    const zipTop = o.under != null ? 0.15 : 0.07;
+    if (o.under != null) T.poly("front", [[0.40, 0], [0.60, 0], [0.5, zipTop]], hx(o.under));
+    T.rect("front", 0.488, zipTop, 0.024, 1 - zipTop, seam);
+    flapPocket(T, "front", 0.12, WORK_ROW.pocket, 0.24, WORK_ROW.pocketH, body);
+    flapPocket(T, "front", 0.64, WORK_ROW.pocket, 0.24, WORK_ROW.pocketH, body);
+    T.rect("back", 0, 0.19, 1, 0.012, stitch);                                  // back yoke seam
+    T.rect("side", 0.48, WORK_ROW.armpit, 0.04, 1 - WORK_ROW.armpit, stitch);   // side seams
+    const wy = TORSO_ROW.waist;                                                  // the elastic waist
+    hemBand(T, tone(body, -0.08), wy - 0.02, 0.04);
+    hemBand(T, seam, wy - 0.02, 0.01);
+    hemBand(T, seam, wy + 0.01, 0.01);
+    if (o.panel != null) T.rect("side", 0.22, WORK_ROW.armpit, 0.56, 1 - WORK_ROW.armpit, hx(o.panel));
     T.shade();
+    J.fill(bc);
+    J.rect("front", 0.488, 0, 0.024, 0.74, seam);                               // the zip runs to the fork
+    J.poly("front", [[0.05, 0.03], [0.11, 0.03], [0.23, 0.42], [0.17, 0.42]], seam);    // slash hip pockets
+    J.poly("front", [[0.95, 0.03], [0.89, 0.03], [0.77, 0.42], [0.83, 0.42]], seam);
+    flapPocket(J, "back", 0.12, 0.1, 0.28, 0.36, body);                          // seat pockets
+    flapPocket(J, "back", 0.6, 0.1, 0.28, 0.36, body);
+    J.rect("back", 0.49, 0, 0.02, 1, stitch);
+    J.rect("side", 0.48, 0, 0.04, 1, stitch);
+    if (o.panel != null) J.rect("side", 0.22, 0, 0.56, 1, hx(o.panel));
+    if (o.legStripe != null) J.rect("side", 0.36, 0, 0.28, 1, hx(o.legStripe));
+    J.shade();
+    A.fill(bc);
+    hemBand(A, stitch, 0.03, 0.012);                                             // the set-in sleeve seam
+    if (o.panel != null) A.rect("side", 0.3, 0, 0.4, 0.92, hx(o.panel));
+    limbHem(A, 0.92, body);
+    A.shade();
+    L.fill(bc);
+    L.rect("side", 0.48, 0, 0.04, 1, stitch);                                    // outside seam
+    if (o.panel != null) L.rect("side", 0.22, 0, 0.56, 0.93, hx(o.panel));
+    if (o.legStripe != null) L.rect("side", 0.36, 0, 0.28, 0.93, hx(o.legStripe));
+    limbHem(L, 0.93, body);
+    L.shade();
+    return { torso: 1, arms: 1, legs: 1, seat: { hex: body } };
+  }
+
+  // the issue orange coverall — every inmate, and the player, wears this
+  PAINT.inmate = function (P, c) {
+    return jumpsuit(P, (c && c.torso != null) ? c.torso : 0xf27a1f, { under: 0xe8e2d4 });
+  };
+  PAINT.inmate_cap = PAINT.inmate;
+
+  // THE JUMPSUIT TIED AT THE WAIST. The way half a real yard wears the issue
+  // coverall: top peeled off, sleeves knotted round the waist, a ribbed tank
+  // under it — and BARE ARMS, which is the only place arm ink is ever seen.
+  // Skin-keyed (arms, neck scoop and armholes are the wearer's tone) and
+  // ink-keyed (entities/heritage.js paints the sleeve set into the same row).
+  // Below the knot it IS the coverall (jumpsuit): same seat, same legs.
+  PAINT.inmate_tank = function (P, c) {
+    const orange = (c && c.legs != null) ? c.legs : 0xf27a1f;
+    const white = 0xe6e3d9, skin = (c && c.skin != null) ? c.skin : 0xcf9a72;
+    const parts = jumpsuit(P, orange, {});
+    const oc = hx(orange), seam = tone(orange, -0.32), wc = hx(white), sk = hx(skin), rib = tone(white, -0.09);
+    const T = P.T, J = P.J, A = P.A;
+    T.fill(wc);
+    T.poly("front", [[0.30, 0], [0.70, 0], [0.64, 0.12], [0.5, 0.17], [0.36, 0.12]], sk);   // scoop neck
+    T.poly("back", [[0.34, 0], [0.66, 0], [0.5, 0.08]], sk);
+    // deep armholes: the outer shoulder is skin, the straps run over the trapezius
+    for (const col of ["front", "back"]) {
+      T.poly(col, [[0, 0], [0.22, 0], [0.13, 0.17], [0.03, 0.29], [0, 0.3]], sk);
+      T.poly(col, [[1, 0], [0.78, 0], [0.87, 0.17], [0.97, 0.29], [1, 0.3]], sk);
+    }
+    T.rect("side", 0, 0, 1, 0.28, sk);
+    T.poly("side", [[0, 0.28], [1, 0.28], [0.8, 0.32], [0.2, 0.32]], sk);
+    for (const col of ["front", "back", "side"]) for (let x = 0.08; x < 1; x += 0.11) T.rect(col, x, 0.18, 0.014, 0.52, rib);
+    // the peeled-down top bunched round the waist, the sleeves knotted in front
+    hemBand(T, oc, 0.70, 0.30);
+    hemBand(T, seam, 0.70, 0.012);
+    hemBand(T, tone(orange, -0.14), 0.75, 0.01);
+    T.poly("front", [[0.40, 0.69], [0.60, 0.69], [0.57, 0.82], [0.43, 0.82]], tone(orange, 0.10));   // the knot
+    T.rect("front", 0.495, 0.69, 0.01, 0.13, seam);
+    T.shade();
+    // the two sleeve tails hang from the knot down the front of the seat
+    J.poly("front", [[0.42, 0], [0.50, 0], [0.44, 0.64], [0.33, 0.58]], tone(orange, -0.10));
+    J.poly("front", [[0.50, 0], [0.58, 0], [0.67, 0.56], [0.56, 0.62]], tone(orange, 0.06));
+    J.rect("front", 0.33, 0.56, 0.11, 0.03, seam); J.rect("front", 0.56, 0.58, 0.11, 0.03, seam);   // hemmed cuffs
     A.fill(sk);
     if (c && c.ink && CBZ.inkPaintArm) CBZ.inkPaintArm(A, c.ink, sk);
     A.shade();
-    inmateLegs(L, c, orange, seam);
-    return { torso: 1, arms: 1, legs: 1 };
+    // a tank has no collar: the collar band is bare neck
+    return Object.assign(parts, { yoke: skin });
   };
 
+  // the infirmary orderly: a white pull-over scrub tunic over the issue orange
+  // trousers, a red cross over the heart, sleeves to the wrist
   PAINT.inmate_orderly = function (P, c) {
     const top = (c && c.torso != null) ? c.torso : 0xe7edf0;
     const orange = (c && c.legs != null) ? c.legs : 0xe76518;
-    const T = P.T, A = P.A, L = P.L, tc = hx(top), trim = hx(orange);
+    const T = P.T, J = P.J, A = P.A, L = P.L, tc = hx(top);
     T.fill(tc);
-    T.poly("front", [[0.36, 0], [0.50, 0.15], [0.64, 0]], tone(top, -0.18));
-    T.rect("front", 0.49, 0.12, 0.02, 0.72, tone(top, -0.22));
-    T.rect("front", 0.10, 0.62, 0.30, 0.20, tone(top, -0.10));
-    T.rect("front", 0.60, 0.62, 0.30, 0.20, tone(top, -0.10));
-    T.rect("front", 0.63, 0.18, 0.29, 0.13, trim);                  // institutional orange chest trim
-    T.rect("front", 0.16, 0.20, 0.14, 0.05, "#b73535");
-    T.rect("front", 0.205, 0.155, 0.05, 0.14, "#b73535");          // medical cross
+    T.poly("front", [[0.35, 0], [0.50, 0.22], [0.65, 0]], tone(top, -0.2));         // V neck
+    T.poly("front", [[0.38, 0], [0.50, 0.17], [0.62, 0]], tone(top, -0.06));
+    T.rect("front", 0.18, 0.26, 0.12, 0.035, "#b73535");                         // red cross, left chest
+    T.rect("front", 0.2225, 0.22, 0.035, 0.115, "#b73535");
+    flapPocket(T, "front", 0.12, 0.56, 0.24, 0.16, top);                         // tunic hip pockets
+    flapPocket(T, "front", 0.64, 0.56, 0.24, 0.16, top);
+    T.rect("side", 0.48, WORK_ROW.armpit, 0.04, 1 - WORK_ROW.armpit, tone(top, -0.12));
     T.shade();
-    A.fill(tc); A.rect("front", 0.06, 0.06, 0.88, 0.09, trim); A.rect("side", 0.06, 0.06, 0.88, 0.09, trim); A.shade();
-    L.fill(trim);
-    L.rect("side", 0.46, 0, 0.08, 1, tone(orange, -0.30));
-    L.rect("front", 0.13, 0.44, 0.74, 0.22, tone(orange, -0.12));
+    A.fill(tc); hemBand(A, tone(top, -0.12), 0.03, 0.012); limbHem(A, 0.92, top); A.shade();
+    trouserSeat(J, orange); J.shade();
+    L.fill(hx(orange));
+    L.rect("side", 0.48, 0, 0.04, 1, tone(orange, -0.22));
+    limbHem(L, 0.93, orange);
     L.shade();
-    return { torso: 1, arms: 1, legs: 1 };
+    return { torso: 1, arms: 1, legs: 1, seat: { hex: orange } };
   };
 
+  // the chapel trustee: the same one-piece in grey, a white shirt collar in the
+  // neck, and the orange trustee stripe down the outside of each leg
   PAINT.inmate_chapel = function (P, c) {
-    const body = (c && c.torso != null) ? c.torso : 0x505c6b;
-    const legs = (c && c.legs != null) ? c.legs : 0x414a57;
-    const T = P.T, A = P.A, L = P.L, bc = hx(body), orange = "#e77724";
-    T.fill(bc);
-    T.rect("front", 0.49, 0, 0.02, 0.82, tone(body, -0.25));
-    T.rect("front", 0.43, 0, 0.14, 0.08, "#eee8dc");               // trustee/chapel collar tab
-    T.rect("front", 0.12, 0.33, 0.27, 0.16, tone(body, -0.12));
-    T.rect("front", 0.61, 0.33, 0.27, 0.16, tone(body, -0.12));
-    T.rect("front", 0.62, 0.17, 0.30, 0.13, orange);                 // institutional orange chest accent
-    T.shade();
-    A.fill(bc); A.rect("front", 0, 0.88, 1, 0.12, tone(body, -0.24)); A.shade();
-    L.fill(hx(legs));
-    L.rect("side", 0.38, 0, 0.24, 1, orange);                       // institutional orange stripe
-    L.rect("front", 0.13, 0.44, 0.74, 0.20, tone(legs, -0.12));
-    L.shade();
-    return { torso: 1, arms: 1, legs: 1 };
+    return jumpsuit(P, (c && c.torso != null) ? c.torso : 0x505c6b, { under: 0xeee8dc, legStripe: 0xe77724 });
   };
 
+  // prison officers: slate uniform shirt worn open over a black undershirt,
+  // a light stripe and a cargo pocket on the trousers (entities/dutykit.js:
+  // gold shield, radio, keys, a taser — no firearm inside the walls)
   PAINT.corrections = function (P, c) {
     const uni = (c && c.torso != null) ? c.torso : 0x34475d;
     const legs = (c && c.legs != null) ? c.legs : 0x202936;
-    const shirt = tone(uni, 0.30), T = P.T, J = P.J, A = P.A, L = P.L;
-    T.fill(shirt);
-    T.rect("front", 0.49, 0, 0.02, 0.86, tone(shirt, -0.24));
-    T.rect("front", 0.12, 0.35, 0.27, 0.15, tone(shirt, -0.10));
-    T.rect("front", 0.61, 0.35, 0.27, 0.15, tone(shirt, -0.10));
-    T.rect("front", 0, 0.84, 1, 0.16, "#111419");                  // real duty belt under jacket
-    T.rect("side", 0.08, 0.78, 0.84, 0.21, "#111419");
-    T.shade();
-    J.fill(hx(uni));
-    J.clear("cap", 0, 0, 1, 1);
-    J.clearPoly("front", [[0.47, 0], [0.53, 0], [0.58, 1], [0.42, 1]]);
-    J.rect("front", 0.10, 0.25, 0.28, 0.15, tone(uni, -0.15));
-    J.rect("front", 0.62, 0.25, 0.28, 0.15, tone(uni, -0.15));
-    J.rect("front", 0.10, 0.25, 0.28, 0.04, tone(uni, -0.36));
-    J.rect("front", 0.62, 0.25, 0.28, 0.04, tone(uni, -0.36));
-    J.poly("front", [[0.19, 0.10], [0.29, 0.10], [0.29, 0.18], [0.24, 0.23], [0.19, 0.18]], "#d9b94b");
-    J.rect("front", 0.05, 0.60, 0.12, 0.20, "#151b24");             // radio
-    J.rect("side", 0.12, 0.74, 0.76, 0.24, "#111419");             // holster/cuff belt mass
-    J.shade();
-    A.fill(hx(uni));
-    A.rect("front", 0.15, 0.04, 0.70, 0.23, tone(uni, -0.28));
-    A.rect("front", 0.15, 0.04, 0.70, 0.04, "#d9b94b");
-    A.rect("side", 0.15, 0.04, 0.70, 0.23, tone(uni, -0.28));
-    A.rect("front", 0, 0.88, 1, 0.12, tone(uni, -0.28));
-    A.shade();
-    L.fill(hx(legs));
-    L.rect("side", 0.42, 0, 0.16, 1, tone(uni, 0.18));
-    L.rect("side", 0.12, 0.22, 0.76, 0.20, tone(legs, -0.16));       // cargo pocket
-    L.shade();
-    return { torso: 1, arms: 1, legs: 1, jacket: 1 };
+    return dutyShirt(P, {
+      shirt: uni, legs: legs, open: 0x15171b, stripe: [0.1, tone(uni, 0.22)], cargo: 1,
+      patch: [tone(uni, -0.3), "#c9a94a", "#8ea596"], tape: "#c4cad3",
+    });
   };
 
   PAINT.warden = function (P, c) {
@@ -947,7 +1019,8 @@
     J.clearPoly("front", [[0.47, 0], [0.53, 0], [0.59, 1], [0.41, 1]]);
     J.rect("front", 0.10, 0.27, 0.27, 0.14, tone(body, -0.13));
     J.rect("front", 0.63, 0.27, 0.27, 0.14, tone(body, -0.13));
-    J.poly("front", [[0.18, 0.10], [0.30, 0.10], [0.30, 0.18], [0.24, 0.24], [0.18, 0.18]], gold);
+    // (the badge is the rig's own fitted metal shield — character.js c.badge —
+    // not a second one painted beside it)
     J.rect("front", 0.60, 0.12, 0.29, 0.055, gold);
     J.rect("front", 0.06, 0.02, 0.30, 0.055, gold);                 // rank bars
     J.rect("front", 0.64, 0.02, 0.30, 0.055, gold);
@@ -971,127 +1044,151 @@
     // a single bandana SASH worn across the chest (the crew read) — one clean
     // diagonal band of the accent color, not a full hoop + polka dots + a
     // floating diamond. Reads instantly as "flying colors", looks intentional.
+    // ONE BAND, LEFT SHOULDER TO RIGHT HIP AND BACK UP: the back used to carry
+    // a level hoop at 0.18 and the flank another at 0.2, so the sash that left
+    // the front at the right hip (0.46-0.62) met neither. The back column's u
+    // runs +x -> -x, so the back is the front MIRRORED in u: it picks the band
+    // up at the right hip and climbs to the left shoulder, and the flank
+    // carries it level at the hip where the two meet.
+    // (warlord/outfits.js's geometric sash over armour copies this angle.)
     T.poly("front", [[0, 0.18], [0.18, 0.1], [1, 0.46], [1, 0.58], [0.82, 0.62], [0, 0.3]], ac);
-    T.rect("back", 0, 0.18, 1, 0.1, ac);                            // band continues round the back
-    T.rect("side", 0, 0.2, 1, 0.1, ac);
-    T.rect("front", 0.49, 0, 0.02, 0.18, tone(hue, -0.15));         // collar placket above the sash
-    T.rect("front", 0, 0.91, 1, 0.09, tone(hue, -0.4));             // waistband
-    T.rect("side", 0, 0.91, 1, 0.09, tone(hue, -0.4));
-    T.rect("back", 0, 0.91, 1, 0.09, tone(hue, -0.4));
+    T.poly("back", [[1, 0.18], [0.82, 0.1], [0, 0.46], [0, 0.58], [0.18, 0.62], [1, 0.3]], ac);
+    T.rect("side", 0, 0.46, 1, 0.12, ac);
+    T.rect("front", 0.49, 0.11, 0.02, 0.12, tone(hue, -0.15));      // collar placket, below the collar band
+    hemBand(T, tone(hue, -0.4));                                    // waistband, above the tuck
     T.shade();
-    A.fill(hc); A.rect("front", 0, 0.3, 1, 0.09, ac); A.rect("side", 0, 0.3, 1, 0.09, ac); A.shade();
+    // the crew ARMBAND, all the way round the upper arm (it had no back)
+    A.fill(hc); for (const col of ["front", "back", "side"]) A.rect(col, 0, 0.3, 1, 0.09, ac); A.shade();
     L.fill(hx((c && c.legs != null) ? c.legs : 0x23262c));
     L.rect("side", 0.38, 0, 0.24, 1, ac);
     L.shade();
     return { torso: 1, arms: 1, legs: 1 };
   };
 
-  PAINT.hivis = function (P, c) {
-    const vest = (c && c.torso != null) ? c.torso : 0xffb43a, drab = 0x5d6052;
-    const T = P.T, A = P.A, L = P.L, vc = hx(vest), refl = "#f4f6ef";
-    T.fill(vc);
-    // TWO reflective stripes, all the way round
-    for (const y of [0.36, 0.62]) for (const col of ["front", "back", "side"]) {
-      T.rect(col, 0, y, 1, 0.1, refl);
-      T.rect(col, 0, y + 0.035, 1, 0.03, "#cdd3d8");                // the silver core line
+  /* THE VEST OVER A SHIRT. A safety vest is a second garment: the shirt is the
+     base layer (sleeves, collar, the armholes and the neck V), and the vest is
+     painted OVER it with its own edges — cut away round the arm to the armpit,
+     open in a V to where its zip starts, hemmed at the belt line so a sliver
+     of shirt shows before the trousers. ANSI Class 2 tape: two bands round the
+     body under the chest and two braces over the shoulders that meet the upper
+     band, front and back (o.backX: crossed on the back, the airside pattern).
+     o.tape null = a plain blaze vest (hunter). o.under(R): a patterned shirt
+     (camo) instead of a solid one. Collar = the shirt's (parts.yoke). */
+  function workVest(P, o) {
+    const T = P.T, A = P.A, L = P.L, vc = hx(o.vest), sc = hx(o.shirt);
+    const hem = TORSO_ROW.waist + 0.02, edge = tone(o.vest, -0.22);
+    if (o.under) o.under(T); else T.fill(sc);
+    // the vest panels, cut round the arms (to the armpit) and open at the neck
+    const ap = WORK_ROW.armpit;
+    T.poly("front", [[0.12, 0], [0.3, 0], [0.5, 0.34], [0.7, 0], [0.88, 0], [0.93, 0.18], [1, ap], [1, hem], [0, hem], [0, ap], [0.07, 0.18]], vc);
+    T.poly("back", [[0.12, 0], [0.34, 0], [0.5, 0.06], [0.66, 0], [0.88, 0], [0.93, 0.18], [1, ap], [1, hem], [0, hem], [0, ap], [0.07, 0.18]], vc);
+    T.rect("side", 0, ap, 1, hem - ap, vc);
+    T.poly("front", [[0.3, 0], [0.34, 0], [0.5, 0.3], [0.5, 0.34]], edge);        // the vest's bound neck edge
+    T.poly("front", [[0.7, 0], [0.66, 0], [0.5, 0.3], [0.5, 0.34]], edge);
+    T.rect("front", 0.49, 0.34, 0.02, hem - 0.34, tone(o.vest, -0.32));          // zip
+    T.rect("front", 0, hem - 0.018, 1, 0.018, edge); T.rect("back", 0, hem - 0.018, 1, 0.018, edge);
+    T.rect("side", 0, hem - 0.018, 1, 0.018, edge);
+    if (o.tape) {
+      const t1 = 0.52, t2 = 0.66, th = 0.07;
+      // braces first so the bands lie over their feet
+      for (const x of [0.15, 0.74]) T.rect("front", x, 0, 0.11, t1, o.tape);
+      if (o.backX) {
+        T.poly("back", [[0.12, 0], [0.26, 0], [0.9, t1], [0.76, t1]], o.tape);
+        T.poly("back", [[0.88, 0], [0.74, 0], [0.1, t1], [0.24, t1]], o.tape);
+      } else for (const x of [0.15, 0.74]) T.rect("back", x, 0, 0.11, t1, o.tape);
+      for (const col of ["front", "back"]) for (const x of [0.185, 0.775]) if (col === "front" || !o.backX) T.rect(col, x, 0, 0.035, t1, o.core);
+      for (const y of [t1, t2]) {
+        for (const col of ["front", "back"]) { T.rect(col, 0, y, 1, th, o.tape); T.rect(col, 0, y + th * 0.3, 1, th * 0.4, o.core); }
+        T.rect("side", 0, y, 1, th, o.tape); T.rect("side", 0, y + th * 0.3, 1, th * 0.4, o.core);
+      }
+      T.rect("front", 0.49, 0.34, 0.02, hem - 0.34, tone(o.vest, -0.32));        // the zip runs through the tape
     }
-    // shoulder straps over the drab shirt at the neckline
-    T.rect("front", 0.06, 0, 0.16, 0.3, refl);
-    T.rect("front", 0.78, 0, 0.16, 0.3, refl);
-    T.rect("back", 0.06, 0, 0.16, 0.3, refl);
-    T.rect("back", 0.78, 0, 0.16, 0.3, refl);
-    T.rect("front", 0.3, 0, 0.4, 0.07, tone(drab, 0));              // shirt at the collar
     T.shade();
-    A.fill(hx(drab)); A.rect("front", 0, 0.84, 1, 0.08, tone(drab, -0.25)); A.shade(); // drab work shirt
-    L.fill(hx((c && c.legs != null) ? c.legs : 0x2f4f8a));
-    L.rect("front", 0, 0.5, 1, 0.07, refl);                         // knee band
-    L.rect("side", 0, 0.5, 1, 0.07, refl);
+    if (o.under) o.under(A); else A.fill(sc);
+    hemBand(A, tone(o.shirt, -0.16), 0.03, 0.012);
+    limbHem(A, 0.92, o.shirt);
+    A.shade();
+    L.fill(hx(o.legs));
+    L.rect("side", 0.46, 0, 0.08, 1, tone(o.legs, -0.2));                        // outseam
+    if (o.knee) L.rect("front", 0.16, 0.44, 0.68, 0.13, tone(o.legs, -0.12));   // work-jean knee
+    limbHem(L, 0.94, o.legs);
     L.shade();
-    return { torso: 1, arms: 1, legs: 1 };
+    return { torso: 1, arms: 1, legs: 1, yoke: o.shirt };
+  }
+  const TAPE = "#c9ced0", TAPE_CORE = "#eef1ee";
+
+  // Dock hi-vis: an amber vest over a drab long-sleeve work shirt and jeans.
+  // (It used to paint its vest BLACK: buildSet read the vest colour out of a
+  // "hivis|<torso>" key that keyOf never made, so the colour was always 0.)
+  PAINT.hivis = function (P, c) {
+    const vest = (c && c.torso != null) ? c.torso : 0xffb43a;
+    const shirt = (c && c.arms != null && c.arms !== vest) ? c.arms : 0x5d6052;
+    return workVest(P, { vest, shirt, legs: (c && c.legs != null) ? c.legs : 0x2f4f8a, tape: TAPE, core: TAPE_CORE });
   };
 
-  // Construction has its own vest grammar. It used to borrow PAINT.hivis,
-  // whose two short shoulder tabs read like white chest buttons when site
-  // orange was substituted for dock yellow. Keep the dock outfit intact and
-  // paint the familiar Class 2 vest over a navy work shirt: long shoulder
-  // reflectors joined by two uninterrupted waist bands.
+  // Construction: site orange over a navy work shirt, work denim, the tape
+  // silver read off the record's collar.
   PAINT.construction = function (P, c) {
     const vest = (c && c.torso != null) ? c.torso : 0xff5f08;
     const shirt = (c && c.arms != null) ? c.arms : 0x1d3352;
-    const denim = (c && c.legs != null) ? c.legs : 0x2e4a6b;
-    const silver = (c && c.collar != null) ? hx(c.collar) : "#bfc6c5";
-    const bright = "#e5e9e6", seam = tone(vest, -0.30);
-    const T = P.T, A = P.A, L = P.L;
-
-    T.fill(hx(vest));
-    // Deep front opening exposes the navy polo instead of a pair of square
-    // tabs. The back stays fully orange like the reference vest.
-    T.poly("front", [[0.29, 0], [0.71, 0], [0.5, 0.34]], hx(shirt));
-    T.poly("front", [[0.36, 0], [0.64, 0], [0.5, 0.20]], tone(shirt, -0.18));
-
-    // Two continuous shoulder reflectors. A brighter inset gives the broad
-    // bands a reflective centre without breaking them into little patches.
-    for (const col of ["front", "back"]) {
-      for (const x of [0.12, 0.76]) {
-        T.rect(col, x, 0.03, 0.12, 0.54, silver);
-        T.rect(col, x + 0.025, 0.03, 0.07, 0.54, bright);
-      }
-    }
-    // The two waist bands run around every face as one unbroken safety read.
-    for (const y of [0.52, 0.72]) for (const col of ["front", "back", "side"]) {
-      T.rect(col, 0, y, 1, 0.11, silver);
-      T.rect(col, 0, y + 0.025, 1, 0.06, bright);
-    }
-    T.rect("front", 0.487, 0.30, 0.026, 0.70, seam);               // vest zip
-    T.rect("front", 0.10, 0.86, 0.30, 0.10, tone(vest, -0.14));    // low pockets
-    T.rect("front", 0.60, 0.86, 0.30, 0.10, tone(vest, -0.14));
-    T.shade();
-
-    A.fill(hx(shirt));
-    A.rect("front", 0, 0.84, 1, 0.08, tone(shirt, -0.24));
-    A.rect("side", 0, 0.84, 1, 0.08, tone(shirt, -0.24));
-    A.shade();
-
-    L.fill(hx(denim));
-    L.rect("side", 0.44, 0, 0.12, 1, tone(denim, -0.20));
-    L.rect("front", 0.16, 0.45, 0.68, 0.13, tone(denim, -0.12));
-    L.shade();
-    return { torso: 1, arms: 1, legs: 1 };
+    const silver = (c && c.collar != null) ? hx(c.collar) : TAPE;
+    return workVest(P, { vest, shirt, legs: (c && c.legs != null) ? c.legs : 0x2e4a6b, tape: silver, core: TAPE_CORE, knee: true });
   };
 
+  /* A BIB APRON is worn over the shirt AND the lap: neck strap, a bib on the
+     chest, ties round the real waist knotted at the back, and the skirt with
+     its pouch pocket over the front of the pelvis (THE SEAT) — not a pocket on
+     the belly and a tie line across the ribs. */
+  function bibApron(T, J, apron, top) {
+    const apc = hx(apron), lo = tone(apron, -0.16);
+    T.rect("front", 0.3, 0, 0.07, top, apc); T.rect("front", 0.63, 0, 0.07, top, apc);   // neck strap
+    T.rect("front", 0.2, top, 0.6, 1 - top, apc);
+    T.rect("front", 0.2, top, 0.6, 0.012, lo);
+    hemBand(T, apc, TORSO_ROW.waist - 0.01, 0.022);                              // the ties round the waist
+    T.rect("back", 0.42, TORSO_ROW.waist - 0.025, 0.16, 0.05, lo);                // knotted at the back
+    J.rect("front", 0.16, 0, 0.68, 1, apc);                                        // the skirt over the lap
+    J.rect("front", 0.28, 0.18, 0.44, 0.34, tone(apron, -0.08));                  // pouch pocket
+    J.rect("front", 0.28, 0.18, 0.44, 0.03, lo);
+    J.rect("front", 0.495, 0.18, 0.01, 0.34, lo);
+  }
   PAINT.vendor = function (P, c) {
-    const shirt = (c && c.torso != null) ? c.torso : 0xc8553a, apron = 0xf0ead8;
-    const T = P.T, A = P.A, sc = hx(shirt), apc = hx(apron);
-    T.fill(sc);
-    T.rect("front", 0.16, 0.16, 0.68, 0.84, apc);                   // apron front panel
-    T.rect("front", 0.28, 0, 0.09, 0.16, apc);                      // straps
-    T.rect("front", 0.63, 0, 0.09, 0.16, apc);
-    T.rect("front", 0.16, 0.52, 0.68, 0.035, tone(apron, -0.25));   // waist tie line
-    T.rect("front", 0.3, 0.62, 0.4, 0.22, tone(apron, -0.12));      // pouch pocket
-    T.rect("front", 0.3, 0.62, 0.4, 0.03, tone(apron, -0.3));
-    T.rect("back", 0.3, 0.5, 0.4, 0.05, tone(apron, -0.1));         // tie knot at the back
-    T.shade();
-    A.fill(hx((c && c.arms != null) ? c.arms : 0xf0ead8));
-    A.rect("front", 0, 0.5, 1, 0.05, tone(shirt, -0.2));            // rolled-sleeve line
+    const shirt = (c && c.torso != null) ? c.torso : 0xc8553a, apron = (c && c.collar != null) ? c.collar : 0xf0ead8;
+    const legs = (c && c.legs != null) ? c.legs : 0x2e3138;
+    const T = P.T, J = P.J, A = P.A;
+    T.fill(hx(shirt));
+    T.poly("front", [[0.38, 0], [0.62, 0], [0.5, 0.12]], tone(shirt, -0.2));      // open collar
+    trouserSeat(J, legs);
+    bibApron(T, J, apron, 0.18);
+    T.shade(); J.shade();
+    A.fill(hx(shirt));
+    hemBand(A, tone(shirt, -0.16), 0.03, 0.012);
+    limbHem(A, 0.92, shirt);
     A.shade();
-    return { torso: 1, arms: 1 };
+    return { torso: 1, arms: 1, seat: 1 };
   };
 
   // ---- HOSPITAL: teal scrubs (nurse) — the simple V-neck top + drawstring -
+  // a scrub top is SHORT-SLEEVED: the arms stay flat (`sleeves: "short"`,
+  // applyClothes hangs the rig's own teal sleeve and the wearer's skin below)
   PAINT.scrubs = function (P, c) {
-    const teal = (c && c.torso != null) ? c.torso : 0x3d8a86, tc = hx(teal);
-    const T = P.T, A = P.A, L = P.L;
+    const teal = (c && c.torso != null) ? c.torso : 0x3d8a86, tc = hx(teal), lo = tone(teal, -0.28);
+    const T = P.T, L = P.L;
     T.fill(tc);
-    T.poly("front", [[0.34, 0], [0.5, 0.2], [0.66, 0]], tone(teal, -0.28));   // V-neck
-    T.rect("front", 0.5 - 0.07, 0.54, 0.14, 0.18, tone(teal, -0.12));         // chest pocket
-    T.rect("front", 0.5 - 0.07, 0.54, 0.14, 0.03, tone(teal, -0.28));        // pocket lip
-    T.rect("front", 0, 0.9, 1, 0.05, tone(teal, -0.22));                      // hem
+    T.poly("front", [[0.34, 0], [0.5, 0.24], [0.66, 0]], lo);                   // V-neck with its binding
+    T.poly("front", [[0.38, 0], [0.5, 0.19], [0.62, 0]], tone(teal, -0.12));
+    T.rect("front", 0.64, 0.26, 0.18, 0.12, tone(teal, -0.1));                  // left chest pocket
+    T.rect("front", 0.64, 0.26, 0.18, 0.015, lo);
+    T.rect("front", 0.7, 0.26, 0.012, 0.12, lo);                               //   pen slot
+    T.rect("front", 0.12, 0.58, 0.22, 0.15, tone(teal, -0.1)); T.rect("front", 0.12, 0.58, 0.22, 0.015, lo);   // hip pockets
+    T.rect("front", 0.66, 0.58, 0.22, 0.15, tone(teal, -0.1)); T.rect("front", 0.66, 0.58, 0.22, 0.015, lo);
+    T.rect("side", 0.48, WORK_ROW.armpit, 0.04, 1 - WORK_ROW.armpit, tone(teal, -0.14));
     T.shade();
-    A.fill(tc); A.rect("front", 0, 0.62, 1, 0.05, tone(teal, -0.22)); A.rect("side", 0, 0.62, 1, 0.05, tone(teal, -0.22)); A.shade(); // short-sleeve cuff
-    L.fill(hx((c && c.legs != null) ? c.legs : 0x3d8a86));
-    L.rect("front", 0.3, 0, 0.4, 0.05, tone(teal, -0.3));                     // drawstring waist
+    L.fill(hx((c && c.legs != null) ? c.legs : teal));
+    L.rect("side", 0.48, 0, 0.04, 1, tone(teal, -0.18));
+    L.rect("side", 0.26, 0.22, 0.48, 0.16, tone(teal, -0.1));                  // cargo pocket
+    limbHem(L, 0.94, (c && c.legs != null) ? c.legs : teal);
     L.shade();
-    return { torso: 1, arms: 1, legs: 1 };
+    return { torso: 1, legs: 1, sleeves: "short" };
   };
 
   // ---- HOSPITAL: doctor — open WHITE COAT over teal scrub front + steth ----
@@ -1103,11 +1200,7 @@
     const T = P.T, J = P.J, A = P.A, L = P.L, sc = hx(scrub);
     // torso = the scrub top showing through the open coat
     T.fill(sc);
-    T.poly("front", [[0.36, 0], [0.5, 0.18], [0.64, 0]], tone(scrub, -0.28));  // scrub V-neck
-    // the stethoscope: a dark tube looping the neck, ear-pieces over the shoulders
-    T.rect("front", 0.3, 0, 0.06, 0.5, "#1c2024");
-    T.rect("front", 0.64, 0, 0.06, 0.42, "#1c2024");
-    T.dot("front", 0.66, 0.46, 0.035, "#9aa0a6");                               // chest piece
+    T.poly("front", [[0.36, 0], [0.5, 0.2], [0.64, 0]], tone(scrub, -0.28));   // scrub V-neck
     T.shade();
     // the WHITE COAT shell — open front, lapels, breast pocket, two hip pockets
     J.fill(coat);
@@ -1117,64 +1210,93 @@
     J.poly("front", [[0.5 + 0.05, 0], [0.5 + 0.05 + 0.12, 0], [0.5 + 0.05 + 0.16, 0.34], [0.5 + 0.17, 0.4]], coatLow);
     J.rect("front", 0.14, 0.2, 0.16, 0.1, coatLow); J.rect("front", 0.14, 0.2, 0.16, 0.025, "#c4c8c9"); // breast pocket + lip
     J.rect("front", 0.1, 0.56, 0.22, 0.16, coatLow); J.rect("front", 0.68, 0.56, 0.22, 0.16, coatLow);  // hip pockets
+    // THE STETHOSCOPE lies OVER the coat, round the collar and down both
+    // lapels (it used to be painted on the scrub top, where the closed coat
+    // front covered all but its two cut-off ends)
+    J.poly("front", [[0.33, 0], [0.36, 0], [0.33, 0.36], [0.30, 0.36]], "#1c2024");
+    J.poly("front", [[0.64, 0], [0.67, 0], [0.71, 0.30], [0.68, 0.30]], "#1c2024");
+    J.dot("front", 0.695, 0.33, 0.035, "#9aa0a6");                               // chest piece
+    J.rect("back", 0.2, 0, 0.6, 0.03, "#1c2024");                                // round the back of the collar
     J.shade();
-    A.fill(coat); A.rect("front", 0, 0.86, 1, 0.07, coatLow); A.rect("side", 0, 0.86, 1, 0.07, coatLow); A.shade(); // coat cuff
-    L.fill(hx((c && c.legs != null) ? c.legs : 0x39414f));
+    A.fill(coat); limbHem(A, 0.9, 0xeef0f0); A.shade();                          // coat cuff
+    const slacks = (c && c.legs != null) ? c.legs : 0x39414f;
+    L.fill(hx(slacks)); L.rect("front", 0.49, 0, 0.02, 0.9, tone(slacks, -0.14));  // pressed crease
+    limbHem(L, 0.95, slacks);
     L.shade();
     return { torso: 1, arms: 1, legs: 1, jacket: 1 };
   };
 
-  // ---- EMS: navy paramedic blues + reflective stripe + Star-of-Life patch --
-  // (websearch: navy shirt/pants, reflective stripe across the chest, a
-  // shoulder Star-of-Life patch + a name tape).
+  // ---- EMS: the navy paramedic duty jacket ----------------------------------
+  // Two lime/silver/lime bands round the body (chest, under the pockets, and
+  // at the hem), one round each upper arm and forearm, a band round each shin
+  // on the cargo trousers; the Star of Life on the OUTSIDE of each sleeve at
+  // the shoulder, where the patch really goes (it used to be a pentagon on
+  // the chest). No invented name tape.
   PAINT.ems = function (P, c) {
     const navy = (c && c.torso != null) ? c.torso : 0x24304a, nc = hx(navy);
-    const refl = "#d7e24a", silver = "#cdd3d8";
+    const legs = (c && c.legs != null) ? c.legs : navy;
+    const lime = "#d7e24a", silver = "#cfd5d9";
     const T = P.T, A = P.A, L = P.L;
     T.fill(nc);
-    T.rect("front", 0.49, 0, 0.02, 1, tone(navy, -0.3));                       // zip placket
-    // reflective chest stripe all the way round
-    for (const col of ["front", "back", "side"]) {
-      T.rect(col, 0, 0.5, 1, 0.09, refl);
-      T.rect(col, 0, 0.535, 1, 0.025, silver);
-    }
-    T.rect("front", 0.12, 0.16, 0.16, 0.04, "#c6d0dc");                        // EMS name tape
-    T.poly("front", [[0.7, 0.12], [0.78, 0.16], [0.74, 0.24], [0.66, 0.24], [0.62, 0.16]], refl); // shoulder patch
-    T.dot("front", 0.7, 0.18, 0.02, "#2f6bb0");                                // Star-of-Life dot
+    T.rect("front", 0.488, 0.07, 0.024, 0.93, tone(navy, -0.34));             // zip
+    flapPocket(T, "front", 0.12, WORK_ROW.pocket, 0.24, 0.13, navy);
+    flapPocket(T, "front", 0.64, WORK_ROW.pocket, 0.24, 0.13, navy);
+    tape(T, 0.42, 0.065, lime, silver);
+    tape(T, 0.68, 0.065, lime, silver);
+    T.rect("side", 0.48, WORK_ROW.armpit, 0.04, 0.12, tone(navy, -0.16));
     T.shade();
     A.fill(nc);
-    A.rect("front", 0, 0.34, 1, 0.07, refl); A.rect("side", 0, 0.34, 1, 0.07, refl);   // sleeve reflective band
+    // the Star of Life: six blue arms on a white ground, outside of the sleeve
+    const cx = 0.5, cy = 0.14, r = 0.3;
+    A.dot("side", cx, cy, r * 1.15, "#e9eef2");
+    for (let k = 0; k < 3; k++) {
+      const a = k * Math.PI / 3, dx = Math.sin(a) * r, dy = Math.cos(a) * r * 0.42, wx = Math.cos(a) * 0.1, wy = -Math.sin(a) * 0.1 * 0.42;
+      A.poly("side", [[cx - dx - wx, cy - dy - wy], [cx - dx + wx, cy - dy + wy], [cx + dx + wx, cy + dy + wy], [cx + dx - wx, cy + dy - wy]], "#2a62b0");
+    }
+    tape(A, 0.40, 0.06, lime, silver);
+    tape(A, 0.80, 0.06, lime, silver);
+    limbHem(A, 0.94, navy);
     A.shade();
-    L.fill(hx((c && c.legs != null) ? c.legs : 0x24304a));
-    L.rect("side", 0.36, 0, 0.28, 1, tone(navy, -0.28));                       // cargo side seam
+    L.fill(hx(legs));
+    L.rect("side", 0.48, 0, 0.04, 1, tone(legs, -0.2));
+    flapPocket(L, "side", 0.18, 0.24, 0.64, 0.2, legs);                         // cargo pocket
+    tape(L, 0.8, 0.05, lime, silver);
+    limbHem(L, 0.94, legs);
     L.shade();
     return { torso: 1, arms: 1, legs: 1 };
   };
 
-  // ---- FIREFIGHTER: tan turnout + yellow reflective bands (NFPA layout) ----
-  // (websearch: one band at the hem encircling the coat, one at the chest line,
-  // one at each sleeve — tan coat, fluorescent-yellow trim).
+  // ---- FIREFIGHTER: tan turnout, NFPA 1971 trim ------------------------------
+  // Lime/silver/lime triple trim: one band round the coat at the chest (under
+  // the arms), one round the hem, one round each sleeve between elbow and
+  // wrist, one round each trouser leg between knee and ankle. Storm flap down
+  // the front with its hook-and-dee closures, bellows pockets under the chest
+  // band, black leather knee reinforcement, knit wristlets at the cuff. The
+  // collar is the coat's own tan (the yoke atlas stands it round the neck).
   PAINT.firefighter = function (P, c) {
     const tan = (c && c.torso != null) ? c.torso : 0xb09a6e, tc = hx(tan);
-    const trim = "#f1e24a", trimLo = "#c9bd3a";
+    const legs = (c && c.legs != null) ? c.legs : tan;
+    const lime = "#e5e54a", silver = "#cfd3cf";
     const T = P.T, A = P.A, L = P.L;
     T.fill(tc);
-    T.rect("front", 0.46, 0, 0.08, 1, tone(tan, -0.22));                       // storm-flap front
-    // chest-line band + hem band, all the way round
-    for (const col of ["front", "back", "side"]) {
-      T.rect(col, 0, 0.28, 1, 0.1, trim); T.rect(col, 0, 0.31, 1, 0.04, trimLo);
-      T.rect(col, 0, 0.78, 1, 0.1, trim);  T.rect(col, 0, 0.81, 1, 0.04, trimLo);
-    }
-    T.rect("front", 0.16, 0.5, 0.14, 0.18, tone(tan, -0.18));                  // bellows pocket L
-    T.rect("front", 0.7, 0.5, 0.14, 0.18, tone(tan, -0.18));                   // bellows pocket R
-    T.rect("front", 0.3, 0.04, 0.4, 0.08, "#3a342a");                         // dark storm collar
+    T.rect("front", 0.44, 0.07, 0.12, 0.93, tone(tan, -0.14));                  // storm flap
+    T.rect("front", 0.44, 0.07, 0.012, 0.93, tone(tan, -0.36));
+    for (let y = 0.16; y < 0.8; y += 0.13) T.rect("front", 0.40, y, 0.05, 0.022, "#2b2620");   // hook-and-dee
+    tape(T, 0.36, 0.075, lime, silver);                                         // chest band
+    tape(T, 0.72, 0.075, lime, silver);                                         // hem band
+    flapPocket(T, "front", 0.08, 0.47, 0.26, 0.2, tan);                          // bellows pockets
+    flapPocket(T, "front", 0.66, 0.47, 0.26, 0.2, tan);
     T.shade();
     A.fill(tc);
-    A.rect("front", 0, 0.6, 1, 0.1, trim); A.rect("side", 0, 0.6, 1, 0.1, trim);   // sleeve band
-    A.rect("front", 0, 0.63, 1, 0.04, trimLo); A.rect("side", 0, 0.63, 1, 0.04, trimLo);
+    tape(A, 0.76, 0.08, lime, silver);                                          // sleeve band
+    hemBand(A, "#2b2620", 0.95, 0.05);                                          // knit wristlet
     A.shade();
-    L.fill(hx((c && c.legs != null) ? c.legs : 0xb09a6e));
-    L.rect("front", 0, 0.42, 1, 0.08, trim); L.rect("side", 0, 0.42, 1, 0.08, trim); // cuff band
+    L.fill(hx(legs));
+    L.rect("front", 0.14, 0.42, 0.72, 0.17, "#2b2620");                         // leather knee
+    L.rect("side", 0.48, 0, 0.04, 1, tone(legs, -0.2));
+    flapPocket(L, "side", 0.14, 0.2, 0.72, 0.18, legs);                         // bellows thigh pocket
+    tape(L, 0.78, 0.08, lime, silver);                                          // leg band
+    limbHem(L, 0.94, legs);
     L.shade();
     return { torso: 1, arms: 1, legs: 1 };
   };
@@ -1198,73 +1320,100 @@
       }
       R.shade();
     }
-    camo(P.T, 22);
-    P.T.rect("front", 0.46, 0, 0.08, 1, tone(base, -0.25));                    // button placket
-    P.T.rect("front", 0.14, 0.34, 0.18, 0.12, tone(base, -0.12));             // chest pocket flap L
-    P.T.rect("front", 0.68, 0.34, 0.18, 0.12, tone(base, -0.12));             // chest pocket flap R
-    camo(P.A, 8);
-    P.A.rect("front", 0.2, 0.06, 0.6, 0.16, tone(base, -0.12));               // shoulder pocket
-    camo(P.L, 12);
-    P.L.rect("side", 0.2, 0.4, 0.6, 0.18, tone(base, -0.12));                 // cargo thigh pocket
+    // the combat shirt: centre zip from the notch, two SLANTED chest pockets
+    // on the upper chest (pocket-flap + edge in shade, not solid slabs, so the
+    // camo still reads through), the sleeve pocket on the OUTSIDE of the upper
+    // arm, elbow and knee patches where the joints bend, the cargo pocket on
+    // the outside of the thigh, and the trousers bloused into the boots
+    const T = P.T, A = P.A, L = P.L, sh = "rgba(0,0,0,0.22)", edge = "rgba(0,0,0,0.38)";
+    camo(T, 22);
+    T.rect("front", 0.49, 0.07, 0.02, 0.93, edge);
+    for (const s of [-1, 1]) {
+      const x0 = 0.5 + s * 0.08, x1 = 0.5 + s * 0.34;
+      T.poly("front", [[x0, 0.25], [x1, 0.22], [x1, 0.36], [x0, 0.39]], sh);
+      T.poly("front", [[x0, 0.25], [x1, 0.22], [x1, 0.24], [x0, 0.27]], edge);
+    }
+    camo(A, 8);
+    A.rect("side", 0.14, 0.1, 0.72, 0.22, sh); A.rect("side", 0.14, 0.1, 0.72, 0.03, edge);   // sleeve pocket
+    A.rect("back", 0.18, 0.56, 0.64, 0.16, sh);                                  // elbow patch
+    hemBand(A, edge, 0.95, 0.05);
+    camo(L, 12);
+    L.rect("side", 0.16, 0.26, 0.68, 0.2, sh); L.rect("side", 0.16, 0.26, 0.68, 0.035, edge);  // cargo pocket
+    L.rect("front", 0.18, 0.44, 0.64, 0.14, sh);                                 // knee patch
+    hemBand(L, edge, 0.9, 0.012);                                                // bloused into the boot
     return { torso: 1, arms: 1, legs: 1 };
   };
 
-  // ---- SECURITY: plain guard blacks + a chest "SECURITY" tape + epaulettes -
+  // ---- SECURITY: plain guard blacks, open collar, a silver-edged sleeve
+  //      patch (entities/dutykit.js: silver shield, radio, torch, cuffs, no gun).
+  //      The old gold chest bar stood in for a "SECURITY" wordmark nobody could
+  //      read; the badge and the patch say guard without inventing text. ----
   PAINT.security = function (P, c) {
-    const body = (c && c.torso != null) ? c.torso : 0x1c1f26, bc = hx(body);
-    const T = P.T, A = P.A, L = P.L;
-    T.fill(bc);
-    T.rect("front", 0.49, 0, 0.02, 1, tone(body, 0.18));                       // placket
-    T.rect("front", 0.06, 0, 0.18, 0.12, tone(body, 0.22)); T.rect("front", 0.76, 0, 0.18, 0.12, tone(body, 0.22)); // epaulettes
-    T.rect("front", 0.28, 0.2, 0.44, 0.06, "#d8b73a");                        // gold SECURITY tape
-    T.shade();
-    A.fill(bc); A.rect("front", 0, 0.88, 1, 0.06, tone(body, 0.15)); A.shade();
-    L.fill(hx((c && c.legs != null) ? c.legs : 0x1c1f26)); L.shade();
-    return { torso: 1, arms: 1, legs: 1 };
+    const body = (c && c.torso != null) ? c.torso : 0x1c1f26;
+    return dutyShirt(P, {
+      shirt: body, legs: (c && c.legs != null) ? c.legs : 0x1c1f26, open: tone2(body, -0.35),
+      patch: [tone(body, 0.1), "#9aa3ad", tone(body, 0.3)],
+    });
   };
 
   // ---- OFFICE: a dress shirt + visible tie (no jacket — desk worker) -------
   PAINT.office = function (P, c) {
     const shirt = (c && c.torso != null) ? c.torso : 0x9ab4c8, tieHex = 0x223247;
     const T = P.T, A = P.A, sc = hx(shirt);
+    // TAILORED (parts.fp): the collar and the knot's top on the collar band,
+    // the rest of the knot and the tie on the shirt, in body units
     T.fill(sc);
-    T.poly("front", [[0.4, 0], [0.5, 0.1], [0.46, 0.02]], tone(shirt, -0.2));  // collar L
-    T.poly("front", [[0.6, 0], [0.5, 0.1], [0.54, 0.02]], tone(shirt, -0.2));  // collar R
-    T.rect("front", 0.49, 0.06, 0.02, 0.86, tone(shirt, -0.12));             // button placket
-    if (neckV2()) {
-      // knot on the yoke (the visible collar zone); the blade starts at row 0
-      // so it runs continuously under the slab and out below it.
-      T.rect("front", 0.47, 0, 0.06, 0.66, hx(tieHex));
-      T.poly("front", [[0.47, 0.66], [0.53, 0.66], [0.5, 0.74]], hx(tieHex));
-    } else {
-      T.poly("front", [[0.45, 0.02], [0.55, 0.02], [0.53, 0.1], [0.47, 0.1]], tone(tieHex, -0.2)); // tie knot
-      T.rect("front", 0.47, 0.1, 0.06, 0.56, hx(tieHex));                      // tie body
-      T.poly("front", [[0.47, 0.66], [0.53, 0.66], [0.5, 0.74]], hx(tieHex));
-    }
+    T.rect("front", fx(-0.012), 0.08, 0.024, TAILOR.tBelt - 0.08, tone(shirt, -0.12));   // button placket
+    T.rect("front", fx(0.15), 0.27, 0.15, 0.13, tone(shirt, -0.05));           // the left chest pocket
+    T.rect("front", fx(0.15), 0.27, 0.15, 0.012, tone(shirt, -0.2));
+    paintTie(T, tieHex, TAILOR.tBelt - 0.025, 0);
     T.shade();
-    A.fill(sc); A.rect("front", 0, 0.88, 1, 0.06, tone(shirt, -0.18)); A.rect("side", 0, 0.88, 1, 0.06, tone(shirt, -0.18)); A.shade();
-    const parts = { torso: 1, arms: 1 };
-    if (neckV2()) parts.neck = { tie: tieHex, w: 0.06 };
-    return parts;
+    A.fill(sc);
+    for (const col of ["front", "side", "back"]) A.rect(col, 0, 0.93, 1, 0.07, tone(shirt, -0.1));   // the buttoned cuff at the wrist
+    A.shade();
+    return { torso: 1, arms: 1, fp: 1, neck: { tie: tieHex, fp: 1 } };
   };
 
-  // ---- SHERIFF: county khaki shirt over brown, with a star badge ----------
+  // ---- SHERIFF: county khaki shirt open over a white undershirt, brown
+  //      trousers with the wide dark stripe, a gold nameplate (entities/
+  //      dutykit.js: the gold six-point star, a brown basketweave belt) ----
   PAINT.sheriff = function (P, c) {
-    const khaki = (c && c.torso != null) ? c.torso : 0xb8a070, kc = hx(khaki);
-    const T = P.T, A = P.A, L = P.L;
-    T.fill(kc);
-    T.rect("front", 0.49, 0, 0.02, 1, tone(khaki, -0.22));                     // placket
-    T.rect("front", 0.14, 0.26, 0.22, 0.13, tone(khaki, -0.16)); T.rect("front", 0.64, 0.26, 0.22, 0.13, tone(khaki, -0.16)); // flap pockets
-    T.rect("front", 0.14, 0.26, 0.22, 0.04, tone(khaki, -0.32)); T.rect("front", 0.64, 0.26, 0.22, 0.04, tone(khaki, -0.32));
-    T.rect("front", 0.06, 0, 0.16, 0.12, tone(khaki, -0.12)); T.rect("front", 0.78, 0, 0.16, 0.12, tone(khaki, -0.12)); // epaulettes
-    // five-point star badge (a small ring of dots reads as a star at distance)
-    T.dot("front", 0.26, 0.16, 0.03, "#e8c454");
+    const khaki = (c && c.torso != null) ? c.torso : 0xb8a070;
+    const legs = (c && c.legs != null) ? c.legs : 0x5a4632;
+    return dutyShirt(P, {
+      shirt: khaki, legs: legs, open: 0xe8e6df, stripe: [0.2, tone(legs, -0.35)],
+      patch: [hx(0x5a4632), "#cfae52", "#cdb784"], tape: "#cfae52",
+    });
+  };
+
+  // ---- DETECTIVE: plain clothes, jacket off at the desk — a pale dress shirt
+  //      and tie, pressed trousers. The gold shield clipped on the belt and the
+  //      pancake holster on the hip are entities/dutykit.js geometry (a jacket
+  //      shell would bury the holster, and the holster is the point). ----
+  PAINT.detective = function (P, c) {
+    const shirt = (c && c.torso != null) ? c.torso : 0xc9d6e6, sc = hx(shirt);
+    const tie = (c && c.tie != null) ? c.tie : 0x6b1f2a;
+    const legs = (c && c.legs != null) ? c.legs : 0x3b3935;
+    const T = P.T, A = P.A, L = P.L, seam = tone(shirt, -0.16);
+    T.fill(sc);
+    T.rect("front", 0.47, 0, 0.06, 0.64, hx(tie));
+    T.poly("front", [[0.47, 0.64], [0.53, 0.64], [0.5, 0.7]], hx(tie));
+    T.rect("front", 0.488, 0.7, 0.024, 0.25, tone(shirt, -0.1));
+    T.dot("front", 0.5, 0.8, 0.01, seam);
+    T.rect("back", 0, 0.12, 1, 0.012, seam);
+    T.rect("side", 0.49, 0.1, 0.02, 0.9, tone(shirt, -0.08));
     T.shade();
-    A.fill(kc); A.rect("front", 0, 0.86, 1, 0.06, tone(khaki, -0.2)); A.shade();
-    L.fill(hx((c && c.legs != null) ? c.legs : 0x5a4632));
-    L.rect("side", 0.36, 0, 0.28, 1, tone(0x5a4632, -0.25));                   // trouser stripe
+    A.fill(sc);
+    for (const col of ["front", "back", "side"]) { A.rect(col, 0, 0, 1, 0.03, seam); A.rect(col, 0, 0.9, 1, 0.07, tone(shirt, -0.06)); A.rect(col, 0, 0.9, 1, 0.01, seam); }
+    A.shade();
+    L.fill(hx(legs));
+    L.rect("front", 0.494, 0, 0.012, 0.93, tone(legs, 0.14));
+    L.rect("side", 0.492, 0, 0.016, 0.95, tone(legs, -0.18));
+    for (const col of ["front", "back", "side"]) L.rect(col, 0, 0.94, 1, 0.06, tone(legs, -0.2));
     L.shade();
-    return { torso: 1, arms: 1, legs: 1 };
+    const parts = { torso: 1, arms: 1, legs: 1 };
+    if (neckV2()) parts.neck = { tie: tie, w: 0.065 };
+    return parts;
   };
 
   // ---- HOMELESS: layered, mismatched, dirty, frayed (websearch: an open
@@ -1280,7 +1429,7 @@
     T.poly("front", [[0.36, 0], [0.5, 0.16], [0.64, 0]], tone(under, -0.3));   // ragged neckline
     T.rect("front", 0.2, 0.6, 0.3, 0.14, grime);                              // a dirt smear
     T.rect("front", 0.55, 0.35, 0.18, 0.1, grime);
-    T.rect("front", 0.4, 0.78, 0.22, 0.06, tone(under, -0.4));                // a frayed tear line
+    T.rect("front", 0.4, 0.66, 0.2, 0.02, tone(under, -0.4));                 // a frayed tear line
     T.shade();
     // the OUTER coat shell — open, uneven tattered hem, a patch, grime
     J.fill(cc);
@@ -1297,29 +1446,39 @@
     J.poly("front", [[0.56, 0], [0.68, 0], [0.6, 0.22]], tone(coat, -0.22));
     J.shade();
     A.fill(cc);
-    A.rect("front", 0, 0.82, 1, 0.1, tone(coat, -0.3));                        // rolled/frayed cuff
-    A.rect("front", 0.3, 0.45, 0.4, 0.1, grime);
+    hemBand(A, tone(coat, -0.3), 0.84, 0.16);                                  // cuffs rolled back, frayed
+    A.rect("front", 0.3, 0.45, 0.4, 0.1, grime);                               // (grime is where it wore:
+    A.rect("back", 0.2, 0.6, 0.6, 0.12, grime);                                //  forearm and elbow)
     A.shade();
-    L.fill(hx((c && c.legs != null) ? c.legs : 0x3a3026));
-    L.rect("front", 0.2, 0.5, 0.3, 0.08, tone(0x3a3026, -0.4));               // knee tear
-    L.rect("front", 0.1, 0.86, 0.8, 0.06, grime);                            // dirty cuffs
+    const trou = (c && c.legs != null) ? c.legs : 0x3a3026;
+    L.fill(hx(trou));
+    L.rect("front", 0.2, 0.5, 0.3, 0.05, tone(trou, -0.4));                    // knee tear
+    hemBand(L, grime, 0.86, 0.14);                                             // dirty, dragged hems
     L.shade();
     return { torso: 1, arms: 1, legs: 1, jacket: 1 };
   };
 
+  // TRACK JACKET + TRACK PANTS. The stripe is ONE line: flank of the jacket,
+  // the side of the sleeve (shoulder to cuff, both lofted segments read the
+  // same column so it never breaks at the elbow) and the side of the leg.
+  // The zip collar is the collar BAND itself (yokeCanvas samples the dark
+  // collar at the throat); the zip pull hangs just below it where it is seen.
   PAINT.tracksuit = function (P, c) {
-    const body = (c && c.torso != null) ? c.torso : 0x2bb673, white = "#eef3f7";
-    const T = P.T, A = P.A, L = P.L, bc = hx(body);
+    const body = (c && c.torso != null) ? c.torso : 0x2bb673;
+    const white = hx((c && c.stripe != null) ? c.stripe : 0xeef3f7);
+    const T = P.T, A = P.A, L = P.L, bc = hx(body), rib = tone(body, -0.35);
     T.fill(bc);
-    T.rect("front", 0.48, 0, 0.04, 1, white);                       // zipper line
-    T.dot("front", 0.5, 0.07, 0.02, "#aab4ba");                     // zip pull
-    T.rect("front", 0.3, 0, 0.4, 0.05, tone(body, -0.3));           // zip collar
-    T.rect("side", 0.36, 0, 0.28, 1, white);                        // white side stripes
-    T.rect("front", 0, 0.92, 1, 0.08, tone(body, -0.35));           // elastic hem
+    T.rect("front", 0.3, 0, 0.4, 0.06, tone(body, -0.3));           // zip collar (worn by the collar band)
+    T.rect("front", 0.485, 0, 0.03, TORSO_ROW.hem, white);          // zipper line, collar to hem
+    T.rect("front", 0.475, 0.12, 0.05, 0.05, "#aab4ba");            // zip pull, under the collar band
+    T.rect("side", 0.38, 0, 0.24, 1, white);                        // side stripe down the flank
+    hemBand(T, rib);                                                // elastic hem, above the tuck
     T.shade();
-    A.fill(bc); A.rect("side", 0.36, 0, 0.28, 1, white); A.rect("front", 0, 0.88, 1, 0.08, tone(body, -0.3)); A.shade();
+    A.fill(bc); A.rect("side", 0.38, 0, 0.24, 0.88, white);
+    for (const col of ["front", "back", "side"]) A.rect(col, 0, 0.88, 1, 0.08, rib);   // elastic cuff, all round
+    A.shade();
     L.fill(hx((c && c.legs != null) ? c.legs : 0x20242c));
-    L.rect("side", 0.36, 0, 0.28, 1, white);
+    L.rect("side", 0.38, 0, 0.24, 1, white);
     L.shade();
     return { torso: 1, arms: 1, legs: 1 };
   };
@@ -1335,12 +1494,11 @@
     const body = (c && c.torso != null) ? c.torso : 0x8a939c;
     const T = P.T, A = P.A, bc = hx(body);
     T.fill(bc);
-    T.poly("front", [[0.36, 0], [0.64, 0], [0.5, 0.12]], tone(body, -0.22)); // crew neckline (soft V)
-    T.rect("front", 0.49, 0.1, 0.02, 0.5, tone(body, -0.13));       // centre placket seam (thin, subtle)
-    T.rect("back", 0.34, 0, 0.32, 0.05, tone(body, -0.2));          // back collar band
-    T.rect("front", 0, 0.93, 1, 0.07, tone(body, -0.2));            // hem
-    T.rect("side", 0, 0.93, 1, 0.07, tone(body, -0.2));
-    T.rect("back", 0, 0.93, 1, 0.07, tone(body, -0.2));
+    // the crew rib is worn by the COLLAR BAND (yokeCanvas samples this tone at
+    // the throat); no placket — a crew-neck shirt has none, and the old seam
+    // down the sternum read as a zip on a tee.
+    T.poly("front", [[0.36, 0], [0.64, 0], [0.5, 0.15]], tone(body, -0.22));
+    hemBand(T, tone(body, -0.2));                                   // hem, above the tuck
     T.shade();
     A.fill(bc); A.rect("front", 0, 0.9, 1, 0.06, tone(body, -0.18)); A.rect("side", 0, 0.9, 1, 0.06, tone(body, -0.18)); A.shade(); // sleeve cuff
     return { torso: 1, arms: 1 };                                   // legs keep their own flat color
@@ -1356,19 +1514,34 @@
   PAINT.hoodie = function (P, c) {
     const body = (c && c.torso != null) ? c.torso : 0x7a4a3a, bc = hx(body);
     const T = P.T, A = P.A, hoodLo = tone(body, -0.22);
+    // ON THE SHAPED BODY. The old layout was a box's: a hood slab across the
+    // whole top of the chest (under the collar band now, so all that showed
+    // was a dark stripe), drawstring tips at the TOP of the strings, and a
+    // pocket and ribbed hem at 0.6-1.0, half of which sat inside the trousers.
+    const rib = tone(body, -0.3), seam = tone(body, -0.34);
     T.fill(bc);
-    T.rect("front", 0.18, 0, 0.64, 0.14, hoodLo);                  // hood gathered at the neck (front)
-    T.rect("back", 0.14, 0, 0.72, 0.34, hoodLo);                   // the hood lump down the back
-    T.dot("front", 0.42, 0.13, 0.018, "#e9e4d8");                  // drawstring tips
-    T.dot("front", 0.58, 0.13, 0.018, "#e9e4d8");
-    T.rect("front", 0.42, 0.12, 0.02, 0.16, "#d9d3c4");           // strings hang
-    T.rect("front", 0.58, 0.12, 0.02, 0.16, "#d9d3c4");
-    T.rect("front", 0.26, 0.6, 0.48, 0.26, hoodLo);               // kangaroo pocket
-    T.rect("front", 0.26, 0.6, 0.48, 0.03, tone(body, -0.34));    // pocket top seam
-    T.rect("front", 0, 0.92, 1, 0.08, tone(body, -0.3));         // ribbed hem
-    T.rect("side", 0, 0.92, 1, 0.08, tone(body, -0.3));
+    // the hood's two edges cross at the throat: a V of hood lining that the
+    // collar band continues round the neck (it samples this tone at the top)
+    T.poly("front", [[0.2, 0], [0.8, 0], [0.56, 0.22], [0.44, 0.22]], hoodLo);
+    // the hood lying on the upper back, rounded, with its centre seam
+    T.poly("back", [[0.14, 0], [0.86, 0], [0.82, 0.24], [0.64, 0.36], [0.36, 0.36], [0.18, 0.24]], hoodLo);
+    T.rect("back", 0.49, 0, 0.02, 0.35, tone(body, -0.36));
+    // drawstrings out of the hood eyelets, aglets at the ENDS
+    T.rect("front", 0.43, 0.19, 0.018, 0.17, "#d9d3c4");
+    T.rect("front", 0.552, 0.19, 0.018, 0.17, "#d9d3c4");
+    T.rect("front", 0.426, 0.35, 0.026, 0.03, "#e9e4d8");
+    T.rect("front", 0.548, 0.35, 0.026, 0.03, "#e9e4d8");
+    // KANGAROO POCKET on the belly, just above the ribbed hem: one panel, a
+    // top seam, and the two slanted hand openings that make it read
+    const hem = (c && c.kid) ? TORSO_ROW.kidHem : TORSO_ROW.hem;     // a child's tucks in higher
+    const pT = (c && c.kid) ? 0.46 : 0.52, pB = hem;
+    T.poly("front", [[0.3, pT], [0.7, pT], [0.79, pB], [0.21, pB]], tone(body, -0.07));
+    T.rect("front", 0.3, pT, 0.4, 0.02, seam);
+    T.poly("front", [[0.3, pT], [0.33, pT], [0.24, pB], [0.21, pB]], seam);
+    T.poly("front", [[0.7, pT], [0.67, pT], [0.76, pB], [0.79, pB]], seam);
+    hemBand(T, rib, hem);                                          // ribbed hem, above the tuck
     T.shade();
-    A.fill(bc); A.rect("front", 0, 0.9, 1, 0.08, tone(body, -0.3)); A.rect("side", 0, 0.9, 1, 0.08, tone(body, -0.3)); A.shade(); // ribbed cuff
+    A.fill(bc); for (const col of ["front", "back", "side"]) A.rect(col, 0, 0.88, 1, 0.09, rib); A.shade(); // ribbed cuff, all round
     return { torso: 1, arms: 1 };
   };
 
@@ -1391,72 +1564,95 @@
     const skin = (c && c.skin != null) ? c.skin : 0xcf9a72;      // shared-atlas approximation — see note above
     const T = P.T, A = P.A;
     const wc = hx(white), sk = hx(skin), rib = tone(white, -0.09), grime = "rgba(40,34,24,0.16)";
-    // The torso is one rectangular solid; exposing its entire top band as skin
-    // creates a broad flesh-coloured shelf around the neck. Keep that solid
-    // fabric and cut only a compact neckline into the front/back. Bare skin is
-    // already represented by the actual arm geometry below.
+    // A TANK IS STRAPS AND ARMHOLES. On the old box torso a skin top band was
+    // a flat flesh shelf round the neck, so only a neckline was cut. The body
+    // has a real trapezius and armpit now, so the tank is cut where a tank is:
+    // a scoop at the front, a higher one behind, and deep ARMHOLES — the outer
+    // top corners of front and back and the top of the flank — leaving two
+    // straps over the shoulders. The collar band samples the scoop (skin) at
+    // the throat, so its front reads as bare neck too.
     T.fill(wc);
-    T.poly("front", [[0.36, 0], [0.64, 0], [0.5, 0.22]], sk);
-    T.poly("back", [[0.39, 0], [0.61, 0], [0.5, 0.14]], sk);
+    T.poly("front", [[0.34, 0], [0.66, 0], [0.5, 0.24]], sk);
+    T.poly("back", [[0.38, 0], [0.62, 0], [0.5, 0.15]], sk);
+    for (const col of ["front", "back"]) {
+      T.poly(col, [[0, 0], [0.2, 0], [0.13, 0.18], [0, 0.3]], sk);
+      T.poly(col, [[1, 0], [0.8, 0], [0.87, 0.18], [1, 0.3]], sk);
+    }
+    T.poly("side", [[0, 0], [1, 0], [1, 0.26], [0.5, 0.32], [0, 0.26]], sk);
     // ribbed texture: thin vertical lines through the fabric only
-    for (const col of ["front", "back", "side"]) for (let x = 0.08; x < 1; x += 0.11) T.rect(col, x, 0.24, 0.014, 0.66, rib);
+    for (const col of ["front", "back", "side"]) for (let x = 0.08; x < 1; x += 0.11) T.rect(col, x, 0.32, 0.014, TORSO_ROW.hem - 0.32, rib);
     T.rect("front", 0.2, 0.5, 0.16, 0.1, grime); T.rect("back", 0.5, 0.55, 0.2, 0.1, grime);   // a couple of grubby smudges
-    T.rect("front", 0, 0.92, 1, 0.08, tone(white, -0.18));         // hem
-    T.rect("back", 0, 0.92, 1, 0.08, tone(white, -0.18));
+    hemBand(T, tone(white, -0.18));                                 // hem, above the tuck
     T.shade();
     A.fill(sk); A.shade();                                          // bare arms, full length — no sleeve at all
     return { torso: 1, arms: 1 };                                   // legs keep the catalog's flat sweatpant color
   };
 
-  // PUFFER — horizontal quilted channels + a zip; warm color default.
+  // ---- STREET JACKETS, cut for the shaped body -----------------------------
+  // All three are TAILORED (parts.fp: the front in body units, see TAILORING)
+  // and hem where the body really stops showing: the torso tucks into the
+  // pelvis from ~0.82, so the old hems at 0.9 were painted inside the
+  // trousers. The hem sits on TORSO_ROW.hem; the collar is the COLLAR BAND's
+  // (neck.band), which is the only place a collar can be seen now.
+  // PUFFER — quilted channels that follow the body down to a ribbed hem, a zip.
   PAINT.puffer = function (P, c) {
     const body = (c && c.torso != null) ? c.torso : 0x223a55, bc = hx(body);
     const T = P.T, A = P.A, seam = tone(body, -0.3), hi = tone(body, 0.16);
+    const hem = TORSO_ROW.hem;
     T.fill(bc);
-    for (const col of ["front", "back", "side"]) {
-      for (let y = 0.08; y < 0.95; y += 0.16) { T.rect(col, 0, y, 1, 0.02, seam); T.rect(col, 0, y + 0.03, 1, 0.04, hi); } // quilt channels + puffed highlight
-    }
-    T.rect("front", 0.48, 0, 0.04, 1, seam);                       // centre zip
-    T.dot("front", 0.5, 0.06, 0.02, "#cdd3d8");                    // zip pull
-    T.rect("front", 0.3, 0, 0.4, 0.08, tone(body, -0.2));        // stand collar
+    for (const col of ["front", "back", "side"])
+      for (let y = 0.1; y < hem - 0.05; y += hem / 5) { T.rect(col, 0, y, 1, 0.018, seam); T.rect(col, 0, y + 0.03, 1, 0.045, hi); }  // channels + the puff between
+    hemBand(T, tone(body, -0.16), hem, TORSO_ROW.hemH);            // the ribbed hem
+    T.rect("front", fx(-0.012), 0, 0.024, hem + TORSO_ROW.hemH, seam);                // the zip
     T.shade();
     A.fill(bc);
-    for (let y = 0.1; y < 0.95; y += 0.18) A.rect("front", 0, y, 1, 0.02, seam);
-    for (let y = 0.1; y < 0.95; y += 0.18) A.rect("side", 0, y, 1, 0.02, seam);
+    for (let y = 0.12; y < 0.9; y += 0.16) for (const col of ["front", "side", "back"]) A.rect(col, 0, y, 1, 0.018, seam);
+    for (const col of ["front", "side", "back"]) A.rect(col, 0, 0.92, 1, 0.08, tone(body, -0.16));   // the cuff
     A.shade();
-    return { torso: 1, arms: 1 };
+    return { torso: 1, arms: 1, fp: 1, neck: { fp: 1, band: tone2(body, -0.12) } };   // the stand collar
   };
 
-  // DENIM JACKET — button placket, chest flap pockets, contrast stitch seams.
+  // DENIM JACKET — placket and shank buttons, the two chest flap pockets, the
+  // pointed yoke seam, contrast stitching, a waistband hem.
   PAINT.denim_jacket = function (P, c) {
     const body = (c && c.torso != null) ? c.torso : 0x3c5a7a, bc = hx(body);
     const T = P.T, A = P.A, stitch = "#d8b87a", dk = tone(body, -0.22);
+    const hem = TORSO_ROW.hem;
     T.fill(bc);
-    T.rect("front", 0.49, 0, 0.02, 1, dk);                         // button placket
-    for (let i = 0; i < 5; i++) T.dot("front", 0.5, 0.12 + i * 0.18, 0.013, "#c9cdd2"); // buttons
-    T.rect("front", 0.16, 0.22, 0.18, 0.14, dk); T.rect("front", 0.66, 0.22, 0.18, 0.14, dk); // chest flap pockets
-    T.rect("front", 0.16, 0.22, 0.18, 0.02, stitch); T.rect("front", 0.66, 0.22, 0.18, 0.02, stitch); // stitch lines
-    T.rect("front", 0.3, 0, 0.4, 0.06, dk);                       // collar
-    T.rect("front", 0, 0.9, 1, 0.05, stitch);                     // hem stitch band
+    T.poly("front", fpts([[-0.5, 0.2], [-0.05, 0.2], [0, 0.24], [0.05, 0.2], [0.5, 0.2], [0.5, 0.212], [0.05, 0.212], [0, 0.252], [-0.05, 0.212], [-0.5, 0.212]]), stitch);  // the yoke seam
+    T.rect("front", fx(-0.018), 0.08, 0.036, hem - 0.08, dk);        // the placket
+    for (let i = 0; i < 5; i++) T.dot("front", fx(0), 0.14 + i * (hem - 0.14) / 5, 0.012, "#c9cdd2");
+    for (const s of [1, -1]) {                                       // chest pockets, flap + stitch
+      const x0 = s > 0 ? 0.1 : -0.3;
+      T.rect("front", fx(x0), 0.26, 0.2, 0.15, dk);
+      T.poly("front", fpts([[x0, 0.26], [x0 + 0.2, 0.26], [x0 + 0.2, 0.3], [x0 + 0.1, 0.33], [x0, 0.3]]), tone(body, -0.1));
+      T.rect("front", fx(x0), 0.26, 0.2, 0.01, stitch);
+    }
+    hemBand(T, dk, hem, TORSO_ROW.hemH);                             // the waistband
+    hemBand(T, stitch, hem, 0.01);
     T.shade();
-    A.fill(bc); A.rect("front", 0, 0.84, 1, 0.1, dk); A.rect("front", 0, 0.84, 1, 0.02, stitch); A.rect("side", 0, 0.84, 1, 0.1, dk); A.shade(); // buttoned cuff
-    return { torso: 1, arms: 1 };
+    A.fill(bc);
+    for (const col of ["front", "side", "back"]) { A.rect(col, 0, 0.9, 1, 0.1, dk); A.rect(col, 0, 0.9, 1, 0.012, stitch); }   // the buttoned cuff
+    A.shade();
+    return { torso: 1, arms: 1, fp: 1, neck: { fp: 1, band: tone2(body, -0.18), open: 1 } };
   };
 
-  // VARSITY — body color torso, CONTRAST sleeves, a chest letter + stripe trim.
+  // VARSITY — wool body, CONTRAST sleeves, snap placket, striped rib knit at
+  // the collar, cuffs and hem. (No chest letter: that would be invented text.)
   PAINT.varsity = function (P, c) {
     const body = (c && c.torso != null) ? c.torso : 0x6e1f2b, sleeve = (c && c.collar != null) ? c.collar : 0xeae6dc;
-    const T = P.T, A = P.A, bc = hx(body), sc = hx(sleeve), trim = tone(body, -0.3);
+    const T = P.T, A = P.A, bc = hx(body), sc = hx(sleeve), rib = tone(body, -0.2);
+    const hem = TORSO_ROW.hem;
     T.fill(bc);
-    T.rect("front", 0.48, 0, 0.04, 1, "#d8c98a");                  // snap placket
-    T.rect("front", 0.18, 0.18, 0.26, 0.34, sc);                  // chest patch (felt block)
-    T.rect("front", 0.22, 0.22, 0.18, 0.26, bc);                  // the letter field
-    T.poly("front", [[0.25, 0.45], [0.31, 0.24], [0.37, 0.45], [0.34, 0.45], [0.31, 0.34], [0.28, 0.45]], "#d8c98a"); // a chunky "A"
-    T.rect("front", 0.3, 0, 0.4, 0.06, sc);                       // collar in sleeve color
-    T.rect("front", 0, 0.9, 1, 0.07, sc); T.rect("front", 0, 0.9, 1, 0.02, trim); // ribbed striped hem
+    T.rect("front", fx(-0.012), 0, 0.024, hem, "#d8c98a");         // the snap placket
+    for (let i = 0; i < 5; i++) T.dot("front", fx(0), 0.12 + i * (hem - 0.12) / 5, 0.012, "#e6dcb0");
+    hemBand(T, rib, hem, TORSO_ROW.hemH);                            // striped rib hem
+    hemBand(T, sc, hem + 0.02, 0.012); hemBand(T, sc, hem + 0.042, 0.012);
     T.shade();
-    A.fill(sc); A.rect("front", 0, 0.88, 1, 0.08, hx(tone2(sleeve, -0.2))); A.rect("side", 0, 0.88, 1, 0.08, hx(tone2(sleeve, -0.2))); A.shade(); // contrast leather sleeves + ribbed cuff
-    return { torso: 1, arms: 1 };
+    A.fill(sc);
+    for (const col of ["front", "side", "back"]) { A.rect(col, 0, 0.9, 1, 0.1, rib); A.rect(col, 0, 0.93, 1, 0.012, sc); }   // rib cuffs
+    A.shade();
+    return { torso: 1, arms: 1, fp: 1, neck: { fp: 1, band: tone2(body, -0.2) } };
   };
 
   // ============================================================
@@ -1468,53 +1664,53 @@
   //  here invents a hex the wardrobe cannot see.
   // ============================================================
 
-  // LEATHER — a moto jacket with real bulk. The SHELL carries the asymmetric
-  // zip, the revers and the panel seams; the torso beneath is the tee it hangs
-  // open over, so the alpha-cut front shows cloth and never a hole.
+  // LEATHER — a waist-length moto jacket (its shell's swept front hem IS the
+  // right length) hanging open over a tee. TAILORED (parts.fp): the shell's
+  // front in body units — open at the neck so the tee's crew collar (the
+  // collar band) shows, the asymmetric zip on the wearer's left, revers, slant
+  // pockets, the waistband just above the hem. The pelvis wears the torso rows
+  // below the trouser top (applyClothes), so the trousers are painted there.
   PAINT.leather = function (P, c) {
     const hide = (c && c.torso != null) ? c.torso : 0x241c18;
     const trim = (c && c.collar != null) ? c.collar : tone2(hide, -0.4);
+    const legHex = (c && c.legs != null) ? c.legs : 0x23262e;
     const T = P.T, J = P.J, A = P.A, L = P.L;
     const hc = hx(hide), seam = tone(hide, -0.36), edge = tone(hide, 0.2), zip = "#b9bdc4";
-    const tee = tone2(hide, 0.52);                                  // the shirt under it, derived off the hide
+    const tee = tone2(hide, 0.52);                                  // the tee under it, derived off the hide
     T.fill(hx(tee));
-    T.poly("front", [[0.36, 0], [0.64, 0], [0.5, 0.12]], tone(tee, -0.24));   // crew neck
-    T.rect("front", 0, 0.93, 1, 0.07, tone(tee, -0.2));             // tee hem
     T.shade();
     J.fill(hc);
-    J.clear("cap", 0, 0, 1, 1);
-    J.clearPoly("front", [[0.47, 0], [0.53, 0], [0.56, 1], [0.44, 1]]);       // it hangs a little open
-    J.rect("front", 0, 0, 1, 0.1, hx(trim));                        // stand collar, all the way round
-    J.rect("back", 0, 0, 1, 0.1, hx(trim));
-    J.rect("side", 0, 0, 1, 0.1, hx(trim));
-    // THE ASYMMETRIC ZIP is the moto read: the storm flap runs OFF centre.
-    J.rect("front", 0.57, 0.08, 0.1, 0.86, tone(hide, 0.12));
-    J.rect("front", 0.598, 0.1, 0.035, 0.82, zip);
-    J.dot("front", 0.615, 0.13, 0.03, "#e2e6ea");                   // zip pull
-    J.poly("front", [[0.26, 0], [0.42, 0], [0.44, 0.34], [0.22, 0.28]], edge);  // revers L
-    J.poly("front", [[0.68, 0], [0.82, 0], [0.84, 0.28], [0.66, 0.34]], edge);  // revers R
-    J.rect("front", 0.12, 0.6, 0.2, 0.045, seam);                   // slanted zip pockets
-    J.rect("front", 0.74, 0.6, 0.18, 0.045, seam);
-    for (const col of ["front", "back", "side"]) J.rect(col, 0, 0.84, 1, 0.07, tone(hide, -0.2)); // waist band
+    const gT = 0.11, gB = 0.07;                                      // the open front: at the neck, at the hem
+    J.poly("front", fpts([[-0.26, 0], [0.26, 0], [0.24, 0.085], [-0.24, 0.085]]), hx(trim));   // the stand collar
+    J.rect("back", 0, 0, 1, 0.09, hx(trim));
+    fboth(J, [[gT - 0.01, 0.07], [0.3, 0.1], [0.27, 0.36], [gB + 0.04, 0.46], [gT - 0.01, 0.3]], edge);   // the revers
+    J.rect("front", fx(0.1), 0.34, 0.06, 0.44, tone(hide, 0.12));   // storm flap, off centre
+    J.rect("front", fx(0.118), 0.34, 0.022, 0.44, zip);
+    J.dot("front", fx(0.13), 0.37, 0.022, "#e2e6ea");               // the pull
+    J.poly("front", fpts([[-0.4, 0.56], [-0.2, 0.5], [-0.2, 0.52], [-0.4, 0.58]]), zip);   // slant zip pockets
+    J.poly("front", fpts([[0.22, 0.5], [0.4, 0.56], [0.4, 0.58], [0.22, 0.52]]), zip);
+    for (const col of ["front", "back", "side"]) J.rect(col, 0, 0.7, 1, 0.3, tone(hide, -0.2));   // the belted waistband
+    J.rect("front", fx(-0.45), 0.72, 0.1, 0.05, zip);               // its buckle
     J.rect("back", 0.15, 0.28, 0.7, 0.03, seam);                    // back yoke seam
+    J.clear("cap", 0, 0, 1, 1);
+    J.clearPoly("front", fpts([[-gT, 0], [gT, 0], [gB, 1], [-gB, 1]]));   // it hangs open
     J.shade();
     A.fill(hc);
-    A.rect("front", 0, 0.4, 1, 0.03, seam); A.rect("side", 0, 0.4, 1, 0.03, seam);   // elbow panel seam
-    A.rect("front", 0, 0.56, 1, 0.03, seam); A.rect("side", 0, 0.56, 1, 0.03, seam);
-    A.rect("front", 0, 0.88, 1, 0.08, tone(hide, -0.22));           // cuff
-    A.rect("front", 0.7, 0.88, 0.14, 0.08, zip);                    // cuff zip
+    for (const col of ["front", "side"]) { A.rect(col, 0, 0.4, 1, 0.025, seam); A.rect(col, 0, 0.56, 1, 0.025, seam); }   // elbow panel
+    for (const col of ["front", "side", "back"]) A.rect(col, 0, 0.9, 1, 0.1, tone(hide, -0.22));   // the cuff
+    A.rect("side", 0.6, 0.86, 0.1, 0.14, zip);                      // cuff zip
     A.shade();
-    L.fill(hx((c && c.legs != null) ? c.legs : 0x23262e));
-    L.rect("front", 0, 0.92, 1, 0.08, tone((c && c.legs != null) ? c.legs : 0x23262e, -0.32)); // boot break
+    L.fill(hx(legHex));
+    for (const col of ["front", "side", "back"]) L.rect(col, 0, 0.9, 1, 0.022, "rgba(0,0,0,0.22)");   // the break
     L.shade();
-    return { torso: 1, arms: 1, legs: 1, jacket: 1 };
+    return { torso: 1, arms: 1, legs: 1, jacket: 1, fp: 1, neck: { fp: 1, band: tone2(tee, -0.1) } };
   };
 
-  // DESIGNER — the statement piece. A two-tone luxe jacket: the house colour on
-  // the body, a METAL trim running the collar, the placket and the hem, cream
-  // trousers with the same braid down the outseam. No logo anywhere — the read
-  // is the colour block and the trim line, which is what actually survives a
-  // 128px canvas (a wordmark would be four grey pixels).
+  // DESIGNER — the statement piece. A two-tone luxe jacket worn open: the
+  // house colour on the body, a METAL trim on the lapels, the seam between the
+  // tones and the pockets, cream trousers with the same braid down the
+  // outseam. No logo anywhere. TAILORED (parts.fp) like the suits; its lower
+  // tone continues on the body under the shell's swept hem (see THE SKIRT).
   PAINT.designer = function (P, c) {
     const body = (c && c.torso != null) ? c.torso : 0x7a3df0;
     const gold = (c && c.collar != null) ? c.collar : 0xffd451;
@@ -1523,39 +1719,37 @@
     const bc = hx(body), gc = hx(gold), lo = tone(body, -0.3), hi = tone(body, 0.22);
     const shirt = tone2(legHex, 0.1);                               // the shirt matches the trouser cream
     T.fill(hx(shirt));
-    T.poly("front", [[0.34, 0], [0.5, 0.2], [0.66, 0]], tone(shirt, -0.22));  // deep open neckline
-    T.rect("front", 0.49, 0.18, 0.02, 0.62, tone(shirt, -0.16));    // placket seam
-    T.rect("front", 0, 0.92, 1, 0.08, tone(shirt, -0.2));
+    T.rect("front", fx(-0.008), 0.2, 0.016, 0.6, tone(shirt, -0.16));   // placket
+    // the coat's lower tone under the swept hem, open over the shirt
+    const h0 = TAILOR.tHem;
+    for (const col of ["side", "back"]) T.rect(col, 0, 0.62, 1, 0.38, lo);
+    for (const s of [1, -1]) T.poly("front", fpts([[s * 0.13, h0], [s * 0.5, h0], [s * 0.5, 1], [s * 0.17, 1]]), lo);
     T.shade();
     J.fill(bc);
-    J.clear("cap", 0, 0, 1, 1);
-    J.clearPoly("front", [[0.45, 0], [0.55, 0], [0.62, 1], [0.38, 1]]);       // worn open
-    // the two-tone break: the lower third of the coat is the deeper tone, and
-    // the trim line rides the seam between them all the way round.
+    const gT = TAILOR.neck, gB = 0.13;                               // worn open: the neck, the hem
     for (const col of ["front", "back", "side"]) {
-      J.rect(col, 0, 0.6, 1, 0.4, lo);
-      J.rect(col, 0, 0.585, 1, 0.03, gc);
-      J.rect(col, 0, 0, 1, 0.08, hi);                               // shoulder highlight
+      J.rect(col, 0, 0.55, 1, 0.45, lo);
+      J.rect(col, 0, 0.535, 1, 0.03, gc);
+      J.rect(col, 0, 0, 1, 0.06, hi);                               // shoulder highlight
     }
-    J.poly("front", [[0.3, 0], [0.45, 0], [0.5, 0.5], [0.28, 0.42]], gc);     // metal-trim lapel L
-    J.poly("front", [[0.55, 0], [0.7, 0], [0.72, 0.42], [0.5, 0.5]], gc);     // metal-trim lapel R
-    J.rect("front", 0.1, 0.66, 0.18, 0.05, gc);                     // trimmed pocket welts
-    J.rect("front", 0.72, 0.66, 0.18, 0.05, gc);
-    J.rect("back", 0, 0, 1, 0.09, gc);                              // trimmed back collar
+    fboth(J, [[gT - 0.02, 0.05], [0.33, 0.12], [0.37, 0.2], [0.29, 0.34], [gB + 0.03, 0.5], [gB, 0.5]], gc);   // the metal-trim lapels
+    for (const s of [1, -1]) J.rect("front", fx(s > 0 ? 0.2 : -0.38), 0.66, 0.18, 0.035, gc);                  // trimmed pocket welts
+    J.rect("back", 0, 0, 1, 0.08, gc);                              // trimmed back collar
+    J.clear("cap", 0, 0, 1, 1);
+    J.clearPoly("front", fpts([[-gT, 0], [gT, 0], [gT, 0.1], [gB, 1], [-gB, 1], [-gT, 0.1]]));
     J.shade();
     A.fill(bc);
     A.rect("front", 0, 0, 1, 0.08, hi); A.rect("side", 0, 0, 1, 0.08, hi);
-    A.rect("front", 0, 0.6, 1, 0.4, lo); A.rect("side", 0, 0.6, 1, 0.4, lo);
-    A.rect("front", 0, 0.585, 1, 0.03, gc); A.rect("side", 0, 0.585, 1, 0.03, gc);
-    A.rect("front", 0, 0.9, 1, 0.06, gc); A.rect("side", 0, 0.9, 1, 0.06, gc);   // gold cuff
+    for (const col of ["front", "side", "back"]) { A.rect(col, 0, 0.6, 1, 0.4, lo); A.rect(col, 0, 0.585, 1, 0.03, gc); A.rect(col, 0, 0.93, 1, 0.07, gc); }   // two-tone sleeve, gold cuff
     A.shade();
     L.fill(hx(legHex));
-    L.rect("side", 0.44, 0, 0.12, 0.94, gc);                        // the braid down the outseam
-    L.rect("front", 0.46, 0, 0.08, 0.9, tone(legHex, 0.16));        // crease
-    L.rect("front", 0, 0.94, 1, 0.06, tone(legHex, -0.28));
+    L.rect("side", 0.44, 0, 0.12, 1, gc);                           // the braid down the outseam
+    L.rect("front", 0.49, 0.02, 0.02, 0.88, tone(legHex, -0.1));    // crease
+    for (const col of ["front", "side", "back"]) L.rect(col, 0, 0.9, 1, 0.022, "rgba(0,0,0,0.18)");   // the break
     L.shade();
-    return { torso: 1, arms: 1, legs: 1, jacket: 1 };
+    return { torso: 1, arms: 1, legs: 1, jacket: 1, fp: 1, neck: { fp: 1, open: 1, band: tone2(shirt, -0.06) } };
   };
+
 
   // TACTICAL — all-black professional kit. Deliberately NOT swat: no plate
   // carrier, no placards, no bulk shell. A slim softshell with a stand collar,
@@ -1567,9 +1761,9 @@
     const T = P.T, A = P.A, L = P.L;
     const bc = hx(body), web = tone(body, 0.22), lo = hx(acc), metal = "#7d858f";
     T.fill(bc);
-    T.rect("front", 0, 0, 1, 0.09, lo);                             // stand collar
-    T.rect("back", 0, 0, 1, 0.09, lo);
-    T.rect("front", 0.485, 0.08, 0.03, 0.84, tone(body, 0.3));      // centre zip
+    // (the stand collar is the yoke atlas round the neck; the painted collar
+    //  band that sat here was under it)
+    T.rect("front", 0.485, 0.07, 0.03, 0.93, tone(body, 0.3));      // centre zip
     T.dot("front", 0.5, 0.12, 0.022, metal);                        // zip pull
     // the harness: two narrow shoulder runs meeting a chest strap, plus one
     // waist run — webbing reads as a HARNESS only if the lines actually meet.
@@ -1577,22 +1771,25 @@
     T.poly("front", [[0.8, 0.02], [0.7, 0.02], [0.54, 0.5], [0.62, 0.52]], web);
     T.rect("front", 0.36, 0.48, 0.28, 0.06, web);
     T.dot("front", 0.5, 0.51, 0.03, metal);                         // the buckle
-    for (const col of ["front", "back", "side"]) T.rect(col, 0, 0.8, 1, 0.07, web);  // waist run
-    T.rect("back", 0.2, 0.02, 0.6, 0.06, web);                      // the runs cross at the back
-    T.rect("front", 0.1, 0.62, 0.18, 0.12, lo);                     // low utility pocket
-    T.rect("front", 0.72, 0.62, 0.18, 0.12, lo);
+    hemBand(T, web, TORSO_ROW.waist - 0.02, 0.05);                  // waist run, at the waist
+    // the shoulder runs go over the top and down the back to the waist run
+    T.poly("back", [[0.2, 0], [0.3, 0], [0.4, TORSO_ROW.waist], [0.32, TORSO_ROW.waist]], web);
+    T.poly("back", [[0.8, 0], [0.7, 0], [0.6, TORSO_ROW.waist], [0.68, TORSO_ROW.waist]], web);
+    T.rect("front", 0.1, 0.58, 0.18, 0.12, lo);                     // low utility pockets
+    T.rect("front", 0.72, 0.58, 0.18, 0.12, lo);
     T.shade();
     A.fill(bc);
-    A.rect("front", 0.2, 0.08, 0.6, 0.14, lo);                      // sleeve pocket
-    A.rect("front", 0.2, 0.08, 0.6, 0.03, web);
-    A.rect("front", 0, 0.56, 1, 0.1, lo); A.rect("side", 0, 0.56, 1, 0.1, lo);      // elbow panel
-    A.rect("front", 0, 0.9, 1, 0.06, web); A.rect("side", 0, 0.9, 1, 0.06, web);    // cuff tab
+    A.rect("side", 0.16, 0.08, 0.68, 0.18, lo);                     // sleeve pocket, outside of the arm
+    A.rect("side", 0.16, 0.08, 0.68, 0.03, web);
+    A.rect("back", 0.16, 0.56, 0.68, 0.14, lo);                     // elbow panel, where it bends
+    hemBand(A, web, 0.93, 0.05);                                    // cuff tab
     A.shade();
-    L.fill(hx((c && c.legs != null) ? c.legs : body));
-    L.rect("side", 0.24, 0.34, 0.52, 0.2, lo);                      // thigh pocket
-    L.rect("side", 0.24, 0.34, 0.52, 0.04, web);
-    L.rect("front", 0.16, 0.46, 0.68, 0.16, lo);                    // knee panel
-    for (const col of ["front", "side"]) L.rect(col, 0, 0.9, 1, 0.1, tone(body, -0.3)); // boot break
+    const trou = (c && c.legs != null) ? c.legs : body;
+    L.fill(hx(trou));
+    L.rect("side", 0.24, 0.3, 0.52, 0.2, lo);                       // thigh pocket
+    L.rect("side", 0.24, 0.3, 0.52, 0.04, web);
+    L.rect("front", 0.16, 0.44, 0.68, 0.15, lo);                    // knee panel
+    hemBand(L, tone(trou, -0.3), 0.92, 0.08);                       // into the boot
     L.shade();
     return { torso: 1, arms: 1, legs: 1 };
   };
@@ -1600,33 +1797,29 @@
   // GRAPHIC TEE — solid tee + a bold centered graphic block (color via collar).
   PAINT.graphic_tee = function (P, c) {
     const body = (c && c.torso != null) ? c.torso : 0x1c1d22, gfx = (c && c.collar != null) ? c.collar : 0xd84a3a;
-    const T = P.T, A = P.A, bc = hx(body), gc = hx(gfx);
+    // A TEE HAS SHORT SLEEVES. This one used to paint the whole arm row the
+    // shirt colour with a cuff at the wrist, i.e. a long-sleeved "tee". The
+    // skin below a sleeve is the WEARER's, which a shared atlas cannot know,
+    // so the arms stay flat: `sleeves: "short"` has applyClothes hang the
+    // rig's own flat short sleeve (garment colour to mid-bicep, own skin
+    // below). The print sits on the CHEST (pecs ~0.45), not the belly, and
+    // the hem above the tuck; the crew rib is worn by the collar band.
+    const T = P.T, bc = hx(body), gc = hx(gfx);
     T.fill(bc);
-    T.poly("front", [[0.38, 0], [0.62, 0], [0.5, 0.1]], tone(body, -0.25)); // crew neck
-    T.rect("front", 0.3, 0.28, 0.4, 0.36, gc);                    // graphic field
-    T.poly("front", [[0.5, 0.3], [0.66, 0.5], [0.5, 0.62], [0.34, 0.5]], tone(gfx, 0.3)); // a diamond motif
-    T.dot("front", 0.5, 0.46, 0.05, bc);                          // negative-space center
-    T.rect("front", 0, 0.94, 1, 0.04, tone(body, -0.2));        // hem
+    T.poly("front", [[0.37, 0], [0.63, 0], [0.5, 0.15]], tone(body, -0.25)); // crew neck
+    T.rect("front", 0.3, 0.22, 0.4, 0.32, gc);                    // graphic field
+    T.poly("front", [[0.5, 0.24], [0.66, 0.38], [0.5, 0.52], [0.34, 0.38]], tone(gfx, 0.3)); // a diamond motif
+    T.dot("front", 0.5, 0.38, 0.05, bc);                          // negative-space center
+    hemBand(T, tone(body, -0.2), TORSO_ROW.hem, 0.04);            // hem, above the tuck
     T.shade();
-    A.fill(bc); A.rect("front", 0, 0.86, 1, 0.05, tone(body, -0.2)); A.rect("side", 0, 0.86, 1, 0.05, tone(body, -0.2)); A.shade();
-    return { torso: 1, arms: 1 };
+    return { torso: 1, sleeves: "short" };
   };
 
-  // COVERALLS — a mechanic ONE-PIECE: zip, chest patch, hip pockets, leg seams.
+  // COVERALLS — the mechanic's one-piece (jumpsuit): the same garment grammar
+  // as the prison issue, in shop blue-grey. (Its blank white "name patch" and
+  // the waist seam painted across the middle of the ribs are gone.)
   PAINT.coveralls = function (P, c) {
-    const body = (c && c.torso != null) ? c.torso : 0x394a5a, bc = hx(body);
-    const T = P.T, A = P.A, L = P.L, dk = tone(body, -0.25);
-    T.fill(bc);
-    T.rect("front", 0.48, 0, 0.04, 1, dk);                         // full-length zip
-    T.rect("front", 0.16, 0.18, 0.2, 0.04, "#e6e2d6");            // oval name patch
-    T.rect("front", 0.16, 0.16, 0.2, 0.1, dk); T.rect("front", 0.16, 0.18, 0.2, 0.04, "#e6e2d6");
-    T.rect("front", 0.62, 0.16, 0.22, 0.13, dk);                  // chest pocket
-    T.rect("front", 0.1, 0.68, 0.24, 0.16, dk); T.rect("front", 0.66, 0.68, 0.24, 0.16, dk); // hip pockets
-    T.rect("front", 0.2, 0.5, 0.6, 0.05, dk);                     // waist seam
-    T.shade();
-    A.fill(bc); A.rect("front", 0, 0.86, 1, 0.06, dk); A.rect("side", 0, 0.86, 1, 0.06, dk); A.shade();
-    L.fill(bc); L.rect("side", 0.38, 0, 0.24, 1, dk); L.rect("front", 0.2, 0.4, 0.6, 0.12, dk); L.shade(); // leg seam + knee pocket
-    return { torso: 1, arms: 1, legs: 1 };
+    return jumpsuit(P, (c && c.torso != null) ? c.torso : 0x394a5a, {});
   };
 
   // CHEF — white double-breasted jacket + a colored neckerchief.
@@ -1634,49 +1827,57 @@
     const white = "#f0efe9", lo = "#dcdbd2";
     const T = P.T, A = P.A, kerch = (c && c.collar != null) ? c.collar : 0x9a2a2a;
     T.fill(white);
-    // two columns of cloth knot buttons (double-breasted)
-    T.rect("front", 0.4, 0.1, 0.2, 0.78, lo);                     // the overlap panel shadow
-    T.rect("front", 0.42, 0.1, 0.16, 0.78, white);                // overlap panel face
-    for (let i = 0; i < 4; i++) { T.dot("front", 0.42, 0.16 + i * 0.18, 0.018, lo); T.dot("front", 0.58, 0.16 + i * 0.18, 0.018, lo); }
+    // the double-breasted front: the wrap panel crosses to the wearer's side,
+    // two columns of cloth knot buttons down to the waist
+    T.poly("front", [[0.36, 0.1], [0.62, 0.1], [0.62, 1], [0.36, 1]], lo);
+    T.poly("front", [[0.37, 0.1], [0.62, 0.1], [0.62, 1], [0.38, 1]], white);
+    T.rect("front", 0.36, 0.1, 0.012, 0.9, tone(0xf0efe9, -0.2));                 // the wrap edge
+    for (let i = 0; i < 4; i++) { T.dot("front", 0.43, 0.2 + i * 0.16, 0.02, lo); T.dot("front", 0.57, 0.2 + i * 0.16, 0.02, lo); }
     T.poly("front", [[0.34, 0], [0.5, 0.12], [0.66, 0]], hx(kerch)); // neckerchief at the throat
-    T.rect("front", 0, 0.92, 1, 0.05, lo);                        // hem
+    T.rect("front", 0.66, 0.26, 0.16, 0.015, lo);                    // thermometer / pen pocket slit
     T.shade();
-    A.fill(white); A.rect("front", 0, 0.86, 1, 0.08, lo); A.rect("side", 0, 0.86, 1, 0.08, lo); A.shade();
+    A.fill(white);
+    hemBand(A, lo, 0.84, 0.03); hemBand(A, lo, 0.97, 0.03);          // turned-back cuffs
+    A.shade();
     return { torso: 1, arms: 1 };
   };
 
-  // WAITER — black vest + white shirt + black bow tie (reuses formal helpers).
+  // WAITER — black jacket over a black waistcoat, white shirt, black bow tie:
+  // the suit cut (formalTorso), buttoned higher at the neck (close).
   PAINT.waiter = function (P, c) {
-    // vTop keeps the server's front BUTTONED-UP: a slimmer collar opening than
-    // the tailored suits, the V2 sibling of the old narrow gap 0.05.
-    const nk = formalTorso(P.T, P.J, 0x16171c, "rgb(30,31,37)", { bow: true, gap: 0.05, lapel: 0.07, lapelType: "notch", vest: 0x141519, vTop: 0.085, ctx: P.ctx });
-    formalLimbs(P.A, P.L, 0x16171c, 0x141519, false, { ctx: P.ctx });
-    const parts = { torso: 1, arms: 1, legs: 1, jacket: 1 };
-    if (nk) parts.neck = nk;
-    return parts;
+    const legs = 0x141519;
+    const neck = formalTorso(P.T, P.J, 0x16171c, "rgb(30,31,37)", { bow: true, close: true, lapelType: "notch", vest: 0x141519, ctx: P.ctx });
+    formalLimbs(P.A, P.L, 0x16171c, legs, false, { ctx: P.ctx });
+    return { torso: 1, arms: 1, legs: 1, jacket: 1, fp: 1, neck: neck, skirt: { hex: 0x16171c } };
   };
 
-  // PILOT — crisp white shirt, black tie, gold EPAULETTES + wings.
+  // PILOT — crisp white shirt, black tie, gold-barred EPAULETTES on the
+  // shoulder straps (the shoulder tops: the front column's top rows out past
+  // the collar, and the side column's), the wings over the left pocket.
   PAINT.pilot = function (P, c) {
-    const white = "#eef0f2", lo = "#d6d9dd";
+    const white = "#eef0f2", lo = "#d6d9dd", gold = "#e8c454", strap = "#1a1c24";
     const T = P.T, A = P.A, L = P.L;
     T.fill(white);
-    T.rect("front", 0.49, 0, 0.02, 0.9, lo);                       // placket
-    if (neckV2()) T.rect("front", 0.47, 0, 0.06, 0.6, "#15161c"); // tie — blade from row 0, knot on the yoke
-    else {
-      T.poly("front", [[0.42, 0.02], [0.58, 0.02], [0.55, 0.1], [0.45, 0.1]], "#15161c"); // tie knot
-      T.rect("front", 0.47, 0.1, 0.06, 0.5, "#15161c");           // tie
+    T.rect("front", fx(-0.012), 0.08, 0.024, TAILOR.tBelt - 0.08, lo);      // placket
+    for (const s of [1, -1]) {
+      const x0 = s > 0 ? 0.25 : -0.45;
+      T.rect("front", fx(x0), 0.02, 0.2, 0.085, strap);                       // the strap, seen from the front
+      for (let i = 0; i < 4; i++) T.rect("front", fx(x0 + 0.03 + i * 0.04), 0.03, 0.018, 0.065, gold);   // four bars: captain
     }
-    T.rect("front", 0.06, 0, 0.18, 0.1, lo); T.rect("front", 0.76, 0, 0.18, 0.1, lo); // epaulette base
-    for (const x of [0.08, 0.14, 0.2]) T.rect("front", x, 0.02, 0.03, 0.06, "#e8c454"); // gold bars L
-    for (const x of [0.78, 0.84, 0.9]) T.rect("front", x, 0.02, 0.03, 0.06, "#e8c454"); // gold bars R
-    T.rect("front", 0.62, 0.2, 0.1, 0.04, "#e8c454");            // gold wings
+    T.rect("side", 0.3, 0, 0.4, 0.1, strap);
+    for (let i = 0; i < 4; i++) T.rect("side", 0.33, 0.012 + i * 0.022, 0.34, 0.01, gold);
+    T.rect("front", fx(0.13), 0.33, 0.17, 0.12, lo);                        // the left pocket…
+    T.poly("front", fpts([[0.12, 0.29], [0.215, 0.275], [0.31, 0.29], [0.215, 0.305]]), gold);   // …and the wings over it
+    paintTie(T, 0x15161c, TAILOR.tBelt - 0.025, 0);
     T.shade();
-    A.fill(white); A.rect("front", 0, 0.86, 1, 0.06, lo); A.rect("side", 0, 0.86, 1, 0.06, lo); A.shade();
-    L.fill(hx((c && c.legs != null) ? c.legs : 0x1a1c24)); L.rect("side", 0.4, 0, 0.2, 1, "#0d0e12"); L.shade(); // black slacks w/ stripe
-    const parts = { torso: 1, arms: 1, legs: 1 };
-    if (neckV2()) parts.neck = { tie: 0x15161c, w: 0.06 };
-    return parts;
+    A.fill(white);
+    for (const col of ["front", "side", "back"]) A.rect(col, 0, 0.93, 1, 0.07, lo);   // the cuff
+    A.shade();
+    const legHex = (c && c.legs != null) ? c.legs : 0x1a1c24;
+    L.fill(hx(legHex)); L.rect("side", 0.46, 0, 0.08, 1, "#0d0e12");          // slacks with a braid
+    L.rect("front", 0.49, 0.02, 0.02, 0.88, tone(legHex, 0.12));
+    L.shade();
+    return { torso: 1, arms: 1, legs: 1, fp: 1, neck: { tie: 0x15161c, fp: 1 } };
   };
 
   // ============================================================
@@ -1688,79 +1889,101 @@
     const blue = (c && c.torso != null) ? c.torso : 0x3a6a96, dark = tone(blue, -0.3);
     const T = P.T, A = P.A, L = P.L;
     T.fill(hx(blue));
-    T.rect("front", 0.49, 0, 0.025, 1, dark);
-    T.rect("front", 0.12, 0.25, 0.22, 0.14, dark); T.rect("front", 0.66, 0.25, 0.22, 0.14, dark);
-    T.poly("front", [[0.1, 0], [0.2, 0], [0.82, 1], [0.7, 1]], "#6b4c2d"); // mailbag strap
-    T.rect("front", 0.68, 0.1, 0.18, 0.055, "#e5e0cf"); T.shade();
-    A.fill(hx(blue)); A.rect("front", 0.22, 0.12, 0.56, 0.16, dark); A.shade();
-    L.fill(hx((c && c.legs != null) ? c.legs : 0x2f4a6b)); L.rect("side", 0.4, 0, 0.2, 1, dark); L.shade();
+    T.rect("front", 0.49, 0.07, 0.02, 0.93, dark);                             // button placket
+    flapPocket(T, "front", 0.12, WORK_ROW.pocket, 0.22, 0.14, blue);
+    flapPocket(T, "front", 0.66, WORK_ROW.pocket, 0.22, 0.14, blue);
+    // the satchel strap: over the left shoulder, across the chest to the right
+    // hip, and down the back the same way (one strap, not a front sticker)
+    T.poly("front", [[0.1, 0], [0.2, 0], [0.84, TORSO_ROW.waist + 0.04], [0.72, TORSO_ROW.waist + 0.04]], "#6b4c2d");
+    T.poly("back", [[0.9, 0], [0.8, 0], [0.16, TORSO_ROW.waist + 0.04], [0.28, TORSO_ROW.waist + 0.04]], "#5e4328");
+    T.shade();
+    A.fill(hx(blue));
+    A.rect("side", 0.2, 0.08, 0.6, 0.16, dark);                                // shoulder patch, outside of the sleeve
+    limbHem(A, 0.92, blue);
+    A.shade();
+    const trou = (c && c.legs != null) ? c.legs : 0x2f4a6b;
+    L.fill(hx(trou)); L.rect("side", 0.4, 0, 0.2, 0.94, dark); limbHem(L, 0.94, trou); L.shade();
     return { torso: 1, arms: 1, legs: 1 };
   };
 
   PAINT.janitor = function (P, c) {
     const grey = (c && c.torso != null) ? c.torso : 0x4a5560, lo = tone(grey, -0.25);
     const T = P.T, A = P.A, L = P.L;
-    T.fill(hx(grey)); T.rect("front", 0.48, 0, 0.04, 1, lo);
-    T.rect("front", 0.12, 0.24, 0.23, 0.15, lo); T.rect("front", 0.66, 0.24, 0.22, 0.15, lo);
-    T.rect("front", 0.14, 0.27, 0.18, 0.045, "#d9d5c8"); T.shade();
-    A.fill(hx(grey)); A.rect("front", 0, 0.84, 1, 0.08, lo); A.shade();
-    L.fill(hx((c && c.legs != null) ? c.legs : 0x3a3f46)); L.rect("front", 0.18, 0.47, 0.64, 0.14, lo); L.shade();
+    T.fill(hx(grey)); T.rect("front", 0.485, 0.07, 0.03, 0.93, lo);
+    flapPocket(T, "front", 0.12, WORK_ROW.pocket, 0.23, 0.15, grey);
+    flapPocket(T, "front", 0.65, WORK_ROW.pocket, 0.23, 0.15, grey);
+    T.shade();
+    A.fill(hx(grey)); limbHem(A, 0.92, grey); A.shade();
+    const trou = (c && c.legs != null) ? c.legs : 0x3a3f46;
+    L.fill(hx(trou)); L.rect("front", 0.18, 0.44, 0.64, 0.14, tone(trou, -0.18)); limbHem(L, 0.94, trou); L.shade();
     return { torso: 1, arms: 1, legs: 1 };
   };
 
   PAINT.valet = function (P, c) {
     const red = (c && c.torso != null) ? c.torso : 0x8a1f24;
-    const T = P.T, A = P.A, L = P.L;
+    // TAILORED: a red waistcoat (V to mid-chest, brass buttons, points at the
+    // hem) over a white shirt and black tie; shirt sleeves with a cuff
+    const T = P.T, A = P.A, L = P.L, rc = hx(red), hem = TORSO_ROW.hem + 0.06;
     T.fill("#eceae4");
-    T.poly("front", [[0.08, 0], [0.42, 0], [0.48, 0.28], [0.4, 1], [0.08, 1]], hx(red));
-    T.poly("front", [[0.92, 0], [0.58, 0], [0.52, 0.28], [0.6, 1], [0.92, 1]], hx(red));
-    T.rect("front", 0.47, 0.02, 0.06, 0.58, "#17191f");
-    for (let y = 0.34; y < 0.8; y += 0.18) T.dot("front", 0.5, y, 0.018, "#e8c454");
-    T.shade(); A.fill("#eceae4"); A.shade();
+    paintTie(T, 0x17191f, 0.36, 0.17);
+    for (const col of ["side", "back"]) T.rect(col, 0, 0.12, 1, hem - 0.12, col === "back" ? tone(red, -0.25) : rc);
+    for (const s of [1, -1]) T.poly("front", fpts([[s * 0.17, 0], [s * 0.5, 0], [s * 0.5, hem], [s * 0.1, hem], [s * 0.05, hem + 0.05], [0, hem], [0, 0.36]]), rc);
+    T.rect("front", fx(-0.004), 0.36, 0.008, hem - 0.36, tone(red, -0.35));
+    for (let i = 0; i < 4; i++) T.dot("front", fx(0), 0.42 + i * (hem - 0.46) / 3, 0.013, "#e8c454");
+    T.shade();
+    A.fill("#eceae4");
+    for (const col of ["front", "side", "back"]) A.rect(col, 0, 0.93, 1, 0.07, "#d6d4cc");
+    A.shade();
     L.fill(hx((c && c.legs != null) ? c.legs : 0x16171c)); L.shade();
-    return { torso: 1, arms: 1, legs: 1 };
+    return { torso: 1, arms: 1, legs: 1, fp: 1, neck: { tie: 0x17191f, fp: 1, band: 0xeceae4 } };
   };
 
   PAINT.busdriver = function (P, c) {
     const teal = (c && c.torso != null) ? c.torso : 0x2f5a6b, lo = tone(teal, -0.3);
     const T = P.T, A = P.A, L = P.L;
-    T.fill(hx(teal)); T.rect("front", 0.49, 0, 0.02, 1, lo);
-    T.rect("front", 0.06, 0, 0.18, 0.11, tone(teal, 0.18)); T.rect("front", 0.76, 0, 0.18, 0.11, tone(teal, 0.18));
-    T.rect("front", 0.14, 0.24, 0.2, 0.13, lo); T.rect("front", 0.66, 0.24, 0.2, 0.13, lo);
-    T.rect("front", 0.62, 0.12, 0.2, 0.045, "#d7d9d4"); T.shade();
-    A.fill(hx(teal)); A.rect("front", 0.16, 0.08, 0.68, 0.16, lo); A.shade();
-    L.fill(hx((c && c.legs != null) ? c.legs : 0x24304a)); L.shade();
+    T.fill(hx(teal)); T.rect("front", 0.49, 0.07, 0.02, 0.93, lo);             // button placket
+    T.rect("front", 0.1, 0, 0.16, 0.1, tone(teal, 0.14)); T.rect("front", 0.74, 0, 0.16, 0.1, tone(teal, 0.14));   // epaulettes
+    flapPocket(T, "front", 0.14, WORK_ROW.pocket, 0.2, 0.13, teal);
+    flapPocket(T, "front", 0.66, WORK_ROW.pocket, 0.2, 0.13, teal);
+    T.shade();
+    A.fill(hx(teal)); A.rect("side", 0.16, 0.08, 0.68, 0.16, lo); limbHem(A, 0.92, teal); A.shade();   // transit patch, outside
+    const trou = (c && c.legs != null) ? c.legs : 0x24304a;
+    L.fill(hx(trou)); L.rect("front", 0.49, 0, 0.02, 0.92, tone(trou, -0.14)); limbHem(L, 0.95, trou); L.shade();
     return { torso: 1, arms: 1, legs: 1 };
   };
 
+  // blaze orange (no tape: a hunting vest) over a woodland camo shirt
   PAINT.hunter = function (P, c) {
     const field = (c && c.torso != null) ? c.torso : 0x465038, orange = (c && c.collar != null) ? c.collar : 0xe86d16;
-    const T = P.T, A = P.A, L = P.L, chips = [0x303a28, 0x5c6344, 0x756447, 0x3b432e];
+    const chips = [0x303a28, 0x5c6344, 0x756447, 0x3b432e];
     function camo(R, n, base) {
       R.fill(hx(base)); let s = 0x51f15e ^ base;
       const rnd = () => { s = (Math.imul(s, 1664525) + 1013904223) | 0; return (s >>> 0) / 4294967296; };
-      for (const col of ["front", "back", "side"]) for (let i = 0; i < n; i++) R.rect(col, rnd(), rnd(), 0.1 + rnd() * 0.16, 0.05 + rnd() * 0.1, hx(chips[(rnd() * chips.length) | 0]));
-      R.shade();
+      for (const col of ["front", "back", "side", "cap"]) for (let i = 0; i < n; i++) R.rect(col, rnd(), rnd(), 0.1 + rnd() * 0.16, 0.05 + rnd() * 0.1, hx(chips[(rnd() * chips.length) | 0]));
     }
-    camo(T, 15, field);
-    for (const col of ["front", "back", "side"]) T.rect(col, 0.08, 0.08, 0.84, 0.86, hx(orange));
-    T.rect("front", 0.47, 0.08, 0.06, 0.86, tone(orange, -0.3));
-    T.rect("front", 0.14, 0.57, 0.28, 0.23, tone(orange, -0.13)); T.rect("front", 0.58, 0.57, 0.28, 0.23, tone(orange, -0.13));
-    T.rect("front", 0.14, 0.57, 0.28, 0.04, tone(orange, -0.35)); T.rect("front", 0.58, 0.57, 0.28, 0.04, tone(orange, -0.35)); T.shade();
-    camo(A, 8, field); camo(L, 10, (c && c.legs != null) ? c.legs : 0x4a4d32);
-    L.rect("side", 0.18, 0.34, 0.64, 0.22, tone(field, -0.28));
-    return { torso: 1, arms: 1, legs: 1 };
+    const legs = (c && c.legs != null) ? c.legs : 0x4a4d32;
+    const parts = workVest(P, { vest: orange, shirt: field, legs, under: function (R) { camo(R, R === P.T ? 15 : 8, field); } });
+    const T = P.T, L = P.L;
+    flapPocket(T, "front", 0.1, 0.5, 0.3, 0.2, orange); flapPocket(T, "front", 0.6, 0.5, 0.3, 0.2, orange);   // vest pockets
+    camo(L, 10, legs);
+    L.rect("side", 0.16, 0.26, 0.68, 0.2, "rgba(0,0,0,0.22)"); L.rect("side", 0.16, 0.26, 0.68, 0.035, "rgba(0,0,0,0.38)");   // cargo pocket
+    hemBand(L, "rgba(0,0,0,0.3)", 0.92, 0.08);
+    L.shade();
+    return parts;
   };
 
   PAINT.ranger = function (P, c) {
     const khaki = (c && c.torso != null) ? c.torso : 0xb19a6a, green = (c && c.collar != null) ? c.collar : 0x4a5835;
     const T = P.T, A = P.A, L = P.L;
-    T.fill(hx(khaki)); T.rect("front", 0.49, 0, 0.02, 1, tone(khaki, -0.25));
-    T.rect("front", 0.06, 0, 0.18, 0.11, hx(green)); T.rect("front", 0.76, 0, 0.18, 0.11, hx(green));
-    T.rect("front", 0.13, 0.26, 0.23, 0.14, tone(khaki, -0.15)); T.rect("front", 0.64, 0.26, 0.23, 0.14, tone(khaki, -0.15));
-    T.dot("front", 0.26, 0.17, 0.03, "#d9b94f"); T.rect("front", 0.66, 0.15, 0.18, 0.045, hx(green)); T.shade();
-    A.fill(hx(khaki)); A.rect("front", 0.2, 0.07, 0.6, 0.18, hx(green)); A.shade();
-    L.fill(hx((c && c.legs != null) ? c.legs : 0x3f4b2e)); L.rect("side", 0.36, 0, 0.28, 1, tone(green, -0.24)); L.shade();
+    T.fill(hx(khaki)); T.rect("front", 0.49, 0.07, 0.02, 0.93, tone(khaki, -0.25));
+    T.rect("front", 0.1, 0, 0.16, 0.1, hx(green)); T.rect("front", 0.74, 0, 0.16, 0.1, hx(green));   // epaulettes
+    flapPocket(T, "front", 0.13, WORK_ROW.pocket + 0.02, 0.23, 0.14, khaki);
+    flapPocket(T, "front", 0.64, WORK_ROW.pocket + 0.02, 0.23, 0.14, khaki);
+    T.poly("front", [[0.22, 0.13], [0.30, 0.13], [0.30, 0.19], [0.26, 0.225], [0.22, 0.19]], "#d9b94f");   // the badge over the pocket
+    T.shade();
+    A.fill(hx(khaki)); A.rect("side", 0.2, 0.07, 0.6, 0.18, hx(green)); limbHem(A, 0.92, khaki); A.shade();   // arm patch, outside
+    const trou = (c && c.legs != null) ? c.legs : 0x3f4b2e;
+    L.fill(hx(trou)); L.rect("side", 0.47, 0, 0.06, 1, tone(trou, -0.2)); limbHem(L, 0.95, trou); L.shade();
     return { torso: 1, arms: 1, legs: 1 };
   };
 
@@ -1768,181 +1991,264 @@
     const shell = (c && c.torso != null) ? c.torso : 0xb94f2f, dark = (c && c.collar != null) ? c.collar : 0x27313a;
     const T = P.T, A = P.A, L = P.L;
     T.fill(hx(shell));
-    for (const col of ["front", "back", "side"]) T.rect(col, 0, 0, 1, 0.22, hx(dark));
-    T.rect("front", 0.48, 0, 0.04, 1, tone(shell, -0.38));
-    T.rect("front", 0.1, 0.52, 0.28, 0.18, tone(shell, -0.2)); T.rect("front", 0.62, 0.52, 0.28, 0.18, tone(shell, -0.2)); T.shade();
-    A.fill(hx(shell)); A.rect("front", 0, 0, 1, 0.28, hx(dark)); A.rect("front", 0, 0.88, 1, 0.08, hx(dark)); A.shade();
-    L.fill(hx((c && c.legs != null) ? c.legs : 0x3d4650)); L.rect("side", 0.18, 0.34, 0.64, 0.22, hx(dark)); L.rect("front", 0.14, 0.48, 0.72, 0.14, tone(dark, 0.12)); L.shade();
+    hemBand(T, hx(dark), 0, 0.22);                                              // two-tone shoulders
+    T.rect("front", 0.48, 0.07, 0.04, 0.93, tone(shell, -0.38));                // zip
+    T.rect("front", 0.1, 0.5, 0.28, 0.18, tone(shell, -0.2)); T.rect("front", 0.62, 0.5, 0.28, 0.18, tone(shell, -0.2));   // hand pockets
+    hemBand(T, tone(shell, -0.3), TORSO_ROW.waist - 0.01, 0.03);               // drawcord hem
+    T.shade();
+    A.fill(hx(shell)); hemBand(A, hx(dark), 0, 0.28); hemBand(A, hx(dark), 0.9, 0.1); A.shade();
+    const trou = (c && c.legs != null) ? c.legs : 0x3d4650;
+    L.fill(hx(trou)); L.rect("side", 0.18, 0.3, 0.64, 0.2, hx(dark)); L.rect("front", 0.14, 0.44, 0.72, 0.14, tone(dark, 0.12));
+    limbHem(L, 0.94, trou); L.shade();
     return { torso: 1, arms: 1, legs: 1 };
   };
 
+  // plaid work shirt under denim bib overalls (straps crossed on the back)
   PAINT.farmer = function (P, c) {
     const shirt = (c && c.torso != null) ? c.torso : 0x76543a, denim = (c && c.legs != null) ? c.legs : 0x3d5872;
-    const T = P.T, A = P.A, L = P.L;
+    const T = P.T, A = P.A, L = P.L, dc = hx(denim);
     T.fill(hx(shirt));
     for (const x of [0.2, 0.5, 0.8]) for (const col of ["front", "back", "side"]) T.rect(col, x, 0, 0.035, 1, tone(shirt, -0.22));
-    for (const y of [0.22, 0.5, 0.78]) for (const col of ["front", "back", "side"]) T.rect(col, 0, y, 1, 0.03, tone(shirt, 0.18));
-    T.rect("front", 0.2, 0.26, 0.6, 0.74, hx(denim)); T.rect("front", 0.18, 0, 0.12, 0.42, hx(denim)); T.rect("front", 0.7, 0, 0.12, 0.42, hx(denim));
-    T.rect("front", 0.34, 0.42, 0.32, 0.2, tone(denim, -0.16)); T.shade();
-    A.fill(hx(shirt)); A.rect("front", 0, 0.76, 1, 0.06, tone(shirt, -0.2)); A.shade();
-    L.fill(hx(denim)); L.rect("front", 0.16, 0.46, 0.68, 0.15, tone(denim, -0.2)); L.shade();
+    for (const y of [0.22, 0.5, 0.78]) hemBand(T, tone(shirt, 0.18), y, 0.03);
+    T.rect("front", 0.2, 0.34, 0.6, 0.66, dc);                                  // the bib
+    T.rect("front", 0.19, 0, 0.1, 0.36, dc); T.rect("front", 0.71, 0, 0.1, 0.36, dc);   // straps
+    T.rect("front", 0.2, 0.33, 0.07, 0.04, "#b9a26a"); T.rect("front", 0.73, 0.33, 0.07, 0.04, "#b9a26a");   // buckles
+    T.rect("front", 0.36, 0.42, 0.28, 0.18, tone(denim, -0.16));               // bib pocket
+    T.poly("back", [[0.2, 0], [0.32, 0], [0.62, 0.5], [0.5, 0.5]], dc);        // straps crossed behind
+    T.poly("back", [[0.8, 0], [0.68, 0], [0.38, 0.5], [0.5, 0.5]], dc);
+    T.rect("back", 0.28, 0.5, 0.44, 0.5, dc);
+    T.rect("side", 0, 0.62, 1, 0.38, dc);                                       // the overall's sides under the arm
+    T.shade();
+    A.fill(hx(shirt)); hemBand(A, tone(shirt, -0.2), 0.72, 0.06); A.shade();    // sleeves rolled
+    L.fill(dc); L.rect("front", 0.16, 0.44, 0.68, 0.15, tone(denim, -0.2)); limbHem(L, 0.94, denim); L.shade();
     return { torso: 1, arms: 1, legs: 1 };
   };
 
+  // oilskin bib trousers over a navy knit, straps crossed behind, sea boots
   PAINT.fisherman = function (P, c) {
     const knit = (c && c.torso != null) ? c.torso : 0x283d50, oil = (c && c.collar != null) ? c.collar : 0xe1bd45;
-    const T = P.T, A = P.A, L = P.L;
+    const T = P.T, A = P.A, L = P.L, oc = hx(oil);
     T.fill(hx(knit));
-    T.rect("front", 0.2, 0.3, 0.6, 0.7, hx(oil)); T.rect("front", 0.18, 0, 0.13, 0.5, hx(oil)); T.rect("front", 0.69, 0, 0.13, 0.5, hx(oil));
-    T.rect("front", 0.32, 0.48, 0.36, 0.2, tone(oil, -0.15)); T.rect("back", 0.18, 0.3, 0.64, 0.7, hx(oil)); T.shade();
-    A.fill(hx(knit)); A.rect("front", 0, 0.85, 1, 0.08, tone(knit, -0.25)); A.shade();
-    L.fill(hx((c && c.legs != null) ? c.legs : 0xc99928)); L.rect("front", 0, 0.88, 1, 0.12, "#1d2924"); L.rect("side", 0, 0.88, 1, 0.12, "#1d2924"); L.shade();
+    for (const col of ["front", "back", "side"]) for (let x = 0.1; x < 1; x += 0.2) T.rect(col, x, 0, 0.03, 1, tone(knit, -0.12));   // knit ribs
+    T.rect("front", 0.2, 0.36, 0.6, 0.64, oc); T.rect("front", 0.19, 0, 0.1, 0.38, oc); T.rect("front", 0.71, 0, 0.1, 0.38, oc);
+    T.rect("front", 0.32, 0.48, 0.36, 0.2, tone(oil, -0.15));
+    T.poly("back", [[0.2, 0], [0.32, 0], [0.62, 0.5], [0.5, 0.5]], oc);
+    T.poly("back", [[0.8, 0], [0.68, 0], [0.38, 0.5], [0.5, 0.5]], oc);
+    T.rect("back", 0.24, 0.5, 0.52, 0.5, oc);
+    T.rect("side", 0, 0.6, 1, 0.4, oc);
+    T.shade();
+    A.fill(hx(knit)); limbHem(A, 0.88, knit); A.shade();                        // rib-knit cuffs
+    L.fill(hx((c && c.legs != null) ? c.legs : 0xc99928));
+    hemBand(L, "#1d2924", 0.72, 0.28); hemBand(L, "#2d3a34", 0.72, 0.03);       // sea boots to the calf
+    L.shade();
     return { torso: 1, arms: 1, legs: 1 };
   };
 
   PAINT.mariner = function (P, c) {
     const white = (c && c.torso != null) ? c.torso : 0xf0f1ed, navy = (c && c.collar != null) ? c.collar : 0x213a5a;
     const T = P.T, A = P.A, L = P.L;
-    T.fill(hx(white)); T.rect("front", 0.49, 0, 0.02, 0.9, tone(white, -0.18));
-    T.rect("front", 0.05, 0, 0.2, 0.12, hx(navy)); T.rect("front", 0.75, 0, 0.2, 0.12, hx(navy));
-    for (const x of [0.08, 0.14]) { T.rect("front", x, 0.03, 0.03, 0.055, "#d5b24a"); T.rect("front", 0.78 + (x - 0.08), 0.03, 0.03, 0.055, "#d5b24a"); }
-    T.rect("front", 0.65, 0.19, 0.16, 0.045, "#d5b24a"); T.shade();
-    A.fill(hx(white)); A.rect("front", 0, 0.86, 1, 0.06, hx(navy)); A.shade();
-    L.fill(hx((c && c.legs != null) ? c.legs : 0x19283d)); L.rect("side", 0.4, 0, 0.2, 1, tone(navy, -0.3)); L.shade();
+    T.fill(hx(white)); T.rect("front", 0.49, 0.07, 0.02, 0.93, tone(white, -0.18));
+    T.rect("front", 0.08, 0, 0.18, 0.1, hx(navy)); T.rect("front", 0.74, 0, 0.18, 0.1, hx(navy));   // shoulder boards
+    for (const x of [0.11, 0.17]) { T.rect("front", x, 0.03, 0.03, 0.05, "#d5b24a"); T.rect("front", 0.66 + x, 0.03, 0.03, 0.05, "#d5b24a"); }
+    flapPocket(T, "front", 0.14, WORK_ROW.pocket, 0.2, 0.13, white);
+    flapPocket(T, "front", 0.66, WORK_ROW.pocket, 0.2, 0.13, white);
+    T.shade();
+    A.fill(hx(white)); limbHem(A, 0.92, white); A.shade();
+    const trou = (c && c.legs != null) ? c.legs : 0x19283d;
+    L.fill(hx(trou)); L.rect("front", 0.49, 0, 0.02, 0.92, tone(trou, -0.16)); limbHem(L, 0.95, trou); L.shade();
     return { torso: 1, arms: 1, legs: 1 };
   };
 
+  // the lifeguard: a red top, the real "GUARD" across the chest, the white
+  // cross on the back (the one wordmark this job actually wears)
   PAINT.lifeguard = function (P, c) {
-    const red = (c && c.collar != null) ? c.collar : 0xc8342f, white = (c && c.torso != null) ? c.torso : 0xf1eee7;
-    const T = P.T, A = P.A, L = P.L, ctx = P.ctx;
-    T.fill(hx(white));
-    for (const col of ["front", "back", "side"]) T.rect(col, 0, 0, 1, 0.2, hx(red));
-    T.rect("front", 0.47, 0.3, 0.06, 0.26, hx(red)); T.rect("front", 0.39, 0.39, 0.22, 0.07, hx(red));
-    T.rect("back", 0.46, 0.26, 0.08, 0.32, hx(red)); T.rect("back", 0.36, 0.38, 0.28, 0.08, hx(red)); T.shade();
-    if (ctx && ctx.fillText) { ctx.save(); ctx.fillStyle = "#c8342f"; ctx.font = "bold 7px Arial"; ctx.textAlign = "center"; ctx.fillText("GUARD", 16, ROWS.torso[0] + 31); ctx.restore(); }
-    A.fill(hx(red)); A.rect("front", 0, 0.5, 1, 0.5, hx(white)); A.shade();
-    L.fill(hx((c && c.legs != null) ? c.legs : 0xc8342f)); L.rect("side", 0.38, 0, 0.24, 1, hx(white)); L.shade();
-    return { torso: 1, arms: 1, legs: 1 };
+    const red = (c && c.torso != null) ? c.torso : 0xc8342f, white = (c && c.collar != null) ? c.collar : 0xf1eee7;
+    const T = P.T, L = P.L, ctx = P.ctx;
+    T.fill(hx(red));
+    T.poly("front", [[0.38, 0], [0.62, 0], [0.5, 0.1]], tone(red, -0.24));      // crew neck
+    T.rect("back", 0.44, 0.26, 0.12, 0.32, hx(white)); T.rect("back", 0.3, 0.36, 0.4, 0.1, hx(white));
+    T.shade();
+    if (ctx && ctx.fillText) {
+      ctx.save(); ctx.fillStyle = hx(white); ctx.font = "bold 9px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText("GUARD", (COLS.front[0] + COLS.front[1]) / 2, ROWS.torso[0] + 0.32 * (ROWS.torso[1] - ROWS.torso[0]));
+      ctx.restore();
+    }
+    const trunks = (c && c.legs != null) ? c.legs : red;
+    L.fill(hx(trunks)); L.rect("side", 0.38, 0, 0.24, 0.95, hx(white)); limbHem(L, 0.95, trunks); L.shade();
+    return { torso: 1, legs: 1, sleeves: "short" };                            // a tee: the wearer's own arms
   };
 
   function skiShell(P, c, patrol) {
     const body = (c && c.torso != null) ? c.torso : (patrol ? 0xc83232 : 0x286ba6), accent = (c && c.collar != null) ? c.collar : (patrol ? 0xf2f0e8 : 0xe67925);
     const T = P.T, A = P.A, L = P.L;
-    T.fill(hx(body)); T.rect("front", 0.48, 0, 0.04, 1, tone(body, -0.35));
-    for (const col of ["front", "back", "side"]) { T.rect(col, 0, 0, 1, 0.22, hx(accent)); T.rect(col, 0, 0.84, 1, 0.09, tone(body, -0.28)); }
-    T.rect("front", 0.1, 0.55, 0.27, 0.16, tone(body, -0.18)); T.rect("front", 0.63, 0.55, 0.27, 0.16, tone(body, -0.18));
-    if (patrol) { T.rect("front", 0.47, 0.32, 0.06, 0.25, "#f2f0e8"); T.rect("front", 0.39, 0.4, 0.22, 0.07, "#f2f0e8"); }
+    T.fill(hx(body)); T.rect("front", 0.48, 0.07, 0.04, 0.93, tone(body, -0.35));
+    hemBand(T, hx(accent), 0, 0.22);                                             // contrast shoulders
+    hemBand(T, tone(body, -0.28), TORSO_ROW.waist - 0.03, 0.06);                 // the powder skirt at the hem
+    T.rect("front", 0.1, 0.5, 0.27, 0.16, tone(body, -0.18)); T.rect("front", 0.63, 0.5, 0.27, 0.16, tone(body, -0.18));
+    if (patrol) for (const col of ["front", "back"]) {                           // the patrol cross, front and back
+      T.rect(col, 0.46, 0.28, 0.08, 0.2, "#f2f0e8"); T.rect(col, 0.38, 0.345, 0.24, 0.07, "#f2f0e8");
+    }
     T.shade();
-    A.fill(hx(body)); A.rect("front", 0, 0, 1, 0.25, hx(accent)); A.rect("front", 0, 0.84, 1, 0.1, tone(body, -0.3)); A.shade();
-    L.fill(hx((c && c.legs != null) ? c.legs : 0x202936)); L.rect("front", 0.12, 0.44, 0.76, 0.17, tone(0x202936, 0.12)); L.rect("side", 0, 0.88, 1, 0.12, "#171b22"); L.shade();
+    A.fill(hx(body)); hemBand(A, hx(accent), 0, 0.25); limbHem(A, 0.88, body); A.shade();
+    const pant = (c && c.legs != null) ? c.legs : 0x202936;
+    L.fill(hx(pant)); L.rect("front", 0.12, 0.42, 0.76, 0.16, tone(pant, 0.12)); hemBand(L, "#171b22", 0.86, 0.14); L.shade();
     return { torso: 1, arms: 1, legs: 1 };
   }
   PAINT.ski = function (P, c) { return skiShell(P, c, false); };
   PAINT.ski_patrol = function (P, c) { return skiShell(P, c, true); };
 
+  // airside: a yellow vest with the tape crossed on the back, over navy
   PAINT.groundcrew = function (P, c) {
     const hi = (c && c.torso != null) ? c.torso : 0xd8ca2f, navy = (c && c.arms != null) ? c.arms : 0x24344d;
-    const T = P.T, A = P.A, L = P.L;
-    T.fill(hx(navy));
-    for (const col of ["front", "back", "side"]) { T.rect(col, 0.08, 0.05, 0.84, 0.9, hx(hi)); T.rect(col, 0.08, 0.38, 0.84, 0.09, "#eef0e9"); T.rect(col, 0.08, 0.42, 0.84, 0.025, "#afb7bd"); }
-    T.poly("back", [[0.08, 0.52], [0.5, 0.8], [0.92, 0.52], [0.92, 0.64], [0.5, 0.92], [0.08, 0.64]], "#eef0e9");
-    T.rect("front", 0.47, 0.05, 0.06, 0.9, tone(hi, -0.3)); T.shade();
-    A.fill(hx(navy)); A.rect("front", 0, 0.3, 1, 0.09, "#eef0e9"); A.shade();
-    L.fill(hx((c && c.legs != null) ? c.legs : 0x24344d)); L.rect("side", 0.2, 0.35, 0.6, 0.2, tone(navy, -0.22)); L.shade();
-    return { torso: 1, arms: 1, legs: 1 };
+    const parts = workVest(P, { vest: hi, shirt: navy, legs: (c && c.legs != null) ? c.legs : 0x24344d, tape: TAPE, core: TAPE_CORE, backX: true });
+    P.L.rect("side", 0.2, 0.3, 0.6, 0.2, tone(navy, -0.22));                    // cargo pocket
+    return parts;
   };
 
+  // CABIN CREW — a fitted navy jacket closed to the waist over a white blouse
+  // V, the knotted scarf (round the neck on the collar band, its tail on the
+  // blouse), the wings pin on the left breast, pocket welts, cuff stripe.
   PAINT.cabincrew = function (P, c) {
     const navy = (c && c.torso != null) ? c.torso : 0x223552, scarf = (c && c.collar != null) ? c.collar : 0xb52d3c;
-    const T = P.T, A = P.A, L = P.L;
-    T.fill(hx(navy)); T.poly("front", [[0.28, 0], [0.5, 0.24], [0.72, 0]], "#eef0ec");
-    T.poly("front", [[0.3, 0], [0.44, 0], [0.57, 0.32], [0.49, 0.38]], hx(scarf));
-    T.rect("front", 0.13, 0.31, 0.2, 0.13, tone(navy, -0.18)); T.rect("front", 0.67, 0.31, 0.2, 0.13, tone(navy, -0.18));
-    T.rect("front", 0.66, 0.18, 0.16, 0.045, "#d5b24a"); T.shade();
-    A.fill(hx(navy)); A.rect("front", 0, 0.86, 1, 0.06, hx(scarf)); A.shade();
+    const T = P.T, A = P.A, L = P.L, hem = TORSO_ROW.hem;
+    T.fill(hx(navy));
+    T.poly("front", fpts([[-0.19, 0], [0.19, 0], [0, 0.3]]), "#eef0ec");             // the blouse V
+    T.poly("front", fpts([[0.02, 0], [0.1, 0], [0.13, 0.2], [0.07, 0.22]]), hx(scarf));   // the scarf's tail
+    T.poly("front", fpts([[-0.05, 0], [0.06, 0], [0.04, 0.06], [-0.03, 0.06]]), tone(scarf, -0.15));   // …its knot
+    for (let i = 0; i < 3; i++) T.dot("front", fx(0), 0.38 + i * 0.13, 0.013, "#d5b24a");
+    for (const s of [1, -1]) T.rect("front", fx(s > 0 ? 0.14 : -0.36), 0.6, 0.22, 0.014, tone(navy, -0.3));   // pocket welts
+    T.poly("front", fpts([[0.18, 0.2], [0.26, 0.19], [0.34, 0.2], [0.26, 0.215]]), "#d5b24a");                // the wings pin
+    hemBand(T, tone(navy, -0.12), hem, 0.02);
+    T.shade();
+    A.fill(hx(navy));
+    for (const col of ["front", "side", "back"]) A.rect(col, 0, 0.9, 1, 0.025, "#d5b24a");   // the cuff stripe
+    A.shade();
     L.fill(hx((c && c.legs != null) ? c.legs : 0x18243a)); L.shade();
-    return { torso: 1, arms: 1, legs: 1 };
+    return { torso: 1, arms: 1, legs: 1, fp: 1, neck: { fp: 1, band: scarf } };
   };
 
+  // BARTENDER — black shirt, a long bistro apron tied at the waist (on the
+  // torso below the tie line, the pelvis and the thigh fronts to the knee),
+  // a bar towel tucked at the right hip, sleeves rolled to the forearm.
   PAINT.bartender = function (P, c) {
     const black = (c && c.torso != null) ? c.torso : 0x24282d, cloth = (c && c.collar != null) ? c.collar : 0xd9d7cf;
-    const T = P.T, A = P.A, L = P.L;
-    T.fill(hx(black)); T.poly("front", [[0.38, 0], [0.5, 0.13], [0.62, 0]], hx(cloth));
-    for (const col of ["front", "back", "side"]) T.rect(col, 0, 0.55, 1, 0.45, "#15181d");
-    T.rect("front", 0.3, 0.68, 0.4, 0.22, tone(0x15181d, 0.2)); T.rect("front", 0.8, 0.56, 0.12, 0.36, hx(cloth)); T.shade();
-    A.fill(hx(black)); A.rect("front", 0, 0.62, 1, 0.06, hx(cloth)); A.shade();
-    L.fill(hx((c && c.legs != null) ? c.legs : 0x15181d)); L.shade();
-    return { torso: 1, arms: 1, legs: 1 };
+    const legHex = (c && c.legs != null) ? c.legs : 0x15181d, apron = tone(legHex, 0.14);
+    const T = P.T, A = P.A, L = P.L, tieY = TORSO_ROW.waist - 0.04;
+    T.fill(hx(black));
+    T.rect("front", fx(-0.008), 0.08, 0.016, tieY - 0.08, tone(black, 0.12));       // placket
+    T.rect("front", 0, tieY, 1, 1 - tieY, apron);
+    T.rect("side", 0, tieY, 1, 0.02, apron); T.rect("back", 0, tieY, 1, 0.02, apron);   // the ties round the waist
+    T.rect("back", 0.44, tieY - 0.01, 0.12, 0.04, apron);                               // knotted behind
+    T.rect("front", fx(-0.42), tieY, 0.1, 0.16, hx(cloth));                            // the towel at the right hip
+    T.shade();
+    A.fill(hx(black));
+    for (const col of ["front", "side", "back"]) A.rect(col, 0, 0.6, 1, 0.07, tone(black, 0.1));   // the rolled cuff
+    A.shade();
+    L.fill(hx(legHex));
+    L.rect("front", 0, 0, 1, 0.46, apron); L.rect("front", 0, 0.44, 1, 0.02, tone(legHex, -0.1));  // apron to the knee
+    L.shade();
+    return { torso: 1, arms: 1, legs: 1, fp: 1, neck: { fp: 1, band: tone2(black, 0.06), open: 1 } };
   };
 
+  // DRIVER — a chauffeur: pale shirt, dark waistcoat, dark tie, a badge on the
+  // left breast.
   PAINT.driver = function (P, c) {
     const shirt = (c && c.torso != null) ? c.torso : 0xc9d3dc, vest = (c && c.collar != null) ? c.collar : 0x27354a;
-    const T = P.T, A = P.A, L = P.L;
-    T.fill(hx(shirt)); T.poly("front", [[0.08, 0], [0.42, 0], [0.48, 0.25], [0.4, 1], [0.08, 1]], hx(vest));
-    T.poly("front", [[0.92, 0], [0.58, 0], [0.52, 0.25], [0.6, 1], [0.92, 1]], hx(vest));
-    T.rect("front", 0.47, 0, 0.06, 0.64, tone(vest, -0.2)); T.rect("front", 0.64, 0.17, 0.18, 0.045, "#d1b14d"); T.shade();
-    A.fill(hx(shirt)); A.rect("front", 0, 0.84, 1, 0.07, tone(shirt, -0.18)); A.shade();
+    const T = P.T, A = P.A, L = P.L, vc = hx(vest), hem = TORSO_ROW.hem + 0.06;
+    const tieHex = tone2(vest, -0.2);
+    T.fill(hx(shirt));
+    paintTie(T, tieHex, 0.36, 0.17);
+    for (const col of ["side", "back"]) T.rect(col, 0, 0.12, 1, hem - 0.12, vc);
+    for (const s of [1, -1]) T.poly("front", fpts([[s * 0.17, 0], [s * 0.5, 0], [s * 0.5, hem], [s * 0.1, hem], [s * 0.05, hem + 0.05], [0, hem], [0, 0.36]]), vc);
+    T.rect("front", fx(-0.004), 0.36, 0.008, hem - 0.36, tone(vest, -0.3));
+    for (let i = 0; i < 4; i++) T.dot("front", fx(0), 0.42 + i * (hem - 0.46) / 3, 0.012, tone(vest, 0.3));
+    T.rect("front", fx(0.18), 0.4, 0.12, 0.035, "#d1b14d");                         // the badge
+    T.shade();
+    A.fill(hx(shirt));
+    for (const col of ["front", "side", "back"]) A.rect(col, 0, 0.93, 1, 0.07, tone(shirt, -0.12));
+    A.shade();
     L.fill(hx((c && c.legs != null) ? c.legs : 0x202733)); L.shade();
-    return { torso: 1, arms: 1, legs: 1 };
+    return { torso: 1, arms: 1, legs: 1, fp: 1, neck: { tie: tieHex, fp: 1 } };
   };
+
 
   PAINT.housekeeping = function (P, c) {
     const teal = (c && c.torso != null) ? c.torso : 0x71939a, cream = (c && c.collar != null) ? c.collar : 0xe5e2d9;
-    const T = P.T, A = P.A, L = P.L;
-    T.fill(hx(teal)); T.poly("front", [[0.36, 0], [0.5, 0.16], [0.64, 0]], hx(cream));
-    T.rect("front", 0.18, 0.34, 0.64, 0.66, hx(cream)); T.rect("front", 0.18, 0.34, 0.64, 0.05, tone(cream, -0.18));
-    T.rect("front", 0.3, 0.65, 0.4, 0.2, tone(cream, -0.1)); T.shade();
-    A.fill(hx(teal)); A.rect("front", 0, 0.82, 1, 0.07, hx(cream)); A.shade();
-    L.fill(hx((c && c.legs != null) ? c.legs : 0x34434b)); L.shade();
-    return { torso: 1, arms: 1, legs: 1 };
+    const T = P.T, J = P.J, A = P.A, L = P.L, trou = (c && c.legs != null) ? c.legs : 0x34434b;
+    T.fill(hx(teal)); T.poly("front", [[0.36, 0], [0.5, 0.16], [0.64, 0]], hx(cream));   // the cream collar V
+    for (let y = 0.2; y < 0.34; y += 0.07) T.dot("front", 0.5, y, 0.018, tone(teal, -0.3));   // tunic buttons above the bib
+    trouserSeat(J, trou);
+    bibApron(T, J, cream, 0.34);
+    T.shade(); J.shade();
+    A.fill(hx(teal)); hemBand(A, hx(cream), 0.9, 0.05); limbHem(A, 0.95, teal); A.shade();   // cream-piped cuffs
+    L.fill(hx(trou)); L.rect("front", 0.49, 0, 0.02, 0.92, tone(trou, -0.14)); limbHem(L, 0.95, trou); L.shade();
+    return { torso: 1, arms: 1, legs: 1, seat: 1 };
   };
 
   PAINT.athletic = function (P, c) {
     const blue = (c && c.torso != null) ? c.torso : 0x315f9b, white = (c && c.collar != null) ? c.collar : 0xe6e7e3;
     const T = P.T, A = P.A, L = P.L;
-    T.fill(hx(blue)); T.rect("front", 0.48, 0, 0.04, 1, tone(blue, -0.32));
-    for (const col of ["front", "back", "side"]) T.rect(col, 0, 0.86, 1, 0.1, hx(white));
+    // warm-up jacket: zip to the hem, white chevron panels off the shoulders,
+    // a white rib hem ABOVE the tuck (it was at 0.86-0.96, inside the
+    // trousers). The piping was two stripes, one on the front face and one
+    // on the side face of the arm; it is one line down the side of the
+    // sleeve and the leg now, centred, like the tracksuit's.
+    T.fill(hx(blue)); T.rect("front", 0.485, 0, 0.03, TORSO_ROW.hem, tone(blue, -0.32));
+    hemBand(T, hx(white));
     T.poly("front", [[0.12, 0], [0.28, 0], [0.46, 0.48], [0.38, 0.55]], hx(white)); T.poly("front", [[0.88, 0], [0.72, 0], [0.54, 0.48], [0.62, 0.55]], hx(white)); T.shade();
-    A.fill(hx(blue)); A.rect("front", 0.08, 0, 0.1, 1, hx(white)); A.rect("side", 0.08, 0, 0.1, 1, hx(white)); A.shade();
-    L.fill(hx((c && c.legs != null) ? c.legs : 0x1f2936)); L.rect("side", 0.12, 0, 0.13, 1, hx(white)); L.shade();
+    A.fill(hx(blue)); A.rect("side", 0.4, 0, 0.2, 1, hx(white)); A.shade();
+    L.fill(hx((c && c.legs != null) ? c.legs : 0x1f2936)); L.rect("side", 0.4, 0, 0.2, 1, hx(white)); L.shade();
     return { torso: 1, arms: 1, legs: 1 };
   };
 
-  function raceWork(P, c, kind) {
-    const body = (c && c.torso != null) ? c.torso : 0x17253a, accent = (c && c.collar != null) ? c.collar : 0xc93632;
-    const T = P.T, A = P.A, L = P.L, hi = kind === "marshal" ? 0xf0e44c : 0xf1eee7;
-    T.fill(hx(body)); T.rect("front", 0.48, 0, 0.04, 1, tone(body, -0.35));
-    if (kind === "marshal") {
-      for (const col of ["front", "back", "side"]) { T.rect(col, 0.07, 0.08, 0.86, 0.84, hx(accent)); T.rect(col, 0.07, 0.38, 0.86, 0.1, hx(hi)); }
-      T.rect("front", 0.47, 0.08, 0.06, 0.84, tone(accent, -0.3));
-    } else {
-      for (const col of ["front", "back", "side"]) T.rect(col, 0, 0.28, 1, 0.16, hx(accent));
-      T.rect("front", 0.12, 0.12, 0.22, 0.07, hx(hi)); T.rect("front", 0.66, 0.12, 0.22, 0.07, hx(hi));
-      T.rect("front", 0, 0.76, 1, 0.08, "#11151b");
-    }
-    T.shade(); A.fill(hx(body)); A.rect("front", 0, 0.22, 1, 0.18, hx(accent)); A.shade();
-    L.fill(hx((c && c.legs != null) ? c.legs : body)); L.rect("side", 0.1, 0, 0.14, 1, hx(accent)); L.rect("front", 0, 0.9, 1, 0.1, "#11151b"); L.shade();
-    return { torso: 1, arms: 1, legs: 1 };
-  }
-  PAINT.pitcrew = function (P, c) { return raceWork(P, c, "pit"); };
-  PAINT.marshal = function (P, c) { return raceWork(P, c, "marshal"); };
-  PAINT.racer = function (P, c) { return raceWork(P, c, "racer"); };
+  // the pit crew and the driver wear one-piece fire suits (jumpsuit) with the
+  // team colour run down the side panels, shoulder to ankle; the driver's has
+  // the shoulder epaulettes a rescuer grabs him by
+  PAINT.pitcrew = function (P, c) {
+    return jumpsuit(P, (c && c.torso != null) ? c.torso : 0x17253a, { panel: (c && c.collar != null) ? c.collar : 0xc93632 });
+  };
+  PAINT.racer = function (P, c) {
+    const body = (c && c.torso != null) ? c.torso : 0xb52d32, accent = (c && c.collar != null) ? c.collar : 0xf1eee7;
+    const parts = jumpsuit(P, body, { panel: accent });
+    P.T.rect("front", 0.08, 0, 0.18, 0.08, hx(accent)); P.T.rect("front", 0.74, 0, 0.18, 0.08, hx(accent));   // epaulettes
+    P.T.rect("back", 0.08, 0, 0.18, 0.08, hx(accent)); P.T.rect("back", 0.74, 0, 0.18, 0.08, hx(accent));
+    return parts;
+  };
+  // the track marshal: an orange tabard with one yellow band over navy
+  PAINT.marshal = function (P, c) {
+    const band = (c && c.collar != null) ? hx(c.collar) : "#f0e44c";
+    const parts = workVest(P, {
+      vest: (c && c.torso != null) ? c.torso : 0xe36f22, shirt: (c && c.arms != null) ? c.arms : 0x26313e,
+      legs: (c && c.legs != null) ? c.legs : 0x26313e,
+    });
+    hemBand(P.T, band, 0.5, 0.1);
+    return parts;
+  };
 
   // DRESS — an A-line dress: fitted bodice, FLARED hem painted onto the LEG row
   // (the skirt sweeps out at the bottom). color via key/torso → many colors.
   PAINT.dress = function (P, c) {
     const body = (c && c.torso != null) ? c.torso : 0x8a2050, bc = hx(body);
-    const T = P.T, A = P.A, L = P.L, hi = tone(body, 0.14), lo = tone(body, -0.2);
+    const T = P.T, L = P.L, hi = tone(body, 0.14), lo = tone(body, -0.2);
     T.fill(bc);
-    T.poly("front", [[0.34, 0], [0.5, 0.18], [0.66, 0]], lo);      // scoop neckline
-    // WAIST SEAM at 0.66: the female rig's waist BOX starts at row y ~0.675
-    // (waistShare 0.325), so the bodice/skirt junction now lands on the body's
-    // actual narrowest point instead of floating up the ribcage at 0.5.
-    T.rect("front", 0.3, 0.66, 0.4, 0.04, lo);                    // waist seam (bodice meets skirt)
-    T.rect("side", 0, 0.66, 1, 0.04, lo); T.rect("back", 0, 0.66, 1, 0.04, lo);  // …and all the way round
-    T.rect("front", 0, 0.86, 1, 0.14, hi);                        // the skirt begins flaring (lighter sweep)
+    // a scoop deep enough to show BELOW the collar band (which wears its tone
+    // round the neck), so the neckline reads instead of hiding under the band
+    T.poly("front", [[0.33, 0], [0.5, 0.24], [0.67, 0]], lo);
+    // WAIST SEAM ON THE WAIST. It sat at 0.66 because that is where the
+    // female rig's waist BOX began — a mesh split, not anatomy: on the shaped
+    // body 0.66 is the lower ribcage, and the narrowest ring is ~0.79. The
+    // seam goes all the way round, just above the tuck, and the pelvis below
+    // it wears the top of the skirt (hips), so bodice meets skirt at the waist.
+    // (The old "skirt begins flaring" sweep at 0.86-1.0 was inside the pelvis.)
+    hemBand(T, lo, TORSO_ROW.waist, 0.03);
+    // two princess seams from the bust down to the waist: a fitted bodice
+    T.poly("front", [[0.3, 0.3], [0.32, 0.3], [0.37, TORSO_ROW.waist], [0.35, TORSO_ROW.waist]], lo);
+    T.poly("front", [[0.7, 0.3], [0.68, 0.3], [0.63, TORSO_ROW.waist], [0.65, TORSO_ROW.waist]], lo);
     T.shade();
-    A.fill(bc); A.rect("front", 0, 0.42, 1, 0.05, lo); A.rect("side", 0, 0.42, 1, 0.05, lo); A.shade(); // cap-sleeve cuff
+    // SLEEVELESS. The arm row was the dress colour to the wrist with a "cap
+    // sleeve cuff" two-thirds down the upper arm, i.e. a long sleeve with a
+    // stripe. The bare arm is the wearer's own skin, which the shared atlas
+    // cannot know, so the arms stay flat in it (applyClothes, `sleeves`).
     // the LEG row carries the A-line skirt: flared (wider light wedge low),
     // hem sweep, so the legs read as a skirt, not trousers.
     L.fill(bc);
@@ -1951,7 +2257,7 @@
       L.rect(col, 0, 0.92, 1, 0.06, lo);                          // hem band
     }
     L.shade();
-    return { torso: 1, arms: 1, legs: 1, hips: 1 };
+    return { torso: 1, legs: 1, hips: 1, sleeves: "none" };
   };
 
   // SUNDRESS — a light summer dress in a woven GINGHAM check.
@@ -1984,22 +2290,26 @@
     // thread the check is woven from, so the seven SUNDRESS_HUES pairs still
     // produce seven visibly different dresses off exactly the same records.
     const accent = (c && c.collar != null) ? c.collar : 0xd86a8a;
-    const T = P.T, A = P.A, L = P.L, ctx = P.ctx;
+    const T = P.T, L = P.L, ctx = P.ctx;
     const trim = tone(body, -0.22);
     T.fill(bc);
     if (ctx) patternRow(T, ctx, body, "gingham", accent);
-    T.poly("front", [[0.34, 0], [0.5, 0.16], [0.66, 0]], tone(body, -0.2)); // neckline
-    T.rect("front", 0.26, 0, 0.1, 0.16, bc); T.rect("front", 0.64, 0, 0.1, 0.16, bc); // straps gap
-    // the tie sits on the waist BOX seam (row y ~0.675), not mid-ribcage
-    T.rect("front", 0.3, 0.66, 0.4, 0.035, trim);                 // waist tie
-    T.rect("side", 0, 0.66, 1, 0.035, trim); T.rect("back", 0, 0.66, 1, 0.035, trim);
+    T.poly("front", [[0.34, 0], [0.5, 0.22], [0.66, 0]], tone(body, -0.2)); // neckline, deep enough to clear the collar band
+    // the tie sits ON THE WAIST (~0.77-0.79 on the shaped body), right above
+    // the tuck where the skirt (the pelvis, `hips`) takes over. It was at
+    // 0.66, the old waist BOX seam — which the shaped body puts on the ribs.
+    // (Two plain "strap" patches at the top broke the check for nothing and
+    // are gone: a SLEEVELESS dress's straps are its bare shoulders, below.)
+    hemBand(T, trim, TORSO_ROW.waist, 0.035);
     T.shade();
-    A.fill(bc); A.shade();                                        // plain shoulder/strap column, as before
+    // SLEEVELESS: the arm row was the dress fabric shoulder to wrist (a long-
+    // sleeved sundress). Bare arms are the wearer's own skin — flat, via
+    // applyClothes `sleeves` — never a guess painted into a shared atlas.
     L.fill(bc);
     if (ctx) patternRow(L, ctx, body, "gingham", accent);         // the skirt carries the same check
     for (const col of ["front", "back", "side"]) L.rect(col, 0, 0.92, 1, 0.05, tone(body, -0.2)); // hem
     L.shade();
-    return { torso: 1, arms: 1, legs: 1, hips: 1 };
+    return { torso: 1, legs: 1, hips: 1, sleeves: "none" };
   };
 
   // TRACKSUIT VARIANTS — color/stripe themes. PAINT.tracksuit already exists;
@@ -2008,8 +2318,8 @@
   PAINT.tracksuit2 = function (P, c) {                            // red w/ white stripes
     return PAINT.tracksuit(P, c && c.torso != null ? c : { torso: 0xb22a2a, legs: 0x161616 });
   };
-  PAINT.tracksuit3 = function (P, c) {                            // navy w/ gold stripes (re-tints the stripe via collar handled below)
-    return PAINT.tracksuit(P, c && c.torso != null ? c : { torso: 0x1c2440, legs: 0x14161c });
+  PAINT.tracksuit3 = function (P, c) {                            // navy w/ GOLD stripes (it said so and was white)
+    return PAINT.tracksuit(P, c && c.torso != null ? c : { torso: 0x1c2440, legs: 0x14161c, stripe: 0xd8b04a });
   };
 
   // ============================================================
@@ -2025,25 +2335,32 @@
     const body = (c && c.torso != null) ? c.torso : 0xd8dce4, bc = hx(body);
     const T = P.T, A = P.A;
     const lo = tone(body, -0.16), lo2 = tone(body, -0.3), hi = tone(body, 0.16);
-    const WAIST = 0.67;                              // the waist-box seam, in row coords
+    // THE WAIST IS THE WAIST: 0.67 was where the female rig's waist BOX began
+    // (a mesh split). On the shaped body that is the lower ribs; the darts
+    // now converge on the narrowest ring, just above the tuck.
+    const WAIST = TORSO_ROW.waist;
     T.fill(bc);
-    T.poly("front", [[0.37, 0], [0.5, 0.17], [0.63, 0]], lo2);       // open neckline
-    T.poly("front", [[0.3, 0], [0.43, 0], [0.47, 0.13]], lo);        // collar leaf L
-    T.poly("front", [[0.7, 0], [0.57, 0], [0.53, 0.13]], lo);        // collar leaf R
-    T.rect("front", 0.49, 0.15, 0.02, 0.66, lo);                     // button placket
-    for (let i = 0; i < 4; i++) T.dot("front", 0.5, 0.24 + i * 0.13, 0.012, hi);
+    // the open collar: the collar band covers the neck base to ~0.11, so the
+    // V and the collar leaves run far enough down to be SEEN below it (they
+    // ended at 0.13-0.17, a sliver under the band)
+    T.poly("front", [[0.37, 0], [0.5, 0.24], [0.63, 0]], lo2);       // open neckline
+    T.poly("front", [[0.28, 0.04], [0.42, 0.04], [0.47, 0.2], [0.4, 0.2]], lo);   // collar leaf L
+    T.poly("front", [[0.72, 0.04], [0.58, 0.04], [0.53, 0.2], [0.6, 0.2]], lo);   // collar leaf R
+    T.rect("front", 0.49, 0.22, 0.02, TORSO_ROW.hem - 0.22, lo);     // button placket
+    for (let i = 0; i < 4; i++) T.dot("front", 0.5, 0.3 + i * 0.13, 0.012, hi);
     // princess/waist darts: shallow wedges pinching in toward the waist line
     T.poly("front", [[0.28, 0.26], [0.33, 0.26], [0.35, WAIST], [0.31, WAIST]], lo);
     T.poly("front", [[0.72, 0.26], [0.67, 0.26], [0.65, WAIST], [0.69, WAIST]], lo);
     T.poly("back", [[0.3, 0.28], [0.35, 0.28], [0.36, WAIST], [0.32, WAIST]], lo);
     T.poly("back", [[0.7, 0.28], [0.65, 0.28], [0.64, WAIST], [0.68, WAIST]], lo);
     // the garment CONTINUES past the seam and tucks in — a single shadow band
-    // at the very hem, never a second belt line.
-    for (const col of ["front", "back", "side"]) T.rect(col, 0, 0.93, 1, 0.07, lo2);
+    // where it meets the waistband (was at 0.93, inside the trousers)
+    hemBand(T, lo2, 0.785, 0.05);
     T.shade();
+    // a long sleeve with a buttoned cuff. The "3/4 seam" at 0.52 was a line
+    // round the arm just above the elbow, which is no seam a blouse has.
     A.fill(bc);
-    A.rect("front", 0, 0.52, 1, 0.04, lo); A.rect("side", 0, 0.52, 1, 0.04, lo);   // 3/4 sleeve seam
-    A.rect("front", 0, 0.84, 1, 0.07, lo2); A.rect("side", 0, 0.84, 1, 0.07, lo2); // cuff
+    for (const col of ["front", "back", "side"]) A.rect(col, 0, 0.84, 1, 0.07, lo2); // cuff, all round
     A.shade();
     return { torso: 1, arms: 1 };                    // legs keep their flat jean color
   };
@@ -2066,12 +2383,14 @@
     T.fill(bc);
     T.rect("front", 0.3, 0, 0.4, 0.07, tc);                          // envelope neck binding
     T.rect("back", 0.3, 0, 0.4, 0.07, tc);
-    T.rect("front", 0.49, 0.07, 0.02, 0.62, lo);                     // snap placket
-    for (let i = 0; i < 4; i++) T.dot("front", 0.5, 0.16 + i * 0.15, 0.014, tc);
-    T.dot("front", 0.32, 0.34, 0.06, tc);                            // a little chest motif
-    T.dot("front", 0.32, 0.34, 0.03, "#fdfaf2");
-    T.rect("front", 0.2, 0.86, 0.6, 0.05, lo);                       // crotch snap row
-    for (const x of [0.3, 0.42, 0.54, 0.66]) T.dot("front", x, 0.885, 0.013, tc);
+    // A BABY'S COLLAR BAND COVERS THE TOP QUARTER of this row (to ~0.27) and
+    // the babygrow tucks into the pelvis from ~0.66, so the snaps run in the
+    // strip actually seen between them. (A "crotch snap row" at 0.86-0.91
+    // was painted inside the pelvis and never drawn once: deleted.)
+    T.rect("front", 0.49, 0.2, 0.02, 0.48, lo);                      // snap placket
+    for (let i = 0; i < 4; i++) T.dot("front", 0.5, 0.31 + i * 0.11, 0.014, tc);
+    T.dot("front", 0.32, 0.38, 0.06, tc);                            // a little chest motif
+    T.dot("front", 0.32, 0.38, 0.03, "#fdfaf2");
     T.shade();                                                        // NOTE: no hem — one piece
     A.fill(bc); A.rect("front", 0, 0.88, 1, 0.08, tc); A.rect("side", 0, 0.88, 1, 0.08, tc); A.shade();
     L.fill(bc);
@@ -2100,7 +2419,7 @@
     T.rect("front", 0.3, 0, 0.4, 0.06, sc);                          // collar band
     T.rect("front", 0.49, 0.06, 0.02, 0.86, lo);                     // placket
     for (let i = 0; i < 5; i++) T.dot("front", 0.5, 0.14 + i * 0.16, 0.012, "#f6f4ee");
-    T.rect("front", 0.14, 0.72, 0.2, 0.14, lo);                      // patch pocket
+    T.rect("front", 0.16, 0.34, 0.2, 0.13, lo);                      // chest patch pocket (was at 0.72-0.86: inside a child's pelvis)
     T.shade();
     A.fill(bc); stripes(A, 0.16, 0.06); A.rect("front", 0, 0.88, 1, 0.08, lo); A.rect("side", 0, 0.88, 1, 0.08, lo); A.shade();
     L.fill(bc); stripes(L, 0.16, 0.06); L.rect("front", 0, 0.9, 1, 0.08, lo); L.rect("side", 0, 0.9, 1, 0.08, lo); L.shade();
@@ -2154,7 +2473,7 @@
     T.rect("back", 0.34, 0, 0.32, 0.05, lo);
     T.dot("front", 0.5, 0.42, 0.16, hx(motif));                      // a big simple motif
     T.dot("front", 0.5, 0.42, 0.08, bc);
-    for (const col of ["front", "back", "side"]) T.rect(col, 0, 0.93, 1, 0.07, lo);   // hem (one line, at the bottom)
+    hemBand(T, lo, TORSO_ROW.kidHem, 0.05);                          // hem (one line, above a child's tuck)
     T.shade();
     A.fill(bc);
     shortSleeve(A, lo, sk);
@@ -2182,7 +2501,7 @@
     T.poly("front", [[0.64, 0], [0.53, 0.1], [0.56, 0.02]], tone(shirtHex, -0.2)); // shirt collar R
     T.rect("front", 0.47, 0.08, 0.06, 0.2, tone(knit, 0.35));        // a slip of school tie
     T.poly("front", [[0.32, 0], [0.5, 0.3], [0.68, 0], [0.72, 0], [0.5, 0.36], [0.28, 0]], lo); // V ribbing
-    for (const col of ["front", "back", "side"]) T.rect(col, 0, 0.92, 1, 0.08, lo);  // ribbed jumper hem
+    hemBand(T, lo, TORSO_ROW.kidHem, 0.06);                          // ribbed jumper hem, above a child's tuck
     T.shade();
     A.fill(kc); A.rect("front", 0, 0.88, 1, 0.08, lo); A.rect("side", 0, 0.88, 1, 0.08, lo); A.shade();
     L.fill(lc);
@@ -2207,7 +2526,7 @@
   PAINT.schoolgirl = function (P, c) { return Object.assign(PAINT.school(P, c, true), { hips: 1 }); };
   // kids' hoodie: the adult hoodie painter, cast in a child's colors. Nothing
   // about a hoodie changes with age — only the palette and the BODY do.
-  PAINT.kidhoodie = function (P, c) { return PAINT.hoodie(P, c); };
+  PAINT.kidhoodie = function (P, c) { return PAINT.hoodie(P, Object.assign({}, c, { kid: 1 })); };   // …hemmed above a child's tuck
 
   // PINAFORE — a little girl's sundress/pinafore: shoulder straps over a tee,
   // a gathered waist and a flared skirt to the knee, bare shins below.
@@ -2224,7 +2543,7 @@
     T.rect("front", 0.26, 0.4, 0.48, 0.6, bc);                       // the pinafore bib
     T.rect("front", 0.34, 0.5, 0.32, 0.14, hi);                      // a little pocket
     T.rect("side", 0, 0.44, 1, 0.56, bc); T.rect("back", 0, 0.44, 1, 0.56, bc);
-    for (const col of ["front", "back", "side"]) T.rect(col, 0, 0.9, 1, 0.05, lo);   // gathered waist tie
+    hemBand(T, lo, TORSO_ROW.kidHem, 0.05);                          // gathered waist tie, above a child's tuck
     T.shade();
     A.fill(tc);
     shortSleeve(A, tone(tee, -0.2), sk);
@@ -2341,6 +2660,7 @@
       }
       ctx.closePath(); ctx.fill();
     }
+    if (neck && neck.fp) { yokeTailored(ctx, R, Q, neckHex, neck); return cv; }
     const hasNeck = !!(neck && (neck.tie != null || neck.bow != null));
     const bc = hx(bodyHex);
     ctx.fillStyle = bc; ctx.fillRect(0, 0, YW, YH);
@@ -2407,6 +2727,48 @@
     }
     return cv;
   }
+  /* THE TAILORED COLLAR BAND (parts.fp): the band round the neck base is the
+     SHIRT collar (or the garment's own, neck.band), laid out in the same
+     body units as the shirt and jacket fronts (fpYokePainter), magnified
+     YOKE_FP_K x so the band's front, only ~a third of a chest wide, spends
+     the whole 48 px column: the knot is 3.5 cm at its base to meet the blade
+     on the chest exactly, 5.5 cm across the top, dimpled, with the collar
+     points' edges running down and out from beside it. The jacket's own
+     collar hides the band's sides and back; they wear the band colour. */
+  const YOKE_FP_K = 2.5;
+  function yokeTailored(ctx, R, Q, neckHex, neck) {
+    const band = neck.band != null ? neck.band : neckHex, bc = hx(band);
+    const F = (pts) => pts.map((p) => [0.5 + p[0] * YOKE_FP_K, p[1]]);
+    const FM = (pts) => pts.map((p) => [0.5 - p[0] * YOKE_FP_K, p[1]]);
+    ctx.fillStyle = bc; ctx.fillRect(0, 0, YW, YH);
+    R("cap", 0, 0, 1, 1, tone(band, -0.3));                         // the inside of the collar, from above
+    for (const col of ["front", "side", "back"]) R(col, 0, 0, 1, 0.1, tone(band, 0.1));   // the fold
+    if (neck.tie != null || neck.bow != null || neck.collar) {
+      // the collar points: stand darker outside their edges, leaf lighter inside
+      const kt = 0.052, kb = 0.032;
+      const edge = [[kt, 0.1], [kt + 0.012, 0.1], [0.172, 1], [0.158, 1]];
+      const stand = [[kt + 0.012, 0.1], [0.5, 0.1], [0.5, 1], [0.172, 1]];
+      Q("front", F(stand), tone(band, -0.06)); Q("front", FM(stand), tone(band, -0.06));
+      Q("front", F(edge), tone(band, -0.2)); Q("front", FM(edge), tone(band, -0.2));
+      if (neck.tie != null) {
+        const t = neck.tie;
+        Q("front", F([[-kt, 0.1], [kt, 0.1], [kb, 1], [-kb, 1]]), tone(t, -0.16));
+        Q("front", F([[-kt + 0.006, 0.1], [kt - 0.006, 0.1], [kt - 0.01, 0.2], [-kt + 0.01, 0.2]]), tone(t, 0.02));   // the top fold
+        Q("front", F([[-0.005, 0.72], [0.005, 0.72], [0.004, 1], [-0.004, 1]]), tone(t, -0.45));                      // the dimple
+      } else if (neck.bow == null) {                                // an open collar: the top button undone
+        Q("front", F([[-kt, 0.1], [kt, 0.1], [0, 1]]), tone(band, -0.3));
+      } else {
+        const b = neck.bow;
+        // the top half of the bow (paintBow puts the rest on the chest below)
+        const wing = [[0.13, 0.22], [0.02, 0.5], [0.02, 1], [0.13, 1]];
+        Q("front", F(wing), hx(b)); Q("front", FM(wing), hx(b));
+        Q("front", F([[-0.024, 0.45], [0.024, 0.45], [0.024, 1], [-0.024, 1]]), tone(b, 0.2));
+      }
+    } else if (neck.open) {
+      Q("front", F([[-0.075, 0], [0.075, 0], [0, 0.95]]), tone(band, -0.32));   // the open neck
+    }
+  }
+
   // ONE UV-remapped box per yoke SIZE (adult male / female / the child bands —
   // a handful, ever), same shape as clothGeom's cache.
   const yokeGeoms = {};
@@ -2493,18 +2855,7 @@
   CBZ.citySuitStyles = SUIT_STYLES;                 // outfits.js reads names/indices
 
   // resolve an outfit record/id to a cache key (null = no painted look)
-  function nearestSuitStyle(hex) {
-    let best = 0, bd = Infinity;
-    for (let i = 0; i < SUIT_STYLES.length; i++) {
-      const st = SUIT_STYLES[i];
-      if (st.tux || st.vest || st.db || (st.pattern && st.pattern !== "solid")) continue;
-      const a = st.body | 0;
-      const dr = (a >> 16 & 255) - (hex >> 16 & 255), dg = (a >> 8 & 255) - (hex >> 8 & 255), db = (a & 255) - (hex & 255);
-      const d = dr * dr + dg * dg + db * db;
-      if (d < bd) { bd = d; best = i; }
-    }
-    return best;
-  }
+
   function keyOf(rec, ch) {
     if (!rec) return null;
     const id = rec.id || (typeof rec === "string" ? rec : null);
@@ -2547,6 +2898,8 @@
       // of the key. Ten heritages x a few sets — still a handful of atlases.
       return id + "|" + (c.torso != null ? c.torso | 0 : 0) + "|" + sk + "|" + (ch && ch.ink ? ch.ink : "");
     }
+    // a closet recipe (cityApplyComposite): one atlas per recipe worn
+    if (id === "comp") return "comp|" + COMP_FIELDS.map((k) => (c[k] != null ? c[k] | 0 : -1)).join("|");
     if (PAINT[id]) return id;
     // …and anything with no painter at all keeps the flat-colour path in
     // outfits.js recolorRig. (leather / designer / tactical used to land here —
@@ -2667,7 +3020,6 @@
       parts = st.tux ? PAINT.tuxedo(P, c, st) : PAINT.suit(P, c, st);
     }
     else if (kind === "basics") parts = PAINT.basics(P, { torso: key.split("|")[1] | 0 });
-    else if (kind === "hivis") parts = PAINT.hivis(P, { torso: key.split("|")[1] | 0, legs: c.legs, arms: c.arms });
     else if (kind === "construction") parts = PAINT.construction(P, { torso: key.split("|")[1] | 0, collar: c.collar, legs: c.legs, arms: c.arms });
     else if (kind === "gang") { const seg = key.split("|"); parts = PAINT.gang(P, { torso: seg[1] | 0, collar: seg[2] | 0, legs: c.legs }); }
     // the WEARER's skin tone isn't in rec.colors (it comes off the rig), so it
@@ -2713,7 +3065,11 @@
     if (neckHex == null) neckHex = bodyHex;
     set.bodyHex = bodyHex; set.neckHex = neckHex;
     if (yokePaint()) {
-      const cv2 = yokeCanvas(bodyHex, neckHex, !!parts.jacket && !YOKE_NO_LAPEL[kind], neck);
+      // parts.yoke: the painter NAMES the collar's cloth when the modal body
+      // sample would be the wrong layer (a vest's collar is the shirt under it,
+      // a tank has no collar: the band is bare skin)
+      const yokeHex = parts.yoke != null ? parts.yoke : bodyHex;
+      const cv2 = yokeCanvas(yokeHex, neckHex, !!parts.jacket && !YOKE_NO_LAPEL[kind], neck);
       if (cv2) {
         const yt = new THREE.CanvasTexture(cv2);
         yt.magFilter = THREE.LinearFilter;
@@ -2732,7 +3088,7 @@
         const ym = new THREE.MeshLambertMaterial({ map: yt });
         ym._shared = true;
         ym._cbzClothKey = key + "~yoke";
-        set.yoke = { mat: ym, tex: yt, hex: bodyHex };
+        set.yoke = { mat: ym, tex: yt, hex: yokeHex };
         set.partsY = Object.assign({}, parts, { collar: 1 });
       }
     }
@@ -2863,25 +3219,150 @@
     };
     return p;
   }
+  /* ---- TAILORING: the FRONT laid out in BODY units ------------------------
+     A torso part's front face maps u ACROSS ITS OWN RING, and on the shaped
+     body the ring width changes by 2.5x between the neck and the chest (the
+     trapezius rings run from the collar out to the shoulder at almost the
+     same height). A lapel painted "12% across the face" was 12% of the neck
+     at the top and 12% of the chest lower down, and the whole shirt collar +
+     tie knot sat behind a 6 cm slit in the jacket's stand collar. A garment
+     that declares parts.fp gets its FRONT column addressed by the vertex's
+     real body x instead: atlas u = 0.5 + x / (2 XR), XR = the jacket's front
+     half-width at the chest line (0.8 (W + the shell offset)), so the front
+     of the torso, the jacket shell and the collar band all read ONE
+     front-projected layout in the same units, scaled to THIS body (a woman's,
+     a child's, a heavy man's chest), and a V cut in it is the V the camera
+     sees. Rows (v) stay the box span, whose landmarks measure the same on
+     every profile (TAILOR below). Side/back/cap columns are untouched. One
+     painter per (row, band, XR): the baked geometry is already one per body
+     shape per painter, so the crowd pools do not grow. */
+  function tailorXR(ch) {
+    const S = ch && ch.torsoShape;
+    return S && S.W > 0 ? 0.8 * (S.W + 0.03 * (S.vs || 1)) : 0;
+  }
+  const fpPainters = {};
+  function fpPainter(part, band, xr) {
+    let b0 = band ? band[0] : 0, b1 = band ? band[1] : 1;
+    if (!(b0 >= 0) || !(b1 > b0)) { b0 = 0; b1 = 1; }
+    const key = part + "|" + b0.toFixed(3) + "," + b1.toFixed(3) + "|" + xr.toFixed(4);
+    let p = fpPainters[key];
+    if (p) return p;
+    const row = ROWS[part === "jacket" ? "jacket" : part] || ROWS.torso, ry0 = row[0], ry1 = row[1];
+    p = fpPainters[key] = {
+      key: "cloth-fp:" + key,
+      fn: function (face, u, v, x) {
+        if (face === "front" && x != null) u = Math.min(0.996, Math.max(0.004, 0.5 + x / (2 * xr)));
+        const col = COLS[face] || COLS.side, vv = b0 + v * (b1 - b0);
+        return [(col[0] + u * (col[1] - col[0])) / W, 1 - (ry1 - vv * (ry1 - ry0)) / H];
+      },
+    };
+    return p;
+  }
+  // …and the collar band (the yoke atlas) in the same front units, magnified
+  // YOKE_FP_K so the narrow band front spends its whole column (yokeTailored)
+  const fpYokePainters = {};
+  function fpYokePainter(xr) {
+    const key = xr.toFixed(4);
+    let p = fpYokePainters[key];
+    if (p) return p;
+    p = fpYokePainters[key] = {
+      key: "yoke-fp:" + key,
+      fn: function (face, u, v, x) {
+        if (face === "front" && x != null) u = Math.min(0.996, Math.max(0.004, 0.5 + YOKE_FP_K * x / (2 * xr)));
+        const col = YCOLS[face] || YCOLS.side;
+        return [(col[0] + u * (col[1] - col[0])) / YW, v];
+      },
+    };
+    return p;
+  }
+
   // a SHAPED body part: a limb loft or a torso part (entities/character.js
   // TORSO block) — both bake the garment row onto their own surface
   function shaped(mesh) { return !!(mesh && mesh.userData && (mesh.userData.limb || mesh.userData.torsoPart)); }
   // the pelvis wears the top sliver of the leg row (where the skirt starts)
   const HIPS_PAINTER = limbPainter("leg", [0.94, 0.995]);
-  function dressHips(list, m) {
+  /* THE SEAT. A garment that declares `seat` has a real pelvis to paint (a
+     one-piece's fly and seat pockets, an apron's skirt over the lap), and the
+     leg row's 6% sliver gives the pelvis ~2 texels of height: colour only. A
+     garment with no jacket shell has the whole JACKET row free, so its pelvis
+     wears that row instead, full height: row y 0 = the waistband (pTop), 0.40
+     = 5 cm above the hip joint, 0.72 = the fullest point of the seat, 0.85+ =
+     the crotch (entities/character.js TORSO block, pelvis box v span; the same
+     fractions on every profile and age). One painter, one baked pelvis per
+     body shape per atlas, shared like the legs. */
+  const SEAT_PAINTER = limbPainter("jacket", null);
+  /* THE SHARED PELVIS. A pelvis baked against an outfit's own atlas is one
+     crowd pool per (body shape x outfit) — pedinstance keys pools on geometry
+     + map, never colour — and dressing every suit's and every jumpsuit's
+     pelvis that way pushed the crowd to its 1024-pool cap (half the city
+     drew itself unpooled). Their pelvis detail is all ONE cloth in darker
+     tones, so it is painted ONCE, in greys, on ONE shared mask atlas, and the
+     garment's colour rides the material colour, which the instancer carries
+     per instance: one pool per body shape per painter, whatever the outfit.
+       jacket rows — THE SEAT's trousers (fly, slash and seat pockets, seams,
+                     waistband), ring-relative (SEAT_PAINTER): jumpsuits;
+       torso rows tBelt..1 — a tailored jacket's skirt over the pelvis in body
+                     units (fpPainter): the quarters open over the fly and the
+                     belt, the vent behind.
+     A mask value v darkens exactly like tone(hex, v - 1). */
+  let pelvisMaskTex;
+  const pelvisMats = {};
+  function pelvisMask() {
+    if (pelvisMaskTex !== undefined) return pelvisMaskTex;
+    if (typeof document === "undefined" || !document.createElement) return (pelvisMaskTex = null);
+    const cv = document.createElement("canvas");
+    cv.width = W; cv.height = H;
+    const ctx = cv.getContext("2d");
+    if (!ctx) return (pelvisMaskTex = null);
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
+    const g = (v) => { const n = Math.round(255 * v); return "rgb(" + n + "," + n + "," + n + ")"; };
+    const J = rowPainter(ctx, "jacket");
+    J.rect("front", 0.49, 0, 0.02, 0.62, g(0.7));                                  // fly
+    J.poly("front", [[0.04, 0.04], [0.1, 0.04], [0.22, 0.4], [0.16, 0.4]], g(0.76));   // slash pockets
+    J.poly("front", [[0.96, 0.04], [0.9, 0.04], [0.78, 0.4], [0.84, 0.4]], g(0.76));
+    J.rect("back", 0.12, 0.1, 0.28, 0.34, g(0.9)); J.rect("back", 0.6, 0.1, 0.28, 0.34, g(0.9));   // seat pockets
+    J.rect("back", 0.12, 0.1, 0.28, 0.04, g(0.78)); J.rect("back", 0.6, 0.1, 0.28, 0.04, g(0.78));
+    J.rect("back", 0.49, 0, 0.02, 1, g(0.78));                                     // centre-back seam
+    J.rect("side", 0.48, 0, 0.04, 1, g(0.78));
+    hemBand(J, g(0.84), 0, 0.04);                                                   // waistband
+    const T = rowPainter(ctx, "torso"), y0 = TAILOR.tBelt;
+    T.rect("back", 0.494, y0 + 0.04, 0.012, 1 - y0 - 0.04, g(0.7));               // the vent
+    T.poly("front", fpts([[-0.05, y0], [0.05, y0], [0.1, 1], [-0.1, 1]]), g(0.82));   // the trousers between the quarters
+    T.rect("front", fx(-0.004), y0, 0.008, 1 - y0, g(0.6));                         // the fly
+    T.rect("front", fx(-0.06), y0, 0.12, 0.03, g(0.3));                             // the belt (or a waistband)
+    T.rect("front", fx(-0.02), y0 + 0.006, 0.04, 0.018, g(0.75));
+    const tex = new THREE.CanvasTexture(cv);
+    tex.magFilter = THREE.LinearFilter;
+    tex._shared = true;
+    return (pelvisMaskTex = tex);
+  }
+  function pelvisMat(hex) {
+    const key = hex | 0;
+    let m = pelvisMats[key];
+    if (m && clothMatOk(m)) return m;
+    const tex = pelvisMask();
+    if (!tex) return null;
+    m = new THREE.MeshLambertMaterial({ map: tex, color: key });
+    m._shared = true;
+    m._cbzClothKey = "pelvis~" + key;
+    return (pelvisMats[key] = m);
+  }
+
+  function dressHips(list, m, painter) {
     if (!list || !m || !CBZ.humanLimbGeometry) return;
     for (let i = 0; i < list.length; i++) {
       const mesh = list[i];
       if (!mesh || !shaped(mesh)) continue;          // a stub box pelvis keeps its flat tint
       if (!mesh.userData._cbzFlat) mesh.userData._cbzFlat = { g: mesh.geometry, m: mesh.material };
-      mesh.geometry = CBZ.humanLimbGeometry(mesh, HIPS_PAINTER);
+      mesh.geometry = CBZ.humanLimbGeometry(mesh, painter || HIPS_PAINTER);
       mesh.material = m;
       mesh.userData._cbzPart = "hips";
     }
   }
-  function limbDressGeom(mesh, part) {
+  function limbDressGeom(mesh, part, xr) {
     if (!shaped(mesh) || !CBZ.humanLimbGeometry) return null;
-    return CBZ.humanLimbGeometry(mesh, limbPainter(part, mesh.userData.clothBand));
+    const band = mesh.userData.clothBand;
+    return CBZ.humanLimbGeometry(mesh, xr > 0 && mesh.userData.torsoPart ? fpPainter(part, band, xr) : limbPainter(part, band));
   }
 
   // ============================================================
@@ -2889,7 +3370,7 @@
   //  flat geometry+material is saved ONCE per mesh and restored on strip,
   //  so the jail/survival look survives any number of city outfit changes.
   // ============================================================
-  function dress(list, part, m) {
+  function dress(list, part, m, xr) {
     if (!list) return;
     if (outfitGuarantee() && !m) return;             // never hand a mesh a material it can't draw
     for (let i = 0; i < list.length; i++) {
@@ -2897,8 +3378,8 @@
       if (!mesh) continue;
       if (!mesh.userData._cbzFlat) mesh.userData._cbzFlat = { g: mesh.geometry, m: mesh.material };
       // split-limb segments carry their own dims + row band (character.js tags);
-      // a lofted limb bakes the same row onto its own shape
-      mesh.geometry = limbDressGeom(mesh, part) || clothGeom(part, mesh.userData.clothDims, mesh.userData.clothBand);
+      // a lofted limb bakes the same row onto its own shape (xr: TAILORING)
+      mesh.geometry = limbDressGeom(mesh, part, xr) || clothGeom(part, mesh.userData.clothDims, mesh.userData.clothBand);
       mesh.material = m;
       mesh.userData._cbzPart = part;                 // "this mesh is wearing painted cloth" (audit read)
     }
@@ -2907,18 +3388,25 @@
   // (restore() puts _cbzFlat back and clears _cbzPart), but the geometry comes
   // from the mesh's OWN box — character.js clamps collarW/collarD per profile,
   // so the size is read off the rig instead of copied here and left to drift.
-  function dressYoke(list, m) {
+  function dressYoke(list, m, xr) {
     if (!list || !list.length || !m) return false;
     let any = false;
     for (let i = 0; i < list.length; i++) {
       const mesh = list[i];
       if (!mesh) continue;
+      // tailored: the band's front in body units, but scaled off the NECK (the
+      // band is the neck's part, shared by every physique of a head form —
+      // keying it on the chest would split one band geometry per physique and
+      // one crowd pool with it). An average chest is 2.53 neck radii wide, so
+      // the knot still meets the blade within a few percent on any build.
+      const nS = mesh.userData.torsoPart && mesh.userData.torsoPart.S;
+      const painter = xr > 0 ? fpYokePainter(nS && nS.nRx > 0 ? 2.53 * nS.nRx : xr) : YOKE_PAINTER;
       const b = boxOf(mesh);
       if (!b) continue;                              // stub rig / no box params → leave it flat
       if (!mesh.userData._cbzFlat) mesh.userData._cbzFlat = { g: mesh.geometry, m: mesh.material };
       // the COLLAR BAND (character.js TORSO block) wears the same four columns
       // round the neck: the knot lands at the throat, the collar stand behind
-      mesh.geometry = (mesh.userData.torsoPart && CBZ.humanLimbGeometry && CBZ.humanLimbGeometry(mesh, YOKE_PAINTER)) || yokeGeom([b.w, b.h, b.d]);
+      mesh.geometry = (mesh.userData.torsoPart && CBZ.humanLimbGeometry && CBZ.humanLimbGeometry(mesh, painter)) || yokeGeom([b.w, b.h, b.d]);
       mesh.material = m;
       mesh.userData._cbzPart = "yoke";
       any = true;
@@ -2981,6 +3469,33 @@
     return c;
   }
 
+  /* FLAT SLEEVES — a painter that returns `sleeves` ("short" | "none") instead
+     of `arms`. A tee or a sleeveless dress shows the WEARER's skin below the
+     sleeve, and a shared atlas cannot know it (wifebeater/kidtee key their
+     atlas on skin for that; a dress in eight colours x every skin tone would
+     be dozens of atlases and crowd pools). The flat arm already knows how:
+     character.js cuts a flat upper arm at its sleeve line and hangs a bare
+     piece below it wearing the FOREARM's material. So: sleeve piece = the
+     garment's own painted colour ("none": skin), forearm = this rig's skin.
+     Shared cmat materials, pooled by the crowd instancer like any flat limb.
+     outfits.js recolorRig leaves arms alone when `sleeves` is declared. */
+  function rigSkin(ch) {
+    const h = ch.skinSlots && ch.skinSlots.hands && ch.skinSlots.hands[0];
+    const m = h && h.material;
+    // the hands ARE the visible skin (crowd promotion repaints them with the
+    // imposter's tone, which is not ch.skinTone) — unless gloved
+    if (ch._gloved == null && m && !m.map && m.color && m.color.getHex) return m.color.getHex();
+    return ch.skinTone != null ? ch.skinTone : 0xcf9a72;
+  }
+  function flatSleeves(ch, kind, hex) {
+    const s = ch.skinSlots, skin = rigSkin(ch);
+    const sleeve = kind === "none" || hex == null ? skin : hex;
+    const put = function (list, c) {
+      if (list) for (let i = 0; i < list.length; i++) { const m = list[i]; if (m && !m.userData._cbzPart) m.material = cmat(c); }
+    };
+    put(s.arms, sleeve); put(s.armsLower, skin);
+  }
+
   function applyClothes(ch, rec, opts) {
     if (!ch || !ch.skinSlots) return null;
     fitTorso(ch);                                    // chest+waist → ONE garment column
@@ -2992,6 +3507,7 @@
         restore(s.torso); restore(s.arms); restore(s.legs); restore(s.pelvis);
         restore(s.armsLower); restore(s.legsLower); restore(s.collar);
         if (ch._jacketMesh) ch._jacketMesh.visible = false;
+        if (CBZ.humanSeatBadge && s.badge && s.badge.length) CBZ.humanSeatBadge(ch, 0);   // off the shell, back onto the shirt
         ch._clothesKey = null;
         // …and the MATERIAL memo with it. Behaviourally a no-op today (the
         // "already wearing it" early-out below needs BOTH to match and the key
@@ -3007,9 +3523,10 @@
     const outParts = yokeOn ? set.partsY : set.parts;
     if (ch._clothesKey === key && ch._clothesMat === m) return outParts;    // already wearing it
     const s = ch.skinSlots;
-    dress(s.torso, "torso", m);
+    const xr = set.parts.fp ? tailorXR(ch) : 0;      // TAILORING: front laid out in body units
+    dress(s.torso, "torso", m, xr);
     if (set.parts.arms) { dress(s.arms, "arm", m); dress(s.armsLower, "arm", m); }
-    else { restore(s.arms); restore(s.armsLower); }
+    else { restore(s.arms); restore(s.armsLower); if (set.parts.sleeves) flatSleeves(ch, set.parts.sleeves, set.bodyHex); }
     if (set.parts.legs) { dress(s.legs, "leg", m); dress(s.legsLower, "leg", m); }
     else { restore(s.legs); restore(s.legsLower); }
     // THE HIPS WEAR THE SKIRT. A dress / one-piece / derived-shorts garment
@@ -3019,7 +3536,16 @@
     // the pelvis with the TOP of its own leg row, on its own atlas material:
     // no new material, no per-colour geometry (one painted pelvis per body
     // form, shared like the legs), so the crowd pools stay per atlas.
-    if (set.parts.hips && set.parts.legs) dressHips(s.pelvis, m);
+    // A TAILORED JACKET'S SKIRT (formalTorso, THE SKIRT) and a SEAT that names
+    // its colour wear THE SHARED PELVIS: a grey mask tinted the garment's colour,
+    // one crowd pool per body shape per painter. A seat without a colour (an
+    // apron over the lap) still wears its own atlas's jacket row.
+    const pv = xr > 0 && set.parts.skirt ? set.parts.skirt : (set.parts.seat && set.parts.seat.hex != null ? set.parts.seat : null);
+    const pm = pv ? pelvisMat(pv.hex) : null;
+    if (pm) dressHips(s.pelvis, (opts && opts.iso) ? isoMat(ch, "pelvis~" + (pv.hex | 0), pm) : pm,
+      pv === set.parts.skirt ? fpPainter("torso", [0, 1 - TAILOR.tBelt], xr) : SEAT_PAINTER);
+    else if (set.parts.seat && !set.parts.jacket) dressHips(s.pelvis, m, SEAT_PAINTER);
+    else if (set.parts.hips && set.parts.legs) dressHips(s.pelvis, m);
     else restore(s.pelvis);
     // ---- the JACKET SHELL (tux/suit/police): silhouette via one inflated
     //      torso shell, structure via the alpha-cut open-jacket paint ----
@@ -3045,16 +3571,22 @@
         y0: chestM.position.y + jf.y - jf.dims[1] / 2, off: 0.03 * ((ch.profile && ch.profile.torsoH) || 0.95) / 0.95,
         box: { w: jf.dims[0], h: jf.dims[1], d: jf.dims[2], y: chestM.position.y + jf.y }, origin: chestM.position.y + jf.y,
       }) : null;
-      if (spec) { jm.userData.torsoPart = spec; jm.geometry = CBZ.humanLimbGeometry(jm, limbPainter("jacket", null)); }
+      if (spec) { jm.userData.torsoPart = spec; jm.geometry = CBZ.humanLimbGeometry(jm, xr > 0 ? fpPainter("jacket", null, xr) : limbPainter("jacket", null)); }
       else if (jf) jm.geometry = clothGeom("jacket", jf.dims);
       jm.material = m;
       jm.visible = true;
     } else if (ch._jacketMesh) ch._jacketMesh.visible = false;
+    // a c.badge (character.js) sits on the OUTERMOST layer: on the shell when
+    // one is on (its clearance), on the shirt when not
+    if (CBZ.humanSeatBadge && s.badge && s.badge.length) {
+      const P0 = ch.profile;
+      CBZ.humanSeatBadge(ch, set.parts.jacket ? 0.03 * ((P0 && P0.torsoH) || 0.95) / 0.95 + 0.006 : 0);
+    }
     // ---- the SHOULDER YOKE wears the garment too (see THE SHOULDER YOKE) ----
     // Dressed LAST so a look with no yoke atlas — or the flag turned off —
     // falls back through the ordinary strip path and outfits.js flat-tints it.
     let yoked = false;
-    if (yokeOn) yoked = dressYoke(s.collar, (opts && opts.iso) ? isoMat(ch, key + "~yoke", set.yoke.mat) : set.yoke.mat);
+    if (yokeOn) yoked = dressYoke(s.collar, (opts && opts.iso) ? isoMat(ch, key + "~yoke", set.yoke.mat) : set.yoke.mat, xr);
     if (!yoked) restore(s.collar);
     ch._clothesKey = key;
     ch._clothesMat = m;
@@ -3224,150 +3756,108 @@
     white: 0xf2f2f2, black: 0x141519, red: 0x8a1f24, silver: 0xb9bdc4,
     royal: 0x274690, pink: 0xd98aa6, tan: 0xb8a070,
   };
-  // tiny helper to build a thin box mesh in a group with a shared/cloned mat
-  function piece(group, w, h, d, x, y, z, hex, opts) {
-    const m = new THREE.Mesh(CBZ.boxGeom ? CBZ.boxGeom(w, h, d) : new THREE.BoxGeometry(w, h, d), cmat(hex));
-    m.position.set(x, y, z);
-    m.castShadow = false; m.receiveShadow = false;
-    if (opts && opts.rotZ) m.rotation.z = opts.rotZ;
-    group.add(m);
-    return m;
-  }
-
-  // Neckties are a silhouette, not a painted stripe or a stack of cuboids.
-  // Build the knot/blade as shallow cloth prisms: they still match the game's
-  // low-poly language, but have the real wide-at-the-bottom blade and pointed
-  // tip. Geometries are shared by every outfit/rack preview.
-  function clothPrism(points, depth) {
-    const s = new THREE.Shape();
-    s.moveTo(points[0][0], points[0][1]);
-    for (let i = 1; i < points.length; i++) s.lineTo(points[i][0], points[i][1]);
-    s.closePath();
-    const g = new THREE.ExtrudeGeometry(s, {
-      depth: depth, steps: 1,
-      bevelEnabled: true, bevelSegments: 1,
-      bevelSize: 0.006, bevelThickness: 0.006,
-    });
-    g.translate(0, 0, -depth / 2);
-    g.computeVertexNormals();
-    g._shared = true;
-    return g;
-  }
-  const TIE_KNOT_GEO = clothPrism([
-    [-0.062, 0.46], [0.062, 0.46], [0.043, 0.34], [-0.043, 0.34],
-  ], 0.04);
-  const TIE_BLADE_GEO = clothPrism([
-    [-0.034, 0.34], [0.034, 0.34], [0.062, -0.23], [0, -0.35], [-0.062, -0.23],
-  ], 0.035);
-  const BOW_GEO = clothPrism([
-    [0, 0.395], [-0.075, 0.35], [-0.17, 0.365], [-0.18, 0.47],
-    [-0.075, 0.49], [0, 0.445], [0.075, 0.49], [0.18, 0.47],
-    [0.17, 0.365], [0.075, 0.35],
-  ], 0.045);
-  const BOW_KNOT_GEO = clothPrism([
-    [-0.045, 0.465], [0.045, 0.465], [0.052, 0.375], [-0.052, 0.375],
-  ], 0.052);
-  function shapedPiece(group, geo, z, hex, name) {
-    const m = new THREE.Mesh(geo, cmat(hex));
-    m.position.z = z;
-    m.castShadow = false; m.receiveShadow = false;
-    m.name = name || "neckwear";
-    m.userData.clothingPart = name || "neckwear";
-    group.add(m);
-    return m;
-  }
-
-  // visualId → spec. draw(group, ctx) places sample meshes at the chest-front
-  // origin (group is expected to sit at the torso); ctx.hex overrides color.
-  const COMP = {};
-  function mkCollar(hex) {
-    return { slot: "shirt", drip: 1, color: hex, label: "Collared Shirt",
-      draw(group, ctx) { const c = (ctx && ctx.hex != null) ? ctx.hex : hex;
-        piece(group, 0.16, 0.1, 0.06, -0.12, 0.42, 0.24, tone2(c, -0.22), { rotZ: 0.5 });
-        piece(group, 0.16, 0.1, 0.06, 0.12, 0.42, 0.24, tone2(c, -0.22), { rotZ: -0.5 });
-        piece(group, 0.04, 0.5, 0.04, 0, 0.18, 0.26, tone2(c, -0.12)); } };
-  }
-  function mkBlazer(hex) {
-    return { slot: "jacket", drip: 5, color: hex, label: "Blazer",
-      // the blazer reuses the painted jacket SHELL look: a tinted open-front
-      // jacket. On a rig it routes through applyClothes(suit-style); on a rack
-      // it draws a simple open jacket box pair.
-      shell: "suit",
-      draw(group, ctx) { const c = (ctx && ctx.hex != null) ? ctx.hex : hex;
-        piece(group, 0.26, 0.9, 0.62, -0.34, 0, 0, c);            // left front panel
-        piece(group, 0.26, 0.9, 0.62, 0.34, 0, 0, c);             // right front panel
-        piece(group, 0.92, 0.9, 0.2, 0, 0, -0.24, c);             // back
-        piece(group, 0.12, 0.5, 0.04, -0.16, 0.2, 0.3, tone2(c, 0.16), { rotZ: 0.2 }); // lapel L
-        piece(group, 0.12, 0.5, 0.04, 0.16, 0.2, 0.3, tone2(c, 0.16), { rotZ: -0.2 }); } }; // lapel R
-  }
-  function mkTie(hex) {
-    return { slot: "neck", drip: 2, color: hex, label: "Tie",
-      draw(group, ctx) { const c = (ctx && ctx.hex != null) ? ctx.hex : hex;
-        shapedPiece(group, TIE_KNOT_GEO, 0.278, tone2(c, -0.2), "tie-knot");
-        shapedPiece(group, TIE_BLADE_GEO, 0.276, c, "tie-blade"); } };
-  }
   function tone2(n, amt) {                          // hex-int → hex-int tone (for cmat keys)
     let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
     if (amt > 0) { r += (255 - r) * amt; g += (255 - g) * amt; b += (255 - b) * amt; }
     else { r *= 1 + amt; g *= 1 + amt; b *= 1 + amt; }
     return ((r | 0) << 16) | ((g | 0) << 8) | (b | 0);
   }
-  // collared shirts in a sensible subset of colors
+  /* A COMPOSITE IS ONE GARMENT, PAINTED. The closet's pieces (a collared
+     shirt, a tie, a bow, a blazer, a bomber) used to be separate box meshes
+     parked at the old box chest's coordinates (collar slabs at z 0.24, a
+     placket stick, a tie prism) and snapped towards the shaped chest after the
+     fact — and a blazer went through a whole painted SUIT, so a "blazer + red
+     tie" wore the suit style's own painted tie with the mesh tie on top of it.
+     Now the recipe IS the outfit key: PAINT.comp paints the shirt, its collar
+     and neckwear, the blazer shell (the suit cut) or the bomber, and the
+     trousers, tailored like every formal look. No per-rig meshes, one atlas
+     per recipe actually worn. `comp` on a spec says what it adds. */
+  const COMP = {};
+  function mkCollar(hex) { return { slot: "shirt", drip: 1, color: hex, label: "Collared Shirt", comp: { shirt: hex, collar: 1 } }; }
+  function mkBlazer(hex) { return { slot: "jacket", drip: 5, color: hex, label: "Blazer", comp: { blazer: hex } }; }
+  function mkTie(hex) { return { slot: "neck", drip: 2, color: hex, label: "Tie", comp: { tie: hex } }; }
   ["white", "navy", "charcoal", "burgundy", "forest", "black", "pink", "royal"].forEach(function (cn) {
     COMP["shirt_" + cn + "_collar"] = mkCollar(NAMED[cn]);
   });
-  COMP.shirt_white = { slot: "shirt", drip: 0, color: NAMED.white, label: "White Tee",
-    draw(group, ctx) { const c = (ctx && ctx.hex != null) ? ctx.hex : NAMED.white;
-      piece(group, 0.5, 0.04, 0.04, 0, 0.46, 0.26, tone2(c, -0.18)); } }; // collar band
+  COMP.shirt_white = { slot: "shirt", drip: 0, color: NAMED.white, label: "White Tee", comp: { shirt: NAMED.white } };
   ["navy", "charcoal", "burgundy", "forest", "black", "tan", "royal"].forEach(function (cn) {
     COMP["blazer_" + cn] = mkBlazer(NAMED[cn]);
   });
   ["navy", "burgundy", "red", "forest", "silver", "royal", "pink", "charcoal"].forEach(function (cn) {
     COMP["tie_" + cn] = mkTie(NAMED[cn]);
   });
-  COMP.bowtie_black = { slot: "neck", drip: 2, color: NAMED.black, label: "Bow Tie",
-    draw(group, ctx) { const c = (ctx && ctx.hex != null) ? ctx.hex : NAMED.black;
-      shapedPiece(group, BOW_GEO, 0.278, c, "bow-tie-wings");
-      shapedPiece(group, BOW_KNOT_GEO, 0.284, tone2(c, 0.18), "bow-tie-knot"); } };
-  COMP.pants_white = { slot: "legs", drip: 1, color: NAMED.white, label: "White Pants",
-    legsHex: NAMED.white,                          // applied as a flat legs color
-    draw(group, ctx) { const c = (ctx && ctx.hex != null) ? ctx.hex : NAMED.white;
-      piece(group, 0.18, 0.9, 0.18, -0.12, -0.5, 0, c);
-      piece(group, 0.18, 0.9, 0.18, 0.12, -0.5, 0, c); } };
-  COMP.jacket_bomber = { slot: "jacket", drip: 6, color: 0x2b3a4a, label: "Bomber Jacket",
-    shell: "suit",                                  // a solid shell on the rig
-    bomberHex: 0x2b3a4a,
-    // (websearch: hip-length, ribbed knit collar + cuffs + waistband, front zip)
-    draw(group, ctx) { const c = (ctx && ctx.hex != null) ? ctx.hex : 0x2b3a4a;
-      piece(group, 0.96, 0.78, 0.64, 0, 0.05, 0, c);              // body
-      piece(group, 0.96, 0.12, 0.66, 0, -0.4, 0, tone2(c, -0.25)); // ribbed waistband hem
-      piece(group, 0.5, 0.1, 0.66, 0, 0.46, 0, tone2(c, -0.25));  // ribbed collar
-      piece(group, 0.04, 0.78, 0.04, 0, 0.05, 0.33, tone2(c, -0.4)); } }; // front zip
-  COMP.tuxedo = { slot: "outfit", drip: 28, color: 0x16171c, label: "Tuxedo", painted: "tuxedo",
-    draw(group) {                                   // the rack sample: black jacket + white shirt V
-      piece(group, 0.9, 0.9, 0.6, 0, 0, 0, 0x16171c);
-      piece(group, 0.3, 0.7, 0.04, 0, 0.05, 0.31, 0xf1f2ec);     // shirt front
-      piece(group, 0.2, 0.07, 0.05, 0, 0.34, 0.33, 0x0b0c10); } }; // bow tie
+  COMP.bowtie_black = { slot: "neck", drip: 2, color: NAMED.black, label: "Bow Tie", comp: { bow: NAMED.black } };
+  COMP.pants_white = { slot: "legs", drip: 1, color: NAMED.white, label: "White Pants", legsHex: NAMED.white };
+  // (hip-length, ribbed knit collar + cuffs + waistband, front zip)
+  COMP.jacket_bomber = { slot: "jacket", drip: 6, color: 0x2b3a4a, label: "Bomber Jacket", comp: { bomber: 0x2b3a4a } };
+  COMP.tuxedo = { slot: "outfit", drip: 28, color: 0x16171c, label: "Tuxedo", painted: "tuxedo" };
+
+  // PAINT.comp — the recipe as one tailored garment (see A COMPOSITE IS ONE
+  // GARMENT). c: {shirt, legs, collar, tie, bow, blazer, bomber} (-1 = none).
+  PAINT.comp = function (P, c) {
+    const has = (v) => v != null && v >= 0;
+    const shirt = has(c.shirt) ? c.shirt : NAMED.white, legs = has(c.legs) ? c.legs : 0x39414f;
+    const tie = has(c.tie) ? c.tie : null, bow = has(c.bow), collar = !!c.collar || tie != null || bow;
+    const T = P.T, A = P.A, L = P.L;
+    if (has(c.blazer)) {                                            // the suit cut, in the recipe's cloth
+      const neck = formalTorso(T, P.J, c.blazer, tone(c.blazer, 0.16), { tie: tie, bow: bow, shirt: shirt, lapelType: "notch", ctx: P.ctx });
+      formalLimbs(A, L, c.blazer, legs, false, { ctx: P.ctx, shirt: shirt });
+      if (!bow && tie == null) neck.collar = collar ? 1 : 0;
+      return { torso: 1, arms: 1, legs: 1, jacket: 1, fp: 1, neck: neck, skirt: { hex: c.blazer } };
+    }
+    const sc = hx(shirt);
+    let neck;
+    if (has(c.bomber)) {                                            // zipped over whatever is under it
+      const b = c.bomber, rib = tone(b, -0.25), hem = TORSO_ROW.hem;
+      T.fill(hx(b));
+      T.rect("front", fx(-0.01), 0, 0.02, hem, tone(b, -0.4));      // the zip
+      T.poly("front", fpts([[0.12, 0.5], [0.16, 0.34], [0.19, 0.34], [0.15, 0.5]]), tone(b, -0.35));   // slash pockets
+      T.poly("front", fpts([[-0.12, 0.5], [-0.16, 0.34], [-0.19, 0.34], [-0.15, 0.5]]), tone(b, -0.35));
+      hemBand(T, rib, hem, TORSO_ROW.hemH);
+      T.shade();
+      A.fill(hx(b));
+      for (const col of ["front", "side", "back"]) A.rect(col, 0, 0.9, 1, 0.1, rib);
+      A.shade();
+      neck = { fp: 1, band: tone2(b, -0.25) };
+    } else {
+      T.fill(sc);
+      if (collar) T.rect("front", fx(-0.012), 0.08, 0.024, TAILOR.tBelt - 0.08, tone(shirt, -0.12));   // placket
+      if (tie != null) paintTie(T, tie, TAILOR.tBelt - 0.025, 0);
+      else if (bow) paintBow(T, c.bow);
+      T.shade();
+      A.fill(sc);
+      if (collar) for (const col of ["front", "side", "back"]) A.rect(col, 0, 0.93, 1, 0.07, tone(shirt, -0.1));   // the cuff
+      A.shade();
+      neck = tie != null ? { tie: tie, fp: 1 } : bow ? { bow: c.bow, fp: 1 } : collar ? { fp: 1, collar: 1 } : { fp: 1, band: tone2(shirt, -0.08) };
+    }
+    L.fill(hx(legs)); L.shade();
+    return { torso: 1, arms: 1, legs: 1, fp: 1, neck: neck };
+  };
+  // the recipe a list of composable ids adds up to (the last piece in a slot wins)
+  function compRecipe(items, shirt, legs) {
+    const r = { shirt: shirt, legs: legs, collar: 0, tie: -1, bow: -1, blazer: -1, bomber: -1 };
+    for (let i = 0; i < items.length; i++) {
+      const sp = COMP[items[i]];
+      if (!sp) continue;
+      if (sp.legsHex != null) r.legs = sp.legsHex;
+      if (sp.comp) for (const k in sp.comp) r[k] = sp.comp[k];
+    }
+    return r;
+  }
+  const COMP_FIELDS = ["shirt", "legs", "collar", "tie", "bow", "blazer", "bomber"];
 
   // ============================================================
   //  NEW BUYABLE FULL-LOOKS — each is a PAINTED outfit (painted:"<id>" short-
-  //  circuits straight to PAINT.<id>, like the tuxedo). The rack sample draws a
-  //  cheap representative box. paintRec carries colors/style to applyClothes.
+  //  circuits straight to PAINT.<id>, like the tuxedo). paintRec carries
+  //  colors/style to applyClothes.
   // ============================================================
-  function paintedLook(visualId, paintId, label, drip, color, paintRec, drawHex2) {
-    COMP[visualId] = {
-      slot: "outfit", drip: drip, color: color, label: label, painted: paintId, paintRec: paintRec || null,
-      draw(group, ctx) {
-        const c = (ctx && ctx.hex != null) ? ctx.hex : color;
-        piece(group, 0.9, 0.9, 0.6, 0, 0, 0, c);
-        if (drawHex2 != null) piece(group, 0.36, 0.7, 0.06, 0, 0.02, 0.31, drawHex2);
-      },
-    };
+  function paintedLook(visualId, paintId, label, drip, color, paintRec) {
+    COMP[visualId] = { slot: "outfit", drip: drip, color: color, label: label, painted: paintId, paintRec: paintRec || null };
   }
   // SUITS: one buyable look per SUIT_STYLES index → painted:"suit", style:N.
   SUIT_STYLES.forEach(function (st, i) {
     paintedLook("suit_" + i, "suit", st.name, st.tux ? 26 : (st.vest ? 18 : 14), st.body,
-      { style: i, forcePaint: 1 }, "#f1f2ec");
+      { style: i, forcePaint: 1 });
   });
   // STREETWEAR / SERVICE / WORKWEAR full-looks
   paintedLook("hoodie",       "hoodie",       "Hoodie",          4,  0x7a4a3a, { forcePaint: 1, colors: { torso: 0x7a4a3a } });
@@ -3379,7 +3869,7 @@
   paintedLook("graphic_tee",  "graphic_tee",  "Graphic Tee",     2,  0x1c1d22, { colors: { torso: 0x1c1d22, collar: 0xd84a3a } });
   paintedLook("coveralls",    "coveralls",    "Coveralls",       4,  0x394a5a, { colors: { torso: 0x394a5a } });
   paintedLook("chef",         "chef",         "Chef Whites",     6,  0xf0efe9, { colors: { collar: 0x9a2a2a } });
-  paintedLook("waiter",       "waiter",       "Waiter Set",      7,  0x16171c, null, "#f1f2ec");
+  paintedLook("waiter",       "waiter",       "Waiter Set",      7,  0x16171c, null);
   paintedLook("pilot",        "pilot",        "Pilot Uniform",   9,  0xeef0f2, { colors: { legs: 0x1a1c24 } });
   paintedLook("tracksuit",    "tracksuit",    "Tracksuit",       5,  0x2bb673, { colors: { torso: 0x2bb673 } });
   paintedLook("tracksuit_red","tracksuit2",   "Red Tracksuit",   5,  0xb22a2a, null);
@@ -3406,72 +3896,44 @@
   CBZ.cityComposableSpec = cityComposableSpec;
 
   // ---- apply a composite recipe to a rig (idempotent) ----------------------
+  // (a composite adds no meshes any more; the bin stays so a rig dressed by an
+  // older build, or a caller that still clears it, is handled)
   function clearComposite(ch) {
     const bin = ch._compMeshes;
     if (bin) for (let i = 0; i < bin.length; i++) {
       const m = bin[i];
       if (m && m.parent) m.parent.remove(m);
-      if (m && m.geometry && !m.geometry._shared && m.geometry.dispose) m.geometry.dispose();
     }
     ch._compMeshes = [];
   }
   CBZ.cityClearComposite = clearComposite;
-  // Composite pieces were authored proud of a FLAT chest plane (z 0.25). On a
-  // shaped body, move each front piece so it keeps the same standoff from the
-  // real surface at its own height (a tie follows the sternum, a collar sits
-  // at the neck instead of floating in front of it).
-  function snapToChest(ch, host, grp) {
-    if (!ch || typeof ch.torsoFrontZ !== "function" || !host || !host.position) return;
-    const sx = grp.scale.x || 1, sy = grp.scale.y || 1, sz = grp.scale.z || 1;
-    for (let i = 0; i < grp.children.length; i++) {
-      const m = grp.children[i];
-      if (!m || !(m.position.z > 0.15)) continue;    // front pieces only (a blazer's back panel stays)
-      const bx = m.position.x * sx, by = host.position.y + grp.position.y + m.position.y * sy;
-      const surf = ch.torsoFrontZ(bx, by);
-      if (!isFinite(surf)) continue;
-      m.position.z = (surf + (m.position.z * sz - 0.25 * sz)) / sz;
-    }
-  }
   function cityApplyComposite(ch, comp) {
     if (!ch || !ch.skinSlots || !comp) return false;
     const items = comp.items || [];
     const shirt = comp.shirt != null ? comp.shirt : 0xf2f2f2;
-    let legs = comp.legs != null ? comp.legs : 0x39414f;
+    const legs0 = comp.legs != null ? comp.legs : 0x39414f;
     // a fully-painted special (tuxedo/suit/dress…) short-circuits the whole stack
-    let painted = null, paintRec = null, shell = null, paintedHex = null;
+    let painted = null, paintRec = null, paintedHex = null;
     for (let i = 0; i < items.length; i++) {
       const sp = COMP[items[i]];
-      if (!sp) continue;
-      if (sp.painted) {
-        painted = sp.painted; paintRec = sp.paintRec || null;
-        paintedHex = (paintRec && paintRec.colors && paintRec.colors.torso != null)
-          ? paintRec.colors.torso : (sp.color != null ? sp.color : null);
-      }
-      if (sp.shell) shell = items[i];
-      if (sp.legsHex != null) legs = sp.legsHex;
+      if (!sp || !sp.painted) continue;
+      painted = sp.painted; paintRec = sp.paintRec || null;
+      paintedHex = (paintRec && paintRec.colors && paintRec.colors.torso != null)
+        ? paintRec.colors.torso : (sp.color != null ? sp.color : null);
     }
     clearComposite(ch);
     if (painted) {                                   // e.g. tuxedo → the painted look
       const rec = paintRec ? Object.assign({ id: painted }, paintRec) : { id: painted };
       const pp = applyClothes(ch, rec);
-      // ONE SOURCE. paintedHex above is the composable's STATIC colour field —
-      // for all 22 buyable suits that is the catalog navy, not the style's own
-      // body, which is the owner's blue-collar-on-a-tan-suit exactly. Ask the
-      // atlas what it painted; fall back to the static value if it cannot say.
+      // ONE SOURCE: ask the atlas what it painted (a suit's static colour field
+      // is the catalog navy, not the style's own body).
       const derived = cityPaintedBodyHex(rec, ch);
       if (derived != null) paintedHex = derived;
-      // …and when the wardrobe DRESSES the yoke, do not tint it: a colour on a
-      // textured Lambert multiplies the map, which would darken the paint.
+      // when the wardrobe DRESSES the collar band, do not tint it (a colour on
+      // a textured Lambert multiplies the map)
       if (pp && pp.collar) return true;
-      // THE YOKE IS NOT A SECOND COLLAR (the long note in outfits.js's
-      // recolorRig). skinSlots.collar is a flat slab at the top of the torso
-      // column that no painted garment ever reaches — and this branch never
-      // touched it AT ALL, so it kept whatever the LAST look left there. The
-      // player's default composite is a white tee, which sets it to 0xf2f2f2;
-      // switching into a black hoodie therefore left a white ring round his
-      // neck that no outfit had asked for, and that is the owner's "my player
-      // sometimes". Give it the garment's own cloth colour so it disappears
-      // into the look. Revert: CBZ.CONFIG.CITY_YOKE_GARMENT = false.
+      // otherwise the band wears the garment's own cloth colour, never the
+      // last look's (a white tee's band left round a black hoodie's neck)
       if (paintedHex != null && (!CBZ.CONFIG || CBZ.CONFIG.CITY_YOKE_GARMENT !== false)) {
         const yoke = ch.skinSlots.collar;
         if (CBZ.cityPaintSlot) CBZ.cityPaintSlot(yoke, paintedHex);
@@ -3483,49 +3945,19 @@
       }
       return true;
     }
-    // PLAIN base: strip any painted look, then flat-tint via recolorRig if the
-    // city look API is present (keeps shoes/collar consistent); else paint here.
+    // THE RECIPE: flat base first (shoes, hands, anything the atlas does not
+    // cover), then the recipe as ONE painted garment (PAINT.comp).
+    const r = compRecipe(items, shirt, legs0);
     applyClothes(ch, null);
-    if (CBZ.cityRecolorRig) {
-      CBZ.cityRecolorRig(ch, { torso: shirt, arms: shirt, legs, collar: shirt, shoes: 0x2b2b2b }, null);
-    } else {
+    if (CBZ.cityRecolorRig) CBZ.cityRecolorRig(ch, { torso: r.shirt, arms: r.shirt, legs: r.legs, collar: r.shirt, shoes: 0x2b2b2b }, null);
+    else {
       const s = ch.skinSlots, setHex = (list, hex) => { if (list) for (const m of list) if (m && m.material && m.material.color) { if (m.material._shared) m.material = m.material.clone(); m.material.color.setHex(hex); } };
-      setHex(s.torso, shirt); setHex(s.arms, shirt); setHex(s.armsLower, shirt); setHex(s.legs, legs); setHex(s.legsLower, legs); setHex(s.collar, shirt);
+      setHex(s.torso, r.shirt); setHex(s.arms, r.shirt); setHex(s.armsLower, r.shirt); setHex(s.legs, r.legs); setHex(s.legsLower, r.legs); setHex(s.collar, r.shirt);
     }
-    // a blazer/bomber shell rides through the painted jacket shell (silhouette
-    // + open front) so it reads as a real jacket, tinted to the item color.
-    if (shell) {
-      const sp = COMP[shell], hex = sp.bomberHex != null ? sp.bomberHex : (sp.color != null ? sp.color : 0x1c2030);
-      // The shell ASKS for a colour; a style-less suit record used to fall to
-      // keyOf's per-rig pick (group.id % n), so a "navy blazer" came out tan,
-      // powder blue or all-white depending on who wore it. Pin the plain solid
-      // style nearest the asked colour instead: same jacket on every wearer.
-      applyClothes(ch, { id: "suit", style: nearestSuitStyle(hex), colors: { torso: hex, legs, arms: hex } });
-    }
-    // layer the small attached meshes (collar/tie/bow) onto the torso
-    const host = (ch.skinSlots.torso && ch.skinSlots.torso[0]) || ch.body || ch.group;
-    const cf = compFrame(ch);                        // adult-authored coords → this body
-    if (host && host.add) {
-      const bin = ch._compMeshes;
-      for (let i = 0; i < items.length; i++) {
-        const sp = COMP[items[i]];
-        if (!sp || sp.shell || sp.painted || sp.legsHex != null) continue; // shells/legs handled above
-        const grp = new THREE.Group();
-        grp.name = "wearable-" + items[i];
-        grp.userData.clothingSlot = sp.slot || "item";
-        // a tie authored for a 0.95-tall male chest would sit ABOVE a woman's
-        // collarbone (her chest box is shorter and higher) — one node fixes
-        // every composable at once instead of re-authoring fourteen of them.
-        if (cf) { grp.scale.set(cf.sx, cf.sy, cf.sz); grp.position.y = cf.y; }
-        sp.draw(grp, {});
-        snapToChest(ch, host, grp);
-        grp.children.forEach((m) => bin.push(m));
-        host.add(grp);
-        bin.push(grp);
-      }
-    }
+    applyClothes(ch, { id: "comp", colors: r });
     ch._compRecipe = items.slice();
     return true;
   }
+
   CBZ.cityApplyComposite = cityApplyComposite;
 })();

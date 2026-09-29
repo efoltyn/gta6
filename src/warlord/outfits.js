@@ -1564,7 +1564,7 @@
       else { paintSlot(s.legs, legs); paintSlot(s.legsLower, legs); }
     }
     if (!pp || !pp.torso) { if (cmT) paintCamo(s.torso, cmT); else paintSlot(s.torso, torso); }
-    if (!pp || !pp.arms) {
+    if (!pp || (!pp.arms && !pp.sleeves)) {          // `sleeves`: clothes.js hung the flat tee sleeve + own skin
       if (cmA) { paintCamo(s.arms, cmA); paintCamo(s.armsLower, cmA); }
       else { paintSlot(s.arms, arms); paintSlot(s.armsLower, arms); }
     }

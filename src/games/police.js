@@ -50,8 +50,9 @@
    dresses peds. The real question is whether the precinct STAFF should read
    as police to the WANTED SYSTEM (i.e. carry kind:"cop"). DECISION: they do
    NOT. Staff are cast as PINNED ctx.npc peds (kind:"staff"), dressed with
-   plain navy/brown torso COLORS — never kind:"cop", never the cop:true
-   "police" catalog fit. This follows the casino precedent (guard blacks,
+   the uniform catalog's NON-cop fits (city/outfits.js CAT.precinct: the
+   patrol uniform and duty belt; CAT.detective: plainclothes, shield on the
+   belt) — never kind:"cop", never the cop:true "police" catalog fit. This follows the casino precedent (guard blacks,
    "no cop flag"). Consequences, all INTENDED for a legal walk-in:
      • killing a desk clerk is ordinary homicide heat via the ped death
        funnel — NOT an instant 5★ cop-kill (tgt.kind==="cop" path).
@@ -500,7 +501,7 @@
 
   /* ==========================================================
      5. CAST — real peds via ctx.npc.  THE COP-FLAG DECISION lives here:
-        plain navy/brown COLORS, post:"pinned" → kind:"staff". Never
+        catalog fits WITHOUT a cop flag (CAT.precinct / CAT.detective), post:"pinned" → kind:"staff". Never
         kind:"cop", never the cop:true "police" catalog fit. See header.
      ========================================================== */
   // POSTS (venue-LOCAL). home = where they stand; coffee = the machine.
@@ -511,28 +512,27 @@
     INTERROGATION: [11, -12.5, -Math.PI / 2], WANTED: [14.6, 0.6, -Math.PI / 2], COFFEE: [-13, -1.2, -Math.PI / 2],
   };
   function queueStaff() {
-    const N = PAL.navy;
-    // uniformed officers — plain navy torso color (reads as precinct blue).
-    qNPC("KOWALCZYK", { role: "sergeant", name: "Sgt. Kowalczyk", outfit: N, skin: 0xdca87e,
+    // uniformed officers — city/outfits.js CAT.precinct: the patrol uniform and duty belt, NO cop flag.
+    qNPC("KOWALCZYK", { role: "sergeant", name: "Sgt. Kowalczyk", outfit: "precinct", skin: 0xdca87e,
       at: POSTS.KOWALCZYK.slice(0, 2), face: POSTS.KOWALCZYK[2], post: "pinned", pose: "stand",
       dialogue: ["Visiting hours. Sit or don't.", "Name? Take a number.", "Third double this week. Don't test me."], sayColor: "#dfe7ff" });
-    qNPC("BRISCO", { role: "officer", name: "Ofc. Brisco", outfit: N, skin: 0x9a6a48,
+    qNPC("BRISCO", { role: "officer", name: "Ofc. Brisco", outfit: "precinct", skin: 0x9a6a48,
       at: POSTS.BRISCO.slice(0, 2), face: POSTS.BRISCO[2], post: "pinned", pose: "stand",
       dialogue: ["Move it along, friend.", "That your face on the board?", "Coffee machine ate my dollar again."] });
     qNPC("DASILVA", { role: "clerk", name: "Clerk da Silva", outfit: 0x5a6478, skin: 0xd8a882,
       at: POSTS.DASILVA.slice(0, 2), face: POSTS.DASILVA[2], post: "pinned", pose: "stand",
       dialogue: ["Cash only.", "No hoods at my window, sir.", "Next."] });
-    qNPC("PYE", { role: "clerk", name: "Ofc. Pye", outfit: N, skin: 0xe8c098,
+    qNPC("PYE", { role: "clerk", name: "Ofc. Pye", outfit: "precinct", skin: 0xe8c098,
       at: POSTS.CAGE.slice(0, 2), face: POSTS.CAGE[2], post: "pinned", pose: "stand",
       dialogue: ["Rookie on the cage. Lucky me.", "Pal, I just work here.", "Six months in. Still get lost down here."] });
-    qNPC("MERCER", { role: "sergeant", name: "Sgt. Mercer", outfit: N, skin: 0xba8a66,
+    qNPC("MERCER", { role: "sergeant", name: "Sgt. Mercer", outfit: "precinct", skin: 0xba8a66,
       at: POSTS.MERCER_DESK.slice(0, 2), face: POSTS.MERCER_DESK[2], post: "pinned", pose: "sit",
       dialogue: ["Twenty-two years. I know a real star from a laminate.", "Son, I've seen every trick twice.", "Eighteen months to my pension."] });
-    // detectives — plain brown/grey (plainclothes, still kind:"staff", not cops).
-    qNPC("REYES", { role: "detective", name: "Det. Reyes", outfit: 0x6a5a48, skin: 0xc08a5e,
+    // detectives — CAT.detective: shirt and tie, shield on the belt (still kind:"staff", not cops).
+    qNPC("REYES", { role: "detective", name: "Det. Reyes", outfit: "detective", skin: 0xc08a5e,
       at: POSTS.REYES_DESK.slice(0, 2), face: POSTS.REYES_DESK[2], post: "pinned", pose: "sit",
       dialogue: ["That desk bites. Walk on.", "Case files are need-to-know."] });
-    qNPC("VOSS", { role: "detective", name: "Det. Voss", outfit: 0x4a4450, skin: 0xe0b090,
+    qNPC("VOSS", { role: "detective", name: "Det. Voss", outfit: "detective", skin: 0xe0b090,
       at: POSTS.VOSS_DESK.slice(0, 2), face: POSTS.VOSS_DESK[2], post: "pinned", pose: "sit",
       dialogue: ["Your boy in there won't stop talking. Good.", "Every word's another charge."] });
     // LOU the bondsman — loud shirt, a civilian fixer (never a cop).

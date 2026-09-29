@@ -111,7 +111,7 @@ ctx.CBZ = {
 const APPEAR = ["sidearm", "shotgun", "carbine", "smg", "taser", "bazooka", "glauncher", "ak47", "revolver", "deagle", "uzi", "sniper", "lmg", "shank"];
 const FILES = ["src/vendor/three.r128.min.js", "src/config.js", "src/core/matrixskip.js", "src/world/materials.js", "src/systems/fphands.js",
   "src/entities/footwear.js", "src/entities/character.js", "src/entities/headwear.js", "src/entities/heritage.js",
-  "src/city/clothes.js", "src/city/outfits.js", "src/city/armor.js", "src/systems/prisonoutfits.js",
+  "src/city/clothes.js", "src/city/outfits.js", "src/entities/dutykit.js", "src/city/armor.js", "src/systems/prisonoutfits.js",
   "src/entities/watch.js", "src/city/bling.js",
   "src/weapons/weapon-data.js", "src/weapons/weapon-scale.js", ...APPEAR.map((n) => `src/weapons/appearances/${n}.js`),
   "src/systems/actorweapons.js"];

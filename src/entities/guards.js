@@ -42,12 +42,15 @@
     // 0.3 s). They used to be a different navy, so every guard popped colour.
     // THE WARDEN WEARS A SUIT, NOT A UNIFORM: city/outfits.js CAT.warden (the
     // charcoal three-piece) is the record; these are its first-frame colours.
+    // An officer's badge, belt, radio, torch and cuff case are NOT built here
+    // (that was a gold cube on the wrong side of the chest): they ride the
+    // corrections record as entities/dutykit.js's one merged kit.
     const ch = makeCharacter(warden ? {
       legs: 0x24272e, torso: 0x2c2f36, collar: 0xf1f2ec, arms: 0x2c2f36,
       skin: 0xdcae84, shoes: 0x0c0d10, belt: 0x16171b,
     } : {
       legs: 0x202936, torso: 0x34475d, collar: 0xaab7c2, arms: 0x34475d,
-      skin: 0xe7b58c, cap: 0x202b3b, capKind: "peaked:police", shoes: 0x111419, belt: 0x111419, badge: true,
+      skin: 0xe7b58c, cap: 0x202b3b, capKind: "peaked:police", shoes: 0x111419,
     });
     ch.group.userData.dynamic = true;
     (CBZ.prisonRoot || CBZ.scene).add(ch.group);

@@ -111,7 +111,7 @@
     mariner:  { id: "mariner", hat: "peaked:captain",   name: "Mariner Whites", tier: "work", who: "captains and harbour crews", price: 0, drip: 1, cap: true, capColor: 0xf0f1ed,
                  colors: { legs: 0x19283d, torso: 0xf0f1ed, collar: 0x213a5a, arms: 0xf0f1ed, shoes: 0x10151d } },
     lifeguard:{ id: "lifeguard", hat: "bucket", name: "Lifeguard Reds", tier: "work", who: "lifeguards", price: 0, drip: 0, cap: true, capColor: 0xc8342f,
-                 colors: { legs: 0xc8342f, torso: 0xf1eee7, collar: 0xc8342f, arms: 0xf1eee7, shoes: 0xe8e8e2 } },
+                 colors: { legs: 0xc8342f, torso: 0xc8342f, collar: 0xf1eee7, arms: 0xc8342f, shoes: 0xe8e8e2 } },
     ski:      { id: "ski",       name: "Ski Instructor Jacket", tier: "work", who: "ski crews", price: 0, drip: 1,
                  colors: { legs: 0x202936, torso: 0x286ba6, collar: 0xe67925, arms: 0x286ba6, shoes: 0x171b22 } },
     ski_patrol:{ id: "ski_patrol", name: "Ski Patrol Shell", tier: "law", who: "ski patrol", price: 0, drip: 0,
@@ -175,9 +175,9 @@
                  colors: { legs: 0xe2a2b8, torso: 0xe2a2b8, collar: 0xf4efe4, arms: 0xf4efe4, shoes: 0xf2f2f2 } },
     // ---- work uniforms (a JOB on your back — casting wears these) ----
     vendor:    { id: "vendor",    name: "Vendor Apron",     tier: "work",   who: "counter clerks",   price: 0,    drip: 0,
-                 colors: { legs: 0x2e3138, torso: 0xc8553a, collar: 0xf0ead8, arms: 0xf0ead8, shoes: 0x2b2b2b } },
+                 colors: { legs: 0x2e3138, torso: 0xc8553a, collar: 0xf0ead8, arms: 0xc8553a, shoes: 0x2b2b2b } },
     hivis:     { id: "hivis",     name: "Dock Hi-Vis",      tier: "work",   who: "dock crews",       price: 0,    drip: 0,
-                 colors: { legs: 0x2f4f8a, torso: 0xffb43a, collar: 0xfff06b, arms: 0xffb43a, shoes: 0x4a3a26 } },
+                 colors: { legs: 0x2f4f8a, torso: 0xffb43a, collar: 0x5d6052, arms: 0x5d6052, shoes: 0x4a3a26 } },
     // ---- uniforms everybody KNOWS ON SIGHT (price 0 — never racked; the
     //      casting sprinkles them through the crowd so the street reads like
     //      a working city, not a costume party). Each is the real-world
@@ -196,25 +196,28 @@
                  colors: { legs: 0x24304a, torso: 0x24304a, collar: 0xc6d435, arms: 0x24304a, shoes: 0x101216 } },
     firefighter: { id: "firefighter", name: "Turnout Gear", tier: "work",   who: "firefighters",     price: 0,    drip: 0,
                  colors: { legs: 0xb09a6e, torso: 0xb09a6e, collar: 0xe8d44a, arms: 0xb09a6e, shoes: 0x16110d } },
-    security:  { id: "security",  name: "Guard Blacks",     tier: "work",   who: "security guards",  price: 0,    drip: 0,
+    security:  { id: "security",  name: "Guard Blacks",     tier: "work",   who: "security guards",  price: 0,    drip: 0, duty: "security",
                  colors: { legs: 0x1c1f26, torso: 0x1c1f26, collar: 0xe8e8e8, arms: 0x1c1f26, shoes: 0x101216 } },
     // ---- the penitentiary (shared with direct Prison Escape) ---------------
     // These are ordinary catalog records, not a second prison-only renderer.
     // systems/prisonoutfits.js casts the live Escape-mode rigs through the same
     // cityRecolorRig -> cityApplyClothes seam used by Gang City's police/SWAT.
+    // A JUMPSUIT IS ONE CLOTH: legs == torso (two oranges read as a shirt and
+    // trousers that do not match). No belts: a coverall has an elastic waist,
+    // and prisonoutfits.js only ever showed a belt on staff anyway.
     inmate:    { id: "inmate", name: "DOC Orange Jumpsuit", tier: "institution", who: "general-population inmates", price: 0, drip: 0,
-                 colors: { legs: 0xe76518, torso: 0xf27a1f, collar: 0xffa14a, arms: 0xf27a1f, shoes: 0x25282d, belt: 0x5b351f } },
+                 colors: { legs: 0xf27a1f, torso: 0xf27a1f, collar: 0xffa14a, arms: 0xf27a1f, shoes: 0x25282d } },
     inmate_cap: { id: "inmate_cap", hat: "ballcap", name: "DOC Jumpsuit and Yard Cap", tier: "institution", who: "yard inmates with issued caps", price: 0, drip: 0,
                  cap: true, capColor: 0x22252b,
-                 colors: { legs: 0xe76518, torso: 0xf27a1f, collar: 0xffa14a, arms: 0xf27a1f, shoes: 0x25282d, belt: 0x5b351f } },
+                 colors: { legs: 0xf27a1f, torso: 0xf27a1f, collar: 0xffa14a, arms: 0xf27a1f, shoes: 0x25282d } },
     inmate_tank: { id: "inmate_tank", name: "DOC Jumpsuit Tied at the Waist", tier: "institution", who: "yard inmates, top off, tank under", price: 0, drip: 0,
-                 colors: { legs: 0xe76518, torso: 0xe6e3d9, collar: 0xe6e3d9, arms: 0xf27a1f, shoes: 0x25282d, belt: 0x5b351f } },
+                 colors: { legs: 0xf27a1f, torso: 0xe6e3d9, collar: 0xe6e3d9, arms: 0xf27a1f, shoes: 0x25282d } },
     inmate_orderly: { id: "inmate_orderly", name: "Inmate Medical Orderly", tier: "institution", who: "infirmary orderlies", price: 0, drip: 0,
-                 colors: { legs: 0xe76518, torso: 0xe7edf0, collar: 0xf27a1f, arms: 0xe7edf0, shoes: 0x30363d, belt: 0x5b351f } },
+                 colors: { legs: 0xf27a1f, torso: 0xe7edf0, collar: 0xf27a1f, arms: 0xe7edf0, shoes: 0x30363d } },
     inmate_chapel: { id: "inmate_chapel", name: "Chapel Trustee Greys", tier: "institution", who: "chapel trustees", price: 0, drip: 0,
-                 colors: { legs: 0x414a57, torso: 0x505c6b, collar: 0xe8e3d8, arms: 0x505c6b, shoes: 0x25282d, belt: 0x252b33 } },
+                 colors: { legs: 0x505c6b, torso: 0x505c6b, collar: 0xe8e3d8, arms: 0x505c6b, shoes: 0x25282d } },
     corrections: { id: "corrections", hat: "peaked:police", name: "Correctional Officer Uniform", tier: "law", who: "prison officers", price: 0, drip: 0,
-                 cap: true, capColor: 0x202b3b, badge: true,
+                 cap: true, capColor: 0x202b3b, duty: "corrections",
                  colors: { legs: 0x202936, torso: 0x34475d, collar: 0xaab7c2, arms: 0x34475d, shoes: 0x111419, belt: 0x111419 } },
     // THE WARDEN IS NOT A GUARD (owner, 2026-09-28: "the warden just acts like
     // a normal cop"). He wore a navy dress uniform with a peaked cap and a
@@ -224,18 +227,28 @@
     warden:    { id: "suit", uniform: "warden", name: "Warden's Three-Piece", tier: "law", who: "the prison warden", price: 0, drip: 9, formal: "suit",
                  style: null, styleName: "Charcoal 3-Piece Suit",
                  colors: { legs: 0x24272e, torso: 0x2c2f36, collar: 0xf1f2ec, arms: 0x2c2f36, shoes: 0x0c0d10, shirt: 0xf1f2ec, tie: 0x7a1f2b, belt: 0x16171b } },
-    sheriff:   { id: "sheriff", hat: "campaign:sheriff",   name: "Sheriff Khakis",   tier: "law",    who: "county deputies",  price: 0,    drip: 0, cap: true, capColor: 0x8a7752,
+    sheriff:   { id: "sheriff", hat: "campaign:sheriff",   name: "Sheriff Khakis",   tier: "law",    who: "county deputies",  price: 0,    drip: 0, cap: true, capColor: 0x8a7752, duty: "sheriff",
                  colors: { legs: 0x5a4632, torso: 0xb8a070, collar: 0x7a6a4a, arms: 0xb8a070, shoes: 0x2b241c, belt: 0x1a140c } },
     soldier:   { id: "soldier", hat: "milcap",   name: "Olive Fatigues",   tier: "work",   who: "soldiers",         price: 0,    drip: 0, cap: true, capColor: 0x44503a,
                  colors: { legs: 0x4a5238, torso: 0x4a5238, collar: 0x3a4030, arms: 0x4a5238, shoes: 0x2b2a22, gloves: 0x3a3a2c } },
     office:    { id: "office",    name: "Office Slacks",    tier: "work",   who: "accountants",      price: 0,    drip: 1,
                  colors: { legs: 0x39414f, torso: 0x9ab4c8, collar: 0x7d97ab, arms: 0x9ab4c8, shoes: 0x23262b } },
     // ---- the LAW (never sold — taken off a body; the street reads the badge) ----
-    police:    { id: "police", hat: "peaked:police",    name: "Police Uniform",   tier: "law",    who: "beat cops",        price: 0,    drip: 1, cop: true,
+    police:    { id: "police", hat: "peaked:police",    name: "Police Uniform",   tier: "law",    who: "beat cops",        price: 0,    drip: 1, cop: true, duty: "police",
                  colors: { legs: 0x1b2a44, torso: 0x24407a, collar: 0x16264a, arms: 0x24407a, shoes: 0x101216, belt: 0x0d111c } },
+    // THE DESK OFFICER (games/police.js's precinct staff): the same patrol
+    // uniform and duty belt, but NO cop flag: posted staff are not the city
+    // force, and taking this shirt off one is a costume, not a disguise.
+    precinct:  { id: "precinct", hat: "peaked:police", name: "Precinct Uniform", tier: "law", who: "desk officers", price: 0, drip: 1, cap: true, capColor: 0x17223c, duty: "police",
+                 colors: { legs: 0x1b2a44, torso: 0x24407a, collar: 0x16264a, arms: 0x24407a, shoes: 0x101216, belt: 0x0d111c } },
+    // PLAINCLOTHES: a detective at his desk, jacket off. Dress shirt and tie,
+    // the gold shield clipped on his belt, a pancake holster on the hip
+    // (clothes.js PAINT.detective + entities/dutykit.js "detective").
+    detective: { id: "detective", name: "Plainclothes", tier: "law", who: "detectives", price: 0, drip: 3, duty: "detective", footwear: "oxford",
+                 colors: { legs: 0x3b3935, torso: 0xc9d6e6, collar: 0xc9d6e6, arms: 0xc9d6e6, shoes: 0x1a1410, tie: 0x6b1f2a } },
     // SWAT redesign: dark-olive carrier over graphite-olive fatigues (torso
     // drives the CARRIER, legs the fatigues — clothes.js PAINT.swat reads both).
-    swat:      { id: "swat", hat: "ballistic:swat",      name: "SWAT Fatigues",    tier: "law",    who: "heavy units",      price: 0,    drip: 1, cop: true,
+    swat:      { id: "swat", hat: "ballistic:swat",      name: "SWAT Fatigues",    tier: "law",    who: "heavy units",      price: 0,    drip: 1, cop: true, duty: "swat",
                  colors: { legs: 0x2e332b, torso: 0x3a4034, collar: 0x22261f, arms: 0x33382e, shoes: 0x101216, belt: 0x0d111c, gloves: 0x17191c } },
     // ---- money fits (boutique racks → the apex tuxedo) ----
     leather:   { id: "leather",   name: "Leather Jacket",   tier: "fit",    who: "the night crowd",  price: 520,  drip: 6,
@@ -681,6 +694,7 @@
       // a composite is never a gang fit → make sure no stale bandana lingers
       if (ch._bandana && CBZ.cityAttachBandana) CBZ.cityAttachBandana(ch, null);
       detailKit(ch, null);
+      if (CBZ.dutyKit) CBZ.dutyKit.wear(ch, null);
       paintGloves(ch, null);
       return true;
     }
@@ -699,7 +713,15 @@
     paint(s.pelvis, c.legs);
     if (!pp || !pp.legs) { paint(s.legs, c.legs); paint(s.legsLower, c.legs); }
     if (!pp || !pp.torso) paint(s.torso, c.torso);
-    if (!pp || !pp.arms) { const ah = c.arms != null ? c.arms : c.torso; paint(s.arms, ah); paint(s.armsLower, ah); }
+    // ARMS. A painter that declares `sleeves` (a tee, a sleeveless dress) has
+    // already hung the rig's own flat sleeve + skin (clothes.js flatSleeves).
+    // Otherwise the flat sleeve is c.arms and the FOREARM c.forearms when set —
+    // a short-sleeved civilian keeps his bare forearm through a re-dress
+    // (plainRedress passes it) instead of every re-dress lengthening the tee.
+    if (!pp || (!pp.arms && !pp.sleeves)) {
+      const ah = c.arms != null ? c.arms : c.torso;
+      paint(s.arms, ah); paint(s.armsLower, c.forearms != null ? c.forearms : ah);
+    }
     // THE YOKE IS NOT A SECOND COLLAR. character.js's collar box is the
     // SHOULDER YOKE — the top of the torso column, a flat slab that no painted
     // garment ever reaches (applyClothes dresses torso/arms/legs/jacket and
@@ -760,6 +782,10 @@
       roleHat(ch, rec);
       paint(s.badge, null, !!(rec.cop || rec.badge));
     }
+    // THE DUTY KIT (entities/dutykit.js): rec.duty names it. Belt, holster,
+    // radio, torch, cuff case, epaulettes and the metal badge ride the uniform
+    // as ONE mesh, and any other fit (or none) takes them off.
+    if (CBZ.dutyKit) CBZ.dutyKit.wear(ch, rec || null);
     return true;
   }
   CBZ.cityRecolorRig = recolorRig;
@@ -812,37 +838,96 @@
     if (ch._gloved != null) { wear(ch.skinTone != null ? ch.skinTone : 0xcf9a72); ch._gloved = null; }
   }
 
-  // ---- THE DETAIL KIT: sunglasses + a coiled earpiece, parented to the neck
-  //      pivot in the FACE frame (character.js scales the face node by
-  //      headSize/0.60; eyes sit at y 0.34, face plane z 0.315), so the same
-  //      numbers fit a smaller head. Shared cached boxes + shared cmat
-  //      materials: nothing is allocated per wearer except the Mesh nodes.
-  const KIT_PARTS = [
-    // shades: two lenses, bridge, two temple arms
-    { k: "shades", w: 0.2, h: 0.12, d: 0.035, x: -0.135, y: 0.345, z: 0.335, hex: 0x0b0c10 },
-    { k: "shades", w: 0.2, h: 0.12, d: 0.035, x: 0.135, y: 0.345, z: 0.335, hex: 0x0b0c10 },
-    { k: "shades", w: 0.09, h: 0.028, d: 0.03, x: 0, y: 0.38, z: 0.34, hex: 0x1a1c21 },
-    { k: "shades", w: 0.025, h: 0.03, d: 0.33, x: -0.31, y: 0.37, z: 0.17, hex: 0x1a1c21 },
-    { k: "shades", w: 0.025, h: 0.03, d: 0.33, x: 0.31, y: 0.37, z: 0.17, hex: 0x1a1c21 },
-    // earpiece: the bud in the right ear and the clear coiled lead running
-    // down behind the jaw into the collar (the lead is the recognisable part)
-    { k: "earpiece", w: 0.045, h: 0.06, d: 0.05, x: 0.315, y: 0.3, z: 0.02, hex: 0xdcd8cf },
-    { k: "earpiece", w: 0.02, h: 0.36, d: 0.02, x: 0.3, y: 0.1, z: -0.07, hex: 0xd2cec5, rz: 0.1, lead: true },
-  ];
-  /* THE LEAD STOPS AT THE COLLAR (tools/overlap-audit.mjs: it ran 0.36 down
-     from the bud, 13 cm past the yoke top and 7.6 cm into the chest, and it
-     rides the NECK, so every head turn swept it through the torso). It now
-     runs from under the bud to the yoke top as THIS rig built it (measured
-     off skinSlots.collar at attach time, in the face frame), where it
-     disappears under the collar line instead of through the body. */
+  // ---- THE DETAIL KIT: wraparound shades + a coiled earpiece, ONE mesh -----
+  //      Seven boxes (two lens slabs, a bridge, two temples run straight back
+  //      through the skull, a bud inside the ear, a lead ending in mid air)
+  //      became one merged, vertex-coloured mesh per (mask, lead) on ONE shared
+  //      material: rounded lenses wrapped a touch round the face, a brow bar,
+  //      temples that flare out over the head to the ears, a bud in the left
+  //      ear and its lead running behind the jaw down into the collar band.
+  //      Built in the FACE frame (the neck pivot; character.js scales the face
+  //      by headSize/0.60), MEASURED on the shaped head: eyes at x +-0.14,
+  //      y 0.34, front z 0.30; the head is +-0.30 wide at eye height at z 0.1
+  //      and +-0.33 at the ear line; the nose bridge z 0.318.
+  const KIT_COL = { lens: 0x0b0c10, frame: 0x1a1c21, bud: 0xdcd8cf, lead: 0xcfcac0 };
+  const _kitGeo = {};
+  let _kitMat = null;
+  function kitMat() {
+    if (!_kitMat) { _kitMat = new THREE.MeshLambertMaterial({ vertexColors: true }); _kitMat._shared = true; }
+    return _kitMat;
+  }
+  function kitPiece(list, g, hex) {                 // non-indexed + a colour per vertex
+    const n = g.index ? g.toNonIndexed() : g;
+    if (n !== g) g.dispose();
+    n.computeVertexNormals();
+    const c = new THREE.Color(hex), cnt = n.attributes.position.count, col = new Float32Array(cnt * 3);
+    for (let i = 0; i < cnt; i++) { col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
+    list.push({ p: n.attributes.position.array, n: n.attributes.normal.array, c: col });
+    n.dispose();
+  }
+  // a thin bar from a to b (a box whose long axis is the segment)
+  function kitBar(list, a, b, w, h, hex) {
+    const A = new THREE.Vector3().fromArray(a), B = new THREE.Vector3().fromArray(b);
+    const len = A.distanceTo(B), g = new THREE.BoxGeometry(w, h, len);
+    const m = new THREE.Matrix4().lookAt(A, B, new THREE.Vector3(0, 1, 0));
+    m.setPosition(A.clone().add(B).multiplyScalar(0.5));
+    g.applyMatrix4(m);
+    kitPiece(list, g, hex);
+  }
+  function kitGeometry(mask, lead) {
+    const key = mask + "|" + (lead ? lead.top.toFixed(2) : "-");
+    let g = _kitGeo[key];
+    if (g) return g;
+    const list = [];
+    if (mask & 1) {
+      // lenses: a rounded rectangle, thin, each turned 0.14 rad so its outer
+      // edge follows the face back
+      const s = new THREE.Shape(), w = 0.095, h = 0.064, r = 0.03;
+      s.moveTo(-w + r, -h); s.lineTo(w - r, -h); s.quadraticCurveTo(w, -h, w, -h + r); s.lineTo(w, h - r);
+      s.quadraticCurveTo(w, h, w - r, h); s.lineTo(-w + r, h); s.quadraticCurveTo(-w, h, -w, h - r); s.lineTo(-w, -h + r);
+      s.quadraticCurveTo(-w, -h, -w + r, -h);
+      for (const sx of [1, -1]) {
+        const lg = new THREE.ExtrudeGeometry(s, { depth: 0.016, bevelEnabled: false, curveSegments: 3 });
+        lg.translate(0, 0, -0.008);
+        lg.applyMatrix4(new THREE.Matrix4().makeRotationY(sx * 0.14));
+        lg.translate(sx * 0.14, 0.345, 0.33);
+        kitPiece(list, lg, KIT_COL.lens);
+      }
+      kitBar(list, [-0.235, 0.402, 0.322], [0.235, 0.402, 0.322], 0.02, 0.02, KIT_COL.frame);   // the brow bar
+      kitBar(list, [-0.05, 0.37, 0.338], [0.05, 0.37, 0.338], 0.018, 0.018, KIT_COL.frame);     // the bridge over the nose
+      for (const sx of [1, -1]) {
+        kitBar(list, [sx * 0.232, 0.395, 0.31], [sx * 0.318, 0.39, 0.27], 0.018, 0.022, KIT_COL.frame);   // the hinge
+        kitBar(list, [sx * 0.322, 0.39, 0.27], [sx * 0.374, 0.37, -0.03], 0.016, 0.022, KIT_COL.frame);   // the temple, clear of the head
+      }
+    }
+    if (mask & 2) {
+      const bud = new THREE.SphereGeometry(0.024, 6, 4);
+      bud.translate(0.376, 0.3, -0.03);
+      kitPiece(list, bud, KIT_COL.bud);
+      if (lead) kitBar(list, [0.37, 0.28, -0.05], [0.24, lead.top + 0.035, -0.1], 0.014, 0.014, KIT_COL.lead);   // behind the jaw, down to the collar (it ends just over the band: an aimed or turned head swings it, and a lead through the collar is a lead through the neck)
+    }
+    let n = 0; for (const q of list) n += q.p.length;
+    const P = new Float32Array(n), N = new Float32Array(n), C = new Float32Array(n);
+    let o = 0; for (const q of list) { P.set(q.p, o); N.set(q.n, o); C.set(q.c, o); o += q.p.length; }
+    g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(P, 3));
+    g.setAttribute("normal", new THREE.BufferAttribute(N, 3));
+    g.setAttribute("color", new THREE.BufferAttribute(C, 3));
+    g.computeBoundingSphere();
+    g._shared = true;
+    return (_kitGeo[key] = g);
+  }
+  /* THE LEAD STOPS AT THE COLLAR (tools/overlap-audit.mjs: it once ran 0.36
+     down from the bud, 7.6 cm into the chest; ending inside the band it still
+     cut the band 5 mm when aiming). It rides the NECK, so it ends just over
+     the collar band's real top at the side of the neck (character.js: the band
+     stands 0.038 vs over the neck ring), in the face frame, on THIS rig. */
   function earLead(ch, k) {
     const col = ch.skinSlots && ch.skinSlots.collar && ch.skinSlots.collar[0];
-    const g = col && col.geometry, p = g && ((col.userData._cbzFlat && col.userData._cbzFlat.g && col.userData._cbzFlat.g.parameters) || g.parameters);
-    if (!p || !(p.height > 0) || !ch.neck || col.parent !== ch.neck.parent) return null;
-    const top = (col.position.y + p.height / 2 - ch.neck.position.y) / k;   // yoke top, face frame
-    const hi = 0.27, lo = top + 0.015;                                       // under the bud .. just over the collar (a nod rides it)
-    if (!(hi - lo > 0.04)) return null;
-    return { h: (hi - lo) / Math.cos(0.1), y: (hi + lo) / 2 };
+    const S = ch.torsoShape;
+    if (!col || !S || !ch.neck || col.parent !== ch.neck.parent) return null;
+    const top = (col.position.y + 0.038 * (S.vs || 1) - ch.neck.position.y) / k;
+    return isFinite(top) ? { top: top } : null;
   }
   function kitMask(kit) { return kit ? ((kit.shades ? 1 : 0) | (kit.earpiece ? 2 : 0)) : 0; }
   function detailKit(ch, kit) {
@@ -853,28 +938,17 @@
     if (cur) { if (cur.parent) cur.parent.remove(cur); ch._detailKit = null; }
     const neck = ch.neck;
     if (!want || !neck || typeof THREE === "undefined") return;
-    const node = new THREE.Group();
-    node.name = "detail-kit";
-    node.userData.mask = want;
-    const hs = (ch.profile && ch.profile.headSize) || 0.6;
-    node.scale.setScalar(hs / 0.6);
-    const lead = earLead(ch, hs / 0.6);
-    for (let i = 0; i < KIT_PARTS.length; i++) {
-      const q0 = KIT_PARTS[i];
-      if (!((q0.k === "shades" ? 1 : 2) & want)) continue;
-      const q = (q0.lead && lead) ? Object.assign({}, q0, lead) : q0;
-      const geo = CBZ.boxGeom ? CBZ.boxGeom(q.w, q.h, q.d) : new THREE.BoxGeometry(q.w, q.h, q.d);
-      const mat = CBZ.cmat ? CBZ.cmat(q.hex) : new THREE.MeshLambertMaterial({ color: q.hex });
-      const m = new THREE.Mesh(geo, mat);
-      m.position.set(q.x, q.y, q.z);
-      if (q.rz) m.rotation.z = q.rz;
-      m.castShadow = false; m.receiveShadow = false;
-      m.userData.clothingPart = "detail-" + q.k;
-      node.add(m);
-    }
-    neck.add(node);
-    ch._detailKit = node;
+    const k = ((ch.profile && ch.profile.headSize) || 0.6) / 0.6;
+    const m = new THREE.Mesh(kitGeometry(want, (want & 2) ? earLead(ch, k) : null), kitMat());
+    m.name = "detail-kit";
+    m.userData.mask = want;
+    m.userData.clothingPart = "detail-kit";
+    m.scale.setScalar(k);
+    m.castShadow = false; m.receiveShadow = false;
+    neck.add(m);
+    ch._detailKit = m;
   }
+
   CBZ.cityDetailKit = detailKit;
   // ---- EVERY RE-DRESS GOES THROUGH THE EXPORTED NAME ----------------------
   // city/armor.js lazily WRAPS CBZ.cityRecolorRig so that mounted armour is
@@ -1558,7 +1632,7 @@
   // hoodie, the tracksuit, a summer dress, an apron at a counter job — but
   // never a badge, crew colors, turnout gear or a $7500 tuxedo.
   const MINOR_BAN_ID = {
-    police: 1, swat: 1, sheriff: 1, soldier: 1, security: 1, corrections: 1, warden: 1,
+    police: 1, swat: 1, sheriff: 1, soldier: 1, security: 1, corrections: 1, warden: 1, precinct: 1, detective: 1,
     inmate: 1, inmate_cap: 1, inmate_tank: 1, inmate_orderly: 1, inmate_chapel: 1, firefighter: 1, ems: 1,
     doctor: 1, scrubs: 1, hivis: 1, construction: 1, coveralls: 1, janitor: 1, valet: 1,
     busdriver: 1, mailman: 1, pilot: 1, office: 1, chef: 1, dress: 1,
@@ -1812,6 +1886,7 @@
     // uniformed police by JOB, not only by kind:"cop" — the President's gate
     // (Uniformed Division), motorcade and checkpoint officers are posted as
     // kind "security" and fell through to a random civilian shirt on re-dress.
+    if (/\bdetective\b|plainclothes|plain clothes officer/i.test(job)) return CAT.detective;
     if (/police officer|patrol officer|uniformed division|state trooper|highway patrol/i.test(job)) return CAT.police;
     if (/bank teller|bank manager|count clerk|pit boss|air traffic controller|yacht broker|receptionist/i.test(job)) return CAT.office;
     if (/cage cashier/i.test(job)) return CAT.waiter || CAT.vendor;
@@ -2080,7 +2155,16 @@
       const headHex = readColor(s.head);
       if (arms === ped.char.skinTone || (headHex != null && arms === headHex)) arms = torso;
     }
+    // …AND A SHORT SLEEVE STAYS SHORT. ~45% of spawns (peds.js) and every
+    // crowd promotion (crowd.js setLook) wear the tee short: shirt sleeve to
+    // mid-bicep, the rig's own skin forearm. This re-dress painted the forearm
+    // the shirt colour, so the first recast after a promotion quietly turned
+    // every tee into a long sleeve. A forearm that is exactly this body's skin
+    // (built tone, live head, live hands) under a shirt sleeve is kept.
     const colors = { legs, torso, collar: torso, arms, shoes: 0x2b2b2b };
+    const fore = force ? null : readColor(s.armsLower);
+    if (fore != null && fore !== arms &&
+        (fore === ped.char.skinTone || fore === readColor(s.head) || fore === readColor(s.hands))) colors.forearms = fore;
     dressRig(ped.char, colors, { id: "basics", colors }, opts);
     ped._castFit = null;
     return colors;

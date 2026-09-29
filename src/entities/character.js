@@ -3576,7 +3576,9 @@
     g.setAttribute("normal", new THREE.BufferAttribute(new Float32Array(nUsed * 3), 3));
     const U = new Float32Array(nUsed * 2);
     for (let i = 0; i < nUsed; i++) {
-      if (paint) { const uv = paint.fn(TORSO_FACE[Fc[i]], Uq[i], Vq[i]); U[i * 2] = uv[0]; U[i * 2 + 1] = uv[1]; }
+      // (x: the vertex's body-local x, for a painter that lays the FRONT out in
+      // body units rather than across the face — city/clothes.js tailoring)
+      if (paint) { const uv = paint.fn(TORSO_FACE[Fc[i]], Uq[i], Vq[i], Pp[i * 3]); U[i * 2] = uv[0]; U[i * 2 + 1] = uv[1]; }
       else { U[i * 2] = Fc[i] < 4 ? (Fc[i] + Uq[i]) / 4 : Uq[i]; U[i * 2 + 1] = Vq[i]; }
     }
     g.setAttribute("uv", new THREE.BufferAttribute(U, 2));
@@ -3659,6 +3661,45 @@
       { y0, y1, off: opts.off != null ? opts.off : 0.03 * S.vs, flat: opts.flat || 0 });
   }
   CBZ.humanShellSpec = shellSpec;
+
+  // ---- c.badge: a thin metal shield laid on the chest (see makeCharacter) ----
+  let _badgeGeo = null;
+  function badgeGeometry() {
+    if (_badgeGeo) return _badgeGeo;
+    const s = 0.074, pts = [[0, 0.62], [-0.26, 0.5], [-0.5, 0.58], [-0.5, 0.12], [-0.34, -0.32], [0, -0.62], [0.34, -0.32], [0.5, 0.12], [0.5, 0.58], [0.26, 0.5]];
+    const sh = new THREE.Shape();
+    pts.forEach((p, i) => (i ? sh.lineTo(p[0] * s, p[1] * s) : sh.moveTo(p[0] * s, p[1] * s)));
+    const g = new THREE.ExtrudeGeometry(sh, { depth: 0.004, bevelEnabled: false, curveSegments: 1 });
+    g.computeBoundingSphere();
+    g._shared = true;
+    return (_badgeGeo = g);
+  }
+  // seat a badge mesh (userData.badgeAt {x, y}) on the body surface, `off`
+  // further out (a jacket shell's clearance), tilted to the surface normal and
+  // lifted until no corner of the plate sinks into the chest
+  const _bn = new THREE.Vector3(), _bz = new THREE.Vector3(0, 0, 1);
+  function seatBadgeMesh(S, mesh, off) {
+    const at = mesh && mesh.userData && mesh.userData.badgeAt;
+    if (!S || !at) return;
+    const f = (x, y) => torsoSurfaceZ(S, x, y, 1), e = 0.01, x = at.x, y = at.y;
+    const fx = (f(x + e, y) - f(x - e, y)) / (2 * e), fy = (f(x, y + e) - f(x, y - e)) / (2 * e);
+    _bn.set(-fx, -fy, 1).normalize();
+    let lift = 0;
+    for (const dx of [-0.037, 0, 0.037]) for (const dy of [-0.046, 0, 0.046]) {
+      const planeZ = f(x, y) + fx * dx + fy * dy;                 // the plate's plane through the centre
+      lift = Math.max(lift, (f(x + dx, y + dy) - planeZ) * _bn.z);
+    }
+    mesh.quaternion.setFromUnitVectors(_bz, _bn);
+    const d = lift + (off || 0) + 0.002;
+    mesh.position.set(x + _bn.x * d, y + _bn.y * d, f(x, y) + _bn.z * d);
+  }
+  // CBZ.humanSeatBadge(rig, off): re-seat the rig's c.badge on its outermost
+  // layer (city/clothes.js calls it with the jacket shell's clearance, or 0)
+  CBZ.humanSeatBadge = function (rig, off) {
+    const list = rig && rig.skinSlots && rig.skinSlots.badge;
+    if (!list || !rig.torsoShape) return;
+    for (let i = 0; i < list.length; i++) seatBadgeMesh(rig.torsoShape, list[i], off);
+  };
 
   /* ==== THE NECK COLUMN (merged into the head geometry) ====================
      In the HEAD's frame (the adult 0.60 head; the neck pivot is y = -0.30):
@@ -4073,11 +4114,20 @@
         buckle.position.set(0, 1.02, 0.29); body.add(buckle); beltParts.push(buckle);
       }
     }
+    /* THE BADGE was a 16 cm gold CUBE on the wearer's RIGHT. It is a thin
+       metal shield now (~5 x 6 cm), on the LEFT chest (+x: the rig faces +z,
+       its right arm is at -x) just above where a pocket flap sits, laid on the
+       real surface and tilted to its normal. Police/CO/sheriff rigs carry
+       their badge in entities/dutykit.js's merged kit instead; this one is
+       for rigs built with c.badge (warlord rank badges). When a jacket shell
+       goes on, city/clothes.js re-seats it onto the shell (CBZ.humanSeatBadge). */
     if (c.badge) {
-      const badge = new THREE.Mesh(boxGeom(0.16, 0.16, 0.05), cmat(0xffd451));
-      const bx = -0.28 * P.torsoW / 0.92, by = chestBot + chestH * 0.64;
-      badge.position.set(bx, by, torsoSurfaceZ(TS, bx, by, 1) + 0.02);       // pinned ON the chest, not in front of a box
+      const badge = new THREE.Mesh(badgeGeometry(), cmat(0xffd451));
+      badge.castShadow = false;
+      const by = base + P.torsoH * 0.73, bx = 0.40 * TS.at(by).a;
+      badge.userData.badgeAt = { x: bx, y: by };
       body.add(badge); badgeParts.push(badge);
+      seatBadgeMesh(TS, badge, 0);
     }
     /* HEADWEAR (entities/headwear.js, CBZ.headwear) is fitted AFTER the rig
        exists — c.cap (a role's uniform hat: c.capKind picks which) and c.hat
