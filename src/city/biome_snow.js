@@ -1389,14 +1389,21 @@
           return m;
         }
         const PEAK = 260;
-        xs = CBZ.mtnAdaptiveAxis(segX, A_MINX, A_MAXX, function (x) {
-          const run = (x > 444 && x < 500) ? 0.9 : 0;      // ski-run corridor
-          return Math.max(run, Math.pow(Math.min(1, colMax(x) / PEAK), 0.75));
-        }, { floor: 0.36 });
-        zs = CBZ.mtnAdaptiveAxis(segZ, A_MINZ, A_MAXZ, function (z) {
-          const run = (z > -1715 && z < -1265) ? 0.55 : 0;
-          return Math.max(run, Math.pow(Math.min(1, rowMax(z) / PEAK), 0.75));
-        }, { floor: 0.36 });
+        // the axes are ~100k macro samples: baked with the mesh (core/bakecache.js)
+        const AXSIG = CBZ.bakeSig ? CBZ.bakeSig("mercy-axes|" + CBZ.bakeHash({ segX: segX, segZ: segZ, A: [A_MINX, A_MAXX, A_MINZ, A_MAXZ], cfg: CFGS })) : null;
+        const AXB = AXSIG && CBZ.bakeGet ? CBZ.bakeGet("mercy-axes", AXSIG) : null;
+        if (AXB && AXB.x && AXB.z) { xs = new Float64Array(AXB.x); zs = new Float64Array(AXB.z); }
+        else {
+          xs = CBZ.mtnAdaptiveAxis(segX, A_MINX, A_MAXX, function (x) {
+            const run = (x > 444 && x < 500) ? 0.9 : 0;      // ski-run corridor
+            return Math.max(run, Math.pow(Math.min(1, colMax(x) / PEAK), 0.75));
+          }, { floor: 0.36 });
+          zs = CBZ.mtnAdaptiveAxis(segZ, A_MINZ, A_MAXZ, function (z) {
+            const run = (z > -1715 && z < -1265) ? 0.55 : 0;
+            return Math.max(run, Math.pow(Math.min(1, rowMax(z) / PEAK), 0.75));
+          }, { floor: 0.36 });
+          if (AXSIG && CBZ.bakePut) CBZ.bakePut("mercy-axes", AXSIG, { x: Float64Array.from(xs), z: Float64Array.from(zs) });
+        }
         // authored frame → mesh-local (the mesh sits at CX,CZ)
         for (let i = 0; i < xs.length; i++) xs[i] = xs[i] + DX - CX;
         for (let i = 0; i < zs.length; i++) zs[i] = zs[i] + DZ - CZ;
@@ -1432,7 +1439,22 @@
       const _mixOut = { v: 0 };
       const n = new THREE.Vector3(), light = new THREE.Vector3(-0.35, 0.82, 0.45).normalize();
       const mH = vertexMemo(mountainHeightAt);
-      for (let i = 0; i < pa.count; i++) {
+      // BAKED ONCE PER VERSION (core/bakecache.js), like the Greater Range
+      let MSIG = null, MBAKE = null;
+      if (CBZ.bakeSig && CBZ.bakeGet) {
+        try {
+          const ax = new Float64Array(pa.count * 2);
+          for (let i = 0; i < pa.count; i++) { ax[i * 2] = pa.getX(i); ax[i * 2 + 1] = pa.getZ(i); }
+          MSIG = CBZ.bakeSig("mount-mercy|" + CBZ.bakeHashArr(ax) + "|" + CBZ.bakeHash({ CX: CX, CZ: CZ, DX: DX, DZ: DZ, SKIN: SKIN, STRATA: STRATA, cfg: CFGS }));
+          MBAKE = CBZ.bakeGet("mount-mercy", MSIG);
+          if (MBAKE && !(MBAKE.y && MBAKE.y.length === pa.count && MBAKE.c && MBAKE.c.length === colors.length && (!mats || (MBAKE.m && MBAKE.m.length === mats.length)))) MBAKE = null;
+        } catch (e) { MSIG = null; MBAKE = null; }
+      }
+      if (MBAKE) {
+        for (let i = 0; i < pa.count; i++) pa.setY(i, MBAKE.y[i]);
+        colors.set(MBAKE.c); if (mats) mats.set(MBAKE.m);
+      }
+      for (let i = MBAKE ? pa.count : 0; i < pa.count; i++) {
         const wx = CX + pa.getX(i), wz = CZ + pa.getZ(i);
         const y = mH(wx, wz);
         pa.setY(i, y);
@@ -1558,6 +1580,11 @@
         colors[i * 3 + 1] = c.g * shade;
         colors[i * 3 + 2] = c.b * shade;
       }
+      if (!MBAKE && MSIG && CBZ.bakePut) {
+        const Y = new Float32Array(pa.count);
+        for (let i = 0; i < pa.count; i++) Y[i] = pa.getY(i);
+        CBZ.bakePut("mount-mercy", MSIG, { y: Y, c: colors, m: mats || new Float32Array(0) });
+      }
       pa.needsUpdate = true;
       geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
       if (mats) geo.setAttribute("aMat", new THREE.BufferAttribute(mats, 4));
@@ -1640,6 +1667,10 @@
       let gxs = null, gzs = null;
       if (CBZ.mtnAdaptiveAxis && CBZ.mtnGridGeometry) {
         const PN = 44, GPEAK = 400;
+        const GAXSIG = CBZ.bakeSig ? CBZ.bakeSig("greater-axes|" + CBZ.bakeHash({ segX: segX, segZ: segZ, A: [GREAT_A_MINX, GREAT_A_MAXX, GREAT_A_MINZ, GREAT_A_MAXZ], cfg: CFGS })) : null;
+        const GAXB = GAXSIG && CBZ.bakeGet ? CBZ.bakeGet("greater-axes", GAXSIG) : null;
+        if (GAXB && GAXB.x && GAXB.z) { gxs = new Float64Array(GAXB.x); gzs = new Float64Array(GAXB.z); }
+        else {
         gxs = CBZ.mtnAdaptiveAxis(segX, GREAT_A_MINX, GREAT_A_MAXX, function (x) {
           let m = 0;
           for (let k = 0; k <= PN; k++) {
@@ -1656,6 +1687,8 @@
           }
           return Math.pow(Math.min(1, m / GPEAK), 0.7);
         }, { floor: 0.30 });
+        if (GAXSIG && CBZ.bakePut) CBZ.bakePut("greater-axes", GAXSIG, { x: Float64Array.from(gxs), z: Float64Array.from(gzs) });
+        }
         for (let i = 0; i < gxs.length; i++) gxs[i] = gxs[i] + DX - gcx;
         for (let i = 0; i < gzs.length; i++) gzs[i] = gzs[i] + DZ - gcz;
       }
@@ -1698,7 +1731,23 @@
       const _mixG = { v: 0 };
       const n = new THREE.Vector3(), light = new THREE.Vector3(-0.36, 0.83, 0.43).normalize();
       const gH = vertexMemo(greaterMercyHeightAt);
-      for (let i = 0; i < pa.count; i++) {
+      // BAKED ONCE PER VERSION (core/bakecache.js): the range's heights and
+      // paint are a pure function of its grid, its placement and the config
+      let GSIG = null, GBAKE = null;
+      if (CBZ.bakeSig && CBZ.bakeGet) {
+        try {
+          const ax = new Float64Array(pa.count * 2);
+          for (let i = 0; i < pa.count; i++) { ax[i * 2] = pa.getX(i); ax[i * 2 + 1] = pa.getZ(i); }
+          GSIG = CBZ.bakeSig("greater-range|" + CBZ.bakeHashArr(ax) + "|" + CBZ.bakeHash({ gcx: gcx, gcz: gcz, DX: DX, DZ: DZ, SKIN: SKIN, STRATA_G: STRATA_G, cfg: CFGS }));
+          GBAKE = CBZ.bakeGet("greater-range", GSIG);
+          if (GBAKE && !(GBAKE.y && GBAKE.y.length === pa.count && GBAKE.c && GBAKE.c.length === colors.length && (!mats || (GBAKE.m && GBAKE.m.length === mats.length)))) GBAKE = null;
+        } catch (e) { GSIG = null; GBAKE = null; }
+      }
+      if (GBAKE) {
+        for (let i = 0; i < pa.count; i++) pa.setY(i, GBAKE.y[i]);
+        colors.set(GBAKE.c); if (mats) mats.set(GBAKE.m);
+      }
+      for (let i = GBAKE ? pa.count : 0; i < pa.count; i++) {
         const wx = gcx + pa.getX(i), wz = gcz + pa.getZ(i);
         const y = gH(wx, wz);
         pa.setY(i, y);
@@ -1784,6 +1833,11 @@
         colors[i * 3] = c.r * shade;
         colors[i * 3 + 1] = c.g * shade;
         colors[i * 3 + 2] = c.b * shade;
+      }
+      if (!GBAKE && GSIG && CBZ.bakePut) {
+        const Y = new Float32Array(pa.count);
+        for (let i = 0; i < pa.count; i++) Y[i] = pa.getY(i);
+        CBZ.bakePut("greater-range", GSIG, { y: Y, c: colors, m: mats || new Float32Array(0) });
       }
       pa.needsUpdate = true;
       geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));

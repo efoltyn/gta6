@@ -466,23 +466,7 @@
        is an any/min test, so visiting fewer items in the same relative order
        gives the same answer. A query with a margin wider than `pad` falls back
        to the full list. */
-    function gridIndex(n, rectOf, pad) {
-      const C = 256, map = new Map(), big = [];
-      for (let i = 0; i < n; i++) {
-        const r = rectOf(i);
-        if (!r) { big.push(i); continue; }
-        const x0 = Math.floor((r[0] - pad) / C), x1 = Math.floor((r[1] + pad) / C);
-        const z0 = Math.floor((r[2] - pad) / C), z1 = Math.floor((r[3] + pad) / C);
-        if ((x1 - x0 + 1) * (z1 - z0 + 1) > 400) { big.push(i); continue; }
-        for (let cx = x0; cx <= x1; cx++) for (let cz = z0; cz <= z1; cz++) {
-          const k = cx * 100003 + cz; let l = map.get(k); if (!l) map.set(k, l = []); l.push(i);
-        }
-      }
-      // merge the always-scanned big items into every list, in index order
-      const EMPTY = big.slice();
-      map.forEach(function (l, k) { if (big.length) { const m = l.concat(big); m.sort(function (a, b) { return a - b; }); map.set(k, m); } });
-      return { pad: pad, list: function (x, z) { return map.get(Math.floor(x / C) * 100003 + Math.floor(z / C)) || EMPTY; } };
-    }
+    function gridIndex(n, rectOf, pad) { return CBZ.rectGrid(n, rectOf, pad); }   // core/rectgrid.js
     function regRect(r) {
       if (!r) return null;
       if (r.kind === "circle") { const R = r.r + (r.pad || 0); return [r.cx - R, r.cx + R, r.cz - R, r.cz + R]; }
@@ -1615,7 +1599,32 @@
     // countryHeightAt four more times per vertex (that would have quintupled
     // this 103k-vertex loop's cost for a shading term).
     const rGrid = new Float32Array(pos.count);
-    for (let i = 0; i < pos.count; i++) {
+    /* THE PLATE IS BAKED ONCE PER VERSION (core/bakecache.js). This loop is the
+       biggest single piece of the city build on a phone (~20 field evaluations
+       for each of 224k vertices). Its outputs are a pure function of what the
+       signature below names: the code (script versions), the seed, the config,
+       every region / water body / blend / authored surface / graded footprint
+       it reads and the derived built-ground grid. Same inputs: last visit's
+       arrays. Anything different: computed exactly as before. */
+    let PLATE_SIG = null, PLATE_BAKE = null;
+    CBZ._plateSig = null;
+    if (CBZ.bakeSig && CBZ.bakeGet) {
+      try {
+        PLATE_SIG = CBZ.bakeSig("plate|" + CBZ.bakeHash({ W: W, D: D, SEG: SEG, cx0: cx0, cz0: cz0, COAST: COAST, HARBOR: HARBOR,
+          regs: regs, water: waterBodies, blends: CBZ._biomeBlendSpecs || null, asb: authoredSurfaceBounds, gr: gradedRegs.slice(0, gradedN),
+          annex: city.annex ? { cx: city.annex.cx, cz: city.annex.cz, r: city.annex.radius } : null, cfg: CFG }) + "|" + CBZ.bakeHashArr(dgHas) + CBZ.bakeHashArr(dgBox));
+        CBZ._plateSig = PLATE_SIG;            // the backdrop's inputs start here
+        PLATE_BAKE = CBZ.bakeGet("continent-plate", PLATE_SIG);
+        if (PLATE_BAKE && !(PLATE_BAKE.y && PLATE_BAKE.y.length === pos.count && PLATE_BAKE.c && PLATE_BAKE.c.length === colors.length && PLATE_BAKE.r && (!COAST || (PLATE_BAKE.s && PLATE_BAKE.s.length === pos.count)))) PLATE_BAKE = null;
+      } catch (e) { PLATE_SIG = null; PLATE_BAKE = null; }
+    }
+    if (PLATE_BAKE) {
+      const Y = PLATE_BAKE.y;
+      for (let i = 0; i < pos.count; i++) pos.setY(i, Y[i]);
+      colors.set(PLATE_BAKE.c); rGrid.set(PLATE_BAKE.r);
+      if (sGrid) sGrid.set(PLATE_BAKE.s);
+    }
+    for (let i = PLATE_BAKE ? pos.count : 0; i < pos.count; i++) {
       const wx = pos.getX(i) + cx0, wz = pos.getZ(i) + cz0;
       // two octaves of position-hash "noise" pick the patch tone —
       // deterministic per seed, no shared rng stream touched.
@@ -1702,6 +1711,11 @@
       }
       pos.setY(i, y);
       colors[i * 3] = c.r * shade; colors[i * 3 + 1] = c.g * shade; colors[i * 3 + 2] = c.b * shade;
+    }
+    if (!PLATE_BAKE && PLATE_SIG && CBZ.bakePut) {
+      const Y = new Float32Array(pos.count);
+      for (let i = 0; i < pos.count; i++) Y[i] = pos.getY(i);
+      CBZ.bakePut("continent-plate", PLATE_SIG, { y: Y, c: colors, r: rGrid, s: sGrid || new Float32Array(0) });
     }
 
     // ==================================================================

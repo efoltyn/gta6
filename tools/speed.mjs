@@ -20,6 +20,7 @@
          # check, so culling passes and a visible change is a LOOK REGRESSION
      node tools/speed.mjs --ask ab --toggle-file toggle.js   # a longer toggle (JS; `on` is the switch)
      node tools/speed.mjs --ask eval 'CBZ.treeAudit()'       # anything, in the live world
+     node tools/speed.mjs --ask prof 'CBZ.startRun()'        # ... under the CPU profiler: self + inclusive tops
      node tools/speed.mjs --ask reload                       # rebuild from edited sources (measured load)
      node tools/speed.mjs --ask info | stop
      node tools/speed.mjs --serve                            # run the world in the foreground instead
@@ -1725,6 +1726,14 @@ async function serveMain() {
       if (op === "reload") { res.ms = Date.now() - t0; return res; }
     }
     if (op === "eval") { res.value = await P.ev(q.expr, (q.timeoutS || 60) * 1000); res.ms = Date.now() - t0; return res; }
+    // --ask prof '<expr>': the expression under V8's CPU profiler (1 ms), the
+    // same self / inclusive tables as --profile, plus the expression's value
+    if (op === "prof") {
+      await P.s("Profiler.enable"); await P.s("Profiler.setSamplingInterval", { interval: 1000 }); await P.s("Profiler.start");
+      try { res.value = await P.ev(q.expr, (q.timeoutS || 300) * 1000); }
+      finally { const { profile } = await P.s("Profiler.stop", {}, 240000); const sm = summarizeProfiles({ run: profile }).run; res.profile = { totalMs: sm.totalMs, self: sm.topFunctions.slice(0, 25), inclusive: sm.inclusiveFunctions.slice(0, 50), files: sm.inclusiveFiles.slice(0, 25) }; }
+      res.ms = Date.now() - t0; return res;
+    }
     /* LOCKING. frames are absolute numbers: they wait for the machine lock
        (--no-lock skips it and says so). An in-page ab is PAIRED — base and
        candidate blocks alternate within a second of each other, so other
@@ -1848,11 +1857,12 @@ async function askMain() {
   if (has("--leave-on")) q.leave = "on";
   const tg = opt("--toggle", ""), tgf = opt("--toggle-file", "");
   if (tg || tgf) q.toggle = tgf ? fs.readFileSync(tgf, "utf8") : tg;
+  if (ASK === "prof") { const f = opt("--eval-file", ""); q.expr = f ? fs.readFileSync(f, "utf8") : argv.filter((a, i) => !a.startsWith("--") && argv[i - 1] !== "--ask" && !/^--(spot|spots|frames|warm|world|root|url|eval-file|toggle|toggle-file|look-dir|pairs|min-pairs|settle-frames|idle|seed|device|preload|query|slice|slice-spots|gpu|shaders|mode|modes|ref|mem-budget)$/.test(argv[i - 1] || "")).join(" "); }
   if (ASK === "eval") { const f = opt("--eval-file", ""); q.expr = f ? fs.readFileSync(f, "utf8") : argv.filter((a, i) => !a.startsWith("--") && argv[i - 1] !== "--ask" && !/^--(spot|spots|frames|warm|world|root|url|eval-file|toggle|toggle-file|look-dir|pairs|min-pairs|settle-frames|idle|seed|device|preload|query|slice|slice-spots|gpu|shaders|mode|modes|ref|mem-budget)$/.test(argv[i - 1] || "")).join(" "); }
   let r;
   try { r = await post(w.port, q, 30 * 60 * 1000); } catch (e) { console.error("[speed] query failed: " + e.message); process.exit(1); }
   const O = (s) => process.stdout.write(s + "\n");
-  if (has("--json-out") || ASK === "info" || ASK === "eval" || ASK === "stop") O(JSON.stringify(r, null, 1));
+  if (has("--json-out") || ASK === "info" || ASK === "eval" || ASK === "prof" || ASK === "stop") O(JSON.stringify(r, null, 1));
   if (r.reloaded) O(`reloaded (${r.reloaded.why}): load ${r.reloaded.load} ms = build ${r.reloaded.build} + first frame ${r.reloaded.firstFrame} + settle ${r.reloaded.settle}; CPU main ${r.reloaded.cpuMain} ms, GPU process ${r.reloaded.gpuProc} ms`);
   if (ASK === "frames") for (const [n, o] of Object.entries(r.spots || {}))
     O(`${n.padEnd(9)} frame ${fmt(o.frame)} ms (p95 ${fmt(o.p95)})  cpu ${fmt(o.cpu)} [sim ${fmt(o.sim)} always ${fmt(o.always)} render ${fmt(o.render)}]  gpu ${fmt(o.gpu)} [main ${fmt(o.gpuMain)} shadow ${fmt(o.gpuShadow)} rt ${fmt(o.gpuRt)}]  CPU/frame main ${fmt(o.cpuThread)} gpuProc ${fmt(o.gpuProcCpu)}  calls ${o.calls} tris ${((o.tris || 0) / 1e6).toFixed(2)}M\n` +
