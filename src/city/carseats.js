@@ -407,7 +407,12 @@
         const st = m.byId[d.seats[k]];
         if (ok(st, occupant(car, st.id))) { s = st; break; }
       }
-      if (!best || dist < best.d) best = { door: d, seat: s, d: dist };
+      // a door with nobody's seat behind it (a frozen passenger, a full
+      // bench) is not the door you mean: the next one that has a seat wins,
+      // so the verb is never pinned on a door that then walks you round
+      // the car to a different one
+      const score = dist + (s ? 0 : 3);
+      if (!best || score < best.score) best = { door: d, seat: s, d: dist, score: score };
     }
     return best;
   }
