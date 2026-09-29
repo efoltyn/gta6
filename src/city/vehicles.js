@@ -6401,7 +6401,18 @@
      skipped by both passes. Waking is a round-robin slice of the sleep list
      per frame (never a scan of all 500) plus wakeCar() at every door into a
      car's state: damage, fire, tyres, entry, carjack, hold, scrap. */
-  const SLEEP_D2 = 150 * 150, WAKE_D2 = 140 * 140, WAKE_SLICE = 24;
+  /* THE SLEEP RING IS THE FOG, NOT 150 m. A parked car used to vanish past
+     150 m and reappear there: inside a 380 m (phone) or 760 m fog that is a
+     car popping into view (owner: "anything that generates within view is
+     slop"). Between 35 m and the fog a settled parked car is drawn by
+     city/carinstances.js's shared instanced pools (far tier: carlod.js's
+     sub-pixel twins), which costs no per-car work, so it can go all the way
+     out; it only sleeps (hidden) where the fog has already made it
+     invisible. CBZ.carSleepD2 is the one number both files read. */
+  CBZ.carSleepD2 = function () { const f = Math.max(150, (+CBZ.cityFogFar || 150) + 30); return f * f; };
+  let SLEEP_D2 = 150 * 150, WAKE_D2 = 140 * 140;
+  const WAKE_SLICE = 24;
+  function sleepRing() { SLEEP_D2 = CBZ.carSleepD2(); const w = Math.sqrt(SLEEP_D2) - 10; WAKE_D2 = w * w; }
   const sleepers = [];
   let _wakeCursor = 0;
   /* THREE STATES, ONE DOOR. A parked car is AWAKE (draws itself), PROXIED
@@ -6435,6 +6446,7 @@
   CBZ.cityCarSleepable = sleepable;     // carinstances.js re-checks it on every proxy, every frame
   const PROXY_IN2 = 35 * 35;            // == carinstances.js PROXY_IN (it re-checks the band itself)
   function wakeSlice(camx, camz) {
+    sleepRing();                        // the fog can change with the quality tier / weather
     const n = Math.min(WAKE_SLICE, sleepers.length);
     for (let k = 0; k < n; k++) {
       if (!sleepers.length) return;

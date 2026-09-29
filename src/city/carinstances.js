@@ -76,7 +76,9 @@
 
   const PROXY_IN = 35, PROXY_OUT = 31;          // enter past 35 m, back to the real car inside 31 m (hysteresis)
   const PROXY_IN2 = PROXY_IN * PROXY_IN, PROXY_OUT2 = PROXY_OUT * PROXY_OUT;
-  const SLEEP_D2 = 150 * 150;                   // == vehicles.js SLEEP_D2 (past it the car sleeps, hidden)
+  // == vehicles.js's sleep ring (the fog + 30 m, never under 150 m): the
+  // pools draw a parked car all the way out to where the fog hides it
+  function sleepD2() { return CBZ.carSleepD2 ? CBZ.carSleepD2() : 150 * 150; }
   const CHUNK = 16;                             // first pool capacity; doubles on demand
   const NEW_POOLS_PER_FRAME = 2;                // shader-variant compiles spread over frames
   const CULL_PAD = 1.0;                         // m of slack on every car sphere test
@@ -332,7 +334,7 @@
     const grp = c.group;
     if (grp.visible === false || !grp.parent) return false;
     const d2 = carDist2(c);
-    if (d2 <= PROXY_IN2 || d2 >= SLEEP_D2) return false;
+    if (d2 <= PROXY_IN2 || d2 >= sleepD2()) return false;
     // the real car is captured at full detail; the pools pick the tier (carlod.js)
     if (CBZ.carLodRestore) CBZ.carLodRestore(c);
     const L = CBZ.carLod, lod = !!(L && L.wantLod(d2, false));
@@ -480,6 +482,7 @@
     }
     if (!proxies.length && !poolList.length) return;
     const view = scratch() && frustumReady();
+    const SD2 = sleepD2();
     for (let i = proxies.length - 1; i >= 0; i--) {
       const rec = proxies[i];
       if (i >= proxies.length) continue;          // a release above swapped the list
@@ -491,7 +494,7 @@
       if (!stillExact(rec)) { release(c); c._proxyRetry = frame + 120; continue; }
       const d2 = carDist2(c);
       if (d2 < PROXY_OUT2) { release(c); continue; }
-      if (d2 > SLEEP_D2) {
+      if (d2 > SD2) {
         release(c);
         if (CBZ.citySleepCar) CBZ.citySleepCar(c);  // hidden past the ring, exactly like vehicles.js would next frame
         continue;
