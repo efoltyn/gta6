@@ -515,12 +515,12 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/textures_surface.js?v=surf2"></script>
 <script src="src/world/materials.js?v=pbr1"></script>
 <script src="src/world/fuel_station.js?v=fuel1"></script>
-<script src="src/world/prisonkit.js?v=tow929"></script>
+<script src="src/world/prisonkit.js?v=tow929b"></script>
 <!-- THE LADDER, DRAWN (world/ladderkit.js): stiles, rungs and a cage built
      off the same numbers systems/climb.js climbs, + railed landings. Every
      tower ladder in every game is made here and registered with climb.js. -->
 <script src="src/world/ladderkit.js?v=lad1"></script>
-<script src="src/world/corridorkit.js?v=doors929"></script>
+<script src="src/world/corridorkit.js?v=tow929b"></script>
 <!-- Masonry textures: procedural brick (stretcher bond + header courses) and
      ashlar (drafted-margin blocks) CanvasTextures + the fixed 6-colourway
      palette. After materials.js — it consumes CBZ.cmat. -->
@@ -561,7 +561,7 @@ document.body.appendChild(b);}}catch(e){}})();
      early — every cross-file reader (e.g. CBZ.breaker) only touches them
      from inside a runtime callback, long after all scripts have loaded. -->
 <script src="src/world/clutter.js?v=dsl3"></script>
-<script src="src/world/door.js?v=doors929"></script>
+<script src="src/world/door.js?v=tow929b"></script>
 <script src="src/world/exit.js?v=doors929"></script>
 
 <!-- 2b. rooms (need world helpers; loaded after coins for stash drops) -->
@@ -687,7 +687,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/roombuild.js"></script>
 <script src="src/world/cafeteria.js?v=m0928s"></script>
 <script src="src/world/lounge.js?v=m0928s"></script>
-<script src="src/world/gunroom.js?v=doors929"></script>
+<script src="src/world/gunroom.js?v=tow929b"></script>
 <script src="src/world/ventilation.js?v=m489457"></script>
 <script src="src/world/escape_routes.js?v=tow929"></script>
 <script src="src/world/southblock.js?v=vit3"></script>
@@ -724,7 +724,7 @@ document.body.appendChild(b);}}catch(e){}})();
      warden it schedules is spawned there) and after roofs.js (it asks
      CBZ.prisonRoof for its own ceiling); BEFORE prisonschedule.js, whose
      block ids it reads at runtime. -->
-<script src="src/world/adminwing.js?v=doors929"></script>
+<script src="src/world/adminwing.js?v=tow929b"></script>
 
 <!-- THE COMPOUND'S REAL SIZE (owner 2026-08-11: "the prison should be bigger…
      think of scale of human vs prison size"). 92x195 m of authored prison was
@@ -739,7 +739,7 @@ document.body.appendChild(b);}}catch(e){}})();
      and cafeteria.js (CBZ.prisonDress fittings); AFTER guards.js + adminwing.js
      so it borrows the same CBZ.jailBoost run watcher; and it must follow
      world/yard.js, which cuts the four gate gaps this file stands gates in. -->
-<script src="src/world/prisonwings.js?v=tow929"></script>
+<script src="src/world/prisonwings.js?v=tow929b"></script>
 <script src="src/world/prisongrounds.js?v=tow929"></script>
 <script src="src/world/corridors.js?v=tow929"></script>
 
