@@ -1560,7 +1560,7 @@
       if (rank >= 2) maybe("Keycard", key(actor.post === "gate" || actor.post === "wing" ? 0.75 : 0.6));
       if (actor.post === "gate") add("Gate Key");     // the exit's key is on the exit's man, not rolled
       if (actor.post === "corridor") add("Corridor Key");
-      if (actor.post === "tower") add("Rifle");        // the post's carbine, slung up the ladder with him
+      if (actor.post === "tower") { add("Rifle"); add("Corridor Key"); }   // the post's carbine, and the key to his tower's door
       if (actor.corrupt) { maybe("Cash Roll", 0.6); maybe("Burner SIM", 0.4); maybe("Gold Tooth", 0.2); maybe("Cigarette Carton", 0.45); }
       // Guns are a CITY thing now — the jail is mostly shivs and fists. The
       // warden still rarely carries one, but firearms moved out to the streets.

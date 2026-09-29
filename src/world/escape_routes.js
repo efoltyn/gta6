@@ -212,6 +212,22 @@
   CBZ.culvertGrate = yardCulvert;
   CBZ.altExitZones.push({ x: -9, z: SZ + 3, r: 3.4, name: "culvert" });
 
+  // ---- route 3: OVER THE WALL (2026-09-29). The towers on the outer wire
+  // hang their catwalks out over it (world/prisonkit.js section 5): vault
+  // the rail and drop twelve metres, or go down a Bedsheet Rope tied to it
+  // (entities/towerwatch.js). Outside the wall is not yet out — the tower
+  // fire covers the ground under it — but get CLEAR of it, into the field,
+  // and you are gone. A test, not a circle: the whole outside of the wire.
+  const OUTW = (CBZ.WORLD && CBZ.WORLD.wings) || { x0: -124, x1: 124, z0: -116, z1: 128 };
+  const CLEAR = 14;
+  CBZ.altExitZones.push({
+    name: "over the wall", kind: "wall",
+    test: function (x, z) {
+      if (CBZ.playerDowned && CBZ.playerDowned()) return false;
+      return x < OUTW.x0 - CLEAR || x > OUTW.x1 + CLEAR || z < OUTW.z0 - CLEAR || z > OUTW.z1 + CLEAR;
+    },
+  });
+
   // (2026-09-27) The dark 6.3 x 14.8 m "ditch path" slab and its two 45 cm
   // kerbs ran straight through the middle of the MESS HALL floor — a drainage
   // ditch across a dining room. Deleted: the hatches are the route.

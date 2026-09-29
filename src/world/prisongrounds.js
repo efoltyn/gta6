@@ -271,7 +271,7 @@
     const YHn = (CBZ.DIM && CBZ.DIM.YH) || 11;
     for (const s of [0, 1]) {
       const cx = VG.x0 + 5 + s * 10;
-      const leaf = addBox(cx, 3.6, VG.z, 9.7, 7.2, 0.32, 0x4a525c, { solid: true, blockLOS: true });
+      const leaf = addBox(cx, 3.6, VG.z, 9.7, 7.2, 0.32, 0x4a525c, { solid: true, blockLOS: true, y0: 0, y1: 7.2 });
       if (leaf.userData.collider) leaf.userData.collider.noBreach = true;
       K.skinBox(leaf, "steel", 0x5b636d);
       for (const y of [0.9, 2.6, 4.3, 6.0]) stat(new THREE.BoxGeometry(9.5, 0.18, 0.12), steelDark, cx, y, VG.z + 0.22, { cast: false });
@@ -280,11 +280,14 @@
     // the wicket in the west leaf, a hinge column either side, a lintel beam with the coil over it
     stat(new THREE.BoxGeometry(0.9, 2.1, 0.06), steelDark, VG.x0 + 2.2, 1.06, VG.z + 0.2, { cast: false });
     for (const x of [VG.x0 - 0.5, VG.x1 + 0.5]) {
-      const col = addBox(x, YHn / 2, VG.z, 1.4, YHn, 1.6, 0x9aa3ad, { solid: true, blockLOS: true });
+      const col = addBox(x, YHn / 2, VG.z, 1.4, YHn, 1.6, 0x9aa3ad, { solid: true, blockLOS: true, y0: 0, y1: YHn });
       if (col.userData.collider) col.userData.collider.noBreach = true;
       K.skinBox(col, "concrete", 0xa9adb1);
     }
-    const lintel = addBox((VG.x0 + VG.x1) / 2, 9.2, VG.z, VG.x1 - VG.x0 + 1, 3.6, 1.0, 0x9aa3ad, { cast: true });
+    // (every piece of the port is solid to its own height and no higher: a
+    // heightless collider is a wall to the sky, see world/yard.js)
+    const lintel = addBox((VG.x0 + VG.x1) / 2, 9.2, VG.z, VG.x1 - VG.x0 + 1, 3.6, 1.0, 0x9aa3ad, { cast: true, solid: true, y0: 7.4, y1: 11 });
+    if (lintel.userData.collider) lintel.userData.collider.noBreach = true;
     K.skinBox(lintel, "panel", 0x9aa3ad);
     K.program("sally-port", PEN.x0, PEN.x1, OUT.z0, PEN.z1);
   })();

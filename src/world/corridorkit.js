@@ -281,17 +281,24 @@
      infill cfg { axis "x" (wall along x at z = fixed) | "z", a0, a1 (the
      whole opening), c0, c1 (the door's rough opening inside it), fixed, t,
      top (full height), head (door head), color, skin, bands (two-tone block
-     paint, the corridors' finish) }. The piers are solid to their full
-     height; the head over the door is LOS-only (actors are 2-D boxes: a
-     solid lintel would seal the doorway for every body). */
+     paint, the corridors' finish) }. Every piece is solid exactly over the
+     band it is drawn in (2026-09-29): the piers from the floor to `top`, the
+     head over the door from `head` to `top`. (The head used to be LOS-only on
+     the belief that actors are 2-D boxes and a banded lintel would seal the
+     door; systems/actorcollide.js and every mover honour y0/y1 now, and a
+     head at door height clears a 1.7 m body. The piers had no band at all:
+     over their top they were a wall to the sky.) */
   function infill(cfg) {
     const along = cfg.axis === "z", f = cfg.fixed, t = cfg.t || 0.3, top = cfg.top || 3.6;
     const color = cfg.color != null ? cfg.color : BLOCK_HIGH, skin = cfg.skin === undefined ? "block" : cfg.skin;
     const piece = function (p0, p1, y0, y1, solid) {
       if (p1 - p0 < 0.02 || y1 - y0 < 0.02) return null;
       const c = (p0 + p1) / 2, hgt = y1 - y0;
-      const m = along ? addBox(f, y0 + hgt / 2, c, t, hgt, p1 - p0, color, { solid: solid, blockLOS: true, cast: true })
-        : addBox(c, y0 + hgt / 2, f, p1 - p0, hgt, t, color, { solid: solid, blockLOS: true, cast: true });
+      // solid exactly as tall as it is drawn: a pier with no band was a wall
+      // to the sky over its own top (a tower catwalk, a roof edge)
+      const o = { solid: solid, blockLOS: true, cast: true, y0: y0, y1: y1 };
+      const m = along ? addBox(f, y0 + hgt / 2, c, t, hgt, p1 - p0, color, o)
+        : addBox(c, y0 + hgt / 2, f, p1 - p0, hgt, t, color, o);
       if (m.userData.collider) m.userData.collider.noBreach = true;
       if (skin) K.skinBox(m, skin, color);
       if (cfg.bands) {
@@ -312,7 +319,7 @@
     };
     piece(cfg.a0, cfg.c0, 0, top, true);
     piece(cfg.c1, cfg.a1, 0, top, true);
-    if (cfg.head != null && top > cfg.head) piece(cfg.c0, cfg.c1, cfg.head, top, false);
+    if (cfg.head != null && top > cfg.head) piece(cfg.c0, cfg.c1, cfg.head, top, true);
   }
 
   /* ==========================================================
@@ -402,8 +409,24 @@
     return {
       leaves: leaves,
       clear: { a0: in0, a1: in1 },
+      // where the shut leaf stands across the wall: its own plane, not the
+      // whole depth of the reveal (see leafCollider)
+      plane: { along: along, fixed: fixed, lz: open * (t / 2 - LT / 2) },
       set: function (u) { for (const L of leaves) L.pivot.rotation.y = L.base + L.swing * u; },
     };
+  }
+
+  /* THE SHUT LEAF'S COLLIDER (2026-09-29): the slab of the leaf, 12 cm
+     through, over the opening, from the floor to the frame head. It used to
+     be the whole wall's depth to the sky: in a 1 m gate wall that was 45 cm
+     of invisible wall in the reveal in front of the leaf, and above the
+     frame a wall to the clouds. */
+  const LEAF_HALF = 0.06;
+  function leafCollider(set, a0, a1, y0, y1, ref) {
+    const P = set.plane, c = P.along ? P.fixed - P.lz : P.fixed + P.lz;
+    return P.along
+      ? { minX: c - LEAF_HALF, maxX: c + LEAF_HALF, minZ: Math.min(a0, a1), maxZ: Math.max(a0, a1), ref: ref, y0: y0, y1: y1 }
+      : { minX: Math.min(a0, a1), maxX: Math.max(a0, a1), minZ: c - LEAF_HALF, maxZ: c + LEAF_HALF, ref: ref, y0: y0, y1: y1 };
   }
 
   /* ==========================================================
@@ -607,8 +630,7 @@
       id: cfg.id, x: along ? fixed : (a0 + a1) / 2, z: along ? (a0 + a1) / 2 : fixed,
       group: L.pivot, pivots: set.leaves.map(function (q) { return q.pivot; }), set: set, kind: "swing",
       slabs: set.leaves.map(function (q) { return q.slab; }).filter(Boolean),
-      collider: along ? { minX: fixed - t / 2, maxX: fixed + t / 2, minZ: a0, maxZ: a1, ref: L.pivot }
-        : { minX: a0, maxX: a1, minZ: fixed - t / 2, maxZ: fixed + t / 2, ref: L.pivot },
+      collider: leafCollider(set, a0, a1, cfg.y0 || 0, h, L.pivot),   // h is the frame head's height (doorSet)
       autoShut: cfg.autoShut != null ? cfg.autoShut : 4,
       staffR: cfg.staffR || 2.4, alarm: !!cfg.alarm,
     };
@@ -786,7 +808,7 @@
     const glass = K.skin("glass");
     function wall(lx, y, lz, w, h, d, y0) {
       const p = P(lx, lz);
-      const m = addBox(p[0], y, p[1], w, h, d, WALL, y0 != null ? { solid: true, blockLOS: true, y0: y0, y1: y + h / 2 } : { solid: true, blockLOS: true });
+      const m = addBox(p[0], y, p[1], w, h, d, WALL, { solid: true, blockLOS: true, y0: y0 != null ? y0 : y - h / 2, y1: y + h / 2 });
       if (m.userData.collider) m.userData.collider.noBreach = true;
       K.skinBox(m, "panel", WALL);
       return m;
@@ -880,7 +902,10 @@
          modesty panel between them (it was a slab on one grey block), and
          the chair its seat anchor always promised — the anchor was there
          with no chair drawn under it, so a body sat on air. */
+      // the counter: a steel top on a closed front to the floor (it was a 6 cm
+      // top floating over nothing, solid from the floor)
       K.skinBox(addBox(dx, 0.74, wc, 0.7, 0.06, 2.6, 0x8a939d, { solid: true, y0: 0, y1: 0.77 }), "steel", 0x8a939d);
+      K.skinBox(addBox(dx, 0.355, wc, 0.62, 0.71, 2.5, 0x6d7680, { cast: false }), "steel", 0x6d7680);
       for (const e of [-1, 1]) stat(new THREE.BoxGeometry(0.62, 0.71, 0.05), steelDark, dx, 0.355, wc + e * 1.22, { cast: false });
       stat(new THREE.BoxGeometry(0.03, 0.5, 2.4), steelDark, dx - side * 0.28, 0.42, wc, { cast: false });
       stat(new THREE.BoxGeometry(0.46, 0.02, 0.34), K.skin("steel", 0x24282d), dx + side * 0.08, 0.78, wc - 0.3, { cast: false });   // keyboard
@@ -919,7 +944,7 @@
 
   CBZ.corridorKit = {
     door, crossDoor, doorSet, infill, detentionLeaf, steelLeaf, barLeaf, glassLeaf, BARS, Paint,
-    cardReader, intercom, lining, exitSign, strip, cagedLamp, keyTest, doors,
+    cardReader, intercom, lining, exitSign, strip, cagedLamp, keyTest, doors, leafCollider,
   };
   CBZ.buildSallyPort = buildSallyPort;
 })();

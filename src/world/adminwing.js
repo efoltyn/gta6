@@ -1138,7 +1138,8 @@
     d.pivots = d.set.leaves.map(function (L) { return L.pivot; });
     d.slabs = d.set.leaves.map(function (L) { return L.slab; }).filter(Boolean);
     d.lamp = cfg.lamp || hold.lamp || null;
-    d.collider = { minX: cfg.x0, maxX: cfg.x1, minZ: cfg.z - T / 2, maxZ: cfg.z + T / 2, ref: d.slabs[0] || d.pivots[0] };
+    // the leaf's own slab, floor to frame head (world/corridorkit.js leafCollider)
+    d.collider = CK.leafCollider(d.set, cfg.x0, cfg.x1, FL, cfg.h || DH, d.slabs[0] || d.pivots[0]);   // (the set's h is the head's height, from 0)
     CBZ.colliders.push(d.collider);
     if (CBZ.losBlockers) for (const s of d.slabs) CBZ.losBlockers.push(s);
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();

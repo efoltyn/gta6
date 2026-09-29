@@ -1300,6 +1300,8 @@
     let routeWin = null;
     if (CBZ.altExitZones) {
       for (const zone of CBZ.altExitZones) {
+        // a zone is a circle, or (over the wall) a test of where you stand
+        if (zone.test) { if (zone.test(player.pos.x, player.pos.z)) { routeWin = zone; break; } continue; }
         const ax = player.pos.x - zone.x, az = player.pos.z - zone.z;
         if (ax * ax + az * az < zone.r * zone.r) { routeWin = zone; break; }
       }
@@ -1308,7 +1310,7 @@
     if (ex * ex + ez * ez < 9) {
       if (!plan || plan.mayWin("gate", "prison-exit")) getOut("gate");
     } else if (routeWin) {
-      const kind = routeWin.name === "culvert" ? "culvert" : "gate";
+      const kind = routeWin.kind || (routeWin.name === "culvert" ? "culvert" : "gate");
       if (!plan || plan.mayWin(kind, routeWin.name)) getOut("route");
     }
   }

@@ -505,9 +505,11 @@
     if (B && B.start) { try { B.start(a, { dirX: dirX, dirZ: dirZ, force: 1.5, dead: !!a.dead, landed: true }); } catch (e) {} }
   }
 
-  /* ---- the player's landing after a fall off a ladder. physics.js pays
-     falls in the city and survival already; the prison paid nothing, so a
-     man dropped off a twelve-metre tower got up and walked. Not any more. */
+  /* ---- the player's landing after a fall off a ladder. A man knocked off
+     the rungs lands through physics.js's thrown-body path, which has no
+     landing charge of its own, so this watches for it and hands the height
+     to the prison's one fall rule (systems/capture.js CBZ.prisonFallLand,
+     which also takes physics.js's ordinary landings and charges once). */
   function fallWatch(dt) {
     if (!FALL.on) return;
     FALL.t += dt;
@@ -519,9 +521,7 @@
     FALL.on = false;
     const h = FALL.y0 - player.pos.y;
     if (!(h > 2.5) || !CBZ.game || CBZ.game.mode !== "escape") return;
-    const dmg = Math.round((h - 2.5) * 11);
-    if (CBZ.hurtPlayer) { try { CBZ.hurtPlayer(dmg, player.pos.x, player.pos.z, { weapon: "fall", shake: Math.min(1.2, 0.4 + h * 0.06), stun: 0.6 }); } catch (e) {} }
-    if (!player.dead) player.ko = Math.max(player.ko || 0, Math.min(4, 0.8 + h * 0.18));
+    if (CBZ.prisonFallLand) { try { CBZ.prisonFallLand(h, { knocked: true }); } catch (e) {} }
   }
 
   /* ================================================================

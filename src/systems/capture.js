@@ -448,6 +448,41 @@
       dirX: dx, dirZ: dz, fromX, fromZ, critical: crit });
     return !!W && (W.outcome === "down" || W.outcome === "dead");
   };
+  /* ---- A FALL (2026-09-29). physics.js hands every hard landing here
+     (cityFallLand, off the height fallen); climb.js hands a man knocked off
+     the rungs. It was a bullet wound (climb.js called hurtPlayer with
+     weapon "fall", which this file read as a round) or nothing at all (a
+     vault off a tower catwalk was free). What the ground does, by height:
+       under 2.8 m   nothing: the knees take it
+       to 4.5 m      a turned ankle: a limp for a minute
+       to 8 m        a broken ankle: a hard limp for the run, down a beat
+       to 17 m       broken legs (a tower is 12.75): on the ground for the
+                     count, then a crawl-paced hobble; you live
+       17 m and up   dead
+     The limp is CBZ.vitals.fall (speedMul); Doc Mercer splints it. The
+     landing is loud, and every screw in earshot is sent to it. */
+  let lastFallT = -1e9;
+  CBZ.prisonFallLand = function (h, o) {
+    if (!g || g.mode !== "escape" || player.dead || !(h > 2.8)) return null;
+    const t = clock();
+    if (t - lastFallT < 0.6) return null;              // one landing, whoever reports it
+    lastFallT = t;
+    if ((g.invuln || 0) > 0) return null;
+    if (h >= 17) { die("Fell", {}); return "dead"; }
+    const sev = h < 4.5 ? "sprain" : h < 8 ? "fracture" : "broken";
+    const hp = player.hp == null ? 100 : player.hp;
+    player.hp = Math.max(sev === "broken" ? 8 : 20, Math.min(hp, hp - Math.round((h - 2.8) * 6.5)));
+    lastHurtT = t;
+    const V = VIT();
+    if (V && V.fall) V.fall(player, h);
+    if (CBZ.shake) CBZ.shake(Math.min(1.3, 0.35 + h * 0.07));
+    flash();
+    if (CBZ.sfx) { CBZ.sfx("hit"); if (sev !== "sprain") CBZ.sfx("ko"); }
+    if (sev === "broken") player.ko = Math.max(player.ko || 0, 2.6);
+    else player.stun = Math.max(player.stun || 0, sev === "fracture" ? 1.1 : 0.35);
+    if (CBZ.guardHear) { try { CBZ.guardHear(player.pos.x, player.pos.z, sev === "sprain" ? 10 : 26, { type: "impact", player: true }); } catch (e) {} }
+    return sev;
+  };
   CBZ.shootPlayer = function (dmg, fromX, fromZ, opts) {
     return CBZ.hurtPlayer(dmg, fromX, fromZ, Object.assign({ weapon: "gun" }, opts || {}));
   };
@@ -1679,7 +1714,7 @@
     const hp = player.hp == null ? 100 : player.hp;
     const px = player.pos.x, pz = player.pos.z;
     const V = VIT();
-    const hurt = !!V && (V.bleeding(player) || V.blood(player) < 0.98);
+    const hurt = !!V && (V.bleeding(player) || V.blood(player) < 0.98 || (V.lame && V.lame(player) < 0.75));
     if (hp >= 100 && !hurt) return;
     if (inInfirmary(px, pz)) {
       const d = doc();

@@ -515,12 +515,12 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/textures_surface.js?v=surf2"></script>
 <script src="src/world/materials.js?v=pbr1"></script>
 <script src="src/world/fuel_station.js?v=fuel1"></script>
-<script src="src/world/prisonkit.js?v=w09290242x"></script>
+<script src="src/world/prisonkit.js?v=tow929b"></script>
 <!-- THE LADDER, DRAWN (world/ladderkit.js): stiles, rungs and a cage built
      off the same numbers systems/climb.js climbs, + railed landings. Every
      tower ladder in every game is made here and registered with climb.js. -->
 <script src="src/world/ladderkit.js?v=lad1"></script>
-<script src="src/world/corridorkit.js?v=doors929"></script>
+<script src="src/world/corridorkit.js?v=tow929b"></script>
 <!-- Masonry textures: procedural brick (stretcher bond + header courses) and
      ashlar (drafted-margin blocks) CanvasTextures + the fixed 6-colourway
      palette. After materials.js — it consumes CBZ.cmat. -->
@@ -551,9 +551,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/carfx.js?v=cars2"></script>
 <script src="src/world/ground.js?v=dsl3"></script>
 <script src="src/world/cellblock.js?v=doors929"></script>
-<script src="src/world/yard.js"></script>
+<script src="src/world/yard.js?v=tow929"></script>
 <script src="src/world/razorwire.js?v=dsl3"></script>
-<script src="src/world/towers.js?v=m489457-st1"></script>
+<script src="src/world/towers.js?v=tow929"></script>
 <!-- crates.js/props.js moved below systems/pieces.js (F7): both now call
      CBZ.spawnPiece at parse time, so they must load after chunks.js/
      pieces.js define it. Nothing else in this file's original 283-284 slot
@@ -561,7 +561,7 @@ document.body.appendChild(b);}}catch(e){}})();
      early — every cross-file reader (e.g. CBZ.breaker) only touches them
      from inside a runtime callback, long after all scripts have loaded. -->
 <script src="src/world/clutter.js?v=dsl3"></script>
-<script src="src/world/door.js?v=doors929"></script>
+<script src="src/world/door.js?v=tow929b"></script>
 <script src="src/world/exit.js?v=doors929"></script>
 
 <!-- 2b. rooms (need world helpers; loaded after coins for stash drops) -->
@@ -627,7 +627,7 @@ document.body.appendChild(b);}}catch(e){}})();
      man out (and he comes to, groggy); a bullet or a blade opens a bleed that
      drains his blood until someone wraps it or he bleeds out; state(a) is what
      cuffs, AI and HUD ask. Games plug in through CBZ.vitals.on(mode, hooks). -->
-<script src="src/systems/vitals.js?v=vit3"></script>
+<script src="src/systems/vitals.js?v=tow929"></script>
 <script src="src/systems/verbs_pickup.js?v=w09290250"></script>
 <script src="src/entities/player.js?v=mc5ae55"></script>
 <script src="src/entities/coins.js"></script>
@@ -647,7 +647,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 4. systems — economy/quests load before actors that reference them -->
 <script src="src/systems/audio.js?v=m0927p"></script>
 <script src="src/systems/hud.js?v=m0927p"></script>
-<script src="src/systems/economy.js?v=m489457"></script>
+<script src="src/systems/economy.js?v=tow929"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
 <script src="src/weapons/weapon-data.js?v=mce86a5"></script>
@@ -687,9 +687,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/roombuild.js"></script>
 <script src="src/world/cafeteria.js?v=m0928s"></script>
 <script src="src/world/lounge.js?v=m0928s"></script>
-<script src="src/world/gunroom.js?v=doors929"></script>
+<script src="src/world/gunroom.js?v=tow929b"></script>
 <script src="src/world/ventilation.js?v=m489457"></script>
-<script src="src/world/escape_routes.js?v=m0928s"></script>
+<script src="src/world/escape_routes.js?v=tow929"></script>
 <script src="src/world/southblock.js?v=vit3"></script>
 <!-- THE PRISON GETS A LID. Every interior above was open-topped (roomShell
      builds four walls and no ceiling), so you could stand in the mess hall and
@@ -703,7 +703,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 3b. actors that depend on economy -->
 <script src="src/entities/vision.js"></script>
 <script src="src/entities/guards.js?v=w09290204"></script>
-<script src="src/entities/searchlight.js?v=m0928s"></script>
+<script src="src/entities/searchlight.js?v=tow929"></script>
 <script src="src/entities/keycard.js?v=armory1"></script>
 <!-- Shared NPC identity/placement layer: jail actors, city scenes and moving
      aircraft passengers request real actors through one reusable contract. -->
@@ -724,7 +724,7 @@ document.body.appendChild(b);}}catch(e){}})();
      warden it schedules is spawned there) and after roofs.js (it asks
      CBZ.prisonRoof for its own ceiling); BEFORE prisonschedule.js, whose
      block ids it reads at runtime. -->
-<script src="src/world/adminwing.js?v=doors929"></script>
+<script src="src/world/adminwing.js?v=tow929b"></script>
 
 <!-- THE COMPOUND'S REAL SIZE (owner 2026-08-11: "the prison should be bigger…
      think of scale of human vs prison size"). 92x195 m of authored prison was
@@ -739,9 +739,9 @@ document.body.appendChild(b);}}catch(e){}})();
      and cafeteria.js (CBZ.prisonDress fittings); AFTER guards.js + adminwing.js
      so it borrows the same CBZ.jailBoost run watcher; and it must follow
      world/yard.js, which cuts the four gate gaps this file stands gates in. -->
-<script src="src/world/prisonwings.js?v=doors929"></script>
-<script src="src/world/prisongrounds.js?v=w09290242x"></script>
-<script src="src/world/corridors.js?v=doors929"></script>
+<script src="src/world/prisonwings.js?v=tow929b"></script>
+<script src="src/world/prisongrounds.js?v=tow929"></script>
+<script src="src/world/corridors.js?v=tow929"></script>
 
 <!-- ============ THE ENGINE LAYER THE PRISON WAVE PROVED WAS MISSING ==========
      Four services promoted OUT of the prison files below, because a hospital,
@@ -822,12 +822,12 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/reality.js?v=support1"></script>
 <script src="src/systems/npcgrid.js?v=scale2"></script>
 <script src="src/systems/camera.js?v=tui0929"></script>
-<script src="src/systems/physics.js?v=pres0929b"></script>
+<script src="src/systems/physics.js?v=prestow0929"></script>
 <script src="src/systems/meshcollider.js?v=meshcol1"></script>
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
-<script src="src/systems/climb.js?v=lad1"></script>
+<script src="src/systems/climb.js?v=tow929"></script>
 <!-- The tower post officers (entities/towerwatch.js): after guards.js, prisonkit.js (CBZ.prisonTowers) and climb.js. -->
-<script src="src/entities/towerwatch.js?v=lad1"></script>
+<script src="src/entities/towerwatch.js?v=tow929"></script>
 <!-- THE MOVING-PLATFORM PRIMITIVE. Nothing in this engine could carry a
      standing actor on a surface that moves — 30+ CBZ.platforms sites, none
      re-centring on a moving parent. CBZ.movingPlatform(parent, spec) carries
@@ -871,7 +871,7 @@ document.body.appendChild(b);}}catch(e){}})();
      actorweapons' self-heal pass is city-only. -->
 <script src="src/systems/prisonshanks.js?v=armed1"></script>
 <script src="src/systems/prisonlaw.js?v=law1"></script>
-<script src="src/systems/capture.js?v=ekey2"></script>
+<script src="src/systems/capture.js?v=tow929"></script>
 <!-- the prison as a configuration of CBZ.brain: registration, the executor,
      yard law (a screw runs the ladder on a fight), witnesses, clique morale
      and rout, proportional retaliation -->
@@ -904,7 +904,7 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.prisonFriendOffered), economy.js and killstreaks.js (it wraps both).
      ?cfg_PRISON_FRIENDS=0 → nobody ever offers and the verb never appears. -->
 <script src="src/systems/prisonfriends.js?v=m0928s"></script>
-<script src="src/systems/interactions.js?v=doors929"></script>
+<script src="src/systems/interactions.js?v=tow929"></script>
 <!-- A door opened off the clock is noticed (systems/prisondoorwatch.js); after interactions.js (the door registry). -->
 <script src="src/systems/prisondoorwatch.js?v=doors2"></script>
 <!-- THE LIFT, AS A MACHINE (no THREE, no DOM): call / go / park, the doors'

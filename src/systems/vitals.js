@@ -41,7 +41,10 @@
      cuffable(a)     -> true when he cannot fight you off (down / ko / tased)
      incapacitated(a)-> same test, named for the AI
      blood(a) 0..1 · bleedRate(a) (fraction/s) · daze(a) · weak(a) 0..1
-     speedMul(a)     -> movement multiplier (groggy, blood loss, a shot leg)
+     speedMul(a)     -> movement multiplier (groggy, blood loss, a shot leg,
+                        legs hurt in a fall)
+     fall(a, h)      -> a landing from h metres: the leg multiplier it left
+     lame(a)         -> that multiplier now (1 = sound)
      busy(a)         -> true while he is bandaging (movers hold him still)
      blunt(a, o)     -> "none" | "stagger" | "knockdown" | "ko" | "dead"
                         o = { zone: jaw|head|liver|body|legs, power 0..1,
@@ -210,10 +213,31 @@
     return w;
   }
   VT.weak = function (a) { return weak(peek(a)); };
+  /* ---- THE LEGS after a fall (systems/capture.js CBZ.prisonFallLand): a
+     turned ankle for a minute, a broken one or broken legs for the run.
+     Nothing to tick: the record carries its own end on this file's clock.
+     A splint (VT.dress: Doc Mercer, the infirmary) takes the worst of it. */
+  function legMul(R) {
+    if (!R || !R.leg) return 1;
+    if (clock > R.leg.until) { R.leg = null; return 1; }
+    return R.leg.mul;
+  }
+  VT.fall = function (a, h) {
+    a = real(a); if (!a || deadOf(a) || !(h > 2.8)) return 1;
+    const R = of(a);
+    const mul = h < 4.5 ? 0.8 : h < 8 ? 0.6 : 0.45;
+    const until = h < 4.5 ? clock + 60 : Infinity;
+    if (!R.leg || mul < R.leg.mul) R.leg = { mul: mul, until: until, splint: false };
+    else R.leg.until = Math.max(R.leg.until, until);
+    R.lastHitT = clock;
+    wake(R);
+    return R.leg.mul;
+  };
+  VT.lame = function (a) { return legMul(peek(a)); };
   VT.speedMul = function (a) {
     const R = peek(a); if (!R) return 1;
     if (R.band && R.band.medic === R.a) return 0.25;
-    let m = 1 - 0.45 * weak(R);
+    let m = (1 - 0.45 * weak(R)) * legMul(R);
     for (let i = 0; i < R.bleeds.length; i++) {
       const b = R.bleeds[i];
       if ((b.zone === "legL" || b.zone === "legR") && b.band < 0.5) { m *= 0.78; break; }
@@ -627,6 +651,7 @@
       addWrap(R, b, false);
       n++;
     }
+    if (R.leg && !R.leg.splint && legMul(R) < 1) { R.leg.mul = Math.max(R.leg.mul, 0.78); R.leg.splint = true; n++; }
     if (o.blood) R.blood = Math.min(1, R.blood + o.blood);
     if (R.critical && rateOf(R) < 0.004) { R.critical = false; R.riseT = isPlayer(a) ? 1.5 : 6; }
     wake(R);

@@ -26,9 +26,17 @@
   // the camera and throws debris — it just does not open. ONE line, and it is
   // the whole policy; delete it and the prison becomes a jailbreak sandbox.
   const K = CBZ.prisonKit;
+  /* THE WALL IS AS TALL AS IT IS DRAWN (2026-09-29). Every segment used to
+     be a collider with no height at all — physics.js reads that as a wall to
+     the sky — so on a tower catwalk twelve metres up, the eleven-metre wall
+     under your feet was still there, an invisible slab across the walkway
+     and the cab. Now it stops at the top of the concertina coil on its
+     coping (razorwire.js: the coil's centre YH + 0.55, radius 0.36), and it
+     is `noClimb`: nobody hauls himself up a wall through razor wire. */
+  const WALL_TOP = YH + 0.92;
   const wall = (x, z, w, d) => {
-    const m = addBox(x, YH / 2, z, w, YH, d, WALL, { solid: true, blockLOS: true });
-    if (m && m.userData && m.userData.collider) m.userData.collider.noBreach = true;
+    const m = addBox(x, YH / 2, z, w, YH, d, WALL, { solid: true, blockLOS: true, y0: 0, y1: WALL_TOP });
+    if (m && m.userData && m.userData.collider) { m.userData.collider.noBreach = true; m.userData.collider.noClimb = true; }
     if (K) K.skinBox(m, "panel", WALL);               // precast panels (world/prisonkit.js)
     return m;
   };
