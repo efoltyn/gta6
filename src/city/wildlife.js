@@ -1186,8 +1186,10 @@
           if (!wet) continue;
           nx = wet.x; nz = wet.z;
         }
-        // don't pop a newborn in right under the player's nose
-        if (P && Math.hypot(nx - P.x, nz - P.z) < 50) continue;
+        // a newborn is born where nobody can see it appear (owner: nothing may
+        // generate within view): past the fog's end, not 50 m off
+        const born = Math.max(50, (+CBZ.cityFogFar || 0) + 30);
+        if (P && Math.hypot(nx - P.x, nz - P.z) < born) continue;
         const kid = makeActor(sp, nx, nz);
         kid.grow = 0;                            // born tiny; grows up in tick()
         applyScale(kid, 0);                      // small from frame one, at ITS OWN size
