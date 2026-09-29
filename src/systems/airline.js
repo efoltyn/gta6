@@ -184,6 +184,7 @@
   function abandon(s, why) {
     if (s.dead) return;
     s.dead = true;
+    pushEnd(s);
     if (s.gate && s.gate.occupant === s.rec) s.gate.occupant = null;
     if (s.rec) { s.rec._airlineGate = null; s.rec._airlineShuttle = null; }
     if (ticket && ticket.shuttle === s) {
@@ -233,6 +234,35 @@
     const pts = [[conn, 0], [conn, ap.taxiZ], [g.lx, ap.taxiZ], [g.lx, g.lz]];
     s.route = pts.map(function (p) { const w = ap.toWorld(p[0], p[1]); return { x: w.x, z: w.z }; });
     s.wp = 0; s.wpBest = null; s.wpStale = 0;
+  }
+
+  /* THE TUG. airside.js's pushback tug body (the one the apron fleet
+     drives), coupled to the nose gear for the length of the push and
+     unhitched when the aeroplane is on the taxiway. */
+  function pushStart(s) {
+    if (s.tug || !CBZ.airsideBodies || !CBZ.airsideBodies.tug || !s.grp.parent) return;
+    try {
+      const rig = CBZ.airsideBodies.tug(0xe8c020);
+      rig.grp.userData.dynamic = true;
+      s.grp.parent.add(rig.grp);
+      s.tug = rig.grp;
+      pushTug(s);
+    } catch (e) { s.tug = null; }
+  }
+  function pushTug(s) {
+    if (!s.tug) return;
+    const d = s.grp.userData && s.grp.userData.aircraftDims;
+    const reach = (d && d.length ? d.length * 0.5 : 19) + 2.2;
+    const f = fwd(s.grp.rotation.y);
+    s.tug.position.set(s.grp.position.x + f.x * reach, 0, s.grp.position.z + f.z * reach);
+    // the tug faces the aeroplane (its model noses down +Z)
+    s.tug.rotation.y = Math.atan2(-f.x, -f.z);
+  }
+  function pushEnd(s) {
+    if (!s.tug) return;
+    if (s.tug.parent) s.tug.parent.remove(s.tug);
+    s.tug.traverse(function (o) { if (o.geometry && !o.geometry._shared) o.geometry.dispose(); });
+    s.tug = null;
   }
 
   function armAir(s) {
@@ -311,10 +341,44 @@
           }
           if (CBZ.cityAircraftDoorSet) { try { CBZ.cityAircraftDoorSet(rec, false); } catch (e) {} }
           if (s.gate && s.gate.occupant === rec) s.gate.occupant = null;
-          routeOut(s);
-          s.phase = "taxiOut"; s.t = 0;
+          /* A NOSE-IN STAND IS LEFT BACKWARDS. The kit parks every airliner
+             nose to the terminal (the jet bridge is on its L1 door), so the
+             departure starts with a PUSHBACK: a tug on the nose gear walks it
+             tail-first back to the taxiway centreline and swings it onto the
+             taxiway toward the runway end it will use; then it taxis. */
+          if (s.gate && s.gate.nose === "in") { s.pushGate = s.gate; s.phase = "push"; s.t = 0; s.spd = 0; pushStart(s); }
+          else { routeOut(s); s.phase = "taxiOut"; s.t = 0; }
           if (s.playerAboard) note("Doors closed. " + s.at.code + " to " + s.to.code + " · taxiing to runway " + s.depEnd.name + ".", 4);
         }
+        break;
+      }
+      case "push": {
+        const ap = s.at, g = s.pushGate;
+        const l = ap.toLocal(s.grp.position.x, s.grp.position.z);
+        const remain = l.lz - ap.taxiZ;
+        // which way along the taxiway: toward the connector for the end in use
+        const course = headingTo(ap.x, ap.z, s.to.x, s.to.z);
+        const end = endForCourse(ap, course);
+        const conn = nearestConn(ap, end.sign * (ap.runway.len / 2 - 60));
+        const want = ap.dirWorld(conn >= (g ? g.lx : l.lx) ? 0 : Math.PI);   // local +X or -X
+        if (remain > 0.4) {
+          accelTo(s, Math.min(1.3, 0.25 + remain * 0.12), 0.35, dt);
+          const f = fwd(s.grp.rotation.y);
+          s.grp.position.x -= f.x * s.spd * dt; s.grp.position.z -= f.z * s.spd * dt;
+        } else {
+          s.spd = 0;
+          const dh = wrap(want - s.grp.rotation.y);
+          const step = Math.max(-0.14 * dt, Math.min(0.14 * dt, dh));
+          s.grp.rotation.y += step;
+          if (Math.abs(dh) < 0.03) {
+            s.grp.rotation.y = want;
+            pushEnd(s);
+            routeOut(s);
+            s.route.shift();                      // already on the taxiway centreline
+            s.phase = "taxiOut"; s.t = 0;
+          }
+        }
+        pushTug(s);
         break;
       }
       case "taxiOut":
