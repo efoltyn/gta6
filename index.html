@@ -392,6 +392,8 @@ document.body.appendChild(b);}}catch(e){}})();
      re-verified against this tree's newest THREE usage, so r128 stays the
      loaded build for now. -->
 <script src="src/vendor/three.r128.min.js"></script>
+<!-- real frustum culling for InstancedMesh pools (every camera, shadow pass included); must precede every InstancedMesh -->
+<script src="src/core/instcull.js?v=ic1"></script>
 <!-- Slayvin flat-mirror reflective water (ported to r128 as THREE.WaterReflect;
      wired onto the ocean by src/world/waterfx.js). Must follow the THREE tag. -->
 <script src="src/vendor/WaterReflect.js"></script>
@@ -485,7 +487,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- 1. core engine -->
 <script src="src/core/scene.js?v=neutralhaze1"></script>
-<script src="src/core/renderer.js?v=scale3"></script>
+<script src="src/core/renderer.js?v=shc1"></script>
 <!-- THE GROUND STOPS BEING DRAWN OVER A HOLE. Must load AFTER core/renderer.js:
      its installFog REPLACES THREE.ShaderChunk.fog_fragment wholesale, so a patch
      installed before it is erased in silence. groundmask.js asserts CBZ.renderer
