@@ -1730,10 +1730,13 @@
       pos.setY(i, y);
       colors[i * 3] = c.r * shade; colors[i * 3 + 1] = c.g * shade; colors[i * 3 + 2] = c.b * shade;
     }
+    // the loop's own outputs, kept for the combined bake below (the passes
+    // after this point change the colours in place)
+    let PLATE_Y = null, PLATE_C = null;
     if (!PLATE_BAKE && PLATE_SIG && CBZ.bakePut) {
-      const Y = new Float32Array(pos.count);
-      for (let i = 0; i < pos.count; i++) Y[i] = pos.getY(i);
-      CBZ.bakePut("continent-plate", PLATE_SIG, { y: Y, c: colors, r: rGrid, s: sGrid || new Float32Array(0) });
+      PLATE_Y = new Float32Array(pos.count);
+      for (let i = 0; i < pos.count; i++) PLATE_Y[i] = pos.getY(i);
+      PLATE_C = colors.slice();
     }
 
     // ==================================================================
@@ -1788,7 +1791,21 @@
     // geology as Mount Mercy) and shades every face by its sun aspect.
     // Colour only — no vertex is moved, so countryHeightAt, floorAt, the carve
     // pass and every audit are untouched.
-    if (CFG.CONTINENT_RELIEF_V1 !== false && CBZ.mtnStrataTint) {
+    /* THE FINISHED PLATE IS BAKED TOO (core/bakecache.js, same signature as
+       the loop above): the strata tint, the linear decode, the carve of the
+       triangles under authored floors and the normals are pure functions of
+       what the loop made and of the same inputs. A hit sets them and skips
+       all four passes (~0.5 M triangle tests, ~0.2 M strata samples). */
+    const FIN = PLATE_BAKE && PLATE_BAKE.fc && PLATE_BAKE.fc.length === colors.length && PLATE_BAKE.fi && PLATE_BAKE.fn ? PLATE_BAKE : null;
+    let carvedTriangles = 0;
+    if (FIN) {
+      colors.set(FIN.fc);
+      geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+      geo.setIndex(new THREE.BufferAttribute(FIN.fi, 1));
+      carvedTriangles = FIN.carved ? FIN.carved[0] : 0;
+      if (FIN.fn.length === pos.count * 3) geo.setAttribute("normal", new THREE.BufferAttribute(FIN.fn, 3));
+    }
+    if (!FIN && CFG.CONTINENT_RELIEF_V1 !== false && CBZ.mtnStrataTint) {
       const stride = SEG + 1;
       const dxw = W / SEG, dzw = D / SEG;
       const rockC = new THREE.Color(), baseC = new THREE.Color();
@@ -1831,7 +1848,7 @@
     // every tier and CBZ.groundCover (which reads these colours) all see
     // the same real reflectance.
     // ONE decoder for all ground: world/textures_surface.js's CBZ.groundLinear.
-    if (CFG.CONTINENT_LINEAR_ALBEDO !== false && CBZ.groundLinear) {
+    if (!FIN && CFG.CONTINENT_LINEAR_ALBEDO !== false && CBZ.groundLinear) {
       const lc = new THREE.Color();
       for (let i = 0; i < colors.length; i += 3) {
         lc.setRGB(colors[i], colors[i + 1], colors[i + 2]);
@@ -1839,12 +1856,11 @@
         colors[i] = lc.r; colors[i + 1] = lc.g; colors[i + 2] = lc.b;
       }
     }
-    geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    if (!FIN) geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
 
     // Physically remove the underlay triangles whose centres sit below an
     // authored floor. Border triangles stay as a continuous seam and receive
     // a GPU depth bias below; the large interiors no longer overdraw at all.
-    let carvedTriangles = 0;
     // A triangle is removed only when its *entire footprint* is safely under
     // an authored surface.  The old centroid-only test carved right up to a
     // region boundary.  On this ~17m grid a removed triangle can extend over
@@ -1855,7 +1871,7 @@
     // beneath every authored edge; its lower Y + polygon offset make the real
     // pad win while guaranteeing continuous earth at the seam.
     const CARVE_SEAM_INSET = Math.min(32, Math.hypot(W / SEG, D / SEG) + 2);
-    if (geo.index) {
+    if (!FIN && geo.index) {
       const src = geo.index.array, kept = [];
       for (let i = 0; i < src.length; i += 3) {
         const ia = src[i], ib = src[i + 1], ic = src[i + 2];
@@ -1866,7 +1882,15 @@
       }
       geo.setIndex(kept);
     }
-    if (COAST || CFG.CONTINENT_RELIEF_V1 !== false) geo.computeVertexNormals(); // coast + country slopes want real shading
+    if (!FIN && (COAST || CFG.CONTINENT_RELIEF_V1 !== false)) geo.computeVertexNormals(); // coast + country slopes want real shading
+    if (!FIN && PLATE_SIG && CBZ.bakePut && geo.index) {
+      // the finished plate joins the loop's record (bakePut replaces it whole)
+      const Y2 = new Float32Array(pos.count);
+      for (let i = 0; i < pos.count; i++) Y2[i] = pos.getY(i);
+      const nrm = geo.attributes.normal;
+      CBZ.bakePut("continent-plate", PLATE_SIG, { y: PLATE_Y || Y2, c: PLATE_C || colors, r: rGrid, s: sGrid || new Float32Array(0),
+        fc: colors, fi: geo.index.array, fn: nrm ? nrm.array : new Float32Array(0), carved: new Float64Array([carvedTriangles]) });
+    }
     // THE GROUND SKIN (world/textures_surface.js, shared with the disaster
     // island): the land cover above stays the macro albedo; per pixel the
     // shader lays grass / soil / sand / stone detail over it by what the
