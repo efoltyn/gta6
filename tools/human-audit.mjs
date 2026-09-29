@@ -65,7 +65,21 @@ ctx.CBZ = {
   CONFIG: {}, game: { mode: "city" }, npcs: [],
   onUpdate() {}, onAlways(p, f) { always.push([p, f]); }, onReset() {}, onModeEnter() {},
 };
-for (const f of ["src/vendor/three.r128.min.js", "src/config.js", "src/core/matrixskip.js", "src/world/materials.js", "src/systems/fphands.js", "src/entities/footwear.js", "src/entities/character.js", "src/entities/headwear.js",
+// INK (entities/tattoo.js): every heritage's ink family is worn, so the audit
+// also proves inked skin (shared ink materials, charts paged by pedinstance)
+// keeps every body whole. Charts "paint" into a no-op 2D context (the audit
+// is about geometry and pools, not pixels), synchronously.
+function inkCanvas(w, h) {
+  const cv = { width: w, height: h, style: {} };
+  const grad = { addColorStop() {} };
+  const t = { canvas: cv, measureText: (s) => ({ width: String(s).length * 20 }), createRadialGradient: () => grad,
+    createLinearGradient: () => grad, createPattern: () => ({}), getImageData: (x, y, W, H) => ({ data: new Uint8ClampedArray(Math.max(1, W * H) * 4) }) };
+  const c2 = new Proxy(t, { get(o, k) { return k in o ? o[k] : function () {}; }, set(o, k, v) { o[k] = v; return true; } });
+  cv.getContext = () => c2;
+  return cv;
+}
+ctx.CBZ.tattoo = { lazy: false, _mkCanvas: inkCanvas };
+for (const f of ["src/vendor/three.r128.min.js", "src/config.js", "src/core/matrixskip.js", "src/world/materials.js", "src/systems/fphands.js", "src/entities/tattoo.js", "src/entities/footwear.js", "src/entities/character.js", "src/entities/headwear.js",
   "src/entities/heritage.js", "src/city/clothes.js", "src/city/outfits.js", "src/entities/dutykit.js", "src/entities/pedinstance.js",
   "src/city/armor.js", "src/systems/prisonoutfits.js"]) {
   vm.runInContext(read(f), ctx, { filename: f });

@@ -644,8 +644,15 @@
       // is a different question and always answerable.
       if (color != null && !(m.userData && m.userData._cbzPart) &&
           m.material && m.material.color && m.material.color.setHex) {
-        if (m.material._shared) m.material = m.material.clone();
-        m.material.color.setHex(color);
+        // INK IS SKIN, NOT CLOTH (entities/tattoo.js): a shared ink material
+        // tinted to a sleeve colour would print the tattoo on the shirt. The
+        // part goes back to plain flat colour; recolorRig's closing refresh
+        // puts the ink back on whatever is still bare skin.
+        if (m.material._shared && CBZ.tattoo && CBZ.tattoo.isInk(m.material) && CBZ.cmat) m.material = CBZ.cmat(color);
+        else {
+          if (m.material._shared) m.material = m.material.clone();
+          m.material.color.setHex(color);
+        }
       }
       if (visible != null) m.visible = visible;
     }
@@ -696,6 +703,7 @@
       detailKit(ch, null);
       if (CBZ.dutyKit) CBZ.dutyKit.wear(ch, null);
       paintGloves(ch, null);
+      if (CBZ.tattoo) CBZ.tattoo.refresh(ch);
       return true;
     }
     // A direct catalog role must also remove any tie/collar/blazer meshes left
@@ -786,6 +794,10 @@
     // radio, torch, cuff case, epaulettes and the metal badge ride the uniform
     // as ONE mesh, and any other fit (or none) takes them off.
     if (CBZ.dutyKit) CBZ.dutyKit.wear(ch, rec || null);
+    // INK (entities/tattoo.js): whatever this fit left bare skin — a tee's
+    // forearms, a tank's arms, the hands, the throat — wears the body's own
+    // tattoos; whatever it covered has just been painted cloth
+    if (CBZ.tattoo) CBZ.tattoo.refresh(ch);
     return true;
   }
   CBZ.cityRecolorRig = recolorRig;
@@ -1006,7 +1018,9 @@
       // a PAINTED part (canvas-textured, clothes.js) has no meaningful flat
       // color — skip it so sampling falls back to the catalog record, which
       // carries the painted identity through a corpse swap intact.
-      if (m && m.material && m.material.map) continue;
+      // (an INK skin material — entities/tattoo.js — is flat skin with a
+      // chart on it: its colour IS the colour the part shows)
+      if (m && m.material && m.material.map && !(CBZ.tattoo && CBZ.tattoo.isInk(m.material))) continue;
       if (m && m.material && m.material.color && m.material.color.getHex) return m.material.color.getHex();
     }
     return null;

@@ -1445,7 +1445,7 @@
         center: new THREE.Vector3(x * R * c, R * s, 0), axis: tangentUp, dorsal: dorsal,
       }, skin);
       hand.castShadow = false;
-      const arm = FPH.makeArm({ fore: fore, upper: up });
+      const arm = FPH.makeArm({ fore: fore, upper: up }, side);
       arms.add(arm);
       rig.push({ x: x, side: side, hand: hand, arm: arm });
     });
