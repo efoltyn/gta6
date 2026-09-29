@@ -227,13 +227,31 @@
       // arena.roads), not the empty CBZ.city.roads.
       if (cfg.pushCityRoads !== false && A && A.roads) A.roads.push(seg);
     }
+    /* EVERY STREET ENDS IN A JUNCTION (owner: "roads end abruptly").
+       · mainstreet laid the wide spine and the cross-streets but no back
+         street, so every cross-street ran to the town's edge and stopped
+         square in the dirt (and every back lot's door "faced" a road that
+         did not exist). The two back lanes close the grid: each cross-street
+         now ends in a T.
+       · organic jittered each line but still ran the perpendicular streets
+         to the UN-jittered edge, so up to 2.6 m of asphalt stuck out past the
+         outer street on every end. Lines now run between the outermost
+         jittered crossings. The jitter draws are taken in the same order
+         (all verticals, then all horizontals) so the rng stream is unchanged. */
     if (pattern === "mainstreet") {
-      // one WIDE spine along x through the centre row, plus short cross-streets.
+      // one WIDE spine along x through the centre row, cross-streets, and a
+      // back lane along each long edge
       roadSeg(cx, cz, false, maxX - minX, ROAD * 1.6);
       for (let k = 0; k <= cols; k++) roadSeg(xLines[k], cz, true, maxZ - minZ);
+      roadSeg(cx, zLines[0], false, maxX - minX);
+      roadSeg(cx, zLines[rows], false, maxX - minX);
     } else if (pattern === "organic") {
-      for (let k = 0; k <= cols; k++) roadSeg(xLines[k] + (rng() - 0.5) * ROAD * 0.4, cz, true, maxZ - minZ);
-      for (let k = 0; k <= rows; k++) roadSeg(cx, zLines[k] + (rng() - 0.5) * ROAD * 0.4, false, maxX - minX);
+      const xs = [], zs = [];
+      for (let k = 0; k <= cols; k++) xs.push(xLines[k] + (rng() - 0.5) * ROAD * 0.4);
+      for (let k = 0; k <= rows; k++) zs.push(zLines[k] + (rng() - 0.5) * ROAD * 0.4);
+      const z0 = zs[0] - ROAD / 2, z1 = zs[rows] + ROAD / 2, x0 = xs[0] - ROAD / 2, x1 = xs[cols] + ROAD / 2;
+      for (const x of xs) roadSeg(x, (z0 + z1) / 2, true, z1 - z0);
+      for (const z of zs) roadSeg((x0 + x1) / 2, z, false, x1 - x0);
     } else { // grid
       for (let k = 0; k <= cols; k++) roadSeg(xLines[k], cz, true, maxZ - minZ);
       for (let k = 0; k <= rows; k++) roadSeg(cx, zLines[k], false, maxX - minX);

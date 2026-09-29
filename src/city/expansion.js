@@ -46,7 +46,7 @@
   // colour join. Still ONE draw call; the geometry cost is a 129x27 ring grid.
   // OFF → the exact old chequer.
   if (CFG.ANNEX_GROUND_V2 == null) CFG.ANNEX_GROUND_V2 = true;
-  // ---- ANNEX_STREETS_V2 — "and road looks awful" --------------------------
+  // ---- THE ISLAND STREETS — "and road looks awful" ------------------------
   // MEASURED CAUSE: the island streets were ~40 separate untextured Lambert
   // planes (flat #33363d, no map at all) plus 25 SEPARATE junction squares in a
   // DIFFERENT tone (0x2e3138) sitting 1 cm proud of them — and those squares
@@ -54,11 +54,11 @@
   // road planes at exactly y=0.05, which z-fights. The bridge deck in this same
   // file already got a baked tarmac grain (bakeTarmac) and the island streets
   // never did, so the island read as painted cardboard beside its own bridge.
-  // ON → one merged, world-UV'd, tarmac-textured surface for the whole island
+  // Now: one merged, world-UV'd, tarmac-textured surface for the whole island
   // street network + one merged concrete shoulder + one merged dash mesh (3
   // draws, was ~105), the two axes separated by 2 mm so nothing is coplanar and
-  // the mismatched junction patches are gone. OFF → the old planes.
-  if (CFG.ANNEX_STREETS_V2 == null) CFG.ANNEX_STREETS_V2 = true;
+  // the mismatched junction patches are gone. (The old per-plane path and its
+  // ANNEX_STREETS_V2 switch are deleted; git is the undo.)
 
   // Deterministic smooth value noise (city/continent.js's noise2, verbatim in
   // shape): hash01 corners, smoothstep interpolation. NEVER Math.random and
@@ -453,11 +453,21 @@
       return rec;
     }
 
-    tower(cx - 13, cz, 19, 20, 38, 0x667991, "TWIN TOWER WEST");
-    tower(cx + 13, cz, 19, 20, 32, 0x71849d, "TWIN TOWER EAST");
-    tower(cx - 52, cz - 30, 14, 15, 8, 0x596b82, "NORTHWEST TOWER");
-    tower(cx + 48, cz + 40, 15, 15, 9, 0x7a6f8c, "SOUTHEAST TOWER");
-    tower(cx + 40, cz - 48, 14, 14, 7, 0x5e7d86, "NORTHEAST TOWER");
+    // EVERY LANDMARK STANDS IN A BLOCK, NEVER ON A STREET. They used to be
+    // placed at the old disaster-hill positions — the twin towers straddled
+    // the centre crossroads, the SE and NE towers each sat ON a junction and
+    // the showroom on the NE corner — and the street scan then cut every line
+    // they touched, so the island's streets ran into tower walls and stopped.
+    // cell(i) is the centre of the i-th block between two grid lines; cell(-3)
+    // and cell(2) are the rim band outside the ring avenues. The twin towers
+    // flank the centre avenue; the other landmarks face the ring avenue from
+    // the rim band, which leaves every inner block to the apartments.
+    const cell = function (i) { return (i + 0.5) * GRID; };
+    tower(cx + cell(-1), cz + cell(-1), 19, 20, 38, 0x667991, "TWIN TOWER WEST");
+    tower(cx + cell(0), cz + cell(-1), 19, 20, 32, 0x71849d, "TWIN TOWER EAST");
+    tower(cx + cell(-3), cz + cell(-1), 14, 15, 8, 0x596b82, "NORTHWEST TOWER");
+    tower(cx + cell(2), cz + cell(0), 15, 15, 9, 0x7a6f8c, "SOUTHEAST TOWER");
+    tower(cx + cell(0), cz + cell(-3), 14, 14, 7, 0x5e7d86, "NORTHEAST TOWER");
 
     // ---- service station: world/fuel_station.js, the SAME builder the
     //      disaster island uses (canopy, dispensers, lit store you can walk
@@ -547,7 +557,7 @@
     }
 
     gasStation(cx - 60, cz + 80 - ROADW / 2 - 1.2 - 13, Math.PI);   // front edge on the shoulder
-    showroom(cx + 72, cz - 76);
+    showroom(cx + cell(2), cz + cell(-1));
 
     // ---- enterable low-rise town around the former terrain peaks ----
     const PALETTE = [0xff7a6b, 0x6bb6ff, 0xffd166, 0x9ad17a, 0xc792ea, 0xff9e6b, 0x66d9c0, 0xf06b9b];
@@ -586,21 +596,20 @@
       made++;
     }
 
-    // ---- copied island street grid, clipped around the replacement towers ----
+    // ---- island street materials ----
     // wet-road tie-in (feature-detected, load-order safe): one shared
     // CBZ.roadMat() instance reused for every segment plane below (same
     // sharing pattern as the flat Lambert it replaces), kept damp-looking by
     // materials.js as CBZ.weather.intensity rises. Falls back to the plain
     // Lambert if materials.js hasn't loaded yet.
-    // ANNEX_STREETS_V2: the island streets get the SAME baked tarmac grain the
+    // The island streets get the SAME baked tarmac grain the
     // bridge deck in this very file already had (bakeTarmac), on world-scaled
     // UVs so one shared material tiles at a constant metres-per-repeat across
     // segments of every length — the discipline city/world.js's quadField uses
     // downtown. The old path handed roadMat NO map at all, which is why the
     // island read as flat painted cardboard next to its own textured bridge.
-    const V2S = CFG.ANNEX_STREETS_V2 !== false;
-    const streetTex = V2S ? bakeTarmac("#33363d") : null;
-    const kerbTex = V2S ? bakeTarmac("#8d939c") : null;
+    const streetTex = bakeTarmac("#33363d");
+    const kerbTex = bakeTarmac("#8d939c");
     if (streetTex) streetTex.repeat.set(1, 1);       // UVs already carry the world scale
     if (kerbTex) kerbTex.repeat.set(1, 1);
     const roadMat = CBZ.roadMat
@@ -674,105 +683,157 @@
       }
       return false;
     }
-    function layRoadLine(fixed, vertical) {
-      const step = 4, segs = [];
-      let start = null;
-      for (let t = -R; t <= R + step; t += step) {
-        const x = vertical ? fixed : cx + t, z = vertical ? cz + t : fixed;
-        const ok = Math.hypot(x - cx, z - cz) < R - 5 && !blocked(x, z);
-        if (ok && start === null) start = t;
-        if ((!ok || t > R) && start !== null) {
-          const end = ok ? t : t - step;
-          if (end - start >= step * 2) segs.push([start, end]);
-          start = null;
-        }
+    /* ---- THE ISLAND STREET NETWORK: every street ends in a junction ------
+       OWNER: "glitch where roads end abruptly in the gang city game."
+
+       This island is the first place you reach from downtown, and it was
+       where the streets stopped. They were a SCAN, copied from the disaster
+       island: walk each grid line in 4 m steps, lay asphalt while the point
+       is inside the rim and not near a building, cut the run when it is not.
+       Nothing ever asked where a street should END, so they ended wherever
+       the scan did:
+         · at a tower wall — the landmarks stood on the lines (see `cell`),
+           so the centre crossroads, two junctions and a corner were each a
+           building with four stubs pointing at it;
+         · at the rim — every line ran on 25-35 m past the outermost cross
+           street and stopped square in the grass above the beach;
+         · short of every causeway — the Mercy deck quit over the bay 36 m
+           off the north shore, and the speedway deck began 7 m off the end
+           of an avenue it only half overlapped.
+
+       Now the network is PLANNED, not scanned. Each line runs between its
+       outermost crossings (plus half a road, so the corner box is whole),
+       i.e. the grid is closed: every end is a T or a corner. A causeway that
+       arrives from outside docks onto a street that reaches it — the bridge
+       on the centre street, the speedway causeway T'd onto the south street
+       (island_speedway.js reads `annex.streets`), the Mercy causeway T'd onto
+       the north street, which runs east to meet its lane (biome_snow.js
+       publishes the lane as CBZ.annexPorts and reads `annex.streets` back).
+       Pure data + closed-form math; no rng draws. */
+    const HWR = ROADW / 2, KERB = 1.2;       // shoulder clears the closest possible building by 0.2 m
+    const REACH = R - 5;                     // a street's centreline stays inside the turf
+    const reach = function (off) { return Math.sqrt(Math.max(0, REACH * REACH - off * off)); };
+    const KS = [-2, -1, 0, 1, 2];
+    // line spans in metres along the line from the island centre: [a, b] plus
+    // whether each end is a trimmed junction end (true) or a port (false)
+    function planLine(k) {
+      const off = k * GRID, R0 = reach(off);
+      let lo = Infinity, hi = -Infinity;
+      for (const m of KS) {
+        const t = m * GRID;
+        if (Math.abs(t) > R0 || Math.abs(off) > reach(t)) continue;    // that line never reaches us
+        if (t < lo) lo = t; if (t > hi) hi = t;
       }
-      for (const [a, b] of segs) {
-        const mid = (a + b) / 2, len = b - a;
-        const x = vertical ? fixed : cx + mid, z = vertical ? cz + mid : fixed;
-        if (V2S) {
-          // THE TWO AXES SIT 2 mm APART. Every crossing used to lay two road
-          // planes at exactly y=0.05 — coplanar, so they z-fight — and the
-          // 25 junction squares existed only to hide that, in a DIFFERENT tone
-          // (0x2e3138 vs 0x33363d) one centimetre proud. Both problems die
-          // here: separate the axes and the junction needs no patch at all.
-          const rY = vertical ? 0.050 : 0.052, kY = vertical ? 0.042 : 0.044;
-          const hw = ROADW / 2, KERB = 1.2;      // shoulder clears the closest possible building by 0.2 m
-          if (vertical) {
-            surfQuad(kbP, kbN, kbU, x - hw - KERB, x - hw, z - len / 2, z + len / 2, kY);
-            surfQuad(kbP, kbN, kbU, x + hw, x + hw + KERB, z - len / 2, z + len / 2, kY);
-            surfQuad(rdP, rdN, rdU, x - hw, x + hw, z - len / 2, z + len / 2, rY);
-          } else {
-            surfQuad(kbP, kbN, kbU, x - len / 2, x + len / 2, z - hw - KERB, z - hw, kY);
-            surfQuad(kbP, kbN, kbU, x - len / 2, x + len / 2, z + hw, z + hw + KERB, kY);
-            surfQuad(rdP, rdN, rdU, x - len / 2, x + len / 2, z - hw, z + hw, rY);
-          }
-        } else {
-          const m = new THREE.Mesh(new THREE.PlaneGeometry(vertical ? ROADW : len, vertical ? len : ROADW), roadMat);
-          m.rotation.x = -Math.PI / 2; m.position.set(x, 0.05, z); m.receiveShadow = true; root.add(m);
-        }
-        // Centre dashes accumulate into ONE island-wide mesh. They used to be
-        // merged per SEGMENT so each dash mesh's cull sphere matched its own
-        // road plane's (out-of-sync culling is what made the bridge's yellow
-        // line float over open water). The road is now ONE mesh, so the paint
-        // has to be one mesh too — same rule, followed to its conclusion.
-        const dashes = Math.max(1, Math.floor(len / 6));
-        const dashPos = V2S ? dashAll : [];
-        const dashY = 0.065;   // paint-thin over the 0.05 road; polygonOffset does the rest
-        for (let i = 0; i < dashes; i++) {
-          const tt = a + (i + 0.5) * (len / dashes);
-          const lx = vertical ? fixed : cx + tt, lz = vertical ? cz + tt : fixed;
-          const hx = vertical ? 0.15 : 1.2, hz = vertical ? 1.2 : 0.15;   // the old 0.3×2.4 dash footprint
-          dashPos.push(
-            lx - hx, dashY, lz - hz, lx - hx, dashY, lz + hz, lx + hx, dashY, lz + hz,
-            lx - hx, dashY, lz - hz, lx + hx, dashY, lz + hz, lx + hx, dashY, lz - hz);
-        }
-        if (!V2S && dashPos.length) {
-          const dg = new THREE.BufferGeometry();
-          dg.setAttribute("position", new THREE.BufferAttribute(new Float32Array(dashPos), 3));
-          const dmesh = new THREE.Mesh(dg, lineMat);
-          dmesh.matrixAutoUpdate = false; dmesh.renderOrder = 1;
-          dmesh.userData.roadPaint = true;
-          root.add(dmesh);
-        }
-        const seg = { x, z, len, vertical, district: "island", w: ROADW, lanesPerDir: 1, laneW: 3.0 };
-        roadSegs.push(seg); city.roads.push(seg);
+      if (!isFinite(lo)) return null;
+      return { a: lo - HWR, b: hi + HWR, aJ: true, bJ: true };
+    }
+    const lines = { ave: {}, cross: {} };
+    for (const k of KS) { lines.ave[k] = planLine(k); lines.cross[k] = planLine(k); }
+    // PORT: the bridge from downtown lands on the centre street's west end
+    const bridgeT = bridgeEnd - cx - 4;      // 4 m onto the bridge deck
+    if (lines.cross[0] && bridgeT < lines.cross[0].a) { lines.cross[0].a = bridgeT; lines.cross[0].aJ = false; }
+    // PORTS from other builders' causeways (parse-time lanes, see header).
+    // A lane landing on the north/south shore stretches that edge street
+    // sideways until the lane's whole deck width sits on it.
+    for (const pt of (CBZ.annexPorts || [])) {
+      if (!pt || !isFinite(pt.x) || !(pt.half > 0)) continue;
+      const k = pt.side === "north" ? -2 : (pt.side === "south" ? 2 : null);
+      const L = k == null ? null : lines.cross[k];
+      if (!L) continue;
+      const t0 = pt.x - pt.half - cx, t1 = pt.x + pt.half - cx;
+      // lane misses the island + beach (+ biome_snow's 8 m landing margin)
+      if (Math.max(0, Math.abs(pt.x - cx) - pt.half) >= R + 14 + 8) continue;
+      if (t1 > L.b) { L.b = t1; L.bJ = false; }
+      if (t0 < L.a) { L.a = t0; L.aJ = false; }
+    }
+
+    function layStreet(k, vertical) {
+      const L = (vertical ? lines.ave : lines.cross)[k];
+      if (!L) return;
+      const fixed = (vertical ? cx : cz) + k * GRID;
+      const base = vertical ? cz : cx;
+      const len = L.b - L.a, mid = (L.a + L.b) / 2;
+      const x = vertical ? fixed : base + mid, z = vertical ? base + mid : fixed;
+      // THE TWO AXES SIT 2 mm APART, so a crossing is never two coplanar planes.
+      const rY = vertical ? 0.050 : 0.052, kY = vertical ? 0.042 : 0.044;
+      // the shoulders wrap a junction end (closes the outer corner), never a port
+      const s0 = base + L.a - (L.aJ ? KERB : 0), s1 = base + L.b + (L.bJ ? KERB : 0);
+      const r0 = base + L.a, r1 = base + L.b;
+      if (vertical) {
+        surfQuad(kbP, kbN, kbU, fixed - HWR - KERB, fixed - HWR, s0, s1, kY);
+        surfQuad(kbP, kbN, kbU, fixed + HWR, fixed + HWR + KERB, s0, s1, kY);
+        surfQuad(rdP, rdN, rdU, fixed - HWR, fixed + HWR, r0, r1, rY);
+      } else {
+        surfQuad(kbP, kbN, kbU, s0, s1, fixed - HWR - KERB, fixed - HWR, kY);
+        surfQuad(kbP, kbN, kbU, s0, s1, fixed + HWR, fixed + HWR + KERB, kY);
+        surfQuad(rdP, rdN, rdU, r0, r1, fixed - HWR, fixed + HWR, rY);
       }
+      // centre dashes, every 6 m, never through a junction box
+      const crossT = [];
+      for (const m of KS) {
+        const O = (vertical ? lines.cross : lines.ave)[m];
+        if (O && k * GRID >= O.a && k * GRID <= O.b) crossT.push(m * GRID);
+      }
+      const dashes = Math.max(1, Math.floor(len / 6));
+      const dashY = 0.065;   // paint-thin over the 0.05 road; polygonOffset does the rest
+      for (let i = 0; i < dashes; i++) {
+        const tt = L.a + (i + 0.5) * (len / dashes);
+        if (tt < L.a + 2 || tt > L.b - 2) continue;
+        let inBox = false;
+        for (const c of crossT) if (Math.abs(tt - c) < HWR + 2.4) { inBox = true; break; }
+        if (inBox) continue;
+        const lx = vertical ? fixed : base + tt, lz = vertical ? base + tt : fixed;
+        const hx = vertical ? 0.15 : 1.2, hz = vertical ? 1.2 : 0.15;
+        dashAll.push(
+          lx - hx, dashY, lz - hz, lx - hx, dashY, lz + hz, lx + hx, dashY, lz + hz,
+          lx - hx, dashY, lz - hz, lx + hx, dashY, lz + hz, lx + hx, dashY, lz - hz);
+      }
+      const seg = { x, z, len, vertical, district: "island", w: ROADW, lanesPerDir: 1, laneW: 3.0 };
+      roadSegs.push(seg); city.roads.push(seg);
     }
     const islandXLines = [], islandZLines = [];
-    for (let k = -2; k <= 2; k++) {
+    for (const k of KS) {
       islandXLines.push(cx + k * GRID); islandZLines.push(cz + k * GRID);
-      layRoadLine(cx + k * GRID, true);
-      layRoadLine(cz + k * GRID, false);
+      layStreet(k, true);
+      layStreet(k, false);
     }
 
     // THE THREE ISLAND SURFACE MESHES. Asphalt + concrete shoulder + paint, for
-    // the whole network. Built here (after every line is laid) rather than per
-    // segment, which is what collapses ~105 draw calls into 3.
-    if (V2S) {
-      surfMesh(kbP, kbN, kbU, kerbMat, "annex-street-shoulder");
-      surfMesh(rdP, rdN, rdU, roadMat, "annex-street-surface");
-      if (dashAll.length) {
-        const dg = new THREE.BufferGeometry();
-        dg.setAttribute("position", new THREE.BufferAttribute(new Float32Array(dashAll), 3));
-        dg.computeBoundingSphere();
-        const dmesh = new THREE.Mesh(dg, lineMat);
-        dmesh.matrixAutoUpdate = false; dmesh.updateMatrix(); dmesh.renderOrder = 1;
-        dmesh.userData.roadPaint = true;   // batch-exempt: keeps the decal material
-        root.add(dmesh);
-      }
+    // the whole network: 3 draws.
+    surfMesh(kbP, kbN, kbU, kerbMat, "annex-street-shoulder");
+    surfMesh(rdP, rdN, rdU, roadMat, "annex-street-surface");
+    if (dashAll.length) {
+      const dg = new THREE.BufferGeometry();
+      dg.setAttribute("position", new THREE.BufferAttribute(new Float32Array(dashAll), 3));
+      dg.computeBoundingSphere();
+      const dmesh = new THREE.Mesh(dg, lineMat);
+      dmesh.matrixAutoUpdate = false; dmesh.updateMatrix(); dmesh.renderOrder = 1;
+      dmesh.userData.roadPaint = true;   // batch-exempt: keeps the decal material
+      root.add(dmesh);
     }
 
-    // Traffic lights and the radar use the same intersection records as downtown.
-    // DELETED with ANNEX_STREETS_V2: the per-junction `plane(...0x2e3138, 0.06)`
-    // patch. It was a different asphalt tone from the road it sat on, one
-    // centimetre proud of it, and it only existed to cover the coplanar z-fight
-    // that the 2 mm axis separation above now makes impossible. The RECORD stays
-    // — that is what traffic lights and the radar read.
-    for (const x of islandXLines) for (const z of islandZLines) {
-      if (Math.hypot(x - cx, z - cz) >= R - 8 || blocked(x, z)) continue;
-      if (!V2S) plane(x, z, ROADW, ROADW, 0x2e3138, 0.06);
-      city.intersections.push({ x, z, i: -1, j: -1, phase: 0, t: rng() * 6, ns: true, light: null, district: "island" });
+    // Traffic lights and the radar use the same intersection records as
+    // downtown: one per crossing with three or four legs (a corner is a bend,
+    // not a signalled junction).
+    for (const kx of KS) for (const kz of KS) {
+      const V = lines.ave[kx], H = lines.cross[kz];
+      if (!V || !H) continue;
+      const tz = kz * GRID, tx = kx * GRID;
+      if (tz < V.a || tz > V.b || tx < H.a || tx > H.b) continue;
+      const legs = (V.a < tz - HWR - 1 ? 1 : 0) + (V.b > tz + HWR + 1 ? 1 : 0) +
+                   (H.a < tx - HWR - 1 ? 1 : 0) + (H.b > tx + HWR + 1 ? 1 : 0);
+      if (legs < 3) continue;
+      city.intersections.push({ x: cx + tx, z: cz + tz, i: -1, j: -1, phase: 0, t: rng() * 6, ns: true, light: null, district: "island" });
+    }
+    // a causeway deck crosses the beach between its shore street and the
+    // water: nothing (trees) may stand in that corridor
+    function inPort(x, z) {
+      for (const pt of (CBZ.annexPorts || [])) {
+        if (!pt || !isFinite(pt.x) || Math.abs(x - pt.x) > pt.half + 2) continue;
+        if (pt.side === "north" && z < cz - 2 * GRID + HWR) return true;
+        if (pt.side === "south" && z > cz + 2 * GRID - HWR) return true;
+      }
+      return false;
     }
     city.allXLines = city.xLines.concat(islandXLines);
     city.allZLines = city.zLines.concat(islandZLines);
@@ -791,7 +852,7 @@
       for (let i = 0; i < 64; i++) {
         const a = rng() * Math.PI * 2, dist = 20 + rng() * (R - 24);
         const x = cx + Math.cos(a) * dist, z = cz + Math.sin(a) * dist;
-        if (blocked(x, z) || nearRoad(x, z, 1, 1) || nearDoor(x, z, 2.7)) continue;
+        if (blocked(x, z) || nearRoad(x, z, 1, 1) || nearDoor(x, z, 2.7) || inPort(x, z)) continue;
         const broad = rng() < 0.5;                 // mix conifers + round broadleaf
         const h = (broad ? 4.0 : 5.0) + rng() * 3.5;
         trees.push({
@@ -906,10 +967,19 @@
       if (!blocked(x, z)) parkedCar(x, z, r.vertical, CAR_COLORS[(rng() * CAR_COLORS.length) | 0], false);
     }
 
+    // The two shore streets a causeway docks onto: centreline z, half width,
+    // and the world x-span the asphalt actually covers (after any port
+    // stretch). island_speedway.js and biome_snow.js land their decks on
+    // these edges instead of guessing where the island's streets are.
+    const edgeStreet = function (k) {
+      const L = lines.cross[k];
+      return L ? { z: cz + k * GRID, hw: HWR, x0: cx + L.a, x1: cx + L.b } : null;
+    };
     const annex = {
       cx, cz, radius: R, lots, towers, roads: roadSegs,
       xLines: islandXLines, zLines: islandZLines,
       center: { x: cx, z: cz },
+      streets: { GRID: GRID, ROADW: ROADW, north: edgeStreet(-2), south: edgeStreet(2) },
     };
     city.annex = annex;
 

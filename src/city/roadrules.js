@@ -895,6 +895,7 @@
       src: g, name: name, circle: circle, cx: g.cx, cz: g.cz, r: g.r,
       minX: minX, maxX: maxX, minZ: minZ, maxZ: maxZ,
       k1: lc(g.owner), k2: lc(g._govOwner), k3: lc(g.biome), civ: !!g.civ,
+      pad: isFinite(g.pad) && g.pad > 0 ? g.pad : 0,
     };
   }
   function placeTable(opts) {
@@ -925,6 +926,19 @@
   function ptIn(p, x, z) {
     if (!(x >= p.minX && x <= p.maxX && z >= p.minZ && z <= p.maxZ)) return false;
     if (p.circle) { const dx = x - p.cx, dz = z - p.cz; return dx * dx + dz * dz <= p.r * p.r; }
+    return true;
+  }
+  // A road ENDS in a place when its end reaches the place's own margin (its
+  // registered pad: a beach ring, a verge). A causeway that lands on an
+  // island's shore street stops on the sand, not past the turf line, and it
+  // has reached the island all the same — without this the post-build pass
+  // clamped such a record back off the street it docks onto, leaving the
+  // traffic lane ending short of the junction the deck visibly makes.
+  function ptInPadded(p, x, z) {
+    const m = p.pad || 0;
+    if (!m) return ptIn(p, x, z);
+    if (!(x >= p.minX - m && x <= p.maxX + m && z >= p.minZ - m && z <= p.maxZ + m)) return false;
+    if (p.circle) { const dx = x - p.cx, dz = z - p.cz, r = p.r + m; return dx * dx + dz * dz <= r * r; }
     return true;
   }
   // Does this road/opts bundle OWN the place? Derived from fields the world
@@ -996,8 +1010,8 @@
           const cdz = Math.max(rminZ - p.cz, 0, p.cz - rmaxZ);
           if (cdx * cdx + cdz * cdz >= p.r * p.r) continue;
         }
-        if (ptIn(p, dest.x, dest.z)) continue;        // THE DESTINATION RULE
-        if (ptIn(p, origin.x, origin.z)) continue;    // ...and its mirror
+        if (ptInPadded(p, dest.x, dest.z)) continue;        // THE DESTINATION RULE
+        if (ptInPadded(p, origin.x, origin.z)) continue;    // ...and its mirror
         if (ownsPlace(opts, p)) continue;
         if (ov <= dock) continue;                     // docking at the edge
         const nearEdge = dir > 0 ? aLo : aHi;
