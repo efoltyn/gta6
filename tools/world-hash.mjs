@@ -150,7 +150,9 @@ const HASH = String.raw`(function(GRID){
 })`;
 
 await takeLock();
+const WATCHDOG = setTimeout(() => { process.stderr.write("[world-hash] watchdog: 240 s under the lock, giving up\n"); try { B && B.close(); } catch (_) {} releaseLock(); process.exit(5); }, 240000);
 let srv, B;
+for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { try { B && B.close(); } catch (_) {} releaseLock(); process.exit(130); });
 const results = {};
 try {
   srv = await startServer(ROOT);
@@ -170,16 +172,18 @@ try {
     if (PROF) { await s("Profiler.enable"); await s("Profiler.setSamplingInterval", { interval: 250 }); await s("Profiler.start"); }
     const bt = await ev("(function(){ var t = performance.now(); CBZ.startRun(); return performance.now() - t; })()");
     if (PROF) { const { profile } = await s("Profiler.stop"); fs.writeFileSync(MODES.length > 1 ? PROF.replace(/(\.cpuprofile)?$/, "." + m + ".cpuprofile") : PROF, JSON.stringify(profile)); }
+    const th = Date.now();
     const r = await ev(HASH + "(" + GRID + ")");
+    r.hashS = (Date.now() - th) / 1000; r.bootS = (th - t0) / 1000;
     r.buildMs = Math.round(bt);
     results[m] = r;
-    process.stderr.write(`[world-hash] ${m}: scene ${r.sceneTotal} (${r.counts.objects} obj, ${r.counts.vertices} verts), build ${r.buildMs} ms\n`);
+    process.stderr.write(`[world-hash] ${m}: scene ${r.sceneTotal} (${r.counts.objects} obj, ${r.counts.vertices} verts), build ${r.buildMs} ms (boot+build ${r.bootS}s, hash ${r.hashS}s)\n`);
     try { await B.send("Target.closeTarget", { targetId }); await B.send("Target.disposeBrowserContext", { browserContextId }); } catch (_) {}
   }
 } finally {
   try { B && B.close(); } catch (_) {}
   try { srv && srv.close(); } catch (_) {}
-  releaseLock();
+  releaseLock(); clearTimeout(WATCHDOG);
   if (tmp) try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {}
 }
 if (OUT) fs.writeFileSync(OUT, JSON.stringify(results, null, 1));
