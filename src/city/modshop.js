@@ -1309,7 +1309,7 @@
       },
       options: [{
         id: "modshop-open", slot: "i",
-        label: function () { return "Open the mod garage"; },
+        label: function () { return "Tune up"; },
         onSelect: function () { openPanel(); },
       }],
     });

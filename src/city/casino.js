@@ -492,7 +492,7 @@
         }
         return best;
       },
-      options: [{ id: "sit-table", slot: "e", label: "Sit at the table", onSelect: function () { openTable(); } }],
+      options: [{ id: "sit-table", slot: "e", label: "Sit", onSelect: function () { openTable(); } }],
     });
   }
 

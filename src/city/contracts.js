@@ -1328,9 +1328,8 @@
         {
           id: "bureau-join", slot: "i",
           label: function () {
-            const f = F(); if (!f) return "Field office";
-            if (f.isMember(AGENCY)) return "Read the board";
-            return "Apply to the bureau";
+            const f = F();
+            return (f && f.isMember(AGENCY)) ? "Read" : "Apply";
           },
           canShow: function () { return !!F(); },
           onSelect: function () {
@@ -1418,7 +1417,7 @@
       options: [
         {
           id: "cause-drop-read", slot: "e",
-          label: function () { return "Read the drop"; },
+          label: function () { return "Read"; },
           onSelect: function () { openBoard(CELL); },
         },
         // (Burning the thread lives on the board — see the note at the Bureau
@@ -1459,7 +1458,7 @@
       options: [
         {
           id: "set-board-read", slot: "i",
-          label: function () { return "Read the set's work"; },
+          label: function () { return "Read"; },
           onSelect: function () { openBoard(GANG); },
         },
       ],

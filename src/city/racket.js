@@ -1390,7 +1390,7 @@
     I.register("ped:vendor", {
       id: "rk-ask", slot: "j", prio: 20,
       canShow: function (v) { return on() && !!v.vendor && !v.vendor.demolished && racketable(v.vendor); },
-      label: "Ask what's going on",
+      label: "Ask",
       onSelect: function (v) {
         const q = requestLine(v.vendor);
         if (CBZ.citySay) CBZ.citySay(v, q.say, "#cfe6ff", 3.6);
@@ -1404,7 +1404,7 @@
         const rec = state.get(v.vendor);
         return !!(rec && isPlayerSide(rec.gang) && rec.owed > 0);
       },
-      label: function (v) { const rec = state.get(v.vendor); return "Collect protection — " + money(rec ? rec.owed : 0); },
+      label: function (v) { const rec = state.get(v.vendor); return "Collect " + money(rec ? rec.owed : 0); },
       onSelect: function (v) { collectCounter(v.vendor); },
     });
   }

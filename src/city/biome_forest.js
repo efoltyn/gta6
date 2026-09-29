@@ -1413,7 +1413,7 @@
             return (dx * dx + dz * dz) < (deckHalf + 0.5) * (deckHalf + 0.5) ? vistaSpot : null;
           },
           options: [{
-            id: "lookout-scan", slot: "e", label: "Scan the treeline",
+            id: "lookout-scan", slot: "e", label: "Scan",
             onSelect: function () {
               if (CBZ.city && CBZ.city.note) CBZ.city.note("From up here the whole of Redhollow Woods spreads out below.", 2.6);
             },

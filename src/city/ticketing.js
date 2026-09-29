@@ -84,20 +84,11 @@
         {
           id: "airline_buy", slot: "e",
           label: function () {
-            const t = CBZ.airlineTicket;
-            if (t) {
-              if (!t.shuttle) return "Ticket to " + t.to.code + " · waiting for the next aircraft";
-              const d = (CBZ.airlineDepartures(target.ap) || []).find(function (x) { return x.shuttle === t.shuttle; });
-              if (d && d.boarding) return "Boarding now, stand " + (d.gate || "?") + " for " + t.to.code;
-              if (d) return "Ticket to " + t.to.code + " · boards in " + mmss(d.eta);
-              return "Ticket to " + t.to.code + " · aircraft inbound";
-            }
             const dep = chosen();
-            if (!dep) return "No departures";
-            return "Buy ticket to " + dep.to.name + " — " + money(dep.price) +
-              (dep.boarding ? " (boarding)" : " (" + mmss(dep.eta) + ")");
+            return "Buy " + money(dep ? dep.price : 0);
           },
-          canShow: function () { return !!(target.deps && target.deps.length); },
+          // holding a ticket, or no departures, are states, not buttons
+          canShow: function () { return !CBZ.airlineTicket && !!chosen(); },
           onSelect: function () {
             if (CBZ.airlineTicket) {
               const t = CBZ.airlineTicket;
@@ -120,9 +111,8 @@
         {
           id: "airline_dest", slot: "i",
           label: function () {
-            const dep = chosen();
             const n = target.deps ? target.deps.length : 0;
-            return "Other destinations (" + (n ? (pick + 1) : 0) + "/" + n + (dep ? " — " + dep.to.code : "") + ")";
+            return "Browse " + (n ? (pick + 1) : 0) + "/" + n;
           },
           // Only worth a key when there is genuinely a choice to make.
           canShow: function () { return !CBZ.airlineTicket && !!(target.deps && target.deps.length > 1); },
@@ -135,10 +125,7 @@
         },
         {
           id: "airline_refund", slot: "j", bad: true,
-          label: function () {
-            const t = CBZ.airlineTicket;
-            return "Refund the " + (t ? t.to.code : "") + " ticket";
-          },
+          label: function () { return "Refund"; },
           canShow: function () { return !!CBZ.airlineTicket; },
           onSelect: function () {
             const t = CBZ.airlineTicket;

@@ -678,7 +678,7 @@
 
   function sign(p) {
     const gate = canSign(p);
-    if (!gate.ok) { if (gate.hard && gate.why) say(p, "“" + gate.why + "”"); return { ok: false, why: gate.why, note: gate.why }; }
+    if (!gate.ok) { if (gate.hard && gate.why) say(p, gate.why); return { ok: false, why: gate.why, note: gate.why }; }
     const st = state();
     const v = verdict(p);
     if (CBZ.cityMeet) { try { CBZ.cityMeet(p); } catch (e) {} }   // you learn a name by asking for it
@@ -1391,7 +1391,7 @@
         if (!p || p.dead || p.vendor) return false;
         return !asked(p);
       },
-      label: function () { const st = state(); return "Ask to sign (" + st.sigCount + "/" + st.sigsNeeded + ")"; },
+      label: function () { const st = state(); return "Canvass " + st.sigCount + "/" + st.sigsNeeded; },
       onSelect: function (p) { sign(p); },
     });
   }

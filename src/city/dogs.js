@@ -331,7 +331,7 @@
     I.register("dog", {
       id: "dog-tame", slot: "e", hold: true, prio: 20,
       canShow: function (d) { return d && !d.tamed && !!haveFeed(); },
-      label: "Feed & tame",
+      label: "Tame",
       onSelect: function (d) { tameStray(d); },
     });
     // PET (your dog)
@@ -345,7 +345,7 @@
     I.register("dog", {
       id: "dog-sit", slot: "i", prio: 16,
       canShow: function (d) { return d && d.tamed; },
-      label: function (d) { return d.sit ? "Heel" : "Sit & stay"; },
+      label: function (d) { return d.sit ? "Heel" : "Stay"; },
       onSelect: function (d) { toggleSit(d); },
     });
     // FEED (your dog, heals)
@@ -360,7 +360,7 @@
     I.register("dog", {
       id: "dog-send", slot: "l", prio: 15,
       canShow: function (d) { return d && d.tamed && !(CBZ.CONFIG && CBZ.CONFIG.ANIMALS_ALL_CONTROLLABLE === false); },
-      label: function (d) { return d.goTo ? "Heel" : "Send ahead"; },
+      label: function (d) { return d.goTo ? "Heel" : "Send"; },
       onSelect: function (d) {
         if (d.goTo) { d.goTo = null; d.sit = false; if (CBZ.city && CBZ.city.note) CBZ.city.note(d.name + " falls back in.", 1.4); return; }
         const P = CBZ.player && CBZ.player.pos; if (!P) return;

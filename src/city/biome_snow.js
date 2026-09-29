@@ -2540,7 +2540,7 @@
           },
           options: [{
             id: "cabin-warmup", slot: "e",
-            label: function () { return (CBZ.now || 0) < nextWarmT ? "Warming up (still cozy)" : "Warm up by the fire"; },
+            label: "Warm up",
             canShow: function () { return (CBZ.now || 0) >= nextWarmT; },
             onSelect: function () {
               nextWarmT = (CBZ.now || 0) + 120000;      // ~2 min cooldown — a rest, not a battery

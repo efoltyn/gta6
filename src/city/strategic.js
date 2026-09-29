@@ -3149,7 +3149,7 @@
       },
       options: [{
         id: "nuke-plant-arm", slot: "e", bad: true,
-        label: function () { return "Plant the nuclear device (" + nkTimer() + "s)"; },
+        label: function () { return "Plant " + nkTimer() + "s"; },
         onSelect: function (t) {
           if (!invTake("Nuclear Device")) return;
           const gy = CBZ.floorAt ? CBZ.floorAt(t.x, t.z) : 0;
@@ -3195,8 +3195,8 @@
         // is not a decision, it is a cutscene.
         label: function (a) {
           return a.arm > 0
-            ? "Safe the device (" + Math.ceil(a.arm) + "s to hot)"
-            : "Abort the countdown (" + Math.ceil(a.t) + "s)";
+            ? "Disarm " + Math.ceil(a.arm) + "s"
+            : "Abort " + Math.ceil(a.t) + "s";
         },
         onSelect: function (a) {
           const i = armed.indexOf(a);

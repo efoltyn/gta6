@@ -2083,13 +2083,9 @@ if(CFG.ARENA_FIGHTS&&CBZ.interactions&&typeof CBZ.interactions.registerZone==="f
     find:function(px,pz){ return Math.hypot(px-RX,pz-RZ)<RING_ZONE?{x:RX,z:RZ}:null; },
     options:[{
       id:"arena_ring_bet", slot:"e",
-      label:function(){
-        if(!bout)return "Ringside betting";
-        if(bout.state==="ko"||bout.state==="reset")return "Bout ending, next matchup soon";
-        if(ringBet&&ringBet.boutId===bout.id)return "Bet down: "+money(ringBet.stake)+" on "+ringBet.side.toUpperCase();
-        return "Bet: RED "+bout.red.name+" @"+bout.oddsRed.toFixed(2)+
-               " / BLUE "+bout.blue.name+" @"+bout.oddsBlue.toFixed(2);
-      },
+      // no bout, a bout ending, or money already down are states, not buttons
+      canShow:function(){ return !!bout&&bout.state!=="ko"&&bout.state!=="reset"&&!(ringBet&&ringBet.boutId===bout.id); },
+      label:function(){ return "Bet"; },
       onSelect:function(){
         if(!bout){ note("No bout scheduled right now.",2); return; }
         if(bout.state==="ko"||bout.state==="reset"){ note("Too late, wait for the next matchup.",2); return; }
@@ -2107,10 +2103,10 @@ if(CFG.ARENA_FIGHTS&&CBZ.interactions&&typeof CBZ.interactions.registerZone==="f
       }
     },{
       id:"arena_ring_box", slot:"j",
+      canShow:function(){ return !pfight; },
       label:function(){
-        if(pfight)return "Bout in progress";
         var c=careerState(),o=bookedOpp(true);
-        return "BOXING"+(isTitle(c,true)?" TITLE":"")+" match vs "+o.name+" ("+o.wins+"-"+o.losses+") · purse "+money(purseFor(c,o,true));
+        return "Fight "+money(purseFor(c,o,true));
       },
       onSelect:startBoxMatch
     }]
@@ -2120,10 +2116,10 @@ if(CFG.ARENA_FIGHTS&&CBZ.interactions&&typeof CBZ.interactions.registerZone==="f
     find:function(px,pz){ return Math.hypot(px-CGX,pz-CGZ)<CAGE_ZONE?{x:CGX,z:CGZ}:null; },
     options:[{
       id:"arena_cage_fight", slot:"i",
+      canShow:function(){ return !pfight; },
       label:function(){
-        if(pfight)return "Bout in progress";
         var c=careerState(),o=bookedOpp(false);
-        return "MMA"+(isTitle(c,false)?" TITLE":"")+" bout vs "+o.name+" ("+o.wins+"-"+o.losses+") · purse "+money(purseFor(c,o,false));
+        return "Fight "+money(purseFor(c,o,false));
       },
       onSelect:startCageFight
     }]
@@ -2134,16 +2130,14 @@ if(CFG.ARENA_FIGHTS&&CBZ.interactions&&typeof CBZ.interactions.registerZone==="f
     options:[
       {
         id:"arena_pit_wild", slot:"j",
-        label:function(){ return pitBout?"Pit bout in progress":"Stage a beast bout (bet ringside)"; },
+        canShow:function(){ return !pitBout; },
+        label:function(){ return "Stage"; },
         onSelect:startWildPit
       },
       {
         id:"arena_pit_pet", slot:"i",
-        label:function(){
-          var pet=findPet();
-          return pet?("Enter your "+prettySpecies(pet.species||"beast")+" in the pit ($600 purse)")
-                    :"Pit entry: no tamed beast with you";
-        },
+        canShow:function(){ return !!findPet(); },   // no tamed beast with you: nothing to enter
+        label:function(){ return "Enter $600"; },
         onSelect:startPetPit
       }
     ]

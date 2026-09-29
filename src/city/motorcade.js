@@ -1955,7 +1955,7 @@
       },
       options: [{
         id: "motorcade-ride", slot: "e", campaignSafe: true,
-        label: function () { return "Get in the car"; },
+        label: "Get in",
         canShow: function () { return playerPresident() && !BOARD && !!stateCar(); },
         onSelect: function () { askWhere(); },
       }],
@@ -1966,7 +1966,7 @@
         if (!pick || pick.kind !== "motorcade") return null;
         const pass = rows && rows._pass; if (!pass || !pass.length) return null;
         const o = pass[0];
-        const out = [{ key: "e", hold: false, label: "Get in the car", bad: false, opt: o, decision: "yes", proposal: "Get in the car", standing: null }];
+        const out = [{ key: "e", hold: false, label: "Get in", bad: false, opt: o, decision: "yes", proposal: "Get in", standing: null }];
         out.dualRide = true;          // the E-router yields to this row
         return out;
       });

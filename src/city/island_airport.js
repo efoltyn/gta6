@@ -1356,7 +1356,7 @@
         if (!P || P.dead || P.driving || P._aircraft) return false;
         return true;
       },
-      label: "Board the cabin",
+      label: "Board",
       onSelect: function (v) {
         if (!v || v.taken || cabinState.inside || cabinState.pending) return;
         cabinState.pending = { rec: v, t: 0.55, dir: "in" };   // door slides, then you step in
@@ -1396,7 +1396,7 @@
       },
       options: [
         {
-          id: "airliner_exit", slot: "e", label: "Exit the airliner",
+          id: "airliner_exit", slot: "e", label: "Get off",
           /* YOU CANNOT STEP OFF AN AEROPLANE THAT IS FLYING. This gate had no
              reason to exist while an airliner was a thing bolted to a gate;
              systems/airline.js flies this same hull with you in it, and the
@@ -1444,7 +1444,7 @@
           id: "airliner_door_in", slot: "e",
           label: function () {
             const d = CBZ.cityAircraftDoor(cabinState.rec);
-            return (d && d.open) ? "Close the door" : "Open the door";
+            return (d && d.open) ? "Close" : "Open";
           },
           onSelect: function () {
             const rec = cabinState.rec;
@@ -1494,7 +1494,7 @@
           id: "aircraft_door_toggle", slot: "e",
           label: function (t) {
             const d = t && CBZ.cityAircraftDoor(t.rec);
-            return (d && d.open) ? "Close the door" : "Open the door";
+            return (d && d.open) ? "Close" : "Open";
           },
           onSelect: function (t) {
             const d = t && CBZ.cityAircraftDoor(t.rec);
@@ -1518,7 +1518,7 @@
         return seatTarget;
       },
       options: [
-        { id: "airliner_sit", slot: "e", label: "Take the seat",
+        { id: "airliner_sit", slot: "e", label: "Sit",
           onSelect: function (t) { if (t && t.seat) cabinSitSeat(t.seat); } },
       ],
     });

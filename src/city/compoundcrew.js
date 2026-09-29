@@ -85,7 +85,7 @@
   function say(ped, lines, secs) {
     if (!ped || ped.dead || !CBZ.citySay) return;
     const line = typeof lines === "string" ? lines : lines[(Math.random() * lines.length) | 0];
-    try { CBZ.citySay(ped, "“" + line + "”", ped.tagColor || "#9be564", secs || 2.2); } catch (e) {}
+    try { CBZ.citySay(ped, line, ped.tagColor || "#9be564", secs || 2.2); } catch (e) {}
   }
   function seeded(seed) {           // mulberry32: a member's look is his own seed
     let a = (seed | 0) || 1;

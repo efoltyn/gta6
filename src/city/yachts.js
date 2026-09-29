@@ -2606,13 +2606,13 @@
       options: [
         {
           id: "yacht-door", slot: "e",
-          label: function (t) { return t && t.g && t.g.want ? "Close the shell door" : "Open the shell door"; },
+          label: function (t) { return t && t.g && t.g.want ? "Close" : "Open"; },
           onSelect: function (t) { if (t && t.g) t.g.want = t.g.want ? 0 : 1; },
         },
         {
           id: "yacht-tender", slot: "i",
           canShow: function (t) { return !!(t && t.g && t.g.open > 0.6 && (t.g.aboard | 0) > 0); },
-          label: function () { return "Launch the tender"; },
+          label: function () { return "Launch"; },
           onSelect: function (t) {
             if (!t || !t.g) return;
             const tender = launchTender(t.g);

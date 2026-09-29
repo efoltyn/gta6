@@ -1598,7 +1598,7 @@
           const d2 = dx * dx + dz * dz;
           if (d2 < cd) { cd = d2; crier = gd; }
         }
-        if (crier) { try { CBZ.citySay(crier, "“" + sentCall + "!”", "#ffd27b", 2.4); } catch (e) {} }
+        if (crier) { try { CBZ.citySay(crier, sentCall + "!", "#ffd27b", 2.4); } catch (e) {} }
       }
       // LOCKUP puts the screws on your block — the cell-watch sweep the
       // strike-2 rule already drives, reused rather than re-authored.

@@ -854,8 +854,8 @@
     if (CBZ.cityPanicRaise) CBZ.cityPanicRaise(m.pos.x, m.pos.z, 0.8);
   }
 
-  const GRIEF_CRY = ["“No. NO!”", "“Somebody help!”", "“Please, please…”", "“Oh god…”", "“Wake up. Wake UP.”"];
-  const GRIEF_KID = ["“Mom? MOM!”", "“Get up, please…”", "“Daddy?”"];
+  const GRIEF_CRY = ["No. No!", "Somebody help!", "Please. Please.", "Oh God.", "Wake up. Wake up!"];
+  const GRIEF_KID = ["Mom? Mom!", "Get up. Please.", "Daddy?"];
   function tickGrief(m, dt) {
     const gr = m._kinGrief;
     if (!gr) return;

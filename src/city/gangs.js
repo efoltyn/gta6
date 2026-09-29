@@ -2584,7 +2584,7 @@
     if (gang && gang._barkT > 0) return;
     if (!nearPlayer(m.pos.x, m.pos.z, 70)) return;
     if (gang) gang._barkT = 4 + rng() * 3;
-    CBZ.citySay(m, "“" + lines[(rng() * lines.length) | 0] + "”", m.tagColor || "#ffb37b", 2.2);
+    CBZ.citySay(m, lines[(rng() * lines.length) | 0], m.tagColor || "#ffb37b", 2.2);
   }
 
   function clearWarRole(m) { m._wRole = null; m._wT = 0; m._wHadGun = false; }

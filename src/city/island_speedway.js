@@ -3540,11 +3540,12 @@
       },
       options: [{
         id: "speedway-join", slot: "i",
-        label: function () { return RACE.active ? "Racing, finish your laps" : "JOIN THE RACE"; },
+        canShow: function () { return !RACE.active; },   // mid-race is a state, not a button
+        label: function () { return "Join"; },
         onSelect: function () { if (!RACE.active) startRace(); },
       }, {
         id: "speedway-standings", slot: "e",
-        label: function () { return "View championship standings"; },
+        label: function () { return "Read"; },
         onSelect: function () { toggleStandings(true); },
       }],
     });
@@ -3560,7 +3561,7 @@
       },
       options: [{
         id: "speedway-board-view", slot: "e",
-        label: function () { return "Championship standings"; },
+        label: function () { return "Read"; },
         onSelect: function () { toggleStandings(true); },
       }],
     });
@@ -3580,12 +3581,12 @@
       options: [{
         id: "raceway-bet", slot: "i",
         label: function () {
-          return BOOK.bet ? ("Ticket live: " + BOOK.bet.label + " @ " + BOOK.bet.odds + "x") : "Bet on the next speedway race";
+          return BOOK.bet ? "Check" : "Bet";
         },
         onSelect: function () { openBook(); },
       }, {
         id: "raceway-standings", slot: "e",
-        label: function () { return "Championship standings"; },
+        label: function () { return "Read"; },
         onSelect: function () { toggleStandings(true); },
       }],
     });

@@ -341,12 +341,9 @@
       I.register("milvehicle", {
         id: "milveh-take", slot: "e", bad: true, campaignSafe: true,
         label: function (v) {
-          return v.civilian ? (v.flightKind === "airliner" ? "Hijack the airliner" : "Steal the private jet")
-            : v.kind === "tank" ? "Commandeer the tank"
-            : v.kind === "patriot" ? "Commandeer the Patriot"
-            : v.kind === "heli" ? "Steal the helicopter"
-            : v.kind === "plane" ? "Steal the aircraft"
-            : "Steal the vehicle";
+          return v.civilian ? (v.flightKind === "airliner" ? "Hijack" : "Steal")
+            : (v.kind === "tank" || v.kind === "patriot") ? "Commandeer"
+            : "Steal";
         },
         onSelect: function (v) { boardVehicle(v); },
       });

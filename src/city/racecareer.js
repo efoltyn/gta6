@@ -737,7 +737,7 @@
     I.register("ped:civ", {
       id: "crew-order-service", slot: "e", prio: 7,
       canShow: showChief,
-      label: function () { return "Order: full service ($260)"; },
+      label: function () { return "Service $260"; },
       onSelect: function () {
         startOrder("service", 260, function (car) {
           car.engineHp = 100; car._smoking = false;
@@ -756,7 +756,7 @@
       label: function () {
         const car = carOnMarks();
         const t = car ? nextTuneTier(car) : 1;
-        return "Order: race tune Stage " + t + " (" + fmt$(TUNE_PRICE[t] || 0) + ")";
+        return "Tune " + fmt$(TUNE_PRICE[t] || 0);
       },
       onSelect: function () {
         const car = carOnMarks(); if (!car) { chiefSay("Roll it onto the marks first.", 2.2); return; }
@@ -778,7 +778,7 @@
         const car = carOnMarks();
         return !!car && !car._leagueLivery;
       },
-      label: function () { return "Order: league livery, #99 ($400)"; },
+      label: function () { return "Paint $400"; },
       onSelect: function () {
         startOrder("livery", 400, function (c2) {
           if (CBZ.cityApplyRaceLivery && c2.group) {
@@ -976,10 +976,7 @@
       canShow: function (p) {
         return !!(CFG.RACE_PINKSLIP && p && p._racer && !p.dead && can("pinkslip") && !PS.active);
       },
-      label: function (p) {
-        const r = p._racer;
-        return "PINK SLIPS, your car vs his " + psCarName(r);
-      },
+      label: function () { return "Wager"; },
       onSelect: function (p) { if (p._racer) psStart(p._racer, p); },
     });
   }
@@ -1002,7 +999,7 @@
       },
       options: [{
         id: "race-shelf-read", slot: "e",
-        label: function () { return "Read the plaques"; },
+        label: function () { return "Read"; },
         onSelect: function () { note(plaqueText(), 4.6); },
       }],
     });
@@ -1020,11 +1017,9 @@
       },
       options: [{
         id: "race-door-try", slot: "e",
-        label: function (t) {
-          const d = t && t._door;
-          if (!d) return "Try the door";
-          return d.locked ? "Try the door. LOCKED" : "Door: open to you";
-        },
+        // an unlocked door is a status ("it's yours, walk in"), not a button
+        canShow: function (t) { const d = t && t._door; return !d || !!d.locked; },
+        label: function () { return "Try"; },
         onSelect: function (t) {
           const d = t && t._door;
           if (!d) return;

@@ -711,10 +711,10 @@
       find: function (px, pz, ctx) { return unitDoorAt(px, pz, 1.9, ctx && ctx.pos ? ctx.pos.y : null); },
       options: [{
         id: "unit-door-use", slot: "e",
-        label: function (d) {
-          if (d.open) return "Close " + d.label;
-          return unitMayOpen(d) ? ("Unlock " + d.label) : ("Locked. " + d.label + ".");
-        },
+        // a door you cannot open offers no verb here: the force row below is
+        // the way through, and "Locked" is a state, not a button
+        canShow: function (d) { return !!d && (d.open || unitMayOpen(d)); },
+        label: function (d) { return d.open ? "Close" : "Unlock"; },
         onSelect: function (d) {
           const note = (CBZ.city && CBZ.city.note) ? CBZ.city.note : function () {};
           if (d.open) { unitSetOpen(d, false); note("Closed " + d.label + ".", 1.6); return; }
@@ -736,9 +736,9 @@
         canShow: function (d) { return !!d && !d.open && !unitMayOpen(d); },
         label: function () {
           const E = CBZ.cityEcon;
-          if (E && E.count && E.count("Lockpick") > 0) return "Pick the lock";
-          if (E && E.count && E.count("Crowbar") > 0) return "Pry the door";
-          return "Kick the door in";
+          if (E && E.count && E.count("Lockpick") > 0) return "Pick";
+          if (E && E.count && E.count("Crowbar") > 0) return "Pry open";
+          return "Kick in";
         },
         onSelect: function (d) {
           const note = (CBZ.city && CBZ.city.note) ? CBZ.city.note : function () {};
@@ -1997,24 +1997,24 @@
   // band and is deliberately tiny: a free rifle is the single most inflationary
   // thing this layer could hand out.
   const LOOT_KIND = {
-    desk:       { rate: 0.18, tier: 0, dud: 0.42, item: 0.20, cash: [4, 44],    label: "Search the desk",           empty: "Paperwork, dead pens, somebody's charger. Nothing." },
-    reception:  { rate: 1.00, tier: 0, dud: 0.34, item: 0.26, cash: [10, 80],   label: "Go through the front desk", empty: "Visitor badges and a sign-in book. Nothing worth taking." },
-    kitchen:    { rate: 0.45, tier: 0, dud: 0.40, item: 0.34, cash: [3, 26],    label: "Search the kitchen drawers",empty: "Cutlery, takeaway menus, a dead kettle." },
-    rack:       { rate: 0.22, tier: 1, dud: 0.38, item: 0.30, cash: [10, 74],   label: "Search the shelves",        empty: "Archive boxes. Somebody's tax returns from nine years ago." },
-    crate:      { rate: 0.55, tier: 1, dud: 0.30, item: 0.36, cash: [15, 92],   label: "Pry open the crate",        empty: "Packing foam and an empty inventory sheet." },
-    footlocker: { rate: 0.60, tier: 1, dud: 0.32, item: 0.36, cash: [12, 84],   label: "Open the footlocker",       empty: "Spare boots, a bar of soap, a letter he never sent." },
-    weapons:    { rate: 1.00, tier: 2, dud: 0.24, item: 0.44, cash: [20, 120],  gun: 0.10, label: "Force the weapons locker", empty: "Empty racks. Whatever was in here walked out already." },
-    cabinet:    { rate: 1.00, tier: 3, dud: 0.16, item: 0.46, cash: [140, 620], label: "Open the drinks cabinet", empty: "Good bottles, all of them empty. He drinks alone." },
-    safe:       { rate: 1.00, tier: 4, dud: 0.00, item: 0.34, cash: [0, 0],     label: "Crack the floor safe",      empty: "Deeds, a passport in another name — and no cash. He moved it." },
+    desk:       { rate: 0.18, tier: 0, dud: 0.42, item: 0.20, cash: [4, 44],    label: "Search",           empty: "Paperwork, dead pens, somebody's charger. Nothing." },
+    reception:  { rate: 1.00, tier: 0, dud: 0.34, item: 0.26, cash: [10, 80],   label: "Go through", empty: "Visitor badges and a sign-in book. Nothing worth taking." },
+    kitchen:    { rate: 0.45, tier: 0, dud: 0.40, item: 0.34, cash: [3, 26],    label: "Search",empty: "Cutlery, takeaway menus, a dead kettle." },
+    rack:       { rate: 0.22, tier: 1, dud: 0.38, item: 0.30, cash: [10, 74],   label: "Search",        empty: "Archive boxes. Somebody's tax returns from nine years ago." },
+    crate:      { rate: 0.55, tier: 1, dud: 0.30, item: 0.36, cash: [15, 92],   label: "Pry open",        empty: "Packing foam and an empty inventory sheet." },
+    footlocker: { rate: 0.60, tier: 1, dud: 0.32, item: 0.36, cash: [12, 84],   label: "Open",       empty: "Spare boots, a bar of soap, a letter he never sent." },
+    weapons:    { rate: 1.00, tier: 2, dud: 0.24, item: 0.44, cash: [20, 120],  gun: 0.10, label: "Force", empty: "Empty racks. Whatever was in here walked out already." },
+    cabinet:    { rate: 1.00, tier: 3, dud: 0.16, item: 0.46, cash: [140, 620], label: "Open", empty: "Good bottles, all of them empty. He drinks alone." },
+    safe:       { rate: 1.00, tier: 4, dud: 0.00, item: 0.34, cash: [0, 0],     label: "Crack",      empty: "Deeds, a passport in another name — and no cash. He moved it." },
     // THE FIT-OUT'S CONTAINERS (city/fitout*.js). Registered lazily when the
     // building is fitted out; the coordinate dedupe makes a rebuild a no-op.
-    mattress:   { rate: 0.30, tier: 1, dud: 0.35, item: 0.25, cash: [40, 260],  label: "Lift the mattress",         empty: "Lint, a sock, a dead phone charger." },
-    closet:     { rate: 0.40, tier: 1, dud: 0.40, item: 0.40, cash: [10, 90],   label: "Go through the closet",     empty: "Coats that smell of somebody else." },
-    medicine:   { rate: 0.55, tier: 0, dud: 0.45, item: 0.45, cash: [0, 12],    label: "Open the mirror cabinet",   empty: "Floss and an empty pill bottle." },
-    register:   { rate: 1.00, tier: 2, dud: 0.05, item: 0.05, cash: [60, 340],  label: "Empty the register",        empty: "The drawer's already been cleared." },
-    stockroom:  { rate: 0.60, tier: 1, dud: 0.30, item: 0.55, cash: [5, 40],    label: "Go through the stock",      empty: "Flattened boxes and a price gun." },
-    countroom:  { rate: 1.00, tier: 3, dud: 0.00, item: 0.18, cash: [900, 3400], label: "Take the count",           empty: "Rubber bands. They already moved it." },
-    lab:        { rate: 1.00, tier: 2, dud: 0.10, item: 0.80, cash: [0, 60],    label: "Bag the product",           empty: "Residue and a cracked flask." },
+    mattress:   { rate: 0.30, tier: 1, dud: 0.35, item: 0.25, cash: [40, 260],  label: "Lift",         empty: "Lint, a sock, a dead phone charger." },
+    closet:     { rate: 0.40, tier: 1, dud: 0.40, item: 0.40, cash: [10, 90],   label: "Go through",     empty: "Coats that smell of somebody else." },
+    medicine:   { rate: 0.55, tier: 0, dud: 0.45, item: 0.45, cash: [0, 12],    label: "Open",   empty: "Floss and an empty pill bottle." },
+    register:   { rate: 1.00, tier: 2, dud: 0.05, item: 0.05, cash: [60, 340],  label: "Empty",        empty: "The drawer's already been cleared." },
+    stockroom:  { rate: 0.60, tier: 1, dud: 0.30, item: 0.55, cash: [5, 40],    label: "Go through",      empty: "Flattened boxes and a price gun." },
+    countroom:  { rate: 1.00, tier: 3, dud: 0.00, item: 0.18, cash: [900, 3400], label: "Take",           empty: "Rubber bands. They already moved it." },
+    lab:        { rate: 1.00, tier: 2, dud: 0.10, item: 0.80, cash: [0, 60],    label: "Bag",           empty: "Residue and a cracked flask." },
   };
   // WHAT COMES OUT, by container. Every name is checked against the live econ
   // catalog before it is offered, so a catalog edit can only ever shrink these.
@@ -2178,7 +2178,7 @@
   };
   CBZ.interiorLootLabel = function (rec) {
     const K = rec && LOOT_KIND[rec.kind];
-    return K ? K.label : "Search it";
+    return K ? K.label : "Search";
   };
 
   /* ---- WITNESSES -------------------------------------------------------

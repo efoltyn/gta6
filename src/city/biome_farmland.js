@@ -637,7 +637,7 @@
         },
         options: [{
           id: "coop-collect-eggs", slot: "e",
-          label: function () { return (CBZ.now || 0) < nextEggT ? "Coop's picked clean for now" : "Collect eggs"; },
+          label: "Collect",
           canShow: function () { return (CBZ.now || 0) >= nextEggT; },
           onSelect: function () {
             nextEggT = (CBZ.now || 0) + 180000;        // ~3 min — a real coop refills slowly

@@ -7,7 +7,9 @@
  *      cover-aware, i.e. it goes through cityLevel(a, viewer) not a raw field;
  *   2. socialRead returns WORDS, and the word MOVES when the relationship
  *      moves (rob a man -> his standing leaves "stranger");
- *   3. the same man says the same thing twice — the pick is hashed off him,
+ *   3. the same man does NOT parrot himself: asked twice he moves on to the
+ *      next line of the pool (owner 2026-09-29, "tremendous variety"); the
+ *      start of the walk is still hashed off him,
  *      not rolled (this is the determinism law applied to dialogue);
  *   4. ...and a DIFFERENT standing gets a different line, so #3 is stability,
  *      not a constant;
@@ -169,7 +171,7 @@ const PASS = await evl(`(() => {
   out.notes.line = a1;
   if (!REVERT) {
     if (!a1) F("cityLine returned nothing for contact");
-    if (a1 !== a2) F("line not stable for the same person+state: " + a1 + " vs " + a2);
+    if (a2 && a1 === a2) F("same person repeated himself: " + a1);
     // a different severity must be able to reach a different pool
     const hard = CBZ.cityLine(p, "contact", { severity: 0.9 });
     out.notes.lineHard = hard;

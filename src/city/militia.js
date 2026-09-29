@@ -704,9 +704,8 @@
           // enlisted fine. Enlisting is paperwork, not a charisma check.
           forceYes: true,
           label: function () {
-            const f = F(); if (!f) return "Recruiting desk";
-            if (f.isMember(ARMY_ID)) return "Report in · " + f.rankName(ARMY_ID, f.rank(ARMY_ID));
-            return "Enlist. Fort Brandt Garrison";
+            const f = F();
+            return (f && f.isMember(ARMY_ID)) ? "Report in" : "Enlist";
           },
           canShow: function () { return !!F(); },
           onSelect: function () {

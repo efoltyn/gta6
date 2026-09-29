@@ -60,6 +60,13 @@
   function lvl(a) { return CBZ.cityLevel ? CBZ.cityLevel(a) : 10; }
   function myLvl() { const P = CBZ.player; return P ? lvl(P) : 10; }
   function sfx(name) { if (CBZ.sfx) CBZ.sfx(name); }
+  // every line comes out of the ONE book (city/read.js): who they are, who you
+  // are, what you did to them, the hour, the rain. `fb` is the degrade line.
+  function sayT(p, topic, fb, opts) {
+    const s = (CBZ.cityLine && CBZ.cityLine(p, topic, opts)) || fb;
+    if (s) say(p, s, null, (opts && opts.secs) || 2.4);
+    return s;
+  }
 
   // money read for the give-money option
   function money(n) { n = Math.round(n || 0); return n >= 1000 ? "$" + Math.round(n / 1000) + "k" : "$" + n; }
@@ -102,22 +109,19 @@
   // ---- COMPLIMENT (slot K, low prio so the relationship ladder in interact.js
   //      wins when it has something to say; this fills the slot for a plain
   //      stranger). Words buy a sliver of warmth — and they remember you said it.
-  const COMP_BACK = ["Ha, appreciate that.", "Aw, thanks.", "You're alright, you know that?", "Tell that to my wife."];
   function compliment(p) {
     meet(p);
     // a small, genuine goodwill nudge — the "flirted" table is mostly affection
     // without the romance commitment; scale it down so a compliment < a date.
     relShift(p, "flirted", 0.4);
     if (p.mood != null) p.mood = Math.min(1, (p.mood || 0) + 0.35);
-    say(p, COMP_BACK[(Math.random() * COMP_BACK.length) | 0], "#cdeccd", 2.2);
+    sayT(p, "complimentBack", "Ha. Thanks.");
     sfx("blip");
   }
 
   // ---- INSULT (slot L, low prio — sits under pickpocket only when nothing
   //      meaner applies). A jab plants a grudge; the person snubs you, and a
   //      bold/armed one may square up. Free to throw, not free to eat.
-  const INSULT_MEEK = ["Whatever, man.", "Why you gotta be like that?", "Jerk.", "Okay. Okay."];
-  const INSULT_BOLD = ["The HELL you say to me?!", "Say that again. I dare you.", "You want a problem?!"];
   function insult(p) {
     meet(p);
     // AN INSULT SCALES WITH WHO IS THROWING IT (owner: "insults scaling to
@@ -140,12 +144,12 @@
     if (bold && CBZ.city && CBZ.city.playerActor) {
       relShift(p, "threatened", 0.5);
       p.rage = CBZ.city.playerActor; p.state = "confront"; p.fear = 0;
-      say(p, INSULT_BOLD[(Math.random() * INSULT_BOLD.length) | 0], "#ff8a7a", 2.4);
+      sayT(p, "insultBold", "Say that again.");
     } else {
       // they sour and walk off the other way
       p.pause = 0; p.path = null;
       if (p.target && p.pos) p.target.set(p.pos.x + (Math.random() - 0.5) * 6, 0, p.pos.z - 5);
-      say(p, INSULT_MEEK[(Math.random() * INSULT_MEEK.length) | 0], "#cfd6e6", 2.2);
+      sayT(p, "insultMeek", "Whatever, man.");
     }
     sfx("blip");
   }
@@ -154,25 +158,36 @@
   //      gang/crew J verbs by prio). You can only lean on someone you plainly
   //      OUT-read; trying it on a bigger name backfires (you look small). Fear
   //      is durable leverage: a feared mark folds to a shakedown later.
+  // THREATEN has two honest endings, and the WORLD picks (sizeup + the brain),
+  // never a toast: they back off (a real step away, a real flight if they
+  // scare) or they square up and it is a fight.
   function intimidate(p) {
     meet(p);
-    if (readsMeAsBigger(p)) {
-      // they outrank you — the threat lands flat. A real reaction, not a toast:
-      // they scoff, your respect with them takes a small ding for overreaching.
-      say(p, "Cute. Run along.", "#dfe7ff", 2);
+    const pa = CBZ.city && CBZ.city.playerActor;
+    const dares = readsMeAsBigger(p) || (pa && CBZ.citySizeUp && CBZ.citySizeUp(p, pa) && ((p.aggr || 0.3) >= 0.6 || p.armed));
+    if (dares) {
       const r = rel(p); if (r) r.respect = Math.max(0, r.respect - 3);
+      relShift(p, "snubbed", 0.6);
+      if (pa && ((p.aggr || 0.3) >= 0.55 || p.armed || !readsMeAsBigger(p))) {
+        // he steps INTO it: a fist fight through the city melee
+        p.rage = pa; p.state = "confront"; p.fear = 0;
+        sayT(p, "scoffFight", "You threatening me?");
+      } else sayT(p, "scoff", "Cute. Run along.");
       return;
     }
     relShift(p, "intimidated", readsMeAsSmaller(p) ? 1.3 : 1);   // a big gap lands harder
     p.alarmed = Math.max(p.alarmed || 0, 4);
     p.fear = Math.min(10, (p.fear || 0) + 3);
-    say(p, ["O-okay, okay…", "I don't want trouble."][(Math.random() * 2) | 0], "#ffd1c4", 2.2);
+    sayT(p, "cower", "Okay, okay.");
+    // the body backs off: the brain decides whether a back-step becomes a run
+    if (pa && CBZ.cityScare) { try { CBZ.cityScare(p, pa, { bias: 0.25 }); } catch (e) {} }
+    else if (p.pos && pa && pa.pos && p.target) {
+      const dx = p.pos.x - pa.pos.x, dz = p.pos.z - pa.pos.z, d = Math.hypot(dx, dz) || 1;
+      p.target.set(p.pos.x + dx / d * 6, 0, p.pos.z + dz / d * 6); p.pause = 0; p.path = null;
+    }
     sfx("blip");
   }
 
-  // (ASK DIRECTIONS is gone: a local who pointed you at the nearest counter
-  // and dropped a map waypoint was the game holding your hand. You find the
-  // shops by walking past their windows and reading their signs.)
   function cap(s) { s = String(s || ""); return s ? s[0].toUpperCase() + s.slice(1) : s; }
   function compassFrom(px, pz, tx, tz) {
     const dx = tx - px, dz = tz - pz;
@@ -180,6 +195,72 @@
     if (Math.abs(dx) > Math.abs(dz) * 1.6) return cap(ew);
     if (Math.abs(dz) > Math.abs(dx) * 1.6) return cap(ns);
     return cap(ns + ew);
+  }
+
+  // ---- ASK THE WAY. The old version dropped a map waypoint, which was the
+  //      game holding your hand, so it was cut. What a real stranger does is
+  //      POINT: he turns, raises his arm at the place and names it. No pin, no
+  //      marker; you walk the way the arm said. WHICH place is read off you:
+  //      bleeding asks for the hospital, hot asks for a change of clothes,
+  //      late asks for a bar, empty-handed asks for a gun counter.
+  function wantKinds() {
+    const P = CBZ.player;
+    const hp = P ? (P.hp == null ? 100 : P.hp) : 100, mx = (P && P.maxHp) || 100;
+    if (hp < mx * 0.55) return ["hospital"];
+    if ((g.wanted | 0) >= 1) return ["clothing", "barber"];
+    let hour = 12;
+    try { if (CBZ.cityHour) hour = CBZ.cityHour(); } catch (e) {}
+    if (hour >= 21 || hour < 4) return ["bar", "food"];
+    if (!(CBZ.cityOwnsGun && CBZ.cityOwnsGun())) return ["guns", "pawn"];
+    return ["food", "bar", "clothing", "gym"];
+  }
+  function nearestLotOf(kinds, x, z, maxD) {
+    const lots = (CBZ.city && CBZ.city.arena && CBZ.city.arena.lots) || [];
+    let best = null, bd = maxD * maxD;
+    for (let i = 0; i < lots.length; i++) {
+      const l = lots[i];
+      if (!l || l.demolished || !l.building || kinds.indexOf(l.kind) < 0) continue;
+      const dx = l.cx - x, dz = l.cz - z, d = dx * dx + dz * dz;
+      if (d < bd) { bd = d; best = l; }
+    }
+    return best;
+  }
+  // turn to a point and hold an arm out at it (the pose lives with the other
+  // talk gestures in city/dialogue.js; peds.js's _faceAt turns the body)
+  function pointAt(p, x, z, dur) {
+    p._faceAt = { x: x, z: z };
+    p._faceT = Math.max(p._faceT || 0, dur);
+    if (CBZ.cityDialogue && CBZ.cityDialogue.beat) CBZ.cityDialogue.beat(p, "dlgPoint", dur);
+  }
+  function pointTheWay(p) {
+    if (!p || p.dead || !p.pos) return false;
+    meet(p);
+    const lot = nearestLotOf(wantKinds(), p.pos.x, p.pos.z, 320);
+    if (!lot) { sayT(p, "directionsNone", "Couldn't tell you."); return false; }
+    const name = (lot.building && (lot.building.name || (lot.building.shop && lot.building.shop.name))) || cap(lot.kind);
+    const dir = compassFrom(p.pos.x, p.pos.z, lot.cx, lot.cz).toLowerCase();
+    pointAt(p, lot.cx, lot.cz, 2.4);
+    sayT(p, "directions", name + "? That way.", { vars: { place: name, dir: dir }, secs: 3 });
+    relShift(p, "greeted", 0.3);
+    return true;
+  }
+  CBZ.cityPointTheWay = pointTheWay;
+  CBZ.cityPointAt = pointAt;
+
+  // ---- TIP THE BUSKER. Five dollars into the case: it is real money in his
+  //      pocket, he says so, and he gives you a bow before he plays on.
+  const TIP = 5;
+  function isBusker(p) { return !!(p && p._role === "busker" && p._stage && !p.dead); }
+  function tipBusker(p) {
+    if (!spend(TIP)) return;
+    meet(p);
+    p.cash = (p.cash | 0) + TIP;
+    relShift(p, "gift", 0.5);
+    if (p.mood != null) p.mood = Math.min(1, (p.mood || 0) + 0.4);
+    sayT(p, "busker", "Thank you!");
+    p._faceT = Math.max(p._faceT || 0, 1.0);
+    if (CBZ.cityDialogue && CBZ.cityDialogue.beat) CBZ.cityDialogue.beat(p, "dlgBow", 0.9);
+    sfx("coin");
   }
 
   // ---- ASK WHAT'S GOOD / FOR A LEAD (slot K, prio above directions but gated on
@@ -208,7 +289,7 @@
     if (truck && truck.pos && Math.random() < 0.85) {
       // words, not a map pin: a heading, and it is only as good as the
       // moment he said it, because the truck keeps driving
-      say(p, "Armored truck's out today, " + compassFrom(p.pos.x, p.pos.z, truck.pos.x, truck.pos.z).toLowerCase() + " of here. You didn't hear it from me.", "#bfe0ff", 3.4);
+      say(p, "Armored truck's out. Went " + compassFrom(p.pos.x, p.pos.z, truck.pos.x, truck.pos.z).toLowerCase() + ".", "#bfe0ff", 3.4);
       sfx("blip");
       return;
     }
@@ -217,22 +298,14 @@
     if (vip && vip.pos) {
       const vd = Math.hypot(vip.pos.x - p.pos.x, vip.pos.z - p.pos.z);
       const who = vip.name || "Somebody with real money";
-      say(p, vd < 40 ? (vip.name ? "See that one? That's " + vip.name + "." : "See that one? That's real money.")
-                     : who + " has been around, " + compassFrom(p.pos.x, p.pos.z, vip.pos.x, vip.pos.z).toLowerCase() + " of here.",
+      say(p, vd < 40 ? (vip.name ? "See that one? That's " + vip.name + "." : "See that one? Real money.")
+                     : who + " was around. Up " + compassFrom(p.pos.x, p.pos.z, vip.pos.x, vip.pos.z).toLowerCase() + ".",
           "#bfe0ff", 3);
       sfx("blip");
       return;
     }
-    // 3) nothing hot — they still gossip about YOU (and warm a touch).
-    const lines = [
-      "Cops have been thick around here lately.",
-      "People talk about you, you know.",
-      "My cousin says the mayor's dirty.",
-      "Somebody got shot by the water last week.",
-      "Rent went up again. Nobody's hiring.",
-      "Nothing. I don't know nothing.",
-    ];
-    say(p, lines[(Math.random() * lines.length) | 0], "#cdeccd", 2.6);
+    // 3) nothing hot: they still gossip (and warm a touch).
+    sayT(p, "gossip", "I don't know nothing.");
   }
 
   // ---- BUM A SMOKE / ASK FOR A LIGHT (free slot — the smallest icebreaker).
@@ -244,9 +317,9 @@
     if (warm) {
       relShift(p, "greeted", 0.5);
       if (p.mood != null) p.mood = Math.min(1, (p.mood || 0) + 0.15);
-      say(p, "Here.", "#dfe7ff", 1.8);
+      sayT(p, "smokeYes", "Here.");
     } else {
-      say(p, "Buy your own.", "#cfd6e6", 1.8);
+      sayT(p, "smokeNo", "Buy your own.");
     }
     sfx("blip");
   }
@@ -262,7 +335,7 @@
     p.cash = (p.cash | 0) + HANDOUT;       // it's real — into their pocket
     relShift(p, "gift", 1);                // affection + loyalty + respect, ripples to their circle
     if (p.mood != null) p.mood = 1;
-    say(p, ["God bless you.", "You're a real one.", "I won't forget this."][(Math.random() * 3) | 0], "#cdeccd", 2.4);
+    sayT(p, "thanks", "Thank you.");
     if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(1);   // a public soft touch reads on the street
     sfx("coin");
   }
@@ -274,7 +347,9 @@
     const photo = Math.random() < 0.5;
     relShift(p, "greeted", 0.6);
     if (p.mood != null) p.mood = Math.min(1, (p.mood || 0) + 0.3);
-    say(p, photo ? "Make it quick." : "Stay classy.", "#ffe9a8", 2.2);
+    sayT(p, "fan", "Make it quick.");
+    // a real beat: the VIP stops, turns to you and holds still for the picture
+    p._faceT = Math.max(p._faceT || 0, photo ? 1.6 : 1.0);
     if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(2);   // being SEEN with a name buys cred
     sfx("blip");
   }
@@ -306,7 +381,7 @@
   I.register("ped:civ", {
     id: "rich-e-fan", slot: "e", prio: 24,
     canShow: (p) => isStrangerish(p) && !isYours(p) && isVip(p) && !hatesYou(p),
-    label: "Take a photo",
+    label: "Photo",
     onSelect: (p) => fanMoment(p),
   });
   I.register("ped:civ", {
@@ -320,6 +395,20 @@
     canShow: (p) => isStrangerish(p) && !isYours(p) && !hatesYou(p),
     label: "Compliment",
     onSelect: (p) => compliment(p),
+  });
+
+  I.register("ped:civ", {
+    id: "rich-e-tip", slot: "e", prio: 26,
+    canShow: (p) => isBusker(p) && myCash() >= TIP,
+    label: "Tip $" + TIP,
+    onSelect: (p) => tipBusker(p),
+  });
+  // SLOT K, under "Ask around": ask the way. He points; you walk.
+  I.register("ped:civ", {
+    id: "rich-k-way", slot: "k", prio: 7,
+    canShow: (p) => isStrangerish(p) && !isYours(p) && !hatesYou(p) && !isVip(p),
+    label: "Ask",
+    onSelect: (p) => pointTheWay(p),
   });
 
   // SLOT K: ask around (gated on the bond), above interact.js's bare "Talk"
@@ -338,13 +427,13 @@
   I.register("ped:civ", {
     id: "rich-j-intimidate", slot: "j", prio: 12, bad: true,
     canShow: (p) => isStrangerish(p) && !isYours(p) && readsMeAsSmaller(p) && !isVip(p),
-    label: "Intimidate",
+    label: "Threaten",
     onSelect: (p) => intimidate(p),
   });
   I.register("ped:civ", {
     id: "rich-j-smoke", slot: "j", prio: 11,
     canShow: (p) => isStrangerish(p) && !isYours(p) && !readsMeAsSmaller(p),
-    label: "Ask a light",
+    label: "Bum one",
     onSelect: (p) => bumSmoke(p),
   });
 

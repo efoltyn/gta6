@@ -440,110 +440,67 @@
       if (r && current) fire(r);
     });
   }
-  // The verb a touch pill wears: the proposal text itself, uppercased, cut at
-  // a word boundary when a long authored line would burst the card.
-  function verbText(r) {
-    let v = String(r.proposal || r.label || "Continue").trim();
-    if (v.length > 40) {
-      v = v.slice(0, 39);
-      const sp = v.lastIndexOf(" ");
-      if (sp > 18) v = v.slice(0, sp);
-      v += "…";
-    }
-    return v.toUpperCase();
+  /* ---- THE WORD ON THE BUTTON (css/city.css "GANG CITY VERBS" styles it) --
+     One rule for every surface that prints a verb: the desktop card row, the
+     phone pill, the docked iPad button and the touch cluster. The word is
+     the VERB only (city/verbword.js CBZ.cityVerbWord): the thing it acts on
+     is the noun, and it is right there under your hand (owner, 2026-09-05:
+     "sabotage power should just be sabotage"). A price rides along because
+     "$40" is what the thumb is deciding on. Case is left as authored
+     ("Tell to follow"); CSS never shouts it in capitals. */
+  function vw(text) {
+    const f = CBZ.cityVerbWord;
+    const s = f ? f(text) : String(text || "").split(/\s+[—–-]\s+/)[0].trim();
+    return s || "Use";
   }
-  // THE BUTTON IS THE VERB — never "YES" (owner, 2026-08-04). A card that
-  // printed "Mount the horse" beside a YES button was asking a question the
-  // player had already answered by walking up; the word on the thumb target is
-  // the thing that happens. This is the prison rail's `shortLabel` law ported:
-  // cut at the first dash clause, then to a word boundary inside 18 chars, so
-  // the docked button stays a button and the copy bar keeps the whole line.
-  // When nothing is lost in that cut the copy bar is dropped (the `dup` test in
-  // the renderer) and the single verb button IS the card.
-  function verbHead(text) {
-    let v = String(text || "").split(/\s+[—–-]\s+/)[0].trim();
-    if (v.length > 18) {
-      const sp = v.slice(0, 18).lastIndexOf(" ");
-      v = sp > 5 ? v.slice(0, sp) : v.slice(0, 17) + "…";
-    }
-    return v || "Continue";
-  }
+  function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;"); }
+  function verbText(r) { return vw(r.proposal || r.label); }
+  function verbHead(text) { return vw(text); }
 
-  /* THE WORDS THAT EXPLAIN A THING NEVER SIT BESIDE THE THING'S BUTTON
-     (owner, 2026-08-18, holding a bank vault card: "look at how many words
-     there are next to that button... there should be almost no words next to
-     a button. Almost none, if any.")
-
-     What he was looking at: a nine-word slab, "The vault needs more than any
-     one…", parked beside a three-word button reading THE VAULT NEEDS — one
-     sentence sawn in half and printed twice, under a title plate that already
-     said The vault. `verbButton` is the whole answer to that. The row wears a
-     VERB and nothing else; a price rides along because "$340" is a number, not
-     words; anything longer is cut to its head. Whatever a door wants, what is
-     behind it, why it refuses, belongs on the card's own subtitle (describe()'s
-     note), which prints above the rows and is not a control. */
-  const BUTTON_MAX = 28;          // caps chars the 440px rail takes without becoming a bar
-  const FIGURE_MAX = 34;          // a little longer is allowed when the tail is a PRICE
-  const DASH = /\s*[—–-]\s+/;     // the authored "verb — price" / "verb — clause" connector
-  function verbButton(text) {
-    let s = String(text || "").trim().replace(/[?.!]+$/, "");
-    if (!s) return "Continue";
-    const cut = s.split(DASH);
-    const head = (cut[0] || "").trim();
-    const tail = cut.length > 1 ? cut.slice(1).join(" ").trim() : "";
-    // A FIGURE IS NOT WORDS. "$340", "4 crates", "20 min" is what the thumb is
-    // actually deciding on, so it rides the button; the em dash never does.
-    if (tail && tail.length <= 12 && /\d/.test(tail)) {
-      const joined = head + " " + tail;
-      if (joined.length <= FIGURE_MAX) return joined;
-      const short = verbHead(head) + " " + tail;
-      if (short.length <= FIGURE_MAX) return short;
-    }
-    // a SHORT tail that is the thing being chosen ("Lift - ground" vs "Lift -
-    // floor 50", "plating - HEAVY") is the difference between two buttons, so
-    // it survives whenever the whole row still fits on one.
-    if (tail && tail.length <= 12 && (head + " " + tail).length <= BUTTON_MAX) return head + " " + tail;
-    if (!tail && s.length <= BUTTON_MAX) return s;
-    if (head.length <= BUTTON_MAX) return head;
-    return verbHead(head);
-  }
-
-  /* ---- THE ONE ROW RENDERER (Block Law) ----------------------------------
-     Every #interact card in city mode speaks this grammar, so it is authored
-     ONCE here and read by everyone who writes those rows — this file's own
-     card and police.js's gun-stop stand-off. Before this, the stand-off hand-
-     rolled legacy `.iopt` markup, which the iPad dock (mobile.css) styles to
-     transparent with pointer-events:none: the owner's screenshot showed YES and
-     REFUSE as bare unstyled text floating 440px left of their own name plate —
-     two dialogues where there was one, and neither of them tappable.
-       desktop  [E] MOUNT THE HORSE          (the .ikey badge carries the key)
-       phone    one full-width verb pill
-       iPad     prose bar on the left, real 52px verb button on the right rail
-     Row records need { key, proposal } and may carry { label, bad, decision }. */
+  /* ---- THE ONE ROW RENDERER --------------------------------------------
+     Every #interact card in city mode speaks this grammar (this file's own
+     card, dialogue.js's line-plus-verb card, police.js's gun-stop stand-off):
+       desktop  [E] Rob            a key chip and the verb, nothing else
+       phone    one verb pill per row, thumb-sized
+       iPad     the same pill, docked on the right rail
+     A hostile verb (bad) wears the warm rim, never red text in a paragraph.
+     Row records need { key, proposal } and may carry { label, bad }. */
   function rowsHTML(rows) {
     const touchVerbs = CBZ.touchMode && (!CBZ.CONFIG || CBZ.CONFIG.TOUCH_VERB_PROMPTS !== false);
     const docked = touchVerbs && CBZ.touchInteractionDocked && CBZ.touchInteractionDocked();
-    const red = (r) => (r.bad ? " style=\"color:#ff9a9a\"" : "");
     return rows.map((r, i) => {
+      const word = esc(verbText(r));
+      const bad = r.bad ? " ibad" : "";
       if (!touchVerbs) {
-        return `<div class="iopt" data-i="${i}"><span class="ikey">${String(r.key || "e").toUpperCase()}</span>` +
-          `<span class="ilab"${red(r)}>${verbText(r)}</span></div>`;
+        return `<div class="iopt${bad}" data-i="${i}"><span class="ikey">${esc(String(r.key || "e").toUpperCase())}</span>` +
+          `<span class="ilab">${word}</span></div>`;
       }
-      const yes = r.decision !== "no";
-      if (!docked) {
-        return `<div class="iopt tverb ${yes ? "tyes" : "tno"}" data-i="${i}">` +
-          `<span class="ilab"${red(r)}>${verbText(r)}</span></div>`;
-      }
-      // THE DOCKED ROW IS A BUTTON, FULL STOP. The copy bar is DELETED (see
-      // verbButton above): there is no second half of the sentence to print,
-      // because the row is not a sentence.
-      const action = verbButton(r.proposal || r.label).toUpperCase();
-      const aria = verbText(r).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
-      return `<div class="iopt tverb ${yes ? "tyes" : "tno"}" data-i="${i}">` +
-        `<button type="button" class="itouch-act${r.bad ? " ibad" : ""}" aria-label="${aria}">${action}</button></div>`;
+      if (!docked) return `<div class="iopt tverb tyes${bad}" data-i="${i}"><span class="ilab">${word}</span></div>`;
+      return `<div class="iopt tverb tyes${bad}" data-i="${i}">` +
+        `<button type="button" class="itouch-act${bad}" aria-label="${word}">${word}</button></div>`;
     }).join("");
   }
   CBZ.cityInteractRowsHTML = rowsHTML;
+
+  /* ---- THE CLUSTER (for the tap-a-person surface) -----------------------
+     CBZ.cityVerbCluster(rows, { ring }) -> HTML for every verb a person or
+     thing offers, around it: `.vcluster` holding `.vpill` buttons, the first
+     row (the likely one) as `.vpill.lead`. With ring:true each pill carries
+     --i/--n and css/city.css lays them on a circle around the anchor. The
+     caller positions the `.vcluster` element (left/top) and routes the tap
+     by data-i. Styling lives entirely in css/city.css. */
+  CBZ.cityVerbCluster = function (rows, opts) {
+    rows = rows || [];
+    const ring = !!(opts && opts.ring);
+    const n = rows.length;
+    const pills = rows.map((r, i) => {
+      const word = esc(verbText(r));
+      const cls = "vpill" + (i === 0 ? " lead" : "") + (r.bad ? " bad" : "");
+      const key = r.key ? `<span class="vkey">${esc(String(r.key).toUpperCase())}</span>` : "";
+      return `<button type="button" class="${cls}" data-i="${i}" style="--i:${i};--n:${n}" aria-label="${word}">${key}<span class="vword">${word}</span></button>`;
+    }).join("");
+    return `<div class="vcluster${ring ? " ring" : ""}" style="--n:${n}">${pills}</div>`;
+  };
 
   // NOTE: #interact's base style is opacity:0; only `.show` lifts it to 1.
   function hidePanel() { dom(); if (panel) { panel.style.display = "none"; panel.classList.remove("show"); } current = null; currentRows = []; fingerprint = ""; currentScore = -1; }

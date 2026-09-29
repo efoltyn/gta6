@@ -241,6 +241,10 @@
     if (!ped || ped.dead) return 0;
     const d = REL_EVENTS[kind]; if (!d) return 0;
     const bond = applyDelta(ped, d, amt == null ? 1 : amt);
+    // WHAT YOU DID TO THEM, for their mouth (city/read.js "robbed" lines): a
+    // real harm is remembered by kind and time, so the next thing they say to
+    // you is about it.
+    if ((d.grudge || 0) >= 20) ped._wronged = { kind: kind, t: (typeof CBZ.now === "number" ? CBZ.now : Date.now()) };
     // the HOT half of a harm: relPlayer is the durable opinion; the brain's
     // decaying grudge is what proportional retaliation and feuds climb on
     if (d.grudge > 0 && CBZ.cityBrain && CBZ.city && CBZ.city.playerActor) {
@@ -283,9 +287,11 @@
       }
     }
     const evt = harm ? "friendHurt" : "spared";   // POV remap (friendHurt for harm, mild goodwill otherwise)
+    const tNow = (typeof CBZ.now === "number" ? CBZ.now : Date.now());
     for (const c of circ) {
       const d = REL_EVENTS[evt]; if (!d) continue;
       applyDelta(c, d, w);
+      if (harm) c._friendWronged = { kind: kind, t: tNow };
       driveFlags(c);
     }
   }
@@ -1030,9 +1036,9 @@
         // grief turns to either rage (bold) or flight (meek); a big grudge will
         // also keep them hunting you long after they've calmed from this moment.
         if ((m.aggr || 0.3) > 0.55 && !m.gang) { m.rage = CBZ.city.playerActor; m.state = "confront"; r.ambushT = 0; say(m, "YOU KILLED THEM!", "#ff6b6b", 2.6); }
-        else { m.fear = 10; m.alarmed = Math.max(m.alarmed || 0, 6); r.ambushT = 25 + rng() * 30; say(m, "“Oh god, oh god…”", "#9bb0ff", 2.6); }
+        else { m.fear = 10; m.alarmed = Math.max(m.alarmed || 0, 6); r.ambushT = 25 + rng() * 30; say(m, "Oh God. Oh God.", "#9bb0ff", 2.6); }
       } else {
-        m.fear = Math.max(m.fear || 0, 6); say(m, "“…what did you do?”", "#9bb0ff", 2.2);
+        m.fear = Math.max(m.fear || 0, 6); say(m, "What did you do?", "#9bb0ff", 2.2);
       }
     }
     if (byPlayer && victim.pos) CBZ.cityGossip(victim.pos.x, victim.pos.z, "heroKilled", 0.8);

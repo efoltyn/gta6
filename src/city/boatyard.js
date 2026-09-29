@@ -742,13 +742,13 @@
           // citystaff.js is not loaded at all, in which case the desk keeps its
           // old, person-free behaviour rather than becoming unusable.
           canShow: function () { return !brokerPost || !!brokerBody(); },
-          label: function () { return "Talk to the broker"; },
+          label: function () { return "Browse"; },
           onSelect: function () { open("buy"); },
         },
         {
           id: "boatyard-fleet", slot: "i",
           canShow: function () { return fleet().length > 0; },
-          label: function () { return "Your fleet (" + fleet().length + ")"; },
+          label: function () { return "Manage " + fleet().length; },
           onSelect: function () { open("fleet"); },
         },
       ],
@@ -768,7 +768,7 @@
         if (C.BOAT_ANCHOR === false) return false;
         return !!(ctx && ctx.driving && ctx.vehicle === car && isMarineCar(car));
       },
-      label: function (car) { return anchored(car) ? "Weigh anchor" : "Drop anchor"; },
+      label: function (car) { return anchored(car) ? "Cast off" : "Anchor"; },
       onSelect: function (car) { anchorToggle(car); },
     });
   }

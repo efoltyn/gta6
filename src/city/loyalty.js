@@ -294,7 +294,7 @@
     I.register("ped:civ", {
       id: "loyal-hand-gun", slot: "k", prio: 58,
       canShow: function (p) { return isCrew(p) && hasSpareGun(); },
-      label: function () { return "Hand over " + heldGunLabel(); },
+      label: function () { return "Hand over"; },
       onSelect: function (p) {
         const w = heldGunPedName();
         if (!w) { note("Nothing to hand them.", 1.4); return; }
@@ -895,13 +895,13 @@
     I.register("ped:civ", {
       id: "loyal-prisoner-join", slot: "g", prio: 74,
       canShow: function (p) { return held(p) && CBZ.cityPowerCan("ransom"); },
-      label: function () { return "Offer them a place"; },
+      label: function () { return "Recruit"; },
       onSelect: function (p) { CBZ.cityTakePrisoner(p, "recruit"); },
     });
     I.register("ped:civ", {
       id: "loyal-prisoner-ransom", slot: "h", prio: 72,
       canShow: function (p) { return held(p) && CBZ.cityPowerCan("ransom"); },
-      label: function () { return "Ransom them"; },
+      label: function () { return "Ransom"; },
       onSelect: function (p) { CBZ.cityTakePrisoner(p, "ransom"); },
     });
   }

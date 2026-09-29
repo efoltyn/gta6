@@ -2375,7 +2375,7 @@
       if (q) mt.men.push(q);
     }
     RT.meet = mt;
-    say(mt.voss, "Nothing personal. A man who kills a President cannot exist afterwards.");
+    say(mt.voss, "Nothing personal. You know too much now.");
     setTimeout(function () {
       if (mt.voss) hostile(mt.voss);
       for (let i = 0; i < mt.men.length; i++) hostile(mt.men[i]);

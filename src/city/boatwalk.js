@@ -185,9 +185,7 @@
       options: [{
         id: "helm-take", slot: "e",
         canShow: function (t) { return !!(t && t.car && !t.car.dead && CBZ.cityEnterVehicle); },
-        label: function (t) {
-          return (t.car.owned || t.car.stolen) ? "Take the helm" : "Take her helm";
-        },
+        label: "Steer",
         onSelect: function (t) {
           if (t && t.car && !t.car.dead && CBZ.cityEnterVehicle) CBZ.cityEnterVehicle(t.car);
         },

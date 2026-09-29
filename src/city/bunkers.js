@@ -373,11 +373,10 @@
            ledger, and refusing SAYS the route — the door is the quest giver.
            `have` is a blasted/already-open leaf: force is always a valid key,
            which is what keeps the bunker-buster path honest.                */
+        canShow: function (t) { return !t.door.disabled; },   // blasted open: nothing left to do with it
         label: function (t) {
-          if (t.door.disabled) return "The door hangs blasted open";
-          if (t.door.target === 1) return "Seal the blast door";
-          const L = doorLock(t);
-          return L.open ? "Open the blast door" : (t.name || "The door") + " won't move";
+          if (t.door.target === 1) return "Seal";
+          return doorLock(t).open ? "Open" : "Try";
         },
         onSelect: function (t) {
           if (t.door.disabled) return;
@@ -410,13 +409,11 @@
       find: function (px, pz) { return nearestTok(crateTokens, px, pz, 3.2); },
       options: [{
         id: "bunkercrate-take", slot: "e",
-        label: function (t) {
-          if (t.kind === "armory") {
-            const day = CBZ.paceDay ? CBZ.paceDay() : 0;
-            return day < t.nextRestock ? "Ordnance crate, restocks tomorrow" : "Take bunker-buster bombs (2)";
-          }
-          return t.taken ? "The cache is cleaned out" : "Crack open the supply cache";
+        canShow: function (t) {
+          if (t.kind === "armory") return !((CBZ.paceDay ? CBZ.paceDay() : 0) < t.nextRestock);
+          return !t.taken;
         },
+        label: function (t) { return t.kind === "armory" ? "Take 2" : "Crack open"; },
         onSelect: function (t) {
           const e = CBZ.cityEcon;
           if (t.kind === "armory") {
@@ -460,11 +457,8 @@
         id: "nukevault-take", slot: "e", bad: true,
         // THREE WARHEADS, ONE NUKE: the label says what is on the rack, the
         // ledger below still moves exactly one item.
-        label: function (t) {
-          if (t.taken) return "An empty rack";
-          return CBZ.CONFIG.NUKE_STASH_TRIPLE === false
-            ? "Take the nuclear device" : "Take the nuclear stash (3 warheads)";
-        },
+        canShow: function (t) { return !t.taken; },
+        label: function () { return CBZ.CONFIG.NUKE_STASH_TRIPLE === false ? "Take" : "Take 3"; },
         onSelect: function (t) {
           if (t.taken) return;
           const e = CBZ.cityEcon;
@@ -518,10 +512,8 @@
       },
       options: [{
         id: "bunkerstrike-call", slot: "e", bad: true,
-        label: function () {
-          const wp = waypoint();
-          return wp ? "Call a B-2 strike on your waypoint" : "Mark a waypoint on the map first";
-        },
+        canShow: function () { return !!waypoint(); },   // no waypoint: nothing to call it on
+        label: function () { return "Call in"; },
         onSelect: function (t) {
           /* AN ORDER NEEDS SOMEBODY WHO CAN GIVE IT. Tasking a bomber is the
              purest "categorical, not numeric" power in the game and it stood
@@ -585,11 +577,8 @@
       },
       options: [{
         id: "bunkernuke-release", slot: "e", bad: true,
-        label: function () {
-          const wp = waypoint();
-          if (!wp) return "Mark a waypoint on the map first";
-          return "Order a nuclear strike on " + (wp.label || "your waypoint");
-        },
+        canShow: function () { return !!waypoint(); },   // no waypoint: nothing to launch at
+        label: function () { return "Launch"; },
         onSelect: function () {
           const L = CBZ.cityLock ? CBZ.cityLock({ id: "bunker-nuke", verb: "vault", label: "The release console", orgs: ["army", "military"], wasOpen: true }) : { open: true };
           if (!L.open) { note(L.line, 3.2); return; }

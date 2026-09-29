@@ -1195,9 +1195,7 @@
       find: function () { return (built && g.mode === "city") ? lootNear() : null; },
       options: [{
         id: "beachbag-rifle", slot: "e", bad: true,
-        // the button names what you are actually rifling (the deleted pill
-        // distinguished bag from cooler; the one surviving surface keeps that)
-        label: function (L) { return L && L.bag ? "Go through the bag" : "Go through the cooler"; },
+        label: "Go through",
         onSelect: function (L) {
           if (!L || L.looted || L._taking) return;
           L._taking = true;

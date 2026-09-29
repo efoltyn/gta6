@@ -439,9 +439,8 @@
       options: [{
         id: "fish-cast", slot: "e",
         label: function () {
-          if (!line) return "Cast a line";
-          if (line.phase === "cast") return "Casting…";
-          if (line.phase === "bite") return "SET THE HOOK";
+          if (!line) return "Cast";
+          if (line.phase === "bite") return "Strike";
           return "Reel in";
         },
         onSelect: function (s) { press(s); },

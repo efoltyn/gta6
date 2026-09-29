@@ -655,7 +655,7 @@
     I.register("ped:civ", {
       id: "capt-castlines", slot: "j", prio: 40,
       canShow: function (p) { return on() && isMyCrew(p) && !(helm && helm.ped === p); },
-      label: function (p) { return p._captFishing ? "Order: stow the lines" : "Order: cast lines"; },
+      label: function (p) { return p._captFishing ? "Reel in" : "Fish"; },
       onSelect: function (p) { orderLines(p, !p._captFishing); },
     });
 
@@ -665,7 +665,7 @@
     I.register("ped:civ", {
       id: "capt-takehelm", slot: "i", prio: 40,
       canShow: function (p) { return on() && isMyCrew(p) && crewCan(p, "moor") && !!specOf(boat); },
-      label: function (p) { return (helm && helm.ped === p) ? "Order: I'll take her" : "Order: take the helm"; },
+      label: function (p) { return (helm && helm.ped === p) ? "Take over" : "Steer"; },
       onSelect: function (p) { (helm && helm.ped === p) ? handBack(p) : takeHelm(p); },
     });
 
@@ -674,7 +674,7 @@
     I.register("ped:civ", {
       id: "capt-armup", slot: "k", prio: 40,
       canShow: function (p) { return on() && isMyCrew(p) && playerIsCaptain(); },
-      label: function () { return armedUp ? "Order: stow the guns" : "Order: all hands, arm up"; },
+      label: function () { return armedUp ? "Stand down" : "Arm up"; },
       onSelect: function () { armAll(!armedUp); },
     });
 
@@ -689,7 +689,7 @@
         if (!(ctx && ctx.driving && ctx.vehicle === car && car === boat)) return false;
         return !!mateAboard();
       },
-      label: function () { return "Hand the helm to the mate"; },
+      label: function () { return "Hand over"; },
       onSelect: function () { const m = mateAboard(); if (m) takeHelm(m); },
     });
   }
@@ -1146,31 +1146,31 @@
       options: [
         { id: "cv-charter", slot: "e",
           canShow: function () { return !voyage && offers && !!offers.charter; },
-          label: function () { const o = offers.charter; return "Charter: " + (o.ped.name || "a fare") + " to " + o.to.name + " — " + money(o.fare); },
+          label: function () { const o = offers.charter; return "Charter " + money(o.fare); },
           onSelect: function () { if (offers && offers.charter) startCharter(offers.charter); } },
         { id: "cv-cargo", slot: "i",
           canShow: function () { return !voyage && offers && !!offers.cargo; },
-          label: function () { const o = offers.cargo; return "Cargo: " + o.n + " crates to " + o.to.name + " — " + money(o.pay); },
+          label: function () { const o = offers.cargo; return "Haul " + money(o.pay); },
           onSelect: function () { if (offers && offers.cargo) startCargo(offers.cargo, false); } },
         { id: "cv-fish", slot: "j",
           canShow: function () { return !voyage && offers && !!offers.fish; },
-          label: function () { return "Fishing trip: " + offers.fish.at.name; },
+          label: function () { return "Fish"; },
           onSelect: function () { if (offers && offers.fish) startFish(offers.fish); } },
         { id: "cv-salvage", slot: "k",
           canShow: function () { return !voyage && offers && !!offers.salvage; },
-          label: function () { return "Salvage a derelict · " + money(offers.salvage.pay); },
+          label: function () { return "Salvage " + money(offers.salvage.pay); },
           onSelect: function () { if (offers && offers.salvage) startSalvage(offers.salvage); } },
         { id: "cv-raid", slot: "l", bad: true,
           canShow: function () { return !voyage && offers && !!offers.raid; },
-          label: function () { const c = offers.raid.car; return "Run up the black: the " + ((c.model && c.model.name) || "vessel"); },
+          label: function () { return "Raid"; },
           onSelect: function () { if (offers && offers.raid) startRaid(offers.raid); } },
         { id: "cv-none", slot: "e",
-          canShow: function () { return !voyage && offers && !offers.charter && !offers.cargo && !offers.fish && !offers.salvage; },
-          label: function () { return "Nothing on the board"; },
+          canShow: function () { return false; },   // "nothing on the board" is a status, not a button
+          label: function () { return "Wait"; },
           onSelect: function () { note("The sea will have work tomorrow.", 1.8); } },
         { id: "cv-live", slot: "e",
-          canShow: function () { return !!voyage; },
-          label: function () { return "Voyage under way"; },
+          canShow: function () { return false; },   // "voyage under way" is a status, not a button
+          label: function () { return "Wait"; },
           onSelect: function () {} },
       ],
     });
@@ -1193,19 +1193,14 @@
       },
       options: [
         { id: "hm-locked", slot: "e", bad: true,
-          canShow: function () { return !playerIsCaptain(); },
-          label: function () {
-            // THE REWARD IS LEGIBLE THROUGH THE LOCKED DOOR (gun-room law):
-            // anybody may read what the manifest pays; only a master takes it.
-            const o = offersHM && offersHM.cargo;
-            return "Ticketed masters only, top manifest pays " + money(o ? o.pay : 2400);
-          },
+          canShow: function () { return false; },   // a status, not a button: the board's own note says who it's for
+          label: function () { return "Read"; },
           onSelect: function () {} },   // no harbourmaster stands here: the locked label says it
         { id: "hm-cargo", slot: "e",
-          canShow: function () { return playerIsCaptain() && !voyage; },
+          canShow: function () { return playerIsCaptain() && !voyage && !!(offersHM && offersHM.cargo); },
           label: function () {
             const o = offersHM && offersHM.cargo;
-            return o ? ("Manifest: " + o.n + " crates to " + o.to.name + " — " + money(o.pay)) : "No manifests today";
+            return "Haul " + money(o ? o.pay : 0);
           },
           onSelect: function () {
             const o = offersHM && offersHM.cargo;
@@ -1233,7 +1228,7 @@
       options: [{
         id: "crate-load", slot: "e",
         canShow: function () { return voyage && voyage.kind === "cargo" && voyage.m && voyage.m.stageId && voyage.m.stageId() === "load" && !!boat; },
-        label: function () { return "Load a crate (" + voyage.loaded + "/" + voyage.n + ")"; },
+        label: function () { return "Load " + voyage.loaded + "/" + voyage.n; },
         onSelect: function () {
           if (!boat || Math.hypot(boat.pos.x - (CBZ.player ? CBZ.player.pos.x : 0), boat.pos.z - (CBZ.player ? CBZ.player.pos.z : 0)) > 40) { note("Bring her alongside first.", 1.8); return; }
           if (hold && hold.closed) { try { hold.openRamp(); } catch (e) {} }
@@ -1469,14 +1464,11 @@
       options: [
         { id: "yg-locked", slot: "e", bad: true,
           canShow: function () { return !!yardGate && !yardOwned(); },
-          label: function () {
-            const e = prizeEntry();
-            return "Locked, the " + (e ? e.label : "Ravenna 41") + ". " + money(e ? e.price : 1450000) + " at the broker's desk";
-          },
+          label: function () { return "Rattle"; },
           onSelect: function () { note("Chain and padlock. The hull sits there where you can read her name. The broker sells the key.", 3); } },
         { id: "yg-open", slot: "e",
           canShow: function () { return !!yardGate && yardOwned() && !yardGate.open; },
-          label: function () { return "Unlock your yard gate"; },
+          label: function () { return "Unlock"; },
           onSelect: function () {
             yardGate.open = true;
             yardGate.leaf.visible = false;

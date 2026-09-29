@@ -837,7 +837,7 @@
       },
       options: [{
         id: "plots-sale-look", slot: "e", prio: 2, campaignSafe: true,
-        label: function (t) { const p = t && t.lot ? priceOf(t.lot) : null; return "For sale" + (p != null ? ", " + money(p) : ""); },
+        label: function (t) { const p = t && t.lot ? priceOf(t.lot) : null; return p != null ? "Buy " + money(p) : "Buy"; },
         onSelect: function (t) { if (t && t.lot) openListing(t.lot); },
       }],
     });
@@ -856,7 +856,7 @@
       },
       options: [{
         id: "plots-own-manage", slot: "e", prio: 2, campaignSafe: true,
-        label: function (t) { return "Your property" + (t && t.plot ? ", " + t.plot.name : ""); },
+        label: "Manage",
         onSelect: function (t) { if (t && t.plot) openPanel(t.plot); },
       }],
     });

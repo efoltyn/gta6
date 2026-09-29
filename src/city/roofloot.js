@@ -339,12 +339,7 @@
       find: function () { return (built && g.mode === "city") ? stashNear() : null; },
       options: [{
         id: "roofstash-pry", slot: "e", bad: true,
-        // a SET'S stash provokes the set that holds the block — the button
-        // says whose box you are about to open (the deleted pill's wording)
-        label: function (st) {
-          if (st && st.kind === "case") return st.rich ? "Pop the set's case" : "Pop the latches";
-          return st && st.rich ? "Unzip the set's bag" : "Unzip it";
-        },
+        label: function (st) { return st && st.kind === "case" ? "Pop open" : "Unzip"; },
         onSelect: function (st) {
           if (!st || st.looted || st._taking) return;
           if (CBZ.shake) CBZ.shake(0.06);

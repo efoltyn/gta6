@@ -2119,19 +2119,18 @@
       },
       options: [
         // the drawer: what is IN it right now, so the label is a real read on
-        // the place and not a constant. An empty drawer says so instead of
-        // advertising money that is not there.
+        // the place and not a constant. An empty drawer offers no verb at all
+        // rather than advertising money that is not there.
         { id: "till-sneak", slot: "e", bad: true,
           label: (t) => { const n = CBZ.cityTill.holds(t.lot, { point: "register" }).amount;
-                          return n > 0 ? "Clean out the drawer (" + fmt$(n) + ")" : "Drawer's empty"; },
-          canShow: (t) => canRobTill(t.lot.kind),
+                          return "Rob " + fmt$(n); },
+          canShow: (t) => canRobTill(t.lot.kind) && CBZ.cityTill.holds(t.lot, { point: "register" }).amount > 0,
           onSelect: (t) => quietTill(t.lot) },
         // the drop safe behind the counter — the fat one, and it is on the
         // shop's OWN deposit-run clock, so a place you cased is worth more.
         { id: "till-safe", slot: "f", bad: true,
           label: (t) => { const n = CBZ.cityTill.holds(t.lot, { point: "safe" }).amount;
-                          const h = CBZ.cityTill.nextClear(t.lot, "safe");
-                          return "Crack the drop safe (" + fmt$(n) + (h > 0 && h < 12 ? " · deposit run in " + Math.round(h) + "h" : "") + ")"; },
+                          return "Crack " + fmt$(n); },
           canShow: (t) => CBZ.CONFIG.TILL_SAFE_POINTS && CBZ.cityTill.points(t.lot).indexOf("safe") >= 0 &&
                           CBZ.cityTill.holds(t.lot, { point: "safe" }).amount > 0,
           onSelect: (t) => crackSafe(t.lot) },
@@ -2151,7 +2150,7 @@
     I.register("ped:vendor", {
       id: "vendor-shut", slot: "e", prio: 20,
       canShow: (v) => !!v.vendor && shopShut(v.vendor),
-      label: (v) => "Locked up for the night, knock anyway",
+      label: "Knock",
       onSelect: (v) => {
         if (CBZ.citySay) CBZ.citySay(v, "We're closed. Sunup.", "#cfe6ff", 2.2);
       },
@@ -2162,7 +2161,7 @@
     I.register("ped:vendor", {
       id: "vendor-hotmeal", slot: "k", prio: 10,
       canShow: (v) => !!v.vendor && v.vendor.kind === "food",
-      label: () => "Hot plate. $15 (a real meal)",
+      label: "Eat $15",
       onSelect: () => {
         if (!CBZ.city.spend(15)) { CBZ.city.note("A plate runs $15.", 1.4); return; }
         g.hunger = Math.min(100, (g.hunger || 0) + 50);
@@ -2176,7 +2175,7 @@
     I.register("ped:vendor", {
       id: "vendor-lineup", slot: "k", prio: 10,
       canShow: (v) => !!v.vendor && v.vendor.kind === "barber" && !shopShut(v.vendor),
-      label: () => "Quick lineup. $25",
+      label: "Trim $25",
       onSelect: () => {
         if (!CBZ.city.spend(25)) { CBZ.city.note("The chair runs $25.", 1.4); return; }
         const lk = look(); lk.swagger = (lk.swagger || 0) + 1;
@@ -2189,7 +2188,7 @@
     I.register("ped:vendor", {
       id: "vendor-toolbag", slot: "k", prio: 10,
       canShow: (v) => !!v.vendor && v.vendor.kind === "hardware",
-      label: () => "Tool bag · " + fmt$(toolbagPrice()) + " (crowbar · picks · medkit)",
+      label: () => "Buy " + fmt$(toolbagPrice()),
       onSelect: () => {
         const price = toolbagPrice();
         if (!CBZ.city.spend(price)) { CBZ.city.note("The bag runs " + fmt$(price) + ".", 1.6); return; }
@@ -2208,7 +2207,7 @@
     I.register("ped:vendor", {
       id: "vendor-fence", slot: "k", prio: 10,
       canShow: (v) => !!v.vendor && v.vendor.kind === "pawn" && sellTotal("pawn") > 0,
-      label: () => "Fence the lot · " + fmt$(sellTotal("pawn")),
+      label: () => "Fence " + fmt$(sellTotal("pawn")),
       onSelect: () => sellAll("pawn"),
     });
     // YOUR trade pays at the counter too: a player working security collects a
@@ -2226,7 +2225,7 @@
       id: "vendor-retainer", slot: "l", prio: 12, role: "security",
       canShow: (v) => !!v.vendor && !v.dead && _sNow() > (v._retainerT || 0) &&
                       CBZ.cityTill.holds(v.vendor, { point: "register" }).amount >= RETAINER,
-      label: () => "Collect the watch retainer · " + fmt$(RETAINER),
+      label: () => "Collect " + fmt$(RETAINER),
       onSelect: (v) => {
         const paid = CBZ.cityTill.take(v.vendor, { point: "register", max: RETAINER, by: "player" });
         if (!(paid.taken > 0)) {
@@ -2246,7 +2245,7 @@
     I.register("ped:civ", {
       id: "ped-mechanic-fix", slot: "k", prio: 44,
       canShow: (p, ctx) => !ctx.driving && !p.dead && /mechanic/i.test(_jobOf(p)) && !!fixableCar(p),
-      label: (p) => { const c = fixableCar(p); return "Fix ride · " + fmt$(c ? fixPrice(c) : 0); },
+      label: (p) => { const c = fixableCar(p); return "Fix " + fmt$(c ? fixPrice(c) : 0); },
       onSelect: (p) => {
         const c = fixableCar(p); if (!c) return;
         const price = fixPrice(c);
@@ -2263,28 +2262,41 @@
       id: "ped-cab-ride", slot: "k", prio: 43,
       canShow: (p, ctx) => !ctx.driving && !p.dead && !p.rage && p.state !== "flee" &&
         _jobOf(p) === "cab driver" && (ctx.wanted | 0) < 2,
-      label: () => "Flag a cab · " + fmt$(cabFare()),
+      label: () => "Ride " + fmt$(cabFare()),
       onSelect: (p) => cabRide(p),
     });
     // a cart vendor sells off the cart — cheap calories without a counter
     I.register("ped:civ", {
       id: "ped-cart-bite", slot: "k", prio: 41,
       canShow: (p) => !p.dead && !p.rage && p.state !== "flee" && _jobOf(p) === "street vendor",
-      label: "Buy a bite $8",
+      label: "Buy $8",
+      // HANDED OVER, NOT MINTED: he holds it out, your hand takes it out of
+      // his (CBZ.verbs.takeFrom at his wrist), and only then is it yours.
       onSelect: (p) => {
-        if (!CBZ.city.spend(8)) { CBZ.city.note("Even the cart wants $8.", 1.4); return; }
-        g.hunger = Math.min(100, (g.hunger || 0) + 30);
-        if (CBZ.player.maxHp) CBZ.player.hp = Math.min(CBZ.player.maxHp, (CBZ.player.hp || 0) + 8);
+        if (!CBZ.city.spend(8)) { if (CBZ.citySay) CBZ.citySay(p, "Eight bucks, pal.", "#cfe6ff", 2); return; }
         p.cash = (p.cash | 0) + 8;
         if (CBZ.sfx) CBZ.sfx("coin");
-        if (CBZ.citySay) CBZ.citySay(p, "Hot and fresh. Next!", "#cfe6ff", 2);
+        p._faceT = Math.max(p._faceT || 0, 1.6);
+        if (CBZ.cityDialogue && CBZ.cityDialogue.beat) CBZ.cityDialogue.beat(p, "dlgSeal", 1.0);
+        let done = false;
+        const eat = function () {
+          if (done) return; done = true;
+          g.hunger = Math.min(100, (g.hunger || 0) + 30);
+          if (CBZ.player.maxHp) CBZ.player.hp = Math.min(CBZ.player.maxHp, (CBZ.player.hp || 0) + 8);
+          if (CBZ.citySayTopic) CBZ.citySayTopic(p, "handOver", { force: true });
+          else if (CBZ.citySay) CBZ.citySay(p, "Here you go.", "#cfe6ff", 2);
+        };
+        const V = CBZ.verbs;
+        let S = null;
+        if (V && V.takeFrom) { try { S = V.takeFrom(CBZ.player, p, { at: "wristR", kind: "cash", pose: "card", dur: 0.55, onTaken: eat }); } catch (e) { S = null; } }
+        if (!S) eat();
       },
     });
     // a posted guard can be GREASED — fifty bucks buys you blind eyes a while
     I.register("ped:civ", {
       id: "ped-guard-grease", slot: "l", prio: 30, bad: true,
       canShow: (p) => !p.dead && !p.rage && !p.gang && _jclass(p) === "law",
-      label: "Slip a fifty",
+      label: "Bribe $50",
       onSelect: (p) => {
         if (!CBZ.city.spend(50)) { CBZ.city.note("You need a whole fifty to grease anyone.", 1.4); return; }
         p.snitch = 0; p.reactCD = Math.max(p.reactCD || 0, 90);
