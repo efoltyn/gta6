@@ -107,13 +107,14 @@
      terrain-identity check. Far-out-of-band queries (|cell| ≥ 8000, i.e.
      ±32km) skip the cache rather than aliasing keys. */
   const COAST_GRID = 4;
-  /* The corner memo is TILED: 32x32 corners per Float64Array (NaN = not yet
+  /* The corner memo is TILED: 8x8 corners per Float64Array (NaN = not yet
      asked, +Infinity = the raw field had no answer), tiles in a Map keyed by
      tile. One Map hit per tile instead of per corner, no boxed values, and
-     the build's ~millions of corner reads become typed-array loads. Values
+     the build's ~millions of corner reads become typed-array loads (tiles stay
+     small because the terrain build touches a sparse lattice). Values
      are exact field values either way, so this is the same answer bit for
-     bit. Bounded like before: past COAST_TILES_MAX tiles (~16 MB) it resets. */
-  const COAST_TILE = 32, COAST_TILES_MAX = 2048;
+     bit. Bounded like before: past COAST_TILES_MAX tiles (~4 MB) it resets. */
+  const COAST_TILE = 8, COAST_TILES_MAX = 8192;
   let coastTiles = new Map(), coastCacheTerrain = null;
   let _ctKey = -1, _ctArr = null;
   function coastRaw(terrain, x, z) {
@@ -126,7 +127,7 @@
   function coastClear() { coastTiles.clear(); _ctKey = -1; _ctArr = null; }
   function coastCorner(terrain, ix, iz) {
     const ux = ix + 8192, uz = iz + 8192;                // both in [192, 16192]
-    const key = (ux >> 5) * 1024 + (uz >> 5);
+    const key = (ux >> 3) * 4096 + (uz >> 3);
     let t = _ctArr;
     if (key !== _ctKey) {
       t = coastTiles.get(key);
@@ -137,7 +138,7 @@
       }
       _ctKey = key; _ctArr = t;
     }
-    const k = ((ux & 31) << 5) | (uz & 31);
+    const k = ((ux & 7) << 3) | (uz & 7);
     let v = t[k];
     if (v !== v) {
       const r = coastRaw(terrain, ix * COAST_GRID, iz * COAST_GRID);

@@ -3267,6 +3267,93 @@
     return tex;
   }
 
+  /* ---- MERGED BOXES, WITHOUT THE BOXES ---------------------------------
+     The deco path used to make a THREE.BoxGeometry per trim box (six
+     buildPlane calls pushing into JS arrays, three typed-array copies, a
+     translate through Vector3 + a normal-matrix inverse), then hand hundreds
+     of them to BufferGeometryUtils.mergeBufferGeometries, which copies them
+     all again. That was most of makeBuilding. This writes the merged
+     geometry straight into its final typed arrays with the SAME arithmetic:
+     BoxGeometry's buildPlane expressions (width/1, width/2, ix*seg - half,
+     x*udir), Float32 storage, then Vector3.applyMatrix4's translation
+     expression on the stored values, normals/uv/index off a real r128
+     BoxGeometry template (the normal only depends on the signs of the dims).
+     Same attribute order, same index type rule, same mergedUserData. */
+  const _boxNrm = new Map();                 // sign pattern -> 72 normals (a real translated BoxGeometry's)
+  let _boxUv = null, _boxIdx = null;
+  function boxTemplate(bw, bh, bd) {
+    const key = (bw > 0 ? 1 : 0) | (bh > 0 ? 2 : 0) | (bd > 0 ? 4 : 0) | (-bw > 0 ? 8 : 0) | (-bh > 0 ? 16 : 0) | (-bd > 0 ? 32 : 0);
+    let n = _boxNrm.get(key);
+    if (!n) {
+      const g = new THREE.BoxGeometry(bw, bh, bd);
+      g.translate(1.5, -2.25, 3.125);
+      n = new Float32Array(g.attributes.normal.array);
+      if (!_boxUv) { _boxUv = new Float32Array(g.attributes.uv.array); _boxIdx = Array.from(g.index.array); }
+      _boxNrm.set(key, n);
+      g.dispose();
+    }
+    return n;
+  }
+  const _bp = new Float64Array(3);
+  // one buildPlane (gridX = gridY = 1), BoxGeometry's own expressions; writes
+  // 4 vertices at `o` (float32 via the target array)
+  function boxPlane(P, o, u, v, w, udir, vdir, width, height, depth) {
+    const segmentWidth = width / 1, segmentHeight = height / 1;
+    const widthHalf = width / 2, heightHalf = height / 2, depthHalf = depth / 2;
+    for (let iy = 0; iy < 2; iy++) {
+      const y = iy * segmentHeight - heightHalf;
+      for (let ix = 0; ix < 2; ix++) {
+        const x = ix * segmentWidth - widthHalf;
+        _bp[u] = x * udir; _bp[v] = y * vdir; _bp[w] = depthHalf;
+        P[o] = _bp[0]; P[o + 1] = _bp[1]; P[o + 2] = _bp[2];
+        o += 3;
+      }
+    }
+    return o;
+  }
+  // boxes: flat [lx, ly, lz, bw, bh, bd, ...]; n boxes. Returns the geometry
+  // mergeBufferGeometries(boxes.map(BoxGeometry(bw,bh,bd).translate(lx,ly,lz))) returns.
+  function mergedBoxGeometry(boxes, n) {
+    const P = new Float32Array(n * 72), N = new Float32Array(n * 72), U = new Float32Array(n * 48);
+    const idx = new Array(n * 36);
+    boxTemplate(boxes[3], boxes[4], boxes[5]);
+    const tu = _boxUv, ti = _boxIdx;
+    const ud = [];
+    for (let b = 0; b < n; b++) {
+      const k = b * 6, lx = boxes[k], ly = boxes[k + 1], lz = boxes[k + 2];
+      const bw = boxes[k + 3], bh = boxes[k + 4], bd = boxes[k + 5];
+      const o0 = b * 72;
+      let o = o0;
+      o = boxPlane(P, o, 2, 1, 0, -1, -1, bd, bh, bw);     // px
+      o = boxPlane(P, o, 2, 1, 0, 1, -1, bd, bh, -bw);     // nx
+      o = boxPlane(P, o, 0, 2, 1, 1, 1, bw, bd, bh);       // py
+      o = boxPlane(P, o, 0, 2, 1, 1, -1, bw, bd, -bh);     // ny
+      o = boxPlane(P, o, 0, 1, 2, 1, -1, bw, bh, bd);      // pz
+      o = boxPlane(P, o, 0, 1, 2, -1, -1, bw, bh, -bd);    // nz
+      // translate: Vector3.applyMatrix4 with makeTranslation(lx, ly, lz),
+      // element by element, on the stored float32 values
+      for (let i = o0; i < o; i += 3) {
+        const x = P[i], y = P[i + 1], z = P[i + 2];
+        const w = 1 / (0 * x + 0 * y + 0 * z + 1);
+        P[i] = (1 * x + 0 * y + 0 * z + lx) * w;
+        P[i + 1] = (0 * x + 1 * y + 0 * z + ly) * w;
+        P[i + 2] = (0 * x + 0 * y + 1 * z + lz) * w;
+      }
+      N.set(boxTemplate(bw, bh, bd), o0);
+      U.set(tu, b * 48);
+      const io = b * 36, vo = b * 24;
+      for (let j = 0; j < 36; j++) idx[io + j] = ti[j] + vo;
+      ud.push({});
+    }
+    const g = new THREE.BufferGeometry();
+    g.userData.mergedUserData = ud;
+    g.setIndex(idx);
+    g.setAttribute("position", new THREE.BufferAttribute(P, 3, false));
+    g.setAttribute("normal", new THREE.BufferAttribute(N, 3, false));
+    g.setAttribute("uv", new THREE.BufferAttribute(U, 2, false));
+    return g;
+  }
+
   // ---- the enterable building (one group; switchback stairs to the roof) ----
   // opts: { boarded:bool (board windows instead of glass), grime:bool }
   function makeBuilding(root, ox, oz, w, d, storeys, color, doorSide, opts) {
@@ -3403,26 +3490,26 @@
     // a whole building's trim lands as 2-4 meshes pre-batch, and core/batch.js
     // then merges those across buildings at load. Falls back to individual
     // meshes (still batch-merged later) if the vendor script is missing.
+    // per colour: flat [lx, ly, lz, bw, bh, bd, ...] (see mergedBoxGeometry)
     const decoGeos = new Map();
     function dbox(lx, ly, lz, bw, bh, bd, col) {
-      const g = new THREE.BoxGeometry(bw, bh, bd);
-      g.translate(lx, ly, lz);
       let arr = decoGeos.get(col);
       if (!arr) { arr = []; decoGeos.set(col, arr); }
-      arr.push(g);
+      arr.push(lx, ly, lz, bw, bh, bd);
     }
     function flushDeco() {
       const BGU = THREE.BufferGeometryUtils;
-      decoGeos.forEach(function (geos, col) {
+      decoGeos.forEach(function (boxes, col) {
         const matD = CBZ.cmat ? CBZ.cmat(col) : mat(col);
-        if (BGU && BGU.mergeBufferGeometries && geos.length > 1) {
-          const merged = BGU.mergeBufferGeometries(geos);
-          for (const g of geos) g.dispose();
-          const m = new THREE.Mesh(merged, matD);
+        const n = boxes.length / 6;
+        if (BGU && BGU.mergeBufferGeometries && n > 1) {
+          const m = new THREE.Mesh(mergedBoxGeometry(boxes, n), matD);
           m.castShadow = false; m.receiveShadow = true;
           bgroup.add(m);
         } else {
-          for (const g of geos) {
+          for (let k = 0; k < boxes.length; k += 6) {
+            const g = new THREE.BoxGeometry(boxes[k + 3], boxes[k + 4], boxes[k + 5]);
+            g.translate(boxes[k], boxes[k + 1], boxes[k + 2]);
             const m = new THREE.Mesh(g, matD);
             m.castShadow = false; m.receiveShadow = true; bgroup.add(m);
           }
