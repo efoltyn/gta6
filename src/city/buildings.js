@@ -3345,6 +3345,35 @@
     }
     const g = new THREE.BufferGeometry();
     const nv = n * 24;
+    /* THE BATCH PASS READS THE BOXES, NOT THE ARRAYS (core/batch.js): one box
+       at a time into a 24-vertex scratch, the same float32 arithmetic as
+       build() above, so a trim geometry that is merged away never allocates
+       its own arrays at all (they were ~285 MB of build garbage citywide). */
+    g._cbzBoxSource = {
+      n: n, idx: null,
+      built: function () { return built !== null; },
+      box: function (b, P, N) {
+        if (!_boxUv) boxTemplate(BX[3], BX[4], BX[5]);
+        const k = b * 6, lx = BX[k], ly = BX[k + 1], lz = BX[k + 2];
+        const bw = BX[k + 3], bh = BX[k + 4], bd = BX[k + 5];
+        let o = 0;
+        o = boxPlane(P, o, 2, 1, 0, -1, -1, bd, bh, bw);
+        o = boxPlane(P, o, 2, 1, 0, 1, -1, bd, bh, -bw);
+        o = boxPlane(P, o, 0, 2, 1, 1, 1, bw, bd, bh);
+        o = boxPlane(P, o, 0, 2, 1, 1, -1, bw, bd, -bh);
+        o = boxPlane(P, o, 0, 1, 2, 1, -1, bw, bh, bd);
+        o = boxPlane(P, o, 0, 1, 2, -1, -1, bw, bh, -bd);
+        for (let i = 0; i < o; i += 3) {
+          const x = P[i], y = P[i + 1], z = P[i + 2];
+          const w = 1 / (0 * x + 0 * y + 0 * z + 1);
+          P[i] = (1 * x + 0 * y + 0 * z + lx) * w;
+          P[i + 1] = (0 * x + 1 * y + 0 * z + ly) * w;
+          P[i + 2] = (0 * x + 0 * y + 1 * z + lz) * w;
+        }
+        N.set(boxTemplate(bw, bh, bd), 0);
+        return _boxIdx;
+      },
+    };
     g.setIndex(lazyAttr(nv - 1 > 65535 ? Uint32Array : Uint16Array, 1, n * 36, function () { return build().I; }));
     g.setAttribute("position", lazyAttr(Float32Array, 3, nv, function () { return build().P; }));
     g.setAttribute("normal", lazyAttr(Float32Array, 3, nv, function () { return build().N; }));
