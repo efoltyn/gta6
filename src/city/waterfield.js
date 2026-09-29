@@ -113,8 +113,14 @@
      the build's ~millions of corner reads become typed-array loads (tiles stay
      small because the terrain build touches a sparse lattice). Values
      are exact field values either way, so this is the same answer bit for
-     bit. Bounded like before: past COAST_TILES_MAX tiles (~4 MB) it resets. */
-  const COAST_TILE = 8, COAST_TILES_MAX = 8192;
+     bit. Bounded like before: past COAST_TILES_MAX tiles it resets. The cap
+     must hold a far MARCH, not just the build: ocean.js's site resolve walks
+     32 bearings x ~7 km at 14 m steps (~16k sparse tiles). At 8192 the memo
+     cleared itself halfway through every retry, so every retry (every 3rd
+     frame while the site is unresolved) re-derived the coast from scratch:
+     45 ms spikes. 32768 x 512 B = 16 MB worst case, only reached by such
+     marches; the old per-corner Map held 130k boxed corners (~same). */
+  const COAST_TILE = 8, COAST_TILES_MAX = 32768;
   let coastTiles = new Map(), coastCacheTerrain = null;
   let _ctKey = -1, _ctArr = null;
   function coastRaw(terrain, x, z) {

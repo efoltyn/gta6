@@ -682,7 +682,14 @@
         root.add(group);
         mount(def, { group, origin: { x: best.cx, z: best.cz }, lot: best, kind: "lot" });
       } else if (def.venue && def.venue.site) {
-        trySiteMount(def, root);
+        // late retries BACK OFF per site: a resolve() that keeps answering
+        // null (ocean.js marches 32 bearings x 7 km) was re-run every 3rd
+        // frame forever. Waits double 1 → 32 retry ticks (3 → 96 frames).
+        if (!city) {
+          if (def._siteWait > 0) { def._siteWait--; continue; }
+          trySiteMount(def, root);
+          if (!live.some((L) => L.def === def)) def._siteWait = def._siteBack = Math.min(32, (def._siteBack || 0) * 2 || 1);
+        } else trySiteMount(def, root);
       }
     }
   }

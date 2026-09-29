@@ -419,7 +419,7 @@ document.body.appendChild(b);}}catch(e){}})();
      mountain heightfield (no hollow ridge sheets) + per-material fog scale.
      Must load right after terrain.js and before city/world.js.
      Revert: CBZ.CONFIG.TERRAIN_SOLID = false. -->
-<script src="src/world/terrain_overhaul.js?v=seabed2"></script>
+<script src="src/world/terrain_overhaul.js?v=seabed3"></script>
 <!-- Geology kit: shared Quilez erosion / ridged multifractal / drainage / strata /
      snow-cover / adaptive-mesh helpers, used by city/biome_snow (the real walkable
      mountains), world/terrain_overhaul (the backdrop range) and city/continent
@@ -471,7 +471,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/vegetation.js?v=allmain1"></script>
 <script src="src/world/forestlook.js?v=allmain1"></script>
 <script src="src/core/prio.js?v=arch2"></script>
-<script src="src/core/lightpin.js?v=combo1"></script>
+<script src="src/core/lightpin.js?v=combo2"></script>
 <script src="src/core/matrixskip.js?v=mskip1"></script>
 <!-- core/interfaces.js is NO LONGER LOADED (2026-07-29). It is 316 lines of
      which ~290 are the contracts index's prose and the rest is a single
@@ -1154,7 +1154,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- Shared signed shoreline/depth/current oracle. Loaded immediately after
      the landmass registry so rendering, swimmers, boats and aquatic wildlife
      all consult the same coast instead of inventing separate radius tests. -->
-<script src="src/city/waterfield.js?v=bmath1"></script>
+<script src="src/city/waterfield.js?v=bmath2"></script>
 <!-- Reflective-ocean FX: swaps CBZ.citySea for a THREE.WaterReflect plane when
      CBZ.CONFIG.WATER_REFLECT is on (default). Reads the sea lazily at runtime,
      so load order past config.js + WaterReflect.js is all it needs. -->
@@ -1252,7 +1252,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/airport_capeharbor.js?v=nodash1"></script>
 <script src="src/city/island_military.js?v=lad1-st1"></script>
 <script src="src/city/biome_desert.js?v=lad1"></script>
-<script src="src/city/biome_forest.js?v=allmain1-st1"></script>
+<script src="src/city/biome_forest.js?v=allmain1-st2"></script>
 <script src="src/city/biome_farmland.js?v=lad1-st1"></script>
 <script src="src/city/biome_snow.js?v=bmath1"></script>
 <script src="src/city/snowboard.js?v=nodash1"></script>
@@ -2298,7 +2298,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- 4b. game packages: engine registry first, then each packaged venue game
      (after every city system they facade: interactions, worldmap, economy) -->
-<script src="src/core/packages.js?v=pkg8"></script>
+<script src="src/core/packages.js?v=pkg9"></script>
 <script src="src/games/casino.js?v=onebet1"></script>
 <script src="src/games/ocean.js?v=nodash1"></script>
 <script src="src/games/racing.js?v=onebet1"></script>
@@ -2395,7 +2395,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/building_dress.js?v=roof1-st1"></script>
 <script src="src/core/farcull.js?v=fc3cells"></script>
 <!-- whole-building frustum hide before every draw (exact: view frustum + sun shadow frustum); also owns CBZ.subtreeSphere, which city/cctv.js's feed scope reuses -->
-<script src="src/core/viewscope.js?v=vs2"></script>
+<script src="src/core/viewscope.js?v=vs3"></script>
 <script src="src/core/losgrid.js?v=lg1"></script>
 <script src="src/core/staticfreeze.js?v=sf1"></script>
 <script src="src/systems/settings.js?v=nodash1"></script>
