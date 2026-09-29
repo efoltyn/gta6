@@ -439,9 +439,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/config.js?v=w0929town"></script>
 <!-- CITY SLICES (?slice=name|x,z,r): one piece of Gang City booted as its own world.
      Parses the URL only; with no slice every helper answers "keep". -->
-<script src="src/core/slice.js?v=slice0929"></script>
+<script src="src/core/slice.js?v=slice0929b"></script>
 <!-- GANG CITY STREAMS: the live city is a slice that follows the player (?stream=0 = whole city). -->
-<script src="src/core/citystream.js?v=stream0929"></script>
+<script src="src/core/citystream.js?v=slice0929b"></script>
 <script src="src/core/seed.js?v=w09290242x"></script>
 <!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
      Turns "is this the city?" into "may I vault / may I blow up here?", so the
@@ -517,7 +517,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (asphalt, concrete, plaster, metal, dirt, grass, sand, wood, glass grime).
      Needs core/seed.js for CBZ.hashN; bakes lazily on first request, so it only
      has to precede its first consumer — world/materials.js. -->
-<script src="src/world/textures_surface.js?v=wreal0929"></script>
+<script src="src/world/textures_surface.js?v=slice0929b"></script>
 <script src="src/world/materials.js?v=pbr1"></script>
 <script src="src/world/fuel_station.js?v=fuel1"></script>
 <script src="src/world/prisonkit.js?v=tow929b"></script>
@@ -936,7 +936,7 @@ document.body.appendChild(b);}}catch(e){}})();
      keeps counting through the 20-30 s synchronous world build (the main
      thread cannot repaint during that). Must load BEFORE state.js, which
      shows it, and before the city modules that call CBZ.bootStep(). -->
-<script src="src/systems/bootprogress.js?v=meter1"></script>
+<script src="src/systems/bootprogress.js?v=slice0929b"></script>
 <script src="src/systems/state.js?v=doors929"></script>
 <!-- AN APP GETS INTERRUPTED AND A TAB DOES NOT. WKWebView drops the WebGL
      context under memory pressure and hands it back later; three.js rebuilds
@@ -1085,7 +1085,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/tsunami_scene.js?v=tsureal1"></script>
 <!-- the grid street layer (road, kerbs, footways, markings) world.js builds -->
 <script src="src/city/streetkit.js?v=metro0929"></script>
-<script src="src/city/world.js?v=wreal0929"></script>
+<script src="src/city/world.js?v=slice0929b"></script>
 <script src="src/city/interior_programs.js?v=pres0929b"></script>
 <!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
      inventory item; an NPC's keys live on the NPC and every existing way to
@@ -1159,7 +1159,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/expansion.js?v=w0929road"></script>
 <!-- 4d-2. ARCHIPELAGO — worldmap registry + 3 islands + 4 biomes (worldmap.js
      MUST precede every island/biome; world.js runs them via CBZ.cityWorldGeo) -->
-<script src="src/city/worldmap.js?v=wreal0929"></script>
+<script src="src/city/worldmap.js?v=slice0929b"></script>
 <!-- Shared signed shoreline/depth/current oracle. Loaded immediately after
      the landmass registry so rendering, swimmers, boats and aquatic wildlife
      all consult the same coast instead of inventing separate radius tests. -->
@@ -1168,7 +1168,7 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.CONFIG.WATER_REFLECT is on (default). Reads the sea lazily at runtime,
      so load order past config.js + WaterReflect.js is all it needs. -->
 <script src="src/world/waterfx.js?v=roadmerge1"></script>
-<script src="src/city/highways.js?v=far0929"></script>
+<script src="src/city/highways.js?v=slice0929b"></script>
 <!-- THE HIGHWAY NETWORK AS DATA (HIGHWAY_NET_V2): the named-route table +
      builder. Loads right after the ribbon builder it drives; registers its
      own landmass pass (order 91 — after every causeway, before the
@@ -1260,10 +1260,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/airport_kit.js?v=wreal0929"></script>
 <script src="src/city/airport_capeharbor.js?v=nodash1"></script>
 <script src="src/city/island_military.js?v=cd0929"></script>
-<script src="src/city/biome_desert.js?v=lad1"></script>
+<script src="src/city/biome_desert.js?v=slice0929b"></script>
 <script src="src/city/biome_forest.js?v=wreal0929"></script>
 <script src="src/city/biome_farmland.js?v=wreal0929"></script>
-<script src="src/city/biome_snow.js?v=wreal0929"></script>
+<script src="src/city/biome_snow.js?v=slice0929b"></script>
 <script src="src/city/snowboard.js?v=cd0929"></script>
 <!-- STRATEGIC LAYER part 1 — hardened bunkers (Fort Brandt command shelter
      w/ the nuclear vault + mountain/desert finds). Landmass order 40: after
@@ -1326,7 +1326,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Right after propuse.js, whose CBZ.propArcActive / propLiePlace it backs. -->
 <script src="src/entities/moves_posture.js?v=w09290242x"></script>
 <script src="src/city/adboard.js?v=cd0929"></script>
-<script src="src/city/mode.js?v=wreal0929"></script>
+<script src="src/city/mode.js?v=slice0929b"></script>
 <script src="src/city/economy.js?v=vit3"></script>
 <script src="src/city/clothes.js?v=body0929a"></script>
 <script src="src/city/outfits.js?v=w09290250"></script>
@@ -2108,7 +2108,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/river.js?v=wreal0929"></script>
 <!-- THE CONTINENT: runs after every landmass builder (order 97) and fills the
      ocean between POIs with walkable backcountry — one world, not circles. -->
-<script src="src/city/continent.js?v=wreal0929"></script>
+<script src="src/city/continent.js?v=slice0929b"></script>
 <script src="src/city/demographics.js?v=world1"></script>
 <!-- X6: the affinity matrix (country/state/city relations) — after
      countries.js (CBZ.COUNTRIES) and officials.js/polity.js (both already

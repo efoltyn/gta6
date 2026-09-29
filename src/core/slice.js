@@ -50,6 +50,7 @@
     "harbor": { x: 250, z: -700, r: 220, label: "East harbour + marina off downtown" },
     "kingsport-downtown": { x: -2900, z: 3050, r: 450, label: "Kingsport CBD (metro towers, central park edge)" },
     "kingsport": { x: -2780, z: 2800, r: 1300, label: "Kingsport metro core (about half the metro)" },
+    "karvel": { x: 5000, z: -1500, r: 450, label: "Karvel city centre (the monument square)" },
     "estate": { x: -2175, z: -4416, r: 260, label: "The Executive Mansion (presidential estate)" },
     "capitol": { x: 2306, z: -4461, r: 260, label: "The Capitol" },
     "redhollow": { x: -1460, z: -2250, r: 550, label: "Redhollow Woods" },

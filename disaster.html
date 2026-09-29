@@ -435,6 +435,11 @@ document.body.appendChild(b);}}catch(e){}})();
 </script>
 <!-- 0. namespace + constants -->
 <script src="src/config.js?v=w0929town"></script>
+<!-- CITY SLICES (?slice=name|x,z,r): one piece of Gang City booted as its own world.
+     Parses the URL only; with no slice every helper answers "keep". -->
+<script src="src/core/slice.js?v=slice0929b"></script>
+<!-- GANG CITY STREAMS: the live city is a slice that follows the player (?stream=0 = whole city). -->
+<script src="src/core/citystream.js?v=slice0929b"></script>
 <!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
      Turns "is this the city?" into "may I vault / may I blow up here?", so the
      prison, gun game and the disaster island reuse Gang City's engine instead
@@ -501,7 +506,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (asphalt, concrete, plaster, metal, dirt, grass, sand, wood, glass grime).
      Needs core/seed.js for CBZ.hashN; bakes lazily on first request, so it only
      has to precede its first consumer — world/materials.js. -->
-<script src="src/world/textures_surface.js?v=wreal0929"></script>
+<script src="src/world/textures_surface.js?v=slice0929b"></script>
 <script src="src/world/materials.js?v=pbr1"></script>
 <script src="src/world/fuel_station.js?v=fuel1"></script>
 <script src="src/world/prisonkit.js?v=tow929b"></script>
@@ -828,7 +833,7 @@ document.body.appendChild(b);}}catch(e){}})();
      keeps counting through the 20-30 s synchronous world build (the main
      thread cannot repaint during that). Must load BEFORE state.js, which
      shows it, and before the city modules that call CBZ.bootStep(). -->
-<script src="src/systems/bootprogress.js?v=meter1"></script>
+<script src="src/systems/bootprogress.js?v=slice0929b"></script>
 <script src="src/systems/state.js?v=doors929"></script>
 <!-- AN APP GETS INTERRUPTED AND A TAB DOES NOT. WKWebView drops the WebGL
      context under memory pressure and hands it back later; three.js rebuilds
@@ -1025,7 +1030,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/facades/brickhouse.js?v=fk3"></script>
 <!-- 4d-2. ARCHIPELAGO — worldmap registry + 3 islands + 4 biomes (worldmap.js
      MUST precede every island/biome; world.js runs them via CBZ.cityWorldGeo) -->
-<script src="src/city/worldmap.js?v=wreal0929"></script>
+<script src="src/city/worldmap.js?v=slice0929b"></script>
 <!-- Shared signed shoreline/depth/current oracle. Loaded immediately after
      the landmass registry so rendering, swimmers, boats and aquatic wildlife
      all consult the same coast instead of inventing separate radius tests. -->

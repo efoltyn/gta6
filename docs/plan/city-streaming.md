@@ -41,6 +41,25 @@ meshes, 80 MB of geometry and 3M triangles. `CBZ.streamRadius` grows the playabl
 the keep circle reaches that budget, using `cellCost` in the manifest: the finished city's own
 per-400 m census of draws, tris and geometry KB.
 
+## Measured 2026-09-29 (speed.mjs, one run each, box at load ~100; desktop frame = max(CPU, GPU) median, ms)
+
+| boot | load s | build s | frame spawn / centre / aerial / drive | JS heap MB | GPU MB | phone total (phone profile) |
+|---|---|---|---|---|---|---|
+| jail (escape) | 3.9 | 0.25 | ~32 steady | 448 | 185 | 437 + 114 = 551 |
+| whole city | 24.3 | 13.9 | 105 / 80 / 60 / 95 | 2562 | 485 | 2538 + 271 = 2809 |
+| slice gangcity-downtown | 22.7 | 11.9 | 108 / 104 / 232 / 96 | 2010 | 445 | |
+| slice harbor | 20.2 | 12.3 | 69 / 64 / 89 / 63 | 1981 | 335 | |
+| slice kingsport-downtown | 14.6 | 8.6 | 68 / 36 / 39 / 54 | 1306 | 256 | 1294 + 101 = 1395 |
+| slice karvel | 14.6 | 8.5 | 39 / 43 / 31 / 36 | 1337 | 267 | |
+| slice estate | 14.9 | 9.1 | 25 / 29 / 34 / 31 | 1382 | 178 | |
+| slice redhollow | 14.7 | 9.5 | 38 / 33 / 37 / 26 | 1374 | 146 | |
+| streamed (?stream=1, downtown spawn) | 17.4 (phone) | 10.7 | | 2106 peak / 1725 | 233 | 1958 |
+
+Kingsport's facade kit already streams (metro.js: cells build within 250 m of the camera and
+drop at 300 m). At the CBD its ring holds about 311 MB of geometry, which is about 4x the
+jail's 80 MB geometry budget. As a slice's detail tier it has to fit the budget, through
+cheaper kit geometry per cell or occlusion, not a smaller visible radius (HD rule).
+
 ## Why the whole city can't stream yet (the exact blockers)
 
 1. **The view band alone is over budget downtown.** The keep circle has to include the fog band
