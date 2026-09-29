@@ -469,7 +469,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/vegetation.js?v=allmain1"></script>
 <script src="src/world/forestlook.js?v=allmain1"></script>
 <script src="src/core/prio.js?v=arch2"></script>
-<script src="src/core/lightpin.js?v=pin1"></script>
+<script src="src/core/lightpin.js?v=w09290204"></script>
 <script src="src/core/matrixskip.js?v=mskip1"></script>
 <!-- core/interfaces.js is NO LONGER LOADED (2026-07-29). It is 316 lines of
      which ~290 are the contracts index's prose and the rest is a single
@@ -504,9 +504,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/tunnels.js?v=tunnel1"></script>
 <!-- GROUND YOU CAN TAKE AWAY A BUCKET AT A TIME (bare ground only). -->
 <script src="src/systems/digsite.js?v=dig1"></script>
-<script src="src/core/lights.js"></script>
-<script src="src/core/sky.js?v=neutralhaze2"></script>
-<script src="src/core/daynight.js?v=dsl3"></script>
+<script src="src/core/lights.js?v=w09290204"></script>
+<script src="src/core/sky.js?v=w09290204"></script>
+<script src="src/core/daynight.js?v=w09290204"></script>
 
 <!-- 2. world geometry -->
 <!-- Procedural surface library: tiling colour + normal + roughness CanvasTextures
@@ -699,7 +699,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- 3b. actors that depend on economy -->
 <script src="src/entities/vision.js"></script>
-<script src="src/entities/guards.js?v=mc5ae55"></script>
+<script src="src/entities/guards.js?v=w09290204"></script>
 <script src="src/entities/searchlight.js?v=m0928s"></script>
 <script src="src/entities/keycard.js?v=armory1"></script>
 <!-- Shared NPC identity/placement layer: jail actors, city scenes and moving
@@ -763,8 +763,8 @@ document.body.appendChild(b);}}catch(e){}})();
      require its service and return early without it. (pushables.js, the fourth,
      is up at the top of the world block — it has to precede the parse-time
      world files that register props.) -->
-<script src="src/systems/dayplan.js?v=eng1"></script>
-<script src="src/systems/fixtures.js?v=eng1"></script>
+<script src="src/systems/dayplan.js?v=w09290204"></script>
+<script src="src/systems/fixtures.js?v=w09290204"></script>
 <script src="src/systems/rest.js?v=eng1"></script>
 
 <!-- TIME OF DAY IS THE PILLAR (escape mode). prisonschedule.js carves the day
@@ -778,12 +778,12 @@ document.body.appendChild(b);}}catch(e){}})();
      After cellblock/guards/searchlight/npc (all read at parse), before the
      detection sweep that consumes the result. -->
 <script src="src/systems/prisonschedule.js?v=dsl3"></script>
-<script src="src/systems/prisonnight.js?v=dsl3"></script>
+<script src="src/systems/prisonnight.js?v=w09290204"></script>
 <!-- THE PLAYER'S FLASHLIGHT: owning a Guard Torch (prison) or a Flashlight
      (city) buys one shadowless SpotLight + floor pool, toggled through
      CBZ.playerFlashlight. After weapons/flashlight.js (the model) and
      prisonnight.js (CBZ.prisonLights.level prices the dark). -->
-<script src="src/systems/playerflashlight.js?v=mce86a5"></script>
+<script src="src/systems/playerflashlight.js?v=w09290204"></script>
 <script src="src/world/prisonlook.js?v=look1"></script>
 <!-- BODIES USE THE FURNITURE. The bunks in this wing had never once become
      propuse anchors (city/propuse.js loads 337 tags after world/cellblock.js,
@@ -884,7 +884,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/reactions.js?v=mce86a5"></script>
 <script src="src/systems/facial.js?v=face1"></script>
 <script src="src/systems/ambient.js"></script>
-<script src="src/systems/weather.js?v=snowbury1"></script>
+<script src="src/systems/weather.js?v=w09290204"></script>
 <script src="src/systems/compass.js"></script>
 <script src="src/systems/dashboard.js?v=cars1"></script>
 <script src="src/systems/combat.js?v=vit3"></script>
@@ -2403,7 +2403,7 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.onQualityChange) AND after core/batch.js — it wraps CBZ.batchStaticUnder
      and registers its own window-load handler SECOND, so the static merge has
      finished before it promotes materials. -->
-<script src="src/core/gfx.js?v=gfx1"></script>
+<script src="src/core/gfx.js?v=w09290204"></script>
 <script src="src/city/localinst.js?v=li2"></script>
 <script src="src/core/profile.js"></script>
 <script src="src/core/fxwarm.js?v=racerstory1"></script>
