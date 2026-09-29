@@ -17,7 +17,7 @@
         and the same painted key for every uniformed role;
      3. guards / wardens / police / SWAT / soldiers / counter-snipers / each
         gang map to one record each, whatever the job spelling;
-     4. recolorRig actually mounts the kit (7 meshes on the neck) on a detail
+     4. recolorRig actually mounts the kit (one merged mesh on the neck) on a detail
         body, strips it on a re-dress into anything else, and paints gloves on
         a gloved uniform then walks the hands back to skin.
 
@@ -50,7 +50,7 @@ vm.runInContext(read("src/vendor/three.r128.min.js"), ctx, { filename: "three" }
 const GEO = {}, MAT = {};
 ctx.CBZ.boxGeom = (w, h, d) => GEO[w + "," + h + "," + d] || (GEO[w + "," + h + "," + d] = new ctx.THREE.BoxGeometry(w, h, d));
 ctx.CBZ.cmat = (hex) => MAT[hex] || (MAT[hex] = Object.assign(new ctx.THREE.MeshLambertMaterial({ color: hex }), { _shared: true }));
-for (const f of ["src/entities/headwear.js", "src/city/clothes.js", "src/city/outfits.js"]) {
+for (const f of ["src/entities/headwear.js", "src/city/clothes.js", "src/city/outfits.js", "src/entities/dutykit.js"]) {
   try { vm.runInContext(read(f), ctx, { filename: f }); }
   catch (e) { console.log("load " + f + " threw: " + e.message); process.exit(2); }
 }
@@ -74,7 +74,7 @@ const st = styles[D.style] || {};
 check(st.name === "Detail Black", "detail style is 'Detail Black' (got " + st.name + ")");
 check(lum(st.body) < 0.1 && lum(st.legs != null ? st.legs : st.body) < 0.1, "jacket + trousers near-black");
 check(st.tie != null && lum(st.tie) < 0.1, "tie is dark");
-check(/shirt = "#f1f2ec"/.test(read("src/city/clothes.js")), "the formal torso paints a white shirt");
+{ const src = read("src/city/clothes.js"); check(/const SHIRT_HEX = 0xf1f2ec;/.test(src) && /opts\.shirt != null \? opts\.shirt : SHIRT_HEX/.test(src), "the formal torso paints a white shirt (unless a closet recipe names one)"); }
 check(lum(D.colors.torso) < 0.1 && lum(D.colors.legs) < 0.1 && lum(D.colors.shoes) < 0.1, "flat fallback is black too");
 check(lum(D.colors.shirt) > 0.9, "record's shirt is white");
 check(D.kit && D.kit.shades && D.kit.earpiece, "detail carries shades + earpiece");
@@ -98,6 +98,7 @@ const ROLES = [
   ["tactical", ["counter-sniper", "bureau agent"]],
   ["soldier", ["soldier", "military aide"]],
   ["security", ["security guard", "private security"]],
+  ["detective", ["detective", "police detective", "homicide detective"]],
 ];
 for (const [id, jobs] of ROLES) for (const job of jobs) for (const b of bodies) {
   const r = CBZ.cityOutfitFor(Object.assign({ job, band: "adult" }, b));
@@ -130,8 +131,10 @@ CBZ.cityRecolorRig(a, D.colors, D);
 CBZ.cityRecolorRig(b, D.colors, D);
 const last2 = painted.slice(-2);
 check(last2.length === 2 && keyOf(last2[0]) === keyOf(last2[1]) && last2[0].style === D.style, "two detail bodies ask the atlas for the same suit key");
-check(a._detailKit && a._detailKit.children.length === 7 && a._detailKit.parent === a.neck, "kit mounted on the neck (7 parts)");
-check(a._detailKit.children[0].geometry === b._detailKit.children[0].geometry && a._detailKit.children[0].material === b._detailKit.children[0].material, "kit geometry/material shared between wearers");
+// the kit is ONE merged, vertex-coloured mesh (shades + earpiece), not seven boxes
+check(a._detailKit && a._detailKit.isMesh && a._detailKit.parent === a.neck && a._detailKit.userData.mask === 3, "kit mounted on the neck as one mesh (shades + earpiece)");
+check(a._detailKit.geometry.attributes.color && a._detailKit.geometry.attributes.position.count > 200, "kit is a merged, vertex-coloured shape (" + (a._detailKit.geometry.attributes.position.count) + " verts)");
+check(a._detailKit.geometry === b._detailKit.geometry && a._detailKit.material === b._detailKit.material, "kit geometry/material shared between wearers");
 CBZ.cityRecolorRig(a, cat.swat.colors, cat.swat);
 // the neck now also carries the role hat (entities/headwear.js), so "stripped"
 // means nothing on it but headwear groups
@@ -152,6 +155,27 @@ const HATS = { police: "peaked", sheriff: "campaign", construction: "hardhat", s
   const h = rig();
   CBZ.cityRecolorRig(h, W.colors, W);
   check(CBZ.headwear.worn(h) === null, `the warden wears no hat (got ${CBZ.headwear.worn(h)})`);
+  check(!W.duty, "the warden wears no duty belt");
+}
+// ---- THE DUTY KIT (entities/dutykit.js): each law record names its kit, and
+// the kit is real geometry on a real body (belt round the waist, badge on the
+// left chest, holster on the right hip), built once per body shape
+{
+  const DUTY = { police: "police", precinct: "police", swat: "swat", corrections: "corrections", sheriff: "sheriff", security: "security", detective: "detective" };
+  for (const id in DUTY) check(cat[id] && cat[id].duty === DUTY[id], `CAT.${id} carries the ${DUTY[id]} kit (got ${cat[id] && cat[id].duty})`);
+  check(!cat.detail.duty && !cat.suit.duty, "suits carry no duty kit");
+  check(!cat.precinct.cop && cat.detective && !cat.detective.cop, "desk officers and detectives are not the city force (no cop flag)");
+  check(!cat.corrections.badge, "the CO's badge is the kit's, not a second rig badge");
+  const K = CBZ.dutyKit;
+  check(!!K && typeof K.wear === "function", "CBZ.dutyKit loaded");
+  // a stub rig (no body / torso shape) gets nothing and keeps nothing
+  const st = rig();
+  check(K.wear(st, cat.police) === null && !st._dutyKit, "a stub rig wears no kit");
+  // painters: no painted holster block / radio / belt left in the duty painters
+  const src = read("src/city/clothes.js");
+  const body = (name) => { const i = src.indexOf("PAINT." + name + " = function"); return i < 0 ? "" : src.slice(i, src.indexOf("\n  };", i)); };
+  for (const n of ["police", "corrections", "sheriff", "security"]) check(!/holster block|radio|duty belt/i.test(body(n)), `PAINT.${n} paints no holster / radio / belt`);
+  check(!/new THREE\.BoxGeometry\(0\.16, 0\.16, 0\.05\)|copBadge/.test(read("src/entities/player.js")), "player.js hangs no fixed-coordinate badge box");
 }
 for (const id in HATS) {
   const h = rig();

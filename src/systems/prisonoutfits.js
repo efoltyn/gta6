@@ -21,8 +21,6 @@
   const CBZ = window.CBZ;
   if (!CBZ) return;
 
-  function on() { return true; }
-
   const NPC_FIT = {
     inmate: "inmate",
     cap: "inmate_cap",
@@ -96,7 +94,7 @@
     return dressed;
   }
   function syncNow() {
-    if (!on() || !CBZ.game || CBZ.game.mode !== "escape") return false;
+    if (!CBZ.game || CBZ.game.mode !== "escape") return false;
     let changed = false;
     const playerId = CBZ.player && CBZ.player.role === "cop" ? "corrections" : "inmate";
     changed = dressChar(CBZ.playerChar, playerId) || changed;
@@ -119,7 +117,7 @@
   // wardrobe owner's job (outfits.js integritySweep), not this adapter's.
   let t = 0;
   CBZ.onUpdate(34.82, function (dt) {
-    if (!on() || !CBZ.game || CBZ.game.mode !== "escape") return;
+    if (!CBZ.game || CBZ.game.mode !== "escape") return;
     t -= dt;
     if (t > 0) return;
     t = 0.30;
@@ -184,7 +182,7 @@
     let records = 0;
     for (let i = 0; i < REQUIRED.length; i++) if (cat && cat[REQUIRED[i]]) records++;
     return {
-      enabled: on() ? 1 : 0,
+      enabled: 1,
       actors: rows.length,
       styled: styled,
       mismatched: mismatched,

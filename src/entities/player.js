@@ -33,14 +33,12 @@
   });
   CBZ.scene.add(playerChar.group);
 
-  // Cop-mode accessories live on the same rig so existing systems keep
-  // their references and only the outfit changes. The cop's cap is not one of
-  // them: it is entities/headwear.js's peaked police cap (applyPlayerRole).
-  const copBadge = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 0.05), CBZ.mat(0xffd451));
-  copBadge.position.set(-0.28, 1.55, 0.27); copBadge.visible = false; playerChar.body.add(copBadge);
-  const radio = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.22, 0.08), CBZ.mat(0x0b0f18));
-  radio.position.set(0.33, 1.55, 0.29); radio.visible = false; playerChar.body.add(radio);
-  playerChar.skinSlots.badge.push(copBadge, radio);
+  // The officer's kit is not built here. Two boxes used to hang at fixed
+  // old-body coordinates (a 16 cm gold "badge" cube and a radio brick in
+  // front of the chest); the badge, belt, radio and the rest now come with the
+  // corrections uniform itself (systems/prisonoutfits.js dresses the cop role
+  // through city/outfits.js -> entities/dutykit.js), and the cap is
+  // entities/headwear.js's peaked police cap (applyPlayerRole below).
 
   function paint(list, color, visible) {
     list.forEach((m) => {
@@ -76,8 +74,6 @@
     paint(s.armsLower, cop ? 0x263a67 : 0xff7a1a);
     paint(s.shoes, cop ? 0x101010 : 0x2b2b2b);
     paint(s.stripes, 0xc85c00, !cop);
-    paint(s.belt, cop ? 0x0d111c : 0x6b4a2a, true);
-    paint(s.badge, null, cop);
     // the officer's peaked cap, fitted on the head with the hair under it. The
     // jail role owns the whole look, so a city fit's role hat (outfits.js,
     // "outfit" owner — same rank) comes off with the rest of the city cloth.

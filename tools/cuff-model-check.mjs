@@ -69,9 +69,9 @@ const { CBZ, THREE } = v, V = CBZ.verbs, H = CBZ.handcuffs;
   const open = H.buildOpen(); open.updateMatrixWorld(true);
   const os = new THREE.Box3().setFromObject(open).getSize(new THREE.Vector3());
   check(os.z > size.z * 1.5, "model: an open pair's swing arms stand open", `${cm(os.z)} across vs ${cm(size.z)} closed`);
-  const pouch = H.buildPouch(); pouch.updateMatrixWorld(true);
-  const ps = new THREE.Box3().setFromObject(pouch).getSize(new THREE.Vector3());
-  check(ps.x > 0.06 && ps.x < 0.09 && ps.y > 0.08 && ps.y < 0.12 && ps.z > 0.03 && ps.z < 0.06, "model: the belt case is a real case (~8 x 10 x 4.5 cm)", `${cm(ps.x)} x ${cm(ps.y)} x ${cm(ps.z)}`);
+  // the belt case is entities/dutykit.js's now (one merged duty kit)
+  const CS = CBZ.dutyKit && CBZ.dutyKit.CASE;
+  check(!!CS && CS.w > 0.06 && CS.w < 0.09 && CS.h > 0.08 && CS.h < 0.12 && CS.d > 0.03 && CS.d < 0.06, "model: the belt case is a real case (~8 x 10 x 4.5 cm)", CS ? `${cm(CS.w)} x ${cm(CS.h)} x ${cm(CS.d)}` : "no dutyKit");
 }
 
 // ================================================================= 2. THE FIT
@@ -285,11 +285,12 @@ function groundRun(variant, pa, pt, build, o) {
   const cop = v.actor({ name: "cop" }); cop.kind = "cop";
   const warden = v.actor({ name: "warden" }); warden.kind = "warden";
   const guard = v.actor({ name: "guard" }); guard.kind = "guard";
-  CBZ.cityCops = [cop]; CBZ.guards = [warden, guard];
-  for (let i = 0; i < 60; i++) v.frame(DT);
-  const has = (a) => { let k = false; a.char.group.traverse((o) => { if (o.name === "handcuff-case") k = true; }); return k; };
-  check(has(cop) && has(guard) && !has(warden), "belt: city cops and prison officers carry the cuff case (the warden does not)", `cop ${has(cop)}, guard ${has(guard)}, warden ${has(warden)}`);
-  CBZ.cityCops = []; CBZ.guards = [];
+  // the cuff case rides the uniform's duty kit (entities/dutykit.js), dressed
+  // by the record: a patrol cop's and a CO's belt carry it, a suit does not
+  const K = CBZ.dutyKit;
+  if (K) { K.wear(cop.char, { duty: "police" }); K.wear(guard.char, { duty: "corrections" }); K.wear(warden.char, { id: "suit" }); }
+  const has = (a) => { const k = a.char._dutyKit; return !!(k && k.parent && K.KINDS[k.userData.kind].cuffs != null); };
+  check(!!K && has(cop) && has(guard) && !has(warden), "belt: city cops and prison officers carry the cuff case (the warden does not)", `cop ${has(cop)}, guard ${has(guard)}, warden ${has(warden)}`);
 }
 
 // ====================================================================== API

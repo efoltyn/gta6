@@ -199,7 +199,7 @@
     for (let i = 0; i < JEWEL_SLOTS.length; i++) {
       const name = blingWornIn(JEWEL_SLOTS[i]);
       if (!name) continue;
-      CBZ.cityBlingBuild(CBZ.cityBlingParts(name), jewelAnchor(rig, JEWEL_SLOTS[i]), out, lm);
+      CBZ.cityBlingBuild(CBZ.cityBlingParts(name), jewelAnchor(rig, JEWEL_SLOTS[i]), out, lm, rig);
     }
     if (out.length) rig._cpJewel = out;
   }

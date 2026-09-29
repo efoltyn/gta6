@@ -651,7 +651,64 @@
   // frame, at the base of a finger (ring finger; the pinky ring's authored
   // outboard x picks the little finger). Authored sizes are rig units for the
   // old 0.29-wide box hand; lm.ringK brings them down onto a real finger.
-  function placePart(mesh, p, lm, side) {
+  /* THE NECKLACE LIES ON THE CHEST IT IS WORN ON. The V was authored against
+     the old box man — a flat front face at z 0.25, collarbone notch ~1.806 —
+     and mounted at those absolutes on every body. On the shaped torso that
+     plane is in FRONT of the chest along the whole V (measured, tools-free:
+     an average man's surface is z 0.16 at the strand tops, 0.24 at the meet;
+     a woman's 0.12-0.19; a teen girl's strand tops were in the air), so every
+     chain hung 2-14 cm off the body. Now each authored point is mapped into
+     THIS body — x by its torso width, y from its own notch by its column
+     scale — and seated the authored standoff (z - 0.25) off the real surface,
+     and a strand is laid ALONG the surface between its two mapped ends
+     instead of standing vertical in front of a chest that slopes back to the
+     collarbones. Rigs without a shape (harness stubs) keep the authored spot. */
+  const AUTH_NOTCH = 1.806, AUTH_FACE = 0.25, RUN = 0.30;
+  const _cA = [0, 0, 0], _cB = [0, 0, 0];
+  let _bx = null, _by = null, _bz = null, _bm = null;
+  function chestPoint(ch, x, y, off, out) {
+    const S = ch.torsoShape, P = ch.profile;
+    const sx = P && P.torsoW > 0 ? P.torsoW / 0.92 : 1, vs = S.vs > 0 ? S.vs : 1;
+    const notch = S.yN - (S.tf || 0) - 0.03 * vs;
+    out[0] = x * sx; out[1] = notch + (y - AUTH_NOTCH) * vs;
+    const z = ch.torsoFrontZ(out[0], out[1]);
+    out[2] = (isFinite(z) ? z : AUTH_FACE) + off;
+    return out;
+  }
+  function placeOnChest(mesh, p, ch) {
+    const off = p.z - AUTH_FACE, s = p.s == null ? 1 : p.s;
+    if (p.rz == null) {                                   // pendant / cross / gem / medal
+      chestPoint(ch, p.x, p.y, off, _cA);
+      mesh.position.set(_cA[0], _cA[1], _cA[2]);
+      mesh.rotation.set(p.rx || 0, p.ry || 0, 0);
+      mesh.scale.set(s, s, s);
+      return;
+    }
+    // a strand: its two authored ends, each put on the surface
+    const hx = 0.5 * RUN * s * Math.cos(p.rz), hy = 0.5 * RUN * s * Math.sin(p.rz);
+    chestPoint(ch, p.x - hx, p.y - hy, off, _cA);
+    chestPoint(ch, p.x + hx, p.y + hy, off, _cB);
+    if (!_bx) { _bx = new THREE.Vector3(); _by = new THREE.Vector3(); _bz = new THREE.Vector3(); _bm = new THREE.Matrix4(); }
+    _bx.set(_cB[0] - _cA[0], _cB[1] - _cA[1], _cB[2] - _cA[2]);
+    const len = _bx.length() || RUN * s;
+    _bx.normalize();
+    _by.set(0, 0, 1).cross(_bx).normalize();              // in the chest surface, across the strand
+    _bz.copy(_bx).cross(_by);                             // the chest normal side
+    _bm.makeBasis(_bx, _by, _bz);
+    mesh.quaternion.setFromRotationMatrix(_bm);
+    // a straight run over a curved chest: the middle rides lower than the
+    // ends, so lift the whole strand until its middle keeps the standoff too
+    const mx = (_cA[0] + _cB[0]) / 2, my = (_cA[1] + _cB[1]) / 2, zm = ch.torsoFrontZ(mx, my);
+    let mz = (_cA[2] + _cB[2]) / 2;
+    if (isFinite(zm) && mz < zm + off) mz = zm + off;
+    mesh.position.set(mx, my, mz);
+    mesh.scale.set(len / RUN, s, s);                      // a narrower chest shortens the run, the V still meets
+  }
+  function chestRigOf(ch, parent) {
+    return ch && parent && parent === ch.body && ch.torsoShape && typeof ch.torsoFrontZ === "function" ? ch : null;
+  }
+  function placePart(mesh, p, lm, side, chest) {
+    if (chest && !p.at) { placeOnChest(mesh, p, chest); return null; }
     if (p.at === "hand" && lm && lm.ringHand && lm.ringFingers) {
       const f = lm.ringFingers[p.x > 0.12 ? 3 : 2];
       const k = (p.s == null ? 1 : p.s) * lm.ringK;
@@ -675,15 +732,15 @@
   // mount one slot's parts onto an anchor; pushes the pooled meshes into `out`.
   // `lm` resolves a part's `at:` landmark — its y is then an OFFSET from that
   // point on THIS body, instead of an absolute authored for the adult male.
-  function mountParts(parts, parent, out, lm) {
+  function mountParts(parts, parent, out, lm, rig) {
     if (!parts || !parent || !parent.add) return;   // harness rigs have empty parts — skip slot
-    const side = wristSide(parent);
+    const side = wristSide(parent), chest = chestRigOf(rig, parent);
     for (let i = 0; i < parts.length; i++) {
       const p = parts[i];
       if (p.kind === "watch") { const w = CBZ.wristwatch && CBZ.wristwatch.attach(parent, p.look); if (w) out.push(w); continue; }
       const mesh = acquire(p.kind);
       mesh.material = p.mat;
-      (placePart(mesh, p, lm, side) || parent).add(mesh);
+      (placePart(mesh, p, lm, side, chest) || parent).add(mesh);
       out.push(mesh);
     }
   }
@@ -721,7 +778,7 @@
     if (!ch) return null;
     const laLow = ch.low && ch.low.la || (ch.parts && ch.parts.la && ch.parts.la.userData.low) || (ch.parts && ch.parts.la);
     const raLow = ch.low && ch.low.ra || (ch.parts && ch.parts.ra && ch.parts.ra.userData.low) || (ch.parts && ch.parts.ra);
-    return { body: ch.body, neck: ch.neck, la: laLow, ra: raLow };
+    return { body: ch.body, neck: ch.neck, la: laLow, ra: raLow, rig: ch };
   }
   function dress(ped, want) {
     const an = anchorsOf(ped);
@@ -731,7 +788,7 @@
     for (let i = 0; i < SLOT_KEYS.length; i++) {
       const key = SLOT_KEYS[i];
       const parts = want[key]; if (!parts) continue;
-      mountParts(parts, an[SLOTS[key]], meshes, lm);
+      mountParts(parts, an[SLOTS[key]], meshes, lm, an.rig);
     }
     if (!meshes.length) return;
     ped._bling = {
@@ -925,13 +982,13 @@
     // anchorsOf() exactly so all three paths agree.
     const laA = (ch.low && ch.low.la) || (ch.parts && ch.parts.la && ch.parts.la.userData.low) || (ch.parts && ch.parts.la);
     const raA = (ch.low && ch.low.ra) || (ch.parts && ch.parts.ra && ch.parts.ra.userData.low) || (ch.parts && ch.parts.ra);
-    const an = { body: ch.body, neck: ch.neck, la: laA, ra: raA };
+    const an = { body: ch.body, neck: ch.neck, la: laA, ra: raA, rig: ch };
     const meshes = [];
     const lm = armLandmarks(ch);
     for (let i = 0; i < SLOT_KEYS.length; i++) {
       const key = SLOT_KEYS[i];
       const parts = res.want[key]; if (!parts) continue;
-      mountParts(parts, an[SLOTS[key]], meshes, lm);
+      mountParts(parts, an[SLOTS[key]], meshes, lm, an.rig);
     }
     if (meshes.length) _pMeshes = meshes;
   }
@@ -1011,10 +1068,11 @@
   // offscreen rig). FRESH meshes on purpose: the pool belongs to the dressed
   // roster, and a caller that removes its meshes without releasing them would
   // drain it. Same shared geometry + materials, so the read is identical.
-  CBZ.cityBlingBuild = function (parts, parent, out, lm) {
+  CBZ.cityBlingBuild = function (parts, parent, out, lm, rig) {
     if (!parts || !parent || !parent.add) return out || null;
     out = out || [];
     const side = wristSide(parent);   // portrait wrists take the same dorsal roll
+    const chest = chestRigOf(rig, parent);   // …and the portrait's chain lies on its chest
     for (let i = 0; i < parts.length; i++) {
       const p = parts[i];
       if (p.kind === "watch") { const w = CBZ.wristwatch && CBZ.wristwatch.attach(parent, p.look); if (w) out.push(w); continue; }
@@ -1022,7 +1080,7 @@
       if (!geo || !p.mat) continue;
       const m = new THREE.Mesh(geo, p.mat);
       m.castShadow = false; m.receiveShadow = false;
-      (placePart(m, p, lm, side) || parent).add(m);
+      (placePart(m, p, lm, side, chest) || parent).add(m);
       out.push(m);
     }
     return out;

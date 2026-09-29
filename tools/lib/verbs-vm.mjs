@@ -106,6 +106,7 @@ export function loadVerbsVM(opts = {}) {
   // the one body-state truth (down / ko / tased), when a check asks for it
   if (opts.vitals && has("src/systems/vitals.js")) run("src/systems/vitals.js");
   if (has("src/entities/handcuffs.js")) run("src/entities/handcuffs.js");
+  if (has("src/entities/dutykit.js")) run("src/entities/dutykit.js");
   run("src/systems/verbs.js");
   if (has("src/systems/arrest.js")) run("src/systems/arrest.js");
   run("src/entities/verbposes.js");

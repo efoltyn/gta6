@@ -73,21 +73,22 @@
   }
 
   function buildRig() {
-    // PARAMEDIC BLUES. The palette is outfits.js's own `ems` record ("Paramedic
-    // Blues", worn by EMS crews) rather than a fourth opinion about what a
-    // medic looks like — navy shirt and trousers, hi-vis collar — and the
-    // `stripes` slot (entities/character.js mounts three torso bands) carries
-    // the reflective chest stripe clothes.js's PAINT.ems paints. That is the
-    // owner's "stripe-shirt guys", off the two records that already described
-    // them. Degrade-safe: no outfits.js and the literals below stand in.
+    // PARAMEDIC BLUES: the medic WEARS outfits.js's `ems` record, painted by
+    // clothes.js PAINT.ems (the duty jacket with its reflective bands, the
+    // Star of Life on the sleeve) — the same garment an EMS crew in the
+    // crowd wears. It used to be a flat navy rig with the constructor's three
+    // jail-stripe hoops standing off the chest in hi-vis: a stuck-on stand-in
+    // for the tape the painter already draws. Degrade-safe: no outfits.js and
+    // the flat literals below stand in (without hoops).
     const cat = CBZ.cityOutfitCatalog ? CBZ.cityOutfitCatalog() : null;
-    const ems = (cat && cat.ems && cat.ems.colors) || null;
+    const rec = (cat && cat.ems) || null, ems = rec && rec.colors;
     const navy = ems ? ems.torso : 0x24304a;
-    const hiviz = ems ? ems.collar : 0xc6d435;
-    return CBZ.makeCharacter({
-      legs: ems ? ems.legs : 0x24304a, torso: navy, collar: hiviz, arms: navy,
-      skin: 0xe2bd97, hair: 0x2a2018, shoes: ems ? ems.shoes : 0x101216, stripes: hiviz,
+    const ch = CBZ.makeCharacter({
+      legs: ems ? ems.legs : 0x24304a, torso: navy, collar: navy, arms: navy,
+      skin: 0xe2bd97, hair: 0x2a2018, shoes: ems ? ems.shoes : 0x101216,
     });
+    if (rec && CBZ.cityRecolorRig) CBZ.cityRecolorRig(ch, ems, rec);
+    return ch;
   }
 
   function makeRecord(ch, sx, sz) {

@@ -10,7 +10,7 @@ export function loadRig(extra) {
   const ctx = vm.createContext({ console, Math, performance });
   ctx.window = ctx; ctx.self = ctx;
   ctx.CBZ = { CONFIG: {}, onAlways() {}, onUpdate() {}, on() {} };
-  const files = ["src/vendor/three.r128.min.js", "src/world/materials.js", "src/systems/fphands.js", "src/entities/character.js"].concat(extra || []);
+  const files = ["src/vendor/three.r128.min.js", "src/world/materials.js", "src/systems/fphands.js", "src/entities/character.js", "src/entities/dutykit.js"].concat(extra || []);
   for (const f of files) vm.runInContext(read(f), ctx, { filename: f });
   return ctx;
 }

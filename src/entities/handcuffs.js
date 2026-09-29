@@ -30,14 +30,11 @@
      CBZ.handcuffs.swivel(cuff, out)   -> the swivel eye, world space
      CBZ.handcuffs.seatChain(pair, a, b, down, k)  re-seat the links between
           two points in the chain's parent frame (sagging when there is slack)
-     CBZ.handcuffs.buildPouch()        -> the closed cuff case of a duty belt
-     CBZ.handcuffs.beltCuffs(rig)      -> puts that case on a rig's belt
      CBZ.handcuffs.material()          -> the one shared nickel material
 
-   Geometry is shared (one ring set per millimetre of radius, one link, one
-   case), materials are shared, nothing casts a shadow, no lights. The
-   duty-belt case goes on every city cop and prison officer (not the
-   warden) by a slow roster sweep below, so no spawner has to know.
+   Geometry is shared (one ring set per millimetre of radius, one link),
+   materials are shared, nothing casts a shadow, no lights. (The closed cuff
+   case on a duty belt is entities/dutykit.js's.)
 ============================================================ */
 (function () {
   "use strict";
@@ -70,7 +67,7 @@
   const PI = Math.PI;
 
   // ---- materials -------------------------------------------------------------
-  let _nickel = null, _case = null;
+  let _nickel = null;
   function material() {
     if (_nickel) return _nickel;
     // Phong, the way the wristwatch shades its steel: a bright nickel that
@@ -79,11 +76,6 @@
     _nickel._shared = true;
     _nickel.name = "handcuff-nickel";
     return _nickel;
-  }
-  function caseMaterial() {
-    if (_case) return _case;
-    _case = CBZ.cmat ? CBZ.cmat(0x131518) : new THREE.MeshLambertMaterial({ color: 0x131518 });
-    return _case;
   }
 
   // ---- geometry (shared) -----------------------------------------------------
@@ -299,85 +291,10 @@
     return cuff.localToWorld(out);
   }
 
-  /* ---- THE DUTY-BELT CASE: a closed black case, flap and snap, real size
-     (9.5 x 7.5 x 4 cm), hanging off the belt. */
-  let _pouchGeo = null;
-  function pouchGeos() {
-    if (_pouchGeo) return _pouchGeo;
-    const bodyG = new THREE.BoxGeometry(0.074, 0.088, 0.036);
-    bodyG.translate(0, -0.044, 0.018);
-    const flapG = new THREE.BoxGeometry(0.078, 0.030, 0.040);
-    flapG.translate(0, -0.012, 0.020);
-    const loopG = new THREE.BoxGeometry(0.050, 0.046, 0.005);           // the belt loop behind it
-    loopG.translate(0, -0.006, -0.0015);
-    const snapG = new THREE.CylinderGeometry(0.0055, 0.0055, 0.003, 10);
-    snapG.rotateX(PI / 2); snapG.translate(0, -0.022, 0.0415);
-    _pouchGeo = { body: mergeInto([bodyG, flapG, loopG]), snap: shared(snapG) };
-    return _pouchGeo;
-  }
-  function buildPouch() {
-    const g = pouchGeos();
-    const grp = new THREE.Group();
-    grp.name = "handcuff-case";
-    const b = new THREE.Mesh(g.body, caseMaterial());
-    b.name = "handcuff-case-body"; b.castShadow = false; b.receiveShadow = false;
-    const s = new THREE.Mesh(g.snap, material());
-    s.name = "handcuff-case-snap"; s.castShadow = false; s.receiveShadow = false;
-    grp.add(b); grp.add(s);
-    return grp;
-  }
-  function scaleOf(ch) {
-    const gg = ch && ch.group, hs = gg && gg.userData && gg.userData.humanScale;
-    return hs > 0 ? hs : ((ch && ch.model && ch.model.scale && ch.model.scale.x) || 1);
-  }
-  /* On the belt, at the back of the left hip (the gun is on the right), on
-     the torso frame so it follows the body. Rig units: the case is built in
-     metres and scaled 1/humanScale. Once per rig; returns the case. */
-  function beltCuffs(ch) {
-    if (!ch || !ch.body || !ch.profile) return null;
-    if (ch._beltCuffs) return ch._beltCuffs;
-    const P = ch.profile, s = scaleOf(ch);
-    const hipY = ch.hipY || 0.95, base = hipY - 0.005;
-    const y = base + 0.07;                                   // the belt line (verbs.js "belt" point)
-    const x = Math.max(0.12, (P.pelvisW || 0.84) * 0.5 * 0.42);
-    let back = Math.max(P.pelvisD || 0.48, P.waistD || 0) / 2;
-    const TS = ch.torsoShape;
-    if (TS && typeof ch.torsoBackZ === "function" && y >= TS.base && y <= TS.yN) {
-      const bz = -ch.torsoBackZ(x, y);
-      if (bz > 0 && isFinite(bz)) back = bz;
-    }
-    const p = buildPouch();
-    p.scale.setScalar(1 / s);
-    // the case's back (its local -z) on the belt, the case facing out behind him
-    p.position.set(x, y, -back - 0.012);
-    p.rotation.y = PI - 0.35;                              // round the hip a little
-    ch.body.add(p);
-    ch._beltCuffs = p;
-    return p;
-  }
-
-  /* ---- THE ROSTER SWEEP: every city cop and prison officer (not the warden:
-     he wears a suit) carries the case. Slow, cheap, no spawner edits. */
-  let sweepT = 0;
-  function sweep(dt) {
-    sweepT -= dt || 0;
-    if (sweepT > 0) return;
-    sweepT = 0.6;
-    const lists = [CBZ.cityCops, CBZ.guards];
-    for (let li = 0; li < lists.length; li++) {
-      const L = lists[li];
-      if (!L || !L.length) continue;
-      for (let i = 0; i < L.length; i++) {
-        const c = L[i], ch = c && (c.char || c.ch);
-        if (!ch || !ch.body) continue;
-        if (c.kind === "warden" || c.warden) continue;
-        const pc = ch._beltCuffs || beltCuffs(ch);
-        // a stripped uniform takes the belt with it
-        if (pc) pc.visible = !c._clothesTaken;
-      }
-    }
-  }
-  if (typeof CBZ.onUpdate === "function") CBZ.onUpdate(92, sweep);
+  /* THE CUFF CASE on an officer's belt is not built here any more: it was a
+     second, separate system (its own roster sweep hanging a case on every cop
+     and CO beside the painted belt). It is part of entities/dutykit.js's one
+     merged duty kit now, which goes on and comes off with the uniform. */
 
   CBZ.handcuffs = {
     version: 1,
@@ -391,8 +308,5 @@
     setOpen: setOpen,
     seatChain: seatChain,
     swivel: swivel,
-    buildPouch: buildPouch,
-    beltCuffs: beltCuffs,
-    sweep: sweep,
   };
 })();
