@@ -1048,23 +1048,33 @@
     say("WARDEN", "That case maps the studios. Bring me the names.", 5.0, "phone");
   }
 
+  // THE RELAY. "Copy" is pinned on the case; E on it (or a tap) plugs in, and
+  // the copy runs while you stay at the relay. Walk off and it stops. It used
+  // to be a polled held E, so the same press also fired whatever else E meant.
+  CBZ.citySpyCopy = function () {
+    if (R.kind !== "spy_intel" || !R.intelPoint) return false;
+    if (CBZ.arrest && CBZ.arrest.playerCuffed && CBZ.arrest.playerCuffed()) return false;   // no hands for the relay
+    R.copying = true;
+    return true;
+  };
   function tickSpyIntel(dt) {
     dt = dt || 0;
     if (!R.intelPoint || distTo(R.intelPoint.x, R.intelPoint.z) > 3.2) {
-      R.transitionT = 0;
+      R.transitionT = 0; R.copying = false;
       return;
     }
-    const keys = CBZ.keys || {};
-    // the copy needs hands on the relay: cuffed, it does not start
-    if (!(keys.e || keys.E) || (CBZ.arrest && CBZ.arrest.playerCuffed && CBZ.arrest.playerCuffed())) {
-      R.transitionT = Math.max(0, R.transitionT - dt * 2);
+    if (!R.copying) {
+      if (CBZ.prisonPrompt) {
+        const p = R.intelPoint;
+        CBZ.prisonPrompt("spy-relay", "@citySpyCopy", "Copy",
+          { at: { x: p.x, y: (p.y || 0) + 1.2, z: p.z }, key: "E", bind: true, d2: Math.pow(distTo(p.x, p.z), 2), city: true });
+      }
       return;
     }
-    // This is a physical data copy, not a disguised tap prompt. The player has
-    // to stay at the relay and hold the interaction long enough to finish it.
+    // This is a physical data copy: the player stays at the relay until it is done.
     R.transitionT += dt;
     if (R.transitionT < 1.15) return;
-    keys.e = false; keys.E = false;
+    R.copying = false;
     const c = state();
     c.flags.spyIntel = true;
     commit();

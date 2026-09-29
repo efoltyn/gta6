@@ -189,10 +189,22 @@
     if (promptLayer && !pills.size) promptLayer.classList.remove("on");
   }
 
+  // ONE PILL: the thing you are LOOKING at, then the nearest. A pin dead ahead
+  // counts at 0.6x its distance, one beside you at 1.6x, so a ladder you face
+  // beats a lift button at your shoulder (owner: priority is what you look at).
+  function lookWeight(p) {
+    const P = CBZ.player, cam = CBZ.cam;
+    if (!p.at || !P || !P.pos || !cam || !CBZ.game || CBZ.game.mode !== "city") return 1;
+    const dx = p.at.x - P.pos.x, dz = p.at.z - P.pos.z, d = Math.hypot(dx, dz);
+    if (d < 0.4) return 0.6;
+    const face = Math.max(0, (dx / d) * -Math.sin(cam.yaw) + (dz / d) * -Math.cos(cam.yaw));
+    return 1.6 - face;
+  }
   function arbitrate() {
-    let best = null;
+    let best = null, bestW = Infinity;
     pills.forEach(function (p) {
-      if (!best || p.d2 < best.d2 - 1e-6 || (p.d2 <= best.d2 + 1e-6 && p.seq > best.seq)) best = p;
+      const w = p.d2 * lookWeight(p);
+      if (!best || w < bestW - 1e-6 || (w <= bestW + 1e-6 && p.seq > best.seq)) { best = p; bestW = w; }
     });
     pills.forEach(function (p) {
       const show = p === best || !!(best && best.group && p.group === best.group);
@@ -207,16 +219,30 @@
   // else also fires on the same press.
   addEventListener("keydown", function (e) {
     if (!pills.size || e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (CBZ.verbWheel && CBZ.verbWheel.isOpen()) return;   // the city verb wheel is modal
     const gm = CBZ.game;
     if (!gm || gm.state !== "playing") return;
     const k = String(e.key || "").toLowerCase();
     let hit = null;
     pills.forEach(function (p) { if (!hit && p.shown && p.bind && p.bind === k && frameNo - p.frame <= 2) hit = p; });
     if (!hit) return;
+    // CITY: the card's target and this pin may both offer the key. The one the
+    // player is LOOKING at owns it (city/interactions.js cityUseOwner); when
+    // that is the card, the press is left for the card's own listener.
+    if (gm.mode === "city" && CBZ.cityUseOwner && CBZ.cityUseOwner(k) === "card") return;
     e.preventDefault();
     e.stopImmediatePropagation();
     fireAct(hit.act);
   }, true);
+
+  // The shown BOUND pin for a key, if any: { at, d2, verb } (city/interactions.js
+  // weighs it against the card's target to decide who owns the press).
+  CBZ.prisonPromptShownFor = function (key) {
+    key = String(key || "e").toLowerCase();
+    let hit = null;
+    pills.forEach(function (p) { if (!hit && p.shown && p.bind === key && frameNo - p.frame <= 2) hit = p; });
+    return hit ? { at: hit.at, d2: hit.d2 } : null;
+  };
 
   /* Pin the shown prompt over its thing: project the world point through the
      LIVE camera (camera.js updates it at always-order 50; this runs at 96).

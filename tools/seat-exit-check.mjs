@@ -9,8 +9,9 @@
    every kind of seat, asserts:
      1. CBZ.seatState() reports the right kind, KEY and VERB
      2. the capture-phase keydown for that key fires the owning system's exit
-        and CONSUMES the press (a bench's E must never reach the ride router)
-     3. the wrong key does nothing (E in a cockpit is the rudder)
+        and CONSUMES the press (a bench's F must never reach the ride router)
+     3. the wrong key does nothing: E is never an exit (2026-09-29 key map:
+        F gets you in and out of anything, E is the verb on what you face)
      4. the per-frame tick pins "[KEY] verb" through CBZ.prisonPrompt on a
         desktop, and shows ONE #tExit wearing the verb on touch, whose tap
         fires the same exit
@@ -90,25 +91,25 @@ const CASES = [
     set(C, hit) { C.player._aircraft = { pos: { x: 5, y: 0, z: 5 }, onGround: true }; C.player.driving = true; C.cityPlayerAircraftExit = () => hit("aircraft"); } },
   { name: "aircraft in the air", kind: "aircraft", key: "f", verb: "Jump", wrong: "e",
     set(C, hit) { C.player._aircraft = { pos: { x: 5, y: 400, z: 5 }, onGround: false, vy: -2, speed: 80 }; C.player.driving = true; C.cityPlayerAircraftExit = () => hit("aircraft"); } },
-  { name: "tank", kind: "armor", key: "e", verb: "Climb out", wrong: "f",
+  { name: "tank", kind: "armor", key: "f", verb: "Climb out", wrong: "e",
     set(C, hit) { C.player.driving = true; C.cityArmorActive = () => true; C.cityArmorRec = () => ({ kind: "tank", pos: { x: 1, y: 0, z: 1 } }); C.cityExitArmor = () => hit("armor"); } },
-  { name: "armored truck", kind: "armor", key: "e", verb: "Get out", wrong: "f",
+  { name: "armored truck", kind: "armor", key: "f", verb: "Get out", wrong: "e",
     set(C, hit) { C.player.driving = true; C.cityArmorActive = () => true; C.cityArmorRec = () => ({ kind: "truck", pos: { x: 1, y: 0, z: 1 } }); C.cityExitArmor = () => hit("armor"); } },
-  { name: "car, driver, parked", kind: "vehicle", key: "e", verb: "Get out", wrong: "f",
+  { name: "car, driver, parked", kind: "vehicle", key: "f", verb: "Get out", wrong: "e",
     set(C, hit) { C.player.driving = true; C.player._vehicle = { pos: { x: 2, y: 0, z: 2 }, v: 0 }; C.cityVehicleGetOutVerb = () => "Get out"; C.cityVehicleGetOut = () => { hit("vehicle"); return true; }; } },
-  { name: "car, passenger, moving", kind: "vehicle", key: "e", verb: "Jump", wrong: "f",
+  { name: "car, passenger, moving", kind: "vehicle", key: "f", verb: "Jump", wrong: "e",
     set(C, hit) { C.player.driving = true; C.player._vehicle = { pos: { x: 2, y: 0, z: 2 }, v: 14 }; C.cityVehicleGetOutVerb = () => "Jump"; C.cityVehicleGetOut = () => { hit("vehicle"); return true; }; } },
-  { name: "motorcade state car (chauffeured shotgun)", kind: "vehicle", key: "e", verb: "Get out", wrong: "f",
+  { name: "motorcade state car (chauffeured shotgun)", kind: "vehicle", key: "f", verb: "Get out", wrong: "e",
     set(C, hit) { C.player.driving = true; C.player._vehicle = { pos: { x: 2, y: 0, z: 2 }, v: 0, npcDriver: {} }; C.cityVehicleGetOutVerb = () => "Get out"; C.cityVehicleGetOut = () => { hit("vehicle"); return true; }; } },
-  { name: "boat at the helm", kind: "vehicle", key: "e", verb: "Get up", wrong: "f",
+  { name: "boat at the helm", kind: "vehicle", key: "f", verb: "Get up", wrong: "e",
     set(C, hit) { C.player.driving = true; C.player._vehicle = { pos: { x: 2, y: 0, z: 2 }, v: 0, _hullSpec: {} }; C.cityVehicleGetOutVerb = () => "Get up"; C.cityVehicleGetOut = () => { hit("vehicle"); return true; }; } },
-  { name: "car without passengerseat.js (fallback verb + exit)", kind: "vehicle", key: "e", verb: "Get out", wrong: "f",
+  { name: "car without passengerseat.js (fallback verb + exit)", kind: "vehicle", key: "f", verb: "Get out", wrong: "e",
     set(C, hit) { C.player.driving = true; C.player._vehicle = { pos: { x: 2, y: 0, z: 2 }, v: 0 }; C.cityExitVehicle = () => hit("vehicle"); } },
-  { name: "horse", kind: "mount", key: "e", verb: "Get off", wrong: "f",
+  { name: "horse", kind: "mount", key: "f", verb: "Get off", wrong: "e",
     set(C, hit) { C.player._mountedAnimal = { pos: { x: 3, y: 0, z: 3 } }; C.cityDismount = () => hit("mount"); } },
-  { name: "bench (city seat / exec chair / prop seat)", kind: "seat", key: "e", verb: "Stand up", wrong: "f",
+  { name: "bench (city seat / exec chair / prop seat)", kind: "seat", key: "f", verb: "Stand up", wrong: "e",
     set(C, hit) { C.player._propSeat = { x: 4, y: 0.45, z: 4 }; C.propArcActive = () => false; C.propStand = (a) => { if (a === C.player) hit("seat"); }; } },
-  { name: "bunk / bed", kind: "bed", key: "e", verb: "Get up", wrong: "f",
+  { name: "bunk / bed", kind: "bed", key: "f", verb: "Get up", wrong: "e",
     set(C, hit) { C.player._propBed = { x: 4, y: 0.6, z: 4 }; C.propArcActive = () => false; C.propWake = (a) => { if (a === C.player) hit("bed"); }; C.propStand = () => hit("WRONG"); } },
 ];
 
@@ -168,8 +169,8 @@ for (const touch of [false, true]) {
   W.CBZ.game.state = "paused";
   W.tick();
   ok(W.document.getElementById("tExit") == null || W.document.getElementById("tExit").style.display === "none", "paused: #tExit hidden");
-  const r = W.press("e");
-  ok(hits.length === 0 && !r.stopped, "paused: E does nothing");
+  const r = W.press("f");
+  ok(hits.length === 0 && !r.stopped, "paused: F does nothing");
   W.CBZ.game.state = "playing";
   W.CBZ.game.mode = "sharksim";
   delete W.CBZ.player._propSeat;

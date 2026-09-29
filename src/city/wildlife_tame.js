@@ -4703,7 +4703,7 @@
     });
     // DISMOUNT (only while riding)
     I.register("animal", {
-      id: "animal-dismount", slot: "e", prio: 40,
+      id: "animal-dismount", ride: true, slot: "e", prio: 40,
       canShow: function (a) { return !!a.ridden; },
       label: "Dismount",
       onSelect: function () { dismount(); },
@@ -4728,7 +4728,7 @@
     });
     // MOUNT
     I.register("animal", {
-      id: "animal-mount", slot: "i", prio: 22,
+      id: "animal-mount", ride: true, slot: "i", prio: 22,
       canShow: function (a) { return canRide(a) && !ride.mount; },
       label: "Ride",
       onSelect: function (a) { mount(a); },
@@ -4737,7 +4737,7 @@
     // touch helpers already take — succeed and it's tamed under you, fail and
     // it bucks you off (a dangerous one turns on you).
     I.register("animal", {
-      id: "animal-break", slot: "i", prio: 21,
+      id: "animal-break", ride: true, slot: "i", prio: 21,
       canShow: function (a) {
         return ALLCTL() && !ride.mount && a && !a.tamed && !a.dead && !a.species.aquatic &&
           !!rideDef(a.species) && a.grow == null;

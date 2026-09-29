@@ -274,7 +274,7 @@ function stubBuilding(env, h, extra) {
   P.pos.set(104.2, Y + 0.02, backZ - 1.0);
   env.frame();
   const rows = env.prompts.filter((p) => /^lift-go-/.test(p.id)).map((p) => p.verb + ":" + p.opts.key);
-  ok(rows.length === 2 && rows[0] === "Ground:e" && rows.includes("Roof:q"), "the car's panel offers every other stop, Ground on [E] (" + rows.join(", ") + ")");
+  ok(rows.length === 2 && rows[0] === "Ground:e" && rows.includes("Roof:2"), "the car's panel offers every other stop, Ground on [E] (" + rows.join(", ") + ")");
   CBZ.cam.yaw = 0.3;
   CBZ.cityLiftGo0();
   for (let i = 0; i < 700 && !(el.m.st === "open" && el.m.at === 0); i++) env.frame();
@@ -340,10 +340,10 @@ console.log("3. systems/interactions.js: a bound pill owns its key");
   CBZ.cityLiftGo0 = () => { called += 10; };
   CBZ.cityLiftGo1 = () => { called += 100; };
   CBZ.prisonPrompt("lift-go-0", "@cityLiftGo0", "Ground", { at: { x: 0, y: 1, z: 0 }, key: "e", bind: true, group: "lift-car", row: 0, d2: 0.01, city: true });
-  CBZ.prisonPrompt("lift-go-1", "@cityLiftGo1", "Roof", { at: { x: 0, y: 1, z: 0 }, key: "q", bind: true, group: "lift-car", row: 1, d2: 0.01, city: true });
+  CBZ.prisonPrompt("lift-go-1", "@cityLiftGo1", "Roof", { at: { x: 0, y: 1, z: 0 }, key: "2", bind: true, group: "lift-car", row: 1, d2: 0.01, city: true });
   frame();
-  press("q");
-  ok(called === 101, "a panel group shows both buttons and [Q] presses the second one");
+  press("2");
+  ok(called === 101, "a panel group shows both buttons and [2] presses the second one");
 }
 
 console.log("\n" + pass + " passed, " + fail + " failed");

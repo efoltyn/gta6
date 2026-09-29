@@ -5219,6 +5219,9 @@
     // just from scrolling past them; they answer the number keys and taps.
     if (CBZ.game.mode === "city") {
       if (CBZ.game.state !== "playing" || CBZ.cityMenuOpen || (CBZ.fullMap && CBZ.fullMap.active)) return;
+      if (CBZ.verbWheel && CBZ.verbWheel.isOpen()) return;          // scrolling the verb wheel, not the guns
+      // guns put away for a cop (police.js stowGuns): a scroll brings them back
+      if ((CBZ.game._copStow || CBZ.game.cityStowedWeapon) && CBZ.cityRedrawWeapon) { e.preventDefault(); CBZ.cityRedrawWeapon(); return; }
       const bar = cityHotbar();
       const sel = [-1];                          // -1 = nothing in your hands
       let cur = -1;
@@ -5255,7 +5258,9 @@
     // frames, which produced "leftover" weapon switches after you stopped
     // mashing. Instead we read the live key state once per frame below
     // (rising-edge + cooldown), so buffered duplicates collapse to nothing.
-    else if (k === "f" && (fps.active || shoulderActive()) && !CBZ.islandModeOn(CBZ.game.mode)) fireControl(true);
+    // F fires too, except in the city, where F is get in / get out
+    // (city/interactions.js key map) and a trigger on it would shoot the car.
+    else if (k === "f" && (fps.active || shoulderActive()) && !CBZ.islandModeOn(CBZ.game.mode) && CBZ.game.mode !== "city") fireControl(true);
     // H: homing on/off (owner toggle). Missile-class contexts only; state
     // cue is the rack sfx pitch + the lock squares standing down — no HUD.
     else if (k === "h" && CBZ.lockonHomingSet &&
@@ -5265,7 +5270,7 @@
     }
   });
   addEventListener("keyup", (e) => {
-    if (e.key.toLowerCase() === "f") fireControl(false);
+    if (e.key.toLowerCase() === "f" && CBZ.game.mode !== "city") fireControl(false);
   });
 
   // ---- per-run reset ----
@@ -5423,7 +5428,8 @@
     // press (key was up last frame, down now) and only when off cooldown,
     // so a backlog of buffered keydowns can never replay as extra switches.
     const qNow = !!(CBZ.keys && CBZ.keys["q"]);
-    if (qNow && !qWasDown && switchCD <= 0 && aiming && armed()) switchWeapon(1);
+    // (not in the city: Q there is the verb wheel, and the mouse wheel swaps)
+    if (qNow && !qWasDown && switchCD <= 0 && aiming && armed() && CBZ.game.mode !== "city") switchWeapon(1);
     qWasDown = qNow;
 
     for (let i = 0; i < tracers.length; i++) {

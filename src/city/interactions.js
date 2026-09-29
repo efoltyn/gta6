@@ -27,8 +27,18 @@
      • SLOT EXCLUSIVITY — per key slot the highest-prio passing option
        wins. That's how branch menus (your soldier vs a stranger) stay
        mutually exclusive WITHOUT every gate re-checking its siblings.
-     • TAP vs HOLD — one key can carry a tap verb AND a hold verb
-       (tap E = get in the car, hold E = drag the driver out).
+     • THE KEY MAP (owner 2026-09-29: "E does too many things... it's very
+       stupid"). One key, one meaning, like GTA and RDR:
+         E       the ONE obvious verb on the thing you are LOOKING at
+         hold E  that thing's heavier verb, only where one is authored
+                 (option `hold:true`, e.g. feed-and-tame a horse)
+         F       get in / get out. Every option flagged `ride:true` (a car,
+                 a horse, a plane, the state car) and the ride router; the
+                 way out of any seat is systems/seat_exit.js's, also on F
+         Q       the wheel: EVERYTHING you can do to this thing, laid round
+                 it (city/verbwheel.js). Orders about a third person start
+                 there (an option with `pick:"person"`).
+       Touch collapses all four into "tap the thing" (systems/touch.js).
      • TARGETING — facing-weighted proximity scoring (the camera ray in
        this engine IS the yaw cone) with HYSTERESIS: the current target
        keeps the panel unless a rival scores meaningfully better, so the
@@ -74,67 +84,25 @@
   const REACH_V2 = CBZ.CONFIG.INTERACT_REACH_V2 !== false;
   const REACH = REACH_V2 ? 5.2 : 3.8;   // baseline interaction reach, shared by every source
   const HOLD_T = 0.38;        // seconds a key is down before the HOLD verb fires
-  const HYSTERESIS = 0.75;    // a rival candidate must beat the current one by this
+  const HYSTERESIS = 0.9;     // a rival candidate must beat the current one by this (~5 degrees of look)
   // How much of the facing bonus a STATIONARY candidate (a zone) is granted
   // without having to be looked at. See scoreOf. 0 = the old hard cone.
   const ZONE_CONE_FLOOR = REACH_V2 ? 0.5 : 0;
-  const KEYS = ["e", "i", "j", "k", "l"];   // E = primary, IJKL = the established slots
 
-  // OWNER DIRECTION: a RIDE never gets a popup. "AIRLINER — HIJACKABLE / Board
-  // the cabin? / YES / NO" is noise — the player already knows pressing E (or
-  // tapping it) takes it. These single-action vehicle/aircraft kinds are boarded
-  // by cityTryNearestRide (the E router) and by touch tap, both independent of
-  // this card, so we simply never SHOW it for them. Peds/vendors/animals keep
-  // their genuine choice menus. Flip CITY_RIDE_SILENT=false to restore the card.
-  CBZ.CONFIG = CBZ.CONFIG || {};
-  if (CBZ.CONFIG.CITY_RIDE_SILENT == null) CBZ.CONFIG.CITY_RIDE_SILENT = true;
-  // SEATS obey the same single-verb, no-popup grammar (owner: "press chairs to
-  // sit, like you press airplanes to steal them — you don't need a popup for a
-  // chair"). Unlike a ride a seat has no external E-router (cityTryNearestRide)
-  // and no tappable mesh, so the card is suppressed on DESKTOP only — press E
-  // to sit — while TOUCH keeps the tappable pill as the sit control (HUD
-  // doctrine: interaction popups are pills). Flip CITY_SEAT_SILENT=false to
-  // restore the card.
-  if (CBZ.CONFIG.CITY_SEAT_SILENT == null) CBZ.CONFIG.CITY_SEAT_SILENT = true;
+  // RIDES AND SEATS SHOW NO CARD. A car, a plane, a tank: the verb is F and
+  // it is pinned on the door (city/boarding.js), so a card would only say it a
+  // second time. A chair: E sits, and on touch the chair itself is the button.
+  // The candidate stays LIVE either way, so E / F / Q still reach it.
   const SILENT_RIDE = { vehicle: 1, "vehicle:inside": 1, milvehicle: 1 };
-  // THE ONE RIDE EXCEPTION (owner spec): a parked CIVIL AIRLINER genuinely
-  // offers two verbs — walk-in cabin boarding (island_airport.js
-  // "airliner_board") and the hijack/fly-it theft (militaryvehicles.js
-  // "milveh-take"), both riding the same "milvehicle" candidate. That single
-  // case keeps a card, but it is a VERB card: exactly two rows, BOARD and
-  // HIJACK — never YES/NO, never a "Board the cabin?" question line, never a
-  // "— HIJACKABLE" name suffix. Every single-verb ride (cars, helis, fighters,
-  // private jets) stays fully silent: press E / tap it and you take it.
-  // Flip CITY_AIRLINER_DUAL_CARD=false to fold the airliner back into the
-  // silent set (E hijacks via the router, walk-in boarding unoffered — the
-  // exact pre-card behaviour).
-  if (CBZ.CONFIG.CITY_AIRLINER_DUAL_CARD == null) CBZ.CONFIG.CITY_AIRLINER_DUAL_CARD = true;
 
   /* ---- THE PILOT OWNS THE KEYBOARD (CBZ.CONFIG.FLIGHT_KEYS_OWNED) ---------
      OWNER, verbatim: "e doesnt work to turn planes because it jumps out."
-
-     He is describing a collision this file caused. FLIGHT_CONTROLS_V2 put the
-     RUDDER on Q/E (playeraircraft.js flyWingV2 — `if (k["e"]) rudder -= 1`) and
-     the heli's lateral cyclic on the same pair (flyHeliV2), and
-     systems/controls.js's "Aeroplane" card prints exactly that: `Q / E —
-     Rudder`, `F — Get out`. But the keydown below routes EVERY e through
-     CBZ.cityTryNearestRide(), and that router's very first branch
-     (militaryvehicles.js) is `if (P._aircraft) { cityPlayerAircraftExit() }`.
-     So the pilot's right-rudder input was read as "leave the aeroplane", every
-     time, at any altitude.
-
-     The fix is not a special case on one key — it is a statement about who owns
-     input in this mode. At the controls of an aircraft the interact fabric
-     stands DOWN ENTIRELY: no E router, no detection pass, no card, no touch
-     verb pills. Nothing can shadow a flight control and nothing ADVERTISES a
-     key the pilot must not press. [F] remains the one exit (playeraircraft.js
-     owns it; bailout.js owns it in the air), which is what the controls card
-     has always said, and the gamepad's Y already called cityPlayerAircraftExit
-     directly rather than synthesising an e — so every route out is unchanged.
-
-     GROUND VEHICLES ARE UNTOUCHED. `ctx.driving` is true for both a car and an
-     aircraft, so the gate is the aircraft handle itself. Every seat's own exit
-     key (F here, E in a car) is systems/seat_exit.js's, not this panel's. */
+     At the controls of an aircraft Q/E are the rudder (playeraircraft.js) and
+     F is the one exit (systems/seat_exit.js). So in a cockpit the interact
+     fabric stands DOWN ENTIRELY: no detection pass, no card, no wheel, no
+     touch verbs. Nothing can shadow a flight control and nothing ADVERTISES a
+     key the pilot must not press. Ground vehicles are untouched: the gate is
+     the aircraft handle itself, not ctx.driving. */
   function pilotingAircraft() {
     if (CBZ.CONFIG.FLIGHT_KEYS_OWNED === false) return false;
     const P = CBZ.player;
@@ -197,11 +165,10 @@
     for (const k in layers) { const a = layers[k]; for (let i = 0; i < a.length; i++) if (a[i].id === id) return true; }
     return false;
   }
-  // A VERB-CARD PROVIDER generalises dualRideRows (the airliner BOARD/HIJACK
-  // card) to other systems: fn(pick, rows, ctx) may return a REPLACEMENT rows
-  // array built from the same gated pool (rows._pass) — labelled decision rows
-  // instead of the single YES. The card never prints a spoken line.
-  // First provider to return rows wins; returning null passes through.
+  // A VERB-CARD PROVIDER: fn(pick, rows, ctx) may return REPLACEMENT rows
+  // built from the same gated pool (rows._pass), e.g. city/dialogue.js's two
+  // answers. Only rows keyed "e" or "f" stay keys; any other row (a second
+  // answer) is moved into the Q wheel, first in line. First provider wins.
   function registerVerbCard(fn) { if (typeof fn === "function") verbCards.push(fn); return verbCards.length; }
 
   // ---- ctx: the ACTING player, packaged. Gates read THIS, never globals -----
@@ -346,80 +313,75 @@
     return s.trim() || String(text || "");
   }
 
-  // Resolve ONE context proposal.  OWNER DOCTRINE: a card lists ONLY doable
-  // actions — the single verb that fits right now (E = do it). Declining is
-  // walking away / not tapping; "NO" is never a rendered row. Authored
-  // registries may still contribute many verbs; priority/context chooses the
-  // one that makes sense instead of dumping a five-key action list.
-  function resolveRows(cand, ctx) {
+  // Resolve a candidate into its KEY ROWS. OWNER DOCTRINE: a card lists ONLY
+  // doable actions; declining is walking away, never a "NO" row. The whole
+  // gated pool is sorted once by authored priority and split by KEY:
+  //   E tap   the best ordinary verb      (at most one)
+  //   E hold  the best `hold:true` verb   (at most one)
+  //   F       the best `ride:true` verb   (at most one)
+  // Everything else in the pool is still reachable: it is the Q wheel's
+  // (rows._pass, in this same order). Nothing is discarded any more; the old
+  // one-row funnel threw ~40 registered person verbs away a line before the
+  // screen, which is how "talk, then hire" became the only flow there was.
+  function isRide(o) { return !!(o && o.ride); }
+  function choiceScore(o, i, gp) {
+    let s = (o.prio || 0) * 10 - i * 0.001;
+    if (o.slot === "e") s += 18;                 // authored primary remains primary
+    if (!gp && o.bad) s -= 240;                   // conversation before random assault
+    if (gp) {
+      if (o.id === "gp-rob") s += 500;           // least-destructive demand first
+      if (/execute|kill/i.test(o.id || "")) s -= 500;
+    }
+    return s;
+  }
+  function gatedPool(cand, ctx) {
     const t = cand.t, gp = !!cand.gunpoint;
     let pool = [];
-    for (const ln of cand.layers) { const a = layers[ln]; if (a) pool = pool.concat(a); }
+    // `_iOnly`: a person who is his job (the President's staff, a candidate
+    // for a post) offers only his own verbs, never the street's
+    if (!(t && t._iOnly)) for (const ln of cand.layers) { const a = layers[ln]; if (a) pool = pool.concat(a); }
     if (t && t._iopts) pool = pool.concat(t._iopts);
     if (cand.zone && cand.zone.options) pool = pool.concat(cand.zone.options);
     const pass = [];
-    for (const o of pool) if (passes(o, t, ctx, gp, cand.d, cand)) pass.push(o);
-    if (!pass.length) return null;
-    function choiceScore(o, i) {
-      let s = (o.prio || 0) * 10 - i * 0.001;
-      if (o.slot === "e") s += 18;                 // authored primary remains primary
-      if (!gp && o.bad) s -= 240;                   // conversation before random assault
-      if (gp) {
-        if (o.id === "gp-rob") s += 500;           // least-destructive demand first
-        if (/execute|kill/i.test(o.id || "")) s -= 500;
-      }
-      return s;
+    for (let i = 0; i < pool.length; i++) {
+      const o = pool[i];
+      if (passes(o, t, ctx, gp, cand.d, cand)) pass.push({ o: o, s: choiceScore(o, i, gp) });
     }
-    let chosen = pass[0], best = choiceScore(chosen, 0);
-    for (let i = 1; i < pass.length; i++) {
-      const s = choiceScore(pass[i], i);
-      if (s > best) { best = s; chosen = pass[i]; }
-    }
-    const proposal = stripTargetName(String(labelOf(chosen, t, ctx) || "Continue").replace(/[?.!]+$/, ""), t);
-    const standing = standingGates(chosen, t) ? interactionStanding(t) : null;
-    const rows = [
-      // ONLY the doable verb. No decline row: walking away (look off / don't
-      // tap) is how you decline — owner doctrine, "NO is not an option".
-      // `label` is the SHORT head of the proposal, and it is what the docked
-      // iPad button wears. It used to be the literal string "YES", which is how
-      // the owner's tablet ended up with a MOUNT THE HORSE bar next to a YES
-      // button: two halves of one sentence pretending to be a question.
-      { key: "e", hold: false, label: verbHead(proposal), bad: false, opt: chosen, decision: "yes", proposal, standing },
-    ];
-    rows._pass = pass;   // the full gated pool — the airliner verb card picks from it
-    return rows;
+    pass.sort((x, y) => y.s - x.s);
+    return pass.map((x) => x.o);
   }
-
-  // A civil airliner with a live walk-in cabin is the one ride with TWO verbs.
-  // Rebuild the card rows from the candidate's already-gated option pool:
-  //   [E] BOARD  — island_airport.js "airliner_board" (door slides, step in)
-  //   [I] HIJACK — militaryvehicles.js "milveh-take" (fly it; loud, 4★)
-  // Both rows are decision:"yes" — fire() runs each option's own onSelect, so
-  // the two existing trigger paths are reused verbatim. Returns null when the
-  // target isn't a civil airliner or the cabin verb isn't live right now
-  // (inside/pending/taken) — the ride then stays silent like every other.
-  function dualRideRows(pick, rows) {
-    if (CBZ.CONFIG.CITY_AIRLINER_DUAL_CARD === false) return null;
-    const t = pick.t, pass = rows && rows._pass;
-    if (!pass || pick.kind !== "milvehicle" || !t || !t.civilian || t.flightKind !== "airliner") return null;
-    let board = null, take = null;
+  function proposalOf(o, t, ctx) {
+    return stripTargetName(String(labelOf(o, t, ctx) || "Continue").replace(/[?.!]+$/, ""), t);
+  }
+  function keyRow(key, hold, o, t, ctx) {
+    const proposal = proposalOf(o, t, ctx);
+    const standing = standingGates(o, t) ? interactionStanding(t) : null;
+    return { key: key, hold: hold, label: verbHead(proposal), bad: false, opt: o, decision: "yes", proposal: proposal, standing: standing };
+  }
+  function resolveRows(cand, ctx) {
+    const t = cand.t;
+    const pass = gatedPool(cand, ctx);
+    if (!pass.length) return null;
+    let tap = null, hold = null, ride = null;
     for (const o of pass) {
-      if (o.id === "airliner_board") board = o;
-      else if (o.id === "milveh-take") take = o;
+      if (o.pick) continue;                 // an order about someone else is a wheel verb, never a key
+      if (isRide(o)) { if (!ride) ride = o; }
+      else if (o.hold) { if (!hold) hold = o; }
+      else if (!tap) tap = o;
     }
-    if (!board || !take) return null;
-    const out = [
-      { key: "e", hold: false, label: "BOARD", bad: false, opt: board, decision: "yes", proposal: "Board", standing: null },
-      { key: "i", hold: false, label: "HIJACK", bad: true, opt: take, decision: "yes", proposal: "Hijack", standing: null },
-    ];
-    out.dualRide = true;   // render as a verb card; E-router yields to the E row
-    return out;
+    const rows = [];
+    if (tap) rows.push(keyRow("e", false, tap, t, ctx));
+    if (hold) rows.push(keyRow("e", true, hold, t, ctx));
+    if (ride) rows.push(keyRow("f", false, ride, t, ctx));
+    rows._pass = pass;   // the full gated pool, best first: the Q wheel reads it
+    return rows;
   }
 
   // ---- the shared panel (same DOM + look as the jail card — keep it) ---------
   let panel, nameEl, noteEl, optsEl;
   let current = null;          // the live candidate {t, kind, layers, ...}
   let currentRows = [];
+  let shownRows = [];          // the rows the card actually draws (click index)
   let currentScore = -1;
   let fingerprint = "";
   let detAcc = 0;
@@ -436,7 +398,7 @@
       if (g.mode !== "city") return;
       const rowEl = e.target.closest && e.target.closest(".iopt");
       if (!rowEl || rowEl.dataset.i == null) return;
-      const r = currentRows[+rowEl.dataset.i];
+      const r = shownRows[+rowEl.dataset.i];
       if (r && current) fire(r);
     });
   }
@@ -546,37 +508,41 @@
   CBZ.cityInteractRowsHTML = rowsHTML;
 
   // NOTE: #interact's base style is opacity:0; only `.show` lifts it to 1.
-  function hidePanel() { dom(); if (panel) { panel.style.display = "none"; panel.classList.remove("show"); } current = null; currentRows = []; fingerprint = ""; currentScore = -1; }
+  function hidePanel() { dom(); if (panel) { panel.style.display = "none"; panel.classList.remove("show"); } current = null; currentRows = []; shownRows = []; fingerprint = ""; currentScore = -1; }
+  // the card goes away but the TARGET stays live: E / F / Q still reach it
+  function quietPanel(tag) { dom(); if (panel) { panel.style.display = "none"; panel.classList.remove("show"); } shownRows = []; fingerprint = "quiet:" + tag; }
   function showPanel() { dom(); if (panel) { panel.style.display = "block"; panel.classList.add("show"); } }
-  function releasePanel() { dom(); if (panel) { panel.style.display = ""; panel.classList.remove("show"); } current = null; currentRows = []; fingerprint = ""; currentScore = -1; }
+  function releasePanel() { dom(); if (panel) { panel.style.display = ""; panel.classList.remove("show"); } current = null; currentRows = []; shownRows = []; fingerprint = ""; currentScore = -1; }
 
-  function fire(r) {
-    if (!r || !r.opt || !current) return;
+  // ONE dispatch for every input: the E / F keys (a row), the Q wheel and a
+  // touch tap (an option on a candidate), and an ORDER about a third person
+  // (`arg` = the person picked as the target, handed to onSelect's 3rd param).
+  function fireOn(cand, opt, arg) {
+    if (!cand || !opt || typeof opt.onSelect !== "function") return false;
     const ctx = buildCtx();
     // Re-check ownership at dispatch too. This closes the sub-100ms window in
     // which a row resolved before a campaign/state change could otherwise fire
     // from the cached panel or a held key.
-    if (!campaignAllows(r.opt, current.t, current)) { dirty = true; return; }
-    const t = current.t, verb = r.proposal || labelOf(r.opt, t, ctx);
-    // Every row is a doable action now — there is no decline branch. The old
-    // decision:"no" path (snub/spare rel-shift + onDecline dispatch) is gone
-    // with the NO row; declining is walking away, not a keypress.
-    const standing = standingGates(r.opt, t) ? interactionStanding(t) : null;
+    if (!campaignAllows(opt, cand.t, cand)) { dirty = true; return false; }
+    const t = cand.t, verb = labelOf(opt, t, ctx);
+    const standing = standingGates(opt, t) ? interactionStanding(t) : null;
     // Force / violence / deal-taking options always land (punch is separate;
     // tribute/tax/handouts are economic, not "please listen to my speech").
-    const forceYes = !!(r.opt && (r.opt.bad || r.opt.forceYes || /street-offer|gp-|mug|rob|shake|pick/i.test(String(r.opt.id || ""))));
+    const forceYes = !!(opt.bad || opt.forceYes || /street-offer|gp-|mug|rob|shake|pick/i.test(String(opt.id || "")));
     if (standing && !standing.canInfluence && !forceYes) {
       rememberChoice(t, verb, true);
       if (CBZ.cityRelShift) CBZ.cityRelShift(t, "snubbed", 0.35);
       dismissedTarget = t; dismissT = 2.2;
       hidePanel(); dirty = true;
-      return;
+      return false;
     }
     rememberChoice(t, verb, true);
-    if (standing && CBZ.cityRelShift && /talk|chat|compliment|meet|directions/i.test(String(r.opt.id || ""))) CBZ.cityRelShift(t, "greeted", 0.4);
-    r.opt.onSelect(t, ctx);
+    if (standing && CBZ.cityRelShift && /talk|chat|compliment|meet|directions/i.test(String(opt.id || ""))) CBZ.cityRelShift(t, "greeted", 0.4);
+    opt.onSelect(t, ctx, arg);
     dirty = true;              // verbs change state → re-resolve next pass
+    return true;
   }
+  function fire(r) { if (r && r.opt && current) fireOn(current, r.opt); }
 
   // ---- targeting --------------------------------------------------------------
   // THE CONE IS A TEST FOR PEOPLE, NOT FOR PLACES (INTERACT_REACH_V2).
@@ -592,16 +558,25 @@
   // granted for being where you are standing, half is still earned by looking.
   // Facing a zone dead-on still scores exactly what it scored before, so this
   // can only ever ADD cards, never re-order two things you are looking at.
+  // LOOKING AT IT WINS (owner: priority when two things are in range is the
+  // thing you are looking at). Facing is now the dominant term: a dead-on look
+  // is worth 10, the full proximity range 2.6, and an option source's authored
+  // `prio` only breaks ties (a vendor at prio 12 used to out-shout a car you
+  // were staring at by 5x the whole facing bonus). A zone keeps its floor.
+  function faceOf(tx, tz, fx, fz, px, pz) {
+    const dx = tx - px, dz = tz - pz, d = Math.hypot(dx, dz);
+    if (d < 0.3) return 1;
+    return Math.max(0, (dx / d) * fx + (dz / d) * fz);
+  }
   function scoreOf(c, fx, fz, px, pz) {
-    let s = (c.base || 0) + (REACH - Math.min(REACH, c.d)) * 0.6;
+    let s = (c.base || 0) * 0.05 + (REACH - Math.min(REACH, c.d)) * 0.5;
     const t = c.t;
     const tx = t && t.pos ? t.pos.x : (t && t.x != null ? t.x : null);
     const tz = t && t.pos ? t.pos.z : (t && t.z != null ? t.z : null);
-    if (tx != null && c.d > 0.3) {
-      const dx = tx - px, dz = tz - pz, d = Math.hypot(dx, dz) || 1;
-      let face = Math.max(0, (dx / d) * fx + (dz / d) * fz);   // looking at it = priority
+    if (tx != null) {
+      let face = faceOf(tx, tz, fx, fz, px, pz);
       if (c.zone && ZONE_CONE_FLOOR > 0) face = ZONE_CONE_FLOOR + (1 - ZONE_CONE_FLOOR) * face;
-      s += face * 1.5;
+      s += face * 10;
     }
     if (c.gunpoint) s += 100;   // a drawn gun on someone overrides everything
     return s;
@@ -609,6 +584,7 @@
   function sameTarget(a, b) { return a && b && a.t === b.t && !!a.gunpoint === !!b.gunpoint; }
 
   const cands = [];   // reused each pass (zero-alloc steady state)
+  let insideCand = null;   // the car you are driving, as a wheel target
   CBZ.onUpdate(39, function (dt) {
     if (g.mode !== "city") { if (current || (panel && panel.style.display)) releasePanel(); return; }
     if (g.state !== "playing" || CBZ.cityMenuOpen || CBZ.player.dead) { if (current) hidePanel(); holdKey = ""; return; }
@@ -627,6 +603,7 @@
 
     // gather candidates
     cands.length = 0;
+    insideCand = null;
     const push = (src) => (t, d, extra) => {
       if (!t) return;
       if (dismissT > 0 && t === dismissedTarget) return;
@@ -656,8 +633,14 @@
     for (const c of cands) c.score = scoreOf(c, fx, fz, px, pz);
     cands.sort((a, b) => b.score - a.score);
     let pick = null, rows = null;
+    // YOUR OWN CAR is never the E target (you cannot look at it from the seat,
+    // and it would shadow the pump you pulled up to). Its verbs - let them out,
+    // drop anchor, hand over the helm - are the Q wheel's: wheel() falls back
+    // to it while you drive.
+    for (const c of cands) if (c.kind === "vehicle:inside") { insideCand = c; break; }
     const cur = current && cands.find((c) => sameTarget(c, current));
     for (const c of cands) {
+      if (c.kind === "vehicle:inside") continue;
       if (cur && c !== cur && c.score < cur.score + HYSTERESIS) {
         const r = resolveRows(cur, ctx);
         if (r) { pick = cur; rows = r; break; }
@@ -677,41 +660,32 @@
       if (vr && vr.length) { rows = vr; break; }
     }
 
-    // RIDES: no card. You just press E / tap to take it (cityTryNearestRide and
-    // touch-tap both fire the board verb without this panel). Keeps the HUD from
-    // announcing "you may now board" like a tutorial. Sole exception: the civil
-    // airliner's two-verb BOARD/HIJACK card (dualRideRows above).
-    if (SILENT_RIDE[pick.kind] && CBZ.CONFIG.CITY_RIDE_SILENT !== false) {
-      rows = dualRideRows(pick, rows);
-      if (!rows) { if (current) hidePanel(); return; }
+    // ONLY E AND F ARE KEYS. A provider row on any other letter (dialogue's
+    // second answer) moves into the Q wheel, first in line, never a key.
+    let extra = null;
+    for (let i = 0; i < rows.length; i++) if (rows[i].key !== "e" && rows[i].key !== "f") { extra = extra || []; extra.push(rows[i]); }
+    if (extra) {
+      const pass = rows._pass;
+      rows = rows.filter((r) => r.key === "e" || r.key === "f");
+      rows._pass = pass; rows._extra = extra;
     }
+    current = pick; currentRows = rows; currentScore = pick.score;
 
-    // SEATS — same single-verb "no popup" grammar as a ride, but a seat has no
-    // external router (cityTryNearestRide is vehicles only) and no tappable
-    // mesh. So keep the candidate LIVE — E (and the touch pill) still fire
-    // seat-sit through the panel's own input paths below — and merely suppress
-    // the VISUAL card on DESKTOP: walk up, press E, you sit, no popup. On TOUCH
-    // the pill IS the control, so it stays. Only the single-verb case goes
-    // silent (_pass holds exactly one option); a second seat verb brings the
-    // card back. Standing up is systems/seat_exit.js's, not a card.
-    // ...AND ON TOUCH TOO, now that a seat IS tappable. The `!CBZ.touchMode`
-    // that used to be on this line was load-bearing for a real reason — the
-    // comment above it said "a seat has no tappable mesh", so on touch the pill
-    // was the ONLY way to sit and had to stay. systems/touch.js's tapWorld now
-    // resolves a tap to the seat anchor under your finger (and any tap to
-    // stand), which is the vehicle grammar and Minecraft's: the object is the
-    // button, and nothing narrates the possibility to you first. With the
-    // control living in the world, the card is pure noise on both inputs.
-    if (pick.kind === "seat" && rows._pass && rows._pass.length === 1 &&
-        CBZ.CONFIG.CITY_SEAT_SILENT !== false) {
-      current = pick; currentRows = rows; currentScore = pick.score;
-      fingerprint = "seat-silent:" + (pick.t && pick.t.x) + "," + (pick.t && pick.t.z);
-      dom(); if (panel) { panel.style.display = "none"; panel.classList.remove("show"); }
+    // WHAT THE CARD SHOWS. The target is live either way (E / F / Q reach it);
+    // the card is only drawn when it says something the world does not:
+    //   • a ride's F is pinned on its door (city/boarding.js) - no card row
+    //   • a lone "Sit down" is the chair itself - no card
+    //   • a pinned verb that owns E right now (a lift button, a ladder) is the
+    //     one E on screen, so the card steps back (cityUseOwner below)
+    //   • TOUCH: the world is the button. Tapping the thing opens its wheel
+    //     (systems/touch.js -> city/verbwheel.js), so no floating pills.
+    const shown = SILENT_RIDE[pick.kind] ? rows.filter((r) => r.key !== "f") : rows;
+    const loneSeat = pick.kind === "seat" && rows._pass && rows._pass.length === 1;
+    if (!shown.length || loneSeat || CBZ.touchMode || (CBZ.verbWheel && CBZ.verbWheel.isOpen()) || useOwner("e") === "pill") {
+      quietPanel(pick.kind);
       return;
     }
-
-    // STANDING UP has no card at all: it is systems/seat_exit.js's verb,
-    // pinned on the chair (desktop) or the one EXIT button (touch).
+    shownRows = shown;
 
     // whoever the panel is offering interactions on turns to LOOK at you
     const t = pick.t;
@@ -725,8 +699,7 @@
     // fingerprint = target + the resolved rows; rebuild DOM only on a real change
     let fp = pick.kind + ":" + (pick.gunpoint ? "G" : "") + (t && t.name || "") + "/" + (desc.label || "") + "/" + (desc.role || "") + "|" +
       (rows[0] && rows[0].proposal || "") + ":" + (rows[0] && rows[0].standing ? rows[0].standing.score : "") + "|";
-    for (const r of rows) fp += r.key + (r.hold ? "H" : "") + r.label + (r.bad ? "!" : "") + ";";
-    current = pick; currentRows = rows; currentScore = pick.score;
+    for (const r of shown) fp += r.key + (r.hold ? "H" : "") + r.label + (r.bad ? "!" : "") + ";";
     dom();
     if (noteEl) {
       // NO LINE ON THE CARD (owner, 2026-08-04 + 2026-09-27). No restated
@@ -752,89 +725,171 @@
           nameEl.appendChild(rs);
         }
       }
-      // ONE doable verb per card (the airliner BOARD/HIJACK is the lone
-      // two-ACTION exception — never a YES/NO). The proposition lives ON the
-      // row; these rows never mutate into a hidden action wheel.
-      if (optsEl) optsEl.innerHTML = rowsHTML(rows);
+      // At most E, hold E and F. Everything else is the Q wheel's.
+      if (optsEl) optsEl.innerHTML = rowsHTML(shown);
       showPanel();
     }
   });
 
-  // ---- keys: E + IJKL. A key with a hold verb arms a timer; the hold fires the
-  //      moment the threshold passes (no release needed), a quick release fires
-  //      the tap. A key with only a tap fires instantly on keydown (snappy). ----
+  /* ---- WHO OWNS E RIGHT NOW: the card, or a verb pinned on a thing --------
+     Two surfaces can offer E at once: this card's target (a person, a counter)
+     and a BOUND pin from systems/interactions.js (a lift's Call button, a
+     ladder, a ransom). The one you are LOOKING at more squarely owns the key;
+     the loser is not drawn and does not fire. systems/interactions.js's
+     capture-phase binder asks this before it consumes a press. */
+  function useOwner(key) {
+    key = String(key || "e").toLowerCase();
+    const pin = CBZ.prisonPromptShownFor ? CBZ.prisonPromptShownFor(key) : null;
+    let mine = false;
+    for (let i = 0; i < currentRows.length; i++) if (currentRows[i].key === key) { mine = true; break; }
+    if (!pin) return mine ? "card" : null;
+    if (!mine || !current || !pin.at) return "pill";
+    const P = CBZ.player, t = current.t;
+    const tx = t && t.pos ? t.pos.x : (t && t.x != null ? t.x : null);
+    const tz = t && t.pos ? t.pos.z : (t && t.z != null ? t.z : null);
+    if (!P || !P.pos || tx == null) return "pill";
+    const yaw = CBZ.cam ? CBZ.cam.yaw : 0, fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+    const fc = faceOf(tx, tz, fx, fz, P.pos.x, P.pos.z);
+    const fp = faceOf(pin.at.x, pin.at.z, fx, fz, P.pos.x, P.pos.z);
+    return fc > fp + 0.05 ? "card" : "pill";
+  }
+  CBZ.cityUseOwner = useOwner;
+
+  /* ---- THE KEYS. One key, one meaning (see THE KEY MAP at the top).
+     E: tap fires the E verb on keydown; if the target also has a HOLD verb,
+     the press arms a timer instead - past HOLD_T the hold verb fires, a quick
+     release fires the tap. F: the ride verb of the thing you are looking at,
+     else the ride router (the nearest car / plane / hull). Q is the wheel's
+     (city/verbwheel.js). I, J, K and L are no longer interaction keys. */
   let holdKey = "", holdT = 0, holdFired = false;
-  function rowsFor(key) {
-    let tap = null, hold = null;
-    for (const r of currentRows) if (r.key === key) { if (r.hold) hold = r; else tap = r; }
-    return { tap, hold };
+  function rowFor(key, hold) {
+    for (const r of currentRows) if (r.key === key && !!r.hold === !!hold) return r;
+    return null;
   }
   function pumpHold(dt) {
     if (!holdKey || holdFired) return;
     holdT += dt;
     if (holdT >= HOLD_T) {
-      const { hold } = rowsFor(holdKey);
+      const hold = rowFor(holdKey, true);
       holdFired = true;
       if (hold) fire(hold);
     }
   }
+  function cuffed() { return !!(CBZ.cuffedPlayer && CBZ.cuffedPlayer.on()); }
   addEventListener("keydown", function (e) {
     if (g.mode !== "city" || g.state !== "playing") return;
     if (CBZ.cityMenuOpen || CBZ.player.dead) return;
-    // FLIGHT STAND-DOWN — the pilot owns the keyboard. Q/E are the rudder, F is
-    // the exit. This must sit ABOVE the ride router below: that router's first
-    // branch exits the aircraft, which is precisely the bug. Returning here
-    // also drops the slot dispatch, so a zone card that resolved on the frame
-    // before takeoff cannot fire from a stale row either.
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    // a panel that just used this press (shops.js closes on E) spent it
+    if (e.defaultPrevented) return;
+    // FLIGHT STAND-DOWN — the pilot owns the keyboard. Q/E are the rudder, F
+    // is the exit (seat_exit.js). Nothing here may shadow a flight control.
     if (pilotingAircraft()) { holdKey = ""; holdT = 0; holdFired = false; return; }
-    const k = e.key.toLowerCase();
-    // E/Y is the physical "use this ride" button. Do this before consulting
-    // the prompt candidate: a pedestrian standing beside an aircraft used to
-    // steal the interaction and could even cuff them while the player was
-    // plainly trying to board the plane. The router also owns vehicle exits.
-    // EXCEPTION: while the airliner's BOARD/HIJACK verb card is live, its E
-    // row (BOARD, the innocent walk-in) must win — the router would hijack.
-    // The card only exists on foot beside a parked civil airliner, so no exit
-    // or other-ride press can be shadowed by this yield.
-    if (k === "e" && !(currentRows && currentRows.dualRide) &&
-        !(CBZ.cuffedPlayer && CBZ.cuffedPlayer.on()) &&
-        CBZ.cityTryNearestRide && CBZ.cityTryNearestRide()) {
-      e.preventDefault();
-      holdKey = ""; holdT = 0; holdFired = false;
+    const k = String(e.key || "").toLowerCase();
+    if (k === "f") {
+      if (e.repeat || cuffed()) return;                       // no hands for a door
+      if (CBZ.verbWheel && CBZ.verbWheel.isOpen()) return;    // the wheel is modal
+      // a mode's own rides first (the President's column and helicopter)
+      if (CBZ.cityRideIntercept && CBZ.cityRideIntercept()) { e.preventDefault(); return; }
+      const fr = rowFor("f", false);
+      if (fr) { e.preventDefault(); fire(fr); return; }
+      if (CBZ.cityTryNearestRide && CBZ.cityTryNearestRide()) e.preventDefault();
       return;
     }
-    if (KEYS.indexOf(k) < 0 || !current || !currentRows.length) return;
+    if (k !== "e" || !current || !currentRows.length) return;
+    if (CBZ.verbWheel && CBZ.verbWheel.isOpen()) return;
     if (e.repeat) { if (k === holdKey) e.preventDefault(); return; }
-    const { tap, hold } = rowsFor(k);
+    const tap = rowFor("e", false), hold = rowFor("e", true);
     if (!tap && !hold) return;
     e.preventDefault();
     if (hold) { holdKey = k; holdT = 0; holdFired = false; }   // arm; tap decided on keyup
     else fire(tap);
   });
   addEventListener("keyup", function (e) {
-    const k = e.key.toLowerCase();
+    const k = String(e.key || "").toLowerCase();
     if (k !== holdKey) return;
     const wasFired = holdFired;
     holdKey = ""; holdT = 0; holdFired = false;
     // ...and never on the release of a key that was armed on the ground and let
-    // go in the air (hold E on a car, [F] into the aircraft beside it, release).
+    // go in the air (hold E on a horse, [F] into the aircraft beside it, release).
     if (wasFired || g.mode !== "city" || g.state !== "playing" || CBZ.cityMenuOpen || pilotingAircraft()) return;
-    const { tap } = rowsFor(k);
+    const tap = rowFor(k, false);
     if (tap) fire(tap);   // released before the threshold → the tap verb
   });
 
-  // Is a live prompt currently offering an action on a given key slot? The
-  // panel only shows rows the player can actually fire RIGHT NOW (current
-  // candidate + resolved currentRows), so this answers "would pressing <key>
-  // run a world interaction this instant?". charpanel.js consults this so the
-  // [I] inventory key DEFERS to a live "i" interaction (take-clothes, mug,
-  // rob-stash, surrender…) instead of double-firing alongside it.
+  // Is a live prompt offering an action on this key right now? charpanel.js
+  // and familypanel.js ask before claiming a letter. Only E and F are
+  // interaction keys now, so their I / L are always theirs.
   function hasSlot(key) {
     if (!current || !currentRows || !currentRows.length) return false;
     if (g.mode !== "city" || g.state !== "playing" || CBZ.cityMenuOpen || (CBZ.player && CBZ.player.dead)) return false;
     key = String(key || "").toLowerCase();
     for (const r of currentRows) if (r.key === key) return true;
     return false;
+  }
+
+  /* ---- THE WHEEL'S FEED (city/verbwheel.js) -------------------------------
+     wheelOf(cand) lists EVERYTHING doable to one candidate, best first: a
+     provider's extra rows (dialogue's second answer), then the whole gated
+     pool. Each item says which key would also fire it, so the wheel can show
+     the one-key shortcut beside the verb. */
+  function wheelOf(cand) {
+    if (!cand) return [];
+    const ctx = buildCtx();
+    const rows = cand === current ? currentRows : resolveRows(cand, ctx);
+    if (!rows) return [];
+    const pass = rows._pass || [];
+    const out = [], seen = new Set();
+    const keyOf = function (o) {
+      for (const r of rows) if (r.opt === o) return r.hold ? "hold e" : r.key;
+      return "";
+    };
+    const add = function (o, label, bad) {
+      if (!o || seen.has(o)) return;
+      seen.add(o);
+      out.push({ opt: o, label: label, bad: !!bad, key: keyOf(o), pick: o.pick || null });
+    };
+    // a provider's own rows first (dialogue's answers are not pool options)
+    for (const r of rows) if (r.opt && pass.indexOf(r.opt) < 0) add(r.opt, r.proposal || r.label, r.bad);
+    if (rows._extra) for (const r of rows._extra) add(r.opt, r.proposal || r.label, r.bad);
+    for (const o of pass) add(o, proposalOf(o, cand.t, ctx), o.bad);
+    return out;
+  }
+  // The live candidate whose screen anchor is nearest a finger (touch): the
+  // last detection pass's candidates, projected through the live camera.
+  const _pp = window.THREE ? new THREE.Vector3() : null;
+  function anchorOf(c) {
+    const t = c && c.t;
+    if (!t) return null;
+    const p = t.pos || (t.group && t.group.position) || (t.x != null ? t : null);
+    if (!p) return null;
+    const y = (p.y != null ? p.y : (CBZ.player && CBZ.player.pos ? CBZ.player.pos.y : 0));
+    return { x: p.x, y: y + (c.layers && c.layers.indexOf("ped") >= 0 ? 1.2 : 0.9), z: p.z };
+  }
+  function pickAt(sx, sy, radius) {
+    const cam = CBZ.camera;
+    if (!cam || !_pp) return null;
+    radius = radius || 64;
+    cam.updateMatrixWorld();
+    const w = window.innerWidth || 800, h = window.innerHeight || 600;
+    let best = null, bd = radius * radius;
+    for (let i = 0; i < cands.length; i++) {
+      const a = anchorOf(cands[i]);
+      if (!a) continue;
+      _pp.set(a.x, a.y, a.z).project(cam);
+      if (_pp.z > 1) continue;
+      const x = (_pp.x * 0.5 + 0.5) * w, y = (-_pp.y * 0.5 + 0.5) * h;
+      const d = (x - sx) * (x - sx) + (y - sy) * (y - sy);
+      if (d < bd) { bd = d; best = cands[i]; }
+    }
+    return best;
+  }
+  // the live candidate for a known world object (a ped / car / animal record)
+  function candidateFor(obj) {
+    if (!obj) return null;
+    if (current && current.t === obj) return current;
+    for (let i = 0; i < cands.length; i++) if (cands[i].t === obj) return cands[i];
+    return null;
   }
 
   // ---- public API ---------------------------------------------------------------
@@ -844,7 +899,13 @@
     registerVerbCard, hasOption,
     ctx: buildCtx,
     current: function () { return current ? { target: current.t, kind: current.kind, gunpoint: !!current.gunpoint, proposal: currentRows[0] && currentRows[0].proposal } : null; },
+    currentCand: function () { return current; },
+    // what the Q wheel opens on: the looked-at thing, else (driving) your car
+    wheelCand: function () { return current || insideCand; },
     hasSlot: hasSlot,
+    wheelOf: wheelOf, fireOn: fireOn, pickAt: pickAt, candidateFor: candidateFor, anchorOf: anchorOf,
+    useOwner: useOwner,
+    rowsFor: function () { return currentRows.map((r) => ({ key: r.key, hold: !!r.hold, id: r.opt && r.opt.id, label: r.label })); },
     refresh: function () { dirty = true; },
     hide: hidePanel,
   };

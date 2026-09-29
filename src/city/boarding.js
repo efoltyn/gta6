@@ -1475,9 +1475,11 @@
 
   // ---- THE VERB ON THE DOOR ------------------------------------------------
   // One pinned label over the door you are at: "Drive", "Ride" / "Sit" with
-  // the seat as the sub line, "Drag out" when somebody is at the wheel. It is
-  // the same press as the E router and the touch tap on the car (both land in
-  // cityEnterVehicle, which asks choosePlayerSeat the same question).
+  // the seat as the sub line, "Drag out" when somebody is at the wheel. Its
+  // chip says F, the one get-in key; the press is city/interactions.js's F
+  // (the looked-at car's ride verb, else the router), and the touch tap on
+  // the car. All of them land in cityEnterVehicle, which asks
+  // choosePlayerSeat the same question.
   const _dw = { x: 0, y: 0, z: 0 };
   function seatWords(seat) {
     if (!seat) return "";
@@ -1527,7 +1529,7 @@
       sub = seatWords(pick.seat);
     }
     doorCar = car;
-    CBZ.prisonPrompt("car-door", "@cityDoorEnter", verb, { at: _dw, sub: sub, d2: d2, city: true });
+    CBZ.prisonPrompt("car-door", "@cityDoorEnter", verb, { at: _dw, sub: sub, d2: d2, key: "F", city: true });
   });
   // somebody is at the wheel (or aboard) who has to be got out first
   function jackable(car) {

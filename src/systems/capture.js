@@ -1484,7 +1484,8 @@
     CBZ.addHeat(45); // gunfire brings the whole block down on you
     if (CBZ.prisonOffense) CBZ.prisonOffense("assault", { severity: 4, seenBy: null });
   }
-  addEventListener("keydown", (e) => { if (e.key.toLowerCase() === "f") fire(); });
+  // prison only: in the city F is get in / get out, never a trigger
+  addEventListener("keydown", (e) => { if (e.key.toLowerCase() === "f" && g.mode === "escape") fire(); });
 
   // fade the pepper-spray overlay (runs even when not playing)
   CBZ.onAlways(70, function (dt) {

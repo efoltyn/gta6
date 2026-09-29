@@ -1024,8 +1024,19 @@
   }
   // Fire the REAL verb. Rides call the exact functions the keyboard router ends
   // in; a ped just aims the camera and lets interactions.js raise its card.
+  /* THE WORLD IS THE BUTTON (owner 2026-09-29: "pressing a person ... should
+     do what you have E do now, everything"). A tapped person, car or animal
+     opens city/verbwheel.js on it: every verb that thing has, the obvious one
+     first. A thing with one verb just does it. Rides ask the President's own
+     intercept first (his column, his helicopter). */
+  function wheelOn(rec) {
+    const VW = CBZ.verbWheel;
+    return !!(VW && CBZ.game.mode === "city" && VW.openFor(rec));
+  }
   function triggerTarget(kind, rec) {
     if (!recAlive(kind, rec)) return false;
+    if ((kind === "car" || kind === "machine") && CBZ.cityRideIntercept && CBZ.cityRideIntercept()) return true;
+    if ((kind === "car" || kind === "machine" || kind === "animal") && wheelOn(rec)) return true;
     if (kind === "car") return !!(CBZ.cityEnterVehicle && CBZ.cityEnterVehicle(rec) !== false);
     if (kind === "machine") return !!(CBZ.cityBoardMilitaryVehicle && CBZ.cityBoardMilitaryVehicle(rec));
     if (kind === "animal") return !!(CBZ.cityMountAnimal && CBZ.cityMountAnimal(rec));
@@ -1046,6 +1057,7 @@
     if (kind === "ped") {
       const p = rec.pos || (rec.group && rec.group.position);
       if (p) faceToward(p.x, p.z);
+      if (wheelOn(rec)) return true;
       if (CBZ.interactions && CBZ.interactions.refresh) CBZ.interactions.refresh();
       return true;
     }
@@ -1126,6 +1138,20 @@
     }
     const hits = objects.length ? tapRay.intersectObjects(objects, true) : [];
     let target = hits.length ? rootFor(hits[0].object, roots) : null;
+
+    // AN ORDER IS WAITING FOR ITS "WHO" (city/verbwheel.js): the person you
+    // tap is who it is about, near or far.
+    if (target && target.kind === "ped" && CBZ.verbWheel && CBZ.verbWheel.ordering()) {
+      CBZ.verbWheel.pickTarget(target.rec);
+      return true;
+    }
+    // NOTHING WITH A BODY UNDER THE FINGER: the counter, the mailbox, the
+    // pump. Every live interaction candidate is tested by where it sits on
+    // the screen, with a thumb-sized radius.
+    if (!target && CBZ.game.mode === "city" && CBZ.interactions && CBZ.interactions.pickAt && CBZ.verbWheel) {
+      const c = CBZ.interactions.pickAt(x, y, 70);
+      if (c && CBZ.verbWheel.openFor(c)) return true;
+    }
 
     /* ---- A GRILLE IS MOSTLY HOLES -------------------------------------
        MEASURED: a cell front (world/cellblock.js) is one merged mesh of

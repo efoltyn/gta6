@@ -696,7 +696,11 @@
   //  posted brain walks to next frame). Decisions (threat scans, the gate,
   //  the counter-snipers) run at ~4-5 Hz; only the walking runs per frame.
   // ============================================================
-  const PRES_BASE = 5;               // shift leader + 4 agents: the standing detail of a head of state
+  // What the OFFICE grants: a shift leader and one agent. The rest of the
+  // detail are people the President hires himself, one by one, out of the
+  // line the Chief of Staff brings to the office (city/president_staff.js);
+  // each hire is memberCount + 1 on this same record, the man himself.
+  const PRES_BASE = 2;
   const POSTS_NEAR = 180, POSTS_FAR = 260;
   const FORCE_SPAWN_T = 2.0;         // seconds a body may wait for the camera to look away
   const CALM_DECAY = 30;             // seconds of quiet before a posture stands down
@@ -1650,6 +1654,7 @@
     for (let i = 0; i < n; i++) {
       const q = peds[i];
       if (!q || q.dead) continue;
+      if (q._order) continue;                    // city/orders.js has him (guarding / tailing / going after someone)
       const leader = q._protRole === "shift-leader";
       const ki = leader ? -1 : k++;
       if (CBZ.boardingHolds && CBZ.boardingHolds(q)) continue;

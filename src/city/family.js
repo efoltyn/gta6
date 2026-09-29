@@ -663,48 +663,56 @@
       endKidnap(true, "You took " + (k.ped.name || "them") + " back the hard way. The street saw it.", "#7fe0a0");
       return;
     }
-    // standing close with the money: pay the number
-    if (P && !P.dead) {
-      const d = Math.hypot(P.pos.x - k.x, P.pos.z - k.z);
-      if (d < 5) {
-        if ((g.cash || 0) >= k.ransom) {
-          if (CBZ.city && CBZ.city.note && !(CBZ.arrest && CBZ.arrest.playerCuffed && CBZ.arrest.playerCuffed())) CBZ.city.note("[E] Pay $" + k.ransom.toLocaleString() + " · or kill the three holding " + (k.ped.name || "them"), 1.4);
-          // cuffed hands cannot count out money
-          if (CBZ.keys && (CBZ.keys["e"] || CBZ.keys["E"]) && !(CBZ.arrest && CBZ.arrest.playerCuffed && CBZ.arrest.playerCuffed())) {
-            /* THE MONEY GOES SOMEWHERE. `g.cash -= k.ransom` DESTROYED it: the
-               crew that took your family got not one dollar richer for it, so
-               the most personal shakedown in the game had no consequence on the
-               other side of the table. It lands in that gang's treasury now —
-               and gangs.js:869 SPENDS the treasury on raids, so the price of
-               buying your girl back is a better-funded set on your block. That
-               is the same law as the ransom you collect, pointed at you. */
-            let paidOut = false;
-            const gangRec = CBZ.cityGangById ? CBZ.cityGangById(k.gangId) : null;
-            if (CBZ.cityTake && (!CBZ.CONFIG || CBZ.CONFIG.TAKE_IS_TRANSFER !== false)) {
-              let r = null;
-              try { r = CBZ.cityTake("player", { max: k.ransom, to: gangRec || k.gangId, site: "family:kidnap", by: "player" }); } catch (e) { r = null; }
-              paidOut = !!(r && r.taken >= k.ransom);
-            } else {
-              if (CBZ.cityTakeLegacy) { try { CBZ.cityTakeLegacy("family:kidnap"); } catch (e) {} }
-              g.cash -= k.ransom;
-              if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-              paidOut = true;
-            }
-            if (!paidOut) return;
-            for (const c of k.captors) if (c && !c.dead) { c.rage = null; c.state = "walk"; }
-            endKidnap(true, "You paid. " + (k.ped.name || "They") + " walks home. The number is a memory now.", "#ffce7a");
-            return;
-          }
-        } else if (CBZ.city && CBZ.city.note) {
-          CBZ.city.note("No $" + k.ransom.toLocaleString() + ", no deal. Don't waste my time.", 1.4, { from: "UNKNOWN NUMBER" });
-        }
-      }
+    // standing close without the money: they tell you so (with it, the pay
+    // pin below is armed every frame and E on it pays)
+    if (P && !P.dead && Math.hypot(P.pos.x - k.x, P.pos.z - k.z) < 5 && (g.cash || 0) < k.ransom && CBZ.city && CBZ.city.note) {
+      CBZ.city.note("No $" + k.ransom.toLocaleString() + ", no deal. Don't waste my time.", 1.4, { from: "UNKNOWN NUMBER" });
     }
     if (k.t <= 0) {
       if (CBZ.cityKillPed) CBZ.cityKillPed(k.ped, { fromX: k.x + 1, fromZ: k.z, force: 4, fling: 1 }, "executed");
       endKidnap(false, "The clock ran out. They put " + (k.ped.name || "your family") + " down.", "#ff7a7a");
     }
   }
+
+  /* PAY THE NUMBER. "Pay $X" is pinned over your family member while you stand
+     close with the money; E on it (or a tap) pays. It used to be a note
+     ("[E] Pay ...") plus a polled E, so the same press also fired whatever
+     else E meant there.
+     THE MONEY GOES SOMEWHERE. `g.cash -= k.ransom` DESTROYED it: the crew that
+     took your family got not one dollar richer for it. It lands in that gang's
+     treasury now - and gangs.js:869 SPENDS the treasury on raids, so the price
+     of buying your girl back is a better-funded set on your block. */
+  CBZ.cityKidnapPay = function () {
+    const k = kidnap, P = CBZ.player;
+    if (!k || !P || P.dead || (g.cash || 0) < k.ransom) return false;
+    if (CBZ.arrest && CBZ.arrest.playerCuffed && CBZ.arrest.playerCuffed()) return false;   // cuffed hands cannot count out money
+    if (Math.hypot(P.pos.x - k.x, P.pos.z - k.z) >= 5) return false;
+    let paidOut = false;
+    const gangRec = CBZ.cityGangById ? CBZ.cityGangById(k.gangId) : null;
+    if (CBZ.cityTake && (!CBZ.CONFIG || CBZ.CONFIG.TAKE_IS_TRANSFER !== false)) {
+      let r = null;
+      try { r = CBZ.cityTake("player", { max: k.ransom, to: gangRec || k.gangId, site: "family:kidnap", by: "player" }); } catch (e) { r = null; }
+      paidOut = !!(r && r.taken >= k.ransom);
+    } else {
+      if (CBZ.cityTakeLegacy) { try { CBZ.cityTakeLegacy("family:kidnap"); } catch (e) {} }
+      g.cash -= k.ransom;
+      if (CBZ.cityHudDirty) CBZ.cityHudDirty();
+      paidOut = true;
+    }
+    if (!paidOut) return false;
+    for (const c of k.captors) if (c && !c.dead) { c.rage = null; c.state = "walk"; }
+    endKidnap(true, "You paid. " + (k.ped.name || "They") + " walks home. The number is a memory now.", "#ffce7a");
+    return true;
+  };
+  if (CBZ.onUpdate) CBZ.onUpdate(40.2, function () {
+    const k = kidnap, P = CBZ.player;
+    if (!k || !k.ped || k.ped.dead || !P || P.dead || !CBZ.prisonPrompt || (g.cash || 0) < k.ransom) return;
+    const d = Math.hypot(P.pos.x - k.x, P.pos.z - k.z);
+    if (d >= 5) return;
+    const at = k.ped.pos;
+    CBZ.prisonPrompt("kidnap-pay", "@cityKidnapPay", "Pay $" + k.ransom.toLocaleString(),
+      { at: { x: at.x, y: (at.y || 0) + 2.1, z: at.z }, key: "E", bind: true, d2: d * d, city: true });
+  });
 
   // Authored story missions need to inspect and deliberately trigger the same
   // hostage system as the ambient director. Keep the record read-only to

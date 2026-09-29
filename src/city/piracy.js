@@ -1052,27 +1052,13 @@
         const P = player();
         if (P && !P.dead && h.state === "demanded" && dist(P.pos.x, P.pos.z, h.x, h.z) < 9) {
           if ((g.cash || 0) >= h.amount) {
-            if (CBZ.city && CBZ.city.note && !(CBZ.arrest && CBZ.arrest.playerCuffed && CBZ.arrest.playerCuffed())) CBZ.city.note("[E] Pay " + money(h.amount) + " for " + nameOf(ped, "them"), 1.3);
-            // cuffed hands cannot count out money
-            if (CBZ.keys && (CBZ.keys.e || CBZ.keys.E) && !(CBZ.arrest && CBZ.arrest.playerCuffed && CBZ.arrest.playerCuffed())) {
-              // THE SAME LAW POINTED AT YOU. Paying is a take out of the
-              // player's own balance and it goes through the one block, so the
-              // ratchet sees both directions of every ransom in the game.
-              let paidOut = false;
-              if (CBZ.cityTake && C.TAKE_IS_TRANSFER !== false) {
-                let r = null;
-                try { r = CBZ.cityTake("player", { max: h.amount, site: "piracy:pay", by: "player" }); } catch (e) { r = null; }
-                paidOut = !!(r && r.taken >= h.amount);
-              } else if (CBZ.city && CBZ.city.spend) {
-                if (CBZ.cityTakeLegacy) { try { CBZ.cityTakeLegacy("piracy:pay"); } catch (e) {} }
-                paidOut = !!CBZ.city.spend(h.amount);
-              }
-              if (paidOut) {
-                _paidByPlayer++;
-                if (crew) standDown(crew, "paid");
-                release(ped, "paid");
-                continue;
-              }
+            // "Pay $X" pinned over the hostage; E (or a tap on it) pays. A
+            // bound pin, not a polled key: the press can mean nothing else.
+            _payArm = { h: h, ped: ped, crew: crew };
+            if (CBZ.prisonPrompt && ped.pos) {
+              CBZ.prisonPrompt("piracy-pay", "@cityPiracyPay", "Pay " + money(h.amount),
+                { at: { x: ped.pos.x, y: (ped.pos.y || 0) + 2.1, z: ped.pos.z }, key: "E", bind: true,
+                  d2: Math.pow(dist(P.pos.x, P.pos.z, h.x, h.z), 2), city: true });
             }
           } else if (CBZ.city && CBZ.city.note) {
             CBZ.city.note("No " + money(h.amount) + ", no deal.", 1.3, { from: h.byName ? h.byName.toUpperCase() : "UNKNOWN NUMBER" });
@@ -2448,4 +2434,29 @@
     if (target) _provokePrize = target;
   };
   CBZ.cityPiracyReset = function () { arenaRef = null; resetIfNewArena(); };
+
+  // ---- THE PAY PIN'S ACT (systems/interactions.js @fn) ------------------------
+  // THE SAME LAW POINTED AT YOU. Paying is a take out of the player's own
+  // balance and it goes through the one block, so the ratchet sees both
+  // directions of every ransom in the game. Cuffed hands cannot count out money.
+  let _payArm = null;
+  CBZ.cityPiracyPay = function () {
+    const a = _payArm; _payArm = null;
+    if (!a || !a.h || a.h.state !== "demanded" || (g.cash || 0) < a.h.amount) return false;
+    if (CBZ.arrest && CBZ.arrest.playerCuffed && CBZ.arrest.playerCuffed()) return false;
+    let paidOut = false;
+    if (CBZ.cityTake && C.TAKE_IS_TRANSFER !== false) {
+      let r = null;
+      try { r = CBZ.cityTake("player", { max: a.h.amount, site: "piracy:pay", by: "player" }); } catch (e) { r = null; }
+      paidOut = !!(r && r.taken >= a.h.amount);
+    } else if (CBZ.city && CBZ.city.spend) {
+      if (CBZ.cityTakeLegacy) { try { CBZ.cityTakeLegacy("piracy:pay"); } catch (e) {} }
+      paidOut = !!CBZ.city.spend(a.h.amount);
+    }
+    if (!paidOut) return false;
+    _paidByPlayer++;
+    if (a.crew) standDown(a.crew, "paid");
+    release(a.ped, "paid");
+    return true;
+  };
 })();

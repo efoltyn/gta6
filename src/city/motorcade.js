@@ -1923,9 +1923,13 @@
 
   // the E press beside a column car, for the President, is a word with the
   // agent, never a carjack (the ride router fires before any card)
+  // THE COLUMN NEEDS A DRIVER YOU HIRED (city/president_staff.js). Without
+  // one the state car is just a car: F gets you in and you drive it yourself.
+  function hasDriver() { return !CBZ.presidentStaff || CBZ.presidentStaff.has("driver"); }
   function wantsAgent() {
     const P = CBZ.player;
     if (!P || !P.pos || P.dead || P.driving || P._vehicle || BOARD) return false;
+    if (!hasDriver()) return false;
     if (!playerPresident() || (RUN && (RUN.phase === "drive" || RUN.phase === "evac"))) return false;
     const L = liveCars();
     for (let i = 0; i < L.length; i++) {
@@ -1943,7 +1947,7 @@
     I.registerZone({
       id: "motorcade-door", kind: "motorcade", prio: 16, radius: 6,
       find: function (px, pz) {
-        if (!playerPresident() || BOARD) return null;
+        if (!playerPresident() || BOARD || !hasDriver()) return null;
         if (RUN && (RUN.phase === "drive" || RUN.phase === "evac")) return null;
         const sc = stateCar(), P = CBZ.player;
         if (!sc || !P || P.driving) return null;
@@ -1954,23 +1958,15 @@
         return { x: at.x, z: at.z, kind: "motorcade" };
       },
       options: [{
-        id: "motorcade-ride", slot: "e", campaignSafe: true,
+        id: "motorcade-ride", slot: "e", ride: true, campaignSafe: true,
         label: function () { return "Get in the car"; },
         canShow: function () { return playerPresident() && !BOARD && !!stateCar(); },
         onSelect: function () { askWhere(); },
       }],
     });
     if (I.describe) { try { I.describe("motorcade", function () { return { label: "The state car", note: "" }; }); } catch (e) {} }
-    if (I.registerVerbCard) {
-      I.registerVerbCard(function (pick, rows) {
-        if (!pick || pick.kind !== "motorcade") return null;
-        const pass = rows && rows._pass; if (!pass || !pass.length) return null;
-        const o = pass[0];
-        const out = [{ key: "e", hold: false, label: "Get in the car", bad: false, opt: o, decision: "yes", proposal: "Get in the car", standing: null }];
-        out.dualRide = true;          // the E-router yields to this row
-        return out;
-      });
-    }
+    // No verb card: the one verb is F (ride:true above), pinned on nothing
+    // but the agent at the door, who says "Where to?" when you press it.
   }
 
   /* ============================================================
@@ -2060,14 +2056,13 @@
     if (HELI.rec) dropHeli();
     return buildHeli();
   }
-  /* THE RIDE ROUTER (E fires it before any card). Two interceptions, for the
+  /* THE RIDE INTERCEPT (city/interactions.js asks it first on every F, and
+     systems/touch.js before a tapped car). Two interceptions, for the
      President only: his own helicopter boards through the same flyable path
      the theft path ends in, minus the four stars; and a column car is a word
      with the agent, not a carjack. Everything else is delegated untouched. */
   function wrapRide() {
-    const orig = CBZ.cityTryNearestRide;
-    if (!orig || orig._motorcade) return;
-    const w = function () {
+    CBZ.cityRideIntercept = function () {
       try {
         const rec = HELI.rec, P = CBZ.player;
         if (rec && !rec.taken && !rec.destroyed && rec.pos && P && P.pos && !P.dead && !P._aircraft && !P._vehicle &&
@@ -2080,12 +2075,9 @@
           rec.taken = false;
         }
         if (wantsAgent()) { askWhere(); return true; }
-      } catch (e) { /* never break the use key */ }
-      return orig.apply(this, arguments);
+      } catch (e) { /* never break the ride key */ }
+      return false;
     };
-    for (const k in orig) { try { w[k] = orig[k]; } catch (e) {} }
-    w._motorcade = true;
-    CBZ.cityTryNearestRide = w;
   }
 
   /* ============================================================

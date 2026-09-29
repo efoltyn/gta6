@@ -794,29 +794,9 @@
     return true;
   };
 
-  // RE-DRAW the stowed loadout with [Q] — the same key fpsmode uses to swap guns.
-  // fpsmode's Q is gated on armed(), so while your guns are STOWED (inventory empty)
-  // it does nothing; we step in there to bring the piece back out. No new key: it's
-  // the natural "draw/swap weapon" control, just covering the empty-handed case.
-  addEventListener("keydown", function (e) {
-    if (g.mode !== "city" || g.state !== "playing" || e.repeat) return;
-    if ((e.key || "").toLowerCase() !== "q") return;
-    if (CBZ.player.driving || CBZ.player.dead || CBZ.cityMenuOpen || stopActive()) return;
-    // [Q] = holster/draw toggle. Your gun STAYS OUT by default — this just lets you
-    // put it away if you want, and bring it back. Stowed → re-draw. Armed with a
-    // SINGLE gun → voluntarily holster (there's nothing to swap to anyway, so fpsmode's
-    // Q is a no-op there). With 2+ guns, [Q] stays the weapon-swap key (fpsmode owns it).
-    if (g._copStow || g.cityStowedWeapon) { e.preventDefault(); CBZ.cityRedrawWeapon(); return; }
-    if (g.cityMeleeWeapon && CBZ.cityDrawGun && CBZ.cityDrawGun()) {
-      e.preventDefault();
-      // (no "Weapon out." note — you can see the swap in your own hands)
-      return;
-    }
-    if ((CBZ.weaponInventory || []).length === 1 && stowGuns()) {
-      e.preventDefault();
-      if (CBZ.city) CBZ.city.note("Holstered. Q to draw.", 1.6);
-    }
-  });
+  // RE-DRAW after a stop: the mouse wheel (fpsmode.js city wheel) brings a
+  // stowed loadout back, and scrolling to empty hands holsters. Q is not a
+  // weapon key in the city any more: it is the verb wheel (city/verbwheel.js).
 
   // capture-phase key handler: while a stop is live, the stop's own key drives
   // it FIRST (and we swallow the event so interact.js doesn't also act on it).

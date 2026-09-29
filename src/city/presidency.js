@@ -1241,6 +1241,27 @@
     return { line: "" };
   }
   function cabinetDead(role) { const S = st(); return !!(S.cabinet && S.cabinet[role] && S.cabinet[role].dead); }
+  // A POST CHANGES HANDS (city/president_staff.js). Fired: the man at the
+  // table walks out and the chair is empty until somebody is hired into it
+  // (an empty chair is a dead officer to every read above: nobody proposes,
+  // nobody calls). Hired: the new person IS the post from now on - the
+  // General on the phone and at the table is the one you picked.
+  function vacateCabinet(role) {
+    cabinet();
+    const S = st(), c = S.cabinet && S.cabinet[role];
+    if (!c) return false;
+    c.dead = true; c.vacant = true;
+    releaseOfficer(role);
+    return true;
+  }
+  function fillCabinet(role, who) {
+    cabinet();
+    const S = st(), R = CABINET_ROLES.find(function (r) { return r.key === role; });
+    if (!R || !who || !who.name) return false;
+    S.cabinet[role] = { name: who.name, sid: who.sid || ("cab_" + role + "_" + day()), role: R.title, gender: who.gender || "m", dead: false, refused: 0 };
+    releaseOfficer(role);
+    return true;
+  }
   function officerAt(role) {
     const st_ = ROOM.stations || [];
     for (let i = 0; i < st_.length; i++) if (st_[i].role === role) return st_[i];
@@ -2794,6 +2815,7 @@
       terms: S.terms | 0, voteDay: S.voteDay, campaignFor: S.campaignFor,
       attacksSeen: S.attacksSeen | 0,
       cabinet: S.cabinet ? JSON.parse(JSON.stringify(S.cabinet)) : null,
+      staff: S.staff ? JSON.parse(JSON.stringify(S.staff)) : null,
       lock: SEAM.lock.active ? { since: SEAM.lock.since, until: SEAM.lock.until, reason: SEAM.lock.reason } : null,
     };
   }
@@ -2820,6 +2842,7 @@
     // attack into today's scandal.
     S.attacksSeen = obj.attacksSeen != null ? (obj.attacksSeen | 0) : (S.attacksDone | 0);
     S.cabinet = obj.cabinet && typeof obj.cabinet === "object" ? obj.cabinet : null;
+    S.staff = obj.staff && typeof obj.staff === "object" ? obj.staff : null;
     if (obj.lock && isFinite(obj.lock.until)) { SEAM.lock.active = true; SEAM.lock.since = obj.lock.since; SEAM.lock.until = obj.lock.until; SEAM.lock.reason = obj.lock.reason || "assassination"; }
   }
   function stamp() { const led = g.cityWorld; if (led && typeof led === "object") led.pres = serialize(); }
@@ -2951,6 +2974,10 @@
     onAssassinated: onAssassinated,
     lockdown: lockdownRead,
     cabinet: cabinet,
+    vacateCabinet: vacateCabinet, fillCabinet: fillCabinet,
+    CABINET_ROLES: CABINET_ROLES.map(function (r) { return { key: r.key, title: r.title, job: r.job, archetype: r.archetype }; }),
+    // the President's hires (city/president_staff.js owns the shape; saved here)
+    staff: function () { const S = st(); return S.staff || (S.staff = {}); },
     // officers at the Situation Room table (probe surface)
     officers: function () { const o = {}; for (const k in OFF.peds) if (OFF.peds[k]) o[k] = OFF.peds[k]; return o; },
     proposal: proposal,

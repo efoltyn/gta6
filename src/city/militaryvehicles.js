@@ -339,7 +339,7 @@
     }
     if (I.register) {
       I.register("milvehicle", {
-        id: "milveh-take", slot: "e", bad: true, campaignSafe: true,
+        id: "milveh-take", slot: "e", ride: true, bad: true, campaignSafe: true,
         label: function (v) {
           return v.civilian ? (v.flightKind === "airliner" ? "Hijack the airliner" : "Steal the private jet")
             : v.kind === "tank" ? "Commandeer the tank"
@@ -509,10 +509,10 @@
     if (CBZ.cam) CBZ.cam.yaw = rec.heading + Math.PI;
     if (CBZ.city && CBZ.city.note) {
       const ctrl = rec.kind === "tank"
-        ? "W/S drive · A/D turn hull · mouse aims turret · L-click FIRE · [E] out"
+        ? "W/S drive · A/D turn hull · mouse aims turret · L-click FIRE · [F] out"
         : rec.kind === "patriot"
-          ? "W/S drive · A/D turn · [M] designate target · L-click LAUNCH · [E] out"
-          : "W/S drive · A/D turn · mouse look · [E] out";
+          ? "W/S drive · A/D turn · [M] designate target · L-click LAUNCH · [F] out"
+          : "W/S drive · A/D turn · mouse look · [F] out";
       note("Driving the " + vehName(rec) + " — " + ctrl, 3.2);
     }
     return true;
@@ -588,7 +588,7 @@
     return armor.kind === "patriot" ? firePatriot(armor) : fireTank(armor);
   };
 
-  // One input route for every stealable machine. Pressing E/Y exits the
+  // One input route for every stealable machine. Pressing F (pad Y) exits the
   // current seat or attempts the nearest parked ride; there is no artificial
   // ownership lock. Aircraft use footprint distance, so touching a door or
   // wing root works even when the model centre is many metres away.
@@ -611,7 +611,7 @@
     if (aimed) {
       // Consume this use press even if the specifically aimed machine is
       // already crewed; otherwise a failed theft can fire an unrelated nearby
-      // interaction and feels like the plane randomly ignored E/Y.
+      // interaction and feels like the plane randomly ignored F/Y.
       boardVehicle(aimed);
       return true;
     }
@@ -624,7 +624,7 @@
     return false;
   };
 
-  // [E] out of armor is systems/seat_exit.js's (CBZ.seatState "armor" reads
+  // [F] out of armor is systems/seat_exit.js's (CBZ.seatState "armor" reads
   // cityArmorActive/cityArmorRec and calls cityExitArmor). No second listener.
 
   // Declared at LOAD so the ordnance census counts a wired launcher, not a used

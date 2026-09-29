@@ -193,19 +193,14 @@
       if (rt > TRIG_ON) want["w"] = true;       // accelerate
       if (lt > TRIG_ON) want["s"] = true;       // brake / reverse
       if (down(pad, B.RB) || down(pad, B.A)) want[" "] = true;   // handbrake
-      if (edge(pad, B.Y)) {
-        // Do not synthesize E here. Cars, aircraft and armor each own a
-        // different seat lifecycle, and the interaction panel is deliberately
-        // suppressed while several of those systems have control. Call the
-        // current ride's real exit function so controller Y is symmetrical:
-        // one press gets in, one press gets out.
-        if (P && P._aircraft && CBZ.cityPlayerAircraftExit) CBZ.cityPlayerAircraftExit();
-        else if (P && P._vehicle && CBZ.cityExitVehicle) CBZ.cityExitVehicle();
-        else if (CBZ.cityArmorActive && CBZ.cityArmorActive() && CBZ.cityExitArmor) CBZ.cityExitArmor();
-        else tapKey("e");
-      }
+      // Y is F: the way out of whatever you are in, through the one exit
+      // dispatcher (systems/seat_exit.js), so a passenger's first press asks
+      // the driver to pull over exactly as the keyboard's does.
+      if (edge(pad, B.Y) && !(CBZ.seatExit && CBZ.seatExit())) tapKey("f");
       // keep non-driving edges fresh
+      if (edge(pad, B.DLEFT)) tapKey("q");      // the wheel on your own car
       edge(pad, B.LB); edge(pad, B.B); edge(pad, B.X); edge(pad, B.DUP); edge(pad, B.BACK);
+      if (edge(pad, B.DRIGHT) && CBZ.verbWheel && CBZ.verbWheel.isOpen()) tapKey("e");
       setAim(false); setFire(false);
     } else {
       // ---- ON FOOT ----
@@ -225,13 +220,12 @@
       if (edge(pad, B.B) && CBZ.fpsReload) CBZ.fpsReload();          // reload
       if (edge(pad, B.LB) && CBZ.fpsNextWeapon) CBZ.fpsNextWeapon(); // next weapon
       if (edge(pad, B.RB) && CBZ.fpsPrevWeapon) CBZ.fpsPrevWeapon(); // prev weapon
-      if (edge(pad, B.Y)) {
-        // Seated in anything (cockpit, hull, car, saddle, chair, bed): Y is
-        // the way out, through the one exit dispatcher (systems/seat_exit.js),
-        // whatever key that seat uses on a keyboard. On foot it stays the
-        // normal interact/board button.
-        if (!(CBZ.seatExit && CBZ.seatExit())) tapKey("e");
-      }
+      // THE KEYBOARD MAP ON A PAD: Y = F (get in / get out), D-pad right = E
+      // (the obvious verb on what you look at), D-pad left = Q (the verb wheel;
+      // D-pad right then fires its highlighted verb).
+      if (edge(pad, B.Y) && !(CBZ.seatExit && CBZ.seatExit())) tapKey("f");
+      if (edge(pad, B.DRIGHT)) tapKey("e");
+      if (edge(pad, B.DLEFT)) tapKey("q");
       if (edge(pad, B.DUP)) tapKey("m");                            // map
       if (edge(pad, B.BACK)) tapKey("Tab");                        // city power
     }

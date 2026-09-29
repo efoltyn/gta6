@@ -841,7 +841,10 @@
   // listener fires on the same press) and on touch the same pill is the tap.
   // One control per verb: the registry zone is deleted.
   const LiftCore = CBZ.liftCore;
-  const ROW_KEYS = ["e", "q", "r", "t"];     // the car's floor buttons, in panel order
+  // the car's floor buttons, in panel order: E is the obvious one (the other
+  // end), the rest are their panel numbers. Q is never a floor: Q is the
+  // city's verb wheel (city/verbwheel.js).
+  const ROW_KEYS = ["e", "2", "3", "4"];
   function rideTime(el, from, to) {
     const d = Math.abs(el.stops[to].no - el.stops[from].no);
     return Math.max(3.0, Math.min(6.0, 2.0 + d * 0.18));

@@ -270,9 +270,16 @@
       ["W / A / S / D", "Move"],
       ["Shift", "Sprint"],
       ["Space", "Jump"],
-      ["E", "Interact, doors, seats, vehicles, loot"],
+      ["E", "Use what you are looking at"],
+      ["Hold E", "Its heavier use, where it has one"],
+      ["F", "Get in, get out"],
+      ["Q", "Everything you can do to it"],
       ["?", "Show the controls for whatever you are doing"],
       ["Space / Esc", "Close this card"],
+    ],
+    touchRows: [
+      ["STICK", "Move"],
+      ["TAP IT", "A person, a car, a door: what you can do to it"],
     ],
   });
 
@@ -341,7 +348,8 @@
       ["A / D", "Steer"],
       ["Space", "Handbrake"],
       ["G", "Slide over to the passenger seat"],
-      ["F", "Get out — moving, that means jump"],
+      ["F", "Get out, moving, that means jump"],
+      ["Q", "What you can do from the seat"],
     ],
     touchRows: [
       ["GAS / BRAKE", "Accelerate / brake and reverse"],
@@ -362,7 +370,7 @@
       ["Space", "Get up — walk your own deck, step back to the wheel to take her"],
       ["Ctrl", "Crash-stop / full astern"],
       ["V", "The wheel view"],
-      ["E", "Over the side"],
+      ["F", "Over the side"],
     ],
     touchRows: [
       ["STICK", "Throttle and steer"],

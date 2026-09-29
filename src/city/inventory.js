@@ -1296,6 +1296,12 @@
     if ((e.key || "").toLowerCase() !== "e") return;
     const c = chestNear(REACH);
     if (!c) return;
+    // E is the verb on what you LOOK at: a chest beside you while you face a
+    // person or a counter is not the thing you meant (city/interactions.js).
+    if (CBZ.cam) {
+      const dx = c.x - P.pos.x, dz = c.z - P.pos.z, d = Math.hypot(dx, dz);
+      if (d > 0.8 && (dx / d) * -Math.sin(CBZ.cam.yaw) + (dz / d) * -Math.cos(CBZ.cam.yaw) < 0.55) return;
+    }
     e.preventDefault(); e.stopPropagation();
     openChest(c);
   }

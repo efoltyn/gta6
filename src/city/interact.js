@@ -34,6 +34,18 @@
 
   function dist(a, x, z) { return Math.hypot(a.pos.x - x, a.pos.z - z); }
   function nearest(list, x, z, test) { let best = null, bd = REACH; for (const p of list) { if (!test(p)) continue; const d = dist(p, x, z); if (d < bd) { bd = d; best = p; } } return best; }
+  // EVERY body in reach is a candidate, not only the nearest one: which person
+  // you MEAN is the one you are looking at (city/interactions.js scoreOf), and
+  // a nearest-only source made the man at your elbow win over the one you
+  // faced. The five closest are plenty for a prompt.
+  const _near = [];
+  function pushNear(list, x, z, test, push) {
+    _near.length = 0;
+    if (!list) return;
+    for (const p of list) { if (!test(p)) continue; const d = dist(p, x, z); if (d < REACH) _near.push({ p: p, d: d }); }
+    _near.sort((a, b) => a.d - b.d);
+    for (let i = 0; i < _near.length && i < 5; i++) push(_near[i].p, _near[i].d);
+  }
 
   // NO-DECOY FIX: a nearest-finder over city.streetProps (city/props.js's flat
   // registry of every street prop: bins, meters, newsboxes, cones, lamps…),
@@ -723,15 +735,15 @@
   });
   I.registerSource({
     id: "src-vendor", kind: "vendor", layers: ["ped:vendor", "ped"], prio: 12, driving: false,
-    find: function (px, pz, ctx, push) { const v = nearest(CBZ.cityPeds, px, pz, (p) => p.vendor && !p.dead); if (v) push(v, dist(v, px, pz)); },
+    find: function (px, pz, ctx, push) { pushNear(CBZ.cityPeds, px, pz, (p) => p.vendor && !p.dead, push); },
   });
   I.registerSource({
     id: "src-cop", kind: "cop", layers: ["ped:cop", "ped"], prio: 8, driving: false,
-    find: function (px, pz, ctx, push) { if (!CBZ.cityCops) return; const c = nearest(CBZ.cityCops, px, pz, (q) => !q.dead); if (c) push(c, dist(c, px, pz)); },
+    find: function (px, pz, ctx, push) { pushNear(CBZ.cityCops, px, pz, (q) => !q.dead, push); },
   });
   I.registerSource({
     id: "src-ped", kind: "ped", layers: ["ped:civ", "ped"], prio: 6, driving: false,
-    find: function (px, pz, ctx, push) { const p = nearest(CBZ.cityPeds, px, pz, (q) => !q.vendor && !q.dead); if (p) push(p, dist(p, px, pz)); },
+    find: function (px, pz, ctx, push) { pushNear(CBZ.cityPeds, px, pz, (q) => !q.vendor && !q.dead && !q.player, push); },
   });
   I.registerSource({
     id: "src-corpse", kind: "corpse", layers: ["corpse"], prio: 4, driving: false,
@@ -1376,7 +1388,9 @@
   I.register("ped:civ", { id: "ped-sell", slot: "k", prio: 38, bad: true, role: "dealer", needsItem: drugIn, label: "Sell product", onSelect: (p) => CBZ.cityDealTo(p) });
   I.register("ped:civ", {
     id: "ped-hire", slot: "k", prio: 37,
-    canShow: (p) => !p.recruited && !p.gang && !hatesYou(p) && canAfford100(),
+    // not for a sitting President: his people come to the office and are hired
+    // there, into real jobs (city/president_staff.js), not off the pavement
+    canShow: (p) => !p.recruited && !p.gang && !hatesYou(p) && canAfford100() && !(CBZ.presidentStaff && CBZ.presidency && CBZ.presidency.seat && CBZ.presidency.seat()),
     label: "Hire", onSelect: (p) => CBZ.cityRecruit(p),
   });
   I.register("ped:civ", { id: "ped-flirt", slot: "k", prio: 36, canShow: (p) => !hatesYou(p) && CBZ.cityIsRomance && CBZ.cityIsRomance(p), label: "Chat up", onSelect: (p) => CBZ.cityFlirt(p) });
@@ -1522,16 +1536,16 @@
   const occupied = (car) => (CBZ.carOccupied ? CBZ.carOccupied(car) : !!car.npcDriver);
   const aboard = (car) => (CBZ.carOccupantCount ? CBZ.carOccupantCount(car) : (car.npcDriver ? 1 : 0));
   I.register("vehicle", {
-    id: "car-get-in", slot: "e", canShow: (car) => !occupied(car) && !car._cineLocked && (car.owned || car.stolen),
+    id: "car-get-in", slot: "e", ride: true, canShow: (car) => !occupied(car) && !car._cineLocked && (car.owned || car.stolen),
     label: (car) => "Get in" + (car.owned ? " your ride" : ""), onSelect: (car) => CBZ.cityEnterVehicle(car),
   });
   I.register("vehicle", {
-    id: "car-boost", slot: "e", bad: true, canShow: (car) => !occupied(car) && !car._cineLocked && !car.owned && !car.stolen,
+    id: "car-boost", slot: "e", ride: true, bad: true, canShow: (car) => !occupied(car) && !car._cineLocked && !car.owned && !car.stolen,
     label: "Boost it", onSelect: (car) => CBZ.cityEnterVehicle(car),
   });
-  // someone's behind the wheel: a HOLD — you rip the door open and drag them out
+  // someone's behind the wheel: F rips the door open and drags them out
   I.register("vehicle", {
-    id: "car-jack", slot: "e", hold: true, bad: true, canShow: (car) => occupied(car) && !car._cineLocked,
+    id: "car-jack", slot: "e", ride: true, bad: true, canShow: (car) => occupied(car) && !car._cineLocked,
     // the label says how many people you are about to be outnumbered by — the
     // crew is a FACT before you pull the door, not a surprise after it.
     label: (car) => aboard(car) > 1 ? "Drag them out (" + aboard(car) + " aboard)" : "Drag the driver out",

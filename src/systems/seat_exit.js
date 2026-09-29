@@ -17,8 +17,10 @@
 
      CBZ.seatState()  -> null, or { kind, key, verb, at, exit }
         kind  "aircraft" | "armor" | "vehicle" | "mount" | "seat" | "bed"
-        key   the real key for that seat ("f" for an aircraft, where E is the
-              rudder — city/interactions.js pilotingAircraft; "e" otherwise)
+        key   always "f" (2026-09-29 key map: F is get in / get out of
+              ANYTHING, a cockpit, a car, a saddle, a chair; E is never an
+              exit, so a press meant for the thing in front of you can never
+              throw you out of your seat)
         verb  what the press will actually do: "Get out", "Jump", "Pull over",
               "Get up", "Climb out", "Get off", "Stand up". A verb, never a
               noun: the thing you are sitting in is the noun.
@@ -37,7 +39,7 @@
        the old E path was the ride router (militaryvehicles.js
        cityTryNearestRide), which, the moment you stood up off a bench, went
        on to board the nearest parked car with the same keystroke.
-     - DESKTOP LABEL: "[E] Get out" pinned on the door through
+     - DESKTOP LABEL: "[F] Get out" pinned on the door through
        CBZ.prisonPrompt (systems/interactions.js), the same element every
        other walk-up verb uses. When the door is off the frame (a first-person
        seat looks forward, the door is beside you) the label drops to the
@@ -109,7 +111,7 @@
     if (CBZ.cityArmorActive && CBZ.cityArmorActive() && CBZ.cityExitArmor) {
       const rec = CBZ.cityArmorRec ? CBZ.cityArmorRec() : null;
       return {
-        kind: "armor", key: "e",
+        kind: "armor", key: "f",
         verb: rec && rec.kind === "tank" ? "Climb out" : "Get out",
         at: rec ? above(rec.pos, rec.kind === "tank" ? 2.4 : 1.8) : null,
         exit: function () { CBZ.cityExitArmor(); },
@@ -121,7 +123,7 @@
       let verb = CBZ.cityVehicleGetOutVerb ? CBZ.cityVehicleGetOutVerb() : null;
       if (!verb) verb = (CBZ.cityVehicleGetOut && carSpeed(car) > STEP_OUT_MS) ? "Jump" : "Get out";
       return {
-        kind: "vehicle", key: "e", verb: verb,
+        kind: "vehicle", key: "f", verb: verb,
         at: doorPoint(car, P),
         exit: function () {
           if (CBZ.cityVehicleGetOut && CBZ.cityVehicleGetOut()) return;
@@ -135,7 +137,7 @@
     const mount = P._mountedAnimal;
     if (mount && CBZ.cityDismount && G().mode !== "sharksim") {
       return {
-        kind: "mount", key: "e", verb: "Get off",
+        kind: "mount", key: "f", verb: "Get off",
         at: above(mount.pos || P.pos, 1.2),
         exit: function () { CBZ.cityDismount(); },
       };
@@ -149,10 +151,10 @@
       const spot = s || b;
       const at = { x: num(spot.x, P.pos.x), y: num(spot.y, P.pos.y) + (s ? 0.6 : 0.5), z: num(spot.z, P.pos.z) };
       if (s && CBZ.propStand) {
-        return { kind: "seat", key: "e", verb: "Stand up", at: at, exit: function () { CBZ.propStand(P); } };
+        return { kind: "seat", key: "f", verb: "Stand up", at: at, exit: function () { CBZ.propStand(P); } };
       }
       if (b && (CBZ.propWake || CBZ.propStand)) {
-        return { kind: "bed", key: "e", verb: "Get up", at: at,
+        return { kind: "bed", key: "f", verb: "Get up", at: at,
           exit: function () { if (CBZ.propWake) CBZ.propWake(P); else CBZ.propStand(P); } };
       }
     }
@@ -184,7 +186,7 @@
     if (!e || e.repeat || e.ctrlKey || e.metaKey || e.altKey || typing(e)) return;
     if (!live()) return;
     const k = String(e.key || "").toLowerCase();
-    if (k !== "e" && k !== "f") return;
+    if (k !== "f") return;
     const st = seatState();
     if (!st || st.key !== k) return;
     e.preventDefault();

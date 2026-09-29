@@ -4440,7 +4440,7 @@
       (!CBZ.CONFIG || CBZ.CONFIG.PASSENGER_SEAT_V1 !== false)) ? "  [G] passenger" : "";
     CBZ.city && CBZ.city.note(helmHint
       ? "At the helm" + worth + "   [SPACE] get up  [V] wheel view"
-      : "Driving" + worth + "   [E] out  [C] car style" + seatHint, 1.8);
+      : "Driving" + worth + "   [F] out  [C] car style" + seatHint, 1.8);
     return true;
   };
   /* THE JACK, AT THE DOOR. A carjack is not "sit down, then they leave":
