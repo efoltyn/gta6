@@ -329,6 +329,14 @@
         grime = Math.max(grime, 0.35 * Math.exp(-eg / 0.12));
       } else {
         g = 1; wear = 0.06 + 0.5 * Math.exp(-Math.max(0, Math.min(ax, az) - P.pw / 2) / 0.5);   // lawn scuffed at the path edge
+        // DESIRE LINES: people cut the corner across the lawn to the fountain
+        // instead of walking the paths round it; one or two diagonals per
+        // park (by the lot's hash), a bald track frayed along its length
+        if (P.desire) {
+          const dg = P.desire === 1 ? Math.abs(lx - lz) : P.desire === 2 ? Math.abs(lx + lz) : Math.min(Math.abs(lx - lz), Math.abs(lx + lz));
+          const dd = dg * 0.7071 + (vn(x / 1.7, z / 1.7, 83) - 0.5) * 0.35;
+          wear = Math.max(wear, 0.95 * Math.exp(-(dd * dd) / (0.42 * 0.42)) * (0.7 + 0.3 * vn(x / 5, z / 5, 89)));
+        }
         for (const t of P.trees) {                                          // a mulch ring round every trunk
           const d = Math.hypot(x - t.x, z - t.z);
           if (d < 1.25) { const k = sm(clamp01((1.25 - d) / 0.25)); g = 1 - k; e = k; tone = 0.04; }
@@ -427,6 +435,7 @@
       const w = lot.w || 30, d = lot.d || 30, bo = Math.min(w, d) * 0.23;
       o.park = {
         lw: w - 1.6, ld: d - 1.6, pw: 2.2, plazaR: Math.min(w, d) * 0.17,
+        desire: 1 + ((hash3(Math.round(lot.cx), Math.round(lot.cz), 97) * 3) | 0),
         trees: lot.groundTrees || [],
         benches: [[1, 0], [-1, 0], [0, 1], [0, -1]].map(function (s) {
           return { x: lot.cx + s[0] * bo + (s[0] === 0 ? 2 : 0), z: lot.cz + s[1] * bo + (s[1] === 0 ? 2 : 0) };
@@ -453,9 +462,99 @@
     let lots = 0;
     for (const lot of state.lots) if (paintLot(state, lot)) lots++;
     state.S.needsUpdate = true; state.M.needsUpdate = true;
-    state.painted = true; state.cursor = state.lots.length;
+    state.painted = true; state.cursor = state.lots.length; state.bIx = null;
     stats.paintMs = Date.now() - t0; stats.paints++; stats.lots = lots;
   }
+  /* ==================================================================
+     coverAt — THE GRASS FIELD'S QUESTION (world/grassfield.js). Where the
+     splat says lawn, blades grow: the same R channel the shader paints, the
+     same bald-patch rule (wear x the same 2.3 m noise, cgNoise ported to
+     JS), the same lush-to-straw rule. The colour handed back is the lawn's
+     own linear albedo, so the blades average to the ground under them.
+     Owns every point inside a splat (a paved texel answers "no grass").
+     ================================================================== */
+  function fract(v) { return v - Math.floor(v); }
+  function cgHashJ(px, py) {
+    let x = fract(px * 0.1031), y = fract(py * 0.1031), z = fract(px * 0.1031);
+    const d = x * (y + 33.33) + y * (z + 33.33) + z * (x + 33.33);
+    x += d; y += d; z += d;
+    return fract((x + y) * z);
+  }
+  function cgNoiseJ(px, py) {
+    const ix = Math.floor(px), iy = Math.floor(py);
+    let fx = px - ix, fy = py - iy;
+    fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy);
+    const a = cgHashJ(ix, iy), b = cgHashJ(ix + 1, iy), c = cgHashJ(ix, iy + 1), d = cgHashJ(ix + 1, iy + 1);
+    return (a + (b - a) * fx) + ((c + (d - c) * fx) - (a + (b - a) * fx)) * fy;
+  }
+  function lin(hex) {
+    const f = function (c) { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+    return [f((hex >> 16) & 255), f((hex >> 8) & 255), f(hex & 255)];
+  }
+  const LAWN = lin(0x5f7e37), STRAW = lin(0x958a52);   // == uCgGrass / uCgDry
+  function underBuilding(st, x, z) {
+    if (!st.bIx) {
+      st.bIx = new Map();
+      for (const lot of st.lots) {
+        const b = lot && lot.building;
+        if (!b || b.park || !(b.w > 1) || !(b.d > 1)) continue;
+        const bx = isFinite(b.ox) ? b.ox : lot.cx, bz = isFinite(b.oz) ? b.oz : lot.cz;
+        const R = { x0: bx - b.w / 2 - 0.2, x1: bx + b.w / 2 + 0.2, z0: bz - b.d / 2 - 0.2, z1: bz + b.d / 2 + 0.2 };
+        for (let ix = Math.floor(R.x0 / 16); ix <= Math.floor(R.x1 / 16); ix++)
+          for (let iz = Math.floor(R.z0 / 16); iz <= Math.floor(R.z1 / 16); iz++) {
+            const k = ix * 100003 + iz; let l = st.bIx.get(k); if (!l) st.bIx.set(k, l = []); l.push(R);
+          }
+      }
+    }
+    const l = st.bIx.get(Math.floor(x / 16) * 100003 + Math.floor(z / 16));
+    if (l) for (let i = 0; i < l.length; i++) { const R = l[i]; if (x >= R.x0 && x <= R.x1 && z >= R.z0 && z <= R.z1) return true; }
+    return false;
+  }
+  function coverAt(x, z, out) {
+    for (let k = 0; k < states.length; k++) {
+      const st = states[k];
+      const u = (x - st.x0) / st.cell, v = (z - st.z0) / st.cell;
+      if (!(u >= 0 && v >= 0 && u < st.N && v < st.N)) continue;
+      const i = ((v | 0) * st.N + (u | 0)) * 4;
+      const S = st.S.image.data, M = st.M.image.data;
+      const g0 = S[i] / 255;
+      if (g0 < 0.04) { out.g = 0; return true; }
+      // the splat is painted 0.8 m past the lot under the footway's back edge
+      // (the kerb mesh hides it); a blade must stand on the lot pad itself
+      // (checked a blade's jitter round the sample: 15 cm each way)
+      const SK = CBZ.streetKit;
+      if (SK && SK.regionAt && SK.surfaces && SK.surfaces.length &&
+          (SK.regionAt(x, z) !== 2 || SK.regionAt(x - 0.15, z - 0.15) !== 2 || SK.regionAt(x + 0.15, z - 0.15) !== 2 ||
+           SK.regionAt(x - 0.15, z + 0.15) !== 2 || SK.regionAt(x + 0.15, z + 0.15) !== 2)) { out.g = 0; return true; }
+      // and never under a building: the splat's texel (0.3-0.6 m) straddles
+      // a wall, the building's own footprint does not
+      if (underBuilding(st, x, z)) { out.g = 0; return true; }
+      const wear = M[i + 2] / 255;
+      // the shader's bald rule: wear x a 2.3 m noise through a steep gain
+      const wn = wear * (0.55 + 0.9 * cgNoiseJ(x / 2.3 + 9.1, z / 2.3 + 9.1));
+      const bald = sm(clamp01((wn - 0.55) / 0.3));
+      const g = g0 * (1 - bald) * (1 - 0.45 * wear);
+      if (g < 0.03) { out.g = 0; return true; }
+      // lush..straw: the 41 m field + wear (the map's own dryness averages 0.5)
+      const m41 = cgNoiseJ(x / 41 + 1.7, z / 41 + 1.7);
+      const dry = clamp01(0.275 + sm(clamp01((m41 - 0.45) / 0.4)) * 0.45 + wear * 0.35 - 0.3);
+      out.g = g;
+      out.dry = dry;
+      out.r = (LAWN[0] + (STRAW[0] - LAWN[0]) * dry) * 0.95;
+      out.gr = (LAWN[1] + (STRAW[1] - LAWN[1]) * dry) * 0.95;
+      out.b = (LAWN[2] + (STRAW[2] - LAWN[2]) * dry) * 0.95;
+      // a neglected yard (projects, abandoned lots) runs to seed and weeds
+      out.wild = wear > 0.5 ? 0.35 + wear * 0.5 : 0;
+      out.h = 1 + wear * 0.5;
+      out.flw = 0.02 + 0.08 * wear;
+      const ys = SK && SK.heightAt ? SK.heightAt(x, z) : null;
+      out.y = ys != null ? ys : (typeof CBZ.floorAt === "function" ? CBZ.floorAt(x, z) : 0.16);
+      return true;
+    }
+    return false;
+  }
+  if (CBZ.groundCover) CBZ.groundCover.register("cityground", coverAt, 10);
+
   /* THE TOWNS PAINT AFTER THE LOAD. A town's lot ground is ~0.1 s of splat
      work each, and a dozen of them were a second and more of boot for ground
      nobody can see from the downtown. So the world build only QUEUES them
@@ -741,6 +840,7 @@
     // finish every queued town now (plain-node checks, a page that needs it)
     flush: function () { drain(1e9); },
     stats: function () { return Object.assign({ splat: SPLAT, detail: TEX, live: !!live, surfaces: states.length }, stats); },
+    coverAt: coverAt,
     _bakeDetail: bakeDetail,     // plain-node checks
     _paint: paint,
   };

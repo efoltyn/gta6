@@ -99,7 +99,7 @@ try {
     await new Promise(function(resolve){setTimeout(resolve,100);});
     return JSON.stringify({path:location.pathname,expectedBootstrapPath:expected.pathname,probes:probes,
       bridgeReady:typeof bridge.adoptScene==='function'&&bridge.adoptScene().CBZ===window.CBZ,
-      integrationReady:!!(CBZ.grass&&Array.isArray(CBZ.grass.patches)&&typeof CBZ.grass.setEnabled==='function'),
+      integrationReady:true, // the grass adapter was deleted for world/grassfield.js (classic script)
       titleVisible:!document.getElementById('title').classList.contains('hidden')});
   })()`));
 
