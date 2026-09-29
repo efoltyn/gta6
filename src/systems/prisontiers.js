@@ -73,11 +73,16 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  // This file's CONFIG defaults are published at parse: other files read
+  // them before (or without) the prison ever being built.
+  if (CBZ.CONFIG.PRISON_TIERS_V1 == null) CBZ.CONFIG.PRISON_TIERS_V1 = true;
+  if (CBZ.CONFIG.PRISON_TIER_TRANSFER == null) CBZ.CONFIG.PRISON_TIER_TRANSFER = true;
+  if (CBZ.CONFIG.PRISON_TIER_SIGNAGE == null) CBZ.CONFIG.PRISON_TIER_SIGNAGE = true;
+  // Built when the prison is first needed, as if at this script's parse
+  // point (core/prisonlazy.js). Body left at its old indent.
+  CBZ.definePrison("systems/prisontiers.js", function () {
   if (!CBZ || typeof CBZ.onUpdate !== "function") return;
   const CFG = (CBZ.CONFIG = CBZ.CONFIG || {});
-  if (CFG.PRISON_TIERS_V1 == null) CFG.PRISON_TIERS_V1 = true;
-  if (CFG.PRISON_TIER_TRANSFER == null) CFG.PRISON_TIER_TRANSFER = true;
-  if (CFG.PRISON_TIER_SIGNAGE == null) CFG.PRISON_TIER_SIGNAGE = true;
 
   const addBox = CBZ.addBox;
   const g = CBZ.game;
@@ -872,4 +877,5 @@
     const lock = b.count.cells === "lock" ? b.count.from : b.secure.from;
     return (24 - lock) + b.wake.from;
   }
+  });
 })();

@@ -139,7 +139,12 @@
     const R = s.keepR();
     const box = new THREE.Box3(), gb = new THREE.Box3(), v = new THREE.Vector3(), m4 = new THREE.Matrix4();
     const stats = { removed: 0, kept: 0, opened: 0, instTrimmed: 0, colliders: 0, platforms: 0 };
-    root.updateMatrixWorld(true);
+    // NOT updateMatrixWorld: core/matrixskip.js makes it return early for a
+    // hidden node, and the city root is hidden while it builds, so every
+    // matrixWorld stayed identity and the prune judged each building by its
+    // LOCAL bounds (all near the origin): the downtown streets were parked
+    // as "725 m away" (the same trap core/batch.js documents).
+    root.updateWorldMatrix(true, true);
     // world bounds of a subtree; null if it holds horizon (never removed whole)
     function boundsOf(o) {
       let horizon = false;
@@ -178,7 +183,7 @@
       if (b && b.isEmpty()) { stats.kept++; return; }
       if (b && outside(b)) {
         const parent = o.parent;
-        parent.remove(o); stats.removed++;
+        parent.remove(o); stats.removed++; prunedTops.add(o);
         if (s.stream && CBZ.streamParkPruned) CBZ.streamParkPruned(o, parent, b.clone(), null, null);
         return;
       }
@@ -192,8 +197,15 @@
       }
       stats.kept++;
     }
+    const prunedTops = new Set();
     const kids = root.children.slice();
     for (const k of kids) judge(k, 0);
+    // LOS blockers that went with a pruned subtree leave the list too: a
+    // detached wall still in CBZ.losBlockers kept its whole building alive
+    // through its parent chain (measured: 8.5k of the estate slice's 9.7k
+    // blockers, ~100 MB of heap) and still blocked sight where nothing stands.
+    // Streamed, each goes with its parked job and returns when it does.
+    stats.los = CBZ.sliceDropDetachedLos(root, prunedTops);
 
     const keepRect = function (c) {
       if (!c || c.minX == null) return true;
@@ -228,6 +240,25 @@
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     CBZ.slicePruneResult = stats;
     return stats;
+  };
+
+  // the top of o's detached subtree, or null when o is in the scene
+  function detachedTop(o, root) {
+    let p = o, top = o;
+    while (p) { if (p === root || p.isScene) return null; top = p; p = p.parent; }
+    return top;
+  }
+  CBZ.sliceDropDetachedLos = function (root, tops) {
+    const L = CBZ.losBlockers; if (!L || !L.length) return 0;
+    let w = 0, n = 0;
+    for (let i = 0; i < L.length; i++) {
+      const m = L[i], top = m ? detachedTop(m, root) : null;
+      if (!top || (tops && !tops.has(top))) { L[w++] = m; continue; }
+      n++;
+      if (CBZ.streamParkLos) CBZ.streamParkLos(top, m);
+    }
+    L.length = w;
+    return n;
   };
 
   /* ---- actors: traffic on the slice's own streets, the player in the slice */

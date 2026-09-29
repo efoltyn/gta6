@@ -129,6 +129,8 @@
   // Called by city/world.js at the top of buildCity. The spawn is the city
   // centre (the rooftop / street spawn is downtown); reset() places the
   // player and the streamer re-centres on them from the first tick.
+  const RECENTRE = 0.5;               // the centre follows the player at r * RECENTRE
+  const lastP = { x: 0, z: 0, t: 0 };
   CBZ.streamBegin = function (cx, cz) {
     if (!streamWanted() || CBZ.slice) return false;
     const view = function () { return Math.max(380, +CBZ.cityFogFar || 760) + 60; };
@@ -136,7 +138,15 @@
       name: "stream", stream: true, x: cx, z: cz, r: 300,
       label: "Gang City (streamed)",
       view: view,
-      keepR: function () { return S.r + S.view(); },
+      /* THE KEEP CIRCLE IS WHAT CAN BE SEEN, NO MORE. The player is never
+         more than RECENTRE (half the playable radius) from the centre (the
+         centre follows at that distance), and sees `view` (fog + 60 m) from
+         there; `lead` adds the ground a moving player covers before the next
+         tick builds it (speed x 2.5 s, up to 250 m). It was r + view: the
+         whole playable radius again on top, ~35% more city in memory at the
+         downtown spawn for ground nobody could see yet. */
+      lead: 0,
+      keepR: function () { return S.r * RECENTRE + S.view() + S.lead; },
     };
     CBZ.slice = S;
     S.r = CBZ.SLICE_MANIFEST ? CBZ.streamRadius(cx, cz, view()) : 300;
@@ -152,15 +162,66 @@
 
   function cityRoot() { const A = CBZ.city && CBZ.city.arena; return (A && A.root) || (CBZ._cityRootBuilding || null); }
 
-  // run fn, capturing what it adds at the top of the city root and the scene
-  // and every collider/platform it pushes
+  /* WHAT A JOB LEAVES BEHIND, SO IT CAN BE TAKEN BACK. A builder writes
+     into shared lists (CBZ.* arrays: shops, lots, work anchors, doors,
+     updaters...; the arena's arrays; any module list registered with
+     CBZ.streamBus). runCaptured notes each list's length before the job and
+     keeps what was appended. A far job is then FREED, not just parked
+     (freeJob below): its objects leave and are disposed, its entries leave
+     every list, and next time it simply runs again. The world's plain DATA
+     (regions, roads, water, no-spawn, frontier, biome blends) stays: the map
+     and traffic read it everywhere; a re-run takes its own old copies out
+     first so nothing is registered twice. */
+  const DATA_BUSES = { regions: 1, roads: 1, waterBodies: 1, noSpawn: 1, frontierRoads: 1, frontierLandmarks: 1, _biomeBlendSpecs: 1 };
+  const OWN_BUSES = { colliders: 1, platforms: 1, losBlockers: 1, streamJobs: 1, updaters: 1, always: 1 };
+  const moduleBuses = [];
+  CBZ.streamBus = function (arr, name) { if (Array.isArray(arr) && moduleBuses.indexOf(arr) < 0) { moduleBuses.push(arr); arr._busName = name || "module"; } };
+  // a registry that is not a plain list (city/placement.js's cell hash) says
+  // how to count, list and take back what a job added: { mark(), since(m), drop(items) }
+  const busHooks = [];
+  CBZ.streamBusHook = function (h) { if (h && busHooks.indexOf(h) < 0) busHooks.push(h); };
+  function busList() {
+    const out = [];
+    const add = function (arr, name) { if (Array.isArray(arr) && Object.isExtensible(arr) && out.every(function (e) { return e.arr !== arr; })) out.push({ arr: arr, name: name, n: arr.length }); };
+    for (const k of Object.keys(CBZ)) { if (OWN_BUSES[k]) continue; const v = CBZ[k]; if (Array.isArray(v)) add(v, k); }
+    const A = CBZ.city && CBZ.city.arena;
+    if (A) for (const k of Object.keys(A)) { const v = A[k]; if (Array.isArray(v)) add(v, "arena." + k); }
+    for (const m of moduleBuses) add(m, m._busName);
+    return out;
+  }
+  function dropItems(arr, items) {
+    if (!arr || !items || !items.length) return;
+    const drop = new Set(items);
+    let w = 0; for (let i = 0; i < arr.length; i++) if (!drop.has(arr[i])) arr[w++] = arr[i];
+    arr.length = w;
+  }
+
+  // run fn, capturing what it adds at the top of the city root and the scene,
+  // every collider/platform it pushes and every list it grows
   function runCaptured(job) {
     const root = cityRoot(), scene = CBZ.scene;
+    // a re-run: its last run's world data comes out first (it registers it again)
+    if (job.data) { for (const d of job.data) dropItems(d.arr, d.items); job.data = null; }
+    // what is already pending pools up now, so the job's pools hold only its own panes
+    if (CBZ.cityFlushPools) { try { CBZ.cityFlushPools(); } catch (e) {} }
     const r0 = root ? root.children.length : 0, s0 = scene ? scene.children.length : 0;
     const c0 = (CBZ.colliders || []).length, p0 = (CBZ.platforms || []).length;
+    const buses = busList();
+    const marks = busHooks.map(function (h) { try { return h.mark(); } catch (e) { return null; } });
     const t0 = performance.now();
     try { job.fn(); } catch (e) { console.error("[stream job " + (job.name || "?") + "]", e); }
+    // late pools (glass, room deco, masonry) of what it built: now, so they are this job's
+    if (CBZ.cityFlushPools) { try { CBZ.cityFlushPools(); } catch (e) {} }
     job.ms = performance.now() - t0;
+    job.bus = []; job.data = [];
+    job.hooks = [];
+    busHooks.forEach(function (h, i) { if (marks[i] == null) return; try { const items = h.since(marks[i]); if (items && items.length) job.hooks.push({ h: h, items: items }); } catch (e) {} });
+    for (const b of buses) {
+      if (b.arr.length <= b.n) continue;
+      const items = b.arr.slice(b.n);
+      (DATA_BUSES[b.name] || DATA_BUSES[b.name.replace(/^arena\./, "")] ? job.data : job.bus).push({ arr: b.arr, items: items });
+    }
+
     job.objs = [];
     if (root) for (let i = r0; i < root.children.length; i++) job.objs.push({ o: root.children[i], parent: root });
     if (scene) for (let i = s0; i < scene.children.length; i++) { const o = scene.children[i]; if (o !== root) job.objs.push({ o: o, parent: scene }); }
@@ -211,8 +272,24 @@
   };
 
   /* ---- park / unpark ------------------------------------------------------ */
+  // a geometry that dropped its CPU arrays after upload (metro far tiles) can
+  // never be uploaded again: it keeps its GPU buffers
+  // (an attribute whose array is an accessor, city/buildings.js's lazy trim
+  // boxes, can always make its array again: never read it here, that would
+  // build what the park is trying not to hold)
+  function hasArray(a) {
+    const d = Object.getOwnPropertyDescriptor(a, "array");
+    if (d && d.get) return true;
+    return !!(a.array || (a.data && a.data.array));
+  }
+  function reuploadable(g) {
+    if (g.index && !hasArray(g.index)) return false;
+    for (const k in g.attributes) { const a = g.attributes[k]; if (a && !hasArray(a)) return false; }
+    return true;
+  }
+  CBZ.geoReuploadable = reuploadable;
   function releaseGPU(o) {
-    o.traverse(function (c) { if (c.geometry && c.geometry.dispose) c.geometry.dispose(); });
+    o.traverse(function (c) { const g = c.geometry; if (g && g.dispose && g.attributes && reuploadable(g)) g.dispose(); });
   }
   function removeFrom(arr, list) {
     if (!arr || !list || !list.length) return;
@@ -220,29 +297,116 @@
     let w = 0; for (let i = 0; i < arr.length; i++) if (!drop.has(arr[i])) arr[w++] = arr[i];
     arr.length = w;
   }
+  // the LOS blockers under a job's objects leave CBZ.losBlockers with it
+  function takeLos(job) {
+    const L = CBZ.losBlockers; if (!L || !L.length || !job.objs || !job.objs.length) return;
+    const tops = new Set(); for (const it of job.objs) tops.add(it.o);
+    let w = 0;
+    for (let i = 0; i < L.length; i++) {
+      const m = L[i]; let p = m, hit = false;
+      while (p) { if (tops.has(p)) { hit = true; break; } p = p.parent; }
+      if (hit) (job.los || (job.los = [])).push(m); else L[w++] = m;
+    }
+    L.length = w;
+  }
   function park(job) {
+    takeLos(job);
     for (const it of job.objs) { if (it.o.parent) it.o.parent.remove(it.o); releaseGPU(it.o); }
     removeFrom(CBZ.colliders, job.cols); removeFrom(CBZ.platforms, job.plats);
-    if (job.pure) { job.objs = null; job.cols = job.plats = null; job.state = "queued"; }
+    if (job.pure) { job.objs = null; job.cols = job.plats = null; job.los = null; job.state = "queued"; }
     else job.state = "parked";
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
   }
+  /* FREE a far job: everything it made goes, and it is queued to run again.
+     Materials are left alone (they are cached and shared across builds). */
+  function freeJob(job) {
+    if (job.state === "built") park(job);
+    for (const it of job.objs || []) {
+      if (it.o.parent) it.o.parent.remove(it.o);
+      it.o.traverse(function (c) {
+        const g = c.geometry;
+        if (g && g.dispose && !g._shared && !(g.userData && g.userData._shared)) g.dispose();
+      });
+    }
+    for (const b of job.bus || []) dropItems(b.arr, b.items);
+    for (const k of job.hooks || []) { try { k.h.drop(k.items); } catch (e) {} }
+    job.hooks = null;
+    // (frame work a job registered is left running: a builder's first run can
+    // wire a whole system's tick once, and its lists are what just emptied)
+    job.objs = null; job.cols = job.plats = null; job.los = null; job.bus = null;
+    job.state = "queued"; job.freed = (job.freed || 0) + 1;
+    CBZ.streamStats.freed = (CBZ.streamStats.freed || 0) + 1;
+  }
+
   function unpark(job) {
     for (const it of job.objs) if (it.parent) it.parent.add(it.o);
     for (const c of job.cols) CBZ.colliders.push(c);
     for (const p of job.plats) (CBZ.platforms = CBZ.platforms || []).push(p);
+    if (job.los && CBZ.losBlockers) { for (const m of job.los) CBZ.losBlockers.push(m); job.los = null; }
     job.state = "built";
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
   }
   function settle(job) {
-    // late content: freeze its matrices and queue its shaders (the batch pass
-    // is a once-per-world step; late content keeps its own draws, like the
-    // metro's streamed tiles)
+    // LATE CONTENT IS BATCHED LIKE BOOT CONTENT. What the job added under the
+    // city root moves into one identity group, and that group gets the same
+    // passes the boot world got (core/batch.js merge, local instancing): a
+    // streamed town draws in a handful of calls, not one per box, and parks
+    // and returns as one unit. Only after the world's own batch ran (a job
+    // that runs during the build is batched with everything else).
+    const root = cityRoot();
+    if (root && root.userData && root.userData._batched && job.objs && job.objs.length && CBZ.batchStaticUnder && window.THREE) {
+      const mine = job.objs.filter(function (it) { return it.parent === root && it.o.parent === root; });
+      if (mine.length) {
+        const G = new window.THREE.Group();
+        G.name = "stream-job";
+        root.add(G);
+        for (const it of mine) { root.remove(it.o); G.add(it.o); }
+        try { CBZ.batchStaticUnder(G); } catch (e) { console.error("[stream batch " + (job.name || "?") + "]", e); }
+        try { if (CBZ.instanceStaticUnder) CBZ.instanceStaticUnder(G); } catch (e) {}
+        job.objs = job.objs.filter(function (it) { return mine.indexOf(it) < 0; });
+        job.objs.push({ o: G, parent: root });
+      }
+    }
     for (const it of job.objs || []) {
+      try { CBZ.freeStaticArrays(it.o); } catch (e) {}
       try { if (CBZ.freezeStaticUnder) CBZ.freezeStaticUnder(it.o); } catch (e) {}
       try { if (CBZ.shaderQueue) CBZ.shaderQueue(it.o, { full: true }); } catch (e) {}
     }
   }
+
+  /* ---- ONE COPY OF STATIC GEOMETRY, NOT TWO -------------------------------
+     three keeps every attribute's array in JS after it uploads it, so a static
+     mesh costs its bytes twice (heap + GPU). For the world's static surfaces
+     (terrain, ground skins: userData.terrain / worldSurface), nothing reads
+     the NON-POSITION arrays again after the build: raycasts touch position
+     and index only. So once an attribute is
+     on the GPU its normal / colour / uv / material arrays are dropped. A lost
+     GL context cannot re-upload them: systems/glcontext.js reloads the page
+     at the player's position instead (CBZ.freedStaticArrays says so). */
+  function dropArray() { this.array = null; CBZ.freedStaticArrays = true; }
+  const KEEP = { position: 1 };
+  CBZ.freeStaticArrays = function (root) {
+    if (!root || (CBZ.CONFIG && CBZ.CONFIG.FREE_STATIC_ARRAYS === false)) return 0;
+    let n = 0;
+    root.traverse(function (o) {
+      if (!o.isMesh || o.isInstancedMesh || !o.geometry) return;
+      const u = o.userData || {};
+      // (batch-merged meshes keep theirs: core/farcull.js evicts them from the
+      // GPU when they are far, and three re-uploads them from these arrays)
+      if (!(u.terrain || u.worldSurface)) return;
+      const g = o.geometry;
+      if (g._cbzFreed) return;
+      g._cbzFreed = true;
+      for (const k in g.attributes) {
+        if (KEEP[k]) continue;
+        const a = g.attributes[k];
+        if (!a || a.isInterleavedBufferAttribute || !a.array) continue;
+        if (a._cbzUploaded) { a.array = null; CBZ.freedStaticArrays = true; } else a.onUpload(dropArray);
+        n++;
+      }
+    });
+    return n;
+  };
 
   /* ---- the pruned downtown/world content (core/slice.js slicePrune) ------
      In a streamed boot the prune parks instead of discarding: each removed
@@ -253,6 +417,12 @@
   // one parked job per 400 m cell (by the subtree's centre), not per object:
   // the streamer scans its job list twice a second
   const prunedCells = new Map();
+  const jobOfTop = new WeakMap();
+  // a pruned LOS blocker rides with the parked job that holds its subtree
+  CBZ.streamParkLos = function (top, m) {
+    const job = jobOfTop.get(top); if (!job) return;
+    (job.los || (job.los = [])).push(m);
+  };
   CBZ.streamParkPruned = function (o, parent, box) {
     const cx = (box.min.x + box.max.x) / 2, cz = (box.min.z + box.max.z) / 2;
     const k = Math.floor(cx / 400) + "," + Math.floor(cz / 400);
@@ -265,11 +435,13 @@
     r.minX = Math.min(r.minX, box.min.x); r.maxX = Math.max(r.maxX, box.max.x);
     r.minZ = Math.min(r.minZ, box.min.z); r.maxZ = Math.max(r.maxZ, box.max.z);
     job.objs.push({ o: o, parent: parent });
+    jobOfTop.set(o, job);
     releaseGPU(o);
   };
 
   /* ---- the streamer --------------------------------------------------------- */
   const HYST = 250;                 // park only this far past the keep circle
+  const FREE_DIST = 700;            // ... and free it outright this far past it
   const STEP_MS = 6;                // per-tick build budget (a job always gets to finish)
   let acc = 0;
   CBZ.streamStats = { built: 0, parked: 0, queued: 0, recentres: 0, lastJobMs: 0, maxJobMs: 0 };
@@ -277,7 +449,19 @@
     const s = CBZ.slice; if (!s || !s.stream) return;
     const P = CBZ.player; if (!P || !P.pos) return;
     const dx = P.pos.x - s.x, dz = P.pos.z - s.z;
-    if (force || dx * dx + dz * dz > (s.r * 0.5) * (s.r * 0.5)) {
+    // how far a moving player gets before the next few ticks (vehicle or feet)
+    // (measured from the position between ticks: a car, a plane, a horse,
+    // a teleport all count the same way; a jump of > 400 m is a teleport)
+    const tNow = performance.now();
+    let V = 0;
+    if (lastP.t && tNow > lastP.t) {
+      const mdx = P.pos.x - lastP.x, mdz = P.pos.z - lastP.z, d = Math.sqrt(mdx * mdx + mdz * mdz);
+      if (d < 400) V = d / ((tNow - lastP.t) / 1000);
+    }
+    lastP.x = P.pos.x; lastP.z = P.pos.z; lastP.t = tNow;
+    const lead = Math.min(250, V * 2.5);
+    if (lead > s.lead + 20 || lead < s.lead - 60) s.lead = lead;     // grows at once, shrinks lazily
+    if (force || dx * dx + dz * dz > (s.r * RECENTRE) * (s.r * RECENTRE)) {
       s.x = P.pos.x; s.z = P.pos.z;
       s.r = CBZ.SLICE_MANIFEST ? CBZ.streamRadius(s.x, s.z, s.view()) : s.r;
       CBZ.streamStats.recentres++;
@@ -292,6 +476,9 @@
       if (performance.now() - t0 > STEP_MS && !force) break;
     }
     for (const j of jobs) if (j.state === "built" && j.objs && !rectKeeps(j.rect, HYST)) park(j);
+    // a parked job this far out is freed outright (it re-runs if the player
+    // comes back); pruned boot content has no fn and stays parked
+    for (const j of jobs) if (j.state === "parked" && j.fn && !j.noFree && !rectKeeps(j.rect, FREE_DIST)) freeJob(j);
     let b = 0, p = 0, qd = 0;
     for (const j of jobs) { if (j.state === "built") b++; else if (j.state === "parked") p++; else qd++; }
     CBZ.streamStats.built = b; CBZ.streamStats.parked = p; CBZ.streamStats.queued = qd;

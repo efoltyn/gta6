@@ -33,12 +33,17 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  // This file's CONFIG defaults are published at parse: other files read
+  // them before (or without) the prison ever being built.
+  if (CBZ.CONFIG.JAIL_SEARCHLIGHT_DETECT == null) CBZ.CONFIG.JAIL_SEARCHLIGHT_DETECT = true;
+  // Built when the prison is first needed, as if at this script's parse
+  // point (core/prisonlazy.js). Body left at its old indent.
+  CBZ.definePrison("entities/searchlight.js", function () {
   const scene = CBZ.prisonRoot || CBZ.scene;
 
   // searchlights are real SENSORS when this is on: systems/detection.js
   // consumes CBZ.litBySearchlight (heat + guard pings), and down in update()
   // the beam that is actually holding the player flushes red as feedback.
-  if (CBZ.CONFIG && CBZ.CONFIG.JAIL_SEARCHLIGHT_DETECT == null) CBZ.CONFIG.JAIL_SEARCHLIGHT_DETECT = true;
 
   /* ==========================================================
      1. SHARED SOFT LIGHT
@@ -442,5 +447,6 @@
   // keep them sweeping on the title screen too, for atmosphere
   CBZ.onAlways(7, function (dt) {
     if (CBZ.game.mode === "escape" && CBZ.game.state !== "playing") update(dt);
+  });
   });
 })();

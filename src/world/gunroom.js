@@ -68,12 +68,23 @@
   function tellHint(m, s) { if (CBZ.jailTell) return CBZ.jailTell.hint(m, s); if (CBZ.flashHint) try { CBZ.flashHint(m, s); } catch (e) {} return false; }
 
   const CBZ = window.CBZ;
+  // This file's CONFIG defaults are published at parse: other files read
+  // them before (or without) the prison ever being built.
+  if (CBZ.CONFIG.PRISON_ARMORY_SPINE == null) CBZ.CONFIG.PRISON_ARMORY_SPINE = true;
+  if (CBZ.CONFIG.PRISON_ARMORY_KEY_ONLY == null) CBZ.CONFIG.PRISON_ARMORY_KEY_ONLY = true;
+  if (CBZ.CONFIG.PRISON_ARMORY_FULL_RACK == null) CBZ.CONFIG.PRISON_ARMORY_FULL_RACK = true;
+  if (CBZ.CONFIG.PRISON_RACK_EMPTIES == null) CBZ.CONFIG.PRISON_RACK_EMPTIES = true;
+  // systems/capture.js's show-don't-tell ledger; declared here first (at
+  // parse) as it always was, so both files share the one object.
+  CBZ._jailShowRaw = CBZ._jailShowRaw || { toasts: [], hints: [], narrations: [] };
+  // Built when the prison is first needed, as if at this script's parse
+  // point (core/prisonlazy.js). Body left at its old indent.
+  CBZ.definePrison("world/gunroom.js", function () {
   const THREE = window.THREE;
   const { addBox, roomShell } = CBZ;
   const ROOT = CBZ.prisonRoot || CBZ.scene;
 
   CBZ.CONFIG = CBZ.CONFIG || {};
-  if (CBZ.CONFIG.PRISON_ARMORY_SPINE == null) CBZ.CONFIG.PRISON_ARMORY_SPINE = true;
   const SPINE = !!CBZ.CONFIG.PRISON_ARMORY_SPINE;
 
   /* ---- 2026-08-05: THE ARMORY IS A KEY DOOR, NOT A PRICE ------------------
@@ -92,7 +103,6 @@
      the cop-role bypass are byte-for-byte what they were, because those are
      things the door physically respects; route 4 was the only one that wasn't.
      PRISON_ARMORY_KEY_ONLY=false hands the ledger route back to both gates. */
-  if (CBZ.CONFIG.PRISON_ARMORY_KEY_ONLY == null) CBZ.CONFIG.PRISON_ARMORY_KEY_ONLY = true;
   // undefined (not false) when reverted, so the lock's own default path runs
   const LOCK_POWER = CBZ.CONFIG.PRISON_ARMORY_KEY_ONLY === false ? undefined : false;
 
@@ -385,7 +395,6 @@
          gatedSlots may only go UP. Count guns.
      Flag false → the exact five-and-one the room shipped with.
      ================================================================== */
-  if (CBZ.CONFIG.PRISON_ARMORY_FULL_RACK == null) CBZ.CONFIG.PRISON_ARMORY_FULL_RACK = true;
   const FULL = SPINE && CBZ.CONFIG.PRISON_ARMORY_FULL_RACK !== false;
 
   const rackData = [
@@ -456,7 +465,6 @@
      The gun leaves the wall. The pad goes DARK, because an unlit bracket is what
      an empty bracket looks like, and the lit ones now genuinely mean "there is a
      weapon here". Flag false = the old shrink-and-glow, byte for byte. */
-  if (CBZ.CONFIG.PRISON_RACK_EMPTIES == null) CBZ.CONFIG.PRISON_RACK_EMPTIES = true;
   function refreshSlotVisual(slot) {
     // weapon slots read ownership off the weapon roster; an ITEM slot (the
     // demolition crate) owns its own `taken` — items live in the bag, and the
@@ -1220,6 +1228,6 @@
      this list. It is state a player cannot see from where he is standing:
      WHY a locked door is locked. (The saw's "Sawing the padlock... N%" hint
      is gone: its progress is a hairline on the Saw pill over the padlock.) */
-  (CBZ._jailShowRaw = CBZ._jailShowRaw || { toasts: [], hints: [], narrations: [] })
-    .hints.push("gunroom:locked-reason");
+  CBZ._jailShowRaw.hints.push("gunroom:locked-reason");
+  });
 })();

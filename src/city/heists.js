@@ -1296,16 +1296,37 @@
     if (h.phase === "execute") { e.preventDefault(); e.stopImmediatePropagation(); grabAndGo(); return; }
     if (h.phase === "escape") { return; }    // nothing to press; just run
 
-    // idle: if a casable score is in reach, open the board (preempt home menu);
-    // otherwise let realestate.js handle [H] for the home menu. But if you're at
-    // your OWN front door, yield to the safehouse menu — that's clearly intended.
+    // idle: if a casable score is in reach, open the board. (Your front door is
+    // a thing in the interaction registry now: realestate.js, E or a tap.)
     if (h.cooldown <= 0) {
-      const atHome = CBZ.cityHomeNear && CBZ.cityHomeNear(CBZ.player.pos.x, CBZ.player.pos.z);
-      if (atHome) return;
       const here = availableHere();
       const anyReady = here.some((a) => a.ready);
       if (anyReady) { e.preventDefault(); e.stopImmediatePropagation(); showBoard(); return; }
     }
     // no score nearby → don't consume the key (home menu / others may use it)
-  }, true);   // capture phase so we can preempt realestate's [H] when relevant
+  }, true);
+
+  /* THE SCORE IS A THING YOU CAN TOUCH (city/interactions.js). Standing at the
+     target of a cased job, its next beat is a verb on it: E, Q or a tap goes
+     loud, then grabs and goes. [H] still advances it from anywhere. */
+  let zoned = false;
+  function wireZone() {
+    if (zoned || !CBZ.interactions || !CBZ.interactions.registerZone) return;
+    zoned = true;
+    CBZ.interactions.registerZone({
+      id: "zone-heist", kind: "heist", radius: 8, prio: 10,
+      find: function (px, pz) {
+        const h = ensure();
+        if (!h.target || (h.phase !== "case" && h.phase !== "execute")) return null;
+        return dist2(px, pz, h.target.x, h.target.z) <= 8 ? h.target : null;
+      },
+      options: [
+        { id: "heist-loud", slot: "e", prio: 6, bad: true, forceYes: true, campaignSafe: true, label: "Hold up",
+          canShow: () => ensure().phase === "case", onSelect: goLoud },
+        { id: "heist-grab", slot: "e", prio: 6, forceYes: true, campaignSafe: true, label: "Grab",
+          canShow: () => ensure().phase === "execute", onSelect: grabAndGo },
+      ],
+    });
+  }
+  if (CBZ.onUpdate) CBZ.onUpdate(41.2, function () { if (g.mode === "city") wireZone(); });
 })();

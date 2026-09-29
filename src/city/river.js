@@ -197,9 +197,38 @@
     const BAY0 = 28, BAY1 = 95, RING_MID = (BAY0 + BAY1) / 2;
 
     /* ---- WHAT A CORRIDOR WOULD HAVE TO CUT THROUGH --------------------- */
-    function regionAt(x, z, m) {
-      for (let i = 0; i < regs.length; i++) {
+    /* The router asks both of these for every 80 m cell of the plate: a grid
+       over the regions and the roads (core/rectgrid.js) keeps each scan to
+       the few that can touch the cell, in the same order, so the same region
+       and the same road list come back. */
+    const RPAD = 160;
+    let REG_G = null;
+    function regGrid() {
+      if (REG_G && REG_G.n === regs.length) return REG_G;
+      REG_G = CBZ.rectGrid ? CBZ.rectGrid(regs.length, function (i) {
         const r = regs[i];
+        if (r.kind === "circle") { const R = r.r + (r.pad || 0); return [r.cx - R, r.cx + R, r.cz - R, r.cz + R]; }
+        return [r.minX, r.maxX, r.minZ, r.maxZ];
+      }, RPAD) : null;
+      return REG_G;
+    }
+    let ROAD_G = null, ROAD_W = 0;
+    function roadGrid() {
+      if (ROAD_G && ROAD_G.n === roads.length) return ROAD_G;
+      ROAD_W = 0;
+      for (let i = 0; i < roads.length; i++) ROAD_W = Math.max(ROAD_W, (roads[i].w || 18) / 2);
+      ROAD_G = CBZ.rectGrid ? CBZ.rectGrid(roads.length, function (i) {
+        const r = roads[i], hl = (r.len || 0) / 2;
+        return r.vertical ? [r.x, r.x, r.z - hl, r.z + hl] : [r.x - hl, r.x + hl, r.z, r.z];
+      }, RPAD) : null;
+      return ROAD_G;
+    }
+    function regionAt(x, z, m) {
+      const G = regGrid();
+      const L = G && m <= RPAD ? G.list(x, z) : null;
+      const n = L ? L.length : regs.length;
+      for (let j = 0; j < n; j++) {
+        const r = regs[L ? L[j] : j];
         if (isLinkName(r.name)) continue;                 // decks are crossed, not avoided
         // The backcountry IS the open country this river is supposed to run
         // through; it is a label on the wilds, not a place with a wall.
@@ -212,8 +241,11 @@
     }
     function roadsCrossing(x, z, m) {
       const out = [];
-      for (let i = 0; i < roads.length; i++) {
-        const r = roads[i];
+      const G = roadGrid();
+      const L = G && ROAD_W + m <= RPAD ? G.list(x, z) : null;
+      const n = L ? L.length : roads.length;
+      for (let j = 0; j < n; j++) {
+        const r = roads[L ? L[j] : j];
         const hw = (r.w || 18) / 2 + m;
         const dx = r.vertical ? Math.abs(x - r.x) : Math.max(0, Math.abs(x - r.x) - r.len / 2);
         const dz = r.vertical ? Math.max(0, Math.abs(z - r.z) - r.len / 2) : Math.abs(z - r.z);

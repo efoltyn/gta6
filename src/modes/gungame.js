@@ -115,7 +115,7 @@
       // the inner compound: the yard (walls x = +-30, z -8..52) and the south
       // courtyard (walls x = +-44, z 52..128). Measured off CBZ.colliders.
       zone: { kind: "rect", minX: -43.4, maxX: 43.4, minZ: -13.4, maxZ: 127.4 },
-      ensure() { return !!CBZ.prisonRoot; },
+      ensure() { return CBZ.ensurePrison ? CBZ.ensurePrison() : !!CBZ.prisonRoot; },
       root() { return CBZ.prisonRoot || null; },
       floorAt() { return 0; },
       sea() { return -Infinity; },
@@ -2048,7 +2048,7 @@
       prisonLeak: (gg.match && g.mode === "gungame")
         ? Math.max(0, Math.round(((g.detection || 0) - gg.heatAtStart) * 100) / 100)
         : 0,
-      borrowedWorlds: { jail: !!CBZ.prisonRoot, island: !!(CBZ.surv && CBZ.surv.built) },
+      borrowedWorlds: { jail: CBZ.prisonBuilt ? CBZ.prisonBuilt() : !!CBZ.prisonRoot, island: !!(CBZ.surv && CBZ.surv.built) },
     };
   };
 })();

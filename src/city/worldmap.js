@@ -901,7 +901,7 @@
           if ((x1 - x0 + 1) * (z1 - z0 + 1) > 400) { wide = true; return; }
           for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) cells.add(x + "," + z);
         };
-        CBZ.scene.updateMatrixWorld(true);
+        CBZ.scene.updateWorldMatrix(true, true);   // not updateMatrixWorld: matrixskip.js skips the hidden city root (cells would be LOCAL coordinates)
         CBZ.scene.traverse(function (o) {
           if (seen.has(o)) return;
           seen.add(o);
@@ -1009,7 +1009,10 @@
       }
       const t0 = trace ? performance.now() : 0;
       if (trace) trace.before(b);
+      const k0 = city.root ? city.root.children.length : 0;
       try { b.fn(city); } catch (e) { console.error("[landmass]", e); }
+      // who drew it (memory census, core/citystream.js parked-job reports)
+      if (city.root) for (let i = k0; i < city.root.children.length; i++) { const o = city.root.children[i]; if (o.userData && !o.userData._builder) o.userData._builder = bkey(b); }
       if (trace) trace.after(b, performance.now() - t0);
       if (CBZ.shaderQueue && city.root) CBZ.shaderQueue(city.root, { skip: deferSurface });
     }

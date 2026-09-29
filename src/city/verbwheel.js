@@ -36,10 +36,12 @@
                grammar, release on a verb to do it. Q / Esc / right-click /
                walking off closes it. The camera does not turn while it is up
                (its mousemove is taken here, in the capture phase).
-     touch     systems/touch.js: tap a person, car or counter and this opens
-               on it (one verb only: it just happens). Tap a verb. Tap
-               anywhere else, or the person again, to close. Walking away
-               closes it too.
+     touch     tap ANYTHING with a verb (a person, a car, a dog, a gun on the
+               wall, an ATM, a chest, a door): systems/touch.js asks
+               CBZ.interactions.tapPick what is under the finger, walks you
+               there if it is out of reach, and this opens on it (one verb
+               only: it just happens). Tap a verb. Tap anywhere else, or the
+               thing again, to close. Walking away closes it too.
      pad       D-pad left opens (a Q tap), D-pad right fires (an E).
 
    PUBLIC: CBZ.verbWheel = { open(cand), openFor(obj), close(), isOpen(),

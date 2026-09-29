@@ -18,6 +18,9 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  // Built when the prison is first needed, as if at this script's parse
+  // point (core/prisonlazy.js). Body left at its old indent.
+  CBZ.definePrison("world/cafeteria.js", function () {
   const { addBox, roomShell } = CBZ;
   const HALF = Math.PI / 2;
 
@@ -1067,5 +1070,6 @@
   if (PD.shell) PD.shell({
     id: "cafeteria", x0: -29, x1: -19, z0: 6, z1: 22, h: 6,
     door: "E", dc: 14, dw: 3.4, tone: 0x8a929c, face: "E",
+  });
   });
 })();

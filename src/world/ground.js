@@ -17,6 +17,9 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  // Built when the prison is first needed, as if at this script's parse
+  // point (core/prisonlazy.js). Body left at its old indent.
+  CBZ.definePrison("world/ground.js", function () {
   const scene = CBZ.prisonRoot || CBZ.scene;
   const { addBox } = CBZ;
   // Every flat patch below overlaps another (base under yard, walkway on
@@ -172,4 +175,5 @@
     paint(-23, -6.8, 13, 0.1, YEL);          // north return, x[-29.5, -16.5]
     paint(23, -6.8, 13, 0.1, YEL);           // north return, x[16.5, 29.5]
   }
+  });
 })();

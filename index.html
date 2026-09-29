@@ -17,11 +17,11 @@
 <link rel="stylesheet" href="css/hud.css?v=flick1">
 <link rel="stylesheet" href="css/screens.css?v=pause1">
 <link rel="stylesheet" href="css/shark_title.css?v=pause1">
-<link rel="stylesheet" href="css/mobile.css?v=tui0929">
+<link rel="stylesheet" href="css/mobile.css?v=tap0929">
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
 <link rel="stylesheet" href="css/inventory.css?v=cuffs1">
-<link rel="stylesheet" href="css/city.css?v=tui0929">
-<link rel="stylesheet" href="css/campaign.css?v=tui0929">
+<link rel="stylesheet" href="css/city.css?v=tap0929">
+<link rel="stylesheet" href="css/campaign.css?v=tap0929">
 <link rel="stylesheet" href="css/interact_touch.css?v=flick1">
 <link rel="stylesheet" href="css/title_hub.css?v=end1">
 </head>
@@ -439,6 +439,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/config.js?v=w0929town"></script>
 <!-- CITY SLICES (?slice=name|x,z,r): one piece of Gang City booted as its own world.
      Parses the URL only; with no slice every helper answers "keep". -->
+<script src="src/core/bakecache.js?v=phonefit1"></script>
+<script src="src/core/rectgrid.js?v=phonefit1"></script>
 <script src="src/core/slice.js?v=slice0929b"></script>
 <!-- GANG CITY STREAMS: the live city is a slice that follows the player (?stream=0 = whole city). -->
 <script src="src/core/citystream.js?v=slice0929b"></script>
@@ -489,6 +491,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- 1. core engine -->
 <script src="src/core/scene.js?v=neutralhaze1"></script>
+<script src="src/core/prisonlazy.js?v=phonefit1"></script>
 <script src="src/core/renderer.js?v=w09290242x"></script>
 <!-- THE GROUND STOPS BEING DRAWN OVER A HOLE. Must load AFTER core/renderer.js:
      its installFog REPLACES THREE.ShaderChunk.fog_fragment wholesale, so a patch
@@ -962,7 +965,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- how a prison run ends: the run out past the wall, the fade, one line (after state.js and save.js) -->
 <script src="src/systems/escapeend.js?v=end1"></script>
 <script src="src/systems/runstats.js?v=end1"></script>
-<script src="src/systems/touch.js?v=ekey2"></script>
+<script src="src/systems/touch.js?v=tap0929"></script>
 <script src="src/systems/touch_vehicle.js?v=boom2"></script>
 <!-- THE WAY OUT of any seat (car, boat, cockpit, armor, saddle, chair, bed):
      CBZ.seatState/seatExit, the key pinned on the door, the one touch EXIT. -->
@@ -1099,7 +1102,7 @@ document.body.appendChild(b);}}catch(e){}})();
      city/buildings.js, which reads CBZ.CIVIC_SHOPS and CBZ.CIVIC_ACCT_SEED at
      parse time and the bld* helpers at build time. -->
 <script src="src/city/buildings_civic.js?v=pres0929b"></script>
-<script src="src/city/buildings.js?v=pres0929b"></script>
+<script src="src/city/buildings.js?v=tap0929"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
@@ -1351,7 +1354,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/factions.js?v=w09290219"></script>
 <script src="src/city/gangs.js?v=cd0929"></script>
 <script src="src/city/social.js?v=cd0929"></script>
-<script src="src/city/realestate.js?v=vit3"></script>
+<script src="src/city/realestate.js?v=tap0929"></script>
 <script src="src/city/view.js?v=cars1"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=brainmoves1"></script>
@@ -1417,7 +1420,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/vehicles.js?v=metro0929"></script>
 <script src="src/city/carinstances.js?v=w09290242x"></script>
 <script src="src/city/playerair.js?v=nodash1"></script>
-<script src="src/city/playeraircraft.js?v=w0929est"></script>
+<script src="src/city/playeraircraft.js?v=tap0929"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
      spec generator derives ~40 numbers from what already exists, taking the
      eye point from geometry the artists already placed (the modelled captain's
@@ -1523,7 +1526,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/tornado.js?v=loose1"></script>
 <script src="src/city/aircraftimpact.js?v=airimpact1"></script>
 <script src="src/city/shops.js?v=cd0929"></script>
-<script src="src/city/gunstore.js?v=boom2"></script>
+<script src="src/city/gunstore.js?v=tap0929"></script>
 <!-- weapon attachments: scopes / bigger mags / suppressor / grips, sold at the
      gunsmith bench in the gun store (sights.js reads a fitted optic) -->
 <script src="src/city/gunmods.js?v=me6f1ee"></script>
@@ -1534,18 +1537,18 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- missile lock-on squares + homing hand-off. After fpsmode/weapons (whose
      fire paths it feeds). Revert: CBZ.CONFIG.WEAPON_LOCKON = false. -->
 <script src="src/systems/lockon.js?v=ads1"></script>
-<script src="src/city/jewelry.js?v=w09290232"></script>
+<script src="src/city/jewelry.js?v=tap0929"></script>
 <script src="src/city/careers.js?v=nodash1"></script>
 <script src="src/city/activities.js?v=onebet1"></script>
-<script src="src/city/heists.js?v=nodash1"></script>
+<script src="src/city/heists.js?v=tap0929"></script>
 <!-- The word on every button is a verb (city/verbword.js CBZ.cityVerbWord);
      before interactions.js, whose row renderer prints through it. -->
-<script src="src/city/verbword.js?v=tui0929"></script>
-<script src="src/city/interactions.js?v=tui0929"></script>
+<script src="src/city/verbword.js?v=tap0929"></script>
+<script src="src/city/interactions.js?v=tap0929"></script>
 <!-- THE VERB WHEEL (Q / a touch tap): everything you can do to the thing you
      look at, laid round it; orders about a third person start here. Reads
      city/interactions.js's wheelOf/fireOn. -->
-<script src="src/city/verbwheel.js?v=tui0929"></script>
+<script src="src/city/verbwheel.js?v=tap0929"></script>
 <!-- FUEL. The world has been generating "Pump & Go Fuel" lots since long
      before this file — they just had nothing to sell, because no vehicle had
      a tank. Player vehicle only (a hundred NPC cars silently running dry is a
@@ -1644,9 +1647,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/leaderboard.js?v=nodash1"></script>
 <script src="src/city/zillow.js?v=onebet1"></script>
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
-<script src="src/city/bank.js?v=cd0929"></script>
-<script src="src/city/pawnshop.js?v=deslop1"></script>
-<script src="src/city/clothingstore.js?v=deslop1"></script>
+<script src="src/city/bank.js?v=tap0929"></script>
+<script src="src/city/pawnshop.js?v=tap0929"></script>
+<script src="src/city/clothingstore.js?v=tap0929"></script>
 <!-- THE SHOP FLOOR (city/storegoods.js): every generic store stands wall bays,
      gondola aisles, a cooler bank and its packaged goods for the few stores
      near you, plus its real catalog stock as the real item models, buyable
@@ -1743,7 +1746,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/regionlife.js?v=wreal0929"></script>
 <script src="src/city/modshop.js?v=cd0929"></script>
 <script src="src/city/stuntjumps.js?v=metro0929"></script>
-<script src="src/city/storage.js?v=cpd1"></script>
+<script src="src/city/storage.js?v=tap0929"></script>
 <!-- MARINA + BOATYARD: finger berths, Med-moor quay, fuel dock, travel-lift
      well, IALA Region B buoyage, and a dealer with three demo hulls floating
      at its own dock. Buying reuses zillow.js's cash AND financed paths (no 7th
@@ -1819,7 +1822,7 @@ document.body.appendChild(b);}}catch(e){}})();
      item-drop pickups + placeable storage chests, and wraps cityKillPlayer so
      the player's guns drop on death. Needs economy/worldstate/combat/fpsmode/
      death.js/charpanel.js, all loaded above. -->
-<script src="src/city/inventory.js?v=ekey2"></script>
+<script src="src/city/inventory.js?v=tap0929"></script>
 <script src="src/city/phone.js?v=nodash1"></script>
 <script src="src/city/killfeed.js?v=sharkmode1"></script>
 <!-- THE MORGUE (DEATH_DROPS_V2 / CORPSE_PERSIST / EMS_RESPONSE): what a death
@@ -1844,7 +1847,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- The hitman's world is physical (2026-09-27): paper he reads, hands that
      hold it, the motel room that is his menu, the consequences of a kill. -->
 <script src="src/city/hitman_paper.js?v=inworld1"></script>
-<script src="src/city/hitman_hands.js?v=inworld1"></script>
+<script src="src/city/hitman_hands.js?v=tap0929"></script>
 <script src="src/city/hitman_room.js?v=w09290219"></script>
 <script src="src/city/hitman.js?v=w09290219"></script>
 <script src="src/city/dossier.js?v=inworld1"></script>
@@ -2003,7 +2006,7 @@ document.body.appendChild(b);}}catch(e){}})();
      BEFORE city/countries.js/polity.js/polwar.js/civilwar.js/migration.js —
      fine, every cross-module read it does is guarded and resolved at CALL
      time (its own onNewDay tick), not at parse time. See that file's header. -->
-<script src="src/sim/forex.js?v=nodash1"></script>
+<script src="src/sim/forex.js?v=tap0929"></script>
 <!-- M3: centralbank.js — governor NPCs, the policy rate feeding bank.js's
      RATES (a compatibility-accessor design so day one is byte-identical —
      see that file's own header) + the reserve-requirement credit cap.
