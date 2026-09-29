@@ -112,7 +112,7 @@ const APPEAR = ["sidearm", "shotgun", "carbine", "smg", "taser", "bazooka", "gla
 const FILES = ["src/vendor/three.r128.min.js", "src/config.js", "src/core/matrixskip.js", "src/world/materials.js", "src/systems/fphands.js",
   "src/entities/footwear.js", "src/entities/character.js", "src/entities/headwear.js", "src/entities/heritage.js",
   "src/city/clothes.js", "src/city/outfits.js", "src/entities/dutykit.js", "src/city/armor.js", "src/systems/prisonoutfits.js",
-  "src/entities/watch.js", "src/city/bling.js",
+  "src/entities/jewelry_kit.js", "src/entities/watch.js", "src/city/bling.js",
   "src/weapons/weapon-data.js", "src/weapons/weapon-scale.js", ...APPEAR.map((n) => `src/weapons/appearances/${n}.js`),
   "src/systems/actorweapons.js"];
 for (const f of FILES) vm.runInContext(read(f), ctx, { filename: f });
@@ -817,7 +817,7 @@ if (!ONLY || ONLY === "kit" || ONLY === "stow") {
       const anchor = slot === "body" ? ch.body : (slot === "ra" ? ch.parts.ra.userData.low : ch.neck);
       const list = lookPartsOf(look);
       if (!list) continue;
-      CBZ.cityBlingBuild(list, anchor, [], CBZ.charArmLandmarks ? CBZ.charArmLandmarks(ch) : null);
+      CBZ.cityBlingBuild(list, anchor, [], CBZ.charArmLandmarks ? CBZ.charArmLandmarks(ch) : null, ch);
       labelNew(ch, before, labels, "bling:" + look);
       run(ch, B.key + " " + under + "+" + look, labels, ["stand", "walkA", "sit", "aim", "turnL"], noHair);
     }

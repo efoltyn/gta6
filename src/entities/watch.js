@@ -129,6 +129,16 @@
       secOrange: lambert(0xe07020),
       crystal: phong(0xffffff, { spec: 0xffffff, shin: 220, opacity: 0.13 }),
     };
+    // THE METAL IS METAL (entities/jewelry_kit.js): the case, bracelet, bezel
+    // and hands take the shared PBR finishes — real F0, polished roughness,
+    // the jewelry environment and its sparkle — the same gold as the chain
+    // on the same body. Phong stays only where there is no kit (headless).
+    const J = CBZ.jewel;
+    if (J && J.mat) {
+      _M.steel = J.mat("steel"); _M.steelBrushed = J.mat("steelBrushed");
+      _M.gold = J.mat("gold"); _M.rose = J.mat("rose");
+      _M.iced = J.mat("ice"); _M.glint = J.mat("ice");
+    }
     return _M;
   }
 
@@ -613,6 +623,8 @@
     let v = _fpMat.get(m);
     if (!v) {
       v = m.clone();
+      if (m.onBeforeCompile) { v.onBeforeCompile = m.onBeforeCompile; v.customProgramCacheKey = m.customProgramCacheKey; }
+      if (CBZ.jewel && CBZ.jewel.adopt && m.isMeshStandardMaterial) CBZ.jewel.adopt(v);
       v.transparent = true; v.depthTest = true;
       if (!m.transparent) { v.opacity = 1; v.depthWrite = true; }
       v._shared = true;
@@ -812,9 +824,11 @@
      lifted clear of the wrist crease by its own radius. Measured with the
      forearm UNtwisted (character.js wristTwist turns it with a gun hand;
      sync() turns the watch with it). Sleeved: see WHERE IT SITS. */
-  function rigPlacement(rig) {
-    const anchor = anchorOf(rig);
-    const fore = rig && rig.skinSlots && rig.skinSlots.armsLower && rig.skinSlots.armsLower[0];
+  // `right` measures the RIGHT wrist instead (the tennis bracelet, jewelry_kit.js)
+  function rightAnchorOf(rig) { return rig && ((rig.low && rig.low.ra) || (rig.parts && rig.parts.ra && rig.parts.ra.userData && rig.parts.ra.userData.low)) || null; }
+  function rigPlacement(rig, right) {
+    const anchor = right ? rightAnchorOf(rig) : anchorOf(rig);
+    const fore = rig && rig.skinSlots && rig.skinSlots.armsLower && rig.skinSlots.armsLower[right ? 1 : 0];
     if (!anchor || !fore || !fore.geometry) return null;
     const tw = fore.rotation.y;
     fore.rotation.y = 0;
@@ -828,7 +842,8 @@
       if (!probe) return null;
       if (crease == null) crease = probe.min;
       // the head's scale: the hand's (rig units per metre, as drawn)
-      const hand = rig.parts && rig.parts.la && rig.parts.la.userData && rig.parts.la.userData.cap;
+      const arm = rig.parts && (right ? rig.parts.ra : rig.parts.la);
+      const hand = arm && arm.userData && arm.userData.cap;
       const sec0 = sliceSection(fore.geometry, M, 1, crease + 0.05);
       const hs = hand && hand.scale && hand.scale.x > 0 ? hand.scale.x : sec0.hu / REF_HALF_WRIST;
       const side = sideOf(anchor);
@@ -1250,6 +1265,9 @@
     },
     styleOf: function (rig) { return styleOf(recOf(rig)); },
     attach: attach, detach: detach, display: display,
+    // the measured wrist (either arm) for anything else worn there: { anchor,
+    // fit {a, b, s}, pos, quat (X 12 o'clock, Y to the elbow, Z dorsal), sleeve }
+    wristPlace: function (rig, right) { try { return rigPlacement(rig, !!right); } catch (e) { return null; } },
     count: function () { return mounted.size; },
     _test: { sliceSection, makeFit, rigPlacement, buildInstance, setNear, tickInstance, headGeometry, strapGeometry, loopPath, fpPlace, sync, recOf, lcdLayout, setLcd, SEG, gameHours, update },
   };

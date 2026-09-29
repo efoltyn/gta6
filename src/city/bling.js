@@ -7,48 +7,35 @@
    can spot the gold chain / iced watch with your EYES and pick your
    mark — no menus, no inspection, just looking at people.
 
-   What you see (REAL jewelry scale — reads at street distance, not
-   clownish up close):
-     • neck   — a chain lying FLAT against the upper chest: a shallow V
-                of two LINK RUNS meeting at a pendant just below the
-                collar (gold curb links + a cross = Gold Chain; fine
-                silver links + a cut stone = Diamond Necklace; fat iced
-                links + a medallion = Iced Chain). Never a hoop, never
-                upright, never bigger than the head.
-     • wristL — THE WATCH IS entities/watch.js's (CBZ.wristwatch): steel /
-                gold Day-Date / diver / iced / Royal Oak / Calatrava /
-                Richard Mille, with hands on the game clock. The look
-                here is one `watch` part; it replaces the wearer's
-                everyday role watch on the same wrist.
-     • ring   — a BAND round the finger with a cut stone on it, on the
-                right hand's edge (Engagement = the $5M rock, Diamond
-                Ring, Pinky = smaller and further outboard)
-     • wristR — slim iced band + stones (Tennis Bracelet)
-     • ears   — two studs / hoops at the lobes (Earrings). They used to
-                render NOTHING on you and a stray RING glint on a ped —
-                one classifier now answers for both.
-     • crown  — an arc of stones across the front of the skull (Diamond
-                Tiara — the mob wife's seven-figure set)
+   WHAT A PIECE IS lives in entities/jewelry_kit.js (CBZ.jewel): real link
+   chains draped over THIS body's collar and chest with a swinging pendant,
+   round brilliants with fire, PBR gold / white gold / platinum, pavé that
+   glitters. This file decides WHO wears WHAT and WHERE, and keeps the body
+   honest with their pockets:
+     • neck   — Gold Chain = a 7 mm gold curb + a polished cross; Iced Chain
+                = a 13 mm iced Miami Cuban + an iced medallion; Diamond
+                Necklace = a rivière of graduated brilliants + a drop stone
+     • wristL — THE WATCH IS entities/watch.js's (CBZ.wristwatch); a look is
+                one `watch` part that replaces the wearer's role watch
+     • wristR — Tennis Bracelet: a line of brilliants round the MEASURED
+                right wrist (watch.js wristPlace)
+     • ring   — on the right hand's ring finger base (Diamond Ring = a
+                platinum solitaire, Engagement Ring = the $5M rock with pavé
+                shoulders, Diamond Pinky = a gold cluster on the little finger)
+     • ears   — Earrings: gold hoops / diamond studs through the LOBE the head
+                actually drew (character.js charHeadLandmarks)
+     • crown  — Diamond Tiara across the front of the head
+     • mouth  — Diamond Grill: iced caps ON the teeth, seen when the mouth
+                opens, exactly like the teeth themselves
+     • eyes   — shades (not jewelry: pooled frame + lens parts below)
    (Crew colours on the head are NOT bling: every crew member's bandana
    is clothes.js's CBZ.cityAttachBandana -> entities/headwear.js, put on
    by the outfit (gang record) — and for YOUR crew by syncPlayerRag here.)
-   (The FORMAL KIT — tux shirt-front / bow-tie / pocket square — is
-   now PAINTED into the outfit textures by clothes.js; bling carries
-   jewelry + colors only.)
 
-   PERF (the game is draw-call bound):
-     • ONE shared geometry per accessory part kind + ONE shared
-       material per finish (gold/silver/ice/glint). Meshes are POOLED
-       and reused.
-     • A piece that reads as jewelry needs more PARTS than a box, and
-       these mount on every dripped ped in the crowd bubble — so a run
-       of chain links, a pavé cluster, a set of grill teeth and a
-       tiara's stones are MERGED ONCE into a single cached geometry.
-       A 7-link strand costs the same one draw call the single link
-       box cost, and the whole chain is still 3 meshes.
-     • dress only within ~45u of the camera, undress past ~60u,
-       hard cap 60 dressed peds, scan time-sliced (~14 peds/frame).
-     • castShadow stays off — a 0.05u box's shadow is invisible.
+   PERF: dress only within ~45u of the camera, undress past ~60u, a live
+   cap on dressed peds, scan time-sliced (~14 peds/frame). Jewelry geometry
+   is cached per piece x body shape inside the kit and swaps to a swept
+   tube past a few metres; shades are pooled meshes on shared geometry.
 
    TRUTH: bling mirrors ped.valuables LIVE. Mug/loot strips the ice
    off the body the moment it's taken (call-through wrappers around
@@ -57,19 +44,13 @@
    corpse KEEPS its shine until looted — you can spot a body still
    wearing its chain from across the street.
 
-   YOUR OWN DRIP: the same read applied to the PLAYER. The city can
-   read everyone — so your body must show YOUR money: the best chain /
+   YOUR OWN DRIP: the same read applied to the PLAYER — the best chain /
    watch / ring you actually OWN (g.cityInv, classified through
-   CBZ.cityEcon.ITEMS — the looted Patek on your wrist, the $5M rock a
-   glint on your hand), a VIP-level fit (CBZ.cityPlayerDrip ≥ VIP_DRIP)
-   ices the off-wrist too, and your crew's colors as a bandana (own
-   founded gang first, else the set you're patched into). Mounted on
-   CBZ.playerChar's rig — third person, shoulder cam, the club line and
-   the WASTED kill-cam all show your status; pure first person hides it
-   for free because fpsmode hides the whole playerChar.group. Selling /
-   losing a piece undresses it: re-derived on a 1s timer via a cheap
-   signature compare (never per-frame), ZERO new geometry/material
-   types — the player wears the exact same shared meshes as the street.
+   CBZ.cityEcon.ITEMS), a VIP-level fit (CBZ.cityPlayerDrip >= VIP_DRIP)
+   ices the off-wrist too, and your crew's colors as a bandana. Mounted on
+   CBZ.playerChar's rig for third person; in first person your RING is on
+   the viewmodel's right hand (CBZ.jewel.setPlayerRing) and your watch on
+   its left wrist (watch.js). Re-derived on a 1 s signature compare.
 
    Headless-safe: every anchor/geometry/API access is guarded, so
    the harness (stub THREE, stub rigs with empty parts) never throws.
@@ -81,286 +62,74 @@
   const THREE = window.THREE;
   const g = CBZ.game;
 
-  // BLING_V2 — jewelry made of jewelry parts (link runs, cased watches, banded
-  // rings, ear studs, a tiara) instead of the proud boxes this file shipped
-  // with. Declared here rather than in config.js so the whole look is one line
-  // back: false restores the V1 part tables byte-for-byte, and looks() rebuilds
-  // on the toggle so it applies without a reload.
-  CBZ.CONFIG = CBZ.CONFIG || {};
-  if (CBZ.CONFIG.BLING_V2 == null) CBZ.CONFIG.BLING_V2 = true;
-  function v2() { return CBZ.CONFIG.BLING_V2 !== false; }
-
   // dress within 45u, undress past 60u (hysteresis so border peds don't flicker)
   const DRESS_D2 = 45 * 45, UNDRESS_D2 = 60 * 60;
   // cap on dressed peds — rides the LIVE quality tier (lo 30 → hi 120); read at
-  // every check so the slider applies instantly. Budget per ped: a
-  // chain 3, a watch 5-6 (the repetition is inside merged geometry, not in the
-  // mesh count) — a body carrying the whole set is ~15 and almost nobody does.
+  // every check so the slider applies instantly
   const CAP = () => Math.round(CBZ.qScale ? CBZ.qScale(30, 120) : 60);
   const SLICE = 14;        // peds scanned per frame (full roster every ~0.2s)
-  // per-kind pool bound; extras just drop (shared geo/mat). 128 because a full
-  // bubble of chain-wearers wants two strand meshes EACH — at 48 the pool
-  // missed and re-allocated on every dress, which is the churn it exists to stop.
-  const POOL_MAX = 128;
+  const POOL_MAX = 128;    // per-kind pool bound for the shades parts
 
-  // ---- shared geometry per accessory PART kind (lazy; built once, never disposed).
-  // Real-jewelry scale against the rig (torso 0.92w, front face z 0.25; arm 0.3
-  // square; hand cap 0.31 x 0.2 x 0.35; head 0.6 cube):
+  /* ---- SHADES: frame + lens parts on shared geometry (pooled). Eyewear is
+     the one thing here that is not jewelry; the metal hardware on the
+     aviators / designer pair is the kit's real gold. */
   const geos = {};
-
-  // ---- COMPOSITE PARTS (V2). A chain that reads as a chain is ~14 links; 14
-  // meshes per strand times 60 dressed peds is not a jewelry system, it is a
-  // frame budget. So the pieces whose detail is REPETITION (link runs, pavé,
-  // grill teeth, tiara stones, bracelet stones) are baked into ONE cached
-  // BufferGeometry each. Positions are constants — nothing here rolls a die,
-  // so two clients build byte-identical jewelry.
-  // Degrade-safe: BufferGeometryUtils is vendored (src/vendor) but the headless
-  // harness has no merge and no Octahedron, so every exotic constructor falls
-  // back to a box and a merge falls back to its first element. A piece may read
-  // plainer without the vendor; it is never missing.
-  function mergeGeos(parts) {
-    const BGU = THREE.BufferGeometryUtils;
-    if (BGU && BGU.mergeBufferGeometries && parts.length > 1) {
-      try {
-        const m = BGU.mergeBufferGeometries(parts);
-        if (m) { for (let i = 0; i < parts.length; i++) if (parts[i].dispose) parts[i].dispose(); return m; }
-      } catch (e) { /* vendor mismatch — fall through to the single-part read */ }
-    }
-    for (let i = 1; i < parts.length; i++) if (parts[i].dispose) parts[i].dispose();
-    return parts[0];
-  }
-  function mergeBoxes(specs) {
-    const parts = [];
-    for (let i = 0; i < specs.length; i++) {
-      const s = specs[i];
-      const gm = new THREE.BoxGeometry(s.w, s.h, s.d);
-      if (s.ry && gm.rotateY) gm.rotateY(s.ry);
-      if (s.rx && gm.rotateX) gm.rotateX(s.rx);
-      if (s.rz && gm.rotateZ) gm.rotateZ(s.rz);
-      if (gm.translate) gm.translate(s.x || 0, s.y || 0, s.z || 0);
-      parts.push(gm);
-    }
-    return mergeGeos(parts);
-  }
-  // ONE strand of chain: n links alternating flat / on-edge along X, spanning
-  // the SAME 0.30 the single link box spanned — so CHAIN_Y/CHAIN_Z/CHAIN_TILT
-  // seat the V exactly where they always did. `len` overlaps the step so the
-  // run has no gaps at any viewing angle.
-  function linkRun(n, len, w, t) {
-    const step = 0.30 / n, specs = [];
-    for (let i = 0; i < n; i++) {
-      const up = (i & 1) === 1;
-      specs.push({ w: len, h: up ? t : w, d: up ? w : t, x: -0.15 + step * (i + 0.5) });
-    }
-    return mergeBoxes(specs);
-  }
-  // stones spaced round a circle in the XZ plane (bracelet) — same radius as
-  // the band torus, so they sit ON the band rather than beside it.
-  function ringStones(n, r, s, y) {
-    const specs = [];
-    for (let i = 0; i < n; i++) {
-      const a = (i / n) * Math.PI * 2;
-      specs.push({ w: s, h: s, d: s, x: Math.sin(a) * r, y: y || 0, z: Math.cos(a) * r, ry: a });
-    }
-    return mergeBoxes(specs);
-  }
-  // a torus that lies FLAT around a limb (limb axis = local Y): the default
-  // torus lies in XY with its axis on Z, so it wants the same rotateX the V1
-  // cuff already did. Falls back to a box ring-ish slab with no THREE.Torus.
-  // NEITHER fallback may hand back CBZ.boxGeom's SHARED cache entry: these two
-  // feed mergeGeos, which disposes the parts it swallowed, and a scaled/disposed
-  // shared box would take the whole engine's box cache with it.
-  function limbBand(r, tube, rad, tub) {
-    if (!THREE.TorusGeometry) return new THREE.BoxGeometry(r * 2, tube * 2, r * 2);
-    const gm = new THREE.TorusGeometry(r, tube, rad, tub);
-    if (gm.rotateX) gm.rotateX(Math.PI / 2);
-    return gm;
-  }
-  // a disc facing the camera (+Z): watch case / dial / medallion. Wrist parts
-  // STAY authored +Z — the mount seam rolls the whole stack dorsal (placePart).
-  function disc(r, depth, seg) {
-    if (!THREE.CylinderGeometry) return new THREE.BoxGeometry(r * 2, r * 2, depth);
-    const gm = new THREE.CylinderGeometry(r, r, depth, seg || 8);
-    if (gm.rotateX) gm.rotateX(Math.PI / 2);
-    return gm;
-  }
-
   function geoFor(kind) {
     let gm = geos[kind];
     if (gm) return gm;
-    if (kind === "link") gm = CBZ.boxGeom(0.30, 0.035, 0.03);        // chain strand (gold chain)
-    else if (kind === "linkThin") gm = CBZ.boxGeom(0.30, 0.026, 0.024); // diamond necklace's finer strand
-    else if (kind === "linkThick") gm = CBZ.boxGeom(0.30, 0.055, 0.035); // iced chain's fat links
-    else if (kind === "pendant") gm = CBZ.boxGeom(0.07, 0.07, 0.03);  // small flat pendant block
-    else if (kind === "cuff") {
-      // A BAND, NOT A BLOCK (owner: "bracelets overlap clothes and look dumb").
-      // The old cuff was a 0.32 box around a 0.30 forearm — one centimetre of
-      // clearance per side, which any sleeve thickness at all swallows, so the
-      // watch sank INTO the shirt and z-fought its own arm. It was also square,
-      // so its corners poked through a round-ish limb at every angle.
-      // A torus wraps the limb properly and 0.185 of radius clears the sleeve
-      // with room to spare; 8 radial segments keeps it in the low-poly language
-      // of everything else on the body.
-      gm = new THREE.TorusGeometry(0.185, 0.028, 4, 8);
-      gm.rotateX(Math.PI / 2);          // torus lies in XY by default; lay it flat around the arm
-    }
-    else if (kind === "ring") gm = CBZ.boxGeom(0.05, 0.04, 0.05);     // a glint dot, not a knuckle-duster
-    else if (kind === "grill") gm = CBZ.boxGeom(0.16, 0.05, 0.04);    // an iced bar across the mouth (a grill)
-    else if (kind === "lens") gm = CBZ.boxGeom(0.20, 0.17, 0.05);     // one shade lens (two of these cover the eyes)
-    else if (kind === "bridge") gm = CBZ.boxGeom(0.09, 0.055, 0.05);  // nose bridge joining the lenses
-    else if (kind === "temple") gm = CBZ.boxGeom(0.035, 0.045, 0.30); // arm running back over the ear
-    // EYEWEAR, BEYOND THE ONE FRAME. A sunglass store selling five pairs of
-    // the same box is the "fake shit" the whole goods pass exists to kill, so
-    // the glasses slot gets three more SHAPES rather than three more prices:
+    if (kind === "lens") gm = CBZ.boxGeom(0.20, 0.17, 0.05);            // one shade lens (two cover the eyes)
+    else if (kind === "bridge") gm = CBZ.boxGeom(0.09, 0.055, 0.05);    // nose bridge joining the lenses
+    else if (kind === "temple") gm = CBZ.boxGeom(0.035, 0.045, 0.30);   // arm running back over the ear
     else if (kind === "lensDrop") gm = CBZ.boxGeom(0.19, 0.20, 0.05);   // aviator teardrop: taller than wide
     else if (kind === "lensWrap") gm = CBZ.boxGeom(0.50, 0.13, 0.06);   // sport: ONE wrap shield across both eyes
     else if (kind === "lensRound") gm = CBZ.boxGeom(0.17, 0.17, 0.05);  // retro: small round-ish lens
     else if (kind === "rimThick") gm = CBZ.boxGeom(0.21, 0.21, 0.035);  // retro's chunky acetate rim behind the lens
-    else if (kind === "templeThick") gm = CBZ.boxGeom(0.048, 0.055, 0.30);  // heavy acetate arm
-    else if (kind === "templeWire") gm = CBZ.boxGeom(0.022, 0.022, 0.31);   // thin wire arm (aviator)
+    else if (kind === "templeThick") gm = CBZ.boxGeom(0.048, 0.055, 0.30);
+    else if (kind === "templeWire") gm = CBZ.boxGeom(0.022, 0.022, 0.31);
     else if (kind === "browBar") gm = CBZ.boxGeom(0.34, 0.028, 0.04);   // the aviator's straight brow bar
-    // ---- V2 PARTS ---------------------------------------------------------
-    // chain strands: three weights of the same 0.30 run (fine necklace / curb
-    // chain / fat iced links), each ONE merged geometry.
-    else if (kind === "chainRun") gm = linkRun(7, 0.050, 0.034, 0.020);
-    else if (kind === "chainRunFine") gm = linkRun(9, 0.040, 0.024, 0.014);
-    else if (kind === "chainRunFat") gm = linkRun(6, 0.058, 0.050, 0.030);
-    // pendants with a shape: a cross and a rimmed medallion.
-    else if (kind === "cross") gm = mergeBoxes([
-      { w: 0.026, h: 0.105, d: 0.020 }, { w: 0.070, h: 0.026, d: 0.020, y: 0.018 }]);
-    else if (kind === "medallion") {
-      const parts = [disc(0.045, 0.016, 8)];
-      if (THREE.TorusGeometry) { const rim = new THREE.TorusGeometry(0.045, 0.009, 4, 8); if (rim.translate) rim.translate(0, 0, 0.004); parts.push(rim); }
-      gm = mergeGeos(parts);
-    }
-    // a cut stone. An octahedron is 8 faces — the cheapest thing in the engine
-    // that catches light like a brilliant instead of like a sugar cube.
-    else if (kind === "gem") gm = THREE.OctahedronGeometry ? new THREE.OctahedronGeometry(0.030, 0) : CBZ.boxGeom(0.040, 0.052, 0.040);
-    // bracelet: a finer band + the stones that make it a TENNIS bracelet.
-    else if (kind === "braceStones") gm = ringStones(8, 0.185, 0.020, 0);
-    // ring: a band round the finger, and the stone is a separate `gem` part.
-    else if (kind === "ringBand") gm = limbBand(0.045, 0.011, 4, 6);
-    // ear hoop hangs in the YZ plane (axis across the head), so it needs the
-    // OTHER rotation — a rotateX hoop would lie flat on top of the ear.
-    else if (kind === "hoop") {
-      if (!THREE.TorusGeometry) gm = CBZ.boxGeom(0.014, 0.076, 0.076);
-      else { gm = new THREE.TorusGeometry(0.038, 0.009, 4, 8); if (gm.rotateY) gm.rotateY(Math.PI / 2); }
-    }
-    // grill: six teeth, not one bar. Merged, so it is still one draw call.
-    else if (kind === "grillTeeth") {
-      const specs = [];
-      for (let i = 0; i < 6; i++) specs.push({ w: 0.021, h: 0.046, d: 0.028, x: -0.0625 + i * 0.025 });
-      gm = mergeBoxes(specs);
-    }
-    // tiara: an arc of band segments across the FRONT of the skull with stones
-    // standing on it, tallest at centre. R clears the 0.60 head by 0.025.
-    else if (kind === "tiaraArc") {
-      const specs = [], R = 0.325;
-      for (let i = 0; i < 9; i++) {
-        const a = -0.95 + i * (1.9 / 8), x = Math.sin(a) * R, z = Math.cos(a) * R;
-        specs.push({ w: 0.078, h: 0.026, d: 0.028, x: x, z: z, ry: a });
-        if (i % 2 === 0) {
-          const h = 0.075 - Math.abs(i - 4) * 0.012;
-          specs.push({ w: 0.020, h: h, d: 0.020, x: x, y: 0.013 + h / 2, z: z, ry: a });
-        }
-      }
-      gm = mergeBoxes(specs);
-    }
-    else gm = CBZ.boxGeom(0.05, 0.05, 0.05);                          // unknown kind: a speck, never a lid
+    else gm = CBZ.boxGeom(0.05, 0.05, 0.05);
     geos[kind] = gm;
     return gm;
   }
-
-  // ---- shared materials per FINISH (cmat caches; nothing here mutates them) ----
   let _mats = null;
   function mats() {
     if (_mats) return _mats;
+    const J = CBZ.jewel;
     _mats = {
-      gold: CBZ.cmat(0xc9a44a, { emissive: 0x6b4f12, ei: 0.4 }),    // warm metal, not neon
-      silver: CBZ.cmat(0xb9c0c8, { emissive: 0x7e8790, ei: 0.35 }),
-      ice: CBZ.cmat(0xeaf6ff, { emissive: 0x9fd8ff, ei: 0.65 }),
-      glint: CBZ.cmat(0xffffff, { emissive: 0xcfeaff, ei: 0.95 }),
-      blueDial: CBZ.cmat(0x1b3a6b, { emissive: 0x0a1830, ei: 0.3 }),   // a diver's blue dial
-      lensDark: CBZ.cmat(0x0a0d12, { emissive: 0x1b2535, ei: 0.30 }),  // basic sunglasses lens: near-black, faint cool sheen
-      lensMirror: CBZ.cmat(0x0e1422, { emissive: 0x37588a, ei: 0.50 }),// designer lens: darker, brighter mirrored cool tint
-      frameDark: CBZ.cmat(0x111317, { emissive: 0x000000, ei: 0.0 }),  // black plastic frame
-      lensGreen: CBZ.cmat(0x121c16, { emissive: 0x2c5a3a, ei: 0.34 }),  // aviator's G-15 green glass
-      lensAmber: CBZ.cmat(0x2a1c0e, { emissive: 0x6b4418, ei: 0.34 }),  // retro's warm amber tint
-      lensSport: CBZ.cmat(0x0d1a22, { emissive: 0x2f7a8a, ei: 0.55 }),  // sport wrap's cyan flash coat
-      frameTort: CBZ.cmat(0x4a2c16, { emissive: 0x1c1008, ei: 0.15 }),  // tortoiseshell acetate
-      frameSport: CBZ.cmat(0x1a1f26, { emissive: 0x0a0d11, ei: 0.10 }), // matte sport frame
-      // V2 finishes. cmat is a Lambert with an emissive tint (and returns a PBR
-      // twin by itself on the high tier) — a metal here wants a DARKER body and
-      // a warmer/cooler self-glow than the flat V1 pair, because contrast
-      // between the case and the dial is what makes a wrist read as a watch at
-      // 20 u. Never build a material per wearer: these are shared and cached.
-      steel: CBZ.cmat(0x9aa3ad, { emissive: 0x4e565f, ei: 0.30 }),     // brushed steel case/band
-      goldRich: CBZ.cmat(0xd4af37, { emissive: 0x7a5510, ei: 0.45 }),  // precious-metal case (the 0xd4af37 family)
-      rose: CBZ.cmat(0xc08464, { emissive: 0x6b3a24, ei: 0.35 }),      // rose gold — the tonneau's hardware
-      carbon: CBZ.cmat(0x191c21, { emissive: 0x0b0e12, ei: 0.20 }),    // forged carbon / a skeleton dial
-      bezelDark: CBZ.cmat(0x11161d, { emissive: 0x0a1018, ei: 0.25 }), // a diver's dark bezel insert
-      dialWhite: CBZ.cmat(0xe6ebef, { emissive: 0x8f99a3, ei: 0.28 }), // white dress dial
-      dialBlack: CBZ.cmat(0x15181d, { emissive: 0x080a0d, ei: 0.18 }), // black dial
+      gold: J ? J.mat("gold") : CBZ.cmat(0xc9a44a, { emissive: 0x6b4f12, ei: 0.4 }),
+      lensDark: CBZ.cmat(0x0a0d12, { emissive: 0x1b2535, ei: 0.30 }),
+      lensMirror: CBZ.cmat(0x0e1422, { emissive: 0x37588a, ei: 0.50 }),
+      frameDark: CBZ.cmat(0x111317, { emissive: 0x000000, ei: 0.0 }),
+      lensGreen: CBZ.cmat(0x121c16, { emissive: 0x2c5a3a, ei: 0.34 }),
+      lensAmber: CBZ.cmat(0x2a1c0e, { emissive: 0x6b4418, ei: 0.34 }),
+      lensSport: CBZ.cmat(0x0d1a22, { emissive: 0x2f7a8a, ei: 0.55 }),
+      frameTort: CBZ.cmat(0x4a2c16, { emissive: 0x1c1008, ei: 0.15 }),
+      frameSport: CBZ.cmat(0x1a1f26, { emissive: 0x0a0d11, ei: 0.10 }),
     };
     return _mats;
   }
-  // ---- LOOKS: each wearable is a small list of PARTS (kind + finish + local
-  // transform). Positions are in the anchor's local space (character.js):
-  //   body — torso front face at z 0.25, yoke bottom ≈ y 1.75
-  //   la/ra — THE ELBOW GROUP (anchorsOf resolves `low`), NOT the shoulder:
-  //           the forearm runs +0.06 -> -armLo and the drawn hand cap spans
-  //           -armLo - 0.03 -> handH - armLo. Anything on this anchor declares
-  //           `at:"wrist"` or `at:"hand"` and lets CBZ.charArmLandmarks place
-  //           it — the two stale absolute y's that used to be documented here
-  //           are what put the watch on the back of the hand, twice.
-  //   neck — hair box at y 0.62
-  // CHAIN: a shallow flat V hugging the upper chest — strand tops at x ±0.20
-  // y 1.76 (under the yoke), meeting at (0, 1.54); each strand is 0.30 long
-  // tilted ±0.83 rad, sitting ~0.03 proud of the torso face. Pendant hangs at
-  // the meet. WATCH: band ON THE WRIST + a face plate on the outer front.
-  // RING: a dot on the front edge of the hand, at the knuckle line.
-  const CHAIN_Y = 1.65, CHAIN_Z = 0.268, CHAIN_TILT = 0.83;
-  // every look key that is a wristwatch (entities/watch.js maps each to a style)
-  const WATCH_LOOKS = { watchSteel: 1, watchSilver: 1, watchGold: 1, watchIced: 1, watchDiver: 1, watchAP: 1, watchPatek: 1, watchRM: 1 };
-  let _looks = null, _looksFlag = null;
-  function looks() {
-    if (_looks && _looksFlag === v2()) return _looks;
-    const M = mats();
-    const v = function (kind, mat) {
-      return [
-        { kind: kind, mat: mat, x: -0.10, y: CHAIN_Y, z: CHAIN_Z, rz: -CHAIN_TILT },
-        { kind: kind, mat: mat, x: 0.10, y: CHAIN_Y, z: CHAIN_Z, rz: CHAIN_TILT },
-      ];
-    };
-    /* THE WRIST IS DERIVED NOW, NOT TYPED (owner: "watches are on HANDS now —
-       move them up to WRISTS"). Every `at:"wrist"` / `at:"hand"` part below
-       carries an OFFSET from a landmark that mountParts resolves against the
-       rig it is being mounted on (CBZ.charArmLandmarks, entities/character.js).
 
-       WHY THIS FILE KEPT GETTING IT WRONG: the anchor is the ELBOW group, and
-       the previous two passes both measured against `leftHand` — the wrist
-       SOCKET, at -armLo - 0.01 — when the thing you can actually SEE is
-       limb()'s hand `cap`, which starts 0.03 lower and is (handH + 0.03) tall,
-       so it reaches UP to handH - armLo = -0.26 on an adult male. -0.36 is
-       0.10 inside that box: the watch was on the back of the hand. There is no
-       constant to get wrong any more, and it is no longer authored for one
-       body — a woman's shorter forearm and a child's much shorter one place
-       their own watch correctly with no table here. */
+  /* ---- LOOKS: a look is a short parts list. A jewelry part is `build` (the
+     kit makes it for the rig it is going on); a shades part is a pooled
+     `kind` at a neck-local spot; a watch is one `watch` part. */
+  const WATCH_LOOKS = { watchSteel: 1, watchSilver: 1, watchGold: 1, watchIced: 1, watchDiver: 1, watchAP: 1, watchPatek: 1, watchRM: 1 };
+  let _looks = null;
+  function looks() {
+    if (_looks) return _looks;
+    const M = mats();
     _looks = {
-      // necklaces — flat V + pendant, all smaller than the head
-      chainGold: v("link", M.gold).concat([{ kind: "pendant", mat: M.gold, x: 0, y: 1.515, z: 0.272 }]),
-      chainDiamond: v("linkThin", M.silver).concat([{ kind: "pendant", mat: M.glint, x: 0, y: 1.515, z: 0.272 }]),
-      chainIced: v("linkThick", M.ice).concat([{ kind: "pendant", mat: M.ice, x: 0, y: 1.515, z: 0.272 }]),
-      // tennis bracelet — band only
-      bracelet: [{ kind: "cuff", at: "wrist", mat: M.ice, x: 0, y: 0.06, z: 0 }],   // a band's width above the watch line, on skin
-      // ring — a glint dot on the hand's front edge (the ONE piece that really
-      // does belong on the hand: `at:"hand"` is the knuckle line, not the wrist)
-      ring: [{ kind: "ring", at: "hand", mat: M.glint, x: 0.10, y: 0, z: 0.17 }],
-      // grill — a small iced bar across the lower face (the mouth)
-      grill: [{ kind: "grill", mat: M.glint, x: 0, y: 0.28, z: 0.265 }],
-      // shades — two lenses + bridge + temples sitting on the eyes (neck-local,
-      // so they turn with the head). Status you wear on your FACE: the same
-      // "I've got money" read as the chain, just up at eye level.
+      chainGold: [{ build: "necklace", style: "curb" }],
+      chainIced: [{ build: "necklace", style: "cuban" }],
+      chainDiamond: [{ build: "necklace", style: "riviera" }],
+      bracelet: [{ build: "bracelet", style: "tennis" }],
+      ring: [{ build: "ring", style: "solitaire" }],
+      ringRock: [{ build: "ring", style: "rock" }],
+      ringPinky: [{ build: "ring", style: "pinky" }],
+      earrings: [{ build: "earrings", style: "hoop" }],
+      earringsIce: [{ build: "earrings", style: "stud" }],
+      tiara: [{ build: "tiara" }],
+      grill: [{ build: "grill" }],
+      // shades — two lenses + bridge + temples on the eyes (neck-local, they turn with the head)
       shades: [
         { kind: "lens", mat: M.lensDark, x: -0.145, y: 0.345, z: 0.34 },
         { kind: "lens", mat: M.lensDark, x: 0.145, y: 0.345, z: 0.34 },
@@ -368,8 +137,6 @@
         { kind: "temple", mat: M.frameDark, x: -0.27, y: 0.345, z: 0.17 },
         { kind: "temple", mat: M.frameDark, x: 0.27, y: 0.345, z: 0.17 },
       ],
-      // AVIATORS — wire frame, straight brow bar, green teardrop glass. The
-      // shape people actually mean when they say "sunglasses".
       shadesAviator: [
         { kind: "lensDrop", mat: M.lensGreen, x: -0.145, y: 0.335, z: 0.34 },
         { kind: "lensDrop", mat: M.lensGreen, x: 0.145, y: 0.335, z: 0.34 },
@@ -378,26 +145,20 @@
         { kind: "templeWire", mat: M.gold, x: -0.27, y: 0.40, z: 0.17 },
         { kind: "templeWire", mat: M.gold, x: 0.27, y: 0.40, z: 0.17 },
       ],
-      // SPORT WRAPS — one shield across both eyes, no bridge to see, matte
-      // arms. The read is a single curved band, not two round windows.
       shadesSport: [
         { kind: "lensWrap", mat: M.lensSport, x: 0.0, y: 0.345, z: 0.335 },
         { kind: "temple", mat: M.frameSport, x: -0.27, y: 0.345, z: 0.17 },
         { kind: "temple", mat: M.frameSport, x: 0.27, y: 0.345, z: 0.17 },
       ],
-      // RETRO FRAMES — fat tortoiseshell acetate rims with amber glass sunk
-      // inside them, heavy arms. The cheap rung, and it looks like a different
-      // decade rather than a cheaper version of the same pair.
       shadesRetro: [
-        { kind: "rimThick", mat: M.frameTort, x: -0.145, y: 0.345, z: 0.332 },   // rims off the face plane (overlap-audit z-fight)
+        { kind: "rimThick", mat: M.frameTort, x: -0.145, y: 0.345, z: 0.332 },
         { kind: "rimThick", mat: M.frameTort, x: 0.145, y: 0.345, z: 0.332 },
         { kind: "lensRound", mat: M.lensAmber, x: -0.145, y: 0.345, z: 0.345 },
         { kind: "lensRound", mat: M.lensAmber, x: 0.145, y: 0.345, z: 0.345 },
         { kind: "bridge", mat: M.frameTort, x: 0.0, y: 0.345, z: 0.335 },
-        { kind: "templeThick", mat: M.frameTort, x: -0.284, y: 0.345, z: 0.17 },   // outer face OFF the skull side (it lay on it: z-fight)
+        { kind: "templeThick", mat: M.frameTort, x: -0.284, y: 0.345, z: 0.17 },
         { kind: "templeThick", mat: M.frameTort, x: 0.284, y: 0.345, z: 0.17 },
       ],
-      // designer shades — same frame, mirrored lens + gold hardware (the pricier read)
       shadesDesigner: [
         { kind: "lens", mat: M.lensMirror, x: -0.145, y: 0.345, z: 0.34 },
         { kind: "lens", mat: M.lensMirror, x: 0.145, y: 0.345, z: 0.34 },
@@ -406,91 +167,13 @@
         { kind: "temple", mat: M.gold, x: 0.27, y: 0.345, z: 0.17 },
       ],
     };
-    if (v2()) blingV2(_looks, M);
-    // WATCHES are entities/watch.js's: a real case, bezel, dial, hands on the
-    // game clock, crystal and strap, swept round the measured wrist. A look is
-    // one `watch` part naming the style; mountParts hands it to
-    // CBZ.wristwatch.attach, which puts it on the wrist in place of the
-    // wearer's everyday (role) watch.
-    for (const k in WATCH_LOOKS) _looks[k] = [{ kind: "watch", at: "wrist", look: k }];
-    _looksFlag = v2();
+    for (const k in WATCH_LOOKS) _looks[k] = [{ kind: "watch", look: k }];
     return _looks;
   }
-
-  /* ============================================================
-     V2 — the same SEATS, made of jewelry instead of boxes.
-     OWNER: watches and chains read as boxes taped to the body. Nothing about
-     WHERE a piece sits moves here: the chain still hangs on CHAIN_Y/Z/TILT,
-     the watch still resolves `at:"wrist"` through CBZ.charArmLandmarks, the
-     ring is still on the knuckle line. What changes is what each piece is
-     MADE of, and the tier is carried by the FINISH (a look is a small parts
-     list, so a tier costs materials, not geometry).
-     Two rules this table must keep: every part list stays short (these mount
-     on every dripped ped in the bubble — the repetition is inside merged
-     geometry, not in the list), and no position is random.
-  ============================================================ */
-  function blingV2(L, M) {
-    // chain strand pair — same V, a link RUN instead of one smooth bar.
-    const strand = function (kind, mat) {
-      return [
-        { kind: kind, mat: mat, x: -0.10, y: CHAIN_Y, z: CHAIN_Z, rz: -CHAIN_TILT },
-        { kind: kind, mat: mat, x: 0.10, y: CHAIN_Y, z: CHAIN_Z, rz: CHAIN_TILT },
-      ];
-    };
-    // ---- necklaces: gold curb + cross, fine silver + stone, fat iced + medal
-    L.chainGold = strand("chainRun", M.gold).concat([{ kind: "cross", mat: M.gold, x: 0, y: 1.505, z: 0.278 }]);
-    L.chainDiamond = strand("chainRunFine", M.silver).concat([{ kind: "gem", mat: M.glint, x: 0, y: 1.515, z: 0.284 }]);
-    L.chainIced = strand("chainRunFat", M.ice).concat([
-      { kind: "medallion", mat: M.ice, x: 0, y: 1.505, z: 0.278 },
-      { kind: "gem", mat: M.glint, s: 0.7, x: 0, y: 1.505, z: 0.298 },
-    ]);
-    // ---- tennis bracelet: a finer band than the watch's, plus its stones.
-    L.bracelet = [
-      { kind: "bandFine", at: "wrist", mat: M.silver, x: 0, y: 0.06, z: 0 },
-      { kind: "braceStones", at: "wrist", mat: M.glint, x: 0, y: 0.06, z: 0 },
-    ];
-    // ---- rings: a BAND round the finger with a stone on it. The pinky ring is
-    // smaller and further outboard (x 0.145 sits inside the 0.31-wide hand cap).
-    L.ring = [
-      { kind: "ringBand", at: "hand", mat: M.silver, x: 0.10, y: 0, z: 0.15 },
-      { kind: "gem", at: "hand", mat: M.glint, s: 0.62, x: 0.10, y: 0.022, z: 0.175 },
-    ];
-    L.ringRock = [                                       // the $5M stone: same band, a rock you can spot
-      { kind: "ringBand", at: "hand", mat: M.silver, x: 0.10, y: 0, z: 0.15 },
-      { kind: "gem", at: "hand", mat: M.glint, s: 1.0, x: 0.10, y: 0.030, z: 0.182 },
-    ];
-    L.ringPinky = [
-      { kind: "ringBand", at: "hand", mat: M.gold, s: 0.8, x: 0.145, y: -0.01, z: 0.14 },
-      { kind: "gem", at: "hand", mat: M.ice, s: 0.5, x: 0.145, y: 0.010, z: 0.162 },
-    ];
-    // ---- earrings. THE OWNER BUG: this slot rendered nothing on the player and
-    // a stray ring glint on a ped. The lobes are at the head box's sides
-    // (0.60 cube on the neck anchor, so |x| = 0.30 is skin) and FORWARD of the
-    // hair side panel, whose front face is z +0.12 — z 0.15 is what keeps a
-    // stud out of a long-haired ped's hair.
-    L.earrings = [
-      { kind: "hoop", mat: M.gold, x: -0.322, y: 0.235, z: 0.15 },
-      { kind: "hoop", mat: M.gold, x: 0.322, y: 0.235, z: 0.15 },
-    ];
-    L.earringsIce = [
-      { kind: "gem", mat: M.glint, s: 0.6, x: -0.318, y: 0.265, z: 0.15 },
-      { kind: "gem", mat: M.glint, s: 0.6, x: 0.318, y: 0.265, z: 0.15 },
-    ];
-    // ---- tiara: one merged arc across the front of the crown.
-    L.tiara = [{ kind: "tiaraArc", mat: M.glint, x: 0, y: 0.50, z: 0 }];
-    // ---- grill: teeth, and ON the mouth. The V1 bar sat at y 0.28 / z 0.265 —
-    // that is above the mouth (character.js draws it at y 0.16) and 0.035 BEHIND
-    // the head's own front face (z 0.30), i.e. buried inside the skull where
-    // nobody could ever see it. The lip box's front plane is z 0.345, so the
-    // teeth have to stand just proud of THAT, not of the skull.
-    L.grill = [{ kind: "grillTeeth", mat: M.glint, x: 0, y: 0.172, z: 0.340 }];
-  }
-  // ---- which rig anchor each slot hangs from. `ears` and `crown` ride the
-  // neck (head) group with the shades, so they turn with the head.
+  // which rig anchor a slot's POOLED parts hang from (jewelry `build` parts
+  // find their own place on the rig: the chest, the lobe, the finger, the teeth)
   const SLOTS = { neck: "body", wristL: "la", wristR: "ra", ring: "ra", ears: "neck", crown: "neck", mouth: "neck", eyes: "neck" };
   const SLOT_KEYS = ["neck", "wristL", "wristR", "ring", "ears", "crown", "mouth", "eyes"];
-  // which slot a look belongs to — declared ONCE, beside the look names, so a
-  // classifier can answer "where does this hang" without a second keyword pass.
   const LOOK_SLOT = {
     chainGold: "neck", chainIced: "neck", chainDiamond: "neck",
     watchSteel: "wristL", watchSilver: "wristL", watchGold: "wristL", watchIced: "wristL",
@@ -502,32 +185,17 @@
     shades: "eyes", shadesDesigner: "eyes",
     shadesAviator: "eyes", shadesSport: "eyes", shadesRetro: "eyes",
   };
-  // With BLING_V2 off the V1 table has no unicorns, no ears and no tiara — a
-  // look key that does not exist there degrades to its nearest V1 sibling
-  // rather than leaving a slot silently empty.
-  const LOOK_V1 = {
-    watchSteel: "watchSilver", watchAP: "watchIced", watchPatek: "watchGold", watchRM: "watchIced",
-    ringRock: "ring", ringPinky: "ring",
-  };
   function lookParts(key) {
     const L = looks();
-    return (key && (L[key] || L[LOOK_V1[key]])) || null;
+    return (key && L[key]) || null;
   }
 
   /* ---- ONE CLASSIFIER, AND THE CATALOG OUTRANKS IT ------------------------
-     OWNER BUG: economy.js's jewel() rows have carried an explicit `blingLook`
-     since the composable wardrobe shipped and this file classified by NAME
-     KEYWORDS anyway — so the catalog could declare a look and be ignored, and
-     the two sides could disagree with nobody noticing. The catalog is now read
-     FIRST; keywords are the fallback that keeps the LOOT valuables working
-     (Omega / Patek / Richard Mille carry no blingLook and never will, because
-     they are loot rows, not wardrobe rows).
-     Also fixed here: "Earrings" contains "ring". The player path used to except
-     it by hand and the ped path did not, so an NPC carrying earrings wore a
-     RING and you wore nothing. Order is the fix — earrings are tested before
-     rings, once, for everybody.
-     Returns { slot, look } (look is a KEY, resolved through lookParts at mount
-     time so a flag flip re-points every wearer) or null for "not visible". */
+     economy.js's rows carry an explicit `blingLook`; it is read FIRST. Name
+     keywords are the fallback that keeps the LOOT valuables working (Omega /
+     Patek / Richard Mille / Tennis Bracelet / Diamond Tiara carry none).
+     "Earrings" contains "ring": earrings are tested before rings, once, for
+     everybody. Returns { slot, look } or null for "not visible". */
   const _cls = Object.create(null);
   function classify(name) {
     if (!name) return null;
@@ -571,7 +239,7 @@
     if (s.indexOf("iced") >= 0 || s.indexOf("diamond") >= 0) return "watchIced";
     if (s.indexOf("diver") >= 0) return "watchDiver";
     if (s.indexOf("steel") >= 0 || s.indexOf("omega") >= 0 || s.indexOf("silver") >= 0) return "watchSteel";
-    return "watchGold";                                  // a nameless watch keeps the V1 default
+    return "watchGold";
   }
   function ringLookKey(s) {
     if (s.indexOf("engagement") >= 0) return "ringRock"; // the $5M stone you learn to hunt
@@ -579,14 +247,12 @@
     return "ring";
   }
 
-  // ---- mesh pools per part kind (reuse: dressing is pointer-swaps, not allocs) ----
-  // (lazy per kind: V2 added a dozen part kinds and a hand-typed table of empty
-  // arrays is exactly the sort of thing that silently loses one)
+  // ---- mesh pools per shades part kind (dressing is pointer-swaps, not allocs) ----
   const pools = Object.create(null);
   function poolFor(kind) { return pools[kind] || (pools[kind] = []); }
   function acquire(kind) {
     const pool = poolFor(kind);
-    let mesh = pool && pool.pop();
+    let mesh = pool.pop();
     if (!mesh) {
       mesh = new THREE.Mesh(geoFor(kind), null);
       mesh.castShadow = false; mesh.receiveShadow = false;
@@ -598,152 +264,60 @@
   function releaseMesh(mesh) {
     if (!mesh) return;
     if (mesh.userData && mesh.userData.wristwatch) { if (CBZ.wristwatch) CBZ.wristwatch.detach(mesh); return; }
+    if (mesh.userData && mesh.userData.jewelPiece) { if (CBZ.jewel) CBZ.jewel.release(mesh); else if (mesh.parent) mesh.parent.remove(mesh); return; }
     if (mesh.parent) mesh.parent.remove(mesh);
     const pool = poolFor(mesh.userData.blingKind);
-    if (pool && pool.length < POOL_MAX) pool.push(mesh);
+    if (pool.length < POOL_MAX) pool.push(mesh);
   }
 
-  // Landmarks in the forearm (ELBOW group) frame for the rig being dressed —
-  // one call per dress, not per part. Degrade-safe: an old character.js with no
-  // export, or CHAR_WRIST_LANDMARK=false, falls back to the adult-male numbers
-  // this table used to hard-code, so nothing can be left unmounted.
-  const LM_FALLBACK = { wrist: -0.22, hand: -0.34 };
+  // Landmarks in the forearm (ELBOW group) frame for the rig being dressed
+  // (the ring rides the hand mesh they name).
   function armLandmarks(ch) {
-    const f = CBZ.charArmLandmarks && CBZ.charArmLandmarks(ch);
-    return f || LM_FALLBACK;
+    return (CBZ.charArmLandmarks && CBZ.charArmLandmarks(ch)) || null;
   }
-  /* THE DIAL GOES DORSAL (owner: "watch dial is on right side of the left
-     wrist… the dial faces forward instead of facing the left of the player").
-     Every wrist part is AUTHORED facing +Z — disc() faces the camera — but in
-     the ELBOW group's frame +Z is the FRONT of a hanging forearm, the inner
-     wrist line, and a real watch sits on the BACK of the wrist with the dial
-     facing laterally OUT. So the mount seam rolls the whole assembled stack a
-     quarter turn about the forearm's LONG axis (local Y): +90° on the LEFT arm
-     and -90° on the right, because the rig's left IS +X (character.js mirrors
-     the roots: `la.position.set(P.armX…)`, armX positive) so outboard/dorsal
-     is +X on the left wrist and -X on the right. WHICH arm is read off the rig
-     — the shoulder pivot's x sign, one hop up from the elbow anchor — never
-     typed, so both watch factories, the bracelet and the portrait all take the
-     same roll on any body. The bracelet is unchanged by construction (its
-     torus and 8-fold stone ring are symmetric under 90°), y is untouched so
-     12 o'clock keeps pointing up the forearm toward the elbow, and `at:"hand"`
-     (the rings) stays in the authored frame. Wrist parts may author ry/rz but
-     never rx: the roll composes as Euler-XYZ ry + 90°, exact only while rx is
-     0 (today no wrist part authors any rotation at all). */
-  function wristSide(parent) {
-    // elbow anchor → its own x is 0, its parent is the shoulder pivot at
-    // ±armX; a legacy shoulder-pivot anchor carries the sign itself. The value
-    // is only ever CONSUMED for `at:"wrist"` parts, which mount on those two
-    // anchors alone — whatever a body/neck anchor's chain reads is never used.
-    // Harness-safe: stub rigs with no positions read +1.
-    const own = (parent && parent.position) ? parent.position.x : 0;
-    const up = (parent && parent.parent && parent.parent.position) ? parent.parent.position.x : 0;
-    return (own || up) < 0 ? -1 : 1;
-  }
-  // one placer for the pooled street path AND the portrait's fresh-mesh path
-  // (cityBlingBuild), so the dorsal roll can never drift between them.
-  // `s` scales a shared part instead of authoring a second geometry for it (a
-  // pinky ring is a ring, a lume pip is a small stone) — always written, never
-  // defaulted, because pooled meshes come back wearing the last wearer's scale.
-  // Returns the object the part must be parented to when it is NOT the slot's
-  // anchor: a ring goes on the real hand (character.js HANDS block), which
-  // curls and slides on its own, so the ring rides the HAND MESH, in its metre
-  // frame, at the base of a finger (ring finger; the pinky ring's authored
-  // outboard x picks the little finger). Authored sizes are rig units for the
-  // old 0.29-wide box hand; lm.ringK brings them down onto a real finger.
-  /* THE NECKLACE LIES ON THE CHEST IT IS WORN ON. The V was authored against
-     the old box man — a flat front face at z 0.25, collarbone notch ~1.806 —
-     and mounted at those absolutes on every body. On the shaped torso that
-     plane is in FRONT of the chest along the whole V (measured, tools-free:
-     an average man's surface is z 0.16 at the strand tops, 0.24 at the meet;
-     a woman's 0.12-0.19; a teen girl's strand tops were in the air), so every
-     chain hung 2-14 cm off the body. Now each authored point is mapped into
-     THIS body — x by its torso width, y from its own notch by its column
-     scale — and seated the authored standoff (z - 0.25) off the real surface,
-     and a strand is laid ALONG the surface between its two mapped ends
-     instead of standing vertical in front of a chest that slopes back to the
-     collarbones. Rigs without a shape (harness stubs) keep the authored spot. */
-  const AUTH_NOTCH = 1.806, AUTH_FACE = 0.25, RUN = 0.30;
-  const _cA = [0, 0, 0], _cB = [0, 0, 0];
-  let _bx = null, _by = null, _bz = null, _bm = null;
-  function chestPoint(ch, x, y, off, out) {
-    const S = ch.torsoShape, P = ch.profile;
-    const sx = P && P.torsoW > 0 ? P.torsoW / 0.92 : 1, vs = S.vs > 0 ? S.vs : 1;
-    const notch = S.yN - (S.tf || 0) - 0.03 * vs;
-    out[0] = x * sx; out[1] = notch + (y - AUTH_NOTCH) * vs;
-    const z = ch.torsoFrontZ(out[0], out[1]);
-    out[2] = (isFinite(z) ? z : AUTH_FACE) + off;
-    return out;
-  }
-  function placeOnChest(mesh, p, ch) {
-    const off = p.z - AUTH_FACE, s = p.s == null ? 1 : p.s;
-    if (p.rz == null) {                                   // pendant / cross / gem / medal
-      chestPoint(ch, p.x, p.y, off, _cA);
-      mesh.position.set(_cA[0], _cA[1], _cA[2]);
-      mesh.rotation.set(p.rx || 0, p.ry || 0, 0);
-      mesh.scale.set(s, s, s);
-      return;
+  // a jewelry piece, made by the kit for THIS rig; pushes what it mounted
+  function buildJewel(p, rig, lm, out, now) {
+    const J = CBZ.jewel;
+    if (!J || !rig) return;
+    let got = null;
+    if (p.build === "necklace") got = J.necklace(rig, p.style, now);
+    else if (p.build === "ring") {
+      const hand = lm && lm.ringHand, F = lm && lm.ringFingers;
+      if (hand) got = J.ring(hand, F ? F[p.style === "pinky" ? 3 : 2] : null, p.style);
+    } else if (p.build === "earrings") got = J.earrings(rig, p.style);
+    else if (p.build === "tiara") got = J.tiara(rig);
+    else if (p.build === "grill") got = J.grill(rig);
+    else if (p.build === "bracelet") {
+      const place = CBZ.wristwatch && CBZ.wristwatch.wristPlace ? CBZ.wristwatch.wristPlace(rig, true) : null;
+      if (place) got = J.bracelet(place.anchor, place);
     }
-    // a strand: its two authored ends, each put on the surface
-    const hx = 0.5 * RUN * s * Math.cos(p.rz), hy = 0.5 * RUN * s * Math.sin(p.rz);
-    chestPoint(ch, p.x - hx, p.y - hy, off, _cA);
-    chestPoint(ch, p.x + hx, p.y + hy, off, _cB);
-    if (!_bx) { _bx = new THREE.Vector3(); _by = new THREE.Vector3(); _bz = new THREE.Vector3(); _bm = new THREE.Matrix4(); }
-    _bx.set(_cB[0] - _cA[0], _cB[1] - _cA[1], _cB[2] - _cA[2]);
-    const len = _bx.length() || RUN * s;
-    _bx.normalize();
-    _by.set(0, 0, 1).cross(_bx).normalize();              // in the chest surface, across the strand
-    _bz.copy(_bx).cross(_by);                             // the chest normal side
-    _bm.makeBasis(_bx, _by, _bz);
-    mesh.quaternion.setFromRotationMatrix(_bm);
-    // a straight run over a curved chest: the middle rides lower than the
-    // ends, so lift the whole strand until its middle keeps the standoff too
-    const mx = (_cA[0] + _cB[0]) / 2, my = (_cA[1] + _cB[1]) / 2, zm = ch.torsoFrontZ(mx, my);
-    let mz = (_cA[2] + _cB[2]) / 2;
-    if (isFinite(zm) && mz < zm + off) mz = zm + off;
-    mesh.position.set(mx, my, mz);
-    mesh.scale.set(len / RUN, s, s);                      // a narrower chest shortens the run, the V still meets
+    const list = Array.isArray(got) ? got : (got ? [got] : []);
+    for (let i = 0; i < list.length; i++) { list[i].userData.jewelPiece = true; out.push(list[i]); }
   }
-  function chestRigOf(ch, parent) {
-    return ch && parent && parent === ch.body && ch.torsoShape && typeof ch.torsoFrontZ === "function" ? ch : null;
-  }
-  function placePart(mesh, p, lm, side, chest) {
-    if (chest && !p.at) { placeOnChest(mesh, p, chest); return null; }
-    if (p.at === "hand" && lm && lm.ringHand && lm.ringFingers) {
-      const f = lm.ringFingers[p.x > 0.12 ? 3 : 2];
-      const k = (p.s == null ? 1 : p.s) * lm.ringK;
-      const dorsal = p.kind === "gem" ? f.r + 0.0028 + 0.030 * k * 0.5 : (p.kind === "ring" ? f.r : 0);
-      mesh.position.set(f.x, 0.001 + dorsal, f.z - 0.007);
-      mesh.rotation.set(p.kind === "ringBand" ? Math.PI / 2 : 0, 0, 0);
-      mesh.scale.set(k, k, k);
-      return lm.ringHand;
-    }
-    const base = (p.at && lm && lm[p.at] != null) ? lm[p.at] : 0;
-    if (p.at === "wrist") {   // dorsal roll: ±90° about Y swaps the authored x/z
-      mesh.position.set(side * p.z, base + p.y, -side * p.x);
-      mesh.rotation.set(p.rx || 0, (p.ry || 0) + side * Math.PI / 2, p.rz || 0);
-    } else {
-      mesh.position.set(p.x, base + p.y, p.z);
-      mesh.rotation.set(p.rx || 0, p.ry || 0, p.rz || 0);
-    }
-    const s = p.s == null ? 1 : p.s;
-    mesh.scale.set(s, s, s);
-  }
-  // mount one slot's parts onto an anchor; pushes the pooled meshes into `out`.
-  // `lm` resolves a part's `at:` landmark — its y is then an OFFSET from that
-  // point on THIS body, instead of an absolute authored for the adult male.
-  function mountParts(parts, parent, out, lm, rig) {
-    if (!parts || !parent || !parent.add) return;   // harness rigs have empty parts — skip slot
-    const side = wristSide(parent), chest = chestRigOf(rig, parent);
+  // mount one slot's parts; pushes what it mounted into `out`. `fresh` =
+  // new meshes (the portrait's offscreen rig) instead of the street pool.
+  function mountParts(parts, parent, out, lm, rig, fresh) {
+    if (!parts) return;
     for (let i = 0; i < parts.length; i++) {
       const p = parts[i];
+      if (p.build) { buildJewel(p, rig, lm, out, fresh || rig === CBZ.playerChar); continue; }
+      if (!parent || !parent.add) continue;                  // harness rigs have empty parts — skip slot
       if (p.kind === "watch") { const w = CBZ.wristwatch && CBZ.wristwatch.attach(parent, p.look); if (w) out.push(w); continue; }
-      const mesh = acquire(p.kind);
-      mesh.material = p.mat;
-      (placePart(mesh, p, lm, side, chest) || parent).add(mesh);
+      let mesh;
+      if (fresh) {
+        const geo = geoFor(p.kind);
+        if (!geo || !p.mat) continue;
+        mesh = new THREE.Mesh(geo, p.mat);
+        mesh.castShadow = false; mesh.receiveShadow = false;
+      } else { mesh = acquire(p.kind); mesh.material = p.mat; }
+      mesh.position.set(p.x || 0, p.y || 0, p.z || 0);
+      mesh.rotation.set(p.rx || 0, p.ry || 0, p.rz || 0);
+      mesh.scale.set(1, 1, 1);
+      parent.add(mesh);
       out.push(mesh);
     }
   }
+
 
   // ---- what a ped SHOULD be wearing right now, straight from their valuables.
   // A looted corpse is picked clean (jewelry gone); its crew bandana is
@@ -955,7 +529,9 @@
     }
     if (!want.wristR && vip) { want.wristR = lookParts("bracelet"); any = !!want.wristR || any; }
     sig += "|" + (vip ? 1 : 0);
-    return { want: any ? want : null, sig };
+    const rl = best.ring && best.ring.look;
+    const ringStyle = rl === "ringRock" ? "rock" : (rl === "ringPinky" ? "pinky" : (rl ? "solitaire" : null));
+    return { want: any ? want : null, sig, ringStyle };
   }
 
   // dress/undress the player rig — same SLOTS, same pooled meshes as peds.
@@ -968,6 +544,7 @@
   function syncPlayer() {
     const res = computePlayerWant();
     if (!res) return;                          // econ not up yet
+    if (CBZ.jewel && CBZ.jewel.setPlayerRing) CBZ.jewel.setPlayerRing(res.ringStyle);   // the first-person hand's
     if (res.sig === _pSig && (_pMeshes || !res.want)) return;   // unchanged
     if (_pMeshes) { for (let i = 0; i < _pMeshes.length; i++) releaseMesh(_pMeshes[i]); _pMeshes = null; }
     _pSig = res.sig;
@@ -1005,6 +582,7 @@
     if (g.mode !== "city") {
       if (dressed.length) clearAll();
       if (_pMeshes) undressPlayer();           // jail jumpsuit wears no city ice
+      if (CBZ.jewel && CBZ.jewel.setPlayerRing) CBZ.jewel.setPlayerRing(null);
       if (_pRag != null) syncPlayerRag(true);  // ...and no city crew bandana
       if (_hatKey) syncPlayerHat(true);         // ...and no shop hat over the jail role
       return;
@@ -1068,21 +646,12 @@
   // offscreen rig). FRESH meshes on purpose: the pool belongs to the dressed
   // roster, and a caller that removes its meshes without releasing them would
   // drain it. Same shared geometry + materials, so the read is identical.
+  // Jewelry is made by the kit for `rig` (the portrait's own body), so the
+  // chain drapes over THAT chest and the ring sits on THAT hand.
   CBZ.cityBlingBuild = function (parts, parent, out, lm, rig) {
-    if (!parts || !parent || !parent.add) return out || null;
+    if (!parts) return out || null;
     out = out || [];
-    const side = wristSide(parent);   // portrait wrists take the same dorsal roll
-    const chest = chestRigOf(rig, parent);   // …and the portrait's chain lies on its chest
-    for (let i = 0; i < parts.length; i++) {
-      const p = parts[i];
-      if (p.kind === "watch") { const w = CBZ.wristwatch && CBZ.wristwatch.attach(parent, p.look); if (w) out.push(w); continue; }
-      const geo = geoFor(p.kind);
-      if (!geo || !p.mat) continue;
-      const m = new THREE.Mesh(geo, p.mat);
-      m.castShadow = false; m.receiveShadow = false;
-      (placePart(m, p, lm, side, chest) || parent).add(m);
-      out.push(m);
-    }
+    mountParts(parts, parent, out, lm || (rig ? armLandmarks(rig) : null), rig || null, true);
     return out;
   };
   // RATCHET — every catalog row that can appear on a body, resolved through the

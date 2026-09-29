@@ -8287,6 +8287,33 @@
       ringK: 0.0100 / 0.045,
     };
   };
+  /* ---- HEAD LANDMARKS for what hangs off a head (entities/jewelry_kit.js):
+     the EAR LOBE, read off earGeometry's own outline (polar rho 0.72 at the
+     bottom of the ear, mid-way through the lobe's thickness), so an earring
+     is pierced through the lobe this head actually drew instead of floating
+     16 cm in front of it; the tiara's band line; the head scale. All in the
+     NECK group's frame (the head mesh sits at y = headSize/2, scaled hk). */
+  CBZ.charHeadLandmarks = function (ch) {
+    const P = ch && ch.profile;
+    if (!P || !(P.headSize > 0)) return null;
+    const F = HEAD_FORMS[ch.headForm] || HEAD_FORMS[headForm(P)] || HEAD_FORMS.m;
+    const hs = P.headSize, hk = hs / 0.60;
+    const E = EAR_SPEC, k = F.ear || 1, ea = E.H / 2 * k, eb = E.W / 2 * k, bf = E.bf * k;
+    const ca = Math.cos(E.alpha), sa = Math.sin(E.alpha), cb = Math.cos(E.beta), sb = Math.sin(E.beta);
+    const rho = 0.72;
+    const b = 0.12 * eb * rho, a = -ea * rho;                  // theta = 3pi/2: the bottom of the outline
+    const b1 = b * cb - a * sb, a1 = a * cb + b * sb, db = b1 - bf;
+    const w = 0.0115 * k;                                      // half the lobe's relief: the middle of the flesh
+    const x = E.x0 + (-db * sa + w * ca), y = E.yc + a1 - 0.30, z = E.zc + bf + (db * ca + w * sa);
+    return {
+      lobe: [x * hk, hs / 2 + y * hk, z * hk],                // the +x (right-hand) lobe; mirror x for the other
+      earYaw: E.alpha,                                         // the ear swings out about its front edge by this
+      earK: 1.6 * k * hk,                                      // the drawn ear against a real one (0.150 u = 10.5 cm tall)
+      crownBandY: hs / 2 + 0.20 * hk,                          // where a band crosses the forehead-top
+      headZ: 0,
+      hk: hk,
+    };
+  };
   /* ---- HOW FAR THE PRONE RIG DROPS, in METRES -----------------------------
      OWNER: "when player is laying down… the player [goes] a tiny bit [under
      ground], bad physics." physics.js dropped the rig group by a TYPED 0.62 to
