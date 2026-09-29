@@ -442,7 +442,10 @@
       for (var i = mine.length - 1; i >= 0; i--) {
         var p = mine[i];
         var dx = p.pos.x - px, dz = p.pos.z - pz;
-        if (dx * dx + dz * dz > DESPAWN_RAD * DESPAWN_RAD && transitionSafe(p.pos.x, p.pos.z)) {
+        // a body you shot (down, or a corpse the morgue still holds) is not
+        // "drifted": CBZ.bodyMayLeave keeps it where it lies
+        if (dx * dx + dz * dz > DESPAWN_RAD * DESPAWN_RAD && transitionSafe(p.pos.x, p.pos.z) &&
+            (!CBZ.bodyMayLeave || CBZ.bodyMayLeave(p))) {
           despawn(p);
           mine.splice(i, 1);
         }

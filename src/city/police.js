@@ -3460,7 +3460,9 @@
         // chase left a conga line of cops trudging across the whole city.
         c._leaveT = (c._leaveT || 0) + dt;
         const lcx = c.pos.x - camx, lcz = c.pos.z - camz;
-        if (c._leaveT > 25 || lcx * lcx + lcz * lcz > 70 * 70) { if (c.group.parent) c.group.parent.remove(c.group); if (!c._returned && c.kind === "cop") { c._returned = true; forcePool = Math.min(POLICE_FORCE_MAX(), forcePool + 1); } LAW.discharge(c); cops.splice(i, 1); continue; }
+        // ...and only a body free to leave does (CBZ.bodyMayLeave): never one
+        // you shot and put on the floor, never one still on your screen.
+        if ((c._leaveT > 25 || lcx * lcx + lcz * lcz > 70 * 70) && (!CBZ.bodyMayLeave || CBZ.bodyMayLeave(c))) { if (c.group.parent) c.group.parent.remove(c.group); if (!c._returned && c.kind === "cop") { c._returned = true; forcePool = Math.min(POLICE_FORCE_MAX(), forcePool + 1); } LAW.discharge(c); cops.splice(i, 1); continue; }
         const home = CBZ.cityPoliceStation && CBZ.cityPoliceStation();
         let gx, gz;
         if (home && Math.hypot(home.x - c.pos.x, home.z - c.pos.z) > 6) { gx = home.x - c.pos.x; gz = home.z - c.pos.z; }

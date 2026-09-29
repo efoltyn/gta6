@@ -2526,6 +2526,9 @@
         // let go of a vendor the shop no longer wants (closed, or you've walked
         // off) — but only once it's far OR safely off-camera, so a counter you're
         // standing at is never emptied in your face.
+        // a vendor you shot and put on the floor (alive, bleeding) is still
+        // there when the shop shuts: he gets up or he dies, he never vanishes
+        if (CBZ.vitals && CBZ.vitals.state && CBZ.vitals.state(v) !== "ok") continue;
         if (!want && (d2 > VEND_OUT2 || vendorPlaceSafe(vs.x, vs.z))) { removeVendor(v); b.vendor = null; }
         continue;
       }

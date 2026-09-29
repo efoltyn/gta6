@@ -1313,7 +1313,29 @@
     while (pool.length < PROMO && made < PREWARM_PER_FRAME) { pool.push({ ped: makePooled(), idx: -1 }); made++; }
     if (pool.length >= PROMO) { poolBuilt = true; prewarming = false; }   // pool complete — promotion is now instant
   }
+  // may this slot's rig leave play now (population thinning / reconcile)?
+  function parkable(e) {
+    const ped = e && e.ped;
+    if (!ped) return true;
+    if (CBZ.bodyMayLeave) return CBZ.bodyMayLeave(ped, { minDistance: 60 });
+    return !ped.dead;
+  }
+  /* A CORPSE IS NEVER PARKED. Parking teleports the rig to PARK and hides it,
+     and the slot then hands the same rig to the next row with dead=false: a
+     body you shot vanished and came back as a stranger. A dead rig leaves the
+     pool instead (the row is consumed, a fresh rig takes the slot, exactly as
+     updatePromotion's reconcile does) and stays where it fell under the
+     corpse law. Every park() caller goes through here, so none can skip it. */
+  function retireCorpse(e) {
+    if (e.idx >= 0) { ungroup(e.idx); deadAgent[e.idx] = 1; promotedBy[e.idx] = -1; }
+    e.idx = -1;
+    const s = pool.indexOf(e);
+    // outside the city (a mode switch) no rig is built; pickFreeSlot skips the
+    // dead entry and the next spawnCityCrowd/clearCityPeds rebuilds the pool
+    if (s >= 0 && arena() && CBZ.game && CBZ.game.mode === "city") pool[s] = { ped: makePooled(), idx: -1 };
+  }
   function park(e) {
+    if (e.ped && e.ped.dead) { retireCorpse(e); return; }
     if (CBZ.cityPedStash) CBZ.cityPedStash(e.ped);   // bank the identity before the body leaves play
     const ped = e.ped;
     ped._parked = true; ped.group.visible = false;
@@ -1337,7 +1359,7 @@
     let fallback = -1;
     for (let s = 0; s < pool.length; s++) {
       const e = pool[s];
-      if (e.idx >= 0) continue;
+      if (e.idx >= 0 || !e.ped || e.ped.dead) continue;   // a corpse is never a free rig
       if (fallback < 0) fallback = s;
       if (e.ped.gender === wantG) return s;
     }
@@ -1432,6 +1454,8 @@
     ungroup(i);          // promoted to a real rig → any walking-group link releases (followers go solo)
     e.idx = i; promotedBy[i] = s;
     ped._parked = false; ped.dead = false; ped.deadT = 0; ped.ko = 0; ped.culled = false; ped.collected = false; ped.needsPickup = false;
+    // a new person: none of the last occupant's wounds or bleeds come with the rig
+    if (CBZ.vitals && CBZ.vitals.reset) { try { CBZ.vitals.reset(ped); } catch (e) {} }
     ped.pos.set(px[i], 0, pz[i]); ped.char.group.rotation.y = heading[i];
     // PROMOTION MOTION CONTINUITY: the instanced body you were watching was
     // WALKING along its cached heading; the real ped must pick that walk straight
@@ -1506,7 +1530,9 @@
       // range and while driving/dead; only an actual population suppression,
       // death, teardown, or observation gate releases one.
       for (let s = 0; s < pool.length; s++) {
-        const e = pool[s]; if (e.idx < 0) continue;
+        const e = pool[s];
+        // a corpse left in a free entry (retired outside the city) gets a fresh rig
+        if (e.idx < 0) { if (e.ped && e.ped.dead) pool[s] = { ped: makePooled(), idx: -1 }; continue; }
         const i = e.idx, ped = e.ped;
         if (ped.dead) {
           ungroup(i);
@@ -1518,7 +1544,7 @@
         px[i] = ped.pos.x;
         pz[i] = ped.pos.z;
         heading[i] = ped.char.group.rotation.y;
-        if (suppressed[i] || deadAgent[i]) {
+        if ((suppressed[i] || deadAgent[i]) && parkable(e)) {
           promotedBy[i] = -1;
           park(e);
         }
@@ -2204,6 +2230,13 @@
   }
   // nearest ambient agent the ray hits within maxT (head sphere wins). hr/br = assist radii.
   CBZ.cityCrowdRayHit = function (ox, oy, oz, dx, dy, dz, maxT, hr, br) {
+    // NO BODY, NO TARGET. With STANDARD_ACTORS_ONLY a row is drawn ONLY
+    // through its promoted real rig (which is excluded here and hit as a real
+    // ped); an unpromoted row draws nothing at all, and rows in view are
+    // exactly the ones promotion defers. Those invisible rows used to take the
+    // round: blood and a kill with no man and no corpse (a shot that
+    // "disappeared" someone), and the real man you aimed at walked on.
+    if (STANDARD_ACTORS_ONLY) return null;
     let best = -1, bd = maxT, head = false;
     const HR = (hr || 0.33) + 0.05, BR = (br || 0.48) + 0.08;
     for (let i = 0; i < count; i++) {
@@ -2222,7 +2255,12 @@
     const x = px[i], z = pz[i];
     ungroup(i);                                         // corpse → drop any walking-group link
     corpseT[i] = 28;                                   // lie on the ground a good long while, then fade
-    if (CBZ.gore) try { CBZ.gore(x, 1.4, z, { dir: opts.fromX != null ? { x: x - opts.fromX, z: z - opts.fromZ } : null, amount: opts.head ? 1.4 : 1.0, player: false }); } catch (e) {}
+    // an unpromoted row has no drawn body in STANDARD_ACTORS_ONLY: a blast or a
+    // collapse still takes it off the headcount, but no blood blooms on an
+    // empty pavement and no voice plays for a man nobody could see
+    const bodiless = STANDARD_ACTORS_ONLY;
+    if (bodiless) opts = Object.assign({}, opts, { quiet: true });
+    if (CBZ.gore && !bodiless) try { CBZ.gore(x, 1.4, z, { dir: opts.fromX != null ? { x: x - opts.fromX, z: z - opts.fromZ } : null, amount: opts.head ? 1.4 : 1.0, player: false }); } catch (e) {}
     if (CBZ.sfx && !opts.quiet) CBZ.sfx(opts.byCar ? "ko" : (opts.head ? "headshot" : "hit"));
     // a killed civilian is a witnessed crime → routes through the city wanted system
     // (skip when an NPC/explosion you didn't cause did the killing — opts.noCrime)
@@ -2238,6 +2276,8 @@
   // everyone within r of (x,z) gets run down (car mowing through a crowd).
   CBZ.cityCrowdCircleKill = function (x, z, r, opts) {
     let n = 0; const r2 = r * r;
+    // a car only mows down a body that is there (see cityCrowdRayHit)
+    if (STANDARD_ACTORS_ONLY && opts && opts.byCar) return 0;
     for (let i = 0; i < count; i++) {
       if (!shootable(i)) continue;
       const dx = px[i] - x, dz = pz[i] - z;
@@ -2384,6 +2424,12 @@
           if (pickSleepers && !asleepNow(i)) continue;   // spare the awake this pass
           const dx = px[i] - ppx, dz = pz[i] - ppz;
           if (dx * dx + dz * dz < FAR2) continue;  // close enough to see → leave it alone
+          // A PROMOTED ROW IS A REAL MAN, and "far" is not "unseen": this used
+          // to park any promoted body past 60 m, which took living men out of
+          // plain view down a street and, worse, the man you had just shot,
+          // lying there bleeding (vitals "down" is alive, so deadAgent never
+          // covered him). He leaves only when CBZ.bodyMayLeave says so.
+          if (STANDARD_ACTORS_ONLY && promotedBy[i] >= 0 && !parkable(pool[promotedBy[i]])) continue;
           ungroup(i);                              // off-street → drop any walking-group link
           if (STANDARD_ACTORS_ONLY && promotedBy[i] >= 0) {
             const s = promotedBy[i];
