@@ -129,6 +129,8 @@
   // Called by city/world.js at the top of buildCity. The spawn is the city
   // centre (the rooftop / street spawn is downtown); reset() places the
   // player and the streamer re-centres on them from the first tick.
+  const RECENTRE = 0.5;               // the centre follows the player at r * RECENTRE
+  const lastP = { x: 0, z: 0, t: 0 };
   CBZ.streamBegin = function (cx, cz) {
     if (!streamWanted() || CBZ.slice) return false;
     const view = function () { return Math.max(380, +CBZ.cityFogFar || 760) + 60; };
@@ -136,7 +138,15 @@
       name: "stream", stream: true, x: cx, z: cz, r: 300,
       label: "Gang City (streamed)",
       view: view,
-      keepR: function () { return S.r + S.view(); },
+      /* THE KEEP CIRCLE IS WHAT CAN BE SEEN, NO MORE. The player is never
+         more than RECENTRE (half the playable radius) from the centre (the
+         centre follows at that distance), and sees `view` (fog + 60 m) from
+         there; `lead` adds the ground a moving player covers before the next
+         tick builds it (speed x 2.5 s, up to 250 m). It was r + view: the
+         whole playable radius again on top, ~35% more city in memory at the
+         downtown spawn for ground nobody could see yet. */
+      lead: 0,
+      keepR: function () { return S.r * RECENTRE + S.view() + S.lead; },
     };
     CBZ.slice = S;
     S.r = CBZ.SLICE_MANIFEST ? CBZ.streamRadius(cx, cz, view()) : 300;
@@ -322,7 +332,19 @@
     const s = CBZ.slice; if (!s || !s.stream) return;
     const P = CBZ.player; if (!P || !P.pos) return;
     const dx = P.pos.x - s.x, dz = P.pos.z - s.z;
-    if (force || dx * dx + dz * dz > (s.r * 0.5) * (s.r * 0.5)) {
+    // how far a moving player gets before the next few ticks (vehicle or feet)
+    // (measured from the position between ticks: a car, a plane, a horse,
+    // a teleport all count the same way; a jump of > 400 m is a teleport)
+    const tNow = performance.now();
+    let V = 0;
+    if (lastP.t && tNow > lastP.t) {
+      const mdx = P.pos.x - lastP.x, mdz = P.pos.z - lastP.z, d = Math.sqrt(mdx * mdx + mdz * mdz);
+      if (d < 400) V = d / ((tNow - lastP.t) / 1000);
+    }
+    lastP.x = P.pos.x; lastP.z = P.pos.z; lastP.t = tNow;
+    const lead = Math.min(250, V * 2.5);
+    if (lead > s.lead + 20 || lead < s.lead - 60) s.lead = lead;     // grows at once, shrinks lazily
+    if (force || dx * dx + dz * dz > (s.r * RECENTRE) * (s.r * RECENTRE)) {
       s.x = P.pos.x; s.z = P.pos.z;
       s.r = CBZ.SLICE_MANIFEST ? CBZ.streamRadius(s.x, s.z, s.view()) : s.r;
       CBZ.streamStats.recentres++;

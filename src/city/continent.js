@@ -736,9 +736,27 @@
       if (dx > 0 || dz > 0) return Math.hypot(dx, dz);
       return -Math.min(x - b.minX, b.maxX - x, z - b.minZ, b.maxZ - z);
     }
+    // a path body whose box, less its widest half, is already past the nearest
+    // answer cannot change the minimum (its field is >= that bound either way)
+    function pathMaxHalf(b) {
+      if (b._maxHalf != null) return b._maxHalf;
+      let m = 0;
+      if (Array.isArray(b.half)) { for (let i = 0; i < b.half.length; i++) if (b.half[i] > m) m = b.half[i]; }
+      else m = +b.half || 40;
+      Object.defineProperty(b, "_maxHalf", { value: m, writable: true, configurable: true, enumerable: false });
+      return m;
+    }
     function inlandWaterField(x, z) {
       let nearest = Infinity;
-      for (let i = 0; i < waterBodies.length; i++) nearest = Math.min(nearest, waterBodyField(waterBodies[i], x, z));
+      for (let i = 0; i < waterBodies.length; i++) {
+        const b = waterBodies[i];
+        if (b && b.kind === "path" && b.bbox && nearest < Infinity) {
+          const bb = b.bbox;
+          const ox = Math.max(bb.minX - x, 0, x - bb.maxX), oz = Math.max(bb.minZ - z, 0, z - bb.maxZ);
+          if (Math.sqrt(ox * ox + oz * oz) - pathMaxHalf(b) >= nearest) continue;
+        }
+        nearest = Math.min(nearest, waterBodyField(b, x, z));
+      }
       return nearest;
     }
     function shoreField(x, z) { return shoreFieldWith(x, z, inlandWaterField(x, z)); }

@@ -2415,8 +2415,15 @@
           // PASS 1 counts the cells that can hold a tree, so PASS 2 can thin
           // them to the budget UNIFORMLY. Taking the first `count` cells in
           // lattice order wooded the north rows and left the south faces bare.
-          const sites = [];
-          for (let j = 0; j < nz; j++) {
+          // PASS 1 is a pure function of the belt, the terrain and the
+          // config: baked once per version (core/bakecache.js)
+          let sites = [];
+          const BKEY = "snow-belt-" + o.salt;
+          let BSIG = null;
+          try { BSIG = CBZ.bakeSig ? CBZ.bakeSig(BKEY + "|" + CBZ.bakeHash({ b: [o.minX, o.maxX, o.minZ, o.maxZ, o.cell, o.floorY, o.treeline, o.fade, o.density, o.salt, o.count], cfg: CBZ.CONFIG })) : null; } catch (e) { BSIG = null; }
+          const BB = BSIG && CBZ.bakeGet ? CBZ.bakeGet(BKEY, BSIG) : null;
+          if (BB && BB.s) sites = Array.from(BB.s);
+          else for (let j = 0; j < nz; j++) {
             for (let i = 0; i < nx; i++) {
               const x = o.minX + (i + CBZ.hash01(i, j, o.salt)) * o.cell;
               const z = o.minZ + (j + CBZ.hash01(i, j, o.salt + 1)) * o.cell;
@@ -2435,6 +2442,7 @@
               sites.push(i, j, x, z, gy);
             }
           }
+          if (!BB && BSIG && CBZ.bakePut) CBZ.bakePut(BKEY, BSIG, { s: Float64Array.from(sites) });
           // the budget thins with the groves, or a belt that used to be
           // capped would simply refill its quota from the kept groves
           const budget = FLK && FLK.density ? Math.min(o.count, Math.round(o.count * 0.5 * FLK.density("mountain"))) : o.count;

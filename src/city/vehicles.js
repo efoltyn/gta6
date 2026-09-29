@@ -2283,7 +2283,63 @@
     return grp;
   }
 
+  /* A CAR NOBODY CAN SEE IS NOT BUILT YET. In the streamed city (core/
+     citystream.js) a car placed outside the keep circle (a lot's parked car
+     across the continent, a marina's, a dealer row's) gets its record, its
+     place in CBZ.cityCars and an EMPTY group now; the body (~5 ms and ~1 MB
+     of geometry each, measured: 144 of them at the downtown spawn) is built
+     by a streamer job when the player comes within sight, long before it can
+     be seen (the keep circle is the fog band plus the playable radius). */
+  const DEFER_DIMS = { width: 2, length: 4.6, height: 1.5, wheelbase: 2.7 };
+  function materializeCar(c) {
+    if (!c._deferred) return;
+    c._deferred = false;
+    const built = buildCar(c.model);
+    const grp = c.group;
+    while (built.children.length) grp.add(built.children[0]);
+    for (const k in built.userData) grp.userData[k] = built.userData[k];
+    grp.visible = true;
+    const prof = vehicleProfile(c.model, grp.userData && grp.userData.bodyKind);
+    c._bk = grp.userData && grp.userData.bodyKind;
+    const d = grp.userData && grp.userData.vehicleDims;
+    if (d) { if (c.dims && c.dims !== d) Object.assign(c.dims, d); else c.dims = d; grp.userData.vehicleDims = c.dims; }
+    c.mass = prof.mass; c.armor = prof.armor; c.repair = prof.repair;
+    tagTailMeshes(c);
+    addOccupants(c);
+    const hooks = c._afterBuild; c._afterBuild = null;
+    if (hooks) for (const f of hooks) { try { f(c); } catch (e) { console.error("[car after-build]", e); } }
+  }
+  CBZ.cityMaterializeCar = materializeCar;
+  // dress a car (livery, lightbar...) now, or the moment its body exists
+  CBZ.cityWhenCarBuilt = function (c, fn) {
+    if (!c) return;
+    if (c._deferred) (c._afterBuild || (c._afterBuild = [])).push(fn);
+    else fn(c);
+  };
   function makeCar(x, z, heading, vertical, model, aggr) {
+    const S = CBZ.slice;
+    if (S && S.stream && CBZ.sliceKeeps && CBZ.sliceAt && !CBZ.sliceKeeps(x, z, 12)) {
+      const grp = new THREE.Group();
+      grp.position.set(x, 0, z); grp.rotation.y = heading;
+      grp.visible = false;
+      CBZ.city.arena.root.add(grp);
+      const prof0 = vehicleProfile(model, null);
+      const c = {
+        group: grp, pos: grp.position, heading, vertical, model: model || null,
+        v: 0, vx: 0, vz: 0, color: model ? model.color : 0x3c6fd6, stolen: false, player: false, ai: true,
+        lane: 0, road: null, dirSign: 1, dead: false,
+        driver: { aggr: aggr != null ? aggr : 0.3 },
+        pullover: 0, ranRedCD: 0, turnCD: 1 + rng() * 2, npcWanted: 0, npcDriver: null, dwell: 0, stopT: 0,
+        roadRageTarget: null, roadRageT: 0, playerHitCD: 0,
+        _bk: null, dims: Object.assign({}, DEFER_DIMS),
+        mass: prof0.mass, armor: prof0.armor, repair: prof0.repair,
+        _deferred: true,
+      };
+      if (model && model.rarity >= 0.975 && rng() < 0.10) c.mods = { booster: true, factoryBooster: true };
+      CBZ.cityCars.push(c);
+      CBZ.sliceAt({ minX: x - 4, maxX: x + 4, minZ: z - 4, maxZ: z + 4 }, function () { materializeCar(c); }, { name: "car" });
+      return c;
+    }
     const grp = buildCar(model);
     grp.position.set(x, 0, z); grp.rotation.y = heading;
     CBZ.city.arena.root.add(grp);
@@ -3031,12 +3087,15 @@
     const c = makeCar(x, z, heading || 0, false, model, 0.2);
     c.ai = false; c.v = 0; c.baseV = 0; c.stolen = false;
     c._persist = true; c._propParked = true; c._arenaRoot = root;
-    if (opts.color != null && c.group) {
-      // repaint deterministically via the shared recolor hook when present
-      if (CBZ.cityRecolorCar) { try { CBZ.cityRecolorCar(c, opts.color); } catch (e) {} }
-    }
+    const dress = function (cc) {
+      if (opts.color != null && cc.group) {
+        // repaint deterministically via the shared recolor hook when present
+        if (CBZ.cityRecolorCar) { try { CBZ.cityRecolorCar(cc, opts.color); } catch (e) {} }
+      }
+      syncOccupants(cc);                    // parked = empty; no ghost driver
+    };
     if (opts.color != null) c.color = opts.color;
-    syncOccupants(c);                       // parked = empty; no ghost driver
+    if (c._deferred) (c._afterBuild || (c._afterBuild = [])).push(dress); else dress(c);
     return c;
   };
 
