@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "6ef81eca09e6f0cfc828944272e56e35954d46b6",
-  "createdAt": "2026-09-29T06:59:49.427Z",
+  "sourceCommit": "8215f21380fd07ecd9cad71ee1b6268e99c41e2d",
+  "createdAt": "2026-09-29T07:01:08.623Z",
   "fileCount": 1168,
-  "totalBytes": 47650091,
+  "totalBytes": 47659182,
   "files": [
     {
       "file": "src/bootstrap.js",
@@ -1723,8 +1723,8 @@
     },
     {
       "file": "src/core/microboot.js",
-      "bytes": 28495,
-      "sha256": "aa1633829ae3d28471e4050e67004adc0f2b9653163b439a11bd73afe03c08d5"
+      "bytes": 37433,
+      "sha256": "bd0809ad13520d94266e0832c7511e29535b99567eea8532995449d66f745b6f"
     },
     {
       "file": "src/core/mission.js",
@@ -1778,8 +1778,8 @@
     },
     {
       "file": "src/core/studio.js",
-      "bytes": 49181,
-      "sha256": "df78cd2c42077a15bd8f4dcb99979e69f3b775d6aa85e9c0b120ef7a3f92f27c"
+      "bytes": 49871,
+      "sha256": "4629174f7bf8faf69a5b1ecfd93b6b96e2e8421f3e6d50ec4a162b1ec35cf848"
     },
     {
       "file": "src/core/viewscope.js",
@@ -3048,8 +3048,8 @@
     },
     {
       "file": "src/warlord/battle.js",
-      "bytes": 78177,
-      "sha256": "df376b6e3f1bd5a2d1d908f9a9ef37314ce1ec15e8e73937808fade68c31e4a0"
+      "bytes": 78224,
+      "sha256": "2c187b58514d77fadea739eee5cbe2d8fa012360ee846f700768f6a93bec6e70"
     },
     {
       "file": "src/warlord/camo.js",
@@ -3073,8 +3073,8 @@
     },
     {
       "file": "src/warlord/desert.js",
-      "bytes": 26951,
-      "sha256": "a99e584fea757f0a234b38eb1097131bde87d138b7ffc90d41995dea3155cbe4"
+      "bytes": 27040,
+      "sha256": "5af4a638a74f1f07bb1940624f5a25aa9105681bb475828bb9e96c242587cdcc"
     },
     {
       "file": "src/warlord/events.js",
@@ -3118,8 +3118,8 @@
     },
     {
       "file": "src/warlord/props.js",
-      "bytes": 103243,
-      "sha256": "73e5f27f5d2ddfeb167b83bc97e693812e5d4a45deba272f6392ace1e7393368"
+      "bytes": 103723,
+      "sha256": "e226f469edea2294e90dc299db31b7c3e461591dfcd221d37b0f8cd8d9ecd24e"
     },
     {
       "file": "src/warlord/sand.js",
@@ -5768,8 +5768,8 @@
     },
     {
       "file": "games/battle.html",
-      "bytes": 416543,
-      "sha256": "9604c3d9ddb79eb5783158a886a872ae145628ab53d3687fc02cbb9beef52715"
+      "bytes": 415732,
+      "sha256": "dcfa97b05395c95fb4eba17049c046deb51b5c7a8a482f874b4e5a71f7051c3d"
     },
     {
       "file": "games/bomb-survivor-scene.js",
@@ -5778,8 +5778,8 @@
     },
     {
       "file": "games/bomb-survivor.html",
-      "bytes": 75742,
-      "sha256": "f677606e4879da8749f1057f511f822b2106815f0b94a54756a325fc3f9e8bba"
+      "bytes": 75755,
+      "sha256": "dd7fb370f9cf2e54cb7aecf94d9b06003643b72eb21dfa0fcb89a5f9e76e9784"
     },
     {
       "file": "games/dev.html",
@@ -5793,8 +5793,8 @@
     },
     {
       "file": "games/warlord.html",
-      "bytes": 74064,
-      "sha256": "33b93b1dababeb8227fdf028f99008305259f5d1b9e1190bc45b49d945d3f37e"
+      "bytes": 73709,
+      "sha256": "4d1042373a332d7d17140f76efee5ca0e90c36e06e34fad5ed21136ef5aa3bbf"
     },
     {
       "file": "thumbs/shark-sim.jpg",
