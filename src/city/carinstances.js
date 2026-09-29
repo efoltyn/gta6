@@ -129,11 +129,16 @@
 
   // Walk the car exactly as projectObject would: an invisible node hides its
   // subtree. Returns false for anything this module cannot reproduce.
+  let _mover = false;                           // collect() for a MOVING car (acquire(c, true))
   function collect(o) {
     if (o.visible === false) return true;
+    // a seated body: vehicles.js owns its show/hide. A MOVING car is proxied
+    // only past MOVE_R (~150 m), where the driver behind the glass is under a
+    // pixel: the pools draw the car without him (and without his subtree).
+    if (_mover && o.userData && o.userData.occupant) return true;
     if (o.isMesh) {
       if (o.isSkinnedMesh || o.isInstancedMesh) return false;
-      if (o.userData && o.userData.occupant) return false;            // a seated body: vehicles.js owns its show/hide
+      if (o.userData && o.userData.occupant) return false;
       if (o.onBeforeRender !== NOOP_RENDER) return false;
       const geo = o.geometry;
       if (!geo || !geo.isBufferGeometry || !geo.attributes.position) return false;
@@ -301,7 +306,7 @@
       m: new Float32Array(16), cr: 1, cg: 1, cb: 1 };
   }
   function newRec() {
-    return freeRecs.pop() || { car: null, entries: [], cx: 0, cy: 0, cz: 0, r: 0, inView: true, px: 0, pz: 0, ph: 0,
+    return freeRecs.pop() || { mover: false, car: null, entries: [], cx: 0, cy: 0, cz: 0, r: 0, inView: true, px: 0, pz: 0, ph: 0,
       gx: 0, gy: 0, gz: 0, rx: 0, ry: 0, rz: 0, vis: null, gch: 0, vch: 0, lod: false, lodPending: false };
   }
   function carDist2(c) {
@@ -328,19 +333,29 @@
 
   /* ACQUIRE: vehicles.js calls this for a settled, sleepable, awake parked car
      past PROXY_IN. Returns true when the car is now drawn by the pools. */
-  function acquire(c) {
+  /* MOVING TRAFFIC (mover = true): a car driving past MOVE_R used to be
+     hidden (vehicles.js's 150 m cull) and so popped into view at 150 m, well
+     inside the fog. It is proxied instead: the same pools, each entry keeping
+     its mesh's matrix RELATIVE to the car, recomposed from the car's live
+     transform every frame (frameTick), out to the fog ring. */
+  const MOVE_R = 150, MOVE_IN2 = MOVE_R * MOVE_R, MOVE_OUT2 = (MOVE_R - 8) * (MOVE_R - 8);
+  const _gw = new THREE.Matrix4(), _gi = new THREE.Matrix4(), _rm = new THREE.Matrix4();
+  function acquire(c, mover) {
     if (!c || c._proxy || c._sleep || !c.group || !c.pos || !ready()) return false;
     if (c._proxyRetry && frame < c._proxyRetry) return false;       // refused or invalidated recently
     const grp = c.group;
-    if (grp.visible === false || !grp.parent) return false;
+    if ((!mover && grp.visible === false) || !grp.parent) return false;
     const d2 = carDist2(c);
-    if (d2 <= PROXY_IN2 || d2 >= sleepD2()) return false;
+    if (mover ? (d2 <= MOVE_IN2 || d2 >= sleepD2()) : (d2 <= PROXY_IN2 || d2 >= sleepD2())) return false;
+    const wasVis = grp.visible; grp.visible = true;               // collect() walks what would draw
+    _mover = !!mover;
     // the real car is captured at full detail; the pools pick the tier (carlod.js)
     if (CBZ.carLodRestore) CBZ.carLodRestore(c);
     const L = CBZ.carLod, lod = !!(L && L.wantLod(d2, false));
     let lodPending = false;
     _found.length = 0; _keys.length = 0; _sigs.length = 0; _negs.length = 0; _geos.length = 0;
-    if (!collect(grp) || !_found.length) { _found.length = 0; c._proxyRetry = frame + 120; return false; }
+    const ok = collect(grp); _mover = false; grp.visible = wasVis;
+    if (!ok || !_found.length) { _found.length = 0; c._proxyRetry = frame + 120; return false; }
     // world matrices straight from the transforms (updateWorldMatrix is not
     // subject to core/matrixskip's hidden/stamped skips)
     grp.updateWorldMatrix(true, true);
@@ -381,6 +396,8 @@
     const view = frustumReady();
     const rec = newRec();
     rec.car = c;
+    rec.mover = !!mover;
+    if (mover) _gi.copy(grp.matrixWorld).invert();
     rec.px = c.pos.x; rec.pz = c.pos.z; rec.ph = c.heading;
     rec.gx = grp.position.x; rec.gy = grp.position.y; rec.gz = grp.position.z;
     rec.rx = grp.rotation.x; rec.ry = grp.rotation.y; rec.rz = grp.rotation.z;
@@ -397,6 +414,7 @@
       e.pool = p; e.rec = rec; e.src = o; e.mat = m; e.geo = o.geometry; e.paint = paint;
       const src = mw.elements, dst = e.m;
       for (let k = 0; k < 16; k++) dst[k] = src[k];
+      if (mover) { if (!e.rel) e.rel = new Float32Array(16); _rm.multiplyMatrices(_gi, mw); e.rel.set(_rm.elements); }
       if (p.neg) { dst[0] = -dst[0]; dst[4] = -dst[4]; dst[8] = -dst[8]; dst[12] = -dst[12]; }   // pool carries scale.x = -1
       if (paint) { e.cr = m.color.r; e.cg = m.color.g; e.cb = m.color.b; }
       e.idx = p.members.length;
@@ -423,6 +441,28 @@
     return true;
   }
 
+  // a moving proxy follows its car: every entry = car world x its relative matrix
+  function moveRec(rec) {
+    const c = rec.car, grp = c.group;
+    if (c.pos.x === rec.px && c.pos.z === rec.pz && c.heading === rec.ph &&
+        grp.position.y === rec.gy && grp.rotation.x === rec.rx && grp.rotation.z === rec.rz) return;
+    rec.px = c.pos.x; rec.pz = c.pos.z; rec.ph = c.heading; rec.gy = grp.position.y; rec.rx = grp.rotation.x; rec.rz = grp.rotation.z;
+    grp.updateMatrix();
+    if (grp.parent) _gw.multiplyMatrices(grp.parent.matrixWorld, grp.matrix); else _gw.copy(grp.matrix);
+    const E = rec.entries;
+    for (let i = 0; i < E.length; i++) {
+      const e = E[i];
+      if (!e.rel) continue;
+      _rm.fromArray(e.rel).premultiply(_gw);
+      const dst = e.m, src = _rm.elements;
+      for (let k = 0; k < 16; k++) dst[k] = src[k];
+      if (e.pool.neg) { dst[0] = -dst[0]; dst[4] = -dst[4]; dst[8] = -dst[8]; dst[12] = -dst[12]; }
+      e.pool.dirty = true;
+    }
+    const w = _gw.elements;
+    rec.cx = w[12]; rec.cy = w[13]; rec.cz = w[14];
+  }
+
   /* RELEASE: the car draws itself again (group shown), instances gone. */
   function release(c) {
     if (!c || !c._proxy) return;
@@ -436,9 +476,10 @@
       if (last !== e) { mem[e.idx] = last; last.idx = e.idx; }
       p.dirty = true;
       e.pool = null; e.rec = null; e.src = null; e.mat = null; e.geo = null; e.idx = -1;
+      if (e.rel) e.rel = null;
       freeEntries.push(e);
     }
-    rec.entries.length = 0; rec.car = null; rec.vis = null;
+    rec.entries.length = 0; rec.car = null; rec.vis = null; rec.mover = false;
     const k = proxies.indexOf(rec);
     if (k >= 0) { proxies[k] = proxies[proxies.length - 1]; proxies.pop(); }
     freeRecs.push(rec);
@@ -454,13 +495,16 @@
   function stillExact(rec) {
     const c = rec.car, grp = c.group;
     if (!grp || grp.visible !== false || !grp.parent || c.dead) return false;
-    if (c.pos.x !== rec.px || c.pos.z !== rec.pz || c.heading !== rec.ph) return false;
-    if (grp.position.x !== rec.gx || grp.position.y !== rec.gy || grp.position.z !== rec.gz) return false;
-    if (grp.rotation.x !== rec.rx || grp.rotation.y !== rec.ry || grp.rotation.z !== rec.rz) return false;
+    if (!rec.mover) {
+      if (c.pos.x !== rec.px || c.pos.z !== rec.pz || c.heading !== rec.ph) return false;
+      if (grp.position.x !== rec.gx || grp.position.y !== rec.gy || grp.position.z !== rec.gz) return false;
+      if (grp.rotation.x !== rec.rx || grp.rotation.y !== rec.ry || grp.rotation.z !== rec.rz) return false;
+    }
     const vis = (grp.userData && grp.userData.carVisual) || null;
-    if (vis !== rec.vis || grp.children.length !== rec.gch || (vis && vis.children.length !== rec.vch)) return false;
+    if (vis !== rec.vis || (!rec.mover && grp.children.length !== rec.gch) || (vis && vis.children.length !== rec.vch)) return false;
     const sl = CBZ.cityCarSleepable;
-    if (sl && !sl(c)) return false;
+    if (!rec.mover && sl && !sl(c)) return false;
+    if (rec.mover && (c.player || c._heldBy || c.wreckT > 0 || c._onFire)) return false;
     const E = rec.entries;
     for (let i = 0; i < E.length; i++) {
       const e = E[i], o = e.src;
@@ -493,11 +537,18 @@
       // would otherwise be captured and released every other frame)
       if (!stillExact(rec)) { release(c); c._proxyRetry = frame + 120; continue; }
       const d2 = carDist2(c);
-      if (d2 < PROXY_OUT2) { release(c); continue; }
-      if (d2 > SD2) {
-        release(c);
-        if (CBZ.citySleepCar) CBZ.citySleepCar(c);  // hidden past the ring, exactly like vehicles.js would next frame
-        continue;
+      if (rec.mover) {
+        // near again: the real car draws itself; past the fog: hidden (vehicles.js's cull)
+        if (d2 < MOVE_OUT2) { release(c); continue; }
+        if (d2 > SD2) { release(c); if (c.group) c.group.visible = false; continue; }
+        moveRec(rec);
+      } else {
+        if (d2 < PROXY_OUT2) { release(c); continue; }
+        if (d2 > SD2) {
+          release(c);
+          if (CBZ.citySleepCar) CBZ.citySleepCar(c);  // hidden past the ring, exactly like vehicles.js would next frame
+          continue;
+        }
       }
       // crossed the LOD switch (carlod.js, hysteresis in pixel space), or a
       // far-tier LOD it was waiting on has landed: re-proxy on the right tier.
@@ -505,8 +556,9 @@
       // car draws itself at full detail until vehicles.js re-proxies it.
       const L = CBZ.carLod;
       if (L && (L.wantLod(d2, rec.lod) !== rec.lod || (rec.lodPending && (frame & 63) === 0))) {
+        const mv = rec.mover;
         release(c);
-        acquire(c);
+        if (!acquire(c, mv) && mv && c.group) c.group.visible = true;   // (a mover that cannot re-proxy draws itself)
         continue;
       }
       if (view) {
@@ -539,6 +591,7 @@
 
   CBZ.carInstances = {
     acquire: acquire, release: release, releaseAll: releaseAll,
+    MOVE_R: MOVE_R,
     PROXY_IN: PROXY_IN, PROXY_OUT: PROXY_OUT,
     _frameTick: frameTick,                       // exposed for the pure-node bookkeeping check
   };

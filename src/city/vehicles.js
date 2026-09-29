@@ -6353,7 +6353,7 @@
     if (car.v > 6) runOver(car, car.v);
     setBrake(car, false);                 // a rammer is flat on the throttle
     const cdx = car.pos.x - CBZ.camera.position.x, cdz = car.pos.z - CBZ.camera.position.z;
-    car.group.visible = (cdx * cdx + cdz * cdz) < 150 * 150;
+    moverVis(car, cdx * cdx + cdz * cdz);
     return true;
   }
 
@@ -6393,6 +6393,20 @@
   // back on screen). This is the single biggest CPU saving in the traffic loop.
   let _vframe = 0, _vslice = 0;
   const FARCAR_D2 = 150 * 150;
+  /* A MOVING CAR PAST 150 m IS DRAWN BY THE POOLS, NOT HIDDEN. The old cull
+     hid traffic past 150 m, so every car popped into view there, well inside
+     the fog. city/carinstances.js proxies it instead (its meshes follow the
+     car's transform every frame) out to the fog ring, where it is hidden. */
+  function moverVis(c, d2) {
+    const CI = CBZ.carInstances;
+    if (d2 < 150 * 150) {
+      if (c._proxy && c._proxyRec && c._proxyRec.mover && CI) CI.release(c);
+      c.group.visible = true; return true;
+    }
+    if (c._proxy) { c.group.visible = false; return false; }      // the pools draw it
+    if (CI && CBZ.carSleepD2 && d2 < CBZ.carSleepD2() && CI.acquire(c, true)) return false;
+    c.group.visible = false; return false;
+  }
   /* PARKED CARS SLEEP. ~500 cars live in cityCars and most are parked; both
      per-frame passes (37 AI, 38 damage/occupants) walked every one of them at
      every tier (measured 40-75 ms/frame at 4x CPU throttle on the iPad
@@ -6807,7 +6821,7 @@
         seatCar(c, dt);
         rollWheels(c, dt);
         const wdx = c.pos.x - CBZ.camera.position.x, wdz = c.pos.z - CBZ.camera.position.z;
-        c.group.visible = (wdx * wdx + wdz * wdz) < 150 * 150;
+        moverVis(c, wdx * wdx + wdz * wdz);
         if (c.wreckT <= 0 && c.abandoned) c.ai = false;   // settle as an abandoned wreck
         continue;
       }
@@ -6830,7 +6844,7 @@
         rollWheels(c, dt);
         if (c.v > 9 && (c.reckless || c.pullover === 4)) runOver(c, c.v);
         const tdx = c.pos.x - CBZ.camera.position.x, tdz = c.pos.z - CBZ.camera.position.z;
-        c.group.visible = (tdx * tdx + tdz * tdz) < 150 * 150;
+        moverVis(c, tdx * tdx + tdz * tdz);
         setBrake(c, c.group.visible && tv < c.v - 0.4);   // easing off into the corner
         continue;
       }
@@ -7235,7 +7249,7 @@
       if (c.v > 5) runOver(c, c.v);
       // simple distance cull: cars far from the camera stop drawing
       const cdx = c.pos.x - CBZ.camera.position.x, cdz = c.pos.z - CBZ.camera.position.z;
-      c.group.visible = (cdx * cdx + cdz * cdz) < 150 * 150;
+      moverVis(c, cdx * cdx + cdz * cdz);
       // brake lights flare while the driver is shedding speed (red / queue /
       // ped ahead) or held stopped — only swapped for cars you can see.
       setBrake(c, c.group.visible && (target < c.v - 0.6 || (c.v < 0.45 && target < 0.6)));

@@ -1747,7 +1747,17 @@ async function serveMain() {
         function at(d){ for (var i = 0; i < legs.length; i++) { if (d <= legs[i] || i === legs.length - 1) { var f = Math.min(1, d / legs[i]); return [route[i][0] + (route[i+1][0]-route[i][0]) * f, route[i][1] + (route[i+1][1]-route[i][1]) * f, Math.atan2(route[i+1][0]-route[i][0], route[i+1][1]-route[i][1])]; } d -= legs[i]; } }
         var gh = function(x, z){ try { var y = A && A.groundHeightAt ? A.groundHeightAt(x, z) : 0; return isFinite(y) ? y : 0; } catch (e) { return 0; } };
         var fr = new T.Frustum(), pm = new T.Matrix4(), bx = new T.Box3(), sph = new T.Sphere(), cache = new WeakMap(), was = new WeakMap();
-        function drawn(o){ if (!o.visible) return false; var got = false; o.traverse(function(c){ if (!got && c.visible && (c.isMesh || c.isPoints || c.isLine) && (c.count == null || c.count > 0)) { var p = c; while (p && p !== o) { if (!p.visible) return; p = p.parent; } got = true; } }); return got; }
+        /* no closures, no allocation per call: the scan itself must not be
+           the garbage the drive measures (a traverse() callback per object
+           per frame was ~300k closures a second) */
+        var _st = [];
+        function drawn(o){ if (!o.visible) return false; _st.length = 0; _st.push(o);
+          while (_st.length) { var c = _st.pop(); if (!c.visible) continue;
+            if ((c.isMesh || c.isPoints || c.isLine) && (c.count == null || c.count > 0)) { _st.length = 0; return true; }
+            var ch = c.children; for (var i = 0; i < ch.length; i++) _st.push(ch[i]); }
+          return false; }
+        function label(o){ var n = o.name || ""; if (!n) { var ch = o.children; for (var i = 0; i < ch.length && !n; i++) n = ch[i].name || ""; }
+          var u = o.userData || {}; return (o.type) + (n ? ":" + n : "") + (u._builder ? "@" + u._builder : "") + (u.carVisual ? ":car" : ""); }
         var pops = [], popN = 0, checks = 0;
         function scan(first){
           var cam = C.camera; cam.updateMatrixWorld(); pm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse); fr.setFromProjectionMatrix(pm);
@@ -1759,7 +1769,7 @@ async function serveMain() {
             var sp = cache.get(o); if (!sp) { bx.setFromObject(o); if (bx.isEmpty()) continue; sp = bx.getBoundingSphere(new T.Sphere()); cache.set(o, sp); }
             checks++;
             var dist = sp.center.distanceTo(cam.position) - sp.radius;
-            if (dist < fog && fr.intersectsSphere(sp)) { popN++; if (pops.length < 20) pops.push([(o.name || o.type) + (u._builder ? "@" + u._builder : ""), Math.round(dist), Math.round(sp.radius)]); } } }
+            if (dist < fog && sp.radius < fog && fr.intersectsSphere(sp)) { popN++; if (pops.length < 30) pops.push([label(o), Math.round(dist), Math.round(sp.radius)]); } } }
         }
         var samples = [], t0 = performance.now(), frames = SECS * 60, d = 0;
         scan(true);
@@ -1769,7 +1779,7 @@ async function serveMain() {
           S.step(1, { path: function(){ Pl.pos.x = q[0]; Pl.pos.z = q[1]; Pl.pos.y = gh(q[0], q[1]); if (Pl.vel) { Pl.vel.x = 0; Pl.vel.y = 0; Pl.vel.z = 0; } Pl.hp = Math.max(Pl.hp || 0, 100);
             if (C.playerChar && C.playerChar.group) { C.playerChar.group.position.set(q[0], Pl.pos.y, q[1]); C.playerChar.group.rotation.y = q[2]; }
             if (C.cam) C.cam.yaw = q[2] + Math.PI; } });
-          scan(false);
+          if (f & 1) scan(false);
           if (f % 60 === 59) { var m = S.memRead(); hp = Math.max(hp, m.heap); gp = Math.max(gp, m.gpu); php = Math.max(php, m.phone);
             var st = C.streamStats || {}; samples.push([Math.round((f + 1) / 60), Math.round(m.heap), Math.round(m.gpu), Math.round(m.phone), st.built, st.parked, st.queued, C.slice ? Math.round(C.slice.keepR()) : null]); }
         }
