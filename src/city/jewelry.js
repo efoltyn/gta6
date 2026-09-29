@@ -141,44 +141,6 @@
              showpiece: name === "Engagement Ring" };
   }
 
-  // ---- shared geometries + materials (one each, flagged _shared) ------------
-  // METAL IS A HIGHLIGHT, NOT A COLOUR: Phong gives every piece a specular
-  // highlight that moves as you walk the aisle. Emissive is kept LOW: a piece
-  // of jewellery does not light itself, the case light does (the old ice ran
-  // at 0.78 and the "glint" at 0.95, i.e. glowing white dots).
-  let M = null;
-  const GEO = new Map();
-  function G(key, make) { let g2 = GEO.get(key); if (!g2) { g2 = make(); g2._shared = true; GEO.set(key, g2); } return g2; }
-  function metal(color, emissive, ei, shininess, spec) {
-    return new THREE.MeshPhongMaterial({ color: color, emissive: emissive, emissiveIntensity: ei, specular: spec, shininess: shininess });
-  }
-  function mats() {
-    if (M) return M;
-    M = {
-      // metal finishes match bling.js's player-worn tones (gold 0xc9a44a,
-      // silver 0xb9c0c8, ice 0xeaf6ff), so the case piece and the wrist it
-      // lands on read as the SAME metal.
-      gold: metal(0xc9a44a, 0x3a2a08, 0.25, 90, 0xfff0c0),
-      silver: metal(0xc6cdd6, 0x2a2f38, 0.2, 110, 0xffffff),
-      ice: metal(0xeaf6ff, 0x6a8aa8, 0.22, 160, 0xffffff),
-      glint: metal(0xffffff, 0x9fb8d0, 0.3, 200, 0xffffff),
-    };
-    Object.keys(M).forEach((k) => { M[k]._shared = true; });
-    return M;
-  }
-  function mesh(geo, mat, x, y, z, rx, ry, rz) {
-    const m = new THREE.Mesh(geo, mat);
-    m.position.set(x || 0, y || 0, z || 0);
-    if (rx || ry || rz) m.rotation.set(rx || 0, ry || 0, rz || 0);
-    m.castShadow = false; m.receiveShadow = false;
-    return m;
-  }
-  const cylG = (rt, rb, h, seg) => G("c" + rt + "," + rb + "," + h + "," + (seg || 16), () => new THREE.CylinderGeometry(rt, rb, h, seg || 16));
-  const torG = (r, t, seg, arc) => G("t" + r + "," + t + "," + (seg || 24) + "," + (arc || 0), () => new THREE.TorusGeometry(r, t, 6, seg || 24, arc || Math.PI * 2));
-  const boxG = (w, h, d) => G("b" + w + "," + h + "," + d, () => new THREE.BoxGeometry(w, h, d));
-  const octG = (r) => G("o" + r, () => new THREE.OctahedronGeometry(r, 0));
-  const PI = Math.PI;
-
   /* ---- THE PIECES, at real size (x DISPLAY) ------------------------------
      Every piece is its own small Group (it leaves the case when bought or
      taken) over shared geometry. Real dimensions: a watch case is 40-42 mm,
@@ -186,6 +148,7 @@
      the piece a hair (a display case is lit and looked at from 1.5 m) without
      going back to the old 12 cm watches and 11 cm rings. */
   const DISPLAY = 1.2;
+  const PI = Math.PI;
 
   // A watch lying over a cushion: the bracelet wraps the pillow (radius PR),
   // the head sits on the pillow's front shoulder 35 degrees up, dial facing
@@ -202,54 +165,24 @@
   }
 
   // the small model for a piece; `kind` = the visualId (buyable) or the loot
-  // name (vault). Origin = where it meets its mount (see MOUNT_H).
+  // name (vault). Origin = where it meets its mount (see MOUNT_H). THE PIECE
+  // IN THE CASE IS THE PIECE YOU WEAR: entities/jewelry_kit.js makes both —
+  // the same links, brilliants, settings and metal, laid on a velvet form.
+  const DISPLAY_KIT = {
+    chain_gold: ["necklace", "curb"], chain_iced: ["necklace", "cuban"], "Diamond Necklace": ["necklace", "riviera"],
+    ring_diamond: ["ring", "solitaire"], "Engagement Ring": ["ring", "rock"],
+    grill_diamond: ["grill"], "Diamond Tiara": ["tiara"],
+  };
   function buildPiece(kind) {
-    const m = mats();
     const grp = new THREE.Group();
+    const D = CBZ.jewel && CBZ.jewel.display, how = DISPLAY_KIT[kind] || ["ring", "pinky"];
     if (kind === "watch_steel" || kind === "watch_diver" || kind === "watch_gold" || kind === "watch_iced") buildWatch(kind, grp);
-    else if (kind === "chain_gold" || kind === "chain_iced" || kind === "Diamond Necklace") {
-      // draped on a neck form: a loop tilted forward round the neck, the
-      // pendant hanging at its lowest point
-      const iced = kind !== "chain_gold";
-      const loop = mesh(torG(0.05, kind === "chain_gold" ? 0.0042 : 0.0032, 32), kind === "Diamond Necklace" ? m.silver : (iced ? m.ice : m.gold), 0, 0, 0.004, PI / 2 + 0.55);
-      grp.add(loop);
-      const py = -Math.sin(0.55) * 0.05, pz = Math.cos(0.55) * 0.05 + 0.006;
-      if (kind === "Diamond Necklace") {
-        for (let i = -3; i <= 3; i++) { const a = PI / 2 + i * 0.22; grp.add(mesh(octG(0.0045 + (i === 0 ? 0.004 : 0)), m.glint, Math.cos(a) * 0.05, -Math.sin(0.55) * Math.sin(a) * 0.05 - (i === 0 ? 0.008 : 0), Math.cos(0.55) * Math.sin(a) * 0.05 + 0.008)); }
-      } else {
-        const pend = mesh(octG(iced ? 0.009 : 0.007), iced ? m.glint : m.gold, 0, py - 0.012, pz);
-        pend.scale.set(1, 1.35, 0.5); grp.add(pend);
-        grp.add(mesh(torG(0.0035, 0.0012, 10), iced ? m.ice : m.gold, 0, py - 0.001, pz));        // the bail
-      }
-    } else if (kind === "ring_diamond" || kind === "Engagement Ring") {
-      // lying on its finger cone: band horizontal, the stone set on top at the front
-      const big = kind === "Engagement Ring";
-      grp.add(mesh(torG(0.0105, 0.0022, 24), big ? m.silver : m.silver, 0, 0, 0, PI / 2));
-      const st = mesh(octG(big ? 0.0085 : 0.0055), m.glint, 0, big ? 0.009 : 0.006, 0.0115);
-      st.scale.set(1, 1.2, 1); grp.add(st);
-      for (let i = 0; i < 4; i++) { const a = i * PI / 2 + PI / 4; grp.add(mesh(cylG(0.0007, 0.0007, big ? 0.008 : 0.006, 5), m.silver, Math.cos(a) * 0.004, big ? 0.004 : 0.003, 0.0115 + Math.sin(a) * 0.004)); }
-      if (!big) for (const s of [-1, 1]) grp.add(mesh(octG(0.0024), m.glint, s * 0.0055, 0.0025, 0.0098));
-    } else if (kind === "grill_diamond") {
-      // a top grill: six iced caps on an arc, the backing bar behind them
-      grp.add(mesh(torG(0.024, 0.0022, 16, PI), m.silver, 0, 0.004, 0, -PI / 2, 0, PI));
-      for (let i = 0; i < 6; i++) {
-        const a = PI * (0.12 + 0.76 * i / 5);
-        const t = mesh(boxG(0.008, 0.011, 0.005), m.glint, Math.cos(a) * 0.026, 0.0065, Math.sin(a) * 0.026, 0, PI / 2 - a, 0);
-        grp.add(t);
-      }
-    } else if (kind === "Diamond Tiara") {
-      // standing on its cushion: an arc of white metal with five stone peaks
-      grp.add(mesh(torG(0.062, 0.0035, 32, PI), m.silver));
-      for (let i = 0; i < 5; i++) {
-        const a = PI * (0.18 + 0.64 * i / 4), big = i === 2;
-        const r = 0.062 + (big ? 0.022 : 0.012);
-        grp.add(mesh(cylG(0.0012, 0.0012, big ? 0.022 : 0.012, 5), m.silver, Math.cos(a) * (0.062 + (big ? 0.011 : 0.006)), Math.sin(a) * (0.062 + (big ? 0.011 : 0.006)), 0, 0, 0, a - PI / 2));
-        grp.add(mesh(octG(big ? 0.009 : 0.0055), m.glint, Math.cos(a) * r, Math.sin(a) * r, 0.002));
-      }
-      for (let i = 0; i < 9; i++) { const a = PI * (0.1 + 0.8 * i / 8); grp.add(mesh(octG(0.0028), m.ice, Math.cos(a) * 0.062, Math.sin(a) * 0.062, 0.003)); }
-    } else {
-      grp.add(mesh(torG(0.0105, 0.0022, 24), m.gold, 0, 0, 0, PI / 2));
-      grp.add(mesh(octG(0.005), m.ice, 0, 0.005, 0.0115));
+    else if (D) {
+      // the neck form's column is ~36 mm radius at the chain's resting height
+      if (how[0] === "necklace") grp.add(D.necklace(how[1], 0.036 / DISPLAY));
+      else if (how[0] === "ring") grp.add(D.ring(how[1]));
+      else if (how[0] === "grill") grp.add(D.grill());
+      else if (how[0] === "tiara") grp.add(D.tiara());
     }
     grp.scale.setScalar(DISPLAY);
     return grp;
