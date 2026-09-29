@@ -287,16 +287,14 @@
   const BOX_LEN_F = 0.32, BOX_SPAN_F = 0.22;
 
   // ============================================================
-  //  2. STATE
+  //  2. STATE — one record per airfield. Every airport in CBZ.airports that
+  //     city/airport_kit.js built gets its own fleet, its own routes and its
+  //     own aircraft list; V is every vehicle of every field (u.fld says whose).
   // ============================================================
-  let F = null;                 // the derived airfield geometry (null = no airport)
-  const V = [];                 // every vehicle this file owns
-  const ROUTES = {};            // name -> {name, pts, loop}
-  let craft = [];               // aircraft discovered on the field (live positions)
-  let nearPeds = [];            // peds worth braking for, refreshed on the slow tick
-  let scanT = 0, frame = 0, farAcc = 0;
-  let kerbDone = false, kerbFromRoad = false;
-  let inspT = 0, inspecting = false;
+  const FIELDS = [];
+  const V = [];
+  let nearPeds = [];
+  let frame = 0;
   let bailouts = 0, holdEvents = 0, nudged = 0;
 
   // ============================================================
@@ -511,239 +509,197 @@
 
   // THE BODIES ARE PUBLIC: island_airport.js's scripted pushback uses the
   // same tug instead of hand-rolling a second one out of loose boxes.
+  function buildStairs(tone) {
+    // Passenger airstairs on a light truck: a low cab at the front left, the
+    // stair flight climbing from the tail to a railed platform over the cab,
+    // canopy over the top landing. The platform floor is at the airliner's
+    // door sill (3.6 m on this field's A320-class hull at 1.45).
+    const g = new THREE.Group();
+    const wheels = [];
+    const paint = vmat("paint", tone);
+    const white = cmat(0xe9ecee);
+    const dark = cmat(0x24272b);
+    const steel = cmat(0xaeb4ba);
+    bx(g, 2.2, 0.36, 7.0, 0, 0.62, 0, cmat(0x3a3e44));                 // chassis
+    bx(g, 1.2, 1.35, 1.9, -0.5, 1.45, 2.3, paint);                     // cab (left, low)
+    bx(g, 1.1, 0.55, 0.08, -0.5, 1.8, 3.26, vmat("glass", 0x1d3a4a), { noCast: true });
+    bx(g, 0.5, 0.45, 0.46, -0.5, 1.0, 2.2, dark);                      // driver's seat
+    // the stair flight: stringers + treads from the tail (0.9 m) to the platform (3.6 m)
+    const run = 5.2, rise = 2.7, n = 14, y0 = 0.9, z0 = -3.3;
+    const ang = Math.atan2(rise, run), L = Math.hypot(run, rise);
+    for (const sx of [-0.62, 0.62]) {
+      const st = bx(g, 0.08, 0.28, L, sx, y0 + rise / 2, z0 + run / 2, paint);
+      st.rotation.x = -ang;
+      const hr = bx(g, 0.05, 0.05, L, sx * 1.05, y0 + rise / 2 + 1.0, z0 + run / 2, steel, { noCast: true });
+      hr.rotation.x = -ang;
+    }
+    for (let i = 0; i < n; i++) {
+      const t = (i + 0.5) / n;
+      bx(g, 1.16, 0.04, 0.3, 0, y0 + rise * t, z0 + run * t, steel, { noCast: true });
+    }
+    // the platform, its rails, the canopy, the bumper that meets the fuselage
+    bx(g, 1.5, 0.12, 1.3, 0, y0 + rise, z0 + run + 0.6, steel);
+    for (const sx of [-0.72, 0.72]) {
+      bx(g, 0.05, 1.05, 1.3, sx, y0 + rise + 0.55, z0 + run + 0.6, white, { noCast: true });
+      bx(g, 0.07, 2.1, 0.07, sx, y0 + rise + 1.05, z0 + run + 1.2, white);
+    }
+    bx(g, 1.7, 0.06, 1.5, 0, y0 + rise + 2.1, z0 + run + 0.55, white);          // canopy
+    bx(g, 1.5, 0.18, 0.2, 0, y0 + rise + 0.05, z0 + run + 1.3, cmat(0x1a1c20)); // rubber bumper
+    // the support frame from the chassis under the platform
+    for (const sx of [-0.7, 0.7]) bx(g, 0.12, rise - 0.3, 0.12, sx, y0 + (rise - 0.3) / 2 + 0.3, z0 + run + 0.2, paint);
+    const bm = beaconLamp(g, -0.5, 2.2, 2.3, 0xffb648, 0.26, 0.13);
+    for (const s of [-1, 1]) for (const z of [2.3, -2.4]) wheel(g, s * 0.98, z, 0.42, 0.32, wheels);
+    return compact({ grp: g, wheels: wheels, beacon: bm, dims: { width: 2.3, length: 7.2, height: 4.2, wheelbase: 4.7 } });
+  }
+
+  function buildCrashTender() {
+    // ARFF crash tender, 6x6: a wide low cab with a raked windscreen and a
+    // roof monitor, a water/foam body with roller-shutter lockers down both
+    // flanks, a bumper turret, big off-road wheels. 12 m, 3.0 m, 3.6 m.
+    const g = new THREE.Group();
+    const wheels = [];
+    const red = vmat("paint", 0xc0241c);
+    const white = cmat(0xeceeef);
+    const dark = cmat(0x24272b);
+    const steel = vmat("chrome", 0xc8ccd2);
+    bx(g, 2.6, 0.5, 11.2, 0, 0.95, -0.2, cmat(0x2a2d31));              // chassis
+    geoMesh(g, taperBox(2.95, 1.9, 2.6, { nz: 0.86, top: 0.9 }), red, 0, 2.1, 4.2);   // cab
+    bx(g, 2.7, 0.9, 0.1, 0, 2.55, 5.45, vmat("glass", 0x1d3a4a), { noCast: true });   // windscreen
+    for (const s of [-1, 1]) bx(g, 0.1, 0.8, 1.6, s * 1.46, 2.5, 4.2, vmat("glass", 0x1d3a4a), { noCast: true });
+    bx(g, 0.5, 0.45, 0.46, -0.6, 1.9, 4.0, dark);                      // driver's seat
+    // the body: tank + lockers with shutters
+    bx(g, 2.95, 2.4, 7.4, 0, 2.3, -1.9, red);
+    for (const s of [-1, 1]) for (let k = 0; k < 4; k++) bx(g, 0.05, 1.5, 1.6, s * 1.49, 2.05, 0.9 - k * 1.8, cmat(0xb8bcc0), { noCast: true });
+    bx(g, 3.0, 0.22, 11.3, 0, 1.55, -0.2, white, { noCast: true });   // the white band
+    bx(g, 2.6, 0.12, 7.0, 0, 3.56, -1.9, steel, { noCast: true });   // roof walkway
+    // roof monitor on the cab and the bumper turret
+    geoMesh(g, cylGeom(0.28, 0.3, 10), steel, 0, 3.2, 4.0);
+    bx(g, 0.18, 0.18, 1.6, 0, 3.42, 4.6, steel);
+    bx(g, 0.14, 0.14, 1.0, 0, 1.0, 6.1, steel);
+    bx(g, 2.9, 0.3, 0.2, 0, 0.8, 5.55, dark);                          // bumper
+    // light bar
+    bx(g, 1.8, 0.12, 0.3, 0, 3.08, 5.0, dark, { noCast: true });
+    const bm = beaconLamp(g, 0, 3.2, 5.0, 0xff2a1a, 0.5, 0.14);
+    for (const s of [-1, 1]) for (const z of [3.9, -1.6, -3.4]) wheel(g, s * 1.2, z, 0.65, 0.5, wheels);
+    return compact({ grp: g, wheels: wheels, beacon: bm, dims: { width: 3.0, length: 12.0, height: 3.6, wheelbase: 7.3 } });
+  }
+
+  // THE BODIES ARE PUBLIC
   CBZ.airsideBodies = {
     tug: buildTug, tractor: buildBaggageTractor, cart: buildCart,
     catering: buildCatering, bowser: buildBowser, followMe: buildFollowMe,
+    stairs: buildStairs, crashTender: buildCrashTender,
   };
 
   // ============================================================
-  //  4. THE FIELD — derived, never re-hardcoded.
+  //  4. THE FIELD — read off the airport RECORD, never re-hardcoded.
   //
-  //  city.airportAudit publishes `bounds` and `runway`. Those two records are
-  //  enough to recover the world-layout dial island_airport.js applies to
-  //  every one of its own coordinates (CBZ.worldOff("airport")), so from here
-  //  the airfield's own literals can be used verbatim and still track the dial:
-  //      RWY_X0 = -850 + dx   ->   dx = runway.minX + 850
-  //      RWY_Z  =  -90 + dz   ->   dz = runwayCentreZ + 90
-  //  Everything else is a documented offset from those, matching the constants
-  //  at island_airport.js:880-888. If the airfield is ever rebuilt at a
-  //  different size, the assertions below fail closed (F stays null) rather
-  //  than paving a service road across a runway.
+  //  Every field city/airport_kit.js built publishes its resolved layout on
+  //  its record (ap.layout: runway, taxiway, stands, the head-of-stand road,
+  //  the terminal plan) and its frame (ap.toWorld). The service network is
+  //  authored in that field's LOCAL metres and projected through the frame,
+  //  so a crooked field (Cape Harbor runs 11/29) gets the same fleet as a
+  //  straight one and nothing here knows which field it is working.
+  //
+  //    head-of-stand road  under the jet bridges, in front of the noses
+  //                        (two lanes, eastbound on the aircraft side)
+  //    tail lane           behind the parked tails, clear of a taxiing
+  //                        aeroplane's wingtip
+  //    links               round both ends of the stand row
+  //    the taxiway         the follow-me's beat, and the rare runway
+  //                        inspection through a holding position
+  //    the kerb            landside: a one-way departures lane
   // ============================================================
-  function deriveField(city) {
-    const A = city && city.airportAudit;
-    if (!A || !A.bounds || !A.runway) return null;
-    const B = A.bounds, R = A.runway;
-    if (!(B.maxX > B.minX) || !(R.maxX > R.minX)) return null;
-    const rwyZ = (R.minZ + R.maxZ) / 2, rwyHW = (R.maxZ - R.minZ) / 2;
-    const dx = R.minX + 850, dz = rwyZ + 90;
-    // sanity: the dial recovered from the runway must agree with the one the
-    // bounds imply, or this is not the airfield this file was written against.
-    if (Math.abs((B.minX + 900) - dx) > 2 || Math.abs((B.minZ + 280) - dz) > 2) return null;
-
-    const apronX = -40 + dx, apronZ = 0 + dz, taxZ = -40 + dz;
+  function deriveField(ap) {
+    const L = ap && ap.layout;
+    if (!L || !L.stand || !L.terminal) return null;
+    const B = ap.bounds;
+    const T = L.terminal, SP = L.stand;
+    const xs = L.stands.map(function (s) { return s.lx; });
+    const x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs);
+    const conns = (L.conns || []).slice().sort(function (a, b) { return a - b; });
+    const mid = conns.length > 2 ? conns.slice(1, conns.length - 1) : conns;
     const f = {
+      ap: ap, id: ap.id, L: L,
       minX: B.minX, maxX: B.maxX, minZ: B.minZ, maxZ: B.maxZ,
       cx: (B.minX + B.maxX) / 2, cz: (B.minZ + B.maxZ) / 2,
-      rwyX0: R.minX, rwyX1: R.maxX, rwyZ: rwyZ, rwyHW: rwyHW,
-      rwyMinZ: R.minZ, rwyMaxZ: R.maxZ,
-      taxZ: taxZ,                         // taxiway centreline (island_airport: RWY_Z + 50)
-      apronX: apronX, apronZ: apronZ,     // apron/terminal centreline
-      connX: [-160 + dx, 80 + dx],        // the two painted runway connectors
-      // terminal footprint (island_airport.js:1016 — tx/tz/tw/td)
-      termX0: -115 + dx, termX1: 35 + dx, termZ0: 11 + dz, termZ1: 37 + dz,
-      // ---- THE SERVICE NETWORK ----
-      // THE HEAD-OF-STAND CORRIDOR — one road behind the stands with two
-      // lanes, and the ONLY strip of ground the field actually offers here:
-      // the parked tails reach z≈+9 and the terminal wall stands at z=+11, so
-      // this corridor necessarily runs UNDER the upswept tailcones (which are
-      // ~7 m up). South lane runs east, north lane runs west, drive-on-the-
-      // right, and the landside kerb loop's return leg IS the north lane —
-      // one road, two users, no second ribbon painted on top of the first.
-      hsZ: apronZ + 4.6,                  // eastbound (airside service)
-      hsBackZ: apronZ + 8.6,              // westbound (kerb return)
-      // apron taxilane: the south edge of the taxiway paint, in front of the
-      // parked noses. Never the taxiway centreline — that is for aircraft.
-      laneZ: taxZ - 8,
-      westX: apronX - 150,                // west link (crosses the taxiway)
-      eastX: apronX + 118,                // east link (between gate 4 and the GA apron)
-      holdZ: taxZ - 16,                   // the PAINTED hold-short bars
-      fmZ: taxZ - 2,                      // the follow-me's taxiway lane
-      // landside kerb: the frontage strip is genuinely only ~3 m deep (the
-      // terminal's north wall at z=37, the island's north edge at z=40), so
-      // the kerb is ONE one-way lane — which is what a real departures kerb is
-      // anyway — looping back around the terminal's ends. 39 centres a car in
-      // the strip AND keeps the shared wall resolver's body radius off the
-      // terminal's north face, which is what would otherwise shunt a stopped
-      // taxi towards the water.
-      kerbZ: 39 + dz,
-      kerbX0: -130 + dx, kerbX1: 50 + dx,
-      dx: dx, dz: dz,
+      H: L.H, rwyHW: L.RW / 2,
+      taxZ: L.taxiZ,
+      hsZ: L.hsRoad.z + 1.6,              // eastbound, the aircraft side
+      hsBackZ: L.hsRoad.z - 1.6,          // westbound
+      laneZ: SP.tailZ - 4,                // the tail lane
+      westX: Math.min(x0 - L.span / 2 - 10, T.x0 - 12),
+      eastX: Math.max(x1 + L.span / 2 + 10, T.x1 + 12),
+      fmZ: L.taxiZ - 2,
+      holdZ: L.holdZ,
+      connX: mid.length >= 2 ? [mid[0], mid[mid.length - 1]] : [conns[0], conns[conns.length - 1]],
+      kerbZ: ap.kerbZ, kerbX0: T.x0 - 12, kerbX1: T.x1 + 18,
+      stands: [], routes: {}, craft: [],
+      inspT: 0, inspecting: false, kerbDone: false, fireDone: false, farAcc: 0,
     };
-    // The head-of-stand north lane is AIRSIDE ONLY. It used to double as the
-    // landside kerb loop's return leg, which is what put ordinary cars in a
-    // circle around the terminal (see ROUTES.kerb) — kept as a published field
-    // so the paving/audit can still name the lane, never again as a car route.
-    f.kerbBackZ = f.hsBackZ;
-    // last guard: nothing in the network may sit on the runway.
+    // last guard: nothing in the network may sit on the runway strip
     const lanes = [f.hsZ, f.hsBackZ, f.laneZ, f.fmZ, f.kerbZ];
-    for (let i = 0; i < lanes.length; i++) {
-      if (lanes[i] > R.minZ - 6 && lanes[i] < R.maxZ + 6) return null;
-    }
+    for (let i = 0; i < lanes.length; i++) if (Math.abs(lanes[i]) < f.rwyHW + 6) return null;
     return f;
   }
 
   // ============================================================
-  //  5. THE PAVING — a service road nobody had ever drawn.
+  //  5. ROUTES — waypoint loops in LOCAL metres, stored in world.
   //
-  //  The airfield's baked surface texture paints grass, runway, taxiway and
-  //  apron. It does NOT paint a service road, because until now nothing drove
-  //  one. Rather than route the fleet over grass and hope it reads, this draws
-  //  the road it uses: one merged ribbon per circuit plus its hold-short
-  //  hatching. Cheap (3 meshes), static, and it is the visual explanation for
-  //  why these vehicles go where they go.
+  //  Node fields: x, z (world) + lx, lz (local); dwell (s parked there);
+  //  mast (catering: raise the box); hold (MANDATORY: wait until nothing on
+  //  the field moves); rwy (on the runway, inspection clearance); dock (the
+  //  vehicle is meant to touch an aeroplane here: a parked airframe's ground
+  //  box does not block it — airstairs and a bowser park under a wing).
   // ============================================================
-  // One quad per polyline segment, extended half a width at each end so the
-  // corners of a turn are covered without a corner primitive.
-  function ribbonGeom(pts, width, y) {
-    const geos = [];
-    for (let i = 0; i < pts.length - 1; i++) {
-      const a = pts[i], b = pts[i + 1];
-      const dx = b.x - a.x, dz = b.z - a.z;
-      const len = Math.hypot(dx, dz);
-      if (len < 0.5) continue;
-      const g = new THREE.PlaneGeometry(len + width, width);
-      g.rotateX(-Math.PI / 2);                    // into the ground plane
-      g.rotateY(-Math.atan2(dz, dx));             // long axis down the segment
-      g.translate((a.x + b.x) / 2, y, (a.z + b.z) / 2);
-      geos.push(g);
-    }
-    return geos;
-  }
-  function pave(root, geos, color, offset) {
-    if (!geos.length) return null;
-    const BGU = THREE.BufferGeometryUtils;
-    // polygonOffset for the same reason island_airport's own paint uses it:
-    // this ribbon sits 2 cm above a giant coplanar surface plane. `offset`
-    // orders our OWN ribbons against each other where two of them touch.
-    const m = (CBZ.mat ? CBZ.mat(color) : new THREE.MeshLambertMaterial({ color: color })).clone();
-    m.polygonOffset = true;
-    m.polygonOffsetFactor = -3 - (offset || 0);
-    m.polygonOffsetUnits = -8 - (offset || 0) * 3;
-    let mesh;
-    if (BGU && BGU.mergeBufferGeometries) {
-      mesh = new THREE.Mesh(BGU.mergeBufferGeometries(geos), m);
-    } else {
-      mesh = new THREE.Group();
-      for (const g of geos) mesh.add(new THREE.Mesh(g, m));
-    }
-    mesh.receiveShadow = true; mesh.castShadow = false;
-    mesh.userData.airsidePaint = true;      // spare it from the static batcher
-    mesh.matrixAutoUpdate = false; mesh.updateMatrix();
-    root.add(mesh);
-    return mesh;
-  }
-
-  // ============================================================
-  //  6. ROUTES — waypoint loops, confined to apron / taxilane / service road.
-  //
-  //  Node fields:
-  //    x, z      where
-  //    dwell     seconds parked there (0 = roll through)
-  //    mast      catering: raise the box while dwelling here
-  //    hold      MANDATORY hold-short: wait here until nothing on the field
-  //              is moving (only the runway-inspection route uses it)
-  //    rwy       this node is on the runway (inspection clearance)
-  //
-  //  Both circuits are ONE-WAY and they never cross each other, so there is no
-  //  junction logic in this file at all — the geometry does that work.
-  // ============================================================
-  function node(x, z, o) {
-    const n = { x: x, z: z, dwell: 0, mast: false, hold: false, rwy: false };
+  function node(f, lx, lz, o) {
+    const w = f.ap.toWorld(lx, lz);
+    const n = { x: w.x, z: w.z, lx: lx, lz: lz, dwell: 0, mast: false, hold: false, rwy: false, dock: false };
     if (o) for (const k in o) n[k] = o[k];
     return n;
   }
-
-  /* IS THIS WAYPOINT REAL GROUND? — ADOPTED from city/roadrules.js's vehicle
-     CLASS filter. Nothing in this file bypasses the keep-out list by hand: it
-     ASKS with the right class. "service" is the class roadrules added for
-     exactly these vehicles — the keep-out that bars a taxi from the apron is
-     precisely where a baggage tug belongs — so the query still refuses the one
-     thing an authored waypoint can genuinely be wrong about out here, which is
-     WATER. The landside kerb lane in particular threads a ~3 m strip between
-     the terminal's north wall and the island's north edge; if a future world
-     layout puts that strip in the sea, the kerb loop must not be built rather
-     than drive four taxis into it. Degrades to "yes" when roadrules is absent. */
   function nodeDrivable(x, z) {
     if (!CBZ.roadPointOpen) return true;
     try { return CBZ.roadPointOpen(x, z, "service") !== false; } catch (e) { return true; }
   }
   function validateRoute(r) {
     if (!r || !r.pts || !r.pts.length) return false;
-    for (let i = 0; i < r.pts.length; i++) {
-      if (!nodeDrivable(r.pts[i].x, r.pts[i].z)) { r.blocked = i; return false; }
-    }
+    for (let i = 0; i < r.pts.length; i++) if (!nodeDrivable(r.pts[i].x, r.pts[i].z)) { r.blocked = i; return false; }
     return true;
   }
-
-  /* AND IS ANYTHING PARKED ON IT? — the second half of the same question, and
-     the one the WORLD has to answer rather than the author. The scripted
-     pushback jet sits exactly on a taxiway connector, so a hand-typed
-     "hold short at the connector" waypoint lands inside a parked airframe and
-     the vehicle holds against something that will never move. Rather than
-     hard-code an offset that a future gate layout would break, every authored
-     node is walked ALONG ITS OWN AXIS (never across it, so a nudge can never
-     put a node on the runway) until it is clear of every discovered airframe's
-     ground box. Returns how many nodes had to move — reported by the audit,
-     because a big number means the route table has drifted from the field. */
+  // a node sitting inside a PARKED airframe's ground box is walked along the
+  // lane (local x) until it is clear — dock nodes excepted, they are meant to
   function nudgeNodes(f) {
     let moved = 0;
     function clear(x, z) {
-      for (let i = 0; i < craft.length; i++) {
-        const c = craft[i];
-        if (!c.grp || !c.grp.parent) continue;
-        if (inGroundBox(c, x, z)) return false;
-      }
+      for (const c of f.craft) { if (c.grp && c.grp.parent && inGroundBox(c, x, z)) return false; }
       return true;
     }
-    for (const k in ROUTES) {
-      const pts = ROUTES[k].pts;
-      for (let i = 0; i < pts.length; i++) {
-        const n = pts[i];
-        if (clear(n.x, n.z)) continue;
-        for (let step = 12; step <= 96 && !clear(n.x, n.z); step += 12) {
+    for (const k in f.routes) {
+      const pts = f.routes[k].pts;
+      for (const n of pts) {
+        if (n.dock || clear(n.x, n.z)) continue;
+        for (let step = 6; step <= 60 && !clear(n.x, n.z); step += 6) {
+          let done = false;
           for (const s of [-1, 1]) {
-            const x = n.x + s * step;
-            if (x < f.minX + 20 || x > f.maxX - 20) continue;
-            if (!clear(x, n.z) || !nodeDrivable(x, n.z)) continue;
-            n.x = x; moved++;
+            const w = f.ap.toWorld(n.lx + s * step, n.lz);
+            if (!clear(w.x, w.z) || !nodeDrivable(w.x, w.z)) continue;
+            n.x = w.x; n.z = w.z; n.lx += s * step; moved++; done = true;
             break;
           }
+          if (done) break;
         }
       }
     }
     return moved;
   }
-  // How many SEGMENTS a route has. A circuit closes (n segments, the last one
-  // running from the final node back to the first); a ONE-WAY LANE does not
-  // (n-1). Getting this wrong is not cosmetic: routePoint staggers the fleet by
-  // arclength, so a phantom closing segment across the airfield would place a
-  // car in mid-field on the first frame.
-  function routeSpan(r) {
-    const n = r.pts.length;
-    return (r.loop === false && n > 1) ? n - 1 : n;
-  }
+  function routeSpan(r) { const n = r.pts.length; return (r.loop === false && n > 1) ? n - 1 : n; }
   function routeLen(r) {
     const n = r.pts.length, span = routeSpan(r);
     let s = 0;
-    for (let i = 0; i < span; i++) {
-      const a = r.pts[i], b = r.pts[(i + 1) % n];
-      s += Math.hypot(b.x - a.x, b.z - a.z);
-    }
+    for (let i = 0; i < span; i++) { const a = r.pts[i], b = r.pts[(i + 1) % n]; s += Math.hypot(b.x - a.x, b.z - a.z); }
     return s;
   }
-  // Point at arclength `s` around a route — used to STAGGER the fleet so five
-  // vehicles do not start nose to tail on the same node.
   function routePoint(r, s) {
     const pts = r.pts, m = pts.length, n = routeSpan(r);
     let left = s % Math.max(1, routeLen(r));
@@ -752,182 +708,86 @@
       const seg = Math.hypot(b.x - a.x, b.z - a.z);
       if (left <= seg || i === n - 1) {
         const t = seg > 0.001 ? Math.max(0, Math.min(1, left / seg)) : 0;
-        return {
-          x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t,
-          heading: Math.atan2(b.x - a.x, b.z - a.z), next: (i + 1) % m,
-        };
+        return { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t, heading: Math.atan2(b.x - a.x, b.z - a.z), next: (i + 1) % m };
       }
       left -= seg;
     }
     return { x: pts[0].x, z: pts[0].z, heading: 0, next: 1 % m };
   }
 
-  function buildRoutes(f, stands) {
-    // stands: the REAL parked airliners found on the apron, west to east. The
-    // service stops are derived from where the aircraft actually are — this
-    // file never recomputes island_airport's gate line.
-    if (!stands || !stands.length) return;
-
-    // --- the airside circuit, counter-clockwise -------------------------
-    // head-of-stand (eastbound) -> east link -> apron taxilane (westbound) ->
-    // west link. Both links CROSS THE TAXIWAY, which is exactly where the
-    // hold-short rule earns its keep.
+  function buildRoutes(f) {
+    const R = f.routes;
+    const st = f.stands;
+    if (!st.length) return;
+    const N = function (lx, lz, o) { return node(f, lx, lz, o); };
+    // the airside circuit: eastbound on the head-of-stand road, round the
+    // east end, westbound down the tail lane, round the west end
     function circuit(extra) {
-      const pts = [node(f.westX, f.hsZ)];
+      const pts = [N(f.westX, f.hsZ)];
       for (const s of extra) pts.push(s);
-      pts.push(node(f.eastX, f.hsZ));
-      pts.push(node(f.eastX, f.taxZ + 10));      // approach the taxiway crossing
-      pts.push(node(f.eastX, f.laneZ));
-      pts.push(node(f.westX + 40, f.laneZ));
-      pts.push(node(f.westX, f.laneZ));
-      pts.push(node(f.westX, f.taxZ + 10));      // and back across it
+      pts.push(N(f.eastX, f.hsZ), N(f.eastX, f.laneZ), N(f.westX + 30, f.laneZ), N(f.westX, f.laneZ));
       return pts;
     }
-
-    // BAGGAGE TRAIN — the one that reads best, so it gets the busiest route:
-    // a stop at every stand, right behind the tail where the hold is.
-    const bagStops = [];
-    for (let i = 0; i < stands.length; i++) {
-      bagStops.push(node(stands[i].x + 9, f.hsZ, { dwell: 8 + (h01(stands[i].x, stands[i].z, 5201) * 6) }));
+    // BAGGAGE TRAIN: a stop at every stand, off the starboard side of the nose
+    R.baggage = { name: "baggage", loop: true, pts: circuit(st.map(function (s) {
+      return N(s.lx - 9, f.hsZ, { dwell: 8 + h01(s.lx, s.lz, 5201) * 6 });
+    })) };
+    // CATERING: every other stand, box raised while it is there
+    const cat = [];
+    for (let i = 0; i < st.length; i += 2) cat.push(N(st[i].lx - 14, f.hsZ, { dwell: 14 + h01(st[i].lx, st[i].lz, 5202) * 8, mast: true }));
+    R.catering = { name: "catering", loop: true, pts: circuit(cat) };
+    // FUEL: off the road and under the starboard wing, outboard of the engine
+    const fs = st[Math.min(1, st.length - 1)];
+    R.fuel = { name: "fuel", loop: true, pts: circuit([
+      N(fs.lx - 19, f.hsZ), N(fs.lx - 19, fs.lz - 2, { dwell: 22 + h01(fs.lx, fs.lz, 5203) * 10, dock: true }), N(fs.lx - 19, f.hsZ, { dock: true }),
+    ]) };
+    // PUSHBACK TUG: works the noses
+    const ns = st[Math.min(2, st.length - 1)];
+    R.tug = { name: "tug", loop: true, pts: circuit([N(ns.lx + 4, f.hsZ, { dwell: 12 + h01(ns.lx, ns.lz, 5204) * 8 })]) };
+    // AIRSTAIRS: to the L1 door of the first stand no bridge serves, square
+    // to the fuselage, and back to the tail lane
+    const open = st.filter(function (s) { return !s.bridge; });
+    if (open.length) {
+      const s = open.find(function (q) { return q.parked; }) || open[0];
+      const dz = s.doorLz, dx = s.doorLx;
+      R.stairs = { name: "stairs", loop: true, pts: [
+        N(dx + 15, f.laneZ), N(dx + 15, dz, { dock: true }),
+        N(dx + 3.9, dz, { dwell: 40 + h01(dx, dz, 5205) * 20, dock: true }),
+        N(dx + 15, dz + 3, { dock: true }), N(dx + 15, f.laneZ + 2), N(dx + 40, f.laneZ),
+      ] };
     }
-    ROUTES.baggage = { name: "baggage", loop: true, pts: circuit(bagStops) };
-
-    // CATERING LIFT — two stands only, and it RAISES THE BOX while it is
-    // parked at one. Nothing else on the field animates while stopped.
-    const cateringStops = [];
-    for (let i = 0; i < stands.length; i += 2) {
-      cateringStops.push(node(stands[i].x - 10, f.hsZ, { dwell: 14 + h01(stands[i].x, stands[i].z, 5202) * 8, mast: true }));
-    }
-    ROUTES.catering = { name: "catering", loop: true, pts: circuit(cateringStops) };
-
-    // FUEL BOWSER — the only route that leaves the road: it turns off the
-    // head-of-stand road and noses UNDER THE WING of one stand, which is where
-    // a bowser actually parks, then rejoins.
-    const fuelStand = stands[Math.min(1, stands.length - 1)];
-    ROUTES.fuel = {
-      name: "fuel", loop: true,
-      pts: circuit([
-        node(fuelStand.x + 19, f.hsZ),
-        node(fuelStand.x + 19, fuelStand.z - 3, { dwell: 22 + h01(fuelStand.x, fuelStand.z, 5203) * 10 }),
-        node(fuelStand.x + 19, f.hsZ),
-      ]),
-    };
-
-    // PUSHBACK TUG — works the front of the field: down the apron taxilane to
-    // a nose position, wait for its jet, then back round.
-    const noseStand = stands[Math.min(2, stands.length - 1)];
-    ROUTES.tug = {
-      name: "tug", loop: true,
-      pts: [
-        node(f.westX, f.hsZ),
-        node(f.eastX, f.hsZ),
-        node(f.eastX, f.taxZ + 10),
-        node(f.eastX, f.laneZ),
-        node(noseStand.x, f.laneZ, { dwell: 12 + h01(noseStand.x, noseStand.z, 5204) * 8 }),
-        node(f.westX + 40, f.laneZ),
-        node(f.westX, f.laneZ),
-        node(f.westX, f.taxZ + 10),
-      ],
-    };
-
-    // FOLLOW-ME — the taxiway is its beat. Out and back on ONE lane (there is
-    // only ever one of these cars, so it can never meet itself), with the far
-    // west end kept well clear of the stands.
-    ROUTES.followme = {
-      name: "followme", loop: true,
-      pts: [
-        node(f.rwyX0 + 150, f.fmZ, { dwell: 4 }),
-        node(f.connX[0], f.fmZ, { dwell: 3 }),
-        node(f.connX[1], f.fmZ, { dwell: 3 }),
-        node(f.apronX + 190, f.fmZ, { dwell: 4 }),
-        node(f.connX[1], f.fmZ),
-        node(f.connX[0], f.fmZ),
-      ],
-    };
-
-    // RUNWAY INSPECTION — deliberately NOT a loop. It is spliced in rarely,
-    // stops AT the painted hold bars, and the node after them carries
-    // `hold: true`, so the car may not begin the entry leg until NOTHING on
-    // the whole field is moving. It then runs 09/27 and vacates. The `rwy`
-    // nodes mark the only sanctioned runway presence in this game.
-    ROUTES.inspect = {
-      name: "inspect", loop: false,
-      pts: [
-        node(f.connX[0], f.holdZ, { dwell: 3 }),                 // stop on the bars
-        node(f.connX[0], f.rwyZ, { rwy: true, hold: true }),     // enter only when clear
-        node(f.connX[1], f.rwyZ, { rwy: true, dwell: 2 }),       // inspect the length
-        node(f.connX[1], f.holdZ),                               // vacate
-        node(f.connX[1], f.fmZ),                                 // rejoin the taxiway
-      ],
-    };
-
-    /* LANDSIDE KERB — the DEPARTURES LANE, and it is a LANE, not a lap.
-       OWNER BUG (2026-07-27, verbatim): "there are still cars driving in a
-       circle around the airport building which is not a road for normal cars."
-
-       That circle was THIS route, and the offending leg is named in the old
-       comment: the loop ran east along the frontage, "south round the
-       terminal's east wall, WEST ALONG THE CORRIDOR'S NORTH LANE, north round
-       the west wall". The corridor is `f.kerbBackZ === f.hsBackZ` — the
-       HEAD-OF-STAND SERVICE ROAD, under the parked airliners' tailcones,
-       inside the airside keep-out (z 8.6 against the zone's 9.0 ceiling) and
-       published to city.roads with `access: "service"` precisely because an
-       ordinary car does not belong on it. Four saloons and taxis lapped the
-       building through it, for ever. It was a closed loop because the frontage
-       strip is a DEAD END, and a dead end was answered by cutting across the
-       apron.
-
-       A real departures kerb is not a circuit either. It is a ONE-WAY LANE you
-       enter from the landside road and leave by the same road, and the landside
-       road now EXISTS: island_airport.js pushes a kerb road along the north
-       edge and a perimeter spur down the island's east side (the two records
-       the causeway feeds). So the route is that lane —
-
-         west end of the frontage → three kerb stops → east end
-           → east along the north-edge kerb road
-           → SOUTH down the east perimeter, away from the terminal
-
-       — and the drive loop RECYCLES a car from the far end back to the head
-       (see advance()), never in view. Nothing here ever enters the airside,
-       and both legs clear it a different way: the frontage runs at kerbZ (39),
-       thirty metres NORTH of the keep-out's z ceiling, and the perimeter runs
-       at A_MAXX - 22, ten metres EAST of the keep-out's x edge (A_MAXX - 32)
-       and twenty-eight metres east of the runway's own threshold.
-
-       THE PERIMETER EXTENSION IS OPTIONAL, and deliberately so: it is the only
-       part that leaves ground this file measured itself, so each node is asked
-       (roadPointOpen, the shared query) before it is appended. A layout that
-       puts the island's east side in the water gets the frontage lane alone
-       rather than losing the frontage traffic entirely — the kerb must stay
-       busy (it IS ordinary traffic, and that is doctrine). */
-    const kerbStops = [];
+    // FOLLOW-ME: the taxiway between the middle connectors
+    const c0 = f.connX[0], c1 = f.connX[1];
+    R.followme = { name: "followme", loop: true, pts: [
+      N(c0 - 60, f.fmZ, { dwell: 4 }), N(c0, f.fmZ, { dwell: 3 }), N(c1, f.fmZ, { dwell: 3 }),
+      N(c1 + 60, f.fmZ, { dwell: 4 }), N(c1, f.fmZ), N(c0, f.fmZ),
+    ] };
+    // RUNWAY INSPECTION — stops on the holding position, enters only when
+    // nothing on the field moves, runs the runway, vacates.
+    R.inspect = { name: "inspect", loop: false, pts: [
+      N(c0, f.holdZ + 3, { dwell: 3 }),
+      N(c0, 0, { rwy: true, hold: true }),
+      N(c1, 0, { rwy: true, dwell: 2 }),
+      N(c1, f.holdZ + 3),
+      N(c1, f.fmZ),
+    ] };
+    // THE DEPARTURES KERB — a one-way lane, recycled out of sight (never a
+    // lap of the terminal)
+    const kerb = [N(f.kerbX0, f.kerbZ)];
     for (let i = 0; i < 3; i++) {
-      const kx = f.termX0 + 18 + i * ((f.termX1 - f.termX0 - 36) / 2);
-      kerbStops.push(node(kx, f.kerbZ, { dwell: 6 + h01(kx, f.kerbZ, 5205) * 9 }));
+      const kx = f.kerbX0 + 12 + i * ((f.kerbX1 - f.kerbX0 - 24) / 2);
+      kerb.push(N(kx, f.kerbZ, { dwell: 6 + h01(kx, f.kerbZ, 5206) * 9 }));
     }
-    const kerbPts = [node(f.kerbX0, f.kerbZ)].concat(kerbStops, [node(f.kerbX1, f.kerbZ)]);
-    // island_airport.js's east perimeter spur: PERIM_X = A_MAXX - 22, and
-    // f.maxX IS A_MAXX (recovered from the airport audit record in field()).
-    // One number, read off the same bound, so a world move carries both.
-    const perimX = f.maxX - 22;
-    const exitZ = f.kerbZ - 160;              // 160 m south — well clear of the frontage
-    if (perimX > f.kerbX1 + 30) {
-      const tail = [node(perimX, f.kerbZ), node(perimX, exitZ, { dwell: 3 })];
-      let ok = true;
-      for (let i = 0; i < tail.length && ok; i++) ok = nodeDrivable(tail[i].x, tail[i].z);
-      if (ok) kerbPts.push.apply(kerbPts, tail);
-    }
-    // loop:false + shuttle:true — an open lane with an off-screen recycle.
-    ROUTES.kerb = { name: "kerb", loop: false, shuttle: true, pts: kerbPts };
+    kerb.push(N(f.kerbX1, f.kerbZ));
+    const tail = N(f.kerbX1 + 60, f.kerbZ);
+    if (nodeDrivable(tail.x, tail.z)) kerb.push(tail);
+    R.kerb = { name: "kerb", loop: false, shuttle: true, pts: kerb };
   }
 
   // ============================================================
-  //  7. AIRCRAFT — discovery and right of way.
-  //
-  //  Discovery is DATA, not names: island_airport stamps every airframe it
-  //  builds with userData.aircraftDims (its published length/span/height), so
-  //  one children-scan finds the parked fleet AND the scripted pushback jet
-  //  AND anything a future file parks out there, with no list to maintain.
+  //  6. AIRCRAFT — discovery and right of way. Discovery is DATA: every
+  //  airframe carries userData.aircraftDims, so one scan finds the parked
+  //  fleet and anything the airline brings in.
   // ============================================================
   function discoverCraft(root, f) {
     const out = [];
@@ -938,89 +798,68 @@
       if (!d || !o.position) continue;
       if (o.position.x < f.minX - 40 || o.position.x > f.maxX + 40) continue;
       if (o.position.z < f.minZ - 40 || o.position.z > f.maxZ + 40) continue;
-      out.push({
-        grp: o, len: +d.length || 30, span: +d.span || 30,
-        lastX: o.position.x, lastZ: o.position.z, moving: false,
-      });
+      out.push({ grp: o, len: +d.length || 30, span: +d.span || 30, lastX: o.position.x, lastZ: o.position.z, moving: false });
     }
     return out;
   }
-
-  // The player's own aircraft is never in that list once it is flying, so it
-  // is queried separately and always counts as under power.
   function playerCraft() {
     const P = CBZ.player, a = P && P._aircraft;
     const g = a && (a.group || a.grp);
     return g && g.position ? g : null;
   }
-
-  function refreshCraft(dt) {
-    for (let i = 0; i < craft.length; i++) {
-      const c = craft[i];
+  function refreshCraft(f, dt) {
+    for (const c of f.craft) {
       if (!c.grp || !c.grp.parent) { c.moving = false; continue; }
       const p = c.grp.position;
       const moved = Math.hypot(p.x - c.lastX, p.z - c.lastZ);
-      // 0.2 m/s is under a walking pace: anything above it is a jet under tow
-      // or under power, and it owns the ground.
       c.moving = c.grp.visible !== false && moved > 0.2 * Math.max(0.05, dt);
       c.lastX = p.x; c.lastZ = p.z;
     }
   }
-  function anyCraftMoving() {
-    for (let i = 0; i < craft.length; i++) if (craft[i].moving) return true;
+  function anyCraftMoving(f) {
+    for (const c of f.craft) if (c.moving) return true;
     return !!playerCraft();
   }
-
-  // Is (wx,wz) inside the part of a PARKED airframe that is actually at
-  // vehicle height? Derived from the aircraft's own dims — the fractions
-  // bracket the gear/engine belly and deliberately exclude the nose cone and
-  // the upswept tail, which a service road is supposed to pass under.
   function inGroundBox(c, wx, wz) {
     const g = c.grp, th = g.rotation.y, cs = Math.cos(th), sn = Math.sin(th);
     const dx = wx - g.position.x, dz = wz - g.position.z;
     const lx = dx * cs - dz * sn, lz = dx * sn + dz * cs;   // models point down local +X
     return Math.abs(lx) <= c.len * BOX_LEN_F && Math.abs(lz) <= c.span * BOX_SPAN_F;
   }
-
-  // THE RULE. Returns the blocking aircraft, or null.
-  function craftBlocks(u, wx, wz) {
-    const px = u.pos.x, pz = u.pos.z;
-    for (let i = 0; i < craft.length; i++) {
-      const c = craft[i];
+  // THE RULE: aircraft outrank ground vehicles. Returns the blocker, or null.
+  function craftBlocks(u, wp) {
+    const f = u.fld, px = u.pos.x, pz = u.pos.z, wx = wp.x, wz = wp.z;
+    for (const c of f.craft) {
       if (!c.grp || !c.grp.parent || c.grp.visible === false) continue;
       const cx = c.grp.position.x, cz = c.grp.position.z;
       if (c.moving) {
         const r = HOLD_R + c.len * 0.5;
-        const dw = Math.hypot(cx - wx, cz - wz), dv = Math.hypot(cx - px, cz - pz);
-        if (dw < r || dv < r) return c;
-      } else if (inGroundBox(c, wx, wz)) {
+        if (Math.hypot(cx - wx, cz - wz) < r || Math.hypot(cx - px, cz - pz) < r) return c;
+      } else if (!wp.dock && inGroundBox(c, wx, wz)) {
         return c;
       }
     }
     const pg = playerCraft();
     if (pg) {
       const r = HOLD_R + 18;
-      if (Math.hypot(pg.position.x - wx, pg.position.z - wz) < r ||
-          Math.hypot(pg.position.x - px, pg.position.z - pz) < r) return { moving: true, grp: pg, len: 36, span: 36 };
+      if (Math.hypot(pg.position.x - wx, pg.position.z - wz) < r || Math.hypot(pg.position.x - px, pg.position.z - pz) < r) return { moving: true, grp: pg, len: 36, span: 36 };
     }
     return null;
   }
 
   // ============================================================
-  //  8. REGISTRATION — one call, and the thing is a real vehicle.
+  //  7. REGISTRATION — one call, and the thing is a real vehicle.
   // ============================================================
-  function register(rig, opts) {
+  function register(f, rig, opts) {
     const grp = rig.grp;
-    grp.userData.dynamic = true;           // never bake a moving group into the batch
+    grp.userData.dynamic = true;
     grp.userData.airsideVehicle = true;
     let rec = null;
     if (CBZ.cityRegisterVehicle) {
       try {
         rec = CBZ.cityRegisterVehicle(grp, {
           body: opts.body || "van", style: opts.style || "van",
-          persist: true,                    // a world fixture: survives traffic resets
-          heading: opts.heading || 0,
-          color: opts.color,
+          persist: true, heading: opts.heading || 0, color: opts.color,
           model: { name: opts.name, value: opts.value || 6500, rarity: 0.06, body: opts.body || "van" },
           dims: rig.dims,
         });
@@ -1028,15 +867,13 @@
     }
     if (!rec) return null;
     const u = {
-      rec: rec, grp: grp, pos: rec.pos, kind: opts.kind, name: opts.name,
+      fld: f, rec: rec, grp: grp, pos: rec.pos, kind: opts.kind, name: opts.name,
       wheels: rig.wheels || [], beacon: rig.beacon || null, mast: rig.mast || null,
       carts: [], trail: [],
-      route: opts.route, i: opts.startNode || 0,
+      route: opts.route || null, i: opts.startNode || 0,
       v: 0, maxV: opts.maxV || 5.0, acc: opts.acc || 2.6, brake: opts.brake || 5.5,
-      // steering time constant, as the per-second retention of the heading
-      // error: a long articulated rig turns lazily, a follow-me car does not.
       turnK: opts.turnK || 0.004,
-      dwellT: 0, holdT: 0, held: false, cleared: false, released: false,
+      dwellT: 0, holdT: 0, held: false, cleared: false, released: false, parked: !!opts.parked,
       beaconT: h01(opts.startX || 0, opts.startZ || 0, 5301) * 2,
     };
     rec.heading = opts.heading || 0;
@@ -1046,36 +883,10 @@
   }
 
   // ============================================================
-  //  8b. THE CREW — SOMEBODY IS DRIVING.
-  //
-  //  OWNER (2026-07-27): "every place should have the people who work there."
-  //  This file built 1,471 lines of pushback tugs, baggage trains, catering
-  //  lifts, bowsers and a follow-me car and put NOBODY IN ANY OF THEM — five
-  //  driverless machines crawling around an international airport, which is a
-  //  stranger sight than the empty apron it replaced.
-  //
-  //  NO BESPOKE OCCUPANT SYSTEM. This is the police/gunship helicopter grammar
-  //  verbatim (police.js CHOP_SEATS): a `crew` node on the vehicle group, an
-  //  npclife ANCHOR per seat, the body in through CBZ.npcLife.attach — so
-  //  syncAttached holds it against the vehicle's own motion every frame, the V2
-  //  chair pose solves feet-on-the-deck from the DECLARED cushion, the rig is
-  //  shootable through its own glass and aim_dossier's Lv.N pill reads the
-  //  truthful `job` with no HUD edit. They are ordinary CBZ.cityPeds: they die
-  //  through killfeed.js's bus and surrender at gunpoint like anyone else.
-  //
-  //  WHEN THE BODY EXISTS AT ALL is citystaff.js's CBZ.cityStaffPost — the
-  //  post is data until you are within 170 m of it. That is the draw-call
-  //  answer (a rig is ~16 calls; five of them idling on an apron nobody is
-  //  standing on is pure waste) and it costs this file one call per vehicle.
-  //
-  //  EVERY SEAT HAS A CONSEQUENCE, the same law the helicopter crews follow:
-  //  shoot the driver and the machine rolls to a stop where it is — which is
-  //  also what turns a hijack into a real event on a live apron.
-  //
-  //  The anchors below are the FLOOR the boots rest on; `cushionH` is the seat
-  //  cushion's height above that floor (propuse.js's SEAT_H convention). Every
-  //  one was solved against this file's own geometry so the head clears the
-  //  canopy/roofline — see the seat and cab edits in section 3.
+  //  8. THE CREW — somebody is driving (police.js CHOP_SEATS grammar: a crew
+  //  node on the vehicle, an npclife anchor per seat, the body minted by
+  //  citystaff inside 170 m). Shoot the driver and the machine coasts to a
+  //  stop; steal it and he is thrown out alive.
   // ============================================================
   const SEATS = {
     tug:      { job: "pushback driver", x:  0.00, y: 0.80, z: -0.30, cushionH: 0.31 },
@@ -1083,257 +894,145 @@
     catering: { job: "catering driver", x: -0.42, y: 0.69, z:  1.62, cushionH: 0.45 },
     fuel:     { job: "refueller",       x: -0.44, y: 0.69, z:  1.90, cushionH: 0.45 },
     followme: { job: "airfield driver", x: -0.34, y: 0.62, z: -0.05, cushionH: 0.43 },
+    stairs:   { job: "ramp agent",      x: -0.50, y: 0.78, z:  2.20, cushionH: 0.45 },
   };
-
   function crewNode(u) {
     const grp = u.grp;
     if (!grp) return null;
     if (grp.userData._crewNode && grp.userData._crewNode.parent === grp) return grp.userData._crewNode;
     const n = new THREE.Group();
     const s = (grp.scale && grp.scale.x) || 1;
-    n.scale.setScalar(s > 0.001 ? 1 / s : 1);   // author in metres whatever the hull scale
+    n.scale.setScalar(s > 0.001 ? 1 / s : 1);
     n.name = "crew";
-    n.userData.dynamic = true;                  // a live rig lives here — never batch it
+    n.userData.dynamic = true;
     grp.add(n);
     grp.userData._crewNode = n;
     return n;
   }
-
   function crewUp(u) {
     if (!u) return;
     const s = SEATS[u.kind];
     if (!s || !CBZ.cityStaffPost) return;
     u.post = CBZ.cityStaffPost({
-      venue: "airside", id: "airside:" + u.kind + ":" + V.length,
+      venue: "airside:" + u.fld.id, id: "airside:" + u.fld.id + ":" + u.kind + ":" + V.length,
       job: s.job, archetype: "laborer",
       x: u.pos.x, z: u.pos.z, face: u.rec ? u.rec.heading : 0,
-      // the station MOVES: hand the post the live hull position each tick.
       at: function () { return u.pos; },
       alive: function () { return !!(u.grp && u.grp.parent) && !u.released; },
       attach: function (ped) {
         if (!CBZ.npcLife || !CBZ.npcLife.attach) return false;
-        const node = crewNode(u);
-        if (!node) return false;
-        ped._seatHold = true;                   // syncAttached defends the facing
-        return !!CBZ.npcLife.attach(ped, node, {
-          x: s.x, y: s.y, z: s.z, yaw: 0, pose: "sit", state: "sit",
-          cushionH: s.cushionH, floorBelow: 0,
-        });
+        const nd = crewNode(u);
+        if (!nd) return false;
+        ped._seatHold = true;
+        return !!CBZ.npcLife.attach(ped, nd, { x: s.x, y: s.y, z: s.z, yaw: 0, pose: "sit", state: "sit", cushionH: s.cushionH, floorBelow: 0 });
       },
       release: function (ped, why) {
         u.driver = null;
-        // Only a HIJACK ("gone") or a KILL ("dead") leaves a body behind. Every
-        // other reason — out of range, a world rebuild, the whole system
-        // resetting — means nobody can see this machine, and the body goes back
-        // to the pool rather than leaking into the next arena.
         if (why !== "gone" && why !== "dead") return false;
-        // A HIJACKED DRIVER IS THROWN OUT ALIVE, and a shot one leaves a body.
-        // cityUnseat is the ONE sanctioned way out of a seat (syncAttached
-        // re-asserts the transform otherwise, so a corpse would ride along).
-        // Being thrown out is NOT a death and must never reach the killfeed.
         if (CBZ.cityUnseat) { try { CBZ.cityUnseat(ped, { state: ped.dead ? "dead" : "walk" }); } catch (e) {} }
         if (!ped.dead) { ped.staffPost = null; ped.state = "walk"; ped.pause = 0.6; }
-        return true;                            // the world keeps him
+        return true;
       },
       after: function (ped) { u.driver = ped; },
     });
   }
 
   // ============================================================
-  //  9. THE BUILD — one landmass builder, ordered AFTER the airport (21) so
-  //     the audit record and the parked fleet already exist.
+  //  9. THE BUILD — one landmass builder, after BOTH fields (21, 22).
   // ============================================================
   function teardown() {
-    // A city rebuild re-runs every landmass builder against a fresh root. Our
-    // records are persist:true, so clearCars() deliberately KEEPS them — which
-    // means we have to reap our own or the next world inherits a fleet of
-    // ghosts parked in the old arena.
     if (CBZ.cityCars) {
       for (let i = CBZ.cityCars.length - 1; i >= 0; i--) {
         const c = CBZ.cityCars[i];
-        if (c && c.group && c.group.userData && (c.group.userData.airsideVehicle || c.group.userData.airsideKerb)) {
-          CBZ.cityCars.splice(i, 1);
-        }
+        if (c && c.group && c.group.userData && (c.group.userData.airsideVehicle || c.group.userData.airsideKerb)) CBZ.cityCars.splice(i, 1);
       }
     }
-    // and reap the people. cityStaffVenue CLEARS this venue's posts, which is
-    // the same "no ghosts from the last arena" problem as the persist:true
-    // vehicle records above and has the same one-line answer.
-    if (CBZ.cityStaffVenue) { try { CBZ.cityStaffVenue("airside", { stations: 0 }); } catch (e) {} }
+    if (CBZ.cityStaffVenue) for (const f of FIELDS) { try { CBZ.cityStaffVenue("airside:" + f.id, { stations: 0 }); } catch (e) {} }
     for (let i = 0; i < V.length; i++) V[i].driver = null;
     V.length = 0;
-    craft = [];
+    FIELDS.length = 0;
     nearPeds = [];
-    for (const k in ROUTES) delete ROUTES[k];
-    kerbDone = false; kerbFromRoad = false;
-    inspecting = false;
-    F = null;
   }
 
-  function buildAirside(city) {
-    teardown();
-    if (!on()) return;
-    const f = deriveField(city);
-    if (!f) return;                       // no airport in this world: nothing to do
-    F = f;
+  function buildField(city, ap) {
+    const f = deriveField(ap);
+    if (!f) return;
     const root = city.root;
-    if (!root) { F = null; return; }
+    FIELDS.push(f);
+    f.craft = discoverCraft(root, f);
+    // the stands, from the record (door positions solved by the kit)
+    f.stands = ap.gates.map(function (g) {
+      const st = g.stand || {};
+      return {
+        lx: g.lx, lz: g.lz, id: g.id, bridge: !!st.bridge, parked: !!g.occupant,
+        doorLx: g.doorL ? g.doorL.lx : g.lx + 2.9, doorLz: g.doorL ? g.doorL.lz : g.lz + 15,
+      };
+    }).sort(function (a, b) { return a.lx - b.lx; });
+    buildRoutes(f);
 
-    // ---- the aircraft already parked out there ------------------------
-    craft = discoverCraft(root, f);
-    // stands = the airliner-sized ones on the apron, west to east. The parked
-    // GA jets are deliberately excluded as SERVICE STOPS (nobody caters a
-    // business jet on this field) but they stay in `craft` as obstacles.
-    let stands = craft
-      .filter(function (c) { return c.len > 30 && c.grp.position.z > f.taxZ - 4 && c.grp.position.z < f.termZ0; })
-      .map(function (c) { return { x: c.grp.position.x, z: c.grp.position.z }; })
-      .sort(function (a, b) { return a.x - b.x; });
-    // A world with no parked airliners still gets a worked apron: the gate line
-    // island_airport builds to, as the LAST resort only.
-    if (!stands.length) {
-      stands = [-80, -25, 30, 85].map(function (o) { return { x: f.apronX + o, z: f.apronZ - 19 }; });
-    }
-
-    buildRoutes(f, stands);
-
-    // ---- pave what we drive on ----------------------------------------
-    // The airfield's baked surface texture paints grass, runway, taxiway and
-    // apron; it has never painted a service road, because nothing drove one.
-    // THE ROAD IS PAINT IN THAT SURFACE (de-slop 2026-09-27): these used to be
-    // dark ribbons laid 2 cm over the airfield plane (another coplanar layer,
-    // and a flat 8 m black stripe across the concrete apron the player
-    // spawns on). island_airport.js publishes city.airportPaint, a painter
-    // in world metres over its own canvas: the service road is now what an
-    // apron service road is, white edge lines and a dashed centreline on the
-    // concrete, with real asphalt only where it runs off the apron onto grass.
-    const mid = (f.hsZ + f.hsBackZ) / 2;
-    const fuelStand = stands[Math.min(1, stands.length - 1)];
-    const apronX0 = f.apronX - 132;             // island_airport.js APRON_X0
-    if (city.airportPaint) {
-      city.airportPaint(function (P) {
-        const ASPH = 0x3e4145, W = 0xe9ecef, Y = 0xd8b53a;
-        // off-apron stretches get a surface first
-        if (f.westX < apronX0) P.rect((f.westX - 4.2 + apronX0) / 2, mid, apronX0 - (f.westX - 4.2), 8.4, ASPH);
-        P.rect(f.westX, (mid + f.laneZ) / 2, 7, Math.abs(mid - f.laneZ) + 7, ASPH);
-        // corridor: two edge lines, dashed centre
-        for (const z of [mid - 4.1, mid + 4.1]) P.line([[f.westX - 3.5, z], [f.eastX + 3.5, z]], 0.25, W);
-        P.line([[f.westX, mid], [f.eastX, mid]], 0.18, W, [3, 3]);
-        // the two links over the taxiway
+    // ---- pave what we drive on: PAINT in the field's own canvas
+    if (ap.paint) {
+      ap.paint(function (P) {
+        const ASPH = 0x3e4145, W = 0xe9ecef;
+        // the tail lane and the two links: edge lines + dashed centre on the concrete
+        for (const z of [f.laneZ - 3.5, f.laneZ + 3.5]) P.line([[f.westX - 3.5, z], [f.eastX + 3.5, z]], 0.18, W);
+        P.line([[f.westX, f.laneZ], [f.eastX, f.laneZ]], 0.12, W, [3, 3]);
         for (const x of [f.westX, f.eastX]) {
-          for (const s of [-1, 1]) P.line([[x + s * 3.4, mid - 4.1], [x + s * 3.4, f.laneZ]], 0.25, W);
+          P.rect(x, (f.hsZ + f.laneZ) / 2, 7.4, Math.abs(f.hsZ - f.laneZ) + 7, ASPH, 0.35);
+          for (const s of [-1, 1]) P.line([[x + s * 3.5, f.laneZ], [x + s * 3.5, f.hsBackZ - 1.6]], 0.18, W);
         }
-        // the fuel spur
-        for (const s of [-1, 1]) P.line([[fuelStand.x + 19 + s * 2.4, mid - 4.1], [fuelStand.x + 19 + s * 2.4, fuelStand.z - 3]], 0.2, W);
-        // hold-short hatching where the service road crosses the live taxiway
-        for (const hx of [f.westX, f.eastX]) {
-          for (let k = 0; k < 4; k++) P.line([[hx - 3.4, f.taxZ + 11 + k * 0.9], [hx + 3.4, f.taxZ + 11 + k * 0.9]], 0.4, Y, k > 1 ? [1.2, 0.8] : null);
-        }
-        // the landside kerb lane: a white edge line off the terminal wall
-        P.line([[f.kerbX0, f.kerbZ - 1.3], [f.kerbX1, f.kerbZ - 1.3]], 0.15, W);
+        const fr = f.routes.fuel;
+        if (fr) { const a = fr.pts[1]; for (const s of [-1, 1]) P.line([[a.lx + s * 2.4, f.hsBackZ - 1.6], [a.lx + s * 2.4, a.lz]], 0.15, W); }
+        // the kerb: an edge line along the departures lane
+        P.line([[f.kerbX0, f.kerbZ - 2.2], [f.kerbX1, f.kerbZ - 2.2]], 0.15, W);
       });
-    } else {
-      // no airfield painter (a slice without it): the old ribbons
-      const y = 0.10;
-      const airsideRibbon = ribbonGeom([{ x: f.westX, z: mid }, { x: f.eastX, z: mid }], 8.4, y);
-      airsideRibbon.push.apply(airsideRibbon, ribbonGeom([
-        { x: f.eastX, z: mid }, { x: f.eastX, z: f.laneZ },
-        { x: f.westX, z: f.laneZ }, { x: f.westX, z: mid },
-      ], 7, y));
-      airsideRibbon.push.apply(airsideRibbon, ribbonGeom([
-        { x: fuelStand.x + 19, z: f.hsZ }, { x: fuelStand.x + 19, z: fuelStand.z - 3 },
-      ], 5, y));
-      pave(root, airsideRibbon, 0x35383d, 0);
-      pave(root, ribbonGeom([{ x: f.kerbX0, z: f.kerbZ }, { x: f.kerbX1, z: f.kerbZ }], 2.6, y), 0x3b3f45, 1);
-      const marks = [];
-      for (const hx of [f.westX, f.eastX]) {
-        for (let k = 0; k < 4; k++) marks.push.apply(marks, ribbonGeom([
-          { x: hx - 3.4, z: f.taxZ + 11 + k * 0.9 }, { x: hx + 3.4, z: f.taxZ + 11 + k * 0.9 },
-        ], 0.4, y + 0.012));
+    }
+
+    for (const k in f.routes) if (!validateRoute(f.routes[k])) delete f.routes[k];
+    nudged += nudgeNodes(f);
+
+    // ---- the service network as road records (axis-aligned fields only:
+    //      a road record cannot carry a bearing)
+    const ax = Math.min(Math.abs(Math.sin(ap.yaw)), Math.abs(Math.cos(ap.yaw))) < 0.03;
+    if (city.roads && ax) {
+      for (const z of [ap.layout.hsRoad.z, f.laneZ]) {
+        const a = ap.toWorld(f.westX, z), b = ap.toWorld(f.eastX, z);
+        const horiz = Math.abs(b.x - a.x) >= Math.abs(b.z - a.z);
+        city.roads.push({
+          x: (a.x + b.x) / 2, z: (a.z + b.z) / 2, vertical: !horiz, len: Math.hypot(b.x - a.x, b.z - a.z), w: 7,
+          district: "industrial", lanesPerDir: 1, laneW: 3.5, access: "service", speedLimit: 15, trafficWeight: 0,
+        });
       }
-      pave(root, marks, 0xd8b53a, 2);
     }
 
-    // ---- is every authored waypoint on real ground? ---------------------
-    // Asked with the "service" class, so the airport keep-out (which is where
-    // these vehicles BELONG) is not the thing being tested — water is. A route
-    // that fails is dropped whole; its vehicle is simply never built.
-    for (const k in ROUTES) if (!validateRoute(ROUTES[k])) delete ROUTES[k];
-    // ...and is anything PARKED on it? (see nudgeNodes — this is what stops a
-    // vehicle holding for ever against an airframe that will never move)
-    nudged = nudgeNodes(f);
+    if (CBZ.cityStaffVenue) CBZ.cityStaffVenue("airside:" + f.id, { stations: 9, note: "service vehicles + the ramp" });
 
-    // ---- the service network is a REAL road record ----------------------
-    // ADOPTED: roadrules.js's per-segment access tag. Publishing the corridor
-    // and the apron taxilane onto city.roads means roadSegmentAt/roadSpeedLimit
-    // can answer for the apron (an honest posted 15, instead of the district
-    // guess), and `access: "service"` RESERVES them: roadOpen(r) with the
-    // default ambient class returns false, so no placement path can put a
-    // saloon on the apron even if the keep-out list is ever edited. Weight 0
-    // keeps roadPick's cumulative table byte-identical, so adding these two
-    // records cannot shift where ambient traffic spawns for a given seed.
-    if (city.roads) {
-      const svcMid = (f.westX + f.eastX) / 2, svcLen = f.eastX - f.westX;
-      city.roads.push({
-        x: svcMid, z: mid, vertical: false, len: svcLen, w: 8.4,
-        district: "industrial", lanesPerDir: 1, laneW: 4.2,
-        access: "service", speedLimit: 15, trafficWeight: 0,
-      });
-      city.roads.push({
-        x: svcMid, z: f.laneZ, vertical: false, len: svcLen, w: 7,
-        district: "industrial", lanesPerDir: 1, laneW: 3.5,
-        access: "service", speedLimit: 15, trafficWeight: 0,
-      });
-    }
-
-    // ---- who works here -------------------------------------------------
-    // FIVE drivers (one per machine, declared by crewUp inside spawn) and
-    // THREE bodies on the ramp itself. That is the whole airside headcount and
-    // it is a deliberate ceiling: a rig is ~16 draw calls, they only exist
-    // inside 170 m, and eight is what you can see across an apron at once.
-    if (CBZ.cityStaffVenue) {
-      CBZ.cityStaffVenue("airside", { stations: 8, note: "5 service vehicles + the ramp" });
-    }
-
-    // ---- the fleet ------------------------------------------------------
-    // Placement is staggered around each route by arclength so the five
-    // machines are spread across the field on the first frame instead of
-    // stacked on one node. Every draw is a position hash: no Math.random.
     function place(routeName, frac) {
-      const r = ROUTES[routeName];
+      const r = f.routes[routeName];
       if (!r) return null;
-      const s = routeLen(r) * frac;
-      const p = routePoint(r, s);
+      const p = routePoint(r, routeLen(r) * frac);
       return { route: r, x: p.x, z: p.z, heading: p.heading, node: p.next };
     }
-
     function spawn(rig, opts) {
       if (!opts || !opts.route) return null;
       rig.grp.position.set(opts.x, 0, opts.z);
       rig.grp.rotation.y = opts.heading;
       root.add(rig.grp);
-      const u = register(rig, opts);
-      crewUp(u);                    // and somebody is driving it
+      const u = register(f, rig, opts);
+      crewUp(u);
       return u;
     }
-    // TUG
+    function base(p, extra) {
+      const o = { route: p.route, startNode: p.node, x: p.x, z: p.z, heading: p.heading, startX: p.x, startZ: p.z };
+      for (const k in extra) o[k] = extra[k];
+      return o;
+    }
     let p = place("tug", 0.15);
-    if (p) spawn(buildTug(0xe8c020), {
-      kind: "tug", name: "Pushback Tug", body: "van", style: "van", color: 0xe8c020, value: 11000,
-      route: p.route, startNode: p.node, x: p.x, z: p.z, heading: p.heading, startX: p.x, startZ: p.z,
-      maxV: 6.0, acc: 3.0, brake: 6.0, turnK: 0.002,
-    });
-
-    // BAGGAGE TRAIN — tractor + towed carts. The carts are NOT registered
-    // vehicles: they are trailers, and they follow the tractor's own path
-    // (section 11). Stealing the tractor takes the whole train with it.
+    if (p) spawn(buildTug(0xe8c020), base(p, { kind: "tug", name: "Pushback Tug", color: 0xe8c020, value: 11000, maxV: 6.0, acc: 3.0, brake: 6.0, turnK: 0.002 }));
     p = place("baggage", 0.55);
-    const tractor = !p ? null : spawn(buildBaggageTractor(0xd8dbdf), {
-      kind: "baggage", name: "Baggage Tractor", body: "van", style: "van", color: 0xd8dbdf, value: 7000,
-      route: p.route, startNode: p.node, x: p.x, z: p.z, heading: p.heading, startX: p.x, startZ: p.z,
-      maxV: 4.2, acc: 2.2, brake: 5.0, turnK: 0.02,
-    });
+    const tractor = !p ? null : spawn(buildBaggageTractor(0xd8dbdf), base(p, { kind: "baggage", name: "Baggage Tractor", color: 0xd8dbdf, value: 7000, maxV: 4.2, acc: 2.2, brake: 5.0, turnK: 0.02 }));
     if (tractor && p) {
-      const nCarts = 2 + ((h01(p.x, p.z, 5401) * 2) | 0);     // 2 or 3, deterministic
+      const nCarts = 2 + ((h01(p.x, p.z, 5401) * 2) | 0);
       for (let i = 0; i < nCarts; i++) {
         const cart = buildCart(p.x, p.z, i);
         cart.grp.userData.dynamic = true;
@@ -1343,146 +1042,101 @@
         root.add(cart.grp);
         tractor.carts.push({ grp: cart.grp, wheels: cart.wheels, back: 3.6 + i * 3.0 });
       }
-      // seed the breadcrumb trail straight out behind the tractor, or the
-      // carts snap into line on the first frame instead of trailing.
-      for (let s = 0; s <= 16; s++) {
-        tractor.trail.push({ x: p.x - Math.sin(p.heading) * s * 0.8, z: p.z - Math.cos(p.heading) * s * 0.8 });
-      }
+      for (let s = 0; s <= 16; s++) tractor.trail.push({ x: p.x - Math.sin(p.heading) * s * 0.8, z: p.z - Math.cos(p.heading) * s * 0.8 });
     }
-
-    // CATERING LIFT
     p = place("catering", 0.78);
-    if (p) spawn(buildCatering(0xe6e9ec), {
-      kind: "catering", name: "Catering Lift", body: "van", style: "van", color: 0xe6e9ec, value: 14000,
-      route: p.route, startNode: p.node, x: p.x, z: p.z, heading: p.heading, startX: p.x, startZ: p.z,
-      maxV: 4.6, acc: 2.0, brake: 5.0, turnK: 0.03,
-    });
-
-    // FUEL BOWSER
+    if (p) spawn(buildCatering(0xe6e9ec), base(p, { kind: "catering", name: "Catering Lift", color: 0xe6e9ec, value: 14000, maxV: 4.6, acc: 2.0, brake: 5.0, turnK: 0.03 }));
     p = place("fuel", 0.35);
-    if (p) spawn(buildBowser(0x2f4d78), {
-      kind: "fuel", name: "Fuel Bowser", body: "van", style: "van", color: 0x2f4d78, value: 18000,
-      route: p.route, startNode: p.node, x: p.x, z: p.z, heading: p.heading, startX: p.x, startZ: p.z,
-      maxV: 4.4, acc: 1.8, brake: 4.6, turnK: 0.035,
-    });
-
-    // FOLLOW-ME
+    if (p) spawn(buildBowser(0x2f4d78), base(p, { kind: "fuel", name: "Fuel Bowser", color: 0x2f4d78, value: 18000, maxV: 4.4, acc: 1.8, brake: 4.6, turnK: 0.035 }));
+    p = place("stairs", 0.25);
+    if (p) spawn(buildStairs(0xdcdfe2), base(p, { kind: "stairs", name: "Airstairs Truck", color: 0xdcdfe2, value: 16000, maxV: 3.6, acc: 1.6, brake: 4.4, turnK: 0.03 }));
     p = place("followme", 0.42);
-    if (p) spawn(buildFollowMe(), {
-      kind: "followme", name: "Follow-Me Car", body: "sedan", style: "sedan", color: 0xf2c010, value: 9000,
-      route: p.route, startNode: p.node, x: p.x, z: p.z, heading: p.heading, startX: p.x, startZ: p.z,
-      maxV: 11.0, acc: 4.5, brake: 8.0, turnK: 0.0016,
-    });
+    if (p) spawn(buildFollowMe(), base(p, { kind: "followme", name: "Follow-Me Car", body: "sedan", style: "sedan", color: 0xf2c010, value: 9000, maxV: 11.0, acc: 4.5, brake: 8.0, turnK: 0.0016 }));
 
-    // ---- THE RAMP CREW — the three bodies the machines drive around.
-    //
-    //  Not scenery and not a new brain: cityPostNpc's `pin` gives peds.js's
-    //  own posted-staff brain (rooted, no wander, no crowd recast, still
-    //  gunpoint-aware, still dies through the kill bus), and citystaff.js
-    //  decides WHEN the body exists. The marshaller stands off the wingtip of
-    //  the first stand facing the aircraft — which is where the machines are
-    //  already holding short for each other, so the ramp finally reads as a
-    //  worked one. The two handlers work the GSE line the baggage train serves.
-    //
-    //  laneBrake() already brakes every vehicle in this file for any ped in
-    //  its lane, so these three are a real constraint on the traffic and not a
-    //  decoration standing in it.
-    if (CBZ.cityStaffPost) {
-      const st = stands[0] || { x: f.apronX, z: f.apronZ - 19 };
-      const post = function (id, x, z, face, job) {
+    // ---- the ramp crew: a marshaller off the first stand's starboard wingtip,
+    //      two handlers on the equipment line
+    if (CBZ.cityStaffPost && f.stands.length) {
+      const s0 = f.stands[0];
+      const post = function (id, lx, lz, lface, job) {
+        const w = ap.toWorld(lx, lz);
         CBZ.cityStaffPost({
-          venue: "airside", id: "airside:ramp:" + id, job: job, archetype: "laborer",
-          x: x, z: z, face: face, pose: "foldarms",
-          opts: { outfit: 0xf0a020, wealth: 0.3 },      // hi-vis: the one thing a ramp worker IS
+          venue: "airside:" + f.id, id: "airside:" + f.id + ":ramp:" + id, job: job, archetype: "laborer",
+          x: w.x, z: w.z, face: lface + ap.yaw, pose: "foldarms", opts: { outfit: 0xf0a020, wealth: 0.3 },
         });
       };
-      post("marshal", st.x + 15, st.z + 7, Math.atan2(-15, -7), "aircraft marshaller");
-      post("load-a", f.apronX - 7, f.hsBackZ + 3.2, Math.PI, "baggage handler");
-      post("load-b", f.apronX + 5, f.hsBackZ + 3.2, Math.PI * 0.85, "ramp agent");
+      post("marshal", s0.lx - 30, s0.lz + 6, Math.PI / 2, "aircraft marshaller");
+      post("load-a", s0.lx - 7, f.hsBackZ - 3.4, 0, "baggage handler");
+      post("load-b", s0.lx + 22, f.hsBackZ - 3.4, 0.4, "ramp agent");
     }
-
-    // first inspection is minutes away, deterministically — the audit's
-    // onRunway ratchet reads 0 on a freshly built world and stays there.
-    inspT = 240 + h01(f.rwyX0, f.rwyZ, 5501) * 180;
+    f.inspT = 240 + h01(f.cx, f.cz, 5501) * 180;
   }
-  // ORDER 21.5: island_airport.js registers at 21, and landmass builders run in
-  // order, so by the time this one is called the audit record exists and the
-  // parked fleet is already in the scene graph to be discovered.
-  if (CBZ.addLandmass) CBZ.addLandmass(buildAirside, 21.5);
+
+  function buildAirside(city) {
+    teardown();
+    if (!on() || !CBZ.airports) return;
+    for (const ap of CBZ.airports) { try { buildField(city, ap); } catch (e) { console.error("[airside]", ap && ap.id, e); } }
+  }
+  // ORDER 23: both fields exist (Halloran 21, Cape Harbor 22) and their
+  // parked fleets are in the scene graph to be discovered.
+  if (CBZ.addLandmass) CBZ.addLandmass(buildAirside, 23);
 
   // ============================================================
-  //  10. LANDSIDE KERB — ORDINARY cars, built by the ordinary car builder.
-  //
-  //  We ask the world first: if a road record actually serves the terminal
-  //  frontage, roadPick/roadPlace own the placement and we adopt the block
-  //  rather than re-typing a lane draw. Since island_airport.js pushed its
-  //  north-edge kerb road and east perimeter spur it usually DOES, and
-  //  ROUTES.kerb now runs out onto that spur — but the lane itself stays
-  //  authored here, because the 3 m frontage strip is narrower than any road
-  //  record's deck and roadPlace would centre a car in the terminal wall.
-  //
-  //  THESE ARE THE ONLY ORDINARY CARS THIS FILE OWNS, and the route they run
-  //  is a one-way lane, never a lap of the building (see ROUTES.kerb). The
-  //  service fleet's own two published records carry access:"service", so
-  //  roadOpen/roadPick refuse to seed an ambient car onto the apron or the
-  //  head-of-stand corridor no matter what the keep-out list says.
-  //
-  //  Deferred to a one-shot updater (island_airport.js:2167 uses the same
-  //  trick) because cityAddParkedCar needs a live CBZ.city.arena, which does
-  //  not exist yet while landmass builders are running.
+  //  10. DEFERRED: the landside kerb cars (ordinary catalogue cars) and the
+  //      crash tenders parked in the fire station bays (the station is part
+  //      of the streamed dressing, so its bays exist once it is built).
   // ============================================================
   CBZ.onUpdate(55.35, function () {
-    if (kerbDone || !on() || !F) return;
-    if (CBZ.CONFIG.AIRSIDE_KERB === false) { kerbDone = true; return; }
+    if (!on() || !FIELDS.length) return;
     if (!CBZ.game || CBZ.game.mode !== "city") return;
     if (!CBZ.city || !CBZ.city.arena || !CBZ.cityAddParkedCar) return;
-    kerbDone = true;
-
-    const r = ROUTES.kerb;
-    if (!r) return;
-    // Does a real road serve the kerb? (roadSegmentAt is roadrules.js's own
-    // query — the answer is authoritative and costs one lookup.)
-    const seg = CBZ.roadSegmentAt ? CBZ.roadSegmentAt(F.apronX, F.kerbZ, 8) : null;
-    kerbFromRoad = !!(seg && CBZ.roadPick && CBZ.roadPlace);
-
-    const NCARS = 4;
-    for (let i = 0; i < NCARS; i++) {
-      const p = routePoint(r, routeLen(r) * (i / NCARS));
-      // half taxis, half ordinary cars — the model is otherwise position-hashed
-      // by cityAddParkedCar, so the mix stays deterministic per seed.
-      const wantTaxi = h01(p.x, p.z, 5601) < 0.5;
-      let rec = null;
-      try {
-        rec = CBZ.cityAddParkedCar(p.x, p.z, p.heading, wantTaxi ? { modelName: "Taxi" } : {});
-      } catch (e) { rec = null; }
-      if (!rec || !rec.group) continue;
-      rec.group.userData.airsideKerb = true;
-      rec.group.userData.dynamic = true;
-      if (kerbFromRoad && CBZ.roadPickUsed) CBZ.roadPickUsed("airside:kerb");
-      // A parked record hides its driver body (vehicles.js occWanted keys off
-      // c.ai, and ours must stay false so the order-37 lane keeper never fights
-      // us for the wheel). These cars are DRIVING, so show the driver.
-      if (rec._occDriver) rec._occDriver.visible = true;
-      const wheels = [];
-      rec.group.traverse(function (o) { if (o.userData && o.userData.playerWheel) wheels.push(o); });
-      V.push({
-        rec: rec, grp: rec.group, pos: rec.pos, kind: "kerb", name: "Kerb Traffic",
-        wheels: wheels, beacon: null, mast: null, carts: [], trail: [],
-        route: r, i: p.next, v: 0, maxV: 7.5 + h01(p.x, p.z, 5602) * 3,
-        acc: 3.4, brake: 7.0, turnK: 0.0016,       // a car turns like a car
-
-        dwellT: 0, holdT: 0, held: false, cleared: false, released: false, beaconT: 0,
-      });
+    for (const f of FIELDS) {
+      if (!f.kerbDone && CBZ.CONFIG.AIRSIDE_KERB !== false) {
+        f.kerbDone = true;
+        const r = f.routes.kerb;
+        if (r) {
+          const NCARS = 4;
+          for (let i = 0; i < NCARS; i++) {
+            const p = routePoint(r, routeLen(r) * (i / NCARS));
+            const wantTaxi = h01(p.x, p.z, 5601) < 0.5;
+            let rec = null;
+            try { rec = CBZ.cityAddParkedCar(p.x, p.z, p.heading, wantTaxi ? { modelName: "Taxi" } : {}); } catch (e) { rec = null; }
+            if (!rec || !rec.group) continue;
+            rec.group.userData.airsideKerb = true;
+            rec.group.userData.dynamic = true;
+            if (rec._occDriver) rec._occDriver.visible = true;
+            const wheels = [];
+            rec.group.traverse(function (o) { if (o.userData && o.userData.playerWheel) wheels.push(o); });
+            V.push({
+              fld: f, rec: rec, grp: rec.group, pos: rec.pos, kind: "kerb", name: "Kerb Traffic",
+              wheels: wheels, beacon: null, mast: null, carts: [], trail: [],
+              route: r, i: p.next, v: 0, maxV: 7.5 + h01(p.x, p.z, 5602) * 3,
+              acc: 3.4, brake: 7.0, turnK: 0.0016,
+              dwellT: 0, holdT: 0, held: false, cleared: false, released: false, beaconT: 0,
+            });
+          }
+        }
+      }
+      if (!f.fireDone && f.ap.fire && f.ap.fire.bays && CBZ.cityRegisterVehicle) {
+        f.fireDone = true;
+        const root = CBZ.city.arena.root;
+        let n = 0;
+        for (const b of f.ap.fire.bays) {
+          if (!b.open || n >= 2) continue;
+          const rig = buildCrashTender();
+          rig.grp.position.set(b.x, 0, b.z);
+          rig.grp.rotation.y = b.heading;
+          root.add(rig.grp);
+          const u = register(f, rig, { kind: "tender", name: "Crash Tender", color: 0xc0241c, value: 42000, heading: b.heading, parked: true, startX: b.x, startZ: b.z });
+          if (u) { u.released = false; n++; }
+        }
+      }
     }
   });
 
   // ============================================================
-  //  11. THE DRIVE — one waypoint follower for every vehicle in the file.
+  //  11. THE DRIVE — one waypoint follower for every vehicle.
   // ============================================================
   function releaseCheck(u) {
-    // The player took it (or a jacker did). Hand the wheel over for good, the
-    // way traffic.js hands over a stolen ambulance — never fight the player
-    // for a vehicle they are sitting in.
     if (u.released) return true;
     const r = u.rec;
     if (!r) { u.released = true; return true; }
@@ -1490,10 +1144,6 @@
     if (r.dead || r._reap || !u.grp || !u.grp.parent) { u.released = true; return true; }
     return false;
   }
-
-  // Brake for whoever is in the lane ahead — the player first, then any ped
-  // the slow scan collected. A tug that drives through the ground crew is
-  // exactly the "dumb traffic" the owner was complaining about.
   function laneBrake(u, top) {
     const fx = Math.sin(u.rec.heading), fz = Math.cos(u.rec.heading);
     function test(px, pz, tol) {
@@ -1512,10 +1162,6 @@
     }
     return top;
   }
-
-  // A body standing where the vehicle is has to be pushed out of it: these are
-  // cityCars records, but resolveCars only separates CARS. Without this you
-  // can stand inside a bowser.
   function pushPlayerOut(u) {
     const P = CBZ.player;
     if (!P || P.dead || P.driving || !P.pos) return;
@@ -1525,69 +1171,51 @@
     const dx = P.pos.x - u.pos.x, dz = P.pos.z - u.pos.z;
     const lx = dx * c - dz * s, lz = dx * s + dz * c;
     if (Math.abs(lx) >= hw || Math.abs(lz) >= hl) return;
+    if ((P.pos.y || 0) > (d.height || 2) + 0.3) return;      // standing on the airstairs, not in the truck
     const px = hw - Math.abs(lx), pz = hl - Math.abs(lz);
     if (px < pz) { const k = lx >= 0 ? px : -px; P.pos.x += k * c; P.pos.z += -k * s; }
     else { const k = lz >= 0 ? pz : -pz; P.pos.x += k * s; P.pos.z += k * c; }
     if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.copy(P.pos);
   }
-
   function advance(u) {
-    const r = u.route;
+    const r = u.route, f = u.fld;
     u.i++;
     if (u.i >= r.pts.length) {
       if (r.loop) u.i = 0;
       else if (r.shuttle) {
-        /* A ONE-WAY LANE HAS AN END, and a departures kerb is a one-way lane.
-           The car that reaches the far end of the perimeter has DRIVEN AWAY;
-           putting it back at the head of the lane is the only way to keep the
-           frontage busy without making it lap the terminal. The recycle is
-           governed by the SHARED contract, never by a distance guess:
-           CBZ.npcTransitionSafe is a padded-screen projection (config.js), the
-           same one crowd.js's promotion and citystaff's minting ask, so a car
-           can never be seen to vanish or to appear. Refused → hold at the end
-           and ask again in a few seconds, which reads as a taxi waiting. */
+        // the kerb car that reaches the far end has driven away; it comes back
+        // to the head of the lane only where nobody can see either end
         const head = r.pts[0];
-        const safe = !CBZ.npcTransitionSafe ||
-          (CBZ.npcTransitionSafe(head.x, head.z) && CBZ.npcTransitionSafe(u.pos.x, u.pos.z));
+        const safe = !CBZ.npcTransitionSafe || (CBZ.npcTransitionSafe(head.x, head.z) && CBZ.npcTransitionSafe(u.pos.x, u.pos.z));
         if (!safe) { u.i = r.pts.length - 1; u.dwellT = 3.5; return; }
         u.i = 1 % r.pts.length;
         const nx = r.pts[u.i];
-        u.pos.x = head.x; u.pos.z = head.z;          // u.pos IS rec.pos IS grp.position
+        u.pos.x = head.x; u.pos.z = head.z;
         u.rec.heading = Math.atan2(nx.x - head.x, nx.z - head.z);
         if (u.grp) u.grp.rotation.y = u.rec.heading;
         u.v = 0; u.rec.v = 0;
         u.trail.length = 0;
-      }
-      else {
-        // the inspection run is over: vacate, drop the clearance, go back to
-        // the taxiway beat.
+      } else {
+        // the inspection is over: vacate, drop the clearance, back to the beat
         u.cleared = false;
-        inspecting = false;
-        u.route = ROUTES.followme || r;
+        f.inspecting = false;
+        u.route = f.routes.followme || r;
         u.i = 0;
-        inspT = 300 + h01(u.pos.x, u.pos.z, 5502) * 240;
+        f.inspT = 300 + h01(u.pos.x, u.pos.z, 5502) * 240;
       }
     }
   }
-
   function mastStep(u, dt, wantUp) {
     const m = u.mast;
     if (!m) return;
     m.target = wantUp ? 1 : 0;
     if (Math.abs(m.t - m.target) < 0.002) return;
     m.t += (m.target - m.t) * Math.min(1, dt * 0.9);
-    // ONE angle drives the whole mast: the arms scissor about it and the box
-    // rides their tips, so the geometry cannot disagree with the animation.
     const th = m.th0 + (m.th1 - m.th0) * m.t;
     for (let i = 0; i < m.arms.length; i++) m.arms[i].mesh.rotation.x = m.arms[i].sign * th;
     m.lift.position.y = m.baseY + m.armLen * (Math.sin(th) - Math.sin(m.th0));
   }
-
   function trailStep(u, dt) {
-    // ARTICULATION: the tractor drops a breadcrumb every 0.8 m; each cart is
-    // placed at its own arclength back along that crumb trail and faces down
-    // the segment it sits on. That is why the train SNAKES through a turn
-    // instead of pivoting as one rigid stick.
     if (!u.carts.length) return;
     const t = u.trail;
     const head = t[0];
@@ -1609,72 +1237,47 @@
         }
         left -= seg; px = t[i].x; pz = t[i].z; i++;
       }
-      if (i >= t.length && t.length) {
-        cart.grp.position.set(t[t.length - 1].x, 0, t[t.length - 1].z);
-      }
+      if (i >= t.length && t.length) cart.grp.position.set(t[t.length - 1].x, 0, t[t.length - 1].z);
       for (let w = 0; w < cart.wheels.length; w++) cart.wheels[w].rotation.x -= u.v * (dt || 0.016) * 2.0;
     }
   }
-
+  function stopHere(u, dt) {
+    u.v += Math.max(-u.brake * dt, -u.v);
+    if (u.v < 0.02) u.v = 0;
+    u.rec.v = u.v;
+  }
   function stepVehicle(u, dt) {
     if (releaseCheck(u)) return;
-    // EVERY SEAT HAS A CONSEQUENCE (the helicopter-crew law). Shoot the driver
-    // and the machine coasts to a stop where it is and stays there. `lost` is
-    // set only by a DEATH — a post that is merely dormant (nobody within
-    // 170 m, so nobody can see the cab is empty) never sets it, which is why
-    // this cannot quietly freeze the whole fleet when you walk away.
-    if (u.post && u.post.lost) {
-      u.v += Math.max(-u.brake * dt, -u.v);
-      if (u.v < 0.02) u.v = 0;
-      u.rec.v = u.v;
-      mastStep(u, dt, false);
-      trailStep(u, dt);
-      pushPlayerOut(u);
+    if (u.parked) { pushPlayerOut(u); return; }             // a tender in its bay
+    if (u.post && u.post.lost) {                            // the driver is dead
+      stopHere(u, dt); mastStep(u, dt, false); trailStep(u, dt); pushPlayerOut(u);
       return;
     }
     const r = u.route, pts = r && r.pts;
     if (!pts || !pts.length) return;
     const wp = pts[u.i % pts.length];
-
-    // ---- RIGHT OF WAY -------------------------------------------------
-    // Test the NEXT WAYPOINT, not the current position: a vehicle must stop
-    // BEFORE it commits to ground an aircraft owns, which is the whole point
-    // of a hold-short line.
-    const blocker = craftBlocks(u, wp.x, wp.z);
-    // a mandatory hold node additionally waits for the WHOLE field to be still
-    const mandatory = wp.hold && anyCraftMoving();
+    const blocker = craftBlocks(u, wp);
+    const mandatory = wp.hold && anyCraftMoving(u.fld);
     if (blocker || mandatory) {
       if (!u.held) holdEvents++;
       u.held = true;
       u.holdT += dt;
-      u.v += Math.max(-u.brake * dt, -u.v);
-      if (u.v < 0.02) u.v = 0;
-      u.rec.v = u.v;
+      stopHere(u, dt);
       mastStep(u, dt, false);
-      // A PARKED blocker will never move, so a hold on one is a deadlock, not
-      // a courtesy. Real drivers go round; after HOLD_BAIL we skip the node.
-      if (!mandatory && blocker && !blocker.moving && u.holdT > HOLD_BAIL) {
-        bailouts++; u.holdT = 0; u.held = false; advance(u);
-      }
+      if (!mandatory && blocker && !blocker.moving && u.holdT > HOLD_BAIL) { bailouts++; u.holdT = 0; u.held = false; advance(u); }
       trailStep(u, dt);
       return;
     }
     u.held = false; u.holdT = 0;
-
-    // ---- DWELL --------------------------------------------------------
     if (u.dwellT > 0) {
       u.dwellT -= dt;
-      u.v += Math.max(-u.brake * dt, -u.v);
-      if (u.v < 0.02) u.v = 0;
-      u.rec.v = u.v;
+      stopHere(u, dt);
       mastStep(u, dt, !!wp.mast);
       trailStep(u, dt);
       pushPlayerOut(u);
       return;
     }
     mastStep(u, dt, false);
-
-    // ---- STEER --------------------------------------------------------
     const dx = wp.x - u.pos.x, dz = wp.z - u.pos.z;
     const d = Math.hypot(dx, dz);
     if (d < ARRIVE) {
@@ -1685,13 +1288,10 @@
     }
     const want = Math.atan2(dx, dz);
     u.rec.heading = lerpAngle(u.rec.heading, want, 1 - Math.pow(u.turnK || 0.004, dt));
-
-    // ---- SPEED --------------------------------------------------------
     let top = u.maxV;
     const nxt = pts[(u.i + 1) % pts.length];
-    if (wp.dwell > 0 && d < 10) top = Math.min(top, 0.6 + d * 0.55);      // ease into a stop
+    if (wp.dwell > 0 && d < 10) top = Math.min(top, 0.6 + d * 0.55);
     else if (nxt) {
-      // slow for the corner: the sharper the turn ahead, the earlier we lift
       const turn = Math.abs(((Math.atan2(nxt.x - wp.x, nxt.z - wp.z) - want + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
       if (turn > 0.7 && d < 14) top = Math.min(top, 2.4 + d * 0.2);
     }
@@ -1699,11 +1299,9 @@
     const dv = top - u.v;
     u.v += Math.max(-u.brake * dt, Math.min(u.acc * dt, dv));
     if (u.v < 0) u.v = 0;
-
     u.pos.x += Math.sin(u.rec.heading) * u.v * dt;
     u.pos.z += Math.cos(u.rec.heading) * u.v * dt;
     u.rec.v = u.v;
-    // walls are walls — the SAME oriented resolver every driven car uses
     if (CBZ.cityCollideVehicle) { try { CBZ.cityCollideVehicle(u.rec); } catch (e) {} }
     u.grp.rotation.y = u.rec.heading;
     for (let w = 0; w < u.wheels.length; w++) u.wheels[w].rotation.x -= u.v * dt * 1.6;
@@ -1712,84 +1310,68 @@
   }
 
   // ============================================================
-  //  12. TICKS
-  //
-  //  37.32 — the SLOW tick (4 Hz): rescan aircraft motion and collect the
-  //          handful of peds worth braking for. Everything expensive lives
-  //          here so the per-frame tick stays arithmetic.
-  //  37.35 — the DRIVE tick: after the ambient lane keeper (37) and before
-  //          resolveCars (37.6), so our vehicles are separated like any other
-  //          car in the same frame they moved.
+  //  12. TICKS — 37.32 the slow scan (4 Hz), 37.35 the drive.
   // ============================================================
-  function fieldFar() {
+  let scanT = 0;
+  function fieldFar(f) {
     const cam = CBZ.camera && CBZ.camera.position;
-    if (!cam || !F) return false;
-    return Math.hypot(cam.x - F.cx, cam.z - F.cz) > FAR_D + (F.maxX - F.minX) * 0.5;
+    if (!cam) return false;
+    return Math.hypot(cam.x - f.cx, cam.z - f.cz) > FAR_D + (f.maxX - f.minX) * 0.5;
   }
-
   CBZ.onUpdate(37.32, function (dt) {
-    if (!on() || !F || !V.length) return;
+    if (!on() || !FIELDS.length || !V.length) return;
     if (!CBZ.game || CBZ.game.mode !== "city") return;
     scanT -= dt;
     if (scanT > 0) return;
     const period = Math.max(SCAN_HZ, SCAN_HZ - scanT);
     scanT = SCAN_HZ;
-    refreshCraft(period);
-    // peds only matter when somebody can see the near-miss
+    for (const f of FIELDS) refreshCraft(f, period);
     nearPeds.length = 0;
     const cam = CBZ.camera && CBZ.camera.position;
-    if (!cam || Math.hypot(cam.x - F.cx, cam.z - F.cz) > 260 + (F.maxX - F.minX) * 0.5) return;
     const peds = CBZ.cityPeds;
-    if (!peds) return;
-    const x0 = F.westX - 20, x1 = F.eastX + 20, z0 = F.laneZ - 20, z1 = F.kerbZ + 20;
-    for (let i = 0; i < peds.length && nearPeds.length < 32; i++) {
-      const p = peds[i];
-      if (!p || p.dead || p.inCar || !p.pos) continue;
-      if (p.pos.x < x0 || p.pos.x > x1 || p.pos.z < z0 || p.pos.z > z1) continue;
-      nearPeds.push(p);
+    if (!cam || !peds) return;
+    for (const f of FIELDS) {
+      if (Math.hypot(cam.x - f.cx, cam.z - f.cz) > 260 + (f.maxX - f.minX) * 0.5) continue;
+      for (let i = 0; i < peds.length && nearPeds.length < 32; i++) {
+        const p = peds[i];
+        if (!p || p.dead || p.inCar || !p.pos) continue;
+        if (p.pos.x < f.minX || p.pos.x > f.maxX || p.pos.z < f.minZ || p.pos.z > f.maxZ) continue;
+        nearPeds.push(p);
+      }
     }
   });
-
   CBZ.onUpdate(37.35, function (dt) {
-    if (!on() || !F || !V.length) return;
+    if (!on() || !FIELDS.length || !V.length) return;
     const g = CBZ.game;
     if (!g || g.mode !== "city" || g.state !== "playing") return;
     frame++;
-
-    // TIME SLICE: nobody is looking at the airfield from the far side of the
-    // continent, so bank dt and tick a third as often out there.
-    let step = dt;
-    if (fieldFar()) {
-      if (frame % FAR_STRIDE !== 0) { farAcc += dt; return; }
-      step = dt + farAcc; farAcc = 0;
-      if (step > 0.6) step = 0.6;             // never teleport on a long stall
-    } else if (farAcc) {
-      farAcc = 0;                             // walked back into view: drop the bank
-    }
-
-    // ---- the rare runway inspection ------------------------------------
-    if (CBZ.CONFIG.AIRSIDE_RUNWAY_INSPECT !== false && ROUTES.inspect && !inspecting) {
-      inspT -= step;
-      if (inspT <= 0) {
-        for (let i = 0; i < V.length; i++) {
-          const u = V[i];
-          if (u.kind !== "followme" || u.released) continue;
-          // CLEARANCE is the whole route, not a node: the car is on runway
-          // ground from the moment it leaves the hold bars until it is back
-          // across them, and the audit must not read a violation in between.
-          u.route = ROUTES.inspect; u.i = 0; u.dwellT = 0; u.holdT = 0; u.cleared = true;
-          inspecting = true;
-          break;
+    for (const f of FIELDS) {
+      let step = dt;
+      if (fieldFar(f)) {
+        if (frame % FAR_STRIDE !== 0) { f.farAcc += dt; f.skip = true; continue; }
+        step = Math.min(0.6, dt + f.farAcc); f.farAcc = 0;
+      } else f.farAcc = 0;
+      f.skip = false;
+      f.step = step;
+      // the rare runway inspection
+      if (CBZ.CONFIG.AIRSIDE_RUNWAY_INSPECT !== false && f.routes.inspect && !f.inspecting) {
+        f.inspT -= step;
+        if (f.inspT <= 0) {
+          for (const u of V) {
+            if (u.fld !== f || u.kind !== "followme" || u.released) continue;
+            u.route = f.routes.inspect; u.i = 0; u.dwellT = 0; u.holdT = 0; u.cleared = true;
+            f.inspecting = true;
+            break;
+          }
+          if (!f.inspecting) f.inspT = 120;
         }
-        if (!inspecting) inspT = 120;          // no follow-me alive: try again later
       }
     }
-
     for (let i = 0; i < V.length; i++) {
       const u = V[i];
-      if (u.released) continue;
+      if (u.released || u.fld.skip) continue;
+      const step = u.fld.step || dt;
       stepVehicle(u, step);
-      // beacons: runtime-only FX, so a plain elapsed-time strobe is fine.
       if (u.beacon) {
         u.beaconT += step;
         u.beacon.emissiveIntensity = ((u.beaconT % 1.1) < 0.5) ? 1.5 : 0.08;
@@ -1798,38 +1380,11 @@
     crewHold();
   });
 
-  /* ---- THE CREW HOLD — ONE OWNER FOR A DRIVER'S FACING --------------------
-     OWNER BUG (2026-07-27, verbatim): "the driver of the prop cars at the
-     airports their heads glitch side to straight."
-
-     TWO WRITERS. That is the entire fault, and neither of them is wrong on its
-     own:
-
-       (1) npclife.js's syncAttached (order 33.8) RE-ASSERTS an attached body's
-           seat transform every frame — for a crew rig, the anchor crewUp
-           declared: local yaw 0, i.e. facing the way the cab faces. This is
-           the law ("A seated body holds its seat") and it is correct.
-
-       (2) any of the ~40 CBZ.cityPeds sweeps that run AFTER 33.8 and write a
-           WORLD-space group.rotation.y with no _npcAttached guard — the goal
-           brain's face() (aigoals.js, order 33/35/36), a social vignette
-           (34.5/34.6), a turn-to-look. CLAUDE.md already names this class:
-           "41 files iterate that list and write group.rotation.y with no
-           _npcAttached guard". On a body parented to a MOVING vehicle's crew
-           node, a world bearing lands as a LOCAL yaw — a side-look, and one
-           that does not even track the cab as it turns.
-
-     Why it SNAPS rather than simply sitting wrong: those sweeps are TIME-
-     SLICED. aigoals.js ticks 1/30th of the ped roster per frame, so the
-     side-look is written about twice a second and wiped by syncAttached on
-     every frame in between. Side, straight, side, straight.
-
-     ONE OWNER, and it is the seat. This runs inside our OWN drive tick (37.35
-     — after peds.js 34, social.js 34.6 and aigoals.js 36), so nothing that
-     fights for the transform can get the last word within a frame, and it
-     writes the pose ABSOLUTELY so nothing can accumulate. It is the same shape
-     as island_airport.js's cabinPassengerHold, it is five bodies, and it adds
-     no state: the anchor npclife already stores IS the answer. */
+  /* THE CREW HOLD — one owner for a driver's facing. npclife's syncAttached
+     re-asserts the seat every frame, and ~40 ped sweeps write a WORLD bearing
+     into group.rotation.y after it; on a body parented to a moving vehicle
+     that lands as a side-look. This runs in the drive tick (after peds,
+     social, aigoals) and writes the anchor's pose absolutely. */
   function crewHold() {
     for (let i = 0; i < V.length; i++) {
       const u = V[i];
@@ -1837,40 +1392,24 @@
       if (!a || a.dead || !a.group) continue;
       const rec = a._npcAttached;
       const an = rec && rec.anchor;
-      if (!an || rec.parent !== a.group.parent) continue;   // no longer in this seat
+      if (!an || rec.parent !== a.group.parent) continue;
       if (CBZ.propArcActive && CBZ.propArcActive(a)) continue;
       const g2 = a.group;
-      if (g2.position.x !== an.x || g2.position.y !== an.y || g2.position.z !== an.z) {
-        g2.position.set(an.x || 0, an.y || 0, an.z || 0);
-      }
-      // pitch/roll too: a drafted street body can arrive carrying a knockdown's
-      // leftover rotation.z and nothing in the attached path eases it back.
+      if (g2.position.x !== an.x || g2.position.y !== an.y || g2.position.z !== an.z) g2.position.set(an.x || 0, an.y || 0, an.z || 0);
       const r2 = g2.rotation, yaw = an.yaw || 0;
       if (r2.y !== yaw || r2.x !== 0 || r2.z !== 0) r2.set(0, yaw, 0);
     }
   }
 
   // ============================================================
-  //  13. THE AUDIT (CLAUDE.md BLOCK LAW #5)
-  //
-  //  `onRunway` is the ratchet: a service vehicle standing on runway 09/27
-  //  WITHOUT the inspection clearance. It is a live measurement of the world,
-  //  not a count of call sites, and it must read 0 on a clean world.
-  //
-  //  `onRunwayRaw` is reported beside it deliberately: it counts EVERY vehicle
-  //  physically inside the runway rectangle, cleared or not, so the ratchet
-  //  cannot be quietly satisfied by widening the definition of "cleared".
+  //  13. THE AUDIT. `onRunway` is the ratchet (a service vehicle on a runway
+  //  without the inspection clearance, measured in each runway's own frame)
+  //  and reads 0; `driverless` (a machine with a seat and no post) reads 0.
   // ============================================================
   CBZ.airsideAudit = function () {
-    let vehicles = 0, onRunway = 0, raw = 0, holding = 0, released = 0, kerb = 0, dwelling = 0;
-    // CREW CENSUS. `seats` counts machines that DECLARE a driver's seat;
-    // `driverless` counts one whose post was never declared at all — the
-    // original bug (five machines, zero people), and it must read 0.
-    // `crewed`/`dormant` are evidence: a dormant post is correct at range and
-    // would be the whole story if the ratchet were "a body exists right now".
+    let vehicles = 0, onRunway = 0, raw = 0, holding = 0, released = 0, kerb = 0, dwelling = 0, tenders = 0;
     let seats = 0, driverless = 0, crewed = 0, dormant = 0, driverDown = 0;
-    for (let i = 0; i < V.length; i++) {
-      const u = V[i];
+    for (const u of V) {
       if (u.released || !u.grp || !u.grp.parent) { released++; continue; }
       vehicles++;
       if (SEATS[u.kind]) {
@@ -1881,42 +1420,22 @@
         else dormant++;
       }
       if (u.kind === "kerb") kerb++;
+      if (u.kind === "tender") tenders++;
       if (u.held) holding++;
       if (u.dwellT > 0) dwelling++;
-      if (F && u.pos.x >= F.rwyX0 && u.pos.x <= F.rwyX1 && u.pos.z >= F.rwyMinZ && u.pos.z <= F.rwyMaxZ) {
-        raw++;
-        if (!u.cleared) onRunway++;
-      }
+      const l = u.fld.ap.toLocal(u.pos.x, u.pos.z);
+      if (Math.abs(l.lx) <= u.fld.H && Math.abs(l.lz) <= u.fld.rwyHW) { raw++; if (!u.cleared) onRunway++; }
     }
-    let routes = 0;
-    for (const k in ROUTES) routes++;
+    const perField = FIELDS.map(function (f) {
+      let r = 0; for (const k in f.routes) r++;
+      return { id: f.id, routes: r, aircraft: f.craft.length, inspecting: f.inspecting };
+    });
     return {
-      vehicles: vehicles,
-      onRunway: onRunway,
-      holdingShort: holding,
-      routes: routes,
-      // crew (see the census above) — `driverless` is a second ratchet and is 0
-      seats: seats, driverless: driverless, crewed: crewed,
-      crewDormant: dormant, driverDown: driverDown,
-      // evidence, not pins
-      onRunwayRaw: raw,
-      inspecting: inspecting,
-      dwelling: dwelling,
-      released: released,
-      kerb: kerb,
-      kerbFromRoad: kerbFromRoad,
-      aircraft: craft.length,
-      aircraftMoving: (function () { let n = 0; for (let i = 0; i < craft.length; i++) if (craft[i].moving) n++; return n; })(),
-      holdEvents: holdEvents,
-      // BAILOUTS: a vehicle that waited HOLD_BAIL seconds on a PARKED airframe
-      // and skipped that waypoint. It is the anti-deadlock valve, not damage —
-      // nothing is abandoned and no route is lost. A steady climb here means an
-      // authored waypoint is sitting inside a parked aircraft and nudgeNodes
-      // could not move it clear; a flat number is normal.
-      bailouts: bailouts,
-      nudgedNodes: nudged,
-      field: F ? { hsZ: F.hsZ, laneZ: F.laneZ, taxZ: F.taxZ, rwyZ: F.rwyZ, kerbZ: F.kerbZ } : null,
-      enabled: on(),
+      fields: FIELDS.length, vehicles: vehicles, onRunway: onRunway, holdingShort: holding,
+      seats: seats, driverless: driverless, crewed: crewed, crewDormant: dormant, driverDown: driverDown,
+      onRunwayRaw: raw, dwelling: dwelling, released: released, kerb: kerb, tenders: tenders,
+      holdEvents: holdEvents, bailouts: bailouts, nudgedNodes: nudged,
+      perField: perField, enabled: on(),
     };
   };
 })();

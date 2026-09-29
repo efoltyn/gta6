@@ -187,11 +187,6 @@
   // it's scripted by its own loop and boarding it would fight that animation.
   const placed = [];
   let _reg = false;
-  // Terminal gate-lounge SEAT anchors this island registered with propuse.js,
-  // kept so the deferred sitting pass finds them without a world-wide
-  // propNearestSeat scan over every chair in the city.
-  const gateSeats = [];
-  let gateSeated = false;
   /* AIRPORT_ENTRY_V2 — the landside overhaul: the frontage fence opening +
      sea wall, the forecourt (gate, canopy, footway, lamps), the taxi rank and
      the tower's door/stairs/controller. One flag, one revert: off restores the
@@ -232,7 +227,6 @@
     grp.userData._rankSeat = n;
     return n;
   }
-  const GATE_SITTERS = 12;      // the rest of the lounge stays genuinely free
   function boardablePlane(grp, x, z, heading, footW, footL, name) {
     if (!grp) return grp;
     grp.userData.milKind = "plane";
@@ -1212,6 +1206,17 @@
     if (P && rec && rec.group) {
       const out = cabinWorld(rec, rec.group.userData.cabin.doorX, -4.4 * AL_SC);
       const hullY = rec.group.position.y || 0;
+      // DOCKED AT A JET BRIDGE (city/airport_kit.js stamps the cab's deck on
+      // the hull while it is docked): you step off into the bridge, level with
+      // the sill, not down onto the apron.
+      const dock = rec.group.userData.bridgeDock;
+      if (dock && hullY < 0.6) {
+        P.pos.set(dock.x, dock.y + 0.05, dock.z);
+        P.vy = 0; P.grounded = true;
+        if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.copy(P.pos);
+        cabinForceClear(true);
+        return;
+      }
       if (hullY >= 0.6) {
         // BELT AND BRACES for the airborne case. The verb above refuses to
         // start while the hull is up, but the arc has a 0.5 s commit window and
@@ -1635,37 +1640,6 @@
     for (let i = 0; i < passengerCabins.length; i++) cabinHoldSeats(passengerCabins[i]);
   }
 
-  // WAITING PASSENGERS in the gate lounge — city/beach.js's sunbathers,
-  // verbatim: CBZ.cityPostNpc puts an ORDINARY ped on the spot and CBZ.propSit
-  // runs the same seat arc a bedroom chair runs. No terminal body, no terminal
-  // brain, no terminal update loop. Committed INSTANT on purpose (these bodies
-  // were never standing up, so playing the walk-in arc at them would be a person
-  // materialising and then climbing onto furniture they are already on), and
-  // WHO sits is a position hash, not a draw on the airport build stream.
-  // Deferred one-shot: cityMakePed and the ped roster are not guaranteed to
-  // exist while the landmass is still building.
-  function seatGateLounge() {
-    if (gateSeated || !gateSeats.length) return;
-    if (!CBZ.cityPostNpc || !CBZ.propSit || !CBZ.cityPeds) return;
-    gateSeated = true;
-    let n = 0;
-    for (let i = 0; i < gateSeats.length && n < GATE_SITTERS; i++) {
-      const rec = gateSeats[i];
-      if (!rec || rec.occupant) continue;
-      if (CBZ.hash01 && CBZ.hash01(rec.x, rec.z, 0xa17e) > 0.34) continue;   // most seats stay empty
-      const ped = CBZ.cityPostNpc(rec.x, rec.z, {
-        archetype: "tourist", aggr: 0.07, wealth: 0.45, src: "airport:gate-lounge",
-      });
-      if (!ped) continue;
-      airportRole(ped, "traveller", "gate-lounge");
-      if (!CBZ.propSit(ped, rec, { instant: true })) {
-        if (CBZ.cityUnpostNpc) CBZ.cityUnpostNpc(ped);
-        continue;
-      }
-      n++;
-    }
-  }
-
   // ---- THE RATCHET ------------------------------------------------------------
   // Physical-plausibility invariant for aircraft cabin life, the propUseAudit /
   // treeAudit shape. `misaligned` and `roleless` are the two that may only ever
@@ -1756,7 +1730,6 @@
     // and the two can never disagree because a walker's seat record is already
     // cleared (deplaneStand) before the first step is taken.
     deplaneTick(dt);
-    seatGateLounge();
     const P = CBZ.player;
     // door panels ease toward open near the player / while boarding / inside
     for (let i = 0; i < placed.length; i++) {
@@ -1918,15 +1891,8 @@
   const CW_MINX = -12, CW_MAXX = 12, CW_MINZ = -566, CW_MAXZ = A_MINZ;
 
   // ---- shared palette (one bucket per colour → batcher collapses them) ----
-  const C_TARMAC = 0x3c3f44;   // apron / taxiway asphalt
-  const C_RUNWAY = 0x2c2f33;   // darker runway asphalt
-  const C_GRASS  = 0x566a3c;   // infield grass (sRGB; decoded with the canvas to ~0.09/0.14/0.045 turf)
-  const C_PAINT  = 0xeef1f4;   // white runway paint
-  const C_YELLOW = 0xd8b53a;   // taxiway centreline / hold lines
   const C_CONC   = 0x9aa0a6;   // concrete kerb / terminal slab
   const C_METAL  = 0xb9c0c8;   // fuselage aluminium
-  const C_DKMET  = 0x6b7178;   // engines / underbelly
-  const C_GLASS  = 0x9fc7df;   // tower cab + terminal glass
   const C_FENCE  = 0x8a9099;   // chain-link tone
 
   CBZ.addLandmass(function (city) {
@@ -1937,9 +1903,6 @@
     // drop any stale cabin-boarding state (platform/collider refs die with
     // the old groups).
     placed.length = 0; _reg = false; deplaneReset(); cabinReset(); resetPassengerCabins();
-    // the gate-lounge anchors die with the propuse reset cityBuildings already
-    // ran (it runs BEFORE the landmass hooks), so only our index needs clearing
-    gateSeats.length = 0; gateSeated = false;
     // the taxi rank re-arms with the world; its cars are ordinary parked
     // records (cleared by clearCars) and its drivers are citystaff posts
     // (cleared with the venue), so only our own index needs resetting.
@@ -1999,477 +1962,54 @@
       }
     }
 
-    // The airfield's own coordinate system (runway/taxiway/apron + all the
-    // hardware parked on it) rides the SAME dial as the A_* footprint, so
-    // the island translates as one rigid piece. The canvas paint mapping is
-    // (world - A_MINX)/gw — the offset cancels, so paint lands identically
-    // on the moved grass.
+    /* =====================================================================
+       HALLORAN FIELD, DRAWN BY THE ONE AIRFIELD BUILDER (city/airport_kit.js).
+
+       Redraw 2026-09-29 (owner: "Make them more real ... just redraw it all,
+       like you did with cars"). This island used to draw its own ground,
+       paint, lights, terminal (a 3.2 m generic retail shell with a barrel
+       roof floated over it), roof, bridges and fence in ~900 lines of world
+       coordinates, and Cape Harbor carried a second, smaller copy of the
+       same ideas. Both fields are now one call to CBZ.buildAirfield with a
+       spec. What stays below is what only Halloran has: the aircraft and
+       cabin systems, the climbable tower, the forecourt and taxi rank, the
+       causeway, the island's roads.
+
+       THE FIELD IS CODE E, because the aeroplane is: the A320-class hull at
+       AIRLINER_SCALE 1.45 spans 52 m. So the runway is 45 m wide (it was 30,
+       narrower than the wings over it), the taxiway 23 m, the stands 60 m
+       apart (52 m span + 7.5 m clearance; they were 55), and they are NOSE-IN
+       contact stands with jet bridges docked to the L1 door (they were parked
+       nose-out, tail to the terminal, which no gate on earth does). To fit
+       that on the island the runway moved 113 m south (z -90 -> -203): the
+       taxiway is 95 m off its centreline, and a parked tail clears a taxiing
+       wingtip by 7.5 m. The terminal keeps its landside face, width and
+       kerb, and grows 20 m deeper toward the apron to hold a real gate floor.
+       ===================================================================== */
     const ADX = _WOFF.dx, ADZ = _WOFF.dz;
-    const RWY_Z = -90 + ADZ;      // runway centre line (z)
-    const RWY_W = 30;             // width
     const RWY_X0 = -850 + ADX, RWY_X1 = 240 + ADX, RWY_LEN = RWY_X1 - RWY_X0;
     const RWY_CX = (RWY_X0 + RWY_X1) / 2;
-    const TAX_Z = RWY_Z + 50;     // taxiway centre
-    const APRON_Z = 0 + ADZ;      // ramp/apron centre (south, by terminal)
-    const APRON_X = -40 + ADX;    // apron/terminal centreline (x)
-    const CONN_XS = [-160 + ADX, 80 + ADX];   // runway->apron connector taxiways
-    /* THE TERMINAL FOOTPRINT, PUBLISHED ONCE (AIRPORT_ENTRY_V2). It used to be
-       four literals inside buildTerminal(), which is why the fence, the kerb
-       and the forecourt could each hold a different idea of where the building
-       stops — and a fence that disagrees with the frontage by a metre is a
-       fence standing in the drop-off. Everything landside now derives from
-       these four numbers. */
-    const TERM_W = 150, TERM_D = 26;
-    const TERM_Z = 24 + ADZ;                       // terminal centre (z)
-    const TERM_X0 = APRON_X - TERM_W / 2;          // -115 + ADX
-    const TERM_X1 = APRON_X + TERM_W / 2;          //   35 + ADX
-    const TERM_FRONT = TERM_Z + TERM_D / 2;        //   37 + ADZ — the DOORS face +z
-    const FRONT_Z = A_MAXZ;                        //   40 + ADZ — the island's north edge
+    const RWY_Z = -203 + ADZ, RWY_W = 45;
+    const TAX_Z = RWY_Z + 95;
+    const TERM_X0 = -115 + ADX, TERM_X1 = 35 + ADX;
+    const TERM_Z0 = -9 + ADZ, TERM_FRONT = 37 + ADZ;          // airside glass / landside doors
+    const TERM_W = TERM_X1 - TERM_X0, TERM_D = TERM_FRONT - TERM_Z0, TERM_Z = (TERM_Z0 + TERM_FRONT) / 2;
+    const APRON_X = -40 + ADX, APRON_Z = -60 + ADZ;
+    const FRONT_Z = A_MAXZ;                        // the island's north edge
     const KERB_Z = 38.5 + ADZ;                     // the drop-off lane (the road record's own z)
-    const PERIM_X = A_MAXX - 22;                   //  268 + ADX — the east perimeter spur
-
-    // ---- shared layout, read by the paint AND by the hardware below --------
-    // The gate line: the larger the airliner, the further SOUTH it parks, so
-    // the up-scaled tail stays clear of the terminal frontage (z=11) while the
-    // nose noses out toward the taxiway. AL_SC=1 keeps the original gate line.
-    const GATE_Z = APRON_Z - 14 - 11 * (AL_SC - 1);
-    const GATE_XS = [0, 1, 2, 3].map(function (i) { return -120 + ADX + i * 55; });
-    const REMOTE_XS = [150 + ADX, 205 + ADX];
-    // jet bridges at the two EMPTY slots between parked airliners
-    const BRIDGE_XS = [-92.5 + ADX, -37.5 + ADX];
-    const BR_WALL = TERM_Z - TERM_D / 2;           // the terminal's airside face (z 11)
-    const BR_HEAD = -4.1 + ADZ, BR_COL = 1.0 + ADZ;  // cab face, drive column
-    // the apron: concrete from the taxiway edge to the terminal face, plus the
-    // east ramp the business jets and the two remote stands stand on (they
-    // used to park on the grass beyond the painted apron's east edge)
-    const APRON_X0 = APRON_X - 132, APRON_X1 = APRON_X + 132;
-    const APRON_Z0 = TAX_Z + 7, APRON_Z1 = BR_WALL + 1;
-    const EAST_X1 = 238 + ADX, EAST_Z1 = 9 + ADZ;
-    // landside forecourt (see 10b): published here so the paint and the
-    // hardware read one set of numbers
+    const PERIM_X = A_MAXX - 22;                   // the east perimeter spur
+    // landside forecourt, east of the terminal
     const PLZ_X0 = TERM_X1 + 6, PLZ_X1 = TERM_X1 + 96;
     const PLZ_Z0 = 14 + ADZ, PLZ_Z1 = FRONT_Z;
-    const GATE_PZ = KERB_Z - 5.5;                  // entry pylon centre, south of the lane
-    const PED_Z = GATE_PZ - 4.5;                   // the pedestrian entrance
-    const TURN_X = TERM_X1 - 4;
+    const GATE_PZ = KERB_Z - 5.5, PED_Z = GATE_PZ - 4.5, TURN_X = TERM_X1 - 4;
     const RANK_Z = KERB_Z - 15, RANK_N = 6, RANK_GAP = 6.4;
     const PARTS = CBZ.airfieldParts || null;
+    const LX = function (x) { return x - RWY_CX; }, LZ = function (z) { return z - RWY_Z; };
+    // three contact stands, 60 m apart, under the terminal; two remote stands
+    // on the east ramp (the airline needs free stands to arrive at)
+    const CONTACT_XS = [-100 + ADX, -40 + ADX, 20 + ADX];
+    const REMOTE_XS = [110 + ADX, 175 + ADX];
 
-    // =====================================================================
-    //  1) ONE AIRFIELD SURFACE — grass, runway, taxiway, apron, landside and
-    //     every marking are baked into one canvas on one plane. The old five
-    //     nearly-coplanar slabs were the airport flicker: at flight distance
-    //     their 0.1 m separation collapsed to the same depth value and green
-    //     won through asphalt. The forecourt deck, footway and rank bay that
-    //     were later laid ON TOP of this plane (at 0.05 / 0.07 / 0.08 against
-    //     its 0.08) were the same bug again, so they are paint in it now.
-    //
-    //     DE-SLOP (2026-09-27): the canvas was 2048 px across 1190 m (1.7
-    //     px/m, so a 0.5 m line was a smear) of flat colour. It is 4096 px
-    //     now, and airport_kit.js's surface shader lays real material over the
-    //     layout at world scale: 5 m concrete apron slabs with sealed joints,
-    //     per-slab tone and fuel drips; asphalt aggregate and repair patches;
-    //     rubber in both touchdown zones; worn paint; patchy mown grass. The
-    //     apron is CONCRETE now, as a real ramp is; the taxiway and runway stay
-    //     asphalt. Markings follow ICAO proportions at this runway's width.
-    // =====================================================================
-    (function ground() {
-      const gw = A_MAXX - A_MINX, gd = A_MAXZ - A_MINZ;
-      const W = 0xeef1f4, Y = C_YELLOW, RED = 0xb8322a;
-      const CONCRETE = 0x8f8d87, SHOULDER = 0x3a3d40, WALK = 0xa9a7a0, PLAZA = 0x4a4d52;
-      let mat0 = null, tex = null, P0 = null;
-      if (PARTS) {
-        P0 = PARTS.painter(gw, gd, 4096, 1024);
-        P0.frame(-A_MINX, -A_MINZ, 0);                 // paint in WORLD metres
-        P0.fill(C_GRASS);
-        for (let z = A_MINZ; z < A_MAXZ; z += 28) P0.rect((A_MINX + A_MAXX) / 2, z + 7, gw, 14, 0x8aa96b, 0.08);
-        // runway strip, shoulders + blast pads, the runway itself
-        P0.rect(RWY_CX, RWY_Z, RWY_LEN + 80, RWY_W + 44, 0x62824b, 0.6);
-        P0.rect(RWY_CX, RWY_Z, RWY_LEN + 60, RWY_W + 10, SHOULDER);
-        P0.rect(RWY_CX, RWY_Z, RWY_LEN, RWY_W, C_RUNWAY);
-        P0.rect(RWY_CX, TAX_Z, RWY_LEN - 20, 18, C_TARMAC);
-        // CONNECTOR TAXIWAYS — apron <-> taxiway <-> runway. (The depth used
-        // to be written `TAX_Z - APRON_Z + 30`, a NEGATIVE number, so the
-        // connectors were 10 m stubs for their whole life. Absolute span.)
-        const CONN_D = Math.abs(TAX_Z - APRON_Z) + 20;
-        const CONN_CZ = (TAX_Z + APRON_Z) / 2;
-        for (const cx of CONN_XS) {
-          P0.rect(cx, CONN_CZ, 16, CONN_D, C_TARMAC);
-          P0.rect(cx, (RWY_Z + TAX_Z) / 2, 16, TAX_Z - RWY_Z, C_TARMAC);
-          for (const zz of [RWY_Z + RWY_W / 2 + 3, TAX_Z - 9 - 3]) P0.rect(cx, zz, 28, 6, C_TARMAC);   // fillets
-        }
-        // the apron (concrete) + the east ramp
-        P0.rect((APRON_X0 + APRON_X1) / 2, (APRON_Z0 + APRON_Z1) / 2, APRON_X1 - APRON_X0, APRON_Z1 - APRON_Z0, CONCRETE);
-        P0.rect((APRON_X1 + EAST_X1) / 2, (APRON_Z0 + EAST_Z1) / 2, EAST_X1 - APRON_X1, EAST_Z1 - APRON_Z0, CONCRETE);
-        P0.rect(APRON_X, TERM_Z, TERM_W + 2, TERM_D, CONCRETE);                 // under the hall
-        // the tower's pad and its footpath to the terminal's west end
-        P0.rect(-180 + ADX, 30 + ADZ, 14, 14, CONCRETE);
-        P0.rect((-173 + ADX + TERM_X0) / 2, 34.5 + ADZ, TERM_X0 - (-173 + ADX), 2.0, WALK);
-        // ---- landside: the kerb lane, the forecourt, footways, the rank
-        P0.rect((TERM_X0 - 12 + PERIM_X + 7) / 2, (TERM_FRONT + FRONT_Z) / 2, PERIM_X + 7 - (TERM_X0 - 12), FRONT_Z - TERM_FRONT, PLAZA);
-        P0.rect((PLZ_X0 + PLZ_X1) / 2, (PLZ_Z0 + PLZ_Z1) / 2, PLZ_X1 - PLZ_X0, PLZ_Z1 - PLZ_Z0, PLAZA);
-        P0.rect((TURN_X + PLZ_X1 + 6) / 2, PED_Z, (PLZ_X1 + 6) - TURN_X, 1.8, WALK);          // gate -> the turn
-        P0.rect(TURN_X, (PED_Z + TERM_FRONT + 0.42) / 2, 1.8, (TERM_FRONT + 0.42) - PED_Z, WALK);
-        P0.rect((TERM_X0 + TURN_X) / 2, TERM_FRONT + 0.42, TURN_X - TERM_X0, 0.84, WALK);     // along the wall
-        // zebra crossing at the doors: bars parallel to the traffic
-        for (let k = 0; k < 3; k++) P0.rect(APRON_X, TERM_FRONT + 0.85 + k * 0.9, 4.0, 0.45, W);
-        // the taxi rank bay: a yellow box with its word painted at the head
-        {
-          const rx0 = PLZ_X0 + 8 - 3.2, rx1 = PLZ_X0 + 8 + (RANK_N - 1) * RANK_GAP + 3.2;
-          P0.line([[rx0, RANK_Z - 1.6], [rx1, RANK_Z - 1.6], [rx1, RANK_Z + 1.6], [rx0, RANK_Z + 1.6], [rx0, RANK_Z - 1.6]], 0.2, Y);
-          P0.text("TAXI", rx0 - 2.4, RANK_Z, 1.6, Math.PI / 2, Y, 3.0);
-        }
-        // forecourt parking-lane edge line
-        P0.line([[PLZ_X0, KERB_Z - 1.8], [PLZ_X1, KERB_Z - 1.8]], 0.15, W);
-
-        // ---- RUNWAY 09/27 markings
-        P0.line([[RWY_X0 + 60, RWY_Z], [RWY_X1 - 60, RWY_Z]], 0.9, W, [30, 20]);
-        for (const s of [-1, 1]) P0.line([[RWY_X0 + 1, RWY_Z + s * (RWY_W / 2 - 0.9)], [RWY_X1 - 1, RWY_Z + s * (RWY_W / 2 - 0.9)]], 0.9, W);
-        for (const e of [{ x: RWY_X0, sg: 1, name: "09", rot: Math.PI / 2 }, { x: RWY_X1, sg: -1, name: "27", rot: -Math.PI / 2 }]) {
-          for (let k = 0; k < 4; k++) for (const s of [-1, 1]) P0.rect(e.x + e.sg * 21, RWY_Z + s * (2.2 + k * 3.4), 30, 1.8, W);
-          P0.text(e.name, e.x + e.sg * 52, RWY_Z, 9, e.rot, W, 7.5);
-          for (const s of [-1, 1]) {
-            P0.rect(e.x + e.sg * 180, RWY_Z + s * 7.5, 40, 4, W);                             // aiming point
-            for (const k of [0, 1]) P0.rect(e.x + e.sg * 330, RWY_Z + s * (6 + k * 2.4), 22, 1.5, W);   // touchdown zone
-          }
-          P0.rect(e.x + e.sg * 0.6, RWY_Z, 1.2, RWY_W, W);                                     // threshold bar
-          for (let k = 0; k < 3; k++) {                                                        // blast pad chevrons
-            const x0 = e.x - e.sg * (6 + k * 8);
-            for (const s of [-1, 1]) P0.line([[x0 - e.sg * 6, RWY_Z + s * (RWY_W / 2 - 2)], [x0, RWY_Z]], 1.0, Y);
-          }
-        }
-        // ---- taxiway + connectors: centrelines, runway-holding positions
-        P0.line([[RWY_X0 + 12, TAX_Z], [RWY_X1 - 12, TAX_Z]], 0.45, Y);
-        for (const cx of CONN_XS) {
-          P0.line([[cx, APRON_Z0 + 2], [cx, RWY_Z + RWY_W / 2 + 1]], 0.45, Y);
-          const hz = RWY_Z + RWY_W / 2 + 18;
-          P0.line([[cx - 8, hz + 1.8], [cx + 8, hz + 1.8]], 0.4, Y);
-          P0.line([[cx - 8, hz + 0.9], [cx + 8, hz + 0.9]], 0.4, Y);
-          P0.line([[cx - 8, hz], [cx + 8, hz]], 0.4, Y, [2, 1.5]);
-          P0.line([[cx - 8, hz - 0.9], [cx + 8, hz - 0.9]], 0.4, Y, [2, 1.5]);
-        }
-        // ---- stands: centreline off the taxiway, nose-wheel stop bar, stand
-        //      number read from the taxiway, red wingtip clearance lines
-        const standXs = GATE_XS.concat(REMOTE_XS);
-        for (let i = 0; i < standXs.length; i++) {
-          const sx = standXs[i];
-          P0.line([[sx, TAX_Z], [sx, GATE_Z + 8]], 0.4, Y);
-          const stopZ = GATE_Z - 10 * AL_SC;                                                   // nose gear
-          P0.rect(sx, stopZ, 6, 0.5, Y);
-          P0.text(i < GATE_XS.length ? String(i + 1) : "R" + (i - GATE_XS.length + 1), sx + 5.5, stopZ - 8, 3.2, Math.PI, Y);
-        }
-        for (let i = 0; i < GATE_XS.length - 1; i++) {
-          const mx = (GATE_XS[i] + GATE_XS[i + 1]) / 2;
-          P0.line([[mx, APRON_Z0 + 3], [mx, BR_HEAD - 2]], 0.3, RED, [3, 3]);
-        }
-        // jet-bridge wheel parking boxes (red, hatched) under each drive column
-        for (const bx of BRIDGE_XS) {
-          P0.line([[bx - 2.2, BR_COL - 1.4], [bx + 2.2, BR_COL - 1.4], [bx + 2.2, BR_COL + 1.4], [bx - 2.2, BR_COL + 1.4], [bx - 2.2, BR_COL - 1.4]], 0.2, RED);
-          for (let k = -1; k <= 1; k++) P0.line([[bx + k * 1.4 - 0.8, BR_COL - 1.3], [bx + k * 1.4 + 0.8, BR_COL + 1.3]], 0.15, RED);
-        }
-        tex = P0.texture();
-        mat0 = PARTS.surfaceMaterial(tex, gw, gd, {
-          frame: { ox: 0, oz: 0, yaw: 0 },
-          rwy: [RWY_X0 - A_MINX, RWY_X1 - A_MINX, RWY_Z - A_MINZ, RWY_W / 2], panel: 5,
-        });
-        /* THE ONE PAINT API. airside.js paints its service road, its kerb lane
-           and its hold-short hatching INTO this canvas instead of laying more
-           ribbons on top of the plane (the same coplanar trap). World metres. */
-        city.airportPaint = function (fn) {
-          try { fn(P0); } catch (e) { try { console.error("[airport] paint", e); } catch (e2) {} }
-          tex.needsUpdate = true;
-        };
-      } else {
-        city.airportPaint = null;
-        mat0 = new THREE.MeshLambertMaterial({ color: CBZ.groundLinear ? CBZ.groundLinear(C_GRASS) : C_GRASS });
-      }
-      const grass = new THREE.Mesh(new THREE.PlaneGeometry(gw, gd), mat0);
-      grass.rotation.x = -Math.PI / 2;
-      // Keep one deliberate depth layer above the continent underlay. 8cm is
-      // visually flush but remains separable in the far camera's depth buffer.
-      grass.position.set((A_MINX + A_MAXX) / 2, 0.08, (A_MINZ + A_MAXZ) / 2);
-      grass.receiveShadow = true; grass.matrixAutoUpdate = false; grass.updateMatrix();
-      grass.userData.terrain = true; grass.userData.worldSurface = true;
-      grass.userData.surfaceOwner = "airport";
-      grass.userData.unifiedSurface = true;
-      grass.name = "airport-island-surface";
-      root.add(grass);
-    })();
-
-    // =====================================================================
-    //  2) EDGE LIGHTS — real elevated fixtures (stem, base plate, lens) in
-    //     their real colours, instanced: white runway edge every 30 m, green
-    //     threshold / red end bars at both ends, blue taxiway edge. They were
-    //     0.5 m amber cubes glowing at full strength at noon. Lenses are dark
-    //     by day and light up with core/daynight.js's night.
-    // =====================================================================
-    (function edgeLights() {
-      if (!PARTS) return;
-      const pts = [];
-      for (let x = RWY_X0; x <= RWY_X1 + 0.1; x += 30) {
-        pts.push([x, RWY_Z - RWY_W / 2 - 1.2, "w"], [x, RWY_Z + RWY_W / 2 + 1.2, "w"]);
-      }
-      for (const e of [{ x: RWY_X0, sg: -1 }, { x: RWY_X1, sg: 1 }]) {
-        for (let k = -3; k <= 3; k++) {
-          pts.push([e.x + e.sg * 1.5, RWY_Z + k * (RWY_W / 7), "g"]);
-          pts.push([e.x - e.sg * 0.8, RWY_Z + k * (RWY_W / 7) + RWY_W / 14, "r"]);
-        }
-      }
-      // taxiway edge (the runway side) + both edges of each connector
-      for (let x = RWY_X0 + 10; x <= RWY_X1 - 10; x += 24) {
-        let clear = true;
-        for (const cx of CONN_XS) if (Math.abs(x - cx) < 18) clear = false;
-        if (clear) pts.push([x, TAX_Z - 9 - 1.0, "b"]);
-      }
-      for (const cx of CONN_XS) for (const s of [-1, 1]) {
-        for (let z = RWY_Z + RWY_W / 2 + 7; z < TAX_Z - 12; z += 9) pts.push([cx + s * 9, z, "b"]);
-      }
-      PARTS.edgeLights(root, pts, root);
-    })();
-
-    // =====================================================================
-    //  4) TAXIWAY (parallel to runway, to its south) + APRON pad in front
-    //     of the terminal. Asphalt strips with yellow centrelines.
-    // =====================================================================
-    // Taxiway/apron asphalt and paint are part of the unified ground texture.
-
-    // =====================================================================
-    //  5) TERMINAL — enterable concourse via cityMakeBuilding. A long, low
-    //     glass shell facing the apron. Inside: seat rows (instanced),
-    //     check-in desks, a gate sign. Door faces the causeway (south).
-    // =====================================================================
-    let terminal = null;
-    (function buildTerminal() {
-      const tx = APRON_X, tz = TERM_Z, tw = TERM_W, td = TERM_D;
-      // doorSide 1 = +z (faces causeway/landside). retail glass = clear.
-      terminal = CBZ.cityMakeBuilding(root, tx, tz, tw, td, 1, 0x6f8ba0, 1,
-        { retail: true, glassKind: "clear", stairs: false });
-      city.airportTerminal = terminal;
-      if (terminal && terminal.group) {
-        // One identity group keeps the terminal's world-authored coordinates
-        // unchanged while giving the interior audit an exact fixture owner.
-        const grp = new THREE.Group();
-        const terminalAuditBoxes = [];
-        root.add(grp);
-        function terminalBox(x, y, z, w, h, d, color, opts) {
-          const m = box(x, y, z, w, h, d, color, opts);
-          m.userData.interiorAuditIgnore = true;
-          grp.add(m); // grp is identity, so the box keeps its world transform
-          terminalAuditBoxes.push({
-            name: "terminal-check-in",
-            minX: x - w / 2, maxX: x + w / 2,
-            minY: y - h / 2, maxY: y + h / 2,
-            minZ: z - d / 2, maxZ: z + d / 2,
-          });
-          return m;
-        }
-        const ix0 = tx - tw / 2 + 4, ix1 = tx + tw / 2 - 4;
-        const fz = tz;    // concourse centre z
-
-        /* CHECK-IN ISLANDS along the landside wall (4). Each was a grey 8 m
-           block with a dark lid. A check-in island is: a laminate counter
-           front with a recessed kick plate, a stone worktop, a bag-drop scale
-           and belt at every position, monitors on stalks facing the agent,
-           and the lit airline board on the back fascia. The audit box and
-           the collider keep the old 8 x 2.4 x 1.2 envelope exactly (the gate
-           agents are posted at dz, tz + td/2 - 1.4, behind it). */
-        const ckBody = [], ckTop = [], ckDark = [], ckLit = [];
-        for (let k = 0; k < 4; k++) {
-          const dx = tx - tw / 2 + 20 + k * 30, dz = tz + td / 2 - 3;
-          terminalAuditBoxes.push({
-            name: "terminal-check-in", minX: dx - 4, maxX: dx + 4, minY: 0, maxY: 1.2, minZ: dz - 1.2, maxZ: dz + 1.2,
-          });
-          solid(dx, dz, 8, 2.4, 0, 1.2);
-          if (!PARTS) { terminalBox(dx, 0.55, dz, 8, 1.1, 2.2, 0xc9cfd6, { cast: true }); continue; }
-          // passenger-side counter front (faces -z, the queue) + kick plate
-          ckBody.push(PARTS.put(PARTS.boxM(8, 1.02, 0.5, 1), dx, 0.56, dz - 0.7));
-          ckDark.push(PARTS.put(new THREE.BoxGeometry(7.9, 0.12, 0.46), dx, 0.06, dz - 0.66));
-          // agent-side desk behind it, lower (0.75 m work height)
-          ckBody.push(PARTS.put(PARTS.boxM(8, 0.72, 0.7, 1), dx, 0.41, dz + 0.35));
-          ckTop.push(PARTS.put(new THREE.BoxGeometry(8.1, 0.05, 0.62), dx, 1.09, dz - 0.68));
-          ckTop.push(PARTS.put(new THREE.BoxGeometry(8.0, 0.04, 0.72), dx, 0.79, dz + 0.35));
-          for (let p = 0; p < 2; p++) {
-            const px = dx - 2 + p * 4;
-            // bag drop: scale plate + short belt, set into the counter line
-            ckDark.push(PARTS.put(new THREE.BoxGeometry(0.8, 0.34, 0.4), px - 1.2, 0.2, dz - 1.0));
-            ckTop.push(PARTS.put(new THREE.BoxGeometry(0.74, 0.02, 0.36), px - 1.2, 0.38, dz - 1.0));
-            // monitor on a stalk, back to the queue
-            ckDark.push(PARTS.put(new THREE.BoxGeometry(0.05, 0.3, 0.05), px + 0.6, 0.95, dz + 0.1));
-            ckDark.push(PARTS.put(new THREE.BoxGeometry(0.5, 0.33, 0.05), px + 0.6, 1.2, dz + 0.1));
-            ckLit.push(PARTS.put(new THREE.BoxGeometry(0.44, 0.27, 0.01), px + 0.6, 1.2, dz + 0.13));
-          }
-          // the back fascia with its lit airline board (no invented name on it)
-          // (behind the agents' standing line at dz + 1.6, so it has its own collider)
-          ckBody.push(PARTS.put(PARTS.boxM(8, 2.3, 0.2, 1), dx, 1.15, dz + 1.95));
-          ckLit.push(PARTS.put(new THREE.BoxGeometry(6.4, 0.7, 0.04), dx, 1.85, dz + 1.83));
-          solid(dx, dz + 1.95, 8, 0.2, 0, 2.3);
-        }
-        if (PARTS) {
-          PARTS.addMerged(grp, ckBody, PARTS.steelMat(0xd9dde1), { cast: true });
-          PARTS.addMerged(grp, ckTop, cmat(0x2a2d31), {});
-          PARTS.addMerged(grp, ckDark, cmat(0x33383e), { cast: true });
-          PARTS.addMerged(grp, ckLit, PARTS.glow(mat(0x2a6aa0, { emissive: 0x2a6aa0, ei: 0.45 }), 0.45, 0.8, root), {});
-          grp.traverse(function (o) { if (o.isMesh) o.userData.interiorAuditIgnore = true; });
-        }
-
-        // =============================================================
-        //  GATE LOUNGE (TERMINAL_GATE_SEATS) — beam benches you can sit on.
-        //
-        //  The old "seat rows" were 63 lone 0.6-cube blocks whose top face sat
-        //  at 0.775 m, spread SIX METRES apart across the concourse, with no
-        //  anchor of any kind: nothing in the game could sit on them and no
-        //  arrangement of them read as a waiting area. Same diorama defect as
-        //  the cabin, same cure — real furniture dimensions (0.44 m cushion,
-        //  0.55 m seat width, 0.45 m back, armrest between every seat) in real
-        //  4-seat beam clusters, and every seat DECLARES its cushion to
-        //  propuse.js so a body gets character.js's feet-on-the-floor solve
-        //  instead of the legacy squat. Four instanced meshes, so the whole
-        //  lounge is four draws.
-        // =============================================================
-        const GATE_CUSH = (CBZ.propSeatHeight ? +CBZ.propSeatHeight("waiting") : 0) || 0.44;
-        const GATE_W = 0.55, GATE_D = 0.50, GATE_BACK = 0.45, GATE_ARM = 0.18;
-        const PER_BENCH = 4, ROW_GAP = 2.6, BENCH_N = 6;
-        const cush = [], back = [], arms = [], beams = [];
-        for (let r = 0; r < 3; r++) {
-          const sz = tz - td / 2 + 5 + r * ROW_GAP;
-          for (let c = 0; c < BENCH_N; c++) {
-            // clusters sit under the gate signage, not smeared end to end
-            const bx = tx - 60 + c * 24;
-            if (bx < ix0 + 2 || bx > ix1 - 2) continue;
-            beams.push([bx, sz]);
-            for (let s = 0; s < PER_BENCH; s++) {
-              const sx = bx + (s - (PER_BENCH - 1) / 2) * GATE_W;
-              cush.push([sx, sz]);
-              back.push([sx, sz]);
-              // seats face the apron glass (-z): body looks along (sin f, cos f)
-              if (CBZ.propRegisterSeat && CBZ.CONFIG.TERMINAL_GATE_SEATS !== false) {
-                // requireEntry: the concourse interior is furnished by
-                // cityMakeBuilding, not by this file, so we cannot promise the
-                // floor in front of every bench is walkable. Anything boxed in
-                // is dropped rather than registered as a chair nothing can
-                // reach — propUseAudit().blocked can only fall from here.
-                const rec = CBZ.propRegisterSeat(sx, 0, sz, Math.PI, "waiting", null,
-                  { cushion: GATE_CUSH, floorBelow: 0, requireEntry: true });
-                if (rec) gateSeats.push(rec);
-              }
-            }
-            for (let a = 0; a <= PER_BENCH; a++) arms.push([bx + (a - PER_BENCH / 2) * GATE_W, sz]);
-          }
-        }
-        const dm = new THREE.Object3D();
-        function inst(list, geo, m, y, dz, cast) {
-          if (!list.length) return;
-          const im = new THREE.InstancedMesh(geo, m, list.length);
-          im.castShadow = !!cast; im.receiveShadow = true;
-          for (let i = 0; i < list.length; i++) {
-            dm.position.set(list[i][0], y, list[i][1] + dz);
-            dm.updateMatrix(); im.setMatrixAt(i, dm.matrix);
-          }
-          im.instanceMatrix.needsUpdate = true; grp.add(im);
-        }
-        inst(cush, new THREE.BoxGeometry(GATE_W - 0.03, 0.10, GATE_D), mat(0x35506e), GATE_CUSH - 0.05, 0, true);
-        inst(back, new THREE.BoxGeometry(GATE_W - 0.03, GATE_BACK, 0.08), mat(0x2a4360), GATE_CUSH + GATE_BACK / 2, GATE_D / 2 - 0.02, true);
-        inst(arms, new THREE.BoxGeometry(0.06, 0.05, 0.42), mat(0x8d959d), GATE_CUSH + GATE_ARM, -0.02, false);
-        inst(beams, new THREE.BoxGeometry(PER_BENCH * GATE_W + 0.12, 0.30, 0.14), mat(0x6b7178), 0.16, 0, false);
-        if (CBZ.interiorTrackFixture) CBZ.interiorTrackFixture(
-          "airport-terminal", terminal, grp, { boxes: terminalAuditBoxes });
-
-        // The building's name on the clerestory glazing over the doors (it was
-        // a board hovering above a 3.2 m roofline), and the gate sign inside
-        // naming the four gates the apron actually has (it promised eight,
-        // with an en dash).
-        if (CBZ.makeLabelSprite) {
-          const s = CBZ.makeLabelSprite("INTERNATIONAL TERMINAL", { color: "#dfeaff" });
-          if (s) { s.position.set(tx, 5.0, tz + td / 2 + 0.3); s.scale.set(18, 1.8, 1); root.add(s); }
-          const g1 = CBZ.makeLabelSprite("GATES 1-4 →", { color: "#ffd451" });
-          if (g1) { g1.position.set(tx + 40, 2.7, fz - td / 2 + 1.5); g1.scale.set(7, 0.9, 1); root.add(g1); }
-        }
-      }
-    })();
-
-    // =====================================================================
-    //  5b) THE TERMINAL ROOF. cityMakeBuilding builds one storey: a 150 m x
-    //      26 m hall 3.2 m tall, which from the apron read as a long grey
-    //      shoebox (an international terminal is the tallest, widest-roofed
-    //      thing on a field). This does NOT touch the building: it stands a
-    //      glazed clerestory on its roof and floats a barrel-vaulted roof
-    //      over the lot, cantilevered 4 m over the airside service road
-    //      (clear of every vehicle: its edge is 7 m up) and 3 m over the
-    //      landside kerb, where it is the drop-off canopy (the old 62 m slab
-    //      on leaning struts is gone with it). Merged per material, no light
-    //      objects: the soffit downlights are emissive and follow the night.
-    // =====================================================================
-    (function terminalRoof() {
-      if (!PARTS || !terminal) return;
-      const H0 = (terminal.h || 3.2) + 0.05;          // clerestory sill: the hall's roof
-      const zS = BR_WALL - 4, zE = FRONT_Z;             // roof edges (airside, landside)
-      const xS = TERM_X0 - 3, xE = TERM_X1 + 3;
-      const Y0 = 7.0, RISE = 2.4, T = 0.6;
-      const yTop = function (z) { return Y0 + RISE * Math.sin(Math.PI * Math.max(0, Math.min(1, (z - zS) / (zE - zS)))); };
-      const ySof = function (z) { return yTop(z) - T; };
-      const cx = (xS + xE) / 2, cz = (zS + zE) / 2, RW = xE - xS, RD = zE - zS;
-      function vault(faceUp) {
-        const g = new THREE.PlaneGeometry(RW, RD, 1, 28);
-        g.rotateX(faceUp ? -Math.PI / 2 : Math.PI / 2);
-        g.translate(cx, 0, cz);
-        const p = g.attributes.position;
-        for (let i = 0; i < p.count; i++) p.setY(i, faceUp ? yTop(p.getZ(i)) : ySof(p.getZ(i)));
-        PARTS.uvScale(g, RW / 1.0, RD / 1.0);
-        g.computeVertexNormals();
-        return g;
-      }
-      const top = [vault(true)], sof = [vault(false)], dark = [], glassG = [], inner = [], lamps = [];
-      // fascia: straight along the two long edges, curved along the gables
-      for (const z of [zS, zE]) dark.push(PARTS.put(new THREE.BoxGeometry(RW + 0.3, T + 0.3, 0.3), cx, Y0 - T / 2 + 0.05, z));
-      for (const sg of [-1, 1]) {
-        const g = new THREE.PlaneGeometry(RD, 1, 28, 1);
-        g.rotateY(sg * Math.PI / 2);
-        g.translate(sg > 0 ? xE + 0.02 : xS - 0.02, 0, cz);
-        const p = g.attributes.position;
-        for (let i = 0; i < p.count; i++) p.setY(i, p.getY(i) > 0 ? yTop(p.getZ(i)) + 0.08 : ySof(p.getZ(i)) - 0.22);
-        g.computeVertexNormals();
-        dark.push(g);
-      }
-      // clerestory: glass on the two long faces and the two gables, a mullion
-      // every 3 m, and a warm interior volume behind it so it reads as a
-      // lit hall rather than a glass fence round an empty roof
-      const z0 = BR_WALL, z1 = TERM_FRONT;
-      for (const z of [z0, z1]) {
-        const hy = ySof(z) - H0;
-        glassG.push(PARTS.put(new THREE.BoxGeometry(TERM_W, hy, 0.05), APRON_X, H0 + hy / 2, z));
-        for (let x = TERM_X0; x <= TERM_X1 + 0.01; x += 3) dark.push(PARTS.put(new THREE.BoxGeometry(0.1, hy, 0.16), x, H0 + hy / 2, z));
-        dark.push(PARTS.put(new THREE.BoxGeometry(TERM_W, 0.14, 0.2), APRON_X, H0 + 0.07, z));
-        solid(APRON_X, z, TERM_W, 0.3, H0, ySof(z));
-      }
-      for (const x of [TERM_X0, TERM_X1]) {
-        const g = new THREE.PlaneGeometry(TERM_D, 1, 16, 1);
-        g.rotateY(Math.PI / 2);
-        g.translate(x, 0, TERM_Z);
-        const p = g.attributes.position;
-        for (let i = 0; i < p.count; i++) p.setY(i, p.getY(i) > 0 ? ySof(p.getZ(i)) : H0);
-        g.computeVertexNormals();
-        glassG.push(g);
-        for (let z = z0 + 3; z < z1; z += 3) { const hy = ySof(z) - H0; dark.push(PARTS.put(new THREE.BoxGeometry(0.16, hy, 0.1), x, H0 + hy / 2, z)); }
-        solid(x, TERM_Z, 0.3, TERM_D, H0, ySof(TERM_Z));
-      }
-      {
-        const ih = ySof(z0 + 2) - H0 - 0.3;
-        inner.push(PARTS.put(new THREE.BoxGeometry(TERM_W - 3, ih, TERM_D - 3.6), APRON_X, H0 + ih / 2, TERM_Z));
-      }
-      // soffit downlights over both overhangs, on a 5 m grid
-      for (let x = xS + 2.5; x < xE - 1; x += 5) {
-        for (const z of [zS + 1.6, zS + 3.2, zE - 1.4]) lamps.push(PARTS.put(new THREE.BoxGeometry(0.5, 0.04, 0.5), x, ySof(z) - 0.03, z));
-      }
-      const g = new THREE.Group();
-      g.name = "terminal-roof";
-      PARTS.addMerged(g, top, PARTS.steelMat(0xc4c9cd), { cast: true });
-      PARTS.addMerged(g, sof, cmat(0xdfe2e4), {});
-      PARTS.addMerged(g, dark, cmat(0x2f353c), { cast: true });
-      PARTS.addMerged(g, inner, cmat(0x7a7670), {});
-      PARTS.addMerged(g, glassG, PARTS.glassMat(0.55), { cast: false, receive: false });
-      PARTS.addMerged(g, lamps, PARTS.glow(mat(0xfff3da, { emissive: 0xffecc8, ei: 0.2 }), 0.2, 1.2, root), {});
-      root.add(g);
-    })();
 
     // =====================================================================
     //  6) CONTROL TOWER — a tall shaft with a glass cab on top, set beside
@@ -3530,200 +3070,108 @@
       return g;
     }
 
-    /* ===================================================================
-       THE AIRFRAMES, PUBLISHED (owner 2026-08-09: "package the airport so
-       you can just duplicate and put it somewhere else easily without
-       rewriting that code").
-
-       These three functions are the only part of this file a SECOND airport
-       actually needs, and until now they were locked inside this closure.
-       They stay here — this is where the part kit, the cabin, the livery
-       materials and the seat maths live, and moving them would fork the one
-       airliner the game has. Publishing them costs three lines and buys
-       city/airport_kit.js and systems/airline.js the whole aeroplane: hull,
-       cabin, seats, pilots, doors, damage model and the hand-off to the
-       player's flight physics, with no second copy of any of it.
-
-       `boardable` is the important one: it is what makes a group a member of
-       `placed`, and `placed` is what the gun path, the blast path, the
-       boarding arc and the flight hand-off all read. A plane built without
-       it is scenery.
-       =================================================================== */
+    /* THE AIRFRAMES, PUBLISHED: the kit and systems/airline.js build and fly
+       the ONE airliner this file defines (hull, cabin, seats, pilots, doors,
+       damage, the hand-off to the player's flight physics). `boardable` is
+       what makes a group a member of `placed`, and `placed` is what the gun
+       path, the blast path, the boarding arc and the flight hand-off read. */
     CBZ.airportKit = {
       airliner: buildAirliner,        // (x, z, heading, livery) -> group
       jet: buildPrivateJet,           // (x, z, heading, livery) -> group
       boardable: boardablePlane,      // (group, x, z, heading, footW, footL, name)
       dims: AIRCRAFT_DIMS,
       scale: AL_SC,
-      // the live boardable roster, so a flight can find the record it built
       records: function () { return placed; },
     };
 
-    // parked airliners at the gates (along the terminal apron edge) — each a
-    // STEALABLE aircraft (climb in and fly it off the gate).
-    const liveries = [0x2d5fb0, 0xb33636, 0x1f7a4d, 0xc78a1f];
-    // the larger the airliner, the further SOUTH it parks, so the up-scaled tail
-    // stays clear of the terminal frontage (z=11) while the nose noses out toward
-    // the taxiway. AL_SC=1 keeps the original gate line (one-number revert).
-    const gateZ = GATE_Z;
-    for (let i = 0; i < 4; i++) {
-      const gx = -120 + ADX + i * 55;
-      const hd = Math.PI / 2 + (rng() - 0.5) * 0.05;
-      boardablePlane(buildAirliner(gx, gateZ, hd, liveries[i]), gx, gateZ, hd, 30, 22, "Airliner");
-    }
-    // private jets on the far apron — also stealable
-    boardablePlane(buildPrivateJet(95 + ADX, APRON_Z - 6, Math.PI / 2 - 0.2, 0x355c8a), 95 + ADX, APRON_Z - 6, Math.PI / 2 - 0.2, 14, 12, "Private Jet");
-    boardablePlane(buildPrivateJet(118 + ADX, APRON_Z + 2, Math.PI / 2 + 0.4, 0x6a3a6a), 118 + ADX, APRON_Z + 2, Math.PI / 2 + 0.4, 14, 12, "Private Jet");
+    const AP = CBZ.buildAirfield ? CBZ.buildAirfield(city, {
+      id: "halloran", name: "Halloran Field", code: "HLR", city: "Los Vantos", hub: true,
+      builtBy: "island_airport", subtitle: "International Airport", biome: "airport",
+      x: RWY_CX, z: RWY_Z, yaw: 0,
+      bounds: { minX: A_MINX, maxX: A_MAXX, minZ: A_MINZ, maxZ: A_MAXZ },
+      runway: { len: RWY_LEN, w: RWY_W },
+      blast: 45,
+      taxiZ: TAX_Z - RWY_Z, taxiX0: -525, taxiX1: 525,
+      conns: [-500, -160, 170, 500],
+      terminal: {
+        x0: LX(TERM_X0), x1: LX(TERM_X1), z0: LZ(TERM_Z0), z1: LZ(TERM_FRONT),
+        levels: 2, mezzY: 4.5, islands: 4, canopy: 7, name: "Halloran Field",
+        entrances: [LX(-95 + ADX), LX(-40 + ADX), LX(15 + ADX)],
+      },
+      kerbZ: LZ(KERB_Z),
+      stands: CONTACT_XS.map(function (x, i) { return { id: "HLR-" + (i + 1), num: String(i + 1), lx: LX(x), bridge: true }; })
+        .concat(REMOTE_XS.map(function (x, i) { return { id: "HLR-R" + (i + 1), num: "R" + (i + 1), lx: LX(x) }; })),
+      parked: ["HLR-1", "HLR-2", "HLR-3"],
+      jets: [{ lx: LX(215 + ADX), lz: LZ(-53 + ADZ), heading: -Math.PI / 2 + 0.2 }, { lx: LX(240 + ADX), lz: LZ(-38 + ADZ), heading: -Math.PI / 2 - 0.3 }],
+      aprons: [{ x0: LX(-175 + ADX), z0: TAX_Z - RWY_Z + 11.5, x1: LX(255 + ADX), z1: LZ(TERM_Z0) }],
+      paved: [
+        { x0: 75, z0: 106.5, x1: 125, z1: 140, color: 0x3c3f44 },       // fire station apron
+        { x0: -45, z0: 106.5, x1: 55, z1: 126, color: 0x8f8d87 },       // maintenance hangar apron
+        { x0: -155, z0: 106.5, x1: -55, z1: 148, color: 0x3c3f44 },     // GA hangars
+        { x0: -255, z0: 106.5, x1: -175, z1: 145, color: 0x8f8d87 },    // cargo apron
+        { x0: -575, z0: 193, x1: 130, z1: 199, color: 0x3c3f44 },       // airside service road
+        { x0: -278, z0: 150, x1: -266, z1: 199, color: 0x3c3f44 },      // fuel fill stand access
+      ],
+      tower: { external: true },           // the climbable tower is built below
+      noSpawn: [
+        { minX: A_MINX, maxX: A_MAXX - 32, minZ: A_MINZ + 26, maxZ: TERM_Z0 + 6, label: "airport-airside" },
+        { minX: TERM_X0 - 1, maxX: TERM_X1 + 1, minZ: TERM_Z0 - 1, maxZ: TERM_FRONT + 1, label: "airport-terminal" },
+      ],
+      paint: function (P0, Lh) {
+        // landside, in the field's local metres
+        const W = 0xeef1f4, Y = 0xd8b53a, WALK = 0xa9a7a0, PLAZA = 0x4a4d52;
+        P0.box(LX(TERM_X0 - 12), LZ(TERM_FRONT), LX(PERIM_X + 7), LZ(FRONT_Z), PLAZA);
+        P0.box(LX(PLZ_X0), LZ(PLZ_Z0), LX(PLZ_X1), LZ(PLZ_Z1), PLAZA);
+        P0.rect(LX((TURN_X + PLZ_X1 + 6) / 2), LZ(PED_Z), (PLZ_X1 + 6) - TURN_X, 1.8, WALK);
+        P0.rect(LX(TURN_X), LZ((PED_Z + TERM_FRONT + 0.42) / 2), 1.8, (TERM_FRONT + 0.42) - PED_Z, WALK);
+        for (let k = 0; k < 3; k++) P0.rect(LX(APRON_X), LZ(TERM_FRONT + 0.85 + k * 0.9), 4.0, 0.45, W);
+        {
+          const rx0 = LX(PLZ_X0 + 8 - 3.2), rx1 = LX(PLZ_X0 + 8 + (RANK_N - 1) * RANK_GAP + 3.2), rz = LZ(RANK_Z);
+          P0.line([[rx0, rz - 1.6], [rx1, rz - 1.6], [rx1, rz + 1.6], [rx0, rz + 1.6], [rx0, rz - 1.6]], 0.2, Y);
+          P0.text("TAXI", rx0 - 2.4, rz, 1.6, Math.PI / 2, Y, 3.0);
+        }
+        P0.line([[LX(PLZ_X0), LZ(KERB_Z - 1.8)], [LX(PLZ_X1), LZ(KERB_Z - 1.8)]], 0.15, W);
+        // the tower pad and its footpath to the terminal's west end
+        P0.rect(LX(-180 + ADX), LZ(30 + ADZ), 14, 14, 0x8f8d87);
+        P0.box(LX(-173 + ADX), LZ(33.6 + ADZ), LX(TERM_X0), LZ(35.4 + ADZ), WALK);
+        // the landside lots west of the tower: rental return and a surface lot
+        P0.box(LX(-462 + ADX), LZ(4 + ADZ), LX(-195 + ADX), LZ(34 + ADZ), 0x45484c);
+        for (let x = LX(-458 + ADX); x < LX(-368 + ADX); x += 2.6) for (const z of [LZ(9 + ADZ), LZ(27 + ADZ)]) P0.rect(x, z, 0.12, 5, W);
+        P0.line([[LX(-462 + ADX), LZ(18 + ADZ)], [LX(-368 + ADX), LZ(18 + ADZ)]], 0.12, W, [3, 3]);
+      },
+      dressing: {
+        hangars: [
+          { lx: 5, lz: 158, yaw: Math.PI, w: 90, d: 66, h: 24, type: "portal", open: 0.5 },
+          { lx: -80, lz: 166, yaw: Math.PI, w: 44, d: 38, h: 15, type: "arch", open: 0.5 },
+          { lx: -130, lz: 166, yaw: Math.PI, w: 44, d: 38, h: 15, type: "arch", open: 0 },
+        ],
+        sheds: [{ lx: -215, lz: 162, yaw: Math.PI, w: 70, d: 36, h: 10, airside: 4, docks: 6 }],
+        fuel: { lx: -330, lz: 160, yaw: 0, tanks: [[-26, -2, 8, 11], [0, -2, 8, 11], [26, -2, 8, 11]], bund: { x0: -38, z0: -14, x1: 38, z1: 12 } },
+        fire: { lx: 100, lz: 151, yaw: Math.PI, bays: 4 },
+        carpark: { lx: LX(-266 + ADX), lz: LZ(18 + ADZ), w: 68, d: 28, levels: 3 },
+        rental: { lx: LX(-340 + ADX), lz: LZ(18 + ADZ), w: 44, d: 14 },
+        asr: { lx: -500, lz: 160, h: 20 },
+        radome: { lx: -560, lz: 185, h: 16 },
+        ils: { end: 1, locDist: 40, gsOffset: 30, gsSide: 1 },
+        approach: [{ end: 1, len: 420, flashers: 5 }, { end: 0, len: 420, flashers: 0 }],
+        masts: [[170, 140], [235, 140], [295, 140], [370, 140], [447, 140], [515, 140], [-10, 118], [-200, 125]],
+        windsocks: [[-295, 55, 0.9], [295, 55, 0.9]],
+        ulds: [[-245, 132, 0, 1], [-242, 128, 0, 1], [-239, 124, 0, 1], [-205, 132, Math.PI / 2, 1], [-201, 132, Math.PI / 2, 0], [-197, 132, Math.PI / 2, 1], [-193, 132, Math.PI / 2, 1]],
+      },
+    }) : null;
+    const gateZ = AP ? AP.gates[0].z : -46 + ADZ;
 
-    // =====================================================================
-    //  8) ONE AIRLINER MID-PUSHBACK (scripted, purely visual) — a jet on a
-    //     connector taxiway being eased back by a tug. It creeps along a
-    //     short path then resets, so the field reads ALIVE without any
-    //     physics or collision churn. CBZ.onUpdate, alloc-free.
-    // =====================================================================
-    (function pushback() {
-      const jet = buildAirliner(-160 + ADX, TAX_Z - 6, Math.PI / 2, 0x444b55);
-      const jetCollider = jet.userData.worldCollider;
-      let jetSolid = true;
-      function setJetSolid(on) {
-        if (!jetCollider || jetSolid === on || !CBZ.colliders) return;
-        const i = CBZ.colliders.indexOf(jetCollider);
-        if (on && i < 0) CBZ.colliders.push(jetCollider);
-        else if (!on && i >= 0) CBZ.colliders.splice(i, 1);
-        jetSolid = on;
-        if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
-      }
-      // a baggage tug shoved up against the nose — a REAL VEHICLE (owner law:
-      // no dumb props): a proper little machine (cab, wheels, hitch) registered
-      // in CBZ.cityCars via cityRegisterVehicle, so you can hop in and drive it
-      // around the apron. The pushback animation yields the moment it's taken.
-      // THE TUG BODY IS airside.js's (CBZ.airsideBodies.tug): the airside
-      // fleet already builds a proper low-slung pushback tug, and this file
-      // used to hand-roll a second, cruder one out of six boxes. One body,
-      // one look; the six-box version survives only as the no-airside
-      // fallback.
-      const AB = CBZ.airsideBodies && CBZ.airsideBodies.tug ? CBZ.airsideBodies.tug(0xe8c020) : null;
-      const tug = AB ? AB.grp : new THREE.Group();
-      tug.position.set(-160 + ADX + 16, 0, TAX_Z - 6);
-      if (!AB) (function buildTug() {
-        function tb(w, h, d, x, y, z, color, emissive) {
-          const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d),
-            emissive ? mat(color, { emissive: emissive, ei: 0.6 }) : mat(color));
-          m.position.set(x, y, z); m.castShadow = true; tug.add(m);
-          return m;
-        }
-        tb(2.6, 0.7, 1.9, 0.2, 0.75, 0, 0xe8c020);              // deck / hood
-        tb(1.4, 0.9, 1.7, -0.5, 1.5, 0, 0xe8c020);              // cab back
-        tb(0.9, 0.5, 0.12, 0.35, 1.35, 0, 0x2a2e33);            // dash
-        tb(0.5, 0.6, 0.5, -0.5, 1.25, 0, 0x2a2e33);             // seat
-        tb(0.5, 0.1, 1.7, 1.55, 0.55, 0, 0x6b7178);             // tow hitch
-        tb(0.3, 0.18, 0.1, 1.45, 0.9, 0, 0xfff2cc, 0xffe9b8);   // work lamp
-        const wgeo = new THREE.CylinderGeometry(0.34, 0.34, 0.3, 10);
-        wgeo._shared = true;
-        for (const wx of [0.85, -0.85]) for (const wz of [0.72, -0.72]) {
-          const wh = new THREE.Mesh(wgeo, mat(0x17191d));
-          wh.rotation.x = Math.PI / 2; wh.position.set(wx, 0.34, wz);
-          wh.userData.playerWheel = true;                        // spins when driven
-          tug.add(wh);
-        }
-      })();
-      root.add(tug);
-      // the tug ANIMATES (position.z below): tag it so the static batcher /
-      // matrix freeze never bake it (an untagged group gets merged and the
-      // pushback would visibly freeze).
-      tug.userData.dynamic = true;
-      let tugRec = null;
-      if (CBZ.cityRegisterVehicle) {
-        try {
-          tugRec = CBZ.cityRegisterVehicle(tug, {
-            body: "van", style: "van", persist: true, color: 0xe8c020,
-            model: { name: "Baggage Tug", value: 9000, rarity: 0.1, body: "van" },
-            dims: AB && AB.dims ? AB.dims : { width: 2.0, length: 3.4, height: 2.0, wheelbase: 1.7 },
-          });
-        } catch (e) { tugRec = null; }
-      }
-      // the pushback choreography must never fight the player for the tug
-      function tugFree() { return !tugRec || (!tugRec.player && !tugRec.stolen && !tugRec.owned); }
-      // One-way ground operation: dwell → push once → taxi away → reset only
-      // while hidden. The old implementation eventually reversed the visible
-      // airliner back into its start pose, even after a long pause.
-      const z0 = TAX_Z - 6, z1 = TAX_Z - 30;
-      const pushSeconds = 34, taxiSpeed = 3.2;
-      let state = "dwell", phase = 0, dwellT = 12;
-      CBZ.onUpdate(40, function (dt) {
-        if (!jet || !jet.parent) return;
-        if (state === "dwell") {
-          dwellT -= dt;
-          if (dwellT <= 0) { setJetSolid(false); state = "push"; }
-          return;
-        }
-        if (state === "push") {
-          phase = Math.min(1, phase + dt / pushSeconds);
-          const e = phase * phase * (3 - 2 * phase);
-          const z = z0 + (z1 - z0) * e;
-          jet.position.z = z;
-          if (tugFree()) tug.position.z = z + 16;
-          if (phase >= 1) state = "taxi";   // tug stays parked in view — it's a real, enterable vehicle now
-          return;
-        }
-        if (state === "taxi") {
-          jet.position.z -= taxiSpeed * dt;
-          // Clear the visible airport before recycling. The next lifecycle
-          // begins parked, never driving backward through the player's view.
-          if (jet.position.z < A_MINZ - 90) {
-            jet.visible = false;
-            jet.position.z = z0;
-            if (tugFree()) { tug.position.z = z0 + 16; tug.position.x = -160 + ADX + 16; }
-            phase = 0; dwellT = 45; state = "hidden";
-          }
-          return;
-        }
-        if (state === "hidden") {
-          dwellT -= dt;
-          if (dwellT <= 0) { jet.visible = true; setJetSolid(true); dwellT = 18; state = "dwell"; }
-        }
-      });
-    })();
-
-    // =====================================================================
-    //  9) GATE EQUIPMENT — only equipment physically tied to the terminal.
-    //     The former loose fuel/stair/cart box cluster read as placeholder
-    //     geometry and obstructed approaches, so it is intentionally gone.
-    // =====================================================================
-    // jet-bridge stubs at the two EMPTY gate slots between the parked
-    // airliners (occupied gates board by stair truck — the airliners park
-    // tail-to-terminal, so a bridge at their gate would skewer the tail).
-    // Elevated corridors off the terminal face: constants only, NO colliders
-    // (underside 2.1u+, everything walks under), clear of every plane
-    // collider (x ±15 around gates) and of the stolen-plane roll-out path.
-    /* DE-SLOP (2026-09-27): each bridge was two flat blue boxes. It is now
-       a real apron-drive bridge (airport_kit.js): a rotunda hung on the
-       terminal face, a glazed two-section telescoping tunnel, a drive column
-       on a two-wheel bogie parked in its painted box, and a cab with its
-       bellows canopy. The tunnel's underside stays at 2.33 m, over the
-       head-of-stand service road (vehicles here are <= 2.1 m), and the ONE
-       thing that stands on the ground, the drive column, stands south of
-       that road (z 0.5..1.5 against its 2.4 edge) and is solid. */
-    function jetBridge(bx) {
-      if (!PARTS) {
-        box(bx, 3.4, 4.5, 3.0, 2.2, 13, 0x9fb4c4, { cast: true });
-        box(bx, 3.4, -2.8, 3.6, 2.6, 2.6, 0x7d8894, { cast: true });
-        return;
-      }
-      const jb = PARTS.jetBridge(root, bx, BR_WALL, BR_HEAD, { floor: 2.55, zCol: BR_COL });
-      const c = jb.col;
-      solid(c.x, c.z, c.w, c.d, 0, c.h);
-    }
-    for (const bx of BRIDGE_XS) jetBridge(bx);
-    // the stands are coned: a cone off each wingtip and one at the nose of
-    // every parked airliner (hazard cones are what a turned stand has on it)
-    if (PARTS) {
-      const hs = AIRCRAFT_DIMS.airliner.span * AL_SC / 2 + 1.2;
-      const cones = [];
-      for (const gx of GATE_XS) cones.push([gx - hs, GATE_Z + 6], [gx + hs, GATE_Z + 6], [gx + 2.2, GATE_Z - AIRCRAFT_DIMS.airliner.length * AL_SC / 2 - 1.5]);
-      PARTS.cones(root, cones);
-      // the wind: a windsock on the infield, abeam the 27 touchdown zone
-      PARTS.windsock(root, RWY_X1 - 330, RWY_Z + RWY_W / 2 + 13, 0.6);
+    /* THE TERMINAL, as the rest of the game knows it: forex.js hangs its
+       exchange desk on the shell record, escalators.js runs its bank to the
+       gate floor from the anchor, citystaff/interior audits read the group. */
+    if (AP && AP.terminal) {
+      const tp = AP.terminal.plan, st = tp.stair;
+      city.airportTerminal = {
+        ox: (TERM_X0 + TERM_X1) / 2, oz: TERM_Z, w: TERM_W, d: TERM_D, h: AP.terminal.eave,
+        group: AP.terminal.group, airfield: AP.id,
+        gateFloorY: tp.mezzY + 0.06,
+        escalator: st ? { x: st.x + RWY_CX + 7, z: tp.zm + RWY_Z + 4.5, run: 8, riseY: tp.mezzY - 0.1, dirZ: -1, width: 1.9 } : null,
+      };
     }
 
     // =====================================================================
@@ -3832,8 +3280,25 @@
       runs.push([A_MINX, A_MINZ, A_MINX, midZ - PG], [A_MINX, midZ + PG, A_MINX, A_MAXZ]);
       runs.push([A_MAXX, A_MINZ, A_MAXX, midZ - PG], [A_MAXX, midZ + PG, A_MAXX, A_MAXZ]);
       runs.push([A_MINX, A_MINZ, gapX0, A_MINZ], [gapX1, A_MINZ, A_MAXX, A_MINZ]);
+      /* THE AIRSIDE FENCE (redraw 2026-09-29). The island's edge fences above
+         only keep cars out of the sea; the movement area had no security
+         line at all — the landside access corridor along the south edge ran
+         straight onto the runway strip. Airside is now fenced: along the
+         north side of the access corridor, up the west shore, across to the
+         terminal's west gable along the landside/airside line, and from its
+         east gable round the east ramp, inside the perimeter road. The
+         terminal building itself closes the line between its two gables. */
+      const AIR_S = A_MINZ + 27, AIR_N = TERM_Z0 + 7, AIR_E = PERIM_X - 10;
+      const secure = [
+        [A_MINX + 3, AIR_S, AIR_E, AIR_S],
+        [A_MINX + 3, AIR_S, A_MINX + 3, AIR_N],
+        [A_MINX + 3, AIR_N, TERM_X0 - 0.3, AIR_N],
+        [TERM_X1 + 0.3, AIR_N, AIR_E, AIR_N],
+        [AIR_E, AIR_S, AIR_E, AIR_N],
+      ];
       if (PARTS) {
         PARTS.fence(root, runs, { height: H, center: { x: midX, z: midZ } });
+        PARTS.fence(root, secure, { height: 2.9, center: { x: (A_MINX + AIR_E) / 2, z: (AIR_S + AIR_N) / 2 } });
       } else {
         const postGeo = new THREE.BoxGeometry(0.18, H, 0.18);
         const pts = [];
@@ -4164,10 +3629,12 @@
       // standing inside a fuselage footprint — the owner's "people under
       // planes"), so each roll is now pushed OUT of the two airliner gate
       // lanes: a ramp agent works beside the hull, never inside it.
-      const GATE_LANES = [-120 + ADX, -10 + ADX];
+      // (stand lanes = the three nose-in contact stands; the check-in and
+      // gate agents are posted by the terminal itself, city/airport_kit.js)
+      const GATE_LANES = CONTACT_XS;
       for (let i = 0; i < 6; i++) {
-        let sx = -120 + ADX + rng() * 220;
-        const sz = APRON_Z - 18 + (rng() - 0.5) * 18;
+        let sx = -135 + ADX + rng() * 175;
+        const sz = gateZ + 6 + (rng() - 0.5) * 16;
         for (let gl = 0; gl < GATE_LANES.length; gl++) {
           const d = sx - GATE_LANES[gl];
           if (Math.abs(d) < 6) sx = GATE_LANES[gl] + (d >= 0 ? 6.5 : -6.5);
@@ -4176,22 +3643,6 @@
           kind: "worker", archetype: "laborer", job: "ground crew",
           outfit: 0xffc81f, wealth: 0.25, aggr: 0.12 + rng() * 0.06,
         }, "ground-crew", "ground crew");
-      }
-      // GATE AGENTS behind the four check-in desks, facing the queue (-z). The
-      // desks have existed since this island was built and nobody has ever stood
-      // at one; a counter with no one behind it is the same dead prop as a seat
-      // nothing can sit on. They are posted, not wandering, so the desk is
-      // always staffed. Desk geometry (dx, tz + td/2 - 3) is read from the same
-      // constants the desks were drawn with — no second copy of the layout.
-      {
-        const tx = APRON_X, tz = TERM_Z, tw = TERM_W, td = TERM_D;
-        for (let k = 0; k < 4; k++) {
-          const dx = tx - tw / 2 + 20 + k * 30;
-          airportActor("venueWorker", dx, tz + td / 2 - 1.4, {
-            kind: "worker", archetype: "laborer", job: "gate agent",
-            outfit: 0x2f4f78, wealth: 0.35, aggr: 0.08,
-          }, "gate-agent", "gate agent", { face: Math.PI });
-        }
       }
       if (populationEntries.length && CBZ.npcLife && CBZ.npcLife.definePopulation) {
         CBZ.npcLife.definePopulation("airport-authored", { root: root, entries: populationEntries });
@@ -4225,136 +3676,46 @@
     if (CBZ.registerWorkAnchor) {
       CBZ.registerWorkAnchor({
         biome: "airport", kind: "terminal", role: "ground crew",
-        x: APRON_X, z: APRON_Z - 16, cap: 6,
+        x: APRON_X, z: gateZ + 10, cap: 6,
         home: { x: APRON_X, z: 24 + ADZ },                  // the terminal concourse
+        // BESIDE each hull (never at its origin: "people under planes"), the
+        // GA ramp, and the head-of-stand equipment line under the bridges
         spots: [
-          // The two gate spots used to be the AIRCRAFT ORIGIN coordinates, so
-          // aigoals routed crew to stand at the fuselage centre on schedule —
-          // the other half of the owner's "people under planes". +7 in x puts
-          // the task point BESIDE the hull (a ramp agent's position), still on
-          // the same gate line.
-          { x: -113 + ADX, z: APRON_Z - 14 - 11 * (AL_SC - 1) },  // beside gate 1 airliner (tracks the up-scaled gate line)
-          { x: -3 + ADX, z: APRON_Z - 14 - 11 * (AL_SC - 1) },    // beside the mid-apron gate
-          { x: 95 + ADX, z: APRON_Z - 6 },                        // the private-jet apron
-          { x: APRON_X, z: APRON_Z + 18 },                        // the baggage / GSE line
+          { x: CONTACT_XS[0] + 8, z: gateZ + 6 },
+          { x: CONTACT_XS[1] + 8, z: gateZ + 6 },
+          { x: CONTACT_XS[2] + 8, z: gateZ + 6 },
+          { x: 215 + ADX, z: -53 + ADZ },
+          { x: APRON_X, z: TERM_Z0 - 6 },
         ],
       });
     }
 
     // =====================================================================
-    //  13) REGISTER THE REGIONS — walkable airport footprint + the causeway
-    //      deck. world.js/swim.js/fullmap consult these.
+    //  13) REGIONS, SPAWN, KEEP-OUTS. The field's own region ("Halloran
+    //      Field", the island rect) and its airside keep-outs are registered
+    //      by the kit from the spec above; the causeway is Halloran's.
     // =====================================================================
-    CBZ.registerCityRegion(city, {
-      name: "Halloran Field", subtitle: "International Airport", biome: "airport", kind: "rect",
-      minX: A_MINX, maxX: A_MAXX, minZ: A_MINZ, maxZ: A_MAXZ, pad: 6,
-    });
     CBZ.registerCityRegion(city, {
       name: "Halloran Causeway", subtitle: "International Airport", kind: "rect",
       minX: CW_MINX, maxX: CW_MAXX, minZ: CW_MINZ, maxZ: CW_MAXZ, pad: 1,
     });
-    // Canonical PLAYER spawn: open apron between the terminal wall (z=11)
-    // and the parked gate aircraft (z=-14). It is on solid airport ground,
-    // outside every building/aircraft collider, and faces the airliners/runway.
-    // Also replace the arena's old downtown fallback so every generic city
-    // spawn consumer (origin fallback, rented room, no-hospital fallback) agrees.
-    city.airportSpawn = { x: APRON_X, y: 0, z: 7 + ADZ, yaw: Math.PI, place: "Halloran Field apron" };
+    // Canonical PLAYER spawn: the apron in front of the terminal glass,
+    // between two stands (clear of every nose, bridge and drive column),
+    // facing the aircraft and the runway.
+    city.airportSpawn = { x: -70 + ADX, y: 0, z: TERM_Z0 - 5, yaw: Math.PI, place: "Halloran Field apron" };
     city.spawn = { x: city.airportSpawn.x, z: city.airportSpawn.z };
-    // NO-SPAWN keep-outs (owner: "NPCs spawning all over the runway and
-    // inside the airport — they belong in terminal areas/curbs"). Every
-    // scatter/relocation path (worldmap.js citySpawnBlocked) refuses these:
-    //   • AIRSIDE — everything south of the terminal frontage: the runway
-    //     (z≈-90), taxiway (z≈-40) and the open apron/ramp.
-    //   • the terminal building's own footprint (tx=-40,tz=24,tw=150,td=26 →
-    //     x[-115,35] z[11,37]) so nobody materializes inside the concourse.
-    // Hand-placed staff (populate()'s ground crew/passengers) don't route
-    // through the scatter paths, so the authored airport life is untouched.
-    /* THE KEEP-OUT IS THE MOVEMENT AREA, NOT THE ISLAND (AIRPORT_ENTRY_V2).
-       Walking the arrival end to end in code is what found this: the causeway
-       lands at (0, A_MINZ) and the east perimeter road starts at (PERIM_X,
-       A_MINZ) — 268 m apart, with NO road record between them and nothing but
-       airside in between. The route the previous wave intended (causeway →
-       east along the south edge → north up the perimeter → west to the kerb)
-       had its first leg missing, so the only way off the causeway really was
-       across the field.
-
-       The link cannot be `access:"service"` — it is the airport's main
-       entrance — so the keep-out has to be the right SHAPE instead. It was the
-       whole southern island; it is now the movement area, with a 26 m landside
-       access corridor along the south edge. That corridor is 149 m south of
-       the runway's own strip edge (RWY_Z -90, half-width 15 → -105, against a
-       corridor ending at -254), so nothing about the runway, the taxiway or
-       the apron changes: `airsideAudit().onRunway` reads a different rect
-       entirely, and the keep-out still bars every ambient path from all of it.
-       ONE declaration, consumed twice — the audit mirror used to be a hand
-       copy, which is how a keep-out and its own census start disagreeing. */
-    const LANDSIDE_S = CBZ.CONFIG.AIRPORT_ENTRY_V2 !== false ? 26 : 0;
-    const NO_SPAWN = [
-      { minX: A_MINX, maxX: A_MAXX - 32, minZ: A_MINZ + LANDSIDE_S, maxZ: 9 + ADZ, label: "airport-airside" },
-      { minX: -116 + ADX, maxX: 36 + ADX, minZ: 10 + ADZ, maxZ: 38 + ADZ, label: "airport-terminal" },
-    ];
-    if (CBZ.registerNoSpawnZone) {
-      for (let i = 0; i < NO_SPAWN.length; i++) CBZ.registerNoSpawnZone(city, NO_SPAWN[i]);
-    }
     city.airportAudit = {
       bounds: { minX: A_MINX, maxX: A_MAXX, minZ: A_MINZ, maxZ: A_MAXZ },
       runway: { minX: RWY_X0, maxX: RWY_X1, minZ: RWY_Z - RWY_W / 2, maxZ: RWY_Z + RWY_W / 2 },
-      noSpawn: NO_SPAWN,
+      taxiway: { z: TAX_Z, w: 23 },
+      terminal: { minX: TERM_X0, maxX: TERM_X1, minZ: TERM_Z0, maxZ: TERM_FRONT },
+      noSpawn: [
+        { minX: A_MINX, maxX: A_MAXX - 32, minZ: A_MINZ + 26, maxZ: TERM_Z0 + 6, label: "airport-airside" },
+        { minX: TERM_X0 - 1, maxX: TERM_X1 + 1, minZ: TERM_Z0 - 1, maxZ: TERM_FRONT + 1, label: "airport-terminal" },
+      ],
       aircraft: AIRCRAFT_DIMS,
+      airport: AP ? AP.id : null,
     };
-
-    /* ===================================================================
-       HALLORAN JOINS THE NETWORK (systems/airports.js). Not a copy of the
-       layout above — every number handed over is the SAME variable the
-       surface was drawn from, so the record cannot drift from the runway
-       and the worldOff dial moves both together. The frame's origin is the
-       runway MIDPOINT and its local +Z is the apron side, which is exactly
-       how this island was always authored; that is why the conversion below
-       is subtraction and nothing else.
-
-       Without this the network has one node and a flight has nowhere to go.
-       =================================================================== */
-    if (CBZ.registerAirport) {
-      /* THE STANDS. The four gates are the four the fleet is parked on, read
-         off the same expression the parked loop used. The two after them are
-         REMOTE STANDS on the east ramp, 115 m clear of the terminal and 32 m
-         clear of the private-jet line — and they are not decoration: a field
-         whose every stand is occupied by a permanently parked aeroplane is a
-         field an arriving flight cannot park at, which is exactly how a
-         shuttle network wedges itself. A real airport keeps remote stands for
-         the same reason. */
-      const gateLX = [];
-      for (let i = 0; i < 4; i++) gateLX.push((-120 + ADX + i * 55) - RWY_CX);
-      gateLX.push((150 + ADX) - RWY_CX, (205 + ADX) - RWY_CX);
-      CBZ.registerAirport({
-        id: "halloran", name: "Halloran Field", code: "HLR",
-        city: "Los Vantos", hub: true, builtBy: "island_airport",
-        x: RWY_CX, z: RWY_Z, yaw: 0,
-        runway: { len: RWY_LEN, w: RWY_W, tdz: 180 },
-        // the two connector taxiways this island actually drew (CONN_XS)
-        connectors: CONN_XS.map(function (x) { return x - RWY_CX; }),
-        taxiZ: TAX_Z - RWY_Z,
-        apronZ: APRON_Z - RWY_Z,
-        standZ: gateZ - RWY_Z,
-        termZ: TERM_Z - RWY_Z,
-        kerbZ: KERB_Z - RWY_Z,
-        gates: gateLX.map(function (lx, i) {
-          return {
-            id: i < 4 ? ("HLR-" + (i + 1)) : ("HLR-R" + (i - 3)),
-            lx: lx, lz: gateZ - RWY_Z, heading: -Math.PI / 2, size: "airliner",
-          };
-        }),
-        // the westmost of the four check-in counters the concourse already
-        // draws (buildTerminal's `dx = tx - tw/2 + 20 + k*30`, k=0), with the
-        // player standing on the queue side of it.
-        desk: {
-          lx: (APRON_X - TERM_W / 2 + 20) - RWY_CX,
-          lz: (TERM_Z + TERM_D / 2 - 5.2) - RWY_Z,
-          heading: 0, label: "Halloran Field",
-        },
-        bounds: { minX: A_MINX, maxX: A_MAXX, minZ: A_MINZ, maxZ: A_MAXZ },
-      });
-    }
     // give traffic a road down the causeway (runs along Z → vertical)
     if (city.roads) {
       /* THE CAUSEWAY RUNS ONTO THE ISLAND, not up to its edge. It used to stop
