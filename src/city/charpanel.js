@@ -514,6 +514,7 @@
         skin: 0xf0c39a, hair: 0x4a3526, shoes: 0x2b2b2b,
       });
       rig.group.position.y = 0;
+      rig._inkFrom = "player";          // the portrait wears the player's own ink (entities/tattoo.js)
       scene.add(rig.group);
 
       PORT.rend = rend; PORT.scene = scene; PORT.cam = cam; PORT.rig = rig;

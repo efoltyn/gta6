@@ -218,9 +218,19 @@
     const RV = 4 * (n + 1), nv = rings.length * RV;
     const P = new Float32Array(nv * 3), U = new Float32Array(nv * 2);
     const F = new Uint8Array(nv), Q = new Float32Array(nv);
+    /* ONE ARM, ONE SKIN CHART. A flat arm segment's canonical v is packed
+       into its half of the arm chart (entities/tattoo.js): the upper arm
+       into [1 - split, 1] (shoulder at the top), the forearm into
+       [0, 1 - split] — so a single texture covers shoulder to wrist and a
+       mark can run across the elbow. Only flat segments sample these UVs
+       (a painted garment bakes its own), and a flat segment has no map
+       until tattoo.js gives it one. */
+    const split = (CBZ.tattoo && CBZ.tattoo.ARM_SPLIT) || 0.6;
+    const vA = kind === "armUp" ? split : kind === "armLo" ? 1 - split : 1;
+    const vB = kind === "armUp" ? 1 - split : 0;
     let o = 0;
     for (let i = 0; i < rings.length; i++) {
-      const R = rings[i], v = Math.min(1, Math.max(0, 1 + R[0]));
+      const R = rings[i], v = vB + vA * Math.min(1, Math.max(0, 1 + R[0]));
       for (let f = 0; f < 4; f++) for (let k = 0; k <= n; k++) {
         const al = -Math.PI / 4 + f * Math.PI / 2 + (k / n) * Math.PI / 2;
         P[o * 3] = R[1] * Math.sin(al); P[o * 3 + 1] = R[0]; P[o * 3 + 2] = R[3] + R[2] * Math.cos(al);

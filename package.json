@@ -52,6 +52,7 @@
     "test:elevator": "node tools/elevator-machine-test.mjs",
     "test:seat-exit": "node tools/seat-exit-check.mjs",
     "test:gunhands": "node tools/gunhands-check.mjs",
+    "test:tattoo": "node tools/tattoo-check.mjs",
     "test:ads": "node tools/ads-check.mjs",
     "test:tp-gun": "node tools/tp-gun-view-check.mjs",
     "test:tp-gun-shots": "node tools/tp-gun-view-check.mjs --shots",

@@ -26,33 +26,31 @@
 
    One roll (heritageRoll) produces a complete `look` that IS a character.js
    colour object — makeCharacter(look) builds the body, heritageApply(ch, look)
-   stamps the head ink and the tags the wardrobe reads. No second rig, no
-   second wardrobe: arm ink is painted INTO the shared city/clothes.js atlas
-   (PAINT.inmate_tank, keyed by skin + ink set) and head ink is one small
-   canvas multiplied under the head's own skin colour, so reactions.js's
-   flash / gore's corpse tint / mugshot's skinTone read all keep working.
+   stamps the tags the wardrobe reads and hands his ink family to
+   entities/tattoo.js, which draws the pieces and inks whatever of him is
+   bare skin (tank arms, hands, face, throat). Ink multiplies under the skin
+   colour, so reactions.js's flash / gore's corpse tint / mugshot's skinTone
+   read all keep working.
 
-   THE INK IS THE REAL IDENTIFIER, and it is ABSTRACT: script lines, block
-   lettering as blocks, webs, dots, stars, rings, tribal bands, wave sleeves,
-   portraits as framed blocks. No real gang symbol, number or letter is ever
-   drawn — only the silhouette of each ink culture, which is what reads at yard
-   distance anyway:
-     chicano    fine-line black-and-grey: throat script, a framed portrait
-                block high on the arm, script down the forearm, cheek dots
-     paisa      sparse: one small name line on the forearm, nothing on the face
-     dots       dotted cheek marks, a dotted line down the outer forearm
-     block      block lettering across the throat and the forearm, a
-                knuckle row at the wrist
-     script     a script line on the throat / down the forearm
+   THE INK IS THE REAL IDENTIFIER. Each car has its ink cultures, drawn as
+   the pieces those cultures wear (tattoo.js). Words are real words, numbers
+   are area codes and home states; no real gang's name or symbol is drawn:
+     chicano    fine-line black-and-grey: a rose or the two masks in clouds,
+                script across the forearm, an area code in old english, a
+                rosary at the wrist, throat script, three dots by the eye
+     paisa      sparse: his home state in script, a small star or cross
+     dots       dotted marks by the eye and down the forearm
+     block      area codes in old english, a banner, knuckle letters
+     script     one word down the inside of the forearm / on the throat
      teardrop   one teardrop under the eye
-     web        a spiderweb on the neck / the elbow
-     blackwork  the heaviest generic set: throat block, temple bars, a web
-                behind the ear, a mark under the eye, a full blackwork sleeve
-     vory       stars at the shoulder and neck, forearm rings, knuckle rings
-     sleeve     irezumi-style wave sleeve (bands of waves shoulder to wrist)
-     yant       rows of fine dotted script on the upper arm and nape
-     batok      geometric chevron bands, arm and neck
-     tribal     bold Polynesian bands, arm and neck
+     web        a spiderweb over the elbow / on the neck
+     blackwork  the heaviest set: barbed wire, skulls, dice, webs on the
+                elbows and behind the ear, a packed band at the wrist
+     vory       eight-point stars, domes, a dagger, finger rings
+     sleeve     irezumi: wind bars, blossoms, a wave sea
+     yant       rows of Khom-style script, the nine spires
+     batok      geometric linework bands
+     tribal     Polynesian bands
      chest      under the shirt: nothing shows on head or arm
    The old "skinhead" heritage is GONE as a race: a subculture is not an
    ethnicity. heritageRoll("skinhead") still answers (old callers) with a
@@ -69,15 +67,13 @@
                                        the rig gets ch.heritage / ch.yardCar / ch.ink —
                                        `yardCar`, because `.car` means a vehicle here)
      CBZ.heritageRollCar(car, rng?, o?) -> a look from that car, weighted
-     CBZ.heritageApply(ch, look)     stamp head ink + tags on a built rig
-     CBZ.inkPaintArm(A, set, skinCss)   sleeve painter for clothes.js's atlas
+     CBZ.heritageApply(ch, look)     stamp the tags and hand his ink to tattoo.js
      CBZ.heritageCensus()            live counts (preset metric)
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
   if (!CBZ) return;
-  const THREE = window.THREE;
 
   const CARS = ["south", "black", "white", "paisa", "asian", "others"];
 
@@ -292,229 +288,23 @@
   }
   function heritageRoll(id, rng, over) {
     const r = toRng(rng);
+    const inkSeed = typeof rng === "string" ? "ink|" + rng : null;
     const alias = id && ALIAS[id];
     if (alias) id = alias.as;
     if (!id || !H[id]) id = rollId(r());
     const look = rollFrom(id, r);
     if (alias) Object.assign(look, alias.over);
     if (over) Object.assign(look, over);
+    if (inkSeed && look.inkSeed == null) look.inkSeed = inkSeed;
     return look;
   }
   // a man of a CAR: the heritage inside the car by weight, then the look
   function heritageRollCar(car, rng, over) {
     const r = toRng(rng);
     const ids = heritagesOfCar(car);
-    return heritageRoll(ids.length ? rollId(r(), ids) : null, r, over);
-  }
-
-  // ---- HEAD INK: one small atlas under the skin colour ----------------------
-  // atlas 128x64: front [0,64) · side [64,96) (both sides, mirrored) · back [96,128)
-  // Drawn WHITE with near-black ink, so material.color (the skin) multiplies
-  // through: white*skin = skin, ink*skin = dark ink. Nothing downstream that
-  // reads or resets the head's colour has to know a texture exists.
-  const HW = 128, HH = 64;
-  const HCOL = { front: [0, 64], side: [64, 96], back: [96, 128] };
-  // The head's UVs ARE this atlas (entities/character.js, CBZ.human.headAtlas):
-  // the skull fills atlas y [0, 0.80] (crown -> chin), the NECK fills
-  // [0.80, 1] — so throat and neck marks sit on the throat, not on the chin.
-  // Face landmarks in atlas y: brow 0.21, eye 0.35 (bottom 0.40), nose tip
-  // 0.51, mouth 0.59, chin 0.80. Side column: 0 = the face edge, 1 = the back
-  // of the head, the ear at ~0.56.
-  // Under the game's own exposure a 0x25282d shoe reads as mid grey, so ink
-  // has to start near black to end up as ink (measured on the first lineup run).
-  const INK = "rgba(16,20,28,0.94)", INK2 = "rgba(16,20,28,0.62)", INK3 = "rgba(16,20,28,0.38)";
-  function headPainter(ctx) {
-    function R(col, x, y, w, h, c) {
-      const cc = HCOL[col], cw = cc[1] - cc[0];
-      ctx.fillStyle = c || INK; ctx.fillRect(cc[0] + x * cw, y * HH, Math.max(1, w * cw), Math.max(1, h * HH));
-    }
-    function P(col, pts, c) {
-      const cc = HCOL[col], cw = cc[1] - cc[0];
-      ctx.fillStyle = c || INK; ctx.beginPath();
-      for (let i = 0; i < pts.length; i++) { const px = cc[0] + pts[i][0] * cw, py = pts[i][1] * HH; if (i) ctx.lineTo(px, py); else ctx.moveTo(px, py); }
-      ctx.closePath(); ctx.fill();
-    }
-    function D(col, x, y, r, c) {
-      const cc = HCOL[col], cw = cc[1] - cc[0];
-      ctx.fillStyle = c || INK; ctx.beginPath(); ctx.arc(cc[0] + x * cw, y * HH, Math.max(1, r * cw), 0, 6.2832); ctx.fill();
-    }
-    // a "script" line: a wavy band that reads as cursive at 64 px
-    function script(col, x0, x1, y, amp, c) {
-      const cc = HCOL[col], cw = cc[1] - cc[0];
-      ctx.strokeStyle = c || INK; ctx.lineWidth = 1.4; ctx.beginPath();
-      for (let x = x0; x <= x1; x += 0.02) {
-        const px = cc[0] + x * cw, py = y * HH + Math.sin(x * 55) * amp * HH;
-        if (x === x0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-      }
-      ctx.stroke();
-    }
-    function star(col, x, y, r) {
-      const cc = HCOL[col], cw = cc[1] - cc[0];
-      const cx = cc[0] + x * cw, cy = y * HH, rr = r * cw;
-      ctx.fillStyle = INK; ctx.beginPath();
-      for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, q = i & 1 ? rr * 0.42 : rr; ctx.lineTo(cx + Math.cos(a) * q, cy + Math.sin(a) * q); }
-      ctx.closePath(); ctx.fill();
-    }
-    function web(col, x, y, r) {
-      const cc = HCOL[col], cw = cc[1] - cc[0];
-      const cx = cc[0] + x * cw, cy = y * HH, rr = r * cw;
-      ctx.strokeStyle = INK2; ctx.lineWidth = 1; ctx.beginPath();
-      for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr); }
-      for (let k = 1; k <= 3; k++) { const q = rr * k / 3; ctx.moveTo(cx + q, cy); for (let i = 1; i <= 8; i++) { const a = i * Math.PI / 4; ctx.lineTo(cx + Math.cos(a) * q, cy + Math.sin(a) * q); } }
-      ctx.stroke();
-    }
-    // block lettering as BLOCKS: a row of filled cells with gaps, no letterforms
-    function blocks(col, x0, x1, y, h, n) {
-      const step = (x1 - x0) / n;
-      for (let i = 0; i < n; i++) R(col, x0 + i * step + step * 0.12, y, step * 0.76, h, i % 3 === 1 ? INK2 : INK);
-    }
-    // a chevron band: a zigzag strip across a column
-    function chevrons(col, y, h, n, c) {
-      for (let i = 0; i < n; i++) { const x = i / n, w = 1 / n; P(col, [[x, y], [x + w / 2, y + h], [x + w, y], [x + w, y + h * 0.45], [x + w / 2, y + h * 1.45], [x, y + h * 0.45]], c); }
-    }
-    return { R, P, D, script, star, web, blocks, chevrons };
-  }
-  // the head sets (atlas y: see the layout note above).
-  function blackworkHead(p) {
-    p.R("front", 0.08, 0.85, 0.84, 0.10);                               // solid throat block
-    p.script("front", 0.10, 0.90, 0.90, 0.02, "rgba(255,255,255,0.28)"); // script reversed out of it
-    p.P("front", [[0.31, 0.42], [0.275, 0.48], [0.34, 0.48]]);          // mark under the eye
-    p.web("side", 0.72, 0.36, 0.20);                                    // a web behind the ear
-    p.R("side", 0.12, 0.14, 0.30, 0.05); p.R("side", 0.12, 0.22, 0.30, 0.05);   // temple bars
-    p.script("side", 0.15, 0.85, 0.90, 0.015);                          // script round the neck
-    p.R("back", 0.25, 0.86, 0.50, 0.07); p.P("back", [[0.5, 0.60], [0.68, 0.84], [0.32, 0.84]]);   // nape block
-  }
-  const HEAD_INK = {
-    script: function (p) { p.script("front", 0.12, 0.88, 0.90, 0.02); },
-    teardrop: function (p) { p.D("front", 0.30, 0.465, 0.026); p.P("front", [[0.30, 0.415], [0.275, 0.465], [0.325, 0.465]]); },
-    chicano: function (p) {                                              // fine-line black-and-grey
-      p.script("front", 0.10, 0.90, 0.90, 0.02);                          // throat script
-      p.D("front", 0.72, 0.45, 0.02); p.D("front", 0.76, 0.49, 0.02); p.D("front", 0.68, 0.49, 0.02);   // three dots on the cheek
-      p.script("side", 0.15, 0.85, 0.90, 0.015, INK2);                    // grey script round the neck
-    },
-    dots: function (p) {                                                 // dotted cheek marks, a dotted neck line
-      p.D("front", 0.70, 0.44, 0.018); p.D("front", 0.74, 0.47, 0.018); p.D("front", 0.78, 0.50, 0.018);
-      for (let x = 0.2; x <= 0.8; x += 0.12) p.D("side", x, 0.90, 0.02, INK2);
-    },
-    block: function (p) { p.blocks("front", 0.14, 0.86, 0.855, 0.075, 6); },   // block lettering across the throat
-    web: function (p) { p.web("side", 0.5, 0.90, 0.30); },
-    vory: function (p) { p.star("side", 0.5, 0.89, 0.20); p.D("front", 0.40, 0.92, 0.018); p.D("front", 0.60, 0.92, 0.018); },
-    tribal: function (p) {
-      p.P("side", [[0, 0.80], [1, 0.74], [1, 0.84], [0, 0.90]]); p.P("side", [[0, 0.93], [1, 0.88], [1, 0.96], [0, 1]]);
-      p.P("back", [[0.2, 0.78], [0.8, 0.78], [0.62, 1], [0.38, 1]]);
-    },
-    batok: function (p) { p.chevrons("side", 0.84, 0.05, 4, INK); p.chevrons("back", 0.86, 0.05, 5, INK2); },
-    yant: function (p) {                                                 // rows of fine dotted script at the nape
-      for (let y = 0.80; y < 0.99; y += 0.05) for (let x = 0.18; x <= 0.82; x += 0.09) p.D("back", x, y, 0.018, INK2);
-      p.R("back", 0.49, 0.78, 0.02, 0.21, INK);
-    },
-    blackwork: blackworkHead,
-    skinhead: blackworkHead,                                             // old key, same set
-    paisa: function () {}, chest: function () {}, sleeve: function () {},
-  };
-  function headInkCanvas(set) {
-    if (typeof document === "undefined") return null;
-    const cv = document.createElement("canvas"); cv.width = HW; cv.height = HH;
-    const ctx = cv.getContext("2d");
-    if (!ctx) return null;
-    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, HW, HH);
-    const fn = HEAD_INK[set];
-    if (fn) fn(headPainter(ctx));
-    return cv;
-  }
-  const headTexCache = Object.create(null);
-  function headInkTex(set) {
-    if (set === "skinhead") set = "blackwork";
-    let t = headTexCache[set];
-    if (t) return t;
-    const cv = headInkCanvas(set);
-    if (!cv) return null;
-    t = new THREE.CanvasTexture(cv);
-    t.magFilter = THREE.LinearFilter;
-    t._shared = true;
-    headTexCache[set] = t;
-    return t;
-  }
-  // sets with nothing on the head: no texture, no map, no extra material work
-  const HEAD_BLANK = { paisa: 1, chest: 1, sleeve: 1 };
-
-  // ---- ARM INK: painted into the clothes.js sleeve row ----------------------
-  // A is clothes.js's rowPainter for the arm row (rect/poly/dot in 0-1 of a
-  // column; y 0 = shoulder, 1 = wrist; the elbow is ~0.5). skinCss is the
-  // wearer's tone as css. Only bare-arm garments call this.
-  function inkPaintArm(A, set, skinCss) {
-    const cols = ["front", "back", "side"];
-    const band = (y, h, c) => { for (const k of cols) A.rect(k, 0, y, 1, h, c || INK); };
-    const webAt = (k, cx, cy, r) => {
-      for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; A.poly(k, [[cx, cy], [cx + Math.cos(a) * r, cy + Math.sin(a) * r * 0.6], [cx + Math.cos(a + 0.12) * r, cy + Math.sin(a + 0.12) * r * 0.6]], INK2); }
-      for (let q = 1; q <= 3; q++) { const rr = r * q / 3; A.rect(k, cx - rr, cy - rr * 0.6, rr * 2, 0.012, INK2); A.rect(k, cx - rr, cy + rr * 0.6, rr * 2, 0.012, INK2); }
-    };
-    const scriptDown = (k, x, y0, y1, c) => { for (let y = y0; y < y1; y += 0.06) A.rect(k, x + (((y * 37) | 0) % 3) * 0.05, y, 0.16, 0.025, c || INK); };
-    const star = (k, cx, cy, r) => { A.poly(k, [[cx, cy - r], [cx + r * 0.3, cy - r * 0.3], [cx + r, cy], [cx + r * 0.3, cy + r * 0.3], [cx, cy + r], [cx - r * 0.3, cy + r * 0.3], [cx - r, cy], [cx - r * 0.3, cy - r * 0.3]], INK); };
-    const dot = (k, x, y, r, c) => { if (A.dot) A.dot(k, x, y, r, c || INK); else A.rect(k, x - r, y - r * 0.5, r * 2, r, c || INK); };
-    const knuckles = (c) => { for (let i = 0; i < 4; i++) dot("front", 0.20 + i * 0.20, 0.955, 0.05, c || INK); };
-    switch (set) {
-      case "blackwork": case "skinhead":                                  // full blackwork sleeve
-        band(0.04, 0.09); band(0.17, 0.05); band(0.26, 0.12); band(0.62, 0.05); band(0.72, 0.16);
-        for (const k of cols) { webAt(k, 0.5, 0.49, 0.42); A.rect(k, 0.30, 0.90, 0.40, 0.05, INK); }
-        break;
-      case "chicano":                                                     // black-and-grey: a framed portrait high, script low
-        dot("front", 0.5, 0.22, 0.30, INK);                               // the frame
-        dot("front", 0.5, 0.22, 0.22, skinCss || "#c08a5a");              // the face, left in skin
-        dot("front", 0.5, 0.22, 0.22, INK3);                              // grey-wash shading
-        A.rect("front", 0.36, 0.17, 0.10, 0.02, INK2); A.rect("front", 0.54, 0.17, 0.10, 0.02, INK2); A.rect("front", 0.42, 0.27, 0.16, 0.02, INK2);
-        for (const k of ["front", "side"]) scriptDown(k, 0.30, 0.56, 0.94, k === "side" ? INK2 : INK);
-        A.rect("back", 0.2, 0.62, 0.6, 0.03, INK2); A.rect("back", 0.2, 0.70, 0.6, 0.03, INK2);
-        break;
-      case "paisa":                                                       // one small name line, maybe a dot at the wrist
-        scriptDown("front", 0.36, 0.64, 0.80);
-        dot("front", 0.5, 0.92, 0.04, INK2);
-        break;
-      case "dots":                                                        // a dotted line down the outer forearm
-        for (let y = 0.56; y < 0.94; y += 0.07) dot("side", 0.5, y, 0.05, INK);
-        dot("front", 0.5, 0.20, 0.05); dot("front", 0.42, 0.26, 0.05); dot("front", 0.58, 0.26, 0.05);
-        break;
-      case "block":                                                       // block lettering across the forearm, knuckle row
-        for (let i = 0; i < 5; i++) A.rect("front", 0.08 + i * 0.18, 0.64, 0.14, 0.10, i === 2 ? INK2 : INK);
-        for (let i = 0; i < 4; i++) A.rect("side", 0.10 + i * 0.22, 0.14, 0.16, 0.08, INK);
-        knuckles();
-        break;
-      case "tribal":                                                      // Polynesian bands, thick and curved
-        for (const k of cols) {
-          A.poly(k, [[0, 0.06], [1, 0.02], [1, 0.14], [0, 0.20]]); A.poly(k, [[0, 0.26], [1, 0.22], [1, 0.30], [0, 0.36]]);
-          A.poly(k, [[0.5, 0.40], [1, 0.36], [1, 0.46], [0.5, 0.52], [0, 0.46], [0, 0.36]], INK2);
-          A.poly(k, [[0, 0.66], [1, 0.60], [1, 0.72], [0, 0.80]]); A.poly(k, [[0, 0.86], [1, 0.82], [1, 0.90], [0, 0.94]], INK2);
-        }
-        break;
-      case "batok":                                                       // geometric chevron bands, shoulder and forearm
-        for (const k of cols) for (const y of [0.06, 0.20, 0.64, 0.78]) for (let i = 0; i < 4; i++) {
-          const x = i / 4, w = 0.25;
-          A.poly(k, [[x, y], [x + w / 2, y + 0.06], [x + w, y], [x + w, y + 0.03], [x + w / 2, y + 0.09], [x, y + 0.03]], y < 0.5 ? INK : INK2);
-        }
-        band(0.34, 0.02); band(0.90, 0.02);
-        break;
-      case "yant":                                                        // rows of fine dotted script on the upper arm
-        for (const k of ["front", "side"]) {
-          for (let y = 0.07; y < 0.40; y += 0.065) for (let x = 0.14; x <= 0.86; x += 0.12) dot(k, x, y, 0.03, INK2);
-          A.rect(k, 0.10, 0.05, 0.80, 0.012, INK); A.rect(k, 0.10, 0.41, 0.80, 0.012, INK);
-        }
-        break;
-      case "vory":                                                        // stars at the shoulder, rings on the forearm
-        for (const k of cols) star(k, 0.5, 0.14, 0.34);
-        band(0.60, 0.03); band(0.66, 0.03); band(0.84, 0.03);
-        A.rect("front", 0.35, 0.72, 0.30, 0.08, INK2);
-        knuckles(INK2);
-        break;
-      case "sleeve":                                                      // irezumi-style: waves shoulder to wrist
-        for (let y = 0.08; y < 0.92; y += 0.10) for (const k of cols) {
-          A.rect(k, 0, y, 1, 0.045, INK2);
-          for (let x = 0; x < 1; x += 0.25) A.poly(k, [[x, y + 0.045], [x + 0.10, y + 0.005], [x + 0.25, y + 0.045]], INK);   // wave crests
-        }
-        break;
-      case "web": for (const k of cols) webAt(k, 0.5, 0.50, 0.40); break;
-      case "script": scriptDown("front", 0.34, 0.58, 0.92); break;
-      case "chest": case "teardrop": default: break;                    // nothing on the arm
-    }
+    const look = heritageRoll(ids.length ? rollId(r(), ids) : null, r, over);
+    if (typeof rng === "string" && look.inkSeed == null) look.inkSeed = "ink|" + rng;
+    return look;
   }
 
   // ---- apply to a built rig ------------------------------------------------
@@ -524,14 +314,9 @@
     ch.yardCar = look.yardCar || heritageCar(look.heritage) || null;
     ch.ink = look.ink || "";
     ch.beardStyle = look.beard || null;
-    const head = ch.skinSlots && ch.skinSlots.head && ch.skinSlots.head[0];
-    if (head && look.ink && HEAD_INK[look.ink] && !HEAD_BLANK[look.ink] && head.material && !head.material.map) {
-      const tex = headInkTex(look.ink);
-      if (tex) {
-        head.material.map = tex;
-        head.material.needsUpdate = true;
-      }
-    }
+    // his ink: the family is his car's ink culture; entities/tattoo.js draws
+    // the pieces (arms, hands, face and neck) and inks whatever is bare
+    if (CBZ.tattoo) CBZ.tattoo.assign(ch, ch.ink, { seed: look.inkSeed || null });
     return true;
   }
 
@@ -566,7 +351,5 @@
   CBZ.heritageRollCar = heritageRollCar;
   CBZ.heritageApply = heritageApply;
   CBZ.heritageSeeded = seeded;
-  CBZ.inkPaintArm = inkPaintArm;
-  CBZ.headInkCanvas = headInkCanvas;
   CBZ.heritageCensus = heritageCensus;
 })();

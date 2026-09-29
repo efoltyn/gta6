@@ -956,10 +956,14 @@
     J.poly("front", [[0.50, 0], [0.58, 0], [0.67, 0.56], [0.56, 0.62]], tone(orange, 0.06));
     J.rect("front", 0.33, 0.56, 0.11, 0.03, seam); J.rect("front", 0.56, 0.58, 0.11, 0.03, seam);   // hemmed cuffs
     A.fill(sk);
-    if (c && c.ink && CBZ.inkPaintArm) CBZ.inkPaintArm(A, c.ink, sk);
     A.shade();
-    // a tank has no collar: the collar band is bare neck
-    return Object.assign(parts, { yoke: skin });
+    // BARE ARMS ARE THE WEARER'S OWN (`sleeves: "none"`): applyClothes hangs
+    // flat skin on them, which is where his ink lives (entities/tattoo.js
+    // paints a whole-arm chart at 320 px round the limb; this atlas's arm
+    // row was 64 x 40 px for the entire arm). A tank has no collar: the
+    // collar band is bare neck.
+    delete parts.arms;
+    return Object.assign(parts, { yoke: skin, sleeves: "none" });
   };
 
   // the infirmary orderly: a white pull-over scrub tunic over the issue orange
@@ -1584,8 +1588,9 @@
     T.rect("front", 0.2, 0.5, 0.16, 0.1, grime); T.rect("back", 0.5, 0.55, 0.2, 0.1, grime);   // a couple of grubby smudges
     hemBand(T, tone(white, -0.18));                                 // hem, above the tuck
     T.shade();
-    A.fill(sk); A.shade();                                          // bare arms, full length — no sleeve at all
-    return { torso: 1, arms: 1 };                                   // legs keep the catalog's flat sweatpant color
+    // bare arms, full length: the wearer's OWN flat skin (sleeves "none"), so
+    // his ink shows on them (entities/tattoo.js); legs keep the flat sweatpants
+    return { torso: 1, sleeves: "none" };
   };
 
   // ---- STREET JACKETS, cut for the shaped body -----------------------------
@@ -2893,10 +2898,10 @@
     // rides too, so two kids in different tees don't share one texture.
     if (SKIN_KEYED[id]) {
       const sk = (c.skin != null) ? c.skin | 0 : (ch && ch.skinTone != null ? ch.skinTone | 0 : 0xcf9a72);
-      // …and the wearer's INK SET (entities/heritage.js stamps ch.ink): bare
-      // arms carry tattoos, and a tattoo is part of the picture, so it is part
-      // of the key. Ten heritages x a few sets — still a handful of atlases.
-      return id + "|" + (c.torso != null ? c.torso | 0 : 0) + "|" + sk + "|" + (ch && ch.ink ? ch.ink : "");
+      // (ink is NOT part of the picture any more: bare arms are the wearer's
+      // own flat skin and entities/tattoo.js inks them, so a yard of inked
+      // men in tanks shares one atlas per skin tone)
+      return id + "|" + (c.torso != null ? c.torso | 0 : 0) + "|" + sk;
     }
     // a closet recipe (cityApplyComposite): one atlas per recipe worn
     if (id === "comp") return "comp|" + COMP_FIELDS.map((k) => (c[k] != null ? c[k] | 0 : -1)).join("|");
@@ -3025,7 +3030,7 @@
     // the WEARER's skin tone isn't in rec.colors (it comes off the rig), so it
     // rides the cache key and is handed back to the painter here. The garment
     // colors stay exactly where every other painter reads them: rec.colors.
-    else if (SKIN_KEYED[kind]) { const seg = key.split("|"); parts = PAINT[kind](P, Object.assign({}, c, { skin: seg[2] | 0, ink: seg[3] || "" })); }
+    else if (SKIN_KEYED[kind]) { const seg = key.split("|"); parts = PAINT[kind](P, Object.assign({}, c, { skin: seg[2] | 0 })); }
     else if (PAINT[kind]) parts = PAINT[kind](P, c);
     if (!parts) return null;
     const tex = new THREE.CanvasTexture(cv);
@@ -3480,6 +3485,9 @@
      Shared cmat materials, pooled by the crowd instancer like any flat limb.
      outfits.js recolorRig leaves arms alone when `sleeves` is declared. */
   function rigSkin(ch) {
+    // tattoo.js owns this question once it is loaded (it also reads a hand
+    // that wears ink as the skin under it)
+    if (CBZ.tattoo && CBZ.tattoo.rigSkin) return CBZ.tattoo.rigSkin(ch);
     const h = ch.skinSlots && ch.skinSlots.hands && ch.skinSlots.hands[0];
     const m = h && h.material;
     // the hands ARE the visible skin (crowd promotion repaints them with the

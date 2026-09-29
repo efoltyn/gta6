@@ -781,8 +781,8 @@
   // the two arms: shared by the fists AND the gun (one pair of arms, whatever you hold)
   const fpArms = new THREE.Group();
   fpArms.name = "fp_arms";
-  const armR = FPH ? FPH.makeArm({ fore: fistSleeve, upper: fistUpper }) : new THREE.Group();
-  const armL = FPH ? FPH.makeArm({ fore: fistSleeve, upper: fistUpper }) : new THREE.Group();
+  const armR = FPH ? FPH.makeArm({ fore: fistSleeve, upper: fistUpper }, 1) : new THREE.Group();
+  const armL = FPH ? FPH.makeArm({ fore: fistSleeve, upper: fistUpper }, -1) : new THREE.Group();
   fpArms.add(armR, armL);
   let armSleeved = false;
   let fistSleeveHex = -1, fistUpperHex = -1, fistSkinHex = -1;
