@@ -8588,10 +8588,52 @@
         // brick shell and a glass one, and the facade kit then rolled a third
         // die on top; STREET_STYLE owns that decision now.) Explicit "office"
         // shell: it is the base the facade kit's grammars are drawn against.
-        const b = makeBuilding(root, lot.cx, lot.cz, w, d, storeys, color, side,
-          { district: dk, facade: "office", dress: streetDress(lot, storeys, false) || false, reach: setback });
         const listed = !!forcedTier;                 // only reserved lots are on the market
         const tierDef = forcedTier || GENERIC;
+        /* A HOME NOBODY CAN SEE IS A RECORD UNTIL SOMEBODY CAN. In the streamed
+           city a generic apartment block outside the keep circle gets its lot
+           record now (kind, door, the home: tier, rent, floor) and its shell,
+           flats and street dressing as a job when the player comes within
+           sight (core/citystream.js). The shell never drew from the city rng,
+           so every later lot gets exactly the draws it always did. Listed
+           homes (the property ladder) are always built. */
+        const HS = CBZ.slice;
+        if (!listed && HS && HS.stream && CBZ.sliceAt && !CBZ.sliceKeepsRect(lot.cx - lot.w / 2, lot.cx + lot.w / 2, lot.cz - lot.d / 2, lot.cz + lot.d / 2)) {
+          lot.kind = "tower";
+          lot.building = { name: "Apartments", sign: color, side, door: doorPt, storeys: storeys, h: storeys * FH, deferred: true };
+          lot.building.home = {
+            tier: tierDef.tier, id: tierDef.id, name: tierDef.name, price: 0, rent: tierDef.rent || 0,
+            sqft: tierDef.sqft, beds: tierDef.beds || 1, garage: tierDef.garage, elevator: !!tierDef.elevator,
+            listed: false, owned: false, floorY: (storeys - 1) * FH, blurb: tierDef.blurb, door: doorPt,
+          };
+          const lotRef = lot, stC = storeys, colC = color, sideC = side, dkC = dk, sbC = setback, wC = w, dC = d, tierC = tierDef;
+          CBZ.sliceAt({ minX: lot.cx - lot.w / 2, maxX: lot.cx + lot.w / 2, minZ: lot.cz - lot.d / 2, maxZ: lot.cz + lot.d / 2 }, function () {
+            const bb = makeBuilding(root, lotRef.cx, lotRef.cz, wC, dC, stC, colC, sideC,
+              { district: dkC, facade: "office", dress: streetDress(lotRef, stC, false) || false, reach: sbC });
+            const topY2 = (stC - 1) * FH;
+            furnishHome(bb, rng, tierC, topY2);
+            const pool2 = (tierC.tier >= 4 && stC >= 3) ? Math.max(1, Math.min(stC - 2, stC - 2)) : -1;
+            for (let k = 0; k < stC - 1; k++) {
+              if (k === pool2) furnishPoolFloor(bb, k * FH);
+              else furnishApartmentFloor(bb, k * FH, (lotRef.i | 0) * 5 + (lotRef.j | 0) * 3 + k);
+            }
+            resFacade(bb, sideC, wC, dC, bb.wallColor != null ? bb.wallColor : colC, lotRef);
+            // the record keeps what it said (door, home, owner...); the shell's fields join it
+            // (the data keys are the ones it had before its first shell: a re-run
+            // after the streamer freed it must take the NEW shell's fields)
+            const rec = lotRef.building, keep = {};
+            if (!rec._dataKeys) Object.defineProperty(rec, "_dataKeys", { value: Object.keys(rec), enumerable: false });
+            for (const k of rec._dataKeys) keep[k] = rec[k];
+            Object.assign(rec, bb, keep);
+            rec.deferred = false;
+            if (pool2 >= 1) rec.poolY = pool2 * FH;
+          }, { name: "lot home" });
+          homeLots.push(lot);
+          placed.push(lot);
+          continue;
+        }
+        const b = makeBuilding(root, lot.cx, lot.cz, w, d, storeys, color, side,
+          { district: dk, facade: "office", dress: streetDress(lot, storeys, false) || false, reach: setback });
         // THE HOME lives on the TOP floor — home.floorY below — which is where
         // the Zillow tour / safehouse elevator actually lands. The tier
         // furnishing goes THERE (the old pass dressed y≈0, so arriving "home"

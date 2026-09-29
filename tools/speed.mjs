@@ -1757,7 +1757,9 @@ async function serveMain() {
             var ch = c.children; for (var i = 0; i < ch.length; i++) _st.push(ch[i]); }
           return false; }
         function label(o){ var n = o.name || ""; if (!n) { var ch = o.children; for (var i = 0; i < ch.length && !n; i++) n = ch[i].name || ""; }
-          var u = o.userData || {}; return (o.type) + (n ? ":" + n : "") + (u._builder ? "@" + u._builder : "") + (u.carVisual ? ":car" : ""); }
+          var u = o.userData || {}, uk = Object.keys(u).filter(function(k){ return k !== "_builder"; }).slice(0, 3).join(",");
+          var nm = 0; o.traverse && (function(){ var st = [o]; while (st.length && nm < 999) { var c = st.pop(); if (c.isMesh) nm++; for (var i = 0; i < c.children.length; i++) st.push(c.children[i]); } })();
+          return (o.type) + (n ? ":" + n : "") + (u._builder ? "@" + u._builder : "") + (uk ? "{" + uk + "}" : "") + "#" + nm; }
         var pops = [], popN = 0, checks = 0;
         function scan(first){
           var cam = C.camera; cam.updateMatrixWorld(); pm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse); fr.setFromProjectionMatrix(pm);
