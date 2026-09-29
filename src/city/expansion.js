@@ -889,14 +889,24 @@
       crownIM.instanceMatrix.needsUpdate = true;
       root.add(trunkIM); root.add(crownIM);
 
-      // SPARSE colliders: only the biggest few trunks (the old code made every
-      // tree a noCam solid box; thousands of AABBs aren't worth it, but a
-      // handful keep the island feeling solid). Pick the tallest, cap at 14.
-      const byH = trees.slice().sort((a, b) => b.h - a.h);
-      for (let i = 0; i < byH.length && i < 14; i++) {
-        const t = byH[i];
-        const r = t.tr * 0.32 + 0.22;
-        CBZ.colliders.push({ minX: t.x - r, maxX: t.x + r, minZ: t.z - r, maxZ: t.z + r, y0: 0, y1: t.h, noCam: true });
+      // EVERY TRUNK IS SOLID. This used to be "the tallest 14, the rest
+      // walk-through" on a perf argument that stopped being true once the
+      // collider grid went spatial: 64 more boxes on one island is nothing,
+      // and 50 of 64 trees you could run through was the solidityAudit's
+      // "annex:island-tree" bare row. The collider is MEASURED off the drawn
+      // instance (systems/meshcollider.js, trunkOnly = the bole's real
+      // cross-section at 0.8-2.0 m, not the root flare, not a guessed r),
+      // so a scaled, leaning trunk is exactly as thick as it looks.
+      // ref:null — an InstancedMesh is never batched anyway, and the record
+      // keeps `_src` for removal.
+      if (CBZ.solidFromMesh) {
+        CBZ.solidFromMesh(trunkIM, { trunkOnly: true, noCam: true, ref: null, tag: "annex-tree" });
+      } else {
+        for (let i = 0; i < N; i++) {
+          const t = trees[i];
+          const r = t.tr * 0.32 + 0.22;
+          CBZ.colliders.push({ minX: t.x - r, maxX: t.x + r, minZ: t.z - r, maxZ: t.z + r, y0: 0, y1: t.h, noCam: true, noBreach: true });
+        }
       }
     })();
     const CAR_COLORS = [0xe24b4b, 0x3c6fd6, 0xf2c43d, 0x4caf6e, 0xe8e8ee, 0x2a2d33, 0xe88a3c];

@@ -586,14 +586,17 @@
     ["street:litter/weeds/drains/bags/pallets/bikes", "decoy", "detail_kit.js's own fine-grain policy line"],
     ["roof:vent/dish/aerial/duct", "decoy", "sub-1 m, or dormant under PROPS_PURGE_V1"],
     ["facade:awning/shutter/downpipe/wall-lamp", "decoy", "lowest edge 3.1 m, you walk under it"],
-    // ---- FOUND AND LEFT: the honest backlog ----------------------------
-    ["facade:fire-escape-drop-ladder", "bare", "hangs into 0.7-3.4 m body height, ~100 of them; a 1.25 m collider off a wall risks blocking the pavement it overhangs, needs a measured footprint, not a guess"],
-    ["gov:perimeter-GATE-opening", "bare", "7 complexes have a 16-24 m gap with no gate leaf at all; that is a missing OBJECT, not a missing collider"],
-    ["gov:hedge", "bare", "99 x 4.4-5.4 m parterres; hedges are the one class this pass deliberately did not decide"],
-    ["bunker:ammo-crate-stack", "bare", "the single missing col() in an otherwise complete file"],
-    ["civic:engaged-column/cheek-wall", "bare", "8 m colonnade proud of the wall on the front walk-up, but buildings_civic.js draws NOTHING unless BLD_EXTRAS is on, and it defaults false, so this is dormant"],
-    ["forest:fallen-log/tent", "bare", "8 logs at 5-10 m, 3 tents at 4.8 m"],
-    ["annex:island-tree", "bare", "50 of 64 trunks, capped at 14 by an explicit comment"],
+    // ---- the old "bare" backlog, closed by systems/meshcollider.js ------
+    // (the collider is MEASURED off the drawn geometry — CBZ.solidFromMesh —
+    //  or, for merged facade deco with no mesh, registered through ctx.solid
+    //  from the same numbers the drawing used)
+    ["facade:fire-escape-drop-ladder", "fixed", "brick.js: one banded body per LOW tread (underside < 2.1 m) on the tread's drawn footprint via F.solidBox/ctx.solid; the high end you can walk under stays open"],
+    ["gov:perimeter-GATE-opening", "fixed", "the gap is the road in and STAYS open; the missing object was hung: two steel sliding leaves parked open behind the wall (govcomplex.js gateLeaves), each solid, measured; the Mansion keeps its own checkpoint"],
+    ["gov:hedge", "fixed", "decided SOLID: 99 parterre hedges, per-instance meshcollider boxes, noCam; park hedges stay brushable decoys"],
+    ["bunker:ammo-crate-stack", "fixed", "each crate measured, the stacked one banded on top"],
+    ["civic:engaged-column/cheek-wall", "fixed", "ctx.solid plinth-to-capital per column + 0.81 m cheek walls; dormant with BLD_EXTRAS off, solid the moment it draws"],
+    ["forest:fallen-log/tent", "fixed", "logs are oriented boxes measured at their random yaw; tents measured off the pyramid base"],
+    ["annex:island-tree", "fixed", "all 64 trunks, trunkOnly bole cross-section per instance (was the tallest 14)"],
   ];
   CBZ.solidityAudit = function () {
     const out = { classesChecked: SOLIDITY.length, classesSolid: 0, classesFixed: 0, decoyPolicy: 0, classesBare: 0, bare: [] };
@@ -616,6 +619,12 @@
         ? CBZ.city.arena._redCurbs
         : ((CBZ.city && CBZ.city._redCurbs != null) ? CBZ.city._redCurbs : null),
       colliders: (CBZ.colliders && CBZ.colliders.length) | 0,
+      // systems/meshcollider.js publishes its own live count: records it
+      // measured, and the ones it refused (slivers / flat / oversize)
+      meshColliders: CBZ.meshCollider ? {
+        built: CBZ.meshCollider.stats.built, skipped: CBZ.meshCollider.stats.skipped,
+        oversize: CBZ.meshCollider.stats.oversize,
+      } : null,
     };
     return out;
   };

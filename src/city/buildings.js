@@ -4635,6 +4635,24 @@
         hash: bhash,
         dbox: dbox,
         lbox: lbox,
+        /* A BODY FOR A DRESSING. dbox trim is merged into one deco mesh per
+           colour, so a facade that draws something you would walk into — a
+           column order on the front walk, cheek walls, a fire escape's hanging
+           flight — had no mesh to measure and no way to say "this is solid"
+           (this ctx is the facade kits' only door to the world). This is that
+           door: a building-local box (same args as dbox) registered as a
+           y-banded collider and filed on the building's own `cols`, so
+           demolition/collapse take it down with the shell. Never a wall to
+           the fracture/breach passes (noBreach); ref-less, so nothing is
+           spared from the batcher on its account. */
+        solid: function (lx, ly, lz, bw, bh, bd, so) {
+          if (!(bw > 0) || !(bd > 0) || !(bh > 0)) return null;
+          const c = { minX: ox + lx - bw / 2, maxX: ox + lx + bw / 2, minZ: oz + lz - bd / 2, maxZ: oz + lz + bd / 2,
+            y0: ly - bh / 2, y1: ly + bh / 2, ref: null, noBreach: true };
+          if (so && so.noCam) c.noCam = true;
+          CBZ.colliders.push(c); cols.push(c);
+          return c;
+        },
         /* PAINT THE DOOR. The shell hangs the leaf long before a facade runs,
            and it has no idea what palette that facade is about to put on the
            walls — so the door was left in one fixed tone for every grammar. A
@@ -4730,6 +4748,7 @@
         const inside = function (x, z, r) { return Math.abs(x) + r <= LX + 1e-3 && Math.abs(z) + r <= LZ + 1e-3; };
         ctxC.dbox = clipBox(ctxC.dbox);
         ctxC.lbox = clipBox(ctxC.lbox);
+        ctxC.solid = clipBox(ctxC.solid);
         for (const nm of ["ball", "column", "cone", "dome", "lamp"]) {
           const fn0 = ctxC[nm];
           ctxC[nm] = function (x, y, z, r) { if (inside(x, z, r || 0)) return fn0.apply(this, arguments); };

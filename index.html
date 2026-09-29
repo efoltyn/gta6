@@ -826,6 +826,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/npcgrid.js?v=scale2"></script>
 <script src="src/systems/camera.js?v=me6f1ee"></script>
 <script src="src/systems/physics.js?v=w09290242x"></script>
+<script src="src/systems/meshcollider.js?v=meshcol1"></script>
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
 <script src="src/systems/climb.js?v=lad1"></script>
 <!-- The tower post officers (entities/towerwatch.js): after guards.js, prisonkit.js (CBZ.prisonTowers) and climb.js. -->
@@ -1091,15 +1092,15 @@ document.body.appendChild(b);}}catch(e){}})();
      the shared masonry / portico / roof-clutter geometry. MUST load BEFORE
      city/buildings.js, which reads CBZ.CIVIC_SHOPS and CBZ.CIVIC_ACCT_SEED at
      parse time and the bld* helpers at build time. -->
-<script src="src/city/buildings_civic.js?v=deslop1"></script>
-<script src="src/city/buildings.js?v=w09290242x"></script>
+<script src="src/city/buildings_civic.js?v=meshcol1"></script>
+<script src="src/city/buildings.js?v=meshcol1"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
      govcomplex.js does to this same office shell: a spec at the call site.
      Inert until a caller passes {dress:{style}} (or ?cfg_FACADE_KIT_CITY=1). -->
-<script src="src/city/facade_kit.js?v=w09290210"></script>
-<script src="src/city/facades/brick.js?v=fk1"></script>
+<script src="src/city/facade_kit.js?v=meshcol1"></script>
+<script src="src/city/facades/brick.js?v=meshcol1"></script>
 <script src="src/city/facades/stone.js?v=fk1"></script>
 <script src="src/city/facades/mosque.js?v=fk1"></script>
 <script src="src/city/facades/artdeco.js?v=fk1"></script>
@@ -1151,7 +1152,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/escalators.js?v=esc2-st1"></script>
 <script src="src/city/roofloot.js?v=deslop1"></script>
 <script src="src/city/beach.js?v=flick1"></script>
-<script src="src/city/expansion.js?v=flick1"></script>
+<script src="src/city/expansion.js?v=meshcol1"></script>
 <!-- 4d-2. ARCHIPELAGO — worldmap registry + 3 islands + 4 biomes (worldmap.js
      MUST precede every island/biome; world.js runs them via CBZ.cityWorldGeo) -->
 <script src="src/city/worldmap.js?v=w09290242x"></script>
@@ -1256,14 +1257,14 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/airport_capeharbor.js?v=nodash1"></script>
 <script src="src/city/island_military.js?v=lad1-st1"></script>
 <script src="src/city/biome_desert.js?v=lad1"></script>
-<script src="src/city/biome_forest.js?v=w09290242x"></script>
+<script src="src/city/biome_forest.js?v=meshcol1"></script>
 <script src="src/city/biome_farmland.js?v=lad1-st1"></script>
 <script src="src/city/biome_snow.js?v=w09290242x"></script>
 <script src="src/city/snowboard.js?v=nodash1"></script>
 <!-- STRATEGIC LAYER part 1 — hardened bunkers (Fort Brandt command shelter
      w/ the nuclear vault + mountain/desert finds). Landmass order 40: after
      the military island (22) and both biome height fields (30/31). -->
-<script src="src/city/bunkers.js?v=w09290219"></script>
+<script src="src/city/bunkers.js?v=meshcol1"></script>
 <!-- 4d-3. WILD NATURE — lush instanced trees/rocks/grass forested onto the
      far backdrop relief (world/terrain.js). Self-registers as a high-order
      landmass; runs via cityWorldGeo after terrain + biomes exist. -->
@@ -1312,7 +1313,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- street hardware kit: signal/lamp prototypes + the additive road light
      pools. Pure builders, no placement; props.js (next) places them. -->
 <script src="src/city/street_hardware.js?v=hw1"></script>
-<script src="src/city/props.js?v=w09290201"></script>
+<script src="src/city/props.js?v=meshcol1"></script>
 <!-- props-with-purpose: seat/bed anchor registry + sit/sleep poses + the
      wanted-poster interact hook. Revert: CBZ.CONFIG.PROPS_PURPOSE = false. -->
 <script src="src/city/propuse.js?v=w09290219"></script>
@@ -2236,7 +2237,7 @@ document.body.appendChild(b);}}catch(e){}})();
      staffs itself through power.js's protection layer rather than authoring
      guards. After power.js and the biome/continent builders whose empty land
      it claims. Revert with ?cfg_GOV_COMPLEX=0. -->
-<script src="src/city/govcomplex.js?v=mce86a5"></script>
+<script src="src/city/govcomplex.js?v=meshcol1"></script>
 
 <!-- THE PRESIDENCY — one spine over organs built above: the President origin
      (candidacy's swearIn fast-forward), the Situation Room inside govcomplex's

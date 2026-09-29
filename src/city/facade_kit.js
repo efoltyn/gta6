@@ -209,6 +209,16 @@
     if (f.horiz) ctx.dbox(t, cy, f.out * n, len, h, proj, col);
     else ctx.dbox(f.out * n, cy, t, proj, h, len, col);
   };
+  // F.box's collider twin: the SAME placement args (t, cy, len, h, proj,
+  // inset), registered as a y-banded solid through ctx.solid (buildings.js)
+  // instead of drawn. Pass the numbers you drew with, so the body cannot
+  // drift from the picture. No-op on a host ctx without ctx.solid.
+  F.solidBox = function (ctx, f, t, cy, len, h, proj, inset, so) {
+    if (!ctx.solid || !(proj > 0)) return null;
+    const n = f.halfN + (inset || 0) + proj / 2;
+    return f.horiz ? ctx.solid(t, cy, f.out * n, len, h, proj, so)
+                   : ctx.solid(f.out * n, cy, t, proj, h, len, so);
+  };
   // a band running the FULL width of a face, with an overhang past the corners
   // so the four faces' bands meet instead of leaving a notch at each corner.
   F.band = function (ctx, f, cy, h, proj, col, over, inset) {
