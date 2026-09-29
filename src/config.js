@@ -1312,6 +1312,38 @@
     return safe;
   };
 
+  /* CBZ.bodyMayLeave(actor, opts) -> may a POPULATION system (density
+     thinning, a scene ending, a streaming ring, a shop closing) take this
+     body out of play right now?
+
+     Owner: "some guys you shoot disappear." They did, by several doors that
+     each asked only "is he far from the player": the crowd's density thin
+     parked a man lying in the street bleeding (vitals "down" is alive, so
+     every `!dead` test let him go) and parked living men standing in plain
+     view past 60 m; a scene ending deleted its surviving cast on the spot.
+     The rule, once, for all of them:
+       - a CORPSE leaves only when the persistence law says so
+         (city/morgue.js corpseMayReap: never on screen, never near, never
+         while EMS holds it). No morgue: never — the owning file's own timer
+         culls it, not a population sweep;
+       - a body that is DOWN (shot, KO'd, tased, mid-fall, in a ragdoll)
+         never leaves: it gets up or it dies, and either way stays a body;
+       - a plain living body leaves only where the player cannot see it
+         (the padded screen above) and not at arm's length.
+     opts.minDistance (default 22) is the no-go radius around the player. */
+  CBZ.bodyMayLeave = function (a, opts) {
+    if (!a) return true;
+    if (a.dead) return !!(a.collected || (CBZ.corpseMayReap && CBZ.corpseMayReap(a)));
+    if (a.ko > 0 || a.tasedT > 0 || a._ragSlot != null || (a._bf && a._bf.on)) return false;
+    if (CBZ.vitals && CBZ.vitals.state && CBZ.vitals.state(a) !== "ok") return false;
+    if (CBZ.body && CBZ.body.busy && CBZ.body.busy(a)) return false;
+    if (!a.pos) return true;
+    const minD = opts && opts.minDistance != null ? opts.minDistance : 22;
+    // 210 m: past the 200 m corpse draw band and the 95 m living-rig band,
+    // nothing of him is on anybody's screen
+    return CBZ.npcTransitionSafe(a.pos.x, a.pos.z, { minDistance: minD, maxDistance: 210 });
+  };
+
   // INTERIORS INTENTIONALITY (owner: "it should be empty, or designed, or a
   // dystopian feeling — intentionally monotonous. Not designed because it has
   // to be."). Every generated office interior is ONE thing, per building,

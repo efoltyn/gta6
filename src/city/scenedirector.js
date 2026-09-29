@@ -170,23 +170,42 @@
 
   // ---- RESTORE a drafted body to a plain civilian (millionaires releaseTycoon
   //      pattern): strip every role flag we set so no rig is leaked.
+  function destroyFresh(p) {
+    if (CBZ.npcLife && CBZ.npcLife.destroyCity) CBZ.npcLife.destroyCity(p);
+    else {
+      if (p.group && p.group.parent) p.group.parent.remove(p.group);
+      const i = CBZ.cityPeds ? CBZ.cityPeds.indexOf(p) : -1;
+      if (i >= 0) CBZ.cityPeds.splice(i, 1);
+    }
+  }
+  /* Fresh fallbacks are owned by this director, unlike claimed citizens, and
+     a surviving one is removed once its scene ends so repeated incidents never
+     grow the roster. It used to be removed ON THE SPOT: shoot the mark and the
+     scene disbands that frame, taking the shooter standing over him (or the
+     man you had just put on the floor, bleeding, who is alive) out of the
+     street in front of you. Now a survivor is retired: he walks on as a plain
+     citizen until CBZ.bodyMayLeave lets him go (off screen, not down), and if
+     he dies first his body belongs to the corpse law like anyone's. */
+  const _retire = [];
+  function retireTick() {
+    for (let i = _retire.length - 1; i >= 0; i--) {
+      const p = _retire[i];
+      const gone = !p || !p.group || !CBZ.cityPeds || CBZ.cityPeds.indexOf(p) < 0;
+      if (!gone && !p.dead && !p._scene) {
+        if (CBZ.bodyMayLeave ? !CBZ.bodyMayLeave(p) : false) continue;
+        destroyFresh(p);
+      }
+      _retire.splice(i, 1);
+      _fresh = Math.max(0, _fresh - 1);
+    }
+  }
   function restore(p) {
     if (!p) return;
     p._scene = null; p._sceneRole = null;
-    // Fresh fallbacks are owned by this director, unlike claimed citizens.
-    // Remove a surviving fallback when its scene ends so repeated incidents
-    // never grow the roster. A dead fallback stays for the normal corpse/loot
-    // pipeline—the player must not watch a body or its gun vanish.
-    if (p._sceneFresh && !p.dead) {
+    if (p._sceneFresh) {
       p._sceneFresh = false;
-      _fresh = Math.max(0, _fresh - 1);
-      if (CBZ.npcLife && CBZ.npcLife.destroyCity) CBZ.npcLife.destroyCity(p);
-      else {
-        if (p.group && p.group.parent) p.group.parent.remove(p.group);
-        const i = CBZ.cityPeds ? CBZ.cityPeds.indexOf(p) : -1;
-        if (i >= 0) CBZ.cityPeds.splice(i, 1);
-      }
-      return;
+      if (p.dead) _fresh = Math.max(0, _fresh - 1);   // a corpse stays for the normal corpse/loot pipeline
+      else if (_retire.indexOf(p) < 0) _retire.push(p);
     }
     const old = p._sceneRestore || {};
     const had = function (k) { return Object.prototype.hasOwnProperty.call(old, k); };
@@ -637,6 +656,7 @@
 
   function sceneTick(dt) {
     if (g.mode !== "city") { if (liveScene()) disband(); return; }
+    if (_retire.length) retireTick();
     // A scripted campaign beat taking over mid-scene reclaims the street: the
     // drafted cast is restored to plain civilians, exactly like a far drift.
     if (campaignBlocked()) { if (liveScene()) disband(); return; }
@@ -670,6 +690,9 @@
   // hook into the spawn reset chain if a sibling exposes one.
   CBZ.citySceneReset = function () {
     for (let i = 0; i < SCENE.actors.length; i++) restore(SCENE.actors[i]);
+    // the roster is being rebuilt: nobody is watching, retirees go now
+    for (let i = 0; i < _retire.length; i++) { const p = _retire[i]; if (p && !p.dead) destroyFresh(p); }
+    _retire.length = 0;
     SCENE.actors.length = 0;
     SCENE.kind = null; SCENE.anchor = null; SCENE.t = 0; SCENE.ttl = 0;
     SCENE._popped = false; SCENE._fled = false; SCENE._broke = false;
