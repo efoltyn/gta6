@@ -223,9 +223,17 @@
   /* ---- park / unpark ------------------------------------------------------ */
   // a geometry that dropped its CPU arrays after upload (metro far tiles) can
   // never be uploaded again: it keeps its GPU buffers
+  // (an attribute whose array is an accessor, city/buildings.js's lazy trim
+  // boxes, can always make its array again: never read it here, that would
+  // build what the park is trying not to hold)
+  function hasArray(a) {
+    const d = Object.getOwnPropertyDescriptor(a, "array");
+    if (d && d.get) return true;
+    return !!(a.array || (a.data && a.data.array));
+  }
   function reuploadable(g) {
-    if (g.index && !g.index.array) return false;
-    for (const k in g.attributes) { const a = g.attributes[k]; if (a && !a.array && !(a.data && a.data.array)) return false; }
+    if (g.index && !hasArray(g.index)) return false;
+    for (const k in g.attributes) { const a = g.attributes[k]; if (a && !hasArray(a)) return false; }
     return true;
   }
   function releaseGPU(o) {

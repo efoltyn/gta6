@@ -3286,44 +3286,79 @@
   }
   // boxes: flat [lx, ly, lz, bw, bh, bd, ...]; n boxes. Returns the geometry
   // mergeBufferGeometries(boxes.map(BoxGeometry(bw,bh,bd).translate(lx,ly,lz))) returns.
+  //
+  // THE ARRAYS ARE WRITTEN THE FIRST TIME ANYBODY READS THEM. A building's
+  // trim is one of these per colour, and most of them never need their
+  // vertices in JS: the batch pass reads them once to merge them (and throws
+  // them away), a slice or the streamed city prunes the far ones before that
+  // (they were ~100 MB of arrays held by lot records in a far slice, and a
+  // 285 MB garbage spike in the whole-city build), and the GPU reads what is
+  // drawn. So the geometry keeps its box list (6 numbers a box instead of
+  // ~800 bytes of vertices) and each attribute's `array` is an accessor that
+  // runs the same arithmetic as before, once, on first read. Bounds are the
+  // boxes' own, so pruning and culling never trigger it.
+  function lazyAttr(Ctor, itemSize, count, get) {
+    const a = new THREE.BufferAttribute(new Ctor(0), itemSize, false);
+    a.count = count;
+    let arr = null, done = false;
+    Object.defineProperty(a, "array", { configurable: true, enumerable: true,
+      get: function () { if (!done) { arr = get(); done = true; } return arr; },
+      set: function (v) { arr = v; done = true; } });
+    return a;
+  }
   function mergedBoxGeometry(boxes, n) {
-    const P = new Float32Array(n * 72), N = new Float32Array(n * 72), U = new Float32Array(n * 48);
-    const idx = new Array(n * 36);
-    boxTemplate(boxes[3], boxes[4], boxes[5]);
-    const tu = _boxUv, ti = _boxIdx;
-    const ud = [];
-    for (let b = 0; b < n; b++) {
-      const k = b * 6, lx = boxes[k], ly = boxes[k + 1], lz = boxes[k + 2];
-      const bw = boxes[k + 3], bh = boxes[k + 4], bd = boxes[k + 5];
-      const o0 = b * 72;
-      let o = o0;
-      o = boxPlane(P, o, 2, 1, 0, -1, -1, bd, bh, bw);     // px
-      o = boxPlane(P, o, 2, 1, 0, 1, -1, bd, bh, -bw);     // nx
-      o = boxPlane(P, o, 0, 2, 1, 1, 1, bw, bd, bh);       // py
-      o = boxPlane(P, o, 0, 2, 1, 1, -1, bw, bd, -bh);     // ny
-      o = boxPlane(P, o, 0, 1, 2, 1, -1, bw, bh, bd);      // pz
-      o = boxPlane(P, o, 0, 1, 2, -1, -1, bw, bh, -bd);    // nz
-      // translate: Vector3.applyMatrix4 with makeTranslation(lx, ly, lz),
-      // element by element, on the stored float32 values
-      for (let i = o0; i < o; i += 3) {
-        const x = P[i], y = P[i + 1], z = P[i + 2];
-        const w = 1 / (0 * x + 0 * y + 0 * z + 1);
-        P[i] = (1 * x + 0 * y + 0 * z + lx) * w;
-        P[i + 1] = (0 * x + 1 * y + 0 * z + ly) * w;
-        P[i + 2] = (0 * x + 0 * y + 1 * z + lz) * w;
+    const BX = Float64Array.from(boxes.length === n * 6 ? boxes : boxes.slice(0, n * 6));
+    let built = null;
+    function build() {
+      if (built) return built;
+      const P = new Float32Array(n * 72), N = new Float32Array(n * 72), U = new Float32Array(n * 48);
+      const I = n * 24 - 1 > 65535 ? new Uint32Array(n * 36) : new Uint16Array(n * 36);
+      boxTemplate(BX[3], BX[4], BX[5]);
+      const tu = _boxUv, ti = _boxIdx;
+      for (let b = 0; b < n; b++) {
+        const k = b * 6, lx = BX[k], ly = BX[k + 1], lz = BX[k + 2];
+        const bw = BX[k + 3], bh = BX[k + 4], bd = BX[k + 5];
+        const o0 = b * 72;
+        let o = o0;
+        o = boxPlane(P, o, 2, 1, 0, -1, -1, bd, bh, bw);     // px
+        o = boxPlane(P, o, 2, 1, 0, 1, -1, bd, bh, -bw);     // nx
+        o = boxPlane(P, o, 0, 2, 1, 1, 1, bw, bd, bh);       // py
+        o = boxPlane(P, o, 0, 2, 1, 1, -1, bw, bd, -bh);     // ny
+        o = boxPlane(P, o, 0, 1, 2, 1, -1, bw, bh, bd);      // pz
+        o = boxPlane(P, o, 0, 1, 2, -1, -1, bw, bh, -bd);    // nz
+        // translate: Vector3.applyMatrix4 with makeTranslation(lx, ly, lz),
+        // element by element, on the stored float32 values
+        for (let i = o0; i < o; i += 3) {
+          const x = P[i], y = P[i + 1], z = P[i + 2];
+          const w = 1 / (0 * x + 0 * y + 0 * z + 1);
+          P[i] = (1 * x + 0 * y + 0 * z + lx) * w;
+          P[i + 1] = (0 * x + 1 * y + 0 * z + ly) * w;
+          P[i + 2] = (0 * x + 0 * y + 1 * z + lz) * w;
+        }
+        N.set(boxTemplate(bw, bh, bd), o0);
+        U.set(tu, b * 48);
+        const io = b * 36, vo = b * 24;
+        for (let j = 0; j < 36; j++) I[io + j] = ti[j] + vo;
       }
-      N.set(boxTemplate(bw, bh, bd), o0);
-      U.set(tu, b * 48);
-      const io = b * 36, vo = b * 24;
-      for (let j = 0; j < 36; j++) idx[io + j] = ti[j] + vo;
-      ud.push({});
+      built = { P: P, N: N, U: U, I: I };
+      return built;
     }
     const g = new THREE.BufferGeometry();
-    g.userData.mergedUserData = ud;
-    g.setIndex(idx);
-    g.setAttribute("position", new THREE.BufferAttribute(P, 3, false));
-    g.setAttribute("normal", new THREE.BufferAttribute(N, 3, false));
-    g.setAttribute("uv", new THREE.BufferAttribute(U, 2, false));
+    const nv = n * 24;
+    g.setIndex(lazyAttr(nv - 1 > 65535 ? Uint32Array : Uint16Array, 1, n * 36, function () { return build().I; }));
+    g.setAttribute("position", lazyAttr(Float32Array, 3, nv, function () { return build().P; }));
+    g.setAttribute("normal", lazyAttr(Float32Array, 3, nv, function () { return build().N; }));
+    g.setAttribute("uv", lazyAttr(Float32Array, 2, nv, function () { return build().U; }));
+    // bounds from the boxes themselves (what computeBoundingBox would find)
+    let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+    for (let b = 0; b < n; b++) {
+      const k = b * 6, hx = Math.abs(BX[k + 3]) / 2, hy = Math.abs(BX[k + 4]) / 2, hz = Math.abs(BX[k + 5]) / 2;
+      if (BX[k] - hx < x0) x0 = BX[k] - hx; if (BX[k] + hx > x1) x1 = BX[k] + hx;
+      if (BX[k + 1] - hy < y0) y0 = BX[k + 1] - hy; if (BX[k + 1] + hy > y1) y1 = BX[k + 1] + hy;
+      if (BX[k + 2] - hz < z0) z0 = BX[k + 2] - hz; if (BX[k + 2] + hz > z1) z1 = BX[k + 2] + hz;
+    }
+    g.boundingBox = new THREE.Box3(new THREE.Vector3(x0, y0, z0), new THREE.Vector3(x1, y1, z1));
+    g.boundingSphere = g.boundingBox.getBoundingSphere(new THREE.Sphere());
     return g;
   }
 
