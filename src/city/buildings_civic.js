@@ -187,6 +187,24 @@
     else ctx.dbox(f.out * n, cy, t, proj, h, len, col);
   }
 
+  /* THE CIVIC BAY RHYTHM of one face: heavy corner piers, then nBay tall
+     openings at a ~4.0 m pitch, symmetric about the face centre. This is the
+     rhythm buildings.js's civic facade branch glazes (its `endPier` / `nBay`
+     / `cellC` / `winW`), stated once here so the column order can stand ON
+     the piers between the windows instead of on its own unrelated 5.4 m
+     pitch (which parked colossal shafts across half the window openings).
+     `piers[i]` is the centre of the pier between bay i-1 and bay i. */
+  function civicBays(span) {
+    const endPier = Math.max(1.0, span * 0.075);
+    const usable = span - 2 * endPier;
+    const nBay = Math.max(1, Math.round(usable / 4.0));
+    const cell = usable / nBay;
+    const piers = [];
+    for (let i = 0; i <= nBay; i++) piers.push(-usable / 2 + i * cell);
+    return { endPier, usable, nBay, cell, winW: Math.min(2.6, cell * 0.56), piers };
+  }
+  CBZ.civicBays = civicBays;
+
   // ============================================================
   //  1. MASONRY DRESSING — what turns a coloured box into BRICKWORK
   // ============================================================
@@ -274,8 +292,11 @@
 
     // ---- PARAPET PIERS: short brick piers punctuating the parapet, the tell
     // that a masonry roofline is built, not extruded. Deterministic count.
+    // A host that runs a BALUSTRADE along this parapet (govcomplex.js's
+    // estate houses: `civic.balustrade`) sets its own dados on its own
+    // rhythm, so these stand down rather than stand inside its balusters.
     const pierN = 4 + ((ctx.hash(0x71a5) * 3) | 0);
-    for (const s of sides) {
+    for (const s of ((ctx.civic && ctx.civic.balustrade) ? [] : sides)) {
       const f = faceOf(ctx, s);
       const step = f.span / pierN;
       for (let i = 0; i <= pierN; i++) {
@@ -459,17 +480,25 @@
     // that clearance instead of from the storey count.
     const orderH = Math.max(FH * 1.1, ctx.rTop - colBase - 1.9);
     const round = spec.order === "doric" || spec.order === "ionic";
-    const nCol = Math.max(4, Math.min(10, Math.round(f.span / 3.0)));
-    const colStep = (f.span - 1.6) / nCol;
+    /* THE COLUMNS STAND ON THE PIERS. The order used to run its own pitch
+       ((span-1.6)/10 = 5.44 m on the Mansion) against the facade's 3.97 m
+       window bays, so half the shafts stood in front of glass. Now every
+       column takes the pier between two openings (civicBays, the rhythm the
+       shell glazes), every other pier when a long front would carry more
+       than a dozen shafts, symmetric about the door, never in the doorway. */
+    const BAYS = civicBays(f.span);
+    const stride = Math.max(1, Math.ceil((BAYS.nBay + 1) / 13));
+    const colStep = BAYS.cell * stride;
     // THE SHAFT KEEPS ITS PROPORTION. 0.42 m is right for a one- or two-
     // storey order; a colossal order two tall storeys high on that radius is
     // a broom handle (1:13). Past ~8 m the radius follows the height at a
     // doric-to-corinthian 1:8.5, still capped by the intercolumniation.
     const R = Math.min(colStep * 0.20, Math.max(0.42, (orderH - 1.0) / 17));
     const colTs = [];
-    for (let i = 0; i <= nCol; i++) {
-      const t = -(f.span - 1.6) / 2 + i * colStep;
-      if (Math.abs(t) < doorGap / 2 - 0.1) continue;          // keep the doorway clear
+    for (let i = 0; i <= BAYS.nBay; i++) {
+      if (Math.abs(i - BAYS.nBay / 2) % stride > 1e-6 && stride > 1) continue;
+      const t = BAYS.piers[i];
+      if (Math.abs(t) < doorGap / 2 + R) continue;             // keep the doorway clear
       colTs.push(t);
       const cx = f.horiz ? t : f.out * (halfN + R + 0.06);
       const cz = f.horiz ? f.out * (halfN + R + 0.06) : t;
@@ -516,7 +545,7 @@
     faceBox(ctx, f, 0, entY + 0.94, f.span + 0.9, 0.24, 0.52, shade(STONE, 1.08));   // cornice
     // triglyph blocks on a doric frieze (the giveaway detail of the order)
     if (spec.order === "doric") {
-      const tn = nCol * 2;
+      const tn = Math.max(8, Math.round(f.span / 2.7));
       const tstep = (f.span - 1.0) / tn;
       for (let i = 0; i <= tn; i++)
         faceBox(ctx, f, -(f.span - 1.0) / 2 + i * tstep, entY + 0.56, 0.24, 0.46, 0.36, shade(STONE, 1.10));
@@ -555,9 +584,14 @@
     // there is a pediment to hold it, and otherwise sits on the wall over the
     // door (never on top of the lettering).
     if (spec.motto) ctx.plaque(f, entY + 0.56, Math.min(f.span - 2.0, 8.4), 0.62, spec.motto, STONE);
-    const sealR = pedimented && pw > 3.0 ? Math.min(1.25, pRise * 0.44) : Math.min(1.35, f.span * 0.09);
-    const sealY = pedimented && pw > 3.0 ? (entY + 1.18 + pRise * 0.40) : Math.max(DOOR_HEAD, entY - 1.5);
-    ctx.seal(f, sealY, sealR, spec.kind || "civic");
+    // a host that builds its own portico carries the seal in ITS tympanum
+    // (`seal:false`); a wall seal with no pediment over it would otherwise
+    // hang across the upper windows of the door bay
+    if (spec.seal !== false) {
+      const sealR = pedimented && pw > 3.0 ? Math.min(1.25, pRise * 0.44) : Math.min(1.35, f.span * 0.09);
+      const sealY = pedimented && pw > 3.0 ? (entY + 1.18 + pRise * 0.40) : Math.max(DOOR_HEAD, entY - 1.5);
+      ctx.seal(f, sealY, sealR, spec.kind || "civic");
+    }
 
     // ---------- FLAGPOLES ----------
     for (const sg of [-1, 1]) {
@@ -584,8 +618,9 @@
     }
 
     // ---------- ENTRY LAMPS flanking the door (warm, emissive, merged-exempt
-    // only by their emissive material — 2 small meshes per civic building)
-    for (const sg of [-1, 1]) {
+    // only by their emissive material — 2 small meshes per civic building).
+    // An external perron's host dresses its own doorcase and lights it.
+    for (const sg of (externalPerron ? [] : [-1, 1])) {
       const t = sg * (doorGap / 2 + 0.55);
       const lx = f.horiz ? t : f.out * (halfN + 0.30);
       const lz = f.horiz ? f.out * (halfN + 0.30) : t;
@@ -604,7 +639,9 @@
     const STONE = pal.stone, CAP = shade(pal.stone, 1.08);
     const cx = ctx.slabCx, cz = ctx.slabCz, top = ctx.rTop + ctx.pp;
     const base = Math.min(ctx.slabW, ctx.slabD);
-    if (base < 4) return;
+    // "none": the host roofs the building itself (govcomplex.js's estate
+    // houses lay a hipped slate roof and chimneys over the plate)
+    if (base < 4 || spec.crown === "none") return;
 
     if (spec.crown === "dome") {
       // DRUM (a ring of engaged colonnettes) → DOME → LANTERN → finial.
@@ -750,4 +787,671 @@
     }
     t = new THREE.CanvasTexture(c); sealCache.set(kind, t); return t;
   };
+})();
+
+/* ============================================================
+   7. THE MONUMENT KIT — CBZ.civicMonument (a legislature's own architecture)
+
+   OWNER (President mode): "all the buildings in the presidential mode just
+   need to be redone ... inside and out." The Capitol was a 92 m office box
+   with a 30 cm perron: this file's own order and crown were switched off
+   (BLD_EXTRAS) and, even on, its dome is a 4.4 m radius cap sized for a
+   courthouse roof. A legislature is read from a kilometre away by three
+   things at their REAL size, and this kit draws those three:
+
+     portico(b, o)  a projecting colonnaded portico on the PRINCIPAL floor
+                    (the US Capitol's east front): a rusticated arcade at
+                    grade that you walk through to the building's one door,
+                    the deck over it at floorTops[1], two broad flights up
+                    to the deck with a half landing each, eight columns at a
+                    1:9 order, entablature, a real sloped pediment and roof.
+                    Every tread is the stair system's (CBZ.stairs.flight with
+                    `steps`), drawn to exactly the rule the walk surface
+                    answers; parapets, newels and the deck balustrade carry
+                    colliders.
+     dome(b, o)     stepped base, a peristyle drum of 24 columns, attic, a
+                    ribbed dome at the building's own scale and a lantern;
+                    INSIDE, the drum wall with its lit windows, a coffered
+                    inner dome and an oculus, so a rotunda carved under it
+                    (city/interior_programs.js "rotunda") looks up into a
+                    real dome.
+     colonnade(root, o)  an open covered colonnade in WORLD space (the
+                    hyphens that tie a Capitol's wings to its centre).
+
+   HOW IT DRAWS. Building-local, into b.group, as merged geometry per colour
+   (Pen) plus InstancedMesh for the repeats (columns, balusters): a portico
+   costs a handful of draw calls before core/batch.js folds the merged ones.
+   Colliders and platforms go to CBZ.colliders/CBZ.platforms AND the
+   building's own lists (b.colliders/b.platforms), so a demolition or an
+   audit that reads the shell reads these too. Authored for a shell whose
+   door is on its +z face (every Capitol shell is); any other side returns
+   null. No rng: every number is derived from the shell and the spec.
+
+   It also teaches the civic order/crown one thing: a spec with
+   `hostOrder:true` / `hostCrown:true` keeps the monumental FACADE (ashlar,
+   bays, cornice) and lets its host draw the order or the crown itself —
+   the Capitol's portico and dome replace the kit's engaged columns and its
+   courthouse cap instead of being stacked on top of them.
+============================================================ */
+(function () {
+  "use strict";
+  const CBZ = window.CBZ;
+  if (!CBZ || !window.THREE) return;
+  const THREE = window.THREE;
+
+  // ---- 7a. the host opt-outs (wrapped once, markers carried) --------------
+  function hostAware(name, key) {
+    const base = CBZ[name];
+    if (typeof base !== "function" || base._hostAware) return;
+    const wrapped = function (ctx) {
+      const s = ctx && ctx.civic;
+      if (s && s[key] === true) return;
+      return base.apply(this, arguments);
+    };
+    for (const k in base) { try { wrapped[k] = base[k]; } catch (e) {} }
+    wrapped._hostAware = true;
+    CBZ[name] = wrapped;
+  }
+  hostAware("bldCivicOrder", "hostOrder");
+  hostAware("bldCivicCrown", "hostCrown");
+
+  // ---- 7b. geometry helpers ------------------------------------------------
+  function cm(hex, o) { return CBZ.cmat ? CBZ.cmat(hex, o) : new THREE.MeshLambertMaterial({ color: hex }); }
+  const BACK = new Map();
+  function backMat(hex, em, ei) {
+    const k = hex + "|" + (em || 0) + "|" + (ei || 0);
+    let m = BACK.get(k);
+    if (!m) {
+      m = new THREE.MeshLambertMaterial({ color: hex, side: THREE.BackSide, emissive: em || 0, emissiveIntensity: ei == null ? 1 : ei });
+      m._shared = true;
+      BACK.set(k, m);
+    }
+    return m;
+  }
+  // concatenate geometries into one non-indexed position/normal/uv geometry
+  function merge(list) {
+    const pos = [], nor = [], uv = [];
+    for (let k = 0; k < list.length; k++) {
+      let g = list[k];
+      if (!g) continue;
+      if (g.index) g = g.toNonIndexed();
+      if (!g.attributes.normal) g.computeVertexNormals();
+      const p = g.attributes.position, n = g.attributes.normal, u = g.attributes.uv;
+      for (let i = 0; i < p.count; i++) {
+        pos.push(p.getX(i), p.getY(i), p.getZ(i));
+        nor.push(n.getX(i), n.getY(i), n.getZ(i));
+        uv.push(u ? u.getX(i) : 0, u ? u.getY(i) : 0);
+      }
+    }
+    const out = new THREE.BufferGeometry();
+    out.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    out.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
+    out.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+    out.computeBoundingSphere(); out.computeBoundingBox();
+    return out;
+  }
+  // a box, then (optionally) rotated about y / z / x through its own centre,
+  // then moved to (x,y,z)
+  function bx(w, h, d, x, y, z, ry, rz, rx) {
+    const g = new THREE.BoxGeometry(w, h, d);
+    if (rx) g.rotateX(rx);
+    if (rz) g.rotateZ(rz);
+    if (ry) g.rotateY(ry);
+    g.translate(x, y, z);
+    return g;
+  }
+  function lathe(profile, seg) {
+    const g = new THREE.LatheGeometry(profile.map(function (p) { return new THREE.Vector2(p[0], p[1]); }), seg || 16);
+    g.computeVertexNormals();
+    return g;
+  }
+  function tube(r0, r1, h, y0, seg, open) {
+    const g = new THREE.CylinderGeometry(r1, r0, h, seg || 48, 1, open !== false);
+    g.translate(0, y0 + h / 2, 0);
+    return g;
+  }
+  // a flat annulus at height y, facing up (dn:true faces down)
+  function ring(r0, r1, y, seg, dn) {
+    const g = new THREE.RingGeometry(r0, r1, seg || 48, 1);
+    g.rotateX(dn ? Math.PI / 2 : -Math.PI / 2);
+    g.translate(0, y, 0);
+    return g;
+  }
+
+  /* THE PEN. Every static piece of a monument goes into a per-colour bucket
+     (building-local geometry) and comes out as ONE mesh per colour. */
+  function Pen(b) {
+    const B = new Map();
+    const put = function (hex, g, kind) {
+      const k = hex + "|" + (kind || "");
+      let L = B.get(k);
+      if (!L) { L = { hex: hex, kind: kind || "", list: [] }; B.set(k, L); }
+      L.list.push(g);
+      return g;
+    };
+    return {
+      add: function (hex, g) { return put(hex, g, ""); },
+      glow: function (hex, g, ei) { return put(hex, g, "glow:" + (ei == null ? 0.7 : ei)); },
+      back: function (hex, g) { return put(hex, g, "back"); },
+      backGlow: function (hex, g, ei) { return put(hex, g, "backglow:" + (ei == null ? 0.7 : ei)); },
+      box: function (hex, w, h, d, x, y, z, ry, rz, rx) { return put(hex, bx(w, h, d, x, y, z, ry, rz, rx), ""); },
+      flush: function (name) {
+        const out = [];
+        B.forEach(function (L) {
+          const geo = merge(L.list);
+          let mat;
+          if (L.kind === "back") mat = backMat(L.hex);
+          else if (L.kind.indexOf("backglow:") === 0) mat = backMat(L.hex, L.hex, +L.kind.slice(9));
+          else if (L.kind.indexOf("glow:") === 0) mat = cm(L.hex, { emissive: L.hex, ei: +L.kind.slice(5) });
+          else mat = cm(L.hex);
+          const m = new THREE.Mesh(geo, mat);
+          m.name = name || "civic-monument";
+          m.castShadow = L.kind === "" && geo.boundingSphere && geo.boundingSphere.radius > 1.5;
+          m.receiveShadow = L.kind.indexOf("glow") < 0;
+          m.matrixAutoUpdate = false; m.updateMatrix();
+          b.group.add(m);
+          out.push(m);
+        });
+        B.clear();
+        return out;
+      },
+    };
+  }
+  // an InstancedMesh of one geometry at building-local points {x,y,z,ry}
+  function instances(b, geo, hex, pts, name) {
+    if (!pts.length) return null;
+    const im = new THREE.InstancedMesh(geo, cm(hex), pts.length);
+    const o = new THREE.Object3D();
+    for (let i = 0; i < pts.length; i++) {
+      o.position.set(pts[i].x, pts[i].y || 0, pts[i].z);
+      o.rotation.set(0, pts[i].ry || 0, 0);
+      o.updateMatrix();
+      im.setMatrixAt(i, o.matrix);
+    }
+    im.instanceMatrix.needsUpdate = true;
+    im.castShadow = true; im.receiveShadow = true;
+    im.name = name || "civic-instances";
+    b.group.add(im);
+    return im;
+  }
+  // colliders and walk surfaces, filed where the world AND the shell look
+  function Phys(b) {
+    const ox = b.ox, oz = b.oz;
+    const file = function (list, rec) { list.push(rec); return rec; };
+    return {
+      solid: function (x0, x1, z0, z1, y0, y1) {
+        const c = { minX: ox + Math.min(x0, x1), maxX: ox + Math.max(x0, x1), minZ: oz + Math.min(z0, z1), maxZ: oz + Math.max(z0, z1), y0: y0, y1: y1, ref: null };
+        CBZ.colliders = CBZ.colliders || [];
+        file(CBZ.colliders, c);
+        if (b.colliders) b.colliders.push(c);
+        return c;
+      },
+      walk: function (x0, x1, z0, z1, top) {
+        const p = { minX: ox + Math.min(x0, x1), maxX: ox + Math.max(x0, x1), minZ: oz + Math.min(z0, z1), maxZ: oz + Math.max(z0, z1), top: top };
+        CBZ.platforms = CBZ.platforms || [];
+        file(CBZ.platforms, p);
+        if (b.platforms) b.platforms.push(p);
+        return p;
+      },
+      dirty: function () {
+        if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+        if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
+      },
+    };
+  }
+
+  /* A COLUMN OF THE ORDER, as one lathe: square plinth, attic base (two tori
+     and a scotia), a shaft with entasis (full to a third, 0.86 at the neck),
+     astragal, a flared bell capital, four corner volutes and the abacus.
+     Origin at the plinth's foot; total height H; lower shaft radius R. */
+  const COLG = new Map();
+  function columnGeo(R, H) {
+    const key = R.toFixed(3) + "|" + H.toFixed(3);
+    if (COLG.has(key)) return COLG.get(key);
+    const yPl = 0.5 * R, yB = yPl + 0.5 * R, capH = 2.1 * R, abH = 0.3 * R;
+    const yS1 = H - capH - abH;
+    const prof = [
+      [0, yPl], [1.36 * R, yPl], [1.36 * R, yPl + 0.14 * R], [1.16 * R, yPl + 0.26 * R],
+      [1.22 * R, yPl + 0.38 * R], [1.04 * R, yB - 0.03 * R], [R, yB],
+      [R, yB + (yS1 - yB) / 3], [0.93 * R, yB + (yS1 - yB) * 0.7], [0.86 * R, yS1],
+      [0.96 * R, yS1 + 0.05 * R], [0.96 * R, yS1 + 0.16 * R], [0.87 * R, yS1 + 0.2 * R],
+      [0.98 * R, yS1 + 0.9 * R], [1.3 * R, yS1 + capH - 0.02 * R], [0, yS1 + capH],
+    ];
+    const parts = [
+      bx(2.72 * R, yPl, 2.72 * R, 0, yPl / 2, 0),
+      lathe(prof, 18),
+      bx(2.9 * R, abH, 2.9 * R, 0, H - abH / 2, 0),
+    ];
+    for (const sx of [-1, 1]) for (const sz of [-1, 1])
+      parts.push(bx(0.55 * R, 0.55 * R, 0.55 * R, sx * 1.12 * R, H - abH - 0.34 * R, sz * 1.12 * R));
+    const g = merge(parts);
+    COLG.set(key, g);
+    return g;
+  }
+  let BALG = null;
+  function balusterGeo() {
+    if (BALG) return BALG;
+    BALG = lathe([[0, 0], [0.085, 0], [0.085, 0.05], [0.06, 0.09], [0.1, 0.26], [0.05, 0.46],
+      [0.045, 0.52], [0.075, 0.56], [0.075, 0.64], [0, 0.64]], 10);
+    return BALG;
+  }
+  // a balustrade run along x or z: plinth, balusters (instanced), rail; and
+  // the SOLID band it is (a guard you lean on, never step through)
+  function balustrade(b, pen, phys, bal, axis, at, from, to, y, hex, capHex) {
+    const L = Math.abs(to - from), mid = (from + to) / 2;
+    if (L < 0.3) return;
+    const alongX = axis === "x";
+    pen.box(hex, alongX ? L : 0.34, 0.16, alongX ? 0.34 : L, alongX ? mid : at, y + 0.08, alongX ? at : mid);
+    pen.box(capHex, alongX ? L + 0.1 : 0.4, 0.14, alongX ? 0.4 : L + 0.1, alongX ? mid : at, y + 0.87, alongX ? at : mid);
+    const n = Math.max(1, Math.floor(L / 0.3));
+    for (let i = 0; i < n; i++) {
+      const t = Math.min(from, to) + (i + 0.5) * L / n;
+      bal.push({ x: alongX ? t : at, y: y + 0.16, z: alongX ? at : t });
+    }
+    if (alongX) phys.solid(Math.min(from, to), Math.max(from, to), at - 0.2, at + 0.2, y, y + 1.0);
+    else phys.solid(at - 0.2, at + 0.2, Math.min(from, to), Math.max(from, to), y, y + 1.0);
+  }
+  /* A PARAPET THAT FOLLOWS A FLIGHT: a wall whose top runs 1.0 m over the
+     walk line, profile [[z, yTop], ...] (z strictly monotonic), from the
+     ground (y 0) up, thickness t along x on [x0, x0 + t]. One extruded
+     prism, a coping on every segment, and a banded collider every half
+     metre so nobody steps off the side of a five-metre stair. The profile may
+     run either way along z. */
+  function parapet(pen, phys, x0, t, prof, hex, capHex) {
+    const sh = new THREE.Shape();
+    sh.moveTo(prof[0][0], 0);
+    for (let i = 0; i < prof.length; i++) sh.lineTo(prof[i][0], prof[i][1]);
+    sh.lineTo(prof[prof.length - 1][0], 0);
+    sh.lineTo(prof[0][0], 0);
+    const g = new THREE.ExtrudeGeometry(sh, { depth: t, bevelEnabled: false, steps: 1 });
+    g.rotateY(-Math.PI / 2);                 // shape x -> world z, extrude -> world -x
+    g.translate(x0 + t, 0, 0);
+    pen.add(hex, g);
+    for (let i = 1; i < prof.length; i++) {
+      const za = prof[i - 1][0], ya = prof[i - 1][1], zb = prof[i][0], yb = prof[i][1];
+      const len = Math.hypot(zb - za, yb - ya);
+      if (len < 0.05) continue;
+      pen.box(capHex, t + 0.12, 0.12, len + 0.06, x0 + t / 2, (ya + yb) / 2 + 0.06, (za + zb) / 2, 0, 0, Math.atan2(-(yb - ya), zb - za));
+      const nb = Math.max(1, Math.ceil(Math.abs(zb - za) / 0.5));
+      for (let k = 0; k < nb; k++) {
+        const z0 = za + (zb - za) * k / nb, z1 = za + (zb - za) * (k + 1) / nb;
+        const y1 = Math.max(ya + (yb - ya) * k / nb, ya + (yb - ya) * (k + 1) / nb);
+        phys.solid(x0, x0 + t, z0, z1, 0, y1 + 0.02);
+      }
+    }
+  }
+
+  /* ---- 7c. THE PORTICO ------------------------------------------------------
+     o: { depth: 11, half: 19 (colonnade half-width), flightW: 8, ground: 0.10,
+          stone, stoneD, roof, bronze, order: { R: 0.55 } }
+     Returns the record the host files (walk rects for its ground oracle,
+     the deck, the flights, the column line). */
+  function portico(b, o) {
+    if (!b || !b.group || !b.localDoor || !(b.localDoor.nz < -0.5)) return null;
+    if (!Array.isArray(b.floorTops) || b.floorTops.length < 3 || !CBZ.stairs || !CBZ.stairs.flight) return null;
+    o = o || {};
+    const STONE = o.stone || 0xe6e3d8, STONED = o.stoneD || 0xc9c4b4, CAP = o.cap || 0xf0ede4;
+    const RUST = o.rust || 0xd3cebf, ROOF = o.roof || 0x7f8489, BRONZE = o.bronze || 0xb99347;
+    const pen = Pen(b), phys = Phys(b), bal = [];
+    const zf = b.d / 2;                       // the facade's outer face
+    const P = o.depth || 11, X1 = o.half || 19, FW = o.flightW || 8, X2 = X1 + FW;
+    const deck = b.floorTops[1], soffit = deck - 0.6;
+    const g0 = o.ground != null ? o.ground : 0.10;
+    const zTop = zf + P;                      // the deck's front edge = the top nosing
+    const rec = { deck: deck, zf: zf, zTop: zTop, half: X1, outer: X2, ground: [], flights: [], treads: [] };
+
+    // ---- the deck, its front string course, the flank masses under it
+    pen.box(STONE, 2 * X2, 0.6, P, 0, deck - 0.3, zf + P / 2);
+    phys.walk(-X2, X2, zf, zTop, deck);
+    pen.box(CAP, 2 * X2 + 0.3, 0.28, 0.3, 0, soffit + 0.14, zTop + 0.05);
+    for (const s of [-1, 1]) {
+      pen.box(CAP, 0.3, 0.28, P + 0.15, s * (X2 + 0.05), soffit + 0.14, zf + P / 2 + 0.07);
+      const xm = s * (X1 + FW / 2);
+      pen.box(RUST, FW, soffit, P, xm, soffit / 2, zf + P / 2);
+      phys.solid(xm - FW / 2, xm + FW / 2, zf, zTop, 0, soffit);
+      // rustication: V-joints every 0.55 m on the outer and inner faces
+      for (let y = 0.55; y < soffit - 0.2; y += 0.55) {
+        pen.box(STONED, 0.04, 0.05, P, s * (X2 + 0.015), y, zf + P / 2);
+        pen.box(STONED, 0.04, 0.05, P - 1.0, s * (X1 - 0.015), y, zf + (P - 1) / 2);
+      }
+    }
+    // ---- the ARCADE: five round-headed openings through a rusticated wall
+    const nA = 5, pitch = 2 * X1 / nA, ow = Math.min(4.0, pitch - 1.6), hr = ow / 2;
+    const spring = Math.max(1.6, soffit - 0.25 - hr);
+    const sh = new THREE.Shape();
+    sh.moveTo(-X1, 0);
+    const centres = [];
+    for (let i = 0; i < nA; i++) {
+      const c = -X1 + pitch * (i + 0.5);
+      centres.push(c);
+      sh.lineTo(c - hr, 0);
+      sh.lineTo(c - hr, spring);
+      sh.absarc(c, spring, hr, Math.PI, 0, true);
+      sh.lineTo(c + hr, 0);
+    }
+    sh.lineTo(X1, 0); sh.lineTo(X1, soffit); sh.lineTo(-X1, soffit); sh.lineTo(-X1, 0);
+    const ag = new THREE.ExtrudeGeometry(sh, { depth: 1.0, bevelEnabled: false, curveSegments: 10 });
+    ag.translate(0, 0, zTop - 1.0);
+    pen.add(RUST, ag);
+    for (let i = 0; i <= nA; i++) {
+      const xa = i === 0 ? -X1 : centres[i - 1] + hr, xb = i === nA ? X1 : centres[i] - hr;
+      phys.solid(xa, xb, zTop - 1.0, zTop, 0, soffit);
+      // the pier's rusticated joints, below the springing only
+      for (let y = 0.55; y < spring - 0.1; y += 0.55) pen.box(STONED, xb - xa, 0.05, 0.04, (xa + xb) / 2, y, zTop + 0.015);
+      pen.box(CAP, xb - xa + 0.1, 0.2, 0.14, (xa + xb) / 2, spring - 0.1, zTop + 0.06);   // impost band
+    }
+    for (const c of centres) pen.box(CAP, 0.56, 0.8, 1.14, c, spring + hr - 0.12, zTop - 0.5);   // keystones
+    // ---- the VESTIBULE under the deck: piers, coffered soffit, lanterns, floor
+    const zV = zf + (P - 1) / 2;
+    for (let i = 0; i < nA - 1; i++) {
+      const xp = (centres[i] + centres[i + 1]) / 2;
+      pen.box(STONE, 1.2, soffit, 1.2, xp, soffit / 2, zV);
+      pen.box(CAP, 1.5, 0.3, 1.5, xp, soffit - 0.15, zV);
+      pen.box(STONED, 1.5, 0.22, 1.5, xp, 0.11, zV);
+      phys.solid(xp - 0.75, xp + 0.75, zV - 0.75, zV + 0.75, 0, soffit);
+    }
+    for (let x = -X1 + pitch; x < X1 - 0.1; x += pitch) pen.box(STONED, 0.34, 0.3, P - 1.0, x, soffit - 0.15, zV);
+    for (let z = zf + 2.5; z < zTop - 1.2; z += 2.5) pen.box(STONED, 2 * X1, 0.3, 0.34, 0, soffit - 0.15, z);
+    pen.box(0xa9a397, 2 * X1, g0, P - 1.0, 0, g0 / 2, zV);           // paving, top at the ground height
+    rec.ground.push({ x0: -X1, x1: X1, z0: zf, z1: zTop - 1.0, y: g0 });
+    for (const x of [-pitch, 0, pitch]) {
+      pen.box(BRONZE, 0.05, 0.9, 0.05, x, soffit - 0.75, zV);
+      pen.glow(0xffe2b0, bx(0.55, 0.75, 0.55, x, soffit - 1.55, zV), 0.9);
+      pen.box(BRONZE, 0.7, 0.1, 0.7, x, soffit - 1.13, zV);
+    }
+    // ---- the DOOR SURROUND on the facade: architrave, frieze, hood
+    pen.box(CAP, 0.5, 3.3, 0.24, -1.25, 1.65, zf + 0.12);
+    pen.box(CAP, 0.5, 3.3, 0.24, 1.25, 1.65, zf + 0.12);
+    pen.box(CAP, 3.0, 0.5, 0.24, 0, 2.75, zf + 0.12);
+    pen.box(STONE, 3.4, 0.35, 0.5, 0, 3.2, zf + 0.25);
+    pen.box(STONED, 3.7, 0.12, 0.62, 0, 3.43, zf + 0.31);
+
+    // ---- the two FLIGHTS, each with a half landing: rise from the forecourt
+    //      toward the building and arrive on the deck's front edge
+    const GO = 0.40, LAND = 2.4, PT = 0.5;
+    const n = Math.max(8, Math.round((deck - g0) / 0.165));
+    const rise = (deck - g0) / n, n1 = Math.ceil(n / 2), n2 = n - n1;
+    const yL = g0 + n1 * rise;
+    const zL0 = zTop + n2 * GO, zL1 = zL0 + LAND, zBot = zL1 + n1 * GO;
+    rec.zBot = zBot;
+    for (const s of [-1, 1]) {
+      const xa = s > 0 ? X1 : -X2, xb = s > 0 ? X2 : -X1;
+      const W = (xb - xa) - 2 * PT, xc = (xa + xb) / 2;
+      const f1 = CBZ.stairs.flight({
+        bottom: { x: b.ox + xc, y: g0, z: b.oz + zBot }, top: { x: b.ox + xc, y: yL, z: b.oz + zL1 },
+        width: W, overlap: 0.3, steps: n1, owner: b, plats: b.platforms || undefined, cols: b.colliders || undefined, kind: "stair",
+      });
+      const f2 = CBZ.stairs.flight({
+        bottom: { x: b.ox + xc, y: yL, z: b.oz + zL0 }, top: { x: b.ox + xc, y: deck, z: b.oz + zTop },
+        width: W, overlap: 0.3, steps: n2, owner: b, plats: b.platforms || undefined, cols: b.colliders || undefined, kind: "stair",
+      });
+      rec.flights.push(f1 && f1.link ? f1.link.id : null, f2 && f2.link ? f2.link.id : null);
+      phys.walk(xc - W / 2, xc + W / 2, zL0 - 0.02, zL1 + 0.02, yL);
+      const mass = function (zStart, base, cnt) {
+        for (let i = 1; i <= cnt; i++) {
+          const top = base + i * rise, zc = zStart - (i - 0.5) * GO, zFront = zStart - (i - 1) * GO;
+          pen.box(STONE, W, top, GO + 0.004, xc, top / 2, zc);
+          pen.box(CAP, W, 0.035, 0.07, xc, top - 0.0175, zFront - 0.035);     // the nosing, flush
+          phys.solid(xc - W / 2, xc + W / 2, zc - GO / 2, zc + GO / 2, -0.05, top);
+          rec.treads.push({ x: b.ox + xc, z: b.oz + zc, top: top, w: W, go: GO });
+        }
+      };
+      mass(zBot, g0, n1);
+      pen.box(STONE, W, yL, LAND + 0.004, xc, yL / 2, (zL0 + zL1) / 2);
+      phys.solid(xc - W / 2, xc + W / 2, zL0, zL1, -0.05, yL);
+      mass(zL0, yL, n2);
+      // the paving apron the first riser rises from (drawn at the ground height)
+      pen.box(0xa9a397, W + 2 * PT, g0, 2.0, xc, g0 / 2, zBot + 1.0);
+      rec.ground.push({ x0: xa, x1: xb, z0: zBot, z1: zBot + 2.0, y: g0 });
+      // parapets: the outer one runs on along the deck's side to the facade
+      const up = 1.0;
+      const line = [[zBot, g0 + up], [zL1, yL + up], [zL0, yL + up], [zTop, deck + up]];
+      parapet(pen, phys, s > 0 ? xb - PT : xa, PT, line.concat([[zf, deck + up]]), RUST, CAP);
+      parapet(pen, phys, s > 0 ? xa : xb - PT, PT, line, RUST, CAP);
+      // newels at the foot of both parapets: pedestal, cap, a bronze lantern
+      for (const xn of [xa + PT / 2, xb - PT / 2]) {
+        pen.box(RUST, 0.9, 1.5, 0.9, xn, 0.75, zBot - 0.1);
+        pen.box(CAP, 1.05, 0.16, 1.05, xn, 1.58, zBot - 0.1);
+        pen.box(BRONZE, 0.1, 1.0, 0.1, xn, 2.16, zBot - 0.1);
+        pen.glow(0xffe2b0, bx(0.34, 0.46, 0.34, xn, 2.86, zBot - 0.1), 0.85);
+        pen.box(BRONZE, 0.44, 0.08, 0.44, xn, 3.13, zBot - 0.1);
+        phys.solid(xn - 0.45, xn + 0.45, zBot - 0.55, zBot + 0.35, 0, 1.66);
+      }
+    }
+    // ---- the DECK: balustrade along the front between the flights
+    balustrade(b, pen, phys, bal, "x", zTop - 0.3, -X1, X1, deck, RUST, CAP);
+
+    // ---- THE ORDER: eight columns on the front, a return column and an anta
+    const R = (o.order && o.order.R) || 0.55;
+    const E0 = deck + (o.order && o.order.H || 9.6);                 // architrave soffit
+    const zc = zTop - 1.7;
+    const xo = X1 - 1.5, nC = 8;
+    const cols = [];
+    for (let i = 0; i < nC; i++) cols.push({ x: -xo + i * (2 * xo) / (nC - 1), y: deck, z: zc });
+    for (const s of [-1, 1]) cols.push({ x: s * xo, y: deck, z: zc - (P - 1.7) / 2 - 0.4 });
+    instances(b, columnGeo(R, E0 - deck), STONE, cols, "civic-portico-columns");
+    for (const c of cols) phys.solid(c.x - 1.36 * R, c.x + 1.36 * R, c.z - 1.36 * R, c.z + 1.36 * R, deck, deck + 3.0);
+    for (const s of [-1, 1]) {           // antae: pilasters where the order meets the wall
+      pen.box(STONE, 1.5 * R * 2, E0 - deck, 0.5, s * xo, (deck + E0) / 2, zf + 0.25);
+      pen.box(CAP, 1.7 * R * 2, 0.5, 0.62, s * xo, E0 - 0.25, zf + 0.31);
+    }
+    rec.columns = cols.map(function (c) { return { x: b.ox + c.x, z: b.oz + c.z }; });
+    // ---- ENTABLATURE: architrave, frieze, cornice on the front and both returns
+    const ent = function (y0, h, proj, hex) {
+      const front = 2 * xo + 2 * R * 1.45 + proj * 2;
+      pen.box(hex, front, h, 1.35 * R * 2 + proj, 0, y0 + h / 2, zc + proj / 2);
+      for (const s of [-1, 1])
+        pen.box(hex, 1.35 * R * 2 + proj, h, zc - zf + 0.02, s * (xo + proj / 2), y0 + h / 2, (zc + zf) / 2);
+    };
+    ent(E0, 0.8, 0, STONE);
+    ent(E0 + 0.8, 0.75, -0.06, STONED);
+    for (let x = -xo; x <= xo + 0.01; x += (2 * xo) / 21) pen.box(CAP, 0.3, 0.55, 0.12, x, E0 + 1.17, zc + 1.35 * R - 0.02);   // frieze blocks
+    ent(E0 + 1.55, 0.2, 0.25, CAP);
+    ent(E0 + 1.75, 0.4, 0.55, STONE);
+    const EC = E0 + 2.15;                                    // cornice top
+    // the portico's own ceiling, coffered, under the architrave line
+    pen.box(STONED, 2 * xo, 0.3, zc - zf, 0, E0 + 0.15, (zc + zf) / 2);
+    for (let x = -xo + (2 * xo) / 7; x < xo - 0.1; x += (2 * xo) / 7) pen.box(STONE, 0.35, 0.34, zc - zf, x, E0 - 0.17, (zc + zf) / 2);
+    for (let z = zf + 2.4; z < zc - 0.5; z += 2.4) pen.box(STONE, 2 * xo, 0.34, 0.35, 0, E0 - 0.17, z);
+    // ---- THE PEDIMENT: a real triangle (1:4.3), raking cornices, tympanum,
+    //      the medallion in it, acroteria; the roof behind it back to the wall
+    const hw = xo + R * 1.45 + 0.55, pr = hw * Math.tan(13.5 * Math.PI / 180);
+    const tri = function (half, rise, depth) {
+      const t = new THREE.Shape();
+      t.moveTo(-half, 0); t.lineTo(half, 0); t.lineTo(0, rise); t.lineTo(-half, 0);
+      return new THREE.ExtrudeGeometry(t, { depth: depth, bevelEnabled: false });
+    };
+    const tf = zc + 1.35 * R - 0.1;                           // tympanum face
+    const tg = tri(hw - 0.5, pr - 0.4, tf - zf); tg.translate(0, EC, zf); pen.add(STONED, tg);
+    const slope = Math.atan2(pr, hw), rl = Math.hypot(hw, pr) + 0.4;
+    for (const s of [-1, 1]) {
+      pen.box(CAP, rl, 0.5, 1.1, s * hw / 2, EC + pr / 2 + 0.12, tf + 0.25, 0, -s * slope);
+      pen.box(STONE, rl, 0.22, 0.8, s * hw / 2, EC + pr / 2 - 0.16, tf + 0.12, 0, -s * slope);
+      pen.box(CAP, 0.9, 0.9, 0.9, s * (hw - 0.3), EC + 0.45, tf);                   // corner acroteria
+      // the ROOF: two lead planes from the ridge down to the eaves, back to the wall
+      pen.box(ROOF, rl, 0.3, tf - zf + 0.6, s * hw / 2, EC + pr / 2 + 0.05, (tf + zf) / 2 + 0.3, 0, -s * slope);
+    }
+    pen.box(CAP, 1.1, 1.3, 0.9, 0, EC + pr + 0.5, tf);                              // apex acroterion
+    const med = new THREE.CylinderGeometry(1.25, 1.25, 0.24, 28); med.rotateX(Math.PI / 2); med.translate(0, EC + pr * 0.42, tf + 0.12);
+    pen.add(BRONZE, med);
+    const medR = new THREE.TorusGeometry(1.32, 0.12, 6, 28); medR.translate(0, EC + pr * 0.42, tf + 0.2);
+    pen.add(CAP, medR);
+
+    if (bal.length) instances(b, balusterGeo(), CAP, bal, "civic-portico-balusters");
+    pen.flush("civic-portico");
+    phys.dirty();
+    rec.pediment = { apex: EC + pr, cornice: EC };
+    rec.entablature = E0;
+    return rec;
+  }
+  /* ---- 7d. THE DOME --------------------------------------------------------
+     Over the shell's centre, standing on its roof (b.h). Real scale for the
+     building it crowns: o.R is the dome's springing radius (default 0.46 of
+     the short side, capped 13). Outside: two base steps, the peristyle drum
+     (24 columns, entablature, balustrade), the attic, a ribbed dome, the
+     lantern and its finial. Inside: the drum wall with lit windows, a cornice,
+     a coffered inner dome and the oculus, over whatever the host opens under
+     it. Returns the numbers a host needs (inner radius, springing, apex). */
+  function dome(b, o) {
+    if (!b || !b.group) return null;
+    o = o || {};
+    const STONE = o.stone || 0xe6e3d8, STONED = o.stoneD || 0xc9c4b4, CAP = o.cap || 0xf0ede4;
+    const SKIN = o.skin || 0xeceae3, RIB = o.rib || 0xd6d2c6, GLASS = 0x2a3440, BRONZE = o.bronze || 0xb99347;
+    const INNER = o.inner || 0xe9e1cd, COFFER = o.coffer || 0xcfc4a8;
+    const pen = Pen(b);
+    const y0 = b.h;
+    const Rd = o.R || Math.min(13, Math.min(b.w, b.d) * 0.23);   // drum outer radius
+    const Ri = Rd - 0.6;                                          // the room's radius inside it
+    const S1 = Rd + 3.4, S2 = Rd + 2.8, SB = Rd + 2.6;             // base steps, stylobate
+    // base steps + stylobate
+    pen.add(STONED, tube(S1, S1, 0.8, y0, 64));
+    pen.add(STONE, ring(Rd - 0.05, S1, y0 + 0.8, 64));
+    pen.add(STONED, tube(S2, S2, 0.8, y0 + 0.8, 64));
+    pen.add(STONE, ring(Rd - 0.05, S2, y0 + 1.6, 64));
+    pen.add(STONE, tube(SB, SB, 0.8, y0 + 1.6, 64));
+    pen.add(CAP, ring(Rd - 0.05, SB + 0.05, y0 + 2.4, 64));
+    // the drum wall
+    const yC0 = y0 + 2.4, colH = o.colH || 8.4, yE = yC0 + colH, yE1 = yE + 1.2;
+    pen.add(STONE, tube(Rd, Rd, yE1 - (y0 + 1.6), y0 + 1.6, 64));
+    // peristyle
+    const NC = 24, Rc = Rd + 1.35, cr = 0.42;
+    const pts = [];
+    for (let i = 0; i < NC; i++) {
+      const a = (i / NC) * Math.PI * 2;
+      pts.push({ x: Math.cos(a) * Rc, y: yC0, z: Math.sin(a) * Rc, ry: -a });
+    }
+    instances(b, columnGeo(cr, colH), STONE, pts, "civic-drum-columns");
+    // windows between the columns: dark glass in a stone architrave outside,
+    // lit panes on the inner wall (the rotunda's daylight)
+    const winH = colH - 2.6, winY = yC0 + 1.0 + winH / 2;
+    const glass = [], trim = [], lit = [], pil = [];
+    for (let i = 0; i < NC; i++) {
+      const a = ((i + 0.5) / NC) * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a), ry = Math.PI / 2 - a;
+      glass.push(bx(1.5, winH, 0.06, ca * (Rd + 0.02), winY, sa * (Rd + 0.02), ry));
+      trim.push(bx(2.0, 0.3, 0.2, ca * (Rd + 0.08), winY + winH / 2 + 0.2, sa * (Rd + 0.08), ry));
+      trim.push(bx(1.9, 0.18, 0.24, ca * (Rd + 0.1), winY - winH / 2 - 0.1, sa * (Rd + 0.1), ry));
+      lit.push(bx(1.4, winH - 0.2, 0.05, ca * (Ri + 0.02), winY, sa * (Ri + 0.02), ry));
+      const b2 = (i / NC) * Math.PI * 2;
+      pil.push(bx(0.8, colH + 1.0, 0.3, Math.cos(b2) * (Ri + 0.1), yC0 + (colH + 1.0) / 2 - 0.4, Math.sin(b2) * (Ri + 0.1), Math.PI / 2 - b2));
+    }
+    pen.add(GLASS, merge(glass));
+    pen.add(CAP, merge(trim));
+    pen.glow(0xfff1d8, merge(lit), 0.55);
+    pen.back(INNER, merge(pil));
+    // the entablature ring and the balustrade on it
+    pen.add(STONE, tube(Rc + 0.75, Rc + 0.75, 1.2, yE, 64));
+    pen.add(STONED, ring(Rd, Rc + 0.75, yE, 64, true));                 // its soffit
+    pen.add(CAP, tube(Rc + 1.0, Rc + 1.0, 0.3, yE1 - 0.3, 64));
+    pen.add(CAP, ring(Rd - 0.05, Rc + 1.0, yE1, 64));
+    const balPts = [];
+    const Rb = Rc + 0.6, nb = Math.round(2 * Math.PI * Rb / 0.32);
+    for (let i = 0; i < nb; i++) { const a = (i / nb) * Math.PI * 2; balPts.push({ x: Math.cos(a) * Rb, y: yE1 + 0.16, z: Math.sin(a) * Rb }); }
+    instances(b, balusterGeo(), CAP, balPts, "civic-drum-balusters");
+    pen.add(STONED, tube(Rb + 0.16, Rb + 0.16, 0.16, yE1, 64, false));
+    pen.add(CAP, tube(Rb + 0.2, Rb + 0.2, 0.14, yE1 + 0.8, 64, false));
+    // the attic: a plainer upper drum with pilasters and square lights
+    const Ra = Rd - 0.25, yA1 = yE1 + 3.6;
+    pen.add(STONE, tube(Ra, Ra, yA1 - yE1, yE1, 64));
+    const at = [], atG = [];
+    for (let i = 0; i < NC; i++) {
+      const a = (i / NC) * Math.PI * 2, ry = Math.PI / 2 - a;
+      at.push(bx(0.7, 3.2, 0.2, Math.cos(a) * (Ra + 0.08), yE1 + 1.8, Math.sin(a) * (Ra + 0.08), ry));
+      const a2 = ((i + 0.5) / NC) * Math.PI * 2;
+      atG.push(bx(1.1, 1.2, 0.06, Math.cos(a2) * (Ra + 0.02), yE1 + 1.9, Math.sin(a2) * (Ra + 0.02), Math.PI / 2 - a2));
+    }
+    pen.add(CAP, merge(at));
+    pen.add(GLASS, merge(atG));
+    pen.add(CAP, tube(Ra + 0.7, Ra + 0.7, 0.4, yA1 - 0.4, 64));
+    pen.add(CAP, ring(Ri, Ra + 0.7, yA1, 64));
+    // THE DOME: a raised (stilted) profile, sixteen ribs, a ring at its eye
+    const yS = yA1, Rs = Ra - 0.15, Hd = o.H || Rs * 1.12, rEye = Math.max(1.8, Rs * 0.19);
+    const tMax = Math.acos(rEye / Rs), NP = 18;
+    const prof = [];
+    for (let i = 0; i <= NP; i++) { const t = tMax * i / NP; prof.push([Rs * Math.cos(t), yS + Hd * Math.sin(t)]); }
+    const yEye = prof[NP][1];
+    pen.add(SKIN, lathe(prof.concat([[0, yEye]]), 64));
+    const ribs = [];
+    for (let k = 0; k < 16; k++) {
+      const a = (k / 16) * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a);
+      const cp = prof.map(function (p) { return new THREE.Vector3(ca * (p[0] + 0.1), p[1] + 0.05, sa * (p[0] + 0.1)); });
+      ribs.push(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(cp), 24, 0.2, 5, false));
+    }
+    pen.add(RIB, merge(ribs));
+    for (const f of [0.02, 0.3]) {
+      const i = Math.round(f * NP), p = prof[i];
+      const tg = new THREE.TorusGeometry(p[0] + 0.12, 0.2, 6, 64); tg.rotateX(Math.PI / 2); tg.translate(0, p[1], 0);
+      pen.add(RIB, tg);
+    }
+    // THE LANTERN: a ring, eight colonnettes round a glazed drum, its cap, the finial
+    const yL0 = yEye;
+    pen.add(CAP, tube(rEye + 0.5, rEye + 0.5, 0.5, yL0 - 0.1, 32, false));
+    const lp = [], lh = 3.4;
+    for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; lp.push({ x: Math.cos(a) * (rEye + 0.1), y: yL0 + 0.4, z: Math.sin(a) * (rEye + 0.1) }); }
+    instances(b, columnGeo(0.16, lh), CAP, lp, "civic-lantern-columns");
+    pen.add(GLASS, tube(rEye - 0.4, rEye - 0.4, lh, yL0 + 0.4, 24, false));
+    pen.add(CAP, tube(rEye + 0.45, rEye + 0.45, 0.5, yL0 + 0.4 + lh, 32, false));
+    pen.add(CAP, ring(0, rEye + 0.45, yL0 + 0.4 + lh + 0.5, 32));
+    const yLc = yL0 + 0.9 + lh;
+    pen.add(SKIN, lathe([[rEye + 0.2, yLc], [rEye * 0.8, yLc + rEye * 0.55], [rEye * 0.4, yLc + rEye * 0.95], [0, yLc + rEye * 1.05]], 32));
+    const yF = yLc + rEye * 1.05;
+    pen.add(BRONZE, lathe([[0, yF], [0.35, yF], [0.18, yF + 0.6], [0.3, yF + 0.9], [0.1, yF + 1.6], [0.26, yF + 1.9], [0, yF + 2.4]], 12));
+    // ---- INSIDE: the drum's inner wall from the roof slab up, its cornice, the
+    //      inner dome with coffer rings and a lit oculus at the lantern's eye
+    const yIn0 = y0 - 0.2;
+    pen.back(INNER, tube(Ri, Ri, yS - yIn0, yIn0, 64));
+    const cor = new THREE.TorusGeometry(Ri - 0.2, 0.28, 6, 64); cor.rotateX(Math.PI / 2); cor.translate(0, yE - 0.2, 0);
+    pen.add(COFFER, cor);
+    const cor2 = new THREE.TorusGeometry(Ri - 0.25, 0.32, 6, 64); cor2.rotateX(Math.PI / 2); cor2.translate(0, yS - 0.1, 0);
+    pen.add(COFFER, cor2);
+    const iH = Hd - 0.6, iprof = [];
+    for (let i = 0; i <= NP; i++) { const t = Math.acos(Math.min(1, (rEye - 0.3) / Ri)) * i / NP; iprof.push([Ri * Math.cos(t), yS + iH * Math.sin(t)]); }
+    const iTop = iprof[NP][1];
+    pen.back(INNER, lathe(iprof.concat([[0, iTop]]), 64));
+    for (const f of [0.18, 0.36, 0.54, 0.72]) {
+      const i = Math.round(f * NP), p = iprof[i];
+      const tg = new THREE.TorusGeometry(p[0] - 0.1, 0.16, 5, 64); tg.rotateX(Math.PI / 2); tg.translate(0, p[1] - 0.05, 0);
+      pen.add(COFFER, tg);
+    }
+    const eye = new THREE.CircleGeometry(rEye - 0.35, 28); eye.rotateX(Math.PI / 2); eye.translate(0, iTop - 0.04, 0);
+    pen.glow(0xfff4dc, eye, 0.9);
+    pen.flush("civic-dome");
+    return { innerR: Ri, drumR: Rd, springing: yS, apex: yF + 2.4, eye: iTop, floorY: y0 };
+  }
+
+  /* ---- 7e. AN OPEN COLONNADE in WORLD space (a hyphen between two blocks)
+     o: { x0, x1, z0, z1, h, stone, cap, roof, ground }: two rows of columns
+     along the long axis, an entablature, a flat roof with a balustraded
+     edge, paving under it at the ground height. Solid columns. */
+  function colonnade(root, o) {
+    if (!root || !o) return null;
+    const host = { group: new THREE.Group(), ox: 0, oz: 0, colliders: null, platforms: null };
+    host.group.name = "civic-colonnade";
+    root.add(host.group);
+    const pen = Pen(host), phys = Phys(host);
+    const STONE = o.stone || 0xe6e3d8, CAP = o.cap || 0xf0ede4, STONED = o.stoneD || 0xc9c4b4;
+    const alongX = (o.x1 - o.x0) >= (o.z1 - o.z0);
+    const L = alongX ? o.x1 - o.x0 : o.z1 - o.z0, D = alongX ? o.z1 - o.z0 : o.x1 - o.x0;
+    const cx = (o.x0 + o.x1) / 2, cz = (o.z0 + o.z1) / 2, H = o.h || 6.0, g0 = o.ground != null ? o.ground : 0.10;
+    const R = 0.34, n = Math.max(2, Math.round(L / 3.2) + 1), pts = [];
+    for (let i = 0; i < n; i++) for (const s of [-1, 1]) {
+      const t = -L / 2 + 0.8 + i * (L - 1.6) / (n - 1), u = s * (D / 2 - 0.6);
+      pts.push({ x: cx + (alongX ? t : u), y: g0, z: cz + (alongX ? u : t) });
+    }
+    instances(host, columnGeo(R, H), STONE, pts, "civic-colonnade-columns");
+    for (const p of pts) phys.solid(p.x - 1.36 * R, p.x + 1.36 * R, p.z - 1.36 * R, p.z + 1.36 * R, 0, g0 + 3);
+    const E = g0 + H;
+    const ww = alongX ? L : D, dd = alongX ? D : L;
+    pen.box(STONE, ww, 0.7, dd, cx, E + 0.35, cz);
+    pen.box(CAP, ww + 0.5, 0.3, dd + 0.5, cx, E + 0.85, cz);
+    pen.box(STONED, ww - 0.3, 0.05, dd - 0.3, cx, E - 0.02, cz);          // the soffit's shadow line
+    for (const s of [-1, 1]) {
+      pen.box(CAP, alongX ? L + 0.5 : 0.3, 0.7, alongX ? 0.3 : L + 0.5, cx + (alongX ? 0 : s * (dd / 2 + 0.1)), E + 1.35, cz + (alongX ? s * (dd / 2 + 0.1) : 0));
+    }
+    pen.box(0xa9a397, ww, g0, dd, cx, g0 / 2, cz);
+    pen.flush("civic-colonnade");
+    phys.dirty();
+    return { ground: { x0: o.x0, x1: o.x1, z0: o.z0, z1: o.z1, y: g0 }, top: E + 1.7 };
+  }
+
+  CBZ.civicMonument = { portico: portico, dome: dome, colonnade: colonnade, columnGeo: columnGeo };
 })();

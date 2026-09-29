@@ -114,18 +114,29 @@
   }
   function toWorld(rec, lx, lz) { const A = rec.approach, L = -lx; return { x: A.x + A.nx * lz + A.tx * L, z: A.z + A.nz * lz + A.tz * L }; }
   function toLocal(rec, wx, wz) { const A = rec.approach, dx = wx - A.x, dz = wz - A.z; return { x: -(dx * A.tx + dz * A.tz), z: dx * A.nx + dz * A.nz }; }
+  // where the staff stand: the room's own spots when it publishes them (the
+  // Oval Office does: an oval has no straight side wall to line people up on),
+  // else a line down the side of a rectangular office
   function spots(rec) {
-    const A = rec.approach, half = A.span / 2;
-    const lp = rec.landmarks.arrivalPortal ? toLocal(rec, rec.landmarks.arrivalPortal.x, rec.landmarks.arrivalPortal.z) : { x: 0, z: 6 };
+    const A = rec.approach, half = A.span / 2, L = rec.landmarks;
+    const lp = L.arrivalPortal ? toLocal(rec, L.arrivalPortal.x, L.arrivalPortal.z) : { x: 0, z: 6 };
     const side = half - 1.1;
     const line = [];
-    for (let i = 0; i < LINE_MAX; i++) line.push(toWorld(rec, side, lp.z + 2.1 + i * 1.2));
+    for (let i = 0; i < LINE_MAX; i++) {
+      const q = L["line" + i];
+      line.push(q ? { x: q.x, z: q.z } : toWorld(rec, side, lp.z + 2.1 + i * 1.2));
+    }
+    const desk = L.presidentialDesk;
     return {
-      door: toWorld(rec, 0, 1.0),
-      chief: toWorld(rec, side, lp.z + 0.9),
+      door: L.staffDoor ? { x: L.staffDoor.x, z: L.staffDoor.z } : toWorld(rec, 0, 1.0),
+      chief: L.chiefSpot ? { x: L.chiefSpot.x, z: L.chiefSpot.z } : toWorld(rec, side, lp.z + 0.9),
       line: line,
-      press: toWorld(rec, Math.min(3.4, half - 1.4), Math.max(1.4, lp.z - 2.0)),
-      faceIn: function (p) { const c = toWorld(rec, 0, toLocal(rec, p.x, p.z).z); return Math.atan2(c.x - p.x, c.z - p.z); },
+      press: L.pressSpot ? { x: L.pressSpot.x, z: L.pressSpot.z } : toWorld(rec, Math.min(3.4, half - 1.4), Math.max(1.4, lp.z - 2.0)),
+      // everybody in the room turns to the man at the desk
+      faceIn: function (p) {
+        if (desk) return Math.atan2(desk.x - p.x, desk.z - p.z);
+        const c = toWorld(rec, 0, toLocal(rec, p.x, p.z).z); return Math.atan2(c.x - p.x, c.z - p.z);
+      },
     };
   }
   function nearOffice(rec) {
@@ -349,6 +360,15 @@
     p.name = nm; p._presStaff = "chief";
     W.chief = p;
     if (CBZ.interactions && CBZ.interactions.registerFor) {
+      // E on him is Talk: the day in one sentence. His orders are on the wheel.
+      CBZ.interactions.registerFor(p, { id: "pres-chief-talk", slot: "e", prio: 30, campaignSafe: true, forceYes: true,
+        label: "Talk", canShow: function () { return !!seat(); },
+        onSelect: function () {
+          const O = CBZ.presidentOffice;
+          let line = "Nothing that can't wait, sir.";
+          if (O && O.dayLine) { try { line = O.dayLine() || line; } catch (e) {} }
+          say(p, line, Math.min(5, 2 + line.length * 0.04));
+        } });
       CBZ.interactions.registerFor(p, { id: "pres-chief-fire", prio: 20, pick: "person", campaignSafe: true, forceYes: true,
         label: "Fire", canShow: function () { return !!seat(); }, onSelect: function (chief, ctx, who) { fire(chief, who); } });
     }

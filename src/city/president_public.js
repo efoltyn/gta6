@@ -21,7 +21,7 @@
       corbels under it, a lectern with the seal, two flags, and a BULLETPROOF
       glass screen that goes up in front of the lectern for a speech (a
       losBlocker while it is up, with the balustrade under it). You reach it from the
-      state residence upstairs ("Step out onto the balcony"); "Go back
+      state residence upstairs ("Step out"); "Go
       inside" takes you in again.
 
    3. THE CROWD. For a speech a crowd gathers on the motor court in front of
@@ -335,7 +335,7 @@
 
     // two stone corbels, stepped out of the wall like a scroll
     for (const sx of [-1, 1]) {
-      const bx = cx + sx * 3.4;
+      const bx = cx + sx * Math.min(3.4, W / 2 - 0.35);   // inside the door bay's columns
       box(grp, bx, D - 1.05, F + 0.26, 0.52, 1.3, 0.52, STONE_D);
       box(grp, bx, D - 0.62, F + 0.62, 0.50, 0.55, 1.2, STONE);
       box(grp, bx, D - 0.38, F + 1.05, 0.48, 0.24, 2.0, STONE_L);
@@ -1595,7 +1595,7 @@
         const q = B.inside;
         return Math.hypot(q.x - px, q.z - pz) < 2.2 ? { x: q.x, y: q.y, z: q.z, kind: "presbalcony" } : null;
       },
-      options: [{ id: "prespub-step-out", slot: "e", label: "Step out onto the balcony",
+      options: [{ id: "prespub-step-out", slot: "e", label: "Step out",
         onSelect: function () { movePlayer(B.cx + 2.4, B.deckY + 0.02, B.facadeZ + 1.6, 0); } }],
     });
     I.registerZone({
@@ -1607,7 +1607,7 @@
         const q = B.door;
         return Math.hypot(q.x - px, q.z - pz) < 1.8 && !(APP.live && APP.live.sp && APP.live.sp.awaiting) ? { x: q.x, y: q.y, z: q.z, kind: "presbalcony" } : null;
       },
-      options: [{ id: "prespub-go-in", slot: "e", label: "Go back inside",
+      options: [{ id: "prespub-go-in", slot: "e", label: "Go in",
         onSelect: function () { const q = B.inside; movePlayer(q.x, q.y + 0.02, q.z, Math.PI); } }],
     });
     I.registerZone({
@@ -1619,7 +1619,7 @@
         if (!P || Math.abs(P.y - L.stage.y) > 1.0) return null;
         return Math.hypot(L.stage.x - px, L.stage.z - pz) < 1.4 ? { x: L.stage.x, y: L.stage.y, z: L.stage.z, kind: "preslectern" } : null;
       },
-      options: [{ id: "prespub-speak", slot: "e", label: "Give the speech",
+      options: [{ id: "prespub-speak", slot: "e", label: "Speak",
         onSelect: function () {
           const L = APP.live; if (!L) return;
           const P = CBZ.player;

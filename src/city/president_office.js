@@ -17,8 +17,9 @@
    THE PHONE RINGS. A proper desk phone sits where the old placeholder box
    was: base, handset, a row of line buttons and a red lamp. When somebody
    needs a decision it rings (a synthesized two-tone trill), the lamp
-   blinks and the handset rattles in its cradle. Walk up and "Answer the
-   phone": the handset comes up to your ear and the caller talks. Callers are
+   blinks and the handset rattles in its cradle. E on it is Answer: the
+   handset comes up to your ear and the caller talks. When it is quiet, E
+   on it is Call: you ring whoever has business waiting for you. Callers are
    the people who run the state for you: the General, the Bureau Director,
    the Treasury Secretary, the Police Commissioner, a foreign ambassador,
    the party whip, the Chief of Staff. What they say is read off the world
@@ -32,12 +33,13 @@
    THE FOLDERS ARE THE AGENDA. Each morning two or three folders are on
    the desk: red for security, blue for the economy, green for the people,
    each with a printed cover label (the classification stamp, the
-   department, the day). "Open the folder" lays it open flat, the camera
-   leans down over your shoulder and the page is the text: a typed memo,
-   FROM / TO / SUBJECT, a body that quotes the current state, and a
-   recommendation. "Sign it" inks your signature and a stamp onto the page,
-   runs the order and drops the folder in the out-tray. "Send it back"
-   stamps it RETURNED. If the order cannot run, a yellow note on the page
+   department, the day). E on the desk is Sign: the top folder opens flat,
+   the camera leans down over your shoulder and the page is the text (a
+   typed memo, FROM / TO / SUBJECT, a body that quotes the current state, a
+   recommendation); E again inks your signature and a stamp onto the page,
+   runs the order and drops the folder in the out-tray. Send back (on the
+   wheel) stamps it RETURNED. Hold E is Govern: you sit down behind the
+   desk and the day comes to you. If the order cannot run, a yellow note on the page
    says why and signing is not offered. Folders left unsigned at the end
    of the day are their own consequence.
 
@@ -54,8 +56,8 @@
    from the doorway, stops in front of the desk and talks to you: the day's
    schedule in words, missed calls, what the folders you ignored cost. When
    an attack is armed at the gate a military aide walks in; after a bad
-   news cycle the press secretary does. A secretary stands at her desk
-   outside the office door and has a word for you when you pass.
+   news cycle the press secretary does. A secretary stands by her desk in
+   the outer office and has a word for you when you pass.
 
    THE MATTERS ENGINE. Everything above is a delivery channel for one
    object, the matter (see offer() below). The world generates matters
@@ -73,7 +75,7 @@
    president_hud.js (the approval/treasury/threat strip). The general's
    threat briefing lives on as the General's phone call and security memo.
 
-   PUBLIC: CBZ.presidentOffice = { offer, news, ringing, deskPoint, audit }.
+   PUBLIC: CBZ.presidentOffice = { offer, news, dayLine, ringing, deskPoint, audit }.
 ============================================================ */
 (function () {
   "use strict";
@@ -91,8 +93,8 @@
   const TV_HZ = 4;                 // repaint ceiling
   const TV_NEAR = 25;              // metres: beyond this the canvas is left alone
   const AIDE_TALK_R = 4.2;
-  const DESK_TOP = 0.74;           // furniture.js bossDesk: worktop top above the floor
-  const THRONE_BACK = 1.12;        // bossDesk: throne centre behind the desk centre (D/2 + 0.52)
+  const DESK_TOP = 0.76;           // interior_programs.js's Resolute desk (the room publishes rec.deskTop)
+  const THRONE_BACK = 1.12;        // the chair's centre behind the desk centre, along the frame
 
   // ---------------------------------------------------------------- seams
   let CLOCK = 0;                   // real seconds of city play, this file's clock
@@ -284,34 +286,34 @@
     const dl = toLocal(rec, lm.presidentialDesk.x, lm.presidentialDesk.z);
     const portal = lm.arrivalPortal ? toLocal(rec, lm.arrivalPortal.x, lm.arrivalPortal.z) : { x: 0, z: Math.min(7, Math.max(5.8, A.depth * 0.22)) };
     const dep = A.depth, half = A.span / 2;
-    // TV: on the credenza wall (lateral -span/2 = local +x), past the second
-    // credenza and short of the sconce by the desk, in front of the chair.
-    const lo = portal.z + 7.4 + 0.98 + 1.0 + 0.25;
-    const hi = dep - 3.4 - 0.35 - 1.0;
-    let tvZ = Math.max(lo, Math.min(hi, dep - 7.5));
-    if (lo > hi) tvZ = hi;
+    // THE TELEVISION hangs where the room says (its tv / tvBack landmarks: a
+    // point on the wall and one behind it); a room that names none gets it
+    // on the side wall level with the desk
+    let tv = { x: half, z: Math.max(1.0, dl.z - 3.0), y: 1.95, yaw: 0 };
+    if (lm.tv && lm.tvBack) {
+      const a = toLocal(rec, lm.tv.x, lm.tv.z), b = toLocal(rec, lm.tvBack.x, lm.tvBack.z);
+      const ux = a.x - b.x, uz = a.z - b.z, ul = Math.hypot(ux, uz) || 1;
+      tv = { x: a.x, z: a.z, y: 1.95, yaw: Math.atan2(uz / ul, -ux / ul) };
+    }
+    const spawn = lm.staffDoor ? toLocal(rec, lm.staffDoor.x, lm.staffDoor.z) : { x: 0, z: 1.0 };
     return {
       desk: { x: dl.x, z: dl.z },
       portalZ: portal.z,
       dep: dep, half: half,
-      tv: { x: half, z: tvZ, y: 1.95 },
-      // desk-frame positions (x = reader's right, z = toward the chair).
-      // interior_programs.js still draws two placeholder boxes on this desk:
-      // a black box (0.48 x 0.28, 0.03..0.17 over the top) with a brass bar
-      // on it at lateral -0.82, and a brass slab (0.62 x 0.42, 0.055..0.105)
-      // at +0.82. That file is not ours, so the real objects SWALLOW them:
-      // the phone's console is built over the black box and the brass bar
-      // becomes its handset rest; the day's folders sit in a brass-lined
-      // tray whose floor is the old slab.
-      phone: { x: 0.82, z: 0.0 },
-      pile: { x: -0.82, z: 0.0 },
-      tray: { x: 0.40, z: 0.33 },
+      tv: tv,
+      // desk-frame positions (x = reader's right, z = toward the chair), on
+      // the Resolute desk's 1.83 x 1.2 top: the phone at the right hand, the
+      // day's folders at the left, the out-tray by the phone
+      phone: { x: 0.60, z: -0.08 },
+      pile: { x: -0.56, z: -0.04 },
+      tray: { x: 0.60, z: 0.36 },
       open: { x: 0.0, z: 0.26 },
-      // people
-      aideSpawn: { x: 0, z: 1.0 },
-      aideStand: { x: 0, z: dl.z - 2.05 },
-      secDesk: { x: -Math.min(3.4, half - 1.4), z: Math.max(1.4, portal.z - 2.0) },
-      secPost: { x: -Math.min(4.25, half - 0.6), z: Math.max(1.4, portal.z - 2.0) },
+      // people: they come in at the office's staff door and stop in front of the desk
+      aideSpawn: spawn,
+      aideStand: { x: dl.x, z: dl.z - 2.05 },
+      // the secretary's post: the room's (outside the office door), in world coords
+      secPostW: lm.secretaryPost ? { x: lm.secretaryPost.x, z: lm.secretaryPost.z } : toWorld(rec, -Math.min(4.25, half - 0.6), Math.max(1.4, portal.z - 2.0)),
+      secLookW: lm.arrivalPortal ? { x: lm.arrivalPortal.x, z: lm.arrivalPortal.z } : toWorld(rec, 0, portal.z),
     };
   }
 
@@ -349,7 +351,7 @@
 
     // the desk frame: origin on the worktop centre
     const desk = new THREE.Group();
-    desk.position.set(L.desk.x, DESK_TOP, L.desk.z);
+    desk.position.set(L.desk.x, rec.deskTop || DESK_TOP, L.desk.z);
     grp.add(desk);
     ROOM.desk = desk;
 
@@ -357,10 +359,9 @@
     buildInTray(desk, L.pile);
     buildTray(desk, L.tray);
     buildTV(grp, L.tv);
-    buildSecretaryDesk(grp, L);
     grp.updateMatrixWorld(true);
-    const tvw = new THREE.Vector3(L.tv.x - 0.33, L.tv.y, L.tv.z);
-    grp.localToWorld(tvw);
+    const tvw = new THREE.Vector3(-0.33, 0, 0);
+    ROOM.tv.localToWorld(tvw);
     ROOM.tvWorld = { x: tvw.x, y: tvw.y, z: tvw.z };
     layoutFolders();
     paintTVNow();
@@ -443,6 +444,7 @@
   function buildTV(grp, at) {
     const tv = new THREE.Group();
     tv.position.set(at.x, at.y, at.z);
+    tv.rotation.y = at.yaw || 0;
     grp.add(tv);
     // wall bracket (hidden behind the set), then the set, then the glass
     box(tv, -0.14, 0, 0, 0.24, 0.32, 0.42, 0x2c2f33);
@@ -457,21 +459,6 @@
     // a tiny standby LED under the glass
     box(tv, -0.324, -0.545, 0.9, 0.004, 0.012, 0.02, 0x66ff88, { emissive: 0x33ff66, ei: 0.8 });
     ROOM.tv = tv; ROOM.tvTex = tex; ROOM.tvCanvas = cv;
-  }
-
-  // ---- the secretary's desk, outside the door -----------------------------
-  function buildSecretaryDesk(grp, L) {
-    const d = new THREE.Group();
-    d.position.set(L.secDesk.x, 0, L.secDesk.z);
-    grp.add(d);
-    const WOOD = 0x4a2f1d;
-    box(d, 0, 0.36, 0, 0.62, 0.72, 1.35, WOOD);                          // modesty body (desk runs along the depth)
-    box(d, 0, 0.745, 0, 0.72, 0.05, 1.45, 0x5b3b25);                     // top
-    // her side is local -x (she stands between the desk and the wall)
-    box(d, -0.12, 0.795, -0.35, 0.30, 0.05, 0.36, 0x1b1e23);             // her phone console
-    box(d, -0.12, 0.776, 0.25, 0.26, 0.012, 0.34, 0xece8dc);             // a pad of paper
-    box(d, 0.20, 0.95, 0.45, 0.05, 0.36, 0.05, 0x8d7a4f);                // lamp stem
-    box(d, 0.20, 1.18, 0.45, 0.22, 0.10, 0.22, 0xe8d9a8, { emissive: 0xffd28a, ei: 0.55 });
   }
 
   // ============================================================
@@ -1221,8 +1208,7 @@
     if (SEC.ped || SEC.dead || !ROOM.rec || !ROOM.L || !CBZ.cityPostNpc) return;
     if (++SEC.tries > 40) return;
     const rec = ROOM.rec, L = ROOM.L;
-    const w = toWorld(rec, L.secPost.x, L.secPost.z);
-    const look = toWorld(rec, 0, L.secPost.z);
+    const w = L.secPostW, look = L.secLookW;
     let ped = null;
     try {
       ped = CBZ.cityPostNpc(w.x, w.z, {
@@ -1798,7 +1784,7 @@
     M.chiefDay = day();
     const s = S();
     const bits = [];
-    if (first) bits.push("Mr. President. Welcome to your office. The phone on your desk is how the cabinet reaches you, and the folders are today's business.");
+    if (first) bits.push("Welcome, Mr. President. Today's business is on your desk.");
     else bits.push("Good morning, Mr. President.");
     const sch = scheduleWords();
     if (sch) bits.push(sch);
@@ -2005,59 +1991,99 @@
   // ============================================================
   let zonesWired = false;
   function yGate(y) { const Pp = player(); return !(Pp && Pp.pos && isFinite(y) && Math.abs(Pp.pos.y - y) > 2.2); }
+  // THE PHONE: E is Answer while it rings. Otherwise E is Call: you ring the
+  // office with something waiting for you (the first call in the queue), or
+  // the one whose business is most pressing today. Whoever it is, it is the
+  // same conversation a ringing call would have been.
+  function placeCall() {
+    if (M.ringing) { answer(); return; }
+    if (M.onCall || READ.f || AIDE.talking) return;
+    let m = M.phoneQ.length ? M.phoneQ.shift() : null;
+    if (!m) {
+      const T = th(), st0 = S();
+      const gen = (T.members > 0 && T.intel) ? bureauCall : ((st0.treasury | 0) < 4000 ? treasuryCall : whipCall);
+      let id = null;
+      try { id = gen(); } catch (e) { id = null; }
+      for (let i = 0; i < M.phoneQ.length; i++) if (M.phoneQ[i].id === id) { m = M.phoneQ.splice(i, 1)[0]; break; }
+    }
+    if (!m) return;
+    M.onCall = m;
+    if (CBZ.sfx) { try { CBZ.sfx("switch", { vol: 0.5 }); } catch (e) {} }
+    liftHandset();
+    converse(m, "phone", function () { M.later.push({ at: CLOCK + 3.0, fn: function () { hangUp(); } }); });
+  }
+  // GOVERN: the heavier verb on the desk. You sit down behind it and the day
+  // comes to you: today's folders on the desk if they are not there yet, and
+  // the Chief of Staff with the day in words if you have not had it.
+  function govern() {
+    const rec = ROOM.rec;
+    if (!rec) return;
+    relocateToDesk(rec);
+    if (!seated()) return;
+    if (M.folderDay !== day()) issueFolders(day());
+    if (M.chiefDay !== day() && !AIDE.ped) chiefVisit(false);
+  }
   function wireZones() {
     if (zonesWired || !CBZ.interactions || !CBZ.interactions.registerZone) return;
     zonesWired = true;
     CBZ.interactions.registerZone({
       id: "presoffice-phone", kind: "presphone", radius: 2.3, prio: 15,
       find: function (px, pz) {
-        if (!M.ringing || !ROOM.phone || !ROOM.rec) return null;
+        if (!ROOM.phone || !ROOM.rec || M.onCall) return null;
         const w = phoneWorld();
         if (!w || !yGate(ROOM.rec.floorY)) return null;
         const dx = w.x - px, dz = w.z - pz;
         return dx * dx + dz * dz < 2.3 * 2.3 ? { x: w.x, y: w.y, z: w.z, kind: "presphone" } : null;
       },
       options: [{
-        id: "presoffice-answer", slot: "e", prio: 20, campaignSafe: true,
-        label: "Answer the phone",
+        id: "presoffice-answer", slot: "e", prio: 22, campaignSafe: true,
+        label: "Answer",
         canShow: function () { return !!M.ringing; },
         onSelect: function () { answer(); },
+      }, {
+        id: "presoffice-call", slot: "e", prio: 20, campaignSafe: true,
+        label: "Call",
+        canShow: function () { return !M.ringing && seated() && !READ.f && !AIDE.talking; },
+        onSelect: function () { placeCall(); },
       }],
     });
+    // THE DESK: E is Sign (the top folder opens under your hand; E again signs
+    // it), hold E is Govern, and the wheel adds Send back
     CBZ.interactions.registerZone({
-      id: "presoffice-folders", kind: "presfolder", radius: 2.2, prio: 14,
+      id: "presoffice-desk", kind: "presdesk", radius: 2.2, prio: 14,
       find: function (px, pz) {
-        if (!ROOM.desk || !ROOM.rec || !ROOM.L) return null;
-        if (!READ.f && !topFolder()) return null;
-        if (READ.closing) return null;
+        if (!ROOM.desk || !ROOM.rec || !ROOM.L || READ.closing) return null;
         if (!yGate(ROOM.rec.floorY)) return null;
         const L = ROOM.L;
         const w = READ.f ? deskWorld(L.open.x, 0.01, L.open.z) : deskWorld(L.pile.x, PILE_Y, L.pile.z);
         if (!w) return null;
         const dx = w.x - px, dz = w.z - pz;
-        return dx * dx + dz * dz < 2.2 * 2.2 ? { x: w.x, y: w.y, z: w.z, kind: "presfolder" } : null;
+        return dx * dx + dz * dz < 2.2 * 2.2 ? { x: w.x, y: w.y, z: w.z, kind: "presdesk" } : null;
       },
       options: [{
-        id: "presoffice-folder-e", slot: "e", prio: 20, campaignSafe: true,
-        label: function () {
-          if (!READ.f) return "Open the folder";
-          return READ.f.blocked ? "Close the folder" : "Sign it";
-        },
+        id: "presoffice-sign", slot: "e", prio: 20, campaignSafe: true,
+        label: function () { return READ.f && READ.f.blocked ? "Close" : "Sign"; },
+        canShow: function () { return READ.f ? READ.f.state === "open" : !!topFolder(); },
         onSelect: function () {
           if (!READ.f) { openFolder(topFolder()); return; }
           if (READ.f.blocked) shutFolder(); else signFolder();
         },
       }, {
-        id: "presoffice-folder-i", slot: "i", prio: 20, campaignSafe: true,
-        label: "Send it back",
+        id: "presoffice-govern", hold: true, prio: 18, campaignSafe: true,
+        label: "Govern",
+        canShow: function () { return seated() && !READ.f; },
+        onSelect: function () { govern(); },
+      }, {
+        id: "presoffice-send-back", prio: 10, campaignSafe: true,
+        label: "Send back",
         canShow: function () { return !!READ.f && READ.f.state === "open"; },
         onSelect: function () { returnFolder(); },
       }],
     });
     if (CBZ.interactions.describe) {
       try {
-        CBZ.interactions.describe("presphone", function () { return { label: "Desk phone", note: M.ringing ? "ringing" : "" }; });
-        CBZ.interactions.describe("presfolder", function () { return { label: READ.f ? READ.f.m.memo.subject : "Briefing folders", note: "" }; });
+        CBZ.interactions.describe("presphone", function () { return { label: "", note: "" }; });
+        CBZ.interactions.describe("presdesk", function () { return { label: "", note: "" }; });
       } catch (e) {}
     }
   }
@@ -2144,9 +2170,21 @@
       desk: deskPoint(),
     };
   }
+  // the day in one short sentence, for whoever on the staff you ask
+  // (president_staff.js: Talk on the Chief of Staff)
+  function dayLine() {
+    if (M.ringing) return "Your line's ringing, sir.";
+    if (M.missed.length) { const m = M.missed[M.missed.length - 1]; return clean(m.missedLine || (speaker(m.who, false) + " tried to reach you.")); }
+    const live = liveFolders();
+    if (live) return live === 1 ? "There's a folder on your desk, sir." : live + " folders on your desk, sir.";
+    const sch = scheduleWords();
+    if (sch) return sch;
+    return "Nothing that can't wait, sir.";
+  }
   CBZ.presidentOffice = {
     offer: offer,
     news: news,
+    dayLine: dayLine,
     ringing: function () { return !!M.ringing; },
     deskPoint: deskPoint,
     audit: audit,
@@ -2193,8 +2231,10 @@
       const r = ROOM.rec, w = ROOM.tvWorld;
       if (!r || !w) return null;
       paintTVNow();
-      // the glass faces into the room: +lateral of the approach frame
-      return { x: w.x, y: w.y, z: w.z, nx: r.approach.tx, nz: r.approach.tz, w: 1.92, h: 1.08 };
+      // the glass faces into the room: the set's own -x, wherever the room hung it
+      const dir = new THREE.Vector3(-1, 0, 0);
+      if (ROOM.tv) { ROOM.tv.updateMatrixWorld(true); dir.transformDirection(ROOM.tv.matrixWorld); }
+      return { x: w.x, y: w.y, z: w.z, nx: dir.x, nz: dir.z, w: 1.92, h: 1.08 };
     },
   };
 })();

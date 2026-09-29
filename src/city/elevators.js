@@ -1419,12 +1419,16 @@
       const y0 = tops[k], y2 = tops[k + 1], y1 = (y0 + y2) / 2;
       addPlat(dA1 - 0.02, D1, L0, L1, y1);                                                  // half landing
       dbox(COREC.land, (dA1 + D1) / 2, latMid, y1 - 0.1, D1 - dA1, Math.abs(L1 - L0), 0.2);
+      // the walk surface IS the treads drawn below (steps: tread i of n has its
+      // top at y0 + i*rise over the i-th n-th of the run); the old straight
+      // ramp ran nosing to nosing, a riser under every tread
+      const nSteps = Math.max(2, Math.round((y1 - y0) / CORE_RISE));
       const fA = CBZ.stairs && CBZ.stairs.flight({
-        bottom: Wp(dA0, aC, y0), top: Wp(dA1, aC, y1), width: laneW, overlap: 0.35,
+        bottom: Wp(dA0, aC, y0), top: Wp(dA1, aC, y1), width: laneW, overlap: 0.35, steps: nSteps,
         owner: b, plats: b.platforms || undefined, link: false, kind: "stair",
       });
       const fB = CBZ.stairs && CBZ.stairs.flight({
-        bottom: Wp(dA1, bC, y1), top: Wp(dA0, bC, y2), width: laneW, overlap: 0.35,
+        bottom: Wp(dA1, bC, y1), top: Wp(dA0, bC, y2), width: laneW, overlap: 0.35, steps: nSteps,
         owner: b, plats: b.platforms || undefined, link: false, kind: "stair",
       });
       if (fA) plats.push(fA.plat);
@@ -1443,7 +1447,6 @@
       }
       // ---- the stair you see: treads + risers, a sloped soffit under each
       // flight, a handrail + balusters on the open (centre) edge ------------
-      const nSteps = Math.max(2, Math.round((y1 - y0) / CORE_RISE));
       const rise = (y1 - y0) / nSteps, go = runLen / nSteps;
       for (let lane = 0; lane < 2; lane++) {
         const lc = lane === 0 ? aC : bC, base = lane === 0 ? y0 : y1;

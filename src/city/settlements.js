@@ -274,7 +274,10 @@
     store:    { shopKind: "hardware", storeys: 1, colorKey: "wood" },
     bar:      { shopKind: "bar",      storeys: 1, colorKey: "accent" },
     gas:      { shopKind: "gas",      storeys: 1, colorKey: "wood" },
-    clinic:   { shopKind: "hospital", storeys: 1, colorKey: "accent" },
+    // a clinic is a clinic in every flavour: two storeys of white render and
+    // clean glass (no auto grammar), and towngen hangs its entrance canopy.
+    // It is the door the ER sends you out of, so it must read as one.
+    clinic:   { shopKind: "hospital", storeys: 2, color: 0xe6eaec, opts: { retail: true, dress: false } },
     gunsmith: { shopKind: "guns",     storeys: 1, colorKey: "accent" },
     pawn:     { shopKind: "pawn",     storeys: 1, colorKey: "wood" },
     clothing: { shopKind: "clothing", storeys: 1, colorKey: "wood" },
@@ -357,8 +360,8 @@
         name: nameFor(archKey),
         shopKind: a.shopKind,
         storeys: a.storeys,
-        color: pal[a.colorKey] != null ? pal[a.colorKey] : (cfg.palette && cfg.palette.wood) || 0x9c7b4e,
-        opts: { retail: true },
+        color: a.color != null ? a.color : pal[a.colorKey] != null ? pal[a.colorKey] : (cfg.palette && cfg.palette.wood) || 0x9c7b4e,
+        opts: a.opts ? Object.assign({}, a.opts) : { retail: true },
         lotKind: "shop",
         _arch: archKey,
       };

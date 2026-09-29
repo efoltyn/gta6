@@ -494,7 +494,7 @@ document.body.appendChild(b);}}catch(e){}})();
      must load before any mode registers its base (city/mode.js, modes/*). -->
 <script src="src/systems/solidground.js?v=solid1"></script>
 <!-- THE ONE STAIR SYSTEM: flight walk surfaces + level links + AI routes. Before any world builder (the prison builds at parse time). -->
-<script src="src/systems/stairs.js?v=stairs1"></script>
+<script src="src/systems/stairs.js?v=pres0929b"></script>
 <!-- ORDNANCE LEAVES THE GROUND CHANGED: a bomb digs a carving. -->
 <script src="src/systems/craters.js?v=crater1"></script>
 <!-- A ROOM UNDER AN INTACT STREET: a hole with a lid on it. -->
@@ -533,7 +533,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- Furniture kit: CBZ.furnish draws a piece AND registers its use-anchor in one
      call. After materials.js (resolves addBox at call time); before its consumers
      lounge.js / cafeteria.js / clutter.js. -->
-<script src="src/city/furniture.js?v=deslop1"></script>
+<script src="src/city/furniture.js?v=pres0929b"></script>
 <!-- FURNITURE MOVES WHEN YOU WALK INTO IT (owner: "physics, not another
      f***ing button"). CBZ.pushables.add(spec) — still exported as CBZ.pushProp —
      makes a drawn prop a mass on a floor:
@@ -822,7 +822,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/reality.js?v=support1"></script>
 <script src="src/systems/npcgrid.js?v=scale2"></script>
 <script src="src/systems/camera.js?v=tui0929"></script>
-<script src="src/systems/physics.js?v=colcore1"></script>
+<script src="src/systems/physics.js?v=pres0929b"></script>
 <script src="src/systems/meshcollider.js?v=meshcol1"></script>
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
 <script src="src/systems/climb.js?v=lad1"></script>
@@ -839,7 +839,7 @@ document.body.appendChild(b);}}catch(e){}})();
      a floating dock + hinged gangway, marina pontoons, and yacht decks.
      Next adopters are one line each — elevators.js (the teleporting cab is
      the reason this exists) and the airliner cabin deck. -->
-<script src="src/systems/platforms_moving.js?v=mp2late"></script>
+<script src="src/systems/platforms_moving.js?v=pres0929b"></script>
 <script src="src/systems/actorcollide.js?v=colcore1"></script>
 <!-- A DEAD MAN LIES ON THE FLOOR, IN THE ROOM. Owns every prison corpse's
      transform: clear lie direction, wall depenetration at both ends of the
@@ -1081,7 +1081,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- the grid street layer (road, kerbs, footways, markings) world.js builds -->
 <script src="src/city/streetkit.js?v=w0929town"></script>
 <script src="src/city/world.js?v=w0929town"></script>
-<script src="src/city/interior_programs.js?v=cd0929"></script>
+<script src="src/city/interior_programs.js?v=pres0929b"></script>
 <!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
      inventory item; an NPC's keys live on the NPC and every existing way to
      take something off a person moves them. MUST load before city/buildings.js
@@ -1091,8 +1091,8 @@ document.body.appendChild(b);}}catch(e){}})();
      the shared masonry / portico / roof-clutter geometry. MUST load BEFORE
      city/buildings.js, which reads CBZ.CIVIC_SHOPS and CBZ.CIVIC_ACCT_SEED at
      parse time and the bld* helpers at build time. -->
-<script src="src/city/buildings_civic.js?v=w0929est"></script>
-<script src="src/city/buildings.js?v=w0929est"></script>
+<script src="src/city/buildings_civic.js?v=pres0929b"></script>
+<script src="src/city/buildings.js?v=pres0929b"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
@@ -1146,7 +1146,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/citynav.js?v=moves1"></script>
 <script src="src/city/fracture.js?v=boom2"></script>
 <script src="src/city/demolition.js?v=w09290219"></script>
-<script src="src/city/elevators.js?v=ekey2"></script>
+<script src="src/city/elevators.js?v=pres0929b"></script>
 <script src="src/city/exec_office.js?v=leaf2-st1"></script>
 <script src="src/city/escalators.js?v=esc2-st1"></script>
 <script src="src/city/roofloot.js?v=cd0929"></script>
@@ -1183,7 +1183,7 @@ document.body.appendChild(b);}}catch(e){}})();
      above. chunks.js first (pieces.js registers pieces into it), though
      either load order works. -->
 <script src="src/systems/chunks.js?v=arch2"></script>
-<script src="src/systems/pieces.js?v=colcore1"></script>
+<script src="src/systems/pieces.js?v=pres0929b"></script>
 <!-- B1 — the wood-tier build catalog + CBZ.building.place() (no UI yet;
      B2 lands the ghost preview/hotbar). Loads right after pieces.js
      (needs spawnPiece/despawnPiece/findSupport) and after placement.js
@@ -1231,8 +1231,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- SETTLEMENT COMPOSITION — flavored anchor plan + registry + cityWorldGeo
      wrapper; loads before towngen.js (which consumes CBZ.settlementsCompose)
      and after worldmap.js (whose cityWorldGeo it wraps). -->
-<script src="src/city/settlements.js?v=settle1"></script>
-<script src="src/city/towngen.js?v=w0929town"></script>
+<script src="src/city/settlements.js?v=pres0929b"></script>
+<script src="src/city/towngen.js?v=pres0929b"></script>
 <!-- DIAMOND SPEEDWAY, part 1 — the circuit's architecture: grandstands with real
      raked seating, pit garages, scoring pylon, jumbotron, floodlight masts,
      hoardings, marshal posts, tyre walls, paddock. Authored against the track
@@ -1627,7 +1627,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/explosives.js?v=boom2"></script>
 <script src="src/systems/helditems.js?v=mce86a5"></script>
 <script src="src/city/armored.js?v=deslop1"></script>
-<script src="src/city/death.js?v=vit3"></script>
+<script src="src/city/death.js?v=pres0929b"></script>
 <script src="src/city/camera.js?v=shouldergun2"></script>
 <script src="src/city/ragdoll.js?v=loose1"></script>
 <script src="src/city/leaderboard.js?v=nodash1"></script>
@@ -1648,7 +1648,7 @@ document.body.appendChild(b);}}catch(e){}})();
      real fixtures) and freed when you leave. After storegoods (same lazy
      dresser shape), furniture.js (CBZ.furnish) and interior_programs.js
      (which declares every floor to it). -->
-<script src="src/city/fitout.js?v=deslop1-st1"></script>
+<script src="src/city/fitout.js?v=pres0929b"></script>
 <script src="src/city/fitout_plans.js?v=deslop1"></script>
 <script src="src/city/fitout_work.js?v=deslop1-st1"></script>
 <script src="src/city/fitout_gang.js?v=deslop1-st1"></script>
@@ -1687,7 +1687,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- sims-overhaul wave 2: living economy + universal housing + place/scene spawning + mini-cities + racing + destruction (additive, feature-detected, self-flagged) -->
 <script src="src/city/wallet.js?v=sim2"></script>
 <script src="src/city/housing.js?v=cpd1"></script>
-<script src="src/city/citytemplates.js?v=w0929town"></script>
+<script src="src/city/citytemplates.js?v=pres0929b"></script>
 <script src="src/city/minicities.js?v=w0929town"></script>
 <script src="src/city/spawnplaces.js?v=sim2"></script>
 <script src="src/city/scenedirector.js?v=w09290218"></script>
@@ -2251,7 +2251,7 @@ document.body.appendChild(b);}}catch(e){}})();
      staffs itself through power.js's protection layer rather than authoring
      guards. After power.js and the biome/continent builders whose empty land
      it claims. Revert with ?cfg_GOV_COMPLEX=0. -->
-<script src="src/city/govcomplex.js?v=cd0929"></script>
+<script src="src/city/govcomplex.js?v=pres0929b"></script>
 
 <!-- THE PRESIDENCY — one spine over organs built above: the President origin
      (candidacy's swearIn fast-forward), the Situation Room inside govcomplex's
@@ -2263,7 +2263,7 @@ document.body.appendChild(b);}}catch(e){}})();
      jail's transport). AFTER govcomplex.js (reads CBZ.govComplexes); every
      other read is feature-detected and lazily retried.
      Revert with ?cfg_PRESIDENCY_V1=0. -->
-<script src="src/city/presidency.js?v=ekey2"></script>
+<script src="src/city/presidency.js?v=pres0929b"></script>
 <!-- THE PRESIDENT'S WORLD (2026-09-27 rework) — no HUD strip, no mission
      list, no button console. In load order: the office (desk phone that rings
      with real calls, briefing folders you read on the desk, the TV news, aides
@@ -2272,14 +2272,14 @@ document.body.appendChild(b);}}catch(e){}})();
      and lockdown bodies in the street), and the regime dressing that changes
      the Mansion when the republic falls. Security (the detail, the gate
      checkpoint, counter-snipers, the panic protocol) lives in protection.js. -->
-<script src="src/city/president_office.js?v=pres3"></script>
+<script src="src/city/president_office.js?v=pres0929b"></script>
 <script src="src/city/motorcade.js?v=ekey2"></script>
 <!-- THE PRESIDENT HIRES HIS PEOPLE: the line in the office, the Chief of
      Staff, the detail / driver / press secretary / empty cabinet chairs.
      After presidency.js, president_office.js, protection.js, motorcade.js. -->
-<script src="src/city/president_staff.js?v=ekey2"></script>
-<script src="src/city/president_public.js?v=w0929est"></script>
-<script src="src/city/president_regime.js?v=w0929est"></script>
+<script src="src/city/president_staff.js?v=pres0929b"></script>
+<script src="src/city/president_public.js?v=pres0929b"></script>
+<script src="src/city/president_regime.js?v=pres0929b"></script>
 
 <!-- CASH STORE — the back half of the cash-bag loop (owner: "only driving to
      your own place can store the cash, not just rob"). Turns govcomplex's

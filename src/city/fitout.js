@@ -431,7 +431,10 @@
     const nextTop = floorTopOf(b, floor.k + 1);
     const ceil = (floor.k + 1 < (Array.isArray(b.floorTops) ? b.floorTops.length : (b.storeys | 0) + 1))
       ? nextTop - 0.2 : y0 + FH - 0.2;                // underside of the slab above
-    const fy = y0 + (floor.k === 0 ? 0.06 : 0.05);    // finished floor top (over the eager covering)
+    // finished floor top: 4 mm over the eager covering (CBZ.INTERIOR_FINISH,
+    // itself 8 mm over the slab), so the floor you see is the floor you stand
+    // on (it was 5-6 cm proud of the slab: feet in the oak on every floor)
+    const fy = y0 + (CBZ.INTERIOR_FINISH != null ? CBZ.INTERIOR_FINISH : 0.008) + 0.004;
     // THE CORE IS SACRED: the lift chase, the stair core (reserved by every
     // multi-storey shell at birth, whether or not it is built yet) and the
     // landing in front of the stair door (b.keepRects) take nothing a planner
@@ -516,7 +519,7 @@
       const nxc = Math.max(1, Math.ceil((x1 - x0) / cell)), nzc = Math.max(1, Math.ceil((z1 - z0) / cell));
       const dx = (x1 - x0) / nxc, dz = (z1 - z0) / nzc;
       const down = !!o.down, sc = TEX_SCALE[matKey] || 2;
-      const holes = o.holes || HOLES;
+      const holes = o.holes || (down ? CEIL_HOLES : HOLES);
       for (let i = 0; i < nxc; i++) for (let j = 0; j < nzc; j++) {
         const ax = x0 + i * dx, az = z0 + j * dz, bx = ax + dx, bz = az + dz;
         let skip = false;
@@ -760,9 +763,18 @@
     };
     // lift shafts / stair wells punched through this floor: never floored over
     let HOLES = [];
+    const CEIL_HOLES = [];     // the ceiling is the slab ABOVE: a hole there only if that slab is opened
     const sr = b.shaftRects || [];
-    for (let i = 0; i < sr.length; i++) HOLES.push({ x0: sr[i].x0 - 0.05, x1: sr[i].x1 + 0.05, z0: sr[i].z0 - 0.05, z1: sr[i].z1 + 0.05 });
-    B.addHole = function (r) { HOLES.push(r); };
+    // (a hole that opens only some slabs, a grand stair's, is a hole in this
+    // floor's plate when it opens this slab, and in its ceiling when it opens
+    // the one above)
+    for (let i = 0; i < sr.length; i++) {
+      const lv = sr[i].levels;
+      const q = { x0: sr[i].x0 - 0.05, x1: sr[i].x1 + 0.05, z0: sr[i].z0 - 0.05, z1: sr[i].z1 + 0.05 };
+      if (!lv || lv.indexOf(floor.k) >= 0) HOLES.push(q);
+      if (!lv || lv.indexOf(floor.k + 1) >= 0) CEIL_HOLES.push(q);
+    }
+    B.addHole = function (r) { HOLES.push(r); CEIL_HOLES.push(r); };
 
     // ---- FINISH: arrays -> meshes, light baked into the vertex colours ----
     B.finish = function (parent) {

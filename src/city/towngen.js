@@ -523,25 +523,65 @@
       return Math.min(TOWN_MAX_STOREYS, Math.max(1, Math.round((base || 1) * fall)));
     }
 
-    // a compact STOREFRONT sign mounted flush on the facade above the door (CH3):
-    // a thin emissive sign-board plate, plus the cached name sprite seated tight
-    // against the wall. The sprite material is cached per text (makeLabelSprite),
-    // so repeated names cost no extra draw call; the plate shares cmat(accent).
-    const SIGN_Y = 3.4;                                   // just above a standard door
-    function mountShopSign(lt, color, name) {
-      const nx = lt.door.nx, nz = lt.door.nz;
-      const fx = lt.cx + nx * (lt.w / 2 + 0.06), fz = lt.cz + nz * (lt.d / 2 + 0.06);  // on the door face
-      // sign-board plate: a thin lit box hugging the facade (rotated to the wall)
-      const boardW = Math.min(lt.w - 1.2, name.length * 0.5 + 2.4);
-      const board = new THREE.Mesh(new THREE.BoxGeometry(boardW, 1.0, 0.2),
-        new THREE.MeshLambertMaterial({ color: pal.signBoard != null ? pal.signBoard : 0x2a2622, emissive: color, emissiveIntensity: 0.35 }));
+    // THE SHOP FRONT: a sign board on the facade over the door, a canopy under
+    // it, and for the clinic (the hospital trade, the door a fallen player wakes
+    // outside) a deep entrance canopy on two posts with a lit soffit.
+    // BOTH ARE MEASURED OFF THE SHELL, NOT THE LOT: the shell is built 1.5 m
+    // narrower than its lot (w = lt.w - 1.5), so a board placed at the lot edge
+    // (the old `lt.w / 2 + 0.06`) hung 0.8 m in front of the wall in mid air,
+    // and its width came from lt.w even on a door that faces +-x. `bw`/`bd` are
+    // the shell's own footprint.
+    const SIGN_Y = 3.4;                                   // just above the canopy
+    const _boardMats = new Map();
+    function boardMat(color) {
+      const k = (pal.signBoard != null ? pal.signBoard : 0x2a2622) + "|" + color;
+      let m = _boardMats.get(k);
+      if (!m) { m = new THREE.MeshLambertMaterial({ color: pal.signBoard != null ? pal.signBoard : 0x2a2622, emissive: color, emissiveIntensity: 0.35 }); _boardMats.set(k, m); }
+      return m;
+    }
+    function frontOf(lt, bw, bd) {
+      const nx = lt.door.nx, nz = lt.door.nz, alongZ = Math.abs(nx) > 0.5;
+      const half = alongZ ? bw / 2 : bd / 2, span = alongZ ? bd : bw;
+      return { nx: nx, nz: nz, tx: -nz, tz: nx, alongZ: alongZ, span: span, x: lt.cx + nx * half, z: lt.cz + nz * half };
+    }
+    function mountShopSign(lt, color, name, bw, bd) {
+      const f = frontOf(lt, bw, bd);
+      const fx = f.x + f.nx * 0.12, fz = f.z + f.nz * 0.12;          // 2 cm off the wall
+      const boardW = Math.min(f.span - 1.2, name.length * 0.5 + 2.4);
+      const board = new THREE.Mesh(new THREE.BoxGeometry(boardW, 1.0, 0.2), boardMat(color));
       board.position.set(fx, SIGN_Y, fz);
-      if (nx !== 0) board.rotation.y = Math.PI / 2;       // face the wall normal
+      if (f.alongZ) board.rotation.y = Math.PI / 2;       // face the wall normal
       board.castShadow = false; root.add(board);
       // name plate (cached sprite) pressed against the board, facing the street
       if (CBZ.makeLabelSprite) {
         const s = CBZ.makeLabelSprite(name, { color: pal.sign || "#f4e7c2" });
-        if (s) { s.position.set(fx + nx * 0.16, SIGN_Y, fz + nz * 0.16); s.scale.set(Math.min(boardW, name.length * 0.42 + 1.4), 0.9, 1); root.add(s); }
+        if (s) { s.position.set(fx + f.nx * 0.12, SIGN_Y, fz + f.nz * 0.12); s.scale.set(Math.min(boardW, name.length * 0.42 + 1.4), 0.9, 1); root.add(s); }
+      }
+    }
+    // canopies are collected here and merged after the lot loop: every canopy
+    // in a town is one draw, every lit soffit another, every post a third.
+    const canopyGeo = [], soffitGeo = [], postGeo = [];
+    function frontBox(list, x, y, z, w, h, d) { const g = new THREE.BoxGeometry(w, h, d); g.translate(x, y, z); list.push(g); }
+    function shopCanopy(lt, bw, bd, trade) {
+      const f = frontOf(lt, bw, bd), er = trade === "hospital";
+      const W = Math.min(f.span - 1.0, er ? 7.0 : 3.6);
+      if (W < 1.8) return;
+      // never past the kerb: the shell stands `setback` inside its lot line and
+      // the footway runs FOOTWAY beyond that (a rural lane has no footway)
+      const setback = ((f.alongZ ? lt.w - bw : lt.d - bd) / 2) || 0;
+      const D = Math.min(er ? 5.0 : 1.3, setback + (kit ? FOOTWAY : 1.2) - 0.45), th = er ? 0.28 : 0.14;
+      if (D < 0.8) return;
+      const y0 = SIGN_Y - 0.5 - th;                       // the board stands on it
+      const cx0 = f.x + f.nx * D / 2, cz0 = f.z + f.nz * D / 2;
+      const sx = f.alongZ ? D : W, sz = f.alongZ ? W : D;
+      frontBox(canopyGeo, cx0, y0 + th / 2, cz0, sx, th, sz);
+      frontBox(soffitGeo, cx0, y0 - 0.012, cz0, sx - 0.3, 0.02, sz - 0.3);
+      if (!er) return;
+      // the entrance canopy stands on two posts at its outer corners (solid)
+      for (const sg of [-1, 1]) {
+        const px = f.x + f.nx * (D - 0.3) + f.tx * sg * (W / 2 - 0.3), pz = f.z + f.nz * (D - 0.3) + f.tz * sg * (W / 2 - 0.3);
+        frontBox(postGeo, px, y0 / 2, pz, 0.26, y0, 0.26);
+        solid(px, pz, 0.32, 0.32, y0);
       }
     }
     for (const lt of lots) {
@@ -666,7 +706,8 @@
         // neutral) name plate seated tight against the wall facing the street.
         // cityMakeBuilding does NOT hang signAwning (that lives in the mainland
         // shop pass), so the town mounts its own compact facade board here.
-        if (isShop && pick.name) mountShopSign(lt, color, pick.name);
+        if (isShop && pick.name) mountShopSign(lt, color, pick.name, w, d);
+        if (isShop) shopCanopy(lt, w, d, sk);
         filled.push(lotRec);
         lt._rec = lotRec;
       } else if (pick.asset && CBZ.assets && CBZ.assets.has && CBZ.assets.has(pick.asset)) {
@@ -709,6 +750,10 @@
         }
       }
     }
+    const CANOPY = cfg.canopyColor != null ? cfg.canopyColor : (kit ? 0x3a3d42 : WOOD);
+    if (canopyGeo.length) mergeAdd(root, canopyGeo, cmat(CANOPY), { cast: true });
+    if (postGeo.length) mergeAdd(root, postGeo, cmat(CANOPY), { cast: true });
+    if (soffitGeo.length) mergeAdd(root, soffitGeo, cmat(0xfff0d2, { emissive: 0xfff0d2, ei: 0.5 }), {});
 
     // =====================================================================
     //  5) THE TOWN SQUARE — the nav anchor. A paved/sand pad + a central

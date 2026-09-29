@@ -514,8 +514,8 @@
     }
   }
 
-  // GATEHOUSE. A booth, a lit window and two boom arms parked RAISED — the
-  // compound is MANNED, not sealed. Only the pivot posts are colliders.
+  // GATEHOUSE. A walk-in booth (lodge(), below) and two boom arms parked
+  // RAISED — the compound is MANNED, not sealed.
   //
   // THE BAR IS NEVER LAID ACROSS THE LANE, and that is not a style choice: a
   // bar sized off the wrong axis is exactly what once left a ten-metre
@@ -538,8 +538,8 @@
     const bx = laneAlongZ ? x - off : x, bz = laneAlongZ ? z : z - off;
     // the booth watches the lane: its big window faces it, its door is on
     // the far side, away from the traffic
+    // a walk-in booth: its walls, desk and chair carry their own colliders
     lodge(root, bx, bz, 3.4, 3.2, 3.0, hex, laneAlongZ ? { x: 1, z: 0 } : { x: 0, z: 1 });
-    col(bx, bz, 3.4, 3.2, 0, 3.0);
     if (o && o.noArms) return;
     const L = 9.0, A = 1.15;                       // arm length / parked angle
     const lift = Math.sin(A) * L / 2, reach = Math.cos(A) * L / 2;
@@ -556,46 +556,140 @@
     }
   }
 
-  /* A MASONRY LODGE — the gatehouse booth and the estate's sentry boxes. It
-     was one 3.4 m cube with a transparent slab stuck to it. A guard lodge is a
-     plinth, walls, a cornice and a flat roof you could stand a searchlight on
-     (president_regime.js does: the roof top stays at h + 0.26), glazing on
-     the three faces a guard watches from, and a door on the fourth. Every
-     piece is a plain static box in the shared colour pool, so the batcher
-     folds the whole lodge into the city's buckets. `face` = the outward unit
-     normal (axis-aligned) of the watching side. No collider: the caller
-     owns that (the gatehouse's is the one president_regime.js measures). */
+  /* A LODGE YOU WALK INTO — the gatehouse booth and the estate's sentry
+     posts. It was a solid 3.4 m cube with a glowing slab stuck to each face
+     and one collider over the lot: a guard post nobody could stand in.
+
+     Now it is a small masonry building: a floor slab one short step over
+     the ground (its top, FT, is registered as the walk surface), 0.22 m
+     walls on a plinth course, glazed windows on the three faces a guard
+     watches from (sill at desk height, stone surround, sill slab), a doorway
+     on the fourth with its leaf parked open against the wall, a cornice and
+     a flat roof slab whose top stays at h + 0.26 (president_regime.js stands
+     its searchlights there). Inside: a desk under the lane window with a
+     monitor and keyboard, a swivel chair, a ceiling light. `face` is the
+     OUTWARD unit normal of the watching side; the door is opposite it.
+     The walls collide except at the doorway; the desk and chair collide.
+     One Kit per lodge: its walls (painted ashlar where the lodge is stone),
+     trim, glass and lamps are a handful of draws. */
+  const LODGE_FT = 0.15;
   function lodge(root, x, z, w, d, h, hex, face) {
     const n = face || { x: 0, z: 1 };
-    box(root, x, 0.2, z, w + 0.24, 0.4, d + 0.24, M.stoneDk, { cast: false });
-    box(root, x, 0.4 + (h - 0.7) / 2, z, w, h - 0.7, d, hex);
-    box(root, x, h - 0.2, z, w + 0.36, 0.2, d + 0.36, M.stoneD);          // cornice
-    box(root, x, h + 0.08, z, w + 0.18, 0.36, d + 0.18, M.stone);          // roof slab, top h + 0.26
-    const glass = cm(0x2b3a44, { emissive: 0xffd9a0, ei: 0.28 });
-    // one window per watched face, the widest on the lane; a panelled door
-    // on the back face, under a stone lintel
-    const faces = [n, { x: -n.z, z: n.x }, { x: n.z, z: -n.x }];
-    for (let i = 0; i < faces.length; i++) {
-      const f = faces[i];
-      const spanW = Math.abs(f.x) > 0.5 ? d : w, off = (Math.abs(f.x) > 0.5 ? w : d) / 2;
-      const ww = Math.min(spanW - 0.9, i === 0 ? 2.4 : 1.2), wh = Math.min(1.25, h - 1.9);
-      const wy = 0.4 + 0.95 + wh / 2;
-      const along = Math.abs(f.z) > 0.5;       // the face spans x
-      // stone surround proud of the wall, then the pane just proud of that
-      const sx = x + f.x * (off + 0.04), sz = z + f.z * (off + 0.04);
-      box(root, sx, wy, sz, along ? ww + 0.3 : 0.08, wh + 0.3, along ? 0.08 : ww + 0.3, M.stone, { cast: false });
-      const gm = new THREE.Mesh(bg(along ? ww : 0.04, wh, along ? 0.04 : ww), glass);
-      gm.position.set(x + f.x * (off + 0.09), wy, z + f.z * (off + 0.09));
-      gm.castShadow = false; root.add(gm);
-      box(root, x + f.x * (off + 0.1), wy - wh / 2 - 0.2, z + f.z * (off + 0.1),
-        along ? ww + 0.46 : 0.2, 0.1, along ? 0.2 : ww + 0.46, M.stoneD, { cast: false });  // sill
+    const T = 0.22, FT = LODGE_FT, top = h - 0.1;
+    const kit = new Kit();
+    const wallK = (hex === M.stone || hex === M.stoneD || hex === M.marble) ? "ashlar" : hex;
+    const TRIM = M.stoneD, DARK = M.stoneDk;
+    // the slab and the walk surface on it (the doorway's threshold included)
+    kit.box(0x8d8a82, x, FT / 2, z, w - 0.04, FT, d - 0.04);
+    plat(x, z, w - 2 * T + 0.02, d - 2 * T + 0.02, FT);
+    // the plinth course the walls stand on, proud of them
+    for (const s of [-1, 1]) {
+      kit.box(DARK, x, 0.18, z + s * (d / 2 + 0.025), w + 0.1, 0.36, 0.05);
+      kit.box(DARK, x + s * (w / 2 + 0.025), 0.18, z, 0.05, 0.36, d);
     }
-    const b = { x: -n.x, z: -n.z }, boff = (Math.abs(b.x) > 0.5 ? w : d) / 2;
-    const alongB = Math.abs(b.z) > 0.5, dh = Math.min(2.1, h - 0.95);
-    box(root, x + b.x * (boff + 0.05), 0.4 + (dh + 0.16) / 2, z + b.z * (boff + 0.05),
-      alongB ? 1.3 : 0.1, dh + 0.16, alongB ? 0.1 : 1.3, M.stone, { cast: false });        // door surround
-    box(root, x + b.x * (boff + 0.1), 0.4 + dh / 2, z + b.z * (boff + 0.1),
-      alongB ? 0.92 : 0.04, dh, alongB ? 0.04 : 0.92, 0x3a2c22, { cast: false });           // the leaf
+    // faces: the watched one, its two neighbours, and the door face behind
+    const back = { x: -n.x, z: -n.z };
+    const faces = [n, { x: -n.z, z: n.x }, { x: n.z, z: -n.x }, back];
+    const sill = FT + 0.9, head = Math.min(top - 0.35, FT + 2.2);
+    for (let i = 0; i < 4; i++) {
+      const f = faces[i], alongX = Math.abs(f.z) > 0.5;
+      const spanW = alongX ? w : d - 2 * T;
+      const opens = [];
+      if (i < 3) {
+        const ww = Math.min(spanW - 0.7, i === 0 ? 2.2 : 1.1);
+        if (ww > 0.5) opens.push({ t: 0, w: ww, y0: sill, y1: head });
+      } else {
+        opens.push({ t: 0, w: 0.96, y0: 0, y1: FT + 2.12, door: true });
+        // the threshold under the doorway walks at the slab top too
+        const tq = alongX ? { x: x, z: z + f.z * (d / 2 - T / 2) } : { x: x + f.x * (w / 2 - T / 2), z: z };
+        plat(tq.x, tq.z, alongX ? 0.96 : T + 0.04, alongX ? T + 0.04 : 0.96, FT);
+      }
+      const W = wallFace(kit, wallK, x, z, f, w, d, T, 0, top, opens, true);
+      const po = W.off + T / 2;                         // the outer plane
+      const at = function (t, nOff) { return alongX ? { x: x + t, z: z + f.z * (po + nOff) } : { x: x + f.x * (po + nOff), z: z + t }; };
+      const bx = function (key, t, y, nOff, len, hh, dep) {
+        const q = at(t, nOff);
+        kit.box(key, q.x, y, q.z, alongX ? len : dep, hh, alongX ? dep : len);
+      };
+      for (const o of opens) {
+        if (o.door) {
+          // the surround, and the leaf swung right round onto the wall
+          bx(TRIM, -o.w / 2 - 0.07, (o.y1 + 0.1) / 2, 0.03, 0.14, o.y1 + 0.1, 0.06);
+          bx(TRIM, o.w / 2 + 0.07, (o.y1 + 0.1) / 2, 0.03, 0.14, o.y1 + 0.1, 0.06);
+          bx(TRIM, 0, o.y1 + 0.1, 0.04, o.w + 0.42, 0.2, 0.08);
+          if (spanW / 2 - (o.w / 2 + 0.14) >= 0.9) {
+            bx(0x3a2c22, o.w / 2 + 0.14 + 0.44, FT + 1.03, 0.035, 0.86, 2.02, 0.045);
+            bx(0xb99347, o.w / 2 + 0.14 + 0.1, FT + 1.0, 0.07, 0.04, 0.16, 0.03);
+          } else {
+            // no wall to fold it back on: it stands open square to the face
+            const q = at(o.w / 2 - 0.03, 0.45);
+            kit.box(0x3a2c22, q.x, FT + 1.03, q.z, alongX ? 0.045 : 0.86, 2.02, alongX ? 0.86 : 0.045);
+          }
+          continue;
+        }
+        // glass mid-wall; a stone surround proud of the face; the sill slab
+        // one pane mesh per face: a flat sheet of glass, never a box of air
+        const q = at(o.t, -T / 2);
+        kit.box("glass" + i, q.x, (o.y0 + o.y1) / 2, q.z, alongX ? o.w : 0.03, o.y1 - o.y0, alongX ? 0.03 : o.w);
+        bx(TRIM, 0, o.y1 + 0.07, 0.025, o.w + 0.3, 0.14, 0.05);
+        bx(TRIM, -o.w / 2 - 0.08, (o.y0 + o.y1) / 2, 0.025, 0.16, o.y1 - o.y0, 0.05);
+        bx(TRIM, o.w / 2 + 0.08, (o.y0 + o.y1) / 2, 0.025, 0.16, o.y1 - o.y0, 0.05);
+        bx(M.stone, 0, o.y0 - 0.05, 0.08, o.w + 0.42, 0.1, 0.16);
+        // a mullion on the wide lane window
+        if (o.w > 1.6) { const m = at(o.t, -T / 2 + 0.03); kit.box(0x2a2d30, m.x, (o.y0 + o.y1) / 2, m.z, alongX ? 0.05 : 0.04, o.y1 - o.y0, alongX ? 0.04 : 0.05); }
+      }
+    }
+    // cornice and roof slab (top at h + 0.26)
+    kit.box(TRIM, x, top - 0.12, z, w + 0.36, 0.2, d + 0.36);
+    kit.box(M.stone, x, h + 0.08, z, w + 0.18, 0.36, d + 0.18);
+    // ---- inside: the desk under the watched window, facing out
+    const inW = (Math.abs(n.z) > 0.5 ? w : d) - 2 * T;
+    const DW = Math.min(1.4, inW - 0.2), DD = 0.58, DT = FT + 0.76;
+    const wallIn = (Math.abs(n.z) > 0.5 ? d : w) / 2 - T;     // inner face distance, along n
+    const L = function (a, b) { return { x: x + n.x * a + (-n.z) * b, z: z + n.z * a + n.x * b }; };   // a along n, b across
+    const lb = function (key, a, b, y, la, hh, lb2) {        // la along n, lb2 across
+      const q = L(a, b);
+      kit.box(key, q.x, y, q.z, Math.abs(n.x) > 0.5 ? la : lb2, hh, Math.abs(n.x) > 0.5 ? lb2 : la);
+    };
+    const dA = wallIn - DD / 2 - 0.02;                      // desk centre, along n
+    const WOOD = 0x5b4633, STEEL = 0x2b2f34;
+    lb(WOOD, dA, 0, DT - 0.02, DD, 0.04, DW);                                     // top
+    for (const s of [-1, 1]) lb(WOOD, dA, s * (DW / 2 - 0.02), FT + (DT - 0.04 - FT) / 2, DD - 0.04, DT - 0.04 - FT, 0.04);   // end panels
+    lb(WOOD, dA + DD / 2 - 0.06, 0, FT + 0.2 + (DT - 0.24 - FT) / 2, 0.03, DT - 0.24 - FT, DW - 0.1);                      // modesty panel
+    { const q = L(dA, 0), nx = Math.abs(n.x) > 0.5; col(q.x, q.z, nx ? DD : DW, nx ? DW : DD, FT, DT); }
+    // the monitor: foot, neck, body, a lit face turned to the chair; keyboard
+    lb(STEEL, dA + 0.08, 0, DT + 0.008, 0.16, 0.016, 0.22);
+    lb(STEEL, dA + 0.1, 0, DT + 0.016 + 0.13, 0.04, 0.26, 0.05);
+    lb(0x16181b, dA + 0.07, 0, DT + 0.3, 0.04, 0.34, 0.56);
+    lb("lit:" + 0x6fa8d8 + ":0.55", dA + 0.048, 0, DT + 0.3, 0.004, 0.29, 0.5);
+    lb(0x202326, dA - 0.14, 0, DT + 0.012, 0.15, 0.02, 0.44);
+    // the chair: a five-star foot, a column, a seat at 0.45, a back
+    const cA = dA - DD / 2 - 0.34;
+    if (cA - 0.26 > -wallIn + 0.05) {
+      lb(STEEL, cA, 0, FT + 0.025, 0.56, 0.05, 0.07);
+      lb(STEEL, cA, 0, FT + 0.025, 0.07, 0.05, 0.56);
+      lb(STEEL, cA, 0, FT + 0.05 + (0.4 - 0.05) / 2, 0.06, 0.35, 0.06);
+      lb(0x23262b, cA, 0, FT + 0.45 - 0.04, 0.46, 0.08, 0.46);
+      lb(STEEL, cA - 0.22, 0, FT + 0.5, 0.04, 0.16, 0.05);
+      lb(0x23262b, cA - 0.24, 0, FT + 0.8, 0.05, 0.46, 0.44);
+      const q = L(cA - 0.02, 0);
+      col(q.x, q.z, 0.56, 0.56, FT, FT + 1.03);
+    }
+    // a steel locker in the back corner beside the door (the post's radio,
+    // its logbook, the long gun), and the ceiling light
+    {
+      const inA = (Math.abs(n.z) > 0.5 ? w : d) / 2 - T;      // inner half-width across n
+      const la = -wallIn + 0.25, lbq = inA - 0.28;
+      if (lbq - 0.25 > 0.62 && la + 0.25 < cA - 0.3) {
+        lb(0x4a5058, la, lbq, FT + 0.925, 0.46, 1.85, 0.5);
+        lb(0x3a3f45, la + 0.235, lbq, FT + 0.925, 0.012, 1.7, 0.012);       // the door seam
+        lb(0xb9bec6, la + 0.24, lbq - 0.12, FT + 1.05, 0.02, 0.16, 0.03);    // the handle
+        const q = L(la, lbq), nx = Math.abs(n.x) > 0.5;
+        col(q.x, q.z, nx ? 0.46 : 0.5, nx ? 0.5 : 0.46, FT, FT + 1.85);
+      }
+    }
+    kit.box("lit:" + 0xfff1d6 + ":0.9", x, top - 0.02, z, 0.5, 0.04, 0.5);
+    kit.flush(root, "lodge");
   }
 
   /* ------------------------------------------------------------------
@@ -640,15 +734,21 @@
   const RISE_MAX = 0.30;     // a comfortable tread rise, and strictly under it
   // every flight this file lays, so §9 can measure that each lands on something
   const _flights = [];
-  function steps(root, x, z, w, depth, top, hex, dir, axis, landing) {
-    if (!(top > 0.02) || !(depth > 0.2) || !(w > 0.2)) return 0;
+  // `base` (optional): the height of the ground the flight lands ON (a
+  // forecourt of setts at 0.10, not the bare grade), so the bottom tread is
+  // one riser over what you walk off, never a slab flush with the paving
+  function steps(root, x, z, w, depth, top, hex, dir, axis, landing, base) {
+    base = base > 0 ? base : 0;
+    if (!(top - base > 0.02) || !(depth > 0.2) || !(w > 0.2)) return 0;
     /* THE RISER COUNT IS SOLVED FROM BOTH DIMENSIONS, never typed. The rise
        may not exceed RISE_MAX (that is what makes every tread auto-climbable),
        and the GOING may not be so deep that a "flight" reads as one kerb — a
        0.42 m going is the shallow end of real stair practice, and the cap of
        four extra treads stops a 12 m ceremonial band from becoming thirty. */
-    const n = Math.max(1, Math.ceil(top / RISE_MAX - 1e-6), Math.min(4, Math.round(depth / 0.42)));
-    const rise = top / n;
+    const n = base > 0
+      ? Math.max(1, Math.round((top - base) / 0.1))
+      : Math.max(1, Math.ceil(top / RISE_MAX - 1e-6), Math.min(4, Math.round(depth / 0.42)));
+    const rise = (top - base) / n;
     const tread = depth / n;
     const flank = top >= STEP_UP;
     for (let i = 0; i < n; i++) {
@@ -656,7 +756,7 @@
       const cxs = axis === "x" ? x + back : x;
       const czs = axis === "x" ? z : z + back;
       const sw = axis === "x" ? tread : w, sd = axis === "x" ? w : tread;
-      const y = rise * (i + 1);
+      const y = base + rise * (i + 1);
       box(root, cxs, y / 2, czs, sw, y, sd, hex, { cast: false });
       plat(cxs, czs, sw, sd, y);
       // THE FLANKS, per tread and never across one: a collider on the two
@@ -687,17 +787,23 @@
      it without re-typing the number. */
   const PERRON_TOP = 0.30;     // deck height — under STEP_UP, over the 0.14 slab
   const PERRON_FLIGHT = 1.2;   // the band the treads themselves occupy
-  function perron(root, fx, fz, w, depth, hex, dir, axis) {
+  // `o.base`: the paving the flight lands on (steps(), above). `o.deck(rect,
+  // top)`: the host lays the deck TOP itself (an estate's York-stone sheet),
+  // so the stone mass stops 1 cm under it and the two never share a plane.
+  function perron(root, fx, fz, w, depth, hex, dir, axis, o) {
+    o = o || {};
     depth = Math.max(PERRON_FLIGHT + 0.8, depth);
     const deckD = depth - PERRON_FLIGHT;
     const dcx = axis === "x" ? fx + dir * deckD / 2 : fx;
     const dcz = axis === "x" ? fz : fz + dir * deckD / 2;
     const dw = axis === "x" ? deckD : w, dd = axis === "x" ? w : deckD;
-    box(root, dcx, PERRON_TOP / 2, dcz, dw, PERRON_TOP, dd, hex, { cast: false });
+    const mass = o.deck ? PERRON_TOP - 0.01 : PERRON_TOP;
+    box(root, dcx, mass / 2, dcz, dw, mass, dd, hex, { cast: false });
     plat(dcx, dcz, dw, dd, PERRON_TOP);
+    if (o.deck) o.deck({ minX: dcx - dw / 2, maxX: dcx + dw / 2, minZ: dcz - dd / 2, maxZ: dcz + dd / 2 }, PERRON_TOP);
     const scx = axis === "x" ? fx + dir * (deckD + PERRON_FLIGHT / 2) : fx;
     const scz = axis === "x" ? fz : fz + dir * (deckD + PERRON_FLIGHT / 2);
-    steps(root, scx, scz, w - 1.4, PERRON_FLIGHT, PERRON_TOP, hex, dir, axis, PERRON_TOP);
+    steps(root, scx, scz, w - 1.4, PERRON_FLIGHT, PERRON_TOP, hex, dir, axis, PERRON_TOP, o.base);
     // CHEEK WALLS either flank, capped — the piece that makes a low platform
     // read as a monumental entrance rather than as a kerb, and the one part of
     // the entrance that is SUPPOSED to stop you (so it takes a real collider).
@@ -856,7 +962,7 @@
       root.add(m);
     }
     col(x, z, 1.2, 1.2, 0, 0.7);
-    col(x, z, 0.3, 0.3, 0, h);
+    col(x, z, 0.3, 0.3, 0.7, h);          // the pole stands ON its base
   }
 
   // Concatenate geometries (indexed or not) into one non-indexed geometry with
@@ -1039,6 +1145,60 @@
         }
       }
     },
+    // COURSED ASHLAR for walls: eight 0.45 m courses over a 3.6 m tile,
+    // blocks 0.6-1.4 m long in broken bond, a recessed lime joint, each block
+    // its own shade of the same limestone and faintly tooled
+    ashlar: function (c, h, N) {
+      c.fillStyle = "#9d978a"; c.fillRect(0, 0, N, N);
+      h.fillStyle = "#282828"; h.fillRect(0, 0, N, N);
+      const rows = 8, rh = N / rows, j = 2.2;
+      let k = 0;
+      for (let r = 0; r < rows; r++) {
+        let x = hsh(r, 61) * N * 0.3;
+        const y = r * rh;
+        while (x < N + 1) {
+          const len = N * (0.17 + hsh(k, 62) * 0.22), t = hsh(k++, 63);
+          const g = 196 + t * 30;
+          for (const ox of [0, -N]) {
+            const x0 = x + ox;
+            c.fillStyle = rgb(g, g * 0.975, g * 0.93);
+            c.fillRect(x0 + j, y + j, len - 2 * j, rh - 2 * j);
+            // a lighter bed on the top arris, a darker drip under it
+            c.fillStyle = "rgba(255,252,240,0.10)"; c.fillRect(x0 + j, y + j, len - 2 * j, 3);
+            c.fillStyle = "rgba(40,36,28,0.10)"; c.fillRect(x0 + j, y + rh - j - 3, len - 2 * j, 3);
+            h.fillStyle = rgb(200 + t * 40, 200 + t * 40, 200 + t * 40);
+            h.fillRect(x0 + j, y + j, len - 2 * j, rh - 2 * j);
+          }
+          x += len;
+        }
+      }
+      for (let i = 0; i < 2600; i++) {
+        c.fillStyle = hsh(i, 64) < 0.5 ? "rgba(70,62,50,0.05)" : "rgba(255,250,235,0.05)";
+        c.fillRect(hsh(i, 65) * N, hsh(i, 66) * N, 1 + hsh(i, 67) * 3, 1 + hsh(i, 68) * 3);
+      }
+    },
+    // SLATE: 0.3 m courses of 0.25 m wide slates, each course half-lapped on
+    // the last, a blue-grey that varies slate to slate, the lower edge of
+    // every course shadowed (the lap)
+    slate: function (c, h, N) {
+      c.fillStyle = "#2e3238"; c.fillRect(0, 0, N, N);
+      h.fillStyle = "#303030"; h.fillRect(0, 0, N, N);
+      const rows = 8, per = 10, rh = N / rows, sw = N / per;
+      let k = 0;
+      for (let r = 0; r < rows; r++) {
+        const off = (r % 2) ? sw / 2 : 0;
+        for (let i = -1; i < per; i++) {
+          const x = i * sw + off, y = r * rh, t = hsh(k++, 71);
+          const g = 72 + t * 26;
+          c.fillStyle = rgb(g * 0.92, g * 0.98, g * 1.1);
+          c.fillRect(x + 1.5, y, sw - 3, rh - 1);
+          c.fillStyle = "rgba(0,0,0,0.28)"; c.fillRect(x + 1.5, y + rh - 5, sw - 3, 4);
+          c.fillStyle = "rgba(255,255,255,0.05)"; c.fillRect(x + 1.5, y, sw - 3, 3);
+          const grd = 120 + t * 40;
+          h.fillStyle = rgb(grd, grd, grd); h.fillRect(x + 1.5, y, sw - 3, rh - 1);
+        }
+      }
+    },
     // the helipad deck: NOT a tile. One square of brushed concrete with its
     // expansion joints, the white perimeter, the yellow touchdown circle and
     // the H, painted at 1024 so the markings are crisp from the approach.
@@ -1116,6 +1276,9 @@
     gravel:  { paint: "gravel", tint: 0xffffff, tile: 2.0, flat: 0xa99d82 },
     bed:     { paint: "bed", tint: 0xffffff, tile: 2.4, flat: 0x43362a },
     heli:    { paint: "helipad", tint: 0xffffff, tile: 0, flat: 0x6f7274 },
+    // wall and roof skins (box-mapped in world metres by Kit, below)
+    ashlar:  { paint: "ashlar", tint: 0xffffff, tile: 3.6, flat: 0xcdc6b6 },
+    slate:   { paint: "slate", tint: 0xffffff, tile: 2.4, flat: 0x464b53 },
   };
   const EMAT = {};
   function estateMat(kind) {
@@ -1253,6 +1416,173 @@
     m.name = name || ("estate-" + this.kind);
     root.add(m);
     return m;
+  }
+
+  /* A KIT: every box of ONE object (a lodge, a garage wall, a house's
+     dressing), merged per material into one mesh when the object is done.
+     Keys: a hex number (the shared colour pool), a SURF name ("ashlar",
+     "slate": the painted estate skins, box-mapped in metres so the courses
+     run true on every face), NAME + "~uv" (that skin, the geometry's own
+     UVs kept: a roof slope), "glass" (one shared see-through pane), or
+     "lit:HEX:EI" (an emissive lamp face — rationed: a handful per object).
+     A textured material is the one thing core/batch.js cannot merge, so the
+     merge is done here: an outbuilding is a few draws, not a hundred. */
+  function Kit() { this.g = new Map(); }
+  Kit.prototype.add = function (key, g) {
+    let l = this.g.get(key);
+    if (!l) this.g.set(key, (l = []));
+    l.push(g);
+    return g;
+  };
+  Kit.prototype.box = function (key, x, y, z, w, h, d, ry, rz, rx) {
+    if (!(w > 0.002 && h > 0.002 && d > 0.002)) return null;
+    const g = new THREE.BoxGeometry(w, h, d);
+    if (rx) g.rotateX(rx);
+    if (rz) g.rotateZ(rz);
+    if (ry) g.rotateY(ry);
+    g.translate(x, y, z);
+    return this.add(key, g);
+  };
+  // a prototype geometry, scaled / yawed / placed (the source is not touched)
+  Kit.prototype.geo = function (key, src, x, y, z, ry, sx, sy, sz) {
+    const g = src.clone();
+    if (sx != null) g.scale(sx, sy == null ? sx : sy, sz == null ? sx : sz);
+    if (ry) g.rotateY(ry);
+    g.translate(x, y, z);
+    return this.add(key, g);
+  };
+  function boxUV(g, tile) {
+    const P = g.attributes.position, N = g.attributes.normal, U = g.attributes.uv;
+    for (let i = 0; i < P.count; i++) {
+      const x = P.getX(i), y = P.getY(i), z = P.getZ(i);
+      const ax = Math.abs(N.getX(i)), ay = Math.abs(N.getY(i)), az = Math.abs(N.getZ(i));
+      if (ay >= ax && ay >= az) U.setXY(i, x / tile, z / tile);
+      else if (ax >= az) U.setXY(i, z / tile, y / tile);
+      else U.setXY(i, x / tile, y / tile);
+    }
+    U.needsUpdate = true;
+  }
+  let _paneM = null;
+  function paneMat() {
+    return _paneM || (_paneM = new THREE.MeshLambertMaterial({ color: 0x9db4c2, emissive: 0x1a2630, transparent: true, opacity: 0.3, depthWrite: false }));
+  }
+  Kit.prototype.flush = function (parent, name) {
+    const out = [];
+    this.g.forEach(function (list, key) {
+      const geo = mergeGeos(list);
+      for (const g of list) g.dispose();
+      let mat, cast = true;
+      const glass = typeof key === "string" && key.indexOf("glass") === 0;
+      if (glass) { mat = paneMat(); cast = false; }
+      else if (typeof key === "string" && key.indexOf("lit:") === 0) {
+        const p = key.split(":");
+        const hx = parseInt(p[1], 10);
+        mat = cm(hx, { emissive: hx, ei: +p[2] || 0.8 }); cast = false;
+      } else if (typeof key === "string") {
+        const keep = key.slice(-3) === "~uv", k = keep ? key.slice(0, -3) : key;
+        if (!keep && SURF[k]) boxUV(geo, SURF[k].tile);
+        mat = SURF[k] ? estateMat(k) : cm(M.stone);
+      } else mat = cm(key);
+      const m = new THREE.Mesh(geo, mat);
+      m.name = (name || "kit") + "-" + key;
+      m.castShadow = cast; m.receiveShadow = !glass;
+      if (glass) m.renderOrder = 1;
+      m.matrixAutoUpdate = false; m.updateMatrix();
+      parent.add(m);
+      out.push(m);
+    });
+    this.g.clear();
+    return out;
+  };
+
+  /* A WALL WITH OPENINGS, as the pieces a mason lays round them. `f` is the
+     OUTWARD axis normal of the face; the face spans the full `w` on the +-z
+     faces and sits between them on the +-x faces, so the corners are closed.
+     Openings: [{t, w, y0, y1, door}] with t along +x (z faces) or +z (x
+     faces) from the building centre. Every piece is a Kit box; a collider
+     runs the whole face except the doorways (a window is glass, and glass is
+     solid), so what you can see through is still what you cannot walk
+     through, and a doorway is the one gap. */
+  function wallFace(kit, key, x, z, f, w, d, T, y0, y1, opens, solid) {
+    const alongX = Math.abs(f.z) > 0.5;
+    const off = (alongX ? d : w) / 2 - T / 2;
+    const span = alongX ? w : d - 2 * T;
+    const nx = x + f.x * off, nz = z + f.z * off;
+    const O = (opens || []).slice().sort(function (a, b) { return a.t - b.t; });
+    const piece = function (t0, t1, ya, yb) {
+      if (t1 - t0 < 0.01 || yb - ya < 0.01) return;
+      const t = (t0 + t1) / 2;
+      if (alongX) kit.box(key, x + t, (ya + yb) / 2, nz, t1 - t0, yb - ya, T);
+      else kit.box(key, nx, (ya + yb) / 2, z + t, T, yb - ya, t1 - t0);
+    };
+    const colAt = function (t0, t1, ya, yb) {
+      if (!solid || t1 - t0 < 0.01) return;
+      const t = (t0 + t1) / 2;
+      if (alongX) col(x + t, nz, t1 - t0, T, ya, yb);
+      else col(nx, z + t, T, t1 - t0, ya, yb);
+    };
+    let a = -span / 2, ca = -span / 2;
+    for (const o of O) {
+      const t0 = o.t - o.w / 2, t1 = o.t + o.w / 2;
+      piece(a, t0, y0, y1);
+      piece(t0, t1, y0, o.y0);
+      piece(t0, t1, o.y1, y1);
+      a = t1;
+      if (o.door) { colAt(ca, t0, y0, y1); colAt(t0, t1, o.y1, y1); ca = t1; }
+    }
+    piece(a, span / 2, y0, y1);
+    colAt(ca, span / 2, y0, y1);
+    return { alongX: alongX, off: off, span: span };
+  }
+
+  /* THE ORDERS' SHAPES, lathed once and shared.
+     A baluster is unit tall (instanced with sy = its height): a square-read
+     foot, a pear belly, a neck and a cap. A column is built for its radius
+     and height (base mouldings do not stretch with the shaft): a moulded
+     base, a shaft with entasis, an astragal, an echinus and a square
+     abacus, so its top is exactly `H` above its foot. */
+  let _balG = null;
+  function balusterGeo() {
+    if (_balG) return _balG;
+    return (_balG = lathe([[0, 0], [0.078, 0], [0.078, 0.07], [0.056, 0.11], [0.05, 0.16], [0.078, 0.34], [0.07, 0.5],
+      [0.042, 0.66], [0.036, 0.74], [0.05, 0.8], [0.062, 0.86], [0.062, 0.92], [0.078, 0.95], [0.078, 1.0], [0, 1.0]], 10));
+  }
+  const _colGeos = {};
+  function columnGeo(R, H, ionic) {
+    const k = R.toFixed(3) + ":" + H.toFixed(3) + ":" + (ionic ? 1 : 0);
+    if (_colGeos[k]) return _colGeos[k];
+    const plinth = new THREE.BoxGeometry(R * 2.5, R * 0.55, R * 2.5); plinth.translate(0, R * 0.275, 0);
+    const b0 = R * 0.55, capH = R * 0.9, s0 = b0 + R * 0.36, s1 = H - capH;
+    const prof = [[0, b0], [R * 1.3, b0], [R * 1.3, b0 + R * 0.12], [R * 1.18, b0 + R * 0.2], [R * 1.08, b0 + R * 0.28], [R * 1.02, s0]];
+    // the shaft: straight for its lower third, then swelling in to 0.86 R
+    for (let i = 1; i <= 6; i++) {
+      const t = i / 6, y = s0 + (s1 - s0) * t;
+      const r = t < 0.33 ? R : R * (1 - 0.14 * Math.pow((t - 0.33) / 0.67, 1.4));
+      prof.push([r, y]);
+    }
+    prof.push([R * 0.98, s1], [R * 0.98, s1 + R * 0.08], [R * 0.9, s1 + R * 0.12], [R * 1.28, s1 + R * 0.46], [R * 1.28, s1 + R * 0.5], [0, s1 + R * 0.5]);
+    const shaft = lathe(prof, 20);
+    const abacus = new THREE.BoxGeometry(R * 2.7, capH - R * 0.5, R * 2.7); abacus.translate(0, s1 + R * 0.5 + (capH - R * 0.5) / 2, 0);
+    const parts = [plinth, shaft, abacus];
+    if (ionic) for (const s of [-1, 1]) {
+      const v = new THREE.CylinderGeometry(R * 0.32, R * 0.32, R * 2.3, 12);
+      v.rotateX(Math.PI / 2); v.translate(s * R * 1.05, s1 + R * 0.34, 0); parts.push(v);
+    }
+    return (_colGeos[k] = mergeGeos(parts));
+  }
+  // a unit PEDIMENT prism (span 1 along x, rise 1, depth 1 along z, base at
+  // y 0) and a unit SEGMENTAL one: instanced over a window with sx/sy/sz
+  let _pedG = null;
+  function pedimentGeos() {
+    if (_pedG) return _pedG;
+    const tri = new THREE.Shape();
+    tri.moveTo(-0.5, 0); tri.lineTo(0.5, 0); tri.lineTo(0, 1); tri.lineTo(-0.5, 0);
+    const seg = new THREE.Shape();
+    seg.moveTo(-0.5, 0); seg.lineTo(0.5, 0);
+    for (let i = 1; i < 12; i++) { const a = i / 12 * Math.PI; seg.lineTo(0.5 * Math.cos(a), Math.sin(a)); }
+    seg.lineTo(-0.5, 0);
+    const ex = function (s) { const g = new THREE.ExtrudeGeometry(s, { depth: 1, bevelEnabled: false, curveSegments: 12 }); g.translate(0, 0, -0.5); g.computeVertexNormals(); return g; };
+    return (_pedG = { tri: ex(tri), seg: ex(seg) });
   }
 
 
@@ -1406,7 +1736,7 @@
         }
       }
     }
-    return { inner: inner, height: H };
+    return { inner: inner, height: H, apothem: A, rot0: rot0, FH: FH, storeys: ST, innerFace: inner };
   }
 
   /* --------------------------------------------------------------------
@@ -1484,14 +1814,18 @@
        the forecourt    granite setts with a darker border, round a kerbed
                         lawn island and its fountain: the carriage ring the
                         motorcade actually drives
-       the house        the civic shell at a real storey height, its wings,
-                        a covered colonnade from the office wing to the court
+       the house        the civic shell at a real storey height, dressed from
+                        its own built record (houseDress: rusticated base,
+                        window pediments, balustrade, slate roof, chimneys,
+                        porticoes, lights), its wings, a covered colonnade
+                        from the office wing to the court
        the grounds      clipped lawns (mown stripes), flank walks to a rear
                         terrace, a central walk to a rondel and basin, two
                         parterres of box hedge, beds and topiary
        the working bits a raised, lit helipad with its windsock off to one
-                        side, a staff car park by the office wing, sentry
-                        lodges in the corners, flags on the court
+                        side, a staff car park by the office wing, a motor
+                        pool with drive-in bays, walk-in sentry lodges in
+                        the corners, flags on the court
 
      ONE KIT, EVERY RICH MAN. Nothing here knows it is the President's. A row
      hands `estate(c, spec)` a spec (footprint comes from the row's hx/hz,
@@ -1883,13 +2217,719 @@
     F.box(um, 3.6, vm, alongU ? len + 1.1 : w + 0.5, 0.16, alongU ? w + 0.5 : len + 1.1, M.stoneD, { cast: false }); // cornice
   }
 
+  /* ---- THE HOUSE, DRESSED -------------------------------------------------
+     OWNER (President mode, iPad): "that building is so low quality ... all
+     the buildings in the presidential mode just need to be redone, inside
+     and out." From outside the Mansion was a marble office block: a 26 m
+     GLASS SHOPFRONT either side of the door (buildings.js glazes the whole
+     door storey of any shell as a storefront), ten colossal columns on a
+     pitch of their own standing across half the windows, a Capitol dome
+     on a house, a plain parapet, no roof, no chimneys, and a back with
+     nothing on it at all.
+
+     houseDress() dresses a civic() shell FROM ITS OWN BUILT RECORD — the
+     window panes it glazed (b.windows), the order it stood (b.civicOrder),
+     its door, storey height and parapet — so no number here can drift from
+     the building it hangs on:
+       clad       the door storey becomes a RUSTICATED BASE: coursed stone
+                  0.27 m proud of the shell, punched with windows on the
+                  bays of the storey above (the shell's glass is now the
+                  back of a deep reveal), a doorcase with pilasters, an
+                  entablature, a segmental pediment, a lit fanlight, two
+                  wall lanterns. Solid, cut round the column shafts (they
+                  carry their own bodies).
+       windows    keystones on the ground storey, alternating triangular
+                  and segmental pediments with balustered aprons on the
+                  principal floor.
+       balustrade the parapet as a balustrade: a plinth on the cornice,
+                  turned balusters (one instanced draw), dados on every
+                  other pier of the bay rhythm, capped.
+       roof       a hipped slate roof over the plate, inset 5.3 m so the
+                  roof walk (and the counter-sniper stands on it) stays
+                  clear, eaves cornice, lead ridge, solid.
+       chimneys   stone stacks with bands, oversailing caps and pots.
+       portico    a PROJECTING pedimented portico on the perron: free-
+                  standing columns on an even ~4.8 m rhythm, entablature
+                  returned to the wall, a coffered ceiling, a slate-roofed
+                  pediment with the seal in its tympanum, a hanging
+                  lantern, uplights at the column feet.
+       south      the garden front's bowed portico: columns on a half
+                  ring, a curved entablature, a balustraded roof, and a
+                  balcony on the principal floor inside it.
+     Everything is merged per material into the shell's own group (it is
+     part of the building: demolition and the batcher treat it as such). */
+  function shadeX(hex, f) {
+    const r = Math.max(0, Math.min(255, (((hex >> 16) & 255) * f) | 0));
+    const g = Math.max(0, Math.min(255, (((hex >> 8) & 255) * f) | 0));
+    const b = Math.max(0, Math.min(255, ((hex & 255) * f) | 0));
+    return (r << 16) | (g << 8) | b;
+  }
+  // a shell's face frame: s 0..3 = -z, +z, -x, +x; t runs along the face
+  // (+x on the z faces, +z on the x faces), n is the distance out from the
+  // shell centre
+  function shellFaces(w, d) {
+    return [0, 1, 2, 3].map(function (s) {
+      const horiz = s < 2;
+      return { s: s, horiz: horiz, out: (s === 0 || s === 2) ? -1 : 1, span: horiz ? w : d, halfN: (horiz ? d : w) / 2 };
+    });
+  }
+  function facePt(f, t, n) { return f.horiz ? { x: t, z: f.out * n } : { x: f.out * n, z: t }; }
+  function faceBoxK(kit, key, f, t, y, n, L, h, dn) {
+    const q = facePt(f, t, n);
+    kit.box(key, q.x, y, q.z, f.horiz ? L : dn, h, f.horiz ? dn : L);
+  }
+  // a box whose long (along-t) axis is tilted up toward +t by `ang`
+  function faceSlant(kit, key, f, t, y, n, L, h, dn, ang) {
+    const q = facePt(f, t, n);
+    if (f.horiz) kit.box(key, q.x, y, q.z, L, h, dn, 0, ang, 0);
+    else kit.box(key, q.x, y, q.z, dn, h, L, 0, 0, -ang);
+  }
+  // re-seat a geometry authored in (x = t, y = n out from `n0`, z = up) onto
+  // face f at height y0 — winding flipped where the map is a mirror
+  function seatOnFace(g, f, n0, y0, mirror) {
+    if (g.index) g = g.toNonIndexed();
+    const P = g.attributes.position;
+    for (let i = 0; i < P.count; i++) {
+      const t = P.getX(i), nn = P.getY(i), up = P.getZ(i);
+      const q = facePt(f, t, n0 + nn);
+      P.setXYZ(i, q.x, y0 + up, q.z);
+    }
+    const det = (f.horiz ? -f.out : f.out) * (mirror ? -1 : 1);
+    if (det < 0) {
+      for (let i = 0; i < P.count; i += 3) {
+        const x = P.getX(i + 1), y = P.getY(i + 1), z = P.getZ(i + 1);
+        P.setXYZ(i + 1, P.getX(i + 2), P.getY(i + 2), P.getZ(i + 2));
+        P.setXYZ(i + 2, x, y, z);
+      }
+    }
+    P.needsUpdate = true;
+    g.computeVertexNormals();
+    return g;
+  }
+  function halfRing(r0, r1, h, seg) {
+    const sh = new THREE.Shape();
+    sh.absarc(0, 0, r1, 0, Math.PI, false);
+    sh.absarc(0, 0, r0, Math.PI, 0, true);
+    return new THREE.ExtrudeGeometry(sh, { depth: h, bevelEnabled: false, curveSegments: seg || 28 });
+  }
+  function halfDisc(r, h) {
+    const sh = new THREE.Shape();
+    sh.moveTo(r, 0); sh.absarc(0, 0, r, 0, Math.PI, false); sh.lineTo(r, 0);
+    return new THREE.ExtrudeGeometry(sh, { depth: h, bevelEnabled: false, curveSegments: 28 });
+  }
+  // the glazed openings of a shell, per face and storey, merged from its
+  // panes (a mullioned opening is several panes; a storefront band is one)
+  function shellOpenings(b) {
+    const WT = b.wt || 0.4, out = [[], [], [], []];
+    for (const r of (b.windows || [])) {
+      const lx = r.x - b.ox, lz = r.z - b.oz;
+      let s = -1, t = 0, hw = 0;
+      if (r.hd < 0.1 && Math.abs(Math.abs(lz) - (b.d / 2 - WT / 2)) < 0.4) { s = lz < 0 ? 0 : 1; t = lx; hw = r.hw; }
+      else if (r.hw < 0.1 && Math.abs(Math.abs(lx) - (b.w / 2 - WT / 2)) < 0.4) { s = lx < 0 ? 2 : 3; t = lz; hw = r.hd; }
+      if (s < 0) continue;
+      const k = Math.max(0, Math.floor(r.y / b.FH));
+      (out[s][k] = out[s][k] || []).push({ t0: t - hw, t1: t + hw, y0: r.y - r.hh, y1: r.y + r.hh });
+    }
+    for (const F of out) for (const k in F) {
+      const L = F[k].sort(function (a, c) { return a.t0 - c.t0; }), M2 = [];
+      for (const o of L) {
+        const p = M2[M2.length - 1];
+        if (p && o.t0 <= p.t1 + 0.12) { p.t1 = Math.max(p.t1, o.t1); p.y0 = Math.min(p.y0, o.y0); p.y1 = Math.max(p.y1, o.y1); }
+        else M2.push({ t0: o.t0, t1: o.t1, y0: o.y0, y1: o.y1 });
+      }
+      F[k] = M2;
+    }
+    return out;
+  }
+
+  function houseDress(sh, D, o) {
+    const b = sh && sh.b;
+    if (!b || !b.group || !D) return null;
+    o = o || {};
+    const G = b.group, ox = b.ox, oz = b.oz, w = b.w, d = b.d, FH = b.FH;
+    const rTop = b.h, pp = b.parapetH || 0.8;
+    const ord = b.civicOrder || null;
+    const ld = b.localDoor || { x: 0, z: d / 2, nx: 0, nz: -1 };
+    const doorS = ld.nz < -0.5 ? 1 : ld.nz > 0.5 ? 0 : ld.nx < -0.5 ? 3 : 2;
+    const FACE = shellFaces(w, d), fD = FACE[doorS];
+    const WALL = b.wallColor || M.marble, TRIM = shadeX(WALL, 1.03), RUST = shadeX(WALL, 0.97);
+    const SHADOW = shadeX(WALL, 0.42), COLC = shadeX(WALL, 1.05), SOFFIT = shadeX(WALL, 0.86);
+    const kit = new Kit();
+    const fb = function (key, f, t, y, n, L, h, dn) { faceBoxK(kit, key, f, t, y, n, L, h, dn); };
+    const fc = function (f, t, n, L, dn, y0, y1) { const q = facePt(f, t, n); return col(ox + q.x, oz + q.z, f.horiz ? L : dn, f.horiz ? dn : L, y0, y1); };
+    const OPEN = shellOpenings(b);
+    const info = { clad: false, portico: null, south: null, roofTop: rTop };
+    const lamps = [];                                   // {f, t, y, n}: wall lanterns
+    const ups = [];                                     // {x, z, y}: uplights (shell-local)
+    const deck = o.deck != null ? o.deck : (ord ? ord.deck : 0);
+
+    // ---- the rusticated base on the door storey --------------------------
+    const band = OPEN[doorS][0] || [];
+    const bandW = band.reduce(function (a, q) { return a + q.t1 - q.t0; }, 0);
+    const clad = D.clad !== false && bandW > fD.span * 0.4;
+    if (clad) {
+      info.clad = true;
+      const hN = fD.halfN, TH = 0.2, RU = 0.07, y1c = FH - 0.24;
+      // what hangs on this front must stand clear of the base: its face is
+      // `out` proud of the shell wall, up to `top`
+      info.base = { out: TH + RU, top: y1c };
+      const dt = fD.horiz ? ld.x : ld.z;
+      const doorO = { t0: dt - 1.1, t1: dt + 1.1, y0: 0, y1: 3.05, door: true };
+      const wins = (OPEN[doorS][1] || []).map(function (q) { return { t0: q.t0, t1: q.t1, y0: q.y0 - FH, y1: q.y1 - FH }; })
+        .filter(function (q) { return q.t1 < doorO.t0 - 0.6 || q.t0 > doorO.t1 + 0.6; });
+      const holes = wins.concat([doorO]).sort(function (a, c) { return a.t0 - c.t0; });
+      const colT = (ord && ord.face === doorS) ? ord.cols.slice().sort(function (a, c) { return a - c; }) : [];
+      const colHalf = ord ? ord.R * 1.25 : 0;
+      // bodies already standing against this base: the order's shafts, and
+      // the cheek walls of a civic terrace (buildings_civic.js stands them
+      // at +-(span/2 - 0.55), 0.55 wide) — the cladding is cut round both
+      const cuts = colT.map(function (t) { return [t - colHalf, t + colHalf]; });
+      if (o.terrace) for (const sg of [-1, 1]) { const t = sg * (fD.span / 2 - 0.55); cuts.push([t - 0.28, t + 0.28]); }
+      cuts.sort(function (p, q) { return p[0] - q[0]; });
+      const courses = [];
+      for (let y = deck + 0.04; y < y1c - 0.12; y += 0.52) courses.push([y, Math.min(y + 0.44, y1c)]);
+      const piece = function (t0, t1, ya, yb) {
+        if (t1 - t0 < 0.02 || yb - ya < 0.02) return;
+        fb(WALL, fD, (t0 + t1) / 2, (ya + yb) / 2, hN + TH / 2, t1 - t0, yb - ya, TH);
+        for (const c of courses) {
+          const a = Math.max(ya, c[0]), e = Math.min(yb, c[1]);
+          if (e - a > 0.05) fb(RUST, fD, (t0 + t1) / 2, (a + e) / 2, hN + TH + RU / 2, t1 - t0, e - a, RU);
+        }
+      };
+      const solidRun = function (t0, t1, ya, yb) {
+        let a = t0;
+        for (const cu of cuts) {
+          if (cu[1] <= a || cu[0] >= t1) continue;
+          if (cu[0] > a + 0.02) fc(fD, (a + cu[0]) / 2, hN + (TH + RU) / 2, cu[0] - a, TH + RU, ya, yb);
+          a = Math.max(a, cu[1]);
+        }
+        if (t1 > a + 0.02) fc(fD, (a + t1) / 2, hN + (TH + RU) / 2, t1 - a, TH + RU, ya, yb);
+      };
+      let a = -fD.span / 2;
+      for (const hO of holes) {
+        piece(a, hO.t0, 0, y1c); solidRun(a, hO.t0, 0, y1c);
+        piece(hO.t0, hO.t1, 0, hO.y0);
+        if (hO.y0 > 0.5) solidRun(hO.t0, hO.t1, 0, hO.y0);
+        piece(hO.t0, hO.t1, hO.y1, y1c);
+        a = hO.t1;
+        if (hO.door) continue;
+        const tc = (hO.t0 + hO.t1) / 2, ww = hO.t1 - hO.t0;
+        fb(TRIM, fD, tc, hO.y0 - 0.07, hN + 0.21, ww + 0.36, 0.14, 0.42);            // the sill
+        for (let v = -2; v <= 2; v++) {                                                // a flat arch of five voussoirs
+          const vw = (ww + 0.2) / 5;
+          fb(v === 0 ? TRIM : RUST, fD, tc + v * vw, hO.y1 + 0.24 + (v === 0 ? 0.04 : 0), hN + TH + (v === 0 ? 0.1 : 0.05), vw - 0.04, v === 0 ? 0.56 : 0.44, v === 0 ? 0.2 : 0.1);
+        }
+      }
+      piece(a, fD.span / 2, 0, y1c); solidRun(a, fD.span / 2, 0, y1c);
+      // THE DOORCASE: pilasters, capitals, an entablature, a segmental
+      // pediment; a transom bar and a lit fanlight over the leaf; the
+      // shell's glass either side of the leaf reads as sidelights
+      // Where the order already stands a column either side of the door
+      // (an odd bay count puts two piers there), those shafts ARE the
+      // doorcase's supports: the entablature and pediment span between them.
+      const nO = hN + TH + RU;
+      let near = Infinity;
+      for (const ct of colT) near = Math.min(near, Math.abs(ct - dt));
+      const framed = near - colHalf < 2.0;
+      const half = framed ? near - colHalf - 0.02 : 1.7;
+      if (!framed) for (const sg of [-1, 1]) {
+        fb(TRIM, fD, dt + sg * 1.36, 3.2 / 2, nO + 0.1, 0.46, 3.2, 0.2);
+        fb(COLC, fD, dt + sg * 1.36, 3.27, nO + 0.12, 0.56, 0.14, 0.24);
+        fc(fD, dt + sg * 1.36, nO + 0.1, 0.46, 0.2, 0, 3.2);
+      }
+      fb(TRIM, fD, dt, 3.52, nO + 0.16, 2 * half, 0.36, 0.32);
+      fb(COLC, fD, dt, 3.75, nO + 0.2, 2 * half + 0.3, 0.1, 0.4);
+      info.doorPed = { f: fD, t: dt, y: 3.8, n: nO + 0.2, span: 2 * half + 0.2, rise: 0.36, dep: 0.36 };
+      fb(TRIM, fD, dt, 2.36, hN + 0.06, 2.2, 0.08, 0.12);
+      fb("lit:" + 0xffdfa6 + ":0.5", fD, dt, 2.72, hN + 0.03, 2.0, 0.62, 0.04);
+      if (!framed) for (const sg of [-1, 1]) lamps.push({ f: fD, t: dt + sg * 2.25, y: 2.55, n: nO });
+    }
+
+    // ---- window dressings --------------------------------------------------
+    const PG = pedimentGeos(), triI = [], segI = [];
+    const pedAt = function (f, t, y, n, span, rise, dep, segm) {
+      const q = facePt(f, t, n);
+      (segm ? segI : triI).push({ x: q.x, y: y, z: q.z, ry: f.horiz ? 0 : Math.PI / 2, sx: span, sy: rise, sz: dep });
+    };
+    if (D.windows !== false) {
+      for (const f of FACE) {
+        const L = OPEN[f.s];
+        for (const k in L) {
+          const kk = +k;
+          if (clad && f.s === doorS && kk === 0) continue;
+          const ops = L[k], c = (ops.length - 1) / 2;
+          for (let i = 0; i < ops.length; i++) {
+            const q = ops[i], tc = (q.t0 + q.t1) / 2, ww = q.t1 - q.t0, hN = f.halfN;
+            if (ww > 4.5) continue;                                   // a band, not a window
+            if (kk === 0) {
+              fb(TRIM, f, tc, q.y1 + 0.3, hN + 0.12, 0.38, 0.58, 0.24);           // keystone
+            } else if (kk === 1) {
+              if (q.y1 + 0.72 > (kk + 1) * FH - 0.12) continue;
+              fb(TRIM, f, tc, q.y1 + 0.35, hN + 0.15, ww + 0.8, 0.1, 0.3);         // the pediment's bed moulding
+              pedAt(f, tc, q.y1 + 0.4, hN + 0.15, ww + 0.7, Math.floor(Math.abs(i - c)) % 2 ? 0.24 : 0.3, 0.28, Math.floor(Math.abs(i - c)) % 2 === 1);
+              fb(TRIM, f, tc, q.y0 - 0.74, hN + 0.03, ww - 0.1, 0.36, 0.06);       // the apron
+              fb(RUST, f, tc, q.y0 - 0.74, hN + 0.07, ww - 0.44, 0.2, 0.03);
+            } else if (q.y1 + 0.55 < rTop - 0.7) {
+              fb(TRIM, f, tc, q.y1 + 0.42, hN + 0.14, ww + 0.62, 0.12, 0.28);      // a cornice hood
+            }
+          }
+        }
+      }
+    }
+    if (info.doorPed) { const p = info.doorPed; pedAt(p.f, p.t, p.y, p.n, p.span, p.rise, p.dep, true); }
+
+    // the portico's column line, solved here because the balustrade has to
+    // stop either side of its pediment
+    const R0 = ord ? Math.max(ord.R, ord.orderH / 18) : 0.5;
+    let POUT = 0, PGAP = 0;
+    if (D.portico && ord && ord.face === doorS) {
+      const want = Math.min(fD.span * 0.225, D.portico.half || 12);
+      POUT = want;
+      if (ord.cols.length) { let best = Infinity; for (const t of ord.cols) { const e = Math.abs(Math.abs(t) - want); if (e < best) { best = e; POUT = Math.abs(t); } } }
+      PGAP = POUT + R0 * 1.3 + 0.55 + 0.3;                    // the pediment's half span + a dado
+    }
+
+    // ---- the balustrade on the parapet --------------------------------------
+    const bals = [];
+    if (D.balustrade) {
+      const yb0 = rTop + 0.08, yb1 = rTop + pp;
+      for (const f of FACE) {
+        const hN = f.halfN, span = f.span;
+        const st = [-span / 2 + 0.32, span / 2 - 0.32];
+        const gap = (f.s === doorS && PGAP > 0) ? PGAP : 0;
+        if (gap) st.push(-gap, gap);
+        const B = CBZ.civicBays ? CBZ.civicBays(span) : null;
+        if (B) for (let i = 0; i <= B.nBay; i++) {
+          if (Math.round(Math.abs(i - B.nBay / 2) * 2) % 4 !== (B.nBay % 2 ? 1 : 0)) continue;
+          if (Math.abs(B.piers[i]) < span / 2 - 1.4 && Math.abs(B.piers[i]) > gap + 1.2) st.push(B.piers[i]);
+        }
+        st.sort(function (a, c) { return a - c; });
+        fb(TRIM, f, 0, rTop, hN + 0.15, span + 0.3, 0.16, 0.3);                       // plinth on the cornice
+        if (!gap) fb(SHADOW, f, 0, (yb0 + yb1) / 2, hN + 0.012, span - 0.2, yb1 - yb0, 0.024);   // the shadow behind the balusters
+        else for (const sg of [-1, 1]) { const a0 = gap, a1 = span / 2 - 0.1; fb(SHADOW, f, sg * (a0 + a1) / 2, (yb0 + yb1) / 2, hN + 0.012, a1 - a0, yb1 - yb0, 0.024); }
+        for (const t of st) {
+          fb(TRIM, f, t, (yb0 + yb1) / 2, hN + 0.17, 0.5, yb1 - yb0, 0.34);
+          fb(COLC, f, t, yb1 + 0.18, hN + 0.19, 0.6, 0.12, 0.38);
+        }
+        for (let j = 0; j + 1 < st.length; j++) {
+          if (gap && st[j] === -gap) continue;                    // behind the pediment
+          const a0 = st[j] + 0.33, a1 = st[j + 1] - 0.33, len = a1 - a0;
+          const nb = Math.max(1, Math.floor(len / 0.27));
+          for (let i = 0; i < nb; i++) {
+            const q = facePt(f, a0 + (i + 0.5) * len / nb, hN + 0.15);
+            bals.push({ x: q.x, y: yb0, z: q.z, sy: yb1 - yb0 });
+          }
+        }
+      }
+    }
+
+    // ---- the roof and its chimneys -------------------------------------------
+    let roofBase = rTop, roofTop = rTop;
+    const RW = w - 2 * (D.roofInset || 5.3), RD = d - 2 * (D.roofInset || 5.3);
+    if (D.roof === "hip" && RW > 4 && RD > 4) {
+      const e1 = rTop + 0.6;
+      kit.box(WALL, 0, (rTop + e1) / 2, 0, RW, e1 - rTop, RD);                       // the attic the roof sits on
+      kit.box(TRIM, 0, e1 + 0.09, 0, RW + 0.6, 0.18, RD + 0.6);                     // eaves cornice
+      const base = e1 + 0.18, hx = RW / 2 + 0.2, hz = RD / 2 + 0.2;
+      const along = hx >= hz, a = along ? hx : hz, c = along ? hz : hx;
+      const rise = c * (D.pitch || 0.36), top = base + rise;
+      const pos = [], uv = [], T = SURF.slate.tile;
+      // one slope: a polygon of (along, across) corners, UV = along / slope distance
+      const tri = function (p, q2, s2) {
+        const ux = q2[0] - p[0], uy = q2[1] - p[1], uz = q2[2] - p[2], vx = s2[0] - p[0], vy = s2[1] - p[1], vz = s2[2] - p[2];
+        const ny = uz * vx - ux * vz;
+        const L = ny >= 0 ? [p, q2, s2] : [p, s2, q2];
+        for (const v of L) pos.push(v[0], v[1], v[2]);
+        return L;
+      };
+      const X = function (al, ac, y) { return along ? [al, y, ac] : [ac, y, al]; };
+      const slopeLen = Math.hypot(c, rise);
+      const pushUV = function (L, alongAxis, sgn) {
+        for (const v of L) {
+          const al = along ? v[0] : v[2], ac = along ? v[2] : v[0];
+          const up = (v[1] - base) / rise * slopeLen;
+          uv.push((alongAxis ? al : ac) / T, (up + (sgn > 0 ? 0 : 0.37)) / T);
+        }
+      };
+      for (const sg of [-1, 1]) {
+        // the long slopes (trapezoids) and the hips (triangles)
+        const p0 = X(-a, sg * c, base), p1 = X(a, sg * c, base), p2 = X(a - c, 0, top), p3 = X(-(a - c), 0, top);
+        pushUV(tri(p0, p1, p2), true, sg); pushUV(tri(p0, p2, p3), true, sg);
+        const q0 = X(sg * a, -c, base), q1 = X(sg * a, c, base), q2 = X(sg * (a - c), 0, top);
+        pushUV(tri(q0, q1, q2), false, sg);
+      }
+      const rg = new THREE.BufferGeometry();
+      rg.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+      rg.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+      rg.computeVertexNormals();
+      kit.add("slate~uv", rg);
+      // the lead ridge
+      if (a - c > 0.1) kit.box(0x3b3f45, along ? 0 : 0, top + 0.05, 0, along ? 2 * (a - c) + 0.3 : 0.3, 0.14, along ? 0.3 : 2 * (a - c) + 0.3);
+      col(ox, oz, RW, RD, rTop, base + rise * 0.55);
+      roofBase = base + rise * 0.55; roofTop = top;
+      info.roofTop = top;
+    }
+    const nCh = D.chimneys | 0;
+    if (nCh > 0) {
+      const hip = D.roof === "hip" && RW > 4 && RD > 4;
+      const cx0 = hip ? Math.max(1.5, RW / 2 * 0.56) : w / 2 - 4.2, cz0 = hip ? RD / 4 : d / 2 - 3.2;
+      const topC = hip ? roofTop + 1.3 : rTop + 2.4;
+      const baseC = hip ? rTop + 0.6 : rTop;
+      const slots = nCh >= 4 ? [[-1, -1], [1, -1], [-1, 1], [1, 1]] : [[-1, -1], [1, 1]];
+      for (let i = 0; i < Math.min(nCh, slots.length); i++) {
+        const x = slots[i][0] * cx0, z = slots[i][1] * cz0 * (hip ? 1 : 0.2);
+        const SW = 2.6, SD = 1.0;
+        kit.box(WALL, x, (baseC + topC) / 2, z, SW, topC - baseC, SD);
+        kit.box(TRIM, x, topC - 0.62, z, SW + 0.14, 0.14, SD + 0.14);
+        kit.box(TRIM, x, topC + 0.08, z, SW + 0.3, 0.16, SD + 0.3);
+        for (const p of [-0.75, 0, 0.75]) kit.geo(0x9a5c43, chimneyPotGeo(), x + p, topC + 0.16, z);
+        col(ox + x, oz + z, SW, SD, hip ? roofBase : rTop, topC + 0.16);
+      }
+    }
+
+    // ---- the portico ---------------------------------------------------------
+    if (POUT > 0) {
+      const f = fD, hN = f.halfN, PO = D.portico, outer = POUT;
+      const m = Math.max(1, Math.round((outer + 2) / 4)), n = 2 * m;
+      const step = 2 * outer / (n - 1);
+      const R = R0, capTop = ord.entY, base = ord.deck;
+      const depth = Math.min(PO.depth || 7, (o.deckDepth || 99) - R * 1.3 - 0.1);
+      const nF = hN + depth;
+      const cg = columnGeo(R, capTop - base, !!D.ionic);
+      const colI = [];
+      const put = function (t, nn) {
+        const q = facePt(f, t, nn);
+        colI.push({ x: q.x, y: base, z: q.z });
+        fc(f, t, nn, R * 2.4, R * 2.4, 0, capTop);
+      };
+      for (let i = 0; i < n; i++) put(-outer + i * step, nF);
+      if (depth > 4.2) for (const sg of [-1, 1]) put(sg * outer, hN + depth * 0.45);
+      instances(G, cg, cm(COLC), colI);
+      // uplights at the column feet, on the deck beside each plinth (the
+      // deck ends a hand's width in front of the plinths)
+      for (let i = 0; i < n; i++) { const t = -outer + i * step, q = facePt(f, t + (t < 0 ? 1 : -1) * (R * 1.25 + 0.25), nF + R * 0.6); ups.push({ x: q.x, z: q.z, y: base }); }
+      // the entablature, returned along both flanks to the wall
+      const EW = outer + R * 1.3 + 0.3;                       // = PGAP - 0.55 (the balustrade's stop)
+      const beam = function (key, yC, h, dep, extra) {
+        fb(key, f, 0, yC, nF, 2 * (EW + extra), h, dep);
+        for (const sg of [-1, 1]) {
+          const len = nF - hN + dep / 2, q = facePt(f, sg * (outer + (extra > 0 ? extra * 0.5 : 0)), hN + len / 2);
+          kit.box(key, q.x, yC, q.z, f.horiz ? dep : len, h, f.horiz ? len : dep);
+        }
+      };
+      beam(TRIM, capTop + 0.18, 0.26, R * 2.3, 0);
+      beam(RUST, capTop + 0.56, 0.46, R * 2.1, 0);
+      beam(COLC, capTop + 0.94, 0.24, R * 2.3 + 0.5, 0.25);
+      if (ord.deck != null && D.ionic !== true) {                        // doric triglyphs on the front frieze
+        const tn = Math.max(4, Math.round(2 * EW / 1.2));
+        for (let i = 0; i <= tn; i++) fb(COLC, f, -EW + 0.2 + i * (2 * EW - 0.4) / tn, capTop + 0.56, nF + R * 1.05 + 0.02, 0.26, 0.46, 0.06);
+      }
+      // the coffered ceiling, at the architrave soffit
+      const cy = capTop + 0.05;
+      fb(SOFFIT, f, 0, cy + 0.42, (hN + nF) / 2, 2 * outer - R * 2, 0.16, depth - R * 1.2);
+      const nr = Math.max(2, Math.round(depth / 2.4));
+      for (let i = 1; i < nr; i++) fb(TRIM, f, 0, cy + 0.2, hN + i * (depth / nr), 2 * outer - R * 2, 0.3, 0.22);
+      for (let i = 1; i < n - 1; i++) {
+        const t = -outer + i * step, q = facePt(f, t, (hN + nF) / 2);
+        kit.box(TRIM, q.x, cy + 0.2, q.z, f.horiz ? 0.22 : depth - R * 1.2, 0.3, f.horiz ? depth - R * 1.2 : 0.22);
+      }
+      // THE PEDIMENT: a gable over the portico, slate on its slopes, a
+      // recessed tympanum with the seal, raking cornices
+      const yb = capTop + 1.06, PW = EW + 0.25, rise = PW * Math.tan(13.5 * Math.PI / 180);
+      // the tympanum stands 0.45 behind the raking cornice, whose face is
+      // flush with the horizontal cornice's (both R*1.15 + 0.25 out)
+      const n1 = nF + R * 1.15 + 0.25, n0 = hN - 0.02;
+      const gl = new THREE.Shape();
+      gl.moveTo(-PW, 0); gl.lineTo(PW, 0); gl.lineTo(0, rise); gl.lineTo(-PW, 0);
+      // the gable mass, extruded from the wall to the tympanum
+      const gm = new THREE.ExtrudeGeometry(gl, { depth: n1 - 0.45 - n0, bevelEnabled: false });
+      // ExtrudeGeometry: shape in x/y, depth along +z → remap (x=t, y=up, z=n)
+      const P2 = gm.attributes.position;
+      for (let i = 0; i < P2.count; i++) { const tx = P2.getX(i), up = P2.getY(i), nn = P2.getZ(i); P2.setXYZ(i, tx, nn, up); }
+      kit.add(TRIM, seatOnFace(gm, f, n0, yb, true));          // the y/z swap above is a mirror
+      const slopeL = Math.hypot(PW, rise) + 0.35, ang = Math.atan2(rise, PW);
+      for (const sg of [-1, 1]) {
+        // raking cornice on the front, and the slate slope over the gable
+        faceSlant(kit, COLC, f, sg * PW / 2, yb + rise / 2 + 0.12, n1 - 0.25, slopeL, 0.26, 0.5, -sg * ang);
+        const t0 = sg > 0 ? 0 : -PW - 0.2, t1 = sg > 0 ? PW + 0.2 : 0;
+        const yA = function (t) { return yb + rise * (1 - Math.abs(t) / PW) + 0.03; };
+        const q = new THREE.BufferGeometry();
+        const cN = [n0, n1 + 0.1];
+        const vs = [[t0, cN[0], yA(t0)], [t1, cN[0], yA(t1)], [t1, cN[1], yA(t1)], [t0, cN[0], yA(t0)], [t1, cN[1], yA(t1)], [t0, cN[1], yA(t0)]];
+        const pa = [], ua = [];
+        for (const v of vs) { pa.push(v[0], v[1], v[2] - yb); ua.push(v[0] / 2.4, (v[1] + (yA(v[0]) - yb) * 1.2) / 2.4); }
+        q.setAttribute("position", new THREE.Float32BufferAttribute(pa, 3));
+        q.setAttribute("uv", new THREE.Float32BufferAttribute(ua, 2));
+        let g2 = seatOnFace(q, f, 0, yb);
+        // both slopes must face up: flip where they do not
+        g2.computeVertexNormals();
+        if (g2.attributes.normal.getY(0) < 0) {
+          const PP = g2.attributes.position, UU = g2.attributes.uv;
+          for (let i = 0; i < PP.count; i += 3) {
+            const x = PP.getX(i + 1), y = PP.getY(i + 1), z = PP.getZ(i + 1), u = UU.getX(i + 1), v = UU.getY(i + 1);
+            PP.setXYZ(i + 1, PP.getX(i + 2), PP.getY(i + 2), PP.getZ(i + 2)); UU.setXY(i + 1, UU.getX(i + 2), UU.getY(i + 2));
+            PP.setXYZ(i + 2, x, y, z); UU.setXY(i + 2, u, v);
+          }
+          g2.computeVertexNormals();
+        }
+        kit.add("slate~uv", g2);
+      }
+      // the seal in the tympanum
+      if (CBZ.civicSealTex) {
+        try {
+          const sr = Math.min(1.15, rise * 0.34);
+          const sm = new THREE.Mesh(new THREE.PlaneGeometry(sr * 2, sr * 2), new THREE.MeshBasicMaterial({ map: CBZ.civicSealTex(D.seal || "mansion"), transparent: true }));
+          const q = facePt(f, 0, n1 - 0.43);
+          sm.position.set(q.x, yb + rise * 0.4, q.z);
+          sm.rotation.y = f.horiz ? (f.out > 0 ? 0 : Math.PI) : (f.out > 0 ? Math.PI / 2 : -Math.PI / 2);
+          sm.renderOrder = 2; G.add(sm);
+        } catch (e) { /* headless */ }
+      }
+      // the hanging lantern, on the door axis, clear of the balcony below
+      {
+        const q = facePt(f, 0, hN + Math.max(4.6, depth * 0.72)), yl = Math.max(FH + 3.0, 7.2);
+        kit.box(0x24282c, q.x, (yl + 0.9 + cy) / 2, q.z, 0.05, cy - yl - 0.9, 0.05);
+        kit.box(0x24282c, q.x, yl + 0.86, q.z, 0.5, 0.1, 0.5);
+        kit.box("lit:" + 0xffe0a8 + ":0.85", q.x, yl + 0.45, q.z, 0.4, 0.7, 0.4);
+        kit.box(0x24282c, q.x, yl + 0.05, q.z, 0.46, 0.1, 0.46);
+      }
+      info.portico = { cols: n, outer: outer, depth: depth, top: yb + rise, R: R };
+    }
+    // uplights at the feet of the engaged order
+    if (ord && ord.face === doorS && D.uplights !== false) {
+      for (const t of ord.cols) { const q = facePt(fD, t, ord.colN + ord.R * 1.25 + 0.3); ups.push({ x: q.x, z: q.z, y: ord.deck }); }
+    }
+
+    // ---- the garden front's bowed portico, with its balcony -------------------
+    if (D.south && ord) {
+      const f = FACE[doorS ^ 1], hN = f.halfN, S = D.south;
+      const r = S.r || 5.6, nC = S.n || 6, R = R0 * 0.92, base = YS, capTop = ord.entY;
+      const cg = columnGeo(R, capTop - base, !!D.ionic), colI = [];
+      for (let i = 0; i < nC; i++) {
+        const th = (i + 0.5) / nC * Math.PI, t = -r * Math.cos(th), nn = hN + r * Math.sin(th);
+        const q = facePt(f, t, nn);
+        colI.push({ x: q.x, y: base, z: q.z });
+        fc(f, t, nn, R * 2.0, R * 2.0, 0, capTop);          // the shaft on its base (an AABB on a ring)
+        const u2 = facePt(f, t * (r + R * 1.25 + 0.3) / r, hN + (nn - hN) * (r + R * 1.25 + 0.3) / r);
+        ups.push({ x: u2.x, z: u2.z, y: base });
+      }
+      instances(G, cg, cm(COLC), colI);
+      const rIn = r - R * 1.2, rOut = r + R * 1.2;
+      kit.add(TRIM, seatOnFace(halfRing(rIn, rOut, 0.78, 32), f, hN, capTop + 0.05));
+      kit.add(COLC, seatOnFace(halfRing(rIn - 0.1, rOut + 0.35, 0.24, 32), f, hN, capTop + 0.83));
+      kit.add(SOFFIT, seatOnFace(halfDisc(rIn, 0.2), f, hN, capTop + 0.63));
+      kit.add(TRIM, seatOnFace(halfDisc(rOut + 0.2, 0.16), f, hN, capTop + 1.07));
+      // a balustrade round the roof of the bow
+      const rb = rOut - 0.05, yr = capTop + 1.23, bh = 0.72;
+      const na = Math.max(8, Math.floor(Math.PI * rb / 0.28));
+      for (let i = 0; i < na; i++) {
+        const th = (i + 0.5) / na * Math.PI, q = facePt(f, -rb * Math.cos(th), hN + rb * Math.sin(th));
+        bals.push({ x: q.x, y: yr, z: q.z, sy: bh });
+      }
+      kit.add(COLC, seatOnFace(halfRing(rb - 0.16, rb + 0.16, 0.1, 32), f, hN, yr + bh));
+      // THE BALCONY, on the principal floor inside the columns
+      const fl = Array.isArray(b.floorTops) ? b.floorTops[1] : null;
+      if (fl != null && fl < capTop - 3) {
+        const top = fl + 0.15, rd = rIn - 0.15;
+        kit.add(TRIM, seatOnFace(halfDisc(rd, 0.3), f, hN, top - 0.3));
+        kit.add(RUST, seatOnFace(halfRing(rd - 0.02, rd + 0.12, 0.16, 32), f, hN, top - 0.46));
+        const rr = rd - 0.25, nb2 = Math.max(8, Math.floor(Math.PI * rr / 0.26));
+        for (let i = 0; i < nb2; i++) {
+          const th = (i + 0.5) / nb2 * Math.PI, q = facePt(f, -rr * Math.cos(th), hN + rr * Math.sin(th));
+          bals.push({ x: q.x, y: top, z: q.z, sy: 0.86 });
+        }
+        kit.add(COLC, seatOnFace(halfRing(rr - 0.14, rr + 0.14, 0.1, 32), f, hN, top + 0.86));
+        // its rail holds you (an arc of short bodies) and its floor carries
+        // you: strips inscribed inside the rail, so the walk never overhangs
+        const segs = 20;
+        for (let i = 0; i < segs; i++) {
+          const a0 = i / segs * Math.PI, a1 = (i + 1) / segs * Math.PI;
+          const p0 = facePt(f, -rr * Math.cos(a0), hN + rr * Math.sin(a0)), p1 = facePt(f, -rr * Math.cos(a1), hN + rr * Math.sin(a1));
+          const cxr = (p0.x + p1.x) / 2, czr = (p0.z + p1.z) / 2;
+          const ew = Math.max(0.12, Math.abs(p1.x - p0.x)), ed = Math.max(0.12, Math.abs(p1.z - p0.z));
+          col(ox + cxr, oz + czr, ew, ed, top, top + 0.96);
+        }
+        const strips = 4, ri = rr - 0.2;
+        for (let j = 0; j < strips; j++) {
+          const n0 = j * ri / strips, n1 = (j + 1) * ri / strips, half = Math.sqrt(Math.max(0, ri * ri - n1 * n1));
+          if (half < 0.3) continue;
+          const q = facePt(f, 0, hN + (n0 + n1) / 2);
+          plat(ox + q.x, oz + q.z, f.horiz ? 2 * half : n1 - n0, f.horiz ? n1 - n0 : 2 * half, top);
+        }
+        info.southBalcony = { top: top, r: rr };
+      }
+      info.south = { r: r, cols: nC };
+    }
+
+    // ---- the lights: uplights and wall lanterns --------------------------------
+    for (const u of ups) {
+      kit.box(0x26292d, u.x, u.y + 0.06, u.z, 0.3, 0.12, 0.3);
+      kit.box("lit:" + 0xffe6b8 + ":0.9", u.x, u.y + 0.125, u.z, 0.2, 0.012, 0.2);
+    }
+    for (const L of lamps) {
+      const q = facePt(L.f, L.t, L.n + 0.14), qb = facePt(L.f, L.t, L.n + 0.06);
+      kit.box(0x24282c, qb.x, L.y - 0.1, qb.z, L.f.horiz ? 0.08 : 0.14, 0.08, L.f.horiz ? 0.14 : 0.08);
+      kit.box(0x24282c, q.x, L.y + 0.33, q.z, 0.3, 0.08, 0.3);
+      kit.box("lit:" + 0xffdfa0 + ":0.85", q.x, L.y + 0.08, q.z, 0.24, 0.42, 0.24);
+      kit.box(0x24282c, q.x, L.y - 0.16, q.z, 0.28, 0.08, 0.28);
+    }
+
+    if (triI.length) instances(G, PG.tri, cm(TRIM), triI);
+    if (segI.length) instances(G, PG.seg, cm(TRIM), segI);
+    if (bals.length) instances(G, balusterGeo(), cm(TRIM), bals, false);
+    kit.flush(G, "house");
+    return info;
+  }
+  let _potG = null;
+  function chimneyPotGeo() {
+    return _potG || (_potG = lathe([[0, 0], [0.16, 0], [0.16, 0.06], [0.13, 0.1], [0.14, 0.42], [0.17, 0.46], [0.17, 0.52], [0.11, 0.52], [0.11, 0.2], [0, 0.2]], 10));
+  }
+
+  /* ---- THE MOTOR POOL -------------------------------------------------------
+     A head of state's cars live in a garage, not on the lawn. The Governor's
+     "garage" was a 1-storey shell with buildings.js's flagship parking deck
+     on it: glass on all four sides. This is a real one: a stone block of
+     drive-in bays on the court side, each with a sectional door (some
+     raised under the ceiling on their tracks, some down and solid), a
+     concrete floor at the apron's own level so a car rolls straight in (the
+     floor is the estate ground there, and a walk platform), coursed ashlar
+     walls with a side door and high windows, a flat roof behind a parapet,
+     a strip light over every bay, a workbench and a tool chest at the back.
+     `G` is gate-up frame metres: {u, v, w (across the doors' axis), d (along
+     the door face), bays}. The doors face the house. */
+  function motorPool(F, G, EG) {
+    const root = F.root;
+    const toHouse = Math.sign(-G.u) || 1;
+    const c = F.p(G.u, G.v), R = F.wr(G.u - G.w / 2, G.v - G.d / 2, G.u + G.w / 2, G.v + G.d / 2);
+    const x = c.x, z = c.z, wW = R.maxX - R.minX, dW = R.maxZ - R.minZ;
+    const fp = F.p(G.u + toHouse, G.v);
+    const nf = { x: Math.round(fp.x - c.x), z: Math.round(fp.z - c.z) };
+    const H = G.h || 4.4, T = 0.3, FL = YS, CLR = 2.9;
+    const alongX = Math.abs(nf.z) > 0.5;
+    const faceLen = alongX ? wW : dW, halfN = (alongX ? dW : wW) / 2;
+    const nb = G.bays || 4, pier = 0.8, bayW = (faceLen - (nb + 1) * pier) / nb;
+    const at = function (t, n) { return alongX ? { x: x + t, z: z + nf.z * n } : { x: x + nf.x * n, z: z + t }; };
+    const B = function (t, y, n, L, h, dn, hex, o) { const q = at(t, n); return box(root, q.x, y, q.z, alongX ? L : dn, h, alongX ? dn : L, hex, o); };
+    const C = function (t, n, L, dn, y0, y1) { const q = at(t, n); return col(q.x, q.z, alongX ? L : dn, alongX ? dn : L, y0, y1); };
+    // the floor
+    box(root, x, FL / 2, z, wW - 0.02, FL, dW - 0.02, 0x7b7c79, { cast: false });
+    plat(x, z, wW - 2 * T, dW - 2 * T, FL);
+    if (EG) EG.rects.push({ minX: R.minX, maxX: R.maxX, minZ: R.minZ, maxZ: R.maxZ, y: FL });
+    // THE DOOR FACE: piers, a header over the bays, a sectional door per bay
+    const nD = halfN - T / 2, doors = [];
+    const openSet = G.open || [0, 1];
+    for (let i = 0; i <= nb; i++) {
+      const t = -faceLen / 2 + pier / 2 + i * (pier + bayW);
+      B(t, CLR / 2, nD, pier, CLR, T + 0.06, M.stone);
+      C(t, nD, pier, T + 0.06, 0, CLR);
+    }
+    B(0, (CLR + H) / 2, nD, faceLen, H - CLR, T, M.stone);
+    C(0, nD, faceLen, T, CLR, H);
+    B(0, CLR + 0.1, nD + T / 2 + 0.04, faceLen - 0.2, 0.2, 0.1, M.stoneD, { cast: false });   // the lintel course
+    const kitUp = new Kit();
+    for (let i = 0; i < nb; i++) {
+      const t = -faceLen / 2 + pier + bayW / 2 + i * (pier + bayW);
+      const open = openSet.indexOf(i) >= 0;
+      doors.push({ bay: i, open: open, at: at(t, halfN) });
+      if (!open) {
+        B(t, (FL + CLR) / 2, nD, bayW, CLR - FL, 0.06, 0xd9d5cb);
+        for (let k = 1; k < 4; k++) B(t, FL + k * (CLR - FL) / 4, nD + 0.035, bayW - 0.04, 0.03, 0.02, 0xb9b5ab, { cast: false });
+        B(t, FL + 0.5, nD + 0.05, 0.3, 0.05, 0.04, M.steel, { cast: false });
+        C(t, nD, bayW, 0.12, 0, CLR);
+      } else {
+        // the raised door, parked flat under the ceiling on its two tracks
+        const len = CLR - FL, n0 = nD - T / 2;
+        const qp = at(t, n0 - len / 2);
+        kitUp.box(0xd9d5cb, qp.x, CLR + 0.14, qp.z, alongX ? bayW : len, 0.05, alongX ? len : bayW);
+        for (const sg of [-1, 1]) {
+          const qt = at(t + sg * (bayW / 2 - 0.03), n0 - (len + 0.3) / 2);
+          kitUp.box(0x4d5157, qt.x, CLR + 0.09, qt.z, alongX ? 0.06 : len + 0.3, 0.06, alongX ? len + 0.3 : 0.06);
+        }
+      }
+    }
+    // THE OTHER THREE WALLS: coursed ashlar, merged per face; a side door and
+    // high windows
+    const sides = [{ x: -nf.z, z: nf.x }, { x: nf.z, z: -nf.x }, { x: -nf.x, z: -nf.z }];
+    for (let k = 0; k < 3; k++) {
+      const f = sides[k], fAlongX = Math.abs(f.z) > 0.5;
+      const span = fAlongX ? wW : dW - 2 * T;
+      const opens = [];
+      if (k < 2) {
+        opens.push({ t: -span / 4, w: 1.2, y0: 2.1, y1: 3.1 }, { t: span / 4, w: 1.2, y0: 2.1, y1: 3.1 });
+        if (k === 0) opens.push({ t: 0, w: 0.96, y0: 0, y1: FL + 2.12, door: true });
+      } else {
+        for (const tt of [-faceLen / 3, 0, faceLen / 3]) opens.push({ t: tt, w: 1.4, y0: 2.2, y1: 3.1 });
+      }
+      const kw = new Kit();
+      const Wf = wallFace(kw, "ashlar", x, z, f, wW, dW, T, 0, H, opens, true);
+      const po = Wf.off + T / 2;
+      for (const o2 of opens) {
+        const q = fAlongX ? { x: x + o2.t, z: z + f.z * (po - T / 2) } : { x: x + f.x * (po - T / 2), z: z + o2.t };
+        if (o2.door) {
+          const qd = fAlongX ? { x: x + o2.t + o2.w / 2 + 0.52, z: z + f.z * (po + 0.03) } : { x: x + f.x * (po + 0.03), z: z + o2.t + o2.w / 2 + 0.52 };
+          kw.box(0x3d4a52, qd.x, FL + 1.03, qd.z, fAlongX ? 0.9 : 0.05, 2.02, fAlongX ? 0.05 : 0.9);
+          const ql = fAlongX ? { x: x + o2.t, z: z + f.z * (po + 0.04) } : { x: x + f.x * (po + 0.04), z: z + o2.t };
+          kw.box(M.stoneD, ql.x, o2.y1 + 0.1, ql.z, fAlongX ? o2.w + 0.4 : 0.08, 0.2, fAlongX ? 0.08 : o2.w + 0.4);
+          continue;
+        }
+        kw.box("glass" + k, q.x, (o2.y0 + o2.y1) / 2, q.z, fAlongX ? o2.w : 0.03, o2.y1 - o2.y0, fAlongX ? 0.03 : o2.w);
+        const qs = fAlongX ? { x: x + o2.t, z: z + f.z * (po + 0.06) } : { x: x + f.x * (po + 0.06), z: z + o2.t };
+        kw.box(M.stone, qs.x, o2.y0 - 0.05, qs.z, fAlongX ? o2.w + 0.3 : 0.14, 0.1, fAlongX ? 0.14 : o2.w + 0.3);
+      }
+      kw.flush(root, "garage-wall");
+    }
+    // cornice, roof slab, parapet and its coping
+    box(root, x, H - 0.12, z, wW + 0.3, 0.2, dW + 0.3, M.stoneD, { cast: false });
+    box(root, x, H + 0.05, z, wW, 0.3, dW, 0x6f6c66);
+    for (const s of [-1, 1]) {
+      box(root, x, H + 0.45, z + s * (dW / 2 - 0.15), wW, 0.5, 0.3, M.stone);
+      box(root, x + s * (wW / 2 - 0.15), H + 0.45, z, 0.3, 0.5, dW - 0.6, M.stone);
+      box(root, x, H + 0.74, z + s * (dW / 2 - 0.15), wW + 0.12, 0.08, 0.42, M.stoneD, { cast: false });
+      box(root, x + s * (wW / 2 - 0.15), H + 0.74, z, 0.42, 0.08, dW - 0.6, M.stoneD, { cast: false });
+    }
+    // strip lights, one over every bay
+    for (let i = 0; i < nb; i++) {
+      const t = -faceLen / 2 + pier + bayW / 2 + i * (pier + bayW), q = at(t, 0);
+      kitUp.box("lit:" + 0xf4f6ff + ":0.9", q.x, H - 0.13, q.z, alongX ? 0.16 : 1.8, 0.05, alongX ? 1.8 : 0.16);
+    }
+    kitUp.flush(root, "garage-over");
+    // the back: a workbench under a tool board, and a tool chest
+    const kb = new Kit(), nBk = -halfN + T;
+    const bench = at(-faceLen / 4, nBk + 0.36);
+    kb.box(0x6b5236, bench.x, FL + 0.87, bench.z, alongX ? 3.0 : 0.7, 0.06, alongX ? 0.7 : 3.0);
+    for (const sg of [-1, 1]) {
+      const lg = at(-faceLen / 4 + sg * 1.42, nBk + 0.36);
+      kb.box(0x3c4046, lg.x, FL + 0.42, lg.z, alongX ? 0.06 : 0.62, 0.84, alongX ? 0.62 : 0.06);
+    }
+    const shelf = at(-faceLen / 4, nBk + 0.36);
+    kb.box(0x6b5236, shelf.x, FL + 0.2, shelf.z, alongX ? 2.9 : 0.62, 0.04, alongX ? 0.62 : 2.9);
+    C(-faceLen / 4, nBk + 0.36, 3.0, 0.7, 0, FL + 0.9);
+    const board = at(-faceLen / 4, nBk + 0.02);
+    kb.box(0x8a7a5e, board.x, FL + 1.7, board.z, alongX ? 2.8 : 0.03, 1.0, alongX ? 0.03 : 2.8);
+    for (let i = 0; i < 7; i++) {
+      const tl = at(-faceLen / 4 - 1.2 + i * 0.4, nBk + 0.05);
+      kb.box(0x3a3d42, tl.x, FL + 1.55 + (i % 3) * 0.18, tl.z, alongX ? 0.05 : 0.04, 0.3, alongX ? 0.04 : 0.05);
+    }
+    const chest = at(faceLen / 4, nBk + 0.27);
+    kb.box(0xa8322c, chest.x, FL + 0.55, chest.z, alongX ? 0.9 : 0.5, 1.1, alongX ? 0.5 : 0.9);
+    for (let k = 0; k < 5; k++) { const dq = at(faceLen / 4, nBk + 0.53); kb.box(0x2a2c30, dq.x, FL + 0.2 + k * 0.2, dq.z, alongX ? 0.8 : 0.02, 0.02, alongX ? 0.02 : 0.8); }
+    C(faceLen / 4, nBk + 0.27, 0.9, 0.5, 0, FL + 1.1);
+    kb.flush(root, "garage-back");
+    // bay lines on the floor
+    for (let i = 0; i <= nb; i++) {
+      const t = -faceLen / 2 + pier / 2 + i * (pier + bayW);
+      B(t, FL + 0.005, 0, 0.1, 0.01, 2 * halfN - 2 * T - 1.2, M.paint, { cast: false });
+    }
+    return { rect: R, face: F.sideOf(toHouse, 0), doors: doors, floor: FL, bays: nb, bayW: bayW, doorN: nf };
+  }
+
   /* ---- A SENTRY LODGE -------------------------------------------------- */
   function sentry(F, u, v, faceU, faceV) {
     const q = F.p(u, v), f = F.p(faceU, faceV);
     const n = { x: Math.sign(Math.round(f.x - F.cx)), z: Math.sign(Math.round(f.z - F.cz)) };
     if (n.x && n.z) n.z = 0;
-    lodge(F.root, q.x, q.z, 2.0, 2.0, 2.6, M.stone, n.x || n.z ? n : { x: 0, z: 1 });
-    col(q.x, q.z, 2.0, 2.0, 0, 2.6);
+    // big enough to stand a man at a desk in: 2.6 m square, 2.9 m to the roof
+    lodge(F.root, q.x, q.z, 2.6, 2.6, 2.9, M.stone, n.x || n.z ? n : { x: 0, z: 1 });
   }
 
   /* ====================================================================
@@ -1935,16 +2975,32 @@
     const H = spec.house;
     const hp = F.p(H.u || 0, H.v);
     const front = F.sideOf(0, 1);
+    // THE HOUSE'S DRESS (houseDress, below): tier 4+ gets the rusticated
+    // base, the window dressings and the balustrade unless it says otherwise.
+    // A balustrade tells the civic grammar to keep its parapet piers off it.
+    const HD = H.dress !== undefined ? H.dress : ((spec.tier || 3) >= 4 ? { clad: true, balustrade: true } : { windows: true, clad: false });
+    const civSpec = H.civic ? Object.assign({}, H.civic, HD && HD.balustrade ? { balustrade: true } : {}) : null;
     const main = civic(root, hp.x, hp.z, F.swap ? H.d : H.w, F.swap ? H.w : H.d, H.storeys, H.hex || M.marble, front,
-      H.civic || null, H.name || "Residence", H.fh ? { fh: H.fh } : null);
+      civSpec, H.name || "Residence", H.fh ? { fh: H.fh } : null);
     const facadeV = H.v + H.d / 2;
     const perronD = H.perron == null ? 9 : H.perron;
     if (perronD > 0) {
       const fp = F.p(H.u || 0, facadeV);
       const axis = F.swap ? "x" : undefined, dir = (F.s === 1 || F.s === 3) ? 1 : -1;
-      perron(root, fp.x, fp.z, H.w, perronD, M.stone, dir, axis);
+      // it lands on the forecourt's setts, and its deck wears York stone:
+      // the flag sheet IS the deck top, filed in the ground record at the
+      // platform's own height
+      perron(root, fp.x, fp.z, H.w, perronD, M.stone, dir, axis, {
+        base: YS,
+        deck: function (r, top) { sheet("flag").rect(r, top); r.y = top; EG.rects.push(r); },
+      });
     }
     layout.house = { u: H.u || 0, v: H.v, w: H.w, d: H.d, facadeV: facadeV, facade: F.p(H.u || 0, facadeV), perronD: perronD };
+    // THE HOUSE, DRESSED from its own built record (rusticated base, window
+    // pediments, balustrade, roof, chimneys, porticoes, lights)
+    try {
+      layout.houseDress = HD ? houseDress(main, HD, { deck: PERRON_TOP, deckDepth: perronD > 0 ? perronD - PERRON_FLIGHT : 0 }) : null;
+    } catch (e) { console.error("[govcomplex] house dress", e); }
 
     // ---- THE WINGS -------------------------------------------------------
     const wings = [];
@@ -1953,17 +3009,27 @@
       const toHouse = Math.sign((H.u || 0) - W.u) || 1;
       const side = W.face === "front" ? front : F.sideOf(toHouse, 0);
       let b = null;
-      if (W.civic) b = civic(root, wp.x, wp.z, F.swap ? W.d : W.w, F.swap ? W.w : W.d, W.storeys, W.hex || M.stone, side, W.civic, W.name || null, W.fh ? { fh: W.fh } : null);
+      if (W.civic) b = civic(root, wp.x, wp.z, F.swap ? W.d : W.w, F.swap ? W.w : W.d, W.storeys, W.hex || M.stone, side,
+        W.dress && W.dress.balustrade ? Object.assign({}, W.civic, { balustrade: true }) : W.civic, W.name || null, W.fh ? { fh: W.fh } : null);
       else {
         const raw = block(root, wp.x, wp.z, F.swap ? W.d : W.w, F.swap ? W.w : W.d, W.storeys, W.hex || M.stoneD, side, Object.assign({ facade: "office" }, W.opts || {}, W.fh ? { fh: W.fh } : {}));
         b = raw ? { b: raw } : null;
       }
       wings.push(b);
-      // the covered walk from the wing's door to the house flank path
+      // the wing's own face: its base, windows and balustrade (a civic wing
+      // stands its door on the civic order's 2.5 m terrace and steps)
+      const terr = !!(W.civic && !W.civic.externalPerron);
+      if (b && W.dress) {
+        try { (layout.wingDress = layout.wingDress || []).push(houseDress(b, W.dress, { deck: terr ? 0.30 : 0, deckDepth: terr ? 1.6 : 0, terrace: terr })); }
+        catch (e) { console.error("[govcomplex] wing dress", e); }
+      }
+      // the covered walk from the wing's door to the house flank path. It
+      // starts past the foot of the wing's entrance steps: its first pair of
+      // columns used to stand ON the terrace and through the order's plinths
       if (W.colonnade && b) {
         const doorU = W.u + toHouse * W.w / 2, cv = W.v;
         const nearU = (H.u || 0) - toHouse * (H.w / 2 + 2.0);
-        colonnade(F, [doorU + toHouse * 0.4, cv], [nearU, cv], 3.6);
+        colonnade(F, [doorU + toHouse * (terr ? 2.95 : 0.6), cv], [nearU, cv], 3.6);
         hard("sett", Math.min(doorU, nearU), cv - 1.8, Math.max(doorU, nearU), cv + 1.8, YS);
       }
     }
@@ -1997,17 +3063,18 @@
       if (!FC.fountain) col(ic.x, ic.z, FC.island * 1.4, FC.island * 1.4, 0, 0.24);
     }
     layout.court = { center: ic, r: FC.island, rect: F.wr(-FC.hw, FC.v0, FC.hw, FC.v1), v0: FC.v0, v1: FC.v1, hw: FC.hw };
-    // a garage wing's doors open onto a real apron that runs to the court
+    // THE MOTOR POOL: its bays open onto a real apron that runs to the court
     const aprons = [];
-    for (const W of (spec.wings || [])) {
-      if (!W.apron) continue;
-      const toHouse = Math.sign((H.u || 0) - W.u) || 1;
-      const doorU = W.u + toHouse * W.w / 2, edgeU = toHouse > 0 ? -FC.hw : FC.hw;
-      const half = Math.min(W.d / 2 - 0.5, 4.0);
-      hard("asphalt", Math.min(doorU, edgeU), W.v - half, Math.max(doorU, edgeU), W.v + half, YS);
-      kerb(F, Math.min(doorU, edgeU), W.v + half + 0.15, Math.max(doorU, edgeU), W.v + half + 0.15);
-      kerb(F, Math.min(doorU, edgeU), W.v - half - 0.15, Math.max(doorU, edgeU), W.v - half - 0.15);
-      aprons.push({ edge: toHouse > 0 ? "w" : "e", c: W.v, w: half * 2 + 0.1 });
+    if (spec.garage) {
+      const GR = spec.garage;
+      const toHouse = Math.sign((H.u || 0) - GR.u) || 1;
+      const doorU = GR.u + toHouse * GR.w / 2, edgeU = toHouse > 0 ? -FC.hw : FC.hw;
+      const half = GR.d / 2 - 0.6;
+      hard("asphalt", Math.min(doorU, edgeU), GR.v - half, Math.max(doorU, edgeU), GR.v + half, YS);
+      kerb(F, Math.min(doorU, edgeU), GR.v + half + 0.15, Math.max(doorU, edgeU), GR.v + half + 0.15);
+      kerb(F, Math.min(doorU, edgeU), GR.v - half - 0.15, Math.max(doorU, edgeU), GR.v - half - 0.15);
+      aprons.push({ edge: toHouse > 0 ? "w" : "e", c: GR.v, w: half * 2 + 0.1 });
+      try { layout.garage = motorPool(F, GR, EG); } catch (e) { console.error("[govcomplex] motor pool", e); }
     }
 
     // ---- THE DRIVE ---------------------------------------------------------
@@ -2166,6 +3233,7 @@
       const open = [];
       if (spec.parking) open.push({ s: Math.sign(spec.parking.u) || -1, v: spec.parking.v, w: 7.4 });
       if (layout.helipad) open.push({ s: Math.sign(spec.helipad.u) || 1, v: layout.helipad.pathV, w: 2.9 });
+      if (spec.garage) open.push({ s: Math.sign(spec.garage.u) || 1, v: spec.garage.v, w: spec.garage.d - 1.0 });
       for (let v = FC.v0 + 5; v < FC.v1 - 8; v += 12) for (const s of [-1, 1]) {
         if (open.some(function (o) { return o.s === s && Math.abs(o.v - v) < o.w / 2 + 2.0; })) continue;
         lp.push(F.p(s * (FC.hw - 1.3), v));
@@ -2238,46 +3306,57 @@
   /* ====================================================================
      §1d  THE GRAND STAIR — how a head of state goes upstairs.
 
-     The Mansion's only way to the family floor was the service core: a
-     boxed switchback in the back corner, the same one every office tower in
-     the city gets. A state entrance hall has a STAIR IN IT. This one is a
-     straight flight of 26 marble risers (0.17 m on a 0.46 m going: a 20
-     degree ceremonial pitch) along the west wall of the hall, rising toward
-     the back to a landing on the first floor that opens onto the service
-     core's own landing — so the two stairs meet on one floor.
+     A state entrance hall has a STAIR IN IT: two straight flights of 13
+     marble risers (0.168 m on a 0.44 m going, a 21 degree ceremonial pitch)
+     along the west wall with a half landing between them, rising toward the
+     back onto the first floor in front of the service core, so the two
+     stairs meet on one floor.
 
-     Everything it stands on is the shared kit: CBZ.stairs.flight is the walk
-     surface (ramp + underside + AI link), CBZ.cityCarveShaft opens exactly
-     ONE slab (levels:[1]) and reserves the footprint so no program furnishes
-     the stairwell, CBZ.interiorPartition is the wall that closes the stair
-     hall off the family floor. The treads are a SOLID stepped mass (no
-     floating risers, nothing to see under), the balustrade is posts and a
-     rail on the open side, and that rail is solid, banded to the flight.
+     OWNER: "when you walk through the stairs, you have to go through the
+     floor". Measured causes, both fixed here and in the shared kit:
+       · the walk surface was ONE straight ramp from the bottom nosing to the
+         top one, i.e. a riser UNDER every tread (feet in the marble all the
+         way up). The flights now pass `steps`, so the walk surface is the
+         treads themselves, to the millimetre (systems/stairs.js).
+       · everything the state hall hung under its ceiling (coffers, cornice,
+         chandeliers) ran across the stairwell, so the climb went through
+         them. The opening is reserved per LEVEL now and buildings.js clips
+         whatever a program draws in that slab's band out of it.
+     Everything it stands on is the shared kit: CBZ.stairs.flight (walk
+     surface + AI link), CBZ.cityCarveShaft (opens exactly slab 1 and reserves
+     it), CBZ.interiorPartition (the stair hall's wall upstairs). The flights
+     are a SOLID stepped mass with a collider per tread (you walk round it on
+     the ground floor, never under it), a balustrade on the open side with a
+     rail that is solid, and a brass rail on brackets along the wall.
 
      Authored for the shell this row builds (door on the +z face); any other
      shell returns null and keeps the service core as its only stair.
      ==================================================================== */
+  const GS = { RISE: 0.168, GO: 0.44, LAND: 1.8, W: 3.2, RH: 0.95 };
   function grandStair(main, layout) {
     const b = main && main.b;
     if (!b || typeof b.lbox !== "function" || !CBZ.stairs || !CBZ.stairs.flight) return null;
     const dn = b.localDoor;
     if (!dn || !(dn.nz < -0.5) || !Array.isArray(b.floorTops) || b.floorTops.length < 3) return null;
     const wt = b.wt != null ? b.wt : 0.4, ox = b.ox, oz = b.oz;
-    const xW = -b.w / 2 + wt;                 // inner face of the west wall
-    const x0 = xW + 0.5, W = 3.2, x1 = x0 + W, xc = (x0 + x1) / 2;
-    const zBot = 9.0, zTop = -3.0;            // it climbs toward the back
     const y0 = b.floorTops[0], y1 = b.floorTops[1];
+    const nTot = Math.max(8, Math.round((y1 - y0) / GS.RISE)), n1 = Math.ceil(nTot / 2), n2 = nTot - n1;
+    const rise = (y1 - y0) / nTot, go = GS.GO, yL = y0 + n1 * rise;
+    const xW = -b.w / 2 + wt;                 // inner face of the west wall
+    const W = GS.W, x0 = xW + 0.12, x1 = x0 + W, xc = (x0 + x1) / 2;
+    const zTop = -3.0;                        // the top nosing: it climbs toward the back
+    const zL0 = zTop + n2 * go, zL1 = zL0 + GS.LAND, zBot = zL1 + n1 * go;
     const xPart = x1 + 0.45;                  // the stair hall's wall on the first floor
-    // 1. open the first-floor slab over the flight (and only that slab)
+    const MARBLE = 0xe4e0d6, NOSE = 0xf1eee6, RUN = 0x7a2c2e, BRASS = 0xb99347, STRING = 0xd8d2c4;
+    // 1. open the first-floor slab over both flights and the landing (only that slab)
     if (CBZ.cityCarveShaft) {
       CBZ.cityCarveShaft(b, ox + (xW + xPart - 0.1) / 2, oz + (zTop + zBot + 0.4) / 2,
         (xPart - 0.1 - xW) / 2, (zBot + 0.4 - zTop) / 2, { levels: [1], reserve: true });
     }
-    // ...and fix where the SERVICE core goes now, on the far (west) side of
-    // the plan, so the stair hall's wall can meet it. This is exactly the
+    // ...and fix where the SERVICE core goes, on the far (west) side of the
+    // plan, so the stair hall's wall can meet it. This is exactly the
     // reservation elevators.js's cityStairCore makes when it plans a core
-    // itself; planning it here only decides the side first (both records —
-    // the shell and the lot's shallow copy — carry the same plan).
+    // itself; planning it here only decides the side first.
     if (!b.stairPlan && CBZ.cityStairPlan) {
       const P = CBZ.cityStairPlan(b, -1);
       if (P) {
@@ -2287,57 +3366,115 @@
         if (main.lot && main.lot.building) main.lot.building.stairPlan = P;
       }
     }
-    // 2. the walk surface
-    const fl = CBZ.stairs.flight({
-      bottom: { x: ox + xc, y: y0, z: oz + zBot }, top: { x: ox + xc, y: y1, z: oz + zTop },
-      width: W, overlap: 0.35, owner: b, plats: b.platforms || undefined, cols: b.colliders || undefined,
-      underside: true, kind: "stair",
+    // 2. the walk surface: two stepped flights and the landing between them
+    const plats = b.platforms || undefined, cols = b.colliders || undefined;
+    const f1 = CBZ.stairs.flight({
+      bottom: { x: ox + xc, y: y0, z: oz + zBot }, top: { x: ox + xc, y: yL, z: oz + zL1 },
+      width: W, overlap: 0.3, steps: n1, owner: b, plats: plats, cols: cols, kind: "stair",
     });
-    // 3. the stair you see: a stepped marble mass with a lighter nosing and a
-    // runner up the middle
-    const n = Math.max(8, Math.round((y1 - y0) / 0.17));
-    const rise = (y1 - y0) / n, go = (zBot - zTop) / n;
-    const MARBLE = 0xe4e0d6, NOSE = 0xf1eee6, RUN = 0x7a2c2e, BRASS = 0xb99347;
-    for (let i = 1; i <= n; i++) {
-      const top = y0 + i * rise, zc = zBot - (i - 0.5) * go;
-      b.lbox(xc, top / 2, zc, W, top, go + 0.01, MARBLE, { cast: i === n });
-      b.lbox(xc, top - 0.012, zBot - (i - 1) * go - 0.03, W + 0.04, 0.03, 0.07, NOSE, { cast: false });
-      b.lbox(xc, top + 0.006, zc, 1.9, 0.014, go - 0.02, RUN, { cast: false });
-    }
-    // the wall string: a skirting that follows the flight against the panelling
-    // 4. the balustrade on the open (east) side: turned posts, a sloped rail,
-    //    newels at both ends
-    const railX = x1 - 0.1, RH = 0.95;
-    for (let i = 0; i < n; i++) {
-      const zz = zBot - (i + 0.5) * go, base = y0 + (i + 1) * rise;
-      b.lbox(railX, base + (RH - 0.05) / 2, zz, 0.06, RH - 0.05, 0.06, MARBLE, { cast: false });
-    }
-    for (const e of [[zBot + 0.1, y0], [zTop - 0.25, y1]]) {
-      b.lbox(railX, e[1] + 0.6, e[0], 0.3, 1.2, 0.3, MARBLE);
-      b.lbox(railX, e[1] + 1.25, e[0], 0.36, 0.1, 0.36, NOSE, { cast: false });
-    }
-    if (b.group) {
-      const len = Math.hypot(zBot - zTop, y1 - y0);
-      const rail = new THREE.Mesh(bg(0.1, 0.08, len + 0.2), cm(BRASS));
-      rail.position.set(railX, (y0 + y1) / 2 + RH + 0.02, (zBot + zTop) / 2);
-      rail.rotation.x = Math.atan2(y1 - y0, zBot - zTop);     // rises toward -z
-      rail.castShadow = false; rail.matrixAutoUpdate = false; rail.updateMatrix();
-      b.group.add(rail);
-    }
-    // the rail is SOLID: a banded collider per half metre of run holds a body
-    // on the flight and stops one walking off its open side
-    const segs = Math.ceil((zBot - zTop) / 0.5), railCols = [];
-    for (let i = 0; i < segs; i++) {
-      const za = zBot - i * (zBot - zTop) / segs, zb = zBot - (i + 1) * (zBot - zTop) / segs;
-      const ya = y0 + (y1 - y0) * (i / segs), yb = y0 + (y1 - y0) * ((i + 1) / segs);
-      const c = { minX: ox + x1 - 0.14, maxX: ox + x1 + 0.02, minZ: oz + zb, maxZ: oz + za, y0: ya + 0.1, y1: yb + RH + 0.05, ref: null };
-      CBZ.colliders.push(c); railCols.push(c);
+    const f2 = CBZ.stairs.flight({
+      bottom: { x: ox + xc, y: yL, z: oz + zL0 }, top: { x: ox + xc, y: y1, z: oz + zTop },
+      width: W, overlap: 0.3, steps: n2, owner: b, plats: plats, cols: cols, kind: "stair",
+    });
+    const landP = { minX: ox + x0, maxX: ox + x1, minZ: oz + zL0 - 0.02, maxZ: oz + zL1 + 0.02, top: yL };
+    CBZ.platforms.push(landP);
+    if (b.platforms) b.platforms.push(landP);
+    function solid(xa, xb, za, zb, ya, yb) {
+      const c = { minX: ox + xa, maxX: ox + xb, minZ: oz + za, maxZ: oz + zb, y0: ya, y1: yb, ref: null };
+      CBZ.colliders.push(c);
       if (b.colliders) b.colliders.push(c);
+      return c;
     }
-    // 5. upstairs: a balustrade across the far end of the opening, and the
-    //    wall that makes the stair hall a room with one door onto the landing
-    b.lbox((xW + xPart - 0.1) / 2, y1 + RH / 2, zBot + 0.52, xPart - 0.1 - xW, RH, 0.22, MARBLE, { solid: true });
-    b.lbox((xW + xPart - 0.1) / 2, y1 + RH + 0.04, zBot + 0.52, xPart - 0.1 - xW + 0.1, 0.08, 0.3, NOSE, { cast: false });
+    // 3. the stair you see: a stepped marble mass, a lighter nosing on every
+    // tread, a runner up the middle held by brass rods. Tread i of a flight
+    // covers the i-th n-th of its run with its top at base + i*rise: exactly
+    // the rule the stepped walk surface answers with.
+    const treads = [];
+    function flightMass(zStart, base, n) {
+      for (let i = 1; i <= n; i++) {
+        const top = base + i * rise, zc = zStart - (i - 0.5) * go, zFront = zStart - (i - 1) * go;
+        b.lbox(xc, top / 2, zc, W, top, go + 0.004, MARBLE, { cast: i === n, stair: true });
+        b.lbox(xc, top - 0.012, zFront - 0.03, W + 0.04, 0.03, 0.07, NOSE, { cast: false, stair: true });
+        b.lbox(xc, top + 0.005, zc, 1.9, 0.012, go - 0.02, RUN, { cast: false, stair: true });
+        b.lbox(xc, top + 0.012, zFront - 0.06, 1.98, 0.012, 0.012, BRASS, { cast: false, stair: true });
+        // the mass is solid from the hall floor to this tread (a body ON the
+        // flight has the next treads' tops within a step of its feet)
+        solid(x0, x1, zc - go / 2, zc + go / 2, y0 - 0.05, top);
+        treads.push({ x: ox + xc, z: oz + zc, top: top, w: W, go: go });
+      }
+    }
+    flightMass(zBot, y0, n1);
+    // the half landing: a marble block with the runner turned across it
+    b.lbox(xc, yL / 2, (zL0 + zL1) / 2, W, yL, zL1 - zL0 + 0.004, MARBLE, { stair: true });
+    b.lbox(xc, yL + 0.005, (zL0 + zL1) / 2, 1.9, 0.012, zL1 - zL0 - 0.1, RUN, { cast: false, stair: true });
+    solid(x0, x1, zL0, zL1, y0 - 0.05, yL);
+    flightMass(zL0, yL, n2);
+    // the open side's face: a closed string with a moulded cap, stepped to the flights
+    b.lbox(x1 + 0.03, yL / 2, (zL0 + zBot) / 2, 0.06, yL, zBot - zL0, STRING, { cast: false, stair: true });
+    b.lbox(x1 + 0.03, y1 / 2, (zTop + zL0) / 2, 0.06, y1, zL0 - zTop, STRING, { cast: false, stair: true });
+    // 4. THE BALUSTRADE on the open (east) side: two turned balusters a tread,
+    //    a sloped rail per flight and a level one across the landing, newels
+    //    at the foot, both landing corners and the head. The rail is SOLID.
+    const railX = x1 - 0.08, RH = GS.RH;
+    function railRun(zStart, base, n) {
+      for (let i = 0; i < n; i++) {
+        const t = base + (i + 1) * rise;
+        for (const f of [0.28, 0.72]) {
+          const zz = zStart - (i + f) * go;
+          b.lbox(railX, t + (RH - 0.05) / 2, zz, 0.045, RH - 0.05, 0.045, MARBLE, { cast: false, stair: true });
+        }
+      }
+      if (b.group) {
+        const len = Math.hypot(n * go, n * rise);
+        const rail = new THREE.Mesh(bg(0.09, 0.07, len), cm(BRASS));
+        rail.position.set(railX, base + (n * rise) / 2 + rise / 2 + RH, zStart - n * go / 2);
+        rail.rotation.x = Math.atan2(n * rise, n * go);           // rises toward -z
+        rail.castShadow = false; rail.matrixAutoUpdate = false; rail.updateMatrix();
+        b.group.add(rail);
+      }
+      // the solid rail: a banded collider per half metre, from the tread under
+      // it to a hand over the rail (stops a body stepping off the open side)
+      const segs = Math.ceil(n * go / 0.5);
+      for (let k = 0; k < segs; k++) {
+        const za = zStart - k * n * go / segs, zb = zStart - (k + 1) * n * go / segs;
+        const lo = base + Math.floor(k * n / segs) * rise, hi = base + Math.ceil((k + 1) * n / segs) * rise;
+        solid(x1 - 0.12, x1 + 0.06, zb, za, lo + 0.1, hi + RH + 0.05);
+      }
+    }
+    railRun(zBot, y0, n1);
+    railRun(zL0, yL, n2);
+    // across the landing, level
+    for (let zz = zL0 + 0.25; zz < zL1 - 0.1; zz += 0.3)
+      b.lbox(railX, yL + (RH - 0.05) / 2, zz, 0.045, RH - 0.05, 0.045, MARBLE, { cast: false, stair: true });
+    b.lbox(railX, yL + RH + 0.02, (zL0 + zL1) / 2, 0.09, 0.07, zL1 - zL0, BRASS, { cast: false, stair: true });
+    solid(x1 - 0.12, x1 + 0.06, zL0, zL1, yL + 0.1, yL + RH + 0.05);
+    const newels = [[zBot + 0.18, y0], [zL1, yL], [zL0, yL], [zTop - 0.2, y1]];
+    for (const e of newels) {
+      b.lbox(railX, e[1] + 0.6, e[0], 0.3, 1.2, 0.3, MARBLE, { stair: true });
+      b.lbox(railX, e[1] + 1.25, e[0], 0.36, 0.1, 0.36, NOSE, { cast: false, stair: true });
+      b.lbox(railX, e[1] + 1.36, e[0], 0.16, 0.12, 0.16, BRASS, { cast: false, stair: true });
+    }
+    solid(x1 - 0.2, x1 + 0.1, zBot + 0.03, zBot + 0.33, y0, y0 + 1.3);
+    // the WALL rail: brass on brackets along the west wall, pitched with each flight
+    if (b.group) {
+      for (const f of [[zBot, y0, n1], [zL0, yL, n2]]) {
+        const len = Math.hypot(f[2] * go, f[2] * rise);
+        const wr = new THREE.Mesh(bg(0.06, 0.06, len), cm(BRASS));
+        wr.position.set(xW + 0.09, f[1] + (f[2] * rise) / 2 + rise / 2 + 0.9, f[0] - f[2] * go / 2);
+        wr.rotation.x = Math.atan2(f[2] * rise, f[2] * go);
+        wr.castShadow = false; wr.matrixAutoUpdate = false; wr.updateMatrix();
+        b.group.add(wr);
+        for (let i = 1; i < f[2]; i += 4) {
+          const t = f[1] + (i + 0.5) * rise;
+          b.lbox(xW + 0.05, t + 0.86, f[0] - (i + 0.5) * go, 0.08, 0.03, 0.03, BRASS, { cast: false, stair: true });
+        }
+      }
+    }
+    // 5. upstairs: a balustrade across the far end of the opening (front side),
+    //    and the wall that makes the stair hall a room with one door onto the landing
+    const zGuard = zBot + 0.52;
+    b.lbox((xW + xPart - 0.1) / 2, y1 + RH / 2, zGuard, xPart - 0.1 - xW, RH, 0.22, MARBLE, { solid: true, stair: true });
+    b.lbox((xW + xPart - 0.1) / 2, y1 + RH + 0.04, zGuard, xPart - 0.1 - xW + 0.1, 0.08, 0.3, NOSE, { cast: false, stair: true });
     const room1 = CBZ.interiorFloorRoom ? CBZ.interiorFloorRoom(b, 1) : null;
     const landingZ = zTop - 2.2;
     // it starts at the service core's front face: behind that the core's own
@@ -2349,7 +3486,14 @@
       CBZ.interiorPartition(room1, { b: b, opts: {} }, { axis: "z", at: xPart, from: zFrom, to: b.d / 2 - wt, gap: landingZ, gapW: 2.6 });
     } else {
       const zs = [[zFrom, landingZ - 1.3], [landingZ + 1.3, b.d / 2 - wt]];
-      for (const q of zs) b.lbox(xPart, y1 + (b.FH - 0.3) / 2, (q[0] + q[1]) / 2, 0.2, b.FH - 0.3, q[1] - q[0], 0xd9d4c8, { solid: true, los: true });
+      for (const q of zs) b.lbox(xPart, y1 + (b.FH - 0.3) / 2, (q[0] + q[1]) / 2, 0.2, b.FH - 0.3, q[1] - q[0], 0xd9d4c8, { solid: true, los: true, stair: true });
+    }
+    // 6. light over the well: a lantern hung from the second floor's slab on
+    //    the stair's centre line, clear of the head path (2.1 m over the landing)
+    {
+      const ly = Math.max(yL + 2.6, b.floorTops[2] - 0.2 - 1.1);
+      b.lbox(xc, (ly + b.floorTops[2] - 0.2) / 2, (zL0 + zL1) / 2, 0.04, b.floorTops[2] - 0.2 - ly, 0.04, BRASS, { cast: false, stair: true });
+      b.lbox(xc, ly - 0.25, (zL0 + zL1) / 2, 0.6, 0.5, 0.6, 0xfff0c8, { emissive: 0xffe6b0, ei: 0.9, cast: false, stair: true });
     }
     // the first-floor programme furnishes the plate EAST of that wall
     const trim = { x0: xPart + 0.15 };
@@ -2358,7 +3502,10 @@
     const W2 = function (x, y, z) { return { x: ox + x, y: y, z: oz + z }; };
     return {
       bottom: W2(xc, y0, zBot), top: W2(xc, y1, zTop), landing: W2((xW + xPart) / 2, y1, landingZ),
-      width: W, risers: n, link: fl && fl.link ? fl.link.id : null, railColliders: railCols.length,
+      halfLanding: W2(xc, yL, (zL0 + zL1) / 2),
+      width: W, risers: nTot, rise: rise, going: go, treads: treads,
+      opening: { minX: ox + xW, maxX: ox + xPart - 0.1, minZ: oz + zTop, maxZ: oz + zBot + 0.4, level: 1 },
+      links: [f1 && f1.link ? f1.link.id : null, f2 && f2.link ? f2.link.id : null],
     };
   }
 
@@ -2695,17 +3842,26 @@
     tier: 5, name: "execmansion", checkpoint: true,
     // A real head-of-state house: 56 x 34 m on plan (the White House is
     // 51 x 26), THREE storeys at 4.5 m (state rooms, the family floor, the
-    // private floor) under a colossal doric order and the dome: 13.5 m to
-    // the roof instead of the 6.4 m dollhouse two 3.2 m office storeys made.
+    // private floor) under a colossal doric order: 13.5 m to the roof
+    // instead of the 6.4 m dollhouse two 3.2 m office storeys made. A HOUSE,
+    // not a capitol: no dome. It is roofed in slate behind a balustrade, with
+    // chimneys, a projecting pedimented portico on the carriage front and a
+    // bowed portico with a balcony on the garden front (houseDress).
     house: {
       v: -34, w: 56, d: 34, storeys: 3, fh: 4.5, hex: M.marble, name: "Executive Mansion", perron: 9,
-      civic: { kind: "mansion", crown: "dome", order: "doric", stone: true, monumental: true, externalPerron: true },
+      civic: { kind: "mansion", crown: "none", order: "doric", stone: true, monumental: true, externalPerron: true, balustrade: true, seal: false },
+      dress: { clad: true, balustrade: true, roof: "hip", chimneys: 4, portico: { depth: 7, half: 12 }, south: { r: 5.6, n: 6 }, seal: "mansion" },
     },
-    // the office wing, its door on the house side, a colonnade to the court
+    // the office wing, its door on the house side, a colonnade to the court:
+    // a low stone block with its own rusticated entrance front
     wings: [{
       u: -58, v: -30, w: 34, d: 22, storeys: 2, fh: 4.2, hex: M.stone, name: "West Wing", colonnade: true,
-      civic: { kind: "federal", crown: "flat", order: "pilaster", stone: true, monumental: true },
+      civic: { kind: "federal", crown: "flat", order: "pilaster", stone: true, monumental: true, balustrade: true },
+      dress: { clad: true, balustrade: true, chimneys: 2 },
     }],
+    // the motorcade's garage: four drive-in bays on the east side of the
+    // court, doors toward the house, an apron to the carriage ring
+    garage: { u: 60, v: 4, w: 12, d: 18.4, bays: 4, open: [0, 1] },
     // the carriage court: the motorcade's ring (motorcade.js §3) runs at
     // 22-26 m round the island at v 18 and stops at the steps at v -4.5
     forecourt: { v0: -8.2, v1: 46, hw: 32, island: 13, islandV: 18 },
@@ -2723,16 +3879,292 @@
     tier: 4, name: "governor",
     house: {
       v: -26, w: 42, d: 28, storeys: 2, fh: 4.2, hex: M.stone, name: "Governor's Residence", perron: 7,
-      civic: { kind: "cityannex", crown: "clock", order: "pilaster", stone: true, monumental: true, externalPerron: true },
+      civic: { kind: "cityannex", crown: "clock", order: "pilaster", stone: true, monumental: true, externalPerron: true, balustrade: true, seal: false },
+      dress: { clad: true, balustrade: true, chimneys: 2, portico: { depth: 5.2, half: 10 }, ionic: true, seal: "cityannex" },
     },
-    // the garage block, doors toward the house
-    wings: [{ u: -54, v: 2, w: 22, d: 16, storeys: 1, hex: M.stoneD, apron: true, opts: { facade: "office", garageGround: true } }],
+    // the garage: three drive-in bays, doors toward the house (it was a
+    // one-storey shell with the downtown flagship's glass parking deck on it)
+    garage: { u: -54, v: 2, w: 12, d: 14.2, bays: 3, open: [0] },
     forecourt: { v1: 40, hw: 25, island: 9 },
     driveW: 9,
     parterres: [{ u: -36, v: -62, w: 26, d: 20 }, { u: 36, v: -62, w: 26, d: 20 }],
     rear: { rondelV: -74 },
     trees: [[-60, 60], [60, 60], [-70, -20], [70, -20], [-40, 76], [40, 76]],
   };
+
+  /* ====================================================================
+     §2c  THE FEDERAL KIT — what turns an office block into a headquarters.
+
+     Rows 4 (the Bureau) and 5 (the Defence HQ) draw from it; nothing else
+     does. The base shell stays the city's glass office building ("our glass
+     is perfect"). What a real federal headquarters adds over that glass is
+     a FRAME, a way of meeting the ground, one way in, and plant on the roof
+     that is there because the building needs it:
+
+       fedFrame     tripartite precast dress: a solid granite base course, a
+                    deep belt course at the first floor, precast fins on a
+                    3 m module so the glass reads as tall window strips set
+                    half a metre back, a band at every floor line, corner
+                    piers, and a deep cornice over the parapet. Nothing is
+                    proud of the wall below head height except the base
+                    course and the corner piers, and both are solid.
+       fedEntrance  the one door: a stepped stylobate (§1 perron), a flat
+                    canopy cantilevered off four columns with downlights in
+                    its soffit, and the fins stop over the entrance bay so
+                    the doorway reads from 200 m as a tall slot of glass.
+       fedRoof      a louvred mechanical penthouse, cooling towers with fan
+                    shrouds, exhaust stacks and a comms mast with dishes,
+                    every piece placed off the stair core the shell reserved
+                    and inside the parapet, every piece solid.
+
+     Fins are two InstancedMeshes per building, bands and caps are plain
+     static boxes the batcher folds: a headquarters costs a handful of draws.
+     ==================================================================== */
+  const FEDM = {
+    precast: 0xd3cfc4, precastD: 0xaeaa9f, granite: 0x55575b, canopy: 0xdcd8ce, soffit: 0x3b3f45,
+    downlight: 0xfff0d2, plant: 0x9a9fa3, plantD: 0x676c71, louvre: 0x4a4f55, glass: 0x28323c,
+  };
+  // the four faces of a shell, each with its outward normal and its span
+  function faces4(b) {
+    const ox = b.ox, oz = b.oz, hw = b.w / 2, hd = b.d / 2;
+    return [
+      { ax: "x", nx: 0, nz: -1, cx: ox, cz: oz - hd, span: b.w },
+      { ax: "x", nx: 0, nz: 1, cx: ox, cz: oz + hd, span: b.w },
+      { ax: "z", nx: -1, nz: 0, cx: ox - hw, cz: oz, span: b.d },
+      { ax: "z", nx: 1, nz: 0, cx: ox + hw, cz: oz, span: b.d },
+    ];
+  }
+  // a box standing proud of face f: `t` along the face, p0..p1 metres out
+  // from the wall plane (negative = into the wall), y0..y1
+  function faceXZ(f, t, p) {
+    return f.ax === "x" ? { x: f.cx + t, z: f.cz + f.nz * p } : { x: f.cx + f.nx * p, z: f.cz + t };
+  }
+  function onFace(root, f, t, len, y0, y1, p0, p1, hex, o) {
+    const q = faceXZ(f, t, (p0 + p1) / 2), dep = p1 - p0;
+    return box(root, q.x, (y0 + y1) / 2, q.z, f.ax === "x" ? len : dep, y1 - y0, f.ax === "x" ? dep : len, hex, o);
+  }
+  function faceCol(f, t, len, p0, p1, y0, y1) {
+    const q = faceXZ(f, t, (p0 + p1) / 2), dep = p1 - p0;
+    return col(q.x, q.z, f.ax === "x" ? len : dep, f.ax === "x" ? dep : len, y0, y1);
+  }
+  function isDoorFace(f, S) { return f.nx === -S.n.x && f.nz === -S.n.z; }
+  function doorAlong(f, S) { return f.ax === "x" ? S.door.x - f.cx : S.door.z - f.cz; }
+
+  function fedFrame(root, S, o) {
+    o = o || {};
+    const b = S.b, FH = b.FH, ST = b.storeys, rTop = ST * FH, pp = b.parapetH || 0.8;
+    const gap = o.gap == null ? 12 : o.gap, pitch = o.pitch || 3.0;
+    const BASE = 0.95, BELT0 = FH - 0.45, BELT1 = FH + 0.45;
+    const TOP = rTop + pp + 0.2;
+    const finX = [], finZ = [];
+    for (const f of faces4(b)) {
+      const door = isDoorFace(f, S), dt = door ? doorAlong(f, S) : 0, half = f.span / 2;
+      // THE BASE COURSE: granite to 0.95 m with a weathered cap, split at the door
+      const segs = door ? [[-half, dt - gap / 2], [dt + gap / 2, half]] : [[-half, half]];
+      for (const s of segs) {
+        if (s[1] - s[0] < 0.3) continue;
+        const t = (s[0] + s[1]) / 2, len = s[1] - s[0];
+        onFace(root, f, t, len, 0, BASE, -0.04, 0.24, FEDM.granite, { cast: false });
+        onFace(root, f, t, len, BASE, BASE + 0.08, -0.04, 0.30, FEDM.precastD, { cast: false });
+        faceCol(f, t, len, -0.04, 0.30, 0, BASE + 0.08);
+      }
+      // THE BELT COURSE at the first floor, a BAND at every floor line above
+      onFace(root, f, 0, f.span, BELT0, BELT1, -0.04, 0.62, FEDM.precast);
+      for (let k = 2; k < ST; k++) onFace(root, f, 0, f.span, k * FH - 0.28, k * FH + 0.22, -0.04, 0.34, FEDM.precast, { cast: false });
+      // THE CORNICE over the parapet: a deep cap, the shadow line under it, a coping
+      onFace(root, f, 0, f.span + 0.2, rTop - 0.55, TOP, -0.04, 0.9, FEDM.precast);
+      onFace(root, f, 0, f.span, rTop - 0.75, rTop - 0.55, -0.04, 0.55, FEDM.precastD, { cast: false });
+      onFace(root, f, 0, f.span + 0.4, TOP, TOP + 0.12, -0.04, 1.0, FEDM.precastD, { cast: false });
+      // THE FINS on the module; the corner piers own the corners, the entrance
+      // bay stays open glass from the canopy to the cornice
+      const n = Math.max(2, Math.round(f.span / pitch));
+      for (let i = 1; i < n; i++) {
+        const t = -half + f.span * i / n;
+        if (door && Math.abs(t - dt) < gap / 2) continue;
+        (f.ax === "x" ? finX : finZ).push(faceXZ(f, t, 0.27));
+      }
+    }
+    const fy = (BELT1 + rTop - 0.55) / 2, fh = rTop - 0.55 - BELT1;
+    if (fh > 0.5) {
+      repeat(root, bg(0.42, fh, 0.62), FEDM.precast, finX, function () { return fy; });
+      repeat(root, bg(0.62, fh, 0.42), FEDM.precast, finZ, function () { return fy; });
+    }
+    // CORNER PIERS, grade to cornice, solid
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      const x = b.ox + sx * (b.w / 2 + 0.05), z = b.oz + sz * (b.d / 2 + 0.05);
+      box(root, x, TOP / 2, z, 1.3, TOP, 1.3, FEDM.precast);
+      col(x, z, 1.3, 1.3, 0, TOP);
+    }
+    return { rTop: rTop, top: TOP };
+  }
+
+  // THE ONE WAY IN. `o.w` the canopy's width, `o.reach` how far it and the
+  // stylobate reach out from the facade.
+  function fedEntrance(root, S, o) {
+    o = o || {};
+    const n = S.n, ox = -n.x, oz = -n.z;                  // outward
+    const fx = S.door.x + ox * 1.6, fz = S.door.z + oz * 1.6;   // the facade point at the door
+    const axis = Math.abs(ox) > 0.5 ? "x" : null, dir = axis ? ox : oz;
+    const tx = -oz, tz = ox;                               // along the facade
+    const W = o.w || 16, R = o.reach || 7.2;
+    perron(root, fx, fz, W - 2, R - 1.2, M.stone, dir, axis);
+    // the canopy: a flat plate cantilevered out, its soffit dark, a fascia lip
+    const y0 = o.soffit || 3.3, th = 0.34;
+    const cx0 = fx + ox * R / 2, cz0 = fz + oz * R / 2;
+    const cw = axis ? R : W, cd = axis ? W : R;
+    box(root, cx0, y0 + th / 2, cz0, cw, th, cd, FEDM.canopy);
+    box(root, cx0, y0 - 0.015, cz0, cw - 0.5, 0.03, cd - 0.5, FEDM.soffit, { cast: false });
+    box(root, fx + ox * (R - 0.08), y0 + th / 2, fz + oz * (R - 0.08), axis ? 0.16 : W + 0.1, th + 0.14, axis ? W + 0.1 : 0.16, FEDM.precastD, { cast: false });
+    // four columns on the outer edge, clear of the stylobate, on the ground
+    for (const s of [-1, -1 / 3, 1 / 3, 1]) {
+      const lat = s * (W / 2 - 0.6);
+      const x = fx + ox * (R - 0.6) + tx * lat, z = fz + oz * (R - 0.6) + tz * lat;
+      cyl(root, x, y0 / 2, z, 0.22, 0.24, y0, FEDM.plantD, 12);
+      box(root, x, 0.06, z, 0.7, 0.12, 0.7, FEDM.granite, { cast: false });
+      col(x, z, 0.5, 0.5, 0, y0);
+    }
+    // downlights in the soffit: one instanced, lit draw
+    const pts = [];
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 2; j++) {
+      const lat = (i - 1.5) * (W / 4.4), dep = R * (0.3 + j * 0.4);
+      pts.push({ x: fx + ox * dep + tx * lat, z: fz + oz * dep + tz * lat });
+    }
+    repeat(root, bg(0.36, 0.03, 0.36), FEDM.downlight, pts, function () { return y0 - 0.045; }, null, { emissive: FEDM.downlight, ei: 0.9 });
+    return { x: fx, z: fz };
+  }
+
+  // ROOF PLANT that belongs there. Everything is kept `margin` inside the
+  // parapet and off the stair/lift reservations the shell made at build.
+  function fedRoof(root, S, o) {
+    o = o || {};
+    const b = S.b, y = b.storeys * b.FH, M0 = o.margin == null ? 3.2 : o.margin;
+    const busy = (b.shaftRects || []).concat(b.keepRects || []).map(function (q) {
+      return { x0: b.ox + q.x0 - 1.5, x1: b.ox + q.x1 + 1.5, z0: b.oz + q.z0 - 1.5, z1: b.oz + q.z1 + 1.5 };
+    });
+    const X0 = b.ox - b.w / 2 + M0, X1 = b.ox + b.w / 2 - M0, Z0 = b.oz - b.d / 2 + M0, Z1 = b.oz + b.d / 2 - M0;
+    const taken = [];
+    function free(x, z, w, d) {
+      if (x - w / 2 < X0 || x + w / 2 > X1 || z - d / 2 < Z0 || z + d / 2 > Z1) return false;
+      const all = busy.concat(taken);
+      for (const q of all) if (x - w / 2 < q.x1 && x + w / 2 > q.x0 && z - d / 2 < q.z1 && z + d / 2 > q.z0) return false;
+      return true;
+    }
+    function place(w, d, prefer) {
+      for (let i = 0; i < prefer.length; i++) {
+        const p = prefer[i];
+        if (free(p.x, p.z, w, d)) { taken.push({ x0: p.x - w / 2 - 1.2, x1: p.x + w / 2 + 1.2, z0: p.z - d / 2 - 1.2, z1: p.z + d / 2 + 1.2 }); return p; }
+      }
+      return null;
+    }
+    const long = b.w >= b.d, L = long ? b.w : b.d;
+    function along(f, off) { return long ? { x: b.ox + f * L, z: b.oz + (off || 0) } : { x: b.ox + (off || 0), z: b.oz + f * L }; }
+    const cands = [0, 0.18, -0.18, 0.3, -0.3, 0.1, -0.1].map(function (f) { return along(f); });
+    // 1. THE PENTHOUSE: a louvred enclosure the air handlers live in
+    const pw = Math.min((long ? b.w : b.d) * 0.26, o.penthouse || 26), pd = Math.min((long ? b.d : b.w) * 0.42, 12), ph = 4.2;
+    const P = place(long ? pw : pd, long ? pd : pw, cands);
+    if (P) {
+      const w = long ? pw : pd, d = long ? pd : pw;
+      box(root, P.x, y + ph / 2, P.z, w, ph, d, FEDM.plant);
+      for (let i = 0; i < 4; i++) box(root, P.x, y + 1.1 + i * 0.7, P.z, w + 0.06, 0.16, d + 0.06, FEDM.louvre, { cast: false });
+      box(root, P.x, y + ph + 0.12, P.z, w + 0.5, 0.24, d + 0.5, FEDM.plantD);
+      col(P.x, P.z, w, d, y, y + ph + 0.24);
+      // two upblast fans on its lid
+      for (const s of [-1, 1]) {
+        const fx = P.x + (long ? s * w * 0.25 : 0), fz = P.z + (long ? 0 : s * d * 0.25);
+        cyl(root, fx, y + ph + 0.24 + 0.45, fz, 0.9, 1.05, 0.9, FEDM.plantD, 14);
+        cyl(root, fx, y + ph + 0.24 + 0.95, fz, 0.7, 0.9, 0.1, FEDM.louvre, 14);
+      }
+    }
+    // 2. COOLING TOWERS: two boxes with fan shrouds
+    for (let k = 0; k < 2; k++) {
+      const C = place(4.4, 4.4, [along(0.36, 0), along(-0.36, 0), along(0.42, 0), along(-0.42, 0), along(0.24, 0), along(-0.24, 0)]);
+      if (!C) continue;
+      box(root, C.x, y + 1.6, C.z, 4.2, 3.2, 4.2, FEDM.plant);
+      for (let i = 0; i < 5; i++) box(root, C.x, y + 0.5 + i * 0.5, C.z, 4.26, 0.08, 4.26, FEDM.louvre, { cast: false });
+      cyl(root, C.x, y + 3.2 + 0.5, C.z, 1.7, 1.9, 1.0, FEDM.plantD, 16);
+      col(C.x, C.z, 4.2, 4.2, y, y + 4.2);
+    }
+    // 3. EXHAUST STACKS in a row
+    const E = place(1.4, 5.0, [along(-0.12, (long ? b.d : b.w) * 0.22), along(0.12, -(long ? b.d : b.w) * 0.22), along(0.4, (long ? b.d : b.w) * 0.2)]);
+    if (E) for (let i = -1; i <= 1; i++) {
+      const x = E.x + (long ? 0 : i * 1.5), z = E.z + (long ? i * 1.5 : 0);
+      cyl(root, x, y + 1.6, z, 0.34, 0.38, 3.2, FEDM.plantD, 10);
+      col(x, z, 0.8, 0.8, y, y + 3.2);
+    }
+    // 4. THE COMMS MAST with its dishes (the reason an agency has a roof)
+    if (o.mast !== false) {
+      const Q = place(3.0, 3.0, [along(-0.4, 0), along(0.4, 0), along(-0.33, 0), along(0.33, 0)]);
+      if (Q) {
+        const mh = o.mast || 14;
+        box(root, Q.x, y + 0.2, Q.z, 2.6, 0.4, 2.6, FEDM.plantD, { cast: false });
+        cyl(root, Q.x, y + 0.4 + mh / 2, Q.z, 0.14, 0.24, mh, M.steel, 8);
+        for (const s of [-1, 1]) {
+          const d = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.2, 0.35, 16), cm(FEDM.canopy));
+          d.position.set(Q.x + s * 0.55, y + 0.4 + mh * (s > 0 ? 0.62 : 0.48), Q.z);
+          d.rotation.z = s * Math.PI / 2 * 0.8; d.castShadow = true; root.add(d);
+        }
+        box(root, Q.x, y + 0.4 + mh + 0.1, Q.z, 0.12, 0.2, 0.12, M.red, { cast: false, matOpts: { emissive: M.red, ei: 0.8 } });
+        col(Q.x, Q.z, 0.6, 0.6, y, y + 0.4 + mh);
+      }
+    }
+  }
+
+  /* THE RING'S WINDOWS. ringHQ drew five rings of blank 23 m bands, which is
+     a silhouette and not a building. Every storey of the outer ring's outer
+     face, and of the innermost ring's courtyard face, gets its punched
+     windows: dark glass set into the stone with a pale sill, on a 2.6 m
+     module, kept 5 m off every corner. Two instanced draws for all of them.
+     The light wells between rings (9 m slots you only see from the air) stay
+     plain on purpose. */
+  function ringWindows(root, cx, cz, R) {
+    const G = [], S = [];
+    const TAN = Math.tan(Math.PI / 5);
+    const faces = [{ apo: R.apothem, out: 1 }];
+    if (R.innerFace > 8) faces.push({ apo: R.innerFace, out: -1 });
+    for (const F of faces) {
+      const half = F.apo * TAN - 5.0;
+      if (half < 3) continue;
+      const n = Math.floor((half * 2) / 2.6);
+      for (let s = 0; s < 5; s++) {
+        const a = R.rot0 + s * (Math.PI * 2 / 5);
+        const nx = Math.cos(a), nz = Math.sin(a), tx = -Math.sin(a), tz = Math.cos(a);
+        const yaw = -(a + Math.PI / 2);
+        const off = F.apo + F.out * 0.03;
+        for (let i = 0; i <= n; i++) {
+          const t = -half + (half * 2) * (i / n);
+          for (let k = 0; k < R.storeys; k++) {
+            const y = k * R.FH + 1.05;
+            G.push({ x: cx + nx * off + tx * t, z: cz + nz * off + tz * t, y: y + 1.0, r: yaw });
+            S.push({ x: cx + nx * (F.apo + F.out * 0.08) + tx * t, z: cz + nz * (F.apo + F.out * 0.08) + tz * t, y: y - 0.06, r: yaw });
+          }
+        }
+      }
+    }
+    repeat(root, bg(1.35, 2.0, 0.12), FEDM.glass, G, null, null);
+    repeat(root, bg(1.6, 0.12, 0.2), FEDM.precastD, S, null, null);
+    return G.length;
+  }
+
+  /* THE PUBLIC PRECINCTS' GROUND (the Capitol, City Hall). They are not
+     estates, but the law is §1c's: the height you stand on is the height that
+     is drawn there. The row files each surface it lays and the one provider
+     (estateGroundAt) answers for it — the pad at YP, a lawn at YG, paving at
+     YS, a kerb at its top — so nobody walks 10 cm inside the forecourt. */
+  function civicGround(c) {
+    const EG = { rect: c.rect, base: YP, rects: [], discs: [] };
+    ESTATE_GROUND.push(EG);
+    return {
+      eg: EG,
+      slab: function (root, x, z, w, d, hex, y) {
+        slab(root, x, z, w, d, hex, y);
+        EG.rects.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2, y: y });
+      },
+      // building-local rects {x0,x1,z0,z1,y} a shell's own kit drew
+      file: function (b, list) {
+        for (const r of list || []) EG.rects.push({ minX: b.ox + r.x0, maxX: b.ox + r.x1, minZ: b.oz + r.z0, maxZ: b.oz + r.z1, y: r.y });
+      },
+    };
+  }
 
   // EVERY SILHOUETTE BELOW STAYS INSIDE ITS OWN HALF-EXTENTS. That is not a
   // style note: the whole reason this file exists is that a complex which
@@ -2749,36 +4181,80 @@
       id: "capitol", name: "The Capitol", subtitle: "Legislative Assembly",
       hx: 132, hz: 112, bearing: 0, keepOut: null, gateSide: 1,
       principal: { key: "speaker", tier: 4, org: "state", lawful: true, role: "President of the Senate", job: "official", wealth: 0.85 },
-      // arrival hall · committee floor · the chamber officer's suite; the two
-      // wings are committee rooms over a clerks' floor.
-      interiors: { main: ["lobby", "meeting", "bosssuite"], aux: ["meeting", "deskfarm"] },
+      // the centre block: the rotunda under the dome on the ground floor, the
+      // galleries round its well with committee rooms and members' offices on
+      // the two floors above. Each wing is a CHAMBER: the house floor on the
+      // ground, the public gallery and committee rooms over it
+      // (city/interior_programs.js, "THE LEGISLATURE").
+      interiors: { main: ["rotunda", "capitolfloor", "capitolfloor"], aux: ["chamber", "chambergallery"] },
       build: function (c) {
         const R = c.rect, root = c.root, cx = c.cx, cz = c.cz;
         pad(root, R, M.paving, "capitol");
-        // the ceremonial approach: lawn either side of a stone axis, with a
-        // reflecting pool down the middle. The single element that makes an
-        // approach read as ceremonial rather than as a service yard.
-        slab(root, cx - 58, cz + 50, 58, 92, M.lawn, YG);          // x -87..-29
-        slab(root, cx + 58, cz + 50, 58, 92, M.lawn, YG);          // x +29..+87
-        slab(root, cx, cz + 52, 44, 96, M.stone, YS);              // x -22..+22
-        slab(root, cx, cz + 58, 18, 66, M.water, YM);
-        // THE CHAMBER. One call buys the podium, the engaged ionic order, the
-        // entablature, the carved motto, the seal, the flagpoles and the
-        // copper dome with its drum, lantern and gilded finial.
-        const main = civic(root, cx, cz - 26, 92, 56, 3, M.marble, 1,
-          { kind: "capitol", crown: "dome", order: "ionic", motto: "THE PEOPLE'S HOUSE", stone: true }, "The Capitol");
+        const G = civicGround(c);
+        /* THE CAPITOL, AT A LEGISLATURE'S SCALE. The old row was a 92 m office
+           box three 3.2 m storeys tall (9.6 m: lower than a town hall) with a
+           30 cm perron and a registry line asking for a dome and an order that
+           the renderer had switched off. Now: three 5 m storeys (15 m to the
+           cornice), a projecting portico on the principal floor reached by two
+           broad flights, the public door at grade through the arcade under it,
+           and a peristyle drum and dome that put the lantern at ~52 m. The
+           wings are the two chambers, each with its own pedimented front. */
+        const SPEC = { kind: "capitol", crown: "dome", order: "ionic", stone: true,
+          monumental: true, externalPerron: true, hostOrder: true, hostCrown: true };
+        const main = civic(root, cx, cz - 40, 92, 56, 3, M.marble, 1, SPEC, "The Capitol", { fh: 5.0 });   // front face z -12
         c.main = main;
-        // a bicameral house is TWO chambers — the wings are the reason the
-        // silhouette reads as a legislature and not as a museum.
-        civic(root, cx - 80, cz - 20, 44, 38, 2, M.stone, 1,
-          { kind: "capitol", crown: "pediment", order: "ionic", motto: "SENATE", stone: true }, "Senate Wing");
-        civic(root, cx + 80, cz - 20, 44, 38, 2, M.stone, 1,
-          { kind: "capitol", crown: "pediment", order: "ionic", motto: "ASSEMBLY", stone: true }, "Assembly Wing");
-        // THE STYLOBATE. `cz - 26 + 56/2` IS the front facade, so the entrance
-        // is derived from the chamber's own wall and reaches 12 m out from it.
-        perron(root, cx, cz + 2, 62, 12, M.stone, 1);              // z +2..+14
-        flagpole(root, cx - 34, cz + 18, 16);
-        flagpole(root, cx + 34, cz + 18, 16);
+        const wings = [];
+        for (const w of [{ s: -1, name: "Senate Wing", motto: "SENATE", house: "senate" }, { s: 1, name: "Assembly Wing", motto: "ASSEMBLY", house: "assembly" }]) {
+          const wb = civic(root, cx + w.s * 80, cz - 34, 44, 38, 2, M.stone, 1,
+            { kind: "capitol", crown: "pediment", order: "ionic", motto: w.motto, stone: true,
+              monumental: true, externalPerron: true, hostCrown: true }, w.name, { fh: 5.0 });     // front face z -15
+          if (!wb) continue;
+          // the full width of the front: the engaged order stands on the deck,
+          // every column of it (a 30 m perron left the outer ones in the air)
+          perron(root, cx + w.s * 80, cz - 15, 42.6, 8, M.stone, 1);                                 // z -15..-7
+          wb.b._civicPlan = { kind: "chamber", house: w.house };
+          wings.push(wb);
+        }
+        const K = CBZ.civicMonument;
+        let por = null, dom = null;
+        if (main && K) {
+          try { por = K.portico(main.b, { depth: 11, half: 19, flightW: 8, ground: YS, stone: M.marble, stoneD: 0xc9c4b4 }); }
+          catch (e) { console.error("[govcomplex] capitol portico", e); }
+          try { dom = K.dome(main.b, { R: 12.9, stone: M.marble }); }
+          catch (e) { console.error("[govcomplex] capitol dome", e); }
+          if (por) G.file(main.b, por.ground);
+          // the plan the rotunda and the gallery floors are drawn from: the
+          // well under the dome is a square inside the drum's inner circle
+          // (the column ring at 11.2 m, the well 14.8 m square: its corners stay
+          // inside the drum's inner wall, 12.3 m out, and inside the ring beam)
+          const plan = { kind: "capitol", rotunda: { x: 0, z: 0, r: 11.2, well: 7.4, band: 12.5 }, dome: dom, portico: por };
+          main.b._civicPlan = plan;
+          if (main.lot && main.lot.building) main.lot.building._civicPlan = plan;
+        }
+        // THE FORECOURT between the flights and the MALL beyond it: paving
+        // under the arcade's mouth, the stone axis with the reflecting pool in
+        // its kerb, lawn either side. Nothing is drawn where the flights and
+        // their aprons already are (a second slab there is a z-fight).
+        const zFoot = por ? por.zBot + (main.b.oz - cz) + 2.0 : 16;       // relative z of the aprons' outer edge
+        G.slab(root, cx, cz + (-1 + zFoot) / 2, 38, zFoot + 1, M.stone, YS);                  // x -19..+19, z -1..foot
+        G.slab(root, cx, cz + (zFoot + 104) / 2, 44, 104 - zFoot, M.stone, YS);              // x -22..+22, z foot..+104
+        G.slab(root, cx - 58, cz + 54, 58, 100, M.lawn, YG);                                  // x -87..-29, z +4..+104
+        G.slab(root, cx + 58, cz + 54, 58, 100, M.lawn, YG);                                  // x +29..+87
+        const pz0 = cz + 40, pz1 = cz + 98;
+        slab(root, cx, (pz0 + pz1) / 2, 17, pz1 - pz0, M.water, YM);
+        for (const e of [[cx, pz0 - 0.2, 17.8, 0.4], [cx, pz1 + 0.2, 17.8, 0.4], [cx - 8.7, (pz0 + pz1) / 2, 0.4, pz1 - pz0], [cx + 8.7, (pz0 + pz1) / 2, 0.4, pz1 - pz0]]) {
+          box(root, e[0], 0.2, e[1], e[2], 0.4, e[3], M.stoneD, { cast: false });
+          G.eg.rects.push({ minX: e[0] - e[2] / 2, maxX: e[0] + e[2] / 2, minZ: e[1] - e[3] / 2, maxZ: e[1] + e[3] / 2, y: 0.4 });
+        }
+        // THE HYPHENS: an open colonnade from the centre block to each wing
+        if (K) for (const s of [-1, 1]) {
+          try {
+            const hy = K.colonnade(root, { x0: cx + s * 46 - (s > 0 ? 0 : 12), x1: cx + s * 46 + (s > 0 ? 12 : 0), z0: cz - 31, z1: cz - 22, h: 4.2, stone: M.marble, ground: YS });
+            if (hy) G.eg.rects.push({ minX: hy.ground.x0, maxX: hy.ground.x1, minZ: hy.ground.z0, maxZ: hy.ground.z1, y: hy.ground.y });
+          } catch (e) { console.error("[govcomplex] capitol colonnade", e); }
+        }
+        flagpole(root, cx - 34, cz + 20, 16);
+        flagpole(root, cx + 34, cz + 20, 16);
         const lamps = [];
         for (let i = 0; i < 7; i++) {
           lamps.push({ x: cx - 26, z: cz + 26 + i * 11 });         // z +26..+92
@@ -2787,16 +4263,14 @@
         lampRow(root, lamps);
         // a public building is protected by BOLLARDS, not by a wall. This is
         // the whole difference between the Capitol and the Agency.
-        bollardLine(root, cx, cz + 20, 30.6, new THREE.CylinderGeometry(0.24, 0.28, 1.0, 8), 0.28, 1.0);
-        // VISITOR PARKING, off the ceremonial axis and 2 m clear of the west
-        // lawn's edge at -87 (two coplanar slabs is a z-fight, not a detail).
-        // TWO lots, one per flank: a legislature the public is invited to,
-        // with visitor parking on ONE side only, was a lot placed where there
-        // happened to be room rather than where the visitors are. The rect
-        // reaches x +/-132 and z +/-112, and the ceremonial lamps own x +/-26,
-        // so both flanks have 42 m of width and 88 m of depth going spare.
+        bollardLine(root, cx, cz + 30, 21.6, new THREE.CylinderGeometry(0.24, 0.28, 1.0, 8), 0.28, 1.0);
+        // VISITOR PARKING, one lot per flank, off the ceremonial axis and 2 m
+        // clear of the lawns' outer edges at x +/-87.
         parkingSea(root, cx - 108, cz + 64, 42, 88);               // x -129..-87, z +20..+108
         parkingSea(root, cx + 108, cz + 64, 42, 88);               // x  +87..+129, z +20..+108
+        G.eg.rects.push({ minX: cx - 129, maxX: cx - 87, minZ: cz + 20, maxZ: cz + 108, y: YG });
+        G.eg.rects.push({ minX: cx + 87, maxX: cx + 129, minZ: cz + 20, maxZ: cz + 108, y: YG });
+        if (c.site) c.site.capitol = { portico: por, dome: dom, wings: wings.length };
         return { gate: { x: cx, z: R.maxZ }, seat: main };
       },
     },
@@ -2811,7 +4285,7 @@
       // "residence AND workplace", made literal: the house is a state entrance
       // hall under the family's floor, and the WEST WING is the work — a real
       // office over the ground floor's staff room, both laid out by roomPlan.
-      interiors: { main: ["statehall", "stateresidence", "room:bedroom"], aux: ["cabinetroom", "ovaloffice"] },
+      interiors: { main: ["statehall", "stateresidence", "stateprivate"], aux: ["cabinetroom", "ovaloffice"] },
       // the service stair takes the WEST back corner: the Situation Room
       // (presidency.js) owns the east bay and the grand stair the west flank
       stairSide: -1,
@@ -2853,7 +4327,9 @@
       id: "governor", name: "The Governor's Residence", subtitle: "State Executive Residence",
       hx: 94, hz: 88, bearing: 308, keepOut: "civ", gateSide: 1,
       principal: { key: "governor", tier: 4, org: "state", lawful: true, role: "Governor", job: "official", wealth: 0.9, family: true },
-      interiors: { main: ["lobby", "bosssuite"], aux: ["storage"] },
+      // a HOUSE: hall, drawing room, dining room, study downstairs; the
+      // principal bedroom, a guest room and the family sitting room upstairs
+      interiors: { main: ["govresidence", "govprivate"], aux: ["storage"] },
       household: [
         { job: "housekeeper", at: "door", outfit: 0xd8dce0 },
         { job: "estate cook", at: "yard", outfit: 0xe8eaec },
@@ -2868,59 +4344,88 @@
       },
     },
     /* ================================================================
-       4. THE AGENCY — an intelligence headquarters. Blank campus behind a
-       fence, one guarded gate, an ocean of parking, no signage anywhere.
-       Deliberately anonymous: the ABSENCE of a seal is the identity.
+       4. THE BUREAU — an intelligence headquarters on a fenced campus.
+
+       Read from the gate inwards, the way you arrive: a guarded east gate,
+       a lit approach drive with the two staff lots off it, a paved plaza
+       with three flags, and the one way in, a canopy over a stepped
+       stylobate in the middle of a long precast-and-glass slab (six storeys
+       at 4 m, the proportions of a real headquarters block rather than a
+       stack of 3.2 m shop floors). A taller wing stands east of it with its
+       own staff door on the car-park side, and a low operations annex sits
+       behind across a service yard. The antenna farm and the plant are
+       where plant goes: the north fence and the roofs. No seal, no name,
+       no signage anywhere; the ABSENCE of a sign is still the identity.
+
+       Inside the slab, floor by floor: the security lobby (screening and a
+       wall-to-wall turnstile line), the watch floor, a desk floor, the
+       briefing room, a second desk floor, and the Director's suite on top.
        ================================================================ */
     {
       id: "agency", name: "Bureau Headquarters", subtitle: "Restricted Federal Facility",
       hx: 154, hz: 132, bearing: 248, keepOut: "hard", gateSide: 3,
       principal: { key: null, tier: 4, org: "agency", lawful: true, role: "Director of the Bureau", job: "official", wealth: 0.8 },
-      // INTENTIONALLY MONOTONOUS (archetype (c)): the annex and the wing are
-      // the SAME desk floor, over and over, all the way up. That is the read a
-      // building with no signage and no windows you can see into is going for,
-      // and repeating one program is how the kit expresses it.
-      interiors: { main: ["lobby", "deskfarm", "deskfarm", "storage", "bosssuite"], aux: ["deskfarm", "storage"] },
+      // the wing and the annex share `aux`: an arrival floor, then desks
+      interiors: {
+        main: ["securitylobby", "opscenter", "deskfarm", "briefingroom", "deskfarm", "directorsuite"],
+        aux: ["lobby", "deskfarm"],
+      },
       build: function (c) {
         const R = c.rect, root = c.root, cx = c.cx, cz = c.cz;
         pad(root, R, M.concrete, "agency");
         // chain link, not masonry: this place is WATCHED, not walled
         perimeter(root, R, { style: "fence", h: 3.4, hex: M.fence, gate: 3, gateW: 20 });
         gatehouse(root, R.maxX - 6, cz, false, M.concreteD);
-        // THE BUILDING. A long blank slab with reflective glass, a lower
-        // annex behind it and a wing off one end. No motto, no crown, no
-        // seal — `civic()` is called with a null spec on purpose.
-        const main = civic(root, cx - 14, cz - 44, 118, 44, 5, M.blank, 1, null, "Bureau Headquarters");
+        // ---- THE BUILDINGS ------------------------------------------------
+        // main slab x -82..+42, z -61..-27 (door on its south face, z -27)
+        const main = civic(root, cx - 20, cz - 44, 124, 34, 6, M.blank, 1, null, "Bureau Headquarters", { fh: 4.0 });
         c.main = main;
-        block(root, cx - 14, cz - 2, 118, 22, 3, M.blankD, 1, { facade: "office" });
-        block(root, cx + 76, cz - 44, 32, 44, 4, M.blank, 2, { facade: "office" });
-        // THE PARKING SEA — two of them, because that is what the aerial
-        // photograph of every real one of these actually shows, and it is the
-        // Agency's whole identity (see the header: "an ocean of parking").
-        // The old pair covered 190 x 74 and 76 x 76 inside a 308 x 264 rect,
-        // which is a car park, not an ocean. These take the ground that is
-        // actually free: the main slab's south wall is at cz-22 and the annex
-        // block's at cz+9, the perimeter fence sits on the rect edge, and the
-        // approach lamp row owns x +128. Everything between is tarmac.
-        // The two blocks are split on x (not overlapped on it) — two coplanar
-        // asphalt slabs sharing ground is a z-fight, not a bigger lot.
-        parkingSea(root, cx - 53, cz + 68, 184, 108);              // x -145..+39, z +14..+122
-        parkingSea(root, cx + 88, cz + 46, 78, 152);               // x  +49..+127, z -30..+122
-        // the antenna farm along the north fence
+        // east wing x +58..+94, z -74..-30 (its staff door faces the car park)
+        const wing = civic(root, cx + 76, cz - 52, 36, 44, 7, M.blank, 1, null, "Bureau East Wing", { fh: 3.8 });
+        // operations annex behind the slab, x -68..+28, z -103..-81, across a
+        // 20 m service yard from the slab's back wall
+        const annex = civic(root, cx - 20, cz - 92, 96, 22, 2, M.blankD, 1, null, "Bureau Annex", { fh: 4.2 });
+        if (main) { fedFrame(root, main, { gap: 17 }); fedEntrance(root, main, { w: 18, reach: 7.4 }); fedRoof(root, main, { mast: 16 }); }
+        if (wing) { fedFrame(root, wing, { gap: 8.2, pitch: 2.6 }); fedEntrance(root, wing, { w: 9, reach: 4.6 }); fedRoof(root, wing, { mast: false, penthouse: 12 }); }
+        if (annex) { fedFrame(root, annex, { gap: 8.2, pitch: 3.6 }); fedEntrance(root, annex, { w: 9, reach: 4.6 }); fedRoof(root, annex, { mast: 10 }); }
+        // ---- THE GROUND, gate inwards -------------------------------------
+        // the approach drive: the east gate to the plaza, z -6..+6
+        slab(root, cx + 27, cz, 254, 12, M.asphalt, YG);                 // x -100..+154
+        for (const s of [-1, 1]) slab(root, cx + 27, cz + s * 6.2, 254, 0.25, M.paint, YM);   // edge lines
+        // the plaza in front of both doors, z -21..-7, and the service yard
+        slab(root, cx + 19, cz - 14, 162, 14, M.paving, YS);              // x -62..+100
+        slab(root, cx - 34, cz - 71, 124, 20, M.asphalt, YG);             // x -96..+28, z -81..-61 (the yard)
+        slab(root, cx - 90, cz - 43.5, 12, 75, M.asphalt, YG);            // x -96..-84: the yard's lane to the drive
+        // three flags on the plaza, the middle one taller
+        flagpole(root, cx - 46, cz - 12, 13);
+        flagpole(root, cx - 40, cz - 12, 15);
+        flagpole(root, cx - 34, cz - 12, 13);
+        // bollards along the plaza's kerb (a gap every 1.5 m to walk through)
+        bollardLine(root, cx + 19, cz - 7.2, 80, new THREE.CylinderGeometry(0.2, 0.24, 0.95, 8), 0.24, 0.95);
+        // THE PARKING SEAS, off the drive and clear of it by a verge: the
+        // aerial photograph of every real one of these is mostly car park
+        parkingSea(root, cx - 53, cz + 68, 184, 108);                     // x -145..+39, z +14..+122
+        parkingSea(root, cx + 88, cz + 68, 78, 108);                      // x  +49..+127, z +14..+122
+        slab(root, cx - 24, cz + 10, 12, 8, M.asphalt, YG);                // the lots' two mouths
+        slab(root, cx + 80, cz + 10, 12, 8, M.asphalt, YG);
+        // the antenna farm along the north fence, west of the annex
         for (let i = 0; i < 3; i++) {
-          const dx = cx - 110 + i * 26, dz = cz - 100;
+          const dx = cx - 140 + i * 18, dz = cz - 112;
           cyl(root, dx, 2.0, dz, 0.34, 0.44, 4.0, M.steel, 8);
           const dish = new THREE.Mesh(new THREE.SphereGeometry(3.4, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), cm(M.stoneD));
           dish.position.set(dx, 4.4, dz); dish.rotation.x = -0.7; dish.castShadow = true; root.add(dish);
           col(dx, dz, 1.4, 1.4, 0, 4.0);
         }
+        // the lattice tower and the standby generators on the east side
         cyl(root, cx + 118, 17, cz - 108, 0.4, 0.7, 34, M.steelD, 8);
         col(cx + 118, cz - 108, 1.6, 1.6, 0, 34);
-        for (let i = 0; i < 4; i++) box(root, cx + 96 + i * 6, 1.4, cz - 78, 4.2, 2.8, 3.2, M.steelD);
-        col(cx + 105, cz - 78, 26, 3.2, 0, 2.8);
+        for (let i = 0; i < 4; i++) box(root, cx + 104 + i * 6, 1.4, cz - 84, 4.2, 2.8, 3.2, M.steelD);
+        col(cx + 113, cz - 84, 26, 3.2, 0, 2.8);
+        // ---- LIGHT: lantern standards both sides of the drive, masts on the lots
         const lamps = [];
-        for (let i = 0; i < 9; i++) lamps.push({ x: R.maxX - 26, z: R.minZ + 20 + i * 26 });
+        for (let x = cx - 76; x <= cx + 140; x += 26) { lamps.push({ x: x, z: cz - 8.4 }); lamps.push({ x: x + 13, z: cz + 8.4 }); }
         lampRow(root, lamps);
+        for (const p of [[-149.5, 17], [-149.5, 119], [44, 17], [44, 119], [140, 119]]) floodMast(root, cx + p[0], cz + p[1], 10);
         return { gate: { x: R.maxX, z: cz }, seat: main, service: true };
       },
     },
@@ -2930,60 +4435,102 @@
        the shape right and the building needs no sign at all.
 
        GEOMETRY NOTE, because the numbers here are load-bearing: the outer
-       ring's apothem is 150, so its CIRCUMRADIUS is 150/cos(36) = 185 and
-       its southern apex reaches cz+185. Everything else on this site is
-       therefore placed against a separating plane of the pentagon rather
-       than by eye — the staff parks sit outside the 126-degree and
-       54-degree faces, and the command annex sits north of the flat
-       northern face at cz-150 with real daylight to spare.
+       ring's apothem is 146, so its CIRCUMRADIUS is 146/cos(36) = 180.5 and
+       its southern apex reaches cz+180.5. Everything else on this site is
+       placed against a separating plane of the pentagon rather than by eye
+       (the staff parks sit outside the 126-degree and 54-degree faces). It
+       was 150; the four metres went to the entrance pavilion, so the
+       pavilion keeps a real 24 m plate and its stylobate still ends where
+       garrison.js posts the approach sentry (22 m in from the gate).
+
+       THE WAY IN is the real building's: an entrance pavilion built against
+       the middle of the flat north face, on the parade axis from the gate,
+       exactly where a real ring HQ puts its ceremonial entrance. It was a
+       command annex parked 82 m off the axis on the parade ground, with its
+       stair core butting the ring's colliders; now the gate, the forecourt,
+       the stylobate, the portico and the ring are one line. Inside the
+       pavilion: the security lobby, the operations centre, the briefing
+       floor, and the Chief of the General Staff's suite on top.
        ================================================================ */
     {
       id: "defence", name: "Defence Headquarters", subtitle: "Joint Command",
       hx: 196, hz: 194, bearing: 204, keepOut: "hard", gateSide: 0,
       principal: { key: null, tier: 5, org: "army", lawful: true, role: "Chief of the General Staff", job: "official", wealth: 0.75 },
-      // you clear a manned entrance before you reach the briefing floor.
-      interiors: { main: ["checkpoint", "meeting", "bosssuite"], aux: ["quarters"] },
+      interiors: { main: ["securitylobby", "opscenter", "briefingroom", "directorsuite"] },
       build: function (c) {
         const R = c.rect, root = c.root, cx = c.cx, cz = c.cz;
         pad(root, R, M.concrete, "defence");
         perimeter(root, R, { style: "fence", h: 3.6, hex: M.fence, gate: 0, gateW: 22 });
         gatehouse(root, cx, R.minZ + 6, true, M.concreteD);
-        const ring = ringHQ(root, cx, cz, { apothem: 150, rings: 5, depth: 18, well: 9, storeys: 5, wall: M.concrete, roof: M.concreteD });
-        // THE COURTYARD — lawn, a path cross, and a pavilion in the middle
+        // THE RINGS, in limestone, and their windows
+        const ring = ringHQ(root, cx, cz, { apothem: 146, rings: 5, depth: 18, well: 9, storeys: 5, wall: M.stone, roof: M.concreteD });
+        ringWindows(root, cx, cz, ring);
+        // THE COURTYARD — lawn, a path cross, trees, and a pavilion you can
+        // stand under (its roof clears 3 m; its posts are solid)
         const ci = Math.max(8, ring.inner - 2);
         disc(root, cx, cz, ci, M.lawn, YG, 26);
         slab(root, cx, cz, 5.0, ci * 2, M.paving, YS);
         slab(root, cx, cz, ci * 2, 5.0, M.paving, YS);
-        box(root, cx, 1.6, cz, 7.0, 0.4, 7.0, M.stone, { cast: false });
-        for (const sx of [-1, 1]) for (const sz of [-1, 1]) cyl(root, cx + sx * 2.8, 0.8, cz + sz * 2.8, 0.22, 0.24, 1.6, M.stone, 10);
-        plat(cx, cz, 7.0, 7.0, 1.8);
-        // the parade approach from the north gate to the outer ring's flat
-        // northern face (z from R.minZ = cz-194 up to cz-150)
-        slab(root, cx, cz - 172, 26, 44, M.paving, YS);
-        // THE COMMAND ANNEX — the general's actual door. The ring block has
-        // no ordinary lot, so his seat is a real enterable shell on the
-        // parade ground, facing NORTH (door side 0) so his forecourt is the
-        // approach and not the six metres between him and the ring wall.
-        const main = civic(root, cx - 82, cz - 168, 40, 24, 3, M.concreteD, 0,
-          { kind: "federal", crown: "flat", order: "pilaster", motto: "JOINT COMMAND", stone: true }, "Joint Command Annex");
+        for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+          cyl(root, cx + sx * 3.4, 1.5, cz + sz * 3.4, 0.2, 0.22, 3.0, M.stone, 12);
+          col(cx + sx * 3.4, cz + sz * 3.4, 0.44, 0.44, 0, 3.0);
+        }
+        box(root, cx, 3.16, cz, 8.4, 0.32, 8.4, M.stoneD);
+        box(root, cx, 3.38, cz, 7.6, 0.12, 7.6, M.concreteD, { cast: false });
+        for (const s of [-1, 1]) {                                        // two benches under it
+          box(root, cx + s * 1.6, 0.22, cz, 0.5, 0.44, 2.6, M.timber, { cast: false });
+          col(cx + s * 1.6, cz, 0.5, 2.6, 0, 0.44);
+        }
+        if (ci > 14) {
+          const tp = [];
+          for (const sx of [-1, 1]) for (const sz of [-1, 1]) tp.push({ x: cx + sx * ci * 0.55, z: cz + sz * ci * 0.55 });
+          for (const t of tp) {
+            cyl(root, t.x, 1.6, t.z, 0.18, 0.26, 3.2, EST.bark, 8);
+            const cr = new THREE.Mesh(new THREE.SphereGeometry(2.6, 12, 9), cm(M.lawnD));
+            cr.position.set(t.x, 4.6, t.z); cr.castShadow = true; root.add(cr);
+            col(t.x, t.z, 0.5, 0.5, 0, 3.0);
+          }
+        }
+        // ---- THE ENTRANCE PAVILION on the flat north face (z -170..-146),
+        // its back bonded 0.1 m into the ring so no slit shows between them;
+        // its stylobate's deck is where garrison.js posts the approach sentry
+        const main = civic(root, cx, cz - 158.05, 60, 24.1, 4, M.stone, 0,
+          { kind: "federal", crown: "flat", order: "pilaster", stone: true, monumental: true, externalPerron: true },
+          "Joint Command Annex", { fh: 4.2 });
         c.main = main;
+        if (main) {
+          perron(root, cx, cz - 170.1, 30, 5.2, M.stone, -1);              // z -170.1..-175.3
+          fedRoof(root, main, { mast: 12, penthouse: 16 });
+          // granite base course along the two flanks the portico does not own
+          for (const s of [-1, 1]) {
+            box(root, cx + s * 30.12, 0.475, cz - 158.05, 0.28, 0.95, 24.1, FEDM.granite, { cast: false });
+            col(cx + s * 30.12, cz - 158.05, 0.28, 24.1, 0, 0.95);
+          }
+        }
+        // the forecourt from the gate to the stylobate, the flags either side
+        slab(root, cx, cz - 184.65, 44, 18.7, M.paving, YS);               // z -194..-175.3
+        flagpole(root, cx - 26, cz - 177, 18);
+        flagpole(root, cx + 26, cz - 177, 18);
+        const lamps = [];
+        for (const s of [-1, 1]) { lamps.push({ x: cx + s * 21, z: cz - 190 }); lamps.push({ x: cx + s * 36, z: cz - 173 }); }
+        lampRow(root, lamps);
         // STAFF PARKING in the two southern rect corners, which are outside
         // the 126-degree / 54-degree faces (see the geometry note above).
         // SOLVED AGAINST THE PENTAGON, not eyeballed: the south-east edge runs
         // from the apex (0, +185) to the vertex (+176, +57.2), so at the lot's
-        // inner edge x=110 the ring reaches only z=+105 — a lot starting at
-        // z=+112 clears it along its whole width, and at the far corner
-        // (x=190, z=+190) it is 80 m outside the building. Two more sit in the
-        // NORTH strip, the full-width 44 m band north of the flat face at
-        // cz-150 that until now held one annex and two flagpoles.
+        // inner edge x=110 the ring reaches only z=+105, and a lot starting at
+        // z=+112 clears it along its whole width. Two more sit in the NORTH
+        // strip either side of the forecourt, north of the flat face at cz-150.
         parkingSea(root, cx - 150, cz + 151, 80, 78);              // x -190..-110, z +112..+190
         parkingSea(root, cx + 150, cz + 151, 80, 78);              // x +110..+190, z +112..+190
         parkingSea(root, cx - 156, cz - 170, 68, 40);              // x -190..-122, z -190..-150
         parkingSea(root, cx + 156, cz - 170, 68, 40);              // x +122..+190, z -190..-150
+        floodMast(root, cx - 193, cz + 110, 10);
+        floodMast(root, cx + 193, cz + 110, 10);
+        floodMast(root, cx - 120, cz - 188, 10);
+        floodMast(root, cx + 120, cz - 188, 10);
         helipad(root, cx + 152, cz - 118, 13);
         helipad(root, cx + 152, cz - 86, 13);
-        flagpole(root, cx - 16, cz - 164, 18);
-        flagpole(root, cx + 16, cz - 164, 18);
         return { gate: { x: cx, z: R.minZ }, seat: main, service: true };
       },
     },
@@ -2999,7 +4546,9 @@
       // beside a city is not a direction this file may assume.
       fan: 22, fanStep: 16 * Math.PI / 180,
       principal: { key: "mayor", tier: 3, org: "state", lawful: true, role: "Mayor", job: "official", wealth: 0.7 },
-      interiors: { main: ["lobby", "deskfarm", "bosssuite"], aux: ["deskfarm"] },
+      // the public lobby (and the strongroom off it), the council floor, the
+      // mayor's floor at the top — the floor you are not allowed on
+      interiors: { main: ["lobby", "councilchamber", "mayorsoffice"], aux: ["deskfarm"] },
       /* §5d — THE ONE LOCKED ROOM. Five words and no coordinates: the bay, the
          walls, the door and the key press are all derived from the shell's own
          floorplate and its stair core. `floor: 0` is deliberate and is the
@@ -3014,12 +4563,17 @@
       build: function (c) {
         const R = c.rect, root = c.root, cx = c.cx, cz = c.cz;
         pad(root, R, M.paving, "cityhall");
-        slab(root, cx - 48, cz + 6, 40, 60, M.lawn, YG);           // x -68..-28
-        slab(root, cx + 48, cz + 6, 40, 60, M.lawn, YG);           // x +28..+68
+        const G = civicGround(c);
+        G.slab(root, cx - 48, cz + 6, 40, 60, M.lawn, YG);         // x -68..-28
+        G.slab(root, cx + 48, cz + 6, 40, 60, M.lawn, YG);         // x +28..+68
+        // a municipal building at a municipal building's height: three 4.2 m
+        // storeys under the clock tower, the monumental facade on (it was a
+        // 9.6 m glass box asking for an order and a clock the flag dropped)
         const main = civic(root, cx, cz - 24, 50, 32, 3, M.stone, 1,
-          { kind: "cityhall", crown: "clock", order: "pilaster", motto: "CITY HALL", stone: true }, "City Hall");
+          { kind: "cityhall", crown: "clock", order: "pilaster", motto: "CITY HALL", stone: true,
+            monumental: true, externalPerron: true }, "City Hall", { fh: 4.2 });
         c.main = main;
-        perron(root, cx, cz - 8, 30, 8, M.stone, 1);               // facade z -8, out to 0
+        perron(root, cx, cz - 8, 48.6, 8, M.stone, 1);             // facade z -8, out to 0; the order's full width
         flagpole(root, cx - 18, cz + 6, 12);
         flagpole(root, cx + 18, cz + 6, 12);
         bollardLine(root, cx, cz + 12, 19.2, new THREE.CylinderGeometry(0.22, 0.26, 0.95, 8), 0.26, 0.95);
@@ -3033,6 +4587,8 @@
         parkingSea(root, cx, cz + 42, 52, 50);                     // x -26..+26, z +17..+67
         parkingSea(root, cx - 50, cz + 52, 40, 28);                // x -70..-30, z +38..+66
         parkingSea(root, cx + 50, cz + 52, 40, 28);                // x +30..+70, z +38..+66
+        for (const q of [[cx, cz + 42, 52, 50], [cx - 50, cz + 52, 40, 28], [cx + 50, cz + 52, 40, 28]])
+          G.eg.rects.push({ minX: q[0] - q[2] / 2, maxX: q[0] + q[2] / 2, minZ: q[1] - q[3] / 2, maxZ: q[1] + q[3] / 2, y: YG });
         const lamps = [];
         for (let i = 0; i < 4; i++) { lamps.push({ x: cx - 28, z: cz + 20 + i * 11 }); lamps.push({ x: cx + 28, z: cz + 20 + i * 11 }); }
         lampRow(root, lamps);
@@ -3534,7 +5090,9 @@
 
         // ---- THE OFFICE ANNEX — the only other enterable shell, and the
         // reason the aux interior list exists. Two storeys of desk-and-rack.
-        block(root, cx + 38, Z(-8), 20, 16, 2, M.blank, GZ > 0 ? 1 : 0, { facade: "office" });
+        // (east of the dock's own stair, whose top tread ran through its wall
+        // at cx + 38: the walk check found a 0.6 m tread inside the annex)
+        block(root, cx + 45, Z(-8), 20, 16, 2, M.blank, GZ > 0 ? 1 : 0, { facade: "office" });
 
         // ---- THE CONTAINER YARD. What makes a fenced rectangle read as a
         // freight terminal on sight. Colours are hash-picked per stack, so a
@@ -5049,6 +6607,9 @@
     const LB = lotBounds(city);
     const belt = { minX: U.minX - BELT, maxX: U.maxX + BELT, minZ: U.minZ - BELT, maxZ: U.maxZ + BELT };
 
+    // published BEFORE the rows build (same array), so a room programme run
+    // inside a build can already find its own site
+    CBZ.govComplexes = SITES;
     for (let i = 0; i < COMPLEXES.length; i++) {
       const def = COMPLEXES[i];
       if (def.flag && CFG[def.flag] === false) continue;     // this row, reverted
@@ -5182,6 +6743,9 @@
     // a console handle, not a HUD surface (HUD doctrine: the only popup is
     // the killfeed) — the placements, in one object, for a probe to read.
     CBZ.govComplexes = SITES;
+    // every enterable shell each complex raised ({site, b, name}): the walk
+    // check (tools/estate-check.mjs) and any audit read the real buildings
+    CBZ.govShells = function () { return _shells.slice(); };
   }, 42);
 
   /* ====================================================================

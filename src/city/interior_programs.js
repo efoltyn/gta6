@@ -438,22 +438,35 @@
 
   // ---- the SHELL every program starts from: floor + light. This alone IS
   // the "empty" archetype — a clean, finished, lit room with nothing in it.
-  // Ground floors (y≈0) lift the covering to clear the 0.14-top foundation
-  // slab the building shells pour; upper floors use the standard 0.02 lift.
+  //
+  // THE FLOOR LAW. The storey's walk surface is its slab top, r.y
+  // (b.floorTops[k]: the platform physics stands every body on). A drawn
+  // finish may sit at most 2 cm over it: FINISH is where this covering's top
+  // is, and every rug, band or plinth a program lays goes on r.y, never on
+  // an imagined covering. OWNER: "your feet go underground" — the covering
+  // used to top out 4 cm over the slab and the state rooms laid rugs and
+  // marble 17-21 cm over it, so every body stood inside the floor.
   // `dark` drops the ceiling strip: an UNLIT storey in a lit tower, which is a
   // deliberate read from the street and the one variant that must be per-FLOOR.
+  const FINISH = 0.008;
+  CBZ.INTERIOR_FINISH = FINISH;
+  // a ceiling strip's height over a floor at y: flush under the slab above,
+  // whose underside is floorTops[k+1] - 0.2. The ground floor's own top is
+  // 0.14, not 0, so `h.fh - 0.205` put its strip 14 cm into the slab.
+  function ceilOff(h, y) { return (y < 0.5 ? h.fh - y : h.fh) - 0.205; }
   function shell(h, r, dark) {
     const w = Math.max(1, r.x1 - r.x0), d = Math.max(1, r.z1 - r.z0);
     // r.y is a slab top (interiorProgram lifts a ground room onto the poured
-    // slab); a slabless host at 0 still lifts its covering over grade
-    const fy = r.y < 0.1 ? r.y + 0.13 : r.y + 0.02;
-    h.b.lbox(cx(r), fy, cz(r), w, 0.04, d, P.floor, { cast: false });
+    // slab); a slabless host at grade keeps its covering over the lot's
+    // 0.10 yard pad (there is no slab to be flush with)
+    const top = r.y < 0.1 ? r.y + 0.15 : r.y + FINISH;
+    h.b.lbox(cx(r), top - 0.02, cz(r), w, 0.04, d, P.floor, { cast: false });
     if (dark) return;
     // FLUSH with the slab's underside (fh - 0.20), 1 cm deep: from the street
     // it is the lit ceiling of the floor; walked into, the fit-out's finished
     // ceiling (at ceil - 0.012) covers it and its own fixtures take over. The
     // old strip hung 8 cm below that ceiling as a glowing slab in mid-air.
-    const m = h.b.lbox(cx(r), r.y + h.fh - 0.205, cz(r), Math.min(w * 0.6, 8.0), 0.01, 0.5, P.light,
+    const m = h.b.lbox(cx(r), r.y + ceilOff(h, r.y), cz(r), Math.min(w * 0.6, 8.0), 0.01, 0.5, P.light,
       { emissive: P.light, ei: 0.32, cast: false });
     ceilingStrip(m);
   }
@@ -622,6 +635,10 @@
       if (!(CBZ.batchWallShow && CBZ.batchWallShow(d.mesh))) d.mesh.visible = true;
       if (cols.indexOf(d.col) < 0) cols.push(d.col);
     }
+    // a door that SWINGS (a room of state): the leaf standing open against
+    // the jamb is its own hidden box, shown while the doorway is clear
+    if (d.openMesh) d.openMesh.visible = d.open;
+    if (CBZ.sfx && d.free) { try { CBZ.sfx(d.open ? "door_open" : "door_close", { volume: 0.7 }); } catch (e) {} }
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     return true;
   }
@@ -654,6 +671,7 @@
   }
   function unitMayOpen(d) {
     if (!d) return false;
+    if (d.free) return typeof d.free === "function" ? !!d.free(d) : true;   // a room of state: nobody needs a key
     if (d.forced) return true;                    // a kicked-in door shuts but no longer locks
     const lot = unitLot(d);
     if (lot && CBZ.cityOwnsLot && CBZ.cityOwnsLot(lot)) return true;
@@ -713,10 +731,20 @@
         id: "unit-door-use", slot: "e",
         // a door you cannot open offers no verb here: the force row below is
         // the way through, and "Locked" is a state, not a button
-        canShow: function (d) { return !!d && (d.open || unitMayOpen(d)); },
-        label: function (d) { return d.open ? "Close" : "Unlock"; },
+        // an open door of state offers Close only to someone standing in its
+        // doorway, so walking past an open door never puts a verb on E
+        canShow: function (d, ctx) {
+          if (!d) return false;
+          if (d.open && d.free) {
+            const P = ctx && ctx.pos ? ctx.pos : (CBZ.player && CBZ.player.pos);
+            return !!P && Math.hypot(P.x - d.x, P.z - d.z) < 1.3;
+          }
+          return d.open || unitMayOpen(d);
+        },
+        label: function (d) { return d.open ? "Close" : (d.free ? "Open" : "Unlock"); },
         onSelect: function (d) {
           const note = (CBZ.city && CBZ.city.note) ? CBZ.city.note : function () {};
+          if (d.free) { unitSetOpen(d, !d.open); return; }
           if (d.open) { unitSetOpen(d, false); note("Closed " + d.label + ".", 1.6); return; }
           if (!unitMayOpen(d)) { note("Locked. " + d.label + ".", 2.0); return; }
           // YOU OWN IT → you get the key, once, as a real item in the bag.
@@ -770,6 +798,7 @@
       }],
     });
     I.describe("unitdoor", function (d) {
+      if (d.free) return { label: "", note: "" };
       return { label: d.label, note: d.open ? "Open" : (unitMayOpen(d) ? "Your key fits" : "Locked. Somebody lives here.") };
     });
     doorVerbWired = true;
@@ -1124,7 +1153,7 @@
     h.b.lbox(alongX ? fx - Math.sign(din.nx) * screenOff : fx, y + 1.64,
       alongX ? fz : fz - Math.sign(din.nz) * screenOff,
       alongX ? 0.004 : 2.22, 1.2, alongX ? 2.22 : 0.004, P.glow, { emissive: P.glow, ei: 0.4, cast: false });
-    ceilingStrip(h.b.lbox(mx2, y + h.fh - 0.205, mz2, alongX ? 0.34 : TL * 0.8, 0.01, alongX ? TL * 0.8 : 0.34, P.light,
+    ceilingStrip(h.b.lbox(mx2, y + ceilOff(h, y), mz2, alongX ? 0.34 : TL * 0.8, 0.01, alongX ? TL * 0.8 : 0.34, P.light,
       { emissive: P.light, ei: 0.3, cast: false }));
     return { anchors: anchors };
   }
@@ -1520,7 +1549,7 @@
       }
       // the living end: rug, sofa facing the divider, low table, wall screen
       const sd = Math.max(td + 2.4, homeEnd - 3.2);
-      A.obox(A.at(sd + 0.6, -half + 1.9), 0.02, Math.min(4.0, span * 0.5), 0.03, Math.min(3.2, homeEnd * 0.34), P.rug, { pad: 0.7 });
+      A.obox(A.at(sd + 0.6, -half + 1.9), 0.011, Math.min(4.0, span * 0.5), 0.016, Math.min(3.2, homeEnd * 0.34), P.rug, { pad: 0.7 });
       const sp = A.at(sd, -half + 1.9);
       if (A.obox(sp, 0.36, 2.5, 0.44, 0.9, P.sofa, { pad: 0.6 })) {
         A.obox(A.at(sd - 0.42, -half + 1.9), 0.72, 2.5, 0.62, 0.16, P.sofa, { pad: 0.6 });   // backrest
@@ -1830,7 +1859,7 @@
     if (!live) return { anchors: anchors, beds: beds, units: 0 };
     // the hall itself: one long strip light, which is the whole read from the
     // stairhead — a lit corridor with doors down it.
-    ceilingStrip(h.b.lbox(cx(r), y + h.fh - 0.205, cz(r),
+    ceilingStrip(h.b.lbox(cx(r), y + ceilOff(h, y), cz(r),
       alongX ? Math.min(runLen - 1.0, 14) : 0.3, 0.01,
       alongX ? 0.3 : Math.min(runLen - 1.0, 14), P.light,
       { emissive: P.light, ei: 0.26, cast: false }));
@@ -2457,14 +2486,41 @@
   });
 
   // ========================================================================
-  //  PRESIDENTIAL ROOMS — four declared programs, no procedural prop scatter.
+  //  PRESIDENTIAL ROOMS — the Executive Mansion and its West Wing, built as a
+  //  head-of-state building at real scale.
   //
-  //  These are in the shared interior owner because govcomplex.js should only
-  //  say WHICH program occupies a floor. Every chair/sofa/table goes through
-  //  CBZ.furnish, so the props expose the same sit/lie interaction grammar as
-  //  an apartment or a shop. Three visibly placed decision objects publish
-  //  their coordinates for presidency.js to wire into the one interaction
-  //  registry; the room program does not implement political state itself.
+  //  OWNER (on the iPad, in President mode): "the interior of the president
+  //  game building: your feet go underground ... that building is so low
+  //  quality for the president game ... and the interaction options." Then:
+  //  "all the buildings in the presidential mode just need to be redone."
+  //
+  //  What that was, in this file:
+  //   · FEET UNDERGROUND. Every rug, marble band and command carpet was
+  //     authored 17-21 cm over the floor, as if the room stood on grade, and
+  //     every plinth stood on that imagined covering. The walk surface is the
+  //     slab top (b.floorTops[k]); a body standing on it was inside the drawn
+  //     floor. THE FLOOR LAW here: a finish tops out within 2 cm of the floor
+  //     top (fields at +0.014, rugs at +0.020), and every piece stands on the
+  //     floor top. A raised thing (the press dais) registers its own walk
+  //     platform, so what you see is what you stand on.
+  //   · ONE PLATE PER STOREY. Each floor was a 54 m plate with a carpet down
+  //     the middle and a few pieces on it. Each floor is a PLAN now: rooms
+  //     with walls, doors that open (the unit-door registry, E), skirting,
+  //     chair rail, cornice, ceilings with coffers, the facade's own windows
+  //     cased and curtained from inside, and furniture from CBZ.furnish.
+  //
+  //  THE FRAME. A plan is written in (d, l): d is metres from the inner face
+  //  of the building's DOOR wall toward the back, l metres across it from the
+  //  centre line (+l is the right hand of a visitor walking in). The Mansion
+  //  (door on +z) and the West Wing (door on +x) run the same code; nothing
+  //  here knows which way either building faces.
+  //
+  //  WHAT THIS FILE DOES NOT OWN: the stairs (govcomplex.js §1d, stairs.js),
+  //  the shell and its floor covering (shell() above, the lead's), the
+  //  Situation Room (presidency.js builds it inside the plate this plan leaves
+  //  for it), and any political state. The rooms publish landmarks
+  //  (CBZ.presidentInteriorRooms) that president_office.js, president_staff.js
+  //  and protection.js hang their people and objects on.
   // ========================================================================
   const PRESIDENTIAL = { rooms: [], props: [], press: [], usable: 0, symbols: 0, emptyDecor: 0 };
 
@@ -2472,20 +2528,24 @@
     PRESIDENTIAL.rooms.length = 0;
     PRESIDENTIAL.props.length = 0;
     PRESIDENTIAL.press.length = 0;
-    PRESIDENTIAL.pressJobs = null; PRESIDENTIAL.pressPosted = undefined;   // a rebuilt hall re-posts its pool
+    PRESIDENTIAL.pressJobs = null; PRESIDENTIAL.pressPosted = undefined;   // a rebuilt house re-posts its pool
     PRESIDENTIAL.usable = 0;
     PRESIDENTIAL.symbols = 0;
     PRESIDENTIAL.emptyDecor = 0;
   }
+  // every chair, sofa, bed and table is the shared kit's, so each exposes the
+  // same sit / lie grammar as an apartment. Big pieces are SOLID here: a
+  // cabinet table you walk through is a picture of a table.
   function presidentialPiece(name, r, h, x, z, yaw, opts) {
     const F = CBZ.furnish;
     const fn = F && F[name];
     if (typeof fn !== "function") return null;
-    const o = Object.assign({}, opts || {}, {
-      box: h.b.lbox, ox: h.ox, oz: h.oz, oy: 0, lot: null, solid: false,
+    const o = Object.assign({ solid: true }, opts || {}, {
+      box: h.b.lbox, ox: h.ox, oz: h.oz, oy: 0, lot: null,
     });
+    const y = (opts && opts.atY != null) ? opts.atY : r.y;
     try {
-      return name === "lamp" ? fn(x, r.y, z, o) : fn(x, r.y, z, yaw || 0, o);
+      return name === "lamp" ? fn(x, y, z, o) : fn(x, y, z, yaw || 0, o);
     } catch (e) { return null; }
   }
   function presidentialUse(rec) {
@@ -2499,14 +2559,11 @@
       w: r.x1 - r.x0, d: r.z1 - r.z0,
       usable: usable | 0, symbols: symbols | 0,
     };
-    // Publish the authored spatial grammar, not just a room count. Visual QA
-    // and future occupants can now target the actual dining table, secure
-    // portal, presidential desk, etc. even when two stacked floors approach
-    // the same plate from opposite stair directions.
+    // the room's own frame: where you come in, which way is "in", how deep and
+    // how wide. president_office.js and president_staff.js build in it.
     if (A) {
-      const entry = A.at(0, 0);
       rec.approach = {
-        x: h.ox + entry.x, z: h.oz + entry.z,
+        x: h.ox + A.x, z: h.oz + A.z,
         nx: A.nx, nz: A.nz, tx: A.tx, tz: A.tz,
         depth: A.depth, span: A.span,
       };
@@ -2522,121 +2579,1387 @@
     PRESIDENTIAL.rooms.push(rec);
     PRESIDENTIAL.usable += usable | 0;
     PRESIDENTIAL.symbols += symbols | 0;
+    return rec;
   }
   function presidentialProp(key, label, order, h, r, p) {
     const rec = { key: key, label: label, order: order, x: h.ox + p.x, y: r.y, z: h.oz + p.z };
     PRESIDENTIAL.props.push(rec);
     return rec;
   }
-  function presidentialZoneRect(A, r, d0, d1, lat0, lat1) {
-    const pts = [A.at(d0, lat0), A.at(d0, lat1), A.at(d1, lat0), A.at(d1, lat1)];
+
+  // the slab is 0.20 thick: a storey's ceiling plane is the NEXT floor's top
+  // minus this, never h.fh (the old fixtures hung inside the slab)
+  const CEIL = 0.20;
+
+  // ---- THE STATE PALETTE ---------------------------------------------------
+  // Few hexes on purpose: core/batch.js merges per colour, so a palette is a
+  // draw-call budget. Existing kit buckets where one reads right.
+  const SP = {
+    ivory: 0xe9e4da,      // painted plaster (fitout.js's plaster tint)
+    ivoryD: 0xd6cdbb,     // the shadow side of a moulding
+    cream: 0xf1ece0,      // cornice, casing, ceiling medallion
+    walnut: P.wood,       // doors, panelling, bookcases
+    mahog: 0x5a2e22,      // the Resolute desk, the cabinet table
+    oak: 0x8a6440,        // parquet
+    marble: P.marble,     // the state floor
+    marbleD: 0x8f8a80,    // border stone
+    black: 0x23262b,      // iron, firebox, the piano
+    gold: P.gold,
+    navy: 0x22324f, blue: 0x2f4f86, red: 0x8f3434, green: 0x3f5a46,
+    rugRed: P.rug, rugBlue: 0x2a3f66, rugGold: 0x9a7b3f, rugGreen: 0x3c5a45, rugCream: 0xcfc3a6,
+    tile: 0xe6e8e4, steel: P.steel, glow: P.glow, lamp: P.lamp,
+    sky: 0xcfe2ee,        // a window lit from outside
+    leather: 0x3b2b27,
+  };
+  const ST_T = 0.20;          // a state partition's thickness
+  const FIELD_B = 0.008, FIELD_T = 0.014;   // a floor field: on the covering, 1.4 cm over the slab
+  const RUG_T = 0.020;                      // a rug's top: THE FLOOR LAW's ceiling
+
+  /* ========================================================================
+     THE STATE FRAME. Everything below draws through F.box(d, l, y0, y1, dd,
+     ll, colour, opts): an axis-aligned box centred on (d, l), dd deep along
+     d, ll wide along l, from y0 to y1 over the floor top. F.P(d, l) is the
+     building-local point, F.face(dd, ll) the yaw that looks along (dd, ll)
+     (furniture's own convention), F.latD / F.latL the yaw that lays a piece's
+     long side along d / along l.
+     ======================================================================== */
+  function stateFrame(h, r) {
+    const b = h.b;
+    const dn = (b.localDoor && b.localDoor.nx != null) ? b.localDoor : { x: cx(r), z: r.z1, nx: 0, nz: -1 };
+    const S = CBZ.interiorShellRect(b) || { x0: r.x0 - 0.4, x1: r.x1 + 0.4, z0: r.z0 - 0.4, z1: r.z1 + 0.4 };
+    const along = Math.abs(dn.nx) > 0.5;
+    const nx = along ? (dn.nx > 0 ? 1 : -1) : 0, nz = along ? 0 : (dn.nz > 0 ? 1 : -1);
+    const tx = -nz, tz = nx;
+    const ox0 = along ? (nx > 0 ? S.x0 : S.x1) : (S.x0 + S.x1) / 2;
+    const oz0 = along ? (S.z0 + S.z1) / 2 : (nz > 0 ? S.z0 : S.z1);
+    const D = along ? S.x1 - S.x0 : S.z1 - S.z0;
+    const W = along ? S.z1 - S.z0 : S.x1 - S.x0;
+    const Y = r.y;
+    const tops = Array.isArray(b.floorTops) ? b.floorTops : null;
+    let k = 0;
+    if (tops) { let bd = 1e9; for (let i = 0; i < tops.length; i++) { const q = Math.abs(tops[i] - Y); if (q < bd) { bd = q; k = i; } } }
+    const next = (tops && tops[k + 1] != null) ? tops[k + 1] : Y + h.fh;
+    const CL = Math.max(2.6, next - CEIL - Y);
+    function P2(d, l) { return { x: ox0 + nx * d + tx * l, z: oz0 + nz * d + tz * l }; }
+    function toF(x, z) { const dx = x - ox0, dz = z - oz0; return { d: dx * nx + dz * nz, l: dx * tx + dz * tz }; }
+    function rectL(d0, d1, l0, l1) {
+      const a = P2(d0, l0), c = P2(d1, l1);
+      return { x0: Math.min(a.x, c.x), x1: Math.max(a.x, c.x), z0: Math.min(a.z, c.z), z1: Math.max(a.z, c.z) };
+    }
+    function box(d, l, y0, y1, dd, ll, col, o) {
+      if (!(y1 > y0) || !(dd > 0.004) || !(ll > 0.004)) return null;
+      const p = P2(d, l);
+      return h.b.lbox(p.x, Y + (y0 + y1) / 2, p.z, along ? dd : ll, y1 - y0, along ? ll : dd, col, o || NOCAST);
+    }
+    const F = {
+      h: h, b: b, r: r, S: S, along: along, nx: nx, nz: nz, tx: tx, tz: tz,
+      D: D, W: W, half: W / 2, Y: Y, k: k, CL: CL,
+      P: P2, toF: toF, rect: rectL, box: box,
+      face: function (dd, ll) { return Math.atan2(nx * dd + tx * ll, nz * dd + tz * ll); },
+      latD: Math.atan2(-nz, nx), latL: Math.atan2(-tz, tx),
+      walls: [], rooms: [], fitRooms: [], fitLights: [], wins: null, doors: [],
+      lights: 0, symbols: 0,
+    };
+    F.wins = stateWindows(F);
+    // the stair core / lift chase / grand stair, in the frame (nothing is
+    // drawn or furnished inside one; the lead's lbox clips a hole's band too)
+    F.holes = [];
+    const sr = b.shaftRects || [];
+    for (let i = 0; i < sr.length; i++) {
+      const a = toF(sr[i].x0, sr[i].z0), c = toF(sr[i].x1, sr[i].z1);
+      F.holes.push({ d0: Math.min(a.d, c.d), d1: Math.max(a.d, c.d), l0: Math.min(a.l, c.l), l1: Math.max(a.l, c.l), levels: sr[i].levels || null });
+    }
+    const kr = b.keepRects || [];
+    F.mouths = [];
+    for (let i = 0; i < kr.length; i++) {
+      const a = toF(kr[i].x0, kr[i].z0), c = toF(kr[i].x1, kr[i].z1);
+      F.mouths.push({ d0: Math.min(a.d, c.d), d1: Math.max(a.d, c.d), l0: Math.min(a.l, c.l), l1: Math.max(a.l, c.l) });
+    }
+    // the front door, in the frame
+    const fd = toF(dn.x, dn.z);
+    F.doorL = fd.l;
+    return F;
+  }
+  const NOCAST = { cast: false };
+  const SOLID = { cast: false, solid: true };
+  // is (d, l) inside a stair / shaft / landing mouth (pad metres of margin)?
+  function stateInHole(F, d, l, pad) {
+    pad = pad || 0;
+    const L = F.holes.concat(F.mouths);
+    for (let i = 0; i < L.length; i++) {
+      const R = L[i];
+      if (d > R.d0 - pad && d < R.d1 + pad && l > R.l0 - pad && l < R.l1 + pad) return true;
+    }
+    return false;
+  }
+
+  /* ---- THE FACADE'S OWN WINDOWS, READ FROM INSIDE --------------------------
+     buildings.js files every pane it glazes on b.windows (world centre, half
+     extents). The panes on this storey are grouped into openings (a window of
+     two stacked panes is one opening) and put in the frame: which wall (d0 the
+     door wall, d1 the back, l- / l+ the flanks), where along it, how wide, and
+     from what height to what height over this floor. A partition that meets a
+     facade is snapped to a pier between openings, never through glass. */
+  function stateWindows(F) {
+    const out = [];
+    const W = F.b.windows || [];
+    const ox = F.h.ox, oz = F.h.oz;
+    const byKey = Object.create(null);
+    for (let i = 0; i < W.length; i++) {
+      const w = W[i];
+      if (!w || w.y == null) continue;
+      const yb = w.y - (w.hh || 0.6) - F.Y, yt = w.y + (w.hh || 0.6) - F.Y;
+      if (yt < 0.3 || yb > F.CL - 0.2) continue;             // another storey's glass
+      const p = F.toF(w.x - ox, w.z - oz);
+      const hx = w.hw || 0, hz = w.hd || 0;
+      const nExt = Math.abs(F.nx) * hx + Math.abs(F.nz) * hz;  // half extent along d
+      const tExt = Math.abs(F.tx) * hx + Math.abs(F.tz) * hz;  // half extent along l
+      let face, c, hw;
+      if (nExt < tExt) { face = p.d < F.D / 2 ? "d0" : "d1"; c = p.l; hw = tExt; }
+      else { face = p.l < 0 ? "l-" : "l+"; c = p.d; hw = nExt; }
+      const key = face + ":" + Math.round(c * 20);
+      const g = byKey[key];
+      if (g) { g.yb = Math.min(g.yb, yb); g.yt = Math.max(g.yt, yt); g.hw = Math.max(g.hw, hw); }
+      else { byKey[key] = { face: face, c: c, hw: hw, yb: yb, yt: yt }; out.push(byKey[key]); }
+    }
+    out.sort(function (a, b2) { return a.face < b2.face ? -1 : a.face > b2.face ? 1 : a.c - b2.c; });
+    return out;
+  }
+  // slide a partition line that meets `face` off any glass (to the nearest pier)
+  function stateSnap(F, face, c) {
+    for (let it = 0; it < 3; it++) {
+      let moved = false;
+      for (let i = 0; i < F.wins.length; i++) {
+        const w = F.wins[i];
+        if (w.face !== face) continue;
+        const a = w.c - w.hw - 0.14, b2 = w.c + w.hw + 0.14;
+        if (c > a && c < b2) { c = (c - a < b2 - c) ? a : b2; moved = true; }
+      }
+      if (!moved) break;
+    }
+    return c;
+  }
+  function stateWinsOn(F, face, c0, c1) {
+    const out = [];
+    for (let i = 0; i < F.wins.length; i++) {
+      const w = F.wins[i];
+      if (w.face === face && w.c + w.hw > c0 + 0.05 && w.c - w.hw < c1 - 0.05) out.push(w);
+    }
+    return out;
+  }
+
+  /* ---- THE STATE WALL -------------------------------------------------------
+     A full-height solid partition on the line d = at (axis "d", running along
+     l from..to) or l = at (axis "l", running along d). `openings`:
+       { c, w, leaf: true|false, h, label, swing: +1|-1, id }
+     A leaf opening gets a real door (stateDoor); a leafless one is an arch.
+     Every opening is cased on both faces. The wall is filed on F.walls so the
+     rooms either side can run their trim to it and stop at its openings. */
+  function stateWall(F, axis, at, from, to, openings, o) {
+    o = o || {};
+    const lo = Math.min(from, to), hi = Math.max(from, to);
+    if (hi - lo < 0.2) return null;
+    const col = o.col != null ? o.col : SP.ivory, casing = o.casing != null ? o.casing : SP.cream;
+    const T = o.t || ST_T, H = F.CL;
+    const ops = (openings || []).filter(function (op) { return op && op.c - op.w / 2 > lo + 0.05 && op.c + op.w / 2 < hi - 0.05; })
+      .sort(function (a, b2) { return a.c - b2.c; });
+    const seg = function (a, c, y0, y1) {
+      if (c - a < 0.02) return;
+      if (axis === "d") F.box(at, (a + c) / 2, y0, y1, T, c - a, col, SOLID);
+      else F.box((a + c) / 2, at, y0, y1, c - a, T, col, SOLID);
+      WALL_TALLY.solid++;
+    };
+    let cur = lo;
+    for (let i = 0; i < ops.length; i++) {
+      const op = ops[i];
+      const a = op.c - op.w / 2, c = op.c + op.w / 2;
+      seg(cur, a, 0, H);
+      const oh = op.h || (op.leaf ? DOOR_H : Math.min(H - 0.5, 3.0));
+      op.h = oh;
+      seg(a, c, oh, H);                              // the header over it
+      cur = c;
+      // casing, both faces: two jambs and a head, 3 cm proud of the plaster
+      for (const s of [-1, 1]) {
+        const off = s * (T / 2 + 0.015);
+        for (const e of [a - 0.07, c + 0.07]) {
+          if (axis === "d") F.box(at + off, e, 0, oh + 0.14, 0.03, 0.14, casing);
+          else F.box(e, at + off, 0, oh + 0.14, 0.14, 0.03, casing);
+        }
+        if (axis === "d") F.box(at + off, op.c, oh, oh + 0.16, 0.03, op.w + 0.28, casing);
+        else F.box(op.c, at + off, oh, oh + 0.16, op.w + 0.28, 0.03, casing);
+        // a pediment cap over the grand doors
+        if (op.grand) {
+          if (axis === "d") F.box(at + s * (T / 2 + 0.05), op.c, oh + 0.16, oh + 0.28, 0.10, op.w + 0.36, casing);
+          else F.box(op.c, at + s * (T / 2 + 0.05), oh + 0.16, oh + 0.28, op.w + 0.36, 0.10, casing);
+        }
+      }
+      if (op.leaf) stateDoor(F, axis, at, op);
+    }
+    seg(cur, hi, 0, H);
+    const rec = { axis: axis, at: at, from: lo, to: hi, t: T, ops: ops };
+    F.walls.push(rec);
+    return rec;
+  }
+
+  /* ---- THE STATE DOOR — a unit door that is not locked --------------------
+     The ONE interior door system in the city is the unit door above (flats:
+     a leaf with a collider, E to open, the collider leaves when it opens).
+     A room of state is the same leaf with `free` set: nobody needs a key to
+     open the Cabinet Room. What it adds is the SWING: the open leaf is its
+     own box standing square to the wall against the jamb, hidden until the
+     door opens (a hidden mesh is never merged, so it costs nothing shut),
+     instead of the leaf simply vanishing. */
+  function stateDoor(F, axis, at, op) {
+    const w = op.w, T = ST_T;
+    const p = axis === "d" ? F.P(at, op.c) : F.P(op.c, at);
+    // does the wall run along local x?
+    const runX = axis === "d" ? Math.abs(F.tx) > 0.5 : Math.abs(F.nx) > 0.5;
+    const leaf = F.h.b.lbox(p.x, F.Y + DOOR_H / 2, p.z, runX ? w - 0.02 : 0.06, DOOR_H - 0.01, runX ? 0.06 : w - 0.02, SP.walnut, SOLID);
+    if (!leaf || !leaf.position) return null;
+    const cols = CBZ.colliders || [];
+    const col = cols.length && cols[cols.length - 1].ref === leaf ? cols[cols.length - 1] : null;
+    if (!col) return null;
+    // the open leaf: hinged at the low-c jamb, square to the wall, on the
+    // `swing` side (+1 = toward +d / +l)
+    const sw = op.swing || 1;
+    const q = axis === "d" ? F.P(at + sw * (T / 2 + w / 2), op.c - w / 2 + 0.05) : F.P(op.c - w / 2 + 0.05, at + sw * (T / 2 + w / 2));
+    const open = F.h.b.lbox(q.x, F.Y + DOOR_H / 2, q.z, runX ? 0.06 : w - 0.02, DOOR_H - 0.01, runX ? w - 0.02 : 0.06, SP.walnut, NOCAST);
+    if (open) open.visible = false;
+    const d = {
+      id: op.id || ("state:" + Math.round(F.h.ox + p.x) + ":" + Math.round(F.h.oz + p.z) + ":" + F.k),
+      label: op.label || "the door", open: false, free: true,
+      x: F.h.ox + p.x, z: F.h.oz + p.z, floorY: F.Y, top: F.Y + F.CL,
+      mesh: leaf, col: col, openMesh: open || null, b: F.h.b, ox: F.h.ox, oz: F.h.oz,
+    };
+    unitFile(d);
+    WALL_TALLY.doors++;
+    F.doors.push(d);
+    return d;
+  }
+
+  /* ---- A ROOM ---------------------------------------------------------------
+     room: { key, name, d0, d1, l0, l1, floor: hex, rug?, wains?, rail, crown,
+             coffer, ceil (tint) }
+     Draws the floor field, the trim on every wall this plan (or the shell)
+     put round it, the windows on its facade walls, and files the ceiling +
+     light for the lazy fit-out. */
+  function stateRoom(F, room) {
+    const d0 = room.d0, d1 = room.d1, l0 = room.l0, l1 = room.l1;
+    if (!(d1 - d0 > 0.8) || !(l1 - l0 > 0.8)) return room;
+    // 1. the floor field, face to face, 0.8..1.4 cm over the slab. The shaft
+    // and the landing mouth are left to the stair (a field over a stairwell
+    // is the old "floor over the hole").
+    stateField(F, d0, d1, l0, l1, room.floor != null ? room.floor : SP.marble);
+    // 2. trim
+    stateTrim(F, room);
+    // 3. windows
+    const faces = [["d0", d0 < 0.05, l0, l1], ["d1", d1 > F.D - 0.05, l0, l1], ["l-", l0 < -F.half + 0.05, d0, d1], ["l+", l1 > F.half - 0.05, d0, d1]];
+    for (let i = 0; i < faces.length; i++) {
+      if (!faces[i][1]) continue;
+      const fc = faces[i][0];
+      const ws = stateWinsOn(F, fc, faces[i][2], faces[i][3]).filter(function (w) {
+        const d = fc === "d0" ? 0.3 : fc === "d1" ? F.D - 0.3 : w.c, l = fc === "l-" ? -F.half + 0.3 : fc === "l+" ? F.half - 0.3 : w.c;
+        return !stateInHole(F, d, l, w.hw + 0.3);
+      });
+      stateWindowRun(F, fc, ws, room);
+    }
+    // 4. the ceiling for the fit-out pass (plaster plane + baked light)
+    const R = F.rect(d0, d1, l0, l1);
+    F.fitRooms.push({ x0: R.x0, x1: R.x1, z0: R.z0, z1: R.z1, tint: room.ceil != null ? room.ceil : 0xf6f1e6 });
+    room.rectL = R;
+    F.rooms.push(room);
+    return room;
+  }
+  // a floor field, split round any hole it would cover
+  function stateField(F, d0, d1, l0, l1, col) {
+    const cut = [{ d0: d0, d1: d1, l0: l0, l1: l1 }];
+    const holes = F.holes.filter(function (H) { return !H.levels || H.levels.indexOf(F.k) >= 0 || F.k === 0; });
+    for (let i = 0; i < holes.length; i++) {
+      const H = holes[i];
+      for (let j = cut.length - 1; j >= 0; j--) {
+        const c = cut[j];
+        if (H.d1 <= c.d0 || H.d0 >= c.d1 || H.l1 <= c.l0 || H.l0 >= c.l1) continue;
+        cut.splice(j, 1);
+        if (H.d0 > c.d0) cut.push({ d0: c.d0, d1: H.d0, l0: c.l0, l1: c.l1 });
+        if (H.d1 < c.d1) cut.push({ d0: H.d1, d1: c.d1, l0: c.l0, l1: c.l1 });
+        const a = Math.max(c.d0, H.d0), b2 = Math.min(c.d1, H.d1);
+        if (H.l0 > c.l0) cut.push({ d0: a, d1: b2, l0: c.l0, l1: H.l0 });
+        if (H.l1 < c.l1) cut.push({ d0: a, d1: b2, l0: H.l1, l1: c.l1 });
+      }
+    }
+    for (let i = 0; i < cut.length; i++) {
+      const c = cut[i];
+      F.box((c.d0 + c.d1) / 2, (c.l0 + c.l1) / 2, FIELD_B, FIELD_T, c.d1 - c.d0, c.l1 - c.l0, col);
+    }
+  }
+  // A RUG: field + border, both topping out at RUG_T (2 cm), bottom on the
+  // field. `inset` border width.
+  function stateRug(F, d, l, dd, ll, col, border, bw) {
+    bw = bw == null ? 0.22 : bw;
+    if (border == null) { F.box(d, l, FIELD_T, RUG_T, dd, ll, col); return; }
+    F.box(d, l, FIELD_T, RUG_T, dd - 2 * bw, ll - 2 * bw, col);
+    F.box(d - dd / 2 + bw / 2, l, FIELD_T, RUG_T, bw, ll, border);
+    F.box(d + dd / 2 - bw / 2, l, FIELD_T, RUG_T, bw, ll, border);
+    F.box(d, l - ll / 2 + bw / 2, FIELD_T, RUG_T, dd - 2 * bw, bw, border);
+    F.box(d, l + ll / 2 - bw / 2, FIELD_T, RUG_T, dd - 2 * bw, bw, border);
+  }
+
+  /* ---- TRIM: skirting, chair rail, wainscot, crown ------------------------
+     Run along every edge of the room that has a wall on it: a facade (the
+     shell's inner face) or a partition this plan drew. Stops at every door
+     and (for the rail and the wainscot) at every window. */
+  // where a perpendicular wall meets the end of a run, the run stops at its face
+  function stateEdgeInset(F, axis, at, end, dir) {
+    let ins = 0;
+    for (let i = 0; i < F.walls.length; i++) {
+      const w = F.walls[i];
+      if (w.axis === axis || !w.t || Math.abs(w.at - end) > 0.06) continue;
+      if (at < w.from - 0.05 || at > w.to + 0.05) continue;
+      ins = Math.max(ins, w.t / 2);
+    }
+    return dir * ins;
+  }
+  // the stair, the core and the landing mouth cut every trim run that meets them
+  function stateHoleCuts(F, axis, face) {
+    const cuts = [];
+    const L = F.holes.concat(F.mouths);
+    for (let i = 0; i < L.length; i++) {
+      const H = L[i];
+      if (H.levels && H.levels.indexOf(F.k) < 0 && F.k !== 0) continue;
+      if (axis === "d") { if (face > H.d0 - 0.4 && face < H.d1 + 0.4) cuts.push({ a: H.l0 - 0.05, b: H.l1 + 0.05, yb: -1, yt: 99 }); }
+      else if (face > H.l0 - 0.4 && face < H.l1 + 0.4) cuts.push({ a: H.d0 - 0.05, b: H.d1 + 0.05, yb: -1, yt: 99 });
+    }
+    return cuts;
+  }
+  function stateEdges(F, room) {
+    const out = [];
+    const E = [
+      { axis: "d", at: room.d0, s: 1, from: room.l0, to: room.l1, face: "d0", ext: room.d0 < 0.05 },
+      { axis: "d", at: room.d1, s: -1, from: room.l0, to: room.l1, face: "d1", ext: room.d1 > F.D - 0.05 },
+      { axis: "l", at: room.l0, s: 1, from: room.d0, to: room.d1, face: "l-", ext: room.l0 < -F.half + 0.05 },
+      { axis: "l", at: room.l1, s: -1, from: room.d0, to: room.d1, face: "l+", ext: room.l1 > F.half - 0.05 },
+    ];
+    for (let i = 0; i < E.length; i++) {
+      const e = E[i];
+      if (e.ext) {
+        const cuts = [];
+        const ws = stateWinsOn(F, e.face, e.from, e.to);
+        for (let j = 0; j < ws.length; j++) cuts.push({ a: ws[j].c - ws[j].hw - 0.1, b: ws[j].c + ws[j].hw + 0.1, yb: ws[j].yb, yt: ws[j].yt });
+        // the front door is a hole in the facade
+        if (e.face === "d0" && Math.abs(F.doorL) < F.half) cuts.push({ a: F.doorL - 1.1, b: F.doorL + 1.1, yb: 0, yt: 3 });
+        const hc = stateHoleCuts(F, e.axis, e.at);
+        for (let j = 0; j < hc.length; j++) cuts.push(hc[j]);
+        const a0 = e.from + stateEdgeInset(F, e.axis, e.at, e.from, 1), a1 = e.to + stateEdgeInset(F, e.axis, e.at, e.to, -1);
+        out.push({ axis: e.axis, face: e.at, s: e.s, runs: [[a0, a1]], cuts: cuts });
+        continue;
+      }
+      for (let j = 0; j < F.walls.length; j++) {
+        const w = F.walls[j];
+        if (w.axis !== e.axis || Math.abs(w.at - e.at) > 0.06) continue;
+        const a = Math.max(e.from, w.from), b2 = Math.min(e.to, w.to);
+        if (b2 - a < 0.3) continue;
+        const cuts = [];
+        for (let k = 0; k < w.ops.length; k++) cuts.push({ a: w.ops[k].c - w.ops[k].w / 2 - 0.16, b: w.ops[k].c + w.ops[k].w / 2 + 0.16, yb: 0, yt: w.ops[k].h + 0.2 });
+        const fc = w.at + e.s * w.t / 2;
+        const hc = stateHoleCuts(F, e.axis, fc);
+        for (let q = 0; q < hc.length; q++) cuts.push(hc[q]);
+        const a0 = a + stateEdgeInset(F, e.axis, fc, a, 1), a1 = b2 + stateEdgeInset(F, e.axis, fc, b2, -1);
+        out.push({ axis: e.axis, face: fc, s: e.s, runs: [[a0, a1]], cuts: cuts });
+      }
+    }
+    return out;
+  }
+  function stateRun(F, e, y0, y1, proud, col, cutAll) {
+    // subtract every cut whose height band meets [y0, y1]
+    let runs = e.runs.slice();
+    for (let i = 0; i < e.cuts.length; i++) {
+      const c = e.cuts[i];
+      if (!cutAll && (c.yt < y0 || c.yb > y1)) continue;
+      const next = [];
+      for (let j = 0; j < runs.length; j++) {
+        const r0 = runs[j][0], r1 = runs[j][1];
+        if (c.b <= r0 || c.a >= r1) { next.push(runs[j]); continue; }
+        if (c.a > r0) next.push([r0, c.a]);
+        if (c.b < r1) next.push([c.b, r1]);
+      }
+      runs = next;
+    }
+    for (let j = 0; j < runs.length; j++) {
+      const a = runs[j][0], b2 = runs[j][1];
+      if (b2 - a < 0.08) continue;
+      const off = e.face + e.s * proud / 2;
+      if (e.axis === "d") F.box(off, (a + b2) / 2, y0, y1, proud, b2 - a, col);
+      else F.box((a + b2) / 2, off, y0, y1, b2 - a, proud, col);
+    }
+    return runs;
+  }
+  function stateTrim(F, room) {
+    const edges = stateEdges(F, room);
+    const skirt = room.skirt != null ? room.skirt : SP.walnut;
+    const railC = room.rail !== undefined ? room.rail : SP.cream;
+    const crown = room.crown != null ? room.crown : SP.cream;
+    for (let i = 0; i < edges.length; i++) {
+      const e = edges[i];
+      stateRun(F, e, 0, 0.20, 0.025, skirt, false);                       // skirting (stands on the floor top)
+      if (railC != null) {
+        if (room.wains != null) {
+          // panelled dado: a board, then raised panels between rail and skirting
+          const runs = stateRun(F, e, 0.20, 0.92, 0.012, room.wains, false);
+          for (let j = 0; j < runs.length; j++) {
+            const a = runs[j][0], b2 = runs[j][1], n = Math.max(1, Math.floor((b2 - a) / 1.15));
+            const step = (b2 - a) / n;
+            for (let q = 0; q < n; q++) {
+              const c = a + step * (q + 0.5), wdt = step - 0.22;
+              if (wdt < 0.2) continue;
+              const off = e.face + e.s * 0.02;
+              if (e.axis === "d") F.box(off, c, 0.32, 0.80, 0.016, wdt, room.wains);
+              else F.box(c, off, 0.32, 0.80, wdt, 0.016, room.wains);
+            }
+          }
+        }
+        stateRun(F, e, 0.92, 0.98, 0.035, railC, false);                  // chair rail
+      }
+      // the crown: a deep cove at the ceiling and a smaller bead under it
+      stateRun(F, e, F.CL - 0.24, F.CL, 0.16, crown, false);
+      stateRun(F, e, F.CL - 0.34, F.CL - 0.24, 0.07, crown, false);
+    }
+  }
+  // a coffered ceiling: beams both ways on `bay`, clear of the crown
+  function stateCoffers(F, d0, d1, l0, l1, bay, col) {
+    col = col != null ? col : SP.cream;
+    const a0 = d0 + 0.5, a1 = d1 - 0.5, b0 = l0 + 0.5, b1 = l1 - 0.5;
+    if (a1 - a0 < 1 || b1 - b0 < 1) return;
+    const nd = Math.max(1, Math.round((a1 - a0) / bay)), nl = Math.max(1, Math.round((b1 - b0) / bay));
+    for (let i = 1; i < nd; i++) F.box(a0 + (a1 - a0) * i / nd, (b0 + b1) / 2, F.CL - 0.2, F.CL, 0.22, b1 - b0, col);
+    for (let j = 1; j < nl; j++) F.box((a0 + a1) / 2, b0 + (b1 - b0) * j / nl, F.CL - 0.2, F.CL, a1 - a0, 0.22, col);
+  }
+  /* A CHANDELIER on (d, l): ceiling rose, drop rod, gilt corona, ONE emissive
+     body (the rationed draw call; it rides the INTERIOR_LIGHT_DAY ramp), a
+     finial — and a baked source for the fit-out so the ceiling and the room
+     round it are actually lit. Its lowest point stays 2.4 m over the floor. */
+  function stateChandelier(F, d, l, size, room) {
+    size = size || 1.0;
+    const top = F.CL;
+    const low = Math.max(2.45, top - 1.15);
+    F.box(d, l, top - 0.03, top, 0.7 * size + 0.3, 0.7 * size + 0.3, SP.cream);    // ceiling rose
+    F.box(d, l, low + 0.62, top - 0.03, 0.05, 0.05, SP.gold);                      // rod
+    F.box(d, l, low + 0.50, low + 0.62, 1.1 * size, 1.1 * size, SP.gold);          // corona
+    const m = F.box(d, l, low + 0.18, low + 0.50, 0.86 * size, 0.86 * size, SP.lamp, { emissive: SP.lamp, ei: 0.85, cast: false });
+    if (m) { ceilingStrip(m); F.lights++; }
+    F.box(d, l, low, low + 0.18, 0.28 * size, 0.28 * size, SP.gold);               // finial
+    const p = F.P(d, l);
+    F.fitLights.push({ x: p.x, z: p.z, r: 5.5 + 2.0 * size, i: 0.85, rect: room ? room.rectL || null : null });
+  }
+  // a quieter light for a private room: a flush dome, emissive disc, baked source
+  function stateDome(F, d, l, room) {
+    F.box(d, l, F.CL - 0.03, F.CL, 0.5, 0.5, SP.cream);
+    const m = F.box(d, l, F.CL - 0.09, F.CL - 0.03, 0.40, 0.40, SP.lamp, { emissive: SP.lamp, ei: 0.7, cast: false });
+    if (m) { ceilingStrip(m); F.lights++; }
+    const p = F.P(d, l);
+    F.fitLights.push({ x: p.x, z: p.z, r: 5.0, i: 0.75, rect: room ? room.rectL || null : null });
+  }
+
+  /* ---- A RUN OF WINDOWS on one facade wall of a room -----------------------
+     Casing round each opening (a shared mullion where two openings touch), a
+     stool and apron under it, and — in a room that wants them — curtains at
+     the ends of the run with a pelmet over. The glass is the facade's. */
+  function stateWindowRun(F, face, ws, room) {
+    if (!ws.length) return;
+    const onD = face === "d0" || face === "d1";
+    const at = face === "d0" ? 0 : face === "d1" ? F.D : face === "l-" ? -F.half : F.half;
+    const s = (face === "d0" || face === "l-") ? 1 : -1;       // into the room
+    const casing = room.casing != null ? room.casing : SP.cream;
+    const put = function (c, y0, y1, depth, off, width, col) {
+      const n = at + s * (off + depth / 2);
+      if (onD) F.box(n, c, y0, y1, depth, width, col);
+      else F.box(c, n, y0, y1, width, depth, col);
+    };
+    // the room's own faces along this wall: a partition at either end eats half its thickness
+    const lo = (onD ? room.l0 : room.d0) + ST_T / 2, hi = (onD ? room.l1 : room.d1) - ST_T / 2;
+    let runStart = null;
+    for (let i = 0; i < ws.length; i++) {
+      const w = ws[i];
+      const a = Math.max(lo + 0.14, w.c - w.hw), b2 = Math.min(hi - 0.14, w.c + w.hw);
+      if (b2 - a < 0.3) continue;
+      const c = (a + b2) / 2, wd = b2 - a;
+      const prev = ws[i - 1], next = ws[i + 1];
+      const joinPrev = prev && (w.c - w.hw) - (prev.c + prev.hw) < 0.2;
+      const joinNext = next && (next.c - next.hw) - (w.c + w.hw) < 0.2;
+      if (!joinPrev) runStart = a;
+      const yb = Math.max(0.02, w.yb), yt = Math.min(F.CL - 0.4, w.yt);
+      // jambs (a joint gets one pilaster, drawn by the left opening)
+      if (!joinPrev) put(a - 0.06, yb - 0.06, yt + 0.1, 0.05, 0, 0.12, casing);
+      put(b2 + 0.06, yb - 0.06, yt + 0.1, joinNext ? 0.06 : 0.05, 0, 0.12, casing);
+      put(c, yt + 0.02, yt + 0.18, 0.05, 0, wd + 0.28, casing);                // head
+      if (yb > 0.25) {
+        put(c, yb - 0.04, yb, 0.16, 0, wd + 0.26, casing);                     // stool
+        put(c, Math.max(0.22, yb - 0.24), yb - 0.04, 0.03, 0, wd + 0.12, casing);   // apron
+      }
+      if (!joinNext && room.drape != null && runStart != null) {
+        const top = Math.min(F.CL - 0.28, yt + 0.5);
+        // the pelmet and the curtains stay between the room's own faces
+        const p0 = Math.max(lo + 0.02, runStart - 0.6), p1 = Math.min(hi - 0.02, b2 + 0.6);
+        if (room.closed) {
+          // drawn curtains: one panel over the whole run (a briefing room)
+          put((p0 + p1) / 2, 0.015, top, 0.08, 0.12, p1 - p0, room.drape);
+        } else {
+          for (const e of [runStart - 0.34, b2 + 0.34]) if (e - 0.23 > lo && e + 0.23 < hi) put(e, 0.015, top, 0.10, 0.10, 0.46, room.drape);
+        }
+        put((p0 + p1) / 2, top, top + 0.28, 0.14, 0.08, p1 - p0, room.drape);
+      }
+    }
+  }
+
+  /* ---- ARCHITECTURAL PIECES ------------------------------------------------ */
+  // a fireplace against the wall whose face is at `face` (axis "d": wall along
+  // l at d = face; "l": wall along d at l = face), opening into the room on
+  // side s. Jambs, lintel, mantel shelf, firebox, one ember glow, a hearth
+  // stone FLUSH with the floor (a 12 cm hearth is a trip step the walk law
+  // counts), and a painting over it.
+  function stateFireplace(F, axis, face, c, s, o) {
+    o = o || {};
+    const put = function (n0, n1, a0, a1, y0, y1, col, oo) {
+      const n = face + s * (n0 + n1) / 2, dn = n1 - n0;
+      if (axis === "d") return F.box(n, (a0 + a1) / 2, y0, y1, dn, a1 - a0, col, oo);
+      return F.box((a0 + a1) / 2, n, y0, y1, a1 - a0, dn, col, oo);
+    };
+    const W = o.w || 1.9, stone = o.stone != null ? o.stone : SP.marble;
+    put(0, 0.34, c - W / 2, c - W / 2 + 0.36, 0, 1.12, stone);          // jambs
+    put(0, 0.34, c + W / 2 - 0.36, c + W / 2, 0, 1.12, stone);
+    put(0, 0.34, c - W / 2, c + W / 2, 0.86, 1.12, stone);              // lintel
+    put(0, 0.46, c - W / 2 - 0.12, c + W / 2 + 0.12, 1.12, 1.20, stone); // mantel shelf
+    put(0, 0.10, c - W / 2 + 0.36, c + W / 2 - 0.36, 0, 0.86, SP.black); // firebox back
+    const g = put(0.10, 0.22, c - 0.4, c + 0.4, 0.02, 0.16, 0xff9a4a, { emissive: 0xff7a2a, ei: 0.9, cast: false });
+    if (g) F.lights++;
+    put(0.34, 0.95, c - W / 2 - 0.1, c + W / 2 + 0.1, FIELD_T, RUG_T, SP.marbleD);   // hearth, flush
+    if (o.painting !== false) {
+      put(0, 0.06, c - 0.62, c + 0.62, 1.55, 2.75, SP.gold);           // frame
+      put(0.06, 0.08, c - 0.52, c + 0.52, 1.65, 2.65, o.canvas != null ? o.canvas : 0x3b4a3f);
+    }
+    const p = axis === "d" ? F.P(face + s * 0.6, c) : F.P(c, face + s * 0.6);
+    return p;
+  }
+  // a framed painting on a wall face (portrait or landscape)
+  function statePainting(F, axis, face, c, s, y0, y1, w, canvas) {
+    const put = function (n0, n1, a0, a1, yy0, yy1, col) {
+      const n = face + s * (n0 + n1) / 2, dn = n1 - n0;
+      if (axis === "d") F.box(n, (a0 + a1) / 2, yy0, yy1, dn, a1 - a0, col);
+      else F.box((a0 + a1) / 2, n, yy0, yy1, a1 - a0, dn, col);
+    };
+    put(0, 0.06, c - w / 2, c + w / 2, y0, y1, SP.gold);
+    put(0.06, 0.075, c - w / 2 + 0.1, c + w / 2 - 0.1, y0 + 0.1, y1 - 0.1, canvas != null ? canvas : 0x4a3f36);
+    F.symbols++;
+  }
+  // a bookcase built into a wall: carcass, shelves, books as coloured runs
+  function stateBookcase(F, axis, face, c, s, w, hgt) {
+    hgt = hgt || 2.4;
+    const put = function (n0, n1, a0, a1, y0, y1, col) {
+      const n = face + s * (n0 + n1) / 2, dn = n1 - n0;
+      if (axis === "d") return F.box(n, (a0 + a1) / 2, y0, y1, dn, a1 - a0, col, SOLID);
+      return F.box((a0 + a1) / 2, n, y0, y1, a1 - a0, dn, col, SOLID);
+    };
+    const put2 = function (n0, n1, a0, a1, y0, y1, col) {
+      const n = face + s * (n0 + n1) / 2, dn = n1 - n0;
+      if (axis === "d") F.box(n, (a0 + a1) / 2, y0, y1, dn, a1 - a0, col);
+      else F.box((a0 + a1) / 2, n, y0, y1, a1 - a0, dn, col);
+    };
+    put(0, 0.05, c - w / 2, c + w / 2, 0, hgt, SP.walnut);                  // back (solid)
+    put2(0.05, 0.40, c - w / 2, c - w / 2 + 0.05, 0, hgt, SP.walnut);       // sides
+    put2(0.05, 0.40, c + w / 2 - 0.05, c + w / 2, 0, hgt, SP.walnut);
+    put2(0.05, 0.42, c - w / 2, c + w / 2, 0, 0.36, SP.walnut);             // cupboard base
+    const books = [0x6e2b27, 0x2b3f5c, 0x3f5a46, 0x8a6a3a, 0x4a3524];
+    const n = Math.max(2, Math.floor((hgt - 0.5) / 0.42));
+    for (let i = 0; i < n; i++) {
+      const y = 0.36 + i * 0.42;
+      put2(0.05, 0.40, c - w / 2 + 0.05, c + w / 2 - 0.05, y, y + 0.03, SP.walnut);   // shelf
+      // two or three runs of books standing on it
+      const runs = 3;
+      for (let k = 0; k < runs; k++) {
+        const a = c - w / 2 + 0.08 + (w - 0.16) * k / runs, b2 = a + (w - 0.16) / runs - 0.06;
+        const bh = 0.24 + 0.06 * (((i * 7 + k * 3) % 3) / 2);
+        put2(0.10, 0.34, a, b2, y + 0.03, y + 0.03 + bh, books[(i * 2 + k) % books.length]);
+      }
+    }
+    put2(0, 0.44, c - w / 2 - 0.03, c + w / 2 + 0.03, hgt, hgt + 0.06, SP.walnut);   // cornice
+  }
+  // a national standard on a floor stand: weighted base (top 0.30, above the
+  // walk law's 25 cm band), pole, finial, cloth hanging flat
+  function stateStandard(F, d, l, col, clothAlongD, side) {
+    if (!F.h.clear(F.P(d, l).x, F.P(d, l).z, 0.2)) return 0;
+    const s = side || 1;
+    F.box(d, l, 0, 0.30, 0.44, 0.44, SP.black, SOLID);
+    F.box(d, l, 0.30, 2.62, 0.05, 0.05, SP.gold);
+    F.box(d, l, 2.62, 2.78, 0.12, 0.12, SP.gold);
+    if (clothAlongD) F.box(d + s * 0.47, l, 1.55, 2.55, 0.9, 0.04, col);
+    else F.box(d, l + s * 0.47, 1.55, 2.55, 0.04, 0.9, col);
+    F.symbols++;
+    return 1;
+  }
+  // a grand piano: legs, case, lid propped, keyboard, a bench (seat anchor)
+  function stateGrandPiano(F, d, l, dirD) {
+    const s = dirD || 1;                       // the keyboard faces -s along d
+    for (const q of [[-0.65, -0.55], [-0.65, 0.55], [0.75, 0]]) F.box(d + s * q[0], l + q[1], 0, 0.62, 0.08, 0.08, SP.black);
+    F.box(d, l, 0.62, 0.98, 1.9, 1.45, SP.black, SOLID);
+    F.box(d + s * 0.2, l, 0.98, 1.02, 1.5, 1.4, SP.black);
+    F.box(d + s * 0.1, l + 0.62, 1.02, 1.62, 1.2, 0.04, SP.black);            // the propped lid, on edge
+    F.box(d - s * 1.02, l, 0.74, 0.82, 0.16, 1.3, 0xeeeae0);                   // keys
+    F.box(d - s * 1.02, l, 0.82, 0.84, 0.08, 1.3, SP.black);
+    const bp = F.P(d - s * 1.55, l);
+    presidentialPiece("bench", F.r, F.h, bp.x, bp.z, F.face(s, 0), { len: 0.9, back: false, tone: "exec" });
+  }
+  // a sky-lit window unit drawn INTO a wall (the Oval's apse, where the curved
+  // wall stands clear of the facade): casing, glazing that reads as daylight,
+  // glazing bars, a stool. Built round a centre point with the wall's yaw.
+  function stateDrawnWindow(F, p, yaw, w, yb, yt) {
+    const b = F.h.b;
+    const mk = function (lx, lz, y0, y1, ww, dd, col, o) {
+      const m = b.lbox(p.x + Math.cos(yaw) * lx + Math.sin(yaw) * lz, F.Y + (y0 + y1) / 2, p.z - Math.sin(yaw) * lx + Math.cos(yaw) * lz,
+        ww, y1 - y0, dd, col, o || NOCAST);
+      if (m) m.rotation.y = yaw;
+      return m;
+    };
+    const g = mk(0, 0, yb, yt, w, 0.04, SP.sky, { emissive: SP.sky, ei: 0.42, cast: false });
+    if (g) F.lights++;
+    mk(0, 0.03, yb, yt, 0.05, 0.03, SP.cream);                                  // centre bar
+    for (let i = 1; i < 4; i++) mk(0, 0.03, yb + (yt - yb) * i / 4 - 0.02, yb + (yt - yb) * i / 4 + 0.02, w, 0.03, SP.cream);
+    for (const e of [-1, 1]) mk(e * (w / 2 + 0.07), 0.05, yb - 0.06, yt + 0.12, 0.14, 0.08, SP.cream);   // jambs
+    mk(0, 0.05, yt, yt + 0.18, w + 0.28, 0.08, SP.cream);                        // head
+    mk(0, 0.10, yb - 0.05, yb, w + 0.3, 0.2, SP.cream);                          // stool
+  }
+
+  /* ========================================================================
+     THE OVAL. An ellipse of wall facets standing inside a rectangular room:
+     centre (dc, lc), semi-axes A along d and B along l. Each facet is one
+     rotated box (core/batch.js bakes matrixWorld, so a rotated box merges
+     like any other) with a run of small colliders along it, and carries its
+     own skirting, chair rail and cornice on the inner face. Doors are
+     VESTIBULES: a straight axis-aligned passage from a gap in the facets to a
+     door in the room's rectangular wall, so the leaf is an ordinary state
+     door and the dead space between the curve and the rectangle is sealed.
+     Window facets are drawn as a sill, a head and a daylit window between.
+       ov.doors: [{ dir: "d+"|"d-"|"l+"|"l-", c, w, to }]   (c across the passage, `to` the wall line)
+       ov.windows: [phi, ...]                                (facet centre angles, radians)
+     ======================================================================== */
+  function stateOval(F, ov) {
+    const N = ov.n || 36, A = ov.A, B = ov.B, dc = ov.dc, lc = ov.lc;
+    const T = 0.18, H = F.CL, b = F.h.b;
+    const col = ov.col != null ? ov.col : SP.cream;
+    const surf = function (phi) { return { d: dc + A * Math.cos(phi), l: lc + B * Math.sin(phi) }; };
+    // where a passage's cheek line meets the curve (on the passage's side)
+    const hit = function (dir, c) {
+      if (dir === "d+" || dir === "d-") {
+        const q = (c - lc) / B; if (Math.abs(q) >= 1) return null;
+        return { d: dc + (dir === "d+" ? 1 : -1) * A * Math.sqrt(1 - q * q), l: c };
+      }
+      const q = (c - dc) / A; if (Math.abs(q) >= 1) return null;
+      return { d: c, l: lc + (dir === "l+" ? 1 : -1) * B * Math.sqrt(1 - q * q) };
+    };
+    const inGap = function (m) {
+      for (let i = 0; i < (ov.doors || []).length; i++) {
+        const g = ov.doors[i];
+        const across = (g.dir === "d+" || g.dir === "d-") ? m.l : m.d;
+        const side = g.dir === "d+" ? m.d > dc : g.dir === "d-" ? m.d < dc : g.dir === "l+" ? m.l > lc : m.l < lc;
+        if (side && Math.abs(across - g.c) < g.w / 2 + 0.2) return true;
+      }
+      return false;
+    };
+    const isWin = function (phi) {
+      for (let i = 0; i < (ov.windows || []).length; i++) {
+        let dphi = Math.abs(phi - ov.windows[i]) % (2 * Math.PI);
+        if (dphi > Math.PI) dphi = 2 * Math.PI - dphi;
+        if (dphi < Math.PI / N) return true;
+      }
+      return false;
+    };
+    // one rotated box along a frame segment (a -> c), `off` metres toward the
+    // ellipse centre, `dep` thick
+    const seg = function (a, c, y0, y1, off, dep, colr, o) {
+      const pa = F.P(a.d, a.l), pc = F.P(c.d, c.l);
+      const vx = pc.x - pa.x, vz = pc.z - pa.z, L = Math.hypot(vx, vz);
+      if (L < 0.02) return null;
+      let mx = (pa.x + pc.x) / 2, mz = (pa.z + pc.z) / 2;
+      // inward normal: perpendicular to the segment, toward the centre
+      const cc = F.P(dc, lc);
+      let nx = -vz / L, nz = vx / L;
+      if ((cc.x - mx) * nx + (cc.z - mz) * nz < 0) { nx = -nx; nz = -nz; }
+      mx += nx * off; mz += nz * off;
+      const m = b.lbox(mx, F.Y + (y0 + y1) / 2, mz, L + 0.02, y1 - y0, dep, colr, o || NOCAST);
+      if (m) m.rotation.y = Math.atan2(-vz, vx);
+      return m;
+    };
+    const cols = CBZ.colliders || [];
+    let facets = 0;
+    for (let i = 0; i < N; i++) {
+      const p0 = (i / N) * Math.PI * 2, p1 = ((i + 1) / N) * Math.PI * 2, pm = (p0 + p1) / 2;
+      const a = surf(p0), c = surf(p1), m = surf(pm);
+      if (inGap(m)) continue;
+      const win = isWin(pm);
+      const wallOff = -T / 2;                          // the facet's centre line sits just outside the curve
+      if (win) {
+        const yb = ov.sill || 0.8, yt = Math.min(H - 0.5, ov.head || 3.1);
+        seg(a, c, 0, yb, wallOff, T, col);
+        seg(a, c, yt, H, wallOff, T, col);
+        // the window unit, on the inner face
+        const pa = F.P(a.d, a.l), pc = F.P(c.d, c.l), cc = F.P(dc, lc);
+        const vx = pc.x - pa.x, vz = pc.z - pa.z, L = Math.hypot(vx, vz);
+        let yaw = Math.atan2(-vz, vx);
+        // local +z of the unit must face the centre
+        if ((cc.x - (pa.x + pc.x) / 2) * Math.sin(yaw) + (cc.z - (pa.z + pc.z) / 2) * Math.cos(yaw) < 0) yaw += Math.PI;
+        stateDrawnWindow(F, { x: (pa.x + pc.x) / 2, z: (pa.z + pc.z) / 2 }, yaw, L - 0.16, yb, yt);
+      } else {
+        const fm = seg(a, c, 0, H, wallOff, T, col);
+        facets++;
+        if (fm) {
+          // colliders every half metre along the facet: an ellipse is not a box
+          const pa = F.P(a.d, a.l), pc = F.P(c.d, c.l);
+          const L = Math.hypot(pc.x - pa.x, pc.z - pa.z), n = Math.max(1, Math.ceil(L / 0.5));
+          for (let k = 0; k < n; k++) {
+            const t = (k + 0.5) / n, x = pa.x + (pc.x - pa.x) * t, z = pa.z + (pc.z - pa.z) * t;
+            const cr = { minX: F.h.ox + x - 0.16, maxX: F.h.ox + x + 0.16, minZ: F.h.oz + z - 0.16, maxZ: F.h.oz + z + 0.16, y0: F.Y, y1: F.Y + H, ref: fm };
+            cols.push(cr);
+          }
+        }
+      }
+      // trim on the inner face
+      seg(a, c, 0, 0.2, 0.012, 0.025, SP.walnut);                        // skirting
+      if (!win) {
+        seg(a, c, 0.2, 0.92, 0.006, 0.012, ov.wains != null ? ov.wains : col);   // dado board
+        seg(a, c, 0.92, 0.98, 0.017, 0.035, SP.cream);                    // chair rail
+      }
+      seg(a, c, H - 0.24, H, 0.08, 0.16, SP.cream);                      // cornice
+      seg(a, c, H - 0.34, H - 0.24, 0.035, 0.07, SP.cream);
+    }
+    if (CBZ.markCollidersDirty) { try { CBZ.markCollidersDirty(); } catch (e) {} }
+    // vestibules: the cheeks from the curve to the room wall
+    for (let i = 0; i < (ov.doors || []).length; i++) {
+      const g = ov.doors[i];
+      for (const e of [-1, 1]) {
+        const c = g.c + e * (g.w / 2 + 0.16 + T / 2);
+        const p = hit(g.dir, c);
+        if (!p) continue;
+        if (g.dir === "d+" || g.dir === "d-") {
+          const a = Math.min(p.d, g.to), z2 = Math.max(p.d, g.to);
+          if (z2 - a > 0.05) F.box((a + z2) / 2, c, 0, H, z2 - a, T, col, SOLID);
+        } else {
+          const a = Math.min(p.l, g.to), z2 = Math.max(p.l, g.to);
+          if (z2 - a > 0.05) F.box(c, (a + z2) / 2, 0, H, T, z2 - a, col, SOLID);
+        }
+      }
+      // an arch head over the gap in the curve
+      const q = hit(g.dir, g.c);
+      if (q) {
+        if (g.dir === "d+" || g.dir === "d-") F.box((q.d + g.to) / 2, g.c, DOOR_H + 0.3, H, Math.abs(g.to - q.d), g.w + 0.3, col);
+        else F.box(g.c, (q.l + g.to) / 2, DOOR_H + 0.3, H, g.w + 0.3, Math.abs(g.to - q.l), col);
+      }
+    }
+    return { facets: facets, surf: surf };
+  }
+
+  /* ---- shared program plumbing -------------------------------------------- */
+  // the fit-out pass (city/fitout.js) builds the ceiling planes and bakes the
+  // light of every fixture this plan hung; one planner serves all five floors.
+  let STATE_FIT = false;
+  function armStateFit() {
+    if (STATE_FIT || !CBZ.fitoutPlan) return;
+    STATE_FIT = true;
+    const plan = function (B, f) {
+      const info = (f && f.info) || B.info || {};
+      const rooms = info.rooms || [], lights = info.lights || [];
+      for (let i = 0; i < rooms.length; i++) {
+        const rm = rooms[i];
+        B.plane(rm.x0, rm.z0, rm.x1, rm.z1, B.ceil - 0.012, "plaster", rm.tint, { down: true, cell: 1.2 });
+      }
+      for (let i = 0; i < lights.length; i++) {
+        const L = lights[i];
+        B.light(L.x, L.z, { kind: "none", r: L.r, i: L.i, rect: L.rect || null });
+      }
+    };
+    for (const name of ["statehall", "stateresidence", "stateprivate", "cabinetroom", "ovaloffice"]) CBZ.fitoutPlan(name, plan);
+  }
+  function stateOut(F) {
+    return { anchors: [], fit: { rooms: F.fitRooms, lights: F.fitLights } };
+  }
+  // the govcomplex site whose building this is (the Sit Room rect, the grand
+  // stair's landing) — matched on origin, because the lot carries a copy
+  function stateSite(F) {
+    const L = CBZ.govComplexes;
+    if (!Array.isArray(L)) return null;
+    for (let i = 0; i < L.length; i++) {
+      const s = L[i];
+      if (s && s.lot && s.lot.building && sameSite(s.lot.building, F.b)) return s;
+    }
+    return null;
+  }
+  // a piece at frame (d, l) facing (fd, fl); returns the kit's record
+  function statePiece(F, name, d, l, yaw, opts) {
+    if (stateInHole(F, d, l, 0.3)) return null;
+    const p = F.P(d, l);
+    return presidentialPiece(name, F.r, F.h, p.x, p.z, yaw, opts);
+  }
+  // a small side table with a lamp on it (the lamp's weighted base stands on
+  // the table, never on the floor, so there is no 2.5 cm disc to trip on)
+  // (a lamp is three emissive boxes, i.e. three draw calls: only the
+  // President's own bedside gets them; a guest's table carries a book)
+  function stateSideLamp(F, d, l, room, lit) {
+    F.box(d, l, 0, 0.56, 0.05, 0.05, SP.walnut);
+    F.box(d, l, 0.56, 0.60, 0.5, 0.5, SP.walnut, SOLID);
+    if (!lit) { F.box(d, l, 0.60, 0.64, 0.22, 0.16, 0x6e2b27); return; }
+    const p = F.P(d, l);
+    presidentialPiece("lamp", F.r, F.h, p.x, p.z, 0, { atY: F.Y + 0.60, h: 0.62, ei: 0.5, solid: false });
+    F.lights++;
+    F.fitLights.push({ x: p.x, z: p.z, r: 3.0, i: 0.45, rect: room && room.rectL ? room.rectL : null });
+  }
+  // a bath: tub, vanity with two basins, a glass shower — boxes, all standing
+  // on the floor top, the tub's rim at 0.60
+  function stateBath(F, room) {
+    const d0 = room.d0, d1 = room.d1, l0 = room.l0, l1 = room.l1;
+    const WHITE = 0xf2f2ee;
+    // tub along the d0 end
+    const td = d0 + 0.2 + 0.45, tl = (l0 + l1) / 2;
+    F.box(td, tl, 0, 0.60, 0.9, 1.75, WHITE, SOLID);
+    F.box(td, tl, 0.60, 0.61, 0.66, 1.5, 0x9fc6d6);                       // water, under the rim
+    F.box(td, tl, 0.61, 0.64, 0.9, 1.75, WHITE);
+    // vanity along the l1 wall
+    const vl = l1 - 0.3, vd = (d0 + d1) / 2 + 0.6;
+    F.box(vd, vl, 0.08, 0.86, 1.9, 0.55, SP.walnut, SOLID);
+    F.box(vd, vl, 0.86, 0.90, 2.0, 0.6, SP.marble);
+    for (const e of [-0.5, 0.5]) F.box(vd + e, vl - 0.02, 0.90, 0.96, 0.44, 0.34, WHITE);
+    F.box(vd, l1 - 0.03, 1.15, 2.1, 1.8, 0.03, SP.sky);                    // mirror
+    // shower in the far corner, glass on two sides
+    const sd = d1 - 0.65, sl = l0 + 0.65;
+    F.box(sd, sl, FIELD_T, RUG_T, 1.1, 1.1, 0xd9dbd8);
+    F.box(sd - 0.55, sl, 0, 2.1, 0.02, 1.1, SP.sky, SOLID);
+    F.box(sd, sl + 0.55, 0, 2.1, 1.1, 0.02, SP.sky, SOLID);
+  }
+  // a kitchen run along a wall (axis "l": the wall at l = face, running d0..d1)
+  function stateKitchenRun(F, axis, face, s, a0, a1) {
+    const put = function (n0, n1, y0, y1, col, o) {
+      const n = face + s * (n0 + n1) / 2, dn = n1 - n0;
+      if (axis === "d") return F.box(n, (a0 + a1) / 2, y0, y1, dn, a1 - a0, col, o);
+      return F.box((a0 + a1) / 2, n, y0, y1, a1 - a0, dn, col, o);
+    };
+    put(0.05, 0.62, 0, 0.1, SP.black);                                    // kick
+    put(0, 0.62, 0.1, 0.88, SP.cream, SOLID);                             // base run
+    put(0, 0.66, 0.88, 0.92, SP.marble);                                  // worktop
+    put(0, 0.36, 1.45, 2.2, SP.cream);                                    // wall cupboards
+  }
+
+  // a single dressed room for a plate the plans below were not written for
+  // (a changed shell): trim, windows, a table under a light. Never bare.
+  function stateFallback(F, key, name) {
+    const room = stateRoom(F, { key: key, name: name, d0: 0, d1: F.D, l0: -F.half, l1: F.half, floor: SP.oak, drape: SP.red });
+    const t = statePiece(F, "table", F.D / 2, 0, F.latD, { len: Math.min(6, F.D * 0.4), deep: 1.4, seats: 8, tone: "exec" });
+    stateChandelier(F, F.D / 2, 0, 1.0, room);
+    presidentialRoom(key, name, F.h, F.r, presidentialUse(t), F.symbols, null, { center: F.P(F.D / 2, 0) });
+    return stateOut(F);
+  }
+
+  /* ========================================================================
+     THE STATE FLOOR (Mansion, storey 0).
+       front:  the ENTRANCE HALL (the grand stair rises from its west end),
+               a screen of columns, then the CROSS HALL, the spine
+       east:   the EAST ROOM
+       back:   the STATE DINING ROOM, the BLUE ROOM, the service hall, and
+               the Situation Room (presidency.js) behind its own door
+     ======================================================================== */
+  function progStateHall(r, h, opts) {
+    // the first presidential program built: the world-rebuild boundary for
+    // the ledger below
+    presidentialReset();
+    armStateFit();
+    shell(h, r);
+    const F = stateFrame(h, r);
+    if (F.D < 28 || F.W < 44) return stateFallback(F, "statehall", "State Entrance Hall");
+    const HW = F.half, D = F.D;
+    // the grand stair on this floor (the reserve that opens slab 1)
+    let stair = null, core = null;
+    for (let i = 0; i < F.holes.length; i++) {
+      const H = F.holes[i];
+      if (H.levels && H.levels.indexOf(1) >= 0) stair = H; else if (!core || H.d1 > core.d1) core = H;
+    }
+    const stairE = stair ? stair.l1 + 0.25 : -HW + 4.0;
+    // THE SITUATION ROOM'S PLATE. This plan decides where the state floor's
+    // rooms are, so it decides this one too: the back corner on the east
+    // flank, from a pier on the back facade to the flank wall, behind the
+    // Cross Hall. presidency.js builds the room on exactly this rect
+    // (b._sitRoom, world coords); site.layout.sitRoom is its fallback only.
+    const dEH = 7.0, dXH = 14.0;
+    const sr = { d0: dXH + 3.1, d1: D, l0: stateSnap(F, "d1", 12.5), l1: HW };
+    {
+      const wr = F.rect(sr.d0, sr.d1, sr.l0, sr.l1);
+      const fr = F.P(sr.d0, (sr.l0 + sr.l1) / 2);
+      F.b._sitRoom = { minX: F.h.ox + wr.x0, maxX: F.h.ox + wr.x1, minZ: F.h.oz + wr.z0, maxZ: F.h.oz + wr.z1, y: F.Y, ceil: F.Y + F.CL,
+        // the door is in the wall that faces the Cross Hall: its centre, and the way out
+        door: { x: F.h.ox + fr.x, z: F.h.oz + fr.z, nx: -F.nx, nz: -F.nz } };
+    }
+    const lEHe = stateSnap(F, "d0", 11.5);                 // the East Room's west wall
+    const lSvc = stateSnap(F, "d1", -19.5);                // service hall | dining
+    const lDB = stateSnap(F, "d1", -3.95);                 // dining | Blue Room
+    const lBE = sr.l0;                                    // Blue Room | Situation Room
+    let usable = 0;
+
+    // ---- walls -------------------------------------------------------------
+    const eastDoor = (lEHe + HW) / 2;
+    stateWall(F, "d", dEH, lEHe, HW, [{ c: eastDoor, w: 1.7, leaf: true, swing: -1, grand: true, label: "the East Room" }]);
+    stateWall(F, "l", lEHe, 0, dEH, [{ c: 5.0, w: 1.7, leaf: true, swing: 1, grand: true, label: "the East Room" }]);
+    const dinC = (lSvc + lDB) / 2, bluC = (lDB + lBE) / 2;
+    stateWall(F, "d", dXH, lSvc, lBE, [
+      { c: dinC, w: 1.9, leaf: true, swing: 1, grand: true, label: "the State Dining Room" },
+      { c: bluC, w: 1.9, leaf: true, swing: 1, grand: true, label: "the Blue Room" },
+    ]);
+    stateWall(F, "l", lSvc, dXH, D, [{ c: 18.6, w: 1.1, leaf: true, swing: 1, label: "the pantry" }]);
+    stateWall(F, "l", lDB, dXH, D, [{ c: (dXH + D) / 2, w: 1.7, leaf: true, swing: 1, grand: true, label: "the Blue Room" }]);
+    if (sr.d0 > dXH + 0.3) stateWall(F, "l", lBE, dXH, sr.d0, []);
+    // the Situation Room's own walls, which presidency.js draws: filed so the
+    // trim round the Blue Room and the lobby runs to them and stops at its door
+    const srDoorL = (sr.l0 + sr.l1) / 2;
+    {
+      F.walls.push({ axis: "l", at: sr.l0, from: sr.d0, to: sr.d1, t: 0, ops: [] });
+      F.walls.push({ axis: "d", at: sr.d0, from: sr.l0, to: sr.l1, t: 0, ops: [{ c: srDoorL, w: 2.4, h: 2.7 }] });
+    }
+    // the core's front and flank: its own walls, filed the same way
+    if (core) {
+      F.walls.push({ axis: "d", at: core.d0, from: core.l0, to: core.l1, t: 0, ops: [{ c: (core.l0 + core.l1) / 2, w: 1.6, h: 2.3 }] });
+      F.walls.push({ axis: "l", at: core.l1, from: core.d0, to: core.d1, t: 0, ops: [] });
+    }
+
+    // ---- rooms -------------------------------------------------------------
+    const EH = stateRoom(F, { key: "entrancehall", name: "Entrance Hall", d0: 0, d1: dEH, l0: -HW, l1: lEHe, floor: SP.marble, drape: SP.red });
+    const XH = stateRoom(F, { key: "crosshall", name: "Cross Hall", d0: dEH, d1: dXH, l0: -HW, l1: HW, floor: SP.marble, drape: SP.red });
+    const LB = stateRoom(F, { key: "sitlobby", name: "Situation Room lobby", d0: dXH, d1: sr.d0, l0: lBE, l1: HW, floor: SP.marble, drape: SP.red });
+    const ER = stateRoom(F, { key: "eastroom", name: "East Room", d0: 0, d1: dEH, l0: lEHe, l1: HW, floor: SP.oak, drape: SP.rugGold, wains: SP.cream });
+    const DR = stateRoom(F, { key: "statedining", name: "State Dining Room", d0: dXH, d1: D, l0: lSvc, l1: lDB, floor: SP.oak, drape: SP.red, wains: SP.walnut });
+    const BR = stateRoom(F, { key: "blueroom", name: "Blue Room", d0: dXH, d1: D, l0: lDB, l1: lBE, floor: SP.oak, drape: SP.blue, wains: SP.blue });
+    const SH = stateRoom(F, { key: "servicehall", name: "Service Hall", d0: dXH, d1: D, l0: -HW, l1: lSvc, floor: SP.tile, rail: null, ceil: 0xf2f2ee });
+
+    // ---- the ENTRANCE HALL ---------------------------------------------------
+    // a screen of columns between it and the Cross Hall, with a clear bay on
+    // the door axis; the architrave they carry runs under the ceiling
+    const colW = Math.max(stairE + 1.2, -HW + 5.2);
+    const piers = [];
+    for (let l = F.doorL + 2.0; l < lEHe - 1.0; l += 3.9) piers.push(l);
+    for (let l = F.doorL - 2.0; l > colW; l -= 3.9) piers.push(l);
+    for (let i = 0; i < piers.length; i++) {
+      const l = piers[i];
+      F.box(dEH, l, 0, 0.30, 0.86, 0.86, SP.marbleD, SOLID);
+      F.box(dEH, l, 0.30, F.CL - 0.62, 0.56, 0.56, SP.marble, SOLID);
+      F.box(dEH, l, F.CL - 0.62, F.CL - 0.46, 0.84, 0.84, SP.cream);
+    }
+    if (piers.length) {
+      const pl0 = Math.min.apply(null, piers) - 0.6, pl1 = Math.min(lEHe, Math.max.apply(null, piers) + 0.6);
+      F.box(dEH, (pl0 + pl1) / 2, F.CL - 0.46, F.CL, 0.64, pl1 - pl0, SP.cream);
+    }
+    stateRug(F, 3.8, F.doorL, 5.6, 2.8, SP.rugRed, SP.gold, 0.16);            // the red carpet in from the door
+    stateCoffers(F, 0, dEH, colW, lEHe, 3.6);
+    stateChandelier(F, dEH / 2, F.doorL - 7.5, 1.1, EH);
+    stateChandelier(F, dEH / 2, F.doorL + 5.0, 1.1, EH);
+    // trees either side of the door, benches under the front windows
+    for (const e of [-1, 1]) {
+      statePiece(F, "planter", 1.1, F.doorL + e * 2.3, 0, { kind: "tree", s: 1.2 });
+      usable += presidentialUse(statePiece(F, "bench", 0.7, F.doorL + e * 6.2, F.face(1, 0), { len: 2.2, tone: "exec" }));
+    }
+    // the Steinway, as a state hall has; the President's portrait on the wall
+    stateGrandPiano(F, 3.9, F.doorL - 9.2, 1);
+    statePainting(F, "l", lEHe - ST_T / 2, 2.2, -1, 1.3, 2.9, 1.3, 0x3a3b4a);
+
+    // ---- the CROSS HALL ---------------------------------------------------
+    stateRug(F, (dEH + dXH) / 2 + 0.3, (colW + HW - 1.0) / 2, 2.4, HW - 1.0 - colW, SP.rugRed, SP.gold, 0.14);
+    stateCoffers(F, dEH, dXH, colW, HW, 3.6);
+    for (const l of [F.doorL - 12, F.doorL + 2, F.doorL + 16]) if (l > colW && l < HW - 1) stateChandelier(F, (dEH + dXH) / 2, l, 1.0, XH);
+    // portraits on the back wall between the doors, a bench under two of them
+    const back = dXH - ST_T / 2;
+    const portraitsAt = [lSvc + 3.0, (dinC + bluC) / 2 - 3.2, (dinC + bluC) / 2 + 3.2, lBE - 2.5];
+    for (let i = 0; i < portraitsAt.length; i++) {
+      const l = portraitsAt[i];
+      if (Math.abs(l - dinC) < 1.8 || Math.abs(l - bluC) < 1.8) continue;
+      statePainting(F, "d", back, l, -1, 1.45, 2.95, 1.1, i % 2 ? 0x3d4a5a : 0x4a3a33);
+      if (i === 1 || i === 2) usable += presidentialUse(statePiece(F, "bench", back - 0.4, l, F.face(-1, 0), { len: 1.9, tone: "exec" }));
+    }
+    // the Situation Room lobby: a Secret Service desk and the two standards
+    {
+      usable += presidentialUse(statePiece(F, "desk", (dXH + sr.d0) / 2, HW - 1.3, F.face(0, -1), { len: 1.5, tone: "exec" }));
+      for (const e of [-1, 1]) stateStandard(F, sr.d0 - 0.45, srDoorL + e * 1.95, e < 0 ? SP.blue : SP.red, false, e);
+    }
+
+    // ---- the EAST ROOM ------------------------------------------------------
+    const erC = (lEHe + HW) / 2;
+    stateRug(F, dEH / 2, erC, dEH - 1.6, HW - lEHe - 2.0, SP.rugCream, SP.rugGold, 0.3);
+    stateCoffers(F, 0, dEH, lEHe, HW, 3.2);
+    stateChandelier(F, dEH / 2, erC - 4.0, 1.2, ER);
+    stateChandelier(F, dEH / 2, erC + 4.0, 1.2, ER);
+    statePainting(F, "d", dEH - ST_T / 2, eastDoor - 3.6, -1, 1.2, 3.1, 1.3, 0x3a3b4a);
+    statePainting(F, "d", dEH - ST_T / 2, eastDoor + 3.6, -1, 1.2, 3.1, 1.3, 0x4a3a33);
+    usable += presidentialUse(statePiece(F, "sofa", dEH / 2, HW - 0.55, F.face(0, -1), { len: 2.4, tone: "warm" }));
+    for (const e of [-1, 1]) usable += presidentialUse(statePiece(F, "armchair", dEH / 2 + e * 2.0, HW - 0.7, F.face(0, -1), { tone: "warm" }));
+    for (const e of [-1, 1]) statePiece(F, "planter", dEH - 0.7, lEHe + 0.8 + (e > 0 ? HW - lEHe - 1.6 : 0), 0, { kind: "tree" });
+
+    // ---- the STATE DINING ROOM ----------------------------------------------
+    const dmid = (dXH + D) / 2;
+    stateRug(F, dmid, dinC, Math.min(14, D - dXH - 3), Math.min(7.6, lDB - lSvc - 3), SP.rugRed, SP.gold, 0.3);
+    const table = statePiece(F, "table", dmid, dinC, F.latD, { len: 10.2, deep: 1.5, seats: 20, tone: "warm" });
+    usable += presidentialUse(table);
+    stateCoffers(F, dXH, D, lSvc, lDB, 3.8);
+    stateChandelier(F, dmid - 3.4, dinC, 1.2, DR);
+    stateChandelier(F, dmid + 3.4, dinC, 1.2, DR);
+    const fire1 = stateFireplace(F, "l", lSvc + ST_T / 2, 28.4, 1, { canvas: 0x4a3a33 });
+    for (const dd of [dXH + 4.4, D - 4.4]) {
+      statePiece(F, "credenza", dd, lDB - ST_T / 2 - 0.3, F.face(0, -1), { len: 2.4, h: 0.9, deep: 0.5, tone: "warm" });
+      statePainting(F, "l", lDB - ST_T / 2, dd, -1, 1.4, 2.8, 1.2, 0x3d4a5a);
+    }
+
+    // ---- the BLUE ROOM ------------------------------------------------------
+    // the oval reception room of the house: an oval of carpet, a round of
+    // seats about one table, a fireplace, the country's portraits
+    const bmid = (dXH + D) / 2 + 0.6;
+    for (let i = 0; i < 7; i++) {
+      const t = (i + 0.5) / 7 * 2 - 1, half = Math.sqrt(1 - t * t);
+      const dd = bmid + t * 4.2, ll = Math.max(1.2, half * Math.min(6.6, (lBE - lDB) / 2 - 1.3) * 2);
+      if (i === 0 || i === 6) { F.box(dd, bluC, FIELD_T, RUG_T, 1.2, ll, SP.rugGold); continue; }
+      F.box(dd, bluC, FIELD_T, RUG_T, 1.2, ll - 0.48, SP.rugBlue);
+      for (const e of [-1, 1]) F.box(dd, bluC + e * (ll / 2 - 0.12), FIELD_T, RUG_T, 1.2, 0.24, SP.rugGold);
+    }
+    const bt = F.P(bmid, bluC);
+    presidentialPiece("coffee", r, h, bt.x, bt.z, F.latD, { len: 1.3, deep: 0.8, tone: "warm" });
+    for (const e of [-1, 1]) {
+      usable += presidentialUse(statePiece(F, "sofa", bmid, bluC + e * 1.75, F.face(0, -e), { len: 2.4, tone: "warm" }));
+      usable += presidentialUse(statePiece(F, "armchair", bmid + e * 1.85, bluC, F.face(-e, 0), { tone: "warm" }));
+    }
+    stateChandelier(F, bmid, bluC, 1.3, BR);
+    stateFireplace(F, "l", lBE, bmid, -1, { canvas: 0x2f3f5a });
+    for (const dd of [dXH + 3.4, D - 3.4]) statePainting(F, "l", lDB + ST_T / 2, dd, 1, 1.35, 2.85, 1.2, 0x3a3b4a);
+    for (const e of [-1, 1]) statePiece(F, "planter", D - 1.0, bluC + e * ((lBE - lDB) / 2 - 1.0), 0, { kind: "tree", s: 0.9 });
+
+    // ---- the SERVICE HALL -----------------------------------------------------
+    for (const dd of [D - 4.2, D - 2.0]) statePiece(F, "shelf", dd, lSvc - ST_T / 2 - 0.3, F.face(0, -1), { len: 1.9, h: 2.1 });
+    stateDome(F, (dXH + D) / 2, (Math.max(stairE, core ? core.l1 : -HW) + lSvc) / 2, SH);
+
+    // ---- the ledger ------------------------------------------------------------
+    const entry = F.P(0, F.doorL);
+    const A = { x: entry.x, z: entry.z, nx: F.nx, nz: F.nz, tx: F.tx, tz: F.tz, depth: D, span: F.W };
+    presidentialRoom("statehall", "State Entrance Hall", h, r, usable, F.symbols, A, {
+      diplomaticSalon: bt,
+      crossHall: F.P((dEH + dXH) / 2, 0),
+      sitRoomDoor: F.P(sr.d0 - 1.2, srDoorL),
+      grandStair: stair ? F.P(Math.max(0.8, stair.d0 - 1.2), (stair.l0 + stair.l1) / 2) : null,
+      stateDiningTable: F.P(dmid, dinC),
+      fireplace: fire1,
+    });
+    for (const rm of [DR, BR, ER]) presidentialRoom(rm.key, rm.name, h, { x0: rm.rectL.x0, x1: rm.rectL.x1, z0: rm.rectL.z0, z1: rm.rectL.z1, y: r.y }, 0, 0, null, {});
+    return stateOut(F);
+  }
+
+  // the plate's own edge in the frame where a wall that is not ours bounds it
+  // (the grand stair hall's partition on the family floor): its face
+  function statePlateL(F) {
+    const a = F.toF(F.r.x0, F.r.z0), c = F.toF(F.r.x1, F.r.z1);
+    const l0 = Math.min(a.l, c.l), l1 = Math.max(a.l, c.l);
     return {
-      x0: Math.min.apply(null, pts.map(function (p) { return p.x; })),
-      x1: Math.max.apply(null, pts.map(function (p) { return p.x; })),
-      z0: Math.min.apply(null, pts.map(function (p) { return p.z; })),
-      z1: Math.max.apply(null, pts.map(function (p) { return p.z; })),
-      y: r.y,
+      l0: l0 > -F.half + 0.5 ? l0 - 0.07 : -F.half,
+      l1: l1 < F.half - 0.5 ? l1 + 0.07 : F.half,
     };
   }
-  function presidentialPortal(A, depth, lateral, gapW) {
-    const edge = gapW / 2 + 0.18;
-    for (const s of [-1, 1]) {
-      A.fitbox(A.at(depth - 0.04, lateral + s * edge), 1.45, 0.30, 2.62, 0.38, P.marble);
-      A.fitbox(A.at(depth - 0.10, lateral + s * edge), 1.45, 0.07, 2.38, 0.42, P.gold);
+  function stateCore(F) {
+    let core = null;
+    for (let i = 0; i < F.holes.length; i++) { const H = F.holes[i]; if (!H.levels && (!core || H.d1 > core.d1)) core = H; }
+    return core;
+  }
+
+  /* ========================================================================
+     THE FAMILY FLOOR (Mansion, storey 1). The grand stair lands in its own
+     hall to the west; you come through its door into the CENTRE HALL, the
+     family's long sitting hall. Off it:
+       front:  a guest bedroom, the FAMILY SALON (the balcony doors on the
+               axis), the MASTER BEDROOM with its bath and dressing room
+       back:   the FAMILY DINING ROOM, a kitchen, the STUDY, the den
+     ======================================================================== */
+  function progStateResidence(r, h, opts) {
+    armStateFit();
+    shell(h, r);
+    const F = stateFrame(h, r);
+    if (F.D < 28 || F.W < 44) return stateFallback(F, "stateresidence", "The Residence");
+    const HW = F.half, D = F.D;
+    const PL = statePlateL(F), lW = PL.l0;
+    const core = stateCore(F);
+    const lCoreE = core ? core.l1 : lW;
+    const dC0 = stateSnap(F, "l+", D / 2), dC1 = stateSnap(F, "l+", D * 0.81);
+    const lA = stateSnap(F, "d0", -7.93), lB = stateSnap(F, "d0", 7.93), lC = stateSnap(F, "d0", 19.83);
+    const lK0 = stateSnap(F, "d1", -7.93), lK1 = stateSnap(F, "d1", -3.97), lS1 = stateSnap(F, "d1", 11.9);
+    const dBath = stateSnap(F, "l+", 8.3);
+    // where the grand stair's landing door is in the stair hall wall
+    // the grand stair lands 2.2 m past its top nosing (govcomplex.js §1d)
+    let landD = (dC0 + dC1) / 2;
+    for (let i = 0; i < F.holes.length; i++) if (F.holes[i].levels && F.holes[i].levels.indexOf(1) >= 0) landD = F.holes[i].d1 + 2.2;
+    const site = stateSite(F);
+    if (site && site.grandStair && site.grandStair.landing) landD = F.toF(site.grandStair.landing.x - F.h.ox, site.grandStair.landing.z - F.h.oz).d;
+    let usable = 0;
+    // ---- walls
+    const gC = (lW + lA) / 2, mC = (lB + lC) / 2, dsC = (lC + HW) / 2;
+    stateWall(F, "d", dC0, lW, HW, [
+      { c: gC, w: 1.1, leaf: true, swing: -1, label: "the guest room" },
+      { c: 0, w: 2.6, leaf: false, h: 3.2, grand: true },
+      { c: mC, w: 1.3, leaf: true, swing: -1, grand: true, label: "the bedroom" },
+      { c: dsC, w: 1.0, leaf: true, swing: -1, label: "the dressing room" },
+    ], { casing: SP.cream });
+    const fdC = (lCoreE + lK0) / 2, stC = (lK1 + lS1) / 2, dnC = (lS1 + HW) / 2;
+    stateWall(F, "d", dC1, lCoreE, HW, [
+      { c: fdC, w: 1.4, leaf: true, swing: 1, grand: true, label: "the dining room" },
+      { c: (lK0 + lK1) / 2, w: 1.0, leaf: true, swing: 1, label: "the kitchen" },
+      { c: stC, w: 1.3, leaf: true, swing: 1, grand: true, label: "the study" },
+      { c: dnC, w: 1.1, leaf: true, swing: 1, label: "the den" },
+    ]);
+    stateWall(F, "l", lA, 0, dC0, []);
+    stateWall(F, "l", lB, 0, dC0, []);
+    stateWall(F, "l", lC, 0, dC0, [
+      { c: dBath / 2 + 0.3, w: 0.95, leaf: true, swing: 1, label: "the bathroom" },
+      { c: (dBath + dC0) / 2, w: 0.95, leaf: true, swing: 1, label: "the dressing room" },
+    ]);
+    stateWall(F, "d", dBath, lC, HW, [{ c: dsC, w: 0.9, leaf: true, swing: -1, label: "the bathroom" }]);
+    stateWall(F, "l", lK0, dC1, D, [{ c: (dC1 + D) / 2, w: 1.0, leaf: true, swing: 1, label: "the kitchen" }]);
+    stateWall(F, "l", lK1, dC1, D, []);
+    stateWall(F, "l", lS1, dC1, D, []);
+    // the stair hall's partition (govcomplex.js draws it) and the core
+    F.walls.push({ axis: "l", at: lW, from: dC0, to: dC1, t: 0, ops: [{ c: landD, w: 2.6, h: 3.0 }] });
+    if (core) {
+      F.walls.push({ axis: "l", at: core.l1, from: Math.max(core.d0, dC1), to: core.d1, t: 0, ops: [] });
+      F.walls.push({ axis: "d", at: core.d0, from: lW, to: core.l1, t: 0, ops: [] });
     }
-    A.fitbox(A.at(depth - 0.04, lateral), 2.76, gapW + 0.72, 0.18, 0.40, P.marble);
-    A.fitbox(A.at(depth - 0.10, lateral), 2.70, gapW + 0.46, 0.06, 0.44, P.gold);
-  }
+    // ---- rooms
+    const CH = stateRoom(F, { key: "centrehall", name: "Centre Hall", d0: dC0, d1: dC1, l0: lW, l1: HW, floor: SP.oak, drape: SP.rugGold });
+    const GB = stateRoom(F, { key: "guestroom", name: "Guest Bedroom", d0: 0, d1: dC0, l0: lW, l1: lA, floor: SP.oak, drape: SP.green });
+    const FS = stateRoom(F, { key: "familysalon", name: "Family Salon", d0: 0, d1: dC0, l0: lA, l1: lB, floor: SP.oak, drape: SP.rugGold, wains: SP.cream });
+    const MB = stateRoom(F, { key: "privatesuite", name: "Master Bedroom", d0: 0, d1: dC0, l0: lB, l1: lC, floor: SP.oak, drape: SP.blue });
+    const BA = stateRoom(F, { key: "masterbath", name: "Master Bath", d0: 0, d1: dBath, l0: lC, l1: HW, floor: SP.tile, rail: null, skirt: SP.marble, ceil: 0xf2f2ee });
+    const DS = stateRoom(F, { key: "dressing", name: "Dressing Room", d0: dBath, d1: dC0, l0: lC, l1: HW, floor: SP.oak, drape: SP.blue });
+    const FD = stateRoom(F, { key: "familydining", name: "Family Dining Room", d0: dC1, d1: D, l0: lCoreE, l1: lK0, floor: SP.oak, drape: SP.red, wains: SP.walnut });
+    const KI = stateRoom(F, { key: "kitchen", name: "Kitchen", d0: dC1, d1: D, l0: lK0, l1: lK1, floor: SP.tile, rail: null, ceil: 0xf2f2ee });
+    const SY = stateRoom(F, { key: "study", name: "Study", d0: dC1, d1: D, l0: lK1, l1: lS1, floor: SP.oak, drape: SP.green, wains: SP.walnut });
+    const DN = stateRoom(F, { key: "den", name: "Den", d0: dC1, d1: D, l0: lS1, l1: HW, floor: SP.oak, drape: SP.rugGold });
+    const cm = (dC0 + dC1) / 2;
 
-  /* ======================================================================
-     THE ROOM-OF-STATE KIT — the six pieces every presidential room shares.
+    // ---- CENTRE HALL: a long runner, two sitting groups, a piano, books
+    stateRug(F, cm, (lW + 2.8 + HW - 1.0) / 2, 2.2, HW - 1.0 - (lW + 2.8), SP.rugGold, SP.rugRed, 0.16);
+    for (const l of [-12, 4, 18]) stateChandelier(F, cm, l, 0.9, CH);
+    // west group, clear of the landing and the dining door
+    const g1 = lK0 - 2.2;
+    usable += presidentialUse(statePiece(F, "sofa", dC1 - 0.65, g1, F.face(-1, 0), { len: 2.4, tone: "warm" }));
+    presidentialPiece("coffee", r, h, F.P(dC1 - 1.95, g1).x, F.P(dC1 - 1.95, g1).z, F.latL, { len: 1.2, deep: 0.6, tone: "warm" });
+    for (const e of [-1, 1]) usable += presidentialUse(statePiece(F, "armchair", dC1 - 3.05, g1 + e * 1.2, F.face(1, 0), { tone: "warm" }));
+    // east group by the master bedroom
+    const g2 = lB + 0.2;
+    usable += presidentialUse(statePiece(F, "sofa", dC0 + 0.65, g2, F.face(1, 0), { len: 2.4, tone: "warm" }));
+    presidentialPiece("coffee", r, h, F.P(dC0 + 1.95, g2).x, F.P(dC0 + 1.95, g2).z, F.latL, { len: 1.2, deep: 0.6, tone: "warm" });
+    for (const e of [-1, 1]) usable += presidentialUse(statePiece(F, "armchair", dC0 + 3.05, g2 + e * 1.2, F.face(-1, 0), { tone: "warm" }));
+    stateGrandPiano(F, cm, HW - 2.2, -1);
+    stateBookcase(F, "d", dC1 - ST_T / 2, -1.0, -1, 2.2, 2.5);
+    stateBookcase(F, "d", dC1 - ST_T / 2, 12.9, -1, 2.4, 2.5);
 
-     WHERE THE CEILING ACTUALLY IS. buildings.js pours each storey slab as
-     `lbox(cx, L*FH - 0.1, cz, w, 0.2, d)`, so the slab occupies FH-0.20..FH
-     and the REAL ceiling plane of a room is `h.fh - 0.20`, not `h.fh`. Every
-     presidential room used to author its "recessed ceiling light panels" at
-     `h.fh - 0.10` with a 0.055 height: dead centre INSIDE the slab. Three per
-     room, in four rooms, none of which has ever been visible in a screenshot
-     — which is the whole reason the State Entrance Hall photographed as an
-     unlit grey plate. CEIL is that plane, it is derived once, and no fixture
-     in this section is allowed above it.
-     ====================================================================== */
-  const CEIL = 0.20;                    // slab thickness: ceiling = h.fh - CEIL
-
-  // Emissive boxes are the ONE thing core/batch.js refuses to merge, so each
-  // call here is a real draw call and they are rationed by hand: a hall gets
-  // three chandeliers and six sconces, not a light every four metres. In
-  // exchange every one of them joins the INTERIOR_LIGHT_DAY ramp for free.
-  function stateLight(A, h, r, p, ly, across, hh, deep, hex, ei) {
-    if (!inRect(r, p.x, p.z, 0.08)) return 0;
-    const m = h.b.lbox(p.x, r.y + ly, p.z, A.along ? deep : across, hh, A.along ? across : deep,
-      hex, { emissive: hex, ei: ei == null ? 0.8 : ei, cast: false });
-    ceilingStrip(m);
-    return 1;
-  }
-
-  // A CEILING, so the room has a top. A stone cornice round the walls with a
-  // brass datum under it. `wallLat` is the lateral of the side WALL FACE and
-  // `d1` the depth of the far one — every offset is measured off those, so no
-  // caller has to know how thick a cornice is and nothing ever spills into the
-  // shell clamp.
-  function stateCornice(A, h, r, d0, d1, wallLat, skipFar) {
-    const top = h.fh - CEIL, run = Math.max(1.0, (d1 - 0.02) - d0), mid = (d0 + (d1 - 0.02)) / 2;
-    for (const s of [-1, 1]) {
-      A.fitbox(A.at(mid, s * (wallLat - 0.24)), top - 0.22, 0.44, 0.44, run, P.marble);
-      A.fitbox(A.at(mid, s * (wallLat - 0.30)), top - 0.50, 0.12, 0.10, run, P.gold);
+    // ---- FAMILY SALON: the fireplace group, a writing table, the balcony doors
+    const fsC = (lA + lB) / 2;
+    const fireD = dC0 * 0.58;
+    stateRug(F, fireD, lA + 4.0, 5.4, 5.6, SP.rugGreen, SP.rugGold, 0.24);
+    stateFireplace(F, "l", lA + ST_T / 2, fireD, 1, { canvas: 0x4a5a3f });
+    for (const e of [-1, 1]) usable += presidentialUse(statePiece(F, "armchair", fireD + e * 1.45, lA + 2.1, F.face(-e, 0), { tone: "warm" }));
+    const lowT = F.P(fireD, lA + 3.4);
+    presidentialPiece("coffee", r, h, lowT.x, lowT.z, F.latD, { len: 1.3, deep: 0.7, tone: "warm" });
+    usable += presidentialUse(statePiece(F, "sofa", fireD, lA + 4.75, F.face(0, -1), { len: 2.4, tone: "warm" }));
+    usable += presidentialUse(statePiece(F, "table", dC0 * 0.58, lB - 2.6, F.latD, { len: 1.8, deep: 0.9, seats: 4, tone: "warm" }));
+    stateBookcase(F, "l", lB - ST_T / 2, dC0 * 0.25, -1, 2.4, 2.5);
+    stateChandelier(F, dC0 * 0.45, fsC, 1.0, FS);
+    // the balcony doors, on the axis in the front wall: a pair of glazed
+    // leaves in a cased opening (president_public.js steps you out through them)
+    for (const e of [-1, 1]) {
+      F.box(0.03, e * 0.42, 0.02, 2.75, 0.05, 0.8, SP.sky, { emissive: SP.sky, ei: 0.35, cast: false });
+      for (let q = 1; q < 4; q++) F.box(0.06, e * 0.42, 0.02 + q * 0.68, 0.05 + q * 0.68, 0.03, 0.8, SP.cream);
+      F.box(0.06, e * 0.87, 0, 2.95, 0.06, 0.12, SP.cream);
     }
-    if (skipFar) return;                 // a wall that carries its own entablature
-    A.fitbox(A.at(d1 - 0.24, 0), top - 0.22, (wallLat - 0.02) * 2, 0.44, 0.44, P.marble);
-    A.fitbox(A.at(d1 - 0.30, 0), top - 0.50, (wallLat - 0.60) * 2, 0.10, 0.12, P.gold);
-  }
-  // …and COFFERS inside it: two longitudinal ribs crossed on the bay rhythm.
-  // The bays are deliberately the SAME rhythm as the piers below, so the
-  // ceiling reads as the building's structure rather than as applied trim.
-  function stateCoffers(A, h, r, d0, d1, latHalf, bay, crossLat) {
-    const top = h.fh - CEIL, run = Math.max(1.0, d1 - d0), mid = (d0 + d1) / 2;
-    const cross = (crossLat == null ? latHalf : crossLat) * 2 + 0.26;
-    for (const s of [-1, 1]) {
-      A.fitbox(A.at(mid, s * latHalf), top - 0.13, 0.26, 0.26, run, P.marble);
-      // an inner pair on a wide ceiling, clear of the light hung on the axis
-      if (latHalf > 3.0) A.fitbox(A.at(mid, s * latHalf * 0.42), top - 0.13, 0.22, 0.24, run, P.marble);
-    }
-    // The transverse beams may run WALL TO WALL even where the longitudinal
-    // ribs stop at the colonnade: a 55 m hall whose ceiling is coffered only
-    // over the carpet still photographs as thirty metres of flat grey.
-    for (let d = d0; d <= d1 + 0.01; d += bay)
-      A.fitbox(A.at(d, 0), top - 0.13, cross, 0.26, 0.26, P.marble);
-  }
-  // A chandelier on the axis: brass drop, corona, warm disc, finial. ONE
-  // emissive box each. Hang them in the MIDDLE of a coffer bay so the drop rod
-  // never shares a volume with a rib.
-  function stateChandelier(A, h, r, d, lat) {
-    const p = A.at(d, lat), top = h.fh - CEIL;
-    if (!inRect(r, p.x, p.z, 0.10)) return 0;
-    A.fitbox(p, top - 0.125, 0.12, 0.25, 0.12, P.gold);          // drop rod, under the slab
-    A.fitbox(p, top - 0.30, 1.90, 0.10, 1.90, P.gold);           // corona
-    stateLight(A, h, r, p, top - 0.50, 1.58, 0.30, 1.58, P.lamp, 0.95);
-    A.fitbox(p, top - 0.74, 0.40, 0.18, 0.40, P.gold);           // finial
-    return 1;
-  }
-  // A wall sconce bracketed to the side wall at lateral `side * wallLat`.
-  function stateSconce(A, h, r, d, wallLat, side) {
-    const p = A.at(d, side * (wallLat - 0.18));
-    if (!inRect(r, p.x, p.z, 0.10)) return 0;
-    A.fitbox(p, 1.98, 0.30, 0.40, 0.30, P.gold);                 // bracket
-    stateLight(A, h, r, A.at(d, side * (wallLat - 0.42)), 2.30, 0.42, 0.34, 0.54, P.lamp, 0.9);
-    return 1;
+    F.box(0.06, 0, 2.75, 2.95, 0.06, 1.86, SP.cream);
+    F.box(0.06, 0, 0, 2.95, 0.05, 0.06, SP.cream);
+    F.lights++;
+
+    // ---- MASTER BEDROOM: the bed's head against the bath wall, a table
+    // either side, a bench at its foot, two chairs in the window
+    // between the bath door and the dressing-room door in that wall
+    const bedD = (dBath / 2 + 0.3 + (dBath + dC0) / 2) / 2;
+    const bedL = lC - ST_T / 2 - 1.26;
+    stateRug(F, bedD, bedL - 0.6, 3.6, 4.0, SP.rugBlue, SP.rugGold, 0.2);
+    const bed = statePiece(F, "bed", bedD, bedL, F.face(0, 1), { len: 2.2, wide: 1.95, tone: "warm" });
+    usable += presidentialUse(bed);
+    for (const e of [-1, 1]) stateSideLamp(F, bedD + e * 1.35, lC - ST_T / 2 - 0.35, MB, true);
+    usable += presidentialUse(statePiece(F, "bench", bedD, bedL - 1.45, F.face(0, -1), { len: 1.5, back: false, tone: "warm" }));
+    for (const e of [-1, 1]) usable += presidentialUse(statePiece(F, "armchair", 1.4, (lB + bedL) / 2 - 0.6 + e * 1.0, F.face(0, -e), { tone: "warm" }));
+    statePiece(F, "credenza", bedD, lB + ST_T / 2 + 0.3, F.face(0, 1), { len: 2.0, h: 0.95, tone: "warm" });
+    statePainting(F, "l", lB + ST_T / 2, bedD, 1, 1.5, 2.6, 1.3, 0x4a5a3f);
+    stateDome(F, bedD, (lB + lC) / 2, MB);
+    // ---- BATH + DRESSING
+    stateBath(F, BA);
+    stateDome(F, dBath / 2, (lC + HW) / 2, BA);
+    for (const dd of [dBath + 1.2, dC0 - 1.2]) statePiece(F, "wardrobe", dd, HW - 0.35, F.face(0, -1), { len: 2.2, h: 2.4, tone: "warm" });
+    usable += presidentialUse(statePiece(F, "bench", (dBath + dC0) / 2, (lC + HW) / 2 - 0.3, F.face(0, 1), { len: 1.2, back: false, tone: "warm" }));
+    stateDome(F, (dBath + dC0) / 2, (lC + HW) / 2, DS);
+
+    // ---- GUEST BEDROOM
+    const gbD = dC0 * 0.5, gbL = lW + 1.3;
+    const gbed = statePiece(F, "bed", gbD, gbL, F.face(0, -1), { len: 2.1, wide: 1.6, tone: "warm" });
+    usable += presidentialUse(gbed);
+    for (const e of [-1, 1]) stateSideLamp(F, gbD + e * 1.2, lW + 0.35, GB);
+    statePiece(F, "wardrobe", dC0 - 0.45, lA - 2.0, F.face(-1, 0), { len: 2.0, h: 2.3, tone: "warm" });
+    usable += presidentialUse(statePiece(F, "armchair", 1.6, lA - 1.4, F.face(1, -1), { tone: "warm" }));
+    stateRug(F, gbD, gbL + 1.4, 3.2, 3.4, SP.rugGreen, SP.rugCream, 0.18);
+    stateDome(F, gbD, (lW + lA) / 2, GB);
+
+    // ---- FAMILY DINING
+    const fdD = (dC1 + D) / 2;
+    stateRug(F, fdD, fdC, D - dC1 - 1.6, 4.8, SP.rugRed, SP.rugGold, 0.2);
+    usable += presidentialUse(statePiece(F, "table", fdD, fdC, F.latL, { len: 3.2, deep: 1.2, seats: 8, tone: "warm" }));
+    stateChandelier(F, fdD, fdC, 1.0, FD);
+    statePiece(F, "credenza", dC1 + ST_T / 2 + 0.3, lCoreE + 1.8, F.face(1, 0), { len: 2.0, h: 0.9, tone: "warm" });
+    // ---- KITCHEN
+    stateKitchenRun(F, "l", lK1 - ST_T / 2, -1, dC1 + 1.0, D - 0.2);
+    F.box(dC1 + 0.55, lK1 - ST_T / 2 - 0.4, 0, 1.95, 0.8, 0.7, 0xdcdcd8, SOLID);     // the refrigerator
+    stateDome(F, fdD, (lK0 + lK1) / 2, KI);
+    // ---- STUDY (the Treaty Room): a writing table, books on both walls
+    const syD = (dC1 + D) / 2;
+    usable += presidentialUse(statePiece(F, "table", syD, stC, F.latL, { len: 2.6, deep: 1.1, seats: 2, tone: "exec" }));
+    stateBookcase(F, "l", lK1 + ST_T / 2, syD, 1, 3.4, 2.6);
+    stateBookcase(F, "l", lS1 - ST_T / 2, syD, -1, 3.4, 2.6);
+    stateChandelier(F, syD, stC, 0.9, SY);
+    // ---- DEN: a sofa facing the set
+    const tvL = dnC + 3.4;
+    statePiece(F, "credenza", dC1 + ST_T / 2 + 0.3, tvL, F.face(1, 0), { len: 2.2, h: 0.6, tone: "exec" });
+    F.box(dC1 + ST_T / 2 + 0.3, tvL, 0.60, 1.50, 0.06, 1.6, SP.black);                           // the set, on the cabinet
+    usable += presidentialUse(statePiece(F, "sofa", D - 0.75, tvL, F.face(-1, 0), { len: 2.4, tone: "warm" }));
+    presidentialPiece("coffee", r, h, F.P(D - 2.1, tvL).x, F.P(D - 2.1, tvL).z, F.latL, { len: 1.2, deep: 0.6, tone: "warm" });
+    stateDome(F, (dC1 + D) / 2, dnC, DN);
+
+    const land = F.P(landD, lW + 1.2);
+    const A = { x: land.x, z: land.z, nx: F.tx, nz: F.tz, tx: -F.nx, tz: -F.nz, depth: HW - lW, span: dC1 - dC0 };
+    presidentialRoom("stateresidence", "The Residence", h, r, usable, F.symbols, A, {
+      balconyDoor: F.P(1.5, 0),
+      familySalon: lowT,
+      presidentialBed: bed ? F.P(bedD, bedL) : null,
+      familyDining: F.P(fdD, fdC),
+      landing: land,
+    });
+    for (const rm of [FS, MB, FD, SY]) presidentialRoom(rm.key, rm.name, h, { x0: rm.rectL.x0, x1: rm.rectL.x1, z0: rm.rectL.z0, z1: rm.rectL.z1, y: r.y }, 0, 0, null, {});
+    return stateOut(F);
   }
 
-  /* THE ONE TEXTURED MESH IN THIS FILE. buildings_civic.js already mints the
-     incised plaque and the branch seal as canvas textures for civic anchors,
-     and core/batch.js spares anything carrying a `map`, so a plate is one draw
-     call that never merges. That is why there are SIX of them in the whole
-     world (three seals, one motto, two nameplates) and why they go
-     on a registered interior fixture group: raw meshes bypass b.lbox, and the
-     shell clamp only sees boxes drawn through b.lbox. Degrade-safe — without
-     THREE, without the textures, or without a host group the caller's framed
-     box still stands and nothing throws. */
+  /* ========================================================================
+     THE THIRD FLOOR (Mansion, storey 2) — the private floor, reached by the
+     service stair. The same centre hall line as the family floor below;
+     front: a library, the SOLARIUM, a guest suite and its bath; back: a gym,
+     a bedroom, a games room.
+     ======================================================================== */
+  function progStatePrivate(r, h, opts) {
+    armStateFit();
+    shell(h, r);
+    const F = stateFrame(h, r);
+    if (F.D < 28 || F.W < 44) return stateFallback(F, "stateprivate", "The Third Floor");
+    const HW = F.half, D = F.D;
+    const PL = statePlateL(F), lW = PL.l0;
+    const core = stateCore(F);
+    const lCoreE = core ? core.l1 : lW;
+    const dC0 = stateSnap(F, "l+", D / 2), dC1 = stateSnap(F, "l+", D * 0.81);
+    const lA = stateSnap(F, "d0", -7.93), lB = stateSnap(F, "d0", 7.93), lC = stateSnap(F, "d0", 19.83);
+    const lK0 = stateSnap(F, "d1", -7.93), lK1 = stateSnap(F, "d1", 7.93);
+    let usable = 0;
+    stateWall(F, "d", dC0, lW, HW, [
+      { c: (lW + lA) / 2, w: 1.3, leaf: true, swing: -1, label: "the library" },
+      { c: 0, w: 3.0, leaf: false, h: 3.1, grand: true },
+      { c: (lB + lC) / 2, w: 1.1, leaf: true, swing: -1, label: "the guest suite" },
+      { c: (lC + HW) / 2, w: 0.95, leaf: true, swing: -1, label: "the bathroom" },
+    ]);
+    stateWall(F, "d", dC1, lCoreE, HW, [
+      { c: (lCoreE + lK0) / 2, w: 1.2, leaf: true, swing: 1, label: "the gym" },
+      { c: (lK0 + lK1) / 2, w: 1.1, leaf: true, swing: 1, label: "the bedroom" },
+      { c: (lK1 + HW) / 2, w: 1.3, leaf: true, swing: 1, label: "the games room" },
+    ]);
+    stateWall(F, "l", lA, 0, dC0, []);
+    stateWall(F, "l", lB, 0, dC0, []);
+    stateWall(F, "l", lC, 0, dC0, []);
+    stateWall(F, "l", lK0, dC1, D, []);
+    stateWall(F, "l", lK1, dC1, D, []);
+    if (core) {
+      F.walls.push({ axis: "l", at: core.l1, from: Math.max(core.d0, dC1), to: core.d1, t: 0, ops: [] });
+      F.walls.push({ axis: "d", at: core.d0, from: lW, to: core.l1, t: 0, ops: [{ c: (core.l0 + core.l1) / 2, w: 1.6, h: 2.3 }] });
+    }
+    const CH = stateRoom(F, { key: "hall3", name: "Third Floor Hall", d0: dC0, d1: dC1, l0: lW, l1: HW, floor: SP.oak, drape: SP.rugGold });
+    const LI = stateRoom(F, { key: "library", name: "Library", d0: 0, d1: dC0, l0: lW, l1: lA, floor: SP.oak, drape: SP.green, wains: SP.walnut });
+    const SO = stateRoom(F, { key: "solarium", name: "Solarium", d0: 0, d1: dC0, l0: lA, l1: lB, floor: SP.tile, drape: SP.rugCream, rail: null });
+    const GS = stateRoom(F, { key: "guestsuite", name: "Guest Suite", d0: 0, d1: dC0, l0: lB, l1: lC, floor: SP.oak, drape: SP.red });
+    const GBA = stateRoom(F, { key: "guestbath", name: "Guest Bath", d0: 0, d1: dC0, l0: lC, l1: HW, floor: SP.tile, rail: null, skirt: SP.marble, ceil: 0xf2f2ee });
+    const GY = stateRoom(F, { key: "gym", name: "Gym", d0: dC1, d1: D, l0: lCoreE, l1: lK0, floor: 0x2e3238, rail: null, skirt: SP.black });
+    const BD = stateRoom(F, { key: "bedroom3", name: "Bedroom", d0: dC1, d1: D, l0: lK0, l1: lK1, floor: SP.oak, drape: SP.blue });
+    const GR = stateRoom(F, { key: "gamesroom", name: "Games Room", d0: dC1, d1: D, l0: lK1, l1: HW, floor: SP.oak, drape: SP.green, wains: SP.walnut });
+    const cm = (dC0 + dC1) / 2;
+    // hall
+    stateRug(F, cm, (lW + 3.5 + HW - 1.0) / 2, 2.0, HW - 1.0 - (lW + 3.5), SP.rugBlue, SP.rugGold, 0.14);
+    for (const l of [-14, 2, 18]) stateDome(F, cm, l, CH);
+    usable += presidentialUse(statePiece(F, "bench", dC1 - 0.45, 2.0, F.face(-1, 0), { len: 2.0, tone: "warm" }));
+    // library: books on two walls, reading chairs, a table
+    const liC = (Math.max(lW, -HW + 4.5) + lA) / 2;
+    stateBookcase(F, "l", lA - ST_T / 2, dC0 * 0.5, -1, Math.min(5.0, dC0 - 3), 2.8);
+    stateBookcase(F, "d", dC0 - ST_T / 2, liC + 2.5, -1, 3.0, 2.8);
+    usable += presidentialUse(statePiece(F, "table", dC0 * 0.45, liC, F.latD, { len: 2.4, deep: 1.1, seats: 4, tone: "exec" }));
+    for (const e of [-1, 1]) usable += presidentialUse(statePiece(F, "armchair", 2.0, liC + e * 1.5, F.face(1, 0), { tone: "warm" }));
+    stateRug(F, dC0 * 0.45, liC, 4.4, 4.2, SP.rugRed, SP.rugGold, 0.2);
+    stateChandelier(F, dC0 * 0.45, liC, 0.9, LI);
+    // solarium: plants, cane seats round a low table, a round of chairs
+    const soC = (lA + lB) / 2;
+    for (const q of [[1.2, lA + 1.0], [1.2, lB - 1.0], [dC0 - 1.2, lA + 1.0], [dC0 - 1.2, lB - 1.0], [dC0 * 0.5, lA + 0.9], [dC0 * 0.5, lB - 0.9]])
+      statePiece(F, "planter", q[0], q[1], 0, { kind: "tree", s: 1.1 });
+    const soT = F.P(dC0 * 0.36, soC);
+    presidentialPiece("coffee", r, h, soT.x, soT.z, F.latL, { len: 1.3, deep: 0.7, tone: "warm" });
+    usable += presidentialUse(statePiece(F, "sofa", dC0 * 0.36 - 1.35, soC, F.face(1, 0), { len: 2.4, tone: "warm" }));
+    for (const e of [-1, 1]) usable += presidentialUse(statePiece(F, "armchair", dC0 * 0.36 + 0.2, soC + e * 1.8, F.face(0, -e), { tone: "warm" }));
+    usable += presidentialUse(statePiece(F, "table", dC0 * 0.72, soC, F.latL, { len: 1.2, deep: 1.2, seats: 4, tone: "warm" }));
+    for (const dd of [dC0 * 0.3, dC0 * 0.7]) stateDome(F, dd, soC, SO);
+    // guest suite
+    const gsD = dC0 * 0.5, gsL = lC - ST_T / 2 - 1.24;
+    usable += presidentialUse(statePiece(F, "bed", gsD, gsL, F.face(0, 1), { len: 2.1, wide: 1.6, tone: "warm" }));
+    for (const e of [-1, 1]) stateSideLamp(F, gsD + e * 1.2, lC - ST_T / 2 - 0.35, GS);
+    statePiece(F, "wardrobe", dC0 - 0.45, lB + 1.6, F.face(-1, 0), { len: 2.0, h: 2.3, tone: "warm" });
+    usable += presidentialUse(statePiece(F, "armchair", 1.5, lB + 1.3, F.face(1, 1), { tone: "warm" }));
+    stateDome(F, gsD, (lB + lC) / 2, GS);
+    stateBath(F, GBA);
+    stateDome(F, dC0 / 2, (lC + HW) / 2, GBA);
+    // gym: a rubber floor, two machines, a rack, a bench, a mirror wall
+    const gyD = (dC1 + D) / 2, gyC = (lCoreE + lK0) / 2;
+    for (const e of [-1, 1]) {
+      const l = gyC + e * 3.0;
+      F.box(gyD, l, 0, 0.26, 1.9, 0.8, SP.black, SOLID);                         // treadmill deck
+      F.box(gyD, l, 0.26, 0.28, 1.6, 0.55, 0x3a3d42);
+      F.box(gyD - 0.85, l, 0.24, 1.3, 0.08, 0.7, SP.black);                     // console post
+      F.box(gyD - 0.85, l, 1.2, 1.35, 0.3, 0.7, 0x2a2f37);
+    }
+    statePiece(F, "shelf", D - 0.45, gyC, F.face(-1, 0), { len: 2.0, h: 1.2 });
+    usable += presidentialUse(statePiece(F, "bench", gyD, gyC, F.face(0, 1), { len: 1.3, back: false, tone: "exec" }));
+    F.box(dC1 + ST_T / 2 + 0.02, gyC + 3.4, 0.3, 2.3, 0.02, 3.0, SP.sky);     // mirror wall, clear of the door
+    stateDome(F, gyD, gyC, GY);
+    // bedroom
+    const bdD = (dC1 + D) / 2 + 0.3, bdC = (lK0 + lK1) / 2;
+    usable += presidentialUse(statePiece(F, "bed", bdD, lK0 + ST_T / 2 + 1.24, F.face(0, -1), { len: 2.1, wide: 1.6, tone: "warm" }));
+    stateSideLamp(F, bdD + 1.2, lK0 + ST_T / 2 + 0.35, BD);
+    statePiece(F, "wardrobe", bdD, lK1 - ST_T / 2 - 0.35, F.face(0, -1), { len: 2.0, h: 2.3, tone: "warm" });
+    stateDome(F, bdD, bdC, BD);
+    // games room: a billiard table, a card table, a sofa
+    const grD = (dC1 + D) / 2, grC = (lK1 + HW) / 2;
+    for (const q of [[-1.1, -0.55], [-1.1, 0.55], [1.1, -0.55], [1.1, 0.55]]) F.box(grD + q[1], grC - 1.5 + q[0], 0, 0.62, 0.12, 0.12, SP.walnut);
+    F.box(grD, grC - 1.5, 0.62, 0.78, 1.45, 2.7, SP.walnut, SOLID);
+    F.box(grD, grC - 1.5, 0.78, 0.80, 1.25, 2.5, 0x2f6b45);
+    usable += presidentialUse(statePiece(F, "table", grD, grC + 3.2, F.latD, { len: 1.1, deep: 1.1, seats: 4, tone: "exec" }));
+    usable += presidentialUse(statePiece(F, "sofa", D - 0.7, grC - 1.5, F.face(-1, 0), { len: 2.4, tone: "exec" }));
+    stateChandelier(F, grD, grC - 1.5, 0.8, GR);
+    presidentialRoom("stateprivate", "The Third Floor", h, r, usable, F.symbols, null, { solarium: soT });
+    return stateOut(F);
+  }
+
+  /* ---- THE SEAL — the one textured mesh a room of state earns ---------------
+     buildings_civic.js mints the branch seal as a canvas texture; a plate is
+     one draw call that never merges, so there are three in the whole house
+     (the Oval's carpet, the lectern, the briefing backdrop). They hang on a
+     registered interior fixture group (the shell clamp only sees b.lbox).
+     Degrade-safe: no THREE, no texture, no group, and the room still stands. */
   function platesRoot(h) {
     const T = window.THREE;
     const g = h && h.b && h.b.group;
@@ -2651,604 +3974,422 @@
       CBZ.interiorTrackFixture("president:" + Math.round(h.ox) + ":" + Math.round(h.oz), h.b, root, null);
     return root;
   }
-  function statePlate(h, tex, x, y, z, w, hgt, yaw, transparent) {
-    const T = window.THREE;
-    const root = tex ? platesRoot(h) : null;
-    if (!root) return false;
-    const m = new T.Mesh(new T.PlaneGeometry(w, hgt),
-      new T.MeshBasicMaterial(transparent ? { map: tex, transparent: true } : { map: tex }));
-    m.position.set(x, y, z);
-    m.rotation.y = yaw;
-    m.castShadow = false; m.receiveShadow = false;
-    m.renderOrder = 3;
-    root.add(m);
-    return true;
-  }
-  function plaqueTex(text) {
-    try { return CBZ.civicPlaqueTex ? CBZ.civicPlaqueTex(text, P.wood) : null; } catch (e) { return null; }
-  }
   function sealTex() {
     try { return CBZ.civicSealTex ? CBZ.civicSealTex("federal") : null; } catch (e) { return null; }
   }
-  // Which way a wall faces in the approach frame. `side` 0 = the wall you walk
-  // toward, ±1 = a side wall; the plate's normal points back into the room.
-  function stateFace(A, side) {
-    return side ? Math.atan2(-side * A.tx, -side * A.tz) : A.faceIn;
-  }
-  function stateOff(A, d, lat, side, off) {
-    return side ? A.at(d, lat - side * off) : A.at(d - off, lat);
+  // a seal plate at frame (d, l), height y over the floor. flat: lying on the
+  // floor (face up); else standing, its face looking along (fd, fl).
+  function stateSeal(F, d, l, y, size, flat, fd, fl) {
+    const T = window.THREE, tex = sealTex();
+    const root = tex ? platesRoot(F.h) : null;
+    if (!root) return 0;
+    const p = F.P(d, l);
+    const m = new T.Mesh(new T.PlaneGeometry(size, size), new T.MeshBasicMaterial({ map: tex, transparent: true }));
+    m.position.set(p.x, F.Y + y, p.z);
+    if (flat) { m.rotation.x = -Math.PI / 2; m.rotation.z = F.face(1, 0); }
+    else m.rotation.y = F.face(fd || 0, fl || 0);
+    m.castShadow = false; m.receiveShadow = false;
+    m.renderOrder = 3;
+    root.add(m);
+    F.symbols++;
+    return 1;
   }
 
-  // THE STATE SEAL — framed, inset, lit, with the real engraved medallion on
-  // it. Falls back to the incised relief boxes when the canvas texture is not
-  // available, so the wall is never a blank blue rectangle.
-  function stateSeal(A, h, r, d, lat, ly, w, hgt, side) {
-    const p = A.at(d, lat);
-    if (!inRect(r, p.x, p.z, 0.10)) return 0;
-    const across = side ? 0.10 : w, deep = side ? w : 0.10;
-    A.fitbox(p, ly, across, hgt, deep, P.gold);
-    const q = stateOff(A, d, lat, side, 0.10);
-    A.fitbox(q, ly, side ? 0.05 : w - 0.6, hgt - 0.55, side ? w - 0.6 : 0.05, P.glow,
-      { emissive: P.glow, ei: 0.38 });
-    const f = stateOff(A, d, lat, side, 0.16);
-    const med = Math.min(w - 0.8, hgt - 0.62);
-    if (!statePlate(h, sealTex(), f.x, r.y + ly, f.z, med, med, stateFace(A, side), true)) {
-      const rel = stateOff(A, d, lat, side, 0.155);
-      A.fitbox(rel, ly, side ? 0.02 : 1.72, 0.15, side ? 1.72 : 0.02, P.gold);
-      A.fitbox(rel, ly - 0.21, side ? 0.02 : 0.22, 0.78, side ? 0.22 : 0.02, P.gold);
-      for (const s of [-1, 1])
-        A.fitbox(stateOff(A, d, lat + (side ? 0 : s * 0.72), side, 0.155), ly + 0.21,
-          side ? 0.02 : 0.60, 0.14, side ? 0.60 : 0.02, P.gold);
-    }
-    return 1;
-  }
-  // A FRAMED PORTRAIT: brass frame, dark canvas, and an engraved nameplate
-  // under it. Two boxes and (optionally) one plate.
-  function statePortrait(A, h, r, d, lat, ly, w, hgt, side, name) {
-    const p = A.at(d, lat);
-    if (!inRect(r, p.x, p.z, 0.10)) return 0;
-    A.fitbox(p, ly, side ? 0.09 : w, hgt, side ? w : 0.09, P.gold);
-    const q = stateOff(A, d, lat, side, 0.055);
-    A.fitbox(q, ly, side ? 0.04 : w - 0.26, hgt - 0.26, side ? w - 0.26 : 0.04, P.wood);
-    if (name) {
-      const ny = ly - hgt / 2 - 0.22, nw = Math.min(w * 0.8, 1.5);
-      const n = stateOff(A, d, lat, side, 0.075);
-      A.fitbox(p, ny, side ? 0.08 : nw, 0.26, side ? nw : 0.08, P.gold);
-      statePlate(h, plaqueTex(name), n.x, r.y + ny, n.z, nw - 0.06, 0.22, stateFace(A, side), false);
-    }
-    return 1;
-  }
-  // TWO STANDARDS FLANKING AN AXIS: a floor-standing pole with a gold finial
-  // and cloth that hangs flat, sideways, the way a mounted flag actually does.
-  function stateStandards(A, h, r, d, lat, hex) {
-    let n = 0;
-    for (const s of [-1, 1]) {
-      const p = A.at(d, s * lat);
-      if (!inRect(r, p.x, p.z, 0.3) || !h.clear(p.x, p.z, 0.45)) continue;
-      // The plinth reaches from y=0 to 0.30 so it clears the GROUND floor's
-      // 0.15 covering as well as an upper floor's 0.04 one.
-      A.fitbox(p, 0.15, 0.52, 0.30, 0.52, P.bezel);              // plinth
-      A.fitbox(p, 1.49, 0.09, 2.38, 0.09, P.gold);               // pole → 2.68
-      A.fitbox(p, 2.76, 0.17, 0.16, 0.17, P.gold);               // finial
-      A.fitbox(A.at(d, s * lat - s * 0.06), 1.86, 0.86, 1.24, 0.05, hex);   // cloth
-      n++;
-    }
-    return n;
-  }
-  // A PANELLED WALL: wainscot, brass datum and a run of raised panels. The one
-  // treatment that turns a 55 m painted span into a room.
-  function statePanelling(A, h, r, d0, d1, wallLat, bay, hex) {
-    const run = Math.max(1.0, d1 - d0), mid = (d0 + d1) / 2;
-    for (const s of [-1, 1]) {
-      A.fitbox(A.at(mid, s * (wallLat - 0.20)), 0.72, 0.10, 1.10, run, hex);   // wainscot
-      A.fitbox(A.at(mid, s * (wallLat - 0.20)), 1.31, 0.12, 0.07, run, P.gold); // brass datum
-      // Raised panels stand PROUD of the wainscot (0.27..0.31 off the wall
-      // against its 0.15..0.25) so no two faces are ever coplanar.
-      for (let d = d0 + bay / 2; d < d1; d += bay)
-        A.fitbox(A.at(d, s * (wallLat - 0.29)), 0.74, 0.04, 0.86, bay * 0.62, P.gold);
-    }
-  }
-  function progStateHall(r, h, opts) {
-    // This is always the first presidential program built, so it is also the
-    // world-rebuild boundary for the tiny room/prop ledger below.
-    presidentialReset();
+  /* ========================================================================
+     THE WEST WING, GROUND FLOOR. The wing's door opens into its LOBBY; a
+     corridor runs the length of the wing to the stair. North of it the
+     CABINET ROOM, south the PRESS BRIEFING ROOM, and at the far end, behind
+     the podium's wall, the press secretary's office.
+     ======================================================================== */
+  function progCabinetRoom(r, h, opts) {
+    armStateFit();
     shell(h, r);
-    const A = approach(r, h, opts);
-    const dep = A.depth, half = A.span / 2 - 0.8;
+    const F = stateFrame(h, r);
+    if (F.D < 26 || F.W < 16) return stateFallback(F, "cabinetroom", "Cabinet Room");
+    const HW = F.half, D = F.D;
+    const core = stateCore(F);
+    const coreD0 = core ? core.d0 : D - 7.5, coreL0 = core ? core.l0 : HW - 4.5;
+    let dLob = stateSnap(F, "l+", 6.6); dLob = stateSnap(F, "l-", dLob);
+    const dCab1 = stateSnap(F, "l+", Math.min(22.8, coreD0 - 2.9));
+    const dP1 = stateSnap(F, "l-", Math.min(26.5, coreD0 + 0.8));
+    const LC = 1.6;                                        // the corridor's half width
+    let mouthL = coreL0 + 2.3;
+    if (F.mouths.length) mouthL = (F.mouths[0].l0 + F.mouths[0].l1) / 2;
     let usable = 0;
-
-    // One ceremonial axis from threshold to the state seal. The gold edge is
-    // structural hierarchy, not loose decor; everything else stays off it.
-    const run = Math.max(8, dep - 4.0), mid = 2.0 + run / 2;
-    A.obox(A.at(mid, 0), 0.18, 5.2, 0.05, run, P.rug, { pad: 0.4 });
-    for (const s of [-1, 1]) A.obox(A.at(mid, s * 2.52), 0.215, 0.08, 0.025, run, P.gold, { pad: 0.3 });
-
-    // Stone flanking the carpet, so the 55 m plate reads as a paved state hall
-    // rather than as one rug lost on a floor covering. It starts at the rug's
-    // own edge — a strip of bare floor covering between carpet and paving is
-    // the thing that made the hall read as a plate with a rug dropped on it.
-    for (const s of [-1, 1])
-      A.obox(A.at(mid, s * 7.0), 0.168, 8.8, 0.03, run, P.marble, { pad: 0.6 });
-
-    // A state hall this wide needs architecture, not more loose furniture.
-    // Four paired piers and their ceiling ties turn the carpet into a real
-    // processional gallery while preserving a 5 m clear presidential axis.
-    const pierLat = Math.min(half - 2.0, 4.45);
-    const bays = [6.5, 13.2, 19.9, 26.6];
-    // THE PIER CARRIES THE BEAM. Its height is solved from the storey: the
-    // capital meets the tie beam's underside at any floor height (a fixed
-    // 2.9 m pier left a 1.3 m gap under the beam once the Mansion's state
-    // floor stood 4.5 m tall, and at 3.2 m it poked through the beam).
-    const tieBot = h.fh - CEIL - 0.22, capY = tieBot - 0.08, shaftTop = capY - 0.08;
-    for (const d of bays) {
-      if (d > dep - 3.0) continue;
-      for (const s of [-1, 1]) {
-        const pp = A.at(d, s * pierLat);
-        A.obox(pp, 0.15, 0.82, 0.18, 0.82, P.marble, { pad: 0.36 });
-        A.obox(pp, (0.24 + shaftTop) / 2, 0.52, shaftTop - 0.24, 0.52, P.marble, { pad: 0.30 });
-        A.obox(pp, capY, 0.88, 0.16, 0.88, P.gold, { pad: 0.32 });
-      }
-      // the tie beam sits UNDER the slab (h.fh - CEIL), not inside it
-      A.fitbox(A.at(d, 0), h.fh - CEIL - 0.11, pierLat * 2 + 1.0, 0.22, 0.34, P.marble);
+    // ---- walls
+    stateWall(F, "d", dLob, -HW, HW, [
+      { c: 0, w: 2 * LC - 0.7, leaf: false, h: 3.0, grand: true },
+      { c: -(LC + HW) / 2, w: 1.7, leaf: true, swing: 1, grand: true, label: "the briefing room" },
+      { c: (LC + HW) / 2, w: 1.7, leaf: true, swing: 1, grand: true, label: "the Cabinet Room" },
+    ]);
+    stateWall(F, "l", LC, dLob, dCab1, [{ c: dCab1 - 3.4, w: 1.1, leaf: true, swing: 1, label: "the Cabinet Room" }]);
+    stateWall(F, "l", -LC, dLob, dP1, [{ c: dLob + 2.4, w: 1.2, leaf: true, swing: -1, label: "the briefing room" }]);
+    stateWall(F, "d", dCab1, LC, HW, []);
+    stateWall(F, "d", dP1, -HW, coreL0, [{ c: 0, w: 1.1, leaf: true, swing: 1, label: "the press office" }]);
+    if (core) {
+      F.walls.push({ axis: "d", at: coreD0, from: coreL0, to: HW, t: 0, ops: [{ c: mouthL, w: 1.6, h: 2.3 }] });
+      F.walls.push({ axis: "l", at: coreL0, from: coreD0, to: D, t: 0, ops: [] });
     }
+    // ---- rooms
+    const LO = stateRoom(F, { key: "wwlobby", name: "West Wing Lobby", d0: 0, d1: dLob, l0: -HW, l1: HW, floor: SP.marble, drape: SP.navy });
+    const CO = stateRoom(F, { key: "wwcorridor", name: "West Wing Corridor", d0: dLob, d1: dP1, l0: -LC, l1: LC, floor: SP.oak });
+    const CR = stateRoom(F, { key: "cabinetroom", name: "Cabinet Room", d0: dLob, d1: dCab1, l0: LC, l1: HW, floor: SP.oak, drape: SP.rugGold, wains: SP.cream });
+    const SL = stateRoom(F, { key: "wwstair", name: "Stair Hall", d0: dCab1, d1: dP1, l0: LC, l1: HW, floor: SP.marble });
+    const PR = stateRoom(F, { key: "pressroom", name: "Press Briefing Room", d0: dLob, d1: dP1, l0: -HW, l1: -LC, floor: SP.navy, drape: SP.navy, closed: true, rail: null, skirt: SP.black });
+    const PO = stateRoom(F, { key: "pressoffice", name: "Press Office", d0: dP1, d1: D, l0: -HW, l1: coreL0, floor: SP.oak, drape: SP.blue });
 
-    // THE ROOM HAS A TOP. Cornice round the walls, coffers on the SAME bay
-    // rhythm as the piers, and three chandeliers hung in the middle of a bay
-    // (never on a rib) — which is also the only real light in the hall.
-    const wallLat = A.span / 2;
-    stateCornice(A, h, r, 0.6, dep, wallLat);
-    stateCoffers(A, h, r, bays[0], dep - 0.5, pierLat + 0.5, 6.7, wallLat - 0.5);
-    for (const d of [9.85, 16.55, 23.25]) if (d < dep - 3.0) stateChandelier(A, h, r, d, 0);
-    // Panelled side walls with a sconce between each pair of panels. Warm
-    // brackets on both flanks are what stop the hall reading as a grey box
-    // from the middle of the carpet, where the player actually stands.
-    statePanelling(A, h, r, 2.0, dep - 1.0, wallLat, 7.0, P.wood);
-    for (const s of [-1, 1]) for (const d of [12.5, 19.5, 26.5])
-      if (d < dep - 2.0) stateSconce(A, h, r, d, wallLat, s);
+    // ---- LOBBY
+    const loC = dLob / 2;
+    stateRug(F, loC, F.doorL, dLob - 1.4, 3.2, SP.rugBlue, SP.rugGold, 0.18);
+    stateChandelier(F, loC, F.doorL, 1.0, LO);
+    usable += presidentialUse(statePiece(F, "desk", loC + 0.2, (LC + HW) / 2, F.face(-1, 0), { len: 1.8, tone: "exec" }));
+    usable += presidentialUse(statePiece(F, "sofa", loC, -HW + 0.55, F.face(0, 1), { len: 2.3, tone: "exec" }));
+    presidentialPiece("coffee", r, h, F.P(loC, -HW + 1.85).x, F.P(loC, -HW + 1.85).z, F.latD, { len: 1.2, deep: 0.6, tone: "exec" });
+    for (const e of [-1, 1]) usable += presidentialUse(statePiece(F, "armchair", loC + e * 1.35, -HW + 2.9, F.face(0, -1), { tone: "exec" }));
+    for (const e of [-1, 1]) statePiece(F, "planter", 0.9, F.doorL + e * 2.2, 0, { kind: "tree" });
+    for (const l of [-3.4, 3.4, -HW + 1.5, HW - 1.5]) if (Math.abs(l) > 2.0 && Math.abs(Math.abs(l) - (LC + HW) / 2) > 1.4) statePainting(F, "d", dLob - ST_T / 2, l, -1, 1.35, 2.75, 1.1, 0x3a3b4a);
 
-    // Waiting belongs by the entrance, square to the axis. These are real
-    // benches, so the room offers an action before it offers exposition.
-    for (const s of [-1, 1]) {
-      const p = A.at(6.0, s * Math.min(half - 1.1, 7.2));
-      usable += presidentialUse(presidentialPiece("bench", r, h, p.x, p.z,
-        s > 0 ? A.faceIn - Math.PI / 2 : A.faceIn + Math.PI / 2,
-        { len: 2.4, tone: "exec" }));
+    // ---- CORRIDOR
+    stateRug(F, (dLob + dP1) / 2, 0, dP1 - dLob - 1.2, 1.9, SP.rugRed, SP.rugGold, 0.12);
+    for (const dd of [dLob + 4.5, (dLob + dP1) / 2 + 3.5]) stateDome(F, dd, 0, CO);
+
+    // ---- CABINET ROOM: one long table, twenty chairs, the fireplace at its end
+    const cabC = (LC + HW) / 2, cabD = (dLob + dCab1) / 2;
+    stateRug(F, cabD, cabC, Math.min(13.4, dCab1 - dLob - 1.6), HW - LC - 1.6, SP.rugBlue, SP.rugGold, 0.3);
+    const ctab = statePiece(F, "table", cabD, cabC, F.latD, { len: Math.min(10.2, dCab1 - dLob - 4.6), deep: 1.55, seats: 20, tone: "exec" });
+    usable += presidentialUse(ctab);
+    stateCoffers(F, dLob, dCab1, LC, HW, 3.4);
+    stateChandelier(F, cabD - 3.6, cabC, 1.0, CR);
+    stateChandelier(F, cabD + 3.6, cabC, 1.0, CR);
+    const cfire = stateFireplace(F, "d", dCab1 - ST_T / 2, cabC, -1, { canvas: 0x3a3b4a });
+    for (const e of [-1, 1]) stateStandard(F, dCab1 - 0.7, cabC + e * 2.3, e < 0 ? SP.blue : SP.red, false, e);
+    for (const dd of [dLob + 3.0, cabD]) {
+      if (Math.abs(dd - (dCab1 - 3.4)) < 1.6) continue;
+      statePainting(F, "l", LC + ST_T / 2, dd, 1, 1.3, 2.7, 1.1, 0x4a3a33);
+      statePiece(F, "credenza", dd, LC + ST_T / 2 + 0.3, F.face(0, 1), { len: 2.0, h: 0.85, tone: "exec" });
     }
+    // the Bureau folio on the table, at the President's place
+    const folio = F.P(cabD, cabC - 0.42);
+    F.box(cabD, cabC - 0.42, 0.74, 0.765, 0.36, 0.5, SP.red);
+    presidentialProp("cabinet-bureau", "Authorize", "bureau", h, r, folio);
 
-    // Diplomatic reception is one conversational group on the EAST side:
-    // sofa → coffee table → two chairs, all facing one another. No duplicates.
-    const salonD = Math.min(dep - 7.0, Math.max(13.0, dep * 0.57));
-    const salonLat = Math.min(half - 2.2, 8.0);
-    const sofa = A.at(salonD, salonLat);
-    const coffee = A.at(salonD, salonLat - 1.75);
-    A.obox(A.at(salonD + 0.25, salonLat - 1.0), 0.17, 5.0, 0.035, 4.8, P.glow, { pad: 0.25 });
-    usable += presidentialUse(presidentialPiece("sofa", r, h, sofa.x, sofa.z, A.faceIn, { len: 2.6, tone: "exec" }));
-    presidentialPiece("coffee", r, h, coffee.x, coffee.z, A.faceIn, { len: 1.4, deep: 0.75, tone: "exec" });
-    for (const q of [-1, 1]) {
-      const cp = A.at(salonD + q * 1.45, salonLat - 1.9);
-      const face = Math.atan2(coffee.x - cp.x, coffee.z - cp.z);
-      usable += presidentialUse(presidentialPiece("armchair", r, h, cp.x, cp.z, face, { tone: "exec" }));
+    // ---- STAIR HALL
+    usable += presidentialUse(statePiece(F, "bench", dCab1 + 1.3, HW - 0.5, F.face(0, -1), { len: 1.8, tone: "exec" }));
+    stateDome(F, (dCab1 + coreD0) / 2, (LC + HW) / 2, SL);
+
+    // ---- PRESS BRIEFING ROOM
+    // the stage: two 18 cm risers onto a navy dais across the room's end, both
+    // REGISTERED walk platforms (the drawn top is the top you stand on)
+    const prC = (-HW - LC) / 2;
+    const s1 = dP1 - ST_T / 2, s0 = s1 - 3.0;
+    const sl0 = -HW, sl1 = -LC - ST_T / 2;
+    F.box((s0 + s1) / 2, (sl0 + sl1) / 2, 0, 0.36, s1 - s0, sl1 - sl0, SP.navy, { cast: false, plat: true });
+    F.box(s0 - 0.21, (sl0 + sl1) / 2, 0, 0.18, 0.42, sl1 - sl0, SP.navy, { cast: false, plat: true });
+    F.box(s0 + 0.01, (sl0 + sl1) / 2, 0.34, 0.36, 0.04, sl1 - sl0, SP.gold);                   // nosings
+    F.box(s0 - 0.41, (sl0 + sl1) / 2, 0.16, 0.18, 0.04, sl1 - sl0, SP.gold);
+    // the backdrop: blue, a darker oval panel, the seal. No lettering.
+    F.box(s1 - 0.03, prC, 0.36, F.CL - 0.4, 0.04, sl1 - sl0 - 0.4, SP.blue);
+    for (let i = 0; i < 5; i++) {
+      const t = (i + 0.5) / 5 * 2 - 1, half = Math.sqrt(1 - t * t);
+      F.box(s1 - 0.06, prC, 0.9 + (i / 5) * 2.2, 0.9 + ((i + 1) / 5) * 2.2, 0.02, Math.max(0.8, half * 5.0), SP.navy);
     }
-    // Opposite the salon, a press/waiting bench gives the other half of the
-    // hall one legible use without mirroring the entire furniture group.
-    const press = A.at(salonD + 1.2, -Math.min(half - 1.4, 8.5));
-    usable += presidentialUse(presidentialPiece("bench", r, h, press.x, press.z,
-      A.faceIn + Math.PI / 2, { len: 3.0, tone: "exec" }));
-
-    // THE FAR WALL terminates the walk: paired stone pilasters and a brass
-    // entablature framing the engraved state seal, the mansion's motto under
-    // it, and a predecessor's portrait on each flank. Attached architectural
-    // signals, never floor clutter.
-    let symbols = 0;
-    // 0.20 in from the far wall: `inRect` rejects a point closer than 0.10 to
-    // an edge, so authoring ON the wall plane silently deletes the whole
-    // composition — which is exactly how a seal goes missing.
-    const wallD = dep - 0.20;
-    for (const s of [-1, 1]) {
-      A.fitbox(A.at(dep - 0.32, s * 3.55), 1.35, 0.62, 2.40, 0.46, P.marble);
-      A.fitbox(A.at(dep - 0.32, s * 3.55), 1.35, 0.10, 2.16, 0.50, P.gold);
+    stateSeal(F, s1 - 0.085, prC, 2.0, 1.2, false, -1, 0);
+    F.box(s1 - 0.1, prC, F.CL - 0.4, F.CL - 0.2, 0.2, sl1 - sl0 - 0.2, SP.lamp, { emissive: SP.lamp, ei: 0.7, cast: false });   // the lit pelmet
+    F.lights++;
+    // the lectern
+    const podD = s0 + 1.1;
+    F.box(podD, prC, 0.36, 1.44, 0.55, 0.78, SP.walnut, SOLID);
+    F.box(podD - 0.02, prC, 1.44, 1.50, 0.62, 0.86, SP.walnut);
+    F.box(podD - 0.28, prC, 0.46, 1.34, 0.02, 0.62, SP.navy);
+    stateSeal(F, podD - 0.30, prC, 1.02, 0.5, false, -1, 0);
+    F.box(podD + 0.05, prC, 1.50, 1.56, 0.04, 0.3, SP.black);                                 // microphones' bar
+    for (const e of [-1, 1]) F.box(podD - 0.15, prC + e * 0.12, 1.50, 1.75, 0.02, 0.02, SP.black);
+    for (const e of [-1, 1]) stateStandard(F, s0 + 2.2, prC + e * 2.3, e < 0 ? SP.blue : SP.red, false, e);
+    // the seats: seven rows of seven, facing the lectern, an aisle along the
+    // corridor wall where the doors are
+    const row0 = dLob + 3.4, nRows = Math.max(1, Math.min(7, Math.floor((s0 - 2.2 - row0) / 1.05) + 1));
+    let seats = 0;
+    for (let i = 0; i < nRows; i++) for (let j = 0; j < 7; j++) {
+      const l = -HW + 0.75 + j * 0.8;
+      if (l > -LC - 2.4) break;
+      const rec = statePiece(F, "chair", row0 + i * 1.05, l, F.face(1, 0), { tone: "cool", solid: false });
+      seats += presidentialUse(rec);
     }
-    symbols += stateSeal(A, h, r, wallD, 0, 1.63, 3.2, 1.78, 0);
-    // the motto, cut into stone the way the facade's is
-    A.fitbox(A.at(dep - 0.14, 0), 0.40, 4.3, 0.52, 0.16, P.marble);
-    if (statePlate(h, plaqueTex("EXECUTIVE MANSION"), A.at(dep - 0.24, 0).x, r.y + 0.40,
-      A.at(dep - 0.24, 0).z, 3.9, 0.44, A.faceIn, false)) symbols++;
-    for (const s of [-1, 1])
-      symbols += statePortrait(A, h, r, wallD, s * 6.4, 1.72, 1.45, 1.60, 0,
-        s < 0 ? "THE FIRST PRESIDENT" : "THE FOUNDER");
-    // TWO STANDARDS flanking the axis in front of it. This is the pair of
-    // flags the room has never had, and the reason the seal reads as a seal.
-    symbols += stateStandards(A, h, r, dep - 2.1, 2.55, 0x8f3434);
-    // A portrait gallery down the panelled flanks, hung in the GAPS between
-    // the raised panels and clear of both the brass datum and the cornice.
-    for (const s of [-1, 1]) for (const d of [9.0, 16.0, 23.0])
-      if (d < dep - 2.0) symbols += statePortrait(A, h, r, d, s * (wallLat - 0.34), 1.98, 1.30, 1.10, s, null);
+    usable += seats;
+    // the cameras on the back row, and a light over the lectern
+    for (let j = 0; j < 3; j++) {
+      const l = -HW + 1.0 + j * 1.6, dd = dLob + 1.5;
+      F.box(dd, l, 0, 0.03, 0.62, 0.06, SP.black);
+      F.box(dd, l, 0, 0.03, 0.06, 0.62, SP.black);
+      F.box(dd, l, 0.03, 1.45, 0.05, 0.05, SP.black);
+      F.box(dd, l, 1.45, 1.72, 0.42, 0.2, 0x2a2f37);
+    }
+    for (const dd of [row0 + 1.5, row0 + 4.6]) {
+      const m = F.box(dd, prC, F.CL - 0.08, F.CL, 0.3, 6.0, P.light, { emissive: P.light, ei: 0.6, cast: false });
+      if (m) { ceilingStrip(m); F.lights++; }
+      const p = F.P(dd, prC);
+      F.fitLights.push({ x: p.x, z: p.z, r: 5.5, i: 0.7, rect: PR.rectL });
+    }
+    const podP = F.P(podD, prC);
+    F.fitLights.push({ x: podP.x, z: podP.z, r: 4.5, i: 0.9, rect: PR.rectL });
 
-    // THE PRESS CORPS. A seat of state has a press pool standing in the public
-    // half of its hall; that is what the room is FOR between ceremonies. The
-    // program publishes the standing spots and posts them through the ONE
-    // sanctioned atom (citystaff, via CBZ.interiorPeople) — no spawner, no
-    // brain and no budget of its own here, and no political state either: who
-    // holds the seat is presidency.js's to decide, and it can re-read
-    // CBZ.presidentInteriorPressPoints() to move or clear them.
+    // ---- PRESS OFFICE
+    const poC = (-HW + coreL0) / 2;
+    usable += presidentialUse(statePiece(F, "desk", (dP1 + D) / 2 + 0.6, poC - 2.5, F.face(-1, 0), { len: 1.6, tone: "exec" }));
+    usable += presidentialUse(statePiece(F, "sofa", (dP1 + D) / 2, coreL0 - ST_T / 2 - 0.5, F.face(0, -1), { len: 2.2, tone: "exec" }));
+    stateBookcase(F, "d", dP1 + ST_T / 2, poC - 5.2, 1, 2.2, 2.4);
+    stateDome(F, (dP1 + D) / 2, poC, PO);
+
+    // ---- THE PRESS CORPS. A seat of government has a press pool in its
+    // briefing room; the program publishes where they stand and posts them
+    // through citystaff directly (CBZ.interiorPeople shares a city-wide cap
+    // and would drop exactly these rows). president_regime.js clears or
+    // restores the pool through CBZ.presidentInteriorPressSet.
     const pressJobs = [];
-    for (const q of [[9.0, -5.6], [11.4, -8.4], [9.0, 5.6], [11.4, 8.4], [13.6, -6.9]]) {
-      if (q[0] > dep - 4.0) continue;
-      const pp = A.at(q[0], q[1]);
-      if (!inRect(r, pp.x, pp.z, 1.0) || !h.clear(pp.x, pp.z, 0.6)) continue;
-      const rec = { x: h.ox + pp.x, z: h.oz + pp.z, yaw: A.faceOut };
+    const posts = [[row0 + 0.5, -LC - 1.2], [row0 + 2.6, -LC - 1.2], [row0 + 4.7, -LC - 1.2], [dLob + 0.8, -HW + 3.4], [dLob + 0.8, -HW + 5.8]];
+    for (let i = 0; i < posts.length; i++) {
+      const q = posts[i];
+      const pp = F.P(q[0], q[1]);
+      if (!F.h.clear(pp.x, pp.z, 0.35)) continue;
+      const rec = { x: h.ox + pp.x, z: h.oz + pp.z, yaw: F.face(1, 0) };
       PRESIDENTIAL.press.push(rec);
       pressJobs.push({
         x: rec.x, z: rec.z, face: rec.yaw,
         job: "press correspondent", archetype: "worker", pose: "foldarms",
-        opts: { wealth: 0.35, aggr: 0.05, armed: false, outfit: 0x2f3640 },
-        near: 90, far: 150,
+        opts: { wealth: 0.35, aggr: 0.05, armed: false, outfit: 0x2f3640, floorY: F.Y },
+        near: 60, far: 110,
       });
     }
-    // Posted through citystaff DIRECTLY rather than through CBZ.interiorPeople:
-    // that door shares INTERIOR_LIFE_MAX_POSTS with every shop and office in a
-    // 400-lot city and would silently drop the five rows that matter most.
-    // Redeclaring the venue clears its previous rows, so a world rebuild can
-    // never inherit a ghost press pool. citystaff's own VENUE_STAFF_MAX still
-    // caps the live bodies, and the 90 m leash means they exist only when you
-    // are in the house.
-    // THE PRESS CAN LEAVE. president_regime.js decides whether a regime keeps a
-    // press pool (its pressAllowed()); it calls CBZ.presidentInteriorPressSet
-    // on every change. Redeclaring the venue clears the old rows either way,
-    // so "leave" is a venue with zero posts and "return" is the rows again.
     PRESIDENTIAL.pressJobs = pressJobs;
     postPressCorps(!(CBZ.presidentRegime && CBZ.presidentRegime.pressAllowed) || CBZ.presidentRegime.pressAllowed());
 
-    presidentialRoom("statehall", "State Entrance Hall", h, r, usable, symbols, A, {
-      diplomaticSalon: coffee,
-      stateSeal: A.at(dep - 0.25, 0),
-      pressPen: A.at(11.0, 0),
+    const entry = F.P(0, F.doorL);
+    presidentialRoom("cabinetroom", "Cabinet Room", h, { x0: CR.rectL.x0, x1: CR.rectL.x1, z0: CR.rectL.z0, z1: CR.rectL.z1, y: r.y }, usable, F.symbols,
+      { x: entry.x, z: entry.z, nx: F.nx, nz: F.nz, tx: F.tx, tz: F.tz, depth: D, span: F.W }, {
+        cabinetTable: F.P(cabD, cabC),
+        fireplace: cfire,
+        bureauFolio: folio,
+        lobby: F.P(loC, 0),
+      });
+    presidentialRoom("pressroom", "Press Briefing Room", h, { x0: PR.rectL.x0, x1: PR.rectL.x1, z0: PR.rectL.z0, z1: PR.rectL.z1, y: r.y }, seats, 0, null, {
+      podium: Object.assign(F.P(podD, prC), { y: 0.36 }),
+      pressPen: F.P(row0 + 2.6, -LC - 1.2),
     });
-    return { anchors: [] };
+    return stateOut(F);
   }
 
-  function progStateResidence(r, h, opts) {
-    shell(h, r);
-    const A = approach(r, h, opts);
-    const dep = A.depth, half = A.span / 2 - 0.8;
-    let diningUsable = 0, salonUsable = 0, suiteUsable = 0;
-    // Three actual rooms in sequence: state dining, family salon, private
-    // suite. Alternating wide portals preserve a clear route while ensuring a
-    // bed never reads as another prop in the dining hall.
-    const publicDoor = A.lat(-5.2, 2.2), privateDoor = A.lat(5.2, 2.2);
-    const publicWall = dep * 0.38, privateWall = dep * 0.70;
-    if (dep > 22) {
-      A.divider(publicWall, publicDoor, 2.6, h.fh - 0.1);
-      A.divider(privateWall, privateDoor, 2.2, h.fh - 0.1);
-      presidentialPortal(A, publicWall, publicDoor, 2.6);
-      presidentialPortal(A, privateWall, privateDoor, 2.2);
-    } else if (dep > 10) A.divider(dep * 0.57, A.gapLat, 2.0, h.fh - 0.1);
-
-    // A narrow gallery runner connects those staggered portals and makes the
-    // upper floor's circulation intentional rather than leftover carpet.
-    const galleryRun = Math.max(5, dep - 4.4);
-    A.obox(A.at(2.2 + galleryRun / 2, 0), 0.17, 2.6, 0.035, galleryRun, P.rug, { pad: 0.3 });
-    // Pendants down the gallery. They hang UNDER the slab (h.fh - CEIL): the
-    // panels these replace were authored at h.fh - 0.10, i.e. buried inside the
-    // storey slab, and had never been visible in any screenshot.
-    for (const d of [6.2, dep * 0.54, dep - 4.2]) {
-      const p = A.at(d, 0);
-      A.fitbox(p, h.fh - CEIL - 0.10, 0.08, 0.20, 0.08, P.gold);
-      stateLight(A, h, r, p, h.fh - CEIL - 0.28, 2.0, 0.16, 0.44, P.lamp, 0.85);
+  // THE RESOLUTE DESK: a partners' desk of dark timber, two pedestals, the
+  // carved kneehole panel on the visitor's side with the seal in brass, a
+  // leather writing surface; the high-backed chair behind it is a registered
+  // seat (the throne), square to the desk. Worktop at 0.76.
+  const RESOLUTE_TOP = 0.76, THRONE_BACK = 1.12;
+  function stateResoluteDesk(F, d, l) {
+    const L = 1.83, DD = 1.1;
+    for (const e of [-1, 1]) {
+      F.box(d, l + e * (L / 2 - 0.3), 0, 0.06, DD - 0.16, 0.50, 0x2a1a14);                        // recessed kick
+      F.box(d, l + e * (L / 2 - 0.3), 0.06, RESOLUTE_TOP - 0.06, DD - 0.1, 0.56, SP.mahog, SOLID);
+      for (let k = 0; k < 3; k++) F.box(d + DD / 2 - 0.03, l + e * (L / 2 - 0.3), 0.16 + k * 0.18, 0.19 + k * 0.18, 0.02, 0.2, SP.gold);
     }
-
-    // A state dining room near the stairs, sized by the plate and ringed with
-    // seats from the shared furniture kit.
-    const dining = A.at(Math.min(6.2, dep * 0.24), Math.min(half - 2.2, 7.0));
-    A.obox(dining, 0.17, 7.4, 0.035, 4.6, P.rug, { pad: 0.32 });
-    diningUsable += presidentialUse(presidentialPiece("table", r, h, dining.x, dining.z,
-      A.faceIn + Math.PI / 2, { len: Math.min(5.4, A.span * 0.34), deep: 1.25, seats: 8, tone: "warm" }));
-    // A fitted serving credenza and state triptych make this a dining room,
-    // not merely a large table near a partition.
-    const servingD = Math.max(2.4, publicWall - 0.75), servingLat = Math.min(half - 2.0, 7.2);
-    A.obox(A.at(servingD, servingLat), 0.48, 4.0, 0.66, 0.62, P.wood, { pad: 0.3 });
-    A.obox(A.at(servingD - 0.06, servingLat), 0.84, 4.15, 0.08, 0.72, P.marble, { pad: 0.28 });
-    for (const s of [-1, 0, 1]) {
-      A.fitbox(A.at(publicWall - 0.17, servingLat + s * 1.38), 1.78, 1.10, 1.28, 0.045, P.gold);
-      A.fitbox(A.at(publicWall - 0.23, servingLat + s * 1.38), 1.78, 0.84, 1.00, 0.025,
-        s === 0 ? P.glow : P.marble, s === 0 ? { emissive: P.glow, ei: 0.30 } : null);
-    }
-    // The private salon is the opposite half, not furniture sprinkled between
-    // the dining chairs.
-    const lounge = A.at(Math.min(dep - 7.8, dep * 0.52), -Math.min(half - 2.0, 6.8));
-    A.obox(A.at(Math.min(dep - 7.0, dep * 0.55), -Math.min(half - 2.0, 6.8)), 0.17, 6.2, 0.035, 5.4, P.glow, { pad: 0.3 });
-    salonUsable += presidentialUse(presidentialPiece("sofa", r, h, lounge.x, lounge.z, A.faceIn, { len: 2.8, tone: "warm" }));
-    const low = A.at(Math.min(dep - 6.4, dep * 0.52 + 1.5), -Math.min(half - 2.0, 6.8));
-    presidentialPiece("coffee", r, h, low.x, low.z, A.faceIn, { len: 1.5, deep: 0.8, tone: "warm" });
-    for (const s of [-1, 1]) {
-      const cp = A.at(Math.min(dep - 6.2, dep * 0.52 + 1.5), -Math.min(half - 3.0, 6.8) + s * 1.6);
-      salonUsable += presidentialUse(presidentialPiece("armchair", r, h, cp.x, cp.z,
-        Math.atan2(low.x - cp.x, low.z - cp.z), { tone: "warm" }));
-    }
-    // Paired built-in portraits sit on the private threshold, giving the salon
-    // a terminating wall instead of another blank white span.
-    for (const s of [-1, 1]) {
-      const portraitLat = privateDoor - s * 3.15;
-      A.fitbox(A.at(privateWall - 0.16, portraitLat), 1.72, 1.42, 1.62, 0.05, P.gold);
-      A.fitbox(A.at(privateWall - 0.22, portraitLat), 1.72, 1.12, 1.30, 0.025, P.marble);
-    }
-    // The far room is unequivocally residential: one bed with a real lie
-    // anchor and two bedside lamps, not the boss-suite aquarium/crate roll.
-    const bed = A.at(dep - 3.2, 0);
-    A.obox(A.at(dep - 3.5, 0), 0.17, 5.4, 0.035, 6.0, P.rug, { pad: 0.3 });
-    suiteUsable += presidentialUse(presidentialPiece("bed", r, h, bed.x, bed.z, A.faceIn, { len: 2.15, wide: 1.65, tone: "warm" }));
-    for (const s of [-1, 1]) {
-      const lp = A.at(dep - 3.0, s * 1.55);
-      presidentialPiece("lamp", r, h, lp.x, lp.z, 0, { h: 1.25, ei: 0.55 });
-      // Fitted wardrobes bookend the headboard and give the suite useful
-      // storage without adding loose prop scatter.
-      A.fitbox(A.at(dep - 0.48, s * 4.30), 1.32, 1.70, 2.34, 0.62, P.wood);
-      A.fitbox(A.at(dep - 0.55, s * 4.30), 1.30, 0.06, 1.86, 0.68, P.gold);
-    }
-    A.fitbox(A.at(dep - 0.34, 0), 1.62, 4.1, 1.82, 0.10, P.wood);
-    A.fitbox(A.at(dep - 0.43, 0), 1.62, 3.35, 1.28, 0.045, P.gold);
-    const foot = A.at(dep - 6.0, 0);
-    suiteUsable += presidentialUse(presidentialPiece("bench", r, h, foot.x, foot.z, A.faceOut,
-      { len: 2.2, tone: "warm" }));
-
-    // The ledger mirrors the architecture: dining room, family salon and
-    // private suite are three named spaces separated by real partitions.
-    const lat0 = -A.span / 2, lat1 = A.span / 2;
-    presidentialRoom("statedining", "State Dining Room", h,
-      presidentialZoneRect(A, r, 0, publicWall, lat0, lat1), diningUsable, 3, A, {
-      stateDiningTable: dining,
-      publicPortal: A.at(publicWall, publicDoor),
-    });
-    presidentialRoom("familysalon", "Family Salon", h,
-      presidentialZoneRect(A, r, publicWall, privateWall, lat0, lat1), salonUsable, 2, A, {
-      familySalon: low,
-      privatePortal: A.at(privateWall, privateDoor),
-    });
-    presidentialRoom("privatesuite", "Private Presidential Suite", h,
-      presidentialZoneRect(A, r, privateWall, dep, lat0, lat1), suiteUsable, 1, A, {
-      presidentialBed: bed,
-    });
-    return { anchors: [], beds: [] };
+    F.box(d + DD / 2 - 0.08, l, 0.08, RESOLUTE_TOP - 0.1, 0.06, L - 1.2, SP.mahog, SOLID);          // kneehole panel
+    F.box(d + DD / 2 - 0.045, l, 0.24, 0.56, 0.01, 0.32, SP.gold);                                   // the seal, in brass
+    F.box(d, l, RESOLUTE_TOP - 0.06, RESOLUTE_TOP, DD + 0.1, L + 0.1, SP.mahog, SOLID);             // top
+    F.box(d - 0.1, l, RESOLUTE_TOP, RESOLUTE_TOP + 0.004, 0.62, 1.2, SP.green);                      // leather
+    // the chair
+    const t = d - THRONE_BACK;
+    F.box(t, l, 0.01, 0.05, 0.62, 0.07, SP.black);                                                // the star foot
+    F.box(t, l, 0.01, 0.05, 0.07, 0.62, SP.black);
+    F.box(t, l, 0.05, 0.42, 0.10, 0.10, SP.black);
+    F.box(t, l, 0.42, 0.50, 0.62, 0.64, SP.leather);
+    F.box(t - 0.28, l, 0.50, 1.34, 0.12, 0.64, SP.leather);
+    for (const e of [-1, 1]) F.box(t, l + e * 0.32, 0.50, 0.68, 0.48, 0.08, SP.leather);
+    const p = F.P(t, l);
+    seatReg(F.h, p.x, F.Y, p.z, F.face(1, 0), "throne", 0.50);
+    return { desk: F.P(d, l), throne: p };
   }
 
-  function progCabinetRoom(r, h, opts) {
-    shell(h, r);
-    const A = approach(r, h, opts);
-    const dep = A.depth, half = A.span / 2 - 0.7;
-    let usable = 0;
-    const divider = Math.min(7.0, Math.max(4.8, dep * 0.27));
-    if (dep > 11) A.divider(divider, 0, 2.2, h.fh - 0.1);
-
-    // The public-to-secure gradient is built into the room: a runner reaches
-    // a framed clearance portal, then the material shifts to command carpet.
-    const entryRun = Math.max(2.0, divider - 1.4);
-    A.obox(A.at(0.7 + entryRun / 2, 0), 0.17, 2.8, 0.035, entryRun, P.rug, { pad: 0.3 });
-    for (const s of [-1, 1]) {
-      A.obox(A.at(divider, s * 1.28), 1.43, 0.30, 2.70, 0.34, P.marble, { pad: 0.25 });
-      A.obox(A.at(divider - 0.02, s * 1.28), 1.43, 0.07, 2.36, 0.39, P.gold, { pad: 0.20 });
-    }
-    A.obox(A.at(divider, 0), 2.76, 2.85, 0.16, 0.38, P.marble, { pad: 0.25 });
-    A.obox(A.at(divider - 0.10, 0), 2.50, 1.75, 0.34, 0.06, P.glow, { emissive: P.glow, ei: 0.45, pad: 0.2 });
-    // The reception wall carries two fitted information panels instead of
-    // remaining a blank partition around a decorated doorway.
-    for (const s of [-1, 1]) {
-      const panelLat = s * Math.min(half - 1.8, 4.8);
-      A.obox(A.at(divider - 0.10, panelLat), 1.72, 2.65, 1.42, 0.055, P.gold, { pad: 0.24 });
-      A.obox(A.at(divider - 0.16, panelLat), 1.72, 2.34, 1.12, 0.03,
-        s < 0 ? P.glow : P.marble, s < 0 ? { emissive: P.glow, ei: 0.32, pad: 0.22 } : { pad: 0.22 });
-    }
-
-    // A compact staff reception before the secure portal.
-    const reception = A.at(Math.max(2.7, divider - 2.2), -Math.min(half - 1.4, 3.8));
-    usable += presidentialUse(presidentialPiece("desk", r, h, reception.x, reception.z, A.faceIn, { len: 1.6, tone: "exec" }));
-    const wait = A.at(Math.max(2.2, divider - 2.7), Math.min(half - 1.4, 3.8));
-    usable += presidentialUse(presidentialPiece("bench", r, h, wait.x, wait.z, A.faceIn, { len: 2.0, tone: "exec" }));
-
-    // One duty officer works the secure side of the portal. This is a real
-    // terminal and seat, but deliberately not a copied desk farm.
-    const duty = A.at(Math.min(dep - 4.2, divider + 3.0), -Math.min(half - 1.6, 4.6));
-    usable += presidentialUse(presidentialPiece("desk", r, h, duty.x, duty.z, A.faceIn, { len: 1.75, tone: "exec" }));
-
-    // Beyond it: ONE cabinet table, aligned down the length of the wing. The
-    // table builder owns all ten chairs and their sit anchors.
-    const tableD = divider + Math.max(4.5, (dep - divider) * 0.48);
-    const table = A.at(Math.min(dep - 3.5, tableD), 0);
-    A.obox(table, 0.17, Math.min(9.0, A.span - 2.0), 0.04, Math.min(8.0, dep - divider - 1.5), P.glow, { pad: 0.28 });
-    usable += presidentialUse(presidentialPiece("table", r, h, table.x, table.z,
-      A.faceIn + Math.PI / 2, { len: Math.min(7.0, dep - divider - 2.4), deep: 1.45, seats: 10, tone: "exec" }));
-    // Continuous acoustic wainscot and brass datum bind the secure half into
-    // one briefing chamber. These are fitted wall surfaces, not more props —
-    // and they sit ON the wall now (0.15..0.25 off it) instead of floating the
-    // best part of a metre into the room the way `half - 0.22` put them.
-    const chamberRun = Math.max(5.0, dep - divider - 1.2);
-    const wall = A.span / 2;
-    statePanelling(A, h, r, divider + 0.6, divider + 0.6 + chamberRun, wall, 5.4, P.steel);
-
-    // THE BRIEFING WALL — one framed situation screen over three live panels…
-    A.fitbox(A.at(dep - 0.18, 0), 1.52, Math.min(8.4, A.span - 1.8), 1.74, 0.12, P.gold);
-    A.fitbox(A.at(dep - 0.29, 0), 1.52, Math.min(7.9, A.span - 2.3), 1.45, 0.08, P.bezel);
-    for (const s of [-1, 0, 1])
-      A.fitbox(A.at(dep - 0.37, s * 2.25), 1.52, 1.8, 1.12, 0.035, P.glow, { emissive: P.glow, ei: 0.52 });
-    // …flanked by the national standards, which is what makes this the CABINET
-    // room and not a meeting room with a projector, plus the seal on the wall
-    // the table faces.
-    let symbols = 1 + stateStandards(A, h, r, dep - 1.5, Math.min(half - 1.2, 4.9), 0x8f3434);
-    // The seal goes on the long wall the table faces, hung in a GAP between the
-    // wainscot's raised panels and standing clear of the brass datum — so no
-    // two surfaces on that wall ever share a plane.
-    symbols += stateSeal(A, h, r, Math.min(dep - 4.0, divider + 16.8),
-      -(wall - 0.40), 1.78, 1.9, 1.50, -1);
-
-    // A CEILING, AND LIGHT OVER THE TABLE. Same rule as the hall: nothing above
-    // h.fh - CEIL, because that plane is the underside of the storey slab and
-    // the three "recessed panels" this replaces were authored inside it.
-    stateCornice(A, h, r, divider + 0.4, dep, wall);
-    stateCoffers(A, h, r, divider + 1.6, dep - 1.2, Math.min(half - 1.6, 3.4), 5.0);
-    const pendant = function (d, deep) {
-      const p = A.at(d, 0);
-      A.fitbox(p, h.fh - CEIL - 0.09, 0.09, 0.18, 0.09, P.gold);
-      stateLight(A, h, r, p, h.fh - CEIL - 0.26, 1.5, 0.16, deep, P.light, 0.72);
-    };
-    for (const d of [divider + 4.1, divider + 9.1, divider + 14.1]) if (d < dep - 2.4) pendant(d, 3.0);
-    pendant(Math.max(2.4, divider - 3.4), 2.4);      // …and the reception half
-    for (const s of [-1, 1]) for (const d of [divider + 4.5, divider + 13.5])
-      if (d < dep - 2.0) stateSconce(A, h, r, d, wall, s);
-
-    // A physical intelligence folio on the table is the room's verb. The
-    // geometry owner publishes position+intent; presidency.js performs the
-    // real Bureau order through its existing button seam.
-    const folio = A.at(Math.min(dep - 4.0, tableD + 1.0), 0);
-    A.obox(folio, 0.82, 0.72, 0.06, 0.48, P.gold, { pad: 0.25 });
-    presidentialProp("cabinet-bureau", "Authorize Bureau raid", "bureau", h, r, folio);
-    presidentialRoom("cabinetroom", "Cabinet and Briefing Room", h, r, usable + 1, symbols, A, {
-      reception: reception,
-      clearancePortal: A.at(divider, 0),
-      dutyStation: duty,
-      cabinetTable: table,
-      briefingWall: A.at(dep - 0.25, 0),
-      bureauFolio: folio,
-    });
-    return { anchors: [] };
-  }
-
+  /* ========================================================================
+     THE WEST WING, UPPER FLOOR — THE PRESIDENT'S OFFICE.
+     The service stair lands at the end of a corridor that runs the length
+     of the wing. Off it: the chief of staff's office, the outer office where
+     the President's secretaries sit, and the OVAL OFFICE — an oval of
+     panelled wall inside its rectangle, the Resolute desk at the east end in
+     front of three tall windows with the standards behind it, two sofas
+     facing across a low table, and at the west end the fireplace with two
+     armchairs. A private study and dining room open off it to the south.
+     ======================================================================== */
   function progOvalOffice(r, h, opts) {
+    armStateFit();
     shell(h, r);
-    const A = approach(r, h, opts);
-    const dep = A.depth, half = A.span / 2 - 0.7;
+    const F = stateFrame(h, r);
+    const HW = F.half, D = F.D;
+    const core = stateCore(F);
+    const coreD0 = core ? core.d0 : D - 7.5, coreL0 = core ? core.l0 : HW - 4.5;
+    const lCor = Math.max(-HW + 12, stateSnap(F, "d0", HW - 4.0));
+    const dOut = stateSnap(F, "l-", Math.min(12.47, D * 0.38));
+    const dChief = stateSnap(F, "l-", Math.min(20.73, coreD0 - 5.0));
+    const lOvS = stateSnap(F, "d0", Math.max(-HW + 5.0, lCor - 10.8));
+    const dStudy = stateSnap(F, "l-", dOut / 2);
+    if (F.D < 26 || F.W < 16 || dOut < 9 || lCor - lOvS < 8) return stateOfficeFallback(F);
     let usable = 0;
+    // ---- walls
+    const outC = (dOut + dChief) / 2, chC = (dChief + Math.min(coreD0, D)) / 2;
+    const dc = dOut / 2, lc = (lOvS + lCor) / 2;
+    const A = Math.min(5.45, dOut / 2 - 0.55), B = Math.min(4.4, (lCor - lOvS) / 2 - 0.6);
+    const doorOO = lc + Math.min(2.4, B * 0.55);             // the outer office's door into the oval
+    const doorST = dc - Math.min(2.8, A * 0.52);              // the study's
+    // the corridor wall runs to the core (whose own wall carries on past it)
+    stateWall(F, "l", lCor, 0, core && core.l0 < lCor + 0.3 ? coreD0 : D, [
+      { c: dc, w: 1.2, leaf: true, swing: 1, label: "the Oval Office" },
+      { c: outC, w: 1.3, leaf: true, swing: -1, label: "the outer office" },
+      { c: chC, w: 1.1, leaf: true, swing: -1, label: "the chief of staff's office" },
+    ]);
+    stateWall(F, "d", dOut, -HW, lCor, [
+      { c: doorOO, w: 1.2, leaf: true, swing: 1, label: "the Oval Office" },
+      { c: (-HW + lOvS) / 2 + 1.5, w: 1.0, leaf: true, swing: -1, label: "the dining room" },
+    ]);
+    stateWall(F, "l", lOvS, 0, dOut, [{ c: doorST, w: 1.1, leaf: true, swing: -1, label: "the study" }]);
+    stateWall(F, "d", dStudy, -HW, lOvS, [{ c: -HW + 1.1, w: 0.9, leaf: true, swing: 1, label: "the dining room" }]);
+    stateWall(F, "d", dChief, -HW, lCor, []);
+    if (core && core.l0 > lCor + 0.05) F.box(coreD0 - ST_T / 2 - 0.01, (lCor + core.l0) / 2, 0, F.CL, ST_T, core.l0 - lCor, SP.ivory, SOLID);   // close the slot behind the core
+    if (core) F.walls.push({ axis: "d", at: coreD0, from: lCor, to: HW, t: 0, ops: [{ c: F.mouths.length ? (F.mouths[0].l0 + F.mouths[0].l1) / 2 : (coreL0 + HW) / 2, w: 1.6, h: 2.3 }] });
+    // ---- the oval's rectangle: a floor and a ceiling; its walls are behind the curve
+    stateField(F, 0, dOut, lOvS, lCor, SP.oak);
+    const OR = F.rect(0, dOut, lOvS, lCor);
+    F.fitRooms.push({ x0: OR.x0, x1: OR.x1, z0: OR.z0, z1: OR.z1, tint: 0xf6f1e6 });
+    const ovRoom = { rectL: OR };
+    // ---- rooms round it
+    const CO = stateRoom(F, { key: "wwhall", name: "West Wing Corridor", d0: 0, d1: Math.min(coreD0, D), l0: lCor, l1: HW, floor: SP.oak, drape: SP.navy });
+    const OO = stateRoom(F, { key: "outeroffice", name: "Outer Oval Office", d0: dOut, d1: dChief, l0: -HW, l1: lCor, floor: SP.oak, drape: SP.rugGold });
+    const CS = stateRoom(F, { key: "chiefofstaff", name: "Chief of Staff's Office", d0: dChief, d1: D, l0: -HW, l1: lCor, floor: SP.oak, drape: SP.blue, wains: SP.walnut });
+    const STY = stateRoom(F, { key: "presstudy", name: "The President's Study", d0: 0, d1: dStudy, l0: -HW, l1: lOvS, floor: SP.oak, drape: SP.green, wains: SP.walnut });
+    const PD = stateRoom(F, { key: "presdining", name: "Private Dining Room", d0: dStudy, d1: dOut, l0: -HW, l1: lOvS, floor: SP.oak, drape: SP.red });
 
-    // A wide, framed antechamber makes this an office you ARRIVE in. The
-    // opening stays broad enough for the stair route and puts every command
-    // object beyond one deliberate threshold.
-    const portalD = Math.min(7.0, Math.max(5.8, dep * 0.22));
-    if (dep > 14) A.divider(portalD, 0, 4.2, h.fh - 0.1);
-    for (const s of [-1, 1]) {
-      A.obox(A.at(portalD, s * 2.28), 1.42, 0.34, 2.68, 0.36, P.marble, { pad: 0.24 });
-      A.obox(A.at(portalD - 0.02, s * 2.28), 1.42, 0.07, 2.34, 0.40, P.gold, { pad: 0.2 });
-    }
-    A.obox(A.at(portalD, 0), 2.75, 4.9, 0.16, 0.40, P.marble, { pad: 0.22 });
-
-    // A warm rug establishes the office destination and leaves a clean walk
-    // from the stair portal all the way to the desk.
-    const rugStart = portalD + 0.8, rugD = Math.max(4.8, dep - rugStart - 2.2);
-    A.obox(A.at(rugStart + rugD / 2, 0), 0.17, Math.min(A.span - 3.2, 9.2), 0.04, rugD, P.rug, { pad: 0.4 });
-    for (const s of [-1, 1]) A.obox(A.at(rugStart + rugD / 2, s * Math.min(4.42, half - 0.5)), 0.205, 0.07, 0.02, rugD, P.gold, { pad: 0.25 });
-
-    // The presidential desk is square to the long approach with its throne
-    // facing the door. No generic boss-suite dice and no duplicate guest seats.
-    const deskD = dep - 5.0;
-    const desk = A.at(deskD, 0);
-    A.obox(A.at(deskD + 0.15, 0), 0.17, 5.7, 0.035, 4.2, P.glow, { pad: 0.32 });
-    usable += presidentialUse(presidentialPiece("bossDesk", r, h, desk.x, desk.z, A.faceIn,
-      { len: 3.15, deep: 1.2, tone: "exec" }));
-
-    // One coherent conversation group on the side, all aimed at one low table.
-    const loungeD = Math.max(portalD + 4.5, dep * 0.48), loungeLat = Math.min(half - 1.5, 4.6);
-    const sofa = A.at(loungeD, loungeLat);
-    const low = A.at(loungeD + 1.5, loungeLat - 1.55);
-    A.obox(A.at(loungeD + 1.25, loungeLat - 1.0), 0.17, 5.2, 0.035, 4.8, P.marble, { pad: 0.28 });
-    usable += presidentialUse(presidentialPiece("sofa", r, h, sofa.x, sofa.z, A.faceIn, { len: 2.7, tone: "exec" }));
-    presidentialPiece("coffee", r, h, low.x, low.z, A.faceIn, { len: 1.35, deep: 0.72, tone: "exec" });
-    for (const s of [-1, 1]) {
-      const cp = A.at(loungeD + 1.5 + s * 1.35, loungeLat - 1.75);
-      usable += presidentialUse(presidentialPiece("armchair", r, h, cp.x, cp.z,
-        Math.atan2(low.x - cp.x, low.z - cp.z), { tone: "exec" }));
-    }
-    for (const s of [-1, 1]) {
-      const flagLat = s * Math.min(half - 1.0, 4.25);
-      // These are wall-mounted standards: cloth spans sideways and is only
-      // centimetres deep. The old argument order projected each flag almost a
-      // metre into the room, where it read as a freestanding red slab.
-      A.fitbox(A.at(dep - 0.34, flagLat), 1.38, 0.07, 2.58, 0.07, P.gold);
-      A.fitbox(A.at(dep - 0.40, flagLat - s * 0.34), 2.04, 0.90, 1.05, 0.045,
-        s < 0 ? 0x2f4f86 : 0x8f3434);
-    }
-    // Seal behind the chair: framed, inset, centred on the desk axis, and now
-    // carrying the real engraved medallion (the incised relief is the fallback
-    // when the civic canvas texture is not available).
-    let symbols = 2;                                  // the two standards above
-    symbols += stateSeal(A, h, r, dep - 0.20, 0, 1.68, 3.4, 2.25, 0);
-    // Monumental desk wall: paired stone pilasters and a brass entablature
-    // frame the flags/seal as one architectural composition.
-    for (const s of [-1, 1]) {
-      A.fitbox(A.at(dep - 0.30, s * 5.25), 1.45, 0.48, 2.62, 0.42, P.marble);
-      A.fitbox(A.at(dep - 0.38, s * 5.25), 1.45, 0.08, 2.34, 0.46, P.gold);
-    }
-    A.fitbox(A.at(dep - 0.30, 0), 2.78, 11.1, 0.18, 0.42, P.marble);
-    A.fitbox(A.at(dep - 0.38, 0), 2.70, 10.5, 0.06, 0.46, P.gold);
-
-    // Warm panelled perimeter makes the office feel occupied even when all
-    // staff are elsewhere. It stops at the arrival portal and the desk wall.
-    const wall = A.span / 2;
-    statePanelling(A, h, r, portalD + 0.6, dep - 0.9, wall, 5.6, P.wood);
-
-    // THE FIREPLACE. An office of state is a room you receive people in, and
-    // this is the wall the visitor group sits beside. Stone jambs and lintel,
-    // a real firebox with one warm ember bed, a mantel, an overmantel painting
-    // and a bookcase bay on each flank. Every dimension is measured off the
-    // WALL FACE, and no two faces are ever left coplanar.
-    const fireD = Math.min(dep - 7.0, Math.max(loungeD + 4.5, dep * 0.66));
-    const fireLat = wall - 0.32;
-    for (const s of [-1, 1])
-      A.fitbox(A.at(fireD + s * 1.0, fireLat), 0.86, 0.60, 1.72, 0.55, P.marble);   // jambs
-    A.fitbox(A.at(fireD, fireLat), 1.62, 0.56, 0.30, 2.55, P.marble);               // lintel
-    A.fitbox(A.at(fireD, wall - 0.40), 1.80, 0.72, 0.16, 2.78, P.marble);           // mantel
-    A.fitbox(A.at(fireD, wall - 0.16), 0.74, 0.16, 1.28, 1.46, P.bezel);            // firebox
-    A.fitbox(A.at(fireD, wall - 0.66), 0.12, 1.12, 0.14, 2.30, P.marble);           // hearth
-    stateLight(A, h, r, A.at(fireD, wall - 0.36), 0.34, 0.34, 0.36, 1.10, P.lamp, 1.0);
-    symbols += statePortrait(A, h, r, fireD, fireLat, 2.22, 1.50, 0.60, 1, null);
-    for (const s of [-1, 1]) {
-      A.fitbox(A.at(fireD + s * 2.6, fireLat), 1.15, 0.58, 2.20, 1.60, P.wood);     // bookcase
-      for (const sh of [0.55, 1.05, 1.55, 2.05])
-        A.fitbox(A.at(fireD + s * 2.6, fireLat), sh, 0.50, 0.06, 1.50, P.shelf);
-    }
-
-    // Low fitted credenzas occupy the otherwise dead side wall and read as
-    // document storage. They are AGAINST that wall now: `across` is the lateral
-    // extent, so 1.95 across put a 2 m-deep sideboard sticking out of a wall it
-    // was already floating 1.5 m clear of, with its framed panel hanging in
-    // mid-air above it.
-    const credLat = -(wall - 0.30);
-    for (const d of [portalD + 4.0, portalD + 7.4]) {
-      A.obox(A.at(d, credLat), 0.20, 0.56, 0.62, 1.95, P.wood, { pad: 0.30 });
-      A.obox(A.at(d, credLat), 0.82, 0.62, 0.06, 2.05, P.marble, { pad: 0.28 });
-      A.obox(A.at(d, credLat + 0.04), 1.72, 0.055, 1.38, 1.35, P.gold, { pad: 0.24 });
-      A.obox(A.at(d, credLat + 0.07), 1.72, 0.03, 1.10, 1.08, P.glow, { emissive: P.glow, ei: 0.28, pad: 0.22 });
-    }
-
-    // A CEILING and pendants hung under the slab. The three "recessed panels"
-    // this replaces were authored at h.fh - 0.10, inside the storey slab, and
-    // have never once been visible.
-    stateCornice(A, h, r, portalD + 0.4, dep - 0.6, wall, true);
-    stateCoffers(A, h, r, portalD + 2.0, dep - 1.6, Math.min(half - 2.0, 3.6), 5.0);
-    for (const d of [portalD + 4.5, portalD + 9.5, deskD - 1.4]) {
-      const p = A.at(d, 0);
-      A.fitbox(p, h.fh - CEIL - 0.09, 0.09, 0.18, 0.09, P.gold);
-      stateLight(A, h, r, p, h.fh - CEIL - 0.28, 1.7, 0.18, 1.7, P.lamp, 0.85);
-    }
-    for (const s of [-1, 1]) for (const d of [portalD + 2.6, dep - 3.4])
-      if (d > 1.5 && d < dep - 2.0) stateSconce(A, h, r, d, wall, s);
-
-    // Two small, visually distinct desk objects turn the office into a second
-    // command surface. Their actions call the SAME presidency orders as the
-    // Situation Room; this room never invents parallel political state.
-    const phone = A.at(deskD, -0.82), folder = A.at(deskD, 0.82);
-    A.obox(phone, 0.84, 0.48, 0.14, 0.28, P.bezel, { pad: 0.2 });
-    A.obox(A.at(deskD - 0.03, -0.82), 0.96, 0.38, 0.08, 0.10, P.gold, { pad: 0.2 });
-    A.obox(folder, 0.82, 0.62, 0.05, 0.42, P.gold, { pad: 0.2 });
-    presidentialProp("oval-address", "Address the nation", "address", h, r, phone);
-    presidentialProp("oval-pardon", "Sign a pardon", "pardon", h, r, folder);
-    presidentialRoom("ovaloffice", "The President's Office", h, r, usable + 2, symbols, A, {
-      arrivalPortal: A.at(portalD, 0),
-      presidentialDesk: desk,
-      visitorSofa: sofa,
-      visitorTable: low,
-      stateSeal: A.at(dep - 0.25, 0),
-      fireplace: A.at(fireD, wall - 0.6),
-      securePhone: phone,
-      pardonFolder: folder,
+    // ---- THE OVAL
+    const N = 37, step = 2 * Math.PI / N;
+    stateOval(F, {
+      dc: dc, lc: lc, A: A, B: B, n: N, col: SP.cream, wains: SP.cream, sill: 0.75, head: Math.min(F.CL - 0.55, 3.2),
+      doors: [
+        { dir: "l+", c: dc, w: 1.2, to: lCor - ST_T / 2 },
+        { dir: "d+", c: doorOO, w: 1.2, to: dOut - ST_T / 2 },
+        { dir: "l-", c: doorST, w: 1.1, to: lOvS + ST_T / 2 },
+      ],
+      windows: [Math.PI, Math.PI - 3 * step, Math.PI + 3 * step],
     });
-    return { anchors: [] };
+    // the carpet: an oval in slices, blue with a gold border, the seal at its heart
+    const ra = A - 0.75, rb = B - 0.65, ns = 11;
+    for (let i = 0; i < ns; i++) {
+      const t = (i + 0.5) / ns * 2 - 1, half = rb * Math.sqrt(1 - t * t), dd = dc + t * ra, sd = 2 * ra / ns;
+      if (i === 0 || i === ns - 1 || half < 0.9) { F.box(dd, lc, FIELD_T, RUG_T, sd, half * 2, SP.rugGold); continue; }
+      F.box(dd, lc, FIELD_T, RUG_T, sd, half * 2 - 0.56, SP.rugBlue);
+      for (const e of [-1, 1]) F.box(dd, lc + e * (half - 0.14), FIELD_T, RUG_T, sd, 0.28, SP.rugGold);
+    }
+    stateSeal(F, dc, lc, RUG_T + 0.0005, 1.7, true);
+    // the desk, the chair, the standards behind it
+    const deskD = dc - A + 2.25;
+    const RD = stateResoluteDesk(F, deskD, lc);
+    for (const e of [-1, 1]) stateStandard(F, deskD - THRONE_BACK - 0.1, lc + e * 1.85, e < 0 ? SP.blue : SP.red, false, -e);
+    // two sofas facing across the low table, the fireplace and its two chairs
+    const sofaD = dc + 0.6;
+    const sofas = [];
+    for (const e of [-1, 1]) {
+      const s = statePiece(F, "sofa", sofaD, lc + e * 1.6, F.face(0, -e), { len: 2.3, tone: { cloth: 0xd9cfb4, wood: SP.mahog } });
+      sofas.push(s); usable += presidentialUse(s);
+    }
+    const low = F.P(sofaD, lc);
+    presidentialPiece("coffee", r, h, low.x, low.z, F.latD, { len: 1.4, deep: 0.7, tone: { wood: SP.mahog } });
+    const fireAt = stateFireplace(F, "d", dc + A - 0.04, lc, -1, { canvas: 0x3a3b4a, w: 1.8 });
+    for (const e of [-1, 1]) usable += presidentialUse(statePiece(F, "armchair", dc + A - 1.7, lc + e * 1.2, F.face(0, -e), { tone: { cloth: 0x9a7b3f } }));
+    stateChandelier(F, dc, lc, 0.9, ovRoom);
+    for (const e of [-1, 1]) statePiece(F, "planter", dc + A - 2.9, lc + e * (B - 1.3), 0, { kind: "tree", s: 0.9 });
+    // the television, on the curve by the desk (president_office.js hangs it)
+    const phiTV = 2.2, tvS = { d: dc + A * Math.cos(phiTV), l: lc + B * Math.sin(phiTV) };
+    const inw = { d: dc - tvS.d, l: lc - tvS.l }, inl = Math.hypot(inw.d, inw.l) || 1;
+    const tv = F.P(tvS.d + inw.d / inl * 0.02, tvS.l + inw.l / inl * 0.02);
+    const tvBack = F.P(tvS.d - inw.d / inl * 0.6, tvS.l - inw.l / inl * 0.6);
+
+    // ---- OUTER OFFICE: two secretaries' desks, a sofa for whoever is waiting
+    const ooC = (-HW + lCor) / 2;
+    const secDesk = F.P(dOut + 2.3, lc);
+    usable += presidentialUse(statePiece(F, "desk", dOut + 2.3, lc, F.face(-1, 0), { len: 1.5, tone: "exec" }));
+    usable += presidentialUse(statePiece(F, "desk", dChief - 2.4, ooC - 1.5, F.face(-1, 0), { len: 1.5, tone: "exec" }));
+    usable += presidentialUse(statePiece(F, "sofa", outC, -HW + 0.55, F.face(0, 1), { len: 2.3, tone: "exec" }));
+    presidentialPiece("coffee", r, h, F.P(outC, -HW + 1.85).x, F.P(outC, -HW + 1.85).z, F.latD, { len: 1.1, deep: 0.6, tone: "exec" });
+    stateBookcase(F, "d", dChief - ST_T / 2, lc - 1.0, -1, 2.4, 2.4);
+    stateDome(F, outC, ooC, OO);
+
+    // ---- CHIEF OF STAFF
+    const csC = (-HW + lCor) / 2;
+    usable += presidentialUse(statePiece(F, "desk", D - 2.9, csC + 1.0, F.face(-1, 0), { len: 1.8, tone: "exec" }));
+    usable += presidentialUse(statePiece(F, "table", dChief + 4.2, -HW + 3.5, F.latD, { len: 2.4, deep: 1.1, seats: 6, tone: "exec" }));
+    usable += presidentialUse(statePiece(F, "sofa", dChief + 4.6, lCor - ST_T / 2 - 0.5, F.face(0, -1), { len: 2.2, tone: "exec" }));
+    stateBookcase(F, "d", dChief + ST_T / 2, csC + 1.0, 1, 2.6, 2.5);
+    stateDome(F, dChief + 3.5, csC, CS);
+    stateDome(F, D - 3.0, csC, CS);
+
+    // ---- STUDY and PRIVATE DINING
+    const stC = (-HW + lOvS) / 2;
+    usable += presidentialUse(statePiece(F, "desk", dStudy - 1.3, stC - 0.4, F.face(-1, 0), { len: 1.4, tone: "exec" }));
+    usable += presidentialUse(statePiece(F, "armchair", 1.4, stC - 1.0, F.face(1, 0), { tone: "warm" }));
+    statePiece(F, "credenza", dStudy - 0.9, lOvS - ST_T / 2 - 0.3, F.face(0, -1), { len: 1.2, tone: "exec" });
+    stateDome(F, dStudy / 2, stC, STY);
+    const pdD = (dStudy + dOut) / 2;
+    usable += presidentialUse(statePiece(F, "table", pdD, stC, F.latD, { len: 2.0, deep: 1.0, seats: 6, tone: "warm" }));
+    statePiece(F, "credenza", dOut - ST_T / 2 - 0.3, -HW + 2.4, F.face(-1, 0), { len: 1.6, tone: "warm" });
+    stateChandelier(F, pdD, stC, 0.8, PD);
+
+    // ---- CORRIDOR
+    const coC = (lCor + HW) / 2;
+    stateRug(F, (Math.min(coreD0, D) - 1.6) / 2 + 0.3, coC, Math.min(coreD0, D) - 2.8, 2.0, SP.rugRed, SP.rugGold, 0.12);
+    for (const dd of [4.0, Math.min(coreD0, D) / 2, Math.min(coreD0, D) - 4.0]) stateDome(F, dd, coC, CO);
+    usable += presidentialUse(statePiece(F, "bench", (dc + outC) / 2, lCor + ST_T / 2 + 0.35, F.face(0, 1), { len: 2.0, tone: "exec" }));
+
+    // ---- the office's frame: in at the outer office door, looking at the desk
+    const ovEntry = F.P(dc + A, lc);
+    const n = { x: -F.nx, z: -F.nz };
+    const room = presidentialRoom("ovaloffice", "The Oval Office", h, r, usable + 2, F.symbols, {
+      x: ovEntry.x, z: ovEntry.z, nx: n.x, nz: n.z, tx: -n.z, tz: n.x, depth: 2 * A, span: 2 * B,
+    }, {
+      arrivalPortal: F.P(dOut, doorOO),
+      presidentialDesk: RD.desk,
+      throne: RD.throne,
+      visitorSofa: sofas[0] ? F.P(sofaD, lc - 1.6) : null,
+      visitorTable: low,
+      stateSeal: F.P(dc, lc),
+      fireplace: F.P(dc + A - 0.9, lc),
+      securePhone: F.P(deskD, lc - 0.55),
+      pardonFolder: F.P(deskD, lc + 0.55),
+      tv: tv, tvBack: tvBack,
+      staffDoor: F.P(dc + A - 2.0, doorOO - 0.1),
+      chiefSpot: F.P(dc - 1.8, lc - 2.4),
+      line0: F.P(dc - 0.6, lc - 2.95),
+      line1: F.P(dc + 0.6, lc - 2.95),
+      line2: F.P(dc + 1.8, lc - 2.8),
+      pressSpot: F.P(dc - 1.8, lc + 2.4),
+      secretaryDesk: secDesk,
+      secretaryPost: F.P(dOut + 3.2, lc + 1.0),
+    });
+    room.deskTop = RESOLUTE_TOP;
+    presidentialProp("oval-address", "Address", "address", h, r, F.P(deskD, lc - 0.55));
+    presidentialProp("oval-pardon", "Pardon", "pardon", h, r, F.P(deskD, lc + 0.55));
+    presidentialRoom("outeroffice", "Outer Oval Office", h, { x0: OO.rectL.x0, x1: OO.rectL.x1, z0: OO.rectL.z0, z1: OO.rectL.z1, y: r.y }, 0, 0, null, { secretary: secDesk });
+    presidentialRoom("chiefofstaff", "Chief of Staff's Office", h, { x0: CS.rectL.x0, x1: CS.rectL.x1, z0: CS.rectL.z0, z1: CS.rectL.z1, y: r.y }, 0, 0, null, {});
+    return stateOut(F);
+  }
+  // an office on a plate the plan above does not fit: still a room with a
+  // desk the President can be seated at, and the frame the office code needs
+  function stateOfficeFallback(F) {
+    const room = stateRoom(F, { key: "ovaloffice", name: "The Oval Office", d0: 0, d1: F.D, l0: -F.half, l1: F.half, floor: SP.oak, drape: SP.blue });
+    const deskD = 3.4;
+    const RD = stateResoluteDesk(F, deskD, 0);
+    stateChandelier(F, F.D / 2, 0, 1.0, room);
+    // the frame looks from the far end toward the desk, so the chair (which
+    // faces +d) is `THRONE_BACK` along the frame's direction from the desk
+    const entry = F.P(F.D - 0.5, 0);
+    const rec = presidentialRoom("ovaloffice", "The Oval Office", F.h, F.r, 1, F.symbols, {
+      x: entry.x, z: entry.z, nx: -F.nx, nz: -F.nz, tx: F.nz, tz: -F.nx, depth: F.D - 0.5, span: F.W,
+    }, { presidentialDesk: RD.desk, throne: RD.throne, arrivalPortal: F.P(F.D - 1.0, 0) });
+    rec.deskTop = RESOLUTE_TOP;
+    return stateOut(F);
   }
 
   CBZ.presidentInteriorRooms = function () {
@@ -3302,14 +4443,2247 @@
     };
   };
 
+  // ========================================================================
+  //  FEDERAL ROOMS — the Bureau and the Defence Headquarters.
+  //
+  //    securitylobby  a guarded arrival: screening (x-ray belt, two walk-
+  //                   through arches, a bag table), a manned security desk,
+  //                   and a turnstile line that runs WALL TO WALL, so the
+  //                   only way into the building is through a lane
+  //    opscenter      a watch floor: an enclosed room, a video wall on the
+  //                   far wall, console rows facing it, a watch officer's
+  //                   desk at the back, a dark ceiling with linear lights
+  //    briefingroom   a real room off the plate with one door: a long table,
+  //                   chairs on both sides and along the walls, a lectern and
+  //                   a screen at the head, standards either side
+  //    directorsuite  the man at the top: a suite behind a door, an outer
+  //                   office with his assistant and a waiting group, then his
+  //                   own office (desk, sitting group, credenza, standards)
+  //
+  //  THE FLOOR LAW, which every piece below obeys: furniture, bases and walls
+  //  stand AT the storey's walk surface (r.y); the only finishes this section
+  //  lays are rugs/mats 1.5 cm thick whose bottom sits 5 mm over it, so their
+  //  top is 2 cm over the surface a body stands on. Nothing here is raised, so
+  //  no platform is owed. Every counter, console row, barrier and wall that a
+  //  body would walk into is `solid`; the turnstile lanes are 0.95 m clear, so
+  //  a 0.38 m body passes and nothing else does. No text anywhere: screens are
+  //  light, not words; no plaques, no seals, no signs.
+  //  Emissive boxes are the one thing core/batch.js cannot merge, so each room
+  //  spends a handful (the linear lights, the video wall, the uplights) and
+  //  registers every one with the day ramp.
+  // ========================================================================
+  const FED = {
+    ceilTile: 0xc9ccd2,        // P.worktop's bucket: pale acoustic tile
+    ceilDark: 0x2a2f37,        // P.chair's bucket: the watch floor's black ceiling
+    carpet: 0x3d4650,          // P.sofa's bucket: carpet tile
+    mat: 0x14181e,             // P.bezel's bucket: entrance matting
+    frost: 0xb9bcc4,           // P.wall's bucket: frosted glass balustrade panels
+    steel: 0x8a939c,           // P.shelf's bucket: brushed steel
+    navy: 0x2c3e6b,            // standards' cloth (govcomplex's flag blue)
+  };
+  // one approach frame + the storey's real ceiling + a bottom-based box, so a
+  // program authors "stands on the floor" as yb = 0 and never types a centre.
+  function fedFrame(r, h, opts) {
+    const A = approach(r, h, opts);
+    const k = floorIndexOf(r, h);
+    // the slab over this storey is poured (k+1)*FH-0.2 .. (k+1)*FH, so the
+    // ceiling plane is its underside, measured up from THIS floor's surface
+    const ceil = Math.max(2.6, (k + 1) * h.fh - 0.20 - r.y);
+    function B(p, yb, across, hh, deep, c, o) {
+      o = o || {};
+      if (!p || !inRect(r, p.x, p.z, o.edge == null ? 0.05 : o.edge)) return null;
+      if (o.clear && !h.clear(p.x, p.z, o.clear)) return null;
+      const lo = o.emit ? { emissive: o.emit, ei: o.ei || 0.6, cast: false } : { cast: false, solid: !!o.solid };
+      return h.b.lbox(p.x, r.y + yb + hh / 2, p.z, A.along ? deep : across, hh, A.along ? across : deep, c, lo);
+    }
+    function lit(p, yb, across, hh, deep, c, ei) {
+      const m = B(p, yb, across, hh, deep, c, { emit: c, ei: ei });
+      if (m) ceilingStrip(m);
+      return m ? 1 : 0;
+    }
+    // a rug/mat: THE FLOOR LAW's one allowed finish (bottom +5 mm, top +20 mm)
+    function rug(d, l, across, deep, c) { return B(A.at(d, l), 0.005, across, 0.015, deep, c, { edge: 0.1 }); }
+    function reserved(x, z, pad) {
+      const L = (h.b.shaftRects || []).concat(h.b.keepRects || []);
+      for (let i = 0; i < L.length; i++) {
+        const q = L[i];
+        if (x > q.x0 - pad && x < q.x1 + pad && z > q.z0 - pad && z < q.z1 + pad) return true;
+      }
+      return false;
+    }
+    // split a run [a,b] into the stretches whose points are clear of every
+    // reserved footprint (stair core, its landing mouth, a lift chase): a wall
+    // or a barrier never crosses the way up.
+    function clearRuns(a, b, at) {
+      const out = [], step = 0.25;
+      let s0 = null;
+      for (let t = a; t <= b + 1e-6; t += step) {
+        const p = at(Math.min(t, b));
+        const ok = !reserved(p.x, p.z, 0.45);
+        if (ok && s0 == null) s0 = t;
+        if (!ok && s0 != null) { if (t - step - s0 > 0.3) out.push([s0, t - step]); s0 = null; }
+      }
+      if (s0 != null && b - s0 > 0.3) out.push([s0, b]);
+      return out;
+    }
+    // a doorway in a partition: jambs, head, and the leaf standing open against
+    // the wall on the room side. `alongLat` = the wall runs laterally.
+    function doorway(D, l, gw, alongLat, into) {
+      const hd = 2.25, lf = Math.min(1.0, gw - 0.18);
+      for (const s of [-1, 1]) {
+        if (alongLat) B(A.at(D, l + s * (gw / 2 + 0.04)), 0, 0.08, hd, PWT + 0.05, FED.steel);
+        else B(A.at(D + s * (gw / 2 + 0.04), l), 0, PWT + 0.05, hd, 0.08, FED.steel);
+      }
+      if (alongLat) {
+        B(A.at(D, l), hd, gw + 0.16, 0.08, PWT + 0.05, FED.steel);
+        // the leaf, swung 90 degrees into the room, hinged on the -lat jamb
+        B(A.at(D + into * (lf / 2 + 0.06), l - gw / 2 + 0.05), 0.02, 0.045, 2.18, lf, P.wood);
+      } else {
+        B(A.at(D, l), hd, PWT + 0.05, 0.08, gw + 0.16, FED.steel);
+        B(A.at(D - gw / 2 + 0.05, l + into * (lf / 2 + 0.06)), 0.02, lf, 2.18, 0.045, P.wood);
+      }
+    }
+    // SOLID partitions from the floor to the slab, each doorway cased.
+    // wallLat: runs laterally at depth D from lat l0..l1; gaps are lateral centres.
+    function wallLat(D, l0, l1, gaps, gw, into) {
+      gw = gw || 1.2;
+      const lo = Math.min(l0, l1), hi = Math.max(l0, l1);
+      const cuts = (gaps || []).filter(function (g) { return g > lo + gw / 2 && g < hi - gw / 2; }).sort(function (a, b) { return a - b; });
+      let a = lo;
+      for (const g of cuts.concat([hi + gw])) {
+        const b = Math.min(hi, g - gw / 2);
+        if (b - a > 0.12) for (const q of clearRuns(a, b, function (t) { return A.at(D, t); })) {
+          B(A.at(D, (q[0] + q[1]) / 2), 0, q[1] - q[0], ceil, PWT, P.wall, { solid: true, edge: -0.3 });
+          B(A.at(D - (into || 1) * 0.1, (q[0] + q[1]) / 2), 0, q[1] - q[0], 0.10, 0.03, P.bezel, { edge: -0.3 });   // skirting
+        }
+        if (g <= hi) {
+          B(A.at(D, g), 2.33, gw + 0.02, ceil - 2.33, PWT, P.wall, { solid: true, edge: -0.3 });  // over the door
+          doorway(D, g, gw, true, into || 1);
+        }
+        a = g + gw / 2;
+      }
+    }
+    // wallDep: runs along the depth at lateral l from depth d0..d1; gaps are depth centres.
+    function wallDep(l, d0, d1, gaps, gw, into) {
+      gw = gw || 1.2;
+      const lo = Math.min(d0, d1), hi = Math.max(d0, d1);
+      const cuts = (gaps || []).filter(function (g) { return g > lo + gw / 2 && g < hi - gw / 2; }).sort(function (a, b) { return a - b; });
+      let a = lo;
+      for (const g of cuts.concat([hi + gw])) {
+        const b = Math.min(hi, g - gw / 2);
+        if (b - a > 0.12) for (const q of clearRuns(a, b, function (t) { return A.at(t, l); })) {
+          B(A.at((q[0] + q[1]) / 2, l), 0, PWT, ceil, q[1] - q[0], P.wall, { solid: true, edge: -0.3 });
+          B(A.at((q[0] + q[1]) / 2, l - (into || 1) * 0.1), 0, 0.03, 0.10, q[1] - q[0], P.bezel, { edge: -0.3 });
+        }
+        if (g <= hi) {
+          B(A.at(g, l), 2.33, PWT, ceil - 2.33, gw + 0.02, P.wall, { solid: true, edge: -0.3 });
+          doorway(g, l, gw, false, into || 1);
+        }
+        a = g + gw / 2;
+      }
+    }
+    // A CEILING over a room: an acoustic tile field hung 6 cm under the slab,
+    // a bulkhead fascia round its free edges (so a cloud over part of a plate
+    // reads as built, not as a floating sheet), and linear lights run along
+    // the depth. `n` lights, `dark` for the watch floor.
+    function ceiling(d0, d1, l0, l1, n, dark, ei) {
+      const md = (d0 + d1) / 2, ml = (l0 + l1) / 2, dd = d1 - d0, ll = l1 - l0;
+      const cy = ceil - 0.085;
+      B(A.at(md, ml), cy, ll, 0.025, dd, dark ? FED.ceilDark : FED.ceilTile, { edge: -0.5 });
+      // fascia (only where the cloud does not meet a wall of the room)
+      B(A.at(d0 + 0.04, ml), ceil - 0.40, ll, 0.34, 0.08, P.wall, { edge: -0.5 });
+      B(A.at(d1 - 0.04, ml), ceil - 0.40, ll, 0.34, 0.08, P.wall, { edge: -0.5 });
+      B(A.at(md, l0 + 0.04), ceil - 0.40, 0.08, 0.34, dd, P.wall, { edge: -0.5 });
+      B(A.at(md, l1 - 0.04), ceil - 0.40, 0.08, 0.34, dd, P.wall, { edge: -0.5 });
+      let lights = 0;
+      for (let i = 0; i < n; i++) {
+        const l = l0 + ll * (i + 0.5) / n;
+        lights += lit(A.at(md, l), cy - 0.03, 0.14, 0.03, Math.max(1, dd - 1.6), P.light, ei == null ? 0.55 : ei);
+      }
+      return lights;
+    }
+    // A STANDARD: weighted base ON the floor, pole, finial, cloth hanging flat.
+    function standard(d, l, side) {
+      const p = A.at(d, l);
+      if (!inRect(r, p.x, p.z, 0.3)) return 0;
+      B(p, 0, 0.46, 0.06, 0.46, P.bezel);
+      B(p, 0.06, 0.07, 2.44, 0.07, P.gold);
+      B(p, 2.50, 0.14, 0.14, 0.14, P.gold);
+      // the cloth hangs flat off the pole toward the axis, facing the room
+      B(A.at(d - 0.06, l - side * 0.44), 1.30, 0.80, 1.10, 0.04, FED.navy);
+      B(A.at(d - 0.06, l - side * 0.44), 1.26, 0.82, 0.04, 0.05, P.gold);   // fringe
+      return 1;
+    }
+    // CBZ.furnish, drawn through this host (seats come back in WORLD coords)
+    function piece(name, d, l, yaw, o) {
+      const F = CBZ.furnish, fn = F && F[name];
+      if (typeof fn !== "function") return null;
+      const p = A.at(d, l);
+      if (!inRect(r, p.x, p.z, 0.6) || !h.clear(p.x, p.z, 0.5)) return null;
+      const oo = Object.assign({ tone: "exec", solid: true }, o || {}, { box: h.b.lbox, ox: h.ox, oz: h.oz, oy: 0, lot: null });
+      try { return name === "lamp" ? fn(p.x, r.y, p.z, oo) : fn(p.x, r.y, p.z, yaw || 0, oo); } catch (e) { return null; }
+    }
+    function planter(d, l, s) {
+      const p = A.at(d, l);
+      if (!CBZ.furnish || !CBZ.furnish.planter || !inRect(r, p.x, p.z, 0.6) || !h.clear(p.x, p.z, 0.6)) return;
+      try { CBZ.furnish.planter(p.x, r.y, p.z, 0, { box: h.b.lbox, ox: h.ox, oz: h.oz, kind: "tree", s: s || 1.0 }); } catch (e) {}
+    }
+    // an anchor straight off a furnish seat record (world coords in, lx/lz out)
+    function seatAnchor(list, s, kind) {
+      if (!s) return null;
+      const a = { x: s.x, y: r.y, z: s.z, face: s.face != null ? s.face : s.yaw, lx: s.x - h.ox, lz: s.z - h.oz,
+        cushionH: s.cushion != null ? s.cushion : 0.45, floorBelow: 0 };
+      if (kind) a.kind = kind;
+      list.push(a);
+      return a;
+    }
+    return { A: A, h: h, r: r, ceil: ceil, B: B, lit: lit, rug: rug, wallLat: wallLat, wallDep: wallDep,
+      ceiling: ceiling, standard: standard, piece: piece, planter: planter, seatAnchor: seatAnchor, clearRuns: clearRuns };
+  }
+
+  // ---- (1) THE SECURITY LOBBY -------------------------------------------------
+  function progSecurityLobby(r, h, opts) {
+    shell(h, r);
+    const F = fedFrame(r, h, opts), A = F.A, B = F.B;
+    const anchors = [];
+    const dep = A.depth, span = A.span, half = span / 2;
+    if (dep < 14 || span < 12) { const o = progLobby(r, h, opts); return o; }
+    // the whole security zone is centred on the way you come in
+    const gl = A.lat(A.gapLat, 7.0);
+    const L = function (v) { return A.lat(gl + v, 0.9); };
+    // ---- ARRIVAL: matting inside the door, a visitor bench group off the axis
+    F.rug(1.9, gl, 4.4, 3.0, FED.mat);
+    // ---- SCREENING at depth 6: x-ray belt (bags go through it), two arches
+    const DS = 6.2;
+    { const xl = L(-3.6);
+      B(A.at(DS, xl), 0, 1.05, 1.25, 2.1, P.desk, { solid: true });                 // the machine
+      B(A.at(DS, xl), 0.25, 0.70, 0.62, 2.14, P.bezel);                             // the tunnel mouth
+      B(A.at(DS - 1.85, xl), 0, 0.72, 0.74, 1.6, P.steel, { solid: true });          // in-feed rollers
+      B(A.at(DS + 1.85, xl), 0, 0.72, 0.74, 1.6, P.steel, { solid: true });          // out-feed rollers
+      B(A.at(DS - 1.85, xl), 0.74, 0.68, 0.04, 1.56, FED.steel);
+      B(A.at(DS + 1.85, xl), 0.74, 0.68, 0.04, 1.56, FED.steel);
+      // the operator's screen on a post beside the tunnel, and his stool
+      B(A.at(DS, xl - 0.95), 0, 0.08, 1.10, 0.08, P.steel);
+      B(A.at(DS, xl - 0.95), 1.10, 0.10, 0.34, 0.46, P.bezel);
+      B(A.at(DS, xl - 0.89), 1.14, 0.02, 0.26, 0.38, P.screen);
+      const st = F.piece("stool", DS, xl - 1.55, Math.atan2(A.tx, A.tz));
+      if (st && st.seats) F.seatAnchor(anchors, st.seats[0]);
+    }
+    for (const al of [L(-1.0), L(1.0)]) {                                           // walk-through arches
+      for (const s of [-1, 1]) B(A.at(DS, al + s * 0.52), 0, 0.12, 2.15, 0.62, FED.steel, { solid: true });
+      B(A.at(DS, al), 2.15, 1.16, 0.24, 0.66, FED.steel);
+      B(A.at(DS - 0.33, al + 0.52), 1.30, 0.04, 0.22, 0.02, P.glow);               // the status light
+    }
+    { const tl = L(3.4);                                                            // the bag table
+      B(A.at(DS + 0.2, tl), 0, 0.9, 0.88, 1.8, P.desk, { solid: true });
+      B(A.at(DS + 0.2, tl), 0.88, 0.96, 0.04, 1.86, P.worktop);
+      B(A.at(DS - 0.4, tl), 0.92, 0.46, 0.08, 0.34, P.bezel);                      // a grey bin
+    }
+    // stanchion posts funnel the queue into the arches (a waist rail between)
+    for (let i = 0; i < 3; i++) for (const s of [-1, 1]) {
+      const pd = DS - 2.6 - i * 1.0, pl = L(s * 2.1);
+      B(A.at(pd, pl), 0, 0.30, 0.03, 0.30, P.bezel);
+      B(A.at(pd, pl), 0.03, 0.06, 0.92, 0.06, FED.steel);
+    }
+    for (const s of [-1, 1]) B(A.at(DS - 3.6, L(s * 2.1)), 0.86, 0.03, 0.04, 2.0, FED.navy);
+    // ---- THE SECURITY DESK, square to the door, on the other flank --------------
+    { const dl = L(7.2), dd = DS - 0.8;
+      B(A.at(dd, dl), 0, 3.4, 1.10, 0.36, P.table, { solid: true });                // the front panel
+      B(A.at(dd, dl), 1.10, 3.6, 0.05, 0.50, P.marble);                            // transaction ledge
+      B(A.at(dd + 0.55, dl), 0, 3.4, 0.74, 0.70, P.desk, { solid: true });           // the work surface
+      B(A.at(dd + 0.55, dl), 0.74, 3.5, 0.03, 0.74, P.worktop);
+      for (let i = -1; i <= 1; i++) {                                               // the camera wall of monitors
+        B(A.at(dd + 0.40, dl + i * 0.95), 0.77, 0.62, 0.40, 0.06, P.bezel);
+        B(A.at(dd + 0.43, dl + i * 0.95), 0.80, 0.54, 0.32, 0.02, P.screen);
+      }
+      const c1 = A.at(dd + 1.35, dl - 0.8), c2 = A.at(dd + 1.35, dl + 0.8);
+      for (const c of [c1, c2]) if (inRect(r, c.x, c.z, 0.5)) {
+        taskChair(h, c.x, r.y, c.z, -A.nx, -A.nz, 0.49);
+        anchors.push({ x: h.ox + c.x, y: r.y, z: h.oz + c.z, face: A.faceIn, lx: c.x, lz: c.z, cushionH: 0.49, floorBelow: 0 });
+      }
+    }
+    // ---- THE TURNSTILE LINE: wall to wall, lanes in the middle ------------------
+    const DB = Math.min(dep - 7, 11.5);
+    const LANES = 5, PITCH = 1.25, HOUSE = 0.30;         // 0.95 m clear per lane
+    const l0 = L(-(LANES * PITCH) / 2);
+    for (let i = 0; i <= LANES; i++) {
+      const hl = l0 + i * PITCH;
+      B(A.at(DB, hl), 0, HOUSE, 1.02, 1.70, FED.steel, { solid: true });            // the cabinet
+      B(A.at(DB, hl), 1.02, HOUSE + 0.04, 0.03, 1.74, P.bezel);                    // the glass top
+      B(A.at(DB - 0.55, hl), 1.05, 0.10, 0.02, 0.12, P.glow);                      // the card reader
+      // the wings, retracted into the cabinet (open lane), frosted
+      if (i < LANES) B(A.at(DB, hl + HOUSE / 2 + 0.03), 0.30, 0.02, 0.62, 0.52, FED.frost);
+    }
+    // the balustrade either side of the bank, to the walls
+    const bank0 = l0 - HOUSE / 2, bank1 = l0 + LANES * PITCH + HOUSE / 2;
+    for (const seg of [[-half, bank0], [bank1, half]]) {
+      const a = Math.max(-half, seg[0]), b = Math.min(half, seg[1]);
+      if (b - a < 0.2) continue;
+      for (const run of F.clearRuns(a, b, function (t) { return A.at(DB, t); })) {
+        const mid = (run[0] + run[1]) / 2, len = run[1] - run[0];
+        B(A.at(DB, mid), 0, len, 0.12, 0.10, P.bezel, { edge: -0.6 });             // shoe
+        B(A.at(DB, mid), 0.12, len, 0.90, 0.03, FED.frost, { solid: true, edge: -0.6 });
+        B(A.at(DB, mid), 1.02, len, 0.04, 0.08, FED.steel, { edge: -0.6 });         // top rail
+        for (const e of [run[0] + 0.04, run[1] - 0.04]) B(A.at(DB, e), 0, 0.07, 1.06, 0.07, FED.steel);
+        for (let t = run[0] + 1.5; t < run[1] - 0.4; t += 3.0) B(A.at(DB, t), 0, 0.06, 1.02, 0.06, FED.steel);
+      }
+    }
+    // ---- BEYOND THE LINE: a stone wall of honour, two standards, a bench --------
+    const DW = Math.min(dep - 2.4, DB + 8.5);
+    if (DW - DB > 4.5) {
+      B(A.at(DW, gl), 0, 9.0, 0.30, 0.60, P.bezel, { solid: true });               // plinth
+      B(A.at(DW, gl), 0.30, 8.6, Math.min(3.2, F.ceil - 0.6), 0.40, P.marble, { solid: true });
+      B(A.at(DW - 0.24, gl), 1.02, 8.4, 0.05, 0.10, P.gold);                       // brass ledge
+      for (const s of [-1, 1]) F.lit(A.at(DW - 0.55, gl + s * 3.0), 0, 0.30, 0.06, 0.30, P.lamp, 0.8);   // uplights
+      F.standard(DW - 0.9, L(-5.2), -1);
+      F.standard(DW - 0.9, L(5.2), 1);
+      const bn = F.piece("bench", DW - 3.4, gl, A.faceOut);
+      if (bn && bn.seats) for (const s of bn.seats) F.seatAnchor(anchors, s);
+    }
+    // ---- a waiting group for visitors, before screening, off the queue ----------
+    { const wd = Math.min(4.2, DS - 2.0), wl = L(-8.2);
+      F.rug(wd, wl, 3.4, 2.6, P.rug);
+      const s1 = F.piece("sofa", wd - 0.95, wl, A.faceOut, { tone: "cool" });
+      const s2 = F.piece("sofa", wd + 0.95, wl, A.faceIn, { tone: "cool" });
+      F.piece("coffee", wd, wl, 0);
+      for (const s of [s1, s2]) if (s && s.seats) for (const q of s.seats) F.seatAnchor(anchors, q);
+    }
+    F.planter(2.0, L(-3.4), 1.0);
+    F.planter(2.0, L(3.4), 1.0);
+    F.planter(DB + 2.4, L(-5.6), 1.1);
+    F.planter(DB + 2.4, L(5.6), 1.1);
+    // ---- THE CEILING over the zone -------------------------------------------------
+    const zh = Math.min(half - 0.5, 12);
+    F.ceiling(0.6, Math.min(dep - 0.6, DW + 1.5), A.lat(gl - zh, 0.5), A.lat(gl + zh, 0.5), 5, false, 0.55);
+    // ---- THE POSTS: one at each arch, one at the lanes, one on the far side
+    anchorAt(A, anchors, DS + 1.3, L(-1.0), A.faceIn, "guard", "foldarms");
+    anchorAt(A, anchors, DS + 1.3, L(1.0), A.faceIn, "guard", "foldarms");
+    anchorAt(A, anchors, DB + 1.4, L(LANES * PITCH / 2 + 1.2), A.faceIn, "guard", "foldarms");
+    anchorAt(A, anchors, DB - 1.6, L(-(LANES * PITCH / 2 + 1.6)), A.faceOut, "guard", "foldarms");
+    return { anchors: anchors };
+  }
+
+  // ---- (2) THE OPERATIONS CENTRE (the watch floor) --------------------------
+  function progOpsCenter(r, h, opts) {
+    shell(h, r);
+    const F = fedFrame(r, h, opts), A = F.A, B = F.B;
+    const anchors = [];
+    const dep = A.depth, span = A.span, half = span / 2;
+    if (dep < 11 || span < 9) return progDeskFarm(r, h);
+    const W = Math.min(span - 0.6, 30), wh = W / 2;           // the room's width
+    const D0 = Math.max(2.4, Math.min(5.0, dep - 17));         // its front wall
+    const D1 = dep;                                            // the far facade
+    const walled = W < span - 1.4;
+    // ---- THE ROOM: a front wall with double doors on your line, side walls ----
+    const dl = Math.max(-wh + 1.6, Math.min(wh - 1.6, A.gapLat));
+    F.wallLat(D0, -wh, wh, [dl], 1.8, 1);
+    if (walled) { F.wallDep(-wh, D0, D1, null, 1.2, 1); F.wallDep(wh, D0, D1, null, 1.2, -1); }
+    // carpet tile over the whole room (the FLOOR LAW finish)
+    F.rug((D0 + D1) / 2, 0, W - 0.3, D1 - D0 - 0.3, FED.carpet);
+    // ---- THE VIDEO WALL on the far wall, facing the room -----------------------
+    const vwH = Math.min(3.0, F.ceil - 0.95), vwY = 0.85, vwD = D1 - 0.32, vwW = Math.min(W - 2.4, 18);
+    B(A.at(vwD + 0.1, 0), 0, vwW + 0.8, vwY, 0.34, P.bezel, { solid: true });       // the plinth under it
+    B(A.at(vwD, 0), vwY, vwW + 0.3, vwH + 0.3, 0.16, P.bezel);                       // the frame
+    F.lit(A.at(vwD - 0.09, 0), vwY + 0.15, vwW, vwH, 0.02, P.glow, 0.42);            // the field (one draw)
+    // tile seams: 6 across, 3 high
+    for (let i = 1; i < 6; i++) B(A.at(vwD - 0.11, -vwW / 2 + vwW * i / 6), vwY + 0.15, 0.04, vwH, 0.02, P.bezel);
+    for (let j = 1; j < 3; j++) B(A.at(vwD - 0.11, 0), vwY + 0.15 + vwH * j / 3 - 0.02, vwW, 0.04, 0.02, P.bezel);
+    // two live feeds, brighter than the field (the map on the left, a camera right)
+    F.lit(A.at(vwD - 0.12, -vwW / 2 + vwW * 1.5 / 6), vwY + 0.15 + vwH / 3 + 0.03, vwW * 2 / 6 - 0.1, vwH * 2 / 3 - 0.08, 0.02, P.screen, 0.5);
+    F.lit(A.at(vwD - 0.12, vwW / 2 - vwW / 12), vwY + 0.19, vwW / 6 - 0.1, vwH / 3 - 0.08, 0.02, P.screen, 0.5);
+    // the clock row over the wall: six faces, no words
+    if (F.ceil - (vwY + vwH + 0.3) > 0.5) for (let i = 0; i < 6; i++) {
+      const cl = -vwW / 2 + vwW * (i + 0.5) / 6, cy = vwY + vwH + 0.42;
+      B(A.at(vwD - 0.02, cl), cy, 0.42, 0.42, 0.06, P.bezel);
+      B(A.at(vwD - 0.06, cl), cy + 0.04, 0.34, 0.34, 0.02, P.marble);
+      B(A.at(vwD - 0.08, cl), cy + 0.2, 0.02, 0.14, 0.01, P.bezel);
+    }
+    // ---- CONSOLE ROWS facing the wall ------------------------------------------
+    const rowLen = Math.min(W - 3.4, 16), seat = 1.6;
+    const nSeat = Math.max(2, Math.floor(rowLen / seat));
+    const firstRow = vwD - 5.2;
+    let rows = 0;
+    for (let d = firstRow; d > D0 + 4.2 && rows < 4; d -= 3.1, rows++) {
+      const len = nSeat * seat;
+      B(A.at(d, 0), 0, len, 0.70, 0.86, P.desk, { solid: true });                    // the console body
+      B(A.at(d, 0), 0.70, len + 0.1, 0.05, 0.96, P.worktop);                        // worktop → 0.75
+      B(A.at(d + 0.44, 0), 0.75, len, 0.12, 0.08, P.bezel);                         // the rear upstand
+      for (let i = 0; i < nSeat; i++) {
+        const sl = -len / 2 + seat * (i + 0.5);
+        for (const s of [-1, 1]) {                                                  // two monitors a seat
+          B(A.at(d + 0.26, sl + s * 0.33), 0.75, 0.10, 0.10, 0.10, P.bezel);        // the foot
+          B(A.at(d + 0.26, sl + s * 0.33), 0.85, 0.05, 0.14, 0.05, P.bezel);        // the neck
+          B(A.at(d + 0.24, sl + s * 0.33), 0.99, 0.60, 0.38, 0.05, P.bezel);        // the panel
+          B(A.at(d + 0.21, sl + s * 0.33), 1.02, 0.54, 0.32, 0.01, P.screen);       // the picture
+        }
+        B(A.at(d - 0.18, sl), 0.75, 0.46, 0.02, 0.16, P.bezel);                     // keyboard
+        const c = A.at(d - 0.9, sl);
+        if (!inRect(r, c.x, c.z, 0.4)) continue;
+        taskChair(h, c.x, r.y, c.z, A.nx, A.nz, 0.49);                              // facing the wall
+        anchors.push({ x: h.ox + c.x, y: r.y, z: h.oz + c.z, face: A.faceOut, lx: c.x, lz: c.z, cushionH: 0.49, floorBelow: 0 });
+      }
+    }
+    // ---- THE WATCH OFFICER at the back, looking over the rows ------------------
+    { const wd = D0 + 2.2, wl = Math.max(-wh + 2.6, Math.min(wh - 2.6, -dl * 0.5 + (dl > 0 ? -3 : 3)));
+      const dk = F.piece("desk", wd, wl, A.faceOut, { len: 2.2, deep: 0.9 });
+      if (dk && dk.seats) F.seatAnchor(anchors, dk.seats[0]);
+      B(A.at(wd + 0.3, wl + 1.35), 0, 0.5, 1.1, 0.6, P.steel, { solid: true });    // the red-phone cabinet
+      B(A.at(wd + 0.3, wl + 1.35), 1.1, 0.24, 0.1, 0.2, 0xb43a32);
+    }
+    // ---- THE CEILING: dark, with rows of linear light --------------------------
+    F.ceiling(D0 + 0.1, D1 - 0.1, -wh + 0.1, wh - 0.1, 4, true, 0.45);
+    // a guard inside the doors
+    anchorAt(A, anchors, D0 + 1.2, A.lat(dl + 1.8, 1.0), A.faceOut, "guard", "foldarms");
+    return { anchors: anchors };
+  }
+
+  // ---- (3) THE BRIEFING ROOM ----------------------------------------------------
+  function progBriefingRoom(r, h, opts) {
+    shell(h, r);
+    const F = fedFrame(r, h, opts), A = F.A, B = F.B;
+    const anchors = [];
+    const dep = A.depth, span = A.span, half = span / 2;
+    if (dep < 10 || span < 8) return progMeeting(r, h, opts);
+    const W = Math.min(span - 0.6, 15), wh = W / 2;
+    const D1 = dep, D0 = Math.max(4.5, D1 - 13.5);
+    const walled = W < span - 1.4;
+    const dl = Math.max(-wh + 1.4, Math.min(wh - 1.4, A.gapLat));
+    F.wallLat(D0, -wh, wh, [dl], 1.2, 1);
+    if (walled) { F.wallDep(-wh, D0, D1, null, 1.2, 1); F.wallDep(wh, D0, D1, null, 1.2, -1); }
+    F.rug((D0 + D1) / 2, 0, W - 0.3, D1 - D0 - 0.3, FED.carpet);
+    // ---- THE HEAD: a screen on the far wall, a lectern to one side, standards --
+    const sd = D1 - 0.28, sw = Math.min(W - 4.5, 4.6), sy = 0.95, sh = Math.min(2.2, F.ceil - 1.3);
+    B(A.at(sd + 0.08, 0), 0, sw + 1.2, 0.80, 0.44, P.table, { solid: true });          // the credenza under it
+    B(A.at(sd + 0.08, 0), 0.80, sw + 1.3, 0.04, 0.48, P.marble);
+    B(A.at(sd, 0), sy, sw + 0.16, sh + 0.16, 0.08, P.bezel);
+    F.lit(A.at(sd - 0.05, 0), sy + 0.08, sw, sh, 0.02, P.glow, 0.45);
+    const ll = Math.min(wh - 1.2, sw / 2 + 1.1);
+    B(A.at(sd - 1.5, ll), 0, 0.62, 1.12, 0.48, P.table, { solid: true });            // the lectern
+    B(A.at(sd - 1.5, ll), 1.12, 0.66, 0.04, 0.56, P.wood);
+    B(A.at(sd - 1.72, ll), 1.16, 0.04, 0.34, 0.02, P.bezel);                         // its microphone
+    F.standard(sd - 0.6, -Math.min(wh - 0.7, sw / 2 + 0.9), -1);
+    F.standard(sd - 0.6, Math.min(wh - 0.7, ll + 0.8), 1);
+    // ---- THE TABLE down the middle, chairs both sides ---------------------------
+    const t0 = D0 + 2.6, t1 = sd - 2.6, tl = t1 - t0;
+    if (tl > 2.5) {
+      const tm = (t0 + t1) / 2, tw = 1.5;
+      B(A.at(tm, 0), 0, tw - 0.5, 0.70, tl - 0.8, P.table, { solid: true });          // the pedestal run
+      B(A.at(tm, 0), 0.70, tw, 0.05, tl, P.wood);                                    // top → 0.75
+      B(A.at(tm, 0), 0.75, 0.36, 0.01, tl - 0.4, P.table);                           // the cable spine
+      const n = Math.max(2, Math.floor(tl / 1.0));
+      for (let i = 0; i < n; i++) {
+        const cd = t0 + tl * (i + 0.5) / n;
+        for (const s of [-1, 1]) {
+          const ch = F.piece("chair", cd, s * (tw / 2 + 0.42), Math.atan2(-s * A.tx, -s * A.tz), { tone: "exec", solid: false });
+          if (ch && ch.seats) F.seatAnchor(anchors, ch.seats[0]);
+          B(A.at(cd, s * (tw / 2 - 0.22)), 0.75, 0.22, 0.01, 0.30, P.worktop);        // a pad at each place
+        }
+      }
+      // the chair at the foot, looking up the table at the screen
+      const fc = F.piece("chair", t0 - 0.45, 0, A.faceOut, { tone: "exec", solid: false });
+      if (fc && fc.seats) F.seatAnchor(anchors, fc.seats[0]);
+    }
+    // ---- the back-benchers along both side walls --------------------------------
+    for (const s of [-1, 1]) {
+      const bl = s * (wh - 0.55);
+      for (let d = D0 + 2.2; d < sd - 2.2; d += 0.95) {
+        const ch = F.piece("chair", d, bl, Math.atan2(-s * A.tx, -s * A.tz), { tone: "cool", solid: false });
+        if (ch && ch.seats) F.seatAnchor(anchors, ch.seats[0]);
+      }
+    }
+    F.ceiling(D0 + 0.1, D1 - 0.1, -wh + 0.1, wh - 0.1, 3, false, 0.5);
+    // ---- outside the door: a pre-function group --------------------------------
+    if (D0 > 5.5) {
+      const pd = D0 - 2.6, pl = A.lat(dl + (dl > 0 ? -3.6 : 3.6), 2.0);
+      const s1 = F.piece("sofa", pd, pl, A.faceOut, { tone: "cool" });
+      F.piece("coffee", pd + 1.0, pl, 0);
+      const a1 = F.piece("armchair", pd + 1.0, pl + 1.4, Math.atan2(-A.tx, -A.tz));
+      for (const s of [s1, a1]) if (s && s.seats) for (const q of s.seats) F.seatAnchor(anchors, q);
+      F.planter(D0 - 0.8, A.lat(dl + 1.6, 1.0), 0.9);
+    }
+    anchorAt(A, anchors, D0 - 1.0, A.lat(dl - 1.3, 1.0), A.faceOut, "guard", "foldarms");
+    return { anchors: anchors };
+  }
+
+  // ---- (4) THE DIRECTOR'S SUITE -----------------------------------------------
+  function progDirectorSuite(r, h, opts) {
+    shell(h, r);
+    const F = fedFrame(r, h, opts), A = F.A, B = F.B;
+    const anchors = [];
+    const dep = A.depth, span = A.span, half = span / 2;
+    if (dep < 14 || span < 9) return progBossSuite(r, h, opts);
+    const W = Math.min(span - 0.6, 16), wh = W / 2;
+    const D2 = dep, D1 = Math.max(7.0, D2 - 9.0), D0 = Math.max(2.6, D1 - 7.5);
+    const walled = W < span - 1.4;
+    const dl = Math.max(-wh + 1.4, Math.min(wh - 1.4, A.gapLat));
+    const ol = wh > 5 ? Math.min(wh - 1.6, 3.0) : 0;              // his door, off the axis
+    // ---- THE SUITE: a front wall (the assistant's door), a wall to his office ---
+    F.wallLat(D0, -wh, wh, [dl], 1.2, 1);
+    F.wallLat(D1, -wh, wh, [ol], 1.2, 1);
+    if (walled) { F.wallDep(-wh, D0, D2, null, 1.2, 1); F.wallDep(wh, D0, D2, null, 1.2, -1); }
+    F.rug((D0 + D1) / 2, 0, W - 0.3, D1 - D0 - 0.3, FED.carpet);
+    // ---- THE OUTER OFFICE: his assistant faces the door you came through --------
+    { const ad = D0 + 2.2, al = A.lat(dl + (dl > 0 ? -3.2 : 3.2), 1.6);
+      const dk = F.piece("desk", ad, al, A.faceIn, { len: 1.8, deep: 0.8 });
+      if (dk && dk.seats) F.seatAnchor(anchors, dk.seats[0]);
+      F.piece("credenza", D1 - 0.55, A.lat(al, 1.2), A.faceIn);
+      const wl = A.lat(-al * 0.6, 1.6);
+      const s1 = F.piece("sofa", (D0 + D1) / 2, wl, Math.atan2(al > 0 ? A.tx : -A.tx, al > 0 ? A.tz : -A.tz), { tone: "exec" });
+      if (s1 && s1.seats) for (const q of s1.seats) F.seatAnchor(anchors, q);
+      F.planter(D0 + 0.8, A.lat(dl + (dl > 0 ? 1.4 : -1.4), 0.8), 0.9);
+    }
+    F.ceiling(D0 + 0.1, D1 - 0.1, -wh + 0.1, wh - 0.1, 2, false, 0.5);
+    // ---- HIS OFFICE ------------------------------------------------------------
+    const od = D2 - 2.4;
+    F.rug((D1 + D2) / 2, 0, W - 0.6, D2 - D1 - 0.6, P.rug);
+    // his desk's line: off the axis, and off any column the shell keeps clear
+    // (the front door's walk-in runs up through every floor over it)
+    let xl = A.lat(-ol * 0.4, 1.8);
+    for (const c of [-ol * 0.4, -ol * 0.4 - 2.4, -ol * 0.4 + 2.4, -ol * 0.4 - 4.2, -ol * 0.4 + 4.2]) {
+      const q = A.lat(c, 1.8), p1 = A.at(od, q), p2 = A.at(od + 0.97, q), p3 = A.at(od - 1.0, q);
+      if (h.clear(p1.x, p1.z, 0.5) && h.clear(p2.x, p2.z, 0.3) && h.clear(p3.x, p3.z, 0.3)) { xl = q; break; }
+    }
+    const bd = F.piece("bossDesk", od, xl, A.faceIn, { len: 2.4, deep: 1.0 });
+    if (bd && bd.seats && bd.seats.length) {
+      F.seatAnchor(anchors, bd.seats[0], "boss");
+      for (let i = 1; i < bd.seats.length; i++) F.seatAnchor(anchors, bd.seats[i]);
+    }
+    F.piece("credenza", D2 - 0.45, xl, A.faceIn);
+    F.standard(D2 - 0.7, A.lat(xl - 1.9, 0.6), -1);
+    F.standard(D2 - 0.7, A.lat(xl + 1.9, 0.6), 1);
+    // the sitting group on the door side of the room
+    { const sd = D1 + 2.6, sl = A.lat(ol + (ol > 0 ? -0.2 : 2.4), 1.6);
+      const so = F.piece("sofa", sd, A.lat(sl + 1.2, 1.2), Math.atan2(-A.tx, -A.tz), { tone: "exec" });
+      F.piece("coffee", sd, sl - 0.2, 0);
+      const a1 = F.piece("armchair", sd, A.lat(sl - 1.5, 1.2), Math.atan2(A.tx, A.tz));
+      for (const s of [so, a1]) if (s && s.seats) for (const q of s.seats) F.seatAnchor(anchors, q);
+    }
+    // a bookcase on the side wall
+    // a bookcase on the side wall: back, two sides, a top, five shelves, and
+    // books standing on four of them (the spines are the only colour it has)
+    { const bl = -wh + 0.32, bh = Math.min(2.2, F.ceil - 0.4), spines = [P.rug, FED.navy, P.table, P.sofa, P.gold];
+      for (let i = 0; i < 2; i++) {
+        const bd2 = D1 + 1.5 + i * 1.02;
+        B(A.at(bd2, bl - 0.15), 0, 0.03, bh, 0.98, P.wood, { solid: true });
+        for (const e of [-1, 1]) B(A.at(bd2 + e * 0.48, bl), 0, 0.33, bh, 0.03, P.wood, { solid: true });
+        B(A.at(bd2, bl), bh - 0.03, 0.33, 0.03, 0.98, P.wood);
+        for (let j = 0; j < 5; j++) {
+          const sy = 0.06 + j * 0.42;
+          B(A.at(bd2, bl + 0.01), sy - 0.03, 0.31, 0.03, 0.93, P.wood);
+          if (j === 4) continue;
+          // a run of books, left to right, a gap where the hash says so
+          let u = -0.42;
+          for (let k = 0; k < 9 && u < 0.4; k++) {
+            const hh = CBZ.hash01 ? CBZ.hash01(h.ox + bd2 * 7 + k, h.oz + j * 13, 0xB00C) : 0.5;
+            const bw = 0.04 + hh * 0.05, bhh = 0.24 + hh * 0.1;
+            if (hh > 0.12) B(A.at(bd2 + u + bw / 2, bl + 0.02), sy, 0.22, bhh, bw, spines[(k + j) % spines.length]);
+            u += bw + 0.012;
+          }
+        }
+      }
+    }
+    F.planter(D2 - 0.8, A.lat(wh - 0.8, 0.8), 1.0);
+    F.ceiling(D1 + 0.1, D2 - 0.1, -wh + 0.1, wh - 0.1, 2, false, 0.5);
+    // a lamp on the desk side, warm (one of his two lights that is not a strip)
+    F.lit(A.at(D2 - 0.45, A.lat(xl - 1.4, 0.8)), 0.86, 0.26, 0.20, 0.26, P.lamp, 0.8);
+    // ---- the detail at his doors -----------------------------------------------
+    anchorAt(A, anchors, D0 - 1.1, A.lat(dl + 1.1, 1.0), A.faceOut, "guard", "foldarms");
+    anchorAt(A, anchors, D0 - 1.1, A.lat(dl - 1.1, 1.0), A.faceOut, "guard", "foldarms");
+    anchorAt(A, anchors, D1 - 1.0, A.lat(ol - 1.3, 1.0), A.faceIn, "guard", "foldarms");
+    return { anchors: anchors };
+  }
+  const FEDERAL_PROGRAMS = {
+    securitylobby: progSecurityLobby, opscenter: progOpsCenter,
+    briefingroom: progBriefingRoom, directorsuite: progDirectorSuite,
+  };
+
+  /* ========================================================================
+     THE LEGISLATURE, THE TOWN HALL AND THE GOVERNOR'S HOUSE — civic programs.
+
+     OWNER (President mode): "all the buildings in the presidential mode just
+     need to be redone ... inside and out." The Capitol's three floors were a
+     generic lobby, a meeting floor and a crime boss's flat; its two wings (a
+     legislature's CHAMBERS) were a meeting floor and a desk farm; City Hall
+     had no council chamber and the Governor's Residence had no rooms. These
+     programs are the buildings those rows declare:
+
+       rotunda          the Capitol's ground floor: the rotunda under the dome
+                        (its well carved through every slab and the roof), the
+                        entrance hall with the screening line, a statuary hall
+                        behind, the cross corridor and members' suites off it.
+       capitolfloor     the two floors above: the gallery round the well, the
+                        corridor, hearing rooms (floor 1), the grand committee
+                        room, the library, members' suites and the principal's
+                        own office on the top floor.
+       chamber          a wing's ground floor: the house floor itself, a real
+                        semicircle of five tiers (each a walk surface, 0.17 m
+                        risers) of members' desks round the well, the rostrum on
+                        a stepped dais, a lobby, side corridors, members' doors.
+       chambergallery   the floor over it: the public galleries round the
+                        chamber's void behind a solid balustrade, a cross
+                        corridor, two committee rooms and a reading room.
+       councilchamber   City Hall's council floor: the council on a dais, the
+                        public in rows, the clerk's office, a committee room.
+       mayorsoffice     City Hall's top floor: the mayor's office, the anteroom,
+                        the deputy's office and staff offices.
+       govresidence     the Governor's ground floor: hall, drawing room, dining
+                        room, study.
+       govprivate       his upper floor: landing hall, the principal bedroom,
+                        a guest room, the family sitting room.
+
+     THE FLOOR LAW, kept by construction: every finish these programs lay has
+     its top at r.y + 0.012 (a field: marble, oak, carpet), + 0.016 (an inlay,
+     a rug's border) or + 0.020 (a rug's field) — never more than 2 cm over
+     the slab the body stands on. Anything higher that you can walk on (a
+     committee dais, the rostrum, the chamber's tiers) is a REGISTERED walk
+     surface whose top is the drawn top.
+
+     WALLS are solid (colliders) with real doorways: casings on both faces, a
+     lintel, a skirting, the leaf standing open against the reveal. Rooms are
+     planned round the stair core (b.stairPlan + its landing mouth): a room
+     that would enclose the core becomes the open stair hall instead.
+     ======================================================================== */
+  const CV = {
+    marble: 0xe4dfd2, marbleD: 0x9d9587, marbleV: 0x5f6e62, plaster: 0xe8e2d4,
+    panel: 0x5b3e28, panelL: 0x7a5638, oak: 0x8a6440, walnut: 0x4a3322,
+    gold: 0xb99347, bronze: 0x6b5a3a, cream: 0xf2ede1, ink: 0x1d2126,
+    red: 0x7a2c2e, blue: 0x2c3c63, green: 0x2f5744, sand: 0xc8b48a,
+    lamp: 0xffe2b0, day: 0xfff1d8, felt: 0x2f4a3a, leather: 0x4a2620,
+  };
+  function cvMat(hex) { return CBZ.cmat ? CBZ.cmat(hex) : new window.THREE.MeshLambertMaterial({ color: hex }); }
+  const CV_FIELD = 0.012, CV_INLAY = 0.016, CV_TOP = 0.020;
+  const CV_DOOR = 2.4, CV_WT = 0.2;
+  const CIVIC = { rooms: 0, doors: 0, walls: 0, tiers: 0, seats: 0, galleries: 0, carved: 0 };
+  /* THE CEILING AND THE LIGHT ON IT. What these programs hang (a chandelier,
+     a flush panel) is emissive; the fit-out pass (city/fitout.js) builds the
+     finished plaster ceiling of the storey when you walk in and bakes a pool
+     of light round every fixture into it — the state rooms' own contract
+     (stateOut / armStateFit), declared here for the civic programs. The
+     ceiling skips every reserved hole, so a well or a chamber's void stays
+     open. */
+  let CV_FIT = { rooms: [], lights: [] };
+  function cvFitStart(r, h) {
+    const R = CBZ.interiorShellRect ? CBZ.interiorShellRect(h.b) : null;
+    const q = R || { x0: r.x0 - 0.4, x1: r.x1 + 0.4, z0: r.z0 - 0.4, z1: r.z1 + 0.4 };
+    CV_FIT = { rooms: [{ x0: q.x0, z0: q.z0, x1: q.x1, z1: q.z1, tint: 0xf3efe6 }], lights: [], h: h, glow: new Map(), doors: [] };
+    armCivicFit();
+  }
+  /* EVERY LAMP ON A FLOOR IS ONE DRAW CALL PER COLOUR. An emissive box drawn
+     through lbox mints its own material (core/batch.js will not merge an
+     emissive), so a floor of chandeliers, sconces and reading lamps was two
+     hundred draw calls. They are gathered here and flushed as one mesh per
+     colour and intensity, each on the day ramp (ceilingStrip). */
+  function cvGlow(hex, ei, w, hh, d, x, y, z) {
+    const G = CV_FIT.glow;
+    if (!G) return;
+    const k = hex + "|" + ei;
+    let L = G.get(k);
+    if (!L) { L = { hex: hex, ei: ei, list: [] }; G.set(k, L); }
+    const g = new window.THREE.BoxGeometry(w, hh, d);
+    g.translate(x, y, z);
+    L.list.push(g);
+  }
+  // every doorway drawn on this floor, so nothing is put in front of one (or
+  // where its open leaf stands)
+  function cvDoorClear(x, z, rad) {
+    const D = CV_FIT.doors || [];
+    for (let i = 0; i < D.length; i++) { const dx = x - D[i].x, dz = z - D[i].z; if (dx * dx + dz * dz < (rad + D[i].w / 2) * (rad + D[i].w / 2)) return false; }
+    return true;
+  }
+  function cvOut(anchors) {
+    const T = window.THREE, h = CV_FIT.h;
+    if (T && h && h.b && h.b.group && CV_FIT.glow) {
+      CV_FIT.glow.forEach(function (L) {
+        const m = new T.Mesh(mergeCivic(L.list), new T.MeshLambertMaterial({ color: L.hex, emissive: L.hex, emissiveIntensity: L.ei }));
+        m.name = "civic-lamps";
+        m.castShadow = false; m.receiveShadow = false;
+        m.matrixAutoUpdate = false; m.updateMatrix();
+        h.b.group.add(m);
+        ceilingStrip(m);
+      });
+      CV_FIT.glow = null;
+    }
+    return { anchors: anchors, fit: { rooms: CV_FIT.rooms, lights: CV_FIT.lights } };
+  }
+  let CIVIC_FIT = false;
+  function armCivicFit() {
+    if (CIVIC_FIT || !CBZ.fitoutPlan) return;
+    CIVIC_FIT = true;
+    const plan = function (B, f) {
+      const info = (f && f.info) || B.info || {};
+      const rooms = info.rooms || [], lights = info.lights || [];
+      for (let i = 0; i < rooms.length; i++) {
+        const rm = rooms[i];
+        B.plane(rm.x0, rm.z0, rm.x1, rm.z1, B.ceil - 0.012, "plaster", rm.tint, { down: true, cell: 1.2 });
+      }
+      for (let i = 0; i < lights.length; i++) B.light(lights[i].x, lights[i].z, { kind: "none", r: lights[i].r, i: lights[i].i });
+    };
+    for (const name of CIVIC_NAMES) CBZ.fitoutPlan(name, plan);
+  }
+
+  // a reserved rect (stair core, its landing, a lift) or the front door's aisle
+  // at (x,z)? `ignore` is a rect the caller owns (the rotunda's own well).
+  function cvFree(h, r, x, z, pad, ignore) {
+    const b = h.b;
+    pad = pad == null ? 0.3 : pad;
+    const L = (b.shaftRects || []).concat(b.keepRects || []);
+    for (let i = 0; i < L.length; i++) {
+      const q = L[i];
+      if (ignore && q === ignore) continue;
+      if (x > q.x0 - pad && x < q.x1 + pad && z > q.z0 - pad && z < q.z1 + pad) return false;
+    }
+    const dn = b.localDoor;
+    if (dn && r.y < 1.0) {
+      const dx = x - dn.x, dz = z - dn.z;
+      const inward = dx * dn.nx + dz * dn.nz, cross = Math.abs(dx * dn.nz - dz * dn.nx);
+      if (inward > -0.8 && inward < 4.8 && cross < 1.2 + pad) return false;
+    }
+    return true;
+  }
+  function rectHits(a, q, pad) {
+    return a.x0 < q.x1 + pad && a.x1 > q.x0 - pad && a.z0 < q.z1 + pad && a.z1 > q.z0 - pad;
+  }
+  // is there a window in the wall behind (x,z) over [y0,y1]? Wall-hung pieces
+  // (a painting, a bookcase, a seal) never stand in front of the glass.
+  function cvGlazed(h, x, z, half, y0, y1) {
+    const W = h.b.windows;
+    if (!W || !W.length) return false;
+    for (let i = 0; i < W.length; i++) {
+      const w = W[i];
+      if (!w || w.y == null) continue;
+      const hh = w.hh || 0.8;
+      if (w.y + hh < y0 || w.y - hh > y1) continue;
+      const lx = w.x - h.ox, lz = w.z - h.oz;
+      const hx = Math.max(w.hw || 0, 0.05), hz = Math.max(w.hd || 0, 0.05);
+      if (Math.abs(lx - x) < hx + half + 0.35 && Math.abs(lz - z) < hz + half + 0.35) return true;
+    }
+    return false;
+  }
+  // the stair core (+ its landing mouth) as rects, so a plan can go round it
+  function cvCore(h) {
+    const P = h.b.stairPlan;
+    const out = [];
+    if (P && P.rect) out.push(P.rect);
+    if (P && P.mouth) out.push(P.mouth);
+    return out;
+  }
+  function cvWalk(h, x0, x1, z0, z1, top) {
+    const p = { minX: h.ox + Math.min(x0, x1), maxX: h.ox + Math.max(x0, x1), minZ: h.oz + Math.min(z0, z1), maxZ: h.oz + Math.max(z0, z1), top: top };
+    (CBZ.platforms = CBZ.platforms || []).push(p);
+    if (h.b.platforms) h.b.platforms.push(p);
+    if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
+    return p;
+  }
+  function cvSolid(h, x0, x1, z0, z1, y0, y1) {
+    const c = { minX: h.ox + Math.min(x0, x1), maxX: h.ox + Math.max(x0, x1), minZ: h.oz + Math.min(z0, z1), maxZ: h.oz + Math.max(z0, z1), y0: y0, y1: y1, ref: null };
+    (CBZ.colliders = CBZ.colliders || []).push(c);
+    if (h.b.colliders) h.b.colliders.push(c);
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    return c;
+  }
+  function cvPiece(name, h, y, x, z, yaw, opts) {
+    const F = CBZ.furnish, fn = F && F[name];
+    if (typeof fn !== "function") return null;
+    const o = Object.assign({}, opts || {}, { box: h.b.lbox, ox: h.ox, oz: h.oz, oy: 0, lot: null });
+    try { return name === "lamp" ? fn(x, y, z, o) : fn(x, y, z, yaw || 0, o); } catch (e) { return null; }
+  }
+  const CV_LEATHER = { cloth: CV.leather, wood: CV.walnut, frame: 0x2a2f37, linen: CV.cream };
+  const CV_HOUSE = {
+    senate: { cloth: 0x7a2c2e, wood: CV.walnut, frame: 0x2a2f37, linen: CV.cream },
+    assembly: { cloth: 0x2f5744, wood: CV.walnut, frame: 0x2a2f37, linen: CV.cream },
+  };
+
+  /* THE FRAME. A room (or a whole floor) described from its door: `d` metres
+     in from the door side, `l` metres sideways from the centre line. It is
+     approach() — the kit's one orientation helper — plus the architecture a
+     civic room is built of, so every room below is authored once and reads
+     right from any of the four sides a shell can present. */
+  function cvFrame(r, h, door, gap) {
+    const A = approach(r, h, { door: door });
+    const y = r.y, L = h.b.lbox;
+    const o0 = A.at(0, 0);
+    // the ceiling, relative to this floor: the underside of the NEXT slab
+    // (on the ground floor that is FH - 0.2 - 0.14, not FH - 0.2)
+    const tops = h.b.floorTops;
+    let ceil = h.fh - 0.2;
+    if (Array.isArray(tops) && tops.length >= 2) {
+      let k = 0, bd = 1e9;
+      for (let i = 0; i < tops.length - 1; i++) { const q = Math.abs(tops[i] - y); if (q < bd) { bd = q; k = i; } }
+      if (tops[k + 1] != null) ceil = tops[k + 1] - 0.2 - y;
+    }
+    const G = gap == null ? 0.4 : gap;
+    const F = {
+      A: A, h: h, r: r, y: y, dep: A.depth, half: A.span / 2, along: A.along, ceil: ceil,
+      wd: A.depth + G, wl: A.span / 2 + G,          // the far wall's face, the side walls' faces
+      faceIn: A.faceIn, faceOut: A.faceOut,
+      p: A.at,
+      inv: function (x, z) {
+        const dx = x - o0.x, dz = z - o0.z;
+        return { d: dx * A.nx + dz * A.nz, l: dx * A.tx + dz * A.tz };
+      },
+      // yaw that looks toward +l (s = 1) or -l (s = -1)
+      faceL: function (s) { return Math.atan2(s * A.tx, s * A.tz); },
+      rect: function (d0, d1, l0, l1) {
+        const a = A.at(d0, l0), c = A.at(d1, l1);
+        return { x0: Math.min(a.x, c.x), x1: Math.max(a.x, c.x), z0: Math.min(a.z, c.z), z1: Math.max(a.z, c.z), y: y };
+      },
+      // a box centred at (d,l): `across` is its lateral size, `deep` its depth
+      box: function (d, l, y0, hh, across, deep, hex, o) {
+        const p = A.at(d, l);
+        return L.call(h.b, p.x, y + y0 + hh / 2, p.z, A.along ? deep : across, hh, A.along ? across : deep, hex,
+          Object.assign({ cast: false }, o || {}));
+      },
+      // a door record for a room whose doorway is at (d,l) and opens INTO
+      // the room toward +d (s = 1) or -d (s = -1); `lat` rooms: toward ±l
+      door: function (d, l, s, lat) {
+        const p = A.at(d, l);
+        return lat ? { x: p.x, z: p.z, nx: s * A.tx, nz: s * A.tz } : { x: p.x, z: p.z, nx: s * A.nx, nz: s * A.nz };
+      },
+    };
+    const WH = ceil;
+    // a flush finish over a band: top at y + lift (the floor law)
+    F.floor = function (d0, d1, l0, l1, hex, lift) {
+      const t = lift || CV_FIELD;
+      return F.box((d0 + d1) / 2, (l0 + l1) / 2, t - 0.004, 0.004, Math.abs(l1 - l0), Math.abs(d1 - d0), hex);
+    };
+    F.rug = function (d0, d1, l0, l1, field, border, bw) {
+      bw = bw == null ? 0.3 : bw;
+      F.box((d0 + d1) / 2, (l0 + l1) / 2, 0.006, CV_INLAY - 0.006, Math.abs(l1 - l0), Math.abs(d1 - d0), border);
+      F.box((d0 + d1) / 2, (l0 + l1) / 2, 0.010, CV_TOP - 0.010, Math.abs(l1 - l0) - 2 * bw, Math.abs(d1 - d0) - 2 * bw, field);
+    };
+    // an emissive fixture on the day ramp
+    F.light = function (d, l, y0, hh, across, deep, hex, ei) {
+      const p = A.at(d, l);
+      cvGlow(hex, ei == null ? 0.8 : ei, A.along ? deep : across, hh, A.along ? across : deep, p.x, y + y0 + hh / 2, p.z);
+      if (y0 > WH - 0.6) CV_FIT.lights.push({ x: p.x, z: p.z, r: 4.5, i: 0.45 });
+      return true;
+    };
+    // a chandelier hung from the ceiling on a rod (the drop is solved from the
+    // storey, never typed): corona, a lit bowl, a finial
+    F.chandelier = function (d, l, size, ceil) {
+      const top = (ceil != null ? ceil : WH);
+      const s = size || 1.4, drop = Math.min(1.1, Math.max(0.5, top - 3.2));
+      F.box(d, l, top - drop, drop, 0.05, 0.05, CV.gold);
+      F.box(d, l, top - drop - 0.12, 0.12, s, s, CV.gold);
+      F.light(d, l, top - drop - 0.42, 0.3, s * 0.8, s * 0.8, CV.lamp, 0.95);
+      F.box(d, l, top - drop - 0.62, 0.2, 0.28, 0.28, CV.gold);
+      if (top <= WH + 0.01) { const p = A.at(d, l); CV_FIT.lights.push({ x: p.x, z: p.z, r: 6.0, i: 0.6 }); }
+    };
+    // a painting on a wall at depth `d` (face -1: on its front face) or, with
+    // `lat`, on a wall at lateral `l` (face: which side it faces)
+    F.art = function (d, l, face, w, hgt, ly, hex, lat) {
+      const k = hex || CV.panel;
+      const c0 = A.at(d, l);
+      if (cvGlazed(h, c0.x, c0.z, w / 2, y + ly - hgt / 2, y + ly + hgt / 2)) return false;
+      if (!cvDoorClear(c0.x, c0.z, w / 2 + 0.3)) return false;
+      if (lat) {
+        F.box(d, l + face * 0.04, ly - hgt / 2, hgt, 0.06, w, CV.gold);
+        F.box(d, l + face * 0.08, ly - hgt / 2 + 0.1, hgt - 0.2, 0.02, w - 0.2, k);
+      } else {
+        F.box(d + face * 0.04, l, ly - hgt / 2, hgt, w, 0.06, CV.gold);
+        F.box(d + face * 0.08, l, ly - hgt / 2 + 0.1, hgt - 0.2, w - 0.2, 0.02, k);
+      }
+    };
+    // a floor standard: weighted base, pole, finial, the cloth hanging flat
+    F.flag = function (d, l, hex) {
+      { const p = A.at(d, l); if (!cvDoorClear(p.x, p.z, 1.0)) return false; }
+      F.box(d, l, 0, 0.06, 0.44, 0.44, CV.bronze);
+      F.box(d, l, 0.06, 2.4, 0.05, 0.05, CV.gold);
+      F.box(d, l, 2.46, 0.18, 0.12, 0.12, CV.gold);
+      F.box(d, l + 0.48, 1.05, 1.3, 0.86, 0.03, hex || CV.blue);
+      F.box(d, l + 0.48, 1.9, 0.45, 0.4, 0.035, CV.cream);
+    };
+    // a wood bookcase standing against a wall, running laterally (or in depth
+    // with `lat`), `face` the side its books face
+    F.bookcase = function (d, l, len, face, lat) {
+      const deep = 0.38, H = Math.min(2.4, WH - 0.3);
+      const c0 = A.at(d, l);
+      if (cvGlazed(h, c0.x, c0.z, len / 2, y + 0.3, y + H)) return false;
+      if (!cvDoorClear(c0.x, c0.z, len / 2 + 0.5)) return false;
+      const bx = function (dd, ll, y0, hh, a, dp, hex) {
+        return lat ? F.box(dd, ll, y0, hh, dp, a, hex, { solid: y0 < 0.1 }) : F.box(dd, ll, y0, hh, a, dp, hex, { solid: y0 < 0.1 });
+      };
+      // along the run: lateral (default) or depth
+      const at = function (t, n) { return lat ? { d: d + t, l: l + n } : { d: d + n, l: l + t }; };
+      const c = at(0, 0);
+      bx(c.d, c.l, 0, H, len, deep, CV.walnut);
+      const books = [0x6b2a24, 0x2c3c63, 0x3f5a3a, 0x8a6a3a, 0x4a3a5a];
+      for (let s = 0; s < 4; s++) {
+        const yy = 0.18 + s * (H - 0.3) / 4;
+        const sh = at(0, face * 0.02);
+        bx(sh.d, sh.l, yy - 0.03, 0.03, len - 0.06, deep - 0.02, CV.panelL);
+        const segs = Math.max(2, Math.round(len / 0.7));
+        for (let q = 0; q < segs; q++) {
+          const t = -len / 2 + 0.05 + (q + 0.5) * (len - 0.1) / segs;
+          const bp = at(t, face * 0.05);
+          const hb = 0.26 + ((q * 7 + s * 3) % 4) * 0.02;
+          bx(bp.d, bp.l, yy, hb, (len - 0.1) / segs - 0.03, deep - 0.12, books[(q + s * 2) % books.length]);
+        }
+      }
+      const cp = at(0, 0);
+      bx(cp.d, cp.l, H, 0.08, len + 0.06, deep + 0.04, CV.panel);
+    };
+    // THE WALL. A solid partition at depth `d` running laterally l0..l1 (or,
+    // `lat`, at lateral `l` running in depth d0..d1), with any number of
+    // doorways {c, w, leaf: +1/-1 (the side the leaf stands open on), hinge}.
+    function wall(lat, at, a0, a1, gaps, o) {
+      o = o || {};
+      const H = o.h != null ? o.h : WH, hex = o.hex || CV.plaster, trim = o.trim || CV.cream, skirt = o.skirt || CV.walnut;
+      const lo = Math.min(a0, a1), hi = Math.max(a0, a1);
+      const G = (gaps || []).filter(function (g) { return g && g.c - g.w / 2 > lo + 0.05 && g.c + g.w / 2 < hi - 0.05; })
+        .sort(function (p, q) { return p.c - q.c; });
+      // one box, in wall space: t along the run, n across it (0 = centreline)
+      const wb = function (t, n, y0, hh, len, thick, hx, oo) {
+        return lat ? F.box(t, at + n, y0, hh, thick, len, hx, oo) : F.box(at + n, t, y0, hh, len, thick, hx, oo);
+      };
+      let s0 = lo;
+      const segs = [];
+      for (const g of G) { segs.push([s0, g.c - g.w / 2]); s0 = g.c + g.w / 2; }
+      segs.push([s0, hi]);
+      for (const s of segs) {
+        const len = s[1] - s[0];
+        if (len < 0.05) continue;
+        wb((s[0] + s[1]) / 2, 0, 0, H, len, CV_WT, hex, { solid: true });
+        for (const sd of [-1, 1]) wb((s[0] + s[1]) / 2, sd * (CV_WT / 2 + 0.01), 0, 0.14, len, 0.02, skirt);
+        CIVIC.walls++;
+      }
+      for (const g of G) {
+        { const dp = lat ? A.at(g.c, at) : A.at(at, g.c); if (CV_FIT.doors) CV_FIT.doors.push({ x: dp.x, z: dp.z, w: g.w }); }
+        wb(g.c, 0, CV_DOOR, H - CV_DOOR, g.w, CV_WT, hex, { solid: true });
+        for (const sd of [-1, 1]) {
+          const n = sd * (CV_WT / 2 + 0.02);
+          for (const e of [-1, 1]) wb(g.c + e * (g.w / 2 + 0.06), n, 0, CV_DOOR + 0.12, 0.12, 0.04, trim);
+          wb(g.c, n, CV_DOOR, 0.12, g.w + 0.24, 0.04, trim);
+        }
+        // the leaf, open 90 degrees against the reveal: panelled, with a knob
+        if (g.leaf) {
+          const Lf = g.w - 0.08, hinge = g.hinge || 1, lt = g.c + hinge * (g.w / 2 - 0.05);
+          const n0 = g.leaf * (CV_WT / 2 + Lf / 2 + 0.02);
+          const leafBox = function (nn, y0, hh, len, thick, hx, oo) {
+            // the leaf lies ACROSS the wall: its long side runs in the wall's
+            // normal direction, its thickness along the run
+            return lat ? F.box(lt, at + nn, y0, hh, len, thick, hx, oo) : F.box(at + nn, lt, y0, hh, thick, len, hx, oo);
+          };
+          leafBox(n0, 0.02, CV_DOOR - 0.06, Lf, 0.05, g.hex || CV.panel, { solid: true });
+          for (const py of [0.35, 1.3]) leafBox(n0, py, 0.75, Lf - 0.3, 0.07, CV.panelL);
+          leafBox(g.leaf * (CV_WT / 2 + Lf - 0.08), 1.0, 0.06, 0.1, 0.1, CV.gold);
+        }
+        CIVIC.doors++;
+      }
+    }
+    F.wallL = function (d, l0, l1, gaps, o) { wall(false, d, l0, l1, gaps, o); };
+    F.wallD = function (l, d0, d1, gaps, o) { wall(true, l, d0, d1, gaps, o); };
+    F.anchor = function (list, d, l, face, kind, pose, cushion) {
+      const p = A.at(d, l);
+      const a = { x: h.ox + p.x, y: y, z: h.oz + p.z, face: face, lx: p.x, lz: p.z, kind: kind || "guard" };
+      if (pose) a.pose = pose;
+      if (cushion != null) { a.cushionH = cushion; a.floorBelow = 0; }
+      list.push(a);
+      return a;
+    };
+    F.seatAnchor = function (list, piece, i, kind, pose) {
+      const s = piece && piece.seats && piece.seats[i || 0];
+      if (!s) return null;
+      const a = { x: s.x, y: y, z: s.z, face: s.face, lx: s.x - h.ox, lz: s.z - h.oz, kind: kind || "clerk", pose: pose || "sit",
+        cushionH: s.cushion, floorBelow: 0 };
+      list.push(a);
+      return a;
+    };
+    F.free = function (d, l, pad, ignore) { const p = A.at(d, l); return cvFree(h, r, p.x, p.z, pad, ignore); };
+    F.piece = function (name, d, l, yaw, opts, pad) {
+      const p = A.at(d, l);
+      if (!cvFree(h, r, p.x, p.z, pad == null ? 0.2 : pad, opts && opts._ignore)) return null;
+      if (!cvDoorClear(p.x, p.z, 1.2)) return null;
+      return cvPiece(name, h, y, p.x, p.z, yaw, opts);
+    };
+    F.walkRect = function (d0, d1, l0, l1, top) {
+      const q = F.rect(d0, d1, l0, l1);
+      return cvWalk(h, q.x0, q.x1, q.z0, q.z1, y + top);
+    };
+    F.solidRect = function (d0, d1, l0, l1, y0, y1) {
+      const q = F.rect(d0, d1, l0, l1);
+      return cvSolid(h, q.x0, q.x1, q.z0, q.z1, y + y0, y + y1);
+    };
+    return F;
+  }
+
+  /* ---- THE ROOMS. Each is dressed in its OWN frame (from its door), so the
+     same five lines furnish a suite off a corridor and one off a hall. ------ */
+  function cvRoom(h, rect, door) {
+    const rr = { x0: rect.x0, x1: rect.x1, z0: rect.z0, z1: rect.z1, y: rect.y };
+    if (!(rr.x1 - rr.x0 > 2.4) || !(rr.z1 - rr.z0 > 2.4)) return null;
+    CIVIC.rooms++;
+    return cvFrame(rr, h, door, 0.03);
+  }
+  // an outer office: the receptionist facing the door, the visitors' chairs,
+  // a flag by the inner door, a painting, a plant, the light
+  function roomReception(h, rect, door, anchors, o) {
+    const R = cvRoom(h, rect, door);
+    if (!R) return;
+    o = o || {};
+    R.floor(0, R.dep, -R.half, R.half, CV.oak);
+    R.rug(1.2, R.dep - 1.0, -R.half + 1.0, R.half - 1.0, o.rug || CV.blue, CV.sand, 0.25);
+    const dd = Math.min(3.4, R.dep * 0.45);
+    const desk = R.piece("desk", dd, 0, R.faceIn, { len: 1.8, deep: 0.8, tone: CV_LEATHER, solid: true });
+    if (desk) R.seatAnchor(anchors, desk, 0, "clerk");
+    const wl = R.half - 0.7;
+    for (let i = 0; i < 2; i++) R.piece("armchair", 1.6 + i * 1.1, wl, R.faceL(-1), { tone: CV_LEATHER, solid: true });
+    R.piece("coffee", 2.15, wl - 0.95, R.faceL(-1), { len: 0.8, deep: 0.5, tone: CV_LEATHER });
+    R.piece("planter", R.dep - 0.6, -R.half + 0.6, 0, { kind: "tree", s: 0.8 });
+    R.flag(R.dep - 0.8, R.half - 1.4, o.flag || CV.blue);
+    R.art(R.wd, 0, -1, 1.6, 1.1, 1.9, 0x3a4a5a);
+    R.art(R.dep * 0.55, -R.wl, 1, 1.4, 1.0, 1.8, 0x5a4a3a, true);
+    R.light(R.dep / 2, 0, R.ceil - 0.06, 0.06, 1.2, 1.2, CV.day, 0.6);
+  }
+  // a member's office: the desk at the far end facing the door with the two
+  // flags behind it, bookcases on the side walls, a sitting group by the door
+  function roomOffice(h, rect, door, anchors, o) {
+    const R = cvRoom(h, rect, door);
+    if (!R) return;
+    o = o || {};
+    R.floor(0, R.dep, -R.half, R.half, o.carpet || CV.blue);
+    R.rug(R.dep - 4.4, R.dep - 0.8, -Math.min(2.6, R.half - 0.6), Math.min(2.6, R.half - 0.6), CV.red, CV.gold, 0.2);
+    const dD = R.dep - 2.3;
+    const desk = R.piece("bossDesk", dD, 0, R.faceIn, { len: 2.4, deep: 1.0, tone: CV_LEATHER, solid: true });
+    if (desk) R.seatAnchor(anchors, desk, 0, o.boss ? "boss" : "clerk");
+    for (const s of [-1, 1]) {
+      R.flag(R.dep - 0.7, s * 1.9, s < 0 ? CV.blue : (o.flag || CV.red));
+      R.bookcase(R.dep - 1.6, s * (R.wl - 0.2), 2.2, -s, true);
+    }
+    if (R.half > 2.6) {
+      // the sitting group on the side AWAY from the way in
+      const sg = R.A.gapLat > 0 ? -1 : 1, sl = sg * (R.half - 1.2);
+      R.piece("sofa", 2.6, sl, R.faceL(-sg), { len: 2.0, tone: CV_LEATHER, solid: true });
+      R.piece("coffee", 2.6, sl - sg * 1.25, R.faceL(-sg), { len: 1.1, deep: 0.55, tone: CV_LEATHER });
+      R.piece("armchair", 2.6, sl - sg * 2.45, R.faceL(sg), { tone: CV_LEATHER, solid: true });
+      R.art(2.6, sg * R.wl, -sg, 1.5, 1.0, 1.85, 0x44523e, true);
+    }
+    R.piece("planter", 0.7, R.half - 0.6, 0, { kind: "tree", s: 0.8 });
+    R.chandelier(R.dep / 2, 0, 1.0);
+    if (o.guard) R.anchor(anchors, 1.0, Math.min(1.6, R.half - 0.8), R.faceOut, "guard", "foldarms");
+  }
+  // THE SEAL SCREEN: a panelled reredos standing 0.45 m off the far wall (so
+  // it never covers a window), the gilt medallion on it, a cornice
+  function sealScreen(h, R, y0, w, hgt, hex) {
+    const d = R.wd - 0.5;
+    { const p = R.p(d, 0); if (!cvDoorClear(p.x, p.z, w / 2 + 0.4)) return; }
+    R.box(d, 0, y0, hgt, w, 0.12, CV.panel, { solid: true });
+    R.box(d, 0, y0 + hgt, 0.14, w + 0.2, 0.2, CV.gold);
+    for (const s of [-1, 1]) R.box(d - 0.06, s * (w / 2 - 0.2), y0, hgt, 0.3, 0.06, CV.panelL);
+    const T = window.THREE;
+    if (T && h.b.group) {
+      const p = R.p(d - 0.1, 0);
+      const g = new T.CylinderGeometry(Math.min(0.95, w * 0.2), Math.min(0.95, w * 0.2), 0.06, 32);
+      g.rotateX(Math.PI / 2);
+      const m = new T.Mesh(g, cvMat(CV.gold));
+      m.position.set(p.x, R.y + y0 + hgt * 0.6, p.z);
+      m.rotation.y = Math.atan2(-R.A.nx, -R.A.nz);
+      m.matrixAutoUpdate = false; m.updateMatrix();
+      h.b.group.add(m);
+      const g2 = new T.CylinderGeometry(Math.min(0.72, w * 0.15), Math.min(0.72, w * 0.15), 0.07, 32);
+      g2.rotateX(Math.PI / 2);
+      const m2 = new T.Mesh(g2, cvMat(hex || CV.blue));
+      m2.position.set(p.x - R.A.nx * 0.02, R.y + y0 + hgt * 0.6, p.z - R.A.nz * 0.02);
+      m2.rotation.y = m.rotation.y;
+      m2.matrixAutoUpdate = false; m2.updateMatrix();
+      h.b.group.add(m2);
+    }
+  }
+  /* A HEARING ROOM: the members' bench on a two-riser dais across the far
+     side (both steps registered walk surfaces, 0.15 each), the seal screen and
+     the flags behind it, the witness table facing it, the public in benches. */
+  function roomHearing(h, rect, door, anchors, o) {
+    const R = cvRoom(h, rect, door);
+    if (!R) return;
+    o = o || {};
+    R.floor(0, R.dep, -R.half, R.half, o.carpet || CV.red);
+    const hw = R.half - 0.2;
+    const DD = Math.max(2.5, Math.min(3.8, R.dep * 0.42));
+    const dB = R.dep - DD;                   // the dais' front edge
+    R.box(dB + 0.2, 0, 0, 0.15, 2 * hw, 0.4, CV.walnut);
+    R.walkRect(dB, dB + 0.4, -hw, hw, 0.15);
+    R.box((dB + 0.4 + R.wd) / 2, 0, 0, 0.30, 2 * hw, R.wd - dB - 0.4, CV.walnut);
+    R.walkRect(dB + 0.4, R.wd, -hw, hw, 0.30);
+    R.box((dB + 0.4 + R.dep) / 2, 0, 0.30 - 0.004, 0.008, 2 * hw - 0.4, R.dep - dB - 0.5, o.dais || CV.blue);
+    // the bench: a panelled front a metre over the dais, a desktop, and a
+    // leather chair per member behind it; clear ends so the dais is reachable
+    const bl = Math.max(2, 2 * hw - 2.2), bd = dB + 0.75;
+    R.box(bd, 0, 0.30, 0.98, bl, 0.12, CV.panel, { solid: true });
+    R.box(bd + 0.28, 0, 1.2, 0.05, bl + 0.1, 0.62, CV.panelL);
+    const nM = Math.max(3, Math.min(13, Math.floor(bl / 1.25)));
+    for (let i = 0; i < nM; i++) {
+      const l = -bl / 2 + (i + 0.5) * bl / nM;
+      R.box(bd + 0.35, l, 1.25, 0.06, 0.34, 0.08, CV.gold);                      // nameplate
+      R.box(bd + 0.45, l + 0.22, 1.25, 0.28, 0.02, 0.02, CV.ink);                // microphone
+      const cp = R.p(bd + 0.95, l);
+      const ch = cvPiece("chair", h, R.y + 0.30, cp.x, cp.z, R.faceIn, { tone: o.tone || CV_LEATHER, solid: true });
+      if (ch && i % 3 === 1) R.seatAnchor(anchors, ch, 0, "clerk");
+    }
+    if (R.wd - (bd + 1.5) > 0.6) sealScreen(h, R, 0.30, Math.min(3.0, bl * 0.4), 2.4, o.dais || CV.blue);
+    for (const s of [-1, 1]) R.flag(R.dep - 0.3, s * Math.min(hw - 0.6, bl * 0.2 + 1.0), s < 0 ? CV.blue : CV.red);
+    // the witness table, three chairs facing the bench
+    const wd = dB - 2.4;
+    if (wd > 3.2) {
+      R.piece("table", wd, 0, R.faceIn, { len: 3.0, deep: 0.9, seats: 0, tone: CV_LEATHER, solid: true });
+      for (const l of [-0.9, 0, 0.9]) R.piece("chair", wd - 0.85, l, R.faceOut, { tone: CV_LEATHER, solid: true });
+      for (const l of [-0.9, 0.9]) R.box(wd, l, 0.74, 0.28, 0.02, 0.02, CV.ink);
+      // the public, in benches behind the witnesses, an aisle down the middle
+      const bl2 = Math.max(1.2, Math.min(3.6, hw - 1.4));
+      for (let d = 1.6; d < wd - 2.0; d += 1.25)
+        for (const s of [-1, 1]) R.piece("bench", d, s * (0.8 + bl2 / 2), R.faceOut, { len: bl2, tone: CV_LEATHER, solid: true });
+    }
+    for (const s of [-1, 1]) {
+      R.art(R.dep * 0.45, s * R.wl, -s, 1.8, 1.2, 2.0, s < 0 ? 0x3a4450 : 0x4a3a30, true);
+      R.light(R.dep * 0.3, s * (R.wl - 0.08), 2.3, 0.4, 0.14, 0.5, CV.lamp, 0.8);
+    }
+    R.chandelier(R.dep * 0.35, 0, 1.4);
+    R.chandelier(R.dep * 0.7, 0, 1.4);
+    R.anchor(anchors, 1.0, Math.min(1.8, R.half - 0.8), R.faceOut, "guard", "foldarms");
+  }
+  // a library: cases on the side walls, reading tables with green lamps, a rug
+  function roomLibrary(h, rect, door, anchors) {
+    const R = cvRoom(h, rect, door);
+    if (!R) return;
+    R.floor(0, R.dep, -R.half, R.half, CV.oak);
+    R.rug(1.5, R.dep - 1.5, -R.half + 1.6, R.half - 1.6, CV.green, CV.gold, 0.3);
+    for (const s of [-1, 1]) {
+      const n = Math.max(1, Math.floor((R.dep - 2.4) / 2.2));
+      for (let i = 0; i < n; i++) R.bookcase(1.6 + i * 2.2 + 1.0, s * (R.wl - 0.2), 2.0, -s, true);
+    }
+    const nF = Math.max(1, Math.floor((2 * R.half - 1.2) / 2.2));
+    for (let i = 0; i < nF; i++) R.bookcase(R.wd - 0.2, -R.half + 0.6 + (i + 0.5) * (2 * R.half - 1.2) / nF, 2.0, -1);
+    const tl = Math.min(3.0, R.half * 0.45);
+    for (let d = 3.0; d < R.dep - 2.5; d += 3.2) for (const s of [-1, 1]) {
+      const t = R.piece("table", d, s * tl, R.faceIn, { len: 2.2, deep: 1.0, seats: 4, tone: CV_LEATHER, solid: true });
+      if (!t) continue;
+      for (const q of [-0.55, 0.55]) {
+        R.box(d, s * tl + q, 0.74, 0.3, 0.04, 0.04, CV.gold);
+        R.light(d, s * tl + q, 1.04, 0.1, 0.34, 0.2, 0x3f7a55, 0.6);
+      }
+      if (d < 4) R.seatAnchor(anchors, t, 0, "clerk");
+    }
+    R.chandelier(R.dep * 0.33, 0, 1.4);
+    R.chandelier(R.dep * 0.66, 0, 1.4);
+  }
+  /* THE PRINCIPAL'S OFFICE: the desk before the seal screen between two
+     standards, a fireplace on the side wall and the sitting group facing it,
+     a conference table for eight, bookcases. The one "boss" anchor in the
+     building, and the two men at his door. */
+  function roomLeader(h, rect, door, anchors, o) {
+    const R = cvRoom(h, rect, door);
+    if (!R) return;
+    o = o || {};
+    R.floor(0, R.dep, -R.half, R.half, CV.oak);
+    R.rug(R.dep * 0.45, R.dep - 1.1, -Math.min(4.0, R.half - 1), Math.min(4.0, R.half - 1), o.rug || CV.blue, CV.gold, 0.35);
+    const dD = R.dep - 2.9;
+    const desk = R.piece("bossDesk", dD, 0, R.faceIn, { len: 2.8, deep: 1.1, tone: CV_LEATHER, solid: true });
+    if (desk) R.seatAnchor(anchors, desk, 0, "boss", "sit");
+    sealScreen(h, R, 0, 3.4, 3.0, o.rug || CV.blue);
+    for (const s of [-1, 1]) R.flag(R.dep - 0.9, s * 2.3, s < 0 ? CV.blue : CV.red);
+    // the fireplace on the -l wall: surround, mantel, firebox, the embers
+    const fd = R.dep * 0.35, fl = -R.wl;
+    const fp = R.p(fd, fl + 0.2);
+    if (!cvGlazed(h, fp.x, fp.z, 1.2, R.y, R.y + 2.5) && cvDoorClear(fp.x, fp.z, 1.6)) {
+      R.box(fd, fl + 0.15, 0, 1.3, 0.3, 2.2, CV.marble, { solid: true });
+      R.box(fd, fl + 0.22, 1.3, 0.1, 0.45, 2.5, CV.marble);
+      R.box(fd, fl + 0.32, 0.05, 0.75, 0.04, 1.1, CV.ink);
+      R.light(fd, fl + 0.35, 0.06, 0.12, 0.03, 0.9, 0xff8a3a, 0.9);
+      R.art(fd, fl, 1, 1.4, 1.1, 2.4, 0x5a3a2a, true);
+    }
+    // the sitting group facing the fire
+    R.piece("sofa", fd, fl + 3.4, R.faceL(-1), { len: 2.2, tone: CV_LEATHER, solid: true });
+    R.piece("coffee", fd, fl + 2.1, R.faceL(-1), { len: 1.2, deep: 0.6, tone: CV_LEATHER });
+    for (const q of [-1, 1]) R.piece("armchair", fd + q * 1.7, fl + 2.0, R.faceL(-1), { tone: CV_LEATHER, solid: true });
+    // the conference table on the +l side
+    if (R.half > 5) {
+      const t = R.piece("table", R.dep * 0.42, R.half - 2.4, R.faceL(1), { len: 3.6, deep: 1.2, seats: 8, tone: CV_LEATHER, solid: true });
+      if (t) R.seatAnchor(anchors, t, 1, "clerk");
+      R.chandelier(R.dep * 0.42, R.half - 2.4, 1.2);
+    }
+    for (let i = 0; i < 2; i++) R.bookcase(R.dep * 0.62 + i * 2.2, R.wl - 0.2, 2.0, -1, true);
+    R.chandelier(R.dep * 0.62, 0, 1.6);
+    R.piece("planter", 0.8, -R.half + 0.7, 0, { kind: "tree", s: 0.9 });
+    R.anchor(anchors, 1.0, 1.5, R.faceOut, "guard", "foldarms");
+    R.anchor(anchors, 1.0, -1.5, R.faceOut, "guard", "foldarms");
+  }
+  // a hall of busts: a checkered marble floor, plinths along both walls, benches
+  function roomStatuary(h, rect, door, anchors) {
+    const R = cvRoom(h, rect, door);
+    if (!R) return;
+    R.floor(0, R.dep, -R.half, R.half, CV.marble);
+    const sq = 1.2;
+    for (let d = 0.6; d < R.dep - 0.6 - sq; d += sq) for (let l = -R.half + 0.6; l < R.half - 0.6 - sq; l += sq) {
+      if ((Math.round(d / sq) + Math.round(l / sq)) % 2) R.box(d + sq / 2, l + sq / 2, CV_INLAY - 0.004, 0.004, sq, sq, CV.marbleV);
+    }
+    for (const s of [-1, 1]) for (let d = 2.2; d < R.dep - 1.4; d += 3.0) {
+      const l = s * (R.half - 0.45);
+      R.box(d, l, 0, 1.15, 0.6, 0.6, CV.marbleD, { solid: true });
+      R.box(d, l, 1.15, 0.08, 0.72, 0.72, CV.marble);
+      // a bronze bust: shoulders, neck, head
+      R.box(d, l, 1.23, 0.26, 0.46, 0.28, CV.bronze);
+      R.box(d, l, 1.49, 0.1, 0.12, 0.12, CV.bronze);
+      R.box(d, l, 1.59, 0.28, 0.2, 0.24, CV.bronze);
+      if (d + 1.5 < R.dep - 1.4) R.art(d + 1.5, s * R.wl, -s, 1.6, 1.2, 2.4, 0x3a3a44, true);
+    }
+    for (let d = 3.0; d < R.dep - 2.0; d += 4.0) R.piece("bench", d, 0, R.faceL(1), { len: 2.4, tone: CV_LEATHER, solid: true });
+    R.chandelier(R.dep * 0.33, 0, 1.6);
+    R.chandelier(R.dep * 0.66, 0, 1.6);
+  }
+
+  /* ---- THE CAPITOL'S FLOORS --------------------------------------------------
+     One plan for all three: the rotunda (or, upstairs, the gallery round its
+     well) at the centre, the cross corridor through it to both ends of the
+     block, suites front and back of the corridor in columns of ~11 m, a hall
+     (or a great room) on the axis in front of and behind the rotunda. The
+     column a stair core stands in is left open as the core's stair hall. */
+  function capitolPlan(r, h, k) {
+    const b = h.b, plan = b._civicPlan || {};
+    const RO = plan.rotunda || { x: 0, z: 0, r: 11.2, well: 7.4, band: 12.5 };
+    const F = cvFrame(r, h, b.localDoor);
+    const c = F.inv(RO.x, RO.z), dC = c.d, lC = c.l;
+    const E = 0.4;                                  // the plate edge to the wall face
+    const dF = -E, dK = F.dep + E, lMax = F.half + E;
+    const CX = Math.min(RO.band || RO.r + 1.3, lMax * 0.4), CW = 2.5;
+    const dmF = (dF + dC - CW) / 2, dmB = (dC + CW + dK) / 2;
+    const cw = (lMax - CX) / 3;
+    const core = cvCore(h);
+    const out = { F: F, dC: dC, lC: lC, CX: CX, CW: CW, rooms: [], RO: RO, dF: dF, dK: dK };
+    const wallsL = [], wallsD = [];
+    for (const side of [-1, 1]) for (const blk of [-1, 1]) {
+      // blk -1: in front of the corridor (toward the door); +1: behind it
+      const dA = blk < 0 ? dC - CW : dC + CW;          // the corridor wall
+      const dM = blk < 0 ? dmF : dmB;                   // between the rows
+      const dE = blk < 0 ? dF : dK;                     // the block's outer wall
+      const one = k === 1 && blk < 0;                   // floor 1 front: hearing rooms
+      for (let ci = 0; ci < 3; ci++) {
+        const la = lC + side * (CX + ci * cw), lb = lC + side * (CX + (ci + 1) * cw);
+        const l0 = Math.min(la, lb), l1 = Math.max(la, lb), lm = (l0 + l1) / 2;
+        const box = F.rect(Math.min(dA, dE), Math.max(dA, dE), l0, l1);
+        const open = core.some(function (q) { return rectHits(box, q, 0.6); });
+        if (open) { out.rooms.push({ open: true, l0: l0, l1: l1, d0: Math.min(dA, dE), d1: Math.max(dA, dE) }); continue; }
+        // the corridor wall with this suite's double door
+        wallsL.push([dA, l0, l1, [{ c: lm, w: 1.8, leaf: blk, hinge: -side }]]);
+        // the rooms: A (on the corridor), B (behind it, through A)
+        const i0 = 0.12;
+        const dAin = dA + blk * i0, dMa = dM - blk * i0, dMb = dM + blk * i0, dEin = dE - blk * 0.05;
+        if (one) {
+          out.rooms.push({ type: "hearing", rect: F.rect(Math.min(dAin, dEin), Math.max(dAin, dEin), l0 + i0, l1 - i0), door: F.door(dA, lm, blk) });
+        } else {
+          wallsL.push([dM, l0, l1, [{ c: lm + side * (cw / 2 - 1.4), w: 1.2, leaf: blk, hinge: side }]]);
+          out.rooms.push({ type: "reception", rect: F.rect(Math.min(dAin, dMa), Math.max(dAin, dMa), l0 + i0, l1 - i0), door: F.door(dA, lm, blk) });
+          out.rooms.push({ type: "office", rect: F.rect(Math.min(dMb, dEin), Math.max(dMb, dEin), l0 + i0, l1 - i0), door: F.door(dM, lm + side * (cw / 2 - 1.4), blk) });
+        }
+      }
+      // the column walls (the centre band's side, and between the suites)
+      for (let ci = 0; ci < 3; ci++) {
+        const lw = lC + side * (CX + ci * cw);
+        const lo = Math.min(dA, dE), hi = Math.max(dA, dE);
+        wallsD.push([lw, lo, hi, []]);
+      }
+    }
+    for (const w of wallsL) F.wallL(w[0], w[1], w[2], w[3]);
+    for (const w of wallsD) {
+      // a column wall between two OPEN columns is nobody's wall
+      const lw = w[0];
+      const openL = out.rooms.some(function (q) { return q.open && Math.abs(q.l1 - lw) < 0.01 && q.d0 <= w[1] + 0.01 && q.d1 >= w[2] - 0.01; });
+      const openR = out.rooms.some(function (q) { return q.open && Math.abs(q.l0 - lw) < 0.01 && q.d0 <= w[1] + 0.01 && q.d1 >= w[2] - 0.01; });
+      if (openL && openR) continue;
+      F.wallD(lw, w[1], w[2], w[3]);
+    }
+    return out;
+  }
+  // dress every room the plan produced
+  function capitolDress(h, P, anchors, k) {
+    for (const q of P.rooms) {
+      if (q.open) continue;
+      if (q.type === "hearing") roomHearing(h, q.rect, q.door, anchors, {});
+      else if (q.type === "reception") roomReception(h, q.rect, q.door, anchors, {});
+      else if (q.type === "office") roomOffice(h, q.rect, q.door, anchors, { carpet: k === 2 ? CV.green : CV.blue });
+    }
+    // the corridor: marble, a runner, lights down its length; the open stair
+    // halls marble too
+    const F = P.F;
+    for (const q of P.rooms) if (q.open) F.floor(q.d0 + 0.05, q.d1 - 0.05, q.l0 + 0.05, q.l1 - 0.05, CV.marble);
+    for (const side of [-1, 1]) {
+      const l0 = P.lC + side * P.CX, l1 = P.lC + side * (P.F.half + 0.4);
+      F.floor(P.dC - P.CW + 0.1, P.dC + P.CW - 0.1, Math.min(l0, l1), Math.max(l0, l1), CV.marble);
+      F.rug(P.dC - 0.9, P.dC + 0.9, Math.min(l0, l1) + 0.6, Math.max(l0, l1) - 1.0, CV.red, CV.gold, 0.12);
+      for (let t = 4; t < Math.abs(l1 - l0) - 2; t += 7) F.light(P.dC, P.lC + side * (P.CX + t), F.ceil - 0.05, 0.05, 1.0, 1.0, CV.day, 0.65);
+    }
+  }
+  // the well's edge, on an upper floor: a balustrade you lean on, never step through
+  function wellRail(F, dC, lC, W) {
+    const bal = [];
+    const run = function (lat, at, a0, a1) {
+      const len = Math.abs(a1 - a0), mid = (a0 + a1) / 2;
+      if (lat) {
+        F.box(mid, at, 0, 0.16, 0.34, len, CV.marbleD);
+        F.box(mid, at, 0.86, 0.14, 0.42, len + 0.1, CV.marble);
+        F.solidRect(Math.min(a0, a1), Math.max(a0, a1), at - 0.2, at + 0.2, 0, 1.0);
+      } else {
+        F.box(at, mid, 0, 0.16, len, 0.34, CV.marbleD);
+        F.box(at, mid, 0.86, 0.14, len + 0.1, 0.42, CV.marble);
+        F.solidRect(at - 0.2, at + 0.2, Math.min(a0, a1), Math.max(a0, a1), 0, 1.0);
+      }
+      const n = Math.max(1, Math.floor(len / 0.3));
+      for (let i = 0; i < n; i++) {
+        const t = Math.min(a0, a1) + (i + 0.5) * len / n;
+        const p = lat ? F.p(t, at) : F.p(at, t);
+        bal.push({ x: p.x, y: F.y + 0.16, z: p.z });
+      }
+    };
+    const e = W + 0.2;
+    run(false, dC - e, lC - e, lC + e);
+    run(false, dC + e, lC - e, lC + e);
+    run(true, lC - e, dC - e + 0.2, dC + e - 0.2);
+    run(true, lC + e, dC - e + 0.2, dC + e - 0.2);
+    if (bal.length && window.THREE && F.h.b.group) {
+      const T = window.THREE;
+      const g = new T.LatheGeometry([[0, 0], [0.085, 0], [0.085, 0.05], [0.06, 0.09], [0.1, 0.26], [0.05, 0.46],
+        [0.045, 0.52], [0.075, 0.56], [0.075, 0.64], [0, 0.64]].map(function (q) { return new T.Vector2(q[0], q[1]); }), 10);
+      const im = new T.InstancedMesh(g, cvMat(CV.marble), bal.length);
+      const o = new T.Object3D();
+      for (let i = 0; i < bal.length; i++) {
+        o.position.set(bal[i].x, bal[i].y, bal[i].z); o.updateMatrix(); im.setMatrixAt(i, o.matrix);
+      }
+      im.instanceMatrix.needsUpdate = true;
+      im.name = "civic-well-balusters";
+      F.h.b.group.add(im);
+    }
+    CIVIC.galleries++;
+  }
+
+  /* THE CAPITOL'S GRAND STAIR — from the rotunda floor to the gallery floor,
+     in the core's own stair hall (the open column behind the corridor), along
+     its inner wall: two marble flights of ~0.165 m risers on 0.42 m goings
+     with a half landing, rising toward the back so you step off upstairs
+     beside the core's landing. Built from the shared kit only: two
+     CBZ.stairs.flight with `steps` (the walk surface IS the treads drawn
+     here), CBZ.cityCarveShaft opening slab 1 over it (and reserving it, so
+     lbox clips anything a program draws in that band), a solid stepped mass
+     with a collider per tread, and a balustrade on the open side whose rail
+     is solid. The guard round the opening upstairs is the gallery floor's
+     (capitolfloor reads plan.stair). */
+  function capitolStair(h, F, P) {
+    const b = h.b, tops = b.floorTops, plan = b._civicPlan;
+    if (!plan || !CBZ.stairs || !CBZ.stairs.flight || !CBZ.cityCarveShaft || !Array.isArray(tops) || tops.length < 3) return null;
+    const col = P.rooms.find(function (q) { return q.open && q.d0 > P.dC; });
+    if (!col) return null;
+    const inner = Math.abs(col.l0 - P.lC) < Math.abs(col.l1 - P.lC) ? col.l0 : col.l1;
+    const sg = inner === col.l0 ? 1 : -1;                 // from the inner wall toward the core
+    const W = 3.0, la = inner + sg * 0.1, lb = la + sg * W, lc = (la + lb) / 2;
+    const lo = Math.min(la, lb), hi = Math.max(la, lb);
+    const y0 = tops[0], y1 = tops[1];
+    const nTot = Math.max(8, Math.round((y1 - y0) / 0.165)), n1 = Math.ceil(nTot / 2), n2 = nTot - n1;
+    const rise = (y1 - y0) / nTot, go = 0.42, LAND = 1.8, RH = 0.95;
+    const dBot = P.dC + P.CW + 1.4, dL0 = dBot + n1 * go, dL1 = dL0 + LAND, dTop = dL1 + n2 * go;
+    const yL = y0 + n1 * rise;
+    if (dTop > P.dK - 2.4) return null;
+    const foot = F.rect(dBot - 0.4, dTop + 1.2, lo - 0.1, hi + 0.6);
+    if (cvCore(h).some(function (q) { return rectHits(foot, q, 0.1); })) return null;
+    // 1. the opening in slab 1
+    const hole = F.rect(dBot - 0.1, dTop, lo - 0.1, hi + (sg > 0 ? 0.25 : 0.1));
+    const hole2 = F.rect(dBot - 0.1, dTop, lo - (sg < 0 ? 0.25 : 0.1), hi + 0.1);
+    const Hh = sg > 0 ? hole : hole2;
+    CBZ.cityCarveShaft(b, h.ox + (Hh.x0 + Hh.x1) / 2, h.oz + (Hh.z0 + Hh.z1) / 2, (Hh.x1 - Hh.x0) / 2, (Hh.z1 - Hh.z0) / 2, { levels: [1], reserve: true });
+    // 2. the walk surface
+    const W3 = function (d, l, y) { const p = F.p(d, l); return { x: h.ox + p.x, y: y, z: h.oz + p.z }; };
+    const fl = [];
+    fl.push(CBZ.stairs.flight({ bottom: W3(dBot, lc, y0), top: W3(dL0, lc, yL), width: W, overlap: 0.3, steps: n1, owner: b, plats: b.platforms || undefined, cols: b.colliders || undefined, kind: "stair" }));
+    fl.push(CBZ.stairs.flight({ bottom: W3(dL1, lc, yL), top: W3(dTop, lc, y1), width: W, overlap: 0.3, steps: n2, owner: b, plats: b.platforms || undefined, cols: b.colliders || undefined, kind: "stair" }));
+    F.walkRect(dL0 - 0.02, dL1 + 0.02, lo, hi, yL - F.y);
+    // 3. the stair you see: a stepped marble mass, a nosing, a red runner
+    const MARBLE = 0xe4e0d6, NOSE = 0xf1eee6;
+    const treads = [];
+    const mass = function (dStart, base, n) {
+      for (let i = 1; i <= n; i++) {
+        const top = base + i * rise - F.y, dc = dStart + (i - 0.5) * go, dFront = dStart + (i - 1) * go;
+        F.box(dc, lc, 0, top, W, go + 0.004, MARBLE, { stair: true, cast: i === n });
+        F.box(dFront + 0.035, lc, top - 0.03, 0.03, W + 0.04, 0.07, NOSE, { stair: true });
+        F.box(dc, lc, top, 0.012, 1.9, go - 0.02, CV.red, { stair: true });
+        F.box(dFront + 0.07, lc, top + 0.012, 0.012, 1.98, 0.012, CV.gold, { stair: true });
+        F.solidRect(dc - go / 2, dc + go / 2, lo, hi, -0.05, top);
+        const p = F.p(dc, lc);
+        treads.push({ x: h.ox + p.x, z: h.oz + p.z, top: base + i * rise, w: W, go: go });
+      }
+    };
+    mass(dBot, y0, n1);
+    F.box((dL0 + dL1) / 2, lc, 0, yL - F.y, W, LAND + 0.004, MARBLE, { stair: true });
+    F.box((dL0 + dL1) / 2, lc, yL - F.y, 0.012, 1.9, LAND - 0.1, CV.red, { stair: true });
+    F.solidRect(dL0, dL1, lo, hi, -0.05, yL - F.y);
+    mass(dL1, yL, n2);
+    // the open side's closed string, stepped with the flights
+    const sO = lb + sg * 0.03;
+    F.box((dBot + dL1) / 2, sO, 0, yL - F.y, 0.06, dL1 - dBot, 0xd8d2c4, { stair: true });
+    F.box((dL1 + dTop) / 2, sO, 0, y1 - F.y, 0.06, dTop - dL1, 0xd8d2c4, { stair: true });
+    // 4. THE BALUSTRADE on the open side: two balusters a tread, a sloped
+    //    brass rail per flight, a level one over the landing, four newels; solid
+    const railL = lb - sg * 0.08;
+    const T = window.THREE;
+    const slopeRail = function (dStart, base, n, l, hgt) {
+      if (!T || !b.group) return;
+      const len = Math.hypot(n * go, n * rise);
+      const g = new T.BoxGeometry(0.09, 0.07, len);
+      g.rotateX(-Math.atan2(n * rise, n * go));
+      g.rotateY(Math.atan2(F.A.nx, F.A.nz));
+      const mid = F.p(dStart + n * go / 2, l);
+      g.translate(mid.x, base + (n * rise) / 2 + rise / 2 + hgt, mid.z);
+      const m = new T.Mesh(g, cvMat(CV.gold));
+      m.castShadow = false; m.matrixAutoUpdate = false; m.updateMatrix();
+      b.group.add(m);
+    };
+    const railRun = function (dStart, base, n) {
+      for (let i = 0; i < n; i++) {
+        const t = base + (i + 1) * rise - F.y;
+        for (const f of [0.28, 0.72]) F.box(dStart + (i + f) * go, railL, t, RH - 0.05, 0.045, 0.045, MARBLE, { stair: true });
+      }
+      slopeRail(dStart, base, n, railL, RH);
+      slopeRail(dStart, base, n, la + sg * 0.07, 0.9);                     // the wall rail
+      const segs = Math.ceil(n * go / 0.5);
+      for (let k = 0; k < segs; k++) {
+        const da = dStart + k * n * go / segs, db = dStart + (k + 1) * n * go / segs;
+        const lo2 = base + Math.floor(k * n / segs) * rise - F.y, hi2 = base + Math.ceil((k + 1) * n / segs) * rise - F.y;
+        F.solidRect(da, db, Math.min(railL - 0.07, railL + 0.07), Math.max(railL - 0.07, railL + 0.07), lo2 + 0.1, hi2 + RH + 0.05);
+      }
+    };
+    railRun(dBot, y0, n1);
+    railRun(dL1, yL, n2);
+    for (let d = dL0 + 0.25; d < dL1 - 0.1; d += 0.3) F.box(d, railL, yL - F.y, RH - 0.05, 0.045, 0.045, MARBLE, { stair: true });
+    F.box((dL0 + dL1) / 2, railL, yL - F.y + RH, 0.07, 0.09, LAND, CV.gold, { stair: true });
+    F.solidRect(dL0, dL1, railL - 0.07, railL + 0.07, yL - F.y + 0.1, yL - F.y + RH + 0.05);
+    for (const e of [[dBot - 0.18, y0], [dL0, yL], [dL1, yL], [dTop + 0.2, y1]]) {
+      F.box(e[0], railL, e[1] - F.y, 1.2, 0.3, 0.3, MARBLE, { stair: true });
+      F.box(e[0], railL, e[1] - F.y + 1.2, 0.1, 0.36, 0.36, NOSE, { stair: true });
+      F.box(e[0], railL, e[1] - F.y + 1.3, 0.12, 0.16, 0.16, CV.gold, { stair: true });
+    }
+    F.solidRect(dBot - 0.33, dBot - 0.03, railL - 0.15, railL + 0.15, -0.05, 1.3);
+    // 5. light over the well: a lantern from the slab above the landing
+    {
+      const top2 = tops[2] - 0.2 - F.y, ly = Math.max(yL - F.y + 2.6, top2 - 1.1);
+      F.box((dL0 + dL1) / 2, lc, ly, top2 - ly, 0.04, 0.04, CV.gold, { stair: true });
+      const p = F.p((dL0 + dL1) / 2, lc);
+      cvGlow(0xfff0c8, 0.9, 0.6, 0.5, 0.6, p.x, F.y + ly - 0.25, p.z);
+    }
+    const rec = { d0: dBot - 0.1, d1: dTop, lo: Math.min(Hh === hole ? lo - 0.1 : lo - 0.25, hi), hi: Hh === hole ? hi + 0.25 : hi + 0.1,
+      open: lb, sg: sg, treads: treads, links: fl.map(function (f) { return f && f.link ? f.link.id : null; }) };
+    plan.stair = rec;                  // the plan object is shared by the shell and its lot copy
+    return rec;
+  }
+  // upstairs: the guard round the grand stair's opening (the side toward the
+  // stair hall and the end over the stair's foot; the far end is the arrival)
+  function capitolStairGuard(F, S) {
+    if (!S) return;
+    const lOpen = S.sg > 0 ? S.hi : S.lo;
+    const run = function (lat, at, a0, a1) {
+      const len = Math.abs(a1 - a0), mid = (a0 + a1) / 2;
+      if (lat) {
+        F.box(mid, at, 0, 0.95, 0.2, len, CV.marbleD);
+        F.box(mid, at, 0.95, 0.08, 0.3, len + 0.06, CV.marble);
+        F.solidRect(Math.min(a0, a1), Math.max(a0, a1), at - 0.12, at + 0.12, 0, 1.03);
+      } else {
+        F.box(at, mid, 0, 0.95, len, 0.2, CV.marbleD);
+        F.box(at, mid, 0.95, 0.08, len + 0.06, 0.3, CV.marble);
+        F.solidRect(at - 0.12, at + 0.12, Math.min(a0, a1), Math.max(a0, a1), 0, 1.03);
+      }
+    };
+    run(true, lOpen + S.sg * 0.12, S.d0, S.d1 - 1.2);
+    run(false, S.d0 - 0.12, S.lo, S.hi);
+  }
+  // THE ROTUNDA — the Capitol's ground floor
+  function progRotunda(r, h, opts) {
+    cvFitStart(r, h);
+    const b = h.b, plan = b._civicPlan || {};
+    const RO = plan.rotunda || { x: 0, z: 0, r: 11.2, well: 7.4, band: 12.5 };
+    const nF = Array.isArray(b.floorTops) ? b.floorTops.length - 1 : (b.storeys | 0);
+    // 1. THE WELL: every slab over the rotunda, and the roof under the dome
+    //    when there is a dome to look up into
+    let well = null;
+    if (CBZ.cityCarveShaft && nF >= 2) {
+      const lv = [];
+      for (let L = 1; L <= nF; L++) lv.push(L);
+      CBZ.cityCarveShaft(b, h.ox + RO.x, h.oz + RO.z, RO.well, RO.well, { levels: lv, roof: !!plan.dome, reserve: true });
+      well = (b.shaftRects || []).find(function (q) { return Math.abs(q.x0 - (RO.x - RO.well)) < 1e-3 && Math.abs(q.z0 - (RO.z - RO.well)) < 1e-3; }) || null;
+      b._civicWell = well;
+      CIVIC.carved++;
+    }
+    shell(h, r);
+    const anchors = [];
+    const P = capitolPlan(r, h, 0);
+    const F = P.F, dC = P.dC, lC = P.lC, RR = RO.r;
+    // 2. THE ROTUNDA: a compass floor, sixteen columns in a ring, the ring
+    //    beam under the gallery floor, benches between the columns
+    const T = window.THREE, cc = F.p(dC, lC);
+    const disc = function (rad, lift, hex, ring0) {
+      const g = ring0 ? new T.RingGeometry(ring0, rad, 64, 1) : new T.CircleGeometry(rad, 64);
+      g.rotateX(-Math.PI / 2);
+      const m = new T.Mesh(g, cvMat(hex));
+      m.position.set(cc.x, r.y + lift, cc.z);
+      m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix();
+      b.group.add(m);
+      return m;
+    };
+    F.floor(dC - P.CX + 0.1, dC + P.CX - 0.1, lC - P.CX + 0.1, lC + P.CX - 0.1, CV.marble);
+    disc(RR - 0.6, CV_INLAY, CV.marbleV, RR - 1.2);
+    disc(6.2, CV_INLAY, CV.marbleD, 5.8);
+    disc(3.1, CV_INLAY, CV.marbleV, 2.8);
+    const star = new T.Shape();
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2, rr = i % 2 ? 1.1 : (i % 4 ? 2.1 : 2.7);
+      if (i === 0) star.moveTo(Math.cos(a) * rr, Math.sin(a) * rr); else star.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+    }
+    const sg = new T.ShapeGeometry(star); sg.rotateX(-Math.PI / 2);
+    const sm = new T.Mesh(sg, cvMat(CV.gold)); sm.position.set(cc.x, r.y + CV_TOP, cc.z); sm.matrixAutoUpdate = false; sm.updateMatrix(); b.group.add(sm);
+    const K = CBZ.civicMonument;
+    const ceil = F.ceil;
+    const colPts = [];
+    for (let i = 0; i < 16; i++) {
+      const a = ((i + 0.5) / 16) * Math.PI * 2;
+      const x = cc.x + Math.cos(a) * RR, z = cc.z + Math.sin(a) * RR;
+      colPts.push({ x: x, z: z, a: a });
+      cvSolid(h, x - 0.72, x + 0.72, z - 0.72, z + 0.72, r.y, r.y + 3.0);   // the plinth, turned: its corners too
+    }
+    if (K && K.columnGeo) {
+      const g = K.columnGeo(0.36, ceil - 0.62);
+      const im = new T.InstancedMesh(g, cvMat(CV.marble), colPts.length);
+      const o = new T.Object3D();
+      colPts.forEach(function (p, i) { o.position.set(p.x, r.y, p.z); o.rotation.set(0, -p.a, 0); o.updateMatrix(); im.setMatrixAt(i, o.matrix); });
+      im.instanceMatrix.needsUpdate = true; im.castShadow = true; im.receiveShadow = true;
+      im.name = "civic-rotunda-columns";
+      b.group.add(im);
+      // the ring beam the columns carry, flush under the gallery slab
+      const beam = new T.CylinderGeometry(RR + 0.6, RR + 0.6, 0.62, 64, 1, true);
+      const beamI = new T.CylinderGeometry(RR - 0.6, RR - 0.6, 0.62, 64, 1, true);
+      const soff = new T.RingGeometry(RR - 0.6, RR + 0.6, 64, 1); soff.rotateX(Math.PI / 2);
+      for (const pair of [[beam, CV.marble, false], [beamI, CV.marble, true], [soff, CV.marbleD, false]]) {
+        const m = new T.Mesh(pair[0], pair[2] ? new T.MeshLambertMaterial({ color: pair[1], side: T.BackSide }) : cvMat(pair[1]));
+        m.position.set(cc.x, r.y + ceil - 0.31 + (pair[0] === soff ? -0.31 : 0), cc.z);
+        m.matrixAutoUpdate = false; m.updateMatrix();
+        b.group.add(m);
+      }
+    }
+    // four bronze torcheres on the diagonals; a rope on four posts round the star
+    for (let i = 0; i < 4; i++) {
+      const a = Math.PI / 4 + i * Math.PI / 2;
+      const px = cc.x + Math.cos(a) * (RR - 1.8), pz = cc.z + Math.sin(a) * (RR - 1.8);
+      if (!cvFree(h, r, px, pz, 0.3, well)) continue;
+      h.b.lbox(px, r.y + 0.05, pz, 0.5, 0.1, 0.5, CV.bronze, { cast: false });
+      h.b.lbox(px, r.y + 1.1, pz, 0.08, 2.0, 0.08, CV.bronze, { cast: false });
+      cvGlow(CV.lamp, 0.9, 0.42, 0.3, 0.42, px, r.y + 2.25, pz);
+      cvSolid(h, px - 0.25, px + 0.25, pz - 0.25, pz + 0.25, r.y, r.y + 2.4);
+    }
+    {
+      const q = 3.4;
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+        h.b.lbox(cc.x + sx * q, r.y + 0.47, cc.z + sz * q, 0.09, 0.94, 0.09, CV.gold, { cast: false });
+        h.b.lbox(cc.x + sx * q, r.y + 0.03, cc.z + sz * q, 0.34, 0.06, 0.34, CV.gold, { cast: false });
+      }
+      for (const s2 of [-1, 1]) {
+        h.b.lbox(cc.x, r.y + 0.82, cc.z + s2 * q, 2 * q, 0.05, 0.05, CV.red, { cast: false });
+        h.b.lbox(cc.x + s2 * q, r.y + 0.82, cc.z, 0.05, 0.05, 2 * q, CV.red, { cast: false });
+        cvSolid(h, cc.x - q, cc.x + q, cc.z + s2 * q - 0.06, cc.z + s2 * q + 0.06, r.y + 0.3, r.y + 0.95);
+        cvSolid(h, cc.x + s2 * q - 0.06, cc.x + s2 * q + 0.06, cc.z - q, cc.z + q, r.y + 0.3, r.y + 0.95);
+      }
+    }
+    F.anchor(anchors, dC - P.CX + 0.9, lC + 3.0, F.faceIn, "guard", "foldarms");
+    F.anchor(anchors, dC + P.CX - 0.9, lC - 3.0, F.faceIn, "guard", "foldarms");
+    // 3. THE ENTRANCE HALL on the axis: marble, the runner from the door to
+    //    the rotunda, the screening line, portraits on its walls, benches
+    const hd1 = dC - P.CX;
+    F.floor(0, hd1, lC - P.CX + 0.1, lC + P.CX - 0.1, CV.marble);
+    F.rug(0.5, hd1 + 0.4, lC - 1.3, lC + 1.3, CV.red, CV.gold, 0.18);
+    const sd = Math.min(7.0, hd1 * 0.5);
+    for (const s of [-1, 1]) {
+      const l = lC + s * 1.25;
+      F.box(sd, l - 0.52, 0, 2.2, 0.14, 0.5, 0x8c939b, { solid: true });
+      F.box(sd, l + 0.52, 0, 2.2, 0.14, 0.5, 0x8c939b, { solid: true });
+      F.box(sd, l, 2.2, 0.16, 1.2, 0.5, 0x5f666e);
+    }
+    F.piece("table", sd, lC + 3.4, F.faceL(-1), { len: 1.6, deep: 0.7, seats: 0, tone: CV_LEATHER, solid: true });
+    F.anchor(anchors, sd + 0.6, lC + 3.4, F.faceIn, "guard", "foldarms");
+    F.anchor(anchors, sd - 0.3, lC - 3.0, F.faceIn, "guard", "foldarms");
+    for (const s of [-1, 1]) {
+      for (let d = 3.0; d < hd1 - 1.0; d += 4.5) F.art(d, lC + s * (P.CX - 0.1), -s, 1.8, 2.2, 2.6, s < 0 ? 0x3a4450 : 0x4a3a30, true);
+      F.piece("bench", hd1 - 2.2, lC + s * (P.CX - 1.0), F.faceL(-s), { len: 2.4, tone: CV_LEATHER, solid: true });
+    }
+    F.chandelier(hd1 * 0.5, lC, 1.8);
+    // 4. THE STATUARY HALL behind the rotunda (open to it, as in the real one)
+    roomStatuary(h, F.rect(dC + P.CX, P.dK - 0.05, lC - P.CX + 0.12, lC + P.CX - 0.12), F.door(dC + P.CX, lC, 1), anchors);
+    // 5. the grand stair to the gallery floor, in the core's stair hall
+    try { capitolStair(h, F, P); } catch (e) { if (window.console) console.error("[civic] grand stair", e); }
+    // 6. the corridor and the suites
+    capitolDress(h, P, anchors, 0);
+    return cvOut(anchors);
+  }
+
+  // THE CAPITOL'S UPPER FLOORS (1: hearings; 2: the members and the principal)
+  function progCapitolFloor(r, h, opts) {
+    cvFitStart(r, h);
+    const b = h.b, plan = b._civicPlan || {};
+    shell(h, r);
+    const anchors = [];
+    const nF = Array.isArray(b.floorTops) ? b.floorTops.length - 1 : (b.storeys | 0);
+    const k = Math.max(1, Math.round((r.y - (b.floorTops ? b.floorTops[0] : 0.14)) / Math.max(1, h.fh)));
+    const top = k >= nF - 1;
+    const P = capitolPlan(r, h, top ? 2 : 1);
+    const F = P.F, dC = P.dC, lC = P.lC, RO = P.RO, RR = RO.r, W = RO.well;
+    if (k === 1 && plan.stair) capitolStairGuard(F, plan.stair);
+    // THE GALLERY round the well: marble, the balustrade, lights on the rim
+    F.floor(dC - P.CX + 0.1, dC + P.CX - 0.1, lC - P.CX + 0.1, lC + P.CX - 0.1, CV.marble);
+    wellRail(F, dC, lC, W);
+    for (const s of [-1, 1]) for (const q of [-1, 1]) F.light(dC + q * (W + 2.0), lC + s * (W + 2.0), F.ceil - 0.05, 0.05, 0.9, 0.9, CV.day, 0.6);
+    // the halls on the axis become rooms upstairs: walls on the gallery side
+    const dFr = dC - P.CX, dBk = dC + P.CX;
+    F.wallL(dFr, lC - P.CX, lC + P.CX, [{ c: lC, w: 2.2, leaf: -1, hinge: 1 }]);
+    F.wallL(dBk, lC - P.CX, lC + P.CX, [{ c: lC, w: 2.2, leaf: 1, hinge: -1 }]);
+    const front = F.rect(P.dF + 0.05, dFr - 0.12, lC - P.CX + 0.12, lC + P.CX - 0.12);
+    const back = F.rect(dBk + 0.12, P.dK - 0.05, lC - P.CX + 0.12, lC + P.CX - 0.12);
+    if (!top) {
+      roomHearing(h, front, F.door(dFr, lC, -1), anchors, { carpet: CV.blue, dais: CV.red });
+      roomLibrary(h, back, F.door(dBk, lC, 1), anchors);
+    } else {
+      roomLibrary(h, front, F.door(dFr, lC, -1), anchors);
+      roomLeader(h, back, F.door(dBk, lC, 1), anchors, { rug: CV.blue });
+    }
+    capitolDress(h, P, anchors, top ? 2 : 1);
+    return cvOut(anchors);
+  }
+
+  /* ---- THE CHAMBERS ------------------------------------------------------- */
+  // the wing's plan, from its front door: lobby band, side corridors, the
+  // chamber between them, the rostrum at the back, the void over the house
+  function chamberPlan(r, h) {
+    const b = h.b;
+    const F = cvFrame(r, h, b.localDoor);
+    const E = 0.4, dF = -E, dK = F.dep + E, lMax = F.half + E;
+    const SC = Math.min(4.8, lMax * 0.24);             // side corridor width
+    const lW = lMax - SC;                              // the chamber's side walls
+    const dL = Math.min(8.0, F.dep * 0.21);            // the lobby's depth
+    const dCh0 = dL;                                   // chamber front wall
+    const CR = Math.min(lW - 3.8, (dK - dCh0) * 0.5);  // radius of the top tier
+    const zc = dK - 3.2;                               // the rostrum's centre, in d
+    const vd0 = dCh0 + Math.max(4.5, (dK - dCh0) * 0.3);   // the void's front edge
+    const vl = lW - 4.0;                               // the void's side edges (side galleries outside)
+    return { F: F, dF: dF, dK: dK, lMax: lMax, SC: SC, lW: lW, dL: dL, dCh0: dCh0, CR: CR, dRc: zc, vd0: vd0, vl: vl };
+  }
+  function progChamber(r, h, opts) {
+    cvFitStart(r, h);
+    const b = h.b, plan = b._civicPlan || {};
+    const house = plan.house || "senate";
+    const P = chamberPlan(r, h);
+    const F = P.F;
+    // 1. the void: the slab over the house floor, the rostrum and the tiers
+    if (CBZ.cityCarveShaft && Array.isArray(b.floorTops) && b.floorTops.length >= 3) {
+      const q = F.rect(P.vd0, P.dK, -P.vl, P.vl);
+      CBZ.cityCarveShaft(b, h.ox + (q.x0 + q.x1) / 2, h.oz + (q.z0 + q.z1) / 2, (q.x1 - q.x0) / 2, (q.z1 - q.z0) / 2, { levels: [1], reserve: true });
+      b._civicVoid = q;
+      CIVIC.carved++;
+    }
+    shell(h, r);
+    const anchors = [];
+    const HT = CV_HOUSE[house] || CV_HOUSE.senate;
+    const carpet = house === "senate" ? CV.red : CV.green;
+    // 2. walls: lobby wall across, chamber side walls with members' doors
+    F.wallL(P.dCh0, -P.lMax, P.lMax, [
+      { c: -(P.lW + P.SC / 2), w: 2.2, leaf: 1, hinge: 1 }, { c: P.lW + P.SC / 2, w: 2.2, leaf: 1, hinge: -1 },
+      { c: -6.0, w: 2.0, leaf: 1, hinge: 1 }, { c: 6.0, w: 2.0, leaf: 1, hinge: -1 }]);
+    for (const s of [-1, 1]) {
+      F.wallD(s * P.lW, P.dCh0, P.dK, [{ c: P.dRc - 8.0, w: 1.8, leaf: -s, hinge: 1 }, { c: P.dCh0 + 3.2, w: 1.8, leaf: -s, hinge: -1 }],
+        { hex: CV.plaster });
+    }
+    // 3. the lobby: marble, a runner to the chamber doors, benches, portraits
+    F.floor(0, P.dCh0 - 0.1, -P.lMax + 0.05, P.lMax - 0.05, CV.marble);
+    F.rug(0.4, P.dCh0 - 0.5, -1.2, 1.2, carpet, CV.gold, 0.15);
+    for (const s of [-1, 1]) {
+      F.piece("bench", P.dCh0 - 0.8, s * 11.5, F.faceIn, { len: 2.6, tone: HT, solid: true });
+      F.art(P.dCh0 - 0.1, s * 11.5, -1, 1.6, 1.8, 2.5, s < 0 ? 0x3a4450 : 0x4a3a30);
+      F.art(P.dCh0 * 0.5, s * P.lMax, -s, 1.8, 1.4, 2.3, 0x44403a, true);
+      F.anchor(anchors, P.dCh0 - 0.7, s * 6.0 + s * 1.6, F.faceIn, "guard", "foldarms");
+    }
+    F.chandelier(P.dCh0 * 0.5, -8, 1.3);
+    F.chandelier(P.dCh0 * 0.5, 8, 1.3);
+    // side corridors: marble, lights
+    for (const s of [-1, 1]) {
+      const l0 = s * P.lW, l1 = s * P.lMax;
+      F.floor(P.dCh0 + 0.1, P.dK, Math.min(l0, l1) + 0.1, Math.max(l0, l1) - 0.05, CV.marble);
+      for (let d = P.dCh0 + 3; d < P.dK - 2; d += 6) F.light(d, s * (P.lW + P.SC / 2), F.ceil - 0.05, 0.05, 0.8, 0.8, CV.day, 0.6);
+    }
+    // 4. THE HOUSE FLOOR: carpet, the tiers, the desks, the rostrum
+    F.floor(P.dCh0 + 0.1, P.dK, -P.lW + 0.1, P.lW - 0.1, carpet);
+    chamberTiers(h, F, P, HT, anchors);
+    chamberRostrum(h, F, P, house, anchors);
+    // 5. the room's height: the side walls panelled to the dado, pilasters up
+    //    to the ceiling of the void, a coffered ceiling, the laylight
+    const H2 = (b.floorTops && b.floorTops[2] != null ? b.floorTops[2] : 2 * h.fh) - r.y - 0.2;
+    for (const s of [-1, 1]) {
+      F.box((P.dCh0 + P.dK) / 2, s * (P.lW - 0.12), 0, 1.1, 0.04, P.dK - P.dCh0, CV.panel);
+      F.box((P.dCh0 + P.dK) / 2, s * (P.lW - 0.14), 1.1, 0.06, 0.06, P.dK - P.dCh0, CV.gold);
+    }
+    F.box(P.dK - 0.03, 0, 0, H2, 2 * P.vl, 0.06, CV.cream);
+    for (let l = -P.vl + 1.5; l <= P.vl - 1.4; l += (2 * P.vl - 3) / 6) if (Math.abs(l) > 4.4) F.box(P.dK - 0.13, l, 0, H2, 0.7, 0.14, CV.marble);
+    F.box(P.dK - 0.16, 0, H2 - 0.7, 0.5, 2 * P.vl, 0.2, CV.marble);
+    const cz0 = P.vd0 + 0.3, cz1 = P.dK - 0.3;
+    for (let d = cz0; d <= cz1; d += (cz1 - cz0) / 5) F.box(d, 0, H2 - 0.3, 0.3, 2 * P.vl - 0.4, 0.3, CV.cream);
+    for (let l = -P.vl + 0.2; l <= P.vl - 0.2; l += (2 * P.vl - 0.4) / 6) F.box((cz0 + cz1) / 2, l, H2 - 0.3, 0.3, 0.3, cz1 - cz0, CV.cream);
+    F.light((cz0 + cz1) / 2, 0, H2 - 0.06, 0.05, P.vl * 1.0, (cz1 - cz0) * 0.5, CV.day, 0.75);
+    for (const s of [-1, 1]) for (const d of [P.vd0 + 3, P.dK - 4]) F.chandelier(d, s * P.vl * 0.55, 1.6, H2);
+    // the fascia on the galleries' edge, seen from the floor
+    const ft = F.ceil;
+    for (const s of [-1, 1]) F.box((P.vd0 + P.dK) / 2, s * (P.vl + 0.15), ft - 0.55, 0.55, 0.3, P.dK - P.vd0, CV.panel);
+    F.box(P.vd0 - 0.15, 0, ft - 0.55, 0.55, 2 * P.vl + 0.6, 0.3, CV.panel);
+    return cvOut(anchors);
+  }
+  /* THE TIERS: five concentric half-rings round the rostrum, 1.3 m deep, each
+     0.17 m over the last, polygonal (14 facets): every facet is BOTH the box
+     you see and an oriented walk surface of the same size at the same top, so
+     what you stand on is what is drawn. Tiers higher than one step off the
+     floor carry an oriented collider (you climb them from the tier below, not
+     from the floor). Radial aisles at 45/90/135 degrees. */
+  function chamberTiers(h, F, P, HT, anchors) {
+    const T = window.THREE;
+    if (!T) return;
+    const y = F.y, NT = 5, RISE = 0.17, DEP = 1.3;
+    const R0 = Math.max(4.2, P.CR - NT * DEP);
+    const c = F.p(P.dRc, 0);
+    // the tiers open toward the door: angle a runs from the +l side (0) through
+    // the door direction (pi/2) to -l (pi)
+    const dirX = function (a) { return Math.cos(a) * F.A.tx - Math.sin(a) * F.A.nx; };
+    const dirZ = function (a) { return Math.cos(a) * F.A.tz - Math.sin(a) * F.A.nz; };
+    const NS = 14, dA = Math.PI / NS;
+    const tierG = [], topG = [], deskG = [], topW = [], chairG = [], chairB = [];
+    const aisles = [Math.PI / 4, Math.PI / 2, 3 * Math.PI / 4];
+    for (let k = 1; k <= NT; k++) {
+      const ri = R0 + (k - 1) * DEP, ro = ri + DEP, top = k * RISE;
+      for (let s = 0; s < NS; s++) {
+        const a = (s + 0.5) * dA;
+        const ux = dirX(a), uz = dirZ(a);                 // radial
+        const tx = -uz, tz = ux;                          // tangent
+        const rm = (ri + ro) / 2, half = ro * Math.sin(dA / 2) + 0.02;
+        const cx = c.x + ux * rm, cz = c.z + uz * rm;
+        tierG.push(orient(new T.BoxGeometry(2 * half, top, DEP), cx, y + top / 2, cz, tx, tz));
+        // the walnut nosing on the tier's front edge, flush with its top
+        topG.push(orient(new T.BoxGeometry(2 * half, 0.05, 0.07), c.x + ux * (ri + 0.035), y + top - 0.025, c.z + uz * (ri + 0.035), tx, tz));
+        // the walk surface: an oriented rectangle, the facet exactly
+        const ex = Math.abs(tx) * half + Math.abs(ux) * DEP / 2, ez = Math.abs(tz) * half + Math.abs(uz) * DEP / 2;
+        const pl = { minX: h.ox + cx - ex, maxX: h.ox + cx + ex, minZ: h.oz + cz - ez, maxZ: h.oz + cz + ez, top: y + top,
+          obb: { cx: h.ox + cx, cz: h.oz + cz, ux: tx, uz: tz, hl: half, hw: DEP / 2 } };
+        CBZ.platforms.push(pl);
+        if (h.b.platforms) h.b.platforms.push(pl);
+        if (top > 0.4 && CBZ.orientedCollider) {
+          const col = CBZ.orientedCollider(h.ox + cx, h.oz + cz, half, DEP / 2, Math.atan2(-tz, tx), y - 0.02, y + top);
+          col.ref = null;
+          CBZ.colliders.push(col);
+          if (h.b.colliders) h.b.colliders.push(col);
+        }
+        CIVIC.tiers++;
+        // the members' desks on this facet, facing the rostrum (unless an aisle)
+        const nd = Math.max(1, Math.floor(2 * half / 1.25));
+        for (let q = 0; q < nd; q++) {
+          const t = -half + (q + 0.5) * 2 * half / nd;
+          const aa = a + t / rm;
+          if (aisles.some(function (x) { return Math.abs(x - aa) * rm < 0.75; })) continue;
+          const dxr = dirX(aa), dzr = dirZ(aa), txr = -dzr, tzr = dxr;
+          const dr = ri + 0.34, cr2 = ri + 0.95;
+          const dx = c.x + dxr * dr, dz = c.z + dzr * dr;
+          deskG.push(orient(new T.BoxGeometry(1.0, 0.7, 0.42), dx, y + top + 0.35, dz, txr, tzr));
+          topW.push(orient(new T.BoxGeometry(1.08, 0.04, 0.56), dx - dxr * 0.03, y + top + 0.72, dz - dzr * 0.03, txr, tzr));
+          const chx = c.x + dxr * cr2, chz = c.z + dzr * cr2;
+          chairG.push(orient(new T.BoxGeometry(0.52, 0.08, 0.5), chx, y + top + 0.41, chz, txr, tzr));
+          chairB.push(orient(new T.BoxGeometry(0.52, 0.62, 0.08), chx + dxr * 0.25, y + top + 0.76, chz + dzr * 0.25, txr, tzr));
+          chairB.push(orient(new T.BoxGeometry(0.08, 0.37, 0.08), chx, y + top + 0.185, chz, txr, tzr));
+          const colD = CBZ.orientedCollider ? CBZ.orientedCollider(h.ox + dx, h.oz + dz, 0.5, 0.21, Math.atan2(-tzr, txr), y + top, y + top + 0.72) : null;
+          if (colD) { colD.ref = null; CBZ.colliders.push(colD); if (h.b.colliders) h.b.colliders.push(colD); }
+          // a real seat: the members sit, the player can
+          const face = Math.atan2(-dxr, -dzr);
+          if (CBZ.propRegisterSeat) CBZ.propRegisterSeat(h.ox + chx, y + top, h.oz + chz, face, "chair", null, { cushion: 0.45, floorBelow: 0 });
+          CIVIC.seats++;
+          if (k === 1 && (q + s) % 5 === 0)
+            anchors.push({ x: h.ox + chx, y: y + top, z: h.oz + chz, face: face, lx: chx, lz: chz, kind: "clerk", pose: "sit", cushionH: 0.45, floorBelow: 0 });
+        }
+      }
+    }
+    // the bar: a panelled parapet round the back of the top tier
+    const rb = R0 + NT * DEP + 0.14, wallG = [], capG = [];
+    for (let s = 0; s < NS; s++) {
+      const a = (s + 0.5) * dA, ux = dirX(a), uz = dirZ(a), tx = -uz, tz = ux;
+      const half = rb * Math.sin(dA / 2) + 0.03, hh = NT * RISE + 1.0;
+      const cx = c.x + ux * rb, cz = c.z + uz * rb;
+      wallG.push(orient(new T.BoxGeometry(2 * half, hh, 0.24), cx, y + hh / 2, cz, tx, tz));
+      capG.push(orient(new T.BoxGeometry(2 * half + 0.02, 0.07, 0.32), cx, y + hh + 0.035, cz, tx, tz));
+      if (CBZ.orientedCollider) {
+        const col = CBZ.orientedCollider(h.ox + cx, h.oz + cz, half, 0.14, Math.atan2(-tz, tx), y, y + hh);
+        col.ref = null; CBZ.colliders.push(col); if (h.b.colliders) h.b.colliders.push(col);
+      }
+    }
+    const add = function (list, hex) {
+      if (!list.length) return;
+      const m = new T.Mesh(mergeCivic(list), cvMat(hex));
+      m.castShadow = false; m.receiveShadow = true; m.matrixAutoUpdate = false; m.updateMatrix();
+      m.name = "civic-chamber";
+      h.b.group.add(m);
+    };
+    add(tierG, HT.cloth === 0x7a2c2e ? CV.red : CV.green); add(topG, CV.walnut);
+    add(deskG, CV.walnut); add(topW, CV.panelL); add(chairG, HT.cloth); add(chairB, HT.cloth);
+    add(wallG, CV.panel); add(capG, CV.gold);
+    if (CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+  }
+  // a box geometry turned so its local +x runs along (tx,tz), placed at (x,y,z)
+  function orient(g, x, y, z, tx, tz) {
+    const yaw = Math.atan2(-tz, tx);
+    g.rotateY(yaw);
+    g.translate(x, y, z);
+    return g;
+  }
+  function mergeCivic(list) {
+    const T = window.THREE, pos = [], nor = [], uv = [];
+    for (let k = 0; k < list.length; k++) {
+      let g = list[k];
+      if (g.index) g = g.toNonIndexed();
+      const p = g.attributes.position, n = g.attributes.normal, u = g.attributes.uv;
+      for (let i = 0; i < p.count; i++) {
+        pos.push(p.getX(i), p.getY(i), p.getZ(i));
+        nor.push(n.getX(i), n.getY(i), n.getZ(i));
+        uv.push(u ? u.getX(i) : 0, u ? u.getY(i) : 0);
+      }
+    }
+    const out = new T.BufferGeometry();
+    out.setAttribute("position", new T.Float32BufferAttribute(pos, 3));
+    out.setAttribute("normal", new T.Float32BufferAttribute(nor, 3));
+    out.setAttribute("uv", new T.Float32BufferAttribute(uv, 2));
+    out.computeBoundingSphere();
+    return out;
+  }
+  /* THE ROSTRUM: a clerks' level (0.30) across the back wall reached by a
+     0.15 step at each end, the presiding officer's platform (0.60) on it with
+     its own 0.45 steps, the clerks' desk wall in front, the chair of state,
+     the seal and the standards behind; two lecterns in the well. */
+  function chamberRostrum(h, F, P, house, anchors) {
+    const hw1 = Math.min(5.2, P.vl - 1.0), hw2 = Math.min(2.6, hw1 - 1.2);
+    const d1 = P.dRc - 0.6;              // the clerks' level's front edge
+    const dB = P.dK - 0.02;              // the back wall's face
+    const d2 = dB - 1.9;                 // the presiding platform's front edge
+    // clerks' level + its end steps
+    F.box((d1 + dB) / 2, 0, 0, 0.30, 2 * hw1, dB - d1, CV.marble);
+    F.walkRect(d1, dB, -hw1, hw1, 0.30);
+    for (const s of [-1, 1]) {
+      F.box((d1 + dB) / 2, s * (hw1 + 0.4), 0, 0.15, 0.8, dB - d1, CV.marble);
+      F.walkRect(d1, dB, s * hw1, s * (hw1 + 0.8), 0.15);
+    }
+    // the presiding platform + its steps (on the clerks' level)
+    F.box((d2 + dB) / 2, 0, 0.30, 0.30, 2 * hw2, dB - d2, CV.marbleD);
+    F.walkRect(d2, dB, -hw2, hw2, 0.60);
+    for (const s of [-1, 1]) {
+      F.box((d2 + dB) / 2, s * (hw2 + 0.35), 0.30, 0.15, 0.7, dB - d2, CV.marble);
+      F.walkRect(d2, dB, s * hw2, s * (hw2 + 0.7), 0.45);
+    }
+    // the clerks' desk wall along the front of the clerks' level
+    F.box(d1 + 0.3, 0, 0.30, 0.95, 2 * hw1 - 1.6, 0.2, CV.panel, { solid: true });
+    F.box(d1 + 0.45, 0, 1.25, 0.05, 2 * hw1 - 1.4, 0.55, CV.marble);
+    F.box(d1 + 0.12, 0, 0, 1.3, 2 * hw1 - 1.4, 0.12, CV.marbleD, { solid: true });
+    for (let i = -2; i <= 2; i++) {
+      const ch = cvPiece("chair", h, F.y + 0.30, F.p(d1 + 1.1, i * 1.5).x, F.p(d1 + 1.1, i * 1.5).z, F.faceIn, { tone: CV_LEATHER, solid: true });
+      if (ch && (i === -1 || i === 1)) F.seatAnchor(anchors, ch, 0, "clerk");
+    }
+    // the presiding officer's desk and chair of state
+    F.box(d2 + 0.35, 0, 0.60, 1.0, 2 * hw2 - 0.8, 0.5, CV.walnut, { solid: true });
+    F.box(d2 + 0.35, 0, 1.6, 0.06, 2 * hw2 - 0.6, 0.62, CV.panelL);
+    F.box(dB - 0.9, 0, 0.60, 0.5, 0.7, 0.62, CV.leather);
+    F.box(dB - 0.62, 0, 1.1, 1.3, 0.72, 0.12, CV.leather);
+    F.box(dB - 0.6, 0, 2.4, 0.16, 0.86, 0.16, CV.gold);
+    if (CBZ.propRegisterSeat) {
+      const sp = F.p(dB - 0.9, 0);
+      CBZ.propRegisterSeat(h.ox + sp.x, F.y + 0.60, h.oz + sp.z, F.faceIn, "chair", null, { cushion: 0.5, floorBelow: 0 });
+      anchors.push({ x: h.ox + sp.x, y: F.y + 0.60, z: h.oz + sp.z, face: F.faceIn, lx: sp.x, lz: sp.z, kind: "boss", pose: "sit", cushionH: 0.5, floorBelow: 0 });
+    }
+    // the back wall: a marble reredos, the seal, the standards
+    F.box(dB - 0.05, 0, 0.6, 3.6, 2 * hw2 + 1.6, 0.1, CV.marbleD);
+    F.box(dB - 0.12, 0, 4.4, 1.9, 2.0, 0.06, CV.gold);
+    F.box(dB - 0.16, 0, 4.55, 1.6, 1.7, 0.04, house === "senate" ? CV.red : CV.green);
+    for (const s of [-1, 1]) F.flag(dB - 0.6, s * (hw2 + 1.0), s < 0 ? CV.blue : (house === "senate" ? CV.red : CV.green));
+    // two lecterns in the well, facing the members
+    for (const s of [-1, 1]) {
+      const l = s * 2.6, d = d1 - 1.6;
+      F.box(d, l, 0, 1.05, 0.62, 0.5, CV.walnut, { solid: true });
+      F.box(d - 0.06, l, 1.05, 0.06, 0.7, 0.58, CV.panelL);
+      F.box(d - 0.2, l, 1.11, 0.3, 0.02, 0.02, CV.ink);
+    }
+    F.anchor(anchors, d1 - 0.6, hw1 + 1.2, F.faceOut, "guard", "foldarms");
+    F.anchor(anchors, d1 - 0.6, -hw1 - 1.2, F.faceOut, "guard", "foldarms");
+  }
+
+  // THE GALLERY FLOOR over a chamber
+  function progChamberGallery(r, h, opts) {
+    cvFitStart(r, h);
+    const b = h.b, plan = b._civicPlan || {};
+    const house = plan.house || "senate";
+    const HT = CV_HOUSE[house] || CV_HOUSE.senate;
+    shell(h, r);
+    const anchors = [];
+    const P = chamberPlan(r, h);
+    const F = P.F;
+    // walls: the rooms' wall across the front band, the galleries' wall with
+    // its two doors, the side galleries' walls
+    F.wallL(P.dCh0 - 2.0, -P.lMax, P.lMax, [{ c: -12.0, w: 1.8, leaf: -1, hinge: 1 }, { c: 0, w: 2.0, leaf: -1, hinge: 1 }, { c: 12.0, w: 1.8, leaf: -1, hinge: -1 }]);
+    for (const s of [-1, 1]) F.wallD(s * 6.0, P.dF, P.dCh0 - 2.0, []);
+    F.wallL(P.dCh0, -P.lW, P.lW, [{ c: -6.0, w: 2.0, leaf: 1, hinge: 1 }, { c: 6.0, w: 2.0, leaf: 1, hinge: -1 }]);
+    for (const s of [-1, 1]) F.wallD(s * P.lW, P.dCh0, P.dK, [{ c: P.vd0 + 4.0, w: 1.8, leaf: -s, hinge: 1 }]);
+    // the front rooms: two committee rooms and a members' reading room
+    roomHearing(h, F.rect(P.dF + 0.05, P.dCh0 - 2.12, -P.lMax + 0.05, -6.12), F.door(P.dCh0 - 2.0, -12.0, -1), anchors, { carpet: house === "senate" ? CV.red : CV.green, tone: HT });
+    roomHearing(h, F.rect(P.dF + 0.05, P.dCh0 - 2.12, 6.12, P.lMax - 0.05), F.door(P.dCh0 - 2.0, 12.0, -1), anchors, { carpet: CV.blue, tone: HT });
+    roomLibrary(h, F.rect(P.dF + 0.05, P.dCh0 - 2.12, -5.88, 5.88), F.door(P.dCh0 - 2.0, 0, -1), anchors);
+    // the cross corridor and the side corridors
+    F.floor(P.dCh0 - 1.9, P.dCh0 - 0.1, -P.lMax + 0.05, P.lMax - 0.05, CV.marble);
+    for (const s of [-1, 1]) {
+      F.floor(P.dCh0 + 0.1, P.dK, Math.min(s * P.lW, s * P.lMax) + 0.1, Math.max(s * P.lW, s * P.lMax) - 0.05, CV.marble);
+      for (let d = P.dCh0 + 3; d < P.dK - 2; d += 6) F.light(d, s * (P.lW + P.SC / 2), F.ceil - 0.05, 0.05, 0.8, 0.8, CV.day, 0.6);
+    }
+    for (let l = -P.lMax + 4; l < P.lMax - 3; l += 8) F.light(P.dCh0 - 1.0, l, F.ceil - 0.05, 0.05, 0.8, 0.8, CV.day, 0.6);
+    // THE GALLERIES: carpet, the balustrade on the void's edge, benches
+    F.floor(P.dCh0 + 0.1, P.vd0, -P.lW + 0.1, P.lW - 0.1, CV.blue);
+    for (const s of [-1, 1]) F.floor(P.vd0, P.dK, Math.min(s * P.vl, s * P.lW) + 0.05, Math.max(s * P.vl, s * P.lW) - 0.1, CV.blue);
+    const rail = function (lat, at, a0, a1) {
+      const len = Math.abs(a1 - a0), mid = (a0 + a1) / 2;
+      if (lat) {
+        F.box(mid, at, 0, 0.95, 0.24, len, CV.panel);
+        F.box(mid, at, 0.95, 0.07, 0.34, len + 0.05, CV.gold);
+        F.solidRect(Math.min(a0, a1), Math.max(a0, a1), at - 0.15, at + 0.15, 0, 1.02);
+      } else {
+        F.box(at, mid, 0, 0.95, len, 0.24, CV.panel);
+        F.box(at, mid, 0.95, 0.07, len + 0.05, 0.34, CV.gold);
+        F.solidRect(at - 0.15, at + 0.15, Math.min(a0, a1), Math.max(a0, a1), 0, 1.02);
+      }
+    };
+    rail(false, P.vd0 - 0.15, -P.vl - 0.3, P.vl + 0.3);
+    for (const s of [-1, 1]) rail(true, s * (P.vl + 0.15), P.vd0, P.dK);
+    CIVIC.galleries++;
+    // benches: rows facing the chamber in the front gallery, one row on each side
+    for (let d = P.vd0 - 1.1, i = 0; d > P.dCh0 + 0.9 && i < 3; d -= 1.2, i++)
+      for (let l = -P.vl + 1.8; l < P.vl - 1.2; l += 3.2) F.piece("bench", d, l, F.faceOut, { len: 2.8, tone: HT, solid: true });
+    for (const s of [-1, 1]) for (let d = P.vd0 + 1.6; d < P.dK - 1.6; d += 3.2)
+      F.piece("bench", d, s * (P.vl + 1.5), F.faceL(-s), { len: 2.8, tone: HT, solid: true });
+    for (const s of [-1, 1]) F.anchor(anchors, P.dCh0 + 0.8, s * 6.0, F.faceOut, "guard", "foldarms");
+    return cvOut(anchors);
+  }
+
+  /* ---- CITY HALL ---------------------------------------------------------
+     A corridor across the back third, the council chamber across the front,
+     rooms either side of it and behind the corridor (round the core). */
+  function hallPlan(r, h) {
+    const F = cvFrame(r, h, h.b.localDoor);
+    const E = 0.4, dF = -E, dK = F.dep + E, lMax = F.half + E;
+    const dCor0 = F.dep * 0.58, dCor1 = dCor0 + 2.6;
+    return { F: F, dF: dF, dK: dK, lMax: lMax, dCor0: dCor0, dCor1: dCor1 };
+  }
+  // the back rooms off the corridor, in columns, leaving the core's column open
+  function hallBack(h, P, anchors, type) {
+    const F = P.F, core = cvCore(h);
+    const n = Math.max(2, Math.round(2 * P.lMax / 8.5)), cw = 2 * P.lMax / n;
+    const cols = [];
+    for (let i = 0; i < n; i++) {
+      const l0 = -P.lMax + i * cw, l1 = l0 + cw;
+      const box = F.rect(P.dCor1, P.dK, l0, l1);
+      cols.push({ l0: l0, l1: l1, open: core.some(function (q) { return rectHits(box, q, 0.6); }) });
+    }
+    for (let i = 0; i < n; i++) {
+      const c = cols[i];
+      if (c.open) continue;
+      const lm = (c.l0 + c.l1) / 2;
+      F.wallL(P.dCor1, c.l0, c.l1, [{ c: lm, w: 1.6, leaf: 1, hinge: 1 }]);
+      if (i > 0) F.wallD(c.l0, P.dCor1, P.dK, []);
+      if (i < n - 1 && !cols[i + 1].open) {} else if (i < n - 1) F.wallD(c.l1, P.dCor1, P.dK, []);
+      const rect = F.rect(P.dCor1 + 0.12, P.dK - 0.05, c.l0 + (i > 0 ? 0.12 : 0.05), c.l1 - (i < n - 1 ? 0.12 : 0.05));
+      if (type === "office") roomOffice(h, rect, F.door(P.dCor1, lm, 1), anchors, { carpet: CV.blue });
+      else roomReception(h, rect, F.door(P.dCor1, lm, 1), anchors, {});
+    }
+  }
+  function hallCorridor(h, P) {
+    const F = P.F;
+    F.floor(P.dCor0 + 0.1, P.dCor1 - 0.1, -P.lMax + 0.05, P.lMax - 0.05, CV.marble);
+    F.rug(P.dCor0 + 0.6, P.dCor1 - 0.6, -P.lMax + 1.0, P.lMax - 1.0, CV.red, CV.gold, 0.1);
+    for (let l = -P.lMax + 4; l < P.lMax - 3; l += 7) F.light((P.dCor0 + P.dCor1) / 2, l, F.ceil - 0.05, 0.05, 0.8, 0.8, CV.day, 0.6);
+  }
+  /* THE COUNCIL CHAMBER: the council's horseshoe on a two-riser dais along the
+     side wall (both surfaces registered), the mayor's seat at its head, the
+     clerk's table, the public speaking lectern facing the dais, the public in
+     rows, the city's seal and flags behind the council. */
+  function progCouncilChamber(r, h, opts) {
+    cvFitStart(r, h);
+    shell(h, r);
+    const anchors = [];
+    const P = hallPlan(r, h), F = P.F;
+    const lC0 = -P.lMax * 0.64, lC1 = P.lMax * 0.64;          // the chamber's lateral extent
+    F.wallL(P.dCor0, -P.lMax, P.lMax, [{ c: lC1 - 3.0, w: 2.0, leaf: -1, hinge: 1 }, { c: (lC1 + P.lMax) / 2, w: 1.6, leaf: -1, hinge: -1 }, { c: (lC0 - P.lMax) / 2, w: 1.6, leaf: -1, hinge: 1 }]);
+    F.wallD(lC0, P.dF, P.dCor0, []);
+    F.wallD(lC1, P.dF, P.dCor0, []);
+    hallCorridor(h, P);
+    // the chamber, in its own frame from its door
+    const ch = F.rect(P.dF + 0.05, P.dCor0 - 0.12, lC0 + 0.12, lC1 - 0.12);
+    const R = cvRoom(h, ch, F.door(P.dCor0, lC1 - 3.0, -1));
+    if (R) {
+      R.floor(0, R.dep, -R.half, R.half, CV.blue);
+      // the dais runs across the chamber's far side, opposite the public
+      const dD = R.dep - 5.0;
+      R.box(dD + 0.2, 0, 0, 0.15, 2 * R.half - 0.4, 0.4, CV.walnut);
+      R.walkRect(dD, dD + 0.4, -R.half + 0.2, R.half - 0.2, 0.15);
+      R.box((dD + 0.4 + R.wd) / 2, 0, 0, 0.30, 2 * R.half - 0.4, R.wd - dD - 0.4, CV.walnut);
+      R.walkRect(dD + 0.4, R.wd, -R.half + 0.2, R.half - 0.2, 0.30);
+      R.box((dD + 0.4 + R.dep) / 2, 0, 0.296, 0.008, 2 * R.half - 0.8, R.dep - dD - 0.6, CV.red);
+      // the horseshoe: the head table and two returns, members' chairs inside
+      const hd = R.dep - 1.6, hl = Math.min(5.5, R.half - 2.0);
+      R.box(hd, 0, 0.30, 0.74, 2 * hl, 0.8, CV.walnut, { solid: true });
+      for (const s of [-1, 1]) R.box((hd + dD + 1.2) / 2, s * hl, 0.30, 0.74, 0.8, hd - dD - 1.2, CV.walnut, { solid: true });
+      R.box(hd, 0, 1.04, 0.04, 2 * hl + 0.1, 0.9, CV.panelL);
+      const members = [];
+      for (let i = 0; i < 5; i++) members.push({ d: hd + 0.8, l: -hl + 0.9 + i * (2 * hl - 1.8) / 4, face: R.faceIn });
+      // the returns: members on the OUTSIDE of the horseshoe, facing in
+      for (const s of [-1, 1]) for (let i = 0; i < 2; i++) members.push({ d: dD + 1.9 + i * 1.3, l: s * (hl + 0.8), face: R.faceL(-s) });
+      members.forEach(function (m, i) {
+        const p = R.p(m.d, m.l);
+        const c = cvPiece("chair", h, R.y + 0.30, p.x, p.z, m.face, { tone: CV_LEATHER, solid: true });
+        if (c && i !== 2) R.seatAnchor(anchors, c, 0, "clerk");
+        R.box(m.d - (i < 5 ? 0.55 : 0), m.l + (i >= 5 ? (m.l > 0 ? -0.55 : 0.55) : 0), 1.08, 0.08, 0.3, 0.3, CV.gold);
+      });
+      // the mayor's chair at the head of the horseshoe (the middle seat)
+      const mp = R.p(hd + 0.8, 0);
+      anchors.push({ x: h.ox + mp.x, y: R.y + 0.30, z: h.oz + mp.z, face: R.faceIn, lx: mp.x, lz: mp.z, kind: "clerk", pose: "sit", cushionH: 0.45, floorBelow: 0 });
+      // the seal and flags on the wall behind
+      sealScreen(h, R, 0.30, 2.6, 2.3, CV.red);
+      for (const s of [-1, 1]) R.flag(R.dep - 0.4, s * (hl + 0.9), s < 0 ? CV.blue : CV.red);
+      // the clerk's table and the public lectern, facing the council
+      R.piece("table", dD - 1.4, 0, R.faceIn, { len: 2.4, deep: 0.8, seats: 0, tone: CV_LEATHER, solid: true });
+      R.piece("chair", dD - 0.75, -0.6, R.faceOut, { tone: CV_LEATHER, solid: true });
+      R.box(dD - 3.6, 0, 0, 1.08, 0.6, 0.45, CV.walnut, { solid: true });
+      R.box(dD - 3.66, 0, 1.08, 0.05, 0.66, 0.5, CV.panelL);
+      R.box(dD - 3.5, 0.2, 1.13, 0.3, 0.02, 0.02, CV.ink);
+      // the public: benches in rows, an aisle to the lectern
+      const bl = Math.max(1.4, Math.min(3.4, R.half - 1.6));
+      for (let d = 1.4; d < dD - 4.6; d += 1.2) for (const s of [-1, 1]) R.piece("bench", d, s * (0.9 + bl / 2), R.faceOut, { len: bl, tone: CV_LEATHER, solid: true });
+      for (const s of [-1, 1]) R.art(R.dep * 0.5, s * R.wl, -s, 2.0, 1.4, 2.2, 0x3a4450, true);
+      R.chandelier(R.dep * 0.3, 0, 1.4);
+      R.chandelier(R.dep * 0.72, 0, 1.4);
+      R.anchor(anchors, 1.0, Math.min(1.8, R.half - 0.8), R.faceOut, "guard", "foldarms");
+    }
+    // the clerk's office and the committee room either side
+    roomReception(h, F.rect(P.dF + 0.05, P.dCor0 - 0.12, -P.lMax + 0.05, lC0 - 0.12), F.door(P.dCor0, (lC0 - P.lMax) / 2, -1), anchors, {});
+    roomHearing(h, F.rect(P.dF + 0.05, P.dCor0 - 0.12, lC1 + 0.12, P.lMax - 0.05), F.door(P.dCor0, (lC1 + P.lMax) / 2, -1), anchors, { carpet: CV.green });
+    hallBack(h, P, anchors, "reception");
+    return cvOut(anchors);
+  }
+  // THE MAYOR'S FLOOR: the mayor's office, the anteroom, the deputy's office
+  function progMayorsOffice(r, h, opts) {
+    cvFitStart(r, h);
+    shell(h, r);
+    const anchors = [];
+    const P = hallPlan(r, h), F = P.F;
+    const la = -P.lMax * 0.18, lb = P.lMax * 0.18;
+    F.wallL(P.dCor0, -P.lMax, P.lMax, [{ c: 0, w: 2.0, leaf: -1, hinge: 1 }, { c: (lb + P.lMax) / 2, w: 1.6, leaf: -1, hinge: -1 }]);
+    F.wallD(la, P.dF, P.dCor0, [{ c: P.dCor0 * 0.5, w: 1.6, leaf: -1, hinge: 1 }]);
+    F.wallD(lb, P.dF, P.dCor0, []);
+    hallCorridor(h, P);
+    roomReception(h, F.rect(P.dF + 0.05, P.dCor0 - 0.12, la + 0.12, lb - 0.12), F.door(P.dCor0, 0, -1), anchors, { rug: CV.red });
+    roomLeader(h, F.rect(P.dF + 0.05, P.dCor0 - 0.12, -P.lMax + 0.05, la - 0.12), F.door(P.dCor0 * 0.5, la, -1, true), anchors, { rug: CV.red });
+    roomOffice(h, F.rect(P.dF + 0.05, P.dCor0 - 0.12, lb + 0.12, P.lMax - 0.05), F.door(P.dCor0, (lb + P.lMax) / 2, -1), anchors, { carpet: CV.green, guard: true });
+    hallBack(h, P, anchors, "office");
+    return cvOut(anchors);
+  }
+
+  /* ---- THE GOVERNOR'S RESIDENCE -----------------------------------------
+     A house, not an office: a central hall front to back, two rooms either
+     side of it. Downstairs the drawing room, the dining room, the study and a
+     morning room; upstairs (framed from the landing) the principal bedroom,
+     a guest room and the family sitting room. The quarter the stair core
+     stands in stays open to the hall. */
+  function housePlan(r, h, door) {
+    const F = cvFrame(r, h, door);
+    const E = 0.4, dF = -E, dK = F.dep + E, lMax = F.half + E;
+    const HW = Math.min(3.2, lMax * 0.18), dM = (dF + dK) / 2;
+    const core = cvCore(h), q = [];
+    for (const s of [-1, 1]) for (const fr of [0, 1]) {
+      const l0 = s < 0 ? -lMax : HW, l1 = s < 0 ? -HW : lMax;
+      const d0 = fr ? dM : dF, d1 = fr ? dK : dM;
+      const box = F.rect(d0, d1, l0, l1);
+      q.push({ s: s, fr: fr, l0: l0, l1: l1, d0: d0, d1: d1, open: core.some(function (c) { return rectHits(box, c, 0.6); }) });
+    }
+    return { F: F, dF: dF, dK: dK, lMax: lMax, HW: HW, dM: dM, q: q };
+  }
+  function houseWalls(h, P) {
+    const F = P.F;
+    for (const s of [-1, 1]) {
+      const fr = P.q.filter(function (x) { return x.s === s; });
+      const A = fr.find(function (x) { return !x.fr; }), B = fr.find(function (x) { return x.fr; });
+      // the hall's side wall, a door into each closed room
+      const gaps = [];
+      if (!A.open) gaps.push({ c: (A.d0 + A.d1) / 2, w: 1.8, leaf: s, hinge: 1 });
+      if (!B.open) gaps.push({ c: (B.d0 + B.d1) / 2, w: 1.8, leaf: s, hinge: -1 });
+      const d0 = A.open ? B.d0 : P.dF, d1 = B.open ? A.d1 : P.dK;
+      if (!(A.open && B.open)) F.wallD(s * P.HW, d0, d1, gaps);
+      if (!A.open || !B.open) F.wallL(P.dM, Math.min(A.l0, A.l1), Math.max(A.l0, A.l1), []);
+    }
+  }
+  function roomDrawing(h, rect, door, anchors) {
+    const R = cvRoom(h, rect, door);
+    if (!R) return;
+    R.floor(0, R.dep, -R.half, R.half, CV.oak);
+    R.rug(1.2, R.dep - 1.2, -R.half + 1.0, R.half - 1.0, 0x6b4a3a, CV.sand, 0.3);
+    // the fireplace on the far wall, the sofas facing across it
+    const fp = R.p(R.wd - 0.2, 0);
+    if (!cvGlazed(h, fp.x, fp.z, 1.2, R.y, R.y + 2.5) && cvDoorClear(fp.x, fp.z, 1.6)) {
+      R.box(R.wd - 0.15, 0, 0, 1.3, 2.2, 0.3, CV.marble, { solid: true });
+      R.box(R.wd - 0.22, 0, 1.3, 0.1, 2.5, 0.45, CV.marble);
+      R.box(R.wd - 0.32, 0, 0.05, 0.75, 1.1, 0.04, CV.ink);
+      R.light(R.wd - 0.35, 0, 0.06, 0.12, 0.9, 0.03, 0xff8a3a, 0.9);
+      R.art(R.wd, 0, -1, 1.3, 1.0, 2.4, 0x4a5a44);
+    }
+    const cd = R.dep - 3.0;
+    R.piece("coffee", cd, 0, R.faceIn, { len: 1.2, deep: 0.6, tone: "warm" });
+    for (const s of [-1, 1]) R.piece("sofa", cd, s * 1.6, R.faceL(-s), { len: 2.2, tone: "warm", solid: true });
+    R.piece("armchair", cd - 1.5, 0, R.faceOut, { tone: "warm", solid: true });
+    R.piece("planter", 0.7, R.half - 0.7, 0, { kind: "tree", s: 0.9 });
+    R.art(R.dep * 0.4, -R.wl, 1, 1.6, 1.1, 1.9, 0x5a4a3a, true);
+    R.chandelier(R.dep / 2, 0, 1.2);
+    R.anchor(anchors, cd - 1.5, 1.4, R.faceIn, "family", "stand");
+  }
+  function roomDining(h, rect, door, anchors) {
+    const R = cvRoom(h, rect, door);
+    if (!R) return;
+    R.floor(0, R.dep, -R.half, R.half, CV.oak);
+    R.rug(1.4, R.dep - 1.4, -Math.min(3.2, R.half - 0.8), Math.min(3.2, R.half - 0.8), CV.red, CV.gold, 0.3);
+    const len = Math.max(2.0, Math.min(4.2, R.dep - 3.4));
+    R.piece("table", R.dep / 2, 0, R.faceIn, { len: 1.2, deep: len, seats: 0, tone: "warm", solid: true });
+    const n = Math.max(2, Math.floor(len / 0.8));
+    for (const s of [-1, 1]) for (let i = 0; i < n; i++) {
+      const d = R.dep / 2 - len / 2 + (i + 0.5) * len / n;
+      const c = R.piece("chair", d, s * 1.05, R.faceL(-s), { tone: "warm", solid: true });
+      if (c && i === 0 && s < 0) R.seatAnchor(anchors, c, 0, "family");
+    }
+    for (let i = 0; i < 3; i++) R.box(R.dep / 2 - len / 3 + i * len / 3, 0, 0.74, 0.3, 0.12, 0.12, CV.gold);
+    R.piece("credenza", R.dep - 0.35, 0, R.faceIn, { len: 2.0, tone: "warm", solid: true });
+    R.art(R.wd, 0, -1, 1.8, 1.1, 2.1, 0x3a4a5a);
+    R.chandelier(R.dep / 2, 0, 1.3);
+  }
+  function roomStudy(h, rect, door, anchors, boss) {
+    const R = cvRoom(h, rect, door);
+    if (!R) return;
+    R.floor(0, R.dep, -R.half, R.half, CV.oak);
+    R.rug(R.dep - 4.0, R.dep - 0.8, -Math.min(2.2, R.half - 0.7), Math.min(2.2, R.half - 0.7), CV.green, CV.gold, 0.2);
+    const desk = R.piece("bossDesk", R.dep - 2.2, 0, R.faceIn, { len: 2.2, deep: 1.0, tone: CV_LEATHER, solid: true });
+    if (desk) R.seatAnchor(anchors, desk, 0, boss ? "boss" : "clerk");
+    for (const s of [-1, 1]) {
+      R.flag(R.dep - 0.6, s * 1.7, s < 0 ? CV.blue : CV.red);
+      const n = Math.max(1, Math.floor((R.dep - 1.6) / 2.2));
+      for (let i = 0; i < n; i++) R.bookcase(0.8 + i * 2.2 + 1.0, s * (R.wl - 0.2), 2.0, -s, true);
+    }
+    R.piece("armchair", 1.8, 0.9, R.faceOut, { tone: CV_LEATHER, solid: true });
+    R.chandelier(R.dep / 2, 0, 1.0);
+  }
+  function roomBedroom(h, rect, door, anchors, big) {
+    const R = cvRoom(h, rect, door);
+    if (!R) return;
+    R.floor(0, R.dep, -R.half, R.half, CV.oak);
+    R.rug(R.dep - 4.2, R.dep - 0.6, -Math.min(2.4, R.half - 0.6), Math.min(2.4, R.half - 0.6), big ? 0x3a4a6a : 0x6a5a4a, CV.sand, 0.25);
+    R.piece("bed", R.dep - 1.4, 0, R.faceOut, {   // the headboard (+fwd) on the far wall
+       len: 2.1, wide: big ? 1.9 : 1.5, tone: "warm", solid: true });
+    for (const s of [-1, 1]) {
+      R.box(R.dep - 0.4, s * (big ? 1.35 : 1.15), 0, 0.55, 0.5, 0.45, CV.walnut, { solid: true });
+      R.box(R.dep - 0.4, s * (big ? 1.35 : 1.15), 0.55, 0.36, 0.16, 0.16, CV.gold);
+      R.light(R.dep - 0.4, s * (big ? 1.35 : 1.15), 0.91, 0.24, 0.3, 0.3, CV.lamp, 0.7);
+    }
+    R.piece("wardrobe", 1.2, R.half - 0.4, R.faceL(-1), { len: 1.6, tone: "warm", solid: true });
+    if (big && R.half > 3.2) R.piece("armchair", 1.8, -R.half + 1.0, R.faceL(1), { tone: "warm", solid: true });
+    R.art(R.wd, 0, -1, 1.4, 0.9, 1.9, 0x5a6a7a);
+    R.light(R.dep / 2, 0, R.ceil - 0.06, 0.06, 1.0, 1.0, CV.day, 0.5);
+  }
+  function roomSitting(h, rect, door, anchors) {
+    const R = cvRoom(h, rect, door);
+    if (!R) return;
+    R.floor(0, R.dep, -R.half, R.half, CV.oak);
+    R.rug(1.0, R.dep - 1.0, -R.half + 0.9, R.half - 0.9, 0x4a5a6a, CV.sand, 0.25);
+    const cd = R.dep / 2;
+    R.piece("sofa", cd + 1.2, 0, R.faceIn, { len: 2.4, tone: "warm", solid: true });
+    R.piece("coffee", cd, 0, R.faceIn, { len: 1.1, deep: 0.6, tone: "warm" });
+    for (const s of [-1, 1]) R.piece("armchair", cd, s * 1.7, R.faceL(-s), { tone: "warm", solid: true });
+    R.bookcase(R.wd - 0.2, R.half - 1.4, 2.0, -1);
+    R.piece("planter", 0.7, -R.half + 0.7, 0, { kind: "tree", s: 0.8 });
+    R.chandelier(R.dep / 2, 0, 1.0);
+    R.anchor(anchors, cd + 1.2, 0.8, R.faceIn, "family", "stand");
+  }
+  function houseHall(h, P, anchors, stairs) {
+    const F = P.F;
+    F.floor(P.dF + 0.05, P.dK - 0.05, -P.HW + 0.1, P.HW - 0.1, CV.marble);
+    for (let d = 1.2; d < P.dK - 1.0; d += 1.2) F.box(d, 0, CV_INLAY - 0.004, 0.004, 0.6, 0.6, CV.marbleV);
+    F.rug(0.6, P.dK - 0.8, -1.0, 1.0, CV.red, CV.gold, 0.14);
+    for (const q of P.q) if (q.open) F.floor(q.d0 + 0.05, q.d1 - 0.05, Math.min(q.l0, q.l1) + 0.05, Math.max(q.l0, q.l1) - 0.05, CV.marble);
+    F.chandelier(P.dK * 0.3, 0, 1.2);
+    F.chandelier(P.dK * 0.7, 0, 1.2);
+    for (const s of [-1, 1]) F.art(P.dK * 0.5, s * (P.HW - 0.1), -s, 1.2, 1.5, 2.2, 0x3a3a44, true);
+    if (!stairs) F.anchor(anchors, 1.6, 1.2, F.faceIn, "guard", "foldarms");
+  }
+  function progGovResidence(r, h, opts) {
+    cvFitStart(r, h);
+    shell(h, r);
+    const anchors = [];
+    const P = housePlan(r, h, h.b.localDoor), F = P.F;
+    houseWalls(h, P);
+    houseHall(h, P, anchors, false);
+    const kinds = { "-1,0": "drawing", "-1,1": "dining", "1,0": "study", "1,1": "morning" };
+    for (const q of P.q) {
+      if (q.open) continue;
+      const lo = Math.min(q.l0, q.l1), hi = Math.max(q.l0, q.l1);
+      const rect = F.rect(q.d0 + (q.fr ? 0.12 : 0.05), q.d1 - (q.fr ? 0.05 : 0.12), lo + (q.s > 0 ? 0.12 : 0.05), hi - (q.s < 0 ? 0.12 : 0.05));
+      const door = F.door((q.d0 + q.d1) / 2, q.s * P.HW, q.s, true);
+      const kind = kinds[q.s + "," + q.fr];
+      if (kind === "drawing") roomDrawing(h, rect, door, anchors);
+      else if (kind === "dining") roomDining(h, rect, door, anchors);
+      else if (kind === "study") roomStudy(h, rect, door, anchors, false);
+      else roomSitting(h, rect, door, anchors);
+    }
+    return cvOut(anchors);
+  }
+  function progGovPrivate(r, h, opts) {
+    cvFitStart(r, h);
+    shell(h, r);
+    const anchors = [];
+    // upstairs is framed from the LANDING: the hall runs from the stairhead
+    const door = (opts && opts.door && opts.door.nx != null) ? opts.door : h.b.localDoor;
+    const P = housePlan(r, h, door), F = P.F;
+    houseWalls(h, P);
+    houseHall(h, P, anchors, true);
+    // the Governor's own study first: it is where he is found upstairs
+    const order = ["study", "bedroom-big", "sitting", "bedroom"];
+    let i = 0;
+    for (const q of P.q) {
+      if (q.open) continue;
+      const lo = Math.min(q.l0, q.l1), hi = Math.max(q.l0, q.l1);
+      const rect = F.rect(q.d0 + (q.fr ? 0.12 : 0.05), q.d1 - (q.fr ? 0.05 : 0.12), lo + (q.s > 0 ? 0.12 : 0.05), hi - (q.s < 0 ? 0.12 : 0.05));
+      const doorR = F.door((q.d0 + q.d1) / 2, q.s * P.HW, q.s, true);
+      const kind = order[i++ % order.length];
+      if (kind === "bedroom-big") roomBedroom(h, rect, doorR, anchors, true);
+      else if (kind === "bedroom") roomBedroom(h, rect, doorR, anchors, false);
+      else if (kind === "sitting") roomSitting(h, rect, doorR, anchors);
+      else roomStudy(h, rect, doorR, anchors, true);
+    }
+    return cvOut(anchors);
+  }
+  CBZ.civicInteriorAudit = function () { return Object.assign({}, CIVIC); };
+
+  const CIVIC_PROGRAMS = {
+    rotunda: progRotunda, capitolfloor: progCapitolFloor,
+    chamber: progChamber, chambergallery: progChamberGallery,
+    councilchamber: progCouncilChamber, mayorsoffice: progMayorsOffice,
+    govresidence: progGovResidence, govprivate: progGovPrivate,
+  };
+  const CIVIC_NAMES = Object.keys(CIVIC_PROGRAMS);
+
   // ---- dispatch -----------------------------------------------------------
   const PROGRAMS = {
     empty: progEmpty, deskfarm: progDeskFarm, meeting: progMeeting, storage: progStorage, lobby: progLobby,
     checkpoint: progCheckpoint, quarters: progQuarters, bosssuite: progBossSuite,
     residential: progResidential, breakroom: progBreakroom,
-    statehall: progStateHall, stateresidence: progStateResidence,
+    statehall: progStateHall, stateresidence: progStateResidence, stateprivate: progStatePrivate,
     cabinetroom: progCabinetRoom, ovaloffice: progOvalOffice,
   };
+  Object.assign(PROGRAMS, FEDERAL_PROGRAMS);   // the federal rooms (section above)
+  Object.assign(PROGRAMS, CIVIC_PROGRAMS);     // the legislature, City Hall, the Governor's house
   const PROG_TALLY = Object.create(null);
   CBZ.interiorProgram = function (name, room, ctx) {
     armReset();                        // see armReset: propuse.js parses AFTER this file
@@ -3345,8 +6719,8 @@
     return out;
   };
   CBZ.interiorProgramNames = ["empty", "deskfarm", "meeting", "storage", "lobby", "checkpoint",
-    "quarters", "bosssuite", "residential", "breakroom", "statehall", "stateresidence",
-    "cabinetroom", "ovaloffice"];
+    "quarters", "bosssuite", "residential", "breakroom", "statehall", "stateresidence", "stateprivate",
+    "cabinetroom", "ovaloffice"].concat(Object.keys(FEDERAL_PROGRAMS)).concat(CIVIC_NAMES);
   // THE PARTITION ALONE — one thin full-run SOLID wall with ONE doorway and a
   // lintel over it, in the host's local frame. It is the only wall this kit
   // draws; a caller that wants to make a ROOM out of part of a big floorplate

@@ -396,7 +396,9 @@
       BAN_TOP: BAN_TOP,         // just under the architrave
       // a colossal order carries a long banner; never longer than reaches the deck
       BAN_H: Math.min(8.0, BAN_TOP - DECK - 0.06),
-      BAN_Z: FACADE + 0.20,     // 0.20 proud of the wall, clear of the shafts
+      // 0.20 proud of the wall, clear of the shafts, and clear of the dressed
+      // house's rusticated base (layout.houseDress.base.out) where it has one
+      BAN_Z: FACADE + Math.max(0.20, (L && L.houseDress && L.houseDress.base && L.houseDress.base.out > 0) ? L.houseDress.base.out + 0.08 : 0),
       PLATE_Z: FACADE + 0.70,   // clear of the cornice, behind the columns
       // the plate hangs ABOVE the balcony's door (president_public.js stands
       // the deck on the first floor, 0.15 over it) and under the architrave;
@@ -441,8 +443,10 @@
     for (const s of [-1, 1]) {
       for (const face of [1, -1]) {
         const z = F.GZ + face * 1.66;
-        box(F.GX + s * 0.95, top - H / 2, z, W, H, T, R.cloth);
-        box(F.GX + s * 0.95, top - 0.09, z - face * 0.015, W + 0.14, 0.18, T + 0.05, R.band);
+        // on the corner piers either side of the booth's windows, not over the glass
+        const bx = F.GX + s * 1.42;
+        box(bx, top - H / 2, z, 0.5, H, T, R.cloth);
+        box(bx, top - 0.09, z - face * 0.015, 0.64, 0.18, T + 0.05, R.band);
       }
     }
   }

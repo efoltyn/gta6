@@ -820,7 +820,7 @@
     const DT = det();
     for (let a = -1; a <= 1; a += 2) for (let b = -1; b <= 1; b += 2)
       p.put(a * (L / 2 - 0.09), 0, b * (D / 2 - 0.08), 0.06, 0.35, 0.06, wood);
-    if (DT) p.put(0, 0.13, 0, L - 0.30, 0.04, D - 0.26, P.darkwood);        // magazine shelf
+    if (DT) p.put(0, 0.13, 0, L - 0.16, 0.04, D - 0.14, P.darkwood);        // magazine shelf, housed in the legs
     // The top oversails the legs by 9cm and carries a SHIN-HIGH collider only:
     // a coffee table between a sofa and a screen is an obstacle you step round,
     // never a wall, and never something the body can stand on.

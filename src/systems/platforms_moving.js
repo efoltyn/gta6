@@ -259,7 +259,7 @@
     else if (r) {
       let t = (r.axis === "x") ? (lx - r.x0) / (r.x1 - r.x0) : (lz - r.z0) / (r.z1 - r.z0);
       if (!(t >= 0)) t = 0; else if (t > 1) t = 1;
-      top = r.y0 + t * (r.y1 - r.y0);
+      top = (r.steps && CBZ.rampTop) ? CBZ.rampTop(r, t) : r.y0 + t * (r.y1 - r.y0);
     }
     return p.y + p.mx * lx + p.my * top + p.mz * lz;
   }

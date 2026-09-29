@@ -310,6 +310,222 @@ if (m && m.lot) {
   console.log("site.layout keys", Object.keys(m.layout || {}).join(","));
 }
 
+
+// ==========================================================================
+// THE WALK. Every enterable shell every complex raised (CBZ.govShells), its
+// stair core built the way the game builds it (CBZ.cityStairCore), then:
+//   FLOOR   a grid over every storey: the walk surface (the same ground law
+//           physics.js uses: platforms, ramps, stepped flights, STEP_UP
+//           reach) must equal floorTops[k], and no drawn floor surface (an
+//           upward face of >= 0.15 m2) may stand more than 2 cm over it:
+//           feet in the carpet. And there must BE a drawn floor within 2 cm.
+//   STAIRS  every CBZ.stairs link the shell owns (grand stair flights, the
+//           core's storey links) walked up at 5 cm on that ground law: it
+//           must arrive (|end error| < 3 cm), never rise more than a riser in
+//           one step, have a drawn tread within 2 cm of the feet on every
+//           sample, a clear column from the ankles to 2.0 m over the feet (no
+//           ceiling, slab, beam or fixture in the head path) and no solid in
+//           the body band.
+//   TREADS  every published grand-stair tread answers its own top.
+// ==========================================================================
+{
+  const STEP_UP = 0.45;
+  const plats = () => CBZ.platforms;
+  function groundAt(x, z, fromY) {
+    let best = CBZ.estateGroundAt ? CBZ.estateGroundAt(x, z) : 0;
+    const reach = (fromY != null ? fromY : best) + STEP_UP;
+    for (const p of plats()) {
+      if (x < p.minX || x > p.maxX || z < p.minZ || z > p.maxZ) continue;
+      if (p.obb) {
+        const o = p.obb, rx = x - o.cx, rz = z - o.cz;
+        const a = rx * o.ux + rz * o.uz, c = rx * o.uz - rz * o.ux;
+        if (a < -o.hl || a > o.hl || c < -o.hw || c > o.hw) continue;
+      }
+      let top = p.top;
+      if (p.ramp) {
+        const r = p.ramp;
+        let t = r.dir ? ((x - r.ox) * r.dx + (z - r.oz) * r.dz) / r.len
+          : (r.axis === "x") ? (x - r.x0) / (r.x1 - r.x0) : (z - r.z0) / (r.z1 - r.z0);
+        if (t < 0) t = 0; else if (t > 1) t = 1;
+        top = CBZ.rampTop(r, t);
+      }
+      if (top <= reach && top > best) best = top;
+    }
+    return best;
+  }
+  // triangle grid of a building's DRAWN geometry (world space)
+  function triGrid(group) {
+    const G = new Map(), C = 0.5;
+    const key = (i, j) => i * 100003 + j;
+    const tris = [];
+    group.updateMatrixWorld(true);
+    const v = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()], m4 = new THREE.Matrix4(), mw = new THREE.Matrix4();
+    group.traverse((o) => {
+      if (!o.isMesh) return;
+      let vis = true;
+      for (let q = o; q; q = q.parent) if (q.visible === false) { vis = false; break; }
+      if (!vis) return;
+      const g = o.geometry, pa = g.attributes.position, idx = g.index ? g.index.array : null;
+      const nT = idx ? idx.length / 3 : pa.count / 3;
+      const inst = o.isInstancedMesh ? o.count : 1;
+      for (let k = 0; k < inst; k++) {
+        if (o.isInstancedMesh) { o.getMatrixAt(k, m4); mw.multiplyMatrices(o.matrixWorld, m4); } else mw.copy(o.matrixWorld);
+        for (let t = 0; t < nT; t++) {
+          for (let c = 0; c < 3; c++) { const vi = idx ? idx[t * 3 + c] : t * 3 + c; v[c].fromBufferAttribute(pa, vi).applyMatrix4(mw); }
+          const ax = v[1].x - v[0].x, az = v[1].z - v[0].z, bx = v[2].x - v[0].x, bz = v[2].z - v[0].z;
+          const area2 = ax * bz - az * bx;                 // signed XZ area x2
+          if (Math.abs(area2) < 1e-7) continue;           // a wall seen edge-on: no vertical line hits it
+          const ux = v[1].x - v[0].x, uy = v[1].y - v[0].y, uz = v[1].z - v[0].z, wx = v[2].x - v[0].x, wy = v[2].y - v[0].y, wz = v[2].z - v[0].z;
+          const ny = uz * wx - ux * wz, nx = uy * wz - uz * wy, nz = ux * wy - uy * wx, nl = Math.hypot(nx, ny, nz) || 1;
+          const T = { p: v.map((q) => [q.x, q.y, q.z]), a2: area2, up: ny / nl, area: Math.abs(area2) / 2, name: (o.name || "") + "[" + [o.scale.x, o.scale.y, o.scale.z].map((q) => +q.toFixed(2)).join("x") + " y" + o.position.y.toFixed(2) + "]" };
+          tris.push(T);
+          const x0 = Math.min(v[0].x, v[1].x, v[2].x), x1 = Math.max(v[0].x, v[1].x, v[2].x), z0 = Math.min(v[0].z, v[1].z, v[2].z), z1 = Math.max(v[0].z, v[1].z, v[2].z);
+          for (let i = Math.floor(x0 / C); i <= Math.floor(x1 / C); i++) for (let j = Math.floor(z0 / C); j <= Math.floor(z1 / C); j++) {
+            const kk = key(i, j); let L = G.get(kk); if (!L) G.set(kk, L = []); L.push(T);
+          }
+        }
+      }
+    });
+    // every surface crossing the vertical line at (x,z): [{y, up, area}]
+    function at(x, z) {
+      const L = G.get(key(Math.floor(x / C), Math.floor(z / C)));
+      const out = [];
+      if (!L) return out;
+      for (const T of L) {
+        const p = T.p;
+        const l1 = ((x - p[0][0]) * (p[2][2] - p[0][2]) - (z - p[0][2]) * (p[2][0] - p[0][0])) / T.a2;
+        const l2 = ((p[1][0] - p[0][0]) * (z - p[0][2]) - (p[1][2] - p[0][2]) * (x - p[0][0])) / T.a2;
+        const l0 = 1 - l1 - l2;
+        if (l0 < -1e-6 || l1 < -1e-6 || l2 < -1e-6) continue;
+        out.push({ y: l0 * p[0][1] + l1 * p[1][1] + l2 * p[2][1], up: T.up, area: T.area, name: T.name, T: T });
+      }
+      return out;
+    }
+    return { at, n: tris.length };
+  }
+  function solidAt(x, z, lo, hi, r) {
+    for (const c of CBZ.colliders) {
+      if (c.y1 != null && c.y1 <= lo) continue;
+      if (c.y0 != null && c.y0 >= hi) continue;
+      if (x + r <= c.minX || x - r >= c.maxX || z + r <= c.minZ || z - r >= c.maxZ) continue;
+      if (c.stairSoffit) continue;
+      return c;
+    }
+    return null;
+  }
+  function gsr0(srec, b) { const g = srec && srec.grandStair; return g && Math.abs(g.bottom.x - b.ox) < b.w / 2 && Math.abs(g.bottom.z - b.oz) < b.d / 2 ? g : null; }
+  const shells = (CBZ.govShells ? CBZ.govShells() : []).filter((s) => s.b && s.b.group && Array.isArray(s.b.floorTops));
+  let W = { floorPts: 0, floorBad: 0, sunk: 0, bare: 0, stairSamples: 0, stairBad: 0, head: 0, treadMiss: 0, blocked: 0, noArrive: 0, links: 0, treads: 0, treadBad: 0 };
+  const samples = { sunk: [], bare: [], walk: [], head: [], tread: [], blocked: [], arrive: [] };
+  const NOTE_MAX = process.argv.includes("-v") ? 60 : 12;
+  let perShell = {};
+  // at most 3 samples of a kind per shell, so one bad building cannot hide the next
+  function note(k, s) { perShell[k] = (perShell[k] | 0) + 1; if (perShell[k] <= 3 && samples[k].length < NOTE_MAX) samples[k].push(s); }
+  const VERBOSE = process.argv.includes("-v");
+  let W0 = {};
+  for (const sh of shells) {
+    W0 = Object.assign({}, W); perShell = {};
+    const b = sh.b, sid = typeof sh.site === "string" ? sh.site : (sh.site && sh.site.id), srec = (CBZ.govComplexes || []).find((q) => q.id === sid) || null, tag = sid + "/" + (sh.name || "shell") + "@" + b.ox.toFixed(0) + "," + b.oz.toFixed(0);
+    if ((b.storeys | 0) >= 2 && CBZ.cityStairCore) { try { CBZ.cityStairCore({ building: b }); } catch (e) { console.log("core fail", tag, e.message); } }
+    const TG = triGrid(b.group);
+    const tops = b.floorTops, wt = b.wt != null ? b.wt : 0.4;
+    const holes = (b.shaftRects || []);
+    const inHole = (lx, lz, k) => holes.some((r) => lx > r.x0 - 0.3 && lx < r.x1 + 0.3 && lz > r.z0 - 0.3 && lz < r.z1 + 0.3 && (k === 0 ? !r.levels : true));
+    // ---- FLOORS
+    for (let k = 0; k < (b.storeys | 0); k++) {
+      const ft = tops[k];
+      for (let lx = -b.w / 2 + wt + 0.35; lx < b.w / 2 - wt - 0.3; lx += 0.7) for (let lz = -b.d / 2 + wt + 0.35; lz < b.d / 2 - wt - 0.3; lz += 0.7) {
+        if (inHole(lx, lz, k)) continue;
+        const x = b.ox + lx, z = b.oz + lz;
+        if (solidAt(x, z, ft + 0.1, ft + 1.2, 0.05)) continue;             // inside furniture/a wall: nobody stands here
+        const g = groundAt(x, z, ft + 0.05);
+        W.floorPts++;
+        if (Math.abs(g - ft) > 0.02) {
+          // a raised walk surface (a dais, the stair) is fine when something is DRAWN at it
+          const hitS = TG.at(x, z).some((h) => h.up > 0.7 && Math.abs(h.y - g) <= 0.02);
+          if (!hitS && process.env.DBG && samples.walk.length < 1) console.log("DBG plats", JSON.stringify(CBZ.platforms.filter((p) => x >= p.minX && x <= p.maxX && z >= p.minZ && z <= p.maxZ).map((p) => ({ x0: +(p.minX - b.ox).toFixed(2), x1: +(p.maxX - b.ox).toFixed(2), z0: +(p.minZ - b.oz).toFixed(2), z1: +(p.maxZ - b.oz).toFixed(2), top: p.top, ramp: p.ramp }))));
+          if (!hitS) { W.floorBad++; note("walk", tag + " k" + k + " walk " + g.toFixed(3) + " vs floor " + ft.toFixed(3) + " @" + lx.toFixed(1) + "," + lz.toFixed(1)); }
+          continue;
+        }
+        const hs = TG.at(x, z);
+        // a FINISH is the top drawn thing there: an up-face with nothing drawn
+        // over it for a metre (under a desk, a bench or a bed it is furniture)
+        const topY = hs.reduce((m, h) => (h.y > g + 0.021 && h.y < g + 1.2 && h.y > m ? h.y : m), -1e9);
+        const over = hs.filter((h) => h.up > 0.7 && h.area >= 0.15 && h.y > g + 0.021 && h.y <= g + 0.25 && h.y >= topY - 1e-4);
+        if (over.length) { W.sunk++; const h = over.sort((a, c) => c.y - a.y)[0]; note("sunk", tag + " k" + k + " drawn floor +" + (h.y - g).toFixed(3) + " over the walk @" + lx.toFixed(1) + "," + lz.toFixed(1) + " " + h.name); }
+        if (!hs.some((h) => h.up > 0.7 && Math.abs(h.y - g) <= 0.021)) { W.bare++; note("bare", tag + " k" + k + " nothing drawn at the walk height " + g.toFixed(3) + " @" + lx.toFixed(1) + "," + lz.toFixed(1)); }
+      }
+    }
+    // ---- STAIRS: every link this shell owns
+    const links = CBZ.stairs.links().filter((L) => L.owner === b || (L.owner && L.owner.group && L.owner.group === b.group));
+    for (const L of links) {
+      W.links++;
+      let y = L.path[0].y, maxUp = 0, bad = 0;
+      for (let i = 1; i < L.path.length; i++) {
+        const a = L.path[i - 1], c = L.path[i];
+        const n = Math.max(1, Math.ceil(Math.hypot(c.x - a.x, c.z - a.z) / 0.05));
+        for (let s2 = 1; s2 <= n; s2++) {
+          const x = a.x + (c.x - a.x) * s2 / n, z = a.z + (c.z - a.z) * s2 / n;
+          const g = groundAt(x, z, y);
+          if (g - y > maxUp) maxUp = g - y;
+          y = g; W.stairSamples++;
+          const hs = TG.at(x, z);
+          if (!hs.some((h) => h.up > 0.7 && Math.abs(h.y - y) <= 0.021)) { W.treadMiss++; bad++; note("tread", tag + " link" + L.id + " no tread under the feet at y " + y.toFixed(3) + " @" + (x - b.ox).toFixed(2) + "," + (z - b.oz).toFixed(2)); }
+          // the column from over a riser (a nosing may overhang the toes) to 2 m
+          const head = hs.filter((h) => h.y > y + 0.25 && h.y < y + 2.0);
+          if (head.length) { W.head++; bad++; const h = head.sort((p, q) => p.y - q.y)[0]; if (process.env.DBG && samples.head.length < 3) console.log("DBG all", y.toFixed(3), JSON.stringify(head.map((q) => [+(q.y - y).toFixed(3), q.T.p.map((w) => w.map((u, ii) => +(u - (ii === 0 ? b.ox : ii === 2 ? b.oz : 0)).toFixed(2)))])));
+          if (process.env.DBG && samples.head.length < 0) console.log("DBG head tri", JSON.stringify(h.T.p.map((q) => q.map((u, ii) => +(u - (ii === 0 ? b.ox : ii === 2 ? b.oz : 0)).toFixed(2)))), "path", JSON.stringify(L.path.map((q) => [+(q.x - b.ox).toFixed(2), +q.y.toFixed(2), +(q.z - b.oz).toFixed(2)])));
+          note("head", tag + " link" + L.id + " drawn surface " + (h.y - y).toFixed(2) + " m over the feet (y " + y.toFixed(2) + ") @" + (x - b.ox).toFixed(2) + "," + (z - b.oz).toFixed(2) + " " + h.name); }
+          const c2 = solidAt(x, z, y + 0.42, y + 1.7, 0.05);
+          if (c2) { W.blocked++; bad++; note("blocked", tag + " link" + L.id + " solid in the body band at y " + y.toFixed(2) + " @" + (x - b.ox).toFixed(2) + "," + (z - b.oz).toFixed(2) + " col y" + (c2.y0 != null ? c2.y0.toFixed(2) : "-") + ".." + (c2.y1 != null ? c2.y1.toFixed(2) : "-")); }
+        }
+      }
+      const end = L.path[L.path.length - 1];
+      if (Math.abs(y - end.y) > 0.03 || maxUp > 0.2) { W.noArrive++; note("arrive", tag + " link" + L.id + " ends at " + y.toFixed(3) + " for " + end.y.toFixed(3) + " maxUp " + maxUp.toFixed(3)); }
+      if (bad) W.stairBad++;
+    }
+    // ---- FROM THE FRONT DOOR TO EVERY FLOOR: the AI route (CBZ.stairs.route
+    // chains the links) walked on the same ground law, arriving at the floor
+    const dn = b.localDoor;
+    const core = b._stairCore || (b.group.userData && b.group.userData.stairCore) || null;
+    if (dn && (b.storeys | 0) >= 2) {
+      const from = { x: b.ox + dn.x + dn.nx * 1.6, y: tops[0], z: b.oz + dn.z + dn.nz * 1.6 };
+      const kMax = core ? core.floors : 1;
+      for (let k = 1; k <= Math.min(kMax, (b.storeys | 0) - 1); k++) {
+        W.routes = (W.routes | 0) + 1;
+        const h = core ? core.headAt(k) : null;
+        const to = h ? { x: h.x + h.nx * 1.2, y: tops[k], z: h.z + h.nz * 1.2 } : (gsr0(srec, b) ? gsr0(srec, b).landing : null);
+        const rt = to ? CBZ.stairs.route(from, to) : null;
+        if (!rt || !rt.length) { W.noRoute = (W.noRoute | 0) + 1; note("arrive", tag + " no route from the door to floor " + k); continue; }
+        let y = from.y, px = from.x, pz = from.z;
+        for (const q of rt) {
+          const n = Math.max(1, Math.ceil(Math.hypot(q.x - px, q.z - pz) / 0.05));
+          for (let s3 = 1; s3 <= n; s3++) y = groundAt(px + (q.x - px) * s3 / n, pz + (q.z - pz) * s3 / n, y);
+          px = q.x; pz = q.z;
+        }
+        if (Math.abs(y - tops[k]) > 0.03) { W.noRoute = (W.noRoute | 0) + 1; note("arrive", tag + " door->floor " + k + " walked to y " + y.toFixed(3) + " for " + tops[k].toFixed(3)); }
+      }
+    }
+    const gsr = srec && srec.grandStair;
+    if (gsr && gsr.treads && Math.abs(gsr.bottom.x - b.ox) < b.w / 2 && Math.abs(gsr.bottom.z - b.oz) < b.d / 2) {
+      for (const t of gsr.treads) {
+        W.treads++;
+        const g = groundAt(t.x, t.z, t.top - 0.05);
+        if (Math.abs(g - t.top) > 0.01) { W.treadBad++; note("tread", tag + " grand tread top " + t.top.toFixed(3) + " walks at " + g.toFixed(3)); }
+      }
+    }
+    const mine = Object.keys(W).map((k) => W[k] - (W0[k] || 0));
+    if (VERBOSE || mine.some((v, i) => i > 0 && ["floorBad", "sunk", "bare", "head", "treadMiss", "blocked", "noArrive", "treadBad"].indexOf(Object.keys(W)[i]) >= 0 && v)) {
+      const d = {}; Object.keys(W).forEach((k, i) => { if (mine[i]) d[k] = mine[i]; });
+      console.log("  shell", tag, "storeys", b.storeys, "FH", b.FH, JSON.stringify(d));
+    }
+  }
+  console.log("\n=== the walk: " + shells.length + " shells ===");
+  console.log("floor points", W.floorPts, "walk!=floor", W.floorBad, "feet under a drawn floor", W.sunk, "no drawn floor", W.bare);
+  console.log("stair links", W.links, "samples", W.stairSamples, "links with faults", W.stairBad, "| no tread", W.treadMiss, "head path", W.head, "body blocked", W.blocked, "no arrival", W.noArrive, "| grand treads", W.treads, "bad", W.treadBad, "| door->floor routes", W.routes | 0, "failed", W.noRoute | 0);
+  for (const k in samples) if (samples[k].length) console.log("  " + k + ":", samples[k].join("\n    "));
+  FAIL += (W.noRoute | 0) + W.floorBad + W.sunk + W.bare + W.treadMiss + W.head + W.blocked + W.noArrive + W.treadBad;
+}
 }
 console.log(FAIL ? "\nESTATE CHECK: " + FAIL + " failures" : "\nESTATE CHECK: clean");
 process.exit(FAIL ? 1 : 0);

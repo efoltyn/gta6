@@ -3565,8 +3565,61 @@
       return lx > ixMin + pad && lx < ixMax - pad && lz > izMin + pad && lz < izMax - pad;
     }
 
+    /* NOTHING IS DRAWN IN A STAIRWELL. OWNER: "when you walk through the
+       stairs, you have to go through the floor". A reserved hole (a stair
+       core, a lift chase, a grand stair's opening: b.shaftRects, optionally
+       limited to the slab `levels` it opens) had only the SLAB taken out of
+       it; every box a program drew afterwards in that slab's band — the
+       floor covering of the storey above, a rug, the coffers, cornice and
+       chandeliers of the storey below — still spanned the opening, and the
+       climb went through them. So the one box primitive clips: a box lying
+       wholly inside a slab's band (1.35 m under the slab .. 0.4 m over it)
+       loses the part over the hole (split into up to four rim boxes, the
+       way cityCarveShaft splits the slab). The stair itself passes
+       o.stair, structure (o.los) is never touched, and a shell with no
+       reserved hole never pays for the test. */
+    function holeClip(lx, lz, bw, bd, yb, yt) {
+      let parts = null;
+      for (let i = 0; i < shaftRects.length; i++) {
+        const r = shaftRects[i];
+        if (lx + bw / 2 <= r.x0 || lx - bw / 2 >= r.x1 || lz + bd / 2 <= r.z0 || lz - bd / 2 >= r.z1) continue;
+        let hit = false;
+        const lv = r.levels;
+        const nL = lv ? lv.length : storeys - 1;
+        for (let j = 0; j < nL && !hit; j++) {
+          const L = lv ? lv[j] : j + 1;
+          const top = L * FH;
+          if (yb >= top - 1.35 && yt <= top + 0.4) hit = true;
+        }
+        if (!hit) continue;
+        if (!parts) parts = [{ x0: lx - bw / 2, x1: lx + bw / 2, z0: lz - bd / 2, z1: lz + bd / 2 }];
+        const next = [];
+        for (const p of parts) {
+          if (p.x1 <= r.x0 || p.x0 >= r.x1 || p.z1 <= r.z0 || p.z0 >= r.z1) { next.push(p); continue; }
+          const cx0 = Math.max(r.x0, p.x0), cx1 = Math.min(r.x1, p.x1), cz0 = Math.max(r.z0, p.z0), cz1 = Math.min(r.z1, p.z1);
+          for (const q of [[p.x0, p.x1, p.z0, cz0], [p.x0, p.x1, cz1, p.z1], [p.x0, cx0, cz0, cz1], [cx1, p.x1, cz0, cz1]])
+            if (q[1] - q[0] > 0.02 && q[3] - q[2] > 0.02) next.push({ x0: q[0], x1: q[1], z0: q[2], z1: q[3] });
+        }
+        parts = next;
+      }
+      return parts;
+    }
     function lbox(lx, ly, lz, bw, bh, bd, col, o) {
       o = o || {};
+      if (shaftRects.length && !o.stair && !o.los && !o._clipped) {
+        const parts = holeClip(lx, lz, bw, bd, ly - bh / 2, ly + bh / 2);
+        if (parts) {
+          const o2 = Object.assign({}, o, { _clipped: true });
+          let first = null;
+          for (const p of parts) {
+            const m = lbox((p.x0 + p.x1) / 2, ly, (p.z0 + p.z1) / 2, p.x1 - p.x0, bh, p.z1 - p.z0, col, o2);
+            if (!first) first = m;
+          }
+          // wholly over the hole: a mesh that is in no scene, so a caller that
+          // keeps the handle (a light strip, a collider ref) holds nothing drawn
+          return first || new THREE.Mesh(unitBoxGeo(false, false), CBZ.cmat(col));
+        }
+      }
       // fake-AO vertex shading on structural LOS surfaces (walls/roofs/rims) —
       // exactly the meshes batch.js spares, so the colour attribute survives
       let mm;
@@ -4997,6 +5050,8 @@
     opts = opts || {};
     if (b.shaftRects && opts.reserve !== false) {
       const r = { x0: wx - b.ox - hw, x1: wx - b.ox + hw, z0: wz - b.oz - hd, z1: wz - b.oz + hd };
+      // the slabs it opens (lbox clips its drawing out of exactly those)
+      if (Array.isArray(opts.levels)) r.levels = opts.levels.slice();
       const dup = b.shaftRects.some((q) => Math.abs(q.x0 - r.x0) < 1e-3 && Math.abs(q.x1 - r.x1) < 1e-3
         && Math.abs(q.z0 - r.z0) < 1e-3 && Math.abs(q.z1 - r.z1) < 1e-3);
       if (!dup) b.shaftRects.push(r);

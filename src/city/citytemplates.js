@@ -34,6 +34,8 @@
 
   // ---- shared shop OPTS (retail = clear see-through storefront glass) -------
   const RET = { retail: true };
+  // a strip motel's shell: the flats' stair core + the Desert Modern grammar
+  const MOTEL = { stairs: true, dress: { style: "desertmod" } };
 
   // Each template:
   //   id, name, biome, pattern, density, cols, rows, blockW, blockD, roadW,
@@ -131,24 +133,34 @@
         wood: 0x6a3a78, accent: 0xff36c0, stone: 0x4a4068, sign: "#ff8ae0",
         signBoard: 0x140f22, plaza: 0x3a3358, lamp: 0xff66cc },
       skyline: { minStoreys: 5, maxStoreys: 12, landmarkStoreys: 38, towerFrac: 0.5, megaChance: true, townMax: 4 },
+      // THE BUILDINGS OF A REAL STRIP are cream stucco, white stone, bronze
+      // glass and one dark club, and the NEON is the signs and the lamps, not
+      // the walls: every shell here used to be painted a flat mid purple, so
+      // the whole town read as one plastic colour from any distance. The two
+      // casinos wear the Deco Tower grammar (a strip's casino is a landmark:
+      // piers, a stepped portal, setbacks and a lit mast), everything else
+      // takes its street's facade family and a real material colour. The
+      // rooms people rent on a strip are mid-century motels, so the homes
+      // wear Desert Modern (flat roofs, deep eaves, breeze block) rather
+      // than whatever house family the 360 m cell happens to roll.
       prefabs: {
         civic: [
-          { name: "ROYAL FLUSH CASINO", storeys: 5, color: 0x7a2a6a, shopKind: "casino", opts: { retail: true, facade: "office" }, lotKind: "shop" },
-          { name: "JACKPOT TOWER", storeys: 5, color: 0x6a2a7a, shopKind: "casino", opts: { retail: true, facade: "office" }, lotKind: "shop" },
+          { name: "ROYAL FLUSH CASINO", storeys: 5, color: 0xd8c9a6, shopKind: "casino", opts: { retail: true, facade: "office", dress: { style: "artdeco" } }, lotKind: "shop" },
+          { name: "JACKPOT TOWER", storeys: 5, color: 0xd9dcdc, shopKind: "casino", opts: { retail: true, facade: "office", dress: { style: "artdeco" } }, lotKind: "shop" },
         ],
         commercial: [
-          { name: "AFTERGLOW NIGHTCLUB", storeys: 2, color: 0x8a2a8a, shopKind: "bar", opts: RET, lotKind: "shop", w: 2 },
-          { name: "QUICK CASH PAWN", storeys: 1, color: 0x5a3a6a, shopKind: "pawn", opts: RET, lotKind: "shop", w: 2 },
-          { name: "DIAMOND LOUNGE", storeys: 2, color: 0x7a3a5a, shopKind: "jewelry", opts: RET, lotKind: "shop", w: 1 },
-          { name: "AFTER DARK SHADES", storeys: 1, color: 0x4a2a5a, shopKind: "eyewear", opts: RET, lotKind: "shop", w: 1 },
-          { name: "THE LUCKY BAR", storeys: 1, color: 0x6a3a4a, shopKind: "bar", opts: RET, lotKind: "shop", w: 2 },
+          { name: "AFTERGLOW NIGHTCLUB", storeys: 2, color: 0x3b3d44, shopKind: "bar", opts: RET, lotKind: "shop", w: 2 },
+          { name: "QUICK CASH PAWN", storeys: 1, color: 0xc6b594, shopKind: "pawn", opts: RET, lotKind: "shop", w: 2 },
+          { name: "DIAMOND LOUNGE", storeys: 2, color: 0xe2d8c3, shopKind: "jewelry", opts: RET, lotKind: "shop", w: 1 },
+          { name: "AFTER DARK SHADES", storeys: 1, color: 0xb7bbbe, shopKind: "eyewear", opts: RET, lotKind: "shop", w: 1 },
+          { name: "THE LUCKY BAR", storeys: 1, color: 0x8c5b40, shopKind: "bar", opts: RET, lotKind: "shop", w: 2 },
         ],
         residential: [
-          { name: "Neon Flophouse", storeys: 3, color: 0x4a3a5a, lotKind: "home", rent: 60, w: 2 },
-          { name: "Strip Motel", storeys: 2, color: 0x5a4060, lotKind: "home", rent: 55, w: 1 },
+          { name: "Neon Flophouse", storeys: 3, color: 0xcbbda3, lotKind: "home", rent: 60, w: 2, opts: MOTEL },
+          { name: "Strip Motel", storeys: 2, color: 0xe4dac4, lotKind: "home", rent: 55, w: 1, opts: MOTEL },
         ],
         default: [
-          { name: "Strip Rooms", storeys: 1, color: 0x4a3a5a, lotKind: "home", rent: 50 },
+          { name: "Strip Rooms", storeys: 1, color: 0xd2c5ab, lotKind: "home", rent: 50, opts: MOTEL },
         ],
       },
     },

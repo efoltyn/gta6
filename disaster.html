@@ -486,7 +486,7 @@ document.body.appendChild(b);}}catch(e){}})();
      must load before any mode registers its base (city/mode.js, modes/*). -->
 <script src="src/systems/solidground.js?v=solid1"></script>
 <!-- THE ONE STAIR SYSTEM: flight walk surfaces + level links + AI routes. Before any world builder (the prison builds at parse time). -->
-<script src="src/systems/stairs.js?v=stairs1"></script>
+<script src="src/systems/stairs.js?v=pres0929b"></script>
 <!-- ORDNANCE LEAVES THE GROUND CHANGED: a bomb digs a carving. -->
 <script src="src/systems/craters.js?v=crater1"></script>
 <!-- A ROOM UNDER AN INTACT STREET: a hole with a lid on it. -->
@@ -520,7 +520,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- Furniture kit: CBZ.furnish draws a piece AND registers its use-anchor in one
      call. After materials.js (resolves addBox at call time); before its consumers
      lounge.js / cafeteria.js / clutter.js. -->
-<script src="src/city/furniture.js?v=deslop1"></script>
+<script src="src/city/furniture.js?v=pres0929b"></script>
 <!-- FURNITURE MOVES WHEN YOU WALK INTO IT (owner: "physics, not another
      f***ing button"). CBZ.pushables.add(spec) — still exported as CBZ.pushProp —
      makes a drawn prop a mass on a floor:
@@ -746,7 +746,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/input.js"></script>
 <script src="src/systems/spatialgrid.js?v=scale3"></script>
 <script src="src/systems/camera.js?v=tui0929"></script>
-<script src="src/systems/physics.js?v=colcore1"></script>
+<script src="src/systems/physics.js?v=pres0929b"></script>
 <script src="src/systems/meshcollider.js?v=meshcol1"></script>
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
 <script src="src/systems/climb.js?v=lad1"></script>
@@ -1381,7 +1381,7 @@ document.body.appendChild(b);}}catch(e){}})();
      real fixtures) and freed when you leave. After storegoods (same lazy
      dresser shape), furniture.js (CBZ.furnish) and interior_programs.js
      (which declares every floor to it). -->
-<script src="src/city/fitout.js?v=deslop1-st1"></script>
+<script src="src/city/fitout.js?v=pres0929b"></script>
 <script src="src/city/fitout_plans.js?v=deslop1"></script>
 <script src="src/city/fitout_work.js?v=deslop1-st1"></script>
 <script src="src/city/fitout_gang.js?v=deslop1-st1"></script>
@@ -1866,14 +1866,14 @@ document.body.appendChild(b);}}catch(e){}})();
      and lockdown bodies in the street), and the regime dressing that changes
      the Mansion when the republic falls. Security (the detail, the gate
      checkpoint, counter-snipers, the panic protocol) lives in protection.js. -->
-<script src="src/city/president_office.js?v=pres3"></script>
+<script src="src/city/president_office.js?v=pres0929b"></script>
 <script src="src/city/motorcade.js?v=ekey2"></script>
 <!-- THE PRESIDENT HIRES HIS PEOPLE: the line in the office, the Chief of
      Staff, the detail / driver / press secretary / empty cabinet chairs.
      After presidency.js, president_office.js, protection.js, motorcade.js. -->
-<script src="src/city/president_staff.js?v=ekey2"></script>
-<script src="src/city/president_public.js?v=w0929est"></script>
-<script src="src/city/president_regime.js?v=w0929est"></script>
+<script src="src/city/president_staff.js?v=pres0929b"></script>
+<script src="src/city/president_public.js?v=pres0929b"></script>
+<script src="src/city/president_regime.js?v=pres0929b"></script>
 
 <!-- CASH STORE — the back half of the cash-bag loop (owner: "only driving to
      your own place can store the cash, not just rob"). Turns govcomplex's

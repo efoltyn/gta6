@@ -1158,12 +1158,20 @@
     for (let i = 0; i < plats.length; i++) {
       const p = plats[i];
       if (x < p.minX || x > p.maxX || z < p.minZ || z > p.maxZ) continue;
+      // an oriented walk surface (a diagonal flight, a curved tier): the AABB
+      // is only its broadphase, as in physics.js groundAt
+      if (p.obb) {
+        const o = p.obb, rx = x - o.cx, rz = z - o.cz;
+        const a = rx * o.ux + rz * o.uz, c = rx * o.uz - rz * o.ux;
+        if (a < -o.hl || a > o.hl || c < -o.hw || c > o.hw) continue;
+      }
       let top = p.top;
       if (p.ramp) {
         const r = p.ramp;
-        let t = (r.axis === "x") ? (x - r.x0) / (r.x1 - r.x0) : (z - r.z0) / (r.z1 - r.z0);
+        let t = r.dir ? ((x - r.ox) * r.dx + (z - r.oz) * r.dz) / r.len
+          : (r.axis === "x") ? (x - r.x0) / (r.x1 - r.x0) : (z - r.z0) / (r.z1 - r.z0);
         if (t < 0) t = 0; else if (t > 1) t = 1;
-        top = r.y0 + t * (r.y1 - r.y0);
+        top = (r.steps && CBZ.rampTop) ? CBZ.rampTop(r, t) : r.y0 + t * (r.y1 - r.y0);
       }
       if (top <= reach && top > best) best = top;
     }

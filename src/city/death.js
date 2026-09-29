@@ -784,7 +784,21 @@
     if (g.citySpawnPoint) { spot = g.citySpawnPoint; atHome = true; }
     else {
       const h = nearestHospital(fx, fz);
-      if (h) { out = doorOut(h); const d = h.building.door; spot = { x: d.x + out.x * 2.6, z: d.z + out.z * 2.6 }; }
+      if (h) {
+        out = doorOut(h);
+        const d = h.building.door, B = h.building;
+        // on the step outside the FACADE, not 2.6 m past a door point that some
+        // builders (town clinics) already put 1.6 m past the lot line: that
+        // stood you in the road
+        let sx = d.x + out.x * 2.6, sz = d.z + out.z * 2.6;
+        const bcx = B.ox != null ? B.ox : h.cx, bcz = B.oz != null ? B.oz : h.cz;
+        if (B.w > 0 && B.d > 0 && bcx != null && bcz != null) {
+          const half = Math.abs(out.x) * B.w / 2 + Math.abs(out.z) * B.d / 2;
+          sx = bcx + out.x * (half + 1.3) + (d.x - bcx) * Math.abs(out.z);
+          sz = bcz + out.z * (half + 1.3) + (d.z - bcz) * Math.abs(out.x);
+        }
+        spot = { x: sx, z: sz };
+      }
     }
     // THE BILL: 250 + 150 per star you died carrying, from your pocket first
     // and then the bank. Never debt: if you have nothing, the ER eats it.

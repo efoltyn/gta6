@@ -2110,7 +2110,7 @@
           let t = r.dir ? ((x - r.ox) * r.dx + (z - r.oz) * r.dz) / r.len
             : (r.axis === "x") ? (x - r.x0) / (r.x1 - r.x0) : (z - r.z0) / (r.z1 - r.z0);
           if (t < 0) t = 0; else if (t > 1) t = 1;
-          top = r.y0 + t * (r.y1 - r.y0);
+          top = r.steps ? CBZ.rampTop(r, t) : r.y0 + t * (r.y1 - r.y0);
         }
         if (top <= reach && top > best) best = top;
       }
@@ -2821,9 +2821,16 @@
           // (a solid step, a kerb, a riser without a ramp under it) is paid
           // out visually over ~0.1 s: the body keeps its old height and eases
           // up (the rig reads _stepLag below), the camera follows the rig.
+          // ...and so is a step DOWN (a stepped flight's tread, a kerb): the
+          // body keeps its old height and eases down, so descending a stair
+          // is a glide and not a 17 cm drop per tread. Signed lag: + = the
+          // rig is drawn below the feet (eases up), - = above (eases down).
           const dUp = support - player.pos.y;
-          if (dUp > 0.06 && dUp > Math.hypot(desX, desZ) * subDt * 1.2) {
+          const stepGate = Math.hypot(desX, desZ) * subDt * 1.2;
+          if (dUp > 0.06 && dUp > stepGate) {
             player._stepLag = Math.min(0.5, (player._stepLag || 0) + dUp);
+          } else if (dUp < -0.06 && -dUp > stepGate && dUp >= -SNAP_DOWN) {
+            player._stepLag = Math.max(-0.5, (player._stepLag || 0) + dUp);
           }
           player.pos.y = support; player.vy = 0; player._fallPeak = 0;
         } else {
@@ -2928,9 +2935,9 @@
     const sink = (CBZ.charProneSink && CBZ.charProneSink(playerChar)) || PRONE_SINK;
     // the step-up ease (see the ground snap): pay the lag out over ~0.1 s
     let stepLag = player._stepLag || 0;
-    if (stepLag > 0) {
+    if (stepLag !== 0) {
       stepLag *= Math.exp(-fdt * 18);
-      if (stepLag < 0.004 || !player.grounded) stepLag = 0;
+      if (Math.abs(stepLag) < 0.004 || !player.grounded) stepLag = 0;
       player._stepLag = stepLag;
     }
     playerChar.group.position.set(player.pos.x, player.pos.y - sink * proneB - stepLag, player.pos.z);

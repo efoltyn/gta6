@@ -287,7 +287,7 @@
           let top = p.top;
           // B3: kept in lockstep with physics.js:241's x-axis ramp branch —
           // same optional r.axis:"x" data-shape extension, same z-default.
-          if (p.ramp) { const r = p.ramp; let t = (r.axis === "x") ? (x - r.x0) / (r.x1 - r.x0) : (z - r.z0) / (r.z1 - r.z0); t = t < 0 ? 0 : t > 1 ? 1 : t; top = r.y0 + t * (r.y1 - r.y0); }
+          if (p.ramp) { const r = p.ramp; let t = (r.axis === "x") ? (x - r.x0) / (r.x1 - r.x0) : (z - r.z0) / (r.z1 - r.z0); t = t < 0 ? 0 : t > 1 ? 1 : t; top = (r.steps && CBZ.rampTop) ? CBZ.rampTop(r, t) : r.y0 + t * (r.y1 - r.y0); }
           if (Math.abs(top - g) < 1e-3) { kind = "platform"; if (p.pieceId != null) pieceId = p.pieceId; break; }
         }
         a = { y: g, kind: kind, pieceId: pieceId };

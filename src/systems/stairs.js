@@ -109,6 +109,17 @@
                         (e.g. a building's own b.platforms for demolition)
        link             false → walk surface only, no AI link
        kind             label for the link ("stair", "ladder", …)
+       steps            n → the walk surface IS the n treads: over the i-th
+                        1/n of the run the top is y0 + i·rise, exactly the
+                        tread a builder draws there (tread i = the i-th
+                        n-th of the run, top y0 + i·(y1-y0)/n). Without it the
+                        surface is the straight line from nosing to nosing,
+                        which lies UNDER every tread by up to one riser: feet
+                        in the marble on every flight. Physics pays each
+                        riser out visually (_stepLag), so it still reads as
+                        a glide.
+       head             clear height to keep over every tread (reported by
+                        CBZ.stairs.headAudit; default 2.05)
      returns { plat, cols, link } */
   function flight(spec) {
     const B = spec.bottom, T = spec.top;
@@ -145,6 +156,8 @@
       };
     }
     plat.stair = true;
+    const nSteps = spec.steps | 0;
+    if (nSteps >= 2) plat.ramp.steps = nSteps;
     CBZ.platforms.push(plat);
     if (spec.plats) spec.plats.push(plat);
 
@@ -341,6 +354,21 @@
     }
     return { links: links.length, bad: bad.length, samples: bad.slice(0, 20) };
   }
+
+  /* THE ONE ANSWER TO "HOW HIGH IS A RAMP RECORD HERE", given its clamped
+     t in [0,1]. Every reader of a ramp platform (physics.js, microboot.js,
+     pieces.js, platforms_moving.js) calls this, so a stepped flight is one
+     rule and not four copies of it. */
+  function rampTop(r, t) {
+    const n = r.steps;
+    if (n >= 2) {
+      let i = Math.ceil(t * n - 1e-6);
+      if (i < 0) i = 0; else if (i > n) i = n;
+      return r.y0 + i * (r.y1 - r.y0) / n;
+    }
+    return r.y0 + t * (r.y1 - r.y0);
+  }
+  CBZ.rampTop = rampTop;
 
   CBZ.stairs = {
     walkAudit: walkAudit,

@@ -480,8 +480,22 @@
   // is THIS person entitled through the door? The sitting head of state.
   function doorOpensFor() { return !!seat(); }
 
-  const WALLC = 0x3a4250, STEEL = 0x2b3038, TRIM = 0x8b96a6, TABLE = 0x243244, PADC = 0x18202c;
-  const NAVY = 0x17283f, BRASS = 0xb99347, LEATHER = 0x3b2b27, CARPET = 0x263c58, PAPER = 0xd8d2c4;
+  /* ====================================================================
+     THE SITUATION ROOM — built on the plate the state floor's plan left for
+     it (interior_programs.js publishes b._sitRoom: the rect, the floor top,
+     the ceiling, and the door in the wall that faces the Cross Hall), so
+     the room and the rooms round it are one plan and never overlap.
+
+     A real one: walnut-panelled walls to a navy acoustic band, a long table
+     under three recessed lights, the country's live state on a video wall
+     at its end with a screen either side, a row of clocks over them, the
+     seal and the standards; a watch floor of three consoles along one side.
+     Everything stands on the floor top (the old carpet was 5 cm proud of
+     it, and every piece stood on that), the carpet tops out 1.8 cm over it.
+     ==================================================================== */
+  function glow(m, hex, ei) { if (m && CBZ.cmat) m.material = CBZ.cmat(hex, { emissive: hex, ei: ei }); return m; }
+  const PANEL = 0x4a3524, STILE = 0x3a2b1e, STEEL = 0x2b3038, TRIM = 0x8b96a6;
+  const NAVY = 0x17283f, BRASS = 0xb99347, CARPET = 0x263c58, PAPER = 0xd8d2c4;
   function buildRoom() {
     if (!CFG.PRESIDENCY_SITROOM || !window.THREE) return false;
     const site = mansionSite();
@@ -491,199 +505,240 @@
     const A = CBZ.city && CBZ.city.arena;
     const root = (A && A.root) || CBZ.scene;
     if (!root || !CBZ.colliders) return false;
-
-    // the mansion's main shell: civic(root, cx, cz-34, 56, 34, ...) — the
-    // ground floor spans x cx±28, z cz-51..cz-17, front door on +z. The room
-    // takes the west end of that hall. All offsets fixed => deterministic.
-    const cx = site.cx, cz = site.cz;
-    // A real 13x13 command room in the shell's clear east bay. WHERE and HOW
-    // TALL come from govcomplex.js's published layout (site.layout.sitRoom):
-    // the state floor stands 4.5 m now, so the walls run to its ceiling
-    // instead of stopping at 3 m in a taller hall.
+    const mb = site.lot && site.lot.building;
+    const PL = mb && mb._sitRoom;
     const SR = site.layout && site.layout.sitRoom;
-    const x0 = SR ? SR.minX : cx + 12.5;
-    const x1 = SR ? SR.maxX : cx + 25.5;
-    const z0 = SR ? SR.minZ : cz - 47.5;
-    const z1 = SR ? SR.maxZ : cz - 34.5;
-    const zc = (z0 + z1) / 2;
+    const LY = site.layout || {};
+    const x0 = PL ? PL.minX : SR ? SR.minX : site.cx + 12.5;
+    const x1 = PL ? PL.maxX : SR ? SR.maxX : site.cx + 25.5;
+    const z0 = PL ? PL.minZ : SR ? SR.minZ : site.cz - 47.5;
+    const z1 = PL ? PL.maxZ : SR ? SR.maxZ : site.cz - 34.5;
+    const Y = PL ? PL.y : (LY.floorTops ? LY.floorTops[0] : 0.14);
+    const CEILW = PL ? PL.ceil : (LY.floorTops && LY.floorTops[1] != null ? LY.floorTops[1] - 0.2 : Y + 3.0);
+    const H = CEILW;                                  // walls stand on the floor top and meet the ceiling
     ROOM.rect = { minX: x0, maxX: x1, minZ: z0, maxZ: z1 };
+    ROOM.floorY = Y;
     const grp = new THREE.Group();
+    grp.name = "situation-room";
     root.add(grp); ROOM.group = grp;
-    const H = SR && SR.wallH > 2.6 ? SR.wallH : 3.0, T = 0.24;
-
-    // A fitted floor and a waist-height acoustic wainscot make the room read
-    // as deliberately embedded in the state residence, not a gray box that
-    // appeared on top of its lobby.
-    addBox(grp, (x0 + x1) / 2, 0.165, zc, x1 - x0 - 0.32, 0.05, z1 - z0 - 0.32, CARPET);
-    addBox(grp, (x0 + x1) / 2, 0.72, z0 + T + 0.035, x1 - x0 - 0.6, 1.22, 0.07, NAVY);
-    addBox(grp, (x0 + x1) / 2, 0.72, z1 - T - 0.035, x1 - x0 - 0.6, 1.22, 0.07, NAVY);
-    for (let i = 0; i < 7; i++) {
-      const px = x0 + 1.1 + i * ((x1 - x0 - 2.2) / 6);
-      addBox(grp, px, 0.74, z0 + T + 0.09, 0.05, 1.12, 0.045, BRASS);
-      addBox(grp, px, 0.74, z1 - T - 0.09, 0.05, 1.12, 0.045, BRASS);
+    const T = 0.24, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+    // the door: in the wall that faces out along (nx, nz); fallback the west wall
+    const dn = (PL && PL.door) ? PL.door : { x: x0, z: cz, nx: -1, nz: 0 };
+    const doorOnX = Math.abs(dn.nx) > 0.5;           // the door wall runs along z
+    const dSide = doorOnX ? (dn.nx > 0 ? x1 : x0) : (dn.nz > 0 ? z1 : z0);
+    const dC = doorOnX ? Math.max(z0 + 2, Math.min(z1 - 2, dn.z)) : Math.max(x0 + 2, Math.min(x1 - 2, dn.x));
+    const outS = doorOnX ? Math.sign(dn.nx) : Math.sign(dn.nz);
+    const GAP = 2.2, DH = 2.6;
+    // ---- walls (real colliders), each one a leaf of plaster to the ceiling
+    const wallBox = function (onX, at, a, b, y0, y1) {
+      if (b - a < 0.02) return;
+      const inset = onX ? (at === x0 ? T / 2 : -T / 2) : (at === z0 ? T / 2 : -T / 2);
+      if (onX) { addBox(grp, at + inset, (y0 + y1) / 2, (a + b) / 2, T, y1 - y0, b - a, 0x3a4250); addCol(at + inset, (a + b) / 2, T, b - a, y0, y1); }
+      else { addBox(grp, (a + b) / 2, (y0 + y1) / 2, at + inset, b - a, y1 - y0, T, 0x3a4250); addCol((a + b) / 2, at + inset, b - a, T, y0, y1); }
+    };
+    for (const side of [["x", x0], ["x", x1], ["z", z0], ["z", z1]]) {
+      const onX = side[0] === "x", at = side[1];
+      const lo = onX ? z0 : x0, hi = onX ? z1 : x1;
+      if (onX === doorOnX && at === dSide) {
+        wallBox(onX, at, lo, dC - GAP / 2, Y, H);
+        wallBox(onX, at, dC + GAP / 2, hi, Y, H);
+        wallBox(onX, at, dC - GAP / 2, dC + GAP / 2, Y + DH, H);
+      } else wallBox(onX, at, lo, hi, Y, H);
     }
-
-    // walls (real colliders — the room is a fact, not a texture)
-    addBox(grp, (x0 + x1) / 2, H / 2, z0 + T / 2, (x1 - x0), H, T, WALLC); addCol((x0 + x1) / 2, z0 + T / 2, x1 - x0, T, 0, H);
-    addBox(grp, (x0 + x1) / 2, H / 2, z1 - T / 2, (x1 - x0), H, T, WALLC); addCol((x0 + x1) / 2, z1 - T / 2, x1 - x0, T, 0, H);
-    // The room faces its door WEST, into the state hall.
-    const doorX = x0;
-    const solidX = x1;
-    const doorOut = -1;
-    addBox(grp, solidX + doorOut * T / 2, H / 2, zc, T, H, (z1 - z0), WALLC);
-    addCol(solidX + doorOut * T / 2, zc, T, z1 - z0, 0, H);
-    // door wall: two jamb segments with a 2.2 m gap at zc
-    const gz0 = zc - 1.1, gz1 = zc + 1.1;
-    addBox(grp, doorX - doorOut * T / 2, H / 2, (z0 + gz0) / 2, T, H, (gz0 - z0), WALLC); addCol(doorX - doorOut * T / 2, (z0 + gz0) / 2, T, gz0 - z0, 0, H);
-    addBox(grp, doorX - doorOut * T / 2, H / 2, (gz1 + z1) / 2, T, H, (z1 - gz1), WALLC); addCol(doorX - doorOut * T / 2, (gz1 + z1) / 2, T, z1 - gz1, 0, H);
-    // The wainscot belongs to the two wall leaves, never across the door
-    // opening. A full-span panel would leave a navy waist-high slab in a
-    // physically open doorway even after the steel leaf slid away.
-    const southA = z0 + 0.30, southB = gz0 - 0.08;
-    const northA = gz1 + 0.08, northB = z1 - 0.30;
-    if (southB > southA) addBox(grp, x0 + T + 0.035, 0.72, (southA + southB) / 2, 0.07, 1.22, southB - southA, NAVY);
-    if (northB > northA) addBox(grp, x0 + T + 0.035, 0.72, (northA + northB) / 2, 0.07, 1.22, northB - northA, NAVY);
-    // the wall over the door, from the door head to the ceiling
-    addBox(grp, doorX - doorOut * T / 2, 2.6 + (H - 2.6) / 2, zc, T, H - 2.6, 2.4, WALLC);
-
-    // THE DOOR — a steel slab that slides north for the President and stays
-    // shut for everyone else. Its collider is added/removed as it moves.
-    const door = addBox(grp, doorX - doorOut * T / 2, 1.3, zc, 0.16, 2.6, 2.2, STEEL);
+    // inner faces
+    const fx0 = x0 + T, fx1 = x1 - T, fz0 = z0 + T, fz1 = z1 - T;
+    // ---- floor and ceiling
+    addBox(grp, cx, Y + 0.0115, cz, fx1 - fx0, 0.013, fz1 - fz0, CARPET);            // carpet: 0.005..0.018 over the floor top
+    addBox(grp, cx, H - 0.02, cz, fx1 - fx0, 0.04, fz1 - fz0, 0x2a2f37);              // acoustic ceiling, under the slab
+    // ---- walnut panelling to 2.8 m, a navy acoustic band over it, stiles on a
+    // 1.2 m rhythm, a skirting and a cornice: on every inner face, round the door
+    const faces = [
+      { onX: true, at: fx0, s: 1, lo: fz0, hi: fz1 }, { onX: true, at: fx1, s: -1, lo: fz0, hi: fz1 },
+      { onX: false, at: fz0, s: 1, lo: fx0, hi: fx1 }, { onX: false, at: fz1, s: -1, lo: fx0, hi: fx1 },
+    ];
+    const run = function (f, a, b, y0, y1, proud, col) {
+      if (b - a < 0.05) return;
+      const n = f.at + f.s * proud / 2;
+      if (f.onX) addBox(grp, n, (y0 + y1) / 2, (a + b) / 2, proud, y1 - y0, b - a, col);
+      else addBox(grp, (a + b) / 2, (y0 + y1) / 2, n, b - a, y1 - y0, proud, col);
+    };
+    for (const f of faces) {
+      const isDoor = f.onX === doorOnX && Math.abs((f.onX ? (f.s > 0 ? x0 : x1) : (f.s > 0 ? z0 : z1)) - dSide) < 0.01;
+      const spans = isDoor ? [[f.lo, dC - GAP / 2 - 0.1], [dC + GAP / 2 + 0.1, f.hi]] : [[f.lo, f.hi]];
+      for (const sp of spans) {
+        run(f, sp[0], sp[1], Y, Y + 2.8, 0.04, PANEL);
+        run(f, sp[0], sp[1], Y, Y + 0.16, 0.06, STILE);                              // skirting
+        run(f, sp[0], sp[1], Y + 0.9, Y + 0.95, 0.06, STILE);                        // rail
+        run(f, sp[0], sp[1], Y + 2.8, H - 0.04, 0.03, NAVY);                         // acoustic band
+        run(f, sp[0], sp[1], Y + 2.76, Y + 2.86, 0.07, BRASS);                       // brass datum
+        for (let a = sp[0] + 0.6; a < sp[1] - 0.3; a += 1.2) run(f, a - 0.04, a + 0.04, Y + 0.95, Y + 2.76, 0.06, STILE);
+      }
+    }
+    // ---- the door: a steel leaf that slides for the President, a frame, a reader
+    const leafAt = dSide - outS * T / 2;
+    const door = doorOnX ? addBox(grp, leafAt, Y + DH / 2, dC, 0.16, DH, GAP, STEEL) : addBox(grp, dC, Y + DH / 2, leafAt, GAP, DH, 0.16, STEEL);
     ROOM.door = door;
-    ROOM.doorHome = { x: doorX - doorOut * T / 2, z: zc };
-    ROOM.doorCol = { minX: doorX - 0.2, maxX: doorX + 0.2, minZ: zc - 1.1, maxZ: zc + 1.1, y0: 0, y1: 2.6, ref: door };
+    ROOM.doorHome = { x: door.position.x, z: door.position.z };
+    ROOM.doorSlide = doorOnX ? { x: 0, z: 1 } : { x: 1, z: 0 };
+    ROOM.doorCol = doorOnX
+      ? { minX: leafAt - 0.2, maxX: leafAt + 0.2, minZ: dC - GAP / 2, maxZ: dC + GAP / 2, y0: Y, y1: Y + DH, ref: door }
+      : { minX: dC - GAP / 2, maxX: dC + GAP / 2, minZ: leafAt - 0.2, maxZ: leafAt + 0.2, y0: Y, y1: Y + DH, ref: door };
     CBZ.colliders.push(ROOM.doorCol);
-    ROOM.doorPt = { x: doorX + doorOut * 1.2, z: zc };
-    // the seal + nameplate — a door with something visibly behind it
-    const plate = canvasTexLive(256, 64);
-    plate.cc.fillStyle = "#11151c"; plate.cc.fillRect(0, 0, 256, 64);
-    plate.cc.strokeStyle = "#8b96a6"; plate.cc.strokeRect(3, 3, 250, 58);
-    plate.cc.fillStyle = "#d8e2f2"; plate.cc.font = "bold 26px monospace"; plate.cc.textAlign = "center";
-    plate.cc.fillText("SITUATION ROOM", 128, 41); plate.paint();
-    const plateMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.375), new THREE.MeshBasicMaterial({ map: plate.tex }));
-    // The room name belongs to the threshold, not to the moving leaf. It stays
-    // readable while the President's door slides open.
-    plateMesh.position.set(doorX + doorOut * 0.19, 2.48, zc); plateMesh.rotation.y = doorOut * Math.PI / 2;
-    grp.add(plateMesh);
-
-    // Deep frame, vision panel, clearance reader and the seal: the lock
-    // advertises both what is behind it and why this player can cross it.
-    addBox(grp, doorX + doorOut * 0.02, 1.35, zc - 1.22, 0.34, 2.7, 0.22, TRIM);
-    addBox(grp, doorX + doorOut * 0.02, 1.35, zc + 1.22, 0.34, 2.7, 0.22, TRIM);
-    addBox(grp, doorX + doorOut * 0.02, 2.73, zc, 0.34, 0.22, 2.66, TRIM);
-    // Vision glass and seal are hardware ON the leaf, so they travel with it
-    // rather than hovering in the opening after the collider has moved.
-    const vision = addBox(door, doorOut * 0.215, 0.16, 0, 0.035, 0.52, 0.82, 0x8fb0c4);
+    ROOM.doorPt = doorOnX ? { x: dSide + outS * 1.2, z: dC } : { x: dC, z: dSide + outS * 1.2 };
+    const fOut = dSide + outS * 0.02;
+    for (const e of [-1, 1]) {
+      if (doorOnX) addBox(grp, fOut, Y + 1.35, dC + e * (GAP / 2 + 0.12), 0.34, 2.7, 0.22, TRIM);
+      else addBox(grp, dC + e * (GAP / 2 + 0.12), Y + 1.35, fOut, 0.22, 2.7, 0.34, TRIM);
+    }
+    if (doorOnX) addBox(grp, fOut, Y + 2.73, dC, 0.34, 0.22, GAP + 0.46, TRIM);
+    else addBox(grp, dC, Y + 2.73, fOut, GAP + 0.46, 0.22, 0.34, TRIM);
+    // the clearance reader beside it (outside), its lamp green
+    const rd = doorOnX ? { x: dSide + outS * 0.16, z: dC + GAP / 2 + 0.55 } : { x: dC + GAP / 2 + 0.55, z: dSide + outS * 0.16 };
+    addBox(grp, rd.x, Y + 1.18, rd.z, 0.18, 0.52, 0.18, STEEL);
+    addBox(grp, rd.x + (doorOnX ? outS * 0.1 : 0), Y + 1.2, rd.z + (doorOnX ? 0 : outS * 0.1), doorOnX ? 0.035 : 0.14, 0.2, doorOnX ? 0.14 : 0.035, 0x66d89c);
+    // vision glass travels with the leaf
+    const vision = addBox(door, 0, 0.16, 0, doorOnX ? 0.18 : 0.82, 0.52, doorOnX ? 0.82 : 0.18, 0x8fb0c4);
     vision.material = new THREE.MeshBasicMaterial({ color: 0x8fb0c4, transparent: true, opacity: 0.42 });
-    addBox(grp, doorX + doorOut * 0.16, 1.18, zc + 1.55, 0.18, 0.52, 0.30, STEEL);
-    addBox(grp, doorX + doorOut * 0.27, 1.20, zc + 1.55, 0.035, 0.20, 0.16, 0x66d89c);
-    addCylinder(door, doorOut * 0.24, 0.38, -0.58, 0.24, 0.24, 0.045, BRASS, 18).rotation.z = Math.PI / 2;
-    ROOM.stateSymbols++;
+    ROOM.stateSymbols = 0;
 
-    // THE CONSOLE — a real ten-seat command table: the shared furniture owner
-    // draws it and registers every sit anchor, while this file owns only the
-    // state orders on its rails.
-    const tx = (x0 + x1) / 2, tz = zc;
-    ROOM.board = canvasTexLive(2048, 512);   // 4:1 - exactly the screen's aspect
+    // ---- the table: its long axis away from the door, the video wall at the far end
+    // (the "far" wall is the one opposite the door)
+    const alongX = !doorOnX ? false : true;         // door on an x wall → the table runs along x
+    const far = -outS;                               // from the door, into the room
+    const len = Math.min(8.4, (alongX ? fx1 - fx0 : fz1 - fz0) - 5.2);
+    const tcx = alongX ? cx + far * 0.2 : cx, tcz = alongX ? cz : cz + far * 0.2;
+    ROOM.board = canvasTexLive(2048, 512);           // 4:1, exactly the screen's aspect
     ROOM.pads = [];
     let tableRec = null;
+    const kitBox = function (x, y, z, w, h, d, color) { return addBox(grp, x, y, z, w, h, d, color); };
     if (CBZ.furnish && CBZ.furnish.table) {
       try {
-        tableRec = CBZ.furnish.table(tx, 0.18, tz, 0, {
-          box: function (x, y, z, w, h, d, color) { return addBox(grp, x, y, z, w, h, d, color); },
-          ox: 0, oz: 0, oy: 0, solid: false,
-          len: 6.4, deep: 1.65, seats: 10, tone: "exec",
+        tableRec = CBZ.furnish.table(tcx, Y, tcz, alongX ? 0 : Math.PI / 2, {
+          box: kitBox, ox: 0, oz: 0, oy: 0, solid: false, len: len, deep: 1.7, seats: 14, tone: "exec",
         });
       } catch (e) { tableRec = null; }
     }
     if (!tableRec) {
-      addBox(grp, tx, 0.52, tz, 6.4, 0.68, 1.65, LEATHER);
-      addBox(grp, tx, 0.89, tz, 6.55, 0.08, 1.80, TABLE);
+      addBox(grp, tcx, Y + 0.37, tcz, alongX ? len : 1.7, 0.74, alongX ? 1.7 : len, 0x243244);
     }
     ROOM.seats = tableRec && tableRec.seats ? tableRec.seats.length : 0;
-    addCol(tx, tz, 6.4, 1.65, 0.18, 0.94);
-    // A leather writing inset, bound briefing books and two red phones make
-    // the table read as a place where people work, without pretending those
-    // props are separate political systems.
-    addBox(grp, tx, 0.933, tz, 4.55, 0.025, 0.56, LEATHER);   // clears both key ranks
-    for (const s of [-1, 1]) {
-      addBox(grp, tx + s * 2.25, 0.97, tz, 0.48, 0.055, 0.34, PAPER);
-      addBox(grp, tx + s * 2.78, 0.99, tz + 0.14, 0.34, 0.12, 0.22, 0x8f3434);
-      addBox(grp, tx + s * 2.78, 1.075, tz + 0.14, 0.28, 0.07, 0.09, BRASS);
+    addCol(tcx, tcz, alongX ? len : 1.7, alongX ? 1.7 : len, Y, Y + 0.76);
+    // the President's chair at the head, facing the door and the table
+    const headX = alongX ? tcx + far * (len / 2 + 0.7) : tcx, headZ = alongX ? tcz : tcz + far * (len / 2 + 0.7);
+    if (CBZ.furnish && CBZ.furnish.armchair) {
+      try {
+        const hr = CBZ.furnish.armchair(headX, Y, headZ, alongX ? Math.atan2(-far, 0) : Math.atan2(0, -far), { box: kitBox, ox: 0, oz: 0, oy: 0, solid: false, tone: "exec" });
+        ROOM.seats += hr && hr.seats ? hr.seats.length : 0;
+      } catch (e) {}
     }
-
-    // The country's live state belongs on the far wall, readable by every
-    // chair. It is not a duplicate glowing texture across the table top.
-    addBox(grp, tx, 1.76, z1 - T - 0.07, 7.30, 2.18, 0.11, STEEL);
-    addBox(grp, tx, 1.76, z1 - T - 0.145, 7.02, 1.90, 0.035, TRIM);
-    const wallFace = new THREE.Mesh(new THREE.PlaneGeometry(6.78, 1.68), new THREE.MeshBasicMaterial({ map: ROOM.board.tex }));
-    wallFace.position.set(tx, 1.76, z1 - T - 0.17); wallFace.rotation.y = Math.PI;
-    grp.add(wallFace);
-
-    // Two communications stations flank the main briefing screen. Their
-    // screens, rack slots and handsets give the walls a specific purpose.
-    let stationSeats = 0;
+    // briefing books, a map, two red phones: a table people work at
+    const along = function (a, b) { return alongX ? { x: tcx + a, z: tcz + b } : { x: tcx + b, z: tcz + a }; };
+    const tw = function (a, b, y, la, lb, h, col) { const p = along(a, b); return addBox(grp, p.x, Y + y, p.z, alongX ? la : lb, h, alongX ? lb : la, col); };
+    tw(0, 0, 0.7535, len * 0.62, 0.56, 0.027, 0x3b2b27);
     for (const s of [-1, 1]) {
-      const sx = tx + s * 4.75;
-      addBox(grp, sx, 0.54, z1 - T - 0.45, 1.55, 0.72, 0.72, STEEL);
-      addBox(grp, sx, 0.94, z1 - T - 0.45, 1.64, 0.08, 0.80, TRIM);
-      addBox(grp, sx, 1.42, z1 - T - 0.26, 1.20, 0.70, 0.08, PADC);
-      addBox(grp, sx, 1.43, z1 - T - 0.31, 1.02, 0.52, 0.025, 0x7ba2b8);
-      for (let i = -1; i <= 1; i++) addBox(grp, sx + i * 0.38, 0.65, z1 - T - 0.86, 0.22, 0.05, 0.12, i === 0 ? BRASS : PADC);
-      addCol(sx, z1 - T - 0.45, 1.55, 0.72, 0, 1.02);
-      // Each communications console is a station someone can actually sit
-      // at, using the same shared seat grammar as the command table.
+      tw(s * len * 0.3, 0.5, 0.768, 0.34, 0.48, 0.055, PAPER);
+      tw(s * len * 0.42, -0.5, 0.80, 0.22, 0.34, 0.12, 0x8f3434);
+    }
+    tw(far * 0.4, 0, 0.768, 1.4, 0.9, 0.012, 0xcfc6a8);
+
+    // ---- THE VIDEO WALL at the far end: the country's live board, a screen
+    // either side, a row of clocks over them, the seal above the board
+    const wallF = alongX ? (far > 0 ? fx1 : fx0) : (far > 0 ? fz1 : fz0);
+    const inw = -far;                                // from the far wall back into the room
+    const onWall = function (lat, y, w, h, depth, off, col) {
+      const n = wallF + inw * (off + depth / 2);
+      return alongX ? addBox(grp, n, Y + y, cz + lat, depth, h, w, col) : addBox(grp, cx + lat, Y + y, n, w, h, depth, col);
+    };
+    const span = alongX ? fz1 - fz0 : fx1 - fx0;
+    const bw = Math.min(6.4, span - 5.0);
+    onWall(0, 1.85, bw + 0.3, 1.9, 0.10, 0.04, STEEL);
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(bw, bw / 4), new THREE.MeshBasicMaterial({ map: ROOM.board.tex }));
+    const fn = wallF + inw * 0.16;
+    if (alongX) { face.position.set(fn, Y + 1.85, cz); face.rotation.y = inw > 0 ? Math.PI / 2 : -Math.PI / 2; }
+    else { face.position.set(cx, Y + 1.85, fn); face.rotation.y = inw > 0 ? 0 : Math.PI; }
+    grp.add(face);
+    for (const e of [-1, 1]) {
+      const lat = e * (bw / 2 + 1.25);
+      onWall(lat, 1.85, 1.9, 1.15, 0.08, 0.04, STEEL);
+      glow(onWall(lat, 1.85, 1.75, 1.0, 0.02, 0.12, 0x39516a), 0x39516a, 0.55);
+      // two clocks over each side screen
+      for (const k of [-0.5, 0.5]) {
+        onWall(lat + k, 3.0, 0.46, 0.46, 0.05, 0.04, 0x1b1e23);
+        onWall(lat + k, 3.0, 0.38, 0.38, 0.01, 0.09, 0xf1ece0);
+        onWall(lat + k, 3.04, 0.02, 0.14, 0.01, 0.1, 0x1b1e23);
+        onWall(lat + k + 0.04, 3.0, 0.1, 0.02, 0.01, 0.1, 0x1b1e23);
+      }
+    }
+    const seal = addCylinder(grp, 0, 0, 0, 0.42, 0.42, 0.06, BRASS, 24);
+    { const n = wallF + inw * 0.07;
+      if (alongX) { seal.position.set(n, Y + 3.25, cz); seal.rotation.z = Math.PI / 2; }
+      else { seal.position.set(cx, Y + 3.25, n); seal.rotation.x = Math.PI / 2; } }
+    ROOM.stateSymbols++;
+    for (const e of [-1, 1]) {
+      const lat = e * (span / 2 - 0.5);
+      const p = alongX ? { x: wallF + inw * 0.45, z: cz + lat } : { x: cx + lat, z: wallF + inw * 0.45 };
+      addBox(grp, p.x, Y + 0.15, p.z, 0.44, 0.30, 0.44, 0x1b1e23);
+      addBox(grp, p.x, Y + 1.46, p.z, 0.05, 2.32, 0.05, BRASS);
+      addBox(grp, p.x + (alongX ? 0 : -e * 0.47), Y + 2.05, p.z + (alongX ? -e * 0.47 : 0), alongX ? 0.04 : 0.9, 1.0, alongX ? 0.9 : 0.04, e < 0 ? 0x2f4f86 : 0x8f3434);
+      addCol(p.x, p.z, 0.44, 0.44, Y, Y + 0.3);
+      ROOM.stateSymbols++;
+    }
+    ROOM.screenPt = alongX ? { x: wallF + inw * 1.6, z: cz } : { x: cx, z: wallF + inw * 1.6 };
+
+    // ---- THE WATCH FLOOR: three consoles along the side wall away from the door
+    let stationSeats = 0;
+    const sideF = alongX ? fz0 : fx0;                // a long side wall
+    for (let i = 0; i < 3; i++) {
+      const a = (i - 1) * 2.1;
+      const px = alongX ? tcx + a : sideF + 0.55, pz = alongX ? sideF + 0.55 : tcz + a;
+      addBox(grp, px, Y + 0.37, pz, alongX ? 1.5 : 0.7, 0.74, alongX ? 0.7 : 1.5, STEEL);
+      addBox(grp, px, Y + 0.76, pz, alongX ? 1.6 : 0.78, 0.04, alongX ? 0.78 : 1.6, TRIM);
+      for (const k of [-0.36, 0.36]) {
+        const mx = alongX ? px + k : sideF + 0.3, mz = alongX ? sideF + 0.3 : pz + k;
+        addBox(grp, mx, Y + 1.08, mz, alongX ? 0.62 : 0.05, 0.4, alongX ? 0.05 : 0.62, 0x14181e);
+        addBox(grp, mx + (alongX ? 0 : 0.035), Y + 1.08, mz + (alongX ? 0.035 : 0), alongX ? 0.56 : 0.01, 0.34, alongX ? 0.01 : 0.56, 0x7ba2b8);
+      }
+      addCol(px, pz, alongX ? 1.5 : 0.7, alongX ? 0.7 : 1.5, Y, Y + 0.78);
       if (CBZ.furnish && CBZ.furnish.chair) {
         try {
-          const cr = CBZ.furnish.chair(sx, 0.18, z1 - T - 1.42, 0, {
-            box: function (x, y, z, w, h, d, color) { return addBox(grp, x, y, z, w, h, d, color); },
-            ox: 0, oz: 0, oy: 0, solid: false, tone: "exec",
-          });
+          const cxp = alongX ? px : sideF + 1.35, czp = alongX ? sideF + 1.35 : pz;
+          const cr = CBZ.furnish.chair(cxp, Y, czp, alongX ? Math.PI : -Math.PI / 2, { box: kitBox, ox: 0, oz: 0, oy: 0, solid: false, tone: "exec" });
           stationSeats += cr && cr.seats ? cr.seats.length : 0;
         } catch (e) {}
       }
     }
     ROOM.seats += stationSeats;
-
-    // Acoustic panels give the otherwise blank secure wall a deliberate
-    // material rhythm. They are wall treatment, not another prop row.
-    for (const px of [tx - 3.1, tx, tx + 3.1]) {
-      addBox(grp, px, 1.82, z0 + T + 0.08, 2.35, 1.22, 0.06, NAVY);
-      addBox(grp, px, 1.82, z0 + T + 0.115, 2.05, 0.92, 0.025, CARPET);
+    // ---- the other long wall: a low cabinet under three live screens
+    const sideG = alongX ? fz1 : fx1;
+    for (let i = 0; i < 3; i++) {
+      const a = (i - 1) * 2.3;
+      const px = alongX ? tcx + a : sideG - 0.08, pz = alongX ? sideG - 0.08 : tcz + a;
+      addBox(grp, px, Y + 1.95, pz, alongX ? 1.9 : 0.06, 1.1, alongX ? 0.06 : 1.9, STEEL);
+      glow(addBox(grp, px + (alongX ? 0 : -0.04), Y + 1.95, pz + (alongX ? -0.04 : 0), alongX ? 1.76 : 0.02, 0.98, alongX ? 0.02 : 1.76, 0x39516a), 0x39516a, 0.5);
+    }
+    {
+      const px = alongX ? tcx : sideG - 0.27, pz = alongX ? sideG - 0.27 : tcz;
+      addBox(grp, px, Y + 0.36, pz, alongX ? 6.6 : 0.5, 0.72, alongX ? 0.5 : 6.6, PANEL);
+      addBox(grp, px, Y + 0.735, pz, alongX ? 6.7 : 0.54, 0.03, alongX ? 0.54 : 6.7, STILE);
+      addCol(px, pz, alongX ? 6.6 : 0.5, alongX ? 0.5 : 6.6, Y, Y + 0.75);
+    }
+    // ---- light: three recessed panels over the table, under the acoustic ceiling
+    for (const k of [-1, 0, 1]) {
+      const p = along(k * len / 3, 0);
+      glow(addBox(grp, p.x, H - 0.05, p.z, alongX ? 1.6 : 0.5, 0.02, alongX ? 0.5 : 1.6, 0xffe6b0), 0xffe6b0, 0.8);
     }
 
-    // NO BUTTONS. This table used to carry seventeen red keys with printed
-    // plates (SECURITY / CURFEW, THE REGIME / THE CROWN ...) and a STANDING
-    // ORDERS console: a vending machine for policy, which is exactly the
-    // "press a button to enact" gimmick the owner asked to be rid of. The
-    // orders themselves still live in BUTTONS below, but in this room they
-    // come out of PEOPLE: the General, the Bureau Director and the Police
-    // Commissioner stand at the table (see §3b), read the same live state the
-    // wall screen draws, and propose what they want to do. You say yes or no.
-    // Where they stand is published here so §3b posts them on real floor.
+    // NO BUTTONS. The orders come out of PEOPLE: the General, the Bureau
+    // Director and the Police Commissioner stand at the table (§3b), read the
+    // same live state the video wall draws, and propose what they want to do.
+    // standing behind the chairs (the ring reaches 1.5 m off the table's axis)
+    const st1 = along(len / 2 - 0.9, 2.05), st2 = along(0, -2.05), st3 = along(-len / 2 + 0.9, 2.05);
+    const faceT = function (p) { return Math.atan2(tcx - p.x, tcz - p.z); };
     ROOM.stations = [
-      { role: "general", x: tx + 3.95, z: tz + 0.2, face: -Math.PI / 2 },
-      { role: "bureau", x: tx + 1.1, z: tz + 1.55, face: Math.PI },
-      { role: "police", x: tx - 1.1, z: tz - 1.55, face: 0 },
+      { role: "general", x: st1.x, z: st1.z, face: faceT(st1) },
+      { role: "bureau", x: st2.x, z: st2.z, face: faceT(st2) },
+      { role: "police", x: st3.x, z: st3.z, face: faceT(st3) },
     ];
-    // a folded map and a pair of grease pencils where the officers work
-    addBox(grp, tx + 1.2, 0.95, tz + 0.1, 1.4, 0.012, 0.9, 0xcfc6a8);
-    addBox(grp, tx + 1.2, 0.957, tz + 0.1, 0.02, 0.004, 0.86, 0x8f3434);
-    addBox(grp, tx + 0.7, 0.962, tz - 0.12, 0.13, 0.012, 0.012, 0x8f3434);
-
-    // Paired standards and an inset seal terminate the room. They are wall-
-    // attached state symbols, never another row of loose floor props.
-    for (const s of [-1, 1]) {
-      const fx = tx + s * 5.10;
-      addBox(grp, fx, 1.48, z0 + T + 0.10, 0.06, 2.62, 0.06, BRASS);
-      addBox(grp, fx - s * 0.22, 1.94, z0 + T + 0.16, 0.50, 0.92, 0.06, s < 0 ? 0x2f4f86 : 0x8f3434);
-    }
-    const seal = addCylinder(grp, tx, 1.86, z0 + T + 0.10, 0.48, 0.48, 0.06, BRASS, 24);
-    seal.rotation.x = Math.PI / 2;
-    ROOM.stateSymbols += 3;
-    // Recessed warm strips establish a ceiling rhythm without spawning
-    // point lights or adding an unrelated decorative object to the floor.
-    for (const lx of [-3.4, 0, 3.4]) addBox(grp, tx + lx, H - 0.06, tz, 1.75, 0.05, 0.18, 0xffe6b0);   // under the hall ceiling
     ROOM.builtFor = CBZ.govComplexes;
     wireZones();
     paintBoard();
@@ -1076,30 +1131,66 @@
     return out;
   }
 
-  // ---- the one zone the room still needs: its door -----------------------
-  // The sitting head of state never sees a prompt here: the leaf slides as he
-  // walks up (the tick below). Anybody else gets a handle that does not turn.
+  // ---- the room's two verbs: its door, and its video wall ------------------
+  // The sitting head of state never sees a prompt at the door: the leaf slides
+  // as he walks up (the tick below). Anybody else gets a handle that does not
+  // turn. At the far end, E on the video wall is Brief: the officer at the
+  // table nearest it gives you the picture (his proposal, read off the world),
+  // which is the whole of what a Situation Room is for.
+  function onRoomFloor() {
+    const P = CBZ.player;
+    return !(P && P.pos && ROOM.floorY != null && Math.abs(P.pos.y - ROOM.floorY) > 1.6);
+  }
+  function briefer() {
+    if (!ROOM.screenPt) return null;
+    let best = null, bd = 1e9;
+    for (const role of ["general", "bureau", "police"]) {
+      const p = OFF.peds[role];
+      if (!p || p.dead || !p.pos) continue;
+      const d = Math.hypot(p.pos.x - ROOM.screenPt.x, p.pos.z - ROOM.screenPt.z);
+      if (d < bd) { bd = d; best = role; }
+    }
+    return best;
+  }
   function wireZones() {
     if (ROOM.zonesWired || !CBZ.interactions || !CBZ.interactions.registerZone) return;
     ROOM.zonesWired = true;
     CBZ.interactions.registerZone({
       id: "pres-door", kind: "presdoor", radius: 2.6, prio: 12,
       find: function (px, pz) {
-        if (!on() || !CFG.PRESIDENCY_SITROOM || !ROOM.doorPt || doorOpensFor()) return null;
-        const P = CBZ.player;
-        if (P && P.pos && P.pos.y > 2.4) return null;
+        if (!on() || !CFG.PRESIDENCY_SITROOM || !ROOM.doorPt || doorOpensFor() || !onRoomFloor()) return null;
         const dx = ROOM.doorPt.x - px, dz = ROOM.doorPt.z - pz;
         return (dx * dx + dz * dz) < 2.6 * 2.6 ? { x: ROOM.doorPt.x, z: ROOM.doorPt.z, kind: "presdoor" } : null;
       },
       options: [{
         id: "pres-door-try", slot: "e",
-        label: "Try the door",
+        label: "Open",
         onSelect: function () {
           if (CBZ.sfx) { try { CBZ.sfx("click", { vol: 0.5 }); } catch (e) {} }
-          if (ROOM.door) { ROOM.door.position.x += 0.02; setTimeout(function () { if (ROOM.door) ROOM.door.position.x -= 0.02; }, 90); }
+          const d = ROOM.door, sl = ROOM.doorSlide || { x: 0, z: 1 };
+          if (d) { d.position.x += sl.x * 0.02; d.position.z += sl.z * 0.02; setTimeout(function () { if (ROOM.door) { ROOM.door.position.x -= sl.x * 0.02; ROOM.door.position.z -= sl.z * 0.02; } }, 90); }
         },
       }],
     });
+    CBZ.interactions.registerZone({
+      id: "pres-screen", kind: "presscreen", radius: 2.4, prio: 13,
+      find: function (px, pz) {
+        if (!on() || !CFG.PRESIDENCY_SITROOM || !ROOM.screenPt || !seat() || CONV || !onRoomFloor() || !briefer()) return null;
+        const dx = ROOM.screenPt.x - px, dz = ROOM.screenPt.z - pz;
+        return (dx * dx + dz * dz) < 2.4 * 2.4 ? { x: ROOM.screenPt.x, z: ROOM.screenPt.z, kind: "presscreen" } : null;
+      },
+      options: [{
+        id: "pres-screen-brief", slot: "e", campaignSafe: true,
+        label: "Brief",
+        onSelect: function () { const r = briefer(); if (r) talkTo(r); },
+      }],
+    });
+    if (CBZ.interactions.describe) {
+      try {
+        CBZ.interactions.describe("presdoor", function () { return { label: "", note: "" }; });
+        CBZ.interactions.describe("presscreen", function () { return { label: "", note: "" }; });
+      } catch (e) {}
+    }
   }
 
   // ============================================================
@@ -2556,7 +2647,9 @@
       const want = (inside || (nearDoor && doorOpensFor())) ? 1 : 0;
       if (want !== ROOM.doorOpen) {
         ROOM.doorOpen = want;
-        ROOM.door.position.z = ROOM.doorHome.z + (want ? 2.25 : 0);
+        const sl = ROOM.doorSlide || { x: 0, z: 1 };
+        ROOM.door.position.x = ROOM.doorHome.x + sl.x * (want ? 2.25 : 0);
+        ROOM.door.position.z = ROOM.doorHome.z + sl.z * (want ? 2.25 : 0);
         const ci = CBZ.colliders.indexOf(ROOM.doorCol);
         if (want && ci >= 0) CBZ.colliders.splice(ci, 1);
         else if (!want && ci < 0) CBZ.colliders.push(ROOM.doorCol);
@@ -2887,7 +2980,7 @@
     let IA = { namedRooms: 0, usableProps: 0, stateSymbols: 0, emptyDecor: 0, roomNames: [], orderProps: [] };
     if (CBZ.presidentInteriorAudit) { try { IA = CBZ.presidentInteriorAudit() || IA; } catch (e) {} }
     const architecture = mansionSite()
-      ? ["monumental order", "state dome", "carved mansion seal", "state standard", "ceremonial fountain"]
+      ? ["monumental order", "slate roof", "carved mansion seal", "state standard", "ceremonial fountain"]
       : [];
     let buttons = 0, live = 0, moveless = 0;
     for (const k in BUTTONS) {
