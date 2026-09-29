@@ -36,6 +36,10 @@
   if (CBZ.CONFIG && CBZ.CONFIG.CITY_FAR_CULL == null) CBZ.CONFIG.CITY_FAR_CULL = true;
 
   const hidByUs = new Set();        // groups WE set visible=false on
+  // a group this sweep just showed again (the drive test's pop census counts
+  // these as LOD handoffs, not as something built in view)
+  const shownAt = new WeakMap();
+  CBZ.farcullShownAt = function (o) { return shownAt.get(o) || 0; };
   /* GPU EVICTION (owner, 2026-09-29: "when I drive the car ... the screen just
      goes to dark navy": iOS dropping the context under GPU memory). Everything
      a drive passes used to stay on the GPU for the rest of the session. A
@@ -436,7 +440,7 @@
         // quality tier" (city/buildings.js's masonry veneer is dropped whole at
         // tier 0). Re-showing on approach would override that owner. Culling it
         // is still fine — hidden is hidden.
-        if (hidByUs.has(o) && !(o.userData && o.userData.cullLocked)) { o.visible = true; hidByUs.delete(o); }
+        if (hidByUs.has(o) && !(o.userData && o.userData.cullLocked)) { o.visible = true; hidByUs.delete(o); shownAt.set(o, performance.now()); }
         evicted.delete(o);
       }
     }

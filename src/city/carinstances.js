@@ -468,7 +468,7 @@
     if (!c || !c._proxy) return;
     const rec = c._proxyRec;
     c._proxy = false; c._proxyRec = null;
-    if (c.group) c.group.visible = true;
+    if (c.group) { c.group.visible = true; c.group.userData._handoffAt = performance.now(); }
     if (!rec) return;
     for (let i = 0; i < rec.entries.length; i++) {
       const e = rec.entries[i], p = e.pool, mem = p.members;

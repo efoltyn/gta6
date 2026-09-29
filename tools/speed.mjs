@@ -1765,7 +1765,7 @@ async function serveMain() {
           var u = o.userData || {}, uk = Object.keys(u).filter(function(k){ return k !== "_builder"; }).slice(0, 3).join(",");
           var nm = 0; o.traverse && (function(){ var st = [o]; while (st.length && nm < 999) { var c = st.pop(); if (c.isMesh) nm++; for (var i = 0; i < c.children.length; i++) st.push(c.children[i]); } })();
           return (o.type) + (n ? ":" + n : "") + (u._builder ? "@" + u._builder : "") + (uk ? "{" + uk + "}" : "") + "#" + nm; }
-        var pops = [], popN = 0, checks = 0;
+        var pops = [], popN = 0, checks = 0, handoffs = 0;
         function scan(first){
           var cam = C.camera; cam.updateMatrixWorld(); pm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse); fr.setFromProjectionMatrix(pm);
           var fog = (C.scene && C.scene.fog && C.scene.fog.far) || C.cityFogFar || 760;
@@ -1773,6 +1773,11 @@ async function serveMain() {
           for (var li = 0; li < lists.length; li++) { var L = lists[li]; for (var k = 0; k < L.length; k++) { var o = L[k]; if (o === root) continue;
             var d = drawn(o), w = was.get(o); was.set(o, d); if (first || !d || w === true) continue;
             var u = o.userData || {}; if (u.dynamic || u.worldSurface || u.terrain) continue;
+            // a LOD HANDOFF is not a build in view: a car the pools drew until
+            // this frame, a building whose LOD box stood in until farcull's
+            // radius. Counted apart (handoffs) so the pop number is creations.
+            var tnow = performance.now();
+            if ((u._handoffAt && tnow - u._handoffAt < 400) || (C.farcullShownAt && tnow - C.farcullShownAt(o) < 400)) { handoffs++; continue; }
             var sp = cache.get(o); if (!sp) { bx.setFromObject(o); if (bx.isEmpty()) continue; sp = bx.getBoundingSphere(new T.Sphere()); cache.set(o, sp); }
             checks++;
             var dist = sp.center.distanceTo(cam.position) - sp.radius;
@@ -1791,7 +1796,7 @@ async function serveMain() {
             var st = C.streamStats || {}; samples.push([Math.round((f + 1) / 60), Math.round(m.heap), Math.round(m.gpu), Math.round(m.phone), st.built, st.parked, st.queued, C.slice ? Math.round(C.slice.keepR()) : null]); }
         }
         return { km: +(Math.min(d, tot) / 1000).toFixed(2), wallS: +((performance.now() - t0) / 1000).toFixed(1), peak: { heap: Math.round(hp), gpu: Math.round(gp), phone: Math.round(php) },
-          pops: popN, popChecks: checks, popSamples: pops, cols: "s heap gpu phone built parked queued keepR", samples: samples };
+          pops: popN, popChecks: checks, lodHandoffs: handoffs, popSamples: pops, cols: "s heap gpu phone built parked queued keepR", samples: samples };
       })(${JSON.stringify(route)}, ${+mps}, ${+secs})`, 1800000);
       if (q.allocs) { try { const { profile } = await P.s("HeapProfiler.getSamplingProfile", {}, 120000); await P.s("HeapProfiler.stopSampling", {}, 60000); res.allocs = heapSites(profile); } catch (e) { res.allocs = { err: String(e).slice(0, 200) }; } }
       res.ms = Date.now() - t0; return res;

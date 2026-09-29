@@ -24,8 +24,27 @@
   CBZ.drawCheckAudit = function () { return installed ? found.slice() : "off (load with &debugInstanced=1 or call CBZ.drawCheckOn())"; };
   CBZ.drawCheckOn = function () { if (!installed) install(); return "on"; };
   if (on) install();
+  let current = null, glWrapped = false;
+  // the GL's own verdict: after every draw call, gl.getError() (a sync read:
+  // debug only), charged to the object three was drawing
+  function wrapGL() {
+    if (glWrapped) return;
+    const r = CBZ.renderer; if (!r || !r.getContext) return;
+    const gl = r.getContext(); if (!gl) return;
+    glWrapped = true;
+    ["drawElementsInstanced", "drawArraysInstanced", "drawElements", "drawArrays"].forEach(function (fn) {
+      const f = gl[fn]; if (typeof f !== "function") return;
+      gl[fn] = function () {
+        const out = f.apply(gl, arguments);
+        const e = gl.getError();
+        if (e && current) report(current, "GL error 0x" + e.toString(16) + " on " + fn + "(" + Array.prototype.slice.call(arguments).join(",") + ")");
+        return out;
+      };
+    });
+  }
   function install() {
   installed = true;
+  wrapGL();
   const maxIndex = new WeakMap();
   function chain(o) { const a = []; for (let p = o; p && a.length < 6; p = p.parent) a.push(p.name || p.type); return a.join(" < "); }
   function report(o, why) {
@@ -44,6 +63,8 @@
   }
   const orig = THREE.Mesh.prototype.onBeforeRender;
   THREE.Mesh.prototype.onBeforeRender = function (renderer, scene, camera, geometry) {
+    current = this;
+    if (!glWrapped) wrapGL();
     try {
       const g = geometry || this.geometry;
       if (g && g.attributes) {
@@ -61,7 +82,7 @@
             const need = prim >= 0 ? Math.ceil(prim / (a.meshPerAttribute || 1)) : 0;
             if (need > a.count) report(this, "per-instance '" + k + "' " + a.count + " < " + need);
           } else if (!a.isInterleavedBufferAttribute) {
-            if (a.array === null) report(this, "attribute '" + k + "' array freed");
+            if (a.array === null) { /* released after upload (core/citystream.js, metro far tiles): fine while on the GPU */ }
             else if (im >= a.count) report(this, "attribute '" + k + "' " + a.count + " <= max index " + im);
           }
         }

@@ -10,7 +10,7 @@ CBZ.scene = new THREE.Scene();
 CBZ.camera = new THREE.PerspectiveCamera(60, 1, 0.1, 5000); CBZ.camera.position.set(0, 2, 0); CBZ.camera.lookAt(0, 2, -1); CBZ.camera.updateMatrixWorld();
 CBZ.carSleepD2 = () => { const f = Math.max(150, CBZ.cityFogFar + 30); return f * f; };
 CBZ.cityCarSleepable = (c) => !c.ai;
-const ctx = vm.createContext({ window: { CBZ, THREE }, THREE, CBZ, Float32Array, Math, Map, WeakMap, String, Array });
+const ctx = vm.createContext({ window: { CBZ, THREE }, THREE, CBZ, Float32Array, Math, Map, WeakMap, String, Array, performance });
 vm.runInContext("var window = this.window;" + fs.readFileSync(ROOT + "/src/city/carinstances.js", "utf8"), ctx);
 const CI = CBZ.carInstances;
 const root = new THREE.Group(); CBZ.scene.add(root);
