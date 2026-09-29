@@ -41,7 +41,10 @@
    Public API:
      CBZ.bodyWound(actor, worldPoint, opts) — opts:
         { head:bool, cal|caliber:0.7..1.6, mm:<bore in millimetres>,
-          melee:"blade" (a cut) | "blunt"|true (stamps nothing),
+          melee:"blade" (a SLIT along the blade + a cut in the cloth) |
+                "blunt"|true (stamps nothing),
+          bladeMm:<edge width in mm>, slash:true|false (default: read off
+          `dir` — a blade travelling along the skin slashes, into it stabs),
           dir:{x,y,z} through-direction,
           fromX, fromZ }  (fromX/Z bias a synthetic centre-point toward
           the attacker so the wound lands on the facing surface, AND are
@@ -65,15 +68,17 @@
   function cityWounds() { return !!(CBZ.game && CBZ.game.mode === "city"); }
   // global live-mesh cap (each is 1 tiny draw call) — now rides the quality tier,
   // read LIVE per check (the slider can move mid-run); fallback = old constants.
-  function capBase() { return (CBZ.qScale ? CBZ.qScale(160, 520) : 300) | 0; }
-  function capCity() { return (CBZ.qScale ? CBZ.qScale(220, 760) : 420) | 0; }
+  // (x1.5 since WOUND_REAL_V3: a clothed hit is hole + CLOTH hole + stain —
+  // three meshes, not two — and the owner asked for MORE holes, not fewer)
+  function capBase() { return (CBZ.qScale ? CBZ.qScale(240, 780) : 450) | 0; }
+  function capCity() { return (CBZ.qScale ? CBZ.qScale(330, 1140) : 630) | 0; }
   // wound+stain pairs per body — also rides the quality tier
-  function perActorBase() { return (CBZ.qScale ? CBZ.qScale(5, 20) : 10) | 0; }
-  function perActorCity() { return (CBZ.qScale ? CBZ.qScale(11, 44) : 22) | 0; }
+  function perActorBase() { return (CBZ.qScale ? CBZ.qScale(8, 30) : 15) | 0; }
+  function perActorCity() { return (CBZ.qScale ? CBZ.qScale(16, 66) : 33) | 0; }
   function capGlobal() { return cityWounds() ? capCity() : capBase(); }
   // A DEAD BODY IS NOT CAPPED LOW: 48 hole+stain pairs before his own oldest
   // recycles. Living men keep the tier caps (a fight never piles 96 on one).
-  const PER_CORPSE = 96;
+  const PER_CORPSE = 144;   // 48 hits x (hole + cloth hole + stain)
   function perActor(actor) {
     if (actor && actor.dead) return PER_CORPSE;
     return cityWounds() ? perActorCity() : perActorBase();
@@ -431,6 +436,186 @@
   // An EXIT is wetter and redder still: it is not a hole, it is an opening.
   const MAT_EXIT = unlit(0x8a1014);
 
+  // ============================================================
+  //  WOUND_REAL_V3 — STAB SLITS, AND THE HOLE IN THE CLOTHES
+  //  (2026-09-29, owner: "bullet holes and stab holes and realness; blood is
+  //  already pretty damn good").
+  //
+  //  WHAT WAS STILL FAKE:
+  //   1. A KNIFE LEFT A BULLET HOLE. kind "blade" drew G_WOUND — a round disc
+  //      — squashed to an ellipse at a RANDOM spin, sized off the legacy
+  //      damage dial (0.24 u long on a 0.7 shank: a third of a chest). A stab
+  //      is a SLIT: a lens pinched to a point at both ends, gaping dark along
+  //      its middle with raw lips, lying along the blade. Now: G_SLIT, laid
+  //      along the blade's own path across the skin (a slash runs with the
+  //      swing; a thrust stands the edge up with a little wrist tilt), sized
+  //      off the BLADE's width in millimetres, not off damage.
+  //   2. THE CLOTHES WERE NEVER HOLED. Every mark sat on the garment as if it
+  //      were skin: the red bore of an entry wound painted straight onto a
+  //      denim jacket. Rounds and blades go THROUGH cloth and leave a torn
+  //      hole or a frayed cut in it, and the fabric around is what the blood
+  //      wicks into. Now every clothed hit also stamps a CLOTH mark — a ragged
+  //      torn hole (bullet), a star tear (exit), a frayed slit (blade) — drawn
+  //      with MULTIPLY blending, so it darkens WHATEVER the garment is (blue
+  //      denim stays blue around a black torn hole; a white shirt shows a grey
+  //      fibre edge) with one shared material and no texture sampling.
+  //      Skin (head, hands, a bare forearm matched against the rig's own skin
+  //      tone) gets no cloth mark.
+  //   3. BLOOD STOPPED SPREADING AFTER TWO SECONDS. A soak now keeps CREEPING
+  //      outward through the cloth for ~40 s after its fast bloom (capped by
+  //      the panel, so the audit's oversized ratchet still reads 0), on the
+  //      existing 0.8 s lifecycle sweep — no per-frame cost.
+  // ============================================================
+  // One fan builder for both shapes. rings: [rx, ry, bright, warm, alpha],
+  // ordered outward. o.slit → the unit outline is a pointed LENS (y = cos a,
+  // x = sgn(sin a)|sin a|^1.5 — the pinch that makes the ends acute); o.jitter
+  // = a smooth sine wobble (a tear), o.rag = per-segment random fray (fibres),
+  // applied to every ring from the same noise so bands stay nested.
+  function fanGeo(core, rings, seg, o) {
+    o = o || {};
+    const n = rings.length, vN = 1 + n * (seg + 1);
+    const pos = new Float32Array(vN * 3), nrm = new Float32Array(vN * 3), col = new Float32Array(vN * 4);
+    const idx = [];
+    const p1 = Math.random() * 6.28, p2 = Math.random() * 6.28, p3 = Math.random() * 6.28;
+    const noise = [];
+    for (let i = 0; i < seg; i++) noise.push(Math.random() * 2 - 1);
+    nrm[2] = 1;
+    col[0] = core[0]; col[1] = core[0] * core[1]; col[2] = core[0] * core[1]; col[3] = core[2] != null ? core[2] : 1;
+    let v = 1, maxR = 0;
+    for (let s = 0; s < n; s++) {
+      const rg = rings[s], rx = rg[0], ry = rg[1], val = rg[2], warm = rg[3], alp = rg[4] != null ? rg[4] : 1;
+      const own = [];
+      for (let i = 0; i < seg; i++) own.push(Math.random() * 2 - 1);
+      for (let i = 0; i <= seg; i++) {
+        const j = i % seg, a = (j / seg) * Math.PI * 2;
+        const sm = o.jitter ? o.jitter * (Math.sin(a * 3 + p1) * 0.5 + Math.sin(a * 5 + p2) * 0.33 + Math.sin(a * 7 + p3) * 0.2) : 0;
+        const rag = o.rag ? o.rag * (noise[j] * 0.7 + own[j] * 0.3) : 0;
+        let x, y;
+        if (o.slit) {
+          const sa = Math.sin(a);
+          x = (sa < 0 ? -1 : 1) * Math.pow(Math.abs(sa), 1.5) * rx * (1 + sm + rag);   // the lips fray
+          y = Math.cos(a) * ry * (1 + sm * 0.25);                                     // the ends stay sharp
+        } else {
+          const k = 1 + sm + rag;
+          x = Math.cos(a) * rx * k; y = Math.sin(a) * ry * k;
+        }
+        pos[v * 3] = x; pos[v * 3 + 1] = y; nrm[v * 3 + 2] = 1;
+        col[v * 4] = val; col[v * 4 + 1] = val * warm; col[v * 4 + 2] = val * warm; col[v * 4 + 3] = alp;
+        const rr = Math.hypot(x, y); if (rr > maxR) maxR = rr;
+        v++;
+      }
+    }
+    for (let i = 0; i < seg; i++) idx.push(0, 1 + i, 2 + i);
+    for (let s = 1; s < n; s++) {
+      const a0 = 1 + (s - 1) * (seg + 1), b0 = 1 + s * (seg + 1);
+      for (let i = 0; i < seg; i++) idx.push(a0 + i, b0 + i, b0 + i + 1, a0 + i, b0 + i + 1, a0 + i + 1);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    g.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
+    g.setAttribute("color", new THREE.BufferAttribute(col, 4));
+    g.setIndex(idx);
+    g._shared = true;
+    g._maxR = maxR || 1;
+    return g;
+  }
+  // THE STAB: a hairline dark gap the full length, raw wet lips either side,
+  // a bruised margin, feathered to nothing. Unit long axis = y.
+  const G_SLIT = fanGeo([0.03, 1, 1], [
+    [0.07, 0.82, 0.04, 1.00, 1.00],   // the gap — you look into it
+    [0.27, 0.92, 0.95, 0.70, 1.00],   // raw lips
+    [0.56, 0.98, 0.46, 0.82, 0.78],   // bruised margin
+    [1.00, 1.05, 0.20, 0.90, 0.00],   // gone by the outline
+  ], 22, { slit: true, jitter: 0.04, rag: 0.05 });
+  // THE CLOTH (multiply: 1.0 = the garment untouched, 0 = black). Values are
+  // grey so the fabric keeps its own hue; only brightness moves.
+  const G_CLOTH_HOLE = fanGeo([0.03, 1], [
+    [0.30, 0.30, 0.05, 1],            // the torn hole
+    [0.48, 0.48, 0.34, 1],            // fibre shadow at the ragged edge
+    [0.72, 0.72, 0.74, 1],            // bullet wipe / grease ring
+    [1.00, 1.00, 1.00, 1],
+  ], 22, { jitter: 0.08, rag: 0.26 });
+  const G_CLOTH_TEAR = fanGeo([0.05, 1], [
+    [0.36, 0.36, 0.08, 1],            // blown outward: a star, not a hole
+    [0.62, 0.62, 0.46, 1],
+    [1.00, 1.00, 1.00, 1],
+  ], 24, { jitter: 0.22, rag: 0.42 });
+  const G_CLOTH_SLIT = fanGeo([0.04, 1], [
+    [0.10, 0.92, 0.06, 1],            // the cut gapes
+    [0.30, 0.97, 0.50, 1],            // frayed lips
+    [0.60, 1.00, 0.84, 1],
+    [1.00, 1.04, 1.00, 1],
+  ], 22, { slit: true, jitter: 0.05, rag: 0.20 });
+  // Multiply, unlit, untone-mapped (tone mapping would turn the 1.0 rim into
+  // a visible darker ring), no fog (fog would tint the multiplier). Same
+  // depth discipline as unlit(): reads depth, never writes it.
+  const MAT_CLOTH = new THREE.MeshBasicMaterial({
+    color: 0xffffff, vertexColors: true, transparent: true, depthWrite: false,
+    blending: THREE.MultiplyBlending, fog: false, toneMapped: false,
+    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+  });
+  MAT_CLOTH._shared = true;
+  const RO_CLOTH = 0.15;              // over its soak, under the flesh it shows
+  const CLOTH_HOLE_K = 2.3;           // cloth hole radius ÷ entry-wound radius
+  const SLIT_MAX_FRAC = 0.40;         // a slit's LENGTH, as a fraction of the face width
+  const SOAK_CREEP = 1.55;            // how far a stain keeps wicking after its bloom
+  const SOAK_CREEP_T = 40;            // ..over this many seconds
+  if (CBZ.CONFIG.WOUND_REAL_V3 == null) CBZ.CONFIG.WOUND_REAL_V3 = true;
+  function realOn() { return CBZ.CONFIG.WOUND_REAL_V3 !== false; }
+
+  // Is this panel CLOTH? Heads and hands are skin. A limb whose own material
+  // IS the rig's skin tone (a bare forearm under a tee, a shirtless torso) is
+  // skin. Everything else a round lands on is a garment.
+  function clothedPart(actor, part, region) {
+    if (region === "head") return false;
+    const ch = actor.char, S = ch && ch.skinSlots;
+    if (S && S.hands && S.hands.indexOf(part) >= 0) return false;
+    let m = part.material;
+    if (Array.isArray(m)) m = m[0];
+    if (!m) return false;
+    const tone = ch && ch.skinTone;
+    if (tone != null && m.color && !m.map) {
+      const c = m.color;
+      const d = Math.abs(c.r - ((tone >> 16) & 255) / 255) + Math.abs(c.g - ((tone >> 8) & 255) / 255) + Math.abs(c.b - (tone & 255) / 255);
+      if (d < 0.07) return false;
+    }
+    return true;
+  }
+
+  // Stamp one decal on a part (the shared tail of every mark below). `pad` is
+  // the radius the CENTRE is kept inside the panel by — pass the same pad for
+  // a hole and its cloth mark so the two can never be clamped apart.
+  function stamp(actor, part, lp, geo, mat, ro, sx, sy, ax, spin, pad, kind) {
+    const m = meshFor(actor);
+    m.geometry = geo; m.material = mat; m.renderOrder = ro;
+    seat(m, part, lp, proudFor(Math.max(sx, sy)), spin, ax, pad);
+    m.scale.set(sx, sy, 1);
+    part.add(m);
+    wounds.push({ m, actor, age: 0, kind, dried: kind === "cloth" });
+    actor._woundN = (actor._woundN || 0) + 1;
+    return m;
+  }
+  // The in-plane spin that lays a decal's long (+y) axis along the part-local
+  // direction t. seat() writes rotation (a, b, spin) with Euler XYZ, so the
+  // spin is applied FIRST in the decal's own plane: read the decal's x/y axes
+  // at spin 0, project t onto them, and solve Rz(spin)·(0,1) = t̂.
+  const _sx = new THREE.Vector3(), _sy = new THREE.Vector3(), _sn = new THREE.Vector3(), _st = new THREE.Vector3();
+  const _sq = new THREE.Quaternion(), _se = new THREE.Euler();
+  function spinAlong(m, tx, ty, tz) {
+    _se.set(m.rotation.x, m.rotation.y, 0, m.rotation.order);
+    _sq.setFromEuler(_se);
+    _sx.set(1, 0, 0).applyQuaternion(_sq);
+    _sy.set(0, 1, 0).applyQuaternion(_sq);
+    const u = tx * _sx.x + ty * _sx.y + tz * _sx.z, v = tx * _sy.x + ty * _sy.y + tz * _sy.z;
+    if (u * u + v * v < 1e-6) return null;
+    return Math.atan2(-u, v);
+  }
+  function decalNormal(m) {
+    _se.set(m.rotation.x, m.rotation.y, 0, m.rotation.order);
+    _sq.setFromEuler(_se);
+    return _sn.set(0, 0, 1).applyQuaternion(_sq);
+  }
+
   // WOUNDS_BITE — the one-line revert for the bite/maul wound type below.
   // OFF: a bite falls back to the ordinary "shot" wound it used to leave.
   CBZ.CONFIG = CBZ.CONFIG || {};
@@ -682,7 +867,9 @@
   // a child of the SAME part, seated on the SAME face, under the wound disc;
   // grows from a blot to full spread over `growT` seconds (per-frame while
   // active, then it costs nothing).
-  function spawnSoak(actor, part, lp, size, growT) {
+  // o (optional): { spin, kx, ky } — a stain laid ALONG something (a slit's
+  // blood wells out along the cut): fixed spin, per-axis stretch.
+  function spawnSoak(actor, part, lp, size, growT, o) {
     const m = meshFor(actor);
     const geo = G_SOAK[(Math.random() * 3) | 0];
     m.geometry = geo;
@@ -700,23 +887,27 @@
     // on, through the same fitR() every other decal uses, and folds in the blob
     // geometry's own ±41% rim wobble so a stain cannot overhang by its wobble
     // either.
-    let gx, gy;
+    let gx, gy, creep = 0;
     if (v2()) {
       const mh = faceMin(part, ax);
       const cap = fitR(geo, mh, mh);
-      gx = Math.min(cap, size * (0.8 + Math.random() * 0.5));
-      gy = Math.min(cap, size * (0.8 + Math.random() * 0.5));
+      gx = Math.min(cap, size * (0.8 + Math.random() * 0.5) * (o && o.kx || 1));
+      gy = Math.min(cap, size * (0.8 + Math.random() * 0.5) * (o && o.ky || 1));
+      // the slow wick through the cloth — never past the panel's own cap
+      if (realOn()) creep = Math.max(1, Math.min(SOAK_CREEP, cap / Math.max(gx, gy)));
     } else {
       const pp = part.geometry && part.geometry.parameters || {};
       const cap = Math.max(0.16, Math.min(pp.width || 0.5, pp.height || 0.7, pp.depth || 0.4) * 1.05);
       gx = Math.min(cap, size * (0.8 + Math.random() * 0.5));
       gy = Math.min(cap * 1.25, size * (0.8 + Math.random() * 0.5));
     }
-    seat(m, part, lp, v2() ? PROUD_SOAK_V2 : PROUD_SOAK, undefined, ax,
-         v2() ? Math.max(gx, gy) * geo._maxR : 0);
+    // pad by the CREPT size: a stain that will keep spreading is centred far
+    // enough in that its final extent still cannot hang off the part.
+    seat(m, part, lp, v2() ? PROUD_SOAK_V2 : PROUD_SOAK, o && o.spin != null ? o.spin : undefined, ax,
+         v2() ? Math.max(gx, gy) * Math.max(1, creep) * geo._maxR : 0);
     m.scale.set(gx * 0.35, gy * 0.35, 1);
     part.add(m);
-    const r = { m, actor, age: 0, kind: "soak", dried: true, gx, gy, gt: growT, t: 0 };
+    const r = { m, actor, age: 0, kind: "soak", dried: true, gx, gy, gt: growT, t: 0, creep };
     wounds.push(r);
     growing.push(r);
     actor._woundN = (actor._woundN || 0) + 1;
@@ -1102,6 +1293,54 @@
       }
     }
 
+    // ---- A BLADE LEAVES A SLIT (WOUND_REAL_V3) --------------------------------
+    //  Sized off the BLADE (opts.bladeMm, the edge's width at the depth it went
+    //  in; default grows gently with `cal`: shank 0.7 → ~22 mm), never off the
+    //  damage dial. A stab's slit is about as long as the blade is wide; a
+    //  SLASH (the blade travelling along the skin rather than into it) opens a
+    //  cut ~2.6x longer and narrower. Laid along the blade's path; a thrust
+    //  stands the edge along the part's long axis with a little wrist tilt.
+    if (kind === "blade" && v2() && realOn()) {
+      part.updateWorldMatrix(true, false);
+      const lp = tmpV.set(px, py, pz);
+      part.worldToLocal(lp);
+      const ax = faceAxis(part, lp);
+      const minHalf = faceMin(part, ax);
+      const clothed = clothedPart(actor, part, pick.region);
+      const dir = throughDir(opts, wp);
+      const dlv = dir ? localDir(part, wp, dir) : null;
+      const dlx = dlv ? dlv.x : 0, dly = dlv ? dlv.y : 0, dlz = dlv ? dlv.z : 0;
+      // how much of the blade's travel lies ALONG the face it hit
+      const dn = dlv ? Math.abs(ax === "x" ? dlx : ax === "y" ? dly : dlz) : 1;
+      const slash = opts.slash === true || (opts.slash !== false && !!dlv && dn < 0.69);
+      const bladeMm = opts.bladeMm != null ? Math.max(6, Math.min(60, opts.bladeMm)) : 16 + 8 * Math.min(2, Math.max(0, cal));
+      let halfL = bladeMm * 0.0005 * RIG_MAG * (slash ? 2.6 : 1) * (0.9 + Math.random() * 0.2);
+      halfL = fitR(G_SLIT, Math.min(halfL, capR(G_SLIT, minHalf, SLIT_MAX_FRAC)), minHalf);
+      const halfW = halfL * (slash ? 0.17 : 0.27);
+      // the fabric parts a little ahead of the edge and frays wider than the skin
+      const cL = clothed ? fitR(G_CLOTH_SLIT, halfL * 1.2, minHalf) : 0;
+      const cW = halfW * 1.3;
+      const pad = Math.max(halfL * G_SLIT._maxR, cL * G_CLOTH_SLIT._maxR);
+      const wm = stamp(actor, part, lp, G_SLIT, MAT_TORN, RO_WOUND, halfW * (clothed ? 0.8 : 1), halfL, ax, 0, pad, "blade");
+      const n = decalNormal(wm);
+      let spin = null;
+      if (slash) {
+        const k = dlx * n.x + dly * n.y + dlz * n.z;
+        spin = spinAlong(wm, dlx - n.x * k, dly - n.y * k, dlz - n.z * k);
+        if (spin != null) spin += (Math.random() - 0.5) * 0.2;
+      }
+      if (spin == null) {
+        spin = spinAlong(wm, -n.x * n.y, 1 - n.y * n.y, -n.z * n.y);   // the part's up, in the face
+        spin = (spin == null ? Math.random() * 6.28 : spin) + (Math.random() - 0.5) * 0.9;
+      }
+      wm.rotation.z = spin;
+      if (clothed) stamp(actor, part, lp, G_CLOTH_SLIT, MAT_CLOTH, RO_CLOTH, cW, cL, ax, spin, pad, "cloth");
+      // the blood WELLS out along the cut, slower than a bullet's bloom
+      const soakR = minHalf * (0.15 + 0.08 * Math.min(2, Math.max(0, cal))) * (slash ? 1.2 : 1);
+      spawnSoak(actor, part, lp, soakR, 4.5, { spin: spin, kx: 0.75, ky: slash ? 1.7 : 1.35 });
+      return;
+    }
+
     const m = meshFor(actor);
 
     // world hit → part-local, snapped to the box face the round came through
@@ -1168,14 +1407,26 @@
     }
 
     const rad = Math.max(sx, sy);
+    // THE HOLE IN THE CLOTHES (WOUND_REAL_V3): a ragged torn hole in the
+    // garment, a little wider than the wound it shows, sharing the wound's
+    // centre and pad so the two can never be clamped apart.
+    const clothOn = shotV2 && realOn() && clothedPart(actor, part, pick.region);
+    const cr = clothOn
+      ? fitR(G_CLOTH_HOLE, Math.min(rad * CLOTH_HOLE_K, capR(G_CLOTH_HOLE, minHalf, ENTRY_MAX_FRAC * 2.6)), minHalf)
+      : 0;
+    const padE = v2on ? Math.max(rad * geo._maxR, cr * G_CLOTH_HOLE._maxR) : 0;
     m.geometry = geo;
     m.material = mat;
     m.renderOrder = RO_WOUND;
-    seat(m, part, lp, v2on ? proudFor(rad) : PROUD, undefined, ax, v2on ? rad * geo._maxR : 0);
+    seat(m, part, lp, v2on ? proudFor(rad) : PROUD, undefined, ax, padE);
     m.scale.set(sx, sy, 1);
     part.add(m);   // rides the part: animates, ragdolls and despawns with the rig
     wounds.push({ m, actor, age: 0, kind, dried: false });
     actor._woundN = (actor._woundN || 0) + 1;
+    if (cr > 0) {
+      stamp(actor, part, lp, G_CLOTH_HOLE, MAT_CLOTH, RO_CLOTH,
+            cr * (0.92 + Math.random() * 0.16), cr * (0.92 + Math.random() * 0.16), ax, Math.random() * 6.28, padE, "cloth");
+    }
 
     // ---- THE EXIT IS THE BIG ONE ---------------------------------------------
     //  A rifle round that goes through leaves a small tidy hole where it went in
@@ -1202,15 +1453,20 @@
         const emx = Math.max(esx, esy), ek = fitR(G_EXIT, emx, eHalf) / emx;
         if (ek < 1) { esx *= ek; esy *= ek; }
         const er = Math.max(esx, esy);
+        // cloth blown OUTWARD: a star tear over the cavity (same part, so the
+        // same garment test as the entry)
+        const ctr = clothOn ? fitR(G_CLOTH_TEAR, er * 1.15, eHalf) : 0;
+        const padX = Math.max(er * G_EXIT._maxR, ctr * G_CLOTH_TEAR._maxR);
         const em = meshFor(actor);
         em.geometry = G_EXIT;
         em.material = MAT_EXIT;
         em.renderOrder = RO_WOUND;
-        seat(em, part, ex, proudFor(er), undefined, ex.ax, er * G_EXIT._maxR);
+        seat(em, part, ex, proudFor(er), undefined, ex.ax, padX);
         em.scale.set(esx, esy, 1);
         part.add(em);
         wounds.push({ m: em, actor, age: 0, kind: "shot", dried: false });
         actor._woundN = (actor._woundN || 0) + 1;
+        if (ctr > 0) stamp(actor, part, ex, G_CLOTH_TEAR, MAT_CLOTH, RO_CLOTH, ctr, ctr * (0.85 + Math.random() * 0.3), ex.ax, Math.random() * 6.28, padX, "cloth");
         exitAt = ex;
       }
     }
@@ -3269,7 +3525,18 @@
       if (!a || a.culled || !a.group || !a.group.parent) { dropWound(i); continue; }
       r.age += step;
       // torn flesh scabs over on the same clock a bullet hole does
-      if ((r.kind === "shot" || r.kind === "bite") && !r.dried && r.age > DRY_T) { r.dried = true; r.m.material = MAT_DRY; }
+      if ((r.kind === "shot" || r.kind === "bite" || r.kind === "blade") && !r.dried && r.age > DRY_T) { r.dried = true; r.m.material = MAT_DRY; }
+      // BLOOD KEEPS WICKING: once the fast bloom is done a soak creeps on
+      // through the cloth (ease-out over SOAK_CREEP_T). Stepped on this 0.8 s
+      // sweep — a millimetre at a time, nobody sees the steps.
+      if (r.creep > 1 && r.t >= r.gt) {
+        const k = Math.min(1, (r.age - r.gt) / SOAK_CREEP_T);
+        if (k > 0) {
+          const e = 1 + (r.creep - 1) * (1 - (1 - k) * (1 - k));
+          r.m.scale.set(r.gx * e, r.gy * e, 1);
+          if (k >= 1) r.creep = 0;
+        }
+      }
     }
   });
 })();

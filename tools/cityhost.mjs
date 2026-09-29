@@ -180,7 +180,7 @@ for (let i = 0; i < 240 && !built; i++) {
   const r = await ev("!!(window.CBZ && CBZ.game && CBZ.game.state==='playing' && CBZ.city && CBZ.city.arena)", 20000);
   if (r.value === true) built = true; else await sleep(1500);
 }
-if (!built) await shutdown(2, "FAIL: the world build never finished — run tools/boot-trace.mjs to see which step it died in");
+if (!built) await shutdown(2, "FAIL: the world build never finished — run tools/speed.mjs --load to see which build step it died in");
 log(`world built in ${((Date.now() - t0) / 1000).toFixed(0)}s`);
 
 /* Pay the one-time shader compile NOW, so no client's first /shot does.

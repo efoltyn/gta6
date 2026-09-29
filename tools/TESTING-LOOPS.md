@@ -23,6 +23,22 @@ node tools/smoke-play.mjs        # ~206s, the ONLY loop that forces a real rende
 
 `node --check <file>` on every touched file first — free, always.
 
+## SPEED — the load/frame regression loop (`tools/speed.mjs`)
+
+```
+node tools/speed.mjs --against tools/speed-baseline.json   # Gang City load + in-game vs the saved main baseline
+node tools/speed.mjs --modes all                           # every mode + games/ pages
+node tools/speed.mjs --ref origin/main --save before.json  # measure another commit the same way
+node tools/speed.mjs --profile --attribute                 # + V8 top functions, + HD/tree share (diagnostic)
+```
+
+Real GPU headless (ANGLE Metal on this Mac), HD viewport (1512x982 @2x, the tier
+the game picks), rAF held and frames stepped by hand at fixed spots, per-updater
+ms, noise per metric, `uptime` in every result, machine lock `/tmp/cbz-speed.lock`.
+It replaced boot-health, boot-trace, load-profile, ipad-perf (`--device tablet`)
+and the perf-ab harnesses. Any "faster" that lowered pixel ratio, tier, shadows,
+trees or textures is printed as a LOOK REGRESSION, not a win.
+
 ## Ranked loops (measured, this tree, WORLD_ENLARGE_V2)
 
 | Rank | Loop / config | Wall | Is it a gate? | Role |
