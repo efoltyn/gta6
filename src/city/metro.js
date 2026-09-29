@@ -593,7 +593,9 @@
     const farOn = farOK && inView && !nearOn;
     if (f && f.mesh && f.mesh.visible !== nearOn) f.mesh.visible = nearOn;
     if (f && f.far && f.far.visible !== farOn) f.far.visible = farOn;
-    const gOn = inView && !!t.gndBuilt;
+    // the streets go with the near buildings: past the swap the far tile's
+    // city stands on the continent plate (flattened under it at load)
+    const gOn = inView && !!t.gndBuilt && d < _showR;
     if (t.gnd && t.gnd.meshes) for (const m of t.gnd.meshes) if (m.visible !== gOn) m.visible = gOn;
   }
 
@@ -648,7 +650,7 @@
     const fogFar = (fog && fog.far) || CBZ.cityFogFar || 1400;
     const SEE = fogFar + 60;
     const BR = Math.min(air ? BUILD_R_AIR : BUILD_R, SEE + 200), DR = Math.max(BR + 600, air ? DROP_R_AIR : DROP_R);
-    _showR = BR + 300;
+    _showR = BR + 150;
     _viewR = Math.min(VIEW_MAX, fogFar / HAZE_SCALE);
     // high up the aerial melt (core/renderer.js) completes the fog at
     // fog.far on true depth: past it a tile is pure fog colour, not drawn
@@ -671,7 +673,7 @@
       }
     }
     // the camera's far plane must reach the farthest tile in view
-    CBZ.metroViewFar = reach > 0 ? Math.min(_viewR, reach) + 60 : 0;
+    CBZ.metroViewFar = reach > 0 && !(CBZ.CONFIG && CBZ.CONFIG.METRO_VIEW_FAR === false) ? Math.min(_viewR, reach) + 60 : 0;
     _pending.length = 0;
     const want = [], wantFar = [];
     for (const M of CBZ.metroCities) {
