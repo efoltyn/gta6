@@ -409,7 +409,7 @@ for (let ti = 0; ti < TOWERS.length; ti++) {
   const zone = (CBZ.altExitZones || []).find((z) => z.kind === "wall");
   check(!!zone && zone.test(-150, 0) && zone.test(0, 150) && !zone.test(0, 0) && !zone.test(-126, 0), "'over the wall' is a way out, and only clear of the wall", zone ? "x<-138 | x>138 | z<-130 | z>142" : "missing");
   // the walls under the towers are as tall as they are drawn, and no taller
-  const walls = CBZ.colliders.filter((c) => c.ref && c.noClimb && c.y1 > 10);
+  const walls = CBZ.colliders.filter((c) => c.ref && c.noClimb && c.y1 > 10 && !c.doorHead);
   check(walls.length > 10 && walls.every((c) => c.y0 === 0 && c.y1 <= 12.1), "perimeter + division walls stop at the wire", walls.length + " wall colliders, top " + Math.max(...walls.map((c) => c.y1)).toFixed(2) + " m");
 }
 console.log("");

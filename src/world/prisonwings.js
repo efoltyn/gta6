@@ -286,9 +286,9 @@
     d.lamp = hold.lamp || null;
     const leaf = leafMeshes[0] || d.pivots[0];
     d.leaf = leaf;
-    d.collider = d.axis === "x"
-      ? { minX: a0, maxX: a1, minZ: cfg.fixed - T / 2, maxZ: cfg.fixed + T / 2, ref: leaf }
-      : { minX: cfg.fixed - T / 2, maxX: cfg.fixed + T / 2, minZ: a0, maxZ: a1, ref: leaf };
+    // the shut leaf: its own slab, floor to frame head (world/corridorkit.js
+    // leafCollider), not the wall's whole depth to the sky
+    d.collider = CK.leafCollider(d.set, a0, a1, 0, cfg.h || DH, leaf);
     CBZ.colliders.push(d.collider);
     if (CBZ.losBlockers) for (const sl of d.slabs) CBZ.losBlockers.push(sl);
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
@@ -386,10 +386,14 @@
     { id: "prison-sally-e2", label: "The lower east gate", axis: "z", fixed: S.x1, c: 84 },
   ];
   const gates = GATES.map(function (g) {
-    // the wall above the opening: never solid (systems/actorcollide.js clamps
-    // an actor against any box with no vertical span, so a y-gated solid head
-    // reads full height to every body and seals the gate for the whole cast).
-    addBox(g.fixed, (DH + YH) / 2, g.c, 1, YH - DH, GATE_W, WALL, { cast: false, blockLOS: true });
+    // the wall above the opening, up under the coping: solid as drawn
+    // (2026-09-29; it was LOS-only, so a body falling past it from a tower
+    // went through eight metres of drawn wall). Banded from the door head,
+    // so it clears every body walking through (systems/actorcollide.js and
+    // the movers honour y0/y1).
+    const head = addBox(g.fixed, (DH + YH) / 2, g.c, 1, YH - DH, GATE_W, WALL, { cast: false, blockLOS: true, solid: true, y0: DH, y1: YH + 0.36 });
+    head.userData.doorHead = true;
+    if (head.userData.collider) { head.userData.collider.noBreach = true; head.userData.collider.noClimb = true; head.userData.collider.doorHead = true; }
     // (2026-09-29: the 6 m barred pair and the steel lintel over it are
     // gone. The gap is walled either side of a 2.4 m steel pair, card
     // readers on the jamb, the way a yard door in a wall is actually built.)

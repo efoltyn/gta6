@@ -91,8 +91,10 @@
   // ---- the gameplay door
   const pivots = inner.leaves.concat(outer.leaves).map(function (L) { return L.pivot; });
   const slabs = inner.leaves.concat(outer.leaves).map(function (L) { return L.slab; }).filter(Boolean);
-  const collider = { minX: -DC, maxX: DC, minZ: WZ - WT / 2, maxZ: WZ + WT / 2, ref: slabs[0] || pivots[0] };
-  const outCollider = { minX: -DC, maxX: DC, minZ: VZ1 - VT / 2, maxZ: VZ1 + VT / 2, ref: slabs[2] || pivots[2] };
+  // each shut pair is its own slab, floor to frame head (world/corridorkit.js
+  // leafCollider), not the wall's depth to the sky
+  const collider = CK.leafCollider(inner, -DC, DC, 0, DH, slabs[0] || pivots[0]);
+  const outCollider = CK.leafCollider(outer, -DC, DC, 0, DH, slabs[2] || pivots[2]);
   CBZ.colliders.push(collider, outCollider);
   if (CBZ.losBlockers) for (const s of slabs) CBZ.losBlockers.push(s);
   if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();

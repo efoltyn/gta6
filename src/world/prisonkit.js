@@ -529,11 +529,11 @@
     shaftWall(hs - t / 2, (-hs + DV0) / 2, t, DV0 + hs, 0, H);
     shaftWall(hs - t / 2, (DV1 + hs) / 2, t, hs - DV1, 0, H);
     {
-      // the wall over the door: LOS only, never solid (systems/actorcollide.js
-      // reads any box as full height for a walking body, so a solid head
-      // would seal the door for the post officer)
+      // the wall over the door: solid over its own band, from the door head
+      // up (every walking body collides by band, so it clears the officer)
       const c = at(hs - t / 2, (DV0 + DV1) / 2), sz = sizeOf(t, DV1 - DV0);
-      const m = addBox(c.x, (DH + H) / 2, c.z, sz.w, H - DH, sz.d, 0x9aa0a8, { blockLOS: true });
+      const m = addBox(c.x, (DH + H) / 2, c.z, sz.w, H - DH, sz.d, 0x9aa0a8, { blockLOS: true, solid: true, y0: DH, y1: H });
+      if (m.userData.collider) m.userData.collider.noBreach = true;
       skinBox(m, "concrete", 0xa9adb1);
     }
     /* THE DOOR AT THE FOOT is the prison's one door kit (world/

@@ -268,7 +268,7 @@
 
   const armory = {
     gate, lamp, set: doorSet, slab: gateSlab, reader: reader, open: false, t: 0, slots: [],
-    collider: { minX: WALL_X - WALL_T / 2, maxX: WALL_X + WALL_T / 2, minZ: DZ0, maxZ: DZ1, ref: gateSlab || gate },
+    collider: CK.leafCollider(doorSet, DZ0, DZ1, 0, DOOR_H, gateSlab || gate),   // the leaf's slab, floor to head
   };
   CBZ.colliders.push(armory.collider);
   if (CBZ.losBlockers && gateSlab) CBZ.losBlockers.push(gateSlab);
@@ -747,7 +747,7 @@
     inner.gate = pivot;
     inner.leaf = leaf2;
     inner.lamp = cageLamp;
-    inner.collider = { minX: GX0, maxX: GX1, minZ: CZ1 - 0.09, maxZ: CZ1 + 0.09, ref: leaf2 };
+    inner.collider = { minX: GX0, maxX: GX1, minZ: CZ1 - 0.09, maxZ: CZ1 + 0.09, ref: leaf2, y0: 0, y1: CH };
     CBZ.colliders.push(inner.collider);
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
 
