@@ -65,7 +65,7 @@
     if (CBZ.CONFIG && CBZ.CONFIG.RENDER_FRAMES === false) return;
     const r = CBZ.renderer, sc = CBZ.scene, cam = CBZ.camera;
     if (!r || typeof r.compile !== "function" || !sc || !cam) return;
-    lastReport = queue(sc, null);
+    lastReport = queue(sc, { depth: true });
   });
 
   // ---- the walker ---------------------------------------------------------
@@ -109,6 +109,67 @@
 
   let lastReport = null;
 
+  /* SHADOW-DEPTH PROGRAMS. compile() never builds them: WebGLShadowMap picks
+     its own depth material per caster (MeshDepthMaterial, RGBA packing, one
+     per morph/skin/instancing combo, side mirrored to the shadow side; or the
+     caster's customDepthMaterial) and compiles it inside the first shadow
+     render, i.e. in the first frame. Programs are cached by KEY, not by
+     material object, so compiling an identical stand-in here, against a
+     linear render target like the shadow map's, leaves the shadow pass a
+     cache hit. The side mirror is r128's (Front→Back, Back→Front, Double). */
+  const SHADOW_SIDE = [1, 0, 2];
+  const depthMats = new Map();              // "m|s|side" -> stand-in MeshDepthMaterial
+  const depthSeen = new Set();              // variant keys already queued
+  let depthRT = null;
+  function depthVariant(o, m) {
+    const side = m.shadowSide != null ? m.shadowSide : SHADOW_SIDE[m.side || 0];
+    const inst = o.isInstancedMesh ? 1 : 0;
+    const custom = o.customDepthMaterial;
+    if (custom) {
+      const key = custom.uuid + "|" + side + "|" + inst;
+      if (depthSeen.has(key)) return null;
+      depthSeen.add(key);
+      custom.side = side;                     // the shadow pass writes the same before every draw
+      return custom;
+    }
+    const g = o.geometry;
+    const morph = !!(m.morphTargets && g && g.morphAttributes && g.morphAttributes.position && g.morphAttributes.position.length);
+    const skin = !!(o.isSkinnedMesh && m.skinning);
+    const key = (morph ? 1 : 0) + "|" + (skin ? 1 : 0) + "|" + side + "|" + inst;
+    if (depthSeen.has(key)) return null;
+    depthSeen.add(key);
+    const mk = (morph ? 1 : 0) + "|" + (skin ? 1 : 0) + "|" + side;
+    let d = depthMats.get(mk);
+    if (!d) {
+      d = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, morphTargets: morph, skinning: skin });
+      d.side = side;
+      depthMats.set(mk, d);
+    }
+    return d;
+  }
+  // `lights` are the frame's pinned lights: the shadow pass draws with the
+  // frame's light state, so its program keys carry the same counts and
+  // shadowMapEnabled (true only when some light casts).
+  function queueDepth(r, cam, casters, lights) {
+    if (!casters.length) return;
+    if (!depthRT) {
+      depthRT = new THREE.WebGLRenderTarget(1, 1);
+      depthRT.texture.name = "fxwarm-depth-standin";
+    }
+    const prev = r.getRenderTarget();
+    const objs = [];
+    for (let i = 0; i < casters.length; i++) {
+      const o = casters[i][0], d = casters[i][1];
+      const px = Object.create(o);           // same geometry and object flags, depth material
+      px.material = d;
+      objs.push(px);
+    }
+    STAND_IN.fog = null; STAND_IN.environment = null; STAND_IN._lights = lights; STAND_IN._objs = objs;
+    try { r.setRenderTarget(depthRT); r.compile(STAND_IN, cam); }
+    catch (e) { try { console.warn("[fxwarm] depth compile threw:", e && e.message); } catch (e2) {} }
+    finally { r.setRenderTarget(prev); STAND_IN._lights = null; STAND_IN._objs = null; }
+  }
+
   // Walk `roots` (an Object3D or an array of them; default the whole scene),
   // pick one object per not-yet-queued (material, kind), and compile those.
   // opts.skip(o) → true prunes o's subtree for this call (it will be picked
@@ -131,11 +192,16 @@
     }
     lightSig = n.D + "|" + n.P + "|" + n.S + "|" + n.H + "|" + n.R + "|" + n.s + "|" + (r.shadowMap.enabled ? 1 : 0) + "|" + (sc.fog ? (sc.fog.isFogExp2 ? 2 : 1) : 0);
     const reps = [];
+    const casters = (opts && opts.depth && r.shadowMap && r.shadowMap.enabled) ? [] : null;
     let bad = 0;
     function visit(o) {
       if (hidden.has(o)) return;
       if (skip && skip(o)) return;
       const m = o.material;
+      if (casters && o.castShadow && o.visible !== false && (o.isMesh || o.isPoints || o.isLine) && m && m.isMaterial) {
+        const d = depthVariant(o, m);
+        if (d) casters.push([o, d]);
+      }
       if (m) {
         const bits = kindBits(o);
         if (Array.isArray(m)) {
@@ -160,10 +226,11 @@
       STAND_IN._lights = lights; STAND_IN._objs = reps;
       try { r.compile(STAND_IN, cam); } catch (e) { rep.threw = true; try { console.warn("[fxwarm] compile threw:", e && e.message); } catch (e2) {} }
       STAND_IN._lights = null; STAND_IN._objs = null;
-      // push the queued compile/link commands to the GPU process NOW; left in
-      // the command buffer they would wait for this long task to end.
-      try { const gl = r.getContext(); if (gl && gl.flush) gl.flush(); } catch (e) {}
     }
+    if (casters && casters.length) { rep.depth = casters.length; queueDepth(r, cam, casters, lights); }
+    // push the queued compile/link commands to the GPU process NOW; left in
+    // the command buffer they would wait for this long task to end.
+    if (reps.length || (casters && casters.length)) { try { const gl = r.getContext(); if (gl && gl.flush) gl.flush(); } catch (e) {} }
     rep.programs = (r.info && r.info.programs && r.info.programs.length) || 0;
     if (bad) {
       try { console.warn("[fxwarm] " + bad + " object(s) carry a non-Material `.material` (a raw colour?) · skipped"); } catch (e) {}

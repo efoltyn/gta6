@@ -609,7 +609,7 @@
       // the finished, batched world: queue whatever programs the builders'
       // queue (core/fxwarm.js) has not, so the GPU links them during pop /
       // traffic instead of inside the first frame.
-      if (CBZ.shaderQueue) CBZ.shaderQueue(A.root, { full: true });
+      if (CBZ.shaderQueue) CBZ.shaderQueue(A.root, { full: true, depth: true });
       if (A.reset) A.reset();
       if (CBZ.fx) CBZ.fx.clear();
       if (CBZ.clearGore) CBZ.clearGore();
