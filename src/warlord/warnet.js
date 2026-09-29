@@ -206,13 +206,23 @@
        netpersist.js owns this in the city; that file is 456 lines of city
        character persistence, so this page provides the one function it
        exports that matters here rather than loading it. */
+    /* ONE TAB IS ONE WARLORD: sessionStorage, not localStorage. localStorage
+       is shared by every tab of a browser profile, so two tabs on one machine
+       sent the relay the SAME pid and server.js's reconnect dedupe killed the
+       first session ("reconnect: dropping stale session #1 (pid match)"): the
+       first player then started a one-warlord match nobody else could see.
+       sessionStorage is unique per tab and survives a reload of that tab, so a
+       refresh still reclaims your own session. The city's netpersist.js keeps
+       its localStorage key on purpose: a city character follows you across
+       tabs, a warlord in a match does not. */
     if (!CBZ.netPid) {
       CBZ.netPid = function () {
+        const fresh = function () { return "w" + Math.random().toString(36).slice(2) + now().toString(36); };
         try {
-          let p = localStorage.getItem("cbz-pid");
-          if (!p) { p = "w" + Math.random().toString(36).slice(2) + now().toString(36); localStorage.setItem("cbz-pid", p); }
+          let p = sessionStorage.getItem("cbz-wl-pid");
+          if (!p) { p = fresh(); sessionStorage.setItem("cbz-wl-pid", p); }
           return p;
-        } catch (e) { return "w" + Math.random().toString(36).slice(2); }
+        } catch (e) { return (CBZ._wlPid = CBZ._wlPid || fresh()); }
       };
     }
     const root = (CBZ.studio && CBZ.studio.root) || "../src/";
