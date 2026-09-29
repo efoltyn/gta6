@@ -358,6 +358,50 @@
   const C_SEA = 0.127, KD_SEA = 0.042;    // Jerlov IB   — level ~36 m
   const C_SURF = 1.60, KD_SURF = 0.600;   // true surf   — level ~2.9 m
   const C_LAKE = 0.55, KD_LAKE = 0.220;   // inland lake — level ~8.3 m
+  /* ============================================================
+     THE CLARITY GAIN — the one number in this block that is a GAME DECISION
+     and says so. (2026-08-30.)
+
+     Owner, after the Duntley rework above shipped: "when I'm underwater I want
+     to be able to see way fucking farther straight ahead, rn I see like 5 feet
+     ahead of me."
+
+     MEASURED FIRST, because the last wave's whole point was that guessing is
+     how this file got a 16 m fog bank. In the shark sim, offshore, at noon,
+     the model above solves 33.4 m level / 52.3 m up / 17.5 m down, and that is
+     the number he is calling five feet. It is not a bug: 33 m IS Jerlov IB, it
+     IS "a really good day" on a reef, and the physics is right. It is simply
+     not the picture this game wants — a shark is a thing that crosses a
+     hundred metres of open water at speed, and a sighting range of a third of
+     that means the sea in front of you is always a wall you are about to hit.
+
+     So rather than quietly bending c, Kd, eps or the ramp — which is exactly
+     how the four separate depth terms this file just untangled got tangled in
+     the first place — the concession is ONE named multiplier on the CLARITY of
+     the medium, applied to c and Kd together. Together, because:
+       • dividing both leaves Kd/c untouched, and Kd/c is the entire shape of
+         the up/down asymmetry (see sightRange) — so the "the one that gets you
+         is the one from below" grammar survives the change exactly;
+       • dividing Kd alone would also brighten the deep, and the RAMP already
+         owns how dark deep water looks;
+       • dividing the solved range instead of the coefficients would leave the
+         shader's per-fragment path length disagreeing with the JS model, which
+         is the one thing tools/shark-sight-check.mjs exists to catch.
+
+     It is honestly a gain on the WATER, not on the eye: the sea in this game
+     is clearer than the sea outside it. At 3.0 the clear-sea numbers become
+     100 m level, 157 m up, 52 m down — which is the top of the physically
+     observed range for real ocean (the Weddell Sea Secchi record is ~80 m) and
+     the picture the owner asked for.
+
+     THE SURF AND THE LAKE GET A SMALLER GAIN ON PURPOSE. Those two exist to
+     say "you cannot see in here" — the wash is milk and a lake is soup — and
+     handing them a 3x would delete the only two places in the game where the
+     water itself is an obstacle. They get enough to stop being blindfolds
+     (2.9 -> 5.3 m in the wash, 8.3 -> 14 m in a lake) and no more.
+
+     No flag: GAIN_SEA = 1 is the pure Jerlov build to the metre. */
+  const GAIN_SEA = 3.0, GAIN_SURF = 1.8, GAIN_LAKE = 1.7;
   /* The surf band, by the seabed depth under the eye, and it is DELIBERATELY
      NARROW. Shallow is not the same as turbid — a Bahamas sand flat in 5 m of
      water is the clearest thing in this game, and ref 3 reads its bottom
@@ -557,13 +601,14 @@
   // The backdrop shell (see THE EMPTY PIXEL, below). Radius only has to clear
   // the longest EFFECTIVE fog range this file can produce by a wide margin at
   // the frustum corners, and stay well inside every camera's far plane. That
-  // ceiling is now R0 at its clearest (~36 m) divided by the anisotropy's
-  // steepest look-up multiplier (clamped at 0.30), i.e. under 120 m in the
-  // worst case and ~56 m in the sea you actually swim in. 260 clears both.
-  // If you ever raise C_SEA's clarity past a 75 m R0, raise this too —
-  // a backdrop inside the fog range stops saturating and becomes a visible
-  // dark sphere around the eye.
-  const BACKDROP_R = 260;
+  // ceiling is R0 at its clearest (~110 m since THE CLARITY GAIN tripled the
+  // sea's clarity) divided by the anisotropy's steepest look-up multiplier
+  // (clamped at 0.30), i.e. under ~370 m in the worst case and ~160 m in the
+  // sea you actually swim in. 600 clears both and stays inside the camera's
+  // 1000 m far plane. If you raise the clarity again, raise this too — a
+  // backdrop inside the fog range stops saturating and becomes a visible dark
+  // sphere around the eye.
+  const BACKDROP_R = 600;
 
   let fxRoot = null, ceiling = null, ceilU = null, shafts = null, shaftMat = null;
   let backdrop = null;
@@ -1526,7 +1571,15 @@
     const stir = 1 - smoothstep(SURF_STIR, SURF_CLEAR, bedDepth);
     let c = C_SEA + (C_SURF - C_SEA) * stir;
     let kd = KD_SEA + (KD_SURF - KD_SEA) * stir;
-    if (inland > 0) { c += (C_LAKE - c) * inland; kd += (KD_LAKE - kd) * inland; }
+    let gain = GAIN_SEA + (GAIN_SURF - GAIN_SEA) * stir;
+    if (inland > 0) {
+      c += (C_LAKE - c) * inland; kd += (KD_LAKE - kd) * inland;
+      gain += (GAIN_LAKE - gain) * inland;
+    }
+    /* THE CLARITY GAIN (see the block by the Jerlov table). Blended on the
+       same two mixes as c and Kd so the wash stays the wash, and applied to
+       BOTH so Kd/c — the whole up/down asymmetry — comes out unchanged. */
+    c /= gain; kd /= gain;
 
     // Adaptation luminance at the eye, and the threshold contrast that buys.
     const E = E_NIGHT + (E_NOON - E_NIGHT) * Math.pow(clamp01(sun01), E_SHAPE);
