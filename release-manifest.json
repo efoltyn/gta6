@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "777802191cbb066eba25418762b40b8e2c899b64",
-  "createdAt": "2026-09-29T07:33:05.698Z",
+  "sourceCommit": "c50979c068e625a042b1242d8e06cb3c9b108ebc",
+  "createdAt": "2026-09-29T07:37:27.254Z",
   "fileCount": 1168,
-  "totalBytes": 47751047,
+  "totalBytes": 47707971,
   "files": [
     {
       "file": "src/bootstrap.js",
@@ -38,8 +38,8 @@
     },
     {
       "file": "src/city/aircraft.js",
-      "bytes": 61789,
-      "sha256": "8d5080aa46795af1fca97ac387dc4f9b1869b5dbacad5a29a8023e32171ef943"
+      "bytes": 62013,
+      "sha256": "c0aa0256dc5e45edac841c13eb86caac4a4c3de1fc4a12993ff1d2da2b64c3d6"
     },
     {
       "file": "src/city/aircraft_doors.js",
@@ -1078,8 +1078,8 @@
     },
     {
       "file": "src/city/nukefx.js",
-      "bytes": 78378,
-      "sha256": "ab8252a3d3c3578d8098b4db529b083c1cecad201e32e58bf385199258456423"
+      "bytes": 34626,
+      "sha256": "81f6e42797cfd95764718fa26bf866888bf71944bc63cdf346102ddb3c1e3afe"
     },
     {
       "file": "src/city/occupy.js",
@@ -2323,8 +2323,8 @@
     },
     {
       "file": "src/systems/debris.js",
-      "bytes": 54759,
-      "sha256": "116e9fda4c0d133a6b5a0f7050ecbf59fb34c29470eb48c8155803ba21960075"
+      "bytes": 55221,
+      "sha256": "fe24c5bbcd9614c2816f38a348d868b28e0130aa9aab155cad0eac5bf75b1107"
     },
     {
       "file": "src/systems/detection.js",
@@ -5743,28 +5743,28 @@
     },
     {
       "file": "shark-sim.html",
-      "bytes": 57506,
-      "sha256": "8919d115a70981f4fd2fac2815587a26ed5bab8df17a399e4ddc143bc3762e47"
+      "bytes": 57504,
+      "sha256": "1c7b09233fefe080eda18444317e696258d0e67d2e2feff69092ceb8b2bf60eb"
     },
     {
       "file": "disaster-survival.html",
-      "bytes": 57549,
-      "sha256": "681594950d8c4b6525fd38da927f3efc74e76fd782a4fd660c7e00b5033690d5"
+      "bytes": 57547,
+      "sha256": "69a0f310ea4d4975d3c9494dc0ab66fdc6ae870acb940fb9f14ea36aee06c432"
     },
     {
       "file": "prison-escape.html",
-      "bytes": 57518,
-      "sha256": "87a4a11ea6f6e1a1ebd0a8033fc341efc0de4f7272c3867c64b4efb71784ecfc"
+      "bytes": 57516,
+      "sha256": "1484e2cd0db0240c78bf267b930dace69988b6bda3c6f9615b7ae6064871b6f2"
     },
     {
       "file": "gang-city.html",
-      "bytes": 57473,
-      "sha256": "758b99f4c061d930551b782a66dd85444885fc7e9f5ac780ffbb6cb0b5c72c4f"
+      "bytes": 57471,
+      "sha256": "4b2603f6dff20d8b06a3c094ed37b70bbaa90f7d228b62f1ad6693ae00c32ae4"
     },
     {
       "file": "gun-game.html",
-      "bytes": 57495,
-      "sha256": "cc8be9f03b9df7140c81ddcf52e10e8c6e16b4fc877207c63bf07aea7c3d49ba"
+      "bytes": 57493,
+      "sha256": "4df6c46ea689faae192b1ec70aed718dcb8b53c3c497000be2b1ad3da7fe976a"
     },
     {
       "file": "games/battle.html",
