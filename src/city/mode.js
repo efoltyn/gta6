@@ -598,9 +598,10 @@
       // InstancedMesh pools. Runs AFTER batch (only sees leftovers) and BEFORE
       // freeze (its pools inherit matrixAutoUpdate=false). Flag-gated + inert off.
       if (CBZ.instanceStaticUnder) CBZ.instanceStaticUnder(A.root);
-      // what both passes left that carries a texture: one draw per material
-      // per tile, the material untouched (core/batch.js batchTexturedUnder)
-      if (CBZ.batchTexturedUnder) CBZ.batchTexturedUnder(A.root);
+      // (core/batch.js batchTexturedUnder is NOT run here: measured 2026-09-28
+      // it found 9 buckets / 32 meshes in the whole city, because nearly every
+      // textured city mesh carries userData or is alone in its tile. It earns
+      // its walk in the prison: 26,639 meshes into 188 draws.)
       // Freeze matrix recompute for everything provably static under the root
       // (core/staticfreeze.js) — after the batch pass (its merged output is
       // already frozen), before actors spawn (they arrive with live matrices).
