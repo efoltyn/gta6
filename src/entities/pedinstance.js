@@ -277,7 +277,7 @@
      limbPainter never read the outfit), and the key was geometry x map — so
      each body shape was a pool per outfit it wore.
 
-     So a pool no longer holds a texture, it holds a PAGE: a big canvas the
+     So a pool no longer holds a texture, it holds a PAGE: a big texture the
      small textures are copied into, slot by slot, and each instance carries
      its slot as a per-instance UV offset+scale (attribute `pinUv`, applied to
      vUv right after uv_vertex). The pixels are the same pixels (1:1 copy,
@@ -300,17 +300,40 @@
      upload at all (their meshes sit on the hide layer), so GPU memory is
      roughly a wash.
 
-     New slots go up incrementally (renderer.copyTextureToTexture, a
-     texSubImage2D of just the slot) once the page is on the GPU; before that,
-     or headless, the page canvas simply re-uploads. A source texture that is
-     repainted (texture.version moves) is re-copied the next frame a body
-     wearing it is placed. */
+     PAGES ARE PIXELS IN A TYPED ARRAY, NEVER A CANVAS (owner, 2026-09-29, on
+     the iPad: "the Secret Service now have no torso and no arms and no legs.
+     It's basically like the outfit is nil"). The first cut kept every page
+     as a 2048-wide <canvas> (the audit crowd: 14 of them, 173 MB) and sent
+     each new slot up as texSubImage2D FROM A CANVAS with UNPACK_FLIP_Y. Both
+     halves are exactly the ground iOS WebKit fails on without a word: its
+     canvas budget is capped, and a canvas made or grown past the cap is a
+     context that draws nothing and reads back all-transparent; and a sub-
+     image upload from a canvas is the one path that never ran headless. An
+     outfit first worn late in a session (the President's detail's black
+     suit arrives when you take office, long after the street's outfits went
+     up at boot) went to its slot through that path, so its slot on the GPU
+     held alpha 0, the garment material's alphaTest 0.5 threw away every
+     fragment of it, and the only parts left were the ones no page carries:
+     the flat skin head and hands. A torso, arms and legs that do not exist.
+
+     So a page is now a THREE.DataTexture over a Uint8Array (GL row order,
+     flipY off; slot math unchanged: image row y is texture v = 1 - y / PH).
+     A slot is filled from the source's own pixels (getImageData on its 2D
+     context; clothes.js atlases are willReadFrequently, so that read is
+     free) with the edge-texel gutter built in the array, written into the
+     page array (so a full upload, a grow and a WebGL context restore all
+     carry it), and sent up as texSubImage2D FROM THAT ARRAY — the one
+     upload path WebGL defines the same on every browser. A source whose
+     pixels cannot be read, or read back with no opaque texel at all (a dead
+     canvas), is NOT paged: it keeps its own exact-map pool, which draws
+     exactly what the source would draw by itself. Paging can therefore never
+     make a garment vanish that the unpaged renderer would have shown. */
   const PAGE_MAX = 2048, PAGES_PER_CLASS = 6;
-  const pageClasses = new Map();    // settings key -> class { w, h, g, sw, sh, PW, PH, cols, rows, pages, scratch }
+  const pageClasses = new Map();    // settings key -> class { w, h, g, sw, sh, PW, PH0, cols, pages }
   const slotOf = new Map();         // source texture uuid -> slot
-  let pageSeq = 0, pageCopies = 0, pageFullUploads = 0;
+  let pageSeq = 0, pageCopies = 0, pageFullUploads = 0, pageRefused = 0;
   const _pagePos = new THREE.Vector2();
-  let _pageSrc = null;
+  let _pageSrc = null;              // the texSubImage2D source: { isDataTexture, image: { data, width, height } }
 
   const VUV_MAPS = ["alphaMap", "emissiveMap", "bumpMap", "normalMap", "specularMap", "displacementMap",
     "roughnessMap", "metalnessMap", "lightMap", "aoMap", "gradientMap", "clearcoatMap", "clearcoatNormalMap",
@@ -325,14 +348,15 @@
     if (!im || typeof im.getContext !== "function" || !(im.width > 0) || !(im.height > 0) || im.width > 512 || im.height > 512) return false;
     if (t.wrapS !== THREE.ClampToEdgeWrapping || t.wrapT !== THREE.ClampToEdgeWrapping || t.flipY !== true) return false;
     if (t.offset.x !== 0 || t.offset.y !== 0 || t.repeat.x !== 1 || t.repeat.y !== 1 || t.rotation !== 0 || t.matrixAutoUpdate === false) return false;
+    // the array holds straight 8-bit RGBA, which is what a canvas uploads as
+    // under these settings and nothing else
+    if (t.format !== THREE.RGBAFormat || t.type !== THREE.UnsignedByteType || t.premultiplyAlpha) return false;
     return true;
   }
-
   function pageClass(t) {
     const im = t.image, w = im.width, h = im.height;
     const mips = t.generateMipmaps !== false && t.minFilter !== THREE.NearestFilter && t.minFilter !== THREE.LinearFilter;
-    const key = w + "x" + h + "|" + t.minFilter + "|" + t.magFilter + "|" + (mips ? 1 : 0) + "|" + t.anisotropy +
-      "|" + t.encoding + "|" + (t.premultiplyAlpha ? 1 : 0) + "|" + t.format + "|" + t.type + "|" + t.unpackAlignment;
+    const key = w + "x" + h + "|" + t.minFilter + "|" + t.magFilter + "|" + (mips ? 1 : 0) + "|" + t.anisotropy + "|" + t.encoding;
     let C = pageClasses.get(key);
     if (C !== undefined) return C;
     const g = mips ? 8 : 1, sw = w + 2 * g, sh = h + 2 * g;
@@ -347,51 +371,46 @@
     C = null;
     if (Math.floor(PW / sw) >= 4 && Math.floor(PAGE_MAX / sh) >= 2) {
       C = { key: key, w: w, h: h, g: g, sw: sw, sh: sh, PW: PW, PH0: PH0, cols: Math.floor(PW / sw),
-        pages: [], scratch: null, proto: t };
+        pages: [], proto: t, block: new Uint8Array(sw * sh * 4) };
     }
     pageClasses.set(key, C);
     return C;
   }
 
+  function pageImage(C, PH, data) { return { data: data || new Uint8Array(C.PW * PH * 4), width: C.PW, height: PH }; }
   function newPage(C) {
-    if (typeof document === "undefined" || !document.createElement) return null;
-    const cv = document.createElement("canvas");
-    cv.width = C.PW; cv.height = C.PH0;
-    const ctx = cv.getContext("2d");
-    if (!ctx) return null;
-    ctx.imageSmoothingEnabled = false;
-    const s = C.proto, t = new THREE.CanvasTexture(cv);
+    const s = C.proto, img = pageImage(C, C.PH0);
+    const t = new THREE.DataTexture(img.data, img.width, img.height, THREE.RGBAFormat, THREE.UnsignedByteType);
+    t.flipY = false; t.premultiplyAlpha = false; t.unpackAlignment = 4;
+    t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
     t.minFilter = s.minFilter; t.magFilter = s.magFilter; t.generateMipmaps = s.generateMipmaps;
-    t.anisotropy = s.anisotropy; t.encoding = s.encoding; t.premultiplyAlpha = s.premultiplyAlpha;
-    t.format = s.format; t.type = s.type; t.unpackAlignment = s.unpackAlignment;
+    t.anisotropy = s.anisotropy; t.encoding = s.encoding;
     t.name = "pedinst-page";
     t._shared = true;
-    const P = { id: ++pageSeq, cls: C, cv: cv, ctx: ctx, tex: t, PH: C.PH0, next: 0, cap: C.cols * Math.floor(C.PH0 / C.sh), slots: [] };
+    t.needsUpdate = true;
+    const P = { id: ++pageSeq, cls: C, data: img.data, tex: t, PH: C.PH0, next: 0, cap: C.cols * Math.floor(C.PH0 / C.sh), slots: [] };
     C.pages.push(P);
     return P;
   }
 
-  // flipY: image row y (from the top) is texture v = 1 - y / PH
+  // image row y (from the top) is texture v = 1 - y / PH
   function slotUv(s) {
     const P = s.page, C = P.cls;
     return [(s.x + C.g) / C.PW, 1 - (s.y + C.g + C.h) / P.PH, C.w / C.PW, C.h / P.PH];
   }
 
-  /* Double a full page's height. Every slot keeps its pixel position; only
-     the normalised v of each slot moves, so every live instance on the page
-     gets its pinUv rewritten here (a rare event: a handful per session). */
+  /* Double a full page's height. Rows are stored bottom-up (GL order), so the
+     old page is the TOP of the new one: every slot keeps its image position,
+     only the normalised v of each slot moves, so every live instance on the
+     page gets its pinUv rewritten here (a rare event: a handful per session). */
   function growPage(P) {
     const C = P.cls;
     if (P.PH >= PAGE_MAX) return false;
-    const PH = P.PH * 2, cv = document.createElement("canvas");
-    cv.width = C.PW; cv.height = PH;
-    const ctx = cv.getContext("2d");
-    if (!ctx) return false;
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(P.cv, 0, 0);
-    P.cv = cv; P.ctx = ctx; P.PH = PH;
+    const PH = P.PH * 2, img = pageImage(C, PH);
+    img.data.set(P.data, (PH - P.PH) * C.PW * 4);
+    P.data = img.data; P.PH = PH;
     P.cap = C.cols * Math.floor(PH / C.sh);
-    P.tex.image = cv;
+    P.tex.image = img;
     P.tex.needsUpdate = true;
     pageFullUploads++;
     for (let i = 0; i < P.slots.length; i++) P.slots[i].uv = slotUv(P.slots[i]);
@@ -406,48 +425,63 @@
     return true;
   }
 
-  // copy the source into its slot (1:1 body + edge-texel gutter), then to the GPU
-  function paintSlot(s) {
-    const P = s.page, C = P.cls, src = s.tex && s.tex.image;
-    if (!src) return;
-    let sc = C.scratch;
-    if (!sc) {
-      sc = C.scratch = document.createElement("canvas");
-      sc.width = C.sw; sc.height = C.sh;
-      sc._ctx = sc.getContext("2d");
-      sc._ctx.imageSmoothingEnabled = false;
+  /* The source's own pixels, straight RGBA rows top-down, or null when they
+     cannot be read (no 2D context, a tainted canvas) or hold no opaque texel
+     at all — a canvas the browser never gave a backing store reads back all
+     zero, and paging that would be paging a hole. */
+  function sourcePixels(t, C) {
+    const im = t && t.image;
+    if (!im || im.width !== C.w || im.height !== C.h) return null;
+    let d = null;
+    try {
+      const ctx = im.getContext("2d");
+      d = ctx && ctx.getImageData ? ctx.getImageData(0, 0, C.w, C.h).data : null;
+    } catch (e) { d = null; }
+    if (!d || d.length !== C.w * C.h * 4) return null;
+    for (let i = 3; i < d.length; i += 4) if (d[i] > 0) return d;
+    return null;
+  }
+
+  // copy the source into its slot (1:1 body + edge-texel gutter) in the page
+  // array, then to the GPU. `px` = sourcePixels(). Returns false if unreadable.
+  function paintSlot(s, px) {
+    const P = s.page, C = P.cls;
+    px = px || sourcePixels(s.tex, C);
+    if (!px) return false;
+    const w = C.w, h = C.h, g = C.g, sw = C.sw, sh = C.sh, B = C.block;
+    // block row j (GL order, bottom-up) is slot image row sh-1-j; the gutter
+    // repeats the nearest edge texel (clamped), corners included
+    for (let j = 0; j < sh; j++) {
+      const sy = Math.min(h - 1, Math.max(0, sh - 1 - j - g));
+      const srow = sy * w * 4, brow = j * sw * 4;
+      for (let bx = 0; bx < sw; bx++) {
+        const si = srow + Math.min(w - 1, Math.max(0, bx - g)) * 4, bi = brow + bx * 4;
+        B[bi] = px[si]; B[bi + 1] = px[si + 1]; B[bi + 2] = px[si + 2]; B[bi + 3] = px[si + 3];
+      }
     }
-    const x = sc._ctx, w = C.w, h = C.h, g = C.g;
-    x.clearRect(0, 0, C.sw, C.sh);
-    x.drawImage(src, 0, 0, w, h, g, g, w, h);
-    x.drawImage(src, 0, 0, w, 1, g, 0, w, g);                  // top edge
-    x.drawImage(src, 0, h - 1, w, 1, g, g + h, w, g);          // bottom edge
-    x.drawImage(src, 0, 0, 1, h, 0, g, g, h);                  // left edge
-    x.drawImage(src, w - 1, 0, 1, h, g + w, g, g, h);          // right edge
-    x.drawImage(src, 0, 0, 1, 1, 0, 0, g, g);                  // corners
-    x.drawImage(src, w - 1, 0, 1, 1, g + w, 0, g, g);
-    x.drawImage(src, 0, h - 1, 1, 1, 0, g + h, g, g);
-    x.drawImage(src, w - 1, h - 1, 1, 1, g + w, g + h, g, g);
-    P.ctx.clearRect(s.x, s.y, C.sw, C.sh);
-    P.ctx.drawImage(sc, s.x, s.y);
+    const y0 = P.PH - s.y - sh;                 // the slot's first GL row
+    const D = P.data, PW4 = C.PW * 4;
+    for (let j = 0; j < sh; j++) D.set(B.subarray(j * sw * 4, (j + 1) * sw * 4), (y0 + j) * PW4 + s.x * 4);
     s.ver = s.tex.version;
-    // incremental upload once the page lives on the GPU; otherwise the whole
-    // canvas goes up with the page's next (or first) upload
+    // incremental upload once the page lives on the GPU (the array already
+    // holds the slot for any later full upload); otherwise the whole page
+    // goes up with its next (or first) upload
     const R = CBZ.renderer, T = P.tex;
     if (R && R.copyTextureToTexture && R.properties) {
       const pr = R.properties.get(T);
       if (pr && pr.__webglInit && pr.__version === T.version) {
-        if (!_pageSrc) _pageSrc = new THREE.Texture();
-        _pageSrc.image = sc;
+        if (!_pageSrc) _pageSrc = { isDataTexture: true, image: { data: null, width: 0, height: 0 } };
+        _pageSrc.image.data = B; _pageSrc.image.width = sw; _pageSrc.image.height = sh;
         try {
-          R.copyTextureToTexture(_pagePos.set(s.x, P.PH - s.y - C.sh), _pageSrc, T);
+          R.copyTextureToTexture(_pagePos.set(s.x, y0), _pageSrc, T);
           pageCopies++;
-          return;
+          return true;
         } catch (e) { /* fall through to the whole-page upload */ }
       }
     }
     T.needsUpdate = true;
     pageFullUploads++;
+    return true;
   }
 
   function freeSlotOf(t) {
@@ -457,8 +491,8 @@
   function onSourceDispose(ev) { freeSlotOf(ev.target); }
 
   /* The slot holding this texture, allocating (or re-copying) as needed; null
-     when the texture is not pageable or every page of its class is full of
-     slots still worn by somebody. */
+     when the texture is not pageable, its pixels cannot be read, or every page
+     of its class is full of slots still worn by somebody. */
   function takeCell(C) {
     for (let i = 0; i < C.pages.length; i++) {
       const P = C.pages[i];
@@ -494,6 +528,8 @@
     }
     const C = pageClass(t);
     if (!C) return null;
+    const px = sourcePixels(t, C);
+    if (!px) { pageRefused++; return null; }      // unreadable or blank: its own exact-map pool draws it as-is
     s = takeCell(C) || reuseSlot(C, true);
     // grow before opening a new page: every page is a pool per shape
     for (let i = 0; !s && i < C.pages.length; i++) if (growPage(C.pages[i])) s = takeCell(C);
@@ -504,7 +540,7 @@
     s.uv = slotUv(s);
     slotOf.set(t.uuid, s);
     if (!t._cbzPageHooked) { t._cbzPageHooked = true; t.addEventListener("dispose", onSourceDispose); }
-    paintSlot(s);
+    paintSlot(s, px);
     return s;
   }
 
@@ -1299,9 +1335,10 @@
       boxPools: boxPools,               // active pools drawing the shared unit cube
       unitPools: unitPools,             // active pools drawing a canonical limb loft (character.js LIMBS)
       pagedPools: pagedPools,           // active pools sampling a texture PAGE (one pool per shape, not per outfit)
-      pages: pages, pageSlots: pageSlots, // page canvases and the source textures copied into them
+      pages: pages, pageSlots: pageSlots, // page textures and the source textures copied into them
       pageMB: Math.round(pageTexels * 4 / 1e5) / 10, // level-0 RGBA bytes of every page (mips add a third)
       pageCopies: pageCopies, pageFullUploads: pageFullUploads,
+      pageRefused: pageRefused,         // sources left unpaged: unreadable, or read back with no opaque texel (a dead canvas)
       blackPools: blackPools,           // RATCHET: pools that would render black. Pin at 0.
       poolsTotal: pools.size,
       instancesLive: live,

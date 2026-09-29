@@ -3000,6 +3000,7 @@
   CBZ.cityClothMatOk = clothMatOk;
   CBZ.cityClothMeshRenders = clothMeshRenders;
 
+  let _deadCanvases = 0;
   function buildSet(key, rec) {
     const cv = document.createElement("canvas");
     cv.width = W; cv.height = H;
@@ -3010,6 +3011,7 @@
     // The CPU-side canvas paints marginally slower and reads for free; the
     // texture upload path (texImage2D from canvas) is unchanged.
     const ctx = cv.getContext("2d", { willReadFrequently: true });
+    if (!ctx) { _deadCanvases++; return null; }
     const P = { T: rowPainter(ctx, "torso"), J: rowPainter(ctx, "jacket"), A: rowPainter(ctx, "arm"), L: rowPainter(ctx, "leg"), ctx: ctx };
     const c = (rec && rec.colors) || {};
     const kind = key.split("|")[0];
@@ -3019,6 +3021,14 @@
     // the jacket's gap/cap clears cut through this layer too.
     ctx.fillStyle = hx(c.torso != null ? c.torso : (key.split("|")[1] | 0) || 0x444444);
     ctx.fillRect(0, 0, W, H);
+    // A DEAD CANVAS IS A BODY WITH NO CLOTHES. iOS WebKit caps the memory all
+    // canvases may hold; a canvas made past the cap still hands out a context,
+    // but it draws nothing and reads back transparent. Uploaded, that atlas is
+    // alpha 0 everywhere and this material's alphaTest discards the whole
+    // torso, arms and legs (owner, iPad: "the outfit is nil"). The opaque fill
+    // just above cannot read back fully transparent; if it does, refuse: null is this
+    // cache's "no painted look", so the body is flat-painted in rec.colors.
+    try { if (ctx.getImageData(W >> 1, H >> 1, 1, 1).data[3] === 0) { _deadCanvases++; return null; } } catch (e) {}
     let parts = null;
     if (kind === "suit") {
       const st = SUIT_STYLES[(key.split("|")[1] | 0)] || SUIT_STYLES[0];
@@ -3110,6 +3120,8 @@
   }
   let _setsRebuilt = 0;
   CBZ.cityClothesSetsRebuilt = function () { return _setsRebuilt; };
+  // atlases refused because their canvas came back dead (see buildSet)
+  CBZ.cityClothesDeadCanvases = function () { return _deadCanvases; };
   function getSet(recOrId, ch) {
     const rec = typeof recOrId === "string" ? { id: recOrId } : recOrId;
     const key = keyOf(rec, ch);
