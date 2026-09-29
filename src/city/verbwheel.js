@@ -13,7 +13,7 @@
          laid round it, the obvious one first and biggest.
 
    The wheel is not a menu that names systems. It is the thing's own verbs
-   (Talk, Hire, Mug, Follow me, Go after...), pinned round the thing.
+   (Talk, Hire, Mug, Follow me, Attack...), pinned round the thing.
 
    ORDERS ABOUT SOMEONE ELSE (the delegation thesis). An option registered
    with `pick: "person"` is an order whose object is a third person ("Go
@@ -70,7 +70,7 @@
   }
   // a verb is a verb: cut an authored "Verb - clause" to its head
   function short(label) {
-    if (CBZ.cityVerbLabel) { try { const v = CBZ.cityVerbLabel(label); if (v) return v; } catch (e) {} }
+    if (CBZ.cityVerbWord) { try { const v = CBZ.cityVerbWord(label); if (v) return v; } catch (e) {} }
     let s = String(label || "").split(/\s+[—–-]\s+/)[0].replace(/[?.!]+$/, "").trim();
     if (s.length > 22) { const sp = s.slice(0, 22).lastIndexOf(" "); s = sp > 6 ? s.slice(0, sp) : s.slice(0, 21) + "…"; }
     return s || "…";
@@ -90,6 +90,8 @@
       "#verbWheel .vw-slice.vw-main{font-size:16px;padding:11px 18px}" +
       "#verbWheel .vw-slice.vw-bad{color:#ffb4a8}" +
       "#verbWheel .vw-slice.on,#verbWheel .vw-slice:hover{background:rgba(236,226,200,.95);color:#15171b}" +
+      // the steered verb (mouse / scroll / pad) needs one visible state
+      "#verbWheel .vpill.on{border-color:var(--verb-rim-lead,#7fe7ff);box-shadow:0 0 0 2px var(--verb-rim-lead,#7fe7ff),0 2px 12px rgba(0,0,0,.38)}" +
       "#verbWheel .vw-n{display:inline-block;margin-right:7px;opacity:.55;font-size:11px}" +
       "body.touch #verbWheel .vw-n{display:none}" +
       "body.touch #verbWheel .vw-slice{min-height:48px;padding:14px 18px;font-size:15px}";
@@ -105,32 +107,47 @@
     document.body.appendChild(root);
     return root;
   }
+  // THE LOOK is css/city.css's (CBZ.cityVerbCluster: .vcluster.ring of .vpill,
+  // the likely verb as .lead). This file only fills it, places it and routes
+  // the input. The .vw-slice fallback is for a page without that renderer.
+  let box = null;                 // the element placed on the thing (.vcluster, or the root)
+  function wire(b, i, n) {
+    b._ang = -Math.PI / 2 + (i / n) * Math.PI * 2;
+    let touchAt = -1e9;
+    b.addEventListener("touchend", function (e) { e.preventDefault(); e.stopPropagation(); touchAt = Date.now(); fire(i); }, { passive: false });
+    b.addEventListener("click", function (e) { e.preventDefault(); e.stopPropagation(); if (Date.now() - touchAt < 700) return; fire(i); });
+  }
   function build() {
     if (!dom()) return;
     ring.innerHTML = "";
-    btns = [];
+    btns = []; box = null;
     const n = W.items.length;
-    for (let i = 0; i < n; i++) {
-      const it = W.items[i];
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = "vw-slice" + (i === 0 ? " vw-main" : "") + (it.bad ? " vw-bad" : "");
-      const num = document.createElement("span");
-      num.className = "vw-n";
-      num.textContent = String(i + 1);
-      b.appendChild(num);
-      b.appendChild(document.createTextNode(short(it.label)));
-      // the obvious verb sits on top, the rest go round clockwise
-      const a = -Math.PI / 2 + (i / n) * Math.PI * 2;
-      const r = n === 1 ? 0 : RING;
-      b.style.left = Math.round(Math.cos(a) * r) + "px";
-      b.style.top = Math.round(Math.sin(a) * r) + "px";
-      b._ang = a;
-      let touchAt = -1e9;
-      b.addEventListener("touchend", function (e) { e.preventDefault(); e.stopPropagation(); touchAt = Date.now(); fire(i); }, { passive: false });
-      b.addEventListener("click", function (e) { e.preventDefault(); e.stopPropagation(); if (Date.now() - touchAt < 700) return; fire(i); });
-      ring.appendChild(b);
-      btns.push(b);
+    if (CBZ.cityVerbCluster) {
+      const touch = !!CBZ.touchMode;
+      const rows = W.items.map(function (it, i) { return { key: touch ? "" : String(i + 1), proposal: it.label, label: it.label, bad: it.bad }; });
+      ring.innerHTML = CBZ.cityVerbCluster(rows, { ring: n > 1 });
+      box = ring.firstElementChild || null;
+      if (box) box.id = "verbWheelRing";
+      const list = box ? box.querySelectorAll(".vpill") : [];
+      for (let i = 0; i < list.length; i++) { wire(list[i], i, n); btns.push(list[i]); }
+    } else {
+      for (let i = 0; i < n; i++) {
+        const it = W.items[i];
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "vw-slice" + (i === 0 ? " vw-main" : "") + (it.bad ? " vw-bad" : "");
+        const num = document.createElement("span");
+        num.className = "vw-n";
+        num.textContent = String(i + 1);
+        b.appendChild(num);
+        b.appendChild(document.createTextNode(short(it.label)));
+        const a = -Math.PI / 2 + (i / n) * Math.PI * 2, r = n === 1 ? 0 : RING;
+        b.style.left = Math.round(Math.cos(a) * r) + "px";
+        b.style.top = Math.round(Math.sin(a) * r) + "px";
+        wire(b, i, n);
+        ring.appendChild(b);
+        btns.push(b);
+      }
     }
     highlight(-1);
   }
@@ -252,8 +269,9 @@
     // keep the whole ring on the screen
     const m = RING + 70;
     sx = Math.max(m, Math.min(w - m, sx)); sy = Math.max(RING + 30, Math.min(h - RING - 30, sy));
-    root.style.left = Math.round(sx) + "px";
-    root.style.top = Math.round(sy) + "px";
+    const el = box || root;
+    el.style.left = Math.round(sx) + "px";
+    el.style.top = Math.round(sy) + "px";
   }
   function stale() {
     const c = W.cand, t = c && c.t, P = CBZ.player;

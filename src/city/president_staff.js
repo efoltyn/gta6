@@ -59,20 +59,23 @@
   const BRIEF_AT = 25;         // scandal at which the press secretary goes to the cameras by herself
 
   const ROLES = {
-    agent: { job: "secret service", archetype: "security", armed: true, weapon: "Pistol", hp: 150,
-      line: "Twelve years on the detail, sir.", hired: "Sir." },
-    driver: { job: "chauffeur", archetype: "professional",
-      line: "I know every road out of here.", hired: "I'll be with the car." },
-    press: { job: "press secretary", archetype: "professional",
-      line: "Bad weeks are my job.", hired: "I'll take the room." },
-    general: { cabinet: true, job: "military general", archetype: "military", armed: true,
-      line: "The army answers to you. Not to me.", hired: "Mr. President." },
-    bureau: { cabinet: true, job: "federal agent", archetype: "professional",
-      line: "Give me a thread and I'll pull it.", hired: "Mr. President." },
-    police: { cabinet: true, job: "police commissioner", archetype: "professional",
-      line: "I want more cars on the corners.", hired: "Mr. President." },
-    treasury: { cabinet: true, job: "treasury secretary", archetype: "professional",
-      line: "The books will balance. Mostly.", hired: "Mr. President." },
+    agent: { job: "secret service", archetype: "security", armed: true, weapon: "Pistol", hp: 150 },
+    driver: { job: "chauffeur", archetype: "professional" },
+    press: { job: "press secretary", archetype: "professional" },
+    general: { cabinet: true, job: "military general", archetype: "military", armed: true },
+    bureau: { cabinet: true, job: "federal agent", archetype: "professional" },
+    police: { cabinet: true, job: "police commissioner", archetype: "professional" },
+    treasury: { cabinet: true, job: "treasury secretary", archetype: "professional" },
+  };
+  // what each says: one line when you walk up, one word when hired
+  const SAYS = {
+    agent: ["Twelve years on the detail, sir.", "Sir."],
+    driver: ["I know every road out of here.", "I'll be with the car."],
+    press: ["Bad weeks are my job.", "I'll take the room."],
+    general: ["The army answers to you. Not to me.", "Mr. President."],
+    bureau: ["Give me a thread and I'll pull it.", "Mr. President."],
+    police: ["I want more cars on the corners.", "Mr. President."],
+    treasury: ["The books will balance. Mostly.", "Mr. President."],
   };
   const ORDER = ["general", "bureau", "police", "treasury", "driver", "agent", "press"];
 
@@ -246,7 +249,7 @@
     if (!p || p.dead || !seat()) return;
     dropFromLine(c);
     p._presCandidate = null; p._iopts = null;
-    say(p, R.hired, 2.2);
+    say(p, SAYS[c.role][1], 2.2);
     if (c.role === "agent") {
       const d = detail();
       if (!d) { walkOut(p); return; }
@@ -331,7 +334,7 @@
     if (!p || !CBZ.interactions || !CBZ.interactions.registerFor) return;
     p._iopts = null;
     CBZ.interactions.registerFor(p, { id: "pres-press-brief", slot: "e", prio: 40, campaignSafe: true, forceYes: true,
-      label: "Brief the press", canShow: function () { return !!seat() && staff().pressDay !== day(); },
+      label: "Brief", canShow: function () { return !!seat() && staff().pressDay !== day(); },
       onSelect: function () { brief(true); } });
   }
 
@@ -406,7 +409,7 @@
         const sp = spots(rec).line[c.spot];
         if (near(p, sp, 0.6) || c.t > 14) { holdAt(p, spots(rec).faceIn(sp)); c.phase = "wait"; }
       } else if (c.phase === "wait" && !c.greeted && P && P.pos && Math.hypot(P.pos.x - p.pos.x, P.pos.z - p.pos.z) < 2.8) {
-        c.greeted = true; say(p, ROLES[c.role].line, 3);
+        c.greeted = true; say(p, SAYS[c.role][0], 3);
       }
     }
     if (W.press && !W.press.dead && rec && W.press.state === "walk" && near(W.press, spots(rec).press, 0.6)) holdAt(W.press, spots(rec).faceIn(spots(rec).press));

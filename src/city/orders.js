@@ -8,20 +8,23 @@
    his staff. Point the wheel (Q, or a tap) at one of them and three verbs
    take a SECOND person:
 
-     Go after   he goes for the one you point at
+     Attack     he goes for the one you point at
      Guard      he sticks to the one you point at and fights whoever does
-     Tail       he follows the one you point at, at a distance
+     Tail       he follows the one you point at, then tells you where he went
+
+   Agent first (this file): you pick the man, then the mark. Mark first is
+   city/interact.js's "Send to rob / scare / tail / Sic" on the stranger's own
+   wheel, which picks your nearest free man. Both land in ONE engine.
 
    ...and "Stand down" ends whatever he is doing. Picking who works like
-   every verb (city/verbwheel.js): after "Go after" the wheel closes, the
+   every verb (city/verbwheel.js): after "Attack" the wheel closes, the
    verb is pinned over whoever you now look at, E gives the order.
 
-   The bodies are driven through the shared seams, never a private mover:
-   CBZ.cityBrain.exec.verb("attack", a, b) for violence (the city's one
-   "a attacks b"), CBZ.protection.moveToward / release for walking (the one
-   move order peds.js honours), CBZ.citySay for the one word he answers
-   with. A detail agent under an order is skipped by protection.js's
-   formation (ped._order) until the order ends.
+   Bodies: tail and a crewman's "go after" are CBZ.followerOrder's (boarding.js).
+   Guard, and "go after" for an agent, run here through the shared seams:
+   CBZ.cityBrain.exec.verb("attack", a, b), CBZ.protection.moveToward /
+   release, CBZ.citySay. A detail agent under an order is skipped by
+   protection.js's formation (ped._order) until the order ends.
 
    PUBLIC: CBZ.cityOrders2 = { give(agent, kind, target), clear(agent),
             worksForYou(ped), list() }
@@ -57,9 +60,18 @@
   }
   function say(p, line) { if (CBZ.citySay && p && p.group) { try { CBZ.citySay(p, line, null, 1.8); } catch (e) {} } }
 
+  // ONE ENGINE. A job on somebody (rob / scare / tail / sic) is city/boarding.js's
+  // follower engine (CBZ.followerOrder: the walk up, the words, the haul back,
+  // the report). This file only adds what that engine has no body for: a
+  // GUARD on a third person, and "go after" for a man the companion brain does
+  // not drive (a Secret Service agent). Everything else is handed straight on.
   function give(a, kind, t) {
     if (!a || a.dead || !t || t.dead || t === a) return false;
-    if (!a._order) a._orderWas = { companion: !!a.companion, controlled: !!a.controlled };
+    if (kind === "tail" || (kind === "attack" && a.companion)) {
+      const v = kind === "tail" ? "tail" : "sic";
+      if (CBZ.followerOrder && CBZ.followerOrder(a, v, { target: t })) return true;
+    }
+    if (!a._order) a._orderWas = { companion: !!a.companion };
     a._order = { kind: kind, target: t, t: 0 };
     a.companion = false;
     LIVE.add(a);
@@ -127,14 +139,17 @@
     if (!I || !I.register) return false;
     const on = function (p) { return worksForYou(p); };
     I.register("ped", { id: "order-attack", prio: 30, bad: true, pick: "person", campaignSafe: true,
-      canShow: on, label: "Go after", onSelect: function (a, ctx, t) { give(a, "attack", t); } });
+      canShow: on, label: "Attack", onSelect: function (a, ctx, t) { give(a, "attack", t); } });
     I.register("ped", { id: "order-guard", prio: 29, pick: "person", campaignSafe: true,
       canShow: on, label: "Guard", onSelect: function (a, ctx, t) { give(a, "guard", t); } });
     I.register("ped", { id: "order-tail", prio: 28, pick: "person", campaignSafe: true,
       canShow: on, label: "Tail", onSelect: function (a, ctx, t) { give(a, "tail", t); } });
     I.register("ped", { id: "order-stand-down", prio: 70, campaignSafe: true,
-      canShow: function (p) { return !!(p && p._order); }, label: "Stand down",
-      onSelect: function (a) { clear(a); say(a, "Sir."); } });
+      canShow: function (p) { return !!(p && (p._order || p._cbzJob)); }, label: "Stand down",
+      onSelect: function (a) {
+        if (a._cbzJob) { a._cbzJob = null; a._sicOn = null; a._boardRun = false; }
+        clear(a); say(a, "Sir.");
+      } });
     return true;
   }
   if (!wire()) { const t = setInterval(function () { if (wire()) clearInterval(t); }, 250); }

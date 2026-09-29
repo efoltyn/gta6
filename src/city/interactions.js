@@ -369,6 +369,14 @@
       else if (o.hold) { if (!hold) hold = o; }
       else if (!tap) tap = o;
     }
+    // ON A PERSON, E IS TALK. An authored primary (slot "e": a shop counter's
+    // clerk, a man waiting to be hired) keeps E; otherwise the obvious thing to
+    // do to a person is speak to him, and every offer (hire, recruit, sell,
+    // send your man at him) is on his wheel. This is what ends "E on a
+    // stranger hires him".
+    if (tap && tap.slot !== "e" && !cand.gunpoint && cand.layers.indexOf("ped") >= 0) {
+      for (const o of pass) if (!o.pick && !o.ride && !o.hold && /(^|-)talk(-|$)/.test(String(o.id || ""))) { tap = o; break; }
+    }
     const rows = [];
     if (tap) rows.push(keyRow("e", false, tap, t, ctx));
     if (hold) rows.push(keyRow("e", true, hold, t, ctx));
@@ -636,9 +644,11 @@
     //     one E on screen, so the card steps back (cityUseOwner below)
     //   • TOUCH: the world is the button. Tapping the thing opens its wheel
     //     (systems/touch.js -> city/verbwheel.js), so no floating pills.
-    const shown = SILENT_RIDE[pick.kind] ? rows.filter((r) => r.key !== "f") : rows;
+    // a hold row's chip reads "HOLD E", so the card never shows two bare E's
+    const shown = (SILENT_RIDE[pick.kind] ? rows.filter((r) => r.key !== "f") : rows)
+      .map((r) => (r.hold ? Object.assign({}, r, { key: "hold " + r.key }) : r));
     const loneSeat = pick.kind === "seat" && rows._pass && rows._pass.length === 1;
-    if (!shown.length || loneSeat || CBZ.touchMode || (CBZ.verbWheel && CBZ.verbWheel.isOpen()) || useOwner("e") === "pill") {
+    if (!shown.length || loneSeat || CBZ.touchMode || (CBZ.verbWheel && (CBZ.verbWheel.isOpen() || CBZ.verbWheel.ordering())) || useOwner("e") === "pill") {
       quietPanel(pick.kind);
       return;
     }
@@ -696,6 +706,7 @@
      capture-phase binder asks this before it consumes a press. */
   function useOwner(key) {
     key = String(key || "e").toLowerCase();
+    if (key === "e" && CBZ.verbWheel && CBZ.verbWheel.ordering()) return "pill";   // "who?": the order's pin owns E
     const pin = CBZ.prisonPromptShownFor ? CBZ.prisonPromptShownFor(key) : null;
     let mine = false;
     for (let i = 0; i < currentRows.length; i++) if (currentRows[i].key === key) { mine = true; break; }
@@ -754,7 +765,8 @@
       return;
     }
     if (k !== "e" || !current || !currentRows.length) return;
-    if (CBZ.verbWheel && CBZ.verbWheel.isOpen()) return;
+    // the wheel is modal, and an order waiting for its "who" owns E (its pin)
+    if (CBZ.verbWheel && (CBZ.verbWheel.isOpen() || CBZ.verbWheel.ordering())) return;
     if (e.repeat) { if (k === holdKey) e.preventDefault(); return; }
     const tap = rowFor("e", false), hold = rowFor("e", true);
     if (!tap && !hold) return;
@@ -806,8 +818,9 @@
       seen.add(o);
       out.push({ opt: o, label: label, bad: !!bad, key: keyOf(o), pick: o.pick || null });
     };
-    // a provider's own rows first (dialogue's answers are not pool options)
-    for (const r of rows) if (r.opt && pass.indexOf(r.opt) < 0) add(r.opt, r.proposal || r.label, r.bad);
+    // what E / hold E / F would do comes first (the obvious verb is the lead,
+    // and a provider's answers are not pool options), then everything else
+    for (const r of rows) if (r.opt) add(r.opt, r.proposal || r.label, r.bad);
     if (rows._extra) for (const r of rows._extra) add(r.opt, r.proposal || r.label, r.bad);
     for (const o of pass) add(o, proposalOf(o, cand.t, ctx), o.bad);
     return out;
