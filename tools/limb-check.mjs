@@ -23,7 +23,7 @@
      5. paint: a painter hands each quadrant the right atlas column in the
         BoxGeometry's u direction and v runs along the old box span;
      6. LOD swap (rig.setHandLod) swaps every limb and keeps the paint.
-   Prints the per-body / 650-crowd triangle numbers (the ipad-perf budget view).
+   Prints the per-body / 650-crowd triangle numbers (the speed.mjs --device tablet budget view).
 
      node tools/limb-check.mjs        exit 0 = ok */
 import { readFileSync } from "node:fs";

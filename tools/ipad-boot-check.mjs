@@ -2,12 +2,12 @@
 /* ============================================================
    tools/ipad-boot-check.mjs — does the game come up clean ON AN IPAD?
 
-   tools/boot-health.mjs answers "does the script chain load" on a desktop
+   tools/speed.mjs --load answers "does the script chain load" on a desktop
    viewport. This asks the three things that are only true on the device the
    owner actually plays on, and that were all broken or unverified before the
    App Store pass:
 
-     1. THE SCRIPT CHAIN loads with no exception (same as boot-health, but with
+     1. THE SCRIPT CHAIN loads with no exception (same as speed.mjs --load, but with
         touch emulation on, because several files branch on it at load time).
      2. THE TOUCH LAYER TURNS ITSELF ON. systems/touch.js used to gate on
         `(pointer: coarse)` alone, which an iPad with a trackpad — and a
@@ -19,7 +19,7 @@
         reaches the HUD.
 
    It does NOT wait for the world build (a 25 km world does not finish inside a
-   CDP window on a contended box — see boot-health.mjs's header for that whole
+   CDP window on a contended box — see tools/speed.mjs's header (the lock) for that whole
    story). Everything asked here is answerable at DOMContentLoaded + a beat.
 
        node tools/ipad-boot-check.mjs
@@ -78,7 +78,7 @@ const page = targets.find((t) => t.type === "page");
 if (!page) done(2, "FATAL: no page target");
 
 // Minimal CDP over node's built-in WebSocket, so this tool has no npm
-// dependency of its own — the same choice boot-health.mjs makes.
+// dependency of its own — the same choice tools/speed.mjs makes.
 const ws = new (globalThis.WebSocket)(page.webSocketDebuggerUrl);
 await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
 let msgId = 0;

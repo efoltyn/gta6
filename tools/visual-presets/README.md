@@ -1,5 +1,8 @@
 # Visual comparison presets
 
+(Speed, not pixels: `node tools/speed.mjs` is the load/frame-time loop — see
+the header of `tools/speed.mjs` and `tools/TESTING-LOOPS.md`.)
+
 `tools/visual-compare.mjs` turns two browser builds into a matched screenshot
 set, HTML contact sheet, and print-ready PDF. It starts a local server for the
 `after` side when `--after` is omitted and opens the PDF on macOS by default.
