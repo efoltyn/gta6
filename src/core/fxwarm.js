@@ -150,6 +150,16 @@
   // `lights` are the frame's pinned lights: the shadow pass draws with the
   // frame's light state, so its program keys carry the same counts and
   // shadowMapEnabled (true only when some light casts).
+  let cachedLights = null;
+  function subtreeHasLight(roots) {
+    const list = Array.isArray(roots) ? roots : [roots];
+    let hit = false;
+    for (let i = 0; i < list.length && !hit; i++) {
+      if (!list[i]) continue;
+      list[i].traverse(function (o) { if (!hit && o.isLight && !o.isPointLight && !o.isSpotLight) hit = true; });
+    }
+    return hit;
+  }
   function queueDepth(r, cam, casters, lights) {
     if (!casters.length) return;
     if (!depthRT) {
@@ -180,9 +190,18 @@
     if (!r || typeof r.compile !== "function" || !sc || !cam) return rep;
     const skip = opts && opts.skip;
     const hidden = hiddenRoots();
-    if (CBZ.lightPinApply) { try { CBZ.lightPinApply(); } catch (e) {} }   // the frame's light counts, now
-    const lights = [];
-    sc.traverseVisible(function (o) { if (o.isLight && o.layers.test(cam.layers)) lights.push(o); });
+    // THE LIGHT SET. A program key carries light COUNTS only, and lightpin
+    // makes the point/spot counts a constant; so the per-builder calls reuse
+    // the last full gather (a traverseVisible of a 160k-node scene per builder
+    // was ~0.5 s of the build) unless the caller asks for a full pass or the
+    // new subtree brings a light of another kind.
+    let lights = cachedLights;
+    if (!lights || (opts && (opts.full || opts.depth || opts.target)) || !opts || subtreeHasLight(roots)) {
+      if (CBZ.lightPinApply) { try { CBZ.lightPinApply(); } catch (e) {} }   // the frame's light counts, now
+      lights = [];
+      sc.traverseVisible(function (o) { if (o.isLight && o.layers.test(cam.layers)) lights.push(o); });
+      cachedLights = lights;
+    }
     const n = { D: 0, P: 0, S: 0, H: 0, A: 0, R: 0, s: 0 };
     for (let i = 0; i < lights.length; i++) {
       const L = lights[i];
