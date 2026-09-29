@@ -471,7 +471,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/vegetation.js?v=allmain1"></script>
 <script src="src/world/forestlook.js?v=allmain1"></script>
 <script src="src/core/prio.js?v=arch2"></script>
-<script src="src/core/lightpin.js?v=cityload1"></script>
+<script src="src/core/lightpin.js?v=combo1"></script>
 <script src="src/core/matrixskip.js?v=mskip1"></script>
 <!-- core/interfaces.js is NO LONGER LOADED (2026-07-29). It is 316 lines of
      which ~290 are the contracts index's prose and the rest is a single
@@ -821,7 +821,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/reality.js?v=support1"></script>
 <script src="src/systems/npcgrid.js?v=scale2"></script>
 <script src="src/systems/camera.js?v=me6f1ee"></script>
-<script src="src/systems/physics.js?v=m489457-st1"></script>
+<script src="src/systems/physics.js?v=colinc1"></script>
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
 <script src="src/systems/climb.js?v=lad1"></script>
 <!-- The tower post officers (entities/towerwatch.js): after guards.js, prisonkit.js (CBZ.prisonTowers) and climb.js. -->
@@ -971,7 +971,7 @@ document.body.appendChild(b);}}catch(e){}})();
      its world lazily, so the prison game above is untouched. Must load
      BEFORE loop.js so its frame-work is included in the sort. -->
 <script src="src/systems/fx.js?v=sharkmode1"></script>
-<script src="src/systems/debris.js?v=debris1"></script>
+<script src="src/systems/debris.js?v=crash1"></script>
 <!-- REAL LIGHTNING. Registers a `lightning` row + FX composer on the impact
      bus, so a cloud-to-ground strike draws a forked channel with return
      strokes, ground flashover, steam and a burn scar instead of falling
@@ -1088,7 +1088,7 @@ document.body.appendChild(b);}}catch(e){}})();
      city/buildings.js, which reads CBZ.CIVIC_SHOPS and CBZ.CIVIC_ACCT_SEED at
      parse time and the bld* helpers at build time. -->
 <script src="src/city/buildings_civic.js?v=deslop1"></script>
-<script src="src/city/buildings.js?v=bmath1"></script>
+<script src="src/city/buildings.js?v=combo1"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
@@ -1347,7 +1347,7 @@ document.body.appendChild(b);}}catch(e){}})();
      brain.rep. After peds.js (fleeFrom / markGunpoint / the report visuals it
      drives) and systems/brain.js; nothing here runs at parse. -->
 <script src="src/city/brain_city.js?v=armed1"></script>
-<script src="src/entities/pedinstance.js?v=me18753"></script>
+<script src="src/entities/pedinstance.js?v=hot1"></script>
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and
      after interior_programs.js. This is what puts a boss on the top floor. -->
@@ -1398,9 +1398,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- city/carlod.js: the far-car LOD (one simplified twin per shared car
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
-<script src="src/city/carlod.js?v=lod1"></script>
-<script src="src/city/vehicles.js?v=mce86a5"></script>
-<script src="src/city/carinstances.js?v=cars2"></script>
+<script src="src/city/carlod.js?v=lodw1"></script>
+<script src="src/city/vehicles.js?v=hot1"></script>
+<script src="src/city/carinstances.js?v=cars3"></script>
 <script src="src/city/playerair.js?v=nodash1"></script>
 <script src="src/city/playeraircraft.js?v=hats1"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
@@ -1479,7 +1479,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- ambient civilian air traffic (GA prop planes + a light heli orbiting the
      city, banking into their turns) — pure atmosphere, deterministic, gated by
      CBZ.CONFIG.AIR_TRAFFIC_AMBIENT -->
-<script src="src/city/airtraffic.js?v=boom2"></script>
+<script src="src/city/airtraffic.js?v=crash1"></script>
 <!-- ORDNANCE + STRUCTURE. impactbus.js: CBZ.detonate(x,y,z,kind,opts) — new
      ordnance is a TABLE ROW, not a file. structural.js: CBZ.structure, the ONE
      building damage ledger (INTACT→SCARRED→WOUNDED→BURNING→CRITICAL→COLLAPSING→
@@ -1812,7 +1812,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/campaign_ui.js?v=markphoto1"></script>
 <script src="src/city/campaign.js?v=me6f1ee"></script>
 <script src="src/city/cinematics.js?v=nodash1"></script>
-<script src="src/systems/humancontact.js?v=bodyphys1"></script>
+<script src="src/systems/humancontact.js?v=hot1"></script>
 <script src="src/systems/navigation.js?v=sharkmode1"></script>
 <!-- THE PRISON WALKS TO DOORS. Owner: "Instead of flickering when walking into
      a wall falling real physics and then finding door etc". The mover is a
@@ -2395,7 +2395,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/building_dress.js?v=roof1-st1"></script>
 <script src="src/core/farcull.js?v=fc3cells"></script>
 <!-- whole-building frustum hide before every draw (exact: view frustum + sun shadow frustum); also owns CBZ.subtreeSphere, which city/cctv.js's feed scope reuses -->
-<script src="src/core/viewscope.js?v=vs1"></script>
+<script src="src/core/viewscope.js?v=vs2"></script>
 <script src="src/core/losgrid.js?v=lg1"></script>
 <script src="src/core/staticfreeze.js?v=sf1"></script>
 <script src="src/systems/settings.js?v=nodash1"></script>
@@ -2409,7 +2409,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/localinst.js?v=li2"></script>
 <script src="src/core/profile.js"></script>
 <script src="src/core/fxwarm.js?v=cityload1"></script>
-<script src="src/city/cctv.js?v=cars1"></script>
+<script src="src/city/cctv.js?v=seen1"></script>
 <script src="src/core/loop.js?v=scale1"></script>
 <script src="src/main.js?v=sharkmode1"></script>
 </body>

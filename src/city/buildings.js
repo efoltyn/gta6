@@ -789,7 +789,7 @@
     gp.shattered = true; shatteredPanes++; shatteredList.push(gp);
     if (gp.mesh) gp.mesh.visible = false;
     else paneShow(gp, false);          // pooled pane: zero its instance matrix
-    if (gp.col) { const i = CBZ.colliders.indexOf(gp.col); if (i >= 0) CBZ.colliders.splice(i, 1); if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
+    if (gp.col) CBZ.colliderRemove(gp.col);   // incremental: the glass debris below queries the grid
     // clear any lingering crack decal for this pane
     for (let i = crackQuads.length - 1; i >= 0; i--) if (crackQuads[i].gp === gp) { CBZ.scene.remove(crackQuads[i].mesh); crackQuads.splice(i, 1); }
     if (!CBZ.debris) return;
@@ -1692,6 +1692,14 @@
       // candidate at any radius — see world/yard.js. The blast still scars,
       // shakes and throws debris there; it just does not open.
       if (c.noBreach) continue;
+      // DISTANCE FIRST. This loop walks every collider in the city (~142k);
+      // wallBandOf below runs a Box3.setFromObject mesh traversal for each
+      // band-less one (every lamp, hydrant, bollard, tree trunk on the map),
+      // which made a single window carve cost tens of ms. Out-of-reach boxes
+      // are dropped by the same `dd > sr2` test that ends the loop body, so
+      // the chosen wall (and its array-order tie-break) is unchanged.
+      { const qx = Math.max(c.minX, Math.min(c.maxX, x)) - x, qz = Math.max(c.minZ, Math.min(c.maxZ, z)) - z;
+        if (qx * qx + qz * qz > sr2) continue; }
       const band = wallBandOf(c);
       if (!band) continue;                                  // heightless AND no readable mesh
       const cy0 = band.y0, cy1 = band.y1;
@@ -1939,7 +1947,7 @@
       if (parent) parent.add(m); else CBZ.scene.add(m);
       rec.extras.push(m);
       const col = { minX: wx - bw / 2, maxX: wx + bw / 2, minZ: wz - bd / 2, maxZ: wz + bd / 2, ref: m, y0: ry0, y1: ry1 };
-      CBZ.colliders.push(col); rec.remnCols.push(col);
+      CBZ.colliderAdd(col); rec.remnCols.push(col);
       if (rec.wallWasLos && CBZ.losBlockers) CBZ.losBlockers.push(m);
     }
     /* The neighbour form of addRemnant: hide a course that runs past the
@@ -1992,7 +2000,7 @@
     addRemnant(su0 - 0.01, su1 + 0.01, v1, y1);   // header above it
 
     // OPEN THE COLLIDER: splice the original wall AABB out + rebuild broadphase
-    const ci = CBZ.colliders.indexOf(c); if (ci >= 0) CBZ.colliders.splice(ci, 1);
+    CBZ.colliderRemove(c);
 
     /* ---- CLEAR THE OPENING ------------------------------------------------
        OWNER, 2026-08-06: "you can shoot a window and walk through it, but if
@@ -2072,7 +2080,7 @@
       if (oU0 >= u0 - 0.02 && oU1 <= u1 + 0.02) {
         // wholly inside the hole — it goes, and so does its picture if that
         // mesh is not also carrying another live collider somewhere else.
-        CBZ.colliders.splice(oi, 1);
+        CBZ.colliderRemove(o, oi);
         rec.clearedCols.push(o);
         if (o.ref && o.ref.material && o.y0 != null && o.y1 != null && !(o.ref.material.transparent)) {
           shedBox(oU0, oU1, o.y0, o.y1, o.ref.material);          // it went; it falls
@@ -2092,7 +2100,7 @@
       const leftLen = u0 - oU0, rightLen = oU1 - u1;
       const keepL = leftLen > 0.12, keepR = rightLen > 0.12;
       if (!keepL && !keepR) {                                   // nothing outside worth keeping
-        CBZ.colliders.splice(oi, 1);
+        CBZ.colliderRemove(o, oi);
         rec.clearedCols.push(o);
         continue;
       }
@@ -2118,15 +2126,16 @@
           if (o.y1 != null) cp.y1 = o.y1;
           if (o.noBreach) cp.noBreach = true;
           if (horiz) { cp.minX = u1; cp.maxX = oU1; } else { cp.minZ = u1; cp.maxZ = oU1; }
-          CBZ.colliders.push(cp); rec.remnCols.push(cp);
+          CBZ.colliderAdd(cp); rec.remnCols.push(cp);
         }
       } else if (horiz) o.minX = u1; else o.minZ = u1;          // only the far side survives
+      { const q = rec.clippedCols[rec.clippedCols.length - 1]; CBZ.colliderShrunk(o, q.minX, q.maxX, q.minZ, q.maxZ); }
     }
     carveDbg.gapU = [+u0.toFixed(2), +u1.toFixed(2)];
     carveDbg.gapV = [+v0.toFixed(2), +v1.toFixed(2)];
     carveDbg.cleared = rec.clearedCols.length;
     carveDbg.clipped = rec.clippedCols.length;
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    // (the broadphase was edited in place above: colliderAdd/Remove/Shrunk)
 
     // window panes hanging on the carved band would float over the hole —
     // clear them silently (the carve's debris/replay-silence owns the moment;
@@ -2139,7 +2148,7 @@
       if (gu < u0 - 0.2 || gu > u1 + 0.2 || gp.y < v0 - 0.3 || gp.y > v1 + 0.3) continue;
       gp.shattered = true; shatteredPanes++; shatteredList.push(gp);
       if (gp.mesh) gp.mesh.visible = false; else paneShow(gp, false);
-      if (gp.col) { const gi = CBZ.colliders.indexOf(gp.col); if (gi >= 0) CBZ.colliders.splice(gi, 1); }
+      if (gp.col) CBZ.colliderRemove(gp.col);
       // A PANE IS MATERIAL TOO. It leaves in the same instant the concrete
       // does, so it falls as ITS OWN glass rather than as more grey masonry —
       // which is why a curtain wall now sheds mostly glass and a brick pier
@@ -2521,9 +2530,8 @@
     const col = { minX: g.horiz ? g.u0 : g.fixed - g.thick / 2, maxX: g.horiz ? g.u1 : g.fixed + g.thick / 2,
       minZ: g.horiz ? g.fixed - g.thick / 2 : g.u0, maxZ: g.horiz ? g.fixed + g.thick / 2 : g.u1,
       ref: board, y0: g.v0, y1: g.v1 };
-    CBZ.colliders.push(col); rec.remnCols.push(col);
+    CBZ.colliderAdd(col); rec.remnCols.push(col);
     if (CBZ.losBlockers) CBZ.losBlockers.push(board);
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
   };
 
   // ---- SHOT-OUT WINDOWS YOU CAN CLIMB THROUGH -----------------------------
@@ -2598,7 +2606,7 @@
       if (o.y + o.hh < wY0 - 0.2 || o.y - o.hh > wY1 + 0.2) continue;
       o.shattered = true; shatteredPanes++; shatteredList.push(o);
       if (o.mesh) o.mesh.visible = false; else paneShow(o, false);
-      if (o.col) { const ci = CBZ.colliders.indexOf(o.col); if (ci >= 0) CBZ.colliders.splice(ci, 1); }
+      if (o.col) CBZ.colliderRemove(o.col);
     }
     // interior SKY slabs + mullion strips (instanced roomDeco) — these ARE the
     // light-gray panel the user filmed. Hide every one on this wall box footprint

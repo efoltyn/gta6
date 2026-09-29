@@ -49,7 +49,6 @@
   if (CBZ.CONFIG.LIGHT_BUDGET_SPOT == null) CBZ.CONFIG.LIGHT_BUDGET_SPOT = 8;
 
   const reg = { point: new Set(), spot: new Set() };
-  let pinnedAt = -1, addsSincePin = 0;   // render-wrap dedupe (see wrapRender)
   const OrigPoint = THREE.PointLight, OrigSpot = THREE.SpotLight;
   function wrap(name, kind) {
     THREE[name] = new Proxy(THREE[name], {
@@ -94,8 +93,8 @@
     const wrappedAdd = function (o) {
       const r = origAdd.apply(this, arguments);
       if (o && !o._cbzPinDummy) {
-        if (o.isPointLight) { reg.point.add(o); addsSincePin++; }
-        else if (o.isSpotLight) { reg.spot.add(o); addsSincePin++; }
+        if (o.isPointLight) reg.point.add(o);
+        else if (o.isSpotLight) reg.spot.add(o);
       }
       return r;
     };
@@ -148,56 +147,69 @@
     return on;
   }
 
-  // Exported so a program compiled OUTSIDE a frame (core/fxwarm.js queues
-  // the city's shaders while it is still being built) sees the same pinned
-  // light counts the next frame will: a builder's freshly-added lamps carry
-  // the default layer until this pass runs, and a compile against them keys
-  // a program no frame will ever ask for.
-  function pin() {
+  function ensurePool() {
+    if (pool) return;
+    pool = new THREE.Group();
+    pool.name = "lightpin-pool";
+    pool.position.y = -4000;          // out of every playfield; intensity 0 anyway
+    CBZ.scene.add(pool);
+    // ONE-TIME sync, not a periodic one. The only lights neither hook can
+    // see are those already parented before this file ran (script order
+    // puts it early, but that is a load-order fact, not a guarantee). From
+    // here on every arrival comes through the add seam above, so this walk
+    // never runs again.
+    CBZ.scene.traverse(function (o) {
+      if (o._cbzPinDummy) return;
+      if (o.isPointLight) reg.point.add(o);
+      else if (o.isSpotLight) reg.spot.add(o);
+    });
+  }
+  function pinNow() {
     if (!CBZ.CONFIG.LIGHT_COUNT_PIN || !CBZ.scene || !CBZ.camera) return;
-    pinnedAt = performance.now(); addsSincePin = 0;
-    if (!pool) {
-      pool = new THREE.Group();
-      pool.name = "lightpin-pool";
-      pool.position.y = -4000;          // out of every playfield; intensity 0 anyway
-      CBZ.scene.add(pool);
-      // ONE-TIME sync, not a periodic one. The only lights neither hook can
-      // see are those already parented before this file ran (script order
-      // puts it early, but that is a load-order fact, not a guarantee). From
-      // here on every arrival comes through the add seam above, so this walk
-      // never runs again.
-      CBZ.scene.traverse(function (o) {
-        if (o._cbzPinDummy) return;
-        if (o.isPointLight) reg.point.add(o);
-        else if (o.isSpotLight) reg.spot.add(o);
-      });
-    }
+    ensurePool();
     budgetPass("point", OrigPoint, Math.max(1, +CBZ.CONFIG.LIGHT_BUDGET_POINT || 16));
     budgetPass("spot", OrigSpot, Math.max(1, +CBZ.CONFIG.LIGHT_BUDGET_SPOT || 8));
   }
-  CBZ.lightPinApply = pin;
-  CBZ.onAlways(97, pin);
-  /* EVERY render sees pinned counts, not just the main one. Render-to-texture
-     passes run from UPDATERS (city/cctv.js at 92, scope views), i.e. before
-     this always-pass in the same frame; on the first frame after a build the
-     world's new lamps still carry the default layer there, and each such
-     render keyed (and compiled) a program per material no later frame uses.
-     The pass is a few dozen lights and a sort: cheap enough to run per call. */
-  function wrapRender() {
-    const r = CBZ.renderer;
-    if (!r || !r.render || r.render._cbzLightPinWrapped) return;
-    const real = r.render;
-    let depth = 0;
-    const wrapped = function () {
-      // the always-pass pinned moments ago and no light arrived since: skip
-      if (depth++ === 0 && (addsSincePin || performance.now() - pinnedAt > 8)) { try { pin(); } catch (e) {} }
-      try { return real.apply(this, arguments); } finally { depth--; }
+  CBZ.lightPinNow = pinNow;
+  CBZ.lightPinApply = pinNow;   // core/fxwarm.js (city-load) calls this name before its out-of-frame compiles
+
+  /* THE PIN RUNS INSIDE renderer.render / renderer.compile, NOT AS AN
+     UPDATER (2026-09-28, tools/speed.mjs "new programs, why"). As an always
+     runner at order 97 it was a promise about a moment that had already
+     passed by the time anything drew:
+       - core/fxwarm.js's play-start renderer.compile runs at always 1.2, on
+         the first playing frame, BEFORE the first pin: it compiled every lit
+         material for all 41 unbudgeted point lights, programs no frame ever
+         used again (the first frame compiled 41-, 24- and 16-light copies).
+       - core/viewscope.js (always 999.9) and farcull hide/show whole groups
+         AFTER 97, taking their lights with them: the drive saw 9, 12, 13, 14,
+         15 and 21 lights, each a fresh copy of every lit program in view,
+         1-7 s per hitch.
+       - city/cctv.js renders its feed from an UPDATER, before 97 ran at all.
+     Pinning at the render call is the only place the count is actually
+     read. Only the game scene is pinned (thumbnail/mugshot scenes are not
+     ours). The pass walks a few dozen registered lights; cheap per render. */
+  function hookRenderer() {
+    const R = CBZ.renderer;
+    if (!R || R._cbzLightPin) return;
+    R._cbzLightPin = true;
+    const r0 = R.render;
+    R.render = function (scene) {
+      if (scene && scene === CBZ.scene) pinNow();
+      return r0.apply(this, arguments);
     };
-    for (const k in real) if (k.endsWith("Wrapped")) wrapped[k] = real[k];
-    wrapped._cbzLightPinWrapped = true;
-    r.render = wrapped;
+    if (typeof R.compile === "function") {
+      const c0 = R.compile;
+      R.compile = function (scene) {
+        if (scene && scene === CBZ.scene) pinNow();
+        return c0.apply(this, arguments);
+      };
+    }
   }
-  CBZ.onAlways(97.01, wrapRender);
+  // first thing in every frame (and on the title loop), so the hook is in
+  // place before fxwarm's play-start compile and any updater-driven render
+  CBZ.onAlways(-100, hookRenderer);
+  if (CBZ.onUpdate) CBZ.onUpdate(-100, hookRenderer);
 
   // probe seam: live/culled/pinned counts for gates and perf probes
   CBZ.lightPinAudit = function () {
