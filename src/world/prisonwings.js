@@ -218,9 +218,10 @@
         SPLICED in and out of CBZ.colliders (never merely hidden), the LOS
         blocker moved with it, and a status lamp that is the entire HUD.
 
-        `bars` draws the leaf as a welded grille over a transparent pane
-        instead of a slab — gun-room grammar rule (a): you must be able to
-        SEE what the lock is holding, or the lock motivates nothing.
+        `bars` (the three cages only) hangs the kit's barred leaf, which you
+        see and shoot through and which never blocks sight — gun-room
+        grammar rule (a): you must be able to SEE what the lock is holding.
+        Everything else is the kit's steel detention door.
      ========================================================== */
   const DH = 2.6;
   const doors = [];
@@ -234,74 +235,53 @@
      box on the lock stile with a 20 mm LED lens in it (it was a 13 cm
      glowing cube). */
   const CK = CBZ.corridorKit;
-  const barMat = K.skin("steel", 0x2a2f38, 0.5), lockMat = K.skin("steel", 0x21262e, 0.55);
-  const hidePane = new THREE.MeshBasicMaterial({ visible: false });
-  function barLeaf(hold, lockOn) {
-    return function (g, w, h, dir, i) {
-      const xs = function (u) { return dir * u; };
-      const geos = [];
-      const bx = function (cx, cy, bw, bh, bd) { geos.push(new THREE.BoxGeometry(bw, bh, bd).translate(cx, cy, 0)); };
-      bx(xs(0.035), h / 2, 0.07, h, 0.07); bx(xs(w - 0.035), h / 2, 0.07, h, 0.07);        // stiles
-      for (const y of [0.05, 1.1, h - 0.05]) bx(xs(w / 2), y, w - 0.07, 0.08, 0.05);      // rails
-      const n = Math.max(2, Math.round((w - 0.14) / 0.16));
-      for (let k = 1; k < n; k++)
-        geos.push(new THREE.CylinderGeometry(0.012, 0.012, h - 0.1, 6, 1, true).translate(xs(0.07 + k * (w - 0.14) / n), h / 2, 0));
-      const BGU = THREE.BufferGeometryUtils;
-      for (let k = 0; k < geos.length; k++) if (geos[k].index) geos[k] = geos[k].toNonIndexed();
-      const geo = BGU && BGU.mergeBufferGeometries ? BGU.mergeBufferGeometries(geos, false) : geos[0];
-      const m = new THREE.Mesh(geo, barMat); m.castShadow = false; m.receiveShadow = true; g.add(m);
-      // the leaf still blocks sight the way it always did: an unseen pane
-      const pane = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.04), hidePane);
-      pane.position.set(xs(w / 2), h / 2, 0); g.add(pane);
-      if (i === lockOn && hold) {
-        const box = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.3, 0.1), lockMat);
-        box.position.set(xs(w - 0.09), 1.1, 0); g.add(box);
-        const lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.006, 12).rotateX(Math.PI / 2),
-          new THREE.MeshLambertMaterial({ color: 0xff3b3b, emissive: 0xff0000, emissiveIntensity: 1.0 }));
-        lamp.position.set(xs(w - 0.09), 1.2, 0.053); g.add(lamp);
-        hold.lamp = lamp;
-      }
-      return pane;
-    };
-  }
-  function plateLeaf(hold, lockOn, color) {
-    const draw = CK.steelLeaf(color || 0x4f5d6b);
-    return function (g, w, h, dir, i) {
-      draw(g, w, h, dir);
-      const pane = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.05), hidePane);
-      pane.position.set(dir * w / 2, h / 2, 0); g.add(pane);
-      if (i === lockOn && hold) {
-        const lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.006, 12).rotateX(Math.PI / 2),
-          new THREE.MeshLambertMaterial({ color: 0xff3b3b, emissive: 0xff0000, emissiveIntensity: 1.0 }));
-        lamp.position.set(dir * (w - 0.12), 1.25, 0.034); g.add(lamp);
-        hold.lamp = lamp;
-      }
-      return pane;
-    };
-  }
-  /* cfg { id, label, keys, pick, bars, lb, axis, a0, a1, fixed, t (wall), h, color } */
+  /* cfg { id, label, keys, pick, bars, lb, axis, a0, a1, fixed, t (wall), h,
+          color, top (wall height to fill to), wall (its colour) }
+     THE LEAVES ARE THE KIT'S (world/corridorkit.js): a steel detention leaf,
+     or — for a CAGE, the one place in this file bars stay — the kit's
+     remade barred leaf. An opening wider than a real pair (2.4 m) gets block
+     infill either side instead of a 3 m leaf. */
   function makeDoor(cfg) {
+    let a0 = cfg.a0, a1 = cfg.a1;
+    if (!cfg.bars && a1 - a0 > 2.5) {
+      const mid = (a0 + a1) / 2;
+      CK.infill({ axis: cfg.axis || "x", a0: a0, a1: a1, c0: mid - 1.2, c1: mid + 1.2, fixed: cfg.fixed, t: cfg.t || 0.5,
+        top: cfg.top || cfg.h || DH, head: cfg.h || DH, color: cfg.wall != null ? cfg.wall : WALL, skin: "panel" });
+      a0 = mid - 1.2; a1 = mid + 1.2;
+    }
     const d = {
       id: cfg.id, label: cfg.label, keys: cfg.keys || null, pick: cfg.pick || 0,
       open: false, t: 0, picked: 0, blown: false, shutT: 0,
       axis: cfg.axis || "x",                       // 'x' = the opening runs along x
-      a0: cfg.a0, a1: cfg.a1, fixed: cfg.fixed,
+      a0: a0, a1: a1, fixed: cfg.fixed,
     };
-    d.x = d.axis === "x" ? (cfg.a0 + cfg.a1) / 2 : cfg.fixed;
-    d.z = d.axis === "x" ? cfg.fixed : (cfg.a0 + cfg.a1) / 2;
-    const T = cfg.t || 0.5, pair = cfg.a1 - cfg.a0 > 2.4, hold = {};
+    d.x = d.axis === "x" ? (a0 + a1) / 2 : cfg.fixed;
+    d.z = d.axis === "x" ? cfg.fixed : (a0 + a1) / 2;
+    const T = cfg.t || 0.5, pair = a1 - a0 > 1.6, hold = {};
     // the leaves open to local +z, the side the old pivot swung them to
-    d.set = CK.doorSet({ axis: d.axis, a0: cfg.a0, a1: cfg.a1, fixed: cfg.fixed, t: T, h: cfg.h || DH,
+    const lockOn = pair ? 1 : 0;
+    d.set = CK.doorSet({ axis: d.axis, a0: a0, a1: a1, fixed: cfg.fixed, t: T, h: cfg.h || DH,
       open: 1, hinge: pair ? 0 : -1, frame: 0x39424e,
-      build: cfg.bars ? barLeaf(hold, pair ? 1 : 0) : plateLeaf(hold, pair ? 1 : 0, cfg.color) });
+      build: cfg.bars ? CK.barLeaf({ hold: hold, lockOn: lockOn })
+        : CK.detentionLeaf({ color: cfg.color, hold: hold, lockOn: lockOn }) });
+    if (!cfg.bars && cfg.keys && cfg.keys.indexOf("Keycard") >= 0) {
+      // the card reader on each face of the lock jamb
+      const lx = a1 + 0.36;
+      for (const s of [-1, 1]) {
+        if (d.axis === "x") CK.cardReader(lx, 1.2, cfg.fixed + s * T / 2, 0, s);
+        else CK.cardReader(cfg.fixed + s * T / 2, 1.2, lx, s, 0);
+      }
+    }
     d.pivots = d.set.leaves.map(function (L) { return L.pivot; });
-    d.slabs = d.set.leaves.map(function (L) { return L.slab; }).filter(Boolean);
+    // a steel leaf blocks sight when shut; bars never did
+    const leafMeshes = d.set.leaves.map(function (L) { return L.slab; }).filter(Boolean);
+    d.slabs = cfg.bars ? [] : leafMeshes;
     d.lamp = hold.lamp || null;
-    const leaf = d.slabs[0] || d.pivots[0];
+    const leaf = leafMeshes[0] || d.pivots[0];
     d.leaf = leaf;
     d.collider = d.axis === "x"
-      ? { minX: cfg.a0, maxX: cfg.a1, minZ: cfg.fixed - T / 2, maxZ: cfg.fixed + T / 2, ref: leaf }
-      : { minX: cfg.fixed - T / 2, maxX: cfg.fixed + T / 2, minZ: cfg.a0, maxZ: cfg.a1, ref: leaf };
+      ? { minX: a0, maxX: a1, minZ: cfg.fixed - T / 2, maxZ: cfg.fixed + T / 2, ref: leaf }
+      : { minX: cfg.fixed - T / 2, maxX: cfg.fixed + T / 2, minZ: a0, maxZ: a1, ref: leaf };
     CBZ.colliders.push(d.collider);
     if (CBZ.losBlockers) for (const sl of d.slabs) CBZ.losBlockers.push(sl);
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
@@ -403,13 +383,13 @@
     // an actor against any box with no vertical span, so a y-gated solid head
     // reads full height to every body and seals the gate for the whole cast).
     addBox(g.fixed, (DH + YH) / 2, g.c, 1, YH - DH, GATE_W, WALL, { cast: false, blockLOS: true });
-    addBox(g.fixed, DH + 0.2, g.c, 1.3, 0.34, GATE_W + 0.5, 0x39424e, { cast: false });
-    // (the two 1.3 m steel piers that stood IN the opening are gone: the
-    // door set's frame lines the reveal, and they buried both leaves' edges)
+    // (2026-09-29: the 6 m barred pair and the steel lintel over it are
+    // gone. The gap is walled either side of a 2.4 m steel pair, card
+    // readers on the jamb, the way a yard door in a wall is actually built.)
     if (PD && PD.lamp) { try { PD.lamp(g.fixed + 0.56, 3.0, g.c, "x+"); } catch (e) {} }
     return makeDoor({
-      id: g.id, label: g.label, keys: ["Keycard"], bars: true, lb: 5,
-      axis: "z", a0: g.c - GATE_W / 2, a1: g.c + GATE_W / 2, fixed: g.fixed, t: 1,
+      id: g.id, label: g.label, keys: ["Keycard"], lb: 5,
+      axis: "z", a0: g.c - GATE_W / 2, a1: g.c + GATE_W / 2, fixed: g.fixed, t: 1, top: DH,
     });
   });
 
@@ -526,6 +506,26 @@
     }
     // only the two faces that look INTO the room are drawn; the other two are
     // the host room's own walls, which is how a real crib is built.
+    /* THE BARS ARE THE KIT'S BARS (2026-09-29): 25 mm round at 125 mm
+       centres on flat straps, channel rails top and bottom, square-tube
+       posts at the ends and either side of the door, ONE merged mesh that
+       casts. They were square 8 cm sticks 44 cm apart (a man's head fits
+       through 44 cm). The panes stay the colliders: you see and shoot
+       through the gaps, you do not walk through them. */
+    const B = CK.BARS, BC = 0x2a2f38, P = new CK.Paint();
+    const face = function (along, f, a, b) {
+      const w = b - a;
+      if (w <= 0.05) return;
+      const at = function (u) { return along ? [f, u] : [u, f]; };
+      const n = Math.max(1, Math.round(w / B.pitch));
+      for (let k = 1; k < n; k++) { const p = at(a + k * w / n); P.cyl(p[0], ch / 2, p[1], B.r, ch - 0.2, BC, 8); }
+      const m = at((a + b) / 2);
+      const bx = function (y, hh, thin) { along ? P.box(m[0], y, m[1], thin, hh, w, BC) : P.box(m[0], y, m[1], w, hh, thin, BC); };
+      bx(0.05, 0.1, 0.06); bx(ch - 0.05, 0.1, 0.06);
+      const ns = Math.max(1, Math.round((ch - 0.2) / B.strapEvery));
+      for (let k = 1; k < ns; k++) bx(0.1 + k * (ch - 0.2) / ns, B.strap, B.strapT);
+      for (const u of [a, b]) { const p = at(u); P.box(p[0], ch / 2, p[1], 0.08, ch, 0.08, BC); }
+    };
     const openS = cfg.open || "S";                 // which side faces the room
     if (openS === "S" || openS === "N") {
       const zf = openS === "S" ? z1 : z0;
@@ -533,14 +533,13 @@
         const w = r[1] - r[0];
         if (w <= 0.02) continue;
         pane((r[0] + r[1]) / 2, zf, w, 0.12);
-        for (let i = 0; i * 0.44 < w - 0.2; i++) addBox(r[0] + 0.2 + i * 0.44, ch / 2, zf, 0.08, ch - 0.04, 0.08, 0x2a2f38, { cast: false });
+        face(false, zf, r[0], r[1]);
       }
-      addBox((x0 + x1) / 2, ch + 0.02, zf, x1 - x0, 0.12, 0.12, 0x2a2f38, { cast: false });
     }
     const xf = cfg.side === "W" ? x0 : x1;
     pane(xf, (z0 + z1) / 2, 0.12, z1 - z0);
-    for (let i = 0; i * 0.44 < z1 - z0 - 0.2; i++) addBox(xf, ch / 2, z0 + 0.2 + i * 0.44, 0.08, ch - 0.04, 0.08, 0x2a2f38, { cast: false });
-    addBox(xf, ch + 0.02, (z0 + z1) / 2, 0.12, 0.12, z1 - z0, 0x2a2f38, { cast: false });
+    face(true, xf, z0, z1);
+    P.mesh(CBZ.prisonRoot || CBZ.scene, true);
     return cfg;
   }
 
@@ -939,8 +938,6 @@
   // sixteen singles in two facing rows off a central corridor. Partitions are
   // real colliders and deliberately NOT noBreach: blowing through a seg wall
   // is precisely the route the charge table exists for.
-  const segPane = new THREE.MeshLambertMaterial({ color: 0x39424e, transparent: true, opacity: 0.05, depthWrite: false });
-  const segBar = K.skin("steel", 0x2a2f38, 0.5);
   const MAP_CELL = 7;                                      // south row, east end: the open cell (below)
   for (let r = 0; r < 2; r++) {
     const zf = r ? 34 : 6;                                  // the cell-front plane
@@ -952,30 +949,25 @@
       // the end cell's east side: it had no partition, so the last cell of
       // each row stood open to the 3.5 m strip against the unit's east wall
       if (i === 7) K.skinBox(addBox(cx + 3.1, 1.75, zf + (r ? 4 : -4), 0.3, 3.5, 8, 0x6f7883, { solid: true, blockLOS: true }), "block", 0x7d8691);
-      /* the barred front: a real welded grille, 22 mm round bar on 180 mm
-         centres between flat-bar rails, a door leaf framed in heavier section
-         with its food slot. It was six square sticks a metre apart in front of
-         an OPAQUE dark slab, so nobody could see the bunk it was "showing".
-         The slab is still the collider (addBox keeps its hooks) but it is a
-         clear pane now, like the cages'. */
-      const pane = addBox(cx, 1.75, zf, 6.0, 3.5, 0.16, 0x39424e, { solid: true, blockLOS: false });
-      pane.material = segPane; pane.castShadow = false; pane.receiveShadow = false;
-      for (let b = 0; cx - 2.9 + b * 0.18 < cx + 2.95; b++) {
-        const bx = cx - 2.9 + b * 0.18;
-        if (bx > cx + 1.0 && bx < cx + 1.18) continue;                  // the door's hinge stile goes here
-        if (openCell && bx > cx + 0.1 && bx < cx + 1.1) continue;       // the leaf is swung back
-        stat(new THREE.CylinderGeometry(0.011, 0.011, 3.3, 6, 1, true), segBar, bx, 1.65, zf, { cast: false });
-      }
-      for (const y of [0.06, 1.15, 2.25, 3.28]) {
-        if (!openCell || y > 3) { stat(new THREE.BoxGeometry(6.0, 0.08, 0.02), segBar, cx, y, zf, { cast: false }); continue; }
-        // the open cell's rails stop at the jambs (the head rail still spans)
-        stat(new THREE.BoxGeometry(3.1 - 0.035, 0.08, 0.02), segBar, cx - 3.0 + (3.1 - 0.035) / 2, y, zf, { cast: false });
-        stat(new THREE.BoxGeometry(1.91 - 0.035, 0.08, 0.02), segBar, cx + 1.09 + 0.035 + (1.91 - 0.035) / 2, y, zf, { cast: false });
-      }
-      for (const dx of [0.1, 1.09]) stat(new THREE.BoxGeometry(0.07, 3.3, 0.07), segBar, cx + dx, 1.65, zf, { cast: false });   // the door's stiles
-      if (!openCell) {
-        stat(new THREE.BoxGeometry(0.4, 0.14, 0.05), segBar, cx + 0.6, 1.1, zf, { cast: false });                                // food slot
-        stat(new THREE.BoxGeometry(0.06, 0.16, 0.08), segBar, cx + 0.2, 1.3, zf, { cast: false });                               // lock box
+      /* THE FRONT IS A WALL WITH A STEEL DOOR (2026-09-29). It was a 6 m
+         barred grille with a barred leaf and a food slot stuck on the bars.
+         A segregation cell is the one place every modern jail agrees on a
+         SOLID door: a detention steel leaf with a vision lite and a food /
+         cuff pass (a man in seg is fed and cuffed through that slot, not
+         through bars he could reach through). Block either side, the leaf in
+         a steel frame, hinged on the old hinge-stile line, opening onto the
+         corridor. The map cell (below) stands with its leaf swung back. */
+      {
+        const open = r ? -1 : 1, d0 = cx + 0.1, d1 = cx + 1.1, ST = 0.2;
+        CK.infill({ axis: "x", a0: cx - 3.0, a1: cx + 3.0, c0: d0, c1: d1, fixed: zf, t: ST, top: 3.5, head: 2.3,
+          color: 0x7d8691, skin: "block" });
+        const set = CK.doorSet({ axis: "x", a0: d0, a1: d1, fixed: zf, t: ST, h: 2.3, open: open, hinge: 1, frame: 0x39424e,
+          build: CK.detentionLeaf({ color: 0x5b6572, pass: true }) });
+        if (openCell) set.set(1);
+        else {
+          CBZ.colliders.push({ minX: d0, maxX: d1, minZ: zf - ST / 2, maxZ: zf + ST / 2, ref: set.leaves[0].slab || set.leaves[0].pivot });
+          if (CBZ.losBlockers && set.leaves[0].slab) CBZ.losBlockers.push(set.leaves[0].slab);
+        }
       }
       /* and what is inside it: a bunk, a stainless combo, nothing else.
 
@@ -1008,35 +1000,15 @@
     if (K) K.skinBox(back, "block", 0x7d8691);
   }
   /* THE MAP LIES ON THE BUNK IN THE LAST CELL, AND THAT CELL STANDS OPEN.
-     Every seg front above is one solid pane, so the map (which lay at z 41,
-     a hand off the bunk's edge, inside a sealed cell) had no route to it by
-     any means but a charge. The last cell on the south row is being turned
-     over: its leaf is swung back against the corridor side of the grille,
-     its pane is cut round the doorway, and the map is on the mattress. */
+     The last cell on the south row is being turned over: its steel leaf is
+     swung back against the corridor wall (above), its doorway has no
+     collider, and the map is on the mattress. */
   const mcx = 62 + MAP_CELL * 6.2, mzf = 34;
-  (function openCell() {
-    // re-cut the one cell front: a pane either side of the leaf's opening
-    const d0 = mcx + 0.14, d1 = mcx + 1.05;
-    for (let i = CBZ.colliders.length - 1; i >= 0; i--) {
-      const c = CBZ.colliders[i];
-      if (c && Math.abs((c.minX + c.maxX) / 2 - mcx) < 0.01 && Math.abs((c.minZ + c.maxZ) / 2 - mzf) < 0.01 && c.maxX - c.minX > 5.9) {
-        CBZ.colliders.splice(i, 1, Object.assign({}, c, { maxX: d0 }), Object.assign({}, c, { minX: d1 }));
-        if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
-        break;
-      }
-    }
-    // the leaf itself, swung 90 degrees on its hinge stile (mcx + 1.09) into the corridor
-    const lw = 0.95, hx = mcx + 1.09, lz = mzf - lw / 2 - 0.05;
-    for (const dz of [-lw / 2 + 0.035, lw / 2 - 0.035]) stat(new THREE.BoxGeometry(0.07, 3.3, 0.07), segBar, hx, 1.65, lz + dz, { cast: false });
-    for (const y of [0.06, 1.15, 2.25, 3.28]) stat(new THREE.BoxGeometry(0.02, 0.08, lw), segBar, hx, y, lz, { cast: false });
-    for (let b = 1; b < 5; b++) stat(new THREE.CylinderGeometry(0.011, 0.011, 3.2, 6, 1, true), segBar, hx, 1.65, lz - lw / 2 + b * lw / 5, { cast: false });
-    stat(new THREE.BoxGeometry(0.05, 0.14, 0.4), segBar, hx, 1.1, lz, { cast: false });   // food slot
-  })();
   // the bunk of that cell is at (mcx - 1.5, 40.4), along x, mattress top at 0.62
   stockCage([["Contraband Map", mcx - 1.1, 0.64, 40.4]]);
   const segDoor = makeDoor({
-    id: "prison-segregation", label: "The segregation gate", keys: ["Keycard"], bars: true, lb: 5,
-    axis: "z", a0: SEG_DOOR.c - SEG_DOOR.w / 2 + 0.1, a1: SEG_DOOR.c + SEG_DOOR.w / 2 - 0.1, fixed: 58, t: 0.5,
+    id: "prison-segregation", label: "The segregation door", keys: ["Keycard"], lb: 5,
+    axis: "z", a0: SEG_DOOR.c - SEG_DOOR.w / 2, a1: SEG_DOOR.c + SEG_DOOR.w / 2, fixed: 58, t: 0.5, top: 3.1, wall: 0x848d98,
   });
 
   /* KITCHEN. A prison this size feeds nine hundred men from one room, and
@@ -1560,7 +1532,7 @@
       ceilingY: 3.0, ceiling: { kind: "acoustic", lights: "troffer", nx: 10, nz: 6 } } });
   const ctrlDoor = makeDoor({
     id: "prison-control", label: "Central control", keys: ["Gun-Room Key"], lb: 7,
-    axis: "x", a0: -2, a1: 2, fixed: -78, h: 3.1, color: 0x4f5d6b,
+    axis: "x", a0: -2, a1: 2, fixed: -78, top: 3.1, wall: 0x8d9099, color: 0x4f5d6b,
   });
   /* THE CONSOLE (rebuilt 2026-09-28): one 16 m operator desk drawn from its
      side profile (a toe kick, the writing ledge on the officer's side, the

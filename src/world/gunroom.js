@@ -238,67 +238,41 @@
   // it. The word is stencilled on the wall beside the reader, below.)
 
   // ------------------------------------------------------------------
-  //  THE GATE — the locked door you can SEE THROUGH
+  //  THE DOOR. OWNER (2026-09-29): "the armory ... the doors to get into
+  //  those areas are the old type, not the new really realistic type."
   // ------------------------------------------------------------------
-  // The mesh itself is unchanged in geometry, position, collider and LOS
-  // membership; under the flag only its MATERIAL changes, to a near-invisible
-  // pane, and the visible gate becomes one welded barred leaf parented to it.
-  const gate = addBox(19, 3, 1, 0.6, 6, 3.0, 0x2a2f38, { solid: true, blockLOS: true, emissive: 0x111418, ei: 0.4 });
-  gate.userData.mover = true;
+  // It was a 3 x 6 m welded barred leaf over an invisible collider slab that
+  // rose six metres into the ceiling. An armory door is the most ordinary
+  // door in a jail made heavier: a single detention steel leaf in a steel
+  // frame, set in the block wall, a card reader on the jamb, a vision lite
+  // you can put your face to. The opening is 1.2 m now; the block either
+  // side fills the 3 m hole the shell left for the old gate. It swings IN,
+  // into the room, hinged on the south jamb, clear of the vests on the
+  // west wall and the packs by the door.
+  const CK = CBZ.corridorKit;
+  const DZ0 = 0.4, DZ1 = 1.6, DOOR_H = 2.4, WALL_X = 19, WALL_T = 0.5;
+  CK.infill({ axis: "z", a0: -0.5, a1: 2.5, c0: DZ0, c1: DZ1, fixed: WALL_X, t: WALL_T, top: 6, head: DOOR_H,
+    color: 0x515a66, skin: null });
+  const doorSet = CK.doorSet({ axis: "z", a0: DZ0, a1: DZ1, fixed: WALL_X, t: WALL_T, h: DOOR_H, open: -1, hinge: 1,
+    frame: 0x2e353e, build: CK.detentionLeaf({ color: 0x3f4855 }) });
+  const gate = doorSet.leaves[0].pivot;
+  const gateSlab = doorSet.leaves[0].slab;
+  // the reader the keycard actually answers to, on the yard face of the
+  // lock jamb; its LED is the door's status lamp
+  const reader = CK.cardReader(WALL_X - WALL_T / 2, 1.2, DZ0 - 0.075 - 0.28, -1, 0);
+  const lamp = reader.led;
+  CK.intercom(WALL_X - WALL_T / 2, 1.45, DZ1 + 0.075 + 0.3, -1, 0);
+  // the painted sign beside it
+  stencil("ARMORY", 18.71, 4.05, 3.50, 0.115, 0xd9dee5);
+  addBox(18.70, 3.36, 4.80, 0.04, 0.06, 2.64, 0xd9dee5, { cast: false });   // underline
 
-  if (SPINE) {
-    gate.material.transparent = true;
-    gate.material.opacity = 0.05;
-    gate.material.depthWrite = false;
-    gate.material.emissive.setHex(0x000000);
-    gate.castShadow = false;          // an invisible slab must not cast a solid shadow
-    gate.receiveShadow = false;
-
-    const BZ = [];
-    BZ.push([0, 0, -1.42, 0.26, 5.9, 0.16]);      // stiles
-    BZ.push([0, 0, 1.42, 0.26, 5.9, 0.16]);
-    BZ.push([0, 2.87, 0, 0.26, 0.18, 3.0]);       // head + sill rails
-    BZ.push([0, -2.87, 0, 0.26, 0.18, 3.0]);
-    BZ.push([0, 1.2, 0, 0.26, 0.16, 3.0]);        // the two original cross-bars,
-    BZ.push([0, -1.0, 0, 0.26, 0.16, 3.0]);       // now part of the leaf that MOVES
-    for (let i = 0; i < 7; i++) BZ.push([0, 0, -1.2 + i * 0.4, 0.13, 5.7, 0.13]);
-    // padlock on the YARD side of the leaf — the lock has to be part of what
-    // you see from outside, or "locked" is a hint string instead of an object
-    BZ.push([-0.17, 0.35, 1.06, 0.30, 0.44, 0.30]);
-    const leaf = weld(BZ, mats.bar, true);
-    gate.add(leaf);
-  } else {
-    addBox(19, 4.2, 1, 0.7, 0.18, 3.0, 0x4a525c, { cast: false });
-    addBox(19, 2.0, 1, 0.7, 0.18, 3.0, 0x4a525c, { cast: false });
-  }
-
-  // Status lamp. Was at (20, 4.4, 1) — INSIDE the room, behind a solid slab.
-  // A door light nobody can see is not a door light; it lives on the outside
-  // wall face beside the reader now.
-  const lamp = SPINE
-    ? addBox(18.60, 3.34, 2.86, 0.18, 0.18, 0.18, 0xff3b3b, { emissive: 0xff0000, ei: 1.0, cast: false })
-    : addBox(20, 4.4, 1, 0.18, 0.18, 0.18, 0xff3b3b, { emissive: 0xff0000, ei: 1.0, cast: false });
-  lamp.userData.mover = true;
-  if (SPINE) {
-    // a domed indicator on a round base, not an 18 cm glowing cube
-    lamp.geometry.dispose();
-    lamp.geometry = new THREE.SphereGeometry(0.065, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2).rotateZ(Math.PI / 2);
-    lamp.position.x = 18.69;
-  }
-
-  if (SPINE) {
-    // the card reader the keycard actually answers to, and the painted sign
-    addBox(18.62, 2.34, 2.86, 0.14, 0.42, 0.30, 0x21262e, { cast: false });
-    addBox(18.52, 2.40, 2.86, 0.04, 0.10, 0.20, 0x39ffd0, { emissive: 0x12b89a, ei: 0.9, cast: false });
-    {                                                                          // lamp base, round
-      const b = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.05, 20).rotateZ(Math.PI / 2), CBZ.mat(0x21262e));
-      b.position.set(18.72, 3.34, 2.86); b.castShadow = false; ROOT.add(b);
-    }
-    stencil("ARMORY", 18.71, 4.05, 3.50, 0.115, 0xd9dee5);
-    addBox(18.70, 3.36, 4.80, 0.04, 0.06, 2.64, 0xd9dee5, { cast: false });   // underline
-  }
-
-  const armory = { gate, lamp, collider: gate.userData.collider, open: false, t: 0, slots: [] };
+  const armory = {
+    gate, lamp, set: doorSet, slab: gateSlab, reader: reader, open: false, t: 0, slots: [],
+    collider: { minX: WALL_X - WALL_T / 2, maxX: WALL_X + WALL_T / 2, minZ: DZ0, maxZ: DZ1, ref: gateSlab || gate },
+  };
+  CBZ.colliders.push(armory.collider);
+  if (CBZ.losBlockers && gateSlab) CBZ.losBlockers.push(gateSlab);
+  if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
 
   // ------------------------------------------------------------------
   //  THE RACK — a weapon is supported by the hardware it is displayed on.
@@ -716,51 +690,58 @@
     pane((GX1 + CX1) / 2, CZ1, CX1 - GX1, 0.12);    // front-right (barred)
     addBox(CX1, CH / 2, CZM, 0.14, CH, CZD, 0x39424e, { solid: true });  // east face: solid steel
 
-    // every static bar in the cage, welded into ONE mesh
-    const CB = [];
-    for (let i = 0; i < 8; i++) CB.push([CX0, 1.5, CZ0 + 0.2 + i * 0.45, 0.10, 2.90, 0.10]);
-    CB.push([CX0, 2.93, CZM, 0.14, 0.14, CZD]);
-    CB.push([CX0, 0.12, CZM, 0.14, 0.14, CZD]);
-    for (let i = 0; i < 3; i++) CB.push([CX0 + 0.15 + i * 0.33, 1.5, CZ1, 0.10, 2.90, 0.10]);
-    for (let i = 0; i < 3; i++) CB.push([GX1 + 0.15 + i * 0.33, 1.5, CZ1, 0.10, 2.90, 0.10]);
-    CB.push([(CX0 + GX0) / 2, 2.93, CZ1, GX0 - CX0, 0.14, 0.14]);
-    CB.push([(CX0 + GX0) / 2, 0.12, CZ1, GX0 - CX0, 0.14, 0.14]);
-    CB.push([(GX1 + CX1) / 2, 2.93, CZ1, CX1 - GX1, 0.14, 0.14]);
-    CB.push([(GX1 + CX1) / 2, 0.12, CZ1, CX1 - GX1, 0.14, 0.14]);
-    CB.push([CX0, 1.5, CZ1, 0.18, CH, 0.18]);       // corner posts
-    CB.push([CX1, 1.5, CZ1, 0.18, CH, 0.18]);
-    CB.push([CX0, 1.5, CZ0 + 0.1, 0.18, CH, 0.18]);
-    CB.push([CX1, 1.5, CZ0 + 0.1, 0.18, CH, 0.18]);
-    for (let i = 0; i < 6; i++) CB.push([CXM, CH + 0.02, CZ0 + 0.3 + i * 0.62, CX1 - CX0, 0.09, 0.09]);
-    for (let i = 0; i < 3; i++) CB.push([CX0 + 0.9 + i * 0.9, CH + 0.02, CZM, 0.09, 0.09, CZD]);
-    const cageBars = weld(CB, mats.bar, false);
-    ROOT.add(cageBars);
+    /* THE CAGE, REMADE (owner, 2026-09-29: bars that stay must "look
+       correct and animate and work correctly"). A weapons cage is a real
+       armory fitting and it keeps its bars — you see the prize through them
+       — but they were square 10 cm sticks at 33-45 cm (an arm goes through
+       that, and so does a rifle). Now the prison's one bar spec
+       (CBZ.corridorKit.BARS): 25 mm round bars at 125 mm, flat straps every
+       half metre, square-tube posts, channel rails, a bar roof. ONE mesh,
+       and it casts. */
+    const B = CK.BARS, BC = 0x39424e;
+    const CP = new CK.Paint();
+    const barsAlongZ = function (x, z0, z1) {
+      const n = Math.max(2, Math.round((z1 - z0) / B.pitch));
+      for (let k = 1; k < n; k++) CP.cyl(x, CH / 2, z0 + k * (z1 - z0) / n, B.r, CH - 0.2, BC, 8);
+      for (let k = 1; k < 6; k++) CP.box(x, 0.1 + k * (CH - 0.2) / 6, (z0 + z1) / 2, B.strapT, B.strap, z1 - z0, BC);
+      CP.box(x, 0.05, (z0 + z1) / 2, 0.06, 0.1, z1 - z0, BC);
+      CP.box(x, CH - 0.05, (z0 + z1) / 2, 0.06, 0.1, z1 - z0, BC);
+    };
+    const barsAlongX = function (z, x0, x1) {
+      const n = Math.max(2, Math.round((x1 - x0) / B.pitch));
+      for (let k = 1; k < n; k++) CP.cyl(x0 + k * (x1 - x0) / n, CH / 2, z, B.r, CH - 0.2, BC, 8);
+      for (let k = 1; k < 6; k++) CP.box((x0 + x1) / 2, 0.1 + k * (CH - 0.2) / 6, z, x1 - x0, B.strap, B.strapT, BC);
+      CP.box((x0 + x1) / 2, 0.05, z, x1 - x0, 0.1, 0.06, BC);
+      CP.box((x0 + x1) / 2, CH - 0.05, z, x1 - x0, 0.1, 0.06, BC);
+    };
+    barsAlongZ(CX0, CZ0 + 0.1, CZ1);                  // west face
+    barsAlongX(CZ1, CX0, GX0 - 0.06);                 // front, either side of the gate
+    barsAlongX(CZ1, GX1 + 0.06, CX1);
+    for (const p of [[CX0, CZ1], [CX1, CZ1], [CX0, CZ0 + 0.1], [CX1, CZ0 + 0.1], [GX0 - 0.03, CZ1], [GX1 + 0.03, CZ1]])
+      CP.box(p[0], CH / 2, p[1], 0.08, CH, 0.08, BC);                                // square-tube posts
+    // the roof: bars across on flat straps
+    for (let x = CX0 + 0.2; x < CX1 - 0.1; x += B.pitch * 2) CP.cyl(x, CH + 0.02, CZM, B.r, CZD, BC, 8, Math.PI / 2);
+    for (let k = 0; k < 4; k++) CP.box(CXM, CH + 0.02, CZ0 + 0.4 + k * (CZD - 0.8) / 3, CX1 - CX0, B.strapT, B.strap, BC);
+    CP.mesh(ROOT, true);
 
-    // the swinging leaf. A cage gate SWINGS — a slider would have to rise
-    // three metres into open air above a three-metre cage. The pivot group
-    // sits on the hinge stile and is tagged `mover`, which is what keeps the
-    // whole subtree out of the static batch (core/batch.js walk()).
+    // the swinging leaf, on the kit's barred leaf; a padlock on a hasp
+    // instead of the kit's lock box, because the saw is cutting a PADLOCK.
     const pivot = new THREE.Group();
     pivot.position.set(GX0, 0, CZ1);
     pivot.userData.mover = true;
     ROOT.add(pivot);
     const GW = GX1 - GX0;
-    const GB = [
-      [0.08, 1.5, 0, 0.16, 2.90, 0.14],
-      [GW - 0.08, 1.5, 0, 0.16, 2.90, 0.14],
-      [GW / 2, 2.86, 0, GW, 0.14, 0.14],
-      [GW / 2, 0.14, 0, GW, 0.14, 0.14],
-      [GW / 2, 1.50, 0, GW, 0.12, 0.12],
-      [GW - 0.18, 1.42, 0.11, 0.20, 0.30, 0.22],   // padlock housing
-    ];
-    for (let i = 0; i < 4; i++) GB.push([0.42 + i * 0.34, 1.5, 0, 0.09, 2.70, 0.09]);
-    const leaf2 = weld(GB, mats.bar, true);
-    pivot.add(leaf2);
-    const cageLamp = new THREE.Mesh(
-      new THREE.BoxGeometry(0.11, 0.11, 0.11),
-      new THREE.MeshLambertMaterial({ color: 0xffb347, emissive: 0xff7a1a, emissiveIntensity: 1.0 })
-    );
-    cageLamp.position.set(GW - 0.18, 1.74, 0.14);
+    const leaf2 = CK.barLeaf({ color: BC })(pivot, GW, CH - 0.06, 1, 0);
+    {
+      const PL = new CK.Paint();
+      PL.box(GW - 0.04, 1.42, 0.07, 0.1, 0.05, 0.02, 0x8b95a1);                         // the hasp
+      PL.box(GW - 0.04, 1.3, 0.085, 0.07, 0.085, 0.03, 0x6e6a5e);                         // padlock body
+      PL.add(new THREE.TorusGeometry(0.022, 0.006, 6, 12, Math.PI).translate(GW - 0.04, 1.345, 0.085), 0x9aa2aa);   // shackle
+      PL.mesh(pivot, true);
+    }
+    const cageLamp = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.006, 12).rotateX(Math.PI / 2),
+      new THREE.MeshLambertMaterial({ color: 0xffb347, emissive: 0xff7a1a, emissiveIntensity: 1.0 }));
+    cageLamp.position.set(GW - 0.1, 1.2, 0.053);
     pivot.add(cageLamp);
 
     inner.gate = pivot;
@@ -891,20 +872,31 @@
      collider, paint the lamp, ring the cue — as five statements inside an
      `if (L.open)`. That is precisely why this door had no close: the verb
      existed only as a branch. Same five statements, named, and they now run
-     BOTH ways. systems/state.js's reset still pokes the fields directly and
-     is unaffected (it snaps the gate to y=3, which is t=0's own position). */
+     BOTH ways. systems/state.js's reset calls armory.reset(). */
+  armory.solid = function (on) {
+    const i = CBZ.colliders.indexOf(armory.collider);
+    if (on && i < 0) CBZ.colliders.push(armory.collider);
+    else if (!on && i >= 0) CBZ.colliders.splice(i, 1);
+    else return;
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    const L = CBZ.losBlockers, sl = armory.slab;
+    if (L && sl) { const li = L.indexOf(sl); if (on && li < 0) L.push(sl); else if (!on && li >= 0) L.splice(li, 1); }
+  };
   armory.setOpen = function (v, quiet) {
     v = !!v;
     if (v === armory.open) return v;
     armory.open = v;
-    const i = CBZ.colliders.indexOf(armory.collider);
-    if (v && i >= 0) CBZ.colliders.splice(i, 1);
-    else if (!v && i < 0) CBZ.colliders.push(armory.collider);
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    if (!v) armory.solid(true);            // shut is solid at once; open clears as it swings (tick)
     armory.lamp.material.color.setHex(v ? 0x39ff88 : 0xff3b3b);
     armory.lamp.material.emissive.setHex(v ? 0x14c258 : 0xff0000);
     if (!quiet && CBZ.sfx) CBZ.sfx(v ? "door_open" : "door_close");
     return v;
+  };
+  // a new run: shut, home, red (systems/state.js calls this)
+  armory.reset = function () {
+    armory.open = false; armory.t = 0; armory.set.set(0);
+    armory.solid(true);
+    armory.lamp.material.color.setHex(0xff3b3b); armory.lamp.material.emissive.setHex(0xff0000);
   };
 
   armory.inner = inner;
@@ -946,13 +938,16 @@
     /* THE LEAF TRAVELS BOTH WAYS. This ramp used to live inside the "already
        open" branch and only ever counted UP, so a gate that closed would have
        stayed drawn in its pocket six metres overhead. Same 1.6 rate, same
-       authored 6 m of travel, one direction added. */
+       authored rate, one direction added; the leaf SWINGS now. */
     {
       const want = armory.open ? 1 : 0;
       if (armory.t !== want) {
         const step = dt * 1.6;
         armory.t = want > armory.t ? Math.min(want, armory.t + step) : Math.max(want, armory.t - step);
-        armory.gate.position.y = 3 + armory.t * 6;
+        armory.set.set(armory.t);
+        // solid until the leaf has swung 40% clear (it used to vanish from
+        // the physics the frame the reader went green)
+        if (armory.open && armory.t >= 0.4) armory.solid(false);
       }
     }
     if (!armory.open) {
@@ -1097,7 +1092,7 @@
           if (inner.sawMsg > 0) inner.sawMsg -= dt;
         } else if (inner.t < 1) {
           inner.t = Math.min(1, inner.t + dt * 1.9);
-          inner.gate.rotation.y = -inner.t * 1.75;   // swings out into the room
+          inner.gate.rotation.y = -inner.t * Math.PI / 2;   // swings out into the room, square to the front
         }
       }
 

@@ -174,14 +174,12 @@
       if (c.ring) c.ring.visible = true;
     });
 
-    CBZ.closeDoor();
+    if (CBZ.door && CBZ.door.reset) CBZ.door.reset(); else CBZ.closeDoor();
 
-    // reset the armory gate
+    // reset the armory door (world/gunroom.js owns how: it swings now)
     if (CBZ.armory) {
-      const a = CBZ.armory; a.open = false; a.t = 0; a.gate.position.y = 3;
-      a.lamp.material.color.setHex(0xff3b3b); a.lamp.material.emissive.setHex(0xff0000);
-      if (CBZ.colliders.indexOf(a.collider) === -1) CBZ.colliders.push(a.collider);
-      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+      const a = CBZ.armory;
+      if (a.reset) a.reset();
       if (a.resetSlots) a.resetSlots();
     }
 

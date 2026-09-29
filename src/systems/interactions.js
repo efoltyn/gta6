@@ -405,7 +405,7 @@
      button needed."
 
      THE MEASURED FAULT: every door in the compound was a one-way valve. Five
-     files own a door primitive — world/door.js's vertical yard leaf,
+     files own a door primitive — world/door.js's unit sally port,
      world/prisonwings.js's nine pivot leaves, world/adminwing.js's two,
      world/gunroom.js's armoury gate plus its inner cage, world/cellblock.js's
      thirteen sliding cell fronts — and between them they exposed exactly ONE
@@ -1104,8 +1104,11 @@
     // updater instead of here.
 
     // ---- door ----
+    // the unit's sally port: 4 m of its inner door, or at its out door's
+    // reader on the yard face (world/door.js publishes both faces)
     const ddx = player.pos.x, ddz = player.pos.z + 8;
-    const nearDoor = ddx * ddx + ddz * ddz < 16;
+    const oz = door.outer ? player.pos.z - door.outer.z : 99;
+    const nearDoor = ddx * ddx + ddz * ddz < 16 || (door.outer && ddx * ddx + oz * oz < 2.6 * 2.6);
     if (!door.open) {
       // LAW 3: a door you shut yourself stays shut while you stand in the
       // radius that would otherwise re-open it. CBZ.prisonDoorLatched is the
@@ -1144,7 +1147,8 @@
       if (door.t !== want) {
         const step = dt * 1.6;
         door.t = want > door.t ? Math.min(want, door.t + step) : Math.max(want, door.t - step);
-        door.mesh.position.y = door.closedY + door.t * (door.travel || 8);
+        if (door.drive) door.drive(door.t);
+        else door.mesh.position.y = door.closedY + door.t * (door.travel || 8);
       }
     }
 

@@ -1,32 +1,54 @@
 /* ============================================================
-   world/corridorkit.js — THE PIECES A PRISON CORRIDOR IS MADE OF.
+   world/corridorkit.js — THE PRISON'S ONE DOOR KIT, and the pieces a
+   prison corridor is made of.
 
-   The owner's photographs (2026-09-05): a block-wall corridor, green to
-   shoulder height and cream above, a polished floor, strip lights, a red
-   EXIT sign; a barred grille across it, one panel fixed and one sliding on
-   a heavy header; a steel door with a wired window; a chain-link walkway
-   under coil into a concrete sally port.
+   OWNER (2026-09-29): "near where the warden is, there's some really
+   realistic doors ... these old doors that are like bar doors ... make
+   those doors realistic, like the ones near the warden; they can all be
+   normal doors ... every jail just has many, many sets of those real
+   doors." And: "if you want to keep the bar-style doors in any places,
+   you need to remake them so they look correct and animate and work
+   correctly."
 
-   This file is those pieces, generic enough that world/corridors.js lays
-   a kilometre of them and world/sallyport.js is one call:
+   WHAT A REAL JAIL HANGS (research, 2026-09-29; sources in the commit):
+     · Detention-grade HOLLOW-METAL steel doors in heavy steel frames, a
+       narrow security-glass VISION LITE, a paracentric lock in a surface
+       lock case, a pull, a kick plate; card readers / key switches and
+       door-position lamps on the frame, intercoms beside them, and the
+       doors released remotely from control. That is what stands between
+       every two zones: corridors, units, rooms, the armory.
+     · SALLY PORTS: a vestibule with two of those doors, INTERLOCKED so
+       only one opens at a time. A housing unit's entrance is one.
+     · BARS survive where the building is old and LINEAR: barred cell
+       fronts on a tiered cell house (the owner's own reference photo),
+       and wire/bar cages inside a room (a tool crib, a property cage, a
+       weapons cage). Not as corridor gates in a modern build.
 
-     CBZ.corridorKit.grille(cfg)      a sliding barred gate across a corridor.
-                                      axis "x" (gate plane z, spans x0..x1)
-                                      or "z" (plane x, spans z0..z1). Keys,
-                                      C4 row, the registry contract every
-                                      prison door speaks (systems/
-                                      interactions.js), auto-shut.
-     CBZ.corridorKit.door(cfg)        a swinging leaf, same contract, same
-                                      two axes; `build(group, w, h, dir)`
-                                      draws the leaf.
-     CBZ.corridorKit.lining(...)      painted block on a wall face, two bands
-     CBZ.corridorKit.exitSign(...)    the red sign, always lit
-     CBZ.corridorKit.strip(...)       a ceiling strip (24 h, merged)
-     CBZ.corridorKit.cagedLamp(...)   an outdoor fitting on the flood circuit
-     CBZ.buildSallyPort(cfg)          the exit building: walkway, vestibule,
-                                      grille on the Gate Key, booth, out door
+   So this file is:
+     CBZ.corridorKit.doorSet(cfg)       a frame that wraps the wall, stops,
+                                        architraves, hinges, the leaves
+     CBZ.corridorKit.detentionLeaf(o)   THE steel door leaf (the warden
+                                        area's door, grown up: vision lite,
+                                        lock case, pull, kick plates)
+     CBZ.corridorKit.steelLeaf(color)   = detentionLeaf({ color }) (the old
+                                        name every caller already used)
+     CBZ.corridorKit.barLeaf(o)         THE barred leaf, remade: round bars
+                                        at 125 mm, flat straps, channel
+                                        frame, a lock box; casts shadow
+     CBZ.corridorKit.BARS               the bar spec cell fronts share
+     CBZ.corridorKit.door(cfg)          a working door (single or PAIR):
+                                        keys, C4 row, auto-shut, staff open
+                                        it, the shared door registry
+     CBZ.corridorKit.crossDoor(cfg)     a partition across an opening with
+                                        a steel PAIR in it (corridor doors,
+                                        a sally port's inner door)
+     CBZ.corridorKit.infill(cfg)        the solid wall either side of a door
+     CBZ.corridorKit.cardReader(...)    reader + LED on a wall face
+     CBZ.corridorKit.intercom(...)      a call station on a wall face
+     CBZ.corridorKit.lining/exitSign/strip/cagedLamp   finishes
+     CBZ.buildSallyPort(cfg)            the exit building
 
-   KEYS ARE FEW. A grille takes ONE ring — the Corridor Key or the Gate Key
+   KEYS ARE FEW. A door takes ONE ring — the Corridor Key or the Gate Key
    — never a key of its own; that is how a real key-control policy works
    (one issued ring per post, restricted sets for the perimeter) and it is
    why the owner's "not a dumb amount of keys" is also the realistic one.
@@ -42,301 +64,266 @@
   const stat = K.stat;
 
   const steelDark = K.skin("steel", 0x3a4048), galv = K.skin("galv", 0xb4bcc4);
-  const bars = K.skin("galv", 0x9aa3a8);
   const BLOCK_LOW = 0x7d9787, BLOCK_HIGH = 0xe4e0d4;
 
   /* ==========================================================
-     1. DOORS. One registry contract, two shapes, two axes.
+     0. THE LEAVES. Built in the leaf's own frame: from the hinge edge
+        along +dir x, floor at y 0, centred on z 0, LT thick. Everything
+        on a leaf is ONE merged vertex-coloured mesh (a leaf is a mover,
+        core/batch.js never merges under one, so a door of forty parts
+        would be forty live draws).
      ========================================================== */
-  const doors = [];
-  function keyTest(keys) {
-    return function () {
-      const g = CBZ.game;
-      if (g && (CBZ.prisonStaffKey ? CBZ.prisonStaffKey() : g.role === "cop")) return true;
-      if (!keys || !keys.length) return true;
-      if (keys.indexOf("Keycard") >= 0 && g && g.hasKey) return true;
-      const econ = CBZ.econ;
-      for (const k of keys) if (econ && econ.hasItem && econ.hasItem(k)) return true;
-      return false;
-    };
+  const LT = 0.05;
+  let VC = null;
+  function vcMat() {
+    if (!VC) VC = new THREE.MeshLambertMaterial({ vertexColors: true });
+    return VC;
   }
-  /* A LEAF IS SOLID UNTIL IT HAS PHYSICALLY MOVED OUT OF THE WAY.
-     OWNER (2026-09-28): "the final gate in the jail game, you don't actually
-     open it up. You just walk straight through it." The collider used to be
-     spliced out the INSTANT a door was told to open, while the bars were
-     still across the opening and had only started to slide: for the first
-     second of every opening you walked through closed steel. Now:
-       a grille  keeps its leaf collider and TRACKS the leaf as the motor
-                 drives it, so the gap you can pass is the gap you can see;
-                 closing, it stalls on any body in its path (a sliding gate
-                 has a safety edge) instead of shoving you through a wall.
-       a swing   leaf keeps its collider until it has swung 40% clear.
-     A collider that shrinks inside the band it was indexed with needs no
-     broadphase rebuild; one that comes back is re-indexed at FULL width. */
-  const colScratch = [];
-  function band(d, p0, p1) {
-    const c = d.collider;
-    if (d.along) { c.minZ = p0; c.maxZ = p1; } else { c.minX = p0; c.maxX = p1; }
-  }
-  function colIn(d) { return CBZ.colliders.indexOf(d.collider) >= 0; }
-  function colAdd(d, lazy) {
-    if (colIn(d)) return;
-    if (d.kind === "grille") band(d, d.fx, d.a1);          // full width, THEN indexed
-    CBZ.colliders.push(d.collider);
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
-    // index it now, while it is full width: a lazy rebuild after the leaf had
-    // been narrowed would bucket the narrow box and miss the rest of the slide
-    if (!lazy && CBZ.queryCollidersNear) { try { CBZ.queryCollidersNear(d.x, d.z, 0.1, colScratch); } catch (e) {} }
-    // ...then down to where the leaf actually is
-    if (d.kind === "grille") {
-      const lx = d.shutX + (d.openX - d.shutX) * d.t;
-      band(d, Math.max(d.fx, lx), Math.max(d.fx + 0.05, lx + d.lw));
-    }
-  }
-  function colDrop(d) {
-    const i = CBZ.colliders.indexOf(d.collider);
-    if (i < 0) return;
-    CBZ.colliders.splice(i, 1);
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
-  }
-  function lampTo(d, v) {
-    if (d.lamp && !d.lamp._exitSignal) {
-      d.lamp.color.setHex(v ? 0x39ff88 : 0xff3b3b);
-      d.lamp.emissive.setHex(v ? 0x14c258 : 0xff0000);
-    }
-  }
-  // an interlocked leaf (a sally port's out door) may open only while the
-  // grille behind it is home and shut, or gone
-  function interlockClear(d) {
-    const q = d.interlock;
-    return !q || q.blown || (!q.open && q.t <= 0.001);
-  }
-  function registerDoor(d, cfg) {
-    d.open = false; d.t = 0; d.openT = 0; d.blown = false; d.keys = cfg.keys || null;
-    d.pending = false;
-    CBZ.colliders.push(d.collider);
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
-    d.setOpen = function (v, quiet) {
-      v = !!v;
-      if (v === d.open) { if (!v) d.pending = false; return v; }
-      if (v && !d.blown && !interlockClear(d)) {
-        // THE INTERLOCK: the out door will not release while the grille is
-        // open. Pushing it cycles the port: the grille drives home first,
-        // the buzzer sounds, and the door releases once the bars are shut.
-        if (!d.pending && !quiet) buzz(d.x, d.z);
-        d.pending = true;
-        if (d.interlock.open) d.interlock.setOpen(false, false);
-        return d.open;
-      }
-      d.pending = false;
-      d.open = v; d.openT = 0;
-      if (!v) colAdd(d);                                     // a closing leaf is solid again at once
-      else if (d.blown) colDrop(d);                          // a blown leaf is a hole, now
-      // (an opening leaf keeps its collider: the tick drops it as the leaf clears)
-      lampTo(d, v);
-      if (!quiet && CBZ.worldSfx) {
-        if (d.kind === "grille") CBZ.worldSfx("rack", d.x, d.z, { ref: 12 });   // the lock throws, the motor takes it
-        else CBZ.worldSfx(v ? "door_open" : "door_close", d.x, d.z, { ref: 10 });
-      }
-      if (v && !quiet && d.alarm && d._by === "player") portAlarm(d);
-      return v;
-    };
-    if (CBZ.registerBreachTarget && cfg.lb) {
-      CBZ.registerBreachTarget({
-        id: cfg.id, lb: cfg.lb, reach: 2.6,
-        at: function () { return { x: d.x, y: 1.4, z: d.z }; },
-        done: function () { return d.open; },
-        defeat: function () { d.blown = true; d.setOpen(true); colDrop(d); d.group.visible = false; if (d.alarm) portAlarm(d); },
-      });
-    }
-    (CBZ._prisonDoorSpecs || (CBZ._prisonDoorSpecs = [])).push({
-      id: cfg.id, label: cfg.label, autoR: 2.5, openByTap: true,
-      keyed: !!(cfg.keys && cfg.keys.length),   // needs a card (systems/prisondoorwatch.js)
-      at: function () { return { x: d.x, y: 1.4, z: d.z }; },
-      pick: function () { return [d.group]; },
-      col: function () { return d.collider; },
-      isOpen: function () { return !!d.open; },
-      permanent: function () { return !!d.blown; },
-      canUse: keyTest(cfg.keys),
-      // the player's own hand on it (systems/interactions.js doorAct)
-      set: function (v) { d._by = "player"; d.setOpen(v); d._by = null; return d.open === !!v; },
-    });
-    doors.push(d);
-    return d;
-  }
-  /* THE PORT WAKES UP. A sally-port grille opened by an inmate (the Gate Key
-     in its lock, or a charge) shows on the booth console the moment it moves:
-     the klaxon sounds from the port, the heat jumps and every screw within
-     earshot is sent to the gate. Nothing is printed; the prison reacts. */
-  function portAlarm(d) {
-    const g = CBZ.game;
-    if (!g || g.mode !== "escape" || g.role === "cop" || g.state !== "playing") return;
-    if (CBZ.worldSfx) CBZ.worldSfx("lockdown", d.x, d.z, { ref: 30, volume: 0.9, gap: 2 });
-    if (CBZ.reportCrime) { try { CBZ.reportCrime(45, { type: "escape" }); } catch (e) {} }
-    if (CBZ.addHeat) { try { CBZ.addHeat(30); } catch (e) {} }
-    if (CBZ.guardHear) { try { CBZ.guardHear(d.x, d.z, 60, { type: "alarm", player: true }); } catch (e) {} }
-  }
-  /* The out door's buzzer: a short square-wave rasp on the sfx bus (the
-     same door into the mix every synthesised voice uses). */
-  function buzz(x, z) {
-    const ctx = CBZ.getAudioCtx && CBZ.getAudioCtx(), bus = CBZ.audioSfxBus && CBZ.audioSfxBus();
-    const P = CBZ.player && CBZ.player.pos;
-    if (!ctx || !bus || !P) return;
-    const dd = Math.hypot(P.x - x, P.z - z), near = 1 / (1 + (dd / 8) * (dd / 8));
-    if (near < 0.05) return;
-    try {
-      const t = ctx.currentTime;
-      const o = ctx.createOscillator(); o.type = "square"; o.frequency.value = 118;
-      const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 900;
-      const gn = ctx.createGain(); gn.gain.setValueAtTime(0, t);
-      gn.gain.linearRampToValueAtTime(0.07 * near, t + 0.02);
-      gn.gain.setValueAtTime(0.07 * near, t + 0.42);
-      gn.gain.linearRampToValueAtTime(0, t + 0.48);
-      o.connect(lp); lp.connect(gn); gn.connect(bus);
-      o.start(t); o.stop(t + 0.5);
-    } catch (e) {}
-  }
-  /* THE GATE MOTOR. A sliding prison gate is driven: a low geared hum while
-     the leaf travels, gone the moment it stops. One voice per moving grille
-     on the shared context and sfx bus, only while the player is in earshot. */
-  function motorOn(d) {
-    const ctx = CBZ.getAudioCtx && CBZ.getAudioCtx(), bus = CBZ.audioSfxBus && CBZ.audioSfxBus();
-    if (!ctx || !bus || d._motor) return;
-    try {
-      const o1 = ctx.createOscillator(); o1.type = "sawtooth"; o1.frequency.value = 47;
-      const o2 = ctx.createOscillator(); o2.type = "triangle"; o2.frequency.value = 141;
-      const g2 = ctx.createGain(); g2.gain.value = 0.35;
-      const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 380; lp.Q.value = 1.6;
-      const out = ctx.createGain(); out.gain.value = 0;
-      o1.connect(lp); o2.connect(g2); g2.connect(lp); lp.connect(out); out.connect(bus);
-      o1.start(); o2.start();
-      d._motor = { ctx: ctx, o1: o1, o2: o2, out: out };
-    } catch (e) { d._motor = null; }
-  }
-  function motorLevel(d, P) {
-    const m = d._motor;
-    if (!m) return;
-    const dd = P ? Math.hypot(P.x - d.x, P.z - d.z) : 99;
-    const near = 1 / (1 + (dd / 9) * (dd / 9));
-    try { m.out.gain.setTargetAtTime(0.11 * near, m.ctx.currentTime, 0.08); } catch (e) {}
-  }
-  function motorOff(d) {
-    const m = d._motor;
-    if (!m) return;
-    d._motor = null;
-    try {
-      const t = m.ctx.currentTime;
-      m.out.gain.setTargetAtTime(0, t, 0.05);
-      m.o1.stop(t + 0.35); m.o2.stop(t + 0.35);
-    } catch (e) {}
-  }
-  // is a body standing where the closing leaf's edge is about to go?
-  const BODY_R = 0.42;
-  function edgeBlocked(d, edge) {
-    const hit = function (p) {
-      if (!p) return false;
-      const al = d.along ? p.z : p.x, pe = d.along ? p.x : p.z;
-      return Math.abs(pe - d.fixed) < 0.25 + BODY_R && al > edge - 0.15 && al < edge + BODY_R + 0.1;
-    };
-    if (hit(CBZ.player && CBZ.player.pos)) return true;
-    const lists = [CBZ.guards, CBZ.npcs];
-    for (let L = 0; L < lists.length; L++) {
-      const list = lists[L] || [];
-      for (let i = 0; i < list.length; i++) {
-        const n = list[i];
-        if (!n || n.dead || n._crowd || !n.group) continue;
-        const p = n.group.position;
-        if (Math.abs(p.x - d.x) > 6 || Math.abs(p.z - d.z) > 6) continue;
-        if (hit(p)) return true;
-      }
-    }
-    return false;
-  }
-  // one mesh per field of bars (a grille was ~80 draws; it is 4)
-  function barField(group, x0, x1, y0, y1, pitch, z, mat) {
-    const n = Math.max(1, Math.round((x1 - x0) / pitch));
-    const geos = [];
-    for (let i = 0; i <= n; i++) {
-      const g = new THREE.BoxGeometry(0.035, y1 - y0, 0.035);
-      g.translate(x0 + (i * (x1 - x0)) / n, (y0 + y1) / 2, z);
-      geos.push(g);
-    }
+  function Paint() { this.g = []; }
+  Paint.prototype.add = function (g, color) {
+    if (g.index) { const t = g.toNonIndexed(); g.dispose(); g = t; }
+    for (const k of Object.keys(g.attributes)) if (k !== "position" && k !== "normal") g.deleteAttribute(k);
+    const n = g.attributes.position.count, c = new THREE.Color(color), a = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) { a[i * 3] = c.r; a[i * 3 + 1] = c.g; a[i * 3 + 2] = c.b; }
+    g.setAttribute("color", new THREE.BufferAttribute(a, 3));
+    this.g.push(g);
+    return this;
+  };
+  Paint.prototype.box = function (x, y, z, w, h, d, color) {
+    return this.add(new THREE.BoxGeometry(w, h, d).translate(x, y, z), color);
+  };
+  // an upright round bar (or a round boss when rx turns it to face z)
+  Paint.prototype.cyl = function (x, y, z, r, h, color, seg, rx) {
+    const g = new THREE.CylinderGeometry(r, r, h, seg || 8, 1, false);
+    if (rx) g.rotateX(rx);
+    return this.add(g.translate(x, y, z), color);
+  };
+  Paint.prototype.mesh = function (parent, cast) {
     const BGU = THREE.BufferGeometryUtils;
-    const merged = BGU && BGU.mergeBufferGeometries ? BGU.mergeBufferGeometries(geos, false) : geos[0];
-    group.add(new THREE.Mesh(merged, mat));
+    if (!this.g.length) return null;
+    const geo = this.g.length === 1 ? this.g[0]
+      : (BGU && BGU.mergeBufferGeometries ? BGU.mergeBufferGeometries(this.g, false) : null);
+    if (!geo) return null;
+    if (this.g.length > 1) for (const q of this.g) q.dispose();
+    this.g = [];
+    const m = new THREE.Mesh(geo, vcMat());
+    m.castShadow = cast !== false; m.receiveShadow = true;
+    if (parent) parent.add(m);
+    return m;
+  };
+  function ledMesh(r) {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(r || 0.01, r || 0.01, 0.006, 12).rotateX(Math.PI / 2),
+      new THREE.MeshLambertMaterial({ color: 0xff3b3b, emissive: 0xff0000, emissiveIntensity: 1.0 }));
+    m.userData.dynamic = true;
+    return m;
   }
-  function flat(group, x0, x1, y, z, h, mat) {
-    const g = new THREE.BoxGeometry(x1 - x0, h, 0.05);
-    g.translate((x0 + x1) / 2, y, z);
-    group.add(new THREE.Mesh(g, mat));
-  }
-  /* cfg: { id, label, axis: "x"|"z", a0, a1 (the span across the corridor),
-            fixed (the gate plane), fixedTo (where the fixed panel ends and
-            the leaf begins; default a0 + 30%), h, keys, lb, autoShut }
-     In local space the gate spans local x from a0..a1 at local z = 0 and
-     the leaf slides toward a0. axis "z" rotates that into the x = fixed
-     plane spanning z. */
-  function grille(cfg) {
-    const along = cfg.axis === "z";
-    const a0 = cfg.a0, a1 = cfg.a1, fixed = cfg.fixed;
-    const h = cfg.h || 3.55, fx = cfg.fixedTo != null ? cfg.fixedTo : a0 + (a1 - a0) * 0.3;
-    const G = new THREE.Group(); G.userData.mover = true;     // the whole gate: fixed panel, header, leaf
-    const fixedG = new THREE.Group();
-    barField(fixedG, a0 + 0.05, fx, 0.06, h, 0.14, -0.1, bars);
-    flat(fixedG, a0, fx + 0.03, 0.30, -0.1, 0.10, steelDark);
-    flat(fixedG, a0, fx + 0.03, 1.55, -0.1, 0.10, steelDark);
-    flat(fixedG, a0, fx + 0.03, h - 0.06, -0.1, 0.10, steelDark);
-    const post = new THREE.Mesh(new THREE.BoxGeometry(0.16, h, 0.24), steelDark);
-    post.position.set(fx, h / 2, -0.1); fixedG.add(post);
-    G.add(fixedG);
-    const header = new THREE.Mesh(new THREE.BoxGeometry(a1 - a0 + 0.3, 0.42, 0.42), steelDark);
-    header.position.set((a0 + a1) / 2, 2.72, 0); G.add(header);
-    const leaf = new THREE.Group();
-    const lw = a1 - fx;
-    barField(leaf, 0.08, lw - 0.08, 0.06, h, 0.14, 0, bars);
-    flat(leaf, 0, lw, 0.30, 0, 0.10, steelDark);
-    flat(leaf, 0, lw, 1.55, 0, 0.10, steelDark);
-    flat(leaf, 0, lw, h - 0.06, 0, 0.10, steelDark);
-    for (const lx of [0.04, lw - 0.04]) { const p = new THREE.Mesh(new THREE.BoxGeometry(0.09, h, 0.2), steelDark); p.position.set(lx, h / 2, 0); leaf.add(p); }
-    const lock = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.5, 0.12), steelDark); lock.position.set(0.16, 1.02, 0.14); leaf.add(lock);
-    const lampMat = new THREE.MeshLambertMaterial({ color: 0xff3b3b, emissive: 0xff0000, emissiveIntensity: 1.0 });
-    const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.06), lampMat); lamp.position.set(0.16, 1.4, 0.19); leaf.add(lamp);
-    for (const lx of [0.3, lw - 0.3]) { const r = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.08, 10), galv); r.rotation.x = Math.PI / 2; r.position.set(lx, h + 0.05, 0.08); leaf.add(r); }
-    leaf.position.set(fx, 0, 0.1);
-    G.add(leaf);
-    if (along) { G.rotation.y = -Math.PI / 2; G.position.set(fixed, 0, 0); }   // local +x -> world +z
-    else G.position.set(0, 0, fixed);
-    root().add(G);
-    // colliders: the fixed panel is a wall, and so is the last 0.5 m of the
-    // opening, which the leaf's lock stile covers open or shut; the leaf's own
-    // collider tracks the leaf (registerDoor + the motor tick)
-    const bandOf = (p0, p1) => along ? { minX: fixed - 0.25, maxX: fixed + 0.25, minZ: p0, maxZ: p1 }
-      : { minX: p0, maxX: p1, minZ: fixed - 0.25, maxZ: fixed + 0.25 };
-    const fixedCol = Object.assign(bandOf(a0, fx + 0.5), { grille: true, noBreach: true, ref: post });
-    CBZ.colliders.push(fixedCol);
-    const d = {
-      id: cfg.id, x: along ? fixed : (fx + a1) / 2, z: along ? (fx + a1) / 2 : fixed, group: G, lamp: lampMat, kind: "grille",
-      shutX: fx, openX: fx - (lw - 0.5), leaf: leaf,
-      along: along, fixed: fixed, fx: fx, a1: a1, lw: lw,
-      // a motor-driven slide, metres per second of leaf travel (real sliders
-      // run ~0.3-1 m/s; a prison grille is quick but it is not a guillotine)
-      speed: cfg.speed || 1.5, alarm: !!cfg.alarm,
-      collider: Object.assign(bandOf(fx, a1), { ref: post }),
-      autoShut: cfg.autoShut != null ? cfg.autoShut : 5,
+
+  /* THE DETENTION DOOR. The warden's staff door was the one leaf in the
+     compound a visitor would believe; this is it, finished the way a
+     detention hollow-metal door is actually made:
+       - a 50 mm steel slab, one colour, no panels (panels are for offices)
+       - a NARROW vision lite at the lock side, eye height, security glass
+         in a welded glazing stop on both faces (100-200 mm wide in the
+         trade; 200 x 620 here), not a window
+       - a surface lock case on the secure face, the key cylinder rose on
+         the other, a welded steel D-pull on both (no lever: a lever is a
+         ligature point, which is why detention doors do not carry one)
+       - stainless kick plates both faces
+     opts { color, lite (default true), hold, lockOn (the leaf index that
+     carries the status LED), led (y) } */
+  function detentionLeaf(opts) {
+    opts = opts || {};
+    const C = opts.color != null ? opts.color : 0x4f5d6b;
+    const STOP = 0x363f49, KICK = 0xa7adb3, HW = 0x9aa2aa, CASE = 0x2a3038;
+    const glass = K.skin("glass", 0xa9bcc4);
+    return function (g, w, h, dir, i) {
+      const P = new Paint(), xs = function (u) { return dir * u; };
+      const lite = opts.lite !== false && w >= 0.7;
+      const vw = Math.min(0.2, w * 0.2), vx1 = w - 0.26, vx0 = vx1 - vw;
+      const vy0 = 1.3, vy1 = Math.min(h - 0.3, vy0 + 0.62);
+      if (lite) {
+        P.box(xs(vx0 / 2), h / 2, 0, vx0, h, LT, C);                                   // hinge side
+        P.box(xs((vx1 + w) / 2), h / 2, 0, w - vx1, h, LT, C);                          // lock side
+        P.box(xs((vx0 + vx1) / 2), vy0 / 2, 0, vw, vy0, LT, C);                          // under the lite
+        P.box(xs((vx0 + vx1) / 2), (vy1 + h) / 2, 0, vw, h - vy1, LT, C);                // over it
+      } else P.box(xs(w / 2), h / 2, 0, w, h, LT, C);
+      for (const f of [-1, 1]) {
+        P.box(xs(w / 2), 0.16, f * (LT / 2 + 0.001), w - 0.05, 0.28, 0.002, KICK);        // kick plate
+        if (lite) {                                                                       // the glazing stop
+          const sz = f * (LT / 2 + 0.006), sw = 0.025;
+          P.box(xs((vx0 + vx1) / 2), vy0 - sw / 2, sz, vw + 2 * sw, sw, 0.012, STOP);
+          P.box(xs((vx0 + vx1) / 2), vy1 + sw / 2, sz, vw + 2 * sw, sw, 0.012, STOP);
+          P.box(xs(vx0 - sw / 2), (vy0 + vy1) / 2, sz, sw, vy1 - vy0, 0.012, STOP);
+          P.box(xs(vx1 + sw / 2), (vy0 + vy1) / 2, sz, sw, vy1 - vy0, 0.012, STOP);
+        }
+        // the welded D-pull: a 25 mm grip on two standoffs, lock stile
+        const px = xs(w - 0.085), pz = f * (LT / 2 + 0.045);
+        P.cyl(px, 1.02, pz, 0.0125, 0.26, HW, 10);
+        P.box(px, 1.13, f * (LT / 2 + 0.022), 0.02, 0.02, 0.045, HW);
+        P.box(px, 0.91, f * (LT / 2 + 0.022), 0.02, 0.02, 0.045, HW);
+      }
+      // a FOOD / CUFF PASS (a cell door's): a welded frame through the leaf
+      // at waist height, its flap shut and padlock-tabbed, both faces
+      if (opts.pass) {
+        for (const f of [-1, 1]) {
+          const fz = f * (LT / 2 + 0.012);
+          P.box(xs(w / 2 - 0.05), 1.02, fz, 0.42, 0.2, 0.024, STOP);
+          P.box(xs(w / 2 - 0.05), 1.02, f * (LT / 2 + 0.026), 0.36, 0.14, 0.006, C);
+        }
+        P.box(xs(w / 2 - 0.05), 0.935, LT / 2 + 0.03, 0.34, 0.018, 0.018, HW);           // the flap hinge
+        P.box(xs(w / 2 + 0.13), 1.06, LT / 2 + 0.035, 0.03, 0.05, 0.02, HW);
+      }
+      // the lock: surface case on +z, the key cylinder rose on -z
+      P.box(xs(w - 0.085), 1.36, LT / 2 + 0.016, 0.1, 0.24, 0.032, CASE);
+      P.cyl(xs(w - 0.085), 1.42, LT / 2 + 0.034, 0.016, 0.006, HW, 12, Math.PI / 2);
+      P.cyl(xs(w - 0.085), 1.36, -(LT / 2 + 0.004), 0.02, 0.008, HW, 12, Math.PI / 2);
+      const slab = P.mesh(g, true);
+      if (slab) slab.userData.doorLeaf = "steel";
+      if (lite) {
+        const pane = new THREE.Mesh(new THREE.BoxGeometry(vw, vy1 - vy0, 0.008), glass);
+        pane.position.set(xs((vx0 + vx1) / 2), (vy0 + vy1) / 2, 0);
+        g.add(pane);
+      }
+      if (opts.hold && opts.lockOn === i) {
+        const lamp = ledMesh(0.009);
+        lamp.position.set(xs(w - 0.085), 1.3, LT / 2 + 0.034);
+        g.add(lamp);
+        opts.hold.lamp = lamp;
+      }
+      return slab;
     };
-    return registerDoor(d, cfg);
   }
+  function steelLeaf(color) { return detentionLeaf({ color: color }); }
+
+  /* THE BARRED LEAF, REMADE. The old ones were square 9 cm sticks at 36-45
+     cm (a head goes through 42 cm) with no straps, a cube for a lock, and
+     no shadow. A real barred door: 25 mm round bars at 125 mm centres run
+     through flat straps (64 x 16) every half metre, in a channel frame,
+     with a lock box on the lock stile. ONE spec, shared by the cell fronts
+     (world/cellblock.js) so every bar in the prison is the same bar. */
+  const BARS = { r: 0.0125, pitch: 0.125, strap: 0.064, strapT: 0.016, strapEvery: 0.52, color: 0x2a2f38 };
+  function barLeaf(opts) {
+    opts = opts || {};
+    const C = opts.color != null ? opts.color : BARS.color;
+    return function (g, w, h, dir, i) {
+      const P = new Paint(), xs = function (u) { return dir * u; };
+      const FW = 0.07, FD = 0.06;
+      P.box(xs(FW / 2), h / 2, 0, FW, h, FD, C);                          // hinge stile
+      P.box(xs(w - FW / 2), h / 2, 0, FW, h, FD, C);                      // lock stile
+      P.box(xs(w / 2), 0.05, 0, w - 2 * FW, 0.1, FD, C);                   // bottom channel
+      P.box(xs(w / 2), h - 0.05, 0, w - 2 * FW, 0.1, FD, C);               // top channel
+      const n = Math.max(2, Math.round((w - 2 * FW) / BARS.pitch));
+      for (let k = 1; k < n; k++) P.cyl(xs(FW + k * (w - 2 * FW) / n), h / 2, 0, BARS.r, h - 0.2, C, 8);
+      const ns = Math.max(1, Math.round((h - 0.2) / BARS.strapEvery));
+      for (let k = 1; k < ns; k++) P.box(xs(w / 2), 0.1 + k * (h - 0.2) / ns, 0, w - 2 * FW, BARS.strap, BARS.strapT, C);
+      // the lock box on the lock stile, a keyway on each face
+      P.box(xs(w - 0.1), 1.08, 0, 0.16, 0.34, 0.1, 0x21262e);
+      for (const f of [-1, 1]) P.cyl(xs(w - 0.1), 1.14, f * 0.052, 0.014, 0.006, 0x9aa2aa, 10, Math.PI / 2);
+      const m = P.mesh(g, true);
+      if (m) m.userData.doorLeaf = "bars";
+      if (opts.hold && opts.lockOn === i) {
+        const lamp = ledMesh(0.01);
+        lamp.position.set(xs(w - 0.1), 1.2, 0.053);
+        g.add(lamp);
+        opts.hold.lamp = lamp;
+      }
+      return m;
+    };
+  }
+  // a glazed leaf in a blue steel frame (the chapel and visits doors: a
+  // normal building door, not a security door)
+  function glassLeaf(g, w, h, dir) {
+    const steelBlue = K.skin("steel", 0x1f3a5f), glass = K.skin("glass");
+    const fr = (x, y, sx, sy) => { const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, 0.08), steelBlue); m.position.set(x, y, 0); g.add(m); };
+    fr(dir * w / 2, 0.04, w, 0.08); fr(dir * w / 2, h - 0.04, w, 0.08); fr(dir * w / 2, h / 2 - 0.02, w, 0.06);
+    fr(dir * 0.04, h / 2, 0.08, h); fr(dir * (w - 0.04), h / 2, 0.08, h);
+    const pane = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.14, h - 0.14), glass); pane.position.set(dir * w / 2, h / 2, 0); g.add(pane);
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(w - 0.3, 0.05, 0.05), galv); bar.position.set(dir * w / 2, 1.02, 0.1); g.add(bar);
+  }
+
   /* ==========================================================
-     THE DOOR SET. A leaf in a hole is not a door (owner, 2026-09-28: "look
+     1. ON THE WALL BESIDE A DOOR. (x, y, z) is the WALL FACE; (nx, nz) the
+        way it faces. Static parts are plain addBox; the LED keeps its own
+        material, because interactions and the doors recolour it.
+     ========================================================== */
+  function onFace(x, y, z, nx, nz, w, h, d, off, color, skin) {
+    const ax = Math.abs(nx) > 0.5;
+    const m = addBox(x + nx * (off + d / 2), y, z + nz * (off + d / 2), ax ? d : w, h, ax ? w : d, color, { cast: false });
+    if (skin) K.skinBox(m, skin, color);
+    return m;
+  }
+  function cardReader(x, y, z, nx, nz) {
+    onFace(x, y, z, nx, nz, 0.1, 0.17, 0.012, 0, 0xaeb7c0, "galv");            // back plate
+    const body = onFace(x, y, z, nx, nz, 0.084, 0.145, 0.03, 0.012, 0x1b1e22);
+    body.material = K.skin("steel", 0x1b1e22, 0.5);
+    onFace(x, y - 0.02, z, nx, nz, 0.06, 0.07, 0.002, 0.042, 0x2c3138);        // read pad
+    const led = ledMesh(0.012);
+    led.rotation.y = Math.atan2(nx, nz);
+    led.position.set(x + nx * 0.045, y + 0.045, z + nz * 0.045);
+    root().add(led);
+    return {
+      led: led, body: body,
+      readerPos: { x: led.position.x, y: led.position.y, z: led.position.z },
+      padPos: { x: x + nx * 0.0435, y: y - 0.02, z: z + nz * 0.0435 },
+      padN: { x: nx, y: 0, z: nz },
+    };
+  }
+  // a stainless call station: speaker grille, call button, a camera dome
+  // over it is the caller's business
+  function intercom(x, y, z, nx, nz) {
+    onFace(x, y, z, nx, nz, 0.14, 0.22, 0.014, 0, 0xb4bcc4, "galv");
+    for (let k = 0; k < 4; k++) onFace(x, y + 0.05 - k * 0.022, z, nx, nz, 0.08, 0.006, 0.003, 0.014, 0x2a2f36);
+    onFace(x, y - 0.07, z, nx, nz, 0.03, 0.03, 0.01, 0.014, 0x1c6fd1);
+  }
+
+  /* THE WALL EITHER SIDE OF A DOOR. A 2.4 m pair does not fill a 4.5 m
+     corridor or a 6 m gate gap, and a leaf wider than 1.2 m is not a door.
+     infill cfg { axis "x" (wall along x at z = fixed) | "z", a0, a1 (the
+     whole opening), c0, c1 (the door's rough opening inside it), fixed, t,
+     top (full height), head (door head), color, skin, bands (two-tone block
+     paint, the corridors' finish) }. The piers are solid to their full
+     height; the head over the door is LOS-only (actors are 2-D boxes: a
+     solid lintel would seal the doorway for every body). */
+  function infill(cfg) {
+    const along = cfg.axis === "z", f = cfg.fixed, t = cfg.t || 0.3, top = cfg.top || 3.6;
+    const color = cfg.color != null ? cfg.color : BLOCK_HIGH, skin = cfg.skin === undefined ? "block" : cfg.skin;
+    const piece = function (p0, p1, y0, y1, solid) {
+      if (p1 - p0 < 0.02 || y1 - y0 < 0.02) return null;
+      const c = (p0 + p1) / 2, hgt = y1 - y0;
+      const m = along ? addBox(f, y0 + hgt / 2, c, t, hgt, p1 - p0, color, { solid: solid, blockLOS: true, cast: true })
+        : addBox(c, y0 + hgt / 2, f, p1 - p0, hgt, t, color, { solid: solid, blockLOS: true, cast: true });
+      if (m.userData.collider) m.userData.collider.noBreach = true;
+      if (skin) K.skinBox(m, skin, color);
+      if (cfg.bands) {
+        // the dado band and its rail, on both faces (corridor paint)
+        const bh = Math.min(1.2, y1) - y0;
+        if (bh > 0.02) for (const s of [-1, 1]) {
+          const o = s * (t / 2 + 0.006);
+          if (along) {
+            stat(new THREE.BoxGeometry(0.012, bh, p1 - p0), K.skin("block", K.toneUp(BLOCK_LOW)), f + o, y0 + bh / 2, c, { uv: 1.6, cast: false });
+            stat(new THREE.BoxGeometry(0.016, 0.03, p1 - p0), K.skin("steel", 0x4f6f60), f + o, 1.2, c, { cast: false });
+          } else {
+            stat(new THREE.BoxGeometry(p1 - p0, bh, 0.012), K.skin("block", K.toneUp(BLOCK_LOW)), c, y0 + bh / 2, f + o, { uv: 1.6, cast: false });
+            stat(new THREE.BoxGeometry(p1 - p0, 0.03, 0.016), K.skin("steel", 0x4f6f60), c, 1.2, f + o, { cast: false });
+          }
+        }
+      }
+      return m;
+    };
+    piece(cfg.a0, cfg.c0, 0, top, true);
+    piece(cfg.c1, cfg.a1, 0, top, true);
+    if (cfg.head != null && top > cfg.head) piece(cfg.c0, cfg.c1, cfg.head, top, false);
+  }
+
+  /* ==========================================================
+     2. THE DOOR SET. A leaf in a hole is not a door (owner, 2026-09-28: "look
      at how stupid the opening to the warden's room is ... his door doesn't
-     have physics"). Every swinging leaf in the compound was a slab pivoting
-     on the wall's CENTRE LINE in a raw hole: no frame, no stop, no hinges,
-     and opened past 90 degrees it swung back through the wall it hung in.
-     A real door set is a frame that wraps the opening (two jambs and a head,
-     the full depth of the wall), a stop the leaf closes against, an
-     architrave on both faces that covers the joint with the wall, and a
-     leaf hung on three hinges at the FACE of the frame on the side it opens
-     to, so it swings clear of the jamb and stops square to the wall.
+     have physics"). A real door set is a frame that wraps the opening (two
+     jambs and a head, the full depth of the wall), a stop the leaf closes
+     against, an architrave on both faces that covers the joint with the
+     wall, and a leaf hung on three hinges at the FACE of the frame on the
+     side it opens to, so it swings clear of the jamb and stops square to
+     the wall.
 
      cfg: { axis "x" (wall along x, plane z = fixed) | "z" (plane x = fixed),
             a0, a1        the rough opening along the wall
@@ -347,11 +334,11 @@
             hinge         -1 hung at a0, +1 at a1, 0 = a PAIR meeting mid-span
             meet          this set is one half of a pair drawn as two sets:
                           no jamb or stop on the free side
-            build(g, w, h, dir)  draws one leaf from its hinge edge along
+            build(g, w, h, dir, i)  draws leaf i from its hinge edge along
                           +dir x, centred on g's z = 0, LT thick
             frame         frame colour; max  fraction of 90 deg it opens }
      -> { leaves: [{ pivot, base, swing, slab }], set(t 0..1), clear }     */
-  const JW = 0.05, AW = 0.075, AP = 0.025, LT = 0.05;
+  const JW = 0.05, AW = 0.075, AP = 0.025;
   function doorSet(cfg) {
     const along = cfg.axis === "z";
     const a0 = Math.min(cfg.a0, cfg.a1), a1 = Math.max(cfg.a0, cfg.a1), fixed = cfg.fixed;
@@ -393,7 +380,6 @@
     const lh = h - JW - y0 - 0.012;
     for (const s of spans) {
       const side = s[0], dir = side < 0 ? 1 : -1, hx = side < 0 ? s[1] : s[2];
-      const lw = s[2] - s[1] - 0.004;
       const pz = open * (t / 2);
       const pivot = new THREE.Group(); pivot.userData.mover = true;
       const p = W(hx, pz);
@@ -402,7 +388,7 @@
       const g = new THREE.Group();
       g.position.set(0, y0 + 0.008, -open * LT / 2);
       pivot.add(g);
-      const slab = cfg.build(g, lw, lh, dir, leaves.length) || null;
+      const slab = cfg.build(g, s[2] - s[1] - 0.004, lh, dir, leaves.length) || null;
       // hinges: knuckles on the frame at the pivot line (static), leaves on the leaf
       for (const hy of [0.24, lh * 0.5, lh - 0.26]) {
         const k = W(hx, pz + open * 0.004);
@@ -419,29 +405,243 @@
       set: function (u) { for (const L of leaves) L.pivot.rotation.y = L.base + L.swing * u; },
     };
   }
-  /* cfg: { id, label, axis, a0, a1, fixed, t, h, keys, lb, swing,
-            hinge (-1 at a0), meet, build(group, w, h, dir), autoShut }
+
+  /* ==========================================================
+     3. WORKING DOORS. One registry contract (systems/interactions.js), a
+        single leaf or a PAIR, either axis.
+     ========================================================== */
+  const doors = [];
+  function keyTest(keys) {
+    return function () {
+      const g = CBZ.game;
+      if (g && (CBZ.prisonStaffKey ? CBZ.prisonStaffKey() : g.role === "cop")) return true;
+      if (!keys || !keys.length) return true;
+      if (keys.indexOf("Keycard") >= 0 && g && g.hasKey) return true;
+      const econ = CBZ.econ;
+      for (const k of keys) if (econ && econ.hasItem && econ.hasItem(k)) return true;
+      return false;
+    };
+  }
+  /* A LEAF IS SOLID UNTIL IT HAS PHYSICALLY MOVED OUT OF THE WAY (owner,
+     2026-09-28: "you don't actually open it up. You just walk straight
+     through it"). An opening leaf keeps its collider until it has swung 40%
+     clear; a closing one is solid again at once — unless a body is standing
+     in the doorway, in which case the leaf waits for him (a closer does not
+     crush a man into the frame, and a box that appears around him would). */
+  function colIn(d) { return CBZ.colliders.indexOf(d.collider) >= 0; }
+  function colAdd(d) {
+    if (colIn(d)) return;
+    CBZ.colliders.push(d.collider);
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+  }
+  function colDrop(d) {
+    const i = CBZ.colliders.indexOf(d.collider);
+    if (i < 0) return;
+    CBZ.colliders.splice(i, 1);
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+  }
+  // a shut steel leaf blocks sight; a barred one never did
+  function losSet(d, on) {
+    const L = CBZ.losBlockers;
+    if (!L || !d.slabs) return;
+    for (const s of d.slabs) {
+      const i = L.indexOf(s);
+      if (on && i < 0) L.push(s);
+      else if (!on && i >= 0) L.splice(i, 1);
+    }
+  }
+  const BODY_R = 0.42;
+  function bodyIn(d) {
+    const c = d.collider;
+    const hit = function (p) {
+      return !!p && p.x > c.minX - BODY_R && p.x < c.maxX + BODY_R && p.z > c.minZ - BODY_R && p.z < c.maxZ + BODY_R;
+    };
+    if (hit(CBZ.player && CBZ.player.pos)) return true;
+    const lists = [CBZ.guards, CBZ.npcs];
+    for (let L = 0; L < lists.length; L++) {
+      const list = lists[L] || [];
+      for (let i = 0; i < list.length; i++) {
+        const n = list[i];
+        if (!n || n.dead || n._crowd || !n.group) continue;
+        const p = n.group.position;
+        if (Math.abs(p.x - d.x) > 4 || Math.abs(p.z - d.z) > 4) continue;
+        if (hit(p)) return true;
+      }
+    }
+    return false;
+  }
+  function lampTo(d, v) {
+    if (d.lamp && !d.lamp._exitSignal) {
+      d.lamp.color.setHex(v ? 0x39ff88 : 0xff3b3b);
+      d.lamp.emissive.setHex(v ? 0x14c258 : 0xff0000);
+    }
+  }
+  // an interlocked leaf (a sally port's out door) may open only while the
+  // inner door behind it is home and shut, or gone
+  function interlockClear(d) {
+    const q = d.interlock;
+    return !q || q.blown || (!q.open && q.t <= 0.001);
+  }
+  function registerDoor(d, cfg) {
+    d.open = false; d.t = 0; d.openT = 0; d.blown = false; d.keys = cfg.keys || null;
+    d.pending = false;
+    colAdd(d); losSet(d, true);
+    d.setOpen = function (v, quiet) {
+      v = !!v;
+      if (v === d.open) { if (!v) d.pending = false; return v; }
+      if (v && !d.blown && !interlockClear(d)) {
+        // THE INTERLOCK: the out door will not release while the inner door
+        // is open. Pushing it cycles the port: the inner door swings home
+        // first, the buzzer sounds, and this one releases once it is shut.
+        if (!d.pending && !quiet) buzz(d.x, d.z);
+        d.pending = true;
+        if (d.interlock.open) d.interlock.setOpen(false, false);
+        return d.open;
+      }
+      d.pending = false;
+      d.open = v; d.openT = 0;
+      // a closing leaf is solid again at once (the tick holds it for a body
+      // in the doorway); an opening one keeps its collider until it clears
+      if (!v && !bodyIn(d)) colAdd(d);
+      if (!v) losSet(d, true);
+      else if (d.blown) { colDrop(d); losSet(d, false); }
+      lampTo(d, v);
+      if (!quiet && CBZ.worldSfx) CBZ.worldSfx(v ? "door_open" : "door_close", d.x, d.z, { ref: 10 });
+      if (v && !quiet && d.alarm && d._by === "player") portAlarm(d);
+      return v;
+    };
+    if (CBZ.registerBreachTarget && cfg.lb) {
+      CBZ.registerBreachTarget({
+        id: cfg.id, lb: cfg.lb, reach: 2.6,
+        at: function () { return { x: d.x, y: 1.4, z: d.z }; },
+        done: function () { return d.open; },
+        defeat: function () {
+          d.blown = true; d.setOpen(true); colDrop(d); losSet(d, false);
+          for (const p of d.pivots) p.visible = false;
+          if (d.alarm) portAlarm(d);
+        },
+      });
+    }
+    (CBZ._prisonDoorSpecs || (CBZ._prisonDoorSpecs = [])).push({
+      id: cfg.id, label: cfg.label, autoR: 2.5, openByTap: true,
+      keyed: !!(cfg.keys && cfg.keys.length),   // needs a card (systems/prisondoorwatch.js)
+      at: function () { return { x: d.x, y: 1.4, z: d.z }; },
+      pick: function () { return d.pivots; },
+      col: function () { return d.collider; },
+      isOpen: function () { return !!d.open; },
+      permanent: function () { return !!d.blown; },
+      canUse: keyTest(cfg.keys),
+      // the player's own hand on it (systems/interactions.js doorAct)
+      set: function (v) { d._by = "player"; d.setOpen(v); d._by = null; return d.open === !!v; },
+    });
+    doors.push(d);
+    return d;
+  }
+  /* THE PORT WAKES UP. A sally port's inner door opened by an inmate (the
+     Gate Key in its lock, or a charge) shows on the booth console the moment
+     it moves: the klaxon sounds from the port, the heat jumps and every screw
+     within earshot is sent to the gate. Nothing is printed; the prison reacts. */
+  function portAlarm(d) {
+    const g = CBZ.game;
+    if (!g || g.mode !== "escape" || g.role === "cop" || g.state !== "playing") return;
+    if (CBZ.worldSfx) CBZ.worldSfx("lockdown", d.x, d.z, { ref: 30, volume: 0.9, gap: 2 });
+    if (CBZ.reportCrime) { try { CBZ.reportCrime(45, { type: "escape" }); } catch (e) {} }
+    if (CBZ.addHeat) { try { CBZ.addHeat(30); } catch (e) {} }
+    if (CBZ.guardHear) { try { CBZ.guardHear(d.x, d.z, 60, { type: "alarm", player: true }); } catch (e) {} }
+  }
+  /* The out door's buzzer: a short square-wave rasp on the sfx bus (the
+     same door into the mix every synthesised voice uses). */
+  function buzz(x, z) {
+    const ctx = CBZ.getAudioCtx && CBZ.getAudioCtx(), bus = CBZ.audioSfxBus && CBZ.audioSfxBus();
+    const P = CBZ.player && CBZ.player.pos;
+    if (!ctx || !bus || !P) return;
+    const dd = Math.hypot(P.x - x, P.z - z), near = 1 / (1 + (dd / 8) * (dd / 8));
+    if (near < 0.05) return;
+    try {
+      const t = ctx.currentTime;
+      const o = ctx.createOscillator(); o.type = "square"; o.frequency.value = 118;
+      const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 900;
+      const gn = ctx.createGain(); gn.gain.setValueAtTime(0, t);
+      gn.gain.linearRampToValueAtTime(0.07 * near, t + 0.02);
+      gn.gain.setValueAtTime(0.07 * near, t + 0.42);
+      gn.gain.linearRampToValueAtTime(0, t + 0.48);
+      o.connect(lp); lp.connect(gn); gn.connect(bus);
+      o.start(t); o.stop(t + 0.5);
+    } catch (e) {}
+  }
+  /* A door-position lamp over the head, both faces: what control sees on
+     the console, and what a man in the corridor sees go green. One
+     material for both lenses. */
+  function headLamp(cfg, h, t) {
+    const along = cfg.axis === "z", mid = (cfg.a0 + cfg.a1) / 2, y = h + AW + 0.09;
+    const mat = new THREE.MeshLambertMaterial({ color: 0xff3b3b, emissive: 0xff0000, emissiveIntensity: 1.0 });
+    for (const s of [-1, 1]) {
+      const off = s * (t / 2 + AP + 0.02);
+      const m = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.03, 14).rotateX(Math.PI / 2), mat);
+      if (along) { m.rotation.y = Math.PI / 2; m.position.set(cfg.fixed + off, y, mid); }
+      else m.position.set(mid, y, cfg.fixed + off);
+      m.userData.dynamic = true;
+      root().add(m);
+      const b = along ? addBox(cfg.fixed + s * (t / 2 + AP + 0.01), y, mid, 0.02, 0.1, 0.1, 0x2a2f36, { cast: false })
+        : addBox(mid, y, cfg.fixed + s * (t / 2 + AP + 0.01), 0.1, 0.1, 0.02, 0x2a2f36, { cast: false });
+      b.userData.dynamic = true;
+    }
+    return mat;
+  }
+  /* cfg: { id, label, axis, a0, a1, fixed, t, h, y0, keys, lb, alarm,
+            swing, hinge (-1 at a0, +1 at a1, 0 a PAIR), meet,
+            build(group, w, h, dir, i), frame, lamp, autoShut, staffR,
+            reader (a card reader each face: default when keys hold the
+            Keycard) }
      `swing` keeps its historic meaning in the LOCAL frame: the leaf goes to
      local z = -swing (for axis "x" that is world -z at swing +1; for axis
-     "z", world +x). The door set above hangs it on that face. */
+     "z", world +x). The door set hangs it on that face. */
   function door(cfg) {
     const along = cfg.axis === "z";
-    const a0 = cfg.a0, a1 = cfg.a1, fixed = cfg.fixed, t = cfg.t || 0.3;
-    const set = doorSet({ axis: cfg.axis, a0: a0, a1: a1, fixed: fixed, t: t, h: cfg.h || 2.3, y0: cfg.y0,
-      open: -(cfg.swing || 1), hinge: cfg.hinge < 0 ? -1 : 1, meet: cfg.meet, build: cfg.build, frame: cfg.frame });
+    const a0 = cfg.a0, a1 = cfg.a1, fixed = cfg.fixed, t = cfg.t || 0.3, h = cfg.h || 2.3;
+    const hinge = cfg.hinge === 0 ? 0 : (cfg.hinge < 0 ? -1 : 1);
+    const set = doorSet({ axis: cfg.axis, a0: a0, a1: a1, fixed: fixed, t: t, h: h, y0: cfg.y0,
+      open: -(cfg.swing || 1), hinge: hinge, meet: cfg.meet, build: cfg.build || detentionLeaf(), frame: cfg.frame });
     const L = set.leaves[0];
     const d = {
-      id: cfg.id, x: along ? fixed : (a0 + a1) / 2, z: along ? (a0 + a1) / 2 : fixed, group: L.pivot, kind: "swing", base: L.base,
-      swing: L.swing,
+      id: cfg.id, x: along ? fixed : (a0 + a1) / 2, z: along ? (a0 + a1) / 2 : fixed,
+      group: L.pivot, pivots: set.leaves.map(function (q) { return q.pivot; }), set: set, kind: "swing",
+      slabs: set.leaves.map(function (q) { return q.slab; }).filter(Boolean),
       collider: along ? { minX: fixed - t / 2, maxX: fixed + t / 2, minZ: a0, maxZ: a1, ref: L.pivot }
         : { minX: a0, maxX: a1, minZ: fixed - t / 2, maxZ: fixed + t / 2, ref: L.pivot },
       autoShut: cfg.autoShut != null ? cfg.autoShut : 4,
+      staffR: cfg.staffR || 2.4, alarm: !!cfg.alarm,
     };
+    const keyed = !!(cfg.keys && cfg.keys.length);
     if (cfg.lamp) d.lamp = cfg.lamp;
+    else if (keyed && cfg.headLamp !== false) d.lamp = headLamp(cfg, h, t);
+    const wantReader = cfg.reader != null ? cfg.reader : (keyed && cfg.keys.indexOf("Keycard") >= 0);
+    if (wantReader) {
+      // on the lock jamb's side, clear of the architrave, both faces
+      const lx = (hinge > 0 ? a0 - 0.28 : a1 + 0.28);
+      for (const s of [-1, 1]) {
+        const off = s * (t / 2);
+        if (along) cardReader(fixed + off, 1.2, lx, s, 0);
+        else cardReader(lx, 1.2, fixed + off, 0, s);
+      }
+    }
     return registerDoor(d, cfg);
   }
+  /* A PARTITION ACROSS AN OPENING WITH A STEEL PAIR IN IT: the corridor
+     doors and a sally port's inner door. cfg { id, label, axis, a0, a1 (the
+     opening to close), fixed, t, top, head, clear (door width, <= 2.4),
+     keys, lb, alarm, swing, color, staffR, autoShut, bands, skin, wall } */
+  function crossDoor(cfg) {
+    const mid = (cfg.a0 + cfg.a1) / 2, cw = Math.min(cfg.clear || 2.2, 2.4, cfg.a1 - cfg.a0);
+    const c0 = mid - cw / 2, c1 = mid + cw / 2, head = cfg.head || 2.4, t = cfg.t || 0.3;
+    infill({ axis: cfg.axis, a0: cfg.a0, a1: cfg.a1, c0: c0, c1: c1, fixed: cfg.fixed, t: t,
+      top: cfg.top || 3.6, head: head, bands: cfg.bands, skin: cfg.skin, color: cfg.wall });
+    return door({ id: cfg.id, label: cfg.label, axis: cfg.axis, a0: c0, a1: c1, fixed: cfg.fixed, t: t, h: head,
+      keys: cfg.keys, lb: cfg.lb, alarm: cfg.alarm, hinge: cw > 1.3 ? 0 : -1, swing: cfg.swing,
+      build: detentionLeaf({ color: cfg.color }), staffR: cfg.staffR, autoShut: cfg.autoShut, reader: cfg.reader });
+  }
   /* STAFF OPEN THE DOORS THEY HOLD KEYS TO. A movement officer walking the
-     spine carries the Corridor Key; when he reaches a grille it opens and it
+     spine carries the Corridor Key; when he reaches a door it opens and it
      shuts behind him — the same tailgating window world/prisonwings.js
      leaves at its card doors, and the reason a man can follow an officer
      through a section he has no key for. Who opens what: any officer for an
@@ -449,9 +649,7 @@
      Corridor Key; the gate post for the Gate Key. */
   function staffFor(d) {
     const list = CBZ.guards || [];
-    // a grille takes a second or two to run back: its officer calls it from
-    // further out, so it is open by the time he reaches the bars
-    const R = d.kind === "grille" ? 5.0 : 2.4;
+    const R = d.staffR || 2.4;
     for (let i = 0; i < list.length; i++) {
       const g = list[i];
       if (!g || g.dead || g.ko > 0 || !g.group) continue;
@@ -465,21 +663,17 @@
     }
     return null;
   }
-  /* A NEW RUN FINDS EVERY GRILLE SHUT AND WHOLE. These doors never reset:
-     a grille blown in one run stayed a hidden hole in every run after it,
-     and one left open stayed open. Same hook world/prisonwings.js uses
-     (CBZ.jailBoost's state-exit list), taken lazily because this file
+  /* A NEW RUN FINDS EVERY DOOR SHUT AND WHOLE. Same hook world/prisonwings.js
+     uses (CBZ.jailBoost's state-exit list), taken lazily because this file
      parses before entities/guards.js publishes it. */
   function resetDoors() {
     for (let i = 0; i < doors.length; i++) {
       const d = doors[i];
-      motorOff(d);
       d.blown = false; d.pending = false; d._by = null;
-      d.group.visible = true;
-      d.t = 0; d.openT = 0;                        // home FIRST: the shut leaf is full width
-      if (d.kind === "grille") d.leaf.position.x = d.shutX;
-      else d.group.rotation.y = d.base;
-      colAdd(d, true);                             // one lazy re-index for the lot
+      for (const p of d.pivots) p.visible = true;
+      d.t = 0; d.openT = 0;
+      d.set.set(0);
+      colAdd(d); losSet(d, true);
       d.setOpen(false, true);
     }
   }
@@ -494,38 +688,23 @@
     for (let i = 0; i < doors.length; i++) {
       const d = doors[i];
       if (!d.open && !d.blown && !d.pending) { const g = staffFor(d); if (g) d.setOpen(true); }
-      // an interlocked door waiting on its grille releases when the bars are
+      // an interlocked door waiting on its partner releases when that one is
       // home; it gives up if the man who pushed it walks away
       if (d.pending) {
         const far = P ? (P.x - d.x) * (P.x - d.x) + (P.z - d.z) * (P.z - d.z) > 5 * 5 : true;
         if (far && !staffFor(d)) d.pending = false;
         else if (interlockClear(d)) d.setOpen(true);
       }
+      // a shut leaf held off a body in the doorway closes on the frame once he is clear
+      if (!d.open && !d.blown && !colIn(d) && !bodyIn(d)) colAdd(d);
       const want = d.open ? 1 : 0;
-      if (d.kind === "grille") {
-        if (d.t !== want) {
-          const travel = Math.max(0.5, d.shutX - d.openX);
-          let step = Math.min(Math.abs(want - d.t), (dt * d.speed) / travel);
-          const lx0 = d.shutX + (d.openX - d.shutX) * d.t;
-          // closing: the leading edge stops on a body (the safety edge)
-          if (want === 0 && edgeBlocked(d, lx0 + d.lw)) step = 0;
-          if (step >= Math.abs(want - d.t) - 1e-9) d.t = want; else d.t += Math.sign(want - d.t) * step;
-          const lx = d.shutX + (d.openX - d.shutX) * d.t;
-          d.leaf.position.x = lx;
-          if (colIn(d)) band(d, Math.max(d.fx, lx), Math.max(d.fx + 0.05, lx + d.lw));
-          if (step > 0) { if (P && Math.abs(P.x - d.x) + Math.abs(P.z - d.z) < 40) motorOn(d); motorLevel(d, P); }
-          else motorOff(d);
-          if (d.t === want) {
-            motorOff(d);
-            if (want === 1) colDrop(d);                  // clear of the opening: nothing left to hit
-            if (CBZ.worldSfx) CBZ.worldSfx(want ? "rack" : "door_close", d.x, d.z, { ref: want ? 10 : 14 });
-          }
-        } else if (d._motor) motorOff(d);
-      } else if (d.t !== want) {
+      if (d.t !== want) {
+        // a leaf waiting on a body stands just off the frame
+        const goal = (!d.open && !colIn(d)) ? Math.min(d.t, 0.4) : want;
         const sw = dt * 1.8;
-        if (sw >= Math.abs(want - d.t)) d.t = want; else d.t += Math.sign(want - d.t) * sw;
-        d.group.rotation.y = d.base + d.swing * d.t;
-        if (want === 1 && d.t >= 0.4) colDrop(d);        // swung clear enough to pass
+        if (sw >= Math.abs(goal - d.t)) d.t = goal; else d.t += Math.sign(goal - d.t) * sw;
+        d.set.set(d.t);
+        if (want === 1 && d.t >= 0.4) { colDrop(d); losSet(d, false); }   // swung clear enough to pass
       }
       if (d.open && !d.blown) {
         d.openT += dt;
@@ -534,29 +713,9 @@
       }
     }
   });
-  // a steel leaf: painted, a wired window, a push bar on the pull side
-  function steelLeaf(color) {
-    const mat = K.skin("steel", color || 0x4f6f60);
-    return function (g, w, h, dir) {
-      const leaf = new THREE.Mesh(new THREE.BoxGeometry(w - 0.04, h - 0.03, 0.06), mat); leaf.position.set(dir * w / 2, h / 2, 0); g.add(leaf);
-      const win = new THREE.Mesh(new THREE.PlaneGeometry(0.28, 0.62), K.skin("glass", 0x8a9a9a)); win.position.set(dir * (w / 2 + 0.2), 1.62, -0.04); win.rotation.y = Math.PI; g.add(win);
-      const win2 = win.clone(); win2.position.z = 0.04; win2.rotation.y = 0; g.add(win2);
-      const bar = new THREE.Mesh(new THREE.BoxGeometry(w - 0.3, 0.07, 0.07), galv); bar.position.set(dir * w / 2, 1.0, -0.08); g.add(bar);
-      const plate = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.14, 0.02), galv); plate.position.set(dir * (w / 2 + 0.25), 1.0, 0.04); g.add(plate);
-    };
-  }
-  // a glazed leaf in a blue steel frame
-  function glassLeaf(g, w, h, dir) {
-    const steelBlue = K.skin("steel", 0x1f3a5f), glass = K.skin("glass");
-    const fr = (x, y, sx, sy) => { const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, 0.08), steelBlue); m.position.set(x, y, 0); g.add(m); };
-    fr(dir * w / 2, 0.04, w, 0.08); fr(dir * w / 2, h - 0.04, w, 0.08); fr(dir * w / 2, h / 2 - 0.02, w, 0.06);
-    fr(dir * 0.04, h / 2, 0.08, h); fr(dir * (w - 0.04), h / 2, 0.08, h);
-    const pane = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.14, h - 0.14), glass); pane.position.set(dir * w / 2, h / 2, 0); g.add(pane);
-    const bar = new THREE.Mesh(new THREE.BoxGeometry(w - 0.3, 0.05, 0.05), galv); bar.position.set(dir * w / 2, 1.02, 0.1); g.add(bar);
-  }
 
   /* ==========================================================
-     2. FINISHES.
+     4. FINISHES.
      ========================================================== */
   // two bands of painted block over a rect (merged; no collider)
   function lining(x0, x1, z0, z1, h, band) {
@@ -612,7 +771,7 @@
   }
 
   /* ==========================================================
-     3. THE SALLY PORT. cfg { id, x, z (the wall line), dir (+1: the way out
+     5. THE SALLY PORT. cfg { id, x, z (the wall line), dir (+1: the way out
         is +z), gateKey, label, walkway (m of fenced approach, 0 = none),
         booth ("E"|"W"|null), altExit (register an alt win zone instead of
         being THE exit), signalHook }
@@ -666,29 +825,31 @@
     stat(new THREE.BoxGeometry(fr[1] - fr[0], 0.06, fr[3] - fr[2]), K.skin("polished", 0x9a9fa6), (fr[0] + fr[1]) / 2, 0.03, (fr[2] + fr[3]) / 2, { uv: 2, cast: false });
     K.skinBox(addBox((fr[0] + fr[1]) / 2, CH + 0.08, (fr[2] + fr[3]) / 2, fr[1] - fr[0], 0.16, fr[3] - fr[2], 0xdedbd2, { cast: false }), "concrete", 0xdedbd2);
     for (const lz of [IZ0 + 2.0, IZ0 + 4.6, 2.2, IZ1 - 1.6]) { const p = P(0, lz); strip(p[0], CH - 0.02, p[1], 3.6, "x"); }
-    // the grille's jamb piers: block piers in the vestibule's own two-tone
-    // paint (they were two full-height black steel slabs either side of it)
-    for (const s of [-1, 1]) { const p = P(s * (IW - 0.3), 0); lining(p[0] - 0.375, p[0] + 0.375, p[1] - 0.625, p[1] + 0.625, CH); }
     CBZ.onUpdate(21.38, (function () { let done = false; return function () {
       if (done || !CBZ.prisonLights || !CBZ.prisonLights.rooms) return; done = true;
       CBZ.prisonLights.rooms.push({ id: cfg.id, x0: X - IW, x1: X + IW, z0: wz0, z1: wz1 });
     }; })());
-    // the grille on the wall line
-    const gate = grille({ id: cfg.id + "-grille", label: "The exit grille", axis: "x", a0: X - IW + 0.6, a1: X + IW - 0.6, fixedTo: X - 0.55, fixed: Z, h: CH - 0.05, keys: [cfg.gateKey || "Gate Key"], lb: 5, alarm: true, speed: 1.1 });
+    /* THE INNER DOOR on the wall line: a block partition across the
+       vestibule with a steel pair in it, on the Gate Key. It was a 7.8 m
+       barred slider on a motor; a sally port is two DOORS (research: "a
+       security vestibule with two or more doors ... releasing only one at a
+       time"), and the out door below is interlocked with this one. */
+    const gate = crossDoor({ id: cfg.id + "-inner", label: "The inner door", axis: "x", a0: X - IW, a1: X + IW, fixed: Z,
+      t: 0.3, top: CH, head: 2.5, clear: 2.2, keys: [cfg.gateKey || "Gate Key"], lb: 5, alarm: true, swing: -D,
+      bands: true, staffR: 3.2, autoShut: 5, color: 0x4f5d6b });
     if (cfg.signal && CBZ.exitSignal) { CBZ.exitSignal.register(gate.lamp); gate.lamp._exitSignal = true; }
-    const es1 = P(0, -0.55), es2 = P(0, IZ1 - 0.35);
+    { const ip = P(1.6, -0.15); intercom(ip[0], 1.45, ip[1], 0, -D); }
+    const es1 = P(0, -0.19), es2 = P(0, IZ1 - 0.35);
     exitSign(es1[0], 3.22, es1[1], D > 0 ? Math.PI : 0);
     exitSign(es2[0], 2.72, es2[1], D > 0 ? Math.PI : 0);
-    const rp = P(-3.0, -0.42);
+    const rp = P(-3.0, -0.16);
     K.sign("AUTHORIZED PERSONNEL ONLY\nBEYOND THIS POINT", rp[0], 2.05, rp[1], 1.3, 0.42, D > 0 ? Math.PI : 0, "#f3f3ef", "#b3261e");
     // the entry pair and the way out
     const ez = P(0, Z0 + T / 2)[1], oz = P(0, Z1 - T / 2)[1];
-    door({ id: cfg.id + "-entry-w", label: "The sally port", axis: "x", a0: X - DW / 2, a1: X, fixed: ez, t: T, meet: true, h: 2.5, keys: null, hinge: -1, swing: -D, build: glassLeaf });
-    door({ id: cfg.id + "-entry-e", label: "The sally port", axis: "x", a0: X, a1: X + DW / 2, fixed: ez, t: T, meet: true, h: 2.5, keys: null, hinge: 1, swing: -D, build: glassLeaf });
-    // THE WAY OUT is interlocked with the grille: it releases only while the
-    // bars behind you are home (world/corridors.js calls this an interlock;
-    // now it is one). A crash-bar door, pushed from inside.
-    const outDoor = door({ id: cfg.id + "-out", label: "The way out", axis: "x", a0: X - OW / 2, a1: X + OW / 2, fixed: oz, t: T, h: 2.35, keys: null, hinge: -1, swing: D, lb: 0, build: steelLeaf(0x4f6f60) });
+    door({ id: cfg.id + "-entry", label: "The sally port", axis: "x", a0: X - DW / 2, a1: X + DW / 2, fixed: ez, t: T, h: 2.5, keys: null, hinge: 0, swing: -D, build: detentionLeaf() });
+    // THE WAY OUT is interlocked with the inner door: it releases only while
+    // the door behind you is home and shut. Pushed from inside.
+    const outDoor = door({ id: cfg.id + "-out", label: "The way out", axis: "x", a0: X - OW / 2, a1: X + OW / 2, fixed: oz, t: T, h: 2.35, keys: null, hinge: -1, swing: D, lb: 0, build: detentionLeaf({ color: 0x4f6f60 }) });
     outDoor.interlock = gate;
     const stp = P(0, Z1 + 0.6);
     const step = addBox(stp[0], 0.08, stp[1], 2.4, 0.16, 1.2, 0x8f959c, { cast: false }); K.skinBox(step, "concrete", 0xa0a5aa);
@@ -736,7 +897,7 @@
       if (CBZ.prisonPlaceItem) { try { CBZ.prisonPlaceItem.apply(null, keyAt); } catch (e) {} }
       else (CBZ._prisonLateItems || (CBZ._prisonLateItems = [])).push(keyAt);
       strip(X + side * (BX + 2.1), B.h - 0.02, wc, 2.2, "z");
-      door({ id: cfg.id + "-booth", label: "The gate booth", axis: "z", fixed: side > 0 ? B.x1 : B.x0, a0: wc - 0.6, a1: wc + 0.6, t: 0.5, h: 2.3, keys: ["Keycard"], lb: 5, hinge: -1, swing: side, build: steelLeaf(0x4f6f60) });
+      door({ id: cfg.id + "-booth", label: "The gate booth", axis: "z", fixed: side > 0 ? B.x1 : B.x0, a0: wc - 0.6, a1: wc + 0.6, t: 0.5, h: 2.3, keys: ["Keycard"], lb: 5, hinge: -1, swing: side, headLamp: false, build: detentionLeaf({ color: 0x4f6f60 }) });
       K.sign("AUTHORIZED\nPERSONNEL ONLY", (side > 0 ? B.x1 : B.x0) + side * 0.28, 2.6, wc, 0.9, 0.42, side > 0 ? Math.PI / 2 : -Math.PI / 2, "#f3f3ef", "#b3261e");
     }
     // the walkway
@@ -748,14 +909,17 @@
     }
     K.program(cfg.id, X - BX, X + BX, wz0, wz1);
     // the win: THE exit, or an alternative one. It stands OUTSIDE, 3.2 m past
-    // the out door's face, 3 m round: nobody reaches it without the grille
-    // open, the grille shut again behind him, and the out door swung (it sat
+    // the out door's face, 3 m round: nobody reaches it without the inner
+    // door open, shut again behind him, and the out door swung (it sat
     // inside the vestibule, so the run ended on a door nobody opened).
     const win = P(0, Z1 + 3.2);
     if (cfg.altExit) (CBZ.altExitZones || (CBZ.altExitZones = [])).push({ x: win[0], z: win[1], r: 3, name: cfg.id });
     return { gate: gate, win: { x: win[0], z: win[1] } };
   }
 
-  CBZ.corridorKit = { grille, door, doorSet, lining, exitSign, strip, cagedLamp, keyTest, steelLeaf, glassLeaf, doors };
+  CBZ.corridorKit = {
+    door, crossDoor, doorSet, infill, detentionLeaf, steelLeaf, barLeaf, glassLeaf, BARS, Paint,
+    cardReader, intercom, lining, exitSign, strip, cagedLamp, keyTest, doors,
+  };
   CBZ.buildSallyPort = buildSallyPort;
 })();

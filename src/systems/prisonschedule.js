@@ -780,6 +780,9 @@
      colliders at a 0.5 m grid with the actor's own 0.5 m radius:
 
        the throat        z[-8.5,-7.5] is solid at every x until the gate racks;
+                         since 2026-09-29 it is a sally port: inner pair
+                         x[-1.2,1.2] at z -8, a vestibule to z -3.6, the out
+                         pair x[-1.2,1.2] at z -3.75 (world/door.js);
                          inside it the south cross-passage z[-13.5,-9.0] is
                          clear from x -11 to +11.
        the galleries     x -11..-9 and x +9..+11, clear the whole length.
@@ -798,7 +801,7 @@
      systems/rest.js hands over at 2.6 m, so propuse's own arc walks the last
      stretch. Row A is 3.8 m deep and he walks in.
      ========================================================== */
-  const THROAT_OUT = -6.2, THROAT_IN = -10.2, CROSS_Z = -11.8, AISLE_Z = -36.2;
+  const THROAT_APRON = -1.4, THROAT_OUT = -6.2, THROAT_IN = -10.2, CROSS_Z = -11.8, AISLE_Z = -36.2;
   function routeHome(n, bed, spot) {
     const p = n.group.position;
     const unit = bed._housingUnit || null;
@@ -823,8 +826,13 @@
     } else {
       // HIS OWN LANE ACROSS THE THROAT. One aim point for thirteen men is a
       // plug; the lane is a hash of the RACK, so it is the same every night.
+      // The throat is the unit's SALLY PORT now (world/door.js): a 2.4 m
+      // steel pair at each end of a vestibule. The lane is inside that
+      // clear width, and the first leg is the apron in front of the out
+      // door, so nobody walks a diagonal into the vestibule's side wall.
       const h = CBZ.hash01 ? CBZ.hash01(bed.x, bed.z, 4517) : 0.5;
-      const lane = -2.1 + h * 4.2;
+      const lane = -0.7 + h * 1.4;
+      way.push({ x: lane, z: THROAT_APRON });
       way.push({ x: lane, z: THROAT_OUT });
       way.push({ x: lane, z: THROAT_IN });
       const cb = CBZ.cellblock;
