@@ -73,7 +73,7 @@ function inkCanvas(w, h) {
   const cv = { width: w, height: h, style: {} };
   const grad = { addColorStop() {} };
   const t = { canvas: cv, measureText: (s) => ({ width: String(s).length * 20 }), createRadialGradient: () => grad,
-    createLinearGradient: () => grad, createPattern: () => ({}), getImageData: (x, y, W, H) => ({ data: new Uint8ClampedArray(Math.max(1, W * H) * 4) }) };
+    createLinearGradient: () => grad, createPattern: () => ({}), getImageData: (x, y, W, H) => ({ data: new Uint8ClampedArray(Math.max(1, W * H) * 4).fill(255) }) };   // a skin chart reads back opaque (pedinstance pages refuse a blank source)
   const c2 = new Proxy(t, { get(o, k) { return k in o ? o[k] : function () {}; }, set(o, k, v) { o[k] = v; return true; } });
   cv.getContext = () => c2;
   return cv;
@@ -371,7 +371,16 @@ for (const sex of SEXES) for (const her of HERITAGES) for (let ri = 0; ri < ROLE
               pagedChecked.add(ps);
               const img = o.material.map.image, C = ps.page.cls, w = img.width, h = img.height;
               const a = img.getContext("2d").getImageData(0, 0, w, h).data;
-              const b = ps.page.ctx.getImageData(ps.x + C.g, ps.y + C.g, w, h).data;
+              // the page is a GL-order array (entities/pedinstance.js): image row y is array row PH-1-y
+              const pageRect = (x0, y0, rw, rh) => {
+                const P = ps.page, out = new Uint8ClampedArray(rw * rh * 4);
+                for (let y = 0; y < rh; y++) for (let x = 0; x < rw; x++) {
+                  const si = ((P.PH - 1 - (y0 + y)) * C.PW + x0 + x) * 4, di = (y * rw + x) * 4;
+                  out[di] = P.data[si]; out[di + 1] = P.data[si + 1]; out[di + 2] = P.data[si + 2]; out[di + 3] = P.data[si + 3];
+                }
+                return out;
+              };
+              const b = pageRect(ps.x + C.g, ps.y + C.g, w, h);
               let bad = a.length !== b.length;
               // a browser canvas is premultiplied: a texel with alpha 0 has no
               // colour to copy (the source uploads as 0,0,0,0 too), so only
@@ -381,7 +390,7 @@ for (const sex of SEXES) for (const her of HERITAGES) for (let ri = 0; ri < ROLE
                 else if (a[i + 3] > 0 && (a[i] !== b[i] || a[i + 1] !== b[i + 1] || a[i + 2] !== b[i + 2])) bad = true;
               }
               // the gutter repeats the edge texel (the left gutter of the top row)
-              const gut = ps.page.ctx.getImageData(ps.x, ps.y + C.g, C.g, 1).data;
+              const gut = pageRect(ps.x, ps.y + C.g, C.g, 1);
               for (let i = 0; !bad && i < gut.length; i += 4) for (let c = a[3] > 0 ? 0 : 3; c < 4; c++) if (gut[i + c] !== a[c]) bad = true;
               // the slot's uv rect lands on the slot's pixels in a flipY upload
               const PH = ps.page.PH, PW = C.PW;
