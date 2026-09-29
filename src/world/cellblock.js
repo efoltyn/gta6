@@ -2194,10 +2194,13 @@
   function handLatched(c) {
     return !!(CBZ.prisonDoorLatched && CBZ.prisonDoorLatched("prison-cell-" + c.i));
   }
-  function setDoor(which, locked) {
+  function setDoor(which, locked, byKey) {
     const c = typeof which === "number" ? cells[which] : which;
     if (!c || !c.doorCol) return false;
-    if (!locked && c.tier) return false;          // the lockdown tier (header)
+    // the lockdown tier (header) is shut to every SYSTEM (the day plan, a
+    // release); a key turned in its own lock opens it (owner, 2026-09-29:
+    // "all doors can be opened with a key")
+    if (!locked && c.tier && !byKey) return false;
     if (!locked && handLatched(c)) return false;
     const arr = CBZ.colliders || (CBZ.colliders = []);
     const i = arr.indexOf(c.doorCol);
@@ -2249,16 +2252,18 @@
         id: "prison-cell-" + c.i, label: c.player ? "your cell door" : (c.tier ? "the cell door (tier lockdown)" : "the cell door"),
         autoR: 6.0,
         at: function () { return { x: c.leafClosed.x, y: 1.4 + c.fy, z: c.leafClosed.z }; },
+        floor: function () { return c.fy; },
         pick: function () { return [c.bars]; },
         col: function () { return c.doorCol; },
         isOpen: function () { return !c.locked; },
-        permanent: function () { return !!c.tier; },
+        permanent: function () { return false; },
+        // a racked front (the schedule, a lockdown, the tier) takes the Cell Key
+        keys: function () { return c.locked ? ["Cell Key"] : null; },
         /* A LOCKED FRONT WANTS A KEY. Standing open, anybody may pull it to
            (the close asks nothing, as above). Locked by the schedule or a
            lockdown, only the officer's keys or a stolen Cell Key open it —
            a bare hand used to be able to tap a racked door open at 02:00. */
         canUse: function () {
-          if (c.tier) return false;
           if (!c.locked) return true;
           if (CBZ.prisonStaffKey && CBZ.prisonStaffKey()) return true;
           const econ = CBZ.econ;
@@ -2272,8 +2277,9 @@
         set: function (v) {
           if (v) this._latch = false;
           const S = CBZ.prisonSchedule;
-          c._keyed = !!v && !!(S && S.cellsLocked && S.cellsLocked());
-          setDoor(c, !v);
+          // (a tier cell stays as the key left it: the day plan never opens one)
+          c._keyed = !!v && !!(c.tier || (S && S.cellsLocked && S.cellsLocked()));
+          setDoor(c, !v, true);
           return c.locked === !v;
         },
       });

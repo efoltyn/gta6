@@ -1052,10 +1052,11 @@
   addBox(-18.7, 2.88, 14, 0.14, 0.16, 3.5, 0x6b7480, { cast: false });   // yard-side nose
   // and a DOOR in it (it was a 3.4 m hole): a framed pair of steel leaves
   // with vision panels, hooked back against the yard face for the day's
-  // traffic (world/corridorkit.js's door set; nothing here is a collider)
-  if (CBZ.corridorKit && CBZ.corridorKit.doorSet) {
-    CBZ.corridorKit.doorSet({ axis: "z", a0: 12.3, a1: 15.7, fixed: -19, t: 0.5, h: 2.8, y0: 0.06,
-      open: -1, hinge: 0, max: 1.0, build: CBZ.corridorKit.steelLeaf(0x4f5d6b) }).set(1);
+  // traffic. A working door (world/corridorkit.js door): E shuts it, anybody
+  // walking up opens it, a new run hooks it back.
+  if (CBZ.corridorKit && CBZ.corridorKit.door) {
+    CBZ.corridorKit.door({ id: "prison-canteen-door", label: "The canteen door", axis: "z", a0: 12.3, a1: 15.7, fixed: -19, t: 0.5, h: 2.8, y0: 0.06,
+      swing: 1, hinge: 0, max: 1.0, keys: null, startOpen: true, autoShut: Infinity, build: CBZ.corridorKit.steelLeaf(0x4f5d6b) });
   }
   PD.lamp(-18.69, 3.4, 16.9, "x+");                                       // over the door, outside
   PD.extinguisher(-19.42, 1.1, 17.6, "x-");

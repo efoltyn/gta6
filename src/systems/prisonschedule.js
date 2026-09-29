@@ -467,8 +467,9 @@
       if (!c.locked) continue;
       const dx = p.x - c.doorX, dz = p.z - c.doorZ;
       if (dx * dx + dz * dz > 1.45 * 1.45) continue;
+      if (Math.abs((p.y || 0) - (c.fy || 0)) > 1.2) continue;   // the tier over it is not at it
       c._keyed = true;
-      CBZ.cellblock.setDoor(c, false);          // voices its own leaf
+      CBZ.cellblock.setDoor(c, false, true);    // voices its own leaf
       if (CBZ.sfx) CBZ.sfx("key");              // YOU turned it: global is honest
       return;
     }

@@ -233,18 +233,17 @@
     if (!CBZ.prisonPrompt) return;
     const d = deskState();
     if (d && d.d2 < DESK_REACH2 && !d.officer && !S.deskTaking) {
-      CBZ.prisonPrompt("plan-desk", "@escapePlanDesk", "Take", { at: d.at, d2: d.d2 });
-      if (CBZ.keys && CBZ.keys.e) deskTake();
+      if (CBZ.prisonPrompt("plan-desk", "@escapePlanDesk", "Take", { at: d.at, d2: d.d2 }) && CBZ.keys && CBZ.keys.e) deskTake();
     }
     const v = CBZ.culvertGrate;
     if (v && !S.grateCut) {
       const dd = d2(player.pos.x, player.pos.z, v.x, v.z);
       if (dd < GRATE_REACH2) {
-        CBZ.prisonPrompt("plan-grate", "@escapePlanCut", "Cut",
+        const reach = CBZ.prisonPrompt("plan-grate", "@escapePlanCut", "Cut",
           { at: { x: v.x, y: 0.7, z: v.z }, d2: dd,
             sub: !has("Hacksaw Blade") ? "needs a blade" : "",
             prog: S.work && S.work.kind === "grate" ? S.work.t / S.work.need : 0 });
-        if (CBZ.keys && CBZ.keys.e) grateCut();
+        if (reach && CBZ.keys && CBZ.keys.e) grateCut();
       }
     }
   }

@@ -1173,19 +1173,32 @@
        staff door reads the Keycard (or the uniform); the Warden's office is
        picked, so its spec wants the Lockpick and refuses to be OPENED by a
        tap; a room door (free) asks nothing. */
+    /* Every door takes a key AT THE DOOR: the staff door the Keycard, the
+       Warden's office his own ring (the Gun-Room Key rides on it; a Lockpick
+       is the other way, through pickBeat's hold, which `beat` hands the
+       verb). The free side of a locked door (the admin side's push bar, the
+       office's thumb turn: cfg.freeSide) is a handle, not a lock. */
+    const doorKeys = d.free ? null : (d.keys ? d.keys.slice() : (d.pick ? ["Gun-Room Key"] : null));
+    const hasItem = function (k) { const e = CBZ.econ; return !!(e && e.hasItem && e.hasItem(k)); };
+    const onFreeSide = function () { return !!(cfg.freeSide && cfg.freeSide()); };
     (CBZ._prisonDoorSpecs || (CBZ._prisonDoorSpecs = [])).push({
-      id: d.id, label: d.label, autoR: d.free ? 1.6 : 2.3, openByTap: !d.pick,
+      id: d.id, label: d.label, autoR: d.free ? 1.6 : 2.3,
       keyed: !!(d.keys || d.pick),   // needs a card or a pick (systems/prisondoorwatch.js)
+      keys: function () { return onFreeSide() ? null : doorKeys; },
       at: function () { return { x: d.x, y: 1.4, z: d.z }; },
       pick: function () { return d.pivots; },
       col: function () { return d.collider; },
       isOpen: function () { return !!d.open; },
       permanent: function () { return !!d.blown; },
+      beat: function () { return !!(d.pick && !d.open && !onFreeSide() && hasItem("Lockpick")); },
       canUse: function () {
-        if (d.free) return true;
-        if (d.keys) return !!(CBZ.game && (CBZ.game.hasKey || (CBZ.prisonStaffKey ? CBZ.prisonStaffKey() : CBZ.game.role === "cop")));
-        const econ = CBZ.econ;
-        return !!(econ && econ.hasItem && econ.hasItem("Lockpick"));
+        if (d.free || onFreeSide()) return true;
+        const g = CBZ.game;
+        if (g && (CBZ.prisonStaffKey ? CBZ.prisonStaffKey() : g.role === "cop")) return true;
+        if (doorKeys) for (let i = 0; i < doorKeys.length; i++) {
+          if (doorKeys[i] === "Keycard" ? !!(g && g.hasKey) : hasItem(doorKeys[i])) return true;
+        }
+        return !!(d.pick && d.open && hasItem("Lockpick"));
       },
       set: function (v) { d.setOpen(v); return d.open === !!v; },
     });
@@ -1199,10 +1212,14 @@
   const staffDoor = makeDoor({
     id: "prison-admin-staff", x0: SG.x0, x1: SG.x1, z: SG.z, t: SG.t || 1, h: SG.h || 2.6, keys: ["Keycard"],
     label: "The staff door", pair: true, build: function () { return CK.detentionLeaf({ color: 0x4f5d6b }); }, lamp: readerLed,
+    // the admin side has a push bar (the tick below): a handle, not a lock
+    freeSide: function () { const P = CBZ.player && CBZ.player.pos; return !!(P && P.z < SG.z - 0.35); },
   });
   const officeDoor = makeDoor({
     id: "prison-warden-office", x0: D_OFF.x0, x1: D_OFF.x1, z: CORR_Z, keys: null,
     label: "The Warden's office", pick: 3.4, pair: true, frame: 0x3e2d1e,
+    // from inside the office it is a thumb turn (the tick below)
+    freeSide: function () { const P = CBZ.player && CBZ.player.pos; return !!(P && P.z < CORR_Z - 0.3 && P.x > PX_B + 0.2); },
     build: function (hold) { return woodLeaf(hold, 1); },
   });
   // the three room doors: unlocked, they open as you (or staff) walk up
@@ -1667,6 +1684,14 @@
         const ex = q.group.position.x - d.x, ez = q.group.position.z - d.z;
         if (ex * ex + ez * ez < 3.2) staff = true;
       }
+      // an unlocked door opens for an inmate walking through it too
+      const men = CBZ.npcs || [];
+      for (let k = 0; k < men.length && !staff; k++) {
+        const q = men[k];
+        if (!q || q.dead || q._crowd || !q.group) continue;
+        const ex = q.group.position.x - d.x, ez = q.group.position.z - d.z;
+        if (ex * ex + ez * ez < 2.4) staff = true;
+      }
       const latched = CBZ.prisonDoorLatched && CBZ.prisonDoorLatched(d.id);
       if (!d.open) {
         if (staff || (you < 2.2 && !latched)) { d.setOpen(true); d.shutT = 2.5; }
@@ -1727,9 +1752,10 @@
     // "Pick", held, pinned over the lock itself. The lock's own status lamp
     // still goes amber at a lock your pick will open and beats faster the
     // further through the shackle you are — that is the progress readout.
-    if (CBZ.prisonPrompt) CBZ.prisonPrompt(promptId, "e", "Pick",
-      { at: { x: target.x, y: target === SAFE ? 1.15 : 1.5, z: target.z }, hold: true });
-    const working = !!(CBZ.keys && CBZ.keys.e);
+    // (prisonPrompt refuses a lock you cannot reach: other floor, a wall between)
+    const reach = !CBZ.prisonPrompt || CBZ.prisonPrompt(promptId, "e", "Pick",
+      { at: { x: target.x, y: target === SAFE ? 1.15 : 1.5, z: target.z }, hold: true, skip: target.collider ? [target.collider] : null });
+    const working = reach && !!(CBZ.keys && CBZ.keys.e);
     if (!working) { target.picked = Math.max(0, (target.picked || 0) - dt * 1.6); tell(target, target.picked / secs, 0); return; }
     target.picked = (target.picked || 0) + dt;
     tell(target, target.picked / secs, 1);

@@ -509,7 +509,7 @@ document.body.appendChild(b);}}catch(e){}})();
      off the same numbers systems/climb.js climbs, + railed landings. Every
      tower ladder in every game is made here and registered with climb.js. -->
 <script src="src/world/ladderkit.js?v=lad1"></script>
-<script src="src/world/corridorkit.js?v=tow929b"></script>
+<script src="src/world/corridorkit.js?v=door929"></script>
 <!-- Masonry textures: procedural brick (stretcher bond + header courses) and
      ashlar (drafted-margin blocks) CanvasTextures + the fixed 6-colourway
      palette. After materials.js — it consumes CBZ.cmat. -->
@@ -534,14 +534,14 @@ document.body.appendChild(b);}}catch(e){}})();
      after core/batch.js has run would already be welded into a static buffer.
      Runtime deps (markCollidersDirty, queryCollidersNear, propNearestSeat) are
      all resolved inside the per-frame driver, never at parse. -->
-<script src="src/world/cellblock.js?v=doors929"></script>
+<script src="src/world/cellblock.js?v=door929"></script>
 <!-- crates.js/props.js moved below systems/pieces.js (F7): both now call
      CBZ.spawnPiece at parse time, so they must load after chunks.js/
      pieces.js define it. Nothing else in this file's original 283-284 slot
      depended on their (synchronous, load-time) execution happening this
      early — every cross-file reader (e.g. CBZ.breaker) only touches them
      from inside a runtime callback, long after all scripts have loaded. -->
-<script src="src/world/door.js?v=tow929b"></script>
+<script src="src/world/door.js?v=door929"></script>
 
 <!-- 2b. rooms (need world helpers; loaded after coins for stash drops) -->
 
@@ -675,7 +675,7 @@ document.body.appendChild(b);}}catch(e){}})();
      so it borrows the same CBZ.jailBoost run watcher; and it must follow
      world/yard.js, which cuts the four gate gaps this file stands gates in. -->
 <script src="src/world/prisongrounds.js?v=tow929"></script>
-<script src="src/world/corridors.js?v=tow929"></script>
+<script src="src/world/corridors.js?v=door929"></script>
 
 <!-- ============ THE ENGINE LAYER THE PRISON WAVE PROVED WAS MISSING ==========
      Four services promoted OUT of the prison files below, because a hospital,
@@ -804,14 +804,14 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.prisonFriendOffered), economy.js and killstreaks.js (it wraps both).
      ?cfg_PRISON_FRIENDS=0 → nobody ever offers and the verb never appears. -->
 <script src="src/systems/prisonfriends.js?v=m0928s"></script>
-<script src="src/systems/interactions.js?v=tow929"></script>
+<script src="src/systems/interactions.js?v=door929"></script>
 <!-- A door opened off the clock is noticed (systems/prisondoorwatch.js); after interactions.js (the door registry). -->
 <script src="src/systems/prisondoorwatch.js?v=doors2"></script>
 <!-- THE LIFT, AS A MACHINE (no THREE, no DOM): call / go / park, the doors'
      holds. city/elevators.js and world/disaster_arena.js are its two bodies;
      both load after this. -->
 <script src="src/systems/liftcore.js?v=lift1"></script>
-<script src="src/systems/escapeplan.js?v=doors929"></script>
+<script src="src/systems/escapeplan.js?v=door929"></script>
 <!-- WHAT A THING IN YOUR BAG LOOKS LIKE: one real 3D object per item KIND,
      which city/itemicons.js photographs for the slot and city/inventory.js
      drops on the pavement. Needs THREE + actorweapons + materials, all

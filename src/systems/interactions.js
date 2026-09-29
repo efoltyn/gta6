@@ -126,10 +126,107 @@
     return wrap;
   }
 
+  /* ---- CBZ.prisonReach(at, o): CAN YOUR HANDS GET THERE? --------------------
+     OWNER (2026-09-29): "the button works too far, like from the second floor
+     I can close the cell below it looking down; the button shows through
+     shit." Every prompt-on-the-thing only armed on a flat XZ radius, so the
+     tier above a cell, the far side of a wall and a closed door between you
+     and a lock all counted as "at it". A verb on a thing now needs:
+       SAME FLOOR   o.fy (the floor the thing stands on) within 1.2 m of your
+                    feet, or, with no fy, the point itself between 1.0 m below
+                    your feet and 2.6 m above them (a grille, a lock, a box);
+       CLEAR SIGHT  nothing solid on the line from your eyes to it: a wall, a
+                    closed door, a floor slab (CBZ.platforms). `o.skip` lists
+                    the thing's own colliders, and the last `o.pad` metres
+                    (default 0.25) are the thing itself, not in the way.
+     Reach and facing stay each owner's own (they differ: a lock is an arm's
+     length, a console a step). prisonPrompt applies this to every escape-mode
+     pill that has an `at`, so a site that polls its own key must act only
+     when prisonPrompt returned true. */
+  const _rh = { hit: false, c: null, t: 0, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0 };
+  function eyeY() {
+    const P = CBZ.player;
+    return ((P && P.pos && P.pos.y) || 0) + (P && P.crouch ? 1.0 : 1.55);
+  }
+  function segBlocked(ax, ay, az, bx, by, bz, skip) {
+    const dx = bx - ax, dy = by - ay, dz = bz - az;
+    const skipFn = skip && skip.length ? function (c) { return skip.indexOf(c) < 0; } : null;
+    if (CBZ.rayColliders) {
+      try {
+        if (CBZ.rayColliders(ax, ay, az, dx, dy, dz, 1, _rh, { any: true, filter: skipFn })) return true;
+      } catch (e) { /* no grid on this page: the plain scan below */ }
+    } else {
+      // no broadphase (a headless check): the same slab test over every box
+      const cols = CBZ.colliders || [];
+      for (let i = 0; i < cols.length; i++) {
+        const c = cols[i];
+        if (!c || (skipFn && !skipFn(c))) continue;
+        let t0 = 0, t1 = 1, ok = true;
+        const lo = [c.minX, c.y0 != null ? c.y0 : -1e9, c.minZ], hi = [c.maxX, c.y1 != null ? c.y1 : 1e9, c.maxZ];
+        const o = [ax, ay, az], d = [dx, dy, dz];
+        for (let k = 0; k < 3 && ok; k++) {
+          if (Math.abs(d[k]) < 1e-12) { if (o[k] < lo[k] || o[k] > hi[k]) ok = false; continue; }
+          let ta = (lo[k] - o[k]) / d[k], tb = (hi[k] - o[k]) / d[k];
+          if (ta > tb) { const q = ta; ta = tb; tb = q; }
+          if (ta > t0) t0 = ta;
+          if (tb < t1) t1 = tb;
+          if (t0 > t1) ok = false;
+        }
+        if (ok) return true;
+      }
+    }
+    // a floor slab between the eyes and the thing (the tier over a cell)
+    const pl = CBZ.platforms || [];
+    if (Math.abs(dy) > 1e-6) {
+      for (let i = 0; i < pl.length; i++) {
+        const p = pl[i];
+        if (!p || p.top == null) continue;
+        const t = (p.top - 0.02 - ay) / dy;               // the slab's underside-ish plane
+        if (t <= 0.02 || t >= 0.98) continue;
+        const x = ax + dx * t, z = az + dz * t;
+        if (x > p.minX && x < p.maxX && z > p.minZ && z < p.maxZ) return true;
+      }
+    }
+    return false;
+  }
+  function prisonReach(at, o) {
+    const P = CBZ.player;
+    if (!at || !P || !P.pos) return false;
+    o = o || {};
+    const feet = P.pos.y || 0;
+    if (o.fy != null) { if (Math.abs(o.fy - feet) > 1.2) return false; }
+    else { const h = (at.y || 0) - feet; if (h < -1.0 || h > 2.6) return false; }
+    const ex = P.pos.x, ey = eyeY(), ez = P.pos.z;
+    let bx = at.x, by = at.y, bz = at.z;
+    const L = Math.hypot(bx - ex, by - ey, bz - ez);
+    const pad = o.pad != null ? o.pad : 0.25;
+    if (L <= pad) return true;
+    // the thing's own body is not in the way of the thing: a box that holds
+    // the point (the safe the dial is on, the leaf the lock is in) is skipped
+    let skip = o.skip ? o.skip.slice() : [];
+    const cols = CBZ.colliders || [];
+    for (let i = 0; i < cols.length; i++) {
+      const c = cols[i];
+      if (!c || at.x <= c.minX || at.x >= c.maxX || at.z <= c.minZ || at.z >= c.maxZ) continue;
+      if (c.y0 != null && (at.y < c.y0 || at.y > c.y1)) continue;
+      skip.push(c);
+    }
+    const k = (L - pad) / L;
+    bx = ex + (bx - ex) * k; by = ey + (by - ey) * k; bz = ez + (bz - ez) * k;
+    return !segBlocked(ex, ey, ez, bx, by, bz, skip);
+  }
+  CBZ.prisonReach = prisonReach;
+
   function prisonPrompt(id, act, verb, opts) {
     if (!act || !verb) return false;
     if (cuffedNow()) return false;
     opts = opts || {};
+    // the reach law above, for every prison pill pinned on a thing
+    if (opts.at && !opts.city && !opts.noReach && CBZ.game && CBZ.game.mode === "escape" &&
+        !prisonReach(opts.at, { fy: opts.fy, skip: opts.skip, pad: opts.pad })) {
+      prisonPromptClear(id);
+      return false;
+    }
     const sig = act + "|" + verb + "|" + (opts.sub || "") + "|" + (opts.hold ? 1 : 0) + "|" + (opts.at ? 1 : 0) + "|" + (opts.key || "");
     let p = pills.get(id);
     if (!p || p.sig !== sig) {
@@ -436,9 +533,18 @@
        set(v)       the file's own setOpen/closeDoor. The SOUND belongs there,
                     so each door keeps voicing itself from its own coordinates
                     with the door_close cue systems/audio.js already ships.
-       openByTap    false when the door's open route is a hold-to-defeat beat
-                    (the three cages, the Warden's office): a tap must never
-                    shortcut a 3.2 s pick.
+       keys         (array, or fn -> array) the items that open it AT THE
+                    DOOR ("Keycard", "Corridor Key", "Cell Key" ...); empty or
+                    absent = unlocked. The pill on a shut door you cannot open
+                    says "Locked" with keys[0] under it (owner, 2026-09-29:
+                    "all doors can be opened with a key, not just a button").
+       beat()       optional: true while the file's own hold-to-work verb on
+                    this lock is live (a pick, a saw), so its pill is shown
+                    instead of "Locked".
+       cols()       optional: every slab the door has (the unit's sally port
+                    has two faces); otherwise col(). Reach, floor and sight are
+                    measured to these.
+       floor()      optional: the floor the door stands on (else the slab's y0)
        autoR        metres of that file's own approach-open radius, so the
                     latch below knows how far away "away" is.
 
@@ -457,8 +563,10 @@
   ============================================================ */
   const doorSpecs = (CBZ._prisonDoorSpecs || (CBZ._prisonDoorSpecs = []));
   const LATCH_PAD = 2.0;              // metres past autoR that release the latch
-  const DOOR_TAP_REACH = 3.2;         // a tap may reach across a doorway
-  const DOOR_KEY_REACH = 2.6;         // a keypress means the door you stand in
+  // ARM'S REACH, MEASURED TO THE LEAF (its shut slab), not to the middle of
+  // the doorway: a 2.2 m pair is reachable from either jamb, a lock is not
+  // reachable from across the room.
+  const DOOR_REACH = 1.8;
   function dsafe(fn, dflt) { try { return fn(); } catch (e) { return dflt; } }
   function doorPoint(s) { return dsafe(function () { return s.at(); }, null); }
   function doorIsOpen(s) { return dsafe(function () { return !!s.isOpen(); }, false); }
@@ -483,8 +591,7 @@
     if (!s) return null;
     if (doorGone(s)) return "gone";                     // blown / released: LAW 4
     if (doorIsOpen(s) === want) return "already";
-    if (!doorCred(s)) return "denied";                  // the open path's own keys
-    if (want && s.openByTap === false) return "held";   // a pick beat owns its opening
+    if (!doorCred(s)) { doorDeny(s); return "denied"; } // the open path's own keys
     const spot = doorTouchSpot(s);                      // the leaf's face as it stood when the hand went to it
     dsafe(function () { return s.set(want); }, false);
     if (doorIsOpen(s) !== want) return "refused";
@@ -517,32 +624,105 @@
     if (!V || !V.touch || !spot) return;
     dsafe(function () { return V.touch(player, { point: spot.point, normal: spot.normal, kind: "palm", key: "door:" + s.id }); }, null);
   }
-  // open === null: either state (the [E] verb offers whichever the door is not)
-  function nearestDoor(open, reach, facing) {
-    let best = null, bd = reach * reach;
-    for (let i = 0; i < doorSpecs.length; i++) {
-      const s = doorSpecs[i];
-      const o = doorIsOpen(s);
-      if (open !== null && o !== open) continue;
-      if (doorGone(s) || !doorCred(s)) continue;
-      if (!o && s.openByTap === false) continue;        // a pick beat owns its opening
-      const d2 = doorD2(s);
-      if (d2 >= bd) continue;
+  /* ---- WHICH DOOR IS "THIS" DOOR -------------------------------------------
+     (owner, 2026-09-29: "the button works too far ... shows through shit".)
+     A door is the one you are at when ALL of these hold, measured to its
+     leaf (the shut slab: s.cols() / s.col()), not to a centre point:
+       REACH   within DOOR_REACH metres of the slab, in plan;
+       FLOOR   the door's floor (the slab's y0, or s.floor()) within 1.2 m
+               of your feet: the tier over a cell is not at that cell;
+       SIGHT   a clear line from your eyes to the leaf (CBZ.prisonReach:
+               walls, other doors, floor slabs), the door's own slab excepted;
+       FACING  it is in front of the camera.
+     Every door that is not blown counts, LOCKED ONES TOO: a locked door
+     says it is locked, on the leaf, and what opens it. */
+  function doorBoxes(s) {
+    const b = dsafe(function () { return s.cols ? s.cols() : [s.col()]; }, null);
+    return (b || []).filter(Boolean);
+  }
+  function doorFloor(s, box) {
+    if (s.floor) { const f = dsafe(function () { return s.floor(); }, null); if (f != null) return f; }
+    if (box && box.y0 != null) return box.y0;
+    const p = doorPoint(s);
+    return p ? Math.max(0, (p.y || 1.4) - 1.4) : 0;
+  }
+  // the nearest point of a slab, pulled 0.25 m in from its ends (the jambs
+  // and the wall either side are not the leaf)
+  function slabPoint(c, x, z) {
+    const w = c.maxX - c.minX, d = c.maxZ - c.minZ;
+    const ix = Math.min(0.25, w / 2), iz = Math.min(0.25, d / 2);
+    return {
+      x: Math.max(c.minX + (w > d ? ix : 0), Math.min(c.maxX - (w > d ? ix : 0), x)),
+      z: Math.max(c.minZ + (d >= w ? iz : 0), Math.min(c.maxZ - (d >= w ? iz : 0), z)),
+    };
+  }
+  function slabDist(c, x, z) {
+    const dx = Math.max(c.minX - x, 0, x - c.maxX), dz = Math.max(c.minZ - z, 0, z - c.maxZ);
+    return Math.hypot(dx, dz);
+  }
+  // -> { s, d, at } when the player can put a hand on door s right now
+  function doorReach(s, facing) {
+    if (!player || !player.pos) return null;
+    const P = player.pos;
+    const boxes = doorBoxes(s);
+    let best = null;
+    for (let i = 0; i < boxes.length; i++) {
+      const c = boxes[i];
+      const d = slabDist(c, P.x, P.z);
+      if (d > DOOR_REACH || (best && d >= best.d)) continue;
+      const fy = doorFloor(s, c);
+      if (Math.abs(fy - (P.y || 0)) > 1.2) continue;
+      const q = slabPoint(c, P.x, P.z);
+      const at = { x: q.x, y: fy + 1.35, z: q.z };
       if (facing) {
-        // THE KEY PATH NEEDS AN AIM THE TAP ALREADY HAS. A tap carries a ray;
-        // a keypress carries only a position, and a cell front is ~2 m from
-        // the bunk you might be pressing [E] at. Requiring the door to be in
-        // front of the camera is the cheapest honest disambiguation.
-        const p = doorPoint(s);
         const yaw = CBZ.cam ? CBZ.cam.yaw : 0;
         const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
-        const dx = p.x - player.pos.x, dz = p.z - player.pos.z;
-        const len = Math.hypot(dx, dz) || 1;
-        if ((dx / len) * fx + (dz / len) * fz < 0.35) continue;
+        const dx = at.x - P.x, dz = at.z - P.z, len = Math.hypot(dx, dz);
+        // standing IN the doorway the leaf is at your shoulder: that is at it
+        if (len > 0.35 && (dx / len) * fx + (dz / len) * fz < 0.3) continue;
       }
-      bd = d2; best = s;
+      if (!prisonReach(at, { fy: fy, skip: boxes, pad: 0.12 })) continue;
+      best = { s: s, d: d, at: at, fy: fy };
     }
     return best;
+  }
+  function doorTarget(facing) {
+    let best = null;
+    for (let i = 0; i < doorSpecs.length; i++) {
+      const s = doorSpecs[i];
+      if (doorGone(s)) continue;
+      const r = doorReach(s, facing);
+      if (r && (!best || r.d < best.d)) best = r;
+    }
+    return best;
+  }
+  function doorKeys(s) {
+    const k = s.keys;
+    const v = typeof k === "function" ? dsafe(function () { return k(); }, null) : k;
+    return v && v.length ? v : null;
+  }
+  // a hold-to-work beat of the door's own file is live (a pick, a saw): its
+  // pill ("Pick", "Saw") is the verb, this one stands aside
+  function doorBeat(s) { return !!(s.beat && dsafe(function () { return s.beat(); }, false)); }
+  // what the pill on the leaf says, or null for no pill
+  function doorVerb(s) {
+    const open = doorIsOpen(s), cred = doorCred(s);
+    if (open) return cred ? { verb: "Close" } : null;
+    if (cred) {
+      const keys = doorKeys(s);
+      const staff = !!(CBZ.prisonStaffKey && CBZ.prisonStaffKey());
+      if (!keys || staff) return { verb: "Open" };
+      if (keys.indexOf("Keycard") >= 0 && CBZ.game && CBZ.game.hasKey) return { verb: "Swipe" };
+      return { verb: "Unlock" };
+    }
+    if (doorBeat(s)) return null;
+    const keys = doorKeys(s);
+    return { verb: "Locked", sub: keys ? keys[0] : "", locked: true };
+  }
+  // a refused hand on a locked door: the lock rattles / the reader clicks
+  function doorDeny(s) {
+    const p = doorPoint(s);
+    if (p && CBZ.worldSfx) CBZ.worldSfx("switch", p.x, p.z, { y: p.y, ref: 6, volume: 0.45, gap: 0.5 });
   }
   CBZ.prisonDoorList = function () { return doorSpecs; };
   CBZ.prisonDoorLatched = function (id) { const s = doorById(id); return !!(s && s._latch); };
@@ -551,18 +731,28 @@
     return s ? doorAct(s, !doorIsOpen(s)) : null;
   };
   CBZ.prisonDoorSet = function (id, v) { const s = doorById(id); return s ? doorAct(s, !!v) : null; };
-  CBZ.prisonDoorNearest = function (reach) { return nearestDoor(true, reach || DOOR_TAP_REACH, false); };
+  CBZ.prisonDoorNearest = function () { const t = doorTarget(false); return t && doorIsOpen(t.s) ? t.s : null; };
   // The @fn a pill would fire, and the function the [E] branch calls. Named on
   // CBZ so a tap, a key and a headless probe are provably the same code.
   CBZ.prisonDoorCloseNearest = function () {
-    const s = nearestDoor(true, DOOR_KEY_REACH, true);
-    return s ? doorAct(s, false) : null;
+    const t = doorTarget(true);
+    return t && doorIsOpen(t.s) ? doorAct(t.s, false) : null;
   };
   // THE ONE DOOR VERB: the door in front of you, opened if it is shut and
   // shut if it is open — the pill pinned on the leaf fires this.
   CBZ.prisonDoorVerbNearest = function () {
-    const s = nearestDoor(null, DOOR_KEY_REACH, true);
-    return s ? doorAct(s, !doorIsOpen(s)) : null;
+    const t = doorTarget(true);
+    if (!t) return null;
+    const v = doorVerb(t.s);
+    if (!v) return null;
+    return doorAct(t.s, !doorIsOpen(t.s));
+  };
+  // what the leaf in front of you says right now (the census reads this)
+  CBZ.prisonDoorTarget = function () {
+    const t = doorTarget(true);
+    if (!t) return null;
+    const v = doorVerb(t.s);
+    return { id: t.s.id, d: t.d, at: t.at, verb: v ? v.verb : null, sub: v ? v.sub || "" : "" };
   };
   /* THE RATCHET. `doors` is every declared leaf; `closeable` is the number
      that expose the verb RIGHT NOW (open, not blown, credential in hand) and
@@ -587,7 +777,7 @@
         if (cc) col = CBZ.colliders.indexOf(cc) >= 0 ? 1 : 0;
       }
       rows.push({ id: s.id, open: o, gone: g2, cred: c, latch: l, col: col,
-        openByTap: s.openByTap !== false, d: Math.round(Math.sqrt(doorD2(s)) * 10) / 10 });
+        keys: doorKeys(s), d: Math.round(Math.sqrt(doorD2(s)) * 10) / 10 });
     }
     return { doors: doorSpecs.length, open: open, blown: gone, credentialed: cred,
       latched: latched, closeable: closeable, rows: rows };
@@ -608,10 +798,13 @@
     // near the origin — so without this a city walk past z=-8 would be
     // offered the yard checkpoint. The tap path carries the same guard.
     if (!CBZ.game || CBZ.game.mode !== "escape") return;
-    const s = nearestDoor(null, DOOR_KEY_REACH, true);
-    if (!s) return;
-    CBZ.prisonPrompt("door", "@prisonDoorVerbNearest", doorIsOpen(s) ? "Close" : "Open",
-      { at: doorPoint(s), d2: doorD2(s), bind: true });
+    const t = doorTarget(true);
+    if (!t) return;
+    const v = doorVerb(t.s);
+    if (!v) return;
+    // reach was proven by doorTarget against the door's own slab
+    CBZ.prisonPrompt("door", "@prisonDoorVerbNearest", v.verb,
+      { at: t.at, d2: t.d * t.d, bind: true, sub: v.sub || undefined, noReach: true });
   }
 
   /* LATCH UPKEEP. Order 41.46 sits AFTER every door tick (gunroom 41,
@@ -1177,9 +1370,9 @@
         const bdx = player.pos.x - breaker.x, bdz = player.pos.z - breaker.z;
         if (bdx * bdx + bdz * bdz < 1.8) {
           // "Sabotage", over the box. The box is the noun.
-          CBZ.prisonPrompt("breaker", "@prisonSabotagePower", "Sabotage",
+          const reach = CBZ.prisonPrompt("breaker", "@prisonSabotagePower", "Sabotage",
             { at: breakerPoint(), d2: bdx * bdx + bdz * bdz });
-          if (CBZ.keys && CBZ.keys["e"]) sabotagePower();
+          if (reach && CBZ.keys && CBZ.keys["e"]) sabotagePower();
         }
       }
     }
@@ -1263,14 +1456,14 @@
           // screwed on. The verb is what your hands can do to it.
           const working = VW.vent === vent;
           const tool = working ? VW.tool : ventTool();
-          CBZ.prisonPrompt("vent", "@prisonVentWork", tool ? "Unscrew" : "Pry",
+          const reach = CBZ.prisonPrompt("vent", "@prisonVentWork", tool ? "Unscrew" : "Pry",
             { at: ventPoint(vent), d2: vd2, prog: working ? VW.t / VW.need : 0 });
-          if (CBZ.keys && CBZ.keys["e"]) ventWorkStart(vent);
+          if (reach && CBZ.keys && CBZ.keys["e"]) ventWorkStart(vent);
         } else {
           const floor = vent.mouth && vent.mouth.kind === "floor";
-          CBZ.prisonPrompt("vent", "@prisonVentCrawl", floor ? "Climb in" : "Crawl",
+          const reach = CBZ.prisonPrompt("vent", "@prisonVentCrawl", floor ? "Climb in" : "Crawl",
             { at: ventPoint(vent), sub: "to " + vent.dest.name, d2: vd2 });
-          if (CBZ.keys && CBZ.keys["e"]) crawlVent(vent);
+          if (reach && CBZ.keys && CBZ.keys["e"]) crawlVent(vent);
         }
       }
     }
