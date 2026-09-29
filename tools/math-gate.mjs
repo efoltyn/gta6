@@ -525,32 +525,8 @@ const PASS = `(() => {
       if (oa.bespoke > 3) out.fails.push("BESPOKE ORIGIN SCENES rose to " + oa.bespoke + " (ratchet 3)");
       if (oa.stories < 10) out.fails.push("origin roster shrank to " + oa.stories + " (expected >= 10)");
     }
-    // RACE AUTHORING TOOL: Diamond's legal weekend, APEX Night and the street
-    // race (city/racing.js) must all consume a course instead of copying
-    // track/path math.
-    // legacy is the missing-adopter count, so zero is a structural pin.
-    if (CBZ.raceToolAudit) {
-      const ra = CBZ.raceToolAudit();
-      out.raceTools = ra.courses + " courses " + ra.adopted + "/" + ra.required + " adopted legacy=" + ra.legacy;
-      if (ra.legacy !== 0) out.fails.push("RACE COURSE CONSUMERS MISSING: " + ra.missing.join(","));
-      if (ra.adopted < 3) out.fails.push("race-course adoption fell to " + ra.adopted + " (ratchet 3)");
-    } else out.fails.push("raceToolAudit missing");
-    // The Racer story is an event/ledger consumer, not a second championship
-    // save. Five beats are authored; durable truth has exactly two owners:
-    // legal and APEX records in worldstate. unreachableStages is the pin
-    // added after three of the five beats were found to read the APEX race
-    // record, which ONLY games/racing.js writes — the middle of the story
-    // asked for the finale three times and could not be played through in
-    // Gang City at all. A chapter nobody can reach is not a chapter.
-    if (CBZ.racerCareerAudit) {
-      const rc = CBZ.racerCareerAudit();
-      out.racerCareer = rc.stages + " stages sources=" + rc.persistentSources + " private=" + rc.privateRaceState +
-        " prices=" + rc.distinctPrices + " rival=" + rc.rival;
-      if (rc.stages !== 5 || rc.persistentSources !== 2 || rc.privateRaceState !== 0 || rc.distinctPrices !== 5) {
-        out.fails.push("RACER CAREER CONTRACT DRIFT: " + JSON.stringify(rc));
-      }
-      if (!rc.rival || rc.rival === "the champion") out.fails.push("the racer story has no named rival");
-    } else out.fails.push("racerCareerAudit missing");
+    // (The race-course / racer-career pins lived here. The racing game left the
+    // city for games/race.html in wave 0929b; its checks are tools/race-check*.mjs.)
     // THE 2026-08-04 MODES WAVE (one hitman card / race ladder of locked
     // places / the presidency / the captain / gun game). Every pin below was
     // MEASURED via probe on seed 90210 before being written (the propUseAudit
@@ -571,12 +547,6 @@ const PASS = `(() => {
       if (ha.caseOpen === undefined) out.fails.push("hitman gear case audit field missing");
       if (ha.cards !== 1) out.fails.push("hitman title cards=" + ha.cards + " (the merge law: exactly one)");
       if (ha.marksLadderTiers < 3) out.fails.push("hitman mark ladder shrank to " + ha.marksLadderTiers);
-    }
-    if (CBZ.raceAudit) {
-      const rl = CBZ.raceAudit();
-      out.raceLadder = rl.rungs + "rungs verbed=" + rl.verbedRungs + " doors=" + rl.doors + "(" + rl.lockedDoors + " locked) built=" + rl.placesBuilt;
-      if (rl.verblessRungs !== 0) out.fails.push("RACE LADDER GREW A VERBLESS RUNG: " + rl.verblessRungs);
-      if (rl.placesBuilt < 3) out.fails.push("race locked places fell to " + rl.placesBuilt + " (paddock gate, bay 12, champion garage)");
     }
     if (CBZ.presidencyAudit) {
       const pa = CBZ.presidencyAudit();
@@ -1206,8 +1176,7 @@ async function runSeed(seed, label) {
   // an audit whose output nobody can see is one nobody will notice regressing.
   tinfo(`${label}: traffic ${r.traffic || "-"} | motion ${r.motion || "-"}`);
   tinfo(`${label}: origins ${r.origins || "-"} | gov ${r.gov || "-"} | airside ${r.airside || "-"}`);
-  tinfo(`${label}: raceTools ${r.raceTools || "-"} | racer ${r.racerCareer || "-"}`);
-  tinfo(`${label}: hitman ${r.hitman || "-"} | raceLadder ${r.raceLadder || "-"}`);
+  tinfo(`${label}: hitman ${r.hitman || "-"}`);
   tinfo(`${label}: presidency ${r.presidency || "-"} | captain ${r.captain || "-"} | gungame ${r.gungame || "-"}`);
   tinfo(`${label}: loyalty ${r.loyalty || "-"}`);
   tinfo(`${label}: take ${r.take || "-"}`);
@@ -1229,8 +1198,7 @@ async function runSeed(seed, label) {
   tinfo(`${label}: cockpit ${r.cockpit || "-"} | wounds ${r.wounds || "-"} | cabin ${r.cabin || "-"} | power ${r.power || "-"}`);
   tmark(`${label}: traffic ${r.traffic || "-"} | motion ${r.motion || "-"}`);
   tmark(`${label}: origins ${r.origins || "-"} | gov ${r.gov || "-"} | airside ${r.airside || "-"}`);
-  tmark(`${label}: raceTools ${r.raceTools || "-"} | racer ${r.racerCareer || "-"}`);
-  tmark(`${label}: hitman ${r.hitman || "-"} | raceLadder ${r.raceLadder || "-"}`);
+  tmark(`${label}: hitman ${r.hitman || "-"}`);
   tmark(`${label}: presidency ${r.presidency || "-"} | captain ${r.captain || "-"} | gungame ${r.gungame || "-"}`);
   tmark(`${label}: loyalty ${r.loyalty || "-"}`);
   tmark(`${label}: take ${r.take || "-"}`);

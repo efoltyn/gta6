@@ -217,6 +217,7 @@ const PAGE_MODES = {
   battle: { kind: "page", page: "games/battle.html", ready: "!!(window.__battle && document.getElementById('start'))", entry: "document.getElementById('start').click()" },
   warlord: { kind: "page", page: "games/warlord.html", query: "go=1", ready: "!!window.__warlordReady", entry: "" },
   bomb: { kind: "page", page: "games/bomb-survivor.html", ready: "!!(window.__bomb && document.getElementById('go'))", entry: "document.getElementById('go').click()" },
+  race: { kind: "page", page: "games/race.html", query: "go=1", ready: "!!window.__raceReady", entry: "" },
 };
 const ALL_MODES = Object.keys(PAGE_MODES);
 const modesArg = opt("--modes", opt("--mode", "city"));
@@ -1757,7 +1758,9 @@ async function serveMain() {
             var ch = c.children; for (var i = 0; i < ch.length; i++) _st.push(ch[i]); }
           return false; }
         function label(o){ var n = o.name || ""; if (!n) { var ch = o.children; for (var i = 0; i < ch.length && !n; i++) n = ch[i].name || ""; }
-          var u = o.userData || {}; return (o.type) + (n ? ":" + n : "") + (u._builder ? "@" + u._builder : "") + (u.carVisual ? ":car" : ""); }
+          var u = o.userData || {}, uk = Object.keys(u).filter(function(k){ return k !== "_builder"; }).slice(0, 3).join(",");
+          var nm = 0; o.traverse && (function(){ var st = [o]; while (st.length && nm < 999) { var c = st.pop(); if (c.isMesh) nm++; for (var i = 0; i < c.children.length; i++) st.push(c.children[i]); } })();
+          return (o.type) + (n ? ":" + n : "") + (u._builder ? "@" + u._builder : "") + (uk ? "{" + uk + "}" : "") + "#" + nm; }
         var pops = [], popN = 0, checks = 0;
         function scan(first){
           var cam = C.camera; cam.updateMatrixWorld(); pm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse); fr.setFromProjectionMatrix(pm);

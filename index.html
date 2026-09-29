@@ -440,6 +440,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- CITY SLICES (?slice=name|x,z,r): one piece of Gang City booted as its own world.
      Parses the URL only; with no slice every helper answers "keep". -->
 <script src="src/core/texfree.js?v=phonefit1"></script>
+<script src="src/core/drawcheck.js?v=phonefit1"></script>
 <script src="src/core/bakecache.js?v=phonefit1"></script>
 <script src="src/core/rectgrid.js?v=phonefit1"></script>
 <script src="src/core/slice.js?v=slice0929b"></script>
@@ -1092,7 +1093,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- the grid street layer (road, kerbs, footways, markings) world.js builds -->
 <script src="src/city/streetkit.js?v=metro0929"></script>
 <script src="src/city/world.js?v=slice0929b"></script>
-<script src="src/city/interior_programs.js?v=pres0929b"></script>
+<script src="src/city/interior_programs.js?v=door929c"></script>
 <!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
      inventory item; an NPC's keys live on the NPC and every existing way to
      take something off a person moves them. MUST load before city/buildings.js
@@ -1244,18 +1245,18 @@ document.body.appendChild(b);}}catch(e){}})();
      and after worldmap.js (whose cityWorldGeo it wraps). -->
 <script src="src/city/settlements.js?v=pres0929b"></script>
 <script src="src/city/towngen.js?v=pres0929b"></script>
-<!-- DIAMOND SPEEDWAY, part 1 — the circuit's architecture: grandstands with real
-     raked seating, pit garages, scoring pylon, jumbotron, floodlight masts,
-     hoardings, marshal posts, tyre walls, paddock. Authored against the track
-     frame island_speedway.js publishes; both run at world-build time so either
-     order works — kept adjacent for readability. -->
-<script src="src/city/speedway_structures.js?v=circuit1-st1"></script>
 <!-- THE ONE BET SLIP (city/betslip.js): every wager in the city is written on
      it at the venue that takes it (Ironjaw ringside/pit, Southpaw bookmaker,
      APEX bookmaker, the Speedway race book, the racepark windows) and settled
      through it into the betting ledger. Before every venue that uses it. -->
 <script src="src/city/betslip.js?v=onebet1"></script>
-<script src="src/city/island_speedway.js?v=cd0929"></script>
+<!-- THE BULLRING: the racing game's own circuit + stadium modules (src/race/),
+     placed on the speedway island by city/island_speedway.js. The race itself
+     is games/race.html, opened over the city by CBZ.cityRaceLaunch. -->
+<script src="src/race/race_core.js?v=rg0929"></script>
+<script src="src/race/race_track.js?v=rg0929"></script>
+<script src="src/race/race_venue.js?v=rg0929"></script>
+<script src="src/city/island_speedway.js?v=rg0929"></script>
 <!-- CIVIL AIRFRAMES. The loft/aerofoil/lathe kit and every civil aircraft
      type drawn from it at real dimensions (narrowbody, widebody, turboprop,
      business jet, light single, helicopter variants), shared per type, with
@@ -1343,7 +1344,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Right after propuse.js, whose CBZ.propArcActive / propLiePlace it backs. -->
 <script src="src/entities/moves_posture.js?v=w09290242x"></script>
 <script src="src/city/adboard.js?v=cd0929"></script>
-<script src="src/city/mode.js?v=slice0929b"></script>
+<script src="src/city/mode.js?v=rg0929"></script>
 <script src="src/city/economy.js?v=vit3"></script>
 <script src="src/city/clothes.js?v=body0929a"></script>
 <script src="src/city/outfits.js?v=w09290250"></script>
@@ -1415,7 +1416,7 @@ document.body.appendChild(b);}}catch(e){}})();
      per-car occupancy map). Before playercars.js (dressCabin upholsters its
      seats) and vehicles.js / boarding.js / passengerseat.js (all read it). -->
 <script src="src/city/carseats.js?v=w09290242x"></script>
-<script src="src/city/playercars.js?v=w09290250"></script>
+<script src="src/city/playercars.js?v=rg0929"></script>
 <script src="src/city/crashfx.js?v=mil0929"></script>
 <script src="src/city/crashdeform.js?v=boom2"></script>
 <script src="src/systems/skidmarks.js?v=skid1"></script>
@@ -1533,7 +1534,7 @@ document.body.appendChild(b);}}catch(e){}})();
      tornado is a silent no-op. Only needs config.js; no other ordering. -->
 <script src="src/systems/tornado.js?v=loose1"></script>
 <script src="src/city/aircraftimpact.js?v=airimpact1"></script>
-<script src="src/city/shops.js?v=cd0929"></script>
+<script src="src/city/shops.js?v=rg0929"></script>
 <script src="src/city/gunstore.js?v=tap0929"></script>
 <!-- weapon attachments: scopes / bigger mags / suppressor / grips, sold at the
      gunsmith bench in the gun store (sights.js reads a fitted optic) -->
@@ -1623,7 +1624,7 @@ document.body.appendChild(b);}}catch(e){}})();
      with real per-segment limits it wins automatically with no edit here.
      After fuel.js (reads CBZ.vehicleFuel). Revert with ?cfg_CAR_CLUSTER=0. -->
 <script src="src/city/carcluster.js?v=speedunit1"></script>
-<script src="src/city/interact.js?v=tui0929"></script>
+<script src="src/city/interact.js?v=rg0929"></script>
 <!-- ORDERS ABOUT SOMEONE ELSE (the principal seat): Attack / Guard / Tail /
      Stand down on anyone who works for you. Registers into interactions. -->
 <script src="src/city/orders.js?v=ekey2"></script>
@@ -1652,7 +1653,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/death.js?v=pres0929b"></script>
 <script src="src/city/camera.js?v=shouldergun2"></script>
 <script src="src/city/ragdoll.js?v=loose1"></script>
-<script src="src/city/leaderboard.js?v=nodash1"></script>
+<script src="src/city/leaderboard.js?v=rg0929"></script>
 <script src="src/city/zillow.js?v=onebet1"></script>
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
 <script src="src/city/bank.js?v=tap0929"></script>
@@ -1726,12 +1727,6 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/metro_structs.js?v=wreal0929"></script>
 <script src="src/city/spawnplaces.js?v=sim2"></script>
 <script src="src/city/scenedirector.js?v=w09290218"></script>
-<script src="src/city/race_livery.js?v=racepaint1"></script>
-<script src="src/city/racing.js?v=cd0929"></script>
-<!-- THE RACING GAME: real driving opponents (one brain for oval + street) + race scorer + racing HUD -->
-<script src="src/city/racedrivers.js?v=onebet1"></script>
-<script src="src/city/racehud.js?v=nodash1"></script>
-<script src="src/city/racecareer.js?v=cd0929"></script>
 <!-- custom dialogue + street talk (one contextual YES/NO decision) — after the registry -->
 <script src="src/systems/custom_dialogue.js?v=ce1"></script>
 <script src="src/city/street_talk.js?v=cd0929"></script>
@@ -1848,7 +1843,7 @@ document.body.appendChild(b);}}catch(e){}})();
      worldstate.js, wanted.js, outfits.js, combat.js, police.js, death.js,
      bank.js, housing.js, minicities.js, citytemplates.js and club.js — all
      already loaded above — so it goes last in the city block. -->
-<script src="src/city/origins.js?v=tp1"></script>
+<script src="src/city/origins.js?v=rg0929"></script>
 <!-- The one hitman pipe + the motel room HQ (wall of marks, gear case, the
      tiered ladder of marks) — activities' Crime doors and the campaign's
      merged opening both route through it. -->
@@ -2298,7 +2293,7 @@ document.body.appendChild(b);}}catch(e){}})();
      jail's transport). AFTER govcomplex.js (reads CBZ.govComplexes); every
      other read is feature-detected and lazily retried.
      Revert with ?cfg_PRESIDENCY_V1=0. -->
-<script src="src/city/presidency.js?v=pres0929b"></script>
+<script src="src/city/presidency.js?v=door929c"></script>
 <!-- THE PRESIDENT'S WORLD (2026-09-27 rework) — no HUD strip, no mission
      list, no button console. In load order: the office (desk phone that rings
      with real calls, briefing folders you read on the desk, the TV news, aides
@@ -2359,7 +2354,6 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/core/packages.js?v=w09290242x"></script>
 <script src="src/games/casino.js?v=onebet1"></script>
 <script src="src/games/ocean.js?v=nodash1"></script>
-<script src="src/games/racing.js?v=onebet1"></script>
 <!-- games/warband.js DELETED 2026-07-29. OWNER: "the whole war band code — it
      was a dumb idea, but it's really what this whole game's point is: get
      enough people recruited, or get enough money, or enough guns, or somehow

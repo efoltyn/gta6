@@ -4,7 +4,7 @@
 
        node tools/build-disaster-page.mjs
 
-     Natural Disaster Survival, standing alone: index.html minus the 446
+     Natural Disaster Survival, standing alone: index.html minus the 439
      script tags this game never runs, opening straight onto the island. This
      is the page the iOS build ships (tools/build-ios.mjs bundles it).
 ============================================================ -->
@@ -438,6 +438,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- CITY SLICES (?slice=name|x,z,r): one piece of Gang City booted as its own world.
      Parses the URL only; with no slice every helper answers "keep". -->
 <script src="src/core/texfree.js?v=phonefit1"></script>
+<script src="src/core/drawcheck.js?v=phonefit1"></script>
 <script src="src/core/bakecache.js?v=phonefit1"></script>
 <script src="src/core/rectgrid.js?v=phonefit1"></script>
 <script src="src/core/slice.js?v=slice0929b"></script>
@@ -1098,15 +1099,16 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- SETTLEMENT COMPOSITION — flavored anchor plan + registry + cityWorldGeo
      wrapper; loads before towngen.js (which consumes CBZ.settlementsCompose)
      and after worldmap.js (whose cityWorldGeo it wraps). -->
-<!-- DIAMOND SPEEDWAY, part 1 — the circuit's architecture: grandstands with real
-     raked seating, pit garages, scoring pylon, jumbotron, floodlight masts,
-     hoardings, marshal posts, tyre walls, paddock. Authored against the track
-     frame island_speedway.js publishes; both run at world-build time so either
-     order works — kept adjacent for readability. -->
 <!-- THE ONE BET SLIP (city/betslip.js): every wager in the city is written on
      it at the venue that takes it (Ironjaw ringside/pit, Southpaw bookmaker,
      APEX bookmaker, the Speedway race book, the racepark windows) and settled
      through it into the betting ledger. Before every venue that uses it. -->
+<!-- THE BULLRING: the racing game's own circuit + stadium modules (src/race/),
+     placed on the speedway island by city/island_speedway.js. The race itself
+     is games/race.html, opened over the city by CBZ.cityRaceLaunch. -->
+<script src="src/race/race_core.js?v=rg0929"></script>
+<script src="src/race/race_track.js?v=rg0929"></script>
+<script src="src/race/race_venue.js?v=rg0929"></script>
 <!-- CIVIL AIRFRAMES. The loft/aerofoil/lathe kit and every civil aircraft
      type drawn from it at real dimensions (narrowbody, widebody, turboprop,
      business jet, light single, helicopter variants), shared per type, with
@@ -1433,7 +1435,6 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/metro_ground.js?v=wreal0929"></script>
 <script src="src/city/metro.js?v=wreal0929"></script>
 <script src="src/city/metro_structs.js?v=wreal0929"></script>
-<!-- THE RACING GAME: real driving opponents (one brain for oval + street) + race scorer + racing HUD -->
 <!-- custom dialogue + street talk (one contextual YES/NO decision) — after the registry -->
 <!-- 4d-3. this wave's feature modules (load after all deps they read) -->
 <!-- DIALOGUE IS TWO CHOICES — every talkable person answers with a line and

@@ -209,13 +209,13 @@ for (const R of runs) {
     const cxl = lx(d.x), czl = lz(d.z);
     const zone = alongX ? { x0: cxl - w / 2 + 0.05, x1: cxl + w / 2 - 0.05, z0: czl - 0.95, z1: czl + 0.95 } : { x0: cxl - 0.95, x1: cxl + 0.95, z0: czl - w / 2 + 0.05, z1: czl + w / 2 - 0.05 };
     for (const a of boxes) {
-      if (a.m === d.mesh || a.m === d.openMesh || a.y1 - Y <= 0.021 || a.y0 - Y > 1.9) continue;
+      if (a.m === d.mesh || (d.pair && a.m === d.pair.mesh) || a.y1 - Y <= 0.021 || a.y0 - Y > 1.9) continue;
       if (ov(a, zone, 0.01)) { blocked.push(d.label + " @" + cxl.toFixed(1) + "," + czl.toFixed(1) + " blocked by " + hex(a.m) + " " + (a.x1 - a.x0).toFixed(2) + "x" + (a.z1 - a.z0).toFixed(2) + " y" + (a.y0 - Y).toFixed(2) + " @" + ((a.x0 + a.x1) / 2).toFixed(2) + "," + ((a.z0 + a.z1) / 2).toFixed(2)); break; }
     }
   }
   ok(doors.length >= 3, tag + ": state doors filed free with the unit-door registry: " + doors.length);
   ok(!blocked.length, tag + ": every doorway is clear both sides (" + blocked.length + ")", blocked);
-  ok(doors.every((d) => d.openMesh && d.openMesh.visible === false && d.col), tag + ": every door has a collider and a hidden open leaf");
+  ok(doors.every((d) => d.col && d.runX != null && d.w > 0.4 && (d.hinge === 1 || d.hinge === -1) && (d.side === 1 || d.side === -1)), tag + ": every door has a collider and a hinge (it swings on its jamb)");
   // the plan's own rooms went to the fit-out (ceiling + baked light)
   const fit = R.out && R.out.fit;
   ok(fit && fit.rooms && fit.rooms.length >= 3 && fit.lights && fit.lights.length >= 2, tag + ": ceilings and light sources handed to the fit-out: " + (fit ? fit.rooms.length + " rooms, " + fit.lights.length + " lights" : "none"));
@@ -295,7 +295,9 @@ ok(CBZ.presidentInteriorPressPoints().length >= 3, "the press corps has places i
     const R = PZ._room.rect, S = mb._sitRoom;
     ok(R && Math.abs(R.minX - S.minX) < 0.01 && Math.abs(R.maxZ - S.maxZ) < 0.01, "the room stands on the plate the state floor left for it");
     const z = (CBZ._zones || []).map((q) => q.options.map((o) => (typeof o.label === "function" ? "fn" : o.label)).join("/")).join(" ");
-    ok(/Open/.test(z) && /Brief/.test(z), "the Sit Room door says Open and its screen says Brief: " + z);
+    const sd = (CBZ.cityUnitDoors ? CBZ.cityUnitDoors.all() : []).find((d) => d.id === "state:sitroom");
+    ok(!!(sd && sd.col && sd.noForce && typeof sd.free === "function"), "the Sit Room door is on the one door kit (E opens it for the President and from inside; nobody kicks it in)");
+    ok(/Brief/.test(z), "the Sit Room screen says Brief: " + z);
   }
 }
 

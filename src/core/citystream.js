@@ -129,7 +129,7 @@
   // Called by city/world.js at the top of buildCity. The spawn is the city
   // centre (the rooftop / street spawn is downtown); reset() places the
   // player and the streamer re-centres on them from the first tick.
-  const RECENTRE = 0.5;               // the centre follows the player at r * RECENTRE
+  const RECENTRE = 0.3;               // the centre follows the player at r * RECENTRE (a 10 Hz tick re-centres cheaply)
   const lastP = { x: 0, z: 0, t: 0 };
   CBZ.streamBegin = function (cx, cz) {
     if (!streamWanted() || CBZ.slice) return false;
@@ -460,6 +460,7 @@
   const HYST = 250;                 // park only this far past the keep circle
   const FREE_DIST = 700;            // ... and free it outright this far past it
   const STEP_MS = 6;                // per-tick build budget (a job always gets to finish)
+  const STEP_SOON_MS = 16;          // ... while something will be in sight within a few ticks
   let acc = 0;
   CBZ.streamStats = { built: 0, parked: 0, queued: 0, recentres: 0, lastJobMs: 0, maxJobMs: 0 };
   CBZ.streamTick = function (force) {
@@ -490,12 +491,24 @@
     // A job the player could already SEE (its rect inside the view distance
     // of where the player stands) is built now, whatever the budget: nothing
     // may assemble itself in view. The rest spend STEP_MS a tick, nearest first.
-    const VIEW = s.view(), V2 = VIEW * VIEW;
+    // Re-attaching parked content is cheap: all of it, now. Building has a
+    // budget that GROWS with need: a job that will be in sight within the
+    // next few ticks (inside view + the speed lead) raises it to STEP_SOON_MS,
+    // so the queue drains BEFORE anything reaches view distance (a build that
+    // only happens inside view is a pop: counted in streamStats.urgent).
+    const VIEW = s.view(), V2 = VIEW * VIEW, SOON = VIEW + s.lead + 60, SOON2 = SOON * SOON;
+    let budget = STEP_MS;
     for (const j of order) {
+      if (j.state === "parked") { unpark(j); continue; }
+      if (distTo(j.rect, P.pos.x, P.pos.z) < SOON2) budget = STEP_SOON_MS;
+    }
+    for (const j of order) {
+      if (j.state !== "queued") continue;
       const urgent = distTo(j.rect, P.pos.x, P.pos.z) < V2;
-      if (!force && !urgent && performance.now() - t0 > STEP_MS) break;
-      if (j.state === "parked") unpark(j);
-      else { runCaptured(j); settle(j); CBZ.streamStats.lastJobMs = Math.round(j.ms); CBZ.streamStats.maxJobMs = Math.max(CBZ.streamStats.maxJobMs, Math.round(j.ms)); if (urgent) CBZ.streamStats.urgent = (CBZ.streamStats.urgent || 0) + 1; }
+      if (!force && !urgent && performance.now() - t0 > budget) break;
+      runCaptured(j); settle(j);
+      CBZ.streamStats.lastJobMs = Math.round(j.ms); CBZ.streamStats.maxJobMs = Math.max(CBZ.streamStats.maxJobMs, Math.round(j.ms));
+      if (urgent) CBZ.streamStats.urgent = (CBZ.streamStats.urgent || 0) + 1;
     }
     for (const j of jobs) if (j.state === "built" && j.objs && !rectKeeps(j.rect, HYST)) park(j);
     // a parked job this far out is freed outright (it re-runs if the player

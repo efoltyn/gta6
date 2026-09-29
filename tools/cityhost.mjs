@@ -236,7 +236,7 @@ const api = http.createServer(async (req, res) => {
         hold: !!CBZ.loopHold, drawing: !(CBZ.CONFIG && CBZ.CONFIG.RENDER_FRAMES===false),
         cars: (CBZ.cityCars||[]).length, peds: (CBZ.cityPeds||[]).length,
         animals: (CBZ.cityWildlife||[]).length,
-        race: CBZ.speedwayRaceState ? (function(R){ return {active:R.active, phase:R.phase, drivers:R.drivers.length}; })(CBZ.speedwayRaceState()) : null };
+        racing: g.state === "racing" };
       })())`, 15000);
       return j(res, 200, { up: true, bootedSec: Math.round((Date.now() - t0) / 1000), errors: consoleErrors.slice(-5), page: r.err ? { err: r.err } : JSON.parse(r.value) });
     }
