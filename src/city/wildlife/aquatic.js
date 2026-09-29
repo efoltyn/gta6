@@ -2301,9 +2301,21 @@
        a dark arch cut into the jaw. The cavity is a cavity; it has no business
        reaching the skin. Costs the open mouth nothing visible — the sack's
        walls are still the cheeks you see down the throat. */
+    /* 0.68, NOT 0.78 — THE BLACK SQUARE (owner, 2026-08-30: "find the black
+       square in the mouth ... make it smaller it's sticking out"). Painted
+       part-by-part from the prey's eye it was this sack: one object filling
+       most of the gape, its corners clearing the tooth crowns and becoming the
+       silhouette, its front wall level with the tooth row so the first thing
+       you met looking into an open mouth was a slab. The cavity must RECEDE.
+       So the trim is where the sack STARTS and how far it reaches sideways,
+       not its depth: front wall 6% -> 16% of a jaw behind the seal, plan
+       half-width 0.78 -> 0.68 of the mouth's (the teeth ring it from every
+       angle), roof dome gap*0.62 -> 0.48 and floor dip 0.30 -> 0.22 so it is
+       a recess, not a box. The liner is cut from this same plan and narrows
+       with it; both cache keys were bumped so no stale geometry is served. */
     function oralPlan(x) {
       const u = clamp((x - cx) / rad, -1, 1);
-      return { u: u, hz: hw * Math.sqrt(Math.max(0, 1 - u * u)) * 0.78 };
+      return { u: u, hz: hw * Math.sqrt(Math.max(0, 1 - u * u)) * 0.68 };
     }
     /* THE FLOOR OF THE SACK STOPS AT THE CHIN'S DECK, and this is a hard
        floor, not a preference. The chin is a SHELL: the deck is its top face,
@@ -2328,7 +2340,7 @@
       return Math.min(topY, (r.y + r.ry * 0.55) - hingeY);
     }
 
-    const sack = meshOf(cachedGeom("buccalSack|v4|" + [hingeX, hingeY, len, width,
+    const sack = meshOf(cachedGeom("buccalSack|v5|" + [hingeX, hingeY, len, width,
       gap, cx, rad, A, cornerRise, upperY, lowerY,
       JSON.stringify(o.rings || null)].join(","), function () {
       /* THE SACK STOPS BEHIND THE SEAL. Its front wall used to stand exactly
@@ -2339,7 +2351,7 @@
          cavity between them: the owner's "white chunks", most of them, in one
          object. Six per cent of a jaw behind the seal there is skin in front
          of it from every angle. */
-      const sh = new Shell(), N = 14, M = 10, xFront = cx + rad - len * 0.06, xBack = -len * 0.16;
+      const sh = new Shell(), N = 14, M = 10, xFront = cx + rad - len * 0.16, xBack = -len * 0.16;
       const top = [], bot = [];
       for (let i = 0; i <= N; i++) {
         const ti = i / N, x = lerp(xFront, xBack, ti);
@@ -2360,7 +2372,7 @@
           const sg = -1 + (2 * j) / M, z = hzAt * sg;
           const ang = Math.atan2(z / hw, pl.u), rise = riseAt(clamp(ang, -A, A));
           const dome = (1 - sg * sg) * fx;
-          tr.push([x, sackRoofAt(x, upperY + rise + gap * 0.62 * dome), z]);
+          tr.push([x, sackRoofAt(x, upperY + rise + gap * 0.48 * dome), z]);
           /* THE FLOOR IS SHALLOW AT THE FRONT. It used to sit on the chin's
              deck from the first station, which is right where the sack is
              buried in a CLOSED chin — but the sack rides the upper jaw, and
@@ -2374,7 +2386,7 @@
              corner of the mouth. Nothing at rest changes: the closed chin
              still covers all of it. */
           const fb0 = clamp((ti - 0.12) / 0.42, 0, 1), fb = fb0 * fb0 * (3 - 2 * fb0);
-          const deepFloor = Math.max(lowerY + rise - gap * 0.30 * dome, sackFloorAt(lowerY + rise));
+          const deepFloor = Math.max(lowerY + rise - gap * 0.22 * dome, sackFloorAt(lowerY + rise));
           const gumFloor = upperY + rise - gumH * 1.2;
           br.push([x, lerp(gumFloor, deepFloor, fb), z]);
         }
@@ -2448,7 +2460,7 @@
     sack.userData.interior = true;
     dental.add(sack);
 
-    const liner = meshOf(cachedGeom("mandibleLiner|v3|" + [len, width, gap, cx, rad,
+    const liner = meshOf(cachedGeom("mandibleLiner|v4|" + [len, width, gap, cx, rad,
       A, cornerRise, lowerY].join(","), function () {
       const sh = new Shell(), N = 12, M = 10, xFront = cx + rad, xBack = 0;
       const rows = [];

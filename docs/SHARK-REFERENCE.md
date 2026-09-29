@@ -331,3 +331,188 @@ rest/tell/expansion/contact/compression/clench/recovery sheet. Run
 `npm run test:shark-bite-cadence`, `npm run test:aquatic-mount`, and
 `node tools/shark-sim-check.mjs --quick` for geometry, mounted contact and
 autonomous-hunt contracts.
+
+---
+
+## 11. THE ATTACK FROM UNDERNEATH (owner, 2026-08-30)
+
+Owner, with a prey's-eye photograph of a great white coming up open-jawed:
+**"you look around at surface and don't see any sharks but then dive and look
+down and a megladon is attacking from under you."**
+
+The engine could not do this, and the reason is worth writing down because it
+is not the reason it looks like. It was not that the ambush was unimplemented.
+It was that **the shark's whole hunt was solved in plan view.**
+
+- `city/wildlife_shark.js` answered "how deep am I?" with `DIVE[state] * draft`
+  — a per-state constant measured FROM THE WATERLINE. Nothing in the shark's
+  brain had ever asked where its quarry was in the water column. So a
+  megalodon (draft ~8 m) hunting you rode at ~7 m on the circle and ~15 m on
+  the rush whether you were floating on the surface or hanging at forty metres.
+- `systems/predator.js` closed its rush on `Math.hypot(dx, dz)`. Horizontal. A
+  megalodon fifteen metres directly below a diver scored `dist ≈ 0` and bit,
+  without ever needing to rise.
+- The one place that DID read the quarry's depth was `strikeWants()`, the
+  breach gate — and it read it only to REFUSE:
+  `if (qs - qp.y > draft * 0.55 + 1.4) return false`. The attack-from-below was
+  not missing, it was **specifically excluded for exactly the case above**.
+
+And the capability was already in the building: `city/wildlife_orca.js` has set
+`diveWant` from `surfaceAt(...) - qp.y` for as long as that file has existed.
+The orca has matched its quarry's depth for years. It was never wired to the
+shark — the animal whose signature kill this actually is.
+
+### THE LAW
+
+**A hunting shark's depth is measured FROM ITS QUARRY, not from the waterline.**
+It wants to be `UNDER[state]` metres below whatever it is hunting.
+
+Note what that does to everything already shipped: for a quarry AT the surface
+(`quarryDepth == 0`) the expression evaluates to exactly `draft * DIVE[state]`
+— the old number, to the bit. Every great-white-off-the-beach read in §4 and §5
+is preserved unchanged, because for a surface swimmer the two formulations are
+the same expression. What changes is only the case the old table could not
+express at all: a quarry that is itself underwater. Then the shark goes under
+IT. The megalodon gets its own column (`UNDER_MEG`) for the same reason
+`vanish` already special-cases it: it is a 22 m open-ocean animal and staging
+it seven metres under a diver puts the ambush in frame before it starts.
+
+### THE ASCENT, AND IT IS SOLVED, NOT ANIMATED
+
+`strikeWants` (breach) and `ascentWants` (ascent) now partition the space on
+the same threshold, so no beat can claim both:
+
+    prey shallower than draft*0.55 + 1.4  ->  THE BREACH  (leaves the water)
+    prey deeper than that                 ->  THE ASCENT  (arrives at its depth)
+
+The physics is the breach's, because it is the same climb — only the terminal
+surface changes from the waterline to a diver. **The trigger is the range at
+which the climb and the charge arrive together**, which `strikeWants` has always
+claimed and which is here solved rather than typed:
+
+    climb = v0*tc + ½*A*tc²   ->   A = 2*(climb - v0*tc) / tc²,   tc = gap / hv
+
+re-evaluated EVERY FRAME against the climb remaining, the gap remaining and the
+speed the body is really making. Far out the required `A` is negative (it has
+time in hand) so it holds its staging depth and keeps coming; the ascent begins
+at the first frame the solve turns positive, which is the longest, most visible
+climb available; too close and the required peak exceeds what the body can do,
+so it does not start and takes the pass as a miss. Body PITCH is
+`atan2(vy, hv)` — derived from its own velocity, never authored, exactly as the
+ballistic arc does it. The gape is written ON the climb (§1: the gape IS the
+photograph) so the teeth arrive with the animal.
+
+Three bugs found underneath it, none of them this feature's and all of them
+older than it:
+
+1. **`city/wildlife.js`'s wander hard-SETS aquatic `y`** to `surface - swimDepth`
+   on every frame the shark brain declines the actor. One declined frame in the
+   middle of an act teleports the body up the water column and the act carries
+   on from there. The breach has always had this exposure too; it is just
+   harder to catch over a short arc. Guarded on `air || asc || ascOut`.
+2. **`city/creature_combat.js`'s `animateAttack` slammed every SWIMMING attacker
+   to its nominal resting draft for the duration of a bite** (`restY()` answers
+   `sea - swimDepth` for anything aquatic, and the write was absolute). On land
+   that is right; in water it means **every deep bite in this game was fought
+   at the resting draft** — the orca's deep takedowns included. Swimmers now
+   contribute `yOff` as a DELTA, the same discipline the lunge beside it
+   already used, and the depth stays owned by whatever solves it.
+3. **The rush's contact test used the horizontal distance** (see above). It now
+   also requires the vertical gap to be inside `reach + the hunter's own draft`
+   — generous on purpose, so the ordinary surface bite is untouched, but enough
+   that biting from eighteen metres underneath is no longer a thing that
+   happens.
+
+### HOW TO VERIFY
+
+(The staging probes that measured this live on the unmerged branch
+claude/megalodon-attack-animation-cdribp; the behaviour shipped flagless on
+2026-09-29 — there is no SHARK_ASCENT switch.)
+
+Measured on a diver at 10 m with the megalodon staged in the dark beneath him,
+before vs after: peak climb **0.00 → 12.74 m/s**, peak nose-up
+**0.0° → 34.9°**, solved ascents **0 → 4**, and the pass finishes with the
+animal **above** the diver (`belowQuarryM` negative) versus arriving at his
+depth and holding.
+
+**`belowQuarryM` CARRIES NO DIRECTION AND THAT IS DELIBERATE.** It is the same
+measurement at two opposite moments and it wants opposite things at each: while
+STALKING, deeper under you is better (`stagedBelowM`); at the moment it ARRIVES
+it should be near ZERO, because the whole point is that it came up to your
+depth instead of biting you from the dark (`arrivalVerticalM`). Scoring the raw
+number "higher is better" made a megalodon closing from 6.89 m under the diver
+to 3.96 m read as a regression.
+
+---
+
+## 12. THE BLACK SQUARE IN THE MOUTH (owner, 2026-08-30)
+
+Owner, on the prey's-eye shot from §11: **"find the black square in the mouth
+it's retarded and make it smaller it's sticking out."**
+
+### FINDING IT, RATHER THAN GUESSING
+
+Worth recording the method, because two rounds of bounding-box arithmetic gave
+two different answers and one of them confidently accused the animal's GILLS of
+being in front of its teeth. (The bug was mine: taking a WORLD axis-aligned box
+and transforming its corners back into body space re-bounds an already-inflated
+box through a rotation. Measure with the mesh's own geometry bounds through the
+relative matrix instead.)
+
+What settled it was `tools/shark-mouth-paint.mjs`: tint every dark mesh in the
+head a primary colour, open the jaws, photograph the mouth from the prey's eye,
+and look. The answer is then a picture, not an inference.
+
+It is **`sharkBuccalSack`** — one object filling most of the gape and standing
+proud of the tooth arc with hard straight edges and sharp corners. It reads
+DARK from in front (you are looking into an unlit interior) and PALE from
+directly below (from there you see its lit outer wrap). One mesh, two readings;
+"black square" describes both.
+
+Three things about the staging cost a run each and are worth knowing before
+using that tool:
+
+- The animal must be IN WATER. Free play starts in the city, so spawning it at
+  player+30 puts it on land and drops a below-the-mouth lens under the terrain
+  — the frame comes back solid black.
+- `applyGape` only drives the UPPER jaw; its own comment says it "leaves the
+  mandible to whoever owns the hinge". Pose with it alone and you photograph a
+  shark with its chin shut.
+- `CBZ.swimJaw` owns the hinge, early-outs when handed the openness it last
+  applied (clear `rig.jawK` first), and the shark's own brain re-zeroes the gape
+  on any frame it is not committed — so the jaw must be opened on the last line
+  before the shutter, after every stepSim.
+
+### THE TRIM (shipped flagless 2026-09-29)
+
+§6's law is that the cavity must RECEDE. The sack was breaking it by starting
+level with the tooth row, so the first thing the eye met looking into an open
+mouth was a flat slab rather than an opening. **Protrusion is what is removed
+here, not depth** — the roof still arches up into the head, which is where a
+mouth's depth belongs.
+
+| | before | after |
+|---|---|---|
+| front wall, behind the seal | 6% of a jaw | **16%** |
+| plan half-width vs the mouth's | 0.78 | **0.68** |
+| roof dome | `gap * 0.62` | **`gap * 0.48`** |
+| floor dip | `gap * 0.30` | **`gap * 0.22`** |
+
+Measured on a megalodon at full gape, tooth
+line identical (1.63) on both sides: sack width **0.86 → 0.76**, depth
+**1.75 → 1.59**, and its front face moved from **0.13 to 0.29 behind the tooth
+line** — more than twice the clearance. The mandible liner is cut from the same
+`oralPlan` and narrows with it (0.86 → 0.75). The throat is untouched.
+
+Both cache keys were bumped (`buccalSack|v5`, `mandibleLiner|v4`): `cachedGeom`
+hands back one geometry per key for the life of the page.
+
+### A PRE-EXISTING RED TEST, NOT CAUSED BY THIS
+
+`npm run test:predator-mouth-envelope` fails `lower body-envelope gape contract`
+for all four sharks, on `cavityReveal < 3`. That metric reads
+`rig.jawCavity.scale.y`, which `swimJaw` only writes **when the builder does NOT
+publish `applyGape`** — and every shark publishes one, deliberately ("a builder
+that publishes applyGape owns its own bore"). So the assertion contradicts the
+design it is testing and reports 1 forever. Verified red on the committed tree
+with this change stashed. Left alone: it wants the test updated, not the code.
