@@ -43,8 +43,8 @@
          and nothing else holds what it made (then it can be freed and re-run) }.
        Nothing may depend synchronously on fn having run.
 
-   ?stream=0 boots the whole city (the old way). ?slice=<name> is a fixed
-   tool slice (no streaming). Streaming is on for the city by default.
+   ?stream=1 streams (opt-in for now, see CFG.CITY_STREAM below); without it
+   the whole city builds as before. ?slice=<name> is a fixed tool slice.
 ============================================================ */
 (function () {
   "use strict";
@@ -54,7 +54,11 @@
   let q = null;
   try { q = new URLSearchParams(location.search); } catch (e) { q = null; }
   const streamParam = q ? q.get("stream") : null;
-  if (CFG.CITY_STREAM == null) CFG.CITY_STREAM = !(streamParam === "0" || streamParam === "false");
+  // OPT-IN until it wins memory (measured 2026-09-29: at the downtown spawn the
+  // keep circle still holds ~all of the heavy builders, so a streamed boot is
+  // the full city's heap plus parking; see docs/plan/city-streaming.md).
+  // ?stream=1 turns it on; flip this default when the builders are split.
+  if (CFG.CITY_STREAM == null) CFG.CITY_STREAM = streamParam === "1" || streamParam === "true";
 
   /* THE JAIL BUDGET. Measured with tools/speed.mjs --modes escape (seed 90210,
      2026-09-29): 11,334 meshes, 2.29M visible tris, 64 programs, build 439 ms

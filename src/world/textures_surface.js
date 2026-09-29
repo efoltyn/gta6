@@ -370,6 +370,10 @@
       dCol.data[i * 4 + 3] = 255;
     }
     gCol.putImageData(dCol, 0, 0);
+    // the map's mean colour from the bytes we just wrote (surfaceMapMean used
+    // to read them back off the canvas: a GPU readback per map, 1.6 s+ of
+    // govcomplex's build headless and slow on a phone). Same bytes, same stride.
+    cCol._cbzMean = meanOfBytes(dCol.data);
 
     // normal canvas — central differences on the height field, wrapped so the
     // normal map tiles as seamlessly as the height that produced it.
@@ -530,10 +534,17 @@
      map divides by this, so the map adds grain without moving the colour the
      vertex authored. Headless / tainted canvas -> [1,1,1]. */
   const _meanCache = new Map();
+  function meanOfBytes(d) {
+    const s2l = function (v) { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    let r = 0, g = 0, b = 0, n = 0;
+    for (let i = 0; i < d.length; i += 4 * 7) { r += s2l(d[i]); g += s2l(d[i + 1]); b += s2l(d[i + 2]); n++; }
+    return n ? [r / n, g / n, b / n] : [1, 1, 1];
+  }
   function surfaceMapMean(tex) {
     if (!tex) return [1, 1, 1];
     if (_meanCache.has(tex)) return _meanCache.get(tex);
     let out = [1, 1, 1];
+    if (tex.image && tex.image._cbzMean) { _meanCache.set(tex, tex.image._cbzMean); return tex.image._cbzMean; }
     try {
       const img = tex.image, N = img.width;
       const d = img.getContext("2d").getImageData(0, 0, N, img.height).data;

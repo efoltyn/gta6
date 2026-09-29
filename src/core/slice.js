@@ -304,9 +304,8 @@
      is only needed by a slice boot, so only a slice boot pays for parsing it.
      document.write from a parser-inserted script inserts a parser-blocking
      tag right here, before worldmap.js reads it. */
-  // a streamed city boot (core/citystream.js, the default) needs it too;
-  // only ?stream=0 without a slice skips it
-  const wantManifest = S || !(q && (q.get("stream") === "0" || q.get("stream") === "false"));
+  // a streamed city boot (core/citystream.js, ?stream=1) needs it too
+  const wantManifest = S || !!(q && (q.get("stream") === "1" || q.get("stream") === "true"));
   if (wantManifest && typeof document !== "undefined" && document.readyState === "loading") {
     try {
       const me = document.currentScript && document.currentScript.src;
