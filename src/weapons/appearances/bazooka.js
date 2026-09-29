@@ -306,8 +306,11 @@
                   it seats in (+Y from the round back into the tube)
          stock    the shoulder contact: the underside of the rear heat shield
                   at shoulderZ, where the tube rests on the shoulder
-         sight    the folding rear leaf's notch -> the front post's tip; the
-                  eye is ~22 cm behind the leaf, over the shoulder */
+         sight    the PGO-7, the 2.7x optic this launcher is issued with and
+                  weapon-data's row names: rear = the ocular glass at the
+                  back of the eyecup, front = the objective glass; the eye
+                  sits 7.5 cm behind the eyecup, left of the tube. (The
+                  folding irons on top are the backup, not the sight line.) */
     const gTop = [(tubeBot - 0.032 + tubeBot - 0.032 + Math.sin(R) * 0.100) / 2, -(0.050 + 0.050 - Math.cos(R) * 0.100) / 2];
     const gAt = (t) => [0, gTop[0] - Math.cos(R) * t, gTop[1] + Math.sin(R) * t];
     K.anchors(g, {
@@ -319,8 +322,8 @@
         quat: new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)) },
       stock: [0, BY - WOOD_R, g.userData.shoulderZ],
       charge: null,
-      sight: { rear: [0, 0.160, RZ], front: [0, 0.160, FZ + 0.001], eyeRelief: 0.22, type: "iron" },
-      optic: { type: "iron", mag: 1 },
+      sight: { rear: [SX, SY + 0.004, 0.118 + 0.046], front: [SX, SY + 0.004, -0.179], lensR: 0.023, eyeRelief: 0.075 },
+      optic: { type: "scope", mag: 2.7 },
     });
     return g;
   };

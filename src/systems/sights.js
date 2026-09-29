@@ -49,18 +49,17 @@
         A magnified scope still takes you to the eye (first person) while it
         is up — that is what a scope is for.
 
-   ANCHOR CONTRACT (weapon appearance -> this file). Model space, barrel along
-   -Z, +Y up, +X the gun's right. On `model.userData.anchors` (or directly on
-   model.userData), every field optional:
-     sight:  { eye|pos: V3  — the EYE POINT (where the eye sits when sighted),
-               quat?: Q     — frame whose -Z is the line of sight, +Y up,
-               eyeRelief?: m (real metres, informational) }
-     lens:   { pos|centre: V3 — ocular / rear-glass centre, radius: units }
-     optic:  { type: "iron"|"reddot"|"holo"|"scope", mag: number }
-   Vectors may be THREE.Vector3 or [x,y,z]; quats THREE.Quaternion or
-   [x,y,z,w]. A fitted gunsmith optic (city/gunmods.js "_gmods") overrides
-   the base gun's sight. Model units: userData.unitsPerMetre (the gun kit's
-   2 per metre when absent).
+   ANCHORS. The contract is the one at the top of
+   weapons/appearances/sidearm.js (model.userData.anchors): sight.pos = the
+   EYE POINT, sight.quat looking down the line, sight.rear / sight.front the
+   notch + post tip (or ocular + objective), eyeRelief (real m), lens
+   { pos, radius }, optic { type, mag }, k = model units per real metre.
+   This file reads the sight IN USE through CBZ.gunAnchors.activeSight (a
+   visible fitted gunsmith optic's record over the factory one) and fills
+   every field of its record from it: eye, dir, up, rear, front, lens,
+   relief, type, mag. The drawn-geometry derivation below is ONLY for a
+   model that publishes no anchors. One hand or two is not decided here:
+   that is CBZ.holds (systems/actorweapons.js).
 
    ENGINE CONTRACT: plain IIFE on window.CBZ, THREE r128. The pure parts
    (resolve / fpPose) run headless in tools/ads-check.mjs.
@@ -257,49 +256,91 @@
     return rec;
   };
 
+  /* The sight the anchors publish for the model as it is NOW: a visible
+     fitted optic's own record (CBZ.gunAnchors.activeSight) over the factory
+     one. Returns { sight, lens, optic, root } or null (no anchors). */
+  function anchoredSight(model) {
+    const A = model.userData.anchors;
+    if (!A) return null;
+    const GA = CBZ.gunAnchors;
+    const act = (GA && GA.activeSight) ? GA.activeSight(model) : { sight: A.sight, lens: A.lens, optic: A.optic };
+    if (!act) return null;
+    // the node whose parts ARE the optic in use (its painted reticle is
+    // hidden under the live glass): a fitted optic, else the factory one
+    let root = null;
+    model.traverse(function (o) {
+      if (root || o === model || !o.userData.opticAnchors || !visibleIn(o, model)) return;
+      if (o.name !== "_baseOptic") root = o;
+    });
+    if (!root) { const b = named(model, function (o) { return o.name === "_baseOptic"; }); if (b && visibleIn(b, model)) root = b; }
+    act.root = root;
+    return act;
+  }
+
   function build(model, w, fit) {
     const ud = model.userData;
-    const A = ud.anchors || ud;
-    const upm = ud.unitsPerMetre || 2;
+    const AS = anchoredSight(model);
+    const A = ud.anchors || null;
+    // units: the anchors' k (model units per real metre) is THE scale
+    const upm = (A && A.k) || ud.unitsPerMetre || 2;
     const row = CBZ.weaponOptic ? CBZ.weaponOptic(w) : { id: "iron", mag: 1, ads: 0.2 };
     let type = ROW_TYPE[row.id] || "iron", mag = row.mag || 1, thermal = false, tint = null;
     if (fit) {
       type = FIT_TYPE[fit.overlay] || (fit.highMag ? "scope" : "reddot");
       mag = fit.mag || (type === "scope" ? Math.tan(HIP * Math.PI / 360) / Math.tan((fit.fov || 20) * Math.PI / 360) : 1);
       thermal = !!fit.thermal; tint = fit.tint || null;
-    } else if (A.optic && A.optic.type) {
-      type = A.optic.type; mag = A.optic.mag || (type === "scope" ? mag : 1);
+    } else if (AS && AS.optic && AS.optic.type) {
+      // what is drawn is what you look through
+      type = AS.optic.type; mag = AS.optic.mag || (type === "scope" ? mag : 1);
     }
     const adsSec = Math.max(0.12, Math.min(0.6, (row.ads || 0.22) + (fit && type === "scope" ? 0.12 : 0)));
+    // no shoulder (no stock, or a folded one): held out at the arms, the
+    // gun's sway is heavier. A fact of the gun, not a hands rule (one hand or
+    // two is CBZ.holds', systems/actorweapons.js).
+    const stub = A ? !(A.stock && !A.stock.folded) : stubby(w);
     const rec = {
       type: type, mag: Math.max(1, mag), thermal: thermal, tint: tint, adsSec: adsSec,
       eye: null, dir: new THREE.Vector3(0, 0, -1), up: new THREE.Vector3(0, 1, 0),
-      lens: null, upm: upm, stub: stubby(w), from: "derived", opticRoot: null,
+      rear: null, front: null, lens: null, relief: 0, upm: upm, stub: stub, from: "derived", opticRoot: null,
     };
     if (type === "none") return rec;
 
+    // ---- ANCHORS: the gun's (or the fitted optic's) own word ----
+    const as = AS && AS.sight;
+    const aEye = as && v3(as.pos);
+    if (aEye) {
+      rec.from = "anchors";
+      rec.rear = v3(as.rear); rec.front = v3(as.front);
+      const q = q4(as.quat);
+      if (rec.rear && rec.front && rec.front.distanceToSquared(rec.rear) > 1e-10) rec.dir.copy(rec.front).sub(rec.rear).normalize();
+      else if (q) rec.dir.set(0, 0, -1).applyQuaternion(q);
+      if (q) rec.up.set(0, 1, 0).applyQuaternion(q);
+      // up square to the sight line (roll from the quat, never tilt)
+      rec.up.addScaledVector(rec.dir, -rec.up.dot(rec.dir)).normalize();
+      if (!rec.rear) rec.rear = aEye.clone().addScaledVector(rec.dir, (as.eyeRelief || 0.1) * upm);
+      if (!rec.front) rec.front = rec.rear.clone().addScaledVector(rec.dir, 0.1 * upm);
+      rec.eye = aEye;
+      // a fitted optic of another kind than its record (a gunsmith dot on the
+      // generic tube): the eye sits where THAT sight is used
+      const aType = AS.optic && AS.optic.type;
+      if (fit && aType && aType !== type && (type === "reddot" || type === "holo")) {
+        const relief = rec.stub ? EYE.pistolArm : 0.20;
+        rec.eye = rec.rear.clone().addScaledVector(rec.dir, -relief * upm);
+      }
+      const al = AS.lens, lp = al && v3(al.pos);
+      if (lp) rec.lens = { pos: lp, r: al.radius || 0.02 };
+      else if (type !== "iron") rec.lens = { pos: rec.rear.clone(), r: 0.02 * upm };
+      rec.opticRoot = (type !== "iron") ? AS.root : null;
+      rec.relief = rec.eye.distanceTo(rec.lens ? rec.lens.pos : rec.rear);
+      return rec;
+    }
+
+    // ---- GEOMETRY FALLBACK (a model with no anchors) ----
     const all = boxesOf(model, null, function (p) { return p.name === "_gmods" || p.name === "_baseOptic" || (p.userData && p.userData.isWeaponOptic); });
     let buttZ = -Infinity;
     for (let i = 0; i < all.length; i++) buttZ = Math.max(buttZ, all[i].max.z);
     if (!isFinite(buttZ)) buttZ = 0.3;
     const cheekZ = buttZ - EYE.cheek * upm;
-
-    // ---- ANCHORS: the gun's own word, unless a fitted optic replaced it ----
-    const as = A.sight;
-    const aEye = as && v3(as.eye || as.pos || as.point);
-    if (aEye && !fit) {
-      rec.eye = aEye; rec.from = "anchors";
-      const q = q4(as.quat);
-      if (q) { rec.dir.set(0, 0, -1).applyQuaternion(q); rec.up.set(0, 1, 0).applyQuaternion(q); }
-      const al = A.lens;
-      const lp = al && v3(al.pos || al.centre || al.center);
-      if (lp) rec.lens = { pos: lp, r: al.radius || 0.02 };
-      else if (type !== "iron") {
-        const op = opticParts(model), ax = op && opticAxis(op.boxes);
-        if (ax) { rec.lens = { pos: new THREE.Vector3(ax.x, ax.y, ax.z), r: ax.r }; rec.opticRoot = op.root; }
-      }
-      return rec;
-    }
 
     // ---- DERIVED from the drawn optic ----
     if (type !== "iron") {
@@ -312,6 +353,8 @@
         else if (rec.stub) ez = ax.z + EYE.pistolArm * upm;
         else ez = Math.max(ax.z + EYE.dotMin * upm, cheekZ);
         rec.eye = new THREE.Vector3(ax.x, ax.y, ez);
+        rec.rear = rec.lens.pos.clone(); rec.front = rec.rear.clone().addScaledVector(rec.dir, 0.1 * upm);
+        rec.relief = rec.eye.distanceTo(rec.rear);
         return rec;
       }
       type = rec.type = "iron";          // an optic row with no optic drawn: irons
@@ -325,6 +368,8 @@
       let top = -Infinity;
       for (let i = 0; i < all.length; i++) top = Math.max(top, all[i].max.y);
       rec.eye = new THREE.Vector3(0, isFinite(top) ? top + 0.01 : 0.1, rec.stub ? buttZ + EYE.pistolArm * upm : cheekZ);
+      rec.rear = rec.eye.clone().addScaledVector(rec.dir, 0.1 * upm); rec.front = rec.eye.clone().addScaledVector(rec.dir, 0.5 * upm);
+      rec.relief = 0.1 * upm;
       return rec;
     }
     rec.dir.copy(il.F).sub(il.R).normalize();
@@ -334,6 +379,7 @@
     const t = (ez - il.R.z) / Math.max(1e-4, back.z);
     rec.eye = il.R.clone().addScaledVector(back, t);
     rec.rear = il.R; rec.front = il.F;
+    rec.relief = rec.eye.distanceTo(il.R);
     // up stays perpendicular to the sight line, in the gun's vertical plane
     rec.up.set(0, 1, 0).addScaledVector(rec.dir, -rec.dir.y).normalize();
     return rec;
@@ -481,7 +527,7 @@
       const lensMat = new THREE.ShaderMaterial({
         uniforms: {
           uMap: { value: null }, uCam: { value: new THREE.Vector3() }, uR: { value: r }, uMag: { value: rec.mag },
-          uTan: { value: 0.3 }, uRelief: { value: EYE.scopeRelief * rec.upm }, uPix: { value: pixTan },
+          uTan: { value: 0.3 }, uRelief: { value: rec.relief || EYE.scopeRelief * rec.upm }, uPix: { value: pixTan },
           uThermal: { value: rec.thermal ? 1 : 0 }, uLive: { value: 0 }, uRet: { value: rec.thermal ? new THREE.Vector3(0.9, 0.3, 0.1) : new THREE.Vector3(0.015, 0.02, 0.022) },
         },
         vertexShader: VERT, fragmentShader: SCOPE_FRAG, depthTest: true, depthWrite: true, transparent: true,
@@ -555,7 +601,7 @@
     ensureRt();
     const lens = fx.userData.lens;
     // the widest the eye can look through this lens (it sits at eye relief)
-    const tanMax = Math.min(0.9, (rec.lens.r / Math.max(0.02, EYE.scopeRelief * rec.upm)) * 1.35);
+    const tanMax = Math.min(0.9, (rec.lens.r / Math.max(0.02, rec.relief || EYE.scopeRelief * rec.upm)) * 1.35);
     const tanRt = tanMax / rec.mag;
     lens.material.uniforms.uTan.value = tanMax;
     lens.material.uniforms.uMap.value = rt.texture;

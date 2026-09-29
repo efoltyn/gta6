@@ -19,7 +19,10 @@
         of the eye, beyond the near plane, and a scope's lens subtends a real
         eyepiece (not a pinhole, not the whole screen),
      5. a fitted gunsmith optic overrides the factory sight,
-     6. anchors, when a model publishes them, win over the derivation.
+     6. every model here publishes anchors (weapons/appearances/sidearm.js
+        contract), so every record comes FROM them (rec.from "anchors"),
+        rear/front/lens/relief included; the geometry derivation is only
+        for an anchor-less model (proved on a stripped copy).
 
      node tools/ads-check.mjs
 */
@@ -84,7 +87,7 @@ for (const w of CBZ.FPS_WEAPONS) {
   const tag = w.id.padEnd(9);
   check(!!rec, `${tag}: sight resolves`);
   if (!rec) continue;
-  check(rec.type === expectType[row.id], `${tag}: type ${rec.type} matches optic row ${row.id}`);
+  check(rec.type === expectType[row.id] || (row.id === "dot" && rec.type === "holo"), `${tag}: type ${rec.type} matches optic row ${row.id} (a drawn holo is a dot-row sight)`);
   if (rec.type === "none") { console.log(`  ${tag} none (no sight: ${w.melee ? "a blade" : "no sight line"})`); continue; }
   check(!!rec.eye, `${tag}: has an eye point`);
   if (!rec.eye) continue;
@@ -98,7 +101,14 @@ for (const w of CBZ.FPS_WEAPONS) {
   check(aheadC.z < 0 && axisErr < 0.05, `${tag}: sight line on the view axis (${axisErr.toFixed(4)} deg)`);
   const upC = inCam(R, rec.eye.clone().add(rec.up)).sub(eyeC);
   check(upC.y > 0.99 * upC.length(), `${tag}: gun upright down the sights (up.y ${(upC.y / upC.length()).toFixed(4)})`);
-  const muzC = inCam(R, R.model.userData.muzzle);
+  const A = R.model.userData.anchors;
+  check(!!A && rec.from === "anchors", `${tag}: sight read from the anchors (${rec.from})`);
+  const muz = (A && A.muzzle && A.muzzle.pos) || R.model.userData.muzzle;
+  check(!!muz, `${tag}: has a muzzle anchor`);
+  if (!muz) continue;
+  check(!!(rec.rear && rec.front), `${tag}: record carries rear + front`);
+  if (!rec.rear || !rec.front) continue;
+  const muzC = inCam(R, muz);
   check(muzC.z < -0.1, `${tag}: muzzle out ahead of the eye (${muzC.z.toFixed(2)})`);
   // 3. irons: rear sight and front post tip on the axis
   let extra = "";
@@ -107,9 +117,9 @@ for (const w of CBZ.FPS_WEAPONS) {
     const fe = deg(Math.atan2(Math.hypot(f.x, f.y), -f.z)), re = deg(Math.atan2(Math.hypot(r.x, r.y), -r.z));
     check(f.z < r.z && r.z < -0.1, `${tag}: rear sight between the eye and the front post, past the near plane (rear ${r.z.toFixed(3)}, front ${f.z.toFixed(3)})`);
     check(fe < 0.1 && re < 0.1, `${tag}: rear notch and front post on the axis (${re.toFixed(3)}/${fe.toFixed(3)} deg)`);
-    const relief = (rec.eye.z - rec.rear.z) / upm;
+    const relief = rec.relief / upm;
     check(relief > 0.02 && relief < 0.6, `${tag}: eye ${(relief * 100).toFixed(1)} cm behind the rear sight`);
-    extra = `rear ${(relief * 100).toFixed(0)} cm, sight radius ${((rec.rear.z - rec.front.z) / upm * 100).toFixed(0)} cm, height over bore ${((rec.front.y - R.model.userData.muzzle.y) / upm * 100).toFixed(1)} cm`;
+    extra = `rear ${(relief * 100).toFixed(0)} cm, sight radius ${((rec.rear.z - rec.front.z) / upm * 100).toFixed(0)} cm, height over bore ${((rec.front.y - muz.y) / upm * 100).toFixed(1)} cm`;
   } else {
     // 4. optics: glass centred in front of the eye
     check(!!rec.lens, `${tag}: optic has a lens`);
@@ -118,7 +128,7 @@ for (const w of CBZ.FPS_WEAPONS) {
       const le = Math.hypot(l.x, l.y);
       check(l.z < -0.1 && le < 1e-3, `${tag}: glass centred on the axis in front of the eye, past the near plane (z ${l.z.toFixed(3)}, off ${le.toExponential(1)})`);
       const halfDeg = deg(Math.atan((rec.lens.r * 1.28) / -l.z));
-      const relief = (rec.eye.z - rec.lens.pos.z) / upm;
+      const relief = rec.relief / upm;
       if (rec.type === "scope") check(halfDeg > 6 && halfDeg < 30, `${tag}: eyepiece subtends a real ocular (${(2 * halfDeg).toFixed(1)} deg across)`);
       else check(relief >= 0.069 && relief < 0.6, `${tag}: eye ${(relief * 100).toFixed(1)} cm behind the dot glass`);
       extra = `${rec.type} ${rec.mag.toFixed(1)}x, glass ${(relief * 100).toFixed(0)} cm ahead, ${(2 * halfDeg).toFixed(1)} deg across`;
@@ -145,16 +155,20 @@ for (const w of CBZ.FPS_WEAPONS) {
   CBZ.gunModsScopeOf = null;
 }
 
-// 6. anchors win
-{
-  const w = CBZ.weaponById("sidearm");
-  const R = rig(w, (model) => {
-    model.userData.anchors = { sight: { eye: [0, 0.2, 0.9], quat: [0, 0, 0, 1], eyeRelief: 0.4 }, optic: { type: "iron", mag: 1 } };
-  });
+// 6. the geometry fallback: the same guns with their anchors stripped
+for (const id of ["sidearm", "ak47", "sniper"]) {
+  const w = CBZ.weaponById(id);
+  const R = rig(w, (model) => { delete model.userData.anchors; });
   const rec = S.resolve(R.model, w);
-  check(rec.from === "anchors" && Math.abs(rec.eye.z - 0.9) < 1e-9, "anchor sight eye point is used as published");
+  check(rec.from === "derived" && !!rec.eye && !!rec.rear && !!rec.front && rec.relief > 0, `${id} stripped: derived record is complete`);
+  if (!rec.eye) continue;
   solve(R, rec);
-  check(inCam(R, rec.eye).length() < 1e-3, "anchor eye lands on the camera");
+  check(inCam(R, rec.eye).length() < 1e-3, `${id} stripped: derived eye lands on the camera`);
+  if (rec.type === "iron") {
+    const f = inCam(R, rec.front);
+    check(deg(Math.atan2(Math.hypot(f.x, f.y), -f.z)) < 0.1, `${id} stripped: derived front post on the axis`);
+  }
+  console.log(`  ${id.padEnd(9)} ${rec.type.padEnd(6)} derived (no anchors)`);
 }
 
 console.log(`\n${checks - fails}/${checks} checks passed`);
