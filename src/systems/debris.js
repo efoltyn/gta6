@@ -894,8 +894,9 @@
       const r = Math.min(b.radius, Math.max(b.ext[0], b.ext[2]));
       const col = { minX: pos.x - r * 0.7, maxX: pos.x + r * 0.7, minZ: pos.z - r * 0.7, maxZ: pos.z + r * 0.7,
         y0: pos.y - 0.3, y1: top * 0.9 + pos.y * 0.1, debris: true, noBreach: true, debrisOwner: b.owner, debrisId: id };
-      CBZ.colliders.push(col);
-      if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+      // indexed in place: a full broadphase rebuild per settling piece was a
+      // steady trickle of 142k-collider rebuilds for seconds after a blast
+      CBZ.colliderAdd(col);
     }
     staticCount++;
     b.pendingId = id;

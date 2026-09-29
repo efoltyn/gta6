@@ -1000,13 +1000,16 @@
     return rec;
   }
   function placeRig(rig) {
-    let whole = true;
+    let whole = true, stamped = 0;
     for (let i = 0; i < _parts.length; i++) {
       const rec = claim(rig, _parts[i]);
       _parts[i] = rec;                                    // the mesh is rec.mesh from here on
       if (rec === false) whole = false;                   // poolable, but no pool would take it
-      else if (rec && rec.slot < 0) whole = false;
+      else if (rec) { if (rec.rig === rig) stamped++; if (rec.slot < 0) whole = false; }
     }
+    // every record this rig holds was reached this frame: sweepRig has
+    // nothing to park or reap, so it can skip the second pass over them
+    if (stamped === rig.recs.length) rig.clean = stamp;
     if (!whole) {
       // The whole body draws itself this frame: nothing on the hide layer,
       // no instance left holding a pose. It re-checks every frame, so the
@@ -1165,6 +1168,13 @@
   function sweepRig(r) {
     if (r.stamp !== stamp) { _gone.push(r); return; }
     if (r.skipStamp === stamp) return;   // far rig on an off-phase frame: instances hold last pose
+    if (r.clean === stamp) return;       // the walk reached every record (placeRig counted them)
+    // A PARKED body draws nothing, and every one of its records was parked
+    // when it was (parkRig): the only work left here is the reap (STALE, or a
+    // part taken off), and a reap that lands a few frames later on a body
+    // nobody is drawing is invisible. Once per 8 frames, phased by id so the
+    // culled crowd is not all swept on one frame.
+    if (r.parked && ((stamp + r.group.id) & 7) !== 0) return;
     const recs = r.recs;
     for (let i = recs.length - 1; i >= 0; i--) {
       const rec = recs[i];

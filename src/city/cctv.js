@@ -18,27 +18,29 @@
 
      2) FOOTAGE ON COMPUTERS — the desk terminals (interior_programs.js
         desk-farms) and the exec office cluster register their monitor faces
-        as feed screens (CBZ.cctvAddScreen, build-path). At runtime, when the
-        player is INSIDE/near an interior with monitors AND the quality tier is
-        high enough, ONE shared low-res WebGLRenderTarget (256x144) is rendered
-        from ONE cctv camera (round-robin every ~2s), and a small pool of
-        unlit overlay quads maps that texture onto the nearest monitor faces.
-        The footage is desaturated/cooled by a plain material colour multiply
-        (no shaders). It is a RUNTIME-VISUAL layer only.
+        as feed screens (CBZ.cctvAddScreen, build-path). At runtime, while a
+        monitor is ACTUALLY IN VIEW, ONE shared low-res WebGLRenderTarget
+        (256x144) is rendered from ONE cctv camera (round-robin every ~2s), and
+        a small pool of unlit overlay quads maps that texture onto the nearest
+        monitor faces. The footage is desaturated/cooled by a plain material
+        colour multiply (no shaders). It is a RUNTIME-VISUAL layer only.
 
-   BUDGET / GATING (the "zero cost otherwise" mandate):
-     • OFF entirely below quality tier 2 (like the backdrop), outside CITY
-       mode, or while not playing.
-     • The extra scene render happens AT MOST once every OTHER frame, and only
-       while at least one feed screen is within range of the player — otherwise
-       no render target is touched at all.
-     • That render is SCOPED, not a second full frame: the feed camera's far
-       plane follows the quality tier's own full-detail radius and every city
-       subtree outside the feed frustum is hidden for the duration of the pass
-       (flag CCTV_FEED_SCOPED — the long WHY sits above renderFeed).
-     • It never renders off the real animation frame (a heartbeat guard keeps
-       headless CBZ.stepSim bursts — the math gate — from paying any render
-       cost; stepSim must "tick the whole updater chain with NO rendering").
+   BUDGET / GATING. Measured 2026-09-28 (tools/speed.mjs, real GPU): the old
+   gate was "a monitor within 24 m of the player", which is TRUE at the Gang
+   Life spawn with every monitor behind a wall. The feed re-rendered the scene
+   every other frame for nobody, and its FIRST render was a 0.9-1.0 s hitch
+   compiling 66 programs. Now:
+     • OFF below quality tier 2, outside CITY mode, or while not playing.
+     • A feed renders only while one of the mapped monitors is IN VIEW: inside
+       the main camera frustum, facing the camera, within READ_RANGE, and not
+       behind a wall (one CBZ.losRaycast per candidate, re-tested every
+       LOS_EVERY seconds). Nothing in view = no render target touched at all.
+     • In view it renders at FEED_HZ (security footage is low frame rate; the
+       monitor holds the last frame between renders), not every other frame.
+     • The pass is SCOPED (see above renderFeed) and must render with the SAME
+       light count as the main view, so it reuses the main view's programs.
+     • It never renders off a real animation frame (heartbeat guard; headless
+       CBZ.stepSim ticks the updater chain with NO rendering).
      • The camera props themselves are 2 static draw calls, always fine.
 
    DETERMINISM: placement is a pure function of the built world (lot doors,
@@ -46,9 +48,7 @@
    Math.random, never a shared rng() stream. The feed (render target, overlay
    pool) is runtime visual and touches no build state.
 
-   REVERT: CBZ.CONFIG.CCTV_V1 = false (config.js) removes the whole layer.
-           CBZ.CONFIG.CCTV_FEED_SCOPED = false (declared here) puts the feed
-           back on the exact old full-scene render.
+   OFF: CBZ.CONFIG.CCTV_V1 = false (config.js) removes the whole layer.
 ============================================================ */
 (function () {
   "use strict";
@@ -57,14 +57,15 @@
   const THREE = window.THREE;
 
   if (CBZ.CONFIG.CCTV_V1 == null) CBZ.CONFIG.CCTV_V1 = true;
-  // The extra feed render pays for itself only if it stays a postage stamp.
-  // OFF = the literal pre-2026-08-03 behaviour (far 520, scene untouched).
-  if (CBZ.CONFIG.CCTV_FEED_SCOPED == null) CBZ.CONFIG.CCTV_FEED_SCOPED = true;
 
   // ---- tunables (one-line knobs; owner judges the look by playing) --------
   const RT_W = 256, RT_H = 144;        // shared feed resolution (low, CCTV-grade)
-  const SCREEN_RANGE = 24;             // player must be within this of a monitor to wake the feed
+  const SCREEN_RANGE = 24;             // monitors within this of the player get a feed overlay
   const SCREEN_RANGE2 = SCREEN_RANGE * SCREEN_RANGE;
+  const READ_RANGE = 18;               // the CAMERA must be this close to an overlaid monitor to render its feed
+  const READ_RANGE2 = READ_RANGE * READ_RANGE;
+  const FEED_HZ = 10;                  // feed renders per second while a monitor is in view
+  const LOS_EVERY = 0.25;              // seconds between wall tests of one monitor
   const OVERLAY_POOL = 8;              // max live feed screens shown at once (draw-call cap)
   const CYCLE_SEC = 2.2;              // round-robin dwell per camera
   const MOUNT_H = 3.15;               // wall-camera mount height (above a door)
@@ -77,15 +78,15 @@
   const STREET_POLE_MAX = 8;          // cap on hashed street-pole cameras
   const STREET_POLE_THRESH = 0.14;    // hash01 gate for a lot to earn a street pole
   // ---- scoped-feed knobs (see the SCOPED FEED block above renderFeed) -----
-  const FEED_FAR_FULL = 520;          // the as-shipped feed far plane = the flag-OFF depth
+  const FEED_FAR_FULL = 520;          // the as-shipped feed far plane
   const FEED_FAR_MIN = 260;           // never scope tighter than this, whatever a tier publishes
   const SCOPE_PAD = 18;               // metres of slack added to every measured subtree sphere
   const SCOPE_MEASURES = 24;          // fresh subtree measurements allowed per feed render
-  const SCOPE_MAX_R = 400;            // a footprint wider than this (terrain, sea, road web) is never scoped
 
   // ---- public buses -------------------------------------------------------
   CBZ.cctvCameras = CBZ.cctvCameras || [];   // { id, pos:{x,y,z}, aimYaw, aimPitch, kind }
   const screens = [];                         // feed-screen anchors { x,y,z, nx,nz } (world + OUTWARD normal)
+  CBZ.cctvScreens = screens;                  // read-only view for probes (tools, console)
 
   // Build-path registration from the interior builders (deskfarm / exec
   // office). World coords + the OUTWARD screen normal (the way a viewer faces
@@ -100,8 +101,10 @@
       if (Math.abs(s.x - x) < 0.15 && Math.abs(s.y - y) < 0.15 && Math.abs(s.z - z) < 0.15) return;
     }
     if (screens.length >= 3000) return;      // pathological guard; per-source caps keep this far below
-    screens.push({ x: x, y: y, z: z, nx: ux, nz: uz });
+    // losT/losClear: the cached wall test (see screenInView)
+    screens.push({ x: x, y: y, z: z, nx: ux, nz: uz, losT: -1e9, losClear: false });
   };
+
 
   // ========================================================================
   //  GEOMETRY — voxel-simple, vertex-coloured, merged so a whole camera is
@@ -338,6 +341,7 @@
     return true;
   }
 
+
   // ========================================================================
   //  HEARTBEAT — a real animation frame ran recently. Keeps the render cost
   //  out of headless CBZ.stepSim bursts (the math gate), which run a tight
@@ -354,108 +358,97 @@
   //  THE FEED PUMP — round-robins one camera into the shared RT and maps it
   //  onto the nearest monitor faces. Fully gated; zero cost when idle.
   // ========================================================================
-  let cycleT = 0, camIdx = 0, evenFrame = false;
+  let cycleT = 0, camIdx = 0, feedT = 0, simT = 0, rtFresh = false;
   const _near = [];
   function deactivate() {
     if (overlays) for (let i = 0; i < overlays.length; i++) overlays[i].visible = false;
     if (feedRoot) feedRoot.visible = false;
   }
 
+  /* IS THIS MONITOR ON SCREEN? Cheapest test first: range, then facing (the
+     glass faces the viewer), then the main camera frustum, then a wall test.
+     The wall test is the one that matters at the Gang Life spawn: the desk
+     farms are INSIDE buildings, and a player on the pavement outside is in
+     range, in frustum and on the facing side of half of them. It is one
+     grid-broadphased ray (core/losgrid.js) from the camera to just short of
+     the glass, cached per monitor for LOS_EVERY seconds. */
+  const _viewF = new THREE.Frustum(), _viewM = new THREE.Matrix4(), _viewS = new THREE.Sphere();
+  const _losRay = new THREE.Raycaster(), _losO = new THREE.Vector3(), _losD = new THREE.Vector3(), _camP = new THREE.Vector3();
+  function screenInView(s, cp) {
+    const vx = cp.x - s.x, vy = cp.y - s.y, vz = cp.z - s.z;
+    const d2 = vx * vx + vy * vy + vz * vz;
+    if (d2 > READ_RANGE2) return false;
+    if (vx * s.nx + vz * s.nz <= 0) return false;            // looking at the back of the monitor
+    _viewS.center.set(s.x, s.y, s.z); _viewS.radius = 0.4;
+    if (!_viewF.intersectsSphere(_viewS)) return false;
+    if (simT - s.losT >= LOS_EVERY) {
+      s.losT = simT;
+      const d = Math.sqrt(d2);
+      if (d < 0.6 || !CBZ.losRaycast || !CBZ.losBlockers || !CBZ.losBlockers.length) s.losClear = true;
+      else {
+        _losO.set(cp.x, cp.y, cp.z);
+        _losD.set(-vx / d, -vy / d, -vz / d);
+        _losRay.set(_losO, _losD);
+        _losRay.near = 0; _losRay.far = d - 0.35;           // stop short of the monitor's own body
+        const hits = CBZ.losRaycast(_losRay, CBZ.losBlockers);
+        s.losClear = !hits || hits.length === 0;
+      }
+    }
+    return s.losClear;
+  }
+
   /* ========================================================================
-     SCOPED FEED (flag CCTV_FEED_SCOPED, default true) — the extra render may
-     cost a POSTAGE STAMP, not a second frame.
+     SCOPED FEED — the extra render costs a POSTAGE STAMP, not a second frame.
 
-     THE DISEASE, and it is the same one world/waterfx.js's ocean mirror had:
-     the target is 256x144, so the feed's PIXEL cost is nothing — but
-     `renderer.render(CBZ.scene, feedCam)` still pays the whole CPU half of a
-     frame, a full projectObject walk over ~150k objects plus a full draw-call
-     submission. With a monitor on screen that DOUBLED main-scene render CPU.
+     The target is 256x144, so the feed's PIXEL cost is nothing; what costs is
+     the CPU half of `renderer.render(scene, feedCam)`: r128's projectObject
+     walk over ~150k objects plus draw submission. Two levers:
 
-     WHY NOT A LAYER MASK: r128's projectObject is, verbatim from the vendored
-     bundle, `if (visible === false) return; if (layers.test(camera.layers))
-     {...}; for (children) recurse` — the layer mask gates only what an object
-     DOES, never whether its children are walked. A CCTV layer would cut draw
-     submission and leave the entire 150k-object traversal intact. `visible =
-     false` on a subtree is the ONLY thing in r128 that skips the walk itself.
-     A layer mask is also actively unsafe here: world/water_underwater.js puts
-     its caustics and god-rays on layer 2 precisely BECAUSE "the mirror and
-     CCTV cameras keep the default layer mask" — narrowing feedCam.layers
-     would break a contract another file wrote down.
+       1) FAR PLANE = CBZ.cityCullRadius, the per-tier full-detail radius
+          core/farcull.js culls the real city at, clamped to [260, 520].
 
-     So two levers, and ONE number bounds both:
+       2) SUBTREE VISIBILITY. Every top-level child of the city arena root
+          gets a measured world sphere (CBZ.subtreeSphere, core/viewscope.js);
+          anything whose sphere misses the feed frustum is hidden for this one
+          render and restored in a `finally`. r128 already frustum-rejects
+          each mesh by its own sphere, so skipping a subtree whose padded
+          union sphere misses cannot remove a mesh that would have drawn.
 
-       1) FAR PLANE. The feed shipped at far=520 while city fog.far is 760 /
-          1000 / 1400 at tiers 2 / 3 / 4 (core/quality.js) — it was drawing to
-          a depth the tier itself calls well past full detail. The scoped far
-          is CBZ.cityCullRadius, the SAME per-tier full-detail radius
-          core/farcull.js culls the real city at (390 / 500 / 700), clamped so
-          it can only ever be TIGHTER than the legacy 520. At tier 2 — the
-          weakest machine, the one that needs this — the frustum's cross
-          section falls to (390/520)^2 = 56% of what it was; at tier 4 the
-          clamp lands back on 520 and nothing changes at all. The saving lands
-          exactly where the pain is, and the tier that can afford the old
-          picture keeps the old picture.
+     LIGHTS. A subtree that holds a LIGHT is never hidden (b.lit). A light
+     lights what is inside the frustum from outside it, and more to the point
+     r128 keys EVERY lit program by the scene's light counts
+     (WebGLPrograms.getParameters numPointLights / numSpotLights): hiding one
+     point light made the feed a different light setup from the main view, so
+     its first render compiled a second copy of every lit material in sight
+     and every later render flipped the shared light-state version, forcing
+     every material in BOTH views to re-derive its program key.
 
-       2) SUBTREE VISIBILITY. Every top-level child of the city arena root —
-          core/farcull.js's own territory: per-lot building groups, town and
-          island groups, the merged street tiles — gets a measured world
-          sphere; anything whose sphere misses the feed frustum is hidden for
-          the duration of this one render and restored immediately after.
-
-     WHY (2) CANNOT CHANGE THE PICTURE: r128 already rejects each mesh with
-     `frustum.intersectsObject`, i.e. that mesh's own bounding sphere against
-     this exact frustum. Our sphere is the UNION of a subtree's meshes plus
-     SCOPE_PAD of slack, so a union sphere that misses the frustum guarantees
-     every member sphere misses it — every mesh we skip is a mesh r128 was
-     going to reject anyway. Meshes carrying frustumCulled=false skip that CPU
-     test, but the GPU still clips to the view volume: outside the frustum
-     they produce zero fragments either way.
-
-     WHY IT CANNOT CHANGE THE GAME: nothing reads the feed except the monitor
-     material. CBZ.cctvCameras is consumed by this file and no other (no
-     wanted-level, detection, AI or mission code anywhere in the repo touches
-     it), so the cameras are pixels, not sensors, and this is a RENDERING
-     change with no gameplay surface. And if a bound is wrong anyway, the
-     blast radius is ONE 256x144 offscreen frame: the mutation is undone in a
-     `finally` before renderFeed returns, and the main view never renders
-     inside it.
-
-     OFF (?cfg_CCTV_FEED_SCOPED=0) = far 520 + an untouched scene = the exact
-     old full-scene render, byte for byte.
+     A layer mask would not work: r128's projectObject tests layers only for
+     what an object DRAWS, never whether its children are walked, and
+     world/water_underwater.js relies on the CCTV camera keeping the default
+     mask ("the mirror and CCTV cameras keep the default layer mask").
   ======================================================================== */
   const _scopeHidden = [];                    // objects WE hid, in the order we hid them
   const _scopeFrustum = new THREE.Frustum();
   const _scopeM = new THREE.Matrix4();
   const _scopeSph = new THREE.Sphere();
-  let auScoped = 0, auFull = 0, auHidden = 0, auCandidates = 0, auMeasured = 0;
+  let auRenders = 0, auHidden = 0, auCandidates = 0, auMeasured = 0, auInView = false, auSeen = null;
 
-  // Depth this feed is allowed to reach. Derived, never a fresh literal: the
-  // quality tier already publishes what "full detail" means and the feed has
-  // no business claiming more than the main view does.
   function feedFar() {
-    if (!CBZ.CONFIG.CCTV_FEED_SCOPED) return FEED_FAR_FULL;
     const r = CBZ.cityCullRadius || 0;
     if (!r) return FEED_FAR_FULL;             // no tier published yet → legacy depth
     return Math.max(FEED_FAR_MIN, Math.min(FEED_FAR_FULL, r));
   }
 
-  // ONE measured world sphere per top-level arena child, cached forever —
-  // core/viewscope.js owns the measurement now (it needs the same sphere for
-  // the main camera every frame); this is the same function under the old name.
-  function scopeBoundsFor(o) { return CBZ.subtreeSphere(o); }
-  // Hand back everything WE hid. Called from renderFeed's finally, and again
-  // at the head of scopeApply — a restore that can run twice and cannot throw
-  // is the only shape allowed here, because a city left invisible is the one
-  // failure this file could cause that the player cannot recover from.
+  // Hand back everything WE hid. A restore that can run twice and cannot throw
+  // is the only shape allowed: a city left invisible is unrecoverable.
   function scopeRestore() {
     for (let i = _scopeHidden.length - 1; i >= 0; i--) _scopeHidden[i].visible = true;
     _scopeHidden.length = 0;
   }
 
   function scopeApply(root) {
-    scopeRestore();                           // never build on a stale list
-    // r128's Camera.updateMatrixWorld also refreshes matrixWorldInverse, which
-    // is what the frustum needs; the renderer will redo this harmlessly.
+    scopeRestore();
     feedCam.updateMatrixWorld(true);
     _scopeM.multiplyMatrices(feedCam.projectionMatrix, feedCam.matrixWorldInverse);
     _scopeFrustum.setFromProjectionMatrix(_scopeM);
@@ -463,33 +456,25 @@
     let budget = SCOPE_MEASURES, seen = 0;
     for (let i = 0; i < kids.length; i++) {
       const o = kids[i];
-      // Only ever hide something CURRENTLY visible, and only ever restore it
-      // to visible. farcull, demolition and the quality tiers already own
-      // anything that is hidden, and must get it back exactly as they left it.
+      // only ever hide something CURRENTLY visible (farcull, demolition and the
+      // quality tiers own what is hidden), meshes and groups only (never a light)
       if (!o || !o.visible) continue;
-      // meshes and groups only. A Light at this level lights the feed and a
-      // hidden light changes what the monitor SHOWS; LODs and Sprites are too
-      // few to be worth the risk.
       if (!o.isMesh && !o.isGroup) continue;
       if (o === camRoot || o === feedRoot) continue;   // renderFeed owns those two
       if (!CBZ.subtreeSphereMeasured(o)) {
-        // A group's first measurement is a Box3 subtree walk — the exact
-        // 30-50 ms hitch-stack farcull budgets against. Unmeasured stays
-        // VISIBLE, so the scope tightens over the first couple of seconds of
-        // feed instead of paying for itself in one stutter.
+        // a first measurement is a subtree walk; unmeasured stays VISIBLE
         if (budget <= 0) continue;
         budget--; auMeasured++;
       }
-      const b = scopeBoundsFor(o);
-      if (b.dyn) continue;
-      // it MOVED between measurements → an actor, not static city. Blacklist.
-      if (o.position.x !== b.px || o.position.z !== b.pz) { b.dyn = true; continue; }
+      const b = CBZ.subtreeSphere(o);
+      if (b.dyn || b.lit) continue;
+      if (o.position.x !== b.px || o.position.z !== b.pz) { b.dyn = true; continue; }   // it moved: an actor
       seen++;
       _scopeSph.center.set(b.x, b.y, b.z);
       _scopeSph.radius = b.r + SCOPE_PAD;
       if (_scopeFrustum.intersectsSphere(_scopeSph)) continue;
       o.visible = false;
-      _scopeHidden.push(o);                   // recorded AS it is hidden — renderFeed's finally restores exactly this list
+      _scopeHidden.push(o);                   // recorded AS it is hidden
     }
     auCandidates = seen;
     return _scopeHidden.length;
@@ -501,9 +486,6 @@
     const p = cam.pos, cp = Math.cos(cam.aimPitch), sp = Math.sin(cam.aimPitch);
     feedCam.position.set(p.x, p.y, p.z);
     feedCam.lookAt(p.x + Math.sin(cam.aimYaw) * cp, p.y + sp, p.z + Math.cos(cam.aimYaw) * cp);
-    // cheap to re-derive every pass; only rebuilds the projection when the
-    // quality tier actually moved.
-    const scoped = !!CBZ.CONFIG.CCTV_FEED_SCOPED;
     const far = feedFar();
     if (feedCam.far !== far) { feedCam.far = far; feedCam.updateProjectionMatrix(); }
     const renderer = CBZ.renderer;
@@ -514,20 +496,16 @@
     const camVis = camRoot ? camRoot.visible : false, feedVis = feedRoot.visible;
     if (camRoot) camRoot.visible = false; feedRoot.visible = false;
     if (renderer.shadowMap) renderer.shadowMap.autoUpdate = false;
-    if (scoped) auHidden = 0;
+    auHidden = 0;
     try {
-      // EVERY temporary scene mutation lives inside this try, and scopeApply
-      // records each object AS it hides it — so a throw halfway through the
-      // sweep still leaves the finally an exact, complete restore list.
-      if (scoped) {
-        const aroot = CBZ.city && CBZ.city.arena && CBZ.city.arena.root;
-        if (aroot) auHidden = scopeApply(aroot);
-      }
+      const aroot = CBZ.city && CBZ.city.arena && CBZ.city.arena.root;
+      if (aroot) auHidden = scopeApply(aroot);
       renderer.setRenderTarget(rt);
       // proxied parked cars are culled against the PLAYER's camera
       // (city/carinstances.js); the monitor may look the other way
       if (CBZ.carInstanceFullDraw) CBZ.carInstanceFullDraw();
       renderer.render(CBZ.scene, feedCam);
+      rtFresh = true;
     } catch (e) {
       /* headless/context loss — fail soft */
     } finally {
@@ -536,7 +514,7 @@
       if (renderer.shadowMap) renderer.shadowMap.autoUpdate = prevAuto;
       if (camRoot) camRoot.visible = camVis; feedRoot.visible = feedVis;
     }
-    if (scoped) auScoped++; else { auFull++; auHidden = 0; }
+    auRenders++;
   }
 
   function tick(dt) {
@@ -547,24 +525,16 @@
     if (camRoot) camRoot.visible = true;                     // camera props are cheap — always on in the city
 
     // ---- everything below is the FEED; gate it hard ----
-    /* A PAGE THAT DRAWS NOTHING MUST NOT DRAW THE FEED EITHER. The rAF-beat
-       guard below is meant to catch exactly that ("headless stepSim → no
-       render"), but its heartbeat is CCTV's own requestAnimationFrame chain,
-       and HUD/DOM writes keep the compositor producing just enough frames to
-       keep that beat alive on a page booted with ?cfg_RENDER_FRAMES=0
-       (core/loop.js's no-draw lever). Measured by the in-page updater
-       profiler: on such a page this tick still ran renderFeed, and its FIRST
-       call compiled every not-yet-compiled shader program through the RT —
-       6.7 s in one call on a software rasterizer, then a full scene raster
-       every other frame, forever, on a page that had promised "no draw
-       calls". The flag is the authoritative form of the same question the
-       beat guard asks, so it gates the same line. */
+    // A page that draws nothing (?cfg_RENDER_FRAMES=0, core/loop.js's no-draw
+    // lever) must not draw the feed either; the rAF beat alone is not proof
+    // (HUD/DOM writes keep the compositor beating on such a page).
     if (CBZ.CONFIG.RENDER_FRAMES === false) { deactivate(); return; }
     if (perfNow() - lastRealFrame > 40) { deactivate(); return; }        // headless stepSim → no render
     const tier = CBZ.getQualityLevel ? CBZ.getQualityLevel() : 4;
     if (tier < 2) { deactivate(); return; }                              // off at tiers 0-1 (like the backdrop)
     if (!CBZ.cctvCameras.length || !screens.length) { deactivate(); return; }
     const P = CBZ.player; if (!P || !P.pos) { deactivate(); return; }
+    simT += dt;
 
     // nearest monitor faces to the player, within range
     _near.length = 0;
@@ -575,20 +545,35 @@
       const d2 = dx * dx + dy * dy + dz * dz;
       if (d2 < SCREEN_RANGE2) _near.push({ s: s, d2: d2 });
     }
-    if (!_near.length) { deactivate(); return; }                          // no monitors near → truly idle, no RT touch
+    if (!_near.length) { deactivate(); rtFresh = false; return; }       // no monitors near → truly idle
     _near.sort(function (a, b) { return a.d2 - b.d2; });
+    const n = Math.min(_near.length, OVERLAY_POOL);
+
+    // is any overlaid monitor actually on screen?
+    let inView = false;
+    const camera = CBZ.camera;
+    if (camera) {
+      camera.updateMatrixWorld();
+      _viewM.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+      _viewF.setFromProjectionMatrix(_viewM);
+      _camP.setFromMatrixPosition(camera.matrixWorld);
+      for (let i = 0; i < n && !inView; i++) { inView = screenInView(_near[i].s, _camP); if (inView) auSeen = _near[i].s; }
+    }
+    auInView = inView;
 
     // round-robin the source camera every ~CYCLE_SEC
     cycleT += dt;
     if (cycleT >= CYCLE_SEC) { cycleT = 0; camIdx = (camIdx + 1) % CBZ.cctvCameras.length; }
 
-    // ONE extra scene render, every OTHER frame
-    evenFrame = !evenFrame;
-    if (evenFrame) renderFeed();
+    if (inView) {
+      feedT -= dt;
+      if (feedT <= 0 || !rtFresh) { feedT = 1 / FEED_HZ; renderFeed(); }
+    }
+    // Never show an RT that was never drawn (it would read as black glass).
+    if (!rtFresh) { deactivate(); return; }
 
     // map the shared feed onto the nearest monitors
     feedRoot.visible = true;
-    const n = Math.min(_near.length, OVERLAY_POOL);
     for (let i = 0; i < overlays.length; i++) {
       const o = overlays[i];
       if (i >= n) { o.visible = false; continue; }
@@ -607,32 +592,22 @@
 
   // small introspection helper (no HUD) — handy for probes / owner console
   CBZ.cctvInfo = function () {
-    return { cameras: CBZ.cctvCameras.length, screens: screens.length, poles: _poles.length, active: !!(feedRoot && feedRoot.visible) };
+    return { cameras: CBZ.cctvCameras.length, screens: screens.length, poles: _poles.length, active: !!(feedRoot && feedRoot.visible), inView: auInView };
   };
 
-  /* CBZ.cctvFeedAudit() — IS THE EXTRA RENDER ACTUALLY SMALL, AND CAN THE
-     READING LIE? Two numbers have to be visible together or a broken scope
-     reads as a working one:
-
-       scopedRenders / fullRenders — which PATH ran. `0 / N` means the flag is
-                       off (or CBZ.cityCullRadius never published and every
-                       pass fell back to the legacy depth), so a healthy
-                       lastHiddenCount of 0 beside it is not a mystery.
-       lastHiddenCount — arena subtrees the LAST feed skipped.
-       candidates    — measured, static, testable subtrees that last pass
-                       actually considered. `hid 0 of 0` (the scope has not
-                       warmed up yet, SCOPE_MEASURES is still trickling) must
-                       never be read as `hid 0 of 900` (the scope is running
-                       at full stretch and genuinely finding nothing).
-       far           — the depth in force, so a "no saving" reading can be
-                       traced to the tier rather than to this file.
-  */
+  /* CBZ.cctvFeedAudit() — is the extra render small, and is it happening?
+       renders        — feed renders so far (0 while no monitor was in view)
+       inView         — a mapped monitor passed the on-screen test last tick
+       lastHiddenCount / candidates — subtrees the last feed skipped, out of
+                        the measured static ones it considered (`0 of 0` =
+                        the scope is still warming, not "found nothing")
+       far            — the depth in force */
   CBZ.cctvFeedAudit = function () {
     return {
-      scopedRenders: auScoped,
-      fullRenders: auFull,
+      renders: auRenders,
+      inView: auInView,
+      seen: auInView && auSeen ? { x: auSeen.x, y: auSeen.y, z: auSeen.z, nx: auSeen.nx, nz: auSeen.nz } : null,
       lastHiddenCount: auHidden,
-      scoped: !!CBZ.CONFIG.CCTV_FEED_SCOPED,
       far: feedCam ? feedCam.far : 0,
       candidates: auCandidates,
       measured: auMeasured,

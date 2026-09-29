@@ -5688,7 +5688,10 @@
     // one-per-call latch so a car that clips SEVERAL bodies this frame still
     // fires exactly ONE hit-stop / impact voice / "catch" (never stack N).
     let juiced = false;
-    for (const p of CBZ.cityPeds) {
+    bodyGrids();
+    const near = bodiesNear(_pedBodyGrid, _pedCand, car.pos.x, car.pos.z, 6);   // near-miss ring: d2 < 34
+    for (let ni = 0; ni < near.length; ni++) {
+      const p = near[ni];
       if (p.dead || p.inCar) continue;
       const dx = p.pos.x - car.pos.x, dz = p.pos.z - car.pos.z;
       const _d2 = dx * dx + dz * dz;
@@ -5803,8 +5806,8 @@
     const _wcam = CBZ.camera && CBZ.camera.position;
     const _wdx = _wcam ? car.pos.x - _wcam.x : 0, _wdz = _wcam ? car.pos.z - _wcam.z : 0;
     if (CBZ.cityWildlife && CBZ.cityWildlifeCarHit &&
-        (!_wcam || _wdx * _wdx + _wdz * _wdz < 240 * 240)) {
-      const wl = CBZ.cityWildlife;
+        (!_wcam || _wdx * _wdx + _wdz * _wdz < WILD_SWEEP * WILD_SWEEP)) {
+      const wl = bodiesNear(wildGrid(), _wildCand, car.pos.x, car.pos.z, _wildReach);
       for (let wi = 0; wi < wl.length; wi++) {
         const an = wl[wi];
         if (!an || an.dead || an.ridden || !an.pos) continue;
@@ -6008,6 +6011,80 @@
     _carGrid.rebuild(CBZ.cityCars, _carVec);
   }
 
+  /* ---- BODIES NEAR A CAR (runOver + the brake-for-a-pedestrian scan) ------
+     Both used to walk the WHOLE roster per car per frame: runOver swept every
+     ped and all ~985 wild animals for every moving car within 240 m of the
+     camera, and every calm lane car swept every ped again to find one in its
+     lane. That is cars x (peds + animals) property reads a frame, for an
+     answer that only ever involves bodies within ~20 m. One spatial hash of
+     peds and one of animals per frame (built lazily on the first query of
+     the frame, so a call from the player-car step before this pass gets the
+     same fresh index), and each query visits only the cells its radius can
+     reach, padded by BODY_MARGIN for anything that moved since the rebuild.
+     Candidates come back IN ROSTER ORDER (insertion by the index stamped at
+     rebuild), so first-match/early-out scans and every side effect that
+     draws from the seeded rng fire in exactly the order the full scan did.
+     The per-candidate tests read LIVE positions, byte-identical to before. */
+  const BODY_CELL = 8, BODY_MARGIN = 3;
+  let _pedBodyGrid = null, _wildBodyGrid = null, _bodyStamp = -1;
+  const _pedCand = [], _wildCand = [], _laneCand = [];
+  function _bodyVec(o) { return o.pos; }
+  const _wildLive = [];
+  let _wildReach = 2.3;
+  let _wildStamp = -1;
+  function bodyGrids() {
+    const st = CBZ._matrixOwnStamp || 0;
+    if (st === _bodyStamp && _pedBodyGrid) return;
+    _bodyStamp = st;
+    if (!_pedBodyGrid) _pedBodyGrid = CBZ.makeGrid(BODY_CELL);
+    const peds = CBZ.cityPeds;
+    for (let i = 0; i < peds.length; i++) peds[i]._vgi = i;
+    _pedBodyGrid.rebuild(peds, _bodyVec);
+  }
+  // The wildlife index is built only on a frame that actually sweeps for
+  // animals, and only holds the ones a sweeping car can reach: runOver sweeps
+  // wildlife only for cars within WILD_SWEEP of the camera, so an animal
+  // further than that plus its reach can never be hit this frame.
+  const WILD_SWEEP = 240;
+  function wildGrid() {
+    const st = CBZ._matrixOwnStamp || 0;
+    if (st === _wildStamp && _wildBodyGrid) return _wildBodyGrid;
+    _wildStamp = st;
+    if (!_wildBodyGrid) _wildBodyGrid = CBZ.makeGrid(BODY_CELL);
+    _wildLive.length = 0;
+    const wl = CBZ.cityWildlife, cam = CBZ.camera && CBZ.camera.position;
+    let ms = 1;
+    if (wl) for (let i = 0; i < wl.length; i++) {
+      const an = wl[i]; if (!an || !an.pos) continue;
+      const sc = (an.species && an.species.scale) || 1; if (sc > ms) ms = sc;
+      if (cam) {
+        const dx = an.pos.x - cam.x, dz = an.pos.z - cam.z, R = WILD_SWEEP + 1.55 + sc * 0.75 + BODY_MARGIN;
+        if (dx * dx + dz * dz > R * R) continue;
+      }
+      an._vgi = i; _wildLive.push(an);
+    }
+    _wildReach = 1.55 + ms * 0.75;          // runOver's widest per-animal reach this frame
+    _wildBodyGrid.rebuild(_wildLive, _bodyVec);
+    return _wildBodyGrid;
+  }
+  // every body whose cell can hold a hit within `r` of (x,z), in roster order
+  function bodiesNear(grid, buf, x, z, r) {
+    buf.length = 0;
+    const C = Math.ceil((r + BODY_MARGIN) / BODY_CELL);
+    const gx = grid.cellIndex(x), gz = grid.cellIndex(z);
+    for (let cx = gx - C; cx <= gx + C; cx++) for (let cz = gz - C; cz <= gz + C; cz++) {
+      const cell = grid.bucket(cx, cz); if (!cell) continue;
+      for (let i = 0; i < cell.length; i++) {
+        const p = cell[i];
+        let at = buf.length;
+        buf.push(p);
+        while (at > 0 && buf[at - 1]._vgi > p._vgi) { buf[at] = buf[at - 1]; at--; }
+        buf[at] = p;
+      }
+    }
+    return buf;
+  }
+
   /* ---- TRAFFIC HEARS GUNFIRE ---------------------------------------------
      Before this, a firefight in the middle of an avenue was invisible to the
      cars on it: they queued politely at the red with rounds going past the
@@ -6067,6 +6144,7 @@
     const camx = CBZ.camera.position.x, camz = CBZ.camera.position.z;
     _vframe++;
     rebuildCarGrid();   // ONE rebuild per frame; carAhead queries it per car
+    bodyGrids();        // the ped index for the lane-brake scan and runOver (wildGrid builds on demand)
     wakeSlice(camx, camz);
     for (const c of CBZ.cityCars) {
       if (c._sleep || c._proxy) continue;
@@ -6402,8 +6480,12 @@
         const dangerGap = 2.5 + c.v * 0.22;
         let brake = 0;
         brakeAt = 1e9;                       // distance to the nearest body in lane
-        for (let i = 0; i < CBZ.cityPeds.length && brake < 1; i++) {
-          const p = CBZ.cityPeds[i]; if (p.dead || p.inCar) continue;
+        // candidates around the middle of the lane box (ahead 0.5..look, 2 m either side)
+        const midA = (0.5 + pedLookahead) * 0.5;
+        const lane = bodiesNear(_pedBodyGrid, _laneCand, c.pos.x + fwx * midA, c.pos.z + fwz * midA,
+          Math.sqrt((pedLookahead - midA) * (pedLookahead - midA) + 4));
+        for (let i = 0; i < lane.length && brake < 1; i++) {
+          const p = lane[i]; if (p.dead || p.inCar) continue;
           const dx = p.pos.x - c.pos.x, dz = p.pos.z - c.pos.z, ah = dx * fwx + dz * fwz;
           if (ah > 0.5 && ah < pedLookahead && Math.abs(dx * -fwz + dz * fwx) < 2.0) {
             brake = ah < dangerGap ? 1 : Math.max(brake, 0.5);

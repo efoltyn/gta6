@@ -117,24 +117,59 @@
   let pool = null; const dummies = { point: [], spot: [] };
   const _wp = new THREE.Vector3();
   const candidates = [];
-  function budgetPass(kind, Orig, budget) {
+  /* WHICH lamps get a budget slot is decided ONCE per frame, at always 97,
+     and WHETHER a slot is a real light is decided at the render call.
+
+     The rank is the old order-97 pass, unchanged: the nearest `budget` lights
+     that want to be on at that moment, before core/viewscope.js (999.9) hides
+     the groups behind the camera. Ranking at render time instead (after
+     viewscope) handed the slots of hidden near lamps to lamps kilometres
+     away, and a far lamp is not harmless: terrain is Lambert, lit per VERTEX,
+     so one lamp by a plate vertex brightens a triangle hundreds of metres
+     wide (the aerial horizon went pale, tools/speed.mjs look guard,
+     2026-09-29). At render a ranked lamp is real only if it is still drawn;
+     every other slot goes to a zero-intensity dummy, so the COUNT is pinned
+     no matter what was hidden after 97 (the reason the pin moved into the
+     render call). Before the first rank of a frame (the title loop, a
+     compile or an updater-driven render that runs before 97) the render
+     ranks for itself. */
+  const ranked = { point: new Set(), spot: new Set() };
+  let frameNo = 0, rankedFrame = -1;
+  function rankPass(kind, budget) {
     candidates.length = 0;
     const cam = CBZ.camera;
     for (const l of reg[kind]) {
       if (!l.parent && !l._cbzPinDummy) { reg[kind].delete(l); continue; }
-      if (l._cbzPinDummy) continue;
-      if (!wantsOn(l)) { l.layers.mask = 1; continue; }   // off lights: restore + skip
+      if (l._cbzPinDummy || !wantsOn(l)) continue;
       l.getWorldPosition(_wp);
       // `userData.pinFirst` (the player's own torch) always makes the cut: a
       // third-person camera can stand farther from it than from a searchlight
       candidates.push([l.userData.pinFirst ? -1 : _wp.distanceToSquared(cam.position), l]);
     }
     candidates.sort((a, b) => a[0] - b[0]);
+    const set = ranked[kind];
+    set.clear();
+    for (let i = 0; i < candidates.length && i < budget; i++) set.add(candidates[i][1]);
+    candidates.length = 0;
+  }
+  function budgets() {
+    return [Math.max(1, +CBZ.CONFIG.LIGHT_BUDGET_POINT || 16), Math.max(1, +CBZ.CONFIG.LIGHT_BUDGET_SPOT || 8)];
+  }
+  function rankNow() {
+    const b = budgets();
+    rankPass("point", b[0]);
+    rankPass("spot", b[1]);
+    rankedFrame = frameNo;
+  }
+  function budgetPass(kind, Orig, budget) {
+    const set = ranked[kind];
     let on = 0;
-    for (let i = 0; i < candidates.length; i++) {
-      const l = candidates[i][1];
-      if (i < budget) { l.layers.mask = 1; on++; }
-      else l.layers.mask = 0;                              // culled: shader never sees it
+    for (const l of reg[kind]) {
+      if (!l.parent && !l._cbzPinDummy) { reg[kind].delete(l); continue; }
+      if (l._cbzPinDummy) continue;
+      if (!wantsOn(l)) { l.layers.mask = 1; continue; }   // off lights: restore + skip
+      if (set.has(l) && on < budget) { l.layers.mask = 1; on++; }
+      else l.layers.mask = 0;                              // unranked: shader never sees it
     }
     const want = budget - on;                              // dummies to top up to the pin
     const list = dummies[kind];
@@ -149,26 +184,77 @@
     return on;
   }
 
+  function ensurePool() {
+    if (pool) return;
+    pool = new THREE.Group();
+    pool.name = "lightpin-pool";
+    pool.position.y = -4000;          // out of every playfield; intensity 0 anyway
+    CBZ.scene.add(pool);
+    // ONE-TIME sync, not a periodic one. The only lights neither hook can
+    // see are those already parented before this file ran (script order
+    // puts it early, but that is a load-order fact, not a guarantee). From
+    // here on every arrival comes through the add seam above, so this walk
+    // never runs again.
+    CBZ.scene.traverse(function (o) {
+      if (o._cbzPinDummy) return;
+      if (o.isPointLight) reg.point.add(o);
+      else if (o.isSpotLight) reg.spot.add(o);
+    });
+  }
+  function pinNow() {
+    if (!CBZ.CONFIG.LIGHT_COUNT_PIN || !CBZ.scene || !CBZ.camera) return;
+    ensurePool();
+    if (rankedFrame !== frameNo) rankNow();
+    const b = budgets();
+    budgetPass("point", OrigPoint, b[0]);
+    budgetPass("spot", OrigSpot, b[1]);
+  }
+  CBZ.lightPinNow = pinNow;
+  CBZ.lightPinApply = pinNow;   // core/fxwarm.js (city-load) calls this name before its out-of-frame compiles
+
+  /* THE PIN RUNS INSIDE renderer.render / renderer.compile, NOT AS AN
+     UPDATER (2026-09-28, tools/speed.mjs "new programs, why"). As an always
+     runner at order 97 it was a promise about a moment that had already
+     passed by the time anything drew:
+       - core/fxwarm.js's play-start renderer.compile runs at always 1.2, on
+         the first playing frame, BEFORE the first pin: it compiled every lit
+         material for all 41 unbudgeted point lights, programs no frame ever
+         used again (the first frame compiled 41-, 24- and 16-light copies).
+       - core/viewscope.js (always 999.9) and farcull hide/show whole groups
+         AFTER 97, taking their lights with them: the drive saw 9, 12, 13, 14,
+         15 and 21 lights, each a fresh copy of every lit program in view,
+         1-7 s per hitch.
+       - city/cctv.js renders its feed from an UPDATER, before 97 ran at all.
+     Pinning at the render call is the only place the count is actually
+     read. Only the game scene is pinned (thumbnail/mugshot scenes are not
+     ours). The pass walks a few dozen registered lights; cheap per render. */
+  function hookRenderer() {
+    const R = CBZ.renderer;
+    if (!R || R._cbzLightPin) return;
+    R._cbzLightPin = true;
+    const r0 = R.render;
+    R.render = function (scene) {
+      if (scene && scene === CBZ.scene) pinNow();
+      return r0.apply(this, arguments);
+    };
+    if (typeof R.compile === "function") {
+      const c0 = R.compile;
+      R.compile = function (scene) {
+        if (scene && scene === CBZ.scene) pinNow();
+        return c0.apply(this, arguments);
+      };
+    }
+  }
+  // first thing in every frame (and on the title loop), so the hook is in
+  // place before fxwarm's play-start compile and any updater-driven render
+  CBZ.onAlways(-100, function () { frameNo++; hookRenderer(); });
+  if (CBZ.onUpdate) CBZ.onUpdate(-100, hookRenderer);
+  // the frame's rank (see budgetPass): after the camera and the game's own
+  // light toggles, before viewscope's per-frame hides
   CBZ.onAlways(97, function () {
     if (!CBZ.CONFIG.LIGHT_COUNT_PIN || !CBZ.scene || !CBZ.camera) return;
-    if (!pool) {
-      pool = new THREE.Group();
-      pool.name = "lightpin-pool";
-      pool.position.y = -4000;          // out of every playfield; intensity 0 anyway
-      CBZ.scene.add(pool);
-      // ONE-TIME sync, not a periodic one. The only lights neither hook can
-      // see are those already parented before this file ran (script order
-      // puts it early, but that is a load-order fact, not a guarantee). From
-      // here on every arrival comes through the add seam above, so this walk
-      // never runs again.
-      CBZ.scene.traverse(function (o) {
-        if (o._cbzPinDummy) return;
-        if (o.isPointLight) reg.point.add(o);
-        else if (o.isSpotLight) reg.spot.add(o);
-      });
-    }
-    budgetPass("point", OrigPoint, Math.max(1, +CBZ.CONFIG.LIGHT_BUDGET_POINT || 16));
-    budgetPass("spot", OrigSpot, Math.max(1, +CBZ.CONFIG.LIGHT_BUDGET_SPOT || 8));
+    ensurePool();
+    rankNow();
   });
 
   // probe seam: live/culled/pinned counts for gates and perf probes

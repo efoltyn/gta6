@@ -547,18 +547,7 @@
     // the city bay ring. Any NON-bridge region force-holds land so a POI
     // can never be carved. All noise is CBZ.hash01 — byte-identical/seed.
     function sm(t) { return t * t * (3 - 2 * t); }
-    function noise2(x, z, cell, salt) {
-      if (!CBZ.hash01) return 0.5;
-      const gx = x / cell, gz = z / cell;
-      const x0 = Math.floor(gx), z0 = Math.floor(gz);
-      const fx = sm(gx - x0), fz = sm(gz - z0);
-      const h00 = CBZ.hash01(x0 * cell, z0 * cell, salt);
-      const h10 = CBZ.hash01((x0 + 1) * cell, z0 * cell, salt);
-      const h01 = CBZ.hash01(x0 * cell, (z0 + 1) * cell, salt);
-      const h11 = CBZ.hash01((x0 + 1) * cell, (z0 + 1) * cell, salt);
-      const a = h00 + (h10 - h00) * fx, b = h01 + (h11 - h01) * fx;
-      return a + (b - a) * fz;
-    }
+    const noise2 = CBZ.noise2 || function () { return 0.5; };   // core/seed.js
     // Signed distance inside a rounded continental frame. The old min-to-four-
     // edges field made the whole world a perfect square in orbital views even
     // after noise was added. A broad corner radius changes the land silhouette
@@ -595,11 +584,18 @@
       return Math.max(dx, dz);
     }
     function isLinkReg(r) { return !!(r && r.name && /bridge|causeway|link/i.test(r.name)); }
+    // The shore field asks this for every plate vertex and every coast-cache
+    // corner, so the bridge/causeway test (a regex on the name) is decided
+    // ONCE here instead of once per region per sample.
+    const solidRegs = regs.filter(function (r) { return !isLinkReg(r); });
     function inSolidRegion(x, z, m) {    // non-bridge regions hold their land
-      for (const r of regs) {
-        if (isLinkReg(r)) continue;
+      for (let i = 0; i < solidRegs.length; i++) {
+        const r = solidRegs[i];
         if (r.kind === "circle") {
-          if (Math.hypot(x - r.cx, z - r.cz) < r.r + (r.pad || 0) + m) return true;
+          const R = r.r + (r.pad || 0) + m, dx = x - r.cx, dz = z - r.cz;
+          // hypot >= max(|dx|,|dz|): outside the square means outside the circle
+          if (dx >= R || dx <= -R || dz >= R || dz <= -R) continue;
+          if (Math.hypot(dx, dz) < R) return true;
         } else if (x > r.minX - m && x < r.maxX + m && z > r.minZ - m && z < r.maxZ + m) return true;
       }
       return false;
