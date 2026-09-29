@@ -191,7 +191,7 @@
   };
   // Both fallbacks self-heal from the live airportAudit at build(), but they
   // ride the dial too so even the audit-lag window points at the MOVED field.
-  const AIM = { x: 170 + _WOFF.dx, z: -90 + _WOFF.dz };  // RWY-27 touchdown aim point (overwritten from the real audit)
+  const AIM = { x: 170 + _WOFF.dx, z: -220 + _WOFF.dz };  // RWY-27 touchdown aim point (overwritten from the real audit)
   let HOME = { minX: -900 + _WOFF.dx, maxX: 290 + _WOFF.dx, minZ: -280 + _WOFF.dz, maxZ: 40 + _WOFF.dz };
   let RUN_HEADING = -Math.PI / 2;            // RWY 27 = land west
 
