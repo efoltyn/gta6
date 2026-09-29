@@ -6,21 +6,21 @@
    Owner, with three photographs of real sally ports: "the green light and
    stupid red thing in front aren't exits — exits have an exit sign and look
    like this." They do. world/sallyport.js now builds the exit as a
-   building: a fenced concertina walkway into a vestibule, a sliding barred
-   grille on a physical Gate Key across the wall line, EXIT signs, a
-   crash-bar steel door out. Nothing glows.
+   building: a fenced concertina walkway into a vestibule, a steel inner
+   door on a physical Gate Key across the wall line (a barred slider until
+   2026-09-29), EXIT signs, an interlocked steel door out. Nothing glows.
 
    What stays here is the STATE the way out speaks, because it is read by
    systems the building does not own:
      CBZ.EXIT           the point systems/interactions.js wins at (3 m),
                         the compass, the minimap and the full map's icon.
                         It sits OUTSIDE, 3.2 m past the out door: through
-                        the grille, through the interlocked door, out.
+                        the inner door, through the interlocked door, out.
                         (world/corridors.js overwrites it with the port's
                         own number; this is the same point.)
      CBZ.exitSignal     the lamp language every refusal in the prison uses
                         (red denied / gold on pace / green open), written on
-                        whatever the building registers — the grille's
+                        whatever the building registers — the inner door's
                         reader lamp and the vestibule strips.
    PRISON_GATE_PACE: gold while the run clock is under your best escape
    (systems/runstats.js CBZ.runStatsPace). A cop inside 6 m sees red.
@@ -30,7 +30,7 @@
   const CBZ = window.CBZ;
   const { WORLD } = CBZ;
   const EX = WORLD.exit.x, EZ = WORLD.exit.z;
-  // the win point: through the grille, at the outer door
+  // the win point: through the inner door, at the outer door
   CBZ.EXIT = new THREE.Vector3(EX, 0, EZ + 10.2);
 
   if (CBZ.CONFIG.PRISON_GATE_PACE == null) CBZ.CONFIG.PRISON_GATE_PACE = true;

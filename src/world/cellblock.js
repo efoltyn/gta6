@@ -300,7 +300,11 @@
   const DOOR_W = 1.60;                  // the sliding leaf's clear opening
   const POCKET = DOOR_W + 0.30;         // the fixed grille the leaf hides behind
   const COL_T = 0.24;                   // barred-face collider thickness
-  const BAR = 0.09, BAR_P = 0.42;       // bar section / pitch (jail.js's pitch)
+  // THE BAR: the prison's one bar spec (world/corridorkit.js BARS): 25 mm
+  // round at 125 mm centres on flat straps. It was a 9 cm square stick at
+  // 42 cm (a head goes through 42 cm; no cell front in the world is that).
+  const KB = (CBZ.corridorKit && CBZ.corridorKit.BARS) || { r: 0.0125, pitch: 0.125, strap: 0.064, strapT: 0.016, strapEvery: 0.52 };
+  const LEAF_TOP = CH - 0.32;           // the leaf hangs from the locking-device housing above it
   const BACK_IN = 0.32;                 // how far a back-wall fitting's CENTRE sits
                                         // off the wall plane, so the unit lands flush
 
@@ -585,7 +589,7 @@
     g.translate(x, y + LIFT, z);
     list.push(g);
   }
-  function mergedMesh(list, color, dynamic) {
+  function mergedMesh(list, color, dynamic, cast) {
     if (!list.length) return null;
     const BGU = THREE.BufferGeometryUtils;
     let geo = null;
@@ -596,7 +600,7 @@
     if (geo) {
       if (geo !== list[0]) for (let i = 0; i < list.length; i++) list[i].dispose();
       obj = new THREE.Mesh(geo, CBZ.cmat(color));
-      obj.castShadow = false; obj.receiveShadow = true;
+      obj.castShadow = !!cast; obj.receiveShadow = true;
     } else {
       // degrade: no merge utility -> a group of boxes. Same look, more calls.
       obj = new THREE.Group();
@@ -617,12 +621,25 @@
     if (c.dx !== 0) pushBox(list, c.faceX + c.dx * off, y, c.faceZ + t, wo, hgt, wt);
     else pushBox(list, c.faceX + t, y, c.faceZ + c.dz * off, wt, hgt, wo);
   }
-  function barRun(list, c, t0, t1, pitch, off) {
+  // an upright round bar on the face frame (a cylinder needs no axis swap)
+  function faceBar(list, c, t, y0, y1, off) {
+    const g = new THREE.CylinderGeometry(KB.r, KB.r, y1 - y0, 8);
+    const x = c.dx !== 0 ? c.faceX + c.dx * off : c.faceX + t;
+    const z = c.dx !== 0 ? c.faceZ + t : c.faceZ + c.dz * off;
+    g.translate(x, (y0 + y1) / 2 + LIFT, z);
+    list.push(g);
+  }
+  /* A RUN OF BARS between t0 and t1, y0..y1: a channel rail top and bottom,
+     round bars at the kit's pitch, flat straps every half metre. */
+  function barRun(list, c, t0, t1, off, y0, y1) {
+    y0 = y0 || 0; y1 = y1 || CH;
     const len = t1 - t0, tc = (t0 + t1) / 2;
-    faceBox(list, c, tc, 0.17, off, len, 0.30, 0.20);            // bottom rail
-    faceBox(list, c, tc, CH - 0.17, off, len, 0.30, 0.20);       // top rail
-    for (let t = t0 + 0.24; t <= t1 - 0.20 + 1e-6; t += pitch)
-      faceBox(list, c, t, CH / 2, off, BAR, CH - 0.34, BAR);
+    faceBox(list, c, tc, y0 + 0.05, off, len, 0.10, 0.08);          // bottom channel
+    faceBox(list, c, tc, y1 - 0.05, off, len, 0.10, 0.08);          // top channel
+    const n = Math.max(1, Math.round(len / KB.pitch));
+    for (let k = 1; k < n; k++) faceBar(list, c, t0 + (k * len) / n, y0 + 0.1, y1 - 0.1, off);
+    const ns = Math.max(1, Math.round((y1 - y0 - 0.2) / KB.strapEvery));
+    for (let k = 1; k < ns; k++) faceBox(list, c, tc, y0 + 0.1 + (k * (y1 - y0 - 0.2)) / ns, off, len, KB.strap, KB.strapT);
   }
 
   /* SOFT GOODS. A mattress, a pillow and a blanket are not boxes: the same
@@ -716,14 +733,24 @@
     //      the hidden original purely as a raycast target.
     addBox(c.x, CH + RT / 2, c.z, c.hx * 2 + WT, RT, c.hz * 2 + WT, C_ROOF, { cast: false, blockLOS: true });
 
-    // ---- the FACE: fixed grille + a jamb + the sliding leaf's floor track.
+    // ---- the FACE: fixed grille + a jamb + the sliding leaf's track.
+    /* A SLIDING CELL DOOR HANGS FROM ITS LOCKING DEVICE. The leaf rolls on a
+       track inside a steel housing over the opening and the pocket (the box
+       the rack gear lives in), with a flush guide in the floor; it slides
+       across the face on the corridor side of the fixed grille and never
+       through anything. The leaf, the housing and the fixed grille all
+       cast: bars throw bar shadows. */
     const gA = c.flip ? [c.ob, c.half] : [-c.half, c.oa];        // the pocket
     const gB = c.flip ? [-c.half, c.oa] : [c.ob, c.half];        // the narrow side
-    barRun(g, c, gA[0], gA[1], BAR_P, 0);
-    if (gB[1] - gB[0] >= 0.7) barRun(g, c, gB[0], gB[1], BAR_P, 0);
+    barRun(g, c, gA[0], gA[1], 0);
+    if (gB[1] - gB[0] >= 0.7) barRun(g, c, gB[0], gB[1], 0);
     else faceBox(g, c, (gB[0] + gB[1]) / 2, CH / 2, 0, gB[1] - gB[0], CH, 0.22);   // jamb post
-    faceBox(g, c, 0, 0.045, 0.14, c.half * 2, 0.09, 0.30);        // floor track (sliding doors run on one)
-    mergedMesh(g, C_BAR, false);
+    for (const t of [gA[0], gA[1], gB[0], gB[1]]) faceBox(g, c, t, CH / 2, 0, 0.08, CH, 0.08);   // square-tube posts
+    faceBox(g, c, 0, 0.01, 0.13, c.half * 2, 0.02, 0.12);        // the flush floor guide
+    // the locking-device housing: over the opening AND the pocket the leaf rides into
+    const hA = Math.min(gA[0], c.oa), hB = Math.max(gA[1], c.ob);
+    faceBox(g, c, (hA + hB) / 2, LEAF_TOP + (CH - LEAF_TOP) / 2, 0.15, hB - hA, CH - LEAF_TOP, 0.2);
+    mergedMesh(g, C_BAR, false, true);
 
     // the fixed halves of the face are permanent walls; only the OPENING toggles
     faceSolid(c, gA[0], gA[1], true);
@@ -731,14 +758,20 @@
     c.doorCol = faceSolid(c, c.oa, c.ob, false);                  // pushed/spliced by setDoor
 
     // ---- the sliding leaf: ONE merged mesh, live (userData.dynamic) so the
-    //      static batcher and staticfreeze both leave it alone.
+    //      static batcher and staticfreeze both leave it alone. Channel
+    //      stiles, the bars, straps, and the lock box on the lock stile with
+    //      a keyway each side (the lock stile is the one that meets the jamb).
     const leaf = [];
     const lc = { dx: c.dx, dz: c.dz, faceX: 0, faceZ: 0 };
-    barRun(leaf, lc, -DOOR_W / 2, DOOR_W / 2, 0.36, 0);
-    faceBox(leaf, lc, -DOOR_W / 2 + 0.06, CH / 2, 0, 0.14, CH - 0.30, 0.16);   // stiles
-    faceBox(leaf, lc, DOOR_W / 2 - 0.06, CH / 2, 0, 0.14, CH - 0.30, 0.16);
-    faceBox(leaf, lc, DOOR_W / 2 - 0.30, 1.15, 0, 0.34, 0.16, 0.22);           // the pull handle
-    const leafMesh = mergedMesh(leaf, C_BAR, true);
+    barRun(leaf, lc, -DOOR_W / 2 + 0.07, DOOR_W / 2 - 0.07, 0, 0.03, LEAF_TOP);
+    faceBox(leaf, lc, -DOOR_W / 2 + 0.035, (0.03 + LEAF_TOP) / 2, 0, 0.07, LEAF_TOP - 0.03, 0.1);   // stiles
+    faceBox(leaf, lc, DOOR_W / 2 - 0.035, (0.03 + LEAF_TOP) / 2, 0, 0.07, LEAF_TOP - 0.03, 0.1);
+    const lockT = c.flip ? -DOOR_W / 2 + 0.12 : DOOR_W / 2 - 0.12;  // the stile that meets the jamb
+    faceBox(leaf, lc, lockT, 1.12, 0, 0.16, 0.34, 0.12);           // lock box
+    for (const o of [-0.065, 0.065]) faceBox(leaf, lc, lockT, 1.18, o, 0.03, 0.05, 0.012);   // keyways
+    for (const tt of [-DOOR_W / 2 + 0.2, DOOR_W / 2 - 0.2]) faceBox(leaf, lc, tt, LEAF_TOP + 0.08, 0, 0.06, 0.16, 0.05);  // roller hangers
+    const leafMesh = mergedMesh(leaf, C_BAR, true, true);
+    if (leafMesh) leafMesh.userData.doorLeaf = "bars";
     c.bars = leafMesh;
     const oc = (c.oa + c.ob) / 2;
     c.leafClosed = facePoint(c, oc, 0.13);

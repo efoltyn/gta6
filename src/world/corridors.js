@@ -6,8 +6,8 @@
    make escaping much cooler … alternate escape routes … I don't want too
    many keys." docs/plan/prison-corridors.md has the research; the short
    version: a real campus prison moves everyone along a main corridor cut
-   into sections by sliding barred grilles, with an interlock (two gates,
-   one at a time) wherever a section meets a secure zone; keys are ONE
+   into sections by cross-corridor steel doors (they were barred sliding
+   grilles until 2026-09-29), with an interlock (two doors, one at a time) wherever a section meets a secure zone; keys are ONE
    issued ring per post, and the perimeter is a restricted set.
 
    WHAT THIS LAYS DOWN — about 640 m of enclosed corridor, 4.5 m wide,
@@ -20,8 +20,8 @@
                  yard (x=-48), segregation (z=21.5), the kitchen (z=78),
                  visitation (z=115), central control (a stub at x=0), and
                  the two lower yard gates (z=84).
-     THE GATES   twenty-odd grilles: an INTERLOCK behind each of the four
-                 yard sally gates (card, then grille), one at every wing
+     THE DOORS   twenty-odd corridor doors: an INTERLOCK behind each of the
+                 four yard sally gates (card, then door), one at every wing
                  mouth, one every ~35 m along the spine. Every one of them
                  takes the CORRIDOR KEY — one ring, on the four movement
                  officers walking the spine (entities/guards.js) and on the
@@ -192,9 +192,12 @@
   for (const s of SEG) build(s);
 
   /* ==========================================================
-     3. THE GRILLES. `at` is the gate plane along the segment's axis; the
-        EXIT sign hangs on the approach side, reading toward the exit the
-        segment's `exit` points at.
+     3. THE CORRIDOR DOORS. `at` is the door plane along the segment's axis;
+        the EXIT sign hangs on the approach side, reading toward the exit
+        the segment's `exit` points at. Each was a barred slider on a motor
+        (owner, 2026-09-29: "every jail just has many, many sets of those
+        real doors"): now a block partition wall to wall with a steel pair
+        in it on the Corridor Key, swinging the way out (egress side).
      ========================================================== */
   const GRILLES = [
     ["spine-w-n", -45], ["spine-w-n", -8], ["spine-w-n", 32],
@@ -213,10 +216,12 @@
   for (const g of GRILLES) {
     const s = byId[g[0]], r = s.r, at = g[1];
     const along = s.axis === "z";
-    CK.grille({
-      id: "corridor-" + s.id + "-" + Math.round(at), label: "A corridor grille",
-      axis: along ? "x" : "z", a0: along ? r.x0 + 0.1 : r.z0 + 0.1, a1: along ? r.x1 - 0.1 : r.z1 - 0.1,
-      fixed: at, h: CH - 0.05, keys: KEY, lb: 5,
+    const ex = s.exit || 1;
+    CK.crossDoor({
+      id: "corridor-" + s.id + "-" + Math.round(at), label: "A corridor door",
+      axis: along ? "x" : "z", a0: along ? r.x0 : r.z0, a1: along ? r.x1 : r.z1,
+      fixed: at, t: 0.3, top: CH, head: 2.45, clear: 2.2, keys: KEY, lb: 5,
+      swing: along ? -ex : ex, bands: true, staffR: 3.2, autoShut: 5,
     });
     grilles++;
     // the sign: 1.2 m on the approach side, facing the man who walks toward the exit
@@ -251,7 +256,7 @@
   const UB = { x0: -44, x1: -27, z0: -108, z1: -76.5, h: 5.2 };
   // published so systems/prisonrest.js can roster Unit B's racks as a POCKET:
   // offered only to men already inside it (they spawn there, entities/npc.js),
-  // never to a man in the yard with corridor grilles between him and them
+  // never to a man in the yard with corridor doors between him and them
   CBZ.prisonUnitB = UB;
   CBZ.roomShell({ x0: UB.x0, x1: UB.x1, z0: UB.z0, z1: UB.z1, h: UB.h, wall: WALL, floor: null, skin: "panel",
     doors: [{ side: "S", center: -35.5, width: 3.0 }] });

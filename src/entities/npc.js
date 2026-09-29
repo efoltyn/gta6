@@ -382,8 +382,16 @@
           : !SCH.inBlock(gp.x, gp.z, -0.5));
         if (outside) {
           const route = n._muster.route;
-          const rx = route ? route.x : 0, rz = route ? route.z : -9.8;
+          let rx = route ? route.x : 0, rz = route ? route.z : -9.8;
           const gate = CBZ.door;
+          /* THE WING'S DOOR IS A SALLY PORT (world/door.js): a man in the
+             yard is aimed at the apron in front of its out door first, not
+             at a point behind two doors and a vestibule wall. */
+          const port = !route && gate && gate.outer ? gate.outer : null;
+          if (port && gp.z > port.z - 0.2 && Math.abs(gp.x - port.x) > 0.9) { rx = port.x; rz = port.z + 2.3; }
+          else if (port && gp.z < port.z - 0.2 && gp.z > gate.inner.z && Math.abs(gp.x - port.x) > 2.2) { rx = gp.x < port.x ? port.x - 3.4 : port.x + 3.4; rz = port.z + 2.3; }
+          // shut, he waits on the yard side of the out door, not behind it
+          if (port && !gate.open && !gate.blown) { rx = port.x; rz = port.z + 2.3; }
           if (gate && !gate.open && !gate.blown) {
             /* LOCKED OUT. The block racked shut with him still in the yard —
                which a prison securing itself does — and the route home runs

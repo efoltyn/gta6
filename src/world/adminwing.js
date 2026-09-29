@@ -302,10 +302,22 @@
     };
     pane((x0 + x1) / 2, z1, x1 - x0, 0.12);                 // front (barred)
     pane(x1, (z0 + z1) / 2, 0.12, z1 - z0);                 // east (barred)
-    for (let i = 0; i < 9; i++) addBox(x0 + 0.2 + i * 0.44, 1.35, z1, 0.08, 2.62, 0.08, 0x2a2f38, { cast: false });
-    for (let i = 0; i < 11; i++) addBox(x1, 1.35, z0 + 0.2 + i * 0.44, 0.08, 2.62, 0.08, 0x2a2f38, { cast: false });
-    addBox((x0 + x1) / 2, 2.72, z1, x1 - x0, 0.12, 0.12, 0x2a2f38, { cast: false });
-    addBox(x1, 2.72, (z0 + z1) / 2, 0.12, 0.12, z1 - z0, 0x2a2f38, { cast: false });
+    // the kit's bars (world/corridorkit.js BARS): 25 mm round at 125 mm on
+    // flat straps, channel rails, tube posts; one mesh, and it casts
+    const CKb = CBZ.corridorKit, B = CKb.BARS, BC = 0x2a2f38, BP = new CKb.Paint();
+    const run = function (along, f, a, b) {
+      const w = b - a, n = Math.max(1, Math.round(w / B.pitch));
+      const at = function (u) { return along ? [f, u] : [u, f]; };
+      for (let k = 1; k < n; k++) { const p = at(a + k * w / n); BP.cyl(p[0], ch / 2, p[1], B.r, ch - 0.2, BC, 8); }
+      const m = at((a + b) / 2);
+      const bx = function (y, hh, thin) { along ? BP.box(m[0], y, m[1], thin, hh, w, BC) : BP.box(m[0], y, m[1], w, hh, thin, BC); };
+      bx(0.05, 0.1, 0.06); bx(ch - 0.05, 0.1, 0.06);
+      for (let k = 1; k < 5; k++) bx(0.1 + k * (ch - 0.2) / 5, B.strap, B.strapT);
+      for (const u of [a, b]) { const p = at(u); BP.box(p[0], ch / 2, p[1], 0.08, ch, 0.08, BC); }
+    };
+    run(false, z1, x0, x1);
+    run(true, x1, z0, z1);
+    BP.mesh(ROOT, true);
     /* PROPERTY SHELVES, AND THEY WERE THE SAME LIE THE CAGES TOLD. This drew
        three 3.4 x 3.6 m cream planes 7 cm thick — one per level, sized to the
        WHOLE cage — and scattered twelve bags across them. Measured
@@ -1108,31 +1120,9 @@
       return slab;
     };
   }
-  /* A PAINTED STEEL LEAF with a narrow wired-glass vision panel at the lock
-     side: the staff door between the wing and administration. */
-  function steelLeaf(g, w, h, dir) {
-    if (!PD || !PD.Paint) return null;
-    const P = new PD.Paint(), C = 0x4f5d6b, xs = function (u) { return dir * u; };
-    const vx0 = w - 0.42, vx1 = w - 0.18, vy0 = 1.25, vy1 = 1.95;
-    P.box(xs(vx0 / 2), h / 2, 0, vx0, h, LEAF_T, C);                                    // hinge side
-    P.box(xs((vx1 + w) / 2), h / 2, 0, w - vx1, h, LEAF_T, C);                           // lock edge
-    P.box(xs((vx0 + vx1) / 2), vy0 / 2, 0, vx1 - vx0, vy0, LEAF_T, C);                   // under the light
-    P.box(xs((vx0 + vx1) / 2), (vy1 + h) / 2, 0, vx1 - vx0, h - vy1, LEAF_T, C);         // over it
-    for (const f of [-1, 1]) {
-      P.box(xs(w / 2), 0.15, f * (LEAF_T / 2 + 0.001), w - 0.05, 0.26, 0.002, 0xa7adb3);  // kick plate
-      P.box(xs((vx0 + vx1) / 2), vy0, f * 0.028, vx1 - vx0 + 0.04, 0.02, 0.008, 0x3a4550);   // glazing frame
-      P.box(xs((vx0 + vx1) / 2), vy1, f * 0.028, vx1 - vx0 + 0.04, 0.02, 0.008, 0x3a4550);
-      P.box(xs(vx0), (vy0 + vy1) / 2, f * 0.028, 0.02, vy1 - vy0, 0.008, 0x3a4550);
-      P.box(xs(vx1), (vy0 + vy1) / 2, f * 0.028, 0.02, vy1 - vy0, 0.008, 0x3a4550);
-      for (let k = 1; k < 5; k++) P.box(xs((vx0 + vx1) / 2), vy0 + k * (vy1 - vy0) / 5, f * 0.005, vx1 - vx0, 0.002, 0.002, 0x5a626b);   // the wire
-      for (let k = 1; k < 3; k++) P.box(xs(vx0 + k * (vx1 - vx0) / 3), (vy0 + vy1) / 2, f * 0.005, 0.002, vy1 - vy0, 0.002, 0x5a626b);
-    }
-    lever(P, xs(w - 0.075), 1.02, dir, 0xb9bfc4);
-    const slab = leafMesh(P, g);
-    glassPane(g, vx1 - vx0, vy1 - vy0, xs((vx0 + vx1) / 2), (vy0 + vy1) / 2);
-    return slab;
-  }
-
+  /* The staff door's leaf is THE prison's detention leaf now: it was
+     drawn here first and every barred door in the compound has been
+     replaced by it (world/corridorkit.js CBZ.corridorKit.detentionLeaf). */
   /* cfg { id, label, x0, x1, z, t (wall), h, pair, build, keys, pick, free,
            frame, lamp (a mesh, if the lock's LED lives off the leaf) } */
   function makeDoor(cfg) {
@@ -1204,23 +1194,10 @@
   const doors = [];
   // the staff door's card reader: on the WING face beside the frame, a
   // stainless back plate, the reader body, its read pad, and the LED
-  const readerLed = (function () {
-    const rx = SG.x0 - 0.3, ry = 1.2, rz = SG.z + (SG.t || 1) / 2;
-    const K2 = CBZ.prisonKit;
-    const plate = addBox(rx, ry, rz + 0.006, 0.1, 0.17, 0.012, 0xaeb7c0, { cast: false });
-    if (K2) K2.skinBox(plate, "galv", 0xb4bcc4);
-    addBox(rx, ry, rz + 0.027, 0.084, 0.145, 0.03, 0x1b1e22, { cast: false });
-    addBox(rx, ry - 0.02, rz + 0.0425, 0.06, 0.07, 0.002, 0x2c3138, { cast: false });
-    const led = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.006, 14).rotateX(HALF),
-      new THREE.MeshLambertMaterial({ color: 0xff3b3b, emissive: 0xff0000, emissiveIntensity: 1.0 }));
-    led.position.set(rx, ry + 0.045, rz + 0.045);
-    led.userData.dynamic = true;
-    ROOT.add(led);
-    return led;
-  })();
+  const readerLed = CK.cardReader(SG.x0 - 0.3, 1.2, SG.z + (SG.t || 1) / 2, 0, 1).led;
   const staffDoor = makeDoor({
     id: "prison-admin-staff", x0: SG.x0, x1: SG.x1, z: SG.z, t: SG.t || 1, h: SG.h || 2.6, keys: ["Keycard"],
-    label: "The staff door", pair: true, build: function () { return steelLeaf; }, lamp: readerLed,
+    label: "The staff door", pair: true, build: function () { return CK.detentionLeaf({ color: 0x4f5d6b }); }, lamp: readerLed,
   });
   const officeDoor = makeDoor({
     id: "prison-warden-office", x0: D_OFF.x0, x1: D_OFF.x1, z: CORR_Z, keys: null,

@@ -1,177 +1,186 @@
 /* ============================================================
-   world/door.js — the locked red yard door (opens with the keycard).
-   Exposes CBZ.door + openDoor()/closeDoor().
+   world/door.js — THE HOUSING UNIT'S SALLY PORT: the wing's only way in
+   and out, on the keycard. Exposes CBZ.door + openDoor()/closeDoor().
+
+   OWNER (2026-09-29): "I don't think there are doors that are so fancy,
+   like the one you have at the exit of the housing area. I don't think
+   those doors really exist. I think every jail just has many, many sets
+   of those real doors that are in the warden area."
+
+   He is right. This was a 5.7 x 3.4 m armoured slab with a picture window
+   that rose 4.35 m into the wall like a hangar door. A housing unit's
+   entrance is a SALLY PORT: "a security vestibule with two or more doors
+   ... to prevent continuous and unobstructed passage" — an inner door in
+   the unit wall, a small vestibule, an outer door, each a detention steel
+   door, released from control, with a card reader, an intercom and a
+   camera. That is what stands here now, built from the prison's one door
+   kit (world/corridorkit.js: the frame, the leaf, the reader, the infill).
+
+   WHAT DID NOT MOVE. The door is still ONE gameplay door: CBZ.door.open,
+   .t, .blown, .collider, .readerLight, .padPos, openDoor()/closeDoor(),
+   the breach row and the registry spec are the same contract every caller
+   (interactions, schedule, lockdown, state, compass, AI) already reads.
+   The control post runs this port in MOVEMENT mode — both leaves released
+   together for a mass movement, which is what the interlock override on a
+   real unit console is for — so the yard-time schedule, the evening muster
+   and the keycard all move the pair as one, exactly as they moved the slab.
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
   const { addBox } = CBZ;
-
-  /* A HOUSING-UNIT GATE, not a red wall that disappears into the ceiling.
-     The armory and Gang City doors both use the same readable grammar:
-     structural jambs stay with the wall; one leaf owns every piece of leaf
-     hardware; access control stays on the jamb. The old door violated all
-     three — its two "window slats" were scene-level boxes, so opening the
-     slab left them floating across the clear route, while its reader was
-     visually stranded on the leaf edge.
-
-     Keep the established vertical-slide mechanism and collider contract, but
-     make the moving object a coherent 3.35 m detention leaf. The opaque wall
-     above is its pocket, so the raised leaf has somewhere physical to go. */
-  const CLOSED_Y = 1.68;
-  const TRAVEL = 4.35;
-  const LEAF_W = 5.72, LEAF_H = 3.36;
-  const mesh = addBox(0, CLOSED_Y, -8, LEAF_W, LEAF_H, 0.34, 0x39424e, {
-    solid: true, blockLOS: true, emissive: 0x3a0d06, ei: 0.4,
-  });
-  mesh.userData.mover = true;
-
-  // The parent is the transparent physics/LOS pane. Every visible fitting is
-  // local to it, exactly like the armory's welded barred leaf, so one transform
-  // moves the whole door and bullet marks inherit the same coordinate space.
-  mesh.material.transparent = true;
-  mesh.material.opacity = 0.035;
-  mesh.material.depthWrite = false;
-  mesh.material.emissive.setHex(0x000000);
-  mesh.castShadow = false;
-  mesh.receiveShadow = false;
-  function leafBox(w, h, d, color, x, y, z, opts) {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), CBZ.cmat(color));
-    m.position.set(x || 0, y || 0, z || 0);
-    m.castShadow = !(opts && opts.cast === false);
-    m.receiveShadow = true;
-    mesh.add(m);
-    return m;
-  }
-  const STEEL = 0x3d4651, EDGE = 0x20262d, KICK = 0x66717d;
-  leafBox(5.28, 1.48, 0.28, STEEL, 0, -0.70, 0);             // lower armor plate
-  leafBox(5.28, 0.22, 0.30, EDGE, 0, 0.17, 0);              // vision sill
-  leafBox(5.28, 0.48, 0.28, STEEL, 0, 1.30, 0);             // upper armor band
-  leafBox(0.24, 0.92, 0.30, EDGE, 0, 0.70, 0);              // window divider
-  for (const x of [-1.36, 1.36]) {
-    const pane = leafBox(2.42, 0.72, 0.12, 0x9fd6e8, x, 0.69, -0.02, { cast: false });
-    pane.material.transparent = true;
-    pane.material.opacity = 0.38;
-    pane.material.depthWrite = false;
-    leafBox(2.52, 0.10, 0.31, EDGE, x, 0.30, 0);
-    leafBox(2.52, 0.10, 0.31, EDGE, x, 1.08, 0);
-  }
-  leafBox(0.28, 3.22, 0.34, EDGE, -2.67, 0, 0);              // perimeter stiles
-  leafBox(0.28, 3.22, 0.34, EDGE, 2.67, 0, 0);
-  leafBox(5.48, 0.22, 0.34, EDGE, 0, -1.55, 0);              // head / sill rails
-  leafBox(5.48, 0.22, 0.34, EDGE, 0, 1.55, 0);
-  leafBox(4.82, 0.08, 0.04, 0xb44534, 0, -1.10, -0.18, { cast: false }); // earned warning stripe
-  leafBox(1.58, 0.54, 0.04, KICK, 1.56, -0.55, -0.18, { cast: false });  // replaceable kick plate
-  leafBox(0.12, 0.54, 0.14, 0xaeb7c0, 2.31, 0.03, -0.23);                // pull handle
-
-  // Static structure: the 9 m wall now closes over a human-scale opening and
-  // visibly contains the lifted leaf. These are not colliders — actors in this
-  // game are 2-D AABBs, so a solid overhead lintel would invisibly seal the
-  // doorway — but the masonry and header still block sight.
-  const WALL = CBZ.COL && CBZ.COL.WALL != null ? CBZ.COL.WALL : 0x9aa0a8;
-  addBox(0, 6.38, -8, 6.35, 5.24, 0.72, WALL, { cast: false, blockLOS: true });
-  addBox(-3.10, 1.78, -8, 0.34, 3.56, 0.72, EDGE, { cast: false });
-  addBox(3.10, 1.78, -8, 0.34, 3.56, 0.72, EDGE, { cast: false });
-  addBox(0, 3.50, -8, 6.54, 0.34, 0.78, EDGE, { cast: false });
-  addBox(-2.78, 5.70, -7.60, 0.10, 4.00, 0.12, KICK, { cast: false });
-  addBox(2.78, 5.70, -7.60, 0.10, 4.00, 0.12, KICK, { cast: false });
-
-  // Access control on the housing-side wall beside the opening: a real
-  // proximity reader. It was a 0.48 x 0.78 black slab with an 18 cm square
-  // lamp box on its face that beat orange whenever you stood near it (the
-  // "black cube with an orange block stuck on it"). Now a stainless back
-  // plate, a slim dark reader body with its read pad, and a 24 mm round LED
-  // in it. The LED keeps its OWN material: systems/interactions.js beats it
-  // amber on a refusal and this file turns it green on open.
-  const RX = 3.52, RY = 1.2, RF = -8.5;              // wall face (housing side)
+  const CK = CBZ.corridorKit;
   const K = CBZ.prisonKit || null;
-  const plate = addBox(RX, RY, RF - 0.006, 0.1, 0.17, 0.012, 0xaeb7c0, { cast: false });
-  if (K) K.skinBox(plate, "galv", 0xb4bcc4);
-  const reader = addBox(RX, RY, RF - 0.027, 0.084, 0.145, 0.03, 0x1b1e22, { cast: false });
-  if (K) reader.material = K.skin("steel", 0x1b1e22, 0.5);
-  reader.userData.dynamic = true;
-  addBox(RX, RY - 0.02, RF - 0.0425, 0.06, 0.07, 0.002, 0x2c3138, { cast: false });   // read pad
-  const readerLight = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.006, 14),
-    new THREE.MeshLambertMaterial({ color: 0xff3b3b, emissive: 0xff0000, emissiveIntensity: 1.0 }));
-  readerLight.rotation.x = Math.PI / 2;
-  readerLight.position.set(RX, RY + 0.045, RF - 0.045);
-  readerLight.userData.dynamic = true;
-  (CBZ.prisonRoot || CBZ.scene).add(readerLight);
+  if (!CK) return;
+
+  const WALL = CBZ.COL && CBZ.COL.WALL != null ? CBZ.COL.WALL : 0x9aa0a8;
+  const WZ = -8, WT = 1.0, WTOP = 9;          // the unit's south wall line, its thickness and height
+  const GAP = 3;                               // the wall's opening, x[-3,3] (world/yard.js, cellblock.js)
+  const DC = 1.2, DH = 2.7;                    // the door's rough opening x[-1.2,1.2], head height
+  const VX = 2.5, VT = 0.3, VZ1 = -3.75, VH = 3.3;   // the vestibule: x[-2.5,2.5], out wall at z -3.75
+  const FRAME = 0x39424e, LEAF = 0x4f5d6b;
+
+  // ---- the inner door in the unit wall: block either side of a steel pair
+  CK.infill({ axis: "x", a0: -GAP, a1: GAP, c0: -DC, c1: DC, fixed: WZ, t: WT, top: WTOP, head: DH,
+    color: WALL, skin: "panel" });
+  const inner = CK.doorSet({ axis: "x", a0: -DC, a1: DC, fixed: WZ, t: WT, h: DH, open: 1, hinge: 0,
+    frame: FRAME, build: CK.detentionLeaf({ color: LEAF }) });
+
+  // ---- the vestibule: two side walls, the out wall, a roof, a light
+  const vz0 = WZ + WT / 2, vzc = (vz0 + VZ1 + VT / 2) / 2, vlen = VZ1 + VT / 2 - vz0;
+  for (const s of [-1, 1]) {
+    const m = addBox(s * (VX - VT / 2), VH / 2, vzc, VT, VH, vlen, WALL, { solid: true, blockLOS: true });
+    if (m.userData.collider) m.userData.collider.noBreach = true;
+    if (K) K.skinBox(m, "panel", WALL);
+  }
+  CK.infill({ axis: "x", a0: -VX, a1: VX, c0: -DC, c1: DC, fixed: VZ1, t: VT, top: VH, head: DH,
+    color: WALL, skin: "panel" });
+  const outer = CK.doorSet({ axis: "x", a0: -DC, a1: DC, fixed: VZ1, t: VT, h: DH, open: 1, hinge: 0,
+    frame: FRAME, build: CK.detentionLeaf({ color: LEAF }) });
+  {
+    const roof = addBox(0, VH + 0.1, vzc, 2 * VX + 0.2, 0.2, vlen + 0.2, 0x8f959c, { cast: true, blockLOS: true });
+    if (K) K.skinBox(roof, "concrete", 0x9ea3a8);
+    if (K) {
+      const fl = new THREE.BoxGeometry(2 * (VX - VT), 0.02, vlen);
+      K.stat(fl, K.skin("polished", 0x9a9fa6), 0, 0.01, vzc, { uv: 2, cast: false });
+    }
+    CK.strip(0, VH - 0.02, vzc, 2.2, "x");
+    // the cameras: a dome in the vestibule ceiling, one on the out wall's yard face
+    for (const c of [{ x: 1.5, y: VH - 0.02, z: vzc }, { x: -1.9, y: DH + 0.55, z: VZ1 + VT / 2 + 0.11 }]) {
+      const dome = new THREE.Mesh(new THREE.SphereGeometry(0.09, 14, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2),
+        K ? K.skin("glass", 0x202830) : new THREE.MeshLambertMaterial({ color: 0x202830 }));
+      dome.position.set(c.x, c.y, c.z);
+      (CBZ.prisonRoot || CBZ.scene).add(dome);
+      addBox(c.x, c.y + 0.02, c.z, 0.22, 0.04, 0.22, 0x3a4048, { cast: false });
+    }
+  }
+
+  // ---- access control: the card reader beside the inner door on the unit
+  // side (where a man in the block holds his card), and its twin on the
+  // yard face of the out door. ONE LED material, because
+  // systems/interactions.js beats it amber on a refusal and this file turns
+  // it green on open. An intercom to control beside each.
+  const RX = DC + 0.075 + 0.28;
+  const rIn = CK.cardReader(RX, 1.2, WZ - WT / 2, 0, -1);
+  const rOut = CK.cardReader(RX, 1.2, VZ1 + VT / 2, 0, 1);
+  rOut.led.material = rIn.led.material;
+  CK.intercom(-RX, 1.45, WZ - WT / 2, 0, -1);
+  CK.intercom(-RX, 1.45, VZ1 + VT / 2, 0, 1);
+  CK.intercom(VX - VT, 1.45, (vz0 + VZ1) / 2, -1, 0);
+
+  // ---- the gameplay door
+  const pivots = inner.leaves.concat(outer.leaves).map(function (L) { return L.pivot; });
+  const slabs = inner.leaves.concat(outer.leaves).map(function (L) { return L.slab; }).filter(Boolean);
+  const collider = { minX: -DC, maxX: DC, minZ: WZ - WT / 2, maxZ: WZ + WT / 2, ref: slabs[0] || pivots[0] };
+  const outCollider = { minX: -DC, maxX: DC, minZ: VZ1 - VT / 2, maxZ: VZ1 + VT / 2, ref: slabs[2] || pivots[2] };
+  CBZ.colliders.push(collider, outCollider);
+  if (CBZ.losBlockers) for (const s of slabs) CBZ.losBlockers.push(s);
+  if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+  function losTo(on) {
+    const L = CBZ.losBlockers;
+    if (!L) return;
+    for (const s of slabs) {
+      const i = L.indexOf(s);
+      if (on && i < 0) L.push(s);
+      else if (!on && i >= 0) L.splice(i, 1);
+    }
+  }
 
   const door = {
-    mesh, reader, readerLight,
-    collider: mesh.userData.collider,
-    open: false, closedY: CLOSED_Y, travel: TRAVEL, t: 0,
-    readerPos: { x: RX, y: RY + 0.045, z: RF - 0.045 },
-    // the read pad's face (0.002 thick at RF - 0.0425) and the way it faces:
-    // where a card is held to it (systems/interactions.js, CBZ.verbs.touch)
-    padPos: { x: RX, y: RY - 0.02, z: RF - 0.0435 },
-    padN: { x: 0, y: 0, z: -1 },
+    mesh: slabs[0] || pivots[0], pivots: pivots, slabs: slabs,
+    reader: rIn.body, readerLight: rIn.led,
+    collider: collider, outCollider: outCollider,
+    open: false, t: 0,
+    // the leaves SWING now; `drive(t)` is the one thing that moves them
+    // (systems/interactions.js ramps t at its authored 1.6 rate). closedY /
+    // travel stay for old callers that still read them: a swing has no lift.
+    closedY: 0, travel: 0,
+    drive: function (t) { inner.set(t); outer.set(t); },
+    readerPos: rIn.readerPos,
+    // the read pad's face and the way it faces: where a card is held to it
+    // (systems/interactions.js, CBZ.verbs.touch)
+    padPos: rIn.padPos,
+    padN: rIn.padN,
+    // the port's two faces, for anything that asks where the doorway is
+    inner: { x: 0, z: WZ }, outer: { x: 0, z: VZ1 },
   };
-
   CBZ.door = door;
 
-  /* closeDoor(soft) — `soft` is the ONE addition: with it, the collider, the
-     reader lamp and the open flag change on this frame exactly as before, but
-     the leaf is left where it is for systems/interactions.js's ramp to lower
-     at the authored 1.6 rate. Callers that pass nothing (systems/lockdown.js's
-     slam, systems/state.js's reset, the storyboards) get the historic
-     teleport, byte for byte — a lockdown SHOULD snap and a reset must not
-     animate behind the fade. */
+  function colSet(on) {
+    for (const c of [collider, outCollider]) {
+      const i = CBZ.colliders.indexOf(c);
+      if (on && i < 0) CBZ.colliders.push(c);
+      else if (!on && i >= 0) CBZ.colliders.splice(i, 1);
+    }
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+  }
+
+  /* closeDoor(soft) — with `soft`, the colliders, the reader lamp and the
+     open flag change on this frame but the leaves are left where they are
+     for systems/interactions.js's ramp to swing shut at the authored 1.6
+     rate. Callers that pass nothing (systems/lockdown.js's slam,
+     systems/state.js's reset, the storyboards) snap the pair shut — a
+     lockdown SHOULD slam and a reset must not animate behind the fade. */
   CBZ.closeDoor = function (soft) {
+    if (door.blown) return;
     door.open = false;
-    if (!soft) { door.t = 0; door.mesh.position.y = door.closedY; }
+    if (!soft) { door.t = 0; door.drive(0); }
     door.readerLight.material.color.setHex(0xff3b3b);
     door.readerLight.material.emissive.setHex(0xff0000);
-    if (CBZ.colliders.indexOf(door.collider) === -1) CBZ.colliders.push(door.collider);
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    colSet(true);
+    losTo(true);
   };
 
   CBZ.openDoor = function () {
     if (door.open) return;
     door.open = true;
-    const i = CBZ.colliders.indexOf(door.collider);
-    if (i >= 0) CBZ.colliders.splice(i, 1);
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    colSet(false);
+    losTo(false);
     door.readerLight.material.color.setHex(0x39ff88);     // reader turns green
     door.readerLight.material.emissive.setHex(0x14c258);
     if (CBZ.sfx) CBZ.sfx("door_open");
   };
 
   /* ---- A SECOND WAY THROUGH (systems/breach.js) ---------------------------
-     THE KEYCARD STORY, doctrine LAW 1: the owner ran for the keycard hundreds
-     of times because it opened a door to a bigger room. This door is the one
-     the whole escape game is built around — and until now it had exactly ONE
-     answer. A breaching charge is a second answer with a different PRICE:
-     the keycard is quiet and needs a plan; 5 lb of C4 on the reader is loud,
-     costs a charge you had to steal from the armory, and brings every guard
-     in the block. That is not a shortcut, it is a different game, and it is
-     the gun-room grammar chained — the RPG and the C4 are both ON the armory
-     wall (world/gunroom.js), so the door you cannot open is the reason to go
-     get the thing that opens it.
-
-     5 lb is not chosen: it is the doctrinal row for a hole one man can move
-     through (FM 90-10-1 app.M). Declaring the requirement in POUNDS rather
-     than as a boolean is the whole point of the shared table — the bank vault
-     next door states its price the same way, in the same unit.
-
-     One line of declaration; this file learns nothing about explosives, and
-     the charge learns nothing about prisons. */
+     THE KEYCARD STORY, doctrine LAW 1: this door is the one the whole escape
+     game is built around, and a breaching charge is a second answer with a
+     different PRICE: the keycard is quiet and needs a plan; 5 lb of C4 on the
+     reader is loud, costs a charge you had to steal from the armory, and
+     brings every guard in the block. 5 lb is the doctrinal row for a hole
+     one man can move through (FM 90-10-1 app.M). The charge takes BOTH
+     leaves of the pair it is set on, and the out door with them. */
   if (CBZ.registerBreachTarget) {
     CBZ.registerBreachTarget({
       id: "prison-yard-door",
       lb: 5,
-      reach: 3.0,                                   // stuck anywhere on a 6 m slab
-      at: function () { return { x: 0, y: 2.0, z: -8 }; },
+      reach: 3.0,
+      at: function () { return { x: 0, y: 1.4, z: WZ }; },
       done: function () { return !!door.open; },    // already blown/opened: not a target
       defeat: function () {
         CBZ.openDoor();
-        // the door does not politely slide — it is GONE. The blast owns the
-        // picture; this just makes sure the slab reads as destroyed and can
-        // never be "closed" back over the hole by a later lockdown.
         door.blown = true;
-        if (door.mesh) door.mesh.visible = false;
-        if (CBZ.losBlockers) { const li = CBZ.losBlockers.indexOf(door.mesh); if (li >= 0) CBZ.losBlockers.splice(li, 1); }
+        for (const p of pivots) p.visible = false;
+        losTo(false);
         if (CBZ.addHeat) CBZ.addHeat(60);           // every screw in the block heard that
         if (CBZ.guards) for (const gd of CBZ.guards) { gd.alert = 1; gd.hunt = Math.max(gd.hunt || 0, 6); }
         if (CBZ.jailTell) CBZ.jailTell.hint("THE DOOR IS GONE", 2.4);
@@ -179,24 +188,24 @@
       },
     });
   }
-  // a blown door stays blown for the run — closeDoor must not resurrect it
-  const _close = CBZ.closeDoor;
-  CBZ.closeDoor = function () {
-    if (door.blown) return;
-    return _close.apply(this, arguments);
+  // A NEW RUN HANGS THE PAIR AGAIN. closeDoor() refuses a blown door (a
+  // lockdown must not resurrect it mid-run), so a blown port used to stay a
+  // hole in every run after it; systems/state.js's reset calls this instead.
+  door.reset = function () {
+    door.blown = false;
+    for (const p of pivots) p.visible = true;
+    CBZ.closeDoor();
   };
 
   /* ---- AND A WAY TO SHUT IT (systems/interactions.js's CBZ.prisonDoors) ----
      One declaration into the shared registry; the tap path and the polled [E]
-     both end in the set() below, so this file still owns the only code that
-     moves the leaf. The credential is `hasKey` — the exact condition
-     interactions.js's approach-open tests — because a door you could not have
-     opened is not a door you may close. `autoR` is 4 m: that open test is
-     `ddx*ddx + ddz*ddz < 16` on the same point. */
+     both end in the set() below. The credential is `hasKey` — the exact
+     condition interactions.js's approach-open tests. `autoR` is 4 m: that
+     open test is `ddx*ddx + ddz*ddz < 16` on the same point. */
   (CBZ._prisonDoorSpecs || (CBZ._prisonDoorSpecs = [])).push({
-    id: "prison-yard-door", label: "the yard checkpoint", autoR: 4.0,
-    at: function () { return { x: 0, y: 1.8, z: -8 }; },
-    pick: function () { return [mesh]; },
+    id: "prison-yard-door", label: "the unit door", autoR: 4.0,
+    at: function () { return { x: 0, y: 1.6, z: WZ }; },
+    pick: function () { return pivots; },
     col: function () { return door.collider; },
     isOpen: function () { return !!door.open; },
     permanent: function () { return !!door.blown; },
@@ -205,11 +214,7 @@
     set: function (v) {
       if (v) { CBZ.openDoor(); return !!door.open; }
       CBZ.closeDoor(true);
-      // the existing 85 dB door_close cue, from the leaf's own coordinates —
-      // CBZ.openDoor's counterpart cue is CBZ.sfx because it fires at arm's
-      // length; a door you shut is likewise yours, but the slab is 5.7 m of
-      // steel across the yard from anyone else, so it speaks from where it is.
-      if (CBZ.worldSfx) CBZ.worldSfx("door_close", 0, -8, { ref: 12 });
+      if (CBZ.worldSfx) CBZ.worldSfx("door_close", 0, WZ, { ref: 12 });
       return !door.open;
     },
   });
