@@ -145,6 +145,7 @@
     const tex = new THREE.CanvasTexture(cv);
     tex.encoding = THREE.sRGBEncoding;
     tex.anisotropy = 4;
+    if (CBZ.freeCanvasAfterUpload) CBZ.freeCanvasAfterUpload(tex);   // painted once: the canvas goes once uploaded
     const shape = new THREE.Shape();
     for (let i = 0; i <= 192; i++) {
       const p = siteEdge(i / 192 * Math.PI * 2, 0);

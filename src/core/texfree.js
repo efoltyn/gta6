@@ -32,7 +32,7 @@
   // (entities/pedinstance.js paints a ped's skin into its atlas page from them)
   const STABLE_S = 30, MIN_PX = 512 * 512, SWEEP_S = 3;
   const tracked = [];                 // WeakRef<CanvasTexture>
-  const A = { tracked: 0, freed: 0, freedMB: 0, repaintedAfterFree: 0, names: [] };
+  const A = { tracked: 0, freed: 0, freedMB: 0, repaintedAfterFree: 0, names: [], lazyPainted: 0, lazyReleased: 0 };
 
   // every CanvasTexture made from here on is watched (a subclass: instanceof
   // THREE.CanvasTexture and the isCanvasTexture flag hold as before)
@@ -91,5 +91,63 @@
     return t;
   };
   setInterval(sweep, SWEEP_S * 1000);
-  CBZ.texFreeAudit = function () { sweep(); return { tracked: tracked.length, created: A.tracked, freed: A.freed, freedMB: +A.freedMB.toFixed(1), repaintedAfterFree: A.repaintedAfterFree, sample: A.names.slice() }; };
+
+  /* ---- PAINTED WHEN FIRST DRAWN, GIVEN BACK ONCE UPLOADED ------------------
+     CBZ.lazyCanvasTexture(w, h, paint[, opts]) returns a CanvasTexture whose
+     canvas does not exist until three first reads texture.image, which it
+     does only to upload it: the first frame the texture is actually drawn.
+     paint(ctx, canvas) runs then, synchronously, so the upload carries the
+     full picture (nothing pops). After the upload the canvas is dropped
+     again; if three ever needs the pixels back (a lost context, a re-upload)
+     the same paint runs again. A sign on a shop across the continent, a paper
+     on a desk in a closed room: no canvas at all until someone sees it.
+     opts.keep: keep the canvas after upload (a texture read as a SOURCE by
+     other code). The painter must be pure: same picture every call. */
+  CBZ.lazyCanvasTexture = function (w, h, paint, opts) {
+    opts = opts || {};
+    const t = new Orig(undefined);          // not Watched: this one frees itself
+    let cv = null;
+    Object.defineProperty(t, "image", {
+      configurable: true, enumerable: true,
+      get: function () {
+        if (!cv) {
+          cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+          try { paint(cv.getContext("2d"), cv); } catch (e) { console.error("[lazy canvas]", t.name || "", e); }
+          A.lazyPainted++;
+        }
+        return cv;
+      },
+      set: function (v) { if (v && typeof v.getContext === "function") cv = v; },
+    });
+    t._cbzLazy = true;
+    // a reader that copied the pixels out (entities/pedinstance.js's atlas)
+    // hands the canvas back; the next read paints it again
+    t._cbzRelease = function () { if (cv) { cv = null; A.lazyReleased++; } };
+    if (opts.name) t.name = opts.name;
+    if (opts.eager) void t.image;             // painted now (an idle-time painter), still given back after use
+    if (CFG.TEX_FREE !== false && !opts.keep) {
+      t.onUpdate = function () { cv = null; A.lazyReleased++; };
+    }
+    return t;                                 // (CanvasTexture's constructor flagged it for upload)
+  };
+  /* A canvas texture painted once, in place, at build time (a painter that
+     draws in many calls): give its canvas back right after the upload
+     instead of 30 s later. It cannot be repainted (a lost context reloads,
+     as for freed arrays). */
+  CBZ.freeCanvasAfterUpload = function (t) {
+    if (!t || CFG.TEX_FREE === false) return t;
+    const prev = t.onUpdate;
+    t.onUpdate = function (tex) {
+      if (prev) prev.call(this, tex);
+      const c = tex.image;
+      if (!c || typeof c.getContext !== "function" || c.isConnected || tex._cbzFreed) return;
+      if (c._cbzTexCount && c._cbzTexCount > 1) return;
+      const mb = c.width * c.height * 4 / 1048576;
+      c.width = 1; c.height = 1;
+      tex._cbzFreed = true; A.freed++; A.freedMB += mb;
+      CBZ.freedStaticArrays = true;
+    };
+    return t;
+  };
+  CBZ.texFreeAudit = function () { sweep(); return { tracked: tracked.length, created: A.tracked, freed: A.freed, freedMB: +A.freedMB.toFixed(1), lazyPainted: A.lazyPainted, lazyReleased: A.lazyReleased, repaintedAfterFree: A.repaintedAfterFree, sample: A.names.slice() }; };
 })();

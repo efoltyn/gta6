@@ -1252,6 +1252,36 @@
     if (PAINTED[kind] !== undefined) return PAINTED[kind];
     PAINTED[kind] = null;
     const N = kind === "helipad" ? 1024 : 512;
+    /* PAINTED ON FIRST SIGHT (core/texfree.js): the estates are far from
+       downtown and mostly parked, so their skins (7 MB of canvas) are painted
+       the first frame one is drawn and handed back after the upload. The
+       painters are deterministic, so a re-upload paints the same picture. */
+    if (CBZ.lazyCanvasTexture && PAINT[kind] && mkCanvas(1)) {
+      try {
+        const aniso = (function () { try { return Math.min(8, CBZ.renderer.capabilities.getMaxAnisotropy()); } catch (e) { return 4; } })();
+        const map = CBZ.lazyCanvasTexture(N, N, function (ctx) {
+          const h = mkCanvas(N); PAINT[kind](ctx, h.getContext("2d"), N); h.width = 1; h.height = 1;
+        }, { name: "estate-" + kind });
+        map.wrapS = map.wrapT = kind === "helipad" ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
+        map.anisotropy = aniso;
+        if (THREE.sRGBEncoding) map.encoding = THREE.sRGBEncoding;
+        const wantN = kind !== "helipad" && !!(CBZ.pbrMaterialsOn && CBZ.pbrMaterialsOn());
+        let normal = null;
+        if (wantN) {
+          normal = CBZ.lazyCanvasTexture(N, N, function (ctx) {
+            const c = mkCanvas(N), h = mkCanvas(N);
+            PAINT[kind](c.getContext("2d"), h.getContext("2d"), N);
+            const nc = heightToNormal(h, kind === "gravel" ? 3.0 : 4.0);
+            if (nc) ctx.drawImage(nc, 0, 0);
+            c.width = h.width = 1; if (nc) nc.width = 1;
+          }, { name: "estate-" + kind + "-n" });
+          normal.wrapS = normal.wrapT = map.wrapS;
+          normal.anisotropy = aniso;
+        }
+        PAINTED[kind] = { map: map, normal: normal };
+      } catch (e) { PAINTED[kind] = null; }
+      return PAINTED[kind];
+    }
     const cc = mkCanvas(N), hc = mkCanvas(N);
     if (!cc || !hc || !PAINT[kind]) return null;
     try {

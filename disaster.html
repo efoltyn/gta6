@@ -392,7 +392,7 @@ document.body.appendChild(b);}}catch(e){}})();
      offline, deterministically, and inside the headless screenshot harness).
      (The r164 IIFE spike and its compat shim were deleted 2026-09-29: never
      loaded, recoverable from git history if a migration is ever attempted.) -->
-<script src="src/vendor/three.r128.min.js?v=w09290242x"></script>
+<script src="src/vendor/three.r128.min.js?v=pf0930a"></script>
 <!-- real frustum culling for InstancedMesh pools (every camera, shadow pass included); must precede every InstancedMesh -->
 <script src="src/core/instcull.js?v=w09290242x"></script>
 <!-- Slayvin flat-mirror reflective water (ported to r128 as THREE.WaterReflect;
@@ -437,13 +437,13 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/config.js?v=af0929m"></script>
 <!-- CITY SLICES (?slice=name|x,z,r): one piece of Gang City booted as its own world.
      Parses the URL only; with no slice every helper answers "keep". -->
-<script src="src/core/texfree.js?v=phonefit1"></script>
-<script src="src/core/drawcheck.js?v=phonefit1"></script>
-<script src="src/core/bakecache.js?v=phonefit1"></script>
+<script src="src/core/texfree.js?v=pf0930a"></script>
+<script src="src/core/drawcheck.js?v=pf0930a"></script>
+<script src="src/core/bakecache.js?v=pf0930a"></script>
 <script src="src/core/rectgrid.js?v=phonefit1"></script>
-<script src="src/core/slice.js?v=slice0929b"></script>
+<script src="src/core/slice.js?v=pf0930a"></script>
 <!-- GANG CITY STREAMS: the live city is a slice that follows the player (?stream=0 = whole city). -->
-<script src="src/core/citystream.js?v=slice0929b"></script>
+<script src="src/core/citystream.js?v=pf0930a"></script>
 <!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
      Turns "is this the city?" into "may I vault / may I blow up here?", so the
      prison, gun game and the disaster island reuse Gang City's engine instead
@@ -513,7 +513,7 @@ document.body.appendChild(b);}}catch(e){}})();
      has to precede its first consumer — world/materials.js. -->
 <script src="src/world/textures_surface.js?v=slice0929b"></script>
 <script src="src/world/materials.js?v=pbr1"></script>
-<script src="src/world/fuel_station.js?v=fuel1"></script>
+<script src="src/world/fuel_station.js?v=pf0930a"></script>
 <script src="src/world/prisonkit.js?v=tow929b"></script>
 <!-- THE LADDER, DRAWN (world/ladderkit.js): stiles, rungs and a cage built
      off the same numbers systems/climb.js climbs, + railed landings. Every
@@ -563,7 +563,7 @@ document.body.appendChild(b);}}catch(e){}})();
        every body's hand (character.js builds it) — so it loads before bodies -->
   <script src="src/systems/fphands.js?v=w09290250"></script>
   <!-- ink in skin: tattoo charts for arms / hands / head, profiles, the FP sync; before character.js (its arm UVs read the chart split) -->
-  <script src="src/entities/tattoo.js?v=w09290250"></script>
+  <script src="src/entities/tattoo.js?v=pf0930a"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
   <script src="src/entities/character.js?v=w09290250"></script>
@@ -1470,7 +1470,7 @@ document.body.appendChild(b);}}catch(e){}})();
      pad + the footway breakup (city/cityground.js). Runtime-only: world.js
      and streetkit.js call it inside buildCity; it registers its paint pass
      at landmass order 68, so it loads after worldmap.js and approach.js. -->
-<script src="src/city/cityground.js?v=grass0929c"></script>
+<script src="src/city/cityground.js?v=pf0930a"></script>
 <!-- FISHING (owner: the world had a "Fisherman" title and nobody wearing it;
      a mackerel was harvested by SHOOTING it through the hunting pipeline).
      Registers water-side spots that SELF-VALIDATE against CBZ.cityWaterAt — a
@@ -1530,7 +1530,7 @@ document.body.appendChild(b);}}catch(e){}})();
      hold it, the motel room that is his menu, the consequences of a kill. -->
 <script src="src/city/hitman_paper.js?v=inworld1"></script>
 <script src="src/city/hitman_hands.js?v=tap0929"></script>
-<script src="src/city/hitman_room.js?v=w09290219"></script>
+<script src="src/city/hitman_room.js?v=pf0930a"></script>
 <script src="src/city/dossier.js?v=inworld1"></script>
 <script src="src/city/hitman_fallout.js?v=w09290219"></script>
 <script src="src/city/agency.js?v=cd0929"></script>
@@ -1547,7 +1547,7 @@ document.body.appendChild(b);}}catch(e){}})();
      metre 683 pedestrians tried to walk went into geometry, 37 of them grinding
      for over 1.5 s at a time. The window is 320 m around the player (peds stop
      drawing at 95 m), marked across frames so a rebuild is never a hitch. -->
-<script src="src/systems/fullmap.js?v=wreal0929"></script>
+<script src="src/systems/fullmap.js?v=pf0930a"></script>
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
      always-updater is in the sort -->
@@ -2022,7 +2022,7 @@ document.body.appendChild(b);}}catch(e){}})();
        - detail_kit.js FIRST; the other four only register passes into it.
        - street_furniture.js before building_dress.js — it owns the shared sign
          atlas texture the house-number plates reuse. -->
-<script src="src/core/farcull.js?v=wreal0929"></script>
+<script src="src/core/farcull.js?v=pf0930a"></script>
 <!-- whole-building frustum hide before every draw (exact: view frustum + sun shadow frustum); also owns CBZ.subtreeSphere, which city/cctv.js's feed scope reuses -->
 <script src="src/core/viewscope.js?v=w09290242x"></script>
 <script src="src/core/staticfreeze.js?v=sf1"></script>

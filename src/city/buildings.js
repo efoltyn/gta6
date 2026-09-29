@@ -8786,15 +8786,19 @@
     // is the sign board, so the name reads as lettering applied to it (and,
     // drawn unlit, as lit letters after dark) instead of a second panel
     // stuck on the first.
-    const c = document.createElement("canvas"); c.width = 768; c.height = 128;
-    const x = c.getContext("2d");
-    x.clearRect(0, 0, 768, 128);
-    let fs = 78; x.textAlign = "center"; x.textBaseline = "middle";
-    // a sign-maker's face (a heavy grotesque), not the game's rounded UI font
-    do { x.font = "800 " + fs + "px 'Helvetica Neue', Helvetica, Arial, sans-serif"; fs -= 4; } while (x.measureText(name).width > 720 && fs > 22);
-    x.fillStyle = "rgba(0,0,0,0.45)"; x.fillText(name, 386, 68);     // shadow
-    x.fillStyle = readableText(signHex); x.fillText(name, 384, 64);  // face text
-    t = new THREE.CanvasTexture(c); signTexCache.set(key, t); return t;
+    // painted the first frame a sign is drawn, canvas given back after the
+    // upload (core/texfree.js): a street of signs nobody has seen costs nothing
+    const paint = function (x) {
+      x.clearRect(0, 0, 768, 128);
+      let fs = 78; x.textAlign = "center"; x.textBaseline = "middle";
+      // a sign-maker's face (a heavy grotesque), not the game's rounded UI font
+      do { x.font = "800 " + fs + "px 'Helvetica Neue', Helvetica, Arial, sans-serif"; fs -= 4; } while (x.measureText(name).width > 720 && fs > 22);
+      x.fillStyle = "rgba(0,0,0,0.45)"; x.fillText(name, 386, 68);     // shadow
+      x.fillStyle = readableText(signHex); x.fillText(name, 384, 64);  // face text
+    };
+    if (CBZ.lazyCanvasTexture) t = CBZ.lazyCanvasTexture(768, 128, paint, { name: "shop-sign" });
+    else { const c = document.createElement("canvas"); c.width = 768; c.height = 128; paint(c.getContext("2d")); t = new THREE.CanvasTexture(c); }
+    signTexCache.set(key, t); return t;
   }
 
   // striped awning canvas, cached per colour and run direction: the stripes run

@@ -1409,6 +1409,28 @@
   function deliverMesh(kind, canvas) {
     const K = paperKit();
     let c = canvas;
+    /* THE MORNING PAPER IS PRINTED WHEN SOMEBODY LOOKS AT IT: a 1400 x 1900
+       front page (10 MB of canvas) under the door of a room the player may
+       never open. The texture paints it the first frame it is drawn and gives
+       the canvas back after the upload (core/texfree.js); reading it (the
+       pick-up) paints it again. */
+    if (!c && kind === "paper" && K && K.newspaper && CBZ.lazyCanvasTexture) {
+      const issue = { masthead: "The Morning Ledger", headline: localStory().headline };
+      const ltex = CBZ.lazyCanvasTexture(1400, 1900, function (ctx, lc) { K.newspaper(issue, { canvas: lc }); }, { name: "hm-paper" });
+      if (THREE.sRGBEncoding != null) ltex.encoding = THREE.sRGBEncoding;
+      ltex.anisotropy = aniso();
+      ltex.minFilter = THREE.LinearMipmapLinearFilter || ltex.minFilter;
+      const grp = new THREE.Group();
+      const mat = new THREE.MeshStandardMaterial({ map: ltex, roughness: 0.95 });
+      B.ownMats.push(mat);
+      B.ownTex.push(ltex);
+      mesh(boxGeo(0.3, 0.012, 0.4), mats().newsprint, grp, 0, 0.006, 0);
+      mesh(new THREE.PlaneGeometry(0.29, 0.39), mat, grp, 0, 0.0125, 0, -Math.PI / 2, 0, 0);
+      grp.traverse(function (o) { o.receiveShadow = true; o.castShadow = false; });
+      const out = { g: grp };
+      Object.defineProperty(out, "canvas", { enumerable: true, get: function () { return ltex.image; } });
+      return out;
+    }
     if (!c) {
       try { c = kind === "paper" ? (K && K.newspaper ? K.newspaper({ masthead: "The Morning Ledger", headline: localStory().headline }) : null) : (K && K.envelope ? K.envelope({ text: "", sealed: true }) : null); } catch (e) { c = null; }
       if (!c) c = fallbackPaper(kind === "paper" ? 280 : 256, kind === "paper" ? 380 : 160, kind === "paper" ? "#e0dccf" : "#e8dcc0", []);
@@ -1901,10 +1923,12 @@
     const m = deliverMesh(kind, opts.canvas || null);
     const r = rng(((now() * 1000) | 0) + (kind === "paper" ? 7 : 3));
     const d = {
-      kind: kind, g: m.g, canvas: m.canvas, verb: opts.verb || "Pick up", onPick: opts.onPick || null,
+      kind: kind, g: m.g, canvas: null, verb: opts.verb || "Pick up", onPick: opts.onPick || null,
       from: { x: 2.3, z: HZ + 0.12 }, to: { x: (DOOR.x0 + DOOR.x1) / 2 - 0.05 + (r() - 0.5) * 0.25, z: HZ - (kind === "paper" ? 0.42 : 0.32) - r() * 0.12 },
       ry0: (r() - 0.5) * 0.3, ry1: (r() - 0.5) * 0.9, t: 0, dur: 0.85,
     };
+    // (read when it is picked up: a lazily printed paper prints then)
+    Object.defineProperty(d, "canvas", { enumerable: true, configurable: true, get: function () { return m.canvas; } });
     m.g.position.set(d.from.x, 0.006, d.from.z);
     m.g.rotation.y = d.ry0;
     B.group.add(m.g);
@@ -1944,9 +1968,22 @@
      ================================================================ */
   function ease(t) { return t < 0 ? 0 : t > 1 ? 1 : 1 - Math.pow(1 - t, 3); }
   let tvT = 0;
+  let _waitT = 0;
   function tick(dt) {
     if (!playing()) return;
-    if (!B || B.root !== (arena() && arena().root)) ensure();
+    if (!B || B.root !== (arena() && arena().root)) {
+      // In the streamed (phone) city the room is built when its motel comes
+      // within the keep circle, not on the first frame wherever the player is
+      // (it was a ~90 MB heap spike 4 s after the reveal). A caller that
+      // needs it (origins' hitman start, the agency) still gets it at once.
+      const S = CBZ.slice;
+      if (S && S.stream && (_waitT -= (dt || 0.016)) > 0) return;       // checked twice a second
+      _waitT = 0.5;
+      const lot = S && S.stream && S.keepR ? motelLot() : null, pl0 = P();
+      const door = lot && lot.building && lot.building.door;
+      if (door && pl0 && pl0.pos && Math.hypot(pl0.pos.x - door.x, pl0.pos.z - door.z) > S.keepR()) return;
+      ensure();
+    }
     if (!B) return;
     regVerbs();
     dt = Math.min(0.1, dt || 0.016);

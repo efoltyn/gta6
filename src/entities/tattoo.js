@@ -1599,8 +1599,18 @@
     const cv = sz && mkCanvas(sz[0], sz[1]);
     // no 2D canvas (a headless stub): no chart, and the skin stays plain
     if (!cv || !cv.getContext || !cv.getContext("2d")) { FAILED.add(id); return null; }
-    try { paint(kind, key, cv); } catch (e) { FAILED.add(id); return null; }
-    t = new THREE.CanvasTexture(cv);
+    /* Painted now (this runs in idle time), but the canvas is not kept: it
+       goes back once the texture is uploaded or copied into a ped atlas page
+       (core/texfree.js lazyCanvasTexture), and a later read paints it again. */
+    if (CBZ.lazyCanvasTexture && !(CBZ.tattoo && CBZ.tattoo._mkCanvas)) {
+      let ok = true;
+      cv.width = 1; cv.height = 1;             // (only the capability probe)
+      t = CBZ.lazyCanvasTexture(sz[0], sz[1], function (ctx, c) { try { paint(kind, key, c); } catch (e) { ok = false; } }, { eager: true });
+      if (!ok) { FAILED.add(id); return null; }
+    } else {
+      try { paint(kind, key, cv); } catch (e) { FAILED.add(id); return null; }
+      t = new THREE.CanvasTexture(cv);
+    }
     t.magFilter = THREE.LinearFilter;
     t.name = "ink:" + id;
     t._shared = true;

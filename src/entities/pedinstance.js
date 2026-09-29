@@ -436,6 +436,8 @@
     try {
       const ctx = im.getContext("2d");
       d = ctx && ctx.getImageData ? ctx.getImageData(0, 0, C.w, C.h).data : null;
+      // a self-painting canvas (core/texfree.js) is not needed once copied here
+      if (d && t._cbzRelease) t._cbzRelease();
     } catch (e) { d = null; }
     if (!d || d.length !== C.w * C.h * 4) return null;
     for (let i = 3; i < d.length; i += 4) if (d[i] > 0) return d;

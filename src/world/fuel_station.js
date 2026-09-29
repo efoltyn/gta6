@@ -313,6 +313,8 @@
     if (M) return M;
     let atlas = null, slab = null, pool = null;
     try { atlas = bakeAtlas(); slab = bakeSlab(); pool = bakePool(); } catch (e) { /* no canvas */ }
+    // baked once, never repainted: the canvases go once uploaded (core/texfree.js)
+    if (CBZ.freeCanvasAfterUpload) { CBZ.freeCanvasAfterUpload(atlas); CBZ.freeCanvasAfterUpload(slab); }
     const sh = function (m, name) { m._shared = true; m.name = name; return m; };
     M = {
       solid: sh(new THREE.MeshLambertMaterial({ vertexColors: true }), "fuel-solid"),

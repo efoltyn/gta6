@@ -417,6 +417,7 @@
   function close(relock) {
     if (!map.active) return;
     map.active = false;
+    releasePlates();
     map._cursor = null; map._sel = null; map._hoverKey = "";
     zoomRepeatStop();   // a held zoom chip must never keep repeating past the map
     root.setAttribute("aria-hidden", "true");
@@ -2178,7 +2179,10 @@
   // dynamic ink is sandwiched between them: turf paint goes UNDER the lots,
   // actor dots stay UNDER the labels.
   const plates = { base: document.createElement("canvas"), lots: document.createElement("canvas"), marks: document.createElement("canvas"), a: null, p0: null };
-  for (const k of ["base", "lots", "marks"]) { plates[k].width = W; plates[k].height = H; }
+  // the plates hold pixels only while the map is open (7 MB of canvas a
+  // phone never needs while driving): sized in buildCityPlates, given back in close()
+  for (const k of ["base", "lots", "marks"]) { plates[k].width = 1; plates[k].height = 1; }
+  function releasePlates() { for (const k of ["base", "lots", "marks"]) { plates[k].width = 1; plates[k].height = 1; } plates.a = null; }
   function onPlate(c, fn) {
     const main = ctx; ctx = c.getContext("2d");
     ctx.clearRect(0, 0, W, H);
@@ -2186,6 +2190,7 @@
     try { fn(); } finally { ctx = main; bakeMode = false; }
   }
   function buildCityPlates(p, A) {
+    for (const k of ["base", "lots", "marks"]) if (plates[k].width !== W || plates[k].height !== H) { plates[k].width = W; plates[k].height = H; }
     plates.a = A;
     plates.p0 = p;   // remember the base projection the plates were baked at
     plateLabels = []; plateOverlapN = 0;   // the bake owns its own label boxes (base-projection px)

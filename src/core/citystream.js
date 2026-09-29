@@ -129,11 +129,17 @@
   // Called by city/world.js at the top of buildCity. The spawn is the city
   // centre (the rooftop / street spawn is downtown); reset() places the
   // player and the streamer re-centres on them from the first tick.
-  const RECENTRE = 0.3;               // the centre follows the player at r * RECENTRE (a 10 Hz tick re-centres cheaply)
+  /* THE CENTRE FOLLOWS THE PLAYER WITHIN RECENTRE_M metres (the 10 Hz tick
+     re-centres cheaply). It was r * 0.3 (45 m at r 150): every metre of it is
+     a ring of city built all round that nobody can see. */
+  const RECENTRE_M = 30;
   const lastP = { x: 0, z: 0, t: 0 };
   CBZ.streamBegin = function (cx, cz) {
     if (!streamWanted() || CBZ.slice) return false;
-    const view = function () { return Math.max(380, +CBZ.cityFogFar || 760) + 60; };
+    /* what can be drawn: core/farcull.js draws everything to the fog's end
+       + 30 m, measured from the player; + 6 m for the camera boom behind them.
+       (It was fog + 60: 24 m more ring than anything draws.) */
+    const view = function () { return Math.max(380, +CBZ.cityFogFar || 760) + 36; };
     const S = {
       name: "stream", stream: true, x: cx, z: cz, r: 300,
       label: "Gang City (streamed)",
@@ -146,7 +152,7 @@
          whole playable radius again on top, ~35% more city in memory at the
          downtown spawn for ground nobody could see yet. */
       lead: 0,
-      keepR: function () { return S.r * RECENTRE + S.view() + S.lead; },
+      keepR: function () { return RECENTRE_M + S.view() + S.lead; },
     };
     CBZ.slice = S;
     S.r = CBZ.SLICE_MANIFEST ? CBZ.streamRadius(cx, cz, view()) : 300;
@@ -505,7 +511,7 @@
     lastP.x = P.pos.x; lastP.z = P.pos.z; lastP.t = tNow;
     const lead = Math.min(250, V * 2.5);
     if (lead > s.lead + 20 || lead < s.lead - 60) s.lead = lead;     // grows at once, shrinks lazily
-    if (force || dx * dx + dz * dz > (s.r * RECENTRE) * (s.r * RECENTRE)) {
+    if (force || dx * dx + dz * dz > RECENTRE_M * RECENTRE_M) {
       s.x = P.pos.x; s.z = P.pos.z;
       s.r = CBZ.SLICE_MANIFEST ? CBZ.streamRadius(s.x, s.z, s.view()) : s.r;
       CBZ.streamStats.recentres++;

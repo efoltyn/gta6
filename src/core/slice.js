@@ -179,6 +179,10 @@
       return dx * dx + dz * dz <= R * R;
     }
     function judge(o, depth) {
+      // a live body (an animal: userData.dynamic) is never opened: it moves,
+      // so its parts were being parked one by one from under a group that
+      // stayed and walked on without them (13.5k wildlife parts, measured)
+      if (o.userData && o.userData.dynamic) { stats.kept++; return; }
       const b = boundsOf(o);
       if (b && b.isEmpty()) { stats.kept++; return; }
       if (b && outside(b)) {

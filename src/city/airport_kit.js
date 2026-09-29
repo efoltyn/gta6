@@ -540,6 +540,9 @@
         tex.generateMipmaps = true;
         tex.anisotropy = Math.min(8, CBZ.renderer && CBZ.renderer.capabilities ? CBZ.renderer.capabilities.getMaxAnisotropy() : 1);
         if (CBZ.groundLinear) CBZ.groundLinear(tex);
+        // painted once, here, in many calls: its 4096-wide canvas goes back
+        // the moment it is on the GPU (core/texfree.js), not 30 s later
+        if (CBZ.freeCanvasAfterUpload) CBZ.freeCanvasAfterUpload(tex);
         return tex;
       },
     };

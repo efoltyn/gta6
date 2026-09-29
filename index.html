@@ -388,7 +388,7 @@ document.body.appendChild(b);}}catch(e){}})();
      offline, deterministically, and inside the headless screenshot harness).
      (The r164 IIFE spike and its compat shim were deleted 2026-09-29: never
      loaded, recoverable from git history if a migration is ever attempted.) -->
-<script src="src/vendor/three.r128.min.js?v=w09290242x"></script>
+<script src="src/vendor/three.r128.min.js?v=pf0930a"></script>
 <!-- real frustum culling for InstancedMesh pools (every camera, shadow pass included); must precede every InstancedMesh -->
 <script src="src/core/instcull.js?v=w09290242x"></script>
 <!-- Slayvin flat-mirror reflective water (ported to r128 as THREE.WaterReflect;
@@ -439,13 +439,13 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/config.js?v=af0929m"></script>
 <!-- CITY SLICES (?slice=name|x,z,r): one piece of Gang City booted as its own world.
      Parses the URL only; with no slice every helper answers "keep". -->
-<script src="src/core/texfree.js?v=phonefit1"></script>
-<script src="src/core/drawcheck.js?v=phonefit1"></script>
-<script src="src/core/bakecache.js?v=phonefit1"></script>
+<script src="src/core/texfree.js?v=pf0930a"></script>
+<script src="src/core/drawcheck.js?v=pf0930a"></script>
+<script src="src/core/bakecache.js?v=pf0930a"></script>
 <script src="src/core/rectgrid.js?v=phonefit1"></script>
-<script src="src/core/slice.js?v=slice0929b"></script>
+<script src="src/core/slice.js?v=pf0930a"></script>
 <!-- GANG CITY STREAMS: the live city is a slice that follows the player (?stream=0 = whole city). -->
-<script src="src/core/citystream.js?v=slice0929b"></script>
+<script src="src/core/citystream.js?v=pf0930a"></script>
 <script src="src/core/seed.js?v=w09290242x"></script>
 <!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
      Turns "is this the city?" into "may I vault / may I blow up here?", so the
@@ -524,7 +524,7 @@ document.body.appendChild(b);}}catch(e){}})();
      has to precede its first consumer — world/materials.js. -->
 <script src="src/world/textures_surface.js?v=slice0929b"></script>
 <script src="src/world/materials.js?v=pbr1"></script>
-<script src="src/world/fuel_station.js?v=fuel1"></script>
+<script src="src/world/fuel_station.js?v=pf0930a"></script>
 <script src="src/world/prisonkit.js?v=tow929b"></script>
 <!-- THE LADDER, DRAWN (world/ladderkit.js): stiles, rungs and a cage built
      off the same numbers systems/climb.js climbs, + railed landings. Every
@@ -585,7 +585,7 @@ document.body.appendChild(b);}}catch(e){}})();
        every body's hand (character.js builds it) — so it loads before bodies -->
   <script src="src/systems/fphands.js?v=w09290250"></script>
   <!-- ink in skin: tattoo charts for arms / hands / head, profiles, the FP sync; before character.js (its arm UVs read the chart split) -->
-  <script src="src/entities/tattoo.js?v=w09290250"></script>
+  <script src="src/entities/tattoo.js?v=pf0930a"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
   <script src="src/entities/character.js?v=w09290250"></script>
@@ -1104,7 +1104,7 @@ document.body.appendChild(b);}}catch(e){}})();
      city/buildings.js, which reads CBZ.CIVIC_SHOPS and CBZ.CIVIC_ACCT_SEED at
      parse time and the bld* helpers at build time. -->
 <script src="src/city/buildings_civic.js?v=pres0929b"></script>
-<script src="src/city/buildings.js?v=mil0929"></script>
+<script src="src/city/buildings.js?v=pf0930a"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
@@ -1159,7 +1159,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/fracture.js?v=mil0929"></script>
 <script src="src/city/demolition.js?v=mil0929"></script>
 <script src="src/city/elevators.js?v=pres0929b"></script>
-<script src="src/city/exec_office.js?v=leaf2-st1"></script>
+<script src="src/city/exec_office.js?v=pf0930a"></script>
 <script src="src/city/escalators.js?v=air0929r"></script>
 <script src="src/city/roofloot.js?v=cd0929"></script>
 <script src="src/city/beach.js?v=cd0929"></script>
@@ -1244,7 +1244,7 @@ document.body.appendChild(b);}}catch(e){}})();
      wrapper; loads before towngen.js (which consumes CBZ.settlementsCompose)
      and after worldmap.js (whose cityWorldGeo it wraps). -->
 <script src="src/city/settlements.js?v=pres0929b"></script>
-<script src="src/city/towngen.js?v=pres0929b"></script>
+<script src="src/city/towngen.js?v=pf0930a"></script>
 <!-- THE ONE BET SLIP (city/betslip.js): every wager in the city is written on
      it at the venue that takes it (Ironjaw ringside/pit, Southpaw bookmaker,
      APEX bookmaker, the Speedway race book, the racepark windows) and settled
@@ -1256,7 +1256,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/race/race_core.js?v=rg0929"></script>
 <script src="src/race/race_track.js?v=rg0929"></script>
 <script src="src/race/race_venue.js?v=rg0929"></script>
-<script src="src/city/island_speedway.js?v=rg0929"></script>
+<script src="src/city/island_speedway.js?v=pf0930a"></script>
 <!-- CIVIL AIRFRAMES. The loft/aerofoil/lathe kit and every civil aircraft
      type drawn from it at real dimensions (narrowbody, widebody, turboprop,
      business jet, light single, helicopter variants), shared per type, with
@@ -1272,7 +1272,7 @@ document.body.appendChild(b);}}catch(e){}})();
      dressing through the city streamer. island_airport.js (Halloran) and
      airport_capeharbor.js are specs; both builders run at worldgen, after
      this file has parsed. -->
-<script src="src/city/airport_kit.js?v=air0929r"></script>
+<script src="src/city/airport_kit.js?v=pf0930a"></script>
 <script src="src/city/airport_capeharbor.js?v=air0929r"></script>
 <!-- MILITARY AIRFRAMES: lofted fighter / attack + utility helicopters / drone / bomber and the kit the cargo lifter is built with. Before island_military (its model factories call CBZ.milAir). -->
 <script src="src/city/mil_air.js?v=mil0929"></script>
@@ -1375,7 +1375,7 @@ document.body.appendChild(b);}}catch(e){}})();
      brain.rep. After peds.js (fleeFrom / markGunpoint / the report visuals it
      drives) and systems/brain.js; nothing here runs at parse. -->
 <script src="src/city/brain_city.js?v=armed1"></script>
-<script src="src/entities/pedinstance.js?v=body0929a"></script>
+<script src="src/entities/pedinstance.js?v=pf0930a"></script>
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and
      after interior_programs.js. This is what puts a boss on the top floor. -->
@@ -1427,7 +1427,7 @@ document.body.appendChild(b);}}catch(e){}})();
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
 <script src="src/city/carlod.js?v=w09290242x"></script>
-<script src="src/city/vehicles.js?v=metro0929"></script>
+<script src="src/city/vehicles.js?v=pf0930a"></script>
 <script src="src/city/carinstances.js?v=w09290242x"></script>
 <script src="src/city/playerair.js?v=nodash1"></script>
 <script src="src/city/playeraircraft.js?v=af0929b"></script>
@@ -1775,7 +1775,7 @@ document.body.appendChild(b);}}catch(e){}})();
      pad + the footway breakup (city/cityground.js). Runtime-only: world.js
      and streetkit.js call it inside buildCity; it registers its paint pass
      at landmass order 68, so it loads after worldmap.js and approach.js. -->
-<script src="src/city/cityground.js?v=grass0929c"></script>
+<script src="src/city/cityground.js?v=pf0930a"></script>
 <!-- FISHING (owner: the world had a "Fisherman" title and nobody wearing it;
      a mackerel was harvested by SHOOTING it through the hunting pipeline).
      Registers water-side spots that SELF-VALIDATE against CBZ.cityWaterAt — a
@@ -1852,7 +1852,7 @@ document.body.appendChild(b);}}catch(e){}})();
      hold it, the motel room that is his menu, the consequences of a kill. -->
 <script src="src/city/hitman_paper.js?v=inworld1"></script>
 <script src="src/city/hitman_hands.js?v=tap0929"></script>
-<script src="src/city/hitman_room.js?v=w09290219"></script>
+<script src="src/city/hitman_room.js?v=pf0930a"></script>
 <script src="src/city/hitman.js?v=w09290219"></script>
 <script src="src/city/dossier.js?v=inworld1"></script>
 <script src="src/city/hitman_fallout.js?v=w09290219"></script>
@@ -1878,7 +1878,7 @@ document.body.appendChild(b);}}catch(e){}})();
      for over 1.5 s at a time. The window is 320 m around the player (peds stop
      drawing at 95 m), marked across frames so a rebuild is never a hitch. -->
 <script src="src/city/pednav.js?v=nav2"></script>
-<script src="src/systems/fullmap.js?v=wreal0929"></script>
+<script src="src/systems/fullmap.js?v=pf0930a"></script>
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
      always-updater is in the sort -->
@@ -2107,7 +2107,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Ace + composed town casinos): marquee/mast exterior, felt tables with
      seats + an "[E] Sit at the table" that opens the casino floor. Loads after
      countries.js and its deps (interactions.js, activities.js, worldmap). -->
-<script src="src/city/casino.js?v=cd0929"></script>
+<script src="src/city/casino.js?v=pf0930a"></script>
 <!-- THE RIVER: the marina's way to the sea. The harbour pass in continent.js
      opens a 67 m bay ring around the city rect and closes it on all four
      sides, so every boat in the game floated in a moat — a flood fill from a
@@ -2282,7 +2282,7 @@ document.body.appendChild(b);}}catch(e){}})();
      staffs itself through power.js's protection layer rather than authoring
      guards. After power.js and the biome/continent builders whose empty land
      it claims. Revert with ?cfg_GOV_COMPLEX=0. -->
-<script src="src/city/govcomplex.js?v=wreal0929"></script>
+<script src="src/city/govcomplex.js?v=pf0930a"></script>
 
 <!-- THE PRESIDENCY — one spine over organs built above: the President origin
      (candidacy's swearIn fast-forward), the Situation Room inside govcomplex's
@@ -2446,7 +2446,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/street_furniture.js?v=deslop1"></script>
 <script src="src/world/world_grime.js?v=detail1"></script>
 <script src="src/world/building_dress.js?v=roof1-st1"></script>
-<script src="src/core/farcull.js?v=wreal0929"></script>
+<script src="src/core/farcull.js?v=pf0930a"></script>
 <!-- whole-building frustum hide before every draw (exact: view frustum + sun shadow frustum); also owns CBZ.subtreeSphere, which city/cctv.js's feed scope reuses -->
 <script src="src/core/viewscope.js?v=w09290242x"></script>
 <script src="src/core/losgrid.js?v=lg1"></script>

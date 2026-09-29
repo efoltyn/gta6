@@ -104,11 +104,17 @@
   function canvasTex(key, w, h, paint, repeat) {
     if (tex[key]) return tex[key];
     if (typeof document === "undefined") return null;
-    const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
-    const g = cv.getContext("2d");
-    if (!g) return null;
-    paint(g, w, h);
-    const t = new THREE.CanvasTexture(cv);
+    let t;
+    if (CBZ.lazyCanvasTexture) {
+      // painted the first frame it is drawn (a closed office costs no canvas)
+      t = CBZ.lazyCanvasTexture(w, h, function (g) { paint(g, w, h); }, { name: "exec-" + key });
+    } else {
+      const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+      const g = cv.getContext("2d");
+      if (!g) return null;
+      paint(g, w, h);
+      t = new THREE.CanvasTexture(cv);
+    }
     if (repeat) { t.wrapS = t.wrapT = THREE.RepeatWrapping; }
     if (THREE.sRGBEncoding != null) t.encoding = THREE.sRGBEncoding;
     t.anisotropy = 4;
