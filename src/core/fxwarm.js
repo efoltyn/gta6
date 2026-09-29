@@ -77,7 +77,43 @@
   function kindBits(o) {
     return (o.isInstancedMesh ? 1 : 0) | (o.isSkinnedMesh ? 2 : 0) | (o.isPoints ? 4 : 0) |
       (o.isLine ? 8 : 0) | (o.isSprite ? 16 : 0) |
-      (o.geometry && o.geometry.morphAttributes && o.geometry.morphAttributes.position ? 32 : 0);
+      (o.geometry && o.geometry.morphAttributes && o.geometry.morphAttributes.position ? 32 : 0) |
+      (o.isInstancedMesh && o.instanceColor ? 64 : 0);   // instancingColor is its own program
+  }
+  /* ONE REPRESENTATIVE PER PROGRAM, NOT PER MATERIAL. The city has ~17k
+     materials (a colour each) behind a few hundred programs, and compile()
+     builds the renderer's per-material state (uniforms, properties) for every
+     one it is handed, drawn or not: the hidden LOS originals the batch pass
+     keeps were most of them, ~27 MB of heap and a good share of the build's
+     compile time. A material whose program-shaping signature was already
+     compiled under this light set is skipped; the renderer makes its own
+     small state the first time it is really drawn (the program exists). The
+     signature is the fields that pick an r128 program (type, maps and their
+     encodings, vertex colours, fog, side, blending, alpha test, flat shading,
+     defines, a custom cache key / onBeforeCompile). */
+  const sigSeen = new Set();
+  let sigLight = null;
+  function texSig(t) { return t ? "T" + (t.encoding | 0) + (t.isCubeTexture ? "c" : "") + (t.mapping | 0) : "-"; }
+  function progSig(m, bits) {
+    let k = m.type + "|" + bits + "|" + (m.vertexColors ? 1 : 0) + (m.fog ? 1 : 0) + (m.flatShading ? 1 : 0) + (m.transparent ? 1 : 0) +
+      (m.alphaTest > 0 ? 1 : 0) + (m.dithering ? 1 : 0) + (m.premultipliedAlpha ? 1 : 0) + (m.toneMapped === false ? 0 : 1) +
+      (m.skinning ? 1 : 0) + (m.morphTargets ? 1 : 0) + (m.morphNormals ? 1 : 0) + (m.wireframe ? 1 : 0) + "|" + m.side + "|" + m.blending + "|" + (m.precision || "") +
+      "|" + texSig(m.map) + texSig(m.alphaMap) + texSig(m.emissiveMap) + texSig(m.normalMap) + texSig(m.bumpMap) + texSig(m.envMap) +
+      texSig(m.lightMap) + texSig(m.aoMap) + texSig(m.specularMap) + texSig(m.displacementMap) + texSig(m.roughnessMap) + texSig(m.metalnessMap) +
+      texSig(m.clearcoatMap) + texSig(m.clearcoatNormalMap) + texSig(m.clearcoatRoughnessMap) + texSig(m.transmissionMap) + texSig(m.gradientMap) +
+      "|" + (m.normalMapType | 0) + (m.combine | 0) + (m.depthPacking | 0) + (m.sizeAttenuation ? 1 : 0) + (m.clearcoat > 0 ? 1 : 0) + (m.transmission > 0 ? 1 : 0) + (m.sheen ? 1 : 0);
+    if (m.defines) { try { k += "|D" + JSON.stringify(m.defines); } catch (e) { k += "|D?"; } }
+    if (m.isShaderMaterial || m.isRawShaderMaterial) k += "|S" + m.uuid;                  // custom shaders: always their own
+    if (m.customProgramCacheKey && m.customProgramCacheKey !== THREE.Material.prototype.customProgramCacheKey) { try { k += "|K" + m.customProgramCacheKey(); } catch (e) { k += "|K" + m.uuid; } }
+    if (m.onBeforeCompile && m.onBeforeCompile !== THREE.Material.prototype.onBeforeCompile) k += "|B" + String(m.onBeforeCompile).length + ":" + String(m.onBeforeCompile).slice(0, 64);
+    return k;
+  }
+  function freshProgram(m, bits) {
+    if (sigLight !== lightSig) { sigSeen.clear(); sigLight = lightSig; }
+    const k = progSig(m, bits);
+    if (sigSeen.has(k)) return false;
+    sigSeen.add(k);
+    return true;
   }
   function fresh(m, bits) {
     const s = seen.get(m);
@@ -231,7 +267,7 @@
           else for (let i = 0; i < m.length; i++) if (fresh(m[i], bits)) want = true;
           if (want) reps.push(o);
         } else if (!m.isMaterial) bad++;
-        else if (fresh(m, bits)) reps.push(o);
+        else if (fresh(m, bits) && freshProgram(m, bits)) reps.push(o);
       }
       const k = o.children;
       for (let i = 0; i < k.length; i++) visit(k[i]);
