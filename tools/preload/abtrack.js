@@ -13,10 +13,10 @@
   var MIN = 1024;
   function site() {
     var st = new Error().stack.split("\n"), out = [];
-    for (var i = 3; i < st.length && out.length < 2; i++) {
+    for (var i = 3; i < st.length && out.length < 3; i++) {
       var m = /\/(src\/[^?:)]+|games\/[^?:)]+|[^/?:)]+\.html)(?:\?[^:)]*)?:(\d+)/.exec(st[i]);
-      if (m && !/three\.r128|abtrack/.test(m[1])) out.push(m[1].replace(/^src\//, "") + ":" + m[2]);
-      else if (m && /three\.r128/.test(m[1]) && !out.length) out.push("three");
+      if (m && !/vendor\/|abtrack/.test(m[1])) out.push(m[1].replace(/^src\//, "") + ":" + m[2]);
+      else if (m && /vendor\//.test(m[1]) && !out.length) out.push(m[1].replace(/^src\/vendor\//, "").replace(/\.min\.js|\.js/, ""));
     }
     return out.join(" < ") || "?";
   }

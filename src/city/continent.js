@@ -459,11 +459,53 @@
     const W_ROOF = SCALE_V5() ? 19500 : (SCALE_V4() ? 15500 : (LAYOUT_V2() ? 13500 : 12000));
     if (!isFinite(W) || W <= 0 || W > W_ROOF) return;
 
+    /* A GRID INDEX OVER RECTS. The plate's field functions each scanned every
+       region (223) or every authored surface for all 224k vertices, several
+       times a vertex. Each item is filed under the 256 m cells its rect, grown
+       by `pad`, touches; a query scans only its own cell's list. Every caller
+       is an any/min test, so visiting fewer items in the same relative order
+       gives the same answer. A query with a margin wider than `pad` falls back
+       to the full list. */
+    function gridIndex(n, rectOf, pad) {
+      const C = 256, map = new Map(), big = [];
+      for (let i = 0; i < n; i++) {
+        const r = rectOf(i);
+        if (!r) { big.push(i); continue; }
+        const x0 = Math.floor((r[0] - pad) / C), x1 = Math.floor((r[1] + pad) / C);
+        const z0 = Math.floor((r[2] - pad) / C), z1 = Math.floor((r[3] + pad) / C);
+        if ((x1 - x0 + 1) * (z1 - z0 + 1) > 400) { big.push(i); continue; }
+        for (let cx = x0; cx <= x1; cx++) for (let cz = z0; cz <= z1; cz++) {
+          const k = cx * 100003 + cz; let l = map.get(k); if (!l) map.set(k, l = []); l.push(i);
+        }
+      }
+      // merge the always-scanned big items into every list, in index order
+      const EMPTY = big.slice();
+      map.forEach(function (l, k) { if (big.length) { const m = l.concat(big); m.sort(function (a, b) { return a - b; }); map.set(k, m); } });
+      return { pad: pad, list: function (x, z) { return map.get(Math.floor(x / C) * 100003 + Math.floor(z / C)) || EMPTY; } };
+    }
+    function regRect(r) {
+      if (!r) return null;
+      if (r.kind === "circle") { const R = r.r + (r.pad || 0); return [r.cx - R, r.cx + R, r.cz - R, r.cz + R]; }
+      return Number.isFinite(r.minX) ? [r.minX, r.maxX, r.minZ, r.maxZ] : null;
+    }
+    const REG_IX = gridIndex(regs.length, function (i) { return regRect(regs[i]); }, 32);
+
     function insideAnything(x, z, margin) {
       margin = margin || 0;
       if (isFinite(city.minX) &&
           x > city.minX - margin && x < city.maxX + margin &&
           z > city.minZ - margin && z < city.maxZ + margin) return true;
+      if (margin <= REG_IX.pad) {
+        const L = REG_IX.list(x, z);
+        for (let j = 0; j < L.length; j++) {
+          const r = regs[L[j]];
+          if (r.kind === "circle") {
+            if (Math.hypot(x - r.cx, z - r.cz) < r.r + (r.pad || 0) + margin) return true;
+          } else if (x > r.minX - margin && x < r.maxX + margin &&
+                     z > r.minZ - margin && z < r.maxZ + margin) return true;
+        }
+        return false;
+      }
       for (const r of regs) {
         if (r.kind === "circle") {
           if (Math.hypot(x - r.cx, z - r.cz) < r.r + (r.pad || 0) + margin) return true;
@@ -600,9 +642,12 @@
     // corner, so the bridge/causeway test (a regex on the name) is decided
     // ONCE here instead of once per region per sample.
     const solidRegs = regs.filter(function (r) { return !isLinkReg(r); });
+    const SOLID_IX = gridIndex(solidRegs.length, function (i) { return regRect(solidRegs[i]); }, 32);
     function inSolidRegion(x, z, m) {    // non-bridge regions hold their land
-      for (let i = 0; i < solidRegs.length; i++) {
-        const r = solidRegs[i];
+      const L = m <= SOLID_IX.pad ? SOLID_IX.list(x, z) : null;
+      const n = L ? L.length : solidRegs.length;
+      for (let j = 0; j < n; j++) {
+        const r = solidRegs[L ? L[j] : j];
         if (r.kind === "circle") {
           const R = r.r + (r.pad || 0) + m, dx = x - r.cx, dz = z - r.cz;
           // hypot >= max(|dx|,|dz|): outside the square means outside the circle
@@ -640,8 +685,33 @@
       }
       const p = b.pts;
       if (!p || p.length < 2) return Infinity;
+      // per-segment bounds, once per body: a segment whose box is farther than
+      // the best edge distance so far (plus its widest half) cannot win, so
+      // it is skipped without the projection. Same minimum, a fraction of the
+      // work (this field runs for all 224k plate vertices, several times).
+      let SB = b._segBox;
+      if (!SB || SB.p !== p || SB.n !== p.length || SB.h !== b.half) {
+        SB = { p: p, n: p.length, h: b.half, box: new Float64Array((p.length - 1) * 5) };
+        // non-enumerable: a cache, never data (the slice manifest clones bodies)
+        Object.defineProperty(b, "_segBox", { value: SB, writable: true, configurable: true, enumerable: false });
+        for (let i = 0; i + 1 < p.length; i++) {
+          const hA = Array.isArray(b.half) ? b.half[i] : (+b.half || 40), hB = Array.isArray(b.half) ? b.half[i + 1] : hA;
+          const o = i * 5;
+          SB.box[o] = Math.min(p[i].x, p[i + 1].x); SB.box[o + 1] = Math.max(p[i].x, p[i + 1].x);
+          SB.box[o + 2] = Math.min(p[i].z, p[i + 1].z); SB.box[o + 3] = Math.max(p[i].z, p[i + 1].z);
+          SB.box[o + 4] = Math.max(hA, hB);
+        }
+      }
+      const BX = SB.box;
       let best = Infinity;
       for (let i = 0; i + 1 < p.length; i++) {
+        if (best < Infinity) {
+          const o = i * 5;
+          const ex = BX[o] - x > 0 ? BX[o] - x : (x - BX[o + 1] > 0 ? x - BX[o + 1] : 0);
+          const ez = BX[o + 2] - z > 0 ? BX[o + 2] - z : (z - BX[o + 3] > 0 ? z - BX[o + 3] : 0);
+          // hypot(ex, ez) - maxHalf is a lower bound on this segment's d
+          if (ex - BX[o + 4] >= best || ez - BX[o + 4] >= best || Math.sqrt(ex * ex + ez * ez) - BX[o + 4] >= best) continue;
+        }
         const ax = p[i].x, az = p[i].z, bx = p[i + 1].x, bz = p[i + 1].z;
         const vx = bx - ax, vz = bz - az;
         const L2 = vx * vx + vz * vz;
@@ -903,6 +973,7 @@
     // 1 = untouched country, 0 = graded flat under (and one cell around) a
     // built surface. Allocation-free; the loops are the same ones the old
     // boolean form already walked, now with a Chebyshev pre-reject in front.
+    let BG_IX = null;
     function builtGate(x, z) {
       if (CFG.TERRAIN_FLATTEN_UNDER_BUILT === false) {
         return (insideAuthoredSurface(x, z, 8) || insideTerrainGrade(x, z, 8)) ? 0 : 1;
@@ -914,8 +985,17 @@
         if (t <= 0) return 0;
         if (t < g) g = t;
       }
-      for (let i = 0; i < authoredSurfaceBounds.length; i++) {
-        const b = authoredSurfaceBounds[i];
+      // the two rect lists grow while the build runs: re-file when they did
+      if (!BG_IX || BG_IX.nA !== authoredSurfaceBounds.length || BG_IX.nG !== gradedN) {
+        BG_IX = {
+          nA: authoredSurfaceBounds.length, nG: gradedN,
+          A: gridIndex(authoredSurfaceBounds.length, function (i) { const b = authoredSurfaceBounds[i]; return [b.minX, b.maxX, b.minZ, b.maxZ]; }, BUILT_REACH + 1),
+          G: gridIndex(gradedN, function (i) { const r = gradedRegs[i]; return r.circle ? [r.cx - r.rad, r.cx + r.rad, r.cz - r.rad, r.cz + r.rad] : [r.minX, r.maxX, r.minZ, r.maxZ]; }, BUILT_REACH + 1),
+        };
+      }
+      const LA = BG_IX.A.list(x, z), LG = BG_IX.G.list(x, z);
+      for (let ia = 0; ia < LA.length; ia++) {
+        const b = authoredSurfaceBounds[LA[ia]];
         // Chebyshev pre-reject first (four compares, no arithmetic) — the same
         // shape highwayNetReliefGate uses, and the reason this gate is
         // affordable inside a 103k-vertex build loop.
@@ -925,8 +1005,8 @@
         if (t <= 0) return 0;
         if (t < g) g = t;
       }
-      for (let i = 0; i < gradedN; i++) {
-        const r = gradedRegs[i];
+      for (let ig = 0; ig < LG.length; ig++) {
+        const r = gradedRegs[LG[ig]];
         let t;
         if (r.circle) {
           const dx = x - r.cx, dz = z - r.cz, rr = r.rad + BUILT_REACH;
@@ -2776,7 +2856,17 @@
           return b && b.kind === "path" && b.pts && b.pts.length > 1;
         }).map(function (b) {
           const hv = Array.isArray(b.half) ? b.half : b.pts.map(function () { return +b.half || 40; });
-          return { pts: b.pts, half: hv };
+          // per-segment box + widest half, for the same exact pruning as
+          // pathBodyField: a segment whose box is past the best distance so far
+          // cannot win the minimum
+          const P = b.pts, bx = new Float64Array((P.length - 1) * 5);
+          for (let i = 0; i + 1 < P.length; i++) {
+            const o = i * 5;
+            bx[o] = Math.min(P[i].x, P[i + 1].x); bx[o + 1] = Math.max(P[i].x, P[i + 1].x);
+            bx[o + 2] = Math.min(P[i].z, P[i + 1].z); bx[o + 3] = Math.max(P[i].z, P[i + 1].z);
+            bx[o + 4] = Math.max(hv[i], hv[i + 1]);
+          }
+          return { pts: b.pts, half: hv, box: bx };
         });
         const LAKES = waterBodies.filter(function (b) { return b && b.kind === "circle" && b.r > 0; });
         function riverDist(x, z) {
@@ -2788,9 +2878,15 @@
           return best;
         }
         function oneRiverDist(RIV, x, z) {
-          const P = RIV.pts, Hf = RIV.half;
+          const P = RIV.pts, Hf = RIV.half, BX = RIV.box;
           let best = Infinity;
           for (let i = 0; i + 1 < P.length; i++) {
+            if (best < Infinity) {
+              const o = i * 5;
+              const ex = BX[o] - x > 0 ? BX[o] - x : (x - BX[o + 1] > 0 ? x - BX[o + 1] : 0);
+              const ez = BX[o + 2] - z > 0 ? BX[o + 2] - z : (z - BX[o + 3] > 0 ? z - BX[o + 3] : 0);
+              if (ex - BX[o + 4] >= best || ez - BX[o + 4] >= best || Math.sqrt(ex * ex + ez * ez) - BX[o + 4] >= best) continue;
+            }
             const ax = P[i].x, az = P[i].z, vx = P[i + 1].x - ax, vz = P[i + 1].z - az;
             const L2 = vx * vx + vz * vz;
             let t = L2 > 0 ? ((x - ax) * vx + (z - az) * vz) / L2 : 0;
