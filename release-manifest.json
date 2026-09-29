@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "32ce535740a6da585b3320001e378fa681555839",
-  "createdAt": "2026-09-29T23:15:17.101Z",
+  "sourceCommit": "c226cbd2c8e80a6996ec6017b25f5d1547618f7c",
+  "createdAt": "2026-09-29T23:42:50.331Z",
   "fileCount": 1180,
-  "totalBytes": 47920770,
+  "totalBytes": 47926136,
   "files": [
     {
       "file": "src/bootstrap.js",
@@ -203,8 +203,8 @@
     },
     {
       "file": "src/city/buildings.js",
-      "bytes": 211342,
-      "sha256": "999dd945817df14cd170c1abea77e0290b53f58b7057e77d0dc3d6cd3ed69897"
+      "bytes": 211763,
+      "sha256": "35a1e0b1c594c7000ce4b047775afcac14daf12dc5a1ea8a8062b31eda152ee4"
     },
     {
       "file": "src/city/buildings_civic.js",
@@ -268,8 +268,8 @@
     },
     {
       "file": "src/city/carinstances.js",
-      "bytes": 14929,
-      "sha256": "c36c1aecfb4c4e1f5dab5e133e8c114627934998f38e7a76971c7db042e6940f"
+      "bytes": 14975,
+      "sha256": "d0800029622b06c319027c2ab81acec01c8221abbd38fedad6ed06cb87b4e2f6"
     },
     {
       "file": "src/city/carlamps.js",
@@ -303,8 +303,8 @@
     },
     {
       "file": "src/city/casino.js",
-      "bytes": 17582,
-      "sha256": "c3e452edea7ecdfb65ae36678f96d78a7dc3c1047c351982a33156e3865a1d1b"
+      "bytes": 17651,
+      "sha256": "44d7f9743f5f47e831949ac6e9514bf7c245279fc879a726198cc194a22a2417"
     },
     {
       "file": "src/city/cctv.js",
@@ -338,8 +338,8 @@
     },
     {
       "file": "src/city/cityground.js",
-      "bytes": 24490,
-      "sha256": "bfdc1f7978f2a0322edc3a4bfade9f501b66ac01e17a903782bda5199514a1e5"
+      "bytes": 24800,
+      "sha256": "047a660bb9fd836f15c46ac1d1e818dd2cfa28b8c7e0d055fdacba4d4061cdb1"
     },
     {
       "file": "src/city/citynav.js",
@@ -1493,8 +1493,8 @@
     },
     {
       "file": "src/city/towngen.js",
-      "bytes": 25131,
-      "sha256": "bc5c31b0ca48ff19dbd6fad27f7d5ad92eb4007d625df4c2c50f03b84b32f571"
+      "bytes": 25200,
+      "sha256": "7e2e56b2fc8e1fc6f773e7835e523f4c46527e75fdeeb2482a6fc2714b4410af"
     },
     {
       "file": "src/city/traffic.js",
@@ -1518,8 +1518,8 @@
     },
     {
       "file": "src/city/vehicles.js",
-      "bytes": 159905,
-      "sha256": "0f308aa3f7152b674574467f186ffe3c6a42f63c8095e9a171192d57146794a3"
+      "bytes": 161107,
+      "sha256": "3c053b1fe14fc39c3cf3cff2912f92f7313c5e532738c143a472c0896d421638"
     },
     {
       "file": "src/city/verbwheel.js",
@@ -1628,8 +1628,8 @@
     },
     {
       "file": "src/city/wildlife.js",
-      "bytes": 83859,
-      "sha256": "1a84ede137df4e409d400b4d426be46039209299fb464c8a6fd8cf896fbda83c"
+      "bytes": 83909,
+      "sha256": "2c45c316e2a7bbe2bf312c1ad40ffc2dd047f02a1174bdb389e3049656e5816e"
     },
     {
       "file": "src/city/wildlife_orca.js",
@@ -1693,18 +1693,18 @@
     },
     {
       "file": "src/core/bakecache.js",
-      "bytes": 3738,
-      "sha256": "5e630f6d2dcfcd842840bf1111465940626f239e55307ab7f24af9d00a019507"
+      "bytes": 3940,
+      "sha256": "bb2ef1a05c051dcd08ff90c5528aa15df4d62830fbe6445529dc4a9ea68d6b33"
     },
     {
       "file": "src/core/batch.js",
-      "bytes": 18068,
-      "sha256": "1815d74d38548391552ffa2b0c30c10a29fb0ab57ef0c70c7abada39105ad2ed"
+      "bytes": 17968,
+      "sha256": "69cdb351ecc7c93d9527b06fc1c79880ff81985b954dbe877f1cc873c7ad2b00"
     },
     {
       "file": "src/core/citystream.js",
-      "bytes": 13465,
-      "sha256": "552992382b82a24f47dbbedbfeeb189bfb897fb7121827d67ef65b1e9761ed37"
+      "bytes": 13528,
+      "sha256": "bda166d320689a5532f4d9bee99974edff9f4e80a1ba51484cbe9cfcca128489"
     },
     {
       "file": "src/core/daynight.js",
@@ -1713,18 +1713,18 @@
     },
     {
       "file": "src/core/drawcheck.js",
-      "bytes": 2131,
-      "sha256": "a0a57a09ae5514e6a2163eccb8bf8ffbe8e88c1bc978c6cde27b602214bc5e45"
+      "bytes": 3546,
+      "sha256": "bb07b1180d4e75099b9617d6f1ddb0703be2011227324137f7d920721d5d2cfc"
     },
     {
       "file": "src/core/farcull.js",
-      "bytes": 18146,
-      "sha256": "241468f8015bce5190a0419b26f81126511a03edb3c356495793c64bb6189036"
+      "bytes": 18101,
+      "sha256": "b0ea8c53cd193aa13ed11c530af1dcd5d159684340c0b4a2d62639a82bfaabad"
     },
     {
       "file": "src/core/fxwarm.js",
-      "bytes": 7611,
-      "sha256": "8f04c19eea0f79d2973a0d637a4d6c2a74accb8397bb81576f6fb9996f807896"
+      "bytes": 9275,
+      "sha256": "ad375cdf86648d2aed380602220c6be29f89b2de2294013740b3d21a2c810a3b"
     },
     {
       "file": "src/core/gfx.js",
