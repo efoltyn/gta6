@@ -724,8 +724,9 @@
           // shop pass), so the town mounts its own compact facade board here.
           if (isShop && pick.name) mountShopSign(lt, color, pick.name, w, d);
           if (isShop) shopCanopy(lt, w, d, sk);
-          // a late parcel's canopy is merged with it (the town's merge ran long ago)
-          if (late) flushCanopies();
+          // a late parcel's canopy is merged with it (the town's merge ran long
+          // ago), and a late shop's shelves are planned now (city/storegoods.js)
+          if (late) { flushCanopies(); if (isShop && CBZ.storeGoodsPlan) CBZ.storeGoodsPlan(lotRec); }
         };
         let lateShell = false;
         if (CBZ.sliceAt) {

@@ -122,6 +122,8 @@
   const HEADER = [0x2f5d8a, 0x8a3530, 0x2f7a4a, 0x7a5a2a, 0x4a3f78, 0x1f6f6a];
 
   const PLANS = [];
+  // a streamed job's store plans go with it (core/citystream.js)
+  if (CBZ.streamBus) CBZ.streamBus(PLANS, "storePlans");
   const BY_LOT = new WeakMap();
   const RECTS = new WeakMap();            // shell group -> local rects (fitout_work.js reads them)
   const S = { arena: null, live: [], scanT: 0, refreshed: false };
@@ -994,6 +996,7 @@
     for (let i = 0; i < lots.length; i++) {
       const lot = lots[i];
       if (!lot || !lot.building || lot.demolished) continue;
+      if (!lot.building.group) continue;       // a shell not built yet (streamed): planned when it is
       if (BY_LOT.get(lot)) continue;
       let p = null;
       try { p = planLot(lot); } catch (err) { p = null; }
@@ -1002,6 +1005,19 @@
     S.arena = A;
     S.refreshed = false;
   }, 90.5);
+  /* A SHOP WHOSE SHELL IS BUILT LATER (a streamed town parcel, city/towngen.js)
+     is planned then: its plan reads the shell's own frame, so at boot it had
+     nothing to plan against. */
+  CBZ.storeGoodsPlan = function (lot) {
+    const A = S.arena || (CBZ.city && CBZ.city.arena) || null;
+    if (!A || !lot || !lot.building || !lot.building.group || lot.demolished) return null;
+    const had = BY_LOT.get(lot);
+    if (had && PLANS.indexOf(had) >= 0) return null;          // planned, and still live
+    let p = null;
+    try { p = planLot(lot); } catch (err) { p = null; }
+    if (p) { p._arena = A; PLANS.push(p); S.refreshed = false; }
+    return p;
+  };
 
   /* ============================================================
      3. THE LIVE BUILD — fixtures, goods, real stock, colliders
