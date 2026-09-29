@@ -33,9 +33,10 @@
 
    ONE mesh per rig, vertex coloured, one shared Phong material; the geometry
    is cached per (body shape key, kit kind, shirt colour, gun, torch), so every
-   average-man patrolman in the city shares ONE buffer. Vertex colours make it
-   a self-drawing attachment in entities/pedinstance.js (never a pool, so it
-   costs the crowd budget nothing); castShadow off, no lights.
+   average-man patrolman in the city shares ONE buffer — and, since the
+   material draws its vertex colours (white base), entities/pedinstance.js
+   pools it like any body part: every officer wearing the same cached kit is
+   ONE instanced draw, not one draw each. castShadow off, no lights.
 
    API
      CBZ.dutyKit.wear(ch, rec)   dress/strip: rec.duty names the kit

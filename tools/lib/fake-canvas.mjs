@@ -155,7 +155,29 @@ class Ctx2D {
   fillText() { this.ignored.fillText = (this.ignored.fillText || 0) + 1; }
   strokeText() { this.ignored.strokeText = (this.ignored.strokeText || 0) + 1; }
   measureText(t) { return { width: String(t).length * 6 }; }
-  drawImage() { this.ignored.drawImage = (this.ignored.drawImage || 0) + 1; }
+  /* drawImage from ANOTHER FakeCanvas is rasterised (nearest sampling, the
+     smoothing-off path: entities/pedinstance.js's texture pages copy outfit
+     atlases 1:1 and stretch 1-texel edges into gutters). Any other source
+     (an <img> stub) is recorded and ignored, as before. */
+  drawImage(src, a, b, c, d, e, f, g, h) {
+    if (!(src instanceof FakeCanvas)) { this.ignored.drawImage = (this.ignored.drawImage || 0) + 1; return; }
+    let sx = 0, sy = 0, sw = src.width, sh = src.height, dx, dy, dw, dh;
+    if (e === undefined) { dx = a; dy = b; dw = c === undefined ? sw : c; dh = d === undefined ? sh : d; }
+    else { sx = a; sy = b; sw = c; sh = d; dx = e; dy = f; dw = g; dh = h; }
+    const p0 = this._p(dx, dy), p1 = this._p(dx + dw, dy + dh);
+    const x0 = Math.min(p0[0], p1[0]), x1 = Math.max(p0[0], p1[0]), y0 = Math.min(p0[1], p1[1]), y1 = Math.max(p0[1], p1[1]);
+    if (!(x1 > x0) || !(y1 > y0)) return;
+    const S = src._data(), SW = src.width, SH = src.height, save = this.fillStyle;
+    for (let j = Math.max(0, Math.ceil(y0 - 0.5)); j < Math.min(this.canvas.height, Math.ceil(y1 - 0.5)); j++)
+      for (let i = Math.max(0, Math.ceil(x0 - 0.5)); i < Math.min(this.canvas.width, Math.ceil(x1 - 0.5)); i++) {
+        const u = Math.min(SW - 1, Math.max(0, Math.floor(sx + (i + 0.5 - x0) / (x1 - x0) * sw)));
+        const v = Math.min(SH - 1, Math.max(0, Math.floor(sy + (j + 0.5 - y0) / (y1 - y0) * sh)));
+        const o = (v * SW + u) * 4;
+        this.fillStyle = "rgba(" + S[o] + "," + S[o + 1] + "," + S[o + 2] + "," + (S[o + 3] / 255) + ")";
+        this._plot(i, j);
+      }
+    this.fillStyle = save;
+  }
   createImageData(w, h) { return { width: w, height: h, data: new Uint8ClampedArray(w * h * 4) }; }
   getImageData(x, y, w, h) {
     const out = new Uint8ClampedArray(w * h * 4), d = this._buf, W = this.canvas.width;
