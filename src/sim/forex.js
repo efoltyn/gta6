@@ -149,12 +149,11 @@
        desk is laid out in the bank's door-relative frame and stays inside the
        live wall shell. When a later wave ships a per-country exchange
        building, this desk remains a small relocation rather than a redesign.
-   Both stations follow the established interact-prompt idiom (city/bank.js's
-   ATM/teller/loan-desk stations: a `stations` array of {x,z,reach}, a
-   per-frame nearest-in-reach picker, a floating "[E] ..." prompt, keydown
-   captures [E]/Escape) — SIMPLIFIED from that file's version: no facing-dot
-   requirement (these are single free-standing props, not room corners you
-   could be facing away from at arm's reach) and no per-frame visibility
+   Both stations are fixtures in the one interaction registry
+   (CBZ.interactions.registerFixtures: a `stations` array of {x,z,reach};
+   E, Q and a tap all reach them), with no facing requirement (these are
+   single free-standing props, not room corners you could be facing away
+   from at arm's reach) and no per-frame visibility
    distance-gating on the geometry itself (a kiosk + a desk is a handful of
    boxes — cheap enough to just always be there, unlike the bank's full
    3-fixture lobby). The panel itself is a plain document.body-appended div
@@ -682,7 +681,7 @@
   const REACH = 3.2;
   const V = {
     arena: null, group: null, built: false, deskBuilt: false, stations: [],
-    cur: null, prompt: null, lastTxt: "", panel: null, panelOpen: false, venue: "airport", msg: "",
+    panel: null, panelOpen: false, venue: "airport", msg: "",
   };
 
   let VM = null;
@@ -790,7 +789,7 @@
     const arena = CBZ.city && CBZ.city.arena;
     if (!arena) return false;
     if (V.arena !== arena) {
-      V.arena = arena; V.built = false; V.deskBuilt = false; V.group = null; V.stations = []; V.cur = null;
+      V.arena = arena; V.built = false; V.deskBuilt = false; V.group = null; V.stations = [];
     }
     const root = arena.root || CBZ.scene;
     if (!V.group) { V.group = new THREE.Group(); root.add(V.group); }
@@ -813,51 +812,23 @@
     return true;
   }
 
-  // ---- nearest-in-reach picker (SIMPLIFIED from bank.js's facing-dot
-  // version — see header: these are single free-standing props, not room
-  // corners, so plain distance is enough).
-  function pickStation() {
-    const P = CBZ.player;
-    if (!P) return null;
-    const px = P.pos.x, pz = P.pos.z;
-    let best = null, bestD = Infinity;
-    for (let i = 0; i < V.stations.length; i++) {
-      const st = V.stations[i];
-      const dd = Math.hypot(st.x - px, st.z - pz);
-      if (dd > st.reach) continue;
-      if (dd < bestD) { bestD = dd; best = st; }
-    }
-    return best;
-  }
-
   function fmtRate(r) { return r >= 1 ? r.toFixed(2) : r.toFixed(4); }
   function fmt$(n) { n = Math.round(n || 0); return "$" + String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
 
-  function promptText(st) {
-    const spread = SPREAD[st.venue] != null ? SPREAD[st.venue] : SPREAD.airport;
-    return "<b style='color:#5bffb0'>[E]</b> " + st.label + " <span style='color:#7f8794'>· " + Math.round(spread * 100) + "% spread</span>";
-  }
-  function promptEl() {
-    if (V.prompt) return V.prompt;
-    if (typeof document === "undefined" || !document.body) return null;
-    const d = document.createElement("div");
-    d.id = "fxPrompt";
-    d.style.cssText = "position:fixed;left:50%;bottom:150px;transform:translateX(-50%);z-index:46;display:none;" +
-      "background:rgba(13,16,21,.9);border:1px solid #3a4150;border-radius:12px;padding:7px 14px;color:#e8eef7;" +
-      "font-family:Fredoka,system-ui,sans-serif;font-size:15px;pointer-events:auto;cursor:pointer;text-align:center;max-width:78vw";
-    d.addEventListener("click", function () { if (V.cur) openPanel(V.cur.venue); });
-    document.body.appendChild(d);
-    V.prompt = d;
-    return d;
-  }
-  function showPrompt(txt) {
-    const el = promptEl(); if (!el) return;
-    if (txt !== V.lastTxt) { el.innerHTML = txt; V.lastTxt = txt; }
-    if (el.style.display !== "block") el.style.display = "block";
-  }
-  function hidePrompt() {
-    if (V.prompt && V.prompt.style.display !== "none") V.prompt.style.display = "none";
-    V.cur = null;
+  // THE COUNTERS ARE CANDIDATES (city/interactions.js registerFixtures): E at
+  // the kiosk or the desk opens it, a tap on it opens it. No private prompt.
+  let fixturesWired = false;
+  function wireFixtures() {
+    if (fixturesWired || !CBZ.interactions || !CBZ.interactions.registerFixtures) return;
+    fixturesWired = true;
+    CBZ.interactions.registerFixtures({
+      id: "fx-counter", kind: "fx-counter", prio: 8,
+      list: function () { return V.panelOpen ? null : V.stations; },
+      reach: function (st) { return st.reach || REACH; },
+      dot: function () { return -2; },            // free-standing props: plain distance
+      name: function (st) { return st.label; },
+      verbs: [{ id: "fx-open", slot: "e", prio: 5, label: "Exchange", onSelect: (st) => openPanel(st.venue) }],
+    });
   }
 
   // ---- the trade panel --------------------------------------------------
@@ -933,30 +904,18 @@
     if (CBZ.requestLock && g.state === "playing") CBZ.requestLock();
   }
 
-  // ---- per-frame: drive the prompt (no distance-gating on the geometry
-  // itself — a kiosk + a desk is cheap enough to just always be there).
+  // ---- per-frame: build the counters, keep the panel honest
   CBZ.onUpdate(38.45, function () {
-    if (!g || g.mode !== "city") { hidePrompt(); if (V.panelOpen) closePanel(); return; }
+    if (!g || g.mode !== "city") { if (V.panelOpen) closePanel(); return; }
     if (!ensure()) return;
-    if (V.panelOpen) { hidePrompt(); return; }
-    if (g.state !== "playing" || CBZ.cityMenuOpen || (CBZ.player && (CBZ.player.driving || CBZ.player.dead))) { hidePrompt(); return; }
-    const st = pickStation();
-    if (!st) { hidePrompt(); return; }
-    V.cur = st;
-    showPrompt(promptText(st));
+    wireFixtures();
+    if (V.panelOpen && (g.state !== "playing" || (CBZ.player && (CBZ.player.driving || CBZ.player.dead)))) closePanel();
   });
 
-  // [E] opens/acts; Escape/E closes (bank.js's exact capture-phase pattern
-  // so this wins the key over interact.js's bubble listener).
+  // the trade panel is modal: E or Esc closes it
   addEventListener("keydown", function (e) {
+    if (!V.panelOpen) return;
     const k = (e.key || "").toLowerCase();
-    if (V.panelOpen) { if (k === "escape" || k === "e") { e.preventDefault(); if (e.stopImmediatePropagation) e.stopImmediatePropagation(); e.stopPropagation(); closePanel(); } return; }
-    if (!V.cur || !g || g.mode !== "city" || g.state !== "playing") return;
-    if (CBZ.cityMenuOpen || (CBZ.player && (CBZ.player.driving || CBZ.player.dead))) return;
-    if (k !== "e") return;
-    e.preventDefault();
-    if (e.stopImmediatePropagation) e.stopImmediatePropagation();
-    e.stopPropagation();
-    openPanel(V.cur.venue);
+    if (k === "escape" || k === "e") { e.preventDefault(); if (e.stopImmediatePropagation) e.stopImmediatePropagation(); e.stopPropagation(); closePanel(); }
   }, true);
 })();

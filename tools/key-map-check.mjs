@@ -66,6 +66,12 @@ console.log("A. static: the old collisions stay gone");
   const fps = strip(read("src/systems/fpsmode.js"));
   ok(/k === "f"[^\n]*mode !== "city"/.test(fps), "F is not a trigger in the city (fpsmode.js)");
   ok(/qNow[^\n]*mode !== "city"/.test(fps), "Q is not a weapon swap in the city (fpsmode.js)");
+  // the store counters' private E listeners are gone: their fixtures are
+  // registry candidates (tools/touch-coverage-check.mjs holds the full census)
+  for (const f of ["gunstore.js", "jewelry.js", "pawnshop.js", "storage.js", "realestate.js"]) {
+    const code = strip(read("src/city/" + f));
+    ok(!/(toLowerCase\(\)|\bk)\s*!==\s*"e"\)\s*return|k === "e"\)\s*\{/.test(code), f + ": no private E listener (the card owns E)");
+  }
   const pol = strip(read("src/city/police.js"));
   ok(!/toLowerCase\(\) !== "q"/.test(pol), "police.js has no Q draw/holster handler");
 }
@@ -296,6 +302,25 @@ function look(W, x, z) { const P = W.P.pos; W.CBZ.cam.yaw = Math.atan2(-(x - P.x
     ok(rows.every((r) => r.id !== "order-attack"), "an order about someone else is never on a key");
     ok(rows.every((r) => r.key === "e" || r.key === "f"), "only E and F are keys: " + sig.join(" "));
   }
+}
+
+// 9. a wall of fixtures (the gun wall, the racks, the cases): E is the one you look at
+{
+  const W = makePage(); stage(W, { man: true });
+  W.man.pos = { x: -2.2, y: 0, z: -1.2 };
+  const wall = [{ name: "Pistol", x: -0.9, z: -2.4 }, { name: "Shotgun", x: 0.3, z: -2.4 }, { name: "Rifle", x: 1.5, z: -2.4 }];
+  W.I.registerFixtures({ id: "t-wall", kind: "t-wall", list: () => wall, reach: () => 3, dot: () => 0.82, name: (s) => s.name,
+    verbs: [{ id: "wall-buy", slot: "e", label: "Buy $400", onSelect: (s) => W.act("buy:" + s.name) }] });
+  look(W, 3, 3);
+  look(W, 1.5, -2.4);
+  let a = W.press("e");
+  ok(a.length === 1 && a[0] === "buy:Rifle", "E buys the gun you look at, only it (the man beside you is not talked to): " + a);
+  look(W, 3, 3); look(W, -0.9, -2.4);
+  a = W.press("e");
+  ok(a.length === 1 && a[0] === "buy:Pistol", "look along the wall: E buys that one: " + a);
+  look(W, 0, 4);
+  a = W.press("e");
+  ok(!a.some((x) => /^buy:/.test(x)), "the wall behind you: E buys nothing (the look cone holds on a keyboard): " + a);
 }
 
 console.log((fails ? "KEY-MAP: FAIL " : "KEY-MAP: OK ") + passes + " passed, " + fails + " failed");
