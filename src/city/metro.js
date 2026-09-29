@@ -631,10 +631,86 @@
       }
     }
   }
+  /* ------------------------------------------------------------------
+     THE FAR GROUND. Past the swap the far skyline stands on the continent
+     plate, and the plate painted it country: the distant city stood on
+     meadow. metro_ground.js rasterises each city's land use (streets,
+     blocks, lawns, lots, fields, lamps) into a small map; here they are
+     made after load, a slice at a time while no tile work is waiting, and
+     packed into ONE mipmapped atlas the plate's ground skin samples
+     (textures_surface.js cityMap). No geometry, no draw call.
+     ------------------------------------------------------------------ */
+  let _maps = null, _mapI = 0, _mapsDone = false;
+  const MAP_BUDGET_MS = 2;
+  function farMapPump() {
+    const FC = CBZ.farCityMap, MG = CBZ.metroGround;
+    if (_mapsDone || !FC || !MG || !MG.farMap || !THREE) { _mapsDone = true; return; }
+    if (!_maps) {
+      _maps = [];
+      for (const M of CBZ.metroCities) {
+        if (_maps.length >= FC.max) break;
+        try { const m = MG.farMap(M.plan); if (m) { m.id = M.id; _maps.push(m); } } catch (e) { console.error("[metro far map] " + M.id, e); }
+      }
+      return;
+    }
+    const end = performance.now() + MAP_BUDGET_MS;
+    while (_mapI < _maps.length && performance.now() < end) {
+      if (_maps[_mapI].step(end - performance.now())) _mapI++;
+    }
+    if (_mapI < _maps.length) return;
+    _mapsDone = true;
+    try { packFarMaps(_maps, FC.uniforms); } catch (e) { console.error("[metro far map atlas]", e); }
+    _maps = null;
+  }
+  // guillotine-pack the maps (power-of-two each, largest first) into the
+  // smallest power-of-two atlas that holds them; every city gets its world
+  // rect and its atlas rect
+  function packInto(order, AW, AH) {
+    const free = [{ x: 0, y: 0, w: AW, h: AH }];
+    for (const m of order) {
+      let bi = -1;
+      for (let i = 0; i < free.length; i++) {
+        const f = free[i];
+        if (f.w >= m.w && f.h >= m.h && (bi < 0 || f.w * f.h < free[bi].w * free[bi].h)) bi = i;
+      }
+      if (bi < 0) return false;
+      const f = free.splice(bi, 1)[0];
+      m.ax = f.x; m.ay = f.y;
+      if (f.w - m.w > 0) free.push({ x: f.x + m.w, y: f.y, w: f.w - m.w, h: m.h });
+      if (f.h - m.h > 0) free.push({ x: f.x, y: f.y + m.h, w: f.w, h: f.h - m.h });
+    }
+    return true;
+  }
+  function packFarMaps(maps, U) {
+    const order = maps.slice().sort(function (a, b) { return b.w * b.h - a.w * a.h; });
+    let AW = 256, AH = 256;
+    while (!packInto(order, AW, AH)) { if (AW <= AH) AW *= 2; else AH *= 2; }
+    const data = new Uint8Array(AW * AH * 4);
+    for (const m of order) {
+      for (let j = 0; j < m.h; j++) data.set(m.data.subarray(j * m.w * 4, (j + 1) * m.w * 4), ((m.ay + j) * AW + m.ax) * 4);
+      m.data = null;
+    }
+    const tex = new THREE.DataTexture(data, AW, AH, THREE.RGBAFormat, THREE.UnsignedByteType);
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearMipmapLinearFilter;
+    tex.generateMipmaps = true;
+    tex.anisotropy = CBZ.renderer && CBZ.renderer.capabilities && CBZ.renderer.capabilities.getMaxAnisotropy ? Math.min(8, CBZ.renderer.capabilities.getMaxAnisotropy()) : 1;
+    tex.needsUpdate = true;
+    order.forEach(function (m, i) {
+      U.uGndCityR.value[i].set(m.x0, m.z0, 1 / (m.w * m.cell), 1 / (m.h * m.cell));
+      U.uGndCityA.value[i].set(m.ax / AW, m.ay / AH, m.w / AW, m.h / AH);
+    });
+    U.uGndCity.value = tex;
+    U.uGndCityN.value = order.length;
+    _audit.farMapMB = +(AW * AH * 4 * 4 / 3 / 1048576).toFixed(1);
+    _audit.farMapMs = Math.round(order.reduce(function (s, m) { return s + m.ms; }, 0));
+  }
+
   CBZ.onAlways && CBZ.onAlways(58, function () {
     const g = CBZ.game;
     if (!g || g.mode !== "city" || !CBZ.metroCities.length) return;
     if (_cur || _pending.length) pump();
+    else if (!_mapsDone) farMapPump();
     const now = performance.now();
     if (now - _lastSweep < 400) return;
     _lastSweep = now;
@@ -704,6 +780,7 @@
       buildMs: _audit.buildMs, tileBuilds: _audit.tileBuilds, tileDrops: _audit.tileDrops,
       tileMsMax: Math.round(_audit.tileMsMax * 10) / 10, tileMsMean: _audit.tileBuilds ? Math.round(_audit.tileMsSum / _audit.tileBuilds * 10) / 10 : 0,
       sliceMsMax: Math.round(_audit.sliceMsMax * 10) / 10, farBuilds: _audit.farBuilds, farMB: +(_audit.farBytes / 1048576).toFixed(1),
+      farMap: _mapsDone ? { MB: _audit.farMapMB || 0, ms: _audit.farMapMs || 0 } : null,
       viewFar: CBZ.metroViewFar || 0, viewR: Math.round(_viewR), showR: Math.round(_showR),
       cities: CBZ.metroCities.map(function (M) {
         const S = M.plan.stats;

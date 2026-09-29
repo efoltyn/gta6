@@ -345,7 +345,10 @@
     "float gfH = aGfPos.w;",
     "float gfType = floor( aGfPar.w / 4.0 );",
     "float gfWm = aGfPar.w - gfType * 4.0;",
-    "float gfD = distance( gfRoot, cameraPosition );",
+    // the eye from viewMatrix (r128 leaves cameraPosition at zero on Lambert):
+    // row-vector product = R^T v, so this is -R^T t
+    "vec3 gfEye = -( viewMatrix[3].xyz * mat3( viewMatrix ) );",
+    "float gfD = distance( gfRoot, gfEye );",
     // the share of blades this distance wants; survivors widen to keep coverage
     "float gfA = uGfLod.x / max( gfD, uGfLod.x );",
     "float gfWant = gfA * gfA * ( 1.0 - smoothstep( uGfLod.z, uGfLod.y, gfD ) );",

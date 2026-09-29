@@ -156,7 +156,7 @@
     // the shared ground skin (world/textures_surface.js): duff, moss and the
     // lake bank get soil / grass / stone detail per pixel instead of paint
     const floor = new THREE.Mesh(floorGeo, CBZ.groundSkin
-      ? CBZ.groundSkin({ name: "redhollow-forest-ground", far: 360, sandY: [-0.9, -0.3] })
+      ? CBZ.groundSkin({ name: "redhollow-forest-ground", far: 360, sandY: [-0.9, -0.3], srgb: true })
       : new THREE.MeshLambertMaterial({ vertexColors: true }));
     floor.position.set(CX, 0.02, CZ);
     floor.receiveShadow = true;
@@ -288,7 +288,7 @@
       tg.setAttribute("normal", new THREE.BufferAttribute(tn, 3));
       const tOff = { vertexColors: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 };
       const tMat = CBZ.groundSkin
-        ? CBZ.groundSkin({ name: "redhollow-trail", far: 300, sandY: [-9, -8], extra: tOff })
+        ? CBZ.groundSkin({ name: "redhollow-trail", far: 300, sandY: [-9, -8], extra: tOff, srgb: true })
         : new THREE.MeshLambertMaterial(tOff);
       // the trails lie ON the floor, so they recede into the fog with it: the
       // floor takes terrainFogScale 0.10 from worldmap.js's worldSurface sweep

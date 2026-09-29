@@ -50,7 +50,14 @@
      * HAZE, NOT A WALL. The material rides the same fog scale as the
        ground the city stands on (metro_ground.js, 0.10: the terrain's
        atmospheric perspective), so a city 2-6 km away fades by distance
-       like the land under it instead of vanishing at the street fog's end.
+       like the land under it instead of vanishing at the street fog's end,
+       and the same AIR as that ground (CBZ.aerialHaze: extinction plus a
+       blue-grey in-scatter, in linear light), so it recedes into blue-grey
+       instead of whitening.
+     * COLOURS ARE sRGB, DECODED IN THE SHADER. Palettes are authored as
+       display colours; the shader decodes them to linear reflectance at the
+       end (see MF_MAIN), which is what keeps pale stone off white and brick
+       off orange at every distance.
 
    PERFORMANCE LAW. No THREE.Geometry, no mergeBufferGeometries: every tile
    is written straight into typed arrays (Float32 position, Int8 normal,
@@ -457,6 +464,10 @@
     "  }",
     // ---- ground contact grime on every wall ----
     "  col *= mix( 1.0, 0.84 + 0.16 * smoothstep( -0.3, 2.2, v ), wall );",
+    // ---- street-canyon occlusion: the lower storeys see less sky (the
+    //      buildings across the street hide it), so a facade darkens toward
+    //      its foot; from a distance this is what seats a city on its ground
+    "  col *= mix( 1.0, 0.9 + 0.1 * smoothstep( 0.0, 14.0, v ), wall );",
     // ---- glass: interior by day, a reflected sky, lit rooms by night ----
     "  float g = mix( wm, wAvg, blur );",
     "  if ( g + glassy > 0.001 ) {",
@@ -478,7 +489,22 @@
     "    lc *= mix( 0.7 + 0.5 * clamp( lvl, 0.0, 1.0 ), 0.95, blur );",
     "    mfEmit += lc * litOn * g * uMfNight * 1.25 * litK;",
     "  }",
-    "  diffuseColor.rgb = col;",
+    // ---- THE ALBEDO IS DECODED. Every colour above (the plan's district
+    //      palettes, the deck/plant tables, the shader's own trims) is an
+    //      sRGB DISPLAY colour, and it used to go to the lights as if it were
+    //      linear reflectance: limestone 0xcdbf9f reflected 80%, a gravel roof
+    //      52%, brick 0x8a3b26 came out salmon. Through the lights, the graded
+    //      ACES and the fog every pale wall and every roof landed at 220-250,
+    //      the horizon's own white, and brick at (235,170,130): "they look
+    //      all the same and white. And some like orangish". Decoded (the
+    //      sRGB curve, polynomial fit) and eased 30% toward grey (the grade
+    //      adds +14% saturation and ACES pushes reds to orange), limestone
+    //      lands at ~230 in sun / 200 in shade, brick is brick red, tar and
+    //      gravel roofs are 50-170, glass reads dark. Near and far are one
+    //      material, so the swap still matches.
+    "  col = max( col, vec3( 0.0 ) );",
+    "  col = col * ( col * ( col * 0.305306011 + 0.682171111 ) + 0.012522878 );",
+    "  diffuseColor.rgb = mix( vec3( dot( col, vec3( 0.2126, 0.7152, 0.0722 ) ) ), col, 0.7 );",
     "}",
   ].join("\n");
 
@@ -522,8 +548,11 @@
           "vMfN = normalize( mat3( modelMatrix ) * objectNormal );",
         ].join("\n"));
     };
-    mat.customProgramCacheKey = function () { return "cbzMetroFabric1"; };
-    // atmospheric perspective of the land it stands on (see the header)
+    mat.customProgramCacheKey = function () { return "cbzMetroFabric2"; };
+    // atmospheric perspective of the land it stands on (see the header):
+    // the fog's scale, and with it the air (terrain_overhaul.js aerialHaze)
+    // that fills the kilometres the scaled fog never reaches: blue-grey,
+    // not white
     if (CBZ.terrainFogScale) CBZ.terrainFogScale(mat, FOG_SCALE);
     hook();
     return mat;

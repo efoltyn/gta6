@@ -1186,11 +1186,40 @@
     // Keep country unmistakably terrestrial through flight-distance fog.
     // The former pale cyan-leaning greens converged on the sea colour and
     // made correctly grounded trees read as if they were floating in water.
-    const cGrass = new THREE.Color(0x4f7445), cDry = new THREE.Color(0x7f7a4a);
-    const cDirt = new THREE.Color(0x795d42), cScrub = new THREE.Color(0x45684e);
-    const cLush = new THREE.Color(0x37684a);                 // moist shore band
-    const cSand = new THREE.Color(0xdcc794), cWet = new THREE.Color(0xbfa877);
+    // THESE ARE sRGB DISPLAY COLOURS, decoded to linear albedo once the
+    // whole plate is painted (CONTINENT_LINEAR_ALBEDO below). They used to
+    // reach the lights undecoded — a meadow
+    // reflecting 45% green, sand 86% — and the whole backcountry came out
+    // one pale mint (214,230,201) from the air: "the ground from far away
+    // just looks like boring green". Picked so the decoded reflectance is a
+    // real one (meadow ~0.08/0.12/0.04, straw ~0.22/0.18/0.09, sand ~0.5).
+    const cGrass = new THREE.Color(0x56683a), cDry = new THREE.Color(0x857a57);
+    const cDirt = new THREE.Color(0x6f5d4a), cScrub = new THREE.Color(0x565d40);
+    const cLush = new THREE.Color(0x40613a);                 // moist shore band
+    const cSand = new THREE.Color(0xc4b08a), cWet = new THREE.Color(0x9c8a66);
     const cBed = new THREE.Color(0x8a8a6b);                  // submerged seabed
+    // LAND USE seen from the air: woodland floor under the forest's own
+    // stands (forestlook's stand mask, so the dark ground is where the trees
+    // are), and farm country as a mosaic of parcels, each its own crop
+    const cWood = new THREE.Color(0x3a4530);
+    const CROPS = [0x455d31, 0x59693f, 0x8c7f59, 0x7f765d, 0x54493c, 0x61654b, 0x4d6434, 0x9c9345].map(function (h) { return new THREE.Color(h); });
+    const FLOOK_N = CBZ.forestLook && CBZ.forestLook.noise;
+    const FA = 0.35, FCA = Math.cos(FA), FSA = Math.sin(FA);
+    const hsh = CBZ.hash01 || function () { return 0.5; };
+    // -> farmland weight at (x,z); `out` gets that parcel's crop
+    function fieldAt(x, z, out) {
+      const zone = noise2(x + 1700, z - 900, 1400, 8840);
+      let w = smooth01((zone - 0.44) / 0.14);
+      if (w <= 0) return 0;
+      const u = x * FCA + z * FSA, v = -x * FSA + z * FCA;
+      const cu = Math.floor(u / 300), cv = Math.floor(v / 190);
+      let k = hsh(cu, cv, 8841);
+      if (hsh(cu, cv, 8842) < 0.55) k = hsh(cu * 2 + ((u / 300 - cu) < 0.5 ? 0 : 1), cv, 8843);   // a split parcel
+      const i = k < 0.04 ? 7 : Math.min(6, Math.floor((k - 0.04) / 0.96 * 7));
+      out.copy(CROPS[i]).multiplyScalar(0.94 + 0.12 * hsh(cu, cv, 8844));
+      return w;
+    }
+    const cField = new THREE.Color();
     const c = new THREE.Color(), c2 = new THREE.Color();
     const biomeBlends = (city.biomeBlends || CBZ._biomeBlendSpecs || []).slice();
     const biomePalettes = biomeBlends.map(function (spec) {
@@ -1273,6 +1302,13 @@
       const drift = noise2(wx, wz, 300, 8812) - 0.5;
       c.lerp(cDry, Math.max(0, drift) * 0.5);
       c.lerp(cLush, Math.max(0, -drift) * 0.4);
+      if (CFG.CONTINENT_LANDUSE_V1 !== false) {
+        const stand = FLOOK_N ? FLOOK_N(wx, wz, 760, 4441) : 0;
+        const wood = smooth01((stand - 0.34) / 0.2);
+        const fw = fieldAt(wx, wz, cField) * (1 - smooth01((stand - 0.22) / 0.12));
+        if (fw > 0) c.lerp(cField, fw * 0.9);
+        if (wood > 0) c.lerp(cWood, wood * 0.75);
+      }
       applyBiomeLandCover(c, wx, wz);
       const reliefY = countryHeightAt(wx, wz);
       rGrid[i] = reliefY;
@@ -1391,6 +1427,23 @@
         }
       }
     }
+    // THE PLATE'S VERTEX COLOUR IS LINEAR ALBEDO. Everything above authors
+    // sRGB display colours (the palettes, the biome blends, the strata);
+    // they used to reach the lights undecoded and the country rendered pale
+    // mint from the air. Decoded here once (the sRGB curve, eased 20% toward
+    // grey because the grade re-saturates), so the plate, the ground skin on
+    // every tier and CBZ.groundCover (which reads these colours) all see
+    // the same real reflectance.
+    if (CFG.CONTINENT_LINEAR_ALBEDO !== false) {
+      for (let i = 0; i < colors.length; i += 3) {
+        let r = Math.max(0, colors[i]), g = Math.max(0, colors[i + 1]), b = Math.max(0, colors[i + 2]);
+        r = r * (r * (r * 0.305306011 + 0.682171111) + 0.012522878);
+        g = g * (g * (g * 0.305306011 + 0.682171111) + 0.012522878);
+        b = b * (b * (b * 0.305306011 + 0.682171111) + 0.012522878);
+        const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        colors[i] = l + (r - l) * 0.8; colors[i + 1] = l + (g - l) * 0.8; colors[i + 2] = l + (b - l) * 0.8;
+      }
+    }
     geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
 
     // Physically remove the underlay triangles whose centres sit below an
@@ -1434,7 +1487,11 @@
     let plateMat = CBZ.groundSkin
       ? CBZ.groundSkin({ name: "continent-ground", extra: plateParams, far: 520,
           // the plate's relief is gentle backcountry: rock on real banks only
-          rockSlope: [0.26, 0.48], sandY: [-0.35, -0.1] })
+          rockSlope: [0.26, 0.48], sandY: [-0.35, -0.1],
+          // (the vertex colours are already linear, decoded below); the
+          // distant metros' streets and blocks come from city/metro.js's
+          // land-use atlas
+          cityMap: true })
       : new THREE.MeshLambertMaterial(plateParams);
     // Keep the dry continent's colour identity through aerial haze. Normal fog
     // made every point beyond the short city fog wall equal the sky's cyan and
@@ -1445,6 +1502,8 @@
     // vertex colours still converged to the horizon grey, creating the exact
     // visual illusion of a second flat water sheet.  Eight percent keeps a
     // light atmospheric veil while preserving an unmistakably dry hue.
+    // (terrainFogScale also lays the AIR the scale leaves out: kilometres of
+    // country recede blue-grey with their contrast cut — aerialHaze)
     if (CBZ.terrainFogScale) plateMat = CBZ.terrainFogScale(plateMat, 0.08);
     const plate = new THREE.Mesh(geo, plateMat);
     // interior sits just under the islands' y=0 slabs (no z-fight), well
@@ -1517,6 +1576,48 @@
         if (l) for (let i = 0; i < l.length; i++) { const b = l[i]; if (x >= b.minX - 0.5 && x <= b.maxX + 0.5 && z >= b.minZ - 0.5 && z <= b.maxZ + 0.5) return true; }
         return false;
       }
+      // the palette the LANDCOVER loop paints with, decoded exactly as the
+      // plate is (CONTINENT_LINEAR_ALBEDO), and what each grows:
+      //   g density, h height, dry straw share
+      const LIN = CFG.CONTINENT_LINEAR_ALBEDO !== false;
+      function dec(col) {
+        let r = col.r, g = col.g, b = col.b;
+        if (LIN) {
+          r = r * (r * (r * 0.305306011 + 0.682171111) + 0.012522878);
+          g = g * (g * (g * 0.305306011 + 0.682171111) + 0.012522878);
+          b = b * (b * (b * 0.305306011 + 0.682171111) + 0.012522878);
+          const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+          r = l + (r - l) * 0.8; g = l + (g - l) * 0.8; b = l + (b - l) * 0.8;
+        }
+        return [r, g, b];
+      }
+      const PAL = [
+        [cGrass, 1.0, 1.0, 0.2], [cLush, 1.0, 1.3, 0.0], [cScrub, 0.75, 0.85, 0.35], [cDry, 0.9, 0.9, 0.9],
+        [cWood, 0.2, 0.7, 0.3], [cDirt, 0.06, 0.6, 0.6], [cSand, 0, 1, 0], [cWet, 0, 1, 0], [cBed, 0, 1, 0],
+      ].filter(function (e) { return e[0] && e[0].isColor; }).map(function (e) {
+        const c = dec(e[0]), l = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2] + 1e-5;
+        return { cr: c[0] / l, cg: c[1] / l, cb: c[2] / l, ll: Math.log(l), g: e[1], h: e[2], dry: e[3] };
+      });
+      const LU = { g: 0, h: 1, dry: 0 };
+      function landUse(r, g, b) {
+        const l = 0.2126 * r + 0.7152 * g + 0.0722 * b + 1e-5, cr = r / l, cg = g / l, cb = b / l, ll = Math.log(l);
+        let W = 0, G = 0, H = 0, Dr = 0;
+        for (let i = 0; i < PAL.length; i++) {
+          const p = PAL[i];
+          const d2 = (cr - p.cr) * (cr - p.cr) + (cg - p.cg) * (cg - p.cg) + (cb - p.cb) * (cb - p.cb) + 0.5 * (ll - p.ll) * (ll - p.ll);
+          const w = Math.exp(-d2 / 0.004);
+          W += w; G += w * p.g; H += w * p.h; Dr += w * p.dry;
+        }
+        // a colour the palette doesn't know (a biome's blend, a strata tint):
+        // green enough to be grass by its hue alone, blended in as W fades
+        const gh = Math.max(0, Math.min(1, (g / Math.max(r, 1e-4) - 1.0) / 0.3));
+        const k = W / (W + 1e-3);
+        LU.g = W > 0 ? k * (G / W) + (1 - k) * gh : gh;
+        LU.h = W > 0 ? k * (H / W) + (1 - k) : 1;
+        LU.dry = W > 0 ? k * (Dr / W) + (1 - k) * 0.3 : 0.3;
+        return LU;
+      }
+      CBZ.continentLandUse = function (r, g, b) { const o = landUse(r, g, b); return { g: o.g, h: o.h, dry: o.dry }; };
       const PMINX = cx0 - W / 2, PMINZ = cz0 - D / 2, IDX = SEG / W, IDZ = SEG / D, ST = SEG + 1;
       CBZ.continentCoverAt = function (x, z, out) {
         const fx = (x - PMINX) * IDX, fz = (z - PMINZ) * IDZ;
@@ -1535,9 +1636,11 @@
         const r = C[a * 3] * wa + C[b * 3] * wb + C[c * 3] * wc;
         const g = C[a * 3 + 1] * wa + C[b * 3 + 1] * wb + C[c * 3 + 1] * wc;
         const bl = C[a * 3 + 2] * wa + C[b * 3 + 2] * wb + C[c * 3 + 2] * wc;
-        const gr = g / Math.max(r, 1e-4);
-        const gw = sm(Math.max(0, Math.min(1, (gr - 0.88) / 0.34)));
-        if (gw < 0.05) return true;                                   // dirt, scrub, rock
+        // WHICH land cover is this? The nearest entries of the plate's OWN
+        // palette (decoded like the plate), soft-weighted in chroma+log-lum
+        landUse(r, g, bl);
+        const gw = LU.g;
+        if (gw < 0.05) return true;                                   // dirt, sand, rock, bed
         const Y = pAttr.array;
         out.y = (Y[a * 3 + 1] * wa + Y[b * 3 + 1] * wb + Y[c * 3 + 1] * wc) + (COAST ? 0 : -0.06);
         // meadow, patchy at 7 m; a mown verge along every road
@@ -1548,7 +1651,8 @@
         out.r = r; out.gr = g; out.b = bl;
         out.wild = verge > 0.5 ? 0 : 1;
         out.h = (verge > 0.5 ? 1.3 : 1) * (1 + 0.35 * moist);
-        out.dry = Math.max(0, 0.35 - moist * 0.3);
+        out.dry = Math.max(0, Math.min(1, LU.dry - moist * 0.3));
+        out.h *= LU.h;
         out.flw = verge > 0.5 ? 0.05 : 0.07 + 0.05 * noise2(x, z, 23, 0x6a13);
         return true;
       };
@@ -1785,7 +1889,12 @@
       const group = new THREE.Group();
       group.name = "frontier-loop";
       group.userData.terrain = true; // one world-spanning route; never disappear as one far-cull blob
-      const roadMat = new THREE.MeshLambertMaterial({ color: 0x30343a });
+      // real asphalt reflectance (0x30343a used to reach the lights as 20%,
+      // a pale concrete band), and the plate's own fog scale and air: from
+      // the air the loop reads as a dark line across the country instead of
+      // fogging out kilometres before the ground it lies on
+      const roadMat = new THREE.MeshLambertMaterial({ color: new THREE.Color(0.072, 0.074, 0.08) });
+      if (CBZ.terrainFogScale) CBZ.terrainFogScale(roadMat, 0.08);
       const paintMat = new THREE.MeshBasicMaterial({ color: 0xe6c45a, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
       // unlit paint on a lit road: without the day tint the dashes glow like
       // LEDs all night while the asphalt under them goes dark
@@ -1842,7 +1951,7 @@
       // outer ring, so the pad wears into the country instead of ending on a
       // ruled edge; groundSkin supplies the soil/stone detail per pixel.
       const gravelMat = CBZ.groundSkin
-        ? CBZ.groundSkin({ name: "frontier-lookout-pad", far: 260, sandY: [-9, -8],
+        ? CBZ.groundSkin({ name: "frontier-lookout-pad", far: 260, sandY: [-9, -8], srgb: true,
             extra: { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 } })
         : new THREE.MeshLambertMaterial({ vertexColors: true });
       const steelMat = new THREE.MeshLambertMaterial({ color: 0x68727d });

@@ -416,7 +416,7 @@ document.body.appendChild(b);}}catch(e){}})();
      mountain heightfield (no hollow ridge sheets) + per-material fog scale.
      Must load right after terrain.js and before city/world.js.
      Revert: CBZ.CONFIG.TERRAIN_SOLID = false. -->
-<script src="src/world/terrain_overhaul.js?v=w09290242x"></script>
+<script src="src/world/terrain_overhaul.js?v=far0929"></script>
 <!-- Geology kit: shared Quilez erosion / ridged multifractal / drainage / strata /
      snow-cover / adaptive-mesh helpers, used by city/biome_snow (the real walkable
      mountains), world/terrain_overhaul (the backdrop range) and city/continent
@@ -512,7 +512,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (asphalt, concrete, plaster, metal, dirt, grass, sand, wood, glass grime).
      Needs core/seed.js for CBZ.hashN; bakes lazily on first request, so it only
      has to precede its first consumer — world/materials.js. -->
-<script src="src/world/textures_surface.js?v=surf2"></script>
+<script src="src/world/textures_surface.js?v=far0929"></script>
 <script src="src/world/materials.js?v=pbr1"></script>
 <script src="src/world/fuel_station.js?v=fuel1"></script>
 <script src="src/world/prisonkit.js?v=tow929b"></script>
@@ -1163,7 +1163,7 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.CONFIG.WATER_REFLECT is on (default). Reads the sea lazily at runtime,
      so load order past config.js + WaterReflect.js is all it needs. -->
 <script src="src/world/waterfx.js?v=roadmerge1"></script>
-<script src="src/city/highways.js?v=flick1"></script>
+<script src="src/city/highways.js?v=far0929"></script>
 <!-- THE HIGHWAY NETWORK AS DATA (HIGHWAY_NET_V2): the named-route table +
      builder. Loads right after the ribbon builder it drives; registers its
      own landmass pass (order 91 — after every causeway, before the
@@ -1256,7 +1256,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/airport_capeharbor.js?v=nodash1"></script>
 <script src="src/city/island_military.js?v=cd0929"></script>
 <script src="src/city/biome_desert.js?v=lad1"></script>
-<script src="src/city/biome_forest.js?v=cd0929"></script>
+<script src="src/city/biome_forest.js?v=far0929"></script>
 <script src="src/city/biome_farmland.js?v=cd0929"></script>
 <script src="src/city/biome_snow.js?v=cd0929"></script>
 <script src="src/city/snowboard.js?v=cd0929"></script>
@@ -1694,13 +1694,13 @@ document.body.appendChild(b);}}catch(e){}})();
      metro_fabric.js draws its buildings, metro_ground.js its streets and ground, metro.js places the
      Kingsport metro + the city rings at landmass order 43 and streams their tiles by distance. -->
 <script src="src/city/metroplan.js?v=metro0929"></script>
-<script src="src/city/metro_fabric.js?v=sky0929"></script>
+<script src="src/city/metro_fabric.js?v=far0929"></script>
 <!-- REAL GRASS (owner: "when you walk on grass it's just fucking green"): instanced lit blades round
      the camera on every grass surface, fed by CBZ.groundCover (the ONE land-use + ground-colour
      query: cityground 10, metro_ground 20, continent 90 register into it, so it loads before them). -->
 <script src="src/world/grassfield.js?v=grass0929"></script>
-<script src="src/city/metro_ground.js?v=grass0929"></script>
-<script src="src/city/metro.js?v=sky0929b"></script>
+<script src="src/city/metro_ground.js?v=grass0929b"></script>
+<script src="src/city/metro.js?v=far0929"></script>
 <script src="src/city/spawnplaces.js?v=sim2"></script>
 <script src="src/city/scenedirector.js?v=w09290218"></script>
 <script src="src/city/race_livery.js?v=racepaint1"></script>
@@ -2102,7 +2102,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/river.js?v=w09290242x"></script>
 <!-- THE CONTINENT: runs after every landmass builder (order 97) and fills the
      ocean between POIs with walkable backcountry — one world, not circles. -->
-<script src="src/city/continent.js?v=grass0929"></script>
+<script src="src/city/continent.js?v=grass0929b"></script>
 <script src="src/city/demographics.js?v=world1"></script>
 <!-- X6: the affinity matrix (country/state/city relations) — after
      countries.js (CBZ.COUNTRIES) and officials.js/polity.js (both already

@@ -214,7 +214,7 @@
   function dirtDeckMaterial() {
     if (!CBZ.groundSkin) return deckMaterial(0x6b5a42, 1);
     // sandY far below the deck: a causeway at sea level is a track, not a beach
-    const m = CBZ.groundSkin({ name: "dirt-track", far: 320, sandY: [-9, -8], chroma: 0.5 });
+    const m = CBZ.groundSkin({ name: "dirt-track", far: 320, sandY: [-9, -8], chroma: 0.5, srgb: true });
     const skin = m.onBeforeCompile;
     m.onBeforeCompile = function (sh) {
       sh.vertexShader = sh.vertexShader
@@ -235,7 +235,7 @@
         ].join("\n"));
       if (skin) skin(sh);
     };
-    m.customProgramCacheKey = function () { return "cbzGroundSkin1-dirtdeck"; };
+    m.customProgramCacheKey = function () { return "cbzGroundSkin2-dirtdeck"; };
     m.userData.dirtDeck = true;
     return m;
   }
