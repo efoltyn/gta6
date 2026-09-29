@@ -47,11 +47,22 @@
 
    WHAT STREAMS (the load-time rule — the metro is 3-5 km from the spawn, so
    none of its geometry may cost the load): every city is cut into 800 m
-   tiles. A tile's buildings (metro_fabric.js) and ground (metro_ground.js)
-   are built when the camera comes within range, one tile per frame at
-   most, and dropped when it is far. Until then ONE instanced far-skyline
-   mesh per city holds the silhouette, so the towers are on the horizon from
-   the air before a single wall is built. Trees are instanced at load (a
+   tiles, and every tile has TWO builds of the same buildings:
+     NEAR — every detail + colliders (metro_fabric.js) and the streets and
+       ground (metro_ground.js); built when the camera comes within range,
+       dropped when it is far;
+     FAR  — the HLOD: the same buildings at their true footprint, height,
+       setbacks, roofs and facades, merged into one draw call per tile.
+       Built once, after the near work, and KEPT (it is video memory only).
+   Owner, 2026-09-29: "if there's no difference when you do the fake
+   skyline, then why are we doing a fake skyline? I want real skyline. I
+   want the actual shit in the distance." So there is no stand-in: past the
+   near radius the tile you see IS the tile's buildings, and the city
+   stays on screen to the distance where its haze completes (it rides the
+   ground's fog scale, see metro_fabric.js), with the camera's far plane
+   pushed out to reach it (CBZ.metroViewFar, read by city/mode.js). All
+   building work runs as sliced jobs under a per-frame millisecond budget,
+   so no single frame pays for a whole tile. Trees are instanced at load (a
    few thousand matrices) and dealt into cells by core/farcull.js.
 
    DETERMINISM: plans are pure functions of (world seed, city id, the live
@@ -73,6 +84,12 @@
   // streaming radii (metres from the camera to a tile's rect)
   const BUILD_R = 1500, DROP_R = 2600;          // on the ground
   const BUILD_R_AIR = 2800, DROP_R_AIR = 4200;  // above ~120 m
+  // the city's haze completes where the ground's does: fog.far / its scale
+  // (metro_fabric.js FOG_SCALE == metro_ground.js's 0.10). Capped so the far
+  // plane never runs past what depth precision can order.
+  const HAZE_SCALE = 0.10, VIEW_MAX = 14000;
+  // per-frame budget for all metro building work (sliced jobs)
+  const BUDGET_MS = 3;
 
   CBZ.metroCities = [];
 
@@ -467,7 +484,7 @@
         }
       } catch (e) { console.error("[metro ground solve] " + id, e); }
     }
-    // ---- tiles (no geometry yet) + the far skyline + trees
+    // ---- tiles (no geometry yet: a near and a far mesh each) + trees
     M.fabric = null; M.ground = null;
     if (CBZ.metroFabric && CBZ.metroFabric.prepare) {
       try { M.fabric = CBZ.metroFabric.prepare(P, { root: g, tile: TILE, name: id }); } catch (e) { console.error("[metro fabric prepare] " + id, e); }
@@ -498,35 +515,48 @@
   }
 
   // ------------------------------------------------------------------
-  //  STREAMING: build near, drop far, one tile per frame
+  //  STREAMING: near tiles in range, far tiles everywhere in view, every
+  //  build a sliced job under BUDGET_MS a frame
   // ------------------------------------------------------------------
-  // a tile is built in two steps on two different frames (its ground, then
-  // its buildings), so no single frame pays for both
+  // the ground half (metro_ground.js) is one atomic build; the buildings
+  // (near or far) run through metro_fabric's job slicer
   function buildPart(M, t, part) {
     const T0 = performance.now();
     if (part === "gnd") {
       if (t.gnd && CBZ.metroGround.buildTile && !t.gndBuilt) { try { CBZ.metroGround.buildTile(M.plan, t.gnd); } catch (e) { console.error("[metro ground tile]", e); } }
       t.gndBuilt = true;
+    } else if (part === "far") {
+      if (t.fab && !t.fab.farBuilt) { try { fabDone(M, t, "far", CBZ.metroFabric.buildFarTile(M.plan, t.fab)); } catch (e) { console.error("[metro far tile]", e); } }
+      t.fab && (t.fab.farBuilt = true);
     } else {
       if (t.fab && CBZ.metroFabric.buildTile && !t.fabBuilt) {
-        try {
-          const r = CBZ.metroFabric.buildTile(M.plan, t.fab);
-          t.cols = (r && r.colliders) || [];
-          for (const c of t.cols) { if (CBZ.colliderAdd) CBZ.colliderAdd(c); else CBZ.colliders.push(c); }
-          if (!CBZ.colliderAdd && CBZ.markCollidersDirty) CBZ.markCollidersDirty();
-          if (M.fabric.proxyHide) M.fabric.proxyHide(t.fab, true);
-        } catch (e) { console.error("[metro fabric tile]", e); }
+        try { fabDone(M, t, "fab", CBZ.metroFabric.buildTile(M.plan, t.fab)); } catch (e) { console.error("[metro fabric tile]", e); }
       }
       t.fabBuilt = true;
     }
     t.built = !!(t.gndBuilt && t.fabBuilt);
-    const ms = performance.now() - T0;
-    _audit.tileBuilds++; _audit.tileMsMax = Math.max(_audit.tileMsMax, ms); _audit.tileMsSum += ms;
+    note(performance.now() - T0);
+  }
+  function note(ms) { _audit.tileBuilds++; _audit.tileMsMax = Math.max(_audit.tileMsMax, ms); _audit.tileMsSum += ms; }
+  // a finished building job: colliders in (near), then show the right one
+  function fabDone(M, t, part, r) {
+    if (part === "fab") {
+      t.cols = (r && r.colliders) || [];
+      for (const c of t.cols) { if (CBZ.colliderAdd) CBZ.colliderAdd(c); else CBZ.colliders.push(c); }
+      if (!CBZ.colliderAdd && CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+      t.fabBuilt = true;
+      t.nearEmpty = !!(r && r.empty);
+      t.built = !!(t.gndBuilt && t.fabBuilt);
+    } else {
+      t.farEmpty = !!(r && r.empty);
+      _audit.farBuilds++; _audit.farBytes += (r && r.stats && r.stats.bytes) || 0;
+    }
+    showTile(t, _cx, _cz);
   }
   function dropTile(M, t) {
+    if (_cur && _cur.t === t && _cur.part === "fab") _cur = null;
     if (t.fab && CBZ.metroFabric.disposeTile) {
       try { CBZ.metroFabric.disposeTile(M.plan, t.fab); } catch (e) {}
-      if (M.fabric.proxyHide) M.fabric.proxyHide(t.fab, false);
     }
     if (t.gnd && CBZ.metroGround.disposeTile) { try { CBZ.metroGround.disposeTile(M.plan, t.gnd); } catch (e) {} }
     if (t.cols && t.cols.length) {
@@ -539,21 +569,70 @@
     }
     t.cols = null; t.built = false; t.gndBuilt = false; t.fabBuilt = false;
     _audit.tileDrops++;
+    showTile(t, _cx, _cz);
   }
   function rectDist(t, x, z) {
     const dx = Math.max(t.x0 - x, 0, x - t.x1), dz = Math.max(t.z0 - z, 0, z - t.z1);
     return Math.hypot(dx, dz);
   }
-  let _lastSweep = 0, _frame = 0;
+  function rectFar(t, x, z) {
+    const dx = Math.max(Math.abs(t.x0 - x), Math.abs(t.x1 - x)), dz = Math.max(Math.abs(t.z0 - z), Math.abs(t.z1 - z));
+    return Math.hypot(dx, dz);
+  }
+  // WHICH OF THE PAIR IS DRAWN. The near tile inside its build radius (plus
+  // a band so a tile on the edge doesn't flip), the far tile everywhere
+  // else in view; never both, never neither while either exists.
+  let _cx = 0, _cz = 0, _showR = BUILD_R + 300, _viewR = 1e9;
+  function showTile(t, x, z) {
+    const f = t.fab;
+    const d = rectDist(t, x, z);
+    const nearOK = !!(f && t.fabBuilt && !t.nearEmpty);
+    const farOK = !!(f && f.farBuilt && !t.farEmpty);
+    const inView = d < _viewR;
+    const nearOn = nearOK && inView && (d < _showR || !farOK);
+    const farOn = farOK && inView && !nearOn;
+    if (f && f.mesh && f.mesh.visible !== nearOn) f.mesh.visible = nearOn;
+    if (f && f.far && f.far.visible !== farOn) f.far.visible = farOn;
+    const gOn = inView && !!t.gndBuilt;
+    if (t.gnd && t.gnd.meshes) for (const m of t.gnd.meshes) if (m.visible !== gOn) m.visible = gOn;
+  }
+
+  let _lastSweep = 0;
   const _pending = [];
+  let _cur = null;                 // the building job in flight: { M, t, part, J }
+  function pump() {
+    let left = BUDGET_MS;
+    while (left > 0.25) {
+      if (!_cur) {
+        const job = _pending.shift();
+        if (!job) return;
+        const t = job.t;
+        if (job.part === "gnd") {
+          if (t.gndBuilt) continue;
+          buildPart(job.M, t, "gnd");
+          showTile(t, _cx, _cz);
+          return;                                  // atomic: it had this frame
+        }
+        if (!t.fab || (job.part === "fab" ? t.fabBuilt : t.fab.farBuilt)) continue;
+        _cur = { M: job.M, t: t, part: job.part, J: CBZ.metroFabric.job(job.M.plan, t.fab, job.part === "far"), t0: performance.now() };
+      }
+      const s0 = performance.now();
+      const r = CBZ.metroFabric.runJob(_cur.J, left);
+      const ms = performance.now() - s0;
+      left -= ms;
+      _audit.sliceMsMax = Math.max(_audit.sliceMsMax, ms);
+      if (r) {
+        const c = _cur; _cur = null;
+        note(r.stats.ms);
+        if (c.part === "far") c.t.fab.farBuilt = true; else c.t.fabBuilt = true;
+        fabDone(c.M, c.t, c.part, r);
+      }
+    }
+  }
   CBZ.onAlways && CBZ.onAlways(58, function () {
     const g = CBZ.game;
     if (!g || g.mode !== "city" || !CBZ.metroCities.length) return;
-    // one queued half-tile every other frame, nearest first
-    if (_pending.length && (++_frame & 1)) {
-      const job = _pending.shift();
-      buildPart(job.M, job.t, job.part);
-    }
+    if (_cur || _pending.length) pump();
     const now = performance.now();
     if (now - _lastSweep < 400) return;
     _lastSweep = now;
@@ -561,61 +640,80 @@
     const x = cam ? cam.position.x : (P ? P.x : 0), z = cam ? cam.position.z : (P ? P.z : 0);
     const alt = cam ? cam.position.y : 2;
     const air = alt > 120;
-    // WHAT THE FOG HIDES IS NOT DRAWN. Past fog.far a city is pure fog
-    // colour; drawing it anyway (its trees, its far skyline, its built
-    // tiles) cost the downtown ~20% GPU in the first A/B. So a city, and
-    // each built tile, is visible only while some of it is inside the fog
-    // distance, and tiles are only built that close.
+    _cx = x; _cz = z;
+    // THE NEAR RADIUS is a detail distance (the street fog still sets it:
+    // inside it the near tile's awnings, AC boxes and stoops are over a
+    // pixel). THE VIEW RADIUS is where the city's own haze completes.
     const fog = CBZ.scene && CBZ.scene.fog;
     const fogFar = (fog && fog.far) || CBZ.cityFogFar || 1400;
     const SEE = fogFar + 60;
     const BR = Math.min(air ? BUILD_R_AIR : BUILD_R, SEE + 200), DR = Math.max(BR + 600, air ? DROP_R_AIR : DROP_R);
+    _showR = BR + 300;
+    _viewR = Math.min(VIEW_MAX, fogFar / HAZE_SCALE);
+    // high up the aerial melt (core/renderer.js) completes the fog at
+    // fog.far on true depth: past it a tile is pure fog colour, not drawn
+    if (alt > 900) _viewR = Math.min(_viewR, fogFar + 100);
+    let reach = 0;
     for (const M of CBZ.metroCities) {
       if (!M.group) continue;
       const F = M.plan.stats.footprint;
       const dc = rectDist({ x0: F.minX, z0: F.minZ, x1: F.maxX, z1: F.maxZ }, x, z);
-      const on = dc < SEE;
+      const on = dc < _viewR;
       if (M.group.visible !== on) M.group.visible = on;
-      for (const tp of M.trees || []) if (tp.visible !== on) tp.visible = on;
+      // trees wear the world's vegetation fog (they fade where every other
+      // tree does); past it they are pure fog colour, so not drawn
+      const treesOn = dc < SEE;
+      for (const tp of M.trees || []) if (tp.visible !== treesOn) tp.visible = treesOn;
       if (!on) continue;
       for (const t of M.tiles) {
-        const tv = rectDist(t, x, z) < SEE;
-        if (t.fab && t.fab.mesh && t.fabBuilt && t.fab.mesh.visible !== tv) t.fab.mesh.visible = tv;
-        if (t.gnd && t.gnd.meshes) for (const m of t.gnd.meshes) if (m.visible !== tv) m.visible = tv;
+        showTile(t, x, z);
+        if (rectDist(t, x, z) < _viewR) reach = Math.max(reach, rectFar(t, x, z));
       }
     }
+    // the camera's far plane must reach the farthest tile in view
+    CBZ.metroViewFar = reach > 0 ? Math.min(_viewR, reach) + 60 : 0;
     _pending.length = 0;
-    const want = [];
+    const want = [], wantFar = [];
     for (const M of CBZ.metroCities) {
       if (!M.group || !M.tiles) continue;
       for (const t of M.tiles) {
         const d = rectDist(t, x, z);
         if (!t.built && d < BR) want.push({ M: M, t: t, d: d });
-        else if ((t.gndBuilt || t.fabBuilt) && d > DR) dropTile(M, t);
+        // a near tile is let go only once its far tile can stand in
+        else if ((t.gndBuilt || t.fabBuilt) && d > DR && (!t.fab || t.fab.farBuilt)) dropTile(M, t);
+        if (t.fab && !t.fab.farBuilt && (d < _viewR || t.fabBuilt)) wantFar.push({ M: M, t: t, d: d });
       }
     }
     want.sort(function (a, b) { return a.d - b.d; });
+    wantFar.sort(function (a, b) { return a.d - b.d; });
     for (const w of want) {
       if (!w.t.gndBuilt) _pending.push({ M: w.M, t: w.t, part: "gnd" });
       if (!w.t.fabBuilt) _pending.push({ M: w.M, t: w.t, part: "fab" });
     }
+    for (const w of wantFar) _pending.push({ M: w.M, t: w.t, part: "far" });
   });
 
   // ------------------------------------------------------------------
   //  AUDIT — what the tools (and the report) read
   // ------------------------------------------------------------------
-  const _audit = { buildMs: 0, tileBuilds: 0, tileDrops: 0, tileMsMax: 0, tileMsSum: 0 };
+  const _audit = { buildMs: 0, tileBuilds: 0, tileDrops: 0, tileMsMax: 0, tileMsSum: 0, sliceMsMax: 0, farBuilds: 0, farBytes: 0 };
   CBZ.metroAudit = function () {
     return {
       buildMs: _audit.buildMs, tileBuilds: _audit.tileBuilds, tileDrops: _audit.tileDrops,
       tileMsMax: Math.round(_audit.tileMsMax * 10) / 10, tileMsMean: _audit.tileBuilds ? Math.round(_audit.tileMsSum / _audit.tileBuilds * 10) / 10 : 0,
+      sliceMsMax: Math.round(_audit.sliceMsMax * 10) / 10, farBuilds: _audit.farBuilds, farMB: +(_audit.farBytes / 1048576).toFixed(1),
+      viewFar: CBZ.metroViewFar || 0, viewR: Math.round(_viewR), showR: Math.round(_showR),
       cities: CBZ.metroCities.map(function (M) {
         const S = M.plan.stats;
         return {
           id: M.id, name: M.name, tier: M.tier, footprint: S.footprint, buildings: S.buildings, storeyBands: S.storeyBands,
           tallest: S.tallest, population: S.population, jobs: S.jobs, streetKm: S.streetKm, districts: M.plan.districts.map(function (d) { return d.name + " (" + d.kind + ")"; }),
           landmarks: M.plan.landmarks.map(function (l) { return l.name; }), regions: M.regions.length, roads: M.roadCount,
-          tiles: M.tiles.length, built: M.tiles.filter(function (t) { return t.built; }).length, trees: M.plan.trees.length, planMs: M.plan.ms,
+          tiles: M.tiles.length, built: M.tiles.filter(function (t) { return t.built; }).length,
+          farBuilt: M.tiles.filter(function (t) { return t.fab && t.fab.farBuilt; }).length,
+          drawnNear: M.tiles.filter(function (t) { return t.fab && t.fab.mesh && t.fab.mesh.visible; }).length,
+          drawnFar: M.tiles.filter(function (t) { return t.fab && t.fab.far && t.fab.far.visible; }).length,
+          trees: M.plan.trees.length, planMs: M.plan.ms,
         };
       }),
     };

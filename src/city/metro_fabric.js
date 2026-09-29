@@ -36,12 +36,21 @@
        sky tint with a view-angle fresnel, and at NIGHT windows lit by hash
        (warm/cool, brighter at the ceiling, offices emptying as the night
        gets late).
-     * THE FAR CITY IS A PROXY. prepare() builds, at load, one instanced
-       box per tall building mass (h >= 12 m, every tower tier) drawn by the
-       SAME fragment code — same seed, same bay count, same storey index —
-       so the lit-window pattern of the skyline is identical before and
-       after a tile streams in. metro.js hides a tile's proxy range when
-       the tile is built.
+     * THE FAR CITY IS THE CITY. There is no stand-in skyline. Every tile
+       has two meshes of the SAME buildings from the SAME writer: the NEAR
+       tile (every detail + the colliders) and the FAR tile, an HLOD that
+       keeps each building's true footprint, height, setback tiers, roof
+       form (gable / hip / mansard / gambrel / sawtooth / dome / spire /
+       crown), headhouse and district facade, and drops only what is under
+       a pixel past ~1 km (AC boxes, water tanks, awnings, canopies,
+       stoops, cornice lips, soffits, parapet returns). Same material, same
+       seed, same bay rule: the lit-window pattern is identical on both, so
+       the swap is invisible. The far tile is one draw call and keeps no
+       CPU copy of its arrays once they are on the GPU.
+     * HAZE, NOT A WALL. The material rides the same fog scale as the
+       ground the city stands on (metro_ground.js, 0.10: the terrain's
+       atmospheric perspective), so a city 2-6 km away fades by distance
+       like the land under it instead of vanishing at the street fog's end.
 
    PERFORMANCE LAW. No THREE.Geometry, no mergeBufferGeometries: every tile
    is written straight into typed arrays (Float32 position, Int8 normal,
@@ -59,11 +68,14 @@
                             (metres above the 0.16 lot), storey top*16, bays
 
    API
-     CBZ.metroFabric.prepare(P, opts)  -> { tiles, proxy, proxyHide(tile, hidden), material }
+     CBZ.metroFabric.prepare(P, opts)  -> { tiles (each: mesh = near, far = HLOD), material }
      CBZ.metroFabric.buildTile(P, tile)-> { colliders, stats:{ms, vertices, triangles, bytes} }
-     CBZ.metroFabric.disposeTile(P, tile)
-     CBZ.metroFabric.build(P, opts)    -> { meshes, colliders, stats, tiles, proxy }  (prepare + every tile)
-     CBZ.metroFabric.material() / proxyMaterial()
+     CBZ.metroFabric.buildFarTile(P, tile) -> { stats }  (no colliders)
+     CBZ.metroFabric.job(P, tile, far) + runJob(job, budgetMs) -> null | result
+                                          (the same build, sliced across frames)
+     CBZ.metroFabric.disposeTile(P, tile) (the near tile; far tiles are kept)
+     CBZ.metroFabric.build(P, opts)    -> { meshes, colliders, stats, tiles }  (prepare + every tile, near + far)
+     CBZ.metroFabric.material()
    opts = { root: THREE.Group, tile: 800, name: P.id }
    A tile mesh is invisible until buildTile fills it (and again after
    disposeTile), so an unbuilt placeholder never reaches the renderer.
@@ -80,6 +92,7 @@
   if (!THREE) return;
 
   const GY = 0.16;                 // the lot / pad level every building stands on
+  const FOG_SCALE = 0.10;          // == metro_ground.js's ground material: one haze for the city and its ground
   const FOOT = GY - 0.3;           // walls run this far below it: no gap on a slope seam
 
   // ---------------------------------------------------------------------
@@ -476,7 +489,7 @@
     uMfNight: { value: 0 }, uMfLate: { value: 0 },
     uMfSky: { value: new THREE.Color(0.62, 0.7, 0.8) }, uMfZen: { value: new THREE.Color(0.36, 0.5, 0.7) },
   };
-  let mat = null, pmat = null, hooked = false;
+  let mat = null, hooked = false;
   function injectFrag(sh) {
     Object.assign(sh.uniforms, U);
     sh.fragmentShader = sh.fragmentShader
@@ -510,46 +523,10 @@
         ].join("\n"));
     };
     mat.customProgramCacheKey = function () { return "cbzMetroFabric1"; };
+    // atmospheric perspective of the land it stands on (see the header)
+    if (CBZ.terrainFogScale) CBZ.terrainFogScale(mat, FOG_SCALE);
     hook();
     return mat;
-  }
-  // The far proxy: instanced unit boxes, the SAME fragment. The vertex stage
-  // rebuilds the facade coordinates the tile builder writes (same bay count
-  // rule, same left-to-right u, same v) so the lit windows line up.
-  function proxyMaterial() {
-    if (pmat) return pmat;
-    pmat = new THREE.MeshLambertMaterial({ color: 0xffffff });
-    pmat.name = "metro-fabric-proxy";
-    pmat.fog = true;
-    pmat.extensions = { derivatives: true };
-    pmat.userData.metroFabric = true;
-    pmat.onBeforeCompile = function (sh) {
-      if (!okShader(sh)) return;
-      injectFrag(sh);
-      sh.vertexShader = sh.vertexShader
-        .replace("#include <common>", "#include <common>\nattribute vec4 iMfC;\nattribute vec4 iMfG;\nattribute vec4 iMfP;\nattribute vec4 iMfT;\n" + MF_VARY)
-        .replace("#include <project_vertex>", [
-          "#include <project_vertex>",
-          "#ifdef USE_INSTANCING",
-          "vec3 mfSc = vec3( length( instanceMatrix[ 0 ].xyz ), length( instanceMatrix[ 1 ].xyz ), length( instanceMatrix[ 2 ].xyz ) );",
-          "vec3 mfPo = position; vec3 mfNo = normal;",
-          "float mfBw = max( floor( iMfP.z + 0.5 ) * 0.1, 0.3 );",
-          "float mfLen = mfSc.x; float mfUm = ( mfPo.x + 0.5 ) * mfSc.x;",
-          "if ( mfNo.z < -0.5 ) mfUm = ( 0.5 - mfPo.x ) * mfSc.x;",
-          "if ( abs( mfNo.x ) > 0.5 ) { mfLen = mfSc.z; mfUm = mfNo.x > 0.0 ? ( 0.5 - mfPo.z ) * mfSc.z : ( mfPo.z + 0.5 ) * mfSc.z; }",
-          "float mfBays = max( 1.0, floor( mfLen / mfBw + 0.5 ) );",
-          "vMfC = iMfC; vMfG = iMfG; vMfP = iMfP;",
-          "vMfU = vec4( mfUm / max( mfLen, 0.01 ) * mfBays, instanceMatrix[ 3 ].y - " + GY.toFixed(2) + " + mfPo.y * mfSc.y, iMfT.x, mfBays );",
-          "if ( mfNo.y > 0.5 ) { vMfP.x = 1.0; vMfC.rgb = iMfT.yzw; vMfU = vec4( ( mfPo.x + 0.5 ) * mfSc.x, ( mfPo.z + 0.5 ) * mfSc.z, 0.0, 0.0 ); }",
-          "vec4 mfW = modelMatrix * instanceMatrix * vec4( position, 1.0 );",
-          "vMfV = cameraPosition - mfW.xyz;",
-          "vMfN = normalize( mat3( modelMatrix ) * mfNo );",
-          "#endif",
-        ].join("\n"));
-    };
-    pmat.customProgramCacheKey = function () { return "cbzMetroFabricProxy1"; };
-    hook();
-    return pmat;
   }
   // per-frame: night, "how late", and the sky the glass reflects (the fog
   // colour IS the horizon every other system matches)
@@ -580,6 +557,10 @@
   //  THE WRITER: typed arrays, grown by doubling, sliced once per tile
   // ---------------------------------------------------------------------
   let CAP = 0, ICAP = 0, nv = 0, ni = 0;
+  // FAR: the tile being written is the distant HLOD of the same buildings —
+  // every mass, roof and setback at its true size, minus the parts under a
+  // pixel past ~1 km (AC boxes, awnings, stoops, soffits, parapet returns)
+  let FAR = false;
   let POS = null, NRM = null, AC = null, AG = null, AP = null, AU = null, IDX = null;
   function growV(n) {
     let c = Math.max(CAP * 2, 65536); while (c < n) c *= 2;
@@ -679,7 +660,7 @@
   function plain(hex, mode, fl) {
     hexC(hex); bMode = mode || M_PLAIN; bFl = fl || 0; bFh = 30; bBay = 10; bTop = 0; bBays = 0; bDoor = 255;
   }
-  // bays on a face of length len for the current brush — the proxy's rule, exactly
+  // bays on a face of length len for the current brush
   function baysFor(len) { return Math.max(1, Math.round(len / (bBay / 10))); }
 
   // ---------------------------------------------------------------------
@@ -720,7 +701,7 @@
   // parapet: inner faces + a coping ring; the outer face is the facade (walls run to yTop)
   function parapet(ox, oz, hw, hd, yDeck, yTop, t, wallHex, deckHex) {
     const ih = hw - t, id = hd - t;
-    if (ih < 0.5 || id < 0.5) { plain(deckHex, M_DECK); topQuad(ox, oz, hw, hd, yTop); return; }
+    if (FAR || ih < 0.5 || id < 0.5) { plain(deckHex, M_DECK); topQuad(ox, oz, hw, hd, yTop); return; }
     plain(shade(wallHex, 0.86));
     for (let k = 0; k < 4; k++) {
       const f = FK[k], len = faceLen(k, ih, id);
@@ -755,7 +736,7 @@
     }
     // soffits + fascia
     plain(trimHex);
-    for (let s = -1; s <= 1; s += 2) {
+    if (!FAR) for (let s = -1; s <= 1; s += 2) {
       const a = P(-hl - rk, s * hc), b = P(hl + rk, s * hc), c = P(hl + rk, s * (hc + over)), d = P(-hl - rk, s * (hc + over)), h = hint(0, s);
       quad(a[0], yT - 0.18, a[1], b[0], yT - 0.18, b[1], c[0], yT - 0.18, c[1], d[0], yT - 0.18, d[1], 0, -1, 0, 0, 0, 2 * (hl + rk), over);
       quad(d[0], yT - 0.18, d[1], c[0], yT - 0.18, c[1], c[0], yT, c[1], d[0], yT, d[1], h[0], 0, h[1], 0, 0, 2 * (hl + rk), 0.18);
@@ -788,6 +769,7 @@
       tri(e[0], yT, e[1], f[0], yT, f[1], g[0], yR, g[1], hh[0], 1, hh[1], 0, 0, 2 * eC, 0, eC, sl2);
     }
     // soffit ring + fascia
+    if (FAR) return yR;
     plain(trimHex);
     const ys = yT - 0.18;
     need(8, 24);
@@ -855,7 +837,7 @@
   // awning on face k of a box: fabric slope + valance + underside
   function awning(k, ox, oz, hw, hd, y, hex) {
     const f = FK[k], len = faceLen(k, hw, hd) - 1.0;
-    if (len < 2) return;
+    if (FAR || len < 2) return;
     const cxw = ox + f.nx * hw, czw = oz + f.nz * hd;       // face centre
     const ax = cxw - f.rx * len / 2, az = czw - f.rz * len / 2, bx = ax + f.rx * len, bz = az + f.rz * len;
     const o = 1.3, dy = 0.45;
@@ -893,11 +875,13 @@
       const hh = kind === "apt" ? 1.6 : Math.min(hw * 0.32, 6), hdd = kind === "apt" ? 1.6 : Math.min(hd * 0.26, 4.5);
       const px = ox + (hq(sx, sz, 901) - 0.5) * (hw - hh - 1) * 1.2, pz = oz + (hq(sx, sz, 902) - 0.5) * (hd - hdd - 1) * 1.2;
       plantBox(px, pz, hh, hdd, y, kind === "apt" ? 2.7 : 4.2, shade(b.wall, 0.9));
+      if (FAR) return;
       if (kind === "apt" && hq(sx, sz, 903) < 0.45 && hw > 5 && hd > 5) {
         const tx = ox - Math.sign(px - ox || 1) * (hw * 0.45), tz = oz - Math.sign(pz - oz || 1) * (hd * 0.4);
         waterTank(tx, tz, y);
       }
     }
+    if (FAR) return;
     for (let i = 0; i < n; i++) {
       if (hq(sx + i, sz, 910) < 0.3) continue;
       const w = kind === "ware" ? 0.7 : 1.2 + hq(sx, sz + i, 911) * 1.0, d = kind === "ware" ? 0.7 : 0.9 + hq(sx + i, sz + i, 912) * 0.7;
@@ -973,6 +957,7 @@
       }
     }
     // an entrance canopy over the lobby on the front (+Z) face
+    if (FAR) return topY;
     const t0 = tiers[0];
     plain(shade(b.wall, 0.7));
     const cw = Math.min(9, t0.w * 0.4);
@@ -1045,6 +1030,7 @@
       parapet(0, 0, hw, hd, deckY, parTop, 0.22, b.wall, deck);
       top = parTop;
     }
+    if (FAR) { frame(0, 0, 0); aabb(b.x - b.w / 2, b.x + b.w / 2, b.z - b.d / 2, b.z + b.d / 2, 0, top); return top; }
     // cornice along the front
     const cy = mansard ? deckY + 0.1 : parTop;
     plain(painted ? 0xe6e2d8 : shade(b.wall, 0.72));
@@ -1104,6 +1090,7 @@
       });
       hip(gx, 0, gW / 2, hd, gy, 0.4, 0.4, roofHex, trim);
     }
+    if (FAR) { frame(0, 0, 0); oriented(b.x, b.z, Wd / 2, Dp / 2, rot, 0, ridge); return ridge; }
     // a door hood over the front door
     const dx = bx - bhw + (doorBay + 0.5) * (2 * bhw / bays);
     plain(roofHex, M_SHINGLE);
@@ -1186,10 +1173,8 @@
     parapet(0, 0, hw, hd, y1, y1 + 1.1, 0.25, b.wall, deck);
     roofPlant(b, 0, 0, hw - 2, hd - 2, y1, "strip");
     // the canopy on columns along the shop front
-    plain(shade(b.wall, 0.78));
-    box(0, hd + 1.6, hw - 0.5, 1.6, GY + 3.55, GY + 3.95);
-    plain(shade(b.wall, 0.9));
-    const nc = Math.max(2, Math.round((Wd - 1) / 9));
+    const nc = FAR ? -1 : Math.max(2, Math.round((Wd - 1) / 9));
+    if (!FAR) { plain(shade(b.wall, 0.78)); box(0, hd + 1.6, hw - 0.5, 1.6, GY + 3.55, GY + 3.95); plain(shade(b.wall, 0.9)); }
     for (let i = 0; i <= nc; i++) {
       const cx = -hw + 0.7 + i * (Wd - 1.4) / nc;
       box(cx, hd + 2.9, 0.18, 0.18, FOOT, GY + 3.55, true);
@@ -1211,9 +1196,11 @@
     parapet(b.x, b.z, hw, hd, y1, y1 + 1.1, 0.3, b.wall, deck);
     roofPlant(b, b.x, b.z, hw - 3, hd - 3, y1, "mall");
     // entrance canopies (both long faces)
-    plain(shade(b.wall, 0.75));
-    box(b.x, b.z + hd + 2.2, 7, 2.2, GY + 5.2, GY + 5.7);
-    box(b.x, b.z - hd - 2.2, 7, 2.2, GY + 5.2, GY + 5.7);
+    if (!FAR) {
+      plain(shade(b.wall, 0.75));
+      box(b.x, b.z + hd + 2.2, 7, 2.2, GY + 5.2, GY + 5.7);
+      box(b.x, b.z - hd - 2.2, 7, 2.2, GY + 5.2, GY + 5.7);
+    }
     let top = y1 + 1.2;
     if (hall) {
       // the skylight down the hall
@@ -1489,13 +1476,38 @@
   }
 
   // ---------------------------------------------------------------------
-  //  PREPARE: tiles (placeholders) + the far proxy. No building geometry.
+  //  PREPARE: per tile, two empty meshes — the NEAR tile (every detail,
+  //  colliders) and the FAR tile (the same buildings merged as their true
+  //  massing, no colliders). No building geometry is written here.
   // ---------------------------------------------------------------------
   function roofReach(b) {
     if (b.roof === "spire" && b.type === "tower") return b.h + Math.max(28, 0.2 * b.h) + 12;
     if (b.type === "clocktower") return b.h + 16;
     if (b.type === "stadium") return 64;
     return b.h + 8;
+  }
+  function noRaycast() {}
+  function tileMesh(P, t, name, far) {
+    const g = new THREE.BufferGeometry();
+    const mesh = new THREE.Mesh(g, material());
+    mesh.name = "metro-fabric" + (far ? "-far:" : ":") + name + ":" + t.key;
+    mesh.position.set((t.x0 + t.x1) / 2, 0, (t.z0 + t.z1) / 2);
+    mesh.updateMatrix();
+    mesh.matrixAutoUpdate = false;
+    // the far tile is past the shadow camera's reach by construction (it is
+    // only drawn where the near tile is not), so it never enters the
+    // shadow pass; it still RECEIVES so it shares the near tile's program
+    mesh.castShadow = !far; mesh.receiveShadow = true; mesh.frustumCulled = true;
+    mesh.userData = { metro: P.id, metroTile: t.key };
+    if (far) {
+      mesh.userData.metroFar = true;
+      // its vertex arrays are freed once on the GPU (below): nothing may
+      // raycast it (bullets and LOS hit the near tile's colliders anyway)
+      mesh.raycast = noRaycast;
+    }
+    mesh.visible = false;                       // nothing to draw until a build fills it
+    g.boundingSphere = t.sphere.clone();
+    return mesh;
   }
   function prepare(P, opts) {
     opts = opts || {};
@@ -1507,8 +1519,8 @@
       const ix = Math.floor(x / T), iz = Math.floor(z / T), key = ix + "," + iz;
       let t = byKey.get(key);
       if (!t) {
-        t = { key: key, ix: ix, iz: iz, x0: ix * T, z0: iz * T, x1: (ix + 1) * T, z1: (iz + 1) * T, idx: [], stations: [], built: false,
-          mesh: null, bx0: 1e9, bx1: -1e9, bz0: 1e9, bz1: -1e9, by1: 0, proxy: [0, 0], masks: masks, tileSize: T };
+        t = { key: key, ix: ix, iz: iz, x0: ix * T, z0: iz * T, x1: (ix + 1) * T, z1: (iz + 1) * T, idx: [], stations: [], built: false, farBuilt: false,
+          mesh: null, far: null, bx0: 1e9, bx1: -1e9, bz0: 1e9, bz1: -1e9, by1: 0, masks: masks, tileSize: T };
         byKey.set(key, t);
       }
       return t;
@@ -1529,24 +1541,12 @@
     }
     const tiles = Array.from(byKey.values()).sort(function (a, b) { return a.iz - b.iz || a.ix - b.ix; });
     for (const t of tiles) {
-      const g = new THREE.BufferGeometry();
-      const mesh = new THREE.Mesh(g, m);
-      mesh.name = "metro-fabric:" + name + ":" + t.key;
-      mesh.position.set((t.x0 + t.x1) / 2, 0, (t.z0 + t.z1) / 2);
-      mesh.updateMatrix();
-      mesh.matrixAutoUpdate = false;
-      mesh.castShadow = true; mesh.receiveShadow = true; mesh.frustumCulled = true;
-      mesh.userData = { metro: P.id, metroTile: t.key };
-      mesh.visible = false;                       // nothing to draw until buildTile fills it
-      t.mesh = mesh;
       t.sphere = tileSphere(t);
-      g.boundingSphere = t.sphere.clone();
-      if (opts.root) opts.root.add(mesh);
+      t.mesh = tileMesh(P, t, name, false);
+      t.far = tileMesh(P, t, name, true);
+      if (opts.root) { opts.root.add(t.mesh); opts.root.add(t.far); }
     }
-    const proxy = buildProxy(P, tiles, opts);
-    const out = { tiles: tiles, proxy: proxy ? proxy.mesh : null, material: m, proxyHide: function (tile, hidden) { proxyHide(proxy, tile, hidden); } };
-    out._proxy = proxy;
-    return out;
+    return { tiles: tiles, material: m };
   }
   function tileSphere(t) {
     const cx = (t.x0 + t.x1) / 2, cz = (t.z0 + t.z1) / 2;
@@ -1555,129 +1555,64 @@
     return new THREE.Sphere(new THREE.Vector3(0, cy, 0), Math.sqrt(ex * ex + ez * ez + cy * cy) + 1);
   }
 
-  // ---- the far proxy: one instanced unit box per tall mass ----
-  function unitBox() {
-    const pos = [], nrm = [], idx = [];
-    const add = function (pts, n) {
-      const s = pos.length / 3;
-      for (const p of pts) { pos.push(p[0], p[1], p[2]); nrm.push(n[0], n[1], n[2]); }
-      idx.push(s, s + 1, s + 2, s, s + 2, s + 3);
-    };
-    // CCW from outside
-    add([[-0.5, 0, 0.5], [0.5, 0, 0.5], [0.5, 1, 0.5], [-0.5, 1, 0.5]], [0, 0, 1]);
-    add([[0.5, 0, 0.5], [0.5, 0, -0.5], [0.5, 1, -0.5], [0.5, 1, 0.5]], [1, 0, 0]);
-    add([[0.5, 0, -0.5], [-0.5, 0, -0.5], [-0.5, 1, -0.5], [0.5, 1, -0.5]], [0, 0, -1]);
-    add([[-0.5, 0, -0.5], [-0.5, 0, 0.5], [-0.5, 1, 0.5], [-0.5, 1, -0.5]], [-1, 0, 0]);
-    add([[-0.5, 1, 0.5], [0.5, 1, 0.5], [0.5, 1, -0.5], [-0.5, 1, -0.5]], [0, 1, 0]);
-    const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-    g.setAttribute("normal", new THREE.Float32BufferAttribute(nrm, 3));
-    g.setIndex(idx);
-    return g;
-  }
-  function buildProxy(P, tiles, opts) {
-    const list = [];
-    for (const t of tiles) {
-      t.proxy[0] = list.length;
-      for (const i of t.idx) {
-        const b = P.bldgs[i];
-        if (b.h < 12 || b.type === "tank" || b.type === "silo" || b.type === "stadium" || b.type === "house") continue;
-        if (b.type === "row" || (b.style === "row")) {                     // a tall terrace unit: its rowhouse face
-          list.push({ b: b, x: b.x, z: b.z, w: b.w, d: b.d, y0: FOOT, y1: GY + b.h, top: (b.st || 3) * (b.fh || 3.1), mode: M_ROW, bay: 2.3, fh: b.fh || 3.1, fl: 0 });
-          continue;
-        }
-        if (b.type === "tower") {
-          const sm = STYLE[b.style] || STYLE.glass;
-          const tiers = b.tiers && b.tiers.length ? b.tiers : [{ w: b.w, d: b.d, y0: 0, y1: b.h, x: b.x, z: b.z }];
-          for (let k = 0; k < tiers.length; k++) {
-            const tt = tiers[k], last = k === tiers.length - 1;
-            const par = last ? (sm[0] === M_GLASS ? 2.4 : 1.3) : 1.0;
-            list.push({ b: b, x: tt.x, z: tt.z, w: tt.w, d: tt.d, y0: k === 0 ? FOOT : GY + tt.y0, y1: GY + tt.y1 + par, top: tt.y1, mode: sm[0], bay: sm[1], fh: b.fh || 3.9,
-              fl: F_OFFICE | (k === 0 && b.shop ? F_SHOP : 0) });
-          }
-          continue;
-        }
-        if (b.type === "clocktower") { list.push({ b: b, x: b.x, z: b.z, w: b.w, d: b.d, y0: FOOT, y1: GY + b.h - 9, top: b.h - 9, mode: M_BRICK, bay: b.w / 3, fh: 3.8, fl: F_ARCH }); continue; }
-        const sm = b.type === "mall" ? [M_STRIP, b.shop ? 3.2 : 6.0] : b.type === "ware" ? (b.style === "brick" ? [M_BRICK, 3.4] : [M_METAL, 6.0]) : (STYLE[b.style] || STYLE.stone);
-        const fh = b.type === "ware" ? (b.style === "brick" ? b.h / Math.max(1, Math.round(b.h / 4.4)) : b.h) : (b.fh || 3.2);
-        const par = b.type === "ware" ? 0.6 : b.type === "mall" || b.type === "strip" ? 1.2 : b.type === "civic" ? (b.roof === "gable" ? 0 : 1.0) : 1.1;
-        list.push({ b: b, x: b.x, z: b.z, w: b.w, d: b.d, y0: FOOT, y1: GY + b.h + par, top: b.h, mode: sm[0], bay: sm[1], fh: fh,
-          fl: (b.type === "office" ? F_OFFICE : 0) | (b.type === "civic" ? F_ARCH : 0) | (b.type === "ware" ? F_DOCK : 0) });
-      }
-      t.proxy[1] = list.length;
-    }
-    if (!list.length) return null;
-    const n = list.length;
-    const g = unitBox();
-    const C = new Uint8Array(n * 4), Gl = new Uint8Array(n * 4), Pp = new Uint8Array(n * 4), Tt = new Float32Array(n * 4);
-    const mats = new Float32Array(n * 16);
-    for (let i = 0; i < n; i++) {
-      const e = list[i], b = e.b;
-      const wall = b.wall != null ? b.wall : 0x999999, glass = b.glass != null ? b.glass : 0x2f3a44, deck = deckOf(b);
-      C[i * 4] = (wall >> 16) & 255; C[i * 4 + 1] = (wall >> 8) & 255; C[i * 4 + 2] = wall & 255; C[i * 4 + 3] = seedOf(b);
-      Gl[i * 4] = (glass >> 16) & 255; Gl[i * 4 + 1] = (glass >> 8) & 255; Gl[i * 4 + 2] = glass & 255; Gl[i * 4 + 3] = e.fl;
-      Pp[i * 4] = e.mode; Pp[i * 4 + 1] = q10(e.fh); Pp[i * 4 + 2] = q10(e.bay); Pp[i * 4 + 3] = 255;
-      Tt[i * 4] = e.top; Tt[i * 4 + 1] = ((deck >> 16) & 255) / 255; Tt[i * 4 + 2] = ((deck >> 8) & 255) / 255; Tt[i * 4 + 3] = (deck & 255) / 255;
-      const o = i * 16, sy = e.y1 - e.y0;
-      mats[o] = e.w; mats[o + 5] = sy; mats[o + 10] = e.d; mats[o + 15] = 1;
-      mats[o + 12] = e.x; mats[o + 13] = e.y0; mats[o + 14] = e.z;
-    }
-    g.setAttribute("iMfC", new THREE.InstancedBufferAttribute(C, 4, true));
-    g.setAttribute("iMfG", new THREE.InstancedBufferAttribute(Gl, 4, true));
-    g.setAttribute("iMfP", new THREE.InstancedBufferAttribute(Pp, 4, false));
-    g.setAttribute("iMfT", new THREE.InstancedBufferAttribute(Tt, 4, false));
-    const mesh = new THREE.InstancedMesh(g, proxyMaterial(), n);
-    mesh.instanceMatrix.array.set(mats);
-    mesh.instanceMatrix.needsUpdate = true;
-    mesh.name = "metro-fabric-proxy:" + (opts.name || P.id);
-    mesh.castShadow = false; mesh.receiveShadow = false;
-    mesh.frustumCulled = false;                 // one mesh spans the whole metro
-    mesh.matrixAutoUpdate = false; mesh.updateMatrix();
-    mesh.userData = { metro: P.id, metroProxy: true };
-    if (opts.root) opts.root.add(mesh);
-    return { mesh: mesh, rest: mats, n: n };
-  }
-  function proxyHide(proxy, tile, hidden) {
-    if (!proxy || !tile) return;
-    const a = tile.proxy[0], b = tile.proxy[1];
-    if (b <= a) return;
-    const arr = proxy.mesh.instanceMatrix.array;
-    if (hidden) arr.fill(0, a * 16, b * 16);
-    else arr.set(proxy.rest.subarray(a * 16, b * 16), a * 16);
-    const im = proxy.mesh.instanceMatrix, ur = im.updateRange;
-    if (ur) {
-      // one pending upload may already cover another tile this frame: union
-      if (ur.count === -1 || ur.count == null) { ur.offset = a * 16; ur.count = (b - a) * 16; }
-      else { const lo = Math.min(ur.offset, a * 16), hi = Math.max(ur.offset + ur.count, b * 16); ur.offset = lo; ur.count = hi - lo; }
-    }
-    im.needsUpdate = true;
-  }
-
   // ---------------------------------------------------------------------
-  //  BUILD ONE TILE
+  //  BUILD ONE TILE — as a JOB that can run in slices across frames.
+  //  One job owns the writer at a time (metro.js runs them serially), so a
+  //  slice just stops between two buildings and the next slice carries on
+  //  where the arrays left off. Synchronous callers (tools, node) run a job
+  //  to the end in one go.
   // ---------------------------------------------------------------------
-  function buildTile(P, tile) {
-    const t0 = now();
+  let JOB = null;
+  function job(P, tile, far) {
+    if (JOB) runJob(JOB, Infinity);            // a sync caller cut in: finish the one in flight first
+    const J = { P: P, tile: tile, far: !!far, k: 0, st: 0, ms: 0, done: false, result: null, marks: null };
+    JOB = J;
     nv = 0; ni = 0;
     oX = (tile.x0 + tile.x1) / 2; oZ = (tile.z0 + tile.z1) / 2;
-    COLS = []; REF = tile.mesh;
-    const B = P.bldgs, masks = tile.masks || streetMasks(P);
-    for (const i of tile.idx) {
-      try { emit(P, B[i], masks[i]); } catch (e) { if (typeof console !== "undefined") console.warn("[metro_fabric] building", B[i] && B[i].id, e); }
-      frame(0, 0, 0);
-    }
-    for (const si of tile.stations) station(P, P.stations[si]);
-    frame(0, 0, 0);
-    // finalize: exact-size copies
+    COLS = []; REF = far ? tile.far : tile.mesh;
+    return J;
+  }
+  // run up to `budget` ms of a job; returns the job's result when it finishes
+  function runJob(J, budget) {
+    if (J.done) return J.result;
+    if (JOB !== J) throw new Error("metro_fabric: job run out of order");
+    const t0 = now(), end = t0 + (budget > 0 ? budget : 0);
+    const P = J.P, tile = J.tile, B = P.bldgs, masks = tile.masks || streetMasks(P);
+    FAR = J.far;
+    try {
+      while (J.k < tile.idx.length) {
+        const i = tile.idx[J.k++];
+        const v0 = nv;
+        try { emit(P, B[i], masks[i]); } catch (e) { if (typeof console !== "undefined") console.warn("[metro_fabric] building", B[i] && B[i].id, e); }
+        frame(0, 0, 0);
+        if (J.marks) J.marks.push(i, v0, nv);
+        if (now() >= end) break;
+      }
+      if (J.k >= tile.idx.length) while (J.st < tile.stations.length) { station(P, P.stations[tile.stations[J.st++]]); frame(0, 0, 0); }
+    } finally { FAR = false; }
+    J.ms += now() - t0;
+    if (J.k < tile.idx.length || J.st < tile.stations.length) return null;
+    J.done = true;
+    J.result = finish(J);
+    JOB = null;
+    return J.result;
+  }
+  function freeArray() { this.array = null; }
+  function finish(J) {
+    const t0 = now(), tile = J.tile, far = J.far;
+    const mesh = far ? tile.far : tile.mesh;
     const g = new THREE.BufferGeometry();
-    const pos = POS.slice(0, nv * 3);
-    g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-    g.setAttribute("normal", new THREE.BufferAttribute(NRM.slice(0, nv * 4), 4, true));
-    g.setAttribute("aMfC", new THREE.BufferAttribute(AC.slice(0, nv * 4), 4, true));
-    g.setAttribute("aMfG", new THREE.BufferAttribute(AG.slice(0, nv * 4), 4, true));
-    g.setAttribute("aMfP", new THREE.BufferAttribute(AP.slice(0, nv * 4), 4, false));
-    g.setAttribute("aMfU", new THREE.BufferAttribute(AU.slice(0, nv * 4), 4, false));
-    const index = nv < 65536 ? Uint16Array.from(IDX.subarray(0, ni)) : IDX.slice(0, ni);
+    const pos = POS ? POS.slice(0, nv * 3) : new Float32Array(0);
+    const attrs = [
+      ["position", new THREE.BufferAttribute(pos, 3)],
+      ["normal", new THREE.BufferAttribute(nv ? NRM.slice(0, nv * 4) : new Int8Array(0), 4, true)],
+      ["aMfC", new THREE.BufferAttribute(nv ? AC.slice(0, nv * 4) : new Uint8Array(0), 4, true)],
+      ["aMfG", new THREE.BufferAttribute(nv ? AG.slice(0, nv * 4) : new Uint8Array(0), 4, true)],
+      ["aMfP", new THREE.BufferAttribute(nv ? AP.slice(0, nv * 4) : new Uint8Array(0), 4, false)],
+      ["aMfU", new THREE.BufferAttribute(nv ? AU.slice(0, nv * 4) : new Int16Array(0), 4, false)],
+    ];
+    for (const a of attrs) g.setAttribute(a[0], a[1]);
+    const index = nv < 65536 ? Uint16Array.from(ni ? IDX.subarray(0, ni) : []) : IDX.slice(0, ni);
     g.setIndex(new THREE.BufferAttribute(index, 1));
     // bounds from what was written
     let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9, z0 = 1e9, z1 = -1e9;
@@ -1690,17 +1625,40 @@
       const c = new THREE.Vector3((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
       g.boundingSphere = new THREE.Sphere(c, Math.hypot(x1 - x0, y1 - y0, z1 - z0) / 2 + 0.5);
     } else if (tile.sphere) g.boundingSphere = tile.sphere.clone();
-    const old = tile.mesh.geometry;
-    tile.mesh.geometry = g;
+    // THE FAR TILE KEEPS NO CPU COPY. Once its arrays are on the GPU they
+    // are dropped (it is never raycast, never rebuilt in place, never read
+    // back), so the whole distant city costs video memory only.
+    if (far && FREE_FAR) {
+      for (const a of attrs) a[1].onUpload(freeArray);
+      g.index.onUpload(freeArray);
+    }
+    const old = mesh.geometry;
+    mesh.geometry = g;
     if (old && old !== g) old.dispose();
-    tile.built = true;
-    tile.mesh.visible = nv > 0;
+    if (far) tile.farBuilt = true; else tile.built = true;
+    mesh.visible = false;                         // metro.js decides which of the pair is drawn
     const bytes = nv * (12 + 4 + 4 + 4 + 4 + 8) + index.byteLength;
     const cols = COLS; COLS = null; REF = null;
-    return { colliders: cols, stats: { ms: now() - t0, vertices: nv, triangles: ni / 3, bytes: bytes, buildings: tile.idx.length } };
+    const out = { colliders: far ? [] : cols, empty: nv === 0,
+      stats: { ms: J.ms + (now() - t0), vertices: nv, triangles: ni / 3, bytes: bytes, buildings: tile.idx.length, far: far } };
+    if (J.marks) out.marks = J.marks;
+    return out;
+  }
+  let FREE_FAR = true;
+  function buildTile(P, tile) {
+    const J = job(P, tile, false);
+    const r = runJob(J, Infinity);
+    tile.mesh.visible = !r.empty;
+    return r;
+  }
+  function buildFarTile(P, tile, opts) {
+    const J = job(P, tile, true);
+    if (opts && opts.marks) J.marks = [];
+    return runJob(J, Infinity);
   }
   function disposeTile(P, tile) {
     if (!tile || !tile.mesh) return;
+    if (JOB && JOB.tile === tile && !JOB.far) { JOB = null; COLS = null; REF = null; }   // dropped mid-build
     const old = tile.mesh.geometry;
     const g = new THREE.BufferGeometry();
     if (tile.sphere) g.boundingSphere = tile.sphere.clone();
@@ -1710,7 +1668,7 @@
     tile.mesh.visible = false;
   }
   // release the writer's scratch (after a burst of tile builds)
-  function trim() { POS = NRM = AC = AG = AP = AU = IDX = null; CAP = ICAP = 0; }
+  function trim() { if (JOB) return; POS = NRM = AC = AG = AP = AU = IDX = null; CAP = ICAP = 0; }
 
   // ---------------------------------------------------------------------
   //  BUILD EVERYTHING (node checks, small towns)
@@ -1720,23 +1678,30 @@
     const pr = prepare(P, opts);
     const meshes = [], colliders = [];
     let vertices = 0, triangles = 0, bytes = 0, worst = 0, worstKey = "";
+    const far = { vertices: 0, triangles: 0, bytes: 0, worstMs: 0, drawCalls: 0 };
     for (const t of pr.tiles) {
       const r = buildTile(P, t);
       meshes.push(t.mesh);
       for (const c of r.colliders) colliders.push(c);
       vertices += r.stats.vertices; triangles += r.stats.triangles; bytes += r.stats.bytes;
       if (r.stats.ms > worst) { worst = r.stats.ms; worstKey = t.key; }
+      if (opts && opts.far === false) continue;
+      const f = buildFarTile(P, t, opts);
+      if (opts && opts.marks) t.farMarks = f.marks;
+      far.vertices += f.stats.vertices; far.triangles += f.stats.triangles; far.bytes += f.stats.bytes;
+      far.worstMs = Math.max(far.worstMs, f.stats.ms); if (!f.empty) far.drawCalls++;
     }
     return {
-      meshes: meshes, colliders: colliders, tiles: pr.tiles, proxy: pr.proxy, proxyHide: pr.proxyHide, material: pr.material,
-      stats: { buildings: P.bldgs.length, vertices: vertices, triangles: triangles, bytes: bytes, ms: now() - t0, drawCalls: meshes.length + (pr.proxy ? 1 : 0),
-        worstTileMs: worst, worstTile: worstKey, proxyInstances: pr._proxy ? pr._proxy.n : 0 },
+      meshes: meshes, colliders: colliders, tiles: pr.tiles, material: pr.material,
+      stats: { buildings: P.bldgs.length, vertices: vertices, triangles: triangles, bytes: bytes, ms: now() - t0, drawCalls: meshes.length,
+        worstTileMs: worst, worstTile: worstKey, far: far },
     };
   }
 
   const API = {
-    build: build, prepare: prepare, buildTile: buildTile, disposeTile: disposeTile, trim: trim,
-    material: material, proxyMaterial: proxyMaterial, tick: tick, uniforms: U,
+    build: build, prepare: prepare, buildTile: buildTile, buildFarTile: buildFarTile, job: job, runJob: runJob,
+    disposeTile: disposeTile, trim: trim, material: material, tick: tick, uniforms: U,
+    setFreeFar: function (on) { FREE_FAR = !!on; },
     _glsl: { pars: MF_PARS, main: MF_MAIN },
   };
   CBZ.metroFabric = API;

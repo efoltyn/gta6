@@ -359,7 +359,11 @@
       // Distant landmarks may request projection room without widening city
       // fog or the full-detail cull bubble. Mount Mercy is a single terrain
       // draw; keeping it through the airfield view has negligible scene cost.
-      const landmarkFar = CBZ.cityDistantLandmarkFar || 0;
+      // The metro cities are REAL to the horizon (city/metro.js): while one
+      // is in view the plane reaches its farthest tile, where its haze is
+      // complete. Precision stays where it was: at a 0.1 m near plane depth
+      // resolution is set by the near plane, not the far one.
+      const landmarkFar = Math.max(CBZ.cityDistantLandmarkFar || 0, CBZ.metroViewFar || 0);
       const wantFar = airborne ? Math.max(7000, ff + 900, landmarkFar) : Math.max(1400, ff + 180, landmarkFar);
       // A 0.1m near plane paired with a 2800m flight far plane throws away
       // most depth precision. At altitude the 0.42m land/sea separation then
