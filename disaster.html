@@ -478,7 +478,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- 1. core engine -->
 <script src="src/core/scene.js?v=neutralhaze1"></script>
-<script src="src/core/renderer.js?v=scale3"></script>
+<script src="src/core/renderer.js?v=w09290219"></script>
 <!-- THE GROUND STOPS BEING DRAWN OVER A HOLE. Must load AFTER core/renderer.js:
      its installFog REPLACES THREE.ShaderChunk.fog_fragment wholesale, so a patch
      installed before it is erased in silence. groundmask.js asserts CBZ.renderer
@@ -495,7 +495,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- GROUND YOU CAN TAKE AWAY A BUCKET AT A TIME (bare ground only). -->
 <script src="src/core/lights.js?v=w09290204"></script>
 <script src="src/core/sky.js?v=w09290204"></script>
-<script src="src/core/daynight.js?v=w09290204"></script>
+<script src="src/core/daynight.js?v=w09290219"></script>
 
 <!-- 2. world geometry -->
 <!-- Procedural surface library: tiling colour + normal + roughness CanvasTextures
@@ -1358,7 +1358,7 @@ document.body.appendChild(b);}}catch(e){}})();
      near you, plus its real catalog stock as the real item models, buyable
      where they stand. After shops.js (it calls CBZ.cityShopAcquire), itemassets.js (the
      models), interactions.js (the verbs) and worldmap.js (addLandmass). -->
-<script src="src/city/storegoods.js?v=deslop1"></script>
+<script src="src/city/storegoods.js?v=w09290219"></script>
 <!-- THE WALK-IN FIT-OUT (city/fitout.js + its planners): the building you are
      in or at the door of is fitted out for real (finished floors, bathrooms,
      kitchens, bedrooms, stockrooms, a gang's count room, baked light from
@@ -1394,7 +1394,7 @@ document.body.appendChild(b);}}catch(e){}})();
      same game. Loads after interactions/interact (registers its verbs), after
      shops (cityTill is the only money source) and after gangs/turf (it steers
      crews and feeds zone control). Flag: RACKET_V1. -->
-<script src="src/city/racket.js?v=racket1"></script>
+<script src="src/city/racket.js?v=w09290219"></script>
 <script src="src/city/stuntjumps.js?v=ballistic2z"></script>
 <!-- MARINA + BOATYARD: finger berths, Med-moor quay, fuel dock, travel-lift
      well, IALA Region B buoyage, and a dealer with three demo hulls floating
@@ -1472,9 +1472,9 @@ document.body.appendChild(b);}}catch(e){}})();
      hold it, the motel room that is his menu, the consequences of a kill. -->
 <script src="src/city/hitman_paper.js?v=inworld1"></script>
 <script src="src/city/hitman_hands.js?v=inworld1"></script>
-<script src="src/city/hitman_room.js?v=inworld1"></script>
+<script src="src/city/hitman_room.js?v=w09290219"></script>
 <script src="src/city/dossier.js?v=inworld1"></script>
-<script src="src/city/hitman_fallout.js?v=inworld1"></script>
+<script src="src/city/hitman_fallout.js?v=w09290219"></script>
 <script src="src/city/agency.js?v=boom2"></script>
 <!-- Canonical story layer: the diegetic phone mounts first, then the campaign
      director drives the rooftop arrest, prison choice and contract chain. -->
@@ -1847,7 +1847,7 @@ document.body.appendChild(b);}}catch(e){}})();
      checkpoint, counter-snipers, the panic protocol) lives in protection.js. -->
 <script src="src/city/president_office.js?v=pres3"></script>
 <script src="src/city/motorcade.js?v=pres3"></script>
-<script src="src/city/president_public.js?v=detail1"></script>
+<script src="src/city/president_public.js?v=w09290219"></script>
 <script src="src/city/president_regime.js?v=pres3-st1"></script>
 
 <!-- CASH STORE — the back half of the cash-bag loop (owner: "only driving to
@@ -1869,8 +1869,8 @@ document.body.appendChild(b);}}catch(e){}})();
      property panel at your address post, the contractor's demolition, locked
      doors, the deed map. Then the crew that lives there and the rival raids
      on it (city/compoundcrew.js). -->
-<script src="src/city/plots.js?v=onebet1"></script>
-<script src="src/city/compoundcrew.js?v=lad1"></script>
+<script src="src/city/plots.js?v=w09290219"></script>
+<script src="src/city/compoundcrew.js?v=w09290219"></script>
 
 <!-- S5: sqlite-wasm single-player parity (BUILD-PLAN.md Stage S). Pure
      feature-detected/lazy — this tag itself is tiny (no wasm, no Worker
@@ -1888,7 +1888,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- 4b. game packages: engine registry first, then each packaged venue game
      (after every city system they facade: interactions, worldmap, economy) -->
-<script src="src/core/packages.js?v=pkg8"></script>
+<script src="src/core/packages.js?v=w09290219"></script>
 <!-- games/warband.js DELETED 2026-07-29. OWNER: "the whole war band code — it
      was a dumb idea, but it's really what this whole game's point is: get
      enough people recruited, or get enough money, or enough guns, or somehow
