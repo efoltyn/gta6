@@ -8569,8 +8569,10 @@
     const reach = b.reach != null ? b.reach : 1.0;
     const driveIn = kind === "gas" || kind === "carlot" || kind === "chop";
     // awning: over the glazing, never deeper than the parcel in front of it
-    const AD = Math.max(0.6, Math.min(1.1, reach - 0.2)), PITCH = 0.26;
-    const railY = 2.28, drop = Math.sin(PITCH) * AD;
+    // rail at 2.5 + shallow pitch + 15 cm valance: valance lip clears ~2.1 m
+    // (was 1.8 m at 2.28/0.26/20 cm: a hem at forehead height on every shop)
+    const AD = Math.max(0.6, Math.min(1.1, reach - 0.2)), PITCH = 0.2;
+    const railY = 2.5, drop = Math.sin(PITCH) * AD;
     if (!driveIn) {                                             // a drive-in bay has no awning over it
       const AW = runW - 0.2;
       const cOff = Math.cos(PITCH) * AD / 2, cY = railY - drop / 2;
@@ -8578,8 +8580,8 @@
       awn.position.set(di.x + onx * cOff, cY, di.z + onz * cOff);
       awn.rotation[along ? "z" : "x"] = along ? PITCH * di.nx : -PITCH * di.nz;   // street edge dips
       b.group.add(awn);
-      const vOff = Math.cos(PITCH) * AD, vY = railY - drop - 0.10;
-      const val = new THREE.Mesh(new THREE.BoxGeometry(...fx(AW, 0.20, 0.018)), mat(shadeHex(awnCol, 0.78)));
+      const vOff = Math.cos(PITCH) * AD, vY = railY - drop - 0.075;
+      const val = new THREE.Mesh(new THREE.BoxGeometry(...fx(AW, 0.15, 0.018)), mat(shadeHex(awnCol, 0.78)));
       val.position.set(di.x + onx * vOff, vY, di.z + onz * vOff);
       b.group.add(val);
       const rail = new THREE.Mesh(new THREE.BoxGeometry(...fx(AW + 0.1, 0.07, 0.08)), mat(0x2b2e33));
@@ -8589,7 +8591,7 @@
     void accent;
     // FASCIA: one painted board the width of the shopfront, a dark cap and
     // sill rail framing it, the name centred (never stretched across 20 m).
-    const fasY0 = 2.34, fasY1 = 3.12, fasH = fasY1 - fasY0, fasC = (fasY0 + fasY1) / 2;
+    const fasY0 = 2.56, fasY1 = 3.12, fasH = fasY1 - fasY0, fasC = (fasY0 + fasY1) / 2;
     const fascia = new THREE.Mesh(new THREE.BoxGeometry(...fx(runW, fasH, 0.16)), mat(color));
     fascia.position.set(di.x + onx * 0.1, fasC, di.z + onz * 0.1);
     b.group.add(fascia);
