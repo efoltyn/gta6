@@ -966,7 +966,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/tsunami_flow.js?v=tsureal1"></script>
 <script src="src/world/tsunami_scene.js?v=tsureal1"></script>
 <!-- the grid street layer (road, kerbs, footways, markings) world.js builds -->
-<script src="src/city/streetkit.js?v=deslop1"></script>
+<script src="src/city/streetkit.js?v=w0929gnd"></script>
 <!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
      inventory item; an NPC's keys live on the NPC and every existing way to
      take something off a person moves them. MUST load before city/buildings.js
@@ -1419,6 +1419,11 @@ document.body.appendChild(b);}}catch(e){}})();
      the near lane. After marina.js/boatyard.js — marina wraps the same spawn
      for boats first, and this wrapper passes every marine hull straight
      through to it. Revert with ?cfg_LOT_APPROACH=0. -->
+<!-- THE CITY GROUND: one splat-mapped Standard material for every grid lot
+     pad + the footway breakup (city/cityground.js). Runtime-only: world.js
+     and streetkit.js call it inside buildCity; it registers its paint pass
+     at landmass order 68, so it loads after worldmap.js and approach.js. -->
+<script src="src/city/cityground.js?v=w0929gnd"></script>
 <!-- FISHING (owner: the world had a "Fisherman" title and nobody wearing it;
      a mackerel was harvested by SHOOTING it through the hunting pipeline).
      Registers water-side spots that SELF-VALIDATE against CBZ.cityWaterAt — a
