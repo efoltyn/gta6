@@ -178,7 +178,7 @@
       if (b && b.isEmpty()) { stats.kept++; return; }
       if (b && outside(b)) {
         const parent = o.parent;
-        parent.remove(o); stats.removed++;
+        parent.remove(o); stats.removed++; prunedTops.add(o);
         if (s.stream && CBZ.streamParkPruned) CBZ.streamParkPruned(o, parent, b.clone(), null, null);
         return;
       }
@@ -192,8 +192,15 @@
       }
       stats.kept++;
     }
+    const prunedTops = new Set();
     const kids = root.children.slice();
     for (const k of kids) judge(k, 0);
+    // LOS blockers that went with a pruned subtree leave the list too: a
+    // detached wall still in CBZ.losBlockers kept its whole building alive
+    // through its parent chain (measured: 8.5k of the estate slice's 9.7k
+    // blockers, ~100 MB of heap) and still blocked sight where nothing stands.
+    // Streamed, each goes with its parked job and returns when it does.
+    stats.los = CBZ.sliceDropDetachedLos(root, prunedTops);
 
     const keepRect = function (c) {
       if (!c || c.minX == null) return true;
@@ -228,6 +235,25 @@
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     CBZ.slicePruneResult = stats;
     return stats;
+  };
+
+  // the top of o's detached subtree, or null when o is in the scene
+  function detachedTop(o, root) {
+    let p = o, top = o;
+    while (p) { if (p === root || p.isScene) return null; top = p; p = p.parent; }
+    return top;
+  }
+  CBZ.sliceDropDetachedLos = function (root, tops) {
+    const L = CBZ.losBlockers; if (!L || !L.length) return 0;
+    let w = 0, n = 0;
+    for (let i = 0; i < L.length; i++) {
+      const m = L[i], top = m ? detachedTop(m, root) : null;
+      if (!top || (tops && !tops.has(top))) { L[w++] = m; continue; }
+      n++;
+      if (CBZ.streamParkLos) CBZ.streamParkLos(top, m);
+    }
+    L.length = w;
+    return n;
   };
 
   /* ---- actors: traffic on the slice's own streets, the player in the slice */

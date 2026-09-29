@@ -220,10 +220,23 @@
     let w = 0; for (let i = 0; i < arr.length; i++) if (!drop.has(arr[i])) arr[w++] = arr[i];
     arr.length = w;
   }
+  // the LOS blockers under a job's objects leave CBZ.losBlockers with it
+  function takeLos(job) {
+    const L = CBZ.losBlockers; if (!L || !L.length || !job.objs || !job.objs.length) return;
+    const tops = new Set(); for (const it of job.objs) tops.add(it.o);
+    let w = 0;
+    for (let i = 0; i < L.length; i++) {
+      const m = L[i]; let p = m, hit = false;
+      while (p) { if (tops.has(p)) { hit = true; break; } p = p.parent; }
+      if (hit) (job.los || (job.los = [])).push(m); else L[w++] = m;
+    }
+    L.length = w;
+  }
   function park(job) {
+    takeLos(job);
     for (const it of job.objs) { if (it.o.parent) it.o.parent.remove(it.o); releaseGPU(it.o); }
     removeFrom(CBZ.colliders, job.cols); removeFrom(CBZ.platforms, job.plats);
-    if (job.pure) { job.objs = null; job.cols = job.plats = null; job.state = "queued"; }
+    if (job.pure) { job.objs = null; job.cols = job.plats = null; job.los = null; job.state = "queued"; }
     else job.state = "parked";
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
   }
@@ -231,6 +244,7 @@
     for (const it of job.objs) if (it.parent) it.parent.add(it.o);
     for (const c of job.cols) CBZ.colliders.push(c);
     for (const p of job.plats) (CBZ.platforms = CBZ.platforms || []).push(p);
+    if (job.los && CBZ.losBlockers) { for (const m of job.los) CBZ.losBlockers.push(m); job.los = null; }
     job.state = "built";
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
   }
@@ -253,6 +267,12 @@
   // one parked job per 400 m cell (by the subtree's centre), not per object:
   // the streamer scans its job list twice a second
   const prunedCells = new Map();
+  const jobOfTop = new WeakMap();
+  // a pruned LOS blocker rides with the parked job that holds its subtree
+  CBZ.streamParkLos = function (top, m) {
+    const job = jobOfTop.get(top); if (!job) return;
+    (job.los || (job.los = [])).push(m);
+  };
   CBZ.streamParkPruned = function (o, parent, box) {
     const cx = (box.min.x + box.max.x) / 2, cz = (box.min.z + box.max.z) / 2;
     const k = Math.floor(cx / 400) + "," + Math.floor(cz / 400);
@@ -265,6 +285,7 @@
     r.minX = Math.min(r.minX, box.min.x); r.maxX = Math.max(r.maxX, box.max.x);
     r.minZ = Math.min(r.minZ, box.min.z); r.maxZ = Math.max(r.maxZ, box.max.z);
     job.objs.push({ o: o, parent: parent });
+    jobOfTop.set(o, job);
     releaseGPU(o);
   };
 
