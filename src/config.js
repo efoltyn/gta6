@@ -723,16 +723,6 @@
   // that file parses before this one; the line below only documents the
   // default for the one-line revert: false = the stage-1 compact world.
   if (CBZ.CONFIG.WORLD_ENLARGE_V2 == null) CBZ.CONFIG.WORLD_ENLARGE_V2 = true;
-  // ROAD MARKINGS V1: biome TOWN streets (city/towngen.js) get a yellow
-  // centreline (dashed on ordinary 2-way lanes, solid on multi-lane), white
-  // dashed lane dividers + curb edge lines, and continental (zebra) crosswalks
-  // at every intersection — reference technique #1 (per-segment decal quads),
-  // ALL folded into ONE vertex-coloured mesh per town (+1 draw call, batch-exempt
-  // like world.js / highways.js road paint). Deterministic: positional math +
-  // CBZ.hash01 paint wear, never rng() (the mainland downtown grid in world.js
-  // is already marked under ROADS_V2; this brings the same read to the towns).
-  // Flip false to restore today's bare town asphalt (byte-identical).
-  if (CBZ.CONFIG.ROAD_MARKINGS_V1 == null) CBZ.CONFIG.ROAD_MARKINGS_V1 = true;
   // BUILDING MASSING V2 (reference adoption: SkyscraperGenerator tripartite
   // grammar). On → taller city/town towers get a base belt cornice, projecting
   // string courses up the shaft, a two-step roofline cornice, corner pinnacles,

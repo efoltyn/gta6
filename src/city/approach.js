@@ -350,15 +350,18 @@
       // only across its OWN pad, frontage to lot edge, 2 cm over the pad.
       // Everywhere else (towns, farms, the annex) there is no kit, and the
       // apron runs to the kerb with its own dropped mouth, as before.
-      const ST = city.street || null;
-      const kitted = !!(lot.grid && ST);
-      const along = kitted ? (kAlong - ST.footway) - frontage : Math.max(2.4, run);
+      // A town parcel carries the street it fronts (towngen: the same kit,
+      // with its own footway depth), so it is kitted exactly like a grid one.
+      const ST = lot.street || (lot.grid ? city.street : null) || null;
+      const kitted = !!ST;
+      const along = kitted ? (kAlong - (ST.footway || 0)) - frontage : Math.max(2.4, run);
       // THE GRID DRAWS ITS OWN. On a kitted parcel city/cityground.js paints
       // the driveway into the lot surface itself (poured slab, wheel tracks,
       // an oil drip, the lawn scuffed along its edges) from b.approach below;
       // the flat grey sheet with white edge lines this used to lay there read
       // as a parking bay glued onto the lawn. Off-grid parcels keep theirs.
-      const groundOwns = kitted && !!CBZ.cityGround;
+      // (a rural lane has no paving at all: a hut's yard is swept dirt)
+      const groundOwns = kitted && (!!ST.rural || (!!CBZ.cityGround && (lot.grid || !!ST.ground)));
       if (!groundOwns && (!kitted || along >= 0.4)) {
         const off = kitted ? 0 : -0.3;
         const ay = kitted ? ST.yLot + 0.02 : 0.12;

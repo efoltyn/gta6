@@ -374,9 +374,9 @@
     id: "village", name: "Village", subtitle: "Rural Settlement", biome: "village",
     pattern: "organic", density: 0.8, cols: 2, rows: 2, blockW: 34, blockD: 30, roadW: 10,
     minFrontage: 9, minLotArea: 90, squarePrefab: "well",
-    // dirt palette: sidewalk == ground so towngen's sidewalk slab reads as
-    // continuous swept dirt, not a paved curb (towngen has no explicit
-    // "no sidewalks" flag — matching the colour is the honest workaround).
+    // RURAL streets: towngen lays swept-dirt lanes flush with the ground —
+    // no kerb, no footway, no lane paint (the kerbed street kit is for towns)
+    streetStyle: "rural",
     palette: {
       ground: 0x8a6b45, sidewalk: 0x8a6b45, road: 0x6b5236, line: 0x8a6b45,
       wood: 0x6b5d4a, accent: 0x8a5a3a, stone: 0x9a8d72, sign: "#f4e7c2",

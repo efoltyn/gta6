@@ -37,8 +37,11 @@
 
   // Each template:
   //   id, name, biome, pattern, density, cols, rows, blockW, blockD, roadW,
-  //   palette{ ground, sidewalk, road, line, wood, accent, stone, sign,
+  //   palette{ ground, verge, sidewalk, road, line, wood, accent, stone, sign,
   //            signBoard, plaza, lamp },
+  //   (verge: the land round the town's streets, outside its kerbed grid —
+  //   scrub, lawn, dry grass or snow; never a road colour, or the placer's
+  //   pad reads as a car park the size of a district)
   //   skyline{ minStoreys, maxStoreys, landmarkStoreys, towerFrac, megaChance, townMax },
   //   squarePrefab, prefabs{ civic, commercial, residential, default }.
   //
@@ -55,7 +58,7 @@
       id: "capeharbor", name: "Cape Harbor", subtitle: "Port City", biome: "capeharbor",
       pattern: "grid", density: 0.66, cols: 4, rows: 3, blockW: 50, blockD: 44, roadW: 13,
       minFrontage: 14, minLotArea: 200, squarePrefab: "flagpole",
-      palette: { ground: 0x7d8794, sidewalk: 0x9aa3ad, road: 0x42474d, line: 0xc9bf8e,
+      palette: { ground: 0x7d8794, verge: 0x6e7560, sidewalk: 0x9aa3ad, road: 0x42474d, line: 0xc9bf8e,
         wood: 0x5a6b78, accent: 0x37607a, stone: 0x8a929b, sign: "#dfeaff",
         signBoard: 0x1f2730, plaza: 0x8f99a3, lamp: 0xbfe0ff },
       skyline: { minStoreys: 3, maxStoreys: 8, landmarkStoreys: 30, towerFrac: 0.18, megaChance: false, townMax: 4 },
@@ -89,7 +92,7 @@
       id: "goldspire", name: "Goldspire", subtitle: "Finance District", biome: "goldspire",
       pattern: "grid", density: 0.82, cols: 3, rows: 3, blockW: 44, blockD: 40, roadW: 14,
       minFrontage: 13, minLotArea: 170, squarePrefab: "flagpole",
-      palette: { ground: 0x6f7480, sidewalk: 0x9498a2, road: 0x3c3f46, line: 0xd8c98a,
+      palette: { ground: 0x6f7480, verge: 0x62703f, sidewalk: 0x9498a2, road: 0x3c3f46, line: 0xd8c98a,
         wood: 0x556070, accent: 0xc9a44a, stone: 0xb8bcc6, sign: "#ffe9a8",
         signBoard: 0x232838, plaza: 0xa6aab4, lamp: 0xffe9a8 },
       skyline: { minStoreys: 8, maxStoreys: 16, landmarkStoreys: 44, towerFrac: 0.6, megaChance: true, townMax: 4 },
@@ -124,7 +127,7 @@
       id: "neonreef", name: "Neon Reef", subtitle: "Casino Strip", biome: "neonreef",
       pattern: "mainstreet", density: 0.78, cols: 4, rows: 2, blockW: 52, blockD: 42, roadW: 14,
       minFrontage: 14, minLotArea: 190, squarePrefab: "flagpole",
-      palette: { ground: 0x2a2440, sidewalk: 0x3a3358, road: 0x201a30, line: 0xff5ab0,
+      palette: { ground: 0x2a2440, verge: 0x4f4a3c, sidewalk: 0x3a3358, road: 0x201a30, line: 0xff5ab0,
         wood: 0x6a3a78, accent: 0xff36c0, stone: 0x4a4068, sign: "#ff8ae0",
         signBoard: 0x140f22, plaza: 0x3a3358, lamp: 0xff66cc },
       skyline: { minStoreys: 5, maxStoreys: 12, landmarkStoreys: 38, towerFrac: 0.5, megaChance: true, townMax: 4 },
@@ -157,7 +160,7 @@
       id: "foundry", name: "Foundry Flats", subtitle: "Factory Town", biome: "foundry",
       pattern: "organic", density: 0.62, cols: 3, rows: 3, blockW: 58, blockD: 52, roadW: 13,
       minFrontage: 16, minLotArea: 260, squarePrefab: "flagpole",
-      palette: { ground: 0x55514a, sidewalk: 0x6a655c, road: 0x3a3833, line: 0xd0a850,
+      palette: { ground: 0x55514a, verge: 0x5a5244, sidewalk: 0x6a655c, road: 0x3a3833, line: 0xd0a850,
         wood: 0x6a5a44, accent: 0xb5662a, stone: 0x736d63, sign: "#f0c060",
         signBoard: 0x201d18, plaza: 0x6a655c, lamp: 0xffb060 },
       skyline: { minStoreys: 2, maxStoreys: 5, landmarkStoreys: 0, towerFrac: 0, megaChance: false, townMax: 4 },
@@ -189,7 +192,7 @@
       id: "harvestmarket", name: "Harvest Market", subtitle: "Farm County", biome: "farmland",
       pattern: "mainstreet", density: 0.55, cols: 3, rows: 2, blockW: 60, blockD: 46, roadW: 12,
       minFrontage: 16, minLotArea: 260, squarePrefab: "well",
-      palette: { ground: 0xb59a66, sidewalk: 0xc2ad7e, road: 0x6a5a40, line: 0xcdb98a,
+      palette: { ground: 0xb59a66, verge: 0xa89060, sidewalk: 0xc2ad7e, road: 0x6a5a40, line: 0xcdb98a,
         wood: 0x8a6b3a, accent: 0x7a5a30, stone: 0x9a8d72, sign: "#f4e7c2",
         signBoard: 0x2a2418, plaza: 0xc6b079, lamp: 0xf3d68a },
       skyline: { minStoreys: 1, maxStoreys: 3, landmarkStoreys: 0, towerFrac: 0, megaChance: false, townMax: 3 },
@@ -221,7 +224,7 @@
       id: "pinecrest", name: "Pinecrest", subtitle: "Alpine Resort", biome: "snow",
       pattern: "mainstreet", density: 0.6, cols: 3, rows: 2, blockW: 52, blockD: 44, roadW: 12,
       minFrontage: 14, minLotArea: 210, squarePrefab: "flagpole",
-      palette: { ground: 0xdde6ef, sidewalk: 0xc7d2dc, road: 0x3b3f45, line: 0xeaf2ff,
+      palette: { ground: 0xdde6ef, verge: 0xdde6ef, sidewalk: 0xc7d2dc, road: 0x3b3f45, line: 0xeaf2ff,
         wood: 0x7a5638, accent: 0x5e4129, stone: 0x9aa6b2, sign: "#eaf2ff",
         signBoard: 0x2a2018, plaza: 0xcdd8e2, lamp: 0xfff0d0 },
       skyline: { minStoreys: 2, maxStoreys: 5, landmarkStoreys: 0, towerFrac: 0, megaChance: false, townMax: 4 },

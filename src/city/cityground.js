@@ -291,6 +291,8 @@
      THE SPLAT PAINTER — what each parcel is made of, from what stands on it.
      ================================================================== */
   function distOf(lot, districts) {
+    // a town parcel names its own surface kind (towngen: zone -> kind)
+    if (lot.groundKind) return { kind: lot.groundKind, wealth: isFinite(lot.groundWealth) ? lot.groundWealth : 0.5 };
     const d = districts && districts[lot.district];
     return { kind: (d && d.kind) || "residential", wealth: d && isFinite(d.wealth) ? d.wealth : 0.5 };
   }
@@ -398,57 +400,88 @@
     const sum = g + e + a + p;
     if (sum > 1) { g /= sum; e /= sum; a /= sum; p /= sum; }
     const j = i * 4;
-    S[j] = Math.round(g * 255); S[j + 1] = Math.round(e * 255); S[j + 2] = Math.round(a * 255); S[j + 3] = Math.round(p * 255);
-    M[j] = Math.round(clamp01(grime) * 255); M[j + 1] = Math.round(clamp01(stain) * 255);
-    M[j + 2] = Math.round(clamp01(wear) * 255); M[j + 3] = Math.round(clamp01(tone) * 255);
+    // (v * 255 + 0.5) | 0 is Math.round for v >= 0, without the call
+    S[j] = (g * 255 + 0.5) | 0; S[j + 1] = (e * 255 + 0.5) | 0; S[j + 2] = (a * 255 + 0.5) | 0; S[j + 3] = (p * 255 + 0.5) | 0;
+    M[j] = (clamp01(grime) * 255 + 0.5) | 0; M[j + 1] = (clamp01(stain) * 255 + 0.5) | 0;
+    M[j + 2] = (clamp01(wear) * 255 + 0.5) | 0; M[j + 3] = (clamp01(tone) * 255 + 0.5) | 0;
   }
 
   // Paint every grid parcel into the live splat. Safe to call again (a
   // rebuilt block, a demolition): each parcel's rectangle is repainted whole.
+  function paintLot(state, lot) {
+    // the downtown's splat paints the grid parcels out of city.lots; a
+    // town's was handed exactly its own parcels
+    if (!lot || (state.main && !lot.grid) || !isFinite(lot.cx)) return false;
+    const S = state.S.image.data, Mo = state.M.image.data;
+    const x0 = state.x0, z0 = state.z0, cell = state.cell, N = state.N;
+    const b = lot.building || null;
+    const D = distOf(lot, state.districts);
+    const o = {
+      cx: lot.cx, cz: lot.cz, hw: (lot.w || 30) / 2, hd: (lot.d || 30) / 2, i: 0,
+      kind: D.kind, wealth: D.wealth,
+      // poorer streets wear harder; a crew's building lets its yard go
+      wear: 0.08 + (1 - D.wealth) * 0.22 + (lot.kind === "abandoned" ? 0.4 : 0),
+      park: null, b: null, face: faceOf(lot, b), front: 0,
+    };
+    if (b && b.park) {
+      const w = lot.w || 30, d = lot.d || 30, bo = Math.min(w, d) * 0.23;
+      o.park = {
+        lw: w - 1.6, ld: d - 1.6, pw: 2.2, plazaR: Math.min(w, d) * 0.17,
+        trees: lot.groundTrees || [],
+        benches: [[1, 0], [-1, 0], [0, 1], [0, -1]].map(function (s) {
+          return { x: lot.cx + s[0] * bo + (s[0] === 0 ? 2 : 0), z: lot.cz + s[1] * bo + (s[1] === 0 ? 2 : 0) };
+        }),
+      };
+    } else if (b && isFinite(b.w) && isFinite(b.d) && b.w > 1) {
+      o.b = { x: (isFinite(b.ox) ? b.ox : lot.cx) - lot.cx, z: (isFinite(b.oz) ? b.oz : lot.cz) - lot.cz, hw: b.w / 2, hd: b.d / 2 };
+      o.front = o.b.x * o.face.nx + o.b.z * o.face.nz + (o.face.nx ? o.b.hw : o.b.hd);
+    }
+    const ix0 = Math.max(0, Math.floor((lot.cx - o.hw - 1 - x0) / cell)), ix1 = Math.min(N - 1, Math.ceil((lot.cx + o.hw + 1 - x0) / cell));
+    const iz0 = Math.max(0, Math.floor((lot.cz - o.hd - 1 - z0) / cell)), iz1 = Math.min(N - 1, Math.ceil((lot.cz + o.hd + 1 - z0) / cell));
+    for (let iz = iz0; iz <= iz1; iz++) {
+      const z = z0 + (iz + 0.5) * cell;
+      for (let ix = ix0; ix <= ix1; ix++) {
+        o.i = iz * N + ix;
+        paintTexel(o, x0 + (ix + 0.5) * cell, z, S, Mo);
+      }
+    }
+    return true;
+  }
   function paint(state) {
     if (!state) return;
     const t0 = Date.now();
-    const S = state.S.image.data, Mo = state.M.image.data;
-    const x0 = state.x0, z0 = state.z0, cell = state.cell, N = SPLAT;
     let lots = 0;
-    for (const lot of state.lots) {
-      if (!lot || !lot.grid || !isFinite(lot.cx)) continue;
-      const b = lot.building || null;
-      const D = distOf(lot, state.districts);
-      const o = {
-        cx: lot.cx, cz: lot.cz, hw: (lot.w || 30) / 2, hd: (lot.d || 30) / 2, i: 0,
-        kind: D.kind, wealth: D.wealth,
-        // poorer streets wear harder; a crew's building lets its yard go
-        wear: 0.08 + (1 - D.wealth) * 0.22 + (lot.kind === "abandoned" ? 0.4 : 0),
-        park: null, b: null, face: faceOf(lot, b), front: 0,
-      };
-      if (b && b.park) {
-        const w = lot.w || 30, d = lot.d || 30, bo = Math.min(w, d) * 0.23;
-        o.park = {
-          lw: w - 1.6, ld: d - 1.6, pw: 2.2, plazaR: Math.min(w, d) * 0.17,
-          trees: lot.groundTrees || [],
-          benches: [[1, 0], [-1, 0], [0, 1], [0, -1]].map(function (s) {
-            return { x: lot.cx + s[0] * bo + (s[0] === 0 ? 2 : 0), z: lot.cz + s[1] * bo + (s[1] === 0 ? 2 : 0) };
-          }),
-        };
-      } else if (b && isFinite(b.w) && isFinite(b.d) && b.w > 1) {
-        o.b = { x: (isFinite(b.ox) ? b.ox : lot.cx) - lot.cx, z: (isFinite(b.oz) ? b.oz : lot.cz) - lot.cz, hw: b.w / 2, hd: b.d / 2 };
-        o.front = o.b.x * o.face.nx + o.b.z * o.face.nz + (o.face.nx ? o.b.hw : o.b.hd);
-      }
-      const ix0 = Math.max(0, Math.floor((lot.cx - o.hw - 1 - x0) / cell)), ix1 = Math.min(N - 1, Math.ceil((lot.cx + o.hw + 1 - x0) / cell));
-      const iz0 = Math.max(0, Math.floor((lot.cz - o.hd - 1 - z0) / cell)), iz1 = Math.min(N - 1, Math.ceil((lot.cz + o.hd + 1 - z0) / cell));
-      for (let iz = iz0; iz <= iz1; iz++) {
-        const z = z0 + (iz + 0.5) * cell;
-        for (let ix = ix0; ix <= ix1; ix++) {
-          o.i = iz * N + ix;
-          paintTexel(o, x0 + (ix + 0.5) * cell, z, S, Mo);
-        }
-      }
-      lots++;
-    }
+    for (const lot of state.lots) if (paintLot(state, lot)) lots++;
     state.S.needsUpdate = true; state.M.needsUpdate = true;
+    state.painted = true; state.cursor = state.lots.length;
     stats.paintMs = Date.now() - t0; stats.paints++; stats.lots = lots;
   }
+  /* THE TOWNS PAINT AFTER THE LOAD. A town's lot ground is ~0.1 s of splat
+     work each, and a dozen of them were a second and more of boot for ground
+     nobody can see from the downtown. So the world build only QUEUES them
+     (order 68) and this tick paints a few parcels per frame inside a small
+     budget; each town's texture uploads once, when its last parcel is done.
+     Until then it reads as plain concrete — out past the draw-in distance. */
+  const queue = [];
+  const BUDGET_MS = 3;
+  function enqueue(state) {
+    if (queue.indexOf(state) < 0) { state.cursor = 0; state.painted = false; queue.push(state); }
+  }
+  function drain(budget) {
+    const t0 = Date.now();
+    while (queue.length) {
+      const st = queue[0];
+      while (st.cursor < st.lots.length) {
+        paintLot(st, st.lots[st.cursor++]);
+        if (Date.now() - t0 >= budget) return;
+      }
+      st.S.needsUpdate = true; st.M.needsUpdate = true; st.painted = true;
+      stats.paints++;
+      queue.shift();
+      if (Date.now() - t0 >= budget) return;
+    }
+  }
+  if (CBZ.onAlways) CBZ.onAlways(94, function () { if (queue.length) drain(BUDGET_MS); });
 
   /* ==================================================================
      SHADERS
@@ -590,7 +623,8 @@
     return t;
   }
 
-  let live = null;           // the current city's splat state (a rebuilt world replaces it)
+  let live = null;           // the downtown's splat state (a rebuilt world replaces it)
+  let states = [];           // every splat of the current world: the downtown + each town
   let detailTex = null;
 
   /* material(ctx) — the lot-pad material for a freshly built grid.
@@ -609,14 +643,24 @@
     const xL = ctx.xLines, zL = ctx.zLines;
     const x0 = xL[0], z0 = zL[0];
     const span = Math.max(xL[xL.length - 1] - x0, zL[zL.length - 1] - z0, 1);
-    const cell = span / SPLAT;
-    const S = dataTex(THREE, new Uint8Array(SPLAT * SPLAT * 4), SPLAT, false, true);
-    const M = dataTex(THREE, new Uint8Array(SPLAT * SPLAT * 4), SPLAT, false, true);
-    live = { S, M, x0, z0, cell, lots: ctx.lots || [], districts: ctx.districts || [] };
+    // ctx.main === false: a TOWN's lot ground (towngen). Same material, same
+    // program; its own splat over its own grid, smaller (a town spans ~300 m,
+    // so 512 texels is ~0.6 m each), painted from the parcels it was handed.
+    const main = ctx.main !== false;
+    const NS = main ? SPLAT : Math.max(128, Math.min(SPLAT, ctx.splat || 512));
+    const cell = span / NS;
+    const S = dataTex(THREE, new Uint8Array(NS * NS * 4), NS, false, true);
+    const M = dataTex(THREE, new Uint8Array(NS * NS * 4), NS, false, true);
+    const state = { S, M, x0, z0, cell, N: NS, main, lots: ctx.lots || [], districts: ctx.districts || [] };
+    if (main) { live = state; states = [state]; }     // a new world: the downtown is laid first
+    else states.push(state);
     // The landmass pass (order 68) paints once buildings exist; painting the
     // bare lots first as well would only double the boot cost. Without the
     // registry (a page that never runs landmasses) paint what there is now.
-    if (!CBZ.addLandmass) paint(live);
+    // A town built INSIDE a world build (ctx.paintNow false) waits for that
+    // same pass, when approach.js has laid its driveways; one built on its
+    // own (a studio page) paints at once, its buildings already stand.
+    if (!CBZ.addLandmass || (!main && ctx.paintNow !== false)) paint(state);
 
     const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0, envMapIntensity: 0.2 });
     mat.name = "city-ground";
@@ -693,8 +737,10 @@
     material: material,
     dressPaving: dressPaving,
     // repaint (after a demolition, a rebuilt parcel) — cheap, a few ms
-    repaint: function () { paint(live); },
-    stats: function () { return Object.assign({ splat: SPLAT, detail: TEX, live: !!live }, stats); },
+    repaint: function () { for (const st of states) paint(st); },
+    // finish every queued town now (plain-node checks, a page that needs it)
+    flush: function () { drain(1e9); },
+    stats: function () { return Object.assign({ splat: SPLAT, detail: TEX, live: !!live, surfaces: states.length }, stats); },
     _bakeDetail: bakeDetail,     // plain-node checks
     _paint: paint,
   };
@@ -702,9 +748,12 @@
   // The real paint, once buildings, doors, approaches (order 67) and parks
   // exist. Order 68: straight after approach.js solves the driveways.
   if (CBZ.addLandmass) CBZ.addLandmass(function cityGroundPaint(city) {
-    if (!live || !city || !city.lots) return null;
-    live.lots = city.lots;
-    paint(live);
+    if (live && city && city.lots) live.lots = city.lots;
+    queue.length = 0;
+    for (const st of states) {
+      if (st.main) paint(st);          // the downtown: now, it is where you are
+      else enqueue(st);                // each town: after the load, a few parcels a frame
+    }
     return null;
   }, 68);
 })();

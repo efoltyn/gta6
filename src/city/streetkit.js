@@ -1,5 +1,5 @@
 /* ============================================================
-   city/streetkit.js — THE DOWNTOWN STREET, BUILT AS ONE THING.
+   city/streetkit.js — EVERY STREET GRID, BUILT AS ONE THING.
 
    The grid used to be a stack of layers patching each other: a checker
    ground plane, avenue asphalt at y 0.040 and cross streets at 0.065
@@ -37,7 +37,14 @@
    kerb 1, tactile 1, paint 2, ironwork 1, grime 1 (+ the one lot-pad mesh
    wearing city/cityground.js, and the avenue medians, built by world.js).
 
-   CBZ.streetKit.build(ctx) is called by city/world.js; see there for ctx.
+   CBZ.streetKit.build(ctx) is called by city/world.js (the downtown) AND by
+   city/towngen.js (every town, capital and mini-city), so there is ONE
+   street system in the game. The grid is any grid: street lines with any
+   spacing and count per axis, each with its own width and lane count
+   (ctx.xWidths/zWidths, ctx.xLanes/zLanes), a footway depth (ctx.footway),
+   an apron (0 = just the skirt into the town's ground). Every build
+   registers its surface; CBZ.streetKit.heightAt(x,z) is the floor for all of
+   them (world.js's groundHeightAt reads it).
 ============================================================ */
 (function () {
   "use strict";
@@ -75,25 +82,77 @@
      GEOMETRY SOLVE — pure math, no THREE. Exposed for node checks.
      ================================================================== */
   function solve(ctx) {
-    const X = ctx.xLines, Z = ctx.zLines, N = X.length - 1;
-    const ROAD = ctx.ROAD, BLK = ctx.BLK, step = BLK + ROAD;
-    const h = ROAD / 2, H = BLK / 2, L = ctx.lotHalf != null ? ctx.lotHalf : H - 2, FW = H - L;
+    /* THE GRID IS ANY GRID. xLines/zLines are street centrelines, increasing,
+       with any spacing and any count on each axis (the downtown's 7x7 square
+       grid, a town's 4x3, a jittered organic plan). Every street may carry its
+       own width (ctx.xWidths / ctx.zWidths, default ROAD) and lane count
+       (ctx.xLanes / ctx.zLanes, default lanesPerDir). A block is whatever lies
+       between the road EDGES of its four streets, so a wide main street and a
+       narrow back lane frame the same block honestly. The footway is ctx.footway
+       metres deep (the downtown derives it from BLK/2 - lotHalf, i.e. 2 m). */
+    const X = ctx.xLines, Z = ctx.zLines, NX = X.length - 1, NZ = Z.length - 1;
+    const ROAD = ctx.ROAD, h = ROAD / 2;
+    const hx = [], hz = [];
+    for (let i = 0; i <= NX; i++) hx.push(((ctx.xWidths && ctx.xWidths[i]) || ROAD) / 2);
+    for (let j = 0; j <= NZ; j++) hz.push(((ctx.zWidths && ctx.zWidths[j]) || ROAD) / 2);
+    let hMin = Infinity;
+    for (const v of hx) hMin = Math.min(hMin, v);
+    for (const v of hz) hMin = Math.min(hMin, v);
+    const FW = ctx.footway != null ? ctx.footway
+      : (ctx.lotHalf != null && ctx.BLK != null ? ctx.BLK / 2 - ctx.lotHalf : 2);
     // The arc centre must sit inside the lot square or the corner geometry
     // below (rays from the arc centre) would not cover the footway.
-    const R = clamp(ctx.cornerR != null ? ctx.cornerR : 4.8, FW + 0.5, h);
-    const S = h + R;
+    const R = clamp(ctx.cornerR != null ? ctx.cornerR : 4.8, FW + 0.5, hMin);
+    const S = h + R;                                         // the base street's (exported)
     const laneW = ctx.laneW || 3.6, nL = ctx.lanesPerDir || 2;
+    const lanesX = [], lanesZ = [], laneWX = [], laneWZ = [];
+    for (let i = 0; i <= NX; i++) {
+      const n = Math.max(1, (ctx.xLanes && ctx.xLanes[i]) || nL);
+      lanesX.push(n); laneWX.push(Math.min(laneW, hx[i] / n));
+    }
+    for (let j = 0; j <= NZ; j++) {
+      const n = Math.max(1, (ctx.zLanes && ctx.zLanes[j]) || nL);
+      lanesZ.push(n); laneWZ.push(Math.min(laneW, hz[j] / n));
+    }
     const medHalf = (ctx.aveMedian || 0) / 2;
     const isAve = ctx.isAvenue || function () { return false; };
-    const near = h + 0.6, xw = clamp(0.16 * ROAD, 1.8, 3.0);
-    const cw0 = near, cw1 = near + xw, stop0 = cw1 + 1.2, stop1 = stop0 + 0.6;
-    const minX = X[0] - h, maxX = X[N] + h, minZ = Z[0] - h, maxZ = Z[N] + h;
+    // crosswalk / stop bar setbacks from a junction centre: they clear the
+    // CROSSING street's half width (hc), so they are per junction leg
+    const xw = clamp(0.16 * ROAD, 1.8, 3.0);
+    function cwNear(hc) { return hc + 0.6; }
+    function cwFar(hc) { return hc + 0.6 + xw; }
+    function stopNear(hc) { return hc + 0.6 + xw + 1.2; }
+    function stopFar(hc) { return hc + 0.6 + xw + 1.8; }
+    const cw0 = cwNear(h), cw1 = cwFar(h), stop0 = stopNear(h), stop1 = stopFar(h);
+    const minX = X[0] - hx[0], maxX = X[NX] + hx[NX], minZ = Z[0] - hz[0], maxZ = Z[NZ] + hz[NZ];
     const KT = P.kerbTop;
     const fa = P.flare / R;                                   // flare, radians of arc
+    const skirt = ctx.skirt != null ? ctx.skirt : P.skirt;
+    const apron = ctx.apron != null ? Math.max(skirt, ctx.apron) : P.apron;
 
-    // crosswalk landing ranges on a corner arc (alpha from the road-A kerb)
-    const aA0 = Math.asin(clamp((S - cw1) / R, 0, 1)), aA1 = Math.asin(clamp((S - cw0) / R, 0, 1));
-    const aB0 = Math.acos(clamp((S - cw0) / R, 0, 1)), aB1 = Math.acos(clamp((S - cw1) / R, 0, 1));
+    // blocks: the rectangle between the four road edges
+    const bx0 = [], bx1 = [], bz0 = [], bz1 = [];
+    for (let bi = 0; bi < NX; bi++) { bx0.push(X[bi] + hx[bi]); bx1.push(X[bi + 1] - hx[bi + 1]); }
+    for (let bj = 0; bj < NZ; bj++) { bz0.push(Z[bj] + hz[bj]); bz1.push(Z[bj + 1] - hz[bj + 1]); }
+    function blockRect(bi, bj) {
+      const x0 = bx0[bi], x1 = bx1[bi], z0 = bz0[bj], z1 = bz1[bj];
+      return { cx: (x0 + x1) / 2, cz: (z0 + z1) / 2, HX: (x1 - x0) / 2, HZ: (z1 - z0) / 2,
+        minX: x0, maxX: x1, minZ: z0, maxZ: z1 };
+    }
+    // the block index whose two bounding lines bracket v (clamped)
+    function bracket(L, v, n) {
+      if (n <= 1 || v <= L[1]) return 0;
+      if (v >= L[n - 1]) return n - 1;
+      let lo = 1, hi = n - 1;
+      while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (L[mid] <= v) lo = mid; else hi = mid - 1; }
+      return lo;
+    }
+
+    // crosswalk landing ranges on a corner arc (alpha from the road-A kerb).
+    // (S - cw) is R - 0.6 (- xw) at every junction whatever the widths, so
+    // one table serves them all.
+    const aA0 = Math.asin(clamp((R - 0.6 - xw) / R, 0, 1)), aA1 = Math.asin(clamp((R - 0.6) / R, 0, 1));
+    const aB0 = Math.acos(clamp((R - 0.6) / R, 0, 1)), aB1 = Math.acos(clamp((R - 0.6 - xw) / R, 0, 1));
 
     // the shared arc parameter list: uniform 6 deg plus every breakpoint the
     // road, the kerb, the ramps and the lot corner need. Road rings and kerb
@@ -116,21 +175,44 @@
     let K45 = ALPHA.indexOf(QTR);
     if (K45 < 0) { K45 = 0; let bd = 9; ALPHA.forEach(function (a, k) { if (Math.abs(a - QTR) < bd) { bd = Math.abs(a - QTR); K45 = k; } }); ALPHA[K45] = QTR; }
     CA[K45] = SA[K45] = Math.SQRT1_2;
+    const TA = ALPHA.map(function (a, k) { return k === K45 ? 1 : Math.tan(a); });
 
-    // ring e-samples (metres from the kerb) along every ray; the last one is
-    // the junction centre-line. 8.65 = the avenue median edge.
-    const E = [0, 0.15, P.gutter, 0.8, 1.4, 2.4, 3.9, 5.6, 7.3].concat(medHalf > 0.05 ? [h - medHalf] : [], [h]);
-    const ELAST = S - R;
+    // ring samples (metres from the kerb) along every ray, on the BASE
+    // street; the last one is the junction centre-line. A ray of another
+    // length maps the same samples linearly past the 0.8 m gutter zone, so
+    // every ray in the grid carries the same count and strips always meet.
+    // Samples at or past the base centre-line are dropped (a 10 m lane has
+    // no 7.3 m ring). 8.65 = the downtown avenue's median edge.
+    const E = [0, 0.15, P.gutter, 0.8, 1.4, 2.4, 3.9, 5.6, 7.3].filter(function (e) { return e < h - 0.3; })
+      .concat(medHalf > 0.05 && h - medHalf > 1.5 ? [h - medHalf] : [], [h]);
+    const ELAST = h, M = E.length;
+    function dOf(m, Ln) {
+      if (m === M - 1) return Ln;
+      const e = E[m];
+      return e <= 0.8 ? e : 0.8 + (e - 0.8) * (Ln - 0.8) / (ELAST - 0.8);
+    }
+    function SX(i) { return hx[i] + R; }
+    function SZ(j) { return hz[j] + R; }
+    // where ray k of junction quadrant (i,j,sx,sz) meets the junction's own
+    // centre lines: on x = X[i] below 45 deg, on z = Z[j] above, and exactly
+    // the crossing point at 45 deg — bitwise shared by mirrored quadrants.
+    // (With equal widths this is the radial ray the downtown always used.)
+    function rayEnd(i, j, sx, sz, k) {
+      if (k === K45) return [X[i], Z[j]];
+      if (ALPHA[k] < QTR) return [X[i], Z[j] + sz * SZ(j) * (1 - TA[k])];
+      return [X[i] + sx * SX(i) * (1 - 1 / TA[k]), Z[j]];
+    }
 
-    function cwA(i, j, sz) { return (sz > 0 ? j < N : j > 0) && i > 0 && i < N; }
-    function cwB(i, j, sx) { return (sx > 0 ? i < N : i > 0) && j > 0 && j < N; }
-    function legA(j, sz) { return sz > 0 ? j < N : j > 0; }
-    function legB(i, sx) { return sx > 0 ? i < N : i > 0; }
+    function cwA(i, j, sz) { return crosswalks && (sz > 0 ? j < NZ : j > 0) && i > 0 && i < NX; }
+    function cwB(i, j, sx) { return crosswalks && (sx > 0 ? i < NX : i > 0) && j > 0 && j < NZ; }
+    function legA(j, sz) { return sz > 0 ? j < NZ : j > 0; }
+    function legB(i, sx) { return sx > 0 ? i < NX : i > 0; }
     function blockAt(i, j, sx, sz) {           // the block in quadrant (sx,sz) of junction (i,j)
       const bi = sx > 0 ? i : i - 1, bj = sz > 0 ? j : j - 1;
-      return (bi >= 0 && bi < N && bj >= 0 && bj < N) ? { bi: bi, bj: bj } : null;
+      return (bi >= 0 && bi < NX && bj >= 0 && bj < NZ) ? { bi: bi, bj: bj } : null;
     }
     // drop ranges on each corner (junction i,j quadrant sx,sz), merged
+    const crosswalks = ctx.crosswalks !== false;
     const cornerDrops = new Map();
     function ckey(i, j, sx, sz) { return i * 4096 + j * 4 + (sx > 0 ? 2 : 0) + (sz > 0 ? 1 : 0); }
     function mergeRanges(rs) {
@@ -142,7 +224,7 @@
       }
       return out;
     }
-    for (let i = 0; i <= N; i++) for (let j = 0; j <= N; j++) {
+    for (let i = 0; i <= NX; i++) for (let j = 0; j <= NZ; j++) {
       for (let sx = -1; sx <= 1; sx += 2) for (let sz = -1; sz <= 1; sz += 2) {
         if (!blockAt(i, j, sx, sz)) continue;
         const rs = [];
@@ -161,7 +243,7 @@
       }
       return d;
     }
-    // driveways: one per block at most, from approach.js
+    // driveways: one per block at most (key bi * NZ + bj), from approach.js
     const drives = ctx.driveways || [];
     function profile(d, delta, lip, run) {
       const drop = delta * (P.yWalk - P.yRoad - lip);
@@ -176,21 +258,21 @@
       if (x < minX || x > maxX || z < minZ || z > maxZ) {
         const dOut = Math.max(minX - x, x - maxX, minZ - z, z - maxZ);
         out.region = -1;
-        return dOut < P.skirt ? P.yRoad * (1 - dOut / P.skirt) : null;
+        return dOut < skirt ? P.yRoad * (1 - dOut / skirt) : null;
       }
-      let bi = Math.floor((x - X[0]) / step), bj = Math.floor((z - Z[0]) / step);
-      if (bi < 0) bi = 0; else if (bi > N - 1) bi = N - 1;
-      if (bj < 0) bj = 0; else if (bj > N - 1) bj = N - 1;
-      const px = x - (X[bi] + X[bi + 1]) * 0.5, pz = z - (Z[bj] + Z[bj + 1]) * 0.5;
+      const bi = bracket(X, x, NX), bj = bracket(Z, z, NZ);
+      const x0 = bx0[bi], x1 = bx1[bi], z0 = bz0[bj], z1 = bz1[bj];
+      const HX = (x1 - x0) * 0.5, HZ = (z1 - z0) * 0.5;
+      const px = x - (x0 + x1) * 0.5, pz = z - (z0 + z1) * 0.5;
       const ax = px < 0 ? -px : px, az = pz < 0 ? -pz : pz;
-      const kk = H - R, qx = ax - kk, qz = az - kk;
+      const qx = ax - (HX - R), qz = az - (HZ - R);
       let sd, corner = false;
       if (qx > 0 && qz > 0) { sd = Math.sqrt(qx * qx + qz * qz) - R; corner = true; }
-      else sd = (ax > az ? ax : az) - H;
+      else sd = (ax - HX > az - HZ ? ax - HX : az - HZ);
       if (sd > 0) { out.region = 0; return P.yRoad; }
       const d = -sd;
       out.d = d;
-      const ox = ax - L, oz = az - L;
+      const ox = ax - (HX - FW), oz = az - (HZ - FW);
       const dl = (ox > 0 && oz > 0) ? Math.sqrt(ox * ox + oz * oz) : (ox > oz ? ox : oz);
       if (dl <= 0) { out.region = 2; return P.yLot; }
       out.region = 1;
@@ -203,10 +285,10 @@
           if (dl2 > 0) { const f = profile(d, dl2, P.rampLip, P.rampRun); if (f < y) y = f; }
         }
       } else {
-        const dv = drives[bi * N + bj];
+        const dv = drives[bi * NZ + bj];
         if (dv) {
           let face, along;
-          if (ax >= az) { face = px > 0 ? "x+" : "x-"; along = z; } else { face = pz > 0 ? "z+" : "z-"; along = x; }
+          if (ax - HX >= az - HZ) { face = px > 0 ? "x+" : "x-"; along = z; } else { face = pz > 0 ? "z+" : "z-"; along = x; }
           if (face === dv.face) {
             const dist = Math.abs(along - dv.at) - dv.half;
             const delta = dist <= 0 ? 1 : 1 - sstep(dist / dv.flare);
@@ -220,26 +302,30 @@
     function regionAt(x, z) { probe(x, z); return out.region; }
     // distance from a road point to the nearest kerb line (build time only)
     function kerbDist(x, z) {
-      const ci = Math.floor((x - X[0]) / step), cj = Math.floor((z - Z[0]) / step);
+      const ci = bracket(X, x, NX), cj = bracket(Z, z, NZ);
       let best = 99;
       for (let bi = ci - 1; bi <= ci + 1; bi++) for (let bj = cj - 1; bj <= cj + 1; bj++) {
-        if (bi < 0 || bj < 0 || bi >= N || bj >= N) continue;
-        const px = Math.abs(x - (X[bi] + X[bi + 1]) * 0.5), pz = Math.abs(z - (Z[bj] + Z[bj + 1]) * 0.5);
-        const qx = px - (H - R), qz = pz - (H - R);
-        const sd = (qx > 0 && qz > 0) ? Math.sqrt(qx * qx + qz * qz) - R : Math.max(px, pz) - H;
+        if (bi < 0 || bj < 0 || bi >= NX || bj >= NZ) continue;
+        const B = blockRect(bi, bj);
+        const px = Math.abs(x - B.cx), pz = Math.abs(z - B.cz);
+        const qx = px - (B.HX - R), qz = pz - (B.HZ - R);
+        const sd = (qx > 0 && qz > 0) ? Math.sqrt(qx * qx + qz * qz) - R : Math.max(px - B.HX, pz - B.HZ);
         if (sd < best) best = sd;
       }
       return Math.max(0, best);
     }
 
     return {
-      X: X, Z: Z, N: N, ROAD: ROAD, BLK: BLK, step: step, h: h, H: H, L: L, FW: FW, R: R, S: S,
-      laneW: laneW, nL: nL, medHalf: medHalf, isAve: isAve,
+      X: X, Z: Z, N: NX, NX: NX, NZ: NZ, ROAD: ROAD, BLK: ctx.BLK, step: X.length > 1 ? X[1] - X[0] : 0,
+      h: h, hx: hx, hz: hz, FW: FW, R: R, S: S, SX: SX, SZ: SZ,
+      laneW: laneW, nL: nL, lanesX: lanesX, lanesZ: lanesZ, laneWX: laneWX, laneWZ: laneWZ,
+      medHalf: medHalf, isAve: isAve,
       cw0: cw0, cw1: cw1, stop0: stop0, stop1: stop1,
-      minX: minX, maxX: maxX, minZ: minZ, maxZ: maxZ,
-      ALPHA: ALPHA, CA: CA, SA: SA, K45: K45, E: E, ELAST: ELAST, fa: fa,
-      aA0: aA0, aA1: aA1, aB0: aB0, aB1: aB1,
-      cwA: cwA, cwB: cwB, legA: legA, legB: legB, blockAt: blockAt,
+      cwNear: cwNear, cwFar: cwFar, stopNear: stopNear, stopFar: stopFar, xw: xw,
+      minX: minX, maxX: maxX, minZ: minZ, maxZ: maxZ, skirt: skirt, apron: apron,
+      ALPHA: ALPHA, CA: CA, SA: SA, K45: K45, E: E, M: M, ELAST: ELAST, fa: fa, dOf: dOf, rayEnd: rayEnd,
+      aA0: aA0, aA1: aA1, aB0: aB0, aB1: aB1, crosswalks: crosswalks,
+      cwA: cwA, cwB: cwB, legA: legA, legB: legB, blockAt: blockAt, blockRect: blockRect,
       cornerDrops: cornerDrops, ckey: ckey, dropCorner: dropCorner, drives: drives,
       heightAt: heightAt, regionAt: regionAt, kerbDist: kerbDist,
     };
@@ -450,17 +536,114 @@
   }
 
   /* ==================================================================
+     SHARED LOOK — the canvases and the non-road materials are the same
+     stone, concrete and paint in every street this kit lays, so they are
+     made once and shared: a town costs geometry, never another texture set
+     or another shader program.
+     ================================================================== */
+  let _look = null;
+  const _townRoadMats = new Map();
+  function look(THREE) {
+    if (_look) return _look;
+    const footTex = texOf(THREE, footwayCanvas());
+    const footMat = new THREE.MeshLambertMaterial({ map: footTex, vertexColors: true });
+    const kerbTex = texOf(THREE, kerbCanvas());
+    const kerbMat = new THREE.MeshLambertMaterial({ map: kerbTex, vertexColors: true });
+    const tactTex = texOf(THREE, tactileCanvas());
+    const tactMat = new THREE.MeshLambertMaterial({ map: tactTex, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -3 });
+    // the 6 m footway canvas repeats its stains; city/cityground.js lays
+    // world-space blots, gum and a 13/41 m mottle over it (and rain)
+    if (CBZ.cityGround && CBZ.cityGround.dressPaving) CBZ.cityGround.dressPaving(footMat);
+    function paintMat(r, g, b) {
+      const m = new THREE.MeshLambertMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 });
+      m.color.setRGB(r, g, b);                   // LINEAR paint albedo, set explicitly
+      if (CBZ.roadPaintWear) CBZ.roadPaintWear(m);
+      return m;
+    }
+    const white = paintMat(0.60, 0.61, 0.60), yellow = paintMat(0.62, 0.40, 0.05);
+    const ironTex = texOf(THREE, ironCanvas(), false);
+    const ironMat = new THREE.MeshLambertMaterial({ map: ironTex, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -5 });
+    const grimeTex = texOf(THREE, grimeCanvas(), false);
+    const grimeMat = new THREE.MeshBasicMaterial({ map: grimeTex, fog: false, toneMapped: false, depthWrite: false,
+      blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.DstColorFactor, blendDst: THREE.ZeroFactor,
+      polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -6 });
+    [footMat, kerbMat, tactMat, white, yellow, ironMat].forEach(function (m) { if (CBZ.terrainFogScale) CBZ.terrainFogScale(m, 0.10); });
+    _look = { footMat, kerbMat, kerbTex, tactMat, white, yellow, ironMat, grimeMat };
+    return _look;
+  }
+  // THE ASPHALT. The downtown has its own (its shader origin and lane model);
+  // every other street of a given lane model shares one, so twenty towns are
+  // one program, not twenty.
+  function asphalt(THREE, G, shared) {
+    const key = G.laneW + "|" + G.nL;
+    if (shared && _townRoadMats.has(key)) return _townRoadMats.get(key);
+    const roadMat = CBZ.roadMat
+      ? CBZ.roadMat({ color: 0xffffff, detailRepeat: 1, normalScale: 0.3 })
+      : new THREE.MeshLambertMaterial({ color: 0xffffff });
+    if (CBZ.asphaltDetail) {
+      CBZ.asphaltDetail(roadMat, {
+        origin: shared ? { x: 0, z: 0 } : { x: (G.minX + G.maxX) / 2, z: (G.minZ + G.maxZ) / 2 },
+        lanes: { laneW: G.laneW, lanesPerDir: G.nL, median: 0 },   // u is median-relative already
+        gutter: P.gutter,
+      });
+    } else roadMat.color.setRGB(0.08, 0.08, 0.085);
+    // The library's roughness map scatters metre-scale glossy blotches that
+    // mirror the sky (the "camouflage" read at noon); the shader owns the
+    // roughness variation here (polish, tar, oil), so drop the map.
+    if (roadMat.roughnessMap) { roadMat.roughnessMap = null; roadMat.needsUpdate = true; }
+    if (CBZ.terrainFogScale) CBZ.terrainFogScale(roadMat, 0.10);
+    if (shared) {
+      // a town is laid over its own ground sheet (and a placer's pad) 2-3 cm
+      // below the carriageway: one polygonOffset step keeps the asphalt in
+      // front at any range (the paint, ironwork and grime sit further forward)
+      roadMat.polygonOffset = true; roadMat.polygonOffsetFactor = -1; roadMat.polygonOffsetUnits = -2;
+      _townRoadMats.set(key, roadMat);
+    }
+    return roadMat;
+  }
+
+  /* ==================================================================
+     THE SURFACE REGISTRY — every street this kit lays answers the ground
+     query. world.js's floor (groundHeightAt) asks CBZ.streetKit.heightAt,
+     so a town's kerb is stepped up exactly like the downtown's. Reset when
+     a new world is built (world.js lays the downtown first).
+     ================================================================== */
+  const surfaces = [];
+  // hot path (every foot and wheel, every frame): a bounds reject per kit,
+  // one probe for the kit that owns the point
+  function floorAt(x, z) {
+    for (let i = 0; i < surfaces.length; i++) {
+      const s = surfaces[i];
+      if (x < s.minX || x > s.maxX || z < s.minZ || z > s.maxZ) continue;
+      const y = s.heightAt(x, z);
+      if (y != null) return y;
+    }
+    return null;
+  }
+  function regionOf(x, z) {
+    for (let i = 0; i < surfaces.length; i++) {
+      const s = surfaces[i];
+      if (x < s.minX || x > s.maxX || z < s.minZ || z > s.maxZ) continue;
+      const r = s.regionAt(x, z);
+      if (r !== -1) return r;
+    }
+    return -1;
+  }
+
+  /* ==================================================================
      BUILD
      ================================================================== */
   function build(ctx) {
     const THREE = window.THREE;
     const G = solve(ctx);
-    const X = G.X, Z = G.Z, N = G.N, h = G.h, H = G.H, R = G.R, S = G.S, FW = G.FW, KT = P.kerbTop;
-    const CA = G.CA, SA = G.SA, ALPHA = G.ALPHA, E = G.E, KN = ALPHA.length, M = E.length;
+    const X = G.X, Z = G.Z, NX = G.NX, NZ = G.NZ, hx = G.hx, hz = G.hz, R = G.R, FW = G.FW, KT = P.kerbTop;
+    const CA = G.CA, SA = G.SA, ALPHA = G.ALPHA, KN = ALPHA.length, M = G.M;
     const root = ctx.root;
     const Y = P.yRoad;
+    const L = look(THREE);
+    const tag = ctx.name || "street";
     const stats = { roadVerts: 0, footwayVerts: 0, kerbVerts: 0, paintQuads: 0, arrows: 0, crosswalks: 0, stopBars: 0,
-      tMarks: 0, manholes: 0, valves: 0, grime: 0, ramps: 0, tactilePads: 0, driveways: 0, drawCalls: 0 };
+      tMarks: 0, manholes: 0, valves: 0, grime: 0, ramps: 0, tactilePads: 0, driveways: 0, drawCalls: 0, blocks: NX * NZ };
     const meshes = {};
 
     function finish(name, geo, material, opt) {
@@ -480,7 +663,7 @@
     }
 
     // ---------------------------------------------------------------
-    // 1) THE ROAD: junction pieces (polar rings round each arc) + strips
+    // 1) THE ROAD: junction pieces (rings round each arc) + strips
     // ---------------------------------------------------------------
     const road = new Acc({ lane: true });
     function roadVert(x, z, ji, jj, strip) {
@@ -489,41 +672,35 @@
       if (strip) { u = strip.vertical ? x - strip.line : z - strip.line; ave = strip.ave; }
       else {
         const dx = x - X[ji], dz = z - Z[jj];
-        if (Math.abs(dz) >= Math.abs(dx)) { u = dx; w = clamp(1 - (S - Math.abs(dz)) / 5, 0, 1); ave = G.isAve(ji); }
-        else { u = dz; w = clamp(1 - (S - Math.abs(dx)) / 5, 0, 1); ave = false; }
+        const sx = G.SX(ji), sz = G.SZ(jj);
+        // which leg this point belongs to: past the diagonal of the box
+        if (Math.abs(dz) * sx >= Math.abs(dx) * sz) { u = dx; w = clamp(1 - (sz - Math.abs(dz)) / 5, 0, 1); ave = G.isAve(ji); }
+        else { u = dz; w = clamp(1 - (sx - Math.abs(dx)) / 5, 0, 1); ave = false; }
       }
       if (ave) u = (u < 0 ? -1 : 1) * Math.max(0, Math.abs(u) - G.medHalf);
       const e = G.kerbDist(x, z);
       return road.v(x, Y, z, x * 0.25, z * 0.25, null, [u, e, w]);
     }
-    // the ray endpoint on the junction's own centre lines (bitwise shared by
-    // mirrored quadrants and by the rectangular outer quadrants)
-    function rayEnd(i, j, sx, sz, k) {
-      const cx = X[i] + sx * S, cz = Z[j] + sz * S;
-      if (k === G.K45) return [X[i], Z[j]];
-      if (CA[k] > SA[k]) return [X[i], cz - sz * SA[k] * (S / CA[k])];
-      return [cx - sx * CA[k] * (S / SA[k]), Z[j]];
-    }
     const rowsA = new Map(), rowsB = new Map();     // quadrant key -> [vertex idx from kerb (e=0) to centre]
-    function qkey(i, j, sx, sz) { return G.ckey(i, j, sx, sz); }
-    for (let i = 0; i <= N; i++) for (let j = 0; j <= N; j++) {
+    const qkey = G.ckey;
+    for (let i = 0; i <= NX; i++) for (let j = 0; j <= NZ; j++) {
       for (let sx = -1; sx <= 1; sx += 2) for (let sz = -1; sz <= 1; sz += 2) {
         const hasA = G.legA(j, sz), hasB = G.legB(i, sx);
         if (G.blockAt(i, j, sx, sz)) {
-          // POLAR quadrant: rays from the arc centre, rings of constant e
-          const cx = X[i] + sx * S, cz = Z[j] + sz * S;
+          // CORNER quadrant: a ray per arc station from the kerb to the
+          // junction's centre lines, rings of constant distance from the kerb
+          const cx = X[i] + sx * G.SX(i), cz = Z[j] + sz * G.SZ(j);
           const grid = [];
           for (let k = 0; k < KN; k++) {
             const col = [];
-            const rmax = CA[k] > SA[k] ? S / CA[k] : S / SA[k];
+            const kx = cx - sx * CA[k] * R, kz = cz - sz * SA[k] * R;
+            const pe = G.rayEnd(i, j, sx, sz, k);
+            const Ln = Math.hypot(pe[0] - kx, pe[1] - kz) || 1e-6;
+            const ux = (pe[0] - kx) / Ln, uz = (pe[1] - kz) / Ln;
             for (let m = 0; m < M; m++) {
               let x, z;
-              if (m === M - 1) { const pe = rayEnd(i, j, sx, sz, k); x = pe[0]; z = pe[1]; }
-              else {
-                const e = E[m];
-                const rho = e <= 0.8 ? R + e : R + 0.8 + (e - 0.8) * (rmax - R - 0.8) / (G.ELAST - 0.8);
-                x = cx - sx * CA[k] * rho; z = cz - sz * SA[k] * rho;
-              }
+              if (m === M - 1) { x = pe[0]; z = pe[1]; }
+              else { const d = G.dOf(m, Ln); x = kx + ux * d; z = kz + uz * d; }
               col.push(roadVert(x, z, i, j, null));
             }
             grid.push(col);
@@ -536,10 +713,10 @@
         } else {
           // RECTANGULAR quadrant: no block here (the grid's outer edge)
           const xs = [], zs = [];
-          if (hasB) { for (let k = G.K45; k < KN; k++) xs.push(rayEnd(i, j, sx, sz, k)[0]); }
-          else { for (let m = M - 1; m >= 0; m--) xs.push(m === M - 1 ? X[i] : X[i] + sx * (h - E[m])); }
-          if (hasA) { for (let k = G.K45; k >= 0; k--) zs.push(rayEnd(i, j, sx, sz, k)[1]); }
-          else { for (let m = M - 1; m >= 0; m--) zs.push(m === M - 1 ? Z[j] : Z[j] + sz * (h - E[m])); }
+          if (hasB) { for (let k = G.K45; k < KN; k++) xs.push(G.rayEnd(i, j, sx, sz, k)[0]); }
+          else { for (let m = M - 1; m >= 0; m--) xs.push(m === M - 1 ? X[i] : X[i] + sx * (hx[i] - G.dOf(m, hx[i]))); }
+          if (hasA) { for (let k = G.K45; k >= 0; k--) zs.push(G.rayEnd(i, j, sx, sz, k)[1]); }
+          else { for (let m = M - 1; m >= 0; m--) zs.push(m === M - 1 ? Z[j] : Z[j] + sz * (hz[j] - G.dOf(m, hz[j]))); }
           const grid = [];
           for (let a = 0; a < xs.length; a++) { const col = []; for (let b = 0; b < zs.length; b++) col.push(roadVert(xs[a], zs[b], i, j, null)); grid.push(col); }
           for (let a = 0; a < xs.length - 1; a++) for (let b = 0; b < zs.length - 1; b++) road.q(grid[a][b], grid[a + 1][b], grid[a + 1][b + 1], grid[a][b + 1]);
@@ -554,7 +731,7 @@
       return rowNeg.concat(rowPos.slice(0, rowPos.length - 1).reverse());
     }
     const INNER = 4;                             // interior rows (shadow/tessellation)
-    for (let i = 0; i <= N; i++) for (let j = 0; j < N; j++) {          // strips of road A (vertical line i)
+    for (let i = 0; i <= NX; i++) for (let j = 0; j < NZ; j++) {          // strips of road A (vertical line i)
       const lo = stripRows(rowsA.get(qkey(i, j, -1, 1)), rowsA.get(qkey(i, j, 1, 1)));
       const hi = stripRows(rowsA.get(qkey(i, j + 1, -1, -1)), rowsA.get(qkey(i, j + 1, 1, -1)));
       const strip = { vertical: true, line: X[i], ave: G.isAve(i) };
@@ -570,7 +747,7 @@
       rows.push(hi);
       for (let r = 0; r < rows.length - 1; r++) for (let c = 0; c < lo.length - 1; c++) road.q(rows[r][c], rows[r][c + 1], rows[r + 1][c + 1], rows[r + 1][c]);
     }
-    for (let j = 0; j <= N; j++) for (let i = 0; i < N; i++) {          // strips of road B (horizontal line j)
+    for (let j = 0; j <= NZ; j++) for (let i = 0; i < NX; i++) {          // strips of road B (horizontal line j)
       const lo = stripRows(rowsB.get(qkey(i, j, 1, -1)), rowsB.get(qkey(i, j, 1, 1)));
       const hi = stripRows(rowsB.get(qkey(i + 1, j, -1, -1)), rowsB.get(qkey(i + 1, j, -1, 1)));
       const strip = { vertical: false, line: Z[j], ave: false };
@@ -586,9 +763,9 @@
       rows.push(hi);
       for (let r = 0; r < rows.length - 1; r++) for (let c = 0; c < lo.length - 1; c++) road.q(rows[r][c], rows[r][c + 1], rows[r + 1][c + 1], rows[r + 1][c]);
     }
-    // THE HARBOUR APRON: the ring from the grid edge out to the seawall line,
-    // skirted down from the road height, sharing every edge vertex of the
-    // road so no crack can open between them.
+    // THE APRON: the ring from the grid edge out (the downtown's runs to the
+    // seawall line; a town's is only the skirt easing the road edge down to
+    // its ground), sharing every edge vertex of the road so no crack opens.
     {
       const edge = { s: [], n: [], w: [], e: [] };
       const nv = road.pos.length / 3, eps = 1e-6;
@@ -606,49 +783,46 @@
         if (i == null) { i = road.v(x, y, z, x * 0.25, z * 0.25, null, [0, 99, 0]); ap.set(k, i); }
         return i;
       }
-      const SK = P.skirt, AP = P.apron;
+      const SK = G.skirt, AP = G.apron;
+      const OFF = AP > SK + 0.05 ? [0, SK, AP] : [0, SK];
+      const OUT = OFF[OFF.length - 1];
       function uniq(list, key) {
         list.sort(function (a, b) { return road.pos[a * 3 + key] - road.pos[b * 3 + key]; });
         const out = [];
         for (const v of list) if (!out.length || Math.abs(road.pos[out[out.length - 1] * 3 + key] - road.pos[v * 3 + key]) > 1e-5) out.push(v);
         return out;
       }
+      function ring(fixed, x, z0, dir, horizontal) {
+        // one column across the apron: the edge vertex (or an outside point) then the offsets
+        const col = [];
+        for (let r = 0; r < OFF.length; r++) {
+          if (r === 0 && fixed != null) { col.push(fixed); continue; }
+          col.push(horizontal ? av(x, z0 + dir * OFF[r], 0) : av(z0 + dir * OFF[r], x, 0));
+        }
+        return col;
+      }
       // south / north: full width incl. the corner squares
       [["s", G.minZ, -1], ["n", G.maxZ, 1]].forEach(function (sd) {
         const inner = uniq(edge[sd[0]], 0), z0 = sd[1], dir = sd[2];
         const cols = [];
-        cols.push([av(G.minX - AP, z0, 0), av(G.minX - AP, z0 + dir * SK, 0), av(G.minX - AP, z0 + dir * AP, 0)]);
-        cols.push([av(G.minX - SK, z0, 0), av(G.minX - SK, z0 + dir * SK, 0), av(G.minX - SK, z0 + dir * AP, 0)]);
-        for (const v of inner) { const x = road.pos[v * 3]; cols.push([v, av(x, z0 + dir * SK, 0), av(x, z0 + dir * AP, 0)]); }
-        cols.push([av(G.maxX + SK, z0, 0), av(G.maxX + SK, z0 + dir * SK, 0), av(G.maxX + SK, z0 + dir * AP, 0)]);
-        cols.push([av(G.maxX + AP, z0, 0), av(G.maxX + AP, z0 + dir * SK, 0), av(G.maxX + AP, z0 + dir * AP, 0)]);
-        for (let c = 0; c < cols.length - 1; c++) for (let r = 0; r < 2; r++) road.q(cols[c][r], cols[c + 1][r], cols[c + 1][r + 1], cols[c][r + 1]);
+        if (OUT > SK + 0.05) cols.push(ring(null, G.minX - OUT, z0, dir, true));
+        cols.push(ring(null, G.minX - SK, z0, dir, true));
+        for (const v of inner) cols.push(ring(v, road.pos[v * 3], z0, dir, true));
+        cols.push(ring(null, G.maxX + SK, z0, dir, true));
+        if (OUT > SK + 0.05) cols.push(ring(null, G.maxX + OUT, z0, dir, true));
+        for (let c = 0; c < cols.length - 1; c++) for (let r = 0; r < OFF.length - 1; r++) road.q(cols[c][r], cols[c + 1][r], cols[c + 1][r + 1], cols[c][r + 1]);
       });
       [["w", G.minX, -1], ["e", G.maxX, 1]].forEach(function (sd) {
         const inner = uniq(edge[sd[0]], 2), x0 = sd[1], dir = sd[2];
         const cols = [];
-        for (const v of inner) { const z = road.pos[v * 3 + 2]; cols.push([v, av(x0 + dir * SK, z, 0), av(x0 + dir * AP, z, 0)]); }
-        for (let c = 0; c < cols.length - 1; c++) for (let r = 0; r < 2; r++) road.q(cols[c][r], cols[c + 1][r], cols[c + 1][r + 1], cols[c][r + 1]);
+        for (const v of inner) cols.push(ring(v, road.pos[v * 3 + 2], x0, dir, false));
+        for (let c = 0; c < cols.length - 1; c++) for (let r = 0; r < OFF.length - 1; r++) road.q(cols[c][r], cols[c + 1][r], cols[c + 1][r + 1], cols[c][r + 1]);
       });
     }
     stats.roadVerts = road.pos.length / 3;
     // THE MATERIAL: CBZ.roadMat (wet-weather driver) + the procedural asphalt
-    const roadMat = CBZ.roadMat
-      ? CBZ.roadMat({ color: 0xffffff, detailRepeat: 1, normalScale: 0.3 })
-      : new THREE.MeshLambertMaterial({ color: 0xffffff });
-    if (CBZ.asphaltDetail) {
-      CBZ.asphaltDetail(roadMat, {
-        origin: { x: (G.minX + G.maxX) / 2, z: (G.minZ + G.maxZ) / 2 },
-        lanes: { laneW: G.laneW, lanesPerDir: G.nL, median: 0 },   // u is median-relative already
-        gutter: P.gutter,
-      });
-    } else roadMat.color.setRGB(0.08, 0.08, 0.085);
-    // The library's roughness map scatters metre-scale glossy blotches that
-    // mirror the sky (the "camouflage" read at noon); the shader owns the
-    // roughness variation here (polish, tar, oil), so drop the map.
-    if (roadMat.roughnessMap) { roadMat.roughnessMap = null; roadMat.needsUpdate = true; }
-    if (CBZ.terrainFogScale) CBZ.terrainFogScale(roadMat, 0.10);
-    const roadMesh = finish("mainland-city-surface", road.geo(THREE, false), roadMat, { surface: true });
+    const roadMat = asphalt(THREE, G, !!ctx.sharedMaterial);
+    const roadMesh = finish(ctx.surfaceName || "mainland-city-surface", road.geo(THREE, false), roadMat, { surface: true });
 
     // ---------------------------------------------------------------
     // 2) BLOCKS: kerb + footway (+ ramps, aprons) per block perimeter
@@ -658,7 +832,7 @@
     const tact = new Acc({});
     const lotLoops = [];                         // per block: [{x,y,z}] back-edge loop
     // depth samples across a full-width (FW) footway; corners squeeze them
-    const DS = [0, KT, 0.6, 0.9, KT + P.driveRun, FW - P.backRun, KT + P.rampRun, FW];
+    const DS = [0, KT, 0.6, 0.9, KT + P.driveRun, FW - P.backRun, KT + P.rampRun, FW].filter(function (d) { return d <= FW; });
     DS.sort(function (a, b) { return a - b; });
     function depths(dmax) {
       const out = [];
@@ -671,12 +845,12 @@
       return out;
     }
     function footTone(x, z) { return 0.94 + hsh(Math.floor(x / 1.5), Math.floor(z / 1.5), 41) * 0.1; }
-    for (let bi = 0; bi < N; bi++) for (let bj = 0; bj < N; bj++) {
-      const dv = G.drives[bi * N + bj] || null;
+    for (let bi = 0; bi < NX; bi++) for (let bj = 0; bj < NZ; bj++) {
+      const dv = G.drives[bi * NZ + bj] || null;
       const segs = [];
       // corner helper: station list over alpha, in the requested direction
       function cornerSeg(ji, jj, sx, sz, forward) {
-        const cx = X[ji] + sx * S, cz = Z[jj] + sz * S;
+        const cx = X[ji] + sx * G.SX(ji), cz = Z[jj] + sz * G.SZ(jj);
         const st = [];
         for (let n = 0; n < KN; n++) {
           const k = forward ? n : KN - 1 - n;
@@ -689,9 +863,11 @@
       }
       // face helper: straight kerb from (x0,z0) to (x1,z1), inward normal (nx,nz)
       function faceSeg(x0, z0, x1, z1, nx, nz, face) {
-        const len = Math.hypot(x1 - x0, z1 - z0), dx = (x1 - x0) / len, dz = (z1 - z0) / len;
+        const len = Math.hypot(x1 - x0, z1 - z0);
+        if (len < 1e-4) return [];
+        const dx = (x1 - x0) / len, dz = (z1 - z0) / len;
         const ts = [];
-        const n = Math.ceil(len / 0.8);
+        const n = Math.max(1, Math.ceil(len / 0.8));
         for (let k = 0; k <= n; k++) ts.push(k * len / n);
         let dA = null, dB = null;
         if (dv && dv.face === face) {
@@ -719,15 +895,16 @@
         return st;
       }
       const x0 = X[bi], x1 = X[bi + 1], z0 = Z[bj], z1 = Z[bj + 1];
+      const sx0 = G.SX(bi), sx1 = G.SX(bi + 1), sz0 = G.SZ(bj), sz1 = G.SZ(bj + 1);
       // CCW loop: SW corner, south face, SE corner, east face, NE, north, NW, west
       segs.push(cornerSeg(bi, bj, 1, 1, true));
-      segs.push(faceSeg(x0 + S, z0 + h, x1 - S, z0 + h, 0, 1, "z-"));
+      segs.push(faceSeg(x0 + sx0, z0 + hz[bj], x1 - sx1, z0 + hz[bj], 0, 1, "z-"));
       segs.push(cornerSeg(bi + 1, bj, -1, 1, false));
-      segs.push(faceSeg(x1 - h, z0 + S, x1 - h, z1 - S, -1, 0, "x+"));
+      segs.push(faceSeg(x1 - hx[bi + 1], z0 + sz0, x1 - hx[bi + 1], z1 - sz1, -1, 0, "x+"));
       segs.push(cornerSeg(bi + 1, bj + 1, -1, -1, true));
-      segs.push(faceSeg(x1 - S, z1 - h, x0 + S, z1 - h, 0, -1, "z+"));
+      segs.push(faceSeg(x1 - sx1, z1 - hz[bj + 1], x0 + sx0, z1 - hz[bj + 1], 0, -1, "z+"));
       segs.push(cornerSeg(bi, bj + 1, 1, -1, false));
-      segs.push(faceSeg(x0 + h, z1 - S, x0 + h, z0 + S, 1, 0, "x-"));
+      segs.push(faceSeg(x0 + hx[bi], z1 - sz1, x0 + hx[bi], z0 + sz0, 1, 0, "x-"));
       const loop = [];
       for (const st of segs) {
         const fcols = [], kcols = [], fcolsFace = [];
@@ -803,24 +980,14 @@
         clean.push(p);
       }
       if (clean.length > 2 && Math.abs(clean[0].x - clean[clean.length - 1].x) < 1e-6 && Math.abs(clean[0].z - clean[clean.length - 1].z) < 1e-6) clean.pop();
-      lotLoops[bi * N + bj] = clean;
+      lotLoops[bi * NZ + bj] = clean;
     }
     stats.footwayVerts = foot.pos.length / 3;
     stats.kerbVerts = kerb.pos.length / 3;
 
-    const footTex = texOf(THREE, footwayCanvas());
-    const footMat = new THREE.MeshLambertMaterial({ map: footTex, vertexColors: true });
-    const kerbTex = texOf(THREE, kerbCanvas());
-    const kerbMat = new THREE.MeshLambertMaterial({ map: kerbTex, vertexColors: true });
-    const tactTex = texOf(THREE, tactileCanvas());
-    const tactMat = new THREE.MeshLambertMaterial({ map: tactTex, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -3 });
-    // the 6 m footway canvas repeats its stains; city/cityground.js lays
-    // world-space blots, gum and a 13/41 m mottle over it (and rain)
-    if (CBZ.cityGround && CBZ.cityGround.dressPaving) CBZ.cityGround.dressPaving(footMat);
-    [footMat, kerbMat, tactMat].forEach(function (m) { if (CBZ.terrainFogScale) CBZ.terrainFogScale(m, 0.10); });
-    finish("street-footway", foot.geo(THREE, true), footMat);
-    finish("street-kerb", kerb.geo(THREE, false), kerbMat);
-    finish("street-tactile", tact.geo(THREE, true), tactMat, { decal: true, order: 1 });
+    finish(tag + "-footway", foot.geo(THREE, true), L.footMat);
+    finish(tag + "-kerb", kerb.geo(THREE, false), L.kerbMat);
+    finish(tag + "-tactile", tact.geo(THREE, true), L.tactMat, { decal: true, order: 1 });
 
     // ---------------------------------------------------------------
     // 3) MARKINGS — US MUTCD, one merged mesh per colour
@@ -835,6 +1002,7 @@
     }
     // frame: origin (ox,oz), forward (fx,fz), lateral (rx,rz); rect in (lat,fwd)
     function frameRect(acc, F, l0, l1, f0, f1, tone) {
+      if (!(f1 - f0 > 0.02) || !(l1 - l0 > 0.001)) return;
       function w(l, f) { return [F.ox + F.rx * l + F.fx * f, F.oz + F.rz * l + F.fz * f]; }
       pquad(acc, [w(l0, f0), w(l1, f0), w(l1, f1), w(l0, f1)], tone);
     }
@@ -846,71 +1014,83 @@
     }
     function wornTone(x, z, salt) { const t = hsh(Math.round(x * 2), Math.round(z * 2), salt); return 0.72 + t * 0.28 - (t < 0.06 ? 0.25 : 0); }
     const LW = 0.12;                       // line width (4-6 in)
-    const DEP0 = G.cw1 + 0.5;              // lines resume 0.5 m past the crosswalk
     const SOLID = 15;                      // solid lane line into the stop bar
-    // per strip: vertical (road A line i between j and j+1) / horizontal
+    function dep0(hc) { return G.cwFar(hc) + 0.5; }   // lines resume 0.5 m past the crosswalk
+    // one street, one block long: vertical = line li of X between Z[j0] and Z[j0+1]
+    function stripInfo(vertical, li, j0) {
+      return vertical
+        ? { L0: X[li], T0: Z[j0], len: Z[j0 + 1] - Z[j0], hL: hx[li], hc0: hz[j0], hc1: hz[j0 + 1],
+            lanes: G.lanesX[li], lw: G.laneWX[li], ave: G.isAve(li) }
+        : { L0: Z[li], T0: X[j0], len: X[j0 + 1] - X[j0], hL: hz[li], hc0: hx[j0], hc1: hx[j0 + 1],
+            lanes: G.lanesZ[li], lw: G.laneWZ[li], ave: false };
+    }
     function paintStrip(vertical, li, j0) {
-      const ave = vertical && G.isAve(li);
-      const base = ave ? G.medHalf : 0;
-      const L0 = vertical ? X[li] : Z[li];
-      const T0 = vertical ? Z[j0] : X[j0];
-      const len = G.step;
+      const I = stripInfo(vertical, li, j0);
+      const base = I.ave ? G.medHalf : 0;
+      const len = I.len;
       // frame: lateral u along x (vertical) / z (horizontal), forward along the road
-      const F = vertical ? { ox: L0, oz: T0, rx: 1, rz: 0, fx: 0, fz: 1 } : { ox: T0, oz: L0, rx: 0, rz: 1, fx: 1, fz: 0 };
-      const y0 = G.stop0, y1 = len - G.stop0;
+      const F = vertical ? { ox: I.L0, oz: I.T0, rx: 1, rz: 0, fx: 0, fz: 1 } : { ox: I.T0, oz: I.L0, rx: 0, rz: 1, fx: 1, fz: 0 };
+      const y0 = G.stopNear(I.hc0), y1 = len - G.stopNear(I.hc1);
       // centreline: double yellow (a solid yellow each side of the median on the avenues)
-      const yo = ave ? base + 0.04 : 0.06;
+      const yo = I.ave ? base + 0.04 : 0.06;
       frameRect(yellow, F, yo, yo + LW, y0, y1, wornTone(F.ox, F.oz, 3));
       frameRect(yellow, F, -yo - LW, -yo, y0, y1, wornTone(F.ox, F.oz, 4));
-      const edgeU = base + G.nL * G.laneW;
+      const edgeU = base + I.lanes * I.lw;
+      const room = I.hL - P.gutter - 0.1;          // the kerb side of the gutter pan
       for (let s = -1; s <= 1; s += 2) {
         // side s travels +forward when fw > 0. Keep right (config.js
         // roadLaneSide): on a horizontal strip lateral +z carries +x traffic;
         // on a vertical strip lateral +x carries -z traffic.
         const fw = vertical ? -s : s;
-        const barNear = fw > 0 ? len - G.stop0 : G.stop0, barFar = fw > 0 ? len - G.stop1 : G.stop1;
+        const barNear = fw > 0 ? len - G.stopNear(I.hc1) : G.stopNear(I.hc0);
+        const barFar = fw > 0 ? len - G.stopFar(I.hc1) : G.stopFar(I.hc0);
+        const d0 = dep0(I.hc0), d1 = len - dep0(I.hc1);
         // lane lines
-        for (let k = 1; k < G.nL; k++) {
-          const u = s * (base + k * G.laneW);
+        for (let k = 1; k < I.lanes; k++) {
+          const u = s * (base + k * I.lw);
           const solidA = fw > 0 ? barFar - SOLID : barFar, solidB = fw > 0 ? barFar : barFar + SOLID;
-          frameRect(white, F, u - LW / 2, u + LW / 2, Math.min(solidA, solidB), Math.max(solidA, solidB), wornTone(F.ox + u, F.oz, 5));
+          frameRect(white, F, u - LW / 2, u + LW / 2, Math.max(d0, Math.min(solidA, solidB)), Math.min(d1, Math.max(solidA, solidB)), wornTone(F.ox + u, F.oz, 5));
           // dashes from the departure end: 3 m on, 9 m off
-          const dep = fw > 0 ? DEP0 : len - DEP0;
-          for (let q = 0; q < 8; q++) {
+          const dep = fw > 0 ? d0 : d1;
+          const nq = Math.ceil(len / 12) + 1;
+          for (let q = 0; q < nq; q++) {
             const a = fw > 0 ? dep + q * 12 : dep - q * 12 - 3, b = a + 3;
             if (fw > 0 ? b > solidA - 1 : a < solidB + 1) break;
             frameRect(white, F, u - LW / 2, u + LW / 2, a, b, wornTone(F.ox + u + a, F.oz + a, 6));
           }
         }
-        // edge line (outside the travel lanes, parking beyond it)
+        // edge line (outside the travel lanes, parking beyond it) — only
+        // where the street has a parking lane for it to separate
         const eu = s * (edgeU + LW / 2);
-        frameRect(white, F, eu - LW / 2, eu + LW / 2, DEP0, len - DEP0, wornTone(F.ox + eu, F.oz, 7));
+        if (edgeU + LW < room) frameRect(white, F, eu - LW / 2, eu + LW / 2, d0, d1, wornTone(F.ox + eu, F.oz, 7));
         // stop bar across the approach lanes, 0.6 m
-        const u0 = s * (yo + LW + 0.05), u1 = s * edgeU;
+        const u0 = s * (yo + LW + 0.05), u1 = s * Math.min(edgeU, room);
         frameRect(white, F, Math.min(u0, u1), Math.max(u0, u1), Math.min(barNear, barFar), Math.max(barNear, barFar), 0.92);
         stats.stopBars++;
         // parking T-marks where a block (and so a kerb) lines this side
         const blk = vertical ? { bi: s > 0 ? li : li - 1, bj: j0 } : { bi: j0, bj: s > 0 ? li : li - 1 };
-        if (blk.bi >= 0 && blk.bi < N && blk.bj >= 0 && blk.bj < N) {
-          const a0 = h + 6.5, a1 = len - h - 6.5, BAY = 6.4;
+        const su0 = edgeU + LW, su1 = Math.min(edgeU + LW + 1.0, room);
+        if (su1 - su0 > 0.3 && blk.bi >= 0 && blk.bi < NX && blk.bj >= 0 && blk.bj < NZ) {
+          const a0 = I.hc0 + 6.5, a1 = len - I.hc1 - 6.5, BAY = 6.4;
           const nb = Math.floor((a1 - a0) / BAY);
           if (nb > 0) {
             const start = a0 + ((a1 - a0) - nb * BAY) / 2;
-            const dv = G.drives[blk.bi * N + blk.bj];
+            const dv = G.drives[blk.bi * NZ + blk.bj];
             const faceHere = vertical ? (s > 0 ? "x-" : "x+") : (s > 0 ? "z-" : "z+");
             for (let b = 0; b <= nb; b++) {
               const t = start + b * BAY;
-              if (dv && dv.face === faceHere && Math.abs((T0 + t) - dv.at) < dv.half + dv.flare + 0.4) continue;
-              const su0 = s * (edgeU + LW), su1 = s * Math.min(edgeU + LW + 1.0, h - P.gutter - 0.1);
-              frameRect(white, F, Math.min(su0, su1), Math.max(su0, su1), t - 0.05, t + 0.05, 0.85);
+              if (dv && dv.face === faceHere && Math.abs((I.T0 + t) - dv.at) < dv.half + dv.flare + 0.4) continue;
+              frameRect(white, F, Math.min(s * su0, s * su1), Math.max(s * su0, s * su1), t - 0.05, t + 0.05, 0.85);
               stats.tMarks++;
             }
           }
         }
       }
     }
-    for (let i = 0; i <= N; i++) for (let j = 0; j < N; j++) paintStrip(true, i, j);
-    for (let j = 0; j <= N; j++) for (let i = 0; i < N; i++) paintStrip(false, j, i);
+    if (ctx.markings !== false) {
+      for (let i = 0; i <= NX; i++) for (let j = 0; j < NZ; j++) paintStrip(true, i, j);
+      for (let j = 0; j <= NZ; j++) for (let i = 0; i < NX; i++) paintStrip(false, j, i);
+    }
     // crosswalks (continental) + arrows, per junction leg
     const ARROWS = {
       through: [[[-0.13, 0], [0.13, 0], [0.13, 1.9], [-0.13, 1.9]], [[-0.45, 1.9], [0.45, 1.9], [0, 3.0]]],
@@ -927,54 +1107,50 @@
       }
       stats.arrows++;
     }
+    // continental bars across a street of half width hL, 1.1 m pitch
+    function bars(hL) { return Math.max(1, Math.floor((hL - 0.8) / 1.1)); }
     const midtown = ctx.isMidtown || function () { return false; };
-    for (let i = 0; i <= N; i++) for (let j = 0; j <= N; j++) {
+    if (ctx.markings !== false) for (let i = 0; i <= NX; i++) for (let j = 0; j <= NZ; j++) {
       // legs: road A (vertical) +/-z, road B (horizontal) +/-x
       for (const sg of [-1, 1]) {
-        // crosswalk across road A on leg sg (bars run along z)
+        // crosswalk across road A on leg sg (bars run along z), clear of road B
         if (G.cwA(i, j, sg)) {
-          const F = { ox: X[i], oz: Z[j], rx: 1, rz: 0, fx: 0, fz: sg };
-          for (let k = -7; k <= 7; k++) frameRect(white, F, k * 1.1 - 0.25, k * 1.1 + 0.25, G.cw0, G.cw1, wornTone(X[i] + k, Z[j] + sg, 8));
+          const F = { ox: X[i], oz: Z[j], rx: 1, rz: 0, fx: 0, fz: sg }, nb = bars(hx[i]);
+          for (let k = -nb; k <= nb; k++) frameRect(white, F, k * 1.1 - 0.25, k * 1.1 + 0.25, G.cwNear(hz[j]), G.cwFar(hz[j]), wornTone(X[i] + k, Z[j] + sg, 8));
           stats.crosswalks++;
         }
         if (G.cwB(i, j, sg)) {
-          const F = { ox: X[i], oz: Z[j], rx: 0, rz: 1, fx: sg, fz: 0 };
-          for (let k = -7; k <= 7; k++) frameRect(white, F, k * 1.1 - 0.25, k * 1.1 + 0.25, G.cw0, G.cw1, wornTone(X[i] + sg, Z[j] + k, 9));
+          const F = { ox: X[i], oz: Z[j], rx: 0, rz: 1, fx: sg, fz: 0 }, nb = bars(hz[j]);
+          for (let k = -nb; k <= nb; k++) frameRect(white, F, k * 1.1 - 0.25, k * 1.1 + 0.25, G.cwNear(hx[i]), G.cwFar(hx[i]), wornTone(X[i] + sg, Z[j] + k, 9));
           stats.crosswalks++;
         }
         // Midtown approach arrows: lanes that drive INTO this junction on leg sg
         if (midtown(i, j)) {
-          const aBase = G.stop1 + 3.0;
           if (G.legA(j, sg)) {
             // approaching from leg sg travelling -sg along z: keep right puts
             // those lanes on side s = +sg in x (heading -z, the driver's right is +x)
-            const s = sg, ave = G.isAve(i), base = ave ? G.medHalf : 0;
-            for (let idx = 0; idx < G.nL; idx++) {
-              const u = s * (base + (idx + 0.5) * G.laneW);
+            const s = sg, ave = G.isAve(i), base = ave ? G.medHalf : 0, nLn = G.lanesX[i], lw = G.laneWX[i];
+            const aBase = G.stopFar(hz[j]) + 3.0;
+            for (let idx = 0; idx < nLn; idx++) {
+              const u = s * (base + (idx + 0.5) * lw);
               const F = { ox: X[i] + u, oz: Z[j] + sg * (aBase + 3.0), rx: s, rz: 0, fx: 0, fz: -sg };
-              drawArrow(F, idx === 0 ? "left" : (idx === G.nL - 1 ? "throughRight" : "through"));
+              drawArrow(F, idx === 0 ? "left" : (idx === nLn - 1 ? "throughRight" : "through"));
             }
           }
           if (G.legB(i, sg)) {
-            const s = -sg;
-            for (let idx = 0; idx < G.nL; idx++) {
-              const u = s * ((idx + 0.5) * G.laneW);
+            const s = -sg, nLn = G.lanesZ[j], lw = G.laneWZ[j];
+            const aBase = G.stopFar(hx[i]) + 3.0;
+            for (let idx = 0; idx < nLn; idx++) {
+              const u = s * ((idx + 0.5) * lw);
               const F = { ox: X[i] + sg * (aBase + 3.0), oz: Z[j] + u, rx: 0, rz: s, fx: -sg, fz: 0 };
-              drawArrow(F, idx === 0 ? "left" : (idx === G.nL - 1 ? "throughRight" : "through"));
+              drawArrow(F, idx === 0 ? "left" : (idx === nLn - 1 ? "throughRight" : "through"));
             }
           }
         }
       }
     }
-    function paintMat(r, g, b) {
-      const m = new THREE.MeshLambertMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 });
-      m.color.setRGB(r, g, b);                   // LINEAR paint albedo, set explicitly
-      if (CBZ.roadPaintWear) CBZ.roadPaintWear(m);
-      if (CBZ.terrainFogScale) CBZ.terrainFogScale(m, 0.10);
-      return m;
-    }
-    finish("street-paint-white", white.geo(THREE, true), paintMat(0.60, 0.61, 0.60), { decal: true, order: 1 });
-    finish("street-paint-yellow", yellow.geo(THREE, true), paintMat(0.62, 0.40, 0.05), { decal: true, order: 1 });
+    finish(tag + "-paint-white", white.geo(THREE, true), L.white, { decal: true, order: 1 });
+    finish(tag + "-paint-yellow", yellow.geo(THREE, true), L.yellow, { decal: true, order: 1 });
 
     // ---------------------------------------------------------------
     // 4) IRONWORK + GRIME — hash-seeded, merged
@@ -989,35 +1165,38 @@
       }
       for (let k = 0; k < seg; k++) acc.t(c, ring[k], ring[(k + 1) % seg]);
     }
-    for (let i = 0; i <= N; i++) for (let j = 0; j < N; j++) {
-      for (const vertical of [true, false]) {
-        const L0 = vertical ? X[i] : Z[i], T0 = vertical ? Z[j] : X[j];
-        const cnt = 1 + (hsh(L0, T0, 51) < 0.45 ? 1 : 0);
-        for (let q = 0; q < cnt; q++) {
-          const t = G.stop1 + 4 + hsh(L0 + q, T0, 52) * (G.step - 2 * G.stop1 - 8);
-          const s = hsh(L0, T0 + q, 53) < 0.5 ? -1 : 1, idx = hsh(L0 + q, T0 + q, 54) < 0.6 ? 0 : 1;
-          const base = vertical && G.isAve(i) ? G.medHalf : 0;
-          const u = s * (base + (idx + 0.5) * G.laneW);
-          const x = vertical ? L0 + u : T0 + t, z = vertical ? T0 + t : L0 + u;
-          disc(iron, x, z, Y + 0.002, 0.38, 0, 0.5, 18); stats.manholes++;
-        }
-        // a water valve cover near the gutter
-        if (hsh(L0, T0, 55) < 0.7) {
-          const t = 8 + hsh(L0, T0, 56) * (G.step - 16), s = hsh(L0, T0, 57) < 0.5 ? -1 : 1;
-          const u = s * (h - 1.0);
-          const x = vertical ? L0 + u : T0 + t, z = vertical ? T0 + t : L0 + u;
-          disc(iron, x, z, Y + 0.002, 0.14, 0.5, 1.0, 10); stats.valves++;
-        }
+    function ironStrip(vertical, li, j0) {
+      const I = stripInfo(vertical, li, j0);
+      const L0 = I.L0, T0 = I.T0;
+      const s0 = G.stopFar(I.hc0) + 4, s1 = I.len - G.stopFar(I.hc1) - 4;
+      const cnt = 1 + (hsh(L0, T0, 51) < 0.45 ? 1 : 0);
+      if (s1 > s0) for (let q = 0; q < cnt; q++) {
+        const t = s0 + hsh(L0 + q, T0, 52) * (s1 - s0);
+        const s = hsh(L0, T0 + q, 53) < 0.5 ? -1 : 1, idx = Math.min(I.lanes - 1, hsh(L0 + q, T0 + q, 54) < 0.6 ? 0 : 1);
+        const base = I.ave ? G.medHalf : 0;
+        const u = s * (base + (idx + 0.5) * I.lw);
+        const x = vertical ? L0 + u : T0 + t, z = vertical ? T0 + t : L0 + u;
+        disc(iron, x, z, Y + 0.002, 0.38, 0, 0.5, 18); stats.manholes++;
+      }
+      // a water valve cover near the gutter
+      if (hsh(L0, T0, 55) < 0.7 && I.len > 16) {
+        const t = 8 + hsh(L0, T0, 56) * (I.len - 16), s = hsh(L0, T0, 57) < 0.5 ? -1 : 1;
+        const u = s * (I.hL - 1.0);
+        const x = vertical ? L0 + u : T0 + t, z = vertical ? T0 + t : L0 + u;
+        disc(iron, x, z, Y + 0.002, 0.14, 0.5, 1.0, 10); stats.valves++;
       }
     }
+    for (let i = 0; i <= NX; i++) for (let j = 0; j < NZ; j++) ironStrip(true, i, j);
+    for (let j = 0; j <= NZ; j++) for (let i = 0; i < NX; i++) ironStrip(false, j, i);
     // a manhole in some junction boxes
-    for (let i = 0; i <= N; i++) for (let j = 0; j <= N; j++) {
-      if (hsh(X[i], Z[j], 58) < 0.4) { disc(iron, X[i] + (hsh(X[i], Z[j], 59) - 0.5) * 6, Z[j] + (hsh(X[i], Z[j], 60) - 0.5) * 6, Y + 0.002, 0.38, 0, 0.5, 18); stats.manholes++; }
+    for (let i = 0; i <= NX; i++) for (let j = 0; j <= NZ; j++) {
+      const bx = Math.min(hx[i], hz[j]) - 1.2;
+      if (bx > 0.5 && hsh(X[i], Z[j], 58) < 0.4) {
+        disc(iron, X[i] + (hsh(X[i], Z[j], 59) - 0.5) * 2 * Math.min(3, bx), Z[j] + (hsh(X[i], Z[j], 60) - 0.5) * 2 * Math.min(3, bx), Y + 0.002, 0.38, 0, 0.5, 18);
+        stats.manholes++;
+      }
     }
-    const ironTex = texOf(THREE, ironCanvas(), false);
-    const ironMat = new THREE.MeshLambertMaterial({ map: ironTex, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -5 });
-    if (CBZ.terrainFogScale) CBZ.terrainFogScale(ironMat, 0.10);
-    finish("street-ironwork", iron.geo(THREE, true), ironMat, { decal: true, order: 1 });
+    finish(tag + "-ironwork", iron.geo(THREE, true), L.ironMat, { decal: true, order: 1 });
 
     // grime: oil where cars idle behind the stop bar, tyre marks at the bar
     const grime = new Acc({});
@@ -1028,30 +1207,28 @@
         c = grime.v(p[2][0], Y + 0.004, p[2][1], u1, 1), d = grime.v(p[3][0], Y + 0.004, p[3][1], u0, 1);
       grime.q(a, b, c, d); stats.grime++;
     }
-    for (let i = 0; i <= N; i++) for (let j = 0; j <= N; j++) {
+    for (let i = 0; i <= NX; i++) for (let j = 0; j <= NZ; j++) {
       for (const sg of [-1, 1]) for (const axisA of [true, false]) {
         if (axisA ? !G.legA(j, sg) : !G.legB(i, sg)) continue;
         const s = axisA ? sg : -sg;              // the approach lanes' side (keep right)
-        for (let idx = 0; idx < G.nL; idx++) {
+        const nLn = axisA ? G.lanesX[i] : G.lanesZ[j], lw = axisA ? G.laneWX[i] : G.laneWZ[j];
+        const stop1 = G.stopFar(axisA ? hz[j] : hx[i]);
+        for (let idx = 0; idx < nLn; idx++) {
           const hk = hsh(X[i] * 3 + idx, Z[j] * 3 + sg, axisA ? 61 : 62);
           const base = axisA && G.isAve(i) ? G.medHalf : 0;
-          const u = s * (base + (idx + 0.5) * G.laneW);
+          const u = s * (base + (idx + 0.5) * lw);
           const F = axisA ? { ox: X[i] + u, oz: Z[j], rx: s, rz: 0, fx: 0, fz: sg } : { ox: X[i], oz: Z[j] + u, rx: 0, rz: s, fx: sg, fz: 0 };
           // oil blot where an idling car's engine sits (~2.5 m behind the bar)
-          if (hk < 0.75) { const f = G.stop1 + 2.2 + hk * 1.6, r = 0.55 + hk * 0.5; gquad(F, -r, r, f - r, f + r, 0, 0.5); }
+          if (hk < 0.75) { const f = stop1 + 2.2 + hk * 1.6, r = 0.55 + hk * 0.5; gquad(F, -r, r, f - r, f + r, 0, 0.5); }
           // tyre marks: two dark streaks in the wheel paths
           if (hk > 0.45) {
-            const f0 = G.stop1 + 0.3, f1 = f0 + 3 + hk * 5;
+            const f0 = stop1 + 0.3, f1 = f0 + 3 + hk * 5;
             gquad(F, -0.95, -0.7, f0, f1, 0.5, 1.0); gquad(F, 0.7, 0.95, f0, f1, 0.5, 1.0);
           }
         }
       }
     }
-    const grimeTex = texOf(THREE, grimeCanvas(), false);
-    const grimeMat = new THREE.MeshBasicMaterial({ map: grimeTex, fog: false, toneMapped: false, depthWrite: false,
-      blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.DstColorFactor, blendDst: THREE.ZeroFactor,
-      polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -6 });
-    finish("street-grime", grime.geo(THREE, true), grimeMat, { decal: true, order: 2 });
+    finish(tag + "-grime", grime.geo(THREE, true), L.grimeMat, { decal: true, order: 2 });
 
     // ---------------------------------------------------------------
     // 5) RED KERB paint (hydrant fire lanes), merged; flushed by finishRed
@@ -1059,18 +1236,20 @@
     const red = new Acc({});
     let redCount = 0;
     function paintRedKerb(bi, bj, px, pz) {
-      if (bi < 0 || bj < 0 || bi >= N || bj >= N) return false;
-      const bx = (X[bi] + X[bi + 1]) / 2, bz = (Z[bj] + Z[bj + 1]) / 2;
+      if (bi < 0 || bj < 0 || bi >= NX || bj >= NZ) return false;
+      const B = G.blockRect(bi, bj);
+      const bx = B.cx, bz = B.cz;
       const dx = px - bx, dz = pz - bz;
-      const alongX = Math.abs(dz) >= Math.abs(dx);          // kerb runs along x (a z-face)
+      const alongX = Math.abs(dz) * B.HX >= Math.abs(dx) * B.HZ;   // kerb runs along x (a z-face)
       const sgn = alongX ? (dz >= 0 ? 1 : -1) : (dx >= 0 ? 1 : -1);
-      const lim = H - R - 0.2;
+      const lim = (alongX ? B.HX : B.HZ) - R - 0.2;
+      if (lim < 2.3) return false;
       const c = clamp(alongX ? dx : dz, -lim + 2.1, lim - 2.1);
       const nIn = [alongX ? 0 : -sgn, alongX ? -sgn : 0];
       const cols = [];
       for (let k = 0; k <= 12; k++) {
         const t = c - 2.1 + k * 0.35;
-        const kx = alongX ? bx + t : bx + sgn * H, kz = alongX ? bz + sgn * H : bz + t;
+        const kx = alongX ? bx + t : bx + sgn * B.HX, kz = alongX ? bz + sgn * B.HZ : bz + t;
         const top0 = G.heightAt(kx + nIn[0] * 0.01, kz + nIn[1] * 0.01);
         const x2 = kx + nIn[0] * KT, z2 = kz + nIn[1] * KT;
         const out = 0.004;
@@ -1092,25 +1271,36 @@
       if (!g) return null;
       const m = new THREE.MeshLambertMaterial({ polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 });
       m.color.setRGB(0.42, 0.035, 0.03);
-      return finish("street-red-kerb", g, m, { decal: true, order: 1 });
+      return finish(tag + "-red-kerb", g, m, { decal: true, order: 1 });
     }
 
     // ---------------------------------------------------------------
     // 6) LOT PADS — a fan to the footway's exact back-edge loop
     // ---------------------------------------------------------------
     function lotPad(acc, bi, bj, uvScale) {
-      const loop = lotLoops[bi * N + bj];
+      const loop = lotLoops[bi * NZ + bj];
       if (!loop || loop.length < 3) return;
-      const cx = (X[bi] + X[bi + 1]) / 2, cz = (Z[bj] + Z[bj + 1]) / 2;
+      const B = G.blockRect(bi, bj), cx = B.cx, cz = B.cz;
       const c = acc.v(cx, P.yLot, cz, cx * uvScale, cz * uvScale, 1);
       const ids = loop.map(function (p) { return acc.v(p.x, p.y, p.z, p.x * uvScale, p.z * uvScale, 1); });
       for (let k = 0; k < ids.length; k++) acc.t(c, ids[k], ids[(k + 1) % ids.length]);
     }
     function lotMesh(name, list, material, uvScale) {
       const acc = new Acc({});
+      if (!list) { list = []; for (let bi = 0; bi < NX; bi++) for (let bj = 0; bj < NZ; bj++) list.push({ bi: bi, bj: bj }); }
       for (const l of list) lotPad(acc, l.bi, l.bj, uvScale);
-      if (CBZ.terrainFogScale) CBZ.terrainFogScale(material, 0.10);
+      if (CBZ.terrainFogScale && !(material.userData && material.userData._streetFog)) {
+        CBZ.terrainFogScale(material, 0.10);
+        material.userData = material.userData || {}; material.userData._streetFog = true;
+      }
       return finish(name, acc.geo(THREE, true), material);
+    }
+
+    // every street this kit lays is part of the floor
+    if (ctx.register !== false) {
+      const sk = G.skirt;
+      surfaces.push({ name: tag, minX: G.minX - sk, maxX: G.maxX + sk, minZ: G.minZ - sk, maxZ: G.maxZ + sk,
+        heightAt: G.heightAt, regionAt: G.regionAt, solve: G });
     }
 
     return {
@@ -1118,9 +1308,18 @@
       heightAt: G.heightAt, regionAt: G.regionAt,
       paintRedKerb: paintRedKerb, finishRed: finishRed, redCount: function () { return redCount; },
       lotMesh: lotMesh,
-      roadMesh: roadMesh, kerbTexture: kerbTex,
+      roadMesh: roadMesh, kerbTexture: L.kerbTex,
     };
   }
 
-  CBZ.streetKit = { profile: P, solve: solve, build: build };
+  CBZ.streetKit = {
+    profile: P, solve: solve, build: build,
+    // a new world: forget the old one's streets (world.js, before the downtown)
+    reset: function () { surfaces.length = 0; },
+    surfaces: surfaces,
+    // THE FLOOR: the street surface under (x,z) from whichever kit owns it,
+    // or null where no street was laid
+    heightAt: floorAt,
+    regionAt: regionOf,
+  };
 })();

@@ -398,7 +398,8 @@
     const rect = { minX: cx - hx, maxX: cx + hx, minZ: cz - hz, maxZ: cz + hz };
     const rng = rngFor(cx, cz);
 
-    addPad(root, cx, cz, hx * 2 + 16, hz * 2 + 16, (tpl.palette && tpl.palette.ground != null) ? tpl.palette.ground : 0x6f7480, 0.018);
+    const P0 = tpl.palette || {};
+    addPad(root, cx, cz, hx * 2 + 16, hz * 2 + 16, P0.verge != null ? P0.verge : (P0.ground != null ? P0.ground : 0x6f7480), 0.018);
     if (CBZ.placement && CBZ.placement.seedFromColliders) { try { CBZ.placement.seedFromColliders(); } catch (e) {} }
 
     const town = CBZ.buildTown(root, Object.assign({}, tpl, { cx: cx, cz: cz, rng: rng, region: rect }));

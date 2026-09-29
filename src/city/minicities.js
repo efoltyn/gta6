@@ -292,7 +292,11 @@
     // (a) GROUND PAD — a settled town floor under the whole footprint, a touch
     //     above grade so it reads as reclaimed land/plaza, then seed placement so
     //     the generator's prop scatter respects what we (and others) already laid.
-    addPad(root, cx, cz, hx * 2 + 18, hz * 2 + 18, tpl.palette && tpl.palette.ground != null ? tpl.palette.ground : 0x6f7480, 0.018);
+    // (the VERGE colour: this pad is the land round the town, and the recipe's
+    // ground tone — Neon Reef's purple, Goldspire's grey — read as a void of
+    // asphalt a district wide)
+    const P0 = tpl.palette || {};
+    addPad(root, cx, cz, hx * 2 + 18, hz * 2 + 18, P0.verge != null ? P0.verge : (P0.ground != null ? P0.ground : 0x6f7480), 0.018);
     if (CBZ.placement && CBZ.placement.seedFromColliders) { try { CBZ.placement.seedFromColliders(); } catch (e) {} }
 
     // (b)+(c) GROW THE TOWN — now that T1 wired the arena, all shops/homes/roads

@@ -244,6 +244,9 @@
     // the kerb-return radius roadrules.js solves for this cross-section
     // (AASHTO design vehicle, capped by the 2 m footway): ~4.8 m
     const cornerR = CBZ.roadCornerRadius ? CBZ.roadCornerRadius(roads[0], roads[N + 1], 2.0) : 4.8;
+    // a new world: the previous build's streets (downtown + every town the
+    // same kit laid) leave the floor registry before this one's are laid
+    if (CBZ.streetKit && CBZ.streetKit.reset) CBZ.streetKit.reset();
     const street = CBZ.streetKit ? CBZ.streetKit.build({
       root, xLines, zLines, ROAD, BLK, lotHalf: LOT_HALF, cornerR,
       laneW, lanesPerDir, aveMedian: AVE_MEDIAN,
@@ -619,7 +622,11 @@
     // is drawn. Off the grid it returns null and the registered terrain
     // oracle (Mount Mercy etc.) owns the answer; where real terrain is higher
     // it always wins.
+    // Every street the kit lays registers itself, the downtown first and then
+    // each town towngen grows during cityWorldGeo, so one query answers for
+    // all of them: a town kerb is stepped up exactly like a downtown one.
     function streetY(x, z) {
+      if (CBZ.streetKit && CBZ.streetKit.heightAt) return CBZ.streetKit.heightAt(x, z);
       return street ? street.heightAt(x, z) : null;
     }
     function realGround(x, z) {

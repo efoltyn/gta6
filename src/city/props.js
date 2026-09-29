@@ -2323,7 +2323,10 @@
         // drawn by city/streetkit.js as part of ONE street surface (rounded
         // blocks, real kerbs, ramps). A second fan/kerb/paint layer here would
         // only fight it, so both-grid junctions are left to the kit.
-        if (J.a && J.b && J.a.grid && J.b.grid) continue;
+        // Town streets (towngen: `kit`) are the same kit's surface — or, in a
+        // dirt village, lanes with no kerb at all — so they are left alone too.
+        // (Their raised kerb returns used to float on a flat town corner.)
+        if (J.a && J.b && (J.a.grid || J.a.kit) && (J.b.grid || J.b.kit)) continue;
         // A freeway is not a street: no crosswalks, stop bars, kerb returns
         // or resurface patches where anything meets a highway-district road
         // (highways.js stops its own paint at those junctions).
@@ -2753,7 +2756,8 @@
     // street profile: raised footway, kerb, road). Everything bolted to a
     // pole is placed relative to its own base, so a raised kerb lifts it all.
     function footY(x, z) {
-      const st = city.street;
+      // any street the kit laid (the downtown or a town), not only the grid
+      const st = (CBZ.streetKit && CBZ.streetKit.heightAt) ? CBZ.streetKit : city.street;
       const h = st && typeof st.heightAt === "function" ? +st.heightAt(x, z) : 0;
       return Number.isFinite(h) ? h : 0;
     }

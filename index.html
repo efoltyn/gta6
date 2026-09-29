@@ -439,7 +439,7 @@ document.body.appendChild(b);}}catch(e){}})();
 ============================================================ -->
 
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=spd0929"></script>
+<script src="src/config.js?v=w0929town"></script>
 <script src="src/core/seed.js?v=w09290242x"></script>
 <!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
      Turns "is this the city?" into "may I vault / may I blow up here?", so the
@@ -1080,8 +1080,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/tsunami_flow.js?v=tsureal1"></script>
 <script src="src/world/tsunami_scene.js?v=tsureal1"></script>
 <!-- the grid street layer (road, kerbs, footways, markings) world.js builds -->
-<script src="src/city/streetkit.js?v=w0929gnd"></script>
-<script src="src/city/world.js?v=w0929gnd"></script>
+<script src="src/city/streetkit.js?v=w0929town"></script>
+<script src="src/city/world.js?v=w0929town"></script>
 <script src="src/city/interior_programs.js?v=deslop1"></script>
 <!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
      inventory item; an NPC's keys live on the NPC and every existing way to
@@ -1233,7 +1233,7 @@ document.body.appendChild(b);}}catch(e){}})();
      wrapper; loads before towngen.js (which consumes CBZ.settlementsCompose)
      and after worldmap.js (whose cityWorldGeo it wraps). -->
 <script src="src/city/settlements.js?v=settle1"></script>
-<script src="src/city/towngen.js?v=w0929road"></script>
+<script src="src/city/towngen.js?v=w0929town"></script>
 <!-- DIAMOND SPEEDWAY, part 1 — the circuit's architecture: grandstands with real
      raked seating, pit garages, scoring pylon, jumbotron, floodlight masts,
      hoardings, marshal posts, tyre walls, paddock. Authored against the track
@@ -1313,7 +1313,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- street hardware kit: signal/lamp prototypes + the additive road light
      pools. Pure builders, no placement; props.js (next) places them. -->
 <script src="src/city/street_hardware.js?v=hw1"></script>
-<script src="src/city/props.js?v=meshcol1"></script>
+<script src="src/city/props.js?v=w0929town"></script>
 <!-- props-with-purpose: seat/bed anchor registry + sit/sleep poses + the
      wanted-poster interact hook. Revert: CBZ.CONFIG.PROPS_PURPOSE = false. -->
 <script src="src/city/propuse.js?v=w09290219"></script>
@@ -1678,8 +1678,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- sims-overhaul wave 2: living economy + universal housing + place/scene spawning + mini-cities + racing + destruction (additive, feature-detected, self-flagged) -->
 <script src="src/city/wallet.js?v=sim2"></script>
 <script src="src/city/housing.js?v=cpd1"></script>
-<script src="src/city/citytemplates.js?v=sim2"></script>
-<script src="src/city/minicities.js?v=w0929road"></script>
+<script src="src/city/citytemplates.js?v=w0929town"></script>
+<script src="src/city/minicities.js?v=w0929town"></script>
 <script src="src/city/spawnplaces.js?v=sim2"></script>
 <script src="src/city/scenedirector.js?v=w09290218"></script>
 <script src="src/city/race_livery.js?v=racepaint1"></script>
@@ -1730,12 +1730,12 @@ document.body.appendChild(b);}}catch(e){}})();
      the near lane. After marina.js/boatyard.js — marina wraps the same spawn
      for boats first, and this wrapper passes every marine hull straight
      through to it. Revert with ?cfg_LOT_APPROACH=0. -->
-<script src="src/city/approach.js?v=w0929gnd"></script>
+<script src="src/city/approach.js?v=w0929town"></script>
 <!-- THE CITY GROUND: one splat-mapped Standard material for every grid lot
      pad + the footway breakup (city/cityground.js). Runtime-only: world.js
      and streetkit.js call it inside buildCity; it registers its paint pass
      at landmass order 68, so it loads after worldmap.js and approach.js. -->
-<script src="src/city/cityground.js?v=w0929gnd"></script>
+<script src="src/city/cityground.js?v=w0929town"></script>
 <!-- FISHING (owner: the world had a "Fisherman" title and nobody wearing it;
      a mackerel was harvested by SHOOTING it through the hunting pipeline).
      Registers water-side spots that SELF-VALIDATE against CBZ.cityWaterAt — a
@@ -2061,8 +2061,8 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.addLandmass so load order isn't strictly load-bearing today, but
      this keeps the "assets define before buildTown reads them" contract
      honest for any future eager caller. -->
-<script src="src/city/villagekit.js?v=world1"></script>
-<script src="src/city/countries.js?v=world2"></script>
+<script src="src/city/villagekit.js?v=w0929town"></script>
+<script src="src/city/countries.js?v=w0929town"></script>
 <!-- REAL CASINOS — order-90 dress pass over every casino lot (mainland Golden
      Ace + composed town casinos): marquee/mast exterior, felt tables with
      seats + an "[E] Sit at the table" that opens the casino floor. Loads after

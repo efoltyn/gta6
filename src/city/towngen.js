@@ -37,6 +37,11 @@
    town from our own non-overlapping lot math + cityMakeBuilding, so a
    biome that calls buildTown works either way.
 
+   STREETS: the town's grid is laid by city/streetkit.js, the SAME kit as
+   the downtown (kerbs, footways, corners, crosswalks, lane paint, lot pads
+   painted by city/cityground.js); see section 1. Rural recipes
+   (streetStyle "rural") get swept-dirt lanes instead.
+
    DRAW-CALL DISCIPLINE (owner rule #4): the ground/road decks are
    merged BufferGeometry; lamps / hitching-rails / parked dressing are
    InstancedMesh; buildings are the only individually-placed solids
@@ -183,196 +188,149 @@
     const ACCENT = pal.accent != null ? pal.accent : 0x7a5a36;
     const region = cfg.region || null;
 
-    const stepX = BW + ROAD, stepZ = BD + ROAD;
-    const halfX = (cols * stepX) / 2, halfZ = (rows * stepZ) / 2;
-    // centreline grids: cols+1 / rows+1 lines bounding cols×rows blocks
-    const xLines = [], zLines = [];
-    for (let k = 0; k <= cols; k++) xLines.push(cx - halfX + k * stepX);
-    for (let k = 0; k <= rows; k++) zLines.push(cz - halfZ + k * stepZ);
-    const minX = xLines[0] - ROAD / 2, maxX = xLines[cols] + ROAD / 2;
-    const minZ = zLines[0] - ROAD / 2, maxZ = zLines[rows] + ROAD / 2;
+    /* =====================================================================
+       1) THE STREET PLAN — centrelines and widths from the town's OWN road
+          spec, then ONE street surface laid by city/streetkit.js, the same
+          kit the downtown grid is built with.
+
+       WHY (owner, from a respawn in a small town: "our road system and city
+       building code don't generalize"): towns used to be four flat sheets a
+       centimetre apart — a ground pad the colour of the recipe (Veridia's
+       and Neon Reef's are asphalt grey/purple, so every empty lot read as a
+       void of road), road planes, sidewalk slabs 1 m wider than each block,
+       and decal paint — while the mainland stood on a real cross-section.
+       city/props.js then dropped the mainland's raised kerb returns onto the
+       town's flat corners and approach.js laid a grey "dropped kerb" slab on
+       the carriageway at every door, which is the loose floating kerb pieces
+       the owner saw. Two more faults were in the plan itself:
+         · "mainstreet" laid its wide spine at cz whatever the row count, so
+           on any odd-row town (Kesh, Mbeya) it ran THROUGH the middle blocks'
+           lots, with block sidewalks and crosswalks painted across it and no
+           cross-streets between the back lanes and the spine;
+         · "organic" jittered the streets but framed the blocks and lots from
+           the UN-jittered lines, so kerbs and frontages missed each other by
+           up to 2.6 m.
+       Now the plan is solved once: every street is a real centreline with its
+       own width (the spine is one of the grid lines, 1.6x wide), blocks keep
+       their authored size between road EDGES, and lots are cut from the
+       blocks the kit actually drew. The kit gives every block a continuous
+       granite kerb and footway with rounded corners, ramps and crosswalks at
+       the real interior junctions, lane paint only on carriageway, and a lot
+       pad that city/cityground.js paints lawn / slab / pavers per parcel.
+       Rural settlements (villagekit's dirt villages) keep swept-dirt lanes:
+       no kerb, no paint — a hut village has neither.
+       ===================================================================== */
+    const FOOTWAY = 2.4;                               // kerb face to lot line
+    const RURAL = cfg.streetStyle === "rural" || !(CBZ.streetKit && CBZ.streetKit.build);
+    const xW = [], zW = [];
+    for (let k = 0; k <= cols; k++) xW.push(ROAD);
+    for (let k = 0; k <= rows; k++) zW.push(ROAD);
+    // the main street is a GRID LINE (the middle one), never a strip laid
+    // through the middle of a row of blocks
+    const spineJ = pattern === "mainstreet" ? ((rows / 2) | 0) : -1;
+    if (spineJ >= 0) zW[spineJ] = Math.round(ROAD * 1.6 * 10) / 10;
+    // centrelines on the authored pitch (block + street), so the town keeps
+    // the footprint every placer reserved for it (biome TOWN rects, minicity
+    // links docking on the perimeter street); the wide spine takes its extra
+    // width out of the two rows of blocks it runs between
+    function lay(n, B, c) {
+      const p = [];
+      for (let k = 0; k <= n; k++) p.push(c - (n * (B + ROAD)) / 2 + k * (B + ROAD));
+      return p;
+    }
+    const xLines = lay(cols, BW, cx), zLines = lay(rows, BD, cz);
+    if (pattern === "organic") {
+      // unplanned streets: each line wanders a little (same draws, same order
+      // as ever: every vertical, then every horizontal), and EVERYTHING below
+      // — kerbs, blocks, lots, doors — is framed from the wandered lines
+      for (let k = 0; k <= cols; k++) xLines[k] += (rng() - 0.5) * ROAD * 0.4;
+      for (let k = 0; k <= rows; k++) zLines[k] += (rng() - 0.5) * ROAD * 0.4;
+    }
+    const minX = xLines[0] - xW[0] / 2, maxX = xLines[cols] + xW[cols] / 2;
+    const minZ = zLines[0] - zW[0] / 2, maxZ = zLines[rows] + zW[rows] / 2;
     const rect = { minX, maxX, minZ, maxZ };
-    const townRoads = [];   // {x,z,vertical,len}
+    const townRoads = [];   // {x,z,vertical,len,w,...}
+    // the block (i,j): the rectangle between its four road edges
+    function blockOf(i, j) {
+      const x0 = xLines[i] + xW[i] / 2, x1 = xLines[i + 1] - xW[i + 1] / 2;
+      const z0 = zLines[j] + zW[j] / 2, z1 = zLines[j + 1] - zW[j + 1] / 2;
+      return { cx: (x0 + x1) / 2, cz: (z0 + z1) / 2, w: x1 - x0, d: z1 - z0, minX: x0, maxX: x1, minZ: z0, maxZ: z1 };
+    }
 
     // ----- placement-API feature detect -----
     const P = CBZ.placement || null;
     if (P && P.seedFromColliders) { try { P.seedFromColliders(); } catch (e) {} }
     function reserveRect(r) { if (P && P.reserve) { try { P.reserve(r); } catch (e) {} } }
 
-    // =====================================================================
-    //  1) GROUND PAD — one merged sand/dirt slab under the whole town, a
-    //     touch above grade so it reads as a swept, settled town floor.
-    // =====================================================================
-    mergeAdd(root, [planeGeo(cx, cz, maxX - minX + 6, maxZ - minZ + 6, 0.03)], cmat(GROUND), { receive: true });
+    // the settled ground the town stands on (and what shows outside the grid)
+    mergeAdd(root, [planeGeo(cx, cz, maxX - minX + 6, maxZ - minZ + 6, 0.03)], cmat(RURAL ? GROUND : (pal.verge != null ? pal.verge : GROUND)), { receive: true });
 
-    // =====================================================================
-    //  2) STREET NETWORK — per the pattern. Push every segment to BOTH the
-    //     town descriptor AND city.roads so traffic/citynav use the streets.
-    // =====================================================================
-    const roadGeoms = [], lineGeoms = [];
-    function roadSeg(x, z, vertical, len, wide) {
-      const w = wide || ROAD;
-      roadGeoms.push(vertical ? planeGeo(x, z, w, len, 0.05) : planeGeo(x, z, len, w, 0.05));
-      // Publish the same cross-section we just rendered. Without this metadata
-      // traffic/props inherited the mainland's 18 m four-lane default on a
-      // 7-12 m village street, putting AI lanes off the asphalt and making
-      // correctly placed sidewalk lamps look like lane intrusions.
-      const lanesPerDir = w >= 13 ? 2 : 1;
+    // ----- the street RECORDS: exactly the cross-section that is drawn, so
+    // traffic, lamps, approaches and the junction solver read the real street
+    function lanesFor(w) { return w >= 13 ? 2 : 1; }
+    function roadRec(vertical, k) {
+      const w = vertical ? xW[k] : zW[k];
+      const lanesPerDir = lanesFor(w);
       const laneW = Math.min(3.6, w / (lanesPerDir * 2));
-      // litByTown: section 6 below lights this street with the town's own
-      // lamps; city/props.js's lamp walk skips it instead of lighting it twice
-      const seg = { x, z, vertical, len, district: cfg.district || "town", w, lanesPerDir, laneW, litByTown: true };
+      // litByTown: section 6 lights this street with the town's own lamps;
+      // city/props.js's lamp walk skips it instead of lighting it twice.
+      // kit: the corners, kerbs and crossings are drawn with the surface, so
+      // props.js's junction pass leaves them alone (as for the downtown grid).
+      const seg = vertical
+        ? { x: xLines[k], z: (minZ + maxZ) / 2, vertical: true, len: maxZ - minZ }
+        : { x: (minX + maxX) / 2, z: zLines[k], vertical: false, len: maxX - minX };
+      Object.assign(seg, { district: cfg.district || "town", w, lanesPerDir, laneW, litByTown: true,
+        kit: true, footway: RURAL ? 0 : FOOTWAY, rural: RURAL || undefined, main: (!vertical && k === spineJ) || undefined });
       townRoads.push(seg);
-      // T1: push town streets onto the REAL arena road list (traffic/citynav read
-      // arena.roads), not the empty CBZ.city.roads.
+      // T1: town streets go on the REAL arena road list (traffic/citynav)
       if (cfg.pushCityRoads !== false && A && A.roads) A.roads.push(seg);
+      return seg;
     }
-    /* EVERY STREET ENDS IN A JUNCTION (owner: "roads end abruptly").
-       · mainstreet laid the wide spine and the cross-streets but no back
-         street, so every cross-street ran to the town's edge and stopped
-         square in the dirt (and every back lot's door "faced" a road that
-         did not exist). The two back lanes close the grid: each cross-street
-         now ends in a T.
-       · organic jittered each line but still ran the perpendicular streets
-         to the UN-jittered edge, so up to 2.6 m of asphalt stuck out past the
-         outer street on every end. Lines now run between the outermost
-         jittered crossings. The jitter draws are taken in the same order
-         (all verticals, then all horizontals) so the rng stream is unchanged. */
-    if (pattern === "mainstreet") {
-      // one WIDE spine along x through the centre row, cross-streets, and a
-      // back lane along each long edge
-      roadSeg(cx, cz, false, maxX - minX, ROAD * 1.6);
-      for (let k = 0; k <= cols; k++) roadSeg(xLines[k], cz, true, maxZ - minZ);
-      roadSeg(cx, zLines[0], false, maxX - minX);
-      roadSeg(cx, zLines[rows], false, maxX - minX);
-    } else if (pattern === "organic") {
-      const xs = [], zs = [];
-      for (let k = 0; k <= cols; k++) xs.push(xLines[k] + (rng() - 0.5) * ROAD * 0.4);
-      for (let k = 0; k <= rows; k++) zs.push(zLines[k] + (rng() - 0.5) * ROAD * 0.4);
-      const z0 = zs[0] - ROAD / 2, z1 = zs[rows] + ROAD / 2, x0 = xs[0] - ROAD / 2, x1 = xs[cols] + ROAD / 2;
-      for (const x of xs) roadSeg(x, (z0 + z1) / 2, true, z1 - z0);
-      for (const z of zs) roadSeg((x0 + x1) / 2, z, false, x1 - x0);
-    } else { // grid
-      for (let k = 0; k <= cols; k++) roadSeg(xLines[k], cz, true, maxZ - minZ);
-      for (let k = 0; k <= rows; k++) roadSeg(cx, zLines[k], false, maxX - minX);
-    }
-    mergeAdd(root, roadGeoms, layerMat(pal.road != null ? pal.road : 0x5a4f3e, 2), { receive: true });
-    // ---- ROAD MARKINGS (ROAD_MARKINGS_V1) --------------------------------
-    // Make town streets READ like streets. The mainland downtown grid (world.js)
-    // is already lane-painted under ROADS_V2; town streets were bare asphalt
-    // (only "mainstreet" had a faint centre dash). Reference technique #1
-    // (per-segment geometry): these streets are already per-segment planes, so
-    // the paint is thin decal quads — a yellow centreline (DASHED on ordinary
-    // 2-way lanes, SOLID on multi-lane), white DASHED lane dividers, white curb
-    // edge lines on wide streets, and continental (zebra) CROSSWALKS at every
-    // intersection. ALL fold into ONE vertex-coloured mesh → a whole town's
-    // markings cost +1 draw call (batch-exempt via userData.roadPaint, same
-    // guard world.js/highways.js use so core/batch.js can't re-material away the
-    // polygonOffset). Markings GAP at each junction box so no line runs through a
-    // crossing. Deterministic: positional only, ZERO rng() draws (the shared
-    // cfg.rng stream stays byte-identical to flag-OFF); paint wear is CBZ.hash01.
-    const ROAD_MARKINGS = !CBZ.CONFIG || CBZ.CONFIG.ROAD_MARKINGS_V1 !== false;
-    if (ROAD_MARKINGS) {
-      const PY = 0.075;                                   // paint just above the 0.05 road deck
-      const C_WHITE = [0.92, 0.94, 0.96], C_YELLOW = [0.95, 0.78, 0.22];
-      const paintGeoms = [];
-      function paintRect(px, pz, pw, pd, col, fade) {
-        const g = new THREE.PlaneGeometry(pw, pd);
-        g.rotateX(-Math.PI / 2); g.translate(px, PY, pz);
-        const cnt = g.attributes.position.count, ca = new Float32Array(cnt * 3);
-        for (let k = 0; k < cnt; k++) { ca[k * 3] = col[0] * fade; ca[k * 3 + 1] = col[1] * fade; ca[k * 3 + 2] = col[2] * fade; }
-        g.setAttribute("color", new THREE.BufferAttribute(ca, 3));
-        paintGeoms.push(g);
-      }
-      const verts = [], horzs = [];
-      for (const s of townRoads) (s.vertical ? verts : horzs).push(s);
-      // where the perpendicular streets actually cross this seg (grid/organic/mainstreet)
-      function crossingsOf(seg) {
-        const out = [], perp = seg.vertical ? horzs : verts;
-        for (const p of perp) {
-          const on = seg.vertical
-            ? (Math.abs(seg.x - p.x) <= p.len / 2 + 0.5 && Math.abs(p.z - seg.z) <= seg.len / 2 + 0.5)
-            : (Math.abs(seg.z - p.z) <= p.len / 2 + 0.5 && Math.abs(p.x - seg.x) <= seg.len / 2 + 0.5);
-          if (on) out.push({ at: seg.vertical ? (p.z - seg.z) : (p.x - seg.x), gap: Math.max(seg.w, p.w) / 2 + 2.8 });
-        }
-        out.sort((a, b) => a.at - b.at);
-        return out;
-      }
-      // clear spans of [-len/2, len/2] with ±gap removed around each crossing
-      function clearSpans(len, cr) {
-        const spans = []; let a = -len / 2;
-        for (const c of cr) { const b = c.at - c.gap; if (b > a) spans.push([a, b]); a = Math.max(a, c.at + c.gap); }
-        if (len / 2 > a) spans.push([a, len / 2]);
-        return spans;
-      }
-      // one line down a seg at lateral offset `off`, gapped at junctions
-      function line(seg, off, col, dashed, halfW, fade) {
-        for (const sp of clearSpans(seg.len, crossingsOf(seg))) {
-          const a = sp[0], b = sp[1], span = b - a; if (span < 0.4) continue;
-          if (dashed) {
-            const n = Math.max(1, Math.floor(span / 7)), step = span / n, dashL = Math.min(2.6, step * 0.55);
-            for (let i = 0; i < n; i++) {
-              const t = a + (i + 0.5) * step;
-              if (seg.vertical) paintRect(seg.x + off, seg.z + t, halfW * 2, dashL, col, fade);
-              else paintRect(seg.x + t, seg.z + off, dashL, halfW * 2, col, fade);
-            }
-          } else {
-            const t = (a + b) / 2;
-            if (seg.vertical) paintRect(seg.x + off, seg.z + t, halfW * 2, span, col, fade);
-            else paintRect(seg.x + t, seg.z + off, span, halfW * 2, col, fade);
-          }
-        }
-      }
-      for (const seg of townRoads) {
-        const w = seg.w, lanes = seg.lanesPerDir || (w >= 13 ? 2 : 1), lw = seg.laneW || Math.min(3.6, w / (lanes * 2));
-        const fade = 0.70 + 0.30 * CBZ.hash01(seg.x, seg.z, 613);          // deterministic paint wear
-        if (lanes >= 2) {
-          line(seg, 0, C_YELLOW, false, 0.10, fade);                       // solid yellow centre
-          for (let s = -1; s <= 1; s += 2) {
-            for (let k = 1; k < lanes; k++) line(seg, s * k * lw, C_WHITE, true, 0.09, fade);   // dashed white lane dividers
-            if (w >= 10) line(seg, s * (w / 2 - 0.4), C_WHITE, false, 0.07, fade * 0.9);        // solid white curb edge
-          }
-        } else {
-          line(seg, 0, C_YELLOW, true, 0.11, fade);                        // dashed yellow centre (2-way)
-        }
-      }
-      // continental crosswalks at every intersection (bars long in travel dir)
-      for (const v of verts) for (const h of horzs) {
-        if (Math.abs(h.z - v.z) > v.len / 2 + 0.5 || Math.abs(v.x - h.x) > h.len / 2 + 0.5) continue;
-        const ix = v.x, iz = h.z, boxH = Math.max(v.w, h.w) / 2;
-        const zkV = Math.max(1, Math.ceil(v.w / 1.2) >> 1);                // N/S arms cross the vertical road
-        for (let s = -1; s <= 1; s += 2) for (let k = -zkV; k <= zkV; k++) paintRect(ix + k * 1.1, iz + s * (boxH + 1.3), 0.6, 1.7, C_WHITE, 0.85);
-        const zkH = Math.max(1, Math.ceil(h.w / 1.2) >> 1);                // E/W arms cross the horizontal road
-        for (let s = -1; s <= 1; s += 2) for (let k = -zkH; k <= zkH; k++) paintRect(ix + s * (boxH + 1.3), iz + k * 1.1, 1.7, 0.6, C_WHITE, 0.85);
-      }
-      if (paintGeoms.length) {
-        const pmat = new THREE.MeshBasicMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -6 });
-        if (BGU && BGU.mergeBufferGeometries) {
-          const pm = new THREE.Mesh(BGU.mergeBufferGeometries(paintGeoms), pmat);
-          pm.castShadow = false; pm.receiveShadow = false; pm.matrixAutoUpdate = false; pm.updateMatrix();
-          pm.renderOrder = 1; pm.userData.roadPaint = true; root.add(pm);
-        } else {
-          for (const g of paintGeoms) { const m = new THREE.Mesh(g, pmat); m.matrixAutoUpdate = false; m.updateMatrix(); m.renderOrder = 1; m.userData.roadPaint = true; root.add(m); }
-        }
-      }
-    } else if (pattern === "mainstreet") {
-      // (flag OFF) original faded centre dashes on the spine — byte-identical
-      const n = Math.max(6, ((maxX - minX) / 7) | 0);
-      for (let i = 0; i < n; i++) lineGeoms.push(planeGeo(minX + 8 + i * ((maxX - minX - 16) / n), cz, 2.4, 0.3, 0.07));
-      mergeAdd(root, lineGeoms, layerMat(pal.line != null ? pal.line : 0xc9bf8e, 3), { receive: false });
-    }
+    for (let k = 0; k <= cols; k++) roadRec(true, k);
+    for (let k = 0; k <= rows; k++) roadRec(false, k);
 
     // =====================================================================
-    //  3) LOTS — subdivide each block into non-overlapping OBB lots by
-    //     recursively splitting across the LONG axis until min frontage /
-    //     min area. A sidewalk inset frames each block; each lot's doorSide
-    //     faces the nearest road. Lots NEVER overlap by construction.
+    //  2) THE STREET SURFACE
     // =====================================================================
-    const SIDEWALK_INSET = 2.4;
+    let kit = null;
+    if (!RURAL) {
+      const baseV = townRoads[0], baseH = townRoads.find(function (r) { return !r.vertical && !r.main; }) || townRoads[cols + 1];
+      try {
+        kit = CBZ.streetKit.build({
+          root, name: "town", surfaceName: "town-street-surface",
+          xLines, zLines, ROAD, xWidths: xW, zWidths: zW,
+          xLanes: xW.map(lanesFor), zLanes: zW.map(lanesFor),
+          laneW: 3.6, lanesPerDir: lanesFor(ROAD), footway: FOOTWAY,
+          cornerR: CBZ.roadCornerRadius ? CBZ.roadCornerRadius(baseV, baseH, FOOTWAY) : 4.5,
+          apron: 0,                        // the road edge eases into the town's ground
+          sharedMaterial: true, driveways: [],
+        });
+      } catch (e) { try { console.error("[towngen] street kit", cfg.name, e); } catch (e2) {} kit = null; }
+    }
+    if (!kit) {
+      // RURAL LANES: swept dirt, flush with the ground, no kerb and no paint
+      const roadGeoms = [];
+      for (const s of townRoads) roadGeoms.push(s.vertical ? planeGeo(s.x, s.z, s.w, s.len, 0.05) : planeGeo(s.x, s.z, s.len, s.w, 0.05));
+      mergeAdd(root, roadGeoms, layerMat(pal.road != null ? pal.road : 0x5a4f3e, 2), { receive: true });
+      for (const s of townRoads) { s.footway = 0; s.rural = true; }
+    }
+    // the ground under a point of this town: the kit's surface (road 0.05,
+    // footway 0.18, lot pad 0.125), else the dirt floor
+    function gy(x, z) {
+      if (kit) { const y = kit.heightAt(x, z); if (y != null) return y; }
+      return 0.03;
+    }
+    const LOT_Y = kit ? kit.profile.yLot : 0.03;
+
+    // =====================================================================
+    //  3) LOTS — subdivide each block (inside its footway) into non-overlapping
+    //     lots by recursively splitting across the LONG axis until min
+    //     frontage / min area. Each lot's door faces the nearest road edge of
+    //     its block. Lots NEVER overlap by construction.
+    // =====================================================================
     const MIN_FRONT = cfg.minFrontage || 12;
     const MIN_AREA = cfg.minLotArea || 150;
     const lots = [];           // {cx,cz,w,d,ring,zone,doorSide,door:{x,z,nx,nz}}
-    const sidewalkGeoms = [];
     const centerRow = (rows - 1) / 2, centerCol = (cols - 1) / 2;
     let squareCell = null;
     let bestSq = 1e9;
@@ -415,21 +373,18 @@
     }
 
     for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
-      const bx = (xLines[i] + xLines[i + 1]) / 2;
-      const bz = (zLines[j] + zLines[j + 1]) / 2;
+      const B = blockOf(i, j);
       const ring = ringOf(i, j);
-      // sidewalk slab framing the block (one inset rect per block)
-      sidewalkGeoms.push(planeGeo(bx, bz, BW + 2, BD + 2, 0.04));
       if (squareCell && i === squareCell.i && j === squareCell.j) {
-        squareCell.bx = bx; squareCell.bz = bz; squareCell.w = BW; squareCell.d = BD;
+        squareCell.bx = B.cx; squareCell.bz = B.cz; squareCell.w = B.w; squareCell.d = B.d;
         continue;   // square block holds NO building lots
       }
       const inner = [];
-      subdivide(bx, bz, BW - SIDEWALK_INSET * 2, BD - SIDEWALK_INSET * 2, ring, inner);
+      subdivide(B.cx, B.cz, B.w - FOOTWAY * 2, B.d - FOOTWAY * 2, ring, inner);
       for (const lt of inner) {
         // door faces the nearest road edge of the parent BLOCK
-        const dxE = (xLines[i + 1]) - lt.cx, dxW = lt.cx - xLines[i];
-        const dzS = (zLines[j + 1]) - lt.cz, dzN = lt.cz - zLines[j];
+        const dxE = B.maxX - lt.cx, dxW = lt.cx - B.minX;
+        const dzS = B.maxZ - lt.cz, dzN = lt.cz - B.minZ;
         const m = Math.min(dxE, dxW, dzS, dzN);
         let nx = 0, nz = 0;
         if (m === dxE) nx = 1; else if (m === dxW) nx = -1; else if (m === dzS) nz = 1; else nz = -1;
@@ -440,7 +395,6 @@
         reserveRect({ minX: lt.cx - lt.w / 2, maxX: lt.cx + lt.w / 2, minZ: lt.cz - lt.d / 2, maxZ: lt.cz + lt.d / 2 });
       }
     }
-    mergeAdd(root, sidewalkGeoms, layerMat(SIDEWALK, 1), { receive: true });
 
     // ANCHOR PLAN — now that lots[] exist, ask the composer which central lots
     // must become which purposeful shop. Deterministic (siteRng only). The fill
@@ -635,6 +589,10 @@
           ring: lt.ring, zone: lt.zone, town: cfg.name,
           skylineStoreys: skylinePlan.get(lt) || null,
           building: { ...b, name: pick.name || "Building", sign: color, side: lt.doorSide, door: doorPt, shop: isShop },
+          // the street this parcel fronts, as drawn: approach.js reads it to
+          // stop its crossing at the footway (the kit owns the kerb) and to
+          // leave the driveway to the painted lot ground
+          street: kit ? { footway: FOOTWAY, yLot: LOT_Y, ground: true } : { footway: 0, yLot: 0.03, rural: true },
         };
         const bb = lotRec.building;
         if (isShop) {
@@ -710,6 +668,7 @@
         // shop pass), so the town mounts its own compact facade board here.
         if (isShop && pick.name) mountShopSign(lt, color, pick.name);
         filled.push(lotRec);
+        lt._rec = lotRec;
       } else if (pick.asset && CBZ.assets && CBZ.assets.has && CBZ.assets.has(pick.asset)) {
         // X5 FINDING: this used to route through P.placeAsset (respects
         // occupancy) — but step 3 above ALREADY reserved this exact lot's
@@ -758,68 +717,101 @@
     let square = null;
     if (squareCell && squareCell.bx != null) {
       const sx = squareCell.bx, sz = squareCell.bz, sw = squareCell.w, sd = squareCell.d;
-      mergeAdd(root, [planeGeo(sx, sz, sw - 3, sd - 3, 0.06)], layerMat(pal.plaza != null ? pal.plaza : SIDEWALK, 3), { receive: true });
+      // On a kerbed town the square is the block's own lot pad inside its
+      // footway, painted as a small park (lawn quarters, gravel paths, a paved
+      // round at the landmark) by city/cityground.js; a dirt village keeps a
+      // swept plaza sheet.
+      const Y0 = kit ? LOT_Y : 0.06;
+      const inW = kit ? sw - FOOTWAY * 2 : sw - 3, inD = kit ? sd - FOOTWAY * 2 : sd - 3;
+      if (!kit) mergeAdd(root, [planeGeo(sx, sz, inW, inD, 0.06)], layerMat(pal.plaza != null ? pal.plaza : SIDEWALK, 3), { receive: true });
       reserveRect({ minX: sx - sw / 2, maxX: sx + sw / 2, minZ: sz - sd / 2, maxZ: sz + sd / 2 });
       // central landmark — a stone WELL (cylinder base + low ring) by default,
       // or a flagpole if the recipe asks. Decor with a thin collider.
       if (cfg.squarePrefab === "flagpole") {
-        mergeAdd(root, [(function () { const g = new THREE.CylinderGeometry(0.18, 0.22, 9, 6); g.translate(sx, 4.5, sz); return g; })()], cmat(ACCENT), { cast: true });
+        mergeAdd(root, [(function () { const g = new THREE.CylinderGeometry(0.18, 0.22, 9, 6); g.translate(sx, Y0 + 4.5, sz); return g; })()], cmat(ACCENT), { cast: true });
         solid(sx, sz, 0.6, 0.6, 9);
       } else {
         mergeAdd(root, [
-          (function () { const g = new THREE.CylinderGeometry(1.5, 1.7, 1.1, 12); g.translate(sx, 0.55, sz); return g; })(),
-          (function () { const g = new THREE.CylinderGeometry(0.12, 0.12, 2.4, 5); g.translate(sx - 1.2, 1.7, sz); return g; })(),
-          (function () { const g = new THREE.CylinderGeometry(0.12, 0.12, 2.4, 5); g.translate(sx + 1.2, 1.7, sz); return g; })(),
-          (function () { const g = new THREE.BoxGeometry(3.0, 0.16, 0.4); g.translate(sx, 2.9, sz); return g; })(),
+          (function () { const g = new THREE.CylinderGeometry(1.5, 1.7, 1.1, 12); g.translate(sx, Y0 + 0.55, sz); return g; })(),
+          (function () { const g = new THREE.CylinderGeometry(0.12, 0.12, 2.4, 5); g.translate(sx - 1.2, Y0 + 1.7, sz); return g; })(),
+          (function () { const g = new THREE.CylinderGeometry(0.12, 0.12, 2.4, 5); g.translate(sx + 1.2, Y0 + 1.7, sz); return g; })(),
+          (function () { const g = new THREE.BoxGeometry(3.0, 0.16, 0.4); g.translate(sx, Y0 + 2.9, sz); return g; })(),
         ], cmat(pal.stone != null ? pal.stone : 0x9a8d72), { cast: true });
         solid(sx, sz, 3.2, 3.2, 2);
       }
-      // benches around the square (instanced)
+      // benches around the square (instanced). On the park square they sit
+      // beside the four paths, where cityground wears the turf bald at a
+      // bench (its own bench spots), not floating over a lawn.
       const benchIM = new THREE.InstancedMesh(new THREE.BoxGeometry(2.2, 0.4, 0.6), cmat(WOOD), 4);
       const dummy = new THREE.Object3D();
-      const off = Math.min(sw, sd) / 2 - 4;
-      [[0, -off], [0, off], [-off, 0], [off, 0]].forEach((c, i) => {
-        dummy.position.set(sx + c[0], 0.45, sz + c[1]);
-        dummy.rotation.set(0, c[0] !== 0 ? Math.PI / 2 : 0, 0); dummy.scale.set(1, 1, 1);
+      const bo = Math.min(inW, inD) * 0.23, off = Math.min(sw, sd) / 2 - 4;
+      const benchAt = kit
+        ? [[1, 0], [-1, 0], [0, 1], [0, -1]].map(function (q) { return [q[0] * bo + (q[0] === 0 ? 2 : 0), q[1] * bo + (q[1] === 0 ? 2 : 0), q[0] === 0]; })
+        : [[0, -off, false], [0, off, false], [-off, 0, true], [off, 0, true]];
+      benchAt.forEach((c, i) => {
+        const yaw90 = c[2];
+        dummy.position.set(sx + c[0], Y0 + 0.45, sz + c[1]);
+        dummy.rotation.set(0, yaw90 ? Math.PI / 2 : 0, 0); dummy.scale.set(1, 1, 1);
         dummy.updateMatrix(); benchIM.setMatrixAt(i, dummy.matrix);
         // SOLID: a 2.2 m plank whose top is 0.65 — over physics.js's 0.45
         // STEP_UP, so it is not something you walk over, it is something you
-        // walked THROUGH. world/clutter.js's yard bench has been solid since it
-        // shipped; the town square's four copies never were. An InstancedMesh
-        // has no per-instance collider, so the AABB is pushed here, from the
-        // SAME rotation the matrix was just built with (never re-typed).
-        const yaw90 = c[0] !== 0;
-        solid(sx + c[0], sz + c[1], yaw90 ? 0.6 : 2.2, yaw90 ? 2.2 : 0.6, 0.65);
+        // walked THROUGH. An InstancedMesh has no per-instance collider, so
+        // the AABB is pushed here, from the SAME rotation the matrix used.
+        solid(sx + c[0], sz + c[1], yaw90 ? 0.6 : 2.2, yaw90 ? 2.2 : 0.6, Y0 + 0.65);
       });
       benchIM.instanceMatrix.needsUpdate = true; benchIM.matrixAutoUpdate = false; benchIM.castShadow = true; root.add(benchIM);
-      // the town-name sign. V2: a PHYSICAL welcome board on two posts at the
-      // square's edge (owner rule: no floating word labels) — the cached name
-      // sprite sits pressed tight against the board face, same convention as
-      // the storefront sign boards above.
+      // the town-name sign: a PHYSICAL welcome board on two posts at the
+      // square's edge (owner rule: no floating word labels), inside the lot
+      // line on a kerbed town so it stands on the square, not the footway.
       if (CBZ.makeLabelSprite && cfg.name) {
         if (V2) {
           const bw2 = Math.min(11, cfg.name.length * 0.72 + 3.2);
-          const bx = sx, bz = sz + sd / 2 - 2.0;
+          const bx = sx, bz = sz + (kit ? inD / 2 - 1.2 : sd / 2 - 2.0);
           mergeAdd(root, [
-            (function () { const g = new THREE.BoxGeometry(0.22, 3.2, 0.22); g.translate(bx - bw2 / 2 + 0.3, 1.6, bz); return g; })(),
-            (function () { const g = new THREE.BoxGeometry(0.22, 3.2, 0.22); g.translate(bx + bw2 / 2 - 0.3, 1.6, bz); return g; })(),
-            (function () { const g = new THREE.BoxGeometry(bw2, 1.5, 0.18); g.translate(bx, 2.7, bz); return g; })(),
+            (function () { const g = new THREE.BoxGeometry(0.22, 3.2, 0.22); g.translate(bx - bw2 / 2 + 0.3, Y0 + 1.6, bz); return g; })(),
+            (function () { const g = new THREE.BoxGeometry(0.22, 3.2, 0.22); g.translate(bx + bw2 / 2 - 0.3, Y0 + 1.6, bz); return g; })(),
+            (function () { const g = new THREE.BoxGeometry(bw2, 1.5, 0.18); g.translate(bx, Y0 + 2.7, bz); return g; })(),
           ], cmat(ACCENT), { cast: true });
-          // THE INVERSE FAULT, and it is the same bug: a collider that does not
-          // match its geometry. This was `solid(bx, bz, bw2, 0.5, 3.5)` — an
-          // 11 m x 3.5 m WALL filling the open air between two 0.22 m posts, so
-          // the one gap you are obviously meant to walk through was sealed. The
-          // board itself spans y 1.95-3.45, over a standing head. What you can
-          // actually walk into is the two POSTS, so that is what is solid.
-          for (const ps of [-1, 1]) solid(bx + ps * (bw2 / 2 - 0.3), bz, 0.4, 0.4, 3.2);
+          // only the two POSTS are solid: the board spans y 1.95-3.45, over a
+          // standing head, and the gap between the posts is walkable
+          for (const ps of [-1, 1]) solid(bx + ps * (bw2 / 2 - 0.3), bz, 0.4, 0.4, Y0 + 3.2);
           const s = CBZ.makeLabelSprite(cfg.name, { color: pal.sign || "#f4e7c2" });
-          if (s) { s.position.set(bx, 2.7, bz + 0.16); s.scale.set(Math.min(bw2 - 0.6, cfg.name.length * 0.6 + 1.6), 1.1, 1); root.add(s); }
+          if (s) { s.position.set(bx, Y0 + 2.7, bz + 0.16); s.scale.set(Math.min(bw2 - 0.6, cfg.name.length * 0.6 + 1.6), 1.1, 1); root.add(s); }
         } else {
           const s = CBZ.makeLabelSprite(cfg.name, { color: pal.sign || "#f4e7c2" });
           if (s) { s.position.set(sx, 5.5, sz); s.scale.set(Math.min(14, cfg.name.length * 1.3 + 4), 3, 1); root.add(s); }
         }
       }
       square = { x: sx, z: sz, w: sw, d: sd };
+    }
+
+    // =====================================================================
+    //  5b) THE LOT GROUND — one pad per block inside its footway, wearing
+    //      city/cityground.js: built parcels get their lawn/beds/slab/pavers
+    //      from what stands on them, empty ones are grass or a poured slab
+    //      by zone, the square is a park. One draw call for the whole town.
+    // =====================================================================
+    if (kit) {
+      const flavor = comp ? comp.flavor : null;
+      const yard = flavor === "factory" || flavor === "port";
+      const groundLots = [];
+      for (const lt of lots) {
+        const rec = lt._rec || null;
+        const kind = lt.zone === "residential" ? "residential" : (yard ? "industrial" : (lt.zone === "civic" ? "core" : "commercial"));
+        groundLots.push({ cx: lt.cx, cz: lt.cz, w: lt.w, d: lt.d, groundKind: kind,
+          groundWealth: lt.zone === "civic" ? 0.7 : (lt.zone === "commercial" ? 0.55 : 0.45),
+          building: rec ? rec.building : null });
+      }
+      if (square) {
+        groundLots.push({ cx: square.x, cz: square.z, w: square.w - FOOTWAY * 2, d: square.d - FOOTWAY * 2,
+          groundKind: "core", groundWealth: 0.7, building: { park: true } });
+      }
+      const gmat = CBZ.cityGround
+        ? CBZ.cityGround.material({ lots: groundLots, xLines, zLines, splat: 512, main: false,
+            // inside a world build the order-68 pass paints it once, driveways included
+            paintNow: !(CBZ._settlementArena && A === CBZ._settlementArena) })
+        : new THREE.MeshLambertMaterial({ color: GROUND });
+      kit.lotMesh("town-lot-ground", null, gmat, 1 / 8);
     }
 
     // =====================================================================
@@ -882,7 +874,11 @@
       const n = Math.max(1, Math.floor(seg.len / 26));
       for (let k = 1; k < n && lampSpots.length < LAMP_MAX; k++) {
         const t = -seg.len / 2 + k * (seg.len / n);
-        const sgn = (k % 2 === 0 ? 1 : -1);
+        let sgn = (k % 2 === 0 ? 1 : -1);
+        // a perimeter street has footway on its town side only: light it from there
+        const edgeLo = seg.vertical ? seg.x <= xLines[0] + 0.01 : seg.z <= zLines[0] + 0.01;
+        const edgeHi = seg.vertical ? seg.x >= xLines[cols] - 0.01 : seg.z >= zLines[rows] - 0.01;
+        if (!RURAL && edgeLo) sgn = 1; else if (!RURAL && edgeHi) sgn = -1;
         const off = half + 1.0;                  // on the kerb, arm out over the lane
         const lx = seg.vertical ? seg.x + sgn * off : seg.x + t;
         const lz = seg.vertical ? seg.z + t : seg.z + sgn * off;
@@ -891,7 +887,7 @@
         for (let q = 0; q < townRoads.length; q++) {
           const o = townRoads[q];
           if (o === seg || o.vertical === seg.vertical) continue;
-          const oh = o.w / 2 + 2.0;
+          const oh = o.w / 2 + 2.0 + (kit ? kit.solve.R : 0);   // clear of the kerb return too
           if (o.vertical ? Math.abs(lx - o.x) < oh : Math.abs(lz - o.z) < oh) { clash = true; break; }
         }
         if (clash) continue;
@@ -908,16 +904,17 @@
     const townLampCensus = A ? (A._lampCensus = A._lampCensus || { lamps: 0, noCollider: 0, overRoad: 0 }) : null;
     for (let i = 0; i < lampN; i++) {
       const sp = lampSpots[i];
-      dummy2.position.set(sp.x, 0, sp.z); dummy2.scale.set(1, 1, 1);
+      const gy0 = gy(sp.x, sp.z);                  // the pole stands ON the footway
+      dummy2.position.set(sp.x, gy0, sp.z); dummy2.scale.set(1, 1, 1);
       dummy2.rotation.set(0, sp.ang, 0);
       dummy2.updateMatrix(); lampIM.setMatrixAt(i, dummy2.matrix);
       // the head sits on the arm's TIP, out over the lane — derived, never
       // authored beside it
-      dummy2.position.set(sp.x + sp.fx * LM.headZ, LM.headY, sp.z + sp.fz * LM.headZ);
+      dummy2.position.set(sp.x + sp.fx * LM.headZ, gy0 + LM.headY, sp.z + sp.fz * LM.headZ);
       dummy2.updateMatrix(); headIM.setMatrixAt(i, dummy2.matrix);
       // the head's light on the road: city/props.js builds one ground pool per
       // entry with the city's lamp pools (these streets are skipped by its walk)
-      if (A) (A._townLampHeads = A._townLampHeads || []).push({ x: sp.x + sp.fx * LM.headZ, z: sp.z + sp.fz * LM.headZ, y: LM.headY - 0.08, h: LM.headY, ang: sp.ang });
+      if (A) (A._townLampHeads = A._townLampHeads || []).push({ x: sp.x + sp.fx * LM.headZ, z: sp.z + sp.fz * LM.headZ, y: gy0 + LM.headY - 0.08, h: gy0 + LM.headY, ang: sp.ang });
       // A POLE YOU CAN WALK THROUGH IS SCENERY. Slim, matched to the 0.16 butt.
       if (CBZ.colliders) {
         CBZ.colliders.push({ minX: sp.x - 0.18, maxX: sp.x + 0.18, minZ: sp.z - 0.18, maxZ: sp.z + 0.18, ref: null, noCam: true });
@@ -945,7 +942,11 @@
     // Both halves are fixed here: the posts are drawn (a second InstancedMesh,
     // one extra draw call for the whole town) and the rail gets an AABB from
     // the SAME yaw its matrix was built with.
-    const railN = Math.min(8, lots.length);
+    // FRONTIER ONLY: a hitching rail belongs to a Western main street or a
+    // farm town, not to a finance district's glass towers or a casino strip.
+    const FRONTIER = { desert: 1, farmland: 1, forest: 1, village: 1, snow: 1 };
+    const frontier = !comp || !comp.flavor || FRONTIER[comp.flavor] === 1;
+    const railN = frontier ? Math.min(8, lots.length) : 0;
     if (railN > 0) {
       const railIM = new THREE.InstancedMesh(new THREE.BoxGeometry(3.2, 0.18, 0.18), cmat(WOOD), railN);
       const postIM = new THREE.InstancedMesh(new THREE.BoxGeometry(0.18, 1.1, 0.18), cmat(WOOD), railN * 2);
@@ -954,19 +955,20 @@
         const lt = lots[(i * 7) % lots.length];
         const rx = lt.door.x + lt.door.nx * 1.0, rz = lt.door.z + lt.door.nz * 1.0;
         const yaw90 = lt.door.nx !== 0;                 // rail runs along Z
-        dummy2.position.set(rx, 1.0, rz);
+        const ry = gy(rx, rz);
+        dummy2.position.set(rx, ry + 1.0, rz);
         dummy2.rotation.set(0, yaw90 ? Math.PI / 2 : 0, 0); dummy2.scale.set(1, 1, 1);
         dummy2.updateMatrix(); railIM.setMatrixAt(i, dummy2.matrix);
         // the two posts the rail was always described as resting on: at the bar
         // ends, base on the ground, top just under the 1.09 bar underside.
         for (const ps of [-1.45, 1.45]) {
-          dummy2.position.set(rx + (yaw90 ? 0 : ps), 0.55, rz + (yaw90 ? ps : 0));
+          dummy2.position.set(rx + (yaw90 ? 0 : ps), ry + 0.55, rz + (yaw90 ? ps : 0));
           dummy2.rotation.set(0, 0, 0);
           dummy2.updateMatrix(); postIM.setMatrixAt(pi++, dummy2.matrix);
         }
         // ONE AABB for the whole rail (not one per post): it is a single
         // waist-high fence, and y1 = 1.09 is the bar's real top.
-        solid(rx, rz, yaw90 ? 0.36 : 3.2, yaw90 ? 3.2 : 0.36, 1.09);
+        solid(rx, rz, yaw90 ? 0.36 : 3.2, yaw90 ? 3.2 : 0.36, ry + 1.09);
       }
       railIM.instanceMatrix.needsUpdate = true; railIM.matrixAutoUpdate = false; railIM.castShadow = true; root.add(railIM);
       postIM.count = pi;

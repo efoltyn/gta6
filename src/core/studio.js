@@ -464,8 +464,9 @@
              "cluster. Ask for a downtown with CBZ.studio.town(); nothing in it " +
              "is a stage flat",
       needs: ["look", "seed"],
-      files: ["vendor/BufferGeometryUtils.js", "city/buildings.js", "city/furniture.js", "city/towngen.js"],
-      publishes: ["cityMakeBuilding", "buildTown"],
+      files: ["vendor/BufferGeometryUtils.js", "city/buildings.js", "city/furniture.js",
+              "city/cityground.js", "city/streetkit.js", "city/towngen.js"],
+      publishes: ["cityMakeBuilding", "buildTown", "streetKit"],
     },
     militaryisland: {
       gives: "the REAL military island from the Gang City map, raised at its " +
