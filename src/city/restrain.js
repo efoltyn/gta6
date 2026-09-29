@@ -562,16 +562,16 @@
   I.register("ped", {
     id: "rs-cuff-gp", slot: "e", prio: 80, needsGunDrawn: true, bad: true,
     canShow: (p) => cuffablePed(p) && subdued(p),
-    label: "Zip wrists",
+    label: "Cuff",
     onSelect: (p) => cuff(p),
   });
   I.register("ped", {
     id: "rs-cuff", slot: "e", prio: 80, bad: true,
     // slot-e prio beats the grapple record, so a downed/broken fighter reads
-    // "Zip wrists" while one still swinging reads "Grapple" — no
+    // "Cuff" while one still swinging reads "Grapple" — no
     // loose-boolean cross-gating (the framework bug this file exists to avoid).
     canShow: (p, ctx) => !ctx.gunDrawn && cuffablePed(p) && subdued(p),
-    label: "Zip wrists",
+    label: "Cuff",
     onSelect: (p) => cuff(p),
   });
 
@@ -586,7 +586,7 @@
   I.register("ped", {
     id: "rs-clinch-cuff", slot: "e", prio: 90, bad: true,
     canShow: (p) => st(p) === "grappled" && p.restraint.t >= WEAR_T,
-    label: "Zip wrists",
+    label: "Cuff",
     // the collar grip lets go and the cuff turns him (CBZ.verbs.cuff)
     onSelect: (p) => { if (st(p) === "grappled") { p.restraint = null; untrack(p); cuff(p); } },
   });
@@ -641,7 +641,7 @@
   I.register("vehicle", {
     id: "rs-unseat", slot: "i", prio: 85, bad: true,
     canShow: (car, ctx) => !ctx.driving && seatedCaptives(car).length > 0,
-    label: (car) => { const n = seatedCaptives(car).length; return n > 1 ? "Drag them out (" + n + ")" : "Drag out"; },
+    label: (car) => { const n = seatedCaptives(car).length; return n > 1 ? "Drag out " + n : "Drag out"; },
     onSelect: (car) => { const a = seatedCaptives(car); for (let i = a.length - 1; i >= 0; i--) unseat(a[i]); },
   });
 

@@ -709,14 +709,14 @@
     I.register("ped:civ", {
       id: "milli-shakedown", slot: "i", prio: 80, bad: true, needsGunDrawn: true,
       canShow: (p) => isTycoon(p) && !p._milliShaken,
-      label: (p) => "Shake down for their fortune (" + money(p._milliBag || 0) + ")",
+      label: (p) => "Shake down " + money(p._milliBag || 0),
       onSelect: shakeDown,
     });
     // A flavor read so the rich aren't anonymous (no-gun, harmless).
     I.register("ped:civ", {
       id: "milli-sizeup", slot: "e", prio: 2,
       canShow: (p) => isTycoon(p),
-      label: (p) => "Size up the " + (p._milliTitle || "tycoon"),
+      label: "Size up",
       onSelect: (p) => {
         const job = (p._milli && p._milli.job) || "serious money";
         // LE5: if his fortune is tied to a tower in the ledger, SAY so — the
@@ -739,7 +739,7 @@
       },
       options: [{
         id: "milli-gala-sponsor", slot: "e", prio: 10,
-        label: () => "Headline the Charity Gala (" + money(galaDonation()) + ")",
+        label: () => "Sponsor " + money(galaDonation()),
         onSelect: () => sponsorGala(),
       }],
     });

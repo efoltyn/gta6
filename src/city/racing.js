@@ -922,7 +922,7 @@
     I.register("ped:civ", {
       id: "racer-challenge", slot: "f", prio: 4,
       canShow: (p) => isRacer(p),
-      label: (p) => "Challenge " + (p._racer ? "#" + p._racer.number : "them") + " to a race",
+      label: () => "Challenge",
       onSelect: (p) => {
         const r = p._racer; if (!r) return;
         const PA = CBZ.player;
@@ -1391,7 +1391,7 @@
     I.register("ped:civ", {
       id: "racer-street", slot: "k", prio: 5,
       canShow: (p) => srOn() && isRacer(p) && !SR.active,
-      label: () => "Street race. $" + SR.ante + " a head, winner takes the pot",
+      label: () => "Race $" + SR.ante,
       onSelect: (p) => {
         const r = p._racer; if (!r) return;
         if (!CBZ.player || !CBZ.player.driving) {
@@ -1400,7 +1400,7 @@
         }
         // he calls two more names onto the grid — real cars form up behind you
         if (srStart({ kind: Math.random() < 0.45 ? "circuit" : "sprint" })) {
-          if (CBZ.citySay) CBZ.citySay(p, "“Grid up. Money where your mouth is.”", "#ffe9a8", 2.4);
+          if (CBZ.citySay) CBZ.citySay(p, "Grid up. Put your money down.", "#ffe9a8", 2.4);
         }
       },
     });

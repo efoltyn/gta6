@@ -977,7 +977,7 @@
         return !!CBZ.cityReduceWanted && vipKindOf(p) === "judge" && (g.wanted | 0) >= 1 &&
           !unpardonable() && !p._benchBurned && nowMs() > (p._benchT || 0);
       },
-      label: function () { return "Approach the bench · " + "$" + judgeFee().toLocaleString("en-US"); },
+      label: function () { return "Bribe $" + judgeFee().toLocaleString("en-US"); },
       onSelect: function (p) {
         if (!(CBZ.city && CBZ.city.spend && CBZ.city.spend(judgeFee()))) {
           if (CBZ.citySay) CBZ.citySay(p, "That is not a serious offer.", "#cfe6ff", 2);
@@ -999,7 +999,7 @@
         return !!CBZ.cityReduceWanted && vipKindOf(p) === "judge" && (g.wanted | 0) >= 1 &&
           !unpardonable() && !p._benchBurned;
       },
-      label: "Lean on the judge",
+      label: "Lean on",
       onSelect: function (p) {
         benchFavour(p, true);
         // "extortion" — wanted.js's CRIME table has no "intimidating a judge",
@@ -1016,7 +1016,7 @@
         return !!(CBZ.cityRun && CBZ.cityRun.live && CBZ.cityRun.live()) &&
           vipKindOf(p) === "senator" && !p._endorseAsked;
       },
-      label: "Ask for their endorsement",
+      label: "Ask",
       onSelect: function (p) { askEndorsement(p); },
     });
   });

@@ -2154,7 +2154,7 @@
         if (CBZ.factions.tier && CBZ.factions.tier(ORG) >= 0) return false;
         return !!crewCan(p, "boarding");        // you talk to the man who says go
       },
-      label: function () { return "Ask to sign on"; },
+      label: function () { return "Sign on"; },
       onSelect: function (p) {
         const can = CBZ.factions.canJoin(ORG);
         if (!can.ok) { phone(can.why, (p._pirCrew ? p._pirCrew.name : "THE CREW").toUpperCase(), 4); return; }
@@ -2172,7 +2172,7 @@
         if (cr.state !== "approach") return false;
         return playerCan("boarding");
       },
-      label: function () { return "Give the order: take her"; },
+      label: function () { return "Board"; },
       onSelect: function (p) {
         const cr = p._pirCrew;
         cr.state = "board"; cr.boardT = 0;
@@ -2190,7 +2190,7 @@
         if (p._pirCrew.state === "leave") return false;
         return playerCan("standdown");
       },
-      label: function () { return "Call them off"; },
+      label: function () { return "Call off"; },
       onSelect: function (p) { standDown(p._pirCrew, "captain", true); },
     }); n++;
 
@@ -2198,7 +2198,7 @@
     I.register("ped:civ", {
       id: "pir-cut-loose", slot: "e", prio: 78,
       canShow: function (p) { return !!(ransomOn() && p && !p.dead && holdOf(p) && !holdOf(p).byPlayer); },
-      label: function (p) { return "Cut " + nameOf(p, "them") + " loose"; },
+      label: function () { return "Cut loose"; },
       onSelect: function (p) { release(p, "rescued"); _rescued++; },
     }); n++;
 
@@ -2207,12 +2207,14 @@
     // is a number that will actually arrive.
     I.register("ped:civ", {
       id: "pir-worth", slot: "i", prio: 60,
-      canShow: function (p) { return !!(ransomOn() && p && !p.dead && p.restraint && holdOf(p) && holdOf(p).byPlayer); },
+      canShow: function (p) {
+        if (!(ransomOn() && p && !p.dead && p.restraint && holdOf(p) && holdOf(p).byPlayer)) return false;
+        const pay = holdOf(p).payer;
+        return !!(pay && pay.pays);   // "nobody's paying" is a status, not a button
+      },
       label: function (p) {
         const h = holdOf(p);
-        const pay = h && h.payer;
-        if (!pay || !pay.pays) return "Nobody's paying for them";
-        return pay.name + " will pay " + money(pay.amount);
+        return "Appraise " + money(h && h.payer ? h.payer.amount : 0);
       },
       onSelect: function (p) {
         const h = holdOf(p);

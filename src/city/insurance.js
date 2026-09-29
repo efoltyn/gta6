@@ -755,14 +755,14 @@
     const approved = myClaim("approved");
     if (approved && CBZ.rankCan && CBZ.rankCan(p, ORG, "settle")) {
       return {
-        label: "Sign for " + money(approved.amount),
+        label: "Sign " + money(approved.amount),
         run: function () { say(p, "Sign here. Sorry for the trouble."); payClaim(approved); },
       };
     }
     const denied = myClaim("denied");
     if (denied) {
       return {
-        label: "Ask about the disputed claim",
+        label: "Ask",
         run: function () {
           say(p, officeCan("deny")
             ? "The director signed that one himself. Sorry."
@@ -778,23 +778,23 @@
         const q = CBZ.cityInsure(lot, { dryRun: true });
         if (q.ok) {
           return {
-            label: "Insure " + addrOf(lot) + " " + money(q.price),
+            label: "Insure " + money(q.price),
             run: function () {
               const r = CBZ.cityInsure(lot);
-              if (!r.ok) { say(p, "“" + r.why + "”"); return; }
+              if (!r.ok) { say(p, r.why); return; }
               if (CBZ.sfx) { try { CBZ.sfx("coin"); } catch (e) {} }
-              say(p, "“Covered to " + money(r.value) + ". Try not to need it.”");
-              note("Cover written on " + addrOf(lot) + " — " + money(r.value) + " for " + money(r.price) + ".", 3.4);
+              say(p, "You're covered. Try not to need it.");
+              note("Cover written on " + addrOf(lot) + ". " + money(r.value) + " for " + money(r.price) + ".", 3.4);
             },
           };
         }
-        return { label: "Ask about cover on " + addrOf(lot), run: function () { say(p, "“" + q.why + "”"); } };
+        return { label: "Ask", run: function () { say(p, q.why); } };
       }
     }
     // 3. the floor. A working person always has something honest to say, and
     //    what this one knows is what the branch is holding.
     return {
-      label: "Ask about the book",
+      label: "Ask",
       run: function () {
         if (CBZ.cityMeet) { try { CBZ.cityMeet(p); } catch (e) {} }
         const r = reserve();

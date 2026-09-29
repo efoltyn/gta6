@@ -495,6 +495,9 @@
     if (ped._cbzWait) return true;              // ordered to hold this spot
     if (ped._cbzBag && ped._cbzBag.job) return true;   // running money
     if (ped._cbzDriving) return true;           // at the wheel
+    // on a job against somebody (rob / scare / tail); a SIC job leaves the
+    // body to the companion brain, which fights the target it is handed
+    if (ped._cbzJob && (ped._cbzJob.verb !== "sic" || ped._cbzJob.phase === "back")) return true;
     return false;
   };
 
@@ -1046,6 +1049,8 @@
       ok = true;
     } else if (verb === "drive") {
       ok = orderDrive(ped, opts);
+    } else if (verb === "rob" || verb === "scare" || verb === "sic" || verb === "tail") {
+      ok = orderOn(ped, verb, opts.target);
     }
     if (ok) TALLY.ordersServed++;
     return ok;
@@ -1768,6 +1773,163 @@
   }
 
   // ============================================================
+  //  ORDERS ON A PERSON: "tell someone to do something to someone else"
+  //  (owner, 2026-08-26: "interaction options are dumb BECAUSE THEY ARE ALL
+  //  1V1"). You are the principal: your man walks over and does it with his
+  //  own hands (CBZ.verbs mug / shove), and what it costs lands where it
+  //  belongs. The mark knows who sent him (the grudge is against YOU), the
+  //  crime is on HIS head (npc heat), and the money only reaches you if he
+  //  makes it back to you with it.
+  //    rob    walk up, "Wallet. Now.", the mug, walk the haul back to you
+  //    scare  walk up, a shove and a line; the brain decides if they run
+  //    tail   follow them at a distance, come back and say where they went
+  //    sic    the companion brain fights them (peds.js companionThreat)
+  // ============================================================
+  const JOB_REACH = 1.5, JOB_GIVEUP = 30, TAIL_T = 26;
+  const JOB_ACK = { rob: "crewRob", scare: "crewScare", sic: "crewSic", tail: "crewTail" };
+  function sayT(p, topic, vars) {
+    if (CBZ.citySayTopic) { try { CBZ.citySayTopic(p, topic, { force: true, vars: vars || null }); } catch (e) {} }
+  }
+  function orderOn(ped, verb, target) {
+    if (!target || target.dead || target === ped || !target.pos) return false;
+    if (ped._cbzSeat || ped._cbzArc || ped.restraint) return false;
+    ped._cbzWait = null; ped._cbzBag = null;
+    ped._cbzJob = { verb: verb, target: target, t: 0, phase: "go", haul: 0, item: null, spoke: false };
+    if (verb === "sic") {
+      ped._sicOn = target;
+      if (CBZ.cityRelShift) { try { CBZ.cityRelShift(target, "threatened", 1); } catch (e) {} }
+    }
+    sayT(ped, JOB_ACK[verb]);
+    return true;
+  }
+  function lotNameNear(x, z) {
+    const lots = (CBZ.city && CBZ.city.arena && CBZ.city.arena.lots) || [];
+    let best = null, bd = 140 * 140;
+    for (let i = 0; i < lots.length; i++) {
+      const l = lots[i];
+      const nm = l && l.building && (l.building.name || (l.building.shop && l.building.shop.name));
+      if (!nm || l.demolished) continue;
+      const dx = l.cx - x, dz = l.cz - z, d = dx * dx + dz * dz;
+      if (d < bd) { bd = d; best = nm; }
+    }
+    return best;
+  }
+  function compass(fx, fz, tx, tz) {
+    const dx = tx - fx, dz = tz - fz;
+    const ns = dz < 0 ? "north" : "south", ew = dx < 0 ? "west" : "east";
+    if (Math.abs(dx) > Math.abs(dz) * 1.6) return ew;
+    if (Math.abs(dz) > Math.abs(dx) * 1.6) return ns;
+    return ns + ew;
+  }
+  function jobAct(p, J) {
+    const T = J.target, V = CBZ.verbs;
+    // the mark stops and turns to the man in front of him
+    T._faceAt = p.pos; T._faceT = Math.max(T._faceT || 0, 1.8); T.pause = Math.max(T.pause || 0, 1.8);
+    if (J.verb === "rob") {
+      const pay = function () {
+        if (T.dead || J.paid) return;
+        J.paid = true;
+        J.haul = Math.max(0, T.cash | 0); T.cash = 0; T.robbed = true;
+        if (Array.isArray(T.valuables) && T.valuables.length) J.item = T.valuables.shift();
+        else if (T.loot) { J.item = T.loot; T.loot = null; }
+        sayT(T, "mugged");
+        // he knows who sent him: the grudge is against YOU, the heat on your man
+        if (CBZ.cityRelShift) { try { CBZ.cityRelShift(T, "robbed", 0.8); } catch (e) {} }
+        if (CBZ.cityNpcOffense) CBZ.cityNpcOffense(p, 25, "robbery");
+        if (CBZ.cityAlarm) { try { CBZ.cityAlarm(T.pos.x, T.pos.z, 14, 0.8, p); } catch (e) {} }
+        // somebody on the street saw it, and says so
+        const peds = CBZ.cityPeds || [];
+        let w = null, wd = 12 * 12;
+        for (let i = 0; i < peds.length; i++) {
+          const q = peds[i];
+          if (!q || q === T || q === p || q.dead || q.companion || q.vendor || !q.pos) continue;
+          const dx = q.pos.x - T.pos.x, dz = q.pos.z - T.pos.z, dd = dx * dx + dz * dz;
+          if (dd < wd) { wd = dd; w = q; }
+        }
+        if (w) { w._faceAt = T.pos; w._faceT = Math.max(w._faceT || 0, 1.4); sayT(w, "witness"); }
+        if (CBZ.sfx) CBZ.sfx("coin");
+      };
+      let S = null;
+      if (V && V.mug) { try { S = V.mug(p, T, { far: true, onOutcome: pay }); } catch (e) { S = null; } }
+      if (!S) pay();
+    } else if (J.verb === "scare") {
+      if (V && V.shove) { try { V.shove(p, T, {}); } catch (e) {} }
+      sayT(T, "scared");
+      if (CBZ.cityRelShift) { try { CBZ.cityRelShift(T, "threatened", 0.8); } catch (e) {} }
+      J.scared = true;
+    }
+  }
+  function deliver(p, J) {
+    if (J.verb === "rob") {
+      if (J.haul > 0 && CBZ.city && CBZ.city.addCash) CBZ.city.addCash(J.haul);
+      if (J.item && CBZ.cityEcon && CBZ.cityEcon.add) { try { CBZ.cityEcon.add(J.item, 1); } catch (e) {} }
+      if (J.haul > 0 || J.item) { sayT(p, "crewBack"); if (CBZ.sfx) CBZ.sfx("coin"); }
+    } else if (J.verb === "tail" && J.seen) {
+      const P = CBZ.player;
+      const place = lotNameNear(J.seen.x, J.seen.z);
+      if (place && P) sayT(p, "crewReport", { place: place, dir: compass(P.pos.x, P.pos.z, J.seen.x, J.seen.z) });
+    } else sayT(p, "crewBack");
+  }
+  function endJob(p) { p._cbzJob = null; p._sicOn = null; p._boardRun = false; }
+  function runJob(p, J, dt, P) {
+    J.t += dt;
+    const T = J.target;
+    const walkTo = function (x, z, run) { p.state = "walk"; p._boardRun = !!run; p.path = null; p.pause = 0; if (p.target) p.target.set(x, 0, z); };
+    if (J.phase === "back") {
+      const d = Math.hypot(P.pos.x - p.pos.x, P.pos.z - p.pos.z);
+      walkTo(P.pos.x, P.pos.z, d > 8);
+      if (d < 2.8 || J.t > 45 || P.driving) { deliver(p, J); endJob(p); }
+      return;
+    }
+    const gone = !T || T.dead || !T.pos || (T.ko > 0 && J.verb !== "sic");
+    if (J.verb === "sic") {
+      if (gone || T.ko > 0 || T.surrender || J.t > 25) { p._sicOn = null; endJob(p); sayT(p, "crewBack"); }
+      return;
+    }
+    if (gone || J.t > (J.verb === "tail" ? TAIL_T : JOB_GIVEUP)) {
+      if (J.verb === "tail" && T && T.pos) J.seen = { x: T.pos.x, z: T.pos.z };
+      J.phase = "back"; J.t = 0; return;
+    }
+    const d = Math.hypot(T.pos.x - p.pos.x, T.pos.z - p.pos.z);
+    if (J.verb === "tail") {
+      // hang back: close to eight metres, hold there, keep him in sight
+      if (d > 8) walkTo(T.pos.x, T.pos.z, d > 18);
+      else { p.state = "idle"; p.speed = 0; if (p.target) p.target.set(p.pos.x, 0, p.pos.z); }
+      J.seen = { x: T.pos.x, z: T.pos.z };
+      return;
+    }
+    if (J.phase === "go") {
+      walkTo(T.pos.x, T.pos.z, d > 6);
+      if (d < 5 && !J.spoke) { J.spoke = true; sayT(p, J.verb === "rob" ? "crewDemand" : "crewThreat"); }
+      if (d < JOB_REACH) { J.phase = "act"; J.t2 = 0; jobAct(p, J); }
+      return;
+    }
+    // "act": the hands are working; then the mark gets to decide about running
+    p.state = "idle"; p.speed = 0; if (p.target) p.target.set(p.pos.x, 0, p.pos.z);
+    J.t2 += dt;
+    if (J.t2 > 1.7) {
+      if (CBZ.cityScare && T && !T.dead) { try { CBZ.cityScare(T, p, { bias: J.verb === "scare" ? 0.6 : 0.3 }); } catch (e) {} }
+      J.phase = "back"; J.t = 0;
+    }
+  }
+  // who you would send: your nearest free man (a companion on your payroll or
+  // in your colours), never the person you are pointing him at
+  CBZ.followerFor = function (target, maxD) {
+    const s = squad(maxD || 30);
+    let best = null, bd = Infinity;
+    for (let i = 0; i < s.length; i++) {
+      const q = s[i];
+      if (q.role !== "crew" || q.ped === target) continue;
+      const p = q.ped;
+      if (p._cbzJob || p._cbzSeat || p._cbzArc || p.restraint || p.hostage) continue;
+      const d = Math.hypot(p.pos.x - target.pos.x, p.pos.z - target.pos.z);
+      if (d < bd) { bd = d; best = p; }
+    }
+    return best;
+  };
+  CBZ.followerJob = function (p) { return (p && p._cbzJob) ? { verb: p._cbzJob.verb, phase: p._cbzJob.phase } : null; };
+
+  // ============================================================
   //  THE ORDER TICK — waiting, bag duty, no-seat cooldowns, and the
   //  self-healing that keeps a seat honest when its owner dies or the
   //  car does.
@@ -1793,7 +1955,10 @@
         }
         continue;
       }
-      if (p.dead) { p._cbzWait = null; p._cbzBag = null; continue; }
+      if (p.dead) { p._cbzWait = null; p._cbzBag = null; p._cbzJob = null; p._sicOn = null; continue; }
+
+      // --- A JOB ON SOMEBODY: rob / scare / tail / sic ------------------
+      if (p._cbzJob && !p._cbzArc) { runJob(p, p._cbzJob, dt, P); continue; }
 
       // --- WAIT HERE: a state, not a popup ------------------------------
       if (p._cbzWait && !p._cbzArc) {

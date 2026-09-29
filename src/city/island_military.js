@@ -1862,7 +1862,7 @@
           options: [
             {
               id: "armory-browse", slot: "e",
-              label: function () { return "Browse the armory"; },
+              label: function () { return "Browse"; },
               onSelect: function () {
                 // prefer a REAL shop if the engine exposes one
                 if (typeof CBZ.cityOpenShop === "function") { CBZ.cityOpenShop("guns", tok); return; }

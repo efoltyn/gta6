@@ -109,7 +109,7 @@
     if (gang && (gang._opBarkT || 0) > 0) return;
     if (!nearPlayer(m.pos.x, m.pos.z, 60)) return;
     if (gang) gang._opBarkT = 5 + rng() * 3;
-    CBZ.citySay(m, "“" + pick(lines) + "”", m.tagColor || "#ffb37b", 2.2);
+    CBZ.citySay(m, pick(lines), m.tagColor || "#ffb37b", 2.2);
   }
 
   // ---- turf POSTS: where a dealer stands / a beat is walked --------------

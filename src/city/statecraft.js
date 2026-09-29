@@ -1055,8 +1055,7 @@
           label: function () {
             const h = holds();
             if (!h) return "Command";
-            const reason = martialReason(h);
-            return reason ? "Order the garrison out (" + reason + ")" : "Ask the garrison for a briefing";
+            return martialReason(h) ? "Deploy" : "Consult";
           },
           onSelect: function () {
             const h = holds();

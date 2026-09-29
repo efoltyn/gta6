@@ -267,10 +267,8 @@
       options: [{
         id: "adboard-lease", slot: "e",
         label: function (b) {
-          if (!b) return "Rent the board";
-          return b.lease
-            ? "End the lease - " + money(b.lease.per) + "/wk"
-            : "Rent the board - " + money(priceOf(b)) + "/wk";
+          if (!b) return "Rent";
+          return b.lease ? "Cancel " + money(b.lease.per) : "Rent " + money(priceOf(b));
         },
         onSelect: function (b) { if (!b) return; if (b.lease) endLease(b, false); else rentBoard(b); },
       }],

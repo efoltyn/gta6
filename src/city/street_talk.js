@@ -127,24 +127,24 @@
       if (p.cash != null) p.cash = Math.max(0, (p.cash | 0) - got);
       p.wealth = Math.max(0, (p.wealth || 0.2) - 0.05);
       relShift(p, "intimidated", o.kind === "tribute" ? 1 : 0.4);
-      say(p, o.kind === "tribute" ? "“Take it, just go.”" : "“Here. Get back on your feet.”", "#cdeccd", 2.2);
+      say(p, o.kind === "tribute" ? "Take it. Just go." : "Here. Get back on your feet.", "#cdeccd", 2.2);
       if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(o.kind === "tribute" ? 2 : 1);
       sfx("coin");
     } else if (o.kind === "tax") {
       if (spend(o.amount)) {
         if (p.cash != null) p.cash = (p.cash | 0) + o.amount;
         relShift(p, "gift", 0.3);
-        say(p, "“Smart. Stay breathing.”", "#ffd1c4", 2.2);
+        say(p, "Smart.", "#ffd1c4", 2.2);
         sfx("coin");
       } else {
         relShift(p, "snubbed", 0.6);
-        say(p, "“Pathetic.”", "#ff8a7a", 2);
+        say(p, "Broke? Next time, then.", "#ff8a7a", 2);
       }
     } else if (o.kind === "charity") {
       if (spend(o.amount)) {
         if (p.cash != null) p.cash = (p.cash | 0) + o.amount;
         relShift(p, "gift", 1);
-        say(p, "“God bless. For real.”", "#cdeccd", 2.2);
+        say(p, "God bless. For real.", "#cdeccd", 2.2);
         if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(1);
         sfx("coin");
       }
@@ -155,15 +155,15 @@
         addCash(Math.floor(o.amount * 0.35)); sfx("coin");
       }
       relShift(p, "greeted", 0.5);
-      say(p, "“We never met.”", "#bfe0ff", 2);
+      say(p, "We never met.", "#bfe0ff", 2);
       if (CBZ.cityAddStars && Math.random() < 0.08) try { CBZ.cityAddStars(1, "street deal"); } catch (e) {}
     } else if (o.kind === "flex") {
       relShift(p, "greeted", 0.7);
       if (CBZ.city && CBZ.city.addRespect) CBZ.city.addRespect(1);
-      say(p, "“Call me if the markets ever love you again.”", "#ffe9a8", 2.4);
+      say(p, "Nice watch. Where'd you get it?", "#ffe9a8", 2.4);
     } else {
       relShift(p, "greeted", 0.5);
-      say(p, ["“Crazy city, huh.”", "“Stay dangerous.”", "“You look familiar.”"][(Math.random() * 3) | 0], "#dfe7ff", 2);
+      say(p, ["Crazy city, huh.", "Stay dangerous.", "You look familiar."][(Math.random() * 3) | 0], "#dfe7ff", 2);
     }
     p._streetOffer = null;
     p._streetDone = nowSec() + 2.5;

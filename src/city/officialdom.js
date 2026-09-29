@@ -313,21 +313,21 @@
     I.register("ped:civ", {
       id: "official-petition", slot: "j", prio: 48,
       canShow: function (p) { return !!seatOf(p); },
-      label: function (p) { const s = seatOf(p); return s ? "Petition the " + titleOf(s.rec, s.deputy) : "Petition"; },
+      label: "Petition",
       onSelect: function (p) { petition(p); },
     });
 
     I.register("ped:civ", {
       id: "official-grease", slot: "k", prio: 48,
       canShow: canGrease,
-      label: function (p) { const s = seatOf(p); return "Grease the wheels · " + fmt$(priceFor(s)); },
+      label: function (p) { return "Bribe " + fmt$(priceFor(seatOf(p))); },
       onSelect: function (p) { grease(p); },
     });
 
     I.register("ped:civ", {
       id: "official-endorse", slot: "k", prio: 52,   // outranks the envelope while you're running
       canShow: canEndorse,
-      label: "Ask for their endorsement",
+      label: "Win over",
       onSelect: function (p) { endorse(p); },
     });
 
@@ -339,7 +339,7 @@
       // a contract to have killed. Ransom is the row worth displacing.
       id: "official-lean", slot: "k", prio: 48, bad: true, needsGunDrawn: true,
       canShow: canLean,
-      label: function (p) { const s = seatOf(p); return s ? "Lean on the " + titleOf(s.rec, s.deputy) : "Lean on them"; },
+      label: "Lean on",
       onSelect: function (p) { lean(p); },
     });
   });

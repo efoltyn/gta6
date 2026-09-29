@@ -4792,10 +4792,8 @@
         label: function (t) {
           if (!t) return "";
           const v = t.v;
-          if (t.what === "key") return "Take " + (v.spec.key || "the key");
-          if (t.what === "rack") return "Take a gun";
-          if (t.what === "seal") return "Take the seal";
-          return v.key ? "Unlock strongroom" : "Locked strongroom";
+          if (t.what === "key" || t.what === "rack" || t.what === "seal") return "Take";
+          return v.key ? "Unlock" : "Try";
         },
         // deliberately NOT `bad`: that field is a static truthy in this registry
         // (interactions.js:363 subtracts 240 from the target score for it), so

@@ -14,6 +14,15 @@
    don't get a mission from a character you never met. The two-choice
    thing already exists PERFECTLY with hijacking or boarding a plane."
 
+   REVISED 2026-09-29 (owner: "far less text", "no menus", "defaults over
+   toggles"): the second choice was mostly a sentence that meant "no thanks"
+   ("Not my thing", "We've all got problems"), which is walking away written
+   out as a button. Now a conversation is their LINE plus ONE verb (Take,
+   Give $12, Listen, Chat), and a second verb only where there is a second
+   real thing to do (Refuse the toll, Push the man who told you to get lost,
+   Mouth off to a cop). Walking away is the decline, and it is remembered
+   (intent.leave). Every label is a verb; the player never speaks a sentence.
+
    So this file is the airliner BOARD/HIJACK card grammar, generalised to
    PEOPLE. Walk up, press Talk, and the card becomes a SCENE: the person
    turns to face you (peds.js's own _faceT stop-and-look — no new brain),
@@ -88,6 +97,7 @@
   function day() { return CBZ.paceDay ? CBZ.paceDay() : 0; }
   function money(n) { n = Math.round(n || 0); return n >= 1000 ? "$" + Math.round(n / 1000) + "k" : "$" + n; }
   function pick(a) { return a[(Math.random() * a.length) | 0]; }
+  function cap(s) { s = String(s || ""); return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
   function sayP(p, text, color, secs) { if (CBZ.citySay && p) CBZ.citySay(p, text, color || "#dfe7ff", secs == null ? 2.4 : secs); }
   function note(t, s, from) { if (CBZ.city && CBZ.city.note) CBZ.city.note(t, s || 2, from ? { from: from, app: "messages" } : undefined); }
   function relShift(p, kind, amt) { if (CBZ.cityRelShift) try { CBZ.cityRelShift(p, kind, amt); } catch (e) {} }
@@ -146,6 +156,23 @@
       if (ra) { ra.rotation.x = d(ra.rotation.x, -1.15, r, dt); ra.rotation.z = d(ra.rotation.z, -0.30 + flick, r, dt); }
       if (la) { la.rotation.x = d(la.rotation.x, -0.08, r, dt); la.rotation.z = d(la.rotation.z, 0.04, r, dt); }
       elbow(J.ra, -0.55, dt, r); elbow(J.la, -0.18, dt, r);
+    };
+    // the point: right arm straight out at shoulder height, where the body is
+    // turned (peds.js _faceAt aims the body; the arm just follows the chest)
+    if (!PS.dlgPoint) PS.dlgPoint = function (ch, dt) {
+      const J = ch.low || {}, r = 14;
+      const la = ch.parts && ch.parts.la, ra = ch.parts && ch.parts.ra;
+      if (ra) { ra.rotation.x = d(ra.rotation.x, -1.45, r, dt); ra.rotation.z = d(ra.rotation.z, -0.08, r, dt); }
+      if (la) { la.rotation.x = d(la.rotation.x, -0.05, r, dt); la.rotation.z = d(la.rotation.z, 0.04, r, dt); }
+      elbow(J.ra, -0.05, dt, r); elbow(J.la, -0.15, dt, r);
+    };
+    // the bow: both hands in front, a small dip (a busker's thanks)
+    if (!PS.dlgBow) PS.dlgBow = function (ch, dt) {
+      const J = ch.low || {}, r = 12;
+      const la = ch.parts && ch.parts.la, ra = ch.parts && ch.parts.ra;
+      if (ra) { ra.rotation.x = d(ra.rotation.x, -0.55, r, dt); ra.rotation.z = d(ra.rotation.z, 0.18, r, dt); }
+      if (la) { la.rotation.x = d(la.rotation.x, -0.55, r, dt); la.rotation.z = d(la.rotation.z, -0.18, r, dt); }
+      elbow(J.ra, -0.9, dt, r); elbow(J.la, -0.9, dt, r);
     };
     // the shrug — both arms flare, elbows deep ("…okay then"), played at the
     // player's back when they walk away mid-line
@@ -284,7 +311,7 @@
     const peds = CBZ.cityPeds || [];
     for (let i = 0; i < peds.length; i++) {
       const q = peds[i];
-      if (q && !q.dead && q.vipLvl) return { name: q.name || "somebody", live: q, what: "is real money" };
+      if (q && !q.dead && q.vipLvl) return { name: q.name || "somebody", live: q, what: "has real money" };
     }
     const lots = (CBZ.city && CBZ.city.arena && CBZ.city.arena.lots) || [];
     for (let i = 0; i < lots.length; i++) {
@@ -317,140 +344,131 @@
   }
 
   /* -------------------------------- the intents ---------------------------- */
-  // Each returns { id, line, a, b }. A choice: { label, closer?, bad?, mem?,
-  // poolId? (fire the existing option from rows._pass verbatim), run? (my own
-  // outcome), deferred? (run at the END of the seal beat — the handshake; a
-  // falsy result reverts, aircraft_doors' onFail rule), beat? }.
+  // Each returns { id, line, a, b?, leave? }.
+  //   a      the thing to DO (the one verb on the card). A choice: { label,
+  //          closer?, bad?, mem?, poolId? (fire the existing option from
+  //          rows._pass verbatim), run? (my own outcome), deferred? (run at the
+  //          END of the seal beat: the handshake; a falsy result reverts) }.
+  //   b      a SECOND real action, only when there is one (refuse the toll,
+  //          push a man who told you to get lost, mouth off to a cop). Never a
+  //          "no thanks" row: declining is walking away (owner doctrine, "NO
+  //          is not an option").
+  //   leave  what walking away means to THEM (a decline remembered, a snub),
+  //          run when you walk off or stand there saying nothing.
+  // Labels are verbs (the card is over their head, the person is the noun);
+  // lines are a few words a person would say.
 
   function intentJob(p, m, gv) {
     const r = gv.row;
-    const pay = r.pay > 0 ? money(r.pay) : "no pay, all name";
+    const pay = r.pay > 0 ? money(r.pay) : "nothing but a name";
     const line = m.declines > 0
-      ? "Still open. " + r.title + ", " + pay + "."
+      ? pick(["Still open. Pays " + pay + ".", "Offer's still there. " + pay + "."])
       : gv.org === "gang"
-        ? pick(["“Set's got work. " + r.title + ", " + pay + ". You in or out?”",
-                "I need somebody solid. " + r.title + ", " + pay + "."])
-        : pick(["Got something. " + r.title + ", " + pay + ".",
-                "We're short a man. " + r.title + ", " + pay + "."]);
+        ? pick(["Set's got work. Pays " + pay + ".", "Need somebody solid. " + pay + "."])
+        : pick(["Got something for you. " + pay + ".", "We're short a man. Pays " + pay + "."]);
     return {
       id: "job", line: line,
       a: {
-        label: pick(["I'm in", "Deal me in", "Say less"]),
-        closer: "Knew you would.",
+        label: "Take",
+        closer: pick(["Knew you would.", "Good. Don't be late.", "That's what I like."]),
         deferred: true,                    // the handshake: take at the beat's end
         run: function () {
           if (CBZ.cityOrders && CBZ.cityOrders.refresh) try { CBZ.cityOrders.refresh(); } catch (e) {}
           const started = (CBZ.mission && CBZ.mission.take) ? CBZ.mission.take(r.id) : null;
-          if (!started || started.inert) { sayP(p, "Hold up, it fell through. Another time.", "#cfd6e6"); return false; }
+          if (!started || started.inert) { sayP(p, "Hold up. It fell through.", "#cfd6e6"); return false; }
           routed++;
           contactAdd(p, "work", gv.org);
           return true;
         },
       },
-      b: {
-        label: pick(["Not my thing", "Pass", "Find someone else"]),
-        closer: "Your loss.",
-        mem: function () { m.declines++; m.lastDay = day(); relShift(p, "snubbed", 0.4); },
-      },
+      leave: function () { m.declines++; m.lastDay = day(); relShift(p, "snubbed", 0.4); },
     };
   }
 
   function intentTrade(p, m, row) {
     const j = jobKey(p);
     const LINES = {
-      doctor: "You look rough. Sit down, let me look at that.",
-      nurse: "That needs cleaning. Sit.",
-      paramedic: "Hey, you bleeding? Sit down a second.",
-      bartender: "Long day? I pour for long days.",
-      "line cook": "Kitchen's open. You hungry?",
-      "personal trainer": "You sit all day, huh? I can fix that.",
-      barber: "That lineup's a week past due, friend.",
-      farmer: "Picked this morning.",
-      fisherman: "Caught this morning.",
-      courier: "More runs than legs today. Want one?",
-      chauffeur: "Car's warm. Beats walking.",
+      doctor: ["You look rough. Let me see that.", "Sit down. That needs stitches."],
+      nurse: ["That needs cleaning. Sit.", "Hold still. This'll sting."],
+      paramedic: ["You bleeding? Sit down a second.", "Let me look at that."],
+      bartender: ["Long day? I pour for long days.", "What are you drinking?"],
+      "line cook": ["Kitchen's open. You hungry?", "Grill's hot. What do you want?"],
+      "personal trainer": ["You sit all day, huh? I can fix that.", "Drop and give me twenty."],
+      barber: ["That lineup's a week late.", "Sit. I'll clean you up."],
+      farmer: ["Picked this morning.", "Best tomatoes in the county."],
+      fisherman: ["Caught this morning.", "Still moving an hour ago."],
+      courier: ["More runs than legs today. Want one?", "Got a package going your way."],
+      chauffeur: ["Car's warm. Beats walking.", "Where to?"],
     };
-    const line = LINES[j] || "You need something?";
+    const line = LINES[j] ? pick(LINES[j]) : "You need something?";
     return {
       id: "trade", line: line,
-      a: { poolId: "rv-role", closer: "Smart.", fallback: { label: "Alright", run: function () { meet(p); relShift(p, "greeted", 0.4); } } },
-      b: {
-        label: pick(["Just passing through", "Maybe later"]),
-        closer: "Suit yourself.",
-        mem: function () { relShift(p, "greeted", 0.15); },
-      },
+      a: { poolId: "rv-role", closer: pick(["Smart.", "Good choice.", "There you go."]), fallback: { label: "Chat", run: function () { meet(p); relShift(p, "greeted", 0.4); } } },
+      leave: function () { relShift(p, "greeted", 0.1); },
     };
   }
 
   function intentScore(p, m) {
     return {
       id: "score",
-      line: pick(["You looking? I got you.", "Walk with me. You need something, I'm holding."]),
-      a: { poolId: "rv-score", bad: true, fallback: { label: "Show me", run: function () { sayP(p, "Not here. Come back.", "#cfd6e6"); } } },
-      b: {
-        label: pick(["I'm good", "Not tonight"]),
-        closer: "Then keep it moving.",
-        mem: function () { relShift(p, "snubbed", 0.2); },
-      },
+      line: pick(["You looking? I got you.", "Walk with me. I'm holding.", "First one's cheap."]),
+      a: { poolId: "rv-score", bad: true, fallback: { label: "Buy", run: function () { sayP(p, "Not here. Come back later.", "#cfd6e6"); } } },
+      leave: function () { relShift(p, "snubbed", 0.2); },
     };
   }
 
   function intentStreet(p, m, o) {
     const LINE = {
-      tribute: "Whoa, easy. Take it. We're square, right?",
-      tax: "Toll's a toll. Everybody pays on this block.",
-      handout: "You look rough. Here.",
-      charity: "Spare something? Anything helps out here.",
+      tribute: ["Easy. Take it. We're square?", "Here. Just leave me alone."],
+      tax: ["Everybody pays on this block.", "Toll's a toll. Pay up."],
+      handout: ["You look rough. Here.", "Take this. Get something to eat."],
+      charity: ["Spare something? Anything helps.", "Just a couple bucks?"],
     };
-    const b = (o.kind === "tax")
-      ? {
-          label: "I'm not paying", bad: true,
-          closer: "Remember that.",
-          mem: function () {
-            relShift(p, "snubbed", 1);
-            // refusing the toll can go physical — if THEY dare (sizeup, not a coin flip)
-            const pa = playerActor();
-            if (CBZ.citySizeUp && pa && CBZ.citySizeUp(p, pa) && Math.random() < 0.35) {
-              p.rage = pa; p.state = "fight"; p.fear = 0;
-              sayP(p, "Wrong answer.", "#ff8a7a");
-            }
-          },
-        }
-      : (o.kind === "tribute")
-        ? { label: "Keep your money", closer: "…thanks? Okay.", mem: function () { relShift(p, "greeted", 0.3); } }
-        : (o.kind === "handout")
-          ? { label: "Keep it", closer: "Respect.", mem: function () { relShift(p, "greeted", 0.5); } }
-          : { label: "Not today", closer: "…yeah. Every day's not today.", mem: function () { const mm = mem(p); mm.declines++; relShift(p, "snubbed", 0.15); } };
+    let b = null;
+    if (o.kind === "tax") {
+      b = {
+        label: "Refuse", bad: true,
+        closer: "Remember that.",
+        mem: function () {
+          relShift(p, "snubbed", 1);
+          // refusing the toll can go physical, if THEY dare (sizeup, not a coin flip)
+          const pa = playerActor();
+          if (CBZ.citySizeUp && pa && CBZ.citySizeUp(p, pa) && Math.random() < 0.35) {
+            p.rage = pa; p.state = "fight"; p.fear = 0;
+            sayP(p, "Wrong answer.", "#ff8a7a");
+          }
+        },
+      };
+    } else if (o.kind === "tribute") {
+      b = { label: "Refuse", closer: "Thanks? Okay.", mem: function () { relShift(p, "greeted", 0.3); } };
+    }
     return {
-      id: "street", line: LINE[o.kind] || "Got a second?",
-      a: { poolId: "street-offer", fallback: { label: "Alright", run: function () { meet(p); relShift(p, "greeted", 0.3); } } },
+      id: "street", line: pick(LINE[o.kind] || ["Got a second?"]),
+      a: { poolId: "street-offer", fallback: { label: "Chat", run: function () { meet(p); relShift(p, "greeted", 0.3); } } },
       b: b,
+      leave: o.kind === "charity" ? function () { m.declines++; relShift(p, "snubbed", 0.15); } : null,
     };
   }
 
   function intentFavor(p, m) {
     const ASK = 8 + ((pedHash(p, 0xFA) * 10) | 0);
     const line = m.helped > 0
-      ? "You again. Anything spare?"
-      : pick(["Brother, anything helps.", "Haven't eaten since yesterday. Anything spare?"]);
+      ? pick(["You again. Anything spare?", "Hey, it's you. Got a dollar?"])
+      : pick(["Brother, anything helps.", "Haven't eaten since yesterday.", "Spare a couple bucks?"]);
     return {
       id: "favor", line: line,
       a: {
-        label: "Here you go " + money(ASK),
-        closer: "God bless. For real.",
+        label: "Give " + money(ASK),
+        closer: pick(["God bless. For real.", "You're a real one.", "I'm eating tonight."]),
         run: function () {
-          if (!spend(ASK)) { sayP(p, "…you're broke too, huh. City's eating everybody.", "#cfd6e6"); return; }
+          if (!spend(ASK)) { sayP(p, "You're broke too, huh?", "#cfd6e6"); return; }
           if (p.cash != null) p.cash = (p.cash | 0) + ASK;
           m.helped++; relShift(p, "gift", 1); addRespect(1);
           if (CBZ.sfx) CBZ.sfx("coin");
           maybeBefriend(p, m);
         },
       },
-      b: {
-        label: pick(["Not today", "Can't help you"]),
-        closer: "…yeah. Heard that one.",
-        mem: function () { m.declines++; relShift(p, "snubbed", 0.15); },
-      },
+      leave: function () { m.declines++; relShift(p, "snubbed", 0.15); },
     };
   }
 
@@ -462,21 +480,21 @@
     const at = (t.live && t.live.pos) ? t.live.pos : t.at;
     if (!at || !p || !p.pos) return "";
     const dx = at.x - p.pos.x, dz = at.z - p.pos.z, d = Math.hypot(dx, dz);
-    if (d < 25) return " Around here somewhere.";
+    if (d < 25) return " Right around here.";
     const ns = dz < 0 ? "north" : "south", ew = dx < 0 ? "west" : "east";
     const dir = Math.abs(dx) > Math.abs(dz) * 1.6 ? ew : Math.abs(dz) > Math.abs(dx) * 1.6 ? ns : ns + ew;
-    return d > 400 ? " Other side of town, " + dir + "." : " Up " + dir + " a ways.";
+    return d > 400 ? " Other side of town." : " Up " + dir + ".";
   }
   function intentIntro(p, m, t) {
     return {
       id: "intro",
-      line: "I know a guy, " + t.what + ".",
+      line: pick(["I know a guy. " + cap(t.what) + ".", "You should meet somebody."]),
       a: {
-        label: "Who?",
-        closer: "\u201cAsk for " + t.name + "." + roughlyWhere(p, t) + " You didn't hear it from me.\u201d",
+        label: "Ask",
+        closer: (t.live ? "Ask for " : "Try ") + t.name + "." + roughlyWhere(p, t),
         run: function () { meet(p); relShift(p, "greeted", 0.6); },
       },
-      b: { label: "Not looking", closer: "Everybody's looking for somebody.", mem: function () { relShift(p, "snubbed", 0.2); } },
+      leave: function () { relShift(p, "snubbed", 0.1); },
     };
   }
 
@@ -484,69 +502,63 @@
     const l = p._jobLot;
     const where = (l && l.building && l.building.name) ? l.building.name : null;
     const line = where
-      ? pick(["Twelve hours at " + where + ". My feet are done.",
-              where + " again tomorrow. Same shift, same pay."])
-      : "My boss docked me again. For nothing.";
+      ? pick(["Twelve hours at " + where + ". My feet.", where + " again tomorrow. Same pay."])
+      : pick(["My boss docked me again. For nothing.", "Double shift. Again.", "They cut my hours."]);
     return {
       id: "gripe", line: line,
       a: {
-        label: pick(["That's rough", "You've earned a break"]),
-        closer: "…thanks for hearing it. Most don't.",
+        label: "Listen",
+        closer: pick(["Thanks for hearing it. Most don't.", "Sorry. Needed to say it.", "Anyway. You're alright."]),
         run: function () { meet(p); relShift(p, "greeted", 0.9); m.warm++; maybeBefriend(p, m); },
       },
-      b: {
-        label: pick(["We've all got problems", "Tell your boss, not me"]),
-        closer: "Forget I said anything.",
-        mem: function () { relShift(p, "snubbed", 0.5); },
-      },
+      leave: function () { relShift(p, "snubbed", 0.3); },
     };
   }
 
   function intentSocial(p, m) {
     const att = CBZ.cityAttending ? CBZ.cityAttending(p) : null;   // {what, venue} or null
     const line = m.friend
-      ? pick(["There you are. Still causing trouble?", "My guy. What's the word?"])
+      ? pick(["There you are. Still causing trouble?", "My guy. What's the word?", "You eat yet?"])
       : (att && att.what)
-        ? "“You out for " + att.what + " too? Whole block is.”"
-        : pick(["Don't know you. That's rare on this block.",
-                "Crazy city lately, huh. You holding up?",
-                "My kid starts school Monday. Can you believe it?"]);
+        ? "You here for " + att.what + " too?"
+        : pick(["Don't know you. That's rare around here.",
+                "Crazy city lately, huh?",
+                "My kid starts school Monday. Can you believe it?",
+                "You from around here?"]);
     return {
       id: "social", line: line,
       a: {
-        label: m.friend ? "Good to see you" : pick(["What's the word?", "Good to meet you"]),
-        closer: null,   // maybeBefriend / warmCloser speaks
+        label: "Chat",
+        closer: null,   // maybeBefriend / the warm closer speaks
         run: function () {
           meet(p); relShift(p, "greeted", 0.6); m.warm++;
-          if (!maybeBefriend(p, m)) sayP(p, pick(["Stay dangerous.", "You're alright.", "See you around, yeah?"]), "#cdeccd");
+          if (!maybeBefriend(p, m)) sayP(p, pick(["Stay dangerous.", "You're alright.", "See you around."]), "#cdeccd");
         },
       },
-      b: {
-        label: pick(["We're done here", "Walk on"]),
-        closer: "Whatever, man.",
-        mem: function () { relShift(p, "snubbed", 0.3); },
-      },
+      leave: function () { relShift(p, "snubbed", 0.2); },
     };
   }
 
   function intentBrushoff(p, m) {
     return {
-      id: "brushoff", line: pick(["The hell you want?", "Keep stepping."]),
-      a: { label: pick(["Easy, wrong guy", "My mistake"]), closer: "Then move.", mem: function () { relShift(p, "greeted", 0.1); } },
+      id: "brushoff", line: pick(["The hell you want?", "Keep stepping.", "Do I know you?"]),
+      a: { label: "Back off", closer: "Then move.", mem: function () { relShift(p, "greeted", 0.1); } },
       b: {
-        label: "Make it my problem", bad: true,
+        label: "Push", bad: true,
         closer: null,
         mem: function () {
           const pa = playerActor();
           relShift(p, "threatened", 0.8);
+          // the push is a real shove through the one hands library
+          if (CBZ.verbs && CBZ.verbs.start && pa) { try { CBZ.verbs.start("shove", pa, p); } catch (e) {} }
           // do they DARE? The read is sizeup's, not a die.
           if (CBZ.citySizeUp && pa && !CBZ.citySizeUp(p, pa)) {
             if (CBZ.cityScare) CBZ.cityScare(p, pa, { bias: 0.1 });
             addRespect(1);
-            sayP(p, "…forget it. Forget it!", "#cfd6e6");
+            sayP(p, "Forget it. Forget it!", "#cfd6e6");
           } else if (pa) {
             p.rage = pa; p.state = "fight"; p.fear = 0;
-            sayP(p, "BIG mistake.", "#ff8a7a");
+            sayP(p, "Big mistake.", "#ff8a7a");
           }
         },
       },
@@ -554,19 +566,17 @@
   }
 
   function intentCop(c, m) {
-    const line = pick(["Keep it moving.",
-                       "Evening. You live around here?",
-                       "Quiet night. Let's keep it that way."]);
+    const line = (CBZ.cityLine && CBZ.cityLine(c, "copTalk")) || "Keep it moving.";
     return {
       id: "cop", line: line,
       a: {
-        label: pick(["You got it, officer", "Just heading home"]),
-        closer: "Good answer.",
+        label: "Nod",
+        closer: pick(["Good.", "Have a good one.", "Stay out of trouble."]),
         run: function () { meet(c); relShift(c, "greeted", 0.5); },
       },
       b: {
-        label: pick(["Don't you have real crimes?", "Quiet for who?"]),
-        closer: "Keep walking, smart guy.",
+        label: "Mouth off",
+        closer: pick(["Keep walking, smart guy.", "Real funny.", "I'll remember that face."]),
         mem: function () { relShift(c, "snubbed", 0.8); addRespect(1); c._faceT = 2.0; },
       },
     };
@@ -603,7 +613,7 @@
     if (dlg) endDialogue("replaced", true);
     const it = castIntent(p);
     dlg = {
-      p: p, intent: it.id, line: it.line, a: it.a, b: it.b,
+      p: p, intent: it.id, line: it.line, a: it.a, b: it.b || null, leave: it.leave || null,
       t: 0, lostT: 0, holdT: 12 + Math.random() * 5,
       phase: "open", beat: null,
       openHp: p.hp != null ? p.hp : null,
@@ -622,13 +632,17 @@
     if (!dlg) return;
     const p = dlg.p, prev = dlg.prevPose;
     const m = mem(p);
+    const d0 = dlg;
     dlg = null;
     unPose(p, prev);
     p._dlgCD = nowSec() + (why === "answered" ? 20 : 32) + Math.random() * 16;
+    // walking off (or standing there mute) IS the decline: what it means to
+    // them lands here, never as a "no" button
+    if ((why === "walkaway" || why === "ignored") && d0 && d0.leave) { try { d0.leave(); } catch (e) {} }
     if (!silent) {
       if (why === "walkaway") { tailBeat(p, "dlgShrug", 0.8 + Math.random() * 0.3); }
       else if (why === "ignored") {
-        sayP(p, pick(["…forget it, then.", "Right. Good talk.", "Hello? Unbelievable."]), "#cfd6e6");
+        sayP(p, pick(["Forget it, then.", "Right. Good talk.", "Hello? Wow."]), "#cfd6e6");
         tailBeat(p, "dlgShrug", 0.9);
         p._dlgCD = nowSec() + 60;
       } else if (why === "violence") {
@@ -642,6 +656,7 @@
   function choose(which) {
     if (!dlg || dlg.phase !== "open") return;
     const c = which === "a" ? dlg.a : dlg.b;
+    if (!c) return;
     dlg.phase = "beat";
     dlg.beat = {
       kind: which === "a" ? "dlgSeal" : "dlgWave",
@@ -682,7 +697,7 @@
       if (l) return String(l).replace(/[?.!]+$/, "");
     }
     if (c.poolId && c.fallback) return c.fallback.label;
-    return c.label || "Alright";
+    return c.label || "Chat";
   }
   function provideRows(pk, rows, ctx) {
     if (!on() || !dlg) return null;
@@ -701,11 +716,12 @@
       dlg.wrapA = { id: "dlg-a:" + (dlg.a.poolId || dlg.intent), onSelect: function () { choose("a"); } };
       dlg.wrapB = { id: "dlg-b:" + dlg.intent, onSelect: function () { choose("b"); } };
     }
-    const la = choiceLabel(dlg.a, pk.t, ctx), lb = dlg.b.label || "Not now";
+    const la = choiceLabel(dlg.a, pk.t, ctx);
     const out = [
       { key: "e", hold: false, label: la, bad: !!(dlg.a.bad || (dlg.aPool && dlg.aPool.bad)), opt: dlg.wrapA, decision: "yes", proposal: la, standing: null },
-      { key: "i", hold: false, label: lb, bad: !!dlg.b.bad, opt: dlg.wrapB, decision: "yes", proposal: lb, standing: null },
     ];
+    // a second verb only when there is a second real thing to do
+    if (dlg.b && dlg.b.label) out.push({ key: "i", hold: false, label: dlg.b.label, bad: !!dlg.b.bad, opt: dlg.wrapB, decision: "yes", proposal: dlg.b.label, standing: null });
     out.dualRide = true;          // verb-card render + the E-router yield
     // The spoken line lives over the speaker's head (citySay at openDialogue);
     // the card carries only the two answers.
@@ -872,8 +888,8 @@
       lastPingReal = nowSec(); pingsToday++; pinged++;
       const call = CBZ.hash01(rec.x, rec.z, 0xCA12 + dNow) < 0.3;
       const text = pend.kind === "job"
-        ? (call ? "Tried to call you. " : "") + "Got another one if you want it: " + pend.title.toLowerCase() + ", pays " + money(pend.pay) + ". Check your contacts."
-        : (call ? "Rang you twice. " : "") + "Been a minute. Meet me at " + pend.place + "? First round's mine.";
+        ? (call ? "Tried to call you. " : "") + "Got another one. Pays " + money(pend.pay) + ". You in?"
+        : (call ? "Rang you twice. " : "") + "Been a minute. " + pend.place + "? First round's mine.";
       phonePush(rec.name.toUpperCase(), text);
       return;                                 // one ping per pass, ever
     }
@@ -893,10 +909,10 @@
       return true;
     }
     if (pend.kind === "job") {
-      if (CBZ.mission && CBZ.mission.busy && CBZ.mission.busy()) { note("Finish what you're carrying first.", 2.2, rec.name.toUpperCase()); return false; }
+      if (CBZ.mission && CBZ.mission.busy && CBZ.mission.busy()) { note("Finish what you got first.", 2.2, rec.name.toUpperCase()); return false; }
       if (CBZ.cityOrders && CBZ.cityOrders.refresh) try { CBZ.cityOrders.refresh(); } catch (e) {}
       const started = (CBZ.mission && CBZ.mission.take) ? CBZ.mission.take(pend.id) : null;
-      if (!started || started.inert) { note("It fell through. I'll call you again.", 2.2, rec.name.toUpperCase()); return false; }
+      if (!started || started.inert) { note("It fell through. I'll call you.", 2.2, rec.name.toUpperCase()); return false; }
       routed++;
       return true;
     }
@@ -906,7 +922,7 @@
         goal: "reach", at: [pend.x, pend.z], radius: 8,
         reward: { respect: 2 },
         brief: "Meet " + rec.name + " at " + pend.place + ".",
-        doneText: rec.name + " buys the round. Friends are worth keeping.",
+        doneText: "Round's on me.",
         onComplete: function () { const p = contactPed(rec); if (p) relShift(p, "gift", 0.8); },
       });
       return true;
@@ -918,6 +934,9 @@
   CBZ.cityDialogue = {
     open: openDialogue,
     active: function () { return dlg ? dlg.p : null; },
+    // a held gesture for anybody (the point, the bow, the shrug): restores the
+    // prior pose when done; refuses a body something else is holding
+    beat: function (p, pose, dur) { tailBeat(p, pose, dur); },
     intentOf: function (p) { return p ? castIntent(p).id : null; },   // probe surface
     contacts: contacts,
     phoneAnswer: phoneAnswer,

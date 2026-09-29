@@ -1959,7 +1959,7 @@
       },
       options: [{
         id: "motorcade-ride", slot: "e", ride: true, campaignSafe: true,
-        label: function () { return "Get in the car"; },
+        label: "Get in",
         canShow: function () { return playerPresident() && !BOARD && !!stateCar(); },
         onSelect: function () { askWhere(); },
       }],

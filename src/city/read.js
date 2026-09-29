@@ -144,6 +144,12 @@
     const out = { key: "civilian", title: "", level: myLvl() };
     try { out.title = CBZ.cityPlayerTitle ? CBZ.cityPlayerTitle() : ""; } catch (e) {}
     if (g && g.role === "cop") { out.key = "cop"; return out; }
+    // THE OFFICE OUTRANKS THE STREET. A sitting president is recognised by
+    // everybody; a read of presidency.js, never a second flag.
+    try {
+      const P = CBZ.presidency, st = P && P.status ? P.status() : null;
+      if (st && st.seat) { out.key = "president"; return out; }
+    } catch (e) {}
     // your own set beats borrowed colours beats a paid career.
     const F = CBZ.factions;
     let memb = null;
@@ -177,11 +183,40 @@
     const n = ((p && p._sid) || 1) * 2654435761 + salt;
     return ((n >>> 8) & 0xffff) / 65536;
   }
+  // NOBODY REPEATS HIMSELF, AND NOBODY REPEATS THE MAN NEXT TO HIM (owner,
+  // 2026-09-29: "tremendous variety"). The start of the walk through a pool is
+  // still hashed off the person and the relationship (who he is and how he
+  // feels about you picks his FIRST line), then:
+  //   - every time he answers the same topic he moves one line on, so asking
+  //     twice gets a second sentence, not a parrot;
+  //   - a line anyone said inside the last minute is skipped, so a crowd of
+  //     five does not say "Watch it." five times.
+  const RECENT = [];                       // [{s, t}] newest last, a short ring
+  const RECENT_MS = 60000, RECENT_MAX = 32;
+  function nowMs() { return typeof CBZ.now === "number" ? CBZ.now : Date.now(); }
+  function recentlySaid(s) {
+    const t = nowMs();
+    for (let i = RECENT.length - 1; i >= 0; i--) if (RECENT[i].s === s && t - RECENT[i].t < RECENT_MS) return true;
+    return false;
+  }
+  function remember(s) {
+    RECENT.push({ s: s, t: nowMs() });
+    if (RECENT.length > RECENT_MAX) RECENT.shift();
+  }
   function pick(p, rd, topic, pool) {
     if (!pool || !pool.length) return null;
     const salt = 0x51ED + topic.length * 131 + (rd.gap + 2) * 17 + (STAND_IX[rd.standing] || 0) * 7;
-    const i = (pedHash(p, salt) * pool.length) | 0;
-    return pool[i < 0 ? 0 : i >= pool.length ? pool.length - 1 : i];
+    let i = (pedHash(p, salt) * pool.length) | 0;
+    if (i < 0 || i >= pool.length) i = 0;
+    let n = 0;
+    if (p) { const said = p._saidN || (p._saidN = {}); n = said[topic] | 0; said[topic] = n + 1; }
+    for (let k = 0; k < pool.length; k++) {
+      const s = pool[(i + n + k) % pool.length];
+      if (!recentlySaid(s)) { remember(s); return s; }
+    }
+    const s = pool[(i + n) % pool.length];
+    remember(s);
+    return s;
   }
 
   // ============================================================
@@ -230,37 +265,38 @@
   const CONTACT = {
     cop:      { "*": ["Keep it moving.", "Watch yourself."],
                 cop: ["Careful, partner.", "Eyes up."],
-                boss: ["…I know who you are. Keep walking.", "Not today. Just go."],
+                boss: ["I know who you are. Keep walking.", "Not today. Just go."],
                 hitman: ["I've got my eye on you.", "One of these days."] },
     security: { "*": ["Careful.", "Watch the space."],
                 boss: ["Sorry, sorry, sir.", "Didn't see you."] },
     // LEVEL INSIDE THE CELL: the same set, two different men. You tower over
     // the corner kid (+2) and he folds; the lieutenant who outreads you (−2)
     // does not care what you think you are.
-    gang:     { "*": { "2": ["…my fault. My fault.", "Didn't see you, sorry."],
+    gang:     { "*": { "2": ["My fault. My fault.", "Didn't see you, sorry."],
                        "0": ["Wrong block to be clumsy on.", "Watch it."],
                        "-2": ["You just put hands on the wrong man.", "Do you know whose block this is?"] },
                 crew: ["Easy, we're family.", "Careful, family."],
                 boss: ["My fault, boss.", "Sorry, didn't see you."],
-                cop: { "1": ["…nothing. Wasn't nothing.", "Keep walking, officer."],
+                cop: { "1": ["Nothing. Wasn't nothing.", "Keep walking, officer."],
                        "-1": ["You're a long way from backup, officer.", "Badge don't mean much here."] },
-                hitman: ["…my bad. My bad.", "Didn't mean nothing by it."] },
+                hitman: ["My bad. My bad.", "Didn't mean nothing by it."] },
     dealer:   { "*": ["Hey, careful, I'm holding.", "Watch it, man."],
                 cop: ["Whoa. I'm just standing here.", "I ain't doing nothing."],
                 hitman: ["Easy! Easy. We're good.", "No trouble here."] },
     vendor:   { "*": ["Mind the stall!", "Careful, that's my stock."],
                 boss: ["Sorry! Sorry, take your time."] },
-    bum:      { "*": ["Hey, hey, easy…", "Sorry, sorry…", "I'm moving, I'm moving."],
+    bum:      { "*": ["Hey, hey, easy.", "Sorry, sorry.", "I'm moving, I'm moving."],
                 cop: ["I'm going, officer, I'm going.", "Don't. I'm leaving."] },
     kid:      { "*": ["Hey!", "Ow!", "Watch it!"],
                 cop: ["I didn't do anything!", "It wasn't me!"] },
     tourist:  { "*": ["Oh, excuse me!", "Sorry! Sorry."] },
-    addict:   { "*": ["Whoa, hey.", "…easy, easy."] },
+    addict:   { "*": ["Whoa, hey.", "Easy, easy."] },
     worker:   { "*": ["Hey, I'm working here.", "Watch it, please."],
                 boss: ["Sorry, didn't see you there."] },
-    "*":      { cop:    ["Sorry, officer.", "Excuse me, officer."],
+    "*":      { president: ["Sorry, sir. Sorry.", "Oh my God. Sorry."],
+                cop:    ["Sorry, officer.", "Excuse me, officer."],
                 boss:   ["Sorry, didn't see you.", "My fault. My fault."],
-                hitman: ["…sorry. Sorry.", "Excuse me."] },
+                hitman: ["Sorry. Sorry.", "Excuse me."] },
   };
   const CONTACT_GAP = {
     "2":  ["Sorry, sorry, my fault.", "My bad, my bad.", "Didn't see you, sorry."],
@@ -286,12 +322,12 @@
   // --- TRADE: what they pitch, and whether they dare. ---------------------
   const TRADE = {
     dealer: { "*":      ["You buying?", "You look like you need something."],
-              hitman:   ["You do work, right? I'll pay double for a problem.", "I need somebody gone. Name a price."],
+              hitman:   ["You do work, right? I got a problem.", "I need somebody gone. Name a price."],
               boss:     ["Your cut's ready whenever you want it, boss.", "I move on your say-so."],
               crew:     ["Tell your people I'm good for the tax.", "You're family. I'll do you a price."],
-              cop:      ["…just talking. Nothing going on here.", "I got nothing on me."] },
+              cop:      ["Just talking. Nothing going on.", "I got nothing on me."] },
     gang:   { "*":      ["You lost?", "What you want?", "Who sent you?"],
-              hitman:   ["We could use somebody like you. Interested in work?", "There's a name we need gone. You listening?"],
+              hitman:   ["We could use somebody like you.", "There's a name we need gone."],
               boss:     ["Whatever you need, boss.", "We're yours. Say the word."],
               crew:     ["Family. What do you need?", "You good? We got you."],
               cop:      ["We're just standing here.", "Move along, officer."] },
@@ -302,7 +338,8 @@
               boss:     ["Big man, spare something for me?", "You look like you can spare it."] },
     worker: { "*":      ["You need something?", "I'm on shift, but go ahead."],
               hitman:   ["I. I don't want any trouble.", "Please, I just work here."] },
-    "*":    { hitman:   ["Word is you handle problems. I've got one.", "They say you do work. I'm paying."],
+    "*":    { president: ["Can you fix the potholes?", "I voted for you. Mostly."],
+              hitman:   ["Word is you handle problems.", "They say you do work. I'm paying."],
               boss:     ["I'll pay tribute, just say the word.", "Your block, your rules."],
               crew:     ["You ride with them, right?", "Tell your people I said hi."],
               cop:      ["I didn't do anything, officer.", "We're good here, right?"] },
@@ -317,23 +354,286 @@
 
   // --- GREET ---------------------------------------------------------------
   const GREET = {
-    cop:    { "*": ["Afternoon.", "Move along now."], cop: ["Partner."], boss: ["…we know each other, don't we."] },
-    gang:   { crew: ["Family.", "There he is."], boss: ["Boss."], cop: ["…officer."] },
+    cop:    { "*": ["Afternoon.", "Move along now."], cop: ["Partner."], boss: ["We know each other, don't we."] },
+    gang:   { crew: ["Family.", "There you are."], boss: ["Boss."], cop: ["Officer."] },
     dealer: { hitman: ["The man himself.", "You working today?"], boss: ["Boss."] },
     bum:    { "*": ["Spare anything?", "God bless."] },
-    "*":    { boss: ["Boss.", "Sir."], cop: ["Officer."] },
+    "*":    { boss: ["Boss.", "Sir."], cop: ["Officer."], president: ["Mr. President.", "Is that really you?"] },
   };
   const GREET_STANDING = {
     friend:  ["There they are!", "My friend!", "Good to see you."],
     solid:   ["Respect.", "'Sup.", "Good to see you out here."],
     known:   ["Hey.", "You again.", "Alright.", "Still around, huh?"],
-    sour:    ["…you.", "Great. You."],
+    sour:    ["Oh. You.", "Great. You."],
     enemy:   ["You've got nerve showing up.", "I see you."],
     stranger:["Hey.", "Alright.", "How you doing?"],
   };
 
   const TABLES = { contact: CONTACT, trade: TRADE, greet: GREET };
   const GAPS = { contact: CONTACT_GAP, trade: TRADE_GAP, greet: null };
+
+  // ============================================================
+  //  5b. THE BOOK. Every other thing a person on the street says.
+  //
+  //  OWNER (2026-09-27): dialogue was "AI slop". Far less text, real short
+  //  lines people actually say, over the speaker's head, never a narrator.
+  //  (2026-09-29): "tremendous variety of interaction in Gang City".
+  //
+  //  So every line in the city lives HERE, keyed by what just happened
+  //  (the topic), and inside a topic by the situation, most personal first:
+  //
+  //      robbed      you robbed / beat / extorted THIS person lately
+  //      hurtFriend  you did it to somebody they love (social.js ripple)
+  //      armed       your gun is out
+  //      wanted      the police are after you
+  //      me.<role>   what you are: cop / president / boss / crew / hitman
+  //      stand.<s>   how they feel: friend / solid / sour / enemy
+  //      them.<role> what they are: vendor / gang / dealer / bum / kid ...
+  //      rain, night the weather and the hour
+  //      base        anybody, any time
+  //
+  //  The first situation that has lines wins. Rules for writing a line here:
+  //  under 56 characters (speech.js drops the rest), a thing a person would
+  //  actually say out loud, no narration, no game words, no em dashes.
+  //  {title} {place} {dir} {item} {price} are filled by the caller.
+  // ============================================================
+  const BOOK = {
+    // you walked up and spoke to them; their answer
+    talk: {
+      robbed: ["You've got some nerve.", "Get away from me.", "You already took my money.", "Don't. Just don't."],
+      hurtFriend: ["I know what you did to my friend.", "Stay away from my people.", "You're the one. I heard."],
+      armed: ["Whoa. Put that away first.", "Not with that thing out.", "Easy. I don't want trouble."],
+      wanted: ["Cops are looking for you.", "You're all over the news.", "Don't stand next to me."],
+      me: {
+        cop: ["Officer.", "Did I do something?", "I'm just waiting on somebody."],
+        president: ["Can I get a picture?", "You're shorter in person.", "My mom loves you. I don't."],
+        boss: ["Whatever you need.", "Didn't see you there."],
+        hitman: ["I don't want any problems.", "Whatever it is, it wasn't me."],
+      },
+      stand: {
+        friend: ["What's good?", "There you are.", "Long time. You eat yet?"],
+        solid: ["What's up.", "Good to see you."],
+        sour: ["What do you want now?", "Make it fast."],
+        enemy: ["Walk away.", "You got a death wish?"],
+      },
+      them: {
+        vendor: ["What can I get you?", "Cash only.", "You buying or browsing?"],
+        bum: ["Spare a dollar?", "Got anything to eat?", "God bless, man."],
+        kid: ["My mom says don't talk to strangers.", "Are you famous?", "I'm not supposed to be out here."],
+        tourist: ["Is the beach this way?", "Where's good to eat around here?", "Can you take our picture?"],
+        dealer: ["You buying or just talking?", "Talk costs, man."],
+        gang: ["You lost?", "Who you with?", "This ain't your block."],
+        worker: ["I'm on the clock.", "Make it quick, I'm working."],
+        addict: ["You got a couple bucks?", "You holding?"],
+        security: ["Keep it moving.", "Help you with something?"],
+        cop: ["Move along.", "Help you?", "Something you need?"],
+      },
+      rain: ["Can't believe this rain.", "I'm soaked through.", "Should've brought an umbrella."],
+      night: ["Kind of late to be out.", "Can't sleep either?", "Streets get weird this late."],
+      base: ["Hey.", "Can I help you?", "Do I know you?", "What's going on?", "Crazy out here lately.",
+        "You new around here?", "Yeah?", "Nice day for it.", "Busy day. What's up?"],
+    },
+    // they walked up to YOU with nothing to sell
+    approach: {
+      wanted: ["You're the one from the news.", "Everybody's looking for you."],
+      me: { president: ["Mr. President! Hey!", "Wait, are you who I think?"], cop: ["Officer, somebody broke my car window."] },
+      rain: ["You got an umbrella I can borrow?", "This rain, man."],
+      night: ["You got a light?", "Hey. You know a place still open?"],
+      base: ["You see what happened over there?", "Spare a few bucks?", "You got a light?",
+        "You know what time it is?", "My landlord's a crook, man.", "You drop something?",
+        "You know where the bus stops?"],
+    },
+    // they want to work for you
+    askWork: {
+      base: ["You hiring?", "Put me on. I need the work.", "I got a kid coming. I need money.",
+        "I can drive. I can keep quiet.", "I'll do anything. Almost."],
+    },
+    // a dealer sidles up
+    pitch: {
+      me: { cop: ["Nothing. I'm just standing here."] },
+      base: ["You good? You need something?", "I got what you need.", "Psst. You looking?", "First one's cheap."],
+    },
+    // they have nothing to trade
+    tapped: {
+      base: ["Nah, I got nothing.", "Not today.", "I'm tapped out.", "Rent's due, man.", "Check back Friday."],
+    },
+    // squaring up to shoot
+    windupKill: {
+      them: { gang: ["Wrong block, homie.", "You shoulda stayed home."] },
+      base: ["You picked the wrong day!", "I'll drop you right here!", "You shoulda kept walking."],
+    },
+    // squaring up to fight with fists
+    windupBeat: {
+      base: ["You don't wanna do this.", "Walk away.", "Square up, then!", "Hands out your pockets."],
+    },
+    // walking at you to start a fist fight
+    startBeat: {
+      night: ["Wrong street at the wrong time.", "Nobody's around to help you."],
+      base: ["The hell you looking at?", "Wrong block, pal.", "You want some?", "Something funny?"],
+    },
+    // someone you hurt sees you and crosses the street
+    avoid: {
+      base: ["Not again.", "Keep walking. Keep walking.", "Not today. Not me.", "Oh no. Him again."],
+    },
+    // a rival set's member charges
+    rival: {
+      base: ["You don't belong here.", "Off our block.", "Bold move, coming round here."],
+    },
+    war: {
+      base: ["Wrong block, opp!", "You're a dead man here.", "Light him up!"],
+    },
+    // your own people, or anyone who rates you, gives you a nod
+    deferCrew: {
+      night: ["Quiet night, boss.", "We got the block, boss."],
+      base: ["Boss.", "Respect.", "Need anything, I'm on it.", "It's quiet today, boss."],
+    },
+    deferFame: {
+      me: { president: ["Mr. President.", "Love what you're doing.", "Hate what you're doing."] },
+      base: ["That's the one from the news.", "Heard about you.", "We good. No problems here."],
+    },
+    // you paid them a compliment
+    complimentBack: {
+      stand: { sour: ["Don't try it.", "Nice try."] },
+      them: { gang: ["Yeah? Okay.", "Appreciate it."], vendor: ["Flattery won't get you a discount."] },
+      base: ["Ha, appreciate that.", "Aw, thanks.", "You're alright, you know that?", "Tell that to my wife.",
+        "Stop. You're gonna make me blush."],
+    },
+    // you insulted them and they are the kind to fold
+    insultMeek: {
+      base: ["Whatever, man.", "Why you gotta be like that?", "Jerk.", "Okay. Okay.", "Wow. Okay."],
+    },
+    // you insulted them and they are the kind to fight
+    insultBold: {
+      base: ["The hell you say to me?", "Say that again. I dare you.", "You want a problem?", "Keep talking."],
+    },
+    // you leaned on them and it worked
+    cower: {
+      base: ["Okay, okay.", "I don't want trouble.", "I'm going. I'm going.", "Please. I got kids."],
+    },
+    // you leaned on them and they out-read you
+    scoff: {
+      base: ["Cute. Run along.", "Who are you supposed to be?", "Go home, kid."],
+    },
+    // you leaned on them, they outrank you, and they are the kind to swing
+    scoffFight: {
+      base: ["You threatening me?", "Big mistake.", "Now we got a problem."],
+    },
+    // asked for a light
+    smokeYes: { night: ["Here. Keep it."], base: ["Here.", "Keep the lighter.", "Yeah, here."] },
+    smokeNo: { base: ["Buy your own.", "I quit. Sorry.", "Get lost."] },
+    // you gave them money
+    thanks: {
+      them: { bum: ["God bless you.", "I'm eating tonight.", "You're a real one."] },
+      base: ["You're a real one.", "I won't forget this.", "Thank you. Seriously."],
+    },
+    // asked what's going on and they have nothing hot
+    gossip: {
+      night: ["Stay off the east side tonight.", "Heard shots earlier. Be careful."],
+      base: ["Cops have been thick around here.", "People talk about you, you know.",
+        "My cousin says the mayor's dirty.", "Somebody got shot by the water last week.",
+        "Rent went up again. Nobody's hiring.", "I don't know nothing."],
+    },
+    // a VIP you asked for a picture
+    fan: { base: ["Make it quick.", "One picture.", "No flash.", "Tag me."] },
+    // asked for directions: {place} and {dir}
+    directions: {
+      base: ["{place}? That way.", "{place}, down there on the {dir}.", "Go {dir}. You can't miss it.",
+        "{place}? Keep going {dir}."],
+    },
+    directionsNone: { base: ["No idea. I'm not from here.", "Couldn't tell you.", "Ask somebody else."] },
+    // you tipped a busker
+    busker: { base: ["Thank you!", "Any requests?", "This one's for you.", "Appreciate you."] },
+    // a vendor hands you what you bought: {item}
+    handOver: {
+      them: { vendor: ["Here you go.", "Enjoy.", "Anything else?", "Careful, it's hot."] },
+      base: ["Here you go.", "Enjoy."],
+    },
+    // a clerk greets you at the counter
+    vendor: {
+      robbed: ["You. Get out of my store.", "Not you. Out.", "I called the cops last time."],
+      armed: ["Hey. Put that away in here.", "Not in my store with that."],
+      wanted: ["I don't want trouble in here.", "Buy something and go."],
+      me: { cop: ["Officer. Coffee's on the house."], president: ["Mr. President! On the house."] },
+      stand: { friend: ["The usual?", "My favorite customer."], enemy: ["We're closed. For you."] },
+      night: ["We're about to close.", "Late one, huh?"],
+      base: ["What can I get you?", "Welcome in.", "Take your time.", "Let me know if you need anything."],
+    },
+    // the clerk won't serve you (you robbed the place)
+    vendorRefuse: {
+      base: ["Not you. Get out.", "You're not welcome here.", "Get out before I call somebody."],
+    },
+    // a cop buys your story
+    copOk: { base: ["Fine. Move along.", "Alright. Go home.", "Don't let me see you again."] },
+    copNo: { base: ["Save it.", "Nice try.", "Hands where I can see them."] },
+    // a cop you talk to with no heat on you
+    copTalk: {
+      night: ["Late to be out. Head home.", "Quiet night. Keep it that way."],
+      base: ["Keep it moving.", "Help you?", "Evening. You live around here?", "Stay out of trouble."],
+    },
+    // your crew member answering an order
+    crewRob: { base: ["On it.", "Say less.", "Watch this.", "Easy money."] },
+    crewScare: { base: ["On it.", "He's gone.", "I got him."] },
+    crewSic: { base: ["With pleasure.", "Say less.", "He's done."] },
+    crewTail: { base: ["I'm on him.", "I'll keep an eye out.", "He won't see me."] },
+    crewFollow: { base: ["Right behind you.", "Let's go.", "I got your back."] },
+    crewWait: { base: ["I'll be here.", "Holding it down.", "Go. I'm good."] },
+    crewNo: { base: ["Not him. He's family.", "I'm not doing that.", "Nah. Not that one."] },
+    // your crew member doing the robbing / scaring
+    crewDemand: { base: ["Wallet. Now.", "Empty your pockets.", "Don't make me ask twice.", "Hand it over."] },
+    crewThreat: { base: ["Beat it.", "Walk. Now.", "You don't live here anymore.", "Get lost."] },
+    crewBack: { base: ["Done.", "Got it. Here.", "Easy.", "That's yours."] },
+    crewReport: { base: ["He went {dir}. Toward {place}.", "Lost him by {place}.", "He's by {place}."] },
+    // the person your crew is robbing
+    mugged: { base: ["Take it! Take it!", "Okay! Here!", "Please, just take it.", "It's all I got!"] },
+    // you got caught with your hand in their pocket
+    caught: { base: ["Hey! Get your hand out!", "Thief! Thief!", "That's my wallet!", "Are you kidding me?"] },
+    // you leaned on them for money and they will not pay
+    refusePay: { base: ["You're not getting a dime.", "Try it.", "Get out of my face.", "Nah. Not today."] },
+    // the person your crew scared off
+    scared: { base: ["Okay! I'm going!", "I'm leaving!", "Alright, alright!"] },
+    // someone who watches it happen
+    witness: {
+      base: ["Somebody call the cops!", "Did you see that?", "Oh my God.", "Leave him alone!"],
+    },
+  };
+  // the context a line is chosen in (read, never written)
+  function situation(p) {
+    const now = nowMs();
+    const w = p && p._wronged, fw = p && p._friendWronged;
+    let hour = 12;
+    try { if (CBZ.cityHour) hour = CBZ.cityHour(); } catch (e) {}
+    return {
+      robbed: !!(w && now - w.t < 600000) || !!(p && p._rkGrudged),
+      hurtFriend: !!(fw && now - fw.t < 600000),
+      armed: !!(CBZ.cityHasGun && (function () { try { return CBZ.cityHasGun(); } catch (e) { return false; } })()),
+      wanted: ((g && g.wanted) | 0) >= 1,
+      night: hour >= 21 || hour < 5,
+      rain: !!(CBZ.weather && CBZ.weather.raining),
+    };
+  }
+  function bookPool(p, T, rd, them, mine) {
+    const S = situation(p);
+    if (S.robbed && T.robbed) return T.robbed;
+    if (S.hurtFriend && T.hurtFriend) return T.hurtFriend;
+    if (S.armed && T.armed) return T.armed;
+    if (S.wanted && T.wanted) return T.wanted;
+    if (T.me && T.me[mine]) return T.me[mine];
+    if (T.stand && T.stand[rd.standing]) return T.stand[rd.standing];
+    // the weather and the hour colour SOME people's lines, never everyone's:
+    // a stable 40% of the street mentions the rain
+    const h = pedHash(p, 0x7EA7);
+    if (S.rain && T.rain && h < 0.4) return T.rain;
+    if (S.night && T.night && h < 0.45) return T.night;
+    if (T.them && T.them[them]) return T.them[them];
+    if (S.rain && T.rain) return T.rain;
+    if (S.night && T.night && h < 0.7) return T.night;
+    return T.base || null;
+  }
+  function fill(s, vars) {
+    if (!s || s.indexOf("{") < 0) return s;
+    return s.replace(/\{(\w+)\}/g, function (m, k) { return vars && vars[k] != null ? String(vars[k]) : ""; })
+      .replace(/\s{2,}/g, " ").trim();
+  }
 
   // ---- FOUR AXES, NOT TWO -------------------------------------------------
   //  OWNER (2026-08-11): "their role and level and my role and level make the
@@ -384,6 +684,15 @@
     const mine = playerRole().key;
     let pool = null;
 
+    // THE BOOK answers every topic that is not the contact/trade/greet matrix
+    if (BOOK[topic]) {
+      pool = bookPool(p, BOOK[topic], rd, them, mine);
+      if (!pool || !pool.length) { _mute++; return null; }
+      const b = pick(p, rd, topic, pool);
+      if (b) _lines++;
+      return fill(b, opts.vars);
+    }
+
     // A HARD SHOVE OUTRANKS THE TABLE. Being knocked about is not a
     // conversation — the register is set by the violence, sized by the gap.
     if (topic === "contact" && opts.severity != null && opts.severity >= 0.55) {
@@ -409,6 +718,17 @@
     return s;
   }
   CBZ.cityLine = line;
+  // the line AND the mouth: cityLine + citySay in one call. Returns true only
+  // when the words reached the screen. opts: vars, secs, color, force.
+  CBZ.citySayTopic = function (p, topic, opts) {
+    opts = opts || {};
+    const s = line(p, topic, opts);
+    if (!s || !CBZ.citySay) return false;
+    const o = { secs: opts.secs || undefined };
+    if (opts.force) o.force = true;
+    return CBZ.citySay(p, s, opts.color || null, o) !== false;
+  };
+  CBZ.cityLineBook = BOOK;          // the check tool and probes read it
 
   // ============================================================
   //  7. CONTACT HAS A VOICE NOW.

@@ -1550,13 +1550,13 @@
         {
           id: "ck-gate-toggle", slot: "e", prio: 2,
           canShow: function (t) { return isMine(t); },
-          label: function (t) { return t._want ? "Close gate" : "Open gate"; },
+          label: function (t) { return t._want ? "Close" : "Open"; },
           onSelect: function (t) { gateOpen(t, !t._want); },
         },
         {
           id: "ck-gate-lock", slot: "i", prio: 2,
           canShow: function (t) { return isMine(t); },
-          label: function (t) { return t.locked ? "Unlock gate" : "Lock gate"; },
+          label: function (t) { return t.locked ? "Unlock" : "Lock"; },
           onSelect: function (t) {
             t.locked = !t.locked;
             if (t.locked) { t.open = false; t._want = false; t._manualT = -1e9; }
@@ -1572,7 +1572,8 @@
       options: [
         {
           id: "ck-stash-open", slot: "e", prio: 2,
-          label: function (t) { return isMine(t) ? "Open stash (" + money(stashCash(t)) + ")" : "Locked cage"; },
+          canShow: function (t) { return isMine(t); },   // someone else's cage: a locked status, not a button
+          label: function (t) { return "Open " + money(stashCash(t)); },
           onSelect: function (t) { if (!isMine(t)) { note("Locked.", 1.2); return; } openStash(t); },
         },
       ],
@@ -1601,7 +1602,7 @@
         {
           id: "ck-garage-get", slot: "e", prio: 3,
           canShow: function (t, ctx) { return !(ctx && ctx.driving); },
-          label: "Get a car",
+          label: "Take out",
           onSelect: function () {
             const S = CBZ.cityStorage;
             if (S && S.openVirtual) S.openVirtual({ id: "compound-garage", name: "Compound Garage", kind: "garage", blurb: "" });

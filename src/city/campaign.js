@@ -933,7 +933,7 @@
     if (openingPrisonPhase(c.phase) && w && !c.flags.wardenSpoke && w.group && distTo(w.group.position.x, w.group.position.z) < 5.2) {
       c.flags.wardenSpoke = true;
       commit();
-      say("WARDEN", "Climb my walls, or work for me. Refuse, and your family pays.", 5.2, w);
+      say("WARDEN", "Work for me. Or your family pays.", 5.2, w);
     }
     if (c.phase === PHASE.PRISON_SPY_EXIT) {
       R.transitionT -= dt;
@@ -1306,8 +1306,8 @@
     const ui = UI();
     if (ui && ui.say) {
       ui.say(cHandler(), order, [
-        { id: "comply", label: "Carry out the order", onSelect: function () { CBZ.cityCampaignChoose("comply"); } },
-        { id: "refuse", label: "Refuse, hunt the handler", onSelect: function () { CBZ.cityCampaignChoose("refuse"); } },
+        { id: "comply", label: "Comply", onSelect: function () { CBZ.cityCampaignChoose("comply"); } },
+        { id: "refuse", label: "Refuse", onSelect: function () { CBZ.cityCampaignChoose("refuse"); } },
       ], { phone: true });
     }
   }
@@ -2071,7 +2071,7 @@
         status: "active",
         objectives: [{ id: "leave", text: "Leave under the warden's protection", done: false }],
       });
-      say("WARDEN", "Good. Your family stays breathing as long as my targets stop.", 3.2, actor);
+      say("WARDEN", "Good. Your family keeps breathing.", 3.2, actor);
       R.kind = "prison"; R.transitionT = 3.0; R.key = g.mode + ":" + c.phase;
       return { handled: true };
     }

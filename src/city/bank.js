@@ -1814,8 +1814,8 @@
   CBZ.cityVaultLabel = function (v) {
     if (!v) return "";
     const L = vaultLock(v);
-    if (L.open) return L.keyed ? "Unlock the vault" : L.insider ? "Make them open it" : "Open the vault";
-    return "Try the vault";
+    if (L.open) return L.keyed ? "Unlock" : L.insider ? "Lean on" : "Open";
+    return "Try";
   };
   // what the door is waiting for, plus the reason to want it. Spoken on the
   // press (see cityVaultTry), which is the only place it is ever printed.

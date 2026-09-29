@@ -881,12 +881,11 @@
     }
     I.register("vehhold", {
       id: "vehhold-ramp", slot: "e",
+      // a ramp in motion is a status, not a button
+      canShow: function (h) { const H = h && h._hold; return !!H && H.phase !== "opening" && H.phase !== "closing"; },
       label: function (h) {
         const H = h && h._hold;
-        if (!H) return "Ramp";
-        if (H.phase === "opening") return "Lowering the ramp…";
-        if (H.phase === "closing") return "Raising the ramp…";
-        return H.rampWant > 0.5 ? "Raise the " + H.label.toLowerCase() + " ramp" : "Lower the " + H.label.toLowerCase() + " ramp";
+        return H && H.rampWant > 0.5 ? "Raise" : "Lower";
       },
       enabled: function (h) { const H = h && h._hold; return !!H && H.phase !== "opening" && H.phase !== "closing"; },
       onSelect: function (h) { if (h) h.toggleRamp(); },

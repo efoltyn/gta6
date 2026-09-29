@@ -925,7 +925,7 @@
     // deterministic pick — never Math.random, even for a bark
     const h = CBZ.hash01 ? CBZ.hash01(Math.round(q.pos.x), Math.round(q.pos.z), 0x1cef) : 0.5;
     const say = pool[Math.min(pool.length - 1, Math.floor(h * pool.length))];
-    try { CBZ.citySay(q, "“" + say + "”", stage >= 3 ? "#ff9aa2" : "#e8dcc0", 2.2); } catch (e) {}
+    try { CBZ.citySay(q, say, stage >= 3 ? "#ff9aa2" : "#e8dcc0", 2.2); } catch (e) {}
   }
 
   function applyStage(rec, prev) {
@@ -1235,13 +1235,7 @@
         const r = reactionTo(p);
         return r === "challenge" || r === "hostile" || r === "watch";
       },
-      label: function (p) {
-        const rec = recOf(p);
-        const q = rec ? frontman(rec) : null;
-        const who = (q && q.name) ? q.name : "The detail";
-        const r = reactionTo(p);
-        return r === "hostile" ? who + " blocks you" : who + " steps in";
-      },
+      label: "Push through",
       onSelect: function (p) {
         const rec = recOf(p);
         if (!rec) return;
@@ -1270,10 +1264,7 @@
         const rec = recOf(p);
         return !!rec && !p.dead && reactionTo(p) === "welcome";
       },
-      label: function (p) {
-        const rec = recOf(p);
-        return "Pay respects to the " + (rec ? rec.role : "boss");
-      },
+      label: "Greet",
       onSelect: function (p) {
         const rec = recOf(p);
         if (!rec) return;
@@ -1306,7 +1297,7 @@
         return !!(rec && rec.live && !q.dead && q !== rec.actor && !q.isFamily &&
           rec.actor && !rec.actor.dead && rec.audienceT <= 0 && rec.hostileT <= 0);
       },
-      label: function (q) { return "Ask for a word with the " + (q._powerOf.role || "boss"); },
+      label: "Ask",
       onSelect: function (q) {
         const rec = q._powerOf;
         if (!rec) return;

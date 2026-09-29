@@ -238,7 +238,7 @@
           const P = CBZ.player;
           const car = P && P._vehicle;
           const cost = priceFor(car);
-          return "Fill up  $" + cost;
+          return "Fill up $" + cost;
         },
         onSelect: function () {
           const P = CBZ.player;

@@ -1443,15 +1443,12 @@
       options: [
         {
           id: "storegoods-buy", slot: "e",
-          label: function (sl) { return "Buy " + sl.name + ", " + fmt$(priceOf(sl.name)); },
+          label: function (sl) { return "Buy " + fmt$(priceOf(sl.name)); },
           onSelect: function (sl) { buySlot(sl); },
         },
         {
           id: "storegoods-take", slot: "i", bad: true,
-          label: function (sl) {
-            const seen = CBZ.cityShopClerkSees && CBZ.cityShopClerkSees(sl.lot, sl.x, sl.z);
-            return seen ? "Pocket the " + sl.name + " (they're watching)" : "Pocket the " + sl.name;
-          },
+          label: "Pocket",
           onSelect: function (sl) { takeSlot(sl); },
         },
       ],

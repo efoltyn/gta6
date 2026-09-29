@@ -4712,7 +4712,7 @@
     I.register("animal", {
       id: "animal-tame", slot: "e", hold: true, prio: 20,
       canShow: function (a) { return !a.ridden && !a.tamed && !!feedItemFor(a.species); },
-      label: "Feed & tame",
+      label: "Tame",
       onSelect: function (a) { tameFeed(a); },
     });
     I.register("animal", {
@@ -4750,7 +4750,7 @@
     I.register("animal", {
       id: "animal-send", slot: "l", prio: 15,
       canShow: function (a) { return ALLCTL() && a.tamed && !a.ridden && !a.species.aquatic; },
-      label: function (a) { return a.goTo ? "Heel" : "Send ahead"; },
+      label: function (a) { return a.goTo ? "Heel" : "Send"; },
       onSelect: function (a) {
         if (a.goTo) { a.goTo = null; a.stay = false; note(a.petName + " falls back in.", 1.4); return; }
         const P = CBZ.player && CBZ.player.pos; if (!P) return;
@@ -4764,7 +4764,7 @@
     I.register("animal", {
       id: "animal-stay", slot: "j", prio: 16,
       canShow: function (a) { return a.tamed && !a.ridden; },
-      label: function (a) { return a.stay ? "Follow" : "Sit & stay"; },
+      label: function (a) { return a.stay ? "Follow" : "Stay"; },
       // "Stay" used to mean "stop moving". It now means what it says: the sit
       // pose runs off the SAME phase the affection ritual uses.
       onSelect: function (a) { a.stay = !a.stay; note(a.petName + (a.stay ? " sits and stays." : " falls in beside you."), 1.6); },

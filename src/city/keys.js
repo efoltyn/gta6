@@ -213,7 +213,7 @@
       canShow: function (b) { return !!(b && Array.isArray(b._keys) && b._keys.length); },
       label: function (b) {
         const k = b && b._keys;
-        return (k && k.length > 1) ? "Take the keys" : "Take the key";
+        return (k && k.length > 1) ? "Take " + k.length : "Take";
       },
       // the hand goes into his pocket and comes out with the ring
       // (systems/verbs_pickup.js takeFrom); the keys are yours on the grab frame
