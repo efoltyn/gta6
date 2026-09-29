@@ -708,7 +708,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/entities/keycard.js?v=armory1"></script>
 <!-- Shared NPC identity/placement layer: jail actors, city scenes and moving
      aircraft passengers request real actors through one reusable contract. -->
-<script src="src/entities/npclife.js?v=w09290218"></script>
+<script src="src/entities/npclife.js?v=w0929seat"></script>
 <!-- Who is in this prison: ten heritages (skin range, hair, facial hair, ink,
      jumpsuit tied at the waist). Rolled by npc.js; the ink is painted by
      city/clothes.js and the head atlas below. -->
@@ -1336,7 +1336,7 @@ document.body.appendChild(b);}}catch(e){}})();
      = a joinable, rankable, paying outfit. MUST precede gangs.js, careers.js,
      playergang.js, promotion.js, heists.js and militia.js — all declare at parse. -->
 <script src="src/city/factions.js?v=w09290219"></script>
-<script src="src/city/gangs.js?v=fallstay1"></script>
+<script src="src/city/gangs.js?v=w0929seat"></script>
 <script src="src/city/social.js?v=brainmoves1"></script>
 <script src="src/city/realestate.js?v=vit3"></script>
 <script src="src/city/view.js?v=cars1"></script>
@@ -1349,7 +1349,7 @@ document.body.appendChild(b);}}catch(e){}})();
      brain.rep. After peds.js (fleeFrom / markGunpoint / the report visuals it
      drives) and systems/brain.js; nothing here runs at parse. -->
 <script src="src/city/brain_city.js?v=armed1"></script>
-<script src="src/entities/pedinstance.js?v=w09290242x"></script>
+<script src="src/entities/pedinstance.js?v=w0929seat"></script>
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and
      after interior_programs.js. This is what puts a boss on the top floor. -->
@@ -1401,7 +1401,7 @@ document.body.appendChild(b);}}catch(e){}})();
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
 <script src="src/city/carlod.js?v=w09290242x"></script>
-<script src="src/city/vehicles.js?v=w09290242x"></script>
+<script src="src/city/vehicles.js?v=w0929seat"></script>
 <script src="src/city/carinstances.js?v=w09290242x"></script>
 <script src="src/city/playerair.js?v=nodash1"></script>
 <script src="src/city/playeraircraft.js?v=hats1"></script>
@@ -1460,7 +1460,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Reverts: ?cfg_COMPANION_BOARDING_V1=0 (the arcs) ·
      ?cfg_FOLLOWER_ORDERS_V1=0 (the verbs) · ?cfg_CAR_DOOR_ARC=0 (just the
      player's own car door beat, leaving companions boarding). -->
-<script src="src/city/boarding.js?v=w09290242x"></script>
+<script src="src/city/boarding.js?v=w0929seat"></script>
 <!-- THE OTHER SEAT (owner: "a button should move me to passenger ... and then
      if I go to the door I can even jump out"). [G] / the SEAT pill slides the
      player across to the shotgun seat of a car or back from a boat's helm: the
@@ -1761,9 +1761,9 @@ document.body.appendChild(b);}}catch(e){}})();
      hooks skin() + the pocket Wear verb, all degrade-safe. -->
 <script src="src/city/pelts.js?v=nodash1"></script>
 <!-- 4d-4. GIG + CRIMINAL ECONOMY: player gig loops + own-a-company + NPC drivers -->
-<script src="src/city/gigs.js?v=nodash1"></script>
+<script src="src/city/gigs.js?v=w0929seat"></script>
 <script src="src/city/gigfleet.js?v=nodash1"></script>
-<script src="src/city/giglife.js?v=gig2"></script>
+<script src="src/city/giglife.js?v=w0929seat"></script>
 <script src="src/city/hud.js?v=vit3"></script>
 <!-- drinking/tipsy system (a sibling agent's file — provides CBZ.cityDrink;
      loads after shops.js/hud so it can hook the same HUD/economy surface) -->
@@ -2256,7 +2256,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the Mansion when the republic falls. Security (the detail, the gate
      checkpoint, counter-snipers, the panic protocol) lives in protection.js. -->
 <script src="src/city/president_office.js?v=pres3"></script>
-<script src="src/city/motorcade.js?v=pres3"></script>
+<script src="src/city/motorcade.js?v=w0929seat"></script>
 <script src="src/city/president_public.js?v=w09290219"></script>
 <script src="src/city/president_regime.js?v=pres3-st1"></script>
 
