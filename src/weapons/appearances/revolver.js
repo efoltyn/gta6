@@ -105,17 +105,17 @@
     K.lathe(g, "py.cone", LA([[0, 115.6], [7.4, 115.6], [8.6, 117], [8.6, 119.5]]), 16, blue, 0, Y0, 0);
 
     // THE CYLINDER: plain rear band, fluted body, plain front band
-    K.lathe(g, "py.cylR", LA([[0, 73], [18.8, 73], [19.75, 74], [19.75, 80]]), 30, blue, 0, Yb(CYL_Y), 0);
-    K.prof(g, "py.cylF", MM(flutedSection()), 31 * S, blue, { axis: "z", bevel: 0, y: Yb(CYL_Y), z: Z(95.5) });
-    K.lathe(g, "py.cylFr", LA([[19.75, 111], [19.75, 113.8], [18.8, 115], [0, 115]]), 30, blue, 0, Yb(CYL_Y), 0);
+    K.tag(K.lathe(g, "py.cylR", LA([[0, 73], [18.8, 73], [19.75, 74], [19.75, 80]]), 30, blue, 0, Yb(CYL_Y), 0), "part_cylinder");
+    K.tag(K.prof(g, "py.cylF", MM(flutedSection()), 31 * S, blue, { axis: "z", bevel: 0, y: Yb(CYL_Y), z: Z(95.5) }), "part_cylinder");
+    K.tag(K.lathe(g, "py.cylFr", LA([[19.75, 111], [19.75, 113.8], [18.8, 115], [0, 115]]), 30, blue, 0, Yb(CYL_Y), 0), "part_cylinder");
     const ch = [], heads = [];
     for (let i = 0; i < 6; i++) {
       const a = Math.PI / 2 + i * Math.PI / 3, cx = 12.5 * Math.cos(a), cy = 12.5 * Math.sin(a);
       ch.push(MM(circle(cx, cy, 4.6, 12)));
       heads.push(MM(circle(cx, cy, 5.4, 12)));
     }
-    K.prof(g, "py.mouths", ch, 0.6 * S, mat.bore || black, { axis: "z", bevel: 0, y: Yb(CYL_Y), z: Z(115.2) });
-    K.prof(g, "py.heads", heads, 0.8 * S, brass, { axis: "z", bevel: 0, y: Yb(CYL_Y), z: Z(72.6) });
+    K.tag(K.prof(g, "py.mouths", ch, 0.6 * S, mat.bore || black, { axis: "z", bevel: 0, y: Yb(CYL_Y), z: Z(115.2) }), "part_cylinder");
+    K.tag(K.prof(g, "py.heads", heads, 0.8 * S, brass, { axis: "z", bevel: 0, y: Yb(CYL_Y), z: Z(72.6) }), "part_cylinder");
 
     // SIGHTS: adjustable rear on the top strap, ramped front blade with its
     // red insert facing the eye

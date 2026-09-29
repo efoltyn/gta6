@@ -176,6 +176,8 @@ const PROBE = `(() => {
       }
       rec.drawn = prop ? prop.userData.weaponId : null;
       rec.grips = !!(prop && prop.userData.grips);
+      // the hold engine's answer: a handgun is one hand in a body's hands
+      rec.oneHand3P = !!(prop && CBZ.holds && CBZ.holds.hands(prop, { view: "tp" }) < 2);
       if (!prop) { rec.err = "no drawn prop"; out.guns.push(rec); continue; }
 
       // ---- presenting
@@ -351,12 +353,17 @@ for (const g of res.guns) {
     (g.geom ? "\n              " + g.geom : "") +
     (g.carryWhy ? "\n              carry: " + g.carryWhy + (g.carryGeo ? "  " + g.carryGeo : "") : ""));
   if (g.err) fails.push(g.id + ": " + g.err);
-  if (g.oneHanded) continue;
+  // A HANDGUN IS ONE HAND in third person (CBZ.holds: the off hand is free
+  // at carry and aimed), so only a two-hand gun's off hand must be on it.
   // A hand wrapped round a gun is within a fist of its bore. 22 cm is generous
   // — it is roughly a forearm's width — and still nowhere near the old pose.
-  if (g.aimGap != null && g.aimGap > 22) fails.push(g.id + ": off hand " + g.aimGap + " cm off the bore while presenting");
-  if (g.carryGap != null && g.carryGap > 26 && !g.carryReleased) fails.push(g.id + ": off hand " + g.carryGap + " cm off the bore at low ready (and not deliberately released)");
-  // A reload has to MOVE the hand. 25 cm is less than one trip to the belt.
+  if (!g.oneHanded && !g.oneHand3P) {
+    if (g.aimGap != null && g.aimGap > 22) fails.push(g.id + ": off hand " + g.aimGap + " cm off the bore while presenting");
+    if (g.carryGap != null && g.carryGap > 26 && !g.carryReleased) fails.push(g.id + ": off hand " + g.carryGap + " cm off the bore at low ready (and not deliberately released)");
+  }
+  // A reload has to MOVE the hand — every gun's, one-handed ones included:
+  // the off hand comes from wherever it is to work the magazine / cylinder
+  // (CBZ.gunReload). 25 cm is less than one trip to the belt.
   if (g.reloadTime > 0 && (g.travel == null || g.travel < 25)) {
     fails.push(g.id + ": reload moved the off hand only " + g.travel + " cm");
   }

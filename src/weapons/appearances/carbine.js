@@ -69,8 +69,8 @@
     K.lathe(g, "m4.fa", [[0, -0.036], [0.009, -0.036], [0.010, -0.030], [0.012, -0.028], [0.013, -0.018],
       [0.013, 0.010], [0.010, 0.022], [0, 0.024]], 12, blued, 0.037, 0.050, 0.000);
     // T charging handle + latch at the back of the rail
-    K.prof(g, "m4.ch", [[-0.072, 0.070], [-0.044, 0.070], [-0.044, 0.080], [-0.050, 0.086], [-0.068, 0.086], [-0.072, 0.080]],
-      0.072, mat.black, { bevel: 0.002 });
+    K.tag(K.prof(g, "m4.ch", [[-0.072, 0.070], [-0.044, 0.070], [-0.044, 0.080], [-0.050, 0.086], [-0.068, 0.086], [-0.072, 0.080]],
+      0.072, mat.black, { bevel: 0.002 }), "part_charge");
 
     // LOWER: flared magwell, trigger guard hole, buffer-tube housing
     K.prof(g, "m4.lower", [
@@ -93,9 +93,9 @@
       mf.push([0.340 + sweep, y]);
       mb.push([0.224 + sweep * 1.15, y]);
     }
-    K.prof(g, "m4.mag", mf.concat(mb.reverse()), 0.046, mat.dark, { bevel: 0.003 });
-    K.prof(g, "m4.floor", [[0.250, -0.314], [0.376, -0.312], [0.382, -0.322], [0.374, -0.334], [0.256, -0.336], [0.246, -0.326]],
-      0.054, mat.black, { bevel: 0.003 });
+    K.tag(K.prof(g, "m4.mag", mf.concat(mb.reverse()), 0.046, mat.dark, { bevel: 0.003 }), "part_mag");
+    K.tag(K.prof(g, "m4.floor", [[0.250, -0.314], [0.376, -0.312], [0.382, -0.322], [0.374, -0.334], [0.256, -0.336], [0.246, -0.326]],
+      0.054, mat.black, { bevel: 0.003 }), "part_mag");
 
     // HANDGUARD: round, ribbed, between the delta ring and the cap
     K.prof(g, "m4.hg", K.ribs(0.048, 0.043, 14), 0.320, poly, { axis: "z", bevel: 0.002, y: BORE, z: -0.580 });

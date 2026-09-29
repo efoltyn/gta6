@@ -107,11 +107,11 @@
 
     // THE CYLINDER: six hollow chamber tubes (the deep flutes between them),
     // a 40mm round seated in each
-    K.prof(g, "mgl.cyl", MM(clusterSection()), 131 * S, park, { axis: "z", bevel: 0, holes: chamberHoles().map(MM), y: Yb(CYL_Y), z: Z(412.5) });
+    K.tag(K.prof(g, "mgl.cyl", MM(clusterSection()), 131 * S, park, { axis: "z", bevel: 0, holes: chamberHoles().map(MM), y: Yb(CYL_Y), z: Z(412.5) }), "part_cylinder");
     const round = LA([[0, 380], [20, 380], [20, 452], [19, 460], [15, 466], [8, 469.5], [0, 470]]);
     for (let i = 0; i < 6; i++) {
       const a = Math.PI / 2 + i * Math.PI / 3;
-      K.lathe(g, "mgl.round", round, 10, od, CH_R * Math.cos(a) * S, Yb(CYL_Y + CH_R * Math.sin(a)), 0);
+      K.tag(K.lathe(g, "mgl.round", round, 10, od, CH_R * Math.cos(a) * S, Yb(CYL_Y + CH_R * Math.sin(a)), 0), "part_cylinder");
     }
 
     // BARREL: short, fat, hollow — the 40mm bore reads from the front

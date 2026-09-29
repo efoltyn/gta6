@@ -58,16 +58,16 @@
     // RECEIVER + FEED-TRAY COVER with its rail
     K.prof(g, "saw.recv", [[-0.050, -0.056], [0.420, -0.056], [0.420, 0.080], [0.020, 0.080], [-0.050, 0.060]],
       0.086, steel, { bevel: 0.005 });
-    K.prof(g, "saw.cover", [[0.010, 0.074], [0.380, 0.074], [0.380, 0.100], [0.350, 0.110], [0.030, 0.110], [0.010, 0.098]],
-      0.092, blued, { bevel: 0.005 });
-    K.prof(g, "saw.rail", K.rail(0.060, 0.340, 0.108, 0.008, 0.008), 0.054, mat.black, { bevel: 0.0015 });
+    K.tag(K.prof(g, "saw.cover", [[0.010, 0.074], [0.380, 0.074], [0.380, 0.100], [0.350, 0.110], [0.030, 0.110], [0.010, 0.098]],
+      0.092, blued, { bevel: 0.005 }), "part_cover");
+    K.tag(K.prof(g, "saw.rail", K.rail(0.060, 0.340, 0.108, 0.008, 0.008), 0.054, mat.black, { bevel: 0.0015 }), "part_cover");
     // charging handle out of the right flank (axis-z profiles mirror x)
     K.prof(g, "saw.ch", [[-0.042, -0.008], [-0.066, -0.006], [-0.076, 0.000], [-0.076, 0.010], [-0.068, 0.016], [-0.042, 0.014]],
       0.040, steel, { axis: "z", bevel: 0.003, z: -0.350 });
     // REAR SIGHT: the leaf folded forward on its base at the back of the cover
-    K.prof(g, "saw.rsBase", [[0.014, 0.100], [0.056, 0.104], [0.056, 0.114], [0.018, 0.114], [0.014, 0.108]],
-      0.040, steel, { bevel: 0.002 });
-    K.prof(g, "saw.rsLeaf", [[0.020, 0.113], [0.054, 0.113], [0.056, 0.118], [0.024, 0.121]], 0.030, mat.black, { bevel: 0.001 });
+    K.tag(K.prof(g, "saw.rsBase", [[0.014, 0.100], [0.056, 0.104], [0.056, 0.114], [0.018, 0.114], [0.014, 0.108]],
+      0.040, steel, { bevel: 0.002 }), "part_cover");
+    K.tag(K.prof(g, "saw.rsLeaf", [[0.020, 0.113], [0.054, 0.113], [0.056, 0.118], [0.024, 0.121]], 0.030, mat.black, { bevel: 0.001 }), "part_cover");
     cyl(g, 0.007, 0.010, mat.black, 0.024, 0.109, -0.030, 0, 0, Math.PI / 2);   // windage knob
     // TRIGGER GUARD + trigger, pistol grip
     K.prof(g, "saw.guard", [[0.090, -0.050], [0.250, -0.050], [0.250, -0.066], [0.232, -0.122], [0.112, -0.122], [0.094, -0.070]],
@@ -77,16 +77,16 @@
     K.prof(g, "saw.grip", K.grip(0.092, -0.050, 0.080, 0.176, R, { swellF: 0.008, swellB: 0.004 }), 0.056, poly, { bevel: 0.005 });
 
     // AMMO BOX under the receiver + the brass BELT up the left side
-    K.prof(g, "saw.box", [[0.140, -0.058], [0.340, -0.058], [0.346, -0.230], [0.330, -0.244], [0.150, -0.244], [0.134, -0.230]],
-      0.110, poly, { bevel: 0.006, x: -0.012 });
-    K.prof(g, "saw.lid", [[0.140, -0.058], [0.340, -0.058], [0.342, -0.072], [0.138, -0.072]], 0.116, mat.black,
-      { bevel: 0.002, x: -0.012 });                                      // the lid's lip
+    K.tag(K.prof(g, "saw.box", [[0.140, -0.058], [0.340, -0.058], [0.346, -0.230], [0.330, -0.244], [0.150, -0.244], [0.134, -0.230]],
+      0.110, poly, { bevel: 0.006, x: -0.012 }), "part_box");
+    K.tag(K.prof(g, "saw.lid", [[0.140, -0.058], [0.340, -0.058], [0.342, -0.072], [0.138, -0.072]], 0.116, mat.black,
+      { bevel: 0.002, x: -0.012 }), "part_box");                                      // the lid's lip
     const rounds = [];
     for (let i = 0; i < 7; i++) {
       const y = -0.070 + i * 0.020;
       rounds.push([[0.208, y], [0.262, y], [0.290, y + 0.008], [0.262, y + 0.016], [0.208, y + 0.016]]);
     }
-    K.prof(g, "saw.belt", rounds, 0.020, mat.brass, { bevel: 0.002, x: -0.0535 });
+    K.tag(K.prof(g, "saw.belt", rounds, 0.020, mat.brass, { bevel: 0.002, x: -0.0535 }), "part_box");
     // the M27 links: two loops round each round's case
     const links = [];
     for (let i = 0; i < 7; i++) {
@@ -94,7 +94,7 @@
       links.push([[0.214, y], [0.228, y], [0.228, y + 0.020], [0.214, y + 0.020]],
         [[0.240, y + 0.002], [0.250, y + 0.002], [0.250, y + 0.018], [0.240, y + 0.018]]);
     }
-    K.prof(g, "saw.links", links, 0.023, mat.black, { bevel: 0.0008, x: -0.0535 });
+    K.tag(K.prof(g, "saw.links", links, 0.023, mat.black, { bevel: 0.0008, x: -0.0535 }), "part_box");
 
     // HEAT SHIELD over the heavy barrel, gas cylinder + ribbed handguard under
     K.tube(g, 0.021, 0.022, 0.740, 14, blued, 0, BORE, -0.790);

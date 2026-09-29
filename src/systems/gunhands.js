@@ -198,7 +198,7 @@
         [0.95, 1.00, "latch", "support", 0.04],
       ],
       eject: 0.36, grab: 0.58, seat: 0.82, cover: [0.10, 0.20, 0.90, 0.95], carry: "l", fresh: "box",
-      at: [-0.14, 1.40, 0.70], work: [0.40, -0.18, 0.90], fp: [-0.06, 0, 0.04, 0.12, 0.15],
+      at: [-0.06, 1.40, 0.70], work: [0.40, -0.18, 0.90], fp: [-0.06, 0, 0.04, 0.12, 0.15],
     },
     // a rocket goes in the FRONT of the tube
     rocket: {
@@ -386,6 +386,12 @@
     model.updateMatrix();
     const pt = function (key, v, pv) { if (v) R.pts[key] = { p: v.clone(), pv: pv || null }; };
     const authored = function (k) { return A[k] || g[k] || null; };
+    // the appearance's own anchor RECORDS (weapons/appearances/sidearm.js
+    // contract: { pos, quat, well, ... } in model space): the remodelled guns
+    // name where the magazine body, its well, the bolt knob and the charging
+    // handle ARE, so those win over anything measured here
+    const AR = ud.anchors || {};
+    const rec = function (k) { return AR[k] && AR[k].pos && AR[k].pos.isVector3 ? AR[k] : null; };
     pt("support", g.support || A.support || null);
     const INSERT = 0.12;                        // a hand's length out of the well, model units (~6 cm)
     // the gun without the part: which way is OUT of it
@@ -407,13 +413,15 @@
       if (!list.length) return null;
       let st = stats(gather(list, model));
       if (!st) return null;
+      let base = null;                   // a pistol's baseplate: where the palm goes
       // a pistol draws only its baseplate: give the magazine its body, up
       // the drawn grip to the frame (hidden inside the grip while seated)
-      if (name === "mag" && st.size.y < 0.06) {
+      if (name === "mag" && st.size.y < 0.09) {
         let owner = null;
         model.traverse(function (o) { if (!owner && o.userData && o.userData.fireGrip) owner = o; });
         const h = owner && owner.userData.fireGrip;
         if (h) {
+          base = st.c.clone();
           toModel(owner, model, _M);
           const top = new THREE.Vector3(0, h.at[0], h.at[1]).applyMatrix4(_M);
           const len = top.distanceTo(st.c);
@@ -428,9 +436,17 @@
           st = stats(gather(list, model));
         }
       }
-      const dir = outOf(list, st);
+      // the way OUT of the gun: the anchor's own insertion axis (+Y up into
+      // the well, reversed), else measured from the rest of the gun
+      const mr = rec("mag");
+      const dir = mr && mr.quat ? new THREE.Vector3(0, -1, 0).applyQuaternion(mr.quat).normalize() : outOf(list, st);
       const pv = pivotFor(model, list, st.c, name);
-      const grab = new THREE.Vector3(st.box.min.x, st.c.y, st.c.z);   // the part's own left face
+      // where the hand holds it: a pistol's magazine is inside the grip, so
+      // the palm is on its BASEPLATE (it slaps it home); an ammo box is taken
+      // by its left side; a rifle magazine by its body (the anchor's centre)
+      const grab = base ? base.clone()
+        : name === "box" ? new THREE.Vector3(st.box.min.x, mr ? mr.pos.y : st.c.y, mr ? mr.pos.z : st.c.z)
+        : mr ? mr.pos.clone() : new THREE.Vector3(st.box.min.x, st.c.y, st.c.z);
       pt(name === "mag" ? "well" : name, grab);
       pt(below, grab.clone().addScaledVector(dir, INSERT));
       R.pv[name] = pv;
@@ -453,7 +469,8 @@
         R.pv.charge = pv;
         R.chargeTravel = kind === "slide" ? 0.16 * len : 0.10;
         // a slide is grabbed over its rear serrations, a handle by itself
-        pt("charge", kind === "slide" ? new THREE.Vector3(st.box.min.x, (st.c.y + st.box.max.y) / 2, st.box.max.z - 0.22 * len) : st.c, pv);
+        const cr = rec("charge");
+        pt("charge", cr ? cr.pos : kind === "slide" ? new THREE.Vector3(st.box.min.x, (st.c.y + st.box.max.y) / 2, st.box.max.z - 0.22 * len) : st.c, pv);
       } else pt("charge", authored("charge") || (R.pts.well && R.pts.well.p));
     } else if (style === "belt") {
       const cov = partObjects(model, "cover");
@@ -468,7 +485,8 @@
         const pv = pivotFor(model, cov, new THREE.Vector3(cst.c.x, cst.box.max.y, cst.box.min.z), "cover");   // hinged at the front
         R.pv.cover = pv;
         pt("latch", new THREE.Vector3(cst.c.x, cst.box.max.y, cst.box.max.z), pv);
-        pt("tray", new THREE.Vector3(cst.box.min.x, cst.box.min.y, cst.c.z));
+        // the feed tray: the belt's own well (the anchor), else under the cover's left edge
+        pt("tray", rec("mag") && rec("mag").well ? rec("mag").well : new THREE.Vector3(cst.box.min.x, cst.box.min.y, cst.c.z));
       } else { pt("latch", authored("charge")); pt("tray", authored("charge")); }
       if (!magLike("box", "boxBelow")) {
         const w = authored("mag");
@@ -562,7 +580,7 @@
         const pv = pivotFor(model, all, at, "bolt");
         R.pv.bolt = pv;
         R.boltTravel = travel;
-        pt("bolt", knobC, pv);
+        pt("bolt", rec("bolt") ? rec("bolt").pos : knobC, pv);
         // the port on top of the action, in front of the handle where the bolt body lies
         const port = A.port || new THREE.Vector3(act ? act.c.x + act.size.x * 0.15 : 0.01, act ? act.box.max.y : axisY + 0.03, knobC.z - travel * 0.55);
         pt("port", port);
