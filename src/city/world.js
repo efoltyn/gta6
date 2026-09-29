@@ -53,6 +53,9 @@
     armRng();
     const C = CBZ.CITY;
     const cx = C.center.x, cz = C.center.z;
+    // GANG CITY STREAMS (core/citystream.js): the live city boots as a slice
+    // around the downtown spawn and builds the rest as the player moves.
+    if (CBZ.streamBegin) CBZ.streamBegin(cx, cz);
     const N = C.blocks, BLK = C.block, ROAD = C.road;
     const step = BLK + ROAD;
     const half = (N * step) / 2;

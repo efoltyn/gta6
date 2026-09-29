@@ -885,8 +885,13 @@
       if (!campaignMode && !jailbreakEntry) game.cityHolstered = true;
       // CITY SLICES: whatever the origin, save or airport said, a slice
       // starts you in the slice (on its nearest street, facing open space).
-      if (CBZ.slice && CBZ.slicePlacePlayer) {
+      if (CBZ.slice && !CBZ.slice.stream && CBZ.slicePlacePlayer) {
         try { if (CBZ.slicePlacePlayer(A, P) && CBZ.cityFaceOpen) CBZ.cityFaceOpen(P); } catch (e) { console.error("[slice spawn]", e); }
+      }
+      // STREAMED: wherever the origin/save put the player, build what they can
+      // see before the first frame (re-centres the slice on them)
+      if (CBZ.slice && CBZ.slice.stream && CBZ.streamTick) {
+        try { CBZ.streamTick(true); } catch (e) { console.error("[stream first tick]", e); }
       }
       if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     },

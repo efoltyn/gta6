@@ -175,7 +175,12 @@
     function judge(o, depth) {
       const b = boundsOf(o);
       if (b && b.isEmpty()) { stats.kept++; return; }
-      if (b && outside(b)) { o.parent.remove(o); stats.removed++; return; }
+      if (b && outside(b)) {
+        const parent = o.parent;
+        parent.remove(o); stats.removed++;
+        if (s.stream && CBZ.streamParkPruned) CBZ.streamParkPruned(o, parent, b.clone(), null, null);
+        return;
+      }
       if (b && inside(b)) { stats.kept++; return; }
       // straddles the edge, or holds horizon somewhere inside: open it
       if (o.children && o.children.length && depth < 6) {
@@ -193,18 +198,32 @@
       if (!c || c.minX == null) return true;
       return CBZ.sliceKeepsRect(c.minX, c.maxX, c.minZ, c.maxZ);
     };
+    // streamed: what leaves the broadphase is parked per 400 m cell and
+    // comes back when the player does (core/citystream.js)
+    const cells = s.stream ? new Map() : null;
+    const bucket = function (c, kind) {
+      if (!cells) return;
+      const kx = Math.floor((c.minX + c.maxX) / 800), kz = Math.floor((c.minZ + c.maxZ) / 800);
+      const k = kx + "," + kz;
+      let e = cells.get(k);
+      if (!e) cells.set(k, e = { rect: { minX: kx * 400, maxX: kx * 400 + 400, minZ: kz * 400, maxZ: kz * 400 + 400 }, cols: [], plats: [] });
+      e[kind].push(c);
+      e.rect.minX = Math.min(e.rect.minX, c.minX); e.rect.maxX = Math.max(e.rect.maxX, c.maxX);
+      e.rect.minZ = Math.min(e.rect.minZ, c.minZ); e.rect.maxZ = Math.max(e.rect.maxZ, c.maxZ);
+    };
     const cols = CBZ.colliders;
     if (cols && colStart != null && colStart < cols.length) {
       let w = colStart;
-      for (let i = colStart; i < cols.length; i++) { const c = cols[i]; if (keepRect(c)) cols[w++] = c; else stats.colliders++; }
+      for (let i = colStart; i < cols.length; i++) { const c = cols[i]; if (keepRect(c)) cols[w++] = c; else { stats.colliders++; bucket(c, "cols"); } }
       cols.length = w;
     }
     const pl = CBZ.platforms;
     if (pl && platStart != null && platStart < pl.length) {
       let w = platStart;
-      for (let i = platStart; i < pl.length; i++) { const p = pl[i]; if (keepRect(p)) pl[w++] = p; else stats.platforms++; }
+      for (let i = platStart; i < pl.length; i++) { const p = pl[i]; if (keepRect(p)) pl[w++] = p; else { stats.platforms++; bucket(p, "plats"); } }
       pl.length = w;
     }
+    if (cells && CBZ.streamParkColliders) for (const e of cells.values()) CBZ.streamParkColliders(e.rect, e.cols, e.plats);
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
     CBZ.slicePruneResult = stats;
     return stats;
@@ -285,7 +304,10 @@
      is only needed by a slice boot, so only a slice boot pays for parsing it.
      document.write from a parser-inserted script inserts a parser-blocking
      tag right here, before worldmap.js reads it. */
-  if (S && typeof document !== "undefined" && document.readyState === "loading") {
+  // a streamed city boot (core/citystream.js, the default) needs it too;
+  // only ?stream=0 without a slice skips it
+  const wantManifest = S || !(q && (q.get("stream") === "0" || q.get("stream") === "false"));
+  if (wantManifest && typeof document !== "undefined" && document.readyState === "loading") {
     try {
       const me = document.currentScript && document.currentScript.src;
       const v = me && /\?v=([^&#]+)/.exec(me);

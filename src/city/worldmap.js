@@ -849,16 +849,20 @@
     return plan;
   }
 
+  // returns the records it pushed, by array, so a streamed late build can
+  // swap them for the real ones (core/citystream.js)
   function sliceReplay(city, rec) {
-    const d = rec && rec.data; if (!d) return;
-    for (const r of (d.regions || [])) CBZ.registerCityRegion(city, Object.assign({}, r));
-    for (const w of (d.waterBodies || [])) CBZ.registerCityWaterBody(city, Object.assign({}, w));
+    const d = rec && rec.data, out = {}; if (!d) return out;
+    const note = function (k, x) { (out[k] = out[k] || []).push(x); };
+    for (const r of (d.regions || [])) { const x = CBZ.registerCityRegion(city, Object.assign({}, r)); if (x) note("regions", x); }
+    for (const w of (d.waterBodies || [])) { const x = CBZ.registerCityWaterBody(city, Object.assign({}, w)); if (x) note("waterBodies", x); }
     for (const k of ["roads", "noSpawn", "frontierRoads", "frontierLandmarks"]) {
       if (!d[k] || !d[k].length) continue;
       const arr = (city[k] = city[k] || []);
-      for (const x of d[k]) arr.push(Object.assign({}, x));
+      for (const x of d[k]) { const c = Object.assign({}, x); arr.push(c); note(k, c); }
     }
-    for (const bl of (d.biomeBlends || [])) CBZ._biomeBlendSpecs.push(Object.assign({}, bl));
+    for (const bl of (d.biomeBlends || [])) { const c = Object.assign({}, bl); CBZ._biomeBlendSpecs.push(c); note("biomeBlends", c); }
+    return out;
   }
 
   /* THE RECORDER (?sliceTrace=1, tools/city-slice-trace.mjs only). After
@@ -944,6 +948,29 @@
     };
   }
 
+  // (also run on content a streamed city builds late: core/citystream.js)
+  CBZ.cityWorldFogSweep = function (rootObj) {
+    const city = { root: rootObj };
+    if (CBZ.CONFIG && CBZ.CONFIG.WORLD_SURFACE_FOG == null) CBZ.CONFIG.WORLD_SURFACE_FOG = true;
+    if ((!CBZ.CONFIG || CBZ.CONFIG.WORLD_SURFACE_FOG !== false) && CBZ.terrainFogScale && city.root) {
+      city.root.traverse(function (o) {
+        if (!o.isMesh || !o.userData || !o.userData.worldSurface) return;
+        const m = o.material;
+        if (!m || m.isShaderMaterial) return;
+        // the tag doubles as the dedupe: terrainFogScale sets it, so a shared
+        // material is wrapped exactly once (and a small mesh that fails the
+        // size gate below never blocks a big sibling from adopting later)
+        if (m.userData && m.userData._cbzFogScaled) return;
+        const g = o.geometry;
+        if (!g) return;
+        if (!g.boundingSphere) { try { g.computeBoundingSphere(); } catch (e) { return; } }
+        if (!g.boundingSphere || !(g.boundingSphere.radius * Math.max(o.scale.x, o.scale.z) >= 60)) return;
+        CBZ.terrainFogScale(m, 0.10);
+        m.needsUpdate = true;
+      });
+    }
+  };
+
   // world.js calls this once, after the original expansion island. Runs every
   // registered landmass builder in order; each is independently try/caught so
   // one bad biome can never take down the rest of the world.
@@ -974,7 +1001,11 @@
     const plan = CBZ.slice ? slicePlan(list) : null;
     for (const b of list) {
       if (boot) boot(b.bootKey);          // the loading meter's per-builder tick
-      if (plan && plan.skip.has(bkey(b))) { sliceReplay(city, plan.recs[bkey(b)]); continue; }
+      if (plan && plan.skip.has(bkey(b))) {
+        const replayed = sliceReplay(city, plan.recs[bkey(b)]);
+        if (CBZ.streamQueueBuilder) CBZ.streamQueueBuilder(bkey(b), plan.recs[bkey(b)], b.fn, replayed);
+        continue;
+      }
       const t0 = trace ? performance.now() : 0;
       if (trace) trace.before(b);
       try { b.fn(city); } catch (e) { console.error("[landmass]", e); }
@@ -995,24 +1026,7 @@
     // builders: big worldSurface meshes adopt the shared terrainFogScale.
     // Hand-dialled materials are tagged and skipped; ShaderMaterials (the
     // sea) own their fog; small meshes (< 60m radius) are props, not ground.
-    if (CBZ.CONFIG && CBZ.CONFIG.WORLD_SURFACE_FOG == null) CBZ.CONFIG.WORLD_SURFACE_FOG = true;
-    if ((!CBZ.CONFIG || CBZ.CONFIG.WORLD_SURFACE_FOG !== false) && CBZ.terrainFogScale && city.root) {
-      city.root.traverse(function (o) {
-        if (!o.isMesh || !o.userData || !o.userData.worldSurface) return;
-        const m = o.material;
-        if (!m || m.isShaderMaterial) return;
-        // the tag doubles as the dedupe: terrainFogScale sets it, so a shared
-        // material is wrapped exactly once (and a small mesh that fails the
-        // size gate below never blocks a big sibling from adopting later)
-        if (m.userData && m.userData._cbzFogScaled) return;
-        const g = o.geometry;
-        if (!g) return;
-        if (!g.boundingSphere) { try { g.computeBoundingSphere(); } catch (e) { return; } }
-        if (!g.boundingSphere || !(g.boundingSphere.radius * Math.max(o.scale.x, o.scale.z) >= 60)) return;
-        CBZ.terrainFogScale(m, 0.10);
-        m.needsUpdate = true;
-      });
-    }
+    CBZ.cityWorldFogSweep(city.root);
     // MAP_RESERVE_V1: regression alarm. After every landmass is placed, report
     // any two PEER landmasses (biome floors, skirts, massifs, island POIs) that
     // interpenetrate — the owner's "terrain overlaps terrain" complaint. This
