@@ -1,32 +1,56 @@
 /* ============================================================
-   core/fxwarm.js — play-start SHADER/FX PREWARM (the first-rocket freeze).
+   core/fxwarm.js — SHADER PROGRAMS: queue them early, use them late.
 
-   three.js r128 compiles a material's GLSL program the FIRST time an object
-   using it is actually RENDERED — and every combat-FX pool in this game
-   (muzzle flashes, tracer lines, rocket smoke, explosion point-bursts,
-   fireball/smoke sprites) sits parked visible=false until the first shot.
-   Their programs therefore used to compile SYNCHRONOUSLY mid-fight: on iPad
-   Safari several compileShader/linkProgram calls stacked into the first
-   fire/impact frame — a multi-hundred-ms freeze, "sometimes" because it is
-   exactly once per session (per program variant).
+   Two jobs, one walker.
 
-   renderer.compile(scene, camera) walks the scene with traverse() — NOT
-   traverseVisible() — initializing programs for INVISIBLE objects too, which
-   is exactly what a hidden pool needs. Run it once per mode entry on the
-   first playing frame (the play-start transition beat, where a one-time cost
-   is invisible; quality.js's governor also ignores this warmup window), after
-   the sibling prewarm blocks in crashfx/gunfx/gore have parked every
-   once-lazy pool object in the scene at load.
+   1. PLAY-START PREWARM (the first-rocket freeze). three.js r128 compiles a
+      material's GLSL program the FIRST time an object using it is drawn, and
+      every combat-FX pool (muzzle flashes, tracers, rocket smoke, explosion
+      bursts, fireball sprites) sits parked visible=false until the first
+      shot — so their programs used to compile mid-fight, a multi-hundred-ms
+      freeze on iPad. Once per mode entry, on the first playing frame, every
+      material in the ACTIVE world (hidden pools included) is compiled.
 
-   Cost: one scene traverse + only the not-yet-compiled programs (already-
-   compiled materials are cache hits). Feature-detected everywhere; a stub
-   renderer without .compile silently skips. No flag: this only moves work
-   that was already guaranteed to happen from mid-fight to the load beat.
+   2. BUILD-TIME QUEUE (CBZ.shaderQueue). The vendored three.r128.min.js is
+      patched (see its header, THREE.CBZ_LAZY_PROGRAMS) so initMaterial no
+      longer asks the driver about a program the instant it links it. With
+      renderer.debug.checkShaderErrors=false, compile() now issues
+      compileShader/linkProgram and RETURNS; Chrome's GPU process compiles
+      while the main thread keeps building the city. The city calls this
+      after every landmass builder and after the batch pass, so by the first
+      frame most of Gang City's ~290 programs are already linked and the
+      first draw only reads them back. Same shaders, same pixels: only WHEN
+      the compile happens moved (UE's PSO precaching, in 30 lines).
+      Measured 2026-09-28 (tools/speed.mjs, real GPU): first frame + settle
+      were 5.8 s of the city's 22 s load, 2.8 s of it getProgramParameter.
+
+   WHAT GETS WALKED. Not `renderer.compile(scene, camera)` any more:
+     • it walked the whole scene, so a CITY start compiled the hidden
+       prison's and island's programs too (68 + dozens) and, with the queue
+       above, would have put them AHEAD of the city's in the GPU's line;
+     • it keyed nothing, so every call re-derived a program key for all
+       ~160k meshes.
+   The walker skips the roots of worlds the current mode is not showing,
+   visits each (material, object kind) pair once per material version, and
+   hands compile() a stand-in scene that carries the real fog, environment
+   and lights but "contains" only the new representatives.
+
+   ANTIFRAGILE, KEPT. `renderer.compile` looks every material up in a
+   WeakMap; a mesh whose `.material` is a raw colour integer throws and used
+   to abort the walk for everything after it. The walker never hands such a
+   mesh to three; it counts it and says so once.
+
+   r128 NOTE: `compileAsync` / KHR_parallel_shader_compile do not exist here
+   (r158+). Without the vendor patch this file still works: compile() just
+   blocks, exactly as it always did, and the build-time queue stays off
+   (blocking there would only move the wait, not hide it).
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
   if (!CBZ || !window.THREE) return;
+  const THREE = window.THREE;
+  const LAZY = !!THREE.CBZ_LAZY_PROGRAMS;
 
   let warmed = "";                 // mode we last compiled for ("" = never)
   CBZ.onAlways(1.2, function () {
@@ -35,119 +59,188 @@
     const key = g.mode || "?";
     if (key === warmed) return;
     warmed = key;                  // one attempt per mode entry, success or not
-    /* A PAGE THAT IS NOT DRAWING HAS NOTHING TO PRE-COMPILE. With
-       ?cfg_RENDER_FRAMES=0 (core/loop.js) no draw call is ever made, so every
-       program this would build is dead work — and on a software rasterizer
-       walking a 25 km scene compiling on the order of a hundred programs is
-       minutes of it, which is exactly the wall that made headless Gang City
-       untestable. Skipping it is not a behaviour change for players: the flag
-       only exists for tools. */
+    /* A PAGE THAT IS NOT DRAWING HAS NOTHING TO PRE-COMPILE (?cfg_RENDER_FRAMES=0,
+       tools only): every program would be dead work, minutes of it on a
+       software rasterizer. */
     if (CBZ.CONFIG && CBZ.CONFIG.RENDER_FRAMES === false) return;
     const r = CBZ.renderer, sc = CBZ.scene, cam = CBZ.camera;
     if (!r || typeof r.compile !== "function" || !sc || !cam) return;
-    warm(r, sc, cam);
+    lastReport = queue(sc, null);
   });
 
-  /* ==================================================================
-     WHY THIS IS NOT JUST `r.compile(sc, cam)` IN A TRY/CATCH ANY MORE.
-
-     `renderer.compile` walks the scene with `scene.traverse` and, for every
-     object, calls `properties.get(material)` — and `WebGLProperties` is a raw
-     `WeakMap`. A WeakMap key MUST be an object, so the instant it reaches a
-     mesh whose `.material` is a raw colour INTEGER instead of a Material, it
-     throws `TypeError: Invalid value used as weak map key`.
-
-     THE BLAST RADIUS IS THE PART THAT WAS MISSED. `traverse` is depth-first
-     and the throw unwinds the WHOLE walk — so the first bad material does not
-     merely fail to warm itself, it ABORTS PREWARMING FOR EVERY OBJECT AFTER IT
-     IN TRAVERSAL ORDER. The old body was `try { r.compile(sc, cam); } catch
-     (e) {}`: completely silent. So the loss was never even 29% of the scene
-     with certainty — it was "everything after the first offender", and nobody
-     could tell, because the catch printed nothing for however long it was live.
-
-     THE FIX IS TO MAKE THE WALK ANTIFRAGILE, not to chase the current
-     offenders. Before compiling we swap a shared dummy Material over anything
-     whose `.material` is not a Material, compile, then restore. `compile()`
-     never renders a frame, so the swap is invisible by construction. A future
-     bad material costs one warning line instead of the rest of the scene.
-
-     r128 NOTE, checked against the vendored source: `compileAsync` and
-     `KHR_parallel_shader_compile` do not exist here — they landed in r158, 30
-     revisions later — so this is synchronous by necessity, not by choice.
-     `renderer.info.programs` and `renderer.properties` ARE public in r128,
-     which is what makes the audit below possible without patching three.js.
-     ================================================================== */
-  let DUMMY = null;
-  let lastReport = null;
-
-  function warm(r, sc, cam) {
-    const THREE = window.THREE;
-    if (!DUMMY && THREE) { DUMMY = new THREE.MeshBasicMaterial({ color: 0x808080 }); DUMMY._fxwarmDummy = true; }
-    const swapped = [];
-    let bad = 0;
-    try {
-      sc.traverse(function (o) {
-        if (!o || !("material" in o) || !o.material) return;
-        const m = o.material;
-        if (Array.isArray(m)) {
-          let dirty = false;
-          for (let i = 0; i < m.length; i++) if (!m[i] || !m[i].isMaterial) dirty = true;
-          if (dirty) { bad++; swapped.push([o, m]); o.material = DUMMY; }
-          return;
-        }
-        if (!m.isMaterial) { bad++; swapped.push([o, m]); o.material = DUMMY; }
-      });
-    } catch (e) {
-      try { console.warn("[fxwarm] material scan failed:", e && e.message); } catch (e2) {}
-    }
-    let err = null;
-    try { r.compile(sc, cam); } catch (e) { err = e; }
-    for (let i = 0; i < swapped.length; i++) swapped[i][0].material = swapped[i][1];
-    // LOUD, ONCE. The whole reason this bug survived is that its predecessor
-    // said nothing at all.
-    if (bad || err) {
-      try {
-        console.warn("[fxwarm] " + bad + " object(s) carry a non-Material `.material` (a raw colour?) · " +
-          "they were swapped for a dummy so the prewarm walk could finish" +
-          (err ? "; compile still threw: " + (err && err.message) : ""));
-      } catch (e2) {}
-    }
-    lastReport = { badMaterials: bad, threw: !!err, programs: (r.info && r.info.programs && r.info.programs.length) || 0 };
+  // ---- the walker ---------------------------------------------------------
+  // material -> { v: material.version, l: light signature, f: bitmask of
+  // object kinds queued }. A program key carries the light COUNTS, so a
+  // material queued under a different light set is queued again.
+  const seen = new WeakMap();
+  let lightSig = "";
+  function kindBits(o) {
+    return (o.isInstancedMesh ? 1 : 0) | (o.isSkinnedMesh ? 2 : 0) | (o.isPoints ? 4 : 0) |
+      (o.isLine ? 8 : 0) | (o.isSprite ? 16 : 0) |
+      (o.geometry && o.geometry.morphAttributes && o.geometry.morphAttributes.position ? 32 : 0);
+  }
+  function fresh(m, bits) {
+    const s = seen.get(m);
+    if (!s || s.v !== m.version || s.l !== lightSig) { seen.set(m, { v: m.version, l: lightSig, f: bits }); return true; }
+    if ((s.f & bits) === bits) return false;
+    s.f |= bits;
+    return true;
   }
 
-  /* THE RATCHET. `renderer.properties` is public in r128, and a material that
-     was actually compiled has a non-empty `programs` set on its property
-     record — so "how much of the scene never got warmed" stops being a guess.
-     `unwarmed` and `badMaterials` both belong at 0. `programs` is evidence:
-     it is the count of unique SHADER PERMUTATIONS, and permutations are keyed
-     on a ~50-field tuple that includes the exact COUNTS of each light type —
-     so a world with dynamic lighting can still compile fresh programs after
-     boot, and a rising number here is the thing to look at if a stutter
-     survives this fix. */
+  // The worlds this mode is NOT showing: never compile them for it.
+  function hiddenRoots() {
+    const out = new Set();
+    const add = function (root) { if (root && root.visible === false) out.add(root); };
+    add(CBZ.prisonRoot);
+    add(CBZ.surv && CBZ.surv.arena && CBZ.surv.arena.root);
+    add(CBZ.city && CBZ.city.arena && CBZ.city.arena.root);
+    return out;
+  }
+
+  // A stand-in scene: the real fog/environment/lights, but compile() only
+  // "finds" the representatives we give it. isScene keeps three from
+  // swapping in its empty default scene (which has no fog → wrong program).
+  const STAND_IN = {
+    isScene: true, fog: null, environment: null, background: null, overrideMaterial: null,
+    _lights: null, _objs: null,
+    traverseVisible: function (cb) { const l = this._lights; for (let i = 0; i < l.length; i++) cb(l[i]); },
+    traverse: function (cb) { const o = this._objs; for (let i = 0; i < o.length; i++) cb(o[i]); },
+  };
+
+  let lastReport = null;
+
+  // Walk `roots` (an Object3D or an array of them; default the whole scene),
+  // pick one object per not-yet-queued (material, kind), and compile those.
+  // opts.skip(o) → true prunes o's subtree for this call (it will be picked
+  // up by a later call once it is ready).
+  function queue(roots, opts) {
+    const r = CBZ.renderer, sc = CBZ.scene, cam = CBZ.camera;
+    const rep = { objects: 0, programsBefore: 0, programs: 0, badMaterials: 0, threw: false };
+    if (!r || typeof r.compile !== "function" || !sc || !cam) return rep;
+    const skip = opts && opts.skip;
+    const hidden = hiddenRoots();
+    if (CBZ.lightPinApply) { try { CBZ.lightPinApply(); } catch (e) {} }   // the frame's light counts, now
+    const lights = [];
+    sc.traverseVisible(function (o) { if (o.isLight && o.layers.test(cam.layers)) lights.push(o); });
+    const n = { D: 0, P: 0, S: 0, H: 0, A: 0, R: 0, s: 0 };
+    for (let i = 0; i < lights.length; i++) {
+      const L = lights[i];
+      if (L.isDirectionalLight) n.D++; else if (L.isPointLight) n.P++; else if (L.isSpotLight) n.S++;
+      else if (L.isHemisphereLight) n.H++; else if (L.isRectAreaLight) n.R++; else n.A++;
+      if (L.castShadow) n.s++;
+    }
+    lightSig = n.D + "|" + n.P + "|" + n.S + "|" + n.H + "|" + n.R + "|" + n.s + "|" + (r.shadowMap.enabled ? 1 : 0) + "|" + (sc.fog ? (sc.fog.isFogExp2 ? 2 : 1) : 0);
+    const reps = [];
+    let bad = 0;
+    function visit(o) {
+      if (hidden.has(o)) return;
+      if (skip && skip(o)) return;
+      const m = o.material;
+      if (m) {
+        const bits = kindBits(o);
+        if (Array.isArray(m)) {
+          let ok = true, want = false;
+          for (let i = 0; i < m.length; i++) { if (!m[i] || !m[i].isMaterial) { ok = false; break; } }
+          if (!ok) bad++;
+          else for (let i = 0; i < m.length; i++) if (fresh(m[i], bits)) want = true;
+          if (want) reps.push(o);
+        } else if (!m.isMaterial) bad++;
+        else if (fresh(m, bits)) reps.push(o);
+      }
+      const k = o.children;
+      for (let i = 0; i < k.length; i++) visit(k[i]);
+    }
+    const list = Array.isArray(roots) ? roots : [roots || sc];
+    for (let i = 0; i < list.length; i++) if (list[i]) visit(list[i]);
+    rep.objects = reps.length;
+    rep.badMaterials = bad;
+    rep.programsBefore = (r.info && r.info.programs && r.info.programs.length) || 0;
+    if (reps.length) {
+      STAND_IN.fog = sc.fog; STAND_IN.environment = sc.environment; STAND_IN.background = sc.background;
+      STAND_IN._lights = lights; STAND_IN._objs = reps;
+      try { r.compile(STAND_IN, cam); } catch (e) { rep.threw = true; try { console.warn("[fxwarm] compile threw:", e && e.message); } catch (e2) {} }
+      STAND_IN._lights = null; STAND_IN._objs = null;
+      // push the queued compile/link commands to the GPU process NOW; left in
+      // the command buffer they would wait for this long task to end.
+      try { const gl = r.getContext(); if (gl && gl.flush) gl.flush(); } catch (e) {}
+    }
+    rep.programs = (r.info && r.info.programs && r.info.programs.length) || 0;
+    if (bad) {
+      try { console.warn("[fxwarm] " + bad + " object(s) carry a non-Material `.material` (a raw colour?) · skipped"); } catch (e) {}
+    }
+    return rep;
+  }
+
+  // BUILD-TIME QUEUE. Only when the compile does not block (vendor patch) and
+  // frames are actually drawn. `root` is walked from child index `from`
+  // (cursor per root) so a builder's new children are visited once; call
+  // with {full:true} to rewalk everything (after the batch pass).
+  const cursors = new WeakMap();
+  CBZ.shaderQueue = function (root, opts) {
+    if (!LAZY) return null;
+    if (CBZ.CONFIG && CBZ.CONFIG.RENDER_FRAMES === false) return null;
+    if (!root) return null;
+    let objs = root;
+    if (!(opts && opts.full)) {
+      const from = cursors.get(root) || 0;
+      objs = root.children.slice(from);
+      cursors.set(root, root.children.length);
+      if (!objs.length) return null;
+    }
+    return queue(objs, opts);
+  };
+  CBZ.shaderQueueStats = function () { return lastReport; };
+
+  /* ?cfg_PROGRAM_LOG=1 — every new GL program with the light counts in its
+     key and who asked for it. The tool for "why did this material compile
+     twice": read CBZ.programLog after a boot. Off by default, zero cost. */
+  if (CBZ.CONFIG && CBZ.CONFIG.PROGRAM_LOG && CBZ.renderer && CBZ.renderer.info && CBZ.renderer.info.programs) {
+    const arr = CBZ.renderer.info.programs, push = arr.push;
+    const log = CBZ.programLog = [];
+    arr.push = function (p) {
+      try {
+        const k = String(p && p.cacheKey || "").split(",");
+        const st = String(new Error().stack || "").split("\n").slice(2, 9)
+          .map(function (l) { const m = l.match(/(src\/[^:?)]+\.js)(?:\?[^:)]*)?:(\d+)/); return m ? m[1].replace("src/", "") + ":" + m[2] : ""; })
+          .filter(Boolean).filter(function (s) { return s.indexOf("vendor/") < 0; }).slice(0, 3).join(" < ");
+        log.push({ t: Math.round(performance.now()), type: k[0], dir: +k[51], point: +k[52], spot: +k[53], inst: k[5], enc: k[4], by: st, state: CBZ.game && CBZ.game.state });
+      } catch (e) {}
+      return push.apply(this, arguments);
+    };
+  }
+
+  /* THE RATCHET. A material that was actually compiled has a non-empty
+     `programs` set on its property record — so "how much of the scene never
+     got warmed" stops being a guess. `unwarmed` and `badMaterials` both
+     belong at 0 for the active world. `programs` is the count of unique
+     SHADER PERMUTATIONS (keyed on a ~50-field tuple including light counts). */
   CBZ.fxWarmAudit = function () {
     const r = CBZ.renderer, sc = CBZ.scene;
     const out = { materials: 0, unwarmed: 0, badMaterials: 0, programs: 0, warmedMode: warmed };
     if (!r || !sc) return out;
     out.programs = (r.info && r.info.programs && r.info.programs.length) || 0;
     if (lastReport) out.badMaterials = lastReport.badMaterials;
-    const seen = new Set();
-    try {
-      sc.traverse(function (o) {
-        if (!o || !("material" in o) || !o.material) return;
-        const list = Array.isArray(o.material) ? o.material : [o.material];
+    const hidden = hiddenRoots();
+    const mats = new Set();
+    (function visit(o) {
+      if (hidden.has(o)) return;
+      const m = o.material;
+      if (m) {
+        const list = Array.isArray(m) ? m : [m];
         for (let i = 0; i < list.length; i++) {
-          const m = list[i];
-          if (!m) continue;
-          if (!m.isMaterial) { out.badMaterials++; continue; }
-          if (seen.has(m)) continue;
-          seen.add(m);
-          out.materials++;
-          let p = null;
-          try { p = r.properties && r.properties.get(m); } catch (e) { p = null; }
-          if (!p || !p.programs || !p.programs.size) out.unwarmed++;
+          if (!list[i]) continue;
+          if (!list[i].isMaterial) { out.badMaterials++; continue; }
+          mats.add(list[i]);
         }
-      });
-    } catch (e) {}
+      }
+      for (let i = 0; i < o.children.length; i++) visit(o.children[i]);
+    })(sc);
+    mats.forEach(function (m) {
+      out.materials++;
+      let p = null;
+      try { p = r.properties && r.properties.get(m); } catch (e) { p = null; }
+      if (!p || !p.programs || !p.programs.size) out.unwarmed++;
+    });
     return out;
   };
 })();

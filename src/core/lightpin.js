@@ -147,7 +147,12 @@
     return on;
   }
 
-  CBZ.onAlways(97, function () {
+  // Exported so a program compiled OUTSIDE a frame (core/fxwarm.js queues
+  // the city's shaders while it is still being built) sees the same pinned
+  // light counts the next frame will: a builder's freshly-added lamps carry
+  // the default layer until this pass runs, and a compile against them keys
+  // a program no frame will ever ask for.
+  function pin() {
     if (!CBZ.CONFIG.LIGHT_COUNT_PIN || !CBZ.scene || !CBZ.camera) return;
     if (!pool) {
       pool = new THREE.Group();
@@ -167,7 +172,9 @@
     }
     budgetPass("point", OrigPoint, Math.max(1, +CBZ.CONFIG.LIGHT_BUDGET_POINT || 16));
     budgetPass("spot", OrigSpot, Math.max(1, +CBZ.CONFIG.LIGHT_BUDGET_SPOT || 8));
-  });
+  }
+  CBZ.lightPinApply = pin;
+  CBZ.onAlways(97, pin);
 
   // probe seam: live/culled/pinned counts for gates and perf probes
   CBZ.lightPinAudit = function () {

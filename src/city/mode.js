@@ -598,11 +598,18 @@
       // InstancedMesh pools. Runs AFTER batch (only sees leftovers) and BEFORE
       // freeze (its pools inherit matrixAutoUpdate=false). Flag-gated + inert off.
       if (CBZ.instanceStaticUnder) CBZ.instanceStaticUnder(A.root);
+      // what both passes left that carries a texture: one draw per material
+      // per tile, the material untouched (core/batch.js batchTexturedUnder)
+      if (CBZ.batchTexturedUnder) CBZ.batchTexturedUnder(A.root);
       // Freeze matrix recompute for everything provably static under the root
       // (core/staticfreeze.js) — after the batch pass (its merged output is
       // already frozen), before actors spawn (they arrive with live matrices).
       if (CBZ.freezeStaticUnder) CBZ.freezeStaticUnder(A.root);
       A.root.visible = true;
+      // the finished, batched world: queue whatever programs the builders'
+      // queue (core/fxwarm.js) has not, so the GPU links them during pop /
+      // traffic instead of inside the first frame.
+      if (CBZ.shaderQueue) CBZ.shaderQueue(A.root, { full: true });
       if (A.reset) A.reset();
       if (CBZ.fx) CBZ.fx.clear();
       if (CBZ.clearGore) CBZ.clearGore();

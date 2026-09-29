@@ -89,11 +89,23 @@
   // hashN(round(x*10), round(z*10), salt|0) — same rounds, same order, same
   // seed — so every world it generates is byte-for-byte the world it
   // generated before (the determinism gate agrees).
+  // 2026-09-28: the rounds are now inlined as well (squirrel was 0.68 s of
+  // SELF time in a 14 s build next to hash01's own 0.75 s: V8 was not
+  // inlining it at these call counts). Same arithmetic, same order; the
+  // world seed is read once per call as before.
   CBZ.hash01 = function (x, z, salt) {
-    let h = squirrel(Math.round(x * 10) | 0, CBZ.WORLD_SEED >>> 0);
-    h = squirrel(Math.round(z * 10) | 0, h);
-    h = squirrel(salt | 0, h);
-    return h / 4294967296;
+    let m = Math.imul((Math.round(x * 10) | 0) >>> 0, N1) >>> 0;
+    m = (m + (CBZ.WORLD_SEED >>> 0)) >>> 0;
+    m ^= m >>> 8; m = (m + N2) >>> 0; m ^= (m << 8) >>> 0; m = Math.imul(m, N3) >>> 0; m ^= m >>> 8;
+    let h = m >>> 0;
+    m = Math.imul((Math.round(z * 10) | 0) >>> 0, N1) >>> 0;
+    m = (m + h) >>> 0;
+    m ^= m >>> 8; m = (m + N2) >>> 0; m ^= (m << 8) >>> 0; m = Math.imul(m, N3) >>> 0; m ^= m >>> 8;
+    h = m >>> 0;
+    m = Math.imul((salt | 0) >>> 0, N1) >>> 0;
+    m = (m + h) >>> 0;
+    m ^= m >>> 8; m = (m + N2) >>> 0; m ^= (m << 8) >>> 0; m = Math.imul(m, N3) >>> 0; m ^= m >>> 8;
+    return (m >>> 0) / 4294967296;
   };
   // hashPick(list, x, z, salt) — order-independent weighted/plain pick
   CBZ.hashPick = function (list, x, z, salt) {

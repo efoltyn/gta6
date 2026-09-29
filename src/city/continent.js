@@ -595,9 +595,12 @@
       return Math.max(dx, dz);
     }
     function isLinkReg(r) { return !!(r && r.name && /bridge|causeway|link/i.test(r.name)); }
+    // regs is a snapshot, so the bridge filter is decided once, not per call:
+    // inSolidRegion runs per plate vertex and the regex was 0.74 s of the
+    // build (speed.mjs --profile, 2026-09-28).
+    const solidRegs = regs.filter(function (r) { return !isLinkReg(r); });
     function inSolidRegion(x, z, m) {    // non-bridge regions hold their land
-      for (const r of regs) {
-        if (isLinkReg(r)) continue;
+      for (const r of solidRegs) {
         if (r.kind === "circle") {
           if (Math.hypot(x - r.cx, z - r.cz) < r.r + (r.pad || 0) + m) return true;
         } else if (x > r.minX - m && x < r.maxX + m && z > r.minZ - m && z < r.maxZ + m) return true;
