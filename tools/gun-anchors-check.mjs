@@ -183,7 +183,7 @@ for (const w of rows) {
   checkRecord(w.id, model, req);
   const A = model.userData.anchors;
   if (A && !melee && opticId !== "none") {
-    const want = { iron: "iron", dot: "reddot", mgo: "scope", acog: "scope", m3a: "scope" }[opticId];
+    const want = { iron: "iron", dot: "reddot", mgo: "scope", acog: "scope", m3a: "scope", pgo7: "scope" }[opticId];
     if (want) ok(A.optic && (A.optic.type === want || (want === "reddot" && A.optic.type === "holo")), `${w.id}: optic type ${A.optic && A.optic.type}, weapon-data says ${opticId}`);
   }
   // THE BAKE: the NPC/rack build (noHand) merges static parts per material;

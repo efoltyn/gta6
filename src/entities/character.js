@@ -4676,13 +4676,36 @@
        null if the rig can't be solved. Writes rotations only. */
   const _armT = new THREE.Vector3(), _armV = new THREE.Vector3();
   const _armWrist = new THREE.Vector3();
+  /* NaN FIREWALL. Every arm solve blends INTO the pose already there
+     (rot += (target - rot) * k), so one non-finite input (a NaN weight, a
+     target read off a missing anchor, a target ON the shoulder -> 1/0) would
+     poison the shoulder for good: every later frame blends from NaN. So the
+     solvers refuse non-finite inputs, never write a non-finite answer, and
+     an arm that is already poisoned is put back to rest before solving. */
+  const finite3 = (v) => !!v && Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z);
+  function armWeight(k) {
+    if (k == null) return 1;
+    return Number.isFinite(k) ? Math.max(0, Math.min(1, k)) : 0;
+  }
+  function qOk(q) {
+    const l = q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w;
+    return Number.isFinite(l) && l > 1e-12;
+  }
+  const rotOk = (o) => qOk(o.quaternion);
+  function healArm(part, low) {
+    if (!rotOk(part)) part.rotation.set(0, 0, 0);
+    // the solvers only ever move the shoulder along z (protraction)
+    if (!Number.isFinite(part.position.z)) part.position.z = part.userData._armRestZ || 0;
+    if (!rotOk(low)) low.rotation.set(0, 0, 0);
+  }
   function charArmTo(ch, worldPoint, arm, k) {
     const P = ch && ch.profile;
     const part = ch && ch.parts && (arm === "l" ? ch.parts.la : ch.parts.ra);
     const low = part && part.userData && part.userData.low;
-    if (!P || !part || !low || !ch.body || !worldPoint) return null;
-    const blend = k == null ? 1 : Math.max(0, Math.min(1, k));
+    if (!P || !part || !low || !ch.body || !finite3(worldPoint)) return null;
+    const blend = armWeight(k);
     if (blend <= 0) return null;
+    healArm(part, low);
 
     // body space — the frame both the shoulder root and the pose live in
     ch.body.updateWorldMatrix(true, false);
@@ -4708,7 +4731,7 @@
     const maxR = (l1 + l2) * 0.985;
     const minR = Math.abs(l1 - l2) + 0.06;
     const d = Math.max(minR, Math.min(maxR, d0));
-    if (d < 1e-4) return null;
+    if (!(d0 > 1e-4)) return null;                      // a target ON the shoulder has no direction
     _armV.multiplyScalar(1 / d0);                       // unit direction to the target
 
     const cosE = Math.max(-1, Math.min(1, (d * d - l1 * l1 - l2 * l2) / (2 * l1 * l2)));
@@ -4723,7 +4746,8 @@
     const rx = Math.atan2(_armV.z, _armV.y) - Math.atan2(uzN, uyN * Math.cos(rz));
 
     const wrap = (a) => (a > Math.PI ? a - 2 * Math.PI : a < -Math.PI ? a + 2 * Math.PI : a);
-    part.rotation.x += (wrap(rx) - part.rotation.x) * blend;
+    if (!Number.isFinite(rx + rz + e)) return null;
+    part.rotation.x +=(wrap(rx) - part.rotation.x) * blend;
     part.rotation.y += (0 - part.rotation.y) * blend;
     part.rotation.z += (rz - part.rotation.z) * blend;
     low.rotation.x += (e - low.rotation.x) * blend;
@@ -5016,9 +5040,11 @@
     const part = ch && ch.parts && (arm === "l" ? ch.parts.la : ch.parts.ra);
     const low = part && part.userData && part.userData.low;
     const parent = part && part.parent;
-    if (!P || !low || !parent || !worldPoint) return null;
-    const blend = k == null ? 1 : Math.max(0, Math.min(1, k));
+    if (!P || !low || !parent || !finite3(worldPoint)) return null;
+    const blend = armWeight(k);
     if (blend <= 0) return null;
+    if (fore && !finite3(fore)) fore = null;
+    healArm(part, low);
     const cap = part.userData.cap;
     const l1 = Math.max(0.12, -low.position.y);
     const l2 = Math.max(0.10, -((cap && cap.userData.fit) ? cap.userData.fit.wristY : (P.handH - P.armLo)));
@@ -5119,6 +5145,7 @@
     _awM.makeBasis(_awX, _awY, _awZ);
     _awQ.setFromRotationMatrix(_awM);
     const e = -Math.acos(Math.max(-1, Math.min(1, _awU.dot(_awF))));
+    if (!Number.isFinite(e) || !qOk(_awQ)) return null;
     if (blend >= 1) part.quaternion.copy(_awQ);
     else part.quaternion.slerp(_awQ, blend);
     low.rotation.set(low.rotation.x + (e - low.rotation.x) * blend,
@@ -5239,8 +5266,9 @@
     const low = part && part.userData && part.userData.low;
     const hand = part && part.userData && part.userData.cap;
     const H = CBZ.fpHands;
-    if (!low || !hand || !hand.userData.fit || !H || !H.PLANT_CONTACT || !point || !normal || !along) return null;
-    const w = k == null ? 1 : Math.max(0, Math.min(1, k));
+    if (!low || !hand || !hand.userData.fit || !H || !H.PLANT_CONTACT || !finite3(point) || !finite3(normal) || !finite3(along)) return null;
+    if (normal.lengthSq() < 1e-10) return null;
+    const w = armWeight(k);
     if (w <= 0) return null;
     pose = pose && H.POSES[pose] ? pose : "plant";
     const pc = plantContact(pose);
