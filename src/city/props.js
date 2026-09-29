@@ -1198,19 +1198,22 @@
       }
     } else if (s.type === "hydrant") {
       if (imp) imp(p, n, { kind: "spark", power: 1 });
-      if (hole) hole(p, n, { size: 0.16 });
+      if (hole) hole(p, n, { size: 0.16, surface: "carpaint" });
       if (!s.gy || s.gy.t <= 0) {                      // POP — the street fountain
         s.gy = { x: s.x, z: s.z, t: 20, acc: 0 };
         geysers.push(s.gy);
       } else s.gy.t = Math.max(s.gy.t, 12);            // re-shot: keep it gushing
     } else if (s.type === "bin") {
       if (imp) imp(p, n, { kind: "chip", power: 0.9, color: 0x356b3e });
-      if (hole) hole(p, n, { size: 0.15 });
+      // tip FIRST (it swaps a kerb-kit instance for the live group), then
+      // mount the hole ON that group — a scene-parented hole stayed hanging
+      // in the air where the bin used to stand once it went over.
       tipProp(s, d.x, d.z, 0, 0.45);
+      if (hole) hole(p, n, { size: 0.15, surface: "carpaint", parent: s.group || undefined });
     } else if (s.type === "newsbox") {
       if (imp) imp(p, n, { kind: "chip", power: 0.8, color: 0x9aa0a8 });
-      if (hole) hole(p, n, { size: 0.14 });
       tipProp(s, d.x, d.z, 0.1, 0.6);
+      if (hole) hole(p, n, { size: 0.14, surface: "carpaint", parent: s.group || undefined });
     } else if (s.type === "cone") {
       if (imp) imp(p, n, { kind: "chip", power: 0.6, color: 0xff6a1a });
       tipProp(s, d.x, d.z, 0.3, 1.5);                  // light plastic FLIES
@@ -1224,14 +1227,14 @@
       // shatter + a witnessed crime + a cop alarm). We do NOT fork heat: these
       // are the same cityCrime/cityAlarm calls combat.js's grenade already makes.
       if (imp) imp(p, n, { kind: "spark", power: 1.2 });
-      if (hole) hole(p, n, { size: 0.14 });
+      if (hole) hole(p, n, { size: 0.14, surface: "metal" });
       if (!s.exploded) {
         s.hp = (s.hp || 1) - 1;
         if (s.hp <= 0) cookOff(s, true);
       }
     } else {                                           // mailbox / meter: bolted steel
       if (imp) imp(p, n, { kind: "spark", power: 0.9 });
-      if (hole) hole(p, n, { size: 0.13 });
+      if (hole) hole(p, n, { size: 0.13, surface: "carpaint" });
     }
     return s;
   }

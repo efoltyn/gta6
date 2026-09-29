@@ -77,11 +77,6 @@
     if (CBZ.CONFIG.FACADES_V2 == null) CBZ.CONFIG.FACADES_V2 = true;
     if (CBZ.CONFIG.FACADE_AC_UNITS == null) CBZ.CONFIG.FACADE_AC_UNITS = false;
   }
-  // Deterministic LCG (owner rule: no Math.random) for cityBulletHole below.
-  // Everything else in this file is driven by a caller-supplied seeded rng, but
-  // bullet holes fire at gameplay time from arbitrary call sites.
-  let _decalSeed = 61819;
-  function decalRng() { _decalSeed = (_decalSeed * 1103515245 + 12345) & 0x7fffffff; return _decalSeed / 0x7fffffff; }
   // FACADES_V2 build-time counters (deterministic per seed): how many windows the
   // massing chose LIT at night + how many got an AC unit, accumulated as the world
   // builds. Exposed for the determinism gate (two boots of one seed must agree).
@@ -1261,29 +1256,11 @@
     return !!(b && m && m.color && !m.map && !m.transparent && b.wallColor != null && m.color.getHex() === b.wallColor);
   };
 
-  // ---- BUILDING DAMAGE: bullet holes and knocked-off chunks ---------------
-  // A fixed POOL of bullet-hole quads reuses the oldest slot once the cap is
-  // hit (FPS-style decal budget); physical chunks share box geometry.
-  const BULLET_CAP = 110;
-  const bulletPool = [];
-  let bulletIdx = 0;
-  let _holeGeo = null, _holeMat = null;
-  function holeGeo() { return _holeGeo || (_holeGeo = new THREE.PlaneGeometry(0.3, 0.3)); }
-  // a soft dark bullet-pit texture (dark core + cracked ring) painted once
-  function holeMat() {
-    if (_holeMat) return _holeMat;
-    const c = document.createElement("canvas"); c.width = 64; c.height = 64;
-    const x = c.getContext("2d");
-    const g = x.createRadialGradient(32, 32, 1, 32, 32, 30);
-    g.addColorStop(0, "rgba(8,8,10,0.95)"); g.addColorStop(0.45, "rgba(20,20,24,0.8)");
-    g.addColorStop(0.7, "rgba(40,40,46,0.35)"); g.addColorStop(1, "rgba(0,0,0,0)");
-    x.fillStyle = g; x.fillRect(0, 0, 64, 64);
-    x.strokeStyle = "rgba(15,15,18,0.5)"; x.lineWidth = 1.4; x.lineCap = "round";
-    for (let i = 0; i < 7; i++) { const a = i / 7 * 6.28 + i; x.beginPath(); x.moveTo(32, 32); x.lineTo(32 + Math.cos(a) * (16 + i * 2), 32 + Math.sin(a) * (16 + i * 2)); x.stroke(); }
-    const t = new THREE.CanvasTexture(c);
-    _holeMat = new THREE.MeshBasicMaterial({ map: t, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
-    return _holeMat;
-  }
+  // ---- BUILDING DAMAGE: knocked-off chunks + crack marks -----------------
+  // (Bullet holes live in ONE place: systems/gunfx.js CBZ.bulletHole — the
+  // per-material atlas on one InstancedMesh. This file used to run a second,
+  // parallel 110-quad pool with its own grey smudge; cityBulletHole below is
+  // now a thin seam onto the real thing.)
   // a shared CRACKED-CONCRETE decal (jagged radiating fracture lines on a faint
   // grey scuff) painted once — the tier-2 wound mark before a wall blows open.
   let _crackMat = null;
@@ -1319,25 +1296,11 @@
     _q.setFromUnitVectors(_zAxis, _nrm); mesh.quaternion.copy(_q);
   }
 
-  // PUBLIC: pool a small dark bullet-hole decal on a wall at (x,y,z) facing the
-  // surface normal (nx,ny,nz). Called by the shooting/impact code when a shot
-  // hits a building surface (not glass). Reuses the oldest decal past the cap.
+  // PUBLIC (legacy seam): a bullet hole on a building face at (x,y,z) facing
+  // (nx,ny,nz) — routed to the one hole system (systems/gunfx.js).
   CBZ.cityBulletHole = function (x, y, z, nx, ny, nz) {
-    if (!CBZ.scene) return null;
-    let m;
-    if (bulletPool.length < BULLET_CAP) {
-      m = new THREE.Mesh(holeGeo(), holeMat());
-      m.renderOrder = 4; CBZ.scene.add(m); bulletPool.push(m);
-    } else {
-      m = bulletPool[bulletIdx]; bulletIdx = (bulletIdx + 1) % BULLET_CAP; m.visible = true;
-    }
-    // nudge a hair off the wall along the normal so it never z-fights
-    const off = 0.02;
-    m.position.set(x + (nx || 0) * off, y + (ny || 0) * off, z + (nz || 0) * off);
-    aimDecal(m, nx || 0, ny || 0, nz || 1);
-    const s = 0.7 + decalRng() * 0.7; m.scale.set(s, s, s);
-    m.rotateZ(decalRng() * Math.PI);
-    return m;
+    if (!CBZ.bulletHole) return null;
+    return CBZ.bulletHole({ x: x, y: y, z: z }, { x: nx || 0, y: ny || 0, z: nz == null ? 1 : nz }, { noProp: true });
   };
 
   // Compatibility seam for the many explosion/crash callers. The former
@@ -1418,14 +1381,16 @@
   // ledger so it counts against the 24-hole budget and boards over like any breach.
   const wallDmg = new Map();   // wall collider -> { dmg, x,y,z (impact centroid), nx,nz }
   const WALLDMG_CAP = 40;
-  // a tiny dedicated CRACK-decal pool (kept apart from bulletPool so cracks don't
+  let _crackGeo = null;
+  function crackGeo() { return _crackGeo || (_crackGeo = new THREE.PlaneGeometry(0.3, 0.3)); }
+  // a tiny dedicated CRACK-decal pool (kept apart from the bullet holes so cracks don't
   // thrash the bullet-hole LRU). Small cap — only a handful of wounded walls
   // ever show cracks at once before they auto-carve.
   const crackPool = []; let crackIdx = 0; const CRACK_CAP = 24;
   function placeCrack(px, py, pz, nx, nz, scale) {
     if (!CBZ.scene) return;
     let m;
-    if (crackPool.length < CRACK_CAP) { m = new THREE.Mesh(holeGeo(), crackMat()); m.renderOrder = 3; CBZ.scene.add(m); crackPool.push(m); }
+    if (crackPool.length < CRACK_CAP) { m = new THREE.Mesh(crackGeo(), crackMat()); m.renderOrder = 3; CBZ.scene.add(m); crackPool.push(m); }
     else { m = crackPool[crackIdx]; crackIdx = (crackIdx + 1) % CRACK_CAP; m.visible = true; }
     m.position.set(px + nx * 0.025, py, pz + nz * 0.025); aimDecal(m, nx, 0, nz); m.rotateZ(Math.random() * Math.PI);
     const s = scale || 1.3; m.scale.set(s, s, s);
@@ -1515,10 +1480,9 @@
   };
 
   CBZ.cityDamageReset = function () {
-    for (const m of bulletPool) m.visible = false;
+    if (CBZ.bulletHolesReset) CBZ.bulletHolesReset();
     if (crackPool) { for (const m of crackPool) m.visible = false; crackIdx = 0; }
     if (wallDmg) wallDmg.clear();   // wipe the accumulated wall-wound records
-    bulletIdx = 0;
     resetBreaches();
   };
 

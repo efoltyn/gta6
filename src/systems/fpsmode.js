@@ -2816,6 +2816,23 @@
   // pocks in the scene makes them hang across the empty doorway after the leaf
   // slides up. Mount only those marks on the mover that the ray actually hit;
   // gunfx.js converts the world hit into this parent's local frame.
+  // World normal of the face a raycast struck (instanced meshes included),
+  // turned to face the shooter. null when the hit carries no face.
+  const _fnN = new THREE.Vector3(), _fnM3 = new THREE.Matrix3(), _fnM4 = new THREE.Matrix4(), _fnI = new THREE.Matrix4();
+  const _fnOut = { x: 0, y: 0, z: 0 };
+  function faceNormalOf(wh, shotDir) {
+    const o = wh && wh.object;
+    if (!o || !wh.face || !wh.face.normal || !o.matrixWorld) return null;
+    _fnM4.copy(o.matrixWorld);
+    if (o.isInstancedMesh && wh.instanceId != null) { o.getMatrixAt(wh.instanceId, _fnI); _fnM4.multiply(_fnI); }
+    _fnM3.getNormalMatrix(_fnM4);
+    _fnN.copy(wh.face.normal).applyMatrix3(_fnM3);
+    if (_fnN.lengthSq() < 1e-8) return null;
+    _fnN.normalize();
+    if (shotDir && _fnN.x * shotDir.x + _fnN.y * shotDir.y + _fnN.z * shotDir.z > 0) _fnN.negate();
+    _fnOut.x = _fnN.x; _fnOut.y = _fnN.y; _fnOut.z = _fnN.z;
+    return _fnOut;
+  }
   function wallWoundParent(hit) {
     let o = hit && hit.object;
     while (o && o !== CBZ.scene) {
@@ -3951,7 +3968,7 @@
           CBZ.bulletImpact(hit.point, hit.normal, { kind: "spark", power: cal });
           if (hit.dist < 45) CBZ.bulletImpact(hit.point, hit.normal, { kind: "chip", power: cal * 0.8, color: car.color });
         }
-        if (CBZ.bulletHole && car.group) CBZ.bulletHole(hit.point, hit.normal, { size: 0.12 + cal * 0.1, parent: car.group, dist: hit.dist });
+        if (CBZ.bulletHole && car.group) CBZ.bulletHole(hit.point, hit.normal, { size: 0.12 + cal * 0.1, parent: car.group, dist: hit.dist, car: true });
         carShudder(car, cal);
         if (acc.carThud < 0) acc.carThud = hit.dist;
       } else if (hit.wall && glassPockSuppress) {
@@ -3995,10 +4012,18 @@
         }
         // persistent pock — static walls remember the hit in world space;
         // moving doors carry the same mark with the panel when they open.
-        if (CBZ.bulletHole) CBZ.bulletHole(hit.point, { x: wnx, y: 0, z: wnz }, {
-          size: 0.15 + cal * 0.13, dist: hit.dist,
-          parent: wallWoundParent(hit.wallHit),
-        });
+        // The hole lies on the STRUCK FACE's own normal (not the shot direction
+        // flattened to horizontal — that tilted every oblique hole off the
+        // wall) and is drawn in the struck material (gunfx.js atlas).
+        if (CBZ.bulletHole) {
+          const hs = surfaceAt(hit.wallHit);
+          const fn = faceNormalOf(hit.wallHit, shotDir);
+          CBZ.bulletHole(hit.point, fn || { x: wnx, y: 0, z: wnz }, {
+            size: 0.15 + cal * 0.13, dist: hit.dist,
+            parent: wallWoundParent(hit.wallHit),
+            material: hs.material, object: hs.object,
+          });
+        }
         else if (CBZ.cityBulletHole) CBZ.cityBulletHole(hit.point.x, hit.point.y, hit.point.z, wnx, 0, wnz);
         // rifle-class rounds CHEW: sustained heavy fire on one wall cell quietly
         // grinds open a murder hole (city/fracture.js counts per 1.2u cell)
