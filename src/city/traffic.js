@@ -898,14 +898,56 @@
     return { grp, redMat, bluMat, body: bodyMat, cab: cabMat, bar: barMat };
   }
 
+  // Is (x,z) off the downtown grid (outside its box by more than a road)?
+  // The grid router below only knows the downtown's avenue lines.
+  function offDowntown(A, x, z) {
+    const m = A.ROAD || 18;
+    return A.minX != null && (x < A.minX - m || x > A.maxX + m || z < A.minZ - m || z > A.maxZ + m);
+  }
+  // OUT IN THE WORLD (a metro street, a town, a mini-city): the unit comes up
+  // the real road nearest the scene, starting ~150 m back along it, instead of
+  // from the end of a random road that could be kilometres away (and then
+  // being steered by the downtown's grid lines and clamped to its edge).
+  // Returns {road, dir, sx, sz, along} or null.
+  const _emgNear = [];
+  function roadApproach(A, tx, tz) {
+    if (!CBZ.roadsNear) return null;
+    const list = CBZ.roadsNear(tx, tz, 140, _emgNear);
+    let best = null, bd = 1e9;
+    for (let i = 0; i < list.length; i++) {
+      const r = list[i];
+      if (!r || r.elevated || !Number.isFinite(r.len) || r.len < 60) continue;
+      if (CBZ.roadOpen && !CBZ.roadOpen(r)) continue;
+      const along = r.vertical ? tz - r.z : tx - r.x, perp = Math.abs(r.vertical ? tx - r.x : tz - r.z);
+      if (Math.abs(along) > r.len / 2 - 6) continue;
+      if (perp < bd) { bd = perp; best = r; }
+    }
+    if (!best || bd > 140) return null;
+    const r = best, ta = r.vertical ? tz - r.z : tx - r.x, lim = r.len / 2 - 4;
+    // start 150 m back on whichever side has the road for it (the longer side)
+    let sa = Math.max(-lim, Math.min(lim, ta + (ta > 0 ? -150 : 150)));
+    // never materialise in plain view of the player: take the other side
+    const cam = CBZ.camera && CBZ.camera.position;
+    if (cam && CBZ.roadInView) {
+      const px = r.vertical ? r.x : r.x + sa, pz = r.vertical ? r.z + sa : r.z;
+      if (Math.hypot(px - cam.x, pz - cam.z) < 140 && CBZ.roadInView(px, pz)) sa = Math.max(-lim, Math.min(lim, ta + (ta > 0 ? 150 : -150)));
+    }
+    const dir = ta >= sa ? 1 : -1;
+    const lane = laneOffset(r, dir, 0);
+    return { road: r, dir: dir, along: ta,
+             sx: r.vertical ? r.x + lane : r.x + sa, sz: r.vertical ? r.z + sa : r.z + lane };
+  }
+
   function spawnEmergency(kind, tx, tz) {
     const A = CBZ.city.arena; if (!A) return null;
-    // enter from the city edge along a road far from the incident
-    const r = A.roads[(Math.random() * A.roads.length) | 0];
-    const dir = Math.random() < 0.5 ? 1 : -1;
+    const ap = offDowntown(A, tx, tz) ? roadApproach(A, tx, tz) : null;
+    // downtown: enter from the city edge along a road far from the incident
+    const r = ap ? ap.road : A.roads[(Math.random() * A.roads.length) | 0];
+    const dir = ap ? ap.dir : (Math.random() < 0.5 ? 1 : -1);
     const lane = laneOffset(r, dir, 0);   // emergency runs the inner lane
     let sx, sz;
-    if (r.vertical) { sx = r.x + lane; sz = r.z - dir * (r.len / 2 - 4); }
+    if (ap) { sx = ap.sx; sz = ap.sz; }
+    else if (r.vertical) { sx = r.x + lane; sz = r.z - dir * (r.len / 2 - 4); }
     else { sx = r.x - dir * (r.len / 2 - 4); sz = r.z + lane; }
     const built = buildEmergency(kind);
     built.grp.position.set(sx, 0, sz);
@@ -918,7 +960,10 @@
       // truck hull collides exactly like every other driven car in the city.
       dims: { width: 2.2, length: 5.4, height: 2.6, wheelbase: 3.4 },
       cx: null, cz: null, stuckT: 0,
+      // road-bound unit (an off-grid scene): it drives THIS record, in lane
+      road: ap ? ap.road : null, roadDir: ap ? ap.dir : 0,
     };
+    if (ap) e.heading = r.vertical ? (dir > 0 ? 0 : Math.PI) : (dir > 0 ? Math.PI / 2 : -Math.PI / 2);
     // EMERGENCY_STEALABLE: the truck is ALSO a first-class CBZ.cityCars record
     // (same object — one identity). That makes it (a) visible to the interact
     // system ("Boost it"/"Get in" via cityNearestCar), (b) SOLID to all other
@@ -1129,7 +1174,7 @@
     const dist = Math.hypot(dx, dz);
     // CURB GOAL: nearest point on the road grid to the scene
     let cx = tx, cz = tz, curbVert = false;
-    const onGrid = !!(A.xLines && A.xLines.length && A.zLines && A.zLines.length);
+    const onGrid = !e.road && !!(A.xLines && A.xLines.length && A.zLines && A.zLines.length);
     if (onGrid) {
       const xl = nearestLine(A.xLines, tx), zl = nearestLine(A.zLines, tz);
       if (Math.abs(tx - xl) <= Math.abs(tz - zl)) { cx = xl; cz = tz; curbVert = true; }
@@ -1138,7 +1183,20 @@
     e.cx = cx; e.cz = cz;
     // this frame's aim point: a 3-leg Manhattan route along real roads
     let aimX, aimZ;
-    if (!onGrid) {
+    if (e.road) {
+      // ROAD-BOUND: keep the lane of its own record and run to the point on it
+      // abreast of the target (the kerb there); past the record's end, stop.
+      const rr = e.road, lane = laneOffset(rr, e.roadDir, 0), lim = rr.len / 2 - 3;
+      const ta = Math.max(-lim, Math.min(lim, rr.vertical ? tz - rr.z : tx - rr.x));
+      cx = rr.vertical ? rr.x + lane : rr.x + ta; cz = rr.vertical ? rr.z + ta : rr.z + lane;
+      e.cx = cx; e.cz = cz;
+      // aim a few metres ahead along the lane (steady heading), or at the kerb once close
+      const pa = rr.vertical ? e.pos.z - rr.z : e.pos.x - rr.x;
+      const ahead = Math.max(-lim, Math.min(lim, pa + e.roadDir * 12));
+      const useCurb = (ta - pa) * e.roadDir < 12;
+      aimX = useCurb ? cx : (rr.vertical ? rr.x + lane : rr.x + ahead);
+      aimZ = useCurb ? cz : (rr.vertical ? rr.z + ahead : rr.z + lane);
+    } else if (!onGrid) {
       // no grid (shouldn't happen in city) — old dominant-axis fallback
       if (Math.abs(dx) > Math.abs(dz) + 2) { aimX = tx; aimZ = e.pos.z; }
       else if (Math.abs(dz) > Math.abs(dx) + 2) { aimX = e.pos.x; aimZ = tz; }
@@ -1163,6 +1221,8 @@
     e.heading = CBZ.lerpAngle ? CBZ.lerpAngle(e.heading, want, 1 - Math.pow(0.0009, dt)) : want;
     // emergency vehicles roll fast — they have right of way (ignore the lights)
     let topV = Math.max(11, (TR().cruise ? TR().cruise[1] : 12) * 1.3);
+    // a road-bound unit rolls up to its kerb point instead of overshooting it
+    if (e.road && e.state === "drive") topV = Math.min(topV, 2 + Math.hypot(e.cx - e.pos.x, e.cz - e.pos.z) * 0.6);
     // ...but a real unit BRAKES for whoever's in its path instead of plowing
     // through the scene it came to help ("just drive through shit"): scan the
     // lane ahead for peds and cars and ease off. Cheap: ≤2 trucks alive, ever.
@@ -1195,12 +1255,14 @@
     // WALLS ARE WALLS: the same oriented resolution every driven car gets
     if (CBZ.cityCollideVehicle) CBZ.cityCollideVehicle(e);
     else if (CBZ.collide) CBZ.collide(e.pos, 1.3);
-    if (A.clampToCity) A.clampToCity(e.pos, 1.6);
+    if (A.clampToCity && !e.road) A.clampToCity(e.pos, 1.6);   // a road-bound unit is out past the downtown
     // pinned against geometry? (commanded a real step, the body barely moved)
     const stepped = Math.hypot(e.pos.x - px, e.pos.z - pz);
     if (e.v > 2 && stepped < e.v * dt * 0.35) { e.stuckT = (e.stuckT || 0) + dt; e.v *= Math.pow(0.05, dt); }
     else e.stuckT = Math.max(0, (e.stuckT || 0) - dt * 2);
-    e.grp.position.set(e.pos.x, 0, e.pos.z);
+    // out in the world the ground is not the downtown's y = 0 plane
+    const gy = e.road && CBZ.cityCarGroundY ? (+CBZ.cityCarGroundY(e.pos.x, e.pos.z, null, e) || 0) : 0;
+    e.grp.position.set(e.pos.x, gy, e.pos.z);
     e.grp.rotation.y = e.heading;
     return dist;
   }
@@ -1365,6 +1427,7 @@
       // respond, and stop steering/parking/despawning it from here.
       if (e.player || e.stolen) {
         if (e.target) { e.target._emgClaimed = false; e.target = null; }
+        e.road = null;   // the dispatch lane is ours, not the lane keeper's: vehicles.js owns it now
         stolenEmg.push(e);
         emg.splice(i, 1);
         continue;
@@ -1400,7 +1463,10 @@
           // ARRIVE at the scene itself — or PARK at the curb nearest it (a
           // mid-block body can't be reached by road; real ambulances park outside)
           const atCurb = e.cx != null && Math.hypot(e.pos.x - e.cx, e.pos.z - e.cz) < 3.5;
-          if (d < 6 || (atCurb && d < 60)) { emergencyArrive(e); e.state = "work"; e.t = 0; e.stuckT = 0; }
+          // (a road-bound unit's kerb can be further from a mid-superblock
+          // scene: the metro's local streets are not road records, so the
+          // arterial kerb IS the nearest a truck gets — the crew walks it)
+          if (d < 6 || (atCurb && (d < 60 || e.road))) { emergencyArrive(e); e.state = "work"; e.t = 0; e.stuckT = 0; }
           else if (e.stuckT > 2.5) {
             // wedged (wreck/queue in the lane): a real unit stops where it is and
             // works the scene from there — never grinds through geometry.
@@ -1421,6 +1487,24 @@
         if (!held && e.t > 3.5) { e.state = "leave"; e.t = 0; if (e.target) e.target._emgClaimed = false; }
       } else { // leave: roll off ALONG A ROAD toward the nearest edge, then despawn
         e.t += dt;
+        if (e.road) {
+          // road-bound: carry on down its own record, then vanish once out of
+          // sight (never pop out in front of the player)
+          const rr = e.road;
+          e.tx = rr.vertical ? rr.x : rr.x + e.roadDir * rr.len / 2;
+          e.tz = rr.vertical ? rr.z + e.roadDir * rr.len / 2 : rr.z;
+          steerEmergency(e, dt, A);
+          const cam = CBZ.camera.position;
+          const far = Math.hypot(e.pos.x - cam.x, e.pos.z - cam.z) > 175;
+          const pa = rr.vertical ? e.pos.z - rr.z : e.pos.x - rr.x;
+          const atEnd = pa * e.roadDir > rr.len / 2 - 8;
+          if (far || ((atEnd || e.stuckT > 3 || e.t > 20) && !(CBZ.roadInView && CBZ.roadInView(e.pos.x, e.pos.z)))) {
+            if (e.target) e.target._emgClaimed = false; despawnEmergency(e); emg.splice(i, 1); continue;
+          }
+          emgCollide(e, dt);
+          e.grp.visible = !far;
+          continue;
+        }
         // exit along the dominant axis, but down a real road line (the router
         // snaps the lateral coordinate to the nearest avenue/cross-street, so
         // the exit run never cuts a block diagonal through buildings)

@@ -76,6 +76,7 @@
     for (let i = 0; i < roads.length && made < 18; i++) {
       const r = roads[i];
       if (!r || r.len < 72 || r.district === "bridge" || r.district === "airport") continue;
+      if (r.elevated) continue;            // a flyover deck (city/metro.js) is no place for a kicker
       // ...and never on a segment the traffic-access law has CLOSED (the
       // airfield, the military perimeter, a bunker shell, or a lane a builder
       // reserved for its own service vehicles). A ramp you cannot legally

@@ -966,7 +966,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/tsunami_flow.js?v=tsureal1"></script>
 <script src="src/world/tsunami_scene.js?v=tsureal1"></script>
 <!-- the grid street layer (road, kerbs, footways, markings) world.js builds -->
-<script src="src/city/streetkit.js?v=w0929town"></script>
+<script src="src/city/streetkit.js?v=metro0929"></script>
 <!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
      inventory item; an NPC's keys live on the NPC and every existing way to
      take something off a person moves them. MUST load before city/buildings.js
@@ -1025,7 +1025,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/facades/brickhouse.js?v=fk3"></script>
 <!-- 4d-2. ARCHIPELAGO — worldmap registry + 3 islands + 4 biomes (worldmap.js
      MUST precede every island/biome; world.js runs them via CBZ.cityWorldGeo) -->
-<script src="src/city/worldmap.js?v=w09290242x"></script>
+<script src="src/city/worldmap.js?v=metro0929"></script>
 <!-- Shared signed shoreline/depth/current oracle. Loaded immediately after
      the landmass registry so rendering, swimmers, boats and aquatic wildlife
      all consult the same coast instead of inventing separate radius tests. -->
@@ -1398,6 +1398,14 @@ document.body.appendChild(b);}}catch(e){}})();
      seam above), the bunker-buster and the nuke. Conventional blasts use the
      wrapped explosion chain; the nuke uses impactbus's analytic field. -->
 <!-- sims-overhaul wave 2: living economy + universal housing + place/scene spawning + mini-cities + racing + destruction (additive, feature-detected, self-flagged) -->
+<!-- REAL CITIES AT REAL SCALE (owner: "realistically large ... not just one mass of tall buildings"):
+     metroplan.js is the pure urban planner (land value -> zoning -> arterials -> blocks -> parcels),
+     metro_fabric.js draws its buildings, metro_ground.js its streets and ground, metro.js places the
+     Kingsport metro + the city rings at landmass order 43 and streams their tiles by distance. -->
+<script src="src/city/metroplan.js?v=metro0929"></script>
+<script src="src/city/metro_fabric.js?v=metro0929"></script>
+<script src="src/city/metro_ground.js?v=metro0929"></script>
+<script src="src/city/metro.js?v=metro0929"></script>
 <!-- THE RACING GAME: real driving opponents (one brain for oval + street) + race scorer + racing HUD -->
 <!-- custom dialogue + street talk (one contextual YES/NO decision) — after the registry -->
 <!-- 4d-3. this wave's feature modules (load after all deps they read) -->
@@ -1411,7 +1419,7 @@ document.body.appendChild(b);}}catch(e){}})();
      shops (cityTill is the only money source) and after gangs/turf (it steers
      crews and feeds zone control). Flag: RACKET_V1. -->
 <script src="src/city/racket.js?v=cd0929"></script>
-<script src="src/city/stuntjumps.js?v=ballistic2z"></script>
+<script src="src/city/stuntjumps.js?v=metro0929"></script>
 <!-- MARINA + BOATYARD: finger berths, Med-moor quay, fuel dock, travel-lift
      well, IALA Region B buoyage, and a dealer with three demo hulls floating
      at its own dock. Buying reuses zillow.js's cash AND financed paths (no 7th
@@ -1510,7 +1518,7 @@ document.body.appendChild(b);}}catch(e){}})();
      metre 683 pedestrians tried to walk went into geometry, 37 of them grinding
      for over 1.5 s at a time. The window is 320 m around the player (peds stop
      drawing at 95 m), marked across frames so a rebuild is never a hitch. -->
-<script src="src/systems/fullmap.js?v=cars1"></script>
+<script src="src/systems/fullmap.js?v=metro0929"></script>
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
      always-updater is in the sort -->

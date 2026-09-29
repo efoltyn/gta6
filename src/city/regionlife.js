@@ -81,6 +81,10 @@
     keshtown: 4, kesh_north: 3, kesh_east: 3,
     solaracity: 4,
     mbeyacity: 4, mbeya_west: 3, mbeya_south: 3, mbeya_east: 3,
+    // THE PLANNED CITIES (city/metro.js). Same doctrine as the mini-cities:
+    // the crowd bubble carries the mass, these are the few full rigs with a
+    // job. A metro is the biggest place in the world, so it gets the most.
+    kingsport: 5, cityborough: 4,
   };
 
   // ---- TIME-OF-DAY DENSITY (GTA popcycle pattern, PROCGEN.md roadmap #4/5) --
@@ -224,6 +228,31 @@
     mbeya_west: villageCast(function () { return OUT_MBEYA; }),
     mbeya_south: villageCast(function () { return OUT_MBEYA; }),
     mbeya_east: villageCast(function () { return OUT_MBEYA; }),
+    // ---- THE PLANNED CITIES (city/metro.js) ------------------------------
+    // KINGSBRIDGE — a whole metro: office people downtown, shop and delivery
+    // workers on the avenues, a guard on a door. Ordinary city clothes.
+    kingsport: function (r) {
+      const k = r();
+      if (k < 0.12) return { job: "security guard", archetype: "resident", kind: "civilian",
+                             armed: r() < 0.5, weapon: "Pistol", aggr: 0.4, outfit: 0x23262e };
+      if (k < 0.45) return { job: "office worker", archetype: r() < 0.25 ? "tycoon" : "resident",
+                             kind: "civilian", outfit: pickCol(r, OUT_SUIT) };
+      if (k < 0.75) return { job: r() < 0.5 ? "clerk" : "vendor", archetype: "resident",
+                             kind: "civilian", outfit: pickCol(r, OUT_CITY) };
+      return { job: r() < 0.5 ? "construction worker" : "warehouse worker", archetype: "resident",
+               kind: "civilian", outfit: pickCol(r, OUT_WORK) };
+    },
+    // THE WEST BOROUGH — the Gang City's own working streets: shop hands and
+    // tradesmen, and the corner boys the rest of Gang City already has.
+    cityborough: function (r) {
+      const k = r();
+      if (k < 0.15) return { job: "security guard", archetype: "resident", kind: "civilian",
+                             armed: r() < 0.4, weapon: "Pistol", aggr: 0.45, outfit: 0x2a2a30 };
+      if (k < 0.6) return { job: r() < 0.5 ? "clerk" : "vendor", archetype: "resident",
+                            kind: "civilian", outfit: pickCol(r, OUT_CITY) };
+      return { job: r() < 0.5 ? "construction worker" : "warehouse worker", archetype: "resident",
+               kind: "civilian", outfit: pickCol(r, OUT_WORK) };
+    },
   };
   // shared adult farmer/villager/vendor cast for a X5 village settlement —
   // takes a THUNK (not the array itself) since it's built as a CAST entry
@@ -254,6 +283,7 @@
   var OUT_SUIT   = [0x23262e, 0x2a3040, 0x303030, 0x3a3a4a, 0x40404a];  // dark business suits
   var OUT_NEON   = [0xff3070, 0x30c0ff, 0xffd020, 0xa030ff, 0x30ffa0, 0xffffff];  // bright strip wear
   var OUT_WORK   = [0x4a4842, 0x5a5248, 0x6b5a44, 0x3a4a3a, 0x6a4a32];  // grey/brown coveralls
+  var OUT_CITY   = [0x2c3e5c, 0x6e2b33, 0x444a52, 0x23262b, 0x8a939c, 0x3a5a7c, 0xe8e6e0, 0x356b9a];  // everyday city clothes (crowd.js SHIRTS 0-9)
   // X5 country palettes (plain colours; clothes/outfits paint roles).
   var OUT_VERIDIA = [0x8a939c, 0x2c3e5c, 0xe8e6e0, 0x33573b, 0x6e2b33];  // cool European business/harbour tones
   var OUT_KESH    = [0x6b5238, 0xa9895c, 0xc9a23a, 0x8a6a3a, 0x7a5a30];  // warm gold/earthen monarchy tones
@@ -285,7 +315,26 @@
   }
 
   // ---- region geometry pick: a {x,z} inside `reg`, near the player ----------
+  // the planned city (CBZ.metroCities) this region belongs to, or null — a
+  // metro is kilometres of region pieces, and its plan knows the pavements
+  function metroOf(reg, x, z) {
+    if (!reg || !reg.biome || !CBZ.metroCityAt) return null;
+    var mc = CBZ.metroCityAt(x, z, 60);
+    return mc && mc.biome === reg.biome && mc.plan ? mc : null;
+  }
   function spawnPointNear(reg, px, pz) {
+    // PLANNED CITY: a pavement on the spawn ring (never inside a house, never
+    // on a local street — those are geometry, not road records)
+    var mc = metroOf(reg, px, pz);
+    if (mc && CBZ.metroSidewalkPoint) {
+      for (var m = 0; m < 3; m++) {
+        var q = CBZ.metroSidewalkPoint(mc, px, pz, SPAWN_RING_IN, SPAWN_RING_OUT);
+        if (!q) break;
+        if (CBZ.citySpawnBlocked && CBZ.citySpawnBlocked(q.x, q.z, 1, true)) continue;
+        if (!transitionSafe(q.x, q.z)) continue;
+        return q;
+      }
+    }
     // try a few candidate points on the spawn ring around the player that also
     // land ON the region; fall back to the region's shared scatter helper.
     // no-spawn zones (worldmap.js): a ring point that lands on a runway/
@@ -314,6 +363,18 @@
 
   // ---- fresh wander goal inside the region (believable stroll) --------------
   function strollGoal(ped, reg) {
+    // PLANNED CITY: a walk down the street (15-80 m of pavement), not a
+    // scatter point that could be kilometres across the metro
+    var mc = metroOf(reg, ped.pos.x, ped.pos.z);
+    if (mc && CBZ.metroSidewalkPoint) {
+      var q = CBZ.metroSidewalkPoint(mc, ped.pos.x, ped.pos.z, 15, 80);
+      if (q && ped.target && ped.target.set && ped.state !== "flee" &&
+          ped.state !== "fight" && ped.state !== "confront") {
+        ped.target.set(q.x, 0, q.z);
+        ped.state = "walk";
+      }
+      if (q) return;
+    }
     if (!CBZ.cityScatterInRegion) return;
     var pts = CBZ.cityScatterInRegion(reg, 3, Math.random, 8);
     // prefer a point within a comfortable stroll radius so they don't sprint

@@ -266,6 +266,16 @@
       const surface = +A.vehicleSurfaceY(x, z);
       if (Number.isFinite(surface)) b = Math.max(b, surface);
     }
+    // AN AI CAR ON A FLYOVER RIDES THE DECK. A road record with `elevated`
+    // (the metro's arterial bridging a freeway) is a deck at r.y over a road
+    // that keeps running underneath, so it cannot be a plain floor height —
+    // and lane cars never ask the layered query below (fromY is the driven
+    // car's alone). The car knows which record it is on; that is the answer.
+    // (CBZ.roadDeckY is the one deck profile: flat r.y, linear r.ramp ends.)
+    if (self && !self.player && self.road && self.road.elevated && CBZ.roadDeckY) {
+      const dy = CBZ.roadDeckY(self.road, x, z);
+      if (dy > b) b = dy;
+    }
     if (fromY != null && CBZ.mpGroundAt) {
       try {
         const t = CBZ.mpGroundAt(x, z, fromY, b);
@@ -6549,6 +6559,14 @@
     rebuildCarGrid();   // ONE rebuild per frame; carAhead queries it per car
     bodyGrids();        // the ped index for the lane-brake scan and runOver (wildGrid builds on demand)
     wakeSlice(camx, camz);
+    // THE DOWNTOWN GRID BOX (one road width of margin). Inside it the (N+1)^2
+    // intersection grid — its signals, its stop lines, its turning — is the
+    // whole truth, exactly as before. Outside it nearestIntersection only
+    // CLAMPS to the grid's edge, so there a car turns at the real junctions
+    // roadrules.js derives from the road list (metro arterials, towns,
+    // mini-cities, the annex) instead.
+    const gridX0 = (A.minX != null ? A.minX : -1e9) - A.ROAD, gridX1 = (A.maxX != null ? A.maxX : 1e9) + A.ROAD;
+    const gridZ0 = (A.minZ != null ? A.minZ : -1e9) - A.ROAD, gridZ1 = (A.maxZ != null ? A.maxZ : 1e9) + A.ROAD;
     for (const c of CBZ.cityCars) {
       if (c._sleep || c._proxy) continue;
       dt = baseDt;     // reset each car (a strided far car overrides this below)
@@ -6794,7 +6812,21 @@
       // arterial roads (the new mini-city/island network) have NO city-grid
       // intersection, so nearestIntersection can return null — treat that as
       // "no signal ahead" (open highway) instead of dereferencing undefined.
-      const it = A.nearestIntersection(c.pos.x, c.pos.z);
+      let it = A.nearestIntersection(c.pos.x, c.pos.z);
+      const offGrid = c.pos.x < gridX0 || c.pos.x > gridX1 || c.pos.z < gridZ0 || c.pos.z > gridZ1;
+      // Off the grid, the clamped edge intersection only counts when this car's
+      // road actually runs through it (a road leaving downtown on a grid line).
+      // A car kilometres away whose along-coordinate happened to match an edge
+      // intersection used to stop for that phantom red light.
+      if (offGrid && it && (r.vertical ? Math.abs(it.x - c.pos.x) : Math.abs(it.z - c.pos.z)) > A.ROAD) it = null;
+      // ...and there, the junction under the car is the derived one — but only
+      // one THIS road is part of (a flyover or a parallel record is not ours).
+      // Bucketed lookup (roadrules.js), so per car per frame is cheap.
+      let offJ = null;
+      if (offGrid && !it && CBZ.roadJunctionAt) {
+        const J = CBZ.roadJunctionAt(c.pos.x, c.pos.z, 0);
+        if (J && (J.a === r || J.b === r)) offJ = J;
+      }
       const distToInt = !it ? 1e9 : (r.vertical ? (it.z - c.pos.z) * c.dirSign : (it.x - c.pos.x) * c.dirSign);
       const red = CBZ.cityIsRed(r.vertical);
       const stopGap = TR().stopGap || 6.5;
@@ -6963,7 +6995,9 @@
       // intersection long enough to be a bug rather than a queue is granted
       // right of way and forced to move. Cheap, unconditional, and it can only
       // ever unstick — it never creates a stop.
-      if (c.v < 0.35 && distToInt > -14 && distToInt < 14) {
+      // (off the grid the box is the derived junction's, when the car is in one)
+      const jamD = it ? distToInt : (offJ ? (r.vertical ? offJ.z - c.pos.z : offJ.x - c.pos.x) * c.dirSign : 1e9);
+      if (c.v < 0.35 && jamD > -14 && jamD < 14) {
         c._jamT = (c._jamT || 0) + dt;
         if (c._jamT > 6) { c.v = Math.max(c.v, 2.2); c._mustTurn = true; c._jamT = 0; }
       } else if (c._jamT) c._jamT = 0;
@@ -7026,15 +7060,20 @@
       if (insideInt && red && c.ranRedCD <= 0 && c.v > 4) {
         c.ranRedCD = 3; ranRed(c);
       }
-      if (insideInt && !c._intActive) {
+      // off-grid: inside the box of a derived junction on this road (no signal
+      // heads out there, so no red-light test — just the route choice)
+      const insideJ = !insideInt && offJ != null &&
+        Math.abs(c.pos.x - offJ.x) < offJ.ha + 0.5 && Math.abs(c.pos.z - offJ.z) < offJ.hb + 0.5;
+      if ((insideInt || insideJ) && !c._intActive) {
         c._intActive = true;
+        const node = insideInt ? it : offJ;
         // METHOD (PROCGEN.md #4): purposeful routing, not a coin flip. Every
         // ambient car carries a destination intersection; at each box it
         // turns exactly when turning reduces the remaining Manhattan
         // distance (the grid staircase citynav uses for peds). On arrival it
         // picks a fresh destination and drives on — traffic goes SOMEWHERE.
-        if (c.destX == null || (Math.abs(c.destX - it.x) < 30 && Math.abs(c.destZ - it.z) < 30)) pickCarDest(c, A);
-        const ddx = c.destX - it.x, ddz = c.destZ - it.z;
+        if (c.destX == null || (Math.abs(c.destX - node.x) < 30 && Math.abs(c.destZ - node.z) < 30)) pickCarDest(c, A, offGrid);
+        const ddx = c.destX - node.x, ddz = c.destZ - node.z;
         const wantV = Math.abs(ddz) > Math.abs(ddx);
         let wantTurn = false, prefDir = null;
         if (wantV !== c.vertical) {
@@ -7050,10 +7089,10 @@
           }
         }
         if (c.v > 1 && (c._mustTurn || (c.turnCD <= 0 && wantTurn))) {
-          beginTurn(c, it, A, prefDir);
+          beginTurn(c, node, A, prefDir, insideJ ? offJ : null);
           if (c.turning) c._mustTurn = false;
         }
-      } else if (!insideInt && c._intActive) c._intActive = false;
+      } else if (!insideInt && !insideJ && c._intActive) c._intActive = false;
 
       // an interchange slip ramp starting here (highways only; cheap reject)
       if (r.district === "highway" && !c.turning && !c.pullover && !c.roadRageTarget && trySlip(c, r, moveAxisZ)) {
@@ -7066,8 +7105,17 @@
       // the opposite lane and head back) — never teleport-wrap across the map.
       const lim = r.len / 2 - 2;
       const along = moveAxisZ ? (c.pos.z - r.z) * c.dirSign : (c.pos.x - r.x) * c.dirSign;
-      if (lim - along < 26) c._mustTurn = true;
-      if (along > lim) {
+      // ...unless the street simply CARRIES ON: a record laid end to end with
+      // this one on the same line (the metro splits every arterial where it
+      // bridges a freeway). Then there is nothing to turn off for — the car
+      // drives across the seam onto the next record, same lane index.
+      const cont = (lim - along < 26 && CBZ.roadContinuation) ? CBZ.roadContinuation(r, c.dirSign) : null;
+      if (lim - along < 26 && !cont) c._mustTurn = true;
+      if (along > lim && cont) {
+        c.road = cont;
+        c.lane = laneOffset(cont, c.dirSign, c.laneIdx != null ? c.laneIdx : 0);
+        c._mustTurn = false; c._intActive = false;
+      } else if (along > lim) {
         c.dirSign *= -1;
         c.lane = -c.lane;                       // back onto the right-hand side
         c.heading = moveAxisZ ? (c.dirSign > 0 ? 0 : Math.PI) : (c.dirSign > 0 ? Math.PI / 2 : -Math.PI / 2);
@@ -7181,7 +7229,27 @@
 
   // a fresh errand for an ambient car: a random far-ish intersection —
   // destination-driven turning replaces the old aimless 38% coin flip.
-  function pickCarDest(c, A) {
+  function pickCarDest(c, A, offGrid) {
+    // OFF THE GRID a destination is a real junction within a drive of here
+    // (250 m .. 2.5 km), not a random downtown box kilometres away: a metro
+    // car used to stair-step toward the downtown from every junction it met.
+    if (offGrid && CBZ.roadJunctions) {
+      const js = CBZ.roadJunctions();
+      if (js && js.length) {
+        let pick = null, alt = null;
+        for (let k = 0; k < 8; k++) {
+          const J = js[(rng() * js.length) | 0];
+          const d = Math.hypot(J.x - c.pos.x, J.z - c.pos.z);
+          if (CBZ.roadPointOpen && !CBZ.roadPointOpen(J.x, J.z)) continue;
+          if (d < 250 || d > 2500) { if (!alt && d >= 60) alt = J; continue; }
+          pick = J; break;
+        }
+        // (a sparse network with nothing in range: any other real junction —
+        // always a box the car can arrive at, so it re-picks there)
+        pick = pick || alt;
+        if (pick) { c.destX = pick.x; c.destZ = pick.z; return; }
+      }
+    }
     const its = A.intersections;
     if (!its || !its.length) { c.destX = c.pos.x; c.destZ = c.pos.z; return; }
     let t = its[(rng() * its.length) | 0];
@@ -7203,11 +7271,17 @@
   // quadratic Bézier from the car's current lane position, through the corner
   // where the two lane centre-lines meet, out onto the new lane — so the car
   // sweeps the turn instead of teleporting + snapping its heading.
-  function beginTurn(c, it, A, prefDir) {
+  function beginTurn(c, it, A, prefDir, J) {
     const wantVertical = !c.vertical;
-    // pass the junction's ALONG coordinate too: roadCross needs both to prove
-    // the segment it returns actually reaches this intersection.
-    const road = findRoad(A, wantVertical, wantVertical ? it.x : it.z, wantVertical ? it.z : it.x);
+    // A DERIVED junction (off the downtown grid) already names both of its
+    // roads: J.a is the vertical one, J.b the horizontal. Otherwise pass the
+    // junction's ALONG coordinate too: roadCross needs both to prove the
+    // segment it returns actually reaches this intersection.
+    let road;
+    if (J) {
+      road = wantVertical ? J.a : J.b;
+      if (road && CBZ.roadOpen && !CBZ.roadOpen(road)) road = null;
+    } else road = findRoad(A, wantVertical, wantVertical ? it.x : it.z, wantVertical ? it.z : it.x);
     if (!road) return;
     let newDir = prefDir != null ? prefDir : (rng() < 0.5 ? 1 : -1);
     // don't turn INTO a dead end: if this direction runs out of road in a couple
@@ -7218,7 +7292,9 @@
     // keep the car's lane INDEX through the turn → its offset on the new road.
     const idx = c.laneIdx != null ? c.laneIdx : 0;
     const newLane = laneOffset(road, newDir, idx);
-    const lead = A.ROAD / 2 + 1.2;
+    // clear of the box: past the half width of the road being LEFT (a
+    // derived junction knows it; the downtown grid is one width everywhere)
+    const lead = (J ? (wantVertical ? J.hb : J.ha) : A.ROAD / 2) + 1.2;
 
     // P0: where we are now, snapped onto the current lane's lateral line
     const P0 = c.vertical ? { x: c.road.x + c.lane, z: c.pos.z }

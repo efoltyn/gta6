@@ -359,7 +359,15 @@
     }
 
     // No arena, or goal within ~1 block → beeline straight to the (outside) goal.
-    if (!a || !a.nearestIntersection || (dx * dx + dz * dz) <= (_step * _step)) {
+    // Also when BOTH ends are off the downtown grid (a metro street, a town):
+    // nearestIntersection only CLAMPS to the grid's edge out there, so the
+    // staircase below would march a walker kilometres to the downtown's rim
+    // and back to cross one of the metro's blocks.
+    const offG = function (x, z) {
+      return a && a.minX != null && (x < a.minX - _step || x > a.maxX + _step || z < a.minZ - _step || z > a.maxZ + _step);
+    };
+    if (!a || !a.nearestIntersection || (dx * dx + dz * dz) <= (_step * _step) ||
+        (offG(fromX, fromZ) && offG(inGoalX, inGoalZ))) {
       const p = wp(0); p.x = inGoalX; p.z = inGoalZ; outArr.push(p);
       appendDoorLegs();
       return outArr;

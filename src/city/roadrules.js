@@ -253,8 +253,14 @@
      are in it, so a linear scan per frame per car is not free. One lazy
      uniform bucket grid, rebuilt only when the list length changes (which is
      exactly when the world was rebuilt), makes the query O(few). */
-  const CELL = 64;
-  let grid = null, gridN = -1, gMinX = 0, gMinZ = 0, gW = 0, gH = 0;
+  // The cell is 64 m unless the world is so big that 64 m cells would pass
+  // 40,000 buckets; then the cell GROWS to fit (it used to give up and drop
+  // the grid, turning every query back into a linear scan of every road —
+  // exactly what the multi-km metro would have triggered). Invalidated on the
+  // list's length AND identity: a rebuilt world can repeat a length.
+  const CELL_MIN = 64, CELL_BUDGET = 40000;
+  let CELL = CELL_MIN;
+  let grid = null, gridN = -1, gridRef = null, gridGen = 0, gMinX = 0, gMinZ = 0, gW = 0, gH = 0;
 
   function roadsList() {
     const c = CBZ.city;
@@ -268,26 +274,25 @@
     return r.vertical ? { hx: w, hz: l } : { hx: l, hz: w };
   }
   function rebuild(R) {
+    gridGen++;
+    gridN = R.length; gridRef = R;
     let minX = 1e18, minZ = 1e18, maxX = -1e18, maxZ = -1e18;
     for (let i = 0; i < R.length; i++) {
-      const r = R[i]; if (!r) continue;
+      const r = R[i]; if (!r || !Number.isFinite(r.x) || !Number.isFinite(r.z)) continue;
       const h = halfSpan(r);
       if (r.x - h.hx < minX) minX = r.x - h.hx;
       if (r.x + h.hx > maxX) maxX = r.x + h.hx;
       if (r.z - h.hz < minZ) minZ = r.z - h.hz;
       if (r.z + h.hz > maxZ) maxZ = r.z + h.hz;
     }
-    if (!(minX < maxX)) { grid = null; gridN = R.length; return; }
+    if (!(minX < maxX)) { grid = null; return; }
     gMinX = minX; gMinZ = minZ;
+    CELL = Math.max(CELL_MIN, Math.ceil(Math.sqrt(((maxX - minX) * (maxZ - minZ)) / CELL_BUDGET)));
     gW = Math.max(1, Math.ceil((maxX - minX) / CELL));
     gH = Math.max(1, Math.ceil((maxZ - minZ) / CELL));
-    // A world-spanning frontier loop would smear across every cell of a grid
-    // sized to it, so cap the bucket count and let the rare giant segment sit
-    // in many cells rather than let the grid itself explode.
-    if (gW * gH > 40000) { grid = null; gridN = R.length; return; }
     grid = new Array(gW * gH);
     for (let i = 0; i < R.length; i++) {
-      const r = R[i]; if (!r) continue;
+      const r = R[i]; if (!r || !Number.isFinite(r.x) || !Number.isFinite(r.z)) continue;
       const h = halfSpan(r);
       const x0 = Math.max(0, Math.floor((r.x - h.hx - gMinX) / CELL));
       const x1 = Math.min(gW - 1, Math.floor((r.x + h.hx - gMinX) / CELL));
@@ -298,8 +303,8 @@
         (grid[k] || (grid[k] = [])).push(r);
       }
     }
-    gridN = R.length;
   }
+  function ensureGrid(R) { if (gridN !== R.length || gridRef !== R) rebuild(R); }
 
   // The road under a point. `pad` (default 0) widens the test — pass a couple
   // of metres to count the shoulder as "on the road".
@@ -307,7 +312,7 @@
     if (!on()) return null;
     const R = roadsList();
     if (!R || !R.length) return null;
-    if (gridN !== R.length) rebuild(R);
+    ensureGrid(R);
     const p = pad || 0;
     let list = R;
     if (grid) {
@@ -329,6 +334,92 @@
       if (off < bd) { bd = off; best = r; }
     }
     return best;
+  };
+
+  /* Every road record whose footprint (centreline +- half width, +- half
+     length) may lie within `pad` of (x,z), from the same bucket grid —
+     deduplicated, written into `out` (a reused array is fine). Pure geometry:
+     it answers even with ROAD_RULES off, because the callers (spawn keep-outs,
+     the continuation lookup) are not road-rules features. A superset, never a
+     miss: callers still run their own exact test. A long record filed in two
+     of the visited cells comes back twice — callers must tolerate that (they
+     all take an any/min over the list). */
+  CBZ.roadsNear = function (x, z, pad, out) {
+    out = out || [];
+    out.length = 0;
+    const R = roadsList();
+    if (!R || !R.length) return out;
+    ensureGrid(R);
+    if (!grid) { for (let i = 0; i < R.length; i++) if (R[i]) out.push(R[i]); return out; }
+    const p = Math.max(0, pad || 0);
+    const x0 = Math.max(0, Math.floor((x - p - gMinX) / CELL)), x1 = Math.min(gW - 1, Math.floor((x + p - gMinX) / CELL));
+    const z0 = Math.max(0, Math.floor((z - p - gMinZ) / CELL)), z1 = Math.min(gH - 1, Math.floor((z + p - gMinZ) / CELL));
+    if (x0 > x1 || z0 > z1) return out;
+    for (let cz = z0; cz <= z1; cz++) for (let cx = x0; cx <= x1; cx++) {
+      const list = grid[cz * gW + cx]; if (!list) continue;
+      for (let i = 0; i < list.length; i++) out.push(list[i]);
+    }
+    return out;
+  };
+
+  /* THE DECK UNDER AN ELEVATED RECORD. A record with `elevated` and `y` is a
+     flyover deck (the metro splits an arterial where it bridges a freeway; the
+     piece carries its own approach ramps). Its height at (x,z): r.y across the
+     middle, climbing LINEARLY from 0 over `r.ramp` metres at each end (no
+     `ramp` = a flat deck end to end). One definition, so the geometry the
+     builder lays and the height traffic rides on cannot disagree. 0 when the
+     record is not elevated or the point is off its length. */
+  CBZ.roadDeckY = function (r, x, z) {
+    if (!r || !r.elevated || !Number.isFinite(r.y)) return 0;
+    const half = (r.len || 0) / 2, along = Math.abs(r.vertical ? z - r.z : x - r.x);
+    if (along > half + 0.5) return 0;
+    const ramp = r.ramp > 0 ? r.ramp : 0;
+    if (!ramp) return r.y;
+    return r.y * Math.max(0, Math.min(1, (half - along) / ramp));
+  };
+
+  /* THE ROAD THAT CARRIES ON. A long street is often several records laid end
+     to end — the metro splits every arterial where it bridges a freeway, the
+     overpass piece carrying `elevated`. The lane keeper only ever knew "this
+     record ends here", so a car reaching the seam U-turned in the middle of a
+     straight road. This answers: is there a record on the SAME line whose near
+     end meets this one's end in direction `dir` (+1 = toward +x/+z), and which
+     carries on past it? Cached on the record per grid generation. */
+  const _contNear = [];
+  function findContinuation(r, dir) {
+    const h = (r.len || 0) / 2;
+    const endA = (r.vertical ? r.z : r.x) + dir * h;          // the along-coord where r ends
+    const coord = r.vertical ? r.x : r.z;
+    const ex = r.vertical ? r.x : endA, ez = r.vertical ? endA : r.z;
+    const list = CBZ.roadsNear(ex, ez, 8, _contNear);
+    let best = null, bd = 1e9;
+    for (let i = 0; i < list.length; i++) {
+      const o = list[i];
+      if (!o || o === r || !!o.vertical !== !!r.vertical || !Number.isFinite(o.len)) continue;
+      if (Math.abs((o.vertical ? o.x : o.z) - coord) > 1.5) continue;       // not the same line
+      const oc = o.vertical ? o.z : o.x, oh = o.len / 2;
+      const near = oc - dir * oh, far = oc + dir * oh;                     // o's two ends, seen along dir
+      if ((near - endA) * dir < -6 || (near - endA) * dir > 4) continue;   // must meet r's end (small gap/overlap)
+      if ((far - endA) * dir < 12) continue;                               // and carry on past it
+      if (CBZ.roadOpen && !CBZ.roadOpen(o)) continue;
+      const d = Math.abs(near - endA);
+      if (d < bd) { bd = d; best = o; }
+    }
+    return best;
+  }
+  // cache: road -> [toward -1, toward +1], dropped whenever the grid rebuilds
+  // (a WeakMap, so nothing is written onto the plain road records)
+  let contCache = new WeakMap(), contGen = -1;
+  CBZ.roadContinuation = function (r, dir) {
+    if (!r || !Number.isFinite(r.len)) return null;
+    const R = roadsList(); if (!R) return null;
+    ensureGrid(R);
+    if (contGen !== gridGen) { contCache = new WeakMap(); contGen = gridGen; }
+    let e = contCache.get(r);
+    if (!e) { e = [undefined, undefined]; contCache.set(r, e); }
+    const k = dir > 0 ? 1 : 0;
+    if (e[k] === undefined) e[k] = findContinuation(r, dir > 0 ? 1 : -1);
+    return e[k];
   };
 
   CBZ.roadSpeedLimit = function (x, z) {
@@ -782,12 +873,16 @@
   // world already holds — rather than assumed, because the mainland's is 2 m
   // and a town's is zero and a corner radius that ignores the difference paves
   // somebody's yard.
-  function footwayAt(J, lots) {
+  function footwayAt(J, lots, lotIdx) {
     if (!lots || !lots.length) return 2.0;
     let best = 1e9;
     const hx = J.ha, hz = J.hb;
-    for (let i = 0; i < lots.length; i++) {
-      const L = lots[i];
+    // only the lots whose footprint reaches within 60 m of the box (the same
+    // cut the loop below makes) — from the lot bucket when there is one, so a
+    // junction costs a handful of lots instead of every lot in the world
+    const cand = lotIdx ? bucketQuery(lotIdx, J.x, J.z, 60, _lotNear) : lots;
+    for (let i = 0; i < cand.length; i++) {
+      const L = cand[i];
       if (!L || !Number.isFinite(L.cx)) continue;
       const lw = (L.w != null ? L.w : 0) / 2, ld = (L.d != null ? L.d : L.w || 0) / 2;
       const dx = Math.abs(L.cx - J.x) - lw, dz = Math.abs(L.cz - J.z) - ld;
@@ -798,10 +893,46 @@
     return best < 1e9 ? best : 2.0;
   }
 
+  /* A tiny uniform bucket index over axis-aligned boxes: items are filed in
+     every cell their box touches; a query returns the (deduplicated) items
+     filed in the cells a +-pad box around the point touches. Used for the
+     junction list (roadJunctionAt runs per awake AI car per frame) and the
+     lot list (footwayAt ran every lot per junction). Keys are a hash of the
+     cell pair; a collision only merges two cells' lists (still exact below). */
+  const _lotNear = [], _juncNear = [];
+  function bucketIndex(items, boxOf, cell) {
+    const map = new Map();
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i]; const b = it && boxOf(it); if (!b) continue;
+      const x0 = Math.floor(b[0] / cell), x1 = Math.floor(b[1] / cell);
+      const z0 = Math.floor(b[2] / cell), z1 = Math.floor(b[3] / cell);
+      for (let cx = x0; cx <= x1; cx++) for (let cz = z0; cz <= z1; cz++) {
+        const k = cx * 73856093 ^ cz * 19349663;
+        let l = map.get(k); if (!l) map.set(k, l = []);
+        l.push(it);
+      }
+    }
+    return { map: map, cell: cell };
+  }
+  function bucketQuery(idx, x, z, pad, out) {
+    out.length = 0;
+    const c = idx.cell;
+    const x0 = Math.floor((x - pad) / c), x1 = Math.floor((x + pad) / c);
+    const z0 = Math.floor((z - pad) / c), z1 = Math.floor((z + pad) / c);
+    // An item filed in two cells can come back twice. Both callers take a
+    // minimum over the list, so a duplicate is harmless — and nothing gets
+    // stamped onto the records (lots and junctions are plain data).
+    for (let cx = x0; cx <= x1; cx++) for (let cz = z0; cz <= z1; cz++) {
+      const l = idx.map.get(cx * 73856093 ^ cz * 19349663); if (!l) continue;
+      for (let i = 0; i < l.length; i++) out.push(l[i]);
+    }
+    return out;
+  }
+
   // `world` is the in-progress descriptor when called from inside buildCity
   // (CBZ.city.arena is not assigned until buildCity RETURNS — the same trap
   // worldRef documents below). Callers outside a build pass nothing.
-  let juncRef = null;
+  let juncRef = null, juncIdx = null;
   CBZ.roadJunctions = function (world) {
     if (!on()) return [];
     const A = (world && world.roads) ? world : null;
@@ -811,19 +942,31 @@
       junc = buildJunctions(R);
       let lots = A ? A.lots : null;
       if (!lots) { const c = CBZ.city; const B = (c && c.arena && c.arena.lots) ? c.arena : c; lots = (B && B.lots) || null; }
+      const lotIdx = lots && lots.length > 24 ? bucketIndex(lots, function (L) {
+        if (!Number.isFinite(L.cx) || !Number.isFinite(L.cz)) return null;
+        const lw = (L.w != null ? L.w : 0) / 2, ld = (L.d != null ? L.d : L.w || 0) / 2;
+        return [L.cx - lw, L.cx + lw, L.cz - ld, L.cz + ld];
+      }, 64) : null;
       for (let i = 0; i < junc.length; i++) {
         const J = junc[i];
-        J.footway = footwayAt(J, lots);
+        J.footway = footwayAt(J, lots, lotIdx);
         J.r = CBZ.roadCornerRadius(J.a, J.b, J.footway);
       }
+      // file every junction by the box roadJunctionAt accepts it in
+      // (half width + corner radius on each axis; the query pad is added at
+      // query time)
+      juncIdx = bucketIndex(junc, function (J) {
+        return [J.x - J.ha - J.r, J.x + J.ha + J.r, J.z - J.hb - J.r, J.z + J.hb + J.r];
+      }, 48);
       juncN = R.length; juncRef = R;
     }
     return junc;
   };
 
   CBZ.roadJunctionAt = function (x, z, pad) {
-    const list = CBZ.roadJunctions();
+    const all = CBZ.roadJunctions();
     const p = pad || 0;
+    const list = juncIdx && junc === all ? bucketQuery(juncIdx, x, z, p, _juncNear) : all;
     let best = null, bd = 1e18;
     for (let i = 0; i < list.length; i++) {
       const J = list[i];

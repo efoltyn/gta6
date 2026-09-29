@@ -160,6 +160,13 @@
     keshtown: [26, 28], kesh_north: [26, 28], kesh_east: [26, 28],
     solaracity: [26, 28],
     mbeyacity: [26, 28], mbeya_west: [26, 28], mbeya_south: [26, 28], mbeya_east: [26, 28],
+    // THE PLANNED CITIES (city/metro.js). A metro is not a biome with a
+    // costume: it dresses like a big city. Kingsport takes the everyday
+    // urban rack plus the downtown brights (0-14: navy/maroon/grey/black/
+    // denim + the tourist-and-money colours); the Gang City's west borough
+    // is the same city's working streets, the everyday rack alone (0-9).
+    // Their rings reuse their mini-city's own biome id, so no entry.
+    kingsport: [0, 14], cityborough: [0, 9],
   };
   const HAIRS = [0x1a1410, 0x2a2018, 0x3b2a1a, 0x6b4a2a, 0x8a6a3a, 0x101010, 0x55524e, 0x4a3520];
   // WHO wears WHAT, by district kind (indexes into SHIRTS): downtown reads
@@ -248,10 +255,20 @@
   // night-core) / foundry 0.6 (industrial, lighter foot traffic). harvestmarket/
   // pinecrest ride the existing farmland/snow shares (sparse, by design).
   const BIOME_DENSITY = { speedway: 1.0, airport: 0.85, military: 0.45, farmland: 0.4, forest: 0.35, desert: 0.3, snow: 0.3,
-                          capeharbor: 0.7, goldspire: 0.9, neonreef: 1.0, foundry: 0.6 };
+                          capeharbor: 0.7, goldspire: 0.9, neonreef: 1.0, foundry: 0.6,
+                          kingsport: 1.0, cityborough: 0.9 };
   // per-tick cache of the player's active region/biome (set in the onUpdate tick,
   // NEVER per-agent). _activeBiome 'city' = mainland or a link → bubble disabled.
   let _activeReg = null, _activeBiome = "city";
+  // ...and, when that biome is a PLANNED CITY the player is in or beside
+  // (CBZ.metroCities), that city: its plan knows where the pavements are.
+  // A metro is kilometres wide and made of many region pieces, so the bubble
+  // there works off the plan around the player, never off one rect.
+  let _activeMetro = null;
+  // a region too big for its uniform scatter to ever land in the ~95 m bubble
+  function hugeRegion(reg) {
+    return reg && (reg.kind === "circle" ? reg.r > 500 : (reg.maxX - reg.minX > 1000 || reg.maxZ - reg.minZ > 1000));
+  }
   // bubble is live only when the flag is on, we have a real region, and its biome
   // has a tint palette (links carry no biome → fall through to 'city'/mainland).
   function bubbleOn() { return CBZ.crowdBiomeBubble && _activeReg && _activeBiome !== "city" && !!BIOME_TINT[_activeBiome]; }
@@ -584,11 +601,21 @@
     const P = CBZ.player; const ppx = P ? P.pos.x : 0, ppz = P ? P.pos.z : 0;
     if (bubbleOn() && Math.random() < BIOME_BUBBLE_SHARE) {
       const reg = _activeReg, far2 = BUBBLE_FAR * BUBBLE_FAR;
+      // PLANNED CITY: seat the body on a pavement in the ring around the
+      // player (a real street's footway, clear of every house and the river)
+      if (_activeMetro && CBZ.metroSidewalkPoint) {
+        const q = CBZ.metroSidewalkPoint(_activeMetro, ppx, ppz, BUBBLE_NEAR, BUBBLE_FAR);
+        if (q && !(CBZ.citySpawnBlocked && CBZ.citySpawnBlocked(q.x, q.z, 0.6, true))) {
+          out.x = q.x; out.z = q.z;
+          if (A.clampToCity) A.clampToCity(out, 0.6);
+          return;
+        }
+      }
       // a few region scatter tries, keep the first that lands inside the bubble
       // AND clear of the no-spawn zones (runways/aprons/terminal footprints —
       // scatter already dodges them internally; the explicit civilian check
       // also honors civ-only restricted zones).
-      for (let t = 0; t < 6; t++) {
+      for (let t = hugeRegion(reg) ? 6 : 0; t < 6; t++) {    // (a huge region's scatter can't hit the bubble: straight to the ring)
         const pts = CBZ.cityScatterInRegion(reg, 1, Math.random, 4);
         if (!pts || !pts.length) break;
         if (CBZ.citySpawnBlocked && CBZ.citySpawnBlocked(pts[0].x, pts[0].z, 0.6, true)) continue;
@@ -655,6 +682,15 @@
     // lots — otherwise clampToCity would drag every biome goal to the nearest
     // mainland sidewalk and the whole bubble would "walk to the sea". Gated so
     // mainland bodies are untouched (bubbleOn false → skipped entirely).
+    // PLANNED CITY: the next goal is a pavement a block or so away along the
+    // streets (12-70 m), not a scatter point kilometres across the metro.
+    if (ax !== undefined && bubbleOn() && _activeMetro && CBZ.metroSidewalkPoint) {
+      const B = _activeMetro.plan.bounds;
+      if (ax >= B.minX && ax <= B.maxX && az >= B.minZ && az <= B.maxZ) {
+        const q = CBZ.metroSidewalkPoint(_activeMetro, ax, az, 12, 70, Math.random, 6);
+        if (q) { out.x = q.x; out.z = q.z; if (A.clampToCity) A.clampToCity(out, 0.6); return; }
+      }
+    }
     if (ax !== undefined && bubbleOn() && CBZ.cityRegionHit && CBZ.cityRegionHit(_activeReg, ax, az, 0)) {
       const pts = CBZ.cityScatterInRegion(_activeReg, 1, Math.random, 4);
       // no-spawn zones bar STROLL GOALS too — a legally-placed walker must
@@ -2529,7 +2565,7 @@
     // per-agent). On/near a non-'city' region → the relocation paths (fieldPoint),
     // the stroll gate and the density multiplier all aim the crowd into that biome.
     // Flag off (or no region) → _activeBiome stays 'city' → every gate no-ops.
-    _activeReg = null; _activeBiome = "city";
+    _activeReg = null; _activeBiome = "city"; _activeMetro = null;
     if (CBZ.crowdBiomeBubble) {
       const A = arena(), P = CBZ.player;
       if (A && P && P.pos) {
@@ -2537,6 +2573,11 @@
         const reg = (CBZ.cityAnyRegion && CBZ.cityAnyRegion(A, ppx, ppz, 0)) ||
                     (CBZ.cityNearestRegion && CBZ.cityNearestRegion(A, ppx, ppz, ACTIVE_RAD));
         if (reg) { _activeReg = reg; _activeBiome = reg.biome || "city"; }  // links carry no biome → 'city'
+        _activeMetro = null;
+        if (reg && CBZ.metroCityAt) {
+          const mc = CBZ.metroCityAt(ppx, ppz, ACTIVE_RAD);
+          if (mc && mc.biome === _activeBiome && mc.plan && mc.plan.bounds) _activeMetro = mc;
+        }
       }
     }
     // SCHEDULES: cache the sun hour + global 4h bucket once per tick (never per

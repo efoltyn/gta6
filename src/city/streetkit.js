@@ -1321,5 +1321,10 @@
     // or null where no street was laid
     heightAt: floorAt,
     regionAt: regionOf,
+    // THE SHARED LOOK for streets this kit does not lay itself (city/
+    // metro_ground.js: a metro's kilometres of street are the same asphalt,
+    // footway, kerb and paint, never a second texture set or program)
+    look: function () { return look(window.THREE); },
+    sharedAsphalt: function (laneW, lanesPerDir) { return asphalt(window.THREE, { laneW: laneW || 3.6, nL: lanesPerDir || 2 }, true); },
   };
 })();

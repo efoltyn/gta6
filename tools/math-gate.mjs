@@ -46,7 +46,12 @@ const CALIBRATE = argv.includes("--calibrate");
 // the stored golden, and the BIOME NAME SET must match exactly. Update these
 // deliberately when a world-content merge intends to change them — run
 // `node tools/math-gate.mjs --calibrate --seeds 90210,1337` and paste.
-const BIOMES_ALL = ["airport","annex","arena","capeharbor","city","desert","farmland","forest","foundry","goldspire","kesh","kesh_east","kesh_north","keshtown","lowport","mbeya","mbeya_east","mbeya_south","mbeya_west","mbeyacity","military","neonreef","snow","solara","solaracity","speedway","veridia","veridiacity","wilds"];
+// "kingsport" (the metro) and "cityborough" (the Gang City west borough) are
+// the planned cities city/metro.js registers (2026-09-29, city-scale). That
+// merge adds ~150-250 arterial road records, so GOLDEN's road counts below are
+// stale until the next `--calibrate` run (both seeds) — re-run it after the
+// merge and paste its values; do not hand-edit the counts.
+const BIOMES_ALL = ["airport","annex","arena","capeharbor","city","cityborough","desert","farmland","forest","foundry","goldspire","kesh","kesh_east","kesh_north","keshtown","kingsport","lowport","mbeya","mbeya_east","mbeya_south","mbeya_west","mbeyacity","military","neonreef","snow","solara","solaracity","speedway","veridia","veridiacity","wilds"];
 // "frontier" is the four Frontier Lookout pads continent.js stands at the
 // midpoints of the plate's edges. They are 32 x 24 m and they have ALWAYS
 // existed; whether the sweep grid lands on one is a coincidence of where the

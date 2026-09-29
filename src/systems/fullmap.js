@@ -698,6 +698,118 @@
     ctx.restore();
   }
 
+  // ---- THE PLANNED CITIES (city/metro.js -> CBZ.metroCities) ----------------
+  // A metro is kilometres of streets and thousands of buildings that are NOT
+  // lots and mostly NOT road records (only its arterials are). They draw from
+  // the plan itself: river, parks and streets onto the BASE plate (a street
+  // grid is geography — it shows at every zoom), building footprints onto the
+  // LOTS plate (tactical detail, like the downtown's lots). Both bake once per
+  // arena at the fit projection. Zoomed in, the same layers redraw LIVE over
+  // the plates for just the view (via the 200 m plan index, CBZ.metroEach) so
+  // a street is a crisp line at 12x instead of a stretched bake.
+  function metroCities() {
+    const L = CBZ.metroCities;
+    return (L && L.length) ? L.filter(function (mc) { return mc && mc.plan && mc.plan.bounds; }) : [];
+  }
+  function mOk(q) { return q && Number.isFinite(q.x) && Number.isFinite(q.z); }
+  function mInBox(B, box) { return !box || !(B.maxX < box.x0 || B.minX > box.x1 || B.maxZ < box.z0 || B.minZ > box.z1); }
+  // visit plan items, all of them (bake) or only those filed near `box` (live)
+  function mEach(mc, kind, box, fn) {
+    if (box && CBZ.metroEach) { CBZ.metroEach(mc, kind, box.x0, box.x1, box.z0, box.z1, fn); return; }
+    const list = mc.plan[kind] || [];
+    for (let i = 0; i < list.length; i++) fn(list[i]);
+  }
+  function strokePoly(pts, p) {
+    for (let i = 0; i < pts.length; i++) {
+      if (!mOk(pts[i])) return;
+      if (i === 0) ctx.moveTo(p.x(pts[i].x), p.z(pts[i].z)); else ctx.lineTo(p.x(pts[i].x), p.z(pts[i].z));
+    }
+  }
+  function drawMetroGround(p, box) {
+    const cities = metroCities();
+    if (!cities.length) return;
+    ctx.save(); ctx.lineCap = "round"; ctx.lineJoin = "round";
+    for (const mc of cities) {
+      const P = mc.plan;
+      if (!mInBox(P.bounds, box)) continue;
+      // parks and the river first: streets and bridges draw over them
+      ctx.fillStyle = "rgba(76,153,82,.55)";
+      mEach(mc, "parks", box, function (k) {
+        if (![k.x0, k.x1, k.z0, k.z1].every(Number.isFinite)) return;
+        ctx.fillRect(p.x(k.x0), p.z(k.z0), Math.max(1, (k.x1 - k.x0) * p.sc), Math.max(1, (k.z1 - k.z0) * p.sc));
+      });
+      const R = P.river;
+      if (R && R.pts && R.pts.length > 1 && R.pts.every(mOk)) {
+        ctx.strokeStyle = "rgba(39,126,143,.95)";
+        ctx.lineWidth = Math.max(2, (R.half || 30) * 2 * p.sc);
+        ctx.beginPath(); strokePoly(R.pts, p); ctx.stroke();
+      }
+      // streets: every casing, then every fill, so crossings knit. Arterials
+      // (and country roads) read brighter and a touch wider than the locals.
+      for (const pass of [0, 1]) {
+        mEach(mc, "streets", box, function (st) {
+          if (!st.pts || st.pts.length < 2) return;
+          const major = st.k === "art" || st.k === "rural";
+          const wpx = Math.max(major ? 1.3 : 0.6, (st.w || 10) * p.sc * (major ? 0.9 : 0.8));
+          if (pass === 0) { ctx.strokeStyle = "rgba(11,16,21,.8)"; ctx.lineWidth = wpx + Math.max(1, wpx * 0.3); }
+          else { ctx.strokeStyle = major ? "rgba(176,186,200,.85)" : "rgba(136,146,160,.66)"; ctx.lineWidth = wpx; }
+          ctx.beginPath(); strokePoly(st.pts, p); ctx.stroke();
+        });
+      }
+      // cul-de-sac turning circles (a handful per city; plain culled loop)
+      ctx.fillStyle = "rgba(136,146,160,.66)";
+      for (const b of P.bulbs || []) {
+        if (!mOk(b) || !(b.r > 0)) continue;
+        if (box && (b.x < box.x0 - b.r || b.x > box.x1 + b.r || b.z < box.z0 - b.r || b.z > box.z1 + b.r)) continue;
+        ctx.beginPath(); ctx.arc(p.x(b.x), p.z(b.z), Math.max(0.6, b.r * p.sc), 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+  const METRO_BLDG_FILL = { tower: "rgba(96,110,130,.85)", ware: "rgba(122,114,104,.78)", tank: "rgba(140,140,136,.78)" };
+  function drawMetroBuildings(p, box) {
+    for (const mc of metroCities()) {
+      if (!mInBox(mc.plan.bounds, box)) continue;
+      mEach(mc, "bldgs", box, function (b) {
+        if (!mOk(b) || !(b.w > 0) || !(b.d > 0)) return;
+        ctx.fillStyle = METRO_BLDG_FILL[b.type] || "rgba(112,127,147,.72)";
+        const w = Math.max(0.7, b.w * p.sc), d = Math.max(0.7, b.d * p.sc), x = p.x(b.x), y = p.z(b.z);
+        const rot = b.rot || 0;
+        if (Math.abs(rot) < 1e-3 || w < 2.5) { ctx.fillRect(x - w / 2, y - d / 2, w, d); return; }
+        // metroplan's footprint convention (obbCorners): world = centre +
+        // R(rot) applied as (lx*c + lz*s, -lx*s + lz*c) — a canvas turn of -rot
+        ctx.save(); ctx.translate(x, y); ctx.rotate(-rot); ctx.fillRect(-w / 2, -d / 2, w, d); ctx.restore();
+      });
+    }
+  }
+  // names: each planned city at the fit, its districts once you zoom in —
+  // neighbourhood names are map lettering (not signage), collision-tested
+  // through the one mapLabel funnel like every other place name.
+  function drawMetroNames(p, detail) {
+    const known = settlementNameSet();
+    for (const mc of metroCities()) {
+      const P = mc.plan;
+      const B = P.bounds, cx = (B.minX + B.maxX) / 2, cz = (B.minZ + B.maxZ) / 2;
+      if (!detail) {
+        const nm = mc.name || P.name; if (!nm) continue;
+        if (known.has(String(nm).toLowerCase().replace(/[^a-z0-9]+/g, ""))) continue;
+        const wpx = (B.maxX - B.minX) * p.sc; if (wpx < 40) continue;
+        mapLabel(String(nm).toUpperCase(), p.x(Number.isFinite(P.cx) ? P.cx : cx), p.z(Number.isFinite(P.cz) ? P.cz : cz), {
+          size: Math.max(11, Math.min(20, wpx / Math.max(6, String(nm).length * 0.55))),
+          fill: "rgba(228,238,250,.9)", haloC: "rgba(0,0,0,.55)",
+        });
+        continue;
+      }
+      for (const d of P.districts || []) {
+        if (!d || !d.name || !Number.isFinite(d.cx) || !Number.isFinite(d.cz)) continue;
+        const nx = p.x(d.cx), ny = p.z(d.cz);
+        if (nx < -40 || nx > W + 40 || ny < -20 || ny > H + 20) continue;
+        mapLabel(d.name, nx, ny, { size: 10, fill: "rgba(214,224,236,.72)", haloC: "rgba(0,0,0,.6)" });
+      }
+    }
+  }
+  function viewBox(p) { return { x0: p.wx(0), x1: p.wx(W), z0: p.wz(0), z1: p.wz(H) }; }
+
   function drawLots(lots, p) {
     for (const lot of lots || []) {
       ctx.fillStyle = lot.kind === "park" ? "rgba(76,153,82,.62)" : (lot.kind === "abandoned" ? "rgba(146,77,67,.75)" : "rgba(112,127,147,.72)");
@@ -2096,10 +2208,12 @@
       // ---- METROPOLIS TITLE: the mainland city is a named place too, equal to
       //      the islands. A large faint banner sits just above the district grid.
       if (!ICONS_V2()) drawCityTitle(p, A);
+      drawMetroGround(p, null);          // the planned cities' streets, parks, river
     });
     onPlate(plates.lots, function () {
       drawLots(A.lots, p);
       if (A.annex) drawLots(A.annex.lots, p);
+      drawMetroBuildings(p, null);       // ...and their building footprints
     });
     onPlate(plates.marks, function () {
       const settlementNames = settlementNameSet();
@@ -2297,6 +2411,9 @@
     const wanted = MAP_V2() ? starCount() : ((CBZ.game && CBZ.game.wanted) || 0);
     compositePlate(plates.base, p);   // real terrain + geographic lettering
     const detail = map.view.z >= 2.4;
+    // zoomed in: the metro streets again, crisp, for just the view (the bake
+    // is at the fit scale and would be a stretched blur here)
+    if (detail) drawMetroGround(p, viewBox(p));
     // THE BRIDGE — the sole chokepoint between mainland and island. WHY it matters
     // mechanically: at 3★+ the cops seal it (roadblocks), so it turns red + SEALED
     // — the map tells you your island escape is cut off.
@@ -2326,6 +2443,7 @@
     if (detail) {
       drawGangTurf(p);
       compositePlate(plates.lots, p);
+      if (map.view.z >= 6) drawMetroBuildings(p, viewBox(p));   // crisp footprints once a block is legible
       drawStoreControl(p);
       for (let i = 0; i < (CBZ.cityPeds || []).length; i += Math.max(1, Math.ceil(CBZ.cityPeds.length / 380))) {
         const ped = CBZ.cityPeds[i]; if (!ped.dead) dot(ped.pos.x, ped.pos.z, p,
@@ -2356,6 +2474,7 @@
       if (detail) drawCityPoisLive(p, A); // city services only at city scale
       drawSettlementsLive(p);        // named towns (labels collision-avoided)
     }
+    drawMetroNames(p, detail);       // planned cities at the fit, their districts zoomed in
     if (ICONS_V2()) { reserveIconBoxes(); drawRegionNames(p, A, settlementNameSet()); }
     drawWaterNames(p, A);
     if (MAP_V2() && (map.view.z >= 2.6 || (map._cursor && !ICONS_V2()))) { drawClimbMarks(p, A); drawBoardTicks(p); }

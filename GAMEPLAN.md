@@ -237,6 +237,19 @@ mountains should have white snow area all around them"*.
 > 5. **`CBZ.roadCorridorMid(city, axis, opts)`** — the derived midpoint of the widest free lane between registered places. Kills the highwaynet re-measure treadmill and serves every future cross-country route, access road and link. The data was always in scope; nobody had asked for it.
 > **AND WHAT SCALE NEEDS BACK:** *a population cap is a DENSITY, not a TOTAL.* `crowd: 700` (config.js:259), `CROWD_RIG_CAP: 1600` (config.js:196) and quality.js's per-tier `crowd: 180..1000` are fixed totals. **A ×3.2-area city with the same totals is a ghost town.** Key on local density near the camera — `traffic.js`'s `computeTarget()` already does this correctly; copy it.
 
+**DELIVERED 2026-09-29 — real cities at real scale (branch city-scale).** Not by growing the 330 m
+downtown (it is ringed by the harbour and the ring-1 islands) but by a PLANNER: `city/metroplan.js`
+(pure: land value -> envelope -> arterials every 400 m -> zoned superblocks -> blocks/parcels; CBD
+towers to 72 storeys, midtown, walk-ups, rowhouses, curving suburbs with cul-de-sacs and strip malls,
+industry on the rail and river, exurbs and farms; a river, rail + station, freeway overpasses and
+diamond interchanges; one fixed look per district). `city/metro.js` places KINGSPORT (the metro,
+~4.6 x 3.6 km, ~12k buildings, ~120k residents) in the SW country the Continental Loop crosses, grows
+Goldspire / Cape Harbor / Neon Reef outward round their walk-in towngen downtowns, and gives Gang City a
+west borough. Geometry streams by 800 m tile (`metro_fabric.js` buildings on one procedural facade
+shader, `metro_ground.js` streets/kerbs/decks/rail); one instanced far skyline per city. Checks:
+`node tools/metro-plan-check.mjs` (no building on a street, no overlaps, one connected network,
+height falls from the core).
+
 ### 3.3 THE AIRLINE NETWORK — an airport outside every city
 
 OWNER: *"there should be an airport outside every city so then there can be airliners flying

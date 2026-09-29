@@ -297,6 +297,52 @@
       }
       if (here) drawReg(here);
     }
+    // ---- THE PLANNED CITIES (CBZ.metroCities): streets, river, parks and
+    //      building footprints from the plan, ONLY what is inside the view —
+    //      the 200 m plan index (worldmap.js CBZ.metroEach) hands back a few
+    //      cells' worth, never the whole metro. Same street language as the
+    //      downtown below: a dark casing, then the fill; arterials brighter.
+    const MC = CBZ.metroCities;
+    if (MC && MC.length && CBZ.metroEach) {
+      const e = R + 30, bx0 = px - e, bx1 = px + e, bz0 = pz - e, bz1 = pz + e;
+      const okP = (q) => q && Number.isFinite(q.x) && Number.isFinite(q.z);
+      const poly = (pts) => { for (let i = 0; i < pts.length; i++) { if (!okP(pts[i])) return; if (i) ctx.lineTo(u(pts[i].x), v(pts[i].z)); else ctx.moveTo(u(pts[i].x), v(pts[i].z)); } };
+      for (const mc of MC) {
+        const Pm = mc && mc.plan, B = Pm && Pm.bounds;
+        if (!B || B.maxX < bx0 || B.minX > bx1 || B.maxZ < bz0 || B.minZ > bz1) continue;
+        ctx.fillStyle = "rgba(58,92,56,.8)";
+        CBZ.metroEach(mc, "parks", bx0, bx1, bz0, bz1, function (k) {
+          ctx.fillRect(u(k.x0), v(k.z0), (k.x1 - k.x0) * sc, (k.z1 - k.z0) * sc);
+        });
+        const Rv = Pm.river;
+        if (Rv && Rv.pts && Rv.pts.length > 1) {
+          ctx.strokeStyle = "#1d4a5c"; ctx.lineWidth = Math.max(3, (Rv.half || 30) * 2 * sc);
+          ctx.lineCap = "round"; ctx.lineJoin = "round";
+          ctx.beginPath(); poly(Rv.pts); ctx.stroke();
+        }
+        ctx.lineCap = "round"; ctx.lineJoin = "round";
+        for (let pass = 0; pass < 2; pass++) {
+          CBZ.metroEach(mc, "streets", bx0, bx1, bz0, bz1, function (st) {
+            if (!st.pts || st.pts.length < 2) return;
+            const major = st.k === "art" || st.k === "rural";
+            const w = Math.max(major ? 1.8 : 1.1, (st.w || 10) * sc * 0.85);
+            ctx.strokeStyle = pass ? (major ? "rgba(178,188,202,.55)" : "rgba(150,160,174,.36)") : "rgba(8,11,15,.65)";
+            ctx.lineWidth = pass ? w : w + 2.5;
+            ctx.beginPath(); poly(st.pts); ctx.stroke();
+          });
+        }
+        ctx.lineCap = "butt"; ctx.lineJoin = "miter";
+        ctx.fillStyle = "#151a20"; ctx.globalAlpha = 0.85;
+        CBZ.metroEach(mc, "bldgs", bx0, bx1, bz0, bz1, function (b) {
+          const dx = b.x - px, dz = b.z - pz; if (dx * dx + dz * dz > R2) return;
+          const w = Math.max(1, b.w * sc), d = Math.max(1, b.d * sc);
+          if (!b.rot || w < 2) { ctx.fillRect(u(b.x) - w / 2, v(b.z) - d / 2, w, d); return; }
+          // metroplan's footprint convention: a canvas turn of -rot
+          ctx.save(); ctx.translate(u(b.x), v(b.z)); ctx.rotate(-b.rot); ctx.fillRect(-w / 2, -d / 2, w, d); ctx.restore();
+        });
+        ctx.globalAlpha = 1;
+      }
+    }
     function paintLots(list) {
       if (!list) return;
       for (const lot of list) {

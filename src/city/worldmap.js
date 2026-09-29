@@ -528,6 +528,7 @@
   // Additionally rejects MID-ROAD points (within the driving lanes of any
   // road centreline segment): sidewalk draws sit ~6.4u off a 16u road's
   // centre, so the 5.5u half-width bars the lanes without touching them.
+  const _blockNear = [];
   CBZ.citySpawnBlocked = function (x, z, pad, civilian) {
     const A = CBZ.city && CBZ.city.arena; if (!A) return false;
     pad = pad || 0;
@@ -540,7 +541,11 @@
         if (dx * dx + dz * dz <= rr * rr) return true;
       } else if (x >= s.minX - pad && x <= s.maxX + pad && z >= s.minZ - pad && z <= s.maxZ + pad) return true;
     }
-    const roads = A.roads;
+    // Only the roads that can reach this point: roadrules.js's bucket grid
+    // (the same one roadSegmentAt uses) instead of every road in the world
+    // per call — this runs per scatter draw, per crowd relocation, per stroll
+    // goal. Same exact test below, so the answer is unchanged.
+    const roads = CBZ.roadsNear ? CBZ.roadsNear(x, z, 6, _blockNear) : A.roads;
     if (roads) for (let i = 0; i < roads.length; i++) {
       const r = roads[i], half = (r.len || 0) / 2;
       const along = r.vertical ? z - r.z : x - r.x;
@@ -575,6 +580,148 @@
       out.push({ x, z });
     }
     return out;
+  };
+
+  // ============================================================
+  //  METRO CITY INDEX — the planned cities (city/metro.js publishes
+  //  CBZ.metroCities = [{ id, name, tier, biome, plan, group }]).
+  //
+  //  A metro plan is thousands of buildings and hundreds of streets over
+  //  kilometres, and it is NOT in A.lots / A.roads (only its arterials are
+  //  road records). Everything that has to ask "what is here" about one —
+  //  the minimap drawing only what is in view, the crowd seating a walker on
+  //  a pavement instead of inside a house — goes through ONE lazy 200 m
+  //  bucket index per plan, built the first time it is asked for. Pure data
+  //  over the plan; cached in a WeakMap so a rebuilt world starts clean.
+  // ============================================================
+  const METRO_CELL = 200;
+  const _metroIdx = new WeakMap();
+  function mKey(ix, iz) { return ix * 65536 + iz; }
+  function mFile(map, x0, x1, z0, z1, item) {
+    const ix0 = Math.floor(x0 / METRO_CELL), ix1 = Math.floor(x1 / METRO_CELL);
+    const iz0 = Math.floor(z0 / METRO_CELL), iz1 = Math.floor(z1 / METRO_CELL);
+    for (let ix = ix0; ix <= ix1; ix++) for (let iz = iz0; iz <= iz1; iz++) {
+      const k = mKey(ix, iz); let l = map.get(k); if (!l) map.set(k, l = []); l.push(item);
+    }
+  }
+  function ptsOk(pts) { return pts && pts.length >= 2 && pts.every(function (q) { return q && Number.isFinite(q.x) && Number.isFinite(q.z); }); }
+  // { cell, streets: Map<cell, street[]>, bldgs: Map<cell, bldg[]>, parks: Map<cell, park[]> }
+  // A street spanning several cells is filed in each (a query that visits
+  // more than one cell can see it twice; every consumer tolerates that).
+  CBZ.metroIndex = function (mc) {
+    const P = mc && mc.plan; if (!P) return null;
+    let I = _metroIdx.get(P);
+    if (I) return I;
+    I = { cell: METRO_CELL, streets: new Map(), bldgs: new Map(), parks: new Map() };
+    for (const st of P.streets || []) {
+      if (!ptsOk(st.pts)) continue;
+      let x0 = 1e18, x1 = -1e18, z0 = 1e18, z1 = -1e18;
+      for (const q of st.pts) { if (q.x < x0) x0 = q.x; if (q.x > x1) x1 = q.x; if (q.z < z0) z0 = q.z; if (q.z > z1) z1 = q.z; }
+      const h = (st.w || 10) / 2;
+      mFile(I.streets, x0 - h, x1 + h, z0 - h, z1 + h, st);
+    }
+    for (const b of P.bldgs || []) {
+      if (!Number.isFinite(b.x) || !Number.isFinite(b.z)) continue;
+      const r = Math.hypot(b.w || 0, b.d || 0) / 2;          // bounding circle of the rotated box
+      mFile(I.bldgs, b.x - r, b.x + r, b.z - r, b.z + r, b);
+    }
+    for (const k of P.parks || []) {
+      if (![k.x0, k.x1, k.z0, k.z1].every(Number.isFinite)) continue;
+      mFile(I.parks, k.x0, k.x1, k.z0, k.z1, k);
+    }
+    _metroIdx.set(P, I);
+    return I;
+  };
+  // visit every item of `kind` ('streets'|'bldgs'|'parks') filed in a cell
+  // the box [x0..x1]x[z0..z1] touches; fn(item) may be called twice for one
+  // item that spans cells.
+  CBZ.metroEach = function (mc, kind, x0, x1, z0, z1, fn) {
+    const I = CBZ.metroIndex(mc); if (!I) return;
+    const map = I[kind]; if (!map) return;
+    const ix0 = Math.floor(x0 / METRO_CELL), ix1 = Math.floor(x1 / METRO_CELL);
+    const iz0 = Math.floor(z0 / METRO_CELL), iz1 = Math.floor(z1 / METRO_CELL);
+    for (let ix = ix0; ix <= ix1; ix++) for (let iz = iz0; iz <= iz1; iz++) {
+      const l = map.get(mKey(ix, iz)); if (!l) continue;
+      for (let i = 0; i < l.length; i++) fn(l[i]);
+    }
+  };
+  // which metro city's plan bounds hold (x,z) (+pad)? null when none.
+  CBZ.metroCityAt = function (x, z, pad) {
+    const L = CBZ.metroCities; if (!L || !L.length) return null;
+    const p = pad || 0;
+    for (let i = 0; i < L.length; i++) {
+      const B = L[i] && L[i].plan && L[i].plan.bounds; if (!B) continue;
+      if (x >= B.minX - p && x <= B.maxX + p && z >= B.minZ - p && z <= B.maxZ + p) return L[i];
+    }
+    return null;
+  };
+  function segD(px, pz, ax, az, bx, bz) {
+    const dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz;
+    const t = L2 > 0 ? Math.max(0, Math.min(1, ((px - ax) * dx + (pz - az) * dz) / L2)) : 0;
+    return Math.hypot(px - (ax + dx * t), pz - (az + dz * t));
+  }
+  function polyD(pts, x, z) {
+    let d = 1e18;
+    for (let i = 0; i + 1 < pts.length; i++) { const e = segD(x, z, pts[i].x, pts[i].z, pts[i + 1].x, pts[i + 1].z); if (e < d) d = e; }
+    return d;
+  }
+  // is (x,z) open ground in this metro — not inside a building footprint
+  // (oriented box, same convention as metroplan's obbCorners), not on a
+  // street's carriageway, not in the river? `pad` grows every footprint.
+  CBZ.metroPointOpen = function (mc, x, z, pad) {
+    const P = mc && mc.plan; if (!P) return true;
+    const p = pad || 0;
+    let hit = false;
+    CBZ.metroEach(mc, "bldgs", x - 1, x + 1, z - 1, z + 1, function (b) {
+      if (hit) return;
+      const c = Math.cos(b.rot || 0), s = Math.sin(b.rot || 0), dx = x - b.x, dz = z - b.z;
+      const lx = dx * c - dz * s, lz = dx * s + dz * c;
+      if (Math.abs(lx) <= b.w / 2 + p && Math.abs(lz) <= b.d / 2 + p) hit = true;
+    });
+    if (hit) return false;
+    CBZ.metroEach(mc, "streets", x - 1, x + 1, z - 1, z + 1, function (st) {
+      if (hit || !ptsOk(st.pts)) return;
+      if (polyD(st.pts, x, z) < (st.w || 10) / 2 - 0.3 + p) hit = true;
+    });
+    if (hit) return false;
+    const R = P.river;
+    if (R && ptsOk(R.pts) && polyD(R.pts, x, z) < (R.half || 0) + 4 + p) return false;
+    return true;
+  };
+  // A PAVEMENT point in a ring [rMin, rMax] around (x,z): a nearby street,
+  // a random spot along it, stepped out past its kerb onto the footway, and
+  // only kept if that footway is open ground. This is where a person in a
+  // metro stands — never mid-block inside a house, never on a local street
+  // (locals are geometry, not road records, so citySpawnBlocked cannot see
+  // them). null when no try lands. rnd defaults to Math.random.
+  const _mStreets = [];
+  CBZ.metroSidewalkPoint = function (mc, x, z, rMin, rMax, rnd, tries) {
+    if (!mc || !mc.plan) return null;
+    rnd = rnd || Math.random;
+    _mStreets.length = 0;
+    CBZ.metroEach(mc, "streets", x - rMax, x + rMax, z - rMax, z + rMax, function (st) {
+      if (st.k !== "rural" && ptsOk(st.pts)) _mStreets.push(st);
+    });
+    if (!_mStreets.length) return null;
+    const lo2 = rMin * rMin, hi2 = rMax * rMax;
+    for (let t = 0; t < (tries || 10); t++) {
+      const st = _mStreets[(rnd() * _mStreets.length) | 0];
+      const pts = st.pts, si = (rnd() * (pts.length - 1)) | 0;
+      const a = pts[si], b = pts[si + 1];
+      const dx = b.x - a.x, dz = b.z - a.z, L = Math.hypot(dx, dz);
+      if (!(L > 0.5)) continue;
+      // bias the spot toward the ring: project the centre onto the segment,
+      // then scatter within the ring's reach of that foot
+      const u0 = Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / (L * L)));
+      const u = Math.max(0, Math.min(1, u0 + (rnd() * 2 - 1) * (rMax / L)));
+      const side = rnd() < 0.5 ? -1 : 1, off = (st.w || 10) / 2 + 1.6;
+      const px = a.x + dx * u + (-dz / L) * off * side, pz = a.z + dz * u + (dx / L) * off * side;
+      const d2 = (px - x) * (px - x) + (pz - z) * (pz - z);
+      if (d2 < lo2 || d2 > hi2) continue;
+      if (!CBZ.metroPointOpen(mc, px, pz, 0.4)) continue;
+      return { x: px, z: pz };
+    }
+    return null;
   };
 
   // ============================================================

@@ -2331,6 +2331,12 @@
         // or resurface patches where anything meets a highway-district road
         // (highways.js stops its own paint at those junctions).
         if ((J.a && J.a.district === "highway") || (J.b && J.b.district === "highway")) continue;
+        // A METRO STREET IS DRAWN BY THE METRO (city/metro_ground.js lays its
+        // own carriageways, kerb returns, crosswalks and lamps; the arterial
+        // records carry `metro` and `litByTown`). Dressing its junctions here
+        // would be a second paint layer on the same corner — the same rule as
+        // the kit-vs-kit skip above, and the lamp walk's `litByTown` skip.
+        if ((J.a && J.a.metro) || (J.b && J.b.metro)) continue;
         list.push(J);
       }
       if (!list.length) return list;
