@@ -3,7 +3,20 @@
 // CBZ/prisonKit/document) and reports every door
 // spec, collider, breach row and leaf style (steel / bars), cycles every
 // door open->clear, shut->solid, and tests the sally-port interlock.
-// Usage: MORE=src/world/cafeteria.js,src/world/yard.js,src/world/gunroom.js,src/world/adminwing.js,src/world/prisonwings.js,src/world/cellblock.js node tools/prison-door-census.mjs .
+//
+// THE PLAYER PATH (2026-09-29, owner: "a lot of them don't open. Make sure all
+// doors are openable" + "the button works too far ... shows through shit"):
+// systems/interactions.js is loaded too, and for EVERY door record the player
+// is stood in front of it, facing it, with empty pockets: the pill the real
+// targeting code shows is read (Open / Close / Locked + what it needs); when
+// locked, the named item is handed over and the verb must turn into Swipe /
+// Unlock / Open; the real [E] function (CBZ.prisonDoorVerbNearest) is fired
+// and the leaf must MOVE, its slab must leave CBZ.colliders and a probe point
+// in the doorway must be walkable; then Close must shut it solid again.
+// Negative cases: a player on the tier over a cell, a cell under the tier,
+// and a player behind a wall must NOT get that door's pill.
+// DOOR_PLAYER_GATE=1 exits 1 on any failure.
+// Usage: node tools/prison-door-census.mjs .   (MORE defaults to the full door set below)
 //   (yard.js draws the coping over the four yard gates' heads; cafeteria.js paints the admin wing's wood leaves)
 import fs from "fs";
 import vm from "vm";
@@ -82,6 +95,19 @@ CBZ.prisonKit = {
 };
 CBZ.prisonKit = new Proxy(CBZ.prisonKit, { get: (t, k) => (k in t ? t[k] : () => new THREE.BoxGeometry(0.1, 0.1, 0.1)) });
 CBZ.roomShell = noop; CBZ.sfx = noop;
+// the real world extents / dims / config (config.js), not hand-typed stubs:
+// a stubbed WORLD left yard.js building a NaN-wide wall across the exit
+try {
+  vm.runInContext(read("src/config.js"), sandbox, { filename: "config" });
+  const real = sandbox.CBZ;
+  if (real) {
+    if (real.WORLD) CBZ.WORLD = real.WORLD;
+    if (real.DIM) CBZ.DIM = real.DIM;
+    if (real.COL) CBZ.COL = Object.assign({}, real.COL, CBZ.COL);
+    if (real.CONFIG) CBZ.CONFIG = real.CONFIG;
+  }
+} catch (e) { console.log("config.js: " + e.message); }
+CBZ.checkerTex = () => new THREE.Texture();
 sandbox.CBZ = CBZ;
 
 // WHO BUILT IT: every collider pushed and every object added while the door
@@ -102,13 +128,57 @@ function run(file) {
   catch (e) { return file + ": " + e.message.split("\n")[0]; }
 }
 const errs = [];
+// the REAL prisonkit.js for one thing: CBZ.guardTower, whose foot door is a
+// kit door on the Corridor Key (the tower doors are doors too). The census's
+// own stub kit stays the one every other file draws with.
+{
+  const stubKit = CBZ.prisonKit;
+  CBZ.prisonKit = undefined;
+  const e = run("src/world/prisonkit.js");
+  if (e) errs.push(e);
+  CBZ.prisonKit = stubKit;
+}
+{ const e = run("src/world/ladderkit.js"); if (e && process.env.DBG) console.log(e); }
 for (const f of ["src/world/corridorkit.js", "src/world/door.js"]) { const e = run(f); if (e) errs.push(e); }
 // corridors.js needs buildSallyPort + roof/fence stubs
 CBZ.prisonRoof = noop; CBZ.prisonFence = noop; CBZ.prisonBunk = noop;
 { const e = run("src/world/corridors.js"); if (e) errs.push(e); }
-for (const f of (process.env.MORE || "").split(",").filter(Boolean)) { const e = run(f); if (e) errs.push(e); }
+const MORE_DEFAULT = "src/world/cafeteria.js,src/world/lounge.js,src/world/southblock.js,src/world/yard.js,src/world/towers.js,src/world/gunroom.js,src/world/adminwing.js,src/world/prisonwings.js,src/world/cellblock.js";
+for (const f of (process.env.MORE != null ? process.env.MORE : MORE_DEFAULT).split(",").filter(Boolean)) { const e = run(f); if (e) errs.push(e); }
+// the one door verb, the real targeting code (systems/interactions.js)
+const econItems = new Set();
+CBZ.econ = { hasItem: (k) => econItems.has(k), takeItem: (k) => econItems.delete(k) };
+CBZ.cam = { yaw: 0 };
+CBZ.keys = {};
+CBZ.el = new Proxy({}, { get: () => deep() });
+CBZ.keycard = deep();
+CBZ.worldSfx = noop; CBZ.flashHint = noop; CBZ.setObjective = noop; CBZ.addHeat = noop;
+CBZ.player.crouch = false; CBZ.player.radius = 0.4;
+{ const e = run("src/systems/interactions.js"); if (e) errs.push(e); }
+// (a build older than the targeting rewrite has no CBZ.prisonDoorTarget: the
+// census reads its doorVerbPrompt's own rule, verbatim, so before/after compare)
+if (!CBZ.prisonDoorTarget) {
+  CBZ.prisonDoorTarget = function () {
+    const P = CBZ.player.pos, yaw = CBZ.cam.yaw, fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+    let best = null, bd = 2.6 * 2.6;
+    for (const s of CBZ._prisonDoorSpecs) {
+      let o, gone, cred; try { o = !!s.isOpen(); gone = !!(s.permanent && s.permanent()); cred = !!s.canUse(); } catch (e) { continue; }
+      if (gone || !cred || (!o && s.openByTap === false)) continue;
+      const a = s.at(), dx = a.x - P.x, dz = a.z - P.z, d2 = dx * dx + dz * dz;
+      if (d2 >= bd) continue;
+      const len = Math.hypot(dx, dz) || 1;
+      if ((dx / len) * fx + (dz / len) * fz < 0.35) continue;
+      bd = d2; best = { id: s.id, verb: o ? "Close" : "Open", sub: "" };
+    }
+    return best;
+  };
+}
 
 const specs = CBZ._prisonDoorSpecs || [];
+// a collider with a NaN edge is invisible to every test that compares it (and
+// a hit to a naive one): name any, they are bugs in the file that built them
+const nanCols = CBZ.colliders.filter((c) => [c.minX, c.maxX, c.minZ, c.maxZ].some((v) => typeof v !== "number" || v !== v));
+if (nanCols.length) errs.push("NaN colliders: " + nanCols.length + " " + JSON.stringify(nanCols.slice(0, 3).map((c) => [c.minX, c.maxX, c.minZ, c.maxZ, c.y0, c.y1, c.ref && c.ref.geometry && c.ref.geometry.parameters])));
 const kinds = {}; const styleCount = {};
 let bad = [];
 for (const s of specs) {
@@ -202,6 +272,170 @@ let interlock = null;
   }
 }
 console.log(JSON.stringify({ cycle, interlock }));
+
+/* ---- THE PLAYER PATH: every door, opened and shut by the player's own verb */
+const playerPath = { doors: 0, ok: 0, verbs: {}, fail: [], negatives: { tierAbove: 0, underTier: 0, behindWall: 0, fail: [] } };
+{
+  const G = CBZ.game;
+  const P = CBZ.player.pos;
+  const colIn = (c) => CBZ.colliders.indexOf(c) >= 0;
+  const inSolid = (x, y, z, pad, skip) => {
+    for (const c of CBZ.colliders) {
+      if (skip && skip.indexOf(c) >= 0) continue;
+      if (x < c.minX - pad || x > c.maxX + pad || z < c.minZ - pad || z > c.maxZ + pad) continue;
+      if (c.y0 != null && (y < c.y0 || y > c.y1)) continue;
+      return c;
+    }
+    return null;
+  };
+  const boxesOf = (s) => (s.cols ? s.cols() : [s.col()]).filter(Boolean);
+  const floorOf = (s, c) => (s.floor ? s.floor() : (c.y0 != null ? c.y0 : Math.max(0, s.at().y - 1.4)));
+  const face = (x, z) => { CBZ.cam.yaw = Math.atan2(-(x - P.x), -(z - P.z)); };
+  // every leaf's pose (a pair's two leaves swing opposite ways: never summed)
+  const leafSig = (s) => (s.pick() || []).filter(Boolean).map((o) => [o.rotation ? o.rotation.y : 0, o.position ? o.position.x : 0, o.position ? o.position.z : 0]);
+  const poseDiff = (a, b) => { let m = 0; for (let i = 0; i < Math.min(a.length, b.length); i++) for (let k = 0; k < 3; k++) m = Math.max(m, Math.abs(a[i][k] - b[i][k])); return m; };
+  const pockets = (items, card) => { econItems.clear(); for (const k of items || []) econItems.add(k); G.hasKey = !!card; };
+  const settle = (n) => tick(n || 45);
+  // stand in front of the slab (0.95 m off its face, on its floor), facing it,
+  // on the first side that is open floor with a clear line to the leaf
+  function standAt(s) {
+    for (const c of boxesOf(s)) {
+      const fy = floorOf(s, c);
+      const cx = (c.minX + c.maxX) / 2, cz = (c.minZ + c.maxZ) / 2;
+      const alongX = (c.maxX - c.minX) >= (c.maxZ - c.minZ);
+      for (const side of [-1, 1]) {
+        const x = alongX ? cx : cx + side * ((c.maxX - c.minX) / 2 + 0.95);
+        const z = alongX ? cz + side * ((c.maxZ - c.minZ) / 2 + 0.95) : cz;
+        if (inSolid(x, fy + 1.0, z, 0.3, [c])) continue;
+        P.set(x, fy, z); face(cx, cz);
+        const t = CBZ.prisonDoorTarget && CBZ.prisonDoorTarget();
+        if (t && t.id === s.id) return { c, fy, cx, cz, t };
+      }
+    }
+    return null;
+  }
+  const doorwayClear = (st) => !inSolid(st.cx, st.fy + 1.0, st.cz, 0.05, null);
+  for (const s of specs) {
+    if (s.permanent && s.permanent()) continue;
+    playerPath.doors++;
+    const why = [];
+    G.role = "inmate"; pockets([], false);
+    let st = standAt(s);
+    if (!st) { playerPath.fail.push(s.id + ": no pill from in front of it (reach/floor/sight/facing)"); continue; }
+    // an open door first shuts by hand ("Close"), so the open half is tested from shut
+    if (s.isOpen()) {
+      if (st.t.verb !== "Close") why.push("open door says " + st.t.verb);
+      CBZ.prisonDoorVerbNearest(); settle(90);
+      if (s.isOpen() || !colIn(boxesOf(s)[0])) why.push("Close did not shut it solid");
+      st = standAt(s) || st;
+    }
+    const shutSig = leafSig(s);
+    let t = CBZ.prisonDoorTarget();
+    let verb = t ? t.verb : null;
+    const key = verb === "Locked" ? t.sub : "";
+    playerPath.verbs[verb + (key ? " (" + key + ")" : "")] = (playerPath.verbs[verb + (key ? " (" + key + ")" : "")] || 0) + 1;
+    if (verb === "Locked") {
+      if (!key) why.push("Locked with no key named");
+      pockets(key && key !== "Keycard" ? [key] : [], key === "Keycard");
+      t = CBZ.prisonDoorTarget(); verb = t ? t.verb : null;
+      if (!/^(Open|Swipe|Unlock)$/.test(verb || "")) why.push("with the " + key + " it says " + verb);
+    } else if (verb !== "Open") why.push("shut door says " + verb);
+    CBZ.prisonDoorVerbNearest(); settle(150);
+    const opened = s.isOpen(), cleared = !colIn(st.c), moved = poseDiff(leafSig(s), shutSig) > 0.05, walk = doorwayClear(st);
+    if (!opened) why.push("E did not open it");
+    else {
+      if (!cleared) why.push("open but its slab is still solid");
+      if (!moved) why.push("open but the leaf never moved");
+      if (!walk) { const c = inSolid(st.cx, st.fy + 1.0, st.cz, 0.05, null); why.push("doorway not walkable (" + (c && c.ref && c.ref.name || "box " + (c.maxX - c.minX).toFixed(2) + "x" + (c.maxZ - c.minZ).toFixed(2)) + ")"); }
+      // and shut again, by hand
+      const t2 = CBZ.prisonDoorTarget();
+      if (!t2 || t2.id !== s.id || t2.verb !== "Close") why.push("open door offers " + (t2 ? t2.id + ":" + t2.verb : "nothing"));
+      CBZ.prisonDoorVerbNearest(); settle(120);
+      if (s.isOpen() || !colIn(st.c)) why.push("Close did not shut it solid");
+      else if (poseDiff(leafSig(s), shutSig) > 0.02) why.push("shut but the leaf is not home");
+    }
+    pockets([], false);
+    if (why.length) playerPath.fail.push(s.id + ": " + why.join("; ")); else playerPath.ok++;
+    // doors that stand open by day go back open
+    try { if (s.id && CBZ.corridorKit && CBZ.corridorKit.doors) for (const d of CBZ.corridorKit.doors) if (d.id === s.id && d.home && !d.open) d.setOpen(true, true); } catch (e) {}
+  }
+  settle(60);
+  // ---- NEGATIVES: another floor, a wall between -------------------------
+  // every key in the pockets, so no credential can hide a pill that the
+  // targeting itself should have refused
+  G.role = "cop"; pockets(["Cell Key", "Corridor Key", "Gate Key", "Gun-Room Key", "Lockpick"], true);
+  const cb = CBZ.cellblock;
+  const cellCells = cb && cb.cells ? cb.cells : [];
+  const cellSpecs = specs.filter((s) => /^prison-cell-/.test(s.id));
+  const FY = cb && cb.tierFloor ? cb.tierFloor : 3.9;
+  for (const s of cellSpecs) {
+    const c = s.col(); const fy = floorOf(s, c);
+    const cx = (c.minX + c.maxX) / 2, cz = (c.minZ + c.maxZ) / 2;
+    const alongX = (c.maxX - c.minX) >= (c.maxZ - c.minZ);
+    for (const side of [-1, 1]) {
+      const x = alongX ? cx : cx + side * 1.1, z = alongX ? cz + side * 1.1 : cz;
+      // the other floor, straight over / under the same spot, looking at it
+      const oy = fy > 1 ? 0 : FY;
+      P.set(x, oy, z); face(cx, cz);
+      const t = CBZ.prisonDoorTarget();
+      if (fy > 1) playerPath.negatives.underTier++; else playerPath.negatives.tierAbove++;
+      if (t && t.id === s.id) playerPath.negatives.fail.push(s.id + " offered '" + t.verb + "' from " + (fy > 1 ? "the floor under it" : "the tier over it"));
+    }
+  }
+  // behind a wall: every door, sampled around it within arm's reach, on its
+  // floor, where the census's own slab test says something solid stands
+  // between the eyes and the leaf
+  const segHits = (ax, ay, az, bx, by, bz, skip) => {
+    const d = [bx - ax, by - ay, bz - az], o = [ax, ay, az];
+    for (const c of CBZ.colliders) {
+      if (skip.indexOf(c) >= 0) continue;
+      if (bx >= c.minX && bx <= c.maxX && bz >= c.minZ && bz <= c.maxZ && (c.y0 == null || (by >= c.y0 && by <= c.y1))) continue;   // the thing's own box
+      const lo = [c.minX, c.y0 != null ? c.y0 : -1e9, c.minZ], hi = [c.maxX, c.y1 != null ? c.y1 : 1e9, c.maxZ];
+      let t0 = 0, t1 = 1, ok = true;
+      for (let k = 0; k < 3 && ok; k++) {
+        if (Math.abs(d[k]) < 1e-12) { if (o[k] < lo[k] || o[k] > hi[k]) ok = false; continue; }
+        let ta = (lo[k] - o[k]) / d[k], tb = (hi[k] - o[k]) / d[k];
+        if (ta > tb) { const q = ta; ta = tb; tb = q; }
+        t0 = Math.max(t0, ta); t1 = Math.min(t1, tb);
+        if (t0 > t1) ok = false;
+      }
+      if (ok) return c;
+    }
+    return null;
+  };
+  for (const s of specs) {
+    if (s.permanent && s.permanent()) continue;
+    const boxes = boxesOf(s);
+    const c = boxes[0]; const fy = floorOf(s, c);
+    const cx = (c.minX + c.maxX) / 2, cz = (c.minZ + c.maxZ) / 2;
+    const halfSpan = Math.max(c.maxX - c.minX, c.maxZ - c.minZ) / 2;
+    for (let a = 0; a < 32 * 5; a++) {
+      const ang = (a % 32) / 32 * Math.PI * 2, r = 0.8 + Math.floor(a / 32) * 0.45 + halfSpan * 0.5;
+      const x = cx + Math.cos(ang) * r, z = cz + Math.sin(ang) * r;
+      if (inSolid(x, fy + 1.0, z, 0.35, null)) continue;
+      // aim where the real code aims: the slab's nearest point, 0.25 m in from its ends
+      const w = c.maxX - c.minX, dd = c.maxZ - c.minZ, ix = w > dd ? Math.min(0.25, w / 2) : 0, iz = dd >= w ? Math.min(0.25, dd / 2) : 0;
+      const tx = Math.max(c.minX + ix, Math.min(c.maxX - ix, x)), tz = Math.max(c.minZ + iz, Math.min(c.maxZ - iz, z));
+      if (Math.hypot(Math.max(c.minX - x, 0, x - c.maxX), Math.max(c.minZ - z, 0, z - c.maxZ)) > 1.8) continue;   // out of reach anyway
+      const L = Math.hypot(tx - x, fy + 1.35 - (fy + 1.55), tz - z) || 1, k = Math.max(0, (L - 0.3) / L);
+      const blk = segHits(x, fy + 1.55, z, x + (tx - x) * k, fy + 1.55 + (fy + 1.35 - fy - 1.55) * k, z + (tz - z) * k, boxes);
+      if (!blk) continue;
+      // only a wall that is not part of this door's own frame (the piers of
+      // its infill touch the slab's ends): a box whose nearest face is > 0.3 m
+      // from the slab
+      const gap = Math.max(blk.minX - c.maxX, c.minX - blk.maxX, blk.minZ - c.maxZ, c.minZ - blk.maxZ);
+      if (gap < 0.3) continue;
+      P.set(x, fy, z); face(tx, tz);
+      playerPath.negatives.behindWall++;
+      const t = CBZ.prisonDoorTarget();
+      if (t && t.id === s.id) playerPath.negatives.fail.push(s.id + " offered '" + t.verb + "' through a wall from (" + x.toFixed(1) + "," + z.toFixed(1) + ")" + (process.env.DBG ? " blk " + JSON.stringify([blk.minX, blk.maxX, blk.minZ, blk.maxZ, blk.y0, blk.y1].map((v) => v == null ? v : +v.toFixed(2))) + " slab " + JSON.stringify([c.minX, c.maxX, c.minZ, c.maxZ].map((v) => +v.toFixed(2))) : ""));
+    }
+  }
+  P.set(0, 0, 500);
+  G.role = "inmate"; pockets([], false);
+}
+console.log(JSON.stringify({ playerPath }, null, 1));
+if (process.env.DOOR_PLAYER_GATE && (playerPath.fail.length || playerPath.negatives.fail.length)) process.exitCode = 1;
 
 /* ---- DRAWN == SOLID for every piece of the door kit (2026-09-29) --------
    Every door shut, then a 3-D sweep (10 cm across, 20 cm up):

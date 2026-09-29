@@ -339,24 +339,33 @@
        One declaration per leaf into systems/interactions.js's shared door
        registry, so a tap on the bars and the polled [E] both end in the
        setOpen above — this file gains no second implementation of "open".
-       The credential is the SAME test the tick below runs: a card door wants
-       the Keycard (or the uniform), a cage wants the Lockpick that picks it.
-       `openByTap` is false for the cages: their opening is a hold-to-defeat
-       beat and a tap must not shortcut 3.2-5.6 seconds of work.
        `permanent` covers both irreversible states — a blown leaf and the
        control-room release, which are holes, not doors. */
+    /* EVERY DOOR TAKES A KEY AT THE DOOR (owner, 2026-09-29: "all doors can
+       be opened with a key, not just a button"). A card door: the Keycard
+       (Central control: the Gun-Room Key, cfg.keys). A cage: the officers'
+       Corridor Key ring on its padlock, or the Lockpick's hold beat
+       (pickBeat below owns that pill; `beat` hands it the verb). */
+    const doorKeys = d.keys ? d.keys.slice() : (d.pick ? ["Corridor Key"] : null);
+    const hasItem = function (k) { const e = CBZ.econ; return !!(e && e.hasItem && e.hasItem(k)); };
     (CBZ._prisonDoorSpecs || (CBZ._prisonDoorSpecs = [])).push({
-      id: d.id, label: d.label, autoR: 2.5, openByTap: !d.pick,   // tick opens at near2 < 6.2
+      id: d.id, label: d.label, autoR: 2.5,   // tick opens at near2 < 6.2
       keyed: !!(d.keys || d.pick),   // needs a card or a pick (systems/prisondoorwatch.js)
+      keys: doorKeys,
       at: function () { return { x: d.x, y: 1.4, z: d.z }; },
       pick: function () { return d.pivots; },
       col: function () { return d.collider; },
       isOpen: function () { return !!d.open; },
       permanent: function () { return !!(d.blown || RELEASE.thrown); },
+      beat: function () { return !!(d.pick && !d.open && hasItem("Lockpick")); },
       canUse: function () {
-        if (d.keys) return !!(CBZ.game && (CBZ.game.hasKey || (CBZ.prisonStaffKey ? CBZ.prisonStaffKey() : CBZ.game.role === "cop")));
-        const econ = CBZ.econ;
-        return !!(econ && econ.hasItem && econ.hasItem("Lockpick"));
+        const g = CBZ.game;
+        if (g && (CBZ.prisonStaffKey ? CBZ.prisonStaffKey() : g.role === "cop")) return true;
+        if (doorKeys) for (let i = 0; i < doorKeys.length; i++) {
+          if (doorKeys[i] === "Keycard" ? !!(g && g.hasKey) : hasItem(doorKeys[i])) return true;
+        }
+        // a cage you picked open you may pull to again with the same pick
+        return !!(d.pick && d.open && hasItem("Lockpick"));
       },
       set: function (v) { d.setOpen(v); return d.open === !!v; },
     });
@@ -972,13 +981,16 @@
         const open = r ? -1 : 1, d0 = cx + 0.1, d1 = cx + 1.1, ST = 0.2;
         CK.infill({ axis: "x", a0: cx - 3.0, a1: cx + 3.0, c0: d0, c1: d1, fixed: zf, t: ST, top: 3.5, head: 2.3,
           color: 0x7d8691, skin: "block" });
-        const set = CK.doorSet({ axis: "x", a0: d0, a1: d1, fixed: zf, t: ST, h: 2.3, open: open, hinge: 1, frame: 0x39424e,
+        /* A REAL DOOR, NOT A PICTURE OF ONE (2026-09-29, owner: "a lot of
+           them don't open"). The leaf was drawn and a static box pushed in
+           front of it: fifteen seg cells nobody could ever open. It is the
+           kit's working door now, on the Cell Key (the seg officer carries
+           one: systems/economy.js), E at the leaf, a charge blows it, and it
+           stays as it was left (no closer). The map cell stands open. */
+        CK.door({ id: "prison-seg-" + r + "-" + i, label: "A seg cell", axis: "x", a0: d0, a1: d1, fixed: zf, t: ST, h: 2.3,
+          keys: ["Cell Key"], lb: 5, hinge: 1, swing: -open, frame: 0x39424e, headLamp: false, reader: false,
+          autoShut: Infinity, staffR: 1.2, startOpen: openCell,
           build: CK.detentionLeaf({ color: 0x5b6572, pass: true }) });
-        if (openCell) set.set(1);
-        else {
-          CBZ.colliders.push({ minX: d0, maxX: d1, minZ: zf - ST / 2, maxZ: zf + ST / 2, ref: set.leaves[0].slab || set.leaves[0].pivot });
-          if (CBZ.losBlockers && set.leaves[0].slab) CBZ.losBlockers.push(set.leaves[0].slab);
-        }
       }
       /* and what is inside it: a bunk, a stainless combo, nothing else.
 
@@ -1633,8 +1645,9 @@
     const has = !!(econ && econ.hasItem && econ.hasItem("Lockpick"));
     const pid = d.id;
     if (!has) { if (CBZ.prisonPromptClear) CBZ.prisonPromptClear(pid); d.picked = 0; tell(d, 0, 0); return; }
-    if (CBZ.prisonPrompt) CBZ.prisonPrompt(pid, "e", "Pick", { at: { x: d.x, y: 1.5, z: d.z }, hold: true });
-    const working = !!(CBZ.keys && CBZ.keys.e);
+    // (prisonPrompt refuses a lock you cannot reach: other floor, a wall between)
+    const reach = !CBZ.prisonPrompt || CBZ.prisonPrompt(pid, "e", "Pick", { at: { x: d.x, y: 1.5, z: d.z }, hold: true, skip: [d.collider] });
+    const working = reach && !!(CBZ.keys && CBZ.keys.e);
     if (!working) { d.picked = Math.max(0, (d.picked || 0) - dt * 1.6); tell(d, d.picked / d.pick, 0); return; }
     d.picked = (d.picked || 0) + dt;
     tell(d, d.picked / d.pick, 1);
@@ -1721,7 +1734,11 @@
             // out — staffNear above is untouched, because a guard with a card
             // opens his own door and that is the tailgating window.
             if (CBZ.prisonDoorLatched && CBZ.prisonDoorLatched(d.id)) continue;
-            const have = !!(g.hasKey || (CBZ.prisonStaffKey ? CBZ.prisonStaffKey() : g.role === "cop"));
+            // the key THIS door takes (Central control reads the Gun-Room Key,
+            // not the Keycard every other card door reads)
+            const econ = CBZ.econ;
+            const have = !!((CBZ.prisonStaffKey ? CBZ.prisonStaffKey() : g.role === "cop") ||
+              d.keys.some(function (k) { return k === "Keycard" ? !!g.hasKey : !!(econ && econ.hasItem && econ.hasItem(k)); }));
             const L = CBZ.cityLock
               ? CBZ.cityLock({ id: d.id, verb: "press", label: d.label, have: have,
                   keys: d.keys, orgs: ["police"], power: false })
@@ -1742,8 +1759,8 @@
       const dx = P.x - RELEASE.x, dz = P.z - RELEASE.z;
       if (dx * dx + dz * dz < 5.0) {
         // "Throw", over the release lamp: the racks are the console you stand at.
-        if (CBZ.prisonPrompt) CBZ.prisonPrompt("prison-control-console", "e", "Throw", { at: { x: RELEASE.x, y: 1.7, z: RELEASE.z }, d2: dx * dx + dz * dz });
-        if (CBZ.keys && CBZ.keys.e) throwEverything();
+        const reach = !CBZ.prisonPrompt || CBZ.prisonPrompt("prison-control-console", "e", "Throw", { at: { x: RELEASE.x, y: 1.7, z: RELEASE.z }, d2: dx * dx + dz * dz });
+        if (reach && CBZ.keys && CBZ.keys.e) throwEverything();
       } else if (CBZ.prisonPromptClear) CBZ.prisonPromptClear("prison-control-console");
     }
   });

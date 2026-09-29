@@ -205,10 +205,16 @@
      condition interactions.js's approach-open tests. `autoR` is 4 m: that
      open test is `ddx*ddx + ddz*ddz < 16` on the same point. */
   (CBZ._prisonDoorSpecs || (CBZ._prisonDoorSpecs = [])).push({
-    id: "prison-yard-door", label: "the unit door", autoR: 4.0,
-    at: function () { return { x: 0, y: 1.6, z: WZ }; },
+    id: "prison-yard-door", label: "the unit door", autoR: 4.0, keys: ["Keycard"],
+    // the face you are at: the inner door from the wing and the vestibule's
+    // back, the out door from the yard (both faces carry a reader)
+    at: function () {
+      const P = CBZ.player && CBZ.player.pos;
+      return { x: 0, y: 1.6, z: P && P.z > (WZ + VZ1) / 2 ? VZ1 : WZ };
+    },
     pick: function () { return pivots; },
     col: function () { return door.collider; },
+    cols: function () { return [collider, outCollider]; },
     isOpen: function () { return !!door.open; },
     permanent: function () { return !!door.blown; },
     // the stolen card, or the officer's own keys (CBZ.prisonStaffKey)

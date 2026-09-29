@@ -849,13 +849,11 @@
     if (v === inner.open) return v;
     inner.open = v;
     if (v) {
-      const i = CBZ.colliders.indexOf(inner.collider);
-      if (i >= 0) CBZ.colliders.splice(i, 1);
+      // solid until the leaf has swung 40% clear (the tick below), like every door
       if (inner.lamp) { inner.lamp.material.color.setHex(0x39ff88); inner.lamp.material.emissive.setHex(0x14c258); }
       if (CBZ.prisonPromptClear) CBZ.prisonPromptClear("gunroom-cage");
     } else {
-      inner.t = 0; inner.saw = 0;
-      inner.gate.rotation.y = 0;
+      inner.saw = 0;          // the leaf swings home in the tick below
       if (CBZ.colliders.indexOf(inner.collider) === -1) CBZ.colliders.push(inner.collider);
       if (inner.lamp) { inner.lamp.material.color.setHex(0xffb347); inner.lamp.material.emissive.setHex(0xff7a1a); }
     }
@@ -913,6 +911,7 @@
     // a.resetSlots() at the end of its armory block), so the inner cage rides
     // the existing seam and systems/state.js needs no edit at all.
     inner.setOpen(false, true);
+    inner.t = 0; if (inner.gate) inner.gate.rotation.y = 0;   // a reset snaps home (behind the fade)
     inner.sawMsg = 0; inner.heard = false;
   };
 
@@ -948,6 +947,22 @@
         // solid until the leaf has swung 40% clear (it used to vanish from
         // the physics the frame the reader went green)
         if (armory.open && armory.t >= 0.4) armory.solid(false);
+      }
+    }
+    /* THE CAGE LEAF SWINGS WHATEVER THE OUTER DOOR IS DOING. It used to swing
+       only inside the "armory fully open" branch, so a cage unlocked with the
+       armory door pulled shut behind you went see-through (collider gone, leaf
+       still across the mouth). Both ways at 1.9, solid until 40% clear. */
+    if (inner.gate) {
+      const want = inner.open ? 1 : 0;
+      if (inner.t !== want) {
+        const step = dt * 1.9;
+        inner.t = want > inner.t ? Math.min(want, inner.t + step) : Math.max(want, inner.t - step);
+        inner.gate.rotation.y = -inner.t * Math.PI / 2;   // swings out into the room, square to the front
+        if (inner.open && inner.t >= 0.4) {
+          const i = CBZ.colliders.indexOf(inner.collider);
+          if (i >= 0) { CBZ.colliders.splice(i, 1); if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
+        }
       }
     }
     if (!armory.open) {
@@ -1027,9 +1042,9 @@
               // The saw's progress is the hairline on this pill, over the
               // padlock: the time is the play here (six loud seconds in the
               // armoury), so it gets a readout, on the lock, not the HUD.
-              if (saw && CBZ.prisonPrompt) CBZ.prisonPrompt("gunroom-cage", "e", "Saw", { at: { x: 23.40, y: 1.55, z: -1.55 }, hold: true, prog: inner.saw / 6 });
-              else if (CBZ.prisonPromptClear) CBZ.prisonPromptClear("gunroom-cage");
-              if (saw && pressing) {
+              const reach = saw && (!CBZ.prisonPrompt || CBZ.prisonPrompt("gunroom-cage", "e", "Saw", { at: { x: 23.40, y: 1.55, z: -1.55 }, hold: true, prog: inner.saw / 6, skip: [inner.collider] }));
+              if (!saw && CBZ.prisonPromptClear) CBZ.prisonPromptClear("gunroom-cage");
+              if (reach && pressing) {
                 inner.saw += dt;
                 if (CBZ.shake && inner.saw % 0.5 < dt) CBZ.shake(0.03);
                 // SIX LOUD SECONDS, AND THE WING HEARS THEM. Steel on steel
@@ -1090,9 +1105,6 @@
             if (CBZ.prisonPromptClear) CBZ.prisonPromptClear("gunroom-cage");
           }
           if (inner.sawMsg > 0) inner.sawMsg -= dt;
-        } else if (inner.t < 1) {
-          inner.t = Math.min(1, inner.t + dt * 1.9);
-          inner.gate.rotation.y = -inner.t * Math.PI / 2;   // swings out into the room, square to the front
         }
       }
 
@@ -1171,7 +1183,7 @@
      lose the right to swing the gate he opened. `autoR` values are the square
      roots of this file's own proximity tests (14 and 5.3). */
   (CBZ._prisonDoorSpecs || (CBZ._prisonDoorSpecs = [])).push({
-    id: "prison-armory", label: "the armory door", autoR: 3.75,
+    id: "prison-armory", label: "the armory door", autoR: 3.75, keys: ["Keycard"],
     at: function () { return { x: 19, y: 2.0, z: 1 }; },
     pick: function () { return [gate]; },
     col: function () { return armory.collider; },
@@ -1183,6 +1195,12 @@
   if (inner.gate) {
     (CBZ._prisonDoorSpecs || (CBZ._prisonDoorSpecs = [])).push({
       id: "prison-armory-cage", label: "the inner cage", autoR: 2.3,
+      keys: function () { return inner.sawed ? null : ["Gun-Room Key"]; },
+      // a blade in hand: the tick's "Saw" pill is the verb on the padlock
+      beat: function () {
+        const e = CBZ.econ;
+        return !!(!inner.open && !inner.sawed && e && e.hasItem && e.hasItem("Hacksaw Blade") && !e.hasItem("Gun-Room Key"));
+      },
       at: function () { return { x: 23.40, y: 1.4, z: -1.55 }; },
       pick: function () { return [inner.gate]; },
       col: function () { return inner.collider; },
@@ -1190,6 +1208,7 @@
       permanent: function () { return false; },
       canUse: function () {
         const econ = CBZ.econ;
+        if (CBZ.prisonStaffKey && CBZ.prisonStaffKey()) return true;
         return !!(inner.sawed || (econ && econ.hasItem && econ.hasItem("Gun-Room Key")));
       },
       set: function (v) { inner.setOpen(v); return inner.open === !!v; },

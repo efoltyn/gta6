@@ -546,8 +546,9 @@
       });
     }
     (CBZ._prisonDoorSpecs || (CBZ._prisonDoorSpecs = [])).push({
-      id: cfg.id, label: cfg.label, autoR: 2.5, openByTap: true,
+      id: cfg.id, label: cfg.label, autoR: 2.5,
       keyed: !!(cfg.keys && cfg.keys.length),   // needs a card (systems/prisondoorwatch.js)
+      keys: cfg.keys && cfg.keys.length ? cfg.keys.slice() : null,   // what opens it at the door
       at: function () { return { x: d.x, y: 1.4, z: d.z }; },
       pick: function () { return d.pivots; },
       col: function () { return d.collider; },
@@ -623,7 +624,7 @@
     const along = cfg.axis === "z";
     const a0 = cfg.a0, a1 = cfg.a1, fixed = cfg.fixed, t = cfg.t || 0.3, h = cfg.h || 2.3;
     const hinge = cfg.hinge === 0 ? 0 : (cfg.hinge < 0 ? -1 : 1);
-    const set = doorSet({ axis: cfg.axis, a0: a0, a1: a1, fixed: fixed, t: t, h: h, y0: cfg.y0,
+    const set = doorSet({ axis: cfg.axis, a0: a0, a1: a1, fixed: fixed, t: t, h: h, y0: cfg.y0, max: cfg.max,
       open: -(cfg.swing || 1), hinge: hinge, meet: cfg.meet, build: cfg.build || detentionLeaf(), frame: cfg.frame });
     const L = set.leaves[0];
     const d = {
@@ -647,7 +648,15 @@
         else cardReader(lx, 1.2, fixed + off, 0, s);
       }
     }
-    return registerDoor(d, cfg);
+    registerDoor(d, cfg);
+    // a door that stands open by day (a dayroom's pair hooked back, the one
+    // seg cell kept open): it starts open and a new run puts it back open
+    if (cfg.startOpen) { d.home = true; openNow(d); }
+    return d;
+  }
+  function openNow(d) {
+    d.open = true; d.pending = false; d.t = 1; d.openT = 0;
+    d.set.set(1); colDrop(d); losSet(d, false); lampTo(d, true);
   }
   /* A PARTITION ACROSS AN OPENING WITH A STEEL PAIR IN IT: the corridor
      doors and a sally port's inner door. cfg { id, label, axis, a0, a1 (the
@@ -662,29 +671,46 @@
       keys: cfg.keys, lb: cfg.lb, alarm: cfg.alarm, hinge: cw > 1.3 ? 0 : -1, swing: cfg.swing,
       build: detentionLeaf({ color: cfg.color }), staffR: cfg.staffR, autoShut: cfg.autoShut, reader: cfg.reader });
   }
-  /* STAFF OPEN THE DOORS THEY HOLD KEYS TO. A movement officer walking the
-     spine carries the Corridor Key; when he reaches a door it opens and it
-     shuts behind him — the same tailgating window world/prisonwings.js
-     leaves at its card doors, and the reason a man can follow an officer
-     through a section he has no key for. Who opens what: any officer for an
-     unlocked door; rank 2+ for a card door; the corridor post for the
-     Corridor Key; the gate post for the Gate Key. */
-  function staffFor(d) {
-    const list = CBZ.guards || [];
+  /* WHO OPENS A DOOR BY WALKING UP TO IT (owner, 2026-09-29: "guards and
+     inmates open the doors they path through"). The nav grid walks a body to
+     a shut door and waits there (systems/navgrid.js); this is the hand on it.
+       unlocked      anybody: an officer, an inmate, the warden
+       Keycard       any officer: every officer on the floor is issued a card
+       Corridor Key  any officer but the gate post (the corridor men and the
+                     tower posts carry the ring, the floor officers ride it)
+       Gate Key      the gate post and the warden only: the exit port is the
+                     one door no floor officer walks through
+       Cell Key      nobody by walking: a cell (a seg cell) is opened on
+                     purpose, with the key, at the door
+     An inmate never opens a locked door: he waits for an officer and follows
+     him through (the tailgating window the wing is built on). */
+  function openerFor(d) {
     const R = d.staffR || 2.4;
+    const k = d.keys;
+    const list = CBZ.guards || [];
     for (let i = 0; i < list.length; i++) {
       const g = list[i];
-      if (!g || g.dead || g.ko > 0 || !g.group) continue;
+      if (!g || g.dead || g.ko > 0 || !g.group || g.tied || g.asleep) continue;
       const dx = g.group.position.x - d.x, dz = g.group.position.z - d.z;
       if (dx * dx + dz * dz > R * R) continue;
-      const k = d.keys;
       if (!k || !k.length) return g;
-      if (k.indexOf("Corridor Key") >= 0 && (g.post === "corridor" || g.kind === "warden")) return g;
-      if (k.indexOf("Gate Key") >= 0 && (g.post === "gate" || g.kind === "warden")) return g;
-      if (k.indexOf("Keycard") >= 0 && ((g.rank || 0) >= 2 || g.kind === "warden")) return g;
+      if (k.indexOf("Gate Key") >= 0) { if (g.post === "gate" || g.kind === "warden") return g; continue; }
+      if (k.indexOf("Cell Key") >= 0 && k.length === 1) continue;
+      return g;
+    }
+    if (k && k.length) return null;
+    const npcs = CBZ.npcs || [];
+    const r = Math.min(R, 1.8);
+    for (let i = 0; i < npcs.length; i++) {
+      const n = npcs[i];
+      if (!n || n.dead || n._crowd || !n.group || n.ko > 0) continue;
+      const p = n.group.position;
+      if (Math.abs(p.x - d.x) > r || Math.abs(p.z - d.z) > r) continue;
+      if ((p.x - d.x) * (p.x - d.x) + (p.z - d.z) * (p.z - d.z) <= r * r) return n;
     }
     return null;
   }
+  const staffFor = openerFor;
   /* A NEW RUN FINDS EVERY DOOR SHUT AND WHOLE. Same hook world/prisonwings.js
      uses (CBZ.jailBoost's state-exit list), taken lazily because this file
      parses before entities/guards.js publishes it. */
@@ -697,6 +723,7 @@
       d.set.set(0);
       colAdd(d); losSet(d, true);
       d.setOpen(false, true);
+      if (d.home) openNow(d);
     }
   }
   CBZ.resetCorridorDoors = resetDoors;

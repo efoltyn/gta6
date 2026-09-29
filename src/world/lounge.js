@@ -360,10 +360,10 @@
     addBox(19, 4.45, 37, 0.5, 3.1, 3.4, 0x6b7480, { cast: false });
     addBox(19.3, 2.88, 37, 0.14, 0.16, 3.5, 0x515a66, { cast: false });
     // the door that was never hung in this 3.4 m hole: a framed steel pair,
-    // hooked back against the yard face (corridorkit's door set, no collider)
-    if (CBZ.corridorKit && CBZ.corridorKit.doorSet) {
-      CBZ.corridorKit.doorSet({ axis: "z", a0: 35.3, a1: 38.7, fixed: 19, t: 0.5, h: 2.8, y0: 0.06,
-        open: 1, hinge: 0, max: 1.0, build: CBZ.corridorKit.steelLeaf(0x4f5d6b) }).set(1);
+    // hooked back against the yard face by day; a working door (corridorkit)
+    if (CBZ.corridorKit && CBZ.corridorKit.door) {
+      CBZ.corridorKit.door({ id: "prison-lounge-door", label: "The lounge door", axis: "z", a0: 35.3, a1: 38.7, fixed: 19, t: 0.5, h: 2.8, y0: 0.06,
+        swing: -1, hinge: 0, max: 1.0, keys: null, startOpen: true, autoShut: Infinity, build: CBZ.corridorKit.steelLeaf(0x4f5d6b) });
     }
     PD.extinguisher(WX0 + 0.18, 1.1, 34.9, "x+");
   })();

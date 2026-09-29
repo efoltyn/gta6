@@ -656,9 +656,9 @@
      pair of steel leaves in a frame, hooked back against the yard face: the
      post is manned all day and its door stands open. */
   addBox(-14, 2.8, 120, 0.5, 0.8, 2.2, 0x515a66, { cast: false, blockLOS: true });
-  if (CBZ.corridorKit && CBZ.corridorKit.doorSet) {
-    CBZ.corridorKit.doorSet({ axis: "z", a0: 118.9, a1: 121.1, fixed: -14, t: 0.5, h: 2.4, y0: 0.06,
-      open: -1, hinge: 0, max: 1.0, build: CBZ.corridorKit.steelLeaf(0x4f5d6b) }).set(1);
+  if (CBZ.corridorKit && CBZ.corridorKit.door) {
+    CBZ.corridorKit.door({ id: "prison-post-hut-door", label: "The post door", axis: "z", a0: 118.9, a1: 121.1, fixed: -14, t: 0.5, h: 2.4, y0: 0.06,
+      swing: 1, hinge: 0, max: 1.0, keys: null, startOpen: true, autoShut: Infinity, build: CBZ.corridorKit.steelLeaf(0x4f5d6b) });
   }
   // the hut's roof: a poured slab on its walls with a steel drip fascia
   // (world/roofs.js knows it is roofed and hangs no second lid)
@@ -900,17 +900,18 @@
       const m = new THREE.Mesh(geo, PD.vcMat()); m.receiveShadow = true; g.add(m);
       return m;
     }
-    function heldPair(wallX, dc, dw, open, build) {
-      if (!CK || !CK.doorSet) { lining(wallX, dc, dw); return; }
-      const set = CK.doorSet({ axis: "z", a0: dc - dw / 2, a1: dc + dw / 2, fixed: wallX, t: T, h: HEAD, y0: 0.06,
-        open: open, hinge: 0, build: build, frame: 0x4a525c });
-      set.set(1);                 // hooked back, square to the wall
+    // hooked back, square to the wall, by day; a working door (E shuts it,
+    // anybody walking up opens it, a new run hooks it back)
+    function heldPair(id, label, wallX, dc, dw, open, build) {
+      if (!CK || !CK.door) { lining(wallX, dc, dw); return; }
+      CK.door({ id: id, label: label, axis: "z", a0: dc - dw / 2, a1: dc + dw / 2, fixed: wallX, t: T, h: HEAD, y0: 0.06,
+        swing: -open, hinge: 0, build: build, frame: 0x4a525c, keys: null, startOpen: true, autoShut: Infinity });
     }
     shutter(-24, 69, 4.2, -1);    // workshop (east wall, room to the west)
     shutter(-26, 96, 4.0, -1);    // laundry
     // chapel / infirmary: west wall, room to the east = world +x = local -z
-    heldPair(24, 69, 4.2, -1, woodPair);
-    heldPair(26, 96, 4.0, -1, CK && CK.glassLeaf ? CK.glassLeaf : woodPair);
+    heldPair("prison-chapel-door", "The chapel door", 24, 69, 4.2, -1, woodPair);
+    heldPair("prison-infirmary-door", "The infirmary door", 26, 96, 4.0, -1, CK && CK.glassLeaf ? CK.glassLeaf : woodPair);
   })();
 
   // The facade pass (world/building_dress.js) dresses whatever registers here.
