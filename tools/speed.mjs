@@ -16,6 +16,7 @@
      node tools/speed.mjs --against tools/speed-baseline.json
      node tools/speed.mjs --ref origin/main       # measure ANOTHER COMMIT (git archive → temp dir)
      node tools/speed.mjs --url http://127.0.0.1:8000/   # an already-running server / other worktree
+     node tools/speed.mjs --root /tmp/snap        # serve a directory (e.g. git archive HEAD + only your files)
      node tools/speed.mjs --profile               # + V8 sampling profile: top functions (file:function)
      node tools/speed.mjs --attribute             # + DIAGNOSTIC: what HD settings / vegetation cost
      node tools/speed.mjs --device tablet         # iPad viewport + touch preload (absorbs ipad-perf)
@@ -120,6 +121,7 @@ const AGAINST = opt("--against", "");
 const JSON_OUT = opt("--json", "");
 const URL_ARG = opt("--url", "");
 const REF = opt("--ref", "");
+const ROOT_ARG = opt("--root", "");   // serve this directory instead (a snapshot: HEAD + only the files under test)
 const QUIET = has("--quiet");
 const NO_NORM = has("--no-norm");
 const BUILD_BUDGET_S = +opt("--budget", 420);
@@ -171,6 +173,8 @@ if (REF) {
   tmpRefDir = fs.mkdtempSync(path.join(os.tmpdir(), "cbz-speed-ref-"));
   execFileSync("sh", ["-c", `git archive ${sha} | tar -x -C ${JSON.stringify(tmpRefDir)}`], { cwd: ROOT0 });
   ROOT = tmpRefDir; commit = sha.slice(0, 10) + " (" + REF + ")";
+} else if (ROOT_ARG) {
+  ROOT = path.resolve(ROOT_ARG); commit = "root " + ROOT;
 } else if (!URL_ARG) {
   try { commit = git(["rev-parse", "--short=10", "HEAD"]) + (git(["status", "--porcelain", "--untracked-files=no"]) ? "+dirty" : ""); } catch (_) {}
 }
@@ -322,9 +326,35 @@ S.wrapRender = function(){
   r.render = function(scene, cam){
     var main = cam === C.camera;
     if (S.rdepth++ === 0 && S.pose && main) S.applyPose(cam);
-    var s = now(); try { return real.apply(this, arguments); } finally { if (--S.rdepth === 0) { if (main) S.render += now() - s; else S.renderOther += now() - s; } } };
+    var pl = r.info && r.info.programs, p0 = pl ? pl.length : 0;
+    var s = now(); try { return real.apply(this, arguments); } finally { if (--S.rdepth === 0) { if (main) S.render += now() - s; else S.renderOther += now() - s; }
+      if (pl && pl.length > p0) S.progWhy(pl, p0, main ? "main" : (srcOf() || (cam && (cam.name || cam.type)) || "other")); } };
   r.render.__sp = 1; return true;
 };
+/* WHY DID A PROGRAM COMPILE MID-PLAY? r128 keys a program by the joined
+   parameter list (WebGLPrograms.getProgramCacheKey). For each new program,
+   find the existing program of the same shader + custom key that differs in
+   the FEWEST parameters and name those parameters (numPointLights 5>8,
+   fog, instancing...). A new shader/custom key with no sibling is "new
+   material". S.pcause: { "who | shader | what": count }. */
+var PK = ["precision","isWebGL2","supportsVertexTextures","outputEncoding","instancing","instancingColor","map","mapEncoding","matcap","matcapEncoding","envMap","envMapMode","envMapEncoding","envMapCubeUV","lightMap","lightMapEncoding","aoMap","emissiveMap","emissiveMapEncoding","bumpMap","normalMap","objectSpaceNormalMap","tangentSpaceNormalMap","clearcoatMap","clearcoatRoughnessMap","clearcoatNormalMap","displacementMap","specularMap","roughnessMap","metalnessMap","gradientMap","alphaMap","combine","vertexColors","vertexAlphas","vertexTangents","vertexUvs","uvsVertexOnly","fog","useFog","fogExp2","flatShading","sizeAttenuation","logarithmicDepthBuffer","skinning","maxBones","useVertexTexture","morphTargets","morphNormals","premultipliedAlpha","numDirLights","numPointLights","numSpotLights","numHemiLights","numRectAreaLights","numDirLightShadows","numPointLightShadows","numSpotLightShadows","shadowMapEnabled","shadowMapType","toneMapping","physicallyCorrectLights","alphaTest","doubleSided","flipSided","numClippingPlanes","numClipIntersection","depthPacking","dithering","sheen","transmissionMap"];
+function pparse(key){ var t = String(key).split(","), i = 0;
+  for (; i < t.length - 1; i++) if (/^(highp|mediump|lowp)$/.test(t[i]) && /^(true|false)$/.test(t[i + 1])) break;
+  if (i >= t.length - 1) return { head: String(key).slice(0, 60), p: null };
+  var head = t[0] + (i > 1 ? "+defs" : ""), tail = t.slice(i + PK.length + 2).join(",");
+  var h = 0; for (var k = 0; k < tail.length; k++) h = (h * 31 + tail.charCodeAt(k)) | 0;
+  return { head: head, defs: t.slice(1, i).join(","), cust: h, p: t.slice(i, i + PK.length) }; }
+S.pcause = {}; S.pnew = 0;
+S.progWhy = function(pl, p0, who){
+  for (var n = p0; n < pl.length; n++) { var np = pparse(pl[n].cacheKey), best = null, bd = 1e9;
+    if (np.p) for (var j = 0; j < n; j++) { var op = pl[j].__pp || (pl[j].__pp = pparse(pl[j].cacheKey));
+      if (!op.p || op.head !== np.head || op.cust !== np.cust || op.defs !== np.defs) continue;
+      var d = []; for (var k = 0; k < PK.length; k++) if (op.p[k] !== np.p[k]) d.push(PK[k] + " " + op.p[k] + ">" + np.p[k]);
+      if (d.length < bd) { bd = d.length; best = d; } }
+    pl[n].__pp = np; S.pnew++;
+    var what = best ? best.slice(0, 4).join("; ") : (np.p ? "new material/defines" : "raw shader");
+    var key = who + " | " + np.head + " | " + what;
+    S.pcause[key] = (S.pcause[key] || 0) + 1; } };
 S.gl = function(){ var C = window.CBZ; if (C && C.renderer && C.renderer.getContext) return C.renderer.getContext(); return S.gls[S.gls.length - 1] || null; };
 /* MACHINE SPEED: a fixed JS workload, median of 5, taken beside every
    measurement. On a shared Mac, run-to-run noise is the box, not the frames
@@ -401,6 +431,17 @@ S.census = function(){
   out.veg.names = top;
   try { if (C.treeAudit) { var ta = C.treeAudit(); out.veg.registeredTrees = ta && ta.trees; } } catch (_) {}
   out.textures = { unique: texSeen.size, megapixels: +(texPx / 1e6).toFixed(2), maxDim: texMax };
+  return out;
+};
+/* LIGHTS: r128 keys every lit program by the visible light COUNT per type, so
+   a count that differs between spots (or frames) is a mid-play compile. */
+S.lights = function(){
+  var out = { point: 0, pointAll: 0, spot: 0, spotAll: 0, dir: 0, hemi: 0, amb: 0, groups: {} };
+  C.scene.traverse(function(o){ if (!o.isLight) return; var v = visibleUp(o);
+    var k = o.isPointLight ? "point" : o.isSpotLight ? "spot" : o.isDirectionalLight ? "dir" : o.isHemisphereLight ? "hemi" : "amb";
+    if (k === "point" || k === "spot") { out[k + "All"]++; if (v) out[k]++; } else if (v) out[k]++;
+    var path = [], q = o.parent; while (q && q !== C.scene && path.length < 3) { path.push((q.name || q.type).slice(0, 24)); q = q.parent; }
+    var g = k + " " + path.reverse().join("/") + (v ? "" : " (hidden)"); out.groups[g] = (out.groups[g] || 0) + 1; });
   return out;
 };
 S.look = function(){
@@ -594,7 +635,7 @@ async function runCbz(B, base, m, withPlay) {
     /* SETTLE: step frames one at a time until the last 5 compiled nothing
        and none of them is a hitch (max < 2x min, all < 250 ms). Frame 1 is
        "first frame"; frames 2.. up to the steady tail are "settle". */
-    const first = await P.ev(`(function(){ var S = window.__speed, rows = [];
+    const first = await P.ev(`(function(){ var S = window.__speed, rows = []; S.pcause = {};
       for (var i = 0; i < ${SETTLE_MAX}; i++) { rows.push(S.step(1, { finish: true, perUpdater: true })[0]);
         if (rows.length >= 6) { var t = rows.slice(-5), mx = 0, mn = 1e9, np = 0;
           t.forEach(function(r){ var f = r.cpu + r.fin; mx = Math.max(mx, f); mn = Math.min(mn, f); np += r.newPrograms || 0; });
@@ -609,6 +650,7 @@ async function runCbz(B, base, m, withPlay) {
     out.settleCompileMs = first.slice(1).reduce((a, r) => a + r.compile, 0);
     out.warmMs = first.slice(1, settled).reduce((a, r) => a + r.cpu + r.fin, 0);
     out.programs = first[first.length - 1].programs;
+    out.firstPcause = await P.ev("window.__speed.pcause");
     if (PROFILE) { const { profile } = await P.s("Profiler.stop", {}, 240000); prof.first = profile; }
     out.boot = { dcl: scr.dcl, bootComplete: bootAt, scriptEval: scr.evalMs, fetchWait: scr.fetchWaitMs };
     out.loadMs = scr.titleReadyAt + out.buildMs + out.firstFrameMs + out.warmMs;   // nav → title interactive → build → frames until steady
@@ -648,19 +690,19 @@ async function playSpots(P, m) {
   for (const name of order) {
     const sp = spots[name];
     const r = await P.ev(`(function(){ var S = window.__speed; S.place(${JSON.stringify(sp)});
-      var cal = S.calib(); var pin = S.pin(${JSON.stringify(sp)});
+      var cal = S.calib(); var pin = S.pin(${JSON.stringify(sp)}); S.pcause = {};
       S.step(${WARM}, { finish: true, path: pin });
       var rows = S.step(${FRAMES}, { finish: true, perUpdater: true, path: pin });
-      var o = S.summ(rows); o.spot = ${JSON.stringify(sp)}; o.look = S.look(); o.calib = (cal + S.calib()) / 2;
+      var o = S.summ(rows); o.spot = ${JSON.stringify(sp)}; o.look = S.look(); o.calib = (cal + S.calib()) / 2; o.pcause = S.pcause; o.lights = S.lights();
       o.emptyFrames = rows.filter(function(r){ return r.empty; }).length; return o; })()`, 300000);
     res.spots[name] = r;
     log(`[speed ${since()}]   ${m}/${name}: frame ${fmt(r.cpu.med)}+${fmt(r.fin.med)} ms (sim ${fmt(r.sim.med)}, render ${fmt(r.render.med)}) calls ${r.calls && r.calls.med} tris ${r.tris && r.tris.med}`);
   }
   if (m === "city" && spots.spawn && spots.downtown) {
     const r = await P.ev(`(function(){ var S = window.__speed; S.pose = null; S.place(${JSON.stringify(spots.spawn)});
-      var fn = S.pathFn(${JSON.stringify(spots.spawn)}, ${JSON.stringify(spots.downtown)});
+      var fn = S.pathFn(${JSON.stringify(spots.spawn)}, ${JSON.stringify(spots.downtown)}); S.pcause = {};
       var rows = S.step(${FRAMES * 2}, { finish: true, perUpdater: true, path: fn });
-      var o = S.summ(rows); o.spot = { path: "spawn->downtown @25m/s" }; return o; })()`, 300000);
+      var o = S.summ(rows); o.spot = { path: "spawn->downtown @25m/s" }; o.pcause = S.pcause; return o; })()`, 300000);
     res.spots.drive = r;
     log(`[speed ${since()}]   ${m}/drive: frame ${fmt(r.cpu.med)}+${fmt(r.fin.med)} ms (sim ${fmt(r.sim.med)}, render ${fmt(r.render.med)}) calls ${r.calls && r.calls.med}`);
   }
@@ -917,6 +959,7 @@ function table(res) {
     pm("load.entryToFirstDraw", "  entry → first draw");
     pm("load.programs", "  programs compiled", "n");
     if (r.firstFrames && r.firstFrames.length && r.firstFrames[0].top != null) p("  settle frames: " + r.firstFrames.slice(0, 12).map((f) => `${fmt(f.cpu + f.fin, 0)}${f.newPrograms ? "/" + f.newPrograms + "p" : ""}`).join(" ") + `  (${r.settleFrames} to steady; worst: ${r.firstFrames.slice().sort((a, b) => b.cpu - a.cpu)[0].top})`);
+    if (r.firstPcause && Object.keys(r.firstPcause).length) p("  first-frame programs, why: " + Object.entries(r.firstPcause).sort((x, y) => y[1] - x[1]).slice(0, 6).map(([k, v]) => `${v}x ${k}`).join("  ||  "));
     if (r.phases && PAGE_MODES[m].kind === "cbz") {
       const top = r.phases.slice().sort((a, b) => b[1] - a[1]).slice(0, 8);
       p("  build checkpoints (ms from key to next): " + top.map(([k, v]) => `${k} ${fmt(v, 0)}`).join(" · "));
@@ -929,6 +972,8 @@ function table(res) {
       p(`  PLAY ${s.padEnd(9)} mean ${fmt(o.meanFrame)}  median frame ${fmt(g(`play.${s}.frame`) && g(`play.${s}.frame`).v)} ms ±${fmt(g(`play.${s}.frame`) && g(`play.${s}.frame`).noise, 2)} (p95 ${fmt(g(`play.${s}.frameP95`) && g(`play.${s}.frameP95`).v)})  sim ${fmt(o.sim && o.sim.med)}  always ${fmt(o.alw && o.alw.med)}  render ${fmt(o.render && o.render.med)}  gpuWait ${fmt(o.fin && o.fin.med)}  calls ${o.calls ? o.calls.med : "-"}  tris ${o.tris ? (o.tris.med / 1e6).toFixed(2) + "M" : "-"}${o.emptyFrames ? "  EMPTY " + o.emptyFrames : ""}`);
       if (o.updaters && o.updaters.length) p("     top updaters (mean/median ms): " + o.updaters.slice(0, 8).map((u) => `${u[0].replace(/^([ua])@/, "$1").replace(/^([ua][0-9.]+) src\//, "$1 ")} ${fmt(u[3], 1)}/${fmt(u[1], 1)}`).join(" · "));
       if (o.hitches && o.hitches.length) p("     hitches [frame, ms, worst, its ms, new programs]: " + o.hitches.slice(0, 5).map((h) => JSON.stringify(h)).join(" "));
+      if (o.lights) p(`     lights visible: point ${o.lights.point}/${o.lights.pointAll} spot ${o.lights.spot}/${o.lights.spotAll} dir ${o.lights.dir} hemi ${o.lights.hemi} amb ${o.lights.amb}`);
+      if (o.pcause && Object.keys(o.pcause).length) p("     new programs, why: " + Object.entries(o.pcause).sort((x, y) => y[1] - x[1]).slice(0, 8).map(([k, v]) => `${v}x ${k}`).join("  ||  "));
       if (o.attribute) {
         const A = o.attribute, b = (A.base.frame + A.base2.frame) / 2;
         const gb = (A.base.fin + A.base2.fin) / 2;
