@@ -25,35 +25,6 @@
   // model work.
   let _s = 90217;
   function rng() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }
-  const cmat = CBZ.cmat || CBZ.mat || function (c, o) { return new THREE.MeshLambertMaterial({ color: c }); };
-
-  // NEW MATERIAL API (carfx.js) with a flat-cmat fallback (auto-upgrades when
-  // carfx loads). Roles: paint/glass/chrome/metal/rim/tire/lightFront/lightTail/
-  // plastic/interior. Police air gets military paint + reflective glass.
-  function vmat(role, color, opts) {
-    if (CBZ.vehicleMat) { try { return CBZ.vehicleMat(role, color, opts); } catch (e) {} }
-    return cmat(color != null ? color : 0x3a4250, opts);
-  }
-
-  // SHAPE HELPER (r128 — sculpt the position attribute, then recompute normals).
-  // Scales each vertex's X/Y by a factor that depends on its Z (nose=+Z → nz,
-  // tail=-Z → tz), with optional roofline (top) / keel (bot) narrowing. Returns a
-  // BoxGeometry; callers flag it _shared so the cache disposer leaves it alone.
-  // taperBox lives ONCE in world/carfx.js now (was copied into 6 builders).
-  function taperBox(w, h, d, opt) { return CBZ.taperBox(w, h, d, opt); }
-  // one thin tapered/drooped rotor blade geometry rooted at the hub (extends +X)
-  function bladeGeo(len, droop) {
-    const geo = new THREE.BoxGeometry(len, 0.06, 0.34, 6, 1, 1);
-    const pos = geo.attributes.position, hl = len / 2;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i), t = (x + hl) / len;
-      pos.setX(i, x + hl);                                   // root at origin, +X
-      pos.setZ(i, pos.getZ(i) * (1 - 0.45 * t));
-      pos.setY(i, pos.getY(i) - (droop || 0) * t * t);
-    }
-    pos.needsUpdate = true; geo.computeVertexNormals();
-    return geo;
-  }
 
   // ============================================================
   //  WHAT A HELICOPTER IS — the ONE flight envelope every rotorcraft AI in
@@ -222,98 +193,34 @@
   let heliBoardCD = 0;
   const jets = [];            // live fighter passes
   const missiles = [];        // active missiles (subset of the pool)
-  const missilePool = [];     // recycled missile objects
-  // Patriot rounds share the missile pool but need the RPG compositor's soft,
-  // billowing smoke mask rather than the aircraft missile's hard grey spheres.
-  // Each sprite owns its opacity (the old mesh material is shared), and this
-  // small pool bounds both allocation and simultaneous smoke history.
-  const PATRIOT_SMOKE_CAP = 60;
-  const patriotSmokePool = [];
-  let patriotSmokeMade = 0;
+  const missilePool = [];     // recycled missile records
+  // WHAT FLIES. Every round on this pool is drawn by weapons/munitions.js at
+  // its real shape and size, and leaves its smoke + motor flare in that
+  // file's two shared point clouds. The launcher names the round by `site`.
+  const MU = CBZ.munitions;
+  const MUNITION_BY_SITE = {
+    "air:jet-missile": "aam",        // the fighter's rail round
+    "air:heli-missile": "atgm",      // the gunship's Hellfire-class
+    "armor:tank-main": "shell",      // 120 mm HEAT, tracer, no motor smoke
+    "armor:patriot-map": "patriot",
+    "armor:mlrs": "mlrs",            // 227 mm guided rocket, 90 kg
+  };
+  const MUNITION_DEFAULT = "hydra";   // an unnamed launcher (the chop-shop rocket car) fires a 70 mm rocket
   const patriotStats = { launches: 0, impacts: 0, lastFlight: null, lastImpact: null };
   let cleanupBound = false;
 
   // shared geometry/materials — flagged ._shared so any disposer leaves them be
   let G = null;               // lazy geometry/material cache
+  // The gunship's searchlight cone + ground pool. The airframes themselves are
+  // the parked base models (city/mil_air.js) that claimMilitary flies.
   function assets() {
     if (G) return G;
     const shared = (o) => { if (o) o._shared = true; return o; };
-    // MILITARY PAINT: dark olive-grey gunship, slate-grey fighter — routed through
-    // the env-mapped vehicle roles for a clean sheen (flat-cmat fallback). Canopy
-    // glass is reflective. A thin emissive police strip keeps them readable as cops.
-    const matDark  = vmat('paint', 0x21262b, { ei: 0.02, emissive: 0x05070a });   // gunship olive-charcoal
-    const matGrey  = vmat('metal', 0x3a4148, { emissive: 0x14171b, ei: 0.18 });   // nose/skids/struts/trim
-    const matJet   = vmat('paint', 0x3a4250, { ei: 0.04, emissive: 0x0c0f14 });   // fighter slate
-    const matGlass = vmat('glass', 0x121b22, { emissive: 0x0a151c, ei: 0.4 });    // reflective canopy
-    const matStrip = CBZ.cmat ? CBZ.cmat(0x2f6bff, { emissive: 0x2f6bff, ei: 0.85 }) : (CBZ.mat ? CBZ.mat(0x2f6bff, { emissive: 0x2f6bff, ei: 0.85 }) : matGrey);  // POLICE blue strip
-    // flag every body material _shared — module-level singletons reused by every
-    // gunship/jet; the disposer must never free them (a carfx vehicleMat may be
-    // cache-shared with the cars, and our own next spawn re-reads the same cache).
-    shared(matDark); shared(matGrey); shared(matJet); shared(matGlass); shared(matStrip);
     G = {
-      matDark, matGrey, matJet, matGlass, matStrip,
-      // gunship body parts — a clean tandem-cockpit attack-heli silhouette, now
-      // SCULPTED (tapered/rounded) instead of plain boxes
-      heliBody:  shared(taperBox(1.75, 1.3, 4.8, { nz: 0.55, tz: 0.42, top: 0.72, bot: 0.6, segD: 8 })), // armoured fuselage
-      heliNose:  shared(taperBox(1.45, 0.95, 1.1, { nz: 0.4, tz: 1.0, top: 0.7, bot: 0.55 })),  // chin/sensor nose
-      heliCanopy:shared(taperBox(1.3, 0.78, 1.95, { nz: 0.6, tz: 0.9, top: 0.5, bot: 1.0 })),   // tandem bubble canopy
-      heliBoom:  shared(taperBox(0.52, 0.52, 3.0, { nz: 1.0, tz: 0.5, top: 0.85, bot: 0.85 })), // tapered tail boom
-      heliFin:   shared(taperBox(0.16, 1.1, 0.75, { tz: 0.5, top: 0.55 })),        // swept vertical stabiliser
-      heliStab:  shared(new THREE.BoxGeometry(1.7, 0.12, 0.6)),  // horizontal tail stabiliser
-      heliSkid:  shared(taperBox(0.16, 0.16, 3.4, { nz: 0.5, tz: 0.5, top: 0.8, bot: 0.8 })), // rounded skid rail
-      heliStrut: shared(new THREE.BoxGeometry(0.2, 0.55, 0.2)), // skid strut (chunky — thin members float at distance)
-      heliPod:   shared(taperBox(0.46, 0.46, 1.6, { nz: 0.35, tz: 0.6, top: 0.8, bot: 0.8 })), // faired missile pod
-      heliWing:  shared(taperBox(1.1, 0.18, 0.75, { nz: 0.85, tz: 0.75 })),  // stub weapon wing (one side)
-      heliHub:   shared(new THREE.CylinderGeometry(0.24, 0.3, 0.26, 8)),     // rotor mast hub
-      rotorBlade:shared(bladeGeo(4.2, 0.14)),                    // one main blade (rooted at hub, +X, drooped)
-      rotorTail: shared(new THREE.BoxGeometry(0.05, 1.5, 0.28)), // one tail blade
-      navBead:   shared(new THREE.BoxGeometry(0.16, 0.16, 0.16)),// nav-light bead
-      strip:     shared(new THREE.BoxGeometry(0.05, 0.12, 2.4)), // thin police side strip
-      bladeMat:  shared((CBZ.vehicleMat ? vmat('metal', 0x1c2229) : (CBZ.cmat ? CBZ.cmat(0x1c2229, { emissive: 0x070a0d, ei: 0.2 }) : matDark))),
-      // jet — clean swept delta with canted twin tails, now sculpted/tapered
-      jetBody:   shared(taperBox(1.35, 1.05, 7.8, { nz: 0.24, tz: 0.6, top: 0.72, bot: 0.6, segD: 10 })), // slim fuselage
-      jetNose:   shared(new THREE.ConeGeometry(0.24, 1.2, 8)),   // fine nose tip
-      jetCanopy: shared(taperBox(0.85, 0.6, 2.0, { nz: 0.5, tz: 0.95, top: 0.45, bot: 1.0 })), // reflective cockpit bubble
-      jetWing:   shared(taperBox(3.4, 0.16, 3.1, { nz: 0.35, tz: 0.78, segW: 4 })),  // one swept delta half (tapered)
-      jetTail:   shared(taperBox(0.14, 1.35, 1.2, { nz: 0.7, tz: 0.45, top: 0.5 })), // one canted vertical tail
-      jetStab:   shared(taperBox(1.5, 0.12, 0.95, { nz: 0.4, tz: 0.7 })),  // tailplane half-span (one side)
-      jetIntake: shared(taperBox(0.46, 0.62, 1.7, { nz: 0.7, top: 0.7 })),  // side air intake
-      // missile + fx
-      missile:   shared(new THREE.CylinderGeometry(0.16, 0.16, 1.4, 7)),
-      smoke:     shared(new THREE.SphereGeometry(0.5, 7, 6)),
-      // spotlight cone + ground pool
       cone:      shared(new THREE.CylinderGeometry(0.4, 5.5, 1, 14, 1, true)),
       pool:      shared(new THREE.CircleGeometry(5, 20)),
       lightMat:  shared(new THREE.MeshBasicMaterial({ color: 0xfff3c0, transparent: true, opacity: 0.13, side: THREE.DoubleSide, depthWrite: false })),
       poolMat:   shared(new THREE.MeshBasicMaterial({ color: 0xfff3c0, transparent: true, opacity: 0.26, depthWrite: false })),
-      // emissive nav-light mats — port red / stbd green / white tail beacon
-      navR:      shared(new THREE.MeshBasicMaterial({ color: 0xff2a22 })),
-      navG:      shared(new THREE.MeshBasicMaterial({ color: 0x18ff3a })),
-      navW:      shared(new THREE.MeshBasicMaterial({ color: 0xeaf4ff })),
-      rotorMat:  shared(new THREE.MeshBasicMaterial({ color: 0x0e1015, transparent: true, opacity: 0.5, depthWrite: false })),
-      missileMat:shared(new THREE.MeshBasicMaterial({ color: 0xffe7a0 })),
-      flameMat:  shared(new THREE.MeshBasicMaterial({ color: 0xffb14a, transparent: true, opacity: 0.9, depthWrite: false })),
-      smokeMat:  shared(new THREE.MeshBasicMaterial({ color: 0x9aa0a8, transparent: true, opacity: 0.5, depthWrite: false })),
-      matDarkest:shared(vmat('interior', 0x0b0d10)),                          // gun barrels / nozzle throats / insets
-      // GUNSHIP detail kit — rotor head, chin gun, FLIR, pod muzzles, crew door
-      heliCowl:  shared(taperBox(0.95, 0.5, 2.0, { tz: 0.6, top: 0.7 })),     // engine cowl under the mast
-      heliPlate: shared(new THREE.CylinderGeometry(0.34, 0.42, 0.12, 8)),     // swashplate ring under the hub
-      heliExh:   shared(new THREE.CylinderGeometry(0.13, 0.17, 0.55, 7)),     // exhaust stub pipe
-      heliChin:  shared(taperBox(0.5, 0.42, 0.75, { nz: 0.65, bot: 0.6 })),   // chin-turret cradle
-      heliBarrel:shared(new THREE.CylinderGeometry(0.06, 0.06, 0.95, 6)),     // chin-gun barrel
-      heliFlir:  shared(new THREE.SphereGeometry(0.26, 10, 8)),               // FLIR sensor ball
-      heliLamp:  shared(new THREE.CylinderGeometry(0.17, 0.24, 0.3, 8)),      // searchlight gimbal housing
-      podCap:    shared(new THREE.CylinderGeometry(0.2, 0.2, 0.1, 8)),        // rocket-pod muzzle face
-      podTube:   shared(new THREE.CylinderGeometry(0.07, 0.07, 0.24, 6)),     // pod center tube stub
-      doorPanel: shared(new THREE.BoxGeometry(0.06, 0.72, 0.95)),             // crew-door inset panel
-      doorStep:  shared(new THREE.BoxGeometry(0.08, 0.08, 0.9)),              // boarding step rail
-      // JET detail kit — LERX chines, burner cans, wingtip rails + missiles
-      jetChine:  shared(taperBox(0.5, 0.09, 2.6, { nz: 0.25 })),              // LERX strake (one side)
-      jetCan:    shared(new THREE.CylinderGeometry(0.27, 0.23, 0.75, 8)),     // afterburner can
-      jetCanIn:  shared(new THREE.CylinderGeometry(0.16, 0.16, 0.1, 8)),      // dark nozzle throat
-      tipRail:   shared(new THREE.BoxGeometry(0.09, 0.09, 1.1)),              // wingtip launch rail
-      tipMsl:    shared(new THREE.CylinderGeometry(0.075, 0.075, 1.35, 6)),   // wingtip missile body
-      tipCone:   shared(new THREE.ConeGeometry(0.075, 0.28, 6)),              // missile nose
     };
     return G;
   }
@@ -376,7 +283,9 @@
       // under an ordered nuclear sortie. `b2` is the record's own flag.
       if (kind === "plane" && (v.b2 || (v.model && /bomber|b-2/i.test(v.model.name || "")))) continue;
       if (!boardOn()) return v;                      // flag off: the original first-free answer
-      const d = nearestFreeCrewDist(v);
+      // the gunship response scrambles an ATTACK helicopter when one is free;
+      // a utility ship only goes if no attack ship can be crewed
+      const d = nearestFreeCrewDist(v) + (kind === "heli" && !v.attackHeli ? 1000 : 0);
       if (d < bestD) { bestD = d; bestRec = v; }
     }
     return bestRec;
@@ -429,16 +338,11 @@
   // ============================================================
   if (CBZ.CONFIG.AIR_HELI_CREW == null) CBZ.CONFIG.AIR_HELI_CREW = true;
   function crewOn() { return CBZ.CONFIG.AIR_HELI_CREW !== false; }
-  // Seat anchors in REAL WORLD METRES relative to the aircraft origin, +Z nose.
-  // The island gunship model is authored at group.scale 1.45, so a rig parented
-  // straight into it would render 45% oversize; crewNode() interposes ONE node
-  // scaled 1/1.45 which cancels it exactly, leaving these numbers in metres.
-  // Cabin floor sits 1.10 m above the origin, cushion 0.42 above that.
-  const GUNSHIP_SEATS = [
-    { job: "Pilot",                     x: -0.55, y: 1.52, z: 3.70, yaw: 0,             cushionH: 0.42, floorBelow: 0.42 },
-    { job: "Weapons Systems Officer",   x:  0.55, y: 1.52, z: 3.70, yaw: 0,             cushionH: 0.42, floorBelow: 0.42 },
-    { job: "Door Gunner",               x:  0.75, y: 1.52, z: 0.60, yaw: Math.PI / 2,   cushionH: 0.42, floorBelow: 0.42 },
-  ];
+  // Seat anchors come from the AIRFRAME (userData.crewSeats, real metres, +Z
+  // nose): the attack helicopter seats a pilot aft-high and a gunner
+  // forward-low, the utility helicopter adds a door gunner. crewNode() still
+  // cancels any group scale, so the numbers stay metres whatever the model.
+  function seatsOf(grp) { return (grp && grp.userData && grp.userData.crewSeats) || []; }
   function crewNode(grp) {
     if (!grp) return null;
     if (grp.userData._crewNode && grp.userData._crewNode.parent === grp) return grp.userData._crewNode;
@@ -465,8 +369,12 @@
     if (!crewOn() || !craft || !craft.group || !CBZ.npcLife || !CBZ.npcLife.attach) return;
     const node = crewNode(craft.group); if (!node) return;
     for (let i = 0; i < craft.crew.length; i++) {
-      const c = craft.crew[i], s = GUNSHIP_SEATS[i] || GUNSHIP_SEATS[0];
+      const c = craft.crew[i];
       if (!c || !c.actor || c.actor.dead || c.seated) continue;
+      const seats = seatsOf(craft.group);
+      let s = null;
+      for (let k = 0; k < seats.length; k++) if (seats[k].job === c.job) { s = seats[k]; break; }
+      if (!s) continue;
       // AIR_CREW_BOARD: a man who has not reached the aircraft does not get a
       // seat in it. `aboard` is true by construction on the no-walk path, so
       // with the flag off this reads exactly as it always did.
@@ -681,7 +589,7 @@
   // who did NOT make it is dropped from the crew and handed back to the base —
   // an empty seat is an honest empty seat, and crewLost() prices it.
   function boardSeat(craft, solo) {
-    // SEAT FIRST, PRUNE AFTER. seatCrew reads GUNSHIP_SEATS[i] by the crew
+    // SEAT FIRST, PRUNE AFTER. seatCrew matches each crew row to its seat by job; the
     // row's INDEX, so dropping the men who did not make it before the seat
     // call would slide a door gunner into the weapons officer's chair. It
     // skips a row that is not `aboard` on its own; we only prepare the ones
@@ -761,10 +669,11 @@
     enlist(pilot, "Pilot");
     // a gunship is crewed, not solo — WSO + door gunner, if the base has bodies
     if (crewOn() && kind === "heli") {
-      for (let n = 1; n < GUNSHIP_SEATS.length; n++) {
+      const seats = seatsOf(rec.group);
+      for (let n = 1; n < seats.length; n++) {
         const extra = militaryPilot(rec);         // skips anyone already _milPilot
         if (!extra) break;
-        enlist(extra, GUNSHIP_SEATS[n].job);
+        enlist(extra, seats[n].job);
       }
     }
     return { rec, pilot, crew, home: Object.assign({}, rec._aiHome) };
@@ -887,61 +796,24 @@
   }
 
   // ---------------------------------------------------- MISSILE projectiles --
+  // A pooled flight RECORD. Its body is a pooled munition mesh swapped in
+  // per launch (munitions.acquire), its two motor-flare slots are claimed once.
   function getMissile() {
     let m = missilePool.pop();
     if (m) { m.live = true; return m; }
     if (missiles.length >= MAX_MISSILES) return null;   // pool empty + at cap
-    const a = assets();
-    const grp = new THREE.Group();
-    const body = new THREE.Mesh(a.missile, a.missileMat);
-    body.rotation.x = Math.PI / 2;     // point the cylinder along +Z (local fwd)
-    grp.add(body);
-    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.42, 8), a.missileMat);
-    nose.rotation.x = -Math.PI / 2; nose.position.z = 0.9; grp.add(nose);
-    for (let i = 0; i < 2; i++) {
-      const fin = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.035, 0.30), a.matDark);
-      fin.position.z = -0.58; fin.rotation.z = i * Math.PI / 2; grp.add(fin);
-    }
-    const flame = new THREE.Mesh(a.smoke, a.flameMat);
-    flame.scale.set(0.42, 0.42, 1.45); flame.position.z = -1.05; grp.add(flame);
-    return { group: grp, flame, live: true, trail: [], dir: new THREE.Vector3(), life: 0, byPlayer: false, seek: null, route: null, site: null, fx: null };
-  }
-  function getPatriotSmoke() {
-    let s = patriotSmokePool.pop();
-    if (!s) {
-      if (patriotSmokeMade >= PATRIOT_SMOKE_CAP || !CBZ.cityBlastPuffAssets) return null;
-      const fx = CBZ.cityBlastPuffAssets();
-      if (!fx || !fx.smoke) return null;
-      const mat = new THREE.SpriteMaterial({
-        map: fx.smoke, color: 0x555b5f, transparent: true, opacity: 0.95,
-        depthWrite: false, depthTest: true,
-      });
-      s = new THREE.Sprite(mat);
-      s._patriotSmoke = true;
-      s.renderOrder = 6;
-      patriotSmokeMade++;
-    }
-    s.visible = true;
-    s.material.opacity = 0.95;
-    s.scale.set(1.35, 1.35, 1);
-    return s;
-  }
-  function releaseTrailPuff(s) {
-    if (!s) return;
-    if (s.parent) s.parent.remove(s);
-    if (s._patriotSmoke) {
-      s.visible = false;
-      s.material.opacity = 0;
-      if (patriotSmokePool.length < PATRIOT_SMOKE_CAP) patriotSmokePool.push(s);
-    }
+    return {
+      group: new THREE.Group(), body: null, type: null, spec: null, flare: MU.claimFlares(2),
+      trail: { x: 0, y: 0, z: 0, on: false }, live: true, dir: new THREE.Vector3(), life: 0,
+      byPlayer: false, seek: null, route: null, site: null, fx: null, speed: 0,
+    };
   }
   function freeMissile(m) {
     m.live = false;
     if (m.group && m.group.parent) m.group.parent.remove(m.group);
-    for (const s of m.trail) releaseTrailPuff(s);
-    m.trail.length = 0;
-    m.route = null; m.seek = null; m.site = null; m.fx = null; m._puffT = 0;
-    if (m.group) m.group.scale.setScalar(1);
+    MU.flareOff(m.flare, 2);
+    m.trail.on = false;
+    m.route = null; m.seek = null; m.site = null; m.fx = null;
     if (missilePool.length < MAX_MISSILES) missilePool.push(m);
   }
 
@@ -954,14 +826,20 @@
   // re-aim toward every frame (a simple proportional-nav-lite homer — see
   // updateMissiles). Pass null/omit for the old straight-line behaviour
   // (still used for anything fired at a static point, e.g. a building).
-  function launchMissile(fx, fy, fz, target, byPlayer, seek) {
+  function launchMissile(fx, fy, fz, target, byPlayer, seek, type) {
     if (!target) return;
     const r = root(); if (!r) return;
     const m = getMissile(); if (!m) return;
+    type = type || MUNITION_DEFAULT;
+    if (m.type !== type) {
+      if (m.body) MU.release(m.body);
+      m.body = MU.acquire(type); m.type = type; m.spec = MU.spec(type);
+      m.group.add(m.body);
+    }
     m.group.position.set(fx, fy, fz);
     m.dir.set(target.x - fx, (target.y || 1) - fy, target.z - fz).normalize();
-    m.life = 0; m.byPlayer = !!byPlayer; m.seek = seek || null; m.route = null; m.site = null; m.fx = null; m._puffT = 0;
-    m.group.scale.setScalar(1);
+    m.life = 0; m.byPlayer = !!byPlayer; m.seek = seek || null; m.route = null; m.site = null; m.fx = null;
+    m.trail.on = false; m.speed = 0; m.out = false;
     // orient nose along travel dir
     m.group.lookAt(fx + m.dir.x, fy + m.dir.y, fz + m.dir.z);
     r.add(m.group);
@@ -1253,7 +1131,7 @@
           legacy: function () { return pickPlayerLockSeek(x, y, z, nx, ny, nz); },
         })
       : null;
-    const m = launchMissile(x, y, z, target, byPlayer, seek);
+    const m = launchMissile(x, y, z, target, byPlayer, seek, opts.munition || MUNITION_BY_SITE[opts.site] || MUNITION_DEFAULT);
     return !!m;                                // false ⇒ pool was at MAX_MISSILES
   };
 
@@ -1286,7 +1164,7 @@
     const rise = Math.max(38, Math.min(240, 26 + dist * 0.23));
     const apex = Math.max(y, ty) + rise;
     const targetPoint = { x: tx, y: ty, z: tz };
-    const m = launchMissile(x, y, z, targetPoint, opts.byPlayer !== false, null);
+    const m = launchMissile(x, y, z, targetPoint, opts.byPlayer !== false, null, opts.munition || MUNITION_BY_SITE[opts.site] || "patriot");
     if (!m) return false;
     const approach = Math.min(90, Math.max(16, dist * 0.26));
     const duration = Math.max(2.0, Math.min(9, 1.35 + dist / 135));
@@ -1303,8 +1181,7 @@
     // spends the bus's rpg row, scaled up for the size of the thing that
     // arrived — not the heavy/missile row whose additive fireball whites out
     // the very building it just hit.
-    m.fx = { kind: opts.fxKind || "rpg", scale: opts.fxScale > 0 ? opts.fxScale : 1.45 };
-    m.group.scale.setScalar(Math.max(1, Math.min(1.7, opts.scale || 1.35)));
+    m.fx = { kind: opts.fxKind || "rpg" };
     const site = ordSite(m.site, m.fx.kind); site.calls++;
     patriotStats.launches++;
     patriotStats.lastFlight = {
@@ -1315,34 +1192,23 @@
   };
 
   CBZ.cityPatriotMissileAudit = function () {
-    let liveRoutes = 0, smokePuffs = 0, live = null, trail = null;
+    let liveRoutes = 0, live = null;
     for (let i = 0; i < missiles.length; i++) {
-      if (missiles[i] && missiles[i].route) {
-        liveRoutes++;
-        if (!live) {
-          const m = missiles[i], q = m.route, p = m.group.position;
-          live = { x: +p.x.toFixed(2), y: +p.y.toFixed(2), z: +p.z.toFixed(2),
-            progress: q.duration > 0 ? +(q.t / q.duration).toFixed(3) : 1 };
-        }
-      }
-      if (missiles[i] && missiles[i].trail) {
-        smokePuffs += missiles[i].trail.length;
-        const tr = missiles[i].trail;
-        if (!trail && tr.length) {
-          const h = tr[tr.length - 1], t0 = tr[0];
-          trail = { n: tr.length,
-            head: { x: +h.position.x.toFixed(1), y: +h.position.y.toFixed(1), z: +h.position.z.toFixed(1),
-              op: +Number(h.material.opacity).toFixed(2), s: +h.scale.x.toFixed(2), vis: h.visible !== false, inScene: !!h.parent },
-            tail: { x: +t0.position.x.toFixed(1), y: +t0.position.y.toFixed(1), z: +t0.position.z.toFixed(1),
-              op: +Number(t0.material.opacity).toFixed(2), s: +t0.scale.x.toFixed(2), vis: t0.visible !== false, inScene: !!t0.parent } };
-        }
+      const m = missiles[i];
+      if (!m || !m.route) continue;
+      liveRoutes++;
+      if (!live) {
+        const q = m.route, p = m.group.position;
+        live = { x: +p.x.toFixed(2), y: +p.y.toFixed(2), z: +p.z.toFixed(2),
+          progress: q.duration > 0 ? +(q.t / q.duration).toFixed(3) : 1, munition: m.type, burning: m.life < m.spec.burn };
       }
     }
+    const st = MU.stats();
     return {
       launches: patriotStats.launches, impacts: patriotStats.impacts,
-      liveRoutes: liveRoutes, smokePuffs: smokePuffs,
+      liveRoutes: liveRoutes, smokePuffs: st.smoke, smokeCap: st.smokeCap,
       lastFlight: patriotStats.lastFlight, lastImpact: patriotStats.lastImpact,
-      live: live, trail: trail, sharedPool: true, sharedDetonation: true,
+      live: live, sharedPool: true, sharedDetonation: true,
     };
   };
 
@@ -1368,7 +1234,6 @@
   const HOMING_TURN_RATE = 1.8;     // rad/s
   const HOMING_ARM_T     = 0.35;    // s before the seeker starts steering
   function updateMissiles(dt, r) {
-    const a = assets();
     for (let i = missiles.length - 1; i >= 0; i--) {
       const m = missiles[i];
       if (!m.live) { missiles.splice(i, 1); continue; }
@@ -1415,42 +1280,21 @@
         p.x += m.dir.x * step; p.y += m.dir.y * step; p.z += m.dir.z * step;
       }
       m.life += dt;
-      /* SMOKE TRAIL — cap count so it never grows unbounded.
-
-         THE TRAIL THAT STOPPED AT THE PAD. Emission used to be one puff PER
-         FRAME against a fixed cap, which is fine for a straight-line missile
-         that lives well under a second and never reaches its ceiling. A lofted
-         Patriot flies ~3 s: the cap filled in the first 0.47 s, emission then
-         stopped for good, and the whole column sat 150 m back near the
-         launcher while the round flew on naked — MEASURED, 28 live puffs on
-         the ledger and an empty sky around the missile in the plate.
-         Rate is now TIME-based, so `trailLife / EMIT` puffs cover the whole
-         live window no matter how long the flight is, and the cap is a ceiling
-         rather than the thing that decides where the trail ends. */
-      const routed = !!m.route;
-      const trailCap = routed ? 48 : 10;
-      const trailLife = routed ? 1.55 : 0.9;
-      const emitEvery = routed ? 0.033 : 0;   // ~47 puffs across trailLife: a train, not a dotted line
-      m._puffT = (m._puffT || 0) + dt;
-      if (m.trail.length < trailCap && (!emitEvery || m._puffT >= emitEvery)) {
-        if (emitEvery) m._puffT = 0;
-        const puff = routed ? getPatriotSmoke() : new THREE.Mesh(a.smoke, a.smokeMat);
-        if (puff) {
-          puff.position.copy(p); puff._age = 0; r.add(puff); m.trail.push(puff);
-        }
-      }
-      for (let j = m.trail.length - 1; j >= 0; j--) {
-        const s = m.trail[j]; s._age += dt;
-        const k = 1 - s._age / trailLife;
-        if (k <= 0) { releaseTrailPuff(s); m.trail.splice(j, 1); continue; }
-        if (s._patriotSmoke) {
-          const size = 1.35 + (1 - k) * 2.6;
-          s.scale.set(size, size, 1);
-          s.material.opacity = Math.max(0, k * 0.95);
-        } else {
-          // Ordinary aircraft missiles retain their shared-material geometry.
-          s.scale.setScalar(0.4 + (1 - k) * 1.6);
-        }
+      if (dt > 0) m.speed = step / dt;
+      /* MOTOR + TRAIL (weapons/munitions.js). The flare sits on the nozzle
+         and flickers while the motor burns; the smoke is laid BY DISTANCE
+         from the nozzle, so a 150 m/s round leaves a continuous ribbon of
+         puffs that billow, drift downwind and linger for seconds after it
+         has gone. A rocket whose motor burns out (Hydra ~1.1 s) stops
+         smoking and coasts dark; a tank round carries only its tracer. */
+      const sp = m.spec, half = sp.L / 2;
+      const tx = p.x - m.dir.x * half, ty = p.y - m.dir.y * half, tz = p.z - m.dir.z * half;
+      if (m.life < sp.burn) {
+        MU.motorFlare(m.flare, tx, ty, tz, m.dir.x, m.dir.y, m.dir.z, sp.flare);
+        if (sp.trail) MU.trail(m.trail, tx, ty, tz, m.dir.x, m.dir.y, m.dir.z, sp.trail, m.speed);
+      } else if (!m.out) {
+        MU.flareOff(m.flare, 2);                 // burnout: the round coasts dark
+        m.out = true; m.trail.on = false;
       }
       // detonate on ground, on a building (losBlockers), or after a max life.
       // PACE V2: the step is swept at <=0.8m samples from the previous tip to
@@ -1485,7 +1329,7 @@
           patriotStats.impacts++;
           patriotStats.lastImpact = { x: +hx.toFixed(1), y: +hy.toFixed(1), z: +hz.toFixed(1) };
         }
-        detonate(hx, hy, hz, m.byPlayer, m.fx); freeMissile(m); missiles.splice(i, 1);
+        detonate(hx, hy, hz, m.byPlayer, m.fx, m.type); freeMissile(m); missiles.splice(i, 1);
       }
     }
   }
@@ -1516,40 +1360,18 @@
   // byPlayer (default false) marks this detonation as the player's — the blast
   // is then a player crime + does player-attributed kills. Gunship/jet missiles
   // pass nothing → false (police fire, no crime on you).
-  function detonate(x, y, z, byPlayer, fx) {
-    byPlayer = !!byPlayer;
-    /* WHICH CLOUD A ROUND MAKES IS THE CALLER'S TO NAME. Every user of this
-       pool used to land on the "missile" row (3.0 x r16, fx "heavy"), and
-       MEASURED at 50 m that row paints a ~40 m pure-white additive disc — two
-       building-widths of blown-out screen with no fire colour in it at all,
-       because ~35 overlapping full-opacity sprites sum past white long before
-       the ramp gets to orange. The owner named the read he wants by name:
-       Patriot rounds "should explode on impact with the beautiful rpg cloud".
-       So a caller may hand over an ordnance identity + scale, and the bus's own
-       table does the rest. Default is the exact old missile row. */
-    const row = (fx && fx.kind) || "missile";
-    const scale = fx && fx.scale > 0 ? fx.scale : 1;
-    // THE MISSILE NAMES ITS ORDNANCE (systems/impactbus.js). This one function
-    // is BOTH the shared missile pool (jet rails, gunship, tank main gun, the
-    // modshop channel) and the 5-star called-in airstrike — they have always
-    // been the same detonation, which is why the bus's "missile" and
-    // "airstrike" rows were re-aligned to the SAME 3.0 / 16 rather than one of
-    // them being invented. The row was corrected UP (it read 2.6 / 11, a blast
-    // 40% smaller than what has actually been firing here) and now carries the
-    // penetration, the fuel fire and the ordnance identity a bare
-    // cityAirstrikeExplosion could not. Degrade: flag off => the exact old
-    // pair, fallback included.
-    if (CBZ.detonate && CBZ.CONFIG && CBZ.CONFIG.ORDNANCE_BUS_ALL !== false) {
-      CBZ.detonate(x, y, z, row, { byPlayer: byPlayer, scale: scale });
-    } else if (CBZ.cityAirstrikeExplosion) {
-      CBZ.cityAirstrikeExplosion(x, z, { power: 3.0 * scale, radius: 16, byPlayer: byPlayer, y: y });   // BIGGER blast, ~48m kill radius — a 5★ airstrike levels the block
-    } else if (CBZ.cityExplosion) {
-      CBZ.cityExplosion(x, z, { power: 2.2 * scale, radius: 11, byPlayer: byPlayer });
-    }
-    // cinematic structural damage on a building hit (buildings agent provides it)
-    if (y > 1.5 && CBZ.cityDamageBuilding) {
-      try { CBZ.cityDamageBuilding(x, y, z, 2.4); } catch (e) {}
-    }
+  /* EVERY ROUND SPENDS ITS OWN WARHEAD. The pool used to land every round on
+     the "missile" row (a 9 kg Hellfire), so a 120 mm shell or a 70 mm Hydra
+     gutted a room. The munition type IS the bus row now (systems/impactbus.js
+     carries the charge in kg TNT per row and city/buildings.js prices holes,
+     breaches, gutting and collapse off that charge). `fx.kind` only names the
+     LOOK (the Patriot/MLRS "rpg cloud"); it never changes the charge. */
+  const ROUND_ROW = { aam: "aam", atgm: "hellfire", hydra: "hydra", mlrs: "rocket227", patriot: "patriot", shell: "shell" };
+  function detonate(x, y, z, byPlayer, fx, type) {
+    const row = ROUND_ROW[type] || "missile";
+    const o = { byPlayer: !!byPlayer };
+    if (fx && fx.kind) o.fx = { kind: fx.kind };
+    CBZ.detonate(x, y, z, row, o);
     // A MISSILE'S BLAST NOW REACHES AIRCRAFT (owner: fire and SEE the
     // result): this detonate used to call only the ground/building couplers,
     // so an air-to-air missile that proximity-fused ON its locked target did
@@ -1569,98 +1391,6 @@
     }
     if (CBZ.shake) CBZ.shake(1.2);
     // the explosion handles blast damage to player/crowd/cops; nothing else here.
-  }
-
-  // ------------------------------------------------------ ATTACK HELICOPTER --
-  // Mesh-only builder (no scene/arena dependency) — used by makeHeli below and
-  // exposed for tools/studio.mjs asset photography (CBZ.debugBuildPoliceAir).
-  function buildGunshipGroup() {
-    const a = assets();
-    const grp = new THREE.Group();
-    const body = new THREE.Mesh(a.heliBody, a.matDark); grp.add(body);
-    // chin sensor nose — sunk into the fuselage front so there's no seam, and
-    // dropped/narrowed a touch to read as a taper rather than a step.
-    const nose = new THREE.Mesh(a.heliNose, a.matGrey);
-    nose.position.set(0, -0.12, 2.55); grp.add(nose);   // geom already tapers — no compensating scale
-    // tandem BUBBLE canopy in REAL transparent glass, overlapping the cabin top
-    const canopy = new THREE.Mesh(a.heliCanopy, a.matGlass); canopy.position.set(0, 0.6, 0.65); grp.add(canopy);
-    grp.userData.canopy = canopy;
-    // TANDEM CREW visible through the clear canopy: two helmeted silhouettes
-    // (pilot aft-high, gunner forward-low — classic gunship stagger)
-    [[0.02, 0.14], [0.46, 1.02]].forEach(function (seat) {
-      const torso = new THREE.Mesh(a.doorPanel, a.matDark);          // doorPanel is 0.06×0.72×0.95 — rescale per-axis
-      torso.scale.set(7, 0.68, 0.3); torso.position.set(0, 0.42 + seat[0] * 0.4, seat[1]); grp.add(torso);
-      const head = new THREE.Mesh(a.navBead, a.matGrey);
-      head.scale.setScalar(1.6); head.position.set(0, 0.74 + seat[0] * 0.4, seat[1]); grp.add(head);
-    });
-    // tapered tail boom — its front sinks INTO the rear of the fuselage (no gap)
-    const boom = new THREE.Mesh(a.heliBoom, a.matDark);
-    boom.position.set(0, 0.32, -3.4); grp.add(boom);    // geom already tapers aft
-    const fin = new THREE.Mesh(a.heliFin, a.matDark); fin.position.set(0, 0.78, -4.55); grp.add(fin);
-    const stab = new THREE.Mesh(a.heliStab, a.matDark); stab.position.set(0, 0.28, -4.3); grp.add(stab);
-    // skids on struts that meet the belly
-    const skidL = new THREE.Mesh(a.heliSkid, a.matGrey); skidL.position.set(-0.78, -0.86, 0.1); grp.add(skidL);
-    const skidR = new THREE.Mesh(a.heliSkid, a.matGrey); skidR.position.set(0.78, -0.86, 0.1); grp.add(skidR);
-    for (const sx of [-0.78, 0.78]) {
-      for (const sz of [0.9, -0.9]) {
-        const st = new THREE.Mesh(a.heliStrut, a.matGrey); st.position.set(sx, -0.55, sz + 0.1); grp.add(st);
-      }
-    }
-    // stub weapon wings with missile pods — each wing root sinks INTO the
-    // fuselage side (x=±0.62 with a 1.1-wide wing) so there's no root gap; the
-    // pods hang at x=±1.5 (matching the missile launch offset).
-    const wingL = new THREE.Mesh(a.heliWing, a.matGrey); wingL.position.set(-0.95, 0.05, 0.25); grp.add(wingL);
-    const wingR = new THREE.Mesh(a.heliWing, a.matGrey); wingR.position.set(0.95, 0.05, 0.25); grp.add(wingR);
-    const podL = new THREE.Mesh(a.heliPod, a.matDark); podL.position.set(-1.5, -0.05, 0.25); grp.add(podL);
-    const podR = new THREE.Mesh(a.heliPod, a.matDark); podR.position.set(1.5, -0.05, 0.25); grp.add(podR);
-    // pod MUZZLE faces — a dark launcher face + center tube stub so the fairings
-    // read as rocket pods, not drop tanks (the x=±1.5 launch offset is unchanged)
-    for (const px of [-1.5, 1.5]) {
-      const cap = new THREE.Mesh(a.podCap, a.matDarkest); cap.rotation.x = Math.PI / 2; cap.position.set(px, -0.05, 1.02); grp.add(cap);
-      const tube = new THREE.Mesh(a.podTube, a.matGrey); tube.rotation.x = Math.PI / 2; tube.position.set(px, -0.05, 1.12); grp.add(tube);
-    }
-    // CHIN GUN under the sensor nose — heliGun's tracers already originate just
-    // below the belly; a visible depressed barrel sells the source of the fire.
-    const chin = new THREE.Mesh(a.heliChin, a.matGrey); chin.position.set(0, -0.62, 2.2); grp.add(chin);
-    const barrel = new THREE.Mesh(a.heliBarrel, a.matDarkest); barrel.rotation.x = Math.PI / 2 + 0.1; barrel.position.set(0, -0.72, 2.85); grp.add(barrel);
-    // FLIR ball offset starboard under the nose + a searchlight gimbal housing
-    // at the beam cone's root (the cosmetic cone itself is untouched below)
-    const flir = new THREE.Mesh(a.heliFlir, a.matGlass); flir.position.set(0.34, -0.6, 2.6); grp.add(flir);
-    const lamp = new THREE.Mesh(a.heliLamp, a.matGrey); lamp.position.set(0, -0.72, 0); grp.add(lamp);
-    // CREW DOOR inset + boarding step on each flank, aft of the wing root
-    for (const sx of [-1, 1]) {
-      const door = new THREE.Mesh(a.doorPanel, a.matDarkest); door.position.set(sx * 0.72, -0.02, -0.35); grp.add(door);
-      const step = new THREE.Mesh(a.doorStep, a.matGrey); step.position.set(sx * 0.78, -0.5, -0.3); grp.add(step);
-    }
-    // rotor mast hub + a translucent blur disc + a crossed pair of REAL tapered/
-    // drooped blades (the blade geom is rooted at the hub extending +X, so the
-    // opposite blade is wrapped in a PI-rotated group; named `rotor` group spun by AI)
-    // rotor head: engine cowl + twin exhaust stubs + swashplate under the hub
-    const cowl = new THREE.Mesh(a.heliCowl, a.matDark); cowl.position.set(0, 0.72, -0.95); grp.add(cowl);
-    for (const sx of [-1, 1]) {
-      const exh = new THREE.Mesh(a.heliExh, a.matDarkest);
-      exh.rotation.x = Math.PI / 2; exh.position.set(sx * 0.3, 0.8, -1.95); grp.add(exh);
-    }
-    const plate = new THREE.Mesh(a.heliPlate, a.matGrey); plate.position.y = 0.88; grp.add(plate);
-    const hub = new THREE.Mesh(a.heliHub, a.matGrey); hub.position.y = 1.02; grp.add(hub);
-    const disc = new THREE.Mesh(a.pool, a.rotorMat); disc.rotation.x = -Math.PI / 2; disc.scale.setScalar(4.2 / 5); disc.position.y = 1.05; grp.add(disc);
-    const rotor = new THREE.Group(); rotor.position.y = 1.06;
-    rotor.add(new THREE.Mesh(a.rotorBlade, a.bladeMat));                 // +X blade
-    const opp = new THREE.Group(); opp.rotation.y = Math.PI; opp.add(new THREE.Mesh(a.rotorBlade, a.bladeMat)); rotor.add(opp);  // -X blade
-    grp.add(rotor);
-    // tail rotor: crossed blades on the fin, group spun about local X
-    const trotor = new THREE.Group(); trotor.position.set(0.16, 0.55, -4.78);
-    const tb1 = new THREE.Mesh(a.rotorTail, a.bladeMat); trotor.add(tb1);
-    const tb2 = new THREE.Mesh(a.rotorTail, a.bladeMat); tb2.rotation.x = Math.PI / 2; trotor.add(tb2);
-    grp.add(trotor);
-    // NAV LIGHTS (port red / stbd green / white tail beacon) + a thin POLICE strip
-    // down each flank — keeps the grey gunship instantly readable as the law.
-    const nL = (m, x, y, z) => { const b = new THREE.Mesh(a.navBead, m); b.position.set(x, y, z); grp.add(b); };
-    nL(a.navR, -1.5, 0.0, 0.25); nL(a.navG, 1.5, 0.0, 0.25); nL(a.navW, 0, 1.25, -4.6);
-    [-0.92, 0.92].forEach((sx) => { const s = new THREE.Mesh(a.strip, a.matStrip); s.position.set(sx, 0.18, 0.4); grp.add(s); });
-    // spotlight cone (the ground pool is scene-owned — makeHeli adds it)
-    const cone = new THREE.Mesh(a.cone, a.lightMat); grp.add(cone);
-    return { grp, rotor, trotor, cone };
   }
 
   function makeHeli() {
@@ -2258,16 +1988,23 @@
           if (!canEngage(heli.pos.x, heli.pos.y - 0.4, heli.pos.z, SP)) return null;
           return { x: SP.pos.x, y: (SP.pos.y || 0) + 1.2, z: SP.pos.z };
         };
-        launchMissile(heli.pos.x + side, heli.pos.y - 0.4, heli.pos.z, t, false, seekHeli);
+        // off a real rail: the airframe publishes its launch points
+        const lp = CBZ.milAirPoint ? CBZ.milAirPoint(heli.group, "rail", (heli.shotN = (heli.shotN || 0) + 1), _heliLaunch) : null;
+        if (lp) launchMissile(lp.x, lp.y, lp.z, t, false, seekHeli, "atgm");
+        else launchMissile(heli.pos.x + side, heli.pos.y - 0.4, heli.pos.z, t, false, seekHeli, "atgm");
         // (no text — the missile has a smoke trail you can see)
       }
     }
   }
 
+  const _heliLaunch = new THREE.Vector3();
   function heliGun(P) {
     if (!heli) return;
     const py = (P.pos.y || 0) + 1.4;                  // the player's ACTUAL chest height (rooftop included)
-    const from = { x: heli.pos.x, y: heli.pos.y - 0.6, z: heli.pos.z };
+    // the CHIN GUN slews onto you and the rounds leave its muzzle
+    if (CBZ.milAirAim) CBZ.milAirAim(heli.group, P.pos.x, py, P.pos.z);
+    const gm = CBZ.milAirPoint ? CBZ.milAirPoint(heli.group, "gun", 0, _heliLaunch) : null;
+    const from = gm ? { x: gm.x, y: gm.y, z: gm.z } : { x: heli.pos.x, y: heli.pos.y - 0.6, z: heli.pos.z };
     // LEAD THE TARGET: aim where the player WILL be after the round's flight, not
     // where they are. Time-of-flight ≈ slant range / muzzle speed; the lead is the
     // tracked velocity over that time, capped so a sprinter can't drag the aim off
@@ -2309,65 +2046,6 @@
   }
 
   // -------------------------------------------------------- FIGHTER JETS ----
-  // Mesh-only builder (no scene dependency) — used by makeJet below and exposed
-  // for tools/studio.mjs asset photography (CBZ.debugBuildPoliceAir).
-  function buildPoliceJetGroup() {
-    const a = assets();
-    const grp = new THREE.Group();
-    const body = new THREE.Mesh(a.jetBody, a.matJet); grp.add(body);
-    // fine NEEDLE nose tip extending the fuselage taper to a sharp point (no seam —
-    // the sculpted body already pinches in; this just caps it to a radar boom).
-    // rotation.x = +PI/2 maps the cone's +Y apex to +Z — apex FORWARD (the old
-    // -PI/2 flew base-first, a flat disc leading the aircraft).
-    const nose = new THREE.Mesh(a.jetNose, a.matJet); nose.rotation.x = Math.PI / 2; nose.position.z = 4.45; grp.add(nose);
-    // REAL transparent bubble canopy with a helmeted pilot silhouette inside
-    const canopy = new THREE.Mesh(a.jetCanopy, a.matGlass); canopy.position.set(0, 0.58, 1.7); grp.add(canopy);
-    grp.userData.canopy = canopy;
-    const jpTorso = new THREE.Mesh(a.doorPanel, a.matGrey);          // doorPanel is 0.06×0.72×0.95 — rescale per-axis
-    jpTorso.scale.set(6, 0.58, 0.27); jpTorso.position.set(0, 0.44, 1.5); grp.add(jpTorso);
-    const jpHead = new THREE.Mesh(a.navBead, a.matGrey);
-    jpHead.scale.setScalar(1.5); jpHead.position.set(0, 0.7, 1.5); grp.add(jpHead);
-    // LERX CHINES — thin strakes blending the wing roots up the forward
-    // fuselage; slanted inward so their tips ride the narrowing nose taper
-    const chL = new THREE.Mesh(a.jetChine, a.matJet); chL.position.set(-0.45, 0.1, 1.9); chL.rotation.y = 0.13; grp.add(chL);
-    const chR = new THREE.Mesh(a.jetChine, a.matJet); chR.position.set(0.45, 0.1, 1.9); chR.rotation.y = -0.13; grp.add(chR);
-    // side intakes hugging the fuselage
-    const inL = new THREE.Mesh(a.jetIntake, a.matJet); inL.position.set(-0.74, -0.14, 0.6); grp.add(inL);
-    const inR = new THREE.Mesh(a.jetIntake, a.matJet); inR.position.set(0.74, -0.14, 0.6); grp.add(inR);
-    // swept delta wings — each half's root sinks INTO the fuselage side (x≈±0.9
-    // with a 3.4-wide half) and is rotated for sweep, so the roots overlap the
-    // body with no gap; wingspan ≈ fuselage length.
-    const wingL = new THREE.Mesh(a.jetWing, a.matJet);
-    wingL.position.set(-1.9, -0.16, -0.7); wingL.rotation.y = 0.32; wingL.rotation.z = 0.06; grp.add(wingL);   // slight dihedral
-    const wingR = new THREE.Mesh(a.jetWing, a.matJet);
-    wingR.position.set(1.9, -0.16, -0.7); wingR.rotation.y = -0.32; wingR.rotation.z = -0.06; grp.add(wingR);
-    // WINGTIP RAILS + AAMs — the 5★ bird visibly carries its ordnance (rail runs
-    // under the tip edge, which sits near x≈±3.5 for z in −1.5..−0.4)
-    for (const sx of [-1, 1]) {
-      const rail = new THREE.Mesh(a.tipRail, a.matGrey); rail.position.set(sx * 3.5, -0.2, -0.95); grp.add(rail);
-      const msl = new THREE.Mesh(a.tipMsl, a.matGrey); msl.rotation.x = Math.PI / 2; msl.position.set(sx * 3.5, -0.32, -0.95); grp.add(msl);
-      const tip = new THREE.Mesh(a.tipCone, a.matDarkest); tip.rotation.x = Math.PI / 2; tip.position.set(sx * 3.5, -0.32, -0.14); grp.add(tip);
-    }
-    // tailplanes
-    const stabL = new THREE.Mesh(a.jetStab, a.matJet); stabL.position.set(-0.85, 0, -3.3); stabL.rotation.y = 0.2; grp.add(stabL);
-    const stabR = new THREE.Mesh(a.jetStab, a.matJet); stabR.position.set(0.85, 0, -3.3); stabR.rotation.y = -0.2; grp.add(stabR);
-    // canted twin vertical tails, roots overlapping the rear fuselage top
-    const tailL = new THREE.Mesh(a.jetTail, a.matJet); tailL.position.set(-0.42, 0.78, -3.0); tailL.rotation.z = 0.22; grp.add(tailL);
-    const tailR = new THREE.Mesh(a.jetTail, a.matJet); tailR.position.set(0.42, 0.78, -3.0); tailR.rotation.z = -0.22; grp.add(tailR);
-    // twin AFTERBURNER CANS with dark throats — the glow now sits behind real
-    // nozzles instead of floating off a bare box tail
-    for (const sx of [-1, 1]) {
-      const can = new THREE.Mesh(a.jetCan, a.matGrey); can.rotation.x = Math.PI / 2; can.position.set(sx * 0.24, -0.05, -4.15); grp.add(can);
-      const thr = new THREE.Mesh(a.jetCanIn, a.matDarkest); thr.rotation.x = Math.PI / 2; thr.position.set(sx * 0.24, -0.05, -4.55); grp.add(thr);
-    }
-    const burn = new THREE.Mesh(a.smoke, a.flameMat); burn.scale.set(0.7, 0.7, 1.4); burn.position.set(0, -0.05, -4.75); grp.add(burn);
-    grp._burn = burn;
-    // NAV LIGHTS: port wingtip red, stbd wingtip green, white tailfin beacon
-    const nL = (m, x, y, z) => { const b = new THREE.Mesh(a.navBead, m); b.position.set(x, y, z); grp.add(b); };
-    nL(a.navR, -2.5, -0.05, -1.5); nL(a.navG, 2.5, -0.05, -1.5); nL(a.navW, 0, 1.2, -3.4);
-    return { grp, burn };
-  }
-
   function makeJet() {
     const r = root(); if (!r) return null;
     const claim = claimMilitary("plane"); if (!claim) return null;
@@ -2415,9 +2093,13 @@
     }
   }
 
+  const _jetDrive = { thr: 0, agl: 0 };
   function updateJets(dt, r) {
     const stars = g.wanted | 0;
     function plume(j, power) {
+      // control surfaces follow the airframe, the nozzle glows with the
+      // burner, the gear folds away once it is off the runway
+      if (CBZ.milAirDrive) { _jetDrive.thr = power; _jetDrive.agl = j.pos.y; CBZ.milAirDrive(j.group, _jetDrive, dt); }
       if (!j.burn) return;
       if (CBZ.setRocketPlume && j.burn.userData && j.burn.userData.rocketPlume) {
         CBZ.setRocketPlume(j.burn, power, j.life, 1.2, 1.05);
@@ -2451,7 +2133,7 @@
       };
       // Launch from the authored fighter's visible nose/rail area, not a remote
       // invisible origin.  The projectile supplies its own flame and smoke.
-      launchMissile(j.pos.x + j.dir.x * 5.8, j.pos.y - 0.35, j.pos.z + j.dir.z * 5.8, t, false, seekJet);
+      launchMissile(j.pos.x + j.dir.x * 5.8, j.pos.y - 0.35, j.pos.z + j.dir.z * 5.8, t, false, seekJet, "aam");
       if (CBZ.sfx && CBZ.player) {
         const d = Math.hypot(j.pos.x - CBZ.player.pos.x, j.pos.z - CBZ.player.pos.z);
         CBZ.sfx("rumble", { dist: d, ghost: true });
@@ -2575,11 +2257,12 @@
     }
   }
 
-  // ---- studio hook: pure mesh builders for tools/studio.mjs expr shots ----
+  // ---- studio hook: the airframes the response actually flies ----
   CBZ.debugBuildPoliceAir = {
-    gunship: function () { return buildGunshipGroup().grp; },
-    jet: function () { return buildPoliceJetGroup().grp; },
+    gunship: function () { return CBZ.milAir.make("attackHeli").group; },
+    jet: function () { return CBZ.milAir.make("fighter").group; },
   };
+
 
   // ----------------------------------------------------------- main tick -----
   let jetCD = 6;

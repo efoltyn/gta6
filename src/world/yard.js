@@ -9,6 +9,13 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  // This file's CONFIG defaults are published at parse: other files read
+  // them before (or without) the prison ever being built.
+  if (CBZ.CONFIG.PRISON_WINGS_V1 == null) CBZ.CONFIG.PRISON_WINGS_V1 = true;
+  if (CBZ.CONFIG.PRISON_ROAD_FIX == null) CBZ.CONFIG.PRISON_ROAD_FIX = true;
+  // Built when the prison is first needed, as if at this script's parse
+  // point (core/prisonlazy.js). Body left at its old indent.
+  CBZ.definePrison("world/yard.js", function () {
   const { addBox, COL, DIM, WORLD } = CBZ;
   const { WALL, TRIM } = COL;
   const YH = DIM.YH;
@@ -67,7 +74,6 @@
      the table; the gate is the answer, and the gate costs 5 lb like every other
      man-sized opening in the compound. ---- */
   CBZ.CONFIG = CBZ.CONFIG || {};
-  if (CBZ.CONFIG.PRISON_WINGS_V1 == null) CBZ.CONFIG.PRISON_WINGS_V1 = true;
   const WINGS = CBZ.CONFIG.PRISON_WINGS_V1 !== false;
   const GATE_W = 6;
   const gaps = CBZ.prisonWallGaps = [];
@@ -169,7 +175,6 @@
      register/keep-out properly — see games/jail.js.)
      ========================================================== */
   CBZ.CONFIG = CBZ.CONFIG || {};
-  if (CBZ.CONFIG.PRISON_ROAD_FIX == null) CBZ.CONFIG.PRISON_ROAD_FIX = true;
   const RECT = {
     minX: Math.min(N.x0, S.x0) - 6, maxX: Math.max(N.x1, S.x1) + 6,
     minZ: (WORLD.cellBlock ? WORLD.cellBlock.z0 : -44) - 6, maxZ: S.z1 + 8,
@@ -212,4 +217,5 @@
       rect: RECT,
     };
   };
+  });
 })();

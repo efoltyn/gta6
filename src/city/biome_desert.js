@@ -742,9 +742,35 @@
       const hw = GSEG_X + 3, hh = GSEG_Z + 3;      // halo grid: one ring outside
       const H = new Float32Array(hw * hh);
       const MG = new Float64Array(hw * hh);      // the mesa term at each grid point (NaN outside)
+      // BAKED ONCE PER VERSION (core/bakecache.js): every tile's positions,
+      // normals and paint, a pure function of the grid and the config
+      let ESIG = null, EB = null, eo = 0;
+      const EP = [], EN = [], EC = [];
+      if (CBZ.bakeSig && CBZ.bakeGet) {
+        try {
+          ESIG = CBZ.bakeSig("erg|" + CBZ.bakeHash({ MINX: MINX, MINZ: MINZ, HX: HX, HZ: HZ, SX: STEP_X, SZ: STEP_Z, GX: GSEG_X, GZ: GSEG_Z, T: ERG_TILES, GRX: GRID_X, GRZ: GRID_Z, cfg: CFG }));
+          EB = CBZ.bakeGet("desert-erg", ESIG);
+          const nv = (GSEG_X + 1) * (GSEG_Z + 1) * 3 * ERG_TILES * ERG_TILES;
+          if (EB && !(EB.p && EB.p.length === nv && EB.n && EB.n.length === nv && EB.c && EB.c.length === nv)) EB = null;
+        } catch (e) { ESIG = null; EB = null; }
+      }
       for (let tj = 0; tj < ERG_TILES; tj++) {
         for (let ti = 0; ti < ERG_TILES; ti++) {
           const g0 = ti * GSEG_X, h0 = tj * GSEG_Z;        // this tile's origin in global cells
+          if (EB) {
+            const geo = new THREE.PlaneGeometry(HX * 2 / ERG_TILES, HZ * 2 / ERG_TILES, GSEG_X, GSEG_Z);
+            geo.rotateX(-Math.PI / 2);
+            const pa = geo.attributes.position, ua = geo.attributes.uv, n3 = pa.count * 3;
+            pa.array.set(EB.p.subarray(eo, eo + n3)); geo.attributes.normal.array.set(EB.n.subarray(eo, eo + n3));
+            const colors = new Float32Array(n3); colors.set(EB.c.subarray(eo, eo + n3)); eo += n3;
+            for (let row = 0; row <= GSEG_Z; row++) for (let col = 0; col <= GSEG_X; col++) {
+              ua.setXY(row * (GSEG_X + 1) + col, (g0 + col) / GRID_X, 1 - (h0 + row) / GRID_Z);
+            }
+            geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+            geo.computeBoundingSphere();
+            out.push(new THREE.Mesh(geo, duneMat));
+            continue;
+          }
           // (a) heights over the halo — the ONLY place the field is evaluated
           for (let b = 0; b < hh; b++) {
             const wz = MINZ + (h0 + b - 1) * STEP_Z;
@@ -780,7 +806,12 @@
           geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
           geo.computeBoundingSphere();
           out.push(new THREE.Mesh(geo, duneMat));
+          if (ESIG) { EP.push(pa.array); EN.push(normals.array); EC.push(colors); }
         }
+      }
+      if (!EB && ESIG && CBZ.bakePut && EP.length === out.length) {
+        const cat = function (L) { let n = 0; for (const a of L) n += a.length; const o = new Float32Array(n); let k = 0; for (const a of L) { o.set(a, k); k += a.length; } return o; };
+        CBZ.bakePut("desert-erg", ESIG, { p: cat(EP), n: cat(EN), c: cat(EC) });
       }
       return out;
     }

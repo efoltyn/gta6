@@ -1,144 +1,316 @@
 /* ============================================================
-   systems/breach.js — THE CHARGE TABLE. Real-world breaching arithmetic,
-   published once, read by every game.
+   systems/breach.js — THE CHARGE LAW. One law for what an explosive does to a
+   building, published once, read by every game.
 
-   OWNER (2026-08-06): "What we discovered is a math, a real math, that should
-   be put into Gang City and then put throughout my games — which makes a
-   reason for connecting the engine to the games."
-
-   That is the whole point of this file. The engine and the scenarios have been
-   connected by CAPABILITY (systems/modecaps.js). This connects them by FACT: a
-   number that is true in a prison, in a bank and on a disaster island because
-   it is true in the world, so every game can read the same one and none of
-   them has to invent it.
+   OWNER: "the way they affect buildings" — an RPG used to open a 7-9 m
+   blown-out apartment (a floor clamped onto the hole radius by ordnance CLASS),
+   a grenade and a JDAM made the same glass radius, and a wall either vanished
+   or did nothing. Every one of those numbers was a per-caller constant. This
+   file replaces them with ONE law driven by ONE input: the charge, W, in kg of
+   TNT-equivalent. Every ordnance row in systems/impactbus.js carries its W;
+   every building effect below is derived from it.
 
    ------------------------------------------------------------------
-   THE SOURCE, and it is a real one. US Army urban-operations doctrine
-   (FM 3-06.11 ch.8; FM 90-10-1 app.M "Field-Expedient Breaching of Common
-   Urban Barriers"; ATP 3-21.8 app.H) gives the charge-to-opening table for
-   C4 against a non-reinforced concrete wall:
+   1. HOPKINSON-CRANZ. Blast effects scale with the cube root of the charge:
+      the same overpressure is found at the same SCALED DISTANCE
 
-       2 lb  -> a MOUSEHOLE                       (crawl, not walk)
-       5 lb  -> a hole large enough for ONE MAN to move through
-       7 lb  -> large enough for TWO MEN abreast
-      10 lb  -> larger still
+          Z = R / W^(1/3)          (m / kg^(1/3))
 
-   The tactic has a name — MOUSE-HOLING — and it goes back to Stalingrad: you
-   move through the buildings instead of the street, because a street is a
-   killing field. That is a GAME MECHANIC that already existed in 1942, and it
-   is the reason a breaching charge is not just a bigger grenade.
+      so an effect that happens at Z* happens at R = Z* . W^(1/3). The
+      thresholds (Kingery-Bulmash hemispherical surface burst, rounded):
 
-   THE OTHER HALF OF THE MATH, and the half that makes the game honest:
-   CONTACT vs STANDOFF. A shaped-charge rocket does NOT make a doorway. The
-   RPG-7's copper jet is focused to defeat armour, so it PENETRATES (the
-   PG-7VR will go through 1.5 m of reinforced concrete and 2 m of brick) while
-   the hole it leaves is ~30 cm or less — practitioners report never seeing an
-   RPG hole big enough to walk through. The thermobaric TBG-7V is smaller
-   still at the wall, 30-40 mm, because its job is to inject the fuel-air
-   cloud INSIDE. What opens a wall is an explosive in CONTACT with it: the
-   energy couples into the structure instead of into the air.
+        Z_GLASS  12    ~2-3 psi   ordinary annealed glazing fails -> windows out
+        Z_GUT    2.8   ~50 psi+   (confined, reflected) partitions, fit-out and
+                                  the storey's facade infill inside it are gone:
+                                  the floor is GUTTED
+        Z_FRAME  1.25  ~200 psi+  primary members (columns, the slab) inside it
+                                  fail -> the SEVER the structural ledger reads
 
-   So the law this file encodes, in one line:
+      A gut smaller than GUT_MIN_R (5.5 m, a room) is a wrecked room behind a
+      hole, not a gutted floor — which is exactly why no rocket or tank shell
+      guts a storey and every bomb does.
 
-       A CHARGE YOU STICK TO SOMETHING OPENS IT. A ROCKET WRECKS IT.
+   2. THE WALL (breaching, FM 5-250 / FM 3-34.214). A charge in contact with a
+      wall defeats it out to the BREACHING RADIUS
 
-   That single distinction is what makes C4 categorically different from the
-   RPG rather than a cheaper version of it — the LOYALTY+WEAPONS doctrine's
-   "categorical asymmetry is the reward that works". It is also what connects
-   this to every game at once, because "a thing that is stuck to a door and
-   goes off" means the same thing in a prison corridor, a bank strongroom and
-   a burning island.
+          W = 16 . R^3 . K . C     (metric: kg, m)  =>  R_b = (W / 16KC)^(1/3)
+
+      K is the material (0.23 timber/poor masonry, 0.35 good masonry/ordinary
+      concrete, 0.45 dense concrete, 0.70 reinforced concrete), C the tamping
+      (1.8 for an untamped charge on the surface). The wall BREACHES when
+      R_b >= its thickness, and the opening is ~2 R_b across. Checked against
+      the doctrinal C4 table this file used to hard-code (8" wall, K 0.35):
+        2 lb  -> 1.0 m  (crawl hole, not walkable)
+        5 lb  -> 1.34 m (one man)
+       10 lb  -> 1.7 m  (wider still)
+      the table falls out of the law instead of being typed in.
+
+      STANDOFF. A charge that is not IN CONTACT spends itself on air. Coupling
+      falls with the scaled standoff Zs = d / W^(1/3):  1 / (1 + (Zs/0.35)^2).
+      A thrown grenade half a metre off the wall delivers ~15% of itself.
+
+      SHAPED CHARGES (RPG, HEAT, Hellfire). About half the fill goes into the
+      jet, so the BLAST part is priced at W/2. The copper jet perforates up to
+      JET_PEN metres of concrete whatever R_b says; the hole it leaves is the
+      whole warhead's crater at the face, narrowing with depth:
+          r = max(0.15, R_b . (1 - t / (2 . JET_PEN)))
+      An RPG (0.7 kg, jet 1.5 m) through a 0.4 m facade: a 0.7 m ragged hole.
+
+   3. CRATER. Apparent crater radius for a surface burst ~ 0.8 . W^(1/3) m; the
+      dark ejecta blanket reaches ~2.2 crater radii.
+
+   4. ACCUMULATION. A wall that held keeps what it took: effective (coupled)
+      charge is banked per 1.6 m cell and the law is re-asked with the running
+      total, so enough grenades, or enough rockets into one panel, do open it.
+      Concrete does not heal. The bank is bounded (LRU, 512 cells).
+
+   The sanity table the law produces is asserted by tools/blast-scaling-check.mjs
+   (plain node): RPG ~0.7 m hole and never guts, grenade never breaches 0.3 m
+   concrete, tank ~1.5 m breach, Hellfire guts a room-scale piece of a storey,
+   Mk-84 guts a floor and severs a lot-sized frame.
    ------------------------------------------------------------------
 
    PUBLIC:
-     CBZ.breachSpec(lb)                  -> {lb, holeR, opening, power, radius}
-     CBZ.contactBreach(x, y, z, opts)    -> {opened, kind, ...}  THE shared verb
-     CBZ.breachTargetAt(x, y, z, reach)  -> what a charge here would defeat
-     CBZ.registerBreachTarget(def)       -> a game declares a defeatable thing
-     CBZ.breachAudit()                   -> ratchet
-
-   THE REGISTRY IS THE CONNECTIVE TISSUE. A game does not teach the charge
-   about its doors; it hands the charge a one-line description of a thing that
-   can be defeated and what to do when it is:
-
-       CBZ.registerBreachTarget({
-         id: "prison-yard-door",
-         at: () => ({ x, y, z }),      // where it is, live
-         reach: 2.2,                   // how close the charge must be stuck
-         lb: 5,                        // charge mass that defeats it
-         defeat: () => CBZ.openDoor(), // what "opened" means HERE
-       });
-
-   Nothing in here knows what a prison is, what a bank is, or what a door is.
+     CBZ.blastLaw                     the pure law (above) — no THREE, no world
+     CBZ.breachSpec(lb)               C4 by the pound -> {kg, holeR, walkable, power, radius}
+     CBZ.breachBank(x,y,z,kg)         bank coupled charge at a wall cell -> running total
+     CBZ.breachDeliver(x,y,z,lb,contact,opts)  legacy seam (lb): bank + open
+     CBZ.contactBreach(x,y,z,opts)    THE C4 verb: one boom, the law opens the wall
+     CBZ.registerBreachTarget(def)    a game declares a defeatable door/vault
+     CBZ.breachTargetStrike(x,y,z,kg) the blast chain asks: did this defeat a target?
+     CBZ.breachTargetAt / breachAudit
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
   if (!CBZ) return;
-  if (CBZ.breachSpec) return;                    // idempotent (family guard idiom)
+  if (CBZ.blastLaw) return;                          // idempotent (family guard idiom)
 
-  CBZ.CONFIG = CBZ.CONFIG || {};
-  // Master switch. false => contactBreach degenerates to a plain detonation
-  // with no carve and no target defeat, i.e. exactly what C4 did before this
-  // file existed. One-line revert.
-  if (CBZ.CONFIG.BREACH_TABLE_V1 == null) CBZ.CONFIG.BREACH_TABLE_V1 = true;
+  /* ======================================================================
+     THE LAW (pure)
+     ====================================================================== */
+  const Z_GLASS = 12, Z_GUT = 2.8, Z_FRAME = 1.25;
+  const GUT_MIN_R = 5.5;              // a gut smaller than a room is just a wrecked room
+  const CRATER_K = 0.8, EJECTA_K = 2.2;
+  const C_CONTACT = 1.8;              // FM 5-250 tamping factor, untamped surface charge
+  const Z_STANDOFF_HALF = 0.35;       // scaled standoff at which coupling halves
+  const K = { timber: 0.23, masonry: 0.35, brick: 0.35, concrete: 0.45, rc: 0.70 };
+  const LB_KG = 0.45359237;
+  const RE = { tnt: 1, c4: 1.34, compB: 1.33, semtex: 1.35 };
+  const WALKABLE_R = 0.6;             // a 1.2 m opening: shoulders plus kit
+  const PROP_SPAN = 1.2;              // a band-less collider narrower than this both ways is a post
 
-  /* ---- THE TABLE ----------------------------------------------------------
-     `opening` is the doctrinal description; `holeR` is that description turned
-     into a RADIUS in metres for city/buildings.js carveHole. The conversion is
-     deliberately conservative and stated rather than tuned:
-       a mousehole you crawl      ~0.6 m across -> r 0.30
-       one man moving through     ~1.0 m across -> r 0.50   (shoulders ~0.5 m,
-                                                             plus kit and a lip)
-       two men abreast            ~1.7 m across -> r 0.85
-       "larger"                   ~2.4 m across -> r 1.20
-     carveHole floors its own opening at 0.5 m, so a 2 lb mousehole comes out
-     as the smallest hole the carve can express — which is correct: the game
-     has no crawl, so a mousehole should read as damage you cannot use, and
-     that is exactly what the doctrine says a 2 lb charge buys you. */
-  const TABLE = [
-    { lb: 2, holeR: 0.30, opening: "mousehole", walkable: false },
-    { lb: 5, holeR: 0.50, opening: "one man", walkable: true },
-    { lb: 7, holeR: 0.85, opening: "two abreast", walkable: true },
-    { lb: 10, holeR: 1.20, opening: "wide breach", walkable: true },
-  ];
-  CBZ.BREACH_TABLE = TABLE;
-
-  // Blast power/radius for a charge of this mass. Anchored on the shipped C4
-  // row in systems/impactbus.js (5 lb == power 1.4 / radius 7, which is what
-  // city/explosives.js has always used) and scaled by the CUBE ROOT of mass —
-  // Hopkinson-Cranz, the same scaling law the ordnance bus already applies to
-  // kinetic impacts. A 10 lb charge is not twice the fireball of a 5 lb one.
-  const REF_LB = 5, REF_POWER = 1.4, REF_RADIUS = 7;
-  function blastOf(lb) {
-    const k = Math.cbrt(Math.max(0.25, lb) / REF_LB);
-    return { power: REF_POWER * k, radius: REF_RADIUS * k };
+  function cbrt(W) { return Math.cbrt(Math.max(0, +W || 0)); }
+  // the radius at which scaled distance Z is reached for charge W
+  function rAt(Z, W) { return Z * cbrt(W); }
+  function breachRadius(W, k) { return cbrt((+W || 0) / (16 * (k || K.masonry) * C_CONTACT)); }
+  function coupling(W, standoff) {
+    const d = Math.max(0, +standoff || 0);
+    if (d < 0.05) return 1;
+    const zs = d / Math.max(0.05, cbrt(W));
+    return 1 / (1 + (zs / Z_STANDOFF_HALF) * (zs / Z_STANDOFF_HALF));
+  }
+  // What material a wall is, from what the game knows about it: a facade hint
+  // ("brick", "civic", "timber", "adobe", "rc"...) and its thickness. A wall
+  // over 0.9 m is massive masonry or a pier (prison stone, a plinth): the FM's
+  // "dense concrete, first-class masonry" row. Reinforced concrete only when a
+  // producer says so.
+  function kOf(thick, hint) {
+    if (hint === "rc" || hint === "bunker") return K.rc;
+    if (thick > 0.9 || hint === "civic" || hint === "fortified" || hint === "concrete") return K.concrete;
+    if (hint === "timber" || hint === "adobe" || hint === "wood") return K.timber;
+    return K.masonry;
   }
 
+  /* hole(W, wall) — what one charge (or a banked total) does to one wall.
+       wall = { thick, k?, hint?, standoff?, shaped?, jetPen?, banked? }
+       banked: the running coupled total already in this cell (added AFTER
+               coupling this charge; the law is asked with the sum).
+     Returns { Weff, Rb, r (opening radius, 0 when held), breach, jet,
+               walkable, scarR (the face crater either way) } */
+  function hole(W, wall) {
+    wall = wall || {};
+    const thick = Math.max(0.05, +wall.thick || 0.3);
+    const k = wall.k || kOf(thick, wall.hint);
+    // A shaped charge spends about half of itself forming the jet, so its BLAST
+    // (what banks, what cracks the face) is half the fill; the jet is below.
+    const Weff = (+W || 0) * coupling(W, wall.standoff) * (wall.shaped ? 0.5 : 1);
+    const Wsum = Weff + Math.max(0, +wall.banked || 0);
+    const Rb = breachRadius(Wsum, k);
+    let r = 0, jet = false;
+    if (Rb >= thick) r = Rb;
+    // a shaped jet perforates on its OWN charge (it does not bank), and only
+    // when the round actually arrived nose-on (standoff ~0: it is fuzed on impact)
+    if (wall.shaped && (wall.jetPen || 0) >= thick && (+wall.standoff || 0) < 0.6) {
+      const rj = Math.max(0.15, breachRadius(W, k) * (1 - thick / (2 * wall.jetPen)));
+      if (rj > r) { r = rj; jet = true; }
+    }
+    return { Weff: Weff, W: Wsum, Rb: Rb, r: r, breach: r > 0, jet: jet,
+             walkable: r >= WALKABLE_R, scarR: Math.max(0.2, Rb), k: k, thick: thick };
+  }
+
+  const glassR = function (W) { return rAt(Z_GLASS, W); };
+  const gutR = function (W) { return rAt(Z_GUT, W); };
+  const frameR = function (W) { return rAt(Z_FRAME, W); };
+  const craterR = function (W) { return CRATER_K * cbrt(W); };
+  const ejectaR = function (W) { return EJECTA_K * craterR(W); };
+  function guts(W) { return gutR(W) >= GUT_MIN_R; }
+
+  /* The structural deposit into city/structural.js's ledger, in its capacity
+     units. Damage is an AREA quantity, so it rides W^(2/3) (the same exponent
+     the bus's kinetic law uses). Calibrated on the ledger's own capacities
+     (1-storey shop 22.8, 4-storey block 55, 11-storey ~110): a rocket is ~2.5
+     (it wounds; ten of them fell a shop), a tank round ~8, a Hellfire ~14, a
+     Mk-82 ~64 (a block), a Mk-84 ~180 (anything under ~20 storeys). */
+  const DEPOSIT_K = 3.2;
+  function deposit(W) { return DEPOSIT_K * Math.pow(Math.max(0, +W || 0), 2 / 3); }
+
+  /* sever(W, cross) — the fraction of a floor's load-bearing width the charge
+     physically removed. Only a gutting charge severs: a hole in a wall is not a
+     column line. `cross` is the building's width across the blast. */
+  function sever(W, cross) {
+    if (!guts(W)) return 0;
+    return Math.min(1, 2 * frameR(W) / Math.max(4, +cross || 10));
+  }
+
+  /* outcome(W, opts) — the whole verdict in one object (the check reads this;
+     the game reads the same functions piecemeal).
+       opts: { wall:{thick,...}, bld:{w,d,storeys} } */
+  function outcome(W, opts) {
+    opts = opts || {};
+    const h = hole(W, opts.wall || { thick: 0.3 });
+    const b = opts.bld || null;
+    const out = {
+      W: +W || 0, hole: h, breach: h.breach, holeD: 2 * h.r,
+      glassR: glassR(W), gut: guts(W), gutR: gutR(W), frameR: frameR(W),
+      craterR: craterR(W), ejectaR: ejectaR(W), deposit: deposit(W),
+    };
+    if (b) {
+      const cross = Math.max(b.w || 10, b.d || 10);
+      out.sever = sever(W, cross);
+      // the gut swallows the whole plan: every floor it reached is gone
+      out.gutsPlan = out.gut && out.gutR >= 0.5 * Math.hypot(b.w || 10, b.d || 10);
+    }
+    return out;
+  }
+
+  // Legacy callers hand cityExplosion a `power` and nothing else. The ordnance
+  // rows were authored so power ~ cube root of the charge (grenade 1.0, RPG
+  // 1.9, airstrike 3.0), so invert that: W = 0.1 . power^3. RPG 1.9 -> 0.69 kg.
+  function chargeOfPower(power) { const p = Math.max(0, +power || 0); return 0.1 * p * p * p; }
+  function lbToKg(lb, re) { return Math.max(0, +lb || 0) * LB_KG * (re || RE.c4); }
+
+  /* A POST IS NOT A WALL (gta6-props-are-not-walls). A band-less collider
+     (street furniture registers a square footprint with no y0/y1) that spans
+     less than PROP_SPAN in BOTH horizontal axes is a lamp, a sign, a hydrant:
+     never carved, never swept away by a neighbour's carve, never dressed. Plain
+     span, not an aspect ratio — a ratio veto broke the 1.4 x 2.5 m heavy wall.
+     `declared` = the collider carries its own y0/y1 (first-class wall). */
+  function isProp(c, declared) {
+    if (!c) return true;
+    if (declared) return false;
+    return Math.max(c.maxX - c.minX, c.maxZ - c.minZ) < PROP_SPAN;
+  }
+
+  // "Did a blast just deliver here?" — the bus stamps every detonation so a
+  // caller that ALSO hands the same warhead to breachDeliver (fpsmode's rocket
+  // does) is not counted twice.
+  let lastDet = { x: 0, y: 0, z: 0, t: -1e9 };
+  function stamp(x, y, z) { lastDet.x = x; lastDet.y = y; lastDet.z = z; lastDet.t = now(); }
+  function recent(x, y, z) {
+    if (now() - lastDet.t > 0.25) return false;
+    return Math.abs(x - lastDet.x) < 2 && Math.abs(z - lastDet.z) < 2 && Math.abs((y || 0) - lastDet.y) < 3;
+  }
+  function now() { return (typeof performance !== "undefined" && performance.now) ? performance.now() / 1000 : Date.now() / 1000; }
+
+  /* Reference charges, kg TNT-equivalent. The ordnance table reads these by
+     row id; they are here so the check and any game can ask "what is a Mk-84"
+     without loading the bus. shaped/jetPen: metres of concrete the jet
+     perforates. */
+  const CHARGES = {
+    grenade:   { W: 0.2 },                                  // M67-class, Comp B fill
+    rpg:       { W: 0.7, shaped: true, jetPen: 1.5 },       // PG-7-class HEAT
+    tank:      { W: 4.0 },                                  // 120/125 mm HE-frag
+    tankHeat:  { W: 3.0, shaped: true, jetPen: 1.2 },       // 120 mm HEAT-MP
+    hellfire:  { W: 9.0, shaped: true, jetPen: 2.0 },       // AGM-114-class
+    missile:   { W: 9.0, shaped: true, jetPen: 2.0 },       // the shared missile pool = Hellfire class
+    atgm:      { W: 9.0, shaped: true, jetPen: 2.0 },       // the gunship's Hellfire-class round
+    shell:     { W: 3.0, shaped: true, jetPen: 1.2 },       // the tank main gun's 120 mm HEAT
+    hydra:     { W: 1.4 },                                  // 70 mm unguided rocket, HE warhead
+    aam:       { W: 8.0 },                                  // air-to-air blast-frag warhead
+    patriot:   { W: 70 },                                   // SAM blast-frag warhead
+    rocket227: { W: 90 },                                   // 227 mm unitary guided rocket
+    mk82:      { W: 89 },                                   // 500 lb GP bomb
+    airstrike: { W: 89 },                                   // a called-in strike: Mk-82 class
+    mk84:      { W: 430 },                                  // 2000 lb GP bomb
+    bomb:      { W: 430 },                                  // the B-2's unguided Mk-84
+    jdam:      { W: 430 },                                  // guidance kit on the same Mk-84 fill
+    buster:    { W: 2400 },                                 // GBU-57-class penetrator
+    moab:      { W: 11000 },                                // H6 fill, TNT-equivalent
+    c4:        { W: lbToKg(5) },                            // the 5 lb brick
+    carcook:   { W: 2.0 },                                  // a car's fuel deflagration
+  };
+
+  const law = CBZ.blastLaw = {
+    Z_GLASS: Z_GLASS, Z_GUT: Z_GUT, Z_FRAME: Z_FRAME, GUT_MIN_R: GUT_MIN_R,
+    CRATER_K: CRATER_K, EJECTA_K: EJECTA_K, C_CONTACT: C_CONTACT, K: K, RE: RE,
+    WALKABLE_R: WALKABLE_R, PROP_SPAN: PROP_SPAN, CHARGES: CHARGES,
+    cbrt: cbrt, scaledDistance: function (R, W) { return R / Math.max(1e-6, cbrt(W)); },
+    rAt: rAt, breachRadius: breachRadius, coupling: coupling, kOf: kOf, hole: hole,
+    glassR: glassR, gutR: gutR, frameR: frameR, craterR: craterR, ejectaR: ejectaR,
+    guts: guts, deposit: deposit, sever: sever, outcome: outcome,
+    chargeOfPower: chargeOfPower, lbToKg: lbToKg, isProp: isProp,
+    stamp: stamp, recent: recent,
+  };
+
+  /* ======================================================================
+     THE BANK — what a wall that held keeps.
+     ====================================================================== */
+  const CELL = 1.6;
+  const BANK_MAX = 512;
+  const BANK = new Map();             // key -> kg (insertion order = LRU order)
+  const audit = { charges: 0, contact: 0, standoff: 0, holes: 0, defeats: 0, byId: {}, banked: 0 };
+  function cellKey(x, y, z) { return Math.round(x / CELL) + "," + Math.round(y / CELL) + "," + Math.round(z / CELL); }
+  function banked(x, y, z) { return BANK.get(cellKey(x, y, z)) || 0; }
+  function bank(x, y, z, kg) {
+    const k = cellKey(x, y, z);
+    const tot = (BANK.get(k) || 0) + Math.max(0, +kg || 0);
+    BANK.delete(k); BANK.set(k, tot);            // refresh LRU position
+    if (BANK.size > BANK_MAX) BANK.delete(BANK.keys().next().value);
+    audit.banked += Math.max(0, +kg || 0);
+    return tot;
+  }
+  CBZ.breachBank = bank;
+  CBZ.breachBanked = banked;
+  CBZ.breachDelivered = function (x, y, z) { return banked(x, y, z) / lbToKg(1); };   // legacy read, in lb C4
+  CBZ.breachLedgerReset = function () { BANK.clear(); };
+
+  /* ======================================================================
+     C4 BY THE POUND — the old table API, now read off the law.
+     ====================================================================== */
+  const REF_LB = 5, REF_POWER = 1.4, REF_RADIUS = 7;
   function breachSpec(lb) {
     lb = +lb > 0 ? +lb : REF_LB;
-    let row = TABLE[0];
-    for (let i = 0; i < TABLE.length; i++) if (lb >= TABLE[i].lb) row = TABLE[i];
-    // between rows, interpolate the hole so a 6 lb charge is not a 5 lb one
-    let holeR = row.holeR;
-    const next = TABLE[TABLE.indexOf(row) + 1];
-    if (next && lb > row.lb) {
-      const t = (lb - row.lb) / (next.lb - row.lb);
-      holeR = row.holeR + (next.holeR - row.holeR) * t;
-    }
-    const b = blastOf(lb);
-    return { lb: lb, holeR: holeR, opening: row.opening, walkable: row.walkable,
-             power: b.power, radius: b.radius };
+    const kg = lbToKg(lb);
+    const h = hole(kg, { thick: 0.2, k: K.masonry });
+    const k = Math.cbrt(Math.max(0.25, lb) / REF_LB);
+    return {
+      lb: lb, kg: kg, holeR: h.r, walkable: h.walkable,
+      opening: !h.breach ? "scar" : h.walkable ? (h.r >= 0.8 ? "wide breach" : "one man") : "mousehole",
+      power: REF_POWER * k, radius: REF_RADIUS * k,
+    };
   }
   CBZ.breachSpec = breachSpec;
+  // kept for tools that print the doctrinal rows; every value is the law's
+  CBZ.BREACH_TABLE = [2, 5, 7, 10].map(function (lb) { const s = breachSpec(lb); return { lb: lb, holeR: s.holeR, opening: s.opening, walkable: s.walkable }; });
 
-  /* ---- THE TARGET REGISTRY ------------------------------------------------
-     A "breach target" is anything a game says can be DEFEATED by a charge
-     stuck to it, as opposed to merely damaged: a locked door, a vault, a
-     grate, a hatch. One line to declare, and the charge never learns what it
-     is defeating. Degrade-safe: with no targets registered, contactBreach is
-     just a carve + a boom, exactly as before. */
+  /* ======================================================================
+     THE TARGET REGISTRY — doors and vaults a game declares defeatable.
+     A target is priced in pounds of C4 in contact; any blast pays toward it in
+     coupled kg, so three rockets do eventually what one brick does.
+     ====================================================================== */
   const TARGETS = [];
+  const TARGET_PAID = new Map();                 // def -> kg paid so far
   CBZ.registerBreachTarget = function (def) {
     if (!def || !def.at || typeof def.defeat !== "function") return null;
     def.reach = def.reach > 0 ? def.reach : 2.2;
@@ -149,20 +321,19 @@
   CBZ.unregisterBreachTarget = function (def) {
     const i = TARGETS.indexOf(def);
     if (i >= 0) TARGETS.splice(i, 1);
+    TARGET_PAID.delete(def);
   };
-
   function targetAt(x, y, z, reachBonus) {
     let best = null, bestD = 1e9;
     for (let i = 0; i < TARGETS.length; i++) {
       const t = TARGETS[i];
       let p = null;
       try { p = t.at(); } catch (e) { p = null; }
-      if (!p) continue;                            // a target that is gone reports nothing
-      if (t.done && t.done()) continue;            // already defeated this run
+      if (!p) continue;
+      if (t.done && t.done()) continue;
       const dx = p.x - x, dy = (p.y == null ? y : p.y) - y, dz = p.z - z;
       const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
-      const reach = t.reach + (reachBonus || 0);
-      if (d > reach || d >= bestD) continue;
+      if (d > t.reach + (reachBonus || 0) || d >= bestD) continue;
       bestD = d; best = t;
     }
     return best ? { target: best, dist: bestD } : null;
@@ -171,207 +342,102 @@
     const r = targetAt(x, y, z, reachBonus);
     return r ? { id: r.target.id, dist: r.dist, lb: r.target.lb } : null;
   };
-
-  const audit = { charges: 0, contact: 0, standoff: 0, holes: 0, defeats: 0, byId: {}, delivered: 0, cells: 0 };
-
-  /* ---- THE LEDGER: ENOUGH IS ENOUGH ---------------------------------------
-     OWNER: "the parts of buildings that fake blow up — with enough C4 actually
-     blowing up, or enough rockets actually opening a man-sized hole. Your
-     research proved it."
-
-     It did, and this is the piece that was missing. Until now a hit either
-     opened a wall or did nothing at all, forever: `carveHole` refuses anything
-     thicker than 0.9 m, and a wall that refused the first rocket refused the
-     hundredth. That is the "fake blow up" — a fireball, a scar, a scorch, and
-     a wall that is exactly as solid as it was. Concrete does not work that way
-     and neither does doctrine: a charge too small for the job still DAMAGES
-     the wall, and the next one starts from there.
-
-     So every detonation DELIVERS explosive mass into a cell of the world, the
-     cell remembers, and the wall opens when the running total crosses the
-     doctrinal threshold. One 5 lb brick in contact opens a wall on the spot
-     (that is the FM row). A rocket standing off delivers a fraction of its
-     mass, so it takes several — which is precisely what the research says:
-     the RPG's shaped jet penetrates, it does not breach, and if you want a
-     doorway from rockets you are going to spend rockets.
-
-     THE COUPLING FACTOR is the one number here that is a judgement call, and
-     it is stated rather than buried: explosive-breaching practice puts a
-     contact charge at roughly 5x the wall effect of the same charge standing
-     off, because a contact charge couples into the structure while a standoff
-     charge spends most of itself on air. 0.35 is deliberately GENEROUS to the
-     rocket (a strict 0.2 would want eleven of them); at 0.35 a 2.2 lb warhead
-     delivers 0.77 lb, so a man-sized hole costs ~7 rockets or ONE brick. That
-     ratio is the whole design: the rocket is the loud way, the charge is the
-     right way.
-
-     THE LEDGER DOES NOT DECAY. city/fracture.js's chewWall forgets a cell
-     after 14 s because sustained rifle fire is a burst, not a wound. Concrete
-     that has been shocked stays shocked, so a wall you softened yesterday is
-     still soft. */
-  const STANDOFF_COUPLING = 0.35;
-  const CELL = 1.6;                 // metres — a wall panel's worth of damage
-  const DELIVERED = new Map();
-  function ledgerKey(x, y, z) {
-    return Math.round(x / CELL) + "," + Math.round(y / CELL) + "," + Math.round(z / CELL);
+  /* The blast chain asks this for every detonation. Returns null (no target
+     here — go carve the wall), or {opened, targetId, needLb}. A door is not a
+     wall: when a target is in reach the wall carve is skipped. */
+  function targetStrike(x, y, z, kg, contact, opts) {
+    const hit = targetAt(x, y, z, 0);
+    if (!hit) return null;
+    const t = hit.target;
+    const eff = kg * (contact ? 1 : coupling(kg, Math.max(0.5, hit.dist)));
+    const paid = (TARGET_PAID.get(t) || 0) + eff;
+    TARGET_PAID.set(t, paid);
+    const price = lbToKg(t.lb);
+    if (paid + 1e-6 >= price) {
+      try { t.defeat({ x: x, y: y, z: z, lb: paid / lbToKg(1), byPlayer: !!(opts && opts.byPlayer) }); } catch (e) {}
+      TARGET_PAID.delete(t);
+      audit.defeats++;
+      audit.byId[t.id || "?"] = (audit.byId[t.id || "?"] || 0) + 1;
+      return { opened: true, kind: "target", targetId: t.id || null };
+    }
+    return { opened: false, kind: "undercharged", targetId: t.id || null, needLb: t.lb };
   }
-  function deliver(x, y, z, lb, contact) {
-    const eff = Math.max(0, +lb || 0) * (contact ? 1 : STANDOFF_COUPLING);
-    if (eff <= 0) return delivered(x, y, z);
-    const k = ledgerKey(x, y, z);
-    const tot = (DELIVERED.get(k) || 0) + eff;
-    if (!DELIVERED.has(k)) audit.cells++;
-    DELIVERED.set(k, tot);
-    audit.delivered += eff;
-    return tot;
-  }
-  function delivered(x, y, z) { return DELIVERED.get(ledgerKey(x, y, z)) || 0; }
-  CBZ.breachDelivered = delivered;
-  CBZ.breachLedgerReset = function () { DELIVERED.clear(); };
+  CBZ.breachTargetStrike = targetStrike;
 
-  /* CBZ.breachDeliver(x, y, z, lb, contact) — THE ONE CALL every explosion
-     makes. It banks the mass and, if the running total in that cell has
-     reached the man-sized row, opens whatever is there. Returns
-     {total, opened, kind}. Any ordnance can call it; nothing has to know what
-     it is hitting. */
+  /* ======================================================================
+     THE VERBS
+     ====================================================================== */
+  /* CBZ.breachDeliver(x,y,z,lb,contact,opts) — the legacy seam (fpsmode's
+     rocket hands its warhead over after the boom). The boom itself already ran
+     the law through the blast chain (buildings.js blastBuildings), so a
+     delivery at the same spot in the same instant is the same warhead: skip.
+     Otherwise run the one wall response with this charge. */
   function breachDeliver(x, y, z, lb, contact, opts) {
     opts = opts || {};
-    const total = deliver(x, y, z, lb, contact);
-    const out = { total: total, opened: false, kind: "banked", targetId: null };
-    if (CBZ.CONFIG.BREACH_TABLE_V1 === false) return out;
+    const kg = lbToKg(lb);
+    const out = { total: banked(x, y, z), opened: false, kind: "banked", targetId: null };
+    if (recent(x, y, z)) { out.kind = "same-blast"; return out; }
     if (CBZ.modeHas && !CBZ.modeHas("breach")) return out;
-
-    // a declared target (vault, door) opens when the TOTAL reaches its price —
-    // so three rockets into a branch vault do what one brick does, eventually.
-    const hit = targetAt(x, y, z, 0);
-    if (hit) {
-      if (total >= hit.target.lb) {
-        try { hit.target.defeat({ x: x, y: y, z: z, lb: total, byPlayer: !!opts.byPlayer }); } catch (e) {}
-        audit.defeats++;
-        audit.byId[hit.target.id || "?"] = (audit.byId[hit.target.id || "?"] || 0) + 1;
-        out.opened = true; out.kind = "target"; out.targetId = hit.target.id || null;
-      } else {
-        out.kind = "undercharged"; out.targetId = hit.target.id || null; out.needLb = hit.target.lb;
-      }
-      return out;                                   // a door is not a wall; do not also carve it
-    }
-
-    const MAN = TABLE[1].lb;                        // 5 lb — the one-man row
-    if (total < MAN) return out;                    // not enough yet. It remembers.
-    if (!CBZ.cityCarveWall) return out;
-    const spec = breachSpec(total);
-    try {
-      // HEAVY charges defeat what a single hit cannot. carveHole refuses a wall
-      // thicker than 0.9 m by default because a single rocket genuinely should
-      // not open a pier; enough accumulated mass should, and says so in pounds.
-      /* A WALKABLE ROW MUST PRODUCE A WALKABLE HOLE. The table's own word for
-         the 5 lb row is "one man" — but the carve used to be r≈0.5 around the
-         charge's own seat, and a charge is seated at chest height (~1.2 m):
-         a 1.0 m window whose 0.7 m sill STEP_UP (0.45, systems/physics.js)
-         refuses. FM 90-10-1's hole is one a man MOVES THROUGH, so the rows
-         the table itself marks walkable open to the floor and to head
-         height, and never narrower than a body (player capsule r 0.38); the
-         2 lb mousehole stays the mousehole the doctrine says it is. */
-      const rec = CBZ.cityCarveWall(x, y, z, spec.holeR, {
-        search: 2.4,
-        gapW: spec.walkable ? Math.max(spec.holeR * 2, 1.3) : spec.holeR * 2,
-        v0: spec.walkable ? y - 1.35 : undefined,
-        v1: spec.walkable ? Math.max(y + 0.9, 2.05) : undefined,
-        maxThick: total >= TABLE[3].lb ? 1.6 : (total >= TABLE[2].lb ? 1.2 : 0.9),
-      });
-      if (rec) {
-        audit.holes++;
-        out.opened = true; out.kind = "wall"; out.holeR = spec.holeR;
-        /* THE LEDGER IS NOT ZEROED ON A HIT, and that is load-bearing. It used
-           to be ("the wall is open, the debt is paid"), and the measurement
-           caught what that costs: a facade is LAYERS, so the first 5 lb opens
-           the thin skin, the counter resets, and the total can never climb to
-           the 7 lb / 10 lb rows that raise carveHole's thickness ceiling — a
-           thick pier behind a thin panel was unopenable at SIXTY pounds.
-           Concrete does not heal, so the cell keeps its running total; each
-           wall still only opens once (carveHole's own `_breached`), and the
-           mass keeps working through the stack until there is nothing left to
-           open. That is exactly "with enough C4, actually blowing up". */
-        const fr = CBZ.cityFracture;
-        // this carve OWNS the opening — drop the room-sized carve the same
-        // blast deferred a frame ago (crashfx's self-coupled blastAt), or it
-        // re-resolves next frame and eats a flank/neighbour (see fracture.js
-        // cancelPendingNear).
-        if (fr && fr.cancelPendingNear) { try { fr.cancelPendingNear(x, z, 2.5); } catch (e) {} }
-        if (fr && fr._adopt) { try { fr._adopt(rec, spec.holeR); } catch (e) {} }
-      }
-    } catch (e) {}
+    const t = targetStrike(x, y, z, kg, contact, opts);
+    if (t) return Object.assign(out, t);
+    if (!CBZ.cityFracture || !CBZ.cityFracture.blastAt) return out;
+    // a loose (not stuck) delivery sat at least half a metre off the face
+    const h = CBZ.cityFracture.blastAt({ x: x, y: y, z: z }, {
+      charge: kg, contact: !!contact, standoff: contact ? 0 : 0.5,
+      byPlayer: !!opts.byPlayer, quiet: !!opts.quiet, now: true,
+    });
+    if (h) { audit.holes++; out.opened = true; out.kind = "wall"; }
+    out.total = banked(x, y, z);
     return out;
   }
   CBZ.breachDeliver = breachDeliver;
 
-  /* ---- THE VERB ------------------------------------------------------------
-     CBZ.contactBreach(x, y, z, opts)
-       opts.lb        charge mass in pounds (default 5 — the doctrinal
-                      man-sized row, and the value C4 has always been priced at)
-       opts.contact   true when the charge was STUCK to something. false (or a
-                      thrown/loose charge) gets the blast and no opening: that
-                      is the standoff half of the law above.
-       opts.byPlayer  routes kills/heat to the player, as everywhere else
-       opts.normal    {x,z} surface normal it was stuck to, when known
-     Returns {opened, kind, holeR, targetId}. */
+  /* CBZ.contactBreach(x,y,z,opts) — THE C4 VERB.
+       opts.lb       pounds of C4 (default 5)
+       opts.contact  stuck to the surface (full coupling) vs lying loose
+     One detonation, carrying its charge: the blast chain (structuralBlast)
+     prices the wall with the law, and a declared target in reach is paid. */
   function contactBreach(x, y, z, opts) {
     opts = opts || {};
     const spec = breachSpec(opts.lb);
-    const on = CBZ.CONFIG.BREACH_TABLE_V1 !== false;
     const contact = !!opts.contact;
     audit.charges++;
     if (contact) audit.contact++; else audit.standoff++;
-
-    // 1) THE BOOM, always — the owner's point exactly: "C4 can use the same
-    //    explosion" the rocket already has. Nothing new is drawn. The city
-    //    keeps the full wrapper chain (structural ledger, vaults, wildlife);
-    //    every other mode detonates through the unwrapped core.
     const cityWorld = !CBZ.game || CBZ.game.mode === "city";
+    // The target is resolved first so the blast chain can skip the wall carve
+    // when the charge was stuck to a door.
+    const t = (!CBZ.modeHas || CBZ.modeHas("breach")) ? targetStrike(x, y, z, spec.kg, contact, opts) : null;
     const boom = cityWorld ? CBZ.cityExplosion : (CBZ.cityBlastCore || CBZ.cityExplosion);
     if (boom) {
       try {
         boom(x, z, { power: spec.power, radius: spec.radius, byPlayer: !!opts.byPlayer,
-                     y: y, cause: opts.cause || "explosion", kind: opts.kind || "c4", normal: opts.normal || null, dir: opts.dir || null });
+                     y: y, cause: opts.cause || "explosion", kind: opts.kind || "c4",
+                     normal: opts.normal || null, dir: opts.dir || null,
+                     charge: spec.kg, contact: contact, noWallCarve: !!t });
       } catch (e) {}
     }
-
-    if (!on) return { opened: false, kind: "off", holeR: 0, lb: spec.lb, targetId: null };
-
-    // 2) BANK THE MASS AND LET THE LEDGER DECIDE. Contact couples fully;
-    //    standoff banks a fraction. Either way the cell remembers, so a wall
-    //    that was not opened by this charge is closer to opening than it was —
-    //    which is the whole of "enough C4, or enough rockets".
-    const res = breachDeliver(x, y, z, spec.lb, contact, opts);
-    return { opened: !!res.opened, kind: res.kind, holeR: res.holeR || spec.holeR,
-             lb: spec.lb, opening: spec.opening, targetId: res.targetId || null,
-             needLb: res.needLb, total: res.total };
+    stamp(x, y, z);
+    const res = t || { opened: false, kind: "wall" };
+    return { opened: !!res.opened, kind: res.kind, holeR: spec.holeR, lb: spec.lb,
+             opening: spec.opening, targetId: res.targetId || null, needLb: res.needLb,
+             total: banked(x, y, z) };
   }
   CBZ.contactBreach = contactBreach;
 
-  /* ---- RATCHET (Block Law rule 5) -----------------------------------------
-     `unreachable` counts registered breach targets that NO charge in the table
-     could ever defeat — a door declared with an lb requirement above the
-     heaviest row, which is a promise the player can never keep. It resolves
-     against the real table rather than a copy of it, so adding a target with a
-     typo'd mass shows up immediately. Pinned at 0. */
+  /* RATCHET: `unreachable` counts registered targets priced above anything a
+     player can carry (the 10 lb row). Pinned at 0. */
   CBZ.breachAudit = function () {
-    const maxLb = TABLE[TABLE.length - 1].lb;
+    const maxLb = 10;
     let unreachable = 0;
     const ids = [];
     for (let i = 0; i < TARGETS.length; i++) {
       if (TARGETS[i].lb > maxLb) { unreachable++; ids.push(TARGETS[i].id || "?"); }
     }
     return {
-      unreachable: unreachable,      // <- THE RATCHET. Pin at 0.
-      unreachableIds: ids,
-      targets: TARGETS.length,
-      rows: TABLE.length,
-      standoffCoupling: STANDOFF_COUPLING,
-      deliveredLb: Math.round(audit.delivered * 10) / 10, cells: audit.cells,
+      unreachable: unreachable, unreachableIds: ids, targets: TARGETS.length,
+      cells: BANK.size, bankedKg: Math.round(audit.banked * 100) / 100,
       charges: audit.charges, contact: audit.contact, standoff: audit.standoff,
       holes: audit.holes, defeats: audit.defeats, byId: Object.assign({}, audit.byId),
-      flag: CBZ.CONFIG.BREACH_TABLE_V1 !== false,
     };
   };
 })();

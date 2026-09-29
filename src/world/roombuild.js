@@ -171,6 +171,11 @@
     if (document.readyState === "complete") CBZ.roomAnchorsFlush();
     else window.addEventListener("load", function () { CBZ.roomAnchorsFlush(); }, { once: true });
   } catch (e) {}
+  // The prison's rooms queue here while it builds; built after the page
+  // loaded (core/prisonlazy.js), nothing else would flush them.
+  if (CBZ.afterPrisonBuilt) CBZ.afterPrisonBuilt(function () {
+    if (document.readyState === "complete") CBZ.roomAnchorsFlush();
+  });
 
   // ============================================================
   //  DESIGN CONSTANTS — each cites the real number it encodes.

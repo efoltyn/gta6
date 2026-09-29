@@ -354,7 +354,7 @@
   const LEAN = 0.06;         // radians a racked long gun leans back into its yoke
 
   const S = { lot: null, gs: null, group: null, slots: [], built: false,
-              cur: null, prompt: null, lastTxt: "", cx: 0, cz: 0,
+              near: false, cx: 0, cz: 0,
               arena: null, noLotArena: null };
 
   function econ() { return CBZ.cityEcon || null; }
@@ -933,72 +933,39 @@
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
   }
 
-  // ---- the look-pick + [E] prompt --------------------------------------------
-  function pickSlot() {
-    const P = CBZ.player, B = S.gs.bounds;
-    const px = P.pos.x, pz = P.pos.z;
-    // browse gate: only while you're actually IN the store (small apron at the door)
-    if (px < B.minX - 1.5 || px > B.maxX + 1.5 || pz < B.minZ - 1.5 || pz > B.maxZ + 1.5) return null;
-    const yaw = CBZ.cam ? CBZ.cam.yaw : 0, fx = -Math.sin(yaw), fz = -Math.cos(yaw);
-    let best = null, bestScore = -1;
-    for (const s of S.slots) {
-      const dx = s.x - px, dz = s.z - pz, d = Math.hypot(dx, dz);
-      if (d > (s.reach || 3) || d < 0.05) continue;
-      const dot = (dx / d) * fx + (dz / d) * fz;
-      if (dot < (s.dot || CASE_DOT)) continue;          // you buy the one you're LOOKING at
-      const score = dot - d * 0.06;
-      if (score > bestScore) { bestScore = score; best = s; }
-    }
-    return best;
-  }
-
-  function promptText(s) {
+  // ---- THE WALL IS A SET OF CANDIDATES (city/interactions.js registerFixtures)
+  // Every gun, box, vest and the bench is a thing in the registry: E buys the
+  // one you are looking at, Q / a tap on it shows its verbs, and a finger can
+  // pick it off the wall from across the shop. No private prompt, no private
+  // E listener: the card and the tap pipeline are the only ways in.
+  function priceOf(s) {
     const e = econ();
-    if (s.mod) return "<b style='color:#ffd166'>[E]</b> Gunsmith Bench, <span style='color:#7ed957'>fit scopes, bigger mags, silencer, grips</span>";
-    if (s.ammo) {
-      const meta = e.ITEMS["Ammo Box"] || {};
-      return "<b style='color:#ffd166'>[E]</b> Ammo Box, <span style='color:#7ed957'>" + fmt$(e.buyPrice("Ammo Box")) + "</span> <span style='color:#7f8794'>+" + (meta.rounds || 60) + " rounds</span>";
-    }
-    if (s.boom) {
-      const use = s.name === "C4 Charge" ? "sticks to anything, remote det" : "frag, [G] throws it";
-      return "<b style='color:#ffd166'>[E]</b> Buy " + s.name + ", <span style='color:#7ed957'>" + fmt$(e.buyPrice(s.name)) + "</span> <span style='color:#7f8794'>" + use + "</span>";
-    }
-    if (s.armor) {
-      const kit = armorKit(s.kit) || {};
-      const price = armorPrice({ kit: s.kit, label: s.name, price: s.price });
-      const stats = ((kit.pts | 0) > 0 ? "+" + kit.pts + " armor" : "body armor") + (kit.slot === "helmet" ? ", head" : "");
-      return "<b style='color:#ffd166'>[E]</b> Equip " + s.name + ", <span style='color:#7ed957'>" + fmt$(price) + "</span> <span style='color:#7f8794'>" + stats + "</span>";
-    }
-    if (s.sold) return "<span style='color:#ff9e9e'>" + s.name + ", SOLD</span> <span style='color:#7f8794'>restock truck's rolling</span>";
-    const meta = e.ITEMS[s.name] || {};
-    const price = e.buyPrice(s.name);
-    const stats = ((meta.dmg | 0) > 1 ? meta.dmg + " dmg" : "explosive") + (meta.ammo ? ", " + meta.ammo + "-rd mag" : "");
-    return "<b style='color:#ffd166'>[E]</b> Buy " + s.name + ", <span style='color:#7ed957'>" + fmt$(price) + "</span> <span style='color:#7f8794'>" + stats + "</span>";
+    if (!e) return 0;
+    if (s.ammo) return e.buyPrice("Ammo Box");
+    if (s.armor) return armorPrice({ kit: s.kit, label: s.name, price: s.price });
+    return e.buyPrice(s.name);
   }
-
-  function promptEl() {
-    if (S.prompt) return S.prompt;
-    if (typeof document === "undefined" || !document.body) return null;
-    const d = document.createElement("div");
-    d.id = "gunstorePrompt";
-    d.style.cssText = "position:fixed;left:50%;bottom:150px;transform:translateX(-50%);z-index:46;display:none;" +
-      "background:rgba(13,16,21,.9);border:1px solid #3a4150;border-radius:12px;padding:7px 14px;color:#e8eef7;" +
-      "font-family:Fredoka,system-ui,sans-serif;font-size:15px;pointer-events:auto;cursor:pointer;text-align:center;max-width:78vw";
-    d.addEventListener("click", function () { if (S.cur) buySlot(S.cur); });   // tap-to-buy (mobile)
-    document.body.appendChild(d);
-    S.prompt = d;
-    return d;
+  function inStore(px, pz) {
+    const B = S.gs && S.gs.bounds;
+    return !!B && px >= B.minX - 1.5 && px <= B.maxX + 1.5 && pz >= B.minZ - 1.5 && pz <= B.maxZ + 1.5;
   }
-  function showPrompt(txt) {
-    const el = promptEl();
-    if (!el) return;
-    if (CBZ.touchPromptHTML) txt = CBZ.touchPromptHTML(txt);   // touch: [E] → tappable verb pill
-    if (txt !== S.lastTxt) { el.innerHTML = txt; S.lastTxt = txt; }
-    if (el.style.display !== "block") el.style.display = "block";
-  }
-  function hidePrompt() {
-    if (S.prompt && S.prompt.style.display !== "none") S.prompt.style.display = "none";
-    S.cur = null;
+  let fixturesWired = false;
+  function wireFixtures() {
+    if (fixturesWired || !CBZ.interactions || !CBZ.interactions.registerFixtures) return;
+    fixturesWired = true;
+    CBZ.interactions.registerFixtures({
+      id: "gunwall", kind: "gunwall", prio: 9,
+      list: function (ctx, px, pz) { return S.built && S.near && inStore(px, pz) ? S.slots : null; },
+      reach: function (s) { return s.reach || 3; },
+      dot: function (s) { return s.dot || CASE_DOT; },
+      name: function (s) { return s.mod ? "" : s.name; },
+      verbs: [
+        { id: "gunwall-mod", slot: "e", prio: 5, label: "Modify", canShow: (s) => !!s.mod, onSelect: buySlot },
+        { id: "gunwall-armor", slot: "e", prio: 5, label: (s) => "Put on " + fmt$(priceOf(s)), canShow: (s) => !!s.armor, onSelect: buySlot },
+        { id: "gunwall-buy", slot: "e", prio: 5, label: (s) => "Buy " + fmt$(priceOf(s)),
+          canShow: (s) => !s.mod && !s.armor && !s.sold, onSelect: buySlot },
+      ],
+    });
   }
 
   // ---- find the lot + build once (self-healing, clubLot pattern) -------------
@@ -1012,7 +979,7 @@
     const arena = CBZ.city && CBZ.city.arena;
     if (S.built) {
       if (S.arena === arena) return true;
-      S.built = false; S.group = null; S.slots = []; S.cur = null; S.lot = null; S.gs = null;
+      S.built = false; S.group = null; S.slots = []; S.near = false; S.lot = null; S.gs = null;
     }
     if (!arena || !econ() || !CBZ.buildActorWeapon) return false;
     if (S.noLotArena === arena) return false;          // this city has no gun wall — answered once
@@ -1032,8 +999,9 @@
 
   // ---- per-frame --------------------------------------------------------------
   CBZ.onUpdate(37, function (dt) {
-    if (!g || g.mode !== "city") { if (S.group && S.group.visible) S.group.visible = false; hidePrompt(); return; }
+    if (!g || g.mode !== "city") { if (S.group && S.group.visible) S.group.visible = false; S.near = false; return; }
     if (!ensure()) return;
+    wireFixtures();
     // restock timers keep ticking — the street keeps moving while you're away
     for (const s of S.slots) {
       if (!s.sold) continue;
@@ -1050,25 +1018,8 @@
     const dx = P.pos.x - S.cx, dz = P.pos.z - S.cz;
     const near = (dx * dx + dz * dz) < VIS_R * VIS_R;
     if (S.group && S.group.visible !== near) S.group.visible = near;
-    if (!near || g.state !== "playing" || P.dead || P.driving || CBZ.cityMenuOpen) { hidePrompt(); return; }
-    const s = pickSlot();
-    if (!s) { hidePrompt(); return; }
-    S.cur = s;
-    showPrompt(promptText(s));
+    S.near = near;
   });
-
-  // [E] buys the piece you're looking at. CAPTURE phase so the wall wins the
-  // key over interact.js's bubble listener; stopImmediatePropagation keeps a
-  // single press from ALSO opening the clerk's counter menu.
-  addEventListener("keydown", function (e) {
-    if (!S.cur || !g || g.mode !== "city" || g.state !== "playing") return;
-    if (CBZ.cityMenuOpen || (CBZ.player && (CBZ.player.driving || CBZ.player.dead))) return;
-    if ((e.key || "").toLowerCase() !== "e") return;
-    e.preventDefault();
-    if (e.stopImmediatePropagation) e.stopImmediatePropagation();
-    e.stopPropagation();
-    buySlot(S.cur);
-  }, true);
 
   // ---- public hooks -------------------------------------------------------------
   // is the wall live (for this lot)? shops.js trims firearms off the counter

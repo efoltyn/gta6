@@ -20,7 +20,9 @@
   function tellHint(m, s) { if (CBZ.jailTell) return CBZ.jailTell.hint(m, s); if (CBZ.flashHint) try { CBZ.flashHint(m, s); } catch (e) {} return false; }
 
   const CBZ = window.CBZ;
-  const { player, el, guardSees } = CBZ;
+  const { player, el } = CBZ;
+  // entities/guards.js publishes this when the prison is built (lazily).
+  const guardSees = function (gd) { return CBZ.guardSees(gd); };
   const g = CBZ.game;
 
   // jail feature flag (self-defaulting): tower searchlights feed REAL

@@ -1,13 +1,11 @@
 /* ============================================================
    weapons/appearances/c4.js — THE CHARGE AND THE DETONATOR, AS OBJECTS.
 
-   The old charge was a box with three tan sticks and a red cube. This is
-   the thing people picture: an olive putty brick in a clear film wrap with
-   a printed label, a small receiver box taped to its face with a blinking
-   LED and a stub antenna, and two short wires running from the receiver
-   into the brick's end. Its thin axis is local +Y (thickness 5.5 cm, see
-   systems/helditem_model.js BRICK) so "flush on a surface" is one
-   setFromUnitVectors(+Y, normal).
+   The charge is the real 5 lb breaching bundle: four M112 blocks taped
+   two by two, a blasting cap in one end, its leads to a receiver taped on
+   the face with a blinking LED and a stub antenna. Its thin axis is local
+   +Y (7.6 cm, see systems/helditem_model.js BRICK) so "flush on a surface"
+   is one setFromUnitVectors(+Y, normal).
 
    The DETONATOR is a hand-sized olive firing device with a hinged squeeze
    lever on its back and a safety bail; userData.lever is the lever pivot the
@@ -45,20 +43,8 @@
 
   function assets(THREE) {
     if (A) return A;
-    const B = { len: 0.28, thick: 0.055, wide: 0.11 };
-    const lab = labelTexture(THREE);
     A = {
-      B: B,
       geo: {
-        brick: new THREE.BoxGeometry(B.len, B.thick, B.wide),
-        film: new THREE.BoxGeometry(B.len + 0.006, B.thick + 0.004, B.wide + 0.006),
-        label: new THREE.PlaneGeometry(B.len * 0.8, B.wide * 0.62),
-        rx: new THREE.BoxGeometry(0.075, 0.03, 0.05),
-        led: new THREE.SphereGeometry(0.0055, 6, 4),
-        ant: new THREE.CylinderGeometry(0.0022, 0.0022, 0.07, 4),
-        wire: new THREE.CylinderGeometry(0.0022, 0.0022, 1, 4),
-        cap: new THREE.CylinderGeometry(0.0055, 0.0055, 0.045, 6),
-        tape: new THREE.BoxGeometry(0.02, B.thick + 0.036, B.wide + 0.008),
         // detonator
         body: new THREE.BoxGeometry(0.045, 0.11, 0.032),
         lever: new THREE.BoxGeometry(0.036, 0.1, 0.008),
@@ -67,16 +53,8 @@
         coil: new THREE.TorusGeometry(0.03, 0.004, 5, 14),
       },
       mat: {
-        brick: new THREE.MeshLambertMaterial({ color: 0x5b6443 }),
         film: new THREE.MeshPhongMaterial({ color: 0xdfe6d8, transparent: true, opacity: 0.22, shininess: 90, specular: 0x999999, depthWrite: false }),
-        label: new THREE.MeshLambertMaterial({ map: lab, color: lab ? 0xffffff : 0xcfc59a }),
-        rx: new THREE.MeshLambertMaterial({ color: 0x23262a }),
         led: new THREE.MeshBasicMaterial({ color: 0xff2a22 }),
-        ant: new THREE.MeshLambertMaterial({ color: 0x111111 }),
-        red: new THREE.MeshLambertMaterial({ color: 0xa3231b }),
-        blk: new THREE.MeshLambertMaterial({ color: 0x151515 }),
-        cap: new THREE.MeshLambertMaterial({ color: 0x9a8d6a }),
-        tape: new THREE.MeshLambertMaterial({ color: 0x2c2f2a }),
         det: new THREE.MeshLambertMaterial({ color: 0x4b5438 }),
         steel: new THREE.MeshLambertMaterial({ color: 0x6f757a }),
         wireG: new THREE.MeshLambertMaterial({ color: 0x39402c }),
@@ -106,44 +84,86 @@
   function mesh(THREE, g, m, parent, x, y, z) {
     const o = new THREE.Mesh(g, m); o.position.set(x || 0, y || 0, z || 0); parent.add(o); return o;
   }
-  // a straight wire segment between two local points
-  function wire(THREE, parent, geo, mat, a, b) {
-    const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
-    const L = Math.hypot(dx, dy, dz) || 1e-3;
-    const w = new THREE.Mesh(geo, mat);
-    w.position.set((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2);
-    w.scale.set(1, L, 1);
-    w.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(dx / L, dy / L, dz / L));
-    parent.add(w);
-    return w;
+  /* THE CHARGE: five pounds of C-4, which is FOUR M112 demolition blocks
+     (each 11 x 2 x 1.5 in = 279 x 51 x 38 mm, 1.25 lb, olive film wrap with a
+     printed label) bundled two wide by two deep and bound with two wraps of
+     black tape. A blasting cap is pushed into the end of one block; its two
+     leads run over the top to the small radio receiver/initiator taped on
+     the face, which carries the arming LED and a stub antenna.
+     Local frame: +X along its length, +Y out of its face (the surface normal
+     when stuck), +Z across. Origin = its centre. Thin axis = +Y (76 mm).
+     Draw cost: ONE merged vertex-coloured body + the film + the label + the
+     LED = 4 meshes (was 16), all geometry built once. */
+  const BLK = { len: 0.279, w: 0.051, t: 0.038 };
+  const B = { len: BLK.len, thick: BLK.t * 2, wide: BLK.w * 2 };
+  function brickAssets(THREE) {
+    const a = assets(THREE);
+    if (a.brick) return a.brick;
+    const K = CBZ.munitions.kit;
+    const P = [];
+    const gap = 0.0015;
+    for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) {
+      const y = (i - 0.5) * BLK.t, z = (j - 0.5) * BLK.w;
+      // each block slightly rounded at the ends: a box a hair short plus end pads
+      P.push({ g: K.box(BLK.len - 0.006, BLK.t - gap, BLK.w - gap, 0, y, z), c: 0x5b6443 });
+      P.push({ g: K.box(0.003, BLK.t - gap * 3, BLK.w - gap * 3, BLK.len / 2 - 0.0015, y, z), c: 0x4d5538 });
+      P.push({ g: K.box(0.003, BLK.t - gap * 3, BLK.w - gap * 3, -BLK.len / 2 + 0.0015, y, z), c: 0x4d5538 });
+    }
+    // two wraps of black tape round the bundle
+    for (const x of [-0.075, 0.07]) P.push({ g: K.box(0.024, B.thick + 0.003, B.wide + 0.003, x, 0, 0), c: 0x1d1f1c });
+    // the receiver/initiator on the face, taped down by the forward wrap
+    const RX = { x: 0.07, y: B.thick / 2 + 0.014, w: 0.07, h: 0.026, d: 0.046 };
+    P.push({ g: K.box(RX.w, RX.h, RX.d, RX.x, RX.y, 0), c: 0x23262a });
+    P.push({ g: K.box(0.026, 0.028, 0.049, RX.x, RX.y, 0), c: 0x1d1f1c });              // tape over it
+    P.push({ g: K.box(0.012, 0.006, 0.012, RX.x - 0.024, RX.y + RX.h / 2 + 0.002, 0.012), c: 0x3a0d0b });   // LED bezel
+    // stub antenna, standing off the receiver's far end
+    const ant = new THREE.CylinderGeometry(0.0022, 0.0028, 0.075, 5); ant.translate(RX.x + 0.028, RX.y + RX.h / 2 + 0.037, -0.016);
+    P.push({ g: ant, c: 0x111111 });
+    // the blasting cap in the end of the top block, crimped to its leads
+    const capY = BLK.t / 2, capZ = BLK.w / 2;
+    const cap = new THREE.CylinderGeometry(0.0038, 0.0038, 0.045, 8); cap.rotateZ(Math.PI / 2); cap.translate(BLK.len / 2 + 0.014, capY, capZ);
+    P.push({ g: cap, c: 0xa8966a });
+    // the two leads: from the cap, up over the end and along the face to the receiver
+    const ex = BLK.len / 2 + 0.036;
+    const lead = function (dz, col) {
+      const c = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(ex, capY, capZ + dz),
+        new THREE.Vector3(ex + 0.016, capY + 0.02, capZ * 0.7 + dz),
+        new THREE.Vector3(ex + 0.004, B.thick / 2 + 0.018, capZ * 0.3 + dz),
+        new THREE.Vector3(BLK.len / 2 - 0.02, B.thick / 2 + 0.008, dz),
+        new THREE.Vector3(RX.x + RX.w / 2 + 0.002, RX.y - 0.004, dz * 2),
+      ]);
+      P.push({ g: new THREE.TubeGeometry(c, 16, 0.0019, 4, false), c: col });
+    };
+    lead(-0.0035, 0xa3231b); lead(0.0035, 0x151515);
+    const lab = labelTexture(THREE);
+    a.brick = {
+      body: K.merge(P),
+      film: new THREE.BoxGeometry(B.len + 0.004, B.thick + 0.003, B.wide + 0.004),
+      label: new THREE.PlaneGeometry(BLK.len * 0.62, BLK.w * 0.8),
+      led: new THREE.SphereGeometry(0.0045, 6, 4),
+      mat: new THREE.MeshLambertMaterial({ vertexColors: true }),
+      labelMat: new THREE.MeshLambertMaterial({ map: lab, color: lab ? 0xffffff : 0xcfc59a }),
+      rx: RX,
+    };
+    a.brick.film._shared = a.brick.label._shared = a.brick.led._shared = a.brick.mat._shared = a.brick.labelMat._shared = true;
+    return a.brick;
   }
-
-  /* The brick. Local frame: +X along its length, +Y out of its face (the
-     surface normal when stuck), +Z across. Origin = its centre. */
   CBZ.buildC4Brick = function (THREE) {
     THREE = THREE || window.THREE;
-    const a = assets(THREE), G = a.geo, M = a.mat, B = a.B;
+    const a = assets(THREE), M = a.mat, K = brickAssets(THREE);
     const g = new THREE.Group();
     g.name = "c4_brick";
-    mesh(THREE, G.brick, M.brick, g);
-    mesh(THREE, G.film, M.film, g);
-    const lab = mesh(THREE, G.label, M.label, g, -0.02, B.thick / 2 + 0.0035, 0);
+    g.add(new THREE.Mesh(K.body, K.mat));
+    g.add(new THREE.Mesh(K.film, M.film));
+    // the printed label on the top block's face, behind the tape wrap
+    const lab = new THREE.Mesh(K.label, K.labelMat);
     lab.rotation.x = -Math.PI / 2;
-    // two bands of tape holding the receiver on
-    mesh(THREE, G.tape, M.tape, g, 0.07, 0, 0);
-    mesh(THREE, G.tape, M.tape, g, 0.105, 0, 0);
-    // the receiver box on the face, LED + stub antenna
-    const rx = mesh(THREE, G.rx, M.rx, g, 0.088, B.thick / 2 + 0.017, 0);
-    const led = mesh(THREE, G.led, M.led, rx, -0.025, 0.016, 0.014);
-    mesh(THREE, G.ant, M.ant, rx, 0.03, 0.045, -0.016);
-    // the cap seated in the brick's end and its two leads into the receiver
-    const cap = mesh(THREE, G.cap, M.cap, g, B.len / 2 + 0.012, 0.004, 0.012);
-    cap.rotation.z = Math.PI / 2;
-    const ex = B.len / 2 + 0.034;
-    wire(THREE, g, G.wire, M.red, [ex, 0.004, 0.009], [ex + 0.01, B.thick / 2 + 0.03, 0.006]);
-    wire(THREE, g, G.wire, M.red, [ex + 0.01, B.thick / 2 + 0.03, 0.006], [0.125, B.thick / 2 + 0.02, 0.012]);
-    wire(THREE, g, G.wire, M.blk, [ex, 0.004, 0.016], [ex + 0.006, B.thick / 2 + 0.026, 0.02]);
-    wire(THREE, g, G.wire, M.blk, [ex + 0.006, B.thick / 2 + 0.026, 0.02], [0.125, B.thick / 2 + 0.018, 0.02]);
+    lab.position.set(-0.035, B.thick / 2 + 0.0022, -BLK.w / 2);
+    g.add(lab);
+    const led = new THREE.Mesh(K.led, M.led);
+    led.position.set(K.rx.x - 0.024, K.rx.y + K.rx.h / 2 + 0.005, 0.012);
+    g.add(led);
     g.userData.led = led;
     g.userData.thick = B.thick;
     // held across the palm by its middle; +Y (the face) outward
@@ -185,5 +205,5 @@
     return g;
   };
 
-  CBZ.c4PropDims = function () { return { len: 0.28, thick: 0.055, wide: 0.11 }; };
+  CBZ.c4PropDims = function () { return { len: B.len, thick: B.thick, wide: B.wide }; };
 })();

@@ -9,6 +9,9 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  // Built when the prison is first needed, as if at this script's parse
+  // point (core/prisonlazy.js). Body left at its old indent.
+  CBZ.definePrison("world/escape_routes.js", function () {
   if (!CBZ || !CBZ.scene) return;
   const THREE = window.THREE;
   const scene = CBZ.prisonRoot || CBZ.scene;
@@ -290,4 +293,5 @@
   // (The 48 m, 10 cm "pipe" hung 9.8 m over the middle of the north yard is
   // GONE. It touched no wall and no roof: from the ground it was a grey line
   // drawn diagonally across the sky, and the owner saw exactly that.)
+  });
 })();

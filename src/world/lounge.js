@@ -62,18 +62,23 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
+  // This file's CONFIG defaults are published at parse: other files read
+  // them before (or without) the prison ever being built.
+  if (CBZ.CONFIG.PRISON_DRESS_V2 == null) CBZ.CONFIG.PRISON_DRESS_V2 = true;
+  if (CBZ.CONFIG.PRISON_PROP_USE_V1 == null) CBZ.CONFIG.PRISON_PROP_USE_V1 = true;
+  // Built when the prison is first needed, as if at this script's parse
+  // point (core/prisonlazy.js). Body left at its old indent.
+  CBZ.definePrison("world/lounge.js", function () {
   const { addBox, roomShell } = CBZ;
   const HALF = Math.PI / 2;
 
   // Canonical declaration + doctrine comment: world/southblock.js.
-  if (CBZ.CONFIG.PRISON_DRESS_V2 == null) CBZ.CONFIG.PRISON_DRESS_V2 = true;
   const PD = CBZ.prisonDress || null;   // degrade-safe: no kit → no dressing
   // PRISON_PROP_USE_V1 — canonical declaration + doctrine: world/southblock.js.
   // Here: 67 dead props in a 140 m2 dayroom. The phone bank goes (18 boxes,
   // none of them usable, duplicating the yard's) and the book shelf gets the
   // collider a 1.9 m unit of furniture should always have had. What stays and
   // why is written at each site.
-  if (CBZ.CONFIG.PRISON_PROP_USE_V1 == null) CBZ.CONFIG.PRISON_PROP_USE_V1 = true;
 
   roomShell({
     x0: 19, x1: 29, z0: 30, z1: 44, h: 6,
@@ -372,5 +377,6 @@
   if (PD && PD.shell) PD.shell({
     id: "lounge", x0: 19, x1: 29, z0: 30, z1: 44, h: 6,
     door: "W", dc: 37, dw: 3.4, tone: 0x6b7480, face: "W",
+  });
   });
 })();

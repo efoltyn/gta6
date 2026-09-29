@@ -20,7 +20,7 @@
    the exact pattern wealth.js uses for w.luxury). EVERY cross-module call is
    feature-detected so a missing sibling degrades gracefully and nothing throws.
 
-   Walk up to a property spot and press [G] for its menu (Buy if unowned, else
+   Walk up to a property spot and press E (or tap it) for its menu (Buy if unowned, else
    Store / Retrieve / ammo). Boarding the parked military jet steals it (4★).
 
    Exposes: CBZ.cityStorage, CBZ.cityOpenStorage, CBZ.cityStorageHangarHit,
@@ -170,7 +170,7 @@
   //  PLACEMENT  (believable map spots, feature-detected anchors)
   // ------------------------------------------------------------
   //  Each property resolves to a world {x,z}. We drop a small beacon there and
-  //  the [G] menu opens within radius. Anchors degrade gracefully: a missing
+  //  the property menu opens within radius. Anchors degrade gracefully: a missing
   //  car-lot / beach / airport just falls back to the arena centre so nothing
   //  is unreachable. Spots are cached per arena (recomputed if the arena rebuilds).
   // ============================================================
@@ -428,7 +428,7 @@
   }
 
   // ============================================================
-  //  [G] MENU  (proximity-gated overlay; number keys act)
+  //  THE PROPERTY MENU  (proximity-gated overlay; number keys act)
   // ============================================================
   let panel = null, open_ = false, curSpot = null, actions = [];
   function el() {
@@ -567,68 +567,44 @@
   };
 
   // ============================================================
-  //  INPUT — [G] near a property; number keys in the menu. Military aircraft
-  //  use the shared physical-vehicle interaction in militaryvehicles.js, so the
-  //  parked prop, collider, taken state and flyable are one authoritative object.
+  //  THE PROPERTY IS A CANDIDATE (city/interactions.js): E at a spot opens
+  //  its menu (Buy if unowned), a tap on it does the same, on foot or at the
+  //  wheel. It used to be [G] with a private prompt: G is the grenade, so
+  //  standing at your garage with a frag in your bag did both. Number keys
+  //  and Esc stay the open menu's own.
   // ============================================================
   function activeCtx() { return g.mode === "city" && g.state === "playing"; }
   addEventListener("keydown", function (e) {
-    if (!activeCtx()) return;
+    if (!activeCtx() || !open_) return;
     const k = (e.key || "").toLowerCase();
-    if (open_) {
-      if (k === "escape") { e.preventDefault(); close(); return; }
-      if (k >= "1" && k <= "9") { e.preventDefault(); const a = actions[parseInt(k, 10) - 1]; if (a) a.fn(); return; }
-      return;
-    }
-    if (e.repeat) return;
-    const P = CBZ.player; if (!P) return;
-    if (k === "g" && !CBZ.cityMenuOpen) {
-      const s = nearestSpot(P.pos.x, P.pos.z);
-      if (s) { e.preventDefault(); open(s); }
-    }
+    if (k === "escape") { e.preventDefault(); close(); return; }
+    if (k >= "1" && k <= "9") { e.preventDefault(); const a = actions[parseInt(k, 10) - 1]; if (a) a.fn(); }
   });
-
-  // ============================================================
-  //  ON-FOOT PROMPT  (cheap; only when not flying/driving/menu-open)
-  // ============================================================
-  let _promptEl = null;
-  function promptEl() {
-    if (_promptEl) return _promptEl;
-    if (typeof document === "undefined" || !document.body) return null;
-    const d = document.createElement("div");
-    d.id = "cityStoragePrompt";
-    d.style.cssText = "position:fixed;left:50%;bottom:118px;transform:translateX(-50%);" +
-      "font:700 15px/1.4 ui-sans-serif,system-ui,sans-serif;color:#bfe2ff;text-align:center;" +
-      "background:rgba(8,12,18,0.6);padding:7px 16px;border-radius:9px;border:1px solid rgba(120,180,255,0.35);" +
-      "pointer-events:none;z-index:60;display:none;text-shadow:0 1px 3px #000";
-    document.body.appendChild(d);
-    _promptEl = d;
-    return d;
+  let zoned = false;
+  function wireZone() {
+    if (zoned || !CBZ.interactions || !CBZ.interactions.registerZone) return;
+    zoned = true;
+    const owe = (prop) => (prop.id === "freeport" && CBZ.cashStore && CBZ.cashStore.remaining) ? CBZ.cashStore.remaining() : prop.cost;
+    CBZ.interactions.registerZone({
+      id: "zone-property", kind: "property", radius: SPOT_R, prio: 7,
+      find: function (px, pz) {
+        const P = CBZ.player;
+        if (open_ || !P || P._aircraft) return null;
+        return nearestSpot(px, pz);
+      },
+      options: [
+        { id: "property-buy", slot: "e", prio: 5, campaignSafe: true, label: (s) => "Buy " + money(owe(s.prop)),
+          canShow: (s) => !owns(s.prop.id), onSelect: open },
+        { id: "property-open", slot: "e", prio: 5, campaignSafe: true, label: "Open",
+          canShow: (s) => owns(s.prop.id), onSelect: open },
+      ],
+    });
+    CBZ.interactions.describe("property", function (s) { return { label: (s && s.prop && s.prop.name) || "" }; });
   }
-  function showPrompt(msg) { const e = promptEl(); if (!e) return; e.style.display = "block"; e.innerHTML = msg; }
-  function hidePrompt() { if (_promptEl) _promptEl.style.display = "none"; }
-
   CBZ.onUpdate(13.5, function () {
-    if (g.mode !== "city") { hidePrompt(); return; }
-    if (!arenaRoot()) return;
+    if (g.mode !== "city" || !arenaRoot()) return;
     hydrate();
-    const P = CBZ.player;
-    if (!P || P.dead || P._aircraft || CBZ.cityMenuOpen || g.state !== "playing") { hidePrompt(); return; }
-    const x = P.pos.x, z = P.pos.z;
-    const s = nearestSpot(x, z);
-    if (s) {
-      const prop = s.prop;
-      // CBZ.touchActionPrompt: desktop keeps the exact "[G] …" string; touch
-      // renders a tappable verb pill that synthesizes the same G press.
-      if (!owns(prop.id)) {
-        const owe = (prop.id === "freeport" && CBZ.cashStore && CBZ.cashStore.remaining) ? CBZ.cashStore.remaining() : prop.cost;
-        showPrompt(CBZ.touchActionPrompt("g", "Buy " + money(owe)));
-      }
-      else if (prop.kind === "hangar") showPrompt(CBZ.touchActionPrompt("g", g.cityOwnsJet ? "Hangar" : "Hangar, needs a jet"));
-      else showPrompt(CBZ.touchActionPrompt("g", "Storage"));
-      return;
-    }
-    hidePrompt();
+    wireZone();
   });
 
   // ============================================================
@@ -641,7 +617,6 @@
     _spots = null; _spotsRoot = null;
     if (panel) panel.style.display = "none";
     open_ = false; curSpot = null;
-    hidePrompt();
   }
   CBZ.cityStorageReset = teardown;
 

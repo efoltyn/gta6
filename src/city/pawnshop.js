@@ -49,7 +49,7 @@
 
   const S = { lot: null, b: null, group: null, built: false, arena: null, noLotArena: null,
               sellDesk: null, loanDesk: null, cx: 0, cz: 0,
-              cur: null, mode: "", redeemIdx: 0, prompt: null, lastTxt: "" };
+              near: false };
 
   function econ() { return CBZ.cityEcon || null; }
   function fmt$(n) { n = Math.round(n || 0); return "$" + String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
@@ -555,99 +555,53 @@
     g.cityPawnTickets = keep;
   }
 
-  // ---- the look-pick + [E] prompt --------------------------------------------
-  function inStore() {
-    const P = CBZ.player, b = S.b;
-    if (!P || !b) return false;
+  // ---- THE DESKS ARE CANDIDATES (city/interactions.js registerFixtures) -----
+  // The sell desk and the loan desk are things in the registry: E does the
+  // obvious deal on the desk you look at, Q / a tap shows the rest (sell
+  // everything, each ticket you can redeem). The old [G] sell-all and the [F]
+  // ticket cycle were private keys on a private prompt; they are verbs now.
+  function inStore(px, pz) {
+    const b = S.b;
+    if (!b || !S.lot) return false;
     const ox = (b.ox != null ? b.ox : S.lot.cx), oz = (b.oz != null ? b.oz : S.lot.cz);
-    const W = b.w || 10, D = b.d || 10;
-    return Math.abs(P.pos.x - ox) < W / 2 + 1.5 && Math.abs(P.pos.z - oz) < D / 2 + 1.5;
+    return Math.abs(px - ox) < (b.w || 10) / 2 + 1.5 && Math.abs(pz - oz) < (b.d || 10) / 2 + 1.5;
   }
-  function pickDesk() {
-    if (!inStore()) return null;
-    const P = CBZ.player;
-    const yaw = CBZ.cam ? CBZ.cam.yaw : 0, fx = -Math.sin(yaw), fz = -Math.cos(yaw);
-    let best = null, bestScore = -1;
-    for (const desk of [S.sellDesk, S.loanDesk]) {
-      if (!desk) continue;
-      const dx = desk.x - P.pos.x, dz = desk.z - P.pos.z, d = Math.hypot(dx, dz);
-      if (d > REACH || d < 0.05) continue;
-      const dot = (dx / d) * fx + (dz / d) * fz;
-      if (dot < LOOK_DOT) continue;
-      const score = dot - d * 0.05;
-      if (score > bestScore) { bestScore = score; best = desk; }
-    }
-    return best;
-  }
-
-  function sellPromptText() {
+  function sellAll() {
     const list = sellable();
-    if (!list.length) return "<span style='color:#7f8794'>Nothing to fence, bring me gold, watches, stones.</span>";
-    const top = list[0], p = fencePrice(top.name);
-    let extra = "";
-    if (list.length > 1) { let t = 0; for (const s of list) t += fencePrice(s.name) * s.n; extra = " <span style='color:#7f8794'>[G] sell everything, " + fmt$(t) + "</span>"; }
-    const nn = top.n > 1 ? " ×" + top.n : "";
-    return "<b style='color:#9fe0ff'>[E]</b> Pawn-sell " + top.name + nn + " <span style='color:#7ed957'>" + fmt$(p) + "</span> <span style='color:#7f8794'>broker's lowball, gone for good</span>" + extra;
+    for (const s of list) for (let i = 0; i < s.n; i++) { if (isWorn(s.name) && (econ().count(s.name) <= 1)) break; sellOne(s.name); }
   }
-  function loanPromptText() {
-    const live = liveTickets();
-    // REDEEM mode (cycle with [F]) — only meaningful when you hold tickets.
-    if (S.mode === "redeem" && live.length) {
-      const t = live[S.redeemIdx % live.length];
-      const left = Math.max(0, Math.round(t.expires - now()));
-      const cyc = live.length > 1 ? " <span style='color:#7f8794'>[F] next ticket (" + ((S.redeemIdx % live.length) + 1) + "/" + live.length + ")</span>" : "";
-      return "<b style='color:#ffd166'>[E]</b> Redeem " + t.name + " <span style='color:#7ed957'>" + fmt$(t.redeem) + "</span> <span style='color:#ff9e9e'>" + left + "s left</span>" + cyc;
-    }
-    // PAWN-NEW mode (the default). Offer the priciest pawnable in your pockets.
-    const list = sellable();
-    const toggle = live.length ? " <span style='color:#7f8794'>[F] redeem tickets (" + live.length + ")</span>" : "";
-    if (!list.length) return "<span style='color:#7f8794'>Bring me something to lend against, gold, a watch, a stone.</span>" + toggle;
-    const top = list[0], o = loanOffer(top.name);
-    return "<b style='color:#ffb23c'>[E]</b> Pawn " + top.name + " for <span style='color:#7ed957'>" + fmt$(o.principal) + "</span> <span style='color:#7f8794'>redeem " + fmt$(o.redeem) + " in " + Math.round(o.term) + "s, else forfeit</span>" + toggle;
+  function sellAllTotal() { let t = 0; for (const s of sellable()) t += fencePrice(s.name) * s.n; return t; }
+  function redeemVerb(i) {
+    return {
+      id: "pawn-redeem-" + i, slot: "e", prio: 4 - i * 0.1,
+      label: () => { const t = liveTickets()[i]; return t ? "Redeem " + t.name + " " + fmt$(t.redeem) : "Redeem"; },
+      canShow: (d) => d.mode === "loan" && liveTickets().length > i,
+      onSelect: () => { const t = liveTickets()[i]; if (t) redeemTicket(t); },
+    };
   }
-  function promptText(desk) { return desk.mode === "sell" ? sellPromptText() : loanPromptText(); }
-
-  function promptEl() {
-    if (S.prompt) return S.prompt;
-    if (typeof document === "undefined" || !document.body) return null;
-    const d = document.createElement("div");
-    d.id = "pawnPrompt";
-    d.style.cssText = "position:fixed;left:50%;bottom:150px;transform:translateX(-50%);z-index:46;display:none;" +
-      "background:rgba(13,16,21,.9);border:1px solid #3a4150;border-radius:12px;padding:7px 14px;color:#e8eef7;" +
-      "font-family:Fredoka,system-ui,sans-serif;font-size:15px;pointer-events:auto;cursor:pointer;text-align:center;max-width:78vw";
-    d.addEventListener("click", function () { if (S.cur) actOn(S.cur); });   // tap-to-act (mobile)
-    document.body.appendChild(d);
-    S.prompt = d;
-    return d;
-  }
-  function showPrompt(txt) {
-    const el = promptEl(); if (!el) return;
-    if (CBZ.touchPromptHTML) txt = CBZ.touchPromptHTML(txt);   // touch: [E]/[G]/[F] → tappable verb pills
-    if (txt !== S.lastTxt) { el.innerHTML = txt; S.lastTxt = txt; }
-    if (el.style.display !== "block") el.style.display = "block";
-  }
-  function hidePrompt() {
-    if (S.prompt && S.prompt.style.display !== "none") S.prompt.style.display = "none";
-    S.cur = null;
-  }
-
-  function actOn(desk) {
-    if (!desk) return;
-    if (desk.mode === "sell") {
-      const list = sellable(); if (list.length) sellOne(list[0].name);
-      return;
-    }
-    // loan desk
-    const live = liveTickets();
-    if (S.mode === "redeem" && live.length) { redeemTicket(live[S.redeemIdx % live.length]); return; }
-    const list = sellable(); if (list.length) pawnLoan(list[0].name);
-  }
-  // [F] at the loan desk toggles pawn-new ↔ redeem, and cycles tickets.
-  function cycle() {
-    if (!S.cur || S.cur.mode !== "loan") return;
-    const live = liveTickets(); if (!live.length) { S.mode = ""; return; }
-    if (S.mode !== "redeem") { S.mode = "redeem"; S.redeemIdx = 0; }
-    else { S.redeemIdx = (S.redeemIdx + 1) % live.length; if (S.redeemIdx === 0) S.mode = ""; }   // wrap back to pawn-new
+  let fixturesWired = false;
+  function wireFixtures() {
+    if (fixturesWired || !CBZ.interactions || !CBZ.interactions.registerFixtures) return;
+    fixturesWired = true;
+    CBZ.interactions.registerFixtures({
+      id: "pawn-desk", kind: "pawn-desk", prio: 9,
+      list: function (ctx, px, pz) { return S.built && S.near && inStore(px, pz) ? [S.sellDesk, S.loanDesk] : null; },
+      reach: function () { return REACH; },
+      dot: function () { return LOOK_DOT; },
+      verbs: [
+        { id: "pawn-sell", slot: "e", prio: 6, forceYes: true,
+          label: () => { const t = sellable()[0]; return t ? "Sell " + t.name + " " + fmt$(fencePrice(t.name)) : "Sell"; },
+          canShow: (d) => d.mode === "sell" && sellable().length > 0,
+          onSelect: () => { const t = sellable()[0]; if (t) sellOne(t.name); } },
+        { id: "pawn-sell-all", prio: 5, forceYes: true, label: () => "Sell all " + fmt$(sellAllTotal()),
+          canShow: (d) => d.mode === "sell" && sellable().length > 1, onSelect: sellAll },
+        { id: "pawn-loan", slot: "e", prio: 6, forceYes: true,
+          label: () => { const t = sellable()[0]; return t ? "Pawn " + t.name + " " + fmt$(loanOffer(t.name).principal) : "Pawn"; },
+          canShow: (d) => d.mode === "loan" && sellable().length > 0,
+          onSelect: () => { const t = sellable()[0]; if (t) pawnLoan(t.name); } },
+        redeemVerb(0), redeemVerb(1), redeemVerb(2),
+      ],
+    });
   }
 
   // ---- find the lot + build once (self-healing, gunstore pattern) ------------
@@ -655,7 +609,7 @@
     const arena = CBZ.city && CBZ.city.arena;
     if (S.built) {
       if (S.arena === arena) return true;
-      S.built = false; S.group = null; S.lot = null; S.b = null; S.cur = null; S.sellDesk = null; S.loanDesk = null;
+      S.built = false; S.group = null; S.lot = null; S.b = null; S.near = false; S.sellDesk = null; S.loanDesk = null;
     }
     if (!arena || !econ()) return false;
     if (S.noLotArena === arena) return false;          // this city has no pawn lot — answered once
@@ -684,8 +638,9 @@
     // be swapped (load/respawn/MP-adopt) while we're outside the city too.
     ensurePawnSaveWraps();
     hydratePawnFromLedger();
-    if (!g || g.mode !== "city") { if (S.group && S.group.visible) S.group.visible = false; hidePrompt(); return; }
+    if (!g || g.mode !== "city") { if (S.group && S.group.visible) S.group.visible = false; S.near = false; return; }
     if (!ensure()) return;
+    wireFixtures();
 
     // tickets count down in real seconds; lapse → forfeit (broker keeps it).
     const arr = tickets();
@@ -699,38 +654,8 @@
     const dx = P.pos.x - S.cx, dz = P.pos.z - S.cz;
     const near = (dx * dx + dz * dz) < VIS_R * VIS_R;
     if (S.group && S.group.visible !== near) S.group.visible = near;
-    if (!near || g.state !== "playing" || P.dead || P.driving || CBZ.cityMenuOpen) { hidePrompt(); return; }
-
-    const desk = pickDesk();
-    if (!desk) { hidePrompt(); return; }
-    // leaving the loan desk drops any redeem cycle so you re-arrive in pawn-new
-    if (S.cur && S.cur.mode === "loan" && desk.mode !== "loan") S.mode = "";
-    S.cur = desk;
-    showPrompt(promptText(desk));
+    S.near = near;
   });
-
-  // [E] transacts at the desk you're looking at; [G] sells everything at the
-  // sell desk; [F] toggles/cycles redeem at the loan desk. CAPTURE phase so the
-  // counter wins the key over interact.js's bubble listener, and
-  // stopImmediatePropagation keeps one press from ALSO opening the clerk menu.
-  addEventListener("keydown", function (e) {
-    if (!S.cur || !g || g.mode !== "city" || g.state !== "playing") return;
-    if (CBZ.cityMenuOpen || (CBZ.player && (CBZ.player.driving || CBZ.player.dead))) return;
-    const k = (e.key || "").toLowerCase();
-    if (k === "e") {
-      e.preventDefault(); if (e.stopImmediatePropagation) e.stopImmediatePropagation(); e.stopPropagation();
-      actOn(S.cur); return;
-    }
-    if (k === "g" && S.cur.mode === "sell") {
-      e.preventDefault(); if (e.stopImmediatePropagation) e.stopImmediatePropagation(); e.stopPropagation();
-      const list = sellable(); for (const s of list) for (let i = 0; i < s.n; i++) { if (isWorn(s.name) && (econ().count(s.name) <= 1)) break; sellOne(s.name); }
-      return;
-    }
-    if (k === "f" && S.cur.mode === "loan") {
-      e.preventDefault(); if (e.stopImmediatePropagation) e.stopImmediatePropagation(); e.stopPropagation();
-      cycle(); showPrompt(promptText(S.cur)); return;
-    }
-  }, true);
 
   // ---- public hooks (contracts E + F; gunstore/jewelry-style) ----------------
   // is the pawn desk live (for this lot)? interact.js trims the generic "Shop

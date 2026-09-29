@@ -36,6 +36,33 @@
   if (CBZ.CONFIG && CBZ.CONFIG.CITY_FAR_CULL == null) CBZ.CONFIG.CITY_FAR_CULL = true;
 
   const hidByUs = new Set();        // groups WE set visible=false on
+  /* GPU EVICTION (owner, 2026-09-29: "when I drive the car ... the screen just
+     goes to dark navy": iOS dropping the context under GPU memory). Everything
+     a drive passes used to stay on the GPU for the rest of the session. A
+     group we hid that is also EVICT metres past the cull radius gives its
+     vertex buffers back (geometry.dispose(): three uploads them again, from
+     the arrays it keeps, the next time the group is drawn, which is the cull
+     radius, inside the fog). Only geometry marked _evictable (core/batch.js's
+     merged meshes: each owned by exactly one mesh) and only while its CPU
+     arrays are there to bring it back. */
+  const EVICT = 220;
+  const evicted = new WeakSet();
+  const _evStats = { groups: 0, geos: 0 };
+  CBZ.farcullEvictStats = _evStats;
+  function evict(o) {
+    evicted.add(o); _evStats.groups++;
+    o.traverse(function (c) {
+      if (!c.isMesh || c.isInstancedMesh) return;
+      const g = c.geometry;
+      if (!g || !g._evictable || !g.attributes || !g.attributes.position) return;
+      if (!g.attributes.position._cbzUploaded) return;          // never on the GPU
+      if (CBZ.geoReuploadable && !CBZ.geoReuploadable(g)) return;
+      g.dispose();
+      for (const k in g.attributes) g.attributes[k]._cbzUploaded = false;
+      if (g.index) g.index._cbzUploaded = false;
+      _evStats.geos++;
+    });
+  }
   const bounds = new WeakMap();     // group -> {x,z,r,px,pz,dynamic}
   const _box = new THREE.Box3();
   const _v = new THREE.Vector3();
@@ -391,12 +418,14 @@
         // to re-take it, or the object stays drawn forever while the set still
         // claims we own it. Re-adding to a Set is free.
         if (o.visible) { o.visible = false; hidByUs.add(o); }
+        if (d > R + EVICT && hidByUs.has(o) && !evicted.has(o)) evict(o);
       } else if (d < R - hysBand()) {
         // userData.cullLocked = "another system wants this hidden at this
         // quality tier" (city/buildings.js's masonry veneer is dropped whole at
         // tier 0). Re-showing on approach would override that owner. Culling it
         // is still fine — hidden is hidden.
         if (hidByUs.has(o) && !(o.userData && o.userData.cullLocked)) { o.visible = true; hidByUs.delete(o); }
+        evicted.delete(o);
       }
     }
   });
