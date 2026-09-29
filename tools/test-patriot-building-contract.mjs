@@ -93,7 +93,6 @@ assert.ok(cubic(p0, p1, p2, p3, 0.5, "y") > Math.max(p0.y, p3.y) + 20);
 // The whole reason a missile could not scratch a glass office: carveHole's
 // eligibility loop. Guard the three moving parts of the fix so a future tidy-up
 // cannot quietly restore the refusal.
-assert.match(config, /STRUCT_CURTAIN_BREACH_V1[^\n]*= true/);
 const carve = section(bld, "function carveHole(x, y, z, r, opts)", "CBZ.cityCarveWall = carveHole;");
 assert.doesNotMatch(carve, /curtainBreachOn/,
   "a short facade course of a real shell is always admitted (the revert flag is gone)");
