@@ -1112,7 +1112,7 @@
   CBZ.blastFlashLightCount = function () { return flashPool.made(); };
 
   // ---- persistent ground crater scorch (instanced, never fades) --------------
-  const MARK_CAP = 24;
+  const MARK_CAP = 32;
   const marks = PURE.makeDecalLedger(MARK_CAP);
   let markMeshes = null;                 // 4 InstancedMesh, one per atlas quadrant
   const ZERO_M = new THREE.Matrix4().makeScale(0, 0, 0);
@@ -1444,8 +1444,15 @@
     if (CBZ.cityWaterAt && CBZ.cityWaterAt(x, z)) return;
     const S = Math.min(P, 2.6), q = o.fxq;
     const wallCharge = !!(o.nrm && Math.abs(o.nrm.y) < 0.6);
-    // (a) the crater scorch — persistent, capped, merged
-    if (K.decal > 0) queueMark(x + (o.nrm ? o.nrm.x * 0.6 : 0), z + (o.nrm ? o.nrm.z * 0.6 : 0), Math.max(1, Math.min(9, 1 + 1.3 * P * K.decal)), gy);
+    // (a) the crater and its dark ejecta blanket — persistent, capped (MARK_CAP,
+    //     the oldest recycled), merged. Sized by the CHARGE through the law:
+    //     apparent crater 0.8 . W^(1/3), ejecta to ~2.2 crater radii — a grenade
+    //     scuffs a metre of pavement, a Mk-84 blackens a 26 m disc.
+    if (K.decal > 0) {
+      const L = CBZ.blastLaw;
+      const mr = L && o.W > 0 ? Math.max(0.6, Math.min(16, L.ejectaR(o.W))) : Math.max(1, Math.min(9, 1 + 1.3 * P * K.decal));
+      queueMark(x + (o.nrm ? o.nrm.x * 0.6 : 0), z + (o.nrm ? o.nrm.z * 0.6 : 0), mr, gy);
+    }
     // (b) the ground it tore up: real chunks of the surface + charred bits
     //     that stay where they land (CBZ.debris grit persists in its ring)
     const surf = K.surface || groundKind();
@@ -1546,6 +1553,17 @@
     };
   };
 
+  // The charge behind a blast, kg TNT-equivalent — the same resolution
+  // buildings.js blastBuildings uses (explicit, else the named ordnance's
+  // reference charge, else the legacy power).
+  function chargeOf(opts) {
+    const L = CBZ.blastLaw;
+    if (!L) return 0;
+    if (opts.charge > 0) return +opts.charge;
+    const ref = L.CHARGES[opts.ordnance] || L.CHARGES[opts.kind];
+    return ref ? ref.W : L.chargeOfPower(opts.power || 1);
+  }
+
   // normalise the directional opts a caller may pass (no allocation on the hot
   // path: two scratch records, read synchronously inside one blast)
   const _nrmS = { x: 0, y: 0, z: 0 }, _dirS = { x: 0, y: 0, z: 0 };
@@ -1604,16 +1622,8 @@
     // (a rocket caught an aircraft) and a hit high on a facade leave none of it
     // on the street. A charge ON a wall still scorches the ground at its foot.
     if (!opts.airburst && power >= 0.5 && (!elevated || (nrm && Math.abs(nrm.y) < 0.6 && hAbove < 4.5))) {
-      blastAftermath(x, gy, z, P, K, { fxq: fxq, nrm: nrm, dir: dir });
+      blastAftermath(x, gy, z, P, K, { fxq: fxq, nrm: nrm, dir: dir, W: chargeOf(opts) });
     }
-    // WINDOWS. In the city, buildings.js's wrap already blows the panes near
-    // every blast (structuralBlast -> cityDamageBuilding -> cityShatter). The
-    // shared worlds (the disaster island) register their glass with
-    // CBZ.shatterGlass instead, and the unwrapped core never reached it.
-    if (!opts.noDamage && CBZ.shatterGlass && CBZ.game && CBZ.game.mode !== "city") {
-      try { CBZ.shatterGlass(x, z, Math.min(30, R * 0.8)); } catch (e) {}
-    }
-
     // ---- IMPACT FEEDBACK: sound, shake, slow-mo, screen flash, by DISTANCE
     // to the lens. The shake falls off as 1/(1+(d/(1.5R+4))^2): full at your
     // feet, half at ~a blast radius and a half, nothing past a few hundred
@@ -1650,18 +1660,11 @@
     // prison yard or on the disaster island must not write into it.
     if (CBZ.cityEvent && (!CBZ.game || CBZ.game.mode === "city")) CBZ.cityEvent("explosion", { x: x, z: z, panic: 10 * power, damage: 8 * power }, { silent: true, noWanted: true });
 
-    // ---- STRUCTURAL COUPLING (the one place a blast wounds a building) --------
-    // buildings.js wraps cityExplosion to run structuralBlast->blastAt AFTER
-    // this returns; when that wrap is installed in the city we skip here so
-    // there is exactly one carve. Outside the city (CBZ.cityBlastCore, no
-    // chain) we self-couple, so a prison wall still opens. Only meaningful
-    // ordnance (power >= 1) carves; noDamage never does.
-    const chainWillCarve = (!CBZ.game || CBZ.game.mode === "city") &&
-      !!(CBZ.cityExplosion && CBZ.cityExplosion._structWrapped);
-    if (!opts.noDamage && power >= 1.0 && CBZ.cityFracture && CBZ.cityFracture.blastAt
-        && !chainWillCarve) {
-      const hr = power >= 1.3 ? Math.min(3.4, 2.6 + (power - 1.3) * 0.7) : 1.6;
-      try { CBZ.cityFracture.blastAt({ x: x, y: cy, z: z }, hr, { power: power }); } catch (e) {}
+    // ---- WHAT IT DOES TO BUILDINGS: glass, doors, the wall, the ledger — all
+    // from the charge, through the one law (buildings.js blastBuildings ->
+    // systems/breach.js). Every mode: the prison's walls open by the same law.
+    if (!opts.noDamage && CBZ.blastBuildings) {
+      try { CBZ.blastBuildings(x, cy, z, opts); } catch (e) {}
     }
   }
   CBZ.cityExplosion = cityExplosionCore;
@@ -1795,7 +1798,7 @@
       const elevated = cy - gy > 6;
       const dir = blastDir(opts);
       blastVisual(x, gy, cy, z, Math.min(4.2, P), K, { fxq: fxq, elevated: elevated, airburst: false, nrm: null, dir: dir });
-      if (!elevated) blastAftermath(x, gy, z, Math.min(4.2, P), K, { fxq: fxq, nrm: null, dir: dir });
+      if (!elevated) blastAftermath(x, gy, z, Math.min(4.2, P), K, { fxq: fxq, nrm: null, dir: dir, W: chargeOf(opts) });
     }
     if (CBZ.cityPropsBlast) { try { CBZ.cityPropsBlast(x, cy, z, R, power, { byPlayer: byPlayer, cause: opts.cause || "airstrike" }); } catch (e) {} }
 
@@ -1826,24 +1829,11 @@
     applyBlastDamage(x, z, R, power, byPlayer, 14, 10, cause);
     if (CBZ.cityEvent) CBZ.cityEvent("explosion", { x: x, z: z, panic: 14 * power, damage: 10 * power }, { silent: true, noWanted: true });
 
-    // STRUCTURAL COUPLING (same contract as cityExplosion above): an airstrike
-    // wounds the nearest facade at its impact HEIGHT. buildings.js wraps this too
-    // (wrapBlast("cityAirstrikeExplosion")), so we SKIP when that wrap is present
-    // and only self-couple as a FALLBACK — exactly one carve, any load order.
-    // Carve at the real wall-hit height (opts.y) when given, not the raised
-    // air-burst seat. Airstrikes are heavy ordnance → always above the gate.
-    // HEAVY READ: an airstrike is by definition power>=2 ordnance, so we floor the
-    // power we hand to blastAt to 2.0 — blastAt→debris() then routes to the BIGGER
-    // cityHeavyWallRuin (full-facade cascade + collapse curtain + taller plume)
-    // instead of the standard rocket ruin. ONE carve only (blastAt owns it), so
-    // there is no double-carve with the heavy ruin — the ruin is pure FX layered
-    // on the single hole. (buildings.js's wrap, when present, drives the same.)
-    if (!opts.noDamage && CBZ.cityFracture && CBZ.cityFracture.blastAt
-        && !(CBZ.cityAirstrikeExplosion && CBZ.cityAirstrikeExplosion._structWrapped)) {
-      const hy = opts.y != null ? Math.max(1.0, opts.y) : cy;
-      const hr = Math.min(4.6, 3.4 + (Math.min(2.4, power) - 1.3) * 0.9);   // big, room-exposing
-      const hp = Math.max(2.0, power);   // airstrike → heavy ruin tier in debris()
-      try { CBZ.cityFracture.blastAt({ x: x, y: hy, z: z }, hr, { power: hp }); } catch (e) {}
+    // WHAT IT DOES TO BUILDINGS — the same one call as cityExplosion. The wall
+    // is asked at the real hit height (opts.y), not the raised fireball seat.
+    if (!opts.noDamage && CBZ.blastBuildings) {
+      const hy = opts.y != null ? Math.max(gy + 1.0, +opts.y) : gy + 1.2;
+      try { CBZ.blastBuildings(x, hy, z, opts); } catch (e) {}
     }
   };
 
@@ -2191,7 +2181,9 @@
   // just shattered here". Pooled (pointBurst ring + spawnPuff pool), so it's
   // draw-call-cheap and can't flood; power scales the volume. Headless-safe.
   // color (optional): the dust of what broke (brick is red, plaster white).
-  CBZ.cityDustKick = function (x, y, z, power, color) {
+  // o (optional): { dirx, dirz, speed } — the cloud ROLLS that way (a collapse
+  // pall runs out along the ground away from the footprint).
+  CBZ.cityDustKick = function (x, y, z, power, color, o) {
     // NO MODE GATE. Two pooled emitters and nothing else — the most obviously
     // shared verb in the file, and the one fracture.js's debris burst calls
     // on every carve regardless of which scenario is wearing the engine.
@@ -2200,13 +2192,17 @@
     // a fast pale dust spray + a couple of slow rolling billows that linger
     pointBurst(x, z, Math.round(10 + 10 * P), color != null ? color : 0x9a9082, 0.45, 2.2 + P * 1.2, 1.0, true, cy);
     if (color != null && CBZ.debris) CBZ.debris.dust(x, cy, z, { color: color, power: P * 0.8, radius: 0.9 });
+    const roll = o && (o.dirx || o.dirz) ? (o.speed || 4) : 0;
+    const rdx = roll ? o.dirx || 0 : 0, rdz = roll ? o.dirz || 0 : 0;
     for (let i = 0; i < Math.round(2 + P * 2); i++) {
       const a = rng() * 6.2832, sp = 0.8 + rng() * 1.4;
       spawnPuff(x + (rng() - 0.5) * 0.8, cy + 0.2 + rng() * 0.6, z + (rng() - 0.5) * 0.8, {
-        additive: false, smoke: true, base: 1.1, pop: (3.2 + rng() * 2.0) * P,
-        life: 1.6 + rng() * 1.0, maxOp: 0.34, shade: 0.36 + rng() * 0.08,
+        additive: false, smoke: true, base: 1.1, pop: (3.2 + rng() * 2.0) * P * (roll ? 1.4 : 1),
+        life: (1.6 + rng() * 1.0) * (roll ? 2.2 : 1), maxOp: 0.34, shade: 0.36 + rng() * 0.08,
         spin: (rng() - 0.5),
-        vx: Math.cos(a) * sp, vy: 0.5 + rng() * 0.8, vz: Math.sin(a) * sp,
+        vx: Math.cos(a) * sp + rdx * roll * (0.6 + rng() * 0.6), vy: (0.5 + rng() * 0.8) * (roll ? 0.4 : 1),
+        vz: Math.sin(a) * sp + rdz * roll * (0.6 + rng() * 0.6),
+        drag: roll ? 0.35 : undefined,
         delay: rng() * 0.12,
       });
     }
@@ -2371,7 +2367,7 @@
         let tx = -fnz, tz = fnx;
         const along = (rng() - 0.5) * width * 0.6;
         try {
-          fr.blastAt({ x: faceX - fnx * 0.15 + tx * along, y: fy, z: faceZ - fnz * 0.15 + tz * along }, hr, { power: power });
+          fr.blastAt({ x: faceX - fnx * 0.15 + tx * along, y: fy, z: faceZ - fnz * 0.15 + tz * along }, { r: hr });
           carved++;   // (the carve itself may land next frame: fracture defers it)
         } catch (e) {}
       }

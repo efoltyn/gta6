@@ -27,7 +27,7 @@
   const C4_ITEM = "C4 Charge";
   const GRENADE_ITEM = "Grenade";
   // the brick as modelled (weapons/appearances/c4.js): thin axis is local +Y
-  const BRICK = { len: 0.28, thick: 0.055, wide: 0.11 };
+  const BRICK = { len: 0.279, thick: 0.076, wide: 0.102 };   // four M112 blocks, two by two
   const REACH = 2.6;          // metres from the eye a charge can be pressed on
   const PLACE_HOLD = 0.5;     // seconds the use input is held to press it on
   const MAX_OUT = 5;          // the receiver tracks five charges

@@ -29,13 +29,16 @@ assert.doesNotMatch(crash, /function reinforcedRuinFrame|jaggedSlabGeo/,
   "no invented concrete teeth around an opening");
 assert.match(crash, /CBZ\.cityRuinAudit/);
 
-const patriot = section(island, "function makePatriot", "// ========================================================================\n  //   PERIMETER FENCE");
-assert.match(patriot, /makeTruck\(\{ flatbed: true \}\)/,
-  "Patriot must extend the canonical truck chassis");
-assert.match(patriot, /patriotMuzzles/);
-assert.match(patriot, /patriotRounds/);
+// The launcher truck is city/mil_armor.js's: the canonical 6x6 chassis, a
+// yaw → elevation launcher rig, one muzzle node per canister.
+const armorKit = await read("src/city/mil_armor.js");
+const patriot = section(armorKit, "function buildPatriot", "// ============================================================ THE LUV");
+assert.match(patriot, /truckChassis\(K, \{\}\)/, "Patriot must ride the canonical truck chassis");
+assert.match(patriot, /launcherRig\(S,/, "canisters sit on the shared yaw/elevation launcher rig");
+assert.match(patriot, /m\.name = "lm" \+ i/, "one authored muzzle node per canister");
+assert.match(armorKit, /hide\(ud, "patriotMuzzles", rig\.muzzles\)/);
 assert.match(island, /patriot: makePatriot/);
-assert.match(island, /patriot \? "patriot" : "ground"/);
+assert.match(island, /\[makePatriot, "patriot", /);
 
 const pointFire = section(aircraft, "CBZ.cityFireMissileAt = function", "CBZ.cityPatriotMissileAudit");
 assert.match(pointFire, /launchMissile\(/,
@@ -45,18 +48,18 @@ assert.doesNotMatch(pointFire, /new THREE\.(Group|Mesh)/,
   "point-targeting API must not create a parallel projectile model");
 const update = section(aircraft, "function updateMissiles", "// cheap building check");
 assert.match(update, /if \(m\.route\)/);
-assert.match(update, /detonate\(hx, hy, hz, m\.byPlayer, m\.fx\)/,
+assert.match(update, /detonate\(hx, hy, hz, m\.byPlayer, m\.fx, m\.type\)/,
   "Patriot route must terminate in the canonical pooled detonation, carrying its own warhead identity");
 // THE OWNER NAMED THE CLOUD. A Patriot spends the bus's rpg row, not the heavy
 // missile row whose additive fireball whites out the building it just hit.
 assert.match(pointFire, /m\.fx = \{ kind: opts\.fxKind \|\| "rpg"/,
   "the map-targeted round must carry the rpg warhead identity");
-assert.match(aircraft, /CBZ\.detonate\(x, y, z, row, \{ byPlayer: byPlayer, scale: scale \}\)/,
-  "detonate must spend the row the caller named");
+assert.match(aircraft, /const row = ROUND_ROW\[type\] \|\| "missile";[\s\S]*?CBZ\.detonate\(x, y, z, row, o\)/,
+  "each round spends its own warhead row (charge), fx names only the look");
 
 const fire = section(armor, "function firePatriot", "CBZ.cityPatriotAudit");
 assert.match(fire, /fullMap/);
-assert.match(fire, /getWorldPosition\(_patriotMuzzle\)/,
+assert.match(fire, /rig\.launcherMuzzle\(slot, _patriotMuzzle\)/,
   "launch must leave the authored tube transform");
 assert.match(fire, /cityFireMissileAt/);
 assert.match(armor, /CBZ\.cityArmorCanFire/);
@@ -93,8 +96,12 @@ assert.ok(cubic(p0, p1, p2, p3, 0.5, "y") > Math.max(p0.y, p3.y) + 20);
 // cannot quietly restore the refusal.
 assert.match(config, /STRUCT_CURTAIN_BREACH_V1[^\n]*= true/);
 const carve = section(bld, "function carveHole(x, y, z, r, opts)", "CBZ.cityCarveWall = carveHole;");
-assert.match(carve, /if \(!curtainBreachOn\(\)\) continue;/,
-  "a short facade course must be admitted only behind the flag");
+assert.doesNotMatch(carve, /curtainBreachOn/,
+  "a short facade course of a real shell is always admitted (the revert flag is gone)");
+assert.match(carve, /CBZ\.blastLaw\.isProp\(c, !band\.derived\)/,
+  "a prop-sized band-less collider is never a wall (the one law, systems/breach.js)");
+assert.match(carve, /lawHole = L\.hole\(charge\.W,/,
+  "a charged carve is priced by the charge law, not a per-caller radius");
 assert.match(carve, /const shell = shellOf\(c\);/,
   "a course is only a course if it belongs to a real shell");
 assert.match(carve, /const vy0 = curtain \? sy0 : y0, vy1 = curtain \? sy1 : y1;/,

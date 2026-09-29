@@ -119,37 +119,9 @@
     else if (CBZ.flashHint) CBZ.flashHint(line, s);
   }
 
-  // ---- the charge mesh: olive-drab body, tan demo blocks, a blinking LED ----
-  // ONE geo/material set shared by every charge (and the gun-store display).
-  let GEO = null, MAT = null;
-  function assets() {
-    if (GEO) return;
-    GEO = {
-      body: new THREE.BoxGeometry(0.34, 0.1, 0.24),
-      block: new THREE.BoxGeometry(0.085, 0.07, 0.2),
-      led: new THREE.BoxGeometry(0.04, 0.04, 0.04),
-    };
-    MAT = {
-      body: new THREE.MeshLambertMaterial({ color: 0x2e3328 }),
-      block: new THREE.MeshLambertMaterial({ color: 0xc9b98a }),
-      led: new THREE.MeshBasicMaterial({ color: 0xff3030 }),
-    };
-    Object.keys(GEO).forEach((k) => { GEO[k]._shared = true; });
-    Object.keys(MAT).forEach((k) => { MAT[k]._shared = true; });
-  }
-  function buildMesh() {
-    // the real prop (weapons/appearances/c4.js): film-wrapped olive brick,
-    // taped receiver, LED, leads into the cap. Thin axis = local +Y.
-    if (CBZ.buildC4Brick) { try { return CBZ.buildC4Brick(THREE); } catch (e) {} }
-    assets();
-    const grp = new THREE.Group();
-    grp.add(new THREE.Mesh(GEO.body, MAT.body));
-    const led = new THREE.Mesh(GEO.led, MAT.led);
-    led.position.set(0.13, 0.07, 0.1);
-    grp.add(led);
-    grp.userData.led = led;
-    return grp;
-  }
+  // ---- the charge mesh: weapons/appearances/c4.js's 5 lb bundle (four M112
+  // blocks, cap, leads, receiver + blinking LED), one merged body per copy.
+  function buildMesh() { return CBZ.buildC4Brick(THREE); }
   // the gun store hangs one on its demolition crate as the display model
   CBZ.cityC4Mesh = buildMesh;
 
@@ -290,12 +262,19 @@
     if (CBZ.collide) CBZ.collide(_probe, 0.12, ny - 0.1, ny + 0.1);
     const pushed = Math.hypot(_probe.x - nx, _probe.z - nz) > 0.01;
     const floor = (CBZ.floorAt ? CBZ.floorAt(nx, nz) : 0) || 0;
-    if (pushed || ny <= floor + 0.06 || fl.t > 6) {
-      ch.x = pushed ? _probe.x : nx;
-      ch.y = Math.max(floor + 0.06, ny);
-      ch.z = pushed ? _probe.z : nz;
+    const half = (ch.mesh.userData.thick || 0.076) / 2;
+    if (pushed || ny <= floor + half || fl.t > 6) {
+      // LANDS FLUSH: its face (+Y) turned to the surface normal, its centre
+      // half a thickness off it — the wall the probe pushed back from, or
+      // the floor — and a random turn about that normal.
+      if (pushed) _nn.set(_probe.x - nx, 0, _probe.z - nz).normalize();
+      else _nn.set(0, 1, 0);
+      _q.setFromAxisAngle(_nn, rng() * 6.2832);
+      ch.mesh.quaternion.setFromUnitVectors(_up, _nn).premultiply(_q);
+      ch.x = pushed ? _probe.x - _nn.x * (0.12 - half) : nx;
+      ch.y = pushed ? Math.max(floor + half, ny) : floor + half;
+      ch.z = pushed ? _probe.z - _nn.z * (0.12 - half) : nz;
       ch.mesh.position.set(ch.x, ch.y, ch.z);
-      ch.mesh.rotation.y = rng() * 6.2832;
       // A THROWN charge that stuck to a WALL is still a contact charge — that
       // is what "stuck to it" means. One that came to rest on the floor is not.
       if (pushed) ch.wall = { x: 0, y: 0, z: 0, thrown: true };

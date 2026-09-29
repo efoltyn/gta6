@@ -408,7 +408,7 @@
       gives: "the shipped military models: fighter jet, bomber, cargo plane, " +
              "helicopter, tank, truck, and the B-2. Real geometry, not boxes",
       needs: ["look"],
-      files: ["city/island_military.js", "city/strategic.js"],
+      files: ["city/mil_air.js", "city/island_military.js", "city/strategic.js"],
       publishes: ["milModels", "strategicModels"],
     },
 
@@ -476,7 +476,7 @@
              "Same files as `military`, named separately so a page that only " +
              "wants the MODELS never raises an island by accident",
       needs: ["military"],
-      files: ["city/island_military.js"],
+      files: ["city/mil_air.js", "city/island_military.js"],
       publishes: [],
     },
     airport: {
