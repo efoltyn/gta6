@@ -22,7 +22,7 @@
      · BLOOD (0..1 of his volume). A bullet or a blade opens a BLEED whose rate
        depends on where it went in (a thigh artery empties a man in under a
        minute, a graze on the arm clots on its own). Blood drains; below 85%
-       he is weak and slow (the player's sight greys), below ~62% he collapses
+       he is weak and slow (the player's eyelids get heavy), below ~62% he collapses
        unconscious, below ~48% he is dead of it. Only a truly lethal hit kills
        at once: the head, the heart, a body riddled with rounds.
 
@@ -74,7 +74,7 @@
 
   /* ---- the body's numbers ---- */
   const K = {
-    BLOOD_WEAK: 0.85,        // below this: weak, slow, the player's sight greys
+    BLOOD_WEAK: 0.85,        // below this: weak, slow, the player's eyelids get heavy
     BLOOD_COLLAPSE: 0.62,    // below this: unconscious (hemorrhagic)
     BLOOD_WAKE: 0.68,        // above this again (and not pouring): comes round
     BLOOD_DEAD: 0.48,        // below this: dead of it
@@ -235,9 +235,12 @@
   };
   VT.lame = function (a) { return legMul(peek(a)); };
   VT.speedMul = function (a) {
-    const R = peek(a); if (!R) return 1;
+    // the player near the end of his hp is slow on his feet too (the stagger
+    // is sight() below): 1 at 40% hp down to 0.65 at the edge
+    const hm = isPlayer(a) ? 1 - 0.35 * hpLow() : 1;
+    const R = peek(a); if (!R) return hm;
     if (R.band && R.band.medic === R.a) return 0.25;
-    let m = (1 - 0.45 * weak(R)) * legMul(R);
+    let m = (1 - 0.45 * weak(R)) * legMul(R) * hm;
     for (let i = 0; i < R.bleeds.length; i++) {
       const b = R.bleeds[i];
       if ((b.zone === "legL" || b.zone === "legR") && b.band < 0.5) { m *= 0.78; break; }
@@ -744,49 +747,45 @@
   }
 
   /* ============================================================
-     THE PLAYER'S SIGHT: grey and closing in as the blood goes
+     HOW CLOSE THE PLAYER IS TO THE END, AND WHAT HIS BODY DOES ABOUT IT.
+     Owner, 2026-09-30: no red screen, ever ("what does that even mean?").
+     Near death is the body's own tells: the eyelids get heavy and the
+     blinks drag (systems/eyes.js), the breath gets loud, the legs go (a
+     stagger in the walk, slower), and the blood is on him (wounds.js).
+     Every game's number counts: the blood this file keeps, and the hp the
+     game keeps (the city's 200, everyone else's 100).
      ============================================================ */
-  let veil = null, veilK = -1;
+  function hpLow() {
+    const P = CBZ.player;
+    if (!P || P.dead || typeof P.hp !== "number") return 0;
+    const m = mode();
+    if (m === "sharksim") return 0;        // the shark's body is its own (hunger)
+    const max = m === "city" ? (P.maxHp || 200) : 100;
+    // nothing above 40%; eyes all but shut at 5%
+    return clamp01((0.4 - P.hp / max) / 0.35);
+  }
+  VT.nearDeath = function () {
+    const P = CBZ.player;
+    if (!P || P.dead) return 0;
+    const R = P._vt;
+    if (R && (R.koT > 0 || R.collapsed)) return 1;      // out cold: the lids are shut
+    // awake, they never quite close: heavy, dragging, but you can still see
+    return Math.max(R ? 0.9 * weak(R) : 0, 0.85 * hpLow());
+  };
+  let limpSide = 0;
   function sight(dt) {
     const P = CBZ.player;
-    const R = P && P._vt;
-    let k = 0;
-    if (R && !P.dead) {
-      // THE PRISON PAINTS NOTHING OVER THE VIEW (owner, 2026-09-29: low
-      // health is known "by blood coming out, by looking down and seeing a
-      // hole, by limping"). There the blood you have lost is in your legs
-      // (speedMul, no sprint) and on the floor behind you, never a grey rim;
-      // the lights still go out when you are out cold.
-      k = mode() === "escape" ? 0 : weak(R);
-      if (R.koT > 0 || R.collapsed) k = 1;
-    }
-    if (k < 0.01 && veilK <= 0.01) return;
-    if (typeof document === "undefined" || !document.createElement) return;
-    if (!veil) {
-      veil = document.createElement("div");
-      veil.id = "vitalsVeil";
-      veil.setAttribute("aria-hidden", "true");
-      const s = veil.style;
-      s.position = "fixed"; s.left = "0"; s.top = "0"; s.right = "0"; s.bottom = "0";
-      s.pointerEvents = "none"; s.zIndex = "6";
-      s.background = "radial-gradient(ellipse at center, rgba(128,128,128,0) 35%, rgba(90,90,90,.55) 75%, rgba(20,20,20,.9) 100%)";
-      s.mixBlendMode = "saturation";
-      s.opacity = "0";
-      const inner = document.createElement("div");
-      const si = inner.style;
-      si.position = "absolute"; si.left = "0"; si.top = "0"; si.right = "0"; si.bottom = "0";
-      si.background = "radial-gradient(ellipse at center, rgba(0,0,0,0) 45%, rgba(0,0,0,.75) 100%)";
-      si.mixBlendMode = "normal";
-      veil.appendChild(inner);
-      veil._inner = inner;
-      if (document.body && document.body.appendChild) document.body.appendChild(veil);
-    }
-    const q = Math.round(k * 40) / 40;
-    if (q === veilK) return;
-    veilK = q;
-    // a heartbeat in the dark edge once it is bad
-    veil.style.opacity = String(Math.min(1, q * 1.1));
-    if (veil._inner) veil._inner.style.opacity = String(Math.max(0, (q - 0.3) / 0.7));
+    const k = VT.nearDeath();
+    if (CBZ.eyes) CBZ.eyes.hurt(k, "body");
+    // the legs: past halfway gone he staggers on one of them (character.js's
+    // limp), the same leg every time until he is patched up
+    const ch = CBZ.playerChar;
+    if (ch && P && !P.dead && k > 0.45 && k < 1) {
+      if (!limpSide) limpSide = Math.random() < 0.5 ? -1 : 1;
+      const sev = 0.25 + 0.55 * (k - 0.45) / 0.55;
+      const lh = ch.legHurt;
+      if (!lh || (lh._nd && lh.sev < sev) || lh.t < 0.4) ch.legHurt = { side: lh && !lh._nd ? lh.side : limpSide, sev: Math.max(sev, lh ? lh.sev : 0), t: 0.6, _nd: true };
+    } else if (k < 0.3) limpSide = 0;
   }
 
   /* ============================================================

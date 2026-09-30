@@ -3050,11 +3050,26 @@
     const t = rayHit(c, _wbX, _wbZ, _wbDX, _wbDZ, 0);
     return t >= 0 && t < _wbL;
   }
+  // IS THERE SOMETHING SOLID BETWEEN TWO PEOPLE? (arrest.js asks before any
+  // hands go on: no cuffs through a wall, a door, a floor). A waist-high
+  // rail is reached over; a slab wholly above head height is not between.
+  function wallOrSlab(c) {
+    if (c.y0 != null && c.y0 > _wbY + 1.8) return false;
+    return wallBetween(c);
+  }
+  function lineBlocked(ax, ay, az, bx, bz) {
+    if (!CBZ.segmentHitsCollider) return false;
+    const dx = bx - ax, dz = bz - az, d = Math.hypot(dx, dz);
+    if (d < 0.05) return false;
+    _wbY = ay || 0; _wbX = ax; _wbZ = az; _wbDX = dx / d; _wbDZ = dz / d; _wbL = d;
+    return !!CBZ.segmentHitsCollider(ax, az, bx, bz, 0, wallOrSlab);
+  }
 
   /* ============================================================
      THE NAMESPACE (only CORE's keys; STRIKE adds its own)
      ============================================================ */
   V.body = body;
+  V.lineBlocked = lineBlocked;
   V.isPlayer = isPlayerA;
   V.playerActor = playerActor;
   V.contacts = contacts;

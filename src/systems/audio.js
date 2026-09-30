@@ -1496,6 +1496,30 @@
   };
   CBZ.nuclearShock = nuclearShock;
 
+  /* ---- A HURT MAN'S BREATH (systems/eyes.js) -------------------------------
+     One ragged breath, in or out: band-passed air through the shared noise
+     buffer, louder and rougher the closer he is to going under (k 0..1). */
+  CBZ.breath = function (k, inhale) {
+    if (!ctx || !sfxBus || ctx.state !== "running") return false;
+    k = k < 0 ? 0 : k > 1 ? 1 : +k || 0;
+    const t = ctx.currentTime;
+    const dur = (inhale ? 0.42 : 0.62) + 0.3 * k;
+    try {
+      const s = nsrc(t, dur + 0.05);
+      const bp = ctx.createBiquadFilter();
+      bp.type = "bandpass"; bp.Q.value = 0.9;
+      bp.frequency.setValueAtTime(inhale ? 1250 : 820, t);
+      bp.frequency.linearRampToValueAtTime(inhale ? 1700 : 600, t + dur);
+      const gn = ctx.createGain();
+      const peak = 0.035 + 0.11 * k;
+      gn.gain.setValueAtTime(0.0001, t);
+      gn.gain.linearRampToValueAtTime(peak, t + dur * (inhale ? 0.55 : 0.2));
+      gn.gain.linearRampToValueAtTime(0.0001, t + dur);
+      s.connect(bp); bp.connect(gn); gn.connect(sfxBus);
+    } catch (e) { return false; }
+    return true;
+  };
+
   /* ---- THE HELD BREATH (2026-08-15) ---------------------------------------
      nuclearShock's duck is an impulse that schedules its own recovery; this
      is the other envelope the same pressure stage can make — a duck that

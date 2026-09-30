@@ -81,8 +81,8 @@
       known "fake scope" bug.
 
    7. BREATH. city/swim.js owns the air model and publishes it through
-      CBZ.citySwimState(). All the HUD does here is an inline-styled edge
-      vignette that reddens and pulses faster as the tank empties — no
+      CBZ.citySwimState(). All the HUD does here is
+      the eyes closing (systems/eyes.js) as the tank empties — no
       floating card, no toast, per the HUD doctrine (the killfeed owns the one
       sanctioned popup). A proper slim breath meter belongs next to the
       stamina sliver in city/hud.js, which this file does not own.
@@ -437,14 +437,13 @@
   const _eye = new THREE.Vector3();
   const _probe = new THREE.Vector3();
 
-  let overlay = null, rays = null, meniscus = null, breathEl = null;
+  let overlay = null, rays = null, meniscus = null;
   let myFog = null, savedFog = null;
   let lastNear = -1, lastFar = -1;      // what WE last wrote (foreign-write probe)
   let savedNear = 0, savedFar = 0;
   let submerged = false, shown = 0;
   let muffle = 0;                        // 0..1 eased muffle amount
   let lastBg = "", lastLine = -99;
-  let breathPulse = 0;
   let kDepth = 0;      // 0..1 "how deep is this water" — the one grading number
   let glow = 0;        // 0..1 how much of the bright surface ceiling is in view
 
@@ -501,17 +500,6 @@
     }
     document.body.appendChild(overlay);
 
-    // Low-air warning. Its OWN element (the city/death.js #hitfx pattern:
-    // fixed, inset 0, pointer-events none, driven purely by inline styles) and
-    // deliberately NOT a card or a toast — the HUD doctrine reserves popups
-    // for the killfeed.
-    breathEl = document.createElement("div");
-    breathEl.id = "cbzBreathWarn";
-    breathEl.style.cssText = [
-      "position:fixed", "inset:0", "pointer-events:none", "z-index:13",
-      "opacity:0", "will-change:opacity",
-    ].join(";");
-    document.body.appendChild(breathEl);
   }
 
   // ============================================================
@@ -1764,7 +1752,7 @@
     // this always scales a fresh authored value — see driveLight's note.
     driveLight(depth, shown);
 
-    breathVignette(dt);
+    breathVignette();
     // Nothing below costs anything unless the treatment is on screen. `_eye`
     // is only current when eyeDepth() ran this frame, so never read it here
     // on a frame we skipped.
@@ -2080,36 +2068,16 @@
   }
 
   // ---- low-air warning -----------------------------------------------------
-  // Reads city/swim.js's meter through the published seam. No card, no toast:
-  // an edge vignette that reddens and pulses faster as the tank empties.
-  function breathVignette(dt) {
-    if (CFG.WATER_BREATH_HUD === false || !CBZ.citySwimState) {
-      if (breathEl) breathEl.style.opacity = "0";
-      return;
-    }
+  // Reads city/swim.js's meter through the published seam. No card, no toast,
+  // NO RED: as the air runs out the eyes close (systems/eyes.js), heavier and
+  // with dragging blinks, the way a body going under actually loses the light.
+  function breathVignette() {
+    if (CFG.WATER_BREATH_HUD === false || !CBZ.citySwimState || !CBZ.eyes) return;
     const st = CBZ.citySwimState();
     const b = st && Number.isFinite(st.breath) ? st.breath : 1;
     const under = !!(st && (st.headUnder || submerged));
-    if (!under || b > 0.30) {
-      if (breathEl && breathEl.style.opacity !== "0") breathEl.style.opacity = "0";
-      breathPulse = 0;
-      return;
-    }
-    // The head can go under without the (third-person) camera following it, so
-    // build the DOM on demand rather than only on the first submerged frame.
-    if (!breathEl) ensureDom();
-    if (!breathEl) return;
-    const urgency = Math.max(0, Math.min(1, (0.30 - b) / 0.30));   // 0..1
-    breathPulse += (dt || 0.016) * (2.2 + urgency * 4.4);          // 0.35Hz -> 1Hz
-    const pulse = 0.5 + 0.5 * Math.sin(breathPulse * Math.PI * 2);
-    // red bleeds in as it empties; at zero it is a hard, fast red throb
-    const r = Math.round(120 + 135 * urgency);
-    const gg = Math.round(190 - 170 * urgency);
-    const bb = Math.round(220 - 170 * urgency);
-    breathEl.style.background =
-      "radial-gradient(120% 90% at 50% 50%, rgba(0,0,0,0) 38%, rgba(" +
-      r + "," + gg + "," + bb + ",0.42) 82%, rgba(" + r + "," + Math.round(gg * 0.5) + "," + Math.round(bb * 0.5) + ",0.66) 100%)";
-    breathEl.style.opacity = String((0.22 + 0.62 * urgency) * (0.45 + 0.55 * pulse));
+    const urgency = under ? Math.max(0, Math.min(1, (0.30 - b) / 0.30)) : 0;
+    CBZ.eyes.hurt(urgency * 0.9, "air");
   }
 
   // ============================================================

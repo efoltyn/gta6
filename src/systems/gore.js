@@ -124,7 +124,6 @@
   const splats = [];   // ground blood pools + tire-smear streaks
   const walls = [];    // vertical wall/surface splatter decals
   const later = [];    // delayed gore beats (arterial spurts, bleed-out pools)
-  let flashEl = null, flashV = 0;
   // ARMED FOR THE DURATION OF ONE WET EVENT (and, via after(), of the delayed
   // beats it queues) — see THE WATER MEDIUM block. Declared up here with the
   // other module state so after() can never read it from the temporal dead
@@ -3680,14 +3679,6 @@
     }
   }
 
-  function ensureFlash() {
-    if (flashEl) return flashEl;
-    flashEl = document.createElement("div");
-    flashEl.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:26;opacity:0;background:radial-gradient(ellipse at 50% 50%,rgba(150,0,0,0) 42%,rgba(135,0,0,.6) 100%)";
-    document.body.appendChild(flashEl);
-    return flashEl;
-  }
-
   CBZ.gore = function (x, y, z, opts) {
     opts = opts || {};
     if (!CBZ.scene) return;
@@ -3881,9 +3872,6 @@
       // the water actually pull something toward it instead of being decor.
       CBZ.goreChum(x, y + 0.6, z, Math.min(1, 0.5 + amt * 0.3), 7 + amt * 2);
       if (CBZ.shake && lens) CBZ.shake(0.26 * amt + (opts.player ? 0.4 : 0) + (boom ? 0.2 : 0));
-      // lens blood is a ONE-BEAT device, and red barely exists at depth: the
-      // jolt lands and is gone, instead of tinting the whole dive red.
-      flashV = Math.max(flashV, (0.32 * amt + (opts.player ? 0.18 : 0)) * 0.45);
       if (opts.slowmo && CBZ.doSlowmo) CBZ.doSlowmo(opts.slowmo);
       if (opts.sfx && CBZ.sfx) CBZ.sfx(typeof opts.sfx === "string" ? opts.sfx : "hit");
       wetEvent = false;
@@ -4010,7 +3998,6 @@
     }
 
     if (CBZ.shake && lens) CBZ.shake(0.26 * amt + (opts.player ? 0.4 : 0) + (boom ? 0.2 : 0));
-    flashV = Math.max(flashV, 0.32 * amt + (opts.player ? 0.18 : 0));
     if (opts.slowmo && CBZ.doSlowmo) CBZ.doSlowmo(opts.slowmo);
     if (opts.sfx && CBZ.sfx) CBZ.sfx(typeof opts.sfx === "string" ? opts.sfx : "hit");
     wetEvent = false;
@@ -4110,7 +4097,7 @@
     if (opts.pool) spawnSplat(x + dx * 0.3, z + dz * 0.3, 0.5 + amt * 0.75, BLOOD_D, true);
     // driven INTO something → it wears the hit. Same wall-sized/opaque gate.
     if (opts.wall && hasDir && lod === 1) spawnWallSplat(x, y, z, -dx, -dz, amt * 0.85, true);
-    if (opts.player) flashV = Math.max(flashV, 0.12 + 0.22 * amt);
+    // (the player's own hit is a flinch, systems/eyes.js: never a red rim)
     if (opts.sfx && CBZ.sfx) CBZ.sfx(typeof opts.sfx === "string" ? opts.sfx : "hit");
   };
 
@@ -4130,12 +4117,8 @@
     if (CBZ.scene && (!ldMesh || ldMesh.parent !== CBZ.scene)) landLayer();
     // ...and the air layer's, for the same reason
     if (CBZ.scene && !airMesh) airReady();
-    // the prison paints nothing red over the view (owner: "the screen turning
-    // red ... is dumb"): a kill beside you is the blood on the floor and on
-    // the walls, not a red rim on your screen
-    if (flashV > 0 && CBZ.game && CBZ.game.mode === "escape") flashV = 0;
-    if (flashV > 0.002) { ensureFlash().style.opacity = String(Math.min(0.5, flashV)); flashV *= Math.pow(0.0012, dt); }
-    else if (flashEl && flashEl.style.opacity !== "0") { flashEl.style.opacity = "0"; flashV = 0; }
+    // NOTHING PAINTS THE VIEW RED (owner: "the screen turning red ... is
+    // dumb"): a kill beside you is the blood on the floor and on the walls.
 
     // delayed gore beats (arterial spurts / bleed-out pools)
     for (let i = later.length - 1; i >= 0; i--) {
@@ -4547,7 +4530,6 @@
     if (plumeMesh && plumeMesh.parent) plumeMesh.parent.remove(plumeMesh);   // re-added on the next scene
     chum.length = 0; chumOut.length = 0; wetEvent = false;
     later.length = 0; killCtx = null; swashEvents = 0;   // the match total is per match
-    flashV = 0; if (flashEl) flashEl.style.opacity = "0";
   };
 
   // FIRST-BLOOD PREWARM: bake the shared blood texture at load instead of on

@@ -13,12 +13,12 @@
        wanted read it carries.
      • CASH (#cMoney + floating delta), top-right, INVISIBLE at rest. It
        appears when the number changes, holds ~3 s, fades.
-     • WANTED (#cHeat): no stars, no pill. A slow red/blue siren wash on the
-       screen edges while wanted > 0, stronger per level. The rest is the
-       world: sirens, cruisers, the chopper, the roadblock.
-     • HEALTH (#cHurt): no bar, no hearts. A red screen-edge that deepens as
-       HP drops and pulses when it is low; the engine's #hitfx flash marks
-       each hit.
+     • WANTED: no stars, no pill, no screen wash. The minimap's heat ring and
+       the world: sirens, cruisers, the chopper, the roadblock.
+     • HEALTH: no bar, no hearts, NO RED SCREEN (owner, 2026-09-30: "the
+       red, what does that even mean?"). Your body tells you: a flinch on
+       every hit, and near the end heavy eyelids, dragging blinks, loud
+       breath and a stagger (systems/eyes.js fed by systems/vitals.js).
      • WEAPON (#cWpn): the ammo count shows ONLY while a gun is the thing in
        your hands. The slot bar surfaces for ~2.5 s when the loadout changes
        (you switched, holstered, picked up, ate), then fades. On touch it
@@ -42,7 +42,7 @@
   const CBZ = window.CBZ;
   const g = CBZ.game;
 
-  let root, hudEl, cashEl, deltaEl, wpnEl, slotsEl, ammoLineEl, objEl, radar, crossEl, heatEl, hurtEl;
+  let root, hudEl, cashEl, deltaEl, wpnEl, slotsEl, ammoLineEl, objEl, radar, crossEl;
   let dirty = true;
 
   function esc(s) { return String(s).replace(/[<>&]/g, function (c) { return c === "<" ? "&lt;" : c === ">" ? "&gt;" : "&amp;"; }); }
@@ -97,18 +97,7 @@
         "#cAmmo .res{color:var(--hud-dim)}" +
         "#cAmmo .rl{color:#ffd166}" +
         "#cRadar{position:absolute;left:var(--hud-pad-l);bottom:var(--hud-pad-b);width:132px;height:132px;border-radius:50%;opacity:.9;box-shadow:0 4px 14px rgba(0,0,0,.45)}" +
-        "@media (max-width:900px),(max-height:560px){#cRadar{width:108px;height:108px}#cMoney{font-size:21px}#cHud .cSlot{width:34px;height:34px}#cHud .cSlot .gunModel{width:30px;height:20px}#cHud .cSlot .itemIcn{width:22px;height:22px}#cHud .cSlots.many .cSlot{width:30px;height:30px}#cHud .cSlots.many .cSlot .gunModel{width:26px;height:18px}#cHud .cSlots.many .cSlot .itemIcn,#cHud .cSlot.flashlight img{width:20px;height:20px}}" +
-        // SCREEN-EDGE SIGNALS. Outside #cHud on purpose: the campaign's
-        // declutter (css/campaign.css) hides #cHud's children wholesale, and a
-        // wound or a manhunt is not narration.
-        "#cHurt,#cHeat{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .5s ease}" +
-        "#cHurt{background:radial-gradient(ellipse at center,rgba(150,0,0,0) 60%,rgba(150,0,0,.6) 100%)}" +
-        "#cHurt.low{animation:cHurtBeat 1.1s ease-in-out infinite}" +
-        "@keyframes cHurtBeat{0%,100%{filter:brightness(1)}45%{filter:brightness(1.6)}}" +
-        "#cHeat{box-shadow:inset 0 0 90px 10px rgba(255,40,40,.5)}" +
-        "#cHeat.on{animation:cSiren 1.6s linear infinite}" +
-        "@keyframes cSiren{0%,100%{box-shadow:inset 0 0 90px 10px rgba(255,40,40,.5)}50%{box-shadow:inset 0 0 90px 10px rgba(40,90,255,.5)}}" +
-        "@media (prefers-reduced-motion:reduce){#cHeat.on,#cHurt.low{animation:none}}";
+        "@media (max-width:900px),(max-height:560px){#cRadar{width:108px;height:108px}#cMoney{font-size:21px}#cHud .cSlot{width:34px;height:34px}#cHud .cSlot .gunModel{width:30px;height:20px}#cHud .cSlot .itemIcn{width:22px;height:22px}#cHud .cSlots.many .cSlot{width:30px;height:30px}#cHud .cSlots.many .cSlot .gunModel{width:26px;height:18px}#cHud .cSlots.many .cSlot .itemIcn,#cHud .cSlot.flashlight img{width:20px;height:20px}}";
       document.head.appendChild(st);
     }
     // shared item-pictogram sizing (city/itemicons.js), so hotbar item chips
@@ -118,8 +107,6 @@
     root.id = "cityHud";
     root.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:20;display:none;font-family:Fredoka,system-ui,sans-serif";
     root.innerHTML =
-      "<div id='cHurt'></div>" +
-      "<div id='cHeat'></div>" +
       "<div id='cHud' style='position:absolute;inset:0'>" +
       // #cTopRight keeps its name: css/mobile.css + css/campaign.css key off it
       "<div id='cTopRight' style='position:absolute;top:var(--hud-pad-t);right:var(--hud-pad-r);text-align:right'>" +
@@ -138,7 +125,6 @@
     objEl = root.querySelector("#cObj");
     radar = root.querySelector("#cRadar");
     crossEl = root.querySelector("#cCross");
-    heatEl = root.querySelector("#cHeat"); hurtEl = root.querySelector("#cHurt");
     // CLICK/TAP-TO-SELECT on the bar. Chips carry data-bi (the bar index); a
     // tap routes to CBZ.cityHotbarSelect (draw / put away a gun, throw, lamp,
     // phone).
@@ -974,27 +960,6 @@
     if (ammoLineEl._disp !== disp) { ammoLineEl._disp = disp; ammoLineEl.style.display = disp; }
   }
 
-  // ---- screen edges: wanted siren wash + wound vignette ----
-  let hurtOp = -1, heatOp = -1, hurtLow = null;
-  function syncEdges(P) {
-    const maxHp = P.maxHp || 100;
-    const f = Math.max(0, Math.min(1, (P.hp || 0) / maxHp));
-    // nothing above half; deepens to full at 10% (a scratch is not a wound)
-    let o = P.dead ? 0 : Math.max(0, Math.min(1, (0.5 - f) / 0.4));
-    o = Math.round(o * 20) / 20;
-    if (o !== hurtOp) { hurtOp = o; hurtEl.style.opacity = String(o); }
-    const low = !P.dead && f < 0.3;
-    if (low !== hurtLow) { hurtLow = low; hurtEl.classList.toggle("low", low); }
-    let w = g.wanted | 0;
-    try { if (CBZ.cityStars) w = CBZ.cityStars() | 0; } catch (e) {}
-    const ho = w > 0 && !P.dead ? Math.min(0.75, 0.22 + w * 0.11) : 0;
-    if (ho !== heatOp) {
-      heatOp = ho;
-      heatEl.style.opacity = String(ho);
-      heatEl.classList.toggle("on", ho > 0);
-    }
-  }
-
   CBZ.onAlways(46, function () {
     build();
     const show = g.mode === "city";
@@ -1010,7 +975,6 @@
     // live ammo while firing/reloading (signature-guarded)
     refreshAmmoLive();
     syncWeapon(P);
-    syncEdges(P);
     // radar + objective poll, throttled (quality slider: tier0 7Hz, Best 14Hz)
     radarAcc += 1 / 60;
     if (radarAcc >= 1 / (CBZ.qScale ? CBZ.qScale(7, 14) : 14)) { radarAcc = 0; drawRadar(); pollObjective(); }

@@ -23,7 +23,7 @@
                                    pool that GROWS and darkens, a wall splat
                                    on whatever is behind him, an entry wound
                                    stamped on the actual body (wounds.js), and
-                                   in its tail a lens jolt + a red vignette.
+                                   in its tail a lens jolt.
      4  THE BODY                   CBZ.cityRagdoll(ped, point, dir, mag)
                                    — city/ragdoll.js:386. 13 verlet points,
                                    and crucially a DYING BEAT: 0.12–0.34 s
@@ -615,7 +615,7 @@
      simply says so).
 
      opts.lens is FALSE except for a tier-2 death. gore.js's tail unconditionally
-     spends CBZ.shake(0.26*amt) and a red vignette, which is correct for one
+     spends CBZ.shake(0.26*amt), which is correct for one
      murder on a street and catastrophic for a battle — and gore.js already
      ships the parameter for exactly this case, with a comment about a shark
      that shook the camera twice per mouthful. Reusing the parameter rather

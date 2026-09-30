@@ -15,11 +15,13 @@
                    permanent (HUD purge 2026-09-27): it shows for a few seconds
                    when your rung changes, while a bot sits on the fists, and
                    while you are dead, then fades (.gg-quiet).
-     .gg-pulse     one full-screen edge pulse: gold (promote), red-gold
-                   (you reached the fists), red (demoted).
-     .gg-lowhp     blood-red vignette that breathes under 35 HP.
+     .gg-pulse     one full-screen edge pulse: gold (promote), orange-gold
+                   (you reached the fists). A demotion is the track draining
+                   and shaking, never a red screen.
+     (low HP is your eyelids, systems/eyes.js fed by vitals.js; nothing here
+      tints the view: owner 2026-09-30, "the red, what does that even mean?")
      .gg-shield    edge shimmer while spawn protection is live.
-     .gg-arcs      damage direction: a pool of 4 red arcs around the reticle,
+     .gg-arcs      damage direction: a pool of 4 pale arcs around the reticle,
                    each pointing at the attacker relative to where you face,
                    re-aimed every frame as you turn, gone in 0.9 s.
      .gg-kc        kill confirm under the reticle: skull pop + the victim's
@@ -118,7 +120,6 @@
   root.id = "ggHud";
 
   // full-screen layers, back to front
-  const lowEl = mk("div", "gg-lowhp", root);
   const shieldEl = mk("div", "gg-shield", root);
   const pulseEl = mk("div", "gg-pulse", root);
 
@@ -206,7 +207,7 @@
     hp: -1, ghost: 100, ghostHoldT: 0, hpState: "", hpShowT: 0, hpShown: false,
     trackT: 0, trackShown: true,
     dead: false, deathBy: "", deathWeapon: null, respawnMax: 3, ringOff: "",
-    low: false, shield: false,
+    shield: false,
     lastT: 0,
   };
 
@@ -237,7 +238,6 @@
     drawTrack(r); S.trackT = 3;
     if (segs[r + 1]) fire(segs[r + 1], "drain", 750);
     fire(trackEl, "shake", 480);
-    fire(pulseEl, "demote", 700);
   }
   function onFinal(e) {
     if (!e) return;
@@ -265,6 +265,7 @@
     slot.el.style.setProperty("--k", k.toFixed(2));
     aimArc(slot);
     fire(slot.el, "on", 900);
+    if (CBZ.eyes) CBZ.eyes.flinch(k);
   }
   function onDeath(e) {
     S.deathBy = e && e.by ? String(e.by) : "";
@@ -406,10 +407,7 @@
     const showHp = !P.dead && (S.hpShowT > 0 || hp <= 60);
     if (showHp !== S.hpShown) { S.hpShown = showHp; setCls(bars, "gg-show", showHp); }
 
-    // ---- low-HP breathing vignette
     const dead = !!P.dead;
-    const low = !dead && hp > 0 && hp < 35;
-    if (low !== S.low) { S.low = low; setCls(lowEl, "on", low); }
 
     // ---- spawn protection shimmer
     const shield = !dead && (+gg.spawnProtectT || 0) > 0;

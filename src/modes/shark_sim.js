@@ -80,7 +80,7 @@
      ladder whose whole point is a body that visibly grows does not need to
      print what that body already is. And on 2026-09-27 the rest went too:
      score pill, clock, health/stamina bars, evolve sliver, killfeed. Nothing
-     is printed mid-play; hunger is the red screen edge, growth is the body,
+     is printed mid-play; hunger is the dark screen edge, growth is the body,
      score and best live on the death card. See the HUD section.
 
      ?cfg_SHARK_SHOW_DONT_TELL=0 restores every line of the old text and
@@ -1374,7 +1374,7 @@
      So while you swim there is no score pill, no frenzy counter, no clock, no
      health or stamina bar and no evolve meter. Every one of them had a world
      reading already, and the world reading is the one that stays:
-       - HUNGER is the red edge of the screen, beating harder as the tank
+       - HUNGER is the dark edge of the screen, beating harder as the tank
          empties (starveTick below), and the shark slowing into it.
        - GROWTH is the body. Each meal swells it; each rung is the evolve
          beat, a bigger animal where the smaller one was.

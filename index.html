@@ -14,9 +14,9 @@
 
 <!-- styles, split by concern -->
 <link rel="stylesheet" href="css/base.css">
-<link rel="stylesheet" href="css/hud.css?v=flick1">
-<link rel="stylesheet" href="css/screens.css?v=pause1">
-<link rel="stylesheet" href="css/shark_title.css?v=pause1">
+<link rel="stylesheet" href="css/hud.css?v=nored0930">
+<link rel="stylesheet" href="css/screens.css?v=nored0930">
+<link rel="stylesheet" href="css/shark_title.css?v=nored0930">
 <link rel="stylesheet" href="css/mobile.css?v=ric0929">
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
 <link rel="stylesheet" href="css/inventory.css?v=cuffs1">
@@ -88,10 +88,8 @@ document.body.appendChild(b);}}catch(e){}})();
   <div id="ammo"></div>
   <div id="weaponStrip" class="panel"></div>
 </div>
-<div id="vignette"></div>
 <div id="flash"></div>
 <div id="survFlash"></div>
-<div id="spray"></div>
 <div id="fade"></div>
 
 <!-- live yard rankings overlay (systems/dashboard.js) -->
@@ -619,12 +617,12 @@ document.body.appendChild(b);}}catch(e){}})();
      size), the cuffs the cuff verb closes on a wrist, the open pair in an
      officer's hand and the case on a cop's / prison officer's duty belt. -->
 <script src="src/entities/handcuffs.js?v=mc5ae55"></script>
-<script src="src/systems/verbs.js?v=colcore1"></script>
+<script src="src/systems/verbs.js?v=nored0930"></script>
 <!-- CBZ.arrest: getting arrested is a contest, not a cutscene. The one rule
      (compliant / subdued / outnumbered-from-behind), the struggle's odds, the
      committed tackle lunge, the taser, and the one physical take of the
      player (hands on, two wrists, the escort) every game's law calls. -->
-<script src="src/systems/arrest.js?v=arrest1"></script>
+<script src="src/systems/arrest.js?v=nored0930"></script>
 <!-- systems/cuffedplayer.js: what a cuffed player can do (hands gate at the window's capture
      phase, speed/stamina/get-up numbers, the grey bar) and how the room treats him; reads
      CBZ.arrest.playerCuffed. Before input.js and every game module. -->
@@ -637,7 +635,10 @@ document.body.appendChild(b);}}catch(e){}})();
      man out (and he comes to, groggy); a bullet or a blade opens a bleed that
      drains his blood until someone wraps it or he bleeds out; state(a) is what
      cuffs, AI and HUD ask. Games plug in through CBZ.vitals.on(mode, hooks). -->
-<script src="src/systems/vitals.js?v=nored929"></script>
+<!-- CBZ.eyes: how a hurt body sees. No red screen anywhere: near death the
+     eyelids droop and the blinks drag, a hit is a flinch, out cold they shut. -->
+<script src="src/systems/eyes.js?v=nored0930"></script>
+<script src="src/systems/vitals.js?v=nored0930"></script>
 <script src="src/systems/verbs_pickup.js?v=w09290250"></script>
 <script src="src/entities/player.js?v=mc5ae55"></script>
 <script src="src/entities/coins.js"></script>
@@ -655,8 +656,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/entities/security.js"></script>
 
 <!-- 4. systems — economy/quests load before actors that reference them -->
-<script src="src/systems/audio.js?v=m0927p"></script>
-<script src="src/systems/hud.js?v=m0927p"></script>
+<script src="src/systems/audio.js?v=nored0930"></script>
+<script src="src/systems/hud.js?v=nored0930"></script>
 <script src="src/systems/economy.js?v=door929"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
@@ -862,7 +863,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/entities/ambientstate.js?v=contact1"></script>
 <script src="src/entities/crowd.js?v=life4"></script>
 <script src="src/systems/simulation.js?v=scale8"></script>
-<script src="src/systems/detection.js?v=armed1"></script>
+<script src="src/systems/detection.js?v=nored0930"></script>
 <script src="src/systems/aitactics.js?v=tac1"></script>
 <!-- HOW WELL A PERSON FIGHTS (NPC_COMBAT_IQ). The ONE competence model —
      role x weapon -> reaction, settle, burst, accuracy, cover quality — plus
@@ -883,7 +884,7 @@ document.body.appendChild(b);}}catch(e){}})();
      actorweapons' self-heal pass is city-only. -->
 <script src="src/systems/prisonshanks.js?v=armed1"></script>
 <script src="src/systems/prisonlaw.js?v=law1"></script>
-<script src="src/systems/capture.js?v=nored929"></script>
+<script src="src/systems/capture.js?v=nored0930"></script>
 <!-- the prison as a configuration of CBZ.brain: registration, the executor,
      yard law (a screw runs the ladder on a fight), witnesses, clique morale
      and rout, proportional retaliation -->
@@ -891,7 +892,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/markers.js?v=allmain2"></script>
 <script src="src/systems/music.js?v=samples1"></script>
 <script src="src/systems/reinforcements.js?v=allmain2"></script>
-<script src="src/systems/lockdown.js?v=warden1"></script>
+<script src="src/systems/lockdown.js?v=nored0930"></script>
 <!-- THE WARDEN'S HEAD: routine table, incident orders (shakedown/lockdown), summons to his office. world/adminwing.js drives his body off CBZ.warden. -->
 <script src="src/systems/prisonwarden.js?v=armory1"></script>
 <!-- TELLING: what the player saw or heard becomes something he can tell a guard or the warden; an officer checks it, the world changes, the yard finds out. -->
@@ -944,7 +945,7 @@ document.body.appendChild(b);}}catch(e){}})();
      thread cannot repaint during that). Must load BEFORE state.js, which
      shows it, and before the city modules that call CBZ.bootStep(). -->
 <script src="src/systems/bootprogress.js?v=slice0929b"></script>
-<script src="src/systems/state.js?v=doors929"></script>
+<script src="src/systems/state.js?v=nored0930"></script>
 <!-- AN APP GETS INTERRUPTED AND A TAB DOES NOT. WKWebView drops the WebGL
      context under memory pressure and hands it back later; three.js rebuilds
      its own GL resources, but nothing told the GAME, so a hundred survivors
@@ -1002,7 +1003,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/grapple.js?v=vit3"></script>
 <script src="src/entities/survivorbot.js?v=m0928a-st1"></script>
 <script src="src/modes/survival.js?v=vit3"></script>
-<script src="src/modes/shark_sim.js?v=sweep0929"></script>
+<script src="src/modes/shark_sim.js?v=nored0930"></script>
 <!-- SHARK SIM's own front door: hides the shared card in shark mode, lays
      PLAY over the live sea, proxies every original control by id. -->
 <script src="src/modes/shark_title.js?v=uicut1"></script>
@@ -1063,7 +1064,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- ==== END PER-DISASTER MODULE SEAM ==================================== -->
 <script src="src/systems/disasters.js?v=mil0929"></script>
 <script src="src/systems/survival_interact.js?v=name1"></script>
-<script src="src/systems/survivalhud.js?v=name1"></script>
+<script src="src/systems/survivalhud.js?v=nored0930"></script>
 <!-- THE SEAM A TRANSPORT PLUGS INTO. Not multiplayer — the three things that
      have to be true before a transport is worth writing: every actor carries a
      stable id, the whole match serialises to one ArrayBuffer and back
@@ -1073,7 +1074,7 @@ document.body.appendChild(b);}}catch(e){}})();
      nothing they need. ?cfg_SURVNET_V1=0 makes it inert. -->
 <script src="src/net/survnet.js?v=survnet1"></script>
 <!-- GUN GAME ladder HUD (mode-gated; shares #survBars with survival) -->
-<script src="src/systems/gungamehud.js?v=nodash1"></script>
+<script src="src/systems/gungamehud.js?v=nored0930"></script>
 
 <!-- 4d. CITY — open-world GTA-style mode (a third game mode). Additive:
      registers its own updaters (gated by game.mode==="city") and builds its
@@ -1356,12 +1357,12 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/clothes.js?v=body0929a"></script>
 <script src="src/city/outfits.js?v=w09290250"></script>
 <script src="src/entities/dutykit.js?v=me18753"></script>
-<script src="src/city/hunger.js?v=vit3"></script>
+<script src="src/city/hunger.js?v=nored0930"></script>
 <!-- THE CITY'S LAW over CBZ.brain: cop perception/hearing, the authority
      ladder (warn/order/cuff), witness reports -> wanted, and the "city-law"
      act executor. Pure logic; wanted.js and police.js bind into it. -->
 <script src="src/city/law.js?v=brainmoves1"></script>
-<script src="src/city/wanted.js?v=brainmoves1"></script>
+<script src="src/city/wanted.js?v=nored0930"></script>
 <script src="src/city/identity.js?v=perm1"></script>
 <script src="src/city/worldstate.js?v=allmain1"></script>
 <!-- THE ONE ORGANISATION LAYER. CBZ.factions.declare({id,ranks,wage,admission,bind})
@@ -1555,7 +1556,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/lockon.js?v=ads1"></script>
 <script src="src/city/jewelry.js?v=tap0929"></script>
 <script src="src/city/careers.js?v=nodash1"></script>
-<script src="src/city/activities.js?v=onebet1"></script>
+<script src="src/city/activities.js?v=nored0930"></script>
 <script src="src/city/heists.js?v=tap0929"></script>
 <!-- The word on every button is a verb (city/verbword.js CBZ.cityVerbWord);
      before interactions.js, whose row renderer prints through it. -->
@@ -1657,7 +1658,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/explosives.js?v=mil0929"></script>
 <script src="src/systems/helditems.js?v=mce86a5"></script>
 <script src="src/city/armored.js?v=deslop1"></script>
-<script src="src/city/death.js?v=pres0929b"></script>
+<script src="src/city/death.js?v=nored0930"></script>
 <script src="src/city/camera.js?v=shouldergun2"></script>
 <script src="src/city/ragdoll.js?v=loose1"></script>
 <script src="src/city/leaderboard.js?v=rg0929"></script>
@@ -1818,10 +1819,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/gigs.js?v=w09290250y"></script>
 <script src="src/city/gigfleet.js?v=nodash1"></script>
 <script src="src/city/giglife.js?v=w09290250y"></script>
-<script src="src/city/hud.js?v=wreal0929"></script>
+<script src="src/city/hud.js?v=nored0930"></script>
 <!-- drinking/tipsy system (a sibling agent's file — provides CBZ.cityDrink;
      loads after shops.js/hud so it can hook the same HUD/economy surface) -->
-<script src="src/city/drinking.js?v=oval0929"></script>
+<script src="src/city/drinking.js?v=nored0930"></script>
 <script src="src/city/charpanel.js?v=w09290250"></script>
 <!-- THE PHOTO BOOTH: one offscreen rig that photographs any body in the
      outfit it is ACTUALLY wearing (CBZ.cityMugshot). The hitman contract
@@ -1888,7 +1889,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
      always-updater is in the sort -->
-<script src="src/systems/gore.js?v=nored929"></script>
+<script src="src/systems/gore.js?v=nored0930"></script>
 <script src="src/systems/wounds.js?v=w09290332s"></script>
 <!-- BLOOD IS EARNED — the disaster island's trauma ledger + cause table.
      Owner-filmed: gore fired on EVERY survival death (a man who FROZE SOLID
@@ -2404,7 +2405,7 @@ document.body.appendChild(b);}}catch(e){}})();
      field, splash/wake FX. After core/quality.js so CBZ.onQualityChange exists
      at parse time; before core/loop.js so their updaters make the boot sort.
      No dependency on each other — any order among these three works. -->
-<script src="src/world/water_underwater.js?v=sweep0929"></script>
+<script src="src/world/water_underwater.js?v=nored0930"></script>
 <script src="src/world/water_buoyancy.js?v=waterv2"></script>
 <!-- Roll and capsize. A shark can now put a boat on its beam ends and roll it
      over, and a hull that goes over stays over — inverted, keel up, its people

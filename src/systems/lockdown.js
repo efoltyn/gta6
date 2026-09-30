@@ -7,10 +7,10 @@
    own no longer seals the block; it is reported to him as an "alarm"
    incident and he decides (a first alarm is a shakedown). With no warden
    module loaded the old heat trigger still fires. A lockdown is:
-     • "LOCKDOWN" toast + a hard red flash + screen shake
+     • "LOCKDOWN" toast + screen shake (NO red flash, NO red overlay: the
+       owner, 2026-09-30, "the screen gets all red ... it's stupid"; the
+       siren, the doors racking and the screws running are the lockdown)
      • a dedicated brief lockdown siren
-     • a pulsing red full-screen vignette overlay (one fixed DIV,
-       created once, only its opacity is animated — cheap on phones)
      • EVERY able guard is forced to hunt the player and gets a
        temporary speed boost (originals saved + restored on lift)
      • the yard door is slammed shut (CBZ.closeDoor)
@@ -18,8 +18,7 @@
    It LIFTS once the player has stayed UNSEEN (witnessGuard() null)
    AND heat has cooled below ~25 for ~6 CONTINUOUS seconds, or when the
    order's own clock runs out (`max`, 2.5 in-game hours from the warden),
-   whichever is first. A lockdown always ends. On lift the overlay fades,
-   guard speeds restore, and the door re-opens *only if the player
+   whichever is first. A lockdown always ends. On lift guard speeds restore, and the door re-opens *only if the player
    actually holds the keycard*. Guards are aimed at the player only when
    he is the reason (`hunt`); a riot lockdown just racks the block.
 
@@ -69,8 +68,6 @@
   let sirenT = 0;              // countdown to next siren blast
   let clearT = 0;              // accumulated continuous "clear" seconds
   let elapsedT = 0;            // seconds this lockdown has been live (for GRACE)
-  let pulse = 0;              // 0..1 vignette intensity envelope (eased)
-  let fading = false;          // overlay is fading out after a lift
   let huntPlayer = true;       // is the player the reason for this one?
   let maxT = 0;                // the order's own clock (0 = none)
   let reason = "";
@@ -79,31 +76,6 @@
   // "lockdown"); new-run detection shares its elapsed watcher too. The tight
   // 0.001 epsilon is this module's original threshold, kept verbatim.
   const pollNewRun = CBZ.jailBoost ? CBZ.jailBoost.newRunWatcher(0.001) : null;
-
-  // ---- the overlay DIV (built lazily, once) ----
-  let overlay = null;
-  function ensureOverlay() {
-    if (overlay || typeof document === "undefined") return overlay;
-    const d = document.createElement("div");
-    d.id = "lockdownOverlay";
-    // sit above the heat vignette but below the menu screens (z-index 30),
-    // so title/pause/win never get washed red. never eat clicks.
-    const s = d.style;
-    s.position = "fixed";
-    s.left = s.top = s.right = s.bottom = "0";
-    s.pointerEvents = "none";
-    s.zIndex = "25";
-    s.opacity = "0";
-    // a strong inset red ring + a faint full-screen red wash
-    s.boxShadow = "inset 0 0 240px 70px rgba(220,20,32,0.95)";
-    s.background = "radial-gradient(circle at 50% 50%, rgba(255,30,40,0) 38%, rgba(190,12,22,0.55) 100%)";
-    s.willChange = "opacity";
-    // attach to body; tolerate a not-yet-ready DOM defensively
-    if (document.body) document.body.appendChild(d);
-    else if (document.documentElement) document.documentElement.appendChild(d);
-    overlay = d;
-    return overlay;
-  }
 
   // ---- guard helpers ----
   function able(gd) {
@@ -416,24 +388,15 @@
     reason = why || "heat";
     huntPlayer = opts.hunt !== false;
     maxT = opts.max > 0 ? +opts.max : 0;
-    fading = false;
     sirenT = 0;          // blare immediately
     clearT = 0;
     elapsedT = 0;
-    pulse = 0;
 
-    ensureOverlay();
-
-    // the siren, the red flash, the shake and the doors racking shut ARE the
-    // lockdown. The objective line below carries the one piece of state a
-    // player cannot see (what lifts it).
+    // the siren, the shake and the doors racking shut ARE the lockdown. The
+    // objective line below carries the one piece of state a player cannot
+    // see (what lifts it).
     tellToast("LOCKDOWN");
     if (CBZ.shake) try { CBZ.shake(0.7); } catch (e) {}
-    // hard red flash via the shared #flash overlay, if present
-    try {
-      const fl = CBZ.el && CBZ.el.flash;
-      if (fl) { fl.classList.remove("go"); void fl.offsetWidth; fl.classList.add("go"); }
-    } catch (e) {}
     if (CBZ.setObjective) try { CBZ.setObjective("Lockdown. Get to your cell."); } catch (e) {}
     // a BRIEF real siren burst as the block seals — then the guards take over
     // (whipped up to beat/bed inmates). No annoying sustained loop.
@@ -451,7 +414,6 @@
   function end() {
     if (!active) return false;
     active = false;
-    fading = true;       // overlay eases out in the always-tick
     restoreGuards();
     musterRelease();     // ALL CLEAR reopens every door WE racked shut
     graceSaid = false;
@@ -464,17 +426,15 @@
     return true;
   }
 
-  // fully reset everything (new run / leaving play). Hard-clears the overlay
-  // (no fade) and restores guard speeds immediately.
+  // fully reset everything (new run / leaving play): guard speeds restored
+  // immediately.
   function teardown() {
     restoreGuards();
     musterRelease();     // no inmate keeps a lockup state across a run reset
     graceSaid = false;
     active = false;
-    fading = false;
-    sirenT = 0; clearT = 0; elapsedT = 0; pulse = 0;
+    sirenT = 0; clearT = 0; elapsedT = 0;
     maxT = 0; reason = ""; huntPlayer = true; alarmArmed = true;
-    if (overlay) overlay.style.opacity = "0";
   }
   // leaving play must also hand the block back — the live driver below only
   // runs while playing, so it cannot be the thing that releases.
@@ -542,37 +502,12 @@
     }
   });
 
-  // ---- overlay animation: runs ALWAYS so it can fade out on menus too ----
-  CBZ.onAlways(73, function (dt) {
-    const d = dt > 0.1 ? 0.1 : (dt > 0 ? dt : 0);
-
+  // ---- runs ALWAYS: a new run or leaving play hands the block back ----
+  CBZ.onAlways(73, function () {
     // detect a new run / leaving play and tear down so we never start sealed
     checkReset();
-
-    if (g.state !== "playing") {
-      // never wash the title / pause / win screens red. Restore eagerly so a
-      // lockdown that was live when the player paused/won/quit can't leave
-      // guards boosted or strand the siren mid-loop.
-      if (active || (CBZ.jailBoost && CBZ.jailBoost.count("lockdown"))) teardown();
-      else if (overlay && overlay.style.opacity !== "0") { overlay.style.opacity = "0"; pulse = 0; fading = false; }
-      return;
-    }
-
-    if (!overlay) {
-      if (active || fading) ensureOverlay();
-      if (!overlay) return;
-    }
-
-    if (active) {
-      // ease pulse up toward 1, then strobe it for that emergency throb
-      pulse += (1 - pulse) * Math.min(1, 6 * d);
-      const strobe = 0.62 + 0.38 * (0.5 + 0.5 * Math.sin((CBZ.now || 0) * 0.011));
-      overlay.style.opacity = (pulse * strobe).toFixed(3);
-    } else if (fading) {
-      // smooth fade-out after a lift
-      pulse += (0 - pulse) * Math.min(1, 3 * d);
-      overlay.style.opacity = pulse.toFixed(3);
-      if (pulse < 0.01) { pulse = 0; fading = false; overlay.style.opacity = "0"; }
-    }
+    // pause / win / title: restore eagerly so a lockdown that was live when
+    // the player left can't leave guards boosted or strand the siren
+    if (g.state !== "playing" && (active || (CBZ.jailBoost && CBZ.jailBoost.count("lockdown")))) teardown();
   });
 })();

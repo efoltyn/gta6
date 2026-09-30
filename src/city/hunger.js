@@ -30,7 +30,7 @@
    you had to remember to press. Now a man with food in his pocket eats it
    when he gets hungry (the cheapest thing that fixes it), and a man with a
    medkit patches himself up when he is hurt badly. No chip, no line of
-   text: the chew's bites and the hurt vignette fading ARE the feedback.
+   text: the chew's bites and your eyes clearing ARE the feedback.
 ============================================================ */
 (function () {
   "use strict";

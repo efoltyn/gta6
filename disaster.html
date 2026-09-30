@@ -23,9 +23,9 @@
 
 <!-- styles, split by concern -->
 <link rel="stylesheet" href="css/base.css">
-<link rel="stylesheet" href="css/hud.css?v=flick1">
-<link rel="stylesheet" href="css/screens.css?v=pause1">
-<link rel="stylesheet" href="css/shark_title.css?v=pause1">
+<link rel="stylesheet" href="css/hud.css?v=nored0930">
+<link rel="stylesheet" href="css/screens.css?v=nored0930">
+<link rel="stylesheet" href="css/shark_title.css?v=nored0930">
 <link rel="stylesheet" href="css/mobile.css?v=ric0929">
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
 <link rel="stylesheet" href="css/inventory.css?v=cuffs1">
@@ -97,10 +97,8 @@ document.body.appendChild(b);}}catch(e){}})();
   <div id="ammo"></div>
   <div id="weaponStrip" class="panel"></div>
 </div>
-<div id="vignette"></div>
 <div id="flash"></div>
 <div id="survFlash"></div>
-<div id="spray"></div>
 <div id="fade"></div>
 
 <!-- live yard rankings overlay (systems/dashboard.js) -->
@@ -595,12 +593,12 @@ document.body.appendChild(b);}}catch(e){}})();
      size), the cuffs the cuff verb closes on a wrist, the open pair in an
      officer's hand and the case on a cop's / prison officer's duty belt. -->
 <script src="src/entities/handcuffs.js?v=mc5ae55"></script>
-<script src="src/systems/verbs.js?v=colcore1"></script>
+<script src="src/systems/verbs.js?v=nored0930"></script>
 <!-- CBZ.arrest: getting arrested is a contest, not a cutscene. The one rule
      (compliant / subdued / outnumbered-from-behind), the struggle's odds, the
      committed tackle lunge, the taser, and the one physical take of the
      player (hands on, two wrists, the escort) every game's law calls. -->
-<script src="src/systems/arrest.js?v=arrest1"></script>
+<script src="src/systems/arrest.js?v=nored0930"></script>
 <!-- systems/cuffedplayer.js: what a cuffed player can do (hands gate at the window's capture
      phase, speed/stamina/get-up numbers, the grey bar) and how the room treats him; reads
      CBZ.arrest.playerCuffed. Before input.js and every game module. -->
@@ -613,7 +611,10 @@ document.body.appendChild(b);}}catch(e){}})();
      man out (and he comes to, groggy); a bullet or a blade opens a bleed that
      drains his blood until someone wraps it or he bleeds out; state(a) is what
      cuffs, AI and HUD ask. Games plug in through CBZ.vitals.on(mode, hooks). -->
-<script src="src/systems/vitals.js?v=nored929"></script>
+<!-- CBZ.eyes: how a hurt body sees. No red screen anywhere: near death the
+     eyelids droop and the blinks drag, a hit is a flinch, out cold they shut. -->
+<script src="src/systems/eyes.js?v=nored0930"></script>
+<script src="src/systems/vitals.js?v=nored0930"></script>
 <script src="src/systems/verbs_pickup.js?v=w09290250"></script>
 <script src="src/entities/player.js?v=mc5ae55"></script>
 <!-- Legacy down-state decals were REMOVED, not merely untagged (the file itself
@@ -629,8 +630,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/brain.js?v=armed1"></script>
 
 <!-- 4. systems — economy/quests load before actors that reference them -->
-<script src="src/systems/audio.js?v=m0927p"></script>
-<script src="src/systems/hud.js?v=m0927p"></script>
+<script src="src/systems/audio.js?v=nored0930"></script>
+<script src="src/systems/hud.js?v=nored0930"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
 <script src="src/weapons/appearances/c4.js?v=mil0929"></script>
@@ -841,7 +842,7 @@ document.body.appendChild(b);}}catch(e){}})();
      thread cannot repaint during that). Must load BEFORE state.js, which
      shows it, and before the city modules that call CBZ.bootStep(). -->
 <script src="src/systems/bootprogress.js?v=slice0929b"></script>
-<script src="src/systems/state.js?v=doors929"></script>
+<script src="src/systems/state.js?v=nored0930"></script>
 <!-- AN APP GETS INTERRUPTED AND A TAB DOES NOT. WKWebView drops the WebGL
      context under memory pressure and hands it back later; three.js rebuilds
      its own GL resources, but nothing told the GAME, so a hundred survivors
@@ -951,7 +952,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- ==== END PER-DISASTER MODULE SEAM ==================================== -->
 <script src="src/systems/disasters.js?v=mil0929"></script>
 <script src="src/systems/survival_interact.js?v=name1"></script>
-<script src="src/systems/survivalhud.js?v=name1"></script>
+<script src="src/systems/survivalhud.js?v=nored0930"></script>
 <!-- THE SEAM A TRANSPORT PLUGS INTO. Not multiplayer — the three things that
      have to be true before a transport is worth writing: every actor carries a
      stable id, the whole match serialises to one ArrayBuffer and back
@@ -1549,7 +1550,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
      always-updater is in the sort -->
-<script src="src/systems/gore.js?v=nored929"></script>
+<script src="src/systems/gore.js?v=nored0930"></script>
 <!-- BLOOD IS EARNED — the disaster island's trauma ledger + cause table.
      Owner-filmed: gore fired on EVERY survival death (a man who FROZE SOLID
      sprayed arterial red) and never for the violent, physical, player-caused

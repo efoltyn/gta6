@@ -17,8 +17,8 @@
                   The name, round number, tip sentence, seconds readout, the
                   SAFE HERE / NOT SAFE chip and the SURVIVED card are gone:
                   the world shows WHAT it is, the glyph says WHERE to go.
-     HURT EDGE    red screen edge that flares with every loss and breathes
-                  when you are low.
+     HURT         no red screen: every loss is a flinch and a jolt; low,
+                  your eyelids get heavy (systems/eyes.js + vitals.js).
      BARS         health shows for a few seconds after you are hit and stays
                   while you are low; stamina only while it is not full; the
                   stamina bar becomes an AIR bar in the water. No captions.
@@ -136,30 +136,19 @@
     cue.style.opacity = "1";
   }
 
-  /* ---- YOU ARE BEING HURT: a red edge that flares with every loss (scaled
-     by it) and stays faintly on when you are low. ---- */
-  let hurtEl = null, hurtK = 0, lastHp = null;
-  function drawHurt(dt) {
+  /* ---- YOU ARE BEING HURT: a flinch and a jolt with every loss (scaled by
+     it). Being LOW is your eyelids (systems/vitals.js feeds systems/eyes.js
+     from your hp in every mode); nothing here tints the screen. ---- */
+  let lastHp = null;
+  function drawHurt() {
     const on = CBZ.game.mode === "survival" && CBZ.game.state === "playing" && !CBZ.player.dead;
-    if (!hurtEl) {
-      hurtEl = document.createElement("div");
-      hurtEl.id = "survHurt";
-      hurtEl.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:35;opacity:0;" +
-        "background:radial-gradient(ellipse at center,rgba(150,0,0,0) 52%,rgba(150,0,0,.55) 82%,rgba(90,0,0,.9) 100%)";
-      document.body.appendChild(hurtEl);
-    }
     const hp = CBZ.player.hp;
-    if (!on) { hurtEl.style.opacity = "0"; lastHp = hp; hurtK = 0; return; }
-    if (lastHp != null && hp < lastHp) {
+    if (on && lastHp != null && hp < lastHp) {
       const d = lastHp - hp;
-      hurtK = Math.min(1, hurtK + d * 0.045);
+      if (CBZ.eyes) CBZ.eyes.flinch(Math.min(1, d / 30));
       if (d >= 12 && CBZ.shake) CBZ.shake(Math.min(0.5, d * 0.02));
     }
     lastHp = hp;
-    hurtK *= Math.pow(0.12, dt);
-    const low = hp < 35 ? (35 - hp) / 35 * (0.35 + 0.15 * Math.sin((CBZ.now || 0) * 0.008)) : 0;
-    const o = Math.max(hurtK, low);
-    hurtEl.style.opacity = o < 0.01 ? "0" : o.toFixed(3);
   }
 
   /* ---- WHAT SHOWS WHEN: bars and the alive pill, survival only ---- */
@@ -205,7 +194,7 @@
   // onAlways, not onUpdate: the cue must fade when the round ends or pauses
   CBZ.onAlways(49.5, function (dt) {
     const d = Math.min(0.1, dt || 1 / 60);
-    drawCue(); drawHurt(d); drawContext(d);
+    drawCue(); drawHurt(); drawContext(d);
   });
 
   CBZ.onUpdate(49, function () {

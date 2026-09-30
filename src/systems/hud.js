@@ -12,7 +12,7 @@
    stash strip, wanted meter, compass, minimap, Ranks button, run stats,
    pickup feed, crate chip...). What is left is the world, the verb pinned
    on the thing (systems/interactions.js prisonPrompt), the hotbar, the
-   crosshair, the hurt vignette, and the escape plan behind one key / one
+   crosshair, and the escape plan behind one key / one
    small button (systems/escapeplan.js), which is also where the clock, the
    cigs, the map and the rankings live now.
 
@@ -40,7 +40,6 @@
     dstate: document.getElementById("detectState"),
     hint: document.getElementById("hint"),
     toast: document.getElementById("toast"),
-    vignette: document.getElementById("vignette"),
     flash: document.getElementById("flash"),
     interact: document.getElementById("interact"),
     interactName: document.getElementById("interactName"),
