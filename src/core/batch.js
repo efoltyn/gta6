@@ -854,7 +854,7 @@
       // a room nobody has drawn yet keeps half-size positions (core/citystream.js)
       // until the frame it enters the view (roomFrame below)
       if (!m._cbzPacked && !(m.geometry.attributes.position && m.geometry.attributes.position._cbzUploaded)) packRoom(m);
-      m.visible = m._want && !m._cbzPacked;
+      m.visible = !!m._want && !m._cbzPacked;      // (a boolean: three draws anything whose visible is not === false)
     }
     interiorMeshes.length = w;
   }

@@ -25,8 +25,11 @@
   const CBZ = window.CBZ;
   if (!CBZ) return;
 
-  const OFF = 32768;          // recentre cell coords so the integer key stays positive
-  const SPAN = 65536;
+  // keys stay SMALL INTEGERS (< 2^30, a V8 Smi): the old 65536 x 65536 key
+  // space made every key a boxed double, one allocation per bucket per
+  // rebuild, every frame (measured in the phone drive's garbage)
+  const OFF = 16000;          // recentre cell coords so the integer key stays positive
+  const SPAN = 32000;
 
   CBZ.makeGrid = function (cell) {
     const inv = 1 / cell;

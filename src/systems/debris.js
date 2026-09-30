@@ -544,7 +544,7 @@
   // Clip a closed convex triangle soup by the half-space n.p <= off and close
   // the cut. Cap faces get the core slot, the plane normal, planar UVs and the
   // core colour.
-  const _poly = [], _cap = [];
+  const _poly = [], _cap = [], _clipD = [0, 0, 0];
   function lerpInto(t, a, b, s, dst) {
     for (let k = 0; k < S; k++) dst.push(t[a + k] + (t[b + k] - t[a + k]) * s);
     dst[dst.length - 1] = t[a + S - 1];      // slot is not interpolated
@@ -561,7 +561,7 @@
       if (d0 > -eps && d1 > -eps && d2 > -eps) continue;
       // Sutherland-Hodgman on the triangle
       _poly.length = 0;
-      const d = [d0, d1, d2];
+      const d = _clipD; d[0] = d0; d[1] = d1; d[2] = d2;       // (scratch: one array per triangle was the fracture's garbage)
       for (let j = 0; j < 3; j++) {
         const a = i + j * S, b = i + ((j + 1) % 3) * S, da = d[j], db = d[(j + 1) % 3];
         if (da <= eps) for (let k = 0; k < S; k++) _poly.push(t[a + k]);
@@ -574,7 +574,9 @@
       }
       const nv = _poly.length / S;
       for (let j = 1; j + 1 < nv; j++) {
-        for (const q of [0, j, j + 1]) for (let k = 0; k < S; k++) out.push(_poly[q * S + k]);
+        for (let k = 0; k < S; k++) out.push(_poly[k]);
+        for (let k = 0; k < S; k++) out.push(_poly[j * S + k]);
+        for (let k = 0; k < S; k++) out.push(_poly[(j + 1) * S + k]);
       }
     }
     if (cap && _cap.length >= 9) addCap(out, nx, ny, nz, cap);

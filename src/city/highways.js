@@ -615,14 +615,19 @@
     function groundAt(x, z) { return S.heightAt ? S.heightAt(x, z) : 0; }
     function P3(p, lat, dy) { const m = p.mit || 1; return [p.x + p.nx * lat * m, yAt(p, lat) + (dy || 0), p.z + p.nz * lat * m]; }
     // interpolated station at arbitrary s (for dashes, posts)
-    function at(s) {
+    // (out: a scratch station for a caller that only reads it — the probes
+    // below ran this per metre of highway, one object each, in the drive)
+    function at(s, out) {
       let lo = 0, hi = st.length - 1;
       while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (st[mid].s <= s) lo = mid; else hi = mid; }
       const a = st[lo], b = st[hi], t = b.s > a.s ? Math.max(0, Math.min(1, (s - a.s) / (b.s - a.s))) : 0;
       const nx = a.nx + (b.nx - a.nx) * t, nz = a.nz + (b.nz - a.nz) * t, nl = Math.hypot(nx, nz) || 1;
-      return { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t, s: s, nx: nx / nl, nz: nz / nl, tx: -nz / nl, tz: nx / nl,
-        e: a.e + (b.e - a.e) * t, out: a.out || b.out, mit: 1 };
+      const o = out || {};
+      o.x = a.x + (b.x - a.x) * t; o.z = a.z + (b.z - a.z) * t; o.s = s; o.nx = nx / nl; o.nz = nz / nl; o.tx = -nz / nl; o.tz = nx / nl;
+      o.e = a.e + (b.e - a.e) * t; o.out = a.out || b.out; o.mit = 1;
+      return o;
     }
+    const _atS = {};
     function inGap(s, side, median) {
       for (const g of gaps) {
         if (median) { if (g.cross && s >= g.m0 && s <= g.m1) return true; continue; }
@@ -772,7 +777,7 @@
         C.paint.quad(P3(a, lat - w / 2, 0.012), P3(a, lat + w / 2, 0.012), P3(b, lat + w / 2, 0.012), P3(b, lat - w / 2, 0.012), color, true);
       }
     }
-    function cutAtS(s, side) { const p = at(s); return isCut(p, side); }
+    function cutAtS(s, side) { const p = at(s, _atS); return isCut(p, side); }
     if (S.markings && !S.isDirt) {
       const endPad = 1.0;
       for (const side of [-1, 1]) {
@@ -949,7 +954,7 @@
     }
     for (const side of [-1, 1]) {
       // water fill
-      for (const r of runsWhere(function (s) { const p = at(s); return side < 0 ? waterSide(p, -1) : waterSide(p, 1); }, 0, totalS, 4)) {
+      for (const r of runsWhere(function (s) { const p = at(s, _atS); return side < 0 ? waterSide(p, -1) : waterSide(p, 1); }, 0, totalS, 4)) {
         stoneStrip(side, Math.max(0, r[0] - 4), Math.min(totalS, r[1] + 4));
       }
       if (S.isDirt) continue;
@@ -996,7 +1001,7 @@
         const wallLat = half + 5;
         for (const side of [-1, 1]) {
           const near = function (s) {
-            const p = at(s);
+            const p = at(s, _atS);
             const x = p.x + p.nx * side * wallLat, z = p.z + p.nz * side * wallLat;
             if (inGap(s, side, false) || isCut(p, side) || waterSide(p, side)) return false;
             for (const r of towns) {
@@ -1114,7 +1119,7 @@
     rec.waterRuns = [];
     const memo = runMemo; runMemo = null;
     if (!S.isDirt) for (const run of runs) {
-      for (const r of runsWhere(function (sq) { const p = at(sq); return waterSide(p, -1) && waterSide(p, 1); }, st[run.i0].s, st[run.i1].s, 4)) {
+      for (const r of runsWhere(function (sq) { const p = at(sq, _atS); return waterSide(p, -1) && waterSide(p, 1); }, st[run.i0].s, st[run.i1].s, 4)) {
         if (r[1] - r[0] >= 150) rec.waterRuns.push({ s0: st[run.i0].s, s1: st[run.i1].s, wet: r[1] - r[0] });
       }
     }

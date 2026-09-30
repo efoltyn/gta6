@@ -29,8 +29,8 @@
   // This changes actor-vs-world collision from O(all walls) to O(local walls).
   const COL_CELL = 8;
   const COL_PAD = 1.0;      // larger than any actor radius in this game
-  const COL_OFF = 32768;
-  const COL_SPAN = 65536;
+  const COL_OFF = 16000;    // keys < 2^30: small integers, not boxed doubles (8 m cells: +-128 km)
+  const COL_SPAN = 32000;
   const EMPTY_COLS = [];
   const colBuckets = new Map();
   let colCount = -1, colDirty = true;
@@ -119,6 +119,36 @@
     if (sync) { if (gridRemove(c, cellRange(c))) colCount--; else colDirty = true; }
     return true;
   };
+  /* BULK, FOR THE STREAMER (core/citystream.js). A park took a job's walls
+     out and an unpark or a finished job put them back, each with a full
+     rebuild of the ~140k-box grid on the next query: tens of ms and a few MB
+     of fresh bucket arrays, several times a second while driving. These
+     edit only the cells the job's boxes cover. */
+  CBZ.colliderAddMany = function (list) {
+    if (!list || !list.length) return;
+    const sync = gridInSync(), cols = CBZ.colliders;
+    for (let i = 0; i < list.length; i++) { cols.push(list[i]); if (sync) gridInsert(list[i]); }
+    if (sync) colCount = cols.length;
+  };
+  CBZ.colliderRemoveMany = function (list) {
+    if (!list || !list.length) return;
+    const cols = CBZ.colliders, sync = gridInSync(), drop = new Set(list);
+    let w = 0, n = 0;
+    for (let i = 0; i < cols.length; i++) { const c = cols[i]; if (drop.has(c)) { n++; if (sync && !gridRemove(c, cellRange(c))) colDirty = true; } else cols[w++] = c; }
+    cols.length = w;
+    if (sync && !colDirty) colCount = w;
+    return n;
+  };
+  // colliders APPENDED since the grid last matched `n0` entries (a streamed
+  // job that only pushed): index just those instead of rebuilding
+  CBZ.colliderIndexAppended = function (n0) {
+    const cols = CBZ.colliders;
+    if (colCount !== n0 || cols.length < n0) return false;
+    for (let i = n0; i < cols.length; i++) gridInsert(cols[i]);
+    colCount = cols.length; colDirty = false;
+    return true;
+  };
+  CBZ.colliderGridInSync = gridInSync;
   // PROOF for probes: is the in-place-edited grid bucket-for-bucket, in
   // order, the grid a full rebuild makes right now? (Leaves it rebuilt.)
   CBZ.colliderGridAudit = function () {

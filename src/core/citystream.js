@@ -212,6 +212,8 @@
     if (CBZ.cityFlushPools) { try { CBZ.cityFlushPools(); } catch (e) {} }
     const r0 = root ? root.children.length : 0, s0 = scene ? scene.children.length : 0;
     const c0 = (CBZ.colliders || []).length, p0 = (CBZ.platforms || []).length;
+    // the broadphase grid was current before the job: index only what it appends
+    const gridWas = !!(CBZ.colliderGridInSync && CBZ.colliderGridInSync()), lastCol = c0 ? CBZ.colliders[c0 - 1] : null;
     const buses = busList();
     const marks = busHooks.map(function (h) { try { return h.mark(); } catch (e) { return null; } });
     const t0 = performance.now();
@@ -235,6 +237,7 @@
     if (scene) for (let i = s0; i < scene.children.length; i++) { const o = scene.children[i]; if (o !== root) job.objs.push({ o: o, parent: scene }); }
     job.cols = (CBZ.colliders || []).slice(c0);
     job.plats = (CBZ.platforms || []).slice(p0);
+    if (gridWas && job.cols.length && CBZ.colliderIndexAppended && (c0 === 0 || CBZ.colliders[c0 - 1] === lastCol)) CBZ.colliderIndexAppended(c0);
     job.state = "built";
   }
 
@@ -404,10 +407,12 @@
     takeLos(job);
     for (const it of job.objs) { if (it.o.parent) it.o.parent.remove(it.o); releaseGPU(it.o); }
     if (!job.pure) for (const it of job.objs) compactTree(it.o);
-    removeFrom(CBZ.colliders, job.cols); removeFrom(CBZ.platforms, job.plats);
+    const inSync = CBZ.colliderRemoveMany && CBZ.colliderGridInSync && CBZ.colliderGridInSync();
+    if (inSync) CBZ.colliderRemoveMany(job.cols); else removeFrom(CBZ.colliders, job.cols);
+    removeFrom(CBZ.platforms, job.plats);
     if (job.pure) { job.objs = null; job.cols = job.plats = null; job.los = null; job.state = "queued"; }
     else job.state = "parked";
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    if (!inSync && CBZ.markCollidersDirty) CBZ.markCollidersDirty();
   }
   /* FREE a far job: everything it made goes, and it is queued to run again.
      Materials are left alone (they are cached and shared across builds). */
@@ -461,11 +466,12 @@
 
   function unpark(job) {
     for (const it of job.objs) { expandTree(it.o); if (it.parent) it.parent.add(it.o); }
-    for (const c of job.cols) CBZ.colliders.push(c);
+    const inSync = CBZ.colliderAddMany && CBZ.colliderGridInSync && CBZ.colliderGridInSync();
+    if (inSync) CBZ.colliderAddMany(job.cols); else for (const c of job.cols) CBZ.colliders.push(c);
     for (const p of job.plats) (CBZ.platforms = CBZ.platforms || []).push(p);
     if (job.los && CBZ.losBlockers) { for (const m of job.los) CBZ.losBlockers.push(m); job.los = null; }
     job.state = "built";
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    if (!inSync && CBZ.markCollidersDirty) CBZ.markCollidersDirty();
   }
   function settle(job) {
     // LATE CONTENT IS BATCHED LIKE BOOT CONTENT. What the job added under the
