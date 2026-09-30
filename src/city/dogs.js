@@ -672,9 +672,18 @@
         continue;
       }
       if (d.biteT > 0) d.biteT -= dt;
+      /* NOT DRAWN PAST THE FOG. A dog's 19 meshes are never frustum-culled
+         (its animated parts outgrow their bounds), so every dog on the map
+         drew every frame, the ones 2 km away too: 190 of the phone's ~1300
+         draw calls at spawn, all of them fog. */
+      if (P) {
+        const fe = ((CBZ.scene && CBZ.scene.fog && CBZ.scene.fog.far) || CBZ.cityFogFar || 760) + 30;
+        const vdx = grp.position.x - P.x, vdz = grp.position.z - P.z;
+        grp.visible = vdx * vdx + vdz * vdz < fe * fe;
+      }
       // wag the tail (a little life)
       d.wag += dt * (6 + (d.wagBoost || 0) * 4); if (d.wagBoost) d.wagBoost = Math.max(0, d.wagBoost - dt);
-      const tail = grp.getObjectByName && grp.getObjectByName("tail");
+      const tail = d._tail !== undefined ? d._tail : (d._tail = (grp.getObjectByName && grp.getObjectByName("tail")) || null);
       if (tail) tail.rotation.y = Math.sin(d.wag) * 0.5;
 
       // TROT: swing the legs (diagonal gait) by how far the dog actually moved

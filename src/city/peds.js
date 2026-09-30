@@ -6615,7 +6615,10 @@
      place, and the added statements collapse to the originals in the original
      order. Read LIVE each frame so ?cfg_ overrides work mid-session.
      ============================================================ */
-  if (CBZ.CONFIG.PED_SIM_BUDGET_MS == null) CBZ.CONFIG.PED_SIM_BUDGET_MS = 8;
+  // a phone's CPU is ~2-3x slower than the desktop this was tuned on, and the
+  // crowd's decisions were ~6 ms of its frame at the spawn: its deadline is 3 ms
+  // (on-screen bodies within ANIM_D2 are never deferred, see below)
+  if (CBZ.CONFIG.PED_SIM_BUDGET_MS == null) CBZ.CONFIG.PED_SIM_BUDGET_MS = CBZ.deviceClass === "phone" ? 3 : 8;
   // performance.now with a Date.now fallback — the headless harnesses that
   // drive CBZ.stepSim (tools/*-node.mjs) do not always inject `performance`,
   // and a budget that throws is strictly worse than no budget. Same shape as
