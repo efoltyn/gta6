@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "f770575c0d6401bc7b84dd1bcf89784a2d7e8d48",
-  "createdAt": "2026-09-30T01:41:07.790Z",
+  "sourceCommit": "c7e7dff7968cdeb092e7dae83feab6b99c25a517",
+  "createdAt": "2026-09-30T02:00:51.522Z",
   "fileCount": 1182,
-  "totalBytes": 47967405,
+  "totalBytes": 47971425,
   "files": [
     {
       "file": "src/bootstrap.js",
@@ -1703,13 +1703,13 @@
     },
     {
       "file": "src/core/batch.js",
-      "bytes": 21332,
-      "sha256": "189ead1e1c584f9a27b6fbb75dceb4005e71a0167e24bdce297d0ea39fa38b82"
+      "bytes": 22471,
+      "sha256": "812b88d0de67ff5b11f8e75b9af5c29c8186c6f8ae11673efd654aabcb60de57"
     },
     {
       "file": "src/core/citystream.js",
-      "bytes": 14644,
-      "sha256": "03d338fe443d8135f14fce268f8f21a1c96595ba30554c00d80ce1e792ff13d6"
+      "bytes": 17525,
+      "sha256": "3f16735b5fb23229e5b180076f0b7bf60b6912dbbfc8629f3d6b3c5637f21a18"
     },
     {
       "file": "src/core/daynight.js",
@@ -5809,27 +5809,27 @@
     {
       "file": "shark-sim.html",
       "bytes": 58826,
-      "sha256": "a52af163f730b9e1e1cbdbdb4161c77d9963ebca8e07fe9e7efe0a03044c80ae"
+      "sha256": "7ed81fcade148a0a995a95e81a00ff5c55cf6a5963a4fc60aa88a54276b42a0e"
     },
     {
       "file": "disaster-survival.html",
       "bytes": 58869,
-      "sha256": "3fab6dfe49f95b20119acd09d54b7cd12dce964bd089ff6ffaf0a34645521d4c"
+      "sha256": "264fc7030c2e2d7ae5dee4942f508ad60a7cd07eab03c44b4b6e0bd34b523197"
     },
     {
       "file": "prison-escape.html",
       "bytes": 58838,
-      "sha256": "3d00feac6fba7c484f6f675354db8b644d6fe86445281e0a91f243193aa5b740"
+      "sha256": "ca6b5484594e197574be705366a601d1c3dfe8673cafcdb004117a7a66fa2fe4"
     },
     {
       "file": "gang-city.html",
       "bytes": 58793,
-      "sha256": "9c0086ec55a7a55bbabbae7e263cbb416c37a45a39268b54e2acd39ad501817f"
+      "sha256": "d84ce903bbad045375cf148578285e60b41c2f0ce8ef1c982483c7505abcb964"
     },
     {
       "file": "gun-game.html",
       "bytes": 58815,
-      "sha256": "6b42175f14929bcef255ec5f133b034afd117a6ea5c5af7408cf7fe291304818"
+      "sha256": "fd1fb1bcecc8f5a04f63f952db9d3524b473c013e214744dbbc03f20d3b42c46"
     },
     {
       "file": "games/battle.html",
