@@ -128,7 +128,25 @@
      frame while the site is unresolved) re-derived the coast from scratch:
      45 ms spikes. 32768 x 512 B = 16 MB worst case, only reached by such
      marches; the old per-corner Map held 130k boxed corners (~same). */
+  // (a phone holds 8192 tiles, 4 MB, and at the cap drops the tiles far from
+  // the player instead of all of them: the full memo was 19 MB of a phone
+  // city's heap, memscope)
   const COAST_TILE = 8, COAST_TILES_MAX = 32768;
+  // (the build walks the whole coastline: the phone's smaller cap applies in play)
+  function coastCap() { return CBZ.deviceClass === "phone" && CBZ.game && CBZ.game.state === "playing" ? 8192 : COAST_TILES_MAX; }
+  function coastTrim() {
+    const P = CBZ.player && CBZ.player.pos;
+    if (!P) { coastTiles.clear(); return; }
+    const cx = Math.floor(P.x / COAST_GRID) + 8192, cz = Math.floor(P.z / COAST_GRID) + 8192;
+    const R = (1500 / COAST_GRID) >> 3;                    // 1.5 km, in tiles
+    const tx = cx >> 3, tz = cz >> 3;
+    coastTiles.forEach(function (v, key) {
+      const kx = (key / 4096) | 0, kz = key - kx * 4096;
+      if (Math.abs(kx - tx) > R || Math.abs(kz - tz) > R) coastTiles.delete(key);
+    });
+    if (coastTiles.size >= coastCap() * 0.9) coastTiles.clear();
+    _ctKey = -1; _ctArr = null;
+  }
   let coastTiles = new Map(), coastCacheTerrain = null;
   let _ctKey = -1, _ctArr = null;
   function coastRaw(terrain, x, z) {
@@ -146,7 +164,7 @@
     if (key !== _ctKey) {
       t = coastTiles.get(key);
       if (t === undefined) {
-        if (coastTiles.size >= COAST_TILES_MAX) coastTiles.clear();
+        if (coastTiles.size >= coastCap()) coastTrim();
         t = new Float64Array(COAST_TILE * COAST_TILE).fill(NaN);
         coastTiles.set(key, t);
       }
