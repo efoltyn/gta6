@@ -868,6 +868,9 @@
     tex.generateMipmaps = true;
     tex.anisotropy = CBZ.renderer && CBZ.renderer.capabilities && CBZ.renderer.capabilities.getMaxAnisotropy ? Math.min(8, CBZ.renderer.capabilities.getMaxAnisotropy()) : 1;
     tex.needsUpdate = true;
+    // painted once: its pixels live on the GPU, not twice (49 MB of JS
+    // retained after a drive, memscope). A lost context reloads the page.
+    tex.onUpdate = function () { tex.image.data = null; tex.onUpdate = null; CBZ.freedStaticArrays = true; };
     order.forEach(function (m, i) {
       U.uGndCityR.value[i].set(m.x0, m.z0, 1 / (m.w * m.cell), 1 / (m.h * m.cell));
       U.uGndCityA.value[i].set(m.ax / AW, m.ay / AH, m.w / AW, m.h / AH);

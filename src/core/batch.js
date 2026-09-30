@@ -133,14 +133,41 @@
     if (!b || typeof WebGL2RenderingContext === "undefined" || !(gl instanceof WebGL2RenderingContext)) return null;
     return { gl: gl, buf: b.buffer };
   }
+  /* READ A GPU-ONLY GEOMETRY BACK (WebGL2), so it can leave the GPU and
+     come back: core/farcull.js evicts a far merged mesh by reading its
+     buffers into JS (COPY_READ_BUFFER: never disturbs a vertex array
+     object's bindings), packing them (core/citystream.js), then disposing.
+     Returns true when every attribute and the index are JS arrays again. */
+  function readBack(attr, gl) {
+    const M = self.__cbzGLAttr, K = M && M.get(gl), b = K && K.get(attr);
+    if (!b || !b.buffer) return false;
+    const n = attr.count * attr.itemSize;
+    const T = b.type === 5126 ? Float32Array : b.type === 5125 ? Uint32Array : b.type === 5123 ? Uint16Array : b.type === 5121 ? Uint8Array : b.type === 5120 ? Int8Array : b.type === 5122 ? Int16Array : null;
+    if (!T) return false;
+    const dst = new T(n);
+    gl.bindBuffer(gl.COPY_READ_BUFFER, b.buffer);
+    gl.getBufferSubData(gl.COPY_READ_BUFFER, 0, dst);
+    gl.bindBuffer(gl.COPY_READ_BUFFER, null);
+    attr.array = dst;
+    return true;
+  }
+  CBZ.batchReadbackGeo = function (g) {
+    const R = CBZ.renderer, gl = R && R.getContext && R.getContext();
+    if (!gl || typeof WebGL2RenderingContext === "undefined" || !(gl instanceof WebGL2RenderingContext)) return false;
+    try {
+      for (const k in g.attributes) { const a = g.attributes[k]; if (a && !a.array && !a._cbzQ && !a._cbzQn && !readBack(a, gl)) return false; }
+      if (g.index && !g.index.array && !readBack(g.index, gl)) return false;
+    } catch (e) { return false; }
+    return true;
+  };
   CBZ.batchGpuSliceable = function () {
     const R = CBZ.renderer, gl = R && R.getContext && R.getContext();
     return !!(gl && self.__cbzGLAttr && typeof WebGL2RenderingContext !== "undefined" && gl instanceof WebGL2RenderingContext);
   };
-  function rangeSet(attr, start, count, hidden, holder) {
+  function rangeSet(attr, start, count, hidden, holder, geo) {
     const i0 = start * 3, n = count * 3;
     if (hidden ? holder._stash : !holder._stash) return true;       // already there
-    if (!attr.array && attr._cbzQ && CBZ.geoExpand) CBZ.geoExpand(attr);   // a parked, compacted buffer (core/citystream.js)
+    if (!attr.array && attr._cbzQ) { if (geo && CBZ.geoExpandAll) CBZ.geoExpandAll(geo); else if (CBZ.geoExpand) CBZ.geoExpand(attr); }   // a parked, compacted buffer (core/citystream.js)
     if (attr.array) {
       if (hidden) { holder._stash = attr.array.slice(i0, i0 + n); attr.array.fill(0, i0, i0 + n); }
       else { attr.array.set(holder._stash, i0); holder._stash = null; }
@@ -174,7 +201,7 @@
     for (const e of arr) {
       if (e.whole) { if (e.mesh.visible) { e.mesh.visible = false; n++; } continue; }
       if (e._stash) continue;                       // already hidden
-      if (rangeSet(e.mesh.geometry.attributes.position, e.start, e.count, true, e)) n++;
+      if (rangeSet(e.mesh.geometry.attributes.position, e.start, e.count, true, e, e.mesh.geometry)) n++;
     }
     return n;
   };
@@ -185,7 +212,7 @@
     for (const e of arr) {
       if (e.whole) { if (!e.mesh.visible) { e.mesh.visible = true; n++; } continue; }
       if (!e._stash) continue;
-      if (rangeSet(e.mesh.geometry.attributes.position, e.start, e.count, false, e)) n++;
+      if (rangeSet(e.mesh.geometry.attributes.position, e.start, e.count, false, e, e.mesh.geometry)) n++;
     }
     return n;
   };
@@ -467,7 +494,7 @@
   // exactly like batchHideGroup's shared-range path.
   const wallSlices = new WeakMap();
   function sliceSet(rec, hidden) {
-    return rangeSet(rec.mesh.geometry.attributes.position, rec.start, rec.count, hidden, rec);
+    return rangeSet(rec.mesh.geometry.attributes.position, rec.start, rec.count, hidden, rec, rec.mesh.geometry);
   }
   // Returns true when the wall was batch-merged and the slice op handled it —
   // callers fall back to plain wall.visible toggling when false (flag off,
@@ -811,6 +838,18 @@
     if (!f) return false;
     return ((f & 1) && px > I.x + I.hw) || ((f & 2) && px < I.x - I.hw) || ((f & 4) && pz > I.z + I.hd) || ((f & 8) && pz < I.z - I.hd);
   }
+  // a room left behind gives its GPU buffers back (read back and packed first
+  // when it kept no JS copy), and comes back through roomFrame like any packed one
+  function evictRoom(m) {
+    const g = m.geometry, a = g && g.attributes.position;
+    if (!a || !a._cbzUploaded) return;
+    if (CBZ.geoReuploadable && !CBZ.geoReuploadable(g)) { if (!CBZ.batchReadbackGeo(g)) return; }
+    if (CBZ.geoCompactOwned) CBZ.geoCompactOwned(g);
+    g.dispose();
+    for (const k in g.attributes) g.attributes[k]._cbzUploaded = false;
+    if (g.index) g.index._cbzUploaded = false;
+    m._cbzPacked = !!g._cbzNoDraw;
+  }
   function packRoom(m) {
     const g = m.geometry, a = g && g.attributes.position;
     if (!a || a._cbzUploaded || !CBZ.geoCompactOwned) { m._cbzPacked = true; return; }
@@ -849,7 +888,7 @@
       interiorMeshes[w++] = m;
       const I = m._cbzInterior, d = Math.hypot(P.x - I.x, P.z - I.z) - I.r;
       const R = seesGlass(I, P.x, P.z) ? fogEnd : INTERIOR_R;
-      if (m._want) { if (d > R + 25) m._want = false; }
+      if (m._want) { if (d > R + 25) { m._want = false; evictRoom(m); } }
       else if (d < R) m._want = true;
       // a room nobody has drawn yet keeps half-size positions (core/citystream.js)
       // until the frame it enters the view (roomFrame below)

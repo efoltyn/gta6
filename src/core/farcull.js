@@ -60,7 +60,13 @@
       const g = c.geometry;
       if (!g || !g._evictable || !g.attributes || !g.attributes.position) return;
       if (!g.attributes.position._cbzUploaded) return;          // never on the GPU
-      if (CBZ.geoReuploadable && !CBZ.geoReuploadable(g)) return;
+      if (CBZ.geoReuploadable && !CBZ.geoReuploadable(g)) {
+        // GPU-ONLY (its arrays were dropped after upload): read it back and
+        // pack it, so it can leave the GPU and return when drawn again
+        if (!CBZ.batchReadbackGeo || !CBZ.batchReadbackGeo(g)) return;
+        if (CBZ.geoCompactOwned) CBZ.geoCompactOwned(g);
+        _evStats.readback = (_evStats.readback || 0) + 1;
+      }
       g.dispose();
       for (const k in g.attributes) g.attributes[k]._cbzUploaded = false;
       if (g.index) g.index._cbzUploaded = false;
@@ -438,6 +444,10 @@
         // quality tier" (city/buildings.js's masonry veneer is dropped whole at
         // tier 0). Re-showing on approach would override that owner. Culling it
         // is still fine — hidden is hidden.
+        if (evicted.has(o) && CBZ.geoExpandAll) {
+          // a packed eviction comes back to full size before it can draw
+          o.traverse(function (c) { const g = c.geometry; if (g && g._cbzNoDraw) CBZ.geoExpandAll(g); });
+        }
         if (hidByUs.has(o) && !(o.userData && o.userData.cullLocked)) { o.visible = true; hidByUs.delete(o); shownAt.set(o, performance.now()); }
         evicted.delete(o);
       }

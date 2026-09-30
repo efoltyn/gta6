@@ -359,6 +359,10 @@
     }
     a._cbzQ = { q: q, o: [x0, y0, z0], s: [sx, sy, sz] };
     a.array = null;
+    // THE RENDERER WILL NOT DRAW IT (vendor three.r128 projectObject checks
+    // _cbzNoDraw): a packed geometry reaching a frame by any path is skipped,
+    // not uploaded from a null array (the a19b4eb4 render stop)
+    g._cbzNoDraw = true;
     return P.byteLength - q.byteLength + compactNormals(g);
   }
   function expandAttr(a) {
@@ -371,6 +375,7 @@
   }
   function expandGeo(g) {
     const a = g.attributes.position; if (a && a._cbzQ) expandAttr(a);
+    g._cbzNoDraw = false;
     const n = g.attributes.normal;
     if (n && n._cbzQn) { const q = n._cbzQn, N = new Float32Array(q.length); for (let i = 0; i < q.length; i++) N[i] = q[i] / 32767; n.array = N; n._cbzQn = null; n.needsUpdate = true; }
   }
@@ -526,7 +531,10 @@
       const g = o.geometry;
       const merged = g._evictable && CFG.CITY_STREAM === true;
       if (!(u.terrain || u.worldSurface || merged)) return;
-      if (merged) g._evictable = false;
+      // (still evictable: core/farcull.js reads a GPU-only merged buffer back,
+      // packed, before it leaves the GPU; the GPU used to keep everything a
+      // drive had seen: +220 MB of GL after a tour, memscope)
+      if (merged && !(CBZ.batchGpuSliceable && CBZ.batchGpuSliceable())) g._evictable = false;
       if (g._cbzFreed) return;
       g._cbzFreed = true;
       /* GPU-ONLY MERGED GEOMETRY. A merged render copy is never a raycast

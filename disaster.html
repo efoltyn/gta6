@@ -392,7 +392,7 @@ document.body.appendChild(b);}}catch(e){}})();
      offline, deterministically, and inside the headless screenshot harness).
      (The r164 IIFE spike and its compat shim were deleted 2026-09-29: never
      loaded, recoverable from git history if a migration is ever attempted.) -->
-<script src="src/vendor/three.r128.min.js?v=pf0930b"></script>
+<script src="src/vendor/three.r128.min.js?v=pf0930k"></script>
 <!-- real frustum culling for InstancedMesh pools (every camera, shadow pass included); must precede every InstancedMesh -->
 <script src="src/core/instcull.js?v=w09290242x"></script>
 <!-- Slayvin flat-mirror reflective water (ported to r128 as THREE.WaterReflect;
@@ -443,7 +443,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/core/rectgrid.js?v=phonefit1"></script>
 <script src="src/core/slice.js?v=pf0930b"></script>
 <!-- GANG CITY STREAMS: the live city is a slice that follows the player (?stream=0 = whole city). -->
-<script src="src/core/citystream.js?v=pf0930j"></script>
+<script src="src/core/citystream.js?v=pf0930k"></script>
 <!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
      Turns "is this the city?" into "may I vault / may I blow up here?", so the
      prison, gun game and the disaster island reuse Gang City's engine instead
@@ -1432,7 +1432,7 @@ document.body.appendChild(b);}}catch(e){}})();
      query: cityground 10, metro_ground 20, continent 90 register into it, so it loads before them). -->
 <script src="src/world/grassfield.js?v=grass0929c"></script>
 <script src="src/city/metro_ground.js?v=wreal0929"></script>
-<script src="src/city/metro.js?v=wreal0929"></script>
+<script src="src/city/metro.js?v=pf0930k"></script>
 <script src="src/city/metro_structs.js?v=wreal0929"></script>
 <!-- custom dialogue + street talk (one contextual YES/NO decision) — after the registry -->
 <!-- 4d-3. this wave's feature modules (load after all deps they read) -->
@@ -2020,12 +2020,12 @@ document.body.appendChild(b);}}catch(e){}})();
        - detail_kit.js FIRST; the other four only register passes into it.
        - street_furniture.js before building_dress.js — it owns the shared sign
          atlas texture the house-number plates reuse. -->
-<script src="src/core/farcull.js?v=pf0930a"></script>
+<script src="src/core/farcull.js?v=pf0930k"></script>
 <!-- whole-building frustum hide before every draw (exact: view frustum + sun shadow frustum); also owns CBZ.subtreeSphere, which city/cctv.js's feed scope reuses -->
 <script src="src/core/viewscope.js?v=w09290242x"></script>
 <script src="src/core/staticfreeze.js?v=sf1"></script>
 <script src="src/systems/settings.js?v=nodash1"></script>
-<script src="src/core/batch.js?v=pf0930j"></script>
+<script src="src/core/batch.js?v=pf0930k"></script>
 <!-- Render-realism layer: light-writer arbiter, world PBR promotion, env reach,
      exposure, contact AO. MUST load after core/quality.js (reads
      CBZ.onQualityChange) AND after core/batch.js — it wraps CBZ.batchStaticUnder
