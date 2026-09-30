@@ -421,7 +421,10 @@ async function launchChrome() {
     "--disable-background-timer-throttling", "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows",
     "--disable-background-networking", "--disable-component-update", "--no-first-run", "--no-default-browser-check", "--disable-extensions",
     "--enable-precise-memory-info",   // performance.memory live, not bucketed (the memory accounting)
-    "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
+    // CBZ_CHROME_FLAGS (space-separated) are appended, e.g. "--js-flags=--trace-deopt";
+    // CBZ_CHROME_OUT=<file> keeps Chrome's stdout (where V8 traces print)
+    ...(process.env.CBZ_CHROME_FLAGS ? process.env.CBZ_CHROME_FLAGS.split(/\s+/).filter(Boolean) : []),
+    "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: ["ignore", process.env.CBZ_CHROME_OUT ? fs.openSync(process.env.CBZ_CHROME_OUT, "w") : "ignore", "pipe"] });
   const wsUrl = await new Promise((res, rej) => {
     let buf = "";
     const to = setTimeout(() => rej(new Error("chrome never printed its DevTools endpoint")), 30000);
