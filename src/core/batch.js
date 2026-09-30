@@ -706,7 +706,7 @@
         // a room's merged furniture lives in the root's interiors group
         // (farcull hides root children; the interior updater owns these)
         const ib = b.interior.b;
-        mesh._cbzInterior = { x: ib.ox != null ? ib.ox : b.interior.g.matrixWorld.elements[12], z: ib.oz != null ? ib.oz : b.interior.g.matrixWorld.elements[14], r: Math.hypot(ib.w, ib.d) / 2 };
+        mesh._cbzInterior = glazing(ib, ib.ox != null ? ib.ox : b.interior.g.matrixWorld.elements[12], ib.oz != null ? ib.oz : b.interior.g.matrixWorld.elements[14]);
         mesh.visible = false;                     // shown by the updater when somebody is near
         interiorsGroup(target).add(mesh);
         interiorMeshes.push(mesh);
@@ -783,6 +783,33 @@
      further, a room is a few pixels behind a window; drawing it cost a
      draw call and its whole buffer on the GPU for every building on screen.
      ?cfg_BATCH_INTERIOR_SPLIT=0 merges rooms into the street tiles again. */
+  /* WHICH WALLS CAN YOU SEE IN THROUGH. A room is visible from outside only
+     through glass in the facade: a face with panes in it (the building's
+     `windows` ledger, city/buildings.js addCityGlass) is a window face. The
+     room hides at INTERIOR_R only for a viewer who cannot see a glazed face
+     (behind brick, or on the blind side); through glass it draws to the fog's
+     end, where the fog has already hidden it (owner: nothing pops in view). */
+  const glazeCache = new WeakMap();
+  function glazing(b, x, z) {
+    let g = glazeCache.get(b);
+    if (g) return g;
+    let faces = 0;
+    const hw = b.w / 2, hd = b.d / 2, W = b.windows || [];
+    for (let i = 0; i < W.length; i++) {
+      const p = W[i]; if (!p || p.x == null) continue;
+      const lx = p.x - x, lz = p.z - z;
+      if (Math.abs(lx - hw) < 1.2) faces |= 1; else if (Math.abs(lx + hw) < 1.2) faces |= 2;
+      if (Math.abs(lz - hd) < 1.2) faces |= 4; else if (Math.abs(lz + hd) < 1.2) faces |= 8;
+    }
+    g = { x: x, z: z, hw: hw, hd: hd, r: Math.hypot(b.w, b.d) / 2, faces: faces };
+    glazeCache.set(b, g);
+    return g;
+  }
+  function seesGlass(I, px, pz) {
+    const f = I.faces;
+    if (!f) return false;
+    return ((f & 1) && px > I.x + I.hw) || ((f & 2) && px < I.x - I.hw) || ((f & 4) && pz > I.z + I.hd) || ((f & 8) && pz < I.z - I.hd);
+  }
   function deadMarker(mesh) { return function () { mesh._cbzDead = true; }; }
   function INTERIOR_SPLIT() { return !(CBZ.CONFIG && CBZ.CONFIG.BATCH_INTERIOR_SPLIT === false); }
   const INTERIOR_R = 130;
@@ -802,14 +829,16 @@
     _intT = 0.2;
     const P = CBZ.player && CBZ.player.pos;
     if (!P) return;
+    const sc = CBZ.scene, fogEnd = ((sc && sc.fog && sc.fog.far) || CBZ.cityFogFar || 760) + 30;
     let w = 0;
     for (let i = 0; i < interiorMeshes.length; i++) {
       const m = interiorMeshes[i];
       if (m._cbzDead) continue;                                    // its geometry was disposed (a freed stream job)
       interiorMeshes[w++] = m;
       const I = m._cbzInterior, d = Math.hypot(P.x - I.x, P.z - I.z) - I.r;
-      if (m.visible) { if (d > INTERIOR_R + 25) m.visible = false; }
-      else if (d < INTERIOR_R) m.visible = true;
+      const R = seesGlass(I, P.x, P.z) ? fogEnd : INTERIOR_R;
+      if (m.visible) { if (d > R + 25) m.visible = false; }
+      else if (d < R) m.visible = true;
     }
     interiorMeshes.length = w;
   }

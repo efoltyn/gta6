@@ -324,6 +324,41 @@
   };
   CBZ.shaderQueueStats = function () { return lastReport; };
 
+  /* THE CAR-ENTRY SET. Getting into a car compiled ~14 programs in its first
+     frames (measured: the car bodies' own materials, drawn close for the
+     first time, and the water spray/wake shaders): a hitch at the worst
+     moment on a phone. Once the city has settled, in idle time, the built
+     car templates and the (empty) water FX are queued through the same
+     non-blocking compile as everything else. */
+  let drivingWarmed = false;
+  CBZ.warmDrivingSet = function () {
+    if (drivingWarmed || !CBZ.scene || !CBZ.renderer) return null;
+    drivingWarmed = true;
+    const objs = [];
+    try { if (CBZ.cityCarTemplates) CBZ.cityCarTemplates().forEach(function (t) { if (t) objs.push(t); }); } catch (e) {}
+    try { if (CBZ.waterFxWarmObjects) CBZ.waterFxWarmObjects().forEach(function (o) { objs.push(o); }); } catch (e) {}
+    if (!objs.length) return null;
+    const rep = queue(objs, { full: true });
+    CBZ.drivingWarmReport = { at: Math.round(performance.now()), objs: objs.length, rep: rep };
+    return rep;
+  };
+  (function armDrivingWarm() {
+    let t = 0;
+    const tick = function () {
+      const g = CBZ.game;
+      if (drivingWarmed) return;
+      if (g && g.state === "playing" && g.mode === "city") {
+        if ((t += 1) >= 6) {                            // ~3 s into play: the boot's first frames are done
+          const go = function () { try { CBZ.warmDrivingSet(); } catch (e) {} };
+          if (typeof requestIdleCallback === "function") requestIdleCallback(go, { timeout: 2000 }); else go();
+          return;
+        }
+      } else t = 0;
+      setTimeout(tick, 500);
+    };
+    setTimeout(tick, 500);
+  })();
+
   /* ?cfg_PROGRAM_LOG=1 — every new GL program with the light counts in its
      key and who asked for it. The tool for "why did this material compile
      twice": read CBZ.programLog after a boot. Off by default, zero cost. */
