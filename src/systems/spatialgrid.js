@@ -38,8 +38,11 @@
     const used = [];             // arrays currently keyed (emptied next rebuild)
     let gen = 0;
 
-    function cellIndex(v) { return Math.floor(v * inv); }
-    function keyOf(gx, gz) { return (gx + OFF) * SPAN + (gz + OFF); }
+    // (`| 0`: an int32 the optimizer keeps as a small integer. Math.floor
+    // hands back a double, and a double key passed to Map.get/set is boxed:
+    // one heap number per bucket lookup, every rebuild, every frame)
+    function cellIndex(v) { return Math.floor(v * inv) | 0; }
+    function keyOf(gx, gz) { return ((gx + OFF) * SPAN + (gz + OFF)) | 0; }
 
     return {
       cellIndex: cellIndex,
@@ -63,7 +66,7 @@
         for (let i = 0; i < n; i++) {
           const it = items[i];
           const v = getVec(it);
-          const k = keyOf(Math.floor(v.x * inv), Math.floor(v.z * inv));
+          const k = keyOf(Math.floor(v.x * inv) | 0, Math.floor(v.z * inv) | 0);
           let a = buckets.get(k);
           if (!a) { a = pool.pop() || []; buckets.set(k, a); used.push(a); }
           a.push(it);
