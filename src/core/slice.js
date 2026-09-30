@@ -210,6 +210,7 @@
     // blockers, ~100 MB of heap) and still blocked sight where nothing stands.
     // Streamed, each goes with its parked job and returns when it does.
     stats.los = CBZ.sliceDropDetachedLos(root, prunedTops);
+    if (s.stream && CBZ.streamCompactParked) { try { stats.compacted = CBZ.streamCompactParked(root); } catch (e) { console.error("[compact parked]", e); } }
 
     const keepRect = function (c) {
       if (!c || c.minX == null) return true;

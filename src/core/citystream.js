@@ -446,8 +446,22 @@
       if (merged) g._evictable = false;
       if (g._cbzFreed) return;
       g._cbzFreed = true;
+      /* GPU-ONLY MERGED GEOMETRY. A merged render copy is never a raycast
+         target (LOS, bullets and the camera test the hidden originals and the
+         blocker lists), and its slice hides go to the GPU buffer directly
+         (core/batch.js rangeSet, WebGL2). So once uploaded it keeps NO CPU
+         copy at all: positions and index go too. */
+      const gpuOnly = merged && CBZ.batchGpuSliceable && CBZ.batchGpuSliceable();
+      if (gpuOnly) {
+        if (!g.boundingSphere) g.computeBoundingSphere();
+        if (!g.boundingBox) g.computeBoundingBox();
+        g.computeBoundingSphere = g.computeBoundingBox = function () {};
+        o.raycast = function () {};
+        const ix = g.index;
+        if (ix && ix.array) { if (ix._cbzUploaded) { ix.array = null; CBZ.freedStaticArrays = true; } else ix.onUpload(dropArray); }
+      }
       for (const k in g.attributes) {
-        if (KEEP[k]) continue;
+        if (KEEP[k] && !gpuOnly) continue;
         const a = g.attributes[k];
         if (!a || a.isInterleavedBufferAttribute || !a.array) continue;
         if (a._cbzUploaded) { a.array = null; CBZ.freedStaticArrays = true; } else a.onUpload(dropArray);
@@ -471,6 +485,33 @@
   CBZ.streamParkLos = function (top, m) {
     const job = jobOfTop.get(top); if (!job) return;
     (job.los || (job.los = [])).push(m);
+  };
+  /* PARKED, BUT MERGED. What the prune parks was built for real and never
+     went through the batch pass (the prune runs before it), so a far cell
+     sat in memory as thousands of single meshes (the estates alone: ~7.8k)
+     and came back as thousands of draw calls. Each parked cell's root-level
+     subtrees are batched here, exactly as a streamed job's are when it
+     settles: static parts merge into a few buffers, live parts stay. */
+  CBZ.streamCompactParked = function (root) {
+    if (!root || !window.THREE || !CBZ.batchStaticUnder) return 0;
+    root.updateWorldMatrix(true, false);
+    if (!root.matrixWorld.equals(new window.THREE.Matrix4())) return 0;   // merged verts are root-space
+    let n = 0;
+    prunedCells.forEach(function (job) {
+      if (job.state !== "parked" || !job.objs || !job.objs.length) return;
+      const mine = job.objs.filter(function (it) { return it.parent === root && it.o && !it.o.parent; });
+      if (mine.length < 2) return;
+      const G = new window.THREE.Group();
+      G.name = "stream-job";
+      for (const it of mine) G.add(it.o);
+      try { CBZ.batchStaticUnder(G); } catch (e) { console.error("[park batch " + job.name + "]", e); }
+      try { if (CBZ.instanceStaticUnder) CBZ.instanceStaticUnder(G); } catch (e) {}
+      root.remove(G);
+      job.objs = job.objs.filter(function (it) { return mine.indexOf(it) < 0; });
+      job.objs.push({ o: G, parent: root });
+      n++;
+    });
+    return n;
   };
   CBZ.streamParkPruned = function (o, parent, box) {
     const cx = (box.min.x + box.max.x) / 2, cz = (box.min.z + box.max.z) / 2;

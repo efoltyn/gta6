@@ -389,6 +389,16 @@
     t._shared = true;
     t.needsUpdate = true;
     const P = { id: ++pageSeq, cls: C, data: img.data, tex: t, PH: C.PH0, next: 0, cap: C.cols * Math.floor(C.PH0 / C.sh), slots: [] };
+    /* ONE COPY OF A FULL PAGE: once a page is at its full height (it can no
+       longer grow, so nothing will ever need its pixels back in JS) and on
+       the GPU, its CPU array goes; every later slot is written straight into
+       the texture (copyTextureToTexture). 16 MB per full page, measured 18 MB
+       live on the phone. A lost context reloads (CBZ.freedStaticArrays). */
+    t.onUpdate = function () {
+      if (P.PH < PAGE_MAX || !P.data || CBZ.CONFIG && CBZ.CONFIG.TEX_FREE === false) return;
+      P.data = null; t.image.data = null; P.gpuOnly = true;
+      CBZ.freedStaticArrays = true;
+    };
     C.pages.push(P);
     return P;
   }
@@ -406,7 +416,11 @@
   function growPage(P) {
     const C = P.cls;
     if (P.PH >= PAGE_MAX) return false;
-    const PH = P.PH * 2, img = pageImage(C, PH);
+    // a page that has already grown to 512 rows is a busy class: it goes
+    // straight to its full height (every doubling on the way was a copy of
+    // the page left as garbage: 24 MB of it at boot, measured), and at full
+    // height it drops its CPU copy once uploaded (newPage's onUpdate)
+    const PH = P.PH >= 512 ? PAGE_MAX : P.PH * 2, img = pageImage(C, PH);
     img.data.set(P.data, (PH - P.PH) * C.PW * 4);
     P.data = img.data; P.PH = PH;
     P.cap = C.cols * Math.floor(PH / C.sh);
@@ -463,7 +477,7 @@
     }
     const y0 = P.PH - s.y - sh;                 // the slot's first GL row
     const D = P.data, PW4 = C.PW * 4;
-    for (let j = 0; j < sh; j++) D.set(B.subarray(j * sw * 4, (j + 1) * sw * 4), (y0 + j) * PW4 + s.x * 4);
+    if (D) for (let j = 0; j < sh; j++) D.set(B.subarray(j * sw * 4, (j + 1) * sw * 4), (y0 + j) * PW4 + s.x * 4);
     s.ver = s.tex.version;
     // incremental upload once the page lives on the GPU (the array already
     // holds the slot for any later full upload); otherwise the whole page
@@ -481,6 +495,8 @@
         } catch (e) { /* fall through to the whole-page upload */ }
       }
     }
+    // a GPU-only page cannot be uploaded whole again (its array is gone)
+    if (P.gpuOnly) return false;
     T.needsUpdate = true;
     pageFullUploads++;
     return true;

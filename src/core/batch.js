@@ -120,6 +120,46 @@
   // triangles → nothing rasterizes), reversibly. Zero draw-call cost either
   // way — the buffers stay merged.
   const groupRanges = new WeakMap();
+  /* A SLICE OF A MERGED BUFFER, HIDDEN OR RESTORED. With its CPU array (the
+     desktop, or before the first upload) the verts are stashed and zeroed in
+     JS and re-uploaded. In the streamed (phone) city a merged mesh keeps no
+     CPU copy once it is on the GPU (core/citystream.js freeStaticArrays):
+     then the slice is read back from the GPU buffer (WebGL2
+     getBufferSubData), zeroed there, and written back on restore. Hides are
+     rare (a wall carved, a building entered), so the sync read is fine. */
+  function gpuBuffer(attr) {
+    const R = CBZ.renderer, gl = R && R.getContext && R.getContext();
+    const M = self.__cbzGLAttr, K = M && gl && M.get(gl), b = K && K.get(attr);
+    if (!b || typeof WebGL2RenderingContext === "undefined" || !(gl instanceof WebGL2RenderingContext)) return null;
+    return { gl: gl, buf: b.buffer };
+  }
+  CBZ.batchGpuSliceable = function () {
+    const R = CBZ.renderer, gl = R && R.getContext && R.getContext();
+    return !!(gl && self.__cbzGLAttr && typeof WebGL2RenderingContext !== "undefined" && gl instanceof WebGL2RenderingContext);
+  };
+  function rangeSet(attr, start, count, hidden, holder) {
+    const i0 = start * 3, n = count * 3;
+    if (hidden ? holder._stash : !holder._stash) return true;       // already there
+    if (attr.array) {
+      if (hidden) { holder._stash = attr.array.slice(i0, i0 + n); attr.array.fill(0, i0, i0 + n); }
+      else { attr.array.set(holder._stash, i0); holder._stash = null; }
+      attr.needsUpdate = true;
+      return true;
+    }
+    const g = gpuBuffer(attr);
+    if (!g) return false;
+    const gl = g.gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER, g.buf);
+    if (hidden) {
+      holder._stash = new Float32Array(n);
+      gl.getBufferSubData(gl.ARRAY_BUFFER, i0 * 4, holder._stash);
+      gl.bufferSubData(gl.ARRAY_BUFFER, i0 * 4, new Float32Array(n));
+    } else {
+      gl.bufferSubData(gl.ARRAY_BUFFER, i0 * 4, holder._stash);
+      holder._stash = null;
+    }
+    return true;
+  }
   function addRange(top, entry) {
     if (!top) return;
     let arr = groupRanges.get(top);
@@ -133,11 +173,7 @@
     for (const e of arr) {
       if (e.whole) { if (e.mesh.visible) { e.mesh.visible = false; n++; } continue; }
       if (e._stash) continue;                       // already hidden
-      const attr = e.mesh.geometry.attributes.position;
-      const i0 = e.start * 3, i1 = (e.start + e.count) * 3;
-      e._stash = attr.array.slice(i0, i1);          // keep the verts for restore
-      attr.array.fill(0, i0, i1);
-      attr.needsUpdate = true; n++;
+      if (rangeSet(e.mesh.geometry.attributes.position, e.start, e.count, true, e)) n++;
     }
     return n;
   };
@@ -148,10 +184,7 @@
     for (const e of arr) {
       if (e.whole) { if (!e.mesh.visible) { e.mesh.visible = true; n++; } continue; }
       if (!e._stash) continue;
-      const attr = e.mesh.geometry.attributes.position;
-      attr.array.set(e._stash, e.start * 3);
-      e._stash = null;
-      attr.needsUpdate = true; n++;
+      if (rangeSet(e.mesh.geometry.attributes.position, e.start, e.count, false, e)) n++;
     }
     return n;
   };
@@ -433,19 +466,7 @@
   // exactly like batchHideGroup's shared-range path.
   const wallSlices = new WeakMap();
   function sliceSet(rec, hidden) {
-    const attr = rec.mesh.geometry.attributes.position;
-    const i0 = rec.start * 3, i1 = (rec.start + rec.count) * 3;
-    if (hidden) {
-      if (rec._stash) return true;             // already hidden
-      rec._stash = attr.array.slice(i0, i1);
-      attr.array.fill(0, i0, i1);
-    } else {
-      if (!rec._stash) return true;            // already shown
-      attr.array.set(rec._stash, i0);
-      rec._stash = null;
-    }
-    attr.needsUpdate = true;
-    return true;
+    return rangeSet(rec.mesh.geometry.attributes.position, rec.start, rec.count, hidden, rec);
   }
   // Returns true when the wall was batch-merged and the slice op handled it —
   // callers fall back to plain wall.visible toggling when false (flag off,

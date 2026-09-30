@@ -567,11 +567,55 @@
     return p || { x: x, z: z };
   }
 
+  /* A BODY ONLY WHERE SOMEBODY CAN SEE IT (streamed/phone city). A land
+     animal is a record (position, herd, hp, size) with an EMPTY group until
+     it comes within its draw radius + 80 m (fillBody, from the tick's LOD
+     gate), which is before it can ever be drawn: ~600 land animals x ~19
+     meshes were built at boot for a continent nobody stands in. Sea life and
+     snakes keep their bodies from the start (marine predation measures a
+     hull off the model wherever it is; a snake's segment chain is its rig).
+     The body draws from its own seeded stream, never the world rng. */
+  function lazyBodyOk(sp) {
+    return !!(CBZ.slice && CBZ.slice.stream) && !(CBZ.CONFIG && CBZ.CONFIG.WILDLIFE_LAZY_BODY === false) && !sp.aquatic && !sp.snake;
+  }
+  function seededRng(x, z) {
+    let t = ((CBZ.hash01 ? CBZ.hash01(x, z, 0x5B0D7) : 0.5) * 4294967296) >>> 0;
+    return function () {
+      t += 0x6D2B79F5;
+      let r = Math.imul(t ^ (t >>> 15), 1 | t);
+      r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+      return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function fillBody(a) {
+    if (!a._lazyBody) return;
+    a._lazyBody = false;
+    const sp = a.species, grp = a.group;
+    let b;
+    try { b = sp.build({ THREE: THREE, mat: mat, rng: seededRng(a.home.x, a.home.z) }); }
+    catch (e) { b = fallbackMesh(sp); }
+    if (!b) b = fallbackMesh(sp);
+    const ident = b.position.lengthSq() < 1e-12 && Math.abs(b.quaternion.w) > 0.999999 &&
+      Math.abs(b.scale.x - 1) < 1e-9 && Math.abs(b.scale.y - 1) < 1e-9 && Math.abs(b.scale.z - 1) < 1e-9;
+    if (ident) {
+      while (b.children.length) grp.add(b.children[0]);
+      for (const k in b.userData) if (grp.userData[k] === undefined) grp.userData[k] = b.userData[k];
+    } else grp.add(b);
+    grp.traverse(function (o) { if (o.isMesh) o.castShadow = true; });
+    if (LIVE()) { a._mOn = undefined; buildGaitRig(a); buildSwimRig(a); setLiveMats(a, grp.visible !== false); }
+    a._mp = null;
+  }
+  CBZ.wildlifeFillBody = fillBody;
+
   function makeActor(sp, x, z) {
     let grp;
-    try { grp = sp.build({ THREE: THREE, mat: mat, rng: rng }); }
-    catch (e) { grp = fallbackMesh(sp); }
-    if (!grp) grp = fallbackMesh(sp);
+    const lazyBody = lazyBodyOk(sp);
+    if (lazyBody) { grp = new THREE.Group(); grp.name = "animal:" + (sp.id || "?"); }
+    else {
+      try { grp = sp.build({ THREE: THREE, mat: mat, rng: rng }); }
+      catch (e) { grp = fallbackMesh(sp); }
+      if (!grp) grp = fallbackMesh(sp);
+    }
     /* ---- THIS ANIMAL'S OWN SIZE. Drawn from where it stands, never from the
        seeded rng stream: hash01 is order-independent, so adding a species
        tomorrow cannot resize the fish that spawned before it, and the same
@@ -651,7 +695,8 @@
     }
     // discover the rig ONCE: legs/head for walkers, tail/jaw for swimmers.
     // Each builder bails on the other's animals, so this is one line per actor.
-    if (LIVE()) { buildGaitRig(a); buildSwimRig(a); }
+    if (lazyBody) a._lazyBody = true;
+    else if (LIVE()) { buildGaitRig(a); buildSwimRig(a); }
     // snakes carry a segment chain the engine undulates (slither) — cache the
     // parts the build() registered on userData so the anim loop is allocation-free.
     if (sp.snake && grp.userData) {
@@ -4243,6 +4288,7 @@
         const vdx = grp.position.x - P.x, vdz = grp.position.z - P.z;
         pd2 = vdx * vdx + vdz * vdz;
         const vr = visR * (SZ(a) >= 1.3 ? 1.6 : 1);
+        if (a._lazyBody && (a.ridden || a.tamed || pd2 < (vr + 80) * (vr + 80))) fillBody(a);
         grp.visible = a.ridden || a.tamed || pd2 < vr * vr;
       }
       // matrix LOD: hidden animals stop paying r128's per-frame matrix math

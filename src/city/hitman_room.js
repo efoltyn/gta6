@@ -1932,6 +1932,7 @@
     m.g.position.set(d.from.x, 0.006, d.from.z);
     m.g.rotation.y = d.ry0;
     B.group.add(m.g);
+    if (B._farHid) m.g.visible = false;
     B.deliveries[kind] = d;
     return { waiting: function () { return !!(B && B.deliveries[kind] === d); }, clear: function () { if (B && B.deliveries[kind] === d) clearDelivery(kind); } };
   }
@@ -1989,6 +1990,18 @@
     dt = Math.min(0.1, dt || 0.016);
     const pl = P();
     const far = !pl || !pl.pos || Math.hypot(pl.pos.x - B.ox, pl.pos.z - B.oz) > 70;
+    /* THE PAPERS ARE READ IN THE ROOM. The corkboard, the TV, the phone and
+       whatever lies under the door are drawn only within 70 m: from further
+       they are a few pixels through a motel window, and drawing them meant
+       uploading ~25 MB of paper and screen canvases the moment a raised
+       camera (the car's) caught the window (the phone's crash on getting
+       into a car, measured). */
+    if (B._farHid !== far) {
+      B._farHid = far;
+      const parts = [B.board && B.board.g, B.tv && B.tv.mesh, B.phone && B.phone.g];
+      for (const k in B.deliveries) if (B.deliveries[k] && B.deliveries[k].g) parts.push(B.deliveries[k].g);
+      for (let i = 0; i < parts.length; i++) if (parts[i]) parts[i].visible = !far;
+    }
 
     // enter / leave
     const inNow = !!(pl && pinside(pl));

@@ -1063,16 +1063,18 @@ async function measureLoad(B, P, url, out, prof) {
 /* live V8 bytes by allocating site: each sample node's selfSize is charged to
    the nearest src/ (game) frame on its stack, and to that frame's file. */
 function heapSites(profile) {
-  const bySite = new Map(), byFile = new Map(); let total = 0;
+  const bySite = new Map(), byFile = new Map(), byVendor = new Map(); let total = 0;
   const walk = (n, game) => {
     const cf = n.callFrame || {}, m = /\/(src\/[^?]+|games\/[^?]+)/.exec(cf.url || "");
     const g = m && !/vendor\//.test(m[1]) ? { site: m[1].replace(/^src\//, "") + ":" + (cf.lineNumber + 1) + " " + (cf.functionName || "(anon)"), file: m[1].replace(/^src\//, "") } : game;
-    if (n.selfSize) { total += n.selfSize; const s = g ? g.site : "(engine/no game frame)", f = g ? g.file : "(engine)"; bySite.set(s, (bySite.get(s) || 0) + n.selfSize); byFile.set(f, (byFile.get(f) || 0) + n.selfSize); }
+    if (n.selfSize) { total += n.selfSize; const s = g ? g.site : "(engine/no game frame)", f = g ? g.file : "(engine)"; bySite.set(s, (bySite.get(s) || 0) + n.selfSize); byFile.set(f, (byFile.get(f) || 0) + n.selfSize);
+      // inside a vendored library: which of ITS functions (three's render internals)
+      if (/vendor\//.test(cf.url || "")) { const v = (cf.url.split("/").pop().replace(/\?.*$/, "")) + ":" + (cf.functionName || "(anon)") + "@" + cf.columnNumber; byVendor.set(v, (byVendor.get(v) || 0) + n.selfSize); } }
     for (const c of n.children || []) walk(c, g);
   };
   walk(profile.head, null);
   const top = (mp, k) => [...mp.entries()].sort((a, b) => b[1] - a[1]).slice(0, k).map(([s, b]) => [s, +(b / 1048576).toFixed(1)]);
-  return { totalMB: +(total / 1048576).toFixed(0), sites: top(bySite, 50), files: top(byFile, 40) };
+  return { totalMB: +(total / 1048576).toFixed(0), sites: top(bySite, 50), files: top(byFile, 40), vendor: top(byVendor, 20) };
 }
 
 async function runCbz(B, base, m, withPlay, ctx = {}) {
@@ -1731,7 +1733,13 @@ async function serveMain() {
       res.reloaded = await bootWorld(op === "reload" ? "reload" : "edited files");
       if (op === "reload") { res.ms = Date.now() - t0; return res; }
     }
-    if (op === "eval") { res.value = await P.ev(q.expr, (q.timeoutS || 60) * 1000); res.ms = Date.now() - t0; return res; }
+    // --ask eval '<expr>' --allocs: who ALLOCATED (garbage included) while the expression ran
+    if (op === "eval") {
+      if (q.allocs) { await P.s("HeapProfiler.enable"); await P.s("HeapProfiler.startSampling", { samplingInterval: 262144, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true }); }
+      res.value = await P.ev(q.expr, (q.timeoutS || 60) * 1000);
+      if (q.allocs) { try { const { profile } = await P.s("HeapProfiler.getSamplingProfile", {}, 300000); await P.s("HeapProfiler.stopSampling", {}, 60000); const h = heapSites(profile); res.allocs = { totalMB: h.totalMB, files: h.files.slice(0, 20), sites: h.sites.slice(0, 30), vendor: h.vendor }; } catch (e) { res.allocs = { err: String(e).slice(0, 200) }; } }
+      res.ms = Date.now() - t0; return res;
+    }
     /* --ask drive [--route x,z;x,z;...] [--mps 40] [--secs 60]: a FAST DRIVE on
        the live world. The player is carried along the route at a fixed speed
        (the streamer, farcull, metro and grass see a real mover), the camera
@@ -1935,6 +1943,7 @@ async function askMain() {
   if (has("--leave-on")) q.leave = "on";
   const tg = opt("--toggle", ""), tgf = opt("--toggle-file", "");
   if (tg || tgf) q.toggle = tgf ? fs.readFileSync(tgf, "utf8") : tg;
+  if (ASK === "eval" && has("--allocs")) q.allocs = true;
   if (ASK === "drive") { const r = opt("--route", ""); q.route = r ? r.split(";").map((p) => p.split(",").map(Number)) : null; q.mps = +opt("--mps", 40); q.secs = +opt("--secs", 60); q.allocs = has("--allocs"); }
   if (ASK === "prof") { const f = opt("--eval-file", ""); q.expr = f ? fs.readFileSync(f, "utf8") : argv.filter((a, i) => !a.startsWith("--") && argv[i - 1] !== "--ask" && !/^--(spot|spots|frames|warm|world|root|url|eval-file|toggle|toggle-file|look-dir|pairs|min-pairs|settle-frames|idle|seed|device|preload|query|slice|slice-spots|gpu|shaders|mode|modes|ref|mem-budget|route|mps|secs)$/.test(argv[i - 1] || "")).join(" "); }
   if (ASK === "eval") { const f = opt("--eval-file", ""); q.expr = f ? fs.readFileSync(f, "utf8") : argv.filter((a, i) => !a.startsWith("--") && argv[i - 1] !== "--ask" && !/^--(spot|spots|frames|warm|world|root|url|eval-file|toggle|toggle-file|look-dir|pairs|min-pairs|settle-frames|idle|seed|device|preload|query|slice|slice-spots|gpu|shaders|mode|modes|ref|mem-budget|route|mps|secs)$/.test(argv[i - 1] || "")).join(" "); }

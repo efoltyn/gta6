@@ -392,7 +392,7 @@ document.body.appendChild(b);}}catch(e){}})();
      offline, deterministically, and inside the headless screenshot harness).
      (The r164 IIFE spike and its compat shim were deleted 2026-09-29: never
      loaded, recoverable from git history if a migration is ever attempted.) -->
-<script src="src/vendor/three.r128.min.js?v=pf0930a"></script>
+<script src="src/vendor/three.r128.min.js?v=pf0930b"></script>
 <!-- real frustum culling for InstancedMesh pools (every camera, shadow pass included); must precede every InstancedMesh -->
 <script src="src/core/instcull.js?v=w09290242x"></script>
 <!-- Slayvin flat-mirror reflective water (ported to r128 as THREE.WaterReflect;
@@ -441,9 +441,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/core/drawcheck.js?v=pf0930a"></script>
 <script src="src/core/bakecache.js?v=pf0930a"></script>
 <script src="src/core/rectgrid.js?v=phonefit1"></script>
-<script src="src/core/slice.js?v=pf0930a"></script>
+<script src="src/core/slice.js?v=pf0930b"></script>
 <!-- GANG CITY STREAMS: the live city is a slice that follows the player (?stream=0 = whole city). -->
-<script src="src/core/citystream.js?v=pf0930a"></script>
+<script src="src/core/citystream.js?v=pf0930b"></script>
 <!-- THE MODE CAPABILITY BUS (CBZ.modeHas / worldActors / blastWorldActors).
      Turns "is this the city?" into "may I vault / may I blow up here?", so the
      prison, gun game and the disaster island reuse Gang City's engine instead
@@ -1143,7 +1143,7 @@ document.body.appendChild(b);}}catch(e){}})();
      hunger scalar wildlife.js spends. Must load BEFORE the engine (it
      binds CBZ.wildlifeTraits once, at load); absent, the engine falls
      straight back to the species constant. -->
-<script src="src/city/wildlife.js?v=sweep0929"></script>
+<script src="src/city/wildlife.js?v=pf0930b"></script>
 <!-- 4d-5. FIGHTING — shared creature-combat (animal fight anims), trait-driven
      companion defense, and the walk-in Fight Arena venue (boxing/MMA/beast pit). -->
 <!-- THE ANGLE LAW loads first because it is the one thing all three biters
@@ -1530,7 +1530,7 @@ document.body.appendChild(b);}}catch(e){}})();
      hold it, the motel room that is his menu, the consequences of a kill. -->
 <script src="src/city/hitman_paper.js?v=inworld1"></script>
 <script src="src/city/hitman_hands.js?v=tap0929"></script>
-<script src="src/city/hitman_room.js?v=pf0930a"></script>
+<script src="src/city/hitman_room.js?v=pf0930b"></script>
 <script src="src/city/dossier.js?v=inworld1"></script>
 <script src="src/city/hitman_fallout.js?v=w09290219"></script>
 <script src="src/city/agency.js?v=cd0929"></script>
@@ -2027,7 +2027,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/core/viewscope.js?v=w09290242x"></script>
 <script src="src/core/staticfreeze.js?v=sf1"></script>
 <script src="src/systems/settings.js?v=nodash1"></script>
-<script src="src/core/batch.js?v=w09290242x"></script>
+<script src="src/core/batch.js?v=pf0930b"></script>
 <!-- Render-realism layer: light-writer arbiter, world PBR promotion, env reach,
      exposure, contact AO. MUST load after core/quality.js (reads
      CBZ.onQualityChange) AND after core/batch.js — it wraps CBZ.batchStaticUnder
