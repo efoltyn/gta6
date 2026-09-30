@@ -160,6 +160,85 @@
     } catch (e) { return false; }
     return true;
   };
+  /* ASYNC EVICTION QUEUE. getBufferSubData is a synchronous round trip; read
+     straight away it waits for every queued GPU command (several ms on a
+     phone, measured by the orchestrator's concern). So an eviction is QUEUED:
+     a fence goes into the command stream, and only once the GPU has passed
+     it (polled, never waited on) is ONE geometry read back per frame, timed.
+     A mesh shown again before its turn simply keeps its GPU buffers. */
+  const evictQ = [];
+  let fence = null;
+  const RB = { queued: 0, done: 0, skipped: 0, ms: 0, maxMs: 0, avgMs: 0 };
+  CBZ.readbackStats = RB;
+  CBZ.batchQueueEvict = function (g, stillHidden, done) {
+    evictQ.push({ g: g, hidden: stillHidden, done: done }); RB.queued++;
+  };
+  /* CHUNKED: a whole merged tile in one getBufferSubData cost 10-25 ms even
+     after the fence (measured, M1); so each frame reads at most CHUNK bytes
+     of the current item, into its destination arrays, and the item is
+     finished (packed, released) when its last chunk lands. */
+  const CHUNK = 256 * 1024;
+  let cur = null;
+  function startItem(it, gl) {
+    const g = it.g, parts = [];
+    const M = self.__cbzGLAttr, K = M && M.get(gl);
+    const add = function (a) {
+      if (!a || a.array || a._cbzQ || a._cbzQn) return true;
+      const b = K && K.get(a); if (!b || !b.buffer) return false;
+      const T = b.type === 5126 ? Float32Array : b.type === 5125 ? Uint32Array : b.type === 5123 ? Uint16Array : b.type === 5121 ? Uint8Array : b.type === 5120 ? Int8Array : b.type === 5122 ? Int16Array : null;
+      if (!T) return false;
+      parts.push({ a: a, buf: b.buffer, dst: new T(a.count * a.itemSize), off: 0 });
+      return true;
+    };
+    for (const k in g.attributes) if (!add(g.attributes[k])) return null;
+    if (g.index && !add(g.index)) return null;
+    return { it: it, parts: parts, p: 0 };
+  }
+  function evictPump() {
+    if (!evictQ.length && !cur) return;
+    const R = CBZ.renderer, gl = R && R.getContext && R.getContext();
+    if (!gl || typeof WebGL2RenderingContext === "undefined" || !(gl instanceof WebGL2RenderingContext)) { evictQ.length = 0; cur = null; return; }
+    if (!cur) {
+      if (!fence) { fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0); gl.flush(); return; }
+      const st = gl.clientWaitSync(fence, 0, 0);
+      if (st !== gl.ALREADY_SIGNALED && st !== gl.CONDITION_SATISFIED) return;   // not yet: next frame
+      gl.deleteSync(fence); fence = null;
+      while (evictQ.length && !cur) {
+        const it = evictQ.shift(), g = it.g;
+        if (!g || !g.attributes || !g.attributes.position || !g.attributes.position._cbzUploaded || (it.hidden && !it.hidden())) { RB.skipped++; continue; }
+        if (CBZ.geoReuploadable && CBZ.geoReuploadable(g)) { try { it.done(g); } catch (e) {} RB.done++; continue; }
+        cur = startItem(it, gl);
+        if (!cur) RB.skipped++;
+      }
+      return;
+    }
+    // a chunk of the current item
+    const it = cur.it;
+    if (!it.g.attributes.position._cbzUploaded || (it.hidden && !it.hidden())) { cur = null; RB.skipped++; return; }
+    const t0 = performance.now();
+    let budget = CHUNK;
+    try {
+      gl.bindBuffer(gl.COPY_READ_BUFFER, null);
+      while (budget > 0 && cur.p < cur.parts.length) {
+        const P = cur.parts[cur.p], bpe = P.dst.BYTES_PER_ELEMENT, left = P.dst.length - P.off;
+        const n = Math.min(left, Math.max(1, (budget / bpe) | 0));
+        gl.bindBuffer(gl.COPY_READ_BUFFER, P.buf);
+        gl.getBufferSubData(gl.COPY_READ_BUFFER, P.off * bpe, P.dst, P.off, n);
+        P.off += n; budget -= n * bpe;
+        if (P.off >= P.dst.length) cur.p++;
+      }
+      gl.bindBuffer(gl.COPY_READ_BUFFER, null);
+    } catch (e) { cur = null; RB.skipped++; return; }
+    const ms = performance.now() - t0;
+    RB.ms += ms; RB.chunks = (RB.chunks || 0) + 1; RB.avgMs = +(RB.ms / RB.chunks).toFixed(2); if (ms > RB.maxMs) RB.maxMs = +ms.toFixed(2);
+    if (cur.p >= cur.parts.length) {
+      for (const P of cur.parts) P.a.array = P.dst;
+      RB.done++;
+      try { it.done(it.g); } catch (e) {}
+      cur = null;
+    }
+  }
+  if (CBZ.onUpdate) CBZ.onUpdate(99.95, evictPump);
   CBZ.batchGpuSliceable = function () {
     const R = CBZ.renderer, gl = R && R.getContext && R.getContext();
     return !!(gl && self.__cbzGLAttr && typeof WebGL2RenderingContext !== "undefined" && gl instanceof WebGL2RenderingContext);
@@ -843,12 +922,14 @@
   function evictRoom(m) {
     const g = m.geometry, a = g && g.attributes.position;
     if (!a || !a._cbzUploaded) return;
-    if (CBZ.geoReuploadable && !CBZ.geoReuploadable(g)) { if (!CBZ.batchReadbackGeo(g)) return; }
-    if (CBZ.geoCompactOwned) CBZ.geoCompactOwned(g);
-    g.dispose();
-    for (const k in g.attributes) g.attributes[k]._cbzUploaded = false;
-    if (g.index) g.index._cbzUploaded = false;
-    m._cbzPacked = !!g._cbzNoDraw;
+    CBZ.batchQueueEvict(g, function () { return !m._want; }, function () {
+      if (CBZ.geoCompactOwned) CBZ.geoCompactOwned(g);
+      g.dispose();
+      for (const k in g.attributes) g.attributes[k]._cbzUploaded = false;
+      if (g.index) g.index._cbzUploaded = false;
+      m._cbzPacked = !!g._cbzNoDraw;
+      if (m._cbzPacked) m.visible = false;
+    });
   }
   function packRoom(m) {
     const g = m.geometry, a = g && g.attributes.position;

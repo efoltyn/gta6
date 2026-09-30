@@ -61,11 +61,17 @@
       if (!g || !g._evictable || !g.attributes || !g.attributes.position) return;
       if (!g.attributes.position._cbzUploaded) return;          // never on the GPU
       if (CBZ.geoReuploadable && !CBZ.geoReuploadable(g)) {
-        // GPU-ONLY (its arrays were dropped after upload): read it back and
-        // pack it, so it can leave the GPU and return when drawn again
-        if (!CBZ.batchReadbackGeo || !CBZ.batchReadbackGeo(g)) return;
-        if (CBZ.geoCompactOwned) CBZ.geoCompactOwned(g);
-        _evStats.readback = (_evStats.readback || 0) + 1;
+        // GPU-ONLY (its arrays were dropped after upload): read back ASYNC
+        // (core/batch.js: fenced, one per frame), packed, then released
+        if (!CBZ.batchQueueEvict) return;
+        CBZ.batchQueueEvict(g, function () { return evicted.has(o) && o.visible === false; }, function () {
+          if (CBZ.geoCompactOwned) CBZ.geoCompactOwned(g);
+          g.dispose();
+          for (const k in g.attributes) g.attributes[k]._cbzUploaded = false;
+          if (g.index) g.index._cbzUploaded = false;
+          _evStats.readback = (_evStats.readback || 0) + 1;
+        });
+        return;
       }
       g.dispose();
       for (const k in g.attributes) g.attributes[k]._cbzUploaded = false;
