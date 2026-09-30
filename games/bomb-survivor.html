@@ -81,8 +81,6 @@
     bottom:calc(14px + env(safe-area-inset-bottom,0px));width:132px;height:132px;z-index:41;
     opacity:.82;pointer-events:none;display:none}
   #flash{position:fixed;inset:0;background:#fff;opacity:0;pointer-events:none;z-index:55;transition:opacity .5s}
-  #hit{position:fixed;inset:0;pointer-events:none;z-index:44;opacity:0;
-    background:radial-gradient(ellipse at center,rgba(0,0,0,0) 45%,rgba(160,20,10,.55) 100%)}
   #threat{position:fixed;left:50%;top:38%;transform:translate(-50%,-50%);z-index:42;pointer-events:none;
     display:none;text-align:center;color:#ff5a45;font-weight:800;letter-spacing:.18em;font-size:14px;text-shadow:0 2px 6px rgba(0,0,0,.9)}
   #threat i{display:block;width:0;height:0;margin:0 auto 6px;border-left:16px solid transparent;border-right:16px solid transparent;
@@ -165,7 +163,6 @@ body.full-map-open #speech, body.sim-view #speech{ display:none !important; }
 
 <div id="swap"></div>
 <div id="streak"></div>
-<div id="hit"></div>
 <div id="threat"><i></i></div>
 <div id="nav"><i></i></div>
 <div id="gunhud"><div class="bar"><s></s></div></div>
@@ -183,7 +180,7 @@ body.full-map-open #speech, body.sim-view #speech{ display:none !important; }
 </div></div>
 
 <!-- ONE TAG for the engine. Everything this game draws, Gang City already draws. -->
-<script src="../src/core/studio.js?v=rg0929"></script>
+<script src="../src/core/studio.js?v=nored0930"></script>
 <!-- the sea, the quays, the light and the smoke: this game's own scene layer -->
 <script src="bomb-survivor-scene.js?v=1"></script>
 <script>
@@ -886,8 +883,8 @@ function hurt(u, dmg, info) {
   u.hp -= dmg;
   if (u === me) {
     if (CBZ.micro.shake) CBZ.micro.shake(Math.min(1, dmg / 60));
-    const h = el("hit"); h.style.transition = "none"; h.style.opacity = String(Math.min(1, 0.35 + dmg / 40));
-    setTimeout(function () { h.style.transition = "opacity .7s"; h.style.opacity = "0"; }, 60);
+    // no red screen: you flinch (systems/eyes.js)
+    if (CBZ.eyes) CBZ.eyes.flinch(Math.min(1, dmg / 40));
   }
   if (u.hp > 0) return;
   u.alive = false; u.hp = 0;
@@ -1451,6 +1448,8 @@ CBZ.micro.onFrame(function (rawDt) {
   drawNav();
   if ((hudT -= dt) <= 0) { hudT = 0.25; setRole(); }
   if (me) hud.health(Math.max(0, me.hp) / 100);
+  // near the end your eyelids get heavy (systems/eyes.js), never a red edge
+  if (CBZ.eyes) CBZ.eyes.hurt(me && me.alive ? Math.max(0, Math.min(1, (40 - me.hp) / 35)) : 0, "body");
   if (scope && me && me.role === "bomber") scope.draw(dt);
 });
 

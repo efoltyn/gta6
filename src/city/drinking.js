@@ -31,10 +31,9 @@
                               Read-only by convention — only this file
                               writes it.
 
-   SAFETY: one onUpdate hook, two of OUR OWN overlay divs (this never
-   touches #vignette — city/death.js's hitFlash already drives that
-   element and fighting it over box-shadow was exactly the trap the
-   brief warned about), and a guarded canvas CSS filter. Every branch
+   SAFETY: one onUpdate hook, two of OUR OWN overlay divs (a dark edge,
+   never a tint: nothing in this game paints the view red), and a guarded
+   canvas CSS filter. Every branch
    bails the instant we're not in city mode (or the player is dead),
    clearing every visual so nothing can be left smeared on the screen
    across a mode switch or a respawn. Every external read is guarded
@@ -88,7 +87,7 @@
     document.body.appendChild(blackEl);
     vigEl = document.createElement("div");
     vigEl.id = "drinkVignette";
-    vigEl.style.cssText = "position:fixed;inset:0;z-index:40;pointer-events:none;box-shadow:inset 0 0 0 0 rgba(120,40,10,0);";
+    vigEl.style.cssText = "position:fixed;inset:0;z-index:40;pointer-events:none;box-shadow:inset 0 0 0 0 rgba(0,0,0,0);";
     document.body.appendChild(vigEl);
   }
 
@@ -186,7 +185,7 @@
     if (CBZ.collide) CBZ.collide(P.pos, P.radius || 0.38, P.pos.y + 0.42, P.pos.y + 1.7);
   }
 
-  // ---- soft vignette pulse on OUR OWN div (never #vignette) --------------
+  // ---- soft dark vignette pulse on OUR OWN div --------------------------
   let vigActive = false;
   function applyVignette(level, t) {
     if (level <= 0.05) { clearVignette(); return; }
@@ -195,10 +194,10 @@
     const breathe = 0.5 + 0.5 * Math.sin(t * 1.1);
     const spread = 30 + level * 10 + breathe * 14 * Math.min(level, 4);
     const alpha = Math.min(0.28, 0.03 + level * 0.028 + breathe * 0.03);
-    vigEl.style.boxShadow = "inset 0 0 " + spread.toFixed(0) + "px " + (10 + level * 3).toFixed(0) + "px rgba(120,40,10," + alpha.toFixed(2) + ")";
+    vigEl.style.boxShadow = "inset 0 0 " + spread.toFixed(0) + "px " + (10 + level * 3).toFixed(0) + "px rgba(0,0,0," + alpha.toFixed(2) + ")";
   }
   function clearVignette() {
-    if (vigActive && vigEl) vigEl.style.boxShadow = "inset 0 0 0 0 rgba(120,40,10,0)";
+    if (vigActive && vigEl) vigEl.style.boxShadow = "inset 0 0 0 0 rgba(0,0,0,0)";
     vigActive = false;
   }
 

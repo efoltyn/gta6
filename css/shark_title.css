@@ -92,9 +92,10 @@ body.touch #sharkTitle .st-keys .st-touch{display:inline-flex;}
 }
 
 /* ---- in play ---- */
-/* the starving edge: a red pulse that beats harder as the tank empties */
+/* the starving edge: the light going out of its eyes, beating harder as the
+   tank empties. Dark, never red (owner, 2026-09-30: no red screens). */
 #sharkStarve{position:fixed; inset:0; pointer-events:none; z-index:44; opacity:0;
-  box-shadow:inset 0 0 70px 14px rgba(190,10,20,.8), inset 0 0 160px 20px rgba(120,0,10,.35);}
+  box-shadow:inset 0 0 70px 14px rgba(0,4,8,.85), inset 0 0 160px 20px rgba(0,4,10,.4);}
 body:not(.mode-sharksim) #sharkStarve, body:not(.state-playing) #sharkStarve{display:none;}
 
 /* ---- THE BOOT SCREEN (index.html marks html.boot-sharksim before paint) ----

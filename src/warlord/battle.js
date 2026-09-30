@@ -2739,7 +2739,7 @@
     }
     if (m.isYou) {
       CBZ.shake && CBZ.shake(Math.min(1.2, after / 30));
-      hurtFlash = 1;
+      if (CBZ.eyes) CBZ.eyes.flinch(Math.min(1, after / 40));
     }
     if (m.hp <= 0) killMan(m, imp);
   }
@@ -3073,7 +3073,6 @@
   const CAMS = ["fps", "third", "cmd"];
   let camMode = "fps";
   let hudSyncOrders = null;      // set by buildHud; keeps the order rail honest
-  let hurtFlash = 0;
   /* THE COMMAND SEAT'S DEFAULTS, and the first draft's were a satellite photo:
    120 m out at 0.55 rad puts the lens 62 m up, which draws a 1.8 m man as two
    pixels and fills the frame with sand. A commander's shot is LOW and near
@@ -3487,8 +3486,9 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
        - RETREAT, the one way out of a fight;
        - the reach prompt when a rifle is at your feet;
        - the end-of-fight line (THEY BREAK), for the beat before the screen;
-       - how hurt you are, as a red screen edge (#wbHit) that flashes on a
-         hit and pulses once you are below half, instead of a bar.
+       - how hurt you are is your own eyes (systems/eyes.js): a flinch on
+         every hit, heavy lids and dragging blinks below half. No bar, and
+         never a red screen.
      Whether you are winning is the field itself: your line and theirs, and
      deaths.js's rim ticks at the bearing of every man of yours who falls.
      The rail and RETREAT sit faded until the mouse is over them or an order
@@ -3513,7 +3513,6 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
       "#wb .ret{position:absolute;right:calc(var(--wl-safe-r, env(safe-area-inset-right,0px)) + 14px);bottom:calc(var(--wl-safe-b, env(safe-area-inset-bottom,0px)) + 74px);pointer-events:auto}" +
       "#wb .ret button{appearance:none;border:1px solid #c4453a;background:rgba(12,10,7,.66);color:#ffc9c4;" +
         "border-radius:12px;padding:10px 13px;font:700 11px/1 inherit;letter-spacing:.14em;cursor:pointer}" +
-      "#wb .hit{position:absolute;inset:0;background:radial-gradient(120% 90% at 50% 50%,transparent 45%,rgba(196,69,58,.55));opacity:0}" +
       "#wb .note{position:absolute;left:50%;top:20%;transform:translateX(-50%);font-size:clamp(16px,4.4vw,30px);" +
         "letter-spacing:.12em;opacity:0;transition:opacity .35s;text-shadow:0 2px 12px #000;white-space:nowrap}" +
       "#wb .note.on{opacity:.95}" +
@@ -3545,7 +3544,6 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
          the camera, which is the entire control surface he actually has. */
       '<div class="ord" id="wbOrders"></div>' +
       '<div class="pick" id="wbPick"></div>' +
-      '<div class="hit" id="wbHit"></div>' +
       '<div class="note" id="wbNote"></div>';
     document.body.appendChild(root);
     hud = root;
@@ -3633,20 +3631,12 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
        syncOrderRail no-ops unless the count changed, so this costs a compare. */
     if (hudSyncOrders) hudSyncOrders();
     if (wakeT > 0 && (wakeT -= dt) <= 0 && hud) hud.classList.remove("act");
-    /* HOW HURT YOU ARE IS THE EDGE OF THE SCREEN. A hit flashes it; below
-       half health it keeps breathing, faster and redder the closer you are
-       to going down. No bar, no number. */
-    const h = document.getElementById("wbHit");
-    if (h) {
-      hurtFlash = Math.max(0, hurtFlash - dt * 1.6);
-      const f = YOU && YOU.maxHp ? clamp(YOU.hp / YOU.maxHp, 0, 1) : 1;
-      let low = 0;
-      if (!YOU.dead && f < 0.5) {
-        const k = (0.5 - f) / 0.5;
-        const t = performance.now() / 1000;
-        low = (0.25 + 0.55 * k) * (0.7 + 0.3 * Math.sin(t * (3 + 4 * k)));
-      }
-      h.style.opacity = Math.max(hurtFlash, low).toFixed(2);
+    /* HOW HURT YOU ARE IS YOUR EYES (systems/eyes.js): nothing below half,
+       then the lids get heavy and the blinks drag as you go. No bar, no
+       number, no red. */
+    if (CBZ.eyes && YOU) {
+      const f = YOU.maxHp ? clamp(YOU.hp / YOU.maxHp, 0, 1) : 1;
+      CBZ.eyes.hurt(YOU.dead ? 0 : clamp((0.5 - f) / 0.45, 0, 1), "body");
     }
     if (noteT > 0 && (noteT -= dt) <= 0) {
       const n = document.getElementById("wbNote"); if (n) n.classList.remove("on");
@@ -3684,7 +3674,7 @@ const cmd = { x: 0, z: 0, dist: 62, yaw: 0.9, pitch: 0.32, auto: true };
        MILLION distance tests to deploy 500 v 500 and read on screen as a hang.
        `.clear()` rather than `.length = 0` — the two waves that met here were
        resetting two different data structures. */
-    _claim.clear(); deadSolving = 0; hurtFlash = 0;
+    _claim.clear(); deadSolving = 0;
     _shot = null;                     // the death studio's last execution
     units = [];
     /* ?squads=old — the formation/relevance layer off. Read once, here, rather

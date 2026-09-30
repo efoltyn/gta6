@@ -767,7 +767,6 @@
       el.bar.style.width = complaints.toFixed(1) + "%";
       el.bar.style.background = complaints >= 65 ? "#ffb020" : complaints > 18 ? "#ffe14d" : "#3ad17a";
       el.dstate.textContent = complaints >= 65 ? "Complaints" : complaints > 18 ? "Reported" : "On Duty";
-      el.vignette.style.boxShadow = "inset 0 0 200px 40px rgba(220,30,40,0)";
       return;
     }
     el.detectLabel.textContent = "Wanted";
@@ -933,7 +932,7 @@
     CBZ.addHeat(-cooling * dt);
 
     // ---- HUD: relabel as WANTED ----
-    // CITY: #detectWrap/#vignette are display:none!important (css/city.css) —
+    // CITY: #detectWrap is display:none!important (css/city.css) —
     // the city runs its own wanted HUD. All the state decay above still ran;
     // skip only the dead DOM writes + the wantedBreakdown()/label string
     // building (measured: fresh boxShadow string every frame for a hidden el).
@@ -971,7 +970,7 @@
     //  for the entire quiet half of a stealth game.
     //
     //  The meter's whole job is the moment it is NOT clear, so that is when it
-    //  exists. Nothing about detection, heat, cases or the vignette changes —
+    //  exists. Nothing about detection, heat or cases changes —
     //  only whether a panel with no reading in it takes up the top of the
     //  screen. `label !== "Clear"` is the condition already computed above, so
     //  there is no second opinion about what "clear" means. The instant a guard
@@ -979,9 +978,7 @@
     //  wallpaper. Flag false = always on, exactly as it shipped.
     // ============================================================
     wantedShown(label !== "Clear" || g.detection > 5);
-
-    const vig = g.detection > 60 ? (g.detection - 60) / 40 : 0;
-    el.vignette.style.boxShadow = `inset 0 0 200px 40px rgba(220,30,40,${(vig * 0.7).toFixed(2)})`;
+    // (no red screen when they are onto you: the screws coming ARE the read)
   }
 
   CBZ.updateDetection = updateDetection;

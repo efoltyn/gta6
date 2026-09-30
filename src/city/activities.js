@@ -122,7 +122,9 @@
     }
     if (def.id === "jail") {
       hide();
-      if (CBZ.cityBust) CBZ.cityBust({ peaceful: true });
+      // turning yourself in from the menu is an authored transfer, not a
+      // world arrest (there is no officer's hands to wait for)
+      if (CBZ.cityBust) CBZ.cityBust({ peaceful: true, arc: false });
       return;
     }
     // THE ONE CONTRACT PIPE (Block Law): both Crime doors are thin routes into

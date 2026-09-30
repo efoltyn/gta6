@@ -271,8 +271,10 @@
       needs: ["look"],
       // fphands.js first: every body's hand IS the first-person hand (body LOD),
       // built inside makeCharacter
-      files: ["systems/fphands.js", "entities/footwear.js", "entities/character.js", "entities/headwear.js", "entities/watch.js", "entities/moves.js", "entities/heritage.js", "entities/poses.js", "systems/bodymass.js"],
-      publishes: ["human", "makeCharacter", "headwear", "heritageRoll", "animChar", "moves", "charPoses", "bodyMass", "meleeScale"],
+      // eyes.js: how that body SEES when it is hurt (heavy lids, a flinch),
+      // the one answer every game has instead of a red screen
+      files: ["systems/fphands.js", "entities/footwear.js", "entities/character.js", "entities/headwear.js", "entities/watch.js", "entities/moves.js", "entities/heritage.js", "entities/poses.js", "systems/bodymass.js", "systems/eyes.js"],
+      publishes: ["human", "makeCharacter", "headwear", "heritageRoll", "animChar", "moves", "charPoses", "bodyMass", "meleeScale", "eyes"],
     },
 
     // ---- two people, hands on each other -------------------------------------
@@ -2247,7 +2249,7 @@
   font-size:14px;letter-spacing:.1em;cursor:pointer}
 .sHud .pr.on{display:flex}
 .sHud .dg{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .18s linear;
-  box-shadow:inset 0 0 90px 22px rgba(196,44,30,.85), inset 0 0 260px 60px rgba(150,20,10,.42)}
+  box-shadow:inset 0 0 90px 22px rgba(0,0,0,.8), inset 0 0 260px 60px rgba(0,0,0,.4)}
 .sHud .pz{position:absolute;inset:0;display:none;place-items:center;background:rgba(9,11,14,.62);
   font-size:clamp(20px,6vw,34px);letter-spacing:.34em}
 body.micro-paused .sHud .pz{display:grid}
@@ -2287,7 +2289,8 @@ body.micro-paused .sHud .pz{display:grid}
     const fd = spec.feed === false ? null : mk("fd", "");
     const nt = spec.note === false ? null : mk("nt", "");
     const pr = spec.prompt === false ? null : mk("pr", "");
-    // DANGER IS A VIGNETTE, NOT A WORD. It costs no HUD space, it reads in
+    // DANGER IS A VIGNETTE, NOT A WORD (and never red: the view closes in,
+    // it is not tinted). It costs no HUD space, it reads in
     // peripheral vision, and it cannot collide with anything else on screen —
     // which is the whole reason a bare HUD can still tell you you are about to
     // die. No icon, no emoji, no counter.

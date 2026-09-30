@@ -172,7 +172,9 @@ ok(!redShowing().length, "no element is showing a red wash at low hp", redShowin
   frames(30, 2.0);
   ok(PC.limpSpeedMul != null && PC.limpSpeedMul < 1, "the walk cycle limps (character.js reads it)", "limpSpeedMul " + PC.limpSpeedMul);
   ok(VT.speedMul(P) < 1, "and you are slower (vitals.speedMul, physics.js)", "speedMul " + VT.speedMul(P).toFixed(2));
-  VT.reset(P);
+  // healed = the wounds closed AND the hp back (a man at 2 hp staggers:
+  // vitals.js's near-death limp)
+  P.hp = 100; VT.reset(P);
   frames(2, 2.0);
   ok(!PC.legHurt, "healed: the limp clears", String(PC.legHurt && PC.legHurt.sev));
   now += 2000;
@@ -186,7 +188,7 @@ ok(!redShowing().length, "no element is showing a red wash at low hp", redShowin
 /* 5: the sources */
 {
   const gore = read("src/systems/gore.js");
-  ok(/flashV > 0 && CBZ\.game && CBZ\.game\.mode === "escape"\) flashV = 0/.test(gore), "gore.js: the red lens is silenced in escape");
+  ok(!/flashV|flashEl/.test(gore), "gore.js: there is no red lens at all (any mode)");
   const cap = read("src/systems/capture.js");
   ok(!/\bflash\(\)/.test(cap) && !/el\.flash/.test(cap), "capture.js: no #flash anywhere");
   const fps = read("src/systems/fpsmode.js");

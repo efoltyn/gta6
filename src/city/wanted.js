@@ -794,12 +794,17 @@
   CBZ.cityArrestTake = function (cop, opts) {
     opts = opts || {};
     const AR = CBZ.arrest;
-    if (!AR || !AR.take || !cop || cop.dead) { bust({ cop: cop, peaceful: !opts.violent, arc: opts.arc }); return true; }
+    // no officer, no arrest: an arrest is a pair of hands (never a bust from
+    // nowhere; that was the "phantom handcuffed")
+    if (!cop || cop.dead) return false;
+    if (!AR || !AR.take) { bust({ cop: cop, peaceful: !opts.violent, arc: opts.arc, take: null, _noTake: true }); return true; }
     const live = AR.active();
     if (live) return live;
     if ((busting || g.busted) && !opts.arcWalk) return true;   // the arc has you (its own walk-in asks with arcWalk)
     const P = CBZ.player;
-    if (P && P.driving) return false;               // a driver is pursued, not cuffed through the glass
+    // in a car (driving or riding): pursued, never cuffed through the glass
+    if (P && P.driving) return false;
+    if (AR.playerInVehicle && AR.playerInVehicle()) return false;
     // a man giving himself up puts his hands up BEFORE the hands come (the
     // take refuses a man on his feet who has not given up)
     if (opts.surrender && CBZ.playerChar) CBZ.playerChar.handsUp = true;
@@ -839,15 +844,25 @@
   function bust(opts) {
     if (busting || g.busted) return;
     opts = opts || {};
-    // AN ARREST THE WORLD MADE IS HANDS ON YOU: with an officer near and no
-    // cuffs on yet, this is a take (he walks up and cuffs you; the arc starts
-    // when the cuffs close and comes back through here with opts.take)
-    const scripted0 = opts.arc === false || !!opts.bigLabel || !!opts.note
-      || !!(CBZ.cityCampaignActive && CBZ.cityCampaignActive());
-    if (!opts.take && !scripted0 && arcOn() && CBZ.arrest && CBZ.arrest.take && !(CBZ.player && CBZ.player.driving)) {
-      if (CBZ.arrest.active()) return;
-      const near = opts.cop && !opts.cop.dead ? opts.cop : nearestCop(6);
-      if (near && CBZ.cityArrestTake(near, { violent: !opts.peaceful, surrender: !!opts.peaceful })) return;
+    // AN ARREST THE WORLD MADE IS HANDS ON YOU, OR IT IS NOTHING. With no
+    // cuffs on yet this is a take (he walks up and cuffs you; the arc starts
+    // when the cuffs close and comes back through here with opts.take). If
+    // the take cannot happen (nobody near enough, you are in a car, on your
+    // feet and not giving up, a wall between you) there is NO arrest. This
+    // used to fall through to the hands-up/cuff scene below with the nearest
+    // cop up to 14 m away, and the cuffs closed in 0.16 s by themselves:
+    // the owner's "phantom handcuffed". Only an authored beat (the campaign's
+    // collar, the exec-fraud opening, the menu's "turn yourself in") skips
+    // the take, and it says so (opts.arc === false / bigLabel / note).
+    const scripted0 = opts.arc === false || !!opts.bigLabel || !!opts.note;
+    if (!opts.take && !scripted0 && !opts._noTake) {
+      if (CBZ.player && CBZ.player.driving) return;
+      if (CBZ.arrest && CBZ.arrest.take) {
+        if (CBZ.arrest.active()) return;
+        const near = opts.cop && !opts.cop.dead ? opts.cop : nearestCop(6);
+        if (near) CBZ.cityArrestTake(near, { violent: !opts.peaceful, surrender: !!opts.peaceful });
+        return;
+      }
     }
     busting = true; g.busted = true;
     const P = CBZ.player;
@@ -874,8 +889,7 @@
     // own big-text/sub-line and expect the short pose + straight transfer; the
     // arc is for arrests the WORLD produced. `opts.arc === false` is the
     // explicit opt-out for anything written later.
-    const scripted = opts.arc === false || !!opts.bigLabel || !!opts.note
-      || !!(CBZ.cityCampaignActive && CBZ.cityCampaignActive());
+    const scripted = scripted0 || !!(CBZ.cityCampaignActive && CBZ.cityCampaignActive());
     // A PETTY COLLAR STAYS IN THE CITY. Every arrest used to end in the prison
     // escape MODE (via County), so a first-minute mugging threw you out of the
     // game you were playing. At 1-2 stars the ride goes to the precinct desk
@@ -1345,16 +1359,20 @@
         return;
       }
       const cuffing = sc.cuffS && !sc.cuffS.done;
-      if (ch) {
-        ch.handsUp = !sc.cuffS && sc.t < 0.18;
-        if (!sc.cuffS) ch.cuffed = sc.t >= 0.16;
-        if (CBZ.animChar) CBZ.animChar(ch, 0, dt);
+      // NO HANDS ON YOU, NO CUFFS ON YOU: his cuff verb could not start, or
+      // it ended without closing them. It used to close them anyway on a
+      // clock (0.16 s with nobody touching you, or 3 s into a struggle).
+      if (!sc._tied && (!sc.cuffS || (sc.cuffS.done && !sc._tiedNow))) {
+        abortArc("escaped");
+        return;
       }
-      if (!sc._tied && (sc.cuffS ? (sc._tiedNow || !cuffing || sc.t > CUFF_T + 3) : sc.t >= 0.16)) {
+      if (ch && CBZ.animChar) CBZ.animChar(ch, 0, dt);
+      if (!sc._tied && sc._tiedNow) {
         sc._tied = true;
         if (CBZ.cityRestrain && CBZ.cityRestrain.cuffPlayer) { try { CBZ.cityRestrain.cuffPlayer(true); } catch (e) {} }
         if (!sc.cuffS && CBZ.sfx) { try { CBZ.sfx("reload"); } catch (e) {} }       // the ratchet click (the verb has its own)
-        if (CBZ.city && CBZ.city.big) CBZ.city.big((sc.opts || {}).bigLabel || ((sc.opts || {}).peaceful ? "SURRENDERED" : "CUFFED"));
+        // no "CUFFED" card: the cuffs on your wrists say it
+        if ((sc.opts || {}).bigLabel && CBZ.city && CBZ.city.big) CBZ.city.big(sc.opts.bigLabel);
         // the officer tells you where this ride ends, on screen, over him
         const line = sc.petty ? "You're under arrest. It's a ticket, relax."
           : "You're under arrest. You're going to County.";

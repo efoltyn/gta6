@@ -75,17 +75,7 @@
 
   CBZ.cityDeathReset = function () { dying = false; respawnT = 0; wastedT = 0; pendingWasted = null; pendingDeathCam = null; deathCamHoldT = 0; spectating = false; specKiller = null; pendingSpecKiller = null; g._citySpecTarget = null; finalDeath = false; finalDeathLine = ""; g._cityGameOver = false; if (goCard) goCard.style.display = "none"; if (specHUD) specHUD.style.display = "none"; hideOverlay(); if (CBZ.cityCam) CBZ.cityCam.death = null; if (CBZ.fpsDeathDropReset) CBZ.fpsDeathDropReset(); };
 
-  // a red damage flash (the engine never defined CBZ.hitFlash) — drives the
-  // existing #hitfx overlay so getting shot reads dramatically.
-  let hitEl = null;
-  if (!CBZ.hitFlash) CBZ.hitFlash = function () {
-    if (!hitEl) { hitEl = document.getElementById("hitfx") || document.getElementById("vignette"); }
-    if (!hitEl) return;
-    hitEl.style.transition = "none"; hitEl.style.boxShadow = "inset 0 0 160px 40px rgba(200,20,20,.6)"; hitEl.style.opacity = "1";
-    void hitEl.offsetWidth;
-    hitEl.style.transition = "opacity .45s ease, box-shadow .45s ease";
-    hitEl.style.opacity = "0";
-  };
+  // A hit is a FLINCH (systems/eyes.js CBZ.hitFlash), never a red screen.
 
   // ---- central player damage: armoured, survivable, with out-of-combat
   //      regen so a gunfight is a back-and-forth, not an instant death.
@@ -144,7 +134,7 @@
     }
     P.hp -= dmg;
     P._hurtT = 3.5;                     // pause regen briefly, then it ramps back
-    if (CBZ.hitFlash) CBZ.hitFlash();
+    if (CBZ.hitFlash) CBZ.hitFlash(Math.min(1, dmg / 60));
     if (CBZ.shake) CBZ.shake(Math.min(0.4, 0.12 + dmg * 0.01));
     // THE BODY (systems/vitals.js): a fist dazes and can knock you out, a
     // round or a blade opens a bleed where it went in. A hit that runs the

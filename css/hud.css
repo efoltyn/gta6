@@ -363,9 +363,9 @@ body.touch #pickupFeed{ gap:5px; max-width:min(330px,46vw); }
   color:#eaffdf; text-shadow:0 1px 0 rgba(0,0,0,.55);
 }
 
-/* alarm vignette + flash */
-#vignette{position:fixed; inset:0; pointer-events:none; box-shadow:inset 0 0 200px 40px rgba(220,30,40,0); transition:box-shadow .15s;}
-#flash{position:fixed; inset:0; pointer-events:none; background:#ff2a3a; opacity:0;}
+/* the white of a blast / flashbang / lightning. NEVER red: nothing in this
+   game tints the view red (owner, 2026-09-30). */
+#flash{position:fixed; inset:0; pointer-events:none; background:#fffaf0; opacity:0;}
 #flash.go{animation:flashfade .5s ease forwards;}
 @keyframes flashfade{0%{opacity:.55;}100%{opacity:0;}}
 
@@ -415,9 +415,6 @@ body.touch #pickupFeed{ gap:5px; max-width:min(330px,46vw); }
 body.touch #ammo{ bottom:auto; top:200px; right:18px; }
 body.fps #compass{ display:none; }
 
-/* pepper-spray sting — orange wash that fades out */
-#spray{position:fixed; inset:0; pointer-events:none; opacity:0; transition:opacity .12s;
-  background:radial-gradient(circle at 50% 50%, rgba(255,140,40,.25) 0%, rgba(200,70,0,.85) 100%);}
 
 /* pitch-black escort fade */
 #fade{position:fixed; inset:0; pointer-events:none; background:#000; opacity:0; transition:opacity .1s;}
@@ -712,7 +709,7 @@ body.touch .wprompt:not(.band)::after{background:rgba(13,26,40,.85); border-colo
        person's NAME (+ muted role), and a stall's item + price; no read line
      - speech over the speaker's head (#speech, systems/speech.js)
      - the hotbar (it is how you pick an item), the crosshair, #ammo while armed
-     - the hurt/heat vignette, the lockdown edge
+     - your eyes (systems/eyes.js): heavy lids when hurt, never a red edge
      - one short note line (#hint) through the renderer policy in hud.js
      - the escape plan, CLOSED until asked for (P / the small Plan button);
        the clock, the cigs, the map and the rankings are inside it

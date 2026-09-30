@@ -40,6 +40,17 @@
                    no hands. Out of every officer's reach for a while and he
                    works them off.
 
+     PHANTOM CUFFS (owner, 2026-09-30: "I'm getting arrested like phantom
+                   handcuffed ... it's way too easy"). The cuffs go on only
+                   when an officer's hands can: he is IN CONTACT (A.contact:
+                   within 1.25 m, facing you, same floor, no wall between),
+                   you are subdued (down, tased, pinned, surrendered), you are
+                   not in a car (never an arrest through the glass), and you
+                   are not throwing hands (a man swinging is taken down
+                   first). city/wanted.js and systems/capture.js used to fall
+                   back to a cuffing with nobody's hands on you whenever this
+                   file said no; they do not any more.
+
    Pure where it can be (the contest, the rule, the lunge, the tiers): no
    THREE in those, plain node runs them (tools/arrest-check.mjs).
 ============================================================ */
@@ -166,18 +177,49 @@
     const ch = rigOfA(a);
     if (ch && (ch.handsUp || ch.surrender || ch.kneel)) return true;
     if (isPlayerA(a)) {
-      // the player kneels by crouching where he stands
+      // the player kneels by crouching where he stands: STOCK STILL, with
+      // nothing in his hands (crouched in cover with a gun out, or creeping,
+      // is not giving up)
       const P = CBZ.player;
-      return !!(g._citySurrender || (P && P.crouch && !(+P.speed > 0.8)));
+      if (g._citySurrender) return true;
+      return !!(P && P.crouch && !(+P.speed > 0.3) && !playerArmed());
     }
     if (a.surrender || a.poseHandsUp || a.intimidMode === "scared") return true;
     const b = a._brain;
     const r = b && b.response;
     return r === "surrender" || r === "comply";
   };
+  function playerArmed() {
+    try {
+      if (mode() === "city") return !!(CBZ.cityHasGun && CBZ.cityHasGun());
+      return !!(CBZ.fps && CBZ.fps.active) || !!(CBZ.weaponThirdPersonActive && CBZ.weaponThirdPersonActive());
+    } catch (e) { return false; }
+  }
+  // the player is in (or on) a vehicle: never cuffed through the glass
+  function playerInVehicle() {
+    const P = CBZ.player;
+    if (!P) return false;
+    if (P.driving) return true;                      // driver or passenger (passengerseat.js sets it too)
+    try { if (CBZ.cityPaxRiding && CBZ.cityPaxRiding()) return true; } catch (e) {}
+    return false;
+  }
+  A.playerInVehicle = playerInVehicle;
+  // throwing hands or shooting right now (the city's swing clock, the
+  // prison's, and rounds at the police)
+  function playerFighting() {
+    const P = CBZ.player;
+    if (!P) return false;
+    if ((P._fighting || 0) > 0) return true;
+    if (g._lawSwingT != null && (g.elapsed || 0) - g._lawSwingT < 1.5) return true;
+    if (g._copsFiredUponT && (CBZ.now || 0) - g._copsFiredUponT < 1500) return true;
+    return false;
+  }
+  A.playerFighting = playerFighting;
   // the reason cuffs may go on this body now, or null
   A.cuffable = function (a) {
     if (!a || a.dead) return null;
+    const pl = isPlayerA(a);
+    if (pl && playerInVehicle()) return null;
     const ch = rigOfA(a);
     const ds = A.downState(a);
     return A.canCuff({
@@ -185,8 +227,46 @@
       ko: ds === "ko",
       subdued: ds === "tased",
       down: ds === "down",
+      fighting: pl && playerFighting(),
       compliant: A.surrendered(a),
     });
+  };
+
+  /* HANDS CAN ONLY GO ON FROM ARM'S LENGTH. The officer is within CONTACT.R
+     of you (a little more for a man lying full length), on the same floor,
+     facing you (a man kneeling on your back is facing you by construction),
+     and nothing solid stands between you. */
+  const CONTACT = { R: 1.25, R_GROUND: 1.6, DY: 0.9, FACE: 0.35 };
+  A.CONTACT = CONTACT;
+  function bodyPos(a) {
+    const Vb = V();
+    if (Vb && Vb.body) { try { const B = Vb.body(a); if (B && B.pos) return B.pos; } catch (e) {} }
+    return posOf(a);
+  }
+  let _cpV = null;
+  A.contact = function (officer, target, ground, reach) {
+    const Vb = V();
+    const t = target || (Vb && Vb.playerActor ? Vb.playerActor() : CBZ.player);
+    const op = bodyPos(officer), tp = bodyPos(t);
+    if (!op || !tp) return false;
+    const dx = tp.x - op.x, dz = tp.z - op.z;
+    let d = Math.hypot(dx, dz);
+    if (ground && Vb && Vb.contactPoint && W.THREE) {
+      // a man lying full length: measure to his back, not his feet
+      const ch = rigOfA(t);
+      _cpV = _cpV || new W.THREE.Vector3();
+      try { const b = ch ? Vb.contactPoint(ch, "back", _cpV, false) : null; if (b) d = Math.min(d, Math.hypot(b.x - op.x, b.z - op.z)); } catch (e) {}
+    }
+    if (d > (reach || (ground ? CONTACT.R_GROUND : CONTACT.R))) return false;
+    if (Math.abs((tp.y || 0) - (op.y || 0)) > CONTACT.DY) return false;
+    if (!ground && d > 0.15) {
+      const yaw = officer.group ? officer.group.rotation.y : (officer.char && officer.char.group ? officer.char.group.rotation.y : null);
+      if (yaw != null && (Math.sin(yaw) * dx + Math.cos(yaw) * dz) / d < CONTACT.FACE) return false;
+    }
+    if (Vb && Vb.lineBlocked) {
+      try { if (Vb.lineBlocked(op.x, op.y || 0, op.z, tp.x, tp.z)) return false; } catch (e) {}
+    }
+    return true;
   };
 
   /* ============================================================
@@ -551,6 +631,7 @@
   A.take = function (officer, opts) {
     const Vb = V();
     if (!Vb || !officer || officer.dead || !CBZ.player || CBZ.player.dead) return null;
+    if (playerInVehicle()) return null;              // pulled out first, or nothing
     if (live && !live.done) {
       if (live.officer === officer) return live;
       return null;                       // one pair of hands at a time on you
@@ -677,11 +758,24 @@
         }
       }
       if (S.phase !== "approach" && h.phase === "reach") {
+        // THE HANDS LAND OR THEY DO NOT: he has to actually be at you, facing
+        // you, on your floor, with nothing between (no cuffs through a wall,
+        // a car, a floor, or from across the room)
+        if (!A.contact(off, Vb.playerActor(), !!(h.onGround || S.ground)) || playerInVehicle()) {
+          S.cancel();
+          end(h, "missed", "no contact"); cb(h, "onMissed");
+          return;
+        }
         h.phase = "cuffing"; h.t0 = clock;
         if (CBZ.playerChar) CBZ.playerChar.handsUp = false;       // his hands take yours down behind you
         if (!h.said.hands) { h.said.hands = true; say(off, h.pinned || h.onGround ? "Stay down! Hands behind your back!" : "Hands behind your back!"); }
       }
       if (h.phase === "cuffing" && S.cst && S.cst.prog > 0.35 && !h.said.resist) { h.said.resist = true; say(off, "Stop resisting!"); }
+      if (h.phase === "cuffing" && !S.done && (playerInVehicle() || !A.contact(off, Vb.playerActor(), true, 2.4))) {
+        S.cancel();
+        end(h, "escaped", "apart"); cb(h, "onEscaped", "apart");
+        return;
+      }
       if (S.done) {
         const k = S.result && S.result.outcome;
         if (k === "cuffed" || h._tied || (CBZ.playerChar && CBZ.playerChar.cuffed)) {

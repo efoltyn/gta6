@@ -1026,8 +1026,15 @@
           tiesOn(true);
           if (lead && CBZ.guardLine) { try { CBZ.guardLine(lead, "cuff", { force: true }); } catch (er) {} }
         };
-        e.cuffS = lead && VB() ? VB().cuff(lead, pa(), { far: true, onOutcome: function (S, k) { if (k === "cuffed") tied(); } }) : null;
-        if (!e.cuffS) { tied(); if (CBZ.sfx) { try { CBZ.sfx("reload"); } catch (er) {} } }
+        // he has you up by the arms (force: you were on the floor a beat ago)
+        e.cuffS = lead && VB() ? VB().cuff(lead, pa(), { far: true, force: true, onOutcome: function (S, k) { if (k === "cuffed") tied(); } }) : null;
+        if (!e.cuffS) {
+          // nobody's hands can reach you: no phantom cuffs, the scene is off
+          const gd = lead;
+          endEscort();
+          if (gd) { gd.capCD = 2.5; gd.hunt = Math.max(gd.hunt || 0, 4); }
+          return;
+        }
         e.phase = "cuff"; e.t = 0;
       }
       return;
@@ -1044,9 +1051,14 @@
         if (gd) { gd.capCD = 2.5; gd.hunt = Math.max(gd.hunt || 0, 4); }
         return;
       }
-      const busy = e.cuffS && !e.cuffS.done;
-      if (busy && e.t < ESC.CUFF + 2.5) return;
-      if (!e.tied) { e.tied = true; tiesOn(true); }
+      // the cuffs are on when HIS hands closed them, not when a clock ran out
+      if (e.cuffS && !e.cuffS.done) return;
+      if (!e.tied) {
+        const gd = lead;
+        endEscort();
+        if (gd) { gd.capCD = 2.5; gd.hunt = Math.max(gd.hunt || 0, 4); }
+        return;
+      }
       dropHolds(e);
       const w = walkTarget();
       e.tx = w.x; e.tz = w.z;
@@ -1130,11 +1142,6 @@
     endEscort();   // unknown phase: never strand the player in a half-scene
   }
   CBZ.jailEscortPhase = function () { return esc ? esc.phase : null; };
-
-  // orange pepper-spray sting overlay
-  let sprayT = 0;
-  const sprayEl = document.getElementById("spray");
-  function spray(sec) { sprayT = sec; }
 
   /* ============================================================
      THE ARREST (CBZ.tryCapture). guards.js calls this every frame a hunting
@@ -1371,14 +1378,10 @@
     const kind = escapeCap ? "transfer" : "hole";
     const severity = Math.max(2, (off && off.severity) || 2) + (rough ? 0.5 : 0);
     const A = AR();
-    if (!A || !A.take || !gd) {
-      // no arrest library: the old haul scene
-      arrest = null;
-      if (gd) gd._escort = false;
-      law("cuffs");
-      startEscort(null, { kind, severity, lead: gd, tased: true });
-      return;
-    }
+    // NO HANDS, NO CUFFS. This used to fall back to the old haul scene, which
+    // put the cuffs on you with nobody's hands on you (the owner's "phantom
+    // handcuffed"). Without the arrest library, or a screw, it is a chase.
+    if (!A || !A.take || !gd) { backToChase(gd); return; }
     if (a) { a.phase = "take"; a.t = 0; }
     gd._escort = true;                   // guards.js leaves him to the verbs
     if (o.subdued && A.subdue) A.subdue(2.6, "tased");   // he keeps the trigger down while he cuffs you
@@ -1423,12 +1426,19 @@
       },
     });
     if (!h) {
-      arrest = null; gd._escort = false;
-      law("cuffs");
-      startEscort(null, { kind, severity, lead: gd, tased: true });
+      // THE TAKE REFUSED (arrest.js: he is not at you, there is a wall or a
+      // floor between you, or you are on your feet and have not given up):
+      // that is not an arrest, it is still a chase. Never cuffs from nowhere.
+      backToChase(gd);
       return;
     }
     if (a) a.take = h;
+    setCaptureState("normal", 0);
+  }
+  function backToChase(gd) {
+    if (gd) gd._escort = false;
+    if (arrest && arrest.gd === gd) { arrest.phase = "chase"; arrest.t = 0; arrest.take = null; }
+    else arrest = null;
     setCaptureState("normal", 0);
   }
   // reached a mark: the door mouth, then inside. Inside: the cuffs come off
@@ -1619,14 +1629,11 @@
   // prison only: in the city F is get in / get out, never a trigger
   addEventListener("keydown", (e) => { if (e.key.toLowerCase() === "f" && g.mode === "escape") fire(); });
 
-  // fade the pepper-spray overlay (runs even when not playing)
-  CBZ.onAlways(70, function (dt) {
+  // (runs even when not playing)
+  CBZ.onAlways(70, function () {
     // A door we shut must never outlive the mode that shut it: the escape tick
     // below returns early outside "escape", so the release cannot live there.
     if (heldDoor != null && CBZ.game.mode !== "escape") { releasePlayerCell(); confineT = 0; confineShown = -1; }
-    if (!sprayEl) return;
-    if (sprayT > 0) { sprayT -= dt; sprayEl.style.opacity = Math.min(0.85, sprayT * 0.6).toFixed(2); }
-    else if (sprayEl.style.opacity !== "0") sprayEl.style.opacity = "0";
   });
   // leaving play (title / won / lost) — the shared run-lifecycle dispatcher
   if (CBZ.jailBoost && CBZ.jailBoost.onStateExit) {
