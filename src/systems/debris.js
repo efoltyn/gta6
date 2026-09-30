@@ -153,11 +153,13 @@
   function lcBand(c, o) {
     const y0 = c.y0 != null ? c.y0 : (o && o.defBot != null ? o.defBot : -Infinity);
     const y1 = c.y1 != null ? c.y1 : (o && o.defTop != null ? o.defTop : Infinity);
-    _lcBand0 = y0; return y1;
+    _LC[0] = y0; return y1;
   }
-  let _lcBand0 = 0;
-  // slab test of A + t*D against [x0,x1]x[y0,y1]x[z0,z1]; writes _lcT/_lcAx/_lcSg
-  let _lcT = 0, _lcAx = 0, _lcSg = 0;
+  // (doubles in a Float64Array: a double stored in a module-scope `let` is a
+  // fresh heap number per store, per collider, per debris body, per step)
+  const _LC = new Float64Array(4);   // [band0, t, axis, sign]
+  // slab test of A + t*D against [x0,x1]x[y0,y1]x[z0,z1]; writes _LC[1]/_LC[2]/_LC[3]
+
   function lcSlab(ax, ay, az, dx, dy, dz, x0, x1, y0, y1, z0, z1) {
     let tmin = -Infinity, tmax = Infinity, axis = -1, sg = 0;
     // X
@@ -187,7 +189,7 @@
     if (tmin > tmax || tmax < 0) return 0;          // miss / box behind
     if (tmin < 0 || axis < 0) return 2;             // started inside
     if (tmin > 1) return 0;                         // beyond this step
-    _lcT = tmin; _lcAx = axis; _lcSg = sg;
+    _LC[1] = tmin; _LC[2] = axis; _LC[3] = sg;
     return 1;
   }
   function lcSegment(ax, ay, az, bx, by, bz, pad, cols, out, o) {
@@ -199,7 +201,7 @@
       const c = cols[i];
       if (!c || c.minX == null) continue;
       if (skip && skip(c)) continue;
-      const y1 = lcBand(c, o), y0 = _lcBand0;
+      const y1 = lcBand(c, o), y0 = _LC[0];
       if (!(y1 > y0)) continue;
       let r, nx = 0, ny = 0, nz = 0;
       if (c.yaw) {
@@ -208,16 +210,16 @@
         const lx = rx * co - rz * si, lz = rx * si + rz * co;         // world -> local (physics.js oriPush)
         const ldx = dx * co - dz * si, ldz = dx * si + dz * co;
         r = lcSlab(lx, ay, lz, ldx, dy, ldz, -c.hw - pad, c.hw + pad, y0 - py, y1 + py, -c.hd - pad, c.hd + pad);
-        if (r !== 1 || _lcT >= best || (sides && _lcAx === 1)) continue;
+        if (r !== 1 || _LC[1] >= best || (sides && _LC[2] === 1)) continue;
         let lnx = 0, lnz = 0;
-        if (_lcAx === 0) lnx = _lcSg; else if (_lcAx === 2) lnz = _lcSg; else ny = _lcSg;
+        if (_LC[2] === 0) lnx = _LC[3]; else if (_LC[2] === 2) lnz = _LC[3]; else ny = _LC[3];
         nx = lnx * co + lnz * si; nz = -lnx * si + lnz * co;          // local -> world
       } else {
         r = lcSlab(ax, ay, az, dx, dy, dz, c.minX - pad, c.maxX + pad, y0 - py, y1 + py, c.minZ - pad, c.maxZ + pad);
-        if (r !== 1 || _lcT >= best || (sides && _lcAx === 1)) continue;
-        if (_lcAx === 0) nx = _lcSg; else if (_lcAx === 1) ny = _lcSg; else nz = _lcSg;
+        if (r !== 1 || _LC[1] >= best || (sides && _LC[2] === 1)) continue;
+        if (_LC[2] === 0) nx = _LC[3]; else if (_LC[2] === 1) ny = _LC[3]; else nz = _LC[3];
       }
-      best = _lcT; bnx = nx; bny = ny; bnz = nz; bc = c;
+      best = _LC[1]; bnx = nx; bny = ny; bnz = nz; bc = c;
     }
     if (!bc) return false;
     out.t = best; out.nx = bnx; out.ny = bny; out.nz = bnz; out.c = bc;
@@ -236,7 +238,7 @@
     return lcSegment(ax, ay, az, bx, by, bz, pad, cols, out, o);
   }
   function lcPushOut(x, y, z, pad, c, out, o) {
-    const y1 = lcBand(c, o), y0 = _lcBand0;
+    const y1 = lcBand(c, o), y0 = _LC[0];
     const py = o && o.padY != null ? o.padY : pad;
     if (y < y0 - py || y > y1 + py) return false;
     let lx = x, lz = z, hx0, hx1, hz0, hz1, co = 1, si = 0;
@@ -544,13 +546,14 @@
   // Clip a closed convex triangle soup by the half-space n.p <= off and close
   // the cut. Cap faces get the core slot, the plane normal, planar UVs and the
   // core colour.
-  const _poly = [], _cap = [], _clipD = [0, 0, 0];
+  const _poly = [], _cap = [], _clipD = [0, 0, 0], _clipA = [], _clipB = [];
   function lerpInto(t, a, b, s, dst) {
     for (let k = 0; k < S; k++) dst.push(t[a + k] + (t[b + k] - t[a + k]) * s);
     dst[dst.length - 1] = t[a + S - 1];      // slot is not interpolated
   }
-  function clipSolid(t, nx, ny, nz, off, cap) {
-    const out = [];
+  function clipSolid(t, nx, ny, nz, off, cap, into) {
+    const out = into || [];
+    if (into) into.length = 0;
     _cap.length = 0;
     const eps = 1e-6;
     for (let i = 0; i < t.length; i += 3 * S) {
@@ -724,7 +727,10 @@
         order.push([j, (q[0] - a[0]) ** 2 * kx2 + (q[1] - a[1]) ** 2 * ky2 + (q[2] - a[2]) ** 2 * kz2]);
       }
       order.sort((p, q) => p[1] - q[1]);
-      let cell = t;
+      // the intermediate cells ping-pong between two kept scratch arrays (a
+      // fresh array per clip, up to 18 per cell, was the fracture's garbage:
+      // ~650 MB in a drive through a few walls); only the finished cell is copied
+      let cell = t, pp = 0;
       const lim = Math.min(order.length, 18);
       for (let oi = 0; oi < lim && cell.length; oi++) {
         const q = sites[order[oi][0]];
@@ -733,9 +739,11 @@
         let off = ((q[0] * q[0] - a[0] * a[0]) * kx2 + (q[1] * q[1] - a[1] * a[1]) * ky2 + (q[2] * q[2] - a[2] * a[2]) * kz2) / 2;
         const l = Math.hypot(nx, ny, nz); if (l < 1e-9) continue;
         nx /= l; ny /= l; nz /= l; off /= l;
-        cell = clipSolid(cell, nx, ny, nz, off, cap);
+        const dst = pp ? _clipB : _clipA; pp ^= 1;
+        cell = clipSolid(cell, nx, ny, nz, off, cap, dst);
       }
       if (cell.length < 4 * 3 * S) continue;
+      if (cell === _clipA || cell === _clipB) cell = cell.slice();
       const vol = volumeOf(cell);
       if (vol.V < 2e-6) continue;
       cells.push({ t: cell, V: vol.V, cx: vol.cx, cy: vol.cy, cz: vol.cz });

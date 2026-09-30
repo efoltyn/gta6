@@ -2037,7 +2037,14 @@
         if (!(fx >= 0 && fz >= 0 && fx < SEG && fz < SEG)) return false;
         if (authoredAt(x, z)) return false;                          // someone else's floor
         out.g = 0;
-        const s = shoreField(x, z);
+        // THE COAST MEMO, not the raw field: the grass asks this per blade
+        // sample as the player drives into new ground, and the raw field walks
+        // every river and lake (the drive's largest garbage source after three
+        // itself). waterfield's memo holds this same field on a 4 m grid,
+        // exact at the corners (under a metre off between them; the grass
+        // bands here are 16/24/52 m wide).
+        const WF = CBZ.waterField, T = CBZ.city && CBZ.city.arena && CBZ.city.arena.mapTerrain;
+        const s = (WF && WF.coastAt && T && T.shoreAt === shoreField) ? WF.coastAt(x, z) : shoreField(x, z);
         if (!(s > 16)) return true;                                   // sand rim and water
         const rd = roadDist(x, z);
         if (rd < 0) return true;                                      // on a road

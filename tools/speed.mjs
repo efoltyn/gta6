@@ -1758,8 +1758,13 @@ async function serveMain() {
       // --allocs: V8's sampling heap profiler over the drive, INCLUDING what
       // the collector already took (the churn behind the sawtooth), by site
       if (q.allocs) { await P.s("HeapProfiler.enable"); await P.s("HeapProfiler.startSampling", { samplingInterval: 262144, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true }); }
-      res.value = await P.ev(`(function(route, MPS, SECS){
+      res.value = await P.ev(`(async function(route, MPS, SECS){
         var S = window.__speed, C = window.CBZ, T = window.THREE, Pl = C.player; if (!Pl || !Pl.pos) return { err: "no player" };
+        /* EVERY FRAME ITS OWN TASK, like real play: a GL fence can only
+           signal and the collector only idles between tasks, so a drive
+           stepped inside one task measured neither (GPU read-back never ran,
+           garbage never collected). ?YIELD=0 in --query keeps the old loop. */
+        var YIELD = !/[?&]YIELD=0\b/.test(location.search);
         var A = C.city && C.city.arena; var root = A && A.root;
         if (!route) { var sx = Pl.pos.x, sz = Pl.pos.z; route = [[sx, sz], [sx - MPS * SECS * 0.5, sz - 300], [sx - MPS * SECS * 0.7, sz + MPS * SECS * 0.45]]; }
         var legs = [], tot = 0; for (var i = 0; i + 1 < route.length; i++) { var L = Math.hypot(route[i+1][0]-route[i][0], route[i+1][1]-route[i][1]); legs.push(L); tot += L; }
@@ -1806,6 +1811,7 @@ async function serveMain() {
             if (C.playerChar && C.playerChar.group) { C.playerChar.group.position.set(q[0], Pl.pos.y, q[1]); C.playerChar.group.rotation.y = q[2]; }
             if (C.cam) C.cam.yaw = q[2] + Math.PI; } });
           if (f & 1) scan(false);
+          if (YIELD) await new Promise(function (r) { setTimeout(r, 0); });
           if (f % 60 === 59) { var m = S.memRead(); hp = Math.max(hp, m.heap); gp = Math.max(gp, m.gpu); php = Math.max(php, m.phone);
             var st = C.streamStats || {}; samples.push([Math.round((f + 1) / 60), Math.round(m.heap), Math.round(m.gpu), Math.round(m.phone), st.built, st.parked, st.queued, C.slice ? Math.round(C.slice.keepR()) : null]); }
         }
