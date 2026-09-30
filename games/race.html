@@ -13,8 +13,8 @@
   every change to a car or a corner cost a 25 km world boot to look at. Now
   it is this page and src/race/*.js, nothing else: three.js, the circuit, the
   cars, the bowl, the drivers. It boots in a couple of seconds on a phone.
-  Gang City's speedway sends you here with ?from=city and the results board
-  sends you back. There is one racing game, and this is it.
+  In Gang City the same race is run in the world (your character walks into
+  the Bullring and gets into a car); this page is the bench for the modules.
 ============================================================ -->
 <link rel="stylesheet" href="../css/fonts.css">
 <style>
@@ -100,8 +100,8 @@
   td:nth-child(4),td:nth-child(5){text-align:right;font-variant-numeric:tabular-nums}
   tr.me td{background:rgba(255,59,48,.18)}
   td.fl{color:#c77dff}
-  /* the portal's back link (injected by the release build) never sits over a race or inside Gang City's frame */
-  body.racing #portalHome,body.embed #portalHome{display:none!important}
+  /* the portal's back link (injected by the release build) never sits over a race */
+  body.racing #portalHome{display:none!important}
 </style>
 </head>
 <body>
@@ -111,7 +111,7 @@
 <div id="card"><h1>BULL<em>RING</em></h1><button id="go" type="button">RACE</button></div>
 
 <div class="hud" id="chip"><span id="hPos">P6/10</span><span id="hLap">LAP 1/8</span></div>
-<div class="hud" id="speedo"><div><b id="hSpd">0</b><i id="hGear">1</i></div><span>KM/H</span><div id="rpmBar"><div id="hRpm"></div></div></div>
+<div class="hud" id="speedo"><div><b id="hSpd">0</b><i id="hGear">1</i></div><span>MPH</span><div id="rpmBar"><div id="hRpm"></div></div></div>
 <div class="hud" id="lights"><i></i><i></i><i></i><i></i><i></i></div>
 <div class="hud" id="flag"></div>
 
@@ -122,22 +122,23 @@
 <button class="pedal tc" id="brk" type="button" aria-label="Brake"></button>
 <button class="pedal tc" id="gas" type="button" aria-label="Throttle"></button>
 
-<div class="sheet" id="pause"><div class="in"><button class="btn" id="resume" type="button">RESUME</button><button class="btn q" id="leave" type="button">CITY</button></div></div>
+<div class="sheet" id="pause"><div class="in"><button class="btn" id="resume" type="button">RESUME</button></div></div>
 <div class="sheet" id="board"><div class="in">
   <h2 id="boardTitle">WINNER</h2>
   <table><tbody id="boardRows"></tbody></table>
-  <button class="btn" id="again" type="button">RACE AGAIN</button><button class="btn q" id="back" type="button">CITY</button>
+  <button class="btn" id="again" type="button">RACE AGAIN</button>
 </div></div>
 
 <script src="../src/vendor/three.r128.min.js"></script>
-<script src="../src/race/race_core.js?v=rg0929"></script>
-<script src="../src/race/race_physics.js?v=rg0929"></script>
-<script src="../src/race/race_ai.js?v=rg0929"></script>
-<script src="../src/race/race_car.js?v=rg0929"></script>
-<script src="../src/race/race_track.js?v=rg0929"></script>
-<script src="../src/race/race_venue.js?v=rg0929"></script>
-<script src="../src/race/race_audio.js?v=rg0929"></script>
-<script src="../src/race/race_game.js?v=rg0929"></script>
+<script src="../src/race/race_core.js?v=ric0929"></script>
+<script src="../src/race/race_physics.js?v=ric0929"></script>
+<script src="../src/race/race_ai.js?v=ric0929"></script>
+<script src="../src/race/race_session.js?v=ric0929"></script>
+<script src="../src/race/race_car.js?v=ric0929"></script>
+<script src="../src/race/race_track.js?v=ric0929"></script>
+<script src="../src/race/race_venue.js?v=ric0929"></script>
+<script src="../src/race/race_audio.js?v=ric0929"></script>
+<script src="../src/race/race_game.js?v=ric0929"></script>
 <a href="../" id="portalHome" style="position:fixed;left:12px;top:10px;z-index:2147483000;font:700 13px/1 Fredoka,Arial,sans-serif;letter-spacing:.08em;color:#fff;text-decoration:none;background:rgba(4,20,36,.55);padding:8px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.25)">◀ ALL GAMES</a>
 </body>
 </html>
