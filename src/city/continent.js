@@ -654,7 +654,16 @@
        `b.pts` (a channel that tapers, which a real river does at both ends).
        Returns the signed distance to the channel's edge, so a caller cannot
        tell a river from a lake — which is the point. */
-    function pathBodyField(b, x, z, exact) {
+    /* NUMBERS IN A TYPED SCRATCH, NOT ARGUMENTS OR RETURNS. The water
+       oracle's inner chain (inlandWaterField -> waterBodyField ->
+       pathBodyField) runs per body per query, and each double handed to or
+       returned from a call that is not inlined is a fresh heap number: ~30
+       MB/s of garbage on the phone road drive (coast-memo misses at speed).
+       _WF = [result, x, z]. The public signatures below are unchanged. */
+    const _WF = new Float64Array(3);
+    function pathBodyField(b, x, z, exact) { _WF[1] = x; _WF[2] = z; pathBodyFieldW(b, exact); return _WF[0]; }
+    function pathBodyFieldW(b, exact) {
+      const x = _WF[1], z = _WF[2];
       const bb = b.bbox;
       if (bb && !exact) {
         const ox = Math.max(bb.minX - x, 0, x - bb.maxX);
@@ -665,10 +674,10 @@
         // river's bounding box (x = -2140 read "13.8 m from water" 2 km from
         // the Mercy River). Far out it is harmless (nothing reads the shore
         // beyond the relief's 1.3 km valley ramp); nearer, measure properly.
-        if ((ox > 0 || oz > 0) && (ox > 1300 || oz > 1300)) return Math.hypot(ox, oz);
+        if ((ox > 0 || oz > 0) && (ox > 1300 || oz > 1300)) { _WF[0] = Math.hypot(ox, oz); return; }
       }
       const p = b.pts;
-      if (!p || p.length < 2) return Infinity;
+      if (!p || p.length < 2) { _WF[0] = Infinity; return; }
       // per-segment bounds, once per body: a segment whose box is farther than
       // the best edge distance so far (plus its widest half) cannot win, so
       // it is skipped without the projection. Same minimum, a fraction of the
@@ -709,11 +718,13 @@
         if (d < best) best = d;
         if (best < -half) break;                            // deep inside: no closer answer matters
       }
-      return best;
+      _WF[0] = best;
     }
-    function waterBodyField(b, x, z) {
+    function waterBodyField(b, x, z) { _WF[1] = x; _WF[2] = z; waterBodyFieldW(b); return _WF[0]; }
+    function waterBodyFieldW(b) { const x = _WF[1], z = _WF[2]; _WF[0] = waterBodyFieldCore(b, x, z); }
+    function waterBodyFieldCore(b, x, z) {
       if (!b) return Infinity;
-      if (b.kind === "path") return pathBodyField(b, x, z);
+      if (b.kind === "path") { _WF[1] = x; _WF[2] = z; pathBodyFieldW(b, false); return _WF[0]; }
       if (b.kind === "circle") {
         // A LAKE IS NOT A COMPASS CIRCLE (owner: "Kings Lake is a perfect
         // circle"). The registered radius is the basin's OUTER limit and the
@@ -755,7 +766,10 @@
           const ox = Math.max(bb.minX - x, 0, x - bb.maxX), oz = Math.max(bb.minZ - z, 0, z - bb.maxZ);
           if (Math.sqrt(ox * ox + oz * oz) - pathMaxHalf(b) >= nearest) continue;
         }
-        nearest = Math.min(nearest, waterBodyField(b, x, z));
+        let wv;
+        if (b && b.kind === "path") { _WF[1] = x; _WF[2] = z; pathBodyFieldW(b, false); wv = _WF[0]; }
+        else wv = waterBodyFieldCore(b, x, z);
+        if (wv < nearest) nearest = wv;
       }
       return nearest;
     }

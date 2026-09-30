@@ -133,18 +133,24 @@
   // city's heap, memscope)
   const COAST_TILE = 8, COAST_TILES_MAX = 32768;
   // (the build walks the whole coastline: the phone's smaller cap applies in play)
-  function coastCap() { return CBZ.deviceClass === "phone" && CBZ.game && CBZ.game.state === "playing" ? 8192 : COAST_TILES_MAX; }
+  // (a phone cap with a player-centred trim was tried and REVERTED: sea life,
+  // boats and wildlife ask the coast all over the map, so the trim threw away
+  // tiles they needed every frame and the memo missed 400-1800 corners a frame)
+  function coastCap() { return COAST_TILES_MAX; }
   function coastTrim() {
     const P = CBZ.player && CBZ.player.pos;
     if (!P) { coastTiles.clear(); return; }
     const cx = Math.floor(P.x / COAST_GRID) + 8192, cz = Math.floor(P.z / COAST_GRID) + 8192;
-    const R = (1500 / COAST_GRID) >> 3;                    // 1.5 km, in tiles
+    // 700 m, in tiles (a 1.5 km square held MORE than the cap, so every trim
+    // ended in a full clear and the memo missed ~400 corners a frame: the
+    // road drive's water garbage)
+    const R = (700 / COAST_GRID) >> 3;
     const tx = cx >> 3, tz = cz >> 3;
     coastTiles.forEach(function (v, key) {
       const kx = (key / 4096) | 0, kz = key - kx * 4096;
       if (Math.abs(kx - tx) > R || Math.abs(kz - tz) > R) coastTiles.delete(key);
     });
-    if (coastTiles.size >= coastCap() * 0.9) coastTiles.clear();
+    if (coastTiles.size >= coastCap()) coastTiles.clear();        // (only if 700 m alone overflows it)
     _ctKey = -1; _ctArr = null;
   }
   let coastTiles = new Map(), coastCacheTerrain = null;
@@ -179,7 +185,11 @@
     }
     return v === Infinity ? null : v;
   }
-  let _lcIx = null, _lcIz = 0, _lc00 = 0, _lc10 = 0, _lc01 = 0, _lc11 = 0;
+  // (the last cell's corners in a typed array: a double stored into a
+  // module-scope `let` is a fresh heap number, four per cell change, and the
+  // queries of many entities change cell nearly every call)
+  let _lcIx = null, _lcIz = 0;
+  const _LCC = new Float64Array(4);
   function coastAt(x, z) {
     const A = arena();
     const terrain = A && A.mapTerrain;
@@ -199,10 +209,10 @@
             if (s0 !== null) return s0;
             return fallbackWater(A, x, z, true) ? -24 : 24;
           }
-          _lcIx = ix; _lcIz = iz; _lc00 = c00; _lc10 = c10; _lc01 = c01; _lc11 = c11;
+          _lcIx = ix; _lcIz = iz; _LCC[0] = c00; _LCC[1] = c10; _LCC[2] = c01; _LCC[3] = c11;
         }
         const fx = gx - ix, fz = gz - iz;
-        return (_lc00 * (1 - fx) + _lc10 * fx) * (1 - fz) + (_lc01 * (1 - fx) + _lc11 * fx) * fz;
+        return (_LCC[0] * (1 - fx) + _LCC[1] * fx) * (1 - fz) + (_LCC[2] * (1 - fx) + _LCC[3] * fx) * fz;
       }
       const s = coastRaw(terrain, x, z);
       if (s !== null) return s;
