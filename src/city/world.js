@@ -536,6 +536,7 @@
       const s = radius / d;
       return { x: x + dx * s, z: z + dz * s };
     }
+    const _lastReg = new WeakMap();
     function clampToCity(p, r) {
       // This helper is containment for autonomous actors, not a player/world
       // boundary. The player and their current vehicle must be allowed to leave
@@ -557,21 +558,40 @@
       // connected walkable union — same treatment as the mainland/annex.
       const regs = city && city.regions;
       if (regs && CBZ.cityRegionHit) {
-        for (let i = 0; i < regs.length; i++) if (CBZ.cityRegionHit(regs[i], p.x, p.z, r)) return;
+        // the region this actor stood in last time first: 84 calls a frame,
+        // each walking all ~220 regions, was ~11 MB/s of boxed numbers
+        const last = _lastReg.get(p);
+        if (last && CBZ.cityRegionHit(last, p.x, p.z, r)) return;
+        for (let i = 0; i < regs.length; i++) if (CBZ.cityRegionHit(regs[i], p.x, p.z, r)) { _lastReg.set(p, regs[i]); return; }
       }
 
-      const spots = [clampRect(p, x0, x1, z0, z1)];
-      if (B) spots.push(clampRect(p, B.minX + r, B.maxX - r, B.minZ + r, B.maxZ - r));
-      if (A) spots.push(clampCircle(p, A.cx, A.cz, A.radius - r));
-      if (regs && CBZ.cityRegionClamp) {
-        for (let i = 0; i < regs.length; i++) spots.push(CBZ.cityRegionClamp(regs[i], p.x, p.z, r));
+      // the nearest point of the union, WITHOUT an object per candidate: this
+      // runs for every autonomous actor outside every region, every frame
+      // (one {x,z} per registered region each call: ~11 MB/s of garbage in
+      // the phone drive)
+      const px = p.x, pz = p.z;
+      let bx = Math.max(x0, Math.min(x1, px)), bz = Math.max(z0, Math.min(z1, pz));
+      let bd = (bx - px) * (bx - px) + (bz - pz) * (bz - pz);
+      const tryPt = function (qx, qz) { const d = (qx - px) * (qx - px) + (qz - pz) * (qz - pz); if (d < bd) { bd = d; bx = qx; bz = qz; } };
+      if (B) tryPt(Math.max(B.minX + r, Math.min(B.maxX - r, px)), Math.max(B.minZ + r, Math.min(B.maxZ - r, pz)));
+      if (A) {
+        const dx = px - A.cx, dz = pz - A.cz, d = Math.hypot(dx, dz) || 1, s = (A.radius - r) / d;
+        tryPt(A.cx + dx * s, A.cz + dz * s);
       }
-      let best = spots[0], bd = Infinity;
-      for (const q of spots) {
-        const d = (q.x - p.x) * (q.x - p.x) + (q.z - p.z) * (q.z - p.z);
-        if (d < bd) { bd = d; best = q; }
+      if (regs) {
+        for (let i = 0; i < regs.length; i++) {
+          const reg = regs[i]; if (!reg) continue;
+          if (reg.kind === "circle") {
+            const dx = px - reg.cx, dz = pz - reg.cz, d = Math.hypot(dx, dz) || 1;
+            const rad = Math.max(0, reg.r + (reg.pad || 0) - r);
+            if (d <= rad) tryPt(px, pz); else tryPt(reg.cx + dx / d * rad, reg.cz + dz / d * rad);
+          } else if (reg.minX != null) {
+            const pad = reg.pad || 0;
+            tryPt(Math.max(reg.minX - pad + r, Math.min(reg.maxX + pad - r, px)), Math.max(reg.minZ - pad + r, Math.min(reg.maxZ + pad - r, pz)));
+          }
+        }
       }
-      p.x = best.x; p.z = best.z;
+      p.x = bx; p.z = bz;
     }
 
     // ---- LAND-VALUE FIELD (PROCGEN.md roadmap #3) -----------------------

@@ -67,10 +67,18 @@
     if (!A) return false;
     const B = A.bridge;
     if (B && x >= B.minX - margin && x <= B.maxX + margin && z >= B.minZ - margin && z <= B.maxZ + margin) return true;
+    // only the bridge/causeway regions (a handful of ~220), listed once per
+    // regions array: this runs for every water query, every frame
     const regs = A.regions || [];
-    for (let i = 0; i < regs.length; i++) if (isLink(regs[i]) && regionHit(regs[i], x, z, margin)) return true;
+    if (_linkOf !== regs || _linkN !== regs.length) {
+      _linkOf = regs; _linkN = regs.length; _links.length = 0;
+      for (let i = 0; i < regs.length; i++) if (isLink(regs[i])) _links.push(regs[i]);
+    }
+    for (let i = 0; i < _links.length; i++) if (regionHit(_links[i], x, z, margin)) return true;
     return false;
   }
+  let _linkOf = null, _linkN = -1;
+  const _links = [];
 
   // Legacy fallback used only before continent.js publishes the real signed
   // shoreline.  It preserves the old gameplay contract during boot.

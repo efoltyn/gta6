@@ -35,7 +35,8 @@
     const inv = 1 / cell;
     const buckets = new Map();   // intKey -> array (pooled, reused)
     const pool = [];             // free array list
-    const used = [];             // arrays currently populated (reset next rebuild)
+    const used = [];             // arrays currently keyed (emptied next rebuild)
+    let gen = 0;
 
     function cellIndex(v) { return Math.floor(v * inv); }
     function keyOf(gx, gz) { return (gx + OFF) * SPAN + (gz + OFF); }
@@ -45,9 +46,19 @@
 
       // bucket the items by cell. getVec(item) -> {x,z}.
       rebuild: function (items, getVec, limit) {
-        for (let i = 0; i < used.length; i++) { used[i].length = 0; pool.push(used[i]); }
-        used.length = 0;
-        buckets.clear();
+        /* The Map is NOT cleared every rebuild: clear() drops its hash table
+           and every rebuild grew it again (a fresh table per grid per frame,
+           ~4 MB/s in the phone drive). Used buckets are emptied in place and
+           stay keyed; the whole Map is only reset every 256 rebuilds, so
+           cells an actor left long ago do not accumulate. */
+        if (++gen >= 256) {
+          gen = 0;
+          for (let i = 0; i < used.length; i++) { used[i].length = 0; pool.push(used[i]); }
+          used.length = 0;
+          buckets.clear();
+        } else {
+          for (let i = 0; i < used.length; i++) used[i].length = 0;
+        }
         const n = limit == null ? items.length : Math.min(items.length, limit);
         for (let i = 0; i < n; i++) {
           const it = items[i];
@@ -59,7 +70,8 @@
         }
       },
 
-      // the array of items in cell (gx,gz), or undefined.
+      // the array of items in cell (gx,gz), or undefined (or empty: a cell
+      // somebody left since the last reset keeps an empty bucket).
       bucket: function (gx, gz) { return buckets.get(keyOf(gx, gz)); },
     };
   };

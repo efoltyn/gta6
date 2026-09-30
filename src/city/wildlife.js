@@ -599,13 +599,29 @@
       Math.abs(b.scale.x - 1) < 1e-9 && Math.abs(b.scale.y - 1) < 1e-9 && Math.abs(b.scale.z - 1) < 1e-9;
     if (ident) {
       while (b.children.length) grp.add(b.children[0]);
-      for (const k in b.userData) if (grp.userData[k] === undefined) grp.userData[k] = b.userData[k];
+      a._bodyKeys = [];
+      for (const k in b.userData) if (grp.userData[k] === undefined) { grp.userData[k] = b.userData[k]; a._bodyKeys.push(k); }
     } else grp.add(b);
     grp.traverse(function (o) { if (o.isMesh) o.castShadow = true; });
     if (LIVE()) { a._mOn = undefined; buildGaitRig(a); buildSwimRig(a); setLiveMats(a, grp.visible !== false); }
-    a._mp = null;
+    a._mp = null; a._bodyMesh = undefined; a._bellyQ = undefined;
   }
   CBZ.wildlifeFillBody = fillBody;
+  /* ...AND GIVEN BACK when the animal is far again (draw radius + 400 m):
+     its own geometries leave the GPU, the group is empty again, the record
+     keeps living. A drive used to leave every animal it passed built. */
+  function unfillBody(a) {
+    const grp = a.group;
+    if (!grp || a._lazyBody || !a._lazyEligible) return;
+    const kids = grp.children.slice();
+    for (let i = 0; i < kids.length; i++) {
+      kids[i].traverse(function (o) { const g = o.geometry; if (g && g.dispose && !g._shared && !(g.userData && g.userData._shared)) g.dispose(); });
+      grp.remove(kids[i]);
+    }
+    if (a._bodyKeys) { for (const k of a._bodyKeys) delete grp.userData[k]; a._bodyKeys = null; }
+    a.gait = null; a.swim = null; a._mOn = undefined; a._mp = null; a._bodyMesh = undefined; a._bellyQ = undefined;
+    a._lazyBody = true;
+  }
 
   function makeActor(sp, x, z) {
     let grp;
@@ -695,7 +711,7 @@
     }
     // discover the rig ONCE: legs/head for walkers, tail/jaw for swimmers.
     // Each builder bails on the other's animals, so this is one line per actor.
-    if (lazyBody) a._lazyBody = true;
+    if (lazyBody) { a._lazyBody = true; a._lazyEligible = true; }
     else if (LIVE()) { buildGaitRig(a); buildSwimRig(a); }
     // snakes carry a segment chain the engine undulates (slither) — cache the
     // parts the build() registered on userData so the anim loop is allocation-free.
@@ -4289,6 +4305,7 @@
         pd2 = vdx * vdx + vdz * vdz;
         const vr = visR * (SZ(a) >= 1.3 ? 1.6 : 1);
         if (a._lazyBody && (a.ridden || a.tamed || pd2 < (vr + 80) * (vr + 80))) fillBody(a);
+        else if (!a._lazyBody && a._lazyEligible && !a.dead && !a.ridden && !a.tamed && pd2 > (vr + 400) * (vr + 400)) unfillBody(a);
         grp.visible = a.ridden || a.tamed || pd2 < vr * vr;
       }
       // matrix LOD: hidden animals stop paying r128's per-frame matrix math
