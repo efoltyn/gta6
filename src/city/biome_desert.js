@@ -813,20 +813,74 @@
         const cat = function (L) { let n = 0; for (const a of L) n += a.length; const o = new Float32Array(n); let k = 0; for (const a of L) { o.set(a, k); k += a.length; } return o; };
         CBZ.bakePut("desert-erg", ESIG, { p: cat(EP), n: cat(EN), c: cat(EC) });
       }
+      /* THE ERG IS STREAMED LIKE THE CITY (streamed/phone city): a tile is
+         kept as a compact record (height per vertex, 8-bit normal and paint:
+         10 bytes a vertex instead of 44) and becomes a mesh only while it is
+         inside the keep circle (a CBZ.sliceAt job per tile; freed again when
+         the player leaves). The ground under your feet is the height function
+         (registerCityGroundHeight), never these meshes, so physics is
+         unchanged; what is drawn is the same surface, rebuilt exactly. */
+      if (CBZ.slice && CBZ.slice.stream && CBZ.sliceAt && CFG.DESERT_TILE_STREAM !== false) {
+        const TW = HX * 2 / ERG_TILES, TD = HZ * 2 / ERG_TILES;
+        for (let k = 0; k < out.length; k++) {
+          const ti = k % ERG_TILES, tj = (k / ERG_TILES) | 0;
+          const g = out[k].geometry, pa = g.attributes.position.array, na = g.attributes.normal.array, ca = g.attributes.color.array;
+          const nv = pa.length / 3, rec = { y: new Float32Array(nv), n: new Int8Array(nv * 3), c: new Uint8Array(nv * 3), g0: ti * GSEG_X, h0: tj * GSEG_Z };
+          for (let v = 0; v < nv; v++) {
+            rec.y[v] = pa[v * 3 + 1];
+            for (let a = 0; a < 3; a++) {
+              rec.n[v * 3 + a] = Math.max(-127, Math.min(127, Math.round(na[v * 3 + a] * 127)));
+              rec.c[v * 3 + a] = Math.max(0, Math.min(255, Math.round(ca[v * 3 + a] * 255)));
+            }
+          }
+          g.dispose();
+          const x0 = MINX + rec.g0 * STEP_X, z0 = MINZ + rec.h0 * STEP_Z;
+          // (the job is made by ergJob, OUTSIDE this scope: a closure here
+          // would keep every tile's full arrays and the bake alive)
+          CBZ.sliceAt({ minX: x0, maxX: x0 + TW, minZ: z0, maxZ: z0 + TD }, ergJob(rec, nv, k, out.length), { name: "desert erg " + ti + "," + tj });
+        }
+        EP.length = 0; EN.length = 0; EC.length = 0; out.length = 0;
+        return [];
+      }
       return out;
     }
-    const ergMeshes = (_V5 && CFG.DESERT_TERRAIN_V2 !== false)
-      ? buildErgTiles() : buildErgSinglePlane();
-    for (let mi = 0; mi < ergMeshes.length; mi++) {
-      const groundMesh = ergMeshes[mi];
+    function ergJob(rec, nv, k, total) {
+      return function () {
+        const geo = new THREE.BufferGeometry(), P = new Float32Array(nv * 3), N = new Float32Array(nv * 3), C = new Float32Array(nv * 3), U = new Float32Array(nv * 2);
+        let i = 0;
+        for (let row = 0; row <= GSEG_Z; row++) for (let col = 0; col <= GSEG_X; col++, i++) {
+          P[i * 3] = MINX + (rec.g0 + col) * STEP_X; P[i * 3 + 1] = rec.y[i]; P[i * 3 + 2] = MINZ + (rec.h0 + row) * STEP_Z;
+          U[i * 2] = (rec.g0 + col) / GRID_X; U[i * 2 + 1] = 1 - (rec.h0 + row) / GRID_Z;
+        }
+        for (let a = 0; a < nv * 3; a++) { N[a] = rec.n[a] / 127; C[a] = rec.c[a] / 255; }
+        geo.setAttribute("position", new THREE.BufferAttribute(P, 3));
+        geo.setAttribute("normal", new THREE.BufferAttribute(N, 3));
+        geo.setAttribute("uv", new THREE.BufferAttribute(U, 2));
+        geo.setAttribute("color", new THREE.BufferAttribute(C, 3));
+        geo.setIndex(ergIndex(GSEG_X, GSEG_Z).clone());   // own copy: a freed tile disposes its index buffer
+        geo.computeBoundingSphere();
+        dressErg(new THREE.Mesh(geo, duneMat), k, total);
+      };
+    }
+    // the PlaneGeometry(…, GSEG_X, GSEG_Z) triangle order, shared by every tile
+    let _ergIdx = null;
+    function ergIndex(sx, sz) {
+      if (_ergIdx) return _ergIdx;
+      const g = new THREE.PlaneGeometry(1, 1, sx, sz);
+      _ergIdx = g.index; g.index = null; g.dispose();
+      return _ergIdx;
+    }
+    function dressErg(groundMesh, mi, total) {
       groundMesh.castShadow = false; groundMesh.receiveShadow = true;
       groundMesh.matrixAutoUpdate = false; groundMesh.updateMatrix();
       groundMesh.userData.terrain = true; groundMesh.userData.worldSurface = true;
       groundMesh.userData.realGround = true;
-      groundMesh.name = ergMeshes.length > 1
-        ? ("saltlands-desert-surface-" + mi) : "saltlands-desert-surface";
+      groundMesh.name = total > 1 ? ("saltlands-desert-surface-" + mi) : "saltlands-desert-surface";
       root.add(groundMesh);
     }
+    const ergMeshes = (_V5 && CFG.DESERT_TERRAIN_V2 !== false)
+      ? buildErgTiles() : buildErgSinglePlane();
+    for (let mi = 0; mi < ergMeshes.length; mi++) dressErg(ergMeshes[mi], mi, ergMeshes.length);
     if (CFG.DESERT_TERRAIN_V2 !== false && CBZ.registerCityGroundHeight) {
       CBZ.registerCityGroundHeight(desertHeightAt, { name: "Saltlands dunes and mesas", biome: "desert" });
       CBZ.desertTerrainHeightAt = desertHeightAt;
