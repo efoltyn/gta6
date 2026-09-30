@@ -120,6 +120,7 @@
       color: color,
       emissive: em,
       emissiveIntensity: ei,
+      vertexColors: !!lam.vertexColors,
       roughness: 0.86,
       metalness: 0.03,
       envMap: CBZ.ENV || null,
@@ -137,10 +138,13 @@
   function cmat(color, opts) {
     opts = opts || {};
     const em = opts.emissive || 0, ei = opts.ei != null ? opts.ei : 1;
-    const k = color + "|" + em + "|" + ei;
+    // opts.vc: the body colour rides a per-vertex `color` attribute (one
+    // material for a merged multi-colour part; the geometry MUST carry it)
+    const vc = !!opts.vc;
+    const k = color + "|" + em + "|" + ei + (vc ? "|vc" : "");
     let m = matCache.get(k);
     if (!m) {
-      m = new THREE.MeshLambertMaterial({ color: color, emissive: em, emissiveIntensity: ei });
+      m = new THREE.MeshLambertMaterial({ color: color, emissive: em, emissiveIntensity: ei, vertexColors: vc });
       m._shared = true;
       matCache.set(k, m);
     }

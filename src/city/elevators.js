@@ -48,13 +48,57 @@
   // ---- shared building blocks (mesh-count bound: ONE geometry, cached mats) --
   const UNIT = new THREE.BoxGeometry(1, 1, 1);
   const cmat = CBZ.cmat || CBZ.mat;
+  let _col = null;                 // buildElevator's boxes, merged when it ends
   function box(parent, x, y, z, w, h, d, hex, o) {
     o = o || {};
     const m = new THREE.Mesh(UNIT, cmat(hex, o.emissive ? { emissive: o.emissive, ei: o.ei || 0.5 } : null));
     m.scale.set(w, h, d); m.position.set(x, y, z);
     m.castShadow = !!o.cast; m.receiveShadow = true;
     parent.add(m);
+    if (_col) _col.push(m);
     return m;
+  }
+  // ONE DRAW PER MATERIAL PER LIFT. The lift goes up lazily, after the batch
+  // pass, so its ~16 boxes a landing (x3 landings + the shaft skins) were each
+  // a draw with an auto-updating matrix. Everything that never moves or swaps
+  // its material bakes into one mesh per material (same boxes, same flat
+  // normals, same shared material); the leafs, the call button and the hall
+  // lantern stay live. The originals stay in the group, hidden and frozen, as
+  // the colliders' refs (c.ref.material / c.ref.parent readers).
+  function mergeStill(grp, list, live) {
+    const byMat = new Map();
+    for (const m of list) {
+      if (live.has(m) || m.parent !== grp) continue;
+      const k = m.material.uuid + (m.castShadow ? "|c" : "|-");
+      let e = byMat.get(k); if (!e) byMat.set(k, e = { mat: m.material, cast: m.castShadow, list: [] });
+      e.list.push(m);
+    }
+    const UP = UNIT.attributes.position.array, UN = UNIT.attributes.normal.array, UI = UNIT.index.array, nv = UP.length / 3;
+    byMat.forEach(function (e) {
+      if (e.list.length < 2) return;
+      const n = e.list.length;
+      const P = new Float32Array(n * nv * 3), N = new Float32Array(n * nv * 3), I = new Uint16Array(n * UI.length);
+      for (let i = 0; i < n; i++) {
+        const m = e.list[i], sc = m.scale, ps = m.position, vo = i * nv;
+        for (let v = 0; v < nv; v++) {
+          const o = (vo + v) * 3;
+          P[o] = UP[v * 3] * sc.x + ps.x; P[o + 1] = UP[v * 3 + 1] * sc.y + ps.y; P[o + 2] = UP[v * 3 + 2] * sc.z + ps.z;
+          N[o] = UN[v * 3]; N[o + 1] = UN[v * 3 + 1]; N[o + 2] = UN[v * 3 + 2];
+        }
+        for (let j = 0; j < UI.length; j++) I[i * UI.length + j] = UI[j] + vo;
+        m.visible = false; m.updateMatrix(); m.matrixAutoUpdate = false;
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(P, 3));
+      g.setAttribute("normal", new THREE.BufferAttribute(N, 3));
+      g.setIndex(new THREE.BufferAttribute(I, 1));
+      g.computeBoundingSphere();
+      const mm = new THREE.Mesh(g, e.mat);
+      mm.name = "lift-still";
+      mm.castShadow = e.cast; mm.receiveShadow = true;
+      grp.add(mm);
+      mm.updateMatrix(); mm.matrixAutoUpdate = false;
+    });
   }
   function solid(y0, y1, minX, maxX, minZ, maxZ, ref) {
     const c = { minX, maxX, minZ, maxZ, y0, y1, ref: ref || null };
@@ -252,6 +296,22 @@
   const CAB_H = 2.45;          // cab interior height
   const DOOR_HW = 0.78;        // door opening half-width (collider span)
   function buildElevator(lot) {
+    _col = [];
+    try { buildElevatorBody(lot); } finally {
+      const list = _col; _col = null;
+      const b = lot.building, el = elevators[elevators.length - 1];
+      if (b && b.group && el && el.b === b) {
+        const live = new Set();
+        for (const s of el.stops) {
+          if (s.btn) live.add(s.btn);
+          if (s.lamp) live.add(s.lamp);
+          if (s.rig && s.rig.leaves) for (const L of s.rig.leaves) live.add(L.m);
+        }
+        mergeStill(b.group, list, live);
+      }
+    }
+  }
+  function buildElevatorBody(lot) {
     const b = lot.building, w = b.w, d = b.d, grp = b.group, ox = b.ox, oz = b.oz, h = b.h;
     const S = slabInfo(b);
     const spot = pickLobby(b);

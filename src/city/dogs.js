@@ -130,6 +130,64 @@
   const BODY_Y = LEG_H + BODY_H / 2;         // 0.51 — torso rides on the legs
   const HEAD = 0.36, HEAD_X = BODY_L / 2 + 0.16, HEAD_Y = BODY_Y + 0.16;
 
+  // ---- the baked coat: one vertex-colour material, geometry per breed -----
+  let _vcMat = null;
+  function vcMat() {
+    if (!_vcMat) _vcMat = CBZ.cmat ? CBZ.cmat(0xffffff, { vc: true }) : new THREE.MeshLambertMaterial({ vertexColors: true });
+    return _vcMat;
+  }
+  const _col = new THREE.Color();
+  function paintColour(g, hex) {
+    _col.setHex(hex);
+    const n = g.attributes.position.count, a = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) { a[i * 3] = _col.r; a[i * 3 + 1] = _col.g; a[i * 3 + 2] = _col.b; }
+    g.setAttribute("color", new THREE.BufferAttribute(a, 3));
+    return g;
+  }
+  const _boxCol = new Map();
+  function colouredBox(src, hex) {
+    const k = src.uuid + "|" + hex;
+    let g = _boxCol.get(k);
+    if (!g) { g = paintColour(src.clone(), hex); g._shared = true; _boxCol.set(k, g); }
+    return g;
+  }
+  const _stillGeo = new Map();
+  function stillGeo(breed, parts) {
+    let g = _stillGeo.get(breed.name);
+    if (g) return g;
+    let nv = 0, ni = 0;
+    for (let i = 0; i < parts.length; i++) { const pg = parts[i].geometry; nv += pg.attributes.position.count; ni += pg.index ? pg.index.count : pg.attributes.position.count; }
+    const pos = new Float32Array(nv * 3), nrm = new Float32Array(nv * 3), col = new Float32Array(nv * 3);
+    const idx = new Uint16Array(ni);
+    const v = new THREE.Vector3(), nm = new THREE.Matrix3();
+    let vo = 0, io = 0;
+    for (let i = 0; i < parts.length; i++) {
+      const m = parts[i], pg = m.geometry, P = pg.attributes.position, N = pg.attributes.normal;
+      m.updateMatrix();
+      nm.getNormalMatrix(m.matrix);
+      _col.copy(m.material.color);
+      for (let j = 0; j < P.count; j++) {
+        v.fromBufferAttribute(P, j).applyMatrix4(m.matrix);
+        pos[(vo + j) * 3] = v.x; pos[(vo + j) * 3 + 1] = v.y; pos[(vo + j) * 3 + 2] = v.z;
+        v.fromBufferAttribute(N, j).applyMatrix3(nm).normalize();
+        nrm[(vo + j) * 3] = v.x; nrm[(vo + j) * 3 + 1] = v.y; nrm[(vo + j) * 3 + 2] = v.z;
+        col[(vo + j) * 3] = _col.r; col[(vo + j) * 3 + 1] = _col.g; col[(vo + j) * 3 + 2] = _col.b;
+      }
+      if (pg.index) for (let j = 0; j < pg.index.count; j++) idx[io++] = pg.index.getX(j) + vo;
+      else for (let j = 0; j < P.count; j++) idx[io++] = vo + j;
+      vo += P.count;
+    }
+    g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    g.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
+    g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    g.setIndex(new THREE.BufferAttribute(idx, 1));
+    g.computeBoundingSphere();
+    g._shared = true;
+    _stillGeo.set(breed.name, g);
+    return g;
+  }
+
   function buildDog(breed) {
     const gp = new THREE.Group();
     const coat = mat(breed.coat), belly = mat(breed.belly), dark = mat(0x141110), inner = mat(0x8a5b52);
@@ -177,6 +235,23 @@
     const tail = box(0.30, 0.14, 0.14, coat); tail.position.set(-BODY_L / 2 - 0.08, BODY_Y + 0.13, 0);
     tail.rotation.z = 0.7; tail.name = "tail"; gp.add(tail);
 
+    // ONE DRAW FOR THE STILL BODY. Torso, rump, belly, bib, neck, head, snout,
+    // nose and both ears never move against the group, so they bake into one
+    // vertex-coloured mesh (cached per breed, shared by every dog of it); the
+    // legs and tail keep their own mesh (they animate) on coloured copies of
+    // their boxes, so the whole coat is ONE material. Same boxes, same flat
+    // normals, same colours: Lambert's color x vColor is exactly the old tint.
+    // 19 draws a dog -> 9 (eyes swap red on aggro, the collar comes and goes).
+    const keep = new Set(eyes.concat(legs, [tail]));
+    const still = [];
+    for (let i = 0; i < gp.children.length; i++) { const c = gp.children[i]; if (c.isMesh && !keep.has(c)) still.push(c); }
+    const vc = vcMat();
+    const bodyM = new THREE.Mesh(stillGeo(breed, still), vc);
+    bodyM.name = "dog-body";
+    for (let i = 0; i < still.length; i++) gp.remove(still[i]);
+    gp.add(bodyM);
+    for (let i = 0; i < legs.length; i++) { legs[i].geometry = colouredBox(legs[i].geometry, breed.coat); legs[i].material = vc; }
+    tail.geometry = colouredBox(tail.geometry, breed.coat); tail.material = vc;
     gp.traverse(function (o) { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
     gp.userData.legs = legs;
     // dogs spawn DURING buildCity(), before city/mode.js sweeps the root with

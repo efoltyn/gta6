@@ -1165,6 +1165,26 @@
     if (ground) return _lboxGeoLosGround || (_lboxGeoLosGround = make(true));
     return _lboxGeoLos || (_lboxGeoLos = make(false));
   }
+  // ONE MATERIAL PER LIGHT RECIPE. Every emissive lbox (ceiling strips, shop
+  // panels, chandelier drops, beacons) used to mint its own material, so
+  // city/localinst.js — which pools repeated statics by geometry + material —
+  // could never pool a single fixture: each was its own draw. Equal recipes
+  // now share one material, so a tile's identical fixtures instance into one
+  // draw. It is deliberately NOT tagged _shared: the dusk flip (city/view.js)
+  // and the interior light ramp (interior_programs.js STRIPS) still find and
+  // drive it, and every light of one recipe carries the same authored
+  // intensity, so they already moved in lockstep.
+  const _emisMats = new Map();
+  function emisMat(col, em, ei, los) {
+    const k = col + "|" + em + "|" + ei + (los ? "|l" : "");
+    let m = _emisMats.get(k);
+    if (!m) {
+      m = mat(col, { emissive: em, ei: ei });
+      if (los) m.vertexColors = true;
+      _emisMats.set(k, m);
+    }
+    return m;
+  }
   const _vcMats = new Map();
   function vcMat(col) {
     let m = _vcMats.get(col);
@@ -3658,10 +3678,8 @@
       // fake-AO vertex shading on structural LOS surfaces (walls/roofs/rims) —
       // exactly the meshes batch.js spares, so the colour attribute survives
       let mm;
-      if (o.emissive) {
-        mm = mat(col, { emissive: o.emissive, ei: o.ei || 0.5 });
-        if (o.los) mm.vertexColors = true;
-      } else mm = o.mat || (o.los ? vcMat(col) : CBZ.cmat(col));
+      if (o.emissive) mm = emisMat(col, o.emissive, o.ei || 0.5, !!o.los);
+      else mm = o.mat || (o.los ? vcMat(col) : CBZ.cmat(col));
       const m = new THREE.Mesh(unitBoxGeo(!!o.los, ly - bh / 2 <= 0.2), mm);
       m.position.set(lx, ly, lz);
       m.scale.set(bw, bh, bd);
@@ -5026,28 +5044,88 @@
     return { y: y, roof: !!isRoof, mat: mesh.material, cast: !!mesh.castShadow,
              pieces: [{ mesh: mesh, plat: plat }], holes: [], carved: false };
   }
-  let _slabGeo = null;
+  // A carved piece is a RECT + its platform, not a mesh: every carved slab of a
+  // building draws from ONE merged mesh per slab material (rebuildCarved), so
+  // a lift chase through 40 storeys is 1-2 draws, not up to 160 unmerged,
+  // auto-updating boxes (carving runs after the batch pass: the lift and the
+  // stair cores go up lazily).
   function slabPiece(b, fs, x0, x1, z0, z1) {
     if (x1 - x0 < 0.05 || z1 - z0 < 0.05) return null;
-    if (!_slabGeo) _slabGeo = unitBoxGeo(true, false);
-    const m = new THREE.Mesh(_slabGeo, fs.mat);
-    m.position.set((x0 + x1) / 2 - b.ox, fs.y, (z0 + z1) / 2 - b.oz);
-    m.scale.set(x1 - x0, 0.2, z1 - z0);
-    m.castShadow = fs.cast; m.receiveShadow = true;
-    b.group.add(m);
-    if (CBZ.losBlockers) CBZ.losBlockers.push(m);
-    if (b.losMeshes) b.losMeshes.push(m);
     const pl = { minX: x0, maxX: x1, minZ: z0, maxZ: z1, top: fs.y + 0.1 };
     if (CBZ.platforms) CBZ.platforms.push(pl);
     if (b.platforms) b.platforms.push(pl);
-    return { mesh: m, plat: pl };
+    return { mesh: null, plat: pl };
+  }
+  function unlist(m, b) {
+    for (const list of [CBZ.losBlockers, b.losMeshes]) { const i = list ? list.indexOf(m) : -1; if (i >= 0) list.splice(i, 1); }
+  }
+  function rebuildCarved(b) {
+    const old = b._carvedSlabs;
+    // (a carve BEFORE the batch pass gets its mesh merged into the shell like
+    // any slab: a later carve zeroes that slice, exactly as dropPiece does)
+    if (old) for (const m of old) {
+      const merged = CBZ.batchWallHide && CBZ.batchWallHide(m);
+      if (m.parent) m.parent.remove(m);
+      unlist(m, b);
+      if (!merged) m.geometry.dispose();
+    }
+    b._carvedSlabs = [];
+    const groups = new Map();
+    const recs = (b.floorSlabs || []).concat(b.roofSlab ? [b.roofSlab] : []);
+    for (const fs of recs) {
+      if (!fs.carved) continue;
+      for (const pc of fs.pieces) {
+        if (pc.mesh) continue;
+        const k = fs.mat.uuid + (fs.cast ? "|c" : "|-");
+        let e = groups.get(k); if (!e) groups.set(k, e = { mat: fs.mat, cast: fs.cast, list: [] });
+        e.list.push(pc.plat, fs.y);
+      }
+    }
+    const U = unitBoxGeo(true, false), UP = U.attributes.position.array, UN = U.attributes.normal.array;
+    const UC = U.attributes.color ? U.attributes.color.array : null, UV = U.attributes.uv ? U.attributes.uv.array : null;
+    const UI = U.index.array, nv = UP.length / 3;
+    groups.forEach(function (e) {
+      const n = e.list.length / 2;
+      const P = new Float32Array(n * nv * 3), N = new Float32Array(n * nv * 3);
+      const C = UC ? new Float32Array(n * nv * 3) : null, T = UV ? new Float32Array(n * nv * 2) : null;
+      const I = new Uint16Array(n * UI.length);
+      for (let i = 0; i < n; i++) {
+        const pl = e.list[i * 2], y = e.list[i * 2 + 1];
+        const sx = pl.maxX - pl.minX, sz = pl.maxZ - pl.minZ;
+        const cx = (pl.minX + pl.maxX) / 2 - b.ox, cz = (pl.minZ + pl.maxZ) / 2 - b.oz;
+        const vo = i * nv;
+        for (let v = 0; v < nv; v++) {
+          const o = (vo + v) * 3;
+          P[o] = UP[v * 3] * sx + cx; P[o + 1] = UP[v * 3 + 1] * 0.2 + y; P[o + 2] = UP[v * 3 + 2] * sz + cz;
+          N[o] = UN[v * 3]; N[o + 1] = UN[v * 3 + 1]; N[o + 2] = UN[v * 3 + 2];
+        }
+        if (C) C.set(UC, vo * 3);
+        if (T) T.set(UV, vo * 2);
+        for (let j = 0; j < UI.length; j++) I[i * UI.length + j] = UI[j] + vo;
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(P, 3));
+      g.setAttribute("normal", new THREE.BufferAttribute(N, 3));
+      if (C) g.setAttribute("color", new THREE.BufferAttribute(C, 3));
+      if (T) g.setAttribute("uv", new THREE.BufferAttribute(T, 2));
+      g.setIndex(new THREE.BufferAttribute(I, 1));
+      g.computeBoundingSphere();
+      const m = new THREE.Mesh(g, e.mat);
+      m.name = "slab-carved";
+      m.castShadow = e.cast; m.receiveShadow = true;
+      b.group.add(m);
+      m.updateMatrix(); m.matrixAutoUpdate = false;
+      if (CBZ.losBlockers) CBZ.losBlockers.push(m);
+      if (b.losMeshes) b.losMeshes.push(m);
+      b._carvedSlabs.push(m);
+    });
   }
   function dropPiece(b, pc) {
     const m = pc.mesh;
     if (m) {
       if (CBZ.batchWallHide) CBZ.batchWallHide(m);     // merged into the shell's buffer: zero its slice
       if (m.parent) m.parent.remove(m);
-      for (const list of [CBZ.losBlockers, b.losMeshes]) { const i = list ? list.indexOf(m) : -1; if (i >= 0) list.splice(i, 1); }
+      unlist(m, b);
     }
     for (const list of [CBZ.platforms, b.platforms]) { const i = list ? list.indexOf(pc.plat) : -1; if (i >= 0) list.splice(i, 1); }
   }
@@ -5102,6 +5180,7 @@
       if (carveSlab(b, b.floorSlabs[i], hx0, hx1, hz0, hz1)) n++;
     }
     if (opts.roof && b.roofSlab && carveSlab(b, b.roofSlab, hx0, hx1, hz0, hz1)) n++;
+    if (n && b.group) rebuildCarved(b);
     if (n && CBZ.markPlatformsDirty) CBZ.markPlatformsDirty();
     return n;
   };
