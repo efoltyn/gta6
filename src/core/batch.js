@@ -140,6 +140,7 @@
   function rangeSet(attr, start, count, hidden, holder) {
     const i0 = start * 3, n = count * 3;
     if (hidden ? holder._stash : !holder._stash) return true;       // already there
+    if (!attr.array && attr._cbzQ && CBZ.geoExpand) CBZ.geoExpand(attr);   // a parked, compacted buffer (core/citystream.js)
     if (attr.array) {
       if (hidden) { holder._stash = attr.array.slice(i0, i0 + n); attr.array.fill(0, i0, i0 + n); }
       else { attr.array.set(holder._stash, i0); holder._stash = null; }

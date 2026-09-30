@@ -1735,8 +1735,11 @@ async function serveMain() {
     }
     // --ask eval '<expr>' --allocs: who ALLOCATED (garbage included) while the expression ran
     if (op === "eval") {
-      if (q.allocs) { await P.s("HeapProfiler.enable"); await P.s("HeapProfiler.startSampling", { samplingInterval: 262144, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true }); }
+      // --gc: a full collection first (what is LIVE, not what is garbage)
+      if (q.gc) { try { await P.s("HeapProfiler.collectGarbage", {}, 30000); await P.s("HeapProfiler.collectGarbage", {}, 30000); } catch (e) {} }
+      if (q.allocs) { await P.s("HeapProfiler.enable"); await P.s("HeapProfiler.startSampling", q.liveOnly ? { samplingInterval: 65536 } : { samplingInterval: 262144, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true }); }
       res.value = await P.ev(q.expr, (q.timeoutS || 60) * 1000);
+      if (q.allocs && q.liveOnly) { try { await P.s("HeapProfiler.collectGarbage", {}, 30000); } catch (e) {} }
       if (q.allocs) { try { const { profile } = await P.s("HeapProfiler.getSamplingProfile", {}, 300000); await P.s("HeapProfiler.stopSampling", {}, 60000); const h = heapSites(profile); res.allocs = { totalMB: h.totalMB, files: h.files.slice(0, 20), sites: h.sites.slice(0, 30), vendor: h.vendor }; } catch (e) { res.allocs = { err: String(e).slice(0, 200) }; } }
       res.ms = Date.now() - t0; return res;
     }
@@ -1754,7 +1757,7 @@ async function serveMain() {
       const route = q.route || null, mps = q.mps || 40, secs = q.secs || 60;
       // --allocs: V8's sampling heap profiler over the drive, INCLUDING what
       // the collector already took (the churn behind the sawtooth), by site
-      if (q.allocs) { await P.s("HeapProfiler.enable"); await P.s("HeapProfiler.startSampling", { samplingInterval: 65536, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true }); }
+      if (q.allocs) { await P.s("HeapProfiler.enable"); await P.s("HeapProfiler.startSampling", { samplingInterval: 262144, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true }); }
       res.value = await P.ev(`(function(route, MPS, SECS){
         var S = window.__speed, C = window.CBZ, T = window.THREE, Pl = C.player; if (!Pl || !Pl.pos) return { err: "no player" };
         var A = C.city && C.city.arena; var root = A && A.root;
@@ -1809,7 +1812,7 @@ async function serveMain() {
         return { km: +(Math.min(d, tot) / 1000).toFixed(2), wallS: +((performance.now() - t0) / 1000).toFixed(1), peak: { heap: Math.round(hp), gpu: Math.round(gp), phone: Math.round(php) },
           pops: popN, popChecks: checks, lodHandoffs: handoffs, popSamples: pops, cols: "s heap gpu phone built parked queued keepR", samples: samples };
       })(${JSON.stringify(route)}, ${+mps}, ${+secs})`, 1800000);
-      if (q.allocs) { try { const { profile } = await P.s("HeapProfiler.getSamplingProfile", {}, 120000); await P.s("HeapProfiler.stopSampling", {}, 60000); res.allocs = heapSites(profile); } catch (e) { res.allocs = { err: String(e).slice(0, 200) }; } }
+      if (q.allocs) { try { const { profile } = await P.s("HeapProfiler.getSamplingProfile", {}, 300000); await P.s("HeapProfiler.stopSampling", {}, 60000); res.allocs = heapSites(profile); } catch (e) { res.allocs = { err: String(e).slice(0, 200) }; } }
       res.ms = Date.now() - t0; return res;
     }
     // --ask prof '<expr>': the expression under V8's CPU profiler (1 ms), the
@@ -1944,6 +1947,9 @@ async function askMain() {
   const tg = opt("--toggle", ""), tgf = opt("--toggle-file", "");
   if (tg || tgf) q.toggle = tgf ? fs.readFileSync(tgf, "utf8") : tg;
   if (ASK === "eval" && has("--allocs")) q.allocs = true;
+  if (ASK === "eval" && has("--gc")) q.gc = true;
+  // --allocs --live: only what the expression allocated and is STILL alive after it (a leak finder)
+  if (ASK === "eval" && has("--live")) { q.allocs = true; q.liveOnly = true; q.timeoutS = 300; }
   if (ASK === "drive") { const r = opt("--route", ""); q.route = r ? r.split(";").map((p) => p.split(",").map(Number)) : null; q.mps = +opt("--mps", 40); q.secs = +opt("--secs", 60); q.allocs = has("--allocs"); }
   if (ASK === "prof") { const f = opt("--eval-file", ""); q.expr = f ? fs.readFileSync(f, "utf8") : argv.filter((a, i) => !a.startsWith("--") && argv[i - 1] !== "--ask" && !/^--(spot|spots|frames|warm|world|root|url|eval-file|toggle|toggle-file|look-dir|pairs|min-pairs|settle-frames|idle|seed|device|preload|query|slice|slice-spots|gpu|shaders|mode|modes|ref|mem-budget|route|mps|secs)$/.test(argv[i - 1] || "")).join(" "); }
   if (ASK === "eval") { const f = opt("--eval-file", ""); q.expr = f ? fs.readFileSync(f, "utf8") : argv.filter((a, i) => !a.startsWith("--") && argv[i - 1] !== "--ask" && !/^--(spot|spots|frames|warm|world|root|url|eval-file|toggle|toggle-file|look-dir|pairs|min-pairs|settle-frames|idle|seed|device|preload|query|slice|slice-spots|gpu|shaders|mode|modes|ref|mem-budget|route|mps|secs)$/.test(argv[i - 1] || "")).join(" "); }

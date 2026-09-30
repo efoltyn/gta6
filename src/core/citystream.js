@@ -323,10 +323,85 @@
     }
     L.length = w;
   }
+  /* PARKED GEOMETRY, HALF SIZE. A parked job's merged buffers (core/batch.js
+     "batch-inert" / "batch-wall": its own, never shared) keep their
+     positions as 16-bit steps across their own box (<= 2 mm on a 112 m tile)
+     while nobody can see them, and are expanded back to floats before they
+     rejoin the scene. Normals and colour are already 8-bit there. */
+  function ownArray(a) { const d = Object.getOwnPropertyDescriptor(a, "array"); return !!(d && !d.get && d.value instanceof Float32Array); }
+  // normals: 16-bit (a 1/32767 step: no visible difference in shading)
+  function compactNormals(g) {
+    const a = g.attributes.normal;
+    if (!a || a._cbzQn || !ownArray(a) || a.itemSize !== 3 || a.isInterleavedBufferAttribute) return 0;
+    const N = a.array, q = new Int16Array(N.length);
+    for (let i = 0; i < N.length; i++) q[i] = Math.round(Math.max(-1, Math.min(1, N[i])) * 32767);
+    a._cbzQn = q; a.array = null;
+    return N.byteLength - q.byteLength;
+  }
+  function compactGeo(g) {
+    const a = g && g.attributes && g.attributes.position;
+    if (!a || a._cbzQ || !ownArray(a) || a.itemSize !== 3 || a.isInterleavedBufferAttribute || g._shared || (g.userData && g.userData._shared)) return 0;
+    if (inUse && inUse.has(g)) return 0;             // also drawn by something still in the scene
+    const P = a.array, n = P.length / 3;
+    let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+    for (let i = 0; i < P.length; i += 3) {
+      const x = P[i], y = P[i + 1], z = P[i + 2];
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; if (z < z0) z0 = z; if (z > z1) z1 = z;
+    }
+    if (!(x1 >= x0)) return 0;
+    const sx = (x1 - x0) / 65535 || 1, sy = (y1 - y0) / 65535 || 1, sz = (z1 - z0) / 65535 || 1;
+    const q = new Uint16Array(n * 3);
+    for (let i = 0; i < P.length; i += 3) {
+      q[i] = Math.round((P[i] - x0) / sx); q[i + 1] = Math.round((P[i + 1] - y0) / sy); q[i + 2] = Math.round((P[i + 2] - z0) / sz);
+    }
+    a._cbzQ = { q: q, o: [x0, y0, z0], s: [sx, sy, sz] };
+    a.array = null;
+    return P.byteLength - q.byteLength + compactNormals(g);
+  }
+  function expandAttr(a) {
+    const Q = a && a._cbzQ; if (!Q) return;
+    const q = Q.q, P = new Float32Array(q.length);
+    for (let i = 0; i < q.length; i += 3) {
+      P[i] = Q.o[0] + q[i] * Q.s[0]; P[i + 1] = Q.o[1] + q[i + 1] * Q.s[1]; P[i + 2] = Q.o[2] + q[i + 2] * Q.s[2];
+    }
+    a.array = P; a._cbzQ = null; a.needsUpdate = true;
+  }
+  function expandGeo(g) {
+    const a = g.attributes.position; if (a && a._cbzQ) expandAttr(a);
+    const n = g.attributes.normal;
+    if (n && n._cbzQn) { const q = n._cbzQn, N = new Float32Array(q.length); for (let i = 0; i < q.length; i++) N[i] = q[i] / 32767; n.array = N; n._cbzQn = null; n.needsUpdate = true; }
+  }
+  CBZ.geoExpand = function (attr) { expandAttr(attr); };
+  CBZ.geoExpandAll = expandGeo;
+  /* The geometries still drawn by the scene: a builder that shares one
+     geometry between a parked and a live mesh without flagging it _shared
+     must never lose its arrays. Rebuilt at most every 4 s (a scene walk). */
+  let inUse = null, inUseAt = -1e9;
+  function refreshInUse() {
+    const now = performance.now();
+    if (inUse && now - inUseAt < 4000) return;
+    inUseAt = now; inUse = new WeakSet();
+    if (CBZ.scene) CBZ.scene.traverse(function (c) { if (c.geometry) inUse.add(c.geometry); });
+  }
+  function compactTree(o) {
+    if (CFG.STREAM_COMPACT === false) return;
+    refreshInUse();
+    let saved = 0;
+    o.traverse(function (c) {
+      if (!c.isMesh || c.isInstancedMesh || c.isSkinnedMesh || !c.geometry || !c.geometry.attributes) return;
+      if (c.userData && c.userData.dynamic) return;
+      if (reuploadable(c.geometry)) saved += compactGeo(c.geometry);
+    });
+    if (CBZ.streamStats) CBZ.streamStats.compactMB = +(((CBZ.streamStats.compactMB || 0) + saved / 1048576)).toFixed(1);
+  }
+  function expandTree(o) {
+    o.traverse(function (c) { const g = c.geometry; if (g && g.attributes && ((g.attributes.position && g.attributes.position._cbzQ) || (g.attributes.normal && g.attributes.normal._cbzQn))) expandGeo(g); });
+  }
   function park(job) {
     for (const k of childrenOf(job)) if (k.state === "built" && k.objs) park(k);
     takeLos(job);
     for (const it of job.objs) { if (it.o.parent) it.o.parent.remove(it.o); releaseGPU(it.o); }
+    if (!job.pure) for (const it of job.objs) compactTree(it.o);
     removeFrom(CBZ.colliders, job.cols); removeFrom(CBZ.platforms, job.plats);
     if (job.pure) { job.objs = null; job.cols = job.plats = null; job.los = null; job.state = "queued"; }
     else job.state = "parked";
@@ -383,7 +458,7 @@
   }
 
   function unpark(job) {
-    for (const it of job.objs) if (it.parent) it.parent.add(it.o);
+    for (const it of job.objs) { expandTree(it.o); if (it.parent) it.parent.add(it.o); }
     for (const c of job.cols) CBZ.colliders.push(c);
     for (const p of job.plats) (CBZ.platforms = CBZ.platforms || []).push(p);
     if (job.los && CBZ.losBlockers) { for (const m of job.los) CBZ.losBlockers.push(m); job.los = null; }
@@ -500,7 +575,7 @@
     prunedCells.forEach(function (job) {
       if (job.state !== "parked" || !job.objs || !job.objs.length) return;
       const mine = job.objs.filter(function (it) { return it.parent === root && it.o && !it.o.parent; });
-      if (mine.length < 2) return;
+      if (mine.length < 2) { for (const it of job.objs) if (it.o) compactTree(it.o); return; }
       const G = new window.THREE.Group();
       G.name = "stream-job";
       for (const it of mine) G.add(it.o);
@@ -509,6 +584,7 @@
       root.remove(G);
       job.objs = job.objs.filter(function (it) { return mine.indexOf(it) < 0; });
       job.objs.push({ o: G, parent: root });
+      for (const it of job.objs) if (it.o) compactTree(it.o);
       n++;
     });
     return n;
