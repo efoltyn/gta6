@@ -1766,7 +1766,52 @@ async function serveMain() {
            garbage never collected). ?YIELD=0 in --query keeps the old loop. */
         var YIELD = !/[?&]YIELD=0\b/.test(location.search);
         var A = C.city && C.city.arena; var root = A && A.root;
-        if (!route) { var sx = Pl.pos.x, sz = Pl.pos.z; route = [[sx, sz], [sx - MPS * SECS * 0.5, sz - 300], [sx - MPS * SECS * 0.7, sz + MPS * SECS * 0.45]]; }
+        /* --route road (the default): a real drive along the city's streets.
+           From the nearest road segment, run to one of its ends, then turn
+           onto the connected segment that continues farthest without doubling
+           back, until the route is long enough. --route straight keeps the old
+           through-the-blocks line (a crash-stress case: it hits walls). */
+        if (route === "road") {
+          var R0 = (A && A.roads || []).filter(function (r) { return r && r.x != null && r.z != null && r.len > 8; });
+          var ends = function (r) { var h = r.len / 2; return r.vertical ? [[r.x, r.z - h], [r.x, r.z + h]] : [[r.x - h, r.z], [r.x + h, r.z]]; };
+          var cur = null, bd = Infinity;
+          for (var ri = 0; ri < R0.length; ri++) { var dd = Math.hypot(R0[ri].x - Pl.pos.x, R0[ri].z - Pl.pos.z); if (dd < bd) { bd = dd; cur = R0[ri]; } }
+          route = null;
+          if (cur) {
+            var E = ends(cur), used = new Set([cur]), len = 0, need = MPS * SECS * 1.05;
+            route = [[cur.x, cur.z], E[1]]; len += cur.len / 2;
+            var at2 = E[1], dir = cur.vertical ? [0, 1] : [1, 0], guard = 0;
+            while (len < need && guard++ < 400) {
+              var best = null, bs = -Infinity, bend = null;
+              for (var rj = 0; rj < R0.length; rj++) {
+                var r2 = R0[rj]; if (used.has(r2)) continue;
+                var e2 = ends(r2);
+                // the current point must lie ON this road (a crossing or a T,
+                // not only end-to-end): within 14 m of its centre line
+                var hl = r2.len / 2, onIt = r2.vertical
+                  ? (Math.abs(at2[0] - r2.x) < 14 && at2[1] > r2.z - hl - 14 && at2[1] < r2.z + hl + 14)
+                  : (Math.abs(at2[1] - r2.z) < 14 && at2[0] > r2.x - hl - 14 && at2[0] < r2.x + hl + 14);
+                if (!onIt) continue;
+                for (var k2 = 0; k2 < 2; k2++) {
+                  var far2 = e2[k2], vx2 = far2[0] - at2[0], vz2 = far2[1] - at2[1], vl = Math.hypot(vx2, vz2) || 1;
+                  if (vl < 30) continue;
+                  var sc = (vx2 * dir[0] + vz2 * dir[1]) / vl * 50 + r2.len * 0.05;   // prefer straight on, then long
+                  if (sc > bs && (vx2 * dir[0] + vz2 * dir[1]) / vl > -0.2) { bs = sc; best = r2; bend = far2; }
+                }
+              }
+              if (!best) break;
+              used.add(best);
+              // turn at the crossing: the route runs along the new road's line
+              var cross = best.vertical ? [best.x, at2[1]] : [at2[0], best.z];
+              if (Math.hypot(cross[0] - at2[0], cross[1] - at2[1]) > 0.5) route.push(cross);
+              route.push(bend); len += Math.hypot(bend[0] - cross[0], bend[1] - cross[1]);
+              dir = [(bend[0] - at2[0]) / (Math.hypot(bend[0] - at2[0], bend[1] - at2[1]) || 1), (bend[1] - at2[1]) / (Math.hypot(bend[0] - at2[0], bend[1] - at2[1]) || 1)];
+              at2 = bend;
+            }
+            if (route.length < 2) route = null;
+          }
+        }
+        if (route === "straight" || !route || !route.length) { var sx = Pl.pos.x, sz = Pl.pos.z; route = [[sx, sz], [sx - MPS * SECS * 0.5, sz - 300], [sx - MPS * SECS * 0.7, sz + MPS * SECS * 0.45]]; }
         var legs = [], tot = 0; for (var i = 0; i + 1 < route.length; i++) { var L = Math.hypot(route[i+1][0]-route[i][0], route[i+1][1]-route[i][1]); legs.push(L); tot += L; }
         function at(d){ for (var i = 0; i < legs.length; i++) { if (d <= legs[i] || i === legs.length - 1) { var f = Math.min(1, d / legs[i]); return [route[i][0] + (route[i+1][0]-route[i][0]) * f, route[i][1] + (route[i+1][1]-route[i][1]) * f, Math.atan2(route[i+1][0]-route[i][0], route[i+1][1]-route[i][1])]; } d -= legs[i]; } }
         var gh = function(x, z){ try { var y = A && A.groundHeightAt ? A.groundHeightAt(x, z) : 0; return isFinite(y) ? y : 0; } catch (e) { return 0; } };
@@ -1815,7 +1860,7 @@ async function serveMain() {
           if (f % 60 === 59) { var m = S.memRead(); hp = Math.max(hp, m.heap); gp = Math.max(gp, m.gpu); php = Math.max(php, m.phone);
             var st = C.streamStats || {}; samples.push([Math.round((f + 1) / 60), Math.round(m.heap), Math.round(m.gpu), Math.round(m.phone), st.built, st.parked, st.queued, C.slice ? Math.round(C.slice.keepR()) : null]); }
         }
-        return { km: +(Math.min(d, tot) / 1000).toFixed(2), wallS: +((performance.now() - t0) / 1000).toFixed(1), peak: { heap: Math.round(hp), gpu: Math.round(gp), phone: Math.round(php) },
+        return { routeLegs: route.length - 1, routeKm: +(tot / 1000).toFixed(2), km: +(Math.min(d, tot) / 1000).toFixed(2), wallS: +((performance.now() - t0) / 1000).toFixed(1), peak: { heap: Math.round(hp), gpu: Math.round(gp), phone: Math.round(php) },
           pops: popN, popChecks: checks, lodHandoffs: handoffs, popSamples: pops, cols: "s heap gpu phone built parked queued keepR", samples: samples };
       })(${JSON.stringify(route)}, ${+mps}, ${+secs})`, 1800000);
       if (q.allocs) { try { const { profile } = await P.s("HeapProfiler.getSamplingProfile", {}, 300000); await P.s("HeapProfiler.stopSampling", {}, 60000); res.allocs = heapSites(profile); } catch (e) { res.allocs = { err: String(e).slice(0, 200) }; } }
@@ -1956,7 +2001,7 @@ async function askMain() {
   if (ASK === "eval" && has("--gc")) q.gc = true;
   // --allocs --live: only what the expression allocated and is STILL alive after it (a leak finder)
   if (ASK === "eval" && has("--live")) { q.allocs = true; q.liveOnly = true; q.timeoutS = 300; }
-  if (ASK === "drive") { const r = opt("--route", ""); q.route = r ? r.split(";").map((p) => p.split(",").map(Number)) : null; q.mps = +opt("--mps", 40); q.secs = +opt("--secs", 60); q.allocs = has("--allocs"); }
+  if (ASK === "drive") { const r = opt("--route", "road"); q.route = r === "road" || r === "straight" ? r : r.split(";").map((p) => p.split(",").map(Number)); q.mps = +opt("--mps", 40); q.secs = +opt("--secs", 60); q.allocs = has("--allocs"); }
   if (ASK === "prof") { const f = opt("--eval-file", ""); q.expr = f ? fs.readFileSync(f, "utf8") : argv.filter((a, i) => !a.startsWith("--") && argv[i - 1] !== "--ask" && !/^--(spot|spots|frames|warm|world|root|url|eval-file|toggle|toggle-file|look-dir|pairs|min-pairs|settle-frames|idle|seed|device|preload|query|slice|slice-spots|gpu|shaders|mode|modes|ref|mem-budget|route|mps|secs)$/.test(argv[i - 1] || "")).join(" "); }
   if (ASK === "eval") { const f = opt("--eval-file", ""); q.expr = f ? fs.readFileSync(f, "utf8") : argv.filter((a, i) => !a.startsWith("--") && argv[i - 1] !== "--ask" && !/^--(spot|spots|frames|warm|world|root|url|eval-file|toggle|toggle-file|look-dir|pairs|min-pairs|settle-frames|idle|seed|device|preload|query|slice|slice-spots|gpu|shaders|mode|modes|ref|mem-budget|route|mps|secs)$/.test(argv[i - 1] || "")).join(" "); }
   let r;
