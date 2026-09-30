@@ -510,7 +510,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Needs core/seed.js for CBZ.hashN; bakes lazily on first request, so it only
      has to precede its first consumer — world/materials.js. -->
 <script src="src/world/textures_surface.js?v=pf0930q"></script>
-<script src="src/world/materials.js?v=pbr1"></script>
+<script src="src/world/materials.js?v=pf0930c"></script>
 <script src="src/world/fuel_station.js?v=pf0930a"></script>
 <script src="src/world/prisonkit.js?v=tow929b"></script>
 <!-- THE LADDER, DRAWN (world/ladderkit.js): stiles, rungs and a cage built
@@ -561,10 +561,10 @@ document.body.appendChild(b);}}catch(e){}})();
        every body's hand (character.js builds it) — so it loads before bodies -->
   <script src="src/systems/fphands.js?v=w09290250"></script>
   <!-- ink in skin: tattoo charts for arms / hands / head, profiles, the FP sync; before character.js (its arm UVs read the chart split) -->
-  <script src="src/entities/tattoo.js?v=pf0930a"></script>
+  <script src="src/entities/tattoo.js?v=pf0930c"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
-  <script src="src/entities/character.js?v=w09290250"></script>
+  <script src="src/entities/character.js?v=pf0930c"></script>
   <script src="src/entities/headwear.js?v=hw1"></script>
   <!-- real jewelry (PBR metal, brilliants, draped link chains, pendants): before watch.js (its metals) and bling.js -->
   <script src="src/entities/jewelry_kit.js?v=w09290232"></script>
@@ -616,7 +616,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/eyes.js?v=nored0930"></script>
 <script src="src/systems/vitals.js?v=nored0930"></script>
 <script src="src/systems/verbs_pickup.js?v=w09290250"></script>
-<script src="src/entities/player.js?v=mc5ae55"></script>
+<script src="src/entities/player.js?v=pf0930c"></script>
 <!-- Legacy down-state decals were REMOVED, not merely untagged (the file itself
      is gone as of 2026-07-26; this comment used to describe it in the present
      tense and offer "re-add the tag" as a revert, which no longer works).
@@ -890,7 +890,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/island_roads.js?v=roads1"></script>
 <script src="src/world/disaster_arena.js?v=lift1-st1"></script>
 <script src="src/world/island_dressing.js?v=dress1"></script>
-<script src="src/systems/grapple.js?v=vit3"></script>
+<script src="src/systems/grapple.js?v=pf0930c"></script>
 <script src="src/entities/survivorbot.js?v=m0928a-st1"></script>
 <script src="src/modes/survival.js?v=vit3"></script>
 <!-- SHARK SIM's own front door: hides the shared card in shark mode, lays

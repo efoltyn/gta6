@@ -851,10 +851,7 @@
       if (hex != null && !(m.userData && m.userData._cbzPart)) {
         const h = toLinear(hex);
         if (CBZ.cmat) m.material = CBZ.cmat(h);
-        else if (m.material && m.material.color && m.material.color.setHex) {
-          if (m.material._shared) m.material = m.material.clone();
-          m.material.color.setHex(h);
-        }
+        else if (m.material && m.material.color && m.material.color.setHex) CBZ.paintMesh(m, h);
       }
       if (visible != null) m.visible = visible;
     }

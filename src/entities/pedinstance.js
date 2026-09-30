@@ -752,7 +752,7 @@
       box: !!L && !o.geometry._cbzUnit, unit: !!(L && o.geometry._cbzUnit),
       cast: !!o.castShadow, recv: !!o.receiveShadow, order: o.renderOrder | 0,
       mesh: null, cap: 0, next: 0, free: [],
-      recs: [], mDirty: false, cDirty: false, live: 0,
+      recs: [], mDirty: false, cDirty: false, live: 0, idleAt: -1,
     };
     pools.set(key, p);
     return p;
@@ -1205,6 +1205,7 @@
      the flag in the console) gives back the byte-identical old renderer. */
   function killPool(p) {
     if (p.mesh) { if (poolRoot) poolRoot.remove(p.mesh); p.mesh.dispose(); p.mesh = null; }
+    if (p.mat) { p.mat.dispose(); p.mat = null; }   // the pool's own clone (makePool); maps are not ours
   }
   function teardown() {
     rigs.forEach(emptyRig);
@@ -1250,8 +1251,25 @@
       else park(rec);
     }
   }
+  // An EMPTY pool is kept for POOL_IDLE frames, hidden, before it retires.
+  // Retiring on the first empty frame made walking/driving through the crowd a
+  // pool factory: a combo leaves with one body and comes back with the next,
+  // and every comeback was a fresh material + InstancedMesh + GPU buffers
+  // (138 pools built in 180 frames of walking — the renderer's per-frame
+  // garbage while moving). The cap still holds: past 3/4 of MAX_POOLS an
+  // empty pool retires at once.
+  const POOL_IDLE = 900;
   function uploadOrRetire(p, key) {
-    if (!p.recs.length) { killPool(p); pools.delete(key); return; }
+    if (!p.recs.length) {
+      if (p.idleAt < 0) {
+        p.idleAt = stamp;
+        p.free.length = 0; p.next = 0; p.mDirty = p.cDirty = p.uDirty = false;
+        if (p.mesh) { p.mesh.count = 0; p.mesh.visible = false; }
+      }
+      if (stamp - p.idleAt > POOL_IDLE || pools.size > (MAX_POOLS * 3) >> 2) { killPool(p); pools.delete(key); }
+      return;
+    }
+    if (p.idleAt >= 0) { p.idleAt = -1; if (p.mesh) p.mesh.visible = true; }
     uploadPool(p);
   }
   function uploadPool(p) {

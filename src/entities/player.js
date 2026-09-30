@@ -47,8 +47,7 @@
         // characters now share cached materials (world/materials.js cmat) —
         // clone-on-write so recolouring the PLAYER never bleeds onto NPCs
         // that share that colour.
-        if (m.material._shared) m.material = m.material.clone();
-        m.material.color.setHex(color);
+        CBZ.paintMesh(m, color);
       }
       if (visible != null) m.visible = visible;
     });

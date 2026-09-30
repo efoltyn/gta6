@@ -73,8 +73,8 @@
   const scene = CBZ.prisonRoot || CBZ.scene;
 
   // basic lambert material with optional emissive glow. FRESH every call —
-  // use this when something will MUTATE the material per-instance (e.g.
-  // reactions.js flashes each NPC's head emissive; sharing would bleed).
+  // for a material its owner will mutate in place. To RECOLOUR something use
+  // CBZ.paintMesh below (shared tints), not a private mat() per instance.
   function mat(color, opts) {
     opts = opts || {};
     return new THREE.MeshLambertMaterial({
@@ -88,7 +88,7 @@
   //      reuse ~10 geometries + a handful of materials instead of ~16 geoms
   //      + ~12 materials PER character). Anything tagged `_shared` must NEVER
   //      be disposed (see entities/survivorbot.js clear). Only use cmat() for
-  //      surfaces nothing mutates per-instance — the head stays mat(). ----
+  //      surfaces nothing mutates per-instance (recolour via CBZ.paintMesh). ----
   const matCache = new Map();
   // Every Standard twin ever built, so core/gfx.js can drive the batch-safe
   // swap protocol and backfill the environment map when carfx builds it late.
@@ -147,6 +147,72 @@
     if (!pbrWanted()) return m;
     return m._cbzTwin || makeTwin(m, color, em, ei);
   }
+
+  // ---- ONE WAY TO RECOLOUR A MESH: shared tints + copy-on-write ----------
+  // CBZ.paintMesh(mesh, hex) gives the mesh the SHARED twin of its current
+  // material in that colour: every property but the colour is the same (type,
+  // maps, emissive, flags), cached by exactly those properties, tagged
+  // `_shared`. So 400 peds in 30 shirt colours hold ~30 shirt materials, not
+  // 400 clones (each clone is a renderer state object + a program lookup on its
+  // first draw, and promotion made ~11 of them a frame while driving).
+  // CBZ.ownMaterial(mesh) is the other half: any writer that must change a
+  // material IN PLACE (a map, an emissive, a flag) calls it first and gets a
+  // private copy when the current one is shared. Nothing mutates a `_shared`
+  // material; nothing needs to clone "just in case" before painting.
+  // Materials with a custom shader hook or userData (ink skins, first-person
+  // twins) are not keyed: they fall back to a private clone + setHex.
+  const tintCache = new Map();
+  const TINT_MAPS = ["map", "emissiveMap", "alphaMap", "normalMap", "bumpMap", "aoMap", "lightMap", "specularMap", "envMap", "roughnessMap", "metalnessMap"];
+  const _baseHook = THREE.Material.prototype.onBeforeCompile;
+  function tintKey(src, hex) {
+    if (src.isShaderMaterial || src.onBeforeCompile !== _baseHook) return null;
+    const ud = src.userData;
+    if (ud) for (const k in ud) return null;
+    let k = src.type + "|" + hex + "|" + (src.emissive ? src.emissive.getHex() : -1) + "|" + src.emissiveIntensity +
+      "|" + src.opacity + "|" + (src.transparent ? 1 : 0) + (src.depthWrite ? 1 : 0) + (src.depthTest ? 1 : 0) +
+      (src.vertexColors ? 1 : 0) + (src.flatShading ? 1 : 0) + (src.skinning ? 1 : 0) + (src.morphTargets ? 1 : 0) +
+      (src.morphNormals ? 1 : 0) + (src.wireframe ? 1 : 0) + (src.fog ? 1 : 0) + (src.visible ? 1 : 0) + (src.toneMapped ? 1 : 0) +
+      "|" + src.side + "|" + src.alphaTest + "|" + src.blending + "|" + src.colorWrite +
+      "|" + (src.polygonOffset ? src.polygonOffsetFactor + "," + src.polygonOffsetUnits : "") +
+      "|" + (src.roughness != null ? src.roughness : "") + "|" + (src.metalness != null ? src.metalness : "") +
+      "|" + (src.envMapIntensity != null ? src.envMapIntensity : "") + "|" + src.name;
+    for (let i = 0; i < TINT_MAPS.length; i++) { const t = src[TINT_MAPS[i]]; if (t) k += "|" + TINT_MAPS[i] + ":" + t.uuid; }
+    return k;
+  }
+  function tintOf(src, hex) {
+    hex = Math.floor(hex) & 0xffffff;
+    const k = tintKey(src, hex);
+    if (k == null) return null;
+    let t = tintCache.get(k);
+    if (!t) {
+      t = src.clone();
+      t.color.setHex(hex);
+      t._shared = true;
+      t._cbzTint = true;
+      tintCache.set(k, t);
+    }
+    return t;
+  }
+  function paintMesh(m, hex) {
+    const cur = m && m.material;
+    if (!cur || Array.isArray(cur) || !cur.color || hex == null) return;
+    hex = Math.floor(hex) & 0xffffff;
+    if (cur.color.getHex() === hex) return;
+    const t = tintOf(cur, hex);
+    if (t) { m.material = t; return; }
+    if (cur._shared) m.material = cur.clone();
+    m.material.color.setHex(hex);
+  }
+  function ownMaterial(m) {
+    const cur = m && m.material;
+    if (!cur || Array.isArray(cur)) return cur || null;
+    if (cur._shared) m.material = cur.clone();
+    return m.material;
+  }
+  CBZ.tintOf = tintOf;
+  CBZ.paintMesh = paintMesh;
+  CBZ.ownMaterial = ownMaterial;
+  CBZ.tintStats = function () { return { tints: tintCache.size }; };
 
   // CBZ.pbrMat(color, opts) — explicit shared PBR material for callers that
   // WANT roughness/metalness regardless of tier (glass, chrome, wet stone).

@@ -425,8 +425,8 @@
   // LOAD — while you're still on the spawn roof and can't reach anyone — so the rigs
   // are finished and parked off-map (visible=false) long before the first promotion.
   // GPU NOTE: every rig material is a MeshLambertMaterial, the SAME shader the
-  // instanced crowd already renders on frame 0 — and cloneLook() clones (same shader
-  // program/defines) — so revealing a pre-built rig triggers NO new shader compile;
+  // instanced crowd already renders on frame 0 — and setLook's shared tints are
+  // the same shader program/defines — so revealing a pre-built rig triggers NO new shader compile;
   // the only first-reveal cost is a tiny matrix/uniform upload, dwarfed by the
   // construction we just moved off the hot path. (An optional renderer.compile()
   // warm-up would be a core/main hook, not ours — reported, not required.)
@@ -1271,15 +1271,8 @@
   }
 
   // ---- promotion pool: real makeCharacter peds reused as you move ----
-  // isolate a pooled rig's tinted materials once so recolouring it per agent
-  // can't bleed onto the shared material cache.
-  function cloneLook(ped) {
-    const ch = ped.char; if (!ch) return;
-    const iso = (arr) => (arr || []).forEach((m) => { if (m && m.material) m.material = m.material.clone(); });
-    if (ch.head && ch.head.material) ch.head.material = ch.head.material.clone();
-    const ss = ch.skinSlots || {};
-    iso(ss.hands); iso(ss.arms); iso(ss.armsLower); iso(ss.hair); iso(ss.torso); iso(ss.collar);
-  }
+  // setLook paints through CBZ.cityPaintSlot -> CBZ.paintMesh: each slot takes
+  // the SHARED material in its colour, so a pooled rig needs no private clones.
   function setLook(ped, skinHex, shirtHex, hairHex) {
     const ch = ped.char; if (!ch) return;
     // PLAIN CIVILIANS (CBZ.CONFIG.CITY_PLAIN_CIVVIES, default on): a body
@@ -1293,11 +1286,10 @@
     if (plain && ch._clothesKey != null && CBZ.cityApplyClothes) CBZ.cityApplyClothes(ch, null);
     // a stale bandana from a prior gang occupant must go too (clothes.js mesh)
     if (plain && ch._bandana && CBZ.cityAttachBandana) CBZ.cityAttachBandana(ch, null);
-    // cityPaintSlot clones a _shared pooled material before tinting. cloneLook()
-    // isolates a POOLED rig up front, but this ran on any rig handed to it, and
-    // an un-isolated one leaked its tint into the global cmat cache — which is
-    // what made strangers' hands change skin tone while their faces did not.
-    const paint = CBZ.cityPaintSlot || ((arr, hex) => (arr || []).forEach((m) => { if (m && m.material && m.material.color) { if (m.material._shared) m.material = m.material.clone(); m.material.color.setHex(hex); } }));
+    // cityPaintSlot -> CBZ.paintMesh: a shared tint per colour, never a write
+    // into a shared material (the old in-place tint is what made strangers'
+    // hands change skin tone while their faces did not).
+    const paint = CBZ.cityPaintSlot || ((arr, hex) => (arr || []).forEach((m) => { if (m) CBZ.paintMesh(m, hex); }));
     if (ch.head) paint([ch.head], skinHex);
     const ss = ch.skinSlots || {};
     // THE PROMOTED BODY GETS REAL SLEEVES (CBZ.CONFIG.CITY_CROWD_SLEEVES, default
@@ -1319,7 +1311,6 @@
     const ped = CBZ.cityMakePed(PARK, PARK, Math.random, { kind: "civilian" });
     ped._crowd = true; ped._parked = true; ped.group.visible = false;
     ped.pos.set(PARK, 0, PARK); ped.target.set(PARK, 0, PARK);
-    cloneLook(ped);
     A.root.add(ped.group);
     CBZ.cityPeds.push(ped);
     return ped;

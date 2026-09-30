@@ -649,10 +649,7 @@
         // part goes back to plain flat colour; recolorRig's closing refresh
         // puts the ink back on whatever is still bare skin.
         if (m.material._shared && CBZ.tattoo && CBZ.tattoo.isInk(m.material) && CBZ.cmat) m.material = CBZ.cmat(color);
-        else {
-          if (m.material._shared) m.material = m.material.clone();
-          m.material.color.setHex(color);
-        }
+        else CBZ.paintMesh(m, color);
       }
       if (visible != null) m.visible = visible;
     }
@@ -666,12 +663,11 @@
     for (let i = 0; i < list.length; i++) {
       const m = list[i];
       if (!m || !m.material || !m.material.emissive || !m.material.emissive.setHex) continue;
-      if (m.material._shared) {
-        if (!on) continue;                     // shared cache mats are already matte
-        m.material = m.material.clone();
-      }
-      m.material.emissive.setHex(on ? 0x3a3f4c : 0x000000);
-      m.material.emissiveIntensity = on ? 0.4 : 1;
+      const want = on ? 0x3a3f4c : 0x000000, wi = on ? 0.4 : 1;
+      if (m.material.emissive.getHex() === want && m.material.emissiveIntensity === wi) continue;
+      const o = CBZ.ownMaterial(m);
+      o.emissive.setHex(want);
+      o.emissiveIntensity = wi;
     }
   }
   // recolor any character rig's CLOTH to an outfit's colors (skin/face untouched).

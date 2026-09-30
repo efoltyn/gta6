@@ -34,6 +34,7 @@
   "use strict";
   const CBZ = window.CBZ;
   const mat = CBZ.mat, cmat = CBZ.cmat, boxGeom = CBZ.boxGeom;
+  let _headBase = null;
 
   CBZ.CONFIG = CBZ.CONFIG || {};
   /* CHAR_SLEEP_POSE — a body in a bed used to be the STANDING rig rolled 90°
@@ -3992,7 +3993,10 @@
     const skinHex = c.skin != null ? c.skin : 0xcf9a72;
     const hairHex = c.hair != null ? c.hair : 0x4a3526;
     const noseV = c.nose != null ? c.nose : defaultNose(skinHex, hairHex);
-    const head = new THREE.Mesh(headGeometry(form, noseV), mat(skinHex));
+    // the head wears the SHARED tint for its skin tone (world/materials.js
+    // CBZ.tintOf): writers go through CBZ.paintMesh / CBZ.ownMaterial
+    if (!_headBase) _headBase = mat(0xcf9a72);
+    const head = new THREE.Mesh(headGeometry(form, noseV), CBZ.tintOf(_headBase, skinHex) || mat(skinHex));
     head.position.y = headSize / 2; head.scale.setScalar(hk); head.castShadow = true;
     head.name = "head";
     neck.add(head);
@@ -8501,10 +8505,7 @@
     const s = rig.skinSlots;
     const paint = (list, hex) => {
       if (hex == null || !list) return;
-      for (const m of list) if (m && m.material && m.material.color) {
-        if (m.material._shared) m.material = m.material.clone();
-        m.material.color.setHex(hex);
-      }
+      for (const m of list) if (m) CBZ.paintMesh(m, hex);
     };
     paint(s.torso, colors.torso); paint(s.collar, colors.collar != null ? colors.collar : colors.torso);
     const arms = colors.arms != null ? colors.arms : colors.torso;

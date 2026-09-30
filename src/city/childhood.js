@@ -317,15 +317,9 @@
   function rebody(ped, age) {
     if (!ped || ped.dead || !ped.char || !ped.group || !CBZ.makeCharacter) return false;
     if (_ageSupport === false) return false;
-    // NEVER re-body a POOLED CROWD RIG. crowd.js's makePooled() calls
-    // cloneLook() to give each pooled body its OWN cloned materials,
-    // specifically so setLook()'s per-agent tinting can't bleed across the
-    // pool ("isolate a pooled rig's tinted materials once so recolouring it
-    // per agent can't bleed onto the shared material cache"). A fresh
-    // makeCharacter comes back on the SHARED cmat cache, so re-bodying one
-    // would re-point it at shared materials and the next setLook would repaint
-    // half the city. A pooled body is ambient street furniture that gets
-    // recycled constantly — it has no business being somebody's child anyway.
+    // NEVER re-body a POOLED CROWD RIG: crowd.js recycles it constantly
+    // (setLook repaints it per agent) — ambient street furniture has no
+    // business being somebody's child.
     if (ped._crowd || ped._parked) return false;
     // a body another placement owns (seated in an aircraft, driving) must not
     // have its skeleton swapped out from under that system mid-frame.

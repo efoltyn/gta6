@@ -289,17 +289,21 @@
   //      emissive pop, no blood-dark tint. The impact reads through gore.spray +
   //      the wounds.js entry hole. flashHead/fadeFlash stay as the public hit
   //      hook but do ONLY the SAFETY normalize: snap the head to its BUILD-TIME
-  //      skinTone ground truth (per-rig material — character.js builds its own,
-  //      never shared) so a hit can never strand a stray tint. That is the
+  //      skinTone ground truth (through CBZ.paintMesh — the head material is a
+  //      shared tint) so a hit can never strand a stray tint. That is the
   //      surviving stuck-bright-face fix. ----
   function normalizeHead(a) {
     const o = owner(a);
-    const m = o && o.char && o.char.head && o.char.head.material;
+    const h = o && o.char && o.char.head, m = h && h.material;
     if (!m) return;
-    const tone = o.char && o.char.skinTone != null ? o.char.skinTone : null;
-    if (m.color && tone != null && m.color.getHex() !== tone) m.color.setHex(tone);
-    if (m.emissive && m.emissiveIntensity !== 1) m.emissiveIntensity = 1;
-    if (m.emissive && m.emissive.getHex() !== 0) m.emissive.setHex(0x000000);
+    const tone = o.char.skinTone != null ? o.char.skinTone : null;
+    // the head is a shared tint: write through the one helper
+    if (m.color && tone != null && m.color.getHex() !== tone) CBZ.paintMesh(h, tone);
+    const e = h.material;
+    if (e.emissive && (e.emissiveIntensity !== 1 || e.emissive.getHex() !== 0)) {
+      const w = CBZ.ownMaterial(h);
+      w.emissiveIntensity = 1; w.emissive.setHex(0x000000);
+    }
   }
   function flashHead(a) {
     // physics-only: no color write — just guarantee the head is on-tone.

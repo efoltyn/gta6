@@ -521,7 +521,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Needs core/seed.js for CBZ.hashN; bakes lazily on first request, so it only
      has to precede its first consumer — world/materials.js. -->
 <script src="src/world/textures_surface.js?v=pf0930q"></script>
-<script src="src/world/materials.js?v=pbr1"></script>
+<script src="src/world/materials.js?v=pf0930c"></script>
 <script src="src/world/fuel_station.js?v=pf0930a"></script>
 <script src="src/world/prisonkit.js?v=tow929b"></script>
 <!-- THE LADDER, DRAWN (world/ladderkit.js): stiles, rungs and a cage built
@@ -583,10 +583,10 @@ document.body.appendChild(b);}}catch(e){}})();
        every body's hand (character.js builds it) — so it loads before bodies -->
   <script src="src/systems/fphands.js?v=w09290250"></script>
   <!-- ink in skin: tattoo charts for arms / hands / head, profiles, the FP sync; before character.js (its arm UVs read the chart split) -->
-  <script src="src/entities/tattoo.js?v=pf0930a"></script>
+  <script src="src/entities/tattoo.js?v=pf0930c"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
-  <script src="src/entities/character.js?v=w09290250"></script>
+  <script src="src/entities/character.js?v=pf0930c"></script>
   <script src="src/entities/headwear.js?v=hw1"></script>
   <!-- real jewelry (PBR metal, brilliants, draped link chains, pendants): before watch.js (its metals) and bling.js -->
   <script src="src/entities/jewelry_kit.js?v=w09290232"></script>
@@ -640,7 +640,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/eyes.js?v=nored0930"></script>
 <script src="src/systems/vitals.js?v=nored0930"></script>
 <script src="src/systems/verbs_pickup.js?v=w09290250"></script>
-<script src="src/entities/player.js?v=mc5ae55"></script>
+<script src="src/entities/player.js?v=pf0930c"></script>
 <script src="src/entities/coins.js"></script>
 <!-- Legacy down-state decals were REMOVED, not merely untagged (the file itself
      is gone as of 2026-07-26; this comment used to describe it in the present
@@ -861,7 +861,7 @@ document.body.appendChild(b);}}catch(e){}})();
      restores the legacy feet-pivot flop. -->
 <script src="src/systems/prisoncorpse.js?v=fallreal1"></script>
 <script src="src/entities/ambientstate.js?v=contact1"></script>
-<script src="src/entities/crowd.js?v=life4"></script>
+<script src="src/entities/crowd.js?v=pf0930c"></script>
 <script src="src/systems/simulation.js?v=scale8"></script>
 <script src="src/systems/detection.js?v=nored0930"></script>
 <script src="src/systems/aitactics.js?v=tac1"></script>
@@ -898,7 +898,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- TELLING: what the player saw or heard becomes something he can tell a guard or the warden; an officer checks it, the world changes, the yard finds out. -->
 <script src="src/systems/prisonsnitch.js?v=tell2"></script>
 <script src="src/systems/difficulty.js?v=sharkmode1"></script>
-<script src="src/systems/reactions.js?v=mce86a5"></script>
+<script src="src/systems/reactions.js?v=pf0930c"></script>
 <script src="src/systems/facial.js?v=face1"></script>
 <script src="src/systems/ambient.js"></script>
 <script src="src/systems/weather.js?v=w09290204"></script>
@@ -1000,7 +1000,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/island_roads.js?v=roads1"></script>
 <script src="src/world/disaster_arena.js?v=lift1-st1"></script>
 <script src="src/world/island_dressing.js?v=dress1"></script>
-<script src="src/systems/grapple.js?v=vit3"></script>
+<script src="src/systems/grapple.js?v=pf0930c"></script>
 <script src="src/entities/survivorbot.js?v=m0928a-st1"></script>
 <script src="src/modes/survival.js?v=vit3"></script>
 <script src="src/modes/shark_sim.js?v=nored0930"></script>
@@ -1354,8 +1354,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/adboard.js?v=cd0929"></script>
 <script src="src/city/mode.js?v=rg0929"></script>
 <script src="src/city/economy.js?v=vit3"></script>
-<script src="src/city/clothes.js?v=body0929a"></script>
-<script src="src/city/outfits.js?v=w09290250"></script>
+<script src="src/city/clothes.js?v=pf0930c"></script>
+<script src="src/city/outfits.js?v=pf0930c"></script>
 <script src="src/entities/dutykit.js?v=me18753"></script>
 <script src="src/city/hunger.js?v=nored0930"></script>
 <!-- THE CITY'S LAW over CBZ.brain: cop perception/hearing, the authority
@@ -1382,7 +1382,7 @@ document.body.appendChild(b);}}catch(e){}})();
      brain.rep. After peds.js (fleeFrom / markGunpoint / the report visuals it
      drives) and systems/brain.js; nothing here runs at parse. -->
 <script src="src/city/brain_city.js?v=armed1"></script>
-<script src="src/entities/pedinstance.js?v=pf0930b"></script>
+<script src="src/entities/pedinstance.js?v=pf0930c"></script>
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and
      after interior_programs.js. This is what puts a boss on the top floor. -->
@@ -1390,7 +1390,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- CHILDHOOD: age bands, the growth curve, child proportions and gait. After
      peds.js (the ped factory) and after the character rig it extends. Without
      this tag children get correct proportions but never grow. -->
-<script src="src/city/childhood.js?v=w09290219"></script>
+<script src="src/city/childhood.js?v=pf0930c"></script>
 <script src="src/city/level.js?v=allmain3"></script>
 <!-- WHO YOU ARE TO THEM, IN WORDS. The street's port of the prison's
      socialRead: the five relationship axes + the cover-aware level + the role
@@ -1403,7 +1403,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/sizeup.js?v=lvl1y"></script>
 <script src="src/city/bling.js?v=w09290232"></script>
 <script src="src/city/club.js?v=deslop1"></script>
-<script src="src/city/crowd.js?v=wreal0929"></script>
+<script src="src/city/crowd.js?v=pf0930c"></script>
 <script src="src/city/blobshadows.js?v=cars1"></script>
 <!-- headlight pools + tail glow on the road at night (instanced ground decals,
      no dynamic lights); pushes the shared lamp emissives up after dark.
@@ -1412,7 +1412,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/carlamps.js?v=lamps1"></script>
 <script src="src/city/medics.js?v=fit1"></script>
 <script src="src/city/security.js?v=seawave1"></script>
-<script src="src/city/vips.js?v=cd0929"></script>
+<script src="src/city/vips.js?v=pf0930c"></script>
 <script src="src/city/police.js?v=po0930"></script>
 <script src="src/city/aircraftphysics.js?v=aero1"></script>
 <script src="src/city/aircraft.js?v=mil0929"></script>
@@ -1759,7 +1759,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/racket.js?v=cd0929"></script>
 <script src="src/city/aim_dossier.js?v=allmain1"></script>
 <script src="src/city/captives.js?v=nodash1"></script>
-<script src="src/city/millionaires.js?v=cd0929"></script>
+<script src="src/city/millionaires.js?v=pf0930c"></script>
 <script src="src/city/regionlife.js?v=wreal0929"></script>
 <script src="src/city/modshop.js?v=cd0929"></script>
 <script src="src/city/stuntjumps.js?v=metro0929"></script>
@@ -1829,7 +1829,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- drinking/tipsy system (a sibling agent's file — provides CBZ.cityDrink;
      loads after shops.js/hud so it can hook the same HUD/economy surface) -->
 <script src="src/city/drinking.js?v=nored0930"></script>
-<script src="src/city/charpanel.js?v=w09290250"></script>
+<script src="src/city/charpanel.js?v=pf0930c"></script>
 <!-- THE PHOTO BOOTH: one offscreen rig that photographs any body in the
      outfit it is ACTUALLY wearing (CBZ.cityMugshot). The hitman contract
      card on the phone shows the mark instead of describing him. -->

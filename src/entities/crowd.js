@@ -143,7 +143,6 @@
   const FAR_AWAY = -1000;
   const rigOf = new Int32Array(TOTAL); rigOf.fill(-1);
   const facePool = [];
-  function cloneShared(m) { if (m && m.material && m.material._shared) m.material = m.material.clone(); }
   // WOMEN IN THE CROWD (W3): this pool is built ONCE at load (not per-agent,
   // like city/crowd.js's own promotion pool), so there's no ambient id to
   // stream a seeded roll off yet — Math.random() here only decides the
@@ -152,8 +151,6 @@
   function makeFaceEntry(pi) {
     const fem = Math.random() < 0.48;
     const rig = CBZ.makeCharacter({ legs: 0xff7a1a, torso: 0xff7a1a, collar: 0xff9747, arms: 0xff7a1a, skin: 0xd8a177, hair: 0x2a2018, stripes: 0xc85c00, shoes: 0x2b2b2b, build: fem ? "f" : "m", longHair: fem && Math.random() < 0.6 });
-    (rig.skinSlots.hands || []).forEach(cloneShared);   // per-rig skin/hair so recolour can't bleed onto the cache
-    (rig.skinSlots.hair || []).forEach(cloneShared);
     rig.group.position.y = FAR_AWAY;
     root.add(rig.group);                                 // under the crowd root → hides with it off-escape
     const chain = new THREE.Mesh(CBZ.boxGeom(0.34, 0.12, 0.07), CBZ.cmat(0xffd451));
@@ -173,11 +170,12 @@
   for (let i = 0; i < FACE_POOL; i++) makeFaceEntry(i);
 
   function setRigSkin(rig, skin, hair) {
-    if (rig.head.material && rig.head.material.color) rig.head.material.color.setHex(skin);
-    // cloneShared first: a glove come off (outfits.js paintGloves) hands the rig
-    // back a SHARED cmat, and tinting that would repaint every hand in the game
-    (rig.skinSlots.hands || []).forEach(function (m) { cloneShared(m); if (m.material.color) m.material.color.setHex(skin); });
-    (rig.skinSlots.hair || []).forEach(function (m) { if (m.material.color) m.material.color.setHex(hair); });
+    // CBZ.paintMesh: the shared material in that colour, never a write into a
+    // shared one (hair is a cmat: an in-place setHex would recolour every
+    // head of hair in the game that shared it)
+    CBZ.paintMesh(rig.head, skin);
+    (rig.skinSlots.hands || []).forEach(function (m) { CBZ.paintMesh(m, skin); });
+    (rig.skinSlots.hair || []).forEach(function (m) { CBZ.paintMesh(m, hair); });
   }
   function assignRig(e, id) {
     const a = e.actor, rig = e.rig;

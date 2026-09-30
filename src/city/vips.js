@@ -224,24 +224,19 @@
   }
 
   // ---------- the FIT: paint a drafted body into the role ----------------
-  // crowd.js setLook pattern: clone the slot materials once (so the shared
-  // base material never repaints every rig), then recolor. Original colors
+  // CBZ.paintMesh hands each slot the shared material in that colour (never a
+  // write into a shared one), so there is nothing to isolate first. Original colors
   // are remembered so release() walks the same body off in its own clothes.
   function paintFit(p, hex) {
     const ss = p.char && p.char.skinSlots; if (!ss || hex == null) return;
     const first = (arr) => (arr && arr[0] && arr[0].material && arr[0].material.color) ? arr[0].material.color.getHex() : null;
     if (!p._vipFit0) p._vipFit0 = { torso: first(ss.torso), collar: first(ss.collar), legs: first(ss.legs) };
-    if (!p._vipFitIso) {
-      const iso = (arr) => (arr || []).forEach((m) => { if (m && m.material) m.material = m.material.clone(); });
-      iso(ss.torso); iso(ss.collar); iso(ss.legs); iso(ss.legsLower);
-      p._vipFitIso = true;
-    }
     const paint = (arr, h) => { if (h == null) return;
       // CBZ.cityPaintSlot clones a _shared pooled material before tinting.
       // The old inline version did not, so dressing ONE actor repainted that
       // colour across the whole world (hands vs faces diverging).
       if (CBZ.cityPaintSlot) return CBZ.cityPaintSlot(arr, h);
-      (arr || []).forEach((m) => { if (m && m.material && m.material.color) { if (m.material._shared) m.material = m.material.clone(); m.material.color.setHex(h); } }); };
+      (arr || []).forEach((m) => { if (m) CBZ.paintMesh(m, h); }); };
     paint(ss.torso, hex); paint(ss.collar, hex); paint(ss.legs, hex); paint(ss.legsLower, hex);
   }
   function restoreFit(p) {
@@ -252,7 +247,7 @@
       // The old inline version did not, so dressing ONE actor repainted that
       // colour across the whole world (hands vs faces diverging).
       if (CBZ.cityPaintSlot) return CBZ.cityPaintSlot(arr, h);
-      (arr || []).forEach((m) => { if (m && m.material && m.material.color) { if (m.material._shared) m.material = m.material.clone(); m.material.color.setHex(h); } }); };
+      (arr || []).forEach((m) => { if (m) CBZ.paintMesh(m, h); }); };
     paint(ss.torso, f.torso); paint(ss.collar, f.collar); paint(ss.legs, f.legs); paint(ss.legsLower, f.legs);
     p._vipFit0 = null;
   }

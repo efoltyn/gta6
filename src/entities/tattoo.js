@@ -1754,8 +1754,9 @@
     if (want === false) want = null;
     else if (key && !want) return -1;
     if (cur === want) return 0;
-    m.map = want;
-    m.needsUpdate = true;
+    const own = CBZ.ownMaterial(head);        // heads are shared tints: ink goes on a private copy
+    own.map = want;
+    own.needsUpdate = true;
     return 1;
   }
   /* Ink whatever of this rig's skin is bare right now, and take it off what

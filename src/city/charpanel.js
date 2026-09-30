@@ -448,10 +448,7 @@
       for (let i = 0; i < list.length; i++) {
         const m = list[i];
         if (!m) continue;
-        if (color != null && m.material && m.material.color && m.material.color.setHex) {
-          if (m.material._shared) m.material = m.material.clone();
-          m.material.color.setHex(color);
-        }
+        if (color != null) CBZ.paintMesh(m, color);
         if (vis != null) m.visible = vis;
       }
     };

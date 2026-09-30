@@ -808,8 +808,7 @@
         const m = list[i];
         if (!m || !m.material || !m.material.color) continue;
         if (m.userData && m.userData._cbzPart) continue;   // painted cloth: a tint would darken the art
-        if (m.material._shared) m.material = m.material.clone();   // the cmat pool is SHARED — clone or repaint the world
-        m.material.color.setHex(hex);
+        CBZ.paintMesh(m, hex);   // shared tint, never a write into the cmat pool
       }
     };
     put(s.legs, c.legs); put(s.legsLower, c.legs); put(s.pelvis, c.legs);

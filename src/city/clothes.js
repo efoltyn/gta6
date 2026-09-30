@@ -3957,11 +3957,7 @@
       if (paintedHex != null && (!CBZ.CONFIG || CBZ.CONFIG.CITY_YOKE_GARMENT !== false)) {
         const yoke = ch.skinSlots.collar;
         if (CBZ.cityPaintSlot) CBZ.cityPaintSlot(yoke, paintedHex);
-        else if (yoke) for (const m of yoke) {
-          if (!m || !m.material || !m.material.color) continue;
-          if (m.material._shared) m.material = m.material.clone();
-          m.material.color.setHex(paintedHex);
-        }
+        else if (yoke) for (const m of yoke) if (m) CBZ.paintMesh(m, paintedHex);
       }
       return true;
     }
@@ -3971,7 +3967,7 @@
     applyClothes(ch, null);
     if (CBZ.cityRecolorRig) CBZ.cityRecolorRig(ch, { torso: r.shirt, arms: r.shirt, legs: r.legs, collar: r.shirt, shoes: 0x2b2b2b }, null);
     else {
-      const s = ch.skinSlots, setHex = (list, hex) => { if (list) for (const m of list) if (m && m.material && m.material.color) { if (m.material._shared) m.material = m.material.clone(); m.material.color.setHex(hex); } };
+      const s = ch.skinSlots, setHex = (list, hex) => { if (list) for (const m of list) if (m) CBZ.paintMesh(m, hex); };
       setHex(s.torso, r.shirt); setHex(s.arms, r.shirt); setHex(s.armsLower, r.shirt); setHex(s.legs, r.legs); setHex(s.legsLower, r.legs); setHex(s.collar, r.shirt);
     }
     applyClothes(ch, { id: "comp", colors: r });

@@ -233,8 +233,8 @@
   }
   CBZ.reactionsAudit = function () { const o = { quiet: _qQuiet, full: _qFull, firstBlock: _qWhy }; _qWhy = ""; return o; };
 
-  // grab the head material (each rig builds its own MeshLambertMaterial,
-  // so mutating it never bleeds onto another actor — see character.js).
+  // grab the head material. It is a SHARED tint (world/materials.js
+  // CBZ.paintMesh): read it freely, write it only through paintMesh/ownMaterial.
   function headMat(a) {
     const h = a.char && a.char.head;
     return h && h.material ? h.material : null;
@@ -248,10 +248,14 @@
   function restoreHead(r, a) {
     const m = headMat(a);
     if (m) {
-      const tone = headTone(a);
-      if (m.color && tone != null && m.color.getHex() !== tone) m.color.setHex(tone);
-      if (m.emissive && m.emissiveIntensity !== 1) m.emissiveIntensity = 1;
-      if (m.emissive && m.emissive.getHex() !== 0) m.emissive.setHex(0x000000);
+      const h = a.char.head, tone = headTone(a);
+      // through the one helper: head materials are shared tints now
+      if (m.color && tone != null && m.color.getHex() !== tone) CBZ.paintMesh(h, tone);
+      const e = h.material;
+      if (e.emissive && (e.emissiveIntensity !== 1 || e.emissive.getHex() !== 0)) {
+        const o = CBZ.ownMaterial(h);
+        o.emissiveIntensity = 1; o.emissive.setHex(0x000000);
+      }
     }
     if (r) { r.savedEm = -1; r.savedCol = -1; }
   }
