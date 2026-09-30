@@ -54,31 +54,63 @@
     return x >= r.minX - p && x <= r.maxX + p && z >= r.minZ - p && z <= r.maxZ + p;
   }
 
+  // Region names never change after build: the regex runs once per region
+  // object. The answer lives in a WeakMap, NOT on the region (writing
+  // r._isLink added a property to every region object mid-play, a map
+  // transition per region that deoptimized every water query compiled
+  // against the old maps: --trace-deopt showed overDeck bailing "wrong map" /
+  // "dependent prototype chain changed" in a loop).
+  const _linkMemo = new WeakMap();
   function isLink(r) {
-    // Region names never change after build, and this used to run the regex
-    // for EVERY region on EVERY water query — profiled at >1% of the sim
-    // tick on its own. Compute once per region object.
     if (!r || !r.name) return false;
-    if (r._isLink === undefined) r._isLink = /bridge|causeway|link/i.test(r.name);
-    return r._isLink;
+    let v = _linkMemo.get(r);
+    if (v === undefined) { v = /bridge|causeway|link/i.test(r.name); _linkMemo.set(r, v); }
+    return v;
   }
 
+  // THE DECK TEST READS NUMBERS, NOT REGIONS. Every water query in the game
+  // (hundreds a frame: floats, buoyancy, predators, swim, wakes) asks this
+  // first. It used to walk the bridge/causeway region OBJECTS, whose shapes
+  // differ per region, so the loop was megamorphic and kept deoptimizing (the
+  // drive's "isSurfaceWater" garbage was that code running unoptimized). The
+  // link regions are copied once per regions array into one Float64Array
+  // (kind, a, b, c, d, pad): the hot loop is monomorphic typed-array reads.
+  //   rect:   kind 0, minX, maxX, minZ, maxZ
+  //   circle: kind 1, cx, cz, r, 0
   function overDeck(A, x, z, margin) {
     if (!A) return false;
     const B = A.bridge;
     if (B && x >= B.minX - margin && x <= B.maxX + margin && z >= B.minZ - margin && z <= B.maxZ + margin) return true;
-    // only the bridge/causeway regions (a handful of ~220), listed once per
-    // regions array: this runs for every water query, every frame
-    const regs = A.regions || [];
-    if (_linkOf !== regs || _linkN !== regs.length) {
-      _linkOf = regs; _linkN = regs.length; _links.length = 0;
-      for (let i = 0; i < regs.length; i++) if (isLink(regs[i])) _links.push(regs[i]);
+    const regs = A.regions || _noRegs;
+    if (_linkOf !== regs || _linkN !== regs.length) linkPack(regs);
+    const L = _linkF, n = _linkCount;
+    for (let i = 0, o = 0; i < n; i++, o += 6) {
+      const p = L[o + 5] + margin;
+      if (L[o] === 1) {
+        const dx = x - L[o + 1], dz = z - L[o + 2], rr = L[o + 3] + p;
+        if (dx * dx + dz * dz <= rr * rr) return true;
+      } else if (x >= L[o + 1] - p && x <= L[o + 2] + p && z >= L[o + 3] - p && z <= L[o + 4] + p) return true;
     }
-    for (let i = 0; i < _links.length; i++) if (regionHit(_links[i], x, z, margin)) return true;
     return false;
   }
-  let _linkOf = null, _linkN = -1;
-  const _links = [];
+  const _noRegs = [];
+  let _linkOf = null, _linkN = -1, _linkF = new Float64Array(0), _linkCount = 0;
+  function linkPack(regs) {
+    _linkOf = regs; _linkN = regs.length;
+    let n = 0;
+    for (let i = 0; i < regs.length; i++) if (isLink(regs[i])) n++;
+    if (_linkF.length < n * 6) _linkF = new Float64Array(n * 6);
+    let o = 0;
+    for (let i = 0; i < regs.length; i++) {
+      const r = regs[i];
+      if (!isLink(r)) continue;
+      if (r.kind === "circle") { _linkF[o] = 1; _linkF[o + 1] = +r.cx || 0; _linkF[o + 2] = +r.cz || 0; _linkF[o + 3] = +r.r || 0; _linkF[o + 4] = 0; }
+      else { _linkF[o] = 0; _linkF[o + 1] = +r.minX; _linkF[o + 2] = +r.maxX; _linkF[o + 3] = +r.minZ; _linkF[o + 4] = +r.maxZ; }
+      _linkF[o + 5] = +r.pad || 0;
+      o += 6;
+    }
+    _linkCount = n;
+  }
 
   // Legacy fallback used only before continent.js publishes the real signed
   // shoreline.  It preserves the old gameplay contract during boot.
