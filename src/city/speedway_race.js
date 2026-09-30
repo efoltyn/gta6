@@ -58,6 +58,19 @@
     stepped: -1, frame: 0, poseT: 0, pylonT: 0, lampsT: 0, lastLit: 0, green: false,
   };
 
+  /* the start-light tone (880 Hz a lamp, 1320 Hz the green), on the game's one audio context */
+  function beep(go) {
+    const ac = CBZ.getAudioCtx ? CBZ.getAudioCtx() : null;
+    if (!ac || ac.state !== "running") return;
+    try {
+      const o = ac.createOscillator(), gn = ac.createGain(), t = ac.currentTime;
+      o.type = "sine"; o.frequency.value = go ? 1320 : 880;
+      gn.gain.setValueAtTime(0.0001, t); gn.gain.exponentialRampToValueAtTime(0.18, t + 0.01);
+      gn.gain.exponentialRampToValueAtTime(0.0001, t + (go ? 0.6 : 0.25));
+      o.connect(gn); gn.connect(ac.destination); o.start(t); o.stop(t + 0.7);
+    } catch (e) {}
+  }
+
   // ---- the car as the world sees it (city coords) ----------------------------------
   function makeView() {
     return { pos: { x: 0, y: 0, z: 0 }, yaw: 0, pitch: 0, roll: 0, wheels: null, damage: null,
@@ -124,7 +137,7 @@
         lights(n, green) {
           F.lastLit = n; F.green = green; F.lampsT = green ? 1.4 : 0;
           const st = sw.stadium; if (st.venue) st.venue.setLights(n, green);
-          if (CBZ.sfx && (n || green)) CBZ.sfx(green ? "pickup" : "click");
+          if (n || green) beep(green);
         },
         flash(text) { hudFlash(text); },
         finish(e, place) {
