@@ -863,6 +863,7 @@
       // makes one visible again runs before this pass (999.4), so it is
       // re-tiered before the frame that shows it
       if (!c || !c.group || c._sleep || c._proxy || c.group.visible === false) continue;
+      if (c._raceCar) continue;                       // a Bullring stock car carries its own near/far LOD (race_car.js)
       const tr0 = c._lodTrack, was = !!(tr0 && tr0.on);
       let on = false;
       if (!c.player && !c.dead) {

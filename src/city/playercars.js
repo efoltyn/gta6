@@ -226,6 +226,8 @@
   const prisms = new Map();
   const spheres = new Map();
   const procTemplates = new Map();
+  // every car body built so far (the materials a car you get into will draw with)
+  CBZ.cityCarTemplates = function () { return Array.from(procTemplates.values()); };
   const tplCtx = new WeakMap();        // template -> its full brand-face context
   let ferrariTemplate = null;
   let ferrariLoading = false;
@@ -3165,6 +3167,8 @@
        It is the same law as "one author per object": the load space is part of
        the vehicle, not a paint job over it. */
     if (grp.userData && grp.userData.holdSpec) return false;
+    // a Bullring stock car IS its body (city/speedway_race.js): no restyle
+    if (grp.userData && grp.userData.raceCar) return false;
     const ud = grp.userData;
     const old = ud.carVisual;
     if (old) {

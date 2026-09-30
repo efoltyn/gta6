@@ -525,17 +525,33 @@ body.tveh-pax #tstick { display: none !important; }
   right: calc(18px + env(safe-area-inset-right, 0px));
   bottom: calc(38px + env(safe-area-inset-bottom, 0px));
 }
+/* the utility column (TILT / SEAT / VIEW) stands over the tall GAS pedal */
 #tveh #tvBtns.tv-car .tv-car-utils {
   position: fixed; display: flex; flex-direction: column-reverse; align-items: flex-end; gap: 9px;
   right: calc(18px + env(safe-area-inset-right, 0px));
-  bottom: calc(152px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(188px + env(safe-area-inset-bottom, 0px));
 }
 #tveh #tvBtns.tv-car .tv-car-steer .tvbtn {
   min-width: 104px; min-height: 82px; padding: 8px 12px;
 }
-#tveh #tvBtns.tv-car .tv-car-pedals .tvbtn {
-  min-width: 104px; min-height: 96px; padding: 8px 12px; font-size: 20px;
+/* THE PEDALS (the Bullring race page's, owner 2026-09-29: "I like the gas and
+   brake, bring that into the real game"): a tall GAS under the resting right
+   thumb and a shorter BRAKE inboard of it, each a ridged pedal face in the
+   cluster's own glass, green and red rims, the word at the heel. */
+#tveh #tvBtns.tv-car .tv-car-pedals .tv-pedal {
+  position: relative; min-width: 0; min-height: 0; padding: 0 0 9px; align-items: flex-end;
+  border-radius: 18px; font-size: 13px; letter-spacing: 1.6px;
 }
+#tveh .tv-pedal::before {
+  content: ""; position: absolute; left: 18%; right: 18%; top: 13%; bottom: 30px; border-radius: 8px;
+  background: repeating-linear-gradient(0deg, rgba(255,255,255,.26) 0 4px, transparent 4px 10px);
+  pointer-events: none;
+}
+#tveh .tv-pedal span { position: relative; opacity: .9; }
+#tveh #tvBtns.tv-car .tv-car-pedals .tv-gas { width: 104px; height: 140px; border-color: rgba(70,224,138,.72); background: rgba(22,92,54,.55); }
+#tveh #tvBtns.tv-car .tv-car-pedals .tv-brake { width: 92px; height: 96px; border-color: rgba(255,96,74,.72); background: rgba(124,34,24,.55); }
+#tveh #tvBtns.tv-car .tv-car-pedals .tv-gas.on, #tveh #tvBtns.tv-car .tv-car-pedals .tv-gas:active { background: rgba(70,224,138,.5); }
+#tveh #tvBtns.tv-car .tv-car-pedals .tv-brake.on, #tveh #tvBtns.tv-car .tv-car-pedals .tv-brake:active { background: rgba(255,80,60,.55); }
 #tveh #tvBtns.tv-car .tv-tilt.tilt-on {
   border-color: rgba(125,231,255,.78); background: rgba(20,104,132,.7); color: #e9fbff;
 }
@@ -745,8 +761,10 @@ body.touch{
   #tveh #tvBtns.tv-car .tv-car-steer {
     left: calc(18px + env(safe-area-inset-left, 0px));
   }
-  #tveh #tvBtns.tv-car .tv-car-steer .tvbtn,
-  #tveh #tvBtns.tv-car .tv-car-pedals .tvbtn { min-width: 88px; }
+  #tveh #tvBtns.tv-car .tv-car-steer .tvbtn { min-width: 88px; }
+  #tveh #tvBtns.tv-car .tv-car-pedals .tv-gas { width: 88px; height: 124px; }
+  #tveh #tvBtns.tv-car .tv-car-pedals .tv-brake { width: 80px; height: 84px; }
+  #tveh #tvBtns.tv-car .tv-car-utils { bottom: calc(172px + env(safe-area-inset-bottom, 0px)); }
   body.tveh-car #tveh #tvDial {
     right: calc(204px + env(safe-area-inset-right, 0px));
   }

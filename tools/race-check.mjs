@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 /* ============================================================
-   tools/race-check.mjs — THE RACING GAME, CHECKED IN PLAIN NODE.
+   tools/race-check.mjs — THE RACING GAME (the Bullring page and the race in
+   Gang City), CHECKED IN PLAIN NODE.
 
    No browser. The circuit (race_core), then each area's own check:
      tools/race-check-car.mjs       the car: real dimensions, parts, draw calls
      tools/race-check-venue.mjs     track + stadium: widths, banks, stands, budget
      tools/race-check-physics.mjs   driving + AI: lap times, braking, grip, a 10-car race
      tools/race-check-game.mjs      the page loop itself: grid, lights, laps, flag, board, restart
+     tools/race-check-city.mjs      the race in Gang City: the walk in (banking, tunnel, walls), the
+                                    ten cars as city vehicles, a race on the city's own pedals, mph
 
      node tools/race-check.mjs            # everything
      node tools/race-check.mjs core       # the circuit only
@@ -56,7 +59,7 @@ check("the Gang City site holds the circuit (x within 205 m)", D.bbox.x1 + D.WAL
 
 // ---- each area's own check -----------------------------------------------------
 if (only === "all") {
-  for (const f of ["race-check-car.mjs", "race-check-venue.mjs", "race-check-physics.mjs", "race-check-game.mjs"]) {
+  for (const f of ["race-check-car.mjs", "race-check-venue.mjs", "race-check-physics.mjs", "race-check-game.mjs", "race-check-city.mjs"]) {
     const p = path.join(ROOT, "tools", f);
     if (!fs.existsSync(p)) { check(f + " exists", false); continue; }
     console.log(`\n---- ${f}`);

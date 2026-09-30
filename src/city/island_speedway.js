@@ -1,29 +1,33 @@
 /* ============================================================
-   city/island_speedway.js — THE BULLRING, where it stands in Gang City.
+   city/island_speedway.js — THE BULLRING, the place.
 
-   The racing game is its own page now (games/race.html, src/race/*.js).
-   This file is only the PLACE in the city: the island's ground, the
-   causeway that reaches it, and the stadium itself, which is built by
-   the SAME modules the race page draws (race_core + race_track +
-   race_venue), so there is one bowl, one track and one racing codebase.
+   The island's ground, the causeway that reaches it, and the stadium, built
+   by the SAME modules games/race.html draws (race_core + race_track +
+   race_venue), so there is one bowl and one circuit. The race itself is run
+   IN THE WORLD by city/speedway_race.js: you walk in, get into a car with F
+   and race on this track against the field.
 
-   From outside it is a closed building: the stands wrap the whole track
-   and the exterior is solid. You go in through the main entrance behind
-   the front-stretch grandstand, press the verb, and CBZ.cityRaceLaunch()
-   opens the race page in a frame over the frozen city (sim stopped, the
-   city renderer switched off). "CITY" on the race page sends a message
-   back, the frame goes, the purse is paid and the world resumes exactly
-   where you left it.
+   WHAT MAKES IT A PLACE YOU WALK, not a picture:
+     - the banking is ground: CBZ.registerCityGroundHeight publishes the
+       racing surface and the apron (race_core.surfaceY), so feet, parked
+       cars and anything else that asks CBZ.floorAt stand on the 24 degree
+       turns, not under them;
+     - the way in is the drivers' tunnel (race_track.js tunnelSpec): the main
+       gate in the back of the grandstand, a 1:8 ramp down under the stands,
+       under the wall, the racing surface and pit road, and a flight of stairs
+       up into the pass-through garage bay, whose roller door opens on pit
+       road; a crew gap in the pit wall leads to the grid. Its floors and
+       ceiling are solidground carvings (the lid over the tunnel is the track
+       itself), its walls and rails are y-banded colliders, and the island's
+       ground has the corridor cut out of it so you walk DOWN into it;
+     - walls you cannot walk through: the outside of the stands (open only at
+       the gate), the SAFER wall from the track side, the pit wall (but its
+       crew gap), the garage block (but the pass-through bay), and the infield
+       buildings once the stadium is built.
 
-   Wave 0929b gutted the old venue: the 3,700-line island (its own frame
-   copy, the showroom campus, the car park, the in-city race weekend,
-   the championship, the race book, pink slips, loaners, the city AI
-   field and the racing HUD) and speedway_structures.js. Git has them.
-
-   Phone: the stadium is not built with the world. It is built the first
-   time you come within BUILD_R of it and hidden past SHOW_R; the island
-   ground, the causeway and the exterior colliders are cheap and built
-   with the world so traffic and the map are right from the start.
+   Phone: the stadium is not built with the world. It is built the first time
+   you come within BUILD_R and hidden past SHOW_R; the ground, the causeway
+   and the colliders are cheap and built with the world.
 ============================================================ */
 (function () {
   "use strict";
@@ -31,10 +35,11 @@
   if (!CBZ || !window.THREE) return;
   const THREE = window.THREE;
   const g = CBZ.game;
-  const RC = CBZ.race && CBZ.race.core;
+  const RACE = CBZ.race || {};
+  const RC = RACE.core;
 
-  // ---- footprint (unchanged: the world layout, the desert strait, the
-  //      causeway lane and the map are all planned around these numbers) ----
+  // ---- footprint (the world layout, the desert strait, the causeway lane and
+  //      the map are all planned around these numbers) ----
   const _WOFF = (CBZ.worldOff && CBZ.worldOff("speedway")) || { dx: 0, dz: 0 };
   const CX = 490 + _WOFF.dx, CZ = -350 + _WOFF.dz, R = 210;
   const SITE_HX = 214, SITE_HZ = 182, SITE_DZ = -23, SITE_POW = 2.45;
@@ -43,9 +48,13 @@
 
   /* THE BOWL IN CITY COORDINATES. The race modules author the circuit with
      the front stretch toward +z (south). Here the public arrives from the
-     north, so the venue is turned half a turn: city = V - core. */
+     north, so the venue is turned half a turn about its centre V:
+       city = V - core      (the same formula both ways)
+       city yaw = core yaw + PI                                            */
   const VX = CX, VZ = CZ + 12;
   const toCity = (x, z, o) => { o = o || {}; o.x = VX - x; o.z = VZ - z; return o; };
+  const toCore = toCity;
+  const yawToCity = (y) => { let a = y + Math.PI; if (a > Math.PI) a -= Math.PI * 2; return a; };
 
   const BUILD_R = 1300, SHOW_R = 2600;
   const QUALITY = ("ontouchstart" in window) || navigator.maxTouchPoints > 0 ? "low" : "high";
@@ -72,17 +81,23 @@
     };
   }
 
+  /* What the city needs to know about the stadium BEFORE it is built: where
+     the outside of the stands is, the gate, and the tunnel. race_venue.js
+     answers from the frame alone. */
+  const VENUE_SPEC = RC && RACE.venue ? RACE.venue.spec(RC) : null;
+  const TU = VENUE_SPEC ? VENUE_SPEC.tunnel : null;
+  const D = RC ? RC.DIMS : null;
+
   /* THE ENTRANCE: where the venue says its public gate is, in city space,
-     plus the point on the plaza the player stands on to use it. */
+     plus the point on the plaza you stand on in front of it. */
   let ENT = null;
   function entrance() {
     if (ENT) return ENT;
-    if (!RC) return null;
+    if (!RC || !VENUE_SPEC) return null;
     const me = VENUE_SPEC.mainEntrance;
     const f = RC.frame(me.s), out = me.u + 7;
     const p = toCity(f.x + f.nx * out, f.z + f.nz * out);
     const door = toCity(f.x + f.nx * me.u, f.z + f.nz * me.u);
-    // facing the door from the plaza: the direction city-space -normal
     ENT = { x: p.x, z: p.z, doorX: door.x, doorZ: door.z, heading: Math.atan2(door.x - p.x, door.z - p.z) };
     return ENT;
   }
@@ -91,14 +106,128 @@
     return e ? { x: e.x, z: e.z, heading: e.heading } : null;
   };
 
-  /* What the city needs to know about the stadium BEFORE it is built: where
-     the outside of the stands is (colliders, the plaza) and where the gate
-     is. race_venue.js answers both from the frame alone. */
-  const VENUE_SPEC = RC && CBZ.race.venue ? CBZ.race.venue.spec(RC) : null;
+  // ====================================================================== //
+  //  THE BANKING IS GROUND                                                  //
+  // ====================================================================== //
+  /* The racing surface and the apron, as the city's ground height (the max of
+     every registered landmass): a quick box reject for the whole world, then
+     race_core's own nearest() with the last answer as the hint. */
+  const BAND_X = RC ? D.bbox.x1 + D.WALL_U + 2 : 0, BAND_Z = RC ? D.bbox.z1 + D.WALL_U + 2 : 0;
+  let hintS = null;
+  const _nr = {};
+  function bowlSurfaceY(x, z) {
+    const cx = VX - x, cz = VZ - z;
+    if (cx > BAND_X || cx < -BAND_X || cz > BAND_Z || cz < -BAND_Z) return 0;
+    RC.nearest(cx, cz, hintS, _nr);
+    if (Math.abs(_nr.u) > 40) RC.nearest(cx, cz, null, _nr);
+    hintS = _nr.s;
+    if (_nr.u < D.APRON_IN || _nr.u > D.WALL_U) return 0;
+    return RC.surfaceY(_nr.s, _nr.u);
+  }
+  if (RC && CBZ.registerCityGroundHeight) CBZ.registerCityGroundHeight(bowlSurfaceY, { name: "Bullring banking" });
 
-  // ---- colliders ------------------------------------------------------------
-  function solidYaw(cx, cz, hw, hd, yaw, y0, y1) {
-    CBZ.colliders.push(CBZ.orientedCollider(cx, cz, hw, hd, yaw, y0 || 0, y1));
+  // ---- colliders (records carry ref "speedway" so a world rebuild can drop them) ----
+  let myCols = [], myCarves = [];
+  function dropOwn() {
+    if (CBZ.colliders && myCols.length) {
+      const set = new Set(myCols);
+      for (let i = CBZ.colliders.length - 1; i >= 0; i--) if (set.has(CBZ.colliders[i])) CBZ.colliders.splice(i, 1);
+    }
+    myCols = [];
+    if (CBZ.removeCarving) for (const c of myCarves) CBZ.removeCarving(c);
+    myCarves = [];
+  }
+  /* a wall between two city points, t thick, from y0 to y1 */
+  function wallSeg(ax, az, bx, bz, t, y0, y1) {
+    const dx = bx - ax, dz = bz - az, len = Math.hypot(dx, dz);
+    if (len < 0.05 || !CBZ.orientedCollider) return;
+    const c = CBZ.orientedCollider((ax + bx) / 2, (az + bz) / 2, len / 2 + 0.05, t / 2, Math.atan2(-dz, dx), y0, y1);
+    c.ref = "speedway";
+    CBZ.colliders.push(c); myCols.push(c);
+  }
+  const _a = {}, _b = {}, _w = {};
+  /* a wall along the circuit at offset u from s0 to s1, in pieces of <= step metres */
+  function wallAlong(s0, s1, u, t, y0, y1, step) {
+    const n = Math.max(1, Math.ceil((s1 - s0) / (step || 6)));
+    for (let i = 0; i < n; i++) {
+      const sa = s0 + (s1 - s0) * i / n, sb = s0 + (s1 - s0) * (i + 1) / n;
+      const ua = typeof u === "function" ? u(sa) : u, ub = typeof u === "function" ? u(sb) : u;
+      RC.toWorld(sa, ua, 0, _w); toCity(_w.x, _w.z, _a);
+      RC.toWorld(sb, ub, 0, _w); toCity(_w.x, _w.z, _b);
+      wallSeg(_a.x, _a.z, _b.x, _b.z, t, y0, y1);
+    }
+  }
+  /* a wall across the circuit at s from u0 to u1 */
+  function wallAcross(s, u0, u1, t, y0, y1) {
+    RC.toWorld(s, u0, 0, _w); toCity(_w.x, _w.z, _a);
+    RC.toWorld(s, u1, 0, _w); toCity(_w.x, _w.z, _b);
+    wallSeg(_a.x, _a.z, _b.x, _b.z, t, y0, y1);
+  }
+  /* the tunnel corridor, in city space: x across (d), z along (u) */
+  const tx = (d) => VX - (TU.x + d), tz = (u) => VZ - (TU.z0 + u);
+
+  function buildWalls() {
+    const L = D.L, PIT = RC.PIT, H = VENUE_SPEC.height || 30, GATE = VENUE_SPEC.gate;
+    // the outside of the stands, all the way round but the main gate. The gate's
+    // recess is square to the S/F normal (core x = +-GATE.hw at s = 0), so the ring
+    // stops where its line passes the jambs, not at s = +-GATE.hw along the curve.
+    const ring = (s) => VENUE_SPEC.outerU(s) - 1.2;
+    let sA = 0;
+    while (sA < 40) { RC.toWorld(sA, ring(sA), 0, _w); if (_w.x >= GATE.hw + 0.3) break; sA += 0.25; }
+    // (the suite block stands 9 m further out than the stands either side: the
+    //  ring runs in three pieces with a wall across each step)
+    const S1 = 78, S0 = L - 78, uBk = VENUE_SPEC.outerU(L / 2) - 1.2, uSu = VENUE_SPEC.outerU(0) - 1.2;
+    wallAlong(sA, S1, uSu, 2.8, 0, H, 7);
+    wallAlong(S1, S0, ring, 2.8, 0, H, 7);
+    wallAlong(S0, L - sA, uSu, 2.8, 0, H, 7);
+    wallAcross(S1, uBk - 1.4, uSu + 1.4, 1.2, 0, H);
+    wallAcross(S0, uBk - 1.4, uSu + 1.4, 1.2, 0, H);
+    // the gate recess: jambs, and the lit back wall either side of the tunnel mouth
+    const uO = VENUE_SPEC.outerU(0), uR = uO - 1.5, z0 = TU.z0;
+    const seg = (x0, zz0, x1, zz1, t) => { toCity(x0, zz0, _a); toCity(x1, zz1, _b); wallSeg(_a.x, _a.z, _b.x, _b.z, t, -0.3, H); };
+    for (const x of [-GATE.hw - 0.25, GATE.hw + 0.25]) seg(x, z0 + uR - 0.45, x, z0 + uO + 0.3, 0.5);
+    seg(-GATE.hw, z0 + uR - 0.25, TU.x - TU.hw, z0 + uR - 0.25, 0.5);
+    seg(TU.x + TU.hw, z0 + uR - 0.25, GATE.hw, z0 + uR - 0.25, 0.5);
+    // the SAFER wall, from the track side (you cannot walk up the banking into the stands)
+    wallAlong(0, L, D.WALL_U + 0.45, 0.9, -0.3, 14, 6);
+    // the pit wall, with the crew gap in front of the pass-through bay
+    wallAlong(PIT.s0 - 6, TU.pitGap[0], PIT.wallU, 0.6, -0.3, 1.05, 6);
+    wallAlong(TU.pitGap[1], PIT.s1 + 6, PIT.wallU, 0.6, -0.3, 1.05, 6);
+    // the garage block: solid but the pass-through bay, which is a room with a door
+    const G = TU.garage, g0 = PIT.boxS(0) - PIT.boxLen / 2 - 3, g1 = PIT.boxS(PIT.boxes - 1) + PIT.boxLen / 2 + 3;
+    const uMid = (G.uF + G.uB) / 2, depth = G.uF - G.uB;
+    wallAlong(g0, TU.bayS0, uMid, depth, -0.3, G.H, 6);
+    wallAlong(TU.bayS1, g1, uMid, depth, -0.3, G.H, 6);
+    wallAcross(TU.bayS0, G.uF, G.uB, 0.3, -0.3, G.H);
+    wallAcross(TU.bayS1, G.uF, G.uB, 0.3, -0.3, G.H);
+    wallAlong(TU.bayS0, TU.bayS1, G.uB + 0.15, 0.3, -0.3, G.H, 12);
+    wallAlong(TU.bayS0, TU.bayS - TU.doorHW, G.uF - 0.12, 0.3, -0.3, G.H, 12);
+    wallAlong(TU.bayS + TU.doorHW, TU.bayS1, G.uF - 0.12, 0.3, -0.3, G.H, 12);
+    // the tunnel: its side walls (full height under the stands, below the lid under
+    // the track, and up to the rail round the stairwell in the garage), and the rail
+    // across the stairwell over the tunnel's end
+    const side = (u0, u1, y0, y1) => { for (const d of [-TU.hw - 0.2, TU.hw + 0.2]) wallSeg(tx(d), tz(u0), tx(d), tz(u1), 0.4, y0, y1); };
+    side(TU.uRampEnd - 0.5, TU.uMouth, -4.5, 6.2);
+    side(TU.uStairBot, TU.uRampEnd, -4.5, TU.lid - 0.05);
+    side(TU.uStairTop, TU.uStairBot + 0.2, -4.5, 1.0);
+    wallSeg(tx(-TU.hw - 0.2), tz(TU.uStairBot + 0.1), tx(TU.hw + 0.2), tz(TU.uStairBot + 0.1), 0.2, -0.45, 1.0);
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+  }
+
+  /* THE TUNNEL'S FLOORS AND CEILING. Three solidground boxes on one straight
+     corridor: the ramp (open above, its floor the 1:8 slope), the run under
+     the track (a LID: the racing surface, the apron and pit road stay solid
+     over a 3.0 m room), and the stairwell (open, its floor the flight). */
+  function buildCarvings() {
+    if (!CBZ.addCarving) return;
+    const u2z = (u) => VZ - TU.z0 - u, floorFn = function (x, z) { return TU.floorAt(VZ - TU.z0 - z); };
+    const box = (u0, u1, o) => {
+      const c = Object.assign({ kind: "box", cx: tx(0), cz: (u2z(u0) + u2z(u1)) / 2, hw: TU.hw, hd: Math.abs(u1 - u0) / 2, yaw: 0, dry: true, owner: "speedway", mode: "city" }, o);
+      myCarves.push(CBZ.addCarving(c));
+    };
+    box(TU.uRampEnd, TU.uMouth, { y0: TU.floor - 0.5, y1: 60, open: true, floorFn });
+    box(TU.uStairBot, TU.uRampEnd, { y0: TU.floor, y1: TU.lid, open: false });
+    box(TU.uStairTop, TU.uStairBot, { y0: TU.floor - 0.5, y1: 60, open: true, floorFn });
   }
 
   // ====================================================================== //
@@ -109,7 +238,8 @@
     if (!root || !RC || !VENUE_SPEC) return;
     annexDock(city);
     ENT = null;
-    const L = RC.DIMS.L;
+    dropOwn();
+    const L = D.L;
 
     // ---- the ground: country grass, a paved ring round the stadium, the
     //      entrance plaza and the approach apron; one canvas, one mesh ----
@@ -139,7 +269,6 @@
     c2.fillStyle = "#55585d";
     const pzx0 = Math.min(E.doorX - 38, CX - 80), pzx1 = E.doorX + 38;
     c2.fillRect(px(pzx0), pz(ACCESS_Z - 14), px(pzx1) - px(pzx0), pz(E.doorZ + 2) - pz(ACCESS_Z - 14));
-    // plaza paving joints
     c2.strokeStyle = "rgba(255,255,255,.08)"; c2.lineWidth = 1;
     for (let x = pzx0; x < pzx1; x += 6) { c2.beginPath(); c2.moveTo(px(x), pz(ACCESS_Z - 14)); c2.lineTo(px(x), pz(E.doorZ)); c2.stroke(); }
     const tex = new THREE.CanvasTexture(cv);
@@ -150,6 +279,14 @@
     for (let i = 0; i <= 192; i++) {
       const p = siteEdge(i / 192 * Math.PI * 2, 0);
       if (i === 0) shape.moveTo(p.x - CX, -(p.z - CZ)); else shape.lineTo(p.x - CX, -(p.z - CZ));
+    }
+    // the tunnel's corridor is cut out of the ground: you walk DOWN into it at the gate
+    {
+      const hole = new THREE.Path(), hx = TU.hw + 0.05;
+      const pts = [[-hx, TU.uStairTop - 0.05], [hx, TU.uStairTop - 0.05], [hx, TU.uMouth + 0.05], [-hx, TU.uMouth + 0.05]];
+      pts.forEach(([d, u], i) => { const x = tx(d) - CX, y = -(tz(u) - CZ); if (i === 0) hole.moveTo(x, y); else hole.lineTo(x, y); });
+      hole.closePath();
+      shape.holes.push(hole);
     }
     const geo = new THREE.ShapeGeometry(shape, 12);
     const pa = geo.attributes.position, uv = new Float32Array(pa.count * 2);
@@ -178,15 +315,8 @@
       });
     }
 
-    // ---- the outside of the stands is a wall: oriented boxes round the bowl --
-    for (let s = 0; s < L; s += 7) {
-      const s1 = Math.min(L, s + 7), sm = (s + s1) / 2;
-      const f = RC.frame(sm), u = VENUE_SPEC.outerU(sm) - 1.2;
-      const p = toCity(f.x + f.nx * u, f.z + f.nz * u);
-      // city tangent is the core tangent turned half a turn
-      solidYaw(p.x, p.z, (s1 - s) * 0.62, 1.4, Math.atan2(f.tz, -f.tx), 0, VENUE_SPEC.height || 30);
-    }
-    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    buildWalls();
+    buildCarvings();
 
     // ---- regions and roads (the map, traffic, the biome) ---------------------
     CBZ.registerCityRegion(city, { name: "Diamond Speedway", subtitle: "The Bullring", biome: "speedway", kind: "circle", cx: CX, cz: CZ, r: R, pad: 6, underlay: true, terrainGrade: true });
@@ -206,7 +336,7 @@
   // ====================================================================== //
   //  THE STADIUM (built when you come near, hidden when you are far)        //
   // ====================================================================== //
-  const STAD = { root: null, built: null, group: null, track: null, venue: null };
+  const STAD = { root: null, built: null, group: null, track: null, venue: null, shown: false, infieldCols: [] };
   function buildStadium() {
     // a world rebuild made a new root: the old bowl goes with the old world
     if (STAD.group) {
@@ -215,8 +345,8 @@
     }
     const grp = new THREE.Group(); grp.name = "bullring";
     grp.position.set(VX, 0, VZ); grp.rotation.y = Math.PI;
-    STAD.track = CBZ.race.track.build(THREE, RC, { quality: QUALITY });
-    STAD.venue = CBZ.race.venue.build(THREE, RC, { quality: QUALITY });
+    STAD.track = RACE.track.build(THREE, RC, { quality: QUALITY });
+    STAD.venue = RACE.venue.build(THREE, RC, { quality: QUALITY });
     grp.add(STAD.track.group); grp.add(STAD.venue.group);
     // the race page's own parking lot and far skyline band are for a page
     // with nothing around it; Gang City is what is around it here
@@ -226,6 +356,15 @@
     STAD.root.add(grp);
     STAD.group = grp; STAD.built = STAD.root;
     STAD.venue.setLights(0, false);
+    // the infield buildings are solid once they exist (the garage block has its own walls)
+    const inf = (STAD.venue.stats && STAD.venue.stats.infield) || [];
+    const n0 = myCols.length;
+    for (let i = 1; i < inf.length; i++) {
+      const [s, u, hl, hw] = inf[i];
+      wallAlong(s - hl, s + hl, u, hw * 2, -0.3, 8, 12);
+    }
+    STAD.infieldCols = myCols.slice(n0);
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
   }
   CBZ.onUpdate(55.5, function (dt) {
     if (!g || g.mode !== "city" || !STAD.root || !RC) return;
@@ -236,64 +375,29 @@
       buildStadium();
     }
     const show = d < SHOW_R;
+    STAD.shown = show;
     if (STAD.group.visible !== show) STAD.group.visible = show;
     if (!show) return;
-    STAD.venue.update(dt, { excite: 0.05, flag: "green", leaderNumber: 0, camera: CBZ.camera });
+    const rs = CBZ.speedwayRaceState ? CBZ.speedwayRaceState() : null;
+    STAD.venue.update(dt, { excite: rs ? rs.excite : 0.05, flag: rs ? rs.flag : "green", leaderNumber: rs ? rs.leader : 0, camera: CBZ.camera });
     if (STAD.track.update) STAD.track.update(dt, CBZ.camera);
   });
 
-  // ====================================================================== //
-  //  THE GATE AND THE LAUNCH                                                //
-  // ====================================================================== //
-  const PURSE = [5000, 3000, 2000, 1500, 1000, 800, 600, 400, 300, 200];
-  let frame = null, renderWas = null;
-  function onMessage(ev) {
-    if (!frame || ev.source !== frame.contentWindow) return;
-    const d = ev.data;
-    if (d && d.type === "race-exit") closeRace(d);
-  }
-  CBZ.cityRaceLaunch = function () {
-    if (frame) return false;
-    if (CBZ.setState) CBZ.setState("racing");            // not "playing": the sim stops, and no pause card
-    try { if (document.exitPointerLock) document.exitPointerLock(); } catch (e) {}
-    renderWas = CBZ.CONFIG.RENDER_FRAMES;
-    CBZ.CONFIG.RENDER_FRAMES = false;                    // the city draws nothing while you race
-    frame = document.createElement("iframe");
-    frame.src = "games/race.html?from=city&go=1";
-    frame.setAttribute("allow", "autoplay; fullscreen; gamepad");
-    frame.style.cssText = "position:fixed;inset:0;width:100%;height:100%;border:0;z-index:2147483600;background:#07080b";
-    frame.addEventListener("load", function () { try { frame.contentWindow.focus(); } catch (e) {} });
-    document.body.appendChild(frame);
-    window.addEventListener("message", onMessage);
-    return true;
+  /* what city/speedway_race.js needs of the place: the transforms, the built
+     stadium (its lights, pylon and skid marks) and the root to hang cars on */
+  CBZ.speedway = {
+    VX, VZ, CX, CZ, toCity, toCore, yawToCity, QUALITY, SHOW_R, spec: VENUE_SPEC, tunnel: TU,
+    stadium: STAD,
+    ready: function () { return !!(STAD.group && STAD.built === STAD.root); },
+    distance: function (x, z) { return Math.hypot(x - VX, z - VZ); },
+    /* where a grid box is in the city: the racer's origin stands you beside yours */
+    gridPose: function (slot) {
+      if (!RC) return null;
+      const sl = RC.GRID.slot(slot), f = RC.frame(sl.s);
+      const side = sl.u > 0 ? 1 : -1, u = sl.u - side * 2.3;          // beside the car, toward the middle of the track
+      const p = toCity(f.x + f.nx * u, f.z + f.nz * u);
+      const c = toCity(f.x + f.nx * sl.u, f.z + f.nz * sl.u);
+      return { x: p.x, z: p.z, y: RC.surfaceY(sl.s, u), heading: Math.atan2(c.x - p.x, c.z - p.z) };
+    },
   };
-  function closeRace(res) {
-    window.removeEventListener("message", onMessage);
-    if (frame && frame.parentNode) frame.parentNode.removeChild(frame);
-    frame = null;
-    CBZ.CONFIG.RENDER_FRAMES = renderWas;
-    const pay = res && res.place > 0 ? PURSE[res.place - 1] || 0 : 0;
-    if (pay && CBZ.city && CBZ.city.addCash) CBZ.city.addCash(pay);
-    if (pay && CBZ.city && CBZ.city.note) CBZ.city.note("P" + res.place + "   +$" + pay.toLocaleString("en-US"), 3);
-    // paused, not playing: the Resume click is the gesture pointer lock needs
-    if (CBZ.setState) CBZ.setState("paused");
-  }
-
-  if (CBZ.interactions && CBZ.interactions.registerZone) {
-    const I = CBZ.interactions;
-    I.registerZone({
-      id: "zone-speedway-race", kind: "speedway", prio: 9, driving: true,
-      find: function (x, z) {
-        const e = entrance();
-        if (!e || Math.hypot(x - e.x, z - e.z) > 16) return null;
-        return e;
-      },
-      options: [{
-        id: "speedway-race", slot: "i",
-        label: function () { return "Race"; },
-        onSelect: function () { CBZ.cityRaceLaunch(); },
-      }],
-    });
-    if (I.describe) I.describe("speedway", function () { return { label: "The Bullring", note: "" }; });
-  }
 })();

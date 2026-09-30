@@ -525,8 +525,9 @@ const PASS = `(() => {
       if (oa.bespoke > 3) out.fails.push("BESPOKE ORIGIN SCENES rose to " + oa.bespoke + " (ratchet 3)");
       if (oa.stories < 10) out.fails.push("origin roster shrank to " + oa.stories + " (expected >= 10)");
     }
-    // (The race-course / racer-career pins lived here. The racing game left the
-    // city for games/race.html in wave 0929b; its checks are tools/race-check*.mjs.)
+    // (The race-course / racer-career pins lived here. The race is run in the
+    // world at the Bullring now, city/speedway_race.js on src/race/*; its checks
+    // are tools/race-check*.mjs, the in-city one tools/race-check-city.mjs.)
     // THE 2026-08-04 MODES WAVE (one hitman card / race ladder of locked
     // places / the presidency / the captain / gun game). Every pin below was
     // MEASURED via probe on seed 90210 before being written (the propUseAudit

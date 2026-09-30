@@ -2,8 +2,10 @@
    race/race_game.js — THE RACE: renderer, sky, input, cameras, HUD,
    the grid → lights → laps → flag → standings loop, and the restart.
 
-   It owns no physics, no car model and no stadium. It wires:
+   It owns no physics, no car model, no stadium and no race rules. It wires:
      race_core     the circuit (frame, surface, grid, pit)
+     race_session  the rules: grid, lights, laps, flag, standings (shared
+                   with Gang City's Bullring, city/speedway_race.js)
      race_physics  every car's dynamics, walls and contact
      race_ai       the nine other drivers
      race_car      the car you see (and the cockpit you sit in)
@@ -11,11 +13,13 @@
      race_venue    stands + crowd, pit road, gantry lights, pylon
      race_audio    the engine you hear
 
-   Gang City's speedway sends you here (games/race.html?from=city) and
-   the results board offers the way back, so there is ONE racing game.
+   This page is the dev/test bench for the racing modules. In Gang City the
+   race is run in the world itself: your own character walks into the
+   Bullring and gets into a car with F (city/speedway_race.js), on the same
+   circuit, cars, drivers and rules as here.
 
-   URL: ?laps=N  ?q=low|high  ?cam=cockpit  ?from=city  ?auto=1 (you drive
-   as an AI too; a demo/attract mode)  ?go=1 (skip the tap-to-race card).
+   URL: ?laps=N  ?q=low|high  ?cam=cockpit  ?auto=1 (you drive as an AI
+   too; a demo/attract mode)  ?go=1 (skip the tap-to-race card).
 ============================================================ */
 (function () {
   "use strict";
@@ -30,15 +34,13 @@
   const $ = (id) => document.getElementById(id);
 
   // ---- who and how many -------------------------------------------------------
-  const FIELD = 10;
   const PLAYER_SLOT = 5;                       // row 3, outside: you start mid-pack and race forward
-  const PLAYER_NUMBER = 17;
   const LAPS = clamp(+Q.get("laps") || 8, 1, 60);
   const TOUCH = ("ontouchstart" in window) || navigator.maxTouchPoints > 0;
   const QUALITY = Q.get("q") || (TOUCH || Math.min(screen.width, screen.height) < 700 ? "low" : "high");
-  const FROM_CITY = Q.get("from") === "city";
   const AUTO = Q.get("auto") === "1";
-  const NAMES = ["Harlan", "Okafor", "Brandt", "Castillo", "Voss", "Lindqvist", "Marchetti", "Pryce", "Tanaka", "Doyle", "Keane", "Sorensen"];
+  // the miles-per-hour readout (1 m/s = 2.23694 mph), the same number Gang City's gauges show
+  const MPH = 2.2369362920544;
 
   // ---- renderer, scene, sky -------------------------------------------------
   const renderer = new THREE.WebGLRenderer({ antialias: QUALITY === "high", powerPreference: "high-performance" });
@@ -122,36 +124,23 @@
   scene.add(venue.group);
   const fx = R.car.createFx(THREE, scene, { quality: QUALITY });
 
-  // ---- the field ----------------------------------------------------------------
-  const liveries = R.car.liveries(FIELD);
-  const entries = [];             // {car, visual, driver, name, number, player}
-  const numbers = [];
-  for (let i = 0; i < FIELD; i++) {
-    const player = i === PLAYER_SLOT;
-    const number = player ? PLAYER_NUMBER : [3, 8, 11, 22, 31, 42, 48, 54, 88, 91][i];
-    numbers.push(number);
-    const visual = R.car.build(THREE, { number, livery: liveries[i], player, quality: QUALITY, fx });
-    scene.add(visual.group);
-    entries.push({ i, number, name: player ? "You" : NAMES[i % NAMES.length], player, visual, car: null, driver: null, best: Infinity, lapT: 0, finishT: 0 });
+  // ---- the field: the rules are race_session.js (shared with Gang City's Bullring) ----
+  const hudFlash = { fn: null };
+  const SES = R.session.create({
+    field: 10, laps: LAPS, playerSlot: PLAYER_SLOT, playerNumber: 17, auto: AUTO, coolPlayer: true,
+    on: {
+      lights(n, green) { venue.setLights(n, green); hudLights(n, green); if (R.audio && (n || green)) R.audio.beep(green); if (green) setTimeout(() => { if (SES.phase === "race") hudLights(0, false); }, 1400); },
+      flash(text, kind) { if (hudFlash.fn) hudFlash.fn(text, kind); },
+      results() { results(); },
+    },
+  });
+  const liveries = R.car.liveries(SES.field);
+  const entries = SES.entries;
+  for (const e of entries) {
+    e.visual = R.car.build(THREE, { number: e.number, livery: liveries[e.i], player: e.player, quality: QUALITY, fx });
+    scene.add(e.visual.group);
   }
-  const me = entries[PLAYER_SLOT];
-
-  /* THE FIELD: race_ai's own skill presets, dealt onto the grid MIXED (a grid
-     sorted fastest-first is a procession). The player starts sixth. */
-  const PRESETS = AI.field(FIELD - 1, 17);
-  const GRID_MIX = [3, 7, 0, 5, 8, 1, 6, 2, 4];
-  function layGrid() {
-    let k = 0;
-    for (const e of entries) {
-      const slot = core.GRID.slot(e.i);
-      e.car = PH.createCar({ id: e.i, number: e.number, s: slot.s, u: slot.u, isPlayer: e.player, assist: e.player ? { stab: 0.5 } : undefined });
-      const p = e.player ? null : PRESETS[GRID_MIX[k++]];
-      e.driver = e.player ? (AUTO ? AI.create(e.car, { skill: 0.9, aggression: 0.4, seed: 4242 }) : null)
-        : AI.create(e.car, Object.assign({ seed: 1000 + e.i * 7919 }, p));
-      e.finishT = 0; e.place = e.i + 1;
-      e.visual.reset();
-    }
-  }
+  const me = SES.me;
   const bestOf = (e) => (e.car && e.car.bestLap > 0 ? e.car.bestLap : Infinity);
 
   // ---- input: keyboard, gamepad, touch ----------------------------------------------
@@ -160,13 +149,13 @@
     keys[ev.code] = true;
     if (R.audio) R.audio.start();                 // the first key is the gesture audio needs
     if (ev.code === "KeyC") cycleCam();
-    if (ev.code === "KeyR" && S.phase === "results") restart();
+    if (ev.code === "KeyR" && SES.phase === "done") restart();
     if (ev.code === "Escape" || ev.code === "KeyP") togglePause();
     if (/^Arrow/.test(ev.code) || ev.code === "Space") ev.preventDefault();
   });
   window.addEventListener("keyup", (ev) => { keys[ev.code] = false; });
   window.addEventListener("pointerdown", () => { if (R.audio) R.audio.start(); });
-  window.addEventListener("blur", () => { for (const k in keys) keys[k] = false; if (S.phase === "race") setPause(true); });
+  window.addEventListener("blur", () => { for (const k in keys) keys[k] = false; if (SES.phase === "race") setPause(true); });
 
   // TOUCH: the left thumb steers (drag from where it lands: a virtual wheel,
   // analog), the right thumb works two pedals. Big targets, no text.
@@ -233,7 +222,7 @@
       if (p.buttons[2] && p.buttons[2].pressed) brake = 1;
       break;
     }
-    input.steer = PH.assistSteer(me.car, steer, dt);
+    input.steer = steer;                         // raw: the session applies the steering assist
     input.throttle = gas; input.brake = brake;
     return input;
   }
@@ -308,6 +297,7 @@
   }
   let flagT = 0;
   function flash(text, cls) { hud.flag.textContent = text; hud.flag.className = "show " + (cls || ""); flagT = 2.6; }
+  hudFlash.fn = flash;
   let hudAcc = 0;
   function updateHud(dt) {
     hudAcc += dt;
@@ -315,27 +305,16 @@
     if (hudAcc < 1 / 12) return;
     hudAcc = 0;
     const c = me.car;
-    hud.pos.textContent = "P" + me.place + "/" + FIELD;
+    hud.pos.textContent = "P" + me.place + "/" + SES.field;
     hud.lap.textContent = "LAP " + clamp(c.lap + 1, 1, LAPS) + "/" + LAPS;
-    hud.spd.textContent = Math.round(Math.abs(c.speed) * 3.6);
+    hud.spd.textContent = Math.round(Math.abs(c.speed) * MPH);
     hud.gear.textContent = c.gear > 0 ? c.gear : (c.gear < 0 ? "R" : "N");
     hud.rpm.style.transform = "scaleX(" + clamp((c.rpm || 0) / 9500, 0, 1).toFixed(3) + ")";
   }
 
   // ---- the race --------------------------------------------------------------------
-  const S = { phase: "intro", t: 0, lit: 0, holdT: 0, raceT: 0, paused: false, finishOrder: [], flag: "green", excite: 0, lastPylon: 0, leaderLap: -1, leader: null };
-  window.__race = { S, entries, core, restart: () => restart(), start: () => begin() };
-
-  function standings() {
-    // finished cars keep the order they took the flag in; everyone else by progress
-    const live = entries.slice().sort((a, b) => {
-      if (a.finishT && b.finishT) return a.finishT - b.finishT;
-      if (a.finishT) return -1; if (b.finishT) return 1;
-      return (b.car.lapS || 0) - (a.car.lapS || 0);
-    });
-    for (let i = 0; i < live.length; i++) live[i].place = i + 1;
-    return live;
-  }
+  const S = { phase: "intro", paused: false, lastPylon: 0 };
+  window.__race = { S, SES, entries, core, restart: () => restart(), start: () => begin() };
 
   function begin() {
     if (S.phase !== "intro" && S.phase !== "results") return;
@@ -343,18 +322,17 @@
     $("board").classList.remove("show");
     document.body.classList.add("racing");
     if (R.audio) R.audio.start();
-    layGrid();
+    SES.begin();
+    for (const e of entries) e.visual.reset();
     me.visual.setCockpit(CAMS[camMode] === "cockpit");
-    S.phase = "grid"; S.t = 0; S.lit = 0; S.raceT = 0; S.finishOrder = []; S.flag = "green"; S.leaderLap = -1; S.leader = null;
-    S.holdT = 0.4 + ((Date.now() % 1000) / 1000) * 1.1;   // the unpredictable wait with all five lit
-    venue.setLights(0, false);
+    S.phase = "run";
     hudLights(0, false);
     camInit = false;
   }
   function restart() { S.phase = "results"; begin(); }
 
   function setPause(p) {
-    if (S.phase !== "race" && S.phase !== "grid") p = false;
+    if (SES.phase !== "race" && SES.phase !== "grid") p = false;
     S.paused = p;
     $("pause").classList.toggle("show", p);
     if (R.audio) R.audio.mute(p);
@@ -363,65 +341,12 @@
   $("resume").addEventListener("click", () => setPause(false));
   $("pauseBtn").addEventListener("click", togglePause);
 
-  const HOLD = { steer: 0, throttle: 0, brake: 1 };
-  const cars = [], inputs = [];
-  function stepGrid(dt) {
-    S.t += dt;
-    // a beat to settle, then one lamp every 0.8 s, hold, all out
-    const t = S.t - 1.2;
-    const lit = t < 0 ? 0 : Math.min(5, 1 + Math.floor(t / 0.8));
-    if (lit !== S.lit) { S.lit = lit; venue.setLights(lit, false); hudLights(lit, false); if (R.audio && lit) R.audio.beep(false); }
-    if (lit === 5 && t > 4 * 0.8 + S.holdT) {
-      S.phase = "race"; S.raceT = 0;
-      venue.setLights(0, true); hudLights(0, true);
-      if (R.audio) R.audio.beep(true);
-      setTimeout(() => { if (S.phase === "race") hudLights(0, false); }, 1400);
-    }
-    // on the grid: feet on the brake
-    cars.length = inputs.length = 0;
-    for (const e of entries) { cars.push(e.car); inputs.push(HOLD); }
-    PH.stepAll(cars, inputs, dt);
-  }
-
-  function stepRace(dt) {
-    S.raceT += dt;
-    cars.length = inputs.length = 0;
-    for (const e of entries) cars.push(e.car);
-    for (const e of entries) inputs.push(e.driver ? e.driver.drive(e.car, cars, dt) : readInput(dt));
-    const laps0 = entries.map((e) => e.car.lap);
-    PH.stepAll(cars, inputs, dt);
-    entries.forEach((e, i) => { if (e.car.lap > laps0[i]) onLap(e); });
-    // everyone home (or the player home and 25 s passed): the board
-    const done = entries.every((e) => e.finishT);
-    if (done || (me.finishT && S.raceT - me.finishT > 25)) results();
-  }
-  // after the flag every car, yours too, does a cool-down lap out of the way
-  function cool(e) {
-    if (!e.driver) e.driver = AI.create(e.car, { skill: 0.8, aggression: 0, seed: 99 });
-    e.driver.cruise = 0.7;
-  }
-
-  function onLap(e) {
-    const lap = e.car.lap;
-    if (lap > S.leaderLap) {
-      S.leaderLap = lap;
-      if (lap === LAPS - 1) S.flag = "white";
-      if (lap >= LAPS) S.flag = "checker";
-    }
-    if (e === me && lap === LAPS - 1) flash("FINAL LAP", "white");
-    if (lap >= LAPS && !e.finishT) {
-      e.finishT = S.raceT; e.car.finished = true;
-      S.finishOrder.push(e);
-      cool(e);
-      if (e === me) { flash(ordinal(standings().indexOf(me) + 1), "chk"); S.excite = 1; }
-    }
-  }
-  const ordinal = (n) => n + (n % 10 === 1 && n !== 11 ? "ST" : n % 10 === 2 && n !== 12 ? "ND" : n % 10 === 3 && n !== 13 ? "RD" : "TH");
+  const ordinal = R.session.ordinal;
   const fmt = (t) => { if (!isFinite(t) || !t) return ""; const m = Math.floor(t / 60), s = t - m * 60; return (m ? m + ":" + (s < 10 ? "0" : "") : "") + s.toFixed(3); };
 
   function results() {
     S.phase = "results";
-    const order = standings();
+    const order = SES.standings();
     const lead = order[0];
     const bestLap = Math.min(...entries.map(bestOf));
     const rows = order.map((e, i) => {
@@ -433,24 +358,8 @@
     $("boardTitle").textContent = me.place === 1 ? "WINNER" : ordinal(me.place);
     $("board").classList.add("show");
     document.body.classList.remove("racing");
-    // save the result for Gang City to read when you go back
-    try { localStorage.setItem("cbz.race.last", JSON.stringify({ place: me.place, field: FIELD, best: bestOf(me), at: Date.now() })); } catch (e) {}
   }
   $("again").addEventListener("click", restart);
-  /* BACK TO THE CITY. Gang City opens this page in a frame over the paused
-     world (island_speedway.js, CBZ.cityRaceLaunch), so going back is a
-     message, not a reload: the city is exactly where you left it. Opened
-     directly with ?from=city (no frame), it goes back the long way. */
-  const EMBED = window.parent && window.parent !== window;
-  if (EMBED) document.body.classList.add("embed");
-  function leave() {
-    const res = { type: "race-exit", place: S.phase === "results" ? me.place : 0, field: FIELD, best: isFinite(bestOf(me)) ? bestOf(me) : 0 };
-    if (EMBED) { try { window.parent.postMessage(res, location.origin); return; } catch (e) {} }
-    location.href = "../index.html?mode=city&from=race";
-  }
-  $("back").addEventListener("click", leave);
-  $("leave").addEventListener("click", leave);
-  if (!FROM_CITY && !EMBED) { $("back").style.display = "none"; $("leave").style.display = "none"; }
   $("go").addEventListener("click", begin);
 
   // ---- tyre marks and the pylon ---------------------------------------------------
@@ -471,22 +380,16 @@
   }
 
   // ---- the loop ----------------------------------------------------------------------
-  let last = performance.now(), acc = 0, fpsT = 0, frames = 0;
+  let last = performance.now(), acc = 0;
   const DT = 1 / 60;
   function frame(now) {
     requestAnimationFrame(frame);
     let dt = Math.min(0.1, (now - last) / 1000); last = now;
     if (S.paused) dt = 0;
-    fpsT += dt; frames++;
-    if (S.phase === "grid" || S.phase === "race" || S.phase === "results") {
+    if (S.phase !== "intro") {
       acc += dt;
       let n = 0;
-      while (acc >= DT && n < 6) {
-        if (S.phase === "grid") stepGrid(DT);
-        else if (S.phase === "race") stepRace(DT);
-        else stepAfter(DT);
-        acc -= DT; n++;
-      }
+      while (acc >= DT && n < 6) { SES.step(DT, SES.phase === "race" ? readInput(DT) : null); acc -= DT; n++; }
       if (n === 6) acc = 0;
     }
     // presentation
@@ -494,40 +397,31 @@
     for (const e of entries) {
       if (!e.car) continue;
       e.visual.update(e.car, dt, camera, e.player && cockpit);
-      if (S.phase === "race") marks(e);
+      if (SES.phase === "race") marks(e);
     }
     if (fx) fx.update(dt, camera, renderer.domElement.clientHeight || window.innerHeight);
     if (S.phase === "intro") orbitCam(dt);
     else if (CAMS[camMode] === "cockpit") cockpitCam(me, dt);
     else chaseCam(me, dt, CAMS[camMode] === "far");
-    S.excite = Math.max(0, S.excite - dt * 0.3);
-    if (S.phase === "race") {
-      // the crowd comes up for contact and for the lead changing hands
-      for (const e of entries) if (e.car.fx && e.car.fx.impact && e.car.fx.impact.mag > 8) S.excite = Math.min(1, S.excite + 0.4);
+    if (SES.phase === "race") {
       S.lastPylon -= dt;
       if (S.lastPylon <= 0) {
         S.lastPylon = 0.5;
-        const st = standings();
+        const st = SES.standings();
         if (venue.setPylon) venue.setPylon(st.map((e) => e.number));
-        if (S.leader && S.leader !== st[0]) S.excite = Math.min(1, S.excite + 0.5);
-        S.leader = st[0];
+        if (SES.leader && SES.leader !== st[0]) SES.excite = Math.min(1, SES.excite + 0.5);
+        SES.leader = st[0];
       }
       updateHud(dt);
     }
-    venue.update(dt, { excite: S.excite, flag: S.flag, leaderNumber: S.leader ? S.leader.number : 0, camera });
+    venue.update(dt, { excite: SES.excite, flag: SES.flag, leaderNumber: SES.leader ? SES.leader.number : 0, camera });
     if (track.update) track.update(dt, camera);
     if (R.audio && me.car) R.audio.update(me.car, entries, camera, dt);
     renderer.render(scene, camera);
   }
-  // after the board is up the cars keep rolling slowly behind it
-  function stepAfter(dt) {
-    cars.length = inputs.length = 0;
-    for (const e of entries) { cool(e); cars.push(e.car); }
-    for (const e of entries) inputs.push(e.driver.drive(e.car, cars, dt));
-    PH.stepAll(cars, inputs, dt);
-  }
 
   // the first frame: the stadium, from the air, and the one button
+  SES.layGrid();                                  // the cars stand on the grid under the opening sweep
   if (Q.get("go") === "1" || AUTO) setTimeout(begin, 50);
   window.__raceReady = true;
   const b = $("boot"); if (b) b.remove();

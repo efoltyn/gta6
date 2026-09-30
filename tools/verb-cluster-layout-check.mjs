@@ -200,12 +200,12 @@ function vehicleControls(s, kind) {
   const Rr = s.W - 14, B = s.H - 18;
   if (kind === "foot") return { cluster: footControls(s, false).slice(3), avoid: footControls(s, false).slice(0, 3) };
   if (kind === "car") {
-    const pw = narrow ? 88 : 104;
-    // pedals (right 18, bottom 38, 96 tall), BRAKE + GAS
-    cl.push({ x: s.W - 18 - pw, y: s.H - 38 - 96, w: pw, h: 96 });
-    cl.push({ x: s.W - 18 - pw - 10 - pw, y: s.H - 38 - 96, w: pw, h: 96 });
-    // utility column (right 18, bottom 152): TILT, SEAT, VIEW
-    let y = s.H - 152;
+    // THE PEDALS (right 18, bottom 38): a tall GAS on the edge, a shorter BRAKE inboard
+    const gw = narrow ? 88 : 104, gh = narrow ? 124 : 140, bw = narrow ? 80 : 92, bh = narrow ? 84 : 96;
+    cl.push({ x: s.W - 18 - gw, y: s.H - 38 - gh, w: gw, h: gh });
+    cl.push({ x: s.W - 18 - gw - 10 - bw, y: s.H - 38 - bh, w: bw, h: bh });
+    // utility column over the gas (right 18, bottom 188 / 172): TILT, SEAT, VIEW
+    let y = s.H - (narrow ? 172 : 188);
     for (let i = 0; i < 3; i++) { y -= 46; cl.push({ x: s.W - 18 - 92, y: y, w: 92, h: 46 }); y -= 9; }
     // dial
     const dr = narrow ? 204 : 246, dw = narrow ? 108 : 128;

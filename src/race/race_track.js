@@ -198,6 +198,52 @@
   const SUITES = { s0: -78, s1: 78, depth: 9, overhang: 4, lift: 3.0, storey: 3.4 };
   function inSuites(core, s) { const d = core.ds(0, s); return d > SUITES.s0 && d < SUITES.s1; }
 
+  /* THE DRIVERS' TUNNEL. How you get from the car park to the cars: in at the
+     main gate in the back of the grandstand, down a 1:8 ramp under the stands,
+     under the SAFER wall, the racing surface, the apron and pit road, and up a
+     straight flight of stairs INSIDE the garage block (the pass-through bay 7),
+     out of its roller door onto pit road and through the crew gap in the pit
+     wall to the grid. The bullrings do it this way: the infield is an island
+     inside the track, and you go under.
+     It is ONE straight corridor in the world, along +z (the S/F normal: at
+     s = 0 the frame is axis-aligned), at x = TUNNEL.x, and its "u" is the same
+     u the frame has at s = 0 (u = z - z0). Pure numbers: race_track cuts the
+     infield grass round the stairwell and opens the pit wall in front of the
+     bay, race_venue draws it, and Gang City (city/island_speedway.js) turns
+     the same numbers into floors, ceilings and walls you walk. */
+  const PIT_GAP_HW = 1.1;          // half-width of the crew gap in the pit wall (a 2.2 m opening)
+  function tunnelSpec(core) {
+    const PIT = core.PIT, f0 = core.frame(0, {});
+    const garageF = PIT.u - PIT.w / 2 - 0.6, garageB = garageF - 9, garageH = 5.2;   // race_venue's garage block
+    const bay = 7, bayS = PIT.boxS(bay);
+    const T = {
+      x: 3.0, hw: 1.4, z0: f0.z,                   // the stair lane is the left side of bay 7 (x 0.5..9.3 there)
+      floor: -3.6, clear: 3.0, grade: 1 / 8,       // 3.0 m clear under a 0.6 m lid; a 1:8 ramp
+      uMouth: STAND.uBack + SUITES.depth - 1.5,    // the back of the main gate's recess
+      riser: 0.18, tread: 0.3,
+      garage: { uF: garageF, uB: garageB, H: garageH, ceil: 4.0 },
+      bay, bayS, bayS0: bayS - PIT.boxLen / 2, bayS1: bayS + PIT.boxLen / 2, doorHW: 3.4,
+      pitGap: [bayS - PIT_GAP_HW, bayS + PIT_GAP_HW],
+    };
+    T.uRampEnd = T.uMouth + T.floor / T.grade;                     // where the ramp reaches the tunnel floor
+    T.steps = Math.round(-T.floor / T.riser);
+    T.uStairBot = garageF - 0.8;                                   // the flight starts inside the building
+    T.uStairTop = T.uStairBot - T.steps * T.tread;
+    T.lid = T.floor + T.clear;                                     // the tunnel ceiling (under the lid)
+    /* the walking surface along the corridor (u), and the ceiling over it */
+    T.floorAt = function (u) {
+      if (u >= T.uMouth) return 0;
+      if (u > T.uRampEnd) return (u - T.uMouth) * T.grade;
+      if (u > T.uStairBot) return T.floor;
+      if (u > T.uStairTop) { const k = Math.min(T.steps, Math.floor((T.uStairBot - u) / T.tread) + 1); return T.floor + k * T.riser; }
+      return 0;
+    };
+    T.ceilAt = function (u) { return u > T.uRampEnd ? Math.min(0, (u - T.uMouth) * T.grade) + T.clear : T.lid; };
+    /* a corridor point in the circuit's world: across d (+x), along u */
+    T.at = function (d, u, y) { return [T.x + d, y, T.z0 + u]; };
+    return T;
+  }
+
   /* light towers: evenly spaced by arc length round the back of the stands */
   function towerSpots(core, n) {
     const D = core.DIMS, L = D.L, f = {};
@@ -233,7 +279,7 @@
   /* arc length along the offset line u (for texture U that doesn't stretch) */
   function arcAt(core, s, u, f) { return s + u * (core.frame(s, f).heading - core.T.H[0]); }
 
-  const kit = { rng, canvas, tex, rgb, css, Mesher, Buckets, chunk, STAND, standSection, SUITES, inSuites, towerSpots, lightField, arcAt };
+  const kit = { rng, canvas, tex, rgb, css, Mesher, Buckets, chunk, STAND, standSection, SUITES, inSuites, tunnelSpec, towerSpots, lightField, arcAt };
 
   // =====================================================================
   // TEXTURES
@@ -433,15 +479,22 @@
       }
     }
 
-    // ---- infield grass (a fan: the inner apron edge is convex) ----------------------------
+    // ---- infield grass: the inner apron edge, less the stairwell of the drivers' tunnel ----
     {
       const me = B.get("grass", { uvScale: 16 }), ol = core.outline(D.APRON_IN, hi ? 4 : 8);
-      let cx = 0, cz = 0; for (let i = 0; i < ol.length; i += 2) { cx += ol[i]; cz += ol[i + 1]; }
-      cx /= ol.length / 2; cz /= ol.length / 2;
-      const n = ol.length / 2, C = [cx, -0.02, cz];
-      for (let i = 0; i < n; i++) {
-        const j = (i + 1) % n;
-        me.tri(C, [ol[i * 2], -0.02, ol[i * 2 + 1]], [ol[j * 2], -0.02, ol[j * 2 + 1]], white, up);
+      const TU = tunnelSpec(core);
+      const contour = [], holes = [[]];
+      for (let i = 0; i < ol.length; i += 2) contour.push(new THREE.Vector2(ol[i], ol[i + 1]));
+      for (const [d, u] of [[-TU.hw, TU.uStairBot], [TU.hw, TU.uStairBot], [TU.hw, TU.uStairTop], [-TU.hw, TU.uStairTop]]) {
+        const p = TU.at(d, u, 0); holes[0].push(new THREE.Vector2(p[0], p[2]));
+      }
+      if (THREE.ShapeUtils.isClockWise(contour)) contour.reverse();
+      if (!THREE.ShapeUtils.isClockWise(holes[0])) holes[0].reverse();
+      const faces = THREE.ShapeUtils.triangulateShape(contour, holes);
+      const all = contour.concat(holes[0]);
+      for (const f of faces) {
+        const a = all[f[0]], b = all[f[1]], c = all[f[2]];
+        me.tri([a.x, -0.02, a.y], [b.x, -0.02, b.y], [c.x, -0.02, c.y], white, up);
       }
     }
 
@@ -467,8 +520,15 @@
       }
       // pit wall: a concrete wall between the grass strip and the pit road
       const wc = rgb(0xd9d7d0), h = 1.05, t = 0.3;
-      for (let s = PIT.s0 - 6; s < PIT.s1 + 6 - 0.01; s += hi ? 3 : 6) {
-        const s1 = Math.min(PIT.s1 + 6, s + (hi ? 3 : 6));
+      /* a crew gap in front of the tunnel's pass-through bay: the way from the
+         garages over to the grid on foot (PIT_GAP_HW each side of the bay) */
+      const TU = tunnelSpec(core), g0 = TU.bayS - PIT_GAP_HW, g1 = TU.bayS + PIT_GAP_HW;
+      const cuts = [PIT.s0 - 6];
+      for (let s = PIT.s0 - 6 + (hi ? 3 : 6); s < PIT.s1 + 6 - 0.01; s += hi ? 3 : 6) if (s < g0 || s > g1) cuts.push(s);
+      cuts.push(g0, g1, PIT.s1 + 6); cuts.sort((a, b) => a - b);
+      for (let i = 0; i < cuts.length - 1; i++) {
+        const s = cuts[i], s1 = cuts[i + 1];
+        if (s1 - s < 0.05 || (s >= g0 - 1e-6 && s1 <= g1 + 1e-6)) continue;
         const ui = PIT.wallU - t, uo = PIT.wallU + t;
         const bi0 = W3(s, ui, 0), bi1 = W3(s1, ui, 0), bo0 = W3(s, uo, 0), bo1 = W3(s1, uo, 0);
         const ti0 = W3(s, ui, h), ti1 = W3(s1, ui, h), to0 = W3(s, uo, h), to1 = W3(s1, uo, h);
@@ -477,10 +537,9 @@
         me.quad(bo0, bo1, to1, to0, wc, [F2.nx, 0, F2.nz]);
         me.quad(ti0, ti1, to1, to0, wc, up);
       }
-      // wall ends
-      for (const se of [PIT.s0 - 6, PIT.s1 + 6]) {
+      // wall ends (and the two faces of the crew gap)
+      for (const [se, sg] of [[PIT.s0 - 6, -1], [PIT.s1 + 6, 1], [g0, 1], [g1, -1]]) {
         core.frame(se, F2);
-        const sg = se < 0 ? -1 : 1;
         me.quad(W3(se, PIT.wallU - t, 0), W3(se, PIT.wallU + t, 0), W3(se, PIT.wallU + t, h), W3(se, PIT.wallU - t, h), wc, [F2.tx * sg, 0, F2.tz * sg]);
       }
     }

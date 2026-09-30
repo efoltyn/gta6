@@ -28,7 +28,7 @@
    IS, not where it was when the beats were typed.
 
    The built-in "bullring" story frames the stadium from its gate plaza. (The
-   race itself left the city for games/race.html in wave 0929b.)
+   race is run in the world: city/speedway_race.js.)
 ============================================================ */
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
@@ -45,7 +45,7 @@ const log = (s) => process.stdout.write(`[story ${((Date.now() - t0) / 1000).toF
    Each one is exactly the JSON a story FILE would hold — the built-ins are
    examples of the format, not a second code path. */
 const BUILTINS = {
-  // the Bullring from its own plaza (the race itself is games/race.html)
+  // the Bullring from its own plaza
   bullring: {
     id: "bullring",
     fov: 58,
@@ -56,7 +56,7 @@ const BUILTINS = {
           return { x: G.x - Math.sin(G.heading) * 40, y: 9, z: G.z - Math.cos(G.heading) * 40 };`,
         lookExpr: `var G = CBZ.speedwayGate && CBZ.speedwayGate(); if (!G) return { x: 0, y: 0, z: 0 };
           return { x: G.x + Math.sin(G.heading) * 30, y: 14, z: G.z + Math.cos(G.heading) * 30 };`,
-        probe: `return { gate: CBZ.speedwayGate ? CBZ.speedwayGate() : null, launch: typeof CBZ.cityRaceLaunch };`,
+        probe: `return { gate: CBZ.speedwayGate ? CBZ.speedwayGate() : null, race: CBZ.speedwayRaceAudit ? CBZ.speedwayRaceAudit() : null };`,
       },
     ],
   },

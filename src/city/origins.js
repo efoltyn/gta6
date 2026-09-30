@@ -1419,7 +1419,12 @@
     return { x: sp.x, z: sp.z, y: CBZ.floorAt ? CBZ.floorAt(sp.x, sp.z) : 0.14, heading: 0 };
   }
   // the speedway's front gate (island_speedway.js publishes it)
+  /* THE RACER STANDS BESIDE HIS CAR ON THE GRID (No. 17, the third row):
+     get in with F and the lights come on (city/speedway_race.js). No grid
+     published (a trimmed page): the gate. */
   function speedwaySpawn() {
+    const sw = CBZ.speedway, gp = sw && sw.gridPose ? sw.gridPose(5) : null;
+    if (gp) return { x: gp.x, z: gp.z, y: gp.y, heading: gp.heading };
     const g0 = CBZ.speedwayGate ? CBZ.speedwayGate() : null;
     if (!g0) return null;
     return { x: g0.x, z: g0.z, y: CBZ.floorAt ? CBZ.floorAt(g0.x, g0.z) : 0.14, heading: g0.heading };
@@ -1453,9 +1458,8 @@
       airborne:   { find: null,            feed: "The field is fogged in. You start on the apron with the keys in your hand." },
       corner:     { find: null,            feed: "" },   // the street IS the place — never fails
       motel:      { find: findMotelLot,    feed: "No room at the motel. You slept in the stairwell." },
-      // The racer opens at the speedway gate and is put straight onto the grid
-      // of the racing game (games/race.html, via CBZ.cityRaceLaunch): the race
-      // is its own page now, the city is where you come back to.
+      // The racer opens on the Bullring's grid beside his own car: the race is
+      // run in the world (city/speedway_race.js), you get in with F.
       speedway:   { resolve: speedwaySpawn, feed: "The speedway is dark tonight. You wait at the gate." },
       // never fails (internal degrade to the arena spawn — the seat is the story)
       mansion:    { resolve: mansionSpawn,  feed: "The Mansion is dark. The motorcade never came." },
@@ -1871,19 +1875,6 @@
     }
   }
 
-  /* THE GRID START. The race is games/race.html now; the racer opens at the
-     speedway gate and, a beat after the world is up, CBZ.cityRaceLaunch()
-     puts him on the grid there. If the launcher is not published (a trimmed
-     page), he simply stays at the gate. */
-  let pendingRace = null;
-  function tickRace(dt) {
-    if (!pendingRace) return;
-    pendingRace.t += dt;
-    if (pendingRace.t < 1.2) return;
-    pendingRace = null;
-    if (CBZ.cityRaceLaunch) CBZ.cityRaceLaunch();
-  }
-
   /* WHERE, made real. Returns the intro opts the camera wants, or null so the
      caller falls back to the street exactly as the originals do. */
   function placeComposition(comp, game) {
@@ -1909,8 +1900,6 @@
       return { compact: false, aerial: true };
     }
 
-    // SPEEDWAY — the racer's opening: the gate, then the grid (tickRace).
-    if (comp.where === "speedway") pendingRace = { t: 0 };
 
     // GROUND — find the lot this story wants and stand the player in it.
     const site = WH.resolve ? WH.resolve() : null;
@@ -2437,7 +2426,7 @@
     // its own guard clause so a story with no heat costs one comparison.
     if (g.mode === "city" && g.state === "playing") {
       if (pendingTP) { pendingTP = false; if (CBZ.disarmFPSAfterIntro) { try { CBZ.disarmFPSAfterIntro(); } catch (e) {} } }
-      tickHeat(dt); tickAirborne(dt); tickRace(dt);
+      tickHeat(dt); tickAirborne(dt);
     }
     if (!scene) return;
     if (g.mode !== "city") { clearScene(); return; }

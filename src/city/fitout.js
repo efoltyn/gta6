@@ -394,6 +394,15 @@
     MATS[key] = m;
     return m;
   }
+  /* WARM BEFORE THE FIRST ROOM (core/fxwarm.js, idle after boot): one mesh
+     per fit-out program (flat, lit glow, glass, textured) so walking into
+     the first fitted room does not stall on its compiles. The textured one
+     uses the plaster skin (256 px), the cheapest; every textured key is the
+     same program. */
+  CBZ.fitoutWarmObjects = function () {
+    const g = new THREE.BoxGeometry(0.01, 0.01, 0.01);
+    return ["flat", "glow", "glass", "plaster"].map(function (k) { try { return new THREE.Mesh(g, texMat(k)); } catch (e) { return null; } }).filter(Boolean);
+  };
   // THE SAME SURFACES ELSEWHERE. The disaster island's walk-in houses and
   // towers (world/disaster_arena.js) finish their floors, walls and ceilings
   // with these exact canvases instead of a second texture library. Texture
