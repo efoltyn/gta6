@@ -551,6 +551,31 @@
 
     const buckets = new Map();      // key -> {meshes:[…], tops:[…], hide:bool}
 
+    /* INSIDE A SHELL. A static mesh whose centre lies inside a building's
+       walls (city/buildings.js makeBuilding: bgroup.userData.bld) and below
+       its roof is furniture, not street: it merges per BUILDING (key
+       "I<gi>|"), never into the 112 m street tile it used to share with
+       kerbs and lamp posts, so a room is drawn (and uploaded) only when
+       somebody is near that building (the interior updater below), instead
+       of every time the street tile it stands in is on screen. */
+    const bldOf = new Map();        // ancestor group -> { inv, b } | null
+    const _iv = new THREE.Vector3();
+    function interiorOf(m) {
+      if (!v2 || !INTERIOR_SPLIT()) return null;
+      for (let o = m.parent; o && o !== target; o = o.parent) {
+        const b = o.userData && o.userData.bld;
+        if (!b || !(b.w > 0) || !(b.d > 0)) continue;
+        let rec = bldOf.get(o);
+        if (rec === undefined) { rec = { inv: new THREE.Matrix4().copy(o.matrixWorld).invert(), b: b, g: o }; bldOf.set(o, rec); }
+        const e = m.matrixWorld.elements;
+        _iv.set(e[12], e[13], e[14]).applyMatrix4(rec.inv);
+        const wt = (b.wt || 0.3) + 0.02;
+        if (Math.abs(_iv.x) < b.w / 2 - wt && Math.abs(_iv.z) < b.d / 2 - wt && _iv.y < (b.h || 0) - 0.05) return rec;
+        return null;
+      }
+      return null;
+    }
+
     function add(key, m, top, hide) {
       let b = buckets.get(key);
       if (!b) { b = { meshes: [], tops: [], hide: hide }; buckets.set(key, b); }
@@ -590,6 +615,14 @@
       let key = v2 ? mergeableKeyV2(m) : mergeableKey(m, false);
       if (!key) return;
       if (v2) {
+        const ir = interiorOf(m);
+        if (ir) {
+          const tg = topGroupIndex(m);
+          const ik = "I" + tg.gi + "|" + key;
+          add(ik, m, tg.top, false);
+          buckets.get(ik).interior = ir;
+          return;
+        }
         // per-TILE buckets: each tile mesh gets a tight bounding sphere, so
         // frustum culling and core/farcull can reject the far ones (the old
         // city-wide colour buckets spanned the map and never culled).
@@ -639,7 +672,7 @@
     const doomed = new Set();
     buckets.forEach((b, bkey) => {
       const meshes = b.meshes;
-      if (meshes.length < 2) return;              // nothing to gain
+      if (meshes.length < 2 && !b.interior) return;   // nothing to gain (a room merges even alone: it must join the near-only group)
       let merged, counts;
       if (v2) {
         const r = bakeMergeV2(meshes);
@@ -669,6 +702,16 @@
       // sphere or frustum culling can't reject it.
       merged.computeBoundingSphere();
       merged._evictable = true;                   // owned by this one mesh: core/farcull.js may drop its GPU copy when far
+      if (b.interior) {
+        // a room's merged furniture lives in the root's interiors group
+        // (farcull hides root children; the interior updater owns these)
+        const ib = b.interior.b;
+        mesh._cbzInterior = { x: ib.ox != null ? ib.ox : b.interior.g.matrixWorld.elements[12], z: ib.oz != null ? ib.oz : b.interior.g.matrixWorld.elements[14], r: Math.hypot(ib.w, ib.d) / 2 };
+        mesh.visible = false;                     // shown by the updater when somebody is near
+        interiorsGroup(target).add(mesh);
+        interiorMeshes.push(mesh);
+        merged.addEventListener("dispose", deadMarker(mesh));   // (made outside run(): a closure here would keep run's whole scope, every source mesh, alive)
+      } else
       target.add(mesh);                           // baked to world space; target is identity
       if (b.hide) {
         // WALL pass: KEEP the originals (LOS raycasts hit visible=false meshes in
@@ -734,6 +777,45 @@
   // ONCE, after the world is assembled but BEFORE any dynamic actors (peds /
   // cars) are added to it — they'd otherwise be baked static. Idempotent guard
   // per-root so a re-entered mode can't double-merge.
+  /* ---- ROOMS ARE DRAWN NEAR THEIR BUILDING ----------------------------
+     The merged interior buckets (interiorOf above) show when the player is
+     within INTERIOR_R of the building's edge, and hide past it + 25 m. From
+     further, a room is a few pixels behind a window; drawing it cost a
+     draw call and its whole buffer on the GPU for every building on screen.
+     ?cfg_BATCH_INTERIOR_SPLIT=0 merges rooms into the street tiles again. */
+  function deadMarker(mesh) { return function () { mesh._cbzDead = true; }; }
+  function INTERIOR_SPLIT() { return !(CBZ.CONFIG && CBZ.CONFIG.BATCH_INTERIOR_SPLIT === false); }
+  const INTERIOR_R = 130;
+  const interiorMeshes = [];
+  function interiorsGroup(target) {
+    let g = target.userData._cbzInteriors;
+    if (!g || g.parent !== target) {
+      g = new THREE.Group(); g.name = "batch-interiors"; g.userData.dynamic = true;   // (farcull/prune/batch: never measured, hidden or re-merged whole)
+      target.add(g); target.userData._cbzInteriors = g;
+    }
+    return g;
+  }
+  let _intT = 0;
+  function interiorTick(dt) {
+    _intT -= dt || 0.016;
+    if (_intT > 0 || !interiorMeshes.length) return;
+    _intT = 0.2;
+    const P = CBZ.player && CBZ.player.pos;
+    if (!P) return;
+    let w = 0;
+    for (let i = 0; i < interiorMeshes.length; i++) {
+      const m = interiorMeshes[i];
+      if (m._cbzDead) continue;                                    // its geometry was disposed (a freed stream job)
+      interiorMeshes[w++] = m;
+      const I = m._cbzInterior, d = Math.hypot(P.x - I.x, P.z - I.z) - I.r;
+      if (m.visible) { if (d > INTERIOR_R + 25) m.visible = false; }
+      else if (d < INTERIOR_R) m.visible = true;
+    }
+    interiorMeshes.length = w;
+  }
+  if (CBZ.onUpdate) CBZ.onUpdate(98.7, interiorTick);
+  CBZ.batchInteriorAudit = function () { let on = 0; for (const m of interiorMeshes) if (m.visible) on++; return { meshes: interiorMeshes.length, shown: on, R: INTERIOR_R }; };
+
   CBZ.batchStaticUnder = function (root) {
     if (!root || root.userData._batched) return null;
     root.userData._batched = true;
