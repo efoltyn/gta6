@@ -337,6 +337,8 @@
     const objs = [];
     try { if (CBZ.cityCarTemplates) CBZ.cityCarTemplates().forEach(function (t) { if (t) objs.push(t); }); } catch (e) {}
     try { if (CBZ.waterFxWarmObjects) CBZ.waterFxWarmObjects().forEach(function (o) { objs.push(o); }); } catch (e) {}
+    try { if (CBZ.fitoutWarmObjects) CBZ.fitoutWarmObjects().forEach(function (o) { objs.push(o); }); } catch (e) {}
+    try { if (CBZ.carInstancesWarmObjects) CBZ.carInstancesWarmObjects().forEach(function (o) { objs.push(o); }); } catch (e) {}
     if (!objs.length) return null;
     const rep = queue(objs, { full: true });
     CBZ.drivingWarmReport = { at: Math.round(performance.now()), objs: objs.length, rep: rep };

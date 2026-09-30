@@ -209,6 +209,30 @@
     return rec;
   }
 
+  /* WARM THE POOL PROGRAMS BEFORE THE FIRST POOL (core/fxwarm.js, idle
+     after boot): every material of every built car body, as the instanced
+     program a pool draws it with (paint as the shared white-painted
+     instance-coloured variant). A pool born on the frame a car comes into
+     view then links nothing. Stand-ins only: count 0, never added anywhere. */
+  CBZ.carInstancesWarmObjects = function () {
+    const out = [], seenM = new Set();
+    const T = CBZ.cityCarTemplates ? CBZ.cityCarTemplates() : [];
+    for (let i = 0; i < T.length; i++) {
+      if (!T[i]) continue;
+      T[i].traverse(function (o) {
+        if (!o.isMesh || o.isInstancedMesh || !o.geometry || Array.isArray(o.material) || !o.material) return;
+        let m = o.material, colored = false, sig = null;
+        if (isPaint(m) && (sig = paintKey(m))) { m = paintShared(sig, m).mat; colored = true; }
+        if (seenM.has(m)) return; seenM.add(m);
+        const im = new THREE.InstancedMesh(o.geometry, m, 1);
+        if (colored) im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(3), 3);
+        im.count = 0;
+        out.push(im);
+      });
+    }
+    return out;
+  };
+
   /* ---- pools ------------------------------------------------------------- */
   function makeMesh(p, cap) {
     const mesh = new THREE.InstancedMesh(p.geo, p.mat, cap);
