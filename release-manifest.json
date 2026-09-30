@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "084dad2837e4e213a8938e806bc6113ae448e019",
-  "createdAt": "2026-09-30T05:37:00.357Z",
+  "sourceCommit": "e8a9bcfd82fd2fab136a58173694f1bb569333cf",
+  "createdAt": "2026-09-30T05:51:06.900Z",
   "fileCount": 1184,
-  "totalBytes": 48008160,
+  "totalBytes": 48008344,
   "files": [
     {
       "file": "src/bootstrap.js",
@@ -1568,8 +1568,8 @@
     },
     {
       "file": "src/city/waterfield.js",
-      "bytes": 17193,
-      "sha256": "4525c72bacbe8c519d30627c2198e1c34e001a5c6fdbddc2ca784a765d4c34c0"
+      "bytes": 17260,
+      "sha256": "c680ac61f904fa4d4882baca0e519c62f1a51dd8b87384eb6afbcc7b764486b2"
     },
     {
       "file": "src/city/wealth.js",
@@ -1638,8 +1638,8 @@
     },
     {
       "file": "src/city/wildlife.js",
-      "bytes": 85805,
-      "sha256": "14b2d6b7fe1b058b4818612ee23b8d77cab1bff6081eac4d0c413667863971e8"
+      "bytes": 85883,
+      "sha256": "9b7be7185e58e3b78cc19d2ea3267b09700a4b7db1a73e670900344d0821d194"
     },
     {
       "file": "src/city/wildlife_orca.js",
@@ -3673,8 +3673,8 @@
     },
     {
       "file": "src/world/water_spec.js",
-      "bytes": 82652,
-      "sha256": "373d2ae7a826dd1ef49f1b0b64f21c51fe0396b6a31fab0e33f573d1d7bbceb3"
+      "bytes": 82701,
+      "sha256": "7d315296f687984f869e9952d4781c7288e7401fcd0d7500bed25f01b96381fb"
     },
     {
       "file": "src/world/water_stability.js",
@@ -5818,28 +5818,28 @@
     },
     {
       "file": "shark-sim.html",
-      "bytes": 58898,
-      "sha256": "8f7e68caaca3c713b4a0118e480346a816616da1ffa416f1b5004e27e3cb6069"
+      "bytes": 58896,
+      "sha256": "f39d2ae194321671b87d4ce0f6141277bac863a9df369c3e5fa68c887334b906"
     },
     {
       "file": "disaster-survival.html",
-      "bytes": 58941,
-      "sha256": "2a38ff3a5a6b2bd34d534f883ef61a6da16ebcd8dd08ec94b8065ebb68936caf"
+      "bytes": 58939,
+      "sha256": "7ac55b162f4f16791af58c9d0d593c46e98f2a9f7189a27f2e0a8d7a77501fb4"
     },
     {
       "file": "prison-escape.html",
-      "bytes": 58910,
-      "sha256": "04f861eb580113f186b67802bcaa60a1d7773b94b4c7166a1bc62a7dd1af5bda"
+      "bytes": 58908,
+      "sha256": "f2f057a69b66707f67408110b57cafee0dca3597c5e8a7869556c25fc2400daa"
     },
     {
       "file": "gang-city.html",
-      "bytes": 58865,
-      "sha256": "586b2200fcaabfc8b2aecc1246be882045a55a517f05711dd5a631ce3b9902a6"
+      "bytes": 58863,
+      "sha256": "54c68a96842f2c7c93d12f2053ea65ee7705187e2df8eb760785ca168995a78d"
     },
     {
       "file": "gun-game.html",
-      "bytes": 58887,
-      "sha256": "6beb42fa340923c70a25ad1495be5951212f695abe265443dd18e5ebaccde32b"
+      "bytes": 58885,
+      "sha256": "7e10e6aacf5e989cf8a94895b9bd5062d662ea05522f73a3888e7c8a3bb6c1cf"
     },
     {
       "file": "games/battle.html",
