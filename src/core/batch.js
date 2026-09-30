@@ -811,6 +811,17 @@
     if (!f) return false;
     return ((f & 1) && px > I.x + I.hw) || ((f & 2) && px < I.x - I.hw) || ((f & 4) && pz > I.z + I.hd) || ((f & 8) && pz < I.z - I.hd);
   }
+  function packRoom(m) {
+    const g = m.geometry, a = g && g.attributes.position;
+    if (!a || a._cbzUploaded || !CBZ.geoCompactOwned) { m._cbzPacked = true; return; }
+    CBZ.geoCompactOwned(g);
+    m._cbzPacked = true;
+  }
+  function expandRoom(m) {
+    const g = m.geometry;
+    if (g && CBZ.geoExpandAll) CBZ.geoExpandAll(g);
+    m._cbzPacked = false;
+  }
   function deadMarker(mesh) { return function () { mesh._cbzDead = true; }; }
   function INTERIOR_SPLIT() { return !(CBZ.CONFIG && CBZ.CONFIG.BATCH_INTERIOR_SPLIT === false); }
   const INTERIOR_R = 130;
@@ -838,12 +849,34 @@
       interiorMeshes[w++] = m;
       const I = m._cbzInterior, d = Math.hypot(P.x - I.x, P.z - I.z) - I.r;
       const R = seesGlass(I, P.x, P.z) ? fogEnd : INTERIOR_R;
-      if (m.visible) { if (d > R + 25) m.visible = false; }
-      else if (d < R) m.visible = true;
+      if (m._want) { if (d > R + 25) m._want = false; }
+      else if (d < R) m._want = true;
+      // a room nobody has drawn yet keeps half-size positions (core/citystream.js)
+      // until the frame it enters the view (roomFrame below)
+      if (!m._cbzPacked && !(m.geometry.attributes.position && m.geometry.attributes.position._cbzUploaded)) packRoom(m);
+      m.visible = m._want && !m._cbzPacked;
     }
     interiorMeshes.length = w;
   }
   if (CBZ.onUpdate) CBZ.onUpdate(98.7, interiorTick);
+  /* EVERY FRAME, the packed rooms that are wanted: the one entering the
+     camera's view (with a margin) is expanded and shown on this very frame,
+     before it renders, which is exactly when it would have drawn anyway. */
+  const _fr = new THREE.Frustum(), _pm = new THREE.Matrix4(), _sp = new THREE.Sphere();
+  function roomFrame() {
+    if (!interiorMeshes.length) return;
+    const cam = CBZ.camera; if (!cam) return;
+    let prepared = false;
+    for (let i = 0; i < interiorMeshes.length; i++) {
+      const m = interiorMeshes[i];
+      if (!m._want || !m._cbzPacked || m._cbzDead) continue;
+      if (!prepared) { cam.updateMatrixWorld(); _pm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse); _fr.setFromProjectionMatrix(_pm); prepared = true; }
+      const bs = m.geometry.boundingSphere; if (!bs) { expandRoom(m); m.visible = true; continue; }
+      _sp.center.copy(bs.center); _sp.radius = bs.radius * 1.3 + 8;
+      if (_fr.intersectsSphere(_sp)) { expandRoom(m); m.visible = true; }
+    }
+  }
+  if (CBZ.onUpdate) CBZ.onUpdate(99.9, roomFrame);
   CBZ.batchInteriorAudit = function () { let on = 0; for (const m of interiorMeshes) if (m.visible) on++; return { meshes: interiorMeshes.length, shown: on, R: INTERIOR_R }; };
 
   CBZ.batchStaticUnder = function (root) {

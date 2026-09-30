@@ -338,10 +338,10 @@
     a._cbzQn = q; a.array = null;
     return N.byteLength - q.byteLength;
   }
-  function compactGeo(g) {
+  function compactGeo(g, owned) {
     const a = g && g.attributes && g.attributes.position;
     if (!a || a._cbzQ || !ownArray(a) || a.itemSize !== 3 || a.isInterleavedBufferAttribute || g._shared || (g.userData && g.userData._shared)) return 0;
-    if (inUse && inUse.has(g)) return 0;             // also drawn by something still in the scene
+    if (!owned && inUse && inUse.has(g)) return 0;   // also drawn by something still in the scene
     const P = a.array, n = P.length / 3;
     let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
     for (let i = 0; i < P.length; i += 3) {
@@ -373,6 +373,8 @@
   }
   CBZ.geoExpand = function (attr) { expandAttr(attr); };
   CBZ.geoExpandAll = expandGeo;
+  // an owned, never-uploaded geometry the caller keeps out of sight (core/batch.js rooms)
+  CBZ.geoCompactOwned = function (g) { return (g && reuploadable(g)) ? compactGeo(g, true) : 0; };
   /* The geometries still drawn by the scene: a builder that shares one
      geometry between a parked and a live mesh without flagging it _shared
      must never lose its arrays. Rebuilt at most every 4 s (a scene walk). */
