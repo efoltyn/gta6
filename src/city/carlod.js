@@ -662,6 +662,7 @@
     if (d && d.userData.tris <= (1 - MIN_SAVE) * d.userData.srcTris) {
       d._shared = true;                 // never disposed by teardown; crashdeform copies before it dents
       d._carLodSrc = job.geo;
+      if (job.geo._cbzFar) d._cbzFar = job.geo._cbzFar;    // the cabin's far cut rides the twin (playercars.js)
       d.name = "car-lod";
       // readers that size a part off its geometry (vehicles.js flat tyre, crashdeform popWheel:
       // parameters.radiusTop) must read the same numbers off the twin

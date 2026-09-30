@@ -129,7 +129,8 @@
 
   // Walk the car exactly as projectObject would: an invisible node hides its
   // subtree. Returns false for anything this module cannot reproduce.
-  let _mover = false;                           // collect() for a MOVING car (acquire(c, true))
+  let _mover = false;
+  let _cabOff = false, _cabSeen = false;        // the cabin's far cut (playercars.js CBZ.cabinFar) for this acquire                           // collect() for a MOVING car (acquire(c, true))
   function collect(o) {
     if (o.visible === false) return true;
     // a seated body: vehicles.js owns its show/hide. A MOVING car is proxied
@@ -142,6 +143,7 @@
       if (o.onBeforeRender !== NOOP_RENDER) return false;
       const geo = o.geometry;
       if (!geo || !geo.isBufferGeometry || !geo.attributes.position) return false;
+      if (geo._cbzFar) { _cabSeen = true; if (_cabOff) return true; }   // past the far cut: glass and body only
       if (geo.morphAttributes && geo.morphAttributes.position && geo.morphAttributes.position.length) return false;
       const m = o.material;
       if (Array.isArray(m)) {
@@ -331,7 +333,7 @@
   }
   function newRec() {
     return freeRecs.pop() || { mover: false, car: null, entries: [], cx: 0, cy: 0, cz: 0, r: 0, inView: true, px: 0, pz: 0, ph: 0,
-      gx: 0, gy: 0, gz: 0, rx: 0, ry: 0, rz: 0, vis: null, gch: 0, vch: 0, lod: false, lodPending: false };
+      gx: 0, gy: 0, gz: 0, rx: 0, ry: 0, rz: 0, vis: null, gch: 0, vch: 0, lod: false, lodPending: false, cabOff: false, hasCab: false };
   }
   function carDist2(c) {
     const cam = CBZ.camera && CBZ.camera.position;
@@ -373,6 +375,8 @@
     if (mover ? (d2 <= MOVE_IN2 || d2 >= sleepD2()) : (d2 <= PROXY_IN2 || d2 >= sleepD2())) return false;
     const wasVis = grp.visible; grp.visible = true;               // collect() walks what would draw
     _mover = !!mover;
+    const CF = CBZ.cabinFar;
+    _cabOff = !!CF && d2 > CF.out * CF.out; _cabSeen = false;
     // the real car is captured at full detail; the pools pick the tier (carlod.js)
     if (CBZ.carLodRestore) CBZ.carLodRestore(c);
     const L = CBZ.carLod, lod = !!(L && L.wantLod(d2, false));
@@ -457,6 +461,7 @@
     rec.r = rad;
     rec.inView = view ? sphereInView(rec) : true;
     rec.lod = lod; rec.lodPending = lodPending;
+    rec.cabOff = _cabOff; rec.hasCab = _cabSeen;
     _found.length = 0; _keys.length = 0; _sigs.length = 0; _geos.length = 0;
     grp.visible = false;
     c._proxy = true;
@@ -578,8 +583,10 @@
       // far-tier LOD it was waiting on has landed: re-proxy on the right tier.
       // If the other tier's pools are still warming, acquire() refuses and the
       // car draws itself at full detail until vehicles.js re-proxies it.
-      const L = CBZ.carLod;
-      if (L && (L.wantLod(d2, rec.lod) !== rec.lod || (rec.lodPending && (frame & 63) === 0))) {
+      const L = CBZ.carLod, CF = CBZ.cabinFar;
+      // ...or crossed the cabin's far cut (out, back in with a margin): re-proxy with/without it
+      const cabFlip = rec.hasCab && CF && (rec.cabOff ? d2 < CF.in * CF.in : d2 > CF.out * CF.out);
+      if (cabFlip || (L && (L.wantLod(d2, rec.lod) !== rec.lod || (rec.lodPending && (frame & 63) === 0)))) {
         const mv = rec.mover;
         release(c);
         if (!acquire(c, mv) && mv && c.group) c.group.visible = true;   // (a mover that cannot re-proxy draws itself)

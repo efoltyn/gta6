@@ -1046,6 +1046,24 @@
                  suv6 suv7 pickup6 van3 van6 cab2. Absent: the style's kind
                  (carseats KIND_BY_STYLE), else read off the cabin box.
        o.doorSpans [[z0,z1],...] the real doors (buildCarDoors) — no card there */
+  /* THE CABIN HAS A FAR CUT. Past ~120 m nothing inside a car reads through
+     its glass at phone resolution, yet every car kept drawing its baked room
+     (up to ~17k verts), its lit screens and its wheel. A geometry tagged
+     _cbzFar is skipped by the renderer (vendor/three.r128.min.js projectObject
+     calls self.__cbzFar) past `out` from the camera and comes back inside
+     `in`: glass and body stay, the margin keeps it from flickering at the
+     line. Instanced pools are not judged here (their object sits at the
+     origin); carinstances.js drops the cabin from a car's far-tier proxy. */
+  const CABIN_FAR = { out: 120, in: 100 };
+  CBZ.cabinFar = CABIN_FAR;
+  self.__cbzFar = function (o, cam) {
+    if (o.isInstancedMesh) return false;
+    const f = o.geometry._cbzFar, e = o.matrixWorld.elements, c = cam.matrixWorld.elements;
+    const dx = e[12] - c[12], dy = e[13] - c[13], dz = e[14] - c[14], d2 = dx * dx + dy * dy + dz * dz;
+    const off = o._cbzFarOff === true ? d2 > f.in * f.in : d2 > f.out * f.out;
+    o._cbzFarOff = off;
+    return off;
+  };
   function dressCabin(root, o) {
     const SEATS = CBZ.carSeats;
     if (!SEATS) return null;
@@ -1303,6 +1321,7 @@
 
     // ---- BAKE: the room is one mesh ----------------------------------------
     const roomGeo = bakeAcc(A, { floorY: floorY, roofY: roofY, dashTopY: dashTopY, dashFaceZ: fz, cushionY: cushionY, zF: zF, halfW: halfW });
+    roomGeo._cbzFar = CABIN_FAR;
     const room = new THREE.Mesh(roomGeo, cabinMat());
     room.name = "cabin_room";
     room.castShadow = false;
@@ -1315,6 +1334,7 @@
       atlasQuad(scW, scH, ATLAS.sc, scF.clone().multiply(mtx(0, 0, -0.008))),
     ]);
     glassGeo._shared = true;
+    glassGeo._cbzFar = CABIN_FAR;
     const glassM = new THREE.Mesh(glassGeo, screenMat());
     glassM.name = "cabin_screens";
     glassM.castShadow = false;
@@ -1333,6 +1353,7 @@
     });
     W.rbox(0.035, wheelR * 0.8, 0.02, 0.01, 0, -wheelR * 0.52, 0.006, TONE.struct);          // 6 o'clock spoke
     const wheelGeo2 = bakeAcc(W, { floorY: -0.6, roofY: 0.6, dashTopY: 10, dashFaceZ: 10, cushionY: -10, zF: 10, halfW: 10 });
+    wheelGeo2._cbzFar = CABIN_FAR;
     const steer = new THREE.Group();
     steer.name = "cabin_steer";
     steer.position.set(wheelX, wheelY, wheelZ);
