@@ -3405,7 +3405,7 @@
       const align = (a.state === "wander") ? 0.5 : 1.4;
       dx += Math.cos(hr.heading) * align; dz += Math.sin(hr.heading) * align;
       const toCx = hr.cx - grp.position.x, toCz = hr.cz - grp.position.z;
-      const cd = Math.hypot(toCx, toCz) || 1;
+      const cd = Math.sqrt(toCx * toCx + toCz * toCz) || 1;
       /* BUNCHING, SPENT. A hungry predator in range does two things to the
          shape of a herd and both are the same number: it pulls the cohesion up
          (they crowd the centre, and from further out — the -5 slack that lets
@@ -4514,7 +4514,7 @@
           // Legacy radial-band fallback when this module is unit-loaded alone.
           const nx = grp.position.x + Math.cos(a.heading) * seaV * dt;
           const nz = grp.position.z + Math.sin(a.heading) * seaV * dt;
-          const rr = Math.hypot(nx - FIELD.cx, nz - FIELD.cz);
+          const rdx = nx - FIELD.cx, rdz = nz - FIELD.cz, rr = Math.sqrt(rdx * rdx + rdz * rdz);
           if (rr < FIELD.r0 || rr > FIELD.r1) a.heading += Math.PI * 0.6;
           else { grp.position.x = nx; grp.position.z = nz; }
           // THE FLOATING SHARK (owner: "sharks go out of water, they float
@@ -4635,7 +4635,7 @@
           dx += Math.cos(hr.heading) * align; dz += Math.sin(hr.heading) * align;
           // cohesion: pull toward the centre only once the herd spreads out
           const toCx = hr.cx - grp.position.x, toCz = hr.cz - grp.position.z;
-          const cd = Math.hypot(toCx, toCz) || 1;
+          const cd = Math.sqrt(toCx * toCx + toCz * toCz) || 1;
           // ..and the same knot in the water, which is the one place it has a
           // name: a BAIT BALL is a school that has bunched because something
           // hungry is underneath it. Same scalar, same source, no second system.
@@ -4649,8 +4649,12 @@
           for (let m = 0; m < hr.members.length; m++) {
             const o = hr.members[m]; if (o === a || o.dead) continue;
             const ox = grp.position.x - o.pos.x, oz = grp.position.z - o.pos.z;
-            const od = Math.hypot(ox, oz);
-            if (od > 0.001 && od < sepR) { sx += (ox / od) * (sepR - od); sz += (oz / od) * (sepR - od); }
+            // squared reject first: this pair loop is O(herd²) a frame, and
+            // Math.hypot is a builtin call that boxes its doubles
+            const od2 = ox * ox + oz * oz;
+            if (od2 >= sepR * sepR || od2 <= 1e-6) continue;
+            const od = Math.sqrt(od2);
+            sx += (ox / od) * (sepR - od); sz += (oz / od) * (sepR - od);
           }
           dx += sx * 0.9; dz += sz * 0.9;
           // ease the heading toward the blended desire (turn rate, not a snap)

@@ -1086,7 +1086,7 @@ document.body.appendChild(b);}}catch(e){}})();
      camera-centred radial sea geometry, the shared ripple normal map and the
      shared water shading chunks. MUST load before city/world.js (its buildSea
      reads this) and before city/waterfield.js (its surfaceY delegates here). -->
-<script src="src/world/water_spec.js?v=wreal0929"></script>
+<script src="src/world/water_spec.js?v=pf0930g"></script>
 <!-- the tsunami kit shared by the island and the city: the entrained debris, the flood hitting buildings, the drawdown seabed and the aftermath mud -->
 <script src="src/world/tsunami_debris.js?v=tsureal1"></script>
 <script src="src/world/tsunami_flow.js?v=tsureal1"></script>
@@ -1171,7 +1171,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- Shared signed shoreline/depth/current oracle. Loaded immediately after
      the landmass registry so rendering, swimmers, boats and aquatic wildlife
      all consult the same coast instead of inventing separate radius tests. -->
-<script src="src/city/waterfield.js?v=pf0930f"></script>
+<script src="src/city/waterfield.js?v=pf0930g"></script>
 <!-- Reflective-ocean FX: swaps CBZ.citySea for a THREE.WaterReflect plane when
      CBZ.CONFIG.WATER_REFLECT is on (default). Reads the sea lazily at runtime,
      so load order past config.js + WaterReflect.js is all it needs. -->
@@ -1320,7 +1320,7 @@ document.body.appendChild(b);}}catch(e){}})();
      binds CBZ.wildlifeTraits once, at load); absent, the engine falls
      straight back to the species constant. -->
 <script src="src/city/wildlife_traits.js?v=indiv1"></script>
-<script src="src/city/wildlife.js?v=pf0930m"></script>
+<script src="src/city/wildlife.js?v=pf0930g"></script>
 <script src="src/city/wildlife_tame.js?v=ekey2"></script>
 <script src="src/city/dogs.js?v=pf0930d"></script>
 <!-- 4d-5. FIGHTING — shared creature-combat (animal fight anims), trait-driven

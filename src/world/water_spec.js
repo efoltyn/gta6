@@ -508,8 +508,13 @@
     let f = 0;
     for (let i = 0; i < inlandRecs.length; i++) {
       const b = inlandRecs[i];
-      const d = Math.hypot(x - b.cx, z - b.cz);
-      const a = b.r * 0.55, c = b.r * 1.15;
+      // Math.hypot is a builtin call (its double arguments are boxed on every
+      // call: this was a top allocation site of the road drive), and most
+      // bodies are far away: reject outside the outer ring on the square.
+      const dx = x - b.cx, dz = z - b.cz, c = b.r * 1.15, dd = dx * dx + dz * dz;
+      if (dd >= c * c) continue;
+      const d = Math.sqrt(dd);
+      const a = b.r * 0.55;
       let s = (d - a) / Math.max(1e-4, c - a);
       s = s < 0 ? 0 : (s > 1 ? 1 : s);
       s = s * s * (3 - 2 * s);

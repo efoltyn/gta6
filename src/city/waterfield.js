@@ -937,12 +937,18 @@
   }
   function smoothAvoid(out, avoid, distance, clearance, urg) {
     if (!out) return avoid;
-    out._avoid = (out._avoid != null && isFinite(out._avoid))
+    out._avoid = (out._avoid != null && out._avoid === out._avoid)
       ? out._avoid + angleDelta(out._avoid, avoid) * filterK(distance, clearance, urg)
       : avoid;
     return out._avoid;
   }
-  function forget(out) { out._side = 0; out._tan = 0; out._avoid = null; out._err = 0; }
+  // NaN, not null, is "nothing remembered": the field stays a double, so the
+  // per-frame write into it is in place (a null in it made every later double
+  // store a fresh heap number, per aquatic animal per frame)
+  function forget(out) { out._side = 0; out._tan = 0; out._avoid = NaN; out._err = 0; }
+  // one result object for every call: both callers (moveInWater, water_survival
+  // islandMove) read heading + shore at once and never keep it
+  const _steerRes = { heading: 0, shore: 0 };
 
   function steerHeading(x, z, heading, distance, clearance, out, shoreAt, inwardAt) {
     const v2 = CFG.MARINE_STEER_V2 !== false;
@@ -1028,8 +1034,9 @@
 
     // Turn rate is capped, preventing instant 180-degree pops at shorelines.
     const cap = v2 ? Math.min(0.34, Math.max(TURN_FLOOR, distance * TURN_PER_UNIT)) : 0.34;
-    return { heading: heading + Math.max(-cap, Math.min(cap, angleDelta(heading, desired))),
-             shore: frontS };
+    _steerRes.heading = heading + Math.max(-cap, Math.min(cap, angleDelta(heading, desired)));
+    _steerRes.shore = frontS;
+    return _steerRes;
   }
   CBZ.waterSteer = steerHeading;
 
