@@ -226,6 +226,8 @@
   const prisms = new Map();
   const spheres = new Map();
   const procTemplates = new Map();
+  // every car body built so far (the materials a car you get into will draw with)
+  CBZ.cityCarTemplates = function () { return Array.from(procTemplates.values()); };
   const tplCtx = new WeakMap();        // template -> its full brand-face context
   let ferrariTemplate = null;
   let ferrariLoading = false;

@@ -1813,6 +1813,16 @@
   //     work package; a one-line swap to CBZ.waterWakeFor(shark, dt, {...})
   //     retires it and deletes that geometry/material pair. May only go DOWN.
   CBZ.waterWakeAudit = function () { return 1; };
+  /* THE DRIVING SET, COMPILED BEFORE ANYBODY DRIVES (core/fxwarm.js warms it
+     in idle time after the city boots): the spray, surface foam, crown and
+     wake ribbon are built (empty) and their programs linked, so the first car
+     or boat you take does not stall the frame on four shader compiles. */
+  CBZ.waterFxWarmObjects = function () {
+    try { buildPoints(); buildSurf(); buildCrown(); ribBuild(); } catch (e) {}
+    const out = [];
+    [points, surfMesh, crownMesh, ribMesh].forEach(function (o) { if (o) out.push(o); });
+    return out;
+  };
 
   // ---- consumers that read the world --------------------------------------
   function isMarine(car) {
