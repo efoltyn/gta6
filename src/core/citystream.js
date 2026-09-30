@@ -469,7 +469,16 @@
     CBZ.streamStats.freed = (CBZ.streamStats.freed || 0) + 1;
   }
 
+  // how near the player a job's content joined the scene (a probe reads it:
+  // anything under the fog's end is content appearing in view)
+  function noteAdd(job, how) {
+    const P = CBZ.player && CBZ.player.pos; if (!P || !job.rect) return;
+    const d = Math.sqrt(distTo(job.rect, P.x, P.z));
+    const L = CBZ.streamStats.adds || (CBZ.streamStats.adds = []);
+    if (L.length < 60) L.push([how, Math.round(d), job.name || "?"]);
+  }
   function unpark(job) {
+    noteAdd(job, "unpark");
     for (const it of job.objs) { expandTree(it.o); if (it.parent) it.parent.add(it.o); }
     const inSync = CBZ.colliderAddMany && CBZ.colliderGridInSync && CBZ.colliderGridInSync();
     if (inSync) CBZ.colliderAddMany(job.cols); else for (const c of job.cols) CBZ.colliders.push(c);
@@ -645,7 +654,11 @@
       if (d < 400) V = d / (tNow - lastP.t);
     }
     lastP.x = P.pos.x; lastP.z = P.pos.z; lastP.t = tNow;
-    const lead = Math.min(300, V * 3.5);
+    const lead = Math.min(320, V * 4.5);
+    // the heading, for the build order below (what is AHEAD is built first)
+    if (lastP.hx == null) { lastP.hx = 0; lastP.hz = 0; }
+    if (lastP.px != null) { const hx = P.pos.x - lastP.px, hz = P.pos.z - lastP.pz, hl = Math.hypot(hx, hz); if (hl > 0.5) { lastP.hx = hx / hl; lastP.hz = hz / hl; } }
+    lastP.px = P.pos.x; lastP.pz = P.pos.z;
     if (lead > s.lead + 20 || lead < s.lead - 60) s.lead = lead;     // grows at once, shrinks lazily
     if (force || dx * dx + dz * dz > RECENTRE_M * RECENTRE_M) {
       s.x = P.pos.x; s.z = P.pos.z;
@@ -655,7 +668,18 @@
     const t0 = performance.now();
     // nearest first
     const order = jobs.filter(function (j) { return j.state !== "built" && rectKeeps(j.rect); });
-    order.sort(function (a, b) { return dist(a.rect, s) - dist(b.rect, s); });
+    // nearest first, but what lies AHEAD of a moving player counts as nearer
+    // (at 30 m/s the road ahead reaches view distance in seconds; the ground
+    // beside and behind can wait): distance minus half its forward reach
+    const hx = V > 3 ? lastP.hx : 0, hz = V > 3 ? lastP.hz : 0;
+    const keyOf = function (r) {
+      const d = Math.sqrt(distTo(r, P.pos.x, P.pos.z));
+      if (!hx && !hz) return d;
+      const cx = (r.minX + r.maxX) / 2 - P.pos.x, cz = (r.minZ + r.maxZ) / 2 - P.pos.z;
+      return d - 0.5 * Math.max(0, cx * hx + cz * hz) * (d > 0 ? Math.min(1, 400 / (d + 1)) : 1);
+    };
+    for (const j of order) j._key = keyOf(j.rect);
+    order.sort(function (a, b) { return a._key - b._key; });
     // A job the player could already SEE (its rect inside the view distance
     // of where the player stands) is built now, whatever the budget: nothing
     // may assemble itself in view. The rest spend STEP_MS a tick, nearest first.
@@ -674,7 +698,7 @@
       if (j.state !== "queued") continue;
       const urgent = distTo(j.rect, P.pos.x, P.pos.z) < V2;
       if (!force && !urgent && performance.now() - t0 > budget) break;
-      runCaptured(j); settle(j);
+      runCaptured(j); settle(j); noteAdd(j, urgent ? "build!" : "build");
       CBZ.streamStats.lastJobMs = Math.round(j.ms); CBZ.streamStats.maxJobMs = Math.max(CBZ.streamStats.maxJobMs, Math.round(j.ms));
       if (urgent) CBZ.streamStats.urgent = (CBZ.streamStats.urgent || 0) + 1;
     }

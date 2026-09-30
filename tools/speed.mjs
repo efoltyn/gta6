@@ -1828,14 +1828,18 @@ async function serveMain() {
         function label(o){ var n = o.name || ""; if (!n) { var ch = o.children; for (var i = 0; i < ch.length && !n; i++) n = ch[i].name || ""; }
           var u = o.userData || {}, uk = Object.keys(u).filter(function(k){ return k !== "_builder"; }).slice(0, 3).join(",");
           var nm = 0; o.traverse && (function(){ var st = [o]; while (st.length && nm < 999) { var c = st.pop(); if (c.isMesh) nm++; for (var i = 0; i < c.children.length; i++) st.push(c.children[i]); } })();
-          return (o.type) + (n ? ":" + n : "") + (u._builder ? "@" + u._builder : "") + (uk ? "{" + uk + "}" : "") + "#" + nm; }
-        var pops = [], popN = 0, checks = 0, handoffs = 0;
+          var gt = o.geometry ? "/" + o.geometry.type + (o.material && o.material.type ? "/" + o.material.type : "") : "";
+          return (o.type) + (n ? ":" + n : "") + gt + (u._builder ? "@" + u._builder : "") + (uk ? "{" + uk + "}" : "") + "#" + nm; }
+        var pops = [], popN = 0, checks = 0, handoffs = 0, poolSw = 0, poolSamples = [], scoped = new WeakMap();
         function scan(first){
           var cam = C.camera; cam.updateMatrixWorld(); pm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse); fr.setFromProjectionMatrix(pm);
           var fog = (C.scene && C.scene.fog && C.scene.fog.far) || C.cityFogFar || 760;
           var lists = [root ? root.children : [], C.scene.children];
           for (var li = 0; li < lists.length; li++) { var L = lists[li]; for (var k = 0; k < L.length; k++) { var o = L[k]; if (o === root) continue;
-            var d = drawn(o), w = was.get(o); was.set(o, d); if (first || !d || w === true) continue;
+            // (core/viewscope.js hides what is outside the frustum for a frame:
+            // coming back from THAT is the camera turning, not a pop-in)
+            var sc0 = scoped.get(o); scoped.set(o, !!o._cbzScopeHidden);
+            var d = drawn(o), w = was.get(o); was.set(o, d); if (first || !d || w === true || sc0) continue;
             var u = o.userData || {}; if (u.dynamic || u.worldSurface || u.terrain) continue;
             // a LOD HANDOFF is not a build in view: a car the pools drew until
             // this frame, a building whose LOD box stood in until farcull's
@@ -1852,7 +1856,10 @@ async function serveMain() {
               checks++;
               sp = sph; sp.center.set(cam.position.x, cam.position.y, cam.position.z); sp.radius = 0.5;
               dist = best;
-              if (dist < fog) { popN++; if (pops.length < 30) pops.push([label(o), Math.round(dist), 0]); }
+              // (a pool is REPLACED by a bigger mesh when it grows, and its
+              // count follows per-car frustum culling: its switches are listed
+              // apart as poolSwitches, not as pop-ins)
+              if (dist < fog) { poolSw++; if (poolSamples.length < 20) poolSamples.push([label(o), Math.round(dist)]); }
               continue;
             }
             sp = cache.get(o); if (!sp) { bx.setFromObject(o); if (bx.isEmpty()) continue; sp = bx.getBoundingSphere(new T.Sphere()); cache.set(o, sp); }
@@ -1874,7 +1881,7 @@ async function serveMain() {
             var st = C.streamStats || {}; samples.push([Math.round((f + 1) / 60), Math.round(m.heap), Math.round(m.gpu), Math.round(m.phone), st.built, st.parked, st.queued, C.slice ? Math.round(C.slice.keepR()) : null]); }
         }
         return { routeLegs: route.length - 1, routeKm: +(tot / 1000).toFixed(2), km: +(Math.min(d, tot) / 1000).toFixed(2), wallS: +((performance.now() - t0) / 1000).toFixed(1), peak: { heap: Math.round(hp), gpu: Math.round(gp), phone: Math.round(php) },
-          pops: popN, popChecks: checks, lodHandoffs: handoffs, popSamples: pops, cols: "s heap gpu phone built parked queued keepR", samples: samples };
+          pops: popN, popChecks: checks, lodHandoffs: handoffs, popSamples: pops, poolSwitches: poolSw, poolSamples: poolSamples, streamAdds: (C.streamStats && C.streamStats.adds || []).filter(function (a) { return a[1] < 420; }).slice(0, 20), cols: "s heap gpu phone built parked queued keepR", samples: samples };
       })(${JSON.stringify(route)}, ${+mps}, ${+secs})`, 1800000);
       if (q.allocs) { try { const { profile } = await P.s("HeapProfiler.getSamplingProfile", {}, 300000); await P.s("HeapProfiler.stopSampling", {}, 60000); res.allocs = heapSites(profile); } catch (e) { res.allocs = { err: String(e).slice(0, 200) }; } }
       res.ms = Date.now() - t0; return res;
