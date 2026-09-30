@@ -23,7 +23,7 @@
    API: CBZ.race.venue.build(THREE, core, {quality}) →
      { group, surroundings, update(dt, state), setLights(n, green), setPylon(numbers),
        setJumbo(text | canvas), anchors, outerU(s), mainEntrance, spec, dispose }
-   CBZ.race.venue.spec(core) → { outerU(s), mainEntrance:{s,u}, height, mastHeight } (pure)
+   CBZ.race.venue.spec(core) → { outerU(s), mainEntrance:{s,u}, gate, tunnel, height, mastHeight } (pure)
 ============================================================ */
 (function (root) {
   "use strict";
@@ -31,7 +31,7 @@
   const TR = (typeof module !== "undefined" && module.exports && typeof require === "function")
     ? require("./race_track.js") : root.CBZ.race.track;
   const K = TR.kit;
-  const { rng, canvas, tex, rgb, Mesher, Buckets, chunk, STAND, standSection, SUITES, inSuites, towerSpots, lightField, arcAt, signAtlas } = K;
+  const { rng, canvas, tex, rgb, Mesher, Buckets, chunk, STAND, standSection, SUITES, inSuites, tunnelSpec, towerSpots, lightField, arcAt, signAtlas } = K;
 
   const CANOPY = { back: 8.0, front: 6.2, reach: 9.0 };           // heights above the concourse; reach inward of uTop
   const SUITE_H = 0.9 + 3.2 + 0.6 + 3.2 + 0.8;                     // fascia, glass, slab, glass, roof fascia
@@ -49,7 +49,7 @@
       const mast = inSuites(core, s) ? o.yConc + SUITES.lift + SUITE_H + MAST.suite : o.yConc + MAST.stand;
       if (top > height) height = top; if (mast > mastHeight) mastHeight = mast;
     }
-    return { outerU, mainEntrance: { s: 0, u: outerU(0) }, height: +height.toFixed(2), mastHeight: +(mastHeight + 2.5).toFixed(2) };
+    return { outerU, mainEntrance: { s: 0, u: outerU(0) }, gate: GATE, tunnel: tunnelSpec(core), height: +height.toFixed(2), mastHeight: +(mastHeight + 2.5).toFixed(2) };
   }
 
   const TEAM = [0xd4202b, 0xf2b705, 0x1b4fd8, 0x111111, 0xf26a1b, 0x0f8a4a, 0xe8e8e8, 0x6a2bbd, 0x14b3c8, 0xa81b5c, 0x5a6470, 0x8bc21f].map(rgb);
@@ -404,8 +404,13 @@
     {
       const s = 0, uO = SP.outerU(0), me = Sat(0, uO), ow = nrm(0), t = tan(0);
       const Wd = GATE.hw * 2, Hd = GATE.h, off = (ds, du, y) => { core.frame(s, F2); return [F2.x + F2.tx * ds + F2.nx * du, y, F2.z + F2.tz * ds + F2.nz * du]; };
-      // recess back (warm light) + side jambs + lintel
-      gl.quad(off(-Wd / 2, uO - 1.5, 0.02), off(Wd / 2, uO - 1.5, 0.02), off(Wd / 2, uO - 1.5, Hd), off(-Wd / 2, uO - 1.5, Hd), [0.95, 0.8, 0.55], ow);
+      // recess back (warm light) round the mouth of the drivers' tunnel, side jambs, lintel
+      {
+        const TU = SP.tunnel, m0 = TU.x - TU.hw, m1 = TU.x + TU.hw, mh = TU.clear, warm = [0.95, 0.8, 0.55];
+        gl.quad(off(-Wd / 2, uO - 1.5, 0.02), off(m0, uO - 1.5, 0.02), off(m0, uO - 1.5, Hd), off(-Wd / 2, uO - 1.5, Hd), warm, ow);
+        gl.quad(off(m1, uO - 1.5, 0.02), off(Wd / 2, uO - 1.5, 0.02), off(Wd / 2, uO - 1.5, Hd), off(m1, uO - 1.5, Hd), warm, ow);
+        gl.quad(off(m0, uO - 1.5, mh), off(m1, uO - 1.5, mh), off(m1, uO - 1.5, Hd), off(m0, uO - 1.5, Hd), warm, ow);
+      }
       for (const sg of [-1, 1]) {
         me.quad(off(sg * Wd / 2, uO - 1.5, 0), off(sg * Wd / 2, uO + 0.05, 0), off(sg * Wd / 2, uO + 0.05, Hd), off(sg * Wd / 2, uO - 1.5, Hd), [0.3, 0.3, 0.32], [-t[0] * sg, 0, -t[2] * sg]);
         me.box(...off(sg * (Wd / 2 + 0.7), uO + 0.5, 0), 1.4, Hd + 2.4, 1.2, core.frame(0, F2).yaw, [0.82, 0.82, 0.8]);
@@ -414,11 +419,66 @@
       // a canopy slab out over the plaza with a light strip under it
       me.box(...off(0, uO + 3.2, Hd + 0.3), 6.4, 0.6, Wd + 5, core.frame(0, F2).yaw, [0.85, 0.85, 0.83]);
       gl.quad(off(-Wd / 2, uO + 0.6, Hd + 0.28), off(Wd / 2, uO + 0.6, Hd + 0.28), off(Wd / 2, uO + 5.8, Hd + 0.28), off(-Wd / 2, uO + 5.8, Hd + 0.28), [1, 0.93, 0.8], [0, -1, 0]);
-      // turnstile posts
-      for (let i = 0; i < 8; i++) me.box(...off(-Wd / 2 + 1 + i * (Wd - 2) / 7, uO - 0.4, 0), 0.4, 1.05, 0.7, core.frame(0, F2).yaw, [0.55, 0.57, 0.6]);
+      // turnstile posts (none across the tunnel mouth: that lane is the way in)
+      for (let i = 0; i < 8; i++) {
+        const x = -Wd / 2 + 1 + i * (Wd - 2) / 7;
+        if (Math.abs(x - SP.tunnel.x) < SP.tunnel.hw + 0.3) continue;
+        me.box(...off(x, uO - 0.4, 0), 0.4, 1.05, 0.7, core.frame(0, F2).yaw, [0.55, 0.57, 0.6]);
+      }
       // the plaza
       const pz = BO.get("lot");
       pz.quad(off(-22, uO, 0.03), off(22, uO, 0.03), off(22, uO + 24, 0.03), off(-22, uO + 24, 0.03), [0.62, 0.61, 0.58], up);
+    }
+
+    // ---- the drivers' tunnel: gate → ramp → under the track → stairs up into garage bay 7 --------------
+    {
+      const TU = SP.tunnel, me = B.get("struct#tun", { lit: null }), gl = B.get("glow"), hw = TU.hw;
+      const A = TU.at, fwd = [0, 0, -1], back = [0, 0, 1], left = [1, 0, 0], right = [-1, 0, 0], dn = [0, -1, 0];
+      const FLOOR = [0.34, 0.34, 0.33], WALL = [0.74, 0.73, 0.69], BAND = [0.62, 0.1, 0.09], CEIL = [0.42, 0.43, 0.45], NOSE = [0.85, 0.7, 0.12];
+      // stations along the corridor: the ramp every 3.2 m, the level run every 6 m
+      const st = [TU.uMouth];
+      for (let u = TU.uMouth - 3.2; u > TU.uRampEnd + 0.5; u -= 3.2) st.push(u);
+      st.push(TU.uRampEnd);
+      for (let u = TU.uRampEnd - 6; u > TU.uStairBot + 1; u -= 6) st.push(u);
+      st.push(TU.uStairBot);
+      for (let i = 0; i < st.length - 1; i++) {
+        const ua = st[i], ub = st[i + 1];
+        const fa = TU.floorAt(ua), fb = TU.floorAt(ub), ca = TU.ceilAt(ua), cb = TU.ceilAt(ub);
+        me.quad(A(-hw, ua, fa), A(hw, ua, fa), A(hw, ub, fb), A(-hw, ub, fb), FLOOR, up);
+        me.quad(A(-hw, ua, ca), A(hw, ua, ca), A(hw, ub, cb), A(-hw, ub, cb), CEIL, dn);
+        for (const [d, face] of [[-hw, left], [hw, right]]) {
+          me.quad(A(d, ua, fa), A(d, ub, fb), A(d, ub, fb + 1.05), A(d, ua, fa + 1.05), WALL, face);
+          me.quad(A(d, ua, fa + 1.05), A(d, ub, fb + 1.05), A(d, ub, fb + 1.25), A(d, ua, fa + 1.25), BAND, face);
+          me.quad(A(d, ua, fa + 1.25), A(d, ub, fb + 1.25), A(d, ub, cb), A(d, ua, ca), WALL, face);
+        }
+        // a lamp down the middle of the ceiling every station
+        const um = (ua + ub) / 2, cm = TU.ceilAt(um) - 0.02;
+        gl.quad(A(-0.18, um + 0.7, cm), A(0.18, um + 0.7, cm), A(0.18, um - 0.7, cm), A(-0.18, um - 0.7, cm), [1, 0.96, 0.86], dn);
+      }
+      // the flight: treads, risers with a yellow nosing, and the stairwell walls up to the garage floor
+      const u0 = TU.uStairBot;
+      for (let k = 0; k < TU.steps; k++) {
+        const ua = u0 - k * TU.tread, ub = ua - TU.tread, y0 = TU.floor + k * TU.riser, y1 = y0 + TU.riser;
+        me.quad(A(-hw, ua, y0), A(hw, ua, y0), A(hw, ua, y1), A(-hw, ua, y1), FLOOR, back);
+        me.quad(A(-hw, ua, y1), A(hw, ua, y1), A(hw, ua - 0.05, y1), A(-hw, ua - 0.05, y1), NOSE, up);
+        me.quad(A(-hw, ua - 0.05, y1), A(hw, ua - 0.05, y1), A(hw, ub, y1), A(-hw, ub, y1), FLOOR, up);
+      }
+      for (const [d, face] of [[-hw, left], [hw, right]]) {
+        me.quad(A(d, u0, TU.floor), A(d, TU.uStairTop, TU.floor), A(d, TU.uStairTop, 0), A(d, u0, 0), WALL, face);
+      }
+      // over the foot of the flight: the lid's edge, from the tunnel ceiling up to the garage floor
+      me.quad(A(-hw, u0, TU.lid), A(hw, u0, TU.lid), A(hw, u0, 0), A(-hw, u0, 0), WALL, fwd);
+      // the safety rail round the stairwell at the top (both sides and the end over the tunnel)
+      const rail = [0.86, 0.7, 0.1];
+      const post = (d, u) => me.beam(A(d, u, 0), A(d, u, 1.0), 0.03, rail);
+      for (const d of [-hw - 0.05, hw + 0.05]) {
+        for (let u = u0; u > TU.uStairTop - 0.01; u -= 1.2) post(d, u);
+        me.beam(A(d, u0, 1.0), A(d, TU.uStairTop, 1.0), 0.028, rail);
+        me.beam(A(d, u0, 0.5), A(d, TU.uStairTop, 0.5), 0.02, rail);
+      }
+      me.beam(A(-hw - 0.05, u0 + 0.05, 1.0), A(hw + 0.05, u0 + 0.05, 1.0), 0.028, rail);
+      me.beam(A(-hw - 0.05, u0 + 0.05, 0.5), A(hw + 0.05, u0 + 0.05, 0.5), 0.02, rail);
+      post(0, u0 + 0.05);
     }
 
     // ---- start/finish gantry + start lights + flag stand ----------------------------------------------
@@ -499,13 +559,15 @@
       for (const [a, b] of [[g0, PIT.boxS(0) - PIT.boxLen / 2], [PIT.boxS(PIT.boxes - 1) + PIT.boxLen / 2, g1]]) Sat(a, uF).quad(W3(a, uF, 0), W3(b, uF, 0), W3(b, uF, 4.0), W3(a, uF, 4.0), [0.84, 0.84, 0.82], nrm(a));
       // bays: an open roller door per pit box (team stripe over it), pillars between
       for (let b = 0; b < PIT.boxes; b++) {
-        const s = PIT.boxS(b), hw = 3.4, me = Sat(s, uF), tc = TEAM[b % TEAM.length], ow = nrm(s);
-        me.quad(W3(s - hw, uF + 0.01, 0), W3(s + hw, uF + 0.01, 0), W3(s + hw, uF + 0.01, 3.8), W3(s - hw, uF + 0.01, 3.8), [0.06, 0.06, 0.07], ow);
+        const s = PIT.boxS(b), hw = 3.4, me = Sat(s, uF), tc = TEAM[b % TEAM.length], ow = nrm(s), pass = b === SP.tunnel.bay;
+        // an open roller door is a dark bay; the pass-through bay is a real room (drawn below)
+        if (!pass) me.quad(W3(s - hw, uF + 0.01, 0), W3(s + hw, uF + 0.01, 0), W3(s + hw, uF + 0.01, 3.8), W3(s - hw, uF + 0.01, 3.8), [0.06, 0.06, 0.07], ow);
         me.quad(W3(s - hw, uF + 0.02, 3.8), W3(s + hw, uF + 0.02, 3.8), W3(s + hw, uF + 0.02, 4.0), W3(s - hw, uF + 0.02, 4.0), tc, ow);
         gl.quad(W3(s - hw + 0.3, uF + 0.03, 3.45), W3(s + hw - 0.3, uF + 0.03, 3.45), W3(s + hw - 0.3, uF + 0.03, 3.62), W3(s - hw + 0.3, uF + 0.03, 3.62), [1, 0.96, 0.88], ow);
         // wall between doors
         for (const e of [-1, 1]) { const a = s + e * hw, c = s + e * PIT.boxLen / 2; me.quad(W3(Math.min(a, c), uF, 0), W3(Math.max(a, c), uF, 0), W3(Math.max(a, c), uF, 4.0), W3(Math.min(a, c), uF, 4.0), [0.84, 0.84, 0.82], ow); }
-        // war wagon on the grass strip, level with the box
+        // war wagon on the grass strip, level with the box (none at the pass-through: that is the crew gap)
+        if (pass) { bays++; continue; }
         const wu = PIT.wallU + 1.75, wy = 0, yaw = core.frame(s, F2).yaw;
         const wp = W3(s, wu, wy), wm = S(wp[0], wp[2]);
         wm.box(wp[0], 0.35, wp[2], 1.6, 1.25, 2.9, yaw, tc);
@@ -514,6 +576,37 @@
         wm.box(wp[0], 3.3, wp[2], 2.0, 0.12, 3.2, yaw, tc);
         const tv = W3(s, wu + 0.55, 2.6); gl.quad(W3(s - 0.5, wu + 0.56, 2.35), W3(s + 0.5, wu + 0.56, 2.35), W3(s + 0.5, wu + 0.56, 2.95), W3(s - 0.5, wu + 0.56, 2.95), [0.25, 0.45, 0.8], nrm(s));
         void tv; bays++;
+      }
+      /* THE PASS-THROUGH BAY: where the drivers' tunnel comes up. A lit room the
+         depth of the block: concrete floor with the stairwell cut out of it,
+         the stair rail, side walls, the back wall, a ceiling and its lamps, and
+         the inside faces of the front wall round the open door. */
+      {
+        const TU = SP.tunnel, b0 = TU.bayS0, b1 = TU.bayS1, ce = TU.garage.ceil, me = B.get("struct#bay", { lit: null });
+        const CONC2 = [0.6, 0.6, 0.58], WALL2 = [0.82, 0.82, 0.8], CEIL2 = [0.5, 0.5, 0.52];
+        const cF = W3(b0, uF - 0.12, 0), cF1 = W3(b1, uF - 0.12, 0), cB1 = W3(b1, uB + 0.15, 0), cB = W3(b0, uB + 0.15, 0);
+        const contour = [cF, cF1, cB1, cB].map((p) => new THREE.Vector2(p[0], p[2]));
+        const hole = [[-TU.hw, TU.uStairBot], [TU.hw, TU.uStairBot], [TU.hw, TU.uStairTop], [-TU.hw, TU.uStairTop]].map(([d, u]) => { const p = TU.at(d, u, 0); return new THREE.Vector2(p[0], p[2]); });
+        if (THREE.ShapeUtils.isClockWise(contour)) contour.reverse();
+        if (!THREE.ShapeUtils.isClockWise(hole)) hole.reverse();
+        const all = contour.concat(hole);
+        for (const f of THREE.ShapeUtils.triangulateShape(contour, [hole])) {
+          const a = all[f[0]], b = all[f[1]], c = all[f[2]];
+          me.tri([a.x, 0.02, a.y], [b.x, 0.02, b.y], [c.x, 0.02, c.y], CONC2, up);
+        }
+        const tB0 = tan(b0), tB1 = tan(b1);
+        me.quad(W3(b0, uF, 0), W3(b0, uB, 0), W3(b0, uB, ce), W3(b0, uF, ce), WALL2, tB0);                  // side walls
+        me.quad(W3(b1, uF, 0), W3(b1, uB, 0), W3(b1, uB, ce), W3(b1, uF, ce), WALL2, [-tB1[0], 0, -tB1[2]]);
+        me.quad(cB, cB1, W3(b1, uB + 0.15, ce), W3(b0, uB + 0.15, ce), WALL2, nrm(TU.bayS));                 // back wall
+        me.quad(W3(b0, uF, ce), W3(b1, uF, ce), W3(b1, uB, ce), W3(b0, uB, ce), CEIL2, [0, -1, 0]);          // ceiling
+        const dh = TU.doorHW, iw0 = inw(TU.bayS);
+        me.quad(W3(b0, uF - 0.12, 0), W3(TU.bayS - dh, uF - 0.12, 0), W3(TU.bayS - dh, uF - 0.12, ce), W3(b0, uF - 0.12, ce), WALL2, iw0);
+        me.quad(W3(TU.bayS + dh, uF - 0.12, 0), W3(b1, uF - 0.12, 0), W3(b1, uF - 0.12, ce), W3(TU.bayS + dh, uF - 0.12, ce), WALL2, iw0);
+        me.quad(W3(TU.bayS - dh, uF - 0.12, 3.8), W3(TU.bayS + dh, uF - 0.12, 3.8), W3(TU.bayS + dh, uF - 0.12, ce), W3(TU.bayS - dh, uF - 0.12, ce), WALL2, iw0);
+        for (const e of [-2.8, 2.8]) {                                                                          // two strip lamps
+          const um = (uF + uB) / 2, sm = TU.bayS + e;
+          gl.quad(W3(sm - 0.15, um + 3, ce - 0.02), W3(sm + 0.15, um + 3, ce - 0.02), W3(sm + 0.15, um - 3, ce - 0.02), W3(sm - 0.15, um - 3, ce - 0.02), [1, 0.97, 0.9], [0, -1, 0]);
+        }
       }
       // haulers: 12 transporters nose-in behind the garages, two groups either side of the pylon
       const hs = []; for (let i = 0; i < 6; i++) { hs.push(-72 + i * 8.5); hs.push(18 + i * 8.5); }

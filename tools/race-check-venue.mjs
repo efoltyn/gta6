@@ -100,7 +100,8 @@ for (const q of ["low", "high"]) {
       verts(o, 5, (x, y, z) => {
         core.nearest(x, z, null, NR); n++;
         const nearGantry = Math.abs(core.ds(0, NR.s)) < 4.5;
-        if (!nearGantry && NR.u > D.APRON_IN && NR.u <= D.WALL_U) bad++;
+        // (the drivers' tunnel passes UNDER the surface: below-grade geometry is not on the track)
+        if (!nearGantry && NR.u > D.APRON_IN && NR.u <= D.WALL_U && y > core.surfaceY(NR.s, NR.u) - 0.3) bad++;
         if (NR.u > 0 && y > 1 && !nearGantry) standMinU = Math.min(standMinU, NR.u);
         if (!glowOnly && Math.abs(core.ds(0, NR.s)) > 14 && NR.u > Math.max(sp.outerU(NR.s - 0.5), sp.outerU(NR.s + 0.5)) + 0.35) outer++;
       });

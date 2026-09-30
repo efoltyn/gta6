@@ -9,8 +9,11 @@
    dial speedometer (units per CBZ.speedRead — MPH by default, the same
    one conversion every other gauge reads) instead of a floating text.
 
-     DRIVING  LEFT / RIGHT = steering; GAS / BRAKE = W / S through the
-              existing car model (BRAKE slows first, then reverses at rest).
+     DRIVING  LEFT / RIGHT = steering; the GAS and BRAKE PEDALS = W / S
+              through the existing car model (BRAKE slows first, then
+              reverses at rest). The pedals are the Bullring race page's
+              (a tall ridged gas under the thumb, a shorter brake inboard),
+              for every car, the race cars included.
               The on-foot joystick stands down only for road cars.
               TILT is an optional, calibrated low-sensitivity analog steer.
      BOAT     stick = steer/throttle (unchanged). ASTERN = hold → Ctrl
@@ -189,6 +192,10 @@
   function pill(id, label, cls) {
     return '<button type="button" id="' + id + '" class="tvbtn ' + (cls || "") + '">' + label + "</button>";
   }
+  // a pedal: the same button, pedal-shaped (css/mobile.css .tv-pedal), the word at its heel
+  function pedal(id, label, cls) {
+    return '<button type="button" id="' + id + '" class="tvbtn tv-pedal ' + cls + '" aria-label="' + label + '"><span>' + label + "</span></button>";
+  }
   // The aux rail's LOOK is entirely the existing .tvbtn / .tv-sm / .tv-big /
   // .tv-go / .tv-warn vocabulary — nothing new is styled. Only its POSITION is
   // new, and it is one rule: a second column standing in the dial's own
@@ -362,8 +369,11 @@
         '<div class="tv-car-steer">' +
           pill("tvLeft", "LEFT", "tv-big tv-steer") + pill("tvRight", "RIGHT", "tv-big tv-steer") +
         "</div>" +
+        // THE PEDALS (from the Bullring race page; owner 2026-09-29: "I like the
+        // gas and brake, bring that into the real game"): a tall ridged GAS
+        // under the resting right thumb, a shorter BRAKE inboard of it
         '<div class="tv-car-pedals">' +
-          pill("tvCarBrake", "BRAKE", "tv-big tv-warn") + pill("tvGas", "GAS", "tv-big tv-go") +
+          pedal("tvCarBrake", "BRAKE", "tv-brake") + pedal("tvGas", "GAS", "tv-gas") +
         "</div>" +
         '<div class="tv-car-utils">' +
           pill("tvTilt", "TILT OFF", "tv-sm tv-tilt") + SEAT_BTN + VIEW_BTN +

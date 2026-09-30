@@ -205,11 +205,15 @@
     // ---- inputs, gearbox, reverse ----
     let thr = clamp(inp.throttle || 0, 0, 1), brk = clamp(inp.brake || 0, 0, 1);
     let steerIn = clamp(inp.steer || 0, -1, 1);
-    // reverse: stopped + brake held, brake becomes reverse throttle; throttle exits
+    // reverse: stopped + brake held, brake becomes reverse throttle; throttle exits.
+    // input.hold is a parked car's foot on the brake (the grid, a car you got
+    // out of, a handbrake): it never engages reverse. (Without it the whole
+    // field backed 15 m off the grid while the lights came on.)
     if (car.gear === -1) {
-      if (thr > 0.1 && vf > -1) car.gear = 1;
+      if (inp.hold || (thr > 0.1 && vf > -1)) car.gear = 1;
       else { const t = thr; thr = brk; brk = t; }
-    } else if (brk > 0.3 && thr < 0.05 && Math.abs(vf) < 0.6) {
+    } else if (inp.hold) car._revT = 0;
+    else if (brk > 0.3 && thr < 0.05 && Math.abs(vf) < 0.6) {
       car._revT += h; if (car._revT > 0.45) { car.gear = -1; car._revT = 0; }
     } else car._revT = 0;
 

@@ -544,10 +544,11 @@
     },
     speedway: {
       gives: "the speedway island: the Bullring stadium (the racing game's own " +
-             "track + venue modules), the causeway and the gate that opens " +
-             "games/race.html over the city",
+             "track + venue modules), the causeway, the drivers' tunnel and the " +
+             "ten stock cars you race in the world",
       needs: ["look"],
-      files: ["race/race_core.js", "race/race_track.js", "race/race_venue.js", "city/island_speedway.js"],
+      files: ["race/race_core.js", "race/race_track.js", "race/race_venue.js", "race/race_physics.js", "race/race_ai.js",
+              "race/race_session.js", "race/race_car.js", "city/island_speedway.js", "city/speedway_race.js"],
       publishes: [],
     },
     bank: {

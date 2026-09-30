@@ -1767,6 +1767,7 @@
     const P = CBZ.player, ch = CBZ.playerChar;
     if (!P || P.dead || P._aircraft) return false;            // cockpit_view owns aircraft
     if (!ch || !ch.group || !car || car.dead) return false;
+    if (car._raceCar) return false;                            // a stock car carries its own helmeted driver
     return true;
   }
 
@@ -4400,6 +4401,8 @@
   CBZ.cityDamageCar = function (car, amount, opts) {
     wakeCar(car);
     if (!car || car.dead) return;
+    // a race car's damage is the racing model's (crumple zones, parts off, smoke)
+    if (car._raceCar) return;
     opts = opts || {};
     if (opts.byPlayer) car._burnByPlayer = true;
     if (car.engineHp == null) car.engineHp = 100;
@@ -4546,7 +4549,8 @@
     // it already wears its own label.
     const seatHint = (CBZ.citySeatShift && !CBZ.touchMode &&
       (!CBZ.CONFIG || CBZ.CONFIG.PASSENGER_SEAT_V1 !== false)) ? "  [G] passenger" : "";
-    CBZ.city && CBZ.city.note(helmHint
+    // a race car needs no card: the start lights are the message
+    if (!car._raceCar) CBZ.city && CBZ.city.note(helmHint
       ? "At the helm" + worth + "   [SPACE] get up  [V] wheel view"
       : "Driving" + worth + "   [F] out  [C] car style" + seatHint, 1.8);
     return true;
@@ -4593,7 +4597,8 @@
       const h = car.heading || 0;
       const side = D ? D.side : (paxSide ? -1 : 1);
       const lx = D ? side * (Math.abs(D.x) + 0.7) : side * 1.6, lz = D ? D.zc : 0;
-      P.pos.set(car.pos.x + lx * Math.cos(h) + lz * Math.sin(h), 0, car.pos.z - lx * Math.sin(h) + lz * Math.cos(h));
+      // (a race car stands on the banking: you step out onto it, not under it)
+      P.pos.set(car.pos.x + lx * Math.cos(h) + lz * Math.sin(h), car._raceCar ? (+car.pos.y || 0) : 0, car.pos.z - lx * Math.sin(h) + lz * Math.cos(h));
       P.grounded = true; P.vy = 0;
       CBZ.playerChar.group.position.copy(P.pos);
     }
@@ -5373,6 +5378,19 @@
   const LAND_HEAVE = 0.12;         // m/s of body drop onto the springs per m/s of landing speed
   const BUMP_HEAVE = 0.35;         // share of the ground's vertical acceleration the sprung body lags (kerbs, crests)
   function paxIn(car) { return !!(CBZ.cityPaxAboard && CBZ.cityPaxAboard(car)); }
+  /* CHASE YAW: behind the car, swung part-way toward where it is actually
+     TRAVELLING when it slides (you see the corner exit mid-drift, not the kerb
+     the nose points at). Reversing keeps the boom behind the heading — the
+     velocity points the other way there, and following it would flip the
+     whole view 180 degrees. Every driven car (the race car too) swings it. */
+  function chaseYaw(car, vmag, dt) {
+    if (!CBZ.cam || vmag <= 3 || (CBZ.camRecenterSuspended && CBZ.camRecenterSuspended())) return;
+    const slip = car.v > 2 ? Math.max(-CAM_DRIFT_MAX, Math.min(CAM_DRIFT_MAX, (car._slipAngle || 0) * CAM_DRIFT_LOOK)) : 0;
+    // body slip is measured toward the +heading side (the side +steer turns to)
+    const target = car.heading + slip + Math.PI;
+    const rate = CAM_YAW_RATE + CAM_YAW_RATE_V * vmag;
+    CBZ.cam.yaw = CBZ.lerpAngle(CBZ.cam.yaw, target, 1 - Math.exp(-rate * dt));
+  }
 
   // ---- player driving (order 11) ----
   CBZ.onUpdate(11, function (dt) {
@@ -5435,6 +5453,31 @@
     if (!Number.isFinite(touchSteer)) {
       if (k["a"]) steer += 1;
       if (k["d"]) steer -= 1;
+    }
+    /* ================= THE RACE CAR SEAM (city/speedway_race.js) ========
+       A Bullring stock car is driven by the racing model (src/race/: tyres
+       with combined slip and load sensitivity, downforce, drafting, the
+       banking, car-to-car contact) because it shares the track with nine AI
+       drivers on the same model. It reads the SAME pedals and wheel as every
+       other car (the keys above, the touch pedals, the tilt seam, the pad),
+       and the camera, the seat, the exit and the HUD below are this loop's
+       own: only the chassis step is the race's. The helm steps the whole
+       field, poses the car and returns its speed, or null to decline. */
+    if (car._raceHelm) {
+      const rs = car._raceHelm(car, throttle, steer, handbrake, dt);
+      if (rs) {
+        const vmag = rs.speed;
+        if (vmag > 6) runOver(car, vmag);
+        else if (vmag > 0.6) creepInto(car, vmag);
+        P.pos.set(car.pos.x, car.pos.y, car.pos.z);
+        // the helmeted driver in the car is you: the walking rig waits outside the frame
+        if (drv.car) releaseDriver();
+        CBZ.playerChar.group.position.copy(P.pos);
+        CBZ.playerChar.group.visible = false;
+        P.speed = vmag;
+        chaseYaw(car, vmag, dt);
+        return;
+      }
     }
     // ---- sync the chassis state with whatever the world did to the car ----
     // (a wall ricochet, a PIT, a respawn, marine_helm handing a beached hull
@@ -5872,18 +5915,7 @@
     }
     P.speed = vmag;
     if (CBZ.cityUpdatePlayerCarVisual) CBZ.cityUpdatePlayerCarVisual(car, dt);
-    // CHASE YAW: behind the car, swung part-way toward where it is actually
-    // TRAVELLING when it slides (you see the corner exit mid-drift, not the
-    // kerb the nose points at). Reversing keeps the boom behind the heading —
-    // the velocity points the other way there, and following it would flip
-    // the whole view 180 degrees.
-    if (CBZ.cam && vmag > 3 && !(CBZ.camRecenterSuspended && CBZ.camRecenterSuspended())) {
-      const slip = car.v > 2 ? Math.max(-CAM_DRIFT_MAX, Math.min(CAM_DRIFT_MAX, (car._slipAngle || 0) * CAM_DRIFT_LOOK)) : 0;
-      // body slip is measured toward the +heading side (the side +steer turns to)
-      const target = car.heading + slip + Math.PI;
-      const rate = CAM_YAW_RATE + CAM_YAW_RATE_V * vmag;
-      CBZ.cam.yaw = CBZ.lerpAngle(CBZ.cam.yaw, target, 1 - Math.exp(-rate * dt));
-    }
+    chaseYaw(car, vmag, dt);
     // chop shop: idle a stolen/owned car in the bay to cash it out
     chopCheck(car, vmag, dt);
     // multi-stage damage: smoke → fire → explode (ticking burn under the player)
@@ -6046,7 +6078,8 @@
   // solid (you shunt it, you cannot drive through it) but it is NOT a crash
   // partner: there is nothing left of it to wreck, and running carCrash on a
   // dead record would re-enter the damage ladder it has already finished.
-  function solidCar(c) { return c && (!c.dead || c._husk); }
+  // (race cars touch each other through the racing model's own contact, city/speedway_race.js)
+  function solidCar(c) { return c && (!c.dead || c._husk) && !c._raceCar; }
   function resolveCars(dt) {
     const cars = CBZ.cityCars, n = cars.length;
     carGrid.clear();
@@ -6493,7 +6526,7 @@
   CBZ.cityWakeCar = wakeCar;
   CBZ.citySleepCar = sleepCar;
   function sleepable(c) {
-    return !c.player && !c.dead && !c.ai && !c._heldBy && !c._runaway && !(c.wreckT > 0) &&
+    return !c.player && !c.dead && !c.ai && !c._heldBy && !c._runaway && !c._raceCar && !(c.wreckT > 0) &&
       !c._onFire && !c._smoking && !c._husk && !(c.occ && c.occ.jacked) && !c.npcDriver;
   }
   CBZ.cityCarSleepable = sleepable;     // carinstances.js re-checks it on every proxy, every frame
@@ -6693,6 +6726,8 @@
     const gridZ0 = (A.minZ != null ? A.minZ : -1e9) - A.ROAD, gridZ1 = (A.maxZ != null ? A.maxZ : 1e9) + A.ROAD;
     for (const c of CBZ.cityCars) {
       if (c._sleep || c._proxy) continue;
+      // a Bullring race car is posed by its own race (city/speedway_race.js), parked or racing
+      if (c._raceCar) continue;
       dt = baseDt;     // reset each car (a strided far car overrides this below)
       /* A CHAINED-DOWN LOAD HAS NO GROUND UNDER IT. This pass runs at 37 and
          vehicle_hold.js writes strapped freight at 12.7, so anything this loop

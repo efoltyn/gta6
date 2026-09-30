@@ -84,14 +84,15 @@
     ensureHud(); if (!hud) return;
     hud.style.display = state.mounted ? "block" : "none";
     if (!state.mounted) return;
-    const kph = Math.round(speed() * 3.6);
+    // the game's one speed read (mph by default, vehicles.js CBZ.speedRead)
+    const rd = CBZ.speedRead ? CBZ.speedRead(speed()) : { n: Math.round(speed() * 2.23694), unit: "MPH" };
     const mode = state.grounded ? (Math.abs(state.steer) > 0.15 ? "CARVING" : "RIDING") : ("AIR " + state.airT.toFixed(1) + "s");
     // THE KEY LEGEND IS FOR A KEYBOARD. Printing "A/D carve · W tuck · Space
     // ollie" to a tablet is teaching controls that are not on the device
     // (owner, 2026-08-18). Touch gets the numbers and nothing else.
     const legend = CBZ.touchMode ? "" :
       "<br><span style=\"font-weight:600;color:#bfe8ff\">A/D carve · W tuck · S brake · Space ollie · X dismount</span>";
-    hudText.innerHTML = "" + mode + " &nbsp;·&nbsp; " + kph + " km/h &nbsp;·&nbsp; " + state.points + " pts" + legend;
+    hudText.innerHTML = "" + mode + " &nbsp;·&nbsp; " + rd.n + " " + rd.unit.toLowerCase() + " &nbsp;·&nbsp; " + state.points + " pts" + legend;
   }
 
   function setFacing(dx, dz) {

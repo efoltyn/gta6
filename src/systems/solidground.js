@@ -194,9 +194,12 @@
   function spansAt(x, z, b) {
     let curT = topA, curB = botA, altT = topB, altB = botB;
     curT[0] = b; curB[0] = -Infinity; nSpan = 1;
+    const md = mode();
     for (let i = 0; i < carvings.length; i++) {
       const c = carvings[i];
       if (x < c._x0 || x > c._x1 || z < c._z0 || z > c._z1) continue;
+      // a carving made in one world (c.mode) is not a hole in another stacked on the same plane
+      if (c.mode && md && c.mode !== md) continue;
       if (!covers(c, x, z)) continue;
       const lo = voidFloor(c, x, z), hi = voidTop(c, x, z);
       if (!(hi > lo)) continue;
