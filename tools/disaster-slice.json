@@ -4322,7 +4322,15 @@
   "src/core/profile.js",
   "src/core/fxwarm.js",
   "src/city/cctv.js",
-  "src/modes/shark_sim.js"
+  "src/modes/shark_sim.js",
+  "src/race/race_core.js",
+  "src/race/race_track.js",
+  "src/race/race_venue.js",
+  "src/race/race_physics.js",
+  "src/race/race_ai.js",
+  "src/race/race_session.js",
+  "src/race/race_car.js",
+  "src/city/speedway_race.js"
  ],
  "needed": [
   "src/city/facade_kit.js",
