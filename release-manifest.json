@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "b81db7a07999844db6438578de6ed29a0b059b09",
-  "createdAt": "2026-09-30T02:54:50.697Z",
+  "sourceCommit": "b8212b41f0037dd8352f8cd5530fd3198254960a",
+  "createdAt": "2026-09-30T03:26:09.885Z",
   "fileCount": 1182,
-  "totalBytes": 47979514,
+  "totalBytes": 47979865,
   "files": [
     {
       "file": "src/bootstrap.js",
@@ -438,8 +438,8 @@
     },
     {
       "file": "src/city/continent.js",
-      "bytes": 84327,
-      "sha256": "346f8614d0a79f72f10d6f1d888b684adb64db78266291eb99449956bb95c024"
+      "bytes": 84457,
+      "sha256": "21b5bb45dfffd9d8ba4a33ab61eb63179062bdf41f7a8aa4b24251b0726d5030"
     },
     {
       "file": "src/city/contracts.js",
@@ -1038,13 +1038,13 @@
     },
     {
       "file": "src/city/metro.js",
-      "bytes": 29082,
-      "sha256": "2568ec15d7525a69c42cbd8e777c64eed17636a3f5547dced28cd4cdaea39aeb"
+      "bytes": 29118,
+      "sha256": "1e056738f6bc43c465b5caca67d0e286f2935087e6ffaf70c22b697635d4e4a0"
     },
     {
       "file": "src/city/metro_fabric.js",
-      "bytes": 91822,
-      "sha256": "38796fa6f74e3a4344c96d369db9ccff5423230ea3618b6e626326e75afb106e"
+      "bytes": 91855,
+      "sha256": "2224dcfe076e53aaf86cdfe691112de41665d90c94df746da72f74fc8ba6b0ea"
     },
     {
       "file": "src/city/metro_ground.js",
@@ -2433,8 +2433,8 @@
     },
     {
       "file": "src/systems/debris.js",
-      "bytes": 55320,
-      "sha256": "3d42ed422667648f0ab9509b77ab9c27ec872ca4a6ca7924c2cf925580d4a468"
+      "bytes": 55484,
+      "sha256": "e4716008ab151c9c7c8c65aa0e0865fec267d641279e0fbeab23bd68376f866c"
     },
     {
       "file": "src/systems/detection.js",
@@ -3588,8 +3588,8 @@
     },
     {
       "file": "src/world/textures_surface.js",
-      "bytes": 18388,
-      "sha256": "93110905a7d265979bacebdc790be0f79a19d38cc486c546ba44e25b0f16bb7b"
+      "bytes": 18416,
+      "sha256": "cf0844c30be0a63b1a9b90029e7cecbb6146b47914f3f059f7ecd2eb90c73c2e"
     },
     {
       "file": "src/world/towers.js",
@@ -5808,28 +5808,28 @@
     },
     {
       "file": "shark-sim.html",
-      "bytes": 58816,
-      "sha256": "d40d2b4e81e41280b64d36cf9fa672cd9962cb9bac6ea55108d13b49e5651771"
+      "bytes": 58808,
+      "sha256": "aee5c8961e7bfcb3bedb876d0b1ba6f1cfa7d3e6824aefa281e8563b0f524c3b"
     },
     {
       "file": "disaster-survival.html",
-      "bytes": 58859,
-      "sha256": "365761b60de6178877ae75733d6c8ea81cb512d774fbf50f4e52923195ca1d09"
+      "bytes": 58851,
+      "sha256": "9f3c1bdc47ad697ddc454ff9c989cb1b8884dc437da5b8a5457454970013f3e5"
     },
     {
       "file": "prison-escape.html",
-      "bytes": 58828,
-      "sha256": "2b42d5fa655099de5923eaff4b217b74220fa9db3c018b32d10e7054ffb3c55b"
+      "bytes": 58820,
+      "sha256": "d291195b31349ac661829464db67f5f47b9bf02cf4a1fe5952db685e098274dd"
     },
     {
       "file": "gang-city.html",
-      "bytes": 58783,
-      "sha256": "c1087a82ba13bb8f91fcc998ac7ffe1665e4bb230523fe1a54a8fdc51fef55f2"
+      "bytes": 58775,
+      "sha256": "0914e42115306d1af17db90a41cea1bfc38980421b24571be046b3ca9bad46d9"
     },
     {
       "file": "gun-game.html",
-      "bytes": 58805,
-      "sha256": "3a94a61b3eee0b2403829666cca83d299df92a27e2a696c0047ddc1097d181ef"
+      "bytes": 58797,
+      "sha256": "254bd3aa2df9e6965ad0271ada770d819bb9250e8d942c8ffae1122490f1e166"
     },
     {
       "file": "games/battle.html",
