@@ -929,7 +929,7 @@
     const I = CBZ.interactions;
     if (doorVerbWired || !I || !I.registerZone) return false;
     I.registerZone({
-      id: "zone-unit-door", kind: "unitdoor", prio: 8, driving: false,
+      id: "zone-unit-door", kind: "unitdoor", prio: 8, driving: false, faceWins: true,
       find: function (px, pz, ctx) { return unitDoorAt(px, pz, 1.9, ctx && ctx.pos ? ctx.pos.y : null); },
       options: [{
         id: "unit-door-use", slot: "e",
@@ -4560,6 +4560,11 @@
       pardonFolder: F.P(deskD, lc + 0.55),
       tv: tv, tvBack: tvBack,
       staffDoor: F.P(dc + A - 2.0, doorOO - 0.1),
+      // the staff's aisle from that door to the line: across the room between
+      // the sofas' far ends and the fireside armchairs, clear of the planters
+      // (president_staff.js threads it; a straight walk hit the sofa)
+      staffAisle0: F.P(dc + Math.max(1.9, A - 2.9), lc + Math.min(1.9, B - 1.6)),
+      staffAisle1: F.P(dc + Math.max(1.9, A - 2.9), lc - Math.min(1.9, B - 1.6)),
       chiefSpot: F.P(dc - 1.8, lc - 2.4),
       line0: F.P(dc - 0.6, lc - 2.95),
       line1: F.P(dc + 0.6, lc - 2.95),

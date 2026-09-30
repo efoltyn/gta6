@@ -397,8 +397,17 @@ let spawnReport = "no Oval Office published";
 if (!oval) fail("the Oval Office (presidential desk) is not published");
 else {
   const d = oval.landmarks.presidentialDesk, A = oval.approach;
-  const THRONE_BACK = 0.9;
-  const sx = d.x + A.nx * THRONE_BACK, sz = d.z + A.nz * THRONE_BACK;
+  // THE CHAIR THE GAME SEATS HIM IN: the throne the room publishes (the
+  // census used to guess 0.9 m behind the desk; the chair is at 1.12, and the
+  // real spawn, president_office.js deskPoint, reads the same number)
+  const T = oval.landmarks.throne || { x: d.x + A.nx * 1.12, z: d.z + A.nz * 1.12 };
+  const sx = T.x, sz = T.z;
+  // a standing body at the chair is not inside anything (the flood below
+  // starts from here, so a spawn wedged into the desk would read as "walked")
+  {
+    const blk = blockedAt(sx, sz, oval.floorY, R);
+    if (blk) fail("SPAWN WEDGED: the President standing at his chair is inside " + colName(blk));
+  }
   const sh = shells.find((s) => inShell(s.b, sx, sz, 0) && oval.floorY >= s.b.floorTops[0] - 0.3 && oval.floorY <= s.b.floorTops[s.b.floorTops.length - 1]);
   if (!sh) fail("no shell holds the Oval Office desk");
   else {
@@ -430,6 +439,57 @@ for (const sh of shells) {
   for (const r of roomsOf(sh)) { nRooms++; if (!F.reachedRect(r.k, r.x0, r.x1, r.z0, r.z1)) fail(tagOf(sh) + " room " + r.name + " (floor " + r.k + ") unreachable from the front door"); }
   if (VERBOSE) console.log("  walk", tagOf(sh), "cells", F.seen.size, "doors opened", F.opened.length, "/", perShellDoors.get(sh).unit.length);
   F.cleanup();
+}
+
+// ==========================================================================
+// 3. THE PLAYER HAS ONE BODY. Everything above walks a 0.38 m body, which is
+//    what physics.js resolves the player with. It is only the truth if no
+//    other per-frame code resolves the player with a FATTER one: drinking.js
+//    ran CBZ.collide(P.pos, 0.5, ankles..) every frame for a sober player and
+//    shoved him back off every desk corner, sofa and jamb within half a metre
+//    (the Oval Office's invisible walls; this census passed, the real game
+//    did not: tools/president-walkout.mjs found it by attributing the undo to
+//    updater 34). Two checks:
+//    a) every CBZ.collide on the player's position outside physics.js is a
+//       known, STATE-GATED one (listed with its state); a new one fails here
+//       until somebody says when it runs;
+//    b) drinking.js, loaded for real and ticked sober for 2 s, leaves the
+//       player where he stands and never resolves him.
+// ==========================================================================
+{
+  const GATED = {
+    "src/city/wanted.js": "only while a cop marches you (escort)",
+    "src/city/drinking.js": "only while drunk (level > 0 or a lurch)",
+    "src/city/swim.js": "only while swimming",
+    "src/systems/grapple.js": "only while grappled",
+    "src/systems/tornado.js": "only while the storm has you",
+    "src/systems/capture.js": "only while captured",
+  };
+  const walkSrc = (dir, out) => { for (const f of fs.readdirSync(dir, { withFileTypes: true })) { const q = dir + "/" + f.name; if (f.isDirectory()) walkSrc(q, out); else if (f.name.endsWith(".js")) out.push(q); } return out; };
+  const re = /collide\((?:CBZ\.)?(?:P|player|Pp|pl|CBZ\.player)\.pos\b/;
+  for (const f of walkSrc(ROOT + "/src", [])) {
+    const rel = f.slice(ROOT.length + 1);
+    if (rel === "src/systems/physics.js") continue;
+    const lines = fs.readFileSync(f, "utf8").split("\n");
+    lines.forEach((ln, i) => { if (re.test(ln) && !GATED[rel]) fail("THE PLAYER'S BODY: " + rel + ":" + (i + 1) + " resolves the player outside physics.js and is not a known state-gated resolver: " + ln.trim().slice(0, 120)); });
+  }
+  // b) drinking.js, sober
+  const calls = [];
+  const P0 = CBZ.player;
+  P0.pos.set(10, 0.14, 10); P0.radius = 0.38; P0.dead = false; P0.driving = false;
+  CBZ.cam = CBZ.cam || { yaw: 0, pitch: 0 };
+  CBZ.now = 0;
+  const realCollide = CBZ.collide;
+  CBZ.collide = function (pos) { if (pos === P0.pos) calls.push(pos.x); return false; };
+  const before = updates.length;
+  try { load("src/city/drinking.js"); } catch (e) { fail("drinking.js would not load in the census vm: " + e.message); }
+  const tick = updates.slice(before).filter((u) => u.o === 34).map((u) => u.fn);
+  if (!tick.length) fail("drinking.js's frame tick (order 34) not found");
+  CBZ.game.mode = "city";
+  for (let i = 0; i < 120; i++) { CBZ.now += 1000 / 60; for (const f of tick) f(1 / 60); }
+  if (calls.length) fail("THE PLAYER'S BODY: drinking.js resolved a SOBER player " + calls.length + " times in 2 s");
+  if (Math.hypot(P0.pos.x - 10, P0.pos.z - 10) > 1e-9) fail("THE PLAYER'S BODY: drinking.js moved a sober player");
+  CBZ.collide = realCollide;
 }
 
 console.log("shells", shells.length, "interior doors", nDoors, "street doors", nStreet, "rooms", nRooms, "walks", nShellWalks);

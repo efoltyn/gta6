@@ -623,6 +623,12 @@
     const tz = t && t.pos ? t.pos.z : (t && t.z != null ? t.z : null);
     if (tx != null) {
       let face = faceOf(tx, tz, fx, fz, px, pz);
+      // A DOOR YOU ARE SQUARELY FACING IS WHAT E MEANS. The Oval Office's
+      // job applicants waited by its door, and E on the door hired the man
+      // beside it instead of opening it (tools/president-walkout.mjs, desktop:
+      // card "Hire" at the door, the President shut in). A zone that says
+      // faceWins beats a person when you look straight at it.
+      if (c.zone && c.zone.faceWins && face > 0.8) s += 14;
       if (c.zone && ZONE_CONE_FLOOR > 0) face = ZONE_CONE_FLOOR + (1 - ZONE_CONE_FLOOR) * face;
       s += face * 10;
     }

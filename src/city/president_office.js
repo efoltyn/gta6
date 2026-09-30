@@ -1812,7 +1812,7 @@
     M.wired = true;
     const on = function (evt, fn) { try { p.on(evt, fn); } catch (e) {} };
     on("sworn", function (e) {
-      SPAWN.pending = true; SPAWN.until = CLOCK + 30; SPAWN.relocs = 0; SPAWN.settle = 0;
+      SPAWN.pending = true; SPAWN.until = CLOCK + 30; SPAWN.relocs = 0; SPAWN.settle = 0; SPAWN.sat = false;
       M.phoneQ.length = 0; M.aideQ.length = 0; M.missed.length = 0; M.flags = {};
       M.morningDay = day(); M.chiefDay = day();      // the welcome below IS today's visit
       M.approvalMorning = null;
@@ -1917,7 +1917,7 @@
   // ============================================================
   //  §10  YOU START AT YOUR DESK.
   // ============================================================
-  const SPAWN = { pending: false, until: 0, relocs: 0, settle: 0, sessionChecked: false, lastReloc: -1e9 };
+  const SPAWN = { pending: false, sat: false, until: 0, relocs: 0, settle: 0, sessionChecked: false, lastReloc: -1e9 };
   function deskPoint() {
     const rec = office();
     if (!rec) return null;
@@ -1957,7 +1957,7 @@
       const site = (P() && P().site) ? (function () { try { return P().site(); } catch (e) { return null; } })() : null;
       const R = site && site.rect;
       if (R && Pp.pos.x > R.minX - 20 && Pp.pos.x < R.maxX + 20 && Pp.pos.z > R.minZ - 20 && Pp.pos.z < R.maxZ + 20) {
-        SPAWN.pending = true; SPAWN.until = CLOCK + 20; SPAWN.relocs = 0; SPAWN.settle = 0;
+        SPAWN.pending = true; SPAWN.until = CLOCK + 20; SPAWN.relocs = 0; SPAWN.settle = 0; SPAWN.sat = false;
         if (M.morningDay !== day()) { M.morningDay = day(); M.later.push({ at: CLOCK + 5, fn: function () { chiefVisit(false); } }); }
       }
     }
@@ -1967,6 +1967,14 @@
     SPAWN.sessionChecked = true;
     const dp = deskPoint();
     const at = Math.abs(Pp.pos.y - rec.floorY) < 1.2 && Math.hypot(Pp.pos.x - dp.x, Pp.pos.z - dp.z) < 1.6;
+    // HE GOT UP. Once he has sat in the chair, standing out of it or walking
+    // is the player's own choice and the spawn is over. (This used to yank a
+    // President who stood up and walked out of the office inside the 20-30 s
+    // window back into the chair, up to five times: leave the floor, or go
+    // 30 m, and you were at the desk again. Owner: "I literally can't get
+    // out of the fucking Oval Office.")
+    if (at && Pp._propSeat) SPAWN.sat = true;
+    if (SPAWN.sat && (!Pp._propSeat || (Pp.speed || 0) > 0.1)) { SPAWN.pending = false; return; }
     if (at) {
       SPAWN.settle += dt;
       if (SPAWN.settle > 3.0) SPAWN.pending = false;       // he is at his desk and staying there

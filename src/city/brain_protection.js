@@ -741,7 +741,14 @@
       const principal = env.principal;
       if (first) {
         const from = D.hasT ? { x: D.tx, z: D.tz } : null;
-        const verb = A.verb("grab", D.cp, principal, { from: from, push: "down" }) || A.verb("escort", D.cp, principal, { from: from });
+        // NEVER HANDS ON THE PLAYER. With the brain core loaded A.verb is
+        // CBZ.verbs, and a real grab on a player principal held the President
+        // (playerHeld: no input) with the session parked in "align": his own
+        // agent pinned him on the lawn outside the West Wing and yanked him a
+        // metre (tools/president-walkout.mjs, all four runs). The player is
+        // told (the line below); only an NPC principal is taken down.
+        const verb = isPlayer(principal) ? true
+          : (A.verb("grab", D.cp, principal, { from: from, push: "down" }) || A.verb("escort", D.cp, principal, { from: from }));
         // no verbs library and no executor for his body: he still ducks
         if (!verb && principal && !isPlayer(principal)) EXEC.posture(principal, "cower");
       } else if (principal && !isPlayer(principal)) A.verb("escort", D.cp, principal, { to: env.safe || null });

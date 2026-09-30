@@ -165,10 +165,27 @@
     if (CBZ.cityUnpostNpc) { try { CBZ.cityUnpostNpc(p); return; } catch (e) {} }
     try { if (p.group && p.group.parent) p.group.parent.remove(p.group); const a = CBZ.cityPeds; if (a) { const i = a.indexOf(p); if (i >= 0) a.splice(i, 1); } } catch (e) {}
   }
-  function walkTo(p, x, z) {
+  // THE AISLE (interior_programs.js publishes it for the Oval Office): the
+  // lane round the sofas and the low table from the staff door to the line.
+  // Walked straight, a man from the door cut through the sofa, stuck on it
+  // and was left standing in the door lane (the President's way out).
+  // walkTo(p, x, z, true) threads the aisle, in the order that runs from
+  // wherever he is toward (x, z).
+  function aisleTo(p, x, z) {
+    const rec = office(), L = rec && rec.landmarks;
+    if (!L || !L.staffAisle0 || !L.staffAisle1) return [];
+    const A = [L.staffAisle0, L.staffAisle1];
+    const d = function (q, r) { return Math.hypot(q.x - r.x, q.z - r.z); };
+    const fwd = d(p.pos, A[0]) <= d(p.pos, A[A.length - 1]) ? A : A.slice().reverse();
+    // leave out the points behind him and past the goal
+    const out = [];
+    for (let i = 0; i < fwd.length; i++) if (d(fwd[i], { x: x, z: z }) < d(p.pos, { x: x, z: z }) + 0.5) out.push({ x: fwd[i].x, z: fwd[i].z });
+    return out;
+  }
+  function walkTo(p, x, z, aisle) {
     if (!p || p.dead) return;
     p.controlled = true; p.staffPost = null;
-    p.path = [{ x: x, z: z }]; p.finalGoal = { x: x, z: z };
+    p.path = (aisle ? aisleTo(p, x, z) : []).concat([{ x: x, z: z }]); p.finalGoal = { x: x, z: z };
     if (p.target && p.target.set) p.target.set(x, 0, z);
     p.state = "walk"; p.pause = 0;
   }
@@ -185,7 +202,7 @@
     const rec = office();
     if (!rec) { unpost(p); return; }
     const S = spots(rec);
-    walkTo(p, S.door.x, S.door.z);
+    walkTo(p, S.door.x, S.door.z, true);
     OUT.push({ ped: p, t: 0, door: S.door });
   }
   let _nameRng = null;
@@ -227,7 +244,7 @@
     p._presCandidate = role;
     const c = { role: role, ped: p, spot: i, phase: "enter", greeted: false, t: 0 };
     LINE.push(c);
-    walkTo(p, S.line[i].x, S.line[i].z);
+    walkTo(p, S.line[i].x, S.line[i].z, true);
     if (CBZ.interactions && CBZ.interactions.registerFor) {
       CBZ.interactions.registerFor(p, { id: "pres-hire", slot: "e", prio: 60, campaignSafe: true, forceYes: true,
         label: "Hire", canShow: function () { return c.phase !== "leave" && !!seat(); }, onSelect: function () { hire(c); } });
@@ -245,7 +262,7 @@
     const S = spots(rec);
     for (let k = 0; k < LINE.length; k++) {
       const e = LINE[k];
-      if (e.spot !== k) { e.spot = k; if (e.phase !== "leave") { e.phase = "enter"; walkTo(e.ped, S.line[k].x, S.line[k].z); } }
+      if (e.spot !== k) { e.spot = k; if (e.phase !== "leave") { e.phase = "enter"; walkTo(e.ped, S.line[k].x, S.line[k].z, true); } }
     }
   }
   function sendAway(c) {
@@ -427,7 +444,10 @@
       c.t += dt;
       if (c.phase === "enter" && rec) {
         const sp = spots(rec).line[c.spot];
-        if (near(p, sp, 0.6) || c.t > 14) { holdAt(p, spots(rec).faceIn(sp)); c.phase = "wait"; }
+        // a man who has not made his place in the line in 14 s is put there:
+        // he never waits wherever he stalled (that was the Oval Office door)
+        if (!near(p, sp, 0.6) && c.t > 14) { p.pos.x = sp.x; p.pos.z = sp.z; if (p.group) { p.group.position.x = sp.x; p.group.position.z = sp.z; } }
+        if (near(p, sp, 0.6)) { holdAt(p, spots(rec).faceIn(sp)); c.phase = "wait"; }
       } else if (c.phase === "wait" && !c.greeted && P && P.pos && Math.hypot(P.pos.x - p.pos.x, P.pos.z - p.pos.z) < 2.8) {
         c.greeted = true; say(p, SAYS[c.role][0], 3);
       }

@@ -144,6 +144,15 @@
   function applyStumble(level, dt, t) {
     const P = CBZ.player, cam = CBZ.cam;
     if (!P || !P.pos || P.driving || P.dead) return;
+    // SOBER, THIS FILE DOES NOTHING TO THE BODY. It used to run the collide()
+    // below every frame for everyone, with a 0.5 m body and a band from the
+    // ankles (physics.js resolves the player at 0.38 m from knee height), so
+    // after physics had moved you it pushed you back off anything within half
+    // a metre: a desk corner, a sofa, a door jamb. In the furnished Oval
+    // Office that was a set of invisible walls the President could not walk
+    // through (tools/president-walkout.mjs: updater 10 moved him 0.4 m, this
+    // updater, order 34, moved him back 0.4 m; no collider within 0.48 m).
+    if (!(level > 0) && !lurchVX && !lurchVZ) return;
     const yaw = cam ? cam.yaw : 0;
     const rx = Math.cos(yaw), rz = -Math.sin(yaw);      // "right" vector (matches physics.js's own rx/rz)
     const sway = Math.sin(t * 0.7) * DRIFT_PER_LEVEL * level;
@@ -172,7 +181,9 @@
     // never end a drunk frame inside a wall — with the player's real standing
     // band, so collide()'s height gate ignores floors above/below (same
     // feetY/headY contract physics.js's own resolver passes).
-    if (CBZ.collide) CBZ.collide(P.pos, 0.5, P.pos.y + 0.1, P.pos.y + 1.8);
+    // (the player's OWN body and band, physics.js resolveCollisions: radius
+    // P.radius, feet + 0.42 so a step stays a step, head at 1.7)
+    if (CBZ.collide) CBZ.collide(P.pos, P.radius || 0.38, P.pos.y + 0.42, P.pos.y + 1.7);
   }
 
   // ---- soft vignette pulse on OUR OWN div (never #vignette) --------------
