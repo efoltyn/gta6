@@ -2676,7 +2676,10 @@
     const t0 = now(), tile = J.tile, far = J.far, kit = J.kit;
     if (kit) return finishKit(J, t0);
     const mesh = far ? tile.far : tile.mesh;
-    const w = writtenGeometry(tile.sphere, far), g = w.g;
+    // (the streamed/phone city drops a NEAR tile's JS copy after upload too:
+    // it is never raycast either (its colliders are boxes, COLS), and metro
+    // tiles a drive passed held ~50 MB of JS after it, memscope/abtrack)
+    const w = writtenGeometry(tile.sphere, far || !!(CBZ.slice && CBZ.slice.stream)), g = w.g;
     const old = mesh.geometry;
     mesh.geometry = g;
     if (old && old !== g) old.dispose();

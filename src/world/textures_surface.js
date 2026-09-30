@@ -719,7 +719,7 @@
       uGndFar: { value: far },
       uGndMix: { value: new THREE.Vector2(opts.chroma == null ? 0.35 : +opts.chroma, opts.mottle == null ? 1 : +opts.mottle) },
     };
-    if (CITY) Object.assign(U, _cityU);
+    if (CITY) { Object.assign(U, _cityU); CBZ.farCityMap.sampled = true; }   // (metro.js builds the atlas only if some ground samples it)
     U.uGndOpt = { value: new THREE.Vector2(SRGB ? 1 : 0, CITY ? 1 : 0) };
     mat.userData.groundSkin = true;
     mat.onBeforeCompile = function (sh) {

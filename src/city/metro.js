@@ -817,6 +817,9 @@
   function farMapPump() {
     const FC = CBZ.farCityMap, MG = CBZ.metroGround;
     if (_mapsDone || !FC || !MG || !MG.farMap || !THREE) { _mapsDone = true; return; }
+    // no ground material samples the atlas at this tier (the textured ground
+    // skin is off on a phone): building it was 16 MB nobody drew
+    if (!FC.sampled) { _mapsDone = true; return; }
     if (!_maps) {
       _maps = [];
       for (const M of CBZ.metroCities) {
