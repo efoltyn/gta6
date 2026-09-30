@@ -676,6 +676,13 @@
   // makes it a height-gated collider (showroom walls) tracked so a burst frees
   // it. opts.tint picks the pooled glass tint; opts.external (jewelry cases)
   // forces an individual mesh because the owner watches rec.mesh directly.
+  function GlassRef(parent) { this.parent = parent; this.visible = false; }
+  GlassRef.prototype.isGlassRef = true;
+  GlassRef.prototype.name = "glass-proxy";
+  let _refMat = null;
+  Object.defineProperty(GlassRef.prototype, "material", { get: function () { return _refMat || (_refMat = glassMat()); } });
+  Object.defineProperty(GlassRef.prototype, "userData", { get: function () { return GLASS_REF_UD; } });
+  const GLASS_REF_UD = Object.freeze({});
   function addCityGlass(group, lx, ly, lz, pw, ph, pd, ox, oz, o, list) {
     o = o || {};
     // OWNER RULE: no gray windows. The "reflective" mirror panes read as flat
@@ -710,11 +717,13 @@
       // instanced pools carry its pixels like every other pane. rec.mesh
       // stays null so every show/hide site takes the paneShow() path.
       if (o.solid) {
-        const m = new THREE.Mesh(unitBox(), glassMat());
-        m.position.set(lx, ly, lz); m.scale.set(pw, ph, pd);
-        m.visible = false;                       // pool renders it — proxy never draws
-        m.matrixAutoUpdate = false; m.updateMatrix();
-        group.add(m); rec.proxy = m;
+        /* THE COLLIDER'S NAME TAG, NOT A MESH. Consumers identify glass by
+           c.ref.material (transparent) and walk c.ref.parent; nothing ever
+           drew, raycast or measured the old invisible proxy Mesh, and there
+           were ~10.5k of them (an Object3D apiece, measured on the phone).
+           A plain tag carries exactly what is read. */
+        const m = new GlassRef(group);
+        rec.proxy = m;
         const c = { minX: ox + lx - pw / 2, maxX: ox + lx + pw / 2, minZ: oz + lz - pd / 2, maxZ: oz + lz + pd / 2, ref: m, y0: ly - ph / 2, y1: ly + ph / 2 };
         CBZ.colliders.push(c); rec.col = c;
       } else {
