@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "111b5bfafe1e2329d4566f24ec700198edbce550",
-  "createdAt": "2026-09-30T02:51:36.908Z",
+  "sourceCommit": "b81db7a07999844db6438578de6ed29a0b059b09",
+  "createdAt": "2026-09-30T02:54:50.697Z",
   "fileCount": 1182,
-  "totalBytes": 47979002,
+  "totalBytes": 47979514,
   "files": [
     {
       "file": "src/bootstrap.js",
@@ -1563,8 +1563,8 @@
     },
     {
       "file": "src/city/waterfield.js",
-      "bytes": 16108,
-      "sha256": "407e69a639a696d6daff3ec0f3d76beb2fb61baa1cbe8e5d135a125dfd4741f5"
+      "bytes": 16620,
+      "sha256": "857509509bd15f1c45041406b53a1e6ab3f834bf9b10d53703c9995a98727fdc"
     },
     {
       "file": "src/city/wealth.js",
@@ -5809,27 +5809,27 @@
     {
       "file": "shark-sim.html",
       "bytes": 58816,
-      "sha256": "e1588653cf34b9ef15d9b28af28aab50aad64b6ed57702e54cd0246920e9dbf9"
+      "sha256": "d40d2b4e81e41280b64d36cf9fa672cd9962cb9bac6ea55108d13b49e5651771"
     },
     {
       "file": "disaster-survival.html",
       "bytes": 58859,
-      "sha256": "79fadf0e377252e3a5b14a1e35b5dbcdcf90624d379fdb054e428e60497b0c1e"
+      "sha256": "365761b60de6178877ae75733d6c8ea81cb512d774fbf50f4e52923195ca1d09"
     },
     {
       "file": "prison-escape.html",
       "bytes": 58828,
-      "sha256": "c22dce9fa5904abd6983aaa17d32c702a362676416c1f6811997d68efeaf8566"
+      "sha256": "2b42d5fa655099de5923eaff4b217b74220fa9db3c018b32d10e7054ffb3c55b"
     },
     {
       "file": "gang-city.html",
       "bytes": 58783,
-      "sha256": "bc805cd5d8ee7ef7159490488cf452b544dcadf0aba5717074573caeb053bcd5"
+      "sha256": "c1087a82ba13bb8f91fcc998ac7ffe1665e4bb230523fe1a54a8fdc51fef55f2"
     },
     {
       "file": "gun-game.html",
       "bytes": 58805,
-      "sha256": "e057aafdb8c954d2d79ea17c2b268899fc514a8259524d280257779a6348b867"
+      "sha256": "3a94a61b3eee0b2403829666cca83d299df92a27e2a696c0047ddc1097d181ef"
     },
     {
       "file": "games/battle.html",
