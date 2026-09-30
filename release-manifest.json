@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "3dd814ac3237f596bb8bfd9005b50a60525e8bb6",
-  "createdAt": "2026-09-29T23:57:15.347Z",
+  "sourceCommit": "d9bd07823d64c59e9d9bff991b31c05b11bdd128",
+  "createdAt": "2026-09-30T00:16:50.930Z",
   "fileCount": 1180,
-  "totalBytes": 47930282,
+  "totalBytes": 47933989,
   "files": [
     {
       "file": "src/bootstrap.js",
@@ -863,8 +863,8 @@
     },
     {
       "file": "src/city/hitman_room.js",
-      "bytes": 69584,
-      "sha256": "6e39cfb53b7eed5a9527d20679d05f18d44dcb2859da96c5b495ba314892ef48"
+      "bytes": 69879,
+      "sha256": "7c666626f01ae8b28c7fe94c08c20f2fa5716720575b9eb2697be845cc5ba65e"
     },
     {
       "file": "src/city/housing.js",
@@ -1628,8 +1628,8 @@
     },
     {
       "file": "src/city/wildlife.js",
-      "bytes": 83909,
-      "sha256": "2c45c316e2a7bbe2bf312c1ad40ffc2dd047f02a1174bdb389e3049656e5816e"
+      "bytes": 85134,
+      "sha256": "7cd67e0786115f7a6682ac9e96f5f19218e28ca048d143b40bf767ceb3bf97d9"
     },
     {
       "file": "src/city/wildlife_orca.js",
@@ -1698,13 +1698,13 @@
     },
     {
       "file": "src/core/batch.js",
-      "bytes": 17968,
-      "sha256": "69cdb351ecc7c93d9527b06fc1c79880ff81985b954dbe877f1cc873c7ad2b00"
+      "bytes": 18669,
+      "sha256": "8226f11cf2f74f5dedd420fa6822437db7fdc3f16ae7b08b2bbfee7c9e27cf30"
     },
     {
       "file": "src/core/citystream.js",
-      "bytes": 13522,
-      "sha256": "4013c8033615bb41f245fdc48f340947f27e9501a1dc217f43ecc8c282e58085"
+      "bytes": 14644,
+      "sha256": "03d338fe443d8135f14fce268f8f21a1c96595ba30554c00d80ce1e792ff13d6"
     },
     {
       "file": "src/core/daynight.js",
@@ -1833,8 +1833,8 @@
     },
     {
       "file": "src/core/slice.js",
-      "bytes": 8467,
-      "sha256": "7fa36c036beca5385b7919a4f972581f4a33c2df8f3dccddd6611bd1e4813833"
+      "bytes": 8599,
+      "sha256": "72d50dbf7d921b16ee05b38df57d22428f25e3903be8ce125b1fe7540575842d"
     },
     {
       "file": "src/core/staticfreeze.js",
@@ -1948,8 +1948,8 @@
     },
     {
       "file": "src/entities/pedinstance.js",
-      "bytes": 19742,
-      "sha256": "c34bcf8ecdbdf63e9f579619a3dcd9afa6ff39d757b663e504055c98a3c93e67"
+      "bytes": 19936,
+      "sha256": "ac79eb0b0741000c66c6bdbc33cdd2e5ddf4af4a85f2bbfd16a13410b41f15c5"
     },
     {
       "file": "src/entities/player.js",
@@ -3078,8 +3078,8 @@
     },
     {
       "file": "src/vendor/three.r128.min.js",
-      "bytes": 605166,
-      "sha256": "2590ea4aa8f7a113501f5525f8a7abb3f35927339ef223c490cd5b5e8a6de4d9"
+      "bytes": 605229,
+      "sha256": "fcc5cd83020ff76fb7a775000cfff0564a72580507605357d95274c58afa9594"
     },
     {
       "file": "src/warlord/CONTRACT.md",
@@ -5798,28 +5798,28 @@
     },
     {
       "file": "shark-sim.html",
-      "bytes": 58550,
-      "sha256": "14cb57c8fc335de88c36bc72f834c1662560e02562b7027c5f32d53d113494b4"
+      "bytes": 58545,
+      "sha256": "71ac05153946af31fd0392f4f1103a6b54cdfa8cfde2f26ab1ef3f744916e1a2"
     },
     {
       "file": "disaster-survival.html",
-      "bytes": 58593,
-      "sha256": "d8fca985a2baf8e4fcf433667db9535a81b50ae96c136b47d6bda4e47298fb16"
+      "bytes": 58588,
+      "sha256": "dfc36af18ae24630ed44a99a6731217dbf91b81262aacbf101e3a4be6002df3f"
     },
     {
       "file": "prison-escape.html",
-      "bytes": 58562,
-      "sha256": "9a2b6c4dce45f855b9faf9bb93e7d1f5a836d72e6a24e389ceb1222a6ba09792"
+      "bytes": 58557,
+      "sha256": "582189447f557c8d90f4461af0ba0d652779b8e59910fa02e04f4fb30c00061f"
     },
     {
       "file": "gang-city.html",
-      "bytes": 58517,
-      "sha256": "6dd8bd7b9050e4ae11c40d8b59a4078365c98badb5f2b256b56812b36ee8eaed"
+      "bytes": 58512,
+      "sha256": "4707a287239581319607fa23a3b5db35b22ee5ca38344c37127951a48508947a"
     },
     {
       "file": "gun-game.html",
-      "bytes": 58539,
-      "sha256": "8637fa0d72d13e6f6db8f2ba01fec0b0d5ce64b3be9658bce6bf10f51bc93036"
+      "bytes": 58534,
+      "sha256": "3f5f2c91f3d014b0c75661e1b820c5ee0270f22d5a78743e243a5abf4eecfcc8"
     },
     {
       "file": "games/battle.html",
