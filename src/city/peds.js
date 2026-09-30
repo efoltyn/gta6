@@ -5267,6 +5267,12 @@
       const cop = nearestActor(ped, 30, _naCopHuntingMe);
       if (cop) {
         if (ped.aggr >= (B.violent || 0.88)) { ped.rage = cop; ped.state = "fight"; return; }
+        // RUNNING FROM THE POLICE, A STOPPED CAR IS A WAY OUT: the pull-out
+        // verb (city/pullout.js via cityNpcCarjack, its own few-second
+        // cooldown) takes the nearest one, the player's included
+        if (CBZ.cityNpcCarjack && !ped.inCar && ped.aggr >= (B.crook || 0.72) &&
+            Math.hypot(cop.pos.x - ped.pos.x, cop.pos.z - ped.pos.z) > 5 &&
+            CBZ.cityNpcCarjack(ped, null, { flee: true })) return;
         ped.state = "flee"; fleeFrom(ped, cop.pos.x, cop.pos.z); return;
       }
     }

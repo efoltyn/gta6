@@ -638,6 +638,19 @@
     const cbDone = R.onDone, spot = R.spot;
     R.onDone = null;
     if (Q.abandon) { abort(R, true); return; }
+    if (Q.kind === "board" && Q.pullOnly) {
+      // never sat: he ends on his feet at the door, his own mover takes over
+      R.state = "stand"; R.b = null; R.sink = null; R.lean = 0; R.feet = null; R.roll = 0;
+      const g = groupOf(a);
+      if (g && g.scale && R.scale != null && R.scale !== 1) g.scale.setScalar(1);
+      R.scale = null; R.V = null;
+      if (ch) { rigStand(ch); ch.crouch = false; }
+      handBack(R);
+      untrack(R);
+      R.spot = null;
+      if (cbDone) { try { cbDone(a, spot); } catch (e) {} }
+      return;
+    }
     if (Q.kind === "board") {
       /* IN THE SEAT. Whoever owns a seated body from here (vehicles.js's
          seatDriver for the player, npclife's attach for an NPC) holds the
@@ -1190,7 +1203,9 @@
       R.y = Q.gy;
       R.yaw = MV.turnToward(R.yaw, V.yaw() + V.yawH, TURN * dt);
       beatOf(R, "wait", u);
-      return Q.t > 0.3 && (!V.clear || V.clear() || Q.t > 1.8);
+      // (a pull-out's wait holds through a window being smashed and the
+      // grab: V.waitMax, city/pullout.js)
+      return Q.t > 0.3 && (!V.clear || V.clear() || Q.t > (V.waitMax || 1.8));
     },
     cswing(R, Q, dt) {
       const V = R.V;
@@ -1292,7 +1307,11 @@
   function carEndNow(R) {
     const Q = R.seq, V = R.V, a = R.actor, ch = charOf(a);
     if (!Q || !V) return;
-    if (Q.kind === "board") {
+    if (Q.kind === "board" && Q.pullOnly) {
+      // a pull-out that never gets in: he is standing back off the door
+      const w = cw(V, V.H.x + V.side * 0.10, 0, V.H.z - 0.30, _c0);
+      R.x = w.x; R.y = Q.gy; R.z = w.z; R.yaw = V.yaw() + V.yawH; R.roll = 0;
+    } else if (Q.kind === "board") {
       const sw = cw(V, V.S.x, V.S.y, V.S.z, _c1);
       R.x = sw.x; R.y = sw.y; R.z = sw.z; R.yaw = V.yaw() + (V.yawS || 0); R.roll = 0;
       R.scale = V.fit; R.lean = 0; R.feet = null;
@@ -1330,7 +1349,11 @@
     if (dH > 0.15) names.push("cwalk");
     names.push("cpull");
     if (V.jack) names.push("cwait");
-    names.push("cswing", "cin");
+    // PULL-OUT ONLY (city/pullout.js): walk to the door, pull it, drag
+    // whoever is in that seat out, and stay on the pavement. The same beats
+    // a carjack plays before the jacker gets in, minus the getting in.
+    if (opts.pullOnly && V.jack) Q.pullOnly = true;
+    else names.push("cswing", "cin");
     begin(R, "board", names, Q);
     return true;
   };

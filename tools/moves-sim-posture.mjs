@@ -383,6 +383,24 @@ function clearOfFrame(p) {
   let d5 = 0; M.board(a, V5, { onDone: () => { d5 = 1; } });
   run(a, 8, () => d5, () => { tj += DT; });
   check("car: jack fires once at the pull, then waits", jacked === 1 && V5.beats.indexOf("wait") > 0 && d5 === 1, V5.beats.join(","));
+
+  // THE PULL-OUT (city/pullout.js): walk, pull, drag him out, never get in.
+  // The wait holds through a smashed window + the grab (V.waitMax), and the
+  // body ends on its feet at the door, full size, handed back to its mover.
+  const V6s = carSpec();
+  let d6s = 0; M.alight(a, V6s, { onDone: () => { d6s = 1; } });
+  run(a, 5, () => d6s);
+  a.group.position.x += 3;                       // step back off the car, then come at the door
+  if (a.pos && a.pos.set && a.pos !== a.group.position) a.pos.set(a.group.position.x, 0, a.group.position.z);
+  let pj = 0, tp = 0, d6 = 0;
+  const V6 = carSpec({ jack: () => { pj++; }, clear: () => tp > 2.6, waitMax: 4.4 });
+  const ok6 = M.board(a, V6, { pullOnly: true, onDone: () => { d6 = 1; } });
+  const st6 = run(a, 8, () => d6, () => { tp += DT; });
+  check("pull-out: beats walk, pull, wait, never swing/in", ok6 && V6.beats.join(",") === "walk,pull,wait", V6.beats.join(","));
+  check("pull-out: the wait outlasts the old 1.8 s cap (waitMax)", d6 === 1 && tp > 2.6, `${tp.toFixed(2)} s`);
+  check("pull-out: jack fires once", pj === 1);
+  check("pull-out: ends standing, full size, not seated", a.group.scale.x === 1 && !a.char.sitting && !M.busy(a));
+  check("pull-out: never a teleport", st6.maxJump <= 0.12, `max ${f3(st6.maxJump)}`);
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall posture scenarios pass");

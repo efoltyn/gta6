@@ -3215,6 +3215,9 @@
       // ---- HANDS ON THE PLAYER (systems/arrest.js's take: the cuffs, the
       // escort): the verb has his body; the beat must not walk him off it
       if (c._arresting) { c.sees = true; c.curTarget = null; c.npcTarget = null; c.speed = 0; c.rage = null; continue; }
+      // ---- AT A CAR DOOR (city/pullout.js): the door beats have his body
+      // until whoever was in that seat is out on the pavement
+      if (c._pulling) { c.sees = true; c.speed = 0; c.rage = null; continue; }
       // ---- ON THE PAVEMENT (a lunge that missed, a blow that dropped him):
       // STRIKE's fall has the rig and gets him up in its own time
       if (c.ko > 0) { c.speed = 0; if (_near) animChar(c.char, 0, dt); continue; }
@@ -3355,7 +3358,9 @@
       if (c.chaseCar && !tgt) {
         const car = c.chaseCar;
         const gx = car.pos.x - c.pos.x, gz = car.pos.z - c.pos.z, gd = Math.hypot(gx, gz);
-        if (gd < 3.2) { /* vehicles.js busts it on contact */ }
+        // stopped (boxed in, crashed): he goes to the driver's door and
+        // pulls him out (city/pullout.js), which files the arrest
+        if (CBZ.pullOut && CBZ.pullOut.copTry(c, car, gd)) continue;
         stepTo(c, gx, gz, c.baseSpeed, dt, near);
         continue;
       }
@@ -3404,8 +3409,16 @@
           // owns the scene and every other unit stands down.
           LAW.release(c); c.arrestT = 0;
         } else if (isPlayer && P.driving) {
-          // a driving suspect is pursued; the cuffs only go on a man on foot
+          // a driving suspect is pursued; the cuffs only go on a man on foot.
+          // Once the car is STOPPED (boxed in, crashed, parked) one officer
+          // goes to your door and pulls you out (city/pullout.js), the rest
+          // cover him; on the pavement the ordinary arrest takes over.
           wantShoot = roe === "shoot"; LAW.release(c);
+          if (!wantShoot && P._vehicle && CBZ.pullOut && CBZ.pullOut.copTry(c, P._vehicle, dist)) continue;
+        } else if (!isPlayer && CBZ.pullOut && CBZ.pullOut.carOf(tgt)) {
+          // an NPC suspect in a car: the same door, the same pull
+          wantShoot = roe === "shoot"; LAW.release(c);
+          if (!wantShoot && CBZ.pullOut.copTry(c, CBZ.pullOut.carOf(tgt), dist)) continue;
         } else if (c.sees || (c.lostT || 0) < 1.5) {
           // (losing him is the LOS/search code's call, never "fled" into the ladder)
           const st = isPlayer ? LAW.playerState(c, false) : LAW.pedState(tgt, c, false);

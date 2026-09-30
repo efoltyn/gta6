@@ -1146,6 +1146,18 @@
       return true;
     },
     squadBoard: squadBoard, squadAlight: squadAlight,
+    /* THE PULL-OUT'S BEATS (city/pullout.js): the same door spec the player,
+       a companion and a carjack victim go through, for any body at any seat
+       of any car. opts: jack/clear/shut/waitMax/run (see carSpec). */
+    pullSpec: function (veh, seatId, actor, opts) {
+      if (!carArcOn() || !veh) return null;
+      const seat = seatById(veh, seatId || "driver");
+      return seat ? carSpec(veh, seat, actor, opts || {}) : null;
+    },
+    doorBusy: function (veh, seatId) {
+      const seat = seatById(veh, seatId || "driver");
+      return !!(seat && doorBusy(veh, seat.doorId || seat.id));
+    },
     arcs: function () { return arcs.length; },
     freeSeats: function (veh) {
       const s = seatsOf(veh); if (!s) return 0;
@@ -1220,6 +1232,9 @@
       fit: fit, ref: ref,
       run: !!opts.run, fast: !!opts.fast, victim: !!opts.victim,
       jack: opts.jack || null, clear: opts.clear || null,
+      // a pull-out (city/pullout.js): how long the wait at the door may run
+      // (a window smashed, the grab) and whether the door is still shut
+      waitMax: opts.waitMax || null, shut: opts.shut || null,
       groundY: null,
       beat: null,
     };
@@ -1320,8 +1335,13 @@
     return function (name, u) {
       let hand = null;
       if (name === "walk") { t = 0; if (u < 0.9) hand = "handle"; }
-      else if (name === "pull") { t = 0.55 * u; hand = "handle"; }
-      else if (name === "wait") { t = Math.max(t, 0.55 + 0.45 * u); if (u < 0.6) hand = "handle"; }
+      else if (name === "pull") { t = V.shut && V.shut() ? 0 : 0.55 * u; hand = "handle"; }
+      else if (name === "wait") {
+        // LOCKED: the handle does nothing, so the hand goes to the glass
+        // above it until the window is in (city/pullout.js's smash)
+        if (V.shut && V.shut()) { t = 0; hand = "frame"; }
+        else { t = Math.max(t, 0.55 + 0.45 * u); if (u < 0.6) hand = "handle"; }
+      }
       else if (name === "swing") { t = Math.max(t, 0.55 + 0.45 * u); hand = u < 0.35 ? "handle" : "frame"; }
       else if (name === "in") { t = 1; if (u < 0.72) hand = "frame"; }
       else if (name === "open") { t = V.victim ? 1 : Math.max(t, u); if (!V.victim) hand = "inner"; }
@@ -1356,12 +1376,16 @@
     const seat = seatById(car, seatId || "driver");
     if (!seat || !seat.hinge) return false;
     const doorId = seat.doorId || seat.id;
-    const V = carSpec(car, seat, P, {
+    /* SOMEBODY IS AT THE WHEEL: the ONE pull-out verb (city/pullout.js)
+       owns the grab, the window if it is locked, and the driver flooring it
+       out from under your hand. The same job a cop or a carjacker runs. */
+    const job = jack && CBZ.pullOut ? CBZ.pullOut.prepare(P, car, { seat: seat.id, take: true }) : null;
+    const V = carSpec(car, seat, P, job ? job.hooks : {
       jack: jack ? function () { return CBZ.cityJackNow && CBZ.cityJackNow(car); } : null,
       clear: jack ? function () { return !doorBusy(car, doorId); } : null,
     });
-    if (!V) return false;
-    const a = { car: car, seat: seat, leaf: leafFor(car, seat), phase: "seq", t: 0, commit: commit, armed: !moveKeysDown() };
+    if (!V) { if (job) CBZ.pullOut.cancel(job); return false; }
+    const a = { car: car, seat: seat, leaf: leafFor(car, seat), phase: "seq", t: 0, commit: commit, armed: !moveKeysDown(), job: job };
     pArc = a;
     const ok = MV.board(P, V, {
       onDone: function () {
@@ -1372,12 +1396,14 @@
       },
       onAbort: function () {
         if (pArc === a) endPlayerArc();
-        // never swallow the input: he asked to get in, so let him in
+        // never swallow the input: he asked to get in, so let him in — unless
+        // the driver floored it out from under his hand (the car is gone)
         const c = a.commit; a.commit = null;
+        if (a.job && a.job.broken) return;
         if (c && !P.dead && !P.driving && inCity()) { try { c(); } catch (e) {} }
       },
     });
-    if (!ok) { if (pArc === a) pArc = null; return false; }
+    if (!ok) { if (pArc === a) pArc = null; if (job) CBZ.pullOut.cancel(job); return false; }
     if (CBZ.sfx) { try { CBZ.sfx("door_open"); } catch (e) {} }
     return true;
   }
@@ -1480,7 +1506,7 @@
 
   // ---- THE VERB ON THE DOOR ------------------------------------------------
   // One pinned label over the door you are at: "Drive", "Ride" / "Sit" with
-  // the seat as the sub line, "Drag out" when somebody is at the wheel. Its
+  // the seat as the sub line, "Pull out" when somebody is at the wheel. Its
   // chip says F, the one get-in key; the press is city/interactions.js's F
   // (the looked-at car's ride verb, else the router), and the touch tap on
   // the car. All of them land in cityEnterVehicle, which asks
@@ -1517,7 +1543,9 @@
       const c = list[i];
       if (!c || c.player || c.dead || c._cineLocked || !c.pos) continue;
       const cx = c.pos.x - P.pos.x, cz = c.pos.z - P.pos.z;
-      if (cx * cx + cz * cz > 49 || Math.abs(c.v || 0) > 2.4) continue;
+      if (cx * cx + cz * cz > 49) continue;
+      // a car still rolling offers no door (the pull-out's own speed rule)
+      if (CBZ.pullOut ? CBZ.pullOut.speedOf(c) > CBZ.pullOut.MAX_V : Math.abs(c.v || 0) > 2.4) continue;
       const pk = choosePlayerSeat(c, null);
       if (!pk || !pk.door) continue;
       S.doorWorld(c, pk.door, _dwT);
@@ -1528,7 +1556,7 @@
     if (!car) return;
     let verb, sub = "";
     if (pick.mode === "drive") {
-      verb = jackable(car) ? "Drag out" : "Drive";
+      verb = jackable(car) ? "Pull out" : "Drive";
     } else {
       verb = pick.mode === "ride" ? "Ride" : "Sit";
       sub = seatWords(pick.seat);
@@ -1634,6 +1662,9 @@
       // YOU GOT OUT, SO THEY GET OUT — through their own doors, on their own
       // legs. Not the captive: see squadAlight's note.
       if (on() && car && !car.dead && !npcRide) { try { squadAlight(car, { freeOnly: true }); } catch (e) {} }
+      // DRAGGED OUT (city/pullout.js): no climb, no door shut behind him —
+      // the hands at the door have him and the open door is theirs
+      if (P && P._pulledOut) return r;
       if (carArcOn() && car && !car.dead && car.group && car.group.parent && P && !P.driving) {
         const seat = seatById(car, mine ? mine.id : "driver");
         if (seat && seat.hinge) {
@@ -1899,6 +1930,16 @@
       return;
     }
     if (J.phase === "go") {
+      /* HE IS IN A CAR: your man goes to his door and pulls him out first
+         (city/pullout.js, the one verb), then the job carries on with him on
+         the pavement. A car that drives off is a car he walks after. */
+      const PO = CBZ.pullOut, tc = PO ? PO.carOf(T) : null;
+      if (tc) {
+        if (PO.jobOf(p)) return;
+        if (d < 11 && PO.start(p, tc, { victim: T, run: true })) return;
+        walkTo(tc.pos.x, tc.pos.z, d > 6);
+        return;
+      }
       walkTo(T.pos.x, T.pos.z, d > 6);
       if (d < 5 && !J.spoke) { J.spoke = true; sayT(p, J.verb === "rob" ? "crewDemand" : "crewThreat"); }
       if (d < JOB_REACH) { J.phase = "act"; J.t2 = 0; jobAct(p, J); }

@@ -3172,25 +3172,110 @@
     return best;
   };
 
-  // ---- carjacking: a high-aggression ped grabs an ambient car + rampages ----
+  /* ---- CARJACKING: a ped with a reason (violent, fleeing the police, a
+     grudge) takes a car. It used to be instant: the nearest ambient car
+     within 6.5 m simply became his, whoever was driving it vanished into
+     thin air and he vanished into the seat. Now it is the ONE pull-out verb
+     (city/pullout.js): he walks to the driver's door, opens it (smashes the
+     window if it is locked), drags the driver out, gets in, and only THEN
+     is it his (npcTakeCar below, the old claim). A car that is moving is
+     not jackable; a driver who floors it before the grab keeps his car.
+     The player's own car is a target too when it is stopped and the ped has
+     a reason to want it (a gang member, a man running from the police, the
+     man you just hurt). */
   let npcDrivers = 0;
-  CBZ.cityNpcCarjack = function (ped, target) {
-    wakeCar(target);
-    if (npcDrivers >= 3) return false;            // bound the chaos
-    const car = nearestAmbientCar(ped.pos.x, ped.pos.z, 6.5);
-    if (!car) return false;
+  const JACK_R = 11;
+  // a lane for a car that has none (the player's own car, a parked one): the
+  // road under it, in the direction it is already pointing
+  function rejoinRoad(c) {
+    if (c.road) return true;
+    const r = CBZ.roadSegmentAt ? CBZ.roadSegmentAt(c.pos.x, c.pos.z, 3) : null;
+    if (!r) return false;
+    const fx = Math.sin(c.heading || 0), fz = Math.cos(c.heading || 0);
+    const dir = r.vertical ? (fz >= 0 ? 1 : -1) : (fx >= 0 ? 1 : -1);
+    c.road = r; c.vertical = r.vertical; c.dirSign = dir; c.laneIdx = 0;
+    try { c.lane = laneOffset(r, dir, 0); } catch (e) { c.lane = 0; }
+    c.turning = null;
+    return true;
+  }
+  function jackTarget(ped, opts) {
+    const PO = CBZ.pullOut, P = CBZ.player;
+    let best = null, bd = JACK_R * JACK_R;
+    const list = CBZ.cityCars || [];
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i];
+      if (!c || c.dead || c._heldBy || c._cineLocked || c._raceCar || !c.pos) continue;
+      if (c.airClass || c.aircraft || (CBZ.isMarineHull && CBZ.isMarineHull(c))) continue;
+      const dx = c.pos.x - ped.pos.x, dz = c.pos.z - ped.pos.z, dd = dx * dx + dz * dz;
+      if (dd >= bd) continue;
+      if (PO && (PO.busy(c) || PO.speedOf(c) > PO.MAX_V)) continue;
+      if (c.player) {
+        // the player's car: only a man with a reason, and only one he could drive off in
+        if (!(opts.player && P && P.driving && P._vehicle === c)) continue;
+        if (!c.road && !(CBZ.roadSegmentAt && CBZ.roadSegmentAt(c.pos.x, c.pos.z, 3))) continue;
+      } else {
+        // ambient traffic, or a carjacker's own ride; never a car somebody owns
+        if (c.owned || !c.road || !(c.ai || c.npcDriver)) continue;
+        if (c.npcDriver && (c.npcDriver === ped || c.npcDriver._cbzDriving)) continue;
+      }
+      bd = dd; best = c;
+    }
+    return best;
+  }
+  // the claim: the car is his and he drives it like he stole it
+  function npcTakeCar(ped, car, target) {
+    if (!ped || ped.dead || !car || car.dead || car.player) return false;
+    if (car.npcDriver && car.npcDriver !== ped) ejectNpcDriver(car);
+    if (!rejoinRoad(car)) return false;
     car.npcDriver = ped; car.ai = true; car.stolen = true; car.reckless = true;
-    car.driver.aggr = Math.max(0.8, ped.aggr); car.baseV = ((TR().cruise || [7, 12])[1]) * (TR().aggrSpeedMul || 1.7);
+    car.abandoned = false; car._playerLeft = false; car.wreckT = 0; car._jackDone = false;
+    car.driver = car.driver || { aggr: 0.2 };
+    car.driver.aggr = Math.max(0.8, ped.aggr || 0); car.baseV = ((TR().cruise || [7, 12])[1]) * (TR().aggrSpeedMul || 1.7);
     car.pullover = 0; car.npcWanted = 1;
     // A victim escalating from a contact event pursues that offender directly.
     // Autonomous carjackers still create general traffic chaos without
     // magically knowing to target the player.
     car.roadRageTarget = target && target.pos ? target : null; car.roadRageT = car.roadRageTarget ? 12 : 0;
+    if (CBZ.carSeats) { CBZ.carSeats.release(car, "driver"); CBZ.carSeats.claim(car, "driver", { kind: "npc", ref: ped }); }
     ped.inCar = car; ped.group.visible = false; ped.controlled = true;
     ped._njCarjack = true;                        // whose eject decrements the cap
     npcDrivers++;
-    if (CBZ.cityNpcOffense) CBZ.cityNpcOffense(ped, 24, "carjacking");
     return true;
+  }
+  CBZ.cityNpcTakeCar = npcTakeCar;
+  CBZ.cityNpcCarjack = function (ped, target, opts) {
+    opts = opts || {};
+    if (!ped || ped.dead || ped.inCar || !ped.pos || !ped.group) return false;
+    if (npcDrivers >= 3) return false;            // bound the chaos
+    const now = (CBZ.game && CBZ.game.elapsed) || 0;
+    if ((ped._jackTryT || 0) > now) return false; // one look round per few seconds, not per frame
+    ped._jackTryT = now + 3.5;
+    const pl = CBZ.city && CBZ.city.playerActor;
+    const car = jackTarget(ped, { player: !!(opts.flee || ped.gang || (target && (target === pl || target === CBZ.player))) });
+    if (!car) return false;
+    wakeCar(car);
+    const PO = CBZ.pullOut;
+    if (!PO) {
+      // no pull-out verb loaded: the old instant claim, never a car with the player in it
+      if (car.player) return false;
+      if (!npcTakeCar(ped, car, target)) return false;
+      if (CBZ.cityNpcOffense) CBZ.cityNpcOffense(ped, 24, "carjacking");
+      return true;
+    }
+    return !!PO.start(ped, car, {
+      take: true, run: true,
+      onDone: function (job) {
+        if (!npcTakeCar(ped, car, target)) {
+          // no lane to drive it down after all: he climbs back out his door
+          const h = car.heading || 0;
+          if (ped.pos && ped.pos.set) ped.pos.set(car.pos.x + Math.cos(h) * 1.9, ped.pos.y || 0, car.pos.z - Math.sin(h) * 1.9);
+          if (ped.group && ped.group.position !== ped.pos) ped.group.position.set(ped.pos.x, ped.pos.y || 0, ped.pos.z);
+          return;
+        }
+        if (CBZ.cityNpcOffense) CBZ.cityNpcOffense(ped, 24, "carjacking");
+        if (job.victims.length && CBZ.cityCrime && !job.victimPlayer) CBZ.cityCrime(45, { x: car.pos.x, z: car.pos.z, type: "carjacking" });
+      },
+    });
   };
 
   /* ==========================================================================
@@ -4476,11 +4561,6 @@
     car.abandoned = true;
     car.wreckT = Math.max(car.wreckT || 0, 1.0);
   }
-  function nearestAmbientCar(x, z, maxd) {
-    let best = null, bd = maxd * maxd;
-    for (const c of CBZ.cityCars) { if (c.player || c.npcDriver || c.owned || c.dead) continue; const dd = (c.pos.x - x) * (c.pos.x - x) + (c.pos.z - z) * (c.pos.z - z); if (dd < bd) { bd = dd; best = c; } }
-    return best;
-  }
 
   // ---- enter / exit ----
   CBZ.cityEnterVehicle = function (car, opts) {
@@ -4559,13 +4639,83 @@
      the door is pulled, the people in the car answer and get out through it,
      and only THEN do you get in. boarding.js calls this at the end of its
      pull beat; the seat commit (cityEnterVehicle) then skips its own jack. */
-  CBZ.cityJackNow = function (car) {
+  CBZ.cityJackNow = function (car, by) {
     if (!car || car.dead || car.player) return 0;
     wakeCar(car);
-    const n = occJack(car, (CBZ.city && CBZ.city.playerActor) || null);
+    const n = occJack(car, by || (CBZ.city && CBZ.city.playerActor) || null);
     if (car.npcDriver) ejectNpcDriver(car);
     car._jackDone = true;
     return n;
+  };
+  /* SEATS EMPTIED BY SOMEBODY'S HANDS (city/pullout.js). The player's own
+     carjack is the whole car answering a gun (occJack above, cityJackNow);
+     this is somebody else at the door: an officer pulling the driver out, a
+     carjacker dragging a driver off his seat. Whoever sits in `slot` (an
+     occupancy seat, promoted to a real body first, or the carjacker's own
+     driver) is put out at his own door. opts.all empties every seat (a
+     carjacker does not drive off with the passengers). opts.cop: an arrest,
+     so nobody decides anything, they come out with their hands up.
+     Otherwise each person makes the same kind of call a jack gets, with no
+     player ledger in it (this is not your crime): a man with a gun and the
+     nerve draws on the jacker, a scared one bolts, the rest are just out.
+     Returns the bodies put out (an array, maybe empty). */
+  function pulledReact(p, by) {
+    const T = CBZ.cityTraits ? CBZ.cityTraits(p) : null;
+    const nerve = T ? T.nerve : (p.aggr == null ? 0.4 : p.aggr);
+    const dares = !!p.armed && (CBZ.citySizeUp ? !!CBZ.citySizeUp(p, by) : nerve > 0.6);
+    if (dares) return "fight";
+    const wasCtl = p.controlled;
+    p.controlled = false;
+    const scare = CBZ.cityScare ? CBZ.cityScare(p, by, { seat: true, bias: (0.5 - nerve) * 0.3 }) : (nerve < 0.35 ? "bolt" : "hold");
+    if (scare !== "bolt") p.controlled = wasCtl;
+    return scare === "bolt" ? "flee" : "out";
+  }
+  CBZ.cityPullOccupant = function (car, slot, by, opts) {
+    opts = opts || {};
+    const out = [];
+    if (!car || car.dead) return out;
+    wakeCar(car);
+    slot = slot || "driver";
+    const all = !!opts.all;
+    let driverOut = false;
+    if (car.occ && occOn() && (occWanted(car) || car.npcDriver)) {
+      occPromote(car, true);
+      const seats = car.occ.seats;
+      for (let i = 0; i < seats.length; i++) {
+        const st = seats[i];
+        if ((!all && st.slot !== slot) || !st.ped || st.gone) continue;
+        const p = st.ped;
+        const kind = opts.cop ? "freeze" : pulledReact(p, by);
+        st.react = kind === "out" ? "freeze" : kind;
+        p._occLastReact = st.react;
+        if (st.slot === "driver") driverOut = true;
+        occStepOut(car, st, { state: kind === "flee" ? "flee" : "walk", keepTarget: kind === "flee", stumble: true });
+        if (kind === "fight" && by) {
+          occDraw(p);
+          p.rage = by; p.alarmed = Math.max(p.alarmed || 0, 8); p.aggr = Math.max(p.aggr || 0, 0.75);
+        } else if (kind === "flee") {
+          p.fear = Math.max(p.fear || 0, 9); p.alarmed = Math.max(p.alarmed || 0, 7);
+          if (CBZ.cityPanicRaise) CBZ.cityPanicRaise(p.pos.x, p.pos.z, 0.8);
+        } else {
+          if (opts.cop) occHandsUp(p, 5);
+          p.fear = Math.max(p.fear || 0, 8);
+        }
+        out.push(p);
+      }
+    }
+    if ((all || slot === "driver") && car.npcDriver) {
+      const p = car.npcDriver;
+      ejectNpcDriver(car);
+      driverOut = true;
+      if (p && out.indexOf(p) < 0) out.push(p);
+    }
+    if (driverOut) {
+      // nobody at the wheel: the car is where it stopped, door open
+      car.abandoned = true; car.ai = false; car.v = 0; car.vx = 0; car.vz = 0;
+      car._pullHoldT = 0; car._pullFleeT = 0;
+      setBrake(car, false);
+    }
+    return out;
   };
   CBZ.cityExitVehicle = function () {
     const P = CBZ.player, car = P._vehicle;
@@ -7080,6 +7230,10 @@
         c.fleeT -= dt;
         if (c.fleeT <= 0) { c.pullover = 0; c.npcWanted = 0; c.stopT = 0; }   // lost them
       }
+      // SOMEBODY IS AT MY DOOR (city/pullout.js): the driver either sits
+      // frozen with his foot on the brake, or floors it before the hand lands
+      if (c._pullHoldT > 0) { c._pullHoldT -= dt; target = 0; }
+      if (c._pullFleeT > 0) { c._pullFleeT -= dt; target = Math.max(target, c.baseV * 1.5); idmDesired = target; }
 
       // PEDESTRIANS: a normal driver brakes for someone in their lane ahead; a
       // RECKLESS one (the aggression stat maxed out) keeps their foot down and
@@ -7282,10 +7436,11 @@
         c._mustTurn = false;
       }
 
-      // fleeing suspect caught: a cop right on it ends the chase
+      // fleeing suspect caught: a cop right on it ends the chase, by
+      // pulling the driver out (city/pullout.js) once the car is stopped
       if (c.pullover === 4) {
-        const cop = copNear(c.pos.x, c.pos.z, 3.2);
-        if (cop) busted(c);
+        const cop = copNear(c.pos.x, c.pos.z, CBZ.pullOut ? 10 : 3.2);
+        if (cop) busted(c, cop);
       }
 
       // VEH_COLLIDE_FIX: walls are walls for AI traffic too. Ordinary lane-
@@ -7634,12 +7789,21 @@
     // register the fleeing driver as an NPC offender the cops will chase
     if (CBZ.cityRegisterCarSuspect) CBZ.cityRegisterCarSuspect(c);
   }
-  function busted(c) {
+  function busted(c, cop) {
+    // THE ONE PULL-OUT: the officer walks to the driver's door and drags him
+    // out (the job files the arrest). A car still moving is not caught yet.
+    const PO = CBZ.pullOut;
+    if (PO) {
+      if (cop && !cop.dead && !cop._pulling && !PO.busy(c)) PO.copTry(cop, c, Math.hypot(cop.pos.x - c.pos.x, cop.pos.z - c.pos.z));
+      return;
+    }
     c.pullover = 0; c.npcWanted = 0; c.v = 0; c.baseV = Math.max(2, c.baseV * 0.5); c.reckless = false; c.driver.aggr = 0.2;
     if (c.npcDriver) { const ped = c.npcDriver; ejectNpcDriver(c); if (ped && CBZ.cityNpcArrest) CBZ.cityNpcArrest(ped); }
   }
   CBZ.cityVehiclesReset = function () {
     npcDrivers = 0;
+    // nobody is still at a door of a car that no longer exists
+    if (CBZ.pullOut && CBZ.pullOut.reset) { try { CBZ.pullOut.reset(); } catch (e) {} }
     // the occupant budget is a LIVE count, not a save — a fresh run starts with
     // no rigged cars and no remembered jack tally.
     occRigCars = 0;

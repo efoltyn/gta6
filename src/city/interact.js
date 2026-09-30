@@ -1568,12 +1568,12 @@
     id: "car-boost", slot: "e", ride: true, bad: true, canShow: (car) => !occupied(car) && !car._cineLocked && !car.owned && !car.stolen,
     label: "Boost it", onSelect: (car) => CBZ.cityEnterVehicle(car),
   });
-  // someone's behind the wheel: F rips the door open and drags them out
+  // someone's behind the wheel: the pull-out verb (city/pullout.js) opens the
+  // door, drags them out, and you get in
   I.register("vehicle", {
     id: "car-jack", slot: "e", ride: true, bad: true, canShow: (car) => occupied(car) && !car._cineLocked,
-    // the label says how many people you are about to be outnumbered by — the
-    // crew is a FACT before you pull the door, not a surprise after it.
-    label: "Drag out",
+    // one verb for everyone (city/pullout.js): the same words the door pin says
+    label: "Pull out",
     onSelect: (car) => CBZ.cityEnterVehicle(car),
   });
   // NO "car-out" ROW. Getting out is systems/seat_exit.js's: [E] pinned on

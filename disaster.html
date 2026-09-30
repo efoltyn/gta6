@@ -4,7 +4,7 @@
 
        node tools/build-disaster-page.mjs
 
-     Natural Disaster Survival, standing alone: index.html minus the 447
+     Natural Disaster Survival, standing alone: index.html minus the 448
      script tags this game never runs, opening straight onto the island. This
      is the page the iOS build ships (tools/build-ios.mjs bundles it).
 ============================================================ -->
@@ -1164,7 +1164,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- CBZ.moves POSTURE: the one sit / lie / stand / kneel / crouch / top-bunk
      climb sequencer for every game (propuse's verbs and the cell bunks call it).
      Right after propuse.js, whose CBZ.propArcActive / propLiePlace it backs. -->
-<script src="src/entities/moves_posture.js?v=w09290242x"></script>
+<script src="src/entities/moves_posture.js?v=po0930"></script>
 <script src="src/entities/dutykit.js?v=me18753"></script>
 <!-- THE CITY'S LAW over CBZ.brain: cop perception/hearing, the authority
      ladder (warn/order/cuff), witness reports -> wanted, and the "city-law"
@@ -1255,6 +1255,11 @@ document.body.appendChild(b);}}catch(e){}})();
      Reverts: ?cfg_COMPANION_BOARDING_V1=0 (the arcs) ·
      ?cfg_FOLLOWER_ORDERS_V1=0 (the verbs) · ?cfg_CAR_DOOR_ARC=0 (just the
      player's own car door beat, leaving companions boarding). -->
+<!-- city/pullout.js: THE ONE PULL-OUT VERB. Any human drags whoever sits in
+     a stopped car seat out through the real door (CBZ.moves.board beats,
+     boarding.js carSpec): the player carjacking, a cop pulling the player or
+     an NPC suspect out for the arrest, a carjacker, crew on a job. After
+     boarding.js (pullSpec / door) and vehicles.js (cityPullOccupant). -->
 <!-- THE OTHER SEAT (owner: "a button should move me to passenger ... and then
      if I go to the door I can even jump out"). [G] / the SEAT pill slides the
      player across to the shotgun seat of a car or back from a boat's helm: the
