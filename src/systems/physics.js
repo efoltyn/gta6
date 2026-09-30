@@ -35,7 +35,7 @@
   const colBuckets = new Map();
   let colCount = -1, colDirty = true;
 
-  function colKey(gx, gz) { return (gx + COL_OFF) * COL_SPAN + (gz + COL_OFF); }
+  function colKey(gx, gz) { return ((gx + COL_OFF) * COL_SPAN + (gz + COL_OFF)) | 0; }   // (int32: a small-integer Map key, never a boxed double)
 
   function rebuildColliderGrid() {
     colBuckets.clear();
