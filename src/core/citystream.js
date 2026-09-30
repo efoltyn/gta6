@@ -635,14 +635,17 @@
     // how far a moving player gets before the next few ticks (vehicle or feet)
     // (measured from the position between ticks: a car, a plane, a horse,
     // a teleport all count the same way; a jump of > 400 m is a teleport)
-    const tNow = performance.now();
+    // (GAME time, not wall time: a slow frame is not a slow car. Measured on
+    // wall time, a phone at 20 fps read a 30 m/s car as 12 m/s and built the
+    // road ahead too late: chunks assembling in view on the road drive.)
+    const tNow = simTime;
     let V = 0;
     if (lastP.t && tNow > lastP.t) {
       const mdx = P.pos.x - lastP.x, mdz = P.pos.z - lastP.z, d = Math.sqrt(mdx * mdx + mdz * mdz);
-      if (d < 400) V = d / ((tNow - lastP.t) / 1000);
+      if (d < 400) V = d / (tNow - lastP.t);
     }
     lastP.x = P.pos.x; lastP.z = P.pos.z; lastP.t = tNow;
-    const lead = Math.min(250, V * 2.5);
+    const lead = Math.min(300, V * 3.5);
     if (lead > s.lead + 20 || lead < s.lead - 60) s.lead = lead;     // grows at once, shrinks lazily
     if (force || dx * dx + dz * dz > RECENTRE_M * RECENTRE_M) {
       s.x = P.pos.x; s.z = P.pos.z;
@@ -693,13 +696,13 @@
   }
   // registered when the first streamed city builds (the loop exists by then;
   // this file loads right after config.js, before core/)
-  let ticking = false;
+  let ticking = false, simTime = 0;
   function armTicker() {
     if (ticking || !CBZ.onUpdate) return;
     ticking = true;
     CBZ.onUpdate(0.05, function (dt) {
       if (!CBZ.slice || !CBZ.slice.stream || !CBZ.game || CBZ.game.mode !== "city") return;
-      acc += dt || 0;
+      acc += dt || 0; simTime += Math.min(0.25, dt || 0);
       if (acc < 0.1) return;           // 10 Hz: a fast car covers 4 m a tick
       acc = 0;
       CBZ.streamTick(false);

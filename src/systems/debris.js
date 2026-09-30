@@ -151,16 +151,23 @@
      Pure arithmetic, zero allocation per call; headless-safe. */
   const LC_EPS = 0.002;
   function lcBand(c, o) {
-    const y0 = c.y0 != null ? c.y0 : (o && o.defBot != null ? o.defBot : -Infinity);
-    const y1 = c.y1 != null ? c.y1 : (o && o.defTop != null ? o.defTop : Infinity);
-    _LC[0] = y0; return y1;
+    _LC[0] = c.y0 != null ? c.y0 : (o && o.defBot != null ? o.defBot : -Infinity);
+    _LC[4] = c.y1 != null ? c.y1 : (o && o.defTop != null ? o.defTop : Infinity);
   }
   // (doubles in a Float64Array: a double stored in a module-scope `let` is a
   // fresh heap number per store, per collider, per debris body, per step)
-  const _LC = new Float64Array(4);   // [band0, t, axis, sign]
+  const _LC = new Float64Array(5);   // [band0, t, axis, sign, band1]
   // slab test of A + t*D against [x0,x1]x[y0,y1]x[z0,z1]; writes _LC[1]/_LC[2]/_LC[3]
 
-  function lcSlab(ax, ay, az, dx, dy, dz, x0, x1, y0, y1, z0, z1) {
+  /* INPUTS IN A TYPED SCRATCH, NOT ARGUMENTS. lcSlab is too big to inline,
+     and every double handed to (or returned by) a non-inlined call is boxed:
+     12 heap numbers per collider per piece per step, ~0.7 GB in a 30 s drive
+     with one aircraft crash (phone profile). _SL = [ax,ay,az,dx,dy,dz,x0,x1,y0,y1,z0,z1] */
+  const _SL = new Float64Array(12);
+  function lcSlab() {
+    const S0 = _SL;
+    const ax = S0[0], ay = S0[1], az = S0[2], dx = S0[3], dy = S0[4], dz = S0[5];
+    const x0 = S0[6], x1 = S0[7], y0 = S0[8], y1 = S0[9], z0 = S0[10], z1 = S0[11];
     let tmin = -Infinity, tmax = Infinity, axis = -1, sg = 0;
     // X
     if (dx > -1e-9 && dx < 1e-9) { if (ax < x0 || ax > x1) return 0; }
@@ -201,7 +208,8 @@
       const c = cols[i];
       if (!c || c.minX == null) continue;
       if (skip && skip(c)) continue;
-      const y1 = lcBand(c, o), y0 = _LC[0];
+      lcBand(c, o);
+      const y1 = _LC[4], y0 = _LC[0];
       if (!(y1 > y0)) continue;
       let r, nx = 0, ny = 0, nz = 0;
       if (c.yaw) {
@@ -209,13 +217,17 @@
         const rx = ax - c.cx, rz = az - c.cz;
         const lx = rx * co - rz * si, lz = rx * si + rz * co;         // world -> local (physics.js oriPush)
         const ldx = dx * co - dz * si, ldz = dx * si + dz * co;
-        r = lcSlab(lx, ay, lz, ldx, dy, ldz, -c.hw - pad, c.hw + pad, y0 - py, y1 + py, -c.hd - pad, c.hd + pad);
+        _SL[0] = lx; _SL[1] = ay; _SL[2] = lz; _SL[3] = ldx; _SL[4] = dy; _SL[5] = ldz;
+        _SL[6] = -c.hw - pad; _SL[7] = c.hw + pad; _SL[8] = y0 - py; _SL[9] = y1 + py; _SL[10] = -c.hd - pad; _SL[11] = c.hd + pad;
+        r = lcSlab();
         if (r !== 1 || _LC[1] >= best || (sides && _LC[2] === 1)) continue;
         let lnx = 0, lnz = 0;
         if (_LC[2] === 0) lnx = _LC[3]; else if (_LC[2] === 2) lnz = _LC[3]; else ny = _LC[3];
         nx = lnx * co + lnz * si; nz = -lnx * si + lnz * co;          // local -> world
       } else {
-        r = lcSlab(ax, ay, az, dx, dy, dz, c.minX - pad, c.maxX + pad, y0 - py, y1 + py, c.minZ - pad, c.maxZ + pad);
+        _SL[0] = ax; _SL[1] = ay; _SL[2] = az; _SL[3] = dx; _SL[4] = dy; _SL[5] = dz;
+        _SL[6] = c.minX - pad; _SL[7] = c.maxX + pad; _SL[8] = y0 - py; _SL[9] = y1 + py; _SL[10] = c.minZ - pad; _SL[11] = c.maxZ + pad;
+        r = lcSlab();
         if (r !== 1 || _LC[1] >= best || (sides && _LC[2] === 1)) continue;
         if (_LC[2] === 0) nx = _LC[3]; else if (_LC[2] === 1) ny = _LC[3]; else nz = _LC[3];
       }
@@ -238,7 +250,8 @@
     return lcSegment(ax, ay, az, bx, by, bz, pad, cols, out, o);
   }
   function lcPushOut(x, y, z, pad, c, out, o) {
-    const y1 = lcBand(c, o), y0 = _LC[0];
+    lcBand(c, o);
+    const y1 = _LC[4], y0 = _LC[0];
     const py = o && o.padY != null ? o.padY : pad;
     if (y < y0 - py || y > y1 + py) return false;
     let lx = x, lz = z, hx0, hx1, hz0, hz1, co = 1, si = 0;

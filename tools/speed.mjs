@@ -1842,9 +1842,22 @@ async function serveMain() {
             // radius. Counted apart (handoffs) so the pop number is creations.
             var tnow = performance.now();
             if ((u._handoffAt && tnow - u._handoffAt < 400) || (C.farcullShownAt && tnow - C.farcullShownAt(o) < 400)) { handoffs++; continue; }
-            var sp = cache.get(o); if (!sp) { bx.setFromObject(o); if (bx.isEmpty()) continue; sp = bx.getBoundingSphere(new T.Sphere()); cache.set(o, sp); }
+            var sp, dist;
+            if (o.isInstancedMesh) {
+              // a pool (car-instances): its own bounds are one prototype at
+              // the origin, so measure its NEAREST drawn instance instead
+              var im = o.instanceMatrix.array, nI = Math.min(o.count | 0, 256), best = Infinity, e = o.matrixWorld.elements;
+              for (var ii = 0; ii < nI; ii++) { var ix = im[ii * 16 + 12] + e[12], iz = im[ii * 16 + 14] + e[14], dd = Math.hypot(ix - cam.position.x, iz - cam.position.z); if (dd < best) best = dd; }
+              if (best === Infinity) continue;
+              checks++;
+              sp = sph; sp.center.set(cam.position.x, cam.position.y, cam.position.z); sp.radius = 0.5;
+              dist = best;
+              if (dist < fog) { popN++; if (pops.length < 30) pops.push([label(o), Math.round(dist), 0]); }
+              continue;
+            }
+            sp = cache.get(o); if (!sp) { bx.setFromObject(o); if (bx.isEmpty()) continue; sp = bx.getBoundingSphere(new T.Sphere()); cache.set(o, sp); }
             checks++;
-            var dist = sp.center.distanceTo(cam.position) - sp.radius;
+            dist = sp.center.distanceTo(cam.position) - sp.radius;
             if (dist < fog && sp.radius < fog && fr.intersectsSphere(sp)) { popN++; if (pops.length < 30) pops.push([label(o), Math.round(dist), Math.round(sp.radius)]); } } }
         }
         var samples = [], t0 = performance.now(), frames = SECS * 60, d = 0;

@@ -324,6 +324,35 @@
     if (snap || t.alt == null || t.cruise > t.alt) t.alt = t.cruise;
     armHits(t);                          // altitude is settled — arm what it can hit
   }
+  /* AMBIENT TRAFFIC PICKS A CLEAR CIRCUIT (orchestrator, 2026-09-30: a plane
+     flying into a tower during a normal drive was the drive's biggest
+     garbage burst on the phone, and the city should not wreck itself while
+     nobody is doing anything). A circuit whose ring crosses something tall at
+     its level is moved: the same altitude band (the owner wanted the craft at
+     their current heights, not raised), a ring shifted and resized until
+     nothing on it can be struck. At the fleet build it is moved outright;
+     later (streamed towers arrive) only while the craft is out of sight, past
+     the fog, so nothing visibly jumps. A craft whose track is still armed in
+     view keeps it: the collision itself stays what the owner asked for. */
+  function avoidRing(t, salt) {
+    if (!t.hits || !t.hits.length) return true;
+    const cx0 = t._cx0 != null ? t._cx0 : (t._cx0 = t.cx), cz0 = t._cz0 != null ? t._cz0 : (t._cz0 = t.cz), r0 = t._r0 != null ? t._r0 : (t._r0 = t.radius);
+    for (let k = 1; k <= 12; k++) {
+      const a = (salt * 7.31 + k * 2.39996) % (Math.PI * 2), sh = 60 * k;
+      t.cx = cx0 + Math.cos(a) * sh; t.cz = cz0 + Math.sin(a) * sh;
+      t.radius = Math.max(60, r0 * (k % 2 ? 0.85 : 1.15));
+      refreshClear(t, false);
+      if (!t.hits.length) return true;
+    }
+    t.cx = cx0; t.cz = cz0; t.radius = r0; refreshClear(t, false);
+    return false;
+  }
+  function outOfSight(t) {
+    const P = CBZ.player && CBZ.player.pos; if (!P || !t.grp) return true;
+    const fe = ((CBZ.scene && CBZ.scene.fog && CBZ.scene.fog.far) || 760) + 100;
+    const dx = t.grp.position.x - P.x, dz = t.grp.position.z - P.z;
+    return dx * dx + dz * dz > fe * fe && Math.hypot(t.cx - P.x, t.cz - P.z) - t.radius > fe;
+  }
   const CLIMB_DOWN = 4.5;           // m/s — a light single's honest rate of descent
   function easeClear(t, dt) {
     if (t.alt > t.cruise) t.alt = Math.max(t.cruise, t.alt - CLIMB_DOWN * dt);
@@ -446,6 +475,7 @@
       // the seeded world build — and draws no rng, so the fleet stays
       // byte-identical per seed.
       refreshClear(t, true);
+      avoidRing(t, i + 1);
       root.add(grp);
       // SOMEBODY IS FLYING IT. The heliAudit census below has always reported
       // these craft as `crew: 1` on the argument that "a light single flown by
@@ -794,7 +824,7 @@
     // below, which is exactly why this can afford to be slow.
     if (fleet.length && clock >= clearNext) {
       clearNext = clock + CLEAR_REFRESH;
-      refreshClear(fleet[clearWho % fleet.length], false);
+      { const tt = fleet[clearWho % fleet.length]; refreshClear(tt, false); if (tt && tt.hits && tt.hits.length && outOfSight(tt)) avoidRing(tt, clearWho + 1); }
       clearWho++;
     }
     const P = CBZ.player;
