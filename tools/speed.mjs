@@ -1840,7 +1840,7 @@ async function serveMain() {
             // coming back from THAT is the camera turning, not a pop-in)
             var sc0 = scoped.get(o); scoped.set(o, !!o._cbzScopeHidden);
             var d = drawn(o), w = was.get(o); was.set(o, d); if (first || !d || w === true || sc0) continue;
-            var u = o.userData || {}; if (u.dynamic || u.worldSurface || u.terrain) continue;
+            var u = o.userData || {}; if (u.dynamic || u.worldSurface || u.terrain || u.fx) continue;
             // a LOD HANDOFF is not a build in view: a car the pools drew until
             // this frame, a building whose LOD box stood in until farcull's
             // radius. Counted apart (handoffs) so the pop number is creations.

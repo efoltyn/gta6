@@ -371,6 +371,7 @@
       color: 0xffc864, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending,
     }));
     m.visible = false; m.frustumCulled = false; m.renderOrder = 9;
+    m.name = "gunfx-streak"; m.userData.fx = true;       // (a transient impact spark: probes skip it)
     scene.add(m);
     streaks.push({ mesh: m, vel: new THREE.Vector3(), life: 0, max: 0.001, grav: 0, len: 0, w: 0 });
   }
