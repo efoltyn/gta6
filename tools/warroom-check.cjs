@@ -45,7 +45,11 @@ const CBZ = {
     cellLeader: () => (CBZ._emirDead ? null : { sid: "cell_emir", name: "Rashid Kaan", rank: "emir" }),
     cellKill: (sid) => { CBZ._emirDead = true; killed.push(sid); return true; },
   },
-  officials: { PLAYER_SID: "player", identityOf: (sid) => ({ name: "Leader " + sid }), titleFor: () => "King",
+  // officials.js's contract: a minted ledger name per sid ("Someone" when the
+  // ledger cannot read it), titles off the country's govType
+  officials: { PLAYER_SID: "player",
+    identityOf: (sid) => ({ name: ({ veridia_pres: "Aldo Marren", veridia_vp: "Celia Voss", mbeya_pres: "Joseph Okonjo", solara_pres: "Ines Arda" })[sid] || "Someone" }),
+    titleFor: (rec) => (rec && rec.govType === "monarchy" ? "King" : "President"),
     killOfficial: (sid) => { killed.push(sid); for (const c of CBZ.polity.list("country")) if (c.office && c.office.holder === sid) c.office.holder = c.office.deputy || null; return true; } },
   colliders: [], platforms: [], scene: scene,
   city: { arena: { root: arenaRoot, regions: [] } },
@@ -169,6 +173,12 @@ tick(3);
 console.log("buster detonations:", JSON.stringify(detonations.filter(x => x.kind === "buster")), "bunker shell", JSON.stringify(vb.shell));
 console.log("bunker breached:", vb.breached, "wornCE", vb.wornCE && vb.wornCE.toFixed(2), "veridia leader killed:", killed.indexOf("veridia_pres") >= 0, "successor:", P.get("veridia").office.holder);
 console.log("\nEVENTS:", events.map(e => e[0]).join(", "));
+// NO RAW KEYS IN ANY HEADLINE: a sid, a polity id or "Someone" never reaches text
+const ids = ["veridia_pres", "veridia_vp", "mbeya_pres", "solara_pres", "cell_emir", "lead_", "cell_dugout", "Someone", "undefined", "null"];
+const leaks = events.filter(([e, p]) => p && p.text && ids.some(k => p.text.indexOf(k) >= 0)).map(([e, p]) => e + ": " + p.text);
+console.log("ID LEAKS IN EVENT TEXT:", leaks.length ? leaks : "none");
+// who is credited for each strike that landed, and where it hit
+for (const [e, p] of events) if (e === "airstrike") console.log("  airstrike on", p.label, "(" + p.nationName + ") credited to", p.attackerName);
 
 // ===== THE NEWS: every event above through the real newsroom.js
 try {
