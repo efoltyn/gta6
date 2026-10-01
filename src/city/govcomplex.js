@@ -2175,16 +2175,20 @@
     if (!trunk || !crown) return 0;
     const tm = VK ? VK.material("wood", 0x8c6a48) : cm(EST.bark);
     const crm = VK ? VK.material("foliage", 0x5a8a45) : cm(0x3f6e38);
-    const ti = [], ci = [], base = big ? 3.6 : 2.7;
+    const ti = [], ci = [], feet = [], base = big ? 3.6 : 2.7;
     for (const p of pts) {
       const q = F.p(p[0], p[1]);
       const sc = 0.92 + h01(q.x, q.z, 0x7e5) * 0.22, ry = h01(q.x, q.z, 0x7e6) * 6.283;
-      ti.push({ x: q.x, y: 0, z: q.z, ry: ry, sx: sc, sy: sc, sz: sc });
+      // the base sits on the PAD (YP) and the lawn (YG) covers its foot: seated 4 cm
+      ti.push({ x: q.x, y: YP, z: q.z, ry: ry, sx: sc, sy: sc, sz: sc });
       ci.push({ x: q.x, y: base * sc, z: q.z, ry: ry, sx: sc, sy: sc, sz: sc });
       col(q.x, q.z, 0.5, 0.5, 0, 3.0);
+      // a groundskeeper's mulch ring, and the crown's shade on the lawn
+      feet.push(q.x, YG, q.z, (big ? 3.1 : 2.3) * sc, (big ? 1.2 : 0.95) * sc);
     }
     const a = instances(F.root, trunk, tm, ti);
     const b = instances(F.root, crown, crm, ci);
+    if (CBZ.treeFoot) CBZ.treeFoot.add(F.root, feet, { name: "estate-trees" });
     if (VK && VK.depthMaterial && b) { const dm = VK.depthMaterial("foliage"); if (dm) b.customDepthMaterial = dm; }
     return ti.length;
   }

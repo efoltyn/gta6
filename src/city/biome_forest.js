@@ -765,13 +765,22 @@
     trunkInst.instanceMatrix.needsUpdate = true;
     root.add(trunkInst);
     if (coniferTrunkInst) { coniferTrunkInst.instanceMatrix.needsUpdate = true; root.add(coniferTrunkInst); }
+    // contact: every stem's foot in shade on the duff (the floor is flat at
+    // 0.02 everywhere a tree may stand; the lake bank is a keep-out)
+    const forestFeet = CBZ.treeFoot ? [] : null;
+    if (forestFeet) for (let i = 0; i < N; i++) {
+      const t = trees[i];
+      forestFeet.push(t.x, 0.02, t.z, SCENERY ? (t.conifer ? 2.2 : 3.0) * t.sc : Math.max(1.4, t.folR * 0.6), 0);
+    }
     foliPool.finish();
     if (spirePool) spirePool.finish();
 
     // ---- SUBCANOPY trees: a separate, lower storey beneath the detached roof.
     const RN = roundTrees.length;
-    const roundTrunkGeo = !SCENERY && GRAM && CBZ.treeTrunkGeo
-      ? CBZ.treeTrunkGeo({ rTop: 0.20, rBase: 0.30, h: 1, seg: 5, roots: 3, spread: 2.4, flare: 1.4, site: "forest" })
+    // (the scenery storey used a bare cylinder: a pole standing in the duff
+    // with no flare and no roots. Same grammar as every other trunk now.)
+    const roundTrunkGeo = GRAM && CBZ.treeTrunkGeo
+      ? CBZ.treeTrunkGeo({ rTop: SCENERY ? 0.24 : 0.20, rBase: SCENERY ? 0.38 : 0.30, h: 1, seg: 5, roots: 3, spread: 2.4, flare: 1.4, site: "forest" })
       : (function () {
         const g = new THREE.CylinderGeometry(SCENERY ? 0.24 : 0.20, SCENERY ? 0.38 : 0.30, 1, 5);
         g.translate(0, 0.5, 0);
@@ -828,6 +837,10 @@
     roundTrunkInst.instanceMatrix.needsUpdate = true;
     root.add(roundTrunkInst);
     roundPool.finish();
+    if (forestFeet) {
+      for (let i = 0; i < RN; i++) forestFeet.push(roundTrees[i].x, 0.02, roundTrees[i].z, 1.5 * Math.max(0.8, roundTrees[i].tr * (SCENERY ? 1 : 2.6)), 0);
+      CBZ.treeFoot.add(root, forestFeet, { name: "redhollow" });
+    }
 
     // ---- DETACHED CANOPY ROOF --------------------------------------------
     // Trees alone preserve one complete silhouette per trunk. These two

@@ -467,7 +467,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/treeaudit.js?v=allmain1"></script>
 <!-- Shared scenery-scale vegetation archetypes. Biomes own ecology/placement;
      this owns mature wood, irregular crowns, canopy roof and thicket grammar. -->
-<script src="src/world/vegetation.js?v=trees0929"></script>
+<script src="src/world/vegetation.js?v=ground1001"></script>
+<!-- where a tree meets the ground: instanced contact shade + mulch rings every
+     tree spawner lays beside its own pools (CBZ.treeFoot) -->
+<script src="src/world/treefoot.js?v=ground1001"></script>
 <script src="src/core/prio.js?v=arch2"></script>
 <script src="src/core/matrixskip.js?v=mskip1"></script>
 <!-- core/interfaces.js is NO LONGER LOADED (2026-07-29). It is 316 lines of
@@ -509,8 +512,8 @@ document.body.appendChild(b);}}catch(e){}})();
      (asphalt, concrete, plaster, metal, dirt, grass, sand, wood, glass grime).
      Needs core/seed.js for CBZ.hashN; bakes lazily on first request, so it only
      has to precede its first consumer — world/materials.js. -->
-<script src="src/world/textures_surface.js?v=pf0930q"></script>
-<script src="src/world/materials.js?v=pf0930d"></script>
+<script src="src/world/textures_surface.js?v=ground1001"></script>
+<script src="src/world/materials.js?v=ground1001"></script>
 <script src="src/world/fuel_station.js?v=pf0930a"></script>
 <script src="src/world/prisonkit.js?v=tow929b"></script>
 <!-- THE LADDER, DRAWN (world/ladderkit.js): stiles, rungs and a cage built
@@ -1444,7 +1447,7 @@ document.body.appendChild(b);}}catch(e){}})();
      query: cityground 10, metro_ground 20, continent 90 register into it, so it loads before them). -->
 <script src="src/world/grassfield.js?v=grass0929c"></script>
 <script src="src/city/metro_ground.js?v=wreal0929"></script>
-<script src="src/city/metro.js?v=pf0930q"></script>
+<script src="src/city/metro.js?v=ground1001"></script>
 <script src="src/city/metro_structs.js?v=wreal0929"></script>
 <!-- custom dialogue + street talk (one contextual YES/NO decision) — after the registry -->
 <!-- 4d-3. this wave's feature modules (load after all deps they read) -->
@@ -1480,7 +1483,7 @@ document.body.appendChild(b);}}catch(e){}})();
      pad + the footway breakup (city/cityground.js). Runtime-only: world.js
      and streetkit.js call it inside buildCity; it registers its paint pass
      at landmass order 68, so it loads after worldmap.js and approach.js. -->
-<script src="src/city/cityground.js?v=pf0930a"></script>
+<script src="src/city/cityground.js?v=ground1001"></script>
 <!-- FISHING (owner: the world had a "Fisherman" title and nobody wearing it;
      a mackerel was harvested by SHOOTING it through the hunting pipeline).
      Registers water-side spots that SELF-VALIDATE against CBZ.cityWaterAt — a

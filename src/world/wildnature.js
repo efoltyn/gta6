@@ -573,6 +573,12 @@
       crownIM.instanceMatrix.needsUpdate = true;
       root.add(trunkIM); root.add(crownIM);
       speciesIMs.push(trunkIM, crownIM);
+      // contact: each crown's footprint in shade, laid on the relief's own slope
+      if (CBZ.treeFoot) {
+        const feet = [];
+        for (let i = 0; i < N; i++) { const t = list[i]; feet.push(t.x, t.y, t.z, Math.max(1.2, t.cR * 0.9), 0); }
+        CBZ.treeFoot.add(root, feet, { name: "wildnature-" + (opts.kind || "trees"), heightAt: groundY, fogScale: true });
+      }
       lodIMs.push({ im: trunkIM, full: N }, { im: crownIM, full: N });
     }
 

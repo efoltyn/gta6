@@ -249,7 +249,7 @@
     if (!rec) return false;
     node.slot = rec.index;
     _q.setFromAxisAngle(_ax, node.rot);
-    _v.set(node.x, 0, node.z);
+    _v.set(node.x, node.y || 0, node.z);
     _sc.set(node.scale, node.scale, node.scale);
     _m4.compose(_v, _q, _sc);
     rec.mesh.setMatrixAt(node.slot, _m4);
@@ -317,8 +317,15 @@
           if (!CBZ.placement.isFree(rect)) continue;
           const kind = wantKind();
           if (!kind) break outer;
+          // THE GROUND IT STANDS ON. Nodes used to be planted at y 0 while the
+          // footway / lot they stand on is 0.125-0.18 up: every harvest tree's
+          // root flare was buried and its trunk came straight out of the
+          // paving, every rock and scrap pile sunk to its knees.
+          const SK = CBZ.streetKit;
+          let gy = SK && SK.heightAt ? SK.heightAt(x, z) : null;
+          if (gy == null && typeof CBZ.floorAt === "function") gy = CBZ.floorAt(x, z);
           const node = {
-            id: nextId++, kind: kind, x: x, z: z, rot: rng() * Math.PI * 2, scale: 0.8 + rng() * 0.6,
+            id: nextId++, kind: kind, x: x, y: isFinite(gy) ? gy : 0, z: z, rot: rng() * Math.PI * 2, scale: 0.8 + rng() * 0.6,
             hp: HP0[kind], maxHp: HP0[kind], poolKey: POOLKEY[kind], slot: -1,
             depleted: false, respawnAt: 0,
           };
@@ -334,7 +341,7 @@
             // claiming less tree than is drawn. An audit bound is only worth
             // anything while it matches the vertices.
             CBZ.treeAabbPush(parts, _m4, -1.0, HARVEST_Y0, -1.0, 1.0, 4.0, 1.0);   // _m4 still holds this node's matrix
-            CBZ.treeRegisterTree("harvest", 0, parts, (function (nd) {
+            CBZ.treeRegisterTree("harvest", node.y, parts, (function (nd) {
               return function () { return !nd.depleted && nd.slot >= 0; };
             })(node));
           }
@@ -345,6 +352,13 @@
       }
     }
     CBZ.resourceNodes.push.apply(CBZ.resourceNodes, placed);
+    // contact: the crown's shade under every harvest tree (a stump keeps it)
+    const root = CBZ.city && CBZ.city.arena && CBZ.city.arena.root;
+    if (CBZ.treeFoot && root) {
+      const feet = [];
+      for (const n of placed) if (n.kind === "tree") feet.push(n.x, n.y, n.z, 1.3 * n.scale, 0);
+      CBZ.treeFoot.add(root, feet, { name: "harvest-trees", fogScale: 0.10 });
+    }
   }
 
   // ============================================================

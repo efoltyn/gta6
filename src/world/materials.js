@@ -849,13 +849,6 @@
     "float asSq(float x) { return x * x; }",
     "float asNoise(vec2 p) { vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);",
     "  return mix(mix(asHash(i), asHash(i + vec2(1.0, 0.0)), u.x), mix(asHash(i + vec2(0.0, 1.0)), asHash(i + vec2(1.0, 1.0)), u.x), u.y); }",
-    // metres to the 0.5 isoline of a noise field of cell size sc: a
-    // meandering crack line whose width does not depend on the local slope
-    "float asIsoDist(vec2 p, float sc, float salt) {",
-    "  vec2 q = p / sc + salt; float n = asNoise(q);",
-    "  float gx = asNoise(q + vec2(0.03, 0.0)) - n; float gy = asNoise(q + vec2(0.0, 0.03)) - n;",
-    "  float g = max(length(vec2(gx, gy)) / 0.03, 0.2);",
-    "  return abs(n - 0.5) / g * sc; }",
     "#if ASPH_Q > 1",
     // distance to the nearest Voronoi edge (block cracking), in cell units
     "float asCellEdge(vec2 p) {",
@@ -903,9 +896,19 @@
     "  rough *= 1.0 - 0.10 * pa.x;",
     "  float seam = max(pa.y, pb.y * 0.7) * mid;",
     "  t *= 1.0 - 0.40 * seam; rough *= 1.0 - 0.35 * seam;",
-    // ---- cracks: the hairline network, sealed runs, block cracking
-    "  float cmask = smoothstep(0.40, 0.62, asNoise(p / 9.0 + 41.0)) * ASPH_CRACKY * (1.0 - pa.x);",
-    "  float cd = asIsoDist(p, 5.5, 17.0);",
+    // ---- cracks. OWNER (2026-09-30): "roads have fake curved lines going
+    // through". They were this block's hairline network: the 0.5 ISOLINE of
+    // a 5.5 m noise field (asIsoDist), i.e. closed loops and S-curves in
+    // dark ink plus a 4-7 cm black "tar seal" band riding the same curves,
+    // laid over half of every road in world space with no idea where the
+    // lanes, kerbs or junctions were, and visible to 480 m. The baked
+    // textures lost the same contour-line cracks earlier (the "squiggles",
+    // see bakeGround); the shader kept them. Asphalt does not crack in
+    // smooth curves: it cracks along the paving joints (lane lines, below),
+    // across the road, and into polygonal blocks where it is old. So: the
+    // isoline network is gone; block cracking (straight Voronoi edges, top
+    // tier) stays; the sealant now runs where road crews actually pour it,
+    // along the lane joints.
     "#if ASPH_Q > 1",
     "  float bmask = smoothstep(0.58, 0.72, asNoise(p / 15.0 + 7.0)) * ASPH_CRACKY * (1.0 - pa.x);",
     "  float bd = asCellEdge(p / 2.6) * 2.6;",
@@ -913,10 +916,8 @@
     "#else",
     "  float blk = 0.0;",
     "#endif",
-    "  float crack = max(cmask * (1.0 - smoothstep(wEff, wEff * 1.8, cd)) * wK, blk) * mid;",
-    "  float seal = smoothstep(0.52, 0.60, asNoise(p / 17.0 + 5.0));",
-    "  float tar = cmask * seal * (1.0 - smoothstep(0.035, 0.07, cd)) * mid;",
-    "  t *= 1.0 - 0.55 * crack - 0.38 * tar; rough *= 1.0 - 0.45 * tar - 0.15 * crack;",
+    "  float crack = blk * mid;",
+    "  t *= 1.0 - 0.55 * crack; rough *= 1.0 - 0.15 * crack;",
     "#ifdef ASPH_LANES",
     "  float au = abs(vAsLane.x) - ASPH_MEDIAN * 0.5;",
     "  float lw = clamp(vAsLane.z, 0.0, 1.0);",
@@ -928,12 +929,16 @@
     "  float oilB = exp(-asSq((f - ASPH_LANEW * 0.5) / 0.42)) * inL;",
     "  float drip = oilB * (0.5 * smoothstep(0.35, 0.8, asNoise(p * 1.7 + 13.0)) + 0.5 * fine * step(0.82, asHash(floor(p * 3.0 + 0.5))));",
     "  t *= 1.0 - 0.24 * drip; rough *= 1.0 - 0.32 * drip; tint = mix(tint, vec3(0.94, 0.96, 1.03), drip * 0.5);",
-    // longitudinal joint cracks where the paver's passes met (lane lines)
-    "  float ja = max(au, 0.0) + (asNoise(p * 0.8 + 3.0) - 0.5) * 0.12;",
+    // longitudinal joint cracks where the paver's passes met (lane lines):
+    // straight, wandering at most 2 cm over ~4 m, broken into runs; some runs
+    // routed and sealed (a 4-7 cm band of glossy black crack filler)
+    "  float ja = max(au, 0.0) + (asNoise(p * 0.25 + 3.0) - 0.5) * 0.04;",
     "  float jd = abs(ja - ASPH_LANEW * floor(ja / ASPH_LANEW + 0.5));",
     "  float jmask = lw * ASPH_CRACKY * smoothstep(0.38, 0.6, asNoise(p / 7.0 + 71.0));",
     "  float jc = jmask * (1.0 - smoothstep(wEff, wEff * 1.8, jd)) * wK * mid;",
-    "  t *= 1.0 - 0.5 * jc;",
+    "  float seal = lw * ASPH_CRACKY * smoothstep(0.52, 0.60, asNoise(p / 17.0 + 5.0));",
+    "  float tar = seal * (1.0 - smoothstep(0.035, 0.07, jd)) * mid;",
+    "  t *= 1.0 - 0.5 * jc * (1.0 - seal) - 0.3 * tar; rough *= 1.0 - 0.4 * tar;",
     "  float ke = vAsLane.y;",
     "#if ASPH_GUTTER > 0",
     "  float gw = ASPH_GUTTERW;",

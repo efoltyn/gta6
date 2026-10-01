@@ -472,7 +472,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/treeaudit.js?v=allmain1"></script>
 <!-- Shared scenery-scale vegetation archetypes. Biomes own ecology/placement;
      this owns mature wood, irregular crowns, canopy roof and thicket grammar. -->
-<script src="src/world/vegetation.js?v=trees0929"></script>
+<script src="src/world/vegetation.js?v=ground1001"></script>
+<!-- where a tree meets the ground: instanced contact shade + mulch rings every
+     tree spawner lays beside its own pools (CBZ.treeFoot) -->
+<script src="src/world/treefoot.js?v=ground1001"></script>
 <script src="src/world/forestlook.js?v=wreal0929"></script>
 <script src="src/core/prio.js?v=arch2"></script>
 <script src="src/core/lightpin.js?v=w09290242x"></script>
@@ -520,8 +523,8 @@ document.body.appendChild(b);}}catch(e){}})();
      (asphalt, concrete, plaster, metal, dirt, grass, sand, wood, glass grime).
      Needs core/seed.js for CBZ.hashN; bakes lazily on first request, so it only
      has to precede its first consumer — world/materials.js. -->
-<script src="src/world/textures_surface.js?v=pf0930q"></script>
-<script src="src/world/materials.js?v=pf0930d"></script>
+<script src="src/world/textures_surface.js?v=ground1001"></script>
+<script src="src/world/materials.js?v=ground1001"></script>
 <script src="src/world/fuel_station.js?v=pf0930a"></script>
 <script src="src/world/prisonkit.js?v=tow929b"></script>
 <!-- THE LADDER, DRAWN (world/ladderkit.js): stiles, rungs and a cage built
@@ -1111,7 +1114,7 @@ document.body.appendChild(b);}}catch(e){}})();
      city/buildings.js, which reads CBZ.CIVIC_SHOPS and CBZ.CIVIC_ACCT_SEED at
      parse time and the bld* helpers at build time. -->
 <script src="src/city/buildings_civic.js?v=flagm1001"></script>
-<script src="src/city/buildings.js?v=flagm1001"></script>
+<script src="src/city/buildings.js?v=ground1001"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
@@ -1169,8 +1172,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/exec_office.js?v=pf0930a"></script>
 <script src="src/city/escalators.js?v=air0929r"></script>
 <script src="src/city/roofloot.js?v=cd0929"></script>
-<script src="src/city/beach.js?v=cd0929"></script>
-<script src="src/city/expansion.js?v=w0929road"></script>
+<script src="src/city/beach.js?v=ground1001"></script>
+<script src="src/city/expansion.js?v=ground1001"></script>
 <!-- 4d-2. ARCHIPELAGO — worldmap registry + 3 islands + 4 biomes (worldmap.js
      MUST precede every island/biome; world.js runs them via CBZ.cityWorldGeo) -->
 <script src="src/city/worldmap.js?v=slice0929b"></script>
@@ -1182,7 +1185,7 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.CONFIG.WATER_REFLECT is on (default). Reads the sea lazily at runtime,
      so load order past config.js + WaterReflect.js is all it needs. -->
 <script src="src/world/waterfx.js?v=roadmerge1"></script>
-<script src="src/city/highways.js?v=pf0930j"></script>
+<script src="src/city/highways.js?v=ground1001"></script>
 <!-- THE HIGHWAY NETWORK AS DATA (HIGHWAY_NET_V2): the named-route table +
      builder. Loads right after the ribbon builder it drives; registers its
      own landmass pass (order 91 — after every causeway, before the
@@ -1293,9 +1296,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/mil_armor.js?v=mil0929"></script>
 <script src="src/city/island_military.js?v=flagm1001"></script>
 <script src="src/city/biome_desert.js?v=pf0930f"></script>
-<script src="src/city/biome_forest.js?v=wreal0929"></script>
+<script src="src/city/biome_forest.js?v=ground1001"></script>
 <script src="src/city/biome_farmland.js?v=wreal0929"></script>
-<script src="src/city/biome_snow.js?v=slice0929b"></script>
+<script src="src/city/biome_snow.js?v=ground1001"></script>
 <script src="src/city/snowboard.js?v=ric0929"></script>
 <!-- STRATEGIC LAYER part 1 — hardened bunkers (Fort Brandt command shelter
      w/ the nuclear vault + mountain/desert finds). Landmass order 40: after
@@ -1304,7 +1307,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 4d-3. WILD NATURE — lush instanced trees/rocks/grass forested onto the
      far backdrop relief (world/terrain.js). Self-registers as a high-order
      landmass; runs via cityWorldGeo after terrain + biomes exist. -->
-<script src="src/world/wildnature.js?v=allmain1"></script>
+<script src="src/world/wildnature.js?v=ground1001"></script>
 <!-- 4d-4. WILDLIFE + HUNTING + DOGS. The bestiary (defineSpecies) loads FIRST,
      then every biome batch of species, then the hunting engine and the dog
      companion system (both self-register as high-order landmasses). -->
@@ -1349,7 +1352,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- street hardware kit: signal/lamp prototypes + the additive road light
      pools. Pure builders, no placement; props.js (next) places them. -->
 <script src="src/city/street_hardware.js?v=hw1"></script>
-<script src="src/city/props.js?v=metro0929"></script>
+<script src="src/city/props.js?v=ground1001"></script>
 <!-- props-with-purpose: seat/bed anchor registry + sit/sleep poses + the
      wanted-poster interact hook. Revert: CBZ.CONFIG.PROPS_PURPOSE = false. -->
 <script src="src/city/propuse.js?v=w09290219"></script>
@@ -1666,7 +1669,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the cone. (systems/craft.js is DELETED — owner mandate "kill crafting";
      its one live organ, the mode-aware item store, moved to
      CBZ.econ.itemStore in systems/economy.js.) -->
-<script src="src/systems/resources.js?v=deslop1"></script>
+<script src="src/systems/resources.js?v=ground1001"></script>
 <script src="src/city/explosives.js?v=mil0929"></script>
 <script src="src/systems/helditems.js?v=phone1001"></script>
 <script src="src/city/armored.js?v=deslop1"></script>
@@ -1743,7 +1746,7 @@ document.body.appendChild(b);}}catch(e){}})();
      query: cityground 10, metro_ground 20, continent 90 register into it, so it loads before them). -->
 <script src="src/world/grassfield.js?v=grass0929c"></script>
 <script src="src/city/metro_ground.js?v=wreal0929"></script>
-<script src="src/city/metro.js?v=pf0930q"></script>
+<script src="src/city/metro.js?v=ground1001"></script>
 <script src="src/city/metro_structs.js?v=wreal0929"></script>
 <script src="src/city/spawnplaces.js?v=sim2"></script>
 <script src="src/city/scenedirector.js?v=w09290218"></script>
@@ -1794,7 +1797,7 @@ document.body.appendChild(b);}}catch(e){}})();
      pad + the footway breakup (city/cityground.js). Runtime-only: world.js
      and streetkit.js call it inside buildCity; it registers its paint pass
      at landmass order 68, so it loads after worldmap.js and approach.js. -->
-<script src="src/city/cityground.js?v=pf0930a"></script>
+<script src="src/city/cityground.js?v=ground1001"></script>
 <!-- FISHING (owner: the world had a "Fisherman" title and nobody wearing it;
      a mackerel was harvested by SHOOTING it through the hunting pipeline).
      Registers water-side spots that SELF-VALIDATE against CBZ.cityWaterAt — a
@@ -2148,7 +2151,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/river.js?v=wreal0929"></script>
 <!-- THE CONTINENT: runs after every landmass builder (order 97) and fills the
      ocean between POIs with walkable backcountry — one world, not circles. -->
-<script src="src/city/continent.js?v=pf0930u"></script>
+<script src="src/city/continent.js?v=ground1001"></script>
 <script src="src/city/demographics.js?v=world1"></script>
 <!-- X6: the affinity matrix (country/state/city relations) — after
      countries.js (CBZ.COUNTRIES) and officials.js/polity.js (both already
@@ -2314,7 +2317,7 @@ document.body.appendChild(b);}}catch(e){}})();
      staffs itself through power.js's protection layer rather than authoring
      guards. After power.js and the biome/continent builders whose empty land
      it claims. Revert with ?cfg_GOV_COMPLEX=0. -->
-<script src="src/city/govcomplex.js?v=flagm1001"></script>
+<script src="src/city/govcomplex.js?v=ground1001"></script>
 
 <!-- THE PRESIDENCY — one spine over organs built above: the President origin
      (candidacy's swearIn fast-forward), the Situation Room inside govcomplex's

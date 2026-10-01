@@ -9524,6 +9524,7 @@
     const trunkM = VK ? VK.material("wood", 0x86674a) : parkMat(0x6b4a2a);
     const leafMs = VK ? [VK.material("foliage", 0x5f9a4c), VK.material("foliage", 0x6fa452)] : [parkMat(0x3f7d3a), parkMat(0x4f9942)];
     let vi = 0;
+    const feet = [];
     for (const [qx, qz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
       const x = cx + qx * w * 0.28 + (rng() - 0.5) * 2.0;
       const z = cz + qz * d * 0.28 + (rng() - 0.5) * 2.0;
@@ -9536,7 +9537,7 @@
       if (GRAM) {
         const tg = CBZ.treeTrunkGeo({ rTop: 0.12, rBase: 0.22, h: trunkH, seg: 7, roots: 5, rise: 0.25, dip: 0.05, spread: 1.8,
           flare: 1.45, uvRepeat: 3, site: "park" });
-        const t = add(tg, trunkM, x, Y, z, { cast: true, ry: hv * 6.28 });
+        const t = add(tg, trunkM, x, Y - 0.04, z, { cast: true, ry: hv * 6.28 });   // seated: the flare meets the turf
         const cg = CBZ.treeCrownGeo({ tiers: conifer ? 3 : 2, r: r0, h: h0, seg: 7, taper: 0.66, site: "park", leaf: !!VK, cards: conifer ? 16 : 18, seed: (hv * 1000) | 0 });
         const c = add(cg, leafMs[vi % 2], x, Y + th - 0.3, z, { cast: true, ry: hv * 6.28 });
         if (VK && cg.userData && cg.userData.leafCards && VK.depthMaterial) c.customDepthMaterial = VK.depthMaterial("foliage");
@@ -9546,9 +9547,11 @@
         add(new THREE.ConeGeometry(r0, h0, 8), leafMs[vi % 2], x, Y + th + h0 / 2 - 0.3, z, { cast: true });
         CBZ.colliders.push({ minX: x - 0.28, maxX: x + 0.28, minZ: z - 0.28, maxZ: z + 0.28, ref: t, noCam: true, noBreach: true });
       }
-      if (REG) CBZ.treeRegisterTree("park", Y, [x - 0.22, Y - 0.05, z - 0.22, x + 0.22, Y + trunkH, z + 0.22,
+      if (REG) CBZ.treeRegisterTree("park", Y, [x - 0.22, Y - 0.09, z - 0.22, x + 0.22, Y + trunkH, z + 0.22,
         x - r0, Y + th - 0.3, z - r0, x + r0, Y + th - 0.3 + h0, z + r0]);
+      feet.push(x, Y, z, r0 * 1.15, 0);                  // (the mulch ring is painted into the lot splat)
     }
+    if (CBZ.treeFoot) CBZ.treeFoot.add(root, feet, { name: "park", fogScale: 0.10 });
   }
 
   // ============================================================

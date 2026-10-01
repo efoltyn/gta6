@@ -446,7 +446,12 @@
     // registers each palm with world/treeaudit.js. rng draw order untouched.
     const TREES2 = !!(CBZ.CONFIG && CBZ.CONFIG.TREES_V2 !== false && CBZ.treeRegisterTree);
     if (TREES2 && CBZ.treeAuditResetSite) CBZ.treeAuditResetSite("beach");
-    const palmTrunkGeo = new THREE.BoxGeometry(0.42, 1, 0.42);
+    // a round, tapering palm bole with its root boss flaring into the sand
+    // (was a 0.42 m square BOX — a post, not a palm). Centred like the box
+    // was (y0 -0.5), so every placement number below holds.
+    const palmTrunkGeo = CBZ.treeTrunkGeo
+      ? CBZ.treeTrunkGeo({ rTop: 0.15, rBase: 0.21, h: 1, y0: -0.5, seg: 8, roots: 4, rootR: 0.5, spread: 1.35, flare: 1.45, rise: 0.07, dip: 0.03, uvRepeat: 2, site: "beach" })
+      : new THREE.BoxGeometry(0.42, 1, 0.42);
     const palmFrondGeo = new THREE.BoxGeometry(2.7, 0.1, 0.62);
     const trunkIM = new THREE.InstancedMesh(palmTrunkGeo, cmat(0x7a5a33), TREES2 ? palms.length * 2 : palms.length);
     const frondIM = new THREE.InstancedMesh(palmFrondGeo, cmat(0x3f9a4f), palms.length * 6);
@@ -497,6 +502,13 @@
     trunkIM.castShadow = frondIM.castShadow = false;
     trunkIM.receiveShadow = frondIM.receiveShadow = true;
     root.add(trunkIM); root.add(frondIM);
+    // contact: the palms cast no sun shadow (castShadow off above), so the
+    // sand under each frond ring gets its shade here, on the sand's own height
+    if (CBZ.treeFoot) {
+      const feet = [];
+      for (const p of palms) feet.push(p.x, sandY(p.x, p.z), p.z, 2.1, 0);
+      CBZ.treeFoot.add(root, feet, { name: "beach-palms" });
+    }
 
     /* ---- THE PALMS CAN BE TAKEN (2026-08-15, TSU_DEBRIS) -----------------
        The tsunami's debris doctrine is REAL OBJECTS ONLY, and the palms are

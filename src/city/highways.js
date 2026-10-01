@@ -547,11 +547,42 @@
     return gaps;
   }
 
+  /* A DECK NEVER LIES ON A STREET-KIT STREET. The airport causeway's record
+     starts 31 m inside the downtown grid (z -566, the grid ends at -535) and
+     the military causeway's ends 32 m inside it (x -133 vs -165): their
+     decks were laid at 0.085 over the kit's 0.05 carriageway, so the grid's
+     edge streets and the x 0 / z -700 streets carried a second road on top
+     — freeway lane lines, rumble strips and edge lines running across and
+     along the kit's own markings, and the deck's square end as a seam. The
+     record (traffic, regions) is untouched; only what is DRAWN is trimmed
+     back to the first point outside every kit surface, where the kit's road
+     ends and the deck takes over. */
+  function trimToKit(path) {
+    const SK = CBZ.streetKit;
+    if (!SK || !SK.regionAt || !SK.surfaces || !SK.surfaces.length || !path || path.length < 2) return path;
+    const out = path.slice();
+    const cut = function (a, b) {          // first point from a toward b off every kit
+      const L = Math.hypot(b.x - a.x, b.z - a.z);
+      if (L < 1 || SK.regionAt(a.x, a.z) === -1) return null;
+      for (let d = 0.5; d < L - 8; d += 0.5) {
+        const x = a.x + (b.x - a.x) * d / L, z = a.z + (b.z - a.z) * d / L;
+        if (SK.regionAt(x, z) === -1) return Object.assign({}, a, { x: x, z: z });
+      }
+      return null;
+    };
+    const h = cut(out[0], out[1]);
+    if (h) out[0] = h;
+    const n = out.length;
+    const t = cut(out[n - 1], out[n - 2]);
+    if (t) out[n - 1] = t;
+    return out;
+  }
+
   function buildNow(rec, city) {
     if (rec.built) return;
     rec.built = true;
     const S = rec.spec, M = mats();
-    const st = stationize(S.path, STEP);
+    const st = stationize(trimToKit(S.path), STEP);
     if (st.length < 2) return;
     const runs = straightRuns(st);
     const isWater = waterOracle(city);
