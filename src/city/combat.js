@@ -223,10 +223,13 @@
     const id = GUN_MAP[name];
     if (!item && !id) return;
     if (id && CBZ.unlockWeapon) {
+      // the bat goes on the belt (a cell on the bar), not in the bin
+      if (g.cityMeleeWeapon) g.cityMeleeStowed = g.cityMeleeWeapon;
       g.cityMeleeWeapon = null;
       CBZ.unlockWeapon(id, { select: true });   // the EXACT jail gun, now yours
     } else if (item.melee) {
       g.cityMeleeWeapon = name;
+      g.cityMeleeStowed = null;
     }
     if (CBZ.city) CBZ.city.note("Equipped " + name, 1.4);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
@@ -248,6 +251,7 @@
   };
   CBZ.cityDrawGun = function () {
     if (!g.cityMeleeWeapon || !(CBZ.equippedWeapon && CBZ.equippedWeapon())) return false;
+    g.cityMeleeStowed = g.cityMeleeWeapon;
     g.cityMeleeWeapon = null;
     if (CBZ.onWeaponInventoryChanged && CBZ.currentWeaponId) CBZ.onWeaponInventoryChanged(CBZ.currentWeaponId, false);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();

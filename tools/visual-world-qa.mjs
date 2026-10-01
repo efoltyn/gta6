@@ -254,7 +254,7 @@ try {
       if(CBZ.setFPS)CBZ.setFPS(false);
       if(CBZ.game)CBZ.game.cityHolstered=false;
       if(CBZ.player&&CBZ.player.pos)CBZ.player.pos.set(20,CBZ.floorAt?CBZ.floorAt(20,20)||0:0,20);
-      if(CBZ.cityHotbarSelect)CBZ.cityHotbarSelect(2);
+      if(CBZ.inventory)CBZ.inventory.select(2);
       if(CBZ.fpsSetAim)CBZ.fpsSetAim(true);
       return true;
     })()`);

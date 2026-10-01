@@ -248,7 +248,7 @@
   }
   // THE SPOT: on top of (or beside) the right-thumb cluster that is live now.
   const CLUSTER = ["#tbtns .tbtn", "#tveh .tvbtn", "#tveh #tvDial"];
-  const AVOID = ["#tstick", "#cWpn", "#hudPauseBtn", "#cRadar", "#cTopRight", "#cCluster"];
+  const AVOID = ["#tstick", "#cWpn", "#hotbar", "#hudPauseBtn", "#cRadar", "#cTopRight", "#cCluster"];
   function rectsOf(sels) {
     const out = [];
     for (const sel of sels) {

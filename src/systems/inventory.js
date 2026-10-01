@@ -1,35 +1,49 @@
 /* ============================================================
-   systems/inventory.js — THE HOTBAR. It is the whole inventory.
+   systems/inventory.js — THE HOTBAR. It is the whole inventory, in every
+   game that carries things: the prison, Gang City, gun game, survival.
 
    OWNER (2026-09-28): "only guns are cool, and the keycard is cool af. All
    other inventory is dumb af, and when there are many guns it shows dumb
    with the other inventory. The button to open the inventory is dumb ...
    The flashlight is a cool thing in inventory because at night it helps.
    Its icon should be the flashlight, like how the guns are in inventory."
+   OWNER (2026-09-30): "ADD THE INVENTORY OF JAIL GAME TO GANG CITY, IT'S
+   DONE WELL."
 
-   What this file used to be: a 36-slot Minecraft stash (27-slot grid on [I]
-   plus a 9-slot hotbar), a drag-to-rearrange weapon-key screen, 40 hand-drawn
-   SVG pictograms for ramen and soap and gold teeth, and a docking trick that
-   reparented fpsmode's #weaponStrip into the bar. All deleted.
+   History: the prison's bar used to be a 36-slot Minecraft stash; the city
+   had its own second bar (city/hud.js #cSlots over fpsmode.js's
+   cityHotbar/cityHotbarSelect, its own digit handler, its own tap handler,
+   a fade-out, a word strip behind a flag in charpanel). All of that is gone.
+   This file is the one bar, the one picker and the one key handler.
 
-   What it is now:
+   What it is:
      · ONE ROW of real renders, bottom centre: every gun you own (the same
-       photograph city/itemicons.js takes of the mesh in your hands), then the
-       flashlight when you carry one, then the keycard and any door key on
-       your belt. What may appear is decided by systems/hotbar_model.js, a
-       pure allow-list the node check pins.
-     · NO SCREEN. There is no [I], no bag button, no stash. Digits 1..9 pick
-       the Nth usable cell; the wheel cycles guns (fpsmode.js); a tap picks a
+       photograph city/itemicons.js takes of the mesh in your hands), the
+       bat/knife on your belt, grenades and charges, the gauze, the
+       flashlight, the phone, then the cards and door keys you carry. What
+       may appear is decided by systems/hotbar_model.js, a pure allow-list
+       the node check pins.
+     · NO SCREEN. No [I], no bag button, no stash. Digits 1..9 pick the Nth
+       usable cell; the mouse wheel cycles guns (fpsmode.js); a tap picks a
        cell; a sideways swipe along the bar steps to the next/previous gun.
-       Picking the gun already in your hands puts it away (prison).
-     · POCKETS STILL EXIST, THEY'RE JUST NOT UI. CBZ.game.inventory remains
-       the count truth that trade, frisks, bribes and the escape plan read.
-       Food and painkillers are taken automatically when you need them
-       (autoConsume below); trade goods are traded in the world; the shiv is
-       already in your punch (systems/prisonshanks.js).
+       Picking the thing already in your hands puts it away.
+     · POCKETS STILL EXIST, THEY'RE JUST NOT UI. CBZ.game.inventory (prison)
+       and CBZ.game.cityInv (city) stay the count truth that trade, frisks,
+       bribes, doors and dealers read. Food and painkillers are taken
+       automatically when you need them (prison: autoConsume below; city:
+       city/hunger.js), drugs are product, cash is the number that shows
+       when it moves.
 
-   The city draws its own bar (city/hud.js #cSlots over CBZ.cityHotbar) with
-   the same faces via CBZ.hotbarFace, so a gun looks identical in every game.
+   API (CBZ.inventory):
+     entries()          what the bar holds right now (model entries)
+     select(i)          act on bar index i (draw, put away, raise, toggle)
+     selectKind(kind)   act on the first cell of a kind ("phone", "flashlight")
+     onUse(kind, fn)    replace what using a kind does. fn(entry) -> true if it
+                        acted. The phone builder can claim the phone here; with
+                        no hook the phone cell calls CBZ.phoneOpen when it
+                        exists, else the campaign handset, else the city phone.
+     onState(kind, fn)  fn() -> {active, unread, buzz} for the phone cell
+     audit()            CBZ.hotbarAudit()
 ============================================================ */
 (function () {
   "use strict";
@@ -52,22 +66,25 @@
     "<path d='M9 13 h16 M9 27 h16' stroke='#a39c8a' stroke-width='.9'/></svg>";
   function img(src) { return src ? "<img src='" + src + "' alt=''>" : ""; }
   function tryCall(fn, a, b) { try { return fn ? (fn(a, b) || "") : ""; } catch (e) { return ""; } }
-  // The one face resolver, shared with city/hud.js. Every branch is a real
-  // render of a real model; a miss returns "" and the caller retries on its
-  // next repaint (the GL context / model factory can land later in boot).
+  function itemRow(name) { const E = CBZ.cityEcon; return (E && E.ITEMS && E.ITEMS[name]) || {}; }
+  // The one face resolver. Every branch is a real render of a real model; a
+  // miss returns "" and the bar retries on its next repaint (the GL context /
+  // model factory can land later in boot).
   CBZ.hotbarFace = function (e) {
     if (!e) return "";
     switch (e.kind) {
       case "gun":
         return img(tryCall(CBZ.itemIconGun, e.id) || tryCall(CBZ.weaponThumbnail, e.id));
+      case "melee":
+        return img(tryCall(CBZ.itemIcon, e.name, itemRow(e.name)));
       case "flashlight":
         return img(tryCall(CBZ.flashlightThumbnail));
       case "keycard":
-        return img(tryCall(CBZ.itemIcon, "Keycard", {}));
+        return img(tryCall(CBZ.itemIcon, e.name || "Keycard", {}));
       case "key":
         return img(tryCall(CBZ.itemIcon, e.name || "Key", {}));
       case "throwable":
-        return (CBZ.itemIconHtml && tryCall(CBZ.itemIconHtml, e.name)) || img(tryCall(CBZ.itemIcon, e.name));
+        return img(tryCall(CBZ.itemIcon, e.name, itemRow(e.name)));
       case "detonator":
         return tryCall(CBZ.detonatorFaceHtml);
       case "phone":
@@ -79,8 +96,13 @@
     }
   };
 
+  /* ---------------- hooks ---------------- */
+  const useHooks = Object.create(null), stateHooks = Object.create(null);
+
   /* ---------------- state -> entries ---------------- */
-  function mode() { return CBZ.game && CBZ.game.mode; }
+  function g() { return CBZ.game || {}; }
+  function mode() { return g().mode; }
+  function city() { return mode() === "city"; }
   function weaponRow(id) {
     const T = CBZ.FPS_WEAPONS;
     if (!T) return -1;
@@ -109,26 +131,53 @@
     for (let i = 0; i < inv.length; i++) if (out.indexOf(inv[i]) < 0) out.push(inv[i]);
     return out;
   }
+  // no gun is in your hands: put away, or (city) the bat is
   function holstered() {
-    const g = CBZ.game || {};
-    return mode() === "escape" ? !!g.prisonHolstered : false;
+    const G = g();
+    if (mode() === "escape") return !!G.prisonHolstered;
+    if (city()) return !!(G.cityHolstered || G.cityMeleeWeapon);
+    return false;
   }
   function flashlightState() {
     const F = CBZ.playerFlashlight;
     if (!F) return null;
     try { return { owned: !!F.owned(), on: !!F.on() }; } catch (e) { return null; }
   }
-  // the charge / detonator you carry (the pen's armory cage has them)
+  // the belt weapon (city): in your hand (cityMeleeWeapon) or put away
+  // (cityMeleeStowed). Buying a gun stows the bat instead of throwing it away.
+  function meleeState() {
+    if (!city()) return null;
+    const G = g();
+    const name = G.cityMeleeWeapon || G.cityMeleeStowed;
+    return name ? { name: name, active: !!G.cityMeleeWeapon } : null;
+  }
+  // the charge / detonator / frag you carry
   function heldCells() {
     const HM = CBZ.heldItemModel, H = CBZ.heldItem;
+    const held = H ? H.current() : null;
+    if (city()) {
+      // the city's pocket: every throwable in the catalog you hold, in
+      // catalog order, then the detonator once a charge is out
+      const inv = g().cityInv || {}, ITEMS = (CBZ.cityEcon && CBZ.cityEcon.ITEMS) || {};
+      const out = [];
+      for (const name in ITEMS) {
+        const it = ITEMS[name];
+        if (!it || it.tag !== "throwable" || !((inv[name] | 0) > 0)) continue;
+        const hk = HM ? HM.heldKindOf(name, it) : null;
+        out.push({ kind: "throwable", item: name, held: hk, count: inv[name] | 0, active: !!(hk && hk === held) });
+      }
+      const planted = CBZ.cityC4Planted ? CBZ.cityC4Planted() | 0 : 0;
+      if (planted > 0) out.push({ kind: "detonator", item: "Detonator", held: "detonator", count: planted, active: held === "detonator" });
+      return out;
+    }
     if (!HM || !H) return [];
-    const live = CBZ.modeHas ? CBZ.modeHas("blast") : mode() === "city";
+    const live = CBZ.modeHas ? CBZ.modeHas("blast") : false;
     if (!live) return [];
     return HM.cells({
       c4: CBZ.cityC4Count ? CBZ.cityC4Count() : 0,
       planted: CBZ.cityC4Planted ? CBZ.cityC4Planted() : 0,
       grenades: 0,
-      held: H.current(),
+      held: held,
     });
   }
   // the gauze rolls you carry (systems/vitals.js owns the count)
@@ -140,22 +189,56 @@
     return { count: n, active: !!(H && H.current() === "bandage") };
   }
   CBZ.hotbarBandage = bandageState;
+  // the handset (city). Whoever owns a phone publishes its state; the cell
+  // exists whenever some phone can be raised.
+  function phoneState() {
+    if (!city()) return null;
+    if (stateHooks.phone) { try { const s = stateHooks.phone(); if (s) return s; } catch (e) {} }
+    let chip = null;
+    try { chip = typeof CBZ.campaignPhoneChip === "function" ? CBZ.campaignPhoneChip() : null; } catch (e) { chip = null; }
+    let open = false;
+    try { open = typeof CBZ.phoneIsOpen === "function" ? !!CBZ.phoneIsOpen() : false; } catch (e) { open = false; }
+    if (chip && chip.available) return { active: open || !!chip.open, unread: !!chip.unread, buzz: !!chip.buzz };
+    if (useHooks.phone || typeof CBZ.phoneOpen === "function" || typeof CBZ.cityOpenPhone === "function") return { active: open, unread: false, buzz: false };
+    return null;
+  }
+  const CARD_RE = /keycard|key card|access card|swipe card|vault card|pass card/i;
+  const KEY_RE = /(^|[^a-z])key([^a-z]|$)/i;
+  function belt() {
+    const G = g();
+    if (mode() === "escape") {
+      const inv = G.inventory || {};
+      const keys = [];
+      for (let i = 0; i < M.DOOR_KEYS.length; i++) if (inv[M.DOOR_KEYS[i]] > 0) keys.push(M.DOOR_KEYS[i]);
+      // an officer carries the staff card from the first frame
+      return { hasKeycard: !!(G.hasKey || inv["Keycard"] > 0 || (G.role === "cop" && !G.copKeysPulled)), cards: [], keys: keys };
+    }
+    if (city()) {
+      // a city key is an ordinary item in g.cityInv (city/keys.js); the bar
+      // shows the ones you carry, cards first
+      const inv = G.cityInv || {}, cards = [], keys = [];
+      for (const name in inv) {
+        if (!((inv[name] | 0) > 0)) continue;
+        if (CARD_RE.test(name)) cards.push(name);
+        else if (KEY_RE.test(name) || itemRow(name).tag === "key") keys.push(name);
+      }
+      return { hasKeycard: false, cards: cards, keys: keys };
+    }
+    return { hasKeycard: false, cards: [], keys: [] };
+  }
   function entries() {
-    const g = CBZ.game || {};
-    const inv = g.inventory || {};
-    const keys = [];
-    for (let i = 0; i < M.DOOR_KEYS.length; i++) if (inv[M.DOOR_KEYS[i]] > 0) keys.push(M.DOOR_KEYS[i]);
+    const b = belt();
     const list = M.build({
       mode: mode(),
       guns: gunOrder(),
       held: CBZ.currentWeaponId || null,
       holstered: holstered(),
-      // an officer carries the staff card from the first frame
-      hasKeycard: !!(g.hasKey || inv["Keycard"] > 0 || (mode() === "escape" && g.role === "cop" && !g.copKeysPulled)),
-      keys: keys,
-      flashlight: flashlightState(),
-      bandage: bandageState(),
+      melee: meleeState(),
       items: heldCells(),
+      bandage: bandageState(),
+      flashlight: flashlightState(),
+      phone: phoneState(),
+      hasKeycard: b.hasKeycard, cards: b.cards, keys: b.keys,
     });
     for (let i = 0; i < list.length; i++) if (list[i].kind === "gun" && !list[i].active) list[i].dry = isDry(list[i].id);
     return list;
@@ -177,9 +260,15 @@
       let cls = "hb " + e.kind;
       if (e.active) cls += " on";
       if (e.dry) cls += " dry";
+      if (e.unread) cls += " unread";
+      if (e.buzz) cls += " buzz";
       if (!e.selectable) { cls += " passive"; if (firstPassive) { cls += " first"; firstPassive = false; } }
       if (sig && !seen[key]) cls += " fresh";      // a pickup pops in; boot does not
-      html += "<div class='" + cls + "' data-i='" + i + "'>" + face + "</div>";
+      // a stack (grenades, charges, gauze) shows its count as pips, not a number
+      let pips = "";
+      const n = e.count | 0;
+      if (n > 1 && e.kind !== "detonator") { pips = "<i class='pips'>"; for (let k = 0; k < Math.min(n, 5); k++) pips += "<b></b>"; pips += "</i>"; }
+      html += "<div class='" + cls + "' data-i='" + i + "'>" + face + pips + "</div>";
     }
     seen = Object.create(null);
     for (let i = 0; i < list.length; i++) seen[list[i].kind + ":" + (list[i].id || list[i].name || "")] = 1;
@@ -189,26 +278,88 @@
     missingFace = missing;
   }
 
-  // the games that carry guns on this bar. The city draws its own (#cSlots);
-  // warlord/shark/others own their digit keys and have nothing to carry here.
-  const BAR_MODES = { escape: 1, gungame: 1, survival: 1, teammatch: 1 };
+  // the games that carry things on this bar. Warlord/shark/others own their
+  // digit keys and have nothing to carry here.
+  const BAR_MODES = { escape: 1, city: 1, gungame: 1, survival: 1, teammatch: 1 };
   function barMode() { return !!BAR_MODES[mode()]; }
+  function cuffed() { const C = CBZ.cuffedPlayer; try { return !!(C && C.on && C.on()); } catch (e) { return false; } }
+  // a city panel, the map or the verb wheel owns the keys and the glass
+  function blocked() {
+    if (!city()) return false;
+    return !!(CBZ.cityMenuOpen || (CBZ.fullMap && CBZ.fullMap.active) || (CBZ.verbWheel && CBZ.verbWheel.isOpen && CBZ.verbWheel.isOpen()));
+  }
+  function hudDirty() { if (CBZ.cityHudDirty) { try { CBZ.cityHudDirty(); } catch (e) {} } }
 
-  /* ---------------- selecting ---------------- */
-  function pick(e) {
-    if (!e || !e.selectable) return false;
-    if (e.kind === "gun") {
-      // the gun already in your hands, picked again, goes away (prison has a
-      // holster; other modes simply keep it drawn)
-      if (e.active && mode() === "escape" && CBZ.playerHolster) { CBZ.playerHolster(true); return true; }
-      return !!(CBZ.fpsSelectWeaponId && CBZ.fpsSelectWeaponId(e.id));
+  /* ---------------- using a cell ---------------- */
+  function stowMelee() {
+    const G = g();
+    if (!G.cityMeleeWeapon) return;
+    G.cityMeleeStowed = G.cityMeleeWeapon;
+    G.cityMeleeWeapon = null;
+  }
+  function useMelee(e) {
+    const G = g();
+    if (e.active) {
+      // put the bat away; the gun stays where it was (holstered), hands empty
+      G.cityHolstered = true;
+      stowMelee();
+    } else {
+      if (CBZ.fpsArmed && CBZ.fpsArmed() && CBZ.cityHolster) CBZ.cityHolster(true);
+      else G.cityHolstered = true;
+      if (CBZ.heldItem && CBZ.heldItem.clear) CBZ.heldItem.clear();
+      G.cityMeleeWeapon = G.cityMeleeStowed || e.name;
+      G.cityMeleeStowed = null;
     }
+    if (CBZ.sfx) CBZ.sfx("switch");
+    hudDirty();
+    return true;
+  }
+  function usePhone(e) {
+    if (useHooks.phone) { try { return !!useHooks.phone(e); } catch (err) { return false; } }
+    try {
+      if (typeof CBZ.phoneOpen === "function") {
+        if (e.active && typeof CBZ.phoneClose === "function") { CBZ.phoneClose(); return true; }
+        CBZ.phoneOpen();
+        return true;
+      }
+      const chip = typeof CBZ.campaignPhoneChip === "function" ? CBZ.campaignPhoneChip() : null;
+      if (chip && chip.available && CBZ.campaignPhoneToggle) return !!CBZ.campaignPhoneToggle();
+      if (typeof CBZ.cityOpenPhone === "function") { CBZ.cityOpenPhone(); return true; }
+    } catch (err) {}
+    return false;
+  }
+  function pick(e) {
+    if (!e || !e.selectable || cuffed()) return false;
+    if (useHooks[e.kind] && e.kind !== "phone") { try { return !!useHooks[e.kind](e); } catch (err) { return false; } }
+    const m = mode();
+    if (e.kind === "gun") {
+      // the gun already in your hands, picked again, goes away (prison and
+      // city have a holster; other modes simply keep it drawn)
+      if (e.active) {
+        if (m === "escape" && CBZ.playerHolster) { CBZ.playerHolster(true); return true; }
+        if (m === "city" && CBZ.cityHolster) { CBZ.cityHolster(true); return true; }
+      }
+      if (m === "city") stowMelee();
+      const okSel = !!(CBZ.fpsSelectWeaponId && CBZ.fpsSelectWeaponId(e.id));
+      if (okSel && m === "city") hudDirty();
+      return okSel;
+    }
+    if (e.kind === "melee") return m === "city" ? useMelee(e) : false;
     if (e.kind === "flashlight") {
       const F = CBZ.playerFlashlight;
       if (F && F.toggle) { F.toggle(); return true; }
+      return false;
     }
-    if ((e.kind === "throwable" || e.kind === "detonator") && e.held && CBZ.heldItem) return !!CBZ.heldItem.select(e.held);
-    if (e.kind === "bandage" && CBZ.heldItem) return !!CBZ.heldItem.select("bandage");
+    if (e.kind === "phone") return usePhone(e);
+    if ((e.kind === "throwable" || e.kind === "detonator" || e.kind === "bandage") && CBZ.heldItem) {
+      const held = e.kind === "bandage" ? "bandage" : e.held;
+      if (held) {
+        if (m === "city") stowMelee();
+        return !!CBZ.heldItem.select(held);
+      }
+    }
+    // a throwable with no held form still leaves on the pick (city)
+    if (e.kind === "throwable" && m === "city" && CBZ.cityThrowFromInventory) { CBZ.cityThrowFromInventory(); return true; }
     return false;
   }
   function stepGun(dir) {
@@ -217,14 +368,16 @@
     let cur = -1;
     for (let i = 0; i < guns.length; i++) if (guns[i].active) cur = i;
     const next = guns[(cur + dir + guns.length) % guns.length];
-    if (next && CBZ.fpsSelectWeaponId) CBZ.fpsSelectWeaponId(next.id);
+    if (next) pick(next.active ? null : next);
   }
+  function refresh() { const list = entries(); render(list); sig = M.signature(list, mode()); return list; }
 
   bar.addEventListener("mousedown", function (ev) {
     const c = ev.target.closest && ev.target.closest(".hb");
     if (!c) return;
     ev.preventDefault(); ev.stopPropagation();
-    pick(shown[+c.dataset.i]);
+    if (blocked()) return;
+    if (pick(shown[+c.dataset.i])) refresh();
   });
   // touch: a tap picks the cell, a sideways swipe along the bar steps guns.
   // (Compat mouse events after touchend are swallowed by preventDefault.)
@@ -238,9 +391,10 @@
     const t = ev.changedTouches && ev.changedTouches[0];
     if (!s || !t) return;
     ev.preventDefault();
+    if (blocked()) return;
     const dx = t.clientX - s.x, dy = t.clientY - s.y;
-    if (Math.abs(dx) > 28 && Math.abs(dx) > Math.abs(dy)) { stepGun(dx < 0 ? 1 : -1); return; }
-    if (s.el) pick(shown[+s.el.dataset.i]);
+    if (Math.abs(dx) > 28 && Math.abs(dx) > Math.abs(dy)) { stepGun(dx < 0 ? 1 : -1); refresh(); return; }
+    if (s.el && pick(shown[+s.el.dataset.i])) refresh();
   }, { passive: false });
 
   addEventListener("keydown", function (ev) {
@@ -248,16 +402,17 @@
     const t = ev.target;
     if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
     const n = "123456789".indexOf(ev.key);
-    if (n < 0) return;
-    const e = M.selectableAt(shown, n);
+    if (n < 0 || blocked()) return;
+    const e = M.selectableAt(entries(), n);
     // the roll's digit, held, is the use input held (systems/helditems.js)
     if (e && e.kind === "bandage" && CBZ.heldItem && CBZ.heldItem.keyHold) { if (CBZ.heldItem.keyHold("bandage", ev.code || ev.key)) ev.preventDefault(); return; }
-    if (e && pick(e)) ev.preventDefault();
+    if (e && pick(e)) { ev.preventDefault(); refresh(); }
   });
 
   /* ---------------- pockets: automatic, not UI ----------------
      The prison's snacks and painkillers used to be cells you clicked. A man
-     who is starving and has a ramen eats the ramen. */
+     who is starving and has a ramen eats the ramen. (The city's own eating
+     and patching up is city/hunger.js.) */
   const FOOD = ["Ramen", "Energy Bar", "Energy Drink"];
   let autoT = 0;
   function autoConsume(dt) {
@@ -285,11 +440,23 @@
   }
 
   /* ---------------- the tick ---------------- */
+  // the city hides the bar behind the wheel (the car's own cluster owns the
+  // bottom of the glass; on touch the bar stays, it is the input) and under
+  // the [Shift+O] clean-frame toggle
+  function cityHidden() {
+    if (!city()) return false;
+    const P = CBZ.player;
+    const touch = !!(CBZ.touchMode || (document.body && document.body.classList && document.body.classList.contains("touch")));
+    if (P && P.driving && !touch) return true;
+    const CP = CBZ.cityCharPanel;
+    try { if (CP && CP.hudHidden && CP.hudHidden()) return true; } catch (e) {}
+    return false;
+  }
   let pollT = 0, retryT = 0;
   CBZ.onAlways(97, function (dt) {
     dt = dt || 0;
     const playing = CBZ.game && CBZ.game.state === "playing";
-    if (!playing || !barMode()) {
+    if (!playing || !barMode() || cityHidden()) {
       if (bar.style.display !== "none") bar.style.display = "none";
       return;
     }
@@ -313,7 +480,8 @@
   if (!CBZ.refreshInventory) CBZ.refreshInventory = function () {};
 
   /* RATCHET: CBZ.hotbarAudit() — what the bar is drawing, as numbers.
-     allowed must be true forever; guns must equal the weapons you own. */
+     allowed must be true forever; guns must equal the weapons you own;
+     bars must be 1 (no second inventory surface anywhere on the page). */
   CBZ.hotbarAudit = function () {
     const list = entries();
     const kinds = {};
@@ -322,6 +490,20 @@
       mode: mode(), cells: list.length, allowed: M.allowed(list), kinds: kinds,
       guns: kinds.gun || 0, owned: (CBZ.weaponInventory || []).length,
       shown: bar.style.display !== "none", screen: false,
+      bars: typeof document.querySelectorAll === "function" ? document.querySelectorAll("#hotbar, #cSlots, #invHotbar").length : 1,
     };
+  };
+
+  CBZ.inventory = {
+    entries: entries,
+    select: function (i) { const list = entries(); const ok = pick(list[i]); if (ok) refresh(); return ok; },
+    selectKind: function (kind) {
+      const list = entries();
+      for (let i = 0; i < list.length; i++) if (list[i].kind === kind) { const ok = pick(list[i]); if (ok) refresh(); return ok; }
+      return false;
+    },
+    onUse: function (kind, fn) { if (typeof fn === "function") useHooks[kind] = fn; else delete useHooks[kind]; },
+    onState: function (kind, fn) { if (typeof fn === "function") stateHooks[kind] = fn; else delete stateHooks[kind]; },
+    audit: CBZ.hotbarAudit,
   };
 })();

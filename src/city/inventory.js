@@ -21,8 +21,8 @@
    resync() reconciles the grid against truth with STABLE placement (the
    systems/inventory.js pattern): correctly-placed stacks never move.
 
-   HOTBAR: the city has ONE bar — CBZ.cityHotbar()/cityHotbarSelect
-   (fpsmode.js), drawn by city/hud.js (#cSlots). It is the inventory the
+   HOTBAR: every game has ONE bar, systems/inventory.js (#hotbar, the
+   prison bar, CBZ.inventory). It is the inventory the
    player sees; this module keeps the truth behind it (drops, chests,
    death) and draws no bar of its own. (A fallback #invHotbar used to live
    here; css/city.css hid it in every city frame, so it was deleted.)
@@ -548,8 +548,8 @@
       if (d.ammo > 0 && CBZ.fpsAddAmmo) { try { CBZ.fpsAddAmmo(d.ammo, d.weaponId); } catch (e) {} }
       note("Picked up " + gunName(d.weaponId), 1.4);
     } else if (d.melee) {
-      if (g.cityMeleeWeapon && g.cityMeleeWeapon !== d.melee) { if (E) E.add(d.melee, 1); }   // hands full → into the bag
-      else g.cityMeleeWeapon = d.melee;
+      if ((g.cityMeleeWeapon || g.cityMeleeStowed) && (g.cityMeleeWeapon || g.cityMeleeStowed) !== d.melee) { if (E) E.add(d.melee, 1); }   // belt full → into the bag
+      else { g.cityMeleeWeapon = d.melee; g.cityMeleeStowed = null; }
       note("Picked up " + d.melee, 1.4);
     } else if (d.name) {
       if (E) E.add(d.name, d.count || 1);
@@ -1057,7 +1057,7 @@
     const s = grid[i];
 
     // SHIFT + RIGHT-CLICK: USE the thing. The hotbar is still the primary way
-    // to eat (a number key, and a tap on touch — see hud.js's #cSlots), but a
+    // to use things (a number key, a tap on touch: systems/inventory.js), but a
     // bag you can only rearrange is the "you can't even hold it" complaint, so
     // the grid gets the verb too. Deliberately NOT plain right-click: that is
     // the Minecraft stack split and it has to stay. Chest grids are excluded —

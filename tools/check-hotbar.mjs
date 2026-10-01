@@ -53,6 +53,29 @@ for (const mode of ["escape", "gungame", "survival", "sharksim"]) {
 const hol = M.build({ mode: "escape", guns: ["sidearm", "ak47"], held: "ak47", holstered: true });
 ok(hol.every((e) => !e.active), "holstered escape still lights a gun");
 
+// GANG CITY runs the same model (2026-09-30): guns, the bat on the belt, a
+// stack of frags, the light, the phone, then the cards and keys it carries
+{
+  const c = M.build({
+    mode: "city", guns: ["sidearm", "ak47"], held: "ak47", holstered: true,
+    melee: { name: "Bat", active: true },
+    items: [{ kind: "throwable", item: "Grenade", held: "grenade", count: 3, active: false }],
+    flashlight: { owned: true, on: false },
+    phone: { active: false, unread: true },
+    cards: ["Officer's Keycard"], keys: ["Vault Key - Meridian Trust"],
+  });
+  ok(M.allowed(c), "city: disallowed kind " + JSON.stringify(c.map((e) => e.kind)));
+  ok(c.map((e) => e.kind).join(",") === "gun,gun,melee,throwable,flashlight,phone,keycard,key", "city: draw order " + c.map((e) => e.kind).join(","));
+  ok(c.filter((e) => e.active).length === 1 && c.find((e) => e.active).kind === "melee", "city: the bat in hand is the one lit cell");
+  ok(M.selectableAt(c, 5).kind === "phone" && M.selectableAt(c, 6) === null, "city: digit 6 is the phone, digit 7 nothing (cards and keys are passive)");
+  ok(c.find((e) => e.kind === "phone").unread, "city: the phone carries its unread LED");
+  ok(M.signature(c) !== M.signature(M.build({ mode: "city", guns: ["sidearm", "ak47"], held: "ak47", holstered: true, melee: { name: "Bat", active: true },
+    items: [{ kind: "throwable", item: "Grenade", held: "grenade", count: 2 }], flashlight: { owned: true }, phone: { unread: true },
+    cards: ["Officer's Keycard"], keys: ["Vault Key - Meridian Trust"] })), "city: throwing one frag must repaint the bar");
+  const p = M.build({ mode: "escape", phone: null, melee: null, keys: ["Vault Key - Meridian Trust", "Gate Key"] });
+  ok(p.length === 1 && p[0].name === "Gate Key", "prison: only the four real door keys exist there");
+}
+
 // ---- 2. the renderer against a stub DOM ----
 function el() {
   return {
@@ -105,5 +128,43 @@ for (const n of [0, 1, 3, 9, 14]) {
   ok(audit.allowed && audit.guns === n && audit.screen === false, `audit n=${n}: ${JSON.stringify(audit)}`);
 }
 
-console.log(fails ? `hotbar check: ${fails} failure(s)` : "hotbar check: OK (model allow-list, 0..14 guns, renderer, audit)");
+// ---- 3. the SAME renderer in Gang City ----
+{
+  let opened = 0, holsterCalls = 0, selected = null;
+  CBZ.game = { mode: "city", state: "playing", cityInv: { "Officer's Keycard": 1, "Vault Key - Meridian Trust": 1, Ramen: 4, Weed: 9 }, cityMeleeStowed: "Bat" };
+  CBZ.weaponInventory = ["sidearm", "ak47"];
+  CBZ.currentWeaponId = "ak47";
+  CBZ.cityOpenPhone = () => { opened++; };
+  CBZ.cityHolster = () => { holsterCalls++; return true; };
+  CBZ.fpsSelectWeaponId = (id) => { selected = id; return true; };
+  CBZ.player = { hp: 100, hunger: 80, driving: false };
+  for (const f of ticks) f(0.2);
+  const html = bar.innerHTML;
+  const kinds = (html.match(/class='hb (\w+)/g) || []).map((s) => s.slice(10));
+  ok(kinds.join(",") === "gun,gun,melee,flashlight,phone,keycard,key", "city render: " + kinds.join(","));
+  ok(!/Ramen|Weed/.test(html) && html.replace(/<[^>]*>/g, "").trim() === "", "city render: words or junk on the bar");
+  ok(bar.style.display === "flex", "city render: bar hidden");
+  const a = CBZ.hotbarAudit();
+  ok(a.mode === "city" && a.allowed && a.guns === 2 && a.bars === 1, "city audit: " + JSON.stringify(a));
+  // using things: the phone raises the phone, the bat comes out of the belt,
+  // a gun comes out and stows the bat, the lit gun goes back in the holster
+  ok(CBZ.inventory.selectKind("phone") && opened === 1, "city: the phone cell does not raise the phone");
+  ok(CBZ.inventory.selectKind("melee") && CBZ.game.cityMeleeWeapon === "Bat" && !CBZ.game.cityMeleeStowed, "city: the bat cell does not draw the bat");
+  ok(CBZ.inventory.select(0) && selected === "sidearm" && CBZ.game.cityMeleeStowed === "Bat" && !CBZ.game.cityMeleeWeapon, "city: drawing a gun must stow the bat");
+  CBZ.game.cityHolstered = false;
+  ok(CBZ.inventory.select(1) && holsterCalls === 1, "city: the gun in your hands, picked again, goes away");
+  // the phone builder's hook wins over every built-in phone
+  let hooked = 0;
+  CBZ.inventory.onUse("phone", () => { hooked++; return true; });
+  ok(CBZ.inventory.selectKind("phone") && hooked === 1 && opened === 1, "city: CBZ.inventory.onUse('phone') must own the phone cell");
+  CBZ.inventory.onUse("phone", null);
+  CBZ.phoneOpen = () => { opened += 10; };
+  ok(CBZ.inventory.selectKind("phone") && opened === 11, "city: CBZ.phoneOpen must win over the old city phone");
+  // behind the wheel on a keyboard the car owns the bottom of the glass
+  CBZ.player.driving = true;
+  for (const f of ticks) f(0.2);
+  ok(bar.style.display === "none", "city: the bar must leave while you drive (keyboard)");
+}
+
+console.log(fails ? `hotbar check: ${fails} failure(s)` : "hotbar check: OK (model allow-list, 0..14 guns, renderer, audit, Gang City on the same bar)");
 process.exit(fails ? 1 : 0);

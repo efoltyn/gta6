@@ -662,7 +662,7 @@
       game.wanted = 0; game.heat = 0; game.hunger = 100; game.tired = 0;
       game.respect = 0; game.kills = 0; game.busted = false; game.career = null;
       game.elapsed = 0; game.invuln = 0;
-      game.cityInv = {}; game.cityMeleeWeapon = null; game.cityBank = 0;
+      game.cityInv = {}; game.cityMeleeWeapon = null; game.cityMeleeStowed = null; game.cityBank = 0;
       game.cityActivity = null;
       // start unarmed in the ONE engine gun system; fresh mags. Buying/looting a
       // gun unlocks it in fpsmode (systems/fpsmode.js), which drives city gunplay.

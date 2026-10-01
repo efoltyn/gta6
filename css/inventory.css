@@ -1,7 +1,8 @@
 /* ============================================================
    inventory.css — THE HOTBAR (systems/inventory.js). The bar IS the
-   inventory: one clean row of real object renders (guns, the flashlight,
-   the keycard, door keys), no text, no stash screen, no bag button.
+   inventory of every game, prison and Gang City alike: one clean row of
+   real object renders (guns, the bat, grenades, the flashlight, the phone,
+   cards, door keys), no text, no stash screen, no bag button.
 
    MANY GUNS: the row never wraps and never scrolls off the glass. Cells
    shrink with the count (--hb-n, stamped by JS) down to a floor, the held
@@ -46,20 +47,27 @@
 #hotbar .hb.passive.first{ margin-left:8px; }
 #hotbar .hb.fresh{ animation:hbIn .5s ease-out; }
 @keyframes hbIn{ 0%{ transform:translateY(10px) scale(.7); opacity:0; } 100%{} }
+/* a stack (grenades, charges, gauze): one pip per thing, up to five */
+#hotbar .hb .pips{ position:absolute; left:50%; bottom:3px; transform:translateX(-50%); display:flex; gap:2px; pointer-events:none; }
+#hotbar .hb .pips b{ width:4px; height:4px; border-radius:50%; background:rgba(236,240,246,.85); box-shadow:0 0 2px rgba(0,0,0,.8); }
+/* the phone: a message waiting is a red LED on the handset, a call shakes it */
+#hotbar .hb.phone.unread::after{ content:""; position:absolute; right:5px; top:5px; width:7px; height:7px; border-radius:50%;
+  background:#ff6258; box-shadow:0 0 8px #ff6258; }
+#hotbar .hb.phone.buzz{ animation:hbBuzz .82s ease; }
+@keyframes hbBuzz{ 0%,100%{ transform:none; } 18%{ transform:translateY(-4px) rotate(-5deg); } 38%{ transform:translateY(-2px) rotate(5deg); } 58%{ transform:translateY(-1px) rotate(-3deg); } }
 
 /* CUFFED (systems/cuffedplayer.js stamps body.cuffed): hands behind your back,
-   so the bar goes grey and dead to the touch. No word, no lock icon. The city
-   draws its own bar (#cSlots), same treatment. */
-body.cuffed #hotbar, body.cuffed #cHud .cSlots, body.cuffed #weaponStrip{
+   so the bar goes grey and dead to the touch. No word, no lock icon. One bar,
+   every game, so this is the one rule. */
+body.cuffed #hotbar{
   opacity:.34 !important; filter:grayscale(1) brightness(.8); pointer-events:none !important;
   transition:opacity .25s, filter .25s;
 }
 body.cuffed #hotbar .hb.on{ transform:none; }
 
-/* legacy surfaces the bar replaced: the text stash strip and the keycard chip */
-#inventory, #keycard{ display:none !important; }
-/* fpsmode's floating weapon strip is never shown next to this bar */
-body:not(.mode-city) #weaponStrip{ display:none !important; }
+/* legacy surfaces the bar replaced: the text stash strip, the keycard chip and
+   fpsmode's floating weapon strip */
+#inventory, #keycard, #weaponStrip{ display:none !important; }
 
 @media (max-width:700px){
   #hotbar{ gap:4px; bottom:12px; --hb-cell:clamp(30px, calc((100vw - 32px) / var(--hb-n) - 4px), 48px); }

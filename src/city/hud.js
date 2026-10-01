@@ -19,10 +19,10 @@
        red, what does that even mean?"). Your body tells you: a flinch on
        every hit, and near the end heavy eyelids, dragging blinks, loud
        breath and a stagger (systems/eyes.js fed by systems/vitals.js).
-     • WEAPON (#cWpn): the ammo count shows ONLY while a gun is the thing in
-       your hands. The slot bar surfaces for ~2.5 s when the loadout changes
-       (you switched, holstered, picked up, ate), then fades. On touch it
-       stays up, because there it is the input.
+     • AMMO (#cWpn): the count shows ONLY while a gun is the thing in your
+       hands, riding just above the bar.
+     • THE BAR is not this file: systems/inventory.js's #hotbar, the prison's
+       inventory, is the one inventory of every game (2026-09-30).
      • NEXT STEP (#cObj): shows when a NEW objective line arrives, ~6 s, fades.
      • RETICLE (#cCross): only with a gun out on foot when fpsmode is not
        already drawing one.
@@ -34,20 +34,16 @@
    waypoint guide already says it), the ROUTE chip and progress sliver.
 
    PUBLIC API kept for the ~80 callers: CBZ.cityHudDirty, CBZ.cityFeed,
-   CBZ.cityFlavor (both route to the phone, never to the screen),
-   CBZ.weaponSlotsHTML + CBZ.weaponStripAudit (shared with the prison).
+   CBZ.cityFlavor (both route to the phone, never to the screen).
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ;
   const g = CBZ.game;
 
-  let root, hudEl, cashEl, deltaEl, wpnEl, slotsEl, ammoLineEl, objEl, radar, crossEl;
+  let root, hudEl, cashEl, deltaEl, wpnEl, ammoLineEl, objEl, radar, crossEl;
   let dirty = true;
 
-  function esc(s) { return String(s).replace(/[<>&]/g, function (c) { return c === "<" ? "&lt;" : c === ">" ? "&gt;" : "&amp;"; }); }
-  function nowMs() { return (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now(); }
-  function isTouch() { return !!(CBZ.touchMode || (document.body && document.body.classList.contains("touch"))); }
 
   function build() {
     if (root) return;
@@ -64,45 +60,17 @@
         "#cDelta{position:absolute;right:0;top:-18px;font-size:16px;font-weight:700;opacity:0;pointer-events:none;white-space:nowrap}" +
         "@keyframes cDeltaUp{0%{opacity:0;transform:translateY(6px)}18%{opacity:1}100%{opacity:0;transform:translateY(-14px)}}" +
         "#cObj{position:absolute;top:var(--hud-pad-t);left:50%;transform:translateX(-50%);max-width:56%;text-align:center;color:var(--hud-ink);font-size:15px;font-weight:600;text-shadow:0 1px 4px rgba(0,0,0,.85)}" +
-        // bottom-centre weapon cluster: slots over the ammo count
-        "#cWpn{position:absolute;left:50%;bottom:var(--hud-pad-b);transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:5px}" +
-        // ONE ROW, ALWAYS. A big arsenal never wraps into a second shelf: the
-        // cells shrink past eight, and past the screen the row scrolls sideways
-        // (no scrollbar) with the held chip kept in view by renderHotbar.
-        "#cHud .cSlots{position:relative;display:flex;gap:4px;justify-content:flex-start;flex-wrap:nowrap;max-width:min(520px,calc(100vw - 32px));overflow-x:auto;overflow-y:hidden;scrollbar-width:none;touch-action:pan-x;overscroll-behavior:contain}" +
-        "#cHud .cSlots::-webkit-scrollbar{display:none}" +
-        "body.touch #cHud .cSlots{max-width:max(150px,calc(100vw - 380px))}" +
-        "#cHud .cSlots>.cSlot{flex:0 0 auto}" +
-        "#cHud .cSlots.many .cSlot{width:34px;height:34px}#cHud .cSlots.many .cSlot .gunModel{width:30px;height:20px}#cHud .cSlots.many .cSlot .itemIcn{width:22px;height:22px}" +
-        "#cHud .cSlots.fade.on{pointer-events:auto}" +
-        "body.touch #cHud .cSlots.fade{opacity:.8;pointer-events:auto}" +
-        "#cHud .cSlot{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;width:40px;height:40px;box-sizing:border-box;padding:2px;border-radius:6px;background:rgba(8,11,17,.55);border:1px solid rgba(232,236,242,.12);pointer-events:inherit;cursor:pointer}" +
-        "#cHud .cSlot.held{border-color:rgba(232,236,242,.85);box-shadow:0 0 0 1px rgba(232,236,242,.4);background:rgba(20,26,36,.72)}" +
-        "#cHud .cSlot.flashlight img{display:block;width:30px;height:30px;object-fit:contain;pointer-events:none;filter:drop-shadow(0 2px 2px rgba(0,0,0,.8))}" +
-        "#cHud .cSlot.flashlight.held img{filter:drop-shadow(0 0 5px rgba(255,236,170,.9)) drop-shadow(0 2px 2px rgba(0,0,0,.8))}" +
-        "#cHud .cSlot .key{display:none}" +
-        "#cHud .cSlot>.ic{font-size:17px;line-height:1;color:var(--hud-ink)}" +
-        "#cHud .cSlot .ic.gun{font-size:18px;transform:scaleX(1.25)}" +
-        "#cHud .cSlot .gunModel{display:block;width:36px;height:24px;object-fit:contain;pointer-events:none;filter:drop-shadow(0 2px 2px rgba(0,0,0,.8))}" +
-        "#cHud .cSlot .itemIcn{width:26px;height:26px}" +
-        "#cHud .cSlot .a{font-size:9px;color:var(--hud-dim);line-height:1}" +
-        "#cHud .cSlot .a.dry{color:#ff7a6a;font-weight:700}" +
-        "#cHud .cSlot .cnt{position:absolute;right:2px;bottom:1px;font-size:9px;font-weight:700;color:var(--hud-ink);text-shadow:1px 1px 0 #000}" +
-        "#cHud .cSlot .led{position:absolute;right:3px;top:3px;width:6px;height:6px;border-radius:50%;background:transparent}" +
-        "#cHud .cSlot.unread .led{background:#ff6258;box-shadow:0 0 8px #ff6258}" +
-        "#cHud .cSlot.buzz{animation:cPhoneBuzz .82s ease}" +
-        "@keyframes cPhoneBuzz{0%,100%{transform:translateY(0) rotate(0)}18%{transform:translateY(-4px) rotate(-5deg)}38%{transform:translateY(-2px) rotate(5deg)}58%{transform:translateY(-1px) rotate(-3deg)}}" +
+        // bottom-centre: the live ammo count, riding just above the one bar
+        // (systems/inventory.js #hotbar, css/inventory.css: bottom 16 + cells)
+        "#cWpn{position:absolute;left:50%;bottom:calc(var(--hud-pad-b) + 54px);transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:5px;pointer-events:none}" +
         "#cAmmo{font-size:13px;color:var(--hud-ink);font-weight:600;text-shadow:0 1px 3px rgba(0,0,0,.8);opacity:.9;min-height:1px}" +
         "#cAmmo b{font-size:20px;font-weight:700}" +
         "#cAmmo .res{color:var(--hud-dim)}" +
         "#cAmmo .rl{color:#ffd166}" +
         "#cRadar{position:absolute;left:var(--hud-pad-l);bottom:var(--hud-pad-b);width:132px;height:132px;border-radius:50%;opacity:.9;box-shadow:0 4px 14px rgba(0,0,0,.45)}" +
-        "@media (max-width:900px),(max-height:560px){#cRadar{width:108px;height:108px}#cMoney{font-size:21px}#cHud .cSlot{width:34px;height:34px}#cHud .cSlot .gunModel{width:30px;height:20px}#cHud .cSlot .itemIcn{width:22px;height:22px}#cHud .cSlots.many .cSlot{width:30px;height:30px}#cHud .cSlots.many .cSlot .gunModel{width:26px;height:18px}#cHud .cSlots.many .cSlot .itemIcn,#cHud .cSlot.flashlight img{width:20px;height:20px}}";
+        "@media (max-width:900px),(max-height:560px){#cRadar{width:108px;height:108px}#cMoney{font-size:21px}#cWpn{bottom:calc(var(--hud-pad-b) + 44px)}}";
       document.head.appendChild(st);
     }
-    // shared item-pictogram sizing (city/itemicons.js), so hotbar item chips
-    // are sized whether or not the [I] grid ever opened.
-    if (CBZ.itemIconCss) { try { CBZ.itemIconCss(); } catch (e) {} }
     root = document.createElement("div");
     root.id = "cityHud";
     root.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:20;display:none;font-family:Fredoka,system-ui,sans-serif";
@@ -113,7 +81,7 @@
       "  <div class='fade' id='cCash' style='position:relative;display:inline-block'><div id='cMoney'>$0</div><div id='cDelta'></div></div>" +
       "</div>" +
       "<div id='cObj' class='fade'></div>" +
-      "<div id='cWpn'><div id='cSlots' class='cSlots fade'></div><div id='cAmmo'></div></div>" +
+      "<div id='cWpn'><div id='cAmmo'></div></div>" +
       "<canvas id='cRadar' width='190' height='190'></canvas>" +
       "<div id='cCross' style='position:absolute;left:50%;top:50%;width:7px;height:7px;margin:-4px 0 0 -4px;border:2px solid rgba(232,236,242,.85);border-radius:50%;display:none'></div>" +
       "</div>";
@@ -121,21 +89,10 @@
     hudEl = root.querySelector("#cHud");
     cashEl = root.querySelector("#cMoney"); deltaEl = root.querySelector("#cDelta");
     wpnEl = root.querySelector("#cWpn");
-    slotsEl = root.querySelector("#cSlots"); ammoLineEl = root.querySelector("#cAmmo");
+    ammoLineEl = root.querySelector("#cAmmo");
     objEl = root.querySelector("#cObj");
     radar = root.querySelector("#cRadar");
     crossEl = root.querySelector("#cCross");
-    // CLICK/TAP-TO-SELECT on the bar. Chips carry data-bi (the bar index); a
-    // tap routes to CBZ.cityHotbarSelect (draw / put away a gun, throw, lamp,
-    // phone).
-    slotsEl.addEventListener("click", function (ev) {
-      const chip = ev.target && ev.target.closest ? ev.target.closest(".cSlot[data-bi]") : null;
-      if (!chip) return;
-      if (g.mode !== "city" || g.state !== "playing") return;
-      if (CBZ.cityMenuOpen || (CBZ.fullMap && CBZ.fullMap.active)) return;
-      const bi = parseInt(chip.getAttribute("data-bi"), 10);
-      if (bi >= 0 && CBZ.cityHotbarSelect) { CBZ.cityHotbarSelect(bi); dirty = true; }
-    });
   }
 
   // ---- reveal-then-fade: an element lifts to .on and drops back after holdMs
@@ -582,349 +539,53 @@
     reveal(objEl, first ? 7000 : 6000);
   }
 
-  // ---- WEAPON HOTBAR — bring the city loadout up to jail's clarity, reading the
-  //      engine's AUTHORITATIVE weapon state: CBZ.weaponInventory (owned ids) →
-  //      CBZ.FPS_WEAPONS (labels/short/slot), CBZ.currentWeaponId (held), and the
-  //      live mag/reserve out of CBZ.fps.rounds/reserves (the SAME source fpsmode's
-  //      setAmmoHud() reads). City melee (g.cityMeleeWeapon) is a held slot too; an
-  //      empty inventory shows a single "Fists" slot. All guarded — degrades to a
-  //      bare Fists slot if the engine weapon tables aren't loaded. -----------------
+  // ---- AMMO — the one number the city keeps under the gun. The things you
+  //      carry are the ONE bar, systems/inventory.js's #hotbar (the prison's
+  //      bar, the same code in every game); this file used to draw a second
+  //      bar here (#cSlots) with its own tap handler, digit map and word-strip
+  //      fallback (CBZ.weaponSlotsHTML). Deleted 2026-09-30. What is left is
+  //      the live mag / reserve of the gun in your hands, read from the same
+  //      engine store fpsmode's setAmmoHud() reads. -----------------------------
   function weaponMetaById(id) {
     const T = CBZ.FPS_WEAPONS;
     if (!T) return null;
     for (let i = 0; i < T.length; i++) { const w = T[i]; if (w && (w.id === id || w.key === id)) return { w: w, i: i }; }
     return null;
   }
-  // a unified-bar gun entry carries label/short (not the engine weapon index); map
-  // it back to its FPS_WEAPONS row so the chip can show live mag/reserve (DRY) and
-  // the big ammo line, exactly as before. Matched by label first, then short.
-  function weaponMetaByLabel(label, short) {
-    const T = CBZ.FPS_WEAPONS;
-    if (!T) return null;
-    for (let i = 0; i < T.length; i++) { const w = T[i]; if (w && (w.label === label || (short && w.short === short))) return { w: w, i: i }; }
-    return null;
-  }
-  // THE FACE OF A USABLE-ITEM CHIP. This used to read two local glyph tables
-  // (LOOT_ITEM_ICON / LOOT_ICON) that the repo-wide emoji strip had emptied to
-  // "" — so every food, drug and throwable on the bar drew the bare "▣"
-  // fallback below. city/itemicons.js draws the real pictogram from the item's
-  // KIND, which also covers everything registered at runtime (species meat,
-  // pelts, the fishing catch, C4, produce) that no name table could reach.
-  // Degrade-safe: no module / flag off -> the old expression exactly.
-  // THE LEAD'S ONE FACE BOOK (systems/inventory.js CBZ.hotbarFace) when it is
-  // loaded, so the city bar and the prison bar draw a thing identically; the
-  // city's own photographs otherwise.
-  function hotbarFace(entry) {
-    if (typeof CBZ.hotbarFace === "function") { try { const h = CBZ.hotbarFace(entry); if (h) return h; } catch (e) {} }
-    if (entry.kind === "phone") return hotbarItemFace("Phone", null);
-    return "";
-  }
-  function flashlightFace(on) {
-    const h = hotbarFace({ kind: "flashlight", on: !!on });
-    if (h) return h;
-    let src = "";
-    try { if (CBZ.flashlightThumbnail) src = CBZ.flashlightThumbnail(); } catch (e) { src = ""; }
-    return src ? "<img src='" + src + "' alt=''>" : hotbarItemFace("Flashlight", null);
-  }
-  // a scrolled row keeps the chip in your hands on screen
-  function keepHeldInView() {
-    if (!slotsEl || slotsEl.scrollWidth <= slotsEl.clientWidth + 1) return;
-    const h = slotsEl.querySelector(".cSlot.held");
-    if (!h) return;
-    const l = h.offsetLeft, r = l + h.offsetWidth;          // .cSlots is the offsetParent
-    if (l < slotsEl.scrollLeft) slotsEl.scrollLeft = l - 4;
-    else if (r > slotsEl.scrollLeft + slotsEl.clientWidth) slotsEl.scrollLeft = r - slotsEl.clientWidth + 4;
-  }
-  function hotbarItemFace(name, item) {
-    if (CBZ.itemIconHtml) { const h = CBZ.itemIconHtml(name, item); if (h) return h; }
-    return "<span class='ic'>▣</span>";
-  }
-  // The model in the player's hands and the full inventory panel carry weapon
-  // names.  The moving HUD uses only a compact silhouette family so it never
-  // recreates the old FIST / 9MM / 556 / RPG word strip.
-  function hotbarGunGlyph(meta) {
-    const w = meta && meta.w;
-    const id = String((w && (w.id || w.key || w.label || w.short)) || "").toLowerCase();
-    if (/rocket|rpg|bazooka|launcher/.test(id)) return "◎";
-    if (/shotgun|12/.test(id)) return "═";
-    if (/smg|machine|uzi/.test(id)) return "≋";
-    if (/rifle|carbine|556|5\.56/.test(id)) return "▰";
-    if (/pistol|sidearm|9mm/.test(id)) return "◒";
-    return "◆";
-  }
-  /* ============================================================
-     ONE BOXED WEAPON HOTBAR, TWO MODES (CBZ.CONFIG.WEAPON_STRIP_SHARED).
-
-     OWNER: "only one gun at a time shows in inventory unlike gang city."
-
-     He is right, and the cause is that the two modes were drawing from two
-     different things over the same array. There is ONE truth — CBZ.weaponInventory
-     (weapons/weapon-data.js) — and there were TWO renderers over it:
-
-       · this file's icon hotbar, which walks the whole inventory and gives each
-         gun its own boxed chip with a real rendered silhouette. This is the one
-         the owner means by "gang city";
-       · systems/fpsmode.js's `setWeaponStrip`, a row of bare WORDS
-         ("9MM / 12G / 762") that the city explicitly disables — and which is
-         all the prison ever had.
-
-     Meanwhile the 9-slot bag the prison DOES show (systems/inventory.js) carries
-     the legacy single "Gun" item that weapon-data.js keeps pointed at whatever
-     is currently in your hands. So three guns rendered as one chip. Not a bug in
-     any one file: two renderers and a proxy item, and nobody owning the answer.
-
-     BLOCK LAW: promote the better renderer, delete the worse one. This is that
-     component. One call, no ceremony, no state of its own — it reads the same
-     globals both callers already read — and it is degrade-safe by construction:
-     a caller that cannot find it keeps whatever it drew before.
-
-       CBZ.weaponSlotsHTML({icons})  ->  the .cSlot chip row for the FULL
-                                         inventory, held slot marked.
-
-     Consumers migrated in this same change: this file's legacy path (above) and
-     systems/fpsmode.js's strip, which now draws boxes instead of words — so the
-     prison gets the city's inventory bar and the text strip is gone.
-     Ratchet: CBZ.weaponStripAudit().renderers, pinned at 1.
-     ============================================================ */
-  CBZ.CONFIG = CBZ.CONFIG || {};
-  if (CBZ.CONFIG.WEAPON_STRIP_SHARED == null) CBZ.CONFIG.WEAPON_STRIP_SHARED = true;
-  CBZ.weaponSlotsHTML = function (opts) {
-    opts = opts || {};
-    const icons = !!opts.icons;
-    const fps2 = CBZ.fps;
-    const inv = (CBZ.weaponInventory && CBZ.weaponInventory.length) ? CBZ.weaponInventory : [];
-    const melee = CBZ.game.cityMeleeWeapon || null;   // Bat/Knife — held melee, not a gun
-    const heldGun = !melee && CBZ.currentWeaponId ? CBZ.currentWeaponId : null;
-    let html = "";
-
-    let slot = 1;
-    const key = function () { return "<span class='key'>" + (slot++) + "</span>"; };
-    // FISTS is the baseline, and it is a real slot: unarmed is a thing you can
-    // deliberately be, not the absence of a bar.
-    const fistsHeld = !melee && !heldGun;
-    if (!inv.length && !melee) {
-      html += "<div class='cSlot held'>" + key() + (icons ? "<span class='ic'></span>" : "<span class='s'>Fists</span>") + "</div>";
-    } else {
-      if (melee) {
-        html += "<div class='cSlot melee held'>" + key() +
-          (icons ? "<span class='ic'></span>" : "<span class='s'>" + esc(melee) + "</span>") + "</div>";
-      } else if (fistsHeld) {
-        html += "<div class='cSlot held'>" + key() + (icons ? "<span class='ic'></span>" : "<span class='s'>Fists</span>") + "</div>";
-      }
-      for (let k = 0; k < inv.length; k++) {
-        const id = inv[k];
-        const m = weaponMetaById(id);
-        if (!m) continue;
-        const lbl = m.w.short || m.w.label || id;
-        const held = (id === heldGun);
-        // ONE source of truth for ammo: the big line under the bar carries the
-        // HELD gun's live mag/reserve; slots stay clean. The only count that
-        // still matters at a glance is a stone-dry gun.
-        let ammoTxt = "";
-        if (!held && fps2 && fps2.rounds && fps2.reserves) {
-          const cur = (fps2.rounds[m.i] != null) ? fps2.rounds[m.i] : (m.w.mag || 0);
-          const res = (fps2.reserves[m.i] != null) ? fps2.reserves[m.i] : (m.w.reserve || 0);
-          if (cur + res <= 0) ammoTxt = "<span class='a dry'>" + (icons ? "∅" : "DRY") + "</span>";
-        }
-        html += "<div class='cSlot" + (held ? " held" : "") + "' data-weapon-id='" + esc(id) + "'>" + key() +
-          (icons ? hotbarGunFace(m, id) : "<span class='s'>" + esc(lbl) + "</span>") + ammoTxt + "</div>";
-      }
-    }
-    return html;
-  };
-  // how many guns the bar can actually SEE. `shown` must equal `held` — that
-  // equality IS the owner's complaint, as a number.
-  CBZ.weaponStripAudit = function () {
-    const inv = (CBZ.weaponInventory && CBZ.weaponInventory.length) ? CBZ.weaponInventory : [];
-    let shown = 0;
-    for (let k = 0; k < inv.length; k++) if (weaponMetaById(inv[k])) shown++;
-    return {
-      on: CBZ.CONFIG.WEAPON_STRIP_SHARED !== false,
-      renderers: 1,                       // pinned: this function is the only one
-      held: inv.length, shown: shown,     // must be equal
-      melee: !!CBZ.game.cityMeleeWeapon,
-      textStrip: false,                   // fpsmode's word row is gone
-    };
-  };
-
-  function hotbarGunFace(meta, directId) {
-    const w = meta && meta.w;
-    // Unified hotbar entries already carry the canonical engine id. Prefer it
-    // over a label round-trip so every gun gets the exact same procedural
-    // thumbnail used by the full I inventory. That "exact same" is now literal:
-    // city/itemicons.js photographs guns through the ONE offscreen camera every
-    // other item in the bar goes through, so the pistol chip and the medkit chip
-    // beside it are lit and framed identically instead of coming from two
-    // renderers with two frames. weaponThumbnail stays as the degrade.
-    const id = directId || (w && (w.id || w.key));
-    let src = "";
-    try { if (id && CBZ.itemIconGun) src = CBZ.itemIconGun(id); } catch (e) {}
-    if (!src) { try { if (id && CBZ.weaponThumbnail) src = CBZ.weaponThumbnail(id); } catch (e) {} }
-    return src ? "<img class='gunModel' src='" + src + "' alt=''>"
-      : "<span class='ic gun'>" + hotbarGunGlyph(meta) + "</span>";
-  }
-  function ammoReadout(cur, mag, reserve, reloading) {
+  function ammoReadout(cur, reserve, reloading) {
     // Instrumentation only: reload is a glyph and all remaining characters are
     // numbers. The old RELOADING/RES prose repeated what the animation conveys.
     return (reloading ? "<span class='rl'>↻</span> " : "") +
       "<b>" + cur + "</b><span class='res'> / " + reserve + "</span>";
   }
-  function renderHotbar() {
-    if (!slotsEl) return;
-    const fps = CBZ.fps;                            // engine ammo store (guarded)
-    // city-only: drive the UNIFIED bar (holster + guns + usable items) when the
-    // API is present. Outside city (jail/survival) fall back to the legacy
-    // owned-guns/melee render so those modes are byte-identical.
-    const useUnified = g.mode === "city" && typeof CBZ.cityHotbar === "function";
-    let line = "";
-    if (useUnified) {
-      let bar = null;
-      try { bar = CBZ.cityHotbar(); } catch (e) { bar = null; }
-      if (bar) {
-        const ITEMS = (CBZ.cityEcon && CBZ.cityEcon.ITEMS) || {};
-        let html = "";
-        for (let bi = 0; bi < bar.length; bi++) {
-          const e = bar[bi];
-          const held = !!e.active;
-          if (e.kind === "gun") {
-            // The real gun, photographed. Empty is the only mark (∅); live
-            // rounds stay in the numeric ammo instrument below.
-            const m = weaponMetaById(e.id) || weaponMetaByLabel(e.label, e.short);
-            let ammoTxt = "";
-            if (!held && m && fps && fps.rounds && fps.reserves) {
-              const cur = (fps.rounds[m.i] != null) ? fps.rounds[m.i] : (m.w.mag || 0);
-              const res = (fps.reserves[m.i] != null) ? fps.reserves[m.i] : (m.w.reserve || 0);
-              if (cur + res <= 0) ammoTxt = "<span class='a dry'>∅</span>";
-            }
-            html += "<div class='cSlot" + (held ? " held" : "") + "' data-bi='" + bi + "'>" +
-              hotbarGunFace(m, e.id) + ammoTxt + "</div>";
-          } else if (e.kind === "throwable") {
-            // A grenade / a brick of C4: its drawn object + how many you carry.
-            const iname = e.item || e.label;
-            const cnt = (e.count != null && e.count > 1) ? "<span class='cnt'>×" + (e.count | 0) + "</span>" : "";
-            html += "<div class='cSlot item" + (held ? " held" : "") + "' data-bi='" + bi + "'>" + hotbarItemFace(iname, ITEMS[iname]) + cnt + "</div>";
-          } else if (e.kind === "detonator") {
-            // the firing device itself, lit while it is the thing in your hand
-            html += "<div class='cSlot item detonator" + (held ? " held" : "") + "' data-bi='" + bi + "'>" +
-              (CBZ.detonatorFaceHtml ? CBZ.detonatorFaceHtml() : "") + "</div>";
-          } else if (e.kind === "flashlight") {
-            // The torch itself, lit like a held gun while it is on.
-            html += "<div class='cSlot flashlight" + (held ? " held" : "") + "' data-bi='" + bi + "'>" +
-              flashlightFace(held) + "</div>";
-          } else if (e.kind === "bandage") {
-            // The roll of gauze itself (systems/vitals.js spends one per wrap)
-            // and how many you carry.
-            const cnt = (e.count != null && e.count > 1) ? "<span class='cnt'>×" + (e.count | 0) + "</span>" : "";
-            html += "<div class='cSlot item bandage" + (held ? " held" : "") + "' data-bi='" + bi + "'>" +
-              (hotbarFace(e) || hotbarItemFace("Bandage", ITEMS.Bandage)) + cnt + "</div>";
-          } else if (e.kind === "phone") {
-            // The handset as a carried thing, never the word PHONE.
-            html += "<div class='cSlot item phone" + (held ? " held" : "") +
-              (e.unread ? " unread" : "") + (e.buzz ? " buzz" : "") + "' data-bi='" + bi + "'>" +
-              hotbarFace({ kind: "phone" }) + "<i class='led' aria-hidden='true'></i></div>";
-          }
-        }
-        const many = bar.length > 8;
-        if (slotsEl._many !== many) { slotsEl._many = many; slotsEl.classList.toggle("many", many); }
-        wHTML(slotsEl, html);
-        keepHeldInView();
-        // the prominent equipped-weapon ammo line (jail-style big mag / reserve) for
-        // whichever gun is the active entry; holster/items show no ammo here.
-        for (let bi = 0; bi < bar.length; bi++) {
-          const e = bar[bi];
-          if (e.kind !== "gun" || !e.active) continue;
-          const m = weaponMetaById(e.id) || weaponMetaByLabel(e.label, e.short);
-          let cur = 0, mag = 0, res = 0, reloading = false;
-          // effective mag capacity respects a fitted extended/drum mag (gunmods.js)
-          const magCap = m ? (CBZ.gunModsMag ? CBZ.gunModsMag(m.w.id || m.w.key, m.w.mag || 0) : (m.w.mag || 0)) : 0;
-          if (m && fps && fps.rounds && fps.reserves) {
-            cur = (fps.rounds[m.i] != null) ? fps.rounds[m.i] : magCap;
-            res = (fps.reserves[m.i] != null) ? fps.reserves[m.i] : (m.w.reserve || 0);
-            mag = magCap;
-            reloading = (m.i === fps.weapon) && (fps.reloading > 0);
-          } else if (m) { cur = magCap; mag = magCap; res = m.w.reserve || 0; }
-          line = ammoReadout(cur, mag, res, reloading);
-          break;
-        }
-        wHTML(ammoLineEl, line);
-        return;
-      }
-    }
-    // ---- LEGACY path (non-city, or the API not yet loaded) — now the SHARED
-    //      renderer, which the prison also draws through. See CBZ.weaponSlotsHTML.
-    wHTML(slotsEl, CBZ.weaponSlotsHTML({ icons: g.mode === "city" }));
-    const inv = (CBZ.weaponInventory && CBZ.weaponInventory.length) ? CBZ.weaponInventory : [];
-    const melee = g.cityMeleeWeapon || null;        // Bat/Knife — a held melee, not a gun
-    const heldGun = !melee && CBZ.currentWeaponId ? CBZ.currentWeaponId : null;
-    // the prominent equipped-weapon ammo line (jail-style big mag / reserve). For a
-    // gun we read fps live state for the CURRENT weapon; melee/fists show no ammo.
-    if (heldGun) {
-      const m = weaponMetaById(heldGun);
-      let cur = 0, mag = 0, res = 0, reloading = false;
-      if (m && fps && fps.rounds && fps.reserves) {
-        cur = (fps.rounds[m.i] != null) ? fps.rounds[m.i] : (m.w.mag || 0);
-        res = (fps.reserves[m.i] != null) ? fps.reserves[m.i] : (m.w.reserve || 0);
-        mag = m.w.mag || 0;
-        reloading = (m.i === fps.weapon) && (fps.reloading > 0);
-      } else if (m) { cur = m.w.mag || 0; mag = m.w.mag || 0; res = m.w.reserve || 0; }
-      line = ammoReadout(cur, mag, res, reloading);
-    }
-    // melee / fists show NOTHING here — the lit chip already names them; a
-    // "Bat — melee" caption under a lit Bat chip was the HUD reading itself
-    // aloud (F6).
-    wHTML(ammoLineEl, line);
+  // the gun in your hands, or null (holstered, the bat out, cuffed, nothing)
+  function heldGun() {
+    if (CBZ.cityHasGun && !CBZ.cityHasGun()) return null;
+    return CBZ.currentWeaponId ? weaponMetaById(CBZ.currentWeaponId) : null;
   }
-
   function wHTML(el, h) { if (el && el._cbzH !== h) { el._cbzH = h; el.innerHTML = h; } }
-
-  let ammoSig = "";
-  // a compact signature of the UNIFIED bar (holster state + each entry's
-  // active/label + item counts) plus the held gun's live mag/reserve/reload. The
-  // bar re-renders only when one of these actually changes — so number-key/click
-  // selection, holstering, picking up a gun, or eating an item all refresh the
-  // chips, while plain firing only touches the DOM on a real ammo change.
-  function unifiedBarSig() {
-    let bar = null;
-    try { bar = CBZ.cityHotbar(); } catch (e) { bar = null; }
-    if (!bar) return "x";
-    let s = (g.cityHolstered ? "H" : "h");
+  function renderAmmo() {
+    const m = heldGun();
+    if (!m) { wHTML(ammoLineEl, ""); return; }
     const fps = CBZ.fps;
-    for (let i = 0; i < bar.length; i++) {
-      const e = bar[i];
-      s += "|" + (e.kind || "") + ":" + (e.short || e.label || "") + (e.active ? "*" : "");
-      if (e.kind === "throwable" || e.kind === "detonator") s += "#" + (e.count | 0);
-      // the phone chip's LED and buzz are state the bar must repaint on
-      if (e.kind === "phone") s += (e.unread ? "u" : "") + (e.buzz ? "z" : "");
-      if (e.kind === "gun" && e.active && fps && fps.rounds && fps.reserves) {
-        const m = weaponMetaById(e.id) || weaponMetaByLabel(e.label, e.short);
-        const k = m ? m.i : -1;
-        s += "@" + (k >= 0 ? fps.rounds[k] : "") + "/" + (k >= 0 ? fps.reserves[k] : "") + (fps.reloading > 0 ? "r" : "");
-      }
+    // effective mag capacity respects a fitted extended/drum mag (gunmods.js)
+    const magCap = CBZ.gunModsMag ? CBZ.gunModsMag(m.w.id || m.w.key, m.w.mag || 0) : (m.w.mag || 0);
+    let cur = magCap, res = m.w.reserve || 0, reloading = false;
+    if (fps && fps.rounds && fps.reserves) {
+      cur = (fps.rounds[m.i] != null) ? fps.rounds[m.i] : magCap;
+      res = (fps.reserves[m.i] != null) ? fps.reserves[m.i] : (m.w.reserve || 0);
+      reloading = (m.i === fps.weapon) && (fps.reloading > 0);
     }
-    return s;
+    wHTML(ammoLineEl, ammoReadout(cur, res, reloading));
   }
+  let ammoSig = "";
   function refreshAmmoLive() {
-    const fps = CBZ.fps;
-    const melee = g.cityMeleeWeapon || null;
-    const heldGun = !melee && CBZ.currentWeaponId ? CBZ.currentWeaponId : null;
-    let sig;
-    if (g.mode === "city" && typeof CBZ.cityHotbar === "function") {
-      // city: signature spans the whole unified bar so holster/item/select changes
-      // re-render too (legacy ammo-only sig missed those).
-      sig = unifiedBarSig();
-    } else if (heldGun && fps && fps.rounds && fps.reserves) {
-      const m = weaponMetaById(heldGun);
-      const i = m ? m.i : -1;
-      sig = heldGun + "|" + (i >= 0 ? fps.rounds[i] : "") + "|" + (i >= 0 ? fps.reserves[i] : "") + "|" + (fps.reloading > 0 ? 1 : 0);
-    } else {
-      sig = (melee || "fists");
-    }
+    const m = heldGun(), fps = CBZ.fps;
+    const sig = !m ? "-" : m.i + "|" + (fps && fps.rounds ? fps.rounds[m.i] : "") + "|" + (fps && fps.reserves ? fps.reserves[m.i] : "") + "|" + (fps && fps.reloading > 0 ? 1 : 0);
     if (sig === ammoSig) return;
     ammoSig = sig;
-    renderHotbar();
+    renderAmmo();
   }
-
-
   // ---- cash: invisible at rest; a change shows the total + a floating delta
   //      for ~3 s, then it fades. ----
   let lastCash = null;
@@ -943,17 +604,7 @@
     lastCash = c;
   }
 
-  // ---- the slot bar surfaces when the loadout's SHAPE changes (select,
-  //      holster, pick up, use up), not when a round leaves the magazine. ----
-  let barShapeSig = null;
   function syncWeapon(P) {
-    let shape = "";
-    if (typeof CBZ.cityHotbar === "function") shape = unifiedBarSig().replace(/@[^|]*/g, "");
-    if (shape !== barShapeSig) {
-      // never over the car's instrument cluster: no reveal behind the wheel
-      if (barShapeSig !== null && !P.driving) reveal(slotsEl, 2500);
-      barShapeSig = shape;
-    }
     // the ammo count exists only while a gun is the thing in your hands
     const gunOut = !!ammoLineEl.innerHTML && !P.driving && !P.dead;
     const disp = gunOut ? "" : "none";
@@ -971,7 +622,7 @@
     if (!show) return;
     const P = CBZ.player;
     showMoney();
-    if (dirty) { renderHotbar(); dirty = false; }
+    if (dirty) { ammoSig = ""; dirty = false; }
     // live ammo while firing/reloading (signature-guarded)
     refreshAmmoLive();
     syncWeapon(P);

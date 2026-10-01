@@ -233,7 +233,7 @@
     const stowed = g._copStow;
     w.weapons = (stowed && stowed.inv ? stowed.inv : (CBZ.weaponInventory || [])).slice();
     w.currentWeapon = (stowed && stowed.cur) || CBZ.currentWeaponId || null;
-    w.meleeWeapon = g.cityMeleeWeapon || null;
+    w.meleeWeapon = g.cityMeleeWeapon || g.cityMeleeStowed || null;   // a bat put away on the bar is still yours
     w.weapon = (CBZ.cityCurrentWeaponName && CBZ.cityCurrentWeaponName()) || w.meleeWeapon || null;
     w.criminalRecord.wantedPeak = Math.max(w.criminalRecord.wantedPeak || 0, g.wanted || 0);
     w.criminalRecord.heatPeak = Math.max(w.criminalRecord.heatPeak || 0, g.heat || 0);
@@ -262,7 +262,7 @@
     g.cityOutfit = copy(w.cityOutfit || {});
     g.cityFenceRep = w.cityFenceRep || 0;
     g.cityContacts = copy(w.cityContacts || []);
-    g.cityMeleeWeapon = w.meleeWeapon || null;
+    g.cityMeleeWeapon = w.meleeWeapon || null; g.cityMeleeStowed = null;
     // ---- property ladder + gang identity (LEDGER GAP fix). Restoring these
     // here covers the MP-adopt path and any future caller of applyToGame()
     // directly; the NORMAL single-player run path additionally relies on
