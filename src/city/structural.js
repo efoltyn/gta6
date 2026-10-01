@@ -1556,7 +1556,7 @@
     // Post to the city event bus so panic/police/news react to a building
     // coming down the same way they react to any other atrocity.
     try {
-      if (CBZ.cityEvent) CBZ.cityEvent("explosion", { x: b.ox, z: b.oz, panic: 60, damage: 40 }, { silent: true, noWanted: !rec.byPlayer });
+      if (CBZ.cityEvent) CBZ.cityEvent("explosion", { x: b.ox, z: b.oz, panic: 60, damage: 40, collapse: true, storeys: b.storeys | 0 }, { silent: true, noWanted: !rec.byPlayer });
     } catch (e) {}
   }
 

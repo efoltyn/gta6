@@ -76,6 +76,8 @@
       if (open_) render();
       return last;
     }
+    // the City Desk's news is also the TV's (city/newsroom.js); tv:false opts out
+    if (app === "news" && payload.tv !== false && CBZ.news && CBZ.news.wire) { try { CBZ.news.wire(text, from); } catch (e) {} }
     const item = { app: app, from: from, text: text, time: clockLabel(), born: now };
     noticeLog.push(item);
     if (noticeLog.length > NOTICE_CAP) noticeLog.splice(0, noticeLog.length - NOTICE_CAP);

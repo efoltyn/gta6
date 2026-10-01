@@ -542,6 +542,10 @@ document.body.appendChild(b);}}catch(e){}})();
      call. After materials.js (resolves addBox at call time); before its consumers
      lounge.js / cafeteria.js / clutter.js. -->
 <script src="src/city/furniture.js?v=pres0929b"></script>
+<!-- NEWS ONE (city/newsroom.js): the one news channel, its one canvas and
+     the one TV set, shared by every screen in the game. Before world/lounge.js
+     (the prison dayroom set) and every city/ room that hangs a TV. -->
+<script src="src/city/newsroom.js?v=news0930"></script>
 <!-- FURNITURE MOVES WHEN YOU WALK INTO IT (owner: "physics, not another
      f***ing button"). CBZ.pushables.add(spec) — still exported as CBZ.pushProp —
      makes a drawn prop a mass on a floor:
@@ -699,7 +703,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- 2c. rooms (use addBox + addPack) -->
 <script src="src/world/roombuild.js"></script>
 <script src="src/world/cafeteria.js?v=door929"></script>
-<script src="src/world/lounge.js?v=door929"></script>
+<script src="src/world/lounge.js?v=news0930"></script>
 <script src="src/world/gunroom.js?v=door929"></script>
 <script src="src/world/ventilation.js?v=m489457"></script>
 <script src="src/world/escape_routes.js?v=tow929"></script>
@@ -1025,7 +1029,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE QUAKE IS SHARED: systems/quake.js owns facade shedding, drop-cover,
      gas fires and downed lines for BOTH worlds (CITY_QUAKE for the city).
      Must precede systems/disasters.js so the roster finds CBZ.quake. -->
-<script src="src/systems/quake.js?v=mil0929"></script>
+<script src="src/systems/quake.js?v=news0930"></script>
 <!-- ==== PER-DISASTER MODULE SEAM ==========================================
      One line per disaster in the survival roster, each owned by exactly that
      disaster and nobody else. A disaster whose behaviour outgrows its entry in
@@ -1364,7 +1368,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/law.js?v=brainmoves1"></script>
 <script src="src/city/wanted.js?v=nored0930"></script>
 <script src="src/city/identity.js?v=perm1"></script>
-<script src="src/city/worldstate.js?v=allmain1"></script>
+<script src="src/city/worldstate.js?v=news0930"></script>
 <!-- THE ONE ORGANISATION LAYER. CBZ.factions.declare({id,ranks,wage,admission,bind})
      = a joinable, rankable, paying outfit. MUST precede gangs.js, careers.js,
      playergang.js, promotion.js, heists.js and militia.js — all declare at parse. -->
@@ -1425,7 +1429,7 @@ document.body.appendChild(b);}}catch(e){}})();
      seats) and vehicles.js / boarding.js / passengerseat.js (all read it). -->
 <script src="src/city/carseats.js?v=w09290242x"></script>
 <script src="src/city/playercars.js?v=pf0930e"></script>
-<script src="src/city/crashfx.js?v=mil0929"></script>
+<script src="src/city/crashfx.js?v=news0930"></script>
 <script src="src/city/crashdeform.js?v=boom2"></script>
 <script src="src/systems/skidmarks.js?v=skid1"></script>
 <script src="src/systems/dustfx.js?v=dust1"></script>
@@ -1539,7 +1543,7 @@ document.body.appendChild(b);}}catch(e){}})();
      to the collapse they had) · ?cfg_COLLAPSE_FRAGMENTS=0 (motion without
      debris) · ?cfg_COLLAPSE_SKIN=0 (no wound dressing). -->
 <script src="src/city/collapse.js?v=mil0929"></script>
-<script src="src/city/structural.js?v=mil0929"></script>
+<script src="src/city/structural.js?v=news0930"></script>
 <script src="src/city/nukefx.js?v=nukevol1"></script>
 <!-- CITY TORNADO: Rankine vortex, EF0-EF5, roof-first structural damage,
      thrown vehicles priced through the impact bus's kinetic row. Spawns from
@@ -1685,10 +1689,10 @@ document.body.appendChild(b);}}catch(e){}})();
      real fixtures) and freed when you leave. After storegoods (same lazy
      dresser shape), furniture.js (CBZ.furnish) and interior_programs.js
      (which declares every floor to it). -->
-<script src="src/city/fitout.js?v=pf0930e"></script>
-<script src="src/city/fitout_plans.js?v=deslop1"></script>
-<script src="src/city/fitout_work.js?v=deslop1-st1"></script>
-<script src="src/city/fitout_gang.js?v=deslop1-st1"></script>
+<script src="src/city/fitout.js?v=news0930"></script>
+<script src="src/city/fitout_plans.js?v=news0930"></script>
+<script src="src/city/fitout_work.js?v=news0930"></script>
+<script src="src/city/fitout_gang.js?v=news0930"></script>
 <script src="src/city/family.js?v=ekey2"></script>
 <script src="src/city/swim.js?v=sharkmode1"></script>
 <!-- TSUNAMI. The whole event is one number — the sea-level surge in
@@ -1698,9 +1702,9 @@ document.body.appendChild(b);}}catch(e){}})();
      mask, crowd.js's flee and the predator dread bus do all of it. Fires only
      on CBZ.cityTsunami() unless ?cfg_TSUNAMI_AUTO=1. After swim.js and
      waterfield.js. Revert with ?cfg_TSUNAMI=0. -->
-<script src="src/city/tsunami.js?v=tsureal2"></script>
+<script src="src/city/tsunami.js?v=news0930"></script>
 <script src="src/city/empire.js?v=nodash1"></script>
-<script src="src/city/construction.js?v=nodash1"></script>
+<script src="src/city/construction.js?v=news0930"></script>
 <script src="src/city/companies.js?v=fallstay1"></script>
 <script src="src/city/citystaff.js?v=staff1s"></script>
 <script src="src/city/playergang.js?v=cpd1"></script>
@@ -1711,14 +1715,14 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/cityevents.js?v=panic1"></script>
 <script src="src/city/story.js?v=night1"></script>
 <script src="src/city/wealth.js?v=nodash1"></script>
-<script src="src/city/turf.js?v=nodash1"></script>
+<script src="src/city/turf.js?v=news0930"></script>
 <script src="src/city/gangops.js?v=cd0929"></script>
 <!-- sims-overhaul wave 1: drivable military hardware + smart team combat (self-contained, self-registering via CBZ.interactions) -->
 <script src="src/city/militaryvehicles.js?v=mil0929"></script>
 <!-- STRATEGIC LAYER part 2 — the B-2 (registers into the militaryvehicles
      seam above), the bunker-buster and the nuke. Conventional blasts use the
      wrapped explosion chain; the nuke uses impactbus's analytic field. -->
-<script src="src/city/strategic.js?v=mil0929"></script>
+<script src="src/city/strategic.js?v=news0930"></script>
 <script src="src/city/squadai.js?v=sim1"></script>
 <script src="src/city/loyalty.js?v=cd0929"></script>
 <!-- sims-overhaul wave 2: living economy + universal housing + place/scene spawning + mini-cities + racing + destruction (additive, feature-detected, self-flagged) -->
@@ -1840,8 +1844,8 @@ document.body.appendChild(b);}}catch(e){}})();
      the player's guns drop on death. Needs economy/worldstate/combat/fpsmode/
      death.js/charpanel.js, all loaded above. -->
 <script src="src/city/inventory.js?v=tap0929"></script>
-<script src="src/city/phone.js?v=nodash1"></script>
-<script src="src/city/killfeed.js?v=sharkmode1"></script>
+<script src="src/city/phone.js?v=news0930"></script>
+<script src="src/city/killfeed.js?v=news0930"></script>
 <!-- THE MORGUE (DEATH_DROPS_V2 / CORPSE_PERSIST / EMS_RESPONSE): what a death
      leaves behind and who comes for it. Wraps cityKillPed + cityHurtCop the
      same way killfeed.js does — so it loads AFTER killfeed, leaving the feed
@@ -1865,14 +1869,14 @@ document.body.appendChild(b);}}catch(e){}})();
      hold it, the motel room that is his menu, the consequences of a kill. -->
 <script src="src/city/hitman_paper.js?v=inworld1"></script>
 <script src="src/city/hitman_hands.js?v=tap0929"></script>
-<script src="src/city/hitman_room.js?v=pf0930b"></script>
+<script src="src/city/hitman_room.js?v=news0930"></script>
 <script src="src/city/hitman.js?v=w09290219"></script>
 <script src="src/city/dossier.js?v=inworld1"></script>
 <script src="src/city/hitman_fallout.js?v=w09290219"></script>
 <script src="src/city/agency.js?v=cd0929"></script>
 <!-- Canonical story layer: the diegetic phone mounts first, then the campaign
      director drives the rooftop arrest, prison choice and contract chain. -->
-<script src="src/city/campaign_ui.js?v=markphoto1"></script>
+<script src="src/city/campaign_ui.js?v=news0930"></script>
 <script src="src/city/campaign.js?v=ekey2"></script>
 <script src="src/city/cinematics.js?v=cd0929"></script>
 <script src="src/systems/humancontact.js?v=w09290242x"></script>
@@ -2307,7 +2311,7 @@ document.body.appendChild(b);}}catch(e){}})();
      jail's transport). AFTER govcomplex.js (reads CBZ.govComplexes); every
      other read is feature-detected and lazily retried.
      Revert with ?cfg_PRESIDENCY_V1=0. -->
-<script src="src/city/presidency.js?v=door929c"></script>
+<script src="src/city/presidency.js?v=news0930"></script>
 <!-- THE PRESIDENT'S WORLD (2026-09-27 rework) — no HUD strip, no mission
      list, no button console. In load order: the office (desk phone that rings
      with real calls, briefing folders you read on the desk, the TV news, aides
@@ -2316,7 +2320,7 @@ document.body.appendChild(b);}}catch(e){}})();
      and lockdown bodies in the street), and the regime dressing that changes
      the Mansion when the republic falls. Security (the detail, the gate
      checkpoint, counter-snipers, the panic protocol) lives in protection.js. -->
-<script src="src/city/president_office.js?v=oval0929"></script>
+<script src="src/city/president_office.js?v=news0930"></script>
 <script src="src/city/motorcade.js?v=ekey2"></script>
 <!-- THE PRESIDENT HIRES HIS PEOPLE: the line in the office, the Chief of
      Staff, the detail / driver / press secretary / empty cabinet chairs.

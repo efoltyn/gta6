@@ -43,14 +43,12 @@
    says why and signing is not offered. Folders left unsigned at the end
    of the day are their own consequence.
 
-   THE TV. A wall-mounted set on the side wall, in view of the chair, shows
-   a live news broadcast painted onto a canvas: channel bug, clock, a
-   studio with an anchor, a lower third, a scrolling ticker, and every so
-   often an approval poll read off the real seat ("Approval 46%, down 3").
-   It reports what actually happens (orders, attacks, raids, speeches,
-   protests, lockdowns, your decisions). Other files push stories through
-   CBZ.presidentOffice.news(). Only breaking items reach the phone's news
-   app, and not more than once a minute.
+   THE TV. A wall-mounted set on the side wall, in view of the chair, is
+   one of the game's NEWS ONE sets (city/newsroom.js owns the channel, the
+   canvas and the set). This file writes the presidency's moments into it
+   (orders, attacks, raids, speeches, protests, lockdowns, your decisions);
+   other files may still call CBZ.presidentOffice.news(). Only breaking
+   items reach the phone's news app, and not more than once a minute.
 
    PEOPLE WALK IN. The Chief of Staff (a named, persistent person) walks in
    from the doorway, stops in front of the desk and talks to you: the day's
@@ -89,9 +87,6 @@
   const CALL_GAP = 40;             // quiet seconds between calls
   const RING_PERIOD = 3.4;         // one trill burst every n seconds
   const FOLDERS_MAX = 3;
-  const TV_W = 512, TV_H = 288;
-  const TV_HZ = 4;                 // repaint ceiling
-  const TV_NEAR = 25;              // metres: beyond this the canvas is left alone
   const AIDE_TALK_R = 4.2;
   const DESK_TOP = 0.76;           // interior_programs.js's Resolute desk (the room publishes rec.deskTop)
   const THRONE_BACK = 1.12;        // the chair's centre behind the desk centre, along the frame
@@ -277,7 +272,7 @@
     rec: null, builtFor: null, key: "", root: null, frame: null, desk: null,
     L: null,              // local layout (see layout())
     phone: null, handset: null, lampOn: null, lampOff: null, lamp: null,
-    tv: null, tvTex: null, tvCanvas: null, tvWorld: null,
+    tv: null, tvWorld: null,
     tray: null,
   };
 
@@ -326,9 +321,8 @@
       ROOM.root = null;
     }
     for (let i = 0; i < M.folders.length; i++) M.folders[i].mesh = null;
-    if (ROOM.tvTex) { try { ROOM.tvTex.dispose(); } catch (e) {} }
     ROOM.rec = null; ROOM.builtFor = null; ROOM.key = ""; ROOM.frame = null; ROOM.desk = null;
-    ROOM.phone = null; ROOM.handset = null; ROOM.lamp = null; ROOM.tv = null; ROOM.tvTex = null; ROOM.tvCanvas = null;
+    ROOM.phone = null; ROOM.handset = null; ROOM.lamp = null; ROOM.tv = null;
     ROOM.tray = null; ROOM.L = null; ROOM.tvWorld = null;
     ROOM.handsetHome = null;
   }
@@ -360,11 +354,13 @@
     buildTray(desk, L.tray);
     buildTV(grp, L.tv);
     grp.updateMatrixWorld(true);
-    const tvw = new THREE.Vector3(-0.33, 0, 0);
-    ROOM.tv.localToWorld(tvw);
-    ROOM.tvWorld = { x: tvw.x, y: tvw.y, z: tvw.z };
+    if (ROOM.tv) {
+      const tvw = new THREE.Vector3(0, 0, 0);
+      ROOM.tv.localToWorld(tvw);
+      ROOM.tvWorld = { x: tvw.x, y: tvw.y, z: tvw.z };
+    }
     layoutFolders();
-    paintTVNow();
+    if (CBZ.news) CBZ.news.paintNow();
     return true;
   }
   function roomKey(rec) { return Math.round(rec.approach.x * 10) + ":" + Math.round(rec.approach.z * 10) + ":" + Math.round(rec.floorY * 10); }
@@ -441,24 +437,19 @@
   }
 
   // ---- the television -----------------------------------------------------
+  // THE ONE SET (city/newsroom.js tvSet): a 2 m wall-hung panel on its
+  // bracket. `at` is the wall point; the old set faced the room along its
+  // local -x, so the group turns a further -90 degrees to face +z that way.
   function buildTV(grp, at) {
-    const tv = new THREE.Group();
-    tv.position.set(at.x, at.y, at.z);
-    tv.rotation.y = at.yaw || 0;
+    const N = CBZ.news;
+    if (!N || !N.tvSet) return;
+    const tv = N.tvSet({ w: 1.92, mount: "wall" });
+    const d = tv.userData.tv.depth;
+    const yaw = (at.yaw || 0) - Math.PI / 2;
+    tv.position.set(at.x + Math.sin(yaw) * d, at.y, at.z + Math.cos(yaw) * d);
+    tv.rotation.y = yaw;
     grp.add(tv);
-    // wall bracket (hidden behind the set), then the set, then the glass
-    box(tv, -0.14, 0, 0, 0.24, 0.32, 0.42, 0x2c2f33);
-    box(tv, -0.29, 0, 0, 0.06, 1.16, 2.04, 0x0d0e10);                  // body, 0.26..0.32 off the wall
-    box(tv, -0.305, -0.555, 0, 0.035, 0.05, 2.04, 0x16181b);           // chin
-    const cv = makeCanvas(TV_W, TV_H);
-    const tex = canvasTex(cv);
-    const scr = new THREE.Mesh(new THREE.PlaneGeometry(1.92, 1.08), new THREE.MeshBasicMaterial({ map: tex }));
-    scr.position.set(-0.3225, 0.02, 0);
-    scr.rotation.y = -Math.PI / 2;        // faces into the room (local -x)
-    tv.add(scr);
-    // a tiny standby LED under the glass
-    box(tv, -0.324, -0.545, 0.9, 0.004, 0.012, 0.02, 0x66ff88, { emissive: 0x33ff66, ei: 0.8 });
-    ROOM.tv = tv; ROOM.tvTex = tex; ROOM.tvCanvas = cv;
+    ROOM.tv = tv;
   }
 
   // ============================================================
@@ -1240,217 +1231,18 @@
   }
 
   // ============================================================
-  //  §8  THE NEWS. A painted broadcast on the office TV.
+  //  §8  THE NEWS. The office TV is a NEWS ONE set like every other TV in
+  //  the game: city/newsroom.js owns the stories, the canvas and the set.
+  //  This file only writes the presidency's own headlines into it.
   // ============================================================
-  const TV = {
-    stories: [], cur: null, curAt: 0, breakingUntil: 0, pollUntil: 0, nextPoll: 20,
-    pollPrev: null, pollShown: null, lastPaint: -1, dirty: true, lastPhone: -1e9, tick: 0,
-  };
   function news(headline, opts) {
     opts = opts || {};
-    const h = clean(headline);
-    if (!h) return false;
-    for (let i = TV.stories.length - 1; i >= 0 && i >= TV.stories.length - 4; i--) {
-      if (TV.stories[i].h.toUpperCase() === h.toUpperCase() && CLOCK - TV.stories[i].t < 8) return false;   // the same story twice in a breath
-    }
-    const s = { h: h, sub: clean(opts.sub || ""), kind: opts.kind === "breaking" ? "breaking" : "story", cat: clean(opts.cat || ""), t: CLOCK, day: day() };
-    TV.stories.push(s);
-    if (TV.stories.length > 12) TV.stories.shift();
-    if (s.kind === "breaking") {
-      TV.cur = s; TV.curAt = CLOCK; TV.breakingUntil = CLOCK + 20;
-      if (!opts.quiet && CLOCK - TV.lastPhone > 60 && CBZ.phoneNotify) {
-        TV.lastPhone = CLOCK;
-        try { CBZ.phoneNotify({ app: "news", from: "News One", text: h, priority: 1 }); } catch (e) {}
-      }
-    } else if (!TV.cur || CLOCK > TV.breakingUntil) { TV.cur = s; TV.curAt = CLOCK; }
-    if (opts.poll) { TV.pollUntil = CLOCK + 8; TV.nextPoll = CLOCK + 40; TV.pollShown = pollNow(); }
-    paintTVNow();
-    return true;
-  }
-  // one paint right now, no frame loop needed (build, every story, harness)
-  function paintTVNow() {
-    if (!ROOM.tvCanvas) { TV.dirty = true; return; }
-    TV.lastPaint = CLOCK; TV.dirty = false;
-    try { paintTV(ROOM.tvCanvas.getContext("2d")); ROOM.tvTex.needsUpdate = true; } catch (e) {}
-  }
-  function rotateStory() {
-    if (CLOCK < TV.breakingUntil) return;
-    if (TV.cur && CLOCK - TV.curAt < 9) return;
-    const recent = TV.stories.slice(-6);
-    if (!recent.length) { TV.cur = fillerStory(); TV.curAt = CLOCK; return; }
-    const i = TV.cur ? recent.indexOf(TV.cur) : -1;
-    TV.cur = recent[(i + 1 + recent.length) % recent.length];
-    if (TV.cur.kind === "breaking" && CLOCK - TV.cur.t > 60) TV.cur = { h: TV.cur.h, sub: TV.cur.sub, kind: "story", cat: TV.cur.cat, t: TV.cur.t };
-    TV.curAt = CLOCK;
-  }
-  function fillerStory() {
-    const s = status();
-    if (s && s.seat) return { h: "Day " + s.day + " of the new administration", sub: "The President at work in the West Wing", kind: "story", cat: "POLITICS" };
-    if (s && s.country) return { h: "Quiet day in the capital", sub: s.country, kind: "story", cat: "NATION" };
-    return { h: "Quiet day in the capital", sub: "", kind: "story", cat: "NATION" };
-  }
-  function tvShouldPaint(rec) {
-    const Pp = player(), w = ROOM.tvWorld;
-    if (!Pp || !Pp.pos || !w) return false;
-    if (Math.abs(Pp.pos.y - w.y) > 3.5) return false;
-    return Math.hypot(Pp.pos.x - w.x, Pp.pos.z - w.z) < TV_NEAR;
-  }
-  function pollNow() {
-    const s = status();
-    if (!s || !s.seat) return null;
-    const ap = Math.round(s.approval || 0);
-    const prev = TV.pollPrev == null ? ap : TV.pollPrev;
-    TV.pollPrev = ap;
-    return { ap: ap, d: ap - prev, treasury: s.treasury || 0 };
-  }
-  function tickTV(dt) {
-    if (!ROOM.tvCanvas) return;
-    rotateStory();
-    if (CLOCK >= TV.nextPoll && seated()) {
-      TV.nextPoll = CLOCK + 45;
-      TV.pollUntil = CLOCK + 8;
-      TV.pollShown = pollNow();
-    }
-    if (!tvShouldPaint(ROOM.rec)) return;
-    if (CLOCK - TV.lastPaint < 1 / TV_HZ && !TV.dirty) return;
-    TV.lastPaint = CLOCK; TV.dirty = false;
-    paintTV(ROOM.tvCanvas.getContext("2d"));
-    ROOM.tvTex.needsUpdate = true;
-  }
-  function paintTV(c) {
-    const W = TV_W, H = TV_H, t = CLOCK;
-    // the studio: deep blue set, a lit backdrop panel and a skyline strip
-    const bg = c.createLinearGradient(0, 0, 0, H);
-    bg.addColorStop(0, "#0b1d3d"); bg.addColorStop(1, "#06101f");
-    c.fillStyle = bg; c.fillRect(0, 0, W, H);
-    c.fillStyle = "rgba(90,140,220,.14)";
-    for (let i = 0; i < 9; i++) c.fillRect(20 + i * 56, 26, 34, 150);
-    c.fillStyle = "rgba(255,255,255,.05)";
-    c.beginPath(); c.arc(150, 100, 86, 0, Math.PI * 2); c.fill();
-    c.strokeStyle = "rgba(160,200,255,.12)"; c.lineWidth = 1;
-    for (let i = -3; i <= 3; i++) { c.beginPath(); c.ellipse(150, 100, 86, Math.abs(i) * 14 + 4, 0, 0, Math.PI * 2); c.stroke(); }
-    // skyline silhouette behind the desk
-    c.fillStyle = "#0f2446";
-    for (let i = 0; i < 16; i++) { const bh = 20 + ((i * 37) % 50); c.fillRect(i * 32, 176 - bh, 28, bh); }
-    drawAnchor(c, 150, t);
-    // the news desk
-    const dk = c.createLinearGradient(0, 178, 0, 240);
-    dk.addColorStop(0, "#1a2f55"); dk.addColorStop(1, "#0a1428");
-    c.fillStyle = dk; c.fillRect(40, 182, 230, 58);
-    c.fillStyle = "#c0392b"; c.fillRect(40, 182, 230, 4);
-    // the right-hand graphic: a poll, or the story's topic card
-    drawSideGraphic(c, t);
-    // channel bug + clock
-    c.fillStyle = "#c0392b"; c.fillRect(12, 10, 86, 24);
-    c.fillStyle = "#fff"; c.font = "bold 15px Arial, sans-serif"; c.textAlign = "left"; c.textBaseline = "middle";
-    c.fillText("NEWS ONE", 18, 23);
-    c.fillStyle = "rgba(0,0,0,.55)"; c.fillRect(100, 10, 40, 24);
-    c.fillStyle = "#ff4d3d"; c.beginPath(); c.arc(110, 22, 4, 0, Math.PI * 2); c.fill();
-    c.fillStyle = "#fff"; c.font = "bold 12px Arial, sans-serif"; c.fillText("LIVE", 117, 23);
-    const hr = hour(), hh = Math.floor(hr), mm = Math.floor((hr - hh) * 60);
-    c.fillStyle = "rgba(0,0,0,.55)"; c.fillRect(W - 70, 10, 58, 24);
-    c.fillStyle = "#fff"; c.font = "bold 15px Arial, sans-serif"; c.textAlign = "center";
-    c.fillText((hh < 10 ? "0" : "") + hh + ":" + (mm < 10 ? "0" : "") + mm, W - 41, 23);
-    // lower third
-    const s = TV.cur || fillerStory();
-    const brk = s.kind === "breaking" && t < TV.breakingUntil;
-    c.textAlign = "left";
-    if (brk) {
-      c.fillStyle = (Math.floor(t * 2) % 2) ? "#e0301e" : "#c0271a";
-      c.fillRect(0, 200, 112, 26);
-      c.fillStyle = "#fff"; c.font = "bold 15px Arial, sans-serif"; c.fillText("BREAKING", 12, 214);
-    } else if (s.cat) {
-      c.fillStyle = "#1d4f9c"; c.fillRect(0, 200, 112, 26);
-      c.fillStyle = "#fff"; c.font = "bold 13px Arial, sans-serif"; c.fillText(s.cat.slice(0, 12).toUpperCase(), 12, 214);
-    }
-    c.fillStyle = "rgba(245,245,245,.96)"; c.fillRect(0, 226, W, 32);
-    c.fillStyle = "#101010"; c.font = "bold 19px Arial, sans-serif";
-    fitText(c, s.h.toUpperCase(), 12, 243, W - 24, 19);
-    // ticker
-    c.fillStyle = "#0a0f19"; c.fillRect(0, 258, W, 30);
-    c.fillStyle = "#f4c542"; c.fillRect(0, 258, 58, 30);
-    c.fillStyle = "#0a0f19"; c.font = "bold 12px Arial, sans-serif"; c.fillText("LATEST", 8, 274);
-    const items = tickerItems();
-    const txt = items.join("     ");
-    c.save(); c.beginPath(); c.rect(60, 258, W - 60, 30); c.clip();
-    c.fillStyle = "#e9eef5"; c.font = "14px Arial, sans-serif";
-    const tw = Math.max(200, c.measureText(txt + "     ").width);
-    const off = (t * 55) % tw;
-    c.fillText(txt, 66 - off, 274);
-    c.fillText(txt, 66 - off + tw, 274);
-    c.restore();
-  }
-  function fitText(c, s, x, y, maxW, size) {
-    let sz = size;
-    c.font = "bold " + sz + "px Arial, sans-serif";
-    while (c.measureText(s).width > maxW && sz > 11) { sz--; c.font = "bold " + sz + "px Arial, sans-serif"; }
-    if (c.measureText(s).width > maxW) { while (s.length > 4 && c.measureText(s + "...").width > maxW) s = s.slice(0, -1); s += "..."; }
-    c.fillText(s, x, y);
-  }
-  function tickerItems() {
-    const out = [];
-    const st = status();
-    if (st && st.seat) {
-      out.push("Approval " + Math.round(st.approval || 0) + "%");
-      out.push("Treasury " + money(st.treasury));
-      if (st.wall && st.wall.ordered) out.push("Saltlands wall " + st.wall.built + " of " + st.wall.total + " sections");
-      if (st.election && st.election.voteDay != null && st.election.voteDay >= st.day) out.push("Election on day " + st.election.voteDay);
-      if (st.threat && st.threat.members > 0) out.push("Security services on alert");
-    }
-    for (let i = TV.stories.length - 1; i >= 0 && out.length < 9; i--) out.push(TV.stories[i].h);
-    if (!out.length) out.push("Markets steady", "Mild weather across the capital");
-    return out;
-  }
-  function drawAnchor(c, cx, t) {
-    // body: a dark suit, white collar, a tie; head with a slight nod while talking
-    const nod = Math.sin(t * 1.7) * 1.2, talk = (Math.floor(t * 6) % 3) ? 1 : 0;
-    c.fillStyle = "#1b1f2a";
-    c.beginPath();
-    c.moveTo(cx - 62, 186); c.lineTo(cx - 50, 146); c.quadraticCurveTo(cx, 132, cx + 50, 146); c.lineTo(cx + 62, 186); c.closePath(); c.fill();
-    c.fillStyle = "#f2f2f2";
-    c.beginPath(); c.moveTo(cx - 13, 140); c.lineTo(cx, 166); c.lineTo(cx + 13, 140); c.closePath(); c.fill();
-    c.fillStyle = "#8e2430";
-    c.beginPath(); c.moveTo(cx - 4, 146); c.lineTo(cx + 4, 146); c.lineTo(cx + 6, 172); c.lineTo(cx, 178); c.lineTo(cx - 6, 172); c.closePath(); c.fill();
-    c.fillStyle = "#c79a7a";                                 // neck
-    c.fillRect(cx - 9, 124 + nod, 18, 18);
-    c.beginPath(); c.ellipse(cx, 104 + nod, 21, 26, 0, 0, Math.PI * 2); c.fill();   // head
-    c.fillStyle = "#3a2a1f";                                 // hair
-    c.beginPath(); c.ellipse(cx, 88 + nod, 22, 13, 0, Math.PI, Math.PI * 2); c.fill();
-    c.fillRect(cx - 22, 86 + nod, 5, 14); c.fillRect(cx + 17, 86 + nod, 5, 14);
-    c.fillStyle = "#2a1d16";                                 // eyes, brows
-    c.fillRect(cx - 10, 101 + nod, 5, 3); c.fillRect(cx + 5, 101 + nod, 5, 3);
-    c.fillRect(cx - 11, 96 + nod, 7, 2); c.fillRect(cx + 4, 96 + nod, 7, 2);
-    c.fillStyle = "#7d3b34";                                 // mouth
-    c.fillRect(cx - 6, 116 + nod, 12, 2 + talk * 2);
-  }
-  function drawSideGraphic(c, t) {
-    const x = 300, y = 44, w = 196, h = 138;
-    c.fillStyle = "rgba(8,18,36,.85)"; c.fillRect(x, y, w, h);
-    c.strokeStyle = "rgba(160,200,255,.35)"; c.lineWidth = 2; c.strokeRect(x, y, w, h);
-    c.textAlign = "left"; c.textBaseline = "alphabetic";
-    if (t < TV.pollUntil && TV.pollShown) {
-      const p = TV.pollShown;
-      c.fillStyle = "#9fc4ff"; c.font = "bold 14px Arial, sans-serif"; c.fillText("NEW POLL", x + 12, y + 24);
-      c.fillStyle = "#fff"; c.font = "bold 16px Arial, sans-serif"; c.fillText("APPROVAL", x + 12, y + 48);
-      c.font = "bold 44px Arial, sans-serif"; c.fillText(p.ap + "%", x + 12, y + 96);
-      const dtxt = p.d === 0 ? "NO CHANGE" : (p.d < 0 ? "DOWN " + (-p.d) : "UP " + p.d);
-      c.fillStyle = p.d < 0 ? "#ff6b5b" : (p.d > 0 ? "#6be38a" : "#cfd8e6");
-      c.font = "bold 16px Arial, sans-serif"; c.fillText(dtxt, x + 118, y + 90);
-      c.fillStyle = "rgba(255,255,255,.15)"; c.fillRect(x + 12, y + 110, w - 24, 12);
-      c.fillStyle = p.ap < 35 ? "#e0473a" : (p.ap < 50 ? "#f4c542" : "#4fb46b");
-      c.fillRect(x + 12, y + 110, (w - 24) * Math.max(0, Math.min(1, p.ap / 100)), 12);
-      return;
-    }
-    const s = TV.cur || fillerStory();
-    const st = status();
-    c.fillStyle = "#9fc4ff"; c.font = "bold 13px Arial, sans-serif";
-    c.fillText((s.cat || "TODAY").toUpperCase(), x + 12, y + 24);
-    c.fillStyle = "#fff"; c.font = "bold 17px Arial, sans-serif";
-    let yy = wrap(c, s.h, x + 12, y + 50, w - 24, 20, 3);
-    if (s.sub) { c.fillStyle = "#cfd8e6"; c.font = "13px Arial, sans-serif"; wrap(c, s.sub, x + 12, yy + 4, w - 24, 16, 2); }
-    else if (st && st.seat && /TREASURY|ECONOMY|TAX/.test((s.cat || "").toUpperCase())) {
-      c.fillStyle = "#6be38a"; c.font = "bold 18px Arial, sans-serif"; c.fillText("Treasury " + money(st.treasury), x + 12, yy + 14);
-    }
+    const N = CBZ.news;
+    if (!N || !N.push) return false;
+    return N.push(clean(headline), {
+      sub: opts.sub || "", cat: opts.cat || "", kind: opts.kind,
+      look: opts.poll ? "poll" : null, phone: !opts.quiet,
+    });
   }
 
   const ORDER_NEWS = {
@@ -1817,7 +1609,6 @@
       M.morningDay = day(); M.chiefDay = day();      // the welcome below IS today's visit
       M.approvalMorning = null;
       // the headline itself arrives through presidency.js's big() -> news()
-      TV.pollPrev = null;
       M.later.push({ at: CLOCK + 1.0, fn: function () { if (M.folderDay !== day()) issueFolders(day()); } });
       M.later.push({ at: CLOCK + 6.0, fn: function () { chiefVisit(true); } });
       M.lastCallEnd = CLOCK;       // first call no sooner than CALL_GAP after taking office
@@ -2146,7 +1937,6 @@
     tickLater();
     tickPhone(dt);
     tickAide(dt);
-    tickTV(dt);
     if (nearOffice(ROOM.rec, 40)) { postSecretary(); tickSecretary(); }
     if (READ.f) {
       READ.t += dt;
@@ -2173,7 +1963,7 @@
       built: !!ROOM.root, office: !!office(), inOffice: !!(ROOM.rec && inOffice(ROOM.rec)),
       ringing: !!M.ringing, onCall: !!M.onCall, phoneQueue: M.phoneQ.length, aideQueue: M.aideQ.length,
       aide: AIDE.phase, folders: M.folders.map(function (f) { return { id: f.m.id, topic: f.m.topic, state: f.state, blocked: !!f.blocked }; }),
-      reading: !!READ.f, stories: TV.stories.length, headline: TV.cur ? TV.cur.h : null,
+      reading: !!READ.f, stories: CBZ.news ? CBZ.news.stories().length : 0, headline: CBZ.news ? CBZ.news.current().h : null,
       secretary: !!SEC.ped, decisions: M.decisions, missed: M.missed.length, spawnPending: SPAWN.pending,
       desk: deskPoint(),
     };
@@ -2238,9 +2028,9 @@
     _tv: function () {
       const r = ROOM.rec, w = ROOM.tvWorld;
       if (!r || !w) return null;
-      paintTVNow();
-      // the glass faces into the room: the set's own -x, wherever the room hung it
-      const dir = new THREE.Vector3(-1, 0, 0);
+      if (CBZ.news) CBZ.news.paintNow();
+      // the glass faces into the room: the set's own +z, wherever the room hung it
+      const dir = new THREE.Vector3(0, 0, 1);
       if (ROOM.tv) { ROOM.tv.updateMatrixWorld(true); dir.transformDirection(ROOM.tv.matrixWorld); }
       return { x: w.x, y: w.y, z: w.z, nx: dir.x, nz: dir.z, w: 1.92, h: 1.08 };
     },

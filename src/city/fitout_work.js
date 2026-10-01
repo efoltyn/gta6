@@ -217,6 +217,17 @@
     return best;
   }
 
+  // ---- THE TV: the game's one set (city/newsroom.js, through B.tv), hung
+  // on a free run of wall with its screen centre `cy` over the floor. On
+  // NEWS ONE, like every set in the city.
+  function wallTV(B, occ, S, w, cy, salt) {
+    if (!B.tv || B.ceil - B.fy < cy + w * 0.3 + 0.15) return null;
+    const run = w + 0.1, sh = w * 9 / 16;
+    const P = wallSpot(B, occ, S, run, 0.14, { hang: [cy - sh / 2 - 0.05, cy + sh / 2 + 0.05], front: 0, noFront: true, salt: salt | 0 });
+    if (!P) return null;
+    return B.tv(P.x(run / 2, 0), P.z(run / 2, 0), Math.atan2(P.nx, P.nz), { w: w, mount: "wall", atWall: true, y: B.fy + cy });
+  }
+
   // ---- surfaces ---------------------------------------------------------
   // a floor finish over R, split at every hole edge so the stairwell and
   // lift chase are cut clean instead of losing a whole metre cell round them
@@ -805,6 +816,7 @@
       }
     }
     const rooms = restroomPair(B, occ, S, restroomOrder(B, S)) || [];
+    wallTV(B, occ, S, 1.2, 1.95, 11);                       // the waiting area's TV
     officeShell(B, S, "terrazzo", 0xffffff, {
       rooms: rooms, ceilMat: "plaster", ceilTint: 0xf4f2ee, fixture: "can", module: 2.4, lightR: 4.2, lightI: 0.5,
       skip: function (x, z) { for (let i = 0; i < pend.length; i++) if (Math.abs(x - pend[i].x) < 1.6 && Math.abs(z - pend[i].z) < 1.6) return true; return false; },
@@ -901,6 +913,7 @@
       }
     }
     const rooms = restroomPair(B, occ, S, restroomOrder(B, S)) || [];
+    wallTV(B, occ, S, 1.0, 1.75, 7);                        // the news over lunch
     officeShell(B, S, "vinyl", 0xf0ece4, { rooms: rooms, module: 3.0 });
     officeExtras(B, S, occ, { copier: false, cooler: false, plants: true, maxPlants: 2 });
     blinds(B, S, 0xd6d0c4);
@@ -1089,6 +1102,8 @@
   //  bare bulbs hanging from it; it used to show the raw slab over a concrete floor)
   const NO_CEILING = { carlot: 1, firestation: 1, gym: 1 };
   // trades that get a stockroom when the room is not already back-walled
+  // the trades with a TV on over the counter (planShop)
+  const TV_KINDS = { food: 1, bar: 1, barber: 1, gym: 1, hospital: 1, gas: 1, pawn: 1, security: 1, drugs: 1, store: 1, liquor: 1 };
   const STOCK_KINDS = { store: 1, gas: 1, electronics: 1, hardware: 1, security: 1, gym: 1, drugs: 1,
     hospital: 1, barber: 1, eyewear: 1, paintball: 1 };
   // the trades that keep buildings.js's back-of-house partition (and so get no
@@ -1291,6 +1306,35 @@
         F.box(B, cLat, Bi - 0.03, y + 2.0, bw + 0.1, 0.8, 0.05, 0x1c1e22);
         F.box(B, cLat, Bi - 0.06, y + 2.04, bw, 0.72, 0.01, 0xfff0d6, { glow: true });
         for (let i = 1; i < 3; i++) F.box(B, cLat - bw / 2 + bw * i / 3, Bi - 0.065, y + 2.04, 0.03, 0.72, 0.01, 0x2a2018);
+      }
+    }
+    // ---- THE TV over the counter: the game's one set on a ceiling drop,
+    // facing the customers (and the door), on NEWS ONE. A diner, a bar, a
+    // barber, a gym, a waiting room, a gas station: the places a TV is on.
+    if (K && TV_KINDS[kind] && B.tv && B.ceil - y >= 2.7) {
+      const side = B.h(6, 2, 0x7b) < 0.5 ? -1 : 1;
+      const tw = Math.min(1.0, Math.max(0.7, hLat * 0.6));
+      const la = cLat + side * Math.min(hLat * (kind === "bar" || kind === "casino" ? 0.3 : 0.55), Math.max(0, hLat - tw / 2));
+      const vd = cIn - hIn + 0.05;
+      const tx2 = F.x(la, vd), tz2 = F.z(la, vd);
+      const sh = tw * 9 / 16;
+      const cy = Math.max(y + 2.08 + sh / 2, B.ceil - 0.42 - sh / 2);
+      if (!inHole(B, tx2, tz2, 0.6) && cy + sh / 2 < B.ceil - 0.15) B.tv(tx2, tz2, Math.atan2(-inx, -inz), { w: tw, mount: "ceiling", y: cy });
+    }
+    // THE SHOP WINDOW: an electronics store shows its sets to the street,
+    // each on a plinth just inside the glass, every one of them on the news
+    if (kind === "electronics" && B.tv) {
+      for (let s = -1; s <= 1; s += 2) {
+        const la = s * Math.max(1.6, Ti * 0.55), v0 = wt + 0.25, v1 = wt + 0.85;
+        if (Math.abs(la) + 0.75 > Ti) continue;
+        const R = F.rect(la - 0.7, v0, la + 0.7, v1);
+        if (!rectFree(B, occ, grow(R, 0.1), 0.05)) continue;
+        occ.add(grow(R, 0.3));
+        F.span(B, la - 0.7, la + 0.7, v0, v1, y, 0.5, 0x22252a, { solid: true });                 // the plinth
+        F.span(B, la - 0.71, la + 0.71, v0 - 0.01, v1 + 0.01, y + 0.5, 0.02, 0xd8dadc);          // its top
+        const fv = (v0 + v1) / 2 - 0.08;
+        B.tv(F.x(la - 0.32, fv), F.z(la - 0.32, fv), Math.atan2(-inx, -inz), { w: 0.62, mount: "stand", base: y + 0.52, spill: false });
+        B.tv(F.x(la + 0.36, fv), F.z(la + 0.36, fv), Math.atan2(-inx, -inz), { w: 0.52, mount: "stand", base: y + 0.52, spill: false });
       }
     }
     // ---- CCTV: a dome over the counter's customer side and one by the door

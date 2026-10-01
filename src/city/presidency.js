@@ -295,10 +295,10 @@
     return function off() { const i = l.indexOf(fn); if (i >= 0) l.splice(i, 1); };
   }
   function emitEvent(evt, payload) {
-    const l = LISTEN[evt];
-    if (!l || !l.length) return;
-    const c = l.slice();
-    for (let i = 0; i < c.length; i++) { try { c[i](payload, evt); } catch (e) {} }
+    // "*" hears every moment (the news channel reads the bus by name)
+    const l = (LISTEN[evt] || []).concat(evt !== "*" ? (LISTEN["*"] || []) : []);
+    if (!l.length) return;
+    for (let i = 0; i < l.length; i++) { try { l[i](payload, evt); } catch (e) {} }
   }
 
   // own seeded LCG for runtime casting order (repo convention; never

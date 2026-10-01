@@ -105,6 +105,7 @@
         app: "news",
         from: "City Desk",
         text: e.name + " was reported dead. Cause: " + e.cause + ".",
+        tv: false,          // the TV counts the dead (newsroom.js), it does not read the roll
       });
     }
     return e;

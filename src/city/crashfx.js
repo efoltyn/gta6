@@ -1827,7 +1827,8 @@
     const cause = opts.cause ||
       (opts.ordnance === "nuke" ? "nuclear blast" : "explosion");
     applyBlastDamage(x, z, R, power, byPlayer, 14, 10, cause);
-    if (CBZ.cityEvent) CBZ.cityEvent("explosion", { x: x, z: z, panic: 14 * power, damage: 10 * power }, { silent: true, noWanted: true });
+    // (airstrike/ordnance ride along so the news can tell a bomb from a gas tank)
+    if (CBZ.cityEvent) CBZ.cityEvent("explosion", { x: x, z: z, panic: 14 * power, damage: 10 * power, airstrike: true, ordnance: opts.ordnance || null }, { silent: true, noWanted: true });
 
     // WHAT IT DOES TO BUILDINGS — the same one call as cityExplosion. The wall
     // is asked at the real hit height (opts.y), not the raised fireball seat.

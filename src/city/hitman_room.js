@@ -1149,9 +1149,11 @@
     B.ownMats.push(scr);
     const m = mesh(new THREE.PlaneGeometry(0.7, 0.394), scr, B.group, dcx + 0.002, DRESSER.top + 0.34, -0.7, 0, -Math.PI / 2, 0);   // 3 mm proud of the bezel (dcx + 0.005)
     m.receiveShadow = false;
-    B.tv = { mesh: m, scr: scr, tex: null, canvas: null, own: true, story: null, day: -1, tick: 0, off: 0 };
+    B.tv = { mesh: m, scr: scr, tex: null, canvas: null, own: true };
     tvIdle();
   }
+  // a story the Bureau put on the set (agency.js: hitman_paper's broadcast
+  // with its own photo) owns the screen until tv.idle()
   function tvSet(c, own) {
     const T = B && B.tv; if (!T || !c) return;
     if (T.tex && T.canvas === c) { T.tex.needsUpdate = true; T.own = own; return; }
@@ -1159,13 +1161,7 @@
     T.tex = paperTex(c); T.canvas = c; T.own = own;
     T.scr.map = T.tex; T.scr.needsUpdate = true;
   }
-  const STORY_BITS = [
-    function (d, off) { return { headline: "Water main break in " + d.a, sub: "Crews expect the street closed through the evening", ticker: "Traffic slow on the ring road   Rain likely after dark   " + d.b + " school board meets Thursday" }; },
-    function (d, off) { return { headline: (off ? off.title + " " + off.name : "City council") + " defends budget", sub: "Opponents say the cuts land hardest in " + d.b, ticker: "Fuel prices up four cents   " + d.a + " bakery reopens after fire   Harbour ferry delays" }; },
-    function (d) { return { headline: "Police appeal for witnesses", sub: "A man was found dead in " + d.a + " early this morning", ticker: "Detectives ask anyone with dashcam footage to come forward   " + d.b + " road works continue" }; },
-    function (d) { return { headline: "Heat wave expected this weekend", sub: "Cooling centres open in " + d.b + " from Friday", ticker: "Pollen count high   " + d.a + " market moves indoors   Stadium sold out Saturday" }; },
-    function (d) { return { headline: "Armed robbery at " + d.a + " pawn shop", sub: "Two men left on foot, police say", ticker: "No arrests yet   Harbour ferry back on schedule   " + d.b + " night market returns" }; },
-  ];
+  // district names for the old clippings on the board (cityEcon's own names)
   const DKEYS = ["downtown", "projects", "waterfront", "uptown", "island"];
   function districtNames() {
     const E = CBZ.cityEcon, out = [];
@@ -1176,28 +1172,29 @@
     }
     return out.length ? out : ["Downtown", "the Waterfront"];
   }
-  function localStory() {
-    const day = CBZ.dayCount ? CBZ.dayCount() : 0;
-    const r = rng(day * 7919 + 17);
-    const dn = districtNames();
-    const d = { a: dn[(r() * dn.length) | 0], b: dn[(r() * dn.length) | 0] };
-    let off = null;
-    try { off = (CBZ.cityOrders && CBZ.cityOrders._official) ? CBZ.cityOrders._official() : null; } catch (e) { off = null; }
-    const R0 = records();
-    // a settled name the night before is the morning's lead story
-    if (R0 && (R0.completed | 0) > 0 && r() < 0.5) return STORY_BITS[2](d, off);
-    return STORY_BITS[(r() * STORY_BITS.length) | 0](d, off);
+  // the morning paper leads with what the news is actually leading with
+  function paperHeadline() {
+    const N = CBZ.news;
+    let h = null;
+    try {
+      const st = N ? N.stories() : [];
+      if (st.length) h = st[st.length - 1].h;
+      if (!h && N) { const a = N.ambient(); if (a.length) h = a[0].h; }
+    } catch (e) { h = null; }
+    return h || "City Edition";
   }
+  // otherwise the motel set is on NEWS ONE like every TV in the city
+  // (city/newsroom.js: the real stories of this session, never invented
+  // filler; one shared canvas, painted only while you are near a screen)
   function tvIdle() {
     const T = B && B.tv; if (!T) return;
-    const K = paperKit();
-    const day = CBZ.dayCount ? CBZ.dayCount() : 0;
-    if (!T.story || T.day !== day) { T.story = localStory(); T.day = day; }
-    let c = null;
-    const o = { headline: T.story.headline, sub: T.story.sub, ticker: T.story.ticker, live: true, tickerOffset: T.off };
-    if (K && K.tv) { try { c = K.tv(o, { canvas: T.own ? T.canvas || undefined : undefined }); } catch (e) { c = null; } }
-    if (!c) { c = cv(64, 36); const cc = c.getContext("2d"); cc.fillStyle = "#1a2a44"; cc.fillRect(0, 0, 64, 36); cc.fillStyle = "#9b1b1b"; cc.fillRect(0, 24, 64, 6); }
-    tvSet(c, true);
+    T.own = true;
+    if (T.tex) { T.tex.dispose(); T.tex = null; T.canvas = null; }
+    const N = CBZ.news;
+    if (N && N.texture) {
+      T.scr.map = N.texture(); T.scr.needsUpdate = true;
+      N.watch(T.mesh);
+    }
   }
 
   /* ---------------- the rail of clothes -------------------------------------- */
@@ -1415,7 +1412,7 @@
        the canvas back after the upload (core/texfree.js); reading it (the
        pick-up) paints it again. */
     if (!c && kind === "paper" && K && K.newspaper && CBZ.lazyCanvasTexture) {
-      const issue = { masthead: "The Morning Ledger", headline: localStory().headline };
+      const issue = { masthead: "The Morning Ledger", headline: paperHeadline() };
       const ltex = CBZ.lazyCanvasTexture(1400, 1900, function (ctx, lc) { K.newspaper(issue, { canvas: lc }); }, { name: "hm-paper" });
       if (THREE.sRGBEncoding != null) ltex.encoding = THREE.sRGBEncoding;
       ltex.anisotropy = aniso();
@@ -1432,7 +1429,7 @@
       return out;
     }
     if (!c) {
-      try { c = kind === "paper" ? (K && K.newspaper ? K.newspaper({ masthead: "The Morning Ledger", headline: localStory().headline }) : null) : (K && K.envelope ? K.envelope({ text: "", sealed: true }) : null); } catch (e) { c = null; }
+      try { c = kind === "paper" ? (K && K.newspaper ? K.newspaper({ masthead: "The Morning Ledger", headline: paperHeadline() }) : null) : (K && K.envelope ? K.envelope({ text: "", sealed: true }) : null); } catch (e) { c = null; }
       if (!c) c = fallbackPaper(kind === "paper" ? 280 : 256, kind === "paper" ? 380 : 160, kind === "paper" ? "#e0dccf" : "#e8dcc0", []);
     }
     const grp = new THREE.Group();
@@ -1754,7 +1751,6 @@
         pl.pos.set(at.x, B.gy, at.z);
         if (CBZ.cam) CBZ.cam.yaw = Math.atan2(-(to.x - at.x), -(to.z - at.z));
       }
-      if (B && B.tv && B.tv.own) { B.tv.story = null; tvIdle(); }
       emit("sleep", { hour: hour, day: CBZ.dayCount ? CBZ.dayCount() : 0 });
     };
     const finish = function () { if (B) B.sleeping = false; if (done) { try { done(); } catch (e) {} } };
@@ -1968,7 +1964,6 @@
      TICK
      ================================================================ */
   function ease(t) { return t < 0 ? 0 : t > 1 ? 1 : 1 - Math.pow(1 - t, 3); }
-  let tvT = 0;
   let _waitT = 0;
   function tick(dt) {
     if (!playing()) return;
@@ -2072,15 +2067,8 @@
       gm.opacity = 0.35 + 0.35 * n;
     }
     if (B.sunStripes) B.sunStripes.material.opacity = 0.32 * (1 - n) * (1 - n);
-    // the TV: a slow flicker, and the ticker crawls while you are in the room
-    if (B.tv) {
-      B.tv.scr.color.setScalar(0.86 + Math.random() * 0.06);
-      if (B.tv.own && B.inside) {
-        tvT += dt;
-        if (tvT > 0.25) { tvT = 0; B.tv.off = (B.tv.off + 18) % 1600; tvIdle(); }
-      }
-      if (B.tv.own && CBZ.dayCount && CBZ.dayCount() !== B.tv.day) tvIdle();
-    }
+    // the TV: a slow flicker (NEWS ONE paints itself, newsroom.js)
+    if (B.tv) B.tv.scr.color.setScalar(0.86 + Math.random() * 0.06);
     // board textures whose photographs are still loading
     if (B.board && B.board.refreshT > 0) {
       B.board.refreshT -= dt;

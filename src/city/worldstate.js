@@ -375,6 +375,16 @@
     }
   }
 
+  // WHO ELSE HEARS IT. The ledger is the city's one event bus; anything that
+  // reports on the world (city/newsroom.js's news channel) subscribes here
+  // instead of wrapping cityEvent. Listeners never throw into a caller.
+  const eventSubs = [];
+  CBZ.onCityEvent = function (fn) {
+    if (typeof fn !== "function") return function () {};
+    eventSubs.push(fn);
+    return function () { const i = eventSubs.indexOf(fn); if (i >= 0) eventSubs.splice(i, 1); };
+  };
+
   CBZ.cityEvent = function (type, data, opts) {
     const w = ensure();
     data = data || {}; opts = opts || {};
@@ -477,6 +487,7 @@
     if (!opts.silent && CBZ.city && CBZ.city.note && data.message) CBZ.city.note(data.message, 2.2);
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     save(w);
+    for (let i = 0; i < eventSubs.length; i++) { try { eventSubs[i](type, data, opts); } catch (e) {} }
     return w;
   };
 

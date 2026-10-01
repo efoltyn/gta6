@@ -925,14 +925,11 @@
     const ct = crateBox(B, x, B.fy, z, w, 0.46, d, COL.crate, { solid: true });
     flatTV(B, x, z, yaw, ct - B.fy, on, 0.98);
   }
-  // a flat screen on its foot, `up` above the floor; `W` the body width
+  // a flat screen on its foot, `up` above the floor; `W` the body width.
+  // The game's one set (B.tv, city/newsroom.js); when it is on it is on
+  // NEWS ONE, the real news of this city.
   function flatTV(B, x, z, yaw, up, on, W) {
-    const p = piece(B, x, z, yaw), H = W * 0.59;
-    p(0, up, 0, W * 0.32, 0.02, 0.2, COL.black);                  // foot
-    p(0, up + 0.02, -0.02, 0.06, 0.08, 0.04, COL.black);          // neck
-    p(0, up + 0.08, -0.02, W, H, 0.06, COL.black);                // body
-    p(0, up + 0.1, 0.012, W - 0.04, H - 0.04, 0.008, on ? 0x3d5f82 : 0x0f1317, on ? { glow: true } : null);
-    if (on) B.lamp(x + Math.sin(yaw) * 0.5, z + Math.cos(yaw) * 0.5, B.fy + up + 0.35, { color: 0x8fb4ff, r: 2.4, i: 0.22 });
+    if (B.tv) B.tv(x, z, yaw, { w: W - 0.03, mount: "stand", base: B.fy + up, on: on });
   }
   // a folding table (top at 0.74); returns the top y
   function foldTable(B, x, z, alongX, L, W, topCol) {
@@ -1329,7 +1326,7 @@
       B.box(mx, fy + 0.0105, mz, ax ? 2.1 : 1.8, 0.001, ax ? 1.8 : 2.1, 0x6b4a3a);
       B.box(mx + 0.3, fy + 0.0118, mz - 0.2, 0.42, 0.001, 0.3, 0x523a2c);
       B.furn("sofa", s.x, s.z, s.yaw, { len: s.len, tone: 0x5b4d3e });
-      tvOnCrate(B, t.x, t.z, t.yaw, h(1, 1) < 0.7);
+      tvOnCrate(B, t.x, t.z, t.yaw, true);
       // the "coffee table": two milk crates and a board
       const cx = s.x + (t.x - s.x) * 0.42, cz = s.z + (t.z - s.z) * 0.42;
       const px = ax ? 0 : 0.35, pz = ax ? 0.35 : 0;
@@ -1579,7 +1576,7 @@
     }
     if (c.foot) { footlocker(B, c.foot); B.loot(c.foot.x, c.foot.z, "footlocker", { lot: B.lot || null }); }
     if (c.rail) clothesRail(B, c.rail, h);
-    if (c.tv) tvOnCrate(B, c.tv.x, c.tv.z, Math.atan2(c.tv.fx, c.tv.fz), h(5, 5) < 0.5);
+    if (c.tv) tvOnCrate(B, c.tv.x, c.tv.z, Math.atan2(c.tv.fx, c.tv.fz), true);   // always on the news
     if (c.guns) {
       const g = c.guns, ax = g.ax;
       const top = crateBox(B, g.x, fy, g.z, ax ? 1.2 : 0.48, 0.44, ax ? 0.48 : 1.2, 0x55603f, { solid: true });
@@ -1655,13 +1652,13 @@
       q(0, 0, 0, 1.5, 0.44, 0.4, 0x2a2420, { solid: true });
       for (let a = -1; a <= 1; a += 2) q(a * 0.37, 0.05, 0.201, 0.7, 0.34, 0.004, 0x352d27);   // doors
       q(0, 0.44, 0, 1.52, 0.02, 0.42, 0x3a312a);                                // top
-      const on = B.h(3, 3, 0xe5) < 0.6;
+      const on = true;                                                          // the news is always on
       const wallX = Math.abs(Math.sin(t.yaw)) > 0.5;                             // hung on a ±x wall
       const glass = windowAt(B, wallX, wallX ? t.x : t.z, (wallX ? t.z : t.x) - 0.7, (wallX ? t.z : t.x) + 0.7, fy + 0.9, fy + 1.9);
-      if (!glass) {
-        q(0, 1.0, -0.17, 1.3, 0.76, 0.05, COL.black);                           // the screen, on the wall
-        q(0, 1.02, -0.143, 1.26, 0.72, 0.004, on ? 0x3d5f82 : 0x0f1317, on ? { glow: true } : null);
-        if (on) B.lamp(t.x + Math.sin(t.yaw) * 0.6, t.z + Math.cos(t.yaw) * 0.6, fy + 1.3, { color: 0x8fb4ff, r: 2.6, i: 0.2 });
+      if (!glass && B.tv) {
+        // the set hung on the wall behind the unit (the unit's back is 0.2 m
+        // behind its centre line), screen centre 1.38 m up
+        B.tv(t.x - Math.sin(t.yaw) * 0.2, t.z - Math.cos(t.yaw) * 0.2, t.yaw, { w: 1.26, mount: "wall", atWall: true, y: fy + 1.38, on: on });
       } else flatTV(B, t.x, t.z, t.yaw, 0.46, on, 1.1);                        // a window behind: it stands on the unit
       q(0.52, 0.46, 0.06, 0.34, 0.07, 0.24, 0x151515);                          // a games console
     }

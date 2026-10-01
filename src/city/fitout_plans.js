@@ -753,8 +753,9 @@
   }
 
   // A TV ON A MEDIA CONSOLE facing `yaw`: a console on short legs with door
-  // fronts, and a flat panel standing on its own foot ON the console (the old
-  // screen hovered 7 cm over its unit). The picture: somebody left the news on.
+  // fronts, and the game's one set (B.tv, city/newsroom.js) standing on its
+  // foot ON the console. The picture: somebody left the news on, and it is
+  // NEWS ONE, the real news of this city.
   function drawTV(B, x, z, yaw, len) {
     const fx = Math.round(Math.sin(yaw)), fz = Math.round(Math.cos(yaw));
     const along = fx === 0;                      // screen spans x when it faces ±z
@@ -769,17 +770,10 @@
       bx(-w / 2 + dw * (i + 0.5), fy + 0.29, dp / 2 + 0.006, dw - 0.008, 0.34, 0.012, 0x36312c);
       bx(-w / 2 + dw * (i + 0.5), fy + 0.42, dp / 2 + 0.018, 0.1, 0.012, 0.012, 0x8a8680);
     }
-    const sw = w * 0.72, sh = sw * 0.5625;
+    const sw = w * 0.72;
     const base = fy + 0.48;
-    bx(0, base + 0.006, -0.02, 0.36, 0.012, 0.2, 0x151619);                            // foot
-    bx(0, base + 0.05, -0.05, 0.06, 0.08, 0.03, 0x151619);                             // neck
-    const sy = base + 0.08 + sh / 2;
-    bx(0, sy, -0.03, sw, sh, 0.03, 0x0e0f11);                                           // panel
-    const scr = [0x3a5a7a, 0x2f4a66, 0x4a6a5a, 0x5a4a6a][(H(x, z, 0x7E1) * 4) | 0];
-    bx(0, sy + 0.01, -0.03 + 0.018, sw - 0.03, sh - 0.05, 0.003, scr, { glow: true });
-    bx(0, sy - sh * 0.3, -0.03 + 0.0205, sw - 0.03, sh * 0.13, 0.002, 0xc8342e, { glow: true });   // the news ticker
-    bx(0, base + 0.035, 0.12, Math.min(0.8, sw * 0.6), 0.07, 0.09, 0x1c1d20);          // soundbar
-    B.lamp(x + fx * 0.8, z + fz * 0.8, sy, { r: 2.4, i: 0.22, color: 0x9fb8d8 });
+    if (B.tv) B.tv(x - fx * 0.02, z - fz * 0.02, yaw, { w: sw, mount: "stand", base: base });
+    bx(0, base + 0.03, 0.12, Math.min(0.8, sw * 0.6), 0.06, 0.09, 0x1c1d20);            // soundbar
   }
   function drawLaptop(B, x, z, y) {
     B.box(x, y + 0.01, z, 0.34, 0.02, 0.24, 0x3a3a3e);

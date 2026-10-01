@@ -2521,7 +2521,7 @@
     if (CBZ.cityAddStars) { try { CBZ.cityAddStars(5, "Nuclear detonation, military response"); } catch (e) {} }
     // panic buses (the loudest possible scare, C4's exact pattern)
     if (CBZ.cityPostEvent) { try { CBZ.cityPostEvent({ type: "explosion", pos: { x: x, y: 1, z: z }, radius: 400, intensity: 4 }); } catch (e) {} }
-    if (CBZ.cityEvent) { try { CBZ.cityEvent("explosion", { x: x, z: z, panic: 40, damage: 30 }, { silent: true, noWanted: true }); } catch (e) {} }
+    if (CBZ.cityEvent) { try { CBZ.cityEvent("explosion", { x: x, z: z, panic: 40, damage: 30, nuke: true }, { silent: true, noWanted: true }); } catch (e) {} }
 
     // The shared airstrike/RPG near-field already lays one central blast stain.
     // Do not add evenly spaced scorch decals here: from altitude they merge

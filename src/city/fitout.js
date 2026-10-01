@@ -434,6 +434,7 @@
     const cols = [];
     const pieces = [];     // {tag, x, z, w, d} footprint ledger for planners
     const people = [];     // bodies this floor puts in its furniture (see B.person)
+    const screens = [];    // live TV screens (B.tv): NEWS ONE planes added at finish
     const ox = b.ox || 0, oz = b.oz || 0;
     const FH = b.FH || 3.2;
     const y0 = floor.y;                               // slab top
@@ -785,6 +786,41 @@
     }
     B.addHole = function (r) { HOLES.push(r); CEIL_HOLES.push(r); };
 
+    /* THE TELEVISION — the game's one set (city/newsroom.js tvParts) drawn
+       into this floor's buckets, with the shared NEWS ONE screen on its face.
+       (x, z) building-local: the point on the floor plan under the screen
+       face (o.atWall: the WALL point; the set is hung off it by the bracket).
+       yaw: the way the screen faces (snapped to the plan's 90 degrees).
+       o.w screen width, o.y screen centre (local y), o.mount "stand" | "wall"
+       | "ceiling", o.base (stand: the surface it stands on, local y),
+       o.on (default true), o.spill (bake a cool pool of screen light). */
+    B.tv = function (x, z, yaw, o) {
+      o = o || {};
+      const N = CBZ.news;
+      if (!N || !N.tvParts) return null;
+      const fx = Math.round(Math.sin(yaw || 0)), fz = Math.round(Math.cos(yaw || 0));
+      const mount = o.mount || "stand";
+      const w = o.w || 1.0, sh = w * 9 / 16;
+      const cy = o.y != null ? o.y : (mount === "stand" ? (o.base != null ? o.base : fy) + 0.1 + sh / 2 : fy + 1.5);
+      const T = N.tvParts({ w: w, mount: mount, base: o.base != null ? cy - o.base : null, reach: mount === "ceiling" ? ceil - cy : null });
+      if (o.atWall) { x += fx * T.depth; z += fz * T.depth; }
+      const lx = fz, lz = -fx, alongX = fx === 0;       // u runs along (lx, lz)
+      for (let i = 0; i < T.parts.length; i++) {
+        const p = T.parts[i];
+        box(x + p.u * lx + p.v * fx, cy + p.y, z + p.u * lz + p.v * fz,
+          alongX ? p.w : p.d, p.h, alongX ? p.d : p.w, p.c, p.glow ? { glow: true } : null);
+      }
+      const on = o.on !== false;
+      if (on) {
+        screens.push({ x: x + fx * 0.0015, y: cy, z: z + fz * 0.0015, yaw: Math.atan2(fx, fz), w: T.sw, h: T.sh });
+        if (o.spill !== false) lamp(x + fx * 0.9, z + fz * 0.9, cy, { r: 2.4, i: 0.2, color: 0x9fb8d8 });
+      } else {
+        box(x + fx * 0.0015, cy, z + fz * 0.0015, alongX ? T.sw : 0.002, T.sh, alongX ? 0.002 : T.sw, 0x07080a);   // dark glass
+      }
+      pieces.push({ tag: "tv", x: x, z: z, w: alongX ? T.sw : 0.3, d: alongX ? 0.3 : T.sw, yaw: yaw || 0 });
+      return { y: cy, w: T.sw, h: T.sh };
+    };
+
     // ---- FINISH: arrays -> meshes, light baked into the vertex colours ----
     B.finish = function (parent) {
       const g = new THREE.Group();
@@ -811,6 +847,19 @@
         if (key === "glass") m.renderOrder = 2;
         g.add(m);
         meshes.push(m);
+      }
+      // the TVs: the shared NEWS ONE plane on each (one material, one
+      // texture for every set in the game; city/newsroom.js paints it only
+      // while one of them is near you)
+      if (screens.length && CBZ.news && CBZ.news.screen) {
+        for (let i = 0; i < screens.length; i++) {
+          const S = screens[i];
+          const m = CBZ.news.screen(S.w, S.h);
+          if (!m) break;
+          m.position.set(S.x, S.y, S.z);
+          m.rotation.y = S.yaw;
+          g.add(m);
+        }
       }
       g.updateMatrixWorld(true);
       if (parent) parent.add(g);

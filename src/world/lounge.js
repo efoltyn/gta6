@@ -184,11 +184,22 @@
     m.position.set(25.3, 0.45, 36.8); m.castShadow = false; (CBZ.prisonRoot || CBZ.scene).add(m);
   })();
 
-  // wall-mounted TV, bezel and screen; the screen is just off (dark glass
-  // with a faint picture), not a glowing blue slab
-  addBox(TV_X, TV_Y, TV_Z, 0.1, 1.05, 1.8, 0x0a0d12, {});
-  addBox(TV_X + 0.056, TV_Y, TV_Z, 0.012, 0.97, 1.72, 0x1c2a36,
-    { emissive: 0x0f2230, ei: 0.6, cast: false });
+  // the wall-mounted TV: the game's one set (city/newsroom.js) on its
+  // bracket off the west wall's inner face (19.25), facing the couch, and it
+  // is on NEWS ONE, the real news of the city outside the wall. (It used to
+  // be a dark slab "just off": the dayroom TV is the one thing in here that
+  // shows you the world.)
+  const NEWS = CBZ.news;
+  if (NEWS && NEWS.tvSet) {
+    const tv = NEWS.tvSet({ w: 1.6, mount: "wall" });
+    tv.position.set(19.25 + tv.userData.tv.depth, TV_Y, TV_Z);
+    tv.rotation.y = HALF;                                   // faces +x, into the room
+    (CBZ.prisonRoot || CBZ.scene).add(tv);
+  } else {
+    addBox(TV_X, TV_Y, TV_Z, 0.1, 1.05, 1.8, 0x0a0d12, {});
+    addBox(TV_X + 0.056, TV_Y, TV_Z, 0.012, 0.97, 1.72, 0x1c2a36,
+      { emissive: 0x0f2230, ei: 0.6, cast: false });
+  }
 
   // coffee station in the corner: a base cabinet with a laminate top, the
   // brewer and its pot on it. (It was a 1.2 m black box hanging 40 cm off

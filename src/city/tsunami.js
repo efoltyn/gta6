@@ -404,6 +404,8 @@
     };
     ev.landU = (-10 - FRONT_FROM) / (ev.frontTo - FRONT_FROM);
     noted = "";
+    // the city's event bus hears it (the news channel reports it by name)
+    if (CBZ.cityEvent) { try { CBZ.cityEvent("tsunami", { x: ev.cx, z: ev.cz, peak: peak, waves: waves }, { silent: true, noWanted: true }); } catch (e) {} }
     return true;
   };
   /* THE EVENT, READABLE FROM OUTSIDE. Everything a storyboard or a probe

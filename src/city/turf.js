@@ -187,10 +187,20 @@
     const held = (ctrl.byGang && ctrl.byGang[newId]) || 0;
     const score = held + "/" + ctrl.total + " districts";
     const col = hex6(gangColorOf(newId));
+    // signage law: no em dashes, no middle dots
     const line = you
-      ? z.name.toUpperCase() + " is YOURS · " + score
-      : z.name.toUpperCase() + " falls to the " + nm + " — " + score;
-    const notice = { app: "news", from: "City Desk", text: line };
+      ? z.name.toUpperCase() + " is YOURS, " + score
+      : z.name.toUpperCase() + " falls to the " + nm + ", " + score;
+    // the phone line is addressed to you; the TV reports it as the street sees it
+    const notice = { app: "news", from: "City Desk", text: line, tv: false };
+    if (CBZ.news && CBZ.news.push) {
+      const crew = you ? (gangName("player") || "A new crew") : (gangName(newId) || "A crew");
+      const zn = z.name.charAt(0).toUpperCase() + z.name.slice(1).toLowerCase();
+      try {
+        CBZ.news.push(zn + " falls to " + (/^(the |a )/i.test(crew) ? crew : "the " + crew),
+          { cat: "STREETS", look: "turf", sub: held + " of " + ctrl.total + " districts now theirs", key: "turf:" + z.id + ":" + newId, hold: 120 });
+      } catch (e) {}
+    }
     if (typeof CBZ.cityPhoneNotify === "function") CBZ.cityPhoneNotify(notice);
     else if (typeof CBZ.phoneNotify === "function") CBZ.phoneNotify(notice);
     // turf flip toward the player: respect, but NO jingle (no-jingle rule).

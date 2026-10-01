@@ -897,7 +897,10 @@
       time: nowLabel(),
       born: Date.now(),
       meta: payload.meta || null,
+      tv: payload.tv,
     };
+    // the City Desk's news is also the TV's (city/newsroom.js); tv:false opts out
+    if (app === "news" && payload.tv !== false && CBZ.news && CBZ.news.wire) { try { CBZ.news.wire(text, item.from); } catch (e) {} }
     // Outside the campaign, hand the notice to the legacy city phone. It must
     // never fall back to floating street text (and doing so can recurse once
     // cityFeed itself is phone-backed).

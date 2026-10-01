@@ -1282,6 +1282,8 @@
       city.lots.push(L);
     }
     liveStructures = city.lots;
+    // the city's event bus hears it (the news channel reports it by name)
+    if (CBZ.cityEvent) { try { CBZ.cityEvent("quake", { x: city.x, z: city.z, mag: city.mag }, { silent: true, noWanted: true }); } catch (e) {} }
     return true;
   }
   function cityStop() {

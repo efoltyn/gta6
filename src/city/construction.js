@@ -343,7 +343,7 @@
     if (S.built >= P.segs.length && !S.doneAnnounced) {
       S.doneAnnounced = true;
       if (CBZ.city && CBZ.city.big) CBZ.city.big("THE WALL STANDS");
-      news("The Saltlands border wall is complete · " + P.segs.length + " sections, " + P.gaps.length + " manned crossing(s).");
+      news("The Saltlands border wall is complete. " + P.segs.length + " sections, " + P.gaps.length + " manned crossings.");
     }
   }
   // re-man a post whose officers died — next day, small treasury cost
