@@ -244,5 +244,49 @@ function body(x, z, m, yaw) { return { pos: { x, y: 0, z }, r: 0.36, _bcMass: m 
   ok(HC.stats().stepOvers > before && pokes.some((f) => f > 3), `a sprinter's foot kicks the body harder (force ${Math.max(...pokes).toFixed(1)})`);
 }
 
+{
+  // A MAN ON THE FLOOR IS STILL A BODY (owner: "they have no colliders on the
+  // ground, I can stand through them"): stopping on him, or walking down the
+  // length of him, puts your feet down beside him; a stride across still steps over
+  const lyingAlongZ = (o) => {
+    // a rig lying along +z: hips at z 0, head 0.8 m up the floor
+    const m = (x, z) => ({ matrixWorld: { elements: [1,0,0,0, 0,1,0,0, 0,0,1,0, x,0.2,z,1] } });
+    o.char = { head: m(0, 0.8), body: m(0, 0), group: { visible: true, userData: { humanScale: 0.7 } } };
+    return o;
+  };
+  {
+    const { HC, CBZ } = world();
+    const D = lyingAlongZ(body(0, 0, 78, 0)); D.ko = 5;
+    CBZ.bots = [D];
+    const S = body(0.04, -0.3, 78, 0);                 // standing on his thighs
+    for (let f = 0; f < 60; f++) HC.resolve([S, D], 1 / 60, { mode: "test" });
+    ok(Math.abs(S.pos.x) > 0.3, `a man who stops on a downed body is put down beside it (x ${S.pos.x.toFixed(2)})`);
+  }
+  {
+    const { HC, CBZ } = world();
+    const D = lyingAlongZ(body(0, 0, 78, 0)); D.ko = 5;
+    CBZ.bots = [D];
+    const S = body(0.02, -1.6, 78, 0);                 // walks up the length of him, feet first
+    for (let f = 0; f < 120; f++) { S.pos.z += 1.3 / 60; HC.resolve([S, D], 1 / 60, { mode: "test" }); }
+    ok(Math.abs(S.pos.x) > 0.3, `walking down the length of him goes round him, not through (x ${S.pos.x.toFixed(2)})`);
+  }
+  {
+    const { HC, CBZ } = world();
+    const D = lyingAlongZ(body(0, 0, 78, 0)); D.ko = 5;
+    CBZ.bots = [D];
+    const S = body(-1.5, 0.3, 78, Math.PI / 2);         // a stride across his chest
+    for (let f = 0; f < 120; f++) { S.pos.x += 1.4 / 60; HC.resolve([S, D], 1 / 60, { mode: "test" }); }
+    ok(S.pos.x > 1.0 && Math.abs(S.pos.z - 0.3) < 0.1, `a stride across him still steps over (x ${S.pos.x.toFixed(2)}, z ${S.pos.z.toFixed(2)})`);
+  }
+  {
+    const { HC, CBZ } = world();
+    const D = lyingAlongZ(body(0, 0, 78, 0)); D.ko = 5;
+    CBZ.bots = [D];
+    const S = body(0, 0.3, 78, 0); S._gnpOn = D;         // mounted on him on purpose
+    for (let f = 0; f < 60; f++) HC.resolve([S, D], 1 / 60, { mode: "test" });
+    ok(Math.abs(S.pos.x) < 0.01, `the man in the mount is left on him (x ${S.pos.x.toFixed(2)})`);
+  }
+}
+
 console.log(fails ?`\n${fails} FAILED` : "\nall ok");
 process.exit(fails ? 1 : 0);

@@ -818,32 +818,101 @@
     }
     return false;
   }
-  const _dq = { x: 0, z: 0 };
-  function stepOver(list, m) {
+  /* A MAN ON THE FLOOR IS STILL A BODY. (OWNER: "I knock someone down and
+     they have no colliders on the ground, I then can stand through them, it's
+     dumb.") This used to be a 0.55 m ring round his hips that only a MOVING
+     man ever tested: stand still on him, or walk down the length of him from
+     the head, and you stood inside him. Now a lying man is what he is on the
+     floor, a capsule from his feet to the crown of his head read off his live
+     rig, and the rule is the one a real floor full of bodies obeys: you can
+     STEP OVER him (a stride across him), and you can never STAND in him. A
+     foot that stops inside him, or travels along him, is put down beside him.
+     The man on top of him in the mount (verbs_strike's ground and pound) is
+     kneeling astride him on purpose and is left there. */
+  const CAP_R = 0.21;                 // a lying torso/leg's half-width on the floor (m)
+  // world positions straight off the last rendered matrices (no THREE needed)
+  const _cw = { x: 0, z: 0 }, _cw2 = { x: 0, z: 0 };
+  function wpos(o, out) { const e = o.matrixWorld && o.matrixWorld.elements; if (!e) return false; out.x = e[12]; out.z = e[14]; return true; }
+  let capFrame = 0;
+  function capsuleOf(D) {
+    let c = D._bcCap;
+    if (c && c.f === capFrame) return c;
+    if (!c) c = D._bcCap = { f: 0, ax: 0, az: 0, bx: 0, bz: 0, r: CAP_R };
+    c.f = capFrame;
+    const p = posOf(D), ch = D.char || D.ch;
+    if (ch && ch.head && ch.body && ch.group && ch.group.visible !== false && wpos(ch.head, _cw) && wpos(ch.body, _cw2)) {
+      let ux = _cw.x - _cw2.x, uz = _cw.z - _cw2.z;
+      const L = Math.hypot(ux, uz);
+      const sc = (ch.group.userData && ch.group.userData.humanScale) ? ch.group.userData.humanScale / 0.7 : 1;
+      if (L > 0.25) {
+        ux /= L; uz /= L;
+        c.ax = _cw.x + ux * 0.12 * sc; c.az = _cw.z + uz * 0.12 * sc;     // the crown
+        c.bx = _cw2.x - ux * 0.95 * sc; c.bz = _cw2.z - uz * 0.95 * sc;   // the heels
+        c.r = CAP_R * sc;
+        return c;
+      }
+      // knelt / folded / sat up: a heap round the hips
+      c.ax = c.bx = _cw2.x; c.az = c.bz = _cw2.z; c.r = 0.40 * sc;
+      return c;
+    }
+    c.ax = c.bx = p.x; c.az = c.bz = p.z; c.r = 0.42;
+    return c;
+  }
+  const _dq = { x: 0, z: 0, d: 0 };
+  // closest point of segment a-b to (px, pz): leaves the push normal in _dq
+  function capNormal(c, px, pz) {
+    const abx = c.bx - c.ax, abz = c.bz - c.az, l2 = abx * abx + abz * abz;
+    let t = l2 > 1e-8 ? ((px - c.ax) * abx + (pz - c.az) * abz) / l2 : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    let nx = px - (c.ax + abx * t), nz = pz - (c.az + abz * t);
+    let d = Math.hypot(nx, nz);
+    if (d < 1e-4) {                                  // dead on his spine: off to the nearer side of the line
+      const l = Math.sqrt(l2) || 1;
+      nx = -abz / l; nz = abx / l; d = 0;
+      if (!(l2 > 1e-8)) { nx = 1; nz = 0; }
+    } else { nx /= d; nz /= d; }
+    _dq.x = nx; _dq.z = nz; _dq.d = d;
+    return _dq;
+  }
+  function stepOver(list, m, dt, clampFn) {
     if (!gatherDowned(m, list)) return;
+    capFrame++;
     if (!downGrid) downGrid = CBZ.makeGrid(CELL);
     downGrid.rebuild(downed, posOf);
     for (let i = 0; i < list.length; i++) {
       const S = list[i];
       if (S._remote || S._bcDown || S._bcSkip) continue;
-      const sp = speedOf(S);
-      if (sp < 0.6 || swimming(S)) continue;          // a standing man steps on nothing: skip the swim test
+      if (swimming(S)) continue;
       const p = posOf(S); if (!p) continue;
+      const sp = speedOf(S);
       const gx = downGrid.cellIndex(p.x), gz = downGrid.cellIndex(p.z);
       for (let cx = gx - 1; cx <= gx + 1; cx++) for (let cz = gz - 1; cz <= gz + 1; cz++) {
         const bucket = downGrid.bucket(cx, cz); if (!bucket) continue;
         for (let k = 0; k < bucket.length; k++) {
           const D = bucket[k];
-          if (D === S) continue;
+          if (D === S || S._gnpOn === D || (isPlayer(S) && CBZ.player && CBZ.player._gnpOn === D)) continue;
           const dp = posOf(D);
           if (Math.abs((dp.y || 0) - (p.y || 0)) > 1.2) continue;
-          const dx = dp.x - p.x, dz = dp.z - p.z;
-          const reach = radiusOf(S) * 0.6 + 0.55;          // a lying body: ~0.55 m either side of the hips
-          if (dx * dx + dz * dz > reach * reach) continue;
+          const cap = capsuleOf(D);
+          const n = capNormal(cap, p.x, p.z);
+          const foot = radiusOf(S) * 0.45;           // a foot, not the whole shoulder width
+          const min = cap.r + foot;
+          if (n.d >= min) continue;
+          // a stride ACROSS him is a step over; standing on him or walking
+          // down the length of him is not
+          const ux = sp > 1e-3 ? (S._bcVx || 0) / sp : 0, uz = sp > 1e-3 ? (S._bcVz || 0) / sp : 0;
+          const across = sp >= 0.6 && Math.abs(ux * n.x + uz * n.z) > 0.45;
+          if (!across) {
+            // put the foot down beside him, quickly but not as a snap
+            const push = Math.min(min - n.d, Math.max(0.03, 3.2 * (dt || 0.016)));
+            p.x += n.x * push; p.z += n.z * push;
+            if (clampFn) clampFn(S);
+            else if (CBZ.collide) CBZ.collide(p, radiusOf(S));
+            continue;
+          }
           if ((D._bcStepAt || -9) > clock - 0.45) continue;
           D._bcStepAt = clock;
           stepOvers++;
-          const ux = (S._bcVx || 0) / sp, uz = (S._bcVz || 0) / sp;
           // the foot catches him: a nudge along your stride, harder at a run
           nudge(D, ux, uz, sp < 2.6 ? 1.2 : 2 + sp * 0.5, dp.x, (dp.y || 0) + 0.2, dp.z);
           if (sp < 2.6) continue;                            // a walk steps over
@@ -966,7 +1035,7 @@
       }
       break;
     }
-    if (opts.downed !== false) stepOver(list, m);
+    if (opts.downed !== false) stepOver(list, m, dt, opts.clamp || null);
     for (let i = 0; i < list.length; i++) { const a = list[i], p = posOf(a); if (p) stamp(a, p); }
   }
 

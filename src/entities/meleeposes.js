@@ -110,6 +110,14 @@
     headbutt:     { dur: 0.46, hand: "both", path: "clinch", level: "head", hip: 0, wind: 0, fwd: 0.10, lean: 0, pro: 0.04, roll: 0 },
     stab:         { dur: 0.30, hand: "rear", path: "stab", level: "body", hip: 0.26, wind: 0.08, fwd: 0.10, lean: 0.14, pro: 0.12, roll: 0.5, dip: 0.06 },
     shove:        { dur: 0.40, hand: "both", path: "shove", level: "body", hip: 0, wind: 0, fwd: 0.14, lean: 0.20, pro: 0.14, roll: 0 },
+    // GROUND AND POUND, thrown from the mount (ch.mount, see THE MOUNT below):
+    // a short punch cocked by the ear and driven DOWN through his face with
+    // the hips posting behind it; the elbow, raised and dropped with the
+    // whole torso falling on its point; the hammerfist, overhead and down,
+    // pinky side first. level "ground" = his head where it lies.
+    gnp:          { dur: 0.34, hand: "lead", path: "ground", level: "ground", hip: 0.42, wind: 0.24, fwd: 0, lean: 0.30, pro: 0.10, roll: 1.10 },
+    gnpElbow:     { dur: 0.46, hand: "rear", path: "groundElbow", level: "ground", hip: 0.50, wind: 0.30, fwd: 0, lean: 0.50, pro: 0.04, roll: 0, ext: -2.3 },
+    hammer:       { dur: 0.42, hand: "rear", path: "hammer", level: "ground", hip: 0.30, wind: 0.12, fwd: 0, lean: 0.34, pro: 0.06, roll: -1.20 },
   };
   // legacy spellings other files write into punchKind
   function kindKey(k) {
@@ -273,7 +281,8 @@
     const D = dims(ch);
     const sx = side === "L" ? 1 : -1;
     // default aim in the unrotated model frame, then into body space
-    out.set(sx * 0.10, level === "body" ? D.hipY + 0.40 : D.chinY - 0.03, level === "body" ? 1.42 : 1.52);
+    if (level === "ground") out.set(sx * 0.04, D.footY + 0.24, 0.62);
+    else out.set(sx * 0.10, level === "body" ? D.hipY + 0.40 : D.chinY - 0.03, level === "body" ? 1.42 : 1.52);
     ch.model.localToWorld(out);
     ch.body.worldToLocal(out);
     return out;
@@ -312,8 +321,15 @@
 
     const hard = ch.surrender || ch.handsUp || ch.cuffed || ch.verbHold || fallActive(ch);
     const stanceOK = ch.fightStance && !ch.aimingPose && !ch.carryPose && !ch.bladeCarry;
+    // THE MOUNT blends in and out on its own clock: on top of a downed man
+    // the stance below kneels astride him (ch.mount is written by
+    // systems/verbs_strike.js V.groundStrike, cleared when he gets up or you
+    // leave him)
+    ch._mountK = damp(ch._mountK || 0, ch.mount && !hard ? 1 : 0, ch.mount ? 9 : 6, dt);
+    if (ch._mountK < 0.004 && !ch.mount) ch._mountK = 0;
+    const mounted = ch._mountK > 0;
     const act = punching || kicking || ch.blockT > 0 || ch.blockK > 0 || dodging || (fs && fs.on) ||
-      (hr && hr.on) || ch.staggerT > 0;
+      (hr && hr.on) || ch.staggerT > 0 || mounted;
     /* A MAN WHO IS NOT FIGHTING DOES NOT SQUARE UP TO BE HIT. A reaction or
        a step on a body with no guard up (a bystander shot in the street, a
        guard shoved by an inmate) used to pull the whole boxing stance in
@@ -324,7 +340,7 @@
        A passive body reacts from the pose it was already in: every channel
        below starts at its current value and the reaction adds deltas. */
     // (latched at rest, so a guard that drops still fades out of its stance)
-    const fighting = ch.fightStance || punching || kicking || ch.blockT > 0 || ch.blockK > 0 || dodging;
+    const fighting = ch.fightStance || punching || kicking || ch.blockT > 0 || ch.blockK > 0 || dodging || mounted;
     if (fighting) ch._mPas = false;
     else if (!(ch._mK > 0.01)) ch._mPas = true;
     const passive = !!ch._mPas;
@@ -396,6 +412,7 @@
     rearF.set(-lx * (D.hipX + 0.10), D.footY + 0.025, -0.30);
     QL.set(0.25, 0.1, 1); QR.set(-0.25, 0.1, 1);                 // knees track over the toes
     }
+    if (mounted) mountPose(ch, D, ch._mountK);
 
     // ================= PUNCH ===============================================
     let aimSide = null;
@@ -416,6 +433,13 @@
       S.by += byDir * (k.hip * d - k.wind * w);
       if (both) S.by = lerp(S.by, 0, Math.max(w, d));             // two hands square the shoulders
       S.mZ += k.fwd * d;                                          // weight rolls onto the lead leg
+      if (k.level === "ground") {
+        // from the mount the hips drive forward and down into him: a punch
+        // posts the weight over his face, the elbow DIVES the whole torso on him
+        const dive = k.path === "groundElbow";
+        S.mZ += (dive ? 0.40 : 0.12) * d;
+        S.dl += (dive ? 0.0 : 0.04) * d;
+      }
       if (k.path === "upper") {
         const dip = sstep(0, 0.20, p) * (1 - sstep(0.20, 0.46, p));
         S.dl += (k.dip || 0) * dip - 0.05 * d;                    // sink, then drive up through the legs
@@ -669,6 +693,39 @@
         PL.set(0.6, -1, -0.2); PR.set(-0.6, -1, -0.2);
         break;
       }
+      case "ground": {
+        // cocked by the ear, elbow up and back, then down the short line
+        // through his face: the guard hand stays posted on his chest
+        _t.set(sx * 0.24, D.shY + 0.06, 0.12);
+        _C.copy(W).lerp(_t, chamber * (1 - d));
+        W.copy(_C).lerp(aim, d);
+        P.set(sx * 0.75, 0.55 - 0.45 * d, -0.55 - 0.35 * d);
+        postHand(side, aim, d);
+        break;
+      }
+      case "groundElbow": {
+        // the arm folds, the elbow goes up past the ear, then the torso falls
+        // on its point: the fist ends by the far collarbone, the elbow in him
+        _t.set(sx * 0.16, D.shY + 0.18, 0.06);
+        W.lerp(_t, chamber * (1 - d));
+        // the wrist stays high over the target, the elbow hangs under it
+        // and is what arrives
+        _t2.set(aim.x - sx * 0.04, aim.y + 0.30, aim.z - 0.04);
+        W.lerp(_t2, d);
+        P.set(sx * 0.4 * (1 - d), 1 - 1.5 * d, 0.2 + 1.1 * d);
+        postHand(side, aim, d);
+        break;
+      }
+      case "hammer": {
+        // overhead, then down like a mallet, pinky side first
+        _t.set(sx * 0.16, D.headY + 0.22, -0.04);
+        _C.copy(W).lerp(_t, chamber * (1 - d));
+        W.copy(_C).lerp(aim, d);
+        W.y += 0.10 * Math.sin(Math.PI * d);
+        P.set(sx * 0.85, 0.35 - 0.5 * d, -0.45);
+        postHand(side, aim, d);
+        break;
+      }
       case "clinch": {
         // headbutt: both fists take his collar and PULL while the head drives
         const grab = sstep(0, 0.28, p);
@@ -679,6 +736,41 @@
         break;
       }
     }
+  }
+
+  /* ---- THE MOUNT: kneeling astride a man on his back ---------------------
+     Knees on the floor either side of his ribs, shins lying back along the
+     floor, hips posted over his belly, torso over him, chin down on him,
+     hands up and in front of the chest. Blended over the stance by `m`, so
+     getting on and off him is a body moving, not a cut. The hip height comes
+     from the thigh length: a kneeling man's hips sit a thigh above his
+     knees, and the knees here are out wide. Root placement (where the actor
+     is on him, which way he faces) is verbs_strike.js's job. */
+  function mountPose(ch, D, m) {
+    const kx = D.hipX + 0.26, kz = 0.12;
+    const thighY = Math.sqrt(Math.max(0.03, D.g1 * D.g1 - (kx - D.hipX) * (kx - D.hipX) - kz * kz));
+    const hipH = D.footY + 0.07 + thighY + 0.04;             // knee pad + thigh, posted a touch up
+    const breath = 0.012 * Math.sin((ch.breath || 0) * 3.1);
+    S.dl = lerp(S.dl, D.hipY - hipH + breath, m);
+    S.mZ = lerp(S.mZ, 0, m); S.mX = lerp(S.mX, 0, m); S.mYaw = lerp(S.mYaw, 0, m);
+    S.bx = lerp(S.bx, 0.40, m); S.by = lerp(S.by, 0, m); S.bz = lerp(S.bz, 0, m);
+    S.nx = lerp(S.nx, 0.55, m); S.ny = lerp(S.ny, 0, m);
+    S.legK = lerp(S.legK, 1, m);
+    // hands: up, in front of the chest, ready to post or punch
+    _t.set(0.20, D.shY - 0.18, 0.30); WL.lerp(_t, m);
+    _t.x = -0.20; WR.lerp(_t, m);
+    PL.lerp(_t2.set(0.6, -1, -0.2), m); PR.lerp(_t2.set(-0.6, -1, -0.2), m);
+    // feet: behind the knees, shins on the floor, toes pointed back
+    _t.set(kx + 0.04, D.footY + 0.06, kz - D.g2 * 0.96); FL.lerp(_t, m);
+    _t.x = -(kx + 0.04); FR.lerp(_t, m);
+    QL.lerp(_t2.set(0.55, -0.1, 1), m); QR.lerp(_t2.set(-0.55, -0.1, 1), m);
+  }
+  // the other hand on a ground strike: posted on his chest, pinning him
+  function postHand(side, aim, d) {
+    const O = side === "L" ? WR : WL, OP = side === "L" ? PR : PL, ox = side === "L" ? -1 : 1;
+    _t2.set(aim.x + ox * 0.16, aim.y - 0.05, aim.z - 0.30);
+    O.lerp(_t2, 0.55 + 0.35 * d);
+    OP.set(ox * 0.7, -0.6, -0.3);
   }
 
   // ---- kicks: foot/knee paths on the leg IK (writes FL/FR/QL/QR) ----
@@ -1028,6 +1120,40 @@
     return 1;
   }
 
+  /* ---- TAKING IT ON THE FLOOR (ch.gHit = { on, t, lx, amt }) -------------
+     A man punched where he lies has nowhere for his head to go: it turns off
+     the blow, hits the floor and comes back, and the whole body jolts. A
+     conscious man's arms come up over his face and stay there a while (he
+     covers, the way every fighter does under ground and pound); a man out
+     cold just takes it. Written over the lying key each frame, never stored. */
+  function groundHit(ch, f, mdt) {
+    const g = ch.gHit;
+    if (!g) return;
+    if (g.on) { g.t += mdt; if (g.t > 1.6) g.on = false; }
+    const t = g.on ? g.t : 9;
+    const h = impulse(t, 0.035, 9) * (g.amt || 1);
+    const back = f.variant !== "face";
+    if (ch.neck && h) {
+      ch.neck.rotation.y += g.lx * 0.70 * h;                   // turned by it
+      ch.neck.rotation.x += (back ? -0.22 : 0.18) * Math.abs(h); // into the floor and back up
+    }
+    ch.body.rotation.x += (back ? 0.05 : -0.05) * Math.abs(h);
+    // covering up: decays over a second and a half after the last one
+    const cover = f.ko ? 0 : clamp01(1.6 - t) * Math.min(1, t * 12);
+    if (cover > 0) {
+      const P = ch.parts, L = ch.low || {};
+      if (P.la) { P.la.rotation.x = lerp(P.la.rotation.x, -2.3, cover); P.la.rotation.z = lerp(P.la.rotation.z, 0.25, cover); }
+      if (P.ra) { P.ra.rotation.x = lerp(P.ra.rotation.x, -2.3, cover); P.ra.rotation.z = lerp(P.ra.rotation.z, -0.25, cover); }
+      if (L.la) L.la.rotation.x = lerp(L.la.rotation.x, -2.1, cover);
+      if (L.ra) L.ra.rotation.x = lerp(L.ra.rotation.x, -2.1, cover);
+    }
+  }
+  MP.groundHit = function (ch, lx, amt) {
+    let g = ch.gHit;
+    if (!g) g = ch.gHit = { on: false, t: 0, lx: 0, amt: 1 };
+    g.on = true; g.t = 0; g.lx = lx < 0 ? -1 : 1; g.amt = amt == null ? 1 : amt;
+  };
+
   /* ============================================================
      HOOK 2 — MP.react: falls, the head snap, the taser. Runs LAST.
      ============================================================ */
@@ -1081,6 +1207,7 @@
       }
       if (f.on || w > 0) writePose(ch, OUT, f.on ? w : 0);
       if (!f.on) { setModel(ch, 0, 0, 0, 0); }
+      if (f.on && f.phase === "down") groundHit(ch, f, mdt);
     }
 
     // ---- HEAD SNAP: additive, backed out next frame by MP.strike ----
@@ -1192,7 +1319,7 @@
     }
     const k = kindKey(kind);
     if (k === "headbutt") { out.set(0, 0.08 * D.hs, 0.5 * D.hs); return at(ch.head, out); }
-    if (k === "elbow") {
+    if (k === "elbow" || k === "gnpElbow") {
       out.set(0, 0.02, -0.08);
       return at(L ? ch.low.la : ch.low.ra, out);
     }

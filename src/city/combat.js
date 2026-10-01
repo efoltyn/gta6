@@ -500,6 +500,46 @@
     return open ? t : null;
   }
 
+  /* ---- GROUND AND POUND (owner: "legit UFC level"): a man on the floor is
+     mounted, and every press of the one hit button is the next blow of the
+     sequence from on top of him; `kind` forces one (the heavy button drops
+     the elbow). A blade stabs down from the mount. */
+  function isDown(t) {
+    return !!(t && !t.dead && (t.ko > 0 || (CBZ.body && CBZ.body.busy && CBZ.body.busy(t)) ||
+      (CBZ.vitals && CBZ.vitals.cuffable && CBZ.vitals.cuffable(t))));
+  }
+  function groundPound(t, kind) {
+    const V = CBZ.verbs, pa = playerActor();
+    if (!V || !V.groundStrike || !pa || !t || t.dead) return false;
+    const feel = weaponFeel();
+    const base = (it() && it().dmg) || 16;
+    const S = V.groundStrike(pa, t, { kind: kind || undefined, weapon: feel.name === "blade" ? BLADE_W : null,
+      onLand: function (res) { landGround(t, res, base, feel); } });
+    if (!S) return false;
+    markFighting();
+    if (CBZ.fpsPunchAnim) CBZ.fpsPunchAnim();
+    combo = 0; comboT = 0;
+    spend(kind ? 8 : 4);
+    fireCD = 0.22;
+    return true;
+  }
+  function landGround(t, res, base, feel) {
+    if (!t || t.dead) return;
+    const blade = feel.name === "blade";
+    const heavy = res.kind === "gnpElbow" || res.kind === "hammer";
+    const wasDown = CBZ.vitals ? CBZ.vitals.cuffable(t) : t.ko > 0;
+    const out = blade
+      ? meleeHurt(t, base * 1.6, res, true, feel, { stab: true, zone: Math.random() < 0.3 ? "neck" : "chest", critical: wasDown })
+      : meleeHurt(t, base * (heavy ? 1.25 : 0.85) * (res.dmgMul || 1), res, heavy, feel, { zone: "head", mul: heavy ? 1.3 : 1 });
+    // a hard one into a head with the floor behind it splits him
+    if (!blade && heavy && CBZ.vitals && CBZ.vitals.daze && CBZ.vitals.daze(t) > 0.4) res.blood = 0.4;
+    if (out === "dead") res.reaction = "dead";
+    if (CBZ.sfx) CBZ.sfx(heavy ? "hit" : "punch");
+    if (CBZ.fpsHitMarker) CBZ.fpsHitMarker(!!t.dead, false);
+    if (t.kind !== "cop" && CBZ.cityCrime) CBZ.cityCrime(50, { x: t.pos.x, z: t.pos.z, type: "assault" });
+    lastTarget = t.dead ? null : t;
+  }
+
   // ---- DEATHBLOW / FINISHER: a single brutal execution on an open foe ------
   // A guard-broken man on his feet takes it where the fist meets him; a man on
   // the ground takes it on the blow's beat (the fist comes down on him).
@@ -638,14 +678,19 @@
   function lightAttack() {
     if (pBrokenT > 0) return;                    // you're guard-broken, can't swing
     if (staggerT > 0 || tired()) return;         // gassed: the guard sags (ch.winded), the fists stay home
-    // an open foe in front → DEATHBLOW instead of a jab
+    // on top of him already: the next blow goes into him
+    if (P._gnpOn && !P._gnpOn.dead && groundPound(P._gnpOn)) return;
+    // an open foe in front → DEATHBLOW instead of a jab; a man DOWN is
+    // mounted and pounded out (verbs_strike V.groundStrike)
     const fin = finisherTarget();
-    if (fin) { doFinisher(fin); return; }
+    if (fin) { if (!(isDown(fin) && groundPound(fin))) doFinisher(fin); return; }
     if (!aimTarget(2.1, 0.3)) { const c = corpseTarget(1.9); if (c) { corpseSwing(c, false); return; } }
     markFighting();
     const next = (comboT > 0 && combo < 3) ? combo + 1 : 1;
     const finisher = next >= 3;
-    const kind = finisher ? "hook" : KINDS[(next - 1) % 3];
+    // chest to chest there is no room to turn a hook over: the forehead goes in
+    const near = finisher ? aimTarget(0.85, 0.5) : null;
+    const kind = finisher ? (near && weaponFeel().name !== "blade" ? "headbutt" : "hook") : KINDS[(next - 1) % 3];
     const base = it() ? it().dmg : 16;
     // jab/cross scale up through the chain; the hook (3rd) is the big one
     const dmg = finisher ? Math.round(base * 1.9) : Math.round(base * (1 + (next - 1) * 0.18));
@@ -662,8 +707,9 @@
     if (pBrokenT > 0) return;                    // guard-broken — can't swing
     if (heavyCD > 0 || staggerT > 0) return;
     if (tired()) return;
+    if (P._gnpOn && !P._gnpOn.dead && groundPound(P._gnpOn, "gnpElbow")) { heavyCD = 0.45; return; }
     const fin = finisherTarget();
-    if (fin) { doFinisher(fin); return; }
+    if (fin) { if (!(isDown(fin) && groundPound(fin, "gnpElbow"))) doFinisher(fin); return; }
     if (!aimTarget(2.1, 0.3)) { const c = corpseTarget(1.9); if (c) { corpseSwing(c, true); heavyCD = 0.5; return; } }
     markFighting();
     combo = 0; comboT = 0;

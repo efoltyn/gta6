@@ -3004,7 +3004,7 @@
     // the old scale.y accordion squash; ease any legacy squash back out.
     // slide/prone hand the rig to their own animChar branches (lean-back
     // feet-first power slide / flat weapon-forward crawl) the same way.
-    playerChar.crouch = !!player.crouch;
+    playerChar.crouch = !!player.crouch && !player._gnpOn;   // the mount (verbs_strike) poses the legs itself; crouch only lowers the eye
     playerChar.slidePose = sliding;
     playerChar.pronePose = !!player.prone;
     playerChar.group.scale.y += (1 - playerChar.group.scale.y) * (1 - Math.pow(0.001, fdt));

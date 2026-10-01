@@ -492,6 +492,59 @@ if (W.ctx && CBZ.playerChar) {
   CBZ.game.mode = was;
 }
 
+// ================================================================ GROUND AND POUND
+// a man knocked flat on his back is mounted (knees either side of him, hips
+// low over his belly, facing his head) and pounded: every blow of the
+// sequence lands on its beat with the fist/elbow at his face, his head turns
+// off it, and the mount ends a beat after the last blow.
+let gnpRow = null;
+if (V.groundStrike) {
+  const { A, B } = pair(1.0);
+  V.guard(A, false);
+  const ach = A.char, bch = B.char;
+  V.knockdown(B, { dir: { x: 0, z: 1 }, ko: true, dur: 60 });
+  B.ko = 60;
+  run(90);
+  const kinds = [], zones = [];
+  let lands = 0, worstReach = 0, hipMin = 9, feetMin = 9, neckTurn = 0, maxOff = 0, mountK = 0;
+  const hv = v3(), sp = v3(), bh = v3();
+  for (let n = 0; n < 6; n++) {
+    const S = V.groundStrike(A, B, { onLand: (res) => { lands++; zones.push(res.zone); } });
+    if (!S) { kinds.push("NONE"); run(10); continue; }
+    kinds.push(S.kind);
+    const kind = S.kind, arm = S.arm;
+    let best = 9;
+    const n0 = bch.neck.rotation.y;
+    for (let i = 0; i < 60 && S.on; i++) {
+      W.frame(DT);
+      ach.group.updateMatrixWorld(true); bch.group.updateMatrixWorld(true);
+      bch.head.getWorldPosition(hv);
+      MP.strikePoint(ach, kind, arm, sp);
+      best = Math.min(best, sp.distanceTo(hv));
+      neckTurn = Math.max(neckTurn, Math.abs(bch.neck.rotation.y - n0));
+      hipMin = Math.min(hipMin, ach.parts.rl.getWorldPosition(v3()).y);
+      feetMin = Math.min(feetMin, footMinY(ach));
+      bch.body.getWorldPosition(bh);
+      maxOff = Math.max(maxOff, Math.hypot(A.group.position.x - bh.x, A.group.position.z - bh.z));
+      mountK = Math.max(mountK, ach._mountK || 0);
+    }
+    const headR = 0.47 * 0.6 * (bch.body.matrixWorld.getMaxScaleOnAxis() || 0.7);
+    worstReach = Math.max(worstReach, best - headR);
+    run(4);
+  }
+  run(150);
+  gnpRow = { kinds, lands, worstReach, hipMin, feetMin, neckTurn, maxOff, mountK, ended: !ach.mount && (ach._mountK || 0) < 0.05 };
+  check(kinds.indexOf("NONE") < 0 && lands === 6, "ground and pound: all 6 blows thrown and landed (" + kinds.join(",") + ", lands " + lands + ")");
+  check(kinds.indexOf("gnp") >= 0 && kinds.indexOf("gnpElbow") >= 0 && kinds.indexOf("hammer") >= 0, "ground and pound: punches, the elbow and the hammerfist all come out");
+  check(zones.every((z) => z === "head"), "ground and pound: every blow lands on his head");
+  check(mountK > 0.9, "the mount blends fully in (" + f2(mountK) + ")");
+  check(hipMin < 0.55, "mounted: the hips are low over him (hip " + f2(hipMin) + " m)");
+  check(feetMin > -0.08, "mounted: no foot through the floor (" + f2(feetMin) + ")");
+  check(worstReach < 0.16, "every blow reaches his face (worst miss " + f2(worstReach) + " m past the skull)");
+  check(neckTurn > 0.15, "his head turns off the blows (" + f2(neckTurn) + " rad)");
+  check(gnpRow.ended, "the mount ends a beat after the last blow");
+}
+
 // ================================================================ REPORT
 console.log("\nverbs-strike-check — contact-resolved strikes on real rigs\n");
 console.log("kind          land  zone   t(s)  p     surf   hips  flat  lowY  guard  out");
@@ -506,6 +559,7 @@ console.log(`\nblock: blocked=${blockRow.blocked} dmg x${f2(blockRow.mul)} attac
 console.log(`hitstop: freeze ${f2(stopRow.fa)}/${f2(stopRow.fb)} s, attacker clock held=${stopRow.attFrozen}, target clock held=${stopRow.tgtFrozen}`);
 if (cityRow) console.log(`city LMB combo: hp ${cityRow.hps.map((h) => h.toFixed(0)).join(" > ")}, driven back ${f2(cityRow.backed)} m, finisher fall=${cityRow.fell}`);
 if (prisonRow) console.log(`prison CBZ.punch: step-in ${f2(prisonRow.stepIn)} m, ${f2(prisonRow.dmg1)} hp, reacted=${prisonRow.reacted}, out-of-range whiff=${prisonRow.whiffed}, KO fall=${prisonRow.fell}`);
+if (gnpRow) console.log(`ground and pound: ${gnpRow.kinds.join(" ")}, lands ${gnpRow.lands}, worst miss ${f2(gnpRow.worstReach)} m, hips ${f2(gnpRow.hipMin)} m, feet ${f2(gnpRow.feetMin)}, head turn ${f2(gnpRow.neckTurn)}, off-centre ${f2(gnpRow.maxOff)} m, ended=${gnpRow.ended}`);
 console.log(`fighter (20 s, seed 1234): ${b1.thrown} blows, max ${b1.maxWin} per 2 s, ${b1.guardBetween} guard returns, ${b1.blocks} blocks, ${b1.slips} slips, ${b1.steps} steps, deterministic=${b1.log.join(",") === b2.log.join(",")}`);
 if (W.errors && W.errors.length) { console.log("\nloader/updater errors:\n  " + W.errors.slice(0, 6).join("\n  ")); fails++; }
 console.log(`\n${checks - fails}/${checks} checks passed`);

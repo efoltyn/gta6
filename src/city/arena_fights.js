@@ -1786,6 +1786,11 @@ function tickRing(dt){
   }else if(b.state==="ko"){
     b.t-=dt;
     var W=(b.winner==="red")?r:u, L=(b.winner==="red")?u:r;
+    // the finish: the winner jumps on him and pounds him until the ref dives in
+    // (verbs_strike: a fighter whose man is down mounts him; ringLanded ignores
+    // blows after the knockdown, so this is the finish, not more scoring)
+    if(b.t>1.3&&VB()&&Math.hypot(W.pos.x-L.pos.x,W.pos.z-L.pos.z)<2.4)VB().fighter(W,{}).tick(dt,L,RING_O);
+    else if(VB()&&VB().dismount)VB().dismount(W);
     if(W.char.fightStance&&VB())VB().guard(W,false);
     anim(W.char,0.5,dt); anim(L.char,0,dt);
     var refMoved=refCh?moveTo(refCh.group.position,L.pos.x+0.9,L.pos.z,1.9*dt):0;

@@ -120,10 +120,12 @@
   const REACH = {
     jab: 1.28, cross: 1.30, hook: 1.30, upper: 0.80, body: 1.32, bodyStraight: 1.12, overhand: 1.42,
     elbow: 0.92, headbutt: 0.74, stab: 0.95, shove: 1.10, front: 0.95, round: 0.90, low: 0.95, knee: 0.62,
+    gnp: 1.0, gnpElbow: 0.9, hammer: 1.0,
   };
   const POWER = {
     jab: 0.35, cross: 0.75, hook: 0.82, upper: 0.82, body: 0.70, bodyStraight: 0.62, overhand: 0.92,
     elbow: 0.80, headbutt: 0.85, stab: 0.55, shove: 0.55, front: 0.72, round: 0.95, low: 0.62, knee: 0.88,
+    gnp: 0.62, gnpElbow: 0.86, hammer: 0.72,
   };
   const ZONE_MUL = { jaw: 1.3, head: 1.0, liver: 1.25, body: 0.8, legs: 0.6 };
   const FIST_R = 0.05;                      // m: the striking surface (knuckles, elbow point, shin)
@@ -187,6 +189,13 @@
   // the aim point for a blow at this zone: the zone's surface facing the attacker
   function aimPoint(Z, level, kind, arm, from, out) {
     let c, r;
+    if (level === "ground") {
+      // his face where it lies: the skull's centre, lifted to its upper surface
+      out.copy(Z.head.c); out.y += Z.head.r * 0.55;
+      const dx = from.x - out.x, dz = from.z - out.z, d = Math.hypot(dx, dz) || 1;
+      out.x += (dx / d) * Z.head.r * 0.25; out.z += (dz / d) * Z.head.r * 0.25;
+      return out;
+    }
     if (level === "legs") { out.copy(Z.lA).lerp(Z.lB, 0.55); r = Z.legR; c = out; }
     else if (level === "body") {
       if (kind === "body" || kind === "round") { c = Z.liver.c; r = Z.liver.r; }
@@ -485,6 +494,7 @@
     for (let i = 0; i < shotQ.length; i++) resolveShot(shotQ[i], MP);
     shotQ.length = 0;
     stepReels();
+    stepMounts(dt);
     for (let i = live.length - 1; i >= 0; i--) {
       const S = live[i];
       if (!S.on) { live.splice(i, 1); continue; }
@@ -1073,6 +1083,136 @@
     { k: ["elbow"], w: 0.35, r: "close" },
   ];
   const WINDOW = 2.0, MAXN = 4;
+  /* ============================================================
+     GROUND AND POUND — the one hit button on a man who is down.
+     (OWNER: "add headbutting and ground and pound, legit UFC level".)
+     V.groundStrike(att, tgt, opts) gets you ON him the first time (a quick
+     slide to kneel astride his belly, facing his head: THE MOUNT, posed by
+     entities/meleeposes.js off ch.mount) and throws the next blow of the
+     sequence a cage fighter actually throws from there: punches in twos,
+     left-right, then the elbow dropped with the whole torso on its point,
+     two more, then the hammerfist. Every blow resolves on its beat (there is
+     no contact test against a man lying under you: the fist is going into
+     the floor through his face) and his head turns off it, hits the floor
+     and comes back; a conscious man covers up. You stay on him while you
+     keep hitting; stop for a moment, walk off him, or let him get up and
+     the mount is over. opts: onLand(res) as V.strike (res.zone "head"),
+     kind (force a blow), heavy, power, weapon (a blade stabs from the
+     mount), rng, reach (how far away you may start, default 2.2 m).
+     ============================================================ */
+  const mounts = [];
+  const GNP_SEQ = ["gnp", "gnp", "gnpElbow", "gnp", "gnp", "hammer"];
+  function mountOf(a) { for (let i = 0; i < mounts.length; i++) if (mounts[i].a === a) return mounts[i]; return null; }
+  V.mountOf = mountOf;
+  function dismount(M) {
+    const i = mounts.indexOf(M);
+    if (i >= 0) mounts.splice(i, 1);
+    if (M.a) M.a._gnpOn = null;
+    const ch = M.Ba && M.Ba.ch;
+    if (ch) ch.mount = false;
+    if (M.Ba && M.Ba.isPlayer && CBZ.player) {
+      CBZ.player._gnpOn = null;
+      if (M.crouchSet) CBZ.player.crouch = false;
+    }
+  }
+  V.dismount = function (a) { const M = mountOf(a); if (M) dismount(M); };
+  V.groundStrike = function (att, tgt, opts) {
+    opts = opts || EMPTY;
+    const Ba = bod(att), Bt = bod(tgt);
+    if (!Ba || !Bt || !Bt.ch || !Bt.pos || !Ba.pos || Ba.dead() || Ba.down() || !Bt.down()) return null;
+    const tch = Bt.ch;
+    if (!tch.head || !tch.body) return null;
+    let M = mountOf(att);
+    if (M && M.t !== tgt) { dismount(M); M = null; }
+    if (!M) {
+      const d = Math.hypot(Bt.pos.x - Ba.pos.x, Bt.pos.z - Ba.pos.z);
+      if (d > (opts.reach || 2.2)) return null;
+      for (let i = 0; i < mounts.length; i++) if (mounts[i].t === tgt) return null;   // somebody is already on him
+      M = { a: att, Ba, t: tgt, Bt, n: 0, idle: 0, slide: 0, drift: 0, lastX: Ba.pos.x, lastZ: Ba.pos.z, side: "r", crouchSet: false };
+      mounts.push(M);
+      att._gnpOn = tgt;
+      if (Ba.isPlayer && CBZ.player) {
+        CBZ.player._gnpOn = tgt;
+        if (!CBZ.player.crouch) { CBZ.player.crouch = true; M.crouchSet = true; }   // the eye comes down with you
+      }
+      if (Ba.ch) Ba.ch.mount = true;
+    }
+    M.idle = 0;
+    const blade = !!(opts.weapon && opts.weapon.blade);
+    const kind = blade ? "stab" : (opts.kind || GNP_SEQ[M.n % GNP_SEQ.length]);
+    let arm = opts.arm;
+    if (!arm) {
+      if (kind === "gnp") { M.side = M.side === "l" ? "r" : "l"; arm = M.side; }
+      else arm = M.side === "l" ? "r" : "l";                  // the power shots come off the other hand
+    }
+    const S = V.strike(att, tgt, { kind, arm, heavy: !!opts.heavy, power: opts.power, lunge: false, snap: 0,
+      weapon: opts.weapon || null, rng: opts.rng,
+      onBeat: function (St) { groundLand(St, M, opts); } });
+    if (!S) return null;
+    M.n++;
+    return S;
+  };
+  function groundLand(S, M, opts) {
+    const Ba = S.Ba, Bt = bod(M.t);
+    if (!Ba || !Bt || !Bt.pos) return;
+    const res = S.res, tch = Bt.ch;
+    if (S.hasAim) res.point.copy(S.aim);
+    else res.point.set(Bt.pos.x, (Bt.pos.y || 0) + 0.2, Bt.pos.z);
+    let dx = res.point.x - Ba.pos.x, dz = res.point.z - Ba.pos.z;
+    const d = Math.hypot(dx, dz) || 1;
+    res.dir.x = dx / d; res.dir.z = dz / d;
+    res.landed = true; res.blocked = false; res.target = M.t;
+    res.zone = S.level === "ground" ? "head" : "body";
+    // a man covering up under you takes some of it on his forearms
+    const covering = tch && tch.gHit && tch.gHit.on && tch.fall && !tch.fall.ko && tch.gHit.t < 1.2;
+    res.dmgMul = (res.zone === "head" ? 1 : 0.8) * (covering ? 0.7 : 1);
+    res.reaction = "none"; res.stagger = false; res.blood = 0;
+    if (opts.onLand) opts.onLand(res);
+    if (!S.Ba) return;
+    const bothP = Ba.isPlayer || Bt.isPlayer;
+    V.hitstop(S.att, M.t, 0.035 + 0.05 * res.power, bothP);
+    if (bothP && CBZ.shake) CBZ.shake(0.12 + 0.32 * res.power);
+    if (Ba.isPlayer && CBZ.fpsPunchLanded) CBZ.fpsPunchLanded(S.kind, S.heavy || res.power > 0.8);
+    const MP = MPf();
+    if (tch && MP && MP.groundHit && !Bt.dead()) MP.groundHit(tch, S.arm === "l" ? 1 : -1, 0.55 + 0.6 * res.power);
+    if (CBZ.trauma && CBZ.trauma.strike) {
+      try {
+        CBZ.trauma.strike(M.t, 3 + 7 * res.power, { dir: { x: res.dir.x, y: -0.6, z: res.dir.z }, fromX: Ba.pos.x, fromZ: Ba.pos.z,
+          y: res.point.y - ((Bt.pos && Bt.pos.y) || 0), flesh: 1 });
+      } catch (e) { /* trauma off in this mode */ }
+    }
+    const cut = !!(S.weapon && S.weapon.blade);
+    if ((res.blood > 0 || cut) && CBZ.goreImpact) {
+      CBZ.goreImpact(res.point.x, res.point.y, res.point.z, { amount: res.blood || 0.8, blade: cut, dir: { x: res.dir.x, y: -0.5, z: res.dir.z } });
+    }
+  }
+  const _mh = new THREE.Vector3(), _mb = new THREE.Vector3();
+  function stepMounts(dt) {
+    for (let i = mounts.length - 1; i >= 0; i--) {
+      const M = mounts[i], Ba = M.Ba, Bt = M.Bt, tch = Bt && Bt.ch, p = Ba && Ba.pos;
+      M.idle += dt;
+      const busy = !!strikeOf(M.a);
+      // walking off him: your own feet moved you since the mount placed you
+      if (p) { const mv = Math.hypot(p.x - M.lastX, p.z - M.lastZ); if (M.slide >= 1 && mv > 0.012) M.drift += mv; }
+      if (!p || Ba.dead() || Ba.down() || !Bt.pos || !tch || !tch.head || !Bt.down() ||
+          (!busy && M.idle > (Ba.isPlayer ? 1.7 : 1.2)) || M.drift > 0.22) { dismount(M); continue; }
+      // astride his belly, facing his head
+      tch.head.getWorldPosition(_mh); tch.body.getWorldPosition(_mb);
+      let ux = _mh.x - _mb.x, uz = _mh.z - _mb.z;
+      const L = Math.hypot(ux, uz);
+      if (L < 0.2) { ux = Bt.pos.x - p.x; uz = Bt.pos.z - p.z; }
+      const l2 = Math.hypot(ux, uz) || 1; ux /= l2; uz /= l2;
+      const s = scaleOf(tch) / 0.7;
+      const tx = _mb.x + ux * 0.38 * s, tz = _mb.z + uz * 0.38 * s;
+      M.slide = Math.min(1, M.slide + dt / 0.3);
+      const k = 1 - Math.exp(-dt * (M.slide >= 1 ? 30 : 12));
+      moveBy(Ba, (tx - p.x) * k, (tz - p.z) * k);
+      Ba.face(Math.atan2(ux, uz), Math.min(1, dt * 12));
+      M.lastX = p.x; M.lastZ = p.z;
+      if (Ba.ch) Ba.ch.mount = true;
+    }
+  }
+
   function mulberry(seed) {
     let a = seed >>> 0;
     return function () {
@@ -1144,9 +1284,24 @@
     const ap = B.pos, tp = Bt.pos;
     const dx = tp.x - ap.x, dz = tp.z - ap.z, dist = Math.hypot(dx, dz) || 1e-4;
     const ux = dx / dist, uz = dz / dist;
-    if (!mine) B.face(Math.atan2(dx, dz), Math.min(1, dt * 8));
     const A = this.act;
     A.type = null;
+    // HE IS DOWN: get on him and pound him out (a burst, then you get off him
+    // the way a fighter does when the ref is not stopping it fast enough)
+    if (Bt.down()) {
+      if (mine || !o.perform || o.groundAndPound === false) return null;
+      if (this.gnpLeft == null) this.gnpLeft = 3 + ((this.rng() * (3 + 4 * this.aggr)) | 0);
+      if (this.gnpLeft <= 0) return null;
+      if (dist > 2.0) return this.footwork(dt, dist, ux, uz, 1.2, o, target);
+      if (this.rng() > (1.6 + 2.4 * this.aggr) * dt) return null;
+      if (!V.groundStrike(a, target, { onLand: o.onLand, rng: this.rng })) return null;
+      this.gnpLeft--; this.thrown++;
+      this.stam = Math.max(0, this.stam - 0.08);
+      A.type = "ground"; A.kind = "gnp";
+      return A;
+    }
+    this.gnpLeft = null;
+    if (!mine) B.face(Math.atan2(dx, dz), Math.min(1, dt * 8));
     // ---- DEFENCE: read his wind-up, answer after a human reaction time ----
     const tel = Bt.down() ? null : telegraphOf(target);
     if (tel && tel.n !== this.readN && tel.prog < 0.4) {

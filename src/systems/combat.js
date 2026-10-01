@@ -118,6 +118,23 @@
     scan(CBZ.guards); scan(CBZ.npcs);
     return standing ? null : best;
   }
+  // centre-to-centre distance to the man you are about to hit (the named one,
+  // or the nearest standing man in front of you)
+  const _cf = [];
+  function closeFoe(actor) {
+    const P = CBZ.player;
+    if (actor && actor.group) { const p = actor.group.position; return Math.hypot(p.x - P.pos.x, p.z - P.pos.z); }
+    _cf.length = 0; candidates(_cf);
+    const ch = CBZ.playerChar, yaw = CBZ.cam ? cameraFacingYaw() : (ch ? ch.group.rotation.y : 0);
+    const fx = Math.sin(yaw), fz = Math.cos(yaw);
+    let best = 99;
+    for (let i = 0; i < _cf.length; i++) {
+      const p = _cf[i].group.position, dx = p.x - P.pos.x, dz = p.z - P.pos.z, d = Math.hypot(dx, dz);
+      if (d < best && d > 0.05 && (dx * fx + dz * fz) / d > 0.5) best = d;
+    }
+    _cf.length = 0;
+    return best;
+  }
   const PA = { isPlayer: true, get pos() { return CBZ.player.pos; } };
   function playerActor() { return CBZ.verbs && CBZ.verbs.playerActor ? CBZ.verbs.playerActor() : PA; }
 
@@ -209,7 +226,9 @@
     if (!V || !V.strike) return { ok: false, msg: "" };
     if (CBZ.player.dead || (CBZ.player.stun || 0) > 0 || (CBZ.player.hitLock || 0) > 0) return { ok: false, msg: "" };
     // a named man on the floor, or nobody standing in front and a body at your feet
-    const low = actor ? (floored(actor) && actor.group && !actor.escaped ? actor : null) : floorTarget();
+    // already on top of him: every press is the next blow on him
+    const onHim = CBZ.player._gnpOn && floored(CBZ.player._gnpOn) && !CBZ.player._gnpOn.escaped ? CBZ.player._gnpOn : null;
+    const low = onHim || (actor ? (floored(actor) && actor.group && !actor.escaped ? actor : null) : floorTarget());
     if (low) return groundBlow(low, !!(opts && opts.blade) && shankOn());
     const hasTarget = punchable(actor);
     if (actor && !hasTarget) return { ok: false, msg: "" };
@@ -230,7 +249,10 @@
     // A fist winds up every third beat into a hook. A shank has no wind-up —
     // its "heavy" is the DEEP one you get for staying on him, every fourth.
     const heavy = !cuffs && (blade ? next % 4 === 0 : next % 3 === 0);
-    const kind = cuffs ? "kick" : blade ? "stab" : (heavy ? "hook" : (next % 2 ? "jab" : "cross"));
+    // CHEST TO CHEST the heavy beat is the HEADBUTT: there is no room to
+    // turn a hook over, so the forehead goes through his nose instead
+    const close = !cuffs && !blade && heavy && closeFoe(hasTarget ? actor : null) < 0.82;
+    const kind = cuffs ? "kick" : blade ? "stab" : (heavy ? (close ? "headbutt" : "hook") : (next % 2 ? "jab" : "cross"));
     // no man named: square up to where you are looking; the swing finds
     // whoever is actually there
     if (!hasTarget && CBZ.playerChar && CBZ.lerpAngle) {
@@ -364,10 +386,16 @@
     const cost = blade ? 0.16 : 0.26;
     const stam = Math.max(0, stamina - cost);
     const fresh = blade ? (0.66 + 0.34 * stam) : (0.35 + 0.65 * stam);
-    const S = V.strike(playerActor(), actor, {
+    // a man down is MOUNTED and pounded (verbs_strike V.groundStrike); a body
+    // the mount cannot take (no rig) still gets the boot or the blade
+    let S = V.groundStrike ? V.groundStrike(playerActor(), actor, {
+      weapon: blade ? BLADE_W : null,
+      onLand: function (res) { landOnFloor(actor, blade, fresh, res); },
+    }) : null;
+    if (!S && !(V.mountOf && V.mountOf(playerActor()))) S = V.strike(playerActor(), actor, {
       kind: blade ? "stab" : "lowKick", heavy: !blade, arm: blade ? "r" : undefined,
       weapon: blade ? BLADE_W : null, maxLunge: 0.45,
-      onBeat: function () { landOnFloor(actor, blade, fresh); },
+      onBeat: function () { landOnFloor(actor, blade, fresh, null); },
     });
     if (!S) return { ok: false, msg: "" };
     combo = next; lastPunch = CBZ.now; stamina = stam;
@@ -375,7 +403,7 @@
     CBZ.game._lawSwingT = CBZ.game.elapsed || 0;
     return { ok: true, msg: "" };
   }
-  function landOnFloor(actor, blade, fresh) {
+  function landOnFloor(actor, blade, fresh, res) {
     if (!actor || !actor.group || CBZ.player.dead) return;
     const p = actor.group.position, P = CBZ.player.pos;
     let dx = p.x - P.x, dz = p.z - P.z;
@@ -385,8 +413,8 @@
     const V = VT(), pt = floorPoint(actor);
     const guardish = actor.kind === "guard" || actor.kind === "warden";
     const wasDead = !!actor.dead;
-    if (CBZ.verbs.hitstop) CBZ.verbs.hitstop(playerActor(), actor, 0.05, true);
-    CBZ.shake(blade ? 0.2 : 0.3);
+    if (!res && CBZ.verbs.hitstop) CBZ.verbs.hitstop(playerActor(), actor, 0.05, true);   // the mount does its own
+    if (!res) CBZ.shake(blade ? 0.2 : 0.3);
     CBZ.sfx(blade ? "hit" : "punch");
     if (!wasDead) theLaw(actor, blade, guardish);
     if (blade) {
@@ -398,8 +426,13 @@
       return;
     }
     if (wasDead) return;                                      // a boot into a corpse moves nothing but the air
-    const out = V ? V.blunt(actor, { zone: "head", power: 0.7 * fresh, weapon: "kick", heavy: true, by: CBZ.player,
+    // from the mount: a fist, an elbow or a hammerfist into a head with the
+    // floor behind it; a hard one splits him (and the blood goes on the floor)
+    const heavyG = !!(res && (res.kind === "gnpElbow" || res.kind === "hammer"));
+    const out = V ? V.blunt(actor, { zone: "head", power: (res ? res.power * (res.dmgMul || 1) : 0.7) * fresh,
+      weapon: res ? (res.kind === "gnpElbow" ? "elbow" : "fist") : "kick", heavy: res ? heavyG : true, by: CBZ.player,
       dirX: dx, dirZ: dz, fromX: P.x, fromZ: P.z }) : "none";
+    if (res && heavyG && V && V.daze && V.daze(actor) > 0.4) res.blood = 0.4;
     if (out === "dead" || actor.dead) finishFx(actor, guardish, false);
   }
   // his forearms took it: a chip through the guard, and you eat the rebound
