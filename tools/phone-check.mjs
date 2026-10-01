@@ -75,7 +75,10 @@ const countries = {
 const rels = { "kesh|republic": -50, "republic|veridia": 10 };
 const rk = (a, b) => [a, b].sort().join("|");
 let enemy = null, shelter = false;
-const cab = { general: { name: "Marcus Hale", display: "General Hale", dead: false }, chief: { name: "Ruth Adair", dead: false } };
+const cab = { general: { name: "Marcus Hale", display: "General Hale", dead: false, loyalty: 60 }, chief: { name: "Ruth Adair", dead: false, loyalty: 60 },
+  bureau: { name: "Leon Varga", display: "Director Varga", dead: false, loyalty: 60 }, police: { name: "Nadia Serrano", display: "Commissioner Serrano", dead: false, loyalty: 60 },
+  treasury: { name: "Oscar Whitlock", display: "Secretary Whitlock", dead: false, loyalty: 60 } };
+const staffState = {};
 const always = [];
 const CBZ = {
   game: { mode: "city", state: "playing" },
@@ -107,8 +110,11 @@ const CBZ = {
       return r;
     },
     cabinet: () => cab,
+    cabinetRecord: (role) => cab[role] || null,
+    staff: () => staffState,
     vacateCabinet: (role) => { cab[role].dead = true; return true; },
-    fillCabinet: (role, who) => { cab[role] = { name: who.name, display: "General " + who.name.split(" ").pop(), dead: false }; return true; },
+    fillCabinet: (role, who) => { cab[role] = { name: who.name, display: "General " + who.name.split(" ").pop(), dead: false, loyalty: who.loyalty, trait: who.trait }; return true; },
+    seat: () => CBZ.gov.holds(),
     site: () => ({ cx: 5000, cz: 5000 }),
   },
   warroom: {
@@ -139,7 +145,7 @@ const win = {
 };
 win.window = win;
 vm.createContext(win);
-for (const f of ["src/city/newsroom.js", "src/city/phone_apps.js", "src/city/dissent.js", "src/city/phone.js"]) {
+for (const f of ["src/city/newsroom.js", "src/city/phone_apps.js", "src/city/president_staff.js", "src/city/dissent.js", "src/city/phone.js"]) {
   vm.runInContext(readFileSync(path.join(root, f), "utf8"), win, { filename: f });
 }
 always.sort((a, b) => a.o - b.o);
@@ -245,10 +251,11 @@ rebuild();
 ok(CBZ.dissent.status().coupDay != null, "the troops move again");
 // call the General: he is cold, and can be relieved
 conv = A.call("general");
-ok(conv && conv.line === "Yes?" && conv.choices[0].id === "relieve", "a disloyal General answers 'Yes?' and can be relieved");
-r = A.choose("relieve");
-ok(r && r.ok && cab.general.name !== "Marcus Hale" && !cab.general.dead, "relieving him puts a new General in (" + cab.general.display + ")");
+ok(conv && conv.line === "Yes?" && conv.choices[0].id === "resign" && conv.choices[0].label === "I need your resignation", "a disloyal General answers 'Yes?' and his resignation is the first thing on the line");
+r = A.choose("resign");
+ok(r && r.ok && cab.general.dead && CBZ.presidentStaff.vacant("general"), "relieving him empties the chair (president_staff.js dismiss)");
 step(3);
+ok(CBZ.presidentStaff.nominee() && CBZ.presidentStaff.nominee().role === "general", "and the Chief has two names for it");
 // force the troops back up inside the purge window: the coup fails
 CBZ.dissent._state().army = 95; CBZ.dissent._state().coupDay = day;
 nextDay();

@@ -11,8 +11,11 @@
              own; dissent.js, warroom.js, polwar.js, the presidency put them
              there by doing things.
      CALLS   people who exist. For a President: his General (war, airstrike,
-             nuke, soldiers on the street, "you're relieved"), his Chief of
-             Staff (the ride, the bunker, the address), every foreign head of
+             nuke, soldiers on the street), his Chief of Staff (the ride, the
+             bunker, the address), the Director, the Commissioner, the
+             Treasury Secretary and the press secretary; every one of them
+             takes "I need your resignation" (president_staff.js dismiss).
+             The Chief rings with two names for an empty chair. Every foreign head of
              state by name (threaten, make peace, offer a deal). For anyone:
              gang bosses (truce, threaten), your crew (come, hold, hit their
              stash), the people you met (their offers), your pilot and your
@@ -289,13 +292,27 @@
         else if (nm === "coup") { addPost(PRESS, d.headline || "The army has taken power."); addPost(c(8), "Stay home. Soldiers everywhere."); }
         else if (nm === "coup-failed") addPost(PRESS, "Coup attempt crushed. The plotters are under arrest.");
         else if (nm === "coup-split") addPost(PRESS, "The army has split. Fighting reported.");
-        else if (nm === "purge") { addPost(PRESS, d.headline || "The General is out."); addPost(c(9), "He fired the General? Something is happening."); }
         else if (nm === "calm") addPost(c(10), "Quiet night for once.");
         return;
       }
       case "protest":
         if (d.phase === "start") addPost(c(11), "At the Mansion gate. It's packed.");
         return;
+      // the President's people (city/president_staff.js)
+      case "dismissal":
+        if (d.headline) addPost(PRESS, d.headline + ".");
+        addPost(c(9), d.role === "general" ? "He fired the General? Something is happening." : pick(["Another one gone.", "Who's left in there?"], evt + d.name));
+        return;
+      case "appointment":
+        if (d.headline && d.ok === false) addPost(PRESS, d.headline + ".");
+        return;
+      case "former": {
+        if (!d.name || !d.text) return;
+        const who = { name: d.name, handle: "@" + String(d.name).toLowerCase().replace(/[^a-z]/g, ""), kind: "citizen" };
+        addPost(who, d.text);
+        if (d.kind === "leak" && d.headline) addPost(PRESS, d.headline + ".");
+        return;
+      }
       case "speech":
         if (+d.approvalDelta > 0.5) addPost(c(12), "Good speech. Didn't expect that.");
         else if (+d.approvalDelta < -0.5) addPost(c(12), "Same old lines.");
@@ -413,9 +430,12 @@
     const out = [];
     const me = us();
     if (me) {
-      const cab = cabinet();
-      if (cab.general && !cab.general.dead) out.push({ id: "general", name: cab.general.display || cab.general.name, role: "General", kind: "staff" });
-      if (cab.chief && !cab.chief.dead) out.push({ id: "chief", name: cab.chief.name, role: "Chief of Staff", kind: "staff" });
+      // every post that has somebody in it (city/president_staff.js); the
+      // Treasury Secretary has no body anywhere, so this is how you reach him
+      STAFF.forEach(function (s) {
+        const c = staffPerson(s.id);
+        if (c) out.push({ id: s.id, name: s.id === "general" ? (c.display || c.name) : c.name, role: s.role, kind: "staff" });
+      });
     }
     if (crew().length) out.push({ id: "crew", name: (g.playerGang && g.playerGang.name) || "Crew", role: "Your crew", kind: "crew" });
     const D = CBZ.cityDialogue;
@@ -434,6 +454,24 @@
     return out;
   }
   function contactById(id) { const l = contacts(); for (let i = 0; i < l.length; i++) if (l[i].id === id) return l[i]; return null; }
+  const STAFF = [
+    { id: "general", role: "General" }, { id: "chief", role: "Chief of Staff" }, { id: "bureau", role: "Bureau Director" },
+    { id: "police", role: "Police Commissioner" }, { id: "treasury", role: "Treasury Secretary" }, { id: "press", role: "Press Secretary" },
+  ];
+  function staffPerson(role) {
+    const PS = CBZ.presidentStaff;
+    if (PS && PS.person) { try { return PS.person(role); } catch (e) { return null; } }
+    const c = cabinet()[role];
+    return c && !c.dead ? c : null;
+  }
+  // the one way to let somebody go by phone (city/president_staff.js)
+  function resign(role) {
+    return { id: "resign", label: "I need your resignation", run: function () {
+      const PS = CBZ.presidentStaff;
+      if (!PS || !PS.dismiss) return { ok: false, why: "Not over the phone." };
+      return PS.dismiss(role, { via: "phone" });
+    } };
+  }
   // the answer on the line: his reply, or why it can't be done. An empty line
   // means the thing answers for itself (the pilot reads his own tasking back).
   function said(r, okLine) {
@@ -447,7 +485,8 @@
     if (id === "general" && me && Wr) {
       const foe = enemy();
       const ch = [];
-      if (st >= 3) ch.push({ id: "relieve", label: "You're relieved", run: function () { return CBZ.dissent.purge(); } });
+      // the army is plotting: letting him go is the first thing on the line
+      if (st >= 3) ch.push(resign("general"));
       if (foe) ch.push({ id: "strike", label: "Airstrike", run: function () { return press("strike"); } });
       else {
         let cw = null;
@@ -457,14 +496,21 @@
       if (Wr.warheads && Wr.warheads() > 0) ch.push({ id: "nuke", label: "Nuke", run: function () { return press("nuke"); } });
       if (st >= 1 && ch.length < 3) ch.push({ id: "streets", label: "Clear the streets", run: function () { return CBZ.dissent.crackdown(); } });
       const line = st >= 3 ? "Yes?" : foe ? shortName(foe) + " is still fighting. Orders?" : "Go ahead, sir.";
-      return { line: line, choices: ch.slice(0, 3) };
+      const out = ch.slice(0, st >= 3 ? 3 : 2);
+      if (st < 3) out.push(resign("general"));
+      return { line: line, choices: out };
     }
     if (id === "chief" && me) {
       const ch = [{ id: "ride", label: "Send the car", run: ride }];
       if (st >= 3 || enemy()) ch.push({ id: "bunker", label: "Get me to the bunker", run: function () { return CBZ.dissent ? CBZ.dissent.bunker() : { ok: false, why: "" }; } });
       if (st >= 1) ch.push({ id: "address", label: "Address the nation", run: function () { return CBZ.dissent.concede(); } });
       const line = st >= 4 ? "Sir, we need to move you. Now." : st >= 2 ? "The opposition is organised now, sir." : "Sir?";
-      return { line: line, choices: ch.slice(0, 3) };
+      return { line: line, choices: ch.slice(0, 2).concat([resign("chief")]) };
+    }
+    // the rest of the cabinet and the press secretary: a word, and the one verb
+    if ((id === "bureau" || id === "police" || id === "treasury" || id === "press") && me) {
+      const LINE = { bureau: "Director.", police: "Commissioner here.", treasury: "Treasury.", press: "Yes, sir?" };
+      return { line: LINE[id], choices: [resign(id)] };
     }
     if (id.indexOf("leader:") === 0 && me) {
       const cid = id.slice(7);
@@ -758,6 +804,10 @@
     if (CONV && CONV.state === "done" && CONV.endAt != null && CLOCK >= CONV.endAt) CONV = null;
     // ringing: one at a time, a gap between, unanswered = missed
     if (RINGING && CLOCK - RINGING.t > RING_SECS) decline();
+    // a call queued by someone who has since left his post never rings
+    const gone = function (r) { return !!r && STAFF.some(function (s) { return s.id === r.id; }) && !staffPerson(r.id); };
+    if (gone(RINGING)) { RINGING = null; lastRingEnd = CLOCK; }
+    while (QUEUE.length && gone(QUEUE[0])) QUEUE.shift();
     if (!RINGING && QUEUE.length && !(CONV && CONV.state === "talk") && CLOCK - lastRingEnd > RING_GAP) {
       RINGING = QUEUE.shift(); RINGING.t = CLOCK;
     }

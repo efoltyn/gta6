@@ -197,6 +197,11 @@
     return FIRST[k % FIRST.length] + " " + LAST[(k >> 5) % LAST.length];
   }
   function person(role) {
+    // the press secretary is the one at her desk (city/president_staff.js)
+    const PS = CBZ.presidentStaff;
+    if (role === "press" && PS && PS.person) {
+      try { const r = PS.person("press"); if (r && r.name) return { name: String(r.name), sid: r.sid || null, role: role }; } catch (e) {}
+    }
     const p = P();
     if (p && typeof p.cabinet === "function") {
       try {
@@ -741,12 +746,33 @@
     return s;
   }
   function liveFolders() { let n = 0; for (let i = 0; i < M.folders.length; i++) if (M.folders[i].state === "closed" || M.folders[i].state === "open") n++; return n; }
+  // WHO SITS IN THE CHAIRS DECIDES WHAT REACHES YOU (city/president_staff.js):
+  // an empty chair calls nobody; without a Chief nobody makes up folders, so
+  // it all comes down the phone; a loyal Chief screens (two folders at most,
+  // nobody sour gets through); a good one lets everything in.
+  function staffSays(m) {
+    const PS = CBZ.presidentStaff;
+    if (!PS || !PS.vacant) return { ok: true };
+    const role = m.who.role;
+    try {
+      if (/^(chief|general|bureau|police|treasury|press)$/.test(role) && PS.vacant(role)) return { ok: false };
+      const style = PS.chiefStyle ? PS.chiefStyle() : "normal";
+      if (style === "none") return { ok: true, phone: m.via === "folder" || m.via === "any" };
+      if (style === "screen" && !m.urgent) {
+        if (PS.loyalty && /^(general|bureau|police|treasury)$/.test(role) && PS.loyalty(role) < 40) return { ok: false };
+        if (m.via !== "phone" && liveFolders() >= 2) return { ok: false };
+      }
+    } catch (e) {}
+    return { ok: true };
+  }
   function offer(matter) {
     if (!seated()) return null;
     const m = normalize(matter);
     if (!m) return null;
     if (openIds()[m.id]) return m.id;
-    let via = m.via;
+    const gate = staffSays(m);
+    if (!gate.ok) return null;
+    let via = gate.phone ? "phone" : m.via;
     if (via === "any") via = (m.urgent || m.expires < 60) ? "aide" : (liveFolders() < FOLDERS_MAX ? "folder" : "phone");
     if (via === "folder" && M.folders.length >= FOLDERS_MAX + 1) via = "phone";
     m.channel = via;
@@ -1603,6 +1629,8 @@
   }
   function chiefVisit(first) {
     if (!first && M.chiefDay === day()) return null;
+    // no Chief of Staff, nobody walks in with the day
+    if (CBZ.presidentStaff && CBZ.presidentStaff.vacant && CBZ.presidentStaff.vacant("chief")) return null;
     M.chiefDay = day();
     const s = S();
     const bits = [];
@@ -1874,6 +1902,14 @@
         label: "Call",
         canShow: function () { return !M.ringing && seated() && !READ.f && !AIDE.talking; },
         onSelect: function () { placeCall(); },
+      }, {
+        // the wheel: dial anyone yourself, through the one directory
+        // (city/phone_apps.js Calls: the cabinet, the press secretary,
+        // foreign leaders; "I need your resignation" lives there)
+        id: "presoffice-dial", prio: 12, campaignSafe: true,
+        label: "Dial",
+        canShow: function () { return !M.ringing && !M.onCall && seated() && !READ.f && !!CBZ.phoneOpen; },
+        onSelect: function () { try { CBZ.phoneOpen("calls"); } catch (e) {} },
       }],
     });
     // THE DESK: E is Sign (the top folder opens under your hand; E again signs
@@ -1999,7 +2035,8 @@
     };
   }
   // the day in one short sentence, for whoever on the staff you ask
-  // (president_staff.js: Talk on the Chief of Staff)
+  // (president_staff.js: Talk on the Chief of Staff; a good Chief leads with
+  // who on the staff is unhappy)
   function dayLine() {
     if (M.ringing) return "Your line's ringing, sir.";
     if (M.missed.length) { const m = M.missed[M.missed.length - 1]; return clean(m.missedLine || (speaker(m.who, false) + " tried to reach you.")); }

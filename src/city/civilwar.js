@@ -610,8 +610,10 @@
     }
     return false;
   }
-  function applyCoupOutcome(rec, kind) {
-    const plotterSid = mintFigure("junta general");
+  function applyCoupOutcome(rec, kind, plotter) {
+    // a known plotter (dissent.js: the General the President dismissed) is
+    // the junta's man; otherwise a shadow general is minted
+    const plotterSid = plotter || mintFigure("junta general");
     if (kind === "success") {
       rec.office.holder = plotterSid; rec.office.deputy = null;
       if (CBZ.city && CBZ.city.big) CBZ.city.big("COUP: " + rec.name.toUpperCase() + " FALLS TO THE JUNTA");
@@ -951,11 +953,11 @@
     partitionsOf: function () { return Object.assign({}, state().partitions); },
     // a coup with a known outcome ("success" | "failure" | "partial"), for a
     // caller that ran its own build-up (city/dissent.js)
-    coup: function (id, kind) {
+    coup: function (id, kind, plotterSid) {
       const rec = CBZ.polity && CBZ.polity.get ? CBZ.polity.get(id) : null;
       if (!rec || activeFractureFor(id)) return null;
       state().coupCooldown[id] = (CBZ.worldDay ? CBZ.worldDay() : 0) + COUP_COOLDOWN_DAYS;
-      return applyCoupOutcome(rec, kind === "failure" || kind === "partial" ? kind : "success");
+      return applyCoupOutcome(rec, kind === "failure" || kind === "partial" ? kind : "success", plotterSid || null);
     },
     reset: reset,
     TUNING: {

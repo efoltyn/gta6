@@ -291,6 +291,18 @@
   function tyranny() { return st().tyranny || 0; }
   function approvalOf() { const h = holds(); return h ? (h.rec.approval || 0) : null; }
   function treasuryOf() { const h = holds(); return h ? (h.rec.treasury || 0) : null; }
+  // the officer who would carry an order out (city/president_staff.js): his
+  // loyalty leans the band; an empty chair has nobody to carry it at all
+  function obedience(role) {
+    const PS = CBZ.presidentStaff;
+    if (!PS || !PS.obedience) return 0;
+    try { return +PS.obedience(role) || 0; } catch (e) { return 0; }
+  }
+  function staffVacant(role) {
+    const PS = CBZ.presidentStaff;
+    if (!PS || !PS.vacant || !holds() || holds().kind !== "country") return false;
+    try { return !!PS.vacant(role); } catch (e) { return false; }
+  }
   function legitimacy() {
     const h = holds();
     if (!h) return 0;
@@ -715,7 +727,7 @@
     const S = st();
     if ((h.rec.treasury || 0) < SURGE_COST) return { ok: false, why: "A surge costs " + money(SURGE_COST) + " and the treasury is short." };
     for (let i = 0; i < S.deployments.length; i++) if (S.deployments[i].kind === "surge") return { ok: false, why: "A surge is already running." };
-    if (legitimacy() < 0.2) return refuse(h, "The commissioner will not move officers on your word.");
+    if (legitimacy() + obedience("police") < 0.2) return refuse(h, "The commissioner will not move officers on your word.");
     const P = CBZ.player;
     const pt = { x: at && at.x != null ? at.x : (P ? P.pos.x : 0), z: at && at.z != null ? at.z : (P ? P.pos.z : 0) };
     if (!inJurisdiction(h, pt.x, pt.z)) return { ok: false, why: "That point is outside " + h.rec.name + "." };
@@ -740,8 +752,11 @@
     if ((h.rec.treasury || 0) < MARTIAL_COST) return { ok: false, why: "Moving the garrison costs " + money(MARTIAL_COST) + "." };
     for (let i = 0; i < S.deployments.length; i++) if (S.deployments[i].kind === "martial") return { ok: false, why: "The garrison is already deployed." };
 
-    // THE BAND. Below it the order is REFUSED, and the refusal has teeth.
-    const leg = legitimacy();
+    // an empty chair: nobody to give the order to (city/president_staff.js)
+    if (staffVacant("general")) return { ok: false, why: "There's no General to give it to." };
+    // THE BAND. Below it the order is REFUSED, and the refusal has teeth. A
+    // loyal General carries it out lower in the band; a sour one refuses higher.
+    const leg = legitimacy() + obedience("general");
     if (leg < MARTIAL_LEGIT) {
       return refuse(h, "Approval " + Math.round(h.rec.approval || 0) + ", and the file on how you govern is thick.");
     }

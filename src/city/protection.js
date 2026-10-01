@@ -374,7 +374,7 @@
   // top up memberPedRefs to memberCount, spawning at (x,z) with the detail's
   // current gear loadout. Cheap no-op once the roster is full.
   // `standing` (runtime, never saved) is bodies the STATE owes a principal on
-  // top of memberCount: the President's detail of five. militia.js's headcount
+  // top of memberCount: the President's detail of six. militia.js's headcount
   // test reads memberCount only, so a standing detail never becomes a militia.
   function spawnMembers(detail, A, x, z, spawnRng) {
     if (!detail || !A || !A.root || !CBZ.cityMakePed) return;
@@ -696,11 +696,11 @@
   //  posted brain walks to next frame). Decisions (threat scans, the gate,
   //  the counter-snipers) run at ~4-5 Hz; only the walking runs per frame.
   // ============================================================
-  // What the OFFICE grants: a shift leader and one agent. The rest of the
-  // detail are people the President hires himself, one by one, out of the
-  // line the Chief of Staff brings to the office (city/president_staff.js);
-  // each hire is memberCount + 1 on this same record, the man himself.
-  const PRES_BASE = 2;
+  // What the OFFICE grants: the whole detail, on day one. Nobody hires
+  // agents (the job line in city/president_staff.js is gone); a fallen agent
+  // is replaced by the service itself, off camera (the 20 s _spawnWait below).
+  // memberCount stays the "bigger detail" order's (statecraft guard deploy).
+  const PRES_BASE = 6;
   const POSTS_NEAR = 180, POSTS_FAR = 260;
   const FORCE_SPAWN_T = 2.0;         // seconds a body may wait for the camera to look away
   const CALM_DECAY = 30;             // seconds of quiet before a posture stands down

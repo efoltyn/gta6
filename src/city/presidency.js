@@ -1057,6 +1057,7 @@
       gate: function (h) {
         if (!CFG.PRESIDENCY_RAIDS) return { ok: false, why: "The Bureau is dark." };
         if (RAID.phase) return { ok: false, why: "A raid is already running (" + RAID.phase + ")." };
+        if (cabinetDead("bureau")) return { ok: false, why: "The Bureau has no director." };
         if (!agencySite()) return { ok: false, why: "The Bureau built no headquarters this world." };
         const S = st();
         if (!S.intelKnown) return { ok: false, why: "No actionable intelligence yet. The cell has to surface once." };
@@ -1361,14 +1362,15 @@
         const name = CBZ.cityMintName ? CBZ.cityMintName(stream, gender) : (R.title + " " + (i + 1));
         const obj = { _parked: true, nameKnown: true, kind: "civilian", archetype: R.archetype, name: name, gender: gender, job: R.job, wealth: 0.7, aggr: 0.2, cash: 300 };
         if (CBZ.cityPedStash) { try { CBZ.cityPedStash(obj); } catch (e) {} }
-        S.cabinet[R.key] = { name: name, sid: obj._sid || ("cab_" + R.key), role: R.title, gender: gender, dead: false, refused: 0 };
+        S.cabinet[R.key] = { name: name, sid: obj._sid || ("cab_" + R.key), role: R.title, gender: gender, dead: false, refused: 0, loyalty: 60, trait: null };
       }
     }
     const out = {};
     for (let i = 0; i < CABINET_ROLES.length; i++) {
       const R = CABINET_ROLES[i], c = S.cabinet[R.key];
       if (!c) continue;
-      out[R.key] = { name: c.name, sid: c.sid, role: c.role, gender: c.gender, dead: !!c.dead,
+      out[R.key] = { name: c.name, sid: c.sid, role: c.role, gender: c.gender, dead: !!c.dead, vacant: !!c.vacant,
+        loyalty: isFinite(c.loyalty) ? +c.loyalty : 60, trait: c.trait || null, refused: c.refused | 0,
         display: R.prefix ? (R.prefix + " " + surname(c.name)) : c.name };
     }
     const rec = seatRec() || countryRecAny();
@@ -1496,16 +1498,21 @@
     return { line: "" };
   }
   function cabinetDead(role) { const S = st(); return !!(S.cabinet && S.cabinet[role] && S.cabinet[role].dead); }
-  // A POST CHANGES HANDS (city/president_staff.js). Fired: the man at the
-  // table walks out and the chair is empty until somebody is hired into it
-  // (an empty chair is a dead officer to every read above: nobody proposes,
-  // nobody calls). Hired: the new person IS the post from now on - the
-  // General on the phone and at the table is the one you picked.
-  function vacateCabinet(role) {
+  // A POST CHANGES HANDS (city/president_staff.js owns why and what it
+  // costs). Dismissed: the chair is empty (an empty chair is a dead officer
+  // to every read above: nobody proposes, nobody calls) until one of the
+  // Chief's two names fills it. opts.keep hands the officer's body back to
+  // the caller (he says his line and walks) instead of removing it.
+  function vacateCabinet(role, opts) {
     cabinet();
     const S = st(), c = S.cabinet && S.cabinet[role];
     if (!c) return false;
     c.dead = true; c.vacant = true;
+    if (opts && opts.keep) {
+      const p = OFF.peds[role];
+      OFF.peds[role] = null;
+      return p && !p.dead ? p : true;
+    }
     releaseOfficer(role);
     return true;
   }
@@ -1513,7 +1520,8 @@
     cabinet();
     const S = st(), R = CABINET_ROLES.find(function (r) { return r.key === role; });
     if (!R || !who || !who.name) return false;
-    S.cabinet[role] = { name: who.name, sid: who.sid || ("cab_" + role + "_" + day()), role: R.title, gender: who.gender || "m", dead: false, refused: 0 };
+    S.cabinet[role] = { name: who.name, sid: who.sid || ("cab_" + role + "_" + day()), role: R.title, gender: who.gender || "m", dead: false, refused: 0,
+      loyalty: isFinite(who.loyalty) ? +who.loyalty : 60, trait: who.trait || null };
     releaseOfficer(role);
     return true;
   }
@@ -1555,6 +1563,8 @@
           canShow: function () { return on() && !!seat() && !CONV && !p.dead; },
           onSelect: function () { talkTo(role); },
         });
+        // the wheel's Dismiss (city/president_staff.js: two lines, he walks)
+        if (CBZ.presidentStaff && CBZ.presidentStaff.wire) CBZ.presidentStaff.wire(p, role);
         // PROCUREMENT IS THE GENERAL'S (city/warroom.js, prices and days in
         // city/arsenal_data.js): his wheel is one verb per thing you can buy,
         // and he answers in one line. Talk stays his E.
@@ -1619,8 +1629,8 @@
         // a refusal is the officer's own sentence, never a system line
         sayPed(ped, r.ok ? (pr.ok || "Yes, sir.") : String(r.why || "It can't be done today."));
       } else {
-        const S = st();
-        if (S.cabinet && S.cabinet[role]) S.cabinet[role].refused = (S.cabinet[role].refused | 0) + 1;
+        // the "no" is remembered: president_staff.js reads it off the
+        // "decision" below and it costs this officer's loyalty
         sayPed(ped, pr.nope || "Understood.");
       }
       emitEvent("decision", { source: "officer", who: c.display, topic: pr.key, choice: choice, order: choice === "yes" ? pr.key : null, ok: choice === "yes" ? !!r.ok : true });
@@ -2510,7 +2520,9 @@
         // REAL sides: agents fielded vs living shooters.
         const shooters = livingCell().filter(function (m) { return m.rank !== "sympathizer"; }).length;
         const agentsLeft = RAID.agents.length - raidCasualties();
-        const p = clamp(0.5 + 0.14 * (agentsLeft - shooters), 0.15, 0.9);
+        // a good Director's team wins more of these; a loyal crony's fewer
+        const lean = CBZ.presidentStaff && CBZ.presidentStaff.edge ? +CBZ.presidentStaff.edge("bureau") || 0 : 0;
+        const p = clamp(0.5 + 0.14 * (agentsLeft - shooters) + lean, 0.15, 0.9);
         const won = h01(day(), st().raidsOrdered, 0x9b30) < p;
         if (!won) {
           // losses on the abstract branch are real bodies too
@@ -3239,8 +3251,24 @@
     lockdown: lockdownRead,
     cabinet: cabinet,
     vacateCabinet: vacateCabinet, fillCabinet: fillCabinet,
+    // the live, saved record of one post (loyalty / trait / refused live here;
+    // city/president_staff.js reads and writes them)
+    cabinetRecord: function (role) { cabinet(); const S = st(); return (S.cabinet && S.cabinet[role]) || null; },
+    // the Bureau's thread: a dismissed Director takes it with him; a good one finds it
+    bureauStop: function () {
+      const S = st();
+      S.intelKnown = false;
+      if (RAID.phase === "muster") {
+        for (let i = 0; i < RAID.agents.length; i++) { const a = RAID.agents[i]; if (a && !a.dead) { a._presRaid = false; a.guard = null; } }
+        RAID.phase = null; RAID.agents = []; RAID.car = null; RAID.target = null;
+        emitEvent("raid", { phase: null, cancelled: true });
+      }
+      paintBoard();
+      return true;
+    },
+    bureauIntel: function (v) { const S = st(); if (v && !livingCell().length) return false; S.intelKnown = !!v; return true; },
     CABINET_ROLES: CABINET_ROLES.map(function (r) { return { key: r.key, title: r.title, job: r.job, archetype: r.archetype }; }),
-    // the President's hires (city/president_staff.js owns the shape; saved here)
+    // the President's people (city/president_staff.js owns the shape; saved here)
     staff: function () { const S = st(); return S.staff || (S.staff = {}); },
     // officers at the Situation Room table (probe surface)
     officers: function () { const o = {}; for (const k in OFF.peds) if (OFF.peds[k]) o[k] = OFF.peds[k]; return o; },

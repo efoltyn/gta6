@@ -25,7 +25,7 @@
 
    ORDERS ABOUT SOMEONE ELSE (the delegation thesis). An option registered
    with `pick: "person"` is an order whose object is a third person ("Go
-   after", "Guard", "Fire"). Choosing it does not fire yet: the wheel closes,
+   after", "Guard", "Tail"). Choosing it does not fire yet: the wheel closes,
    and whoever you now look at wears that verb, pinned over his head. E (or a
    tap on him) gives the order: onSelect(agent, ctx, target). Q or Esc drops
    it. The agent is the thing the wheel was opened on.

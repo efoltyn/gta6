@@ -1392,9 +1392,9 @@
   I.register("ped:civ", { id: "ped-sell", slot: "k", prio: 38, bad: true, role: "dealer", needsItem: drugIn, label: "Sell", onSelect: (p) => CBZ.cityDealTo(p) });
   I.register("ped:civ", {
     id: "ped-hire", slot: "k", prio: 37,
-    // not for a sitting President: his people come to the office and are hired
-    // there, into real jobs (city/president_staff.js), not off the pavement
-    canShow: (p) => !p.recruited && !p.gang && !hatesYou(p) && canAfford100() && !(CBZ.presidentStaff && CBZ.presidency && CBZ.presidency.seat && CBZ.presidency.seat()),
+    // not for a sitting President: the office comes staffed and its chairs are
+    // filled from the Chief of Staff's two names (city/president_staff.js)
+    canShow: (p) => !p.recruited && !p.gang && !hatesYou(p) && canAfford100() && !(CBZ.presidency && CBZ.presidency.seat && CBZ.presidency.seat()),
     label: "Hire", onSelect: (p) => CBZ.cityRecruit(p),
   });
   I.register("ped:civ", { id: "ped-flirt", slot: "k", prio: 36, canShow: (p) => !hatesYou(p) && CBZ.cityIsRomance && CBZ.cityIsRomance(p), label: "Flirt", onSelect: (p) => CBZ.cityFlirt(p) });

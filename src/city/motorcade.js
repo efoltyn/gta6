@@ -1918,13 +1918,10 @@
 
   // the E press beside a column car, for the President, is a word with the
   // agent, never a carjack (the ride router fires before any card)
-  // THE COLUMN NEEDS A DRIVER YOU HIRED (city/president_staff.js). Without
-  // one the state car is just a car: F gets you in and you drive it yourself.
-  function hasDriver() { return !CBZ.presidentStaff || CBZ.presidentStaff.has("driver"); }
+  // the office comes with a driver (city/president_staff.js posts him at the car)
   function wantsAgent() {
     const P = CBZ.player;
     if (!P || !P.pos || P.dead || P.driving || P._vehicle || BOARD) return false;
-    if (!hasDriver()) return false;
     if (!playerPresident() || (RUN && (RUN.phase === "drive" || RUN.phase === "evac"))) return false;
     const L = liveCars();
     for (let i = 0; i < L.length; i++) {
@@ -1942,7 +1939,7 @@
     I.registerZone({
       id: "motorcade-door", kind: "motorcade", prio: 16, radius: 6,
       find: function (px, pz) {
-        if (!playerPresident() || BOARD || !hasDriver()) return null;
+        if (!playerPresident() || BOARD) return null;
         if (RUN && (RUN.phase === "drive" || RUN.phase === "evac")) return null;
         const sc = stateCar(), P = CBZ.player;
         if (!sc || !P || P.driving) return null;

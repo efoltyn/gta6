@@ -31,9 +31,16 @@
      crackdown() soldiers on the street (martial law, else curfew): the
                  movement breaks, the street gets angrier, and an army told
                  to fire on its own people at approval under 35 resents it.
-     purge()     relieve the General (presidency.vacateCabinet + a new man,
-                 fillCabinet): the plot loses its head, readiness drops. A
-                 coup that fires within three days of a purge FAILS.
+     purge()     relieve the General: president_staff.js's dismiss("general"),
+                 the one way any post is emptied (news, readiness, the
+                 Chief's two names). A loyal General leaving calls relieved():
+                 the plot loses its head, and a coup that fires within three
+                 days FAILS. A disloyal one (or any, in a dictatorship) calls
+                 plot(): he takes officers with him, the army climbs, and he
+                 is the junta's man if the coup lands.
+   THE GENERAL'S LOYALTY rides the army line every day
+   (presidentStaff.armyLean): a sour General pushes it up, a loyal pick
+   holds it under the coup mark.
      bunker()    get to a shelter (a waypoint to the nearest real bunker, or
                  warroom's own bunker verb if it has one). A coup that fires
                  while you are sheltered or abroad takes the capital but not
@@ -96,7 +103,7 @@
   function fresh() {
     return {
       seat: null, unrest: 0, movement: 0, army: 0, stage: 0, coupDay: null, lastDay: -1,
-      leader: null, purgedDay: -99, conceded: 0, crackdowns: 0, coups: 0, lastCoup: null, log: [],
+      leader: null, purgedDay: -99, plotter: null, conceded: 0, crackdowns: 0, coups: 0, lastCoup: null, log: [],
     };
   }
   function S() { return g.dissentWorld || (g.dissentWorld = fresh()); }
@@ -204,8 +211,11 @@
     // the army cools on a President the country has turned on
     let da = (s.movement > 40 ? (s.movement - 40) * 0.45 : -8) + (ap < 30 ? 5 : 0) + (lose ? 8 : 0);
     da *= auth;
+    const lean = staffLean();
+    da += lean.add;
     if (d - s.purgedDay < PURGE_GUARD_DAYS) da = Math.min(da, -10);
     s.army = clamp(s.army + da, 0, 100);
+    if (lean.cap != null && !s.plotter) s.army = Math.min(s.army, lean.cap);
     // the coup day
     if (s.coupDay != null && d >= s.coupDay) { fire(h, d); return; }
     evaluate(rec, d);
@@ -238,7 +248,9 @@
     s.lastCoup = { day: d, kind: kind };
     let out = null;
     const CW = CBZ.civilwar;
-    if (CW && typeof CW.coup === "function") { try { out = CW.coup(h.id, kind); } catch (e) { out = null; } }
+    // the man who plotted it is the junta's General (a dismissed one, if any)
+    if (CW && typeof CW.coup === "function") { try { out = CW.coup(h.id, kind, s.plotter ? s.plotter.sid : null); } catch (e) { out = null; } }
+    if (kind === "failure") s.plotter = null;
     if (kind === "failure") {
       say(2, "coup-failed", "Coup attempt crushed in " + capitalName(rec), { sub: "The plotters are under arrest", breaking: true });
       s.army = 10; s.movement = Math.max(0, s.movement - 20);
@@ -278,29 +290,39 @@
     return { ok: true, line: "Soldiers on the streets by tonight." };
   }
   function purge() {
+    if (!seat()) return { ok: false, why: "You do not hold the country." };
+    const PS = CBZ.presidentStaff;
+    if (!PS || !PS.dismiss) return { ok: false, why: "Nobody is answering." };
+    if (!generalName()) return { ok: false, why: "There is no General to relieve." };
+    return PS.dismiss("general", { via: "phone" });
+  }
+  // a loyal General left quietly: the plot has no head for three days
+  function relieved() {
     const h = seat();
-    if (!h) return { ok: false, why: "You do not hold the country." };
-    const p = P();
-    if (!p || !p.vacateCabinet || !p.fillCabinet) return { ok: false, why: "Nobody to replace him with." };
-    const old = generalName();
-    if (!old) return { ok: false, why: "There is no General to relieve." };
-    p.vacateCabinet("general");
-    let rng = null;
-    if (CBZ.seedStream) { try { rng = CBZ.seedStream("dissent:general:" + day() + ":" + S().crackdowns); } catch (e) { rng = null; } }
-    if (!rng) { let x = 0x91e1 ^ day(); rng = function () { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; }; }
-    let name = CBZ.cityMintName ? (function () { try { return CBZ.cityMintName(rng, "m"); } catch (e) { return null; } })() : null;
-    if (!name) name = "Adrian Kovac";
-    p.fillCabinet("general", { name: name, gender: "m" });
+    if (!h) return false;
     const s = S();
     s.purgedDay = day();
-    s.army = Math.max(0, s.army - 50);
+    s.plotter = null;
+    s.army = Math.max(0, s.army - 40);
     s.movement = clamp(s.movement + 5, 0, 100);
-    const W = CBZ.polwar;
-    try { const mil = W && W.militaryOf ? W.militaryOf(h.id) : null; if (mil) mil.readiness = clamp((mil.readiness || 0) - 0.1, 0, 1); } catch (e) {}
-    if (CBZ.approvalShock) { try { CBZ.approvalShock(h.id, -2); } catch (e) {} }
-    say(s.stage >= 3 ? 3 : s.stage, "purge", "President relieves " + old, { sub: "General " + String(name).split(" ").pop() + " takes command", breaking: true });
     evaluate(h.rec, day());
-    return { ok: true, line: "Understood. I'll clear my desk.", newGeneral: name, old: old };
+    return true;
+  }
+  // a dismissed man took officers with him
+  function plot(who) {
+    const h = seat();
+    if (!h) return false;
+    const s = S();
+    if (who && who.name) s.plotter = { name: who.name, sid: who.sid || null };
+    s.purgedDay = -99;
+    s.army = clamp(s.army + ((who && who.push) || 25), 0, 100);
+    evaluate(h.rec, day());
+    return true;
+  }
+  function staffLean() {
+    const PS = CBZ.presidentStaff;
+    if (!PS || !PS.armyLean) return { add: 0, cap: null };
+    try { const l = PS.armyLean() || {}; return { add: +l.add || 0, cap: l.cap != null ? +l.cap : null }; } catch (e) { return { add: 0, cap: null }; }
   }
   // the nearest real shelter: warroom's own bunker verb when it has one,
   // else a waypoint to the nearest registered bunker
@@ -410,6 +432,8 @@
     // president_public.js's protest anger: the movement fills the street
     pressure: function () { if (!seat()) return 0; const s = S(); return clamp(s.unrest / 100 * 0.3 + s.movement / 100 * 0.3, 0, 0.6); },
     concede: concede, crackdown: crackdown, purge: purge, bunker: bunker, inShelter: inShelter,
+    relieved: relieved, plot: plot,
+    bump: function (du, dm, da) { bump(du, dm, da); const h = seat(); if (h) evaluate(h.rec, day()); },
     reset: reset,
     _tick: tick, _daily: daily, _state: S, _fire: function () { const h = seat(); return h ? fire(h, day()) : null; }, _hook: hook,
   };
