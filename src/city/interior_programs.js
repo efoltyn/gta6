@@ -3382,16 +3382,34 @@
     }
     put2(0, 0.44, c - w / 2 - 0.03, c + w / 2 + 0.03, hgt, hgt + 0.06, SP.walnut);   // cornice
   }
-  // a national standard on a floor stand: weighted base (top 0.30, above the
-  // walk law's 25 cm band), pole, finial, cloth hanging flat
-  function stateStandard(F, d, l, col, clothAlongD, side) {
+  // A STAFF FLAG ON THE FLOOR: city/flags.js's indoor staff (bell base, oak
+  // pole, eagle, the cloth hanging in folds with a gold fringe and a tassel
+  // cord), live in the room's plates group. `kind`: "nation" (the country at
+  // this spot), "standard" (its head of state's standard) or "city" (the
+  // municipality's own). p is building-local; fly the local fall direction.
+  function liveStaff(h, p, y, flyX, flyZ, kind, tag) {
+    if (!CBZ.flags) return null;
+    const root = platesRoot(h);
+    if (!root) return null;
+    const wx = p.x + (h.ox || 0), wz = p.z + (h.oz || 0);
+    const nation = CBZ.flags.nationAt(wx, wz);
+    let id = nation;
+    if (kind === "standard") id = "standard:" + nation;
+    else if (kind === "city") {
+      let c = null;
+      try { c = CBZ.polity && CBZ.polity.of ? CBZ.polity.of(wx, wz) : null; } catch (e) { c = null; }
+      id = c && c.id ? "city:" + c.id : nation;
+    }
+    return CBZ.flags.staff(root, { x: p.x, y: y, z: p.z, flyX: flyX, flyZ: flyZ, id: id, tag: tag || null });
+  }
+  // the state rooms' standards: `kind` as liveStaff, the cloth falling along
+  // the frame's lateral (or depth) axis toward `side`
+  function stateStandard(F, d, l, kind, clothAlongD, side, tag) {
     if (!F.h.clear(F.P(d, l).x, F.P(d, l).z, 0.2)) return 0;
     const s = side || 1;
-    F.box(d, l, 0, 0.30, 0.44, 0.44, SP.black, SOLID);
-    F.box(d, l, 0.30, 2.62, 0.05, 0.05, SP.gold);
-    F.box(d, l, 2.62, 2.78, 0.12, 0.12, SP.gold);
-    if (clothAlongD) F.box(d + s * 0.47, l, 1.55, 2.55, 0.9, 0.04, col);
-    else F.box(d, l + s * 0.47, 1.55, 2.55, 0.04, 0.9, col);
+    // the pole's collider, inside the round pole
+    F.box(d, l, 0.17, 2.3, 0.02, 0.02, 0x5b3a22, SOLID);
+    liveStaff(F.h, F.P(d, l), F.Y, s * (clothAlongD ? F.nx : F.tx), s * (clothAlongD ? F.nz : F.tz), kind, tag);
     F.symbols++;
     return 1;
   }
@@ -3778,7 +3796,7 @@
     // the Situation Room lobby: a Secret Service desk and the two standards
     {
       usable += presidentialUse(statePiece(F, "desk", (dXH + sr.d0) / 2, HW - 1.3, F.face(0, -1), { len: 1.5, tone: "exec" }));
-      for (const e of [-1, 1]) stateStandard(F, sr.d0 - 0.45, srDoorL + e * 1.95, e < 0 ? SP.blue : SP.red, false, e);
+      for (const e of [-1, 1]) stateStandard(F, sr.d0 - 0.45, srDoorL + e * 1.95, e < 0 ? "nation" : "standard", false, e);
     }
 
     // ---- the EAST ROOM ------------------------------------------------------
@@ -4262,7 +4280,7 @@
     stateChandelier(F, cabD - 3.6, cabC, 1.0, CR);
     stateChandelier(F, cabD + 3.6, cabC, 1.0, CR);
     const cfire = stateFireplace(F, "d", dCab1 - ST_T / 2, cabC, -1, { canvas: 0x3a3b4a });
-    for (const e of [-1, 1]) stateStandard(F, dCab1 - 0.7, cabC + e * 2.3, e < 0 ? SP.blue : SP.red, false, e);
+    for (const e of [-1, 1]) stateStandard(F, dCab1 - 0.7, cabC + e * 2.3, e < 0 ? "nation" : "standard", false, e);
     for (const dd of [dLob + 3.0, cabD]) {
       if (Math.abs(dd - (dCab1 - 3.4)) < 1.6) continue;
       statePainting(F, "l", LC + ST_T / 2, dd, 1, 1.3, 2.7, 1.1, 0x4a3a33);
@@ -4304,7 +4322,7 @@
     stateSeal(F, podD - 0.30, prC, 1.02, 0.5, false, -1, 0);
     F.box(podD + 0.05, prC, 1.50, 1.56, 0.04, 0.3, SP.black);                                 // microphones' bar
     for (const e of [-1, 1]) F.box(podD - 0.15, prC + e * 0.12, 1.50, 1.75, 0.02, 0.02, SP.black);
-    for (const e of [-1, 1]) stateStandard(F, s0 + 2.2, prC + e * 2.3, e < 0 ? SP.blue : SP.red, false, e);
+    for (const e of [-1, 1]) stateStandard(F, s0 + 2.2, prC + e * 2.3, e < 0 ? "nation" : "standard", false, e);
     // the seats: seven rows of seven, facing the lectern, an aisle along the
     // corridor wall where the doors are
     const row0 = dLob + 3.4, nRows = Math.max(1, Math.min(7, Math.floor((s0 - 2.2 - row0) / 1.05) + 1));
@@ -4487,7 +4505,7 @@
     // the desk, the chair, the standards behind it
     const deskD = dc - A + 2.25;
     const RD = stateResoluteDesk(F, deskD, lc);
-    for (const e of [-1, 1]) stateStandard(F, deskD - THRONE_BACK - 0.1, lc + e * 1.85, e < 0 ? SP.blue : SP.red, false, -e);
+    for (const e of [-1, 1]) stateStandard(F, deskD - THRONE_BACK - 0.1, lc + e * 1.85, e < 0 ? "nation" : "standard", false, -e, e < 0 ? "oval" : null);
     // two sofas facing across the low table, the fireplace and its two chairs
     const sofaD = dc + 0.6;
     const sofas = [];
@@ -4813,12 +4831,10 @@
     function standard(d, l, side) {
       const p = A.at(d, l);
       if (!inRect(r, p.x, p.z, 0.3)) return 0;
-      B(p, 0, 0.46, 0.06, 0.46, P.bezel);
-      B(p, 0.06, 0.07, 2.44, 0.07, P.gold);
-      B(p, 2.50, 0.14, 0.14, 0.14, P.gold);
-      // the cloth hangs flat off the pole toward the axis, facing the room
-      B(A.at(d - 0.06, l - side * 0.44), 1.30, 0.80, 1.10, 0.04, FED.navy);
-      B(A.at(d - 0.06, l - side * 0.44), 1.26, 0.82, 0.04, 0.05, P.gold);   // fringe
+      // the pole's collider inside the round pole; the staff is city/flags.js's,
+      // the cloth falling off the pole toward the axis, facing the room
+      B(p, 0.17, 0.02, 2.3, 0.02, 0x5b3a22, { solid: true });
+      liveStaff(h, p, r.y, -side * A.tx, -side * A.tz, "nation");
       return 1;
     }
     // CBZ.furnish, drawn through this host (seats come back in WORLD coords)
@@ -5491,14 +5507,13 @@
         F.box(d + face * 0.08, l, ly - hgt / 2 + 0.1, hgt - 0.2, w - 0.2, 0.02, k);
       }
     };
-    // a floor standard: weighted base, pole, finial, the cloth hanging flat
+    // a floor standard: city/flags.js's staff flag
     F.flag = function (d, l, hex) {
       { const p = A.at(d, l); if (!cvDoorClear(p.x, p.z, 1.0)) return false; }
-      F.box(d, l, 0, 0.06, 0.44, 0.44, CV.bronze);
-      F.box(d, l, 0.06, 2.4, 0.05, 0.05, CV.gold);
-      F.box(d, l, 2.46, 0.18, 0.12, 0.12, CV.gold);
-      F.box(d, l + 0.48, 1.05, 1.3, 0.86, 0.03, hex || CV.blue);
-      F.box(d, l + 0.48, 1.9, 0.45, 0.4, 0.035, CV.cream);
+      // the pole's collider inside the round pole; the staff is city/flags.js's:
+      // the blue one is the nation's, any other colour the city's own flag
+      F.box(d, l, 0.17, 2.3, 0.02, 0.02, 0x5b3a22, { solid: true });
+      liveStaff(h, A.at(d, l), y, A.tx, A.tz, (hex == null || hex === CV.blue) ? "nation" : "city");
     };
     // a wood bookcase standing against a wall, running laterally (or in depth
     // with `lat`), `face` the side its books face

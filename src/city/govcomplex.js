@@ -229,7 +229,7 @@
     steel: 0x5a6068, steelD: 0x3c4046, fence: 0x9aa0a6, fenceP: 0x6a7077,
     dark: 0x202327, warn: 0xd4a017, red: 0xb43a32, glassSteel: 0x39444f,
     brick: 0x8d5b46, adobe: 0xd8c39c, tileRoof: 0x9c4f3a, timber: 0x6b4a2a,
-    flagRed: 0xc0392b, flagWhite: 0xecf0f1, flagBlue: 0x2c3e6b,
+    flagRed: 0xc0392b,
     lampHead: 0xffe9b0, blank: 0xb9bcc0, blankD: 0x9aa0a4,
     // freight colours — shipping containers and the racking inside a shed
     boxRust: 0x8a4b32, boxTeal: 0x2c6f6a, boxOchre: 0xb08a3a, boxBlue: 0x2f5b8c,
@@ -938,42 +938,13 @@
     }
   }
 
-  /* A FLAG ON A POLE. It was three coloured boxes hung a metre off a bare
-     tube. Now: a stepped stone base, a tapered pole, a gilt truck, and the
-     cloth as three waved strips (one geometry, three colours) that start AT
-     the pole, so nothing hangs in the air beside it. */
-  const FLAG_M = {};
-  function flagMat(hex) {
-    return FLAG_M[hex] || (FLAG_M[hex] = new THREE.MeshLambertMaterial({ color: hex, side: THREE.DoubleSide }));
-  }
-  let _flagGeo = null;
-  function flagGeo() {
-    if (_flagGeo) return _flagGeo;
-    const L = 2.7, H = 0.6;
-    const g = new THREE.PlaneGeometry(L, H, 18, 1);
-    g.translate(L / 2, 0, 0);                              // hoist edge at x = 0
-    const p = g.attributes.position;
-    for (let i = 0; i < p.count; i++) {
-      const x = p.getX(i), t = x / L;
-      p.setZ(i, Math.sin(x * 2.3 + 0.4) * 0.16 * t);      // the fly end moves, the hoist does not
-      p.setY(i, p.getY(i) - 0.05 * t * t);                // and droops a touch
-    }
-    g.computeVertexNormals();
-    return (_flagGeo = g);
-  }
-  function flagpole(root, x, z, h, colours) {
+  /* A FLAG ON A POLE: a stepped stone base under city/flags.js's pole (the
+     one flag system: tapered pole, truck, finial, halyard, cleat, and the
+     nation's own flag in cloth, instanced per complex). */
+  function flagpole(root, x, z, h) {
     box(root, x, 0.2, z, 1.2, 0.4, 1.2, M.stoneD);
     box(root, x, 0.55, z, 0.8, 0.3, 0.8, M.stone);
-    cyl(root, x, 0.7 + (h - 0.7) / 2, z, 0.055, 0.105, h - 0.7, 0xc6c9cc, 12);
-    const truck = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 8), cm(0xb99347));
-    truck.position.set(x, h + 0.1, z); truck.castShadow = false; root.add(truck);
-    const cs = colours || [M.flagWhite, M.flagBlue, M.flagRed];
-    for (let i = 0; i < cs.length; i++) {
-      const m = new THREE.Mesh(flagGeo(), flagMat(cs[i]));
-      m.position.set(x + 0.07, h - 0.45 - i * 0.6, z);
-      m.castShadow = false;
-      root.add(m);
-    }
+    if (CBZ.flags) CBZ.flags.pole(root, { x: x, y: 0.7, z: z, height: h - 0.7, finial: h >= 16 ? "eagle" : "ball" });
     col(x, z, 1.2, 1.2, 0, 0.7);
     col(x, z, 0.3, 0.3, 0.7, h);          // the pole stands ON its base
   }
@@ -6800,6 +6771,7 @@
     // every enterable shell each complex raised ({site, b, name}): the walk
     // check (tools/estate-check.mjs) and any audit read the real buildings
     CBZ.govShells = function () { return _shells.slice(); };
+    if (CBZ.flags) CBZ.flags.flush();     // the complexes' flags, one pool per design and cell
   }, 42);
 
   /* ====================================================================

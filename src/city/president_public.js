@@ -191,14 +191,6 @@
     TEX[key] = t;
     return t;
   }
-  function flagTex() {
-    return canvasTex("flag", 128, 84, function (cc, w, h) {
-      cc.fillStyle = "#1d3160"; cc.fillRect(0, 0, w, h);
-      cc.fillStyle = "#f2efe6"; cc.fillRect(0, h * 0.36, w, h * 0.28);
-      cc.fillStyle = "#a8262b"; cc.fillRect(0, h * 0.44, w, h * 0.12);
-      cc.fillStyle = "#d8b24a"; star(cc, w * 0.2, h * 0.2, 9, 4);
-    });
-  }
   function star(cc, x, y, R, r) {
     cc.beginPath();
     for (let i = 0; i < 10; i++) {
@@ -253,11 +245,9 @@
     SIGN_MATS[key] = [edge, edge, edge, edge, face, face];
     return SIGN_MATS[key];
   }
-  let _flagMat = null, _glassMat = null;
-  function flagMat() {
-    if (!_flagMat) _flagMat = new THREE.MeshLambertMaterial({ map: flagTex(), side: THREE.DoubleSide });
-    return _flagMat;
-  }
+  let _glassMat = null;
+  // every flag here is city/flags.js's: the President's own national design
+  function nation() { return CBZ.flags ? CBZ.flags.home() : "republic"; }
   function glassMat() {
     if (!_glassMat) {
       _glassMat = new THREE.MeshPhongMaterial({ color: 0xcfe2ea, transparent: true, opacity: 0.2, shininess: 90, depthWrite: false });
@@ -325,7 +315,7 @@
     grp.name = "presidential-balcony";
     root.add(grp);
     B.group = grp;
-    const STONE = 0xe6e0d2, STONE_D = 0xcfc7b5, STONE_L = 0xefeae0, BRONZE = 0x6e5a36;
+    const STONE = 0xe6e0d2, STONE_D = 0xcfc7b5, STONE_L = 0xefeae0;
 
     // the deck: a slab with a moulded edge and a soffit band
     box(grp, cx, D - 0.13, (z0 + z1) / 2, W, 0.26, DEP, STONE);
@@ -385,15 +375,7 @@
     // two flags on standards behind and either side of the lectern
     for (const sx of [-1, 1]) {
       const px = cx + sx * 1.45, pz = F + 1.2;
-      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.028, 2.5, 8), cm(BRONZE));
-      pole.position.set(px, D + 1.25, pz); grp.add(pole);
-      const fin = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 6), cm(0xc9a24a));
-      fin.position.set(px, D + 2.54, pz); grp.add(fin);
-      box(grp, px, D + 0.05, pz, 0.32, 0.1, 0.32, BRONZE);
-      const cloth = new THREE.Mesh(new THREE.PlaneGeometry(0.82, 1.24), flagMat());
-      cloth.position.set(px - sx * 0.43, D + 1.78, pz);
-      grp.add(cloth);
-      box(grp, px - sx * 0.43, D + 2.42, pz, 0.86, 0.02, 0.02, BRONZE);          // the cross bar
+      if (CBZ.flags) CBZ.flags.staff(grp, { x: px, y: D, z: pz, flyX: -sx, flyZ: 0, height: 2.5, outdoor: true, id: nation() });
     }
 
     // the glass: up for a speech, gone the rest of the time. It is
@@ -753,10 +735,9 @@
   }
 
   // ---- props (shared geometry, cached materials) -------------------------
-  let _stickGeo = null, _boardGeo = null, _smallFlagGeo = null;
+  let _stickGeo = null, _boardGeo = null;
   function stickGeo() { return _stickGeo || (_stickGeo = new THREE.CylinderGeometry(0.017, 0.017, 1.0, 6)); }
   function boardGeo() { return _boardGeo || (_boardGeo = new THREE.BoxGeometry(0.82, 0.52, 0.02)); }
-  function smallFlagGeo() { return _smallFlagGeo || (_smallFlagGeo = new THREE.PlaneGeometry(0.44, 0.29)); }
   function giveSign(ped, text, support) {
     if (!ped || !ped.group) return;
     const pr = new THREE.Group();
@@ -776,8 +757,8 @@
     pr.position.set(-0.22, 1.72, 0.3);              // the right hand, raised
     const st = new THREE.Mesh(stickGeo(), cm(0x3a3a3a));
     st.scale.y = 0.9; st.position.y = 0.2; pr.add(st);
-    const fl = new THREE.Mesh(smallFlagGeo(), flagMat());
-    fl.position.set(-0.22, 0.5, 0); pr.add(fl);
+    // the cloth hoisted at the stick's top, the fly out toward -x
+    if (CBZ.flags) CBZ.flags.hand(pr, { x: 0, top: 0.645, z: 0, yaw: Math.PI, fly: 0.44, id: nation() });
     ped.group.add(pr);
     ped._pubProp = pr;
     if (ped.char) { ped.char._pubProp = pr; ped.char._pubPh = Math.random() * 6; }
@@ -1081,10 +1062,7 @@
     seal.position.set(lx + dx * 0.235, top + 0.66, lz + dz * 0.235); seal.rotation.y = f; grp.add(seal);
     for (const s of [-1, 1]) {
       const px = stage.x - dx * 0.8 + Math.cos(f) * s * 1.6, pz = stage.z - dz * 0.8 - Math.sin(f) * s * 1.6;
-      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.028, 2.5, 8), cm(0x6e5a36));
-      pole.position.set(px, top + 1.25, pz); grp.add(pole);
-      const cloth = new THREE.Mesh(new THREE.PlaneGeometry(0.82, 1.24), flagMat());
-      cloth.position.set(px - Math.cos(f) * s * 0.43, top + 1.78, pz + Math.sin(f) * s * 0.43); cloth.rotation.y = f; grp.add(cloth);
+      if (CBZ.flags) CBZ.flags.staff(grp, { x: px, y: top, z: pz, flyX: -Math.cos(f) * s, flyZ: Math.sin(f) * s, height: 2.5, outdoor: true, id: nation() });
     }
     if (CBZ.platforms) {
       const h = 2.1;

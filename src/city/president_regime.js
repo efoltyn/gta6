@@ -213,6 +213,7 @@
     lastChangeDay: -1,
     detailTier: null,   // the detail's gearTier before we touched it
     detailFor: null,    // ...and which detail record that reading belongs to
+    nation: null,       // the country whose flag the banners fly (city/flags.js)
   };
   function cm(hex, o) { return CBZ.cmat ? CBZ.cmat(hex, o) : new THREE.MeshLambertMaterial({ color: hex }); }
   function bgeo(w, h, d) { return CBZ.boxGeom ? CBZ.boxGeom(w, h, d) : new THREE.BoxGeometry(w, h, d); }
@@ -424,16 +425,16 @@
   // ============================================================
   //  §6  THE FITTINGS
   // ============================================================
+  // THE BANNERS ARE THE NEW FLAG. setRegime() (build, below) has already
+  // made the regime's design the nation's in city/flags.js, so these hang the
+  // same flag every pole and desk in the country now flies: vertical, union
+  // to the observer's upper left, off a brass rod with a weighted hem.
+  function flagId() { return D.nation || (CBZ.flags ? CBZ.flags.home() : "republic"); }
   function hangBanners(F, R) {
-    const H = F.BAN_H, W = 1.2, T = 0.10;
-    const cy = F.BAN_TOP - H / 2;
+    if (!CBZ.flags) return;
+    const H = F.BAN_H, W = 1.2;
     for (let i = 0; i < F.BAN_T.length; i++) {
-      const x = F.cx + F.BAN_T[i];
-      box(x, cy, F.BAN_Z, W, H, T, R.cloth);
-      // a valance at the head and a weighted hem, so the cloth has ends
-      box(x, F.BAN_TOP - 0.10, F.BAN_Z - 0.015, W + 0.16, 0.20, T + 0.05, R.band);
-      box(x, F.BAN_TOP - H + 0.07, F.BAN_Z - 0.015, W + 0.10, 0.14, T + 0.04, R.trim);
-      if (R.hang.emblem) box(x, F.BAN_TOP - 1.35, F.BAN_Z + 0.06, 0.62, 0.62, 0.05, R.trim, false);
+      CBZ.flags.banner(D.group, { x: F.cx + F.BAN_T[i], y: F.BAN_TOP - 0.03, z: F.BAN_Z + 0.03, width: W, length: H - 0.06, id: flagId() });
     }
   }
   function hangGatehouse(F, R) {
@@ -445,8 +446,7 @@
         const z = F.GZ + face * 1.66;
         // on the corner piers either side of the booth's windows, not over the glass
         const bx = F.GX + s * 1.42;
-        box(bx, top - H / 2, z, 0.5, H, T, R.cloth);
-        box(bx, top - 0.09, z - face * 0.015, 0.64, 0.18, T + 0.05, R.band);
+        if (CBZ.flags) CBZ.flags.banner(D.group, { x: bx, y: top - 0.03, z: z + face * (T / 2 + 0.03), yaw: face > 0 ? 0 : Math.PI, width: 0.5, length: H - 0.06, id: flagId() });
       }
     }
   }
@@ -479,10 +479,7 @@
         box(x + s * 0.48, LO + HI / 2 - 0.05, jz, BW - 0.55, HI, BD - 0.18, R.sand, false);
         // one squad standard every fourth emplacement, so the line is manned
         // by SOMEBODY's colours rather than being anonymous earthworks
-        if (i % 4 === 1) {
-          cyl(x, 1.28, jz - 0.42, 0.05, 2.3, R.band, 6);
-          box(x + 0.42, 2.02, jz - 0.42, 0.80, 0.62, 0.04, R.cloth, false);
-        }
+        if (i % 4 === 1 && CBZ.flags) CBZ.flags.staff(D.group, { x: x, y: 0.13, z: jz - 0.42, flyX: s, flyZ: 0, height: 2.3, outdoor: true, cord: false, finial: "spear", hoist: 0.6, id: flagId() });
         outer = 3.95 + i * 1.9;
       }
       // ONE collider per run, not 22: the boxes are a continuous parapet and
@@ -513,8 +510,7 @@
     box(F.cx, 1.10, z + 1.33, 0.80, 0.72, 0.05, R.cloth, false);
     box(F.cx, 1.10, z + 1.36, 0.34, 0.34, 0.04, R.trim, false);
     for (const s of [-1, 1]) {
-      cyl(F.cx + s * 2.0, 2.30, z - 1.5, 0.07, 3.4, R.trim, 8);
-      box(F.cx + s * 2.0 + s * 0.55, 3.20, z - 1.5, 1.1, 1.5, 0.06, R.cloth, false);
+      if (CBZ.flags) CBZ.flags.staff(D.group, { x: F.cx + s * 2.0, y: 0.84, z: z - 1.5, flyX: s, flyZ: 0, height: 2.9, outdoor: true, id: flagId() });
     }
   }
   function tintFountain(F, R) {
@@ -587,6 +583,10 @@
   function build(key, rec) {
     teardown();
     D.key = key;
+    // the regime's flag becomes the nation's, everywhere it flies
+    // (city/flags.js); "none" puts the republic's own back up
+    D.nation = (rec && rec.id) || (countryRec() && countryRec().id) || (CBZ.flags ? CBZ.flags.home() : "republic");
+    if (CBZ.flags) { try { CBZ.flags.setRegime(D.nation, key, !seen); } catch (e) {} }
     if (key === "none") return true;
     const R = REGIME[key];
     const s = site();

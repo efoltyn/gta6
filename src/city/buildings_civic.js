@@ -601,20 +601,9 @@
       const poleN = halfN + Math.max(terrD * 0.55, 2 * R + 0.5);
       const px = f.horiz ? t : f.out * poleN;
       const pz = f.horiz ? f.out * poleN : t;
-      ctx.column(px, colBase, pz, 0.075, 7.2, 0xb9bec6, 8);
       ctx.dbox(px, colBase + 0.16, pz, 0.42, 0.32, 0.42, shade(STONE, 0.88));    // pole base
-      ctx.ball(px, colBase + 7.34, pz, 0.11, 0xd8c98a);                          // gold truck
-      // the flag itself: a thin banner hanging off the pole, tangent to the face
-      const fw = 1.5, fh = 0.9, fy = colBase + 6.1;
-      const fx2 = f.horiz ? px + (sg > 0 ? -fw / 2 - 0.09 : fw / 2 + 0.09) : px;
-      const fz2 = f.horiz ? pz : pz + (sg > 0 ? -fw / 2 - 0.09 : fw / 2 + 0.09);
-      if (f.horiz) {
-        ctx.dbox(fx2, fy, fz2, fw, fh, 0.05, 0x1f4fa8);
-        ctx.dbox(fx2 - fw * 0.28, fy + fh * 0.22, fz2 + 0.03, fw * 0.42, fh * 0.5, 0.04, 0xe8e8ee);
-      } else {
-        ctx.dbox(fx2, fy, fz2, 0.05, fh, fw, 0x1f4fa8);
-        ctx.dbox(fx2 + 0.03, fy + fh * 0.22, fz2 - fw * 0.28, 0.04, fh * 0.5, fw * 0.42, 0xe8e8ee);
-      }
+      // the pole and its flag: city/flags.js, the nation's own design
+      if (ctx.flag) ctx.flag(px, colBase + 0.32, pz, 7.1);
     }
 
     // ---------- ENTRY LAMPS flanking the door (warm, emissive, merged-exempt

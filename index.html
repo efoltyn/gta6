@@ -1098,7 +1098,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- the grid street layer (road, kerbs, footways, markings) world.js builds -->
 <script src="src/city/streetkit.js?v=metro0929"></script>
 <script src="src/city/world.js?v=pf0930m"></script>
-<script src="src/city/interior_programs.js?v=oval0929"></script>
+<!-- ONE FLAG SYSTEM (city/flags.js): every nation's design, the cloth shader, poles, staffs, banners, the President's flag designer. Before every file that hangs a flag. -->
+<script src="src/city/flags.js?v=flag0930"></script>
+<script src="src/city/interior_programs.js?v=flag0930"></script>
 <!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
      inventory item; an NPC's keys live on the NPC and every existing way to
      take something off a person moves them. MUST load before city/buildings.js
@@ -1108,8 +1110,8 @@ document.body.appendChild(b);}}catch(e){}})();
      the shared masonry / portico / roof-clutter geometry. MUST load BEFORE
      city/buildings.js, which reads CBZ.CIVIC_SHOPS and CBZ.CIVIC_ACCT_SEED at
      parse time and the bld* helpers at build time. -->
-<script src="src/city/buildings_civic.js?v=pres0929b"></script>
-<script src="src/city/buildings.js?v=pf0930d"></script>
+<script src="src/city/buildings_civic.js?v=flag0930"></script>
+<script src="src/city/buildings.js?v=flag0930"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
@@ -1249,7 +1251,7 @@ document.body.appendChild(b);}}catch(e){}})();
      wrapper; loads before towngen.js (which consumes CBZ.settlementsCompose)
      and after worldmap.js (whose cityWorldGeo it wraps). -->
 <script src="src/city/settlements.js?v=pres0929b"></script>
-<script src="src/city/towngen.js?v=pf0930a"></script>
+<script src="src/city/towngen.js?v=flag0930"></script>
 <!-- THE ONE BET SLIP (city/betslip.js): every wager in the city is written on
      it at the venue that takes it (Ironjaw ringside/pit, Southpaw bookmaker,
      APEX bookmaker, the Speedway race book, the racepark windows) and settled
@@ -1289,7 +1291,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/mil_air.js?v=mil0929"></script>
 <!-- GROUND ARMOR: tank / IFV / 8x8 / 6x6 truck / light vehicle / rocket artillery / missile launcher at real dimensions, instanced running gear + turret/launcher rigs. Before island_military (makeTank/makeTruck/makePatriot delegate to CBZ.milArmor). -->
 <script src="src/city/mil_armor.js?v=mil0929"></script>
-<script src="src/city/island_military.js?v=mil0929"></script>
+<script src="src/city/island_military.js?v=flag0930"></script>
 <script src="src/city/biome_desert.js?v=pf0930f"></script>
 <script src="src/city/biome_forest.js?v=wreal0929"></script>
 <script src="src/city/biome_farmland.js?v=wreal0929"></script>
@@ -1775,7 +1777,7 @@ document.body.appendChild(b);}}catch(e){}})();
      persistence and net worth work with zero new save code. After storage.js
      — CBZ.cityBerth wraps citySpawnOwnedCar so every existing retrieval path
      became water-aware without a caller changing. -->
-<script src="src/city/marina.js?v=deslop1"></script>
+<script src="src/city/marina.js?v=flag0930"></script>
 <script src="src/city/boatyard.js?v=cd0929"></script>
 <!-- THE APPROACH: how you get IN and OUT of a property. Every block in the
      city was ringed by an UNBROKEN kerb and every home's retrieved car was
@@ -2299,7 +2301,7 @@ document.body.appendChild(b);}}catch(e){}})();
      staffs itself through power.js's protection layer rather than authoring
      guards. After power.js and the biome/continent builders whose empty land
      it claims. Revert with ?cfg_GOV_COMPLEX=0. -->
-<script src="src/city/govcomplex.js?v=pf0930a"></script>
+<script src="src/city/govcomplex.js?v=flag0930"></script>
 
 <!-- THE PRESIDENCY — one spine over organs built above: the President origin
      (candidacy's swearIn fast-forward), the Situation Room inside govcomplex's
@@ -2321,7 +2323,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the Mansion when the republic falls. Security (the detail, the gate
      checkpoint, counter-snipers, the panic protocol) lives in protection.js. -->
 <script src="src/city/president_office.js?v=news0930"></script>
-<script src="src/city/motorcade.js?v=ekey2"></script>
+<script src="src/city/motorcade.js?v=flag0930"></script>
 <!-- THE PRESIDENT HIRES HIS PEOPLE: the line in the office, the Chief of
      Staff, the detail / driver / press secretary / empty cabinet chairs.
      After presidency.js, president_office.js, protection.js, motorcade.js. -->
@@ -2334,8 +2336,8 @@ document.body.appendChild(b);}}catch(e){}})();
      Emits war/airstrike/nuke events on CBZ.presidency's bus. After
      presidency.js and president_staff.js; everything is read lazily. -->
 <script src="src/city/warroom.js?v=war0930"></script>
-<script src="src/city/president_public.js?v=pres0929b"></script>
-<script src="src/city/president_regime.js?v=pres0929b"></script>
+<script src="src/city/president_public.js?v=flag0930"></script>
+<script src="src/city/president_regime.js?v=flag0930"></script>
 
 <!-- CASH STORE — the back half of the cash-bag loop (owner: "only driving to
      your own place can store the cash, not just rob"). Turns govcomplex's

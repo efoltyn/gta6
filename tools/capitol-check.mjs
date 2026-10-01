@@ -52,7 +52,7 @@ const CBZ = ctx.CBZ = {
   markCollidersDirty() {}, markPlatformsDirty() {},
 };
 CBZ.mat = CBZ.cmat;
-for (const f of ["src/systems/stairs.js", "src/city/buildings_civic.js", "src/city/buildings.js", "src/city/interior_programs.js", "src/city/govcomplex.js",
+for (const f of ["src/city/flags.js", "src/systems/stairs.js", "src/city/buildings_civic.js", "src/city/buildings.js", "src/city/interior_programs.js", "src/city/govcomplex.js",
   "src/city/elevators.js", "src/city/furniture.js", "src/world/roombuild.js"]) load(f);
 // a program's throw is swallowed by §5c's dressFloor; surface it here
 const THROWN = [];
