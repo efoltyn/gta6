@@ -815,15 +815,26 @@
     for (let i = 0; i < b.length; i++) if (!b[i].dead) out.push(b[i]);
     return out;
   }
-  function grab() {
+  // `who` (optional): the man a game already chose (the prison's cluster is
+  // ON him, so the grab goes to him, not to whoever the cone finds first)
+  function grab(who) {
     const v = VB(), pa = me();
-    if (!v || !pa || v.holding(pa)) return;
+    if (!v || !pa || v.holding(pa)) return null;
     // a man on his feet is taken by the collar; a man already down is lifted
-    const up = v.pick(pa, "grab");
-    const t = up || v.pick(pa, "carry", { down: true });
-    if (!t) return;
+    let t = null, up = false;
+    if (who && typeof who === "object" && !who.dead) {
+      const B = v.body ? v.body(who) : null;
+      up = !(B && B.down && B.down());
+      t = who;
+    } else {
+      const u = v.pick(pa, "grab");
+      t = u || v.pick(pa, "carry", { down: true });
+      up = !!u;
+    }
+    if (!t) return null;
     const S = up ? v.grab(pa, t) : v.carry(pa, t);
     if (S && CBZ.sfx) CBZ.sfx("whoosh");
+    return S || null;
     // NO caption (owner: "I know that I have grabbed"). The body in your hands
     // is the feedback; survival_interact.js shows what you can do with it.
   }

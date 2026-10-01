@@ -157,7 +157,7 @@ if (gg.leak > 0) fails.push("gungameAudit().prisonLeak is " + gg.leak + " (ratch
 // --- and the prison still has its game ---
 if (!(esc.chain > 0)) fails.push("ESCAPE REGRESSION: a reported crime reached no witness/heat path at all");
 if (esc.heatDirect !== 9) fails.push("ESCAPE REGRESSION: addHeat(9) moved the ledger by " + esc.heatDirect);
-if (!esc.card) fails.push("ESCAPE REGRESSION: the killstreak card no longer pops");
+if (esc.card) fails.push("the killstreak card popped in the prison (deleted 2026-09-30: no HUD narration)");
 
 if (fails.length) {
   console.log("GUNGAME-QUIET: FAIL");

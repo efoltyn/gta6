@@ -678,7 +678,7 @@
     // joystick's corner anchor now sits over its left-hand cells. A slot tap
     // must reach the slot, not start a walk.
     "#hotbar, #weaponStrip, " +
-    "#phone, #dashboard, button, [data-act], .iopt, .tpill, #cRadar, #minimap, #verbWheel";
+    "#phone, #dashboard, button, [data-act], .iopt, .tpill, #cRadar, #minimap, #verbWheel, #prisonTrade";
   const inUI = (t) => t && t.closest && t.closest(UI_SEL);
 
   function setMove(nx, ny) {
@@ -769,7 +769,7 @@
 
   let interactDockSig = "";
   function syncInteractionDock() {
-    const prisonPanel = document.querySelector("#pinteract.show");
+    const prisonPanel = null;   // the prison's verbs ride on the person now (systems/interact.js)
     const sharedPanel = document.querySelector("#interact.show:not(.pi-quiet)");
     const panel = prisonPanel || sharedPanel;
     if (!panel || !CBZ.touchInteractionDocked || !CBZ.touchInteractionDocked()) {
@@ -968,7 +968,7 @@
   // ---- tap-to-interact target model ------------------------------------------
   function reachOf(kind) {
     return kind === "cand" ? 0.5 : kind === "car" ? 5.2 : kind === "machine" ? 6.2 : kind === "animal" ? 4.5 :
-      kind === "door" ? 3.2 : 3.0;
+      kind === "door" ? 3.2 : kind === "inmate" ? 2.6 : 3.0;
   }
   // How close the player is to actually USING a target. Vehicles/animals measure
   // to the VISIBLE box (a plane's origin can be dozens of metres from its hull);
@@ -990,7 +990,7 @@
       if (!p || !CBZ.player.pos) return Infinity;
       return Math.hypot(p.x - CBZ.player.pos.x, p.z - CBZ.player.pos.z);
     }
-    if (kind === "ped") {
+    if (kind === "ped" || kind === "inmate") {
       const p = rec.pos || (rec.group && rec.group.position);
       if (!p || !CBZ.player.pos) return Infinity;
       return Math.hypot(p.x - CBZ.player.pos.x, p.z - CBZ.player.pos.z);
@@ -1009,7 +1009,7 @@
     if (kind === "door" && rec && rec.at) {
       try { const p = rec.at(); if (p) return { x: p.x, z: p.z }; } catch (e) {}
     }
-    if (kind !== "ped" && rec.group && tapBox) {
+    if (kind !== "ped" && kind !== "inmate" && rec.group && tapBox) {
       tapBox.setFromObject(rec.group);
       const P = CBZ.player.pos;
       return { x: clamp(P.x, tapBox.min.x, tapBox.max.x), z: clamp(P.z, tapBox.min.z, tapBox.max.z) };
@@ -1063,10 +1063,20 @@
        in. It answers with a word, not a boolean, so a refusal can say why. */
     if (kind === "door") {
       const r = CBZ.prisonDoorToggle ? CBZ.prisonDoorToggle(rec) : null;
-      if (r === "denied") note((rec.label ? rec.label.charAt(0).toUpperCase() + rec.label.slice(1) : "That door") + " needs the key.");
+      // a refused tap shows the lock's own word on the leaf ("Locked", and the
+      // key under it) for a moment: the door answers, not a toast
+      if (r === "denied" && CBZ.prisonDoorShow) CBZ.prisonDoorShow(rec);
       // A tap that landed on a door is spent on the door either way: falling
       // through to the seat/stand fallbacks would sit you down on the spot.
       return true;
+    }
+    /* A PRISON PERSON (inmate, guard, warden): the tap SELECTS him and his
+       verbs appear on him (systems/interact.js). Nothing shows on anybody
+       until you touch him; tapping elsewhere or walking off puts them away. */
+    if (kind === "inmate") {
+      const p = rec.group && rec.group.position;
+      if (p) faceToward(p.x, p.z);
+      return !!(CBZ.prisonPeople && CBZ.prisonPeople.select(rec));
     }
     if (kind === "ped") {
       const p = rec.pos || (rec.group && rec.group.position);
@@ -1140,6 +1150,18 @@
         for (let j = 0; j < ms.length; j++) add(ms[j], "door", s);
       }
     }
+    // THE PRISON'S PEOPLE are tappable too (escape mode): the finger on his
+    // body selects him (kind "inmate", triggerTarget above)
+    if (CBZ.game && CBZ.game.mode === "escape" && CBZ.prisonPeople) {
+      const lists = [CBZ.npcs || [], CBZ.guards || []];
+      for (let li = 0; li < lists.length; li++) {
+        const L = lists[li];
+        for (let i = 0; i < L.length; i++) {
+          const a = L[i];
+          if (a && !a.dead && !a.escaped && a.group && a.data) add(a.group, "inmate", a);
+        }
+      }
+    }
     if (V2) {   // tapping a person opens the contextual card
       const peds = CBZ.cityPeds || [];
       for (let i = 0; i < peds.length; i++) {
@@ -1152,6 +1174,38 @@
     }
     const hits = objects.length ? tapRay.intersectObjects(objects, true) : [];
     let target = hits.length ? rootFor(hits[0].object, roots) : null;
+    /* A PRISON MAN IS ALSO A CAPSULE. The rig meshes of the yard's people are
+       not reliably ray-pickable (pooled / instanced bodies, skinned parts on
+       their own layers), so the finger also tests each one as the body the
+       rest of the game already hits analytically: a 0.45 m upright capsule,
+       feet to crown. The nearer of the two wins. */
+    if (CBZ.game && CBZ.game.mode === "escape" && CBZ.prisonPeople && !(target && target.kind === "inmate")) {
+      const R = tapRay.ray, o = R.origin, d = R.direction;
+      const lists = [CBZ.npcs || [], CBZ.guards || []];
+      let best = null, bestT = hits.length ? hits[0].distance : 40;
+      for (let li = 0; li < lists.length; li++) {
+        const L = lists[li];
+        for (let i = 0; i < L.length; i++) {
+          const a = L[i];
+          if (!a || a.dead || a.escaped || !a.group || !a.data) continue;
+          const q = a.group.position;
+          // nearest approach of the ray to the body's vertical axis, in plan
+          const px = q.x - o.x, pz = q.z - o.z;
+          const hl = d.x * d.x + d.z * d.z;
+          if (hl < 1e-6) continue;
+          const t = (px * d.x + pz * d.z) / hl;
+          if (t <= 0 || t >= bestT) continue;
+          const cx = o.x + d.x * t - q.x, cz = o.z + d.z * t - q.z;
+          if (cx * cx + cz * cz > 0.45 * 0.45) continue;
+          const y = o.y + d.y * t - (q.y || 0);
+          if (y < 0 || y > 1.95) continue;
+          bestT = t; best = a;
+        }
+      }
+      if (best) target = { kind: "inmate", rec: best, group: best.group };
+    }
+    // a tap anywhere but on a prison person puts away the verbs on whoever had them
+    if (CBZ.prisonPeople && CBZ.game.mode === "escape" && !(target && target.kind === "inmate")) CBZ.prisonPeople.select(null);
 
     // AN ORDER IS WAITING FOR ITS "WHO" (city/verbwheel.js): the person you
     // tap is who it is about, near or far.

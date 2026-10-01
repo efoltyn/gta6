@@ -42,9 +42,12 @@
      - Breaking a rule is answered: the other car tells you once, then puts
        hands on you; your own car disciplines you for the embarrassment, since
        one man's disrespect is the whole car's problem.
-   Kept respectful on purpose: no real gang names or insignia anywhere, no
-   slurs, no caricature. The cars are ordinary headings and the tattoos
-   (entities/heritage.js) are generic ink cultures, not symbols.
+   PLAYER-FACING NAMES (owner, 2026-09-30): use recognizable real gang
+   names instead of "White car" / "Black car". Internal car IDs remain the
+   yard partition keys; they are not the text shown to the player. These
+   six gameplay factions simplify affiliations, not a historical roster.
+   A man outside a faction's active business is labeled Independent by
+   interact.js. Tattoos remain the existing generic ink cultures.
 
    WHAT THIS FILE OWNS (everything the arm band used to fake):
      CARS           the catalogue: index = the int ai.js keeps in `n.gang`
@@ -80,12 +83,12 @@
   // phone: which of the three yard phones is theirs (world/yardfurniture.js
   // phone bank at x 11, z 17: phones at x 9.85 / 11.0 / 12.15).
   const CARS = [
-    { id: "south",  label: "Southsiders", phrase: "the Southsiders", yard: { x: -22, z: 30, r: 6.5 }, phone: 0 },
-    { id: "black",  label: "Black car",   phrase: "the Black car",   yard: { x: 22,  z: 16, r: 6.5 }, phone: 1 },
-    { id: "white",  label: "White car",   phrase: "the White car",   yard: { x: 7,   z: 32, r: 6.0 }, phone: 2 },
-    { id: "paisa",  label: "Paisas",      phrase: "the Paisas",      yard: { x: -12, z: 39, r: 5.5 }, phone: 0 },
-    { id: "asian",  label: "Asian car",   phrase: "the Asian car",   yard: { x: -3,  z: 46, r: 5.0 }, phone: 2 },
-    { id: "others", label: "Others",      phrase: "the Others",      yard: { x: 11,  z: 45, r: 5.0 }, phone: 2 },
+    { id: "south",  label: "Sureños", phrase: "the Sureños", yard: { x: -22, z: 30, r: 6.5 }, phone: 0 },
+    { id: "black",  label: "Black Guerrilla Family", phrase: "the Black Guerrilla Family", yard: { x: 22, z: 16, r: 6.5 }, phone: 1 },
+    { id: "white",  label: "Aryan Brotherhood", phrase: "the Aryan Brotherhood", yard: { x: 7, z: 32, r: 6.0 }, phone: 2 },
+    { id: "paisa",  label: "Border Brothers", phrase: "the Border Brothers", yard: { x: -12, z: 39, r: 5.5 }, phone: 0 },
+    { id: "asian",  label: "Asian Boyz", phrase: "the Asian Boyz", yard: { x: -3, z: 46, r: 5.0 }, phone: 2 },
+    { id: "others", label: "Independents", phrase: "the Independents", yard: { x: 11, z: 45, r: 5.0 }, phone: 2 },
   ];
   const N = CARS.length;
   const IDX = {};
@@ -500,15 +503,15 @@
   };
   // what his OLD car says to a man it put out, at its own table / phone / slot
   const OUTCAST_LINE = {
-    seat: ["You don't sit with us no more.", "Get up. You know why.", "Nah. Not here. Not ever."],
+    seat: ["You don't sit with us no more.", "Get up. You know why.", "Nah. Not here."],
     phone: ["You don't touch our phone.", "Put it down. You're done here."],
     shower: ["You shower when we're gone.", "Not with us. Out."],
   };
   const OWN_LINE = {
-    seat: "Get up from there. You embarrass all of us.",
-    phone: "Use our phone. Don't make me say it twice.",
-    shower: "Wait for our turn. Don't start nothing in there.",
-    share: "We don't share with them. Ever.",
+    seat: "Get up. That's not our table.",
+    phone: "Use our phone.",
+    shower: "Wait for our turn.",
+    share: "We don't share with them.",
   };
   const viol = { kind: "", yardCar: -1, t: 0, warned: 0, warnAt: 0, by: null, hands: false };
   const strikes = { share: 0, rules: 0 };
@@ -574,7 +577,7 @@
       if (m && CBZ.prisonStartApproach) {
         const exiled = isOut() && v.yardCar === member.from;
         const ok = CBZ.prisonStartApproach(m, "turfWarning", 0, { forced: true, shove: true, carRule: v.kind,
-          msg: pick((exiled ? OUTCAST_LINE : RULE_LINE)[v.kind]), motive: exiled ? "outcast" : "car rules" });
+          msg: pick((exiled ? OUTCAST_LINE : RULE_LINE)[v.kind]), motive: exiled ? "outcast" : "yard rules" });
         if (ok) { viol.warned = 1; viol.warnAt = viol.t; viol.by = m; }
       } else if (viol.t > 6) { viol.warned = 1; viol.warnAt = viol.t; }
     }

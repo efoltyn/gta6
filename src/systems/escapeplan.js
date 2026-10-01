@@ -73,7 +73,6 @@
   function econ() { return CBZ.econ; }
   function has(item) { const e = econ(); return !!(e && e.hasItem && e.hasItem(item)); }
   function short(name) { return String(name || "someone").replace(/^the |^a |^an /, ""); }
-  function hint(t, secs) { if (CBZ.flashHint) { try { CBZ.flashHint(t, secs || 2.6); } catch (e) {} } }
   function sfx(n, o) { if (CBZ.sfx) { try { CBZ.sfx(n, o); } catch (e) {} } }
   function d2(ax, az, bx, bz) { const dx = ax - bx, dz = az - bz; return dx * dx + dz * dz; }
 
@@ -310,7 +309,6 @@
     if (S.refuseT <= 0) {
       S.refuseT = 2.5;
       if (CBZ.reportCrime) { try { CBZ.reportCrime(30, { type: "escape" }); } catch (e) {} }
-      hint("Not while he's watching.", 1.8);
     }
     return false;
   }
@@ -372,7 +370,6 @@
   }
   function showLost(text) {
     S.lost = text; S.lostT = 30;
-    hint(text, 2.6);
     dirty = true;
   }
   function confiscate() {

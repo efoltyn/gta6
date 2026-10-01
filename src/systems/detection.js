@@ -673,8 +673,9 @@
     const ok = CBZ.npcWitnessCrime ? CBZ.npcWitnessCrime(n, amount, m)
       : !!(CBZ.sendNpcToSnitch && CBZ.sendNpcToSnitch(n, amount, m));
     // A WITNESS IS A PERSON REACTING, NOT A LINE OF TEXT: over HIS head
-    if (ok && CBZ.citySay) {
-      try { CBZ.citySay(n, m && m.heardOnly ? "The hell was that?" : "Hey! HEY!", "#ffd27b", 1.6); } catch (e) {}
+    if (ok) {
+      const line = m && m.heardOnly ? "The hell was that?" : "Hey!";
+      try { if (CBZ.prisonSay) CBZ.prisonSay(n, line, { secs: 1.6, force: true }); else if (CBZ.citySay) CBZ.citySay(n, line, "#ffd27b", 1.6); } catch (e) {}
     }
     return ok;
   }

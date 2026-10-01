@@ -100,7 +100,21 @@
   // a joystick press or a world tap. The local listener is the degrade path.
   function makePill(act, verb, opts) {
     const wrap = document.createElement("div");
-    wrap.className = "wprompt" + (opts.at ? "" : " band");
+    wrap.className = "wprompt" + (opts.at ? "" : " band") + (opts.group ? " wgroup" : "") + (opts.lead ? " lead" : "") +
+      (opts.side ? " wside" : "") + (opts.stack === "up" && !opts.lead ? " nocaret" : "");
+    // A LABEL ROW (a person's name over his verbs): words, not a button
+    if (opts.label) {
+      const nm = document.createElement("div");
+      nm.className = "wname";
+      const parts = String(verb).split("  ");
+      const strong = document.createElement("span");
+      strong.className = "wverb";
+      strong.textContent = parts[0];
+      nm.appendChild(strong);
+      if (parts[1]) { const r = document.createElement("span"); r.className = "wrole"; r.textContent = parts[1]; nm.appendChild(r); }
+      wrap.appendChild(nm);
+      return wrap;
+    }
     const b = document.createElement("button");
     b.type = "button";
     b.className = "tpill";
@@ -229,7 +243,9 @@
       prisonPromptClear(id);
       return false;
     }
-    const sig = act + "|" + verb + "|" + (opts.sub || "") + "|" + (opts.hold ? 1 : 0) + "|" + (opts.at ? 1 : 0) + "|" + (opts.key || "");
+    const sig = act + "|" + verb + "|" + (opts.sub || "") + "|" + (opts.hold ? 1 : 0) + "|" + (opts.at ? 1 : 0) + "|" + (opts.key || "") +
+      "|" + (opts.lead ? 1 : 0) + "|" + (opts.group ? 1 : 0) + "|" + (opts.stack || "") +
+      "|" + (opts.side ? 1 : 0) + "|" + (opts.label ? 1 : 0);
     let p = pills.get(id);
     if (!p || p.sig !== sig) {
       if (p && p.wrap.parentNode) p.wrap.parentNode.removeChild(p.wrap);
@@ -248,6 +264,14 @@
     // does not have to poll a key and every other [E] listener stands aside.
     p.group = opts.group || null;
     p.row = opts.row | 0;
+    // a cluster on a PERSON stacks UP from over his head (row 0, the lead
+    // verb, nearest the head); a lift panel stacks down from its first button
+    p.up = opts.stack === "up";
+    // a line you SAY (what you know, in the snitch menu) is content, not a
+    // button naming its object: the noun audit below does not count it
+    p.quote = !!opts.quote;
+    p.side = !!opts.side;
+    p.label = !!opts.label;
     p.act = act;
     p.bind = opts.bind ? String(opts.key || "e").toLowerCase() : "";
     p.frame = frameNo;
@@ -293,7 +317,7 @@
   // beats a lift button at your shoulder (owner: priority is what you look at).
   function lookWeight(p) {
     const P = CBZ.player, cam = CBZ.cam;
-    if (!p.at || !P || !P.pos || !cam || !CBZ.game || CBZ.game.mode !== "city") return 1;
+    if (!p.at || !P || !P.pos || !cam || !CBZ.game || (CBZ.game.mode !== "city" && CBZ.game.mode !== "escape")) return 1;
     const dx = p.at.x - P.pos.x, dz = p.at.z - P.pos.z, d = Math.hypot(dx, dz);
     if (d < 0.4) return 0.6;
     const face = Math.max(0, (dx / d) * -Math.sin(cam.yaw) + (dz / d) * -Math.cos(cam.yaw));
@@ -353,6 +377,7 @@
      a live walk-and-turn, worst 2,500 px from the leaf). The verb still
      works off-screen; it just does not pretend to be somewhere. */
   const EDGE = 0.03, SLIVER = 1.12;
+  const groupRows = { min: 0, max: 0 };   // the shown side column's row span (the sweep fills it)
   function placePrompt(p) {
     if (!p.at) return;
     const cam = CBZ.camera;
@@ -368,7 +393,21 @@
     const w = window.innerWidth || 800, h = window.innerHeight || 600;
     const nx = Math.max(-1 + EDGE * 2, Math.min(1 - EDGE * 2, _pv.x));
     const ny = Math.max(-1 + EDGE * 4, Math.min(1 - EDGE * 2, _pv.y));
-    const sx = Math.round((nx * 0.5 + 0.5) * w), sy = Math.round((-ny * 0.5 + 0.5) * h) + (p.row || 0) * 40;
+    const rowH = onTouch() ? 54 : 36;
+    let sy0 = Math.round((-ny * 0.5 + 0.5) * h);
+    // A COLUMN BESIDE A MAN stays whole on the glass: a short landscape phone
+    // slides the whole column up (or down) rather than cutting its last verbs
+    if (p.side && p.group) {
+      const top = sy0 + groupRows.min * rowH - rowH / 2, bot = sy0 + groupRows.max * rowH + rowH / 2;
+      if (bot > h - 8) sy0 -= Math.min(bot - (h - 8), Math.max(0, top - 8));
+      else if (top < 8) sy0 += 8 - top;
+    }
+    const sx = Math.round((nx * 0.5 + 0.5) * w), sy = sy0 + (p.row || 0) * rowH * (p.up ? -1 : 1);
+    if (p.side) {
+      // a cluster beside a man near the right edge of the glass goes to his other side
+      const flip = sx > w - 190;
+      if (p._flip !== flip) { p._flip = flip; p.wrap.classList.toggle("flip", flip); }
+    }
     if (p._sx !== sx || p._sy !== sy) {
       p._sx = sx; p._sy = sy;
       p.wrap.style.left = sx + "px";
@@ -394,7 +433,11 @@
     for (let i = 0; i < ids.length; i++) prisonPromptClear(ids[i]);
     if (!pills.size) return;
     const best = arbitrate();
-    if (best) pills.forEach(function (p) { if (p.shown) placePrompt(p); });
+    if (best) {
+      groupRows.min = 0; groupRows.max = 0;
+      pills.forEach(function (p) { if (p.shown && p.side) { groupRows.min = Math.min(groupRows.min, p.row || 0); groupRows.max = Math.max(groupRows.max, p.row || 0); } });
+      pills.forEach(function (p) { if (p.shown) placePrompt(p); });
+    }
   });
 
   CBZ.prisonPrompt = prisonPrompt;
@@ -464,7 +507,7 @@
     let out = null;
     pills.forEach(function (p, id) {
       if (p.shown) out = { id: id, verb: p.wrap.querySelector(".wverb").textContent, sub: (p.wrap.querySelector(".wsub") || {}).textContent || "",
-        key: p.wrap.querySelector(".wkey").textContent, anchored: !!p.at, x: p._sx, y: p._sy };
+        key: (p.wrap.querySelector(".wkey") || {}).textContent || "", anchored: !!p.at, x: p._sx, y: p._sy };
     });
     return out;
   };
@@ -486,7 +529,7 @@
     pills.forEach(function (p) {
       if (p.shown) shown++;
       if (p.at) anchored++;
-      if (NOUN_RE.test(p.wrap.querySelector(".wverb").textContent)) nouned++;
+      if (!p.quote && NOUN_RE.test(p.wrap.querySelector(".wverb").textContent)) nouned++;
     });
     return {
       sites: s.length, pilled: pilled.length, textOnly: textOnly.length,
@@ -729,6 +772,12 @@
     const p = doorPoint(s);
     if (p && CBZ.worldSfx) CBZ.worldSfx("switch", p.x, p.z, { y: p.y, ref: 6, volume: 0.45, gap: 0.5 });
   }
+  // a tapped door shows its verb on the leaf for a moment (touch only)
+  const doorShown = { s: null, until: 0 };
+  CBZ.prisonDoorShow = function (id, ms) {
+    const s = doorById(id);
+    doorShown.s = s; doorShown.until = performance.now() + (ms || 1800);
+  };
   CBZ.prisonDoorList = function () { return doorSpecs; };
   CBZ.prisonDoorLatched = function (id) { const s = doorById(id); return !!(s && s._latch); };
   CBZ.prisonDoorToggle = function (id) {
@@ -807,6 +856,11 @@
     if (!t) return;
     const v = doorVerb(t.s);
     if (!v) return;
+    /* TOUCH: NOTHING UNTIL YOU TOUCH IT (owner, 2026-09-30). On a touchscreen
+       the door IS the button (systems/touch.js taps it open or shut through
+       prisonDoorToggle), so no pill floats on it while you walk by. A tap the
+       lock refuses shows its word on the leaf for a moment instead. */
+    if (onTouch() && !(doorShown.s === t.s && performance.now() < doorShown.until)) return;
     // reach was proven by doorTarget against the door's own slab. An OPEN door
     // you are facing at arm's reach owns [E]: the man on the bunk in another
     // man's cell used to win the press, so only your own (empty) cell shut

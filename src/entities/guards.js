@@ -155,8 +155,8 @@
       data: {
         name, pool: null, offer: null,
         talk: warden
-          ? ["What do you want.", "Keep walking.", "Not now.", "My prison runs on time."]
-          : ["Keep moving.", "Move along.", "Back to your block.", "Twelve-hour shift. Don't start.", "Two years to my pension. Two.", "Tuck your shirt in."],
+          ? ["What do you want.", "Keep walking.", "Not now."]
+          : ["Keep moving.", "Back to your block.", "Twelve-hour shift. Don't start.", "Tuck your shirt in."],
       },
     };
     // a post named by the roster outranks the one systems/economy.js derives
@@ -356,12 +356,12 @@
       : CBZ.econ.payoffCost(g);          // the till's price, never a second sum
     const finalCost = extra.cost || (kind === "witnessBlackmail" ? Math.max(4, Math.ceil((extra.amount || 14) / 6) + Math.ceil(((CBZ.game && CBZ.game.detection) || 0) / 14) + 3 + racketPriceMod(0.7)) : cost);
     const msg = kind === "witnessBlackmail"
-      ? `${nameOf(g)} heard ${extra.source || "a snitch"} talking and wants ${finalCost} cigs to bury it.`
+      ? (extra.source ? `${extra.source} talked. ${finalCost} and it goes away.` : `Somebody talked. ${finalCost} and it goes away.`)
       : kind === "racketOffer"
-      ? `${nameOf(g)} wants ${finalCost} cigs to ignore your stash and side work.`
+      ? `${finalCost} and I don't toss your cell.`
       : kind === "snitchIntel"
-      ? `${nameOf(g)} can sell you the snitch's name for ${finalCost} cigs.`
-      : `${nameOf(g)} can bury your wanted level for ${cost} cigs.`;
+      ? `${finalCost} and I give you a name.`
+      : `${cost} and your sheet stays clean.`;
     g.approach = {
       kind,
       cost: finalCost,
@@ -475,8 +475,8 @@
         a.t = 12;
         a.greeted = false;
         a.msg = a.kind === "snitchIntel"
-          ? `${nameOf(g)} still has that name. ${a.cost} cigs, like before.`
-          : `${nameOf(g)}: the offer to bury your sheet still stands. ${a.cost} cigs.`;
+          ? `Still got that name. ${a.cost}.`
+          : `Still ${a.cost}. Your sheet stays clean.`;
         g.approach = a;
         g.approachCD = 0;
       }
@@ -731,7 +731,7 @@
           addRacketStanding(1);
           CBZ.sfx && CBZ.sfx("coin");
           clearGuardApproach(g);
-          return { ok: true, msg: paidPrefix() + `It was ${nameOf(snitch)}. Do what you like with that. I never said it.` };
+          return { ok: true, msg: paidPrefix() + `It was ${nameOf(snitch)}. I never said it.` };
         }
         if (CBZ.addHeat) CBZ.addHeat(-3);
         addRacketStanding(1);
@@ -796,7 +796,7 @@
       return res;
     }
     if (action === "haggle") {
-      if (a.haggled || a.cost <= 3) return { ok: false, msg: "The price is the price." };
+      if (a.haggled || a.cost <= 3) return { ok: false, msg: "That's the price." };
       a.haggled = true;
       const heat = (CBZ.game && CBZ.game.detection) || 0;
       const chance = Math.max(0.18, Math.min(0.72, (g.corrupt ? 0.45 : 0.24) - heat * 0.002 + ((CBZ.game.cigs || 0) < a.cost ? 0.12 : 0)));
@@ -825,7 +825,7 @@
         }
         if (CBZ.addHeat) CBZ.addHeat(8);
         addRacketStanding(-5);
-        return { ok: true, msg: snitch && snitch.data ? `${nameOf(g)} spits out ${nameOf(snitch)}'s name, then backs off.` : `${nameOf(g)} backs off for now, but the heat ticks up.` };
+        return { ok: true, msg: snitch && snitch.data ? `${nameOf(snitch)}. Now get away from me.` : "You just bought trouble." };
       }
       clearGuardApproach(g);
       g.bribed = 0;

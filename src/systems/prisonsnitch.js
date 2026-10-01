@@ -16,7 +16,7 @@
                what you did (the officer you paid), what your car told you
                (where the stash is), and the warden's gun if it walks. Each
                is a FACT with a man, a time, and whether anybody else saw it.
-     TELLING   "Tell" on a guard (quick, worth less, leaks) or on the warden
+     TELLING   "Snitch" on a guard (quick, worth less, leaks) or on the warden
                (in his office; he sends for you, worth the most). The card
                turns into what you know, as short items. You can also just
                put a name in: that is a lie unless the man is really holding.
@@ -165,7 +165,7 @@
   const LINE = {
     guardHears: ["Alright. I'll look at it.", "Noted. Now walk."],
     guardShrug: ["That's it?", "Not my problem."],
-    guardNoMore: ["You already cried wolf. Walk."],
+    guardNoMore: ["You lied last time. Walk."],
     goOn: ["Go on.", "Talk."],
     wardenHears: {
       time: "If it checks out, it's time off.",
@@ -409,7 +409,7 @@
      die roll with no warning; now one man at a time decides, says so to his
      cellie within earshot, and goes at the hour he named — unless somebody
      told. ---- */
-  const PLAN_LINES = ["Tonight. The fence.", "I'm gone tonight. Don't say nothing."];
+  const PLAN_LINES = ["Tonight. I'm gone.", "I'm gone tonight. Don't say nothing."];
   function drivePlan(dt) {
     const H = hourLen();
     if (!S.plan) {
