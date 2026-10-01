@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "b5b678df35d6854c23d718545334a3b7bd254392",
-  "createdAt": "2026-10-01T02:52:50.725Z",
+  "sourceCommit": "4a420b7b4ca48007ee125a7b8811fe894e46d504",
+  "createdAt": "2026-10-01T02:54:00.311Z",
   "fileCount": 1186,
-  "totalBytes": 48084067,
+  "totalBytes": 48084698,
   "files": [
     {
       "file": "src/bootstrap.js",
@@ -813,8 +813,8 @@
     },
     {
       "file": "src/city/govcomplex.js",
-      "bytes": 165209,
-      "sha256": "c245091eeb6a04fcc8ac36e809c8499dc8310503b233cfb9e578c3008c44fc3b"
+      "bytes": 165238,
+      "sha256": "4af03141a9b14bf6b4c60ee178a1142c7c9ff5ed7f2215309ea6afc014d7485f"
     },
     {
       "file": "src/city/gunmods.js",
@@ -918,8 +918,8 @@
     },
     {
       "file": "src/city/interior_programs.js",
-      "bytes": 207099,
-      "sha256": "ddad2a23b760dbd1b1fc1ec93b4d44f12b9946e9f82377ef82fe3c7914a11bc3"
+      "bytes": 207635,
+      "sha256": "b273d30be25f806a23ae8ea723267620288b2ec2ce73824c3f735276d993c7aa"
     },
     {
       "file": "src/city/interiorlight.js",
@@ -1723,8 +1723,8 @@
     },
     {
       "file": "src/core/citystream.js",
-      "bytes": 18897,
-      "sha256": "bb9f32ef79d802841894cdebccfa9cd0d9c96dd1cbe991b603d0a74d3240fd58"
+      "bytes": 18938,
+      "sha256": "8a2330a01776fbb5130467ac717b3ade6a7198386a0b9d634e71d3180c9851a8"
     },
     {
       "file": "src/core/daynight.js",
@@ -5828,28 +5828,28 @@
     },
     {
       "file": "shark-sim.html",
-      "bytes": 59013,
-      "sha256": "50645e97570f2ac9d1c14960ad48e64f8910f954ee37c0974582f95a6f4a1806"
+      "bytes": 59018,
+      "sha256": "8d1bddc9ba28aed3e6811ce925380ec28cb29fe2fc66075521d79d98a5644e67"
     },
     {
       "file": "disaster-survival.html",
-      "bytes": 59056,
-      "sha256": "37fb80b16db5f3e3e5a21f99d45b1f0a9af3b7adbe387fa6d5fc6f711bf1ad03"
+      "bytes": 59061,
+      "sha256": "97e674f67a6bd4b43d8b8e8349ff69ea03a036a533e048db7685491862f6993a"
     },
     {
       "file": "prison-escape.html",
-      "bytes": 59025,
-      "sha256": "217201b957e615bf794f1535ae2d75d79a1925d828c3dfc89f8160a01d37f2a5"
+      "bytes": 59030,
+      "sha256": "8087ed723ae666dfcb160cd80181ef7d1359a10cfbbed185c4f8f347c9da1f7c"
     },
     {
       "file": "gang-city.html",
-      "bytes": 58980,
-      "sha256": "c7baa2d2fc6971050a2cd14aeff954a3e8bbf4d168a1b6b4fd5fef53465e6e16"
+      "bytes": 58985,
+      "sha256": "2b98779358b6d3705db9f9b2ec4131c3b881d0edadc05794d6591d7468ead2f8"
     },
     {
       "file": "gun-game.html",
-      "bytes": 59002,
-      "sha256": "434cde4b5e3c21563698438cc9d5db1d86edfb74331130e59e91bc745c54b443"
+      "bytes": 59007,
+      "sha256": "fbb9cfc1df37c790bea44f292ae22cf58495a920f28c3c5810dfabe082a8c07e"
     },
     {
       "file": "games/battle.html",
