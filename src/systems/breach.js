@@ -364,6 +364,48 @@
   }
   CBZ.breachTargetStrike = targetStrike;
 
+  /* CBZ.breachBlowOut(objs, at, o) — A DEFEATED DOOR LEAVES AS ITSELF.
+     Every prison door's defeat() used to end in `pivot.visible = false`: the
+     leaf blinked out of existence and the doorway was suddenly empty. A
+     breaching charge tears a leaf off its hinges and throws it, so the leaf's
+     own geometry goes to the one rigid-body sim (systems/debris.js) — each
+     welded solid as itself (`whole`): a barred leaf's bars and rails come
+     apart bar by bar, a detention leaf's slab, kick plates and pull fly as
+     the slab, plates and pull they were, bent a little (steel bends), all of
+     them away from where the charge sat. The debris sim hides the source in
+     the same breath; a run reset that re-hangs the leaf clears `o.owner`.
+       objs  Object3D or array (the pivots)
+       at    {x,y,z} the charge (defeat() is handed it), or null
+       o     {owner, lb} — lb sizes the throw (a 5 lb brick vs a 10 lb pair)
+     Without the debris sim the leaf is only hidden, as before. */
+  CBZ.breachBlowOut = function (objs, at, o) {
+    o = o || {};
+    const list = Array.isArray(objs) ? objs : [objs];
+    const D = CBZ.debris;
+    const lb = o.lb > 0 ? +o.lb : REF_LB;
+    const power = Math.max(0.8, Math.min(2.4, 0.7 * Math.cbrt(lb)));
+    let pieces = 0;
+    for (let i = 0; i < list.length; i++) {
+      const obj = list[i];
+      if (!obj || obj.visible === false) continue;
+      if (D && D.shatter) {
+        try {
+          const r = D.shatter(obj, {
+            at: at && isFinite(at.x) ? { x: at.x, y: at.y == null ? 1.2 : at.y, z: at.z } : null,
+            power: power, whole: true, snap: false, owner: o.owner || "breach-door",
+            grit: 0.5, dust: 0.6,
+          });
+          pieces += r && r.pieces ? r.pieces : 0;
+        } catch (e) {}
+      }
+      obj.visible = false;
+    }
+    return pieces;
+  };
+  CBZ.breachClearBlown = function (owner) {
+    if (CBZ.debris && CBZ.debris.clear) { try { CBZ.debris.clear(owner || "breach-door"); } catch (e) {} }
+  };
+
   /* ======================================================================
      THE VERBS
      ====================================================================== */

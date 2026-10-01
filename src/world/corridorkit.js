@@ -108,6 +108,9 @@
     this.g = [];
     const m = new THREE.Mesh(geo, vcMat());
     m.castShadow = cast !== false; m.receiveShadow = true;
+    // every leaf is steel: a blown one (systems/breach.js breachBlowOut) must
+    // come apart as steel, not as whatever its white vertex-colour base reads as
+    m.userData.debrisKind = "metal";
     if (parent) parent.add(m);
     return m;
   };
@@ -538,9 +541,11 @@
         id: cfg.id, lb: cfg.lb, reach: 2.6,
         at: function () { return { x: d.x, y: 1.4, z: d.z }; },
         done: function () { return d.open; },
-        defeat: function () {
-          d.blown = true; d.setOpen(true); colDrop(d); losSet(d, false);
+        defeat: function (hit) {
+          // the leaf goes as its own steel, thrown off the charge (breach.js)
+          if (CBZ.breachBlowOut) CBZ.breachBlowOut(d.pivots, hit, { owner: "door:" + cfg.id, lb: hit && hit.lb });
           for (const p of d.pivots) p.visible = false;
+          d.blown = true; d.setOpen(true); colDrop(d); losSet(d, false);
           if (d.alarm) portAlarm(d);
         },
       });
@@ -691,6 +696,7 @@
   function resetDoors() {
     for (let i = 0; i < doors.length; i++) {
       const d = doors[i];
+      if (d.blown && CBZ.breachClearBlown) CBZ.breachClearBlown("door:" + d.id);
       d.blown = false; d.pending = false; d._by = null;
       for (const p of d.pivots) p.visible = true;
       d.t = 0; d.openT = 0;

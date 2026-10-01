@@ -278,25 +278,20 @@
      four-tone unit cube) and threw them from every blast, crash and wall hit.
      Every piece of that was invented. Now: a wall that is hit sheds ITS OWN
      pieces through the carve (buildings.js), props break into themselves
-     (city/props.js via cityPropsBlast below), and a blast on open ground throws
-     chips of the ground it dug into. What remains here is fire, smoke, dust,
-     scorch and the thin steel of exposed rebar. */
-  // what the ground under a blast is made of (city streets are asphalt;
-  // everywhere else is earth)
-  function groundKind() {
+     (city/props.js via cityPropsBlast below), and a blast on ground that held
+     throws only grit of that ground. What remains here is fire, smoke, dust
+     and scorch. */
+  // what the ground under a blast is made of: city streets are asphalt; inside
+  // the prison wire every floor is concrete (yard hardstanding, the wings, the
+  // tiers) — a grenade in the cell house used to kick up brown EARTH grit and
+  // dust off a concrete floor; only the field outside the wire is earth
+  function groundKind(x, z) {
     const m = CBZ.game && CBZ.game.mode;
-    return (m === "city" || m === "gang") ? "asphalt" : "dirt";
+    if (m === "city" || m === "gang") return "asphalt";
+    const W = m === "escape" && CBZ.WORLD && CBZ.WORLD.wings;
+    if (W && x != null && x >= W.x0 && x <= W.x1 && z >= W.z0 && z <= W.z1) return "concrete";
+    return "dirt";
   }
-  // exposed REBAR: a thin dark steel bar. One shared thin box (cheaper than a
-  // cylinder, and at this gauge the silhouette is identical) bent into an L by a
-  // child segment so it dangles + hooks like blown reinforcement.
-  const rebarMat = new THREE.MeshLambertMaterial({ color: 0x2a2520 });
-  rebarMat._shared = true;
-  // a round bar (rebar is round), 16 mm-ish at game scale
-  const rebarGeo = new THREE.CylinderGeometry(0.022, 0.022, 1, 5, 1);
-  rebarGeo._shared = true;
-  const rebar = [];                 // [{group, t, hold}] dangling-rebar props
-  const REBAR_CAP = 28;             // bars across all live wounds
   const ruinFrames = [];            // persistent broken slab/rebar frames
   const RUIN_FRAME_CAP = 10;
   const ruinStats = { events: 0, pieces: 0, bars: 0 };
@@ -445,24 +440,6 @@
       op0: opt.opacity == null ? 0.72 : opt.opacity,
       flat: !!opt.flat, // shockwave hugs the ground and thins as it grows
     });
-  }
-
-  // dir (optional {x,z} unit vector) biases the spray DOWNRANGE of the impact so
-  // a head-on crash throws panels forward off the hit instead of a flat ring.
-  // y0 (optional) spawns the debris at an elevated impact seat; life stretches
-  // to cover the fall so chunks reach the street instead of vanishing mid-air.
-  function addChunks(x, z, count, force, hot, dir, y0) {
-    const y = y0 != null ? y0 : floorAt(x, z) + 0.25;
-    if (CBZ.debris) {
-      CBZ.debris.chips(x, y, z, {
-        kind: y0 != null ? "concrete" : groundKind(),
-        count: Math.min(44, Math.round((count | 0) * 2.4)),
-        dir: dir ? { x: dir.x, y: 0.45, z: dir.z } : null,
-        power: Math.max(0.5, Math.min(2.6, force / 5.5)), spread: 1.4,
-      });
-    }
-    // what used to be "glowing chunks" is the honest thing: embers
-    if (hot) pointBurst(x, z, Math.max(4, Math.round(count * 1.6)), 0xff8a2a, 0.11, force * 0.7, 0.9, false, y + 0.3);
   }
 
   // adopt an already-built mesh (a hood torn off a crashed car) into the shared
@@ -1333,18 +1310,6 @@
     return c && c.position ? Math.hypot(x - c.position.x, y - c.position.y, z - c.position.z) : 0;
   }
 
-  // shared ground chunk materials (debris freezes rubble per material, so one each)
-  const groundMats = {};
-  function groundMat(kind) {
-    let m = groundMats[kind];
-    if (!m) {
-      const col = kind === "asphalt" ? 0x2e2e30 : kind === "rock" ? 0x3f3a36 : kind === "concrete" ? 0x8a857c : 0x5b4938;
-      m = groundMats[kind] = new THREE.MeshLambertMaterial({ color: col });
-      m._shared = true;
-    }
-    return m;
-  }
-
   const DUST_ROCK = [0.36, 0.33, 0.3], DUST_ASPHALT = [0.46, 0.44, 0.41], DUST_EARTH = [0.5, 0.44, 0.36];
   /* THE PICTURE. (x,cy,z) the seat, gy the ground under it, P the visual power,
      K the kind row. o: {fxq, elevated, airburst, nrm, dir}. */
@@ -1407,7 +1372,7 @@
     // (5) THE SHOCK: a low dust skirt racing out along the ground
     if (!o.elevated && K.dust > 0) {
       const nDust = Math.max(3, Math.round(14 * S * K.dust * q));
-      const dt0 = K.surface === "rock" ? DUST_ROCK : (groundKind() === "asphalt" ? DUST_ASPHALT : DUST_EARTH);
+      const dt0 = K.surface === "rock" ? DUST_ROCK : (groundKind(x, z) === "dirt" ? DUST_EARTH : DUST_ASPHALT);
       for (let i = 0; i < nDust; i++) {
         const a = (i / nDust) * 6.2832 + rng() * 0.4, sp = (9 + rng() * 6) * sq;
         spawnPuff(x + Math.cos(a) * 0.8, gy + 0.35 + rng() * 0.3, z + Math.sin(a) * 0.8, {
@@ -1443,7 +1408,6 @@
   function blastAftermath(x, gy, z, P, K, o) {
     if (CBZ.cityWaterAt && CBZ.cityWaterAt(x, z)) return;
     const S = Math.min(P, 2.6), q = o.fxq;
-    const wallCharge = !!(o.nrm && Math.abs(o.nrm.y) < 0.6);
     // (a) the crater and its dark ejecta blanket — persistent, capped (MARK_CAP,
     //     the oldest recycled), merged. Sized by the CHARGE through the law:
     //     apparent crater 0.8 . W^(1/3), ejecta to ~2.2 crater radii — a grenade
@@ -1453,24 +1417,21 @@
       const mr = L && o.W > 0 ? Math.max(0.6, Math.min(16, L.ejectaR(o.W))) : Math.max(1, Math.min(9, 1 + 1.3 * P * K.decal));
       queueMark(x + (o.nrm ? o.nrm.x * 0.6 : 0), z + (o.nrm ? o.nrm.z * 0.6 : 0), mr, gy);
     }
-    // (b) the ground it tore up: real chunks of the surface + charred bits
-    //     that stay where they land (CBZ.debris grit persists in its ring)
-    const surf = K.surface || groundKind();
+    // (b) THE FLOOR HELD. A grenade on a concrete floor does not cut a slab out
+    //     of it: it leaves a scorch, a cloud and a spray of grit. This used to
+    //     shatter an invented 0.9-2.2 m box of a flat grey "ground" material
+    //     (no mesh ever lost that volume) into rigid chunks on every ground
+    //     blast, and paint the grit charcoal whatever the floor was. Ground
+    //     that genuinely breaks (systems/craters.js digs the terrain) answers
+    //     for itself; here the surface only loses grit, sized as grit by
+    //     CBZ.debris.chips, in the surface's own colour.
+    const surf = K.surface || groundKind(x, z);
     if (CBZ.debris && K.frag > 0) {
       try {
         CBZ.debris.chips(x, gy + 0.3, z, {
-          kind: surf, color: 0x1d1a17, count: Math.max(2, Math.round(10 * S * K.frag * q)),
+          kind: surf, count: Math.max(2, Math.round(10 * S * K.frag * q)),
           power: 0.55 + 0.25 * S, spread: 2.5, dust: false,
         });
-        if (!wallCharge && CBZ.debris.shatter) {
-          const s = 0.45 + 0.3 * S;
-          CBZ.debris.shatter({ box: { minX: x - s, maxX: x + s, minY: gy + 0.02, maxY: gy + 0.2 + 0.05 * S, minZ: z - s, maxZ: z + s }, material: groundMat(surf) }, {
-            at: { x: x, y: gy + 0.1, z: z },
-            dir: { x: o.dir ? o.dir.x * 0.4 : 0, y: 1, z: o.dir ? o.dir.z * 0.4 : 0 },
-            power: Math.min(2.6, 0.9 + 0.5 * S), kind: surf,
-            maxPieces: Math.max(2, Math.round((3 + 3 * S) * K.frag * q)), owner: "blastfx", dust: 0.6,
-          });
-        }
       } catch (e) {}
     }
     // (c) small fires on the debris
@@ -2046,47 +2007,6 @@
   const _nn = { x: 0, y: 1 };
   function nNorm(nx, nz) { const l = Math.hypot(nx, nz); if (l < 1e-3) { _nn.x = 0; _nn.y = 1; } else { _nn.x = nx / l; _nn.y = nz / l; } return _nn; }
 
-  // ---- DANGLING REBAR off the wound's top edge ----
-  // The iconic read of blasted reinforced concrete: bent steel bars hanging out
-  // of the broken slab. A few thin dark bars rooted at the header line, kinked
-  // and drooping outward over the hole. Pooled + persistent (they hold ~80s with
-  // the wound, then fade), capped so a mag-dump of rockets can't flood them.
-  function dangleRebar(cx, topY, cz, nx, nz, width, n) {
-    let tx = -nz, tz = nx; const tl = Math.hypot(tx, tz) || 1; tx /= tl; tz /= tl;
-    for (let i = 0; i < n; i++) {
-      while (rebar.length >= REBAR_CAP) { const o = rebar.shift(); scene.remove(o.group); }
-      const along = (rng() - 0.5) * width * 0.85;
-      const x = cx + tx * along + nx * 0.12;
-      const z = cz + tz * along + nz * 0.12;
-      const g = new THREE.Group();
-      g.position.set(x, topY - 0.05, z);
-      // root segment hangs DOWN out of the broken header, kinked outward
-      const len1 = 0.5 + rng() * 0.7;
-      const s1 = new THREE.Mesh(rebarGeo, rebarMat);
-      s1.scale.y = len1; s1.position.y = -len1 / 2;
-      // tilt it outward + a little sideways so bars splay instead of hanging neat
-      s1.rotation.z = (rng() - 0.5) * 0.5;
-      s1.rotation.x = (nz !== 0 ? 1 : 0) * (0.3 + rng() * 0.5) * (nz > 0 ? 1 : -1);
-      g.add(s1);
-      // a kinked tip on most bars (the L-bend that sells "torn from concrete")
-      if (rng() < 0.75) {
-        const len2 = 0.25 + rng() * 0.4;
-        const s2 = new THREE.Mesh(rebarGeo, rebarMat);
-        s2.scale.y = len2;
-        // hang the tip off the bottom of the first segment, bent ~60-100°
-        s2.position.set((rng() - 0.5) * 0.1, -len1 - len2 / 2 * 0.4, (rng() - 0.5) * 0.1);
-        s2.rotation.z = (rng() - 0.5) * 1.8;
-        s2.rotation.x = (rng() - 0.5) * 1.8;
-        g.add(s2);
-      }
-      // splay the whole bundle outward from the facade
-      g.rotation.y = Math.atan2(nx, nz) + (rng() - 0.5) * 0.6;
-      scene.add(g);
-      rebar.push({ group: g, t: 0, hold: 78 + rng() * 40 });
-    }
-  }
-
-
   // ---- SOOT RING decal hugging the wall around the wound ----
   // NO-OP by default. The argument that brought this back was "the old floating
   // brown decal was fake because it hung in EMPTY AIR; now there is a real carved
@@ -2102,9 +2022,8 @@
   // ============================================================
   // cityWallRuin — the COMPLETE real-blast facade read in one call, composed by
   // fracture.js right after it carves a persistent hole. Layers, big→subtle:
-  //   1) debris AVALANCHE pouring down the facade (the existing cascade),
-  //   2) a DENSE PERSISTENT RUBBLE HEAP mounded at the wall base on the street,
-  //   3) DANGLING REBAR off the broken header edge,
+  //   1)-3) [GONE] the avalanche, the rubble heap and the dangling rebar were
+  //      all invented here; the carve sheds the wall's own pieces instead,
   //   4) [PURGED by FX_WALL_WOUNDS] a painted soot ring on the wall face,
   //   5) a fat concrete DUST CLOUD bursting out of the wound,
   //   6) [PURGED by FX_WALL_WOUNDS] a 60-90s smoke column off the wound.
@@ -2131,13 +2050,10 @@
        line are cells of that wall, in that wall's colour, and they are on their
        way to becoming the pile. Minting a second, fake population next to them
        is exactly the "fake blocks that are supposed to be rubble" read.
-       Flag off → both invented spawners return, byte for byte. */
-    // (3) dangling REBAR off the broken header (only if the wound is up off the
-    //     deck — a slab edge to tear from; ground-line blasts get fewer bars).
-    //     Reinforcement is NOT debris: it is the steel that was always inside
-    //     that slab, still rooted in it and now exposed. It stays.
-    const nBar = top > 2.2 ? Math.round(3 + width * 0.8) : 2;
-    dangleRebar(x, top - 0.1, z, nx, nz, width, Math.min(8, nBar));
+       (3) THE REBAR WENT THE SAME WAY. It was 2-8 dark cylinders minted at the
+       header line of EVERY hole and held for two minutes — on the prison's
+       block partitions, on brick, on a wall whose mesh never had a bar in it.
+       Steel nobody modelled is steel that came from nowhere. */
 
     // (4) soot ring on the face — PURGED by default (FX_WALL_WOUNDS); the call
     //     stays so flipping the flag restores the old read exactly.
@@ -2451,8 +2367,15 @@
         if (d < bd) { bd = d; hitMat = c.ref.material; }
       }
     }
-    if (roof) addChunks(x, z, Math.round(5 + 4 * power), 3.5, false, null, y);
-    else facadeAvalanche(x, y, z, nx, nz, power, Array.isArray(hitMat) ? hitMat[0] : hitMat);
+    if (Array.isArray(hitMat)) hitMat = hitMat[0];
+    // a roof that held loses grit of ITSELF, thrown up (it used to be 44
+    // "concrete" chips whatever the roof was made of)
+    if (roof) {
+      if (CBZ.debris) CBZ.debris.chips(x, y, z, {
+        material: hitMat || null, kind: hitMat ? undefined : "concrete",
+        count: Math.round(8 + 6 * power), power: Math.min(2.6, 0.6 + power * 0.3), spread: 1.4,
+      });
+    } else facadeAvalanche(x, y, z, nx, nz, power, hitMat);
     // a breath of concrete dust out of the wound itself
     pointBurst(x, z, Math.round(16 + 10 * power), 0x9a9082, 0.42, 3.5 + power, 1.0, true, y);
     // (3) the wound used to smoke for a minute-plus — PURGED by default
@@ -2524,8 +2447,6 @@
     sootRing.clear(); sootSplash.clear();
     for (const s of scars) { scene.remove(s.mesh); s.mat.dispose(); }
     scars.length = 0;
-    for (const rb of rebar) scene.remove(rb.group);   // shared geo/mats — remove only
-    rebar.length = 0;
     for (const rf of ruinFrames) if (rf.group && rf.group.parent) rf.group.parent.remove(rf.group);
     ruinFrames.length = 0;
     ruinStats.events = ruinStats.pieces = ruinStats.bars = 0;
@@ -2549,12 +2470,6 @@
         s.mat.opacity = Math.max(0, 0.95 * (1 - (s.t - s.hold) / 8));
         if (s.t - s.hold >= 8) { scene.remove(s.mesh); s.mat.dispose(); scars.splice(i, 1); }
       }
-    }
-    // dangling rebar: hold with the wound, then quietly retire (no fade — steel
-    // doesn't fade; we just despawn it once the wound has long stopped smoking).
-    for (let i = rebar.length - 1; i >= 0; i--) {
-      const rb = rebar[i]; rb.t += dt;
-      if (rb.t >= rb.hold) { scene.remove(rb.group); rebar.splice(i, 1); }
     }
     // wounded facades keep smoking: ~2 puffs/s drifting up + out of the hole,
     // thinning as the wound cools; the first beats still cook with flame licks.
@@ -2681,11 +2596,6 @@
   // (measured: the first blast of a session linked ~dozens of programs; the
   // second linked zero).
   (function parkBlastMats() {
-    const pg = new THREE.BoxGeometry(0.01, 0.01, 0.01); pg._shared = true;
-    const fam = [rebarMat];
-    for (let i = 0; i < fam.length; i++) {
-      const m = new THREE.Mesh(pg, fam[i]); m.visible = false; scene.add(m);
-    }
     const sm = new THREE.Mesh(new THREE.PlaneGeometry(0.01, 0.01),
       new THREE.MeshBasicMaterial({ map: scorchTex, transparent: true, depthWrite: false, opacity: 0 }));
     sm.visible = false; scene.add(sm);

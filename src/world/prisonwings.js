@@ -332,11 +332,13 @@
         id: d.id, lb: cfg.lb || 5, reach: 2.6,
         at: function () { return { x: d.x, y: 1.4, z: d.z }; },
         done: function () { return d.open; },
-        defeat: function () {
+        defeat: function (hit) {
+          // the bars / the leaf go as themselves, off the charge (breach.js)
+          if (CBZ.breachBlowOut) CBZ.breachBlowOut(d.pivots, hit, { owner: "door:" + d.id, lb: hit && hit.lb });
+          for (const p of d.pivots) p.visible = false;
           d.blown = true; d.setOpen(true);
           const i = CBZ.colliders.indexOf(d.collider);
           if (i >= 0) { CBZ.colliders.splice(i, 1); if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
-          for (const p of d.pivots) p.visible = false;
         },
       });
     }
@@ -1775,6 +1777,7 @@
   CBZ.resetPrisonWings = function () {
     for (let i = 0; i < doors.length; i++) {
       const d = doors[i];
+      if (d.blown && CBZ.breachClearBlown) CBZ.breachClearBlown("door:" + d.id);
       d.blown = false; d.picked = 0; d.shutT = 0;
       for (const p of d.pivots) p.visible = true;
       d.setOpen(false, true);
