@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "74800796d69443f9f9f70005ec185539cac14ce8",
-  "createdAt": "2026-10-01T04:12:28.622Z",
+  "sourceCommit": "7784c5a62ef87d14fcd01814f0b123c679618f9b",
+  "createdAt": "2026-10-01T04:16:43.540Z",
   "fileCount": 1195,
-  "totalBytes": 48327762,
+  "totalBytes": 48327883,
   "files": [
     {
       "file": "src/bootstrap.js",
@@ -788,8 +788,8 @@
     },
     {
       "file": "src/city/frontline.js",
-      "bytes": 20256,
-      "sha256": "a017b3176c74b66e3fa79faf89248fab356acb3f2fc3d9015f73ecd0cdbc3d3a"
+      "bytes": 19913,
+      "sha256": "6449c0aa666c2df9b8ee6f51eca1e1684c80d2093372487c172c0ffbf4297dd0"
     },
     {
       "file": "src/city/fuel.js",
@@ -5873,33 +5873,33 @@
     },
     {
       "file": "shark-sim.html",
-      "bytes": 59786,
-      "sha256": "4ee89bf0ee49806d67e0709f3725584865e0c81a367ec5eb24b7ecdb4ff3f808"
+      "bytes": 59788,
+      "sha256": "ed1b29bbfd4198b1f455ce9212ca47175bf30f10de263d5fa445d09c83799b96"
     },
     {
       "file": "disaster-survival.html",
-      "bytes": 59829,
-      "sha256": "033f40b8da6156bcf9ff366800b15f178220c799ba47e363dea528f3b75eb9e0"
+      "bytes": 59831,
+      "sha256": "30c6a68db3f7d19f9f99e25aece0fb0da8188c9933e7b3a2a0d383667ba979a0"
     },
     {
       "file": "prison-escape.html",
-      "bytes": 59798,
-      "sha256": "ef06f9de2b84245939f7b95a9f75ba1d3eb6cc3626cf09486a78dfc197639688"
+      "bytes": 59800,
+      "sha256": "88821423455ae6a8269f2c022d79c8b99082a41c9fecc0338cf53c88b01fa57f"
     },
     {
       "file": "gang-city.html",
-      "bytes": 59753,
-      "sha256": "114f25f423e69686b67f8e9f804723de671796c8bbaa134f1c03a960a90a65a2"
+      "bytes": 59755,
+      "sha256": "a8d580247cc7e39c47cce744b3f93d748d7a2a7741c5d2f9233769113b2127fa"
     },
     {
       "file": "gun-game.html",
-      "bytes": 59775,
-      "sha256": "51a022c1df9288f2c3f89144fa7923701741a3cdb8537103669747930829aeb3"
+      "bytes": 59777,
+      "sha256": "6cf39264b2c14e4dfa2c5952d35f2355964f2a5d30e352859ed76155363ec1e9"
     },
     {
       "file": "games/battle.html",
-      "bytes": 451560,
-      "sha256": "32e3ef908b024f22f53d7894121abf7d6aad53c8156452d8d64c348bdd6c4521"
+      "bytes": 452014,
+      "sha256": "751445d7b705b2eb314c6f3c98222f68300d218b75f8d8e2f4ef56e787389220"
     },
     {
       "file": "games/bomb-survivor-scene.js",

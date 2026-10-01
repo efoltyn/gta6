@@ -746,6 +746,8 @@ const FLAG_URL = {};
 function flagURL(t) {
   if (!FRONT || !FRONT[t]) return "";
   if (FLAG_URL[t]) return FLAG_URL[t];
+  // the city's one flag system (city/flags.js) painted it: use that picture as is
+  if (FRONT[t].flagUrl) return (FLAG_URL[t] = FRONT[t].flagUrl);
   const cv = document.createElement("canvas"); cv.width = 96; cv.height = 64;
   drawFlag(cv.getContext("2d"), FRONT[t].flag, 96, 64);
   return (FLAG_URL[t] = cv.toDataURL());
@@ -6233,6 +6235,11 @@ CBZ.studio.need(NEED).then(function () {
     const cv = document.createElement("canvas"); cv.width = 192; cv.height = 128;
     drawFlag(cv.getContext("2d"), FRONT[team].flag, 192, 128);
     const tex = new THREE.CanvasTexture(cv);
+    if (FRONT[team].flagUrl) {           // the nation's real flag (city/flags.js), drawn over the fallback once it decodes
+      const im = new Image();
+      im.onload = function () { cv.getContext("2d").drawImage(im, 0, 0, 192, 128); tex.needsUpdate = true; };
+      im.src = FRONT[team].flagUrl;
+    }
     tex.encoding = THREE.sRGBEncoding;
     const flag = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.6, 8, 1),
       new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide }));
