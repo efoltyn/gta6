@@ -196,6 +196,43 @@ for (const B of bodies) for (const sleeve of [false, true]) {
   check(!inst.userData.ww.near, tagB + ": near detail off");
 }
 
+// ---- 2b. DRESSED AFTER IT WAS BUILT ----------------------------------------
+// Owner: "watches overlap with shirts". A body built in a tee has a "bare"
+// forearm loft; put it in a long sleeve later (outfits.js tints that loft the
+// shirt colour) and the watch used to stay wrapped round the loft's surface —
+// over the cloth. What the forearm WEARS decides, live, both ways.
+{
+  const rig = CBZ.makeCharacter({ legs: 0x223344, torso: 0x445566, arms: SKIN, skin: SKIN, shoes: 0x222222 });
+  CBZ.scene.add(rig.group);
+  rig.group.updateMatrixWorld(true);
+  W.wear(rig, "diver");
+  const r = X.recOf(rig), fore = rig.skinSlots.armsLower[0], anchor = rig.low.la;
+  X.sync(r, cam);
+  check(r.place && r.place.sleeve === false, "redress: a tee body's watch is on the skin");
+  fore.material = fore.material.clone();
+  fore.material.color.setHex(0x445566);
+  X.sync(r, cam);
+  check(r.place && r.place.sleeve === true, "redress: the same forearm in a long sleeve puts the watch under it");
+  if (r.inst) {
+    const crease = CBZ.charArmLandmarks(rig).handTop;
+    const [strap, head] = r.inst.children;
+    let bad = 0, n = 0, badS = 0;
+    for (const mesh of [strap, head]) {
+      const M = toAnchor(mesh, anchor), pos = mesh.geometry.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        _v.fromBufferAttribute(pos, i).applyMatrix4(M);
+        if (_v.y <= crease + 0.001) continue;
+        n++; if (!inLoft(fore, anchor, _v.clone(), 0.966)) { bad++; if (mesh === strap) badS++; }
+      }
+    }
+    check(n > 0 && bad === 0, "redress: nothing of the watch over the sleeve (" + bad + "/" + n + " out, " + badS + " of the strap)");
+  }
+  fore.material.color.setHex(SKIN);
+  X.sync(r, cam);
+  check(r.place && r.place.sleeve === false, "redress: back in the tee, back on the skin");
+  CBZ.scene.remove(rig.group);
+}
+
 // ---- 3. first person ------------------------------------------------------
 const player = CBZ.makeCharacter({ legs: 0xff7a1a, torso: 0xff7a1a, arms: 0xff7a1a, skin: 0xf0c39a, stripes: 0xc85c00 });
 CBZ.playerChar = player;
@@ -226,9 +263,17 @@ for (const C of cases) {
   const fit = inst.children[0].geometry;
   fit.computeBoundingBox();
   const fb = fit.boundingBox;
-  // the strap is on the forearm's skin (sleeved: inside the cuff)
+  // the strap is on the forearm's skin; sleeved, the forearm drawn IS the
+  // sleeve, so the strap wraps the real wrist inside it and nothing of it
+  // (strap, raised row, clasp) reaches the cuff's outer band (owner:
+  // "watches overlap with shirts" — it used to stand ~2 mm proud of the cuff)
   const fsec = X.sliceSection(armL.userData.parts.fore.geometry, null, 2, t / lf);
-  check(fb.max.x >= fsec.hu * K && fb.max.z >= fsec.hw * K, tag + ": strap clears the forearm");
+  if (!C.sleeved) check(fb.max.x >= fsec.hu * K && fb.max.z >= fsec.hw * K, tag + ": strap clears the forearm");
+  else {
+    const band = 0.0035 * K;
+    const ox = Math.max(fb.max.x, -fb.min.x), oz = Math.max(fb.max.z, -fb.min.z);
+    check(ox < fsec.hu * K + band && oz < fsec.hw * K + band, tag + ": strap hidden under the sleeve (" + ((ox - fsec.hu * K) * 1000 / K).toFixed(1) + " / " + ((oz - fsec.hw * K) * 1000 / K).toFixed(1) + " mm vs the cuff's " + (band * 1000 / K).toFixed(1) + ")");
+  }
   const head = inst.children[1];
   check(Math.abs(head.scale.x - K) < 1e-6, tag + ": head at the hand's scale (" + head.scale.x.toFixed(2) + ")");
   if (C.sleeved) {

@@ -604,8 +604,12 @@ console.log("DRIVING (hands on the rim through full lock)");
   const PC = read("src/city/playercars.js");
   const src = "const THREE = window.THREE; const CBZ = window.CBZ;" + block(PC, "  const WHEEL_POSE =", "  /* shadeCabin") + "return CBZ.carCabinHands;";
   const make = vm.runInContext("(function(){" + src + "})()", ctx);
-  const skin = new T.MeshLambertMaterial(), sleeve = new T.MeshLambertMaterial({ color: 0x223344 });
-  const hands = make(skin, sleeve, 0.18);
+  // the cabin dresses itself off the live body (fphands.dressOf), never off
+  // the rig's painted atlas materials: a sleeved body, then the colours checked
+  const flat = (hex) => [{ material: new T.MeshLambertMaterial({ color: hex }) }];
+  const prevChar = CBZ.playerChar;
+  CBZ.playerChar = { skinTone: 0xc08860, skinSlots: { hands: flat(0xc08860), armsLower: flat(0x223344), arms: flat(0x223344) } };
+  const hands = make(0.18);
   const spin = new T.Group(); spin.add(hands);
   const S = [new T.Vector3(-0.20, 0.04, -0.50), new T.Vector3(0.20, 0.04, -0.50)];
   let minD = 9;
@@ -625,6 +629,11 @@ console.log("DRIVING (hands on the rim through full lock)");
     minD = Math.min(minD, d);
   }
   console.log(`  closest forearm approach through lock-to-lock ${minD.toFixed(3)} m`);
+  const P0 = hands.userData.arms.children[0].userData.parts;
+  check(!P0.fore.material.map && P0.fore.material.color.getHex() === 0x223344, "wheel: the forearm wears the body's sleeve colour, flat (no atlas)");
+  check(P0.elbow.material.color.getHex() === 0x223344 && P0.upper.material.color.getHex() === 0x223344, "wheel: elbow + upper arm wear the shirt");
+  check(P0.cuff.visible, "wheel: a sleeved driver's cuff is drawn");
+  CBZ.playerChar = prevChar;
 }
 
 // ---------------------------------------------------------------- HANDS ON THE LEDGE (first person)
@@ -704,6 +713,47 @@ console.log("HANDS ON THE LEDGE (fpPlants -> poseFpArms)");
   check(!P.fpPlants() && !(P.fistT[0].plantW > 0) && !(P.fistT[1].plantW > 0), "no traversal: fpPlants lets go");
   console.log(`  palms on their rays within ${worstAng.toFixed(2)} deg; flat ${worstUp.toFixed(3)}; fingers along ${worstFwd.toFixed(3)}`);
   CBZ.playerChar = { _ww: { role: "diver", over: null } };
+}
+
+// ---------------------------------------------------------------- THE ELBOW IS ONE CLOTH
+// Owner: "shirts are not going well over joints". Both open tube ends that
+// meet at the elbow (forearm z 1, upper arm z 0) must sit INSIDE the elbow
+// ball's flat facets with margin, so no bend shows a notch or z-fights; the
+// upper arm is closed (its shoulder end is a dome, no open rim).
+{
+  const E = H.ELBOW, g = H._geo;
+  const ball = g.elbowGeo(), bp = ball.attributes.position, bi = ball.index.array;
+  // the ball's inscribed radius: the nearest facet plane to its centre
+  let inR = Infinity;
+  const a = new T.Vector3(), b = new T.Vector3(), c = new T.Vector3(), n = new T.Vector3();
+  for (let i = 0; i < bi.length; i += 3) {
+    a.fromBufferAttribute(bp, bi[i]); b.fromBufferAttribute(bp, bi[i + 1]); c.fromBufferAttribute(bp, bi[i + 2]);
+    n.subVectors(c, b).cross(new T.Vector3().subVectors(a, b));
+    if (n.lengthSq() < 1e-16) continue;
+    n.normalize();
+    inR = Math.min(inR, Math.abs(n.dot(a)));
+  }
+  // the widest vertex of each tube within 1 mm of the joint
+  const endR = (geo, zJoint, zScale) => {
+    const p = geo.attributes.position; let r = 0;
+    for (let i = 0; i < p.count; i++) if (Math.abs(p.getZ(i) - zJoint) * zScale < 0.001) r = Math.max(r, Math.hypot(p.getX(i), p.getY(i)));
+    return r;
+  };
+  const foreEnd = endR(g.foreGeo(), 1, 0.27), upEnd = endR(g.upperGeo(), 0, 0.29);
+  check(foreEnd > 0 && inR - foreEnd >= 0.0012, `elbow: forearm end ${(foreEnd * 1000).toFixed(1)} mm inside the ball's facets (${(inR * 1000).toFixed(1)} mm)`);
+  check(upEnd > 0 && inR - upEnd >= 0.0012, `elbow: upper-arm end ${(upEnd * 1000).toFixed(1)} mm inside the ball's facets (${(inR * 1000).toFixed(1)} mm)`);
+  check(E.R > 0 && E.W >= 16, "elbow: ball fine enough to stay round");
+  // the upper arm is a closed solid past its elbow end: every edge used twice except the elbow rim
+  const ui = g.upperGeo().index.array, edges = new Map();
+  for (let i = 0; i < ui.length; i += 3) for (let k = 0; k < 3; k++) {
+    const p0 = ui[i + k], p1 = ui[i + (k + 1) % 3], key = Math.min(p0, p1) + ":" + Math.max(p0, p1);
+    edges.set(key, (edges.get(key) || 0) + 1);
+  }
+  const up = g.upperGeo().attributes.position;
+  let openAway = 0;
+  edges.forEach((cnt, key) => { if (cnt !== 1) return; const [p0, p1] = key.split(":").map(Number); if (Math.abs(up.getZ(p0)) > 1e-6 || Math.abs(up.getZ(p1)) > 1e-6) openAway++; });
+  check(openAway === 0, `upper arm: the only open rim is inside the elbow ball (${openAway} open edges elsewhere)`);
+  console.log(`  elbow: ball facets at ${(inR * 1000).toFixed(1)} mm; forearm end ${(foreEnd * 1000).toFixed(1)} mm, upper end ${(upEnd * 1000).toFixed(1)} mm`);
 }
 
 // ---------------------------------------------------------------- THE OLD RIG (on record)

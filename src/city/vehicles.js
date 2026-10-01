@@ -1788,8 +1788,9 @@
   /* THE LIVE COCKPIT — only in the car the player sits in. Two needles on
      the cluster dials, the wheel turning with the steering input, and in
      driver first person a pair of forearms and hands ON the rim (the rig's
-     own arms are hidden there: its shoulders are at the lens). Materials are
-     the rig's own skin and sleeve, so the hands wear what he wears. */
+     own arms are hidden there: its shoulders are at the lens). They are
+     dressed off the live body (fphands.dressOf, in playercars.js), so the
+     hands wear what he wears. */
   const live = { car: null, needles: null, spin: null, hands: null };
   const _armInv = new THREE.Matrix4(), _armS = [new THREE.Vector3(), new THREE.Vector3()];
   function dropLive() {
@@ -1803,10 +1804,6 @@
     if (live.spin) live.spin.rotation.z = 0;
     live.car = null; live.needles = null; live.spin = null; live.hands = null;
   }
-  function firstMat(list) {
-    const m = list && list[0] && list[0].material;
-    return Array.isArray(m) ? m[0] : m;
-  }
   function tickLive(car, vis, ci, ch, seat, fp, steerLeft) {
     if (live.car !== car) {
       dropLive();
@@ -1817,15 +1814,12 @@
       }
       const steer = vis.getObjectByName(ci.steerName || "cabin_steer");
       live.spin = steer ? (steer.getObjectByName("cabin_steer_spin") || null) : null;
-      const sk = ch && ch.skinSlots;
-      if (live.spin && CBZ.carCabinHands && sk) {
-        const skin = firstMat(sk.hands) || firstMat(sk.head);
-        if (skin) {
-          live.hands = CBZ.carCabinHands(skin, firstMat(sk.armsLower) || skin, ci.wheel && ci.wheel.r, firstMat(sk.arms));
-          live.spin.add(live.hands);
-          // the ARMS hang off the steer group: the rim turns, the shoulders do not
-          if (live.hands.userData.arms && live.spin.parent) live.spin.parent.add(live.hands.userData.arms);
-        }
+      if (live.spin && CBZ.carCabinHands && ch && ch.skinSlots) {
+        // dressed off the live body by fphands.dressOf (playercars.js)
+        live.hands = CBZ.carCabinHands(ci.wheel && ci.wheel.r);
+        live.spin.add(live.hands);
+        // the ARMS hang off the steer group: the rim turns, the shoulders do not
+        if (live.hands.userData.arms && live.spin.parent) live.spin.parent.add(live.hands.userData.arms);
       }
     }
     if (live.spin) live.spin.rotation.z = -steerLeft * 1.55;       // ~90° of wheel at full lock

@@ -820,11 +820,33 @@
     void rings; void sides;
     return g;
   }
+  /* THE ELBOW IS ONE PIECE OF CLOTH (owner: "shirts are not going well over
+     joints"). It was three surfaces of the SAME radius meeting at the joint:
+     the forearm's open end (4.0-4.1 cm), the upper arm's open end (4.2 cm)
+     and a 10x8 ball of 4.3 cm whose flat facets sag 2 mm inside their own
+     radius. So the ball's facets dipped UNDER both tubes (the open tube ends
+     showed through as see-through notches round the bend) and where they did
+     not, three coincident surfaces in two materials z-fought: the torn,
+     two-tone elbow. Now the body's own law (character.js JOINTS): the joint
+     is a ball whose facets clear every tube end that meets it by >= 1.2 mm,
+     so both open ends always sit INSIDE it and the arm reads as one sleeve
+     over any bend. The upper arm is a closed solid: a dome over the shoulder
+     end, nothing to look into. */
+  const ELBOW_R = 0.0445, ELBOW_W = 16, ELBOW_H = 12;
+  const UPPER_R0 = 0.042, UPPER_R1 = 0.048, UPPER_NOM = 0.28;
   function upperGeo() {
     if (UPPER) return UPPER;
-    const g = new THREE.CylinderGeometry(0.048, 0.042, 1, 12, 1, true);
-    g.rotateX(Math.PI / 2);
-    g.translate(0, 0, 0.5);
+    // rings [z, rx, ry]: the elbow end (open, inside the ball) up to the
+    // shoulder, then a dome authored at UPPER_NOM (posed with scale z = lu)
+    const rings = [];
+    for (let i = 0; i <= 4; i++) { const r = UPPER_R0 + (UPPER_R1 - UPPER_R0) * i / 4; rings.push([i / 4, r, r]); }
+    const D = UPPER_R1 * 0.8 / UPPER_NOM;
+    for (let k = 1; k <= 3; k++) {
+      const th = Math.PI / 2 * k / 4;
+      rings.push([1 + D * Math.sin(th), UPPER_R1 * Math.cos(th), UPPER_R1 * Math.cos(th)]);
+    }
+    rings.push([1 + D, 0, 0]);
+    const g = lathe([], rings, 12, 0);
     g._shared = true; g.userData._shared = true;
     return (UPPER = g);
   }
@@ -870,7 +892,7 @@
   }
   function elbowGeo() {
     if (ELBOW) return ELBOW;
-    const g = new THREE.SphereGeometry(0.043, 10, 8);
+    const g = new THREE.SphereGeometry(ELBOW_R, ELBOW_W, ELBOW_H);
     g._shared = true; g.userData._shared = true;
     return (ELBOW = g);
   }
@@ -1618,5 +1640,7 @@
     grasp, graspHand, regraspWithSolids, solidsOf, solidsSdf, prismSdf, holdPose, HOLD_RADII, TORCH, torchMount,
     math: { solveElbow, flexForWrap, fingerChain, segDist, clampFore, foreHalf, stubRings },
     WRIST, STUB_LATHE, FORE_NOM, FORE_DOME, CUFF_PROFILE,
+    ELBOW: { R: ELBOW_R, W: ELBOW_W, H: ELBOW_H }, UPPER_R0, UPPER_R1,
+    _geo: { upperGeo, elbowGeo, foreGeo },
   };
 })();
