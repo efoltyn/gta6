@@ -795,6 +795,19 @@
     const rc = square > 0.9 ? Math.min(a, b) * 0.18 : Math.min(a, b) * 0.92;
     return { a: a, b: b, rc: rc, s: s, key: q4(a) + "|" + q4(b) + "|" + q4(rc) + "|" + q4(s) };
   }
+  /* THE WRIST UNDER A SLEEVE: the strap cinches the REAL wrist (the hand's
+     own, fphands WRIST, a little tighter), never the cloth: it may grow
+     toward the sleeve's inside (cu, cw: its half-extents over the strap)
+     only while clearance + strap + buckle still fit inside it. One rule for
+     the body (rigPlacement) and the first-person arms (fpPlace). `sec0`:
+     the bare forearm section, the fallback with no fphands loaded. */
+  function wristUnderSleeve(cu, cw, hs, sec0) {
+    const WR = CBZ.fpHands && CBZ.fpHands.WRIST;
+    const room = (CLEAR + 0.0090) * hs;               // clearance + strap + buckle
+    const a0 = WR ? WR.hw * 0.9 * hs : sec0.hu * 0.6, b0 = WR ? WR.ht * 0.95 * hs : sec0.hw * 0.6;   // a strap cinches the wrist a little
+    return { a: Math.max(a0, Math.min(a0 * 1.15, cu * 0.96 - room)), b: Math.max(b0, Math.min(b0 * 1.2, cw * 0.96 - room)),
+      fits: cu * 0.96 - room >= a0 && cw * 0.96 - room >= b0 };
+  }
   // the head's resting place on its instance: `drop` toward the hand, `sink` into the wrist
   function seatHead(inst, fit, drop, sink) {
     inst.userData.ww.head.position.set(0, -(drop || 0), fit.b + CLEAR * fit.s - (sink || 0));
@@ -826,6 +839,38 @@
      sync() turns the watch with it). Sleeved: see WHERE IT SITS. */
   // `right` measures the RIGHT wrist instead (the tennis bracelet, jewelry_kit.js)
   function rightAnchorOf(rig) { return rig && ((rig.low && rig.low.ra) || (rig.parts && rig.parts.ra && rig.parts.ra.userData && rig.parts.ra.userData.low)) || null; }
+  /* IS THIS FOREARM COVERED, NOW. It was the loft's build-time variant
+     ("cloth" / "bare"), but a body is dressed long after it is built: a tee
+     body put in a jacket (a painted garment on the forearm, or outfits.js
+     tinting the bare loft the shirt's colour) kept a "bare" forearm, so the
+     watch was wrapped round the sleeve's surface and sat ON the cloth. What
+     the forearm wears decides: a painted garment (a map that is not ink) is
+     cloth; a flat colour is cloth unless it is the skin (or the hand). */
+  function hexNear(a, b) {
+    const dr = ((a >> 16) & 255) - ((b >> 16) & 255), dg = ((a >> 8) & 255) - ((b >> 8) & 255), db = (a & 255) - (b & 255);
+    return dr * dr + dg * dg + db * db < 300;
+  }
+  function matOf(o) { const m = o && o.material; return Array.isArray(m) ? m[0] : m; }
+  function sleevedNow(rig, fore) {
+    const m = matOf(fore);
+    if (!m) return false;
+    const ink = CBZ.tattoo && CBZ.tattoo.isInk && CBZ.tattoo.isInk(m);
+    if (m.map && !ink) return true;
+    if (!m.color || !m.color.getHex) return !!(fore.userData && fore.userData.limb && fore.userData.limb.variant === "cloth");
+    const hex = m.color.getHex();
+    if (rig && rig.skinTone != null && hexNear(hex, rig.skinTone | 0)) return false;
+    // the live skin (heritage repaints it off the build tone): the head's, else
+    // the hand's — a glove the colour of the sleeve must not read as skin
+    const sk = rig && rig.skinSlots;
+    let live = null;
+    for (const slot of ["head", "hands"]) {
+      const sm = matOf(sk && sk[slot] && sk[slot][0]);
+      if (sm && sm.color && (!sm.map || (CBZ.tattoo && CBZ.tattoo.isInk && CBZ.tattoo.isInk(sm)))) { live = sm.color.getHex(); break; }
+    }
+    if (live != null && hexNear(hex, live)) return false;
+    if (rig && rig.skinTone == null && live == null) return !!(fore.userData && fore.userData.limb && fore.userData.limb.variant === "cloth");
+    return true;
+  }
   function rigPlacement(rig, right) {
     const anchor = right ? rightAnchorOf(rig) : anchorOf(rig);
     const fore = rig && rig.skinSlots && rig.skinSlots.armsLower && rig.skinSlots.armsLower[right ? 1 : 0];
@@ -850,26 +895,31 @@
       // wrist frame: X = 12 o'clock, Y = toward the elbow, Z = dorsal (outboard)
       const q = new THREE.Quaternion().setFromRotationMatrix(_m4.makeBasis(
         new THREE.Vector3(0, 0, -side), new THREE.Vector3(0, 1, 0), new THREE.Vector3(side, 0, 0)));
-      const sig = fore.geometry.uuid + "|" + q4(fore.scale.x) + "|" + q4(fore.scale.z);
-      const spec = fore.userData && fore.userData.limb;
-      if (spec && spec.variant === "cloth") {
+      const covered = sleevedNow(rig, fore);
+      const sig = fore.geometry.uuid + "|" + q4(fore.scale.x) + "|" + q4(fore.scale.z) + (covered ? "|s" : "|b");
+      if (covered) {
         // UNDER THE SLEEVE: the real wrist (the hand's own, a little up the
         // arm) inside the cloth, the strap 2-4 cm (hand) above the hem,
         // the head dropped to the hem and sunk under the fabric (sync)
         const WR = CBZ.fpHands && CBZ.fpHands.WRIST;
-        const y = crease + 0.030 * hs;
-        // the cloth's narrowest inside over the strap's width, less the strap's own build
-        let cu = Infinity, cw = Infinity;
-        for (let dy = -0.012; dy <= 0.0121; dy += 0.004) {
-          const c = sliceSection(fore.geometry, M, 1, y + dy * hs);
-          cu = Math.min(cu, c.hu); cw = Math.min(cw, c.hw);
+        // the cloth's narrowest inside over the strap's width, less the strap's
+        // own build. A tight cuff (a bare-shaped loft dressed as a sleeve hugs
+        // the wrist) has no room 3 cm up: the strap slides up the arm until it
+        // fits inside, and the head still drops to the hem
+        let y = crease + 0.030 * hs, wr = null;
+        for (let up = 0.030; up <= 0.0601; up += 0.005) {
+          const yy = Math.min(probe.max - 0.02, crease + up * hs);
+          let cu = Infinity, cw = Infinity;
+          for (let dy = -0.012; dy <= 0.0121; dy += 0.004) {
+            const c = sliceSection(fore.geometry, M, 1, yy + dy * hs);
+            cu = Math.min(cu, c.hu); cw = Math.min(cw, c.hw);
+          }
+          y = yy; wr = wristUnderSleeve(cu, cw, hs, WR ? null : sec0);
+          if (wr.fits) break;
         }
-        const room = (CLEAR + 0.0090) * hs;               // clearance + strap + buckle
-        const a0 = WR ? WR.hw * 0.9 * hs : sec0.hu * 0.6, b0 = WR ? WR.ht * 0.95 * hs : sec0.hw * 0.6;   // a strap cinches the wrist a little
-        const a = Math.max(a0, Math.min(a0 * 1.15, cu * 0.96 - room)), b = Math.max(b0, Math.min(b0 * 1.2, cw * 0.96 - room));
         const at = sliceSection(fore.geometry, M, 1, y);
-        return { anchor: anchor, fit: makeFit(a, b, 0.7, hs), pos: new THREE.Vector3(at.cw, y, at.cu), quat: q, sig: sig,
-          sleeve: true, drop: 0.030 * hs, crease: crease, foreGeo: fore.geometry, foreInv: M.clone().invert() };
+        return { anchor: anchor, fit: makeFit(wr.a, wr.b, 0.7, hs), pos: new THREE.Vector3(at.cw, y, at.cu), quat: q, sig: sig,
+          sleeve: true, drop: y - crease, crease: crease, foreGeo: fore.geometry, foreInv: M.clone().invert() };
       }
       const y = Math.min(probe.max - 0.02, crease + (0.0215 + 0.0045) * hs);
       const sec = sliceSection(fore.geometry, M, 1, y);
@@ -1014,7 +1064,8 @@
     }
     // measure (once per forearm shape)
     const fore = rig.skinSlots && rig.skinSlots.armsLower && rig.skinSlots.armsLower[0];
-    const sig = fore && fore.geometry ? fore.geometry.uuid + "|" + q4(fore.scale.x) + "|" + q4(fore.scale.z) : "";
+    // (re-measured when the shape changes OR the forearm is dressed / undressed)
+    const sig = fore && fore.geometry ? fore.geometry.uuid + "|" + q4(fore.scale.x) + "|" + q4(fore.scale.z) + (sleevedNow(rig, fore) ? "|s" : "|b") : "";
     if (!r.place || r.place.sig !== sig) {
       r.place = rigPlacement(rig);
       if (r.inst) unmount(r);
@@ -1079,13 +1130,12 @@
      band's 3.5 mm), by bisection; cached per shape. Inst frame -> fore frame:
      x = -xf, y = zf, z = yf (FP_BASIS). */
   const _fpSink = new Map();
-  function fpCuffSink(style, sec, kk, lf, zAlong, cx, cy, drop) {
+  function fpCuffSink(style, b, kk, lf, zAlong, cx, cy, drop) {
     const H = CBZ.fpHands;
     if (!H || !H.math || !H.math.foreHalf) return 0;
-    const key = style + "|" + q4(kk) + "|" + q4(lf / kk) + "|" + q4(sec.hw);
+    const key = style + "|" + q4(kk) + "|" + q4(lf / kk) + "|" + q4(b / kk);
     if (_fpSink.has(key)) return _fpSink.get(key);
     const pos = headGeometry(style).attributes.position, band = 0.0035;
-    const b = sec.hw * kk;
     const out = function (sink) {
       for (let i = 0; i < pos.count; i++) {
         const x = pos.getX(i) * kk, y = pos.getY(i) * kk - drop, z = pos.getZ(i) * kk + b + CLEAR * kk - sink;
@@ -1122,14 +1172,19 @@
     let a, b, zAlong, cx = 0, cy = 0, drop = 0, sink = 0;
     const R0 = 0.0215 + 0.0045;
     if (sleeved) {
-      // under the cuff: the strap on the forearm's skin 3 cm up (inside the
-      // sleeve cuff, which covers 0..5.9 cm), the head dropped to the cuff's
-      // lip and sunk under its surface, so the dial peeks out past the cuff
+      // under the cuff: the forearm drawn here IS the sleeve, so the strap
+      // wraps the real wrist INSIDE it, 3 cm up (under the cuff, which covers
+      // 0..5.9 cm) — it used to wrap the sleeve's own surface, and with the
+      // strap's 3.4 mm + the bracelet's raised row it stood ~2 mm proud of
+      // the cuff all the way round: a watch clipped through the shirt. The
+      // head drops to the cuff's lip and sinks under it, so the dial peeks
+      // out past the cuff onto the hand's wrist.
       zAlong = 0.030 * kk;
       const sec = sliceSection(P.fore.geometry, null, 2, zAlong / lf);
-      a = sec.hu * kk; b = sec.hw * kk; cx = sec.cu * kk; cy = sec.cw * kk;
+      const wr = wristUnderSleeve(sec.hu * kk, sec.hw * kk, kk, null);
+      a = wr.a; b = wr.b; cx = sec.cu * kk; cy = sec.cw * kk;
       drop = 0.030 * kk;
-      sink = fpCuffSink(style, sec, kk, lf, zAlong, cx, cy, drop);
+      sink = fpCuffSink(style, b, kk, lf, zAlong, cx, cy, drop);
     } else {
       zAlong = R0;
       const sec = sliceSection(P.fore.geometry, null, 2, zAlong * kk / lf);

@@ -1443,7 +1443,38 @@
      Returns the hands group (goes on the spin group); `userData.arms` goes on
      the steer group; `userData.tick(spin, shoulders)` poses the arms. */
   const WHEEL_POSE = { wrap: 0.021, thumb: [[-0.34, -0.66, -0.67], [-0.12, -0.96, -0.24], [0.18, -0.62, -0.76]], cup: 0.005, name: "rim" };
-  CBZ.carCabinHands = function (skin, sleeve, rimR, upper) {
+  /* WHAT THE DRIVER WEARS. The cabin arms used to borrow the RIG's own
+     materials (skinSlots.armsLower / arms / hands). A worn garment there is
+     clothes.js's painted ATLAS material — a canvas laid out for the body's
+     limb UVs — so on fphands' forearm chart, the upper-arm tube, the elbow
+     ball and the UV-less cuff it sampled four unrelated corners of the
+     atlas: white and grey patches that broke apart at the elbow. And
+     "sleeved" was an atlas's white vs the skin, decided once at build. Now
+     the car is what every other first-person arm already is (fpsmode,
+     cockpit, the pickup lens): its own flat materials, coloured every tick
+     from fphands.dressOf off the live body (gloves, heritage skin, a change
+     of clothes at the wheel all come through), sleeved by the same rule. */
+  const DRIVER_MATS = { skin: null, fore: null, upper: null, hex: [-1, -1, -1], sleeved: false };
+  function driverMats() {
+    if (!DRIVER_MATS.skin) ["skin", "fore", "upper"].forEach(function (k) {
+      const m = new THREE.MeshLambertMaterial({ color: 0xd6a57e });
+      m._shared = true;                     // one set for every car: never disposed
+      DRIVER_MATS[k] = m;
+    });
+    return DRIVER_MATS;
+  }
+  function dressDriverArms() {
+    const FPH = CBZ.fpHands, M = driverMats();
+    const d = FPH && FPH.dressOf ? FPH.dressOf(CBZ.playerChar, { skin: 0xd6a57e, sleeve: 0x46503c }) : null;
+    if (!d) return M;
+    const want = [d.hand, d.fore, d.upper];
+    ["skin", "fore", "upper"].forEach(function (k, i) {
+      if (M.hex[i] !== want[i]) { M.hex[i] = want[i]; M[k].color.setHex(want[i]); }
+    });
+    M.sleeved = !!d.sleeved;
+    return M;
+  }
+  CBZ.carCabinHands = function (rimR) {
     const FPH = CBZ.fpHands;
     const g = new THREE.Group();
     g.name = "cabin_hands";
@@ -1452,7 +1483,7 @@
     g.userData.arms = arms;
     if (!FPH) return g;
     const R = rimR || 0.18, K = 1.08, TH = 0.22;
-    const fore = sleeve || skin, up = upper || fore;
+    const MT = dressDriverArms(), skin = MT.skin;
     const rig = [];
     [-1, 1].forEach(function (x) {
       // x = car-local side; the driver's RIGHT is -X, so the right hand is on -X
@@ -1468,14 +1499,14 @@
         center: new THREE.Vector3(x * R * c, R * s, 0), axis: tangentUp, dorsal: dorsal,
       }, skin);
       hand.castShadow = false;
-      const arm = FPH.makeArm({ fore: fore, upper: up }, side);
+      const arm = FPH.makeArm({ fore: MT.fore, upper: MT.upper }, side);
       arms.add(arm);
       rig.push({ x: x, side: side, hand: hand, arm: arm });
     });
-    const sleeved = !!(fore && skin && fore.color && skin.color && !fore.color.equals(skin.color));
     const W = new THREE.Vector3(), E = new THREE.Vector3(), Q = new THREE.Quaternion();
     const Sa = [0, 0, 0], Wa = [0, 0, 0], pole = [0, -1, -0.3];
     g.userData.tick = function (spin, shoulders) {
+      const sleeved = dressDriverArms().sleeved;
       for (let i = 0; i < rig.length; i++) {
         const r = rig[i], S = shoulders[r.x < 0 ? 0 : 1];
         W.copy(r.hand.position).applyQuaternion(spin.quaternion);
