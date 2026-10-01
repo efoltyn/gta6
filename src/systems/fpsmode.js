@@ -2613,8 +2613,8 @@
   }
 
   // THE WEAPON STRIP IS GONE (2026-09-28). The guns you carry are drawn by
-  // exactly one bar per game: systems/inventory.js's #hotbar everywhere but
-  // the city, city/hud.js's #cSlots in the city. This used to be a third
+  // exactly one bar: systems/inventory.js's #hotbar, in every game, the city
+  // included. This used to be a third
   // renderer (a text row, later a docked chip row) that other files spent
   // years hiding and re-parenting. The element stays in the page, empty.
   function setWeaponStrip() {
@@ -4746,8 +4746,8 @@
     return true;
   }
   CBZ.fpsSelectSlot = selectWeaponSlot;
-  // Select by WEAPON ID. systems/inventory.js's docked jail bar speaks ids:
-  // it renders CBZ.weaponInventory order (via weaponSlotsHTML) while slots
+  // Select by WEAPON ID. systems/inventory.js's bar (every game) speaks ids:
+  // it draws CBZ.weaponInventory order while slots
   // here index availableIndices' catalog order, and the mapping between the
   // two belongs to the file that owns both orderings — this one.
   CBZ.fpsSelectWeaponId = function (id) {
@@ -4757,139 +4757,10 @@
     return s >= 0 ? selectWeaponSlot(s) : false;
   };
 
-  // ---- THE CITY BAR IS THE INVENTORY -----------------------------------------
-  // OWNER: "only guns are cool, and the keycard is cool af. All other inventory
-  // is dumb af... The flashlight is a cool thing in inventory because at night
-  // it helps. Its icon should be the flashlight, like how the guns are."
-  // So the city carries ONE row and nothing else: the owned GUNS (their
-  // left-to-right order), then THROWABLES (grenade / C4: weapons, one chip per
-  // kind with a count), then the FLASHLIGHT once you own one, then the PHONE
-  // when the campaign handset is live. No fists chip: empty hands are simply
-  // nothing lit, and selecting the gun you already hold puts it away. Food and
-  // medicine are not chips any more: city/hunger.js eats and patches up on its
-  // own when you need it. Drugs are product; the dealers' trade flows read them
-  // straight out of g.cityInv.
-  // Each entry: { kind:"gun"|"throwable"|"detonator"|"flashlight"|"phone", label, short,
-  //   id?, gunSlot?, item?, count?, active }. city/hud.js renders exactly this;
-  // CBZ.cityHotbarSelect dispatches a bar index. Pure read so renderers poll.
-  //
-  // cityBarEntries is the PURE assembly (no CBZ reads), so the order contract
-  // can be checked in plain node: it takes what the world already knows.
-  function cityBarEntries(s) {
-    const bar = [];
-    const guns = s.guns || [];
-    for (let i = 0; i < guns.length; i++) {
-      const gn = guns[i];
-      bar.push({ kind: "gun", id: gn.id, gunSlot: i, label: gn.label, short: gn.short, active: !s.holstered && !!gn.held });
-    }
-    const th = s.throwables || [];
-    for (let i = 0; i < th.length; i++) {
-      if (!(th[i].count > 0)) continue;
-      bar.push({ kind: "throwable", item: th[i].name, label: th[i].name, short: th[i].name, count: th[i].count | 0,
-                 held: th[i].held || null, active: !!(th[i].held && th[i].held === s.held) });
-    }
-    // the detonator is its own thing in your hand once a charge is out
-    if ((s.planted | 0) > 0) {
-      bar.push({ kind: "detonator", item: "Detonator", label: "Detonator", short: "DET", held: "detonator", count: s.planted | 0, active: s.held === "detonator" });
-    }
-    // a gauze roll while you carry one (systems/vitals.js): in your hand, held use = wrap
-    if (s.bandage && (s.bandage.count | 0) > 0) {
-      bar.push({ kind: "bandage", item: "Bandage", label: "Bandage", short: "", count: s.bandage.count | 0, held: "bandage", active: !!s.bandage.active });
-    }
-    if (s.flashlight && s.flashlight.owned) {
-      bar.push({ kind: "flashlight", item: "Flashlight", label: "Flashlight", short: "LIGHT", active: !!s.flashlight.on });
-    }
-    const ph = s.phone;
-    if (ph && ph.available) {
-      bar.push({ kind: "phone", label: "Phone", short: "PHONE", item: "Phone", active: !!ph.open, unread: !!ph.unread, buzz: !!ph.buzz });
-    }
-    return bar;
-  }
-  function cityThrowables() {
-    // stable order: ITEMS catalog declaration order, filtered to owned throwables
-    const inv = CBZ.game.cityInv || {}, ITEMS = (CBZ.cityEcon && CBZ.cityEcon.ITEMS) || {};
-    const out = [];
-    const HM = CBZ.heldItemModel;
-    for (const name in ITEMS) {
-      const it = ITEMS[name];
-      if (it && it.tag === "throwable" && (inv[name] || 0) > 0) {
-        out.push({ name: name, count: inv[name] | 0, held: HM ? HM.heldKindOf(name, it) : null });
-      }
-    }
-    return out;
-  }
-  function cityHotbar() {
-    if (CBZ.game.mode !== "city") return [];
-    const idx = availableIndices();
-    const guns = [];
-    for (let s = 0; s < idx.length; s++) {
-      const w = WEAPONS[idx[s]];
-      guns.push({ id: w.id || w.key, label: w.label, short: w.short, held: idx[s] === fps.weapon });
-    }
-    // The flashlight: systems/playerflashlight.js owns the lamp and whether you
-    // own one; this bar only gives it a slot. The phone: city/campaign_ui.js
-    // owns the device, publishing its chip state read-only.
-    let fl = null;
-    try {
-      const PF = CBZ.playerFlashlight;
-      if (PF && typeof PF.owned === "function" && PF.owned()) fl = { owned: true, on: !!(PF.on && PF.on()) };
-    } catch (e) { fl = null; }
-    let ph = null;
-    try { ph = (typeof CBZ.campaignPhoneChip === "function") ? CBZ.campaignPhoneChip() : null; } catch (e) { ph = null; }
-    const H = CBZ.heldItem;
-    return cityBarEntries({ guns: guns, holstered: !!CBZ.game.cityHolstered, throwables: cityThrowables(), flashlight: fl, phone: ph,
-      bandage: CBZ.hotbarBandage ? CBZ.hotbarBandage() : null,
-      held: H ? H.current() : null, planted: CBZ.cityC4Planted ? CBZ.cityC4Planted() : 0 });
-  }
-  CBZ.cityHotbar = cityHotbar;
-
-  // dispatch a bar index: gun -> draw it (fpsSelectSlot, which un-holsters), or
-  // put it away when it is already the one in your hands; throwable -> the
-  // EXISTING throw / plant path for that kind; flashlight -> click the lamp;
-  // phone -> raise/stow the handset. Returns true if it acted on a valid slot.
-  function cityHotbarSelect(barIdx) {
-    if (CBZ.game.mode !== "city" || cuffedHands()) return false;
-    const bar = cityHotbar();
-    if (barIdx < 0 || barIdx >= bar.length) return false;
-    const e = bar[barIdx];
-    if (e.kind === "gun") {
-      if (e.active) { CBZ.cityHolster(true); return true; }
-      CBZ.game.cityHolstered = false;
-      return selectWeaponSlot(e.gunSlot);
-    }
-    // a charge, a frag, the detonator: it goes IN YOUR HAND (systems/
-    // helditems.js); the use input does the rest. Anything else throwable
-    // with no held form still leaves on the tap.
-    if ((e.kind === "throwable" || e.kind === "detonator" || e.kind === "bandage") && e.held && CBZ.heldItem) {
-      return !!CBZ.heldItem.select(e.held);
-    }
-    if (e.kind === "throwable") {
-      if (CBZ.cityThrowFromInventory) { CBZ.cityThrowFromInventory(); return true; }
-      return false;
-    }
-    if (e.kind === "flashlight") {
-      const PF = CBZ.playerFlashlight;
-      if (PF && typeof PF.toggle === "function") { try { PF.toggle(); } catch (err) { return false; } return true; }
-      return false;
-    }
-    if (e.kind === "phone") { try { return !!(CBZ.campaignPhoneToggle && CBZ.campaignPhoneToggle()); } catch (err) { return false; } }
-    return false;
-  }
-  CBZ.cityHotbarSelect = cityHotbarSelect;
-
-  // number-key bar in CITY (jail keeps its own bar in systems/inventory.js).
-  // [1]..[9] map across the visible chips, so a keypress matches what
-  // city/hud.js draws. Gated so it never fires while a menu/map is up.
-  addEventListener("keydown", function (e) {
-    if (e.repeat || CBZ.game.mode !== "city" || CBZ.game.state !== "playing") return;
-    if (CBZ.cityMenuOpen || (CBZ.fullMap && CBZ.fullMap.active)) return;
-    const n = "123456789".indexOf(e.key);
-    if (n < 0) return;
-    // the roll's digit, held, is the use input held (systems/helditems.js)
-    const be = cityHotbar()[n];
-    if (be && be.kind === "bandage" && CBZ.heldItem && CBZ.heldItem.keyHold) { if (CBZ.heldItem.keyHold("bandage", e.code || e.key)) e.preventDefault(); return; }
-    if (cityHotbarSelect(n)) e.preventDefault();
-  });
+  // THE BAR (guns, the bat, throwables, the light, the phone, cards, keys) is
+  // systems/inventory.js in every game, the city included: one model, one
+  // renderer, one digit handler. This file only owns the gun orderings it
+  // maps between (CBZ.fpsSelectWeaponId above) and the wheel (below).
 
   const fpBody = { on: false, hid: [] };   // YOUR BODY UNDER THE LENS, below
   function setActive(on) {
@@ -5137,7 +5008,9 @@
       if (CBZ.verbWheel && CBZ.verbWheel.isOpen()) return;          // scrolling the verb wheel, not the guns
       // guns put away for a cop (police.js stowGuns): a scroll brings them back
       if ((CBZ.game._copStow || CBZ.game.cityStowedWeapon) && CBZ.cityRedrawWeapon) { e.preventDefault(); CBZ.cityRedrawWeapon(); return; }
-      const bar = cityHotbar();
+      const INV = CBZ.inventory;
+      if (!INV) return;
+      const bar = INV.entries();
       const sel = [-1];                          // -1 = nothing in your hands
       let cur = -1;
       for (let i = 0; i < bar.length; i++) {
@@ -5150,7 +5023,7 @@
       const pos = sel.indexOf(cur);
       const next = sel[(pos + (e.deltaY > 0 ? 1 : -1) + sel.length) % sel.length];
       if (next < 0) CBZ.cityHolster(true);
-      else cityHotbarSelect(next);
+      else INV.select(next);
       return;
     }
     if (!(fps.active || shoulderActive()) || !armed()) return;

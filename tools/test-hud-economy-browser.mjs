@@ -201,7 +201,7 @@ try {
     // even after the city stylesheet hid it, so check the owning DOM too.
     CBZ.cityHudDirty(); run(CBZ.always, 46); run(CBZ.updaters, 53);
     if (CBZ.fpsResyncAmmo) CBZ.fpsResyncAmmo();
-    const citySlotsText = ((document.getElementById("cSlots") || {}).textContent || "").replace(/\\s+/g, " ").trim();
+    const citySlotsText = ((document.getElementById("hotbar") || {}).textContent || "").replace(/\\s+/g, " ").trim();
     const cityAmmoText = ((document.getElementById("cAmmo") || {}).textContent || "").replace(/\\s+/g, " ").trim();
     const engineAmmoText = ((document.getElementById("ammo") || {}).textContent || "").replace(/\\s+/g, " ").trim();
     const engineStrip = document.getElementById("weaponStrip");

@@ -23,11 +23,11 @@
      CBZ.requestLock(). A bigger portrait (same rig), the 9 ACCESSORY
      slots (hat/top/outer/bottom/shoes/glasses/chain/watch/ring) read
      straight from g.cityFit + your owned jewellery, a GRID of carried
-     items (g.cityInv), and a mirror of CBZ.cityHotbar(). Click an
+     items (g.cityInv). Click an
      accessory to equip/unequip through the EXISTING wardrobe
      (CBZ.cityWear / cityUnwear) — no parallel wardrobe, the model
-     updates on the next signature tick. Click a hotbar slot to
-     CBZ.cityHotbarSelect it.
+     updates on the next signature tick. (Its hotbar mirror is gone:
+     the one bar is systems/inventory.js's #hotbar.)
 
    • [O] HIDE-HUD — hides/shows ALL city HUD (this panel + #cityHud) for
      a clean, immersive frame ([Shift+O]; H belongs to heists.js /
@@ -629,13 +629,6 @@
       "#cpInv .cpItem .nm{font-size:8px;color:#9fb0c6;text-align:center;line-height:1.05;margin-top:2px;max-width:54px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
       "#cpInv .cpItem .ct{position:absolute;right:3px;top:2px;font-size:9px;font-weight:800;color:#fff;background:rgba(8,11,17,.85);border-radius:6px;padding:0 4px}" +
       "#cpInv .cpEmpty{font-size:12px;color:#7f8ba0;padding:8px 2px}" +
-      "#cpInv .cpHot{display:flex;flex-wrap:wrap;gap:7px}" +
-      "#cpInv .cpHs{display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:50px;height:46px;padding:4px 8px;border-radius:9px;background:rgba(255,255,255,.04);border:1px solid rgba(232,236,242,.1);cursor:pointer;position:relative}" +
-      "#cpInv .cpHs:hover{border-color:rgba(125,231,255,.5)}" +
-      "#cpInv .cpHs .s{font-size:12px;font-weight:800;color:#e8ecf2;line-height:1.05}" +
-      "#cpInv .cpHs .a{font-size:9px;color:#7f8ba0;margin-top:1px}" +
-      "#cpInv .cpHs.active{border-color:rgba(125,231,255,.6);box-shadow:0 0 0 1px rgba(125,231,255,.35)}" +
-      "#cpInv .cpHs .ct{position:absolute;right:2px;top:1px;font-size:8px;font-weight:800;color:#fff;background:rgba(8,11,17,.85);border-radius:5px;padding:0 3px}" +
       "#cpInv .cpBuild{display:flex;gap:6px;width:100%}" +
       "#cpInv .cpBuildBtn{flex:1;font-family:inherit;font-size:11px;font-weight:700;letter-spacing:.3px;color:#9fb0c6;background:rgba(255,255,255,.04);border:1px solid rgba(232,236,242,.12);border-radius:8px;padding:6px 4px;cursor:pointer;transition:border-color .1s,background .1s,color .1s}" +
       "#cpInv .cpBuildBtn:hover{border-color:rgba(125,231,255,.5);color:#e8ecf2}" +
@@ -655,7 +648,7 @@
   // ============================================================
   //  [I] INVENTORY OVERLAY DOM
   // ============================================================
-  let inv = null, invBigCanvas = null, invAcc = null, invGrid = null, invHot = null, invBuild = null;
+  let inv = null, invBigCanvas = null, invAcc = null, invGrid = null, invBuild = null;
   let invOpen = false, invBigSig = "";
 
   // The LOOT_ICON / ITEM_ICON glyph tables that used to sit here were the THIRD
@@ -690,14 +683,12 @@
       "<div class='cpRight'>" +
       "<div><div class='cpH'>Worn</div><div class='cpAcc'></div></div>" +
       "<div><div class='cpH'>Carried</div><div class='cpGrid'></div></div>" +
-      "<div class='cpHotSection'><div class='cpH'>Hotbar</div><div class='cpHot'></div></div>" +
       "</div>" +
       "</div>";
     document.body.appendChild(inv);
     invBigCanvas = inv.querySelector("canvas");
     invAcc = inv.querySelector(".cpAcc");
     invGrid = inv.querySelector(".cpGrid");
-    invHot = inv.querySelector(".cpHot");
     invBuild = inv.querySelector(".cpBuild");
     // INVENTORY V2 (city/inventory.js): the Carried grid becomes the live
     // Minecraft-style 27-slot grid — the module binds its own click handlers.
@@ -781,34 +772,6 @@
     invGrid.innerHTML = html;
   }
 
-  function renderHot() {
-    if (!invHot) return;
-    const section = invHot.closest ? invHot.closest(".cpHotSection") : invHot.parentNode;
-    // V2's Carried grid already contains guns and items in identical slots.
-    // Repeating a separate weapon/item strip made the inventory look like two
-    // incompatible systems; the in-world hotbar remains available after close.
-    if (CBZ.CONFIG && CBZ.CONFIG.INVENTORY_V2 !== false) {
-      if (section) section.style.display = "none";
-      invHot.innerHTML = "";
-      return;
-    }
-    if (section) section.style.display = "";
-    const bar = (CBZ.cityHotbar && CBZ.cityHotbar()) || [];
-    if (!bar.length) { invHot.innerHTML = "<div class='cpEmpty'>—</div>"; return; }
-    let html = "";
-    for (let i = 0; i < bar.length; i++) {
-      const e = bar[i];
-      const short = e.short || e.label || "?";
-      const sub = e.kind === "throwable" ? "throw"
-        : e.kind === "flashlight" ? "light"
-        : e.kind === "phone" ? "phone" : "gun";
-      html += "<div class='cpHs" + (e.active ? " active" : "") + "' data-bar='" + i + "'>" +
-        (e.count != null && e.count > 1 ? "<div class='ct'>" + (e.count | 0) + "</div>" : "") +
-        "<div class='s'>" + esc(short) + "</div><div class='a'>" + sub + "</div></div>";
-    }
-    invHot.innerHTML = html;
-  }
-
   function renderInvAll() {
     if (!inv) return;
     const lvl = CBZ.cityPlayerLevel ? CBZ.cityPlayerLevel() : 1;
@@ -817,7 +780,6 @@
     if (sub) sub.textContent = "Lv." + lvl + " " + title + "   " + fmt$(netWorth());
     renderAcc();
     renderGrid();
-    renderHot();
     renderBuild();
     // big portrait — redraw on look change (or first open)
     const sig = lookSig();
@@ -861,12 +823,6 @@
       if (id && CBZ.cityUnwear) { CBZ.cityUnwear(id); invBigSig = ""; renderInvAll(); }
       return;
     }
-    // hotbar slot
-    let barEl = n; while (barEl && barEl !== inv && !barEl.dataset.bar) barEl = barEl.parentNode;
-    if (barEl && barEl !== inv && barEl.dataset.bar != null) {
-      const idx = parseInt(barEl.dataset.bar, 10);
-      if (!isNaN(idx) && CBZ.cityHotbarSelect) { CBZ.cityHotbarSelect(idx); renderHot(); }
-    }
   }
 
   // ---- open / close the overlay (the city-panel convention) ----------------
@@ -907,7 +863,7 @@
   // ============================================================
   // [I] NO LONGER OPENS ANYTHING. OWNER: "Inventory: only guns are cool...
   // All other inventory is dumb af. The button to open the inventory is dumb."
-  // The city bar (city/hud.js #cSlots) is the inventory now; food and meds use
+  // The one bar (systems/inventory.js #hotbar) is the inventory now; food and meds use
   // themselves (city/hunger.js), drugs are product the dealers read from
   // g.cityInv, clothes are worn at the clothing store's mirror. So the key is
   // gone rather than left opening a screen of things you can't do anything

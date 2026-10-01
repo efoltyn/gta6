@@ -182,7 +182,7 @@
   }
   // the other things on the glass the pills may not sit on (touch controls,
   // the radar, the pause button, the seat's way out)
-  const AVOID = ["#tstick", "#tbtns .tbtn", "#tveh .tvbtn", "#hudPauseBtn", "#cRadar", "#tExit", "#cWpn", "#cTopRight"];
+  const AVOID = ["#tstick", "#tbtns .tbtn", "#tveh .tvbtn", "#hudPauseBtn", "#cRadar", "#tExit", "#cWpn", "#hotbar", "#cTopRight"];
   function controls() {
     const out = [];
     for (const sel of AVOID) {

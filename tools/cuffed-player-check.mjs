@@ -201,7 +201,7 @@ check(/vm\.visible = !!\(\(fps\.active \|\| seatGun\)[^;]*!cuffs\)/.test(fps), "
 check(/vm\.visible = on && !aquaticRide\(\) && !cuffedHands\(\)/.test(fps), "and on the [V] toggle");
 check(/crossShow = aiming[^;]*!cuffs/.test(fps), "no reticle in cuffs");
 check(/A\.playerCuffed = function \(\) \{ const pc = CBZ\.playerChar; return !!\(pc && pc\.cuffed\); \};/.test(read("src/systems/arrest.js")), "the ONE helper lives in arrest.js");
-check(/body\.cuffed #hotbar[\s\S]{0,80}#cHud \.cSlots[\s\S]{0,200}pointer-events:none/.test(read("css/inventory.css")), "the bar greys and goes dead (both bars)");
+check(/body\.cuffed #hotbar\{[\s\S]{0,200}pointer-events:none/.test(read("css/inventory.css")), "the bar greys and goes dead (one bar, every game)");
 for (const html of ["index.html", "disaster.html"]) {
   const s = read(html);
   const a = s.indexOf("src/systems/arrest.js"), c = s.indexOf("src/systems/cuffedplayer.js"), i = s.indexOf("src/systems/input.js");

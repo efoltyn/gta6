@@ -1098,12 +1098,12 @@
     const bagged = {
       inv: (prev ? prev.inv.slice() : []),
       cur: (prev && prev.cur) || CBZ.currentWeaponId || null,
-      melee: (prev && prev.melee) || g.cityMeleeWeapon || null,
+      melee: (prev && prev.melee) || g.cityMeleeWeapon || g.cityMeleeStowed || null,
     };
     for (const id of (CBZ.weaponInventory || [])) if (bagged.inv.indexOf(id) < 0) bagged.inv.push(id);
     if (CBZ.weaponInventory) CBZ.weaponInventory.length = 0;
     CBZ.currentWeaponId = null;
-    g.cityMeleeWeapon = null;
+    g.cityMeleeWeapon = null; g.cityMeleeStowed = null;
     g.cityHolstered = false;
     if (CBZ.fpsResetWeapons) { try { CBZ.fpsResetWeapons(); } catch (e) {} }
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
@@ -1116,7 +1116,7 @@
     g.cityEvidence = null;
     if (CBZ.weaponInventory) { CBZ.weaponInventory.length = 0; for (const id of bagged.inv || []) CBZ.weaponInventory.push(id); }
     CBZ.currentWeaponId = bagged.cur || CBZ.currentWeaponId;
-    g.cityMeleeWeapon = bagged.melee || null;
+    g.cityMeleeWeapon = bagged.melee || null; g.cityMeleeStowed = null;
     if (CBZ.onWeaponInventoryChanged && CBZ.currentWeaponId) { try { CBZ.onWeaponInventoryChanged(CBZ.currentWeaponId, false); } catch (e) {} }
     if (CBZ.cityWorldCommit) { try { CBZ.cityWorldCommit(); } catch (e) {} }   // the ledger must agree
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();

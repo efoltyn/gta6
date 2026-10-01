@@ -25,11 +25,10 @@
    corner. OWNER (2026-08-04): "in hitman mode there's a phone in the right
    corner of the screen, click to press. Instead that should just be like a
    gun — it should just be in the inventory." So the corner `.campaign-phone-
-   peek` button is not built at all; systems/fpsmode.js's CBZ.cityHotbar()
-   appends a { kind:"phone" } entry read from CBZ.campaignPhoneChip() below,
-   and every bar renderer (city/hud.js #cSlots, city/inventory.js #invHotbar,
-   charpanel) draws it beside the guns. The stowed-phone signal is unchanged
-   in KIND — glyph shake + LED, owner rule — it just rides the slot now.
+   peek` button is not built at all; systems/inventory.js (the one bar)
+   draws a { kind:"phone" } cell read from CBZ.campaignPhoneChip() below,
+   beside the guns. The stowed-phone signal is unchanged in KIND (a shake
+   and an LED, owner rule); it just rides the cell now.
    Flag off rebuilds the corner button and drops the slot: a one-line revert.
 ============================================================ */
 (function () {
@@ -689,7 +688,7 @@
      `key` names the digit that raises it. Those three may never regress. */
   CBZ.campaignPhoneAudit = function () {
     let bar = [];
-    try { bar = (typeof CBZ.cityHotbar === "function" && CBZ.cityHotbar()) || []; } catch (e) { bar = []; }
+    try { bar = (CBZ.inventory && CBZ.inventory.entries()) || []; } catch (e) { bar = []; }
     let idx = -1;
     for (let i = 0; i < bar.length; i++) if (bar[i] && bar[i].kind === "phone") { idx = i; break; }
     return {
