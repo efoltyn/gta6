@@ -1134,6 +1134,8 @@
     let a = Math.max(0, (35 - approval()) / 35);
     for (const k in UNPOPULAR) if (ORD[k] != null && T - ORD[k] < pace(1.5)) a += UNPOPULAR[k];
     if (ATTACK.t != null && T - ATTACK.t < pace(1.0)) a += 0.2;
+    // an organised movement (city/dissent.js) fills the road on its own
+    if (CBZ.dissent && CBZ.dissent.pressure) { try { a += CBZ.dissent.pressure(); } catch (e) {} }
     return clamp(a, 0, 1.5);
   }
   function curfewLive() {

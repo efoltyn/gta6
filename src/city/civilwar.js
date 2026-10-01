@@ -615,7 +615,7 @@
     if (kind === "success") {
       rec.office.holder = plotterSid; rec.office.deputy = null;
       if (CBZ.city && CBZ.city.big) CBZ.city.big("COUP: " + rec.name.toUpperCase() + " FALLS TO THE JUNTA");
-      if (CBZ.cityFeed) CBZ.cityFeed("A military coup succeeds in " + rec.name + " · the junta rules now.", "#ff9e6b");
+      if (CBZ.cityFeed) CBZ.cityFeed("A military coup succeeds in " + rec.name + ", the junta rules now.", "#ff9e6b");
       if (CBZ.approvalShock) CBZ.approvalShock(rec.id, -6);
       return { outcome: "success", plotterSid: plotterSid };
     }
@@ -643,6 +643,9 @@
     for (let i = 0; i < countries.length; i++) {
       const rec = countries[i];
       if (activeFractureFor(rec.id)) continue;
+      // a seat the player sits in is watched by city/dissent.js: its coup is
+      // telegraphed (movement, generals, troops) and fired from there
+      if (CBZ.dissent && CBZ.dissent.owns && CBZ.dissent.owns(rec.id)) continue;
       if (!coupEligible(rec)) continue;
       const cd = S.coupCooldown[rec.id];
       if (cd && day < cd) continue;
@@ -946,6 +949,14 @@
     fractureOf: activeFractureFor,
     activeFractures: function () { const out = []; const S = state(); for (const k in S.fractures) out.push(S.fractures[k]); return out; },
     partitionsOf: function () { return Object.assign({}, state().partitions); },
+    // a coup with a known outcome ("success" | "failure" | "partial"), for a
+    // caller that ran its own build-up (city/dissent.js)
+    coup: function (id, kind) {
+      const rec = CBZ.polity && CBZ.polity.get ? CBZ.polity.get(id) : null;
+      if (!rec || activeFractureFor(id)) return null;
+      state().coupCooldown[id] = (CBZ.worldDay ? CBZ.worldDay() : 0) + COUP_COOLDOWN_DAYS;
+      return applyCoupOutcome(rec, kind === "failure" || kind === "partial" ? kind : "success");
+    },
     reset: reset,
     TUNING: {
       MISERY_DISTRICT_T: MISERY_DISTRICT_T, TRIGGER_DISTRICTS_MIN: TRIGGER_DISTRICTS_MIN, APPROVAL_T: APPROVAL_T, UNREST_DAYS: UNREST_DAYS,

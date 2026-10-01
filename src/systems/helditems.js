@@ -39,7 +39,7 @@
   if (!CBZ || !THREE || !CBZ.heldItemModel) return;
   const M = CBZ.heldItemModel;
 
-  let held = null;          // "c4" | "detonator" | "grenade" | "bandage" | null
+  let held = null;          // "c4" | "detonator" | "grenade" | "bandage" | "phone" | null
   let down = false, downT = 0;
   let pressedT = 0;         // the push-and-return after a brick goes on
   let squeezeT = -1, squeezeFired = false;
@@ -163,6 +163,7 @@
     if (kind === "c4" && CBZ.buildC4Brick) m = CBZ.buildC4Brick(THREE);
     else if (kind === "detonator" && CBZ.buildC4Detonator) m = CBZ.buildC4Detonator(THREE);
     else if (kind === "bandage") m = buildRoll();
+    else if (kind === "phone" && CBZ.phoneBuildProp) m = CBZ.phoneBuildProp();   // city/phone.js's handset
     else if (kind === "grenade" && CBZ.grenadeMesh) {
       m = CBZ.grenadeMesh(THREE);
       if (m) {
@@ -206,6 +207,8 @@
     grenade: { pose: "hold034", basis: [[0, 0, 1], [1, 0, 0], [0, 1, 0]], off: [0, 0, 0] },
     // the roll's axle along the grip axis, held in the fingers
     bandage: { pose: "hold034", basis: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], off: [0, 0, 0] },
+    // the handset's long edge up the fingers, its back in the palm, the glass out
+    phone: { pose: "hold034", basis: [[1, 0, 0], [0, 0, 1], [0, -1, 0]], off: [0, -0.012, 0.02] },
   };
   const _gc = new THREE.Vector3(), _bx = new THREE.Vector3(), _by = new THREE.Vector3(), _bz = new THREE.Vector3();
   const _mb = new THREE.Matrix4();
@@ -242,6 +245,9 @@
     }
     if (!held || !handR || !fistT || !fistT[0]) return false;
     if (held === "grenade" && throwGone > 0) return false;      // the fists play the throw
+    // the phone: city/phone.js holds the handset up at reading distance and
+    // poses this wrist under it (one handset for the eye, whatever the view)
+    if (held === "phone") return !!(CBZ.phoneFpHold && CBZ.phoneFpHold(vm, fistT[0]));
     const prop = fpProp(held);
     if (!prop) return false;
     const FPH = CBZ.fpHands;
@@ -324,6 +330,7 @@
       const k = down ? Math.min(1, downT / M.PLACE_HOLD) : (pressedT > 0 ? pressedT / 0.3 : 0);
       reach += 0.3 * k; up += 0.12 * k;
     } else if (held === "grenade" && down) { reach = 0.05; up = 1.6; }
+    else if (held === "phone") { reach = 0.30; up = 1.28; }      // at the chest, looking down at it
     _hand.set(P.pos.x + bx * reach - bz * 0.16, P.pos.y + up, P.pos.z + bz * reach + bx * 0.16);
     try {
       if (CBZ.charArmTo.rest) CBZ.charArmTo.rest(ch, "r", 0);

@@ -198,6 +198,7 @@
     try { chip = typeof CBZ.campaignPhoneChip === "function" ? CBZ.campaignPhoneChip() : null; } catch (e) { chip = null; }
     let open = false;
     try { open = typeof CBZ.phoneIsOpen === "function" ? !!CBZ.phoneIsOpen() : false; } catch (e) { open = false; }
+    if (!(chip && chip.available) && typeof CBZ.cityPhoneChip === "function") { try { chip = CBZ.cityPhoneChip(); } catch (e) { chip = null; } }
     if (chip && chip.available) return { active: open || !!chip.open, unread: !!chip.unread, buzz: !!chip.buzz };
     if (useHooks.phone || typeof CBZ.phoneOpen === "function" || typeof CBZ.cityOpenPhone === "function") return { active: open, unread: false, buzz: false };
     return null;

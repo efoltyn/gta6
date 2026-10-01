@@ -73,7 +73,7 @@
    president_hud.js (the approval/treasury/threat strip). The general's
    threat briefing lives on as the General's phone call and security memo.
 
-   PUBLIC: CBZ.presidentOffice = { offer, news, dayLine, ringing, deskPoint, audit }.
+   PUBLIC: CBZ.presidentOffice = { offer, news, dayLine, ringing, cellCall, deskPoint, audit }.
 ============================================================ */
 (function () {
   "use strict";
@@ -887,6 +887,36 @@
     converse(m, "phone", function () {
       M.later.push({ at: CLOCK + 3.0, fn: function () { hangUp(); } });
     });
+  }
+  // THE PHONE IN YOUR POCKET (city/phone.js). Away from the desk, the call
+  // that is waiting rings the President's own phone instead: the same matter,
+  // the same decide(), the same "he says why". In the office the desk keeps it.
+  function cellCall() {
+    if (!seated() || M.ringing || M.onCall || !M.phoneQ.length) return null;
+    if (CLOCK - M.lastCallEnd < CALL_GAP) return null;
+    const rec = ROOM.rec || office();
+    if (rec && inOffice(rec)) return null;
+    const m = M.phoneQ.shift();
+    const gate = m.yes.order ? btn(m.yes.order) : { ok: true };
+    let line = clean(m.line);
+    const choices = gate.ok ? [{ id: "yes", label: clean(m.yes.label) }, { id: "no", label: clean(m.no.label) }]
+      : [{ id: "no", label: clean(m.no.label) }];
+    if (!gate.ok) line += " " + cantLine(m, gate.why);
+    let done = false;
+    return {
+      id: m.id, name: m.who.name, role: m.who.role, title: speaker(m.who, false), line: line, choices: choices,
+      answer: function (pick) {
+        if (done) return null;
+        done = true; M.lastCallEnd = CLOCK;
+        if (pick === "yes") {
+          const r = decide(m, "yes", "cell");
+          return clean(r.ok ? (m.yes.reply || "Understood. It's done.") : cantLine(m, r.why));
+        }
+        decide(m, "no", "cell");
+        return clean(m.no.reply || "Understood, sir.");
+      },
+      ignore: function () { if (done) return; done = true; M.lastCallEnd = CLOCK; ignore(m, "phone"); },
+    };
   }
   function hangUp() {
     M.onCall = null; M.lastCallEnd = CLOCK;
@@ -1984,6 +2014,7 @@
     news: news,
     dayLine: dayLine,
     ringing: function () { return !!M.ringing; },
+    cellCall: cellCall,
     deskPoint: deskPoint,
     audit: audit,
     // harness hooks only
