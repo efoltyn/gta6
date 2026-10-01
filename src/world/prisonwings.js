@@ -353,7 +353,7 @@
        (pickBeat below owns that pill; `beat` hands it the verb). */
     const doorKeys = d.keys ? d.keys.slice() : (d.pick ? ["Corridor Key"] : null);
     const hasItem = function (k) { const e = CBZ.econ; return !!(e && e.hasItem && e.hasItem(k)); };
-    (CBZ._prisonDoorSpecs || (CBZ._prisonDoorSpecs = [])).push({
+    (CBZ._prisonDoorSpecs || (CBZ._prisonDoorSpecs = [])).push(d._spec = {
       id: d.id, label: d.label, autoR: 2.5,   // tick opens at near2 < 6.2
       keyed: !!(d.keys || d.pick),   // needs a card or a pick (systems/prisondoorwatch.js)
       keys: doorKeys,
@@ -1632,15 +1632,11 @@
         wings resolve their doors in the same frame batch, deterministically.
      ========================================================== */
   const READER_R2 = 3.4 * 3.4;
+  // an officer at the reader with the key it reads (the compound's one rule:
+  // systems/bodydoors.js)
   function staffNear(d) {
-    const list = CBZ.guards || [];
-    for (let i = 0; i < list.length; i++) {
-      const g = list[i];
-      if (g.dead || g.ko > 0 || !g.group) continue;
-      const dx = g.group.position.x - d.x, dz = g.group.position.z - d.z;
-      if (dx * dx + dz * dz < READER_R2) return g;
-    }
-    return null;
+    const B = CBZ.bodyDoors;
+    return B && d._spec ? B.openerNear(d._spec, d.x, d.z, Math.sqrt(READER_R2)) : null;
   }
   // ONE hold-to-defeat beat, shared by all three cages — world/adminwing.js's
   // shape verbatim: a polled [E], a touch pill, and a PHYSICAL tell (the lamp

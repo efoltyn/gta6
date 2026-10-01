@@ -6445,6 +6445,14 @@
     }
     for (let i = 0; i < o.nbrN; i++) _nbrO[i] = null;
     ped.speed = m.speed;
+    // A DOOR HE MAY NOT OPEN (systems/bodydoors.js refused him: a flat he has
+    // no key to, the Situation Room): a free walker gives the errand up and
+    // his brain picks another; a scripted one (staff, the detail) keeps his
+    // order and the navigator plans round it.
+    if (m.doorBlockT > 1.4 && !ped.controlled && !order && (ped.path || ped.finalGoal)) {
+      ped.path = null; ped.finalGoal = null; ped.pause = Math.max(ped.pause, 0.8);
+      if (ped.target && ped.target.set) ped.target.set(ped.pos.x, 0, ped.pos.z);
+    }
     // a stroller standing on his spot takes his beat before the next errand
     if (!order && m.arrived && !ped.path && (st === "wander" || st === "walk")) ped.pause = Math.max(ped.pause, 0.4);
 

@@ -150,11 +150,13 @@ for (const H of HOURS) {
     return { block: CBZ.prisonSchedule?CBZ.prisonSchedule.id():null, actors: roster.length,
              trySecs: Math.round(tryT/60), stallSecs: Math.round(stall/60),
              pct: Math.round(100*stall/Math.max(1,tryT)), grinders: grinders, top: top,
-             worstFrameMs: Math.round(worstMs*100)/100, nav: A };`);
+             worstFrameMs: Math.round(worstMs*100)/100, nav: A,
+             doors: CBZ.bodyDoors ? CBZ.bodyDoors.stats() : null };`);
   rows.push({ hour: H, ...S });
   const A = S.nav || {};
   console.log(`hour ${H} (${S.block}): trying ${S.trySecs} actor-s, stalled ${S.stallSecs} (${S.pct}%), grinders>1.5s ${S.grinders}/${S.actors}` +
-    `  | nav plans ${A.plans || 0} (partial ${A.partials || 0}, none ${A.planFails || 0}) lastPlan ${A.lastPlanMs || 0}ms build ${A.buildMs || 0}ms  worstFrame ${S.worstFrameMs}ms`);
+    `  | nav plans ${A.plans || 0} (partial ${A.partials || 0}, none ${A.planFails || 0}) lastPlan ${A.lastPlanMs || 0}ms build ${A.buildMs || 0}ms  worstFrame ${S.worstFrameMs}ms` +
+    (S.doors ? `  | bodies at doors: opened ${S.doors.opened} refused ${S.doors.refused} of ${S.doors.doors} ${JSON.stringify(S.doors.refusedAt)}` : ""));
   for (const t of S.top) console.log("   ", JSON.stringify(t));
 }
 

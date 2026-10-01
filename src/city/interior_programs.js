@@ -590,8 +590,39 @@
     let a = UNIT_GRID.get(k);
     if (!a) { a = []; UNIT_GRID.set(k, a); }
     a.push(d);
+    if (CBZ.bodyDoors && d.col) CBZ.bodyDoors.tag(d.col, CITY_DOORS, d);
   }
-  function unitDoorsReset() { DOOR_KEEP.refused.length = 0; SWINGING.length = 0; STATE_ROOMS.length = 0; STATE_OPENINGS.length = 0; FIN_SETS.clear(); UNIT_DOORS.length = 0; UNIT_GRID.clear(); WALL_TALLY.solid = 0; WALL_TALLY.doors = 0; }
+  /* PEOPLE OPEN THESE DOORS TOO (systems/bodydoors.js: a body walking a route
+     through a shut door opens it if it is cleared, and it shuts behind it).
+     Who is cleared for which door of this kit:
+       a room of state, an office (free: true)   anybody
+       a door somebody kicked in                 anybody (it no longer locks)
+       the Situation Room (a secured door)       the President's staff, his
+                                                 detail, and police
+       a flat (locked)                           whoever carries its key
+                                                 (housing.js hands the tenant
+                                                 one with the lease) */
+  function isCopBody(a) {
+    if (a.kind === "cop" || a.kind === "swat" || a.swat || a.copRank) return true;
+    return !!(CBZ.cityCops && CBZ.cityCops.indexOf(a) >= 0);
+  }
+  const CITY_DOORS = {
+    name: "city",
+    isOpen: function (d) { return !!d.open; },
+    set: function (d, v) { return unitSetOpen(d, v, "body"); },
+    // a door the player opened (or shut) is his, not a body's to close
+    ownedByBody: function (d) { return !!d._byBody; },
+    may: function (d, a) {
+      if (!a) return d.free === true;
+      if (a.dead || a.ko > 0 || a.isPlayer) return false;
+      if (d.free === true || d.forced) return true;
+      if (typeof d.free === "function") return a.organization === "state" || !!a._detailBrain || !!a._det || isCopBody(a);
+      const K = CBZ.cityKeys;
+      return !!(K && typeof K.pedHas === "function" && K.pedHas(a, d.id));
+    },
+    bodies: function () { return [CBZ.cityPeds, CBZ.cityCops]; },
+  };
+  function unitDoorsReset() { if (CBZ.bodyDoors) for (let i = 0; i < UNIT_DOORS.length; i++) CBZ.bodyDoors.untag(UNIT_DOORS[i].col); DOOR_KEEP.refused.length = 0; SWINGING.length = 0; STATE_ROOMS.length = 0; STATE_OPENINGS.length = 0; FIN_SETS.clear(); UNIT_DOORS.length = 0; UNIT_GRID.clear(); WALL_TALLY.solid = 0; WALL_TALLY.doors = 0; }
 
   // THE LEAF. Drawn through the host's lbox WITHOUT its own collider (lbox
   // splits a box that crosses a stair hole into pieces and pushes one
@@ -785,9 +816,10 @@
     else return;
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
   }
-  function unitSetOpen(d, open) {
+  function unitSetOpen(d, open, by) {
     if (!d || !d.mesh || !!d.open === !!open) return false;
     d.open = !!open;
+    d._byBody = d.open && by === "body";
     const pv = swingPivot(d);
     if (d.open) {
       if (!(CBZ.batchWallHide && CBZ.batchWallHide(d.mesh))) d.mesh.visible = false;
@@ -800,8 +832,10 @@
       if (!pv) shutNow(d);
     }
     if (pv && SWINGING.indexOf(d) < 0) SWINGING.push(d);
-    if (d.pair && !!d.pair.open !== d.open) unitSetOpen(d.pair, d.open);
-    if (CBZ.sfx && d.free) { try { CBZ.sfx(d.open ? "door_open" : "door_close", { volume: 0.7 }); } catch (e) {} }
+    if (d.pair && !!d.pair.open !== d.open) unitSetOpen(d.pair, d.open, by);
+    // the player's own door in his ear; a door somebody else moves, where it is
+    if (by === "body") { if (CBZ.worldSfx) { try { CBZ.worldSfx(d.open ? "door_open" : "door_close", d.x, d.z, { ref: 8 }); } catch (e) {} } }
+    else if (CBZ.sfx && d.free) { try { CBZ.sfx(d.open ? "door_open" : "door_close", { volume: 0.7 }); } catch (e) {} }
     return true;
   }
   function shutNow(d) {
@@ -937,6 +971,7 @@
     if (k >= 0) SWINGING.splice(k, 1);
     if (rec.pivot && rec.pivot.parent) rec.pivot.parent.remove(rec.pivot);
     rec.pivot = undefined;
+    if (CBZ.bodyDoors && rec.col) CBZ.bodyDoors.untag(rec.col);
   }
   /* A STREAMED BUILDING'S DOORS GO WITH IT. The records live in this file's
      own list, which core/citystream.js cannot see, so a job it FREED (a block

@@ -119,6 +119,8 @@
       stuckT: 0, stuckN: 0, goodT: 0, detourT: 0, detourS: 1, passS: 0, passT: 0,
       gx: null, gz: null,            // the goal the arrival latch belongs to
       id: (motor._seq = (motor._seq || 0) + 1),
+      actor: a || null,              // who this body is (systems/bodydoors.js asks his clearance)
+      doorT: 0, doorBlockT: 0,
     };
     if (a) a._mv = m;
     return m;
@@ -274,8 +276,24 @@
 
     let wx = 0, wz = 0, want = 0;
     let hx = 0, hz = 0;
+    if (m.doorBlockT > 0) m.doorBlockT -= dt;
     if (!m.arrived) {
       if (dist > 1e-4) { hx = dx / dist; hz = dz / dist; }
+      /* A SHUT DOOR ACROSS THE NEXT STRIDE (systems/bodydoors.js, every game):
+         opened if this body is cleared for it. Refused, the leaf's collider
+         holds him and his brain is told (m.doorBlockT, m.stuckN): a free
+         walker gives the errand up, a routed one was never planned through it
+         (systems/navgrid.js asks the same rule). He is NOT frozen here: a
+         body with no brain to answer (a crowd extra) stood at a grille for
+         good, measured on the prison nav gate. */
+      const BD = CBZ.bodyDoors;
+      if (BD && dist > 0.05) {
+        m.doorT -= dt;
+        if (m.doorT <= 0) {
+          m.doorT = lod >= 2 ? 0.35 : 0.15;
+          BD.ahead(m, pos, hx, hz, dist);
+        }
+      }
       // ARRIVAL PROFILE: brake to a stop exactly at `stop`.
       const room = Math.max(0, dist - stop);
       want = speedMax;

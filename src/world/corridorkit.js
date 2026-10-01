@@ -545,7 +545,7 @@
         },
       });
     }
-    (CBZ._prisonDoorSpecs || (CBZ._prisonDoorSpecs = [])).push({
+    (CBZ._prisonDoorSpecs || (CBZ._prisonDoorSpecs = [])).push(d._spec = {
       id: cfg.id, label: cfg.label, autoR: 2.5,
       keyed: !!(cfg.keys && cfg.keys.length),   // needs a card (systems/prisondoorwatch.js)
       keys: cfg.keys && cfg.keys.length ? cfg.keys.slice() : null,   // what opens it at the door
@@ -557,6 +557,8 @@
       canUse: keyTest(cfg.keys),
       // the player's own hand on it (systems/interactions.js doorAct)
       set: function (v) { d._by = "player"; d.setOpen(v); d._by = null; return d.open === !!v; },
+      // a body's hand (systems/bodydoors.js): never books the port alarm
+      npcSet: function (v) { d.setOpen(v); return d.open === !!v; },
     });
     doors.push(d);
     return d;
@@ -671,44 +673,16 @@
       keys: cfg.keys, lb: cfg.lb, alarm: cfg.alarm, hinge: cw > 1.3 ? 0 : -1, swing: cfg.swing,
       build: detentionLeaf({ color: cfg.color }), staffR: cfg.staffR, autoShut: cfg.autoShut, reader: cfg.reader });
   }
-  /* WHO OPENS A DOOR BY WALKING UP TO IT (owner, 2026-09-29: "guards and
-     inmates open the doors they path through"). The nav grid walks a body to
-     a shut door and waits there (systems/navgrid.js); this is the hand on it.
-       unlocked      anybody: an officer, an inmate, the warden
-       Keycard       any officer: every officer on the floor is issued a card
-       Corridor Key  any officer but the gate post (the corridor men and the
-                     tower posts carry the ring, the floor officers ride it)
-       Gate Key      the gate post and the warden only: the exit port is the
-                     one door no floor officer walks through
-       Cell Key      nobody by walking: a cell (a seg cell) is opened on
-                     purpose, with the key, at the door
-     An inmate never opens a locked door: he waits for an officer and follows
-     him through (the tailgating window the wing is built on). */
+  /* WHO OPENS A DOOR BY WALKING UP TO IT: one rule for the whole compound
+     (and the city's doors follow the same layer): systems/bodydoors.js
+     CBZ.bodyDoors.openerNear. Officers by their keys (Keycard, Corridor Key;
+     the Gate Key is the gate post's and the warden's), an inmate only a door
+     with no lock, nobody a Cell Key door. An inmate never opens a locked
+     door: he waits for an officer and follows him through (the tailgating
+     window the wing is built on). */
   function openerFor(d) {
-    const R = d.staffR || 2.4;
-    const k = d.keys;
-    const list = CBZ.guards || [];
-    for (let i = 0; i < list.length; i++) {
-      const g = list[i];
-      if (!g || g.dead || g.ko > 0 || !g.group || g.tied || g.asleep) continue;
-      const dx = g.group.position.x - d.x, dz = g.group.position.z - d.z;
-      if (dx * dx + dz * dz > R * R) continue;
-      if (!k || !k.length) return g;
-      if (k.indexOf("Gate Key") >= 0) { if (g.post === "gate" || g.kind === "warden") return g; continue; }
-      if (k.indexOf("Cell Key") >= 0 && k.length === 1) continue;
-      return g;
-    }
-    if (k && k.length) return null;
-    const npcs = CBZ.npcs || [];
-    const r = Math.min(R, 1.8);
-    for (let i = 0; i < npcs.length; i++) {
-      const n = npcs[i];
-      if (!n || n.dead || n._crowd || !n.group || n.ko > 0) continue;
-      const p = n.group.position;
-      if (Math.abs(p.x - d.x) > r || Math.abs(p.z - d.z) > r) continue;
-      if ((p.x - d.x) * (p.x - d.x) + (p.z - d.z) * (p.z - d.z) <= r * r) return n;
-    }
-    return null;
+    const B = CBZ.bodyDoors;
+    return B && d._spec ? B.openerNear(d._spec, d.x, d.z, d.staffR || 2.4) : null;
   }
   const staffFor = openerFor;
   /* A NEW RUN FINDS EVERY DOOR SHUT AND WHOLE. Same hook world/prisonwings.js
