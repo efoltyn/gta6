@@ -1005,6 +1005,91 @@
   let fpRoll = 0, fpRollV = 0;
   let weave = 0;
 
+  /* ---- THE LENS RIDES THE HEAD (owner: "falling onto back first person
+     doesn't do that either, nail headbutt animation and fall over and all
+     first person, making it realer"). The first-person eye was a fixed point
+     1.65 m over your feet that nothing your body did could move: knocked flat
+     you kept looking level at the room from standing height, a headbutt was a
+     fist jab, a punch in the face was a roll. The body is still animated in
+     first person (physics.js runs animChar on the hidden rig), so the lens
+     now goes where the HEAD goes when the body owns it:
+       · DOWN (ch.fall: knocked down, tripped, KO'd): position AND orientation
+         come off the head bone. You go over backwards and see the ceiling or
+         the sky, face down you see the floor at your cheek, and the get-up
+         brings you back up through the knee to standing, where the mouse
+         takes over again. The look is pinned while you are down.
+       · THE MOUNT (ground and pound): the eye kneels with the body and leans
+         over him, every blow driving it down into him; the view is drawn onto
+         his face.
+       · A HEADBUTT: the head cocks back and snaps forward through him.
+       · TAKEN ON THE CHIN (hitReact "snap"): the head's own snap turns the view.
+     Blended in and out on damped weights, so nothing cuts. */
+  const _hp = new THREE.Vector3(), _hf = new THREE.Vector3(), _hu = new THREE.Vector3(), _ht = new THREE.Vector3();
+  const _hq = new THREE.Quaternion(), _cq = new THREE.Quaternion();
+  const _flipY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
+  let headWp = 0, headWr = 0, wasDown = false;
+  const ss01 = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  function headRide(dt) {
+    const ch = CBZ.playerChar, cam = CBZ.camera;
+    if (!ch || !ch.head || !ch.group || !cam || CBZ.player.driving) { headWp = headWr = 0; return; }
+    // down = the keyed fall (prison, the melee knockdown) OR the body layer's
+    // (city: physics.js tips the rig onto its back while _phys.down runs, and
+    // spins it while you are thrown)
+    const f = ch.fall, ph = CBZ.player._phys;
+    const down = !!(f && f.on) || !!(ph && (ph.down > 0 || ph.air));
+    const mk = ch._mountK || 0;
+    // weights: where the head owns the lens
+    let tp = 0, tr = 0;
+    if (down) { tp = 1; tr = 1; }
+    else if (mk > 0.01) tp = mk;
+    const kp = 1 - Math.exp(-dt * (tp > headWp ? 16 : 7)), kr = 1 - Math.exp(-dt * (tr > headWr ? 16 : 5));
+    headWp += (tp - headWp) * kp; headWr += (tr - headWr) * kr;
+    if (headWp < 0.002) headWp = 0;
+    if (headWr < 0.002) headWr = 0;
+    // back on your feet: the mouse takes over from where the head left the view
+    if (wasDown && !down) {
+      _hf.set(0, 0, -1).applyQuaternion(cam.quaternion);
+      CBZ.cam.yaw = Math.atan2(-_hf.x, -_hf.z);
+      fps.fp = Math.max(-1.2, Math.min(1.2, Math.asin(Math.max(-1, Math.min(1, _hf.y)))));
+    }
+    wasDown = down;
+    if (headWp > 0 || headWr > 0) {
+      ch.head.updateWorldMatrix(true, false);
+      ch.head.getWorldPosition(_hp); ch.head.getWorldQuaternion(_hq);
+      _hf.set(0, 0, 1).applyQuaternion(_hq); _hu.set(0, 1, 0).applyQuaternion(_hq);
+      _hp.addScaledVector(_hf, 0.09).addScaledVector(_hu, 0.04);     // the eyes, not the middle of the skull
+      cam.position.lerp(_hp, headWp);
+      if (headWr > 0) { _cq.copy(_hq).multiply(_flipY); cam.quaternion.slerp(_cq, headWr); }
+    }
+    // the mount draws the view onto his face (gently: the mouse still looks)
+    if (mk > 0.3 && !down && CBZ.player._gnpOn) {
+      const t = CBZ.player._gnpOn, tch = t.char || t.ch;
+      if (tch && tch.head) {
+        tch.head.getWorldPosition(_ht);
+        const dx = _ht.x - cam.position.x, dy = _ht.y - cam.position.y, dz = _ht.z - cam.position.z;
+        const want = Math.atan2(dy, Math.hypot(dx, dz));
+        fps.fp += (want - fps.fp) * Math.min(1, dt * 3 * mk);
+      }
+    }
+    // the headbutt: cock the head back, then drive it through him
+    const pk = ch.punchKind;
+    if (ch.punchT > 0 && pk === "headbutt" && !down) {
+      const dur = ch.punchDur || 0.46, pr = Math.max(0, Math.min(1, 1 - ch.punchT / dur));
+      const MP = CBZ.meleePoses, d = MP && MP.drive ? MP.drive(pr) : Math.sin(pr * Math.PI);
+      const cock = ss01(0, 0.25, pr) * (1 - d);
+      _hf.set(0, 0, -1).applyQuaternion(cam.quaternion); _hf.y = 0; _hf.normalize();
+      cam.position.addScaledVector(_hf, -0.10 * cock + 0.24 * d);
+      cam.position.y += 0.03 * cock - 0.09 * d;
+      cam.rotateX(0.22 * cock - 0.34 * d);
+    }
+    // a blow to the face: the head's own snap (meleeposes' additive neck offsets)
+    if (!down && (ch._rNx || ch._rNy || ch._rNz)) {
+      cam.rotateY(ch._rNy * 0.8);
+      cam.rotateX(-ch._rNx * 0.7);
+      cam.rotateZ(ch._rNz * 0.8);
+    }
+  }
+
   function triggerFistPunch(silent) {
     // the kind and the arm come off the body the way the third-person rig
     // reads them: systems/combat.js writes punchKind/punchArm/punchDur right
@@ -1071,6 +1156,9 @@
     else if (kind === "upper") { out.x = s * 0.07; out.y = 0.32; out.z = 0.04; out.roll = 2.55; out.bend = 0.15; }
     else if (kind === "stab") { out.x = 0.10; out.y = -0.02; out.z = -0.06; out.roll = 1.25; out.bend = 0.0; }   // the body, not the chin
     else if (kind === "cross") { out.x = s * 0.05; out.y = 0.17; out.z = -0.10; out.roll = 0.10; out.bend = 0.05; }
+    else if (kind === "gnp") { out.x = s * 0.05; out.y = -0.22; out.z = -0.12; out.roll = 0.30; out.bend = 0.05; }       // down into his face
+    else if (kind === "hammer") { out.x = s * 0.03; out.y = -0.24; out.z = -0.06; out.roll = 1.9; out.bend = 0.10; }     // pinky side first
+    else if (kind === "gnpElbow") { out.x = -s * 0.04; out.y = 0.02; out.z = 0.16; out.roll = 1.6; out.bend = -0.25; }   // folded: the elbow is what arrives
     else { out.x = s * 0.07; out.y = 0.16; out.z = -0.04; out.roll = 0.20; out.bend = 0.05; }   // jab / default: the fist corkscrews palm-down
     return out;
   }
@@ -1081,6 +1169,9 @@
     if (kind === "hook") { out.x = base.x + s * 0.18; out.y = base.y + 0.01; out.z = base.z + 0.08; out.roll = base.roll - 0.5; }
     else if (kind === "upper") { out.x = base.x + s * 0.02; out.y = base.y - 0.18; out.z = base.z + 0.10; out.roll = base.roll + 0.6; }
     else if (kind === "stab") { out.x = 0.30; out.y = -0.44; out.z = 0.14; out.roll = 1.2; out.bend = -0.1; }
+    else if (kind === "gnp") { out.x = s * 0.22; out.y = 0.20; out.z = 0.22; out.roll = 0.9; }                   // cocked by the ear
+    else if (kind === "hammer") { out.x = s * 0.12; out.y = 0.40; out.z = 0.24; out.roll = 1.6; }                // overhead
+    else if (kind === "gnpElbow") { out.x = s * 0.20; out.y = 0.30; out.z = 0.20; out.roll = 1.4; out.bend = -0.2; }
     else { out.x = base.x + s * 0.03; out.y = base.y - 0.02; out.z = base.z + 0.07; }
     return out;
   }
@@ -1123,8 +1214,23 @@
 
     const flinch = flinchT > 0 ? Math.sin(Math.min(1, flinchT / 0.24) * Math.PI) : 0;
     const jolt = impactT > 0 ? impactT / 0.14 : 0;
+    // A HEADBUTT IS NOT A FIST: both hands go out and take his collar, and
+    // haul him onto the forehead as it comes through (the lens does the head)
+    let butt = false;
+    if (swing && punchT > 0 && swing.kind === "headbutt") {
+      butt = true;
+      const grab = Math.min(1, prog / 0.28);
+      for (let i = 0; i < 2; i++) {
+        const T = fistT[i], s = i === 0 ? 1 : -1, guard = i === 0 ? gR : GUARD_L;
+        lerpPose(T, guard, guard, 0);
+        T.x += (s * 0.14 - T.x) * grab; T.y += (-0.02 - T.y) * grab; T.z += (-0.14 - T.z) * grab;
+        T.z += 0.16 * drive; T.y -= 0.03 * drive;                 // the pull
+        T.roll += (0.35 - T.roll) * grab; T.bend = 0.1;
+        T.vis = true; T.curl = "fist"; T.hook = 0;
+      }
+    }
 
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < 2 && !butt; i++) {
       const T = fistT[i], s = i === 0 ? 1 : -1;
       const guard = i === 0 ? gR : GUARD_L;
       const rest = i === 0 ? HAND_REST : LEFT_DOWN;
@@ -5535,6 +5641,7 @@
       tmp.copy(eye).add(fwd);
       CBZ.camera.lookAt(tmp);
       if (fpRoll !== 0 && !armed()) CBZ.camera.rotateZ(fpRoll);   // the torso turns behind a cross or a hook
+      headRide(dt);
       // ADS ZOOM (RMB): ease the FPS lens ~14° tighter while aiming, back out on
       // release. Capture the hip fov from camera.js's value only while NOT aiming
       // (and clamp sane) so reading our own zoomed value can never ratchet it.
