@@ -224,7 +224,10 @@
        one, which is the supported way to take a picture from a page booted
        with drawing off. */
     const drawing = !CBZ.CONFIG || CBZ.CONFIG.RENDER_FRAMES !== false;
-    if (drawing) CBZ.renderer.render(CBZ.scene, CBZ.camera);
+    // CBZ.drawHeld: a page drawn OVER this one owns the screen (city/
+    // frontline.js's battle). Skip the draw but keep the rAF pump, so the
+    // clock does not turn into the setTimeout spin RENDER_FRAMES=false gets.
+    if (drawing && !CBZ.drawHeld) CBZ.renderer.render(CBZ.scene, CBZ.camera);
     schedule();
   }
 

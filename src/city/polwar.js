@@ -692,7 +692,12 @@
     const aId = war.sides[0], bId = war.sides[1];
     const milA = ensureMilitary(aId), milB = ensureMilitary(bId);
 
-    const sLoss = Math.round(SOLDIER_RATE * war.intensity);
+    // THE GROUND WAR IS A BATTLE (city/frontline.js): the day's fight on the
+    // front (NPC War's, watched or headless) decides the soldiers lost and the
+    // ground; the even-losses dice and the ratio slide only run without one.
+    const fought = !!(CBZ.frontline && CBZ.frontline.dayOfBattle && CBZ.frontline.dayOfBattle(war, day));
+    if (war.ended) return;
+    const sLoss = fought ? 0 : Math.round(SOLDIER_RATE * war.intensity);
     const mLoss = Math.round(MISSILE_RATE * war.intensity);
     const pLoss = Math.round(PLANE_RATE * war.intensity);
     applyCasualties(aId, milA, sLoss, mLoss, pLoss);
@@ -700,7 +705,7 @@
 
     for (let i = 0; i < war.fronts.length; i++) {
       const f = war.fronts[i];
-      if (!f.collapsedSide) tickFront(f, war, milA, milB);
+      if (!f.collapsedSide && !fought) tickFront(f, war, milA, milB);
       if (f.collapsedSide) { endWar(war.id, f.collapsedSide, "front collapse"); return; }
     }
 
@@ -878,6 +883,9 @@
     strikeOn: strikeOn,
     nuclearStrike: nuclearStrike,
     makePeace: makePeace,
+    // the front's battles (city/frontline.js): counted dead, and ground won
+    casualties: function (id, n) { applyCasualties(id, ensureMilitary(id), Math.max(0, n | 0), 0, 0); },
+    pushFront: function (warId, winnerId, shift) { const w = warOf(warId); if (w && !w.ended) pushFront(w, winnerId, shift); },
     reset: reset,
     TUNING: {
       GOV_MUL: Object.assign({}, GOV_MUL), SOLDIER_RATE: SOLDIER_RATE, MISSILE_RATE: MISSILE_RATE, PLANE_RATE: PLANE_RATE,
