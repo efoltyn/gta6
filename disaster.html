@@ -532,7 +532,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- NEWS ONE (city/newsroom.js): the one news channel, its one canvas and
      the one TV set, shared by every screen in the game. Before world/lounge.js
      (the prison dayroom set) and every city/ room that hangs a TV. -->
-<script src="src/city/newsroom.js?v=news0930"></script>
+<script src="src/city/newsroom.js?v=arsenal0930"></script>
 <!-- FURNITURE MOVES WHEN YOU WALK INTO IT (owner: "physics, not another
      f***ing button"). CBZ.pushables.add(spec) — still exported as CBZ.pushProp —
      makes a drawn prop a mass on a floor:
@@ -1793,6 +1793,11 @@ document.body.appendChild(b);}}catch(e){}})();
      already live above. declareWar()/endWar()/warsOf()/frontsOf() are a
      kind-agnostic public API — X6b's civil war (a country splitting into
      two warring polity records) builds directly on this machinery. -->
+<!-- THE ARSENAL TABLE (city/arsenal_data.js): pure data — which aircraft
+     carries which payload, prices, delivery days, each nation's starting
+     fleet and warheads, bunker hardness. polwar.js seeds from it; warroom.js
+     gates, sells and flies off it. -->
+<script src="src/city/arsenal_data.js?v=arsenal0930"></script>
 <!-- P9: migration — policy per country (president legislates over
      LEGISLATE_DAYS days + an approval cost if unpopular; every other govType
      decrees instantly), daily individual-migration-evaluation propensity
@@ -1924,7 +1929,7 @@ document.body.appendChild(b);}}catch(e){}})();
      strategic.js (the release, the B-2 sortie, the nuke) and the impact bus.
      Emits war/airstrike/nuke events on CBZ.presidency's bus. After
      presidency.js and president_staff.js; everything is read lazily. -->
-<script src="src/city/warroom.js?v=war0930"></script>
+<script src="src/city/warroom.js?v=arsenal0930"></script>
 <script src="src/city/president_public.js?v=pres0929b"></script>
 <script src="src/city/president_regime.js?v=pres0929b"></script>
 

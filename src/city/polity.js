@@ -179,10 +179,7 @@
       // Fort Brandt) inherits it implicitly via CBZ.polity.countryOf()
       // (sim/currency.js's jurisdictionCurrency() helper) rather than
       // stamping the field on each of them — one source, no drift.
-      // warheads: the republic's nuclear arsenal (city/strategic.js's B-2 force
-      // at Fort Brandt). polwar.js seeds mil.warheads from this; warroom.js
-      // lets a President order one only while the count is above zero.
-      { id: "republic", kind: "country", name: "Republic of Liberty", parent: null, rect: null, currencyId: "LBD", warheads: 6 },
+      { id: "republic", kind: "country", name: "Republic of Liberty", parent: null, rect: null, currencyId: "LBD" },
       seedMutable("country")));
 
     addRecord(Object.assign(
@@ -245,7 +242,7 @@
     for (let ci = 0; ci < extraCountries.length; ci++) {
       const cd = extraCountries[ci];
       if (!cd || !cd.id) continue;
-      registerCountry({ id: cd.id, name: cd.name, wealthLevel: cd.wealthLevel, govType: cd.govType, currencyId: cd.currencyId, warheads: cd.warheads });
+      registerCountry({ id: cd.id, name: cd.name, wealthLevel: cd.wealthLevel, govType: cd.govType, currencyId: cd.currencyId });
       const settleList = cd.settlements || [];
       const stateList = cd.states || [];
       for (let si = 0; si < stateList.length; si++) {
@@ -403,8 +400,6 @@
     // only: nothing reads rec.currencyId this wave except sim/currency.js's
     // own countryOf()-walking helper.
     if (opts.currencyId) rec.currencyId = opts.currencyId;
-    // the nuclear arsenal, straight off the data row (0 = none, the default)
-    rec.warheads = isFinite(opts.warheads) ? Math.max(0, opts.warheads | 0) : 0;
     records[opts.id] = rec;
     invalidateCache();
     return rec;

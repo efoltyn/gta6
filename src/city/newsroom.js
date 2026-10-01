@@ -372,6 +372,18 @@
     if (!t || IGNORE.test(t)) return false;
     N.events++;
     const loc = inLoc(d);
+    // ---- the war room's own words (city/warroom.js): purchases, deliveries,
+    // bunkers and a leader's death carry an exact `text`. Read BEFORE the
+    // nuke rule, or "warhead-bought" would air as a nuclear blast.
+    if (/-bought$|-delivered$|^sanctions$|^bunker-built$|^bunker-strike(-ordered)?$|^leader-killed$/.test(t) && d.text) {
+      const big = /^leader-killed$|^warhead-bought$|^bunker-strike$/.test(t) && (t !== "bunker-strike" || d.verdict === "breach");
+      return push(clean(d.text), {
+        kind: big ? "breaking" : "story", cat: /bunker|leader/.test(t) ? "WAR" : "DEFENSE", look: /leader|bunker-strike$/.test(t) ? "strike" : "politics",
+        key: "wr:" + t + ":" + d.text, hold: big ? 300 : 120,
+      });
+    }
+    // an ordered strike is news when it LANDS ("airstrike"), not twice
+    if (/^airstrike-ordered$/.test(t)) return false;
     // ---- the biggest things first
     if (/nuke|nuclear|warhead/.test(t) || d.ordnance === "nuke" || d.nuke) {
       const s = sidesOf(d);
