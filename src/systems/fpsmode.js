@@ -4827,15 +4827,17 @@
       guns.push({ id: w.id || w.key, label: w.label, short: w.short, held: idx[s] === fps.weapon });
     }
     // The flashlight: systems/playerflashlight.js owns the lamp and whether you
-    // own one; this bar only gives it a slot. The phone: city/campaign_ui.js
-    // owns the device, publishing its chip state read-only.
+    // own one; this bar only gives it a slot. The phone: city/phone.js (or the
+    // story's city/campaign_ui.js) owns the device, publishing its chip read-only.
     let fl = null;
     try {
       const PF = CBZ.playerFlashlight;
       if (PF && typeof PF.owned === "function" && PF.owned()) fl = { owned: true, on: !!(PF.on && PF.on()) };
     } catch (e) { fl = null; }
+    // the story campaign's handset while it runs, else the city's own (city/phone.js)
     let ph = null;
     try { ph = (typeof CBZ.campaignPhoneChip === "function") ? CBZ.campaignPhoneChip() : null; } catch (e) { ph = null; }
+    if (!(ph && ph.available) && typeof CBZ.cityPhoneChip === "function") { try { ph = CBZ.cityPhoneChip(); } catch (e) { ph = null; } }
     const H = CBZ.heldItem;
     return cityBarEntries({ guns: guns, holstered: !!CBZ.game.cityHolstered, throwables: cityThrowables(), flashlight: fl, phone: ph,
       bandage: CBZ.hotbarBandage ? CBZ.hotbarBandage() : null,
@@ -4872,7 +4874,13 @@
       if (PF && typeof PF.toggle === "function") { try { PF.toggle(); } catch (err) { return false; } return true; }
       return false;
     }
-    if (e.kind === "phone") { try { return !!(CBZ.campaignPhoneToggle && CBZ.campaignPhoneToggle()); } catch (err) { return false; } }
+    if (e.kind === "phone") {
+      try {
+        const camp = CBZ.campaignPhoneChip ? CBZ.campaignPhoneChip() : null;
+        if (camp && camp.available) return !!(CBZ.campaignPhoneToggle && CBZ.campaignPhoneToggle());
+        return !!(CBZ.phoneToggle && CBZ.phoneToggle());
+      } catch (err) { return false; }
+    }
     return false;
   }
   CBZ.cityHotbarSelect = cityHotbarSelect;

@@ -220,21 +220,23 @@
     const h = mostHostile(us);
     return h ? h.id : null;
   }
-  function canWar() {
+  function canWar(opts) {
     const us = nation(), W = PW();
     if (!us) return { ok: false, why: "You do not hold the country." };
     if (!W || !W.declareWar) return { ok: false, why: "The army is not answering." };
     const cur = enemyOf(us);
     if (cur) return { ok: false, why: "We are already at war with " + nameOf(cur) + "." };
-    const foe = warFoe(us);
+    // opts.foe: a named country (the phone's post / call names who)
+    const want = opts && opts.foe && opts.foe !== us && polGet(opts.foe) ? opts.foe : null;
+    const foe = want || warFoe(us);
     if (!foe) return { ok: false, why: "There is nobody to fight." };
     if (enemyOf(foe)) return { ok: false, why: nameOf(foe) + " is tied up in another war." };
     const rec = polGet(us);
     if (rec && rec.govType === "anarchism") return { ok: false, why: "There is no army left to send." };
     return { ok: true, foe: foe, name: nameOf(foe) };
   }
-  function war() {
-    const gt = canWar();
+  function war(opts) {
+    const gt = canWar(opts);
     if (!gt.ok) return gt;
     const us = nation();
     const w = PW().declareWar(us, gt.foe, { byPlayer: true });

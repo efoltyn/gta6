@@ -96,7 +96,8 @@
     return (h && h.lot && h.lot.building && h.lot.building.home) ? h.lot.building.home : null;
   }
   function ownsPenthouse() { const h = homeRec(); return !!g.cityOwnsPenthouse || !!(h && h.flagship); }
-  function canChopper() { return !!g.cityOwnsHeli; }      // comes with the penthouse
+  // comes with the penthouse; a head of state has one too (his aide sends it, city/phone_apps.js)
+  function canChopper() { return !!g.cityOwnsHeli || !!(CBZ.warroom && CBZ.warroom.nation && CBZ.warroom.nation()); }
   function canStrike() { return !!g.cityOwnsHangar; }     // the bought hangar add-on
 
   function charge(amt) {

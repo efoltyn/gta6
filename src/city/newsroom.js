@@ -362,7 +362,7 @@
   }
   function sidesOf(d) {
     let a = d.a || d.attacker || d.aggressor || d.from || d.side || null;
-    let b = d.b || d.target || d.enemy || d.to || d.vs || d.against || null;
+    let b = d.b || d.defender || d.target || d.enemy || d.to || d.vs || d.against || null;
     if ((!a || !b) && Array.isArray(d.sides) && d.sides.length >= 2) { a = d.sides[0]; b = d.sides[1]; }
     return { a: a, b: b, an: a ? polName(a) || gangName(a) : null, bn: b ? polName(b) || gangName(b) : null };
   }

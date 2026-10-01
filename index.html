@@ -545,7 +545,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- NEWS ONE (city/newsroom.js): the one news channel, its one canvas and
      the one TV set, shared by every screen in the game. Before world/lounge.js
      (the prison dayroom set) and every city/ room that hangs a TV. -->
-<script src="src/city/newsroom.js?v=news0930"></script>
+<script src="src/city/newsroom.js?v=phone1001"></script>
 <!-- FURNITURE MOVES WHEN YOU WALK INTO IT (owner: "physics, not another
      f***ing button"). CBZ.pushables.add(spec) — still exported as CBZ.pushProp —
      makes a drawn prop a mass on a floor:
@@ -983,7 +983,7 @@ document.body.appendChild(b);}}catch(e){}})();
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
 <script src="src/systems/gamepad.js?v=ekey2"></script>
-<script src="src/systems/fpsmode.js?v=mil0929"></script>
+<script src="src/systems/fpsmode.js?v=phone1001"></script>
 <script src="src/systems/gunfx.js?v=pf0930t"></script>
 <script src="src/systems/intimidate.js?v=cop1"></script>
 
@@ -1440,7 +1440,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/carlod.js?v=pf0930e"></script>
 <script src="src/city/vehicles.js?v=sl0930a"></script>
 <script src="src/city/carinstances.js?v=pf0930e"></script>
-<script src="src/city/playerair.js?v=war0930"></script>
+<script src="src/city/playerair.js?v=phone1001"></script>
 <script src="src/city/playeraircraft.js?v=af0929b"></script>
 <!-- COCKPIT: diegetic aircraft interiors. Airframes author ZERO lines — the
      spec generator derives ~40 numbers from what already exists, taking the
@@ -1666,7 +1666,7 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.econ.itemStore in systems/economy.js.) -->
 <script src="src/systems/resources.js?v=deslop1"></script>
 <script src="src/city/explosives.js?v=mil0929"></script>
-<script src="src/systems/helditems.js?v=mce86a5"></script>
+<script src="src/systems/helditems.js?v=phone1001"></script>
 <script src="src/city/armored.js?v=deslop1"></script>
 <script src="src/city/death.js?v=nored0930"></script>
 <script src="src/city/camera.js?v=shouldergun2"></script>
@@ -1844,7 +1844,13 @@ document.body.appendChild(b);}}catch(e){}})();
      the player's guns drop on death. Needs economy/worldstate/combat/fpsmode/
      death.js/charpanel.js, all loaded above. -->
 <script src="src/city/inventory.js?v=tap0929"></script>
-<script src="src/city/phone.js?v=news0930"></script>
+<!-- THE PHONE: a real handset in your hand, one for every Gang City player.
+     phone_apps.js is what it does (News is NEWS ONE's store, Calls are real
+     people running real verbs, Holler is the social feed where a post is the
+     act); phone.js draws it in 3D on a canvas screen and routes taps onto
+     the glass. Also the city's one text sink (CBZ.cityPhoneNotify). -->
+<script src="src/city/phone_apps.js?v=phone1001"></script>
+<script src="src/city/phone.js?v=phone1001"></script>
 <script src="src/city/killfeed.js?v=news0930"></script>
 <!-- THE MORGUE (DEATH_DROPS_V2 / CORPSE_PERSIST / EMS_RESPONSE): what a death
      leaves behind and who comes for it. Wraps cityKillPed + cityHurtCop the
@@ -2221,7 +2227,7 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.regimes/CBZ.polwar/CBZ.hunger/CBZ.npcEcon/CBZ.migration/
      CBZ.cityGangs/CBZ.cityEcon/CBZ.officials-family mint hooks/
      CBZ.onOfficialDeath, every one already live above. -->
-<script src="src/city/civilwar.js?v=nodash1"></script>
+<script src="src/city/civilwar.js?v=phone1001"></script>
 <!-- GOVERNMENT YOU CAN PLAY. Placed here because this is the latest anchor any
      of the four names: officialdom reads officials.js's ledger (:970),
      candidacy requires elections.js (:972), civic hooks shops.js's keydown
@@ -2320,7 +2326,7 @@ document.body.appendChild(b);}}catch(e){}})();
      and lockdown bodies in the street), and the regime dressing that changes
      the Mansion when the republic falls. Security (the detail, the gate
      checkpoint, counter-snipers, the panic protocol) lives in protection.js. -->
-<script src="src/city/president_office.js?v=news0930"></script>
+<script src="src/city/president_office.js?v=phone1001"></script>
 <script src="src/city/motorcade.js?v=ekey2"></script>
 <!-- THE PRESIDENT HIRES HIS PEOPLE: the line in the office, the Chief of
      Staff, the detail / driver / press secretary / empty cabinet chairs.
@@ -2333,8 +2339,14 @@ document.body.appendChild(b);}}catch(e){}})();
      strategic.js (the release, the B-2 sortie, the nuke) and the impact bus.
      Emits war/airstrike/nuke events on CBZ.presidency's bus. After
      presidency.js and president_staff.js; everything is read lazily. -->
-<script src="src/city/warroom.js?v=war0930"></script>
-<script src="src/city/president_public.js?v=pres0929b"></script>
+<script src="src/city/warroom.js?v=phone1001"></script>
+<script src="src/city/president_public.js?v=phone1001"></script>
+<!-- THE COUNTRY TURNS ON ITS PRESIDENT, AND YOU SEE IT COMING (city/dissent.js):
+     unrest, an organised movement with a leader, generals meeting, troops
+     moving, then the coup (civilwar.js's own) a day later. Every step is on
+     NEWS ONE and the phone first; concede, crack down, relieve the General or
+     get to a bunker. After presidency/warroom/civilwar; reads them lazily. -->
+<script src="src/city/dissent.js?v=phone1001"></script>
 <script src="src/city/president_regime.js?v=pres0929b"></script>
 
 <!-- CASH STORE — the back half of the cash-bag loop (owner: "only driving to
