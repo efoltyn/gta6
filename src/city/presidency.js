@@ -17,6 +17,8 @@
        the country has warheads), the map is Order airstrike (Mark when
        nothing is marked). BUTTONS war/peace/strike/nuke; the General
        proposes war on a country that has cut us off, and strikes once at war.
+       At war the map also has F: Front (city/frontline.js): today's ground
+       battle opens in NPC War over the city, with you in it.
      • No banners, no phone texts from rooms. big() routes to the TV in the
        President's Office; a refused order is returned to the person who
        asked, who says why in his own words.
@@ -1265,6 +1267,13 @@
           if (!CBZ.warroom.target()) { markMap(); return; }
           warAnswer(pressButton("strike"), "general");
         },
+      }, {
+        // THE FRONT (city/frontline.js): today's battle on the line, in NPC
+        // War, with you in it. Only while there is a war to go to.
+        id: "pres-map-front", slot: "f", prio: 19, campaignSafe: true,
+        label: "Front",
+        canShow: function () { return !!(CBZ.frontline && CBZ.warroom && CBZ.warroom.enemy()); },
+        onSelect: function () { const r = CBZ.frontline.go(); if (!r.ok) warAnswer(r, "general"); },
       }, {
         id: "pres-map-mark", hold: true, prio: 18, campaignSafe: true,
         label: "Mark",

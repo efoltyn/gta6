@@ -391,6 +391,12 @@
         push(h, { kind: first ? "breaking" : "story", cat: "WAR", look: "strike", sub: s.an ? "Ordered by " + s.an : "", key: "air:" + a.t0 + ":" + a.n, hold: 5 });
       });
     }
+    // THE FRONT (city/frontline.js): a day's ground battle, in its own words
+    if (/^battle-/.test(t) && d.text) {
+      const ended = /ended/.test(t);
+      return push(clean(d.text), { kind: ended ? "breaking" : "story", cat: "WAR", look: ended ? "war" : "strike",
+        key: "battle:" + (d.warId || "") + ":" + (d.day != null ? d.day : "") + ":" + (ended ? "e" : "s"), hold: ended ? 240 : 60 });
+    }
     if (/declare|war/.test(t)) {
       const s = sidesOf(d);
       if (s.an && s.bn) return push(s.an + " declares war on " + s.bn, { kind: "breaking", cat: "WAR", look: "war", key: "war:" + [s.an, s.bn].sort().join("|"), hold: 900 });

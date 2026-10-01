@@ -545,7 +545,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- NEWS ONE (city/newsroom.js): the one news channel, its one canvas and
      the one TV set, shared by every screen in the game. Before world/lounge.js
      (the prison dayroom set) and every city/ room that hangs a TV. -->
-<script src="src/city/newsroom.js?v=news0930"></script>
+<script src="src/city/newsroom.js?v=front0930"></script>
 <!-- FURNITURE MOVES WHEN YOU WALK INTO IT (owner: "physics, not another
      f***ing button"). CBZ.pushables.add(spec) — still exported as CBZ.pushProp —
      makes a drawn prop a mass on a floor:
@@ -2188,7 +2188,7 @@ document.body.appendChild(b);}}catch(e){}})();
      already live above. declareWar()/endWar()/warsOf()/frontsOf() are a
      kind-agnostic public API — X6b's civil war (a country splitting into
      two warring polity records) builds directly on this machinery. -->
-<script src="src/city/polwar.js?v=war0930"></script>
+<script src="src/city/polwar.js?v=front0930"></script>
 <!-- P9: migration — policy per country (president legislates over
      LEGISLATE_DAYS days + an approval cost if unpopular; every other govType
      decrees instantly), daily individual-migration-evaluation propensity
@@ -2311,7 +2311,7 @@ document.body.appendChild(b);}}catch(e){}})();
      jail's transport). AFTER govcomplex.js (reads CBZ.govComplexes); every
      other read is feature-detected and lazily retried.
      Revert with ?cfg_PRESIDENCY_V1=0. -->
-<script src="src/city/presidency.js?v=warnews0930"></script>
+<script src="src/city/presidency.js?v=front0930"></script>
 <!-- THE PRESIDENT'S WORLD (2026-09-27 rework) — no HUD strip, no mission
      list, no button console. In load order: the office (desk phone that rings
      with real calls, briefing folders you read on the desk, the TV news, aides
@@ -2334,6 +2334,12 @@ document.body.appendChild(b);}}catch(e){}})();
      Emits war/airstrike/nuke events on CBZ.presidency's bus. After
      presidency.js and president_staff.js; everything is read lazily. -->
 <script src="src/city/warroom.js?v=war0930"></script>
+<!-- THE FRONT (city/frontline.js): every day of a war is one ground battle,
+     fought in NPC War (games/battle.html). The President goes from the
+     Situation Room map (F: Front) and the page opens over the city in this
+     tab; nobody watching, the same battle is resolved headless here. The
+     result is polwar's soldiers, ground and weariness. After warroom.js. -->
+<script src="src/city/frontline.js?v=front0930"></script>
 <script src="src/city/president_public.js?v=pres0929b"></script>
 <script src="src/city/president_regime.js?v=pres0929b"></script>
 
@@ -2488,7 +2494,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/core/profile.js"></script>
 <script src="src/core/fxwarm.js?v=pf0930e"></script>
 <script src="src/city/cctv.js?v=w09290242x"></script>
-<script src="src/core/loop.js?v=scale1"></script>
+<script src="src/core/loop.js?v=front0930"></script>
 <script src="src/main.js?v=sharkmode1"></script>
 </body>
 </html>
