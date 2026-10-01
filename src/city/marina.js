@@ -1177,9 +1177,8 @@
         K.addMerged(root, pane, cmat(0x27323b), {});
         K.addMerged(root, dark, cmat(0x2a2d31), {});
         K.addMerged(root, metal, K.steelMat(0xdfe2e5), { cast: true });
-        const flag = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.7, 4, 1), new THREE.MeshLambertMaterial({ color: 0xd94a3a, side: THREE.DoubleSide }));
-        { const fp = flag.geometry.attributes.position; for (let i = 0; i < fp.count; i++) fp.setZ(i, Math.sin((fp.getX(i) + 0.55) * 4.2) * 0.07); flag.geometry.computeVertexNormals(); }
-        flag.position.set(mx + 0.62, m0 + 4.7, mz); root.add(flag);
+        // the ensign at the masthead: the nation's own flag (city/flags.js)
+        if (CBZ.flags) CBZ.flags.hand(root, { x: mx + 0.06, top: m0 + 4.95, z: mz, fly: 1.1, id: CBZ.flags.nationAt(mx, mz) });
         solid(hx, hz, 8, 6, null, 0, Y + 6.9);
       }
     }

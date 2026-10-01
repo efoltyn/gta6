@@ -688,21 +688,16 @@
   // The principal rides rear right, behind the door agent.
   const SEAT_DRIVER = "driver", SEAT_FRONT = "shotgun", SEAT_PRINCIPAL = "rearR", SEAT_REAR = "rearL";
 
+  // the state car's two fender flags: city/flags.js's car flag, the
+  // President's own national design, streaming aft off a chrome staff
   function addFlags(c) {
-    if (!THREE || !c || !c.group || !CBZ.boxGeom || !CBZ.cmat) return;
+    if (!THREE || !c || !c.group || !CBZ.flags) return;
     if (c.group.userData && c.group.userData._mcFlags) return;
     const d = c.dims || (c.group.userData && c.group.userData.vehicleDims) || {};
     const W = d.width || 2, L = d.length || 4.9, H = d.height || 1.45;
-    const y0 = H * 0.55;
     for (let s = -1; s <= 1; s += 2) {
-      const x = s * W * 0.40, z = L * 0.41;
-      const pole = new THREE.Mesh(CBZ.boxGeom(0.025, 0.44, 0.025), CBZ.cmat(0xc8ccd2));
-      pole.position.set(x, y0 + 0.22, z);
-      const top = new THREE.Mesh(CBZ.boxGeom(0.012, 0.1, 0.26), CBZ.cmat(0xefefe9));
-      top.position.set(x, y0 + 0.38, z - 0.14);
-      const bot = new THREE.Mesh(CBZ.boxGeom(0.012, 0.1, 0.26), CBZ.cmat(0x1e3b86));
-      bot.position.set(x, y0 + 0.28, z - 0.14);
-      [pole, top, bot].forEach(function (m) { m.castShadow = false; m.receiveShadow = false; m.userData._mcFlag = true; c.group.add(m); });
+      const f = CBZ.flags.car(c.group, { x: s * W * 0.40, y: H * 0.55, z: L * 0.41 });
+      if (f) f.userData._mcFlag = true;
     }
     c.group.userData._mcFlags = true;
   }

@@ -64,7 +64,7 @@ const CBZ = ctx.CBZ = {
   markCollidersDirty() {}, markPlatformsDirty() {},
 };
 CBZ.mat = CBZ.cmat;
-for (const rel of ["src/systems/stairs.js", "src/city/buildings_civic.js", "src/city/buildings.js", "src/city/interior_programs.js",
+for (const rel of ["src/city/flags.js", "src/systems/stairs.js", "src/city/buildings_civic.js", "src/city/buildings.js", "src/city/interior_programs.js",
   "src/city/elevators.js", "src/city/furniture.js", "src/world/roombuild.js", "src/city/govcomplex.js"]) load(rel);
 
 let fails = 0, passes = 0;
@@ -331,5 +331,14 @@ if (PI > 0 && process.argv[PI + 1]) {
   console.log("plans written to " + dir);
 }
 console.log(notes.join("\n"));
+// THE FLAGS (city/flags.js): every standard in these rooms is the one staff
+// flag, the Oval's national standard is tagged for the President's designer,
+// and the complexes' poles went through the one pole kit
+{
+  const FA = CBZ.flags ? CBZ.flags.audit().counts : null;
+  ok(!!FA && FA.staffs > 0, "state rooms stand city/flags.js staff flags", FA ? ["staffs " + FA.staffs] : []);
+  ok(!!CBZ.flags && CBZ.flags.tagged("oval").length > 0, "the Oval's national standard is tagged for the flag designer");
+  ok(!!FA && FA.poles > 0, "the complexes' flagpoles are city/flags.js poles", FA ? ["poles " + FA.poles] : []);
+}
 console.log("PRESIDENT-ROOMS: " + (fails ? "FAIL" : "OK") + " " + passes + " passed, " + fails + " failed");
 process.exit(fails ? 1 : 0);

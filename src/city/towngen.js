@@ -806,7 +806,8 @@
       // central landmark — a stone WELL (cylinder base + low ring) by default,
       // or a flagpole if the recipe asks. Decor with a thin collider.
       if (cfg.squarePrefab === "flagpole") {
-        mergeAdd(root, [(function () { const g = new THREE.CylinderGeometry(0.18, 0.22, 9, 6); g.translate(sx, Y0 + 4.5, sz); return g; })()], cmat(ACCENT), { cast: true });
+        // a real pole with the nation's flag on it (city/flags.js), not a bare post
+        if (CBZ.flags) CBZ.flags.pole(root, { x: sx, y: Y0, z: sz, height: 9, base: true });
         solid(sx, sz, 0.6, 0.6, 9);
       } else {
         mergeAdd(root, [

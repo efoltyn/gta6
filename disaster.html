@@ -984,6 +984,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/tsunami_scene.js?v=tsureal1"></script>
 <!-- the grid street layer (road, kerbs, footways, markings) world.js builds -->
 <script src="src/city/streetkit.js?v=metro0929"></script>
+<!-- ONE FLAG SYSTEM (city/flags.js): every nation's design, the cloth shader, poles, staffs, banners, the President's flag designer. Before every file that hangs a flag. -->
+<script src="src/city/flags.js?v=flagm1001"></script>
 <!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
      inventory item; an NPC's keys live on the NPC and every existing way to
      take something off a person moves them. MUST load before city/buildings.js
@@ -1922,7 +1924,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the Mansion when the republic falls. Security (the detail, the gate
      checkpoint, counter-snipers, the panic protocol) lives in protection.js. -->
 <script src="src/city/president_office.js?v=phone1001"></script>
-<script src="src/city/motorcade.js?v=ekey2"></script>
+<script src="src/city/motorcade.js?v=flagm1001"></script>
 <!-- THE PRESIDENT HIRES HIS PEOPLE: the line in the office, the Chief of
      Staff, the detail / driver / press secretary / empty cabinet chairs.
      After presidency.js, president_office.js, protection.js, motorcade.js. -->
@@ -1935,13 +1937,13 @@ document.body.appendChild(b);}}catch(e){}})();
      Emits war/airstrike/nuke events on CBZ.presidency's bus. After
      presidency.js and president_staff.js; everything is read lazily. -->
 <script src="src/city/warroom.js?v=merge1001b"></script>
-<script src="src/city/president_public.js?v=phone1001"></script>
+<script src="src/city/president_public.js?v=flagm1001"></script>
 <!-- THE COUNTRY TURNS ON ITS PRESIDENT, AND YOU SEE IT COMING (city/dissent.js):
      unrest, an organised movement with a leader, generals meeting, troops
      moving, then the coup (civilwar.js's own) a day later. Every step is on
      NEWS ONE and the phone first; concede, crack down, relieve the General or
      get to a bunker. After presidency/warroom/civilwar; reads them lazily. -->
-<script src="src/city/president_regime.js?v=pres0929b"></script>
+<script src="src/city/president_regime.js?v=flagm1001"></script>
 
 <!-- CASH STORE — the back half of the cash-bag loop (owner: "only driving to
      your own place can store the cash, not just rob"). Turns govcomplex's

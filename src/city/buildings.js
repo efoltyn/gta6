@@ -4802,6 +4802,11 @@
           CBZ.platforms.push(p); plats.push(p);
         },
         ball: function (lx, ly, lz, r, col) { addMesh(new THREE.SphereGeometry(r, 10, 7), col, lx, ly, lz); },
+        // a flagpole and the nation's flag (city/flags.js), building-local
+        flag: function (lx, ly, lz, h, o) {
+          if (!CBZ.flags) return null;
+          return CBZ.flags.pole(bgroup, Object.assign({ x: lx, y: ly, z: lz, height: h, wx: ox + lx, wz: oz + lz }, o || {}));
+        },
         column: function (lx, ly, lz, r, h, col, seg) {
           addMesh(new THREE.CylinderGeometry(r, r, h, seg || 12), col, lx, ly + h / 2, lz);
         },
@@ -4869,7 +4874,7 @@
         ctxC.dbox = clipBox(ctxC.dbox);
         ctxC.lbox = clipBox(ctxC.lbox);
         ctxC.solid = clipBox(ctxC.solid);
-        for (const nm of ["ball", "column", "cone", "dome", "lamp"]) {
+        for (const nm of ["ball", "column", "cone", "dome", "lamp", "flag"]) {
           const fn0 = ctxC[nm];
           ctxC[nm] = function (x, y, z, r) { if (inside(x, z, r || 0)) return fn0.apply(this, arguments); };
         }

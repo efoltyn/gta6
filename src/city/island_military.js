@@ -68,8 +68,7 @@
     steelD: 0x3c4046, tire: 0x14161a, glassDark: 0x223044, jetGrey: 0x77808a,
     jetGreyD: 0x5a626b, canopy: 0x2a3b4d, sand: 0xb6a373, sandbag: 0x9a8a5e,
     fence: 0x9aa0a6, fenceP: 0x6a7077, fuel: 0x7d8a6a, red: 0xb43a32,
-    warn: 0xd4a017, dark: 0x202327, hangarRoof: 0x6e7682, flagRed: 0xc0392b,
-    flagWhite: 0xecf0f1, flagBlue: 0x2c3e6b,
+    warn: 0xd4a017, dark: 0x202327, hangarRoof: 0x6e7682,
   };
   function cm(hex, opts) { return CBZ.cmat ? CBZ.cmat(hex, opts) : CBZ.mat(hex, opts); }
   function bg(w, h, d) { return CBZ.boxGeom ? CBZ.boxGeom(w, h, d) : new THREE.BoxGeometry(w, h, d); }
@@ -1036,10 +1035,7 @@
     let hq = null;
     try { hq = CBZ.cityMakeBuilding(root, hqX, hqZ, 34, 28, 3, 0x55603f, 1, { facade: "office" }); } catch (e) {}
     // flagpole + flag in front of HQ (the base's heart reads as the HQ)
-    cyl(root, hqX - 12, 6, hqZ + 18, 0.12, 0.14, 12, M.steel, 8);
-    box(root, hqX - 11.0, 11, hqZ + 18, 2.0, 1.3, 0.05, M.flagBlue, { cast: false });
-    box(root, hqX - 10.0, 10.5, hqZ + 18, 3.0, 0.45, 0.05, M.flagRed, { cast: false });
-    box(root, hqX - 10.0, 11.4, hqZ + 18, 3.0, 0.45, 0.05, M.flagWhite, { cast: false });
+    if (CBZ.flags) CBZ.flags.pole(root, { x: hqX - 12, y: 0, z: hqZ + 18, height: 12, base: true, finial: "eagle" });
 
     // ARMORY ZONE: a spot just inside the HQ door where the player can browse
     // weapons. WHY a zone, not a wall-store: the engine's gunstore.js is bound
