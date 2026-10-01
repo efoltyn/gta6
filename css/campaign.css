@@ -598,10 +598,8 @@ body:not(.wanted-stars-v2).campaign-active.mode-city #cityHud #cHud > #cTopRight
 }
 body.campaign-active.mode-city #cityHud #cWpn { display: block !important; }
 body.campaign-active.mode-city #cityHud #cLoot { display: none !important; }
-/* The bar (#hotbar, systems/inventory.js) is the inventory itself (guns, the
-   bat, throwables, the flashlight, the phone), an instrument like the
-   minimap: it is not in any declutter list, here or in city.css. */
-body.campaign-active.mode-city #cityHud #cAmmo { display: block !important; }
+/* The bar (#hotbar, systems/inventory.js) is the inventory itself; the rounds
+   are the one ammo gauge (#ammo, systems/fpsmode.js). */
 /* PHONE_NOTIS_V2: the bottom-left minimap survives the declutter — it is an
    instrument, not narration, and lives in the opposite corner from the phone
    (peek bottom-right), so the two never collide. */

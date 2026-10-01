@@ -238,7 +238,18 @@
     if (P.ra) P.ra.rotation.z -= 0.30 * j(3.1) * w;
     if (P.ll) P.ll.rotation.z += 0.10 * j(3.7) * w;
     if (P.rl) P.rl.rotation.z -= 0.10 * j(4.1) * w;
-    if (ch.neck) ch.neck.rotation.y += 0.45 * j(1.3) * w;
+    if (ch.neck) neckTurn(ch.neck, 0.45 * j(1.3) * w);
+  }
+  /* A TURNED HEAD TURNS BACK. Face down the keyed lie already has the cheek
+     on the floor (about 80 degrees, the end of a neck's range); the sprawl
+     and every round's jolt used to add their own yaw on top in whichever
+     direction, and a shot corpse's head wound round to 132 degrees. Past
+     half the range a turn goes back toward the middle instead, and the
+     body's own limit (CBZ.human.clampNeck) holds the rest. */
+  function neckTurn(neck, d) {
+    const y = neck.rotation.y;
+    if (y > 0.8 && d > 0) d = -d; else if (y < -0.8 && d < 0) d = -d;
+    neck.rotation.y = y + d;
   }
   // FACE DOWN THE FEET GO TOES-DOWN. The keyed lie stretches the legs flat,
   // and a straight leg on its front drives the shoe 12 cm into the floor
@@ -320,6 +331,8 @@
         : fall.phase === "fall" ? Math.max(0, Math.min(1, (ft - 0.4) / 0.26))
         : fall.phase === "getup" ? Math.max(0, 1 - (fall.gt || 0) / 0.3) : 0);
     }
+    // the pose is written outright every frame here: hold its neck to the range
+    if (CBZ.human && CBZ.human.clampNeck) CBZ.human.clampNeck(ch.neck);
     if (CBZ.lockCharacterHips) CBZ.lockCharacterHips(ch);
     // the FEET (entities/character.js ANKLE SOLVE): animChar is skipped for a
     // body this owns, so solve them here off the pose just written: slack and
@@ -477,13 +490,13 @@
     if (part === "la" || part === "ra") {
       const arm = part === "la" ? P.la : P.ra;
       if (arm) arm.rotation.z += w;
-      if (ch.neck) ch.neck.rotation.y += 0.25 * w;
+      if (ch.neck) neckTurn(ch.neck, 0.25 * w);
     } else if (part === "ll" || part === "rl") {
       const hit = part === "ll" ? P.ll : P.rl, other = part === "ll" ? P.rl : P.ll;
       if (hit) hit.rotation.z += 0.45 * w;
       if (other) other.rotation.z += 0.15 * w;
     } else {
-      if (ch.neck) ch.neck.rotation.y += 0.9 * w;
+      if (ch.neck) neckTurn(ch.neck, 0.9 * w);
       if (P.la) P.la.rotation.z += 0.35 * Math.abs(w);
       if (P.ra) P.ra.rotation.z -= 0.35 * Math.abs(w);
     }

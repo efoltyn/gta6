@@ -19,8 +19,8 @@
        red, what does that even mean?"). Your body tells you: a flinch on
        every hit, and near the end heavy eyelids, dragging blinks, loud
        breath and a stagger (systems/eyes.js fed by systems/vitals.js).
-     • AMMO (#cWpn): the count shows ONLY while a gun is the thing in your
-       hands, riding just above the bar.
+     • AMMO is not this file: the one gauge every game draws (systems/fpsmode.js
+       #ammo), only while a gun is in your hands.
      • THE BAR is not this file: systems/inventory.js's #hotbar, the prison's
        inventory, is the one inventory of every game (2026-09-30).
      • NEXT STEP (#cObj): shows when a NEW objective line arrives, ~6 s, fades.
@@ -41,7 +41,7 @@
   const CBZ = window.CBZ;
   const g = CBZ.game;
 
-  let root, hudEl, cashEl, deltaEl, wpnEl, ammoLineEl, objEl, radar, crossEl;
+  let root, hudEl, cashEl, deltaEl, objEl, radar, crossEl;
   let dirty = true;
 
 
@@ -62,13 +62,8 @@
         "#cObj{position:absolute;top:var(--hud-pad-t);left:50%;transform:translateX(-50%);max-width:56%;text-align:center;color:var(--hud-ink);font-size:15px;font-weight:600;text-shadow:0 1px 4px rgba(0,0,0,.85)}" +
         // bottom-centre: the live ammo count, riding just above the one bar
         // (systems/inventory.js #hotbar, css/inventory.css: bottom 16 + cells)
-        "#cWpn{position:absolute;left:50%;bottom:calc(var(--hud-pad-b) + 54px);transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:5px;pointer-events:none}" +
-        "#cAmmo{font-size:13px;color:var(--hud-ink);font-weight:600;text-shadow:0 1px 3px rgba(0,0,0,.8);opacity:.9;min-height:1px}" +
-        "#cAmmo b{font-size:20px;font-weight:700}" +
-        "#cAmmo .res{color:var(--hud-dim)}" +
-        "#cAmmo .rl{color:#ffd166}" +
         "#cRadar{position:absolute;left:var(--hud-pad-l);bottom:var(--hud-pad-b);width:132px;height:132px;border-radius:50%;opacity:.9;box-shadow:0 4px 14px rgba(0,0,0,.45)}" +
-        "@media (max-width:900px),(max-height:560px){#cRadar{width:108px;height:108px}#cMoney{font-size:21px}#cWpn{bottom:calc(var(--hud-pad-b) + 44px)}}";
+        "@media (max-width:900px),(max-height:560px){#cRadar{width:108px;height:108px}#cMoney{font-size:21px}}";
       document.head.appendChild(st);
     }
     root = document.createElement("div");
@@ -81,15 +76,12 @@
       "  <div class='fade' id='cCash' style='position:relative;display:inline-block'><div id='cMoney'>$0</div><div id='cDelta'></div></div>" +
       "</div>" +
       "<div id='cObj' class='fade'></div>" +
-      "<div id='cWpn'><div id='cAmmo'></div></div>" +
       "<canvas id='cRadar' width='190' height='190'></canvas>" +
       "<div id='cCross' style='position:absolute;left:50%;top:50%;width:7px;height:7px;margin:-4px 0 0 -4px;border:2px solid rgba(232,236,242,.85);border-radius:50%;display:none'></div>" +
       "</div>";
     document.body.appendChild(root);
     hudEl = root.querySelector("#cHud");
     cashEl = root.querySelector("#cMoney"); deltaEl = root.querySelector("#cDelta");
-    wpnEl = root.querySelector("#cWpn");
-    ammoLineEl = root.querySelector("#cAmmo");
     objEl = root.querySelector("#cObj");
     radar = root.querySelector("#cRadar");
     crossEl = root.querySelector("#cCross");
@@ -546,46 +538,6 @@
   //      fallback (CBZ.weaponSlotsHTML). Deleted 2026-09-30. What is left is
   //      the live mag / reserve of the gun in your hands, read from the same
   //      engine store fpsmode's setAmmoHud() reads. -----------------------------
-  function weaponMetaById(id) {
-    const T = CBZ.FPS_WEAPONS;
-    if (!T) return null;
-    for (let i = 0; i < T.length; i++) { const w = T[i]; if (w && (w.id === id || w.key === id)) return { w: w, i: i }; }
-    return null;
-  }
-  function ammoReadout(cur, reserve, reloading) {
-    // Instrumentation only: reload is a glyph and all remaining characters are
-    // numbers. The old RELOADING/RES prose repeated what the animation conveys.
-    return (reloading ? "<span class='rl'>↻</span> " : "") +
-      "<b>" + cur + "</b><span class='res'> / " + reserve + "</span>";
-  }
-  // the gun in your hands, or null (holstered, the bat out, cuffed, nothing)
-  function heldGun() {
-    if (CBZ.cityHasGun && !CBZ.cityHasGun()) return null;
-    return CBZ.currentWeaponId ? weaponMetaById(CBZ.currentWeaponId) : null;
-  }
-  function wHTML(el, h) { if (el && el._cbzH !== h) { el._cbzH = h; el.innerHTML = h; } }
-  function renderAmmo() {
-    const m = heldGun();
-    if (!m) { wHTML(ammoLineEl, ""); return; }
-    const fps = CBZ.fps;
-    // effective mag capacity respects a fitted extended/drum mag (gunmods.js)
-    const magCap = CBZ.gunModsMag ? CBZ.gunModsMag(m.w.id || m.w.key, m.w.mag || 0) : (m.w.mag || 0);
-    let cur = magCap, res = m.w.reserve || 0, reloading = false;
-    if (fps && fps.rounds && fps.reserves) {
-      cur = (fps.rounds[m.i] != null) ? fps.rounds[m.i] : magCap;
-      res = (fps.reserves[m.i] != null) ? fps.reserves[m.i] : (m.w.reserve || 0);
-      reloading = (m.i === fps.weapon) && (fps.reloading > 0);
-    }
-    wHTML(ammoLineEl, ammoReadout(cur, res, reloading));
-  }
-  let ammoSig = "";
-  function refreshAmmoLive() {
-    const m = heldGun(), fps = CBZ.fps;
-    const sig = !m ? "-" : m.i + "|" + (fps && fps.rounds ? fps.rounds[m.i] : "") + "|" + (fps && fps.reserves ? fps.reserves[m.i] : "") + "|" + (fps && fps.reloading > 0 ? 1 : 0);
-    if (sig === ammoSig) return;
-    ammoSig = sig;
-    renderAmmo();
-  }
   // ---- cash: invisible at rest; a change shows the total + a floating delta
   //      for ~3 s, then it fades. ----
   let lastCash = null;
@@ -604,13 +556,6 @@
     lastCash = c;
   }
 
-  function syncWeapon(P) {
-    // the ammo count exists only while a gun is the thing in your hands
-    const gunOut = !!ammoLineEl.innerHTML && !P.driving && !P.dead;
-    const disp = gunOut ? "" : "none";
-    if (ammoLineEl._disp !== disp) { ammoLineEl._disp = disp; ammoLineEl.style.display = disp; }
-  }
-
   CBZ.onAlways(46, function () {
     build();
     const show = g.mode === "city";
@@ -622,10 +567,7 @@
     if (!show) return;
     const P = CBZ.player;
     showMoney();
-    if (dirty) { ammoSig = ""; dirty = false; }
-    // live ammo while firing/reloading (signature-guarded)
-    refreshAmmoLive();
-    syncWeapon(P);
+    if (dirty) dirty = false;
     // radar + objective poll, throttled (quality slider: tier0 7Hz, Best 14Hz)
     radarAcc += 1 / 60;
     if (radarAcc >= 1 / (CBZ.qScale ? CBZ.qScale(7, 14) : 14)) { radarAcc = 0; drawRadar(); pollObjective(); }

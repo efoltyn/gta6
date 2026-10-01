@@ -991,6 +991,10 @@
       if (l > 0.001) {
         _a.multiplyScalar(1 / l);
         ch.neck.rotation.set(Math.atan2(_a.z, _a.y), 0, Math.asin(cl1(-_a.x)));
+        // atan2 answers up to +-180 degrees when the head point sits below the
+        // shoulder line; the neck cone above keeps the points sane, and the
+        // body's own range (CBZ.human.clampNeck) keeps the drawn head on
+        if (CBZ.human && CBZ.human.clampNeck) CBZ.human.clampNeck(ch.neck);
       }
     }
     const P = ch.parts;

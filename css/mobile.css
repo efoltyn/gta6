@@ -16,7 +16,8 @@
      top-center    objective / job lines
      top-right     #cTopRight cash, only when it changes (jail: #minimap)
      mid-bottom    walk-up prompt band (bottom:158) → #interact card (224)
-     bottom-center #hotbar (the one bar, every game) + #cWpn ammo above it
+     bottom-center #cWpn / #hotbar, the #ammo gauge just above it (gun
+                   out only; portrait phone: right column, top:200)
      bottom-left   FIXED joystick (faint till touched; rim = sprint,
                    quick press = crouch — TOUCH_FIXED_STICK)
      bottom-right  #tbtns on foot ⇄ #tveh dial+buttons in a vehicle
