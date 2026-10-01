@@ -2929,6 +2929,64 @@
     if (pitch < 0) hairPair(pitch, F.pitch, out, 4);
     return out;
   }
+  /* ============================================================
+     THE NECK HAS A RANGE. Owner: "when shot, people's head turns backward,
+     which would break the neck." A dozen systems write rig.neck.rotation
+     (look-at, stare, the hit snap, the fall keys, the corpse sprawl and
+     jolt, the ragdoll), most of them as ADDITIVE offsets backed out the next
+     frame, and nothing anywhere said how far a neck turns. One feedback bug
+     (meleeposes' passive counter-turn reading its own last write) ran the
+     yaw up to 143 degrees on an arm shot, and a face-down corpse took the
+     keyed 81-degree cheek-on-the-floor turn PLUS its sprawl PLUS a jolt per
+     round to 132. A real cervical spine turns about 80 degrees each way,
+     nods about 60 (chin to chest), tips back about 50 and tilts about 40.
+
+     So the limit lives in the body, once, for every human in every game:
+       · RENDER: every rig's neck composes its matrix from the clamped
+         angles (neckUpdateMatrix). Whatever any writer leaves in
+         .rotation, the head that draws and the head the hit zones read
+         (matrixWorld) are inside the range. The stored value is NOT
+         touched, so additive writers still back out exactly what they put
+         on (clamping their storage would break their bookkeeping).
+       · ABSOLUTE writers (a fall pose, a corpse) call
+         CBZ.human.clampNeck(neck) to keep their storage in range too.
+     Conventions (facing +z): rotation.x > 0 chin down, < 0 looks up;
+     rotation.y turns the face; rotation.z tilts the ear to the shoulder.
+     tools/neck-limit-check.mjs fires rounds from every side and holds both
+     the drawn and the stored neck to these numbers. */
+  const NECK_LIMITS = Object.freeze({
+    yaw: 1.40,        // ~80 deg each way
+    flex: 1.05,       // ~60 deg chin to chest (+x)
+    ext: 0.87,        // ~50 deg looking up / head thrown back (-x)
+    roll: 0.70,       // ~40 deg ear to shoulder
+  });
+  function clampNeckValue(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+  function neckInRange(r) {
+    const L = NECK_LIMITS;
+    return r.x <= L.flex && r.x >= -L.ext && r.y <= L.yaw && r.y >= -L.yaw && r.z <= L.roll && r.z >= -L.roll;
+  }
+  // in place: for writers that own the channel outright every frame
+  function clampNeck(neck) {
+    if (!neck || !neck.rotation) return false;
+    const r = neck.rotation, L = NECK_LIMITS;
+    if (r.x === r.x && r.y === r.y && r.z === r.z && neckInRange(r)) return false;
+    r.set(clampNeckValue(r.x || 0, -L.ext, L.flex), clampNeckValue(r.y || 0, -L.yaw, L.yaw), clampNeckValue(r.z || 0, -L.roll, L.roll));
+    return true;
+  }
+  const _neckE = new THREE.Euler(), _neckQ = new THREE.Quaternion();
+  // the drawn neck: Object3D.updateMatrix with the angles held to the range
+  function neckUpdateMatrix() {
+    const r = this.rotation, L = NECK_LIMITS;
+    if (neckInRange(r)) {
+      this.matrix.compose(this.position, this.quaternion, this.scale);
+    } else {
+      _neckE.set(clampNeckValue(r.x || 0, -L.ext, L.flex), clampNeckValue(r.y || 0, -L.yaw, L.yaw),
+        clampNeckValue(r.z || 0, -L.roll, L.roll), r.order);
+      _neckQ.setFromEuler(_neckE);
+      this.matrix.compose(this.position, _neckQ, this.scale);
+    }
+    this.matrixWorldNeedsUpdate = true;
+  }
   // per hair mesh, right before it draws (and callable by tools): neck pose -> influences
   function hairFollowSync(mesh) {
     const inf = mesh.morphTargetInfluences;
@@ -2936,7 +2994,8 @@
     const g = mesh.geometry, on = g && g.morphAttributes && g.morphAttributes.position && g.morphAttributes.position.length >= 6;
     const neck = mesh.parent;
     if (!on || !neck) { for (let i = 0; i < inf.length; i++) inf[i] = 0; return; }
-    hairFollowInfluences(neck.rotation.y, neck.rotation.x, inf);
+    const L = NECK_LIMITS;
+    hairFollowInfluences(clampNeckValue(neck.rotation.y, -L.yaw, L.yaw), clampNeckValue(neck.rotation.x, -L.ext, L.flex), inf);
     // a painter that swapped the material in (crowd.js paint, heritage) must
     // still read the targets; the flag is harmless on any mesh without them
     const m = mesh.material;
@@ -3981,6 +4040,7 @@
     // all, and that "head sitting straight on the shoulders" read is half of
     // what makes a small body look like a CHILD instead of a distant adult.
     const neck = new THREE.Group();
+    neck.updateMatrix = neckUpdateMatrix;   // THE NECK HAS A RANGE (drawn inside it, whoever wrote it)
     // The pivot rides NECK_LEN above the column top (TORSO block), so the
     // neck shows between the chin and the collar; an older head carries forward.
     neck.position.set(0, TS.pivotY, headZ);
@@ -8529,6 +8589,11 @@
     // (the renderer does it in onBeforeRender; tools call it after posing)
     hairFollow: hairFollowSync,
     hairFollowSpec: HAIR_FOLLOW,
+    // THE NECK HAS A RANGE: the limits (radians), an in-place clamp for
+    // absolute writers, and the test the drawn neck uses
+    neckLimits: NECK_LIMITS,
+    clampNeck: clampNeck,
+    neckInRange: neckInRange,
     // the skull entities/headwear.js fits every hat to (read live, not copied)
     headForms: HEAD_FORMS,
     jawMul: jawMul,

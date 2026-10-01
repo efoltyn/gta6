@@ -293,6 +293,13 @@
       if (ch.neck) { ch.neck.rotation.x -= ch._rNx; ch.neck.rotation.y -= ch._rNy; ch.neck.rotation.z -= ch._rNz; }
       ch._rNx = ch._rNy = ch._rNz = 0;
     }
+    // ...and last frame's PASSIVE neck counter-turn (see APPLY): the neck's
+    // yaw is a channel nothing else re-anchors, so this layer must read the
+    // clean neck, never its own previous write
+    if (ch._mPnx || ch._mPny) {
+      if (ch.neck) { ch.neck.rotation.x -= ch._mPnx; ch.neck.rotation.y -= ch._mPny; }
+      ch._mPnx = ch._mPny = 0;
+    }
     ch.body.rotation.y = damp(ch.body.rotation.y, yGait, 10, dt);
 
     // ---- clocks ----
@@ -549,9 +556,22 @@
     b.rotation.z = lerp(b.rotation.z, ch.sway * mv + S.bz, K);
     if (CBZ.lockCharacterHips) CBZ.lockCharacterHips(ch);
     // eyes stay on the man: the neck counter-turns the torso
+    /* THE HEAD THAT TURNED BACKWARD. A passive body's base is the neck as
+       it found it (S.ny = n0.y + 0.8 * b0.y), and the counter-turn below
+       takes 0.8 of the torso's FINAL yaw off it. Whenever a reaction turned
+       the torso (an arm shot: "the hurt shoulder turns away"; a hook; the
+       legacy wobble) the target was n0.y - 0.8 * delta, and next frame n0.y
+       was that target: the neck integrated the delta every frame with
+       nothing to stop it. A man shot through the arm screwed his head round
+       143 degrees in 1.1 s (tools/neck-limit-check.mjs). Passive writes are
+       now an offset on the clean neck, stored and backed out at the top of
+       MP.strike like the head snap, so the counter-turn is a turn, not a
+       winding. */
     if (ch.neck) {
-      ch.neck.rotation.x = lerp(ch.neck.rotation.x, S.nx - S.bx * 0.5, K);
-      ch.neck.rotation.y = lerp(ch.neck.rotation.y, -S.by * 0.8 + S.ny, K);
+      const n = ch.neck.rotation, nx0 = n.x, ny0 = n.y;
+      n.x = lerp(n.x, S.nx - S.bx * 0.5, K);
+      n.y = lerp(n.y, -S.by * 0.8 + S.ny, K);
+      if (passive) { ch._mPnx = n.x - nx0; ch._mPny = n.y - ny0; }
     }
     ch._mNeckK = K;
 
@@ -844,7 +864,7 @@
                L: { f: -0.42, lift: 0.07, z: 0.04 }, R: { f: -0.40, lift: 0.07, z: -0.02 }, aL: [-0.20, 0.20, -0.30], aR: [-0.15, 0.18, -0.30] },
     // face down the thighs lie on the floor (ankles a touch under hip height)
     // and the arms lie along the ground by the ribs (-x = toward it)
-    lieFace: { h: 0.27, mZ: 0.10, bx: 1.50, by: 0, bz: 0.04, nx: -0.40, ny: 1.42, nz: 0.06,   // cheek on the floor
+    lieFace: { h: 0.27, mZ: 0.10, bx: 1.50, by: 0, bz: 0.04, nx: -0.40, ny: 1.36, nz: 0.06,   // cheek on the floor (inside the neck's ~80 degree turn, CBZ.human.neckLimits)
                L: { f: -0.93, lift: 0.12, z: 0.12 }, R: { f: -0.93, lift: 0.13, z: -0.02 }, aL: [-0.10, 0.45, -0.15], aR: [-0.12, 0.30, -0.20] },
     lieFaceBrace: { h: 0.27, mZ: 0.10, bx: 1.45, by: 0, bz: 0.04, nx: -0.55, ny: 0.40, nz: 0.05,
                L: { f: -0.93, lift: 0.12, z: 0.12 }, R: { f: -0.93, lift: 0.13, z: -0.02 }, aL: [-0.10, 0.35, -0.25], aR: [-0.10, 0.35, -0.25] },
@@ -996,6 +1016,7 @@
     ch.punchT = 0; ch.kickT = 0; ch.blockT = 0; ch.dodgeT = 0;
     if (ch.hitReact) ch.hitReact.on = false;
     if (ch.footStep) ch.footStep.on = false;
+    ch._mPnx = ch._mPny = 0;   // the fall writes the neck outright: nothing of the stance's to back out
     return f;
   };
   MP.getUp = function (ch) {

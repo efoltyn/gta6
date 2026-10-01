@@ -600,9 +600,9 @@ body.campaign-active.mode-city #cityHud #cWpn { display: block !important; }
 body.campaign-active.mode-city #cityHud #cLoot { display: none !important; }
 /* The weapon bar (#cSlots) is the inventory itself (guns, throwables, the
    flashlight, the phone), an instrument like the minimap: the declutter keeps
-   it, always, in its designed home inside #cWpn over the live ammo line. */
+   it, always, in its designed home inside #cWpn. The rounds are the one ammo
+   gauge (#ammo, systems/fpsmode.js), which stands over the phone peek. */
 body.campaign-active.mode-city #cityHud #cSlots { display: flex !important; }
-body.campaign-active.mode-city #cityHud #cAmmo { display: block !important; }
 /* PHONE_NOTIS_V2: the bottom-left minimap survives the declutter — it is an
    instrument, not narration, and lives in the opposite corner from the phone
    (peek bottom-right), so the two never collide. */

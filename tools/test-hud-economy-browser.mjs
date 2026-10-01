@@ -202,12 +202,11 @@ try {
     CBZ.cityHudDirty(); run(CBZ.always, 46); run(CBZ.updaters, 53);
     if (CBZ.fpsResyncAmmo) CBZ.fpsResyncAmmo();
     const citySlotsText = ((document.getElementById("cSlots") || {}).textContent || "").replace(/\\s+/g, " ").trim();
-    const cityAmmoText = ((document.getElementById("cAmmo") || {}).textContent || "").replace(/\\s+/g, " ").trim();
     const engineAmmoText = ((document.getElementById("ammo") || {}).textContent || "").replace(/\\s+/g, " ").trim();
     const engineStrip = document.getElementById("weaponStrip");
     check(!/[A-Za-z]|\\b(?:FIST|9MM|556|RPG|DRY)\\b/i.test(citySlotsText), "city hotbar contains weapon/item words: " + citySlotsText);
-    check(!/[A-Za-z]/.test(cityAmmoText), "city ammo contains prose: " + cityAmmoText);
-    check(!/\\b(?:RELOADING|RES|FIST|9MM|556|RPG|PISTOL|SHOTGUN|RIFLE)\\b/i.test(engineAmmoText), "engine ammo contains prose: " + engineAmmoText);
+    check(!document.getElementById("cAmmo"), "the city still mounts its own second ammo line (#cAmmo)");
+    check(!/[A-Za-z]/.test(engineAmmoText), "ammo gauge contains prose: " + engineAmmoText);
     check(!engineStrip || (!engineStrip.textContent.trim() && getComputedStyle(engineStrip).display === "none"), "legacy weapon word strip remains mounted");
     const mcVitalsWas = CBZ.CONFIG.CITY_HUD_MC;
     CBZ.CONFIG.CITY_HUD_MC = false; run(CBZ.always, 46);
@@ -343,7 +342,7 @@ try {
           width: portraitRect.width, height: portraitRect.height }
       } : null,
       passivePromptCount: passiveIds.length + buildHints.length,
-      ammoText: { city: cityAmmoText, engine: engineAmmoText, slots: citySlotsText },
+      ammoText: { engine: engineAmmoText, slots: citySlotsText },
       inventory: { slots: slots.filter(Boolean).map(function (s) { return s.name; }), renderedCells: gridCells.length, hiddenCollarWidth: slabWidth },
       drops: { gunMeshes: gunMeshes, briefcaseMeshes: caseMeshes, deathDrops: deathDrops.map(function (d) { return d.weaponId || (d.cash ? "$" + d.cash : d.name); }) },
       balancesAfterDeath: { cash: CBZ.game.cash, bank: CBZ.game.cityBank },

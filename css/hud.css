@@ -400,19 +400,15 @@ body.touch #pickupFeed{ gap:5px; max-width:min(330px,46vw); }
 #crosshair.blocked{color:#ffb33f;opacity:.94}
 #crosshair.dry{color:#ffd451;background:radial-gradient(circle,currentColor 0 1px,transparent 1.5px)}
 
-/* ammo readout (first-person, armed) */
-#ammo{
-  position:absolute; right:22px; bottom:210px; display:none; pointer-events:none;
-  font-weight:700; font-size:22px; letter-spacing:1px; color:#fff; font-variant-numeric:tabular-nums;
-  text-shadow:0 2px 0 rgba(0,0,0,.5); white-space:pre; text-align:right; line-height:1.18;
-}
+/* the ammo gauge: systems/fpsmode.js draws AND styles it (THE AMMO GAUGE),
+   so every page that mounts the gun gets the same one. Hidden until a gun is out. */
+#ammo{ display:none; }
 #weaponStrip{
   position:absolute; right:22px; bottom:166px; display:none; pointer-events:none;
   max-width:min(440px,86vw); padding:8px 10px; font-weight:700; font-size:12px;
   letter-spacing:1px; text-transform:uppercase; color:#d7e4f3; white-space:nowrap;
 }
 #weaponStrip .active{color:#ffd451;}
-body.touch #ammo{ bottom:auto; top:200px; right:18px; }
 body.fps #compass{ display:none; }
 
 

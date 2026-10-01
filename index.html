@@ -14,14 +14,14 @@
 
 <!-- styles, split by concern -->
 <link rel="stylesheet" href="css/base.css">
-<link rel="stylesheet" href="css/hud.css?v=nored0930">
+<link rel="stylesheet" href="css/hud.css?v=ammo0930">
 <link rel="stylesheet" href="css/screens.css?v=nored0930">
 <link rel="stylesheet" href="css/shark_title.css?v=nored0930">
-<link rel="stylesheet" href="css/mobile.css?v=ric0929">
+<link rel="stylesheet" href="css/mobile.css?v=ammo0930">
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
 <link rel="stylesheet" href="css/inventory.css?v=cuffs1">
-<link rel="stylesheet" href="css/city.css?v=tap0929">
-<link rel="stylesheet" href="css/campaign.css?v=tap0929">
+<link rel="stylesheet" href="css/city.css?v=ammo0930">
+<link rel="stylesheet" href="css/campaign.css?v=ammo0930">
 <link rel="stylesheet" href="css/interact_touch.css?v=flick1">
 <link rel="stylesheet" href="css/title_hub.css?v=end1">
 </head>
@@ -590,7 +590,7 @@ document.body.appendChild(b);}}catch(e){}})();
   <script src="src/entities/tattoo.js?v=pf0930c"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
-  <script src="src/entities/character.js?v=pf0930c"></script>
+  <script src="src/entities/character.js?v=neck0930"></script>
   <script src="src/entities/headwear.js?v=hw1"></script>
   <!-- real jewelry (PBR metal, brilliants, draped link chains, pendants): before watch.js (its metals) and bling.js -->
   <script src="src/entities/jewelry_kit.js?v=w09290232"></script>
@@ -632,9 +632,9 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.arrest.playerCuffed. Before input.js and every game module. -->
 <script src="src/systems/cuffedplayer.js?v=cuffs1"></script>
 <script src="src/entities/verbposes.js?v=verbs1"></script>
-<script src="src/entities/meleeposes.js?v=fallreal1"></script>
+<script src="src/entities/meleeposes.js?v=neck0930"></script>
 <script src="src/systems/verbs_strike.js?v=colcore1"></script>
-<script src="src/systems/bodyfall.js?v=vit3"></script>
+<script src="src/systems/bodyfall.js?v=neck0930"></script>
 <!-- CBZ.vitals: ONE body that can be hurt, in every game. Blunt trauma knocks a
      man out (and he comes to, groggy); a bullet or a blade opens a bleed that
      drains his blood until someone wraps it or he bleeds out; state(a) is what
@@ -983,7 +983,7 @@ document.body.appendChild(b);}}catch(e){}})();
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
 <script src="src/systems/gamepad.js?v=ekey2"></script>
-<script src="src/systems/fpsmode.js?v=mil0929"></script>
+<script src="src/systems/fpsmode.js?v=ammo0930"></script>
 <script src="src/systems/gunfx.js?v=pf0930t"></script>
 <script src="src/systems/intimidate.js?v=cop1"></script>
 
@@ -1670,7 +1670,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/armored.js?v=deslop1"></script>
 <script src="src/city/death.js?v=nored0930"></script>
 <script src="src/city/camera.js?v=shouldergun2"></script>
-<script src="src/city/ragdoll.js?v=loose1"></script>
+<script src="src/city/ragdoll.js?v=neck0930"></script>
 <script src="src/city/leaderboard.js?v=rg0929"></script>
 <script src="src/city/zillow.js?v=onebet1"></script>
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
@@ -1829,7 +1829,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/gigs.js?v=w09290250y"></script>
 <script src="src/city/gigfleet.js?v=nodash1"></script>
 <script src="src/city/giglife.js?v=w09290250y"></script>
-<script src="src/city/hud.js?v=nored0930"></script>
+<script src="src/city/hud.js?v=ammo0930"></script>
 <!-- drinking/tipsy system (a sibling agent's file — provides CBZ.cityDrink;
      loads after shops.js/hud so it can hook the same HUD/economy surface) -->
 <script src="src/city/drinking.js?v=nored0930"></script>

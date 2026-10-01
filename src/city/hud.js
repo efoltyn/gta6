@@ -19,8 +19,8 @@
        red, what does that even mean?"). Your body tells you: a flinch on
        every hit, and near the end heavy eyelids, dragging blinks, loud
        breath and a stagger (systems/eyes.js fed by systems/vitals.js).
-     • WEAPON (#cWpn): the ammo count shows ONLY while a gun is the thing in
-       your hands. The slot bar surfaces for ~2.5 s when the loadout changes
+     • WEAPON (#cWpn): the slot bar. The rounds are the one ammo gauge every
+       game draws (systems/fpsmode.js), only while a gun is in your hands. The slot bar surfaces for ~2.5 s when the loadout changes
        (you switched, holstered, picked up, ate), then fades. On touch it
        stays up, because there it is the input.
      • NEXT STEP (#cObj): shows when a NEW objective line arrives, ~6 s, fades.
@@ -42,7 +42,7 @@
   const CBZ = window.CBZ;
   const g = CBZ.game;
 
-  let root, hudEl, cashEl, deltaEl, wpnEl, slotsEl, ammoLineEl, objEl, radar, crossEl;
+  let root, hudEl, cashEl, deltaEl, wpnEl, slotsEl, objEl, radar, crossEl;
   let dirty = true;
 
   function esc(s) { return String(s).replace(/[<>&]/g, function (c) { return c === "<" ? "&lt;" : c === ">" ? "&gt;" : "&amp;"; }); }
@@ -92,10 +92,6 @@
         "#cHud .cSlot.unread .led{background:#ff6258;box-shadow:0 0 8px #ff6258}" +
         "#cHud .cSlot.buzz{animation:cPhoneBuzz .82s ease}" +
         "@keyframes cPhoneBuzz{0%,100%{transform:translateY(0) rotate(0)}18%{transform:translateY(-4px) rotate(-5deg)}38%{transform:translateY(-2px) rotate(5deg)}58%{transform:translateY(-1px) rotate(-3deg)}}" +
-        "#cAmmo{font-size:13px;color:var(--hud-ink);font-weight:600;text-shadow:0 1px 3px rgba(0,0,0,.8);opacity:.9;min-height:1px}" +
-        "#cAmmo b{font-size:20px;font-weight:700}" +
-        "#cAmmo .res{color:var(--hud-dim)}" +
-        "#cAmmo .rl{color:#ffd166}" +
         "#cRadar{position:absolute;left:var(--hud-pad-l);bottom:var(--hud-pad-b);width:132px;height:132px;border-radius:50%;opacity:.9;box-shadow:0 4px 14px rgba(0,0,0,.45)}" +
         "@media (max-width:900px),(max-height:560px){#cRadar{width:108px;height:108px}#cMoney{font-size:21px}#cHud .cSlot{width:34px;height:34px}#cHud .cSlot .gunModel{width:30px;height:20px}#cHud .cSlot .itemIcn{width:22px;height:22px}#cHud .cSlots.many .cSlot{width:30px;height:30px}#cHud .cSlots.many .cSlot .gunModel{width:26px;height:18px}#cHud .cSlots.many .cSlot .itemIcn,#cHud .cSlot.flashlight img{width:20px;height:20px}}";
       document.head.appendChild(st);
@@ -113,7 +109,7 @@
       "  <div class='fade' id='cCash' style='position:relative;display:inline-block'><div id='cMoney'>$0</div><div id='cDelta'></div></div>" +
       "</div>" +
       "<div id='cObj' class='fade'></div>" +
-      "<div id='cWpn'><div id='cSlots' class='cSlots fade'></div><div id='cAmmo'></div></div>" +
+      "<div id='cWpn'><div id='cSlots' class='cSlots fade'></div></div>" +
       "<canvas id='cRadar' width='190' height='190'></canvas>" +
       "<div id='cCross' style='position:absolute;left:50%;top:50%;width:7px;height:7px;margin:-4px 0 0 -4px;border:2px solid rgba(232,236,242,.85);border-radius:50%;display:none'></div>" +
       "</div>";
@@ -121,7 +117,7 @@
     hudEl = root.querySelector("#cHud");
     cashEl = root.querySelector("#cMoney"); deltaEl = root.querySelector("#cDelta");
     wpnEl = root.querySelector("#cWpn");
-    slotsEl = root.querySelector("#cSlots"); ammoLineEl = root.querySelector("#cAmmo");
+    slotsEl = root.querySelector("#cSlots");
     objEl = root.querySelector("#cObj");
     radar = root.querySelector("#cRadar");
     crossEl = root.querySelector("#cCross");
@@ -763,12 +759,10 @@
     return src ? "<img class='gunModel' src='" + src + "' alt=''>"
       : "<span class='ic gun'>" + hotbarGunGlyph(meta) + "</span>";
   }
-  function ammoReadout(cur, mag, reserve, reloading) {
-    // Instrumentation only: reload is a glyph and all remaining characters are
-    // numbers. The old RELOADING/RES prose repeated what the animation conveys.
-    return (reloading ? "<span class='rl'>↻</span> " : "") +
-      "<b>" + cur + "</b><span class='res'> / " + reserve + "</span>";
-  }
+  /* THE ROUNDS ARE NOT DRAWN HERE. This file used to print its own ammo
+     line (#cAmmo) under the slots while fpsmode drew #ammo for every other
+     game: two renderers of one number. The city now shows the one gauge
+     every game shows (systems/fpsmode.js AMMO GAUGE). */
   function renderHotbar() {
     if (!slotsEl) return;
     const fps = CBZ.fps;                            // engine ammo store (guarded)
@@ -776,7 +770,6 @@
     // API is present. Outside city (jail/survival) fall back to the legacy
     // owned-guns/melee render so those modes are byte-identical.
     const useUnified = g.mode === "city" && typeof CBZ.cityHotbar === "function";
-    let line = "";
     if (useUnified) {
       let bar = null;
       try { bar = CBZ.cityHotbar(); } catch (e) { bar = null; }
@@ -788,7 +781,7 @@
           const held = !!e.active;
           if (e.kind === "gun") {
             // The real gun, photographed. Empty is the only mark (∅); live
-            // rounds stay in the numeric ammo instrument below.
+            // rounds are the ammo gauge's (systems/fpsmode.js).
             const m = weaponMetaById(e.id) || weaponMetaByLabel(e.label, e.short);
             let ammoTxt = "";
             if (!held && m && fps && fps.rounds && fps.reserves) {
@@ -828,51 +821,12 @@
         if (slotsEl._many !== many) { slotsEl._many = many; slotsEl.classList.toggle("many", many); }
         wHTML(slotsEl, html);
         keepHeldInView();
-        // the prominent equipped-weapon ammo line (jail-style big mag / reserve) for
-        // whichever gun is the active entry; holster/items show no ammo here.
-        for (let bi = 0; bi < bar.length; bi++) {
-          const e = bar[bi];
-          if (e.kind !== "gun" || !e.active) continue;
-          const m = weaponMetaById(e.id) || weaponMetaByLabel(e.label, e.short);
-          let cur = 0, mag = 0, res = 0, reloading = false;
-          // effective mag capacity respects a fitted extended/drum mag (gunmods.js)
-          const magCap = m ? (CBZ.gunModsMag ? CBZ.gunModsMag(m.w.id || m.w.key, m.w.mag || 0) : (m.w.mag || 0)) : 0;
-          if (m && fps && fps.rounds && fps.reserves) {
-            cur = (fps.rounds[m.i] != null) ? fps.rounds[m.i] : magCap;
-            res = (fps.reserves[m.i] != null) ? fps.reserves[m.i] : (m.w.reserve || 0);
-            mag = magCap;
-            reloading = (m.i === fps.weapon) && (fps.reloading > 0);
-          } else if (m) { cur = magCap; mag = magCap; res = m.w.reserve || 0; }
-          line = ammoReadout(cur, mag, res, reloading);
-          break;
-        }
-        wHTML(ammoLineEl, line);
         return;
       }
     }
     // ---- LEGACY path (non-city, or the API not yet loaded) — now the SHARED
     //      renderer, which the prison also draws through. See CBZ.weaponSlotsHTML.
     wHTML(slotsEl, CBZ.weaponSlotsHTML({ icons: g.mode === "city" }));
-    const inv = (CBZ.weaponInventory && CBZ.weaponInventory.length) ? CBZ.weaponInventory : [];
-    const melee = g.cityMeleeWeapon || null;        // Bat/Knife — a held melee, not a gun
-    const heldGun = !melee && CBZ.currentWeaponId ? CBZ.currentWeaponId : null;
-    // the prominent equipped-weapon ammo line (jail-style big mag / reserve). For a
-    // gun we read fps live state for the CURRENT weapon; melee/fists show no ammo.
-    if (heldGun) {
-      const m = weaponMetaById(heldGun);
-      let cur = 0, mag = 0, res = 0, reloading = false;
-      if (m && fps && fps.rounds && fps.reserves) {
-        cur = (fps.rounds[m.i] != null) ? fps.rounds[m.i] : (m.w.mag || 0);
-        res = (fps.reserves[m.i] != null) ? fps.reserves[m.i] : (m.w.reserve || 0);
-        mag = m.w.mag || 0;
-        reloading = (m.i === fps.weapon) && (fps.reloading > 0);
-      } else if (m) { cur = m.w.mag || 0; mag = m.w.mag || 0; res = m.w.reserve || 0; }
-      line = ammoReadout(cur, mag, res, reloading);
-    }
-    // melee / fists show NOTHING here — the lit chip already names them; a
-    // "Bat — melee" caption under a lit Bat chip was the HUD reading itself
-    // aloud (F6).
-    wHTML(ammoLineEl, line);
   }
 
   function wHTML(el, h) { if (el && el._cbzH !== h) { el._cbzH = h; el.innerHTML = h; } }
@@ -954,10 +908,6 @@
       if (barShapeSig !== null && !P.driving) reveal(slotsEl, 2500);
       barShapeSig = shape;
     }
-    // the ammo count exists only while a gun is the thing in your hands
-    const gunOut = !!ammoLineEl.innerHTML && !P.driving && !P.dead;
-    const disp = gunOut ? "" : "none";
-    if (ammoLineEl._disp !== disp) { ammoLineEl._disp = disp; ammoLineEl.style.display = disp; }
   }
 
   CBZ.onAlways(46, function () {

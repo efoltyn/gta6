@@ -2564,51 +2564,218 @@
   }
   CBZ.fpsHitMarker = flashHitMarker;
 
+  /* ============================================================
+     THE AMMO GAUGE — the one ammo readout every game draws (the prison, the
+     city, gun game, survival, the battles). Owner: "the ammo counter is in a
+     bad spot and looks boring." It was a line of text ("12 / 60", a reload
+     arrow on top) floating at right:22 bottom:210, mid-air over the world,
+     and the city drew a SECOND one of its own under its slot bar (#cAmmo,
+     city/hud.js, now deleted).
+
+     WHAT IT IS (no words, ever):
+       · the magazine as a big numeral, what you carry as a small one beside
+         it, behind a hairline;
+       · a row of rounds under them that empties as you fire (one pip per
+         round up to PIP_MAX; a belt or a drum is one bar that drains);
+       · LOW (the last quarter): amber, and the numeral breathes; DRY: red;
+       · RELOAD: the pips fill back in on the reload animation's own clock,
+         from the moment the fresh magazine is in the hand to the moment it
+         seats (CBZ.gunReload's recipe grab -> seat; a shell gun fills one
+         pip per shell), and the numeral counts up with them;
+       · the held gun's own render, as a quiet white silhouette (the same
+         cached picture the hotbar draws, so it costs nothing).
+     WHERE: bottom-right on a desktop (the shooter's corner; the hotbar is
+     bottom-centre, the radar left); raised over the campaign phone and over
+     the car cluster when you shoot from a car. On touch the thumbs own both
+     bottom corners, so it sits centred just above the hotbar, and on a
+     portrait phone in the right column under the radar (top:200, the slot
+     systems/runstats.js reserves for it). Shown only while a gun is in the
+     hands. The CSS lives here, so every page that mounts fpsmode (index,
+     disaster, the warlord battles) gets the same gauge.
+     ============================================================ */
+  const PIP_MAX = 40;
+  const AG_CSS =
+    "#ammo.ag{position:fixed;left:auto;top:auto;right:calc(24px + env(safe-area-inset-right,0px));" +
+      "bottom:calc(22px + env(safe-area-inset-bottom,0px));transform:none;flex-direction:column;align-items:flex-end;gap:5px;" +
+      "pointer-events:none;z-index:14;white-space:normal;letter-spacing:0;line-height:1;text-align:right;font-family:inherit;" +
+      "font-size:16px;font-weight:700;color:#eef2f6;text-shadow:0 1px 3px rgba(0,0,0,.75);transition:opacity .3s;" +
+      "--ag-ink:#eef2f6;--ag-dim:rgba(238,242,246,.55);--ag-off:rgba(238,242,246,.17);--ag-hot:#eef2f6}" +
+    "#ammo.ag .agRow{display:flex;align-items:flex-end;gap:10px}" +
+    "#ammo.ag .agGun{display:block;height:22px;width:auto;max-width:76px;object-fit:contain;margin-bottom:6px;" +
+      "filter:brightness(0) invert(1) drop-shadow(0 1px 2px rgba(0,0,0,.6));opacity:.4}" +
+    "#ammo.ag .agGun[hidden]{display:none}" +
+    "#ammo.ag .agLock{font-size:15px;color:var(--ag-dim);margin-bottom:8px}" +
+    "#ammo.ag .agLock[hidden]{display:none}" +
+    "#ammo.ag .agMag{font-size:40px;font-weight:700;color:var(--ag-hot);font-variant-numeric:tabular-nums;text-align:right}" +
+    "#ammo.ag .agRes{font-size:17px;font-weight:600;color:var(--ag-dim);font-variant-numeric:tabular-nums;" +
+      "padding:0 0 5px 10px;border-left:1.5px solid rgba(238,242,246,.26)}" +
+    "#ammo.ag .agPips{display:flex;justify-content:flex-end;gap:2px;height:9px}" +
+    "#ammo.ag .agPip{flex:1 1 0;min-width:2px;max-width:9px;border-radius:1.5px;background:var(--ag-off)}" +
+    "#ammo.ag .agPip.on{background:var(--ag-hot);box-shadow:0 0 2px rgba(0,0,0,.55)}" +
+    "#ammo.ag .agPip.nx{background:linear-gradient(to top,var(--ag-fill) 0 calc(var(--f,0) * 100%),var(--ag-off) 0)}" +
+    "#ammo.ag .agBar{position:relative;height:7px;border-radius:3.5px;background:var(--ag-off);overflow:hidden}" +
+    "#ammo.ag .agFill{position:absolute;left:0;top:0;bottom:0;width:100%;transform-origin:100% 50%;background:var(--ag-hot)}" +
+    // the last quarter: amber, and the numeral breathes
+    "#ammo.ag.low{--ag-hot:#ffb547}" +
+    "#ammo.ag.dry{--ag-hot:#ff5d52}" +
+    "#ammo.ag.dry .agRes{color:rgba(255,93,82,.75)}" +
+    "#ammo.ag.low .agMag,#ammo.ag.dry .agMag{animation:agBreath 1.1s ease-in-out infinite}" +
+    "@keyframes agBreath{0%,100%{opacity:1}50%{opacity:.5}}" +
+    // reloading: the rounds coming in are a cooler white
+    "#ammo.ag.rl{--ag-hot:#eef2f6;--ag-fill:#bfe2ff}" +
+    "#ammo.ag.rl .agMag{opacity:.82;animation:none}" +
+    "#ammo.ag.rl .agPip.in{background:var(--ag-fill)}" +
+    "@media (prefers-reduced-motion:reduce){#ammo.ag .agMag{animation:none!important}}" +
+    // over the campaign phone (bottom-right, 45px) and the car cluster
+    "body.campaign-active:not(.touch) #ammo.ag{bottom:calc(78px + env(safe-area-inset-bottom,0px))}" +
+    "#ammo.ag.car{bottom:calc(214px + env(safe-area-inset-bottom,0px))}" +
+    // a narrow desktop window: a long hotbar can reach the corner, so stand on it
+    "@media (max-width:1000px){body:not(.touch) #ammo.ag{bottom:calc(86px + env(safe-area-inset-bottom,0px))}}" +
+    // TOUCH: both bottom corners are thumbs. Centred, just above the hotbar.
+    "body.touch #ammo.ag{right:auto;left:50%;transform:translateX(-50%);align-items:center;gap:4px;" +
+      "bottom:calc(84px + env(safe-area-inset-bottom,0px))}" +
+    "body.touch #ammo.ag .agGun{display:none}" +
+    "body.touch #ammo.ag .agMag{font-size:28px}" +
+    "body.touch #ammo.ag .agRes{font-size:14px;padding-bottom:3px}" +
+    "body.touch #ammo.ag .agPips{height:7px}" +
+    "body.touch #ammo.ag.car{bottom:auto;top:calc(200px + env(safe-area-inset-top,0px))}" +
+    // a portrait phone: the joystick ring reaches the middle; the right column is clear
+    "@media (orientation:portrait) and (max-width:560px){body.touch #ammo.ag{left:auto;transform:none;align-items:flex-end;" +
+      "right:calc(18px + env(safe-area-inset-right,0px));bottom:auto;top:calc(200px + env(safe-area-inset-top,0px))}}";
+
+  function agEnsureStyle() {
+    if (document.getElementById("ammoGaugeStyle")) return;
+    const s = document.createElement("style");
+    s.id = "ammoGaugeStyle";
+    s.textContent = AG_CSS;
+    (document.head || document.body).appendChild(s);
+  }
+  function agMake(tag, cls, parent) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  // build the gauge into #ammo once (an element warlord/gunplay swapped in gets its own)
+  function agOf(el) {
+    if (el._ag) return el._ag;
+    agEnsureStyle();
+    el.textContent = "";
+    el.classList.add("ag");
+    const row = agMake("div", "agRow", el);
+    const gun = agMake("img", "agGun", row);
+    gun.alt = ""; gun.hidden = true;
+    const lock = agMake("span", "agLock", row);
+    lock.textContent = "◎"; lock.hidden = true;
+    const mag = agMake("span", "agMag", row);
+    const res = agMake("span", "agRes", row);
+    const pips = agMake("div", "agPips", el);
+    el._ag = { gun, lock, mag, res, pips, gunId: null, cap: -1, bar: null, fill: null, pipEls: [],
+      magTxt: "", resTxt: "", cls: "", lit: -1, inTo: -1, nxF: -1, fillK: -1 };
+    return el._ag;
+  }
+  function agSetCap(G, cap) {
+    if (G.cap === cap) return;
+    G.cap = cap;
+    G.pips.textContent = ""; G.pipEls.length = 0; G.bar = G.fill = null;
+    G.lit = -1; G.inTo = -1; G.nxF = -1; G.fillK = -1;
+    if (cap > PIP_MAX) {
+      G.pips.style.width = "";
+      G.bar = agMake("div", "agBar", G.pips);
+      G.bar.style.width = "150px";
+      G.fill = agMake("div", "agFill", G.bar);
+    } else if (cap > 0) {
+      // one pip per round, the row as wide as the magazine is deep: a shotgun's
+      // six are fat shells, a rifle's thirty are thin cartridges
+      const each = cap <= 8 ? 11 : cap <= 20 ? 7.5 : 4.4;
+      G.pips.style.width = Math.min(160, Math.round(cap * each)) + "px";
+      for (let i = 0; i < cap; i++) G.pipEls.push(agMake("i", "agPip", G.pips));
+    }
+    G.mag.style.minWidth = String(cap).length + "ch";
+  }
+  // where the reload is in its own animation: 0 until the fresh magazine is in
+  // the hand, 1 once it seats (CBZ.gunReload recipe; a shell, one shell)
+  function agReloadFill(i) {
+    if (!(fps.reloading > 0) || reloadWeapon !== i) return -1;
+    const w = WEAPONS[i];
+    const p = Math.max(0, Math.min(1, 1 - fps.reloading / Math.max(0.05, w.reload || fps.reloading)));
+    const R = CBZ.gunReload && CBZ.gunReload.recipe ? CBZ.gunReload.recipe(weaponModels[i]) : null;
+    const g0 = R && R.grab != null ? R.grab : 0.4, g1 = R && R.seat != null ? R.seat : 0.82;
+    const u = Math.max(0, Math.min(1, (p - g0) / Math.max(0.05, g1 - g0)));
+    return u * u * (3 - 2 * u);
+  }
+  function agRender(el, w) {
+    const G = agOf(el);
+    const i = fps.weapon, cap = Math.max(0, fps.mag | 0), ammo = Math.max(0, fps.ammo | 0), reserve = Math.max(0, fps.reserve | 0);
+    agSetCap(G, cap);
+    // the held gun's silhouette: the hotbar's own cached render
+    const gid = weaponIdOf(i) || "";
+    if (G.gunId !== gid) {
+      G.gunId = gid;
+      let src = "";
+      try { src = (CBZ.itemIconGun && CBZ.itemIconGun(gid)) || (CBZ.weaponThumbnail && CBZ.weaponThumbnail(gid)) || ""; } catch (e) { src = ""; }
+      if (src) G.gun.src = src;
+      G.gun.hidden = !src;
+    }
+    const rocketSpec = w.explosive ? rocketAmmoSpec(w) : null;
+    G.lock.hidden = !(rocketSpec && rocketSpec.homing);
+    // reload: rounds coming in on the animation's clock
+    const f = agReloadFill(i);
+    const rl = f >= 0;
+    const give = rl ? Math.max(0, Math.min(w.shellReload ? 1 : cap - ammo, reserve)) : 0;
+    const inF = rl ? give * f : 0;
+    const shownN = ammo + Math.floor(inF + 1e-6);
+    const magTxt = String(shownN), resTxt = String(reserve - (shownN - ammo));
+    if (G.magTxt !== magTxt) { G.magTxt = magTxt; G.mag.textContent = magTxt; }
+    if (G.resTxt !== resTxt) { G.resTxt = resTxt; G.res.textContent = resTxt; }
+    const lowN = cap > 2 ? Math.max(1, Math.ceil(cap * 0.25)) : 0;
+    const cls = rl ? "rl" : ammo === 0 ? "dry" : ammo <= lowN ? "low" : "";
+    if (G.cls !== cls) {
+      if (G.cls) el.classList.remove(G.cls);
+      if (cls) el.classList.add(cls);
+      G.cls = cls;
+    }
+    if (G.fill) {
+      const k = cap > 0 ? Math.min(1, (ammo + inF) / cap) : 0;
+      const kk = Math.round(k * 400) / 400;
+      if (G.fillK !== kk) { G.fillK = kk; G.fill.style.transform = "scaleX(" + kk + ")"; }
+    } else if (G.pipEls.length) {
+      // pips drain from the left: the row's right end is the round on top
+      const P = G.pipEls, n = P.length;
+      const lit = Math.min(n, shownN), inTo = rl ? lit : -1;
+      const nx = rl && lit < n && lit < ammo + give ? Math.round((inF - Math.floor(inF + 1e-6)) * 20) / 20 : -1;
+      if (G.lit !== lit || G.inTo !== inTo || G.nxF !== nx) {
+        for (let p = 0; p < n; p++) {
+          const slot = n - 1 - p;              // p-th round from the right
+          const on = p < lit;
+          const e = P[slot];
+          const want = "agPip" + (on ? " on" : "") + (on && rl && p >= ammo ? " in" : "") + (p === lit && nx > 0 ? " nx" : "");
+          if (e.className !== want) e.className = want;
+          if (p === lit && nx > 0) e.style.setProperty("--f", String(nx));
+        }
+        G.lit = lit; G.inTo = inTo; G.nxF = nx;
+      }
+    }
+  }
   function setAmmoHud() {
     const ammoEl = ammoHudEl();
     if (!ammoEl) return;
     syncAmmo();
-    // city/life mode shows ammo whenever you're holding a gun (third-person too),
-    // not only while aiming — you always want to see your rounds.
-    // A MELEE WEAPON HAS NO MAGAZINE. Without this test the shank reads
-    // "0 / 0 · 0" over the crosshair — an ammo counter for a thing that has
-    // never had ammo, which is exactly the kind of gun-shaped assumption that
-    // let a blade be a pistol in the first place. The weapon strip below still
-    // runs, so the chip and its icon are unaffected.
+    // A MELEE WEAPON HAS NO MAGAZINE: the shank never gets an ammo gauge.
+    // Shown whenever a gun is the thing in your hands: aiming or not, first
+    // person or third, in every game; never behind the wheel unless the gun is
+    // out of the window, never dead, never with the city HUD hidden.
     const wAmmo = weapon();
-    if ((fps.active || shoulderActive() || CBZ.game.mode === "city") && armed() && !(wAmmo && wAmmo.melee)) {
-      const w = wAmmo;
-      ammoEl.style.display = "block";
-      // City play is always instrumentation-only.  This cannot depend on a
-      // campaign mission being active: sandbox/side-job weapons were still
-      // writing weapon names, RELOADING and RES over the world.
-      // THE PRISON IS MINIMAL TOO. This used to read "AK-47\n30 / 30   RES 120"
-      // over the world in escape mode — the weapon's NAME and the word RES,
-      // beside a boxed hotbar chip that already shows which gun is in your
-      // hands. Numbers stay; the words were the clutter.
-      // …AND SO IS GUN GAME, for the same reason and now on the same evidence:
-      // its weapon strip docks into the hotbar as one boxed chip (2026-08-04,
-      // systems/inventory.js), so "9MM SIDEARM" over the crosshair was naming a
-      // gun that was already drawn at the bottom of the screen, and "RES" was a
-      // label on a number nothing else could be.
-      const campaignMinimal = CBZ.game.mode === "city" || CBZ.game.mode === "escape" ||
-        CBZ.game.mode === "gungame" ||
-        !!(CBZ.cityCampaignOwnsMission && CBZ.cityCampaignOwnsMission());
-      const rocketSpec = w.explosive ? rocketAmmoSpec(w) : null;
-      const rocketMode = rocketSpec ? (rocketSpec.label || rocketSpec.id || "").toUpperCase() : "";
-      if (campaignMinimal) {
-        // Prison shares the engine ammo panel rather than city/hud.js. Keep the
-        // same campaign rule here: reload is a glyph and every other character
-        // is numeric, with no weapon/reserve labels floating over the world.
-        // One compact lock glyph is enough to reveal that homing is armed; no
-        // floating tutorial prose is introduced into the minimal campaign HUD.
-        ammoEl.textContent = (fps.reloading > 0 ? "↻\n" : "") + (rocketSpec && rocketSpec.homing ? "◎ " : "") + fps.ammo + " / " + fps.reserve;   // rounds in the gun / rounds you carry (signage law: no middle dots)
-      } else {
-        const held = rocketMode ? w.short + " " + rocketMode : w.label;
-        const top = fps.reloading > 0 ? "RELOADING " + w.short : held;
-        ammoEl.textContent = top + "\n" + fps.ammo + " / " + fps.mag + "   RES " + fps.reserve;
-      }
-    } else ammoEl.style.display = "none";
+    const P = CBZ.player;
+    const inCar = !!(P && P.driving);
+    const hudHidden = CBZ.game.mode === "city" && CBZ.cityCharPanel && CBZ.cityCharPanel.hudHidden && CBZ.cityCharPanel.hudHidden();
+    if ((fps.active || shoulderActive() || CBZ.game.mode === "city" || carGun()) && armed() && !(wAmmo && wAmmo.melee) &&
+        !(P && P.dead) && (!inCar || carGun()) && !hudHidden) {
+      agRender(ammoEl, wAmmo);
+      const car = inCar;
+      if (ammoEl._agCar !== car) { ammoEl._agCar = car; ammoEl.classList.toggle("car", car); }
+      if (ammoEl.style.display !== "flex") ammoEl.style.display = "flex";
+    } else if (ammoEl.style.display !== "none") ammoEl.style.display = "none";
     setWeaponStrip();
   }
 
