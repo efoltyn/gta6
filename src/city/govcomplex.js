@@ -3419,18 +3419,24 @@
     // a woven runner, the string and the newels in stone. The eager stair
     // stays what the street and the physics see.
     const FS = CBZ.stateFinish ? CBZ.stateFinish(b, "grandStair") : null;
-    const fin = function (kind, x, y, z, w, h, d, tint) { if (FS) FS.box(kind, x, y, z, w, h, d, tint); };
+    const fin = function (kind, x, y, z, w, h, d, tint, mask) { if (FS) FS.box(kind, x, y, z, w, h, d, tint, mask); };
+    // THE EAGER STAIR IS THE STREET'S AND THE PHYSICS'S, THE FINISH IS ITS
+    // FACE. Each eager mass is DRAWN 1.5 cm under its top, the finish riser stands 1 cm proud of its face
+    // (the collider keeps the full box: buildings.js lbox o.shrink), and the
+    // nosing, the runner and its rods are finish only: the eager copies lay
+    // 3-6 mm under the finish ones and fought them for depth (the flicker).
+    // Each finish piece owns its own patch of surface (tread, nosing and
+    // riser meet edge to edge, never overlapping).
+    const IN = 0.015;            // 1.5 cm: the finish face 1.9 cm off, the drawn tread still within a stride check of the walk top
     function flightMass(zStart, base, n) {
       for (let i = 1; i <= n; i++) {
         const top = base + i * rise, zc = zStart - (i - 0.5) * go, zFront = zStart - (i - 1) * go;
-        b.lbox(xc, top / 2, zc, W, top, go + 0.004, MARBLE, { cast: i === n, stair: true });
-        b.lbox(xc, top - 0.012, zFront - 0.03, W + 0.04, 0.03, 0.07, NOSE, { cast: false, stair: true });
-        b.lbox(xc, top + 0.005, zc, 1.9, 0.012, go - 0.02, RUN, { cast: false, stair: true });
-        b.lbox(xc, top + 0.012, zFront - 0.06, 1.98, 0.012, 0.012, BRASS, { cast: false, stair: true });
-        fin("marble", xc, top + 0.002, zc, W + 0.008, 0.004, go + 0.004, 0xf2efe8);            // the tread
-        fin("marble", xc, top - rise / 2, zFront + 0.002, W + 0.008, rise, 0.004, 0xe8e3d8);    // the riser
-        fin("marble", xc, top - 0.012, zFront - 0.03, W + 0.048, 0.034, 0.074, 0xf6f3ec);       // the nosing
-        fin("rug", xc, top + 0.0125, zc, 1.904, 0.003, go - 0.016, 0xb04a44);                   // the runner
+        b.lbox(xc, top / 2, zc, W, top, go + 0.004, MARBLE, { cast: i === n, stair: true, shrink: [0, 0, 0, IN, 0, 0] });
+        fin("marble", xc, top + 0.002, zc - 0.035, W, 0.004, go - 0.066, 0xf2efe8, 1 | 2 | 4);    // the tread, behind its nosing (only its seen faces: a buried face fights)
+        fin("marble", xc, (top - rise + top - 0.035) / 2, zFront + 0.010, W, rise - 0.035, 0.004, 0xe8e3d8, 1 | 2 | 16);   // the riser, under it
+        fin("marble", xc, top - 0.0145, zFront - 0.024, W + 0.048, 0.039, 0.088, 0xf6f3ec, 63 & ~32);    // the nosing, 1.6 cm proud of the riser
+        fin("rug", xc, top + 0.0125, zc, 1.904, 0.003, go - 0.016, 0xb04a44, 63 & ~8);          // the runner
+        fin("flat", xc, top + 0.021, zFront - 0.06, 1.98, 0.014, 0.014, BRASS, 128 | 3);         // its brass rod (a round)
         // the mass is solid from the hall floor to this tread (a body ON the
         // flight has the next treads' tops within a step of its feet)
         solid(x0, x1, zc - go / 2, zc + go / 2, y0 - 0.05, top);
@@ -3439,17 +3445,16 @@
     }
     flightMass(zBot, y0, n1);
     // the half landing: a marble block with the runner turned across it
-    b.lbox(xc, yL / 2, (zL0 + zL1) / 2, W, yL, zL1 - zL0 + 0.004, MARBLE, { stair: true });
-    b.lbox(xc, yL + 0.005, (zL0 + zL1) / 2, 1.9, 0.012, zL1 - zL0 - 0.1, RUN, { cast: false, stair: true });
-    fin("marble", xc, yL + 0.002, (zL0 + zL1) / 2, W + 0.008, 0.004, zL1 - zL0 + 0.008, 0xf2efe8);
-    fin("rug", xc, yL + 0.0125, (zL0 + zL1) / 2, 1.904, 0.003, zL1 - zL0 - 0.096, 0xb04a44);
+    b.lbox(xc, yL / 2, (zL0 + zL1) / 2, W, yL, zL1 - zL0 + 0.004, MARBLE, { stair: true, shrink: [0, 0, 0, IN, 0, 0] });
+    fin("marble", xc, yL + 0.002, (zL0 + zL1 - 0.002) / 2, W, 0.004, zL1 - zL0 - 0.002, 0xf2efe8, 1 | 2 | 4);   // to the last tread's edge, not over it
+    fin("rug", xc, yL + 0.0125, (zL0 + zL1) / 2, 1.904, 0.003, zL1 - zL0 - 0.096, 0xb04a44, 63 & ~8);
     solid(x0, x1, zL0, zL1, y0 - 0.05, yL);
     flightMass(zL0, yL, n2);
     // the open side's face: a closed string with a moulded cap, stepped to the flights
-    b.lbox(x1 + 0.03, yL / 2, (zL0 + zBot) / 2, 0.06, yL, zBot - zL0, STRING, { cast: false, stair: true });
-    b.lbox(x1 + 0.03, y1 / 2, (zTop + zL0) / 2, 0.06, y1, zL0 - zTop, STRING, { cast: false, stair: true });
-    fin("marble", x1 + 0.03, yL / 2, (zL0 + zBot) / 2, 0.068, yL + 0.004, zBot - zL0 + 0.008, 0xe2ddd2);
-    fin("marble", x1 + 0.03, y1 / 2, (zTop + zL0) / 2, 0.068, y1 + 0.004, zL0 - zTop + 0.008, 0xe2ddd2);
+    b.lbox(x1 + 0.03, yL / 2, (zL0 + zBot) / 2, 0.06, yL, zBot - zL0, STRING, { cast: false, stair: true, shrink: [0.03, 0.01, 0, 0.05, IN, IN] });
+    b.lbox(x1 + 0.03, y1 / 2, (zTop + zL0) / 2, 0.06, y1, zL0 - zTop, STRING, { cast: false, stair: true, shrink: [0.03, 0.01, 0, 0.05, IN, IN] });
+    fin("marble", x1 + 0.032, (yL - 0.04) / 2, (zL0 + zBot) / 2, 0.064, yL - 0.04, zBot - zL0 + 0.008, 0xe2ddd2, 63 & ~8);   // its inner face ON the mass side, never over it; its cap under the nosings
+    fin("marble", x1 + 0.032, (y1 - 0.04) / 2, (zTop + zL0) / 2, 0.064, y1 - 0.04, zL0 - zTop + 0.008, 0xe2ddd2, 63 & ~8);
     // 4. THE BALUSTRADE on the open (east) side: two turned balusters a tread,
     //    a sloped rail per flight and a level one across the landing, newels
     //    at the foot, both landing corners and the head. The rail is SOLID.
@@ -3459,7 +3464,8 @@
         const t = base + (i + 1) * rise;
         for (const f of [0.28, 0.72]) {
           const zz = zStart - (i + f) * go;
-          b.lbox(railX, t + (RH - 0.05) / 2, zz, 0.045, RH - 0.05, 0.045, MARBLE, { cast: false, stair: true });
+          // standing ON the finished tread (its foot was buried in the tread, face to face)
+          b.lbox(railX, t + 0.004 + (RH - 0.054) / 2, zz, 0.045, RH - 0.054, 0.045, MARBLE, { cast: false, stair: true });
         }
       }
       if (b.group) {
@@ -3483,13 +3489,13 @@
     railRun(zL0, yL, n2);
     // across the landing, level
     for (let zz = zL0 + 0.25; zz < zL1 - 0.1; zz += 0.3)
-      b.lbox(railX, yL + (RH - 0.05) / 2, zz, 0.045, RH - 0.05, 0.045, MARBLE, { cast: false, stair: true });
+      b.lbox(railX, yL + 0.004 + (RH - 0.054) / 2, zz, 0.045, RH - 0.054, 0.045, MARBLE, { cast: false, stair: true });
     b.lbox(railX, yL + RH + 0.02, (zL0 + zL1) / 2, 0.09, 0.07, zL1 - zL0, BRASS, { cast: false, stair: true });
     solid(x1 - 0.12, x1 + 0.06, zL0, zL1, yL + 0.1, yL + RH + 0.05);
     const newels = [[zBot + 0.18, y0], [zL1, yL], [zL0, yL], [zTop - 0.2, y1]];
     for (const e of newels) {
-      b.lbox(railX, e[1] + 0.6, e[0], 0.3, 1.2, 0.3, MARBLE, { stair: true });
-      fin("marble", railX, e[1] + 0.6, e[0], 0.308, 1.204, 0.308, 0xf0ece4);
+      b.lbox(railX, e[1] + 0.6, e[0], 0.3, 1.2, 0.3, MARBLE, { stair: true, shrink: [0.03, 0.03, 0, 0.03, 0.03, 0.03] });
+      fin("marble", railX, e[1] + 0.6, e[0], 0.308, 1.204, 0.308, 0xf0ece4, 63 & ~8);   // its foot is in the floor
       b.lbox(railX, e[1] + 1.25, e[0], 0.36, 0.1, 0.36, NOSE, { cast: false, stair: true });
       b.lbox(railX, e[1] + 1.36, e[0], 0.16, 0.12, 0.16, BRASS, { cast: false, stair: true });
     }

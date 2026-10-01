@@ -1447,12 +1447,16 @@
       if (los !== false) { if (CBZ.losBlockers) CBZ.losBlockers.push(m); if (b.losMeshes) b.losMeshes.push(m); }
       return m;
     }
-    wall(D0 - 0.09, D1, L0 - side * 0.09, L0 + side * 0.09, 0, wallTop);                  // the shaft wall (lane A's outer side)
+    // (the shaft wall and the stub run 1 cm past the slab's hole edge: their
+    // ends lay in its plane, the slab's edge and the steel in one face)
+    wall(D0 - 0.10, D1, L0 - side * 0.09, L0 + side * 0.09, 0, wallTop);                  // the shaft wall (lane A's outer side)
     const dL0 = latMid - side * CORE_DOORHALF, dL1 = latMid + side * CORE_DOORHALF;
-    if (Math.abs(dL0 - L0) > 0.12) wall(D0 - 0.09, D0 + 0.09, L0, dL0, 0, wallTop);       // door stubs
+    if (Math.abs(dL0 - L0) > 0.12) wall(D0 - 0.09, D0 + 0.09, L0 - side * 0.01, dL0, 0, wallTop);       // door stubs
     if (Math.abs(L1 - dL1) > 0.12) wall(D0 - 0.09, D0 + 0.09, dL1, L1, 0, wallTop);
     for (let k = 0; k <= kTop; k++) {                                                      // header over each doorway
-      const hy0 = tops[k] + CORE_DOORH, hy1 = k < nFloors ? tops[k + 1] : wallTop;
+      // (stopping 1.2 cm under the next floor's top: flush with it, its top
+      // face lay in the slab's at the stair door's threshold, two floors in one plane)
+      const hy0 = tops[k] + CORE_DOORH, hy1 = k < nFloors ? tops[k + 1] - 0.012 : wallTop;
       if (hy1 - hy0 > 0.1) wall(D0 - 0.09, D0 + 0.09, dL0, dL1, hy0, hy1);
     }
     if (roofAccess) {
@@ -1512,17 +1516,24 @@
         const lc = lane === 0 ? aC : bC, base = lane === 0 ? y0 : y1;
         for (let i = 1; i <= nSteps; i++) {
           const vt = base + i * rise;
-          const dC = lane === 0 ? dA0 + (i - 0.5) * go : dA1 - (i - 0.5) * go;
+          // the tread oversails its riser by 1.5 cm and runs 1.5 cm under the
+          // next one; the TOP tread stops at the landing's edge (it ran 1.5 cm
+          // into the landing, the two tops face to face). The riser stands
+          // UNDER its tread (it ran up through it: two faces in one plane)
+          const ext = i === nSteps ? 0.015 : 0.03, dOff = (i - 1) * go - 0.015 + (go + ext) / 2;
+          const dC = lane === 0 ? dA0 + dOff : dA1 - dOff;
           const dR = lane === 0 ? dA0 + (i - 1) * go : dA1 - (i - 1) * go;
-          dbox(COREC.tread, dC, lc, vt - 0.025, go + 0.03, laneW - 0.04, 0.05);
-          dbox(COREC.riser, dR, lc, vt - rise / 2, 0.03, laneW - 0.06, rise);
+          dbox(COREC.tread, dC, lc, vt - 0.025, go + ext, laneW - 0.04, 0.05);
+          dbox(COREC.riser, dR, lc, vt - 0.05 - (rise - 0.05) / 2, 0.03, laneW - 0.06, rise - 0.05);
         }
         const dF = lane === 0 ? dA0 : dA1, dT = lane === 0 ? dA1 : dA0;
         slope(COREC.soffit, dF, base - 0.16, dT, base + (y1 - y0) - 0.16, lc, laneW - 0.02, 0.14);
         const railLat = latMid + (lane === 0 ? -side : side) * 0.06;
         slope(COREC.rail, dF, base + 0.92, dT, base + (y1 - y0) + 0.92, railLat, 0.05, 0.06);
         for (let i = 0; i <= nSteps; i += 2) {
-          const dAt = lane === 0 ? dA0 + i * go : dA1 - i * go;
+          // a baluster stands in the middle of its tread (on the riser line
+          // it shared the riser's and the nosing's faces)
+          const dAt = lane === 0 ? dA0 + (i - 0.5) * go : dA1 - (i - 0.5) * go;
           dbox(COREC.rail, dAt, railLat, base + i * rise + 0.46, 0.035, 0.035, 0.92);
         }
       }

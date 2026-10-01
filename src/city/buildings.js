@@ -3683,6 +3683,15 @@
       const m = new THREE.Mesh(unitBoxGeo(!!o.los, ly - bh / 2 <= 0.2), mm);
       m.position.set(lx, ly, lz);
       m.scale.set(bw, bh, bd);
+      // o.shrink [-x, +x, -y, +y, -z, +z]: the DRAWN box stands that far in
+      // from the solid one on each side (the collider keeps the full box). A
+      // house of state's partition is drawn 3 cm inside its own faces, so the
+      // fit-out's plaster skin over it never shares its depth (the flicker).
+      const k = o.shrink;
+      if (k) {
+        m.position.set(lx + (k[0] - k[1]) / 2, ly + (k[2] - k[3]) / 2, lz + (k[4] - k[5]) / 2);
+        m.scale.set(Math.max(0.002, bw - k[0] - k[1]), Math.max(0.002, bh - k[2] - k[3]), Math.max(0.002, bd - k[4] - k[5]));
+      }
       m.castShadow = o.cast !== false; m.receiveShadow = true;
       bgroup.add(m);
       if (o.solid) {
@@ -3716,8 +3725,11 @@
     const DJAMB = 0.18;               // casing reveal width (covers the ~0.08 slit + reads as trim)
     function doorFrameHoriz(fz) {
       const jx = (DLEAF_W / 2 + DJAMB / 2);   // jamb centre, just outside the leaf edge
-      lbox(-jx, DLEAF_H / 2 + 0.02, fz, DJAMB, DLEAF_H + 0.04, WT, color, { los: true });   // left jamb
-      lbox(jx, DLEAF_H / 2 + 0.02, fz, DJAMB, DLEAF_H + 0.04, WT, color, { los: true });    // right jamb
+      // the jambs stand 1 cm proud of both faces of the wall (flush, they lay
+      // in the wall's own plane over its plinth course: one colour shaded two
+      // ways, flickering)
+      lbox(-jx, DLEAF_H / 2 + 0.02, fz, DJAMB, DLEAF_H + 0.04, WT + 0.02, color, { los: true });   // left jamb
+      lbox(jx, DLEAF_H / 2 + 0.02, fz, DJAMB, DLEAF_H + 0.04, WT + 0.02, color, { los: true });    // right jamb
       // lintel: from the leaf top up to the wall header bottom (DOORH), full DOORW
       lbox(0, (DLEAF_H + DOORH) / 2, fz, DOORW, DOORH - DLEAF_H, WT, color, { los: true });
       // a slim casing lip proud of the street face so the doorway reads framed.
@@ -3728,8 +3740,8 @@
     }
     function doorFrameVert(fx) {
       const jz = (DLEAF_W / 2 + DJAMB / 2);
-      lbox(fx, DLEAF_H / 2 + 0.02, -jz, WT, DLEAF_H + 0.04, DJAMB, color, { los: true });
-      lbox(fx, DLEAF_H / 2 + 0.02, jz, WT, DLEAF_H + 0.04, DJAMB, color, { los: true });
+      lbox(fx, DLEAF_H / 2 + 0.02, -jz, WT + 0.02, DLEAF_H + 0.04, DJAMB, color, { los: true });
+      lbox(fx, DLEAF_H / 2 + 0.02, jz, WT + 0.02, DLEAF_H + 0.04, DJAMB, color, { los: true });
       lbox(fx, (DLEAF_H + DOORH) / 2, 0, WT, DOORH - DLEAF_H, DOORW, color, { los: true });
       const fxo = fx + (f0OutX(fx) * (WT / 2 + 0.04));
       dbox(fxo, DOORH + 0.06, 0, 0.1, 0.14, DOORW + 0.3, TRIM);

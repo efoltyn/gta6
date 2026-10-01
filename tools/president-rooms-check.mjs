@@ -116,6 +116,10 @@ for (const R of runs) {
   // the lead's shell() (floor covering 0x33373f, ceiling strip 0xeef2ff) is not this plan's
   const SHELL = new Set(["33373f", "eef2ff"]);
   const boxes = R.meshes.filter((m) => m.visible !== false && !SHELL.has(hex(m))).map((m) => { const a = aabb(m); a.m = m; a.rot = Math.abs(m.rotation.y) > 1e-4; a.x0 -= gx; a.x1 -= gx; a.z0 -= gz; a.z1 -= gz; return a; });
+  // THE GHOSTS: a solid the fit-out draws (interior_programs.js ghost(): a
+  // sofa, a column, a stage, a kitchen run) is an invisible collider box
+  // here. It is still a BODY: what stands on it stands, what it covers is covered
+  const ghosts = R.meshes.filter((m) => m.visible === false).map((m) => { const a = aabb(m); a.m = m; a.rot = Math.abs(m.rotation.y) > 1e-4; a.x0 -= gx; a.x1 -= gx; a.z0 -= gz; a.z1 -= gz; a.ghost = true; return a; });
   const plats = CBZ.platforms.filter((p) => Math.abs(p.top - Y) < 1.0);
   const lx = (x) => x - b.ox, lz = (z) => z - b.oz;
   // FLOOR LAW
@@ -128,7 +132,7 @@ for (const R of runs) {
     const carried = plats.some((p) => cx >= p.minX && cx <= p.maxX && cz >= p.minZ && cz <= p.maxZ && p.top >= a.y1 - 0.012);
     // only the TOPMOST surface is walked on: a plinth under a carcass is not a floor
     const lcx = (a.x0 + a.x1) / 2, lcz = (a.z0 + a.z1) / 2;
-    const covered = boxes.some((o) => o !== a && o.y0 <= a.y1 + 0.012 && o.y1 > a.y1 + 0.01 &&
+    const covered = boxes.concat(ghosts).some((o) => o !== a && o.y0 <= a.y1 + 0.012 && o.y1 > a.y1 + 0.01 &&
       o.x0 <= a.x0 + 0.02 && o.x1 >= a.x1 - 0.02 && o.z0 <= a.z0 + 0.02 && o.z1 >= a.z1 - 0.02);
     if (!carried && !covered) law.push(hex(a.m) + " top+" + top.toFixed(3) + " " + w.toFixed(2) + "x" + d.toFixed(2) + " @" + ((a.x0 + a.x1) / 2).toFixed(1) + "," + ((a.z0 + a.z1) / 2).toFixed(1));
   }
@@ -169,7 +173,7 @@ for (const R of runs) {
     const S = { x0: -b.w / 2 + wt, x1: b.w / 2 - wt, z0: -b.d / 2 + wt, z1: b.d / 2 - wt };
     // a potted tree's leaves hang round its trunk by design (furniture.js)
     const LEAF = new Set(["3f7a45", "5a8f4a", "2f6338", "5a4632"]);
-    const all = boxes.filter((a) => !LEAF.has(hex(a.m))).map((a) => ({ a, ok: false }));
+    const all = boxes.concat(ghosts).filter((a) => !LEAF.has(hex(a.m))).map((a) => ({ a, ok: false }));
     const near = (p, q, e) => p.x0 <= q.x1 + e && p.x1 >= q.x0 - e && p.z0 <= q.z1 + e && p.z1 >= q.z0 - e && p.y0 <= q.y1 + e && p.y1 >= q.y0 - e;
     const solids = R.cols.filter((c) => (c.y1 - c.y0) > 2.3).map((c) => ({ x0: c.minX - b.ox, x1: c.maxX - b.ox, z0: c.minZ - b.oz, z1: c.maxZ - b.oz, y0: c.y0, y1: c.y1 }));
     // the stair core's and the lead's partitions are walls too (colliders made before this program)
@@ -178,7 +182,8 @@ for (const R of runs) {
     if (b._sitRoom && R.k === 0) { const q = b._sitRoom; solids.push({ x0: q.minX - b.ox, x1: q.maxX - b.ox, z0: q.minZ - b.oz, z1: q.maxZ - b.oz, y0: Y, y1: R.ceil }); }
     for (const n of all) {
       const a = n.a;
-      if (a.y0 <= Y + 0.03 || a.y1 >= R.ceil - 0.025) n.ok = true;
+      // (a ghost stands on the legs, the plinth, the frame the finish draws for it)
+      if (a.ghost || a.y0 <= Y + 0.03 || a.y1 >= R.ceil - 0.025) n.ok = true;
       else if (a.x0 <= S.x0 + 0.06 || a.x1 >= S.x1 - 0.06 || a.z0 <= S.z0 + 0.06 || a.z1 >= S.z1 - 0.06) n.ok = true;
       else if (solids.some((w) => near(a, w, 0.03))) n.ok = true;
     }

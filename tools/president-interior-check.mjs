@@ -72,6 +72,8 @@ const CBZ = ctx.CBZ = {
   markCollidersDirty() {}, markPlatformsDirty() {},
 };
 CBZ.mat = CBZ.cmat;
+// FIGHTS=<file>: the state plans file who drew each finish piece (the dump names them)
+if (process.env.FIGHTS) CBZ.FIN_TRACE = true;
 for (const rel of ["src/systems/stairs.js", "src/city/buildings_civic.js", "src/city/buildings.js", "src/city/fitout.js", "src/city/interior_programs.js",
   "src/city/elevators.js", "src/city/furniture.js", "src/world/roombuild.js", "src/city/govcomplex.js"]) load(rel);
 
@@ -158,7 +160,10 @@ function facesOf(b) {
       const bx = P[2][0] - P[0][0], by = P[2][1] - P[0][1], bz = P[2][2] - P[0][2];
       const cxn = ay * bz - az * by, cyn = az * bx - ax * bz, czn = ax * by - ay * bx, cl = Math.hypot(cxn, cyn, czn) || 1;
       const area = 0.5 * cl;
-      out.push({ x0, x1, y0, y1, z0, z1, area, kind, fit, m, nx: cxn / cl, ny: cyn / cl, nz: czn / cl,
+      // what the face LOOKS like: its material and its (vertex) colour
+      const ca = g.attributes.color, v0 = idx ? idx.getX(t) : t;
+      const rgb = ca ? [ca.getX(v0), ca.getY(v0), ca.getZ(v0)] : m.material && m.material.color ? [m.material.color.r, m.material.color.g, m.material.color.b] : [1, 1, 1];
+      out.push({ x0, x1, y0, y1, z0, z1, area, kind, fit, m, nx: cxn / cl, ny: cyn / cl, nz: czn / cl, rgb,
         P: [P[0].slice(), P[1].slice(), P[2].slice()] });
     }
   });
@@ -213,6 +218,164 @@ for (const b of blds) {
   const tag = b === blds[0] ? "Mansion" : "West Wing";
   ok(!intr.length, tag + ": nothing stands in any doorway (" + intr.length + " of " + mine.length + " openings crossed)", intr);
   ok(!uncased.length, tag + ": every opening is cased on both faces (" + uncased.length + ")", uncased);
+}
+
+// ---- DEPTH FIGHTS: two drawn faces looking the same way, nearly coplanar ----
+// OWNER (iPad, 2026-10-01): "The walls are flickering." Two faces that face
+// the same way and overlap on screen, a few millimetres apart, quantise to
+// the same depth on a phone's depth buffer and flicker in stair-steps as the
+// camera moves (a 6 mm plaster skin over the plan wall, a 4 mm arch soffit
+// round its eager box). Every drawn triangle of both buildings (eager and
+// fitted, every floor fitted at once) is filed by its quantised normal and
+// its plane offset; any pair of triangles facing the same way, within TOL of
+// each other's plane and overlapping by more than a square centimetre in
+// that plane, is a fight. The gate is zero within 5 mm, and zero within
+// 20 mm too: that is what a 16-bit depth buffer (some mobile GPUs) cannot
+// separate across a room (0.1 m near plane, 11 m away).
+const DEPTH = {};
+function tri2(t, U, V) { return t.P.map((p) => [p[0] * U[0] + p[1] * U[1] + p[2] * U[2], p[0] * V[0] + p[1] * V[1] + p[2] * V[2]]); }
+function polyArea(P) { let a = 0; for (let i = 0; i < P.length; i++) { const p = P[i], q = P[(i + 1) % P.length]; a += p[0] * q[1] - q[0] * p[1]; } return a / 2; }
+function clipPoly(subj, clip) {
+  // Sutherland-Hodgman against a convex clip polygon of either winding
+  const ccw = polyArea(clip) > 0;
+  let out = subj;
+  for (let i = 0; i < clip.length && out.length; i++) {
+    const A = clip[i], B = clip[(i + 1) % clip.length];
+    const side = (p) => { const s = (B[0] - A[0]) * (p[1] - A[1]) - (B[1] - A[1]) * (p[0] - A[0]); return ccw ? s : -s; };
+    const inp = out; out = [];
+    for (let j = 0; j < inp.length; j++) {
+      const P = inp[j], Q = inp[(j + 1) % inp.length], sp = side(P), sq = side(Q);
+      if (sp >= 0) out.push(P);
+      if ((sp >= 0) !== (sq >= 0)) { const t = sp / (sp - sq); out.push([P[0] + (Q[0] - P[0]) * t, P[1] + (Q[1] - P[1]) * t]); }
+    }
+  }
+  return out;
+}
+function depthFights(b, TOL) {
+  // the interior: inside the shell's inner faces (the facade's inner face
+  // included), from the ground floor's top up
+  const S = CBZ.interiorShellRect(b), y0 = (b.floorTops && b.floorTops[0] != null ? b.floorTops[0] : 0) - 0.05;
+  // THE SLAB SANDWICH: from a storey's finished ceiling up to the finished
+  // floor over it nothing is seen from either room (and over the top storey's
+  // ceiling is the roof), except down a stair or a shaft
+  const FP = CBZ.stateFinishPlanes || { floor: 0.01, ceil: 0.03, slab: 0.2 }, tops = b.floorTops || [];
+  const shafts = b.shaftRects || [];
+  const sandwiched = (cx, cy, cz) => {
+    for (const h of shafts) if (cx > h.x0 - 0.05 && cx < h.x1 + 0.05 && cz > h.z0 - 0.05 && cz < h.z1 + 0.05) return false;
+    for (let k = 1; k < tops.length; k++) {
+      if (cy > tops[k] - FP.slab - FP.ceil + 0.002 && cy < tops[k] + FP.floor - 0.001) return true;
+    }
+    return tops.length > 1 && cy > tops[tops.length - 1] - FP.slab - FP.ceil + 0.002;
+  };
+  const tris = facesFor(b).filter((t) => {
+    if (!(t.area > 2e-5) || t.kind === "glass") return false;
+    const cx = (t.P[0][0] + t.P[1][0] + t.P[2][0]) / 3, cy = (t.P[0][1] + t.P[1][1] + t.P[2][1]) / 3, cz = (t.P[0][2] + t.P[1][2] + t.P[2][2]) / 3;
+    if (sandwiched(cx, cy, cz)) return false;
+    // on the shell's inner face but looking out of the building: the outside
+    if (S && ((cx < S.x0 + 0.03 && t.nx < -0.7) || (cx > S.x1 - 0.03 && t.nx > 0.7) || (cz < S.z0 + 0.03 && t.nz < -0.7) || (cz > S.z1 - 0.03 && t.nz > 0.7))) return false;
+    return cy > y0 && (!S || (cx > S.x0 - 0.03 && cx < S.x1 + 0.03 && cz > S.z0 - 0.03 && cz < S.z1 + 0.03));
+  });
+  const groups = new Map();
+  for (const t of tris) {
+    const k = Math.round(t.nx * 400) + "," + Math.round(t.ny * 400) + "," + Math.round(t.nz * 400);
+    let g = groups.get(k); if (!g) groups.set(k, g = []); g.push(t);
+  }
+  const out = [];
+  const C = 0.5, OB = Math.max(TOL, 0.002);
+  for (const g of groups.values()) {
+    if (g.length < 2) continue;
+    const n = [g[0].nx, g[0].ny, g[0].nz];
+    const a = Math.abs(n[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
+    let U = [n[1] * a[2] - n[2] * a[1], n[2] * a[0] - n[0] * a[2], n[0] * a[1] - n[1] * a[0]];
+    const ul = Math.hypot(U[0], U[1], U[2]); U = U.map((v) => v / ul);
+    const V = [n[1] * U[2] - n[2] * U[1], n[2] * U[0] - n[0] * U[2], n[0] * U[1] - n[1] * U[0]];
+    const grid = new Map();
+    for (const t of g) {
+      t._o = t.P[0][0] * n[0] + t.P[0][1] * n[1] + t.P[0][2] * n[2];
+      t._q = tri2(t, U, V);
+      let u0 = 1e9, u1 = -1e9, v0 = 1e9, v1 = -1e9;
+      for (const p of t._q) { u0 = Math.min(u0, p[0]); u1 = Math.max(u1, p[0]); v0 = Math.min(v0, p[1]); v1 = Math.max(v1, p[1]); }
+      t._bb = [u0, u1, v0, v1];
+      const ob = Math.floor(t._o / OB);
+      for (let gu = Math.floor(u0 / C); gu <= Math.floor(u1 / C); gu++)
+        for (let gv = Math.floor(v0 / C); gv <= Math.floor(v1 / C); gv++) {
+          const key = gu + "," + gv + "," + ob; let L = grid.get(key); if (!L) grid.set(key, L = []); L.push(t);
+        }
+    }
+    const seen = new Set();
+    for (const [key, L] of grid) {
+      const kk = key.split(",").map(Number);
+      const M = L.concat(grid.get(kk[0] + "," + kk[1] + "," + (kk[2] + 1)) || []);
+      for (let i = 0; i < L.length; i++) for (let j = 0; j < M.length; j++) {
+        const A = L[i], B = M[j];
+        if (A === B) continue;
+        const gap = Math.abs(A._o - B._o);
+        if (gap > TOL) continue;
+        // two faces that LOOK the same (one material, one colour within 4%)
+        // render the same whichever wins the depth test: no flicker
+        if (A.m.material === B.m.material && Math.abs(A.rgb[0] - B.rgb[0]) < 0.04 && Math.abs(A.rgb[1] - B.rgb[1]) < 0.04 && Math.abs(A.rgb[2] - B.rgb[2]) < 0.04) continue;
+        if (A._bb[1] <= B._bb[0] || B._bb[1] <= A._bb[0] || A._bb[3] <= B._bb[2] || B._bb[3] <= A._bb[2]) continue;
+        const id = A._id < B._id ? A._id + ":" + B._id : B._id + ":" + A._id;
+        if (seen.has(id)) continue; seen.add(id);
+        const area = Math.abs(polyArea(clipPoly(A._q, B._q)));
+        if (area < 1e-4) continue;
+        out.push({ A, B, gap, area });
+      }
+    }
+  }
+  return out;
+}
+// which finish piece a fitted face belongs to (FIGHTS dumps only): the filed
+// boxes whose volume holds the face's centroid
+function finSource(t) {
+  if (!t.fit) return "eager " + (t.m.name || "") ;
+  const cx = (t.P[0][0] + t.P[1][0] + t.P[2][0]) / 3, cy = (t.P[0][1] + t.P[1][1] + t.P[2][1]) / 3, cz = (t.P[0][2] + t.P[1][2] + t.P[2][2]) / 3;
+  const names = new Set();
+  for (const b of blds) {
+    const site = CBZ.fitoutSiteOf(b);
+    if (!site) continue;
+    for (const k in site.floors) {
+      const inf = site.floors[k].info || {}, fin = inf.fin, tr = inf.trace;
+      if (!fin || !tr) continue;
+      for (let i = 0, j = 0; i + 9 < fin.length; i += 10, j++) {
+        const yaw = fin[i + 8], c = Math.cos(yaw), s = Math.sin(yaw);
+        const dx = cx - fin[i], dz = cz - fin[i + 2];
+        const lx = dx * c - dz * s, lz = dx * s + dz * c;
+        if (Math.abs(lx) <= fin[i + 3] / 2 + 0.002 && Math.abs(cy - fin[i + 1]) <= fin[i + 4] / 2 + 0.002 && Math.abs(lz) <= fin[i + 5] / 2 + 0.002) names.add(tr[j]);
+      }
+    }
+  }
+  return [...names].slice(0, 3).join(" & ") || "?";
+}
+{
+  let id = 0;
+  for (const b of blds) for (const t of facesFor(b)) t._id = id++;
+  const lab = (t) => (t.fit ? "fit:" : "eager:") + t.kind;
+  for (const TOL of [0.005, 0.02]) {
+    let tot = 0; const kinds = new Map(), where = [];
+    for (const b of blds) {
+      const FF = depthFights(b, TOL);
+      tot += FF.length;
+      for (const f of FF) {
+        const k = [lab(f.A), lab(f.B)].sort().join(" / ");
+        const e = kinds.get(k) || { n: 0, area: 0, gap: 0 }; e.n++; e.area += f.area; e.gap = Math.max(e.gap, f.gap); kinds.set(k, e);
+        if (where.length < (process.env.FIGHTS ? 1e6 : 300)) where.push((process.env.FIGHTS ? "[" + finSource(f.A) + " | " + finSource(f.B) + "] " : "") +k + " gap " + (f.gap * 1000).toFixed(1) + " mm @" + ((f.A.x0 + f.A.x1) / 2).toFixed(2) + "," + ((f.A.y0 + f.A.y1) / 2).toFixed(2) + "," + ((f.A.z0 + f.A.z1) / 2).toFixed(2) + " n " + [f.A.nx, f.A.ny, f.A.nz].map((v) => v.toFixed(2)).join(",") +
+          (process.env.FIGHTS ? " | A box " + [f.A.x0, f.A.x1, f.A.y0, f.A.y1, f.A.z0, f.A.z1].map((v) => v.toFixed(3)).join(",") + " B box " + [f.B.x0, f.B.x1, f.B.y0, f.B.y1, f.B.z0, f.B.z1].map((v) => v.toFixed(3)).join(",") : ""));
+      }
+    }
+    const rows = [...kinds.entries()].sort((p, q) => q[1].area - p[1].area).map(([k, e]) => k + ": " + e.n + " pairs, " + e.area.toFixed(2) + " m2, max gap " + (e.gap * 1000).toFixed(1) + " mm");
+    DEPTH[TOL] = tot;
+    // FIGHTS=<file>: every fight within 5 mm, one per line (kinds, gap, where, facing)
+    if (process.env.FIGHTS && TOL < 0.01) fs.writeFileSync(process.env.FIGHTS, where.join("\n") + "\n");
+    if (TOL < 0.01) ok(tot === 0, "no two drawn faces fight for depth (same facing, overlapping, within " + (TOL * 1000) + " mm): " + tot + " pairs", rows.concat(VERBOSE ? where : []));
+    else {
+      // a 24-bit depth buffer (what WebKit allocates when OES_depth24 is
+      // there, i.e. every iPad/iPhone GPU) separates 1 mm at 30 m from a
+      // 0.1 m near plane; this count is what a 16-bit buffer could not
+      console.log("       (report) same-facing overlaps within 20 mm, a 16-bit depth buffer's blind band at 11 m: " + tot + " pairs");
+      if (VERBOSE) for (const r of rows.slice(0, 12)) console.log("         " + r);
+    }
+  }
 }
 
 // ---- MATERIALS, per room ------------------------------------------------------
@@ -340,15 +503,159 @@ ok(!bad.length, "every state room shows real finishes (<=35% of its visible area
   ok(panelled >= 8, "wood panelling, bookcases and veneered joinery in the offices and libraries: " + panelled + " rooms");
 }
 
+// ---- ON THE WALL: everything hung on a wall sits on its finished face ------
+// OWNER (iPad): "You can see the TV's covered up." The set was hung square to
+// the radius, 2 cm off the Oval's curve at its middle: both ends of a 2 m
+// panel were inside the plaster. Every mount the plans file
+// (CBZ.stateMountsAll: paintings, sconces, fireplaces, bookcases, mirrors,
+// the President's television) is measured against what is DRAWN:
+//   ON IT     beside it, the finished wall is the mount's back plane (within
+//             8 mm); the television's bracket is its only stand-off
+//   CLEAR     nothing drawn passes through its volume but its own pieces (a
+//             skirting, a dado, a chair rail, a panel, a wall facet through a
+//             painting or the screen is the owner's "covered up")
+//   OPEN      nothing stands within 15 cm in front of its face
+const MOUNTS = CBZ.stateMountsAll ? CBZ.stateMountsAll() : [];
+const OWN = {
+  painting: ["flat", "oil", "glow"], sconce: ["flat", "paint", "glow"], fireplace: ["marble", "flat", "glow"],
+  bookcase: ["veneer", "flat"], mirror: ["flat", "flat#cfe2ee"], stage: ["carpet", "flat", "fabric", "flat#4a3524", "flat#22324f", "flat#23262b", "textured"], tv: [],
+};
+function rayHits(b, ox, oy, oz, dx, dy, dz, maxT) {
+  const out = [];
+  for (const t of facesFor(b)) {
+    // a quick reject on the triangle's box against the segment's box
+    const ex = ox + dx * maxT, ey = oy + dy * maxT, ez = oz + dz * maxT;
+    if (t.x1 < Math.min(ox, ex) - 1e-3 || t.x0 > Math.max(ox, ex) + 1e-3 || t.y1 < Math.min(oy, ey) - 1e-3 || t.y0 > Math.max(oy, ey) + 1e-3 || t.z1 < Math.min(oz, ez) - 1e-3 || t.z0 > Math.max(oz, ez) + 1e-3) continue;
+    const A = t.P[0], B = t.P[1], C = t.P[2];
+    const e1x = B[0] - A[0], e1y = B[1] - A[1], e1z = B[2] - A[2], e2x = C[0] - A[0], e2y = C[1] - A[1], e2z = C[2] - A[2];
+    const px = dy * e2z - dz * e2y, py = dz * e2x - dx * e2z, pz = dx * e2y - dy * e2x;
+    const det = e1x * px + e1y * py + e1z * pz;
+    if (Math.abs(det) < 1e-12) continue;
+    const inv = 1 / det, sx = ox - A[0], sy = oy - A[1], sz = oz - A[2];
+    const u = (sx * px + sy * py + sz * pz) * inv; if (u < 0 || u > 1) continue;
+    const qx = sy * e1z - sz * e1y, qy = sz * e1x - sx * e1z, qz = sx * e1y - sy * e1x;
+    const v = (dx * qx + dy * qy + dz * qz) * inv; if (v < 0 || u + v > 1) continue;
+    const tt = (e2x * qx + e2y * qy + e2z * qz) * inv;
+    if (tt >= 0 && tt <= maxT) out.push({ t: tt, tri: t });
+  }
+  return out;
+}
+{
+  ok(MOUNTS.length >= 40 && MOUNTS.some((m) => m.kind === "tv"), "the plans file what hangs on their walls: " + MOUNTS.length + " (" + [...new Set(MOUNTS.map((m) => m.kind))].join(", ") + ")");
+  const bad = { on: [], clear: [], open: [] };
+  for (const m of MOUNTS) {
+    if (m.trimOnly) continue;
+    const b = blds.find((q) => q.ox === m.b.ox && q.oz === m.b.oz) || m.b;
+    const tag = m.kind + " @" + m.x.toFixed(2) + "," + ((m.y0 + m.y1) / 2).toFixed(2) + "," + m.z.toFixed(2);
+    const own = OWN[m.kind] || [];
+    const P = (u, n, y) => [m.x + m.ux * u + m.nx * n, y, m.z + m.uz * u + m.nz * n];
+    // ON IT: the finished wall beside it (and, for the set, behind it)
+    {
+      const ym = (m.y0 + m.y1) / 2;
+      const probes = m.kind === "tv" ? [0] : [-(m.w / 2 + 0.04), m.w / 2 + 0.04];
+      for (const u of probes) {
+        const o = P(u, 0.45, ym);
+        // the finished wall: the deepest FITTED face looking out (the plan's
+        // own wall stands 3 cm behind the plaster on purpose)
+        // (to 8 cm behind its back plus its bracket: not through the wall into the next room)
+        const hs = rayHits(b, o[0], o[1], o[2], -m.nx, 0, -m.nz, 0.45 + 0.08 + (m.bracket || 0)).filter((h) => h.tri.fit && h.tri.nx * m.nx + h.tri.nz * m.nz > 0.7);
+        if (!hs.length) continue;
+        const wallAt = 0.45 - Math.max.apply(null, hs.map((h) => h.t));        // the deepest face's offset from the back plane
+        const want = m.kind === "tv" ? -(m.bracket || 0) : 0;
+        if (Math.abs(wallAt - want) > (m.kind === "tv" ? 0.012 : 0.008)) bad.on.push(tag + " wall " + (wallAt * 1000).toFixed(0) + " mm off its back (wants " + (want * 1000).toFixed(0) + ")" +
+          (VERBOSE ? " u " + u.toFixed(2) + " hits " + hs.map((h) => h.tri.kind + "@" + (0.45 - h.t).toFixed(3)).join(" ") : ""));
+      }
+    }
+    // CLEAR: sample every triangle near it; a stranger's point inside its volume
+    {
+      const half = m.w / 2 - 0.006, n0 = 0.003, n1 = m.depth - 0.003, y0 = m.y0 + 0.006, y1 = m.y1 - 0.006;
+      const cx = m.x + m.nx * m.depth / 2, cz = m.z + m.nz * m.depth / 2, R = Math.hypot(m.w / 2, m.depth) + 0.05;
+      let hit = null;
+      for (const t of facesFor(b)) {
+        if (t.x1 < cx - R || t.x0 > cx + R || t.z1 < cz - R || t.z0 > cz + R || t.y1 < y0 || t.y0 > y1) continue;
+        if (own.indexOf(t.kind) >= 0 || own.indexOf(t.kind.replace(/^flat#/, "flat#")) >= 0) continue;
+        if (m.kind === "tv" && t.kind === "flat#cfe2ee") continue;
+        for (const w of [[1 / 3, 1 / 3], [1, 0], [0, 1], [0, 0], [0.5, 0.5], [0.5, 0], [0, 0.5], [0.2, 0.6], [0.6, 0.2], [0.2, 0.2]]) {
+          const a = 1 - w[0] - w[1];
+          const x = t.P[0][0] * a + t.P[1][0] * w[0] + t.P[2][0] * w[1], y = t.P[0][1] * a + t.P[1][1] * w[0] + t.P[2][1] * w[1], z = t.P[0][2] * a + t.P[1][2] * w[0] + t.P[2][2] * w[1];
+          const dx = x - m.x, dz = z - m.z, u = dx * m.ux + dz * m.uz, n = dx * m.nx + dz * m.nz;
+          if (Math.abs(u) < half && n > n0 && n < n1 && y > y0 && y < y1) { hit = t.kind + (t.fit ? "" : " (eager)") + " " + (n * 1000).toFixed(0) + " mm out"; break; }
+        }
+        if (hit) break;
+      }
+      if (hit) bad.clear.push(tag + " crossed by " + hit);
+    }
+    // OPEN: nothing within 15 cm in front of its face (three rays across it)
+    if (m.kind !== "stage") {
+      for (const u of [-m.w * 0.3, 0, m.w * 0.3]) {
+        const o = P(u, m.depth + 0.004, (m.y0 + m.y1) / 2);
+        const hs = rayHits(b, o[0], o[1], o[2], m.nx, 0, m.nz, 0.15);
+        if (hs.length) { bad.open.push(tag + " faced by " + hs[0].tri.kind + " " + (hs[0].t * 100).toFixed(0) + " cm in front"); break; }
+      }
+    }
+  }
+  ok(!bad.on.length, "every mount sits ON the finished wall (" + bad.on.length + " off it)", bad.on);
+  ok(!bad.clear.length, "nothing passes through a mount: no trim, rail, panel or wall facet over a painting, a fireplace or the screen (" + bad.clear.length + ")", bad.clear);
+  ok(!bad.open.length, "nothing stands over a mount's face (" + bad.open.length + ")", bad.open);
+  const tv = MOUNTS.find((m) => m.kind === "tv");
+  if (tv) console.log("       the President's set: " + tv.w.toFixed(2) + " m on a " + ((tv.bracket || 0) * 100).toFixed(1) + " cm bracket off the Oval's curve, its edges clear of the plaster");
+}
+
+// ---- THE DOORS LOOK LIKE DOORS -----------------------------------------------
+// OWNER: "they don't even look like doors until you press them and open them".
+// Every door of the two buildings, dressed as walking up to it dresses it:
+// its real leaf hangs SHUT in the doorway (the flat slab is hidden), with
+// raised panels (six on a full leaf), a knob and rose on both faces, hinges,
+// and the opening is cased on both faces (CASED above).
+{
+  const UD = CBZ.cityUnitDoors;
+  // (the kit's own doors: the Situation Room's secured door is presidency.js's steel)
+  const doors = UD ? UD.all().filter((d) => d.kit && d.b && blds.some((b) => b.ox === d.b.ox && b.oz === d.b.oz)) : [];
+  const flat = [], poor = [];
+  for (const d of doors) {
+    if (!UD.dress) { flat.push(d.label); continue; }
+    UD.dress(d, true);
+    const pv = d.pivot;
+    if (!d.dressed || !pv || !pv.visible || (d.mesh && d.mesh.visible !== false) || Math.abs(pv.rotation.y) > 1e-6) { flat.push(d.label + " @" + d.x.toFixed(1) + "," + d.z.toFixed(1)); continue; }
+    const P = d.leafParts || {};
+    const wantPanels = d.w >= 0.7 ? 6 : 4;
+    if ((P.panels | 0) < wantPanels || (P.knobs | 0) < 2 || (P.hinges | 0) < 2 || (P.faces | 0) < 2) poor.push(d.label + " w" + d.w.toFixed(2) + " " + JSON.stringify(P));
+    // the leaf itself: a door's thickness, its height, and the stiles proud of the panels
+    const bb = new THREE.Box3();
+    pv.updateWorldMatrix(true, true);
+    bb.setFromObject(pv);
+    const th = d.runX ? bb.max.z - bb.min.z : bb.max.x - bb.min.x;
+    if (!(th > 0.04 && bb.max.y - bb.min.y > 1.9)) poor.push(d.label + " leaf " + th.toFixed(3) + " thick, " + (bb.max.y - bb.min.y).toFixed(2) + " high");
+    UD.dress(d, false);
+  }
+  ok(doors.length >= 40, "the President's two buildings hang " + doors.length + " doors");
+  ok(!flat.length, "every shut door shows its real leaf, never the flat slab (" + flat.length + " flat)", flat);
+  ok(!poor.length, "every leaf is a door: raised panels (six on a full leaf), a knob on both faces, hinges (" + poor.length + " poor)", poor);
+}
+
 // ---- CEILINGS + LIGHT + COST --------------------------------------------------
 for (const f of FIT) {
   if (!f.rec || !f.rec.group) continue;
   const tag = f.prog + "@" + f.k;
   ok(f.rec.lights >= 2, tag + ": fixtures with baked light: " + f.rec.lights);
-  ok(f.rec.meshes.length <= 14, tag + ": merged into a handful of draw calls (one per material): " + f.rec.meshes.length);
+  // (16: the upholstery weave and the Oval rug's canvas are a material each)
+  ok(f.rec.meshes.length <= 16, tag + ": merged into a handful of draw calls (one per material): " + f.rec.meshes.length);
   const verts = f.rec.meshes.reduce((n, m) => n + m.geometry.attributes.position.count, 0);
   // one floor is built per fit-out tick as you approach: it must stay a frame-sized job
   ok(verts < 160000, tag + ": " + verts + " vertices, built in " + f.ms + " ms (node, one floor per tick)");
+  // THE LIGHT ON THE WALLS (a report): the baked plaster's luminance across
+  // the floor, 10th / 50th / 90th percentile. A room lit by its windows and
+  // its fixtures has a spread; "washes out flat" is a narrow one.
+  {
+    const pm = f.rec.meshes.find((m) => /plaster$/.test(m.material.name || ""));
+    if (pm) {
+      const nor = pm.geometry.attributes.normal, col = pm.geometry.attributes.color, L = [];
+      for (let i = 0; i < col.count; i++) if (Math.abs(nor.getY(i)) < 0.5) L.push(0.2126 * col.getX(i) + 0.7152 * col.getY(i) + 0.0722 * col.getZ(i));
+      L.sort((p, q) => p - q);
+      const q = (t) => L.length ? L[Math.min(L.length - 1, Math.floor(t * L.length))].toFixed(2) : "-";
+      console.log("       " + tag + " wall light p10 " + q(0.1) + " p50 " + q(0.5) + " p90 " + q(0.9) + " (" + L.length + " plaster vertices)");
+    }
+  }
   const kinds = f.rec.meshes.map((m) => (m.material.name || "").replace("fitout:", ""));
   ok(kinds.indexOf("plaster") >= 0, tag + ": a plaster skin and ceiling: " + kinds.join(","));
 }
