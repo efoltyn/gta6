@@ -528,7 +528,7 @@ document.body.appendChild(b);}}catch(e){}})();
      off the same numbers systems/climb.js climbs, + railed landings. Every
      tower ladder in every game is made here and registered with climb.js. -->
 <script src="src/world/ladderkit.js?v=lad1"></script>
-<script src="src/world/corridorkit.js?v=door929"></script>
+<script src="src/world/corridorkit.js?v=bdoor0930"></script>
 <!-- Masonry textures: procedural brick (stretcher bond + header courses) and
      ashlar (drafted-margin blocks) CanvasTextures + the fixed 6-colourway
      palette. After materials.js — it consumes CBZ.cmat. -->
@@ -609,7 +609,12 @@ document.body.appendChild(b);}}catch(e){}})();
      avoidance, stuck recovery, foot-matched stride, formations). Pure math;
      every AI mover in every game steps through it. Before poses.js so the
      rig's gait phase (character.js animChar) can read CBZ.moves.phaseDelta. -->
-<script src="src/entities/moves.js?v=moves1-st1"></script>
+<script src="src/entities/moves.js?v=bdoor0930"></script>
+<!-- CBZ.bodyDoors: PEOPLE OPEN DOORS, every game. A body walking a route
+     through a shut door opens it if cleared (the city door kit, the prison
+     door registry), is refused if not, and it shuts behind them. Asked by
+     CBZ.moves.step and by systems/navgrid.js. -->
+<script src="src/systems/bodydoors.js?v=bdoor0930"></script>
 <script src="src/entities/poses.js?v=pose1"></script>
 <!-- CBZ.verbs: THE ONE library of what two people do to each other with their
      hands, for every game: grab, carry, throw, shove, tackle, cuff, frisk,
@@ -741,7 +746,7 @@ document.body.appendChild(b);}}catch(e){}})();
      warden it schedules is spawned there) and after roofs.js (it asks
      CBZ.prisonRoof for its own ceiling); BEFORE prisonschedule.js, whose
      block ids it reads at runtime. -->
-<script src="src/world/adminwing.js?v=door929"></script>
+<script src="src/world/adminwing.js?v=bdoor0930"></script>
 
 <!-- THE COMPOUND'S REAL SIZE (owner 2026-08-11: "the prison should be bigger…
      think of scale of human vs prison size"). 92x195 m of authored prison was
@@ -756,7 +761,7 @@ document.body.appendChild(b);}}catch(e){}})();
      and cafeteria.js (CBZ.prisonDress fittings); AFTER guards.js + adminwing.js
      so it borrows the same CBZ.jailBoost run watcher; and it must follow
      world/yard.js, which cuts the four gate gaps this file stands gates in. -->
-<script src="src/world/prisonwings.js?v=door929"></script>
+<script src="src/world/prisonwings.js?v=bdoor0930"></script>
 <script src="src/world/prisongrounds.js?v=tow929"></script>
 <script src="src/world/corridors.js?v=door929"></script>
 
@@ -1098,7 +1103,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- the grid street layer (road, kerbs, footways, markings) world.js builds -->
 <script src="src/city/streetkit.js?v=metro0929"></script>
 <script src="src/city/world.js?v=pf0930m"></script>
-<script src="src/city/interior_programs.js?v=sdoor0930"></script>
+<script src="src/city/interior_programs.js?v=bdoor0930"></script>
 <!-- KEYS ARE THINGS PEOPLE CARRY (city/keys.js). A key is an ordinary
      inventory item; an NPC's keys live on the NPC and every existing way to
      take something off a person moves them. MUST load before city/buildings.js
@@ -1379,7 +1384,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/view.js?v=cars1"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=brainmoves1"></script>
-<script src="src/city/peds.js?v=po0930"></script>
+<script src="src/city/peds.js?v=bdoor0930"></script>
 <!-- THE STREET AS A CONFIGURATION OF CBZ.brain: bystanders become witnesses
      (social.crime), react on their own delay through threat.respond, gangs
      retaliate proportionally and rout on brain morale, gang standing is
@@ -1888,7 +1893,7 @@ document.body.appendChild(b);}}catch(e){}})();
      to walk at curfew was a body pressed into geometry. This sits between the
      brain and the mover and answers HOW to get there — and it owns the one
      walkability grid + A* that navigation.js's escapeRoute now delegates to. -->
-<script src="src/systems/navgrid.js?v=nav2-st1"></script>
+<script src="src/systems/navgrid.js?v=bdoor0930"></script>
 <script src="src/systems/prisonnav.js?v=nav2-st1"></script>
 <!-- THE CITY'S SIDE OF THE SAME GRID. Measured on a calm street: 56% of every
      metre 683 pedestrians tried to walk went into geometry, 37 of them grinding

@@ -1186,8 +1186,11 @@
     const doorKeys = d.free ? null : (d.keys ? d.keys.slice() : (d.pick ? ["Gun-Room Key"] : null));
     const hasItem = function (k) { const e = CBZ.econ; return !!(e && e.hasItem && e.hasItem(k)); };
     const onFreeSide = function () { return !!(cfg.freeSide && cfg.freeSide()); };
-    (CBZ._prisonDoorSpecs || (CBZ._prisonDoorSpecs = [])).push({
+    (CBZ._prisonDoorSpecs || (CBZ._prisonDoorSpecs = [])).push(d._spec = {
       id: d.id, label: d.label, autoR: d.free ? 1.6 : 2.3,
+      // a body's clearance (systems/bodydoors.js): the office is the warden's
+      // (or a man he sent for); the staff door is any officer's card
+      npc: cfg.npc,
       keyed: !!(d.keys || d.pick),   // needs a card or a pick (systems/prisondoorwatch.js)
       keys: function () { return onFreeSide() ? null : doorKeys; },
       at: function () { return { x: d.x, y: 1.4, z: d.z }; },
@@ -1223,6 +1226,7 @@
   const officeDoor = makeDoor({
     id: "prison-warden-office", x0: D_OFF.x0, x1: D_OFF.x1, z: CORR_Z, keys: null,
     label: "The Warden's office", pick: 3.4, pair: true, frame: 0x3e2d1e,
+    npc: function (a) { return !!a && (a.kind === "warden" || !!a._wardenCall); },
     // from inside the office it is a thumb turn (the tick below)
     freeSide: function () { const P = CBZ.player && CBZ.player.pos; return !!(P && P.z < CORR_Z - 0.3 && P.x > PX_B + 0.2); },
     build: function (hold) { return woodLeaf(hold, 1); },
@@ -1247,16 +1251,11 @@
   // Still short enough that entities/guards.js's indoor tier patrol (nearest
   // approach 5.9 m at its own waypoint (0,-39)) can never hold it open.
   const READER_R2 = 3.4 * 3.4;
-  function staffNear(d) {
-    const list = CBZ.guards || [];
-    for (let i = 0; i < list.length; i++) {
-      const g = list[i];
-      if (g.dead || g.ko > 0) continue;
-      const dx = g.group.position.x - d.x, dz = g.group.position.z - d.z;
-      if (dx * dx + dz * dz < READER_R2) return g;
-    }
-    return null;
+  function staffNear(d, R) {
+    const B = CBZ.bodyDoors;
+    return B && d._spec ? B.openerNear(d._spec, d.x, d.z, R || Math.sqrt(READER_R2)) : null;
   }
+
 
   /* ---- the breach routes. One line each, and neither this file nor
        systems/breach.js learns anything about the other: 5 lb is the
@@ -1642,7 +1641,7 @@
     //      never exit (same one-way-lock law as the staff door above).
     if (!officeDoor.open) {
       const s = staffNear(officeDoor);
-      if (s && (s.kind === "warden" || s._wardenCall)) officeDoor.setOpen(true);
+      if (s) officeDoor.setOpen(true);
       else {
         const dx = P.x - officeDoor.x, dz = P.z - officeDoor.z;
         const insideOffice = P.z < CORR_Z - 0.3 && P.x > PX_B + 0.2;
@@ -1681,22 +1680,9 @@
       const d = roomDoors[i];
       if (d.blown) continue;
       const dx = P.x - d.x, dz = P.z - d.z, you = dx * dx + dz * dz;
-      let staff = false;
-      const list = CBZ.guards || [];
-      for (let k = 0; k < list.length && !staff; k++) {
-        const q = list[k];
-        if (!q || q.dead || q.ko > 0 || !q.group) continue;
-        const ex = q.group.position.x - d.x, ez = q.group.position.z - d.z;
-        if (ex * ex + ez * ez < 3.2) staff = true;
-      }
-      // an unlocked door opens for an inmate walking through it too
-      const men = CBZ.npcs || [];
-      for (let k = 0; k < men.length && !staff; k++) {
-        const q = men[k];
-        if (!q || q.dead || q._crowd || !q.group) continue;
-        const ex = q.group.position.x - d.x, ez = q.group.position.z - d.z;
-        if (ex * ex + ez * ez < 2.4) staff = true;
-      }
+      // whoever is at it and may open it (systems/bodydoors.js: an unlocked
+      // door is anybody's, within 1.8 m)
+      const staff = !!staffNear(d, 1.8);
       const latched = CBZ.prisonDoorLatched && CBZ.prisonDoorLatched(d.id);
       if (!d.open) {
         if (staff || (you < 2.2 && !latched)) { d.setOpen(true); d.shutT = 2.5; }

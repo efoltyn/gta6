@@ -69,6 +69,21 @@
   // rebuilt only when the ask leaves the middle of what is already built.
   let nx = 0, nz = 0, oX = 0, oZ = 0, half = 0;
   let blocked = null;
+  /* DOORS ARE NOT WALLS (systems/bodydoors.js). A collider tagged as a door
+     (`_bd`) is not marked in `blocked`: its cells go in a door layer (`dgrid`,
+     the door's index + 1 into `dcols`), and a door cell is open for the body
+     being planned for exactly when bodyDoors says he may pass it (it stands
+     open, or it is his to open). So a man routes THROUGH the Oval Office door
+     he will open on the way and AROUND a flat whose key he does not carry,
+     and a cell front stays a wall to every inmate. */
+  let dgrid = null, dcols = [];
+  let planActor = null;
+  function doorOk(k) {
+    const c = dcols[k - 1];
+    const B = CBZ.bodyDoors;
+    if (!c || !B) return false;
+    return B.passable(planActor, c);
+  }
   /* THE COARSE TIER. A city goal is two hundred metres away and A* on 0.4 m
      cells cannot see that far for any affordable number of nodes: 12,000 nodes
      is a 44 m square, so every long ask came back PARTIAL — and a partial
@@ -127,11 +142,49 @@
     const w = Math.max(1, Math.ceil((reach * 2) / STEP));
     const buf = (job && job.buf && job.buf.length === w * w) ? job.buf : new Uint8Array(w * w);
     buf.fill(0);
+    const dbuf = (job && job.dbuf && job.dbuf.length === w * w) ? job.dbuf : new Uint16Array(w * w);
+    dbuf.fill(0);
     const boxes = gather(centreX, centreZ, reach, _boxes).slice();
     job = {
-      buf: buf, n: w, oX: centreX - reach, oZ: centreZ - reach,
+      buf: buf, dbuf: dbuf, doors: [], n: w, oX: centreX - reach, oZ: centreZ - reach,
       cx: centreX, cz: centreZ, half: reach, boxes: boxes, i: 0, ms: 0,
     };
+  }
+
+  /* A DOORWAY IS A LANE. Walls are grown by BODY_R so a free cell fits a
+     man; an interior door is 0.9-1.3 m, so its two jambs grown by 0.42 m met
+     in the middle and every office door in the city was a solid wall to the
+     planner, open or shut (measured: the Cabinet Room's open 1.1 m door,
+     routed six waypoints round the building). Every door the body layer
+     knows (systems/bodydoors.js), open or shut, gets its centre line cut back
+     through the inflation: cells within the opening, short of the jambs by a
+     body radius, and a body-width either side of the leaf, are open floor
+     gated by that door (dgrid), which is exactly what a man walking through
+     it needs. */
+  const _dw = [];
+  function carveDoorways(J) {
+    const B = CBZ.bodyDoors;
+    if (!B || !B.near) return;
+    const N = J.n, buf = J.buf, dbuf = J.dbuf;
+    B.near(J.cx, J.cz, J.half + 2, _dw);
+    for (let q = 0; q < _dw.length; q++) {
+      const c = _dw[q];
+      if (c.y0 != null && (c.y0 >= HEAD || c.y1 <= FOOT)) continue;      // another storey's door
+      const w = c.maxX - c.minX, d = c.maxZ - c.minZ, alongX = w >= d;
+      const mx = (c.minX + c.maxX) / 2, mz = (c.minZ + c.maxZ) / 2;
+      const half = Math.max(0.12, (alongX ? w : d) / 2 - 0.3);
+      const deep = (alongX ? d : w) / 2 + BODY_R + STEP;
+      let di = J.doors.indexOf(c) + 1;
+      if (!di) { if (J.doors.length >= 65535) continue; di = J.doors.push(c); }
+      const x0 = Math.max(0, ((mx - (alongX ? half : deep) - J.oX) / STEP) | 0), x1 = Math.min(N - 1, ((mx + (alongX ? half : deep) - J.oX) / STEP) | 0);
+      const z0 = Math.max(0, ((mz - (alongX ? deep : half) - J.oZ) / STEP) | 0), z1 = Math.min(N - 1, ((mz + (alongX ? deep : half) - J.oZ) / STEP) | 0);
+      for (let k = z0; k <= z1; k++) for (let j = x0; j <= x1; j++) {
+        const ccx = J.oX + (j + 0.5) * STEP, ccz = J.oZ + (k + 0.5) * STEP;
+        if (Math.abs((alongX ? ccx - mx : ccz - mz)) > half + STEP * 0.5) continue;
+        buf[k * N + j] = 0; dbuf[k * N + j] = di;
+      }
+    }
+    _dw.length = 0;
   }
 
   // mark one budget's worth of boxes; returns true when the window is finished
@@ -152,6 +205,14 @@
       if (x1 < 0 || z1 < 0 || x0 >= N || z0 >= N) continue;
       if (x0 < 0) x0 = 0; if (z0 < 0) z0 = 0;
       if (x1 >= N) x1 = N - 1; if (z1 >= N) z1 = N - 1;
+      if (c._bd && job.doors.length < 65535) {
+        const di = job.doors.push(c);
+        for (let k = z0; k <= z1; k++) {
+          const row = k * N;
+          for (let j = x0; j <= x1; j++) job.dbuf[row + j] = di;
+        }
+        continue;
+      }
       for (let k = z0; k <= z1; k++) {
         const row = k * N;
         for (let j = x0; j <= x1; j++) buf[row + j] = 1;
@@ -160,6 +221,7 @@
     job.i = end;
     job.ms += ((window.performance && performance.now) ? performance.now() : Date.now()) - t0;
     if (job.i < job.boxes.length) return false;
+    carveDoorways(job);
     // downsample for the coarse tier, then swap the finished window in
     const CN = Math.ceil(job.n / COARSE);
     if (!coarse || coarse.length !== CN * CN) coarse = new Uint8Array(CN * CN);
@@ -169,7 +231,7 @@
       for (let j = 0; j < job.n; j++) if (!job.buf[row + j]) coarse[crow + ((j / COARSE) | 0)] = 0;
     }
     cnx = cnz = CN;
-    blocked = job.buf; nx = nz = job.n; oX = job.oX; oZ = job.oZ;
+    blocked = job.buf; dgrid = job.dbuf; dcols = job.doors; nx = nz = job.n; oX = job.oX; oZ = job.oZ;
     cx0 = job.cx; cz0 = job.cz; half = job.half;
     buildMs = job.ms; builds++; version++;
     builtCols = (CBZ.colliders || []).length;
@@ -205,7 +267,9 @@
     if (!blocked) return true;
     const j = ix(x), k = iz(z);
     if (j < 0 || j >= nx || k < 0 || k >= nz) return true;
-    return !blocked[k * nx + j];
+    const id = k * nx + j;
+    if (blocked[id]) return false;
+    return !(dgrid && dgrid[id]) || doorOk(dgrid[id]);
   }
   function inWindow(x, z) {
     return !!blocked && x > oX && x < oX + nx * STEP && z > oZ && z < oZ + nz * STEP;
@@ -361,7 +425,15 @@
      arrives at (dx,dz) for `cost` metres (systems/navigation.js's vents). The
      arrival point carries {teleportToNext, portalLabel} so that file's map
      copy still reads out of the returned list. */
+  // opts.actor: plan for THIS body (which doors he may open); otherwise the
+  // body being stepped, or nobody (a map route: only open / unlocked doors)
   function plan(from, to, opts) {
+    if (!opts || opts.actor === undefined) return planCore(from, to, opts);
+    const was = planActor;
+    planActor = opts.actor;
+    try { return planCore(from, to, opts); } finally { planActor = was; }
+  }
+  function planCore(from, to, opts) {
     if (!blocked) return null;
     const t0 = (window.performance && performance.now) ? performance.now() : Date.now();
     // WHICH TIER. Short asks get the fine grid (it threads doorways); anything
@@ -417,6 +489,7 @@
         if (a < 0 || a >= gn || b < 0 || b >= gn) continue;
         const ni = b * gn + a;
         if (g[ni]) continue;
+        if (!far && dgrid && dgrid[ni] && !doorOk(dgrid[ni])) continue;   // a door he may not open
         // no cutting a corner between two walls — a body cannot pass diagonally
         // through a doorjamb, and a route that says it can is a route that grinds
         if (DIRS[d] && DIRS[d + 1] && (g[k * gn + a] || g[b * gn + j])) continue;
@@ -782,6 +855,11 @@
   const NO_OPTS = {};
   function step(a, p, t, dt, opts) {
     if (!a || !p || !t) return false;
+    // every door question asked while steering this body is about HIM
+    planActor = a;
+    try { return stepFor(a, p, t, dt, opts); } finally { planActor = null; }
+  }
+  function stepFor(a, p, t, dt, opts) {
     const o = opts || NO_OPTS;
     if (levelStep(a, p, t, dt, o)) return true;   // walking a route between floors
     if (!blocked || budget < 0) return false;

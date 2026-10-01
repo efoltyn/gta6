@@ -294,7 +294,10 @@ else {
       var st = CBZ.seatState ? CBZ.seatState() : null;
       var verb = st ? st.verb : null, kind = st ? st.kind : null;
       if (st && st.exit) st.exit(); else if (CBZ.cityVehicleGetOut) CBZ.cityVehicleGetOut();
-      for (var k = 0; k < 30; k++) CBZ.stepSim(1/60);
+      // he CLIMBS out (city/boarding.js: CBZ.moves.alight opens the door, steps
+      // out, shuts it, ~2 s); half a second in he is still in the doorway, so
+      // read where he stands once the climb is done
+      for (var k = 0; k < 30 || (k < 360 && CBZ.moves && CBZ.moves.busy && CBZ.moves.busy(P)); k++) CBZ.stepSim(1/60);
       var h = sc.heading || 0, dx = P.pos.x - sc.pos.x, dz = P.pos.z - sc.pos.z;
       var lx = dx * Math.cos(h) - dz * Math.sin(h), lz = dx * Math.sin(h) + dz * Math.cos(h);
       return { kind: kind, verb: verb, driving: !!P.driving, vehicle: !!P._vehicle, localX: +lx.toFixed(2), localZ: +lz.toFixed(2),
@@ -323,7 +326,7 @@ else {
         CBZ.stepSim(1/60);
         if (k % 60 === 0) {
           var n = 0, P = CBZ.cityPeds || [];
-          for (var i = 0; i < P.length; i++) { var p = P[i]; if (p && !p.dead && p.organization === 'cell' && Math.hypot(p.pos.x - gate.x, p.pos.z - gate.z) < 140) n++; }
+          for (var i = 0; i < P.length; i++) { var p = P[i]; if (p && !p.dead && p.organization === 'cell') { var dd = Math.hypot(p.pos.x - gate.x, p.pos.z - gate.z); seen.cellAny = Math.max(seen.cellAny || 0, 1); seen.minD = Math.min(seen.minD == null ? 1e9 : seen.minD, Math.round(dd)); if (dd < 140) n++; } }
           if (n > seen.bodies) seen.bodies = n;
         }
       }

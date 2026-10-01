@@ -92,6 +92,8 @@ load("src/core/citystream.js");
 const STREAM = { keep: true };
 CBZ.sliceKeepsRect = function () { return STREAM.keep; };
 CBZ.slice = { stream: true, x: 0, z: 0, r: 1e6, lead: 0, view() { return 1000; }, keepR() { return 1e6; } };
+load("src/entities/moves.js");
+load("src/systems/bodydoors.js");
 load("src/systems/stairs.js");
 load("src/city/buildings_civic.js");
 load("src/city/buildings.js");
@@ -610,8 +612,177 @@ let streamReport = "not run";
   }
 }
 
+// ==========================================================================
+// 5. PEOPLE OPEN DOORS (systems/bodydoors.js through CBZ.moves.step, every
+//    game). Real motors, real door kit, a plain circle-vs-box resolver:
+//    a) a West Wing staffer walks a route through a SHUT Oval Office door:
+//       it opens in front of him, he comes out the far side, and it shuts
+//       behind him (collider back) once he is clear;
+//    b) a SECURED door (the Situation Room's rule): a stranger is refused and
+//       held at the leaf (door stays shut, m.doorBlockT); staff, the detail
+//       and police are let through; a LOCKED flat opens for its key holder
+//       only;
+//    c) the navigator (systems/navgrid.js) plans a staffer THROUGH a shut
+//       door and refuses a stranger the same way when every way is secured;
+//    d) the prison rule: a cell front opens for nobody walking up (inmate or
+//       officer), a card door for officers only, the Gate Key door for the
+//       gate post / warden, a room door for anybody; an inmate walking at a
+//       cell front is refused by the same motor hook.
+// ==========================================================================
+let bodyReport = "not run";
+{
+  const BD = CBZ.bodyDoors, MV = CBZ.moves;
+  const bdTick = updates.filter((u) => u.o === 34.32).map((u) => u.fn);
+  if (!BD || !MV) fail("BODIES: systems/bodydoors.js or entities/moves.js did not load");
+  else if (!bdTick.length) fail("BODIES: the bodydoors shut tick (34.32) is not registered");
+  else {
+    const runTicks = (s) => { for (let i = 0; i < Math.round(s / 0.05); i++) { for (const f of bdTick) f(0.05); for (const f of swingTick) f(0.05); } };
+    const wwDoors = oval ? UD.all().filter((d) => /Oval Office/.test(d.label) && Math.abs(d.floorY - oval.floorY) < 0.5) : [];
+    const door = wwDoors.find((d) => !d.pair) || wwDoors[0];
+    if (!door) fail("BODIES: no Oval Office door to walk through");
+    else {
+      if (door.open) setOpen(door, false);
+      if (!door.col._bd) fail("BODIES: the Oval Office door is not tagged for bodies (door kit -> bodyDoors.tag)");
+      const nrm = door.runX ? { x: 0, z: 1 } : { x: 1, z: 0 };
+      const near = CBZ.colliders.concat(allUnitCols()).filter((c) => c.maxX > door.x - 4 && c.minX < door.x + 4 && c.maxZ > door.z - 4 && c.minZ < door.z + 4);
+      const RAD = 0.32, feet = door.floorY;
+      function resolve(p) {
+        for (const c of near) {
+          if (CBZ.colliders.indexOf(c) < 0) continue;
+          if (c.y0 != null && (c.y0 >= feet + 1.7 || c.y1 <= feet + 0.42)) continue;
+          const qx = Math.max(c.minX, Math.min(p.x, c.maxX)), qz = Math.max(c.minZ, Math.min(p.z, c.maxZ));
+          const dx = p.x - qx, dz = p.z - qz, d2 = dx * dx + dz * dz;
+          if (d2 >= RAD * RAD) continue;
+          if (d2 > 1e-10) { const d = Math.sqrt(d2), k = (RAD - d) / d; p.x += dx * k; p.z += dz * k; }
+          else {   // centre inside the box: out the nearest face
+            const o = [[c.minX - RAD - p.x, 0], [c.maxX + RAD - p.x, 0], [0, c.minZ - RAD - p.z], [0, c.maxZ + RAD - p.z]];
+            o.sort((a, b) => Math.hypot(a[0], a[1]) - Math.hypot(b[0], b[1]));
+            p.x += o[0][0]; p.z += o[0][1];
+          }
+        }
+      }
+      // walk `who` from one face of the door to the other; -> where he ended up
+      function walk(who, side, secs) {
+        const p = new THREE.Vector3(door.x - nrm.x * side * 1.1, feet, door.z - nrm.z * side * 1.1);
+        who.pos = p;
+        const m = MV.motor(who); MV.reset(m, p);
+        const tx = door.x + nrm.x * side * 1.4, tz = door.z + nrm.z * side * 1.4;
+        let yaw = Math.atan2(nrm.x * side, nrm.z * side), refused = false;
+        for (let i = 0; i < Math.round(secs / 0.05); i++) {
+          MV.step(m, p, yaw, tx, tz, { speed: 1.4, stop: 0.3 }, 0.05);
+          yaw = m.yaw;
+          resolve(p);
+          if (m.doorBlockT > 0) refused = true;
+          for (const f of bdTick) f(0.05); for (const f of swingTick) f(0.05);
+        }
+        const along = (p.x - door.x) * nrm.x * side + (p.z - door.z) * nrm.z * side;
+        return { along: along, refused: refused, m: m };
+      }
+      const live = (c) => CBZ.colliders.indexOf(c) >= 0;
+      // a) staff through a free door, and it shuts behind him
+      const staffer = { organization: "state" };
+      const ra = walk(staffer, 1, 4);
+      if (ra.along < 0.9) fail("BODIES: a staffer walking through the shut Oval Office door ended " + ra.along.toFixed(2) + " m past it (never got through)");
+      if (ra.refused) fail("BODIES: a staffer was REFUSED a free door");
+      staffer.pos.set(1e5, 0, 1e5);
+      runTicks(3);
+      if (door.open || !live(door.col)) fail("BODIES: the door a staffer walked through did not shut behind him (open " + door.open + ", collider " + live(door.col) + ")");
+      // the player's own door is his: a body never shuts it
+      UD.setOpen(door, true); syncLive(door.col);
+      const rb0 = walk({ organization: "state" }, -1, 3);
+      runTicks(3);
+      if (!door.open) fail("BODIES: a body SHUT a door the player had opened");
+      setOpen(door, false);
+      if (rb0.along < 0.9) fail("BODIES: a staffer could not walk through a door standing open");
+      // b) the secured rule and the locked rule
+      const free0 = door.free;
+      door.free = function () { return false; };
+      if (door.pair) door.pair.free = door.free;
+      const stranger = {};
+      const rs = walk(stranger, 1, 4);
+      if (rs.along > 0) fail("BODIES: a stranger walked through a SECURED door (" + rs.along.toFixed(2) + " m past it)");
+      if (!rs.refused) fail("BODIES: a stranger at a secured door was not refused (doorBlockT never set)");
+      if (door.open) fail("BODIES: a secured door opened for a stranger");
+      for (const who of [{ organization: "state" }, { _detailBrain: "cp" }, { kind: "cop" }]) {
+        const r = walk(who, 1, 4);
+        if (r.along < 0.9) fail("BODIES: " + JSON.stringify(who) + " was kept out of a secured door");
+        who.pos.set(1e5, 0, 1e5); runTicks(3);
+      }
+      door.free = false; if (door.pair) door.pair.free = false;
+      const tenant = { name: "tenant" };
+      const oldKeys = CBZ.cityKeys;
+      CBZ.cityKeys = { pedHas: (ped, id) => ped === tenant && (id === door.id || (door.pair && id === door.pair.id)) };
+      const rt = walk(tenant, 1, 4);
+      if (rt.along < 0.9) fail("BODIES: a tenant with the key was kept out of his locked door");
+      tenant.pos.set(1e5, 0, 1e5); runTicks(3);
+      const rx = walk({ name: "burglar" }, 1, 4);
+      if (rx.along > 0) fail("BODIES: a man with no key walked through a locked door");
+      CBZ.cityKeys = oldKeys;
+      // c) the navigator, per body. (systems/navgrid.js is the GROUND floor's
+      //    grid, upper storeys are the stair layer's: a ground-floor door.)
+      let navNote = "navgrid not loaded";
+      const ovSh = shells.find((s) => oval && inShell(s.b, oval.landmarks.presidentialDesk.x, oval.landmarks.presidentialDesk.z, 0));
+      const gd = ovSh && UD.all().find((d) => inShell(ovSh.b, d.x, d.z, 0.5) && d.floorY < 0.5 && !d.pair);
+      if (!gd) fail("BODIES: no ground-floor West Wing door for the navigator check");
+      else try {
+        load("src/systems/navgrid.js");
+        const G = CBZ.navGrid;
+        CBZ.game.elapsed = 0;
+        for (let i = 0; i < 800; i++) G.focus(gd.x, gd.z, 30);
+        const gn = gd.runX ? { x: 0, z: 1 } : { x: 1, z: 0 };
+        const from = { x: gd.x - gn.x * 1.6, z: gd.z - gn.z * 1.6 }, to = { x: gd.x + gn.x * 1.6, z: gd.z + gn.z * 1.6 };
+        const free1 = gd.free;
+        gd.free = true;
+        if (gd.open) setOpen(gd, false);
+        const pS = G.plan(from, to, { actor: { organization: "state" } });
+        if (!(pS && !pS.partial && pS.length <= 2)) fail("BODIES: the navigator would not plan a staffer straight through a shut free door (" + (pS ? pS.length + " pts, partial " + !!pS.partial : "null") + ")");
+        gd.free = function () { return false; };
+        const pX = G.plan(from, to, { actor: {} });
+        if (pX && !pX.partial && pX.length <= 2) fail("BODIES: the navigator planned a stranger straight through a SECURED door (" + gd.label + ")");
+        const pC = G.plan(from, to, { actor: { kind: "cop" } });
+        if (!(pC && !pC.partial && pC.length <= 2)) fail("BODIES: the navigator would not plan police through a secured door");
+        gd.free = free1;
+        navNote = "nav (" + gd.label + "): staff through (" + pS.length + " pts), stranger " + (pX ? (pX.partial ? "partial" : pX.length + " pts round") : "no route") + ", police through";
+      } catch (e) { fail("BODIES: navgrid check threw " + e.message); }
+      door.free = free0; if (door.pair) door.pair.free = free0;
+      // d) the prison rule (bodyDoors.prisonMay) and the motor hook on a cell front
+      const PM = BD.prisonMay;
+      const officer = { kind: "guard", isGuard: true }, warden = { kind: "warden" }, gatePost = { isGuard: true, post: "gate" }, inmate = { name: "inmate" };
+      const specs = {
+        cell: { id: "prison-cell-3", keys: () => ["Cell Key"], isOpen: () => false },
+        card: { id: "prison-sally-x", keyed: true, keys: ["Keycard"], isOpen: () => false },
+        gate: { id: "prison-port-x", keyed: true, keys: ["Gate Key"], isOpen: () => false },
+        room: { id: "prison-admin-records", isOpen: () => false },
+      };
+      const expect = [
+        ["cell", inmate, false], ["cell", officer, false], ["cell", warden, false],
+        ["card", inmate, false], ["card", officer, true], ["card", { kind: "guard", tied: true }, false],
+        ["gate", officer, false], ["gate", gatePost, true], ["gate", warden, true], ["gate", inmate, false],
+        ["room", inmate, true], ["room", officer, true],
+      ];
+      for (const [k, a, want] of expect) if (!!PM(specs[k], a) !== want) fail("BODIES: prison rule " + k + " door for " + JSON.stringify(a) + " says " + !want + ", wants " + want);
+      // the hook: an inmate walking at a cell front is refused, the leaf never moves
+      let sets = 0;
+      const cellCol = { minX: 500, maxX: 501.6, minZ: 499.95, maxZ: 500.05, y0: 0, y1: 2.5 };
+      const cellSpec = { id: "prison-cell-99", keys: () => ["Cell Key"], isOpen: () => false, set: () => { sets++; return false; }, col: () => cellCol };
+      (CBZ._prisonDoorSpecs || (CBZ._prisonDoorSpecs = [])).push(cellSpec);
+      BD.sync();
+      if (!cellCol._bd) fail("BODIES: a prison door spec was not tagged by bodyDoors.sync");
+      const inm = { name: "inmate" }, ip = new THREE.Vector3(500.8, 0, 499), im = MV.motor(inm);
+      inm.pos = ip; MV.reset(im, ip);
+      let refusedI = false;
+      for (let i = 0; i < 40; i++) { MV.step(im, ip, 0, 500.8, 501.5, { speed: 1.4 }, 0.05); if (im.doorBlockT > 0) refusedI = true; if (ip.z > 499.6) ip.z = 499.6; }
+      if (!refusedI) fail("BODIES: an inmate walking at a cell front was never refused");
+      if (sets) fail("BODIES: a cell front was set() by an inmate walking at it");
+      const st = BD.stats();
+      bodyReport = "staff through + shut behind; secured: stranger held, staff/detail/police through; flat: key only; " + navNote + "; prison rule " + expect.length + " cases; bodyDoors " + JSON.stringify(st);
+    }
+  }
+}
+
 console.log("shells", shells.length, "interior doors", nDoors, "street doors", nStreet, "rooms", nRooms, "walks", nShellWalks);
 console.log("stream:", streamReport);
+console.log("bodies:", bodyReport);
 console.log("spawn:", spawnReport);
 if (fails.length) console.log("FAILURES\n  " + fails.join("\n  "));
 console.log(FAIL ? "\nESTATE DOOR CENSUS: " + FAIL + " failures" : "\nESTATE DOOR CENSUS: 100% clean");
