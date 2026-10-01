@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 /* ============================================================
-   tools/interact-verbs-check.mjs — NEVER MORE THAN THREE BUTTONS.
+   tools/interact-verbs-check.mjs — NEVER MORE THAN FOUR VERBS ON A MAN.
+
+   2026-09-30: the verbs moved ONTO the person (systems/interact.js pins them
+   beside him, E J K L) and every man gained GRAB (the disaster game's grab)
+   and TRADE (the two-pocket table). The ceiling moved from three to four with
+   them; it is still a ceiling the curated lists must never lean on.
 
    OWNER, 2026-08-21: "I like 3 interaction buttons max at a time... more than
    3 interaction buttons showing at once looks bad. trading also has like 5."
@@ -55,10 +60,12 @@ vm.runInContext(
   extract("cuffOk", "function cuffOk(a)") + "\n" +
   extract("verbsFor", "function verbsFor(a)") + "\n" +
   extract("pressureVerb", "function pressureVerb(a)") + "\n" +
-  extract("guardPayoffWorthIt", "function guardPayoffWorthIt(a)") + "\n" +
+  extract("guardPayoffWorthIt", "function guardPayoffWorthIt()") + "\n" +
+  extract("staff", "function staff(a)") + "\n" +
+  extract("isHand", "function isHand(v)") + "\n" +
   extract("capVerbs", "function capVerbs(v)") + "\n" +
-  // MAX_VERBS / VERB_PRIORITY are consts capVerbs closes over
-  SRC.slice(SRC.indexOf("const MAX_VERBS"), SRC.indexOf("function capVerbs")) + "\n" +
+  // MAX_VERBS is the const capVerbs closes over
+  (SRC.match(/const MAX_VERBS = \d+;/) || ["const MAX_VERBS = 4;"])[0] + "\n" +
   "this.verbsFor = verbsFor; this.capVerbs = capVerbs; this.MAX_VERBS = MAX_VERBS;",
   sandbox);
 const { verbsFor, capVerbs, MAX_VERBS } = sandbox;
@@ -66,7 +73,7 @@ const { verbsFor, capVerbs, MAX_VERBS } = sandbox;
 // Every verb id the VERB table actually defines — so a menu can never name one
 // that has no dispatch behind it (a dead button is worse than a missing one).
 const VERB_IDS = new Set(
-  [...SRC.slice(SRC.indexOf("const VERB = {"), SRC.indexOf("// one-line teaching text per verb"))
+  [...SRC.slice(SRC.indexOf("const VERB = {"), SRC.indexOf("function wardenAct"))
     .matchAll(/^\s{4}([a-zA-Z]+):\s*\{/gm)].map((m) => m[1]));
 
 const APPROACH_KINDS = [
@@ -98,7 +105,7 @@ function assess(label, a) {
     console.log(`  FAIL ${label}: ${shown.length} buttons would render (${shown.join("/")})`);
   }
   for (const v of raw) {
-    if (!VERB_IDS.has(v)) { failed++; console.log(`  FAIL ${label}: "${v}" has no entry in the VERB table`); }
+    if (!VERB_IDS.has(v) && !/^h:/.test(v)) { failed++; console.log(`  FAIL ${label}: "${v}" has no entry in the VERB table`); }
   }
   if (raw.indexOf("listen") >= 0) { failed++; console.log(`  FAIL ${label}: LISTEN is back — the pitch is spoken now (autoListen)`); }
   if (raw.indexOf("befriend") >= 0) sawBefriend++;
@@ -157,8 +164,12 @@ for (const stall of [false, true]) {
         failed++;
         console.log(`  FAIL inmate stall=${stall} recruiter=${recruiter}: befriend ${has ? "shown without" : "missing despite"} an offer`);
       }
-      // ...and TALK is what carries the favour loop now, on every ordinary man.
-      if (raw.indexOf("talk") < 0) { failed++; console.log(`  FAIL inmate stall=${stall}: no TALK — the favour loop is unreachable`); }
+      // ...and TALK is what carries the favour loop, on every ordinary man
+      // whose headline is not already a conversation of its own (befriend,
+      // join, squash, settle, collect); GRAB and TRADE are on everybody.
+      const headed = raw[0] !== "talk" && ["befriend", "join", "squash", "settle", "collect"].indexOf(raw[0]) >= 0;
+      if (raw.indexOf("talk") < 0 && !headed) { failed++; console.log(`  FAIL inmate stall=${stall}: no TALK — the favour loop is unreachable`); }
+      if (raw.indexOf("grab") < 0 || raw.indexOf("trade") < 0) { failed++; console.log(`  FAIL inmate stall=${stall}: GRAB/TRADE missing (${raw.join("/")})`); }
     }
   }
 }

@@ -502,6 +502,23 @@
     if (!reasons || !reasons.length) return "";
     return reasons.slice(0, 2).join(", ");
   }
+  /* THE SAME LEDGER PRICES A WHOLE DEAL (systems/prisontrade.js). What this
+     man adds to (or takes off) anything of his you ask for, in cigarettes:
+     offerPrice's modifiers, run against the item you want instead of his
+     stall's. `items` = the names you are asking for. */
+  function dealMod(actor, items) {
+    if (!actor || !actor.data || !items || !items.length) return 0;
+    const saved = actor.data.offer;
+    let mod = -Infinity;
+    for (let i = 0; i < items.length; i++) {
+      const v = itemValue(items[i]);
+      actor.data.offer = { item: items[i], price: v, basePrice: v };
+      mod = Math.max(mod, offerPrice(actor).price - v);
+    }
+    actor.data.offer = saved;
+    return isFinite(mod) ? mod : 0;
+  }
+  function itemValue(name) { return name === "cigs" ? 1 : ((ITEMS[name] && ITEMS[name].value) || 2); }
   function offerPrice(actor) {
     const offer = actor && actor.data && actor.data.offer;
     if (!offer) return { price: 0, base: 0, reasons: [] };
@@ -602,68 +619,63 @@
   const VOICE = {
     // a screw standing a count is doing arithmetic with his eyes
     guardBusy: ["Not during the count. Move.",
-                "I'm counting bodies. Yours is one of them.",
+                "On your number.",
                 "Stand on your number and shut up."],
-    wardenBusy: ["The count is running. Whatever it is, it waits.",
-                 "Not while my officers are counting."],
-    guardShort: ["That's not enough and you know it.",
-                 "Come back when your hand's fuller.",
-                 "You're short. I'm not."],
-    guardClean: ["Try that again and you'll be doing it in the hole.",
-                 "I don't take anything off inmates. Walk on.",
-                 "Wrong officer, wrong day."],
+    wardenBusy: ["After count.",
+                 "Not now. We're counting."],
+    guardShort: ["That's not enough.",
+                 "You're short."],
+    guardClean: ["Try that again, you're in the hole.",
+                 "Put that away. Walk.",
+                 "Wrong officer."],
     /* THE SECOND TIME HE TURNS YOU DOWN. PHONE_TEACH is the once-only version
        and it is a paragraph because it is teaching; these are what a man says
        when he has already explained himself and you came back anyway. */
-    guardNoPhone: ["Bring a phone or bring nothing.",
-                   "No line out, no business. Walk on.",
-                   "Come back with a number I can call."],
-    guardPaid: ["I'm looking at the wall for the next while.",
-                "Never saw you. Keep it that way.",
-                "I'm on my break. You hear me?"],
+    guardNoPhone: ["Not smokes. A number I can call.",
+                   "No phone, no business. Walk.",
+                   "Get me a number."],
+    guardPaid: ["I'm on my break.",
+                "Never saw you.",
+                "Ten minutes. Go."],
     /* THE WARDEN'S VOICE IS AUTHORITY, NOT COMMERCE (owner, 2026-08-19: "he
        should not accept cigs... he legit acted like an inmate"). Every warden
        line below exists because the generic guard/inmate line was wrong in
        his mouth. His one currency is what you know (systems/prisonsnitch.js). */
-    wardenNoCigs: ["Cigarettes? I sign for this whole prison. Walk.",
-                   "Put them away. I'm not one of my officers.",
-                   "You can't afford me, and it isn't counted in smokes."],
-    wardenNoPaper: ["The sheet stays the sheet. Bring me something I can use.",
-                    "You don't buy paperwork in here. You earn it. With names."],
+    wardenNoCigs: ["Cigarettes? Walk.",
+                   "Put them away."],
+    wardenNoPaper: ["Your sheet stays. Bring me a name.",
+                    "Give me a name. Then we talk."],
     // his card has no Insult any more (systems/prisonwarden.js); these only
     // answer a stray insult() from an old path
     wardenInsulted: ["Segregation. Tonight."],
     wardenIgnores: ["Noted."],
-    guardCaught: ["Hand. Out. Of my belt.",
-                  "You just bought yourself a shakedown.",
-                  "Radio's already in my hand, boy."],
+    guardCaught: ["Hand off my belt!",
+                  "That's a shakedown. Wall.",
+                  "Hands on the wall!"],
     // he is on your payroll — that changes what happens, not just what he says
-    guardCaughtBought: ["I'm paid to look away, not to be robbed. Don't.",
-                        "That belt is where our arrangement ends.",
-                        "I'll forget the hand. Not twice."],
-    inmateCaught: ["Get off me.", "Try that again, see what happens.",
-                   "You're going in my pocket next, is that it?",
+    guardCaughtBought: ["Off my belt. Don't.",
+                        "Not my belt. Ever.",
+                        "Once. Not twice."],
+    inmateCaught: ["Get off me.", "Try that again.",
+                   "Hands out of my pocket.",
                    "Hands. Now."],
-    inmateCaughtNight: ["Quiet. The man's on the tier. And get off me.",
-                        "You want the whole wing awake? Off."],
-    inmateSour: ["I've got nothing to say to you.",
-                 "Walk. Before I make it a thing."],
-    inmateWarm: ["Anything you need, you ask.",
-                 "You've been straight with me. That counts.",
-                 "You're alright. Most in here aren't."],
-    // night in a cellblock is a whisper, and whispers are where the truth is
-    nightTalk: ["Keep it down. Sound carries at night.",
+    inmateCaughtNight: ["Quiet. CO's on the tier. Off me.",
+                        "You want the whole wing up? Off."],
+    inmateSour: ["Nothing to say to you.",
+                 "Walk."],
+    inmateWarm: ["You need something, ask.",
+                 "You're alright."],
+    // night in a cellblock is a whisper
+    nightTalk: ["Keep it down.",
                 "Can't sleep either, huh.",
                 "Hear him two cells down? Every night.",
-                "Lights out's the only quiet in here.",
                 "I dream about cereal. Just cereal."],
-    yardTalk: ["Sun feels different out here.",
+    yardTalk: ["Hot one today.",
                "That court's ours. Don't.",
-               "Hot one today.",
                "Heard they're shipping ten guys out Friday.",
-               "Chow was a crime this morning."],
-    noStock: ["Nothing on me worth your smokes.",
-              "Sold out. Try tomorrow."],
+               "Chow was bad this morning."],
+    noStock: ["Got nothing on me.",
+              "Sold out. Tomorrow."],
     notNow: ["Not now.",
              "Not here. Later."],
   };
@@ -733,19 +745,19 @@
      What comes out of the seller's MOUTH is the reason in his own words —
      same reasons, same order of importance, no parentheses. */
   const WHY = {
-    "heat tax":   "Price goes up when you're this hot.",
-    "search risk": "They're turning pockets out today. That's in the price.",
-    "cash loud":  "You're rattling when you walk. Costs extra.",
-    "crew price": "Crew price. Don't go telling people.",
-    "respect cut": "You've been straight with me. So has the price.",
-    "bad blood":  "That's what it costs you. Just you.",
-    "debt tax":   "You owe. It's baked in.",
+    "heat tax":   "COs are on you. Costs more.",
+    "search risk": "They're tossing cells today. Costs more.",
+    "cash loud":  "You're rattling when you walk.",
+    "crew price": "Crew price. Keep it quiet.",
+    "respect cut": "For you, a little off.",
+    "bad blood":  "For you, extra.",
+    "debt tax":   "You still owe me.",
     trust:        "For you, cheap.",
-    grudge:       "I haven't forgotten. Neither has the price.",
+    grudge:       "I remember you.",
     scared:       "Just take it and go.",
-    "racket tab": "You're behind with us. Price says so.",
-    "bent trust": "You've been good for it. So am I.",
-    "bent heat":  "You're bad for my health. Pay for it.",
+    "racket tab": "You're behind with us.",
+    "bent trust": "You've been good for it.",
+    "bent heat":  "You're hot. Costs more.",
   };
   function whyLine(reasons) { return (reasons && reasons.length && WHY[reasons[0]]) || ""; }
 
@@ -872,7 +884,7 @@
     // not as a number leaving your pocket. The discount/markup reason, when
     // he has one, is the second half — his voice, not a spreadsheet row.
     const why = whyLine(priced.reasons);
-    return { ok: true, msg: why ? `${offer.item}, ${price}. ${why}` : `${offer.item}, ${price}. ${yardTime() ? "Come back if you need more." : "That's the last one I've got on me."}` };
+    return { ok: true, msg: why ? `${offer.item}, ${price}. ${why}` : `${offer.item}, ${price}.` };
   }
 
   /* A MAN YOU HAVE ALREADY PAID IS CHEAPER, AND HE STAYS CHEAPER.
@@ -960,7 +972,7 @@
           if (CBZ.addRacketStanding) CBZ.addRacketStanding(2);
           noteRead("badge", 6, who, 13);
           CBZ.sfx("coin");
-          return { ok: true, msg: `${nm(known)} talks to the office? That I can use. Go on.` };
+          return { ok: true, msg: `${nm(known)}? Good. Go.` };
         }
         if (bought(actor)) {
           // A RELATIONSHIP FAVOUR. Free at the point of use, and it draws the
@@ -978,10 +990,10 @@
           actor._saidNoCigs = true;
           return { ok: false, msg: "What am I going to do with prison smokes?" };
         }
-        return { ok: false, msg: "My shelf's for sale. My eyes aren't." };
+        return { ok: false, msg: "No. Buy something or walk." };
       }
       const cost = bribeCost(actor);
-      if (g.cigs < cost) return { ok: false, msg: `It's ${cost} to look the other way. ${pick(VOICE.guardShort)}` };
+      if (g.cigs < cost) return { ok: false, msg: `${cost}. ${pick(VOICE.guardShort)}` };
       addCigs(-cost);
       // A BOUGHT MAN LOOKS AWAY LONGER. `bribed` stays what it always was —
       // seconds of blindness — and `loyalty` is the thing that persists, so a
@@ -1004,7 +1016,7 @@
     }
     // inmates: a small gift earns goodwill + sometimes a free item/tip
     const cost = 3;
-    if (g.cigs < cost) return { ok: false, msg: `Three smokes buys goodwill in here. ${pick(VOICE.guardShort)}` };
+    if (g.cigs < cost) return { ok: false, msg: "You don't have three smokes." };
     addCigs(-cost);
     // SHARING ACROSS CARS: your own car sees you hand smokes to another car
     // (systems/prisoncars.js); the gift still lands with him
@@ -1018,7 +1030,7 @@
       const it = SELLABLE[Math.floor(rng() * 4)];
       addItem(it, 1);
       if (CBZ.pickupNote) CBZ.pickupNote(it, { rare: isRare(it) });
-      return { ok: true, msg: "Here. Don't say I never gave you anything." };
+      return { ok: true, msg: "Here. Take this." };
     }
     return { ok: true, msg: actor.data.tip || "Thanks, friend." };
   }
@@ -1035,7 +1047,7 @@
     // The warden's sheet is not for sale either — his clean-up is bought with
     // a NAME (snitch() below), never with cigarettes.
     if (actor.kind === "warden") return { ok: false, msg: pick(VOICE.wardenNoPaper) };
-    if (actor.kind !== "guard") return { ok: false, msg: "Do I look like I write the paperwork in here?" };
+    if (actor.kind !== "guard") return { ok: false, msg: "Do I look like a CO?" };
     if (counting() && !bought(actor)) return { ok: false, msg: pick(VOICE.guardBusy) };
     if (!actor.corrupt) {
       if (CBZ.addHeat) CBZ.addHeat(6);
@@ -1059,8 +1071,8 @@
     const cost = quoted || payoffCost(actor);
     // A REFUSAL NAMES THE THING AND THE NUMBER — and, now, the instrument.
     if (g.cigs < cost) return { ok: false, msg: phoneBridge()
-      ? `Paperwork runs ${cost}. ${PHONE_TERMS}`
-      : `Making paper disappear runs ${cost}. ${pick(VOICE.guardShort)}` };
+      ? `${cost}. ${PHONE_TERMS}`
+      : `${cost}. ${pick(VOICE.guardShort)}` };
 
     addCigs(-cost);
     consumePhoneTime();          // one call, one shift — a rented line is spent
@@ -1096,8 +1108,8 @@
     // that is the magnitude of the favour — but the officer was not paid in
     // tobacco and says so, once, and then the game stops explaining itself.
     return { ok: true, msg: outsidePaidPrefix() + (g.role === "cop"
-      ? "The complaint goes in the wrong drawer. Nobody reads that drawer."
-      : "Your name comes off the sheet. It goes back on if you make me look stupid.") };
+      ? "Complaint's gone."
+      : "You're off the sheet. Don't make me look stupid.") };
   }
 
   /* SNITCH lived here: a warden-only button, gated on YOUR heat, that sold a
@@ -1334,12 +1346,11 @@
   */
 
   // ---------- INSULT: lower rep, maybe start a fight / a hunt ----------
-  const INSULT_BACK = ["Say it again. Slower.", "That's twice. There isn't a third.",
-                       "You just made this personal.", "Alright. Alright."];
-  const INSULT_TAKEN = ["Keep talking. See where it gets you.",
-                        "I'll remember that one.",
-                        "You're going to want a friend in here. It won't be me.",
-                        "Big words from a man with no cell key."];
+  const INSULT_BACK = ["Say it again.", "What'd you say?",
+                       "Alright. Alright."];
+  const INSULT_TAKEN = ["Keep talking.",
+                        "I'll remember that.",
+                        "Big mouth."];
   function insult(actor) {
     actor.rep = Math.max(-50, (actor.rep || 0) - 15);
     actor.love = Math.max(0, (actor.love || 0) - 12);
@@ -1905,7 +1916,7 @@
     };
   };
 
-  CBZ.econ = { talk, trade, bribe, payoff, steal, beat, insult, thiefTick, addCigs, addItem, hasItem, takeItem, itemStore, pickOffer, offerPrice, offerLine, payoffCost, bribeCost, rollLoadout, rollDrops, lootActor, armorySergeant, pickArmorySergeant, keyHolders, resetLoadouts, mintLoadouts, lootAudit, announceLoot, isRare, ITEMS, SELLABLE, DRUGS, VALUABLES, SERVICES, isService, rng, reseed,
+  CBZ.econ = { talk, trade, bribe, payoff, steal, beat, insult, thiefTick, dealMod, itemValue, addRespect, addLoyalty, addCigs, addItem, hasItem, takeItem, itemStore, pickOffer, offerPrice, offerLine, payoffCost, bribeCost, rollLoadout, rollDrops, lootActor, armorySergeant, pickArmorySergeant, keyHolders, resetLoadouts, mintLoadouts, lootAudit, announceLoot, isRare, ITEMS, SELLABLE, DRUGS, VALUABLES, SERVICES, isService, rng, reseed,
     // the phone bridge — ask these, never re-derive the rule or the words
     hasPhoneAccess, phoneGate, phoneTerms, grantPhoneTime, consumePhoneTime, phoneBridge, outsidePaidPrefix, PHONE_TIME_SECS,
     // the one writer on g.racketDebt (also CBZ.addRacketDebt)

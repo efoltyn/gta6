@@ -46,7 +46,7 @@
                his officers owe you one. A lie to his face costs you both.
      TELL      systems/prisonsnitch.js: in his office the card is TELL (what
                you know), FAVOR (an errand) or PROTECTION, THREATEN. On the
-               floor "Tell" gets you "My office." and an officer comes for you.
+               floor "Snitch" gets you "My office." and an officer comes for you.
      HIS GUN   (world/adminwing.js, the prison-slop lead's pickup; feature-
                detected, never built here) a real threat in or by his office
                sends him for it. If it walks, the prison locks down and every
@@ -189,6 +189,10 @@
     trespass1: ["This is my office. Out.", "Wrong room."],
     trespass2: ["I won't say it twice. Out."],
     trespass3: ["Officers. My office."],
+    office: ["My office.", "Not here. My office."],
+    begYes: ["One more chance. Yard's yours.", "Fine. Go on out."],
+    begNo: ["No.", "You had your chance."],
+    transfer: ["Fine. You're reclassified.", "Paperwork's signed. You move down."],
   };
   let lineSeq = 0;
   function pick(list) { lineSeq++; return list[(lineSeq * 7 + ((S.now * 10) | 0)) % list.length]; }
@@ -582,8 +586,51 @@
     if (robbed && has("Luxury Watch")) return "Luxury Watch";
     return null;
   }
+  /* ---- WHAT YOU CAN ASK OF HIM (owner, 2026-09-30: "for the warden it's
+     just Snitch. That's dumb") -------------------------------------------
+     Every one of these moves something he already keeps:
+       ASK       on the floor, with nothing to sell him: he sends for you
+                 (the same summons a name gets). His office is where the
+                 errand, protection, a threat and a transfer live.
+       BEG       only while he has taken your yard (g.wardenStanding fell to
+                 -4): he gives it back unless he is furious or you lied to him.
+                 Once a day; the second time is a no.
+       TRANSFER  in his office, once he owes you (standing 5+) and you are not
+                 already in the lowest wing: one security level down
+                 (systems/prisontiers.js runs the softer regime around you),
+                 and it spends what he owed you. */
+  function yardTaken() { return S.blockSeq < S.noYard; }
+  function canBeg() { return yardTaken() && S.begSeq !== S.wakeSeq; }
+  function canTransfer() {
+    const T = CBZ.prisonTier;
+    return !!(T && T.enabled && T.enabled() && T.level() > 0 && (g.wardenStanding || 0) >= 5);
+  }
+  function beg(w) {
+    S.begSeq = S.wakeSeq;
+    const mood = CORE.moodOf(S.incidents, S.now, hourLen());
+    if (mood === "furious" || (g.wardenLies || 0) > 0) { standing(-1); return { handled: true, ok: false, msg: pick(LINE.begNo) }; }
+    S.noYard = -1;
+    return { handled: true, ok: true, msg: pick(LINE.begYes) };
+  }
+  function transferDown() {
+    const T = CBZ.prisonTier;
+    if (!canTransfer()) return { handled: true, ok: false, msg: pick(LINE.silent) };
+    S.meet = null;
+    T.set(T.level() - 1);
+    standing(-5);
+    S.owes = false;
+    return { handled: true, ok: true, msg: pick(LINE.transfer) };
+  }
   function act(v, a) {
     const m = S.meet;
+    if (a && a.kind === "warden") {
+      if (v === "wask") {
+        summon("tell", { now: true });
+        return { handled: true, ok: true, msg: pick(LINE.office) };
+      }
+      if (v === "wbeg" && canBeg()) return beg(a);
+      if (v === "wtransfer") return transferDown();
+    }
     if (!a || a.kind !== "warden" || !m || !m.opened) return { handled: false, ok: false, msg: "" };
     const w = a;
     if (v === "protect") {
@@ -649,8 +696,20 @@
     const SN = CBZ.prisonSnitch;
     const out = [];
     if (SN && SN.canTell && SN.canTell(a)) out.push("tell");
+    if (canTransfer()) out.push("wtransfer");
+    else if (canBeg()) out.push("wbeg");
     out.push(SN && SN.protectionOffered && SN.protectionOffered() ? "protect" : "wfavor");
     out.push("wthreat");
+    return out;
+  }
+  // OFF THE MEETING: the man on his rounds or at his desk. Snitch (or Ask)
+  // gets you his office; Beg only while your yard is gone.
+  function floor(a) {
+    if (!a || a.kind !== "warden") return null;
+    const SN = CBZ.prisonSnitch;
+    const out = [];
+    out.push(SN && SN.canTell && SN.canTell(a) ? "tell" : "wask");
+    if (canBeg()) out.push("wbeg");
     return out;
   }
   /* ---- what systems/prisonsnitch.js tells him back ---- */
@@ -1111,7 +1170,7 @@
     endShakedown(); endCall(); releaseEscorts();
     S.incidents.length = 0; S.pending = null; S.meet = null; S.favor = null; S.owes = false;
     S.lastShake = -1e9; S.lastLockEnd = -1e9; S.lockdownMine = false; S.immuneSeq = -1;
-    S.blockSeq = 0; S.lastBlock = null; S.wakeSeq = -1; S.paQueue = null; S.lastInc = null; S.morningT = 0;
+    S.blockSeq = 0; S.lastBlock = null; S.wakeSeq = -1; S.begSeq = null; S.paQueue = null; S.lastInc = null; S.morningT = 0;
     S.holeWas = false; S.cuffWas = false; S.hpWas = null; S.koWas = 0; S.now = 0; S.lastDecision = null;
     for (const k in S.log) S.log[k] = 0;
     for (let i = 0; i < S.orders.length; i++) if (S.orders[i].gd) S.orders[i].gd._facePt = null;
@@ -1261,6 +1320,9 @@
     // the player is walking to or standing in his office on his orders
     pass: function () { return !!(S.call && S.call.phase === "lead") || !!S.meet; },
     verbs: verbs,
+    floor: floor,
+    // probes and the console: you are standing in his office, he has opened
+    meetNow: function (reason) { S.meet = { t: 0, reason: reason || "tell", opened: true, done: false }; S.pending = null; return true; },
     act: act,
     line: function (group) { return LINE[group] ? pick(LINE[group]) : ""; },
     // THE OFFICER'S RECORD (systems/prisondoorwatch.js): a cop who keeps

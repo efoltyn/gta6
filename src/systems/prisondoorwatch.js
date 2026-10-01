@@ -141,8 +141,8 @@
       count: ["Hey! Why's that open? It's count.", "Whoa, whoa. We're counting. Shut that."],
       night: ["Hey. Lights out. Why's that open?", "What are you doing? They're locked in."],
       lockdown: ["We're on lockdown! Shut it!", "Lockdown! Who opened that?"],
-      armory: ["You sign that out? Close it up.", "Hey! That's the armory."],
-      armoryLeft: ["Who left the armory open?"],
+      armory: ["You sign that out? Close it up.", "Hey! Staff only!"],
+      armoryLeft: ["Who left that open?"],
       staff: ["Hey! Where'd you get that card?", "Get away from that door!"],
     },
     // an inmate out of his own cell after lock-up
@@ -152,7 +152,7 @@
     radio: {
       cell: "Control says a cell's open. I got it.",
       gate: "Tower says the yard gate's open. On it.",
-      armory: "Control, armory's showing open. Checking.",
+      armory: "Control, I show a door open. Checking.",
       staff: "Control's got a door open. On it.",
     },
     ask: ["You got a reason?", "What's going on?"],
@@ -161,9 +161,9 @@
     out: ["Door's open.", "Huh. Door's open."],
     run: ["Gate's open. Go, go.", "Gate's open. Let's go."],
     // the Warden, on the PA, as the officer's record grows
-    wardenSee: ["Officer, see me. The doors stay on the schedule."],
+    wardenSee: ["Officer, my office. Now."],
     wardenKeys: ["Control, pull that officer's keys."],
-    wardenRun: ["We have a runner. That door was yours, officer."],
+    wardenRun: ["We have a runner. That was your door, officer."],
   };
   W.LINES = L;
 

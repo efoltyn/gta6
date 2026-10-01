@@ -25,9 +25,8 @@
              calls (combat.js melee, fpsmode shots, econ.beat, cuffs).
      REGULAR you have bought from the same man REGULARS_NEEDED times. econ.trade
              already paid +1 respect a sale; nobody was counting the sales.
-     OWED    his favour ladder ran to the end (rep >= quests.FRIEND). This is
-             the ORIGINAL alternate victory and it is untouched: taking his
-             offer at that rung still walks you out the side gate.
+     OWED    his favour ladder ran to the end (rep >= quests.FRIEND). Since
+             2026-09-30 that is a crew slot, not a walk-out ending.
 
    Any of those, plus no bad blood, and he offers. The offer is RECOMPUTED
    (offered(a)) rather than latched, so a count or a swing at you silently
@@ -135,14 +134,6 @@
     const n = a && a.data && a.data.name ? a.data.name : "They";
     return String(n).replace(/^the |^a |^an /, "");
   }
-  /* HALF THIS WING IS NOT A PERSON. entities/npc.js names the cast in two
-     ways: real men (Vince, Lou, the Professor) and fillers ("a thief", "an
-     inmate"), and nameOf() strips the article because it was written for the
-     front of a sentence. In the middle of one it produces "you already run with
-     thief", so the posse's lines use the name the way it was written. */
-  function manName(a) {
-    return a && a.data && a.data.name ? String(a.data.name) : "him";
-  }
   function dist2ToPlayer(a) {
     const P = CBZ.player;
     if (!P || !a || !a.group) return Infinity;
@@ -201,28 +192,14 @@
   function syncCrew() { crewN = count(); crewCap = capNow(); }
   function full() { return posse() && crewN >= crewCap; }
 
-  /* Who you already run with, in his mouth. He names them — up to three, which
-     is as many as anybody says out loud before they start counting instead. */
-  function crewNames() {
-    const men = list().map(manName);
-    if (!men.length) return "nobody";
-    if (men.length === 1) return men[0];
-    if (men.length <= 3) return men.slice(0, -1).join(", ") + " and " + men[men.length - 1];
-    return men.slice(0, 3).join(", ") + " and " + numword(men.length - 3) + " more";
-  }
-
   /* He has done the deed and you have no room. Not a lapsed offer and not a
-     refusal — a man standing in front of you doing the arithmetic out loud.
-     The walk-out at the top of a favour ladder (reasonFor "owes you") is NEVER
-     in here: that offer is an ending, not a slot in a line, and capping it
-     would quietly gate systems/quests.js's alternate victory behind a crew
-     size, which is a different game. */
+     refusal: a man standing in front of you who sees you have enough people.
+     "owes you" (favours run to the end) is a slot like any other now. */
   function heldBack(a) {
     if (!posse() || !full()) return false;
     if (!a || a.pfFriend) return false;
     if (!eligible(a)) return false;
-    const why = reasonFor(a);
-    return !!why && why !== "owes you";
+    return !!reasonFor(a);
   }
 
   // ===========================================================================
@@ -351,15 +328,13 @@
   // ===========================================================================
   function accept(a) {
     if (!a) return { ok: false, msg: "" };
-    // THE WALK-OUT IS UNCHANGED. At the top of his favour ladder, taking his
-    // hand is still systems/quests.js's alternate victory — same function, same
-    // ending, just reached through a button that now only exists because he
-    // offered it.
-    if ((a.rep || 0) >= friendRep() && CBZ.quests) return CBZ.quests.onTalk(a);
+    // 2026-09-30: the top of his favour ladder is no longer a walk-out. A man
+    // whose favours you ran to the end rides with you like any other friend
+    // (and, asked, makes noise for you: systems/quests.js).
     // Pressed on a man the cap is holding back — the card and the crew moved
     // between render and click. He says the number, not the rule.
     if (heldBack(a)) {
-      return { ok: false, msg: `You've got ${crewNames()}. Come back one short.` };
+      return { ok: false, msg: "You got enough people." };
     }
     if (!offered(a)) {
       // The offer lapsed between render and press (a count started, he took a
@@ -378,11 +353,7 @@
     shadow(a, true);
     syncCrew();
     CBZ.sfx && CBZ.sfx("coin");
-    const n = count();
-    const msg = n >= 3
-      ? "I'm with you."
-      : "I'm with you. Anybody comes at you, comes at me.";
-    return { ok: true, msg: msg };
+    return { ok: true, msg: "I'm with you." };
   }
 
   /* Put him at your shoulder. entities/ai.js's shadowPlayer already walks an
@@ -614,7 +585,7 @@
           ? "You stepped in. I owe you."
           : why === "a regular"
             ? "You want me with you, say so."
-            : "You did right by me. I'm with you if you want.";
+            : "I'm with you if you want.";
         if (CBZ.prisonSay) CBZ.prisonSay(a, line, { secs: 3.2 });
         else if (CBZ.citySay) CBZ.citySay(a, line, null, 3.2);
       }

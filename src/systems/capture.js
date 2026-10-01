@@ -1685,10 +1685,10 @@
   //  cured once): the call is what the screw shouts and what the objective
   //  line carries; the prose only ever rode the suppressed hint path.
   const DAY_BEAT = [
-    { t: 55, call: "YARD CALL", s: "the block empties into the yard." },
-    { t: 40, call: "CHOW", s: "the line's forming in the cafeteria." },
-    { t: 35, call: "REC", s: "the lounge is open." },
-    { t: 30, call: "LOCKUP", s: "back to your cell, count time.", lock: true },
+    { t: 55, call: "Yard", shout: "Yard time!" },
+    { t: 40, call: "Chow", shout: "Chow! Line up!" },
+    { t: 35, call: "Rec", shout: "Rec!" },
+    { t: 30, call: "Count", shout: "Count time! On your bunks!", lock: true },
   ];
   let beatI = 0, beatT = 0, beatLock = false;
   // the block musters to its cells (lockdown.js owns the routine; this is its
@@ -1730,7 +1730,7 @@
       // popup. With nobody in earshot it is silent, which is correct: you
       // missed the call, and that is information you get by being somewhere
       // else, not information the HUD owes you.
-      if (showing() && CBZ.citySay && CBZ.guards) {
+      if (showing() && (CBZ.prisonSay || CBZ.citySay) && CBZ.guards) {
         let crier = null, cd = 34 * 34;
         for (const gd of CBZ.guards) {
           if (!gd || gd.dead || gd.ko > 0 || !gd.group) continue;
@@ -1738,7 +1738,8 @@
           const d2 = dx * dx + dz * dz;
           if (d2 < cd) { cd = d2; crier = gd; }
         }
-        if (crier) { try { CBZ.citySay(crier, sentCall + "!", "#ffd27b", 2.4); } catch (e) {} }
+        // prisonSay first: citySay reads .pos and a guard keeps his on .group
+        if (crier) { try { if (CBZ.prisonSay) CBZ.prisonSay(crier, b.shout, { secs: 2.4, force: true }); else CBZ.citySay(crier, b.shout, "#ffd27b", 2.4); } catch (e) {} }
       }
       // LOCKUP puts the screws on your block — the cell-watch sweep the
       // strike-2 rule already drives, reused rather than re-authored.

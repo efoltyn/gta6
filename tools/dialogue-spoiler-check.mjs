@@ -37,11 +37,9 @@ const SPOILER = /gun[ -]?room|armou?ry|key ?card|culvert|\bgrate\b|\bvents?\b|tu
 const ALLOW = new Map([
   ["Gun room! Stand still!", "a CO yelling at a man already inside it (detection.js)"],
   ["The armory door needs a Keycard.", "the reader speaking for itself when pressed (gunroom.js)"],
-  ["You're alright. Come find me. I'll get you out of here.", "a friend's promise, earned at max respect (quests.js)"],
   ["You tried my fence.", "the warden naming what you already did (prisonwarden.js)"],
   ["On the fence! Stop!", "a CO yelling at a man already on it (detection.js)"],
   ["The grate is welded again.", "the screws undoing your own cut after a shakedown (escapeplan.js)"],
-  ["Side gate. Walk, don't run, and don't look back at me.", "the friend walking you out as the run ends (quests.js befriend win)"],
 ]);
 const STR = /(["'`])((?:\\.|(?!\1)[^\\\n])*)\1/g;
 function spokenLiterals(file) {

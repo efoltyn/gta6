@@ -2319,11 +2319,11 @@
   const SKIN = [0xf0c39a, 0xe8b58c, 0xc08a5a, 0x8a5a3a, 0x6b4a32, 0xd8a177, 0xb5825a];
   const HAIR = [0x2a2018, 0x4a3526, 0x101820, 0xb9b1a6, 0x7a4a2e, 0x222222, 0xdedede];
   const TALK = [
-    ["Bunk's mine. Floor's yours.", "Lights out at nine. Don't be loud."],
-    ["I been in this cell longer than that paint.", "Count comes twice. Be in here for it."],
-    ["Snore and I'll smother you. Kidding. Mostly.", "Pictures on the wall are my girls. Don't look."],
-    ["Third time in this same box. Feels like home now.", "Don't touch my shelf."],
-    ["They move you when they feel like it. Not before.", "Sleep light."],
+    ["Bunk's mine. Floor's yours.", "Don't be loud."],
+    ["Six years in this cell.", "Keep your stuff off my side."],
+    ["Don't snore.", "Those are my girls. Don't look."],
+    ["Third time in this box.", "Don't touch my shelf."],
+    ["Lights out. Shut up.", "Sleep light."],
   ];
   function jump(skin, hair) {
     return { legs: 0xff7a1a, torso: 0xff7a1a, collar: 0xff9747, arms: 0xff7a1a,
