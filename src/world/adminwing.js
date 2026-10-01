@@ -1169,9 +1169,11 @@
       if (!v) d.picked = 0;
       return v;
     };
-    d.blow = function () {
-      d.setOpen(true); d.blown = true;
+    d.blow = function (hit) {
+      // the leaf goes as its own steel, off the charge (systems/breach.js)
+      if (CBZ.breachBlowOut) CBZ.breachBlowOut(d.pivots, hit, { owner: "door:" + d.id, lb: hit && hit.lb });
       for (const p of d.pivots) p.visible = false;
+      d.setOpen(true); d.blown = true;
     };
     /* ---- AND A WAY TO SHUT IT: the shared registry in
        systems/interactions.js. The credential is the tick's own test: the
@@ -1266,13 +1268,13 @@
       id: "prison-admin-staff", lb: 5, reach: 2.4,
       at: function () { return { x: staffDoor.x, y: 1.4, z: staffDoor.z }; },
       done: function () { return staffDoor.open; },
-      defeat: function () { staffDoor.blow(); },
+      defeat: function (hit) { staffDoor.blow(hit); },
     });
     CBZ.registerBreachTarget({
       id: "prison-warden-office", lb: 5, reach: 2.4,
       at: function () { return { x: officeDoor.x, y: 1.4, z: officeDoor.z }; },
       done: function () { return officeDoor.open; },
-      defeat: function () { officeDoor.blow(); },
+      defeat: function (hit) { officeDoor.blow(hit); },
     });
     CBZ.registerBreachTarget({
       id: "prison-warden-safe", lb: 5, reach: 2.0,
@@ -1793,6 +1795,7 @@
   CBZ.resetAdminWing = function () {
     for (let i = 0; i < doors.length; i++) {
       const d = doors[i];
+      if (d.blown && CBZ.breachClearBlown) CBZ.breachClearBlown("door:" + d.id);
       d.blown = false; d.picked = 0; d.shutT = 0;
       d.setOpen(false, true);
       for (const p of d.pivots) p.visible = true;

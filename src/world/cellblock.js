@@ -776,7 +776,7 @@
     for (const o of [-0.065, 0.065]) faceBox(leaf, lc, lockT, 1.18, o, 0.03, 0.05, 0.012);   // keyways
     for (const tt of [-DOOR_W / 2 + 0.2, DOOR_W / 2 - 0.2]) faceBox(leaf, lc, tt, LEAF_TOP + 0.08, 0, 0.06, 0.16, 0.05);  // roller hangers
     const leafMesh = mergedMesh(leaf, C_BAR, true, true);
-    if (leafMesh) leafMesh.userData.doorLeaf = "bars";
+    if (leafMesh) { leafMesh.userData.doorLeaf = "bars"; leafMesh.userData.debrisKind = "metal"; }
     c.bars = leafMesh;
     const oc = (c.oa + c.ob) / 2;
     c.leafClosed = facePoint(c, oc, 0.13);
@@ -2202,6 +2202,8 @@
   function setDoor(which, locked, byKey) {
     const c = typeof which === "number" ? cells[which] : which;
     if (!c || !c.doorCol) return false;
+    // a blown front has no leaf left to rack shut (see the breach target below)
+    if (locked && c.blown) return false;
     // the lockdown tier (header) is shut to every SYSTEM (the day plan, a
     // release); a key turned in its own lock opens it (owner, 2026-09-29:
     // "all doors can be opened with a key")
@@ -2261,7 +2263,7 @@
         pick: function () { return [c.bars]; },
         col: function () { return c.doorCol; },
         isOpen: function () { return !c.locked; },
-        permanent: function () { return false; },
+        permanent: function () { return !!c.blown; },
         // a racked front (the schedule, a lockdown, the tier) takes the Cell Key
         keys: function () { return c.locked ? ["Cell Key"] : null; },
         /* A LOCKED FRONT WANTS A KEY. Standing open, anybody may pull it to
@@ -2289,6 +2291,46 @@
         },
       });
     })(cells[i]);
+  }
+
+  /* ---- AND A WAY THROUGH A RACKED FRONT: a charge on the bars ------------
+     A cell front was the one leaf in the compound a breaching charge could
+     not touch: it was no breach target and its collider carries no mesh, so
+     a brick of C4 on the bars of a locked cell fell through to the wall
+     carve (systems/breach.js) and opened the block partition beside the door
+     while the grille stood there untouched. It is a target now, priced like
+     the cages (5 lb, the man-sized row), and when it goes it goes as ITSELF:
+     the leaf's own bars, stiles and lock box torn off the rollers and thrown
+     off the charge (CBZ.breachBlowOut). A blown front stays open for the run;
+     a new run re-hangs the leaf and sweeps its pieces. Open fronts are not
+     targets (there is nothing across the opening to blow). */
+  if (CBZ.registerBreachTarget) {
+    for (let i = 0; i < cells.length; i++) {
+      (function (c) {
+        if (!c.doorCol || !c.bars || !c.leafClosed) return;
+        CBZ.registerBreachTarget({
+          id: "prison-cell-" + c.i, lb: 5, reach: 2.2,
+          at: function () { return { x: c.leafClosed.x, y: 1.3 + (c.fy || 0), z: c.leafClosed.z }; },
+          done: function () { return !!c.blown || !c.locked; },
+          defeat: function (hit) {
+            if (CBZ.breachBlowOut) CBZ.breachBlowOut([c.bars], hit, { owner: "door:prison-cell-" + c.i, lb: hit && hit.lb });
+            c.bars.visible = false;
+            setDoor(c, false, true);
+            c.blown = true;
+            const arr = CBZ.colliders || [];
+            const k = arr.indexOf(c.doorCol);
+            if (k >= 0) { arr.splice(k, 1); if (CBZ.markCollidersDirty) CBZ.markCollidersDirty(); }
+            c.locked = false;
+          },
+        });
+      })(cells[i]);
+    }
+  }
+  function rehang(c) {
+    if (!c.blown) return;
+    if (CBZ.breachClearBlown) CBZ.breachClearBlown("door:prison-cell-" + c.i);
+    c.blown = false;
+    if (c.bars) c.bars.visible = true;
   }
 
   // Build state: every door OPEN, and the LEAF SNAPPED INTO ITS POCKET — a
@@ -2947,7 +2989,10 @@
     }
     return best;
   }
-  function resetDoors() { return lockAll(false); }
+  function resetDoors() {
+    for (let i = 0; i < cells.length; i++) rehang(cells[i]);
+    return lockAll(false);
+  }
   function assign(npc, which) {
     const c = typeof which === "number" ? cells[which] : which;
     if (!c || !npc) return false;

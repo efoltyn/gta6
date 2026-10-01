@@ -1782,7 +1782,13 @@
     }
   }
 
-  // sourceless hit: grit + dust off a surface (bullet on a wall, blast on the road)
+  /* sourceless hit: grit + dust off a surface (bullet on a wall, blast on a
+     floor that held). Nothing broke, so nothing the size of a CHUNK may come
+     off it: the default grain is 35 mm (spawnGrit spreads it 16-90 mm), the
+     scale a grenade actually spalls off concrete. It used to ride spawnGrit's
+     70 mm default — up to 18 cm "grit", i.e. fist-sized lumps of a floor that
+     was still whole. A caller that knows its grain (bark char, clods) says so. */
+  const SOURCELESS_GRIT = 0.035;
   function chips(x, y, z, o) {
     o = o || {};
     const kind = o.kind || (o.material ? kindOf(o.material) : "concrete");
@@ -1793,7 +1799,7 @@
     const n = o.count != null ? o.count : Math.round(k.gritN * 0.6 * power);
     const dir = o.dir ? new THREE.Vector3(o.dir.x || 0, o.dir.y || 0, o.dir.z || 0) : null;
     if (dir && dir.lengthSq() > 1e-6) dir.normalize();
-    const got = spawnGrit(x, y, z, { kind, color, count: Math.min(PHONE ? 14 : 40, n), dir, power, size: o.size, spread: o.spread, owner: o.owner });
+    const got = spawnGrit(x, y, z, { kind, color, count: Math.min(PHONE ? 14 : 40, n), dir, power, size: o.size > 0 ? o.size : SOURCELESS_GRIT, spread: o.spread, owner: o.owner });
     if (o.dust !== false && k.dust != null) dust(x, y, z, { color: o.dustColor != null ? o.dustColor : (color != null ? new THREE.Color(k.dust).lerp(new THREE.Color(color), 0.3).getHex() : k.dust), power: power * 0.7, radius: o.radius || 0.6, dir });
     return got;
   }

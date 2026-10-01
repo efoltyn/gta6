@@ -181,10 +181,12 @@
       reach: 3.0,
       at: function () { return { x: 0, y: 1.4, z: WZ }; },
       done: function () { return !!door.open; },    // already blown/opened: not a target
-      defeat: function () {
+      defeat: function (hit) {
+        // all four leaves go as their own steel, off the charge (breach.js)
+        if (CBZ.breachBlowOut) CBZ.breachBlowOut(pivots, hit, { owner: "door:prison-yard-door", lb: hit && hit.lb });
+        for (const p of pivots) p.visible = false;
         CBZ.openDoor();
         door.blown = true;
-        for (const p of pivots) p.visible = false;
         losTo(false);
         if (CBZ.addHeat) CBZ.addHeat(60);           // every screw in the block heard that
         if (CBZ.guards) for (const gd of CBZ.guards) { gd.alert = 1; gd.hunt = Math.max(gd.hunt || 0, 6); }
@@ -197,6 +199,7 @@
   // lockdown must not resurrect it mid-run), so a blown port used to stay a
   // hole in every run after it; systems/state.js's reset calls this instead.
   door.reset = function () {
+    if (door.blown && CBZ.breachClearBlown) CBZ.breachClearBlown("door:prison-yard-door");
     door.blown = false;
     for (const p of pivots) p.visible = true;
     CBZ.closeDoor();
