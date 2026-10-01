@@ -6,40 +6,32 @@
    thing." Plus: Grab (the disaster game's grab, its hold set swapped in),
    Trade (two pockets on one table), and a warden with more than Snitch.
 
-   BEFORE (HEAD): a person's verbs are a key-row card at the right edge on a
-   keyboard (#interact, J K L) and a rail of buttons by the thumb on touch
-   (#pinteract), shown whenever anybody is near.
-   AFTER: pills beside the man (systems/interact.js through CBZ.prisonPrompt),
-   his name on top, E J K L on a keyboard; on touch nothing until he is
-   tapped (the tap goes through CBZ.cityTapWorld, the real raycast).
+   SECOND PASS (owner, on d777ac85): touch verbs back in a fixed dock by the
+   thumb, compact, on no other control; desktop verbs beside the man, never
+   on his body; door verbs beside the leaf. BEFORE = d777ac85 (verbs pinned
+   at his shoulder on both inputs), AFTER = this branch.
 
    Subjects run in one booted page per side (window.__onthingSeq). Every
-   subject re-stages its own man and camera. The stage asks only for APIs
-   both builds have, and feature-detects the new ones (prisonPeople,
-   prisonTrade, warden.meetNow), so the BEFORE shows what HEAD really does.
+   subject re-stages its own man and camera.
 
-   Metrics: fixedSurface = 1 when the old card or rail is on screen;
-   pillsOnPerson = verb pills in #prisonPrompts beside him; pxFromPerson =
-   pixels from the first verb to his projected shoulder.
+   Metrics: verbsShown = verb buttons on screen; overlapPx = px^2 the verbs
+   cover of his body / the door (desktop) or of any touch control (touch,
+   the trade card included); hudAreaPx = the screen the verbs take.
 */
 
 const FRAMES = ["laptop", "iphone-16:landscape"];
 
 const SUBJECTS = [
   { id: "inmate", label: "An inmate, walked up to",
-    focus: "Desktop: his verbs on him, E first. Touch: nothing on anybody until you tap him." },
+    focus: "Desktop: his verbs BESIDE him, never on his body. Touch: nothing on anybody until you tap him." },
   { id: "inmate-tap", label: "The same inmate, tapped (touch)",
-    focus: "Touch: the tap (a real raycast through CBZ.cityTapWorld) puts his verbs on him. Desktop: unchanged from the walk-up." },
-  { id: "warden", label: "The warden on his floor",
-    focus: "Was Snitch alone. Now Snitch (or Ask) for his office, Beg while he has your yard, his keys when nobody guards him, Grab." },
+    focus: "Touch: the tap puts his verbs in the dock left of the thumb cluster, compact, on no other control." },
   { id: "warden-office", label: "The warden in his office",
-    focus: "Snitch, Transfer (or Beg), Work (or Protect), Threaten: each moves something he keeps." },
+    focus: "Snitch, Transfer (or Beg), Work (or Protect), Threaten, beside him." },
   { id: "door", label: "An open cell door",
-    focus: "Desktop: [E] Close on the leaf. Touch: no pill, the door is the button." },
-  { id: "grab", label: "Grab: the hold set swaps in",
-    focus: "The disaster game's grab: Throw (or the world's word for it), Carry, Set down, and Steal, on the man in your hands." },
+    focus: "Desktop: [E] Close beside the leaf and its frame, not on it. Touch: no pill, the door is the button." },
   { id: "trade", label: "Trade: two pockets on one table",
-    focus: "Your items and his real ones; Offer, Request, Accept, Leave." },
+    focus: "Touch: Offer / Request / Leave in the dock, the table in the free glass, no control covered." },
 ];
 
 export default {
@@ -56,9 +48,9 @@ export default {
   pairNote: "Same seed, same man, same stance: where the verbs are, and which",
   defaultFocus: "Are the verbs on the thing, and on touch only after a tap?",
   metrics: {
-    fixedSurface: { label: "A fixed HUD card/rail for people is on screen", unit: "0/1", better: "lower" },
-    pillsOnPerson: { label: "Verb pills pinned beside the person", unit: "pills", better: "higher" },
-    pxFromPerson: { label: "Pixels from the first verb to the person", unit: "px", better: "lower" },
+    verbsShown: { label: "Verb pills on screen", unit: "pills", better: "higher" },
+    overlapPx: { label: "Overlap: desktop verbs on the body/door, touch verbs on a touch control", unit: "px2", better: "lower" },
+    hudAreaPx: { label: "HUD area the verbs take", unit: "px2", better: "lower" },
   },
 
   stage: async function stageOnThing(input) {
@@ -144,10 +136,17 @@ export default {
     if (sub !== "door" && !a) return { ok: false, err: "no actor for " + sub };
 
     // stand in front of him, facing him; hold it a beat (the brain owns his feet)
-    const face = (x, z, d, ang) => {
+    // HARNESS TRAP: a level lens over a seated warden photographed the office
+    // ceiling with his head at the bottom edge; the lens now looks at the
+    // chest of whoever it faces.
+    const face = (x, z, d, ang, y) => {
       P.pos.set(x + Math.sin(ang) * d, P.pos.y, z + Math.cos(ang) * d); P.vy = 0;
       if (CBZ.playerChar && CBZ.playerChar.group) CBZ.playerChar.group.position.copy(P.pos);
-      if (CBZ.cam) { CBZ.cam.yaw = Math.atan2(-(x - P.pos.x), -(z - P.pos.z)); CBZ.cam.pitch = -0.05; }
+      if (CBZ.cam) {
+        CBZ.cam.yaw = Math.atan2(-(x - P.pos.x), -(z - P.pos.z));
+        // camera.js: POSITIVE pitch looks DOWN
+        CBZ.cam.pitch = y == null ? 0.05 : Math.max(-0.2, Math.min(0.5, Math.atan2(((P.pos.y || 0) + 1.6) - (y + 1.15), d)));
+      }
     };
     // HARNESS TRAP: the nearest inmate at spawn is usually the cellmate, lying
     // in a bunk or behind the cell's own steel, so "in front of him" put the
@@ -169,7 +168,7 @@ export default {
       for (let i = 0; i < (n || 30); i++) {
         actor.group.position.set(qx, qy, qz);
         actor.aiState = actor.aiState === "fight" ? "wander" : actor.aiState;
-        face(qx, qz, d, ang);
+        face(qx, qz, d, ang, (actor.group.position.y || 0));
         step(1);
       }
     };
@@ -195,7 +194,7 @@ export default {
       a.group.position.set(13.0, 0, -54.5);
       P.pos.set(13.0, 0, -52.6);
       if (W && W.meetNow) W.meetNow("tell");
-      pin(a, 1.6, 40);
+      pin(a, 2.0, 40);
       if (W && W.meetNow) W.meetNow("tell");
       step(2);
     } else {
@@ -230,6 +229,15 @@ export default {
       }
     }
     if (sub === "trade") {
+      // HARNESS TRAP: officers across the yard shouted "Still open." over the
+      // table in the last capture. Every guard goes 25 m off and their lines go.
+      for (const o of CBZ.guards || []) {
+        if (!o.group || o.kind === "warden") continue;
+        o.group.position.set(a.group.position.x + 25, o.group.position.y, a.group.position.z + 25);
+      }
+      if (CBZ.prisonPeople && touch) CBZ.prisonPeople.select(a);
+      step(2);
+      document.querySelectorAll("#speech .say").forEach((el) => el.remove());
       if (CBZ.econ) { CBZ.econ.addItem("Soap", 1); CBZ.econ.addItem("Lighter", 1); CBZ.econ.addCigs(20); }
       const i = verbIdx("trade");
       if (i >= 0 && CBZ.prisonTrade) {
@@ -247,25 +255,65 @@ export default {
       const r = el.getBoundingClientRect();
       return r.width > 2 && r.height > 2 && r.bottom > 0 && r.top < innerHeight;
     };
-    const fixed = [document.querySelector("#interact.show"), document.querySelector("#pinteract.show")].some(vis) ? 1 : 0;
-    const pills = Array.from(document.querySelectorAll("#prisonPrompts .wprompt.wside .tpill")).filter((el) => vis(el) && vis(el.closest(".wprompt")));
-    let px = 0;
-    if (pills.length && a) {
-      const v = new T.Vector3(a.group.position.x, a.group.position.y + 1.6, a.group.position.z).project(CBZ.camera);
-      const tx = (v.x * 0.5 + 0.5) * innerWidth, ty = (-v.y * 0.5 + 0.5) * innerHeight;
-      const r = pills[0].getBoundingClientRect();
-      const fx = Math.max(r.left, Math.min(r.right, tx)), fy = Math.max(r.top, Math.min(r.bottom, ty));
-      px = Math.round(Math.hypot(fx - tx, fy - ty));
+    const rect = (el) => { const r = el.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom }; };
+    const area = (p, q) => (!p || !q) ? 0 : Math.max(0, Math.min(p.r, q.r) - Math.max(p.l, q.l)) * Math.max(0, Math.min(p.b, q.b) - Math.max(p.t, q.t));
+    const union = (rs) => rs.length ? rs.reduce((u, r) => ({ l: Math.min(u.l, r.l), t: Math.min(u.t, r.t), r: Math.max(u.r, r.r), b: Math.max(u.b, r.b) })) : null;
+    // the verbs on screen: prompt pills (BEFORE and AFTER), the old card/rail, the trade's buttons
+    const wraps = Array.from(document.querySelectorAll("#prisonPrompts .wprompt")).filter(vis);
+    const pills = wraps.map((w) => w.querySelector(".tpill")).filter((el) => el && vis(el));
+    const oldEls = Array.from(document.querySelectorAll("#interact.show .iopt, #pinteract.show button")).filter(vis);
+    const tradeEls = Array.from(document.querySelectorAll("#prisonTrade.show .ptr-act")).filter(vis);
+    const tradeCard = tradeEls.length ? document.querySelector("#prisonTrade .ptr-card") : null;
+    const verbEls = tradeEls.length ? tradeEls : pills.concat(oldEls);
+    const cluster = union((tradeEls.length ? tradeEls : wraps.concat(oldEls)).map(rect));
+    // what it must not cover: desktop, his body (capsule) or the door + frame; touch, every control
+    const proj = (boxes) => {
+      CBZ.camera.updateMatrixWorld();
+      const v = new T.Vector3(); let l = 1e9, t = 1e9, r = -1e9, b = -1e9, n = 0;
+      for (const B of boxes) for (let k = 0; k < 8; k++) {
+        v.set(k & 1 ? B[3] : B[0], k & 2 ? B[4] : B[1], k & 4 ? B[5] : B[2]).project(CBZ.camera);
+        if (v.z > 1) continue;
+        const x = (v.x * 0.5 + 0.5) * innerWidth, y = (-v.y * 0.5 + 0.5) * innerHeight;
+        l = Math.min(l, x); r = Math.max(r, x); t = Math.min(t, y); b = Math.max(b, y); n++;
+      }
+      return n ? { l, t, r, b } : null;
+    };
+    let overlap = 0;
+    if (touch) {
+      const ctl = Array.from(document.querySelectorAll("#touch button, #tstick, #hudPauseBtn, #planBtn, #hotbar, #weaponStrip")).filter(vis).map(rect);
+      for (const c of ctl) {
+        overlap = Math.max(overlap, area(cluster, c));
+        if (tradeCard) overlap = Math.max(overlap, area(rect(tradeCard), c));
+      }
+    } else if (cluster) {
+      let target = null;
+      if (sub === "door") {
+        const tid = (CBZ.prisonDoorTarget && CBZ.prisonDoorTarget() || {}).id;
+        const sp = (CBZ.prisonDoorList ? CBZ.prisonDoorList() : []).filter((x) => x.id === tid)[0];
+        if (sp) {
+          const boxes = [];
+          for (const c of (sp.cols ? sp.cols() : [sp.col()]) || []) if (c) { const fy = sp.floor ? sp.floor() : 0; boxes.push([c.minX, fy, c.minZ, c.maxX, fy + 2.3, c.maxZ]); }
+          for (const m of sp.pick ? sp.pick() : []) { const bx = new T.Box3().setFromObject(m); if (!bx.isEmpty()) boxes.push([bx.min.x, bx.min.y, bx.min.z, bx.max.x, bx.max.y, bx.max.z]); }
+          target = proj(boxes);
+        }
+      } else if (a && !tradeEls.length) {
+        const q = a.group.position, y = q.y || 0;
+        target = proj([[q.x - 0.3, y, q.z - 0.3, q.x + 0.3, y + 1.9, q.z + 0.3]]);
+      }
+      overlap = area(cluster, target);
     }
-    const words = pills.map((el) => (el.innerText || "").replace(/\s+/g, " ").trim());
-    const oldRows = Array.from(document.querySelectorAll("#interact .iopt, #pinteract button")).filter(vis).map((el) => (el.innerText || "").replace(/\s+/g, " ").trim());
+    const words = verbEls.map((el) => (el.innerText || "").replace(/\s+/g, " ").trim());
     return {
       ok: true, frame: input.frame ? input.frame.id : null, touch,
       who: a && a.data ? a.data.name : null,
       verbs: CBZ.prisonVerbsFor && a ? CBZ.prisonVerbsFor(a) : null,
-      pills: words, oldRows,
+      pills: words,
       trade: CBZ.prisonTrade ? CBZ.prisonTrade.audit() : null,
-      metrics: { fixedSurface: fixed, pillsOnPerson: pills.length, pxFromPerson: px },
+      metrics: {
+        verbsShown: verbEls.length,
+        overlapPx: Math.round(overlap),
+        hudAreaPx: cluster ? Math.round((cluster.r - cluster.l) * (cluster.b - cluster.t)) : 0,
+      },
     };
   },
 };

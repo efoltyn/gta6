@@ -17,6 +17,15 @@
        move items between g.inventory and his loadout
      - the warden wears two or more verbs
      - touch: nothing until select(), his verbs after, gone on select(null)
+     - NO OVERLAP, live (owner, 2026-09-30: "it can't be overlapping them.
+       It can't block them at all"), measured in px^2 every frame of a walk
+       around the target with the camera turning:
+         desktop  the verb cluster vs his projected body (capsule + rig
+                  bounds), and a door's pill vs its leaf + frame: 0
+         touch    (852x393 iPhone landscape, touch emulated, real controls)
+                  the dock vs the joystick, the fire/jump/eye cluster, pause,
+                  Plan and the belt: 0; grab's hold set and the trade table's
+                  verbs + card too; every tap target >= 44 px
 
      node tools/prison-onthing-check.mjs [--port 9822]
    Exit 0 = pass, 1 = any assertion failed.
@@ -58,7 +67,9 @@ for (let i = 0; i < 40 && !wsUrl; i++) {
   await sleep(500);
   try {
     const tabs = await (await fetch(`http://127.0.0.1:${DBG}/json/list`)).json();
-    const t = tabs.find((x) => x.webSocketDebuggerUrl);
+    // HARNESS TRAP: Chrome can list a non-page target (a service worker, an
+    // extension) first; driving that one never reaches the title card.
+    const t = tabs.find((x) => x.type === "page" && x.webSocketDebuggerUrl);
     if (t) wsUrl = t.webSocketDebuggerUrl;
   } catch (_) {}
 }
@@ -165,6 +176,113 @@ check("verbs are E/J/K/L and include Grab + Trade", inmate && inmate.verbs && in
 check("no fixed card, no rail", inmate && !inmate.oldCard && !inmate.rail);
 check("noun audit stays 0", inmate && inmate.audit && inmate.audit.nouned === 0, inmate && inmate.audit);
 
+// GEOMETRY, MEASURED INDEPENDENTLY OF THE LAYOUT: a man is an upright 0.30 m
+// capsule feet to 1.9 m, unioned with his rig's own mesh bounds; a door is its
+// shut slab(s) plus its leaf mesh. Projected through the live camera every frame.
+await ev(`(function(){
+  function proj(boxes) {
+    var cam = CBZ.camera; cam.updateMatrixWorld();
+    var v = new THREE.Vector3(), l = 1e9, t = 1e9, r = -1e9, b = -1e9, n = 0;
+    boxes.forEach(function (B) {
+      for (var k = 0; k < 8; k++) {
+        v.set(k & 1 ? B[3] : B[0], k & 2 ? B[4] : B[1], k & 4 ? B[5] : B[2]).project(cam);
+        if (v.z > 1) continue;
+        var x = (v.x * 0.5 + 0.5) * innerWidth, y = (-v.y * 0.5 + 0.5) * innerHeight;
+        l = Math.min(l, x); r = Math.max(r, x); t = Math.min(t, y); b = Math.max(b, y); n++;
+      }
+    });
+    return n ? { l: l, t: t, r: r, b: b } : null;
+  }
+  function meshBox(o, cap) {
+    var bx = new THREE.Box3().setFromObject(o);
+    if (bx.isEmpty()) return null;
+    if (cap && (bx.max.x - bx.min.x > cap || bx.max.y - bx.min.y > cap || bx.max.z - bx.min.z > cap)) return null;
+    return [bx.min.x, bx.min.y, bx.min.z, bx.max.x, bx.max.y, bx.max.z];
+  }
+  window.__geo = {
+    body: function (a) {
+      var q = a.group.position, R = 0.30, y = q.y || 0;
+      var boxes = [[q.x - R, y, q.z - R, q.x + R, y + 1.9, q.z + R]];
+      var m = meshBox(a.group, 2.3); if (m && m[3] - m[0] < 1.1 && m[5] - m[2] < 1.1) boxes.push(m);
+      return proj(boxes);
+    },
+    door: function (s) {
+      var boxes = [];
+      var cols = s.cols ? s.cols() : [s.col()];
+      (cols || []).forEach(function (c) { if (!c) return; var fy = s.floor ? s.floor() : (c.y0 || 0);
+        boxes.push([c.minX, Math.max(fy, c.y0 != null ? c.y0 : fy), c.minZ, c.maxX, Math.min(c.y1 != null ? c.y1 : fy + 2.3, fy + 3), c.maxZ]); });
+      (s.pick ? s.pick() : []).forEach(function (m) { if (m && m.visible) { var mb = meshBox(m, 8); if (mb) boxes.push(mb); } });
+      return proj(boxes);
+    },
+    // the shown cluster: every visible prompt wrap, as one rect
+    cluster: function () {
+      var l = 1e9, t = 1e9, r = -1e9, b = -1e9, n = 0, minH = 1e9;
+      document.querySelectorAll('#prisonPrompts .wprompt').forEach(function (w) {
+        if (w.style.display === 'none' || w.style.visibility === 'hidden') return;
+        var q = w.getBoundingClientRect(); if (q.width < 2) return;
+        l = Math.min(l, q.left); t = Math.min(t, q.top); r = Math.max(r, q.right); b = Math.max(b, q.bottom); n++;
+        var p = w.querySelector('.tpill'); if (p) minH = Math.min(minH, p.getBoundingClientRect().height);
+      });
+      return n ? { l: l, t: t, r: r, b: b, n: n, minH: minH } : null;
+    },
+    rectOf: function (el) {
+      if (!el) return null;
+      var cs = getComputedStyle(el);
+      if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity < 0.05) return null;
+      var q = el.getBoundingClientRect(); if (q.width < 2 || q.height < 2) return null;
+      return { l: q.left, t: q.top, r: q.right, b: q.bottom, id: el.id || el.className };
+    },
+    controls: function () {
+      var out = [];
+      document.querySelectorAll('#touch button, #tstick, #hudPauseBtn, #planBtn, #hotbar, #weaponStrip').forEach(function (el) {
+        var r = __geo.rectOf(el); if (r) out.push(r);
+      });
+      return out;
+    },
+    area: function (a, b) {
+      if (!a || !b) return 0;
+      return Math.max(0, Math.min(a.r, b.r) - Math.max(a.l, b.l)) * Math.max(0, Math.min(a.b, b.b) - Math.max(a.t, b.t));
+    },
+  };
+  return true;
+})()`);
+
+// 1b) DESKTOP, LIVE: walking round him and turning the camera, the cluster
+// never touches his body (zero intersection px^2, every frame it is shown)
+const deskLive = await ev(`(function(){
+  var a = window.__inmate; a.ko = 0;
+  var frames = 0, shown = 0, hitFrames = 0, maxArea = 0, flips = 0, lastSide = 0, offGlass = 0;
+  var base = null;
+  for (var k = 0; k < 300; k++) {
+    var q = a.group.position;
+    if (base === null) base = Math.atan2(CBZ.player.pos.x - q.x, CBZ.player.pos.z - q.z);
+    var ang = base + 0.6 * Math.sin(k / 40), d = 1.5 + 0.45 * Math.sin(k / 23);
+    var P = CBZ.player.pos;
+    P.set(q.x + Math.sin(ang) * d, q.y, q.z + Math.cos(ang) * d);
+    if (CBZ.playerChar) CBZ.playerChar.group.position.copy(P);
+    CBZ.cam.yaw = Math.atan2(-(q.x - P.x), -(q.z - P.z)) + 0.32 * Math.sin(k / 17);
+    CBZ.cam.pitch = -0.05;
+    __step(1); frames++;
+    var sh = CBZ.prisonPeople.shown();
+    var c = __geo.cluster();
+    if (!c || !sh || sh.who !== a) continue;
+    shown++;
+    var B = __geo.body(a);
+    var ar = __geo.area(c, B);
+    if (ar > 0) hitFrames++;
+    maxArea = Math.max(maxArea, Math.round(ar));
+    if (c.l < 0 || c.r > innerWidth || c.t < 0 || c.b > innerHeight) offGlass++;
+    var side = B ? ((c.l + c.r) / 2 > (B.l + B.r) / 2 ? 1 : -1) : 0;
+    if (lastSide && side !== lastSide) flips++;
+    lastSide = side;
+  }
+  return { frames: frames, shown: shown, hitFrames: hitFrames, maxArea: maxArea, flips: flips, offGlass: offGlass };
+})()`);
+log("  desktop live: " + JSON.stringify(deskLive));
+check("desktop live: the cluster is shown on him while walking + turning", deskLive && deskLive.shown >= 150, deskLive);
+check("desktop live: ZERO overlap with his body, every frame", deskLive && deskLive.hitFrames === 0 && deskLive.maxArea === 0, deskLive);
+check("desktop live: steady (at most 2 side flips in 300 frames), on the glass", deskLive && deskLive.flips <= 2 && deskLive.offGlass === 0, deskLive);
+
 // 2) GRAB swaps in the hold set; he struggles; release
 const grab = await ev(`(function(){
   var a = window.__inmate; __face(a, 1.0); __step(2);
@@ -220,6 +338,8 @@ check("a request gets his price and Accept moves the item", trade && (!trade.req
 const warden = await ev(`(function(){
   var w = (CBZ.npcs||[]).concat(CBZ.guards||[]).filter(function(x){ return x.kind === 'warden' && !x.dead; })[0];
   if (!w) return { err: 'no warden' };
+  // HARNESS TRAP: the inmate from the trade often stands in the warden's reach and wins the faced test; clear a 4 m ring first
+  (CBZ.npcs||[]).concat(CBZ.guards||[]).forEach(function (o) { if (o === w || !o.group) return; var op = o.group.position, wq = w.group.position; if (Math.hypot(op.x - wq.x, op.z - wq.z) < 4) op.set(wq.x + 9, op.y, wq.z + 9); });
   __face(w, 1.4); __step(20);
   var floorV = CBZ.prisonVerbsFor(w);
   var sh = CBZ.prisonPeople.shown();
@@ -228,12 +348,54 @@ const warden = await ev(`(function(){
 log("  warden: " + JSON.stringify(warden));
 check("the warden wears more than one verb", warden && warden.floor && warden.floor.length >= 2 && warden.shownOnHim, warden);
 
-// 5) TOUCH: nothing until tapped, then on him; tap elsewhere hides
+// 4b) A DOOR'S VERB IS BESIDE THE DOOR (desktop, live): an open cell front,
+// walked across and looked about; the pill never sits on the leaf or its frame
+const doorLive = await ev(`(function(){
+  var cb = CBZ.cellblock, cells = (cb && cb.cells) || [], c = null;
+  for (var i = 0; i < cells.length; i++) if (cells[i].player && !cells[i].tier) { c = cells[i]; break; }
+  if (!c) for (var i = 0; i < cells.length; i++) if (!cells[i].tier && cells[i].leafClosed) { c = cells[i]; break; }
+  if (!c) return { err: 'no ground cell' };
+  var s = (CBZ.prisonDoorList ? CBZ.prisonDoorList() : []).filter(function (x) { return x.id === 'prison-cell-' + c.i; })[0];
+  if (!s) return { err: 'no door spec' };
+  try { s.set(true); } catch (e) {}
+  var shown = 0, hitFrames = 0, maxArea = 0, verbs = {};
+  for (var k = 0; k < 200; k++) {
+    var P = CBZ.player.pos;
+    P.set(c.leafClosed.x + 0.5 * Math.sin(k / 25), c.fy || 0, c.leafClosed.z + 1.5 + 0.25 * Math.sin(k / 31)); CBZ.player.vy = 0;
+    if (CBZ.playerChar) CBZ.playerChar.group.position.copy(P);
+    CBZ.cam.yaw = 0.22 * Math.sin(k / 19); CBZ.cam.pitch = 0;
+    __step(1);
+    var sh = CBZ.prisonPromptShown && CBZ.prisonPromptShown();
+    if (!sh || sh.id !== 'door') continue;
+    var cl = __geo.cluster(); if (!cl) continue;
+    shown++; verbs[sh.verb] = 1;
+    var ar = __geo.area(cl, __geo.door(s));
+    if (ar > 0) hitFrames++;
+    maxArea = Math.max(maxArea, Math.round(ar));
+  }
+  return { door: s.id, shown: shown, hitFrames: hitFrames, maxArea: maxArea, verbs: Object.keys(verbs) };
+})()`);
+log("  door live: " + JSON.stringify(doorLive));
+check("desktop door: its verb is shown at the open cell front", doorLive && doorLive.shown >= 60, doorLive);
+check("desktop door: ZERO overlap with the leaf and its frame, every frame", doorLive && doorLive.hitFrames === 0 && doorLive.maxArea === 0, doorLive);
+
+// 5) TOUCH, A REAL PHONE LAYOUT: iPhone landscape (852x393), touch emulated,
+// the touch layer switched on by a real touchstart (so the joystick, the
+// fire/jump/eye cluster, pause and Plan are the live ones), a belt to carry.
+// Nothing on him until he is tapped; then his verbs sit in THE DOCK, and the
+// dock never covers a single touch control while you walk and turn.
+await send("Emulation.setDeviceMetricsOverride", { width: 852, height: 393, deviceScaleFactor: 1, mobile: true });
+await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+await ev(`(function(){ CBZ.econ.addItem('Lighter', 1); CBZ.econ.addItem('Soap', 1); return true; })()`);
+await send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: 430, y: 60 }] });
+await send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+await sleep(300);
 const touch = await ev(`(function(){
-  var a = window.__inmate; a.ko = 0; CBZ.touchMode = true; document.body.classList.add('touch');
-  __face(a, 1.4); __step(20);
+  var a = window.__inmate; a.ko = 0;
+  if (CBZ.prisonPeople) CBZ.prisonPeople.select(null);
+  if (window.dispatchEvent) window.dispatchEvent(new Event('resize'));
+  __face(a, 1.4); __step(30);
   var before = __pills().length;
-  // THE REAL TAP: a finger on his chest, through touch.js's raycast
   CBZ.camera.updateMatrixWorld();
   var v = new THREE.Vector3(a.group.position.x, a.group.position.y + 1.2, a.group.position.z).project(CBZ.camera);
   var p0 = CBZ.player.pos.clone();
@@ -244,16 +406,89 @@ const touch = await ev(`(function(){
   if (!sel) CBZ.prisonPeople.select(a);
   __step(3);
   var after = __pills();
+  // LIVE: walk round him and turn, the dock against every live touch control
+  var shown = 0, hitFrames = 0, maxArea = 0, worst = null, minH = 1e9, ctlIds = {}, dockArea = 0, base = null;
+  for (var k = 0; k < 240; k++) {
+    var q = a.group.position, P = CBZ.player.pos;
+    if (base === null) base = Math.atan2(P.x - q.x, P.z - q.z);
+    var ang = base + 0.6 * Math.sin(k / 40), d = 1.6 + 0.5 * Math.sin(k / 23);
+    P.set(q.x + Math.sin(ang) * d, q.y, q.z + Math.cos(ang) * d);
+    if (CBZ.playerChar) CBZ.playerChar.group.position.copy(P);
+    CBZ.cam.yaw = Math.atan2(-(q.x - P.x), -(q.z - P.z)) + 0.4 * Math.sin(k / 17);
+    __step(1);
+    var c = __geo.cluster(); if (!c) continue;
+    shown++; minH = Math.min(minH, c.minH); dockArea = Math.max(dockArea, Math.round((c.r - c.l) * (c.b - c.t)));
+    var ctl = __geo.controls(), worstHere = 0;
+    ctl.forEach(function (o) { ctlIds[o.id] = 1; var ar = __geo.area(c, o); if (ar > worstHere) { worstHere = ar; if (ar > maxArea) worst = o.id; } });
+    if (worstHere > 0) hitFrames++;
+    maxArea = Math.max(maxArea, Math.round(worstHere));
+  }
+  var dock = __geo.cluster();
   CBZ.prisonPeople.select(null); __step(3);
   var gone = __pills().length;
-  CBZ.touchMode = false; document.body.classList.remove('touch'); __step(2);
-  return { before: before, after: after, gone: gone, tapped: tapped, selectedByTap: sel, moved: moved, ndc: [+v.x.toFixed(2), +v.y.toFixed(2)] };
+  return { before: before, after: after, gone: gone, tapped: tapped, selectedByTap: sel, moved: moved,
+    live: { shown: shown, hitFrames: hitFrames, maxArea: maxArea, worst: worst, minPillH: Math.round(minH), dockAreaPx: dockArea, controls: Object.keys(ctlIds) },
+    dock: dock && { l: Math.round(dock.l), t: Math.round(dock.t), r: Math.round(dock.r), b: Math.round(dock.b) } };
 })()`);
 log("  touch: " + JSON.stringify(touch));
-check("touch: nothing on him until he is tapped", touch && touch.before === 0, touch);
-check("touch: a real tap on his body selects him", touch && touch.selectedByTap && touch.moved < 1.0, touch);
-check("touch: tapped, his verbs are on him", touch && touch.after.length >= 3, touch);
-check("touch: tap elsewhere puts them away", touch && touch.gone === 0, touch);
+check("touch: nothing on him until he is tapped", touch && touch.before === 0, touch && touch.before);
+check("touch: a real tap on his body selects him", touch && touch.selectedByTap && touch.moved < 1.0, touch && { sel: touch.selectedByTap, moved: touch.moved });
+check("touch: tapped, his verbs show in the dock", touch && touch.after.length >= 3, touch && touch.after);
+check("touch: tap elsewhere puts them away", touch && touch.gone === 0, touch && touch.gone);
+check("touch live: the dock sees the real controls (stick, cluster, pause)", touch && touch.live.controls.length >= 4, touch && touch.live.controls);
+check("touch live: ZERO overlap with every touch control, walking + turning", touch && touch.live.shown >= 150 && touch.live.hitFrames === 0 && touch.live.maxArea === 0, touch && touch.live);
+check("touch: tap targets at least 44 px tall", touch && touch.live.minPillH >= 44, touch && touch.live.minPillH);
+
+// 5b) TOUCH GRAB: the hold set swaps into the same dock, still clear of every control
+const tgrab = await ev(`(function(){
+  var a = window.__inmate; a.ko = 0; __face(a, 1.0); __step(2);
+  CBZ.prisonPeople.select(a); __step(2);
+  var i = CBZ.prisonVerbsFor(a).indexOf('grab');
+  if (i < 0) return { err: 'no grab', v: CBZ.prisonVerbsFor(a) };
+  for (var tries = 0; tries < 3 && !(CBZ.grapple && CBZ.grapple.holding()); tries++) {
+    __face(a, 1.0); var j = CBZ.prisonVerbsFor(a).indexOf('grab'); if (j >= 0) CBZ.doInteract(j);
+    for (var k = 0; k < 200 && !(CBZ.grapple && CBZ.grapple.holding()); k++) __step(1);
+  }
+  __step(10);
+  var held = !!(CBZ.grapple && CBZ.grapple.holding());
+  var c = __geo.cluster(), maxArea = 0, worst = null;
+  __geo.controls().forEach(function (o) { var ar = __geo.area(c, o); if (ar > maxArea) { maxArea = ar; worst = o.id; } });
+  var out = { held: held, verbs: CBZ.prisonVerbsFor(a), pills: __pills(), maxArea: Math.round(maxArea), worst: worst };
+  var v = CBZ.prisonVerbsFor(a), s = v.indexOf('h:setDown'); if (s < 0) s = v.indexOf('h:letGo');
+  if (s >= 0) CBZ.doInteract(s);
+  __step(150);
+  CBZ.prisonPeople.select(null); __step(2);
+  return out;
+})()`);
+log("  touch grab: " + JSON.stringify(tgrab));
+check("touch grab: the hold set shows in the dock, clear of every control", tgrab && tgrab.held && tgrab.pills.length >= 2 && tgrab.maxArea === 0, tgrab);
+
+// 5c) TOUCH TRADE: Offer/Request/Leave in the dock, the table in the free glass,
+// neither on a control
+const ttrade = await ev(`(function(){
+  var a = window.__inmate; a.ko = 0; __face(a, 1.3); __step(20);
+  CBZ.prisonPeople.select(a); __step(2);
+  var i = CBZ.prisonVerbsFor(a).indexOf('trade');
+  if (i < 0) return { err: 'no trade', v: CBZ.prisonVerbsFor(a) };
+  CBZ.econ.addCigs(10);
+  CBZ.doInteract(i); __step(3);
+  var root = document.getElementById('prisonTrade');
+  var acts = __geo.rectOf(root && root.querySelector('.ptr-acts')), card = __geo.rectOf(root && root.querySelector('.ptr-card'));
+  var maxActs = 0, maxCard = 0, worst = null;
+  __geo.controls().forEach(function (o) {
+    var x = __geo.area(acts, o), y = __geo.area(card, o);
+    if (x > maxActs) { maxActs = x; worst = 'acts/' + o.id; } if (y > maxCard) { maxCard = y; worst = 'card/' + o.id; }
+  });
+  var minH = 1e9; root.querySelectorAll('.ptr-act').forEach(function (b) { var r = b.getBoundingClientRect(); if (r.height > 2) minH = Math.min(minH, r.height); });
+  var res = { open: CBZ.prisonTrade.isOpen(), touch: CBZ.prisonTrade.audit().touch, acts: acts, card: card,
+    actsOnControls: Math.round(maxActs), cardOnControls: Math.round(maxCard), worst: worst, minActH: Math.round(minH),
+    actsInCard: Math.round(__geo.area(acts, card)) };
+  CBZ.prisonTrade.close(); __step(2);
+  return res;
+})()`);
+log("  touch trade: " + JSON.stringify(ttrade));
+check("touch trade: the table opens docked (no sheet over the controls)", ttrade && ttrade.open && ttrade.touch, ttrade);
+check("touch trade: its verbs and its table are on no control, 44 px targets", ttrade && ttrade.actsOnControls === 0 && ttrade.cardOnControls === 0 && ttrade.minActH >= 44, ttrade);
 
 check("no console errors after PLAY", errors.length === 0, errors.length);
 if (errors.length) {

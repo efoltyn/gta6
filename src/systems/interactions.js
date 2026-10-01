@@ -272,6 +272,12 @@
     p.quote = !!opts.quote;
     p.side = !!opts.side;
     p.label = !!opts.label;
+    // `box`: () => world AABBs of the thing (a man's body, a door's leaf +
+    // frame); the pill is laid out BESIDE their screen rect, never on it.
+    // `dock`: on touch this group sits in the dock by the thumb instead.
+    p.box = typeof opts.box === "function" ? opts.box : null;
+    p.dock = !!opts.dock;
+    p.id = id;
     p.act = act;
     p.bind = opts.bind ? String(opts.key || "e").toLowerCase() : "";
     p.frame = frameNo;
@@ -382,6 +388,7 @@
     if (!p.at) return;
     const cam = CBZ.camera;
     if (!cam) return;
+    if (p._lay) { p._lay = ""; p.wrap.classList.remove("wabs", "wdock"); p.wrap.style.width = ""; }
     // THIS frame's camera, not last frame's. camera.js moved it at order 50;
     // the renderer will not refresh matrixWorldInverse until the draw AFTER
     // this, so project() here would trail the camera by a frame — which on
@@ -395,8 +402,6 @@
     const ny = Math.max(-1 + EDGE * 4, Math.min(1 - EDGE * 2, _pv.y));
     const rowH = onTouch() ? 54 : 36;
     let sy0 = Math.round((-ny * 0.5 + 0.5) * h);
-    // A COLUMN BESIDE A MAN stays whole on the glass: a short landscape phone
-    // slides the whole column up (or down) rather than cutting its last verbs
     if (p.side && p.group) {
       const top = sy0 + groupRows.min * rowH - rowH / 2, bot = sy0 + groupRows.max * rowH + rowH / 2;
       if (bot > h - 8) sy0 -= Math.min(bot - (h - 8), Math.max(0, top - 8));
@@ -404,26 +409,246 @@
     }
     const sx = Math.round((nx * 0.5 + 0.5) * w), sy = sy0 + (p.row || 0) * rowH * (p.up ? -1 : 1);
     if (p.side) {
-      // a cluster beside a man near the right edge of the glass goes to his other side
       const flip = sx > w - 190;
       if (p._flip !== flip) { p._flip = flip; p.wrap.classList.toggle("flip", flip); }
     }
-    if (p._sx !== sx || p._sy !== sy) {
-      p._sx = sx; p._sy = sy;
-      p.wrap.style.left = sx + "px";
-      p.wrap.style.top = sy + "px";
+    moveTo(p, sx, sy);
+  }
+  function moveTo(p, x, y) {
+    x = Math.round(x); y = Math.round(y);
+    if (p._sx !== x || p._sy !== y) {
+      p._sx = x; p._sy = y;
+      p.wrap.style.left = x + "px";
+      p.wrap.style.top = y + "px";
     }
     p.wrap.style.visibility = "";
   }
+
+  /* ==========================================================================
+     NEVER ON THE THING, ALWAYS BESIDE IT (owner, 2026-09-30, on the verbs
+     pinned to a man: "I like it on computer if you put it in a good spot to
+     the side of them. Not, it can't be overlapping them. It can't block them
+     at all.")
+
+     A prompt that carries `box` (a function returning world AABBs: a man's
+     body, a door's leaf and its frame) is laid out against the SCREEN
+     rectangle those boxes project to, every frame, through the live camera:
+     the whole column just outside it, his right by default, his left when the
+     right runs off the glass or into a HUD readout. The side is sticky (it
+     only comes back once the right fits with room to spare) and the column
+     eases toward its spot, but the ease is clamped: whatever the smoothing
+     says, the column's near edge never crosses into the box.
+
+     And on TOUCH a `dock` group (a person's verbs) is not on him at all:
+     "put those buttons back where they were so that they don't overlap with
+     other buttons. And don't take up too much of the HUD." It sits in THE
+     DOCK, left of the right-thumb cluster, at a spot derived from the live
+     rects of every touch control on screen (joystick, the fire/jump/eye
+     cluster, pause, Plan, the belt) so it never covers one of them.
+     ========================================================================== */
+  const SIDE_GAP = 14;                  // px between the body's edge and the column
+  const DOCK_GAP = 10;                  // px kept clear of every touch control
+  const _bx = new THREE.Vector3();
+  // world AABBs -> the screen rect they cover, or null (behind / off the glass)
+  function screenRect(boxes) {
+    const cam = CBZ.camera;
+    if (!cam || !boxes || !boxes.length) return null;
+    cam.updateMatrixWorld();                     // this frame's camera (see placePrompt)
+    const w = window.innerWidth || 800, h = window.innerHeight || 600;
+    let l = Infinity, t = Infinity, r = -Infinity, b = -Infinity, n = 0;
+    for (let i = 0; i < boxes.length; i++) {
+      const B = boxes[i];
+      if (!B) continue;
+      for (let k = 0; k < 8; k++) {
+        _bx.set(k & 1 ? B.maxX : B.minX, k & 2 ? B.maxY : B.minY, k & 4 ? B.maxZ : B.minZ).project(cam);
+        if (_bx.z > 1) continue;                 // behind the lens
+        const x = (_bx.x * 0.5 + 0.5) * w, y = (-_bx.y * 0.5 + 0.5) * h;
+        if (x < l) l = x; if (x > r) r = x; if (y < t) t = y; if (y > b) b = y;
+        n++;
+      }
+    }
+    if (!n || r < 0 || l > w || b < 0 || t > h) return null;
+    return { l: l, t: t, r: r, b: b };
+  }
+  CBZ.prisonScreenRect = screenRect;
+  function hits(a, b, pad) {
+    pad = pad || 0;
+    return a.l < b.r + pad && a.r > b.l - pad && a.t < b.b + pad && a.b > b.t - pad;
+  }
+  function shownRect(el) {
+    if (!el || !el.isConnected) return null;
+    const r = el.getBoundingClientRect();
+    if (r.width < 2 || r.height < 2) return null;
+    const cs = getComputedStyle(el);
+    if (cs.display === "none" || cs.visibility === "hidden" || parseFloat(cs.opacity) < 0.05) return null;
+    return { l: r.left, t: r.top, r: r.right, b: r.bottom, id: el.id || el.className || el.tagName };
+  }
+  /* WHAT ELSE IS ON THE GLASS. Touch: every control a thumb uses. Keyboard:
+     the readouts a column must not sit on. The element list is re-queried
+     every half second (controls come and go: RELOAD while armed, the belt
+     once you carry something); their rects are read when asked. */
+  const TOUCH_SEL = "#touch button, #tstick, #hudPauseBtn, #planBtn, #hotbar, #weaponStrip, #ammo, #tExit, #tveh button, #survVerbs .svbtn";
+  const DESK_SEL = "#hotbar, #weaponStrip, #ammo, #hint, #planBtn, #escapePlan, #hudPauseBtn";
+  const obsCache = { t: 0, touch: null, els: [] };
+  function hudObstacles(touch) {
+    const now = performance.now();
+    if (obsCache.touch !== touch || now - obsCache.t > 500) {
+      obsCache.t = now; obsCache.touch = touch;
+      obsCache.els = Array.prototype.slice.call(document.querySelectorAll(touch ? TOUCH_SEL : DESK_SEL));
+    }
+    const out = [];
+    for (let i = 0; i < obsCache.els.length; i++) {
+      const r = shownRect(obsCache.els[i]);
+      if (r) out.push(r);
+    }
+    return out;
+  }
+  CBZ.prisonHudObstacles = hudObstacles;
+  function clearOf(rect, obs, pad) {
+    for (let i = 0; i < obs.length; i++) if (hits(rect, obs[i], pad)) return false;
+    return true;
+  }
+
+  /* THE DOCK: a free spot for a w x h block, left of the right-thumb cluster,
+     as low as the controls allow (nearest the thumb). Scans up from the floor,
+     then inward from the cluster; the first spot clear of every control by
+     DOCK_GAP wins. -> { x, y, w, h, clear } */
+  function dockSpot(bw, bh, obs) {
+    const W = window.innerWidth || 800, H = window.innerHeight || 600;
+    obs = obs || hudObstacles(true);
+    // the right-thumb cluster: controls in the right half, lower 2/3
+    let cl = Infinity;
+    for (let i = 0; i < obs.length; i++) {
+      const o = obs[i], cx = (o.l + o.r) / 2, cy = (o.t + o.b) / 2;
+      if (cx > W * 0.55 && cy > H * 0.3 && o.l < cl) cl = o.l;
+    }
+    const xr0 = (isFinite(cl) ? cl : W - 100) - DOCK_GAP - 2;
+    const floor = H - 12, ceil = 8;
+    for (let xr = xr0; xr - bw >= 8; xr -= 8) {
+      for (let yb = floor; yb - bh >= ceil; yb -= 6) {
+        const r = { l: xr - bw, t: yb - bh, r: xr, b: yb };
+        if (clearOf(r, obs, DOCK_GAP)) return { x: r.l, y: r.t, w: bw, h: bh, clear: true };
+      }
+      if (xr0 - xr > W * 0.5) break;
+    }
+    return { x: Math.max(8, xr0 - bw), y: Math.max(ceil, floor - bh), w: bw, h: bh, clear: false };
+  }
+  CBZ.prisonDockSpot = dockSpot;
+
+  // a pill's own size, measured once per build (the sig rebuilds it on change)
+  function natSize(p, cls) {
+    if (p._lay !== cls) {
+      p.wrap.classList.remove("wabs", "wdock");
+      p.wrap.classList.add(cls);
+      p.wrap.style.width = "";
+      p._lay = cls; p._nat = null;
+    }
+    if (!p._nat || !p._nat.w) p._nat = { w: p.wrap.offsetWidth, h: p.wrap.offsetHeight };
+    return p._nat;
+  }
+
+  // a person's verbs on a touchscreen: name on top, the lead verb at the
+  // bottom nearest the thumb, one width, tight gaps
+  function layoutDock(list) {
+    const gap = 6;
+    const name = list.filter(function (p) { return p.label; });
+    const verbs = list.filter(function (p) { return !p.label; }).sort(function (a, b) { return b.row - a.row; });
+    const ordered = name.concat(verbs);
+    let bw = 0, bh = 0;
+    for (let i = 0; i < ordered.length; i++) {
+      const s = natSize(ordered[i], "wdock");
+      bw = Math.max(bw, s.w); bh += s.h + (i ? gap : 0);
+    }
+    bw = Math.ceil(bw);
+    const spot = dockSpot(bw, bh);
+    let y = spot.y;
+    for (let i = 0; i < ordered.length; i++) {
+      const p = ordered[i], s = p._nat;
+      if (!p.label && p.wrap.style.width !== bw + "px") p.wrap.style.width = bw + "px";
+      // the name is right-aligned over the column
+      moveTo(p, p.label ? spot.x + bw - s.w : spot.x, y);
+      y += s.h + gap;
+    }
+    dockState.rect = { l: spot.x, t: spot.y, r: spot.x + bw, b: spot.y + bh, clear: spot.clear };
+  }
+  const dockState = { rect: null };
+
+  // keyed by the group (or the lone pill's id): which side it is on, where it eased to
+  const beside = { key: null, side: 1, x: 0, y: 0 };
+  function layoutBeside(list, boxes, key) {
+    const W = window.innerWidth || 800, H = window.innerHeight || 600;
+    const touch = onTouch();
+    const R = screenRect(boxes);
+    if (!R) { for (let i = 0; i < list.length; i++) list[i].wrap.style.visibility = "hidden"; besideState.rect = null; return; }
+    const gap = touch ? 6 : 4;
+    const ordered = list.slice().sort(function (a, b) { return (a.label ? -1 : 0) - (b.label ? -1 : 0) || a.row - b.row; });
+    let bw = 0, bh = 0;
+    for (let i = 0; i < ordered.length; i++) {
+      const s = natSize(ordered[i], "wabs");
+      bw = Math.max(bw, s.w); bh += s.h + (i ? gap : 0);
+    }
+    const obs = hudObstacles(touch);
+    // level with his upper body, kept on the glass
+    const ty = Math.max(8, Math.min(H - 8 - bh, R.t + (R.b - R.t) * 0.1));
+    const xOf = function (side) { return side > 0 ? R.r + SIDE_GAP : R.l - SIDE_GAP - bw; };
+    const fits = function (side, margin) {
+      const x = xOf(side);
+      if (x < 8 + (margin || 0) || x + bw > W - 8 - (margin || 0)) return false;
+      return clearOf({ l: x, t: ty, r: x + bw, b: ty + bh }, obs, 4);
+    };
+    const fresh = beside.key !== key;
+    let side = fresh ? 1 : beside.side;
+    if (fresh) { if (!fits(1) && fits(-1)) side = -1; }
+    else if (side < 0) { if (fits(1, 24) || !fits(-1)) side = fits(1) ? 1 : side; }
+    else if (!fits(1) && fits(-1)) side = -1;
+    let tx = xOf(side);
+    let y = ty;
+    const roomR = W - 8 - (R.r + SIDE_GAP), roomL = R.l - SIDE_GAP - 8;
+    let free = fits(side);
+    if (!free) {
+      // neither side has room for the whole column beside him: above him,
+      // then below, then the roomier side clamped onto the glass
+      if (R.t - SIDE_GAP - bh >= 8) { y = R.t - SIDE_GAP - bh; tx = Math.max(8, Math.min(W - 8 - bw, (R.l + R.r) / 2 - bw / 2)); side = 0; }
+      else if (R.b + SIDE_GAP + bh <= H - 8) { y = R.b + SIDE_GAP; tx = Math.max(8, Math.min(W - 8 - bw, (R.l + R.r) / 2 - bw / 2)); side = 0; }
+      else { side = roomR >= roomL ? 1 : -1; tx = Math.max(8, Math.min(W - 8 - bw, xOf(side))); }
+    }
+    let x = tx;
+    if (!fresh && beside.side === side) {
+      // ease, then clamp the near edge back outside the body
+      x = beside.x + (tx - beside.x) * 0.45;
+      y = beside.y + (y - beside.y) * 0.35;
+      if (side > 0) x = Math.max(x, R.r + SIDE_GAP);
+      else if (side < 0) x = Math.min(x, R.l - SIDE_GAP - bw);
+      x = Math.max(8, Math.min(W - 8 - bw, x));
+      if (side === 0) y = (y < R.t) ? Math.min(y, R.t - SIDE_GAP - bh) : Math.max(y, R.b + SIDE_GAP);
+      y = Math.max(8, Math.min(H - 8 - bh, y));
+    }
+    beside.key = key; beside.side = side; beside.x = x; beside.y = y;
+    let yy = y;
+    for (let i = 0; i < ordered.length; i++) {
+      const p = ordered[i], s = p._nat;
+      // the column hugs the body: right-aligned on his left
+      moveTo(p, side < 0 ? x + bw - s.w : x, yy);
+      yy += s.h + gap;
+    }
+    besideState.rect = { l: x, t: y, r: x + bw, b: y + bh, side: side };
+    besideState.box = R;
+  }
+  const besideState = { rect: null, box: null };
+  // what the layout did this frame (tools/prison-onthing-check reads it)
+  CBZ.prisonPromptLayout = function () {
+    return { dock: dockState.rect, beside: besideState.rect, box: besideState.box, side: beside.side };
+  };
 
   // Sweep + placement. A prompt whose owner stopped re-arming it goes away
   // within two frames, and the whole layer stands down outside a live prison
   // run (a prison prompt must never survive into the city, a pause or a death
   // screen — a pause stops the updaters, so nothing re-arms and it clears).
   let frameNo = 0;
+  const _grp = [];
   CBZ.onAlways(96, function () {
     frameNo++;
-    if (!pills.size) return;
+    if (!pills.size) { dockState.rect = null; besideState.rect = null; beside.key = null; return; }
     const gm = CBZ.game;
     const live = !!(gm && gm.state === "playing");
     const ids = [];
@@ -431,13 +656,25 @@
       if (!live || (gm.mode === "city" && !p.city) || frameNo - p.frame > 2) ids.push(id);
     });
     for (let i = 0; i < ids.length; i++) prisonPromptClear(ids[i]);
-    if (!pills.size) return;
+    dockState.rect = null; besideState.rect = null;
+    if (!pills.size) { beside.key = null; return; }
     const best = arbitrate();
-    if (best) {
-      groupRows.min = 0; groupRows.max = 0;
-      pills.forEach(function (p) { if (p.shown && p.side) { groupRows.min = Math.min(groupRows.min, p.row || 0); groupRows.max = Math.max(groupRows.max, p.row || 0); } });
-      pills.forEach(function (p) { if (p.shown) placePrompt(p); });
+    if (!best) return;
+    // the shown set: the best pill and (a panel) everything in its group
+    _grp.length = 0;
+    pills.forEach(function (p) { if (p.shown) _grp.push(p); });
+    const boxFn = best.box || (_grp.filter(function (p) { return p.box; })[0] || {}).box;
+    const docked = onTouch() && _grp.some(function (p) { return p.dock; });
+    if (docked) { beside.key = null; layoutDock(_grp); return; }
+    if (boxFn) {
+      let boxes = null;
+      try { boxes = boxFn(); } catch (e) { boxes = null; }
+      if (boxes && boxes.length) { layoutBeside(_grp, boxes, boxFn); return; }
     }
+    beside.key = null;
+    groupRows.min = 0; groupRows.max = 0;
+    _grp.forEach(function (p) { if (p.side) { groupRows.min = Math.min(groupRows.min, p.row || 0); groupRows.max = Math.max(groupRows.max, p.row || 0); } });
+    _grp.forEach(function (p) { placePrompt(p); });
   });
 
   CBZ.prisonPrompt = prisonPrompt;
@@ -866,7 +1103,40 @@
     // man's cell used to win the press, so only your own (empty) cell shut
     const closing = v.verb === "Close";
     CBZ.prisonPrompt("door", "@prisonDoorVerbNearest", v.verb,
-      { at: t.at, d2: closing ? Math.min(t.d * t.d, 0.0004) : t.d * t.d, bind: true, sub: v.sub || undefined, noReach: true });
+      { at: t.at, d2: closing ? Math.min(t.d * t.d, 0.0004) : t.d * t.d, bind: true, sub: v.sub || undefined, noReach: true,
+        box: doorBoxFn(t.s) });
+  }
+  /* THE DOOR'S OWN FOOTPRINT ON THE GLASS, so its verb goes BESIDE it (owner:
+     "to the side ... it can't block them at all"): the doorway's shut slab
+     (its frame, s.cols()/s.col()) plus the leaf mesh where it stands now (an
+     open leaf has slid or swung off the slab). One function per door, so the
+     layout's side memory is per door. */
+  const _dbox = new THREE.Box3();
+  function doorBoxFn(s) {
+    if (s._promptBox) return s._promptBox;
+    s._promptBox = function () {
+      const out = [];
+      const cols = doorBoxes(s);
+      for (let i = 0; i < cols.length; i++) {
+        const c = cols[i];
+        const fy = doorFloor(s, c);
+        const y0 = c.y0 != null ? c.y0 : fy, y1 = c.y1 != null ? c.y1 : (c.top != null ? c.top : fy + 2.3);
+        out.push({ minX: c.minX, maxX: c.maxX, minY: Math.max(fy, y0), maxY: Math.min(y1, fy + 3), minZ: c.minZ, maxZ: c.maxZ });
+      }
+      const meshes = dsafe(function () { return s.pick ? s.pick() : null; }, null);
+      for (let i = 0; meshes && i < meshes.length; i++) {
+        const m = meshes[i];
+        if (!m || !m.isObject3D || !m.visible) continue;
+        _dbox.makeEmpty();
+        _dbox.setFromObject(m);
+        if (_dbox.isEmpty()) continue;
+        const B = _dbox;
+        if (B.max.x - B.min.x > 8 || B.max.y - B.min.y > 6 || B.max.z - B.min.z > 8) continue;   // a whole wing, not a leaf
+        out.push({ minX: B.min.x, maxX: B.max.x, minY: B.min.y, maxY: B.max.y, minZ: B.min.z, maxZ: B.max.z });
+      }
+      return out;
+    };
+    return s._promptBox;
   }
 
   /* LATCH UPKEEP. Order 41.46 sits AFTER every door tick (gunroom 41,

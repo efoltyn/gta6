@@ -709,6 +709,20 @@ body.touch .wprompt.wside .tpill{min-height:46px; min-width:96px; justify-conten
 body.touch .wprompt.wside.lead .tpill{background:rgba(25,70,104,.94); border-color:rgba(160,238,255,.85);}
 body.touch .wprompt .wname{font-size:16px;}
 
+/* LAID OUT, NOT PINNED (systems/interactions.js layoutBeside / layoutDock).
+   The sweep writes each pill's top-left itself, so no centring transform and
+   no caret pointing at a spot the column deliberately stands off.
+     .wabs   beside the thing's projected rect (a man's body, a door + frame)
+     .wdock  touch: a person's verbs in the dock left of the thumb cluster,
+             compact capsules (44px tap height, 6px gaps), one column width */
+.wprompt.wabs, .wprompt.wdock{transform:none !important; padding:0;}
+.wprompt.wabs::after, .wprompt.wdock::after{display:none;}
+body.touch .wprompt.wdock .tpill{display:flex; width:100%; box-sizing:border-box; min-height:44px; min-width:84px;
+  padding:0 16px; margin:0; justify-content:center; font-size:15px; border-radius:22px; box-shadow:0 2px 0 rgba(0,0,0,.35);}
+body.touch .wprompt.wdock.lead .tpill{background:rgba(25,70,104,.94); border-color:rgba(160,238,255,.85);}
+body.touch .wprompt.wdock .wname{font-size:14px; padding:0 2px 2px;}
+body.touch .wprompt.wdock .wname .wrole{font-size:11px;}
+
 /* TRADE (systems/prisontrade.js): your pockets and his on one table */
 #prisonTrade{position:fixed; inset:0; z-index:62; display:none; align-items:center; justify-content:center;
   background:rgba(4,8,12,.42); padding:16px; box-sizing:border-box;}
@@ -736,6 +750,18 @@ body.touch .wprompt .wname{font-size:16px;}
 #prisonTrade .ptr-accept{border-color:#ffd27a; background:rgba(80,60,16,.9);}
 #prisonTrade .ptr-leave{border-color:rgba(255,255,255,.25);}
 @media (max-width:520px){ #prisonTrade .ptr-sides{grid-template-columns:1fr;} #prisonTrade .ptr-act{flex:1 1 40%;} }
+/* touch: no sheet over the controls. The card sits in the free glass and the
+   four verbs in the dock (prisontrade.js layoutTouch writes the positions) */
+#prisonTrade.ptr-touch{background:transparent; pointer-events:none; padding:0;}
+#prisonTrade.ptr-touch.show{display:block;}
+#prisonTrade.ptr-touch .ptr-card{position:fixed; pointer-events:auto; padding:10px; border-radius:14px;}
+#prisonTrade.ptr-touch .ptr-sides{gap:8px; grid-template-columns:1fr 1fr;}
+#prisonTrade.ptr-touch .ptr-side{padding:8px;}
+#prisonTrade.ptr-touch .ptr-who{font-size:14px; margin:0 2px 6px;}
+#prisonTrade.ptr-touch .ptr-grid{grid-template-columns:repeat(auto-fill,minmax(50px,1fr)); gap:6px;}
+#prisonTrade.ptr-touch .ptr-tile{min-height:48px;}
+#prisonTrade.ptr-touch .ptr-acts{position:fixed; margin:0; flex-direction:column; flex-wrap:nowrap; gap:6px; pointer-events:auto;}
+#prisonTrade.ptr-touch .ptr-act{min-height:44px; min-width:96px; padding:0 16px; font-size:15px; flex:none;}
 
 /* ============================================================
    THE BARE PRISON (body.prison-bare, stamped by systems/hud.js in escape
