@@ -783,7 +783,7 @@
     martial: "Soldiers on the street", guard: "A bigger detail", bureau: "The Bureau raid", wall: "The wall",
     police: "Police funding", taxup: "A tax rise", taxdown: "A tax cut", address: "An address to the nation",
     amnesty: "An amnesty", pardon: "A pardon", fascism: "One state", communism: "The state takes the market", crown: "The crown",
-    war: "War", peace: "Peace", strike: "An airstrike", nuke: "A nuclear strike",
+    war: "War", peace: "Peace", strike: "An airstrike", nuke: "A nuclear strike", bunker: "A bunker strike",
   };
   function padName(key) { return ORDER_NAMES[key] || String(key); }
   function inRoom(x, z) {
@@ -1128,11 +1128,13 @@
     peace: warButton("peace", "Make peace", "canPeace",
       ["polwar.js makePeace -> endWar (reparations, armistice, approval)"]),
     strike: warButton("strike", "Order an airstrike", "canStrike",
-      ["playerair.js cityStrikeFlight: real jets from your capital", "strategic.js strategicRelease -> impactbus detonate -> structural.js", "polwar.js strikeOn (losses, front, fatigue)", "rec.treasury"]),
+      ["arsenal_data.js payloads.strike: strike jets (polwar mil.planes)", "playerair.js cityStrikeFlight: real jets from your air station", "strategic.js strategicRelease -> impactbus detonate -> structural.js", "polwar.js strikeOn (losses, front, fatigue)"]),
     nuke: warButton("nuke", "Order a nuclear strike", "canNuke",
-      ["polwar.js mil.warheads (data: polity/countries rows)", "strategic.js strategicNuclearSortie (the B-2) or a strike jet", "nukefx.js + impactbus nuke row", "polwar.js nuclearStrike (surrender or retaliation)"]),
+      ["arsenal_data.js payloads.nuke: a B-52 or a B-2 on its pad + mil.warheads", "strategic.js strategicSortie: the bomber takes off from its own pad", "nukefx.js + impactbus nuke row", "polwar.js nuclearStrike (surrender or retaliation)"]),
+    bunker: warButton("bunkerStrike", "Strike a bunker", "canBunker",
+      ["arsenal_data.js payloads.bunker: a B-2 + mil.mops", "strategic.js strategicSortie kind buster -> bunkers.js breach (wornCE)", "officials.js killOfficial / presidency cellKill (the leader inside)"]),
   };
-  function warButton(key, name, gateFn, moves) {
+  function warButton(fnName, name, gateFn, moves) {
     return {
       group: "WAR", name: name, moves: moves,
       live: function () { return !!(CBZ.warroom && CBZ.warroom.enemy()); },
@@ -1140,7 +1142,7 @@
         const W = CBZ.warroom;
         return W && W[gateFn] ? W[gateFn]() : { ok: false, why: "The army is not answering." };
       },
-      run: function () { return CBZ.warroom[key](); },
+      run: function () { return CBZ.warroom[fnName](); },
     };
   }
   function doctrineGate(gov) {
@@ -1251,7 +1253,10 @@
       options: [{
         id: "pres-nuke", slot: "e", prio: 20, campaignSafe: true, bad: true,
         label: "Order nuke",
-        canShow: function () { return !!(CBZ.warroom && CBZ.warroom.warheads() > 0); },
+        // a verb only while the country has BOTH a bomber on its pad and a
+        // warhead (city/arsenal_data.js payloads.nuke); what is missing is
+        // the General's one line when you Talk to him
+        canShow: function () { return !!(CBZ.warroom && CBZ.warroom.hasMeans("nuke")); },
         onSelect: function () { warAnswer(pressButton("nuke"), null); },
       }],
     });
@@ -1270,6 +1275,14 @@
         label: "Mark",
         canShow: function () { return !!(CBZ.fullMap && CBZ.fullMap.open); },
         onSelect: markMap,
+      }, {
+        // on the wheel: a known bunker (the one by the mark, the enemy
+        // leader's, the cell's once the Bureau has them). No B-2 or no MOPs
+        // and the General says so in one line.
+        id: "pres-map-bunker", prio: 16, campaignSafe: true,
+        label: "Strike bunker",
+        canShow: function () { return !!(CBZ.warroom && CBZ.warroom.bunkerTarget()); },
+        onSelect: function () { warAnswer(pressButton("bunker"), "general"); },
       }],
     });
     if (CBZ.interactions.describe) {
@@ -1381,6 +1394,11 @@
       const WR = CBZ.warroom;
       if (WR && WR.enemy()) {
         const t = WR.target();
+        const bk = WR.bunkerTarget();
+        if (bk && bk.owner === WR.enemy() && gateOk("bunker")) return {
+          line: "Their leader is in his bunker" + sir + ". The B-2 can put two bunker busters in one hole.",
+          key: "bunker", yes: "Do it", no: "Not yet", ok: "The B-2 is rolling.", nope: "He'll stay down there.",
+        };
         if (t && gateOk("strike")) return {
           line: "I have a package on " + (t.label || "their capital") + sir + ". Two jets, six bombs. Say go.",
           key: "strike", yes: "Go", no: "Hold", ok: "Wheels up.", nope: "Holding.",
@@ -1406,6 +1424,9 @@
         line: "The emergency has held. The men want one flag and no parties. Say it and it's done.",
         key: "fascism", yes: "One state", no: "Not that", ok: "One state.", nope: "They'll be disappointed.",
       };
+      // what the arsenal is missing is the first thing he tells you
+      const miss = WR && WR.missingLine ? WR.missingLine("nuke") : "";
+      if (miss) return { line: miss };
       return { line: T.wall && T.wall.ordered && !T.wall.done ? "The engineers are on the wall, " + T.wall.built + " of " + T.wall.total + " sections done. The garrison is at readiness." : "The garrison is at readiness. Nothing on the board I'd move men for today." };
     }
     if (role === "bureau") {
@@ -1506,10 +1527,31 @@
           canShow: function () { return on() && !!seat() && !CONV && !p.dead; },
           onSelect: function () { talkTo(role); },
         });
+        // PROCUREMENT IS THE GENERAL'S (city/warroom.js, prices and days in
+        // city/arsenal_data.js): his wheel is one verb per thing you can buy,
+        // and he answers in one line. Talk stays his E.
+        if (role === "general" && CBZ.ARSENAL) {
+          const T = CBZ.ARSENAL;
+          const keys = Object.keys(T.aircraft).concat(Object.keys(T.stores));
+          keys.forEach(function (k, i) {
+            const def = T.aircraft[k] || T.stores[k];
+            CBZ.interactions.registerFor(p, {
+              id: "pres-buy-" + k, prio: 20 - i, campaignSafe: true, label: def.label,
+              canShow: function () { return on() && !!seat() && !CONV && !p.dead && !!CBZ.warroom; },
+              onSelect: function () { sayPed(p, answerLine(CBZ.warroom.buy(k))); },
+            });
+          });
+          CBZ.interactions.registerFor(p, {
+            id: "pres-build-bunker", prio: 8, campaignSafe: true, label: T.bunkers.build.label,
+            canShow: function () { return on() && !!seat() && !CONV && !p.dead && !!CBZ.warroom && CBZ.warroom.canBuildBunker().why !== "You have a bunker, sir."; },
+            onSelect: function () { sayPed(p, answerLine(CBZ.warroom.buildBunker())); },
+          });
+        }
       } catch (e) {}
     }
     return p;
   }
+  function answerLine(r) { return r && r.ok ? (r.line || "Yes, sir.") : String((r && r.why) || "It can't be done."); }
   function sayPed(ped, line) { if (ped && line && CBZ.citySay) { try { CBZ.citySay(ped, line, "#dfe7ff", Math.min(6, 2 + line.length * 0.04)); } catch (e) {} } }
   function talkTo(role) {
     if (CONV) return;
@@ -3183,6 +3225,34 @@
     on: onEvent,
     emit: emitEvent,
     roster: function () { return st().roster.slice(); },
+    // THE CELL'S LEADER AND HIS GROUND (city/warroom.js builds his bunker
+    // there and kills him in it): the emir if he lives, else the top rank.
+    cellLeader: function () {
+      const live = livingCell();
+      const R = { emir: 3, bomber: 2, runner: 1 };
+      live.sort(function (a, b) { return (R[b.rank] || 0) - (R[a.rank] || 0); });
+      return live[0] ? { sid: live[0].sid, name: live[0].name, rank: live[0].rank } : null;
+    },
+    cellKill: function (sid, cause) {
+      const S = st();
+      for (let i = 0; i < S.roster.length; i++) {
+        const m = S.roster[i];
+        if (m.sid !== sid || m.dead) continue;
+        m.dead = true;
+        paintBoard();
+        emitEvent("cell-death", { sid: sid, name: m.name, rank: m.rank, cause: cause || null });
+        return true;
+      }
+      return false;
+    },
+    cellHome: function () {
+      const R = saltlandsRegion();
+      if (!R) return null;
+      const sh = safehouses();
+      if (sh.length) return { x: sh[0].cx, z: sh[0].cz, name: "Dry Gulch" };
+      return { x: (R.minX + R.maxX) / 2, z: (R.minZ + R.maxZ) / 2, name: "the Saltlands" };
+    },
+    cellRegion: function () { return saltlandsRegion(); },
     orderRaid: function () { const h = seat(); return h ? orderRaid(h) : { ok: false, why: "You do not hold the country." }; },
     audit: audit,
     reset: reset,

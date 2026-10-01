@@ -175,8 +175,12 @@
      release it fast and high and it opens a command shelter. That is a real
      skill the player can learn, expressed as one row field and one square
      root — not a code path.                                                */
-  const MASS = { bomb: 925, jdam: 970, buster: 2130, nuke: 4400 };
-  const BUSTER_REF_E = 3.4e7;      // 2130 kg arriving at ~180 m/s — a NOMINAL release
+  // The buster is the GBU-57 MOP (2026-09-30): 13,600 kg, the 30,000 lb class
+  // only a B-2 carries. Its reference energy scales with the mass, so the
+  // penetration a given release earns (BUSTER_PEN_CE x sqrt(E/refE)) is the
+  // same arithmetic the 2130 kg round had — heavier round, same law.
+  const MASS = { bomb: 925, jdam: 970, buster: 13600, nuke: 4400 };
+  const BUSTER_REF_E = 3.4e7 * (13600 / 2130);   // 13.6 t arriving at ~180 m/s — a NOMINAL release
   const BUSTER_PEN_CE = 6.0;       // GBU-28's published ~6 m of reinforced concrete, at refE
 
   let _rowsDone = false;
@@ -1520,7 +1524,8 @@
   function bayPoint(c) {
     const grp = c && c.group;
     if (grp && grp.localToWorld) {
-      try { return grp.localToWorld(_bayWorld.copy(BAY_LOCAL)); } catch (e) {}
+      // another airframe (a B-52) names its own bay; the B-2 loft owns this one
+      try { return grp.localToWorld(_bayWorld.copy((c && c.bayLocal) || BAY_LOCAL)); } catch (e) {}
     }
     return _bayWorld.set(c.pos.x, c.pos.y + 0.6, c.pos.z);
   }
@@ -1805,11 +1810,15 @@
     // BECAUSE the ballistics are closed-form.
     if (bombs.length >= bombCap()) { resolveImpact(b); return b; }
 
-    b.mesh = bombMesh(kind);
-    b.mesh.rotation.order = "YXZ";                   // yaw then pitch — nose tracks the arc
-    b.mesh.position.set(b.x0, b.y0, b.z0);
-    b.mesh.rotation.y = Math.atan2(b.vx, b.vz);
-    if (CBZ.scene) CBZ.scene.add(b.mesh);
+    // A MESH THAT FAILS TO BUILD NEVER EATS THE WEAPON: the round still flies
+    // its solved arc and resolves on time, it just is not drawn
+    try { b.mesh = bombMesh(kind); } catch (e) { b.mesh = null; }
+    if (b.mesh) {
+      b.mesh.rotation.order = "YXZ";                 // yaw then pitch — nose tracks the arc
+      b.mesh.position.set(b.x0, b.y0, b.z0);
+      b.mesh.rotation.y = Math.atan2(b.vx, b.vz);
+      if (CBZ.scene) CBZ.scene.add(b.mesh);
+    }
     bombs.push(b);
     return b;
   }
@@ -2098,6 +2107,7 @@
         resolveImpact(b);
         continue;
       }
+      if (!b.mesh) continue;                            // an undrawn round only needs its clock
       bombAt(b, b.t, _bp);
       b.mesh.position.set(_bp.x, _bp.y, _bp.z);
       // nose tracks the arc: yaw down the ground track, pitch down the descent
@@ -2550,128 +2560,92 @@
   CBZ.strategicNukeDetonate = nukeDetonate;           // probe/tooling handle
 
   /* ==========================================================================
-     THE ORDERED SORTIE — you name a place; the bomber actually goes there.
+     THE ORDERED SORTIE — a bomber on its pad takes off, flies to a place and
+     lets go of its stores there.
 
      OWNER (2026-08-04): "they should be able to order a nuke on a place and
-     literally in the game, a B-2 should fly to that place and drop a nuke. The
-     same way that it works when you currently drop a nuke in pilot."
+     literally in the game, a B-2 should fly to that place and drop a nuke."
+     OWNER (2026-09-30): "EVERY BOMB PAYLOAD NEEDS A SPECIFIC PLANE ... GET A
+     B2, AND THEN ORDER A NUKE STRIKE" / "the B-2 takes off from YOUR airbase".
 
-     The last four words are the whole specification, and they are why this is
-     ~150 lines instead of a second weapon system. There is no delivery code
-     here. The sortie flies an aeroplane to a point and calls releaseStore()
-     with a bay position and a release velocity — the identical call the [B]
-     key makes. From that instant the file cannot tell the two apart: the same
-     closed-form solve, the same B61 laydown parachute, the same tumble, the
-     same bombAt() evaluation, the same resolveImpact -> nukeDetonate -> the
-     bus. A player watching the weapon come down is watching the exact arc his
-     own release would have flown, because it IS that arc.
+     So the sortie flies the bomber it is HANDED (opts.bomber): the B-2 parked
+     at Fort Brandt (the default, b2rec), the B-52 beside it, or an aircraft a
+     President bought for his own air station (city/warroom.js). It does not
+     build an aeroplane and it does not teleport one: it CLAIMS the parked
+     record through militaryvehicles.js's ownership protocol, rolls it down
+     its own heading, climbs out, and releases through releaseStore() — the
+     identical call the [B] key makes — then re-parks it on its pad.
+       · steal the bomber, or blow it up, and nobody can order with it;
+       · a real garrison trooper flies it when there is one on the base
+         (CBZ.airSeatActor seats him); a bought airframe comes with its own
+         crew (rec.ownCrew), so a small country's B-2 flies from a pier;
+       · kill the trooper in the seat and the aeroplane goes down.
 
-     WHAT THIS REPLACES. CBZ.strategicCallStrike (above) is the file's older
-     answer to "bomb that district with nobody in the cockpit", and it is a
-     ground effect: it authors impact points and hands them to cityBombWalk. No
-     aircraft exists, which is exactly the complaint — you order a strike and
-     the sky stays empty. That path stays as-is for IRON (it is 12 rounds of
-     2000 lb and a bomb walk is the honest picture of one); a nuclear order is
-     a single weapon on a single aeroplane and now gets the aeroplane.
+     WHEN TO LET GO is solved every frame, not tuned: the closed-form fall of
+     a store released RIGHT NOW (solveFall, and the B61's parachute through
+     retardFor/solveRetard) is evaluated against the mark, and the bay opens
+     the moment that landing point reaches it. That holds through the climb,
+     at any distance, for every kind — which a fixed release offset cannot.
 
-     THE AEROPLANE IS THE ONE ON THE APRON. This does not build a B-2 — it
-     CLAIMS the parked one through the same ownership protocol aircraft.js's
-     fighter scramble uses (cityClaimMilitaryVehicle / cityReleaseMilitaryVehicle,
-     militaryvehicles.js), flies b2rec.group itself, and re-parks it on return.
-     Three things fall out for free and none of them are bookkeeping:
-       · the apron is genuinely EMPTY while your strike is in the air, and the
-         boarding verb is genuinely gone, because it is the same airframe;
-       · steal the bomber, or blow it up, and nobody can order a strike — the
-         order is backed by an object in the world, not by a flag;
-       · a real garrison trooper flies it (CBZ.airSeatActor puts him in the
-         seat aircraft.js solved), so the crew is a person, not a fiction.
-     No aircrew on the base, no sortie. That is the honest refusal.
+     ALTITUDE IS THE WEAPON for a penetrator: a GBU-57 dropped from the B-2's
+     600 m pass arrives at ~92 m/s and gets ~4.3 m of concrete; two in the
+     same hole open a head of state's bunker (city/bunkers.js wornCE).
      ========================================================================== */
   if (CBZ.CONFIG.STRAT_NUKE_SORTIE == null) CBZ.CONFIG.STRAT_NUKE_SORTIE = true;
   const SORTIE = {
-    ALT: 210,          // release altitude AGL over the aimpoint — see below
-    SPD: 165,          // ingress ground speed, m/s
+    SPD: 165,          // cruise ground speed, m/s
     EGRESS_SPD: 205,   // and what it runs home at once the bay is empty
     RTB: 26,           // s of egress before the airframe is back on its pad
-    WARN: 0.9,         // s between inbound engine notes
+    WARN: 0.9,         // s between engine notes
+    TAKEOFF: 6,        // s of take-off roll from 25 m/s to cruise
+    ROLL: 140,         // m of runway before the wheels leave
+    CLIMB: 30,         // m/s climb once airborne
+    TURN: 0.35,        // rad/s turn rate (a ~470 m radius at cruise)
+    RUN: 900,          // m of straight run-in at height before the mark
+    ALT: { nuke: 210, buster: 600, bomb: 240, jdam: 240 },   // pass altitude AGL over the mark
   };
-  // WHY 210 m. retardFor() streams the canopy only when the free fall does not
-  // already buy the bomber its escape (RET.T_ESCAPE = 12 s). A 210 m release
-  // falls in sqrt(2*210/14) = 5.5 s ballistic — comfortably short of 12 — so
-  // this profile ALWAYS takes the retarded laydown, which is both the real B61
-  // delivery rule and the reason you get to watch a parachute come down.
-  let sortie = null;
+  const sorties = [];
+  const _sv = { vx: 0, vy: 0, vz: 0 };
 
-  /* WHERE THE RUN-IN STARTS. playerair.js's called jet enters from a point on
-     the ARENA's edge, which is right for a city-block strike and wrong here:
-     the arena is the built-up blocks, and Fort Brandt (and half of what you
-     would ever nuke) is outside it, so an arena-edge ingress can put the
-     aeroplane between the base and the mark and have it fly outward.
-     This aeroplane has a home, so the run-in is authored off the home: the
-     line from the pad to the aimpoint, backed up INGRESS metres. That is
-     always well-defined, always reads as a departure from the base the bomber
-     actually left, and gives a fixed ~5.5 s of visible run-in whatever the
-     world's scale — which no bounds-derived number can promise. */
-  const SORTIE_INGRESS = 900;
-  function sortieRunIn(tx, tz) {
-    const h = (b2rec && (b2rec._aiHome || b2rec.pos)) || { x: 0, z: 0 };
-    let dx = tx - h.x, dz = tz - h.z;
-    let len = Math.hypot(dx, dz);
-    if (!(len > 0.001)) { dx = 0; dz = 1; len = 1; }     // ordered onto the pad itself
-    return { x: tx - (dx / len) * SORTIE_INGRESS, z: tz - (dz / len) * SORTIE_INGRESS };
+  function bomberAvailable(rec) {
+    return !!(rec && rec.group && rec.group.parent && rec.group.visible !== false && !rec.taken && !rec._aiActive && !rec.lost);
   }
-
   // A free trooper to fly it, by the same test aircraft.js applies before it
   // scrambles anyone: alive, not already crewing something, not otherwise busy.
-  function sortieCrew() {
+  function sortieCrew(rec) {
+    rec = rec || b2rec;
+    if (!rec || !rec.pos) return null;
     const troops = CBZ.cityMilitaryPersonnel || [];
-    let best = null, bd = Infinity;
+    let best = null, bd = 400;
     for (let i = 0; i < troops.length; i++) {
       const p = troops[i];
-      if (!p || p.dead || p._milPilot || p._airPilot) continue;
+      if (!p || p.dead || p._milPilot || p._airPilot || !p.pos) continue;
       if (CBZ.body && CBZ.body.busy) { try { if (CBZ.body.busy(p)) continue; } catch (e) {} }
-      if (!p.pos || !b2rec) continue;
-      const d = Math.hypot(p.pos.x - b2rec.pos.x, p.pos.z - b2rec.pos.z);
+      const d = Math.hypot(p.pos.x - rec.pos.x, p.pos.z - rec.pos.z);
       if (d < bd) { bd = d; best = p; }
     }
     return best;
   }
-
-  /* WHERE TO LET GO — solved, not tuned.
-     Every other "the jet drops when it is N metres out" number in this repo is
-     a guess (playerair.js releases at a flat 55 m). It does not have to be:
-     the ballistics here are closed-form, so the honest way to find the release
-     point is to run the SAME solve the release will run and subtract. This
-     probes a release directly over the aimpoint at cruise, reads how far
-     downrange the weapon actually travels — including the canopy's horizontal
-     decay integral, which no hand-picked constant would have known about —
-     and hands back that offset. Release point = aimpoint - throw.
-     One consequence worth stating: `rv` is computed once and REUSED at the
-     real release. The ingress leg is straight and level at constant speed, so
-     the release velocity is identical at both moments by construction; caching
-     it makes the prediction and the event the same numbers rather than two
-     solves that could disagree, and keeps ordnanceAudit()'s call count honest
-     at one release per sortie. */
-  function sortieSolve(tx, tz, vx, vz) {
-    const gy = surfaceAt(tx, tz);
-    const y0 = gy + SORTIE.ALT + BAY_LOCAL.y;
-    const rv = releaseVel({ vx: vx, vy: 0, vz: vz }, "nuke");
-    const probe = { x0: tx, y0: y0, z0: tz, vx: rv.vx, vy: rv.vy, vz: rv.vz };
-    let sol = solveFall(probe.x0, probe.y0, probe.z0, probe.vx, probe.vy, probe.vz);
-    const ret = retardFor("nuke", probe.y0, probe.vy, sol.y);
-    if (ret) sol = solveRetard(probe, ret, sol);
-    return {
-      y: y0 - BAY_LOCAL.y,                       // the aircraft's own altitude
-      throwX: sol.x - tx, throwZ: sol.z - tz,    // how far downrange it lands
-      fall: sol.t,
-      rv: { vx: rv.vx, vy: rv.vy, vz: rv.vz },   // releaseVel returns SHARED scratch — copy it
-    };
+  function claim(rec, crew) {
+    if (CBZ.cityClaimMilitaryVehicle) return !!CBZ.cityClaimMilitaryVehicle(rec, crew);
+    if (!bomberAvailable(rec)) return false;
+    rec.taken = true; rec._aiActive = true;
+    rec._aiHome = { x: rec.pos.x, y: rec.pos.y || 0, z: rec.pos.z, heading: rec.group.rotation.y || 0 };
+    return true;
+  }
+  function release(rec, crashed) {
+    if (CBZ.cityReleaseMilitaryVehicle) { try { CBZ.cityReleaseMilitaryVehicle(rec, !!crashed); return; } catch (e) {} }
+    rec._aiActive = false;
+    if (crashed) { rec.taken = true; return; }
+    const h = rec._aiHome;
+    if (h) { rec.pos.set(h.x, h.y, h.z); rec.group.position.copy(rec.pos); rec.group.rotation.set(0, h.heading, 0); }
+    rec.taken = false;
   }
 
-  function sortieEnd(crashed) {
-    if (!sortie) return;
-    const s = sortie;
-    sortie = null;
+  function sortieEnd(s, crashed) {
+    const i = sorties.indexOf(s);
+    if (i < 0) return;
+    sorties.splice(i, 1);
     const p = s.pilot;
     if (p) {
       if (CBZ.npcLife && CBZ.npcLife.detach) {
@@ -2684,108 +2658,165 @@
         if (p.group) { p.group.position.copy(p.pos); p.group.visible = true; }
       }
     }
-    if (b2rec && CBZ.cityReleaseMilitaryVehicle) {
-      try { CBZ.cityReleaseMilitaryVehicle(b2rec, !!crashed); } catch (e) {}
+    if (s.rec) release(s.rec, crashed);
+    // A LOST AIRFRAME MUST NOT BE LEFT IN THE SKY. A destroyed record is never
+    // re-parked (a shot-down machine never silently reappears on its pad), so
+    // the mesh goes with it, and the record says so for whoever counts fleets.
+    if (crashed && s.rec && s.rec.group) {
+      s.rec.group.visible = false;
+      s.rec.lost = true;
+      note("The bomber is down.", 3.2, { from: "Strategic Command", app: "messages" });
     }
-    // A LOST AIRFRAME MUST NOT BE LEFT IN THE SKY. cityReleaseMilitaryVehicle
-    // deliberately does NOT re-park a destroyed record (a shot-down machine
-    // never silently reappears on its pad) — which for a flying one would have
-    // parked a B-2 at 210 m forever. Destroyed here means destroyed: the mesh
-    // goes with the record, so the world's answer to "where is the bomber" is
-    // the same whether you ask the registry or your eyes. It stays `taken`, so
-    // shooting down the aircrew costs the base its bomber permanently.
-    if (crashed && b2rec && b2rec.group) {
-      b2rec.group.visible = false;
-      note("The bomber is down. There is no second one.", 3.2, { from: "Strategic Command", app: "messages" });
+    if (typeof s.onEnd === "function") { try { s.onEnd({ crashed: !!crashed, rec: s.rec }); } catch (e) {} }
+  }
+  function sortieEndAll() { while (sorties.length) sortieEnd(sorties[0], false); }
+
+  // where would a store released RIGHT NOW land?
+  function predictLanding(s) {
+    s.group.updateMatrixWorld(true);
+    const bp = bayPoint(s);
+    const rv = releaseVel(s, s.kind);
+    const x0 = bp.x, y0 = bp.y, z0 = bp.z, vx = rv.vx, vy = rv.vy, vz = rv.vz;
+    let sol = solveFall(x0, y0, z0, vx, vy, vz);
+    const ret = retardFor(s.kind, y0, vy, sol.y);
+    if (ret) sol = solveRetard({ x0: x0, y0: y0, z0: z0, vx: vx, vy: vy, vz: vz }, ret, sol);
+    return sol;
+  }
+  function letGo(s) {
+    s.phase = "egress";
+    s.t = 0;
+    s.group.updateMatrixWorld(true);
+    for (let k = 0; k < s.count; k++) {
+      // the stores leave side by side across the bay: one hole, not a walk
+      const bp = bayPoint(s);
+      const off = (k - (s.count - 1) / 2) * 0.8;
+      const p = { x: bp.x + s.az * off, y: bp.y, z: bp.z - s.ax * off };
+      const rv = releaseVel(s, s.kind);
+      _sv.vx = rv.vx; _sv.vy = rv.vy; _sv.vz = rv.vz;
+      let b = null;
+      try { b = releaseStore(s.kind, p, _sv, { by: s.by, byPlayer: s.byPlayer, stateAct: s.stateAct }); } catch (e) { b = null; }
+      if (typeof s.onRelease === "function") { try { s.onRelease(b, k, s); } catch (e) {} }
     }
+    if (s.kind === "nuke") note("WEAPON AWAY.", 2.4, { from: "Strategic Command", app: "messages" });
   }
 
   /* THE ORDER. opts:
        x, z        the aimpoint (required, finite)
-       by/byPlayer blame, forwarded verbatim to nukeDetonate through the store
+       kind        "nuke" (default) | "buster" | "bomb"
+       count       stores released together (1..4)
+       bomber      the parked record to fly (default: the Fort Brandt B-2)
+       alt         pass altitude AGL (default per kind, SORTIE.ALT)
+       by/byPlayer/stateAct  blame, forwarded verbatim to the release
        label       what to call the place in the warning line
-     Returns { ok:true } or { ok:false, why } — a STRING the caller can put in
-     front of the player, because every refusal here is a real world fact and
-     deserves to be said out loud rather than swallowed as a silent false. */
-  function nuclearSortie(opts) {
+       onRelease(bombRecord, k, sortie) / onEnd({crashed, rec})
+     Returns { ok:true, sortie } or { ok:false, why } — a STRING the caller can
+     put in front of the player: every refusal is a real world fact. */
+  function strategicSortie(opts) {
     opts = opts || {};
-    if (CBZ.CONFIG.STRAT_NUKE_SORTIE === false || CBZ.CONFIG.STRAT_NUKE === false) {
+    const kind = opts.kind || "nuke";
+    if (CBZ.CONFIG.STRAT_NUKE_SORTIE === false || (kind === "nuke" && CBZ.CONFIG.STRAT_NUKE === false)) {
       return { ok: false, why: "Strategic command is offline." };
     }
     if (!g || g.mode !== "city") return { ok: false, why: "Not here." };
     const tx = +opts.x, tz = +opts.z;
     if (!isFinite(tx) || !isFinite(tz)) return { ok: false, why: "Mark a target first." };
-    if (sortie) return { ok: false, why: "A sortie is already airborne." };
     // The nuclear channel admits one apocalypse at a time and always has —
     // refuse BEFORE anything is claimed or debited, the way dropPayload does.
-    if (nuclearChannelBusy()) return { ok: false, why: "Nuclear channel busy, one weapon at a time." };
-    if (!b2rec || !b2rec.group || !b2rec.group.parent) return { ok: false, why: "There is no bomber." };
-    if (b2rec.taken || b2rec._aiActive) return { ok: false, why: "The bomber is not on its pad." };
-    const pilot = sortieCrew();
-    if (!pilot) return { ok: false, why: "No aircrew left on the base." };
-    if (!CBZ.cityClaimMilitaryVehicle || !CBZ.cityClaimMilitaryVehicle(b2rec, pilot)) {
-      return { ok: false, why: "The bomber will not release from its pad." };
-    }
-    pilot._milPilot = true;
+    if (kind === "nuke" && nuclearChannelBusy()) return { ok: false, why: "Nuclear channel busy, one weapon at a time." };
+    const rec = opts.bomber || b2rec;
+    if (!rec || !rec.group || !rec.group.parent) return { ok: false, why: "There is no bomber." };
+    if (!bomberAvailable(rec)) return { ok: false, why: "The bomber is not on its pad." };
+    const pilot = sortieCrew(rec);
+    if (!pilot && !rec.ownCrew) return { ok: false, why: "No aircrew left on the base." };
+    // a bought airframe's own crew is not a body in the world: the claim
+    // protocol only needs to know somebody alive is in the seat
+    if (!claim(rec, pilot || { dead: false, name: "aircrew" })) return { ok: false, why: "The bomber will not release from its pad." };
+    if (pilot) pilot._milPilot = true;
 
-    const from = sortieRunIn(tx, tz);
-    const dx = tx - from.x, dz = tz - from.z;
-    const len = Math.hypot(dx, dz) || 1;
+    const home = { x: rec.pos.x, y: rec.pos.y || 0, z: rec.pos.z };
+    let dx = tx - home.x, dz = tz - home.z;
+    let len = Math.hypot(dx, dz);
+    if (!(len > 1)) { dx = 0; dz = 1; len = 1; }      // ordered onto its own pad
     const ax = dx / len, az = dz / len;
-    const sol = sortieSolve(tx, tz, ax * SORTIE.SPD, az * SORTIE.SPD);
-
-    const grp = b2rec.group;
+    const grp = rec.group;
     grp.visible = true;
-    grp.position.set(from.x, sol.y, from.z);
-    grp.rotation.set(0, Math.atan2(ax, az), 0);       // models here face +Z at yaw 0
-    // PUT THE MAN IN THE SEAT BEFORE THE AEROPLANE MOVES. airSeatActor solves
-    // the anchor with the same code the fighter scramble uses — including the
-    // seated-eye correction — so no head comes through this canopy either. He
-    // is a real body up there: shoot him down and the sortie dies with him.
-    if (CBZ.airSeatActor) {
+    grp.rotation.set(0, Math.atan2(ax, az) + (rec.modelYawOffset || 0), 0);   // models here face +Z at yaw 0
+    // PUT THE MAN IN THE SEAT BEFORE THE AEROPLANE MOVES.
+    if (pilot && CBZ.airSeatActor) {
       try {
-        CBZ.airSeatActor({ group: grp, airClass: "airliner", displayName: "B-2 SPIRIT", modelYawOffset: 0 }, pilot);
+        CBZ.airSeatActor({ group: grp, airClass: "airliner", displayName: (rec.model && rec.model.name) || "BOMBER", modelYawOffset: rec.modelYawOffset || 0 }, pilot);
       } catch (e) {}
     }
-
-    sortie = {
-      group: grp, pos: grp.position, pilot: pilot,
-      home: Object.assign({}, b2rec._aiHome || { x: b2rec.pos.x, z: b2rec.pos.z }),
-      tx: tx, tz: tz, ax: ax, az: az,
-      // the point on the run-in at which letting go puts the weapon on the mark
-      rx: tx - sol.throwX, rz: tz - sol.throwZ,
-      rv: sol.rv, alt: sol.y,
+    const alt = Math.max(60, opts.alt || SORTIE.ALT[kind] || 210);
+    const cruiseY = surfaceAt(tx, tz) + alt;
+    // THE RUN-IN NEEDS ROOM. A bomber climbs at CLIMB m/s; a mark closer than
+    // the climb (plus a straight run to line up) gets an INITIAL POINT first:
+    // fly out past the pad, then turn back and run in at height.
+    const need = SORTIE.ROLL + ((cruiseY - home.y) / SORTIE.CLIMB) * SORTIE.SPD + SORTIE.RUN;
+    const wps = [];
+    if (len < need) wps.push({ x: tx - ax * need, z: tz - az * need, ip: true });
+    wps.push({ x: tx, z: tz, ip: false });
+    const s = {
+      rec: rec, group: grp, pos: grp.position, pilot: pilot, home: home,
+      bayLocal: rec.b2 ? null : (rec.bayLocal || new THREE.Vector3(0, 1.0, 0)),
+      tx: tx, tz: tz, ax: ax, az: az, dist: len, cruiseY: cruiseY, wps: wps,
+      h: Math.atan2(ax, az), yawOff: rec.modelYawOffset || 0,
+      kind: kind, count: Math.max(1, Math.min(4, (opts.count | 0) || 1)),
       by: opts.by, byPlayer: opts.byPlayer !== false, stateAct: !!opts.stateAct,
-      phase: "inbound", t: 0, sndT: 0,
+      onRelease: opts.onRelease, onEnd: opts.onEnd, label: opts.label || null,
+      phase: "inbound", t: 0, sndT: 0, travelled: 0, vx: 0, vy: 0, vz: 0,
     };
-    // The city gets told, once, the way every other inbound is told.
-    note("NUCLEAR SORTIE AIRBORNE, one weapon inbound on " +
-      (opts.label || "your mark") + ". Get underground.", 4.2,
-      { from: "Strategic Command", app: "messages" });
-    if (CBZ.sfxAt) { try { CBZ.sfxAt("siren", tx, tz, { volume: 0.4 }); } catch (e) {} }
-    return { ok: true };
+    sorties.push(s);
+    if (kind === "nuke") {
+      note("NUCLEAR SORTIE AIRBORNE, one weapon inbound on " + (opts.label || "your mark") + ". Get underground.", 4.2,
+        { from: "Strategic Command", app: "messages" });
+      if (CBZ.sfxAt) { try { CBZ.sfxAt("siren", tx, tz, { volume: 0.4 }); } catch (e) {} }
+    }
+    return { ok: true, sortie: s };
   }
-  CBZ.strategicNuclearSortie = nuclearSortie;
+  CBZ.strategicSortie = strategicSortie;
+  // the old name, kept for the bunker's release console
+  CBZ.strategicNuclearSortie = function (opts) { return strategicSortie(Object.assign({}, opts || {}, { kind: "nuke" })); };
+  CBZ.strategicB2Rec = function () { return b2rec; };
+  CBZ.strategicBomberAvailable = function (rec) { return bomberAvailable(rec); };
 
-  // ---- the sortie tick. 42.55 sits between playerair.js's called jet (42.5)
-  // and airtraffic.js's ambient fleet (42.7): all three move aircraft, and
-  // keeping them adjacent is how the band stays readable.
-  CBZ.onUpdate(42.55, function (dt) {
-    if (!sortie) return;
-    const s = sortie;
-    if (!g || g.mode !== "city" || !s.group || !s.group.parent) { sortieEnd(false); return; }
-    // Kill the man in the seat and the aeroplane is nobody's — it goes down
-    // with him, exactly as a scrambled fighter does.
-    if (s.pilot && s.pilot.dead) { sortieEnd(true); return; }
-    const spd = s.phase === "inbound" ? SORTIE.SPD : SORTIE.EGRESS_SPD;
+  function tickSortie(s, dt) {
+    if (!g || g.mode !== "city" || !s.group || !s.group.parent) { sortieEnd(s, false); return; }
+    // Kill the man in the seat and the aeroplane is nobody's — it goes down.
+    if (s.pilot && s.pilot.dead) { sortieEnd(s, true); return; }
     s.t += dt;
-    s.pos.x += s.ax * spd * dt;
-    s.pos.z += s.az * spd * dt;
+    const spd = s.phase === "inbound"
+      ? Math.min(SORTIE.SPD, 25 + s.t * (SORTIE.SPD - 25) / SORTIE.TAKEOFF)   // the take-off roll
+      : SORTIE.EGRESS_SPD;
+    const step = spd * dt;
+    const y0 = s.pos.y;
+    // STEER: on the runway it holds the runway heading; airborne it turns
+    // toward the next waypoint at TURN rad/s and banks into the turn
+    let turn = 0;
+    if (s.phase === "inbound" && s.travelled > SORTIE.ROLL && s.wps.length) {
+      const w = s.wps[0];
+      if (w.ip && Math.hypot(w.x - s.pos.x, w.z - s.pos.z) < 120) s.wps.shift();
+      const wp = s.wps[0];
+      let err = Math.atan2(wp.x - s.pos.x, wp.z - s.pos.z) - s.h;
+      while (err > Math.PI) err -= 2 * Math.PI;
+      while (err < -Math.PI) err += 2 * Math.PI;
+      turn = Math.max(-SORTIE.TURN * dt, Math.min(SORTIE.TURN * dt, err));
+      s.h += turn;
+      s.err = err;
+    }
+    s.ax = Math.sin(s.h); s.az = Math.cos(s.h);
+    s.pos.x += s.ax * step;
+    s.pos.z += s.az * step;
+    s.travelled += step;
+    if (s.phase === "inbound" && s.travelled > SORTIE.ROLL) {
+      // wheels up after the roll, then a real climb rate to the pass altitude
+      s.pos.y = Math.min(s.cruiseY, s.pos.y + SORTIE.CLIMB * dt);
+    }
+    s.group.rotation.set(0, s.h + s.yawOff, dt > 0 ? -Math.max(-0.6, Math.min(0.6, (turn / dt) * 1.4)) : 0);
+    s.vx = s.ax * spd; s.vz = s.az * spd; s.vy = dt > 0 ? (s.pos.y - y0) / dt : 0;
 
-    // THE BOMBER IS THE WARNING. Same instrument playerair.js's strike jet
-    // uses: a repeating engine note keyed to the player's TRUE distance, so a
-    // nuclear sortie announces itself as a far-off rumble that swells into an
-    // overhead roar. force+ghost so the cadence can neither starve nor be starved.
+    // THE BOMBER IS THE WARNING: a repeating engine note keyed to the player's
+    // TRUE distance, a far-off rumble that swells into an overhead roar.
     s.sndT -= dt;
     if (s.sndT <= 0 && CBZ.sfx) {
       s.sndT = SORTIE.WARN;
@@ -2795,37 +2826,49 @@
     }
 
     if (s.phase === "inbound") {
-      // released the instant the run-in reaches the solved release point
-      if ((s.pos.x - s.rx) * s.ax + (s.pos.z - s.rz) * s.az >= 0) {
-        s.phase = "egress";
-        s.t = 0;
-        // ONE call, and it is the player's own. bayPoint() reads the real
-        // model, so the weapon leaves the real bay of the real aeroplane.
-        releaseStore("nuke", bayPoint(s), s.rv, { by: s.by, byPlayer: s.byPlayer, stateAct: s.stateAct });
-        note("WEAPON AWAY.", 2.4, { from: "Strategic Command", app: "messages" });
+      // the bay opens only on the run-in: past the initial point, lined up on
+      // the mark and at height (or, after two minutes, whatever it has)
+      const onRun = s.wps.length === 1 && Math.abs(s.err || 0) < 0.06 && s.pos.y >= s.cruiseY - 8;
+      if (s.travelled > SORTIE.ROLL && (onRun || s.t > 120)) {
+        const sol = predictLanding(s);
+        const along = (sol.x - s.tx) * s.ax + (sol.z - s.tz) * s.az;
+        const over = (s.pos.x - s.tx) * s.ax + (s.pos.z - s.tz) * s.az;
+        // half a frame of lead: let go on the frame whose landing point is
+        // NEAREST the mark, not the first one past it
+        const step = s.prevAlong != null ? along - s.prevAlong : 0;
+        s.prevAlong = along;
+        if (along + step * 0.5 >= 0 || over >= 0 || s.t > 120) { s.aimed = { x: sol.x, z: sol.z, t: sol.t, y: s.pos.y }; letGo(s); }
       }
     } else if (s.t > SORTIE.RTB) {
-      sortieEnd(false);                               // feet dry, back on the pad
+      sortieEnd(s, false);                            // feet dry, back on the pad
     }
+  }
+  // 42.55 sits between playerair.js's strike flights (42.5) and airtraffic.js's
+  // ambient fleet (42.7): all three move aircraft.
+  CBZ.onUpdate(42.55, function (dt) {
+    for (let i = sorties.length - 1; i >= 0; i--) tickSortie(sorties[i], dt);
   });
 
   // Read-only: what the strike console and any probe need to know.
   CBZ.strategicSortieState = function () {
-    if (!sortie) {
+    const s = sorties[0] || null;
+    if (!s) {
       return {
-        active: false,
-        bomber: !!(b2rec && b2rec.group && b2rec.group.parent && !b2rec.taken && !b2rec._aiActive),
-        crew: !!sortieCrew(), channelBusy: nuclearChannelBusy(),
+        active: false, bomber: bomberAvailable(b2rec),
+        crew: !!sortieCrew(b2rec), channelBusy: nuclearChannelBusy(),
       };
     }
     return {
-      active: true, phase: sortie.phase, bomber: false, crew: true,
-      channelBusy: nuclearChannelBusy(),
-      x: sortie.pos.x, y: sortie.pos.y, z: sortie.pos.z,
-      tx: sortie.tx, tz: sortie.tz,
-      pilot: sortie.pilot ? (sortie.pilot.name || "aircrew") : null,
+      active: true, phase: s.phase, bomber: false, crew: true, kind: s.kind,
+      channelBusy: nuclearChannelBusy(), count: sorties.length,
+      x: s.pos.x, y: s.pos.y, z: s.pos.z,
+      tx: s.tx, tz: s.tz,
+      pilot: s.pilot ? (s.pilot.name || "aircrew") : null,
+      aimed: s.aimed || null,      // where the solve said the stores would land, at release
     };
   };
+  CBZ.strategicSorties = function () { return sorties.slice(); };
+
 
   // ---- the aftermath resolver (order 34.7 — after systems/impactbus.js's
   // wave (34.4), city/structural.js's ledger (34.45) and demolition's ticker
@@ -2846,7 +2889,7 @@
       armed.length = 0;
       run.active = false; run.onDone = null; run.sent = 0;
       nk = null;
-      sortieEnd(false);                    // and the bomber goes back on its pad
+      sortieEndAll();                      // and every bomber goes back on its pad
       if (CBZ.impact && CBZ.impact.clearWaves) { try { CBZ.impact.clearWaves(); } catch (e) {} }
     }
     _lastEl = el;

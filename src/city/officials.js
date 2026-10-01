@@ -815,6 +815,19 @@
     isPlayer: isPlayer,
     mayorSid: function () { ensureState(); return g.officials.mayorSid; },
     officeOf: officeOf,
+    // AN OFFICEHOLDER DIES WITH NO BODY IN REACH — a foreign head of state in
+    // his bunker 2 km away, killed by a bunker buster (city/warroom.js). The
+    // same succession as a shot one: deputy sworn in or a vacuum, the
+    // assassination world-event, onOfficialDeath. opts.stateAct = an act of
+    // war, not a street murder: no murder charge on the player.
+    killOfficial: function (sid, opts) {
+      opts = opts || {};
+      const info = sid ? officeOf(sid) : null;
+      if (!info) return false;
+      info.ped = opts.ped || null;
+      succeed(info, sid, opts.name || nameOf(sid), !!opts.stateAct);
+      return true;
+    },
     identityOf: identityOf,
     /* THE ONE TITLE DERIVATION. Re-measured 2026-07-29: EIGHT files carry a
        kind->title block (officials · officialdom · contracts · civic ·

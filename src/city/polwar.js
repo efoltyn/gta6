@@ -115,11 +115,14 @@
        `rec.warCrime = true` on the live polity record as a convenience
        mirror once mil state is restored, so any reader of the polity
        record sees it too, but the source of truth is this file's blob.
-     - NUKES (2026-09-30, city/warroom.js): a nuclear arsenal is a per-
-       nation DATA fact — `warheads` on the country's data row (polity.js's
-       republic record, countries.js's COUNTRIES rows), seeded into this
-       file's `mil.warheads` and persisted with it. Zero means the country
-       cannot order one, full stop. strikeOn()/nuclearStrike() below are the
+     - THE ARSENAL (2026-09-30, city/arsenal_data.js + city/warroom.js):
+       each nation's air fleet (mil.planes = strike jets, mil.heavy = B-52s,
+       mil.b2 = B-2s) and stores (mil.warheads, mil.mops) are seeded from
+       CBZ.ARSENAL.start and persisted here; their upkeep comes off the same
+       table. Country treasuries now also EARN their taxes daily (revenueOf)
+       — before, they only ever drained. `arsenal` on this file's state is
+       warroom.js's world (deliveries, bunkers, alerts, sanctions), saved
+       with this file's blob. strikeOn()/nuclearStrike() below are the
        war-side consequence of a strike that actually landed in the world
        (warroom.js calls them from the impact, never from the order).
      - EVENTS: declareWar/endWar emit "war-declared"/"war-ended" on the
@@ -223,7 +226,9 @@
     if (O && typeof O.news === "function") { try { O.news(String(text), { kind: "breaking" }); } catch (e) {} }
   }
 
-  function freshState() { return { mil: Object.create(null), wars: Object.create(null), reparations: [], nextWarId: 1, nextFrontId: 1 }; }
+  // `arsenal` is city/warroom.js's world (deliveries, built bunkers, alerts,
+  // sanctions) — kept HERE so it rides this file's one save path.
+  function freshState() { return { mil: Object.create(null), wars: Object.create(null), reparations: [], nextWarId: 1, nextFrontId: 1, arsenal: {} }; }
   function reset() { g.polwarWorld = freshState(); }
   function state() { if (!g.polwarWorld) reset(); return g.polwarWorld; }
 
@@ -235,27 +240,46 @@
     if (rec && rec.wealthLevel != null) return clamp01(rec.wealthLevel);
     return id === "republic" ? 1.0 : 0.5;
   }
-  // THE ARSENAL IS DATA: the country's own record (polity.js's republic row,
-  // registerCountry plumbing countries.js's rows), else the COUNTRIES table
-  // row, else none. A rebel fragment inherits nothing — warheads stay with
-  // the state that built them.
-  function warheadsOf(id) {
-    const rec = CBZ.polity && CBZ.polity.get ? CBZ.polity.get(id) : null;
-    if (rec && isFinite(rec.warheads)) return Math.max(0, rec.warheads | 0);
-    const cd = (CBZ.COUNTRIES || []).find(function (c) { return c.id === id; });
-    return cd && isFinite(cd.warheads) ? Math.max(0, cd.warheads | 0) : 0;
+  // THE ARSENAL IS DATA (city/arsenal_data.js CBZ.ARSENAL.start): what each
+  // nation owns on day one. An id the table does not list (a rebel fragment)
+  // gets no bombers, no warheads, no bunker busters — those stay with the
+  // state that bought them.
+  function startOf(id, key) {
+    const A = CBZ.ARSENAL, row = A && A.start ? A.start[id] : null;
+    return row && isFinite(row[key]) ? Math.max(0, row[key] | 0) : null;
+  }
+  function warheadsOf(id) { return startOf(id, "warhead") || 0; }
+  // the daily fiscal line of every country: taxes in, upkeep out
+  function upkeepOf(mil) {
+    const A = CBZ.ARSENAL;
+    let u = mil.soldiers * UPKEEP_SOLDIER + mil.planes * UPKEEP_PLANE + mil.missiles * UPKEEP_MISSILE;
+    if (A) {
+      if (A.aircraft.heavy) u += (mil.heavy | 0) * A.aircraft.heavy.upkeep;
+      if (A.aircraft.b2) u += (mil.b2 | 0) * A.aircraft.b2.upkeep;
+      if (A.stores.warhead) u += (mil.warheads | 0) * A.stores.warhead.upkeep;
+    }
+    return u;
+  }
+  function revenueOf(rec) {
+    const A = CBZ.ARSENAL;
+    const base = A && A.revenue ? A.revenue : 60000;
+    const tax = isFinite(rec.taxRate) ? clampNum(0, 0.6, rec.taxRate) : 0.1;
+    return Math.round(tax * base * (0.4 + 1.2 * wealthOf(rec.id)));
   }
   function seedMilitary(id) {
     const wealth = wealthOf(id), r = mkRng(id);
     const scale = 0.4 + 1.6 * wealth;
     const soldiers = Math.max(40, Math.round(BASE_SOLDIERS * scale * (0.9 + 0.2 * r())));
-    const planes = Math.max(1, Math.round(BASE_PLANES * scale * (0.9 + 0.2 * r())));
+    const rolled = Math.max(1, Math.round(BASE_PLANES * scale * (0.9 + 0.2 * r())));
+    const planes = startOf(id, "jet") != null ? startOf(id, "jet") : rolled;
     const missiles = Math.max(4, Math.round(BASE_MISSILES * scale * (0.9 + 0.2 * r())));
     const readiness = clampNum(0.15, 1, 0.35 + 0.35 * wealth + (r() - 0.5) * 0.1);
     const budgetShare = clampNum(0.05, 0.3, 0.10 + 0.08 * wealth);
     return {
       soldiers: soldiers, planes: planes, missiles: missiles, readiness: readiness, budgetShare: budgetShare,
-      warheads: warheadsOf(id),
+      // the air fleet beyond strike jets (`planes`), and the stores
+      heavy: startOf(id, "heavy") || 0, b2: startOf(id, "b2") || 0,
+      warheads: warheadsOf(id), mops: startOf(id, "mop") || 0,
       seedSoldiers: soldiers, warDead: 0, warCrime: false, warCrimeDay: null,
       pendingKaido: 0, pendingVolante: 0, lastConscriptDay: -999, desperateDays: 0,
       conscriptedEcon: 0, conscriptedCohort: 0, releaseDaysLeft: 0, releasePerDayEcon: 0, releasePerDayCohort: 0,
@@ -418,7 +442,7 @@
     if (CBZ.cityFeed) CBZ.cityFeed("" + label + (front.real ? ", the front opens at the causeway." : ", the front opens at the border."), "#ff6a5e");
     war.log.push({ day: day, kind: "declared", text: label });
     emitBus("war-declared", {
-      warId: war.id, attacker: aId, attackerName: nameOf(aId), defender: bId, defenderName: nameOf(bId),
+      warId: war.id, attacker: aId, attackerName: nameOf(aId), defender: bId, defenderName: nameOf(bId), target: bId,
       byPlayer: !!opts.byPlayer, day: day, front: { x: front.x, z: front.z }, text: label,
     });
     return war;
@@ -432,7 +456,10 @@
     for (let i = 0; i < countries.length; i++) {
       const rec = countries[i];
       const mil = ensureMilitary(rec.id);
-      const upkeep = mil.soldiers * UPKEEP_SOLDIER + mil.planes * UPKEEP_PLANE + mil.missiles * UPKEEP_MISSILE;
+      // TAXES COME IN. Country treasuries used to only ever drain (upkeep out,
+      // nothing in), so a small country could never save for anything.
+      rec.treasury = (rec.treasury || 0) + revenueOf(rec);
+      const upkeep = upkeepOf(mil);
       const treasury = rec.treasury || 0;
       const paid = Math.min(treasury, upkeep);
       rec.treasury = treasury - paid;
@@ -843,6 +870,8 @@
     // the war room's seam (city/warroom.js): the arsenal, the anchor a strike
     // flies from/at, and the consequences of a strike that landed
     warheadsOf: function (id) { return ensureMilitary(id).warheads | 0; },
+    arsenalState: function () { const S = state(); if (!S.arsenal) S.arsenal = {}; return S.arsenal; },
+    revenueOf: function (id) { const r = CBZ.polity && CBZ.polity.get ? CBZ.polity.get(id) : null; return r ? revenueOf(r) : 0; },
     useWarhead: useWarhead,
     anchorOf: anchorForPolity,
     capitalOf: capitalOf,
@@ -879,7 +908,7 @@
   function serializeMil(m) {
     return {
       soldiers: m.soldiers, planes: m.planes, missiles: m.missiles, readiness: m.readiness, budgetShare: m.budgetShare,
-      warheads: m.warheads | 0,
+      warheads: m.warheads | 0, heavy: m.heavy | 0, b2: m.b2 | 0, mops: m.mops | 0,
       seedSoldiers: m.seedSoldiers, warDead: m.warDead || 0, warCrime: !!m.warCrime, warCrimeDay: m.warCrimeDay,
       pendingKaido: m.pendingKaido || 0, pendingVolante: m.pendingVolante || 0,
       lastConscriptDay: m.lastConscriptDay != null ? m.lastConscriptDay : -999, desperateDays: m.desperateDays || 0,
@@ -901,6 +930,7 @@
     const wars = {}; for (const wid in S.wars) wars[wid] = serializeWar(S.wars[wid]);
     return {
       v: 1, nextWarId: S.nextWarId, nextFrontId: S.nextFrontId, mil: mil, wars: wars,
+      arsenal: JSON.parse(JSON.stringify(S.arsenal || {})),
       reparations: S.reparations.map(function (d) { return { payer: d.payer, payee: d.payee, remaining: d.remaining, perDay: d.perDay }; }),
     };
   }
@@ -909,6 +939,7 @@
     if (!obj || obj.v !== 1) return;
     const S = state();
     S.nextWarId = obj.nextWarId || 1; S.nextFrontId = obj.nextFrontId || 1;
+    S.arsenal = (obj.arsenal && typeof obj.arsenal === "object") ? JSON.parse(JSON.stringify(obj.arsenal)) : {};
     if (obj.mil) for (const id in obj.mil) {
       const src = obj.mil[id]; if (!src) continue;
       S.mil[id] = {
@@ -917,6 +948,9 @@
         budgetShare: clampNum(0.05, 0.3, isFinite(src.budgetShare) ? +src.budgetShare : 0.12),
         // a save from before the arsenal existed gets the country's data row
         warheads: isFinite(src.warheads) ? Math.max(0, src.warheads | 0) : warheadsOf(id),
+        heavy: isFinite(src.heavy) ? Math.max(0, src.heavy | 0) : (startOf(id, "heavy") || 0),
+        b2: isFinite(src.b2) ? Math.max(0, src.b2 | 0) : (startOf(id, "b2") || 0),
+        mops: isFinite(src.mops) ? Math.max(0, src.mops | 0) : (startOf(id, "mop") || 0),
         seedSoldiers: isFinite(src.seedSoldiers) ? +src.seedSoldiers : Math.max(0, +src.soldiers || 0),
         warDead: +src.warDead || 0, warCrime: !!src.warCrime, warCrimeDay: src.warCrimeDay != null ? src.warCrimeDay : null,
         pendingKaido: +src.pendingKaido || 0, pendingVolante: +src.pendingVolante || 0,

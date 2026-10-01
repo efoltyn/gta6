@@ -267,11 +267,16 @@
   //   held   — spent on the berm.
   // (Killing whoever is inside is the WEAPON's job — strategic.js sweeps the
   // interior bounds through the kill bus; this handles only the structure.)
+  // TWO IN THE SAME HOLE. A penetrator that does not get through still digs
+  // its own depth out of the roof (`wornCE`), and the next one starts from the
+  // bottom of that crater — which is how real deep bunkers are attacked (and
+  // why a head of state's needs two GBU-57s where a cell's dug-out needs one).
   CBZ.strategicBunkerBreach = function (b, opts) {
     if (!b) return { verdict: "held", roofCE: 0, penCE: 0 };
-    const roofCE = CBZ.strategicBunkerRoof(b);
+    const roofCE = Math.max(0, CBZ.strategicBunkerRoof(b) - (b.wornCE || 0));
     const penCE = (opts && opts.penCE != null) ? +opts.penCE : Infinity;
     if (b.breached) return { verdict: "breach", roofCE: roofCE, penCE: penCE };
+    if (isFinite(penCE)) b.wornCE = (b.wornCE || 0) + Math.max(0, penCE);
     if (!(penCE >= roofCE)) {
       // not through. A near miss still wrecks the entrance — 60% of the way
       // through a hardened roof is a survivable room, not an untouched one.
@@ -284,6 +289,9 @@
       return { verdict: crack ? "crack" : "held", roofCE: roofCE, penCE: penCE };
     }
     b.breached = true;
+    // THE MOUND CAVES IN: the upper tiers and the crown drop into the room
+    // (the crater dish and the tumbled slabs below are what is left on top)
+    if (b.topMeshes) for (const m of b.topMeshes) { if (m) m.visible = false; }
     for (const d of b.doors) {
       d.target = 1; d.holdT = 9e9;               // hangs open…
       d.disabled = false;                         // (let the ease finish)
@@ -293,6 +301,8 @@
     try {
       const g = b.root, S = b.shell;
       const cx = (S.minX + S.maxX) / 2, cz = (S.minZ + S.maxZ) / 2;
+      // with the tiers caved in, the rubble sits on the first tier
+      if (b.topMeshes) b.moundTop = b.interior.floorY + 2.4 + 0.3;
       const top = b.moundTop;
       const dish = new THREE.Mesh(new THREE.CylinderGeometry(3.4, 4.6, 1.0, 12), cm(0x1c1e20));
       dish.position.set(cx, top - 0.3, cz);
@@ -647,9 +657,13 @@
     }
     const T1H = 2.4, T2H = 1.6, T3H = 1.2;
     box(g, cx, FY + T1H / 2, cz, W, T1H, D, M.earth);
-    box(g, cx, FY + T1H + T2H / 2, cz - 0.6, W - 5, T2H, D - 5, M.earthD);
-    box(g, cx, FY + T1H + T2H + T3H / 2, cz - 1.2, W - 11, T3H, D - 11, M.earth);
-    box(g, cx, FY + T1H + T2H + T3H + 0.2, cz - 1.2, W - 13, 0.4, D - 13, crete); // crown slab
+    // the upper tiers and the crown are what caves in when a bunker buster
+    // gets through (strategicBunkerBreach) — kept so the mound can fall
+    const topMeshes = [
+      box(g, cx, FY + T1H + T2H / 2, cz - 0.6, W - 5, T2H, D - 5, M.earthD),
+      box(g, cx, FY + T1H + T2H + T3H / 2, cz - 1.2, W - 11, T3H, D - 11, M.earth),
+      box(g, cx, FY + T1H + T2H + T3H + 0.2, cz - 1.2, W - 13, 0.4, D - 13, crete), // crown slab
+    ];
     const moundTop = FY + T1H + T2H + T3H + 0.4;
     // skirt ring so the berm meets uneven ground without a floating seam
     box(g, cx, FY + 0.22, cz, W + 2.4, 0.44, D + 2.4, M.earthD, { cast: false });
@@ -753,7 +767,10 @@
       breached: false, cracked: false, moundTop,
       // hardness, in metres of concrete-equivalent — what a bunker-buster's
       // penetration is tested against (see CBZ.strategicBunkerBreach)
-      roofCE: ROOF_CE[site.tier] || ROOF_CE.outpost,
+      roofCE: site.roofCE != null ? +site.roofCE : (ROOF_CE[site.tier] || ROOF_CE.outpost),
+      wornCE: 0,                 // metres already dug out of the roof by earlier hits
+      owner: site.owner || null, // city/warroom.js: whose bunker (a nation id, or "cell")
+      topMeshes: topMeshes, site: site,
       shell: { minX: cx - W / 2, maxX: cx + W / 2, minZ: cz - D / 2, maxZ: cz + D / 2 },
       interior: { minX: ix0, maxX: ix1, minZ: iz0, maxZ: iz1, floorY: FY, ceilY: CEIL, cx, cz },
       troopSpecs: [],
@@ -1042,6 +1059,34 @@
     const floorY = Math.max(0, hi + 0.15);
     return { floorY, grade0: Math.max(0, door), found: Math.max(0, floorY - Math.max(0, lo)) + 1.2 };
   }
+
+  /* ---- RUNTIME BUNKERS (city/warroom.js) ---------------------------------
+     A head of state's bunker by his capital, a terror cell's dug-out in the
+     Saltlands, the one a President orders built: the SAME builder, the same
+     blast door, the same shell/interior/roof records, the same breach. site:
+     {id, name, cx, cz, w, d, tier, roofCE, owner, floorY, grade0, found,
+     crete, theme}. Idempotent by id while the record lives; a city rebuild
+     clears the list and warroom.js builds them again from its saved list. */
+  CBZ.strategicBuildBunker = function (site) {
+    if (CBZ.CONFIG.STRAT_BUNKERS === false || !site || !site.id) return null;
+    for (let i = 0; i < bunkers.length; i++) if (bunkers[i].id === site.id) return bunkers[i];
+    const A = CBZ.city && CBZ.city.arena;
+    const root = (A && A.root) || CBZ.scene;
+    if (!root || !CBZ.colliders) return null;
+    const s = Object.assign({ w: 22, d: 18, tier: "leader", floorY: 0, grade0: 0 }, site);
+    if (s.grade && typeof s.grade === "function") {
+      const gd = gradeFor(s.grade, s.cx, s.cz, s.w, s.d);
+      s.floorY = gd.floorY; s.grade0 = gd.grade0; s.found = gd.found;
+    }
+    let rec = null;
+    try { rec = buildBunker(A || null, root, s); } catch (e) { rec = null; }
+    if (!rec) return null;
+    rec.dynamic = true;
+    if (CBZ.registerNoSpawnZone && A) { try { CBZ.registerNoSpawnZone(A, { minX: rec.shell.minX, maxX: rec.shell.maxX, minZ: rec.shell.minZ, maxZ: rec.shell.maxZ, label: "bunker-" + rec.id }); } catch (e) {} }
+    wireZones();
+    if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
+    return rec;
+  };
 
   CBZ.addLandmass(function (city) {
     if (CBZ.CONFIG.STRAT_BUNKERS === false) return;
