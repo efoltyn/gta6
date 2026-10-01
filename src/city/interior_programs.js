@@ -609,7 +609,11 @@
   const CITY_DOORS = {
     name: "city",
     isOpen: function (d) { return !!d.open; },
-    set: function (d, v) { return unitSetOpen(d, v, "body"); },
+    set: function (d, v, by) { return unitSetOpen(d, v, by === "push" ? "push" : "body"); },
+    // THE PLAYER WALKS THROUGH what anybody may open (a room of state, an
+    // office) or a door already forced; a locked flat and the Situation
+    // Room's secured door still want his [E] (a key, a clearance)
+    playerMay: function (d) { return d.free === true || !!d.forced; },
     // a door the player opened (or shut) is his, not a body's to close
     ownedByBody: function (d) { return !!d._byBody; },
     may: function (d, a) {
@@ -622,7 +626,7 @@
     },
     bodies: function () { return [CBZ.cityPeds, CBZ.cityCops]; },
   };
-  function unitDoorsReset() { if (CBZ.bodyDoors) for (let i = 0; i < UNIT_DOORS.length; i++) CBZ.bodyDoors.untag(UNIT_DOORS[i].col); DOOR_KEEP.refused.length = 0; SWINGING.length = 0; STATE_ROOMS.length = 0; STATE_OPENINGS.length = 0; FIN_SETS.clear(); UNIT_DOORS.length = 0; UNIT_GRID.clear(); WALL_TALLY.solid = 0; WALL_TALLY.doors = 0; }
+  function unitDoorsReset() { if (CBZ.bodyDoors) for (let i = 0; i < UNIT_DOORS.length; i++) CBZ.bodyDoors.untag(UNIT_DOORS[i].col); DOOR_KEEP.refused.length = 0; SWINGING.length = 0; STATE_ROOMS.length = 0; STATE_OPENINGS.length = 0; STATE_MOUNTS.length = 0; FIN_SETS.clear(); UNIT_DOORS.length = 0; UNIT_GRID.clear(); WALL_TALLY.solid = 0; WALL_TALLY.doors = 0; }
 
   // THE LEAF. Drawn through the host's lbox WITHOUT its own collider (lbox
   // splits a box that crosses a stair hole into pieces and pushes one
@@ -653,7 +657,7 @@
       label: label || "the door", open: false, free: true,
       x: h.ox + lx, z: h.oz + lz, y: y + 0.2, floorY: y, top: y + 3,
       mesh: L.leaf, col: L.col, b: h.b, ox: h.ox, oz: h.oz,
-      runX: runX, w: w, h: hh, hex: hex, hinge: hinge || -1, side: side || 1,
+      runX: runX, w: w, h: hh, hex: hex, hinge: hinge || -1, side: side || 1, kit: true,
     };
     unitFile(d);
     doorKeep(h, y, lx, lz, runX, w);
@@ -709,16 +713,15 @@
     if (overH > 0.06)
       h.b.lbox(lx, y + DOOR_H + overH / 2, lz,
         alongX ? gapW : PWT, overH, alongX ? PWT : gapW, P.wall, WALLOPT);
-    // a handle, because a door with no handle is a panel
-    const hoff = gapW / 2 - 0.14;
-    h.b.lbox(alongX ? lx + hoff : lx, y + 1.02, alongX ? lz : lz + hoff,
-      alongX ? 0.1 : PWT + 0.06, 0.06, alongX ? PWT + 0.06 : 0.1, P.gold, { cast: false });
+    // (its knob, rose and hinges are the real leaf's, hung when you are near:
+    // see THE LEAF YOU SEE below. A handle merged onto the far slab floated
+    // through the real leaf the moment it was hung.)
     const d = {
       id: id, label: label, open: false,
       x: h.ox + lx, z: h.oz + lz, y: y + 0.2, floorY: y, top: y + wallH,
       mesh: leaf, col: col, b: h.b, ox: h.ox, oz: h.oz,
       // the hinge: at the -run jamb, the leaf swinging to +normal
-      runX: alongX, w: gapW, h: DOOR_H, hex: P.door, hinge: -1, side: 1,
+      runX: alongX, w: gapW, h: DOOR_H, hex: P.door, hinge: -1, side: 1, kit: true,
     };
     unitFile(d);
     doorKeep(h, y, lx, lz, alongX, gapW);
@@ -727,15 +730,155 @@
   }
 
   /* ---- OPEN / SHUT — the one door verb every interior door answers --------
-     Open: the closed leaf (merged into core/batch.js's buckets, or a plain
-     mesh for a door somebody built outside the batch) is hidden and its
-     collider leaves CBZ.colliders AT ONCE, so the doorway is walkable the
-     moment you press E; a real hinged leaf swings open on its jamb (built on
-     the first open, so a door nobody touches costs nothing). Shut: the leaf
-     swings back and the collider returns when nobody is standing in the
-     doorway (a door never closes on a body and shoves it through a wall). */
+     THE LEAF YOU SEE IS A DOOR. OWNER (iPad): "they don't even look like doors
+     until you press them and open them". The SHUT door was the plan's
+     placeholder: one flat brown box merged into the building (zero draw
+     calls, 4k of them in the city), and the only other leaf, built on the
+     first E, was another box with a box for a knob. Now every door this kit
+     files (d.kit) has ONE real leaf, hung on its pivot, and that is the door
+     you see shut, opening and open whenever you are near it (DRESS_R, on your
+     storey): stiles and rails, raised panels in their fields (six on a full
+     leaf), a brass knob and rose and an escutcheon on both faces, three
+     hinge knuckles on the swing side; painted on a house of state, wood on a
+     flat. The flat box stays the door seen from the street (hidden, its
+     merged slice zeroed, while the leaf is up), so the city keeps its draw
+     calls. Open: the collider leaves CBZ.colliders AT ONCE; shut: it comes
+     back when nobody stands in the doorway. */
   const SWINGING = [];
   let swingGeo = null;
+  const LEAF_T = 0.045;
+  const LEAF_GEO = new Map();         // "L|H|face|style" -> { wood, brass, parts }
+  const LEAF_MAT = new Map();
+  // the leaf in its own frame: x from the hinge (0) to the free edge (L), y up
+  // from the floor, z across its thickness; hinge knuckles on the face +z*hf
+  function leafGeometry(L, H, hf) {
+    const key = Math.round(L * 100) + "|" + Math.round(H * 100) + "|" + hf;
+    let g = LEAF_GEO.get(key);
+    if (g) return g;
+    const T = LEAF_T, h2 = T / 2;
+    const W = { pos: [], nor: [], uv: [], idx: [] }, Bz = { pos: [], nor: [], uv: [], idx: [] };
+    const quad = function (A, p0, p1, p2, p3, n, sc) {
+      const b = A.pos.length / 3;
+      for (const q of [p0, p1, p2, p3]) {
+        A.pos.push(q[0], q[1], q[2]); A.nor.push(n[0], n[1], n[2]);
+        // UVs in metres over the face: the grain runs up a stile, along a rail
+        const u = Math.abs(n[0]) > 0.5 ? q[2] : q[0], v = Math.abs(n[1]) > 0.5 ? q[2] : q[1];
+        A.uv.push(u / sc, v / sc);
+      }
+      A.idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
+    };
+    const box = function (A, x0, x1, y0, y1, z0, z1, sc, mask) {
+      mask = mask == null ? 63 : mask;
+      if (mask & 1) quad(A, [x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [1, 0, 0], sc);
+      if (mask & 2) quad(A, [x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0], [-1, 0, 0], sc);
+      if (mask & 4) quad(A, [x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [x0, y1, z0], [0, 1, 0], sc);
+      if (mask & 8) quad(A, [x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1], [0, -1, 0], sc);
+      if (mask & 16) quad(A, [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1], [0, 0, 1], sc);
+      if (mask & 32) quad(A, [x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0], [0, 0, -1], sc);
+    };
+    // a round along z (a knob, a rose) at (cx, cy) from z0 to z1, its cap at the far end
+    const cylZ = function (A, cx, cy, z0, z1, r, seg) {
+      const s = z1 > z0 ? 1 : -1;
+      for (let i = 0; i < seg; i++) {
+        const a0 = i / seg * Math.PI * 2, a1 = (i + 1) / seg * Math.PI * 2;
+        const c0 = Math.cos(a0), s0 = Math.sin(a0), c1 = Math.cos(a1), s1 = Math.sin(a1);
+        const b = A.pos.length / 3;
+        const P4 = s > 0 ? [[c0, s0, z0], [c1, s1, z0], [c1, s1, z1], [c0, s0, z1]] : [[c1, s1, z0], [c0, s0, z0], [c0, s0, z1], [c1, s1, z1]];
+        for (const q of P4) { A.pos.push(cx + q[0] * r, cy + q[1] * r, q[2]); A.nor.push(q[0], q[1], 0); A.uv.push(0, 0); }
+        A.idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
+        const m = A.pos.length / 3;
+        A.pos.push(cx, cy, z1, cx + (s > 0 ? c0 : c1) * r, cy + (s > 0 ? s0 : s1) * r, z1, cx + (s > 0 ? c1 : c0) * r, cy + (s > 0 ? s1 : s0) * r, z1);
+        for (let k = 0; k < 3; k++) { A.nor.push(0, 0, s); A.uv.push(0, 0); }
+        A.idx.push(m, m + 1, m + 2);
+      }
+    };
+    // a hinge knuckle: an upright round at (cx, cz)
+    const cylY = function (A, cx, cz, y0, y1, r, seg) {
+      for (let i = 0; i < seg; i++) {
+        const a0 = i / seg * Math.PI * 2, a1 = (i + 1) / seg * Math.PI * 2;
+        const c0 = Math.cos(a0), s0 = Math.sin(a0), c1 = Math.cos(a1), s1 = Math.sin(a1);
+        const b = A.pos.length / 3;
+        for (const q of [[c0, s0, y0], [c0, s0, y1], [c1, s1, y1], [c1, s1, y0]]) { A.pos.push(cx + q[0] * r, q[2], cz + q[1] * r); A.nor.push(q[0], 0, q[1]); A.uv.push(0, 0); }
+        A.idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
+        for (const yy of [y0, y1]) {
+          const m = A.pos.length / 3, up = yy === y1;
+          A.pos.push(cx, yy, cz, cx + (up ? c1 : c0) * r, yy, cz + (up ? s1 : s0) * r, cx + (up ? c0 : c1) * r, yy, cz + (up ? s0 : s1) * r);
+          for (let k = 0; k < 3; k++) { A.nor.push(0, up ? 1 : -1, 0); A.uv.push(0, 0); }
+          A.idx.push(m, m + 1, m + 2);
+        }
+      }
+    };
+    const SC = 0.8;
+    // THE FRAME: two stiles, the rails between them, a muntin up the middle
+    const sw = L < 0.72 ? 0.09 : 0.115, mw = L < 0.72 ? 0.07 : 0.09;
+    const rb = 0.24, rl = 0.18, rf = 0.1, rt = 0.11;
+    const av = Math.max(0.6, H - rb - rl - rf - rt);
+    const r1 = av * 0.34, r2 = av * 0.44;
+    const rows = [[rb, rb + r1], [rb + r1 + rl, rb + r1 + rl + r2], [rb + r1 + rl + r2 + rf, H - rt]];
+    box(W, 0, sw, 0, H, -h2, h2, SC);
+    box(W, L - sw, L, 0, H, -h2, h2, SC);
+    const rails = [[0, rb], [rows[0][1], rows[1][0]], [rows[1][1], rows[2][0]], [H - rt, H]];
+    for (const r of rails) box(W, sw, L - sw, r[0], r[1], -h2, h2, SC, 63 & ~3);
+    const xm = L / 2;
+    for (const r of rows) box(W, xm - mw / 2, xm + mw / 2, r[0], r[1], -h2, h2, SC, 63 & ~12);
+    // THE PANELS: a sunk field round a raised centre, both faces, in each of
+    // the six openings (the field 1 cm down from the frame, the raise 5 mm)
+    let panels = 0;
+    const zf = h2 - 0.01, zr = h2 - 0.005;
+    for (const r of rows) for (const cxs of [[sw, xm - mw / 2], [xm + mw / 2, L - sw]]) {
+      const x0 = cxs[0], x1 = cxs[1], y0 = r[0], y1 = r[1];
+      if (x1 - x0 < 0.1 || y1 - y0 < 0.1) continue;
+      const bw = Math.min(0.05, (x1 - x0) * 0.2, (y1 - y0) * 0.2);
+      box(W, x0, x1, y0, y0 + bw, -zf, zf, SC, 63 & ~11);
+      box(W, x0, x1, y1 - bw, y1, -zf, zf, SC, 63 & ~7);
+      box(W, x0, x0 + bw, y0 + bw, y1 - bw, -zf, zf, SC, 63 & ~14);
+      box(W, x1 - bw, x1, y0 + bw, y1 - bw, -zf, zf, SC, 63 & ~13);
+      box(W, x0 + bw, x1 - bw, y0 + bw, y1 - bw, -zr, zr, SC);
+      panels++;
+    }
+    // THE BRASS: a knob on its rose and a keyhole escutcheon on each face,
+    // three hinge knuckles on the swing face's edge
+    const kx = L - 0.068, ky = Math.min(1.0, H * 0.47);
+    for (const s of [1, -1]) {
+      cylZ(Bz, kx, ky, s * h2, s * (h2 + 0.008), 0.03, 16);
+      cylZ(Bz, kx, ky, s * (h2 + 0.008), s * (h2 + 0.036), 0.009, 10);
+      cylZ(Bz, kx, ky, s * (h2 + 0.036), s * (h2 + 0.062), 0.029, 16);
+      box(Bz, kx - 0.011, kx + 0.011, ky - 0.11, ky - 0.06, s > 0 ? h2 : -h2 - 0.004, s > 0 ? h2 + 0.004 : -h2, 1, s > 0 ? 63 & ~32 : 63 & ~16);
+    }
+    for (const yc of [0.25, H / 2, H - 0.27]) cylY(Bz, 0.0, hf * h2, yc - 0.05, yc + 0.05, 0.012, 12);
+    const mk = function (A) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.Float32BufferAttribute(A.pos, 3));
+      geo.setAttribute("normal", new THREE.Float32BufferAttribute(A.nor, 3));
+      geo.setAttribute("uv", new THREE.Float32BufferAttribute(A.uv, 2));
+      geo.setIndex(A.idx);
+      geo.computeBoundingSphere();
+      geo._shared = true;
+      return geo;
+    };
+    g = { wood: mk(W), brass: mk(Bz), parts: { panels: panels, knobs: 2, hinges: 3, faces: 2 } };
+    LEAF_GEO.set(key, g);
+    return g;
+  }
+  // the leaf's material: painted joinery on a house of state, wood on a flat
+  function leafMaterial(d) {
+    const paint = d.style === "state";
+    const key = paint ? "paint" : "wood|" + (d.hex != null ? d.hex : 0x4a3524);
+    let m = LEAF_MAT.get(key);
+    if (m) return m;
+    const tex = CBZ.fitoutTex ? CBZ.fitoutTex(paint ? "paint" : "veneer") : null;
+    let col = paint ? 0xf3efe6 : (d.hex != null ? d.hex : 0x4a3524);
+    if (!paint && tex) {
+      // the veneer canvas averages about (138, 102, 70): the tint that lands it on the door's colour
+      const r = Math.min(255, ((col >> 16) & 255) / 138 * 255), gg = Math.min(255, ((col >> 8) & 255) / 102 * 255), b = Math.min(255, (col & 255) / 70 * 255);
+      col = (Math.round(r) << 16) | (Math.round(gg) << 8) | Math.round(b);
+    }
+    m = new THREE.MeshLambertMaterial({ color: col, map: tex || null });
+    if (CBZ.fitoutShade) CBZ.fitoutShade(m);
+    m._shared = true;
+    LEAF_MAT.set(key, m);
+    return m;
+  }
   function swingPivot(d) {
     if (d.pivot !== undefined) return d.pivot;
     d.pivot = null;
@@ -749,7 +892,6 @@
     const A = CBZ.city && CBZ.city.arena;
     const root = d.root || (d.mesh && d.mesh.parent) || (A && A.root) || CBZ.scene;
     if (!root) return null;
-    if (!swingGeo) swingGeo = new THREE.BoxGeometry(1, 1, 1);
     const ux = d.runX ? 1 : 0, uz = d.runX ? 0 : 1;          // along the wall
     const hs = d.hinge || -1;
     const pivot = new THREE.Group();
@@ -759,22 +901,33 @@
     root.updateWorldMatrix(true, false);
     root.worldToLocal(at);                // a shell's group is translated to its lot
     pivot.position.copy(at);
-    const leaf = new THREE.Mesh(swingGeo, CBZ.cmat ? CBZ.cmat(d.hex != null ? d.hex : 0x4a3524) : new THREE.MeshLambertMaterial({ color: d.hex || 0x4a3524 }));
-    const L = d.w - 0.04;
-    // the leaf lies from the hinge toward the doorway's centre
-    leaf.position.set(-ux * hs * L / 2, (d.h || DOOR_H) / 2, -uz * hs * L / 2);
-    leaf.scale.set(d.runX ? L : 0.05, (d.h || DOOR_H) - 0.02, d.runX ? 0.05 : L);
-    leaf.castShadow = false; leaf.receiveShadow = true;
-    pivot.add(leaf);
-    // a handle on both faces at the free edge
-    const hx = -ux * hs * (L - 0.12), hz = -uz * hs * (L - 0.12);
-    const knob = new THREE.Mesh(swingGeo, CBZ.cmat ? CBZ.cmat(0xb99347) : leaf.material);
-    knob.position.set(hx, 1.02, hz);
-    knob.scale.set(d.runX ? 0.1 : 0.16, 0.05, d.runX ? 0.16 : 0.1);
-    pivot.add(knob);
+    const L = d.w - 0.04, H = (d.h || DOOR_H) - 0.02;
+    // the leaf lies from the hinge toward the doorway's centre: its own +x
+    // along (-u * hs); its swing face (+n * side) is +z or -z of it
+    const dx = -ux * hs, dz = -uz * hs, th = Math.atan2(-dz, dx);
+    const nx = d.runX ? 0 : 1, nz = d.runX ? 1 : 0, sd = d.side || 1;
+    if (d.kit) {
+      const hf = (Math.sin(th) * nx * sd + Math.cos(th) * nz * sd) >= 0 ? 1 : -1;
+      const G = leafGeometry(L, H, hf);
+      const wood = new THREE.Mesh(G.wood, leafMaterial(d));
+      const brass = new THREE.Mesh(G.brass, CBZ.cmat ? CBZ.cmat(0xc9a45a) : wood.material);
+      for (const m of [wood, brass]) { m.rotation.y = th; m.castShadow = true; m.receiveShadow = true; pivot.add(m); }
+      d.leafParts = G.parts;
+    } else {
+      if (!swingGeo) swingGeo = new THREE.BoxGeometry(1, 1, 1);
+      const leaf = new THREE.Mesh(swingGeo, CBZ.cmat ? CBZ.cmat(d.hex != null ? d.hex : 0x4a3524) : new THREE.MeshLambertMaterial({ color: d.hex || 0x4a3524 }));
+      leaf.position.set(-ux * hs * L / 2, H / 2 + 0.01, -uz * hs * L / 2);
+      leaf.scale.set(d.runX ? L : 0.05, H, d.runX ? 0.05 : L);
+      leaf.castShadow = false; leaf.receiveShadow = true;
+      pivot.add(leaf);
+      const hx = -ux * hs * (L - 0.12), hz = -uz * hs * (L - 0.12);
+      const knob = new THREE.Mesh(swingGeo, CBZ.cmat ? CBZ.cmat(0xb99347) : leaf.material);
+      knob.position.set(hx, 1.02, hz);
+      knob.scale.set(d.runX ? 0.1 : 0.16, 0.05, d.runX ? 0.16 : 0.1);
+      pivot.add(knob);
+    }
     // the angle that carries the leaf (hinge -> centre, i.e. -u*hs) onto the
     // swing side of the wall (+n*side), n = the wall normal
-    const nx = d.runX ? 0 : 1, nz = d.runX ? 1 : 0, sd = d.side || 1;
     const a0 = Math.atan2(-ux * hs, -uz * hs), a1 = Math.atan2(nx * sd, nz * sd);
     let da = a1 - a0;
     while (da > Math.PI) da -= 2 * Math.PI;
@@ -785,6 +938,29 @@
     root.add(pivot);
     d.pivot = pivot;
     return pivot;
+  }
+  // THE LEAF UP / DOWN. dressed: the real leaf shows, the merged slab's slice
+  // is zeroed; undressed (far, shut, still): the slab is the door again.
+  function slabShow(d, on) {
+    if (!d.mesh) return;
+    if (on) { if (!(CBZ.batchWallShow && CBZ.batchWallShow(d.mesh))) d.mesh.visible = true; }
+    else if (!(CBZ.batchWallHide && CBZ.batchWallHide(d.mesh))) d.mesh.visible = false;
+  }
+  function dress(d, on) {
+    if (!!d.dressed === !!on) return;
+    if (on) {
+      const pv = swingPivot(d);
+      if (!pv) return;
+      d.dressed = true;
+      pv.rotation.y = (d.t || 0) * (d.swingTo || 0);
+      pv.visible = true;
+      slabShow(d, false);
+    } else {
+      d.dressed = false;
+      if (d.open || d.pendingShut || SWINGING.indexOf(d) >= 0) { d.dressed = true; return; }   // a moving or open door keeps its leaf
+      if (d.pivot) d.pivot.visible = false;
+      slabShow(d, true);
+    }
   }
   function bodyInDoorway(d) {
     const c = d.col;
@@ -816,16 +992,22 @@
     else return;
     if (CBZ.markCollidersDirty) CBZ.markCollidersDirty();
   }
+  // by: "body" (somebody walking a route), "push" (the player walking into
+  // it, systems/bodydoors.js), else the player's own [E]
   function unitSetOpen(d, open, by) {
     if (!d || !d.mesh || !!d.open === !!open) return false;
     d.open = !!open;
-    d._byBody = d.open && by === "body";
+    // a door opened by walking through it shuts behind you (bodydoors' rule);
+    // one you opened with E is yours and stays as you left it
+    d._byBody = d.open && (by === "body" || by === "push");
     const pv = swingPivot(d);
     if (d.open) {
-      if (!(CBZ.batchWallHide && CBZ.batchWallHide(d.mesh))) d.mesh.visible = false;
+      slabShow(d, false);
       colIn(d, false);
       d.pendingShut = false;
-      if (pv) pv.visible = true;
+      // (a door somebody opens out of your sight wears its leaf too, and the
+      // dress tick takes it down once it is shut and you are not near)
+      if (pv) { pv.visible = true; d.dressed = true; if (DRESSED.indexOf(d) < 0) DRESSED.push(d); }
     } else {
       // the collider comes back once the doorway is clear (swingTick)
       d.pendingShut = true;
@@ -835,17 +1017,54 @@
     if (d.pair && !!d.pair.open !== d.open) unitSetOpen(d.pair, d.open, by);
     // the player's own door in his ear; a door somebody else moves, where it is
     if (by === "body") { if (CBZ.worldSfx) { try { CBZ.worldSfx(d.open ? "door_open" : "door_close", d.x, d.z, { ref: 8 }); } catch (e) {} } }
-    else if (CBZ.sfx && d.free) { try { CBZ.sfx(d.open ? "door_open" : "door_close", { volume: 0.7 }); } catch (e) {} }
+    else if (CBZ.sfx && (d.free || by === "push")) { try { CBZ.sfx(d.open ? "door_open" : "door_close", { volume: 0.7 }); } catch (e) {} }
     return true;
   }
   function shutNow(d) {
     d.pendingShut = false;
-    if (!(CBZ.batchWallShow && CBZ.batchWallShow(d.mesh))) d.mesh.visible = true;
-    if (d.pivot) d.pivot.visible = false;
+    // a dressed door stays its leaf, shut; an undressed one is the slab again
+    if (!d.dressed || !d.pivot) { slabShow(d, true); if (d.pivot) d.pivot.visible = false; }
     colIn(d, true);
+  }
+  // THE DOORS ROUND YOU wear their leaves: every DRESS_T seconds the kit's
+  // doors within DRESS_R of the player on his storey are dressed, the rest
+  // undressed (a handful of meshes at a time: the floor you are on)
+  const DRESS_R = 22, DRESS_T = 0.35;
+  let dressT = 0;
+  const DRESSED = [];
+  function dressTick(dt) {
+    dressT -= dt;
+    if (dressT > 0) return;
+    dressT = DRESS_T;
+    const P = CBZ.player, g = CBZ.game;
+    const on = !!(P && P.pos && g && g.mode === "city" && !P.driving);
+    const px = on ? P.pos.x : 0, pz = on ? P.pos.z : 0, py = on ? P.pos.y : 0;
+    const want = new Set();
+    if (on) {
+      const gx0 = Math.floor((px - DRESS_R) / UNIT_CELL), gx1 = Math.floor((px + DRESS_R) / UNIT_CELL);
+      const gz0 = Math.floor((pz - DRESS_R) / UNIT_CELL), gz1 = Math.floor((pz + DRESS_R) / UNIT_CELL);
+      for (let x = gx0; x <= gx1; x++) for (let z = gz0; z <= gz1; z++) {
+        const a = UNIT_GRID.get(x + "," + z);
+        if (!a) continue;
+        for (let i = 0; i < a.length; i++) {
+          const d = a[i];
+          if (!d.kit || py < d.floorY - 1.5 || py > d.floorY + 3.2) continue;
+          if ((d.x - px) * (d.x - px) + (d.z - pz) * (d.z - pz) > DRESS_R * DRESS_R) continue;
+          want.add(d);
+        }
+      }
+    }
+    for (let i = DRESSED.length - 1; i >= 0; i--) {
+      const d = DRESSED[i];
+      if (want.has(d)) continue;
+      dress(d, false);
+      if (!d.dressed) DRESSED.splice(i, 1);
+    }
+    want.forEach(function (d) { if (!d.dressed) { dress(d, true); if (d.dressed) DRESSED.push(d); } else if (DRESSED.indexOf(d) < 0) DRESSED.push(d); });
   }
   if (CBZ.onUpdate) CBZ.onUpdate(34.31, function (dt) {
     if (!doorVerbWired) wireDoorVerb();
+    dressTick(dt || 0.016);
     if (!SWINGING.length) return;
     const k = Math.min(1, (dt || 0.016) * 7);
     for (let i = SWINGING.length - 1; i >= 0; i--) {
@@ -959,6 +1178,8 @@
       return rec;
     },
     remove: unitDrop,
+    // hang (or take down) a door's real leaf now, as walking up to it does
+    dress: function (d, on) { dress(d, on !== false); return !!d.dressed; },
     openCount: function () { let n = 0; for (let i = 0; i < UNIT_DOORS.length; i++) if (UNIT_DOORS[i].open) n++; return n; },
   };
   function unitDrop(rec) {
@@ -971,6 +1192,9 @@
     if (k >= 0) SWINGING.splice(k, 1);
     if (rec.pivot && rec.pivot.parent) rec.pivot.parent.remove(rec.pivot);
     rec.pivot = undefined;
+    rec.dressed = false;
+    const di = DRESSED.indexOf(rec);
+    if (di >= 0) DRESSED.splice(di, 1);
     if (CBZ.bodyDoors && rec.col) CBZ.bodyDoors.untag(rec.col);
   }
   /* A STREAMED BUILDING'S DOORS GO WITH IT. The records live in this file's
@@ -2803,6 +3027,35 @@
   // clear width and head, the wall's thickness. The fit-out skins stop at
   // these, and tools/president-interior-check.mjs proves nothing stands in one.
   const STATE_OPENINGS = [];
+  /* EVERYTHING ON A WALL. A painting, a sconce, a fireplace, a bookcase, a
+     mirror, the President's television: each files where it hangs (the
+     wall's face line in the frame, the side of it, the run a0..a1, the
+     height y0..y1, how far it stands out) so the trims (skirting, dado and
+     its panels, the chair rail, the picture-frame panelling) stop round it
+     instead of running through it, and tools/president-interior-check.mjs
+     can prove every one sits ON the finished surface with nothing over it.
+     STATE_MOUNTS holds them building-local: { b, floorY, x, z (the centre of
+     its back, on the finished face), nx, nz (out of the wall), ux, uz (along
+     it), w, y0, y1 (absolute), depth, kind }. */
+  const STATE_MOUNTS = [];
+  if (CBZ.streamBus) CBZ.streamBus(STATE_MOUNTS, "stateMounts");
+  CBZ.stateMountsAll = function () { return STATE_MOUNTS.slice(); };
+  // the plaster skin's thickness: the finished face of a wall is this far off its line
+  const SKIN_T = 0.006;
+  function stateMount(F, kind, axis, face, s, a0, a1, y0, y1, depth, trims) {
+    const c = (a0 + a1) / 2;
+    const p0 = axis === "d" ? F.P(face + s * SKIN_T, c) : F.P(c, face + s * SKIN_T);
+    const nx = axis === "d" ? s * F.nx : s * F.tx, nz = axis === "d" ? s * F.nz : s * F.tz;
+    const ux = axis === "d" ? F.tx : F.nx, uz = axis === "d" ? F.tz : F.nz;
+    const rec = { b: F.b, k: F.k, floorY: F.Y, kind: kind, axis: axis, face: face, s: s, a0: a0, a1: a1,
+      x: p0.x, z: p0.z, nx: nx, nz: nz, ux: ux, uz: uz, w: a1 - a0, y0: F.Y + y0, y1: F.Y + y1, depth: depth,
+      // the trims that stop round it ("all" or a height band: the trim runs that cross y0..y1)
+      trims: trims || "band",
+      // the briefing stage stops the trims it stands against; it hangs on nothing
+      trimOnly: kind === "stage" };
+    F.mounts.push(rec);
+    return rec;
+  }
   if (CBZ.streamBus) CBZ.streamBus(STATE_OPENINGS, "stateOpenings");
   CBZ.stateOpeningsAll = function () { return STATE_OPENINGS.slice(); };
   function stateOpening(F, p, runX, w, hgt, t, kind, label, cased) {
@@ -2828,15 +3081,169 @@
     const F = CBZ.furnish;
     const fn = F && F[name];
     if (typeof fn !== "function") return null;
+    // A HOUSE OF STATE'S UPHOLSTERY AND TABLES ARE MADE, NOT BOXED. In a
+    // state room (h.F, the plan's frame) the kit's sofa, armchair and coffee
+    // table keep their seats and their bodies (colliders, invisible), and the
+    // finish draws the real piece: turned legs, rolled arms, piped cushions,
+    // a veneered top on an apron. (OWNER, the Oval on the iPad: the sofas
+    // were "blocky white boxes", the table "a flat salmon slab".)
+    const SF = h.F && STATE_MADE[name] ? h.F : null;
+    const box = SF ? function (lx, ly, lz, w, hh, d, col, oo) {
+      if (!oo || !oo.solid) return null;
+      return ghostOf(h.b, function () { return h.b.lbox(lx, ly, lz, w, hh, d, col, oo); });
+    } : h.b.lbox;
     const o = Object.assign({ solid: true }, opts || {}, {
-      box: h.b.lbox, ox: h.ox, oz: h.oz, oy: 0, lot: null,
+      box: box, ox: h.ox, oz: h.oz, oy: 0, lot: null,
     });
     const y = (opts && opts.atY != null) ? opts.atY : r.y;
     if (doorBlocked(h, r.y, x, z, 0.5)) return null;
+    let rec = null;
     try {
-      return name === "lamp" ? fn(x, y, z, o) : fn(x, y, z, yaw || 0, o);
+      rec = name === "lamp" ? fn(x, y, z, o) : fn(x, y, z, yaw || 0, o);
     } catch (e) { return null; }
+    if (rec && SF) STATE_MADE[name](SF, x, z, yaw || 0, opts || {}, rec);
+    return rec;
   }
+  /* ---- THE MADE PIECES (the finish's furniture) ----------------------------
+     A piece is drawn in its own frame: lat across it (+ its right), fwd the
+     way a sitter faces, y up from the floor top; F.fin carries it (the same
+     yaw convention as furniture.js: lat runs along (cos yaw, -sin yaw)). */
+  const STATE_CLOTH = { warm: 0xb4865a, exec: 0x46566c, cool: 0x8c98a6, clinic: 0xd8dbe0 };
+  const MAHOG = 0xb06a5a;            // the veneer canvas tinted to mahogany
+  function madeFrame(F, x, z, yaw) {
+    const sn = Math.sin(yaw), cs = Math.cos(yaw);
+    const P = function (lat, fwd) { return { x: x + lat * cs + fwd * sn, z: z - lat * sn + fwd * cs }; };
+    return {
+      box: function (kind, lat, fwd, y0, y1, w, d, col, mask) { const q = P(lat, fwd); finOBox(F, kind, q.x, y0, y1, q.z, w, d, yaw, col, mask); },
+      cyl: function (kind, lat, fwd, y0, y1, dia, col, caps, seg) { const q = P(lat, fwd); finPrim(F, kind, FIN_CYL, q.x, y0, y1, q.z, dia, dia, 0, col, caps, seg); },
+      // a lying round across the piece (along lat) / along it (along fwd)
+      rodLat: function (kind, lat0, lat1, fwd, yc, dia, diaV, col, caps) { const q = P((lat0 + lat1) / 2, fwd); finPrim(F, kind, FIN_HCYL, q.x, yc - diaV / 2, yc + diaV / 2, q.z, lat1 - lat0, dia, yaw, col, caps); },
+      rodFwd: function (kind, lat, f0, f1, yc, dia, diaV, col, caps) { const q = P(lat, (f0 + f1) / 2); finPrim(F, kind, FIN_HCYL, q.x, yc - diaV / 2, yc + diaV / 2, q.z, f1 - f0, dia, yaw - Math.PI / 2, col, caps); },
+    };
+  }
+  function madeTone(opts, key, dflt) {
+    const t = opts && opts.tone;
+    if (t && typeof t === "object" && t[key] != null) return t[key];
+    if (typeof t === "number") return t;
+    if (key === "cloth" && typeof t === "string" && STATE_CLOTH[t] != null) return STATE_CLOTH[t];
+    return dflt;
+  }
+  // a turned leg: a foot, a tapered shaft in two drums, a collar under the rail
+  function madeLeg(M, lat, fwd, top, wood) {
+    M.cyl("veneer", lat, fwd, 0, 0.025, 0.034, wood, 4, 10);
+    M.cyl("veneer", lat, fwd, 0.025, top * 0.55, 0.04, wood, 0, 10);
+    M.cyl("veneer", lat, fwd, top * 0.55, top - 0.03, 0.048, wood, 0, 10);
+    M.cyl("veneer", lat, fwd, top - 0.03, top, 0.056, wood, 0, 10);
+  }
+  // AN UPHOLSTERED SEAT: a sofa (n cushions over L) or an armchair (n 1):
+  // turned legs, a seat rail piped along its top, cushions with rounded noses,
+  // a back frame with a rolled top rail and its own cushions, English rolled
+  // arms with a scroll disc at the front. Cushion tops at the kit's anchors.
+  function madeSeat(F, x, z, yaw, L, D, cushTop, backTop, cloth, wood, n) {
+    const M = madeFrame(F, x, z, yaw), L2 = L / 2, AW = n > 1 ? 0.15 : 0.14, D2 = D / 2;
+    const pipe = finShade(cloth, 0.72);                     // the piping: the cloth a shade darker
+    const legs = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
+    if (L > 1.9) legs.push([0, -1], [0, 1]);
+    for (const q of legs) madeLeg(M, q[0] * (L2 - 0.09), q[1] * (D2 - 0.1), 0.12, wood);
+    const railTop = cushTop - 0.10;
+    M.box("uph", 0, 0, 0.12, railTop, L, D - 0.04, cloth, 63 & ~8);                         // the seat rail
+    M.rodLat("uph", -L2 + AW, L2 - AW, D2 - 0.02, railTop, 0.02, 0.02, pipe, 0);             // its piping
+    // the seat cushions, a 1 cm gap between, each with a rounded nose
+    const inner = L - 2 * AW, gap = 0.012, cw = (inner - gap * (n - 1)) / n;
+    const cf0 = -D2 + 0.13, cf1 = D2 - 0.06;                                                 // the cushion's depth
+    for (let i = 0; i < n; i++) {
+      const c = -inner / 2 + cw / 2 + i * (cw + gap);
+      M.box("uph", c, (cf0 + cf1 - 0.04) / 2, railTop, cushTop, cw - 0.012, cf1 - 0.04 - cf0, cloth, 63 & ~8);
+      M.rodLat("uph", c - cw / 2, c + cw / 2, cf1 - 0.04, cushTop - 0.05, 0.08, 0.10, cloth, 3);
+    }
+    // the back: a frame between the arms, its top rolled, cushions before it
+    const bf0 = -D2, bf1 = -D2 + 0.12;
+    M.box("uph", 0, (bf0 + 0.008 + bf1) / 2, railTop, backTop - 0.07, L - 2 * AW, bf1 - bf0 - 0.008, cloth, 63 & ~8);
+    M.rodLat("uph", -L2 + AW, L2 - AW, (bf0 + bf1) / 2 + 0.01, backTop - 0.08, 0.16, 0.15, cloth, 0);
+    for (let i = 0; i < n; i++) {
+      const c = -inner / 2 + cw / 2 + i * (cw + gap);
+      M.box("uph", c, bf1 + 0.06, cushTop, backTop - 0.14, cw - 0.012, 0.12, cloth, 63 & ~8);
+      M.rodLat("uph", c - cw / 2, c + cw / 2, bf1 + 0.06, backTop - 0.14, 0.12, 0.12, cloth, 3);
+    }
+    // the arms: a panel and an English roll with a scroll disc on its front
+    for (const e of [-1, 1]) {
+      const al = e * (L2 - AW / 2), armTop = cushTop + 0.16;
+      M.box("uph", al, (bf0 + 0.008 + D2 - 0.02) / 2, railTop, armTop - 0.02, AW, D2 - 0.028 - bf0, cloth, 63 & ~8 & ~4);
+      M.rodFwd("uph", al + e * 0.01, bf0, D2 + 0.01, armTop, AW + 0.04, 0.15, cloth, 3);
+      M.rodFwd("uph", al + e * 0.01, D2 + 0.01, D2 + 0.02, armTop, AW - 0.01, 0.11, pipe, 1);
+    }
+  }
+  // A LOW TABLE: turned legs, an apron framed between them, a lower shelf, a
+  // veneered top with its edge, all mahogany (or the room's own wood)
+  function madeLowTable(F, x, z, yaw, L, D, top, wood) {
+    const M = madeFrame(F, x, z, yaw), L2 = L / 2, D2 = D / 2, ins = 0.07;
+    for (const a of [-1, 1]) for (const b2 of [-1, 1]) {
+      const la = a * (L2 - ins), fb = b2 * (D2 - ins);
+      M.cyl("veneer", la, fb, 0, 0.03, 0.036, wood, 4, 10);
+      M.cyl("veneer", la, fb, 0.03, 0.2, 0.046, wood, 0, 10);
+      M.cyl("veneer", la, fb, 0.2, 0.26, 0.06, wood, 0, 10);
+      M.cyl("veneer", la, fb, 0.26, top - 0.04, 0.048, wood, 0, 10);
+    }
+    const rt = 0.022, ry0 = top - 0.11, ry1 = top - 0.04;
+    for (const b2 of [-1, 1]) M.box("veneer", 0, b2 * (D2 - ins), ry0, ry1, L - 2 * ins, rt, wood, 63 & ~4);
+    for (const a of [-1, 1]) M.box("veneer", a * (L2 - ins), 0, ry0, ry1, rt, D - 2 * ins - rt, wood, 63 & ~4);
+    M.box("veneer", 0, 0, 0.1, 0.12, L - 2 * ins - 0.02, D - 2 * ins - 0.02, finLift(wood, 0.05));          // the lower shelf
+    M.box("veneer", 0, 0, top - 0.04, top, L, D, wood);                                                       // the top
+    M.box("veneer", 0, 0, top - 0.055, top - 0.04, L - 0.03, D - 0.03, finShade(wood, 0.8), 63 & ~4);        // its moulded edge, under
+  }
+  // A DINING CHAIR at a seat the kit filed (seat height 0.45): turned front
+  // legs, square rear legs running up as the back's uprights, a seat frame
+  // and an upholstered drop-in pad, a carved top rail, a vase splat
+  function madeChair(F, x, z, face, cloth, wood) {
+    const M = madeFrame(F, x, z, face), w = 0.46;
+    for (const a of [-1, 1]) {
+      M.cyl("veneer", a * 0.2, 0.2, 0, 0.37, 0.042, wood, 4, 8);                     // front legs, turned
+      M.box("veneer", a * 0.2, -0.2, 0, 0.96, 0.042, 0.042, wood, 63 & ~8);          // rear legs up to the crest
+    }
+    M.box("veneer", 0, 0, 0.37, 0.42, w - 0.042 - 0.012, w - 0.042 - 0.012, wood);  // the seat frame, between the legs
+    M.box("uph", 0, 0.03, 0.42, 0.45, w + 0.01, 0.4, cloth, 63 & ~8);                // the drop-in pad → 0.45 (in front of the uprights)
+    M.box("veneer", 0, -0.2, 0.86, 0.95, 2 * 0.2 - 0.042, 0.03, wood);               // the top rail between the uprights
+    M.box("veneer", 0, -0.2, 0.5, 0.54, 2 * 0.2 - 0.042, 0.026, wood);               // the shoe over the seat
+    M.box("veneer", 0, -0.2, 0.54, 0.86, 0.11, 0.018, finShade(wood, 0.9));          // the splat
+  }
+  // A LONG TABLE (a dining or cabinet table): turned legs, aprons framed
+  // between them, a veneered top with its moulded edge; and its chairs
+  function madeTable(F, x, z, yaw, L, D, wood) {
+    const M = madeFrame(F, x, z, yaw), L2 = L / 2, D2 = D / 2, ins = 0.09;
+    const legs = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
+    if (L > 3.6) legs.push([0, -1], [0, 1]);
+    for (const q of legs) {
+      const la = q[0] * (L2 - ins), fb = q[1] * (D2 - ins);
+      M.cyl("veneer", la, fb, 0, 0.28, 0.062, wood, 4, 10);
+      M.cyl("veneer", la, fb, 0.28, 0.4, 0.075, wood, 0, 10);
+      M.cyl("veneer", la, fb, 0.4, 0.6, 0.06, wood, 0, 10);
+      M.box("veneer", la, fb, 0.6, 0.705, 0.07, 0.07, wood, 63 & ~4);               // the block under the top
+    }
+    for (const b2 of [-1, 1]) M.box("veneer", 0, b2 * (D2 - ins), 0.61, 0.69, L - 2 * ins - 0.07, 0.025, finShade(wood, 0.92), 63 & ~4);
+    for (const a of [-1, 1]) M.box("veneer", a * (L2 - ins), 0, 0.61, 0.69, 0.025, D - 2 * ins - 0.07, finShade(wood, 0.92), 63 & ~4);
+    M.box("veneer", 0, 0, 0.705, 0.74, L, D, wood);                                   // the top → 0.74
+    M.box("veneer", 0, 0, 0.69, 0.705, L - 0.03, D - 0.03, finShade(wood, 0.8), 63 & ~4);   // its moulded edge, under
+  }
+  const STATE_MADE = {
+    table: function (F, x, z, yaw, opts, rec) {
+      const L = Math.max(0.8, opts.len != null ? +opts.len : 1.6), D = Math.max(0.6, opts.deep != null ? +opts.deep : 0.9);
+      madeTable(F, x, z, yaw, L, D, MAHOG);
+      const cloth = madeTone(opts, "cloth", opts.tone === "exec" ? 0x3d4f6e : 0x8c3a33);
+      const seats = (rec && rec.seats) || [];
+      for (let i = 0; i < seats.length; i++) madeChair(F, seats[i].x - F.h.ox, seats[i].z - F.h.oz, seats[i].face, cloth, MAHOG);
+    },
+    sofa: function (F, x, z, yaw, opts) {
+      const L = Math.max(1.2, opts.len != null ? +opts.len : 2.4);
+      madeSeat(F, x, z, yaw, L, 0.86, 0.40, 0.86, madeTone(opts, "cloth", STATE_CLOTH.warm), MAHOG, L > 1.9 ? 3 : 2);
+    },
+    armchair: function (F, x, z, yaw, opts) {
+      const W = Math.max(0.70, opts.len != null ? +opts.len : 0.94);
+      madeSeat(F, x, z, yaw, W, 0.90, 0.42, 0.88, madeTone(opts, "cloth", STATE_CLOTH.warm), MAHOG, 1);
+    },
+    coffee: function (F, x, z, yaw, opts) {
+      madeLowTable(F, x, z, yaw, Math.max(0.6, opts.len != null ? +opts.len : 1.1), Math.max(0.4, opts.deep != null ? +opts.deep : 0.6), 0.40, MAHOG);
+    },
+  };
   function presidentialUse(rec) {
     if (!rec) return 0;
     return ((rec.seats && rec.seats.length) | 0) + ((rec.beds && rec.beds.length) | 0);
@@ -2947,12 +3354,18 @@
       face: function (dd, ll) { return Math.atan2(nx * dd + tx * ll, nz * dd + tz * ll); },
       latD: Math.atan2(-nz, nx), latL: Math.atan2(-tz, tx),
       walls: [], rooms: [], fitRooms: [], fitLights: [], wins: null, doors: [],
+      // what hangs on or stands against a wall (stateMount), and the rooms
+      // whose trim waits for them (laid at stateOut, cut round every mount)
+      mounts: [], trimRooms: [], late: [], decals: [],
       lights: 0, symbols: 0,
       // THE FINISH (see "THE FINISH OF A HOUSE OF STATE" below): what the
       // fit-out lays when you walk in, packed: fin = boxes, flo = floors
       fin: [], flo: [],
+      // CBZ.FIN_TRACE (a census, never the game): who filed each finish piece
+      trace: CBZ.FIN_TRACE ? [] : null,
     };
     F.fbox = function (kind, d, l, y0, y1, dd, ll, col, mask) { return finBox(F, kind, d, l, y0, y1, dd, ll, col, mask); };
+    h.F = F;                        // presidentialPiece draws the made pieces in this frame
     F.fplane = function (kind, d0, d1, l0, l1, y, col) { return finPlane(F, kind, d0, d1, l0, l1, y, col); };
     F.nbit = function (dd, dl) { return finBit(F, dd, dl); };
     F.wins = stateWindows(F);
@@ -2977,6 +3390,35 @@
   }
   const NOCAST = { cast: false };
   const SOLID = { cast: false, solid: true };
+  const OVAL_CAST = { cast: true };
+  // how far a drawn structural box stands inside the solid one its finish
+  // covers (see stateWall). 3 cm: a face 3.6 cm behind the plaster is
+  // separate on any depth buffer at any distance inside a room.
+  const WALL_INSET = 0.03;
+  // a frame shrink { d0, d1, y0, y1, l0, l1 } (metres in from each side) as
+  // buildings.js lbox's o.shrink [-x, +x, -y, +y, -z, +z]
+  function frameShrink(F, s) {
+    let xs, zs;
+    const d0 = s.d0 || 0, d1 = s.d1 || 0, l0 = s.l0 || 0, l1 = s.l1 || 0;
+    if (F.along) { xs = F.nx > 0 ? [d0, d1] : [d1, d0]; zs = F.tz > 0 ? [l0, l1] : [l1, l0]; }
+    else { zs = F.nz > 0 ? [d0, d1] : [d1, d0]; xs = F.tx > 0 ? [l0, l1] : [l1, l0]; }
+    return [xs[0], xs[1], s.y0 || 0, s.y1 || 0, zs[0], zs[1]];
+  }
+  // A SOLID THAT THE FINISH DRAWS: the eager box keeps its collider and draws
+  // nothing (core/batch.js never folds a hidden mesh; the collider's ref stays
+  // live for LOS). The fit-out's model of the piece is what you see.
+  function ghost(F, d, l, y0, y1, dd, ll) {
+    return ghostOf(F.h.b, function () { return F.box(d, l, y0, y1, dd, ll, SP.ivory, SOLID); });
+  }
+  // run draw() and hide every mesh it added to the building (lbox splits a
+  // box over a stair hole into pieces and hands back only the first)
+  function ghostOf(b, draw) {
+    const g = b && b.group, n0 = g ? g.children.length : 0;
+    const m = draw();
+    if (g) for (let i = n0; i < g.children.length; i++) if (g.children[i].isMesh) g.children[i].visible = false;
+    if (m && m.isObject3D) m.visible = false;
+    return m;
+  }
 
   /* ========================================================================
      THE FINISH OF A HOUSE OF STATE.
@@ -3016,10 +3458,18 @@
      finish costs ~a quarter MB until it is built, and nothing at all on the
      GPU until you are at the door.
      ======================================================================== */
-  const FIN_KINDS = ["plaster", "paint", "veneer", "parquet", "marble", "carpet", "rug", "tile", "fabric", "flat", "glow", "glass", "oil", "wood", "ceiling"];
+  const FIN_KINDS = ["plaster", "paint", "veneer", "parquet", "marble", "carpet", "rug", "tile", "fabric", "flat", "glow", "glass", "oil", "wood", "ceiling", "uph"];
   const FIN_IX = {};
   for (let i = 0; i < FIN_KINDS.length; i++) FIN_IX[FIN_KINDS[i]] = i;
-  const FIN_FLOOR = 0.017;          // the finished floor's face: 3 mm over the eager field
+  // the finished floor's face: 1 cm over the slab top (the walk surface), a
+  // rug's top 1 cm over that. A state room draws no eager covering or field
+  // under it (they were 3-9 mm under this face, all fighting for depth).
+  const FIN_FLOOR = 0.010;
+  // the finished ceiling: 3 cm under the slab's underside (it was 1.2 cm)
+  const CEIL_FIN = 0.03;
+  // (published for the census: what lies between a finished ceiling and the
+  // finished floor over it is inside the slab sandwich and never seen)
+  CBZ.stateFinishPlanes = { floor: FIN_FLOOR, ceil: CEIL_FIN, slab: CEIL };
   // the face bit (city/fitout.js FACES order: +x -x +y -y +z -z) of a frame direction
   function finBit(F, dd, dl) {
     const wx = F.nx * dd + F.tx * dl, wz = F.nz * dd + F.tz * dl;
@@ -3034,6 +3484,39 @@
     if (y0 <= 0.03) m &= ~8;
     if (y1 >= F.CL - 0.02) m &= ~4;
     F.fin.push(p.x, F.Y + (y0 + y1) / 2, p.z, F.along ? dd : ll, y1 - y0, F.along ? ll : dd, col == null ? 0xffffff : col, FIN_IX[kind] | 0, 0, m);
+    if (F.trace) finTrace(F);
+  }
+  // ROUND FINISH PIECES (city/fitout.js prim): a turned leg, a rolled arm, a
+  // candle, a knob, a crystal drop. Packed in the same ten floats as a box,
+  // the shape riding the mask: FIN_CYL upright (w x dep ellipse), FIN_HCYL
+  // lying along the yaw's own x (w long, (y1-y0) x dep across), FIN_OCT a cut
+  // drop; caps in the face bits (cyl: 4 top, 8 bottom; hcyl: 1 / 2 its ends),
+  // the side count in bits 9-13.
+  const FIN_CYL = 64, FIN_HCYL = 128, FIN_OCT = 256;
+  // the census's trace: the two callers above the filing function
+  function finTrace(F) {
+    const st = String(new Error().stack || "").split("\n").slice(3, 6).map(function (l) { const m = /at (\S+)/.exec(l); return m ? m[1] : "?"; });
+    F.trace.push(st.join("<"));
+  }
+  // building-local centre (x, z), y0..y1 over the floor
+  function finPrim(F, kind, shape, x, y0, y1, z, w, dep, yaw, col, caps, seg) {
+    if (!(y1 > y0) || !(w > 0.001) || !(dep > 0.001)) return;
+    const m = shape | (caps == null ? (shape === FIN_HCYL ? 3 : 12) : caps) | ((seg | 0) << 9);
+    F.fin.push(x, F.Y + (y0 + y1) / 2, z, w, y1 - y0, dep, col == null ? 0xffffff : col, FIN_IX[kind] | 0, yaw || 0, m);
+    if (F.trace) finTrace(F);
+  }
+  // in the frame: an upright round at (d, l)
+  function finCylAt(F, kind, d, l, y0, y1, dia, col, caps, seg) {
+    const p = F.P(d, l);
+    finPrim(F, kind, FIN_CYL, p.x, y0, y1, p.z, dia, dia, 0, col, caps, seg);
+  }
+  // in the frame: a lying round from (d0, l0) to (d1, l1) at height yc, dia across
+  function finRod(F, kind, d0, l0, d1, l1, yc, dia, col, caps, seg, diaV) {
+    const a = F.P(d0, l0), c = F.P(d1, l1);
+    const vx = c.x - a.x, vz = c.z - a.z, L = Math.hypot(vx, vz);
+    if (L < 0.002) return;
+    const dv = diaV != null ? diaV : dia;
+    finPrim(F, kind, FIN_HCYL, (a.x + c.x) / 2, yc - dv / 2, yc + dv / 2, (a.z + c.z) / 2, L, dia, Math.atan2(-vz, vx), col, caps, seg);
   }
   // an oriented finish box, building-local (a facet of the Oval)
   function finOBox(F, kind, x, y0, y1, z, w, dep, yaw, col, mask) {
@@ -3042,6 +3525,7 @@
     if (y0 <= 0.03) m &= ~8;
     if (y1 >= F.CL - 0.02) m &= ~4;
     F.fin.push(x, F.Y + (y0 + y1) / 2, z, w, y1 - y0, dep, col == null ? 0xffffff : col, FIN_IX[kind] | 0, yaw, m);
+    if (F.trace) finTrace(F);
   }
   // THE FINISH OF SOMETHING ANOTHER FILE BUILT INTO A STATE BUILDING (the
   // Mansion's grand stair, govcomplex.js; the Situation Room, presidency.js):
@@ -3073,23 +3557,36 @@
     if (R.x1 - R.x0 < 0.05 || R.z1 - R.z0 < 0.05) return;
     F.flo.push(R.x0, R.z0, R.x1, R.z1, F.Y + y, FIN_IX[kind] | 0, col == null ? 0xffffff : col);
   }
-  // a solid piece: the eager box keeps its collider (and the street's view),
-  // the finish wraps it 4 mm proud in its real material
+  // a solid piece: the eager box is its collider only (a ghost), the finish
+  // draws it in its real material. (It used to draw both, the finish 4 mm
+  // proud of the flat box: two skins a hair apart, fighting for depth.)
   function finSolid(F, kind, d, l, y0, y1, dd, ll, col, tint) {
-    F.box(d, l, y0, y1, dd, ll, col, SOLID);
-    finBox(F, kind, d, l, Math.max(0, y0 - (y0 > 0.03 ? 0.004 : 0)), Math.min(F.CL, y1 + 0.004), dd + 0.008, ll + 0.008, tint != null ? tint : col);
+    ghost(F, d, l, y0, y1, dd, ll);
+    finBox(F, kind, d, l, y0, y1, dd, ll, tint != null ? tint : col);
   }
   // THE PAINT OF EACH ROOM (the walls' colour; the plaster canvas is near
   // white so this is what you see). The Blue Room is blue, the Family Salon
   // the yellow of an oval sitting room, the Oval Office a warm cream-gold.
+  /* THE LIGHT OF A ROOM OF STATE. OWNER: the rooms "wash out flat". Every
+     surface took the same 0.62 of ambient fill in its bake and the pools of
+     the fixtures barely lifted it: cream walls at one value from the floor to
+     the cornice. A real room is lit from its WINDOWS (bright on the window
+     wall's returns and the floor in front of them, falling off across the
+     room) and its FIXTURES (a pool under each chandelier, the ceiling round
+     it), and its far corners are darker. So a state floor bakes with less
+     fill (STATE_AMB) and every window it cases is a soft daylight source
+     (stateWindowRun), each fixture as before. */
+  const STATE_AMB = 0.46;
   const ROOM_PAINT = {
-    entrancehall: 0xf0ebdf, crosshall: 0xf0ebdf, sitlobby: 0xe7e2d6, eastroom: 0xf6f2e9, statedining: 0xeee3c8,
-    blueroom: 0xb3c4dc, servicehall: 0xe6e5df, centrehall: 0xeee5cf, guestroom: 0xdbe4d4, familysalon: 0xf0dca6,
+    // (a paint is a value step under the joinery's white eggshell: the
+    // casings, rails and cornices read against it. They were within 2% of it)
+    entrancehall: 0xe6dcc6, crosshall: 0xe6dcc6, sitlobby: 0xdcd5c6, eastroom: 0xede4cf, statedining: 0xe0cc9c,
+    blueroom: 0xa3b7d4, servicehall: 0xe0ded6, centrehall: 0xe4d6b6, guestroom: 0xd0dcc6, familysalon: 0xeacf8c,
     privatesuite: 0xd7dee9, masterbath: 0xf2f0ea, dressing: 0xe8e1d3, familydining: 0xe9d6b6, kitchen: 0xf1f0ea,
     study: 0xd0d9c4, den: 0xe0cfb0, hall3: 0xece4d2, library: 0xd8c9a8, solarium: 0xf3efe2, guestsuite: 0xecd9d0,
-    guestbath: 0xf2f0ea, gym: 0xdcdcd7, bedroom3: 0xdae2ec, gamesroom: 0xcdd6c0, wwlobby: 0xeee8da, wwcorridor: 0xefe9db,
-    cabinetroom: 0xf2ecdd, wwstair: 0xeee8da, pressroom: 0x8a98b2, pressoffice: 0xe5e1d6, wwhall: 0xefe9db,
-    outeroffice: 0xefe4c9, chiefofstaff: 0xe4e0d4, presstudy: 0xd6ccb4, presdining: 0xe9d6ba, ovaloffice: 0xf2e5c2,
+    guestbath: 0xf2f0ea, gym: 0xdcdcd7, bedroom3: 0xdae2ec, gamesroom: 0xcdd6c0, wwlobby: 0xe4dccb, wwcorridor: 0xe4dbc7,
+    cabinetroom: 0xe5d8bb, wwstair: 0xe3dccb, pressroom: 0x8a98b2, pressoffice: 0xdcd6c8, wwhall: 0xe4dbc7,
+    outeroffice: 0xe6d6b2, chiefofstaff: 0xdad4c4, presstudy: 0xd0c4a6, presdining: 0xe2caa6, ovaloffice: 0xe3cc95,
   };
   const PAINT_WOOD = 0xf3efe6;      // the joinery's eggshell: casings, skirtings, rails, crowns
   function roomPaint(room) { return room.paint != null ? room.paint : (ROOM_PAINT[room.key] != null ? ROOM_PAINT[room.key] : 0xefe9dc); }
@@ -3102,6 +3599,10 @@
     if (col === SP.navy) return { kind: "carpet", tint: 0x6f86c0 };
     if (col === 0x2e3238) return { kind: "carpet", tint: 0x8a9098 };       // the gym's rubber
     return { kind: "parquet", tint: 0xffffff };
+  }
+  // a hex scaled toward black by k (0..1)
+  function finShade(hex, k) {
+    return (Math.round(((hex >> 16) & 255) * k) << 16) | (Math.round(((hex >> 8) & 255) * k) << 8) | Math.round((hex & 255) * k);
   }
   // a hex lifted toward white by f (0..1): a tint for a mid-grey canvas
   function finLift(hex, f) {
@@ -3192,20 +3693,32 @@
     const T = o.t || ST_T, H = F.CL;
     const ops = (openings || []).filter(function (op) { return op && op.c - op.w / 2 > lo + 0.05 && op.c + op.w / 2 < hi - 0.05; })
       .sort(function (a, b2) { return a.c - b2.c; });
-    const seg = function (a, c, y0, y1) {
+    // THE PLAN WALL IS THE STRUCTURE, THE FINISH IS ITS FACE. The solid box
+    // keeps the wall's full thickness (its collider, the navigator's wall);
+    // what is DRAWN stands WALL_INSET inside both faces, inside each opening's
+    // jambs and above its head, so the plaster skin, the reveal lining and the
+    // soffit the fit-out lays never share a depth with it (they did, 4-6 mm
+    // apart: the stair-stepped flicker on the iPad). It casts: a wall the sun
+    // shines through lit every room behind it in window-shaped patches.
+    const seg = function (a, c, y0, y1, openA, openC, head) {
       if (c - a < 0.02) return;
-      if (axis === "d") F.box(at, (a + c) / 2, y0, y1, T, c - a, col, SOLID);
-      else F.box((a + c) / 2, at, y0, y1, c - a, T, col, SOLID);
+      const sh = { d0: 0, d1: 0, l0: 0, l1: 0, y0: head ? WALL_INSET : 0, y1: 0 };
+      if (axis === "d") { sh.d0 = sh.d1 = WALL_INSET; sh.l0 = openA ? WALL_INSET : 0; sh.l1 = openC ? WALL_INSET : 0; }
+      else { sh.l0 = sh.l1 = WALL_INSET; sh.d0 = openA ? WALL_INSET : 0; sh.d1 = openC ? WALL_INSET : 0; }
+      const o2 = { cast: true, solid: true, shrink: frameShrink(F, sh) };
+      if (axis === "d") F.box(at, (a + c) / 2, y0, y1, T, c - a, col, o2);
+      else F.box((a + c) / 2, at, y0, y1, c - a, T, col, o2);
       WALL_TALLY.solid++;
     };
-    let cur = lo;
+    let cur = lo, curOpen = false;
     for (let i = 0; i < ops.length; i++) {
       const op = ops[i];
       const a = op.c - op.w / 2, c = op.c + op.w / 2;
-      seg(cur, a, 0, H);
+      seg(cur, a, 0, H, curOpen, true);
+      curOpen = true;
       const oh = op.h || (op.leaf ? DOOR_H : Math.min(H - 0.5, 3.0));
       op.h = oh;
-      seg(a, c, oh, H);                              // the header over it
+      seg(a, c, oh, H, false, false, true);          // the header over it
       stateOpening(F, axis === "d" ? F.P(at, op.c) : F.P(op.c, at),
         axis === "d" ? Math.abs(F.tx) > 0.5 : Math.abs(F.nx) > 0.5, op.w, oh, T,
         op.leaf ? (op.w >= 1.6 ? "pair" : "door") : "arch", op.label);
@@ -3213,7 +3726,7 @@
       stateCasing(F, axis, at, T, a, c, oh, op, casing);
       if (op.leaf) stateDoor(F, axis, at, op);
     }
-    seg(cur, hi, 0, H);
+    seg(cur, hi, 0, H, curOpen, false);
     const rec = { axis: axis, at: at, from: lo, to: hi, t: T, ops: ops };
     F.walls.push(rec);
     return rec;
@@ -3241,11 +3754,15 @@
       // the back (against the plaster) never shows
       const back = axis === "d" ? F.nbit(-s, 0) : F.nbit(0, -s);
       const m = 63 & ~back, mj = m & ~12;          // a jamb's ends are in its plinth and its head
+      // Every piece meets the next at a joint, never laps over it: the jambs
+      // stand on their plinth blocks and stop under the head, the back bands
+      // stop under the head's band (two faces of one colour lapped a few mm
+      // apart flickered in the bake's two shades).
       for (const e of [-1, 1]) {
         const j0 = e < 0 ? a - 0.12 : c, j1 = e < 0 ? a : c + 0.12;           // the architrave, outside the opening
         const b0 = e < 0 ? a - 0.15 : c + 0.12, b1 = e < 0 ? a - 0.12 : c + 0.15; // its back band
-        put(kind, n(0), n(0.026), j0, j1, 0.24, oh + 0.12, col, mj);
-        put(kind, n(0), n(0.038), b0, b1, 0.24, oh + 0.15, col, mj);
+        put(kind, n(0), n(0.026), j0, j1, 0.26, oh, col, mj);
+        put(kind, n(0), n(0.038), b0, b1, 0.26, oh + 0.12, col, mj);
         // the plinth block: taller than the skirting, a hair prouder than the casing
         put(kind, n(0), n(0.042), e < 0 ? a - 0.155 : c, e < 0 ? a : c + 0.155, 0, 0.26, col, m);
       }
@@ -3266,7 +3783,7 @@
     }
     put(kind, -half, half, a, c, oh - 0.008, oh, col, 8);
     // the threshold: a marble saddle across the opening, flush with the floor
-    put("marble", -T / 2, T / 2, a, c, 0.004, FIN_FLOOR + 0.001, 0xd9d3c6);
+    put("marble", -T / 2, T / 2, a, c, 0.004, FIN_FLOOR + 0.006, 0xd9d3c6);
   }
 
   /* ---- THE STATE DOOR — a unit door that is not locked --------------------
@@ -3288,6 +3805,8 @@
     const d = freeDoorway(F.h, F.Y, p.x, p.z, runX, w, DOOR_H, SP.walnut,
       -Math.sign(runX ? rX : rZ) || -1, (Math.sign(runX ? mZ : mX) || 1) * sw, op.label, F.k);
     if (!d) return null;
+    // a house of state's doors are painted joinery, like their casings
+    d.style = "state"; if (d.pair) d.pair.style = "state";
     if (op.id) d.id = op.id;
     F.doors.push(d);
     if (d.pair) F.doors.push(d.pair);
@@ -3307,8 +3826,9 @@
     // and the landing mouth are left to the stair (a field over a stairwell
     // is the old "floor over the hole"). The finish lays the real floor on it.
     stateField(F, d0, d1, l0, l1, room.floor != null ? room.floor : SP.marble, true);
-    // 2. the walls' finish: skins, panelling, skirting, rails, crown
-    stateTrim(F, room);
+    // 2. the walls' finish: skins, panelling, skirting, rails, crown. Laid
+    // at stateOut, once everything that hangs on a wall has said where it is
+    F.trimRooms.push(room);
     // 3. windows
     const faces = [["d0", d0 < 0.05, l0, l1], ["d1", d1 > F.D - 0.05, l0, l1], ["l-", l0 < -F.half + 0.05, d0, d1], ["l+", l1 > F.half - 0.05, d0, d1]];
     for (let i = 0; i < faces.length; i++) {
@@ -3351,8 +3871,8 @@
     const ff = floorFinish(col);
     for (let i = 0; i < cut.length; i++) {
       const c = cut[i];
-      F.box((c.d0 + c.d1) / 2, (c.l0 + c.l1) / 2, FIELD_B, FIELD_T, c.d1 - c.d0, c.l1 - c.l0, col);
-      if (!fin) continue;
+      // the eager field only where nothing finishes it (the finish is the floor)
+      if (!fin) { F.box((c.d0 + c.d1) / 2, (c.l0 + c.l1) / 2, FIELD_B, FIELD_T, c.d1 - c.d0, c.l1 - c.l0, col); continue; }
       // a marble hall gets its border: a 40 cm band of darker stone round the
       // field, as a laid floor has (only where the cut is the room's own edge)
       const B = ff.border != null && c.d1 - c.d0 > 3 && c.l1 - c.l0 > 3 ? 0.4 : 0;
@@ -3432,7 +3952,11 @@
         const cuts = [], xcuts = [];
         const ws = stateWinsOn(F, e.face, e.from, e.to);
         for (let j = 0; j < ws.length; j++) {
-          cuts.push({ a: ws[j].c - ws[j].hw - 0.1, b: ws[j].c + ws[j].hw + 0.1, yb: ws[j].yb, yt: ws[j].yt });
+          // the trims stop at the window's casing (15.5 cm out, to its band
+          // over the head); the skirting runs on under a sill, and stops at
+          // the plinth blocks of a window that comes down to the floor
+          const yb = ws[j].yb > 0.25 ? 0.23 : -1;
+          cuts.push({ a: ws[j].c - ws[j].hw - 0.16, b: ws[j].c + ws[j].hw + 0.16, yb: yb, yt: ws[j].yt + 0.16 });
           xcuts.push({ a: ws[j].c - ws[j].hw, b: ws[j].c + ws[j].hw, yb: ws[j].yb, yt: ws[j].yt });
         }
         // the front door is a hole in the facade
@@ -3496,8 +4020,12 @@
     const back = e.axis === "d" ? F.nbit(-e.s, 0) : F.nbit(0, -e.s);
     const mask = opt.mask != null ? opt.mask : (63 & ~back);
     const off = e.face + e.s * ((opt.inset || 0) + proud / 2);
+    // AT A CORNER the two walls' trims butt: a run along d (axis "l") stops
+    // at the face of the same trim on the wall across its end (they lapped
+    // over each other in the corner, two faces of one moulding a hair apart)
+    const c0 = e.runs[0][0], c1 = e.runs[0][1], butt = e.axis === "l" && !opt.noButt ? proud + (opt.inset || 0) : 0;
     for (let j = 0; j < runs.length; j++) {
-      const a = runs[j][0], b2 = runs[j][1];
+      const a = runs[j][0] === c0 ? runs[j][0] + butt : runs[j][0], b2 = runs[j][1] === c1 ? runs[j][1] - butt : runs[j][1];
       if (b2 - a < (opt.min || 0.06)) continue;
       const n = Math.max(1, Math.ceil((b2 - a) / seg)), st = (b2 - a) / n;
       for (let q = 0; q < n; q++) {
@@ -3527,6 +4055,16 @@
   }
   function stateTrim(F, room) {
     const edges = stateEdges(F, room);
+    // what hangs on each edge stops its trims (never its plaster: it hangs ON that)
+    for (let i = 0; i < edges.length; i++) {
+      const e = edges[i];
+      for (let j = 0; j < F.mounts.length; j++) {
+        const m = F.mounts[j];
+        if (m.axis !== e.axis || m.s !== e.s || Math.abs(m.face - e.face) > 0.03) continue;
+        const yb = m.trims === "all" ? -1 : m.y0 - F.Y - 0.02, yt = m.trims === "all" ? 99 : m.y1 - F.Y + 0.02;
+        e.cuts.push({ a: m.a0 - 0.02, b: m.a1 + 0.02, yb: yb, yt: yt, mount: true });
+      }
+    }
     const ff = floorFinish(room.floor != null ? room.floor : SP.marble);
     const paint = roomPaint(room);
     // skirting: marble in a marble hall, else the joinery's paint (a room
@@ -3550,7 +4088,7 @@
       if (railC != null) {
         if (wains != null) {
           // panelled dado: the board, then raised fields in bolection frames
-          const runs = stateRun(F, e, 0.225, 0.92, 0.012, wainsKind, wainsCol);
+          const runs = stateRun(F, e, 0.225, 0.905, 0.012, wainsKind, wainsCol);
           for (let j = 0; j < runs.length; j++) {
             const a = runs[j][0], b2 = runs[j][1], n = Math.max(1, Math.floor((b2 - a) / 1.15));
             const step = (b2 - a) / n;
@@ -3611,15 +4149,32 @@
     if (a1 - a0 < 1 || b1 - b0 < 1) return;
     const nd = Math.max(1, Math.round((a1 - a0) / bay)), nl = Math.max(1, Math.round((b1 - b0) / bay));
     const top = F.CL, bot = F.CL - 0.22;
-    for (let i = 1; i < nd; i++) {
-      const dd = a0 + (a1 - a0) * i / nd;
+    // the beams along d run through; the beams along l are framed BETWEEN
+    // them (and so are the bed mouldings), so no two pieces lap at a crossing
+    const DS = [], LS = [];
+    for (let i = 1; i < nd; i++) DS.push(a0 + (a1 - a0) * i / nd);
+    for (let j = 1; j < nl; j++) LS.push(b0 + (b1 - b0) * j / nl);
+    const spans = function (lo, hi, at, half) {
+      const out = []; let c = lo;
+      for (let i = 0; i < at.length; i++) { if (at[i] - half - c > 0.02) out.push([c, at[i] - half]); c = at[i] + half; }
+      if (hi - c > 0.02) out.push([c, hi]);
+      return out;
+    };
+    for (let i = 0; i < DS.length; i++) {
+      const dd = DS[i];
       F.fbox("paint", dd, (b0 + b1) / 2, bot, top, 0.24, b1 - b0, col);
-      for (const e of [-1, 1]) F.fbox("paint", dd + e * 0.14, (b0 + b1) / 2, bot + 0.1, bot + 0.16, 0.04, b1 - b0, col);
+      // its bed mouldings stop at the crossing beams' mouldings
+      const sp = spans(b0, b1, LS, 0.16);
+      for (const e of [-1, 1]) for (let k = 0; k < sp.length; k++)
+        F.fbox("paint", dd + e * 0.14, (sp[k][0] + sp[k][1]) / 2, bot + 0.1, bot + 0.16, 0.04, sp[k][1] - sp[k][0], col);
     }
-    for (let j = 1; j < nl; j++) {
-      const ll = b0 + (b1 - b0) * j / nl;
-      F.fbox("paint", (a0 + a1) / 2, ll, bot, top, a1 - a0, 0.24, col);
-      for (const e of [-1, 1]) F.fbox("paint", (a0 + a1) / 2, ll + e * 0.14, bot + 0.1, bot + 0.16, a1 - a0, 0.04, col);
+    for (let j = 0; j < LS.length; j++) {
+      const ll = LS[j];
+      const sp = spans(a0, a1, DS, 0.12);
+      for (let k = 0; k < sp.length; k++) {
+        F.fbox("paint", (sp[k][0] + sp[k][1]) / 2, ll, bot, top, sp[k][1] - sp[k][0], 0.24, col);
+        for (const e of [-1, 1]) F.fbox("paint", (sp[k][0] + sp[k][1]) / 2, ll + e * 0.14, bot + 0.1, bot + 0.16, sp[k][1] - sp[k][0], 0.04, col);
+      }
     }
     for (let i = 0; i < nd; i++) for (let j = 0; j < nl; j++) {
       const dd = a0 + (a1 - a0) * (i + 0.5) / nd, ll = b0 + (b1 - b0) * (j + 0.5) / nl;
@@ -3635,36 +4190,51 @@
      material when the light count changes). Lowest point 2.4 m over the floor. */
   function stateChandelier(F, d, l, size, room) {
     size = size || 1.0;
-    const top = F.CL, low = Math.max(2.45, top - 1.15);
-    const p = F.P(d, l), BR = 0xc9a45a, CANDLE = 0xf4efe2, LIT = 0xfff1cf;
-    // the rose: two plaster squares on the diagonal make an octagon
-    for (const yaw of [0, Math.PI / 4]) finOBox(F, "plaster", p.x, top - 0.035, top, p.z, 0.62 * size, 0.62 * size, yaw, 0xfbf8f0);
-    finOBox(F, "paint", p.x, top - 0.05, top - 0.035, p.z, 0.3 * size, 0.3 * size, Math.PI / 4, 0xd8c39a);
-    F.fbox("flat", d, l, top - 0.12, top - 0.035, 0.14, 0.14, BR);                         // canopy
-    F.fbox("flat", d, l, low + 0.62, top - 0.12, 0.035, 0.035, BR);                         // stem
-    F.fbox("flat", d, l, low + 0.12, low + 0.62, 0.09 * size + 0.04, 0.09 * size + 0.04, BR);   // column
-    F.fbox("flat", d, l, low + 0.30, low + 0.36, 0.22 * size, 0.22 * size, BR);              // the hub
-    const ring = function (n, R, y, cup, yaw0) {
+    const top = F.CL - CEIL_FIN, low = Math.max(2.45, F.CL - 1.15);
+    const p = F.P(d, l), BR = 0xc9a45a, BRD = 0xa9853f, CANDLE = 0xf4efe2, LIT = 0xfff1cf, XTAL = 0xe6f0ff;
+    const cyl = function (kind, x, z, y0, y1, dia, col, caps) { finPrim(F, kind, FIN_CYL, x, y0, y1, z, dia, dia, 0, col, caps); };
+    const drop = function (x, z, y0, y1, dia) { finPrim(F, "glass", FIN_OCT, x, y0, y1, z, dia, dia, Math.PI / 4, XTAL); };
+    // the ceiling rose: a moulded plaster disc, a ring round it, a boss
+    cyl("plaster", p.x, p.z, top - 0.045, top + 0.01, 0.66 * size, 0xfbf8f0, 8);
+    cyl("plaster", p.x, p.z, top - 0.065, top - 0.045, 0.5 * size, 0xfbf8f0, 8);
+    cyl("paint", p.x, p.z, top - 0.09, top - 0.065, 0.2 * size, 0xd8c39a, 8);
+    // the canopy and the chain-stem down to the body
+    cyl("flat", p.x, p.z, top - 0.17, top - 0.09, 0.11, BR, 8);
+    cyl("flat", p.x, p.z, low + 0.74, top - 0.17, 0.016, BRD, 0);
+    // THE BODY, turned: a neck, an urn, a collar, the arm hub, a stem, a ball finial
+    cyl("flat", p.x, p.z, low + 0.66, low + 0.74, 0.045, BR, 12);
+    cyl("flat", p.x, p.z, low + 0.52, low + 0.66, 0.10 * size + 0.02, BR, 12);
+    cyl("flat", p.x, p.z, low + 0.47, low + 0.52, 0.06, BRD, 12);
+    cyl("flat", p.x, p.z, low + 0.27, low + 0.33, 0.20 * size, BR, 12);
+    cyl("flat", p.x, p.z, low + 0.33, low + 0.47, 0.035, BR, 0);
+    cyl("flat", p.x, p.z, low + 0.12, low + 0.27, 0.04, BR, 0);
+    finPrim(F, "flat", FIN_OCT, p.x, low + 0.05, low + 0.12, p.z, 0.07, 0.07, 0, BR);
+    drop(p.x, p.z, low - 0.06, low + 0.05, 0.035);
+    // ARMS: a fine brass arm out from the hub, a riser, a drip pan, a cup, a
+    // candle sleeve and its flame; a crystal drop hung from every pan
+    const arms = function (n, R, y, yaw0, sleeve) {
       for (let i = 0; i < n; i++) {
         const a = yaw0 + i * 2 * Math.PI / n, cx = Math.cos(a), sz = Math.sin(a);
-        // the arm: a turned box from the hub to the cup
-        finOBox(F, "flat", p.x + cx * R / 2, y - 0.012, y + 0.012, p.z + sz * R / 2, R, 0.024, -a, BR);
+        const r0 = 0.09 * size;
+        finPrim(F, "flat", FIN_HCYL, p.x + cx * (r0 + R) / 2, y - 0.008, y + 0.008, p.z + sz * (r0 + R) / 2, R - r0, 0.016, -a, BR, 0, 8);
         const qx = p.x + cx * R, qz = p.z + sz * R;
-        finOBox(F, "flat", qx, y - 0.01, y + 0.03, qz, cup, cup, 0, BR);                    // the cup
-        finOBox(F, "paint", qx, y + 0.03, y + 0.15, qz, 0.026, 0.026, 0, CANDLE);           // the sleeve
-        finOBox(F, "glow", qx, y + 0.15, y + 0.2, qz, 0.03, 0.03, 0, LIT);                  // the flame bulb
-        // a crystal drop under each arm
-        finOBox(F, "glass", qx, y - 0.13, y - 0.02, qz, 0.025, 0.025, Math.PI / 4, 0xe6f0ff);
+        cyl("flat", qx, qz, y - 0.012, y + 0.035, 0.018, BR, 0);                               // riser
+        cyl("flat", qx, qz, y + 0.035, y + 0.043, 0.075, BR, 12);                               // drip pan
+        cyl("flat", qx, qz, y + 0.043, y + 0.07, 0.036, BRD, 4);                                // cup
+        cyl("paint", qx, qz, y + 0.07, y + 0.07 + sleeve, 0.024, CANDLE, 4);                    // the sleeve
+        finPrim(F, "glow", FIN_OCT, qx, y + 0.075 + sleeve, y + 0.115 + sleeve, qz, 0.018, 0.018, 0, LIT);   // the flame bulb
+        drop(qx + cx * 0.03, qz + sz * 0.03, y - 0.03, y + 0.03, 0.02);
+        drop(qx + cx * 0.03, qz + sz * 0.03, y - 0.09, y - 0.035, 0.026);
       }
     };
-    ring(8, 0.5 * size, low + 0.33, 0.07, 0);
-    ring(4, 0.26 * size, low + 0.56, 0.05, Math.PI / 4);
-    // the crystal skirt round the column
-    for (let i = 0; i < 12; i++) {
-      const a = i * Math.PI / 6;
-      finOBox(F, "glass", p.x + Math.cos(a) * 0.16 * size, low + 0.12, low + 0.28, p.z + Math.sin(a) * 0.16 * size, 0.02, 0.02, 0, 0xe6f0ff);
+    arms(8, 0.48 * size, low + 0.30, 0, 0.12);
+    arms(4, 0.24 * size, low + 0.56, Math.PI / 4, 0.09);
+    // the crystal swag round the hub: drops on a ring, a second ring lower
+    for (let i = 0; i < 16; i++) {
+      const a = (i + 0.5) * Math.PI / 8, r = 0.13 * size;
+      drop(p.x + Math.cos(a) * r, p.z + Math.sin(a) * r, low + 0.19, low + 0.26, 0.022);
+      if (i % 2 === 0) drop(p.x + Math.cos(a) * r * 0.62, p.z + Math.sin(a) * r * 0.62, low + 0.1, low + 0.17, 0.024);
     }
-    F.fbox("flat", d, l, low, low + 0.12, 0.06, 0.06, BR);                                  // finial
     F.lights++;
     F.fitLights.push({ x: p.x, z: p.z, y: F.Y + low + 0.45, r: 5.5 + 2.0 * size, i: 0.9, rect: room ? room.rectL || null : null });
   }
@@ -3678,18 +4248,22 @@
   // A WALL SCONCE: a brass back plate on the wall face, an arm, a candle and
   // its lit shade, and a small baked pool. (axis/face/s as stateFireplace)
   function stateSconce(F, axis, face, c, s, y, room) {
-    const BR = 0xc9a45a;
-    const put = function (k, n0, n1, a0, a1, y0, y1, col) {
-      const n = face + s * (n0 + n1) / 2, dn = n1 - n0;
-      if (axis === "d") F.fbox(k, n, (a0 + a1) / 2, y0, y1, dn, a1 - a0, col);
-      else F.fbox(k, (a0 + a1) / 2, n, y0, y1, a1 - a0, dn, col);
-    };
-    put("flat", 0.006, 0.026, c - 0.06, c + 0.06, y - 0.16, y + 0.16, BR);      // back plate
-    put("flat", 0.026, 0.16, c - 0.012, c + 0.012, y - 0.02, y + 0.004, BR);    // arm
-    put("flat", 0.12, 0.18, c - 0.03, c + 0.03, y + 0.004, y + 0.03, BR);       // cup
-    put("paint", 0.135, 0.165, c - 0.015, c + 0.015, y + 0.03, y + 0.13, 0xf4efe2);
-    put("fabric", 0.09, 0.21, c - 0.06, c + 0.06, y + 0.11, y + 0.24, 0xf1e6cc);   // the shade
-    put("glow", 0.13, 0.17, c - 0.02, c + 0.02, y + 0.11, y + 0.13, 0xfff1cf);
+    stateMount(F, "sconce", axis, face, s, c - 0.055, c + 0.055, y - 0.13, y + 0.13, 0.19);
+    const BR = 0xc9a45a, BRD = 0xa9853f;
+    // n metres off the wall face, into the room
+    const at = function (n) { return axis === "d" ? F.P(face + s * n, c) : F.P(c, face + s * n); };
+    const wx = axis === "d" ? s * F.nx : s * F.tx, wz = axis === "d" ? s * F.nz : s * F.tz;
+    const out = Math.atan2(-wz, wx);                 // a lying round's own x pointing into the room
+    const cyl = function (kind, n, y0, y1, dia, col, caps) { const q = at(n); finPrim(F, kind, FIN_CYL, q.x, y0, y1, q.z, dia, dia, 0, col, caps); };
+    // an oval brass escutcheon ON the plaster (its back on the skin's face)
+    { const q = at(0.016); finPrim(F, "flat", FIN_HCYL, q.x, y - 0.13, y + 0.13, q.z, 0.02, 0.11, out, BR, 1, 16); }
+    // the arm out to the candle, a riser, a drip pan, a cup, the candle and its flame
+    { const q = at(0.088); finPrim(F, "flat", FIN_HCYL, q.x, y - 0.009, y + 0.009, q.z, 0.124, 0.018, out, BRD, 0, 8); }
+    cyl("flat", 0.15, y - 0.012, y + 0.035, 0.018, BR, 0);
+    cyl("flat", 0.15, y + 0.035, y + 0.043, 0.08, BR, 12);
+    cyl("flat", 0.15, y + 0.043, y + 0.075, 0.038, BRD, 4);
+    cyl("paint", 0.15, y + 0.075, y + 0.19, 0.024, 0xf4efe2, 4);
+    { const q = at(0.15); finPrim(F, "glow", FIN_OCT, q.x, y + 0.195, y + 0.235, q.z, 0.018, 0.018, 0, 0xfff1cf); }
     const q = axis === "d" ? F.P(face + s * 0.25, c) : F.P(c, face + s * 0.25);
     F.fitLights.push({ x: q.x, z: q.z, y: F.Y + y + 0.15, r: 2.6, i: 0.4, rect: room ? room.rectL || null : null });
   }
@@ -3716,7 +4290,8 @@
     let runStart = null;
     for (let i = 0; i < ws.length; i++) {
       const w = ws[i];
-      const a = Math.max(lo + 0.14, w.c - w.hw), b2 = Math.min(hi - 0.14, w.c + w.hw);
+      // (its casing, 15 cm out from the glass, stays 2 cm off the room's side walls and their trims)
+      const a = Math.max(lo + 0.17, w.c - w.hw), b2 = Math.min(hi - 0.17, w.c + w.hw);
       if (b2 - a < 0.3) continue;
       const c = (a + b2) / 2, wd = b2 - a;
       const prev = ws[i - 1], next = ws[i + 1];
@@ -3724,13 +4299,36 @@
       const joinNext = next && (next.c - next.hw) - (w.c + w.hw) < 0.2;
       if (!joinPrev) runStart = a;
       const yb = Math.max(0.02, w.yb), yt = Math.min(F.CL - 0.4, w.yt);
-      // the architrave round the opening, a back band at its edge (a joint
-      // between two openings gets one pilaster, drawn by the left one)
-      if (!joinPrev) { put("paint", a - 0.06, yb - 0.06, yt + 0.12, 0.026, 0, 0.12, casing); put("paint", a - 0.135, yb - 0.06, yt + 0.15, 0.036, 0, 0.03, casing); }
-      put("paint", b2 + 0.06, yb - 0.06, yt + 0.12, joinNext ? 0.03 : 0.026, 0, 0.12, casing);
-      if (!joinNext) put("paint", b2 + 0.135, yb - 0.06, yt + 0.15, 0.036, 0, 0.03, casing);
-      put("paint", c, yt, yt + 0.12, 0.026, 0, wd + 0.24, casing);                 // head
-      put("paint", c, yt + 0.12, yt + 0.15, 0.036, 0, wd + 0.30, casing);          // its back band
+      const stool = yb > 0.25;
+      // THE DAYLIGHT through it: a soft cool source a pace inside the glass,
+      // confined to this room (STATE_AMB above: the room's light comes from here)
+      {
+        const q = onD ? F.P(at + s * 0.9, c) : F.P(c, at + s * 0.9);
+        const RR = F.rect(room.d0, room.d1, room.l0, room.l1);
+        F.fitLights.push({ x: q.x, z: q.z, y: F.Y + (yb + yt) / 2, r: 4.8 + 0.6 * Math.min(2, wd), i: 0.42, c: 0xe9efff, rect: RR });
+      }
+      // where this opening's casing meets the next one's: halfway across the
+      // pier (a joined run is ONE casing, its pieces butt, never lap)
+      const L0 = joinPrev ? ((prev.c + prev.hw) + (w.c - w.hw)) / 2 : a - 0.12;
+      const R0 = joinNext ? ((w.c + w.hw) + (next.c - next.hw)) / 2 : b2 + 0.12;
+      // the architrave round the opening, a back band at its edge: the jambs
+      // stand on the stool (or on plinth blocks at the floor) and stop under
+      // the head; a joint between two openings is one pilaster
+      const jy0 = stool ? yb : 0.26;
+      if (!joinPrev) {
+        put("paint", a - 0.06, jy0, yt, 0.026, 0, 0.12, casing);
+        put("paint", a - 0.135, jy0, yt + 0.12, 0.036, 0, 0.03, casing);
+        if (!stool) put("paint", a - 0.0775, 0, 0.26, 0.042, 0, 0.155, casing);
+      }
+      if (joinNext) put("paint", (b2 + R0) / 2 + (R0 - b2) / 2, jy0, yt, 0.03, 0, Math.max(0.02, 2 * (R0 - b2)), casing);
+      else {
+        put("paint", b2 + 0.06, jy0, yt, 0.026, 0, 0.12, casing);
+        put("paint", b2 + 0.135, jy0, yt + 0.12, 0.036, 0, 0.03, casing);
+        if (!stool) put("paint", b2 + 0.0775, 0, 0.26, 0.042, 0, 0.155, casing);
+      }
+      put("paint", (L0 + R0) / 2, yt, yt + 0.12, 0.026, 0, R0 - L0, casing);                 // head
+      const B0 = joinPrev ? L0 : L0 - 0.03, B1 = joinNext ? R0 : R0 + 0.03;
+      put("paint", (B0 + B1) / 2, yt + 0.12, yt + 0.15, 0.036, 0, B1 - B0, casing);          // its back band
       // THE REVEAL: the wall's thickness round the glass, lined in painted
       // boards from the inner face back to the pane (jambs, soffit, a sill board)
       const deep = w.n != null ? Math.abs(w.n - at) - 0.02 : 0;
@@ -3741,30 +4339,36 @@
         put("paint", w.c, yt - 0.008, yt, deep, -deep, 2 * w.hw, casing, 8);
         put("paint", w.c, yb, yb + 0.012, deep, -deep, 2 * w.hw, casing, 4);
       }
-      if (yb > 0.25) {
-        put("paint", c, yb - 0.045, yb, 0.17, 0, wd + 0.30, casing);              // the stool, its nose proud
-        put("paint", c, Math.max(0.22, yb - 0.24), yb - 0.045, 0.026, 0, wd + 0.16, casing);   // apron
-        // a panelled window seat front under a low sill (the jamb is deep in a house like this)
-        if (yb > 0.6) put("paint", c, 0.24, Math.max(0.3, yb - 0.26), 0.012, 0, wd - 0.1, casing);
+      if (stool) {
+        // the stool, its nose proud, one board along a joined run; the apron
+        // under it; and under a low sill a panelled seat front (the dado and
+        // its rail stop at the casing: stateEdges cuts them there)
+        const S0 = joinPrev ? L0 : L0 - 0.03, S1 = joinNext ? R0 : R0 + 0.03;
+        put("paint", (S0 + S1) / 2, yb - 0.045, yb, 0.17, 0, S1 - S0, casing);
+        const A0 = joinPrev ? L0 : L0 + 0.04, A1 = joinNext ? R0 : R0 - 0.04;
+        if (yb - 0.045 > 0.26) put("paint", (A0 + A1) / 2, Math.max(0.24, yb - 0.24), yb - 0.045, 0.026, 0, A1 - A0, casing);
+        if (yb > 0.6 && yb - 0.26 > 0.3) put("paint", c, 0.24, yb - 0.26, 0.012, 0, wd - 0.1, casing);
       }
       if (!joinNext && drape != null && runStart != null) {
         const top = Math.min(F.CL - 0.28, yt + 0.5);
         // the pelmet and the curtains stay between the room's own faces
         const p0 = Math.max(lo + 0.02, runStart - 0.6), p1 = Math.min(hi - 0.02, b2 + 0.6);
+        // the curtains hang from a rod INSIDE the pelmet (their heads run up
+        // into it), 2 cm in from its ends
         if (room.closed) {
           // drawn curtains: one panel over the whole run (a briefing room)
-          put("fabric", (p0 + p1) / 2, 0.02, top, 0.08, 0.12, p1 - p0, drape);
+          put("fabric", (p0 + p1) / 2, 0.02, top + 0.1, 0.08, 0.12, p1 - p0 - 0.04, drape);
         } else {
-          for (const e of [runStart - 0.34, b2 + 0.34]) {
+          for (const e of [runStart - 0.32, b2 + 0.32]) {
             if (e - 0.26 <= lo || e + 0.26 >= hi) continue;
             // a dress curtain hung in folds, a tie-back at 1 m
-            put("fabric", e, 0.02, top, 0.12, 0.09, 0.52, drape, 63);
+            put("fabric", e, 0.02, top + 0.1, 0.12, 0.09, 0.52, drape, 63);
             put("fabric", e, 0.98, 1.06, 0.15, 0.075, 0.46, finLift(drape, 0.3), 63);
           }
         }
-        // the pelmet: a boxed valance with a fringe band
+        // the pelmet: a boxed valance with a fringe band under its edge
         put("fabric", (p0 + p1) / 2, top, top + 0.30, 0.16, 0.06, p1 - p0, drape, 63);
-        put("flat", (p0 + p1) / 2, top - 0.035, top, 0.168, 0.058, p1 - p0 + 0.008, 0xb99347, 63);
+        put("flat", (p0 + p1) / 2, top - 0.035, top, 0.168, 0.058, p1 - p0, 0xb99347, 63 & ~4);
         // the brass rod's finials
         for (const e of [p0 - 0.03, p1 + 0.03]) if (e > lo && e < hi) put("flat", e, top + 0.1, top + 0.18, 0.06, 0.1, 0.06, 0xb99347, 63);
       }
@@ -3780,25 +4384,29 @@
   // and a sconce either side. All finish: the fit-out lays it as you come in.
   function stateFireplace(F, axis, face, c, s, o) {
     o = o || {};
+    const back = axis === "d" ? F.nbit(-s, 0) : F.nbit(0, -s);
     const put = function (k, n0, n1, a0, a1, y0, y1, col) {
       const n = face + s * (n0 + n1) / 2, dn = n1 - n0;
-      if (axis === "d") F.fbox(k, n, (a0 + a1) / 2, y0, y1, dn, a1 - a0, col);
-      else F.fbox(k, (a0 + a1) / 2, n, y0, y1, a1 - a0, dn, col);
+      // what stands against the plaster shows no back
+      const m = n0 <= 0.0001 ? 63 & ~back : 63;
+      if (axis === "d") F.fbox(k, n, (a0 + a1) / 2, y0, y1, dn, a1 - a0, col, m);
+      else F.fbox(k, (a0 + a1) / 2, n, y0, y1, a1 - a0, dn, col, m);
     };
     const W = o.w || 1.9, stone = o.stone != null && o.stone !== SP.marble ? o.stone : 0xf0ece4;
+    stateMount(F, "fireplace", axis, face, s, c - W / 2 - 0.12, c + W / 2 + 0.12, 0.03, 1.21, 0.46);
     put("marble", 0, 0.30, c - W / 2, c - W / 2 + 0.34, 0, 1.12, stone);          // pilasters
     put("marble", 0, 0.30, c + W / 2 - 0.34, c + W / 2, 0, 1.12, stone);
     put("marble", 0.30, 0.34, c - W / 2 + 0.04, c - W / 2 + 0.30, 0.12, 1.02, stone);   // their fluted faces, proud
     put("marble", 0.30, 0.34, c + W / 2 - 0.30, c + W / 2 - 0.04, 0.12, 1.02, stone);
-    put("marble", 0, 0.32, c - W / 2, c + W / 2, 0.86, 1.12, stone);              // the frieze
+    put("marble", 0, 0.32, c - W / 2 + 0.34, c + W / 2 - 0.34, 0.86, 1.12, stone);   // the frieze, between the pilasters
     put("marble", 0, 0.46, c - W / 2 - 0.12, c + W / 2 + 0.12, 1.12, 1.18, stone); // mantel shelf
     put("marble", 0, 0.42, c - W / 2 - 0.08, c + W / 2 + 0.08, 1.18, 1.21, stone);
-    put("flat", 0, 0.12, c - W / 2 + 0.34, c + W / 2 - 0.34, 0, 0.86, 0x1c1b1a);  // the firebox, sooted
+    put("flat", 0, 0.12, c - W / 2 + 0.36, c + W / 2 - 0.36, 0, 0.86, 0x1c1b1a);  // the firebox, sooted (between the cheeks)
     put("flat", 0.06, 0.32, c - W / 2 + 0.34, c - W / 2 + 0.36, 0.02, 0.86, 0x2a2826);   // its cheeks
     put("flat", 0.06, 0.32, c + W / 2 - 0.36, c + W / 2 - 0.34, 0.02, 0.86, 0x2a2826);
     // the fire basket: two andirons and a grate, the embers glowing in it
     for (const e of [-0.32, 0.32]) put("flat", 0.12, 0.30, c + e - 0.02, c + e + 0.02, 0.02, 0.32, 0x24221f);
-    put("flat", 0.12, 0.28, c - 0.36, c + 0.36, 0.14, 0.16, 0x24221f);
+    put("flat", 0.13, 0.28, c - 0.36, c + 0.36, 0.14, 0.16, 0x24221f);
     put("glow", 0.14, 0.26, c - 0.3, c + 0.3, 0.16, 0.22, 0xff8a3a);
     F.lights++;
     put("marble", 0.32, 0.95, c - W / 2 - 0.1, c + W / 2 + 0.1, FIN_FLOOR - 0.0005, RUG_T, 0xc9c0b0);   // hearth, flush
@@ -3807,7 +4415,7 @@
       F.symbols--;                                   // the painting over the fire was never counted as a symbol
     }
     const room = stateRoomAt(F, axis === "d" ? face + s * 0.6 : c, axis === "d" ? c : face + s * 0.6);
-    for (const e of [-1, 1]) stateSconce(F, axis, face, c + e * (W / 2 + 0.38), s, 1.75, room);
+    if (o.sconces !== false) for (const e of [-1, 1]) stateSconce(F, axis, face, c + e * (W / 2 + 0.38), s, 1.75, room);
     const p = axis === "d" ? F.P(face + s * 0.6, c) : F.P(c, face + s * 0.6);
     const g = axis === "d" ? F.P(face + s * 0.22, c) : F.P(c, face + s * 0.22);
     F.fitLights.push({ x: g.x, z: g.z, y: F.Y + 0.25, r: 2.4, i: 0.5, rect: room ? room.rectL || null : null, c: 0xffa860 });
@@ -3830,6 +4438,7 @@
       else F.fbox(k, (a0 + a1) / 2, n, yy0, yy1, a1 - a0, dn, col);
     };
     const GILT = 0xc49a4a, f = 0.1;
+    stateMount(F, "painting", axis, face, s, c - w / 2, c + w / 2, y0, y1, 0.07);
     put("flat", 0.006, 0.07, c - w / 2, c + w / 2, y0, y0 + f, GILT);          // the frame, four rails
     put("flat", 0.006, 0.07, c - w / 2, c + w / 2, y1 - f, y1, GILT);
     put("flat", 0.006, 0.07, c - w / 2, c - w / 2 + f, y0 + f, y1 - f, GILT);
@@ -3837,9 +4446,9 @@
     put("flat", 0.07, 0.082, c - w / 2 + 0.02, c + w / 2 - 0.02, y1 - 0.04, y1 - 0.02, 0xe0c27a);   // the lip catches light
     put("oil", 0.006, 0.05, c - w / 2 + f, c + w / 2 - f, y0 + f, y1 - f, finLift(canvas != null ? canvas : 0x4a3f36, 0.55));
     if (!noLight) {
-      put("flat", 0.006, 0.12, c - 0.03, c + 0.03, y1 + 0.06, y1 + 0.1, 0xb99347);      // the arm
+      put("flat", 0.006, 0.12, c - 0.03, c + 0.03, y1 + 0.06, y1 + 0.09, 0xb99347);     // the arm, into the hood
       put("flat", 0.10, 0.17, c - w * 0.32, c + w * 0.32, y1 + 0.04, y1 + 0.1, 0xb99347);   // the hood
-      put("glow", 0.11, 0.16, c - w * 0.3, c + w * 0.3, y1 + 0.035, y1 + 0.04, 0xfff1cf);
+      put("glow", 0.11, 0.16, c - w * 0.3, c + w * 0.3, y1 + 0.025, y1 + 0.04, 0xfff1cf);
       const q = axis === "d" ? F.P(face + s * 0.3, c) : F.P(c, face + s * 0.3);
       const rm = stateRoomAt(F, axis === "d" ? face + s * 0.4 : c, axis === "d" ? c : face + s * 0.4);
       F.fitLights.push({ x: q.x, z: q.z, y: F.Y + y1, r: 1.9, i: 0.35, rect: rm ? rm.rectL || null : null });
@@ -3850,6 +4459,7 @@
   // carcass, shelves, books in coloured runs, a cupboard base and a cornice
   function stateBookcase(F, axis, face, c, s, w, hgt) {
     hgt = hgt || 2.4;
+    stateMount(F, "bookcase", axis, face, s, c - w / 2 - 0.03, c + w / 2 + 0.03, 0.03, hgt + 0.1, 0.46);
     const put = function (n0, n1, a0, a1, y0, y1, col) {
       const n = face + s * (n0 + n1) / 2, dn = n1 - n0;
       if (axis === "d") return F.box(n, (a0 + a1) / 2, y0, y1, dn, a1 - a0, col, SOLID);
@@ -3862,11 +4472,11 @@
     };
     const WD = 0x8a5a3a;
     const bookMask = 63 & ~8 & ~(axis === "d" ? F.nbit(-s, 0) : F.nbit(0, -s));   // no bottom, no back
-    put(0, 0.05, c - w / 2, c + w / 2, 0, hgt, SP.walnut);                     // back (solid, eager)
+    { const m = put(0, 0.05, c - w / 2, c + w / 2, 0, hgt, SP.walnut); if (m && m.isObject3D) m.visible = false; }   // its back: the collider (the veneer below is its face)
     put2("veneer", 0.05, 0.052, c - w / 2, c + w / 2, 0, hgt, WD);              // its veneer face
     put2("veneer", 0.05, 0.40, c - w / 2, c - w / 2 + 0.05, 0, hgt, WD);        // sides
     put2("veneer", 0.05, 0.40, c + w / 2 - 0.05, c + w / 2, 0, hgt, WD);
-    put2("veneer", 0.05, 0.42, c - w / 2, c + w / 2, 0, 0.36, WD);              // cupboard base
+    put2("veneer", 0.05, 0.42, c - w / 2 + 0.05, c + w / 2 - 0.05, 0, 0.36, WD);    // cupboard base, between the sides
     for (const e of [-0.25, 0.25]) put2("veneer", 0.42, 0.43, c + e * w - w * 0.22, c + e * w + w * 0.22, 0.05, 0.31, finLift(WD, 0.08));   // its doors
     const books = [0x7a2e29, 0x2e4466, 0x40604a, 0x8f6e3c, 0x4e3826, 0x5d2f45, 0x2f2f33];
     const n = Math.max(2, Math.floor((hgt - 0.5) / 0.42));
@@ -3941,9 +4551,9 @@
     };
     const g = mk(0, 0, yb, yt, w, 0.04, SP.sky, { emissive: SP.sky, ei: 0.42, cast: false });
     if (g) F.lights++;
-    mk(0, 0.03, yb, yt, 0.05, 0.03, SP.cream);                                  // centre bar
-    for (let i = 1; i < 4; i++) mk(0, 0.03, yb + (yt - yb) * i / 4 - 0.02, yb + (yt - yb) * i / 4 + 0.02, w, 0.03, SP.cream);
-    for (const e of [-1, 1]) mk(e * (w / 2 + 0.07), 0.05, yb - 0.06, yt + 0.12, 0.14, 0.08, SP.cream);   // jambs
+    mk(0, 0.03, yb + 0.008, yt - 0.008, 0.05, 0.03, SP.cream);                  // centre bar (its ends clear of the glass's)
+    for (let i = 1; i < 4; i++) mk(0, 0.03, yb + (yt - yb) * i / 4 - 0.02, yb + (yt - yb) * i / 4 + 0.02, w - 0.014, 0.03, SP.cream);   // (their ends clear of the glass's)
+    for (const e of [-1, 1]) mk(e * (w / 2 + 0.07), 0.05, yb, yt, 0.14, 0.08, SP.cream);   // jambs, on the stool, under the head
     mk(0, 0.05, yt, yt + 0.18, w + 0.28, 0.08, SP.cream);                        // head
     mk(0, 0.10, yb - 0.05, yb, w + 0.3, 0.2, SP.cream);                          // stool
   }
@@ -3995,7 +4605,7 @@
       let nx = -vz / L, nz = vx / L;
       if ((cc.x - mx) * nx + (cc.z - mz) * nz < 0) { nx = -nx; nz = -nz; }
       mx += nx * off; mz += nz * off;
-      const m = b.lbox(mx, F.Y + (y0 + y1) / 2, mz, L + 0.02, y1 - y0, dep, colr, o || NOCAST);
+      const m = b.lbox(mx, F.Y + (y0 + y1) / 2, mz, L + 0.02, y1 - y0, dep, colr, o || OVAL_CAST);
       if (m) m.rotation.y = Math.atan2(-vz, vx);
       return m;
     };
@@ -4052,11 +4662,14 @@
       finOBox(F, kind, mx, y0, y1, mz, L + 0.004, dep, yaw, colr, mask);
     };
     let facets = 0;
+    const trimSegs = [];
     for (let i = 0; i < N; i++) {
       const p0 = (i / N) * Math.PI * 2, p1 = ((i + 1) / N) * Math.PI * 2, pm = (p0 + p1) / 2;
       const A0 = surf(p0), C0 = surf(p1);
       const win = isWin(pm);
-      const wallOff = -T / 2;                          // the facet's centre line sits just outside the curve
+      // the facet's drawn box: from WALL_INSET behind the chord (the plaster
+      // skin is the face you see, 6 mm in front of the chord) to T behind it
+      const wallOff = -(T + WALL_INSET) / 2, wallDep = T - WALL_INSET;
       const parts = pieces(A0, C0);
       for (let pi = 0; pi < parts.length; pi++) {
         if (parts[pi][1] - parts[pi][0] < 0.02) continue;
@@ -4064,8 +4677,8 @@
         const whole = parts.length === 1 && parts[0][0] === 0 && parts[0][1] === 1;
         if (win && whole) {
           const yb = ov.sill || 0.8, yt = Math.min(H - 0.5, ov.head || 3.1);
-          seg(a, c, 0, yb, wallOff, T, col);
-          seg(a, c, yt, H, wallOff, T, col);
+          seg(a, c, 0, yb, wallOff, wallDep, col);
+          seg(a, c, yt, H, wallOff, wallDep, col);
           // the window unit, on the inner face
           const pa = F.P(a.d, a.l), pc = F.P(c.d, c.l), cc = F.P(dc, lc);
           const vx = pc.x - pa.x, vz = pc.z - pa.z, L = Math.hypot(vx, vz);
@@ -4076,7 +4689,7 @@
           fseg("plaster", a, c, 0, yb, 0.003, 0.006, paint, true);
           fseg("plaster", a, c, yt, H, 0.003, 0.006, paint, true);
         } else {
-          const fm = seg(a, c, 0, H, wallOff, T, col);
+          const fm = seg(a, c, 0, H, wallOff, wallDep, col);
           facets++;
           if (fm) {
             // colliders every half metre along the facet: an ellipse is not a box
@@ -4090,21 +4703,38 @@
           }
           fseg("plaster", a, c, 0, H, 0.003, 0.006, paint, true);
         }
-        // the finish on the inner face: skirting, a panelled dado with its
-        // rail (not under a window), a two-part cornice
-        fseg("paint", a, c, 0, 0.2, 0.016, 0.02, PAINT_WOOD);
-        fseg("paint", a, c, 0.2, 0.225, 0.02, 0.028, PAINT_WOOD);
-        if (!(win && whole)) {
-          fseg("paint", a, c, 0.225, 0.92, 0.012, 0.012, ov.wains != null && ov.wains !== SP.cream ? ov.wains : PAINT_WOOD, true);
-          fseg("paint", a, c, 0.33, 0.80, 0.022, 0.012, finLift(PAINT_WOOD, 0.4), true);
-          fseg("paint", a, c, 0.905, 0.92, 0.017, 0.022, PAINT_WOOD);
-          fseg("paint", a, c, 0.92, 0.975, 0.023, 0.034, PAINT_WOOD);
-        }
-        fseg("paint", a, c, H - 0.22, H, 0.081, 0.15, PAINT_WOOD);
-        fseg("paint", a, c, H - 0.30, H - 0.22, 0.044, 0.075, PAINT_WOOD);
-        fseg("paint", a, c, H - 0.34, H - 0.30, 0.029, 0.045, PAINT_WOOD);
+        // the finish on the inner face (skirting, a panelled dado with its
+        // rail, a two-part cornice) waits for stateOut: whatever hangs on the
+        // curve (the fireplace, the television) stops it
+        trimSegs.push({ a: a, c: c, win: win && whole });
       }
     }
+    F.late.push(function () {
+      for (let i = 0; i < trimSegs.length; i++) {
+        const t = trimSegs[i], a = t.a, c = t.c;
+        const pa = F.P(a.d, a.l), pc = F.P(c.d, c.l), mx = (pa.x + pc.x) / 2, mz = (pa.z + pc.z) / 2, half = Math.hypot(pc.x - pa.x, pc.z - pa.z) / 2;
+        // the height bands a mount on this facet takes out of its trims
+        const bands = [];
+        for (let j = 0; j < F.mounts.length; j++) {
+          const m = F.mounts[j];
+          const along = (mx - m.x) * m.ux + (mz - m.z) * m.uz, out = (mx - m.x) * m.nx + (mz - m.z) * m.nz;
+          if (Math.abs(along) < m.w / 2 + half && Math.abs(out) < 0.35) bands.push([m.y0 - F.Y - 0.02, m.y1 - F.Y + 0.02]);
+        }
+        const free = function (y0, y1) { for (let k = 0; k < bands.length; k++) if (y1 > bands[k][0] && y0 < bands[k][1]) return false; return true; };
+        const tr = function (kind, y0, y1, off, dep, col, face) { if (free(y0, y1)) fseg(kind, a, c, y0, y1, off, dep, col, face); };
+        tr("paint", 0, 0.2, 0.016, 0.02, PAINT_WOOD);
+        tr("paint", 0.2, 0.225, 0.02, 0.028, PAINT_WOOD);
+        if (!t.win) {
+          tr("paint", 0.225, 0.905, 0.012, 0.012, ov.wains != null && ov.wains !== SP.cream ? ov.wains : PAINT_WOOD, true);
+          tr("paint", 0.33, 0.80, 0.022, 0.012, finLift(PAINT_WOOD, 0.4), true);
+          tr("paint", 0.905, 0.92, 0.017, 0.022, PAINT_WOOD);
+          tr("paint", 0.92, 0.975, 0.023, 0.034, PAINT_WOOD);
+        }
+        tr("paint", H - 0.22, H, 0.081, 0.15, PAINT_WOOD);
+        tr("paint", H - 0.30, H - 0.22, 0.044, 0.075, PAINT_WOOD);
+        tr("paint", H - 0.34, H - 0.30, 0.029, 0.045, PAINT_WOOD);
+      }
+    });
     if (CBZ.markCollidersDirty) { try { CBZ.markCollidersDirty(); } catch (e) {} }
     // vestibules: the cheeks from the curve to the room wall, plastered both sides
     for (let i = 0; i < (ov.doors || []).length; i++) {
@@ -4115,10 +4745,10 @@
         if (!p) continue;
         if (g.dir === "d+" || g.dir === "d-") {
           const a = Math.min(p.d, g.to), z2 = Math.max(p.d, g.to);
-          if (z2 - a > 0.05) { F.box((a + z2) / 2, c, 0, H, z2 - a, T, col, SOLID); F.fbox("plaster", (a + z2) / 2, c, 0, H, z2 - a, T + 0.012, paint); }
+          if (z2 - a > 0.05) { F.box((a + z2) / 2, c, 0, H, z2 - a, T, col, { cast: true, solid: true, shrink: frameShrink(F, { l0: WALL_INSET, l1: WALL_INSET, d0: WALL_INSET, d1: WALL_INSET }) }); F.fbox("plaster", (a + z2) / 2, c, 0, H, z2 - a, T + 0.012, paint); }
         } else {
           const a = Math.min(p.l, g.to), z2 = Math.max(p.l, g.to);
-          if (z2 - a > 0.05) { F.box(c, (a + z2) / 2, 0, H, T, z2 - a, col, SOLID); F.fbox("plaster", c, (a + z2) / 2, 0, H, T + 0.012, z2 - a, paint); }
+          if (z2 - a > 0.05) { F.box(c, (a + z2) / 2, 0, H, T, z2 - a, col, { cast: true, solid: true, shrink: frameShrink(F, { d0: WALL_INSET, d1: WALL_INSET, l0: WALL_INSET, l1: WALL_INSET }) }); F.fbox("plaster", c, (a + z2) / 2, 0, H, T + 0.012, z2 - a, paint); }
         }
       }
       // an arch head over the gap in the curve
@@ -4129,11 +4759,11 @@
         stateOpening(F, alongD ? F.P(mid, g.c) : F.P(g.c, mid), alongD ? Math.abs(F.tx) > 0.5 : Math.abs(F.nx) > 0.5,
           g.w, DOOR_H, Math.abs(g.to - from) + 0.4, "passage", "the Oval's passage", false);
         if (alongD) {
-          F.box((q.d + g.to) / 2, g.c, DOOR_H + 0.3, H, Math.abs(g.to - q.d), g.w + 0.3, col);
-          F.fbox("plaster", (q.d + g.to) / 2, g.c, DOOR_H + 0.296, H, Math.abs(g.to - q.d), g.w + 0.308, paint);
+          F.box((q.d + g.to) / 2, g.c, DOOR_H + 0.3, H, Math.abs(g.to - q.d), g.w + 0.3, col, { cast: true, shrink: frameShrink(F, { l0: WALL_INSET, l1: WALL_INSET, d0: WALL_INSET, d1: WALL_INSET, y0: WALL_INSET }) });
+          F.fbox("plaster", (q.d + g.to) / 2, g.c, DOOR_H + 0.3, H, Math.abs(g.to - q.d), g.w + 0.308, paint, 63 & ~F.nbit(0, 1) & ~F.nbit(0, -1));
         } else {
-          F.box(g.c, (q.l + g.to) / 2, DOOR_H + 0.3, H, g.w + 0.3, Math.abs(g.to - q.l), col);
-          F.fbox("plaster", g.c, (q.l + g.to) / 2, DOOR_H + 0.296, H, g.w + 0.308, Math.abs(g.to - q.l), paint);
+          F.box(g.c, (q.l + g.to) / 2, DOOR_H + 0.3, H, g.w + 0.3, Math.abs(g.to - q.l), col, { cast: true, shrink: frameShrink(F, { d0: WALL_INSET, d1: WALL_INSET, l0: WALL_INSET, l1: WALL_INSET, y0: WALL_INSET }) });
+          F.fbox("plaster", g.c, (q.l + g.to) / 2, DOOR_H + 0.3, H, g.w + 0.308, Math.abs(g.to - q.l), paint, 63 & ~F.nbit(1, 0) & ~F.nbit(-1, 0));
         }
       }
     }
@@ -4156,7 +4786,7 @@
       const rooms = info.rooms || [], lights = info.lights || [];
       for (let i = 0; i < rooms.length; i++) {
         const rm = rooms[i];
-        B.plane(rm.x0, rm.z0, rm.x1, rm.z1, B.ceil - 0.012, "plaster", rm.tint, { down: true, cell: 1.2 });
+        B.plane(rm.x0, rm.z0, rm.x1, rm.z1, B.ceil - CEIL_FIN, "plaster", rm.tint, { down: true, cell: 1.2 });
       }
       const flo = info.flo;
       if (flo) for (let i = 0; i + 6 < flo.length; i += 7)
@@ -4166,14 +4796,20 @@
           if (y0 != null && (fin[i + 1] < y0 || fin[i + 1] >= y1)) continue;
           const o = OPT[fin[i + 7]] || OPT[9];
           const yaw = fin[i + 8], mask = fin[i + 9];
-          const oo = (yaw || mask !== 63) ? Object.assign({}, o, { yaw: yaw, faces: mask }) : o;
+          // bits 64 / 128 / 256 of the mask name a round primitive (FIN_CYL)
+          const shape = mask & FIN_CYL ? "cyl" : mask & FIN_HCYL ? "hcyl" : mask & FIN_OCT ? "oct" : null;
+          const oo = (yaw || mask !== 63) ? Object.assign({}, o, { yaw: yaw, faces: mask & 63, shape: shape, seg: shape ? ((mask >> 9) & 31) || 12 : 0 }) : o;
           B.box(fin[i], fin[i + 1], fin[i + 2], fin[i + 3], fin[i + 4], fin[i + 5], fin[i + 6], oo);
         }
       };
       if (info.fin) lay(info.fin);
+      const dec = info.decals || [];
+      for (let i = 0; i < dec.length; i++) { const q = dec[i]; if (B.decal) B.decal(q.id, q.x, q.z, q.w, q.d, q.y, q.yaw); }
       // what other files built into this storey (the grand stair, the Situation Room)
       const sets = finSetsOf(B.b);
-      if (sets) for (const name in sets) lay(sets[name], B.y0 - 0.05, B.ceil + 0.2);
+      // a storey takes what stands from 5 cm under its floor to 5 cm under the
+      // next one's (half-open: a box on the line is one storey's, never two)
+      if (sets) for (const name in sets) lay(sets[name], B.y0 - 0.05, B.ceil + 0.15);
       for (let i = 0; i < lights.length; i++) {
         const L = lights[i];
         B.light(L.x, L.z, { kind: L.kind || "none", r: L.r, i: L.i, rect: L.rect || null, y: L.y != null ? L.y : undefined, color: L.c != null ? L.c : undefined });
@@ -4183,7 +4819,13 @@
   }
   // the finish rides the fit-out declaration as two packed arrays
   function stateOut(F) {
-    return { anchors: [], fit: { rooms: F.fitRooms, lights: F.fitLights, fin: new Float32Array(F.fin), flo: new Float32Array(F.flo) } };
+    if (F.h && F.h.F === F) F.h.F = null;
+    for (let i = 0; i < F.trimRooms.length; i++) stateTrim(F, F.trimRooms[i]);
+    for (let i = 0; i < F.late.length; i++) F.late[i]();
+    F.late.length = 0;
+    F.trimRooms.length = 0;
+    for (let i = 0; i < F.mounts.length; i++) STATE_MOUNTS.push(F.mounts[i]);
+    return { anchors: [], fit: { rooms: F.fitRooms, lights: F.fitLights, fin: new Float32Array(F.fin), flo: new Float32Array(F.flo), trace: F.trace, decals: F.decals, amb: STATE_AMB } };
   }
   // the govcomplex site whose building this is (the Sit Room rect, the grand
   // stair's landing) — matched on origin, because the lot carries a copy
@@ -4207,8 +4849,7 @@
   // (a lamp is three emissive boxes, i.e. three draw calls: only the
   // President's own bedside gets them; a guest's table carries a book)
   function stateSideLamp(F, d, l, room, lit) {
-    F.box(d, l, 0, 0.56, 0.05, 0.05, SP.walnut);
-    F.fbox("veneer", d, l, 0, 0.56, 0.056, 0.056, 0x7a5034);
+    finCylAt(F, "veneer", d, l, 0, 0.56, 0.05, 0x7a5034, 0);                    // a turned pedestal
     finSolid(F, "veneer", d, l, 0.56, 0.60, 0.5, 0.5, SP.walnut, 0x7a5034);
     if (!lit) { F.box(d, l, 0.60, 0.64, 0.22, 0.16, 0x6e2b27); return; }
     const p = F.P(d, l);
@@ -4225,24 +4866,33 @@
     const td = d0 + 0.2 + 0.45, tl = (l0 + l1) / 2;
     finSolid(F, "marble", td, tl, 0, 0.60, 0.9, 1.75, WHITE, 0xf0ede6);
     F.box(td, tl, 0.60, 0.61, 0.66, 1.5, 0x9fc6d6);                       // water, under the rim
-    F.box(td, tl, 0.61, 0.64, 0.9, 1.75, WHITE);
-    F.fbox("paint", td, tl, 0.61, 0.645, 0.908, 1.758, 0xfbfaf6);
+    F.fbox("paint", td, tl, 0.60, 0.645, 0.92, 1.77, 0xfbfaf6, 63 & ~8);              // the rolled rim
     // vanity along the l1 wall: walnut cabinet, a marble slab, two basins
     const vl = l1 - 0.3, vd = (d0 + d1) / 2 + 0.6;
     finSolid(F, "veneer", vd, vl, 0.08, 0.86, 1.9, 0.55, SP.walnut, 0x7a5034);
-    F.box(vd, vl, 0.86, 0.90, 2.0, 0.6, SP.marble);                          // the slab the basins sit in
-    F.fbox("marble", vd, vl, 0.856, 0.904, 2.008, 0.608, 0xece8e0);
-    for (const e of [-0.5, 0.5]) F.box(vd + e, vl - 0.02, 0.90, 0.96, 0.44, 0.34, WHITE);
-    F.box(vd, l1 - 0.03, 1.15, 2.1, 1.8, 0.03, SP.sky);                    // mirror
-    F.fbox("flat", vd, l1 - 0.02, 1.12, 2.13, 1.86, 0.02, 0xc49a4a);      // its gilt frame
+    F.fbox("marble", vd, vl, 0.86, 0.90, 2.0, 0.6, 0xece8e0);                  // the slab the basins sit in
+    // two oval basins sat on the slab, a chrome pillar tap behind each
+    for (const e of [-0.5, 0.5]) {
+      const q = F.P(vd + e, vl - 0.04), t = F.P(vd + e, vl + 0.19);
+      finPrim(F, "paint", FIN_CYL, q.x, 0.90, 0.95, q.z, F.along ? 0.44 : 0.34, F.along ? 0.34 : 0.44, 0, 0xf8f8f4, 4, 20);
+      finPrim(F, "flat", FIN_CYL, t.x, 0.90, 1.1, t.z, 0.028, 0.028, 0, 0xd8dde2, 4, 10);
+    }
+    // the mirror over the basins, in a gilt frame ON the plaster (never over
+    // a window: the vanity wall may be the facade)
+    const glassBehind = stateWinsOn(F, "l+", vd - 1.0, vd + 1.0).length && l1 > F.half - 0.05;
+    if (!glassBehind) {
+      stateMount(F, "mirror", "l", l1, -1, vd - 0.93, vd + 0.93, 1.12, 2.13, 0.045);
+      F.fbox("flat", vd, l1 - SKIN_T - 0.012, 1.12, 2.13, 1.86, 0.024, 0xc49a4a, 63 & ~F.nbit(0, 1));   // the gilt frame
+      F.box(vd, l1 - SKIN_T - 0.036, 1.15, 2.1, 1.8, 0.012, SP.sky);                                       // the glass, proud of it
+    }
     // the walls clad to 1.2 m in marble, stopping at the door's casing and the glass
     const edges = stateEdges(F, room);
-    for (let i = 0; i < edges.length; i++) stateRun(F, edges[i], 0.2, 1.2, 0.012, "marble", 0xeae6de, { seg: 2.2 });
+    for (let i = 0; i < edges.length; i++) stateRun(F, edges[i], 0.225, 1.2, 0.012, "marble", 0xeae6de, { seg: 2.2 });
     // shower in the far corner, glass on two sides
     const sd = d1 - 0.65, sl = l0 + 0.65;
-    F.fbox("tile", sd, sl, FIN_FLOOR - 0.0005, RUG_T, 1.1, 1.1, 0xd9dbd8);
-    F.box(sd - 0.55, sl, 0, 2.1, 0.02, 1.1, SP.sky, SOLID);
-    F.box(sd, sl + 0.55, 0, 2.1, 1.1, 0.02, SP.sky, SOLID);
+    F.fbox("tile", sd - 0.01, sl + 0.01, FIN_FLOOR - 0.0005, RUG_T, 1.08, 1.08, 0xd9dbd8);   // the tray, 2 cm off both walls
+    F.box(sd - 0.56, sl, 0, 2.1, 0.02, 1.12, SP.sky, SOLID);
+    F.box(sd, sl + 0.56, 0, 2.1, 1.12, 0.02, SP.sky, SOLID);
   }
   // a kitchen run along a wall (axis "l": the wall at l = face, running d0..d1)
   function stateKitchenRun(F, axis, face, s, a0, a1) {
@@ -4258,20 +4908,18 @@
       else F.fbox(k, (A0 + A1) / 2, n, y0, y1, A1 - A0, dn, col);
     };
     put(0.05, 0.62, 0, 0.1, SP.black);                                    // kick
-    put(0, 0.62, 0.1, 0.88, SP.cream, SOLID);                             // base run
-    put(0, 0.66, 0.88, 0.92, SP.marble);                                  // worktop
-    put(0, 0.36, 1.45, 2.2, SP.cream);                                    // wall cupboards
+    { const m = put(0, 0.62, 0.1, 0.88, SP.cream, SOLID); if (m && m.isObject3D) m.visible = false; }   // base run (its collider)
     // the finish: painted shaker doors in frames, a honed marble top and a
     // marble splashback, brass knobs
-    fput("paint", 0, 0.624, 0.1, 0.88, 0xe9e4d6);
-    fput("marble", 0, 0.664, 0.88, 0.925, 0xeeeae2);
-    fput("marble", 0, 0.012, 0.925, 1.45, 0xe6e2d8);
-    fput("paint", 0, 0.364, 1.45, 2.205, 0xe9e4d6);
+    fput("paint", 0, 0.62, 0.1, 0.88, 0xe9e4d6);
+    fput("marble", 0, 0.66, 0.88, 0.92, 0xeeeae2);
+    fput("marble", 0.006, 0.018, 0.92, 1.45, 0xe6e2d8);                     // splashback, on the plaster
+    fput("paint", 0, 0.36, 1.45, 2.2, 0xe9e4d6);
     const nd = Math.max(1, Math.round((a1 - a0) / 0.6)), st = (a1 - a0) / nd;
     for (let i = 0; i < nd; i++) {
       const c0 = a0 + st * i + 0.03, c1 = a0 + st * (i + 1) - 0.03;
-      fput("paint", 0.624, 0.636, 0.16, 0.82, 0xf1ede2, c0, c1);
-      fput("paint", 0.364, 0.376, 1.5, 2.15, 0xf1ede2, c0, c1);
+      fput("paint", 0.62, 0.636, 0.16, 0.82, 0xf1ede2, c0, c1);
+      fput("paint", 0.36, 0.376, 1.5, 2.15, 0xf1ede2, c0, c1);
       fput("flat", 0.636, 0.66, 0.72, 0.745, 0xb99347, (c0 + c1) / 2 - 0.012, (c0 + c1) / 2 + 0.012);
     }
   }
@@ -4299,7 +4947,7 @@
     // the ledger below
     presidentialReset();
     armStateFit();
-    shell(h, r);
+    // no eager covering or ceiling strip: the finish is this storey's floor and ceiling
     const F = stateFrame(h, r);
     if (F.D < 28 || F.W < 44) return stateFallback(F, "statehall", "State Entrance Hall");
     const HW = F.half, D = F.D;
@@ -4373,17 +5021,24 @@
     for (let l = F.doorL - 2.0; l > colW; l -= 3.9) piers.push(l);
     for (let i = 0; i < piers.length; i++) {
       const l = piers[i];
-      // a marble column: plinth, shaft, a moulded capital (all real stone)
+      // a ROUND marble column on a square plinth: a torus base, an entasised
+      // shaft (three drums, the middle a hair fuller), a necking ring and a
+      // square abacus under the architrave. The eager box is its collider.
+      ghost(F, dEH, l, 0, F.CL - 0.46, 0.62, 0.62);
       finSolid(F, "marble", dEH, l, 0, 0.30, 0.86, 0.86, SP.marbleD, 0xc9c1b2);
-      finSolid(F, "marble", dEH, l, 0.30, F.CL - 0.62, 0.56, 0.56, SP.marble, 0xf2efe8);
-      F.fbox("marble", dEH, l, 0.30, 0.38, 0.66, 0.66, 0xe6e1d6);
+      finCylAt(F, "marble", dEH, l, 0.30, 0.36, 0.72, 0xe6e1d6, 4, 24);
+      finCylAt(F, "marble", dEH, l, 0.36, 0.42, 0.64, 0xece8df, 4, 24);
+      const sh0 = 0.42, sh1 = F.CL - 0.70, sh3 = (sh1 - sh0) / 3;
+      finCylAt(F, "marble", dEH, l, sh0, sh0 + sh3, 0.56, 0xf2efe8, 0, 24);
+      finCylAt(F, "marble", dEH, l, sh0 + sh3, sh0 + 2 * sh3, 0.575, 0xf2efe8, 0, 24);
+      finCylAt(F, "marble", dEH, l, sh0 + 2 * sh3, sh1, 0.55, 0xf2efe8, 0, 24);
+      finCylAt(F, "paint", dEH, l, F.CL - 0.70, F.CL - 0.62, 0.64, PAINT_WOOD, 12, 24);
       F.fbox("paint", dEH, l, F.CL - 0.62, F.CL - 0.46, 0.84, 0.84, PAINT_WOOD);
-      F.fbox("paint", dEH, l, F.CL - 0.70, F.CL - 0.62, 0.64, 0.64, PAINT_WOOD);
     }
     if (piers.length) {
       const pl0 = Math.min.apply(null, piers) - 0.6, pl1 = Math.min(lEHe, Math.max.apply(null, piers) + 0.6);
-      F.fbox("paint", dEH, (pl0 + pl1) / 2, F.CL - 0.46, F.CL, 0.64, pl1 - pl0, PAINT_WOOD);
-      F.fbox("paint", dEH, (pl0 + pl1) / 2, F.CL - 0.50, F.CL - 0.46, 0.70, pl1 - pl0, PAINT_WOOD);
+      F.fbox("paint", dEH, (pl0 + pl1) / 2, F.CL - 0.40, F.CL, 0.64, pl1 - pl0, PAINT_WOOD);
+      F.fbox("paint", dEH, (pl0 + pl1) / 2, F.CL - 0.46, F.CL - 0.40, 0.70, pl1 - pl0, PAINT_WOOD);
     }
     stateRug(F, 3.8, F.doorL, 5.6, 2.8, SP.rugRed, SP.gold, 0.16);            // the red carpet in from the door
     stateCoffers(F, 0, dEH, colW, lEHe, 3.6);
@@ -4510,7 +5165,7 @@
      ======================================================================== */
   function progStateResidence(r, h, opts) {
     armStateFit();
-    shell(h, r);
+    // no eager covering or ceiling strip: the finish is this storey's floor and ceiling
     const F = stateFrame(h, r);
     if (F.D < 28 || F.W < 44) return stateFallback(F, "stateresidence", "The Residence");
     const HW = F.half, D = F.D;
@@ -4604,7 +5259,7 @@
     // the balcony doors, on the axis in the front wall: a pair of glazed
     // leaves in a cased opening (president_public.js steps you out through them)
     for (const e of [-1, 1]) {
-      F.box(0.03, e * 0.42, 0.02, 2.75, 0.05, 0.8, SP.sky, { emissive: SP.sky, ei: 0.35, cast: false });
+      F.box(0.03, e * 0.42, 0.02, 2.75, 0.05, 0.78, SP.sky, { emissive: SP.sky, ei: 0.35, cast: false });   // between the post and the frame
       for (let q = 1; q < 4; q++) F.box(0.06, e * 0.42, 0.02 + q * 0.68, 0.05 + q * 0.68, 0.03, 0.8, SP.cream);
       F.box(0.06, e * 0.87, 0, 2.95, 0.06, 0.12, SP.cream);
     }
@@ -4688,7 +5343,7 @@
      ======================================================================== */
   function progStatePrivate(r, h, opts) {
     armStateFit();
-    shell(h, r);
+    // no eager covering or ceiling strip: the finish is this storey's floor and ceiling
     const F = stateFrame(h, r);
     if (F.D < 28 || F.W < 44) return stateFallback(F, "stateprivate", "The Third Floor");
     const HW = F.half, D = F.D;
@@ -4765,7 +5420,7 @@
       const l = gyC + e * 3.0;
       F.box(gyD, l, 0, 0.26, 1.9, 0.8, SP.black, SOLID);                         // treadmill deck
       F.box(gyD, l, 0.26, 0.28, 1.6, 0.55, 0x3a3d42);
-      F.box(gyD - 0.85, l, 0.24, 1.3, 0.08, 0.7, SP.black);                     // console post
+      F.box(gyD - 0.85, l, 0.24, 1.2, 0.08, 0.7, SP.black);                     // console post, under the console
       F.box(gyD - 0.85, l, 1.2, 1.35, 0.3, 0.7, 0x2a2f37);
     }
     statePiece(F, "shelf", D - 0.45, gyC, F.face(-1, 0), { len: 2.0, h: 1.2 });
@@ -4815,6 +5470,90 @@
   }
   // a seal plate at frame (d, l), height y over the floor. flat: lying on the
   // floor (face up); else standing, its face looking along (fd, fl).
+  /* THE OVAL RUG'S CANVAS (once; fitout.js lays it as a decal). In pixels the
+     oval fills the canvas, so its aspect is the rug's: rb/ra. A woven key
+     border on cream, a gold rule, the deep blue field with a sunburst of
+     faint rays, a ring of stars, the seal: an eagle with spread wings over a
+     shield, a ring round it. Wool everywhere. */
+  let OVAL_RUG = null;
+  function ovalRugTex(ra, rb) {
+    if (OVAL_RUG) return OVAL_RUG;
+    const T = window.THREE;
+    if (!T || typeof document === "undefined") return null;
+    const W = 1024, H = Math.max(256, Math.round(W * rb / ra));
+    const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+    const x = cv.getContext("2d");
+    if (!x) return null;
+    const cx0 = W / 2, cy0 = H / 2, RX = W / 2 - 2, RY = H / 2 - 2;
+    const ell = function (k) { x.beginPath(); x.ellipse(cx0, cy0, RX * k, RY * k, 0, 0, Math.PI * 2); };
+    x.clearRect(0, 0, W, H);
+    ell(1); x.fillStyle = "#d8c89c"; x.fill();                                   // the cream border
+    // the woven key round it: a run of gold/blue blocks on the border's midline
+    const keys = 96;
+    for (let i = 0; i < keys; i++) {
+      const a = (i + 0.5) / keys * Math.PI * 2, k = 0.935;
+      x.save(); x.translate(cx0 + Math.cos(a) * RX * k, cy0 + Math.sin(a) * RY * k); x.rotate(a + Math.PI / 2);
+      x.fillStyle = i % 2 ? "#a8833c" : "#26406e"; x.fillRect(-9, -7, 18, 14);
+      x.fillStyle = "#d8c89c"; x.fillRect(-4, -3, 8, 6);
+      x.restore();
+    }
+    ell(0.885); x.fillStyle = "#b8944a"; x.fill();                                // the gold rule
+    ell(0.87); x.fillStyle = "#1f3563"; x.fill();                                 // the field
+    // the sunburst: faint rays from the heart
+    x.save(); ell(0.87); x.clip();
+    for (let i = 0; i < 48; i++) {
+      const a0 = i / 48 * Math.PI * 2, a1 = (i + 0.5) / 48 * Math.PI * 2;
+      x.beginPath(); x.moveTo(cx0, cy0);
+      x.lineTo(cx0 + Math.cos(a0) * RX, cy0 + Math.sin(a0) * RY); x.lineTo(cx0 + Math.cos(a1) * RX, cy0 + Math.sin(a1) * RY);
+      x.closePath(); x.fillStyle = "rgba(120,150,210,0.07)"; x.fill();
+    }
+    x.restore();
+    // the ring of stars
+    const star = function (px, py, r) {
+      x.beginPath();
+      for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.42 : r; x.lineTo(px + Math.cos(a) * rr, py + Math.sin(a) * rr); }
+      x.closePath(); x.fill();
+    };
+    x.fillStyle = "#e9dcb6";
+    for (let i = 0; i < 50; i++) { const a = i / 50 * Math.PI * 2; star(cx0 + Math.cos(a) * RX * 0.62, cy0 + Math.sin(a) * RY * 0.62, 7); }
+    // THE SEAL: a gold ring, a blue disc, the eagle
+    const SR = RY * 0.36;
+    x.beginPath(); x.arc(cx0, cy0, SR, 0, Math.PI * 2); x.fillStyle = "#b8944a"; x.fill();
+    x.beginPath(); x.arc(cx0, cy0, SR * 0.9, 0, Math.PI * 2); x.fillStyle = "#162a52"; x.fill();
+    x.fillStyle = "#e9dcb6";
+    for (let i = 0; i < 13; i++) { const a = -Math.PI / 2 + (i - 6) * 0.16; star(cx0 + Math.cos(a) * SR * 0.66, cy0 + Math.sin(a) * SR * 0.66, 4.5); }
+    // the eagle: wings spread and raised, head turned, a shield on its breast
+    x.fillStyle = "#c9a85a";
+    const E = SR * 0.62;
+    x.beginPath();
+    x.moveTo(cx0, cy0 - E * 0.30);
+    x.bezierCurveTo(cx0 - E * 0.35, cy0 - E * 0.55, cx0 - E * 0.85, cy0 - E * 0.75, cx0 - E * 1.0, cy0 - E * 0.25);
+    x.lineTo(cx0 - E * 0.7, cy0 - E * 0.2); x.lineTo(cx0 - E * 0.9, cy0 + E * 0.05); x.lineTo(cx0 - E * 0.55, cy0 + E * 0.02);
+    x.lineTo(cx0 - E * 0.62, cy0 + E * 0.25); x.lineTo(cx0 - E * 0.25, cy0 + E * 0.15);
+    x.lineTo(cx0 - E * 0.2, cy0 + E * 0.65); x.lineTo(cx0, cy0 + E * 0.5); x.lineTo(cx0 + E * 0.2, cy0 + E * 0.65);
+    x.lineTo(cx0 + E * 0.25, cy0 + E * 0.15); x.lineTo(cx0 + E * 0.62, cy0 + E * 0.25); x.lineTo(cx0 + E * 0.55, cy0 + E * 0.02);
+    x.lineTo(cx0 + E * 0.9, cy0 + E * 0.05); x.lineTo(cx0 + E * 0.7, cy0 - E * 0.2); x.lineTo(cx0 + E * 1.0, cy0 - E * 0.25);
+    x.bezierCurveTo(cx0 + E * 0.85, cy0 - E * 0.75, cx0 + E * 0.35, cy0 - E * 0.55, cx0, cy0 - E * 0.30);
+    x.closePath(); x.fill();
+    x.beginPath(); x.arc(cx0 + E * 0.05, cy0 - E * 0.42, E * 0.13, 0, Math.PI * 2); x.fill();   // the head
+    x.fillStyle = "#e9dcb6"; x.fillRect(cx0 - E * 0.17, cy0 - E * 0.18, E * 0.34, E * 0.1);     // the shield's chief
+    for (let i = 0; i < 7; i++) { x.fillStyle = i % 2 ? "#e9dcb6" : "#8f2f2f"; x.fillRect(cx0 - E * 0.17 + i * E * 0.0486, cy0 - E * 0.08, E * 0.0486, E * 0.32); }
+    // wool: knots and abrash over all of it (the alpha stays the oval)
+    x.save(); ell(1); x.clip();
+    let sd = 7331;
+    const rnd = function () { sd = (sd * 1664525 + 1013904223) >>> 0; return sd / 4294967296; };
+    for (let i = 0; i < 26000; i++) { x.fillStyle = rnd() < 0.5 ? "rgba(0,0,0,0.07)" : "rgba(255,255,255,0.06)"; x.fillRect(rnd() * W, rnd() * H, 1.2, 1.2); }
+    for (let i = 0; i < 10; i++) { x.fillStyle = rnd() < 0.5 ? "rgba(0,0,0,0.025)" : "rgba(255,255,255,0.025)"; x.fillRect(0, rnd() * H, W, 20 + rnd() * 60); }
+    x.restore();
+    const t = new T.CanvasTexture(cv);
+    t.encoding = T.sRGBEncoding;
+    t.generateMipmaps = true;
+    t.minFilter = T.LinearMipmapLinearFilter;
+    t.magFilter = T.LinearFilter;
+    OVAL_RUG = t;
+    CBZ.fitoutDecalTex("ovalrug", t);
+    return t;
+  }
   function stateSeal(F, d, l, y, size, flat, fd, fl) {
     const T = window.THREE, tex = sealTex();
     const root = tex ? platesRoot(F.h) : null;
@@ -4839,7 +5578,7 @@
      ======================================================================== */
   function progCabinetRoom(r, h, opts) {
     armStateFit();
-    shell(h, r);
+    // no eager covering or ceiling strip: the finish is this storey's floor and ceiling
     const F = stateFrame(h, r);
     if (F.D < 26 || F.W < 16) return stateFallback(F, "cabinetroom", "Cabinet Room");
     const HW = F.half, D = F.D;
@@ -4906,7 +5645,7 @@
     }
     // the Bureau folio on the table, at the President's place
     const folio = F.P(cabD, cabC - 0.42);
-    F.box(cabD, cabC - 0.42, 0.74, 0.765, 0.36, 0.5, SP.red);
+    F.fbox("fabric", cabD, cabC - 0.42, 0.74, 0.765, 0.36, 0.5, 0x9a3a36, 63 & ~8);     // the red leather folio, on the made table
     presidentialProp("cabinet-bureau", "Authorize", "bureau", h, r, folio);
 
     // ---- STAIR HALL
@@ -4919,21 +5658,26 @@
     const prC = (-HW - LC) / 2;
     const s1 = dP1 - ST_T / 2, s0 = s1 - 3.0;
     const sl0 = -HW, sl1 = -LC - ST_T / 2;
-    F.box((s0 + s1) / 2, (sl0 + sl1) / 2, 0, 0.36, s1 - s0, sl1 - sl0, SP.navy, { cast: false, plat: true });
-    F.box(s0 - 0.21, (sl0 + sl1) / 2, 0, 0.18, 0.42, sl1 - sl0, SP.navy, { cast: false, plat: true });
-    F.box(s0 + 0.01, (sl0 + sl1) / 2, 0.34, 0.36, 0.04, sl1 - sl0, SP.gold);                   // nosings
-    F.box(s0 - 0.41, (sl0 + sl1) / 2, 0.16, 0.18, 0.04, sl1 - sl0, SP.gold);
+    // (the platforms' drawn boxes stand 1.5 cm inside the carpet the finish
+    // lays over them: the stage you see is the carpet, the one you walk the box)
+    const stIn = frameShrink(F, { d0: 0.015, d1: 0.015, l0: 0.015, l1: 0.015 }); stIn[3] = 0.015;
+    F.box((s0 + s1) / 2, (sl0 + sl1) / 2, 0, 0.36, s1 - s0, sl1 - sl0, SP.navy, { cast: false, plat: true, shrink: stIn });
+    F.box(s0 - 0.21, (sl0 + sl1) / 2, 0, 0.18, 0.42, sl1 - sl0, SP.navy, { cast: false, plat: true, shrink: stIn });
+    F.fbox("carpet", (s0 + s1) / 2, (sl0 + sl1) / 2, 0, 0.36, s1 - s0, sl1 - sl0, 0x6f86c0);
+    F.fbox("carpet", s0 - 0.21, (sl0 + sl1) / 2, 0, 0.18, 0.42, sl1 - sl0, 0x6f86c0);
+    F.fbox("flat", s0 + 0.012, (sl0 + sl1) / 2, 0.36, 0.366, 0.024, sl1 - sl0, SP.gold, 63 & ~8);   // brass nosings ON the carpet's edge
+    F.fbox("flat", s0 - 0.408, (sl0 + sl1) / 2, 0.18, 0.186, 0.024, sl1 - sl0, SP.gold, 63 & ~8);
     // the backdrop: blue, a darker oval panel, the seal. No lettering.
-    F.box(s1 - 0.03, prC, 0.36, F.CL - 0.4, 0.04, sl1 - sl0 - 0.4, SP.blue);
     // the finish: the stage carpeted, the backdrop a stretched blue drape
-    F.fbox("carpet", (s0 + s1) / 2, (sl0 + sl1) / 2, 0.36, 0.3625, s1 - s0 + 0.004, sl1 - sl0 + 0.004, 0x6f86c0, 4);
-    F.fbox("carpet", s0 - 0.21, (sl0 + sl1) / 2, 0.18, 0.1825, 0.424, sl1 - sl0 + 0.004, 0x6f86c0, 4);
-    F.fbox("fabric", s1 - 0.052, prC, 0.36, F.CL - 0.4, 0.004, sl1 - sl0 - 0.4, 0x7d97c8);
+    F.fbox("fabric", s1 - 0.03, prC, 0.36, F.CL - 0.4, 0.04, sl1 - sl0 - 0.4, 0x7d97c8);
     for (let i = 0; i < 5; i++) {
       const t = (i + 0.5) / 5 * 2 - 1, half = Math.sqrt(1 - t * t);
-      F.box(s1 - 0.06, prC, 0.9 + (i / 5) * 2.2, 0.9 + ((i + 1) / 5) * 2.2, 0.02, Math.max(0.8, half * 5.0), SP.navy);
+      F.fbox("fabric", s1 - 0.06, prC, 0.9 + (i / 5) * 2.2, 0.9 + ((i + 1) / 5) * 2.2, 0.02, Math.max(0.8, half * 5.0), 0x3a4f80, 63 & ~F.nbit(1, 0));
     }
     stateSeal(F, s1 - 0.085, prC, 2.0, 1.2, false, -1, 0);
+    stateMount(F, "stage", "d", s1, -1, sl0, sl1, 0, F.CL - 0.2, 3.0, "all");
+    stateMount(F, "stage", "l", sl1, -1, s0 - 0.42, s1, 0, 0.36, 3.42);
+    stateMount(F, "stage", "l", sl0, 1, s0 - 0.42, s1, 0, 0.36, 3.42);
     F.box(s1 - 0.1, prC, F.CL - 0.4, F.CL - 0.2, 0.2, sl1 - sl0 - 0.2, SP.lamp, { emissive: SP.lamp, ei: 0.7, cast: false });   // the lit pelmet
     F.lights++;
     // the lectern
@@ -5038,8 +5782,7 @@
     finSolid(F, "veneer", d + DD / 2 - 0.08, l, 0.08, RESOLUTE_TOP - 0.1, 0.06, L - 1.2, SP.mahog, MAH);   // kneehole panel
     F.box(d + DD / 2 - 0.045, l, 0.24, 0.56, 0.01, 0.32, SP.gold);                                   // the seal, in brass
     finSolid(F, "veneer", d, l, RESOLUTE_TOP - 0.06, RESOLUTE_TOP, DD + 0.1, L + 0.1, SP.mahog, MAH); // top
-    F.box(d - 0.1, l, RESOLUTE_TOP, RESOLUTE_TOP + 0.004, 0.62, 1.2, SP.green);                      // leather
-    F.fbox("fabric", d - 0.1, l, RESOLUTE_TOP + 0.004, RESOLUTE_TOP + 0.007, 0.62, 1.2, 0x5f8a6c);
+    F.fbox("fabric", d - 0.1, l, RESOLUTE_TOP, RESOLUTE_TOP + 0.006, 0.62, 1.2, 0x4f7a5c, 63 & ~8);   // the leather
     // the chair
     const t = d - THRONE_BACK;
     F.box(t, l, 0.01, 0.05, 0.62, 0.07, SP.black);                                                // the star foot
@@ -5065,7 +5808,7 @@
      ======================================================================== */
   function progOvalOffice(r, h, opts) {
     armStateFit();
-    shell(h, r);
+    // no eager covering or ceiling strip: the finish is this storey's floor and ceiling
     const F = stateFrame(h, r);
     const HW = F.half, D = F.D;
     const core = stateCore(F);
@@ -5099,7 +5842,7 @@
     if (core && core.l0 > lCor + 0.05) F.box(coreD0 - ST_T / 2 - 0.01, (lCor + core.l0) / 2, 0, F.CL, ST_T, core.l0 - lCor, SP.ivory, SOLID);   // close the slot behind the core
     if (core) F.walls.push({ axis: "d", at: coreD0, from: lCor, to: HW, t: 0, ops: [{ c: F.mouths.length ? (F.mouths[0].l0 + F.mouths[0].l1) / 2 : (coreL0 + HW) / 2, w: 1.6, h: 2.3 }] });
     // ---- the oval's rectangle: a floor and a ceiling; its walls are behind the curve
-    stateField(F, 0, dOut, lOvS, lCor, SP.oak);
+    stateField(F, 0, dOut, lOvS, lCor, SP.oak, true);
     const OR = F.rect(0, dOut, lOvS, lCor);
     F.fitRooms.push({ x0: OR.x0, x1: OR.x1, z0: OR.z0, z1: OR.z1, tint: 0xf6f1e6 });
     const ovRoom = { rectL: OR };
@@ -5121,15 +5864,37 @@
       ],
       windows: [Math.PI, Math.PI - 3 * step, Math.PI + 3 * step],
     });
-    // the carpet: an oval in slices, blue with a gold border, the seal at its heart
-    const ra = A - 0.75, rb = B - 0.65, ns = 11;
-    for (let i = 0; i < ns; i++) {
-      const t = (i + 0.5) / ns * 2 - 1, half = rb * Math.sqrt(1 - t * t), dd = dc + t * ra, sd = 2 * ra / ns;
-      if (i === 0 || i === ns - 1 || half < 0.9) { F.fbox("rug", dd, lc, FIN_FLOOR - 0.0005, RUG_T, sd, half * 2, finLift(SP.rugGold, 0.1)); continue; }
-      F.fbox("rug", dd, lc, FIN_FLOOR - 0.0005, RUG_T, sd, half * 2 - 0.56, finLift(SP.rugBlue, 0.15));
-      for (const e of [-1, 1]) F.fbox("rug", dd, lc + e * (half - 0.14), FIN_FLOOR - 0.0005, RUG_T, sd, 0.28, finLift(SP.rugGold, 0.1));
+    // the rectangle's own walls, on the oval's side: plaster (the vestibules
+    // between the curve and the doors look at them; behind the curve they are
+    // never seen). Their plan walls stand 3 cm inside; this is their face.
+    { const er = stateEdges(F, { d0: 0, d1: dOut, l0: lOvS, l1: lCor }); for (let i = 0; i < er.length; i++) stateSkin(F, er[i], ROOM_PAINT.ovaloffice); }
+    // THE OVAL RUG: one woven oval (ovalRugTex: a key-pattern border, a deep
+    // blue field with a sunburst, a ring of stars, the seal at its heart),
+    // its outline cut by the canvas's alpha, laid 8 mm over the floor and
+    // clear of the hearth. It used to be eleven slices of the tiled rug
+    // canvas with a seal decal 0.5 mm over them.
+    const ra = A - 1.35, rb = B - 0.75;
+    if (CBZ.fitoutDecalTex && ovalRugTex(ra, rb)) {
+      const q = F.P(dc, lc);
+      F.decals.push({ id: "ovalrug", x: q.x, z: q.z, w: 2 * ra, d: 2 * rb, y: F.Y + FIN_FLOOR + 0.008, yaw: F.latD });
+      F.symbols++;
     }
-    stateSeal(F, dc, lc, RUG_T + 0.0005, 1.7, true);
+    // THE OVAL CEILING: a sunburst medallion round the chandelier's rose and
+    // two oval ribs following the walls, in plaster under the finished ceiling
+    {
+      const top = F.CL - CEIL_FIN, cq = F.P(dc, lc);
+      finPrim(F, "plaster", FIN_CYL, cq.x, top - 0.02, top + 0.01, cq.z, 1.7, 1.7, 0, 0xfbf8f0, 8, 32);
+      finPrim(F, "paint", FIN_CYL, cq.x, top - 0.03, top - 0.02, cq.z, 1.2, 1.2, 0, 0xe9dcbc, 8, 32);
+      for (const k of [0.62, 0.86]) {
+        const n = 56;
+        for (let i = 0; i < n; i++) {
+          const a0 = i / n * 2 * Math.PI, a1 = (i + 1) / n * 2 * Math.PI;
+          const p0 = F.P(dc + A * k * Math.cos(a0), lc + B * k * Math.sin(a0)), p1 = F.P(dc + A * k * Math.cos(a1), lc + B * k * Math.sin(a1));
+          const vx = p1.x - p0.x, vz = p1.z - p0.z;
+          finOBox(F, "paint", (p0.x + p1.x) / 2, top - (k > 0.7 ? 0.05 : 0.035), top + 0.01, (p0.z + p1.z) / 2, Math.hypot(vx, vz), k > 0.7 ? 0.12 : 0.08, Math.atan2(-vz, vx), 0xf6f1e4);
+        }
+      }
+    }
     // the desk, the chair, the standards behind it
     const deskD = dc - A + 2.25;
     const RD = stateResoluteDesk(F, deskD, lc);
@@ -5138,20 +5903,66 @@
     const sofaD = dc + 0.6;
     const sofas = [];
     for (const e of [-1, 1]) {
-      const s = statePiece(F, "sofa", sofaD, lc + e * 1.6, F.face(0, -e), { len: 2.3, tone: { cloth: 0xd9cfb4, wood: SP.mahog } });
+      // (a warm straw damask, not the cream of the walls: the sofas read against them)
+      const s = statePiece(F, "sofa", sofaD, lc + e * 1.6, F.face(0, -e), { len: 2.3, tone: { cloth: 0xcbb07a, wood: SP.mahog } });
       sofas.push(s); usable += presidentialUse(s);
     }
     const low = F.P(sofaD, lc);
     presidentialPiece("coffee", r, h, low.x, low.z, F.latD, { len: 1.4, deep: 0.7, tone: { wood: SP.mahog } });
-    const fireAt = stateFireplace(F, "d", dc + A - 0.04, lc, -1, { canvas: 0x3a3b4a, w: 1.8 });
+    // ON A CURVED WALL a flat thing stands where the curve meets its ends
+    // (the plaster comes toward the room either side of the middle): the
+    // surround's face is set back to where the curve is at its widest piece,
+    // the portrait over it hung where the curve is at ITS ends. (Both were on
+    // a straight line 4 cm off the curve's middle, and their ends were in the
+    // wall.) The sconces either side would be inside the curve: none here.
+    // How far a flat thing hw either side of the curve's point at phi must
+    // stand off it (along the curve's true normal there) for the plaster's
+    // facets (chords, the skin on them) to stay behind it, plus `clear`.
+    const standoff = function (phi, hw, clear) {
+      const E = { d: dc + A * Math.cos(phi), l: lc + B * Math.sin(phi) };
+      const qd = Math.cos(phi) / A, ql = Math.sin(phi) / B, qn = Math.hypot(qd, ql);
+      const out = { d: qd / qn, l: ql / qn }, along = { d: -out.l, l: out.d };
+      let off = 0;
+      for (let k = 0; k <= 40; k++) {
+        const u = -hw + 2 * hw * k / 40;
+        for (let i = 0; i < N; i++) {
+          const a0 = (i / N) * 2 * Math.PI, a1 = ((i + 1) / N) * 2 * Math.PI;
+          const p0 = { d: dc + A * Math.cos(a0) - E.d, l: lc + B * Math.sin(a0) - E.l }, p1 = { d: dc + A * Math.cos(a1) - E.d, l: lc + B * Math.sin(a1) - E.l };
+          const u0 = p0.d * along.d + p0.l * along.l, u1 = p1.d * along.d + p1.l * along.l;
+          if ((u - u0) * (u - u1) > 0 || Math.abs(u1 - u0) < 1e-6) continue;
+          const t = (u - u0) / (u1 - u0);
+          const sIn = -(p0.d * out.d + p0.l * out.l) * (1 - t) - (p1.d * out.d + p1.l * out.l) * t;
+          if (Math.abs(sIn) < 0.6) off = Math.max(off, sIn + SKIN_T + clear);
+        }
+      }
+      return { E: E, out: out, along: along, off: off };
+    };
+    const fpS = standoff(0, 1.8 / 2 + 0.12, 0.003), ptS = standoff(0, 0.62, 0.003);
+    const fireAt = stateFireplace(F, "d", fpS.E.d - fpS.off, lc, -1, { canvas: 0x3a3b4a, w: 1.8, painting: false, sconces: false });
+    statePainting(F, "d", ptS.E.d - ptS.off + SKIN_T, lc, -1, 1.55, 2.75, 1.24, 0x3a3b4a, true);
     for (const e of [-1, 1]) usable += presidentialUse(statePiece(F, "armchair", dc + A - 1.7, lc + e * 1.2, F.face(0, -e), { tone: { cloth: 0x9a7b3f } }));
     stateChandelier(F, dc, lc, 0.9, ovRoom);
     for (const e of [-1, 1]) statePiece(F, "planter", dc + A - 2.9, lc + e * (B - 1.3), 0, { kind: "tree", s: 0.9 });
-    // the television, on the curve by the desk (president_office.js hangs it)
-    const phiTV = 2.2, tvS = { d: dc + A * Math.cos(phiTV), l: lc + B * Math.sin(phiTV) };
-    const inw = { d: dc - tvS.d, l: lc - tvS.l }, inl = Math.hypot(inw.d, inw.l) || 1;
-    const tv = F.P(tvS.d + inw.d / inl * 0.02, tvS.l + inw.l / inl * 0.02);
-    const tvBack = F.P(tvS.d - inw.d / inl * 0.6, tvS.l - inw.l / inl * 0.6);
+    // THE TELEVISION on the curve by the desk (president_office.js hangs the
+    // game's one set, 1.92 m of screen, its back on the plane named here).
+    // OWNER: "You can see the TV's covered up." It was hung 2 cm off the curve
+    // at its middle, square to the RADIUS: a flat panel 2 m wide on a 4-5 m
+    // curve, so both ends of it were 7-10 cm inside the wall. Now it faces
+    // along the curve's true normal and stands off it on its bracket by as
+    // much as the curve needs, measured against the plaster's facets, with
+    // 1.5 cm to spare at its ends.
+    const phiTV = 2.2, TVW = 1.92 + 0.024, TVH = TVW * 9 / 16, tvY = 1.95;
+    const tvSt = standoff(phiTV, TVW / 2 + 0.02, 0.015);
+    const tvS = tvSt.E, tvOut = tvSt.out, tvAlong = tvSt.along, tvOff = tvSt.off;
+    const tv = F.P(tvS.d - tvOut.d * tvOff, tvS.l - tvOut.l * tvOff);
+    const tvBack = F.P(tvS.d + tvOut.d * 0.6, tvS.l + tvOut.l * 0.6);
+    {
+      // filed with the room's mounts: the trims stop round it, the census proves it clear
+      const nI = { x: -(F.nx * tvOut.d + F.tx * tvOut.l), z: -(F.nz * tvOut.d + F.tz * tvOut.l) };
+      const uI = { x: F.nx * tvAlong.d + F.tx * tvAlong.l, z: F.nz * tvAlong.d + F.tz * tvAlong.l };
+      F.mounts.push({ b: F.b, k: F.k, floorY: F.Y, kind: "tv", axis: null, x: tv.x, z: tv.z, nx: nI.x, nz: nI.z, ux: uI.x, uz: uI.z,
+        w: TVW, y0: F.Y + tvY - TVH / 2 - 0.03, y1: F.Y + tvY + TVH / 2, depth: 0.075, bracket: tvOff });
+    }
 
     // ---- OUTER OFFICE: two secretaries' desks, a sofa for whoever is waiting
     const ooC = (-HW + lCor) / 2;

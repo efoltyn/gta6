@@ -151,6 +151,51 @@
     if (actor && typeof actor.pause === "number") actor.pause = Math.max(actor.pause, 0.8);
   }
 
+  /* ---- THE PLAYER IS A BODY TOO ----------------------------------------------
+     OWNER (iPad, the President's house): "When you run into doors, they
+     don't open." Only [E] opened a door for the player; a staffer walking
+     the same corridor pushed straight through. Same rule now, one place: a
+     SHUT door across the player's next stride (his DESIRED motion,
+     player.moveX/moveZ, which a blocking leaf cannot zero) opens if the
+     door's owner says the player may walk through it (provider.playerMay):
+     in the city an unlocked door of state or office, or one already forced.
+     A locked flat, the Situation Room's secured door: still [E] / a key.
+     A door he walked through shuts behind him like anyone's (OPENED below);
+     one he opened with [E] stays as he left it. A provider with no
+     playerMay (the prison: its doors are the game) is never pushed. */
+  const PLOOK = 0.75;                     // metres of stride: the body's radius and a step
+  let nPushed = 0;
+  function playerStep() {
+    const P = CBZ.player, g = CBZ.game;
+    if (!P || !P.pos || P.dead || P.driving || !g || g.mode !== "city" || !GRID.size) return null;
+    const mx = +P.moveX || 0, mz = +P.moveZ || 0, sp = Math.hypot(mx, mz);
+    if (sp < 0.4) return null;
+    const hx = mx / sp, hz = mz / sp, x = P.pos.x, z = P.pos.z, y = P.pos.y || 0;
+    const gx0 = Math.floor((Math.min(x, x + hx * PLOOK) - 2) / CELL), gx1 = Math.floor((Math.max(x, x + hx * PLOOK) + 2) / CELL);
+    const gz0 = Math.floor((Math.min(z, z + hz * PLOOK) - 2) / CELL), gz1 = Math.floor((Math.max(z, z + hz * PLOOK) + 2) / CELL);
+    for (let i = gx0; i <= gx1; i++) for (let j = gz0; j <= gz1; j++) {
+      const a = GRID.get(i + "," + j);
+      if (!a) continue;
+      for (let q = 0; q < a.length; q++) {
+        const c = a[q], e = c._bd;
+        if (!e || typeof e.p.playerMay !== "function") continue;
+        if (c.y0 != null && (y < c.y0 - 0.7 || y > c.y0 + 1.5)) continue;
+        if (!crosses(c, x, z, hx, hz, PLOOK, 0.3)) continue;
+        if (isOpen(c)) continue;
+        let ok = false;
+        try { ok = !!e.p.playerMay(e.rec); } catch (err) { ok = false; }
+        if (!ok) return "deny";
+        try { e.p.set(e.rec, true, "push"); } catch (err) {}
+        if (isOpen(c)) {
+          nPushed++;
+          if (!OPENED.some((o) => o.col === c)) OPENED.push({ col: c, t: 0, clear: 0 });
+        }
+        return "open";
+      }
+    }
+    return null;
+  }
+
   // ---- AND IT SHUTS BEHIND THEM --------------------------------------------
   const OPENED = [];
   function posOf(b) { return b && !b.dead ? (b.pos || (b.group && b.group.position) || null) : null; }
@@ -189,7 +234,7 @@
       }
     }
   }
-  if (CBZ.onUpdate) CBZ.onUpdate(34.32, function (dt) { tick(dt || 0.016); prisonSync(); });
+  if (CBZ.onUpdate) CBZ.onUpdate(34.32, function (dt) { playerStep(); tick(dt || 0.016); prisonSync(); });
 
   /* ---- THE PRISON'S PROVIDER -----------------------------------------------
      The prison's doors are already one registry (systems/interactions.js:
@@ -296,10 +341,11 @@
   CBZ.bodyDoors = {
     tag: tag, near: near, untag: untag, ahead: ahead, passable: passable, may: may, isOpen: isOpen,
     sync: prisonSync, tick: tick, isOfficer: isOfficer, openerNear: openerNear, prisonMay: prisonMay,
+    playerStep: playerStep,
     opened: function () { return OPENED.length; },
     stats: function () {
       const top = Array.from(REFUSED_AT.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5);
-      return { doors: Array.from(GRID.values()).reduce((n, a) => n + a.length, 0), opened: nOpened, refused: nRefused, holding: OPENED.length, refusedAt: top };
+      return { doors: Array.from(GRID.values()).reduce((n, a) => n + a.length, 0), opened: nOpened, refused: nRefused, pushed: nPushed, holding: OPENED.length, refusedAt: top };
     },
   };
 })();

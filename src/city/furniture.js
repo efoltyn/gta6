@@ -454,9 +454,9 @@
     p.put(0, 0.06, 0, 0.05, 0.28, 0.05, P.shelf);                              // gas lift
     p.put(0, 0.34, 0, 0.42, 0.04, 0.42, frame);                                // seat pan
     const top = p.put(0, 0.38, 0.01, 0.5, 0.07, 0.5, pad, { solid: true, colH: 0.07 });   // cushion → 0.45
-    p.put(0, 0.36, -0.25, 0.06, 0.2, 0.03, frame);                             // back stem
+    p.put(0, 0.36, -0.25, 0.06, 0.18, 0.03, frame);                            // back stem, up to the back
     p.put(0, 0.54, -0.27, 0.46, 0.42, 0.06, pad);                              // back 0.54..0.96
-    if (D) p.put(0, 0.58, -0.295, 0.4, 0.34, 0.012, frame);                    // its shell
+    if (D) p.put(0, 0.58, -0.306, 0.4, 0.34, 0.012, frame);                    // its shell, ON the back (it sat 1 mm inside it: two backs fighting)
     if (D) for (let a = -1; a <= 1; a += 2) {
       p.put(a * 0.27, 0.40, -0.02, 0.03, 0.2, 0.03, frame);                    // arm post
       p.put(a * 0.27, 0.60, 0.0, 0.06, 0.03, 0.26, frame);                     // arm pad → 0.63
@@ -638,7 +638,7 @@
       // as furniture rather than a plinth when you walk in the door.
       p.put(0, 0.12, L / 2 + 0.05, W - 0.12, 0.72, 0.09, P.head);                 // panel → 0.84
       for (let a = -1; a <= 1; a += 2)
-        p.put(a * (W / 2 + 0.01), 0.06, L / 2 + 0.06, 0.10, 0.86, 0.13, frame);   // posts → 0.92
+        p.put(a * (W / 2 + 0.01), 0.06, L / 2 + 0.0525, 0.10, 0.86, 0.115, frame);   // posts → 0.92 (their backs 1.5 cm in from the cap rail's)
       p.put(0, 0.84, L / 2 + 0.05, W + 0.14, 0.09, 0.15, P.head);                 // cap rail → 0.93
     } else {
       p.put(0, 0.12, L / 2 + 0.06, W + 0.10, 0.83, 0.12, P.head);                 // headboard
@@ -740,7 +740,7 @@
       }
     }
     p.put(L / 2 - 0.05, 0.02, 0, 0.08, 0.66, D - 0.14, P.chair);           // end leg
-    p.put(0, 0.16, D / 2 - 0.05, L - 0.14, 0.50, 0.06, P.desk);            // modesty panel
+    p.put(0, 0.16, D / 2 - 0.05, L - 0.14, DT ? 0.46 : 0.50, 0.06, P.desk);   // modesty panel (up to the apron rail, not behind it)
     // APRON SHADOW: a dark recessed rail tucked under the worktop's front lip.
     // The worktop already oversails it by 4cm, so the rail is never lit the way
     // the top is and the top reads as a separate, floating slab.
@@ -775,7 +775,7 @@
       for (let b = -1; b <= 1; b += 2)
         p.put(0, 0.61, b * (D / 2 - 0.08), L - 0.24, 0.09, 0.025, P.darkwood);       // long aprons
       for (let a = -1; a <= 1; a += 2)
-        p.put(a * (L / 2 - 0.09), 0.61, 0, 0.025, 0.09, D - 0.2, P.darkwood);        // end aprons
+        p.put(a * (L / 2 - 0.09), 0.61, 0, 0.025, 0.09, D - 0.22, P.darkwood);       // end aprons, between the legs (not into their tops)
       p.put(0, 0.665, 0, L - 0.2, 0.03, D - 0.2, P.darkwood, { solid: true, colH: 0.08 });   // under-frame (collider)
     } else {
       p.put(0, 0.56, 0, L - 0.16, 0.10, D - 0.16, wood, { solid: true, colH: 0.18 });       // apron
@@ -825,7 +825,7 @@
     // a coffee table between a sofa and a screen is an obstacle you step round,
     // never a wall, and never something the body can stand on.
     const top = p.put(0, 0.35, 0, L, 0.05, D, wood, { solid: true, colH: 0.05 });   // top → 0.40
-    if (DT) p.put(0, 0.31, 0, L - 0.10, 0.04, D - 0.10, P.darkwood);        // apron shadow under the lip
+    if (DT) p.put(0, 0.30, 0, L - 0.10, 0.04, D - 0.12, P.darkwood);        // apron shadow under the lip (its top 1 cm below the legs', never in their plane)
     return p.done(L, D, 0.40, top);
   };
 
@@ -871,13 +871,13 @@
     const H = Math.max(1.0, opts.h != null ? +opts.h : 2.0);
     const p = pen("shelf", x, y, z, yaw, opts);
     p.put(0, 0, 0, L, 0.30, D, P.metal, { solid: true, colH: H });          // plinth (collider = whole rack)
-    p.put(0, 0.30, -(D / 2 - 0.03), L, H - 0.30, 0.06, P.metal);            // back panel
+    p.put(0, 0.30, -(D / 2 - 0.03), L, H - 0.35, 0.06, P.metal);            // back panel, up to the cap
     for (let a = -1; a <= 1; a += 2)
-      p.put(a * (L / 2 - 0.03), 0.30, 0, 0.06, H - 0.30, D, P.metal);       // uprights
+      p.put(a * (L / 2 - 0.03), 0.30, 0, 0.06, H - 0.35, D, P.metal);       // uprights, up to the cap
     const gap = (H - 0.35) / 4;
     for (let i = 1; i <= 3; i++)
       p.put(0, 0.30 + gap * i, 0, L - 0.12, 0.05, D - 0.06, P.shelf);       // boards
-    const top = p.put(0, H - 0.05, 0, L, 0.05, D, P.shelf);                 // cap → H
+    const top = p.put(0, H - 0.05, 0, L + 0.02, 0.05, D + 0.02, P.shelf);   // cap → H, oversailing the uprights by 1 cm
     return p.done(L, D, H, top);
   };
 
@@ -947,7 +947,7 @@
       p.put(lat + ((i % 2) ? -1 : 1) * (dw / 2 - 0.04), H * 0.5, (D - 0.02) / 2 + 0.018, 0.012, 0.16, 0.014, P.shelf);
     }
     if (det()) for (let i = 1; i < n; i++)
-      p.put(-(L - 0.02) / 2 + dw * i, 0.08, (D - 0.02) / 2 + 0.002, 0.006, H - 0.13, 0.006, P.darkwood);
+      p.put(-(L - 0.02) / 2 + dw * i, 0.08, (D - 0.02) / 2 + 0.004, 0.006, H - 0.13, 0.006, P.darkwood);   // 7 mm off the carcass
     return p.done(L + 0.02, D + 0.01, H, top);
   };
 
@@ -970,9 +970,16 @@
     // a tapered pot: a narrower foot, the body, a rolled rim; soil inside it
     p.put(0, 0, 0, pw * 0.8, ph * 0.18, pw * 0.8, potC);
     p.put(0, ph * 0.18, 0, pw, ph * 0.74, pw, potC, { solid: true, colH: ph * 0.74 });
-    p.put(0, ph * 0.92, 0, pw + 0.03, ph * 0.08, pw + 0.03, potC);
-    p.put(0, ph - 0.015, 0, pw - 0.02, 0.01, pw - 0.02, P.soil);
-    const y0 = ph - 0.01;
+    // the rolled rim is a RING round the soil (a solid lid of pot colour hid
+    // the soil 5 mm under its own top), the soil sits 1.5 cm down inside it
+    const ro = pw + 0.03, ri = pw - 0.02, rt = (ro - ri) / 2;
+    for (let a = -1; a <= 1; a += 2) {
+      p.put(0, ph * 0.92, a * (ri + rt) / 2, ro, ph * 0.08, rt, potC);
+      p.put(a * (ri + rt) / 2, ph * 0.92, 0, rt, ph * 0.08, ri, potC);
+    }
+    const soilTop = Math.max(ph * 0.92 + 0.007, ph - 0.015);
+    p.put(0, soilTop - 0.01, 0, ri, 0.01, ri, P.soil);
+    const y0 = soilTop;                                   // the stems and the trunk stand ON the soil
     const greens = [P.leaf, P.leaf2, P.leaf3];
     if (!tree) {
       const n = 9;
@@ -989,8 +996,13 @@
     }
     const TH = 1.7 * s;
     p.put(0, y0, 0, 0.035, TH * 0.78, 0.035, P.trunk);                               // trunk
-    p.put(0.03, y0 + TH * 0.35, 0, 0.14, 0.025, 0.025, P.trunk);                      // a limb
-    p.put(-0.02, y0 + TH * 0.52, 0.02, 0.025, 0.025, 0.12, P.trunk);
+    // ONE TREE, ONE GREEN. Thin leaf boxes laid at any height and offset come
+    // to rest a few mm apart in one plane; in three greens (and with two limbs
+    // through the canopy) those pairs flickered for depth. A tree's leaves are
+    // its species' one green (the next tree is the next green), so two leaves
+    // in one plane are the same leaf colour. (The limbs are gone: the canopy
+    // hid them and they sat in the leaves' planes.)
+    const green = greens[Math.floor(h(0, 9) * 3) % 3];
     const n = 30;
     for (let i = 0; i < n; i++) {
       const t = i / (n - 1);
@@ -1000,8 +1012,8 @@
       const lat = Math.cos(a) * r, fwd = Math.sin(a) * r;
       const L = (0.15 + 0.07 * h(i, 6)) * s, W = L * 0.68;
       const flat = h(i, 7) < 0.55;
-      if (flat) p.put(lat, ly, fwd, (i & 1) ? L : W, 0.012, (i & 1) ? W : L, greens[i % 3]);
-      else p.put(lat, ly - L * 0.3, fwd, (i & 1) ? L * 0.8 : 0.012, L * 0.7, (i & 1) ? 0.012 : L * 0.8, greens[(i + 1) % 3]);
+      if (flat) p.put(lat, ly, fwd, (i & 1) ? L : W, 0.012, (i & 1) ? W : L, green);
+      else p.put(lat, ly - L * 0.3, fwd, (i & 1) ? L * 0.8 : 0.012, L * 0.7, (i & 1) ? 0.012 : L * 0.8, green);
     }
     return p.done(0.6 * s, 0.6 * s, y0 + TH, y + ph);
   };

@@ -774,8 +774,55 @@ let bodyReport = "not run";
       for (let i = 0; i < 40; i++) { MV.step(im, ip, 0, 500.8, 501.5, { speed: 1.4 }, 0.05); if (im.doorBlockT > 0) refusedI = true; if (ip.z > 499.6) ip.z = 499.6; }
       if (!refusedI) fail("BODIES: an inmate walking at a cell front was never refused");
       if (sets) fail("BODIES: a cell front was set() by an inmate walking at it");
+      // e) THE PLAYER WALKS INTO A DOOR (OWNER: "When you run into doors,
+      //    they don't open"). His desired motion (player.moveX/moveZ, what
+      //    systems/physics.js publishes) carries him at a shut free door: it
+      //    opens, he walks through, it shuts behind him. A secured door does
+      //    not open to his body (that is [E] and a clearance), nor a locked flat.
+      let pushNote = "";
+      {
+        const P = CBZ.player, wasMode = CBZ.game.mode;
+        CBZ.game.mode = "city";
+        const pushWalk = function (side, secs) {
+          const p = P.pos;
+          p.set(door.x - nrm.x * side * 1.1, feet, door.z - nrm.z * side * 1.1);
+          for (let i = 0; i < Math.round(secs / 0.05); i++) {
+            P.moveX = nrm.x * side * 3.2; P.moveZ = nrm.z * side * 3.2;
+            p.x += P.moveX * 0.05; p.z += P.moveZ * 0.05;
+            resolve(p);
+            for (const f of bdTick) f(0.05); for (const f of swingTick) f(0.05);
+            if ((p.x - door.x) * nrm.x * side + (p.z - door.z) * nrm.z * side > 1.3) { P.moveX = P.moveZ = 0; break; }
+          }
+          P.moveX = P.moveZ = 0;
+          return (p.x - door.x) * nrm.x * side + (p.z - door.z) * nrm.z * side;
+        };
+        if (door.open) setOpen(door, false);
+        settle();
+        const pushed0 = BD.stats().pushed | 0;
+        const a1 = pushWalk(1, 3);
+        if (a1 < 0.9) fail("PLAYER: walking into the shut Oval Office door did not take him through (" + a1.toFixed(2) + " m past it)");
+        if (((BD.stats().pushed | 0) - pushed0) < 1) fail("PLAYER: the door never registered a push");
+        P.pos.set(1e5, 0, 1e5);
+        runTicks(3);
+        if (door.open || !live(door.col)) fail("PLAYER: the door he walked through did not shut behind him");
+        const a2 = pushWalk(-1, 3);
+        if (a2 < 0.9) fail("PLAYER: walking back through the same door failed (" + a2.toFixed(2) + ")");
+        P.pos.set(1e5, 0, 1e5); runTicks(3);
+        const free2 = door.free;
+        door.free = function () { return false; }; if (door.pair) door.pair.free = door.free;
+        const a3 = pushWalk(1, 3);
+        if (a3 > 0) fail("PLAYER: walked through a SECURED door by bumping it (" + a3.toFixed(2) + " m past)");
+        if (door.open) fail("PLAYER: a secured door opened to his body");
+        door.free = false; if (door.pair) door.pair.free = false;
+        const a4 = pushWalk(1, 3);
+        if (a4 > 0 || door.open) fail("PLAYER: walked into a LOCKED door and it opened");
+        door.free = free2; if (door.pair) door.pair.free = free2;
+        P.pos.set(1e6, 0, 1e6); runTicks(3);
+        CBZ.game.mode = wasMode;
+        pushNote = "; player: through a free door both ways (it shut behind him), held at a secured and a locked one";
+      }
       const st = BD.stats();
-      bodyReport = "staff through + shut behind; secured: stranger held, staff/detail/police through; flat: key only; " + navNote + "; prison rule " + expect.length + " cases; bodyDoors " + JSON.stringify(st);
+      bodyReport = "staff through + shut behind; secured: stranger held, staff/detail/police through; flat: key only; " + navNote + "; prison rule " + expect.length + " cases" + pushNote + "; bodyDoors " + JSON.stringify(st);
     }
   }
 }

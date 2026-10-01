@@ -569,8 +569,10 @@
     const FINOF = {};
     FINOF[PANEL] = ["veneer", 0x7d5236]; FINOF[STILE] = ["veneer", 0x5e3c26]; FINOF[NAVY] = ["fabric", 0x3d5a80]; FINOF[BRASS] = ["flat", 0xc9a45a];
     // ---- floor and ceiling
-    addBox(grp, cx, Y + 0.0115, cz, fx1 - fx0, 0.013, fz1 - fz0, CARPET);            // carpet: 0.005..0.018 over the floor top
-    addBox(grp, cx, H - 0.02, cz, fx1 - fx0, 0.04, fz1 - fz0, 0x2a2f37);              // acoustic ceiling, under the slab
+    const cpt = addBox(grp, cx, Y + 0.0115, cz, fx1 - fx0, 0.013, fz1 - fz0, CARPET);            // carpet: 0.005..0.018 over the floor top
+    const clg = addBox(grp, cx, H - 0.02, cz, fx1 - fx0, 0.04, fz1 - fz0, 0x2a2f37);              // acoustic ceiling, under the slab
+    // the finish IS the carpet and the ceiling (the flat ones lay 1-2 mm behind them)
+    if (FS) { cpt.visible = false; clg.visible = false; }
     fin("carpet", cx, Y + 0.01875, cz, fx1 - fx0, 0.0025, fz1 - fz0, 0x5d7aa8, 4);          // its face only
     fin("ceiling", cx, H - 0.0415, cz, fx1 - fx0, 0.003, fz1 - fz0, 0x8e949c, 8);
     // ---- walnut panelling to 2.8 m, a navy acoustic band over it, stiles on a
@@ -579,26 +581,40 @@
       { onX: true, at: fx0, s: 1, lo: fz0, hi: fz1 }, { onX: true, at: fx1, s: -1, lo: fz0, hi: fz1 },
       { onX: false, at: fz0, s: 1, lo: fx0, hi: fx1 }, { onX: false, at: fz1, s: -1, lo: fx0, hi: fx1 },
     ];
-    const run = function (f, a, b, y0, y1, proud, col) {
+    // A RUN: the eager box is what an unfitted floor shows; where the finish
+    // lays the real material it is the ONLY drawn copy (the finish used to be
+    // a 3 mm-proud skin over the flat box: two faces a hair apart, fighting
+    // for depth). A run in front of the panelling (skirting, rail, the brass
+    // datum) stops `ret` short of each end, so its end grain never lies in the
+    // panel's end face. The back, against the plaster, is never drawn.
+    const run = function (f, a, b, y0, y1, proud, col, ret) {
       if (b - a < 0.05) return;
+      // AT A CORNER the runs butt: a run on a z-facing wall stops at the face
+      // of the same run on the x-facing wall across its end (they lapped in
+      // the corner, two tops of one rail in one plane)
+      if (!f.onX) { if (Math.abs(a - f.lo) < 1e-6) a += proud; if (Math.abs(b - f.hi) < 1e-6) b -= proud; }
+      const r = ret || 0;
+      a += r; b -= r;
       const n = f.at + f.s * proud / 2;
-      if (f.onX) addBox(grp, n, (y0 + y1) / 2, (a + b) / 2, proud, y1 - y0, b - a, col);
-      else addBox(grp, (a + b) / 2, (y0 + y1) / 2, n, b - a, y1 - y0, proud, col);
-      // its real material, 3 mm proud of it on every side
+      const m = f.onX ? addBox(grp, n, (y0 + y1) / 2, (a + b) / 2, proud, y1 - y0, b - a, col)
+        : addBox(grp, (a + b) / 2, (y0 + y1) / 2, n, b - a, y1 - y0, proud, col);
       const k = FINOF[col];
-      if (!k) return;
-      if (f.onX) fin(k[0], n + f.s * 0.0015, (y0 + y1) / 2, (a + b) / 2, proud + 0.003, y1 - y0 + 0.003, b - a + 0.003, k[1]);
-      else fin(k[0], (a + b) / 2, (y0 + y1) / 2, n + f.s * 0.0015, b - a + 0.003, y1 - y0 + 0.003, proud + 0.003, k[1]);
+      if (!k || !FS) return;
+      if (m) m.visible = false;
+      const back = f.onX ? (f.s > 0 ? 2 : 1) : (f.s > 0 ? 32 : 16);
+      const msk = 63 & ~back & (y0 <= Y + 0.03 ? ~8 : 63);       // nor its underside on the floor
+      if (f.onX) fin(k[0], n, (y0 + y1) / 2, (a + b) / 2, proud, y1 - y0, b - a, k[1], msk);
+      else fin(k[0], (a + b) / 2, (y0 + y1) / 2, n, b - a, y1 - y0, proud, k[1], msk);
     };
     for (const f of faces) {
       const isDoor = f.onX === doorOnX && Math.abs((f.onX ? (f.s > 0 ? x0 : x1) : (f.s > 0 ? z0 : z1)) - dSide) < 0.01;
       const spans = isDoor ? [[f.lo, dC - GAP / 2 - 0.1], [dC + GAP / 2 + 0.1, f.hi]] : [[f.lo, f.hi]];
       for (const sp of spans) {
         run(f, sp[0], sp[1], Y, Y + 2.8, 0.04, PANEL);
-        run(f, sp[0], sp[1], Y, Y + 0.16, 0.06, STILE);                              // skirting
-        run(f, sp[0], sp[1], Y + 0.9, Y + 0.95, 0.06, STILE);                        // rail
+        run(f, sp[0], sp[1], Y, Y + 0.16, 0.06, STILE, 0.008);                       // skirting
+        run(f, sp[0], sp[1], Y + 0.9, Y + 0.95, 0.06, STILE, 0.008);                 // rail
         run(f, sp[0], sp[1], Y + 2.8, H - 0.04, 0.03, NAVY);                         // acoustic band
-        run(f, sp[0], sp[1], Y + 2.76, Y + 2.86, 0.07, BRASS);                       // brass datum
+        run(f, sp[0], sp[1], Y + 2.76, Y + 2.86, 0.07, BRASS, 0.008);                // brass datum
         for (let a = sp[0] + 0.6; a < sp[1] - 0.3; a += 1.2) run(f, a - 0.04, a + 0.04, Y + 0.95, Y + 2.76, 0.06, STILE);
       }
     }

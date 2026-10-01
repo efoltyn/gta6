@@ -154,7 +154,9 @@
                       //   fabric   0.6 m of silk damask / linen weave (curtains, upholstery)
                       //   rug      one 2.4 m repeat of a woven field (tinted by its colour)
                       //   oil      a 1.2 m canvas of brushed paint (the portraits)
-                      marble: 1.2, parquet: 1.2, veneer: 1.6, paint: 0.8, fabric: 0.6, rug: 2.4, oil: 1.2 };
+                      //   uph      0.5 m of upholstery weave (sofas, chairs): a tight
+                      //            basket weave, no folds, no figure
+                      marble: 1.2, parquet: 1.2, veneer: 1.6, paint: 0.8, fabric: 0.6, rug: 2.4, oil: 1.2, uph: 0.5 };
   const TEX_SIZE = { wood: 1024, brick: 512, concrete: 512, carpet: 512, terrazzo: 512, marble: 512, parquet: 512, rug: 512 };
   const MATS = {};
   function rnd(seed) { let s = seed >>> 0; return function () { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
@@ -430,19 +432,28 @@
       }
       noise(x, n, 0, 0.04, 2500, 1.0, 342);
     },
-    rug: function (x, n) {                           // a woven field: medallion lattice, wool fleck
-      x.fillStyle = "#c9c6c0"; x.fillRect(0, 0, n, n);
-      const r = rnd(351), q = n / 4;
-      for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
-        const cx0 = i * q + q / 2, cy0 = j * q + q / 2;
-        x.fillStyle = "rgba(0,0,0,0.13)";
-        x.beginPath(); x.moveTo(cx0, cy0 - q * 0.42); x.lineTo(cx0 + q * 0.42, cy0); x.lineTo(cx0, cy0 + q * 0.42); x.lineTo(cx0 - q * 0.42, cy0); x.closePath(); x.fill();
-        x.fillStyle = "rgba(255,255,255,0.16)";
-        x.beginPath(); x.moveTo(cx0, cy0 - q * 0.2); x.lineTo(cx0 + q * 0.2, cy0); x.lineTo(cx0, cy0 + q * 0.2); x.lineTo(cx0 - q * 0.2, cy0); x.closePath(); x.fill();
-        x.fillStyle = "rgba(0,0,0,0.18)"; x.fillRect(cx0 - 3, cy0 - 3, 6, 6);
-        for (let k = 0; k < 4; k++) { x.fillStyle = "rgba(255,255,255,0.08)"; x.fillRect(i * q + r() * q, j * q + r() * q, 4, 4); }
+    rug: function (x, n) {                           // a hand-knotted wool field: abrash, pile, knots
+      // OWNER (iPad, the Oval): "a repeating blue diamond tile pattern". The
+      // field was a 4 x 4 lattice of diamonds every 60 cm: a tiled floor, not
+      // a rug. A real field reads as wool: soft bands of dye lot (abrash)
+      // across the weft, the pile's sheen, the knots. No figure that repeats.
+      x.fillStyle = "#cdcac4"; x.fillRect(0, 0, n, n);
+      const r = rnd(351);
+      for (let i = 0; i < 9; i++) {                   // abrash: wide soft bands, seamless
+        const y = r() * n, h = n * (0.06 + r() * 0.14), a = 0.03 + r() * 0.05;
+        x.fillStyle = (r() < 0.5 ? "rgba(0,0,0," : "rgba(255,255,255,") + a.toFixed(3) + ")";
+        wrapFill(x, n, 0, y, n, h);
       }
-      noise(x, n, 0, 0.16, 26000, 1.0, 352);           // the knots
+      for (let i = 0; i < 40; i++) blot(x, n, r() * n, r() * n, 30 + r() * 80, r() < 0.5 ? "0,0,0" : "255,255,255", 0.015 + r() * 0.02);
+      noise(x, n, 0, 0.12, 30000, 1.0, 352);           // the knots
+      noise(x, n, 0, 0.05, 6000, 2.5, 353);            // the pile's sheen
+    },
+    uph: function (x, n) {                           // upholstery: a tight basket weave, slubs, no figure
+      x.fillStyle = "#ece9e3"; x.fillRect(0, 0, n, n);
+      for (let i = 0; i < n; i += 2) { x.fillStyle = "rgba(0,0,0,0.05)"; x.fillRect(i, 0, 1, n); x.fillStyle = "rgba(0,0,0,0.035)"; x.fillRect(0, i, n, 1); }
+      const r = rnd(361);
+      for (let i = 0; i < 500; i++) { x.fillStyle = "rgba(" + (r() < 0.5 ? "0,0,0" : "255,255,255") + ",0.06)"; wrapFill(x, n, r() * n, r() * n, 4 + r() * 10, 1); }   // slubs
+      noise(x, n, 0, 0.035, 3000, 1.0, 362);
     },
     oil: function (x, n) {                           // brushed oil paint: dark ground, a lit sitter, varnish
       x.fillStyle = "#5a5650"; x.fillRect(0, 0, n, n);
@@ -491,10 +502,15 @@
       .replace("#include <color_fragment>", "#include <color_fragment>\n\tdiffuseColor.rgb *= fitMottle(vFitW);")
       .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += diffuseColor.rgb * uFitLit;");
   }
+  // the decals' canvases (B.decal): registered once by whoever paints them
+  const DECALS = Object.create(null);
+  CBZ.fitoutDecalTex = function (id, tex) { if (id && tex) DECALS[id] = tex; return DECALS[id] || null; };
   function texMat(key) {
     if (MATS[key]) return MATS[key];
     let m;
-    if (key === "flat") m = new THREE.MeshLambertMaterial({ vertexColors: true });
+    if (key.indexOf("decal:") === 0) {
+      m = new THREE.MeshLambertMaterial({ map: DECALS[key.slice(6)] || null, vertexColors: true, alphaTest: 0.5 });
+    } else if (key === "flat") m = new THREE.MeshLambertMaterial({ vertexColors: true });
     else if (key === "glow") m = new THREE.MeshBasicMaterial({ vertexColors: true });
     else if (key === "glass") m = new THREE.MeshLambertMaterial({ vertexColors: true, transparent: true, opacity: 0.28, depthWrite: false });
     else {
@@ -527,6 +543,9 @@
      the first fitted room does not stall on its compiles. The textured one
      uses the plaster skin (256 px), the cheapest; every textured key is the
      same program. */
+  // the fit-out's surface (the mottle, the night self-light) on somebody
+  // else's material: a door leaf hung in a fitted room lights like the room
+  CBZ.fitoutShade = function (m) { if (m) m.onBeforeCompile = fitShader; return m; };
   CBZ.fitoutWarmObjects = function () {
     const g = new THREE.BoxGeometry(0.01, 0.01, 0.01);
     return ["flat", "glow", "glass", "plaster"].map(function (k) { try { return new THREE.Mesh(g, texMat(k)); } catch (e) { return null; } }).filter(Boolean);
@@ -605,6 +624,7 @@
     function box(x, y, z, w, h, d, color, o) {
       if (!(w > 0.002 && h > 0.002 && d > 0.002)) return null;
       o = o || {};
+      if (o.shape) return prim(x, y, z, w, h, d, color, o);
       const yaw = o.yaw || 0, cy = Math.cos(yaw), sy = Math.sin(yaw);
       const rx = yaw ? Math.abs(cy) * w / 2 + Math.abs(sy) * d / 2 : w / 2;
       const rz = yaw ? Math.abs(sy) * w / 2 + Math.abs(cy) * d / 2 : d / 2;
@@ -653,6 +673,90 @@
         bk.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
       }
       if (o.solid) solid(x - rx, x + rx, z - rz, z + rz, y - hh, y + hh);
+      return true;
+    }
+    /* ROUND THINGS. A turned leg, a rolled sofa arm, a candle sleeve, a brass
+       knob, a crystal drop: a box cannot be any of them. (x,y,z) the centre,
+       building-local, as box():
+         o.shape "cyl"   an upright cylinder, an ellipse w (x) by d (z), h tall;
+                         o.faces bit 4 / 8 = the top / bottom cap
+         o.shape "hcyl"  a cylinder lying along the piece's own x (o.yaw turns
+                         it): w long, h by d across; bits 1 / 2 = its end caps
+         o.shape "oct"   a cut drop: an eight-faced bipyramid w x h x d
+       o.seg sides (default 12). Normals are smooth round the barrel, so the
+       baked light rolls over it the way it rolls over a turned thing. */
+    function prim(x, y, z, w, h, d, color, o) {
+      const yaw = o.yaw || 0, cy = Math.cos(yaw), sy = Math.sin(yaw);
+      const key = o.glow ? "glow" : o.glass ? "glass" : (o.mat || "flat");
+      const bk = bucket(key);
+      const c = hexRGB(color == null ? 0xffffff : color);
+      const sc = bk.tex ? (o.uv || TEX_SCALE[key] || 2) : 1;
+      const faces = o.faces == null ? 63 : o.faces;
+      const n = Math.max(4, o.seg | 0 || 12);
+      // a local point / normal into the building frame
+      const V = function (lx, ly, lz, nx, ny, nz, u, v) {
+        bk.pos.push(x + lx * cy + lz * sy, y + ly, z - lx * sy + lz * cy);
+        const wx = nx * cy + nz * sy, wz = -nx * sy + nz * cy, l = Math.hypot(wx, ny, wz) || 1;
+        bk.nor.push(wx / l, ny / l, wz / l);
+        bk.col.push(c[0], c[1], c[2]);
+        if (bk.tex) bk.uv.push(u / sc, v / sc);
+        return bk.pos.length / 3 - 1;
+      };
+      const tri = function (a, b2, c2) { bk.idx.push(a, b2, c2); };
+      let rx, ry, rz;
+      if (o.shape === "oct") {
+        rx = w / 2; ry = h / 2; rz = d / 2;
+        const P6 = [[0, ry, 0], [0, -ry, 0], [rx, 0, 0], [0, 0, rz], [-rx, 0, 0], [0, 0, -rz]];
+        for (let i = 0; i < 4; i++) {
+          const a = P6[2 + i], b2 = P6[2 + (i + 1) % 4];
+          for (const tip of [P6[0], P6[1]]) {
+            // the facet's own normal, wound outward
+            let p0 = tip, p1 = a, p2 = b2;
+            const ux = p1[0] - p0[0], uy = p1[1] - p0[1], uz = p1[2] - p0[2], vx = p2[0] - p0[0], vy = p2[1] - p0[1], vz = p2[2] - p0[2];
+            let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+            const mx = (p0[0] + p1[0] + p2[0]), my = (p0[1] + p1[1] + p2[1]), mz = (p0[2] + p1[2] + p2[2]);
+            if (nx * mx + ny * my + nz * mz < 0) { const q = p1; p1 = p2; p2 = q; nx = -nx; ny = -ny; nz = -nz; }
+            const i0 = V(p0[0], p0[1], p0[2], nx, ny, nz, 0, 0), i1 = V(p1[0], p1[1], p1[2], nx, ny, nz, 0.1, 0), i2 = V(p2[0], p2[1], p2[2], nx, ny, nz, 0, 0.1);
+            tri(i0, i1, i2);
+          }
+        }
+        return true;
+      }
+      // (a barrel is a strip of n+1 shared columns, a cap a fan round one
+      // shared centre: about a third of the vertices of quads and loose fans)
+      if (o.shape === "hcyl") {
+        // the barrel along local x; the ring in (y, z)
+        const hx = w / 2; ry = h / 2; rz = d / 2;
+        const R = (ry + rz) / 2, A0 = [], A1 = [];
+        for (let i = 0; i <= n; i++) {
+          const a = i / n * 2 * Math.PI, c = Math.cos(a), sn = Math.sin(a);
+          A0.push(V(-hx, ry * c, rz * sn, 0, c / ry, sn / rz, -hx, R * a));
+          A1.push(V(hx, ry * c, rz * sn, 0, c / ry, sn / rz, hx, R * a));
+        }
+        for (let i = 0; i < n; i++) { tri(A0[i], A0[i + 1], A1[i + 1]); tri(A0[i], A1[i + 1], A1[i]); }
+        for (const e of [1, -1]) {
+          if (!(faces & (e > 0 ? 1 : 2))) continue;
+          const m = V(e * hx, 0, 0, e, 0, 0, 0, 0), ring = [];
+          for (let i = 0; i <= n; i++) { const a = i / n * 2 * Math.PI; ring.push(V(e * hx, ry * Math.cos(a), rz * Math.sin(a), e, 0, 0, ry * Math.cos(a), rz * Math.sin(a))); }
+          for (let i = 0; i < n; i++) { if (e > 0) tri(m, ring[i], ring[i + 1]); else tri(m, ring[i + 1], ring[i]); }
+        }
+        return true;
+      }
+      // "cyl": upright
+      rx = w / 2; rz = d / 2;
+      const hh = h / 2, R = (rx + rz) / 2, B0 = [], B1 = [];
+      for (let i = 0; i <= n; i++) {
+        const a = i / n * 2 * Math.PI, c = Math.cos(a), sn = Math.sin(a);
+        B0.push(V(rx * c, -hh, rz * sn, c / rx, 0, sn / rz, R * a, -hh));
+        B1.push(V(rx * c, hh, rz * sn, c / rx, 0, sn / rz, R * a, hh));
+      }
+      for (let i = 0; i < n; i++) { tri(B0[i], B1[i], B1[i + 1]); tri(B0[i], B1[i + 1], B0[i + 1]); }
+      for (const e of [1, -1]) {
+        if (!(faces & (e > 0 ? 4 : 8))) continue;
+        const m = V(0, e * hh, 0, 0, e, 0, 0, 0), ring = [];
+        for (let i = 0; i <= n; i++) { const a = i / n * 2 * Math.PI; ring.push(V(rx * Math.cos(a), e * hh, rz * Math.sin(a), 0, e, 0, rx * Math.cos(a), rz * Math.sin(a))); }
+        for (let i = 0; i < n; i++) { if (e > 0) tri(m, ring[i + 1], ring[i]); else tri(m, ring[i], ring[i + 1]); }
+      }
       return true;
     }
     function solid(x0, x1, z0, z1, ya, yb) {
@@ -926,6 +1030,31 @@
       if (!lv || lv.indexOf(floor.k + 1) >= 0) CEIL_HOLES.push(q);
     }
     B.addHole = function (r) { HOLES.push(r); CEIL_HOLES.push(r); };
+    /* A DECAL OF ITS OWN: one registered canvas (CBZ.fitoutDecalTex) laid flat
+       as a subdivided plane, centre (x, z), w along the yaw's own x, d across,
+       its face at y (building-local), UV 0..1 over it; the canvas's alpha cuts
+       its outline (an oval rug). Its own bucket: one more draw for the floor. */
+    B.decal = function (id, x, z, w, d, y, yaw, cell) {
+      if (!DECALS[id]) return false;
+      const bk = bucket("decal:" + id);
+      const c = hexRGB(0xffffff), cy = Math.cos(yaw || 0), sy = Math.sin(yaw || 0);
+      cell = cell || 0.6;
+      const nu = Math.max(1, Math.ceil(w / cell)), nv = Math.max(1, Math.ceil(d / cell));
+      const base = bk.pos.length / 3;
+      for (let j = 0; j <= nv; j++) for (let i = 0; i <= nu; i++) {
+        const lu = (i / nu - 0.5) * w, lv = (j / nv - 0.5) * d;
+        bk.pos.push(x + lu * cy + lv * sy, y, z - lu * sy + lv * cy);
+        bk.nor.push(0, 1, 0);
+        bk.col.push(c[0], c[1], c[2]);
+        bk.uv.push(i / nu, 1 - j / nv);
+      }
+      for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) {
+        const a = base + j * (nu + 1) + i, b2 = a + 1, c2 = a + nu + 1, d2 = c2 + 1;
+        // wound to face up
+        bk.idx.push(a, c2, b2, b2, c2, d2);
+      }
+      return true;
+    };
 
     /* THE TELEVISION — the game's one set (city/newsroom.js tvParts) drawn
        into this floor's buckets, with the shared NEWS ONE screen on its face.
@@ -974,7 +1103,7 @@
         if (!bk.idx.length) continue;
         const n = bk.pos.length / 3;
         const pos = new Float32Array(bk.pos), nor = new Float32Array(bk.nor), col = new Float32Array(bk.col);
-        if (key !== "glow") bake(pos, nor, col, n, lights, fy, ceil);
+        if (key !== "glow") bake(pos, nor, col, n, lights, fy, ceil, floor.info && floor.info.amb != null ? floor.info.amb : AMB);
         const geo = new THREE.BufferGeometry();
         geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
         geo.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
@@ -1026,7 +1155,8 @@
   // cell its radius touches), so a vertex tests the handful of fixtures that
   // can reach it instead of every lamp on the storey.
   const BIN = 2.0;
-  function bake(pos, nor, col, n, lights, fy, ceil) {
+  function bake(pos, nor, col, n, lights, fy, ceil, amb) {
+    if (amb == null) amb = AMB;
     const grid = new Map();
     for (let l = 0; l < lights.length; l++) {
       const L = lights[l];
@@ -1046,7 +1176,7 @@
       const i3 = v * 3;
       const px = pos[i3], py = pos[i3 + 1], pz = pos[i3 + 2];
       const nx = nor[i3], ny = nor[i3 + 1], nz = nor[i3 + 2];
-      let lr = AMB, lg = AMB, lb = AMB;
+      let lr = amb, lg = amb, lb = amb;
       const list = grid.get(Math.floor(px / BIN) * 65536 + Math.floor(pz / BIN)) || NONE;
       for (let l = 0; l < list.length; l++) {
         const L = list[l];
