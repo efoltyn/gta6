@@ -60,6 +60,8 @@ globalThis.CBZ = {
   cityPopulationDie: () => {},
 };
 const CBZ = globalThis.CBZ;
+// the one flag system (city/flags.js) paints each nation's flag; the page gets its picture
+CBZ.flags = { dataURL: (id) => "data:image/png;flag=" + id };
 require(path.join(ROOT, "src/systems/brain.js"));
 require(path.join(ROOT, "src/city/polwar.js"));
 const F = require(path.join(ROOT, "src/city/frontline.js"));
@@ -149,7 +151,7 @@ scenario(4, "the President's battle: posted back once, leave finished headless",
   CBZ.warroom = { nation: () => "republic", nationAt: () => null, STRIKE_COST: 12000 };
   const sp = F.specFor(war, DAY, { you: "republic" });
   check(sp && sp.you === "red" && sp.red.id === "republic", "spec: the President's nation is RED (" + (sp && sp.red.name) + " v " + (sp && sp.blue.name) + ", " + (sp && sp.ground) + ")");
-  check(sp && sp.red.flag && sp.blue.flag && sp.red.mark !== sp.blue.mark, "each side carries its own flag and colour");
+  check(sp && sp.red.flagUrl && sp.blue.flagUrl && sp.red.flagUrl !== sp.blue.flagUrl && sp.red.mark !== sp.blue.mark, "each side carries its own flag and colour");
   // fake the overlay (no DOM): open state by hand, then post an END
   const before = W.militaryOf("veridia").soldiers;
   const treas0 = records.republic.treasury;
@@ -195,7 +197,7 @@ scenario(5, "the overlay: go to the front, the city holds, the result comes home
   const raw = body.kids[0].src.split("front=")[1];
   const b = raw.replace(/-/g, "+").replace(/_/g, "/");
   const back = JSON.parse(decodeURIComponent(escape(Buffer.from(b + "===".slice((b.length + 3) % 4), "base64").toString("binary"))));
-  check(back.red.id === "republic" && back.blue.id === "kesh" && back.red.flag.kind === "band" && back.hold && back.ground,
+  check(back.red.id === "republic" && back.blue.id === "kesh" && back.red.flagUrl === "data:image/png;flag=republic" && back.hold && back.ground,
     "the page decodes the spec the city sent (" + back.red.name + " v " + back.blue.name + " on " + back.ground + ", " + back.hold + " holds)");
   check(bus.some((b) => b.evt === "battle-started" && b.p.watched), "battle-started on the bus, watched");
   check(!F.canGo().ok, "and you cannot open a second one");

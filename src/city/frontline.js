@@ -97,24 +97,17 @@
   }
 
   /* ============================================================ THE LOOK
-     A NATION'S COLOURS AND FLAG. The republic's flag is the one already flying
-     over the capital (city/president_public.js flagTex: navy field, a white
-     band, a red stripe through it, a gold star). The four countries had none;
-     these are theirs. `mark` is the bright colour a helmet cover and a smoke
+     A NATION'S COLOURS. The flag is never designed here: city/flags.js owns
+     every nation's flag and the battle page is handed its picture. `mark` is the bright colour a helmet cover and a smoke
      trail carry so a crane shot still sorts the lines; `cloth` is the
      fatigues. A polity with no row (a rebel fragment) gets colours off its id
      — the same id always gets the same flag. */
   const LOOK = {
-    republic: { mark: 0x3f6fd0, cloth: 0x4b5a3c,
-      flag: { kind: "band", field: "#1d3160", band: "#f2efe6", stripe: "#a8262b", star: "#d8b24a" } },
-    veridia:  { mark: 0x2fae7c, cloth: 0x3f5249,
-      flag: { kind: "cross", field: "#1f7a5a", cross: "#f2efe6" } },
-    kesh:     { mark: 0xd23a3a, cloth: 0x6b5236,
-      flag: { kind: "tri", field: "#7a1420", band: "#d9a62e", tri: "#141414" } },
-    solara:   { mark: 0xf09a2a, cloth: 0x75684a,
-      flag: { kind: "sun", field: "#e8761c", disc: "#fff0c0" } },
-    mbeya:    { mark: 0xe0c03a, cloth: 0x3d4a2c,
-      flag: { kind: "stripes", stripes: ["#1b6b34", "#141414", "#e0b62a"] } },
+    republic: { mark: 0x3f6fd0, cloth: 0x4b5a3c },
+    veridia:  { mark: 0x2fae7c, cloth: 0x3f5249 },
+    kesh:     { mark: 0xd23a3a, cloth: 0x6b5236 },
+    solara:   { mark: 0xf09a2a, cloth: 0x75684a },
+    mbeya:    { mark: 0xe0c03a, cloth: 0x3d4a2c },
   };
   function lookOf(id) {
     if (LOOK[id]) return LOOK[id];
@@ -124,8 +117,7 @@
       return (Math.round(f(0) * 255) << 16) | (Math.round(f(8) * 255) << 8) | Math.round(f(4) * 255);
     };
     const hex = function (n) { return "#" + n.toString(16).padStart(6, "0"); };
-    return { mark: hsl(hue, 0.6, 0.5), cloth: 0x4d4a3a,
-      flag: { kind: "stripes", stripes: [hex(hsl(hue, 0.55, 0.32)), "#f2efe6", hex(hsl((hue + 0.5) % 1, 0.5, 0.4))] } };
+    return { mark: hsl(hue, 0.6, 0.5), cloth: 0x4d4a3a };
   }
 
   /* ============================================================ THE GROUND
@@ -226,7 +218,9 @@
       return {
         id: id, name: shortName(id), full: nameOf(id),
         n: committed(mil), tier: tierOf(mil, wl), guns: gunsOf(wl),
-        mark: L.mark, cloth: L.cloth, flag: L.flag,
+        mark: L.mark, cloth: L.cloth,
+        // the nation's ONE flag (city/flags.js: custom, regime, authored); the page draws this picture
+        flagUrl: CBZ.flags && CBZ.flags.dataURL ? CBZ.flags.dataURL(id, 192) : null,
         // the army flies one bomber over its own line if it still has the planes
         air: mil && mil.planes >= 3 ? "bomber" : "none",
         // the President's own sorties (in the page: his AIR button)
