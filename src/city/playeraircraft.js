@@ -1677,7 +1677,9 @@
     try { CBZ.ordnanceSite("air:jet-missile", "missile"); CBZ.ordnanceSite("air:heli-missile", "missile"); } catch (e) {}
   }
 
-  // left-click fires while flying (pointer-locked)
+  // left-click fires while flying (pointer-locked). activeCtx was called here
+  // but never defined in this file: every mousedown anywhere threw.
+  function activeCtx() { return g.mode === "city" && g.state === "playing"; }
   addEventListener("mousedown", function (e) {
     if (e.button !== 0) return;
     if (!activeCtx()) return;

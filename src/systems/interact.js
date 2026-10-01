@@ -19,8 +19,16 @@
                keys), so a door beside him never takes the same press.
      TOUCH     nothing on anybody until you tap him (systems/touch.js raycasts
                the tap against the prison's people and calls select()). His
-               verbs appear on him; tap one. Tap anywhere else, or walk off,
-               and they go away.
+               verbs appear in THE DOCK, left of the right-thumb cluster
+               (owner, on the first pass: "put those buttons back where they
+               were so that they don't overlap with other buttons"); tap one.
+               Tap anywhere else, or walk off, and they go away.
+
+   NEVER ON HIM (owner: "it can't be overlapping them. It can't block them at
+   all"): on a keyboard the cluster is laid out beside his PROJECTED BODY
+   (bodyBoxFn below, laid out by interactions.js layoutBeside), right side
+   first, left when the right is off the glass, never across him. Measured
+   live by tools/prison-onthing-check.mjs.
 
    GRAB is the disaster game's grab (systems/handverbs.js + grapple.js +
    CBZ.verbs): pressing it swaps in the hold set (Throw / Carry / Set down)
@@ -555,23 +563,52 @@
       CBZ["prisonPersonAct" + i] = function () { doAction(i); };
     })(i);
   }
+  /* HIS BODY ON THE GLASS (systems/interactions.js lays the cluster just
+     outside it, never over him): an upright capsule, feet to crown, shoulder
+     wide, unioned with his rig's own mesh bounds when the rig has any (a man
+     lifted in a grab, a man on the floor). One function per man, so the
+     layout remembers which side of HIM it chose. */
+  // the rig's bounds count only while they look like a body (a lying, reaching
+  // or lifted man); a rig whose bounds span a bunk or a prop is the capsule
+  const BODY_R = 0.34, BODY_H = 1.92, BODY_SPAN = 1.1;
+  const _abox = new THREE.Box3();
+  function bodyBoxFn(a) {
+    if (a._promptBox) return a._promptBox;
+    const out = [{ minX: 0, maxX: 0, minY: 0, maxY: 0, minZ: 0, maxZ: 0 }];
+    a._promptBox = function () {
+      const q = a.group.position, B = out[0];
+      B.minX = q.x - BODY_R; B.maxX = q.x + BODY_R;
+      B.minZ = q.z - BODY_R; B.maxZ = q.z + BODY_R;
+      B.minY = q.y || 0; B.maxY = (q.y || 0) + BODY_H;
+      out.length = 1;
+      _abox.makeEmpty();
+      try { _abox.setFromObject(a.group); } catch (e) { _abox.makeEmpty(); }
+      if (!_abox.isEmpty() && _abox.max.x - _abox.min.x < BODY_SPAN && _abox.max.z - _abox.min.z < BODY_SPAN && _abox.max.y - _abox.min.y < 2.3) {
+        out.push({ minX: _abox.min.x, maxX: _abox.max.x, minY: _abox.min.y, maxY: _abox.max.y, minZ: _abox.min.z, maxZ: _abox.max.z });
+      }
+      return out;
+    };
+    return a._promptBox;
+  }
+  CBZ.prisonBodyBoxes = function (a) { return a && a.group ? bodyBoxFn(a)() : null; };
   function render(a, verbs) {
     if (!CBZ.prisonPrompt) return;
     const at = anchorOf(a);
+    const box = bodyBoxFn(a);
     const d2 = touchUI() ? 0 : d2Of(a);
     const who = whoFor(a);
     const name = who.name + (who.role ? "  " + who.role : "");
     let row = 0;
     if (who.name) {
       CBZ.prisonPrompt("person-who", "@prisonNoop", name,
-        { at: at, group: "person", row: row++, side: true, label: true, quote: true, d2: d2, noReach: true });
+        { at: at, group: "person", row: row++, side: true, label: true, quote: true, d2: d2, noReach: true, box: box, dock: true });
     } else CBZ.prisonPromptClear("person-who");
     for (let i = 0; i < verbs.length; i++) {
       const v = verbs[i];
       const sub = subFor(a, v);
       CBZ.prisonPrompt("person" + i, "@prisonPersonAct" + i, shortLabel(a, v), {
         at: at, key: KEYS[i], bind: true, group: "person", row: row++, side: true, lead: i === 0,
-        sub: sub || undefined, d2: d2, noReach: true,
+        sub: sub || undefined, d2: d2, noReach: true, box: box, dock: true,
         quote: v === "tellA" || v === "tellB" || v === "tellC",
       });
     }

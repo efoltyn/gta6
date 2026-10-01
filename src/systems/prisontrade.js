@@ -310,6 +310,7 @@
     try { if (document.pointerLockElement && document.exitPointerLock) document.exitPointerLock(); } catch (e) {}
     T.root.classList.add("show");
     render();
+    layoutTouch();
     return { ok: true, msg: "" };
   }
   function close() {
@@ -324,6 +325,49 @@
   }
   function isOpen() { return !!T.a; }
 
+  /* ON TOUCH THE TABLE NEVER COVERS A CONTROL (owner, 2026-09-30: the verb
+     buttons "back where they were so that they don't overlap with other
+     buttons"). Offer / Request / Accept / Leave go in THE DOCK, the same
+     spot a person's verbs use (CBZ.prisonDockSpot: left of the thumb
+     cluster, clear of every live touch control), and the two pockets take
+     the free glass between the left-hand controls and that dock. No dimmed
+     full-screen sheet: the joystick, pause and the cluster stay usable. */
+  function layoutTouch() {
+    const r = T.root;
+    if (!r) return;
+    const touch = !!CBZ.touchMode;
+    if (r.classList.contains("ptr-touch") !== touch) r.classList.toggle("ptr-touch", touch);
+    const card = r.querySelector(".ptr-card"), acts = r.querySelector(".ptr-acts");
+    if (!touch || !CBZ.prisonDockSpot || !CBZ.prisonHudObstacles) {
+      card.style.cssText = ""; acts.style.cssText = "";
+      return;
+    }
+    const W = innerWidth, H = innerHeight;
+    const obs = CBZ.prisonHudObstacles(true);
+    const aw = acts.offsetWidth, ah = acts.offsetHeight;
+    const spot = CBZ.prisonDockSpot(aw, ah, obs);
+    acts.style.left = Math.round(spot.x) + "px";
+    acts.style.top = Math.round(spot.y) + "px";
+    let L = 10, R = spot.x - 12, Tp = 10, B = H - 10;
+    for (let i = 0; i < obs.length; i++) {
+      const o = obs[i];
+      if ((o.l + o.r) / 2 < W * 0.45) L = Math.max(L, o.r + 10);
+    }
+    if (R - L < 300) {
+      // portrait: the free band across the top, over every bottom control and the dock
+      L = 10; R = W - 10; B = spot.y - 10;
+      for (let i = 0; i < obs.length; i++) {
+        const o = obs[i], cy = (o.t + o.b) / 2;
+        if (cy < H * 0.3) Tp = Math.max(Tp, o.b + 8);
+        else B = Math.min(B, o.t - 10);
+      }
+    }
+    card.style.left = Math.round(L) + "px";
+    card.style.top = Math.round(Tp) + "px";
+    card.style.width = Math.max(200, Math.round(R - L)) + "px";
+    card.style.maxHeight = Math.max(120, Math.round(B - Tp)) + "px";
+  }
+
   // walked off, he went down, the run stopped: the table folds
   CBZ.onAlways && CBZ.onAlways(97.5, function () {
     if (!T.a) return;
@@ -332,6 +376,7 @@
     if (!g || g.mode !== "escape" || g.state !== "playing" || a.dead || (a.ko > 0) || !ap || !P || !P.pos ||
         Math.hypot(ap.x - P.pos.x, ap.z - P.pos.z) > 4.5) { close(); return; }
     render();
+    layoutTouch();
   });
   addEventListener("keydown", function (e) {
     if (!T.a) return;
@@ -344,7 +389,7 @@
     put: function (side, item, n) { const d = side === "mine" ? T.mine : T.theirs; if (n > 0) d[item] = n; else delete d[item]; T.counter = null; render(); },
     offer: offer, request: request, accept: accept,
     audit: function () {
-      return { open: !!T.a, who: T.a ? nameOf(T.a) : null, mine: Object.assign({}, T.mine), theirs: Object.assign({}, T.theirs),
+      return { open: !!T.a, touch: !!(T.root && T.root.classList.contains("ptr-touch")), who: T.a ? nameOf(T.a) : null, mine: Object.assign({}, T.mine), theirs: Object.assign({}, T.theirs),
         counter: T.counter, his: T.a ? hisPocket(T.a) : null, hisCigs: T.a ? hisCigs(T.a) : 0, give: giving(), ask: T.a ? asking(T.a) : 0 };
     },
   };

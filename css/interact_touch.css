@@ -172,7 +172,9 @@
   bottom: calc(96px + env(safe-area-inset-bottom, 0px));
 }
 
-/* 3. THE PRISON'S PEOPLE: their verbs ride on the person now (css/hud.css
-   .wprompt.wside, systems/interact.js). The #pinteract rail is gone. */
+/* 3. THE PRISON'S PEOPLE: on touch a tapped man's verbs sit in the dock left
+   of the thumb cluster (css/hud.css .wprompt.wdock; the spot is derived from
+   the live control rects by systems/interactions.js dockSpot). The old
+   #pinteract rail is gone. */
 
 /* 4. speech over heads moved to css/hud.css (#speech, systems/speech.js) */
