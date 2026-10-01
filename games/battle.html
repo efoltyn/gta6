@@ -27,6 +27,23 @@
   answers "how many can this machine actually show" by measuring instead
   of guessing. There is NO cap on team size anywhere in this page — the
   input takes what you type and the frame rate tells you the truth.
+
+  2026-09-30, "NPC WAR SUCKS NOW BUT IT IS VERY CAPABLE". What sucked, and
+  what changed:
+    • Every battle had one shape: both armies walked at each other's centre
+      of mass and melted together in the middle. ORDERS: a side holds a line
+      or advances on one. The outnumbered men dig in (the few hold, the many
+      come), kneel on their line, take the reverse slope of a crest, and only
+      leave it to run down a broken enemy. ?hold=0 is the old meeting.
+    • You could only watch. YOU: the rifle button (G) puts you in the boots
+      of a man on your side; the same button hands it back.
+    • Two open grounds. Snow and fields are the same honest erg under
+      another surface and sky.
+    • THE FRONT: Gang City's wars are fought here (city/frontline.js opens
+      this page over the city with ?front=<the battle>): two nations, their
+      men, rifles, colours and flags, who holds, the General's HOLD/ADVANCE
+      and his airstrikes, and the result posted home.
+  tools/npcwar-headless.mjs runs this page's sim in node and holds all of it.
 ============================================================ -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -282,6 +299,33 @@
   #whoHp.low s{background:#ff5a3d}
   #whoMagT s{background:#e8dcc0}
   #whoMagT.rl s{background:#ff9a3d}
+
+  /* ---- A RIFLE IN YOUR HANDS: the one mark on the glass while you are a
+     soldier. Nothing else: your blood and your magazine are the two bars above. */
+  #xhair{position:fixed;left:50%;top:50%;width:22px;height:22px;margin:-11px 0 0 -11px;z-index:40;
+    pointer-events:none;opacity:0;transition:opacity .2s}
+  #xhair.on{opacity:.85}
+  #xhair::before,#xhair::after{content:"";position:absolute;background:#fff;box-shadow:0 0 2px #000}
+  #xhair::before{left:10px;top:2px;width:2px;height:18px;clip-path:polygon(0 0,100% 0,100% 35%,0 35%,0 65%,100% 65%,100% 100%,0 100%)}
+  #xhair::after{top:10px;left:2px;height:2px;width:18px;clip-path:polygon(0 0,35% 0,35% 100%,0 100%,0 0,65% 0,100% 0,100% 100%,65% 100%)}
+  #ctl button .n{position:absolute;right:-3px;top:-3px;min-width:16px;height:16px;border-radius:8px;padding:0 4px;
+    background:#ffb35c;color:#1a0d04;font:800 10px/16px ui-sans-serif,system-ui,sans-serif;text-align:center}
+  #ctl button{position:relative}
+  #ctl button.hide{display:none}
+
+  /* ---- THE FRONT (city/frontline.js opens this page over Gang City): no war
+     room, no question, no call. Two flags and the road in. ---- */
+  body.front #menu section,body.front #menu .hubLink,body.front #start{display:none}
+  body.front #menu .dock{position:fixed;left:0;right:0;bottom:22vh;margin:0;background:none}
+  .flagimg{height:.72em;width:auto;vertical-align:.02em;border-radius:2px;box-shadow:0 1px 6px rgba(0,0,0,.55)}
+  #end .tally{display:flex;justify-content:center;gap:22px;margin:0 0 16px;font:800 12px/1.3 ui-sans-serif,system-ui,sans-serif;letter-spacing:.18em;opacity:.85}
+  #end .tally img{height:14px;vertical-align:-2px;margin-right:7px;border-radius:2px}
+  .art-snow{--art:radial-gradient(120% 55% at 28% 112%,#dfe6ec 58%,transparent 59%),
+    radial-gradient(110% 50% at 88% 118%,#c9d3dc 58%,transparent 59%),
+    linear-gradient(180deg,#9fb2c6 0%,#dbe3ea 60%,#b9c6d2 100%)}
+  .art-grass{--art:radial-gradient(120% 55% at 28% 112%,#6f8a45 58%,transparent 59%),
+    radial-gradient(110% 50% at 88% 118%,#566d33 58%,transparent 59%),
+    linear-gradient(180deg,#8fb0cf 0%,#a9bf8a 55%,#5d7438 100%)}
 /* ============================================================
    SPEECH OVER THE SPEAKER'S HEAD (#speech .say, systems/speech.js)
    The only place a spoken line appears, in every game. One short line per
@@ -392,7 +436,11 @@ body.full-map-open #speech, body.sim-view #speech{ display:none !important; }
   <button id="cPause" aria-label="pause"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg></button>
   <button id="cSpeed" aria-label="speed"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6l8 6-8 6zM12 6l8 6-8 6z"/></svg></button>
   <button id="cCam" aria-label="camera"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5C6.5 5 2.7 9.4 1.5 12c1.2 2.6 5 7 10.5 7s9.3-4.4 10.5-7C21.3 9.4 17.5 5 12 5zm0 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8z"/></svg></button>
+  <button id="cRifle" aria-label="take a rifle"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 13h11l1.5-2H21v2.5h-4l-1 1.5h-3.5l-1.6 4H8.6l1.2-4H2z"/></svg></button>
+  <button id="cHold" class="hide" aria-label="hold or advance"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 2h2v20H5zM8 3h11l-2.5 4L19 11H8z"/></svg></button>
+  <button id="cAir" class="hide" aria-label="airstrike"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15.5v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0v5l-8 5v2l8-2.5V18l-2 1.5V21l3.5-1 3.5 1v-1.5L13 18v-5z"/></svg><span class="n" id="cAirN"></span></button>
 </div>
+<div id="xhair"></div>
 <div id="banner"></div>
 <div id="nflash"></div>
 <div id="who"><i id="whoHp"><s></s></i><i id="whoMagT"><s></s></i></div>
@@ -450,11 +498,36 @@ const SET = {
   call:  Q.get("call") || null,
 };
 if (SET.call !== "red" && SET.call !== "blue") SET.call = null;
+/* ============================================================ THE FRONT
+   city/frontline.js opens this page over Gang City (same tab, an iframe) with
+   ?front=<the battle as base64 JSON>: two nations, their committed men, their
+   training and rifles, their colours and flags, the ground under the front,
+   who holds the line, and the air each side can fly. The war room is skipped;
+   the result goes back to the city on postMessage (frontPost below). */
+const FRONT = (function () {
+  const raw = Q.get("front");
+  if (!raw) return null;
+  try {
+    const b = raw.replace(/-/g, "+").replace(/_/g, "/");
+    const f = JSON.parse(decodeURIComponent(escape(atob(b + "===".slice((b.length + 3) % 4)))));
+    return f && f.red && f.blue ? f : null;
+  } catch (e) { console.warn("[war] bad front spec", e); return null; }
+})();
+if (FRONT) {
+  SET.map = FRONT.ground || "dunes";
+  SET.redN = Math.max(1, FRONT.red.n | 0); SET.blueN = Math.max(1, FRONT.blue.n | 0);
+  SET.redU = SET.blueU = "men";
+  SET.redW = FRONT.red.guns || "ak47"; SET.blueW = FRONT.blue.guns || "ak47";
+  SET.redT = FRONT.red.tier || "pro"; SET.blueT = FRONT.blue.tier || "pro";
+  SET.redS = FRONT.red.air || "none"; SET.blueS = FRONT.blue.air || "none";
+  SET.auto = true; SET.bench = false; SET.call = null;
+  document.body.classList.add("front");
+}
 /* The quality counters cost a segment test and a lane scan on every trigger
    pull, which is worth paying when a tool is watching and worth nothing when
    a person is. On for ?auto=1 and ?bench=1 (both are tools), on for ?probe=1,
    off otherwise. */
-const PROBE = Q.get("probe") === "1" || (Q.get("probe") !== "0" && (SET.auto || SET.bench));
+const PROBE = Q.get("probe") === "1" || (Q.get("probe") !== "0" && !FRONT && (SET.auto || SET.bench));
 const SEP_OLD = Q.get("sep") === "old";      // the revert switch — see separateOld()
 const FIRE_OLD = Q.get("fire") === "old";    // ditto, for fire discipline
 const STEER_OLD = Q.get("steer") === "old";  // ditto, for wall-aware goal projection
@@ -594,7 +667,14 @@ const MAPS = {
   harbor:   { label: "CAPE HARBOR", note: "the coastal strip. apron, helipads", packs: ["capeharbor"], raise: ["capeharbor"], sea: true },
   marina:   { label: "THE MARINA", note: "basin, pontoons, moored boats", packs: ["marina"], raise: ["marina"], sea: true },
   speedway: { label: "THE SPEEDWAY", note: "banked oval. a ground that is NOT flat", packs: ["speedway"], raise: ["speedway"], sea: true },
-  dunes:    { label: "OPEN DUNES", note: "rolling sand. crests hide men", packs: ["desert"], featured: true },
+  dunes:    { label: "OPEN DUNES", note: "rolling sand. crests hide men", packs: ["desert"], featured: true, erg: "sand" },
+  /* THE SAME ERG, TWO MORE SKINS. The honest ground is a height function and
+     nothing else, so snow and grass are the same crests under a different
+     surface and sky: the snowfield the north's wars are fought on, and the
+     rolling fields of the farmland and forest country (softer folds). Both
+     exist because Gang City's wars are fought where the front IS. */
+  snow:     { label: "OPEN SNOW", note: "the same ground, frozen. crests hide men", packs: ["desert"], erg: "snow" },
+  grass:    { label: "OPEN FIELDS", note: "rolling grass. the folds hide men", packs: ["desert"], erg: "grass" },
   /* OPEN WATER — the one venue with NO GROUND IN IT.
 
      Every other row above raises a place. This one raises nothing, on purpose:
@@ -625,6 +705,58 @@ const TEAMS = {
   red:  { id: "red",  name: "RED",  color: 0xff5a3d },
   blue: { id: "blue", name: "BLUE", color: 0x3fa8ff },
 };
+// AT THE FRONT A SIDE IS A NATION: its name, and the bright colour its helmet
+// covers and smoke carry (the cloth is set with the uniforms below)
+if (FRONT) {
+  ["red", "blue"].forEach(function (t) {
+    TEAMS[t].name = String(FRONT[t].name || TEAMS[t].name).toUpperCase();
+    if (isFinite(FRONT[t].mark)) TEAMS[t].color = FRONT[t].mark;
+  });
+}
+/* A NATION'S FLAG, painted from its row (city/frontline.js LOOK). The
+   republic's is the one over the capital (city/president_public.js). */
+function drawFlag(c, F, w, h) {
+  F = F || { kind: "stripes", stripes: ["#555", "#999", "#555"] };
+  const star = function (x, y, R, r) {
+    c.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r : R;
+      c.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+    }
+    c.closePath(); c.fill();
+  };
+  c.fillStyle = F.field || "#444"; c.fillRect(0, 0, w, h);
+  if (F.kind === "band") {
+    c.fillStyle = F.band; c.fillRect(0, h * 0.36, w, h * 0.28);
+    c.fillStyle = F.stripe; c.fillRect(0, h * 0.44, w, h * 0.12);
+    if (F.star) { c.fillStyle = F.star; star(w * 0.2, h * 0.2, h * 0.107, h * 0.048); }
+  } else if (F.kind === "cross") {
+    c.fillStyle = F.cross; c.fillRect(w * 0.28, 0, w * 0.14, h); c.fillRect(0, h * 0.42, w, h * 0.16);
+  } else if (F.kind === "tri") {
+    c.fillStyle = F.band; c.fillRect(0, h * 0.4, w, h * 0.2);
+    c.fillStyle = F.tri; c.beginPath(); c.moveTo(0, 0); c.lineTo(w * 0.38, h / 2); c.lineTo(0, h); c.closePath(); c.fill();
+  } else if (F.kind === "sun") {
+    c.fillStyle = F.disc; c.beginPath(); c.arc(w * 0.5, h * 0.5, h * 0.26, 0, Math.PI * 2); c.fill();
+  } else {
+    const st = F.stripes || [];
+    for (let i = 0; i < st.length; i++) { c.fillStyle = st[i]; c.fillRect(0, h * i / st.length, w, h / st.length + 1); }
+  }
+}
+const FLAG_URL = {};
+function flagURL(t) {
+  if (!FRONT || !FRONT[t]) return "";
+  if (FLAG_URL[t]) return FLAG_URL[t];
+  const cv = document.createElement("canvas"); cv.width = 96; cv.height = 64;
+  drawFlag(cv.getContext("2d"), FRONT[t].flag, 96, 64);
+  return (FLAG_URL[t] = cv.toDataURL());
+}
+function flagImg(t) { const u = flagURL(t); return u ? "<img class=\"flagimg\" alt=\"\" src=\"" + u + "\">" : ""; }
+if (FRONT) {
+  // the road in: two flags over the loading bar, and nothing to choose
+  const hero = document.querySelector("#menu .hero");
+  if (hero) hero.innerHTML = "<div class=\"kick\">THE FRONT" + (FRONT.where ? ", " + String(FRONT.where).toUpperCase() : "") + "</div>" +
+    "<h1 style=\"font-size:clamp(48px,11vw,96px)\">" + flagImg("red") + " " + TEAMS.red.name + " <em>v</em> " + TEAMS.blue.name + " " + flagImg("blue") + "</h1>";
+}
 
 /* actor.weapon strings chosen so BOTH consumers read them right:
    actorweapons.js resolves the appearance model, combat_iq.js classifies the
@@ -797,7 +929,7 @@ CBZ.studio.need(NEED).then(function () {
      downtown itself) live behind MORE GROUNDS. Every map is still one <button>
      inside #maps, which is what the capture tools count. */
   const artOf = function (id) {
-    return id === "dunes" || id === "water" || id === "arena" ? "art-" + id : "art-venue";
+    return id === "dunes" || id === "water" || id === "arena" || id === "snow" || id === "grass" ? "art-" + id : "art-venue";
   };
   const tierOf = function (id) {
     return MAPS[id].featured ? "feat" : (MAPS[id].raise || id === "city") ? "more" : "main";
@@ -1130,6 +1262,8 @@ CBZ.studio.need(NEED).then(function () {
   let HAS_BEASTS = false;
   function packsFor() {
     const p = MAPS[SET.map].packs.slice();
+    // the General's own sorties need the air stack loaded even with no army air
+    if (FRONT && ((FRONT.red.strikes | 0) > 0 || (FRONT.red.queued | 0) > 0 || (FRONT.blue.queued | 0) > 0)) p.push("military", "airbase", "air", "ordnance");
     // airbase rides along for its aircraft FACTORIES, not for a base: raw
     // milModels.bomber returns a {group, footprint} record, and airbase.js is
     // the layer that hands back a seated THREE.Group — the exact reason
@@ -2041,7 +2175,16 @@ CBZ.studio.need(NEED).then(function () {
      low sun that throws the slip faces into shadow, and wind ripples in the
      sand's own shader that fade out before they can shimmer. */
   const DUNE = { on: false, cx: 0, cz: 0, R0: 420, R1: 585, half: 600,
-    wx: Math.cos(0.42), wz: Math.sin(0.42), lam: 92, skin: null };
+    wx: Math.cos(0.42), wz: Math.sin(0.42), lam: 92, skin: null, pal: null };
+  /* WHAT THE ERG IS WEARING. Sand is the original; snow and grass are the same
+     crests under another surface. `amp` softens the folds (fields roll, they
+     do not slip-face), `tint` is what the desert world's far terrain is worked
+     toward so the horizon matches the window, `tuft` is the low growth. */
+  const ERG_PAL = {
+    sand:  { sand: 0xc4935a, crest: 0xd8aa6c, trough: 0xa77a48, slip: 0xb07c46, pan: 0xb49a78, amp: 1, tint: null, tuft: 0x9a8a5a, tufts: 900 },
+    snow:  { sand: 0xe6ebef, crest: 0xf5f7f9, trough: 0xcdd6de, slip: 0xb9c6d3, pan: 0xd3d8dc, amp: 1, tint: [0.88, 0.91, 0.94], tuft: 0x857e6c, tufts: 260 },
+    grass: { sand: 0x6c8744, crest: 0x84a053, trough: 0x58713a, slip: 0x627a3e, pan: 0x8b8758, amp: 0.62, tint: [0.36, 0.45, 0.25], tuft: 0x5b7832, tufts: 1600 },
+  };
   function hash2(ix, iz, salt) {
     let h = (ix * 374761393 + iz * 668265263 + salt * 2147483647) | 0;
     h = Math.imul(h ^ (h >>> 13), 1274126177);
@@ -2077,7 +2220,7 @@ CBZ.studio.need(NEED).then(function () {
     if (f < 0.74) { const t = f / 0.74; s = t * t * (1.7 - 0.7 * t); }
     else { const t = (f - 0.74) / 0.26; s = 1 - t * t * (3 - 2 * t); }
     // crests are not all one height, and some die out into flat pan
-    const amp = 2 + 6.4 * vn2(u * 0.0065, v * 0.0045, 41);
+    const amp = (2 + 6.4 * vn2(u * 0.0065, v * 0.0045, 41)) * (DUNE.pal ? DUNE.pal.amp : 1);
     // a small cross-ripple so no slope is a perfect plane
     const lump = (vn2(x * 0.045, z * 0.045, 53) - 0.5) * 1.1;
     return ((s - 0.45) * amp + lump) * w;
@@ -2088,8 +2231,9 @@ CBZ.studio.need(NEED).then(function () {
     g.rotateX(-Math.PI / 2);
     const pos = g.attributes.position, n = pos.count;
     const col = new Float32Array(n * 3);
-    const sand = new THREE.Color(0xc4935a), crest = new THREE.Color(0xd8aa6c),
-      trough = new THREE.Color(0xa77a48), slip = new THREE.Color(0xb07c46), pan = new THREE.Color(0xb49a78);
+    const PAL = DUNE.pal || ERG_PAL.sand;
+    const sand = new THREE.Color(PAL.sand), crest = new THREE.Color(PAL.crest),
+      trough = new THREE.Color(PAL.trough), slip = new THREE.Color(PAL.slip), pan = new THREE.Color(PAL.pan);
     const tmp = new THREE.Color();
     for (let i = 0; i < n; i++) {
       const x = pos.getX(i) + DUNE.cx, z = pos.getZ(i) + DUNE.cz;
@@ -2151,7 +2295,10 @@ CBZ.studio.need(NEED).then(function () {
           // the erg beyond the skin wears the skin's sand, so the rim has no seam
           // (the salt pan and the mountains past the dune ring keep their own)
           .replace("#include <color_fragment>", "#include <color_fragment>\n" +
-            "diffuseColor.rgb *= mix(vec3(0.9, 0.78, 0.65), vec3(1.0), smoothstep(2650.0, 2900.0, length(vHoleW.xz)));");
+            "diffuseColor.rgb *= mix(vec3(0.9, 0.78, 0.65), vec3(1.0), smoothstep(2650.0, 2900.0, length(vHoleW.xz)));" +
+            // snow and fields: the basin wears the window's ground out to the ring
+            (PAL.tint ? "\ndiffuseColor.rgb = mix(diffuseColor.rgb, vec3(" + PAL.tint.map(function (v) { return v.toFixed(3); }).join(",") +
+              "), 0.82 * (1.0 - smoothstep(2650.0, 2900.0, length(vHoleW.xz))));" : ""));
       };
       T.material.needsUpdate = true;
     }
@@ -2290,8 +2437,9 @@ CBZ.studio.need(NEED).then(function () {
       o.instanceMatrix.needsUpdate = true;
     });
     // dry grass, only where a lens can see it
-    const N = 900, tuft = new THREE.InstancedMesh(tuftGeometry(),
-      new THREE.MeshLambertMaterial({ color: 0x9a8a5a }), N);
+    const TP = DUNE.pal || ERG_PAL.sand;
+    const N = TP.tufts || 900, tuft = new THREE.InstancedMesh(tuftGeometry(),
+      new THREE.MeshLambertMaterial({ color: TP.tuft }), N);
     let k = 0;
     for (let i = 0; i < N * 3 && k < N; i++) {
       const x = DUNE.cx + (hash2(i, 3, 101) - 0.5) * (DUNE.R0 * 1.8), z = DUNE.cz + (hash2(i, 4, 101) - 0.5) * (DUNE.R0 * 1.8);
@@ -2851,7 +2999,8 @@ CBZ.studio.need(NEED).then(function () {
         };
         return { red: mk(-1, SET.redN), blue: mk(1, SET.blueN) };
       })();
-    } else if (id === "dunes") {
+    } else if (M.erg) {
+      DUNE.pal = ERG_PAL[M.erg] || ERG_PAL.sand;
       world = CBZ.studio.world("desert", { seed: "npcwar" });
       groundAt = (world && world.heightAt) || groundAt;
       /* WALK OUT UNTIL THE GROUND MEASURES AS DUNES. The old centre was a
@@ -3025,8 +3174,8 @@ CBZ.studio.need(NEED).then(function () {
          touched. The buildings already block sight the honest way, through
          their own colliders. So: dunes only, until a map's ground is measured
          by something that knows the difference. */
-      terrainTrue: id === "dunes",
-      terrainLos: id === "dunes" && relief > 6 && Q.get("tlos") !== "0",
+      terrainTrue: !!M.erg,
+      terrainLos: !!M.erg && relief > 6 && Q.get("tlos") !== "0",
       // team spawn: down the streets where there are streets, ranked columns
       // where there are not, and in both cases OUT of the geometry
       spawnAt: function (team, i, r) {
@@ -3044,6 +3193,13 @@ CBZ.studio.need(NEED).then(function () {
   };
   function pickGun(choice, i) {
     if (choice === "fists") return "fists";
+    // A NATION'S ISSUE is a list (city/frontline.js: "carbine,carbine,lmg,..."),
+    // dealt out man by man on the same cycle MIXED uses
+    if (String(choice).indexOf(",") > 0) {
+      const L = String(choice).split(",");
+      const id = L[(i * 7 + ((i / L.length) | 0)) % L.length];
+      return GUN_NAME[id] ? id : "ak47";
+    }
     if (choice === "mixed") return MIX_RIFLES[(i * 7 + ((i / MIX_RIFLES.length) | 0)) % MIX_RIFLES.length];
     if (choice === "everything") return GUN_ORDER[(i * 5 + ((i / GUN_ORDER.length) | 0)) % GUN_ORDER.length];
     return GUN_NAME[choice] ? choice : "ak47";
@@ -3068,6 +3224,27 @@ CBZ.studio.need(NEED).then(function () {
     const r = Math.min(255, ((hex >> 16) & 255) * k) | 0, g = Math.min(255, ((hex >> 8) & 255) * k) | 0,
       b = Math.min(255, (hex & 255) * k) | 0;
     return (r << 16) | (g << 8) | b;
+  }
+  /* AT THE FRONT A UNIFORM IS A NATION'S, in the ground's colours: its own
+     cloth worked toward the camouflage of the place (white over-smocks in the
+     snow, tan on the sand), and the helmet cover in the nation's bright mark
+     so a crane shot still sorts the two lines. */
+  if (FRONT) {
+    const CAMO = { dunes: 0xb39a72, snow: 0xe8ecef, grass: 0x55603e, city: 0x5c5f63, harbor: 0x4c5560 };
+    const mixHex = function (a, b, t) {
+      const ch = function (sh) { return Math.round(((a >> sh) & 255) * (1 - t) + ((b >> sh) & 255) * t) & 255; };
+      return (ch(16) << 16) | (ch(8) << 8) | ch(0);
+    };
+    ["red", "blue"].forEach(function (t) {
+      const S = FRONT[t], tone = CAMO[SET.map] != null ? CAMO[SET.map] : 0x6b6b5a;
+      const k = SET.map === "snow" ? 0.72 : 0.38;
+      const cloth = mixHex(isFinite(S.cloth) ? S.cloth : 0x4d4a3a, tone, k);
+      UNIFORM[t] = {
+        torso: cloth, arms: shade(cloth, 0.94), legs: shade(mixHex(isFinite(S.cloth) ? S.cloth : 0x4d4a3a, tone, k * 0.8), 0.82),
+        cap: TEAMS[t].color, shoes: 0x1e1c19, belt: 0x2a2620,
+        shirt: mixHex(TEAMS[t].color, 0x3a3a3a, 0.4), swatT: shade(cloth, 0.62),
+      };
+    });
   }
   function uniformFor(teamId, trId, i) {
     const U = UNIFORM[teamId];
@@ -3164,6 +3341,9 @@ CBZ.studio.need(NEED).then(function () {
       routed: false, fled: false, routT: 0, routBest: 0, routStall: 0, rallyT: 0,
     };
     man.target.set(at.x, 0, at.z);
+    // where he formed up: the line a HOLD order keeps him on (ORDERS below)
+    man.home = { x: at.x, z: at.z };
+    if (FRONT && i === 0) plantFlag(teamId, at.x, at.z);
     (squads[teamId][man.sq] = squads[teamId][man.sq] || []).push(man);
     // when there is an air war, every man is a thing a bomb can find — through
     // ordnance's OWN cover rules, so a roof or a wall between the bang and the
@@ -3463,8 +3643,11 @@ CBZ.studio.need(NEED).then(function () {
         (!m.tgt || m.tgt.dead || m.tgt.fled)) m.tgt = imp.by;
     if (m.hp <= 0) killMan(m, imp);
   }
+  const DEADN = { red: 0, blue: 0 };       // the dead, by side (corpses retire; this does not)
   function killMan(m, imp) {
     m.dead = true; m.hp = 0;
+    DEADN[m.team] = (DEADN[m.team] || 0) + 1;
+    if (m.you) youDown(m);
     // a beast that dies mid-swing must let the pose go, or the strike offset
     // stays latched on the corpse — the exact leak creatureEndAttack exists for
     if (m.beast && CBZ.creatureEndAttack) { try { CBZ.creatureEndAttack(m); } catch (e) {} }
@@ -4623,6 +4806,27 @@ CBZ.studio.need(NEED).then(function () {
 
   const teamCOM = { red: { x: 0, z: 0 }, blue: { x: 0, z: 0 } };
   const HUNT = { red: false, blue: false };
+  /* ============================================================ ORDERS
+     A BATTLE HAS A SHAPE: somebody holds a line and somebody comes for it.
+     Before this every army walked at the other's centre of mass and the two
+     crowds melted together in the middle of the map — a meeting engagement
+     every time, nothing held, nothing taken. Now a side is told one of two
+     things:
+       advance  the march it always had
+       hold     stay on the line it formed on: kneel there, take the reverse
+                slope of the nearest crest when there is one, fire from it,
+                and only go forward to run down a broken enemy (or when the
+                sweep, 3:1, says the fight is over)
+     Who holds: at THE FRONT, the nation whose ground it is (city/frontline.js
+     says), and the General can change his own side's order. On the war room,
+     the smaller army of MEN digs in when the other side outnumbers it half
+     again — the few hold, the many come — and equal armies still meet. */
+  const ORDER = { red: "advance", blue: "advance" };
+  function holding(m) {
+    if (m.beast || m.you || ORDER[m.team] !== "hold" || m.hunt) return false;
+    const F = ARMY[m.team === "red" ? "blue" : "red"];
+    return !(F && F.broken);                 // a broken enemy is run down
+  }
   let comAt = -1;
   function updateCOM() {
     // the morale tick rides this one: same cadence, and it splices the fled
@@ -4962,11 +5166,20 @@ CBZ.studio.need(NEED).then(function () {
   function spawnPlanes() {
     ["red", "blue"].forEach(function (team) {
       const opt = team === "red" ? SET.redS : SET.blueS;
+      // the President's airstrikes on the front that were already in the air
+      // when it went in (city/frontline.js: `queued`) are over it at the start
+      const q = FRONT && FRONT[team] ? (FRONT[team].queued | 0) : 0;
+      for (let k = 0; k < q; k++) spawnBomber(team, k + 1, false, 2600);
       if (opt === "none") return;
       const count = opt === "bomber2" ? 2 : 1;
-      for (let i = 0; i < count; i++) {
+      for (let i = 0; i < count; i++) spawnBomber(team, i, opt === "nuke" && i === 0, 0);
+    });
+  }
+  /* ONE BOMBER, for either side, whenever: the opening's air support, and
+     the General's AIRSTRIKE mid-battle (callAir), through the same racetrack. */
+  function spawnBomber(team, i, isNuke, near) {
+      {
         const side = team === "red" ? -1 : 1;
-        const isNuke = opt === "nuke" && i === 0;
         // A NUKE PLANE NEVER TURNS. A loaded bomber's turnaround measured
         // close to a minute here, longer than half a war — so the armed run
         // is its FIRST run: it spawns however far out release-time-times-
@@ -4974,7 +5187,7 @@ CBZ.studio.need(NEED).then(function () {
         // release happens ~1.3 km short of the mass (that is how far a bomb
         // thrown at 165 m/s travels): the spawn distance buys the seconds
         // that put each plane's FIRST window after its own opening gate
-        const dist = isNuke ? Math.max(2800, 165 * (AIR.nukeAt + 6)) : 3400;
+        const dist = isNuke ? Math.max(2800, 165 * (AIR.nukeAt + 6)) : (near || 3400);
         const sx = MAP.cx + side * dist, sz = MAP.cz + (300 + i * 340) * side;
         const flown = CBZ.studio.fly("bomber", {
           groundAt: MAP.groundAt,
@@ -4989,7 +5202,21 @@ CBZ.studio.need(NEED).then(function () {
           trail: CBZ.studio.trail({ length: 60, color: TEAMS[team].color, opacity: 0.35, minStep: 24 }),
         });
       }
-    });
+  }
+  /* THE GENERAL'S AIRSTRIKE (the plane button at the front): one of his
+     nation's sorties, flown at the densest knot of the enemy line now. The
+     count is what the nation can fly and pay for (city/frontline.js), and
+     every one used is billed to its treasury when the result goes home. */
+  const AIRSTRIKE = { left: 0, used: 0 };
+  function callAir() {
+    if (!AIR.on || AIRSTRIKE.left <= 0 || over || !started) return false;
+    AIRSTRIKE.left--; AIRSTRIKE.used++;
+    airAim.red = densestCellOf("blue");
+    spawnBomber("red", 3 + AIRSTRIKE.used, false, 2600);
+    const p = planes[planes.length - 1];
+    if (p) p.dropCool = 0;
+    paintFrontCtl();
+    return true;
   }
   function dropStick(p) {
     // five bombs a pass on a long cooldown: air PUNCTUATES an infantry fight.
@@ -5155,6 +5382,11 @@ CBZ.studio.need(NEED).then(function () {
   // (Shared with the beasts verbatim: a wolf pack files through the same
   // streets the men do, and spreads the same way when it finds the fight.)
   function marchGoal(m) {
+    if (m.home && holding(m)) {
+      m.target.set(m.home.x, 0, m.home.z);
+      m.slot = "march";
+      return;
+    }
     const com = teamCOM[m.team === "red" ? "blue" : "red"];
     const sq = squads[m.team][m.sq];
     let lead = null;
@@ -5323,6 +5555,7 @@ CBZ.studio.need(NEED).then(function () {
   /* Any think that does not end in the fold gives the fold up: a man told to
      push, chase or run does not carry a crouch across open sand. */
   function think(m, now) {
+    if (m.you) return;
     thinkMan(m, now);
     if (m.hull && m.slot !== "hull") m.hull = null;
   }
@@ -5445,7 +5678,8 @@ CBZ.studio.need(NEED).then(function () {
        Not on the sweep: a hunting army does not go to ground. The fold gets
        the body-scale spread, not the 2.6 m anti-clump, which could shove the
        goal out over the lip. */
-    if (MAP.terrainLos && !m.hunt && (m.supp > 0.3 || m.hull)) {
+    const holds = holding(m);
+    if (MAP.terrainLos && !m.hunt && (m.supp > 0.3 || m.hull || holds)) {
       const hd = hullFor(m, tgt);
       if (hd) {
         m.target.set(hd.x, 0, hd.z);
@@ -5455,6 +5689,15 @@ CBZ.studio.need(NEED).then(function () {
       }
     }
 
+    /* A HELD LINE IS HELD. combat_iq's posture walks a rifleman into his
+       band (26 m for a rifle); a man holding a line fires from it instead —
+       his goal is leashed to ten metres of where he formed, and anything he
+       can see inside his gun's reach he shoots from where he is. */
+    if (holds && m.home) {
+      const hx = m.target.x - m.home.x, hz = m.target.z - m.home.z, hd = Math.hypot(hx, hz);
+      if (hd > 10) { m.target.x = m.home.x + hx / hd * 10; m.target.z = m.home.z + hz / hd * 10; }
+      if (m.sees && m.slot !== "cover" && m.slot !== "peek") m.slot = "fire";
+    }
     // anti-clump on the goal, from the grid: posture's own separation scans
     // city rosters, which are empty out here
     const a = grid.get(gridKey(Math.floor(m.pos.x / GRID_CELL), Math.floor(m.pos.z / GRID_CELL)));
@@ -5510,6 +5753,7 @@ CBZ.studio.need(NEED).then(function () {
       return;
     }
     if (m.fled) return;              // off the field; updateMorale splices him out
+    if (m.you) { stepYou(m, sdt); return; }
     if (simT >= m.thinkAt) think(m, simT);
     if (m.fled) return;
     if (m.supp > 0) m.supp = Math.max(0, m.supp - sdt * SUPP_DECAY);
@@ -5661,8 +5905,9 @@ CBZ.studio.need(NEED).then(function () {
     if (m.routed || m.fists) { if (m.stance !== "stand") setStance(m, "stand"); }
     else if (m.slot === "hull" && m.hull) m.up = workHull(m, sdt);
     else if (m.stance === "crouch") {
-      if (spd > 0.1 || !tgt || tgt.dead || (m.supp < 0.12 && m.hp >= m.maxHp * 0.5)) setStance(m, "stand");
-    } else if (spd <= 0.1 && tgt && !tgt.dead && (m.supp > 0.35 || m.hp < m.maxHp * 0.5)) {
+      const kneel = holding(m);
+      if (spd > 0.1 || (!kneel && (!tgt || tgt.dead || (m.supp < 0.12 && m.hp >= m.maxHp * 0.5)))) setStance(m, "stand");
+    } else if (spd <= 0.1 && (holding(m) || (tgt && !tgt.dead && (m.supp > 0.35 || m.hp < m.maxHp * 0.5)))) {
       setStance(m, "crouch");
     }
     m.coverK = m.stance === "crouch" ? CROUCH_HIT
@@ -5754,6 +5999,259 @@ CBZ.studio.need(NEED).then(function () {
         try { CBZ.sfx("reload", { dist: dCam, ghost: true }); } catch (e) {}
       }
     }
+  }
+
+  /* ============================================================ YOU
+     TAKE A RIFLE. The page was a thing you only watched; now you can be one
+     of the men. The rifle button (or G) puts you in the boots of a soldier of
+     your side — your call's side on the war room, your own nation's at the
+     front — standing in the middle of his army. He stops thinking and you
+     drive him: WASD (the stick on a phone), the mouse looks, the button
+     fires, R reloads, C kneels, Shift runs. The enemy shoots at you the way
+     it shoots at anybody. The same button gives the rifle back and the man
+     goes back to fighting on his own.
+
+     Everything a round does is the page's own: fireShot draws it, lands it
+     (hurtMan, wounds, the kill ledger) and plays it. The man is the same man:
+     his gun, his magazine, his reload, his training's damage per round
+     (combat_iq's derived number, so YOU are a soldier, not a god), at a
+     cadence capped to twice his own rhythm. Aim is your yaw: the nearest
+     enemy you can SEE inside a hair of the crosshair takes the round. */
+  const YOU = { m: null, yaw: 0, pitch: 0.24, down: false };
+  let TB = null;
+  function youTeam() {
+    if (FRONT) return "red";
+    const menIn = function (u) { return String(u).split("|").indexOf("men") >= 0; };
+    if (SET.call && menIn(SET.call === "red" ? SET.redU : SET.blueU)) return SET.call;
+    return menIn(SET.redU) ? "red" : menIn(SET.blueU) ? "blue" : null;
+  }
+  function join() {
+    if (!started || over || bench || YOU.m) return false;
+    const team = youTeam();
+    if (!team) return false;
+    const c = teamCOM[team];
+    let m = null, bd = Infinity;
+    for (let i = 0; i < men.length; i++) {
+      const o = men[i];
+      if (o.team !== team || o.dead || o.fled || o.beast || o.routed || o._apeHeld || o._apeFlying) continue;
+      const d = Math.hypot(o.pos.x - c.x, o.pos.z - c.z) + (o.armed ? 0 : 40);
+      if (d < bd) { bd = d; m = o; }
+    }
+    if (!m) return false;
+    YOU.m = m; YOU.last = m; YOU.down = false;
+    m.you = true; m.tgt = null; m.hull = null; m.slot = "you"; m.stepAsideT = 0;
+    YOU.yaw = m.yaw; YOU.pitch = 0.24;
+    setStance(m, "stand");
+    if (speed !== 1) setSpeed(1);              // a soldier lives at one second a second
+    if (KILL.t > 0) { KILL.t = 0; KILL.m = null; }
+    setCamMode("you");
+    if (COARSE) touchOn(); else CBZ.micro.lock();
+    el("xhair").classList.add("on");
+    el("cRifle").classList.add("on");
+    return true;
+  }
+  function leaveYou(down) {
+    const m = YOU.m;
+    YOU.m = null;
+    if (down) YOU.down = true;
+    if (m) { m.you = false; m.thinkAt = simT; m.slot = "hold"; }
+    touchOff();
+    if (!COARSE) CBZ.micro.unlock();
+    el("xhair").classList.remove("on");
+    el("cRifle").classList.remove("on");
+    if (cam.mode === "you") {
+      setCamMode("auto");
+      // the director holds on where you fell before it cuts away
+      if (m && down) { cam.shot = "point"; cam.followM = m; cam.holdT = 0; cam.cutAt = simT + 3; }
+    }
+  }
+  function youDown(m) { if (YOU.m === m) leaveYou(true); }
+  function toggleRifle() { if (YOU.m) leaveYou(false); else join(); }
+  function touchOn() {
+    const T = CBZ.micro.touch;
+    if (!T) return;
+    if (!T.root) T.init({});
+    if (!T.root) return;
+    T.root.style.display = "";
+    if (!TB) TB = {
+      fire: T.addButton({ glyph: "◎", key: "KeyJ", right: 22, bottom: "calc(104px + env(safe-area-inset-bottom,0px))", size: 86, id: "tFire" }),
+      reload: T.addButton({ glyph: "↻", key: "KeyR", right: 122, bottom: "calc(92px + env(safe-area-inset-bottom,0px))", size: 54, id: "tReload" }),
+      crouch: T.addButton({ glyph: "▼", key: "KeyC", right: 30, bottom: "calc(206px + env(safe-area-inset-bottom,0px))", size: 54, id: "tCrouch" }),
+    };
+  }
+  function touchOff() { const T = CBZ.micro.touch; if (T && T.root) T.root.style.display = "none"; }
+
+  // the round's damage: his training's derived number for this gun (the same
+  // arithmetic IQ.shot runs for every man on the field)
+  function youRoundDmg(m, w) {
+    const base = (w && w.damage) || 14;
+    const p = CBZ.combatIQ && CBZ.combatIQ.profile ? CBZ.combatIQ.profile(m) : null;
+    if (!p || !p.secPerRound || !p.dps) return base * 0.4;
+    const mul = Math.max(0.35, Math.min(1.6, (p.dps * p.secPerRound) / ((p.hit10 || 0.6) * base)));
+    return base * mul;
+  }
+  function youCadence(m, w) {
+    const p = CBZ.combatIQ && CBZ.combatIQ.profile ? CBZ.combatIQ.profile(m) : null;
+    return Math.max((w && (w.fireDelay || w.interval)) || 0.12, p && p.secPerRound ? p.secPerRound * 0.5 : 0.15);
+  }
+  function youTarget(m, range) {
+    const fx = Math.sin(YOU.yaw), fz = Math.cos(YOU.yaw);
+    let best = null, bs = Infinity;
+    for (let i = 0; i < men.length; i++) {
+      const o = men[i];
+      if (o.dead || o.fled || o.team === m.team) continue;
+      const dx = o.pos.x - m.pos.x, dz = o.pos.z - m.pos.z, d = Math.hypot(dx, dz);
+      if (d > range || d < 0.3) continue;
+      const along = (dx * fx + dz * fz) / d;
+      if (along < 0.85) continue;
+      const ang = Math.acos(Math.min(1, along));
+      const cone = 0.03 + 0.9 / d + (o.rad || 0.45) / d;
+      if (ang > cone) continue;
+      const score = ang / cone + d * 0.003;
+      if (score < bs && eyeLos(m, o)) { bs = score; best = o; }
+    }
+    return best;
+  }
+  const _yFrom = V(), _yTo = V();
+  function youMiss(m, w) {
+    m.mag--; m.lastShotT = simT; stats[m.team].shots++; m.shotsF++;
+    let from = CBZ.actorMuzzle ? CBZ.actorMuzzle(m, _yFrom) : null;
+    if (!from) from = _yFrom.set(m.pos.x + Math.sin(m.yaw) * 0.5, m.pos.y + 1.42, m.pos.z + Math.cos(m.yaw) * 0.5);
+    const reach = 140, drop = (YOU.pitch - 0.24) * 0.6;
+    _yTo.set(from.x + Math.sin(YOU.yaw) * reach, from.y - drop * reach * 0.4, from.z + Math.cos(YOU.yaw) * reach);
+    CBZ.tracer(from, _yTo, { shooter: m, muzzle: true, muzzleScale: (w && w.flash ? 0.5 + w.flash : 0.9) });
+    if (w && w.sfx) { try { CBZ.sfx(w.sfx, { dist: 2, ghost: true, volume: (w.sfxVol || 1) * 0.9, pitch: w.sfxPitch || 1 }); } catch (e) {} }
+    missImpact(from, _yTo, 0);
+  }
+  function youFire(m) {
+    const w = CBZ.weaponById(m.wid);
+    if (m.fists) {
+      // a swing at whoever is in front of you, within your arms
+      let o = null, bd = Infinity;
+      for (let i = 0; i < men.length; i++) {
+        const q = men[i];
+        if (q.dead || q.fled || q.team === m.team) continue;
+        const dx = q.pos.x - m.pos.x, dz = q.pos.z - m.pos.z, d = Math.hypot(dx, dz);
+        if (d > meleeReach(m, q) * 1.25 || (dx * Math.sin(YOU.yaw) + dz * Math.cos(YOU.yaw)) < d * 0.5) continue;
+        if (d < bd) { bd = d; o = q; }
+      }
+      m.cool = 0.5;
+      if (o) hurtMan(o, m.punch * (0.9 + lcg() * 0.4) * (CBZ.meleeScale ? CBZ.meleeScale(m, o) : 1), { by: m });
+      return;
+    }
+    if (m.mag <= 0) { youReload(m, w); return; }
+    const tgt = youTarget(m, m.launcher ? 95 : 175);
+    if (m.launcher) {
+      if (!tgt) { m.cool = 0.2; return; }
+      fireRocket(m, tgt);
+      m.cool = ((w && (w.fireDelay || w.interval)) || 1.2) + 0.4;
+      if (m.mag <= 0) youReload(m, w);
+      return;
+    }
+    m.cool = youCadence(m, w);
+    if (tgt) {
+      const d = Math.hypot(tgt.pos.x - m.pos.x, tgt.pos.z - m.pos.z);
+      let hit = Math.max(0.12, Math.min(0.88, 0.88 - d * 0.0045));
+      if (m.speed > 3.4) hit *= 0.55; else if (m.speed > 1.1) hit *= 0.8;
+      if (m.stance === "crouch") hit = Math.min(0.92, hit * 1.1);
+      if (m.supp > 0.35) hit *= 0.75;
+      fireShot(m, tgt, { fire: true, hit: hit, dmg: youRoundDmg(m, w), cd: m.cool });
+    } else youMiss(m, w);
+    if (m.mag <= 0) youReload(m, w);
+  }
+  function youReload(m, w) {
+    if (!m.magSize || m.reloadT > 0 || m.mag >= m.magSize) return;
+    m.reloadT = (w && (w.reloadTime || w.reload)) || 1.6;
+    m.reloads++;
+    try { CBZ.sfx("reload", { dist: 2, ghost: true }); } catch (e) {}
+  }
+  function stepYou(m, sdt) {
+    const IN = CBZ.micro.input, T = CBZ.micro.touch;
+    if (m.supp > 0) m.supp = Math.max(0, m.supp - sdt * SUPP_DECAY);
+    if (m.reloadT > 0) { m.reloadT -= sdt; if (m.reloadT <= 0) m.mag = m.magSize; }
+    m.cool -= sdt;
+    let ax = 0, az = 0, run = false;
+    if (IN) {
+      ax = IN.axis("KeyA", "KeyD"); az = IN.axis("KeyS", "KeyW");
+      run = IN.isDown("ShiftLeft") || IN.isDown("ShiftRight");
+    }
+    if (T && T.active && T.stick && T.stick.mag > 0.12) { ax = T.stick.x; az = -T.stick.y; run = !!T.stick.rim; }
+    const sy = Math.sin(YOU.yaw), cy = Math.cos(YOU.yaw);
+    let mx = sy * az - cy * ax, mz = cy * az + sy * ax;
+    const ml = Math.hypot(mx, mz);
+    let spd = 0;
+    if (ml > 0.05) {
+      if (run && m.stance === "crouch") setStance(m, "stand");
+      spd = (m.stance === "crouch" ? 2.2 : run ? 6.6 : 4.4) * Math.min(1, ml);
+      if (m.hp < m.maxHp * 0.45) spd *= 0.78;          // the limp is the health bar
+      mx /= ml; mz /= ml;
+      m.pos.x += mx * spd * sdt; m.pos.z += mz * spd * sdt;
+      CBZ.micro.resolveCircle(m.pos, m.rad || 0.5, m.pos.y, 1.8);
+    }
+    m.speed = spd;
+    if (MAP.water) stepDepth(m, sdt);
+    m.pos.y = MAP.bodyY(m, m.pos.x, m.pos.z);
+    m.yaw = YOU.yaw; m.group.rotation.y = m.yaw;
+    m.coverK = m.stance === "crouch" ? CROUCH_HIT : 1;
+    m.up = true;
+    const fire = IN && (IN.isDown("KeyJ") || (!COARSE && IN.locked && IN.buttons[0]));
+    const w = CBZ.weaponById(m.wid);
+    const semi = w && !w.auto;
+    const pull = semi ? (IN && (IN.pressed("KeyJ") || (!COARSE && IN.locked && IN.clicked[0]))) : fire;
+    if (pull && m.cool <= 0 && m.reloadT <= 0) youFire(m);
+  }
+  function frameYou(dt) {
+    const m = YOU.m;
+    if (!m || m.dead) { leaveYou(!!(m && m.dead)); return; }
+    const IN = CBZ.micro.input;
+    if (IN) {
+      // the edge keys, once a FRAME (the step above runs up to eight times one)
+      if (IN.pressed("KeyC")) setStance(m, m.stance === "crouch" ? "stand" : "crouch");
+      if (IN.pressed("KeyR")) youReload(m, CBZ.weaponById(m.wid));
+      YOU.yaw -= IN.mx * 0.0024;
+      YOU.pitch = Math.max(0.05, Math.min(0.85, YOU.pitch + IN.mz * 0.002));
+    }
+    const ry = YOU.yaw, low = m.stance === "crouch";
+    cam.wFocus.set(m.pos.x - Math.cos(ry) * 0.55, m.pos.y + (low ? 0.02 : 0.4), m.pos.z + Math.sin(ry) * 0.55);
+    cam.focus.copy(cam.wFocus);
+    cam.wYaw = cam.yaw = ry + Math.PI;
+    cam.wPitch = cam.pitch = YOU.pitch;
+    cam.wDist = cam.dist = 3.3;
+    cam.followM = m;
+  }
+
+  /* A NATION'S FLAG ON ITS OWN LINE (the front only): a pole behind where its
+     army formed up, the flag painted off its row. */
+  function plantFlag(team, x, z) {
+    if (!FRONT || !FRONT[team] || !MAP) return;
+    const bx = x + (team === "red" ? -8 : 8), bz = z;
+    const gy = MAP.groundAt(bx, bz);
+    const grp = new THREE.Group();
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.065, 8.5, 8), new THREE.MeshLambertMaterial({ color: 0x8c8f93 }));
+    pole.position.y = 4.25; pole.castShadow = true;
+    grp.add(pole);
+    const cv = document.createElement("canvas"); cv.width = 192; cv.height = 128;
+    drawFlag(cv.getContext("2d"), FRONT[team].flag, 192, 128);
+    const tex = new THREE.CanvasTexture(cv);
+    tex.encoding = THREE.sRGBEncoding;
+    const flag = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.6, 8, 1),
+      new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide }));
+    // a little set in the cloth, so it hangs and does not read as a sign
+    const p = flag.geometry.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const u = (p.getX(i) + 1.2) / 2.4;
+      p.setZ(i, Math.sin(u * 5.2) * 0.14 * u);
+      p.setY(i, p.getY(i) - u * u * 0.18);
+    }
+    p.needsUpdate = true; flag.geometry.computeVertexNormals();
+    flag.position.set(1.22, 7.6, 0);
+    flag.castShadow = true;
+    grp.add(flag);
+    grp.position.set(bx, gy, bz);
+    grp.rotation.y = team === "red" ? Math.PI / 2 : -Math.PI / 2;
+    grp.userData.dynamic = true;
+    grp.name = "frontFlag";
+    CBZ.scene.add(grp);
   }
 
   /* ============================================================ CAMERA
@@ -6170,7 +6668,7 @@ CBZ.studio.need(NEED).then(function () {
   function killCam(m) {
     if (!KILLCAM || bench || over || !started) return;
     if (!m || !m.beast || KILL.t > 0 || KILL.cool > 0) return;
-    if (cam.mode === "free" || cam.mode === "kill") return;
+    if (cam.mode === "free" || cam.mode === "kill" || cam.mode === "you") return;
     if (camDist2(m.pos) > 110 * 110) return;
     KILL.t = 2.1; KILL.cool = 7; KILL.n++;
     KILL.m = m; KILL.speed = speed > 0 ? speed : lastSpeed;
@@ -6257,6 +6755,8 @@ CBZ.studio.need(NEED).then(function () {
       frameUnder(dt);
     } else if (cam.mode === "surface") {
       frameWave(dt);
+    } else if (cam.mode === "you") {
+      frameYou(dt);
     } else if (IN) {
       const fwd = 46 * dt * (cam.dist / 60 + 0.4);
       const mx = IN.axis("KeyA", "KeyD"), mz = IN.axis("KeyS", "KeyW");
@@ -6278,7 +6778,7 @@ CBZ.studio.need(NEED).then(function () {
      that is already drawing a thousand bodies. */
   const whoC = { on: null, team: "", hp: -1, low: null, mag: -1, rl: null, hasMag: null, hurt: null };
   function stepWho() {
-    const m = (cam.mode === "follow" || cam.shot === "point" ||
+    const m = (cam.mode === "follow" || cam.mode === "you" || cam.shot === "point" ||
       cam.shot === "push" || cam.shot === "study" || cam.shot === "kill")
       ? cam.followM : null;
     const on = !!m && !m.dead;
@@ -6361,6 +6861,8 @@ CBZ.studio.need(NEED).then(function () {
   }
   window.addEventListener("pointerdown", function (e) {
     if (!started || uiTarget(e)) return;
+    // a soldier's mouse is his rifle: a click with no lock takes the lock
+    if (cam.mode === "you") { if (!COARSE && !CBZ.micro.input.locked) CBZ.micro.lock(); return; }
     if (cam.mode !== "free") setCamMode("free");
     drag = { id: e.pointerId, x: e.clientX, y: e.clientY, b: e.button };
   });
@@ -6379,12 +6881,12 @@ CBZ.studio.need(NEED).then(function () {
   });
   window.addEventListener("pointerup", function () { drag = null; pinch.d = 0; });
   window.addEventListener("wheel", function (e) {
-    if (!started || uiTarget(e)) return;
+    if (!started || uiTarget(e) || cam.mode === "you") return;
     if (cam.mode !== "free") setCamMode("free");
     cam.wDist = Math.max(6, Math.min(420, cam.wDist * (e.deltaY > 0 ? 1.13 : 0.885)));
   }, { passive: true });
   window.addEventListener("touchmove", function (e) {
-    if (!started || e.touches.length !== 2) return;
+    if (!started || e.touches.length !== 2 || cam.mode === "you") return;
     const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX,
       e.touches[0].clientY - e.touches[1].clientY);
     if (pinch.d) cam.wDist = Math.max(6, Math.min(420, cam.wDist * (pinch.d / d)));
@@ -6456,7 +6958,81 @@ CBZ.studio.need(NEED).then(function () {
     window.addEventListener(ev, wakeCtl, { passive: true });
   });
   // out of the war: back to the war room (which carries MAIN MENU to the hub)
-  el("cBack").addEventListener("click", function () { location.href = location.pathname; });
+  el("cBack").addEventListener("click", function () {
+    if (FRONT) { frontPost(over ? "end" : "leave"); return; }
+    location.href = location.pathname;
+  });
+  el("cRifle").addEventListener("click", function () { toggleRifle(); });
+  el("cHold").addEventListener("click", function () {
+    ORDER.red = ORDER.red === "hold" ? "advance" : "hold";
+    // a man told to go is told now, not on his next think
+    for (let i = 0; i < men.length; i++) if (men[i].team === "red") men[i].thinkAt = simT;
+    paintFrontCtl();
+  });
+  el("cAir").addEventListener("click", function () { callAir(); });
+
+  /* ============================================================ THE FRONT: CHROME
+     The General's two orders sit in the same wordless row as the clock: the
+     flag (lit = HOLD, dark = ADVANCE) and the plane (his sorties left). */
+  function paintFrontCtl() {
+    const h = el("cHold"), a = el("cAir");
+    if (!h || !a) return;
+    // a rifle only where there are men to carry one
+    el("cRifle").classList.toggle("hide", !youTeam() || !!bench);
+    h.classList.toggle("hide", !FRONT);
+    h.classList.toggle("on", ORDER.red === "hold");
+    h.style.setProperty("--cc", "#" + TEAMS.red.color.toString(16).padStart(6, "0"));
+    const showAir = !!(FRONT && (AIRSTRIKE.left > 0 || AIRSTRIKE.used > 0));
+    a.classList.toggle("hide", !showAir);
+    el("cAirN").textContent = AIRSTRIKE.left > 0 ? String(AIRSTRIKE.left) : "";
+    a.style.opacity = AIRSTRIKE.left > 0 ? "" : ".35";
+  }
+  /* THE RESULT, AT THE FRONT: who held the line, and the dead on both sides,
+     under the two flags. One way out: back to the city, which takes the
+     numbers (city/frontline.js applies them to the war). */
+  function frontEnd(won) {
+    over = true;
+    winner = won;
+    if (YOU.m) leaveYou(false);
+    const h = el("endT");
+    const verb = won ? (FRONT.hold === won ? " HOLD" : " BREAK THROUGH") : "";
+    h.textContent = won ? TEAMS[won].name + verb : "NOBODY HOLDS";
+    h.className = "";
+    if (won) h.style.color = "#" + TEAMS[won].color.toString(16).padStart(6, "0");
+    const ec = el("endCall");
+    ec.className = "";
+    ec.innerHTML = "<div class=\"tally\"><span>" + flagImg("red") + DEADN.red + " DEAD</span><span>" + flagImg("blue") + DEADN.blue + " DEAD</span></div>" +
+      (YOU.down ? "<div style=\"opacity:.7\">YOU WERE HIT</div>" : "");
+    const acts = el("end").querySelector(".acts");
+    [".nl", ".calls"].forEach(function (q) { const n = acts && acts.querySelector(q); if (n) n.style.display = "none"; });
+    el("endLoser").style.display = "none";
+    const row = el("endMenu").parentNode;
+    if (row) row.style.display = "none";
+    el("endAgain").textContent = "RETURN";
+    el("end").style.display = "grid";
+    el("ctl").classList.add("idle");
+  }
+  let posted = false;
+  function frontPost(kind) {
+    if (posted) return;
+    posted = true;
+    // the men still running when it was decided got away; the rest stand
+    const fled = { red: ARMY.red.fled, blue: ARMY.blue.fled }, alive = { red: 0, blue: 0 };
+    for (let i = 0; i < men.length; i++) {
+      const m = men[i];
+      if (m.dead || m.fled) continue;
+      if (kind === "end" && m.routed) fled[m.team]++; else alive[m.team]++;
+    }
+    const msg = { type: "cbz-front", kind: kind, warId: FRONT.warId, winner: kind === "end" ? winner : null,
+      dead: { red: DEADN.red, blue: DEADN.blue }, fled: fled, alive: alive,
+      strikesUsed: AIRSTRIKE.used, youDown: !!YOU.down, secs: Math.round(simT) };
+    if (YOU.m) leaveYou(false);
+    try {
+      if (window.parent && window.parent !== window) { window.parent.postMessage(msg, location.origin || "*"); return; }
+    } catch (e) {}
+    // opened on its own (no city behind it): the war room's way home
+    location.href = "../index.html";
+  }
 
   /* ============================================================ BENCH
      The honest answer to "how many". Everybody is unkillable so the census
@@ -6620,6 +7196,7 @@ CBZ.studio.need(NEED).then(function () {
     }
   }
   function endWar(won) {
+    if (FRONT) { frontEnd(won); return; }
     over = true;
     winner = won;
     const h = el("endT");
@@ -6657,7 +7234,10 @@ CBZ.studio.need(NEED).then(function () {
   // AGAIN used to be location.reload(), which on a war started from the menu
   // (no ?auto) dropped you straight back on the setup card. A rematch is the
   // same war, now, with your next call riding on it.
-  el("endAgain").addEventListener("click", function () { location.href = warURL({ call: nextCall }); });
+  el("endAgain").addEventListener("click", function () {
+    if (FRONT) { frontPost("end"); return; }
+    location.href = warURL({ call: nextCall });
+  });
   el("endLoser").addEventListener("click", function () {
     const o = { call: nextCall };
     if (winner === "red") o.blue = Math.max(SET.blueN + 1, Math.ceil(SET.blueN * 1.5));
@@ -6723,6 +7303,22 @@ CBZ.studio.need(NEED).then(function () {
         sunDir: [0.72, 0.5, 0.48],
       },
     };
+    /* SNOW: an overcast-bright northern day, short haze, a cold bounce off the
+       snow itself. FIELDS: a temperate afternoon over green ground. */
+    SKY.snow = {
+      fov: 64, far: 16000, exposure: 0.84,
+      sky: { top: 0x7d95b2, bottom: 0xdfe6ec, fogNear: 320, fogFar: 4200, radius: 12000, exponent: 0.7 },
+      lights: { sun: 0.88, hemi: 0.62, shadowSpan: 160, shadowMap: 2048, sunColor: 0xfff4e6,
+        skyColor: 0xc8d6e6, groundColor: 0xd5dbe0 },
+      sunDir: [0.6, 0.42, 0.55],
+    };
+    SKY.grass = {
+      fov: 64, far: 16000, exposure: 0.82,
+      sky: { top: 0x2f63a3, bottom: 0xbcd0dc, fogNear: 600, fogFar: 6000, radius: 12000, exponent: 0.6 },
+      lights: { sun: 1.0, hemi: 0.45, shadowSpan: 160, shadowMap: 2048, sunColor: 0xffe6c4,
+        skyColor: 0xa9c2dc, groundColor: 0x5f6e3e },
+      sunDir: [0.7, 0.42, 0.52],
+    };
     SKY.island = SKY.field = SKY.city;
     CBZ.micro.boot(SKY[SET.map] || SKY.dunes);
     CBZ.micro.pauseKey = null;                       // the clock is ours (Space)
@@ -6737,8 +7333,18 @@ CBZ.studio.need(NEED).then(function () {
     // men and the aircraft stay animated through it.
     if (Q.get("settle") !== "0") CBZ.studio.settle(CBZ.scene);
     // the walkable map, once, off the colliders the ground just registered
-    navBuild(MAP.cx, MAP.cz, { city: 330, island: 340, field: 540, arena: 150, dunes: 220, water: 200 }[SET.map] || 260);
-    AIR.on = SET.redS !== "none" || SET.blueS !== "none";
+    navBuild(MAP.cx, MAP.cz, { city: 330, island: 340, field: 540, arena: 150, dunes: 220, snow: 220, grass: 220, water: 200 }[SET.map] || 260);
+    AIR.on = SET.redS !== "none" || SET.blueS !== "none" ||
+      !!(FRONT && ((FRONT.red.strikes | 0) > 0 || (FRONT.red.queued | 0) > 0 || (FRONT.blue.queued | 0) > 0));
+    AIRSTRIKE.left = FRONT ? Math.max(0, FRONT.red.strikes | 0) : 0; AIRSTRIKE.used = 0;
+    // WHO HOLDS (ORDERS): the front says; on the war room the outnumbered men
+    ORDER.red = ORDER.blue = "advance";
+    if (FRONT) ORDER[FRONT.hold === "blue" ? "blue" : "red"] = "hold";
+    else if (!asBench && Q.get("hold") !== "0") {      // ?hold=0: the old meeting engagement, always
+      const menRed = String(SET.redU).split("|").indexOf("men") >= 0, menBlue = String(SET.blueU).split("|").indexOf("men") >= 0;
+      if (menBlue && SET.redN >= SET.blueN * 1.5) ORDER.blue = "hold";
+      else if (menRed && SET.blueN >= SET.redN * 1.5) ORDER.red = "hold";
+    }
     // a small war is short: the warhead arms early enough to matter
     AIR.nukeAt = 20 + Math.min(22, (SET.redN + SET.blueN) / 36);
     if (AIR.on && CBZ.ordnance && CBZ.ordnance.init) {
@@ -6792,6 +7398,10 @@ CBZ.studio.need(NEED).then(function () {
     initRes(spawnTotal);
     started = true;
     if (AIR.on) spawnPlanes();
+    paintFrontCtl();
+    // AT THE FRONT the two flags and the place, once, over the opening crane
+    if (FRONT) banner(flagImg("red") + " " + TEAMS.red.name + " <em style=\"font-style:normal;color:#ffb35c\">v</em> " + TEAMS.blue.name + " " + flagImg("blue"),
+      FRONT.where ? String(FRONT.where).toUpperCase() : "");
     CBZ.micro.onFrame(frame);
   }
 
@@ -6896,6 +7506,10 @@ CBZ.studio.need(NEED).then(function () {
       if (IN.pressed("Digit3")) setSpeed(4);
       if (IN.pressed("Digit4")) setSpeed(8);
       if (IN.pressed("Digit5")) setSpeed(0.25);
+      // G: take a rifle / hand it back (the rifle button)
+      if (IN.pressed("KeyG")) toggleRifle();
+    }
+    if (IN && cam.mode !== "you") {
       // F rides the front rank; pressing it again crosses to the other army
       if (IN.pressed("KeyF")) {
         setCamMode("follow", cam.mode === "follow" && cam.followTeam === "red" ? "blue" : "red");
@@ -7094,6 +7708,13 @@ CBZ.studio.need(NEED).then(function () {
       // for BREAK_GRACE seconds (MORALE) — a rout ends a war, not only a wipe
       const ar = inFight("red"), ab = inFight("blue");
       if (ar === 0 || ab === 0) endWar(ar > 0 ? "red" : ab > 0 ? "blue" : null);
+      /* TWO HELD LINES ARE NOT A BATTLE. When both sides hold and nobody has
+         fired for twenty seconds, the side the General is not commanding
+         goes forward. */
+      else if (ORDER.red === "hold" && ORDER.blue === "hold") {
+        const last = shotsRing.length ? shotsRing[shotsRing.length - 1].t : 0;
+        if (simT - last > 20) ORDER[FRONT ? "blue" : (SET.redN >= SET.blueN ? "red" : "blue")] = "advance";
+      }
     }
   }
 
@@ -7469,6 +8090,48 @@ CBZ.studio.need(NEED).then(function () {
        corpsesOf()where the dead actually are, so a tool can point a camera at
                   a body instead of guessing at the middle of the map.
        All read/drive-only, and none of it is reachable from play. */
+    /* THE ORDERS, THE LINE AND THE SOLDIER, readable (tools/npcwar-headless.mjs) */
+    orders: function () { return { red: ORDER.red, blue: ORDER.blue }; },
+    tally: function () {
+      const alive = { red: 0, blue: 0 }, routed = { red: 0, blue: 0 };
+      for (let i = 0; i < men.length; i++) {
+        const m = men[i];
+        if (m.dead || m.fled) continue;
+        alive[m.team]++; if (m.routed) routed[m.team]++;
+      }
+      return { dead: { red: DEADN.red, blue: DEADN.blue }, fled: { red: ARMY.red.fled, blue: ARMY.blue.fled }, alive: alive, routed: routed, simT: simT, winner: winner };
+    },
+    drift: function () {
+      const o = {};
+      ["red", "blue"].forEach(function (t) {
+        let n = 0, d = 0;
+        for (let i = 0; i < men.length; i++) {
+          const m = men[i];
+          if (m.team !== t || m.dead || m.fled || !m.home) continue;
+          n++; d += Math.hypot(m.pos.x - m.home.x, m.pos.z - m.home.z);
+        }
+        o[t] = n ? Math.round(d / n * 10) / 10 : null;
+      });
+      return o;
+    },
+    you: function () {
+      const m = YOU.m || YOU.last;
+      return { on: !!YOU.m, down: YOU.down, x: m ? m.pos.x : 0, z: m ? m.pos.z : 0,
+        shots: m ? m.shotsF : 0, hits: m ? m.hitsF : 0, kills: m ? m.kills : 0, hp: m ? Math.round(m.hp) : 0 };
+    },
+    youFace: function () {
+      const m = YOU.m; if (!m) return false;
+      let best = null, bd = Infinity;
+      for (let i = 0; i < men.length; i++) {
+        const o = men[i];
+        if (o.dead || o.fled || o.team === m.team) continue;
+        const d = Math.hypot(o.pos.x - m.pos.x, o.pos.z - m.pos.z);
+        if (d < bd) { bd = d; best = o; }
+      }
+      if (best) YOU.yaw = Math.atan2(best.pos.x - m.pos.x, best.pos.z - m.pos.z);
+      return !!best;
+    },
+    youHurt: function (n) { if (YOU.m) hurtMan(YOU.m, n, { byTeam: YOU.m.team === "red" ? "blue" : "red" }); return YOU.down; },
     freeze: function () {
       if (CBZ.micro.stop) CBZ.micro.stop();
       lastWall = 0;                       // the next real frame must not see a gap
