@@ -6401,7 +6401,8 @@
         p._carHitUntil = (CBZ.now || 0) + 850;
         // Low-speed contact knocks a person over and makes them react. Only a
         // genuinely fast impact becomes a lethal run-over.
-        const imp = { fromX: car.pos.x, fromZ: car.pos.z, force: 8 + vmag * 0.35, fling: 4 + vmag * 0.3 };
+        // `car`: gore.js puts the blood on the panels that hit him (bumper, bonnet, screen)
+        const imp = { fromX: car.pos.x, fromZ: car.pos.z, force: 8 + vmag * 0.35, fling: 4 + vmag * 0.3, car: car };
         if (!car.player) { imp.attacker = car.npcDriver || null; imp.byPlayer = false; }
         const lethal = vmag >= CRASH.pedLethal && !p.dead;   // a genuine kill THIS contact
         if (vmag >= CRASH.pedLethal) CBZ.cityKillPed && CBZ.cityKillPed(p, imp, "run over");

@@ -1432,7 +1432,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/carseats.js?v=w09290242x"></script>
 <script src="src/city/playercars.js?v=sl0930b"></script>
 <script src="src/city/crashfx.js?v=news0930"></script>
-<script src="src/city/crashdeform.js?v=boom2"></script>
+<script src="src/city/crashdeform.js?v=carblood930"></script>
 <script src="src/systems/skidmarks.js?v=skid1"></script>
 <script src="src/systems/dustfx.js?v=dust1"></script>
 <script src="src/city/cardyn.js?v=cars2aids"></script>
@@ -1440,7 +1440,7 @@ document.body.appendChild(b);}}catch(e){}})();
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
 <script src="src/city/carlod.js?v=pf0930e"></script>
-<script src="src/city/vehicles.js?v=sl0930a"></script>
+<script src="src/city/vehicles.js?v=carblood930"></script>
 <script src="src/city/carinstances.js?v=pf0930e"></script>
 <script src="src/city/playerair.js?v=phone1001"></script>
 <script src="src/city/playeraircraft.js?v=af0929b"></script>
@@ -1907,7 +1907,9 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
      always-updater is in the sort -->
-<script src="src/systems/gore.js?v=doorblood930"></script>
+<!-- projected decals: blood cut out of the struck mesh's own triangles (cars) -->
+<script src="src/systems/surfacedecal.js?v=carblood930"></script>
+<script src="src/systems/gore.js?v=carblood930"></script>
 <script src="src/systems/wounds.js?v=w09290332s"></script>
 <!-- BLOOD IS EARNED — the disaster island's trauma ledger + cause table.
      Owner-filmed: gore fired on EVERY survival death (a man who FROZE SOLID
