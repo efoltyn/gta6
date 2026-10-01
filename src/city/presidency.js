@@ -12,6 +12,11 @@
        still the one implementation of every order, called by people: these
        officers, the callers on the desk phone and the folders on the desk
        (president_office.js), the balcony speech (president_public.js).
+     • 2026-09-30 WAR (city/warroom.js): on the table, the left red phone is
+       War/Peace, the right red phone is the nuclear line (a verb only while
+       the country has warheads), the map is Order airstrike (Mark when
+       nothing is marked). BUTTONS war/peace/strike/nuke; the General
+       proposes war on a country that has cut us off, and strikes once at war.
      • No banners, no phone texts from rooms. big() routes to the TV in the
        President's Office; a refused order is returned to the person who
        asked, who says why in his own words.
@@ -478,6 +483,8 @@
     ROOM.group = null; ROOM.cols = []; ROOM.door = null; ROOM.doorCol = null;
     ROOM.board = null; ROOM.pads = []; ROOM.rect = null; ROOM.doorPt = null; ROOM.builtFor = null;
     ROOM.seats = 0; ROOM.stateSymbols = 0;
+    // the screen and the war table go with the room (their verbs read these)
+    ROOM.screenPt = null; ROOM.redPhones = null; ROOM.mapPt = null;
   }
   // is THIS person entitled through the door? The sitting head of state.
   function doorOpensFor() { return !!seat(); }
@@ -655,8 +662,17 @@
     for (const s of [-1, 1]) {
       tw(s * len * 0.3, 0.5, 0.768, 0.34, 0.48, 0.055, PAPER);
       tw(s * len * 0.42, -0.5, 0.80, 0.22, 0.34, 0.12, 0x8f3434);
+      // the handset lying in its cradle across the top, and the dial plate
+      tw(s * len * 0.42, -0.5, 0.875, 0.07, 0.32, 0.05, 0x5c1d1d);
+      tw(s * len * 0.42 + 0.06, -0.5, 0.862, 0.06, 0.12, 0.006, 0xd8d2c4);
     }
     tw(far * 0.4, 0, 0.768, 1.4, 0.9, 0.012, 0xcfc6a8);
+    // THE WAR IS ORDERED FROM THESE (city/warroom.js; wireZones below): the
+    // red phone on the left is the line to the army (War / Peace), the one on
+    // the right is the nuclear line (dead unless the country has warheads),
+    // and the map at the head of the table is where a strike is aimed.
+    ROOM.redPhones = [along(-len * 0.42, -0.5), along(len * 0.42, -0.5)];
+    ROOM.mapPt = along(far * 0.4, 0);
 
     // ---- THE VIDEO WALL at the far end: the country's live board, a screen
     // either side, a row of clocks over them, the seal above the board
@@ -767,6 +783,7 @@
     martial: "Soldiers on the street", guard: "A bigger detail", bureau: "The Bureau raid", wall: "The wall",
     police: "Police funding", taxup: "A tax rise", taxdown: "A tax cut", address: "An address to the nation",
     amnesty: "An amnesty", pardon: "A pardon", fascism: "One state", communism: "The state takes the market", crown: "The crown",
+    war: "War", peace: "Peace", strike: "An airstrike", nuke: "A nuclear strike",
   };
   function padName(key) { return ORDER_NAMES[key] || String(key); }
   function inRoom(x, z) {
@@ -1103,7 +1120,29 @@
     // amnesty is for everybody else the law is hunting inside your border.
     amnesty: decreeButton("amnesty", "THE PEOPLE",
       ["statecraft decree('amnesty') -> ped.npcHeat/npcWanted/bounty across the jurisdiction", "g.respect via CBZ.city.addRespect", "approvalShock"]),
+
+    // WAR (city/warroom.js). Thin wrappers: the gate, the target, the jets,
+    // the arsenal and every refusal line come back out of the war room.
+    war: warButton("war", "Go to war", "canWar",
+      ["polwar.js declareWar (relations -90, front, fatigue, conscription)", "approvalShock (rally)", "warroom.js enemy raids on your soil"]),
+    peace: warButton("peace", "Make peace", "canPeace",
+      ["polwar.js makePeace -> endWar (reparations, armistice, approval)"]),
+    strike: warButton("strike", "Order an airstrike", "canStrike",
+      ["playerair.js cityStrikeFlight: real jets from your capital", "strategic.js strategicRelease -> impactbus detonate -> structural.js", "polwar.js strikeOn (losses, front, fatigue)", "rec.treasury"]),
+    nuke: warButton("nuke", "Order a nuclear strike", "canNuke",
+      ["polwar.js mil.warheads (data: polity/countries rows)", "strategic.js strategicNuclearSortie (the B-2) or a strike jet", "nukefx.js + impactbus nuke row", "polwar.js nuclearStrike (surrender or retaliation)"]),
   };
+  function warButton(key, name, gateFn, moves) {
+    return {
+      group: "WAR", name: name, moves: moves,
+      live: function () { return !!(CBZ.warroom && CBZ.warroom.enemy()); },
+      gate: function () {
+        const W = CBZ.warroom;
+        return W && W[gateFn] ? W[gateFn]() : { ok: false, why: "The army is not answering." };
+      },
+      run: function () { return CBZ.warroom[key](); },
+    };
+  }
   function doctrineGate(gov) {
     return function (h) {
       if (!CBZ.regimeDeclareDoctrine) return { ok: false, why: "No regime machinery loaded." };
@@ -1185,11 +1224,71 @@
         onSelect: function () { const r = briefer(); if (r) talkTo(r); },
       }],
     });
+    // ---- THE WAR IS ORDERED FROM THE TABLE (city/warroom.js) -------------
+    // The left red phone is the army: War, or Peace while there is a war.
+    // The right red phone is the nuclear line: it has a verb only while the
+    // country has warheads. The map: E aims nothing and orders the strike on
+    // what is marked (no mark and no war: E is Mark, which opens the map).
+    // The answer comes back down the line, or from the General at the table.
+    const thing = function (pt, r, px, pz, kind) {
+      if (!pt || !on() || !CFG.PRESIDENCY_SITROOM || !seat() || CONV || !onRoomFloor() || !CBZ.warroom) return null;
+      const dx = pt.x - px, dz = pt.z - pz;
+      return dx * dx + dz * dz < r * r ? { x: pt.x, y: (ROOM.floorY || 0) + 0.95, z: pt.z, kind: kind } : null;
+    };
+    const markMap = function () { if (CBZ.fullMap && CBZ.fullMap.open) { try { CBZ.fullMap.open(); } catch (e) {} } };
+    CBZ.interactions.registerZone({
+      id: "pres-war-phone", kind: "preswarphone", radius: 1.6, prio: 14,
+      find: function (px, pz) { return thing(ROOM.redPhones && ROOM.redPhones[0], 1.6, px, pz, "preswarphone"); },
+      options: [{
+        id: "pres-war", slot: "e", prio: 20, campaignSafe: true,
+        label: function () { return CBZ.warroom && CBZ.warroom.enemy() ? "Peace" : "War"; },
+        onSelect: function () { warAnswer(pressButton(CBZ.warroom.enemy() ? "peace" : "war"), null); },
+      }],
+    });
+    CBZ.interactions.registerZone({
+      id: "pres-nuke-phone", kind: "presnukephone", radius: 1.6, prio: 14,
+      find: function (px, pz) { return thing(ROOM.redPhones && ROOM.redPhones[1], 1.6, px, pz, "presnukephone"); },
+      options: [{
+        id: "pres-nuke", slot: "e", prio: 20, campaignSafe: true, bad: true,
+        label: "Order nuke",
+        canShow: function () { return !!(CBZ.warroom && CBZ.warroom.warheads() > 0); },
+        onSelect: function () { warAnswer(pressButton("nuke"), null); },
+      }],
+    });
+    CBZ.interactions.registerZone({
+      id: "pres-war-map", kind: "preswarmap", radius: 1.7, prio: 14,
+      find: function (px, pz) { return thing(ROOM.mapPt, 1.7, px, pz, "preswarmap"); },
+      options: [{
+        id: "pres-map-strike", slot: "e", prio: 20, campaignSafe: true,
+        label: function () { return CBZ.warroom && CBZ.warroom.target() ? "Order airstrike" : "Mark"; },
+        onSelect: function () {
+          if (!CBZ.warroom.target()) { markMap(); return; }
+          warAnswer(pressButton("strike"), "general");
+        },
+      }, {
+        id: "pres-map-mark", hold: true, prio: 18, campaignSafe: true,
+        label: "Mark",
+        canShow: function () { return !!(CBZ.fullMap && CBZ.fullMap.open); },
+        onSelect: markMap,
+      }],
+    });
     if (CBZ.interactions.describe) {
       try {
         CBZ.interactions.describe("presscreen", function () { return { label: "", note: "" }; });
+        CBZ.interactions.describe("preswarphone", function () { return { label: "", note: "" }; });
+        CBZ.interactions.describe("presnukephone", function () { return { label: "", note: "" }; });
+        CBZ.interactions.describe("preswarmap", function () { return { label: "", note: "" }; });
       } catch (e) {}
     }
+  }
+  // the answer to a war order: the officer at the table says it over his
+  // head if he is standing there, otherwise the voice on the line does
+  function warAnswer(r, role) {
+    const line = r && r.ok ? (r.line || "Yes, sir.") : String((r && r.why) || "It can't be done.");
+    const ped = role ? OFF.peds[role] : null;
+    if (ped && !ped.dead) { sayPed(ped, line); return; }
+    if (CBZ.speech && CBZ.speech.phone) { try { CBZ.speech.phone(line, { secs: 3 }); return; } catch (e) {} }
+    feed(line);
   }
 
   // ============================================================
@@ -1277,6 +1376,23 @@
           ". Give me soldiers on the streets and I'll have checkpoints up before dark.",
         key: "martial", yes: "Put the soldiers out", no: "Not on our own streets", ok: "Trucks are rolling.", nope: "Then we wait for the next one.",
       };
+      // THE WAR (city/warroom.js): at war he wants to hit them; at peace with
+      // a country that has stopped talking to us, he wants to go.
+      const WR = CBZ.warroom;
+      if (WR && WR.enemy()) {
+        const t = WR.target();
+        if (t && gateOk("strike")) return {
+          line: "I have a package on " + (t.label || "their capital") + sir + ". Two jets, six bombs. Say go.",
+          key: "strike", yes: "Go", no: "Hold", ok: "Wheels up.", nope: "Holding.",
+        };
+      } else if (WR && gateOk("war")) {
+        const cw = WR.canWar();
+        const rel = (cw.ok && CBZ.relations && CBZ.relations.get && seat()) ? (CBZ.relations.get(seat().id, cw.foe) || 0) : 0;
+        if (cw.ok && rel <= -45) return {
+          line: cw.name + " won't even take our calls" + sir + ". Say the word and we are at war.",
+          key: "war", yes: "War", no: "Not yet", ok: "God help them.", nope: "They won't wait forever.",
+        };
+      }
       const mil = militiaName();
       if (mil && gateOk("crackdown")) return {
         line: "There's a private army out of " + mil + " answering to nobody. I can break it up this week.",

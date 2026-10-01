@@ -1757,6 +1757,10 @@
       // carried to resolveImpact so the blame survives the fall (undefined on
       // the piloted path, which is what keeps that path byte-identical)
       by: opts.by, byPlayer: opts.byPlayer,
+      // an act of STATE (a President's order, an enemy air force): the bus
+      // still does every bit of damage, but nukeDetonate bills no street
+      // crime to the player for it (city/warroom.js owns those consequences)
+      stateAct: !!opts.stateAct,
     };
     b.sol = solveFall(b.x0, b.y0, b.z0, b.vx, b.vy, b.vz);
     /* THE DELIVERY PROFILE, chosen the way a real one is: ballistic unless the
@@ -1842,7 +1846,7 @@
     // was told (releaseStore); undefined leaves both branches on exactly the
     // defaults that shipped — who() for `by`, true for `byPlayer` — so the
     // piloted drop is unchanged and an ordered sortie can still name its owner.
-    if (b.kind === "nuke") { nukeDetonate(s.x, s.z, { by: b.by, byPlayer: b.byPlayer }); return; }
+    if (b.kind === "nuke") { nukeDetonate(s.x, s.z, { by: b.by, byPlayer: b.byPlayer, stateAct: b.stateAct }); return; }
     detonate(s.x, iy, s.z, b.kind, {
       byPlayer: b.byPlayer !== false, by: b.by, dirx: b.vx, dirz: b.vz,
       mass: MASS[b.kind] || MASS.bomb, speed: s.speed,
@@ -2517,8 +2521,13 @@
 
     // ---- consequence: the whole state turns on you. The star API grants the
     // owner-reserved 5th star only for a military-scale reason — this is one.
-    if (CBZ.cityCrime) { try { CBZ.cityCrime(400, { x: x, z: z, type: "terrorism", instant: true }); } catch (e) {} }
-    if (CBZ.cityAddStars) { try { CBZ.cityAddStars(5, "Nuclear detonation, military response"); } catch (e) {} }
+    // An act of state (opts.stateAct — a President's order or an enemy air
+    // force) is not a street crime: city/warroom.js prices it in approval,
+    // relations and war instead.
+    if (!opts.stateAct) {
+      if (CBZ.cityCrime) { try { CBZ.cityCrime(400, { x: x, z: z, type: "terrorism", instant: true }); } catch (e) {} }
+      if (CBZ.cityAddStars) { try { CBZ.cityAddStars(5, "Nuclear detonation, military response"); } catch (e) {} }
+    }
     // panic buses (the loudest possible scare, C4's exact pattern)
     if (CBZ.cityPostEvent) { try { CBZ.cityPostEvent({ type: "explosion", pos: { x: x, y: 1, z: z }, radius: 400, intensity: 4 }); } catch (e) {} }
     if (CBZ.cityEvent) { try { CBZ.cityEvent("explosion", { x: x, z: z, panic: 40, damage: 30 }, { silent: true, noWanted: true }); } catch (e) {} }
@@ -2746,7 +2755,7 @@
       // the point on the run-in at which letting go puts the weapon on the mark
       rx: tx - sol.throwX, rz: tz - sol.throwZ,
       rv: sol.rv, alt: sol.y,
-      by: opts.by, byPlayer: opts.byPlayer !== false,
+      by: opts.by, byPlayer: opts.byPlayer !== false, stateAct: !!opts.stateAct,
       phase: "inbound", t: 0, sndT: 0,
     };
     // The city gets told, once, the way every other inbound is told.
@@ -2792,7 +2801,7 @@
         s.t = 0;
         // ONE call, and it is the player's own. bayPoint() reads the real
         // model, so the weapon leaves the real bay of the real aeroplane.
-        releaseStore("nuke", bayPoint(s), s.rv, { by: s.by, byPlayer: s.byPlayer });
+        releaseStore("nuke", bayPoint(s), s.rv, { by: s.by, byPlayer: s.byPlayer, stateAct: s.stateAct });
         note("WEAPON AWAY.", 2.4, { from: "Strategic Command", app: "messages" });
       }
     } else if (s.t > SORTIE.RTB) {
