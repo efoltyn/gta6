@@ -1509,7 +1509,8 @@
   const AMK = new Float32Array(AIR_MAX);           // mark-size multiplier (drops that merge on landing)
   const AKIND = new Uint8Array(AIR_MAX), AMARK = new Uint8Array(AIR_MAX);    // 0 drop / 1 mist; leaves a mark
   const AWP = new Int8Array(AIR_MAX), AWG = new Uint16Array(AIR_MAX);        // wall plane + its generation
-  const AIR_FIELDS = [AX, AY, AZ, AVX, AVY, AVZ, AR, AS1, AT, AL, AA, AK, ATR, ABRK, AFL, AFT, ASEA, AMG, AMK, AKIND, AMARK, AWP, AWG];
+  const AVV = new Int8Array(AIR_MAX), AVG = new Uint16Array(AIR_MAX);        // the car volume it stops in + its generation
+  const AIR_FIELDS = [AX, AY, AZ, AVX, AVY, AVZ, AR, AS1, AT, AL, AA, AK, ATR, ABRK, AFL, AFT, ASEA, AMG, AMK, AKIND, AMARK, AWP, AWG, AVV, AVG];
   let airN = 0, airCursor = 0, airShutter = 1 / 120, airLands = 0;
   // A STREAM LANDS AS A FEW BIGGER MARKS, NOT SIXTY SMALL ONES: drops that
   // arrive on top of each other merge. An emitter (or a blast) sets these
@@ -1685,6 +1686,7 @@
     ATR[i] = trail0 || 0; ABRK[i] = brk || 0.12;
     AKIND[i] = 0; AMARK[i] = airMarkP >= 1 || Math.random() < airMarkP ? 1 : 0; AMG[i] = markR || 0; AMK[i] = airMarkK;
     AWP[i] = wp == null || wp < 0 ? -1 : wp; AWG[i] = wp == null || wp < 0 ? 0 : WP_GEN[wp];
+    AVV[i] = airVV; AVG[i] = airVV < 0 ? 0 : VV_GEN[airVV];
     AFL[i] = decalFloorAt(x, z); AFT[i] = 0.02 + Math.random() * 0.06; ASEA[i] = Math.random() * 0.18;
     AIR_AUDIT.drops++;
     return i;
@@ -1699,7 +1701,7 @@
     AX[i] = x; AY[i] = y; AZ[i] = z; AVX[i] = vx; AVY[i] = vy; AVZ[i] = vz;
     AR[i] = s0; AS1[i] = Math.max(s0, s1); AT[i] = 0; AL[i] = life; AA[i] = alpha;
     AK[i] = 7 + Math.random() * 4;                      // aerosol stops in centimetres
-    ATR[i] = 0; ABRK[i] = 0; AKIND[i] = 1; AMARK[i] = 0; AMG[i] = 0; AMK[i] = 1; AWP[i] = -1; AWG[i] = 0;
+    ATR[i] = 0; ABRK[i] = 0; AKIND[i] = 1; AMARK[i] = 0; AMG[i] = 0; AMK[i] = 1; AWP[i] = -1; AWG[i] = 0; AVV[i] = -1; AVG[i] = 0;
     AFL[i] = 0; AFT[i] = 0; ASEA[i] = 0;
     AIR_AUDIT.mist++;
     return i;
@@ -1716,10 +1718,11 @@
   const WP_Y0 = new Float32Array(WP_MAX), WP_Y1 = new Float32Array(WP_MAX);
   const WP_GEN = new Uint16Array(WP_MAX);
   const WP_C = new Array(WP_MAX).fill(null);         // the collider struck: its mesh is what the drops ride
-  let wpCursor = 0;
+  let wpCursor = 0, airWallT = 3.4;
   function airWall(x, y, z, dx, dz) {
     if (!(dx || dz)) return -1;
     const f = wallFace(x, y, z, dx, dz, 3.4);
+    airWallT = f ? f.t : 3.4;
     if (!f) return -1;
     const k = wpCursor; wpCursor = (wpCursor + 1) % WP_MAX;
     const c = f.c, hx = x + dx * f.t, hz = z + dz * f.t;
@@ -1889,7 +1892,11 @@
     if (!through) return;
     const T = head ? 0.17 : 0.26;
     const ex = x + dx * T, ey = y + dy * T, ez = z + dz * T;
-    const wp = lod >= 0.6 ? airWall(ex, ey, ez, dx, dz) : -1;
+    let wp = lod >= 0.6 ? airWall(ex, ey, ez, dx, dz) : -1;
+    // a car on the line before the wall takes the spray ON its body
+    const vv = lod >= 0.6 ? vehicleSpray(ex, ey, ez, dx, dy, dz, amt, head, wp >= 0 ? airWallT : 3.4) : -1;
+    if (vv >= 0) wp = -1;
+    airVV = vv;
     const nX = Math.round((8 + 20 * amt) * (head ? 1.3 : 1) * (pop ? 1.5 : 1) * lod);
     const k = 0.7 + 0.45 * Math.min(1.4, amt);
     for (let i = 0; i < nX; i++) {
@@ -1898,6 +1905,7 @@
       airDrop(ex + (Math.random() - 0.5) * 0.04, ey + (Math.random() - 0.5) * 0.04, ez + (Math.random() - 0.5) * 0.04,
         v.x * sp, v.y * sp, v.z * sp, rMM(0.3, head ? 2.6 : 2.2), wp, 0, 0, 0);
     }
+    airVV = -1;
     const nXM = lod < 0.35 ? 1 : (head ? 4 : 2) + (amt > 0.8 ? 1 : 0) + (pop ? 3 : 0);
     const big = (head ? 1.45 : 1) * (pop ? 1.5 : 1) * (0.7 + 0.4 * Math.min(1.4, amt));
     for (let i = 0; i < nXM; i++) {
@@ -2015,6 +2023,13 @@
             killAir(i); continue;
           }
         }
+      }
+      // the car its spray was headed for: it is on the body now (the spatter
+      // decal stands for it), not falling through the bonnet to the road
+      const vv = AVV[i];
+      if (vv >= 0) {
+        if (AVG[i] !== VV_GEN[vv]) AVV[i] = -1;
+        else if (inVolume(vv, x, y, z)) { killAir(i); continue; }
       }
       // the wall its spray was headed for
       const wp = AWP[i];
@@ -2545,6 +2560,7 @@
      record { c, t, face, y0, y1 } or null. */
   const _wf = { c: null, t: 0, face: null, y0: 0, y1: 0 };
   function wallFace(x, y, z, dx, dz, MAXD) {
+    _vehNoted.length = 0;
     const cols = CBZ.colliders;
     if (!cols || !cols.length) return null;
     let best = null, bestT = MAXD, by0 = -1e9, by1 = 1e9;
@@ -2568,6 +2584,10 @@
         if (ta > t0) { t0 = ta; face = fa; } t1 = Math.min(t1, tb);
       } else if (z < c.minZ || z > c.maxZ) { continue; }
       if (!(face && t0 >= 0 && t0 <= t1 && t0 < bestT)) continue;
+      // A VEHICLE'S COLLIDER IS A BOX ROUND THE CAR, NOT A WALL: blood on it
+      // was a flat sheet standing in the air beside the doors. The car's own
+      // meshes take it (vehicleSplat / vehicleSpray).
+      if (c.ref) { const vr = vehicleRootOf(c.ref); if (vr) { noteVehicle(vr); continue; } }
       // WALL-SIZED face: the struck face spans the axis PERPENDICULAR to its
       // normal. A blood plane needs a real wall behind it, so require that span
       // (and enough height) — a thin hydrant/pole/meter/sign box never passes.
@@ -2603,6 +2623,8 @@
   function spawnWallSplat(x, y, z, dx, dz, amt, instant) {
     if (walls.length > 48) return;
     const best = wallFace(x, y, z, dx, dz, 3.4);
+    // a car between the wound and the wall wears it, where the slug lands
+    if (vehicleSplat(x, y, z, dx, 0.1, dz, best ? best.t : 3.4, amt, instant)) return;
     if (!best) return;
     const col = best.c;                                   // best is a reused record: hold the collider now
     const c = claimLand();
@@ -2644,6 +2666,597 @@
         (instant ? 0.1 : 0.25) + Math.random() * 0.5);
       walls.push(anchorTo({ m: dm, slot: dc.slot, t: 0, hold: near ? 60 : 26, fade: 12 }, col));
     }
+  }
+
+  /* ============================================================
+     BLOOD ON A VEHICLE LIES ON THE BODY. (OWNER: "BLOOD SPLATTERS ONTO
+     VEHICLES LOOK FAKE AS FUCK. THEY TREAT THE VEHICLE AS FLAT SO
+     FLOATING, BAD PHYSICS AGAIN.")
+
+     ROOT CAUSE. Nothing in this file knew a car was a car. The only way blood
+     reached one was wallFace(): an AABB scan of CBZ.colliders, which for a
+     vehicle holds a BOX ROUND THE CAR (police.js's roadblock cruisers are a
+     4 x 4 m square on a 1.9 x 4.7 m car; parked hardware a footprint box).
+     The splat was a flat vertical quad on that box's face, at a guessed
+     height (`y + 0.1..0.4`): 0.6-1.1 m clear of the doors and the bonnet,
+     standing upright in the air beside the car — and on a curved panel even
+     a quad seated at the right point leaves its edges hanging off the curve.
+     Every other car (traffic, parked, the player's) had no collider at all,
+     so a spray toward one went THROUGH it to the wall or the road behind.
+
+     WHAT IT IS NOW.
+       * The line the blood actually travels (the shot line as a ballistic
+         arc under AIR_G, the run-over's contact) is RAYCAST against the
+         vehicle's drawn meshes (merged buckets, baked shut doors, glass,
+         wheels; never an occupant or another decal). A collider whose ref is
+         a vehicle is no longer a wall: wallFace hands it here instead.
+       * The mark is a PROJECTED DECAL (systems/surfacedecal.js): the host
+         mesh's own triangles inside a box at the hit, clipped to it, so it
+         lies on the hood's curve, wraps the fender, follows the windscreen's
+         rake. Lift 1.5 mm along the interpolated normal + polygonOffset.
+       * Each piece is a child of the mesh it was cut from, so it rides the
+         car, swings with a door (a shut door is a baked merge: the live leaf,
+         parked off the graph, gets its own piece in its shut pose, so the
+         blood is on the leaf the moment it opens), and REFITS when
+         crashdeform dents the host (barycentric re-evaluation, no new
+         projection).
+       * Paint: the floor layer's multiply filter, so the paint's own
+         clearcoat and lighting come through. Glass: a thin translucent film
+         that runs DOWN the pane (a shader smear along the projected gravity),
+         drawn after the glass.
+       * Rain washes it, speed thins it. Per car cap 5, global cap rides the
+         quality tier (10 phone .. 36), pooled meshes, materials and buffers.
+  ============================================================ */
+  const VD_PER_CAR = 5;
+  function vdCap() { return Math.round(CBZ.qScale ? CBZ.qScale(10, 36) : 24); }
+  const VD_OFF = 0.0015;            // lift along the surface normal (m)
+  const VD_IN = 0.16, VD_OUT = 0.06; // the projector reaches this far under / over the hit
+  const vehRecs = [];
+  const VD_TIME = { value: 0 };     // one clock uniform object shared by every piece
+  const VD_AUDIT = { stamps: 0, pieces: 0, glass: 0, refits: 0, misses: 0, released: 0 };
+
+  function isVehicleRoot(o) {
+    const u = o && o.userData;
+    return !!(u && (u.carVisual || u.bodyKind || u.milKind || u.aircraftDims));
+  }
+  function vehicleRootOf(o) {
+    for (let k = 0; o && k < 8; k++, o = o.parent) if (isVehicleRoot(o)) return o;
+    return null;
+  }
+  // the car record behind a root (cityCars), for wake/speed
+  function carOfRoot(root) {
+    const L = CBZ.cityCars;
+    if (L) for (let i = 0; i < L.length; i++) if (L[i] && L[i].group === root) return L[i];
+    return null;
+  }
+  // root-local bounds, measured once per root (a car never changes size)
+  const vehBoundsMemo = new WeakMap();
+  const _vb = new THREE.Box3(), _vbm = new THREE.Matrix4(), _vbi = new THREE.Matrix4();
+  function vehBounds(root) {
+    let b = vehBoundsMemo.get(root);
+    if (b) return b;
+    root.updateWorldMatrix(true, true);
+    _vbi.copy(root.matrixWorld).invert();
+    const box = new THREE.Box3();
+    vehMeshes(root, _vbList, false);
+    for (let i = 0; i < _vbList.length; i++) {
+      const m = _vbList[i], g = m.geometry;
+      if (!g.boundingBox) g.computeBoundingBox();
+      if (!g.boundingBox) continue;
+      _vbm.multiplyMatrices(_vbi, m.matrixWorld);
+      _vb.copy(g.boundingBox).applyMatrix4(_vbm);
+      box.union(_vb);
+    }
+    _vbList.length = 0;
+    if (box.isEmpty()) box.set(new THREE.Vector3(-1, 0, -2.5), new THREE.Vector3(1, 1.6, 2.5));
+    const c = box.getCenter(new THREE.Vector3());
+    b = { min: box.min.clone(), max: box.max.clone(), c, r: box.getSize(new THREE.Vector3()).length() * 0.5 };
+    vehBoundsMemo.set(root, b);
+    return b;
+  }
+  const _vbList = [];
+  // the meshes blood can land on: drawn (below the root: a proxied car's
+  // group is hidden while its instances draw it), not a body, not a decal
+  function vehMeshes(root, out, visOnly) {
+    out.length = 0;
+    (function walk(o, top) {
+      if (!top && visOnly !== false && o.visible === false) return;
+      const u = o.userData;
+      if (u && (u.occupant || u.goreDecal || u.charRig || u.pilot)) return;
+      if (o.isMesh && !o.isSkinnedMesh && !o.isInstancedMesh && o.geometry && o.geometry.attributes &&
+          o.geometry.attributes.position && o.material && !Array.isArray(o.material) && o.material.visible !== false) out.push(o);
+      const ch = o.children;
+      for (let i = 0; i < ch.length; i++) walk(ch[i], false);
+    })(root, true);
+    return out;
+  }
+
+  // ---- which vehicles are near a line ----------------------------------------
+  const _vehNoted = [];             // wallFace drops vehicle colliders here
+  function noteVehicle(root) { if (_vehNoted.indexOf(root) < 0 && _vehNoted.length < 8) _vehNoted.push(root); }
+  const _vehCand = [];
+  const _vc = new THREE.Vector3();
+  function vehicleCandidates(x, y, z, dx, dy, dz, len) {
+    _vehCand.length = 0;
+    for (let i = 0; i < _vehNoted.length; i++) _vehCand.push(_vehNoted[i]);
+    const L = CBZ.cityCars;
+    if (L) {
+      const mx = x + dx * len * 0.5, mz = z + dz * len * 0.5, reach = len * 0.5 + 9;
+      for (let i = 0; i < L.length && _vehCand.length < 8; i++) {
+        const c = L[i], g = c && c.group;
+        if (!g || !g.parent || c._sleep) continue;
+        const ex = g.position.x - mx, ez = g.position.z - mz;
+        if (ex * ex + ez * ez > reach * reach) continue;      // world-space prefilter (cars sit on the root)
+        if (_vehCand.indexOf(g) < 0) _vehCand.push(g);
+      }
+    }
+    // the honest test: the line against each car's own bounding sphere
+    let n = 0;
+    for (let i = 0; i < _vehCand.length; i++) {
+      const g = _vehCand[i], b = vehBounds(g);
+      g.updateWorldMatrix(true, false);
+      _vc.copy(b.c).applyMatrix4(g.matrixWorld);
+      const px = _vc.x - x, py = _vc.y - y, pz = _vc.z - z;
+      let t = px * dx + py * dy + pz * dz; t = t < 0 ? 0 : (t > len ? len : t);
+      const qx = px - dx * t, qy = py - dy * t, qz = pz - dz * t;
+      if (qx * qx + qy * qy + qz * qz <= (b.r + 0.6) * (b.r + 0.6)) _vehCand[n++] = g;
+    }
+    _vehCand.length = n;
+    return _vehCand;
+  }
+
+  // ---- the ray --------------------------------------------------------------
+  const _vRay = new THREE.Raycaster();
+  const _vHits = [], _vMeshes = [], _vRoots = [], _vTmp = [];
+  const _vO = new THREE.Vector3(), _vD = new THREE.Vector3(), _vN3 = new THREE.Matrix3();
+  const VH = { root: null, mesh: null, p: new THREE.Vector3(), n: new THREE.Vector3(), d: 0, glass: false };
+  // the drawn meshes of these roots, world matrices fresh: once per event,
+  // not once per chord of the arc
+  function gatherMeshes(roots) {
+    _vMeshes.length = 0; _vRoots.length = 0;
+    for (let r = 0; r < roots.length; r++) {
+      roots[r].updateWorldMatrix(true, true);
+      vehMeshes(roots[r], _vTmp, true);
+      for (let i = 0; i < _vTmp.length; i++) { _vMeshes.push(_vTmp[i]); _vRoots.push(roots[r]); }
+    }
+    _vTmp.length = 0;
+  }
+  // nearest drawn vehicle surface on (o, dir) within len, over the gathered
+  // meshes. dir unit. -> VH | null
+  function vehicleRay(ox, oy, oz, dx, dy, dz, len) {
+    let best = null, bestD = len;
+    _vO.set(ox, oy, oz); _vD.set(dx, dy, dz);
+    _vRay.set(_vO, _vD); _vRay.near = 0; _vRay.far = len;
+    if (CBZ.camera) _vRay.camera = CBZ.camera;
+    for (let i = 0; i < _vMeshes.length; i++) {
+      const m = _vMeshes[i];
+      _vHits.length = 0;
+      try { m.raycast(_vRay, _vHits); } catch (e) { continue; }
+      for (let k = 0; k < _vHits.length; k++) {
+        const h = _vHits[k];
+        if (h.distance >= bestD || !h.face) continue;
+        bestD = h.distance; best = h; VH.root = _vRoots[i]; VH.mesh = m;
+      }
+    }
+    _vHits.length = 0;
+    if (!best) return null;
+    VH.p.copy(best.point); VH.d = bestD;
+    _vN3.getNormalMatrix(VH.mesh.matrixWorld);
+    VH.n.copy(best.face.normal).applyMatrix3(_vN3).normalize();
+    if (VH.n.dot(_vD) > 0) VH.n.negate();                   // the side the blood came from
+    VH.glass = vehGlass(VH.mesh);
+    return VH;
+  }
+  // the blood's real path: a slug thrown at `sp` along (dx,dy,dz), falling
+  // under AIR_G, marched in short chords. -> VH (with VH.t flight seconds) | null
+  function vehicleArc(x, y, z, dx, dy, dz, sp, reach, roots) {
+    if (!roots.length) return null;
+    gatherMeshes(roots);
+    let px = x, py = y, pz = z, vx = dx * sp, vy = dy * sp, vz = dz * sp, run = 0, t = 0;
+    const DT = 0.035;
+    for (let s = 0; s < 24 && run < reach; s++) {
+      const nx = px + vx * DT, ny = py + vy * DT - 0.5 * AIR_G * DT * DT, nz = pz + vz * DT;
+      const sx = nx - px, sy = ny - py, sz = nz - pz, sl = Math.sqrt(sx * sx + sy * sy + sz * sz) || 1e-6;
+      const h = vehicleRay(px, py, pz, sx / sl, sy / sl, sz / sl, sl);
+      if (h) { h.t = t + DT * (h.d / sl); h.run = run + Math.hypot(sx, sz) * (h.d / sl); _vMeshes.length = 0; _vRoots.length = 0; return h; }
+      run += Math.hypot(sx, sz); t += DT;
+      vy -= AIR_G * DT; px = nx; py = ny; pz = nz;
+      if (py < -0.5) break;
+    }
+    _vMeshes.length = 0; _vRoots.length = 0;   // never pin a car that later leaves the world
+    return null;
+  }
+  function vehGlass(m) {
+    const mat = m && m.material;
+    if (!mat) return false;
+    if (m.userData && m.userData.carGlass) return true;
+    if (mat._bodyPaint || mat._playerCarOwned) return false;
+    if (mat.transmission > 0) return true;
+    return !!(mat.transparent && (mat.opacity == null || mat.opacity < 0.95));
+  }
+
+  // ---- the decal pieces: pooled mesh + geometry + material per look ----------
+  const VD_VS = [
+    "uniform vec4 uCell; uniform vec4 uT; uniform vec4 uFx;",
+    "uniform vec3 uTx; uniform vec3 uTy; uniform float uTime;",
+    "varying vec2 vUv; varying vec4 vS;",
+    "varying vec3 vN; varying vec3 vTx; varying vec3 vTy; varying vec3 vView;",
+    "void main() {",
+    "  vUv = uCell.xy + vec2(" + LD_CELL_W.toFixed(4) + ", " + LD_CELL_H.toFixed(4) + ") * uv;",
+    "  float age = max(0.0, uTime - uT.x);",
+    "  float g = uT.y > 0.0 ? clamp(age / uT.y, 0.0, 1.0) : 1.0;",
+    "  g = uT.w + (1.0 - uT.w) * (1.0 - pow(1.0 - g, 2.2));",
+    "  vS = vec4(mix(1.0, uFx.w, g) + uFx.z, clamp(age / uT.z, 0.0, 1.0), uFx.x, uFx.y);",
+    "  if (uTime < uT.x) vS.x = 2.0;",                  // still in the air: nothing on the panel yet
+    "  mat3 m3 = mat3(modelMatrix);",
+    "  vN = normalize(m3 * normal); vTx = normalize(m3 * uTx); vTy = normalize(m3 * uTy);",
+    "  vec4 wp = modelMatrix * vec4(position, 1.0);",
+    "  vView = cameraPosition - wp.xyz;",
+    "  gl_Position = projectionMatrix * viewMatrix * wp;",
+    "}",
+  ].join("\n");
+  // GLASS: a thin film you see the cabin through, run down the pane. The
+  // field is smeared along the pane's projected gravity (uDown, in cell uv),
+  // every tap clamped inside this cell so nothing bleeds in from the atlas.
+  const VD_FS_GLASS = [
+    "uniform sampler2D uMap; uniform vec4 uCell; uniform vec2 uDown;",
+    "varying vec2 vUv; varying vec4 vS;",
+    "varying vec3 vN; varying vec3 vTx; varying vec3 vTy; varying vec3 vView;",
+    "float tap(vec2 q) { return texture2D(uMap, clamp(q, uCell.xy, uCell.xy + uCell.zw)).r; }",
+    "void main() {",
+    "  vec4 t = texture2D(uMap, vUv);",
+    "  vec2 st = uDown * uCell.zw * 0.075;",
+    "  float f = max(t.r, max(tap(vUv - st) * 0.85, max(tap(vUv - st * 2.0) * 0.68, tap(vUv - st * 3.3) * 0.48)));",
+    "  float thr = vS.x;",
+    "  float c = smoothstep(thr, thr + 0.03, f) * vS.z;",
+    "  float dist = length(vView);",
+    "  c *= 1.0 - smoothstep(48.0, 72.0, dist);",
+    "  if (c < 0.004) discard;",
+    "  float depth = clamp((f - thr) / 0.32, 0.0, 1.0);",
+    "  float body = clamp(depth * vS.w * (0.6 + 0.5 * t.g), 0.0, 1.0) * 0.6;",
+    "  float dry = clamp(vS.y * (1.4 - depth * 0.6), 0.0, 1.0);",
+    "  vec3 fresh = mix(vec3(0.46, 0.035, 0.03), vec3(0.28, 0.012, 0.01), body);",
+    "  vec3 dried = mix(vec3(0.30, 0.075, 0.045), vec3(0.17, 0.04, 0.025), body);",
+    "  vec3 F = mix(fresh, dried, dry);",
+    "  float wet = (1.0 - dry) * (1.0 - dry);",
+    "  vec3 V = normalize(vView);",
+    "  vec3 N = dot(vN, V) < 0.0 ? -vN : vN;",
+    "  float spec = smoothstep(0.35, 0.6, pow(max(dot(N, normalize(normalize(vec3(0.3, 1.0, 0.22)) + V)), 0.0), 40.0));",
+    "  F = mix(F, vec3(0.9, 0.85, 0.85), clamp(wet * spec * 0.5, 0.0, 0.5));",
+    "  gl_FragColor = vec4(F, c * (0.34 + 0.46 * body + wet * spec * 0.2));",
+    "}",
+  ].join("\n");
+  const vdFree = { paint: [], glass: [] };
+  function vdMaterial(glass) {
+    const u = {
+      uMap: { value: landAtlas() }, uTime: VD_TIME,
+      uCell: { value: new THREE.Vector4() }, uT: { value: new THREE.Vector4() }, uFx: { value: new THREE.Vector4() },
+      uTx: { value: new THREE.Vector3(1, 0, 0) }, uTy: { value: new THREE.Vector3(0, 1, 0) },
+      uDown: { value: new THREE.Vector2(0, -1) },
+    };
+    const o = {
+      uniforms: u, vertexShader: VD_VS, fragmentShader: glass ? VD_FS_GLASS : LD_FS,
+      transparent: true, depthWrite: false, depthTest: true, side: THREE.FrontSide,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4,
+      fog: false, lights: false,
+    };
+    if (!glass) {
+      // the floor's 2x multiply: the paint's own clearcoat and light come through
+      o.blending = THREE.CustomBlending; o.blendEquation = THREE.AddEquation;
+      o.blendSrc = THREE.DstColorFactor; o.blendDst = THREE.SrcColorFactor;
+      o.blendSrcAlpha = THREE.ZeroFactor; o.blendDstAlpha = THREE.OneFactor;
+    }
+    const m = new THREE.ShaderMaterial(o);
+    m._shared = true;                 // a car being scrapped must not dispose a pooled piece's material
+    return m;
+  }
+  function vdPiece(glass) {
+    const L = glass ? vdFree.glass : vdFree.paint;
+    let p = L.pop();
+    if (!p) {
+      const geo = new THREE.BufferGeometry();
+      const mesh = new THREE.Mesh(geo, vdMaterial(glass));
+      mesh.matrixAutoUpdate = false;  // the geometry is in the host's own space: identity
+      mesh.raycast = function () {};  // a stain is never a surface
+      mesh.castShadow = mesh.receiveShadow = false;
+      mesh.userData.goreDecal = true; // crashdeform / carinstances / the blood's own ray skip it
+      mesh.name = glass ? "gore-car-glass" : "gore-car-paint";
+      p = { mesh, geo, glass, host: null, d: null, srcGeo: null, ver: -1, pos: null, nrm: null, off: VD_OFF };
+    }
+    return p;
+  }
+  function vdRelease(p) {
+    if (p.mesh.parent) p.mesh.parent.remove(p.mesh);
+    p.host = null; p.d = null; p.srcGeo = null;
+    (p.glass ? vdFree.glass : vdFree.paint).push(p);
+  }
+  function vdFit(p) {
+    const ok = CBZ.surfaceDecal.refit(p.d, p.host.geometry, p.off, p.pos, p.nrm);
+    p.srcGeo = p.host.geometry;
+    p.ver = p.srcGeo.attributes.position.version;
+    if (!ok) return false;
+    p.geo.attributes.position.needsUpdate = true;
+    p.geo.attributes.normal.needsUpdate = true;
+    p.geo.computeBoundingSphere();
+    return true;
+  }
+
+  // ---- stamping -------------------------------------------------------------
+  const _bx = new THREE.Vector3(), _by = new THREE.Vector3(), _bz = new THREE.Vector3();
+  const _bW = new THREE.Matrix4(), _bWi = new THREE.Matrix4(), _toBox = new THREE.Matrix4(), _hW = new THREE.Matrix4();
+  const _hWi = new THREE.Matrix4(), _vt = new THREE.Vector3(), _bs = new THREE.Sphere();
+  const _tgt = [], _tgtW = [];
+  /* vehicleStamp(hit, sx, sy, cell, o) — a decal sx x sy metres on the body at
+     hit.p, facing hit.n. o: { tx,ty,tz travel dir (the cell's +v runs along
+     it; else spun at random), growT, dryT, grow0, thick, thrEnd, delay } */
+  function vehicleStamp(hit, sx, sy, cell, o) {
+    const SD = CBZ.surfaceDecal;
+    if (!SD || !hit) return null;
+    o = o || NO_OPTS;
+    const root = hit.root;
+    // budgets: this car's oldest mark, then the oldest anywhere, give way
+    let mine = 0, oldest = -1;
+    for (let i = 0; i < vehRecs.length; i++) if (vehRecs[i].root === root) { mine++; if (oldest < 0) oldest = i; }
+    if (mine >= VD_PER_CAR && oldest >= 0) vdDrop(oldest);
+    while (vehRecs.length >= vdCap()) vdDrop(0);
+    // the projector: z out of the panel, y along the blood's travel in the panel
+    _bz.copy(hit.n);
+    let have = false;
+    if (o.tx != null) {
+      _by.set(o.tx, o.ty || 0, o.tz || 0);
+      _by.addScaledVector(_bz, -_by.dot(_bz));
+      have = _by.lengthSq() > 1e-4;
+    }
+    if (!have) {
+      _by.set(0, 1, 0).addScaledVector(_bz, -_bz.y);
+      if (_by.lengthSq() < 1e-4) _by.set(1, 0, 0).addScaledVector(_bz, -_bz.x);
+      _by.normalize().applyAxisAngle(_bz, Math.random() * 6.2832);
+    }
+    _by.normalize();
+    _bx.crossVectors(_by, _bz).normalize();
+    const depth = VD_IN + VD_OUT;
+    _vt.copy(hit.p).addScaledVector(_bz, (VD_OUT - VD_IN) * 0.5);
+    _bW.makeBasis(_bx.clone().multiplyScalar(sx), _by.clone().multiplyScalar(sy), _bz.clone().multiplyScalar(depth));
+    _bW.setPosition(_vt);
+    _bWi.copy(_bW).invert();
+    const bR = 0.5 * Math.sqrt(sx * sx + sy * sy + depth * depth);
+
+    // WHAT IT IS CUT OUT OF: every drawn mesh of this vehicle, plus each door
+    // leaf parked off the graph (vehicles.js bakeShutDoors), posed shut — so
+    // the blood is already on the leaf when the door swings open
+    root.updateWorldMatrix(true, true);
+    vehMeshes(root, _tgt, true);
+    _tgtW.length = 0;
+    for (let i = 0; i < _tgt.length; i++) _tgtW.push(_tgt[i].matrixWorld);
+    const vis = (root.userData && root.userData.carVisual) || root;
+    const rig = vis._cbzDoorRig || root._cbzDoorRig;
+    if (rig && rig.doors && !rig.split) {
+      for (let di = 0; di < rig.doors.length; di++) {
+        const g = rig.doors[di];
+        if (g.parent) continue;
+        g.updateMatrix();
+        for (let k = 0; k < g.children.length; k++) {
+          const m = g.children[k];
+          if (!m.isMesh || !m.geometry || !m.geometry.attributes || !m.geometry.attributes.position) continue;
+          m.updateMatrix();
+          _tgt.push(m);
+          _tgtW.push(new THREE.Matrix4().multiplyMatrices(vis.matrixWorld, g.matrix).multiply(m.matrix));
+        }
+      }
+    }
+    const rec = { root, car: carOfRoot(root), pieces: [], t: 0, hold: o.hold || 75, fade: 14, wash: 0, glass: false };
+    const now = ldClock + (o.delay || 0);
+    for (let i = 0; i < _tgt.length; i++) {
+      const host = _tgt[i], W = _tgtW[i], geo = host.geometry;
+      if (!geo.boundingSphere) geo.computeBoundingSphere();
+      if (geo.boundingSphere) {
+        _bs.copy(geo.boundingSphere).applyMatrix4(W);
+        if (_bs.center.distanceTo(_vt) > _bs.radius + bR) continue;
+      }
+      _toBox.multiplyMatrices(_bWi, W);
+      const d = SD.project(geo, _toBox.elements, { minFacing: 0.05, maxTris: 900 });
+      if (!d) continue;
+      const glass = vehGlass(host);
+      const p = vdPiece(glass);
+      p.host = host; p.d = d;
+      p.off = VD_OFF / Math.max(1e-4, W.getMaxScaleOnAxis());   // the lift is metres in the WORLD
+      p.pos = new Float32Array(d.n * 3); p.nrm = new Float32Array(d.n * 3);
+      p.geo.dispose();                 // frees the last owner's GPU buffers before the swap
+      p.geo.setAttribute("position", new THREE.BufferAttribute(p.pos, 3));
+      p.geo.setAttribute("normal", new THREE.BufferAttribute(p.nrm, 3));
+      p.geo.setAttribute("uv", new THREE.BufferAttribute(d.uv, 2));
+      if (!vdFit(p)) { vdRelease(p); continue; }
+      // the shader's tangent frame and the pane's down, in the host's space
+      _hWi.copy(W).invert();
+      const U = p.mesh.material.uniforms;
+      U.uTx.value.copy(_bx).transformDirection(_hWi);
+      U.uTy.value.copy(_by).transformDirection(_hWi);
+      U.uCell.value.set(cell[0] * LD_CELL_W, 1 - (cell[1] + 1) * LD_CELL_H, LD_CELL_W, LD_CELL_H);
+      U.uT.value.set(now, o.growT != null ? o.growT : 0.14, Math.max(0.5, o.dryT || 22), o.grow0 != null ? o.grow0 : 0.3);
+      U.uFx.value.set(1, glass ? 0.6 : (o.thick || 0.85), 0, o.thrEnd || 0.07);
+      // gravity in the box's uv: blood runs down the pane
+      const gx = -_bx.y, gy = -_by.y, gl = Math.hypot(gx, gy);
+      U.uDown.value.set(gl > 0.05 ? gx / gl : 0, gl > 0.05 ? gy / gl : -1);
+      p.mesh.renderOrder = (host.renderOrder | 0) + 1;
+      host.add(p.mesh);
+      rec.pieces.push(p);
+      if (glass) { rec.glass = true; VD_AUDIT.glass++; }
+      VD_AUDIT.pieces++;
+    }
+    _tgt.length = 0; _tgtW.length = 0;
+    if (!rec.pieces.length) { VD_AUDIT.misses++; return null; }
+    // a proxied car is drawn by carinstances' pools, which cannot draw a
+    // ShaderMaterial: wake it (it then declines to re-proxy while it wears blood)
+    if (rec.car && rec.car._proxy && CBZ.cityWakeCar) CBZ.cityWakeCar(rec.car);
+    VD_AUDIT.stamps++;
+    vehRecs.push(rec);
+    return rec;
+  }
+  function vdDrop(i) {
+    const r = vehRecs[i];
+    for (let k = 0; k < r.pieces.length; k++) vdRelease(r.pieces[k]);
+    vehRecs.splice(i, 1);
+    VD_AUDIT.released++;
+  }
+  // per frame: follow dents, fade, wash, let go of cars that left the world
+  function updateVehicleBlood(dt) {
+    VD_TIME.value = ldClock;
+    const W = CBZ.weather;
+    const rain = W && W.raining ? Math.max(0, (W.intensity || 0) * (1 - (W.snow || 0))) : 0;
+    for (let i = vehRecs.length - 1; i >= 0; i--) {
+      const r = vehRecs[i];
+      r.t += dt;
+      if (refShown(r.root) < 0) { vdDrop(i); continue; }
+      // RAIN rinses a car (a few tens of seconds in a downpour); SPEED thins
+      // a wet film off the paint, never what has already dried on
+      const c = r.car;
+      const sp = c ? Math.max(Math.abs(c.v || 0), Math.hypot(c.vx || 0, c.vz || 0)) : 0;
+      r.wash = Math.min(1, r.wash + dt * (rain * 0.035 + (r.t < 25 ? Math.max(0, sp - 12) * 0.0025 : 0)));
+      const fadeOut = r.t > r.hold ? Math.max(0, 1 - (r.t - r.hold) / r.fade) : 1;
+      const a = fadeOut * (1 - r.wash);
+      if (a <= 0.003) { vdDrop(i); continue; }
+      for (let k = 0; k < r.pieces.length; k++) {
+        const p = r.pieces[k], h = p.host;
+        // a dent (crashdeform displaces in place, or swaps a same-layout clone):
+        // put the blood back on the new surface. A far LOD twin has another
+        // layout: refit refuses it and the mark keeps its last fit.
+        const g = h.geometry, pa = g && g.attributes && g.attributes.position;
+        if (pa && (g !== p.srcGeo || pa.version !== p.ver)) { vdFit(p); VD_AUDIT.refits++; }
+        p.mesh.material.uniforms.uFx.value.x = a;
+      }
+    }
+  }
+
+  /* vehicleSplat — a kill's / a hard impact's heavy slug toward (dx,dy,dz)
+     reaching a vehicle before maxT (the wall wallFace found, if any). True
+     when it landed on one. */
+  function vehicleSplat(x, y, z, dx, dy, dz, maxT, amt, instant) {
+    if (!CBZ.surfaceDecal) return false;
+    const l = Math.hypot(dx, dy, dz) || 1; dx /= l; dy /= l; dz /= l;
+    const reach = Math.min(3.4, maxT);
+    const roots = vehicleCandidates(x, y, z, dx, dy, dz, reach + 0.5);
+    const h = vehicleArc(x, y, z, dx, dy, dz, 7, reach, roots);
+    if (!h || h.run > maxT) return false;
+    const g = (0.7 + amt * 0.7) * 0.55 * 0.55 * (0.85 + Math.random() * 0.3);
+    const S = g * 4 * 0.85;
+    vehicleStamp(h, S, S, CELL_SPLAT[0], {
+      tx: dx, ty: dy, tz: dz, growT: instant ? 0.05 : 0.12, grow0: instant ? 1 : 0.3,
+      dryT: 20 + Math.random() * 15, delay: h.t,
+    });
+    return true;
+  }
+  /* RUN OVER: the body meets the car's nose (or tail, reversing) at the
+     bumper, and at speed folds onto the bonnet and into the windscreen.
+     Rays come in from outside the car at the victim's side offset, so they
+     hit the panels he actually hit. */
+  function runOverBlood(car, x, y, z, amt) {
+    const g = car && car.group;
+    if (!g || !g.parent || !CBZ.surfaceDecal) return;
+    const b = vehBounds(g);
+    const h0 = car.heading != null ? car.heading : g.rotation.y;
+    let fx = Math.sin(h0), fz = Math.cos(h0);
+    // which end met him
+    const rx = x - g.position.x, rz = z - g.position.z;
+    if (rx * fx + rz * fz < 0) { fx = -fx; fz = -fz; }
+    const lx = fz, lz = -fx;                            // across the car
+    const half = Math.max(1.6, Math.max(Math.abs(b.min.z), Math.abs(b.max.z)));
+    const halfW = Math.max(0.6, (b.max.x - b.min.x) * 0.5);
+    let side = rx * lx + rz * lz;
+    side = Math.max(-halfW * 0.8, Math.min(halfW * 0.8, side));
+    const ox = g.position.x + fx * (half + 1.2) + lx * side, oz = g.position.z + fz * (half + 1.2) + lz * side;
+    const base = g.position.y;
+    gatherMeshes([g]);
+    const spd = Math.max(Math.abs(car.v || 0), Math.hypot(car.vx || 0, car.vz || 0));
+    // the bumper / grille at the knee-to-hip line
+    let h = vehicleRay(ox, base + 0.62, oz, -fx, 0, -fz, half + 2.5);
+    if (h) vehicleStamp(h, 0.55 + amt * 0.2, 0.55 + amt * 0.2, CELL_SPLAT[1], { growT: 0.1, grow0: 0.5, dryT: 24 });
+    // the body folds onto the bonnet and the head meets the screen: a ray
+    // dropping in from above the nose toward the cabin
+    if (spd > 9) {
+      const dl = Math.hypot(1, 0.75);
+      h = vehicleRay(ox + fx * 0.4, base + 2.4, oz + fz * 0.4, -fx / dl, -0.75 / dl, -fz / dl, half + 4);
+      if (h) vehicleStamp(h, 0.5 + amt * 0.25, 0.85 + amt * 0.3, CELL_SPLAT[0], { tx: -fx, ty: 0, tz: -fz, growT: 0.08, grow0: 0.6, dryT: 26 });
+    }
+    _vMeshes.length = 0; _vRoots.length = 0;
+  }
+  function nearestCar(x, z, r) {
+    const L = CBZ.cityCars;
+    let best = null, bd = r * r;
+    if (L) for (let i = 0; i < L.length; i++) {
+      const c = L[i], g = c && c.group;
+      if (!g || !g.parent) continue;
+      const dx = g.position.x - x, dz = g.position.z - z, d = dx * dx + dz * dz;
+      if (d < bd) { bd = d; best = c; }
+    }
+    return best;
+  }
+  /* the ratchet: `floatMm` is the worst distance, in mm, between any live
+     vehicle-blood vertex and the panel triangle it was cut from, on the
+     panel's CURRENT shape (so a dent the decal failed to follow shows up). */
+  function vehicleAudit() {
+    let pieces = 0, glass = 0, worst = 0;
+    for (let i = 0; i < vehRecs.length; i++) {
+      const r = vehRecs[i];
+      for (let k = 0; k < r.pieces.length; k++) {
+        const p = r.pieces[k], d = p.d, P = p.host.geometry.attributes.position;
+        pieces++; if (p.glass) glass++;
+        if (!P || P.count !== d.count) continue;
+        for (let v = 0; v < d.n; v++) {
+          const i0 = d.src[v * 3], i1 = d.src[v * 3 + 1], i2 = d.src[v * 3 + 2];
+          const ax = P.getX(i0), ay = P.getY(i0), az = P.getZ(i0);
+          const ex = P.getX(i1) - ax, ey = P.getY(i1) - ay, ez = P.getZ(i1) - az;
+          const fx = P.getX(i2) - ax, fy = P.getY(i2) - ay, fz = P.getZ(i2) - az;
+          let nx = ey * fz - ez * fy, ny = ez * fx - ex * fz, nz = ex * fy - ey * fx;
+          const nl = Math.hypot(nx, ny, nz);
+          if (!(nl > 0)) continue;
+          const q = v * 3;
+          const dist = Math.abs((p.pos[q] - ax) * nx + (p.pos[q + 1] - ay) * ny + (p.pos[q + 2] - az) * nz) / nl;
+          if (dist > worst) worst = dist;
+        }
+      }
+    }
+    return Object.assign({ live: vehRecs.length, livePieces: pieces, liveGlass: glass, floatMm: +(worst * 1000).toFixed(2), cap: vdCap() }, VD_AUDIT);
+  }
+  // the drops of a spray whose line met a car stop ON it (the spatter decal
+  // already stands for them) instead of falling through the body to the road
+  const VV_MAX = 8;
+  const VV_INV = new Float32Array(VV_MAX * 16), VV_B = new Float32Array(VV_MAX * 6);
+  const VV_GEN = new Uint16Array(VV_MAX);
+  let vvCursor = 0, airVV = -1;
+  function vehicleVolume(root) {
+    const k = vvCursor; vvCursor = (vvCursor + 1) % VV_MAX;
+    const b = vehBounds(root);
+    _hWi.copy(root.matrixWorld).invert();
+    VV_INV.set(_hWi.elements, k * 16);
+    VV_B[k * 6] = b.min.x; VV_B[k * 6 + 1] = b.min.y; VV_B[k * 6 + 2] = b.min.z;
+    VV_B[k * 6 + 3] = b.max.x; VV_B[k * 6 + 4] = b.max.y; VV_B[k * 6 + 5] = b.max.z;
+    VV_GEN[k] = (VV_GEN[k] + 1) & 0xffff;
+    return k;
+  }
+  function inVolume(k, x, y, z) {
+    const e = VV_INV, o = k * 16, B = VV_B, q = k * 6;
+    const lx = e[o] * x + e[o + 4] * y + e[o + 8] * z + e[o + 12];
+    if (lx < B[q] || lx > B[q + 3]) return false;
+    const ly = e[o + 1] * x + e[o + 5] * y + e[o + 9] * z + e[o + 13];
+    if (ly < B[q + 1] || ly > B[q + 4] * 0.92) return false;
+    const lz = e[o + 2] * x + e[o + 6] * y + e[o + 10] * z + e[o + 14];
+    return lz >= B[q + 2] && lz <= B[q + 5];
+  }
+  /* a spray's exit cone toward a car: one spatter where the cone's centre
+     line meets the body, flight-delayed, sized by the burst; its drops are
+     swallowed by the car's volume. -> the car volume index (or -1) and,
+     when the car is nearer than the wall, the wall plane is dropped. */
+  function vehicleSpray(ex, ey, ez, dx, dy, dz, amt, head, wallT) {
+    if (!CBZ.surfaceDecal) return -1;
+    const l = Math.hypot(dx, dy, dz) || 1; dx /= l; dy /= l; dz /= l;
+    const reach = Math.min(3.4, wallT);
+    const roots = vehicleCandidates(ex, ey, ez, dx, dy, dz, reach + 0.5);
+    if (!roots.length) return -1;
+    const h = vehicleArc(ex, ey, ez, dx, dy + 0.08, dz, 6.5, reach, roots);
+    if (!h || h.run > wallT) return -1;
+    const S = (0.32 + 0.3 * Math.min(1.4, amt)) * (head ? 1.3 : 1);
+    vehicleStamp(h, S, S * 1.15, CELL_SPLAT[0], { tx: dx, ty: dy, tz: dz, growT: 0.1, grow0: 0.4, dryT: 14 + amt * 10, thick: 0.7, delay: h.t });
+    return vehicleVolume(h.root);
   }
 
   // ---- WHAT TOOK THE HEAD decides if it comes apart ---------------------------
@@ -4055,6 +4668,11 @@
     }
     // run-over smear: the streak starts under the body and is dragged down-range
     // along the car's travel line. Length scales with the impact fling (≈speed).
+    // and the car that did it wears him: bumper, bonnet, screen
+    if (ranOver && !far) {
+      const rc = (ctx && ctx.imp && ctx.imp.car) || nearestCar(x, z, 5);
+      if (rc) runOverBlood(rc, x, y, z, amt);
+    }
     if (ranOver && hasDir) {
       let sl = opts.smearLen || 0;
       if (!sl && ctx && ctx.imp && ctx.imp.fling) sl = 2.2 + Math.min(6.5, ctx.imp.fling * 0.55);
@@ -4472,6 +5090,7 @@
       if (w.slot >= 0) ldSetFx(w.slot, fadeOut * (w.ref ? w.vis : 1), (1 - fadeOut) * 0.3);
       if (w.t > w.hold + w.fade) { ldRelease(w); walls.splice(i, 1); }
     }
+    if (vehRecs.length) updateVehicleBlood(dt);
     ldFlush(dt);
   });
 
@@ -4576,6 +5195,7 @@
       // sum of per-decal visibility: 0 means the ground reads clean even
       // though records may still exist mid-bury.
       bloodVisible: +visible.toFixed(2),
+      vehicle: vehicleAudit(),
     };
   };
 
@@ -4588,6 +5208,7 @@
     if (airMesh && airMesh.parent) airMesh.parent.remove(airMesh);       // re-added on the next frame
     for (const s of splats) freeSlick(s); splats.length = 0; slickN = 0;
     for (const w of walls) ldRelease(w); walls.length = 0;
+    while (vehRecs.length) vdDrop(vehRecs.length - 1);
     if (ldMesh && ldMesh.parent) ldMesh.parent.remove(ldMesh);          // re-added on the next mark
     // water medium: drop the plume + every bleed source. The pooled sprites go
     // too — a scene swap orphans them, so they must be re-added, not reused.

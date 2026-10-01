@@ -286,6 +286,9 @@
   // collect deformable panel meshes, pruning wheel subtrees (they spin)
   function collect(o, list) {
     if (o.userData && o.userData.playerWheel) return;
+    // a blood decal (gore.js) is not a panel: it rides the dented host and
+    // refits itself onto the new surface, so it must never be dented itself
+    if (o.userData && o.userData.goreDecal) return;
     if (o.geometry && o.material && !Array.isArray(o.material) &&
         o.geometry.attributes && o.geometry.attributes.position &&
         o.geometry.attributes.position.itemSize === 3) list.push(o);
