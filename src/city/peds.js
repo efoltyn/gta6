@@ -6748,9 +6748,13 @@
       // outside the padded camera view. It may simulate while hidden, so when
       // the player later turns around they find a person already living there,
       // never a frozen body appearing on a frame boundary.
+      // The reveal asks only "can the player see that spot now?" (config.js
+      // npcRevealSafe: off screen, behind a wall, or held 1.2 s at most when
+      // near). It used to ask the SPAWN question (18 m away AND off screen),
+      // which indoors is never true: the President's staff were invisible.
       if (p._spawnHidden) {
-        if (CBZ.npcTransitionSafe && CBZ.npcTransitionSafe(p.pos.x, p.pos.z, { minDistance: 18, maxDistance: 150 })) {
-          p._spawnHidden = false;
+        if (!CBZ.npcRevealSafe || CBZ.npcRevealSafe(p, dt)) {
+          p._spawnHidden = false; p._hidT = 0;
         } else {
           p.group.visible = false;
         }

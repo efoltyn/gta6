@@ -556,9 +556,21 @@
     }
     // inner faces
     const fx0 = x0 + T, fx1 = x1 - T, fz0 = z0 + T, fz1 = z1 - T;
+    // THE FINISH (interior_programs.js THE FINISH OF A HOUSE OF STATE): the
+    // walnut is veneer, the band is fabric, the carpet is carpet, the ceiling
+    // is acoustic tile, laid by the Mansion's fit-out with the light baked in
+    // when you come down the Cross Hall. The flat boxes stay as the room's
+    // body (and what a not-yet-fitted floor shows).
+    const FS = (CBZ.stateFinish && mb) ? CBZ.stateFinish(mb, "sitroom") : null;
+    const fox = mb && mb.ox != null ? mb.ox : 0, foz = mb && mb.oz != null ? mb.oz : 0;
+    const fin = function (kind, x, y, z, w, h, d, tint, mask) { if (FS) FS.box(kind, x - fox, y, z - foz, w, h, d, tint, mask); };
+    const FINOF = {};
+    FINOF[PANEL] = ["veneer", 0x7d5236]; FINOF[STILE] = ["veneer", 0x5e3c26]; FINOF[NAVY] = ["fabric", 0x3d5a80]; FINOF[BRASS] = ["flat", 0xc9a45a];
     // ---- floor and ceiling
     addBox(grp, cx, Y + 0.0115, cz, fx1 - fx0, 0.013, fz1 - fz0, CARPET);            // carpet: 0.005..0.018 over the floor top
     addBox(grp, cx, H - 0.02, cz, fx1 - fx0, 0.04, fz1 - fz0, 0x2a2f37);              // acoustic ceiling, under the slab
+    fin("carpet", cx, Y + 0.01875, cz, fx1 - fx0, 0.0025, fz1 - fz0, 0x5d7aa8, 4);          // its face only
+    fin("ceiling", cx, H - 0.0415, cz, fx1 - fx0, 0.003, fz1 - fz0, 0x8e949c, 8);
     // ---- walnut panelling to 2.8 m, a navy acoustic band over it, stiles on a
     // 1.2 m rhythm, a skirting and a cornice: on every inner face, round the door
     const faces = [
@@ -570,6 +582,11 @@
       const n = f.at + f.s * proud / 2;
       if (f.onX) addBox(grp, n, (y0 + y1) / 2, (a + b) / 2, proud, y1 - y0, b - a, col);
       else addBox(grp, (a + b) / 2, (y0 + y1) / 2, n, b - a, y1 - y0, proud, col);
+      // its real material, 3 mm proud of it on every side
+      const k = FINOF[col];
+      if (!k) return;
+      if (f.onX) fin(k[0], n + f.s * 0.0015, (y0 + y1) / 2, (a + b) / 2, proud + 0.003, y1 - y0 + 0.003, b - a + 0.003, k[1]);
+      else fin(k[0], (a + b) / 2, (y0 + y1) / 2, n + f.s * 0.0015, b - a + 0.003, y1 - y0 + 0.003, proud + 0.003, k[1]);
     };
     for (const f of faces) {
       const isDoor = f.onX === doorOnX && Math.abs((f.onX ? (f.s > 0 ? x0 : x1) : (f.s > 0 ? z0 : z1)) - dSide) < 0.01;
@@ -773,6 +790,8 @@
       { role: "police", x: st3.x, z: st3.z, face: faceT(st3) },
     ];
     ROOM.builtFor = CBZ.govComplexes;
+    // a floor already fitted out was laid without this room's finish: lay it again
+    if (FS && FS.count() && CBZ.fitoutRebuild) { try { CBZ.fitoutRebuild(mb, 0); } catch (e) {} }
     wireZones();
     paintBoard();
     return true;

@@ -1255,7 +1255,9 @@
       _npcTransitionProbe.set(x, y, z).project(camera);
       const onPaddedScreen = _npcTransitionProbe.z >= -1.05 && _npcTransitionProbe.z <= 1.05 &&
         Math.abs(_npcTransitionProbe.x) <= 1.28 && Math.abs(_npcTransitionProbe.y) <= 1.38;
-      if (onPaddedScreen) { stats.blocked++; return false; }
+      // ON SCREEN BUT BEHIND A WALL is not seen: a body in the next room, or
+      // on the far side of a shut door, may appear (opts.occlusion)
+      if (onPaddedScreen && !(opts.occlusion && CBZ.npcOccluded(x, y - 1.05, z, camera))) { stats.blocked++; return false; }
       stats.allowed++;
       return true;
     }
@@ -1267,6 +1269,70 @@
     const safe = forwardDot < -0.12;
     if (safe) stats.allowed++; else stats.blocked++;
     return safe;
+  };
+
+  /* CBZ.npcOccluded(x, footY, z, camera) -> is a standing body at (x, z)
+     hidden from the camera by something solid? Two sight lines, head
+     (1.65 m) and hips (0.95 m), from the camera's world position; each must
+     be cut by a collider (a wall, a shut door, a car) that is not glass.
+     Analytic (CBZ.rayColliders over the 8 m grid), no mesh raycast. */
+  const _occHit = {};
+  function _occFilter(c) {
+    const m = c.ref && c.ref.material;
+    return !(m && (m.transparent || m.opacity < 1));
+  }
+  const _occOpts = { any: true, filter: _occFilter, minT: 0.05 };
+  CBZ.npcOccluded = function (x, footY, z, camera) {
+    camera = camera || CBZ.camera;
+    if (!camera || !camera.matrixWorld || !CBZ.rayColliders) return false;
+    const e = camera.matrixWorld.elements, cx = e[12], cy = e[13], cz = e[14];
+    for (let i = 0; i < 2; i++) {
+      const ty = footY + (i ? 0.95 : 1.65);
+      const dx = x - cx, dy = ty - cy, dz = z - cz, L = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (L < 0.3) return false;
+      // stop 0.35 m short of the body: the wall he leans on does not hide him
+      if (!CBZ.rayColliders(cx, cy, cz, dx / L, dy / L, dz / L, L - 0.35, _occHit, _occOpts)) return false;
+    }
+    return true;
+  };
+
+  /* CBZ.npcRevealSafe(actor, dt) -> may a body that was minted HIDDEN
+     (peds.js `_spawnHidden`: it was born where the player might have watched
+     it appear) be drawn now?
+
+     OWNER (2026-09-30): "PRESIDENT'S GAME HAS INVISIBLE PEOPLE." Measured
+     (tools/president-people-check.mjs): 0 of 6 people drawn on the West
+     Wing's office floor — the secretary, the detail, the line of hires, the
+     Chief of Staff walking in with the morning's business. The reveal used
+     the SPAWN test, minDistance 18 m: a body stays hidden until the player
+     is 18 m from him AND not looking. Indoors nobody is ever 18 m away, and
+     a detail walks at your shoulder, so they talked, blocked doorways and
+     took bullets as nobody, for as long as you stayed.
+
+     The question a reveal asks is only "can the player see that spot right
+     now?". So, distance plays no part:
+       - off the padded screen          -> reveal (he turns round, the man is there);
+       - on screen but behind a wall    -> reveal (npcOccluded);
+       - in full view, near             -> held at most REVEAL_HOLD seconds,
+         then drawn anyway: a person you can bump into, talk to or be shot by
+         is never invisible. (A spawner that places people in plain view
+         is the bug to fix there; this is the floor under it.) */
+  const REVEAL_HOLD = 1.2, REVEAL_NEAR2 = 45 * 45;
+  CBZ.npcRevealStats = CBZ.npcRevealStats || { revealed: 0, forced: 0 };
+  CBZ.npcRevealSafe = function (a, dt) {
+    if (!a || !a.pos) return true;
+    a._hidT = (a._hidT || 0) + (dt || 0);
+    const y = (a.pos.y || 0) + 1.05;
+    if (CBZ.npcTransitionSafe(a.pos.x, a.pos.z, { minDistance: 0, maxDistance: 150, y: y, occlusion: true })) {
+      CBZ.npcRevealStats.revealed++;
+      return true;
+    }
+    const P = CBZ.player;
+    if (a._hidT >= REVEAL_HOLD && P && P.pos) {
+      const dx = a.pos.x - P.pos.x, dz = a.pos.z - P.pos.z;
+      if (dx * dx + dz * dz < REVEAL_NEAR2) { CBZ.npcRevealStats.forced++; return true; }
+    }
+    return false;
   };
 
   /* CBZ.bodyMayLeave(actor, opts) -> may a POPULATION system (density
