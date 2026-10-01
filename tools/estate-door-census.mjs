@@ -83,6 +83,15 @@ const CBZ = ctx.CBZ = {
   markCollidersDirty() {}, markPlatformsDirty() {},
 };
 CBZ.mat = CBZ.cmat;
+// THE STREAMED CITY (the phone's default boot): the real core/citystream.js
+// with a slice that keeps everything while the census builds, so every
+// complex's interiors are a real stream job ("gov interiors <id>") that
+// section 4 below can park, free and bring back.
+CBZ.CONFIG.STREAM_COMPACT = false;
+load("src/core/citystream.js");
+const STREAM = { keep: true };
+CBZ.sliceKeepsRect = function () { return STREAM.keep; };
+CBZ.slice = { stream: true, x: 0, z: 0, r: 1e6, lead: 0, view() { return 1000; }, keepR() { return 1e6; } };
 load("src/systems/stairs.js");
 load("src/city/buildings_civic.js");
 load("src/city/buildings.js");
@@ -492,7 +501,117 @@ for (const sh of shells) {
   CBZ.collide = realCollide;
 }
 
+// ==========================================================================
+// 4. THE STREAMED CITY. On a phone the city streams (core/citystream.js):
+//    the President drives off to an appearance, the estate's interiors job
+//    PARKS (colliders out) and, far enough away, used to be FREED and run
+//    again on the way back. The rooms are drawn into the shells' groups, which
+//    the job does not own, so a free left every mesh standing and the re-run
+//    drew it all again: a dead door record filed in front of every live one
+//    (E opened nothing) and the old leaf shut in the doorway with no body.
+//    And a door left OPEN came back with its collider re-attached: an
+//    invisible wall in an open doorway. Checks, on the real streamer:
+//    a) every complex's interiors job exists and is never freed (noFree);
+//    b) the West Wing: open the Oval Office door, drive far away (park +
+//       the free pass), come back: the open door is still walkable, every
+//       shut door is solid, no door is filed twice, and [E] in front of each
+//       door finds THAT door;
+//    c) a freeable job that files doors (a block of flats): freed, its doors
+//       leave the kit; run again, each spot holds exactly one live record.
+// ==========================================================================
+let streamReport = "not run";
+{
+  const P = CBZ.player;
+  const jobs = CBZ.streamJobs || [];
+  const gj = jobs.filter((j) => /^gov interiors /.test(j.name || ""));
+  if (!gj.length) fail("STREAM: no 'gov interiors' stream job (the census slice should make one per complex)");
+  for (const j of gj) if (!j.noFree) fail("STREAM: " + j.name + " can be FREED; its rooms live in shells it does not own (a re-run draws them twice)");
+  const sh = oval && shells.find((s) => inShell(s.b, oval.landmarks.presidentialDesk.x, oval.landmarks.presidentialDesk.z, 0));
+  const job = sh && gj.find((j) => sh.b.ox >= j.rect.minX && sh.b.ox <= j.rect.maxX && sh.b.oz >= j.rect.minZ && sh.b.oz <= j.rect.maxZ);
+  if (sh && !job) fail("STREAM: no interiors job covers " + tagOf(sh));
+  const away = () => { STREAM.keep = false; P.pos.set(1e5, 0, 1e5); CBZ.streamTick(true); CBZ.streamTick(true); };
+  const back = (x, z) => { STREAM.keep = true; P.pos.set(x, 0, z); CBZ.streamTick(true); };
+  const live = (c) => CBZ.colliders.indexOf(c) >= 0;
+  if (sh && job && CBZ.streamTick) {
+    const b = sh.b;
+    const doorsOf = () => UD.all().filter((d) => inShell(b, d.x, d.z, 0.5));
+    const before = doorsOf();
+    const ovalDoor = before.find((d) => /Oval Office/.test(d.label)) || before[0];
+    setOpen(ovalDoor, true);
+    // the swinging leaf hangs in the shell (it parks with it), on its jamb
+    {
+      const pv = ovalDoor.pivot;
+      if (!pv) fail("STREAM: " + ovalDoor.label + " opened with no swinging leaf");
+      else {
+        let o = pv; while (o && o !== b.group) o = o.parent;
+        if (!o) fail("STREAM: " + ovalDoor.label + "'s swinging leaf is not in its shell (it would hang in the air when the shell parks)");
+        const w = new THREE.Vector3(); pv.getWorldPosition(w);
+        const hs = ovalDoor.hinge || -1, ux = ovalDoor.runX ? 1 : 0, uz = ovalDoor.runX ? 0 : 1;
+        const hx = ovalDoor.x + ux * hs * ovalDoor.w / 2, hz = ovalDoor.z + uz * hs * ovalDoor.w / 2;
+        if (Math.hypot(w.x - hx, w.z - hz) > 0.01 || Math.abs(w.y - ovalDoor.floorY) > 0.01) fail("STREAM: " + ovalDoor.label + "'s hinge is off its jamb by " + Math.hypot(w.x - hx, w.z - hz).toFixed(2) + " m");
+      }
+    }
+    away();
+    if (job.state !== "parked") fail("STREAM: the West Wing interiors job did not park when the President left (state " + job.state + ")");
+    if (before.some((d) => live(d.col))) fail("STREAM: a West Wing door kept its collider while its job was parked");
+    back(b.ox, b.oz);
+    if (job.state !== "built") fail("STREAM: the West Wing interiors job did not come back (state " + job.state + ")");
+    const after = doorsOf();
+    if (after.length !== before.length) fail("STREAM: the West Wing had " + before.length + " door records, " + after.length + " after the round trip");
+    if (live(ovalDoor.col) || !ovalDoor.open) fail("STREAM: " + ovalDoor.label + " was left open and came back SOLID (an invisible wall in an open doorway)");
+    let ok = 0;
+    for (const d of after) {
+      if (d === ovalDoor || (d.pair && d.pair === ovalDoor)) continue;
+      if (!d.open && !live(d.col)) { fail("STREAM: " + d.label + " (" + d.id + ") came back shut with no collider"); continue; }
+      const n = d.runX ? { x: 0, z: 1 } : { x: 1, z: 0 };
+      for (const s of [-1, 1]) {
+        const f = UD.at(d.x + n.x * s * 0.8, d.z + n.z * s * 0.8, 1.9, d.floorY + 0.05);
+        if (f !== d && !(f && f.pair === d)) fail("STREAM: [E] in front of " + d.label + " (" + d.id + ") finds " + (f ? f.id : "nothing"));
+      }
+      ok++;
+    }
+    setOpen(ovalDoor, false);
+    if (!live(ovalDoor.col)) fail("STREAM: " + ovalDoor.label + " shut after the round trip but has no collider");
+    // the full drive: far past the free distance, twice, then home
+    away(); away(); back(b.ox, b.oz);
+    if (doorsOf().length !== before.length) fail("STREAM: the West Wing door count changed after a second trip (" + doorsOf().length + " vs " + before.length + ")");
+    streamReport = tagOf(sh) + ": " + before.length + " doors, round trip x2, " + ok + " found by [E] from both faces";
+  }
+  // c) a freeable job that files a door (what a block of flats does)
+  {
+    const X = 9000, Z = 9000;
+    const mkDoor = () => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(1, 2, 0.06), CBZ.cmat(0x4a3524));
+      m.position.set(X, 1, Z); city.root.add(m);
+      const col = { minX: X - 0.5, maxX: X + 0.5, minZ: Z - 0.03, maxZ: Z + 0.03, y0: 0, y1: 2, ref: m, door: true };
+      CBZ.colliders.push(col);
+      UD.add({ id: "door:stream-test", label: "the flat", x: X, z: Z, floorY: 0, mesh: m, col: col, runX: true, w: 1, h: 2, free: true });
+    };
+    STREAM.keep = true;
+    const fj = CBZ.sliceAt({ minX: X - 5, maxX: X + 5, minZ: Z - 5, maxZ: Z + 5 }, mkDoor, { name: "census flats" });
+    const at = () => UD.all().filter((d) => d.id === "door:stream-test");
+    if (!fj || at().length !== 1) fail("STREAM: the test job did not file its door");
+    else {
+      setOpen(at()[0], true);
+      away();
+      if (fj.state !== "queued") fail("STREAM: the freeable test job was not freed (state " + fj.state + ")");
+      if (at().length) fail("STREAM: a FREED job's door is still filed in the door kit (" + at().length + " records)");
+      back(X, Z);
+      const recs = at();
+      if (recs.length !== 1) fail("STREAM: after the re-run the flat's door is filed " + recs.length + " times");
+      else {
+        const f = UD.at(X, Z + 0.8, 1.9, 0.05);
+        if (f !== recs[0]) fail("STREAM: [E] at the re-built flat's door finds a dead record");
+        if (!live(recs[0].col)) fail("STREAM: the re-built flat's door is not solid");
+        setOpen(recs[0], true);
+        if (live(recs[0].col)) fail("STREAM: the re-built flat's door does not open");
+      }
+    }
+  }
+}
+
 console.log("shells", shells.length, "interior doors", nDoors, "street doors", nStreet, "rooms", nRooms, "walks", nShellWalks);
+console.log("stream:", streamReport);
 console.log("spawn:", spawnReport);
 if (fails.length) console.log("FAILURES\n  " + fails.join("\n  "));
 console.log(FAIL ? "\nESTATE DOOR CENSUS: " + FAIL + " failures" : "\nESTATE DOOR CENSUS: 100% clean");

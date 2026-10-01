@@ -582,7 +582,9 @@
   const UNIT_DOORS = [];
   const UNIT_GRID = new Map();
   function unitCellKey(x, z) { return Math.floor(x / UNIT_CELL) + "," + Math.floor(z / UNIT_CELL); }
+  let UNIT_SEQ = 0;                     // every record's filing number (the streamer's mark)
   function unitFile(d) {
+    d._seq = ++UNIT_SEQ;
     UNIT_DOORS.push(d);
     const k = unitCellKey(d.x, d.z);
     let a = UNIT_GRID.get(k);
@@ -707,15 +709,25 @@
     if (d.pivot !== undefined) return d.pivot;
     d.pivot = null;
     if (!window.THREE || !(d.w > 0.3)) return null;
+    // THE SWINGING LEAF LIVES IN THE BUILDING, beside the closed leaf it
+    // stands in for (the shell's group), not loose in the city root: a
+    // streamed building that parks or is freed takes its open doors with it
+    // (in the root they stayed hanging in the air where the building had
+    // been, and a re-built shell showed the old leaf standing open through
+    // its new, shut one).
     const A = CBZ.city && CBZ.city.arena;
-    const root = d.root || (A && A.root) || CBZ.scene;
+    const root = d.root || (d.mesh && d.mesh.parent) || (A && A.root) || CBZ.scene;
     if (!root) return null;
     if (!swingGeo) swingGeo = new THREE.BoxGeometry(1, 1, 1);
     const ux = d.runX ? 1 : 0, uz = d.runX ? 0 : 1;          // along the wall
     const hs = d.hinge || -1;
     const pivot = new THREE.Group();
     pivot.name = "door-leaf";
-    pivot.position.set(d.x + ux * hs * d.w / 2, d.floorY, d.z + uz * hs * d.w / 2);
+    pivot.userData.mover = true;          // core/batch.js + staticfreeze.js leave a hinge live
+    const at = new THREE.Vector3(d.x + ux * hs * d.w / 2, d.floorY, d.z + uz * hs * d.w / 2);
+    root.updateWorldMatrix(true, false);
+    root.worldToLocal(at);                // a shell's group is translated to its lot
+    pivot.position.copy(at);
     const leaf = new THREE.Mesh(swingGeo, CBZ.cmat ? CBZ.cmat(d.hex != null ? d.hex : 0x4a3524) : new THREE.MeshLambertMaterial({ color: d.hex || 0x4a3524 }));
     const L = d.w - 0.04;
     // the leaf lies from the hinge toward the doorway's centre
@@ -762,6 +774,11 @@
   }
   function colIn(d, on) {
     const cols = CBZ.colliders || [];
+    // `_out`: the owner took it out. core/citystream.js re-attaches a parked
+    // job's colliders on the way back and skips one marked out, so a door
+    // left OPEN when you drove off is still open (not an invisible wall in an
+    // open doorway) when you come back.
+    if (d.col) d.col._out = !on;
     const i = cols.indexOf(d.col);
     if (on && i < 0) cols.push(d.col);
     else if (!on && i >= 0) cols.splice(i, 1);
@@ -907,19 +924,32 @@
       unitFile(rec);
       return rec;
     },
-    remove: function (rec) {
-      if (!rec) return;
-      const i = UNIT_DOORS.indexOf(rec);
-      if (i >= 0) UNIT_DOORS.splice(i, 1);
-      const a = UNIT_GRID.get(unitCellKey(rec.x, rec.z));
-      if (a) { const j = a.indexOf(rec); if (j >= 0) a.splice(j, 1); }
-      const k = SWINGING.indexOf(rec);
-      if (k >= 0) SWINGING.splice(k, 1);
-      if (rec.pivot && rec.pivot.parent) rec.pivot.parent.remove(rec.pivot);
-      rec.pivot = undefined;
-    },
+    remove: unitDrop,
     openCount: function () { let n = 0; for (let i = 0; i < UNIT_DOORS.length; i++) if (UNIT_DOORS[i].open) n++; return n; },
   };
+  function unitDrop(rec) {
+    if (!rec) return;
+    const i = UNIT_DOORS.indexOf(rec);
+    if (i >= 0) UNIT_DOORS.splice(i, 1);
+    const a = UNIT_GRID.get(unitCellKey(rec.x, rec.z));
+    if (a) { const j = a.indexOf(rec); if (j >= 0) a.splice(j, 1); }
+    const k = SWINGING.indexOf(rec);
+    if (k >= 0) SWINGING.splice(k, 1);
+    if (rec.pivot && rec.pivot.parent) rec.pivot.parent.remove(rec.pivot);
+    rec.pivot = undefined;
+  }
+  /* A STREAMED BUILDING'S DOORS GO WITH IT. The records live in this file's
+     own list, which core/citystream.js cannot see, so a job it FREED (a block
+     of flats, a town lot) and ran again later filed every door a second time
+     beside a dead one at the same spot; E found the dead record first (same
+     distance, filed earlier), "opened" a leaf no longer in the world, and the
+     real door stayed shut and solid. The streamer now takes back, with the
+     job, every door that job filed. */
+  if (CBZ.streamBusHook) CBZ.streamBusHook({
+    mark: function () { return UNIT_SEQ; },
+    since: function (m) { const out = []; for (let i = 0; i < UNIT_DOORS.length; i++) if (UNIT_DOORS[i]._seq > m) out.push(UNIT_DOORS[i]); return out; },
+    drop: function (items) { for (let i = 0; i < items.length; i++) unitDrop(items[i]); },
+  });
 
   // [E] ON THE DOOR. Registered lazily: city/interactions.js parses AFTER this
   // file (index.html 989 vs 1390), so a registration written at parse time
@@ -2730,6 +2760,8 @@
   // every room a state plan drew (world rect, floor), for the door census
   // (tools/estate-door-census.mjs walks to each one)
   const STATE_ROOMS = [];
+  // a streamed job that is freed takes its rooms back with its doors
+  if (CBZ.streamBus) CBZ.streamBus(STATE_ROOMS, "stateRooms");
   CBZ.stateRoomsAll = function () { return STATE_ROOMS.slice(); };
 
   function presidentialReset() {
