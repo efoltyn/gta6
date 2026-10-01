@@ -3388,6 +3388,7 @@
           // than typed as a separate height.
           const sy = sc * (0.86 + crownJ * 0.20);
           const base = gy + 2.6 * sc;
+          if (C.feet) C.feet.push(px, gy, pz, VKIT.nominal.spireRadius * sc * (0.92 + crownJ * 0.34) * 1.05, 0);
           dummy.position.set(px, base, pz);
           dummy.rotation.set(0, rot, 0);
           dummy.scale.set(sc * (0.92 + crownJ * 0.34), sy, sc * (0.92 + crownJ * 0.34));
@@ -3396,6 +3397,8 @@
         } else {
           const cr = sc * (1.14 + crownJ * 0.28);
           const ch = sc * (0.86 + hs * 0.20);
+          // the ground the crown roofs over: darkest at the bole, faint at the drip line
+          if (C.feet) C.feet.push(px, gy, pz, VKIT.nominal.matureCrownRadius * cr * 0.5, 0);
           dummy.position.set(px, gy + 6.4 * sc, pz);
           dummy.rotation.set(0, rot, 0);
           dummy.scale.set(cr, ch, cr);
@@ -3457,7 +3460,7 @@
           // them is what waits until the chunk can be seen.
           const plant = function () {
           ch.meshes.length = 0;
-          const C = { ti: 0, bi: 0, ci: 0, cti: 0 };
+          const C = { ti: 0, bi: 0, ci: 0, cti: 0, feet: CBZ.treeFoot ? [] : null };
           /* ---- A COUNTRY THAT IS NOT ONE TREE ---------------------------
              world/vegetation.js now grows K structurally different crowns per
              archetype. Redhollow splits its stand PER INSTANCE because you
@@ -3545,6 +3548,10 @@
                 : (m === C.spires ? "conifer-spire" : "krummholz"));
             city.root.add(m);
             forestMeshes++;
+          }
+          // the contact layer rides the chunk: same slice, same distance disc
+          if (C.feet && C.feet.length) for (const m of CBZ.treeFoot.add(city.root, C.feet, { name: "backcountry-" + ch.cx + "," + ch.cz, heightAt: reliefAt, fogScale: 0.08 })) {
+            m.userData.terrain = true; ch.meshes.push(m);
           }
           ti += C.ti + C.cti;
           };

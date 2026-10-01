@@ -500,14 +500,29 @@
     const big = function (k) { return k === "park" || k === "avenue" || k === "hedge"; };
     const lists = { trunk: [], s0: [], s1: [], l0: [], l1: [] };
     const hsh = CBZ.hash01 || function () { return 0.5; };
+    // THE GROUND UNDER EVERY TREE. The metro floor answers null off its own
+    // items (the hedgerows stand on the continent plate past the last pad):
+    // those used to be planted at a flat 0, wherever the country actually was.
+    const groundAt = function (x, z) {
+      const y = floorAt ? floorAt(x, z) : null;
+      if (y != null && isFinite(y)) return y;
+      return typeof CBZ.floorAt === "function" ? (CBZ.floorAt(x, z) || 0) : 0.16;
+    };
+    const feet = [];
     for (const t of P.trees) {
       const L = big(t.k);
       const sc = t.s * (L ? 1.05 : 1);
       const ci = hsh(t.x, t.z, 0x7e2) < 0.5 ? 0 : 1;
       const ry = hsh(t.x, t.z, 0x7e1) * 6.283;
-      const y = floorAt ? (floorAt(t.x, t.z) || 0) : 0.16;
-      lists.trunk.push([t.x, y, t.z, ry, sc * (L ? 1.35 : 1)]);
+      const y = groundAt(t.x, t.z);
+      // seated 4 cm under the surface: the root flare meets the ground
+      lists.trunk.push([t.x, y - 0.04, t.z, ry, sc * (L ? 1.35 : 1)]);
       lists[(L ? "l" : "s") + ci].push([t.x, y + (L ? 3.4 : 2.6) * sc, t.z, ry, sc]);
+      // contact: the crown's footprint in shade, and a mulch ring round every
+      // planted tree (a hedgerow stands in rough grass, no ring)
+      // (a street tree stands ~1 m off the kerb: its disc is kept on the footway)
+      const fr = t.k === "street" ? 1.2 : (L ? 2.9 : 1.9);
+      feet.push(t.x, y, t.z, fr * sc, t.k === "hedge" ? 0 : (L ? 1.05 : 0.75) * sc);
     }
     const out = [];
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), s = new THREE.Vector3();
@@ -532,6 +547,7 @@
     pool("crowns-s1", treeKit.crownS, treeKit.crownM[1], lists.s1, true);
     pool("crowns-l0", treeKit.crownL, treeKit.crownM[0], lists.l0, true);
     pool("crowns-l1", treeKit.crownL, treeKit.crownM[1], lists.l1, true);
+    if (CBZ.treeFoot) for (const m of CBZ.treeFoot.add(root, feet, { name: "metro-" + P.id, fogScale: 0.10 })) { m.userData.metro = P.id; out.push(m); }
     return out;
   }
 

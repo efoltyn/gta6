@@ -2326,7 +2326,15 @@
         // Town streets (towngen: `kit`) are the same kit's surface — or, in a
         // dirt village, lanes with no kerb at all — so they are left alone too.
         // (Their raised kerb returns used to float on a flat town corner.)
-        if (J.a && J.b && (J.a.grid || J.a.kit) && (J.b.grid || J.b.kit)) continue;
+        // ONE kit road in the crossing is enough: the kit's carriageway runs
+        // straight through it. A bridge or causeway landing on the grid's edge
+        // street (the annex bridge at x 156, the airport and military
+        // causeways) used to get this pass's fan at 0.086 — over the kit's
+        // 0.05 road — with 0.22 m CURVED kerb returns, an 18 m resurface
+        // patch and a second set of stop bars drawn across the kit's own
+        // straight lanes: curved lines through the road, from a layer whose
+        // heights still quote world.js's deleted sidewalk slabs.
+        if ((J.a && (J.a.grid || J.a.kit)) || (J.b && (J.b.grid || J.b.kit))) continue;
         // A freeway is not a street: no crosswalks, stop bars, kerb returns
         // or resurface patches where anything meets a highway-district road
         // (highways.js stops its own paint at those junctions).
@@ -3584,7 +3592,7 @@
       const crownGeo = GRAM ? geo("streetTreeCrown", () => CBZ.treeCrownGeo({ tiers: 2, r: 1.25, h: 2.7, seg: 7, taper: 0.66,
         site: "street", leaf: !!VKIT, cards: 12 })) : null;
       const CROWN_Y = 2.3;
-      const trunkItems = [], crownItems = [[], []];
+      const trunkItems = [], crownItems = [[], []], treeFeet = [];
       function tree(x, z) {
         if (!GRAM) return;
         const y = st.heightAt(x, z), ry = hsh(x, z, 0x7e1) * 6.283;
@@ -3593,6 +3601,7 @@
         inst("grate", x, y, z, 0);
         const ti = trunkItems.length; trunkItems.push({ x: x, y: y, z: z, ry: ry, sx: sc, sy: sc, sz: sc });
         const cj = crownItems[ci].length; crownItems[ci].push({ x: x, y: y + CROWN_Y * sc, z: z, ry: ry, sx: sc, sy: sc, sz: sc });
+        treeFeet.push(x, y, z, 1.15 * sc, 0);       // the grate is its pit; the footway round it lies in its shade (0.85 m to the kerb: kept off the road)
         const col = solidCollider(x, z, 0.2, null);
         const g = new THREE.Group(); g.position.set(x, y, z);
         const b = breakable(g, "tree", x, z, { cols: [col] });
@@ -3841,6 +3850,7 @@
             perMesh: function (im) { if (dm) im.customDepthMaterial = dm; } }).addTo(root);
           KERB_STATS.drawSets += KERB_SETS["_crown" + c].meshes.length;
         }
+        if (CBZ.treeFoot) KERB_STATS.drawSets += CBZ.treeFoot.add(root, treeFeet, { name: "kerb-trees", fogScale: 0.10 }).length;
       }
     })();
     } catch (e) { console.error("[kerb furniture]", e); }

@@ -328,7 +328,9 @@
     // Buttress roots, real metres so they stay broad when uniformly scaled.
     for (let i = 0; i < 5; i++) {
       const a = i * GOLDEN + 0.4, r = 2.2 + (i % 2) * 0.7;
-      parts.push(cylinderBetween([0, 0.5, 0], [Math.cos(a) * r, 0.05, Math.sin(a) * r], 0.46, 0.09, 5, true));
+      // the tip goes INTO the ground (it ended 5 cm above the trunk's base,
+      // so on any seat shallower than that a 2-3 m root hung in the air)
+      parts.push(cylinderBetween([0, 0.5, 0], [Math.cos(a) * r, -0.1, Math.sin(a) * r], 0.46, 0.09, 5, true));
     }
     // Crown-bearing limbs fork asymmetrically; collision stays on the bole.
     const limbs = [

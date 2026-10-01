@@ -252,8 +252,8 @@
     green: {
       gives: "instanced trees, bushes and grass that cost one draw call a layer",
       needs: ["look"],
-      files: ["world/vegetation.js"],
-      publishes: ["vegetationKit"],
+      files: ["world/vegetation.js", "world/treefoot.js"],
+      publishes: ["vegetationKit", "treeFoot"],
     },
 
     // ---- people ------------------------------------------------------------

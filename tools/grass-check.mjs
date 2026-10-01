@@ -177,7 +177,8 @@ const cases = [
   ["backcountry meadow", { wild: 1, dry: 0.3, flw: 0.03, col: [0.31, 0.455, 0.27] }],
 ];
 const lin = (h) => [(h >> 16) & 255, (h >> 8) & 255, h & 255].map((c) => { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); });
-const LAWN = lin(0x5f7e37), STRAW = lin(0x958a52);
+const PAL = (CBZ.cityGround && CBZ.cityGround.palette) || { grass: 0x566a3c, dry: 0x857a57 };
+const LAWN = lin(PAL.grass), STRAW = lin(PAL.dry);
 for (const [name, c] of cases) {
   const base = c.col || LAWN.map((v, i) => (v + (STRAW[i] - v) * c.dry) * 0.95);
   const cover = (x, z, o) => { o.g = 1; o.y = 0; o.wild = c.wild; o.dry = c.dry; o.flw = c.flw; o.h = 1; o.r = base[0]; o.gr = base[1]; o.b = base[2]; return true; };

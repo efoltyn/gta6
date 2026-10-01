@@ -128,17 +128,20 @@
         out.q = 0.88;
       },
     },
-    // ---- asphalt: aggregate stones in bitumen, hairline cracks -----------
+    // ---- asphalt: aggregate stones in bitumen ---------------------------
+    // (no baked cracks: they were the ridge of a 6-cell noise, i.e. curved
+    // grooves repeating every road tile — the "fake curved lines" the owner
+    // saw in low sun. world/materials.js asphaltDetail draws the real ones,
+    // along the lane joints and as polygonal blocks.)
     asphalt: {
       def: { roughness: 0.92, metalness: 0.02, normalScale: 0.85, repeat: 6 },
       author: function (u, v, out) {
         const grain = fbm(u, v, 48, 3, 0x0a51);     // aggregate speckle
         const blotch = fbm(u, v, 4, 3, 0x0a52);     // patch/repair mottling
         const fine = fbm(u, v, 128, 1, 0x0a53);     // sub-stone grit
-        const crack = Math.pow(clamp01(ridge(u, v, 6, 3, 0x0a54)), 22) * 0.9;
-        const l = 0.16 + grain * 0.10 + blotch * 0.05 + fine * 0.03 - crack * 0.10;
+        const l = 0.16 + grain * 0.10 + blotch * 0.05 + fine * 0.03;
         out.r = l * 1.00; out.g = l * 1.01; out.b = l * 1.06;   // asphalt reads faintly blue
-        out.h = grain * 0.62 + fine * 0.30 - crack * 0.55;
+        out.h = grain * 0.62 + fine * 0.30;
         out.q = 0.97 - grain * 0.13 - blotch * 0.06;
       },
     },

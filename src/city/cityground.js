@@ -72,6 +72,18 @@
   if (!CBZ) return;
 
   const TEX = 512;              // detail map edge (POT: repeat + mipmaps)
+  /* THE LAWN'S COLOURS (sRGB display hexes, decoded to linear below).
+     WAS 0x5f7e37 / 0x958a52: decoded, the lawn reflected (0.114, 0.209,
+     0.038) — 21 % green at a green/blue ratio of 5.5, so every downtown yard
+     and park rendered as a lit, saturated green sheet next to the metro's
+     turf (0.086, 0.125, 0.047; g/b 2.7) and the continent's meadow (0.099,
+     0.135, 0.058 after its grey ease). Real mown turf, measured off aerial
+     and street photographs of US lawns and parks, sits near 9-14 % green
+     with g/r 1.3-1.5 and g/b 2.4-3; dried-out grass runs straw-tan. These
+     are now the continent's own meadow / straw, plus a deeper irrigated /
+     shaded green for the lush patches, so one lawn is one colour at every
+     distance and across every ground system. */
+  const GRASS_HEX = 0x566a3c, DRY_HEX = 0x857a57, LUSH_HEX = 0x445a30;
   const SPLAT = 1024;           // splat edge over the grid (POT: mipmaps from the air)
   const stats = { bakeMs: 0, paintMs: 0, paints: 0, lots: 0 };
 
@@ -395,6 +407,19 @@
         g = 1; tone = 0.35;
         if (dB < 0.75) { g = 0; e = 1; tone = 0.03; }                       // planting bed at the facade
     }
+    if (g > 0) {
+      // THE LAWN'S EDGES. Turf beside a hot footway browns and thins (kerb
+      // heat, salt, feet cutting the corner): a worn band, frayed by the
+      // shader's 2.3 m bald noise, never a ruled line.
+      wear = Math.max(wear, 0.5 * Math.exp(-edge / 0.45));
+    }
+    if (o.walk != null && B && !inDrive && al > o.front - 0.05) {
+      // THE FRONT WALK. A house without a driveway still has a path from the
+      // footway to its door: a 1.2 m poured walk, the turf scuffed along it.
+      const off = Math.abs(lat - o.walk);
+      if (off < 0.6) { g = 0; e = 0; a = 0; p = 0; wear = Math.max(0.12, wear * 0.4); stain = 0.15; }
+      else if (g > 0 && off < 1.1) wear = Math.max(wear, 0.6 * (1 - (off - 0.6) / 0.5));
+    }
     if (inDrive) {
       // the driveway: pour-concrete (asphalt in the yards), wheel tracks,
       // an oil drip where cars stand, the lawn scuffed along its edges
@@ -436,7 +461,7 @@
       kind: D.kind, wealth: D.wealth,
       // poorer streets wear harder; a crew's building lets its yard go
       wear: 0.08 + (1 - D.wealth) * 0.22 + (lot.kind === "abandoned" ? 0.4 : 0),
-      park: null, b: null, face: faceOf(lot, b), front: 0,
+      park: null, b: null, face: faceOf(lot, b), front: 0, walk: null,
     };
     if (b && b.park) {
       const w = lot.w || 30, d = lot.d || 30, bo = Math.min(w, d) * 0.23;
@@ -451,6 +476,10 @@
     } else if (b && isFinite(b.w) && isFinite(b.d) && b.w > 1) {
       o.b = { x: (isFinite(b.ox) ? b.ox : lot.cx) - lot.cx, z: (isFinite(b.oz) ? b.oz : lot.cz) - lot.cz, hw: b.w / 2, hd: b.d / 2 };
       o.front = o.b.x * o.face.nx + o.b.z * o.face.nz + (o.face.nx ? o.b.hw : o.b.hd);
+      // a lawned parcel whose door is not served by a driveway gets a front walk
+      const dr = b.door;
+      if (!o.face.drive && dr && isFinite(dr.x) && isFinite(dr.z) && (D.kind === "residential" || D.kind === "projects"))
+        o.walk = o.face.nx ? dr.z - lot.cz : dr.x - lot.cx;
     }
     const ix0 = Math.max(0, Math.floor((lot.cx - o.hw - 1 - x0) / cell)), ix1 = Math.min(N - 1, Math.ceil((lot.cx + o.hw + 1 - x0) / cell));
     const iz0 = Math.max(0, Math.floor((lot.cz - o.hd - 1 - z0) / cell)), iz1 = Math.min(N - 1, Math.ceil((lot.cz + o.hd + 1 - z0) / cell));
@@ -498,7 +527,8 @@
     const f = function (c) { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
     return [f((hex >> 16) & 255), f((hex >> 8) & 255), f(hex & 255)];
   }
-  const LAWN = lin(0x5f7e37), STRAW = lin(0x958a52);   // == uCgGrass / uCgDry
+  const LAWN = lin(GRASS_HEX), STRAW = lin(DRY_HEX), LUSHC = lin(LUSH_HEX);   // == uCgGrass / uCgDry / uCgLush
+  const GTMP = [0, 0, 0];
   function underBuilding(st, x, z) {
     if (!st.bIx) {
       st.bIx = new Map();
@@ -547,9 +577,12 @@
       const dry = clamp01(0.275 + sm(clamp01((m41 - 0.45) / 0.4)) * 0.45 + wear * 0.35 - 0.3);
       out.g = g;
       out.dry = dry;
-      out.r = (LAWN[0] + (STRAW[0] - LAWN[0]) * dry) * 0.95;
-      out.gr = (LAWN[1] + (STRAW[1] - LAWN[1]) * dry) * 0.95;
-      out.b = (LAWN[2] + (STRAW[2] - LAWN[2]) * dry) * 0.95;
+      // the shader's lush patches (a 23 m field), so the blades match the turf
+      const lush = (1 - sm(clamp01((cgNoiseJ(x / 23 + 12.4, z / 23 + 12.4) - 0.2) / 0.35))) * (1 - dry) * 0.8;
+      for (let c = 0; c < 3; c++) GTMP[c] = LAWN[c] + (LUSHC[c] - LAWN[c]) * lush;
+      out.r = (GTMP[0] + (STRAW[0] - GTMP[0]) * dry) * 0.95;
+      out.gr = (GTMP[1] + (STRAW[1] - GTMP[1]) * dry) * 0.95;
+      out.b = (GTMP[2] + (STRAW[2] - GTMP[2]) * dry) * 0.95;
       // a neglected yard (projects, abandoned lots) runs to seed and weeds
       out.wild = wear > 0.5 ? 0.35 + wear * 0.5 : 0;
       out.h = 1 + wear * 0.5;
@@ -603,7 +636,7 @@
     "uniform sampler2D uCgS;", "uniform sampler2D uCgM;",
     "uniform sampler2D uCgT1;", "uniform sampler2D uCgT2;", "uniform sampler2D uCgT3;",
     "uniform vec4 uCgRect;",
-    "uniform vec3 uCgGrass;", "uniform vec3 uCgDry;", "uniform vec3 uCgLoam;", "uniform vec3 uCgGravel;",
+    "uniform vec3 uCgGrass;", "uniform vec3 uCgDry;", "uniform vec3 uCgLush;", "uniform vec3 uCgLoam;", "uniform vec3 uCgGravel;",
     "uniform vec3 uCgAsph;", "uniform vec3 uCgConc;", "uniform vec3 uCgPavA;", "uniform vec3 uCgPavB;",
     "uniform float uCgWet;",
     NOISE_GLSL,
@@ -658,7 +691,10 @@
     "  bw /= ws; bc /= ws;",
     // GRASS: lush to straw by a 41 m field, the map's own dryness and wear
     "  float dry = clamp( t2.z * 0.55 + smoothstep( 0.45, 0.85, m41 ) * 0.45 + cgMo.b * 0.35 - 0.3, 0.0, 1.0 );",
-    "  vec3 cG = mix( uCgGrass, uCgDry, dry ) * ( 0.3 + 1.4 * t1.x );",
+    // lush: the low half of a 23 m field (irrigated, shaded, the low ground
+    // where water stands) goes a deeper green; never where it is dry
+    "  float lush = ( 1.0 - smoothstep( 0.2, 0.55, cgNoise( xz / 23.0 + 12.4 ) ) ) * ( 1.0 - dry );",
+    "  vec3 cG = mix( mix( uCgGrass, uCgLush, lush * 0.8 ), uCgDry, dry ) * ( 0.3 + 1.4 * t1.x );",
     "  cG *= mix( vec3( 1.0 ), vec3( 0.9, 1.05, 0.86 ), m13 );",
     // EARTH: mulch/loam .. decomposed granite by the painted tone
     "  vec3 cE = mix( uCgLoam, uCgGravel, cgMo.a ) * ( 0.4 + 1.2 * t1.z );",
@@ -774,7 +810,7 @@
       uCgS: { value: S }, uCgM: { value: M },
       uCgT1: { value: detailTex.T1 }, uCgT2: { value: detailTex.T2 }, uCgT3: { value: detailTex.T3 },
       uCgRect: { value: new THREE.Vector4(x0, z0, 1 / span, 1 / span) },
-      uCgGrass: { value: srgbLin(0x5f7e37) }, uCgDry: { value: srgbLin(0x958a52) },
+      uCgGrass: { value: srgbLin(GRASS_HEX) }, uCgDry: { value: srgbLin(DRY_HEX) }, uCgLush: { value: srgbLin(LUSH_HEX) },
       uCgLoam: { value: srgbLin(0x463426) }, uCgGravel: { value: srgbLin(0xa89674) },
       uCgAsph: { value: srgbLin(0x464749) }, uCgConc: { value: srgbLin(0x807d76) },
       uCgPavA: { value: srgbLin(0x68645f) }, uCgPavB: { value: srgbLin(0x9e8c70) },
@@ -798,7 +834,7 @@
     };
     // terrainFogScale wraps onBeforeCompile with a generic closure whose
     // source every fog-scaled material shares: the program key must be ours.
-    mat.customProgramCacheKey = function () { return "cbzCityGround1"; };
+    mat.customProgramCacheKey = function () { return "cbzCityGround2"; };
     return mat;
   }
 
@@ -848,6 +884,7 @@
     flush: function () { drain(1e9); },
     stats: function () { return Object.assign({ splat: SPLAT, detail: TEX, live: !!live, surfaces: states.length }, stats); },
     coverAt: coverAt,
+    palette: { grass: GRASS_HEX, dry: DRY_HEX, lush: LUSH_HEX },   // sRGB display hexes (tools/grass-check.mjs)
     _bakeDetail: bakeDetail,     // plain-node checks
     _paint: paint,
   };

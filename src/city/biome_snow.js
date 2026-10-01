@@ -2317,6 +2317,7 @@
       const tbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(trunkG) : null;
       const cbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(canopyG) : null;
       const kbb = TREES2 && CBZ.treeGeoBounds ? CBZ.treeGeoBounds(capG) : null;
+      const pineFeet = CBZ.treeFoot ? [] : null;
       for (let i = 0; i < COUNT; i++) {
         const p = pts[i];
         // keep pines off the lake + the causeway mouth
@@ -2337,6 +2338,7 @@
           const seatRef = Math.min(gy, gu.min);
           const seatY = seatRef - 0.3;                 // SEATED below the downhill surface
           const span = trunkTop - seatY;
+          if (pineFeet) pineFeet.push(p.x, gy, p.z, 1.6 * sc, 0);
           // trunk: scale y so it spans [seatY, trunkTop]. ROOTED geo is
           // base-at-0/unit-height (origin at the seat); the legacy geo is
           // centred and 1.6 tall (origin at the midpoint).
@@ -2385,6 +2387,7 @@
         Math.hypot(MAXX - MINX, MAXZ - MINZ) / 2 + 14);
       trunkG.boundingSphere = bs.clone(); canopyG.boundingSphere = bs.clone(); capG.boundingSphere = bs.clone();
       root.add(trunkIM); root.add(canopyIM); root.add(capIM);
+      if (pineFeet && pineFeet.length) CBZ.treeFoot.add(root, pineFeet, { name: "resort-pines", heightAt: mountainHeightAt, fogScale: 0.12 });
 
       /* ---- THE FOREST BELT: the flanks are wooded up to the treeline ------
          130 pines in a 55 ha valley is a car park, not a forest. The owner's
@@ -2448,6 +2451,7 @@
           const budget = FLK && FLK.density ? Math.min(o.count, Math.round(o.count * 0.5 * FLK.density("mountain"))) : o.count;
           const keep = Math.min(1, budget / Math.max(1, sites.length / 5));
           let k = 0;
+          const feet = CBZ.treeFoot ? [] : null;
           for (let si = 0; si < sites.length && k < budget; si += 5) {
             const i = sites[si], j = sites[si + 1], x = sites[si + 2], z = sites[si + 3], gy = sites[si + 4];
             {
@@ -2460,7 +2464,13 @@
               const sc = (o.scale0 + CBZ.hash01(i, j, o.salt + 3) * o.scale1) * stunt;
               q.setFromAxisAngle(up, CBZ.hash01(i, j, o.salt + 4) * Math.PI * 2);
               const trunkTop = gy + 1.6 * sc;
-              const seatY = gy - 0.35 * sc;                    // seated into the slope
+              // SEATED below the LOWEST ground under the root spread, not the
+              // centre sample: on the 45-53 deg flanks a belt may stand on, the
+              // downhill side of a trunk seated 0.35·sc under its centre hung
+              // up to 0.65·sc in the air (the resort pines already obey this)
+              const gu = CBZ.treeGroundUnder ? CBZ.treeGroundUnder(o.heightAt, x, z, Math.max(0.32 * sc, 0.6)) : null;
+              const seatY = Math.min(gy, gu ? gu.min : gy) - 0.3 - 0.05 * sc;
+              if (feet) feet.push(x, gy, z, 1.6 * sc, 0);
               const span = trunkTop - seatY;
               if (ROOTED) { s.set(sc, span, sc); v.set(x, seatY, z); }
               else { s.set(sc, span / 1.6, sc); v.set(x, (seatY + trunkTop) / 2, z); }
@@ -2489,6 +2499,8 @@
           tIM.name = o.name + "-trunks"; cIM.name = o.name + "-crowns"; kIM.name = o.name + "-caps";
           tIM.userData.forestBelt = cIM.userData.forestBelt = kIM.userData.forestBelt = o.name;
           root.add(tIM); root.add(cIM); root.add(kIM);
+          // tree wells: the snow under a spruce is shaded and shallow
+          if (feet && feet.length) CBZ.treeFoot.add(root, feet, { name: o.name, heightAt: o.heightAt, fogScale: 0.12 });
           return k;
         }
         const lakeX = 180 + DX, lakeZ = -1380 + DZ;
