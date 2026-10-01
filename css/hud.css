@@ -693,6 +693,50 @@ body:not(.touch) .wprompt .tpill{
    the caret under it takes that rule's colours */
 body.touch .wprompt:not(.band)::after{background:rgba(13,26,40,.85); border-color:rgba(125,231,255,.55);}
 
+/* A PERSON'S VERBS (systems/interact.js): a column BESIDE him, his name on
+   top, the first verb (E) brightest. Left-aligned on the anchor at his
+   shoulder; .flip puts it on his other side near the right edge. */
+.wprompt.wside{transform:translate(0,-50%); padding-bottom:0;}
+.wprompt.wside.flip{transform:translate(-100%,-50%);}
+.wprompt.wside::after, .wprompt.nocaret::after{display:none;}
+.wprompt .wname{display:inline-flex; align-items:baseline; gap:7px; padding:2px 4px; pointer-events:none;
+  color:#fff; font:700 15px/1.2 Fredoka, "Arial Rounded MT Bold", system-ui, sans-serif; letter-spacing:.3px;
+  text-shadow:0 1px 3px rgba(0,0,0,.85), 0 0 8px rgba(0,0,0,.5);}
+.wprompt .wname .wrole{font-weight:500; font-size:12px; opacity:.78;}
+body:not(.touch) .wprompt.wside .tpill{padding:4px 11px 4px 5px; font-size:14px; background:rgba(9,14,20,.78);}
+body:not(.touch) .wprompt.wside.lead .tpill{background:rgba(14,30,44,.92); border-color:rgba(125,231,255,.6);}
+body.touch .wprompt.wside .tpill{min-height:46px; min-width:96px; justify-content:flex-start; margin:0;}
+body.touch .wprompt.wside.lead .tpill{background:rgba(25,70,104,.94); border-color:rgba(160,238,255,.85);}
+body.touch .wprompt .wname{font-size:16px;}
+
+/* TRADE (systems/prisontrade.js): your pockets and his on one table */
+#prisonTrade{position:fixed; inset:0; z-index:62; display:none; align-items:center; justify-content:center;
+  background:rgba(4,8,12,.42); padding:16px; box-sizing:border-box;}
+#prisonTrade.show{display:flex;}
+#prisonTrade .ptr-card{width:min(760px,100%); max-height:100%; overflow:auto; box-sizing:border-box;
+  background:rgba(10,15,21,.94); border:1px solid rgba(255,255,255,.16); border-radius:16px; padding:14px;
+  box-shadow:0 10px 40px rgba(0,0,0,.55); color:#eaf6ff; font:600 14px/1.2 Fredoka, system-ui, sans-serif;}
+#prisonTrade .ptr-sides{display:grid; grid-template-columns:1fr 1fr; gap:12px;}
+#prisonTrade .ptr-side{min-width:0; background:rgba(255,255,255,.04); border-radius:12px; padding:10px;}
+#prisonTrade .ptr-who{font-weight:700; font-size:16px; margin:0 2px 8px;}
+#prisonTrade .ptr-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(64px,1fr)); gap:8px;}
+#prisonTrade .ptr-tile{position:relative; aspect-ratio:1; min-height:56px; border-radius:10px; cursor:pointer;
+  border:1px solid rgba(255,255,255,.14); background:rgba(255,255,255,.06); padding:6px; display:flex; align-items:center; justify-content:center;
+  touch-action:manipulation; -webkit-tap-highlight-color:transparent;}
+#prisonTrade .ptr-tile img{max-width:100%; max-height:100%; object-fit:contain; pointer-events:none;}
+#prisonTrade .ptr-tile.in{border-color:#ffd27a; background:rgba(255,210,122,.16); box-shadow:inset 0 0 0 1px #ffd27a;}
+#prisonTrade .ptr-n{position:absolute; right:5px; bottom:3px; font-size:12px; opacity:.8;}
+#prisonTrade .ptr-d{position:absolute; left:4px; top:3px; min-width:18px; padding:1px 5px; border-radius:9px; background:#ffd27a; color:#1a1206; font-size:12px; font-weight:700; text-align:center;}
+#prisonTrade .ptr-cig{width:70%; height:18%; border-radius:3px; background:linear-gradient(90deg,#f4efe4 0 72%,#d98b3a 72% 100%); box-shadow:0 1px 2px rgba(0,0,0,.5);}
+#prisonTrade .ptr-none{width:46%; height:46%; border-radius:8px; background:rgba(255,255,255,.18);}
+#prisonTrade .ptr-empty{display:block; height:56px;}
+#prisonTrade .ptr-acts{display:flex; gap:10px; justify-content:flex-end; margin-top:12px; flex-wrap:wrap;}
+#prisonTrade .ptr-act{min-height:46px; min-width:96px; padding:10px 18px; border-radius:24px; cursor:pointer;
+  border:2px solid rgba(125,231,255,.55); background:rgba(13,26,40,.9); color:#eaf6ff; font:700 15px/1.2 Fredoka, system-ui, sans-serif;}
+#prisonTrade .ptr-accept{border-color:#ffd27a; background:rgba(80,60,16,.9);}
+#prisonTrade .ptr-leave{border-color:rgba(255,255,255,.25);}
+@media (max-width:520px){ #prisonTrade .ptr-sides{grid-template-columns:1fr;} #prisonTrade .ptr-act{flex:1 1 40%;} }
+
 /* ============================================================
    THE BARE PRISON (body.prison-bare, stamped by systems/hud.js in escape
    mode). Owner, 2026-09-27: "every HUD, the overlapping tabs, everything

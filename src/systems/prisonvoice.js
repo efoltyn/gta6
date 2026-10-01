@@ -29,7 +29,7 @@
     // an inmate talking to a player in a CO's uniform
     toCop: ["I ain't done nothing, CO.", "Search me. I'm clean.", "When's my phone call, CO?",
       "You new? You look new.", "Sink's been leaking three weeks, boss.", "Morning, boss."],
-    seesGun: ["Where'd you get that?", "Put that away before you get us all shot.",
+    seesGun: ["Where'd you get that?", "Put that away.",
       "You're gonna get the whole block tossed.", "Don't point that at me.", "You crazy? Put it away."],
     seesBlade: ["Put that away. Not here.", "Carrying in the open? Stupid.", "Easy with that."],
     // the moment a man hits the floor, from somebody who saw it
@@ -41,7 +41,7 @@
     freshFish: ["Fresh fish.", "What you in for?", "Don't sit there. Not yet.",
       "First night's the worst.", "Keep your eyes down a week."],
     code: ["Don't sit there.", "Don't touch another man's tray.", "Eyes down in the shower.",
-      "Don't ask a man what he's in for.", "Nobody jumps the phone line.", "Pay your debts. First rule."],
+      "Nobody jumps the phone line.", "Pay what you owe."],
     // a CO doing the job, to an inmate who is doing nothing wrong
     coProcedure: ["Tuck your shirt in.", "Hands out of your pockets.", "Keep it moving.",
       "ID on your chest.", "Single file.", "Where you supposed to be?", "Walk, don't run."],

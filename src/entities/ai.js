@@ -964,9 +964,9 @@
 
   function jobObjective(job) {
     if (!job) return "";
-    if (job.type === "rivalTurf") return `${job.label}: stay on ${job.targetName} for ${Math.ceil(job.need - job.progress)}s.`;
-    if (job.type === "delivery") return `${job.label}: reach the ${job.targetName}.`;
-    if (job.type === "lookoutShift") return `${job.label}: stay around ${job.targetName} and keep heat controlled.`;
+    if (job.type === "rivalTurf") return `Hold ${job.targetName}: ${Math.ceil(job.need - job.progress)}s`;
+    if (job.type === "delivery") return `Package to the ${job.targetName}`;
+    if (job.type === "lookoutShift") return `Watch ${job.targetName}`;
     return job.label || "Gang job";
   }
 
@@ -983,9 +983,9 @@
   }
   function jobPitch(job) {
     if (!job) return "Got work if you want it.";
-    if (job.type === "rivalTurf") return `We need a body standing on ${job.targetName}.`;
-    if (job.type === "delivery") return `A package needs to reach the ${job.targetName}.`;
-    if (job.type === "lookoutShift") return `We need eyes around ${job.targetName} for a stretch.`;
+    if (job.type === "rivalTurf") return `Stand on ${job.targetName} for us.`;
+    if (job.type === "delivery") return `Package for the ${job.targetName}.`;
+    if (job.type === "lookoutShift") return `Watch ${job.targetName} for us.`;
     return "Got work if you want it.";
   }
 
@@ -1006,10 +1006,10 @@
     CBZ.setObjective && CBZ.setObjective(jobObjective(job));
     // The handoff is the giver's words. The objective readout above carries the
     // mechanics; nobody in a prison says "job accepted".
-    const sendoff = job.type === "delivery" ? `Get it to the ${job.targetName}. Walk, don't run.`
-      : job.type === "rivalTurf" ? `Go stand on ${job.targetName} and stay standing. They'll feel it.`
-      : job.type === "lookoutShift" ? `Post up around ${job.targetName}. Whistle if a uniform moves.`
-      : "The work's yours now. See it done.";
+    const sendoff = job.type === "delivery" ? `${job.targetName}. Walk, don't run.`
+      : job.type === "rivalTurf" ? `${job.targetName}. Don't move.`
+      : job.type === "lookoutShift" ? `${job.targetName}. Whistle if a CO comes.`
+      : "Go.";
     return { ok: true, msg: sendoff };
   }
 
@@ -1313,7 +1313,7 @@
     const near = playerDist(n) < 22;
     if (a.kind === "alibiDeal" && a.memoryType && n.memory && (CBZ.game.cigs || 0) > 0 && rng() < 0.42) {
       sendNpcToSnitch(n, a.heat || 12, { copCrime: a.memoryType === "copCrime", lastKnown: n.memory.lastKnown, type: "ignored alibi" });
-      if (near) say(n, "You wouldn't buy it. The screws will.", null, 2.0);
+      if (near) say(n, "Fine. I'll sell it to a CO.", null, 2.0);
       return;
     }
     if (a.kind === "witnessFix") {
@@ -1599,7 +1599,7 @@
     if (kind === "stickUp" && extra.racketGuard) return `${extra.racketGuard} says ${c}.`;
     if (kind === "stickUp") return `Empty your pockets. ${c}.`;
     if (kind === "diversion") return `${c} and the CO's looking the other way.`;
-    if (kind === "stashCover") return `People see what you're carrying. ${c} and they don't.`;
+    if (kind === "stashCover") return `${c} and I don't say what you're carrying.`;
     if (kind === "racketCover") return `${c} and the bent ones lose your name.`;
     if (kind === "coverDebt") return `I lied to ${extra.guard || "the CO"} for you. ${c}.`;
     if (kind === "witnessFix") return `${extra.targetName || "Your witness"}? ${c} and he forgets.`;
@@ -1823,7 +1823,7 @@
       racketGuard: guardName,
       racketDebt: debt,
       rivalGang: CBZ.player.gang != null && best.gang >= 0 && best.gang !== CBZ.player.gang,
-      msg: `${actorName(best)} says ${guardName} sent word: ${cost} cigs or clean guards hear your name.`,
+      msg: guard && guard.data ? `${guardName} wants ${cost}. Now.` : `${cost}. For the CO. Now.`,
     });
     best.approachCD = 0;
     addBuzz("badge", 7 + Math.min(8, debt * 0.25), "racket-runner");
@@ -4024,19 +4024,18 @@
   function contractPitch(c) {
     const who = c.name;
     const owed = `${c.amt}`;
-    const since = c.why ? ` since ${c.why}` : "";
     const cut = c.workOff
-      ? `Bring it and ${gangName(c.workOff.gang)} take it off your tab.`
+      ? `Bring it, we're square.`
       : `Bring it, keep ${c.cut}.`;
     if (c.kind === "repo") {
-      return `${who} bought a ${c.item} with my ${owed}${since}. ${c.place} Bring me the ${c.item}` +
-        (c.workOff ? ` and we're square.` : `, keep ${c.cut}.`);
+      return `${who} has my ${c.item}. ${c.place} Bring it back` +
+        (c.workOff ? `, we're square.` : `, keep ${c.cut}.`);
     }
     if (c.kind === "roughUp") {
-      return `${who} is into me for ${owed}${since} and he's laughing. ${c.place} Put him on the floor` +
-        (c.workOff ? `. That squares us.` : `. ${c.cut} for you.`);
+      return `${who} owes me ${owed}. ${c.place} Put him down` +
+        (c.workOff ? `, we're square.` : `. ${c.cut} for you.`);
     }
-    return `${who} is into me for ${owed}${since}. ${c.place} ${cut}`;
+    return `${who} owes me ${owed}. ${c.place} ${cut}`;
   }
   // the card's one line — the pitch is SPOKEN, this is what you glance at
   function contractText(n, c) {
@@ -4185,7 +4184,7 @@
     if (c.kind === "roughUp") {
       return onHand > 0
         ? `Don't. I got ${onHand} right here. Take it to him.`
-        : `He sent you? I got nothing. Do what you're gonna do.`;
+        : `He sent you? I got nothing.`;
     }
     if (onHand <= 0) return `This about the ${c.amt}? I'm empty. ${DODGE_DAYS[(rng() * DODGE_DAYS.length) | 0]}.`;
     if (onHand >= c.amt) return `Alright. Here's the ${c.amt}. Tell him we're done.`;
@@ -4397,7 +4396,7 @@
       addGangStanding(c.workOff.gang, 6);
       addGangProtection(c.workOff.gang, 14 + c.amt);
       for (const m of CBZ.npcs) if (m.gang === c.workOff.gang) m.huntPlayer = 0;
-      line += ` Your tab's lighter.`;
+      line += ` That's off your tab.`;
     } else if (c.kind !== "collect" && c.cut > 0) {
       CBZ.econ.addCigs(c.cut);
       if (CBZ.pickupNote) CBZ.pickupNote("Cigarettes", { count: c.cut });
@@ -6716,7 +6715,7 @@
         addBuzz("snitch", -12, "paid-recant");
         clearApproach(n);
         CBZ.sfx && CBZ.sfx("coin");
-        return { ok: true, msg: challenged && challenged.ok ? `${who} recants. The case loses a named source.` : `${who} walks the story back. Wanted pressure drops.` };
+        return { ok: true, msg: challenged && challenged.ok ? "I got it wrong. Wasn't you." : "Maybe I didn't see so good." };
       }
       if (a.kind === "lookout") {
         addGangStanding(n.gang, n.gang >= 0 ? 5 : 0);
@@ -6768,7 +6767,7 @@
         addBuzz("wealth", -6, "stick-up-paid");
         clearApproach(n);
         CBZ.sfx && CBZ.sfx("coin");
-        return { ok: true, msg: racketGuard ? `${who} takes the racket cut and writes nothing down.` : `${who} takes the cut and leaves your pockets alone for now.` };
+        return { ok: true, msg: racketGuard ? "Smart." : "Good. Go." };
       }
       if (a.kind === "diversion") {
         n.playerTrust = Math.min(12, (n.playerTrust || 0) + 1);
@@ -6934,7 +6933,7 @@
       if (CBZ.addComplaint) CBZ.addComplaint(justified ? -2 : 8);
       if (CBZ.knockback) CBZ.knockback(n, CBZ.player.pos.x, CBZ.player.pos.z, 0.9);
       CBZ.sfx && CBZ.sfx("punch");
-      return { ok: justified, msg: justified ? `${who} is detained on a clean read.` : `${who} drops, but witnesses call it rough.` };
+      return { ok: justified, msg: justified ? "Alright! Alright!" : "What'd I do?" };
     }
 
     if (action === "haggle") {
@@ -7045,7 +7044,7 @@
           addBuzz("snitch", -5, "forced-recant");
           clearApproach(n);
           n.aiState = "flee"; n.fleeT = 2.0 + rng() * 1.4;
-          return { ok: true, msg: challenged && challenged.ok ? `${who}'s report collapses under pressure.` : `${who} backs off the story, but remembers the threat.` };
+          return { ok: true, msg: challenged && challenged.ok ? "Okay! It wasn't you!" : "Okay. I didn't see nothing." };
         }
         if (a.kind === "coverStory") {
           misdirectSearch(n, 3);
@@ -7113,7 +7112,7 @@
           }
           clearApproach(n);
           n.aiState = "flee"; n.fleeT = 1.5 + rng();
-          return { ok: true, msg: racketGuard ? `${who} backs off, but ${racketGuard}'s tab gets uglier.` : `${who} backs off, but the block hears you flashed steel over money.` };
+          return { ok: true, msg: racketGuard ? "Alright. Put it away." : "Easy. Easy." };
         }
         if (a.kind === "alibiDeal") {
           misdirectSearch(n, 2);
@@ -7658,7 +7657,7 @@
         n.playerTrust = Math.max(-8, (n.playerTrust || 0) - 1);
         if (gang >= 0) addGangStanding(gang, sameGang ? 1 : -1);
         emote(n, "...");
-        return { ok: true, msg: shaky || (challenged && challenged.ok) ? `${who}'s story starts falling apart. The case gets shakier.` : `${who} admits talking and gives enough detail to muddy the search.` };
+        return { ok: true, msg: shaky || (challenged && challenged.ok) ? "Maybe it wasn't you." : "I said a name. That's all." };
       }
       n.playerGrudge = Math.min(14, (n.playerGrudge || 0) + 2);
       n.reportedPlayerT = Math.max(n.reportedPlayerT || 0, 18);
@@ -7688,7 +7687,7 @@
       }
       CBZ.sfx && CBZ.sfx("coin");
       emote(n, "$");
-      return { ok: true, msg: challenged && challenged.ok ? `${who} takes ${cost} cigs and the case file loses a source.` : `${who} takes ${cost} cigs and walks the story back. Wanted pressure drops.` };
+      return { ok: true, msg: challenged && challenged.ok ? "I never said nothing." : `${cost}. I'll say I was wrong.` };
     }
 
     if (action === "threatenSnitch") {
@@ -7784,9 +7783,9 @@
      tables, they back you, you answer to their key holder). Refuse: you are
      nobody's, which on a yard means anybody's. */
   const CLAIM_LINES = [
-    "You're with us. We eat over there. You don't share with nobody else and you don't sit at their tables.",
-    "Who you with? You're with us now. Our tables, our phone. Anything happens, you come to us first.",
-    "New? You ride with us. Don't sit with them, don't eat with them. We look out for our own.",
+    "You're with us. We eat over there.",
+    "Who you with? You're with us now.",
+    "New? You ride with us. Not them.",
   ];
   function updateCarClaim(nf) {
     const g = CBZ.game || {};
@@ -7803,7 +7802,7 @@
     if (!m) { nf.claimAt = nf.t + 6 + rng() * 6; if (nf.t > 420) g.carClaim = "none"; return; }
     if (m.gang < 0) setClique(m, m.yardCar);
     const ok = startApproach(m, "gangInvite", 0, { forced: true, claim: true,
-      msg: CLAIM_LINES[(rng() * CLAIM_LINES.length) | 0], motive: "your car" });
+      msg: CLAIM_LINES[(rng() * CLAIM_LINES.length) | 0], motive: "your people" });
     if (ok) g.carClaim = "asked";
     else nf.claimAt = nf.t + 6 + rng() * 6;
   }
@@ -7938,6 +7937,39 @@
   CBZ.fightOdds = fightOdds;
   CBZ.combatPower = combatPower;
   CBZ.actorName = actorName;
+  /* WHAT A MAN REALLY WANTS DONE (systems/quests.js reads this). Only state
+     the yard already keeps: a beef he holds against a named man, or a named
+     man who holds one against him. Nothing is rolled here. `divert` is the
+     diversion approach's own effect, given free by a friend. */
+  function namedMan(m) {
+    return !!(m && m.data && m.data.name && !/^(a|an) /.test(m.data.name) && !m.dead && !m.escaped);
+  }
+  CBZ.prisonFavor = {
+    grudge(n) {
+      let best = null, bw = 5;
+      for (const b of (n && n._beef) || []) {
+        if (b.w > bw && namedMan(b.who) && b.who !== CBZ.player) { best = b.who; bw = b.w; }
+      }
+      return best;
+    },
+    threat(n) {
+      let best = null, bw = BEEF_SWING - 0.01;
+      for (const m of CBZ.npcs || []) {
+        if (m === n || !namedMan(m)) continue;
+        const w = m.foe === n ? BEEF_MAX : beefWith(m, n);
+        if (w > bw) { best = m; bw = w; }
+      }
+      return best;
+    },
+    divert(n) {
+      if (!alive(n) || !nearestGuard(n)) return false;
+      n.aiState = "diversion";
+      n.diversionT = 8;
+      n.foe = null;
+      coolWanted(12);
+      return true;
+    },
+  };
   CBZ.ensureCombatProfile = ensureCombatProfile;
   // a single "notoriety" score used to rank the whole yard
   CBZ.npcPower = function (a) {

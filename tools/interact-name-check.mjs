@@ -42,65 +42,46 @@ function node() {
 }
 
 // ---------------------------------------------------------------- PRISON
+// 2026-09-30: the verbs ride ON the person (systems/interact.js render pins a
+// group through CBZ.prisonPrompt); his name is that group's top row, a label.
 {
   const SRC = readFileSync(join(ROOT, "src/systems/interact.js"), "utf8");
+  const calls = [];
   const sb = {
-    // the role under a prison name is his race's car (systems/prisoncars.js)
-    CBZ: { touchInteractionDocked: () => false,
-      prisonCars: { label: (i) => ["Southsiders", "Black car", "White car", "Paisas", "Asian car", "Others"][i] || "", phrase: (i) => "car " + i } },
-    el: { interactName: node(), interactNote: node(), interactOpts: node() },
-    document: { documentElement: { style: { setProperty() {} } } },
-    TOUCH: false,
+    CBZ: {
+      cam: { yaw: 0 }, touchMode: false,
+      prisonCars: { label: (i) => ["Sureños", "Black Guerrilla Family", "Aryan Brotherhood", "Border Brothers", "Asian Boyz", "Independents"][i] || "" },
+      prisonPrompt: (id, act, verb, opts) => { calls.push({ id, act, verb, opts }); return true; },
+      prisonPromptClear: () => {},
+    },
   };
   vm.createContext(sb);
   vm.runInContext(
-    ["function esc(s)", "function cleanName(a)", "function shortText(s, max)", "function gangShort(a)",
-     "function whoFor(a)", "function whoHTML(a)", "function renderTouch(a, verbs, rawNote)",
-     "function setDockHeight(px)", "function renderPanel(a)"].map((a) => extract(SRC, a)).join("\n") + `
-    const OPT_KEYS = ["j", "k", "l"];
-    let piRoot = null, piName = null, piNote = null, piVerbs = null, piOpts = null, piSig = "";
-    function buildTouchUI() {
-      if (!piRoot) { piRoot = { getBoundingClientRect() { return { height: 0 }; } };
-        piName = el.piName = mk(); piNote = mk(); piVerbs = el.piVerbs = mk(); piOpts = mk(); }
-      return piRoot;
-      function mk() { return { textContent: "", innerHTML: "", style: {} }; }
-    }
-    function touchUI() { return TOUCH; }
-    function panelNote(a) { return ""; }
-    function verbsFor(a) { return ["trade", "talk", "steal"]; }
-    function capVerbs(v) { return v; }
-    function labelFor(a, v) { return v; }
+    ["function cleanName(a)", "function shortText(s, max)", "function gangShort(a)", "function whoFor(a)",
+     "function anchorOf(a)", "function render(a, verbs)"].map((x) => extract(SRC, x)).join("\n") + `
+    const KEYS = ["E", "J", "K", "L"], ROWS = 5;
+    function touchUI() { return false; }
+    function d2Of(a) { return 1; }
     function subFor(a, v) { return ""; }
     function shortLabel(a, v) { return v[0].toUpperCase() + v.slice(1); }
-    function optButton(cls, i, a, v) { return '<button data-pi="' + i + '">' + shortLabel(a, v) + "</button>"; }
-    function optChoice(i, a, v) { return optButton("", i, a, v); }
-    this.renderPanel = renderPanel; this.whoFor = whoFor;`, sb);
+    this.render = render;`, sb);
+  const go = (a) => { calls.length = 0; sb.render(a, ["talk", "trade", "steal", "grab"]); return calls; };
+  const at = { group: { position: { x: 0, y: 0, z: 0 } } };
+  const nameRow = (c) => c.find((x) => x.id === "person-who");
 
-  // a man who only rides under his car (not active in its business) still shows it
-  const inmate = { data: { name: "Marcus Hale" }, gang: -1, yardCar: 1 };
-  sb.renderPanel(inmate);
-  check("prison desktop: #interactName carries the name", sb.el.interactName.innerHTML.startsWith("Marcus Hale"), sb.el.interactName.innerHTML);
-  check("prison desktop: his car in muted role span", /<span class="iname-role">Black car<\/span>/.test(sb.el.interactName.innerHTML), sb.el.interactName.innerHTML);
-  check("prison desktop: buttons still render", /Trade/.test(sb.el.interactOpts.innerHTML), sb.el.interactOpts.innerHTML);
-
-  sb.renderPanel({ kind: "guard", data: { name: "Officer Diaz" } });
-  check("prison desktop: guard reads 'Guard'", /Officer Diaz<span class="iname-role">Guard<\/span>/.test(sb.el.interactName.innerHTML), sb.el.interactName.innerHTML);
-  sb.renderPanel({ kind: "warden", data: { name: "the Warden" } });
-  check("prison desktop: warden not doubled", sb.el.interactName.innerHTML === "Warden", sb.el.interactName.innerHTML);
-  sb.renderPanel({ data: { name: "Tico", offer: { item: "Shiv", price: 15 } }, gang: -1 });
-  check("prison desktop: stall man reads 'Trader'", /Tico<span class="iname-role">Trader<\/span>/.test(sb.el.interactName.innerHTML), sb.el.interactName.innerHTML);
-  sb.renderPanel({ data: { name: "an inmate" }, gang: -1 });
-  check("prison desktop: anonymous man reads 'Inmate'", sb.el.interactName.innerHTML === "Inmate", sb.el.interactName.innerHTML);
-  sb.renderPanel({ data: { name: "<b>x</b>" } });
-  check("prison desktop: name is escaped", !/<b>/.test(sb.el.interactName.innerHTML), sb.el.interactName.innerHTML);
-
-  sb.TOUCH = true;
-  vm.runInContext("TOUCH = true", sb);
-  sb.renderPanel(inmate);
-  check("prison touch: .piw-name carries the name", sb.el.piName && sb.el.piName.innerHTML.startsWith("Marcus Hale"), sb.el.piName && sb.el.piName.innerHTML);
-  check("prison touch: plate visible", sb.el.piName && sb.el.piName.style.display === "", sb.el.piName && sb.el.piName.style.display);
-  check("prison touch: verbs render", sb.el.piVerbs && /Steal/.test(sb.el.piVerbs.innerHTML), sb.el.piVerbs && sb.el.piVerbs.innerHTML);
-  check("prison touch markup: .piw-name precedes .piw-note", /<span class="piw-name"><\/span><span class="piw-note">/.test(SRC), "");
+  let c = go(Object.assign({ data: { name: "Marcus Hale" }, gang: 1, yardCar: 1 }, at));
+  check("prison: the name row tops his verbs", nameRow(c) && nameRow(c).opts.row === 0 && nameRow(c).verb.startsWith("Marcus Hale"), nameRow(c) && nameRow(c).verb);
+  check("prison: his gang as the muted role", nameRow(c) && /Black Guerrilla Family/.test(nameRow(c).verb), nameRow(c) && nameRow(c).verb);
+  check("prison: the name row is a label, not a button", nameRow(c) && nameRow(c).opts.label === true && !nameRow(c).opts.bind, nameRow(c) && nameRow(c).opts);
+  check("prison: verbs follow under it, E first", c.filter((x) => /^person\d/.test(x.id)).map((x) => x.opts.key).join("") === "EJKL", c.map((x) => x.opts.key));
+  check("prison: verbs are all on the same man", c.every((x) => x.opts.group === "person"), "");
+  c = go(Object.assign({ data: { name: "Ray" }, gang: -1 }, at));
+  check("prison: a man outside any gang reads Independent", nameRow(c) && /Independent/.test(nameRow(c).verb), nameRow(c) && nameRow(c).verb);
+  c = go(Object.assign({ kind: "guard", data: { name: "Officer Diaz" } }, at));
+  check("prison: guard reads 'Guard'", nameRow(c) && /Officer Diaz\s+Guard/.test(nameRow(c).verb), nameRow(c) && nameRow(c).verb);
+  c = go(Object.assign({ kind: "warden", data: { name: "the Warden" } }, at));
+  check("prison: warden not doubled", nameRow(c) && nameRow(c).verb === "Warden", nameRow(c) && nameRow(c).verb);
+  check("prison: no fixed card or rail left in interact.js", !/interactOpts\.innerHTML|pinteract/.test(SRC.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "")), "");
 }
 
 // ---------------------------------------------------------------- SURVIVAL

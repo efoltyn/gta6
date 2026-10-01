@@ -64,22 +64,10 @@
   if (CBZ.CONFIG && CBZ.CONFIG.JAIL_GUARD_HOLDUP == null) CBZ.CONFIG.JAIL_GUARD_HOLDUP = true;
   const guardHoldupOn = () => !!(CBZ.CONFIG && CBZ.CONFIG.JAIL_GUARD_HOLDUP);
 
-  // PRISON_TOUCH_PROMPTS (declared in systems/interactions.js): "[G] to rob"
-  // names a key a touch player does not have. The CUE loses the glyph on touch
-  // and a real ROB pill is armed for as long as the shakedown is actually
-  // possible — see the tick loop. Desktop and flag-off are unchanged.
-  const PTP = () => !CBZ.CONFIG || CBZ.CONFIG.PRISON_TOUCH_PROMPTS !== false;
-  const onTouch = () => !!(CBZ.touchMode ||
-    (document.body && document.body.classList.contains("touch")));
-  const robCue = () => (PTP() && onTouch() ? "rob him" : "[G] to rob");
-
   function alive(a) { return a && !a.dead && !(a.ko > 0) && !a.escaped; }
   function playerDist(n) {
     const p = CBZ.player.pos, g = n.group.position;
     return Math.hypot(p.x - g.x, p.z - g.z);
-  }
-  function shortName(n) {
-    return (n.data && n.data.name ? n.data.name : "He").replace(/^the |^a |^an /, "");
   }
 
   // any living gangmates close enough to embolden this inmate?
@@ -298,8 +286,6 @@
     if (miss) return;
     if (CBZ.shootPlayer) CBZ.shootPlayer(opts && opts.dmg ? opts.dmg : 52, g.x, g.z, {
       heat: 16, shake: 0.62, stun: 0.22,
-      haulMsg: "SHOT DOWN · DRAGGED TO YOUR CELL",
-      hint: shortName(n) + " shoots back!",
     });
   }
 

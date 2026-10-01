@@ -32,27 +32,10 @@
 
   // verb sets — labels + the call each one fires (the keys map through
   // systems/grapple.js; the rest go to CBZ.verbs directly)
-  const VB = () => CBZ.verbs || null;
-  const me = () => (VB() ? VB().playerActor() : null);
   let tgt = null;                              // the man the card is about
-  const THROW = { label: "Throw", fn: () => CBZ.grapple && CBZ.grapple.release(true) };
-  const SET_DOWN = { label: "Set down", fn: () => CBZ.grapple && CBZ.grapple.release(false) };
-  const CARRY = { label: "Carry", fn: () => { const v = VB(); if (v && tgt) v.carry(me(), tgt); } };
-  const HOLD_VERBS = [THROW, CARRY, SET_DOWN];
-  const CARRY_VERBS = [THROW, SET_DOWN];
-  const DRAG_VERBS = [{ label: "Let go", fn: () => CBZ.grapple && CBZ.grapple.release(false) }];
-  const FREE_VERBS = [
-    { label: "Grab", fn: () => CBZ.grapple && CBZ.grapple.grab() },
-    { label: "Punch", fn: () => CBZ.grapple && CBZ.grapple.punch() },
-    { label: "Shove", fn: () => CBZ.grapple && CBZ.grapple.push() },
-    { label: "Tackle", fn: () => { const v = VB(); if (v && tgt) v.tackle(me(), tgt); } },
-  ];
-  const DOWN_VERBS = [
-    { label: "Pick up", fn: () => CBZ.grapple && CBZ.grapple.grab() },
-    { label: "Drag", fn: () => { const v = VB(); if (v && tgt) v.drag(me(), tgt); } },
-  ];
-  // what the world in front of you makes of a throw
-  const THROW_WORD = { water: "Throw in", ledge: "Throw over", rail: "Throw over", wall: "Slam", bed: "Throw", table: "Throw", open: "Throw" };
+  // THE HANDS' VERB SETS (Grab / Punch / Shove / Tackle, and the swap-in
+  // set while you hold somebody) live in systems/handverbs.js now, shared
+  // with the prison: one grab, one set of follow-ups, both games.
   // THE WATER'S ONE VERB (owner: "I want climb out placed like" these).
   // city/swim.js used to render the haul-out as a .tpill in the centre-screen
   // prompt band, which is where a walk-up verb belongs and not where a verb you
@@ -129,32 +112,15 @@
     doAction(+b.dataset.i);
   });
 
-  function lookDir() { const y = CBZ.cam ? CBZ.cam.yaw : 0; return { x: -Math.sin(y), z: -Math.cos(y) }; }
-
   // who the hands can reach right now: the man you hold, the nearest man on
   // his feet in front (the grab's own reach and cone), or a man already down
   const _T = { set: null };
   function target() {
-    const v = VB(); if (!v) return null;
-    const pa = me(); if (!pa) return null;
-    const S = v.sessionOf(pa);
-    if (S && S.a === pa && v.holding(pa)) {
-      tgt = S.t;
-      if (S.verb === "drag") _T.set = DRAG_VERBS;
-      else if (S.verb === "carry") _T.set = CARRY_VERBS;
-      else _T.set = HOLD_VERBS;
-      if (_T.set !== DRAG_VERBS) {
-        const L = lookDir(), c = v.context(CBZ.player.pos, L, 2.6);
-        THROW.label = THROW_WORD[c.kind] || "Throw";
-      }
-      return _T;
-    }
-    const up = v.pick(pa, "grab");
-    if (up) { tgt = up; _T.set = FREE_VERBS; return _T; }
-    const dn = v.pick(pa, "carry", { down: true });
-    if (dn) { tgt = dn; _T.set = DOWN_VERBS; return _T; }
-    tgt = null;
-    return null;
+    const H = CBZ.handVerbs;
+    const r = H ? (H.held() || H.near()) : null;
+    if (!r) { tgt = null; return null; }
+    tgt = r.t; _T.set = r.set;
+    return _T;
   }
 
   // The desktop card is the person's NAME over the verbs and their keys. The

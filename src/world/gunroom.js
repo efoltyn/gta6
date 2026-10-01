@@ -514,7 +514,7 @@
     // (fallback only — pickupNote owns this normally.) "Q/wheel" is a keyboard
     // and a mouse; a thumb has the swap button, which the hotbar already shows.
     else tellHint((first ? "Picked up " : "Equipped ") + slot.name +
-      (CBZ.touchMode ? "." : " · Q/wheel swaps."), 1.8);
+      ".", 1.8);
   }
 
   // ==================================================================
