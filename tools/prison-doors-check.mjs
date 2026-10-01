@@ -25,8 +25,8 @@
         that auto-opens it, then run 5 simulated seconds without moving. It
         must still be shut. Getting this wrong is what makes the feature look
         broken, so it is a number here.
-     4. IT STILL NEEDS THE KEY. Drop the keycard and tap an open sally gate:
-        it must stay open. You may only shut what you could have opened.
+     4. CLOSING IS ALWAYS EASY. Drop the keycard: an open sally gate still
+        shuts by hand, and then will not open again without the card.
      5. A BLOWN DOOR NEVER COMES BACK (LAW 4), and neither does the console
         release: both report "gone" and the leaf stays open.
      6. AUTO-OPEN SURVIVED ALL OF IT. Walk away, walk back with the card: the
@@ -276,7 +276,8 @@ for (const d of [
     r.wasOpen === true && r.open === false && r.flips === 1, JSON.stringify(r));
 }
 
-// ---- 4. IT STILL NEEDS THE KEY ------------------------------------------
+// ---- 4. CLOSING IS ALWAYS EASY, OPENING TAKES THE KEY ---------------------
+// (owner 2026-09-30: "closing a door or cell is easy and E should always do it")
 {
   const r = await evl(`
     var id = "prison-sally-e1", s = window.__doors.spec(id);
@@ -286,14 +287,14 @@ for (const d of [
     for (var i = 0; i < 60; i++) CBZ.stepSim(1/60);
     var wasOpen = !!s.isOpen();
     CBZ.game.hasKey = false; CBZ.game.role = "inmate";     // drop the card
-    var verdict = CBZ.prisonDoorToggle(id);
-    var tap = window.__doors.tap(id);
+    var shut = CBZ.prisonDoorToggle(id);
+    var reopen = CBZ.prisonDoorToggle(id);
     CBZ.game.hasKey = true;
-    return { wasOpen: wasOpen, verdict: verdict, tap: tap, stillOpen: !!s.isOpen() };
+    return { wasOpen: wasOpen, shut: shut, reopen: reopen, open: !!s.isOpen() };
   `);
-  if (bad(r)) check("credential: a card door refuses a man with no card", false, why(r));
-  else check("credential: a man with no keycard cannot shut a sally gate",
-    r.wasOpen === true && r.verdict === "denied" && r.stillOpen === true, JSON.stringify(r));
+  if (bad(r)) check("credential: close is free, open takes the card", false, why(r));
+  else check("credential: a man with no keycard can shut a sally gate but not open it again",
+    r.wasOpen === true && r.shut === "closed" && r.reopen === "denied" && r.open === false, JSON.stringify(r));
 }
 
 // ---- 5. A BLOWN DOOR DOES NOT CLOSE (LAW 4) -----------------------------

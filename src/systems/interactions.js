@@ -528,10 +528,9 @@
        permanent()  blown, or released by the control-room console. LAW 4: a
                     hole is a hole, and never becomes a door again.
        canUse()     THE CREDENTIAL, and it is the SAME test the file's open
-                    path runs. You may only shut a door you would have been
-                    allowed to open — a man with no keycard cannot shut a
-                    sally gate in a guard's face, and a cell front, which asks
-                    nothing to open, asks nothing to close either.
+                    path runs. It gates OPENING only: since 2026-09-30 any
+                    open leaf can be pulled shut by hand (owner: "closing a
+                    door or cell is easy").
        set(v)       the file's own setOpen/closeDoor. The SOUND belongs there,
                     so each door keeps voicing itself from its own coordinates
                     with the door_close cue systems/audio.js already ships.
@@ -593,7 +592,11 @@
     if (!s) return null;
     if (doorGone(s)) return "gone";                     // blown / released: LAW 4
     if (doorIsOpen(s) === want) return "already";
-    if (!doorCred(s)) { doorDeny(s); return "denied"; } // the open path's own keys
+    // SHUTTING A DOOR IS ALWAYS EASY (owner, 2026-09-30: "player should be able
+    // to close every single cell ... closing a door or cell is easy and E
+    // should always do it"). The key is for OPENING; a hand pulls any open
+    // leaf to, a cell that is not yours, a seg door, a sally gate.
+    if (want && !doorCred(s)) { doorDeny(s); return "denied"; } // the open path's own keys
     const spot = doorTouchSpot(s);                      // the leaf's face as it stood when the hand went to it
     dsafe(function () { return s.set(want); }, false);
     if (doorIsOpen(s) !== want) return "refused";
@@ -709,7 +712,7 @@
   // what the pill on the leaf says, or null for no pill
   function doorVerb(s) {
     const open = doorIsOpen(s), cred = doorCred(s);
-    if (open) return cred ? { verb: "Close" } : null;
+    if (open) return { verb: "Close" };                     // closing asks nothing (doorAct)
     if (cred) {
       const keys = doorKeys(s);
       const staff = !!(CBZ.prisonStaffKey && CBZ.prisonStaffKey());
@@ -804,9 +807,12 @@
     if (!t) return;
     const v = doorVerb(t.s);
     if (!v) return;
-    // reach was proven by doorTarget against the door's own slab
+    // reach was proven by doorTarget against the door's own slab. An OPEN door
+    // you are facing at arm's reach owns [E]: the man on the bunk in another
+    // man's cell used to win the press, so only your own (empty) cell shut
+    const closing = v.verb === "Close";
     CBZ.prisonPrompt("door", "@prisonDoorVerbNearest", v.verb,
-      { at: t.at, d2: t.d * t.d, bind: true, sub: v.sub || undefined, noReach: true });
+      { at: t.at, d2: closing ? Math.min(t.d * t.d, 0.0004) : t.d * t.d, bind: true, sub: v.sub || undefined, noReach: true });
   }
 
   /* LATCH UPKEEP. Order 41.46 sits AFTER every door tick (gunroom 41,
