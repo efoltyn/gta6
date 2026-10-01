@@ -145,8 +145,17 @@
      other side), so no tile boundary shows as a line across the floor.
      ======================================================================== */
   const TEX_SCALE = { wood: 2.0, carpet: 2.0, tile: 1.2, vinyl: 1.2, checker: 1.2, concrete: 4.5,
-                      plaster: 2.5, subway: 0.45, brick: 0.61, terrazzo: 2.0, ceiling: 2.4 };
-  const TEX_SIZE = { wood: 1024, brick: 512, concrete: 512, carpet: 512, terrazzo: 512 };
+                      plaster: 2.5, subway: 0.45, brick: 0.61, terrazzo: 2.0, ceiling: 2.4,
+                      // the finishes of a house of state (interior_programs.js THE FINISH):
+                      //   marble   one 1.2 m tile = four 60 cm slabs, veined, 1 mm joints
+                      //   parquet  one 1.2 m tile of oak herringbone, 7 x 40 cm blocks
+                      //   veneer   1.6 m of quarter-cut walnut/oak: panelling, doors, desks
+                      //   paint    0.8 m of eggshell on joinery (casings, skirtings, mouldings)
+                      //   fabric   0.6 m of silk damask / linen weave (curtains, upholstery)
+                      //   rug      one 2.4 m repeat of a woven field (tinted by its colour)
+                      //   oil      a 1.2 m canvas of brushed paint (the portraits)
+                      marble: 1.2, parquet: 1.2, veneer: 1.6, paint: 0.8, fabric: 0.6, rug: 2.4, oil: 1.2 };
+  const TEX_SIZE = { wood: 1024, brick: 512, concrete: 512, carpet: 512, terrazzo: 512, marble: 512, parquet: 512, rug: 512 };
   const MATS = {};
   function rnd(seed) { let s = seed >>> 0; return function () { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
   function canvas(n) { const c = document.createElement("canvas"); c.width = c.height = n; return c; }
@@ -328,6 +337,125 @@
       }
       x.fillStyle = "rgba(120,114,100,0.55)"; x.fillRect(0, 0, n, 1.5); x.fillRect(0, 0, 1.5, n);
     },
+    // ---- THE FINISHES OF A HOUSE OF STATE ----------------------------------
+    // All painted near-neutral: the vertex colour (the room's own tint) is the
+    // stone, the stain or the paint, so one canvas serves every room.
+    marble: function (x, n) {                        // honed white marble, 60 cm slabs, grey veining
+      const r = rnd(301), q = n / 2;
+      x.fillStyle = "#f1efea"; x.fillRect(0, 0, n, n);
+      for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) {
+        // each slab its own cloud and its own run of veins
+        for (let k = 0; k < 10; k++) blot(x, n, i * q + r() * q, j * q + r() * q, 18 + r() * 60, r() < 0.55 ? "120,116,110" : "255,255,252", 0.03 + r() * 0.05);
+        const ang = r() * Math.PI;
+        for (let v = 0; v < 5; v++) {
+          let px = i * q + r() * q, py = j * q + r() * q, a = ang + (r() - 0.5) * 0.8;
+          const w0 = 0.5 + r() * 1.6, al = 0.10 + r() * 0.22;
+          x.strokeStyle = "rgba(92,90,88," + al.toFixed(3) + ")"; x.lineWidth = w0;
+          x.beginPath(); x.moveTo(px, py);
+          for (let st = 0; st < 26; st++) {
+            a += (r() - 0.5) * 0.7; px += Math.cos(a) * 6; py += Math.sin(a) * 6;
+            x.lineTo(px, py);
+          }
+          x.stroke();
+          // a hairline branch off the vein
+          if (r() < 0.6) {
+            x.lineWidth = 0.4; x.strokeStyle = "rgba(110,108,104," + (al * 0.6).toFixed(3) + ")";
+            x.beginPath(); x.moveTo(px, py); x.lineTo(px + (r() - 0.5) * 50, py + (r() - 0.5) * 50); x.stroke();
+          }
+        }
+      }
+      noise(x, n, 0, 0.03, 9000, 1.0, 302);
+      // the joints: a 1 mm hairline with its catch-light
+      x.fillStyle = "rgba(70,68,64,0.45)"; for (let k = 0; k < 2; k++) { x.fillRect(k * q, 0, 1, n); x.fillRect(0, k * q, n, 1); }
+      x.fillStyle = "rgba(255,255,255,0.35)"; for (let k = 0; k < 2; k++) { x.fillRect(k * q + 1, 0, 1, n); x.fillRect(0, k * q + 1, n, 1); }
+    },
+    parquet: function (x, n) {                       // oak herringbone, 70 x 400 mm blocks, 1.2 m tile
+      x.fillStyle = "#6e4f33"; x.fillRect(0, 0, n, n);
+      const r = rnd(311), bw = n / 17.14, bl = bw * 5.71;        // 7 cm x 40 cm on a 1.2 m tile
+      // the herringbone as rows of chevrons: blocks at +-45 deg, stepped
+      for (let row = -4; row < 26; row++) for (let col = -3; col < 6; col++) {
+        for (let side = 0; side < 2; side++) {
+          const t = 0.86 + r() * 0.26, warm = (r() - 0.5) * 14;
+          const cx0 = col * bl * 1.414 + (side ? bl * 0.707 : 0), cy0 = row * bw * 1.414;
+          x.setTransform(1, 0, 0, 1, 0, 0);
+          x.translate(cx0, cy0); x.rotate(side ? -Math.PI / 4 : Math.PI / 4);
+          x.fillStyle = rgb(150 * t + warm, 110 * t + warm * 0.4, 72 * t - warm * 0.3);
+          x.fillRect(0, 0, bl, bw);
+          for (let g = 0; g < 5; g++) {
+            const al = 0.04 + r() * 0.08;
+            x.fillStyle = r() < 0.6 ? "rgba(60,36,18," + al.toFixed(3) + ")" : "rgba(255,230,190," + (al * 0.6).toFixed(3) + ")";
+            x.fillRect(0, 1 + r() * (bw - 2), bl, 0.7 + r());
+          }
+          x.fillStyle = "rgba(30,18,8,0.55)"; x.fillRect(0, 0, bl, 1); x.fillRect(0, 0, 1, bw);
+        }
+      }
+      x.setTransform(1, 0, 0, 1, 0, 0);
+      noise(x, n, 0, 0.05, 6000, 1.1, 312);
+    },
+    veneer: function (x, n) {                        // quarter-cut hardwood: straight grain, ray fleck, no joints
+      x.fillStyle = "#8a6646"; x.fillRect(0, 0, n, n);
+      const r = rnd(321);
+      for (let i = 0; i < 160; i++) {
+        const gx = r() * n, w = 0.6 + r() * 2.6, al = 0.05 + r() * 0.12;
+        x.fillStyle = r() < 0.6 ? "rgba(58,34,16," + al.toFixed(3) + ")" : "rgba(255,226,186," + (al * 0.55).toFixed(3) + ")";
+        // the grain runs along v (up a panel, along a desk top's length)
+        wrapFill(x, n, gx, 0, w, n);
+      }
+      for (let i = 0; i < 26; i++) blot(x, n, r() * n, r() * n, 10 + r() * 40, r() < 0.5 ? "70,40,18" : "255,236,200", 0.04 + r() * 0.05);
+      for (let i = 0; i < 300; i++) { x.fillStyle = "rgba(255,240,215,0.10)"; wrapFill(x, n, r() * n, r() * n, 3 + r() * 6, 0.8); }   // ray fleck
+      noise(x, n, 0, 0.04, 4000, 1.0, 322);
+    },
+    paint: function (x, n) {                         // eggshell on joinery: almost smooth, a faint brush lay
+      x.fillStyle = "#f6f5f1"; x.fillRect(0, 0, n, n);
+      const r = rnd(331);
+      for (let i = 0; i < 90; i++) { x.fillStyle = "rgba(0,0,0," + (0.008 + r() * 0.012).toFixed(3) + ")"; wrapFill(x, n, 0, r() * n, n, 0.6 + r() * 1.2); }
+      for (let i = 0; i < 8; i++) blot(x, n, r() * n, r() * n, 20 + r() * 50, "0,0,0", 0.01 + r() * 0.012);
+      noise(x, n, 0, 0.025, 3000, 1.4, 332);
+    },
+    fabric: function (x, n) {                        // silk damask: woven ground, a figured repeat, the folds
+      x.fillStyle = "#e9e6df"; x.fillRect(0, 0, n, n);
+      for (let i = 0; i < n; i += 2) { x.fillStyle = "rgba(0,0,0,0.035)"; x.fillRect(i, 0, 1, n); x.fillRect(0, i, n, 1); }
+      // the figure: a lozenge repeat, two across
+      const q = n / 2;
+      x.fillStyle = "rgba(255,255,255,0.10)";
+      for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) {
+        const cx0 = i * q + q / 2, cy0 = j * q + q / 2;
+        x.beginPath(); x.moveTo(cx0, cy0 - q * 0.36); x.lineTo(cx0 + q * 0.22, cy0); x.lineTo(cx0, cy0 + q * 0.36); x.lineTo(cx0 - q * 0.22, cy0); x.closePath(); x.fill();
+      }
+      // the folds of a hung curtain: soft vertical light and shade across u
+      for (let i = 0; i < n; i++) {
+        const f = Math.sin(i / n * Math.PI * 2 * 4);
+        x.fillStyle = f > 0 ? "rgba(255,255,255," + (f * 0.10).toFixed(3) + ")" : "rgba(0,0,0," + (-f * 0.16).toFixed(3) + ")";
+        x.fillRect(i, 0, 1, n);
+      }
+      noise(x, n, 0, 0.04, 2500, 1.0, 342);
+    },
+    rug: function (x, n) {                           // a woven field: medallion lattice, wool fleck
+      x.fillStyle = "#c9c6c0"; x.fillRect(0, 0, n, n);
+      const r = rnd(351), q = n / 4;
+      for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
+        const cx0 = i * q + q / 2, cy0 = j * q + q / 2;
+        x.fillStyle = "rgba(0,0,0,0.13)";
+        x.beginPath(); x.moveTo(cx0, cy0 - q * 0.42); x.lineTo(cx0 + q * 0.42, cy0); x.lineTo(cx0, cy0 + q * 0.42); x.lineTo(cx0 - q * 0.42, cy0); x.closePath(); x.fill();
+        x.fillStyle = "rgba(255,255,255,0.16)";
+        x.beginPath(); x.moveTo(cx0, cy0 - q * 0.2); x.lineTo(cx0 + q * 0.2, cy0); x.lineTo(cx0, cy0 + q * 0.2); x.lineTo(cx0 - q * 0.2, cy0); x.closePath(); x.fill();
+        x.fillStyle = "rgba(0,0,0,0.18)"; x.fillRect(cx0 - 3, cy0 - 3, 6, 6);
+        for (let k = 0; k < 4; k++) { x.fillStyle = "rgba(255,255,255,0.08)"; x.fillRect(i * q + r() * q, j * q + r() * q, 4, 4); }
+      }
+      noise(x, n, 0, 0.16, 26000, 1.0, 352);           // the knots
+    },
+    oil: function (x, n) {                           // brushed oil paint: dark ground, a lit sitter, varnish
+      x.fillStyle = "#5a5650"; x.fillRect(0, 0, n, n);
+      const r = rnd(361);
+      for (let i = 0; i < 40; i++) blot(x, n, r() * n, r() * n, 20 + r() * 70, r() < 0.5 ? "20,18,16" : "200,190,170", 0.06 + r() * 0.1);
+      // head and shoulders in the middle, read from across the room
+      blot(x, n, n * 0.5, n * 0.36, n * 0.12, "236,214,186", 0.55);
+      blot(x, n, n * 0.5, n * 0.72, n * 0.3, "40,36,34", 0.5);
+      for (let i = 0; i < 900; i++) {
+        x.fillStyle = "rgba(" + (r() < 0.5 ? "0,0,0" : "255,250,240") + "," + (0.03 + r() * 0.05).toFixed(3) + ")";
+        x.fillRect(r() * n, r() * n, 2 + r() * 8, 1 + r() * 2);
+      }
+    },
     ceiling: function (x, n) {                       // 600 grid, fissured mineral tile, white T-bar
       x.fillStyle = "#e8e8e4"; x.fillRect(0, 0, n, n);
       noise(x, n, 0, 0.035, 2500, 2.0, 101);
@@ -470,12 +598,21 @@
     // ONE box. (x,y,z) is the CENTRE in building-local space; o.mat picks a
     // texture bucket (else flat colour), o.glow makes it unlit/self-lit,
     // o.solid adds a collider, o.faces is a 6-bit mask (+x,-x,+y,-y,+z,-z).
+    // o.yaw turns the box about its own vertical axis (a facet of a curved
+    // wall); its UVs stay world-scaled along the turned faces. o.free: the
+    // caller already kept clear of the core (a state plan cuts its own runs
+    // round the stair and the shaft), so the core guard is not asked again.
     function box(x, y, z, w, h, d, color, o) {
       if (!(w > 0.002 && h > 0.002 && d > 0.002)) return null;
       o = o || {};
+      const yaw = o.yaw || 0, cy = Math.cos(yaw), sy = Math.sin(yaw);
+      const rx = yaw ? Math.abs(cy) * w / 2 + Math.abs(sy) * d / 2 : w / 2;
+      const rz = yaw ? Math.abs(sy) * w / 2 + Math.abs(cy) * d / 2 : d / 2;
       // (a flat finish may cover the landing mouth, which is floor — never a shaft, which is a hole)
-      if (SHAFTS.length && hits(SHAFTS, x - w / 2, x + w / 2, z - d / 2, z + d / 2)) return null;
-      if (MOUTHS.length && h > 0.05 && hits(MOUTHS, x - w / 2, x + w / 2, z - d / 2, z + d / 2)) return null;
+      if (!o.free) {
+        if (SHAFTS.length && hits(SHAFTS, x - rx, x + rx, z - rz, z + rz)) return null;
+        if (MOUTHS.length && h > 0.05 && hits(MOUTHS, x - rx, x + rx, z - rz, z + rz)) return null;
+      }
       const key = o.glow ? "glow" : o.glass ? "glass" : (o.mat || "flat");
       const bk = bucket(key);
       const c = hexRGB(color == null ? 0xffffff : color);
@@ -488,30 +625,34 @@
         if (!(mask & (1 << f))) continue;
         const F = FACES[f];
         const ext = [hw, hh, hd];
-        const nx = F.n[0], ny = F.n[1], nz = F.n[2];
-        const cxp = x + nx * hw, cyp = y + ny * hh, czp = z + nz * hd;
         const ua = F.u, va = F.v;
+        // the face's normal and axes turned into the building frame
+        const nx = F.n[0] * cy + F.n[2] * sy, ny = F.n[1], nz = -F.n[0] * sy + F.n[2] * cy;
+        const ux = ua[0] * cy + ua[2] * sy, uz = -ua[0] * sy + ua[2] * cy;
+        const vx = va[0] * cy + va[2] * sy, vz = -va[0] * sy + va[2] * cy;
         const uh = Math.abs(ua[0]) * ext[0] + Math.abs(ua[1]) * ext[1] + Math.abs(ua[2]) * ext[2];
         const vh = Math.abs(va[0]) * ext[0] + Math.abs(va[1]) * ext[1] + Math.abs(va[2]) * ext[2];
+        const lcx = F.n[0] * hw, lcz = F.n[2] * hd;
+        const cxp = x + lcx * cy + lcz * sy, cyp = y + ny * hh, czp = z - lcx * sy + lcz * cy;
         const base = bk.pos.length / 3;
         for (let q = 0; q < 4; q++) {
           const su = (q === 0 || q === 3) ? -1 : 1, sv = (q < 2) ? -1 : 1;
-          const px = cxp + ua[0] * su * uh + va[0] * sv * vh;
+          const px = cxp + ux * su * uh + vx * sv * vh;
           const py = cyp + ua[1] * su * uh + va[1] * sv * vh;
-          const pz = czp + ua[2] * su * uh + va[2] * sv * vh;
+          const pz = czp + uz * su * uh + vz * sv * vh;
           bk.pos.push(px, py, pz);
           bk.nor.push(nx, ny, nz);
           bk.col.push(c[0], c[1], c[2]);
           if (bk.tex) {
             // world-scaled UVs: the texture keeps its real size on any box
-            const wu = (ua[0] ? px + ox : 0) * ua[0] + (ua[1] ? py : 0) * ua[1] + (ua[2] ? pz + oz : 0) * ua[2];
-            const wv = (va[0] ? px + ox : 0) * va[0] + (va[1] ? py : 0) * va[1] + (va[2] ? pz + oz : 0) * va[2];
+            const wu = (px + ox) * ux + py * ua[1] + (pz + oz) * uz;
+            const wv = (px + ox) * vx + py * va[1] + (pz + oz) * vz;
             bk.uv.push(wu / sc, wv / sc);
           }
         }
         bk.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
       }
-      if (o.solid) solid(x - hw, x + hw, z - hd, z + hd, y - hh, y + hh);
+      if (o.solid) solid(x - rx, x + rx, z - rz, z + rz, y - hh, y + hh);
       return true;
     }
     function solid(x0, x1, z0, z1, ya, yb) {
@@ -1084,6 +1225,19 @@
     if (PEOPLE.opened && CBZ.cityStaffVenue) { try { CBZ.cityStaffVenue("fitout", { stations: 0 }); } catch (e) {} }
     PEOPLE.opened = false; PEOPLE.live = 0;
   }
+  // BUILD ONE FLOOR NOW, whoever is standing where: what walking in does, for
+  // a tool or a preset that needs the finished room without a player (the
+  // president-interior check measures the state rooms' fit-out this way).
+  CBZ.fitoutBuildNow = function (b, k) {
+    const s = b && SITES.get(siteKey(b));
+    if (!s || !s.floors[k]) return null;
+    siteWorld(s);
+    if (s.live[k]) freeFloor(s, k);
+    buildFloor(s, k);
+    if (LIVE.indexOf(s) < 0) LIVE.push(s);
+    return s.live[k] || null;
+  };
+  CBZ.fitoutFloorY = floorTopOf;
   CBZ.fitoutRebuild = function (b, k) {
     const s = b && SITES.get(siteKey(b));
     if (!s) return false;
