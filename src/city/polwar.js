@@ -115,9 +115,16 @@
        `rec.warCrime = true` on the live polity record as a convenience
        mirror once mil state is restored, so any reader of the polity
        record sees it too, but the source of truth is this file's blob.
-     - NO NUKES: scope is conventional matériel (soldiers/planes/missiles)
-       per the task brief — the strategic tier (V.6's own nuclear program
-       paragraph) is explicitly later work (M/X waves).
+     - NUKES (2026-09-30, city/warroom.js): a nuclear arsenal is a per-
+       nation DATA fact — `warheads` on the country's data row (polity.js's
+       republic record, countries.js's COUNTRIES rows), seeded into this
+       file's `mil.warheads` and persisted with it. Zero means the country
+       cannot order one, full stop. strikeOn()/nuclearStrike() below are the
+       war-side consequence of a strike that actually landed in the world
+       (warroom.js calls them from the impact, never from the order).
+     - EVENTS: declareWar/endWar emit "war-declared"/"war-ended" on the
+       presidency bus (CBZ.presidency.emit) for EVERY war, AI or player, so
+       the TV news hears them the same way it hears everything else.
      - jurisdictionCard/POLITICS-tab UI wiring (V.5's "player-visible... per
        jurisdictionCard seam if clean") is NOT done this wave — this file
        ships the full simulation + a public read API (warsOf/frontsOf/
@@ -202,6 +209,20 @@
   // ============================================================
   //  STATE — g.polwarWorld: {mil, wars, reparations, nextWarId, nextFrontId}
   // ============================================================
+  // THE NEWS BUS. presidency.js owns the one synchronous world-event bus the
+  // TV and the office listen to; polwar loads before it, so it is read live.
+  function emitBus(evt, payload) {
+    const P = CBZ.presidency;
+    if (P && typeof P.emit === "function") { try { P.emit(evt, payload); } catch (e) {} }
+  }
+  // A headline with no event of its own goes to the television in the
+  // President's Office (never a screen-wide banner). Wars do NOT use this:
+  // they emit "war-declared"/"war-ended" and the TV reports off the bus.
+  function headline(text) {
+    const O = CBZ.presidentOffice;
+    if (O && typeof O.news === "function") { try { O.news(String(text), { kind: "breaking" }); } catch (e) {} }
+  }
+
   function freshState() { return { mil: Object.create(null), wars: Object.create(null), reparations: [], nextWarId: 1, nextFrontId: 1 }; }
   function reset() { g.polwarWorld = freshState(); }
   function state() { if (!g.polwarWorld) reset(); return g.polwarWorld; }
@@ -214,6 +235,16 @@
     if (rec && rec.wealthLevel != null) return clamp01(rec.wealthLevel);
     return id === "republic" ? 1.0 : 0.5;
   }
+  // THE ARSENAL IS DATA: the country's own record (polity.js's republic row,
+  // registerCountry plumbing countries.js's rows), else the COUNTRIES table
+  // row, else none. A rebel fragment inherits nothing — warheads stay with
+  // the state that built them.
+  function warheadsOf(id) {
+    const rec = CBZ.polity && CBZ.polity.get ? CBZ.polity.get(id) : null;
+    if (rec && isFinite(rec.warheads)) return Math.max(0, rec.warheads | 0);
+    const cd = (CBZ.COUNTRIES || []).find(function (c) { return c.id === id; });
+    return cd && isFinite(cd.warheads) ? Math.max(0, cd.warheads | 0) : 0;
+  }
   function seedMilitary(id) {
     const wealth = wealthOf(id), r = mkRng(id);
     const scale = 0.4 + 1.6 * wealth;
@@ -224,6 +255,7 @@
     const budgetShare = clampNum(0.05, 0.3, 0.10 + 0.08 * wealth);
     return {
       soldiers: soldiers, planes: planes, missiles: missiles, readiness: readiness, budgetShare: budgetShare,
+      warheads: warheadsOf(id),
       seedSoldiers: soldiers, warDead: 0, warCrime: false, warCrimeDay: null,
       pendingKaido: 0, pendingVolante: 0, lastConscriptDay: -999, desperateDays: 0,
       conscriptedEcon: 0, conscriptedCohort: 0, releaseDaysLeft: 0, releasePerDayEcon: 0, releasePerDayCohort: 0,
@@ -373,6 +405,7 @@
       fatigue: {}, ended: false, endedDay: null, loser: null, winner: null, endReason: null, log: [],
     };
     war.fatigue[aId] = 0; war.fatigue[bId] = 0;
+    war.byPlayer = !!opts.byPlayer;
     S.wars[war.id] = war;
 
     if (CBZ.relations) {
@@ -381,9 +414,13 @@
       rippleAllies(aId, bId);
     }
     const label = nameOf(aId) + " declares war on " + nameOf(bId);
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("WAR: " + nameOf(aId).toUpperCase() + " VS " + nameOf(bId).toUpperCase());
-    if (CBZ.cityFeed) CBZ.cityFeed("" + label + (front.real ? " · front opens at the causeway." : " · front opens at the border."), "#ff6a5e");
+    // no banner: the TV reports it off the "war-declared" event below
+    if (CBZ.cityFeed) CBZ.cityFeed("" + label + (front.real ? ", the front opens at the causeway." : ", the front opens at the border."), "#ff6a5e");
     war.log.push({ day: day, kind: "declared", text: label });
+    emitBus("war-declared", {
+      warId: war.id, attacker: aId, attackerName: nameOf(aId), defender: bId, defenderName: nameOf(bId),
+      byPlayer: !!opts.byPlayer, day: day, front: { x: front.x, z: front.z }, text: label,
+    });
     return war;
   }
 
@@ -510,7 +547,7 @@
         CBZ.relations.event(id, countries[i].id, "insult", CHILD_SOLDIER_RELATIONS_MAG);
       }
       if (CBZ.approvalShock) CBZ.approvalShock(id, CHILD_SOLDIER_APPROVAL);
-      if (CBZ.city && CBZ.city.big) CBZ.city.big("WAR CRIME: " + rec.name.toUpperCase() + " CONSCRIPTS CHILDREN");
+      headline(rec.name + " conscripts children");
       if (CBZ.cityFeed) CBZ.cityFeed("" + rec.name + " turns to child conscription, a war crime the world will not forget.", "#ff3b3b");
     }
   }
@@ -577,9 +614,12 @@
     startConscriptRelease(loserId); startConscriptRelease(winnerId);
 
     const wName = winnerRec ? winnerRec.name : winnerId, lName = loserRec ? loserRec.name : loserId;
-    if (CBZ.city && CBZ.city.big) CBZ.city.big("WAR ENDS: " + wName.toUpperCase() + " DEFEATS " + lName.toUpperCase());
-    if (CBZ.cityFeed) CBZ.cityFeed("" + reason + " — " + lName + " surrenders to " + wName + ".", "#8fe08a");
+    if (CBZ.cityFeed) CBZ.cityFeed("" + reason + ": " + lName + " surrenders to " + wName + ".", "#8fe08a");
     w.log.push({ day: day, kind: "ended", text: reason, loser: loserId, winner: winnerId });
+    emitBus("war-ended", {
+      warId: w.id, winner: winnerId, winnerName: wName, loser: loserId, loserName: lName,
+      reason: reason, day: day, text: lName + " surrenders to " + wName,
+    });
     // regimes.js's own daily tick reacts on its own from here (a losing
     // democracy's approval hit can spiral into emergencyRule) — free, per plan.
   }
@@ -687,6 +727,86 @@
   if (CBZ.onNewDay) CBZ.onNewDay(dailyTick);
 
   // ============================================================
+  //  STRIKES THAT LANDED — the war-side consequence of ordnance that really
+  //  hit a country's ground (city/warroom.js calls these from the IMPACT, so
+  //  a strike that never arrived costs the target nothing). `power` 1 = one
+  //  strike package (two jets, six Mk-84s).
+  // ============================================================
+  function pushFront(w, attackerId, shift) {
+    const f = w.fronts[0];
+    if (!f || f.collapsedSide) return;
+    // position -> 1 means sides[0] is winning (tickFront's own sign)
+    f.position = clampNum(0, 1, f.position + (w.sides[0] === attackerId ? shift : -shift));
+    if (f.position <= 0) f.collapsedSide = w.sides[0];
+    else if (f.position >= 1) f.collapsedSide = w.sides[1];
+    if (f.collapsedSide) endWar(w.id, f.collapsedSide, "front collapse");
+  }
+  function strikeOn(targetId, attackerId, power) {
+    if (!targetId) return null;
+    power = clampNum(0.1, 10, isFinite(power) ? +power : 1);
+    const mil = ensureMilitary(targetId);
+    const sLoss = Math.min(mil.soldiers, Math.round(9 * power));
+    const pLoss = Math.min(mil.planes, Math.floor(0.4 * power + 0.3));
+    applyCasualties(targetId, mil, sLoss, 0, pLoss);
+    mil.readiness = clampNum(0.05, 1, mil.readiness - 0.025 * power);
+    const w = activeWarFor(targetId);
+    if (w && attackerId && w.sides.indexOf(attackerId) >= 0 && !w.ended) {
+      w.fatigue[targetId] = (w.fatigue[targetId] || 0) + 3 * power;
+      w.log.push({ day: CBZ.worldDay ? CBZ.worldDay() : 0, kind: "strike", text: nameOf(attackerId) + " strikes " + nameOf(targetId) });
+      pushFront(w, attackerId, 0.035 * power);
+    }
+    return { soldiers: sLoss, planes: pLoss };
+  }
+  function useWarhead(id) {
+    const mil = ensureMilitary(id);
+    if (!(mil.warheads > 0)) return false;
+    mil.warheads--;
+    return true;
+  }
+  // A NUCLEAR DETONATION ON A COUNTRY'S GROUND. Half its army is gone, what is
+  // left is barely standing, and a country with nothing to answer with gives
+  // up. First use is a war crime the whole world reacts to.
+  function nuclearStrike(targetId, attackerId) {
+    if (!targetId) return null;
+    const mil = ensureMilitary(targetId);
+    const sLoss = Math.round(mil.soldiers * 0.5);
+    applyCasualties(targetId, mil, sLoss, 0, Math.round(mil.planes * 0.4));
+    mil.readiness = clampNum(0.05, 1, mil.readiness * 0.4);
+    if (attackerId && attackerId !== targetId && CBZ.polity) {
+      if (CBZ.relations && CBZ.relations.event) {
+        const countries = CBZ.polity.list("country");
+        for (let i = 0; i < countries.length; i++) {
+          const c = countries[i].id;
+          if (c !== attackerId && c !== targetId) CBZ.relations.event(c, attackerId, "insult", 25);
+        }
+      }
+      const am = ensureMilitary(attackerId);
+      am.warCrime = true; am.warCrimeDay = CBZ.worldDay ? CBZ.worldDay() : 0;
+      const ar = CBZ.polity.get(attackerId); if (ar) ar.warCrime = true;
+    }
+    let surrendered = false;
+    const w = activeWarFor(targetId);
+    if (w && attackerId && w.sides.indexOf(attackerId) >= 0 && !w.ended) {
+      w.fatigue[targetId] = (w.fatigue[targetId] || 0) + 60;
+      w.log.push({ day: CBZ.worldDay ? CBZ.worldDay() : 0, kind: "nuke", text: nameOf(attackerId) + " uses a nuclear weapon on " + nameOf(targetId) });
+      if (!(mil.warheads > 0)) { endWar(w.id, targetId, "nuclear surrender"); surrendered = true; }
+      else pushFront(w, attackerId, 0.3);
+    }
+    return { soldiers: sLoss, surrendered: surrendered, canAnswer: mil.warheads > 0 };
+  }
+  // A NEGOTIATED END. Whoever the front favours sets the terms: the side the
+  // line has been pushed back on is the one that concedes.
+  function makePeace(id) {
+    const w = activeWarFor(id);
+    if (!w || w.ended) return null;
+    const f = w.fronts[0];
+    const pos = f ? f.position : 0.5;
+    const loser = pos >= 0.5 ? w.sides[1] : w.sides[0];
+    endWar(w.id, loser, "negotiated peace");
+    return { loser: loser, winner: w.winner };
+  }
+
+  // ============================================================
   //  PUBLIC API — X6b's contract: works for ANY two polity ids.
   // ============================================================
   function warsOf(id, opts) {
@@ -720,6 +840,15 @@
     militaryOf: militaryOf,
     activeWarFor: activeWarFor,
     allWars: allWars,
+    // the war room's seam (city/warroom.js): the arsenal, the anchor a strike
+    // flies from/at, and the consequences of a strike that landed
+    warheadsOf: function (id) { return ensureMilitary(id).warheads | 0; },
+    useWarhead: useWarhead,
+    anchorOf: anchorForPolity,
+    capitalOf: capitalOf,
+    strikeOn: strikeOn,
+    nuclearStrike: nuclearStrike,
+    makePeace: makePeace,
     reset: reset,
     TUNING: {
       GOV_MUL: Object.assign({}, GOV_MUL), SOLDIER_RATE: SOLDIER_RATE, MISSILE_RATE: MISSILE_RATE, PLANE_RATE: PLANE_RATE,
@@ -750,6 +879,7 @@
   function serializeMil(m) {
     return {
       soldiers: m.soldiers, planes: m.planes, missiles: m.missiles, readiness: m.readiness, budgetShare: m.budgetShare,
+      warheads: m.warheads | 0,
       seedSoldiers: m.seedSoldiers, warDead: m.warDead || 0, warCrime: !!m.warCrime, warCrimeDay: m.warCrimeDay,
       pendingKaido: m.pendingKaido || 0, pendingVolante: m.pendingVolante || 0,
       lastConscriptDay: m.lastConscriptDay != null ? m.lastConscriptDay : -999, desperateDays: m.desperateDays || 0,
@@ -759,7 +889,7 @@
   }
   function serializeWar(w) {
     return {
-      id: w.id, sides: w.sides.slice(), aggressor: w.aggressor, startedDay: w.startedDay, intensity: w.intensity,
+      id: w.id, sides: w.sides.slice(), aggressor: w.aggressor, startedDay: w.startedDay, intensity: w.intensity, byPlayer: !!w.byPlayer,
       fronts: w.fronts.map(function (f) { return { id: f.id, x: f.x, z: f.z, real: !!f.real, position: f.position, collapsedSide: f.collapsedSide }; }),
       fatigue: Object.assign({}, w.fatigue), ended: !!w.ended, endedDay: w.endedDay, loser: w.loser, winner: w.winner, endReason: w.endReason,
       log: w.log.slice(-20),
@@ -785,6 +915,8 @@
         soldiers: Math.max(0, +src.soldiers || 0), planes: Math.max(0, +src.planes || 0), missiles: Math.max(0, +src.missiles || 0),
         readiness: clampNum(0, 1, isFinite(src.readiness) ? +src.readiness : 0.5),
         budgetShare: clampNum(0.05, 0.3, isFinite(src.budgetShare) ? +src.budgetShare : 0.12),
+        // a save from before the arsenal existed gets the country's data row
+        warheads: isFinite(src.warheads) ? Math.max(0, src.warheads | 0) : warheadsOf(id),
         seedSoldiers: isFinite(src.seedSoldiers) ? +src.seedSoldiers : Math.max(0, +src.soldiers || 0),
         warDead: +src.warDead || 0, warCrime: !!src.warCrime, warCrimeDay: src.warCrimeDay != null ? src.warCrimeDay : null,
         pendingKaido: +src.pendingKaido || 0, pendingVolante: +src.pendingVolante || 0,
@@ -798,6 +930,7 @@
       const src = obj.wars[wid]; if (!src || !Array.isArray(src.sides) || src.sides.length !== 2) continue;
       S.wars[wid] = {
         id: src.id || wid, sides: src.sides.slice(), aggressor: src.aggressor || src.sides[0], startedDay: src.startedDay || 0,
+        byPlayer: !!src.byPlayer,
         intensity: isFinite(src.intensity) ? +src.intensity : 1,
         fronts: Array.isArray(src.fronts) ? src.fronts.map(function (f) {
           return { id: f.id, x: +f.x || 0, z: +f.z || 0, real: !!f.real, position: clampNum(0, 1, isFinite(f.position) ? +f.position : 0.5), collapsedSide: f.collapsedSide || null };

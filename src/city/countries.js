@@ -178,6 +178,9 @@
       // M1: currencyId placeholder filled (sim/currency.js's registry) —
       // Veridian Mark (VDM), a rich harbor-finance note.
       currencyId: "VDM",
+      // the nuclear arsenal (polwar.js mil.warheads; city/warroom.js). Rich
+      // Veridia built a small deterrent; the other three never did.
+      warheads: 4,
       settlements: [
         {
           // NOTE: the settlement id is DISTINCT from the country id ("veridia")
@@ -209,7 +212,7 @@
       id: "kesh", name: "Kingdom of Kesh", wealthLevel: 0.35, govType: "monarchy",
       // M1: currencyId placeholder filled — Kesh Dinar (KSD), the royal-
       // treasury coinage a monarchy's culture reads as.
-      currencyId: "KSD",
+      currencyId: "KSD", warheads: 0,
       settlements: [
         {
           // (distinct from the country id "kesh" — see veridiacity's note above)
@@ -245,7 +248,7 @@
       id: "solara", name: "Solara", wealthLevel: 0.6,
       // M1: currencyId placeholder filled — Solara Sol (SOL), the sunny
       // island city-state's note (Sol doubles as sun/currency).
-      currencyId: "SOL",
+      currencyId: "SOL", warheads: 0,
       settlements: [
         {
           // (distinct from the country id "solara" — see veridiacity's note above)
@@ -264,7 +267,7 @@
       id: "mbeya", name: "Mbeya Federation", wealthLevel: 0.25,
       // M1: currencyId placeholder filled — Mbeya Shilling (MBS), the
       // real-world East-African-federation coinage this culture reads as.
-      currencyId: "MBS",
+      currencyId: "MBS", warheads: 0,
       // X4 gives Mbeya (and everyone) a real demographics config (skin-tone
       // distribution, name pools, dress palette) — this wave it draws from
       // the SAME default population pools every other settlement does.

@@ -20,10 +20,12 @@
 
    Everything reuses the existing explosion / crashfx machinery and is fully
    feature-detected. Wanted-air (police gunship/jets) lives in aircraft.js; this
-   is strictly the PLAYER'S side.
+   is the player's and the state's side: CBZ.cityStrikeFlight is the ONE
+   strike flight every bombing jet flies (your phone's F-22, a President's
+   strike package, an enemy air raid — city/warroom.js).
 
    Exposes: CBZ.cityCallChopper, CBZ.cityCallAirstrike, CBZ.cityAirServices
-            (status for the phone), CBZ.cityClearPlayerAir.
+            (status for the phone), CBZ.cityClearPlayerAir, CBZ.cityStrikeFlight.
    ============================================================ */
 (function () {
   "use strict";
@@ -72,14 +74,10 @@
   const CHOPPER_CD  = 18;     // s between chopper calls (refuel)
   const STRIKE_COST = 5000;   // $ per airstrike
   const STRIKE_CD   = 40;     // s jet rearm
-  const STRIKE_Y    = 54;     // jet pass altitude
-  const STRIKE_SPD  = 90;     // m/s jet
-  const STRIKE_DROP = 55;     // distance from target the bomb releases
 
   // ---- shared state ---------------------------------------------------------
   let G = null;               // lazy geom/mat cache
   let chopper = null;         // active personal heli or null
-  let strike = null;          // active attack jet or null
   let chopperCD = 0, strikeCD = 0;
 
   function arenaRoot() { const a = CBZ.city && CBZ.city.arena; return a ? a.root : null; }
@@ -394,7 +392,7 @@
     return { x: P.pos.x - Math.sin(y) * 34, z: P.pos.z - Math.cos(y) * 34, label: "your sights" };
   }
 
-  // Mesh-only builder (no scene/target dependency) — used by makeStrikeJet and
+  // Mesh-only builder (no scene/target dependency) — used by strikeFlight and
   // exposed for tools/studio.mjs asset photography (CBZ.debugBuildPlayerAir).
   function buildStrikeJetGroup() {
     const a = assets();
@@ -418,7 +416,7 @@
     const tailL = new THREE.Mesh(a.jetTail, a.matJet); tailL.position.set(-0.42, 0.75, -2.95); tailL.rotation.z = 0.22; grp.add(tailL);
     const tailR = new THREE.Mesh(a.jetTail, a.matJet); tailR.position.set(0.42, 0.75, -2.95); tailR.rotation.z = -0.22; grp.add(tailR);
     // UNDERWING PYLONS with visible slung bombs — these are the stores the drop
-    // "releases": dropBomb hides the pair the moment the live bomb spawns, so
+    // "releases": releaseFrom hides a pair the moment its live bomb leaves, so
     // the ordnance you see on the run-in is the ordnance that falls.
     const stores = [];
     for (const sx of [-1, 1]) {
@@ -439,24 +437,204 @@
     return { grp, burn, stores };
   }
 
-  function makeStrikeJet(tgt) {
-    const r = arenaRoot(); if (!r) return null;
-    const built = buildStrikeJetGroup();
-    const grp = built.grp, burn = built.burn, stores = built.stores;
-    r.add(grp);
-    const sp = edgePoint(tgt.x, tgt.z, STRIKE_Y);
-    grp.position.set(sp.x, STRIKE_Y, sp.z);
-    const dir = new THREE.Vector3(tgt.x - sp.x, 0, tgt.z - sp.z); dir.y = 0; dir.normalize();
-    grp.rotation.y = Math.atan2(dir.x, dir.z);
-    return { group: grp, burn, dir, pos: grp.position, target: tgt, life: 0, dropped: false, _stores: stores };
+  /* ==========================================================================
+     STRIKE FLIGHTS — ONE system for every jet that bombs something.
+
+     The phone's F-22, a President's strike package (city/warroom.js) and an
+     enemy air raid are the same thing: N real jets that run in along a
+     heading, release real stores over their aimpoints, and fly on out. There
+     used to be a hand-integrated bomb here (its own gravity, its own "near
+     enough" fuse, cityAirstrikeExplosion). It is gone: every store now leaves
+     the pylon through city/strategic.js's CBZ.strategicRelease — the B-2's own
+     release — so the fall is the solved arc, the mesh is the Mk-84 (or the
+     B61 under its parachute), and the impact is CBZ.detonate on the bus with
+     the structural ledger behind it. One release, three customers.
+
+       CBZ.cityStrikeFlight(opts) -> flight | null
+         x, z         the aimpoint (required)
+         kind         "bomb" (default) | "jdam" | "nuke"
+         jets         1..4 in echelon (default 1)
+         bombs        stores per jet, walked along the track (default 2)
+         from {x,z}   where the flight comes from (sets the heading); else
+         heading      radians; else from the arena centre outward
+         alt, speed   pass altitude AGL (default 95 m, 210 for a nuke) and m/s
+         by/byPlayer  blame, forwarded to the release (byPlayer default true)
+         stateAct     an act of state: no street crime billed for a nuke
+         side         "ours" | "enemy" (bookkeeping for callers)
+         onImpact(im, flight, n)  each store landing, n = 1 for the first
+         onDone(flight)           every jet is clear and every store has landed
+     The jets spawn RUNIN metres back down the heading (≈10 s out at 140 m/s),
+     so a strike across the map still has its aeroplanes: they fly there.  */
+  const FLIGHT = { RUNIN: 1400, RUNOUT: 900, SPD: 140, ALT: 95, STICK: 18, MAX: 6, LIFE: 60 };
+  const FALL_G = 14;                 // strategic.js's GRAV: used only to LEAD the release
+  const flights = [];
+  const _relP = { x: 0, y: 0, z: 0 };
+  if (CBZ.ordnanceSite) { try { CBZ.ordnanceSite("playerair:strike", "bomb"); } catch (e) {} }
+
+  function flightHeading(tx, tz, opts) {
+    let hx, hz;
+    if (opts.from && isFinite(opts.from.x) && isFinite(opts.from.z)) { hx = tx - opts.from.x; hz = tz - opts.from.z; }
+    else if (opts.heading != null && isFinite(opts.heading)) { hx = Math.sin(opts.heading); hz = Math.cos(opts.heading); }
+    else {
+      const a = CBZ.city && CBZ.city.arena;
+      hx = tx - (a && a.center ? a.center.x : 0); hz = tz - (a && a.center ? a.center.z : 0);
+    }
+    const l = Math.hypot(hx, hz);
+    return l > 1 ? { x: hx / l, z: hz / l } : { x: 0, z: 1 };
   }
 
-  function despawnStrike() {
-    if (!strike) return;
-    if (strike.group && strike.group.parent) strike.group.parent.remove(strike.group);
-    disposeGroup(strike.group);
-    strike = null;
+  function strikeFlight(opts) {
+    opts = opts || {};
+    if (g.mode !== "city") return null;
+    const r = arenaRoot(); if (!r) return null;
+    const tx = +opts.x, tz = +opts.z;
+    if (!isFinite(tx) || !isFinite(tz)) return null;
+    if (flights.length >= FLIGHT.MAX) return null;
+    const kind = opts.kind || "bomb";
+    const nJets = Math.max(1, Math.min(4, (opts.jets | 0) || 1));
+    const per = Math.max(1, Math.min(6, (opts.bombs | 0) || 2));
+    const spd = opts.speed > 0 ? +opts.speed : FLIGHT.SPD;
+    const h = flightHeading(tx, tz, opts);
+    const agl = opts.alt > 0 ? +opts.alt : (kind === "nuke" ? 210 : FLIGHT.ALT);
+    const y = floorAt(tx, tz) + agl;
+    // THE LEAD, solved once: the flight is straight and level at constant
+    // speed, so every store leaves with the same velocity. aircraft.js's
+    // release law says what a store keeps of the airframe's speed; the fall
+    // time off the pass altitude says how far it carries that.
+    const craft = { vx: h.x * spd, vy: 0, vz: h.z * spd };
+    let rv = null;
+    if (CBZ.ordnanceDropVel) { try { rv = CBZ.ordnanceDropVel("playerair:strike", craft, { vx: 0, vy: 0, vz: 0 }); } catch (e) { rv = null; } }
+    if (!rv) rv = { vx: craft.vx, vy: -1.5, vz: craft.vz };
+    const tf = (rv.vy + Math.sqrt(rv.vy * rv.vy + 2 * FALL_G * agl)) / FALL_G;
+    const f = {
+      kind: kind, tx: tx, tz: tz, hx: h.x, hz: h.z, spd: spd, y: y, t: 0,
+      rv: { vx: rv.vx, vy: rv.vy, vz: rv.vz }, tf: tf, lead: Math.hypot(rv.vx, rv.vz) * tf,
+      jets: [], impacts: [], hits: 0, released: 0, total: nJets * per, sndT: 0,
+      by: opts.by, byPlayer: opts.byPlayer !== false, stateAct: !!opts.stateAct,
+      label: opts.label || "", side: opts.side || "ours", data: opts.data || null,
+      onImpact: typeof opts.onImpact === "function" ? opts.onImpact : null,
+      onDone: typeof opts.onDone === "function" ? opts.onDone : null,
+    };
+    const yaw = Math.atan2(h.x, h.z);
+    for (let j = 0; j < nJets; j++) {
+      const built = buildStrikeJetGroup();
+      // echelon: the lead on the line, wingmen alternating right/left and back
+      const lat = j === 0 ? 0 : (j % 2 ? 1 : -1) * Math.ceil(j / 2) * 18;
+      const back = Math.ceil(j / 2) * 32;
+      // (hz, -hx) is the unit to the right of the heading
+      built.grp.position.set(tx - h.x * (FLIGHT.RUNIN + back) + h.z * lat, y + j * 3, tz - h.z * (FLIGHT.RUNIN + back) - h.x * lat);
+      built.grp.rotation.y = yaw;
+      r.add(built.grp);
+      // this jet's stick: walked along the track through the aimpoint, under its own lane
+      const aims = [];
+      for (let k = 0; k < per; k++) {
+        const d = (k - (per - 1) / 2) * FLIGHT.STICK;
+        aims.push({ x: tx + h.x * d + h.z * lat, z: tz + h.z * d - h.x * lat });
+      }
+      f.jets.push({ group: built.grp, burn: built.burn, stores: built.stores, pos: built.grp.position, aims: aims, next: 0, flight: f });
+    }
+    flights.push(f);
+    return f;
   }
+
+  function releaseFrom(jt, a) {
+    const f = jt.flight;
+    // the slung store visibly leaves its pylon (stores are [bomb, tip] pairs)
+    if (jt.stores) {
+      const si = (jt.next % 2) * 2;
+      if (jt.stores[si]) jt.stores[si].visible = false;
+      if (jt.stores[si + 1]) jt.stores[si + 1].visible = false;
+    }
+    _relP.x = jt.pos.x; _relP.y = jt.pos.y - 0.9; _relP.z = jt.pos.z;
+    let b = null;
+    if (CBZ.strategicRelease) {
+      try { b = CBZ.strategicRelease(f.kind, _relP, f.rv, { by: f.by, byPlayer: f.byPlayer, stateAct: f.stateAct }); } catch (e) { b = null; }
+    }
+    if (b && b.sol) f.impacts.push({ at: f.t + (b.sol.t > 0 ? b.sol.t : f.tf), x: b.sol.x, z: b.sol.z, kind: f.kind });
+    else f.impacts.push({ at: f.t + f.tf, x: a.x, z: a.z, kind: f.kind, fallback: true });
+    f.released++;
+    if (CBZ.sfx) CBZ.sfx("whoosh");
+  }
+
+  // degrade path only: strategic.js absent, so nothing is falling — the bus
+  // still prices the blast (or the plain explosion if even that is missing)
+  function fallbackBlast(f, im) {
+    const k = im.kind === "nuke" ? "bomb" : im.kind;
+    if (CBZ.detonate) { try { CBZ.detonate(im.x, null, im.z, k, { byPlayer: f.byPlayer, by: f.by }); return; } catch (e) {} }
+    if (CBZ.cityExplosion) { try { CBZ.cityExplosion(im.x, im.z, { power: 2.6, radius: 13, byPlayer: f.byPlayer }); } catch (e) {} }
+  }
+
+  function despawnFlight(f) {
+    for (let i = 0; i < f.jets.length; i++) {
+      const jt = f.jets[i];
+      if (jt.group && jt.group.parent) jt.group.parent.remove(jt.group);
+      disposeGroup(jt.group);
+      jt.group = null;
+    }
+    const i = flights.indexOf(f);
+    if (i >= 0) flights.splice(i, 1);
+  }
+  function despawnAllFlights() { while (flights.length) despawnFlight(flights[flights.length - 1]); }
+
+  // returns true when the flight is finished
+  function tickFlight(f, dt) {
+    f.t += dt;
+    const step = f.spd * dt;
+    let allOut = true;
+    for (let j = 0; j < f.jets.length; j++) {
+      const jt = f.jets[j];
+      jt.pos.x += f.hx * step; jt.pos.z += f.hz * step;
+      if (jt.burn) jt.burn.scale.z = 1.4 + Math.sin(f.t * 30 + j) * 0.4;
+      // release each store the instant the jet crosses its solved release point
+      while (jt.next < jt.aims.length) {
+        const a = jt.aims[jt.next];
+        const s = (jt.pos.x - (a.x - f.hx * f.lead)) * f.hx + (jt.pos.z - (a.z - f.hz * f.lead)) * f.hz;
+        if (s < 0) break;
+        releaseFrom(jt, a);
+        jt.next++;
+      }
+      if ((jt.pos.x - f.tx) * f.hx + (jt.pos.z - f.tz) * f.hz < FLIGHT.RUNOUT) allOut = false;
+    }
+    for (let i = f.impacts.length - 1; i >= 0; i--) {
+      const im = f.impacts[i];
+      if (f.t < im.at) continue;
+      f.impacts.splice(i, 1);
+      f.hits++;
+      if (im.fallback) fallbackBlast(f, im);
+      if (f.onImpact) { try { f.onImpact(im, f, f.hits); } catch (e) {} }
+    }
+    // THE JETS ARE THE ALERT: a repeating engine roar keyed to the lead's true
+    // distance from the player — sfx's dist handling attenuates it and swaps to
+    // the muffled far-field bus, so it starts as a far-off rumble and swells
+    // into a hard overhead roar on the pass. force+ghost so the cadence never
+    // starves (or is starved by) other rumbles.
+    f.sndT -= dt;
+    if (f.sndT <= 0 && CBZ.sfx && f.jets[0]) {
+      f.sndT = 0.55;
+      const P = CBZ.player, lp = f.jets[0].pos;
+      const d = P && P.pos ? Math.hypot(lp.x - P.pos.x, lp.z - P.pos.z) : 999;
+      CBZ.sfx("rumble", { dist: d, volume: 0.9, force: true, ghost: true });
+      if (d < 55) CBZ.sfx("wind", { dist: d, volume: 1.0, force: true, ghost: true });  // close pass: the air itself tears
+    }
+    return (allOut && !f.impacts.length && f.released >= f.total) || f.t > FLIGHT.LIFE;
+  }
+  function updateFlights(dt) {
+    for (let i = flights.length - 1; i >= 0; i--) {
+      const f = flights[i];
+      if (!tickFlight(f, dt)) continue;
+      // anything still in the air when the clock runs out lands now, so no
+      // caller is left waiting on an impact that never reports
+      while (f.impacts.length) {
+        const im = f.impacts.shift(); f.hits++;
+        if (im.fallback) fallbackBlast(f, im);
+        if (f.onImpact) { try { f.onImpact(im, f, f.hits); } catch (e) {} }
+      }
+      despawnFlight(f);
+      if (f.onDone) { try { f.onDone(f); } catch (e) {} }
+    }
+  }
+  CBZ.cityStrikeFlight = strikeFlight;
+  CBZ.cityStrikeFlights = function () { return flights.slice(); };
 
   // systems/lockon.js UNIVERSAL-acquisition seam: the summoned taxi chopper
   // and the airstrike jet are real craft in the sky, so they're lockable like
@@ -478,73 +656,16 @@
     if (chopper && chopper.pos && chopper.group && chopper.group.parent) {
       if (cb(chopper, airLockSeek(chopper), chopper.pos.x, chopper.pos.y, chopper.pos.z, 3.0, "aircraft") === false) return;
     }
-    if (strike && strike.pos && strike.group && strike.group.parent) {
-      cb(strike, airLockSeek(strike), strike.pos.x, strike.pos.y, strike.pos.z, 3.2, "aircraft");
+    // every jet of every strike flight — yours, the state's, the enemy's
+    for (let i = 0; i < flights.length; i++) {
+      const js = flights[i].jets;
+      for (let j = 0; j < js.length; j++) {
+        const jt = js[j];
+        if (!jt.group || !jt.group.parent) continue;
+        if (cb(jt, airLockSeek(jt), jt.pos.x, jt.pos.y, jt.pos.z, 3.2, "aircraft") === false) return;
+      }
     }
   };
-
-  function dropBomb(j) {
-    const r = arenaRoot(); if (!r) { detonateStrike(j.target); return; }
-    const a = assets();
-    // the wing stores visibly release: hide the slung pair, spawn the live bomb
-    if (j._stores) for (let i = 0; i < j._stores.length; i++) j._stores[i].visible = false;
-    const b = new THREE.Mesh(a.bomb, a.bombMat);
-    b.position.copy(j.pos); b.position.y -= 0.7; b.rotation.x = Math.PI / 2;
-    r.add(b);
-    j._bomb = { mesh: b, vx: j.dir.x * 28, vz: j.dir.z * 28, vy: -2, t: 0 };
-    if (CBZ.sfx) CBZ.sfx("whoosh");
-  }
-
-  function detonateStrike(tgt) {
-    if (CBZ.cityAirstrikeExplosion) {
-      CBZ.cityAirstrikeExplosion(tgt.x, tgt.z, { power: 3.0, radius: 16, byPlayer: true, y: 0.4 });
-    } else if (CBZ.cityExplosion) {
-      CBZ.cityExplosion(tgt.x, tgt.z, { power: 2.6, radius: 13, byPlayer: true });
-    }
-    if (CBZ.shake) CBZ.shake(1.1);
-  }
-
-  function updateStrike(dt) {
-    if (!strike) return;
-    const j = strike;
-    j.life += dt;
-    const step = STRIKE_SPD * dt;
-    j.pos.x += j.dir.x * step; j.pos.z += j.dir.z * step;
-    if (j.burn) j.burn.scale.z = 1.4 + Math.sin(j.life * 30) * 0.4;
-    // THE JET IS THE ALERT: a repeating engine roar keyed to its true distance
-    // from the player — sfx's dist handling attenuates it and swaps to the
-    // muffled far-field bus past 60u, so it starts as a far-off rumble at the
-    // city edge and swells into a hard overhead roar on the pass. force+ghost
-    // so the 0.55s cadence never starves (or is starved by) other rumbles.
-    if (CBZ.sfx) {
-      j._sndT = (j._sndT == null ? 0 : j._sndT) - dt;
-      if (j._sndT <= 0) {
-        j._sndT = 0.55;
-        const P = CBZ.player;
-        const d = P ? Math.hypot(j.pos.x - P.pos.x, j.pos.z - P.pos.z) : 999;
-        CBZ.sfx("rumble", { dist: d, volume: 0.9, force: true, ghost: true });
-        if (d < 55) CBZ.sfx("wind", { dist: d, volume: 1.0, force: true, ghost: true });  // close pass: the air itself tears
-      }
-    }
-    // release the bomb near the run-in to the target
-    if (!j.dropped) {
-      const dx = j.pos.x - j.target.x, dz = j.pos.z - j.target.z;
-      if (dx * dx + dz * dz < STRIKE_DROP * STRIKE_DROP) { j.dropped = true; dropBomb(j); }
-    }
-    // fly the dropped bomb down onto the mark
-    if (j._bomb) {
-      const bm = j._bomb; bm.t += dt; bm.vy -= 20 * dt;
-      bm.mesh.position.x += bm.vx * dt; bm.mesh.position.z += bm.vz * dt; bm.mesh.position.y += bm.vy * dt;
-      const gy = floorAt(j.target.x, j.target.z);
-      const near = Math.hypot(bm.mesh.position.x - j.target.x, bm.mesh.position.z - j.target.z) < 4;
-      if (bm.mesh.position.y <= gy + 0.6 || (near && bm.t > 0.4) || bm.t > 4) {
-        detonateStrike(j.target);
-        if (bm.mesh.parent) bm.mesh.parent.remove(bm.mesh);
-        j._bomb = null;
-      }
-    }
-    if (j.life > 7) despawnStrike();
-  }
 
   // ============================================================ API ===========
   CBZ.cityCallChopper = function () {
@@ -570,13 +691,15 @@
     tgt = tgt || strikeTarget();
     if (!tgt) { note("No target, set a waypoint [M] or aim at the ground.", 2.6); return false; }
     if (((g.cash || 0) + (g.cityBank || 0)) < STRIKE_COST) { note("An airstrike costs " + money(STRIKE_COST) + ".", 2.6); return false; }
+    // your F-22: one jet, its two slung Mk-84s walked across the mark
+    const f = strikeFlight({ x: tgt.x, z: tgt.z, jets: 1, bombs: 2, alt: 70, byPlayer: true, label: tgt.label || "" });
+    if (!f) { note("The jet can't get airborne right now.", 2); return false; }
     charge(STRIKE_COST);
     strikeCD = STRIKE_CD;
-    strike = makeStrikeJet(tgt);
     // calling in military ordnance is a felony spectacle — the law notices.
     if (CBZ.city && CBZ.city.addHeat) CBZ.city.addHeat(260);
     // (CUT: the "🎯 AIRSTRIKE INBOUND" centre flash. In real life nothing pops
-    // up to tell you a jet is coming — you HEAR it: updateStrike() drives a
+    // up to tell you a jet is coming — you HEAR it: tickFlight() drives a
     // swelling engine roar from the moment it crosses the city edge. The only
     // words are the read-back below — YOUR pilot confirming YOUR tasking, a
     // notification from a person, on the quiet feed.)
@@ -603,16 +726,16 @@
     strikeJet: function () { return buildStrikeJetGroup().grp; },
   };
 
-  function teardown() { despawnChopper(); despawnStrike(); chopperCD = 0; strikeCD = 0; g.cityChopperRide = false; }
+  function teardown() { despawnChopper(); despawnAllFlights(); chopperCD = 0; strikeCD = 0; g.cityChopperRide = false; }
   CBZ.cityClearPlayerAir = teardown;
 
   // ---- tick (after player physics @10 so the ride pos override wins) ---------
   CBZ.onUpdate(42.5, function (dt) {
-    if (g.mode !== "city") { if (chopper || strike) teardown(); return; }
+    if (g.mode !== "city") { if (chopper || flights.length) teardown(); return; }
     if (chopperCD > 0) chopperCD = Math.max(0, chopperCD - dt);
     if (strikeCD > 0) strikeCD = Math.max(0, strikeCD - dt);
     if (g.state !== "playing") return;
     updateChopper(dt);
-    updateStrike(dt);
+    updateFlights(dt);
   });
 })();
