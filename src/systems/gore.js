@@ -660,6 +660,64 @@
     if (rec.m && ldProxies.length < LD_CAP) ldProxies.push(rec.m);
     rec.slot = -1;
   }
+  /* BLOOD RIDES WHAT IT HIT. (OWNER: "if i get shot in front of a door and
+     then the door opens the blood floats like the door is closed ... it should
+     stay on door duh".) A wall mark was stamped in WORLD space, so when the
+     leaf it landed on swung open the stain stayed hanging in the empty
+     doorway. Now every wall mark keeps the drawn mesh behind the collider it
+     hit (c.ref: the leaf slab for a door, the wall box for a wall) and its own
+     matrix in that mesh's space; when the mesh moves, the mark moves with it,
+     and the GPU still draws it in the one instanced call. If the surface goes
+     away instead (its collider pulled while the mesh never moved, the mesh
+     hidden, or taken out of the scene) the mark goes with it: blood never
+     hangs on nothing. */
+  const _anM = new THREE.Matrix4();
+  // 1 drawn + in a scene, 0 in a scene but hidden, -1 not in any scene
+  function refShown(o) {
+    let vis = true;
+    for (; o; o = o.parent) { if (!o.visible) vis = false; if (o.isScene) return vis ? 1 : 0; }
+    return -1;
+  }
+  function anchorTo(rec, col) {
+    const ref = col && col.ref;
+    if (!ref || !ref.isObject3D) return rec;
+    const shown = refShown(ref);
+    if (shown < 0) return rec;                        // a loose raycast proxy: nothing to ride
+    ref.updateWorldMatrix(true, false);
+    rec.ref = ref; rec.col = col; rec.shown = shown;
+    rec.local = new THREE.Matrix4().copy(ref.matrixWorld).invert().multiply(rec.m.matrix);
+    rec.last = ref.matrixWorld.elements.slice();
+    rec.moved = false; rec.gone = false; rec.vis = 1; rec.chk = Math.random() * 0.5;
+    return rec;
+  }
+  // per frame for an anchored mark: follow the surface; false = the surface
+  // left the world, release the mark
+  function rideAnchor(w, dt) {
+    const ref = w.ref, e = ref.matrixWorld.elements, L = w.last;
+    let k = 0;
+    for (; k < 16; k++) if (Math.abs(e[k] - L[k]) > 1e-5) break;
+    if (k < 16) {
+      for (k = 0; k < 16; k++) L[k] = e[k];
+      w.moved = true;
+      _anM.multiplyMatrices(ref.matrixWorld, w.local);
+      if (ldMesh && w.slot >= 0) { ldMesh.setMatrixAt(w.slot, _anM); ldMatDirty = true; }
+      w.m.position.setFromMatrixPosition(_anM);
+    }
+    w.chk -= dt;
+    if (w.chk <= 0) {
+      w.chk = 0.5;
+      const s = refShown(ref);
+      if (s < 0) return false;
+      // a door whose collider is pulled but whose leaf SWUNG still has the
+      // blood on it; a collider pulled from under a mesh that never moved
+      // (a leaf swapped out, a wall knocked down) leaves nothing to stain
+      const pulled = !w.moved && CBZ.colliders && CBZ.colliders.indexOf(w.col) < 0;
+      w.gone = (w.shown === 1 && s === 0) || pulled;
+    }
+    w.vis = w.gone ? Math.max(0, w.vis - dt * 4) : Math.min(1, w.vis + dt * 4);
+    return true;
+  }
+
   // end of the gore frame: push what changed (one upload each, at most)
   function ldFlush(dt) {
     ldClock += dt;
@@ -1657,6 +1715,7 @@
   const WP_T0 = new Float32Array(WP_MAX), WP_T1 = new Float32Array(WP_MAX);
   const WP_Y0 = new Float32Array(WP_MAX), WP_Y1 = new Float32Array(WP_MAX);
   const WP_GEN = new Uint16Array(WP_MAX);
+  const WP_C = new Array(WP_MAX).fill(null);         // the collider struck: its mesh is what the drops ride
   let wpCursor = 0;
   function airWall(x, y, z, dx, dz) {
     if (!(dx || dz)) return -1;
@@ -1668,13 +1727,13 @@
     const nz = f.face === "zmin" ? -1 : (f.face === "zmax" ? 1 : 0);
     WP_NX[k] = nx; WP_NZ[k] = nz; WP_D[k] = nx * hx + nz * hz;
     if (nx) { WP_T0[k] = c.minZ; WP_T1[k] = c.maxZ; } else { WP_T0[k] = c.minX; WP_T1[k] = c.maxX; }
-    WP_Y0[k] = f.y0; WP_Y1[k] = f.y1;
+    WP_Y0[k] = f.y0; WP_Y1[k] = f.y1; WP_C[k] = c;
     WP_GEN[k] = (WP_GEN[k] + 1) & 0xffff;
     return k;
   }
   // a drop's mark on a wall face: the stain layer's drop/dot cells, laid in
   // the face's plane, tail pointing along the drop's in-plane travel
-  function wallDrop(px, py, pz, nx, nz, vx, vy, vz, g) {
+  function wallDrop(px, py, pz, nx, nz, vx, vy, vz, g, col) {
     if (walls.length > 34) return false;             // the kills' own wall splats come first
     const c = claimLand();
     if (!c) return false;
@@ -1693,7 +1752,7 @@
     m.scale.set(sx, sy, 1);
     ldWrite(c.slot, m, drop ? CELL_DROP : CELL_DOT, 1, 0.08, 5 + Math.random() * 5, 0.35, 0.55, 0.1, 1, 0);
     const near = dist2Cam(px, pz) < 24 * 24;
-    walls.push({ m, slot: c.slot, t: 0, hold: near ? 40 : 14, fade: 8 });
+    walls.push(anchorTo({ m, slot: c.slot, t: 0, hold: near ? 40 : 14, fade: 8 }, col));
     return true;
   }
   // how big a mark a drop leaves: a few times its own size, more the faster
@@ -1969,7 +2028,7 @@
               if (AMARK[i] && airLands < AIR_LAND_FRAME) {
                 airLands++;
                 const sp = Math.sqrt(vx * vx + vy * vy + vz * vz);
-                if (wallDrop(x - WP_NX[wp] * s, y, z - WP_NZ[wp] * s, WP_NX[wp], WP_NZ[wp], vx, vy, vz, markOf(i, sp))) AIR_AUDIT.wallLands++;
+                if (wallDrop(x - WP_NX[wp] * s, y, z - WP_NZ[wp] * s, WP_NX[wp], WP_NZ[wp], vx, vy, vz, markOf(i, sp), WP_C[wp])) AIR_AUDIT.wallLands++;
               }
               killAir(i); continue;
             }
@@ -2409,6 +2468,7 @@
   // opaque wall → NO splat (the wound decal + ground pool still convey the hit;
   // a missing splat beats a floating one).
   const MIN_FACE = 1.2;   // min in-plane horizontal face span for a "wall" (rejects hydrant/pole/meter/sign)
+  const MIN_DOOR = 0.7;   // ...unless it is a door: door-high (>= 1.8 m, see wallFace) and at least this wide
   const MIN_WALL_H = 1.0; // min height of a height-gated band to count as wall (rejects low curbs/ledges)
 
   /* A BAND-LESS COLLIDER IS NOT A FULL-HEIGHT WALL — IT IS A PROP NOBODY GAVE
@@ -2513,7 +2573,7 @@
       // (and enough height) — a thin hydrant/pole/meter/sign box never passes.
       const faceX = face === "xmin" || face === "xmax";
       const span = faceX ? (c.maxZ - c.minZ) : (c.maxX - c.minX);
-      if (span < MIN_FACE) continue;                         // thin prop, not a wall
+      if (span < MIN_DOOR) continue;                         // thin prop, not a wall
       // NO DECLARED BAND: measure the thing that is drawn before believing it
       // is a wall. This is where the table gets thrown out — 2.2 m wide, and
       // 0.10 m tall. Placed after the slab test on purpose: the derive only
@@ -2524,6 +2584,10 @@
         if (band && bandRejects(band.y0, band.y1, y)) continue;
         if (band) { y0 = band.y0; y1 = band.y1; }
       }
+      // a DOOR is narrower than a wall run (a 0.9 m leaf) but it is a full
+      // door-height opaque face; before this the leaf was skipped and the
+      // blood went through the closed door to whatever stood behind it
+      if (span < MIN_FACE && !(y1 - y0 >= 1.8 && y1 - y0 < 50)) continue;
       // OPEN / SHATTERED WINDOW: the bullet flew through a hole — there is no
       // surface to splat. Skip and keep scanning for a real wall behind it.
       const hx = x + dx * t0, hz = z + dz * t0;
@@ -2540,6 +2604,7 @@
     if (walls.length > 48) return;
     const best = wallFace(x, y, z, dx, dz, 3.4);
     if (!best) return;
+    const col = best.c;                                   // best is a reused record: hold the collider now
     const c = claimLand();
     if (!c) return;
     const hx = x + dx * best.t, hz = z + dz * best.t;
@@ -2560,7 +2625,7 @@
     m.scale.set(Math.random() < 0.5 ? -S : S, S, 1);
     ldWrite(c.slot, m, CELL_SPLAT[1], 1, instant ? 0.05 : 0.12, 20 + Math.random() * 15, instant ? 1 : 0.3, 0.85, 0.07, 1, 0);
     const near = dist2Cam(hx, hz) < 24 * 24;
-    walls.push({ m, slot: c.slot, t: 0, hold: near ? 60 : 26, fade: 12 });
+    walls.push(anchorTo({ m, slot: c.slot, t: 0, hold: near ? 60 : 26, fade: 12 }, col));
     // the heavy part runs: 1-3 drips out of the core, each crawling down at a
     // few cm a second and stopping where the blood runs out
     const drips = Math.min(3, 1 + Math.round(amt));
@@ -2577,7 +2642,7 @@
       dm.scale.set(wd / 0.42, L / 1.92, 1);
       ldWrite(dc.slot, dm, CELL_DRIP, 1, L / (0.06 + Math.random() * 0.1), 18 + Math.random() * 10, 0, 0.9, 0.05, 1,
         (instant ? 0.1 : 0.25) + Math.random() * 0.5);
-      walls.push({ m: dm, slot: dc.slot, t: 0, hold: near ? 60 : 26, fade: 12 });
+      walls.push(anchorTo({ m: dm, slot: dc.slot, t: 0, hold: near ? 60 : 26, fade: 12 }, col));
     }
   }
 
@@ -4403,7 +4468,8 @@
       const w = walls[i]; w.t += dt;
       // splats and drips grow on the GPU; only the end of their life is ours
       const fadeOut = w.t > w.hold ? Math.max(0, 1 - (w.t - w.hold) / w.fade) : 1;
-      if (w.slot >= 0) ldSetFx(w.slot, fadeOut, (1 - fadeOut) * 0.3);
+      if (w.ref && !rideAnchor(w, dt)) { ldRelease(w); walls.splice(i, 1); continue; }
+      if (w.slot >= 0) ldSetFx(w.slot, fadeOut * (w.ref ? w.vis : 1), (1 - fadeOut) * 0.3);
       if (w.t > w.hold + w.fade) { ldRelease(w); walls.splice(i, 1); }
     }
     ldFlush(dt);
