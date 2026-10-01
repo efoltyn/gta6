@@ -40,7 +40,7 @@
   // ---- TUNING — one line of why each ------------------------------------
   const SUBSTEP = 1 / 120;          // tyre forces are stiff; 120 Hz explicit steps stay stable even when a frame is 0.2 s
   const MAX_SUBSTEPS = 12;          // a 0.1 s hitch still integrates; a longer one is clamped rather than exploding
-  const MU_BASE = 0.50, MU_SLOPE = 0.05; // carDynamics' arcade grip (≈2.5..11) -> peak friction 0.63 g (semi) .. 1.05 g (super)
+  const MU_BASE = 0.56, MU_SLOPE = 0.05; // carDynamics' arcade grip (≈2.5..11) -> peak friction 0.69 g (semi) .. 1.11 g (super): street tyres, not ice
   const FRONT_BIAS = 0.87;          // front axle ~10% weaker than the rear: road cars leave the factory understeering, so a lift never spins them
   const REAR_DRIFT_K = 0.12;        // rear grip lost per unit of FEEL 'drift' above 1: loose-tailed classes, still stable on a lift
   const UNDER_K = 0.28;             // extra front weakness per unit of soft 'roll' above a sedan: tall and heavy pushes wide
@@ -71,6 +71,20 @@
   const IDLE_REV = 0.12;            // rpm fraction at idle
   const LAUNCH_REV = 0.55;          // clutch-slip rpm fraction with the throttle pinned at a standstill
   const CLUTCH_REV = 0.34;          // below this rpm fraction in 1st the clutch slips (the engine never stalls)
+  // ---- the driver aids every road car since ~2012 carries (TCS + ESC) ----
+  // A keyboard W is 100% throttle, always. Without these, every RWD car held
+  // at full power through a corner spent its rear friction circle on drive
+  // and swung out 50-75 degrees: a drift on every turn, which no real car
+  // does. A handbrake turn is still yours: both aids stand down while SPACE
+  // is held and for ESC_HB_HOLD after.
+  const TCS_V = 4.0;                // m/s: below this the launch may still spin the tyres (burnouts, launch squeal)
+  const TCS_MARGIN = 0.94;          // drive may use this share of what the friction circle leaves after cornering
+  const ESC_V = 5.0;                // m/s: stability control wakes above walking-the-car speed
+  const ESC_YAW_K = 6.0;            // corrective yaw moment per rad/s of yaw beyond what the tyres can honestly turn
+  const ESC_BETA = 0.06;            // rad (~3.5 deg) of body slip ESC lets you have before it brakes a wheel
+  const ESC_BETA_K = 14.0;          // corrective yaw moment per rad of slip past that
+  const ESC_MZ = 0.42;              // max ESC yaw moment as a share of mu*track: one wheel braked hard
+  const ESC_HB_HOLD = 0.25;         // s after the handbrake is released before ESC takes the car back
 
   // ---- THE GEARBOX (moved here from vehicles.js — one owner) ------------
   // top-of-gear points as fractions of the car's own top speed.
@@ -178,7 +192,7 @@
     return {
       vx: 0, vy: 0, r: 0, steer: 0, delta: 0, gear: 0, rpm: IDLE_REV, shiftT: 0, shifted: false,
       axF: 0, ax: 0, ay: 0, alphaF: 0, alphaR: 0, sF: 0, sR: 0, wsF: 0, wsR: 0,
-      hbSlide: 0, brakeSatF: 0, brakeSatR: 0, skid: 0, skidF: 0, skidR: 0, squeal: 0, beta: 0,
+      hbSlide: 0, hbHold: 0, esc: 0, tcs: 0, brakeSatF: 0, brakeSatR: 0, skid: 0, skidF: 0, skidR: 0, squeal: 0, beta: 0,
       heading: 0, throttleOut: 0, braking: false, reversing: false,
     };
   }
@@ -233,7 +247,9 @@
     S.gear = gear;
     const torque = lerpCurve(P.torque[Math.min(gear, P.torque.length - 1)], bandFrac(gear, sN));
 
-    let wsF = 0, wsR = 0, satF = 0, satR = 0, hbSl = 0, sFmax = 0, sRmax = 0;
+    let wsF = 0, wsR = 0, satF = 0, satR = 0, hbSl = 0, sFmax = 0, sRmax = 0, tcsCut = 0, escAmt = 0;
+    if (hb) S.hbHold = ESC_HB_HOLD; else if (S.hbHold > 0) S.hbHold = Math.max(0, S.hbHold - dt);
+    const aidsOff = !!In.aidsOff || S.hbHold > 0;
     let axSum = 0, aySum = 0;
     for (let i = 0; i < n; i++) {
       const vx = S.vx, vy = S.vy, r = S.r;
@@ -279,6 +295,16 @@
       const brk = brake * P.brake;
       let dF = eng * P.drive - brk * BRAKE_BIAS * sgn;
       let dR = eng * (1 - P.drive) - (hb ? 0 : brk * (1 - BRAKE_BIAS) * sgn);
+      // TRACTION CONTROL: each driven axle gets only the drive its friction
+      // circle has left after the cornering force it is making right now.
+      if (eng > 0 && !hb && !aidsOff && avx > TCS_V) {
+        const vfy0 = vy + P.a * r, vry0 = vy - P.b * r;
+        const qF = Math.min(1, Math.abs(tyreShape(Math.atan2(-vx * sd + vfy0 * cd, Math.max(Math.abs(vx * cd + vfy0 * sd), V_EPS)) / P.alphaPeak)) * P.fBias / MU_LONG);
+        const qR = Math.min(1, Math.abs(tyreShape(Math.atan2(vry0, Math.max(avx, V_EPS)) / P.alphaPeak)) * P.rBias / MU_LONG);
+        const okF = capF * Math.sqrt(1 - qF * qF) * TCS_MARGIN, okR = capR * Math.sqrt(1 - qR * qR) * TCS_MARGIN;
+        if (dF > okF) { tcsCut = Math.max(tcsCut, 1 - okF / dF); dF = okF; }
+        if (dR > okR) { tcsCut = Math.max(tcsCut, 1 - okR / dR); dR = okR; }
+      }
       // engine braking off-throttle, through the driven wheels
       if (drive === 0 && brake === 0 && avx > 1) {
         const eb = ENGINE_BRAKE * S.rpm * sgn;
@@ -337,12 +363,33 @@
 
       // ---- body forces (per unit mass) ------------------------------------
       const drag = (air ? 0 : ROLL_RES * clamp(avx, 0, 1)) + P.cd * vx * vx;
-      const Fx = FxF * cd - FyF * sd + FxR - drag * sgn;
+      let Fx = FxF * cd - FyF * sd + FxR - drag * sgn;
       const FyFb = FxF * sd + FyF * cd;
       const Fy = FyFb + FyR;
-      const Mz = P.a * FyFb - P.b * FyR;
+      let Mz = P.a * FyFb - P.b * FyR;
+      let FxB = Fx;
+      // STABILITY CONTROL: when the car yaws faster than its tyres can turn
+      // it, or the tail is out past ESC_BETA, brake one wheel — a yaw moment
+      // that pulls the nose back onto the velocity, paid for in speed.
+      if (!air && !hb && !aidsOff && vx > ESC_V) {
+        const rLim = P.mu * 0.95 / Math.max(spd, 1);
+        const rRef = clamp(vx * Math.tan(delta) / P.L, -rLim, rLim);
+        let m = 0;
+        if (r * rRef >= 0 && Math.abs(r) > Math.abs(rRef) + 0.04) m -= ESC_YAW_K * (r - rRef);
+        else if (r * rRef < 0 && Math.abs(r) > 0.08) m -= ESC_YAW_K * r;
+        if (beta > ESC_BETA) m += ESC_BETA_K * (beta - ESC_BETA);
+        else if (beta < -ESC_BETA) m += ESC_BETA_K * (beta + ESC_BETA);
+        const mMax = ESC_MZ * P.mu * 1.6;
+        m = clamp(m, -mMax, mMax);
+        if (m !== 0) {
+          Mz += m;
+          FxB -= Math.abs(m) / 0.8 * 0.5;          // the braked wheel's drag (half-track ~0.8 m, split with the cut throttle)
+          escAmt = Math.max(escAmt, Math.abs(m) / mMax);
+        }
+      }
 
       // ---- integrate: dynamic model blended with kinematic at crawl ------
+      Fx = FxB;
       let nvx = vx + (Fx + vy * r) * h;
       // brakes/drag/engine-brake never push a car backward through zero
       if (drive === 0 && vx !== 0 && nvx * vx < 0) nvx = 0;
@@ -373,6 +420,7 @@
     S.ax = axSum / n; S.ay = aySum / n;
     S.sF = sFmax; S.sR = sRmax; S.wsF = wsF; S.wsR = wsR; S.hbSlide = hbSl;
     S.brakeSatF = satF; S.brakeSatR = satR;
+    S.tcs = tcsCut; S.esc = escAmt;
 
     // ---- engine rpm (0..1 of redline) — what the voice sings --------------
     const avx = Math.abs(S.vx);
