@@ -6728,7 +6728,16 @@
       // ~51k meshes, and a phone at the downtown spawn built all ten sites'.
       // With no slice, sliceAt runs it right here, exactly as before.
       const dressIt = function () { try { dressComplex(site); } catch (e) { console.error("[govcomplex] interiors " + def.id, e); } };
-      if (CBZ.sliceAt) CBZ.sliceAt(site.rect, dressIt, { name: "gov interiors " + def.id }); else dressIt();
+      // NEVER FREED, only parked: the rooms are drawn INTO the shells' own
+      // groups, which this job does not own (it captures what lands at the
+      // top of the city root), so a free took the colliders and left every
+      // mesh standing, and the re-run drew the whole interior a second time
+      // over it: two leaves in every doorway, the old one shut with no
+      // collider and a dead door record in front of the live one, so E at the
+      // Oval Office door "opened" a door that was no longer there. (metro.js's
+      // far tiles are noFree for the same reason.)
+      const ij = CBZ.sliceAt ? CBZ.sliceAt(site.rect, dressIt, { name: "gov interiors " + def.id }) : (dressIt(), null);
+      if (ij) ij.noFree = true;
 
       // ---- keep-out ------------------------------------------------------
       // hard  → nobody at all (the Agency, the Defence HQ)

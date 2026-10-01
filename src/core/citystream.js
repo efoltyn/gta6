@@ -481,7 +481,11 @@
     noteAdd(job, "unpark");
     for (const it of job.objs) { expandTree(it.o); if (it.parent) it.parent.add(it.o); }
     const inSync = CBZ.colliderAddMany && CBZ.colliderGridInSync && CBZ.colliderGridInSync();
-    if (inSync) CBZ.colliderAddMany(job.cols); else for (const c of job.cols) CBZ.colliders.push(c);
+    // a collider its owner had TAKEN OUT while the job was built (`_out`: an
+    // open door, interior_programs.js) stays out: re-attaching all of them
+    // put a solid body back in every doorway left open when the player left
+    const cols = job.cols.filter(function (c) { return !c._out; });
+    if (inSync) CBZ.colliderAddMany(cols); else for (const c of cols) CBZ.colliders.push(c);
     for (const p of job.plats) (CBZ.platforms = CBZ.platforms || []).push(p);
     if (job.los && CBZ.losBlockers) { for (const m of job.los) CBZ.losBlockers.push(m); job.los = null; }
     job.state = "built";
