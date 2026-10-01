@@ -99,7 +99,14 @@
     return S;
   }
   function polGet(id) { return CBZ.polity && CBZ.polity.get ? CBZ.polity.get(id) : null; }
-  function nameOf(id) { if (id === "cell") return "the Sons of the Dune"; const r = id ? polGet(id) : null; return (r && r.name) || id || null; }
+  function nameOf(id) {
+    if (id === "cell") return "the Sons of the Dune";
+    const r = id ? polGet(id) : null;
+    if (r && r.name) return r.name;
+    // never a raw key in a headline: "kesh_rebels_1" reads "Kesh Rebels"
+    return id ? String(id).split(/[_\-]+/).filter(function (w) { return w && !/^\d+$/.test(w); })
+      .map(function (w) { return w.charAt(0).toUpperCase() + w.slice(1); }).join(" ") || null : null;
+  }
   function seat() {
     const h = (CBZ.gov && CBZ.gov.holds) ? CBZ.gov.holds() : null;
     return (h && h.kind === "country" && h.rec) ? h : null;
@@ -862,7 +869,7 @@
   function leaderOf(owner) {
     if (owner === "cell") {
       const L = CBZ.presidency && CBZ.presidency.cellLeader ? CBZ.presidency.cellLeader() : null;
-      return L ? { sid: L.sid, name: L.name, title: "Emir" } : null;
+      return L ? { sid: L.sid, name: realName(L.name, L.sid), title: "Emir" } : null;
     }
     const rec = polGet(owner);
     const sid = rec && rec.office ? rec.office.holder : null;
@@ -871,7 +878,27 @@
     let name = null, title = "President";
     if (CBZ.officials && CBZ.officials.identityOf) { try { const i = CBZ.officials.identityOf(sid); name = i && i.name; } catch (e) {} }
     if (CBZ.officials && CBZ.officials.titleFor) { try { title = CBZ.officials.titleFor(rec) || title; } catch (e) {} }
-    return { sid: sid, name: name || "the leader", title: title };
+    return { sid: sid, name: realName(name, sid), title: title };
+  }
+  // A NAME IS A NAME, NEVER A KEY. The ledger answers "Someone" for a sid it
+  // cannot read, and a raw sid ("veridia_pres") must never reach a headline:
+  // either a person's name or nothing (the text then says the office).
+  function realName(name, sid) {
+    if (!name || typeof name !== "string") return null;
+    const n = name.trim();
+    if (!n || n === sid || /^someone$/i.test(n) || /^[a-z0-9]+(_[a-z0-9]+)+$/i.test(n) || !/\s/.test(n) && /\d/.test(n)) return null;
+    return n;
+  }
+  // "Republic of Veridia" -> "Veridia" for a headline
+  function shortName(id) {
+    const n = nameOf(id) || "";
+    return n.replace(/^(the\s+)?(republic|kingdom|federation|state|union|empire)\s+of\s+/i, "").replace(/\s+(federation|republic|kingdom)$/i, "") || n;
+  }
+  function leaderHeadline(owner, L, cause) {
+    const how = cause === "bunker-buster" ? "bunker strike" : cause === "nuke" ? "nuclear strike" : "airstrike";
+    if (owner === "cell") return (L.name ? "Terror leader " + L.name : "The terror cell's leader") + " killed in " + how;
+    const who = L.name ? L.title + " " + L.name + " of " + shortName(owner) : shortName(owner) + "'s " + String(L.title || "leader").toLowerCase();
+    return who + " killed in " + how;
   }
   function killLeader(owner, cause, at, by) {
     const L = leaderOf(owner);
@@ -884,7 +911,7 @@
       const cur = CBZ.presidency && CBZ.presidency.current ? CBZ.presidency.current() : null;
       const ped = cur && cur.kind === "npc" && cur.sid === L.sid ? cur.ped : null;
       if (ped && !ped.dead && CBZ.cityKillPed) { try { CBZ.cityKillPed(ped, { byPlayer: false, explosive: true }, cause); } catch (e) {} }
-      else if (CBZ.officials && CBZ.officials.killOfficial) { try { CBZ.officials.killOfficial(L.sid, { stateAct: true, name: L.name }); } catch (e) {} }
+      else if (CBZ.officials && CBZ.officials.killOfficial) { try { CBZ.officials.killOfficial(L.sid, { stateAct: true, name: L.name || undefined }); } catch (e) {} }
     }
     if (by && owner !== "cell" && PW() && PW().strikeOn) { try { PW().strikeOn(owner, by, 3); } catch (e) {} }
     const where = owner === "cell" ? "the Sons of the Dune" : nameOf(owner);
@@ -892,8 +919,7 @@
       owner: owner, nation: owner === "cell" ? null : owner, nationName: owner === "cell" ? null : nameOf(owner),
       leader: L.name, title: L.title, cause: cause, attacker: by || null, attackerName: nameOf(by), day: day(),
       x: at ? Math.round(at.x) : null, z: at ? Math.round(at.z) : null,
-      text: (owner === "cell" ? "Terror leader " : L.title + " ") + L.name + " killed in " +
-        (cause === "bunker-buster" ? "bunker strike" : cause === "nuke" ? "nuclear strike" : "airstrike"),
+      text: leaderHeadline(owner, L, cause),
       where: where,
     });
     return true;
