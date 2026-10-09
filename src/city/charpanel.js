@@ -279,116 +279,48 @@
   }
 
   // ============================================================
-  //  WORN EYEWEAR ON THE PORTRAIT — sunglasses / designer shades.
-  //  Same separate-mesh story as the jewellery + armour above: bling.js
-  //  mounts the player's shades as a 5-part shell (two lenses + bridge + two
-  //  temples) on the LIVE rig's "eyes" group — which resolves to the head/neck
-  //  bone, so the glasses RIDE AND TURN with the head — but that path is the
-  //  live-player roster + camera-distance gated, wrong for this isolated
-  //  offscreen rig. So we mount the SAME shell here directly, at the EXACT
-  //  geometry, local transforms and finishes bling.js uses, anchored on the
-  //  rig's NECK group (transforms are NECK-LOCAL). Built once, re-pointed on
-  //  change — no per-frame alloc, no global roster touched.
+  //  WORN EYEWEAR ON THE PORTRAIT — whatever pair the player owns.
+  //  The pair is entities/eyewear.js's (CBZ.eyewear.make): the SAME fitted
+  //  frame bling.js puts on the live body, fitted to THIS rig's head, hung on
+  //  its NECK group so it turns with the head. (This used to be a 1:1 copy of
+  //  bling's five boxes, temples inside the skull included.)
   //
-  //  WHY a face-mounted shade reads at all on a tiny portrait: the small panel
-  //  frames the upper body and the big [I] view shows the whole rig — the head
-  //  is the focal point of both, so a worn pair of shades is the single most
-  //  visible accessory; without this the portrait lied (bare eyes) the instant
-  //  the player put shades on, exactly the "is it actually ON me?" doubt this
-  //  whole mirror exists to kill.
+  //  WHY a face-mounted shade reads at all on a tiny portrait: the head is the
+  //  focal point of both the small panel and the big [I] view, so a worn pair
+  //  is the single most visible accessory; without this the portrait lied
+  //  (bare eyes) the instant the player put shades on.
   // ============================================================
-  const EG = {};                                   // shared eyewear geometry by kind (mirror bling.js)
-  function egeo(kind) {
-    if (EG[kind] !== undefined) return EG[kind];
-    const B = CBZ.boxGeom; let gm = null;
-    if (B) {
-      if (kind === "lens") gm = B(0.20, 0.17, 0.05);         // one shade lens over an eye
-      else if (kind === "bridge") gm = B(0.09, 0.055, 0.05); // nose bridge joining the lenses
-      else if (kind === "temple") gm = B(0.035, 0.045, 0.30);// arm running back over the ear
-    }
-    EG[kind] = gm;
-    return gm;
-  }
-  let _emats = null;                               // shared eyewear finishes (mirror bling.js)
-  function emats() {
-    if (_emats) return _emats;
-    const C = CBZ.cmat; if (!C) return null;
-    _emats = {
-      lensDark: C(0x0a0d12, { emissive: 0x1b2535, ei: 0.30 }),   // basic sunglasses lens
-      lensMirror: C(0x0e1422, { emissive: 0x37588a, ei: 0.50 }), // designer mirrored lens
-      frameDark: C(0x111317, { emissive: 0x000000, ei: 0.0 }),   // black plastic frame
-      gold: C(0xc9a44a, { emissive: 0x6b4f12, ei: 0.4 }),        // designer frame (same gold the jewelry uses)
-    };
-    return _emats;
-  }
-  // the 5-part shade shell (kind + finish + neck-local transform) — copied 1:1
-  // from bling.js so the portrait reads identically to the live body. The basic
-  // pair is all-black with dark lenses; the designer pair is the SAME 5
-  // transforms with mirrored lenses + a gold frame.
-  function eyewearParts(name) {
-    const M = emats(); if (!M) return null;
-    const designer = String(name).toLowerCase().indexOf("designer") >= 0;
-    const lens = designer ? M.lensMirror : M.lensDark;
-    const frame = designer ? M.gold : M.frameDark;
-    return [
-      { kind: "lens", mat: lens, x: -0.145, y: 0.345, z: 0.34 },
-      { kind: "lens", mat: lens, x: 0.145, y: 0.345, z: 0.34 },
-      { kind: "bridge", mat: frame, x: 0.0, y: 0.345, z: 0.34 },
-      { kind: "temple", mat: frame, x: -0.27, y: 0.345, z: 0.17 },
-      { kind: "temple", mat: frame, x: 0.27, y: 0.345, z: 0.17 },
-    ];
-  }
-  // best OWNED eyewear NAME (or null) — scans g.cityInv + CBZ.cityEcon.ITEMS
-  // exactly like blingWornIn does, but with the eyewear name test: a "sunglass"
-  // or "shades" item (NEVER a "grill", which slots to glasses but is a mouth
-  // piece). Designer Shades (value 420) outrank Sunglasses (value 140), so the
-  // highest-value owned pair wins.
+  // best OWNED eyewear NAME (or null): any catalog row that resolves to a
+  // style (Sunglasses, Retro Frames, Sport Wraps, Aviators, Designer Shades;
+  // NEVER a grill, which slots to glasses but is a mouth piece). The most
+  // valuable owned pair wins.
   function eyewearWornIn() {
-    const econ = CBZ.cityEcon;
-    if (!econ || !econ.ITEMS || !g.cityInv) return null;
+    const econ = CBZ.cityEcon, EW = CBZ.eyewear;
+    if (!econ || !econ.ITEMS || !g.cityInv || !EW) return null;
     const items = econ.ITEMS;
     let best = null, bestV = -1;
     for (const name in g.cityInv) {
       if ((g.cityInv[name] | 0) <= 0) continue;
       const it = items[name];
-      if (!it) continue;
-      const s = name.toLowerCase();
-      if (s.indexOf("grill") >= 0) continue;                 // a grill slots to glasses but is NOT eyewear
-      if (s.indexOf("sunglass") < 0 && s.indexOf("shades") < 0) continue;
+      if (!it || !EW.styleFor(name)) continue;
       const v = it.value || 0;
       if (v > bestV) { bestV = v; best = name; }
     }
     return best;
   }
-  function mountEyewearMesh(kind, anchor, mat, x, y, z, out) {
-    if (!anchor || !anchor.add || !THREE || !mat) return;
-    const geo = egeo(kind);
-    if (!geo) return;
-    const m = new THREE.Mesh(geo, mat);
-    m.castShadow = false; m.receiveShadow = false;
-    m.position.set(x, y, z);
-    anchor.add(m); out.push(m);
-  }
   // (re)dress the portrait rig's worn eyewear to match the player. Idempotent:
-  // strips the previous shade shell, mounts the current pair on the NECK group
-  // (so it rides the head exactly like bling.js's "eyes" anchor). No pool shared
-  // with bling — its own tracked list on rig._cpEyewear.
+  // strips the previous pair, mounts the current one on the NECK group. Its
+  // own tracked list on rig._cpEyewear.
   function applyPortraitEyewear(rig) {
     if (!rig) return;
     if (rig._cpEyewear) {
       for (let i = 0; i < rig._cpEyewear.length; i++) { const m = rig._cpEyewear[i]; if (m && m.parent) m.parent.remove(m); }
       rig._cpEyewear = null;
     }
-    if (!emats()) return;                           // engine primitives not up yet
     const worn = eyewearWornIn();
-    if (!worn) return;                              // no shades owned — bare eyes
-    const out = [];
-    const parts = eyewearParts(worn);
-    if (parts) for (let i = 0; i < parts.length; i++) {
-      const p = parts[i];
-      mountEyewearMesh(p.kind, rig.neck, p.mat, p.x, p.y, p.z, out);
-    }
-    if (out.length) rig._cpEyewear = out;
+    if (!worn || !rig.neck) return;                 // no shades owned — bare eyes
+    const m = CBZ.eyewear.make(rig, worn);
+    if (m) { rig.neck.add(m); rig._cpEyewear = [m]; }
   }
 
   // ============================================================

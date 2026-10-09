@@ -112,7 +112,7 @@ const APPEAR = ["sidearm", "shotgun", "carbine", "smg", "taser", "bazooka", "gla
 const FILES = ["src/vendor/three.r128.min.js", "src/config.js", "src/core/matrixskip.js", "src/world/materials.js", "src/systems/fphands.js",
   "src/entities/footwear.js", "src/entities/character.js", "src/entities/headwear.js", "src/entities/heritage.js",
   "src/city/clothes.js", "src/city/outfits.js", "src/entities/dutykit.js", "src/city/armor.js", "src/systems/prisonoutfits.js",
-  "src/entities/jewelry_kit.js", "src/entities/watch.js", "src/city/bling.js",
+  "src/entities/jewelry_kit.js", "src/entities/eyewear.js", "src/entities/watch.js", "src/city/bling.js",
   "src/weapons/weapon-data.js", "src/weapons/weapon-scale.js", ...APPEAR.map((n) => `src/weapons/appearances/${n}.js`),
   "src/systems/actorweapons.js"];
 for (const f of FILES) vm.runInContext(read(f), ctx, { filename: f });
@@ -811,7 +811,7 @@ if (!ONLY || ONLY === "kit" || ONLY === "stow") {
       const parts = CBZ.cityBlingParts ? null : null;
       const ped = { char: ch, valuables: [] };
       // build through the portrait's fresh-mesh path, on the anchor the street path uses
-      const L = CBZ.cityBlingBuild && CBZ.cityBlingGeo ? look : null;
+      const L = CBZ.cityBlingBuild ? look : null;
       if (!L) continue;
       const slot = SLOT[look] || "neck";
       const anchor = slot === "body" ? ch.body : (slot === "ra" ? ch.parts.ra.userData.low : ch.neck);

@@ -8538,6 +8538,61 @@
      is pierced through the lobe this head actually drew instead of floating
      16 cm in front of it; the tiara's band line; the head scale. All in the
      NECK group's frame (the head mesh sits at y = headSize/2, scaled hk). */
+  /* ---- THE HEAD'S REAL SURFACE, for anything that sits ON a face ----------
+     (entities/eyewear.js fits every pair of glasses to it). One record per
+     (form, nose), cached, all in the UNIT FACE FRAME: x across, u up from the
+     chin (0) to the crown (0.60), z forward; the neck frame is this times
+     hk = headSize/0.60, because the head mesh and the face groups are scaled
+     uniformly by exactly that. What it carries is what headGeometry drew:
+       sdf(x,u,z)   the skull (no socket carve: the carve only goes INWARD, so
+                    a point outside this is outside the drawn skin)
+       hit(o,d,out) where a ray from inside the skull leaves it
+       nose         the near head's nose vertices [x,u,z,...] (z > the face plane)
+       ear          the +x ear's vertices [x,u,z,...] (mirror x for the other)
+       eye          {x, y, front, r} the eyeballs; brow {y0, xi, xt, th}
+     charHeadSurface(ch) reads the rig's own form/nose and adds hk. */
+  const _headSurf = Object.create(null);
+  CBZ.charHeadSurface = function (a, b) {
+    let form = a, nose = b, hk = 1;
+    if (a && typeof a === "object") {
+      const P = a.profile, R = a.faceRest;
+      form = (R && R.form) || a.headForm || (P ? headForm(P) : "m");
+      nose = R && R.nose != null ? R.nose : 1;
+      hk = P && P.headSize > 0 ? P.headSize / 0.60 : 1;
+    }
+    const fk = HEAD_FORMS[form] ? form : "m";
+    const ni = Math.max(0, Math.min(2, nose | 0));
+    const key = fk + "|" + ni;
+    let S = _headSurf[key];
+    if (!S) {
+      const F = HEAD_FORMS[fk];
+      const toU = function (pos, keep) {
+        const out = [];
+        for (let i = 0; i < pos.count; i++) {
+          const x = pos.getX(i), u = pos.getY(i) + 0.30, z = pos.getZ(i);
+          if (keep(x, u, z)) out.push(x, u, z);
+        }
+        return out;
+      };
+      let nosePts = [], earPts = [];
+      try {
+        const hg = headGeometry(fk, ni, false);
+        // the nose is the only thing standing proud of the face plane between the eyes
+        nosePts = toU(hg.attributes.position, function (x, u, z) { return z > 0.302 && Math.abs(x) < 0.09 && u > 0.18 && u < 0.42; });
+        earPts = toU(earGeometry(F, 1, false).attributes.position, function () { return true; });
+      } catch (e) { /* headless stub THREE: the analytic skull still answers */ }
+      const B = BROW_FORM[fk] || BROW_FORM.m;
+      S = _headSurf[key] = {
+        form: fk, nose: ni, hk: 1,
+        sdf: function (x, u, z) { return skullSdfF(F, x, u, z); },
+        hit: function (o, d, out) { return skullHit(F, o, d, out || { p: [0, 0, 0], n: [0, 0, 0] }); },
+        nosePts: nosePts, earPts: earPts,
+        eye: { x: EYE.x, y: EYE.y, front: EYE.front, r: eyeR(fk) },
+        brow: { y0: B.y0, xi: B.xi, xt: B.xt, th: B.th, restY: BROW_REST_Y },
+      };
+    }
+    return hk === 1 ? S : Object.assign(Object.create(S), { hk: hk });
+  };
   CBZ.charHeadLandmarks = function (ch) {
     const P = ch && ch.profile;
     if (!P || !(P.headSize > 0)) return null;
