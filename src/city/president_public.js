@@ -1125,7 +1125,7 @@
     for (let i = 0; i < PROT.members.length; i++) queuePanic(PROT.members[i].ped, PROT.drifting, x, z);
     PROT.members.length = 0;
     if (CBZ.mob && CBZ.mob.panic) { try { CBZ.mob.panic(x, z); } catch (e) {} }
-    if (CBZ.cityCrowdFlee) { try { CBZ.cityCrowdFlee(x, z, 60, 1); } catch (e) {} }
+    if (CBZ.streetLife && CBZ.streetLife.panic) { try { CBZ.streetLife.panic(x, z, 60, 10); } catch (e) {} }
     if (CBZ.cityPanicRaise) { try { CBZ.cityPanicRaise(x, z, 1.2); } catch (e) {} }
   }
 

@@ -209,6 +209,7 @@
     if (p.restraint || p.cuffed || p.busted || p.arrestState) return true;
     if (p.kind === "cop" || p.kind === "security") return true;
     if (p._kidHeld || p._kidInside) return true;        // childhood.js owns the legs
+    if (p._street && p._streetRow >= 0) return true;    // city/streetlife.js walks this one with its group
     if ((p.enterT || 0) > 0) return true;               // inside a building
     if (p._kinGrief) return true;                        // our own grief beat outranks a stroll
     return false;

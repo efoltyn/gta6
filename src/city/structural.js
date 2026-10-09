@@ -1463,9 +1463,7 @@
     const hx = b.w * 0.55, hz = b.d * 0.55;
     const cause = "crushed in the collapse";
     try {
-      if (CBZ.cityCrowdCircleKill) {
-        CBZ.cityCrowdCircleKill(b.ox, b.oz, Math.max(hx, hz), { quiet: true, fromX: b.ox, fromZ: b.oz, noCrime: !rec.byPlayer });
-      }
+      if (CBZ.crowds && CBZ.crowds.crush) CBZ.crowds.crush(b.ox, b.oz, Math.max(hx, hz), { cause: cause, byPlayer: !!rec.byPlayer });
       for (const p of (CBZ.cityPeds || [])) {
         if (!p || p.dead || !p.pos) continue;
         if (Math.abs(p.pos.x - b.ox) > hx || Math.abs(p.pos.z - b.oz) > hz) continue;
@@ -1509,9 +1507,7 @@
       try {
         const reach = rec.controlled ? Math.max(b.w, b.d) * 0.55 + 1 : Math.max(b.w, b.d) * 0.6 + (b.h || 12) * 0.35;
         const cause = "buried in the collapse";
-        if (CBZ.cityCrowdCircleKill) {
-          CBZ.cityCrowdCircleKill(b.ox, b.oz, reach, { quiet: true, fromX: b.ox, fromZ: b.oz, noCrime: !rec.byPlayer });
-        }
+        if (CBZ.crowds && CBZ.crowds.crush) CBZ.crowds.crush(b.ox, b.oz, reach, { cause: cause, byPlayer: !!rec.byPlayer });
         for (const p of (CBZ.cityPeds || [])) {
           if (!p || p.dead || !p.pos) continue;
           const d = Math.hypot(p.pos.x - b.ox, p.pos.z - b.oz);

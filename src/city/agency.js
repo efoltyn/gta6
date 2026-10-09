@@ -2499,21 +2499,6 @@
       for (const k in orig) if (Object.prototype.hasOwnProperty.call(orig, k) && k.charAt(0) === "_") w[k] = orig[k];
       CBZ.cityKillPed = w;
     }
-    if (typeof CBZ.cityCrowdKill === "function" && !CBZ.cityCrowdKill._agencyWrap) {
-      const origC = CBZ.cityCrowdKill;
-      const wc = function (i, opts) {
-        const killed = origC.apply(this, arguments);
-        const tgt = liveTarget();
-        if (killed && tgt) {
-          opts = opts || {};
-          if (!opts.noCrime && opts.byPlayer !== false && !opts.attacker) tgt.kills.civ = (tgt.kills.civ | 0) + 1;
-        }
-        return killed;
-      };
-      wc._agencyWrap = true;
-      for (const k in origC) if (Object.prototype.hasOwnProperty.call(origC, k) && k.charAt(0) === "_") wc[k] = origC[k];
-      CBZ.cityCrowdKill = wc;
-    }
   }
 
   /* ================================================================

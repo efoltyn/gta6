@@ -6491,20 +6491,6 @@
         if (!struck) { if (CS) CS.cheapLoss(car); else car.v *= vmag >= CRASH.pedLethal ? 0.9 : 0.72; }
       }
     }
-    // mow down the ambient instanced crowd (the far NPCs) — player car only so
-    // the kill is attributed to you, not to NPC drivers. Fast impacts are lethal.
-    if (car.player && vmag >= CRASH.pedLethal && CBZ.cityCrowdCircleKill) {
-      const n = CBZ.cityCrowdCircleKill(car.pos.x, car.pos.z, 2.0, { byCar: true, fromX: car.pos.x, fromZ: car.pos.z });
-      if (n > 0 && CBZ.shake) CBZ.shake(0.25 + Math.min(0.5, vmag * 0.02));
-      // same THUNK for plowing the ambient crowd (shares the per-call `juiced`
-      // latch so a kill that already thunked above doesn't double-fire). Note:
-      // cityCrowdCircleKill already plays a "ko" voice (crowd.js) — we only add
-      // the missing hit-stop here, never a second bass voice, to avoid stacking.
-      if (n > 0 && CBZ.runoverJuice && !juiced) {
-        juiced = true;
-        if (CBZ.doHitstop) CBZ.doHitstop(Math.min(0.05, 0.034 + vmag * 0.0009));
-      }
-    }
     // ---- THE CROWDS (entities/crowdstore.js): a car into a march or a rally
     // ploughs through rows of the one store, any driver (yours is on you).
     // Each body it goes through costs it a little speed.
@@ -7308,6 +7294,15 @@
         if (brake < 1 && !CBZ.player.driving && !CBZ.player.dead) {
           const dx = CBZ.player.pos.x - c.pos.x, dz = CBZ.player.pos.z - c.pos.z, ah = dx * fwx + dz * fwz;
           if (ah > 0.5 && ah < pedLookahead && Math.abs(dx * -fwz + dz * fwx) < 2.0) {
+            brake = ah < dangerGap ? 1 : Math.max(brake, 0.5);
+            if (ah < brakeAt) brakeAt = ah;
+          }
+        }
+        // the crowd store's people (city/streetlife.js on the crosswalk, a
+        // march in the road): the same lane box, asked of its spatial hash
+        if (brake < 1 && CBZ.crowds && CBZ.crowds.ahead) {
+          const ah = CBZ.crowds.ahead(c.pos.x, c.pos.z, fwx, fwz, pedLookahead, 2.0);
+          if (ah < pedLookahead) {
             brake = ah < dangerGap ? 1 : Math.max(brake, 0.5);
             if (ah < brakeAt) brakeAt = ah;
           }

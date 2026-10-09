@@ -53,7 +53,7 @@
      debris strikes CBZ.detonate(x,y,z,"kinetic",{mass,speed}) — the ONE bus,
                     which prices E=1/2mv^2 itself (cube root for FX, 2/3 power
                     for structural). A thrown car into a facade is ONE call.
-     deaths         CBZ.cityKillPed / cityCrowdCircleKill / cityHurtPlayer.
+     deaths         CBZ.cityKillPed / CBZ.crowds.crush / cityHurtPlayer.
                     The killfeed is the only sanctioned popup; we toast nothing.
      panic/police   CBZ.cityPostEvent — buys crowd flee + police reaction free.
      street props   CBZ.cityShootProp — the existing public "something passed
@@ -1704,13 +1704,7 @@
     // ---- CITY: crowd, peds, player -------------------------------------
     if (tick) {
       const kill = t.R * 0.7;
-      if (CBZ.cityCrowdCircleKill) {
-        try {
-          CBZ.cityCrowdCircleKill(t.x, t.z, kill, {
-            byCar: true, quiet: true, fromX: t.x, fromZ: t.z, noCrime: true,
-          });
-        } catch (e) {}
-      }
+      if (CBZ.crowds && CBZ.crowds.crush) { try { CBZ.crowds.crush(t.x, t.z, kill, { cause: "tornado" }); } catch (e) {} }
       const peds = CBZ.cityPeds;
       if (peds && peds.length) {
         const reach = t.outer;

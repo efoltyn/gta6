@@ -77,11 +77,10 @@
     evR[i] = ev.radius > 0 ? ev.radius : 24;
     evInt[i] = ev.intensity > 0 ? ev.intensity : 1;
     evAge[i] = 0;
-    // also scatter the INSTANCED background crowd (crowd.js). The full-rig peds react
-    // in the delivery pass below; this closes the gap where the 760-strong mass kept
-    // strolling through gunfire. Gated inside cityCrowdFlee by CBZ.crowdMassFlee
-    // (default OFF); intensity gate keeps minor noises from stampeding the street.
-    if (CBZ.cityCrowdFlee && evInt[i] >= 0.5) CBZ.cityCrowdFlee(evX[i], evZ[i], evR[i], evInt[i]);
+    // also scatter the street (city/streetlife.js, the GPU crowd). The full-rig
+    // peds react in the delivery pass below; the intensity gate keeps minor
+    // noises from stampeding the pavement.
+    if (CBZ.streetLife && CBZ.streetLife.panic && evInt[i] >= 0.5) CBZ.streetLife.panic(evX[i], evZ[i], evR[i], 6 + evInt[i] * 3);
   };
 
   // ---- spatial hash over the near subjects ------------------------------

@@ -731,7 +731,6 @@
       if (CBZ.bootStep) CBZ.bootStep("city:pop");
       const netGuest = CBZ.net && CBZ.net.noSim();
       const observePeds = campaignLayerObserved("peds");
-      const observeCrowd = campaignLayerObserved("crowd");
       const observeTraffic = campaignLayerObserved("traffic");
       // CITY SLICES: the downtown roster lives on the downtown sidewalks. A
       // slice that does not hold downtown spawns none of it (towns, the metro
@@ -745,9 +744,10 @@
         if (CBZ.cityDeferPedPopulation) CBZ.cityDeferPedPopulation();
         else if (CBZ.clearCityPeds) CBZ.clearCityPeds();
       }
-      // the instanced ambient crowd is COSMETIC and stays local on guests too
-      // (crowd.js skips promotion-to-real-peds when net.noSim())
-      if (CBZ.spawnCityCrowd) CBZ.spawnCityCrowd(observeCrowd && sliceDowntown ? (CBZ.CITY.crowd != null ? CBZ.CITY.crowd : 280) : 0);
+      // the street (city/streetlife.js) refills itself round the player from
+      // the density field, wherever the run starts; a new run starts it clean.
+      // It stays local on guests (no promotion to real peds when net.noSim()).
+      if (CBZ.streetLife) CBZ.streetLife.reset();
       if (CBZ.clearCityCops) CBZ.clearCityCops();
       if (CBZ.bootStep) CBZ.bootStep("city:traffic");
       if (!netGuest && CBZ.spawnCityTraffic) {

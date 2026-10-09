@@ -347,17 +347,14 @@
     block: 34,             // block size (building lot)
     road: 18,              // four 3.6m lanes + 1.8m curb/clear zone per side
     // Full per-rig peds are ~16 draw calls EACH — the single biggest GPU cost in
-    // the city. The instanced ambient crowd (city/crowd.js, ~6 draw calls for
-    // hundreds of bodies) carries street DENSITY, and walking up promotes nearby
-    // ambient agents into real rigs on demand. So we keep the expensive rig pool
-    // lean and let the cheap crowd fill the streets. Adaptive quality (core/
-    // quality.js) trims this further on weak GPUs via CBZ.cityRigBudget.
+    // the city. The street population (city/streetlife.js: the real human,
+    // GPU-instanced through entities/crowdgpu.js, ~5 draw calls for hundreds)
+    // carries street DENSITY, and walking up promotes the nearest of it into
+    // real rigs. So we keep the expensive rig pool lean and let the street fill
+    // the pavements (its budget is per device there: CONFIG.STREET_ROWS).
+    // Adaptive quality (core/quality.js) trims this on weak GPUs via
+    // CBZ.cityRigBudget.
     peds: typeof CBZ.CITY_PEDS === "number" ? CBZ.CITY_PEDS : 100,
-    // the instanced ambient mass (city/crowd.js) — where the population head-
-    // room lives: ~6 extra draw calls total no matter how big this gets. The
-    // crowd tick is tiered by camera distance (near every frame, far every
-    // 16th with dead-reckoning between), so 700 costs about what 300 used to.
-    crowd: typeof CBZ.CITY_CROWD === "number" ? CBZ.CITY_CROWD : 700,
     cops: typeof CBZ.CITY_COPS === "number" ? CBZ.CITY_COPS : 0, // spawn on wanted
     ambientCops: typeof CBZ.CITY_AMBIENT_COPS === "number" ? CBZ.CITY_AMBIENT_COPS : 3, // patrols policing NPCs/traffic at 0 stars
     traffic: typeof CBZ.CITY_TRAFFIC === "number" ? CBZ.CITY_TRAFFIC : 84,   // was 66: nine cars per km of road read as a ghost town

@@ -714,11 +714,7 @@
     h.hurtT = 0.1;
     const cause = "crushed by falling debris";
     try {
-      if (CBZ.cityCrowdCircleKill) {
-        CBZ.cityCrowdCircleKill(h.x, h.z, HAZ_R, {
-          byCar: true, quiet: true, fromX: h.x, fromZ: h.z, noCrime: !h.byPlayer,
-        });
-      }
+      if (CBZ.crowds && CBZ.crowds.crush) CBZ.crowds.crush(h.x, h.z, HAZ_R, { cause: cause, byPlayer: !!h.byPlayer });
     } catch (e) {}
     try {
       const peds = CBZ.cityPeds || [];

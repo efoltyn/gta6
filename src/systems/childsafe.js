@@ -15,7 +15,7 @@
    anyway." So this file adds NOTHING to any caller. It wraps the shared entry
    points that already exist — the damage bus, the kill bus, the gore/wound/
    ragdoll entries, the lock-on fire gate — the same way city/killfeed.js
-   wraps cityKillPed/cityCrowdKill and the way five modules wrap cityExplosion.
+   wraps cityKillPed and the way five modules wrap cityExplosion.
    Not one damage site anywhere in the tree changes a character.
 
    THE TWO MECHANISMS
@@ -390,39 +390,15 @@
   }
 
   /* --------------------------------------------------------------
-     4. THE AMBIENT CROWD — crowd.js's cityCrowdKill(i, opts).
-
-     HONEST LIMITATION, and it is the biggest one in this file: the instanced
-     crowd is typed arrays addressed by INDEX. There is no per-agent record,
-     no age, no band, and no public read that exposes one. If the character
-     work puts children into the ambient crowd, THIS FILE CANNOT SEE THEM.
-
-     So we wrap the entry and consult, in order, two optional seams that the
-     crowd could grow in a one-line change:
-        CBZ.cityCrowdChild(i)   -> bool          (the cheap, allocation-free one)
-        CBZ.cityCrowdAgent(i)   -> record        (already exists; today it
-                                                  returns no age field)
-     Until one of them answers, this wrapper is a no-op and the path stays on
-     the OPEN census below. That is the truthful state, not a covered one.
-
-     cityCrowdKill returns false for "no kill happened" — its documented
-     "already dead / not shootable" value — so the veto is indistinguishable
-     from a miss to every caller (cityCrowdCircleKill counts it correctly).
+     4. THE CROWD — entities/crowdstore.js rows (the street, the rallies,
+     the stands). Children in the crowd are rows minted with {prot: true}
+     (city/streetlife.js's families); the store's one casualty path refuses
+     every blast, round, car and collapse on a prot row and sends the child
+     running instead. Nothing to wrap here: this hook only confirms the
+     store's protection is loaded.
      -------------------------------------------------------------- */
-  function crowdIsChild(i) {
-    try {
-      if (typeof CBZ.cityCrowdChild === "function") return !!CBZ.cityCrowdChild(i);
-      if (typeof CBZ.cityCrowdAgent === "function") return isProtectedActor(CBZ.cityCrowdAgent(i));
-    } catch (e) {}
-    return false;
-  }
   function hookCrowdKill() {
-    return wrapOnce("cityCrowdKill", "_csWrapped", function (orig) {
-      return function (i, opts) {
-        if (on() && crowdIsChild(i)) { vetoedCalls++; return false; }
-        return orig.apply(this, arguments);
-      };
-    });
+    return !!(CBZ.crowds && CBZ.crowds.S && CBZ.crowds.S.prot);
   }
 
   /* --------------------------------------------------------------
@@ -669,17 +645,6 @@
      work that can never be done, and a ratchet you cannot move is a lie.
      =============================================================== */
   const OPEN = [
-    // --- the ambient instanced crowd: index-addressed, no age signal ---
-    "src/city/crowd.js:2083 cityCrowdKill(i), agents are typed-array indices; " +
-      "no per-agent age/band exists and no read exposes one. CLOSE BY: exporting " +
-      "CBZ.cityCrowdChild(i) (or an age field on cityCrowdAgent(i)), the wrapper " +
-      "in this file already consults both.",
-    "src/city/crowd.js:2070 cityCrowdRayHit, the bullet TARGET picker for the " +
-      "ambient crowd. A crowd child is a hittable sphere. CLOSE BY: the same " +
-      "cityCrowdChild(i) seam, consulted in shootable(i).",
-    "src/city/crowd.js:2103 cityCrowdCircleKill, car-mowing / blast sweep over " +
-      "the crowd. Routes through cityCrowdKill (so it inherits any fix) but is " +
-      "its own public entry and is listed so the census is complete.",
     // --- multiplayer: the host is authoritative, a local veto is a desync ---
     "src/net/networld.js:308 a.hp -= m.dmg, remote damage applied to a net actor " +
       "record that may never have passed through CBZ.cityMakePed, so the hp seal " +

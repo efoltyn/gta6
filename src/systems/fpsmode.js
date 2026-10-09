@@ -3246,28 +3246,16 @@
     else { scan(CBZ.guards); scan(CBZ.npcs); }
     // multiplayer: remote player avatars + host-synced puppet NPCs are real targets
     if (CBZ.net && CBZ.net.active && CBZ.net.targetList) scan(CBZ.net.targetList());
-    // the ambient instanced crowd is also a valid target (so you can shoot ANYONE,
-    // not just the few promoted peds). It competes on distance → real occlusion.
-    let crowdIdx = -1;
-    if (CBZ.game.mode === "city" && CBZ.cityCrowdRayHit) {
-      // The instanced crowd is index-addressed and this call takes ONE pair of
-      // radii for the whole sweep, so per-agent radii are not expressible from
-      // here — the assisted pair stands. childsafe.js's OPEN census already
-      // carries `crowd.js cityCrowdRayHit` as its own separate item, whose
-      // stated close is a `cityCrowdChild(i)` seam inside crowd.js.
-      const ch = CBZ.cityCrowdRayHit(origin.x, origin.y, origin.z, dir.x, dir.y, dir.z, bestDist, hrA, brA);
-      if (ch) { bestActor = null; crowdIdx = ch.i; bestDist = ch.dist; bestHead = ch.head; bestOcc = false; }
-    }
     // THE CROWDS (entities/crowdstore.js): every rally, march and grandstand
     // is rows of the one store; a round is tested against every body's
     // capsule through its spatial hash and competes on distance like anyone
     let crowdRow = -1;
     if (CBZ.crowds && CBZ.crowds.ray) {
       const cr = CBZ.crowds.ray(origin.x, origin.y, origin.z, dir.x, dir.y, dir.z, bestDist);
-      if (cr && cr.dist < bestDist) { bestActor = null; crowdIdx = -1; crowdRow = cr.row; bestDist = cr.dist; bestHead = cr.head; bestOcc = false; }
+      if (cr && cr.dist < bestDist) { bestActor = null; crowdRow = cr.row; bestDist = cr.dist; bestHead = cr.head; bestOcc = false; }
     }
-    if (!bestActor && crowdIdx < 0 && crowdRow < 0) return null;
-    return { actor: bestActor, crowd: crowdIdx >= 0 ? crowdIdx : null, crowdRow: crowdRow >= 0 ? crowdRow : null, occupant: bestOcc, dist: bestDist, head: bestHead, point: origin.clone().addScaledVector(dir, bestDist) };
+    if (!bestActor && crowdRow < 0) return null;
+    return { actor: bestActor, crowdRow: crowdRow >= 0 ? crowdRow : null, occupant: bestOcc, dist: bestDist, head: bestHead, point: origin.clone().addScaledVector(dir, bestDist) };
   }
 
   // ---- ray vs the DOWNED (every game) ----------------------------------------
@@ -4065,15 +4053,10 @@
           if (to === CBZ.crowds.DEAD) acc.down = true;
         }
         acc.head = acc.head || hit.head;
-        spawnImpact(hit.point, !w.nonlethal, w.key === "shotgun", cal);
-        if (!w.nonlethal && CBZ.gore && CBZ.gore.spray) CBZ.gore.spray(hit.point, hit.head ? 0.9 : 0.55, shotDir, goreOpts(hit, w, cal));
-      } else if (hit.crowd != null) {
-        // shot an ambient crowd member (the far NPCs that used to be unkillable)
-        acc.hitSomething = true;
-        if (!w.nonlethal && CBZ.cityCrowdKill) { CBZ.cityCrowdKill(hit.crowd, { head: hit.head, fromX: origin.x, fromZ: origin.z }); acc.down = true; }
-        acc.head = acc.head || hit.head;
-        spawnImpact(hit.point, !w.nonlethal, w.key === "shotgun", cal);
-        if (!w.nonlethal && CBZ.gore && CBZ.gore.spray) CBZ.gore.spray(hit.point, hit.head ? 0.9 : 0.55, shotDir, goreOpts(hit, w, cal));
+        // a child in the crowd (the store's prot row) is never hurt: no blood
+        const kidRow = !!(CBZ.crowds && CBZ.crowds.S.prot && CBZ.crowds.S.prot[hit.crowdRow]);
+        spawnImpact(hit.point, !w.nonlethal && !kidRow, w.key === "shotgun", cal);
+        if (!w.nonlethal && !kidRow && CBZ.gore && CBZ.gore.spray) CBZ.gore.spray(hit.point, hit.head ? 0.9 : 0.55, shotDir, goreOpts(hit, w, cal));
       } else if (hit.aircraft) {
         // bullets chip the gunship — sparks off the hull, damage routed to the heli
         acc.hitSomething = true;
@@ -4282,7 +4265,7 @@
         // resolveShot always answers; a "wall:false, actor:null" answer at the
         // end of the segment is empty air and the round keeps flying.
         const struck = hit && (hit.actor || hit.wall || hit.car || hit.corpse ||
-          hit.crowd != null || hit.crowdRow != null || hit.aircraft || hit.civilAircraft || hit.lightAir);
+          hit.crowdRow != null || hit.aircraft || hit.civilAircraft || hit.lightAir);
         // the visible round IS the tracer: one short streak per frame along the
         // segment it actually covered, so the streak travels instead of drawing
         // the whole flight path in the frame the trigger was pulled.

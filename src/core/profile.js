@@ -361,7 +361,7 @@
       counts: {
         peds: (CBZ.cityPeds || []).length, cops: (CBZ.cityCops || []).length,
         cars: (CBZ.cityCars || []).length,
-        crowd: CBZ.cityCrowdCount ? CBZ.cityCrowdCount() : null,
+        crowd: CBZ.streetLife ? CBZ.streetLife.audit().rows : null,
         guards: (CBZ.guards || []).length,
         inmates: (CBZ.npcs || []).filter(function (a) { return a && !a._crowd; }).length,
         prisonCrowdActive: CBZ.crowdStats && CBZ.crowdStats.active != null ? CBZ.crowdStats.active : null,
@@ -400,7 +400,6 @@
     }
     if (scenario === "chaos") {
       if (CBZ.spawnCityPeds) CBZ.spawnCityPeds(260);
-      if (CBZ.spawnCityCrowd) CBZ.spawnCityCrowd(360);
       if (CBZ.spawnCityTraffic) CBZ.spawnCityTraffic(100);
       if (CBZ.cityAlarm) CBZ.cityAlarm(CBZ.player.pos.x, CBZ.player.pos.z, 120, 1, CBZ.city.playerActor);
     }

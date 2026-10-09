@@ -17,7 +17,6 @@ const here = dirname(fileURLToPath(import.meta.url));
 const read = (p) => readFileSync(resolve(here, p), "utf8");
 const impactSource = read("../src/systems/impactbus.js");
 const structuralSource = read("../src/city/structural.js");
-const crowdSource = read("../src/city/crowd.js");
 const strategicSource = read("../src/city/strategic.js");
 
 // Static contracts cover owners that cannot be meaningfully booted without
@@ -33,8 +32,6 @@ assert.match(impactSource, /function drainOverBudget\(\)/,
   "nuclear drains must be time-bounded, not just item-bounded");
 assert.match(impactSource, /defer: w\.kind === "nuke"/,
   "nuclear structure work must use the deferred ledger path");
-assert.match(crowdSource, /CBZ\.cityCrowdAnnulusKill = function/,
-  "crowd owner must expose a one-pass annulus query");
 
 const copStart = strategicSource.indexOf("if (!nk.copsDone)");
 const copEnd = strategicSource.indexOf("// (vehicles:", copStart);
