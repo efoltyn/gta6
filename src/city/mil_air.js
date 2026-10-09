@@ -23,7 +23,7 @@
      attackHeli  AH-64-class: 14.6 m rotor, 15.5 m fuselage, tandem seats
      utilityHeli UH-60-class: 16.4 m rotor, wheels not skids
      drone       MQ-9-class MALE: 11 L x 20 span, V-tail, pusher prop
-     bomber      B-1-class swing-wing (parked spread): 44.4 x 41.7 x 10.4
+     bomber      B-52H Stratofortress: 48.5 x 56.4 x 12.4, eight engines in four pods
 
    COST: every type is built ONCE into a template (merged per material,
    geometry flagged _shared so no disposer frees it) and each placement is
@@ -925,102 +925,129 @@
   };
 
   // =====================================================================
-  //  7. HEAVY BOMBER — B-1-class. A blended wing-body (the fuselage widens
-  //     into fixed gloves), swing wings parked spread, two twin-engine
-  //     nacelles under the body with open intakes and four nozzles, tall
-  //     fin with a cruciform stabiliser, four crew windows cut from the
-  //     nose, bomb-bay doors, a twin nose leg and two four-wheel bogies.
+  //  7. HEAVY BOMBER — B-52H Stratofortress.
   // =====================================================================
+  /* THE HEAVY BOMBER IS A B-52H (2026-10-09). Every menu, the war room and
+     the arsenal call this airframe "B-52" — and it was a B-1 (swing wing,
+     four engines in two boxes, a cruciform tail, 41.7 m span). Nothing about
+     that silhouette says Stratofortress, so it is rebuilt from the B-52H's
+     own numbers: 48.5 m long, 56.4 m span, 12.4 m to the fin tip; a long
+     slab-sided fuselage; a shoulder wing swept 35° that droops on the ground
+     until the tip outriggers carry it; EIGHT engines in four twin pods on
+     pylons ahead of the leading edge; the tall fin; bicycle main gear (four
+     two-wheel trucks under the fuselage) and the 700-gal tip tanks. */
   BUILDERS.bomber = function () {
     const B = new Build("bomber");
-    const SK = cm(0x4f555d), SKD = cm(0x3c4148), GLASS = vm("glass", 0x1d2833), GUN = vm("plastic", 0x202327);
+    const SK = cm(0x50565d), SKD = cm(0x3d4247), GLASS = vm("glass", 0x1d2833);
     const TRIM = vm("interior", 0x0d0e10), RUB = vm("tire", 0x14161a), RIM = vm("rim", 0x9aa0a8), DUCT = cm(0x121417), GEARM = cm(0xb9bdc4);
+    const NOSE = cm(0x3b3f44);
     const K = B.main;
+    // fuselage: z, half-width, top, bottom, centre y, superellipse
     const FUS = [
-      [ 22.2, 0.05, 0.05, 0.05, 3.00, 2.0],
-      [ 21.0, 0.55, 0.50, 0.48, 3.05, 2.2],
-      [ 19.0, 1.05, 0.98, 0.88, 3.15, 2.4],
-      [ 16.5, 1.40, 1.22, 1.12, 3.25, 2.5],
-      [ 13.0, 1.62, 1.32, 1.28, 3.30, 2.5],
-      [  8.0, 1.85, 1.34, 1.38, 3.35, 2.7],
-      [  4.0, 3.20, 1.20, 1.30, 3.30, 3.3],
-      [  0.0, 4.10, 1.10, 1.33, 3.25, 3.6],
-      [ -6.0, 3.60, 1.00, 1.28, 3.30, 3.4],
-      [-12.0, 1.80, 0.95, 0.95, 3.45, 2.7],
-      [-17.0, 1.05, 0.80, 0.60, 3.70, 2.4],
-      [-20.5, 0.50, 0.50, 0.35, 3.90, 2.2],
-      [-22.2, 0.10, 0.12, 0.08, 4.00, 2.0],
+      [ 24.2, 0.06, 0.06, 0.06, 3.05, 2.0],
+      [ 23.5, 0.72, 0.78, 0.70, 3.05, 2.2],
+      [ 22.0, 1.22, 1.30, 1.15, 3.10, 2.6],
+      [ 20.2, 1.45, 1.72, 1.45, 3.15, 2.9],
+      [ 18.2, 1.52, 1.98, 1.62, 3.15, 3.0],
+      [ 15.0, 1.52, 1.90, 1.78, 3.08, 3.2],
+      [  6.0, 1.52, 1.86, 1.82, 3.02, 3.4],
+      [ -5.0, 1.52, 1.86, 1.82, 3.02, 3.4],
+      [-12.0, 1.42, 1.80, 1.45, 3.20, 3.2],
+      [-18.0, 1.10, 1.60, 0.95, 3.62, 3.0],
+      [-22.6, 0.58, 1.10, 0.50, 4.10, 2.6],
+      [-23.9, 0.12, 0.30, 0.12, 4.40, 2.0],
     ].map(function (r) { return { z: r[0], w: r[1], t: r[2], b: r[3], y: r[4], p: r[5] }; });
     const parts = loft(FUS, {
       n: 28, split: function (z, th) {
         const s = Math.sin(th), c = Math.cos(th);
-        if (z > 17.4 && z < 18.9) return s > 0.55 && Math.abs(c) > 0.08;            // two windscreens
-        if (z > 16.0 && z < 17.0) return s > 0.3 && s < 0.7;                          // side windows
+        if (z > 19.0 && z < 20.6) return s > 0.42 && Math.abs(c) > 0.06;           // the windscreen band
+        if (z > 17.4 && z < 18.6) return s > 0.25 && s < 0.62;                       // side windows
         return false;
       },
     });
     K.add(parts[0], SK); if (parts[1]) K.add(parts[1], GLASS);
-    K.add(loft(FUS.slice(2, 5).map(function (s) { return { z: s.z, w: s.w - 0.08, t: s.t - 0.08, b: s.b - 0.08, y: s.y, p: s.p }; }), { n: 28, flipped: true, caps: false }), TRIM);
-    [[-0.6, 17.1], [0.6, 17.1], [-0.6, 15.2], [0.6, 15.2]].forEach(function (c) {
-      K.add(xf(box(0.56, 0.12, 0.56), c[0], 3.44, c[1]), TRIM).add(xf(box(0.56, 0.86, 0.14), c[0], 3.87, c[1] - 0.34, 0.12), TRIM);
+    K.add(loft([rnd(24.25, 0.06, 3.05), rnd(23.3, 0.76, 3.05), rnd(22.6, 1.0, 3.07)], { n: 20, caps: false }), NOSE);   // the radome
+    // the flight deck behind the glass: two seats abreast, glareshield
+    K.add(loft(FUS.slice(3, 5).map(function (s) { return { z: s.z, w: s.w - 0.08, t: s.t - 0.08, b: s.b - 0.08, y: s.y, p: s.p }; }), { n: 28, flipped: true, caps: false }), TRIM);
+    [[-0.6, 18.9], [0.6, 18.9]].forEach(function (c) {
+      K.add(xf(box(0.56, 0.12, 0.56), c[0], 3.95, c[1]), TRIM).add(xf(box(0.56, 0.86, 0.14), c[0], 4.38, c[1] - 0.34, 0.12), TRIM);
     });
-    K.add(xf(box(2.0, 0.34, 0.14), 0, 4.0, 18.2, -0.5), TRIM);
-    // gloves (fixed, blended) and the spread outer wings
-    const glove = wing([{ x: 0.5, le: 12.0, c: 16.0, tc: 0.06, y: 3.7 }, { x: 7.2, le: 2.6, c: 6.2, tc: 0.08, y: 3.85 }], { K: 6 });
-    K.add([glove, mir(glove)], SK);
-    const ow = wing([{ x: 6.4, le: 2.3, c: 5.2, tc: 0.1, y: 3.92 }, { x: 20.85, le: -1.55, c: 2.0, tc: 0.08, y: 4.05 }], { K: 6 });
-    K.add([ow, mir(ow)], SK);
-    K.add([xf(cylX(0.5, 0.5, 12), 7.0, 3.9, 0.2), xf(cylX(0.5, 0.5, 12), -7.0, 3.9, 0.2)], SKD);     // pivot fairings
-    // nacelles (twin-engine boxes, p=4) with open intakes and four nozzles
-    {
-      const NS = [{ z: 3.0, x: 3.9, y: 2.2, w: 1.15, t: 0.95, b: 0.62, p: 4.5 }, { z: 1.5, x: 3.9, y: 2.2, w: 1.2, t: 1.1, b: 0.72, p: 4.5 },
-        { z: -5.5, x: 3.9, y: 2.2, w: 1.2, t: 1.1, b: 0.72, p: 4.5 }, { z: -7.4, x: 3.9, y: 2.1, w: 1.05, t: 0.62, b: 0.6, p: 4 }];
-      const nac = loft(NS, { n: 20, capFront: false, capBack: false });
-      const inner = { z: 3.0, x: 3.9, y: 2.0, w: 1.07, t: 0.62, b: 0.42, p: 4.5 };
-      const lip = annulus(NS[0], inner, 20, [0, 0, 1]);
-      const duct = loft([inner, { z: 2.0, x: 3.9, y: 2.0, w: 1.02, t: 0.58, b: 0.38, p: 4.5 }], { n: 20, flipped: true, caps: false });
-      const back = xf(new THREE.PlaneGeometry(2.0, 1.0), 3.9, 2.0, 2.05);
-      const split = xf(box(0.06, 1.0, 1.2), 3.9, 2.0, 2.5);
-      const aft = xf(new THREE.PlaneGeometry(2.1, 1.2), 3.9, 2.1, -7.4, 0, Math.PI);
-      K.add([nac, mir(nac)], SK).add([lip, mir(lip)], SKD).add([duct, mir(duct), back, mir(back), aft, mir(aft)], DUCT).add([split, mir(split)], SKD);
-      [3.35, 4.45].forEach(function (x) {
-        const nz = loft([rnd(-7.3, 0.5, 2.05, x), rnd(-8.6, 0.42, 2.05, x)], { n: 16, caps: false });
-        const th = loft([rnd(-8.6, 0.38, 2.05, x), rnd(-8.1, 0.3, 2.05, x)], { n: 16, caps: false, flipped: true });
-        K.add([nz, mir(nz)], GUN).add([th, mir(th)], DUCT);
-      });
-    }
-    // tail: tall swept fin, cruciform stabiliser mid-fin
-    K.add(xf(wing([{ x: 0, le: -13.2, c: 7.6, tc: 0.08 }, { x: 6.2, le: -18.9, c: 3.0, tc: 0.07 }], { K: 6 }), 0, 4.2, 0, 0, 0, Math.PI / 2), SK);
-    const hs = wing([{ x: 0.1, le: -17.0, c: 4.3, tc: 0.07, y: 6.3 }, { x: 7.0, le: -20.6, c: 1.6, tc: 0.06, y: 6.2 }], { K: 5 });
-    K.add([hs, mir(hs)], SK);
-    // bomb bays (three doors) on the belly
-    [7.0, 1.2, -4.6].forEach(function (z) {
-      K.add(xf(box(0.9, 0.06, 4.6), -0.46, 1.98, z), SKD).add(xf(box(0.9, 0.06, 4.6), 0.46, 1.98, z), SKD);
+    K.add(xf(box(2.2, 0.3, 0.3), 0, 4.55, 20.0, -0.4), TRIM);
+    // THE WING: shoulder-mounted, 35° at the quarter chord, drooping to the
+    // outriggers. Root on top of the fuselage, tip 1.8 m lower.
+    const WY = 4.78;
+    const le = function (x) { return 6.4 - (x - 1.5) * 0.735; };
+    const wy = function (x) { return WY - 1.75 * Math.pow(Math.max(0, x - 1.5) / 26.7, 1.6); };
+    const WS = [1.5, 6, 10.5, 15, 19.5, 24, 28.2].map(function (x) {
+      const c = 11.6 - (x - 1.5) * (11.6 - 3.7) / 26.7;
+      return { x: x, le: le(x), c: c, tc: 0.105 - 0.03 * (x - 1.5) / 26.7, y: wy(x) };
     });
-    // gear
-    {
-      const nw = wheel(0.5, 0.3), mw = wheel(0.56, 0.34);
-      K.add(rod([0, 2.1, 15.4], [0, 0.5, 15.5], 0.14), GEARM).add(rod([0, 2.0, 14.4], [0, 0.9, 15.45], 0.08), GEARM);
-      K.add([xf(nw.tire.clone(), -0.3, 0.5, 15.5), xf(nw.tire, 0.3, 0.5, 15.5)], RUB).add([xf(nw.hub.clone(), -0.3, 0.5, 15.5), xf(nw.hub, 0.3, 0.5, 15.5)], RIM);
+    const wg = wing(WS, { K: 7 });
+    K.add([wg, mir(wg)], SK);
+    // EIGHT ENGINES, FOUR PODS. Each pod is two nacelles side by side under a
+    // shared pylon, slung ahead of and below the leading edge.
+    [9.6, 18.4].forEach(function (px) {
+      const y = wy(px) - 1.75, zf = le(px) + 3.6, zb = zf - 6.6;
       [-1, 1].forEach(function (s) {
-        K.add(rod([s * 2.2, 2.05, -1.4], [s * 2.2, 0.62, -1.5], 0.17), GEARM).add(xf(box(0.4, 0.24, 2.3), s * 2.2, 0.62, -1.5), GEARM);
-        [-0.8, 0.8].forEach(function (dz) {
-          [-0.42, 0.42].forEach(function (dx) {
-            const w = wheel(0.56, 0.34);
-            K.add(xf(w.tire, s * 2.2 + dx, 0.56, -1.5 + dz), RUB).add(xf(w.hub, s * 2.2 + dx, 0.56, -1.5 + dz), RIM);
-          });
+        [-0.66, 0.66].forEach(function (dx) {
+          const x = s * px + dx;
+          const N = [rnd(zf, 0.62, y, x), rnd(zf - 0.6, 0.68, y, x), rnd(zf - 3.6, 0.66, y, x), rnd(zb + 0.7, 0.55, y, x), rnd(zb, 0.42, y, x)];
+          K.add(loft(N, { n: 18, capFront: false, capBack: false }), SK);
+          K.add(annulus(rnd(zf, 0.62, y, x), rnd(zf, 0.5, y, x), 18, [0, 0, 1]), SKD);
+          K.add(loft([rnd(zf, 0.5, y, x), rnd(zf - 0.9, 0.46, y, x)], { n: 18, caps: false, flipped: true }), DUCT);
+          K.add(xf(new THREE.CircleGeometry(0.46, 18), x, y, zf - 0.9), DUCT);
+          K.add(xf(new THREE.CircleGeometry(0.42, 16), x, y, zb + 0.01, 0, Math.PI), DUCT);
+          K.add(xf(new THREE.CircleGeometry(0.30, 14), x, y, zb + 0.02, 0, Math.PI), cm(0x2a1d16));
         });
+        // the pylon: a swept blade from the pod's back to the wing's underside
+        const pl = wing([{ x: 0, le: zf - 2.2, c: 5.2, tc: 0.12 }, { x: 1.45, le: le(px) - 0.4, c: 5.6, tc: 0.12 }], { K: 4 });
+        K.add(xf(pl, s * px, y + 0.4, 0, 0, 0, Math.PI / 2), SKD);
       });
-      mw.tire.dispose(); mw.hub.dispose();
-    }
-    navLights(B, [[20.85, 4.05, -2.4, RED], [-20.85, 4.05, -2.4, GREEN], [0, 10.45, -20.0, WHITE]]);
-    muzzleNode(B, 0, 3.0, 22.3);
+    });
+    // 700-gal external tanks, outboard of the outer pods
+    [-1, 1].forEach(function (s) {
+      const x = s * 23.2, y = wy(23.2) - 0.75, z0 = le(23.2) - 0.2;
+      K.add(loft([rnd(z0 + 0.2, 0.05, y, x), rnd(z0 - 0.6, 0.42, y, x), rnd(z0 - 3.6, 0.48, y, x), rnd(z0 - 6.4, 0.25, y, x), rnd(z0 - 7.2, 0.04, y, x)], { n: 14 }), SK);
+      K.add(xf(box(0.12, 0.5, 2.6), x, y + 0.45, z0 - 3.4), SKD);
+    });
+    // TAIL: the tall swept fin (12.4 m to the tip) and the low stabiliser
+    K.add(xf(wing([{ x: 0, le: -12.8, c: 10.8, tc: 0.08 }, { x: 7.6, le: -19.6, c: 3.8, tc: 0.07 }], { K: 6 }), 0, 4.8, 0, 0, 0, Math.PI / 2), SK);
+    const hs = wing([{ x: 0.9, le: -16.6, c: 6.6, tc: 0.08, y: 4.25 }, { x: 8.4, le: -21.4, c: 2.4, tc: 0.07, y: 4.35 }], { K: 5 });
+    K.add([hs, mir(hs)], SK);
+    // the ECM / tail-cone fairing and the antennae ahead of the fin
+    K.add(loft([rnd(-22.8, 0.42, 4.25), rnd(-23.9, 0.18, 4.3), rnd(-24.2, 0.04, 4.3)], { n: 12 }), NOSE);
+    K.add(xf(box(0.06, 0.5, 0.9), 0, 5.2, 9.0), SKD).add(xf(box(0.06, 0.4, 0.7), 0, 5.15, -2.0), SKD);
+    // bomb bay doors on the belly, between the main gear trucks
+    K.add(xf(box(1.0, 0.05, 8.6), -0.52, 1.215, 2.5), SKD).add(xf(box(1.0, 0.05, 8.6), 0.52, 1.215, 2.5), SKD);
+    // ---- GEAR: bicycle trucks under the fuselage + wingtip outriggers ----
+    const gear = B.node("gear"); B.refs.gear = "gear";
+    const GK = B.kit(gear);
+    [10.6, -7.8].forEach(function (gz) {
+      [-1, 1].forEach(function (s) {
+        const gx = s * 0.95;
+        GK.add(rod([gx, 1.45, gz], [gx, 0.56, gz], 0.13), GEARM);
+        GK.add(xf(box(0.22, 0.2, 2.0), gx, 0.56, gz), GEARM);
+        [-0.62, 0.62].forEach(function (dz) {
+          const w = wheel(0.56, 0.36);
+          GK.add(xf(w.tire, gx + s * 0.24, 0.56, gz + dz), RUB).add(xf(w.hub, gx + s * 0.24, 0.56, gz + dz), RIM);
+        });
+        GK.add(xf(box(0.04, 0.85, 2.4), s * 1.42, 1.0, gz), SKD);     // the truck doors, hanging open
+      });
+    });
+    [-1, 1].forEach(function (s) {
+      const x = s * 24.6, yb = wy(24.6) - 0.25, z = le(24.6) - 2.0;
+      GK.add(rod([x, yb, z], [x, 0.36, z - 0.15], 0.07), GEARM);
+      const w = wheel(0.36, 0.2);
+      GK.add(xf(w.tire, x, 0.36, z - 0.15), RUB).add(xf(w.hub, x, 0.36, z - 0.15), RIM);
+    });
+    navLights(B, [[28.2, wy(28.2), le(28.2) - 1.8, RED], [-28.2, wy(28.2), le(28.2) - 1.8, GREEN], [0, 12.35, -20.6, WHITE]]);
+    muzzleNode(B, 0, 3.05, 24.4);
     B.ud.cabin = { seats: [
-      { id: "seat-captain", role: "pilot", cockpit: true, x: 0.6, y: 3.5, z: 17.1 },
-      { id: "seat-firstofficer", role: "copilot", cockpit: true, x: -0.6, y: 3.5, z: 17.1 },
+      { id: "seat-captain", role: "pilot", cockpit: true, x: -0.6, y: 4.0, z: 18.9 },
+      { id: "seat-firstofficer", role: "copilot", cockpit: true, x: 0.6, y: 4.0, z: 18.9 },
     ] };
     B.ud.cockpitClass = "bomber";
-    return B.finish({ family: "B-1-class", length: 44.5, span: 41.7, height: 10.45, bodyW: 10.2, bodyL: 44.5 });
+    return B.finish({ family: "B-52-class", length: 48.5, span: 56.4, height: 12.4, bodyW: 6.0, bodyL: 48.5 });
   };
 
   // =====================================================================
