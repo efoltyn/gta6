@@ -684,7 +684,8 @@
   // The stick's ANALOG reading, published for anything that flies. WASD are
   // on/off switches past a 0.28 dead band, so a forward push 17 degrees off
   // true also held a full pedal and the helicopter flew circles. The heli
-  // reads this instead (x right, y FORWARD, length <= 1); null with no thumb.
+  // reads this instead, and so does every plane (x right, y FORWARD, length
+  // <= 1); null with no thumb.
   const stickAxis = { x: 0, y: 0 };
   let stickAxisOn = false;
   function setMove(nx, ny) {

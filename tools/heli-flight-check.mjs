@@ -55,7 +55,7 @@ const check = (ok, msg) => { console.log((ok ? "ok   " : "FAIL ") + msg); if (!o
   fly(st, { cycF: 1, cycR: 0, pedal: 0, coll: 0 }, 8);
   const h0 = st.heading, v = Math.hypot(st.vx, st.vz);
   check(v > 30 && Math.abs(st.heading - 0.7) < 1e-6, "full forward 8 s: " + v.toFixed(1) + " m/s, no heading change");
-  check(st.pitch > 0.05, "full forward: nose down (rotation.x " + st.pitch.toFixed(3) + ")");
+  check(st.pitch < -0.05, "full forward: nose down (pitch " + st.pitch.toFixed(3) + ")");
   fly(st, { cycF: 1, cycR: 1, pedal: 0, coll: 0 }, 2);
   check(st.heading < h0 - 0.3 && st.roll > 0.1, "cruise + stick right: banks right (" + st.roll.toFixed(2) + ") and turns right (" + (st.heading - h0).toFixed(2) + " rad)");
   const fwd = st.vx * Math.sin(st.heading) + st.vz * Math.cos(st.heading);

@@ -1423,7 +1423,7 @@
       // Cars publish no roll → bankK eases back to level. rotateZ runs AFTER
       // lookAt, so it tilts about the live view axis.
       if (CBZ.CONFIG.CAM_AIR_BANK !== false) {
-        const tBank = craft ? Math.max(-0.35, Math.min(0.35, (craft.roll || 0) * 0.42)) : 0;
+        const tBank = craft ? Math.max(-0.35, Math.min(0.35, -(craft.roll || 0) * 0.42)) : 0;   // roll + = right bank; rotateZ + leans the lens LEFT
         bankK += (tBank - bankK) * (1 - Math.exp(-7 * fdt));
         if (Math.abs(bankK) > 0.0006) camera.rotateZ(bankK);
       } else bankK = 0;
