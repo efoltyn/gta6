@@ -979,6 +979,13 @@
     // it reads as cloth with light behind it and not as a glowing block.
     function kitBox(lx, ly, lz, w, h, d, color, o) {
       box(lx, ly, lz, w, h, d, color, o && o.emissive != null && (o.ei == null || o.ei >= 0.34) ? { glow: true } : null);
+      // THE KIT'S COLLIDERS. This dropped o.solid on the floor, so every
+      // fit-out sofa, bed, desk and chair was a picture you walked through.
+      // The kit hands its own band (a seat is solid floor-to-cushion, its
+      // back and arms higher); solid() ledgers it with the floor's colliders,
+      // so it dies with the floor like every wall here.
+      if (o && o.solid) solid(lx - w / 2, lx + w / 2, lz - d / 2, lz + d / 2,
+        o.y0 != null ? o.y0 : ly - h / 2, o.y1 != null ? o.y1 : ly + h / 2);
       return true;
     }
     function furn(name, x, z, yaw, o) {

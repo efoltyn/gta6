@@ -669,24 +669,30 @@
     ROOM.board = canvasTexLive(2048, 512);           // 4:1, exactly the screen's aspect
     ROOM.pads = [];
     let tableRec = null;
-    const kitBox = function (x, y, z, w, h, d, color) { return addBox(grp, x, y, z, w, h, d, color); };
+    // the kit's colliders ride its draw call ({solid, y0, y1}: a chair is a
+    // seat you can step onto and a back); addCol ledgers them on ROOM.cols so
+    // they leave with the room
+    const kitBox = function (x, y, z, w, h, d, color, o) {
+      if (o && o.solid) addCol(x, z, w, d, o.y0 != null ? o.y0 : y - h / 2, o.y1 != null ? o.y1 : y + h / 2);
+      return addBox(grp, x, y, z, w, h, d, color);
+    };
     if (CBZ.furnish && CBZ.furnish.table) {
       try {
         tableRec = CBZ.furnish.table(tcx, Y, tcz, alongX ? 0 : Math.PI / 2, {
-          box: kitBox, ox: 0, oz: 0, oy: 0, solid: false, len: len, deep: 1.7, seats: 14, tone: "exec",
+          box: kitBox, ox: 0, oz: 0, oy: 0, len: len, deep: 1.7, seats: 14, tone: "exec",
         });
       } catch (e) { tableRec = null; }
     }
     if (!tableRec) {
       addBox(grp, tcx, Y + 0.37, tcz, alongX ? len : 1.7, 0.74, alongX ? 1.7 : len, 0x243244);
+      addCol(tcx, tcz, alongX ? len : 1.7, alongX ? 1.7 : len, Y, Y + 0.76);
     }
     ROOM.seats = tableRec && tableRec.seats ? tableRec.seats.length : 0;
-    addCol(tcx, tcz, alongX ? len : 1.7, alongX ? 1.7 : len, Y, Y + 0.76);
     // the President's chair at the head, facing the door and the table
     const headX = alongX ? tcx + far * (len / 2 + 0.7) : tcx, headZ = alongX ? tcz : tcz + far * (len / 2 + 0.7);
     if (CBZ.furnish && CBZ.furnish.armchair) {
       try {
-        const hr = CBZ.furnish.armchair(headX, Y, headZ, alongX ? Math.atan2(-far, 0) : Math.atan2(0, -far), { box: kitBox, ox: 0, oz: 0, oy: 0, solid: false, tone: "exec" });
+        const hr = CBZ.furnish.armchair(headX, Y, headZ, alongX ? Math.atan2(-far, 0) : Math.atan2(0, -far), { box: kitBox, ox: 0, oz: 0, oy: 0, tone: "exec" });
         ROOM.seats += hr && hr.seats ? hr.seats.length : 0;
       } catch (e) {}
     }
@@ -769,7 +775,7 @@
       if (CBZ.furnish && CBZ.furnish.chair) {
         try {
           const cxp = alongX ? px : sideF + 1.35, czp = alongX ? sideF + 1.35 : pz;
-          const cr = CBZ.furnish.chair(cxp, Y, czp, alongX ? Math.PI : -Math.PI / 2, { box: kitBox, ox: 0, oz: 0, oy: 0, solid: false, tone: "exec" });
+          const cr = CBZ.furnish.chair(cxp, Y, czp, alongX ? Math.PI : -Math.PI / 2, { box: kitBox, ox: 0, oz: 0, oy: 0, tone: "exec" });
           stationSeats += cr && cr.seats ? cr.seats.length : 0;
         } catch (e) {}
       }

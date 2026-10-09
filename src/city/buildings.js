@@ -3695,7 +3695,12 @@
       m.castShadow = o.cast !== false; m.receiveShadow = true;
       bgroup.add(m);
       if (o.solid) {
-        const c = { minX: ox + lx - bw / 2, maxX: ox + lx + bw / 2, minZ: oz + lz - bd / 2, maxZ: oz + lz + bd / 2, ref: m, y0: ly - bh / 2, y1: ly + bh / 2 };
+        // o.y0/o.y1: a band of its own (city/furniture.js: a sofa's seat is
+        // solid floor-to-cushion while the drawn box is just the cushion), the
+        // same contract CBZ.addBox and every venue box already honour
+        const c = { minX: ox + lx - bw / 2, maxX: ox + lx + bw / 2, minZ: oz + lz - bd / 2, maxZ: oz + lz + bd / 2, ref: m,
+          y0: o.y0 != null ? o.y0 : ly - bh / 2, y1: o.y1 != null ? o.y1 : ly + bh / 2 };
+        if (o.noBreach) c.noBreach = true;
         CBZ.colliders.push(c); cols.push(c);
       }
       if (o.plat) { const p = { minX: ox + lx - bw / 2, maxX: ox + lx + bw / 2, minZ: oz + lz - bd / 2, maxZ: oz + lz + bd / 2, top: ly + bh / 2 }; CBZ.platforms.push(p); plats.push(p); }
