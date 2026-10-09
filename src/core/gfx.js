@@ -502,6 +502,10 @@
     if (CBZ.CONFIG.GFX_TIGHT_SHADOWS && rig && rig.setShadowFrustum && g && g.mode === "city" && t.shadowHalf) {
       rig.setShadowFrustum(t.shadowHalf, t.shadowHalf * 2.6 + 40);
     }
+    // ---- the shadow grid, last: snap the box onto whole light-space texels
+    //      and size the normal bias to the live texel, whatever mode wrote
+    //      the sun this frame (core/lights.js stabilizeShadow).
+    if (rig && rig.stabilizeShadow) rig.stabilizeShadow();
 
     // ---- eye adaptation. Slow, bounded, and purely presentational.
     if (CBZ.setExposure && CBZ.CONFIG.GFX_AUTO_EXPOSURE) {

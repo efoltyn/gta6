@@ -121,14 +121,21 @@ export function boxQuads(b, key, faces) {
   return out;
 }
 
-/* THE Z-FIGHT LEDGER. Returns { pairs, area, samples[] }. */
+/* THE Z-FIGHT LEDGER. Returns { pairs, area, samples[], byKind, seps[] }.
+   pairs/area/samples/byKind count the faces within `tol` (the gate).
+   opts.band (>= tol): ALSO list every visible same-normal overlap whose planes
+   are within `band`, as seps[] = [{ d, area }] (d = plane separation in m),
+   so a caller can ask at what viewing distance each one starts to fight
+   for a given near plane and depth-buffer width (depthFightRange below). */
 export function zfight(quads, tol, opts) {
   opts = opts || {};
   const hid = opts.solids ? solidIndex(opts.solids) : null;
   tol = tol == null ? 0.005 : tol;
+  const band = Math.max(tol, opts.band || 0);
+  const seps = [];
   const MIN_A = 1e-4, MIN_D = 0.002;
   const buckets = new Map();
-  const cell = Math.max(tol * 2, 0.01);
+  const cell = Math.max(band * 2, 0.01);
   for (let i = 0; i < quads.length; i++) {
     const q = quads[i];
     if (q.u1 - q.u0 < MIN_D || q.v1 - q.v0 < MIN_D) continue;
@@ -154,7 +161,8 @@ export function zfight(quads, tol, opts) {
         if (j <= i && l2 === list) continue;
         if (j === i) continue;
         const b = quads[j];
-        if (Math.abs(a.off - b.off) > tol) continue;
+        const sep = Math.abs(a.off - b.off);
+        if (sep > band) continue;
         if (a.key === b.key && !a.vc && !b.vc) continue;      // the same pixel twice: no flicker
         const du = Math.min(a.u1, b.u1) - Math.max(a.u0, b.u0);
         const dv = Math.min(a.v1, b.v1) - Math.max(a.v0, b.v0);
@@ -165,6 +173,8 @@ export function zfight(quads, tol, opts) {
         const pk = i < j ? i + ":" + j : j + ":" + i;
         if (seen.has(pk)) continue;
         seen.add(pk);
+        if (opts.band) seps.push({ d: sep, area: du * dv, w: Math.min(du, dv), back: (a.off * a.sg < b.off * b.sg ? a.src : b.src), kind: [a.src.split("#")[0] + ":" + "xyz"[a.ax] + (a.sg > 0 ? "+" : "-"), b.src.split("#")[0]].sort().join(" | "), a: a.src, b: b.src, at: a.q, r: ["xyz"[a.ax] + (a.sg > 0 ? "+" : "-"), +a.off.toFixed(3), +b.off.toFixed(3), [a.u0, a.u1, a.v0, a.v1].map((x) => +x.toFixed(2)), [b.u0, b.u1, b.v0, b.v1].map((x) => +x.toFixed(2))] });
+        if (sep > tol) continue;
         pairs++; area += du * dv;
         const kind = [a.src.split("#")[0] + ":" + "xyz"[a.ax] + (a.sg > 0 ? "+" : "-"), b.src.split("#")[0]].sort().join(" | ");
         byKind.set(kind, (byKind.get(kind) || 0) + 1);
@@ -172,7 +182,22 @@ export function zfight(quads, tol, opts) {
       }
     }
   });
-  return { pairs: pairs, area: +area.toFixed(3), samples: samples, byKind: byKind };
+  return { pairs: pairs, area: +area.toFixed(3), samples: samples, byKind: byKind, seps: seps };
+}
+
+/* AT WHAT DISTANCE DOES A LAYER GAP START TO FIGHT? A perspective depth
+   buffer of `bits` steps over [near, far >> near] resolves
+       dz(z) = z^2 / (near * 2^bits)
+   (a 24-bit buffer and Apple's Depth32Float behave alike near z_ndc = 1).
+   Two parallel faces `d` apart stay resolved while d >= K * dz(z), K = the
+   steps of margin the interpolated depth needs (rasteriser rounding, MSAA
+   sample positions): beyond that range they trade pixels, and which one wins
+   changes with every sub-pixel move of the camera (the "fine when still,
+   flickers when I move" signature). Returns that range in metres. */
+export const DEPTH_K = 4;
+export function depthFightRange(d, near, bits, K) {
+  K = K || DEPTH_K;
+  return Math.sqrt(Math.max(0, d) * near * Math.pow(2, bits || 24) / K);
 }
 
 /* Is a pane visible from the street? Sample a 4x4 grid over the pane's outer

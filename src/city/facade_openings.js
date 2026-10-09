@@ -262,8 +262,13 @@
     // the room behind it
     if (E.glow && o.glow) {
       const c = FO.at(f, (t0 + t1) / 2, (y0 + y1) / 2, 0, 0, 0, 0);
-      // the room panel stands 6 cm behind the glass, never in its plane
-      E.glow(c[0], c[1], c[2], W, H, f.horiz ? { x: 0, z: f.out } : { x: f.out, z: 0 }, Object.assign({ inset: rev + 0.06 }, o.glow));
+      // the room panel stands 12 cm behind the glass, never in its plane. It
+      // was 6 cm: only 2-2.5 cm behind the frame's back face, and it draws
+      // without writing depth after every opaque, so past ~140 m (where 2 cm
+      // is under the depth buffer's resolution) the painted room bled across
+      // the frame members in a grey shimmer that changed as the view moved.
+      // 12 cm is ~9 cm behind the frame and still inside a 0.4 m wall.
+      E.glow(c[0], c[1], c[2], W, H, f.horiz ? { x: 0, z: f.out } : { x: f.out, z: 0 }, Object.assign({ inset: rev + 0.12 }, o.glow));
     }
     return n;
   };
@@ -655,16 +660,25 @@
      lie in the same plane (within 5 mm) over an overlapping area are drawn
      by the depth buffer in whichever order the angle favours. The LATER box
      is the one the author laid on top, so it wins: the earlier box's face is
-     pulled back 8 mm behind it (the box shrinks by 8 mm on that side, which
+     pulled back 20 mm behind it (the box shrinks by 20 mm on that side, which
      no eye can see; the face it pulls back is hidden by the later one).
      `walls`, when given ([x0,x1,y0,y1,z0,z1] boxes in the same frame, the
      shell's own wall pieces), are fixed planes: a deco face lying in a wall's
-     face is pushed 8 mm OUT of it instead (the dressing replaces the wall
+     face is pushed 20 mm OUT of it instead (the dressing replaces the wall
      surface it lies on, it never shares it). In place on `recs`
      ([x,y,z,w,h,d,col,...]); returns the number of faces moved.            */
   FO.resolveCoplanar = function (recs, walls, tol) {
     tol = tol == null ? 0.0068 : tol;   // a hair over the 5 mm the census holds us to
-    const EPS = 0.01;
+    /* THE STEP IS SET BY THE DEPTH BUFFER, NOT BY THE CENSUS. A face this
+       resolver moved used to land 10 mm from the one it cleared, and 10 mm is
+       only resolved to ~92 m by the on-foot camera (~65 m in first person,
+       tools/facade-census.mjs DEPTH BANDS): every ornament it settled went on
+       fighting across the street, flickering while the view moved, which is
+       the facade flicker the 5 mm census called fixed. 20 mm holds to ~130 m,
+       where the haze is closing in and a 3 cm moulding is a pixel. (Widening
+       tol as well re-clusters whole runs of ornament and was measured to push
+       pieces across windows, so tol stays.) */
+    const EPS = 0.02;
     const n = recs.length;
     if (!n) return 0;
     // box bounds, mutable
@@ -734,7 +748,7 @@
         // face of another colour gets its OWN plane, in the order the boxes
         // were laid: the last one laid stays, each earlier one steps back
         // behind it (a box too thin to give up the depth steps forward
-        // instead), to the nearest plane 10 mm steps away where it overlaps
+        // instead), to the nearest plane 20 mm (EPS) steps away where it overlaps
         // NO other face of another colour. Pairwise nudging cascaded.
         const idx = new Map();                     // plane cell -> face indices
         const cellOf = function (p) { return Math.round(p / CELL); };
@@ -825,7 +839,7 @@
           c0 = c1;
         }
         // a deco face lying in a fixed face (a wall's, a slab's): out of it,
-        // to the nearest free plane in 10 mm steps (never onto another face)
+        // to the nearest free plane in EPS (20 mm) steps (never onto another face)
         if (W.length) {
           const outDir = s === 1 ? 1 : -1;
           for (let i = 0; i < n; i++) {

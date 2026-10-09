@@ -142,8 +142,12 @@
     _roomTexLit = new THREE.CanvasTexture(cv);
     _roomTexLit.wrapS = _roomTexLit.wrapT = THREE.ClampToEdgeWrapping;
     if (THREE.sRGBEncoding != null) _roomTexLit.encoding = THREE.sRGBEncoding;
-    _roomTexLit.minFilter = THREE.LinearFilter;
-    _roomTexLit.generateMipmaps = false;
+    // MIPMAPPED (64x128 is a power of two): a 1.5 m window at 100 m covers ~10
+    // pixels of this 64-texel painting, and with LinearFilter alone every turn
+    // of the view re-picked which texels landed: the room panels shimmered
+    // as dark-grey squares behind the glass while the camera moved.
+    _roomTexLit.minFilter = THREE.LinearMipmapLinearFilter;
+    _roomTexLit.generateMipmaps = true;
     return _roomTexLit;
   }
   function makeRoomTexture() {
@@ -179,8 +183,9 @@
     _roomTex = new THREE.CanvasTexture(cv);
     _roomTex.wrapS = _roomTex.wrapT = THREE.ClampToEdgeWrapping;
     if (THREE.sRGBEncoding != null) _roomTex.encoding = THREE.sRGBEncoding;
-    _roomTex.minFilter = THREE.LinearFilter;   // no mipmaps needed (small, seen near)
-    _roomTex.generateMipmaps = false;
+    // mipmapped: seen far more often from the street than near (see the lit twin)
+    _roomTex.minFilter = THREE.LinearMipmapLinearFilter;
+    _roomTex.generateMipmaps = true;
     return _roomTex;
   }
 
