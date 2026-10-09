@@ -241,7 +241,7 @@ async function runBatch(lane, reqs) {
       }
     }
     const fan = (u, patch) => { for (const o of u.owners) setCheck(res(o.q.id), o.name, patch); };
-    const logFor = (u) => path.join(BD, "logs", slug(u.key.replace(/^(node|probe):/, "")) + ".log");
+    const logFor = (u) => path.join(BD, "logs", slug(u.kind === "node" ? [u.cmd, ...u.args].join(" ") : `${u.name}-${u.wk}`) + ".log");
 
     // node checks: cheap, first, in parallel
     const nodeList = [...nodeU.values()];
@@ -368,12 +368,14 @@ function atCommit(checks, BD, lane) {
       try {
         await ensureBrowser(); await loadGate();
         srv = await serve(dir); pg = await browser.newPage();
-        await bootWorld(pg, srv.origin, wk, CFG.bootTimeoutMs);
+        const b = await bootWorld(pg, srv.origin, wk, CFG.bootTimeoutMs);
+        log(`  bisect @ ${label}: ${wk} booted in ${(b.bootMs / 1000).toFixed(1)} s`);
         for (const u of plan(list).flat()) {
           if (u.probe.meta.fresh && dirty) { await bootWorld(pg, srv.origin, wk, CFG.bootTimeoutMs); dirty = false; }
           const r = await runProbe(pg, u.probe, { args: u.args, seed: parseKey(wk).seed, world: parseKey(wk).name, timeoutMs: CFG.probeTimeoutMs });
           if (u.probe.meta.dirties) dirty = true;
           out.set(u.key, r.status);
+          log(`  bisect @ ${label}: ${u.name} ${r.status} (${(r.ms / 1000).toFixed(1)} s)`);
           if (r.broken) break;
         }
       } catch (e) { log(`  bisect boot ${wk} at ${label} failed: ${e.message}`); }
