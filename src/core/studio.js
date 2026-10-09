@@ -273,8 +273,8 @@
       // built inside makeCharacter
       // eyes.js: how that body SEES when it is hurt (heavy lids, a flinch),
       // the one answer every game has instead of a red screen
-      files: ["systems/fphands.js", "entities/footwear.js", "entities/character.js", "entities/headwear.js", "entities/watch.js", "entities/moves.js", "entities/heritage.js", "entities/poses.js", "entities/crowdgpu.js", "systems/bodymass.js", "systems/eyes.js"],
-      publishes: ["human", "makeCharacter", "headwear", "heritageRoll", "animChar", "moves", "charPoses", "crowdGPU", "bodyMass", "meleeScale", "eyes"],
+      files: ["systems/fphands.js", "entities/footwear.js", "entities/character.js", "entities/headwear.js", "entities/eyewear.js", "entities/watch.js", "entities/moves.js", "entities/heritage.js", "entities/poses.js", "entities/crowdgpu.js", "systems/bodymass.js", "systems/eyes.js"],
+      publishes: ["human", "makeCharacter", "headwear", "eyewear", "heritageRoll", "animChar", "moves", "charPoses", "crowdGPU", "bodyMass", "meleeScale", "eyes"],
     },
 
     // ---- two people, hands on each other -------------------------------------

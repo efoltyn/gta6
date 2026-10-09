@@ -422,12 +422,9 @@
        into a DETAIL. The wire matters more than the bud: a coiled clear lead
        running from the ear down behind the collar is the single most
        recognisable thing about close protection, and it is one thin box. */
-    if (K.shades && neck) {
-      const g1 = box(0.52 * k, 0.10 * k, 0.05 * k, 0x0c0d11);
-      g1.position.set(0, hs * 0.60, hs * 0.50); add(neck, g1);
-      const arm = box(0.62 * k, 0.03 * k, 0.03 * k, 0x14161b)   /* ends off the skull sides (0.60 lay on them) */;
-      arm.position.set(0, hs * 0.61, hs * 0.30); add(neck, arm);
-    }
+    /* The shades are entities/eyewear.js's "agent" wraparound, fitted to this
+       head (they were a slab and one 0.62 bar straight THROUGH the skull). */
+    if (K.shades && neck && CBZ.eyewear) add(neck, CBZ.eyewear.make(rig, "agent"));
     if (K.earpiece && neck) {
       const bud = box(0.06 * k, 0.08 * k, 0.06 * k, 0xdcd8cf);
       bud.position.set(hs * 0.46, hs * 0.56, hs * 0.06); add(neck, bud);

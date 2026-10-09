@@ -846,18 +846,16 @@
     if (ch._gloved != null) { wear(ch.skinTone != null ? ch.skinTone : 0xcf9a72); ch._gloved = null; }
   }
 
-  // ---- THE DETAIL KIT: wraparound shades + a coiled earpiece, ONE mesh -----
-  //      Seven boxes (two lens slabs, a bridge, two temples run straight back
-  //      through the skull, a bud inside the ear, a lead ending in mid air)
-  //      became one merged, vertex-coloured mesh per (mask, lead) on ONE shared
-  //      material: rounded lenses wrapped a touch round the face, a brow bar,
-  //      temples that flare out over the head to the ears, a bud in the left
-  //      ear and its lead running behind the jaw down into the collar band.
-  //      Built in the FACE frame (the neck pivot; character.js scales the face
-  //      by headSize/0.60), MEASURED on the shaped head: eyes at x +-0.14,
-  //      y 0.34, front z 0.30; the head is +-0.30 wide at eye height at z 0.1
-  //      and +-0.33 at the ear line; the nose bridge z 0.318.
-  const KIT_COL = { lens: 0x0b0c10, frame: 0x1a1c21, bud: 0xdcd8cf, lead: 0xcfcac0 };
+  // ---- THE DETAIL KIT: wraparound shades + a coiled earpiece -------------
+  //      THE SHADES are entities/eyewear.js's "agent" pair (CBZ.eyewear): a
+  //      half-rim wraparound FITTED to this body's head (front on the nose,
+  //      temples 2-3 mm off the skin, bent down behind the ear). They used to
+  //      be bars typed here against one measured head, standing 7 cm off it.
+  //      THE EARPIECE stays one merged, vertex-coloured mesh per lead length
+  //      on ONE shared material: a bud in the left ear and its lead running
+  //      behind the jaw down into the collar band. Built in the FACE frame (the
+  //      neck pivot; character.js scales the face by headSize/0.60).
+  const KIT_COL = { bud: 0xdcd8cf, lead: 0xcfcac0 };
   const _kitGeo = {};
   let _kitMat = null;
   function kitMat() {
@@ -887,27 +885,6 @@
     let g = _kitGeo[key];
     if (g) return g;
     const list = [];
-    if (mask & 1) {
-      // lenses: a rounded rectangle, thin, each turned 0.14 rad so its outer
-      // edge follows the face back
-      const s = new THREE.Shape(), w = 0.095, h = 0.064, r = 0.03;
-      s.moveTo(-w + r, -h); s.lineTo(w - r, -h); s.quadraticCurveTo(w, -h, w, -h + r); s.lineTo(w, h - r);
-      s.quadraticCurveTo(w, h, w - r, h); s.lineTo(-w + r, h); s.quadraticCurveTo(-w, h, -w, h - r); s.lineTo(-w, -h + r);
-      s.quadraticCurveTo(-w, -h, -w + r, -h);
-      for (const sx of [1, -1]) {
-        const lg = new THREE.ExtrudeGeometry(s, { depth: 0.016, bevelEnabled: false, curveSegments: 3 });
-        lg.translate(0, 0, -0.008);
-        lg.applyMatrix4(new THREE.Matrix4().makeRotationY(sx * 0.14));
-        lg.translate(sx * 0.14, 0.345, 0.33);
-        kitPiece(list, lg, KIT_COL.lens);
-      }
-      kitBar(list, [-0.235, 0.402, 0.322], [0.235, 0.402, 0.322], 0.02, 0.02, KIT_COL.frame);   // the brow bar
-      kitBar(list, [-0.05, 0.37, 0.338], [0.05, 0.37, 0.338], 0.018, 0.018, KIT_COL.frame);     // the bridge over the nose
-      for (const sx of [1, -1]) {
-        kitBar(list, [sx * 0.232, 0.395, 0.31], [sx * 0.318, 0.39, 0.27], 0.018, 0.022, KIT_COL.frame);   // the hinge
-        kitBar(list, [sx * 0.322, 0.39, 0.27], [sx * 0.374, 0.37, -0.03], 0.016, 0.022, KIT_COL.frame);   // the temple, clear of the head
-      }
-    }
     if (mask & 2) {
       const bud = new THREE.SphereGeometry(0.024, 6, 4);
       bud.translate(0.376, 0.3, -0.03);
@@ -941,15 +918,36 @@
   function detailKit(ch, kit) {
     if (!ch) return;
     const want = kitMask(kit);
+    // the shades: one fitted pair, kept while the fit keeps them
+    const sh = ch._detailShades;
+    if (!(want & 1) || !ch.neck) {
+      if (sh) {
+        if (sh.parent) sh.parent.remove(sh);
+        ch._detailShades = null;
+        const kids = ch.neck ? ch.neck.children : [];                      // the pocket pair comes back
+        for (let i = 0; i < kids.length; i++) if (kids[i].userData && kids[i].userData.eyewear) kids[i].visible = true;
+      }
+    } else if (!sh || sh.parent !== ch.neck) {
+      if (sh && sh.parent) sh.parent.remove(sh);
+      const m = CBZ.eyewear ? CBZ.eyewear.make(ch, "agent") : null;
+      // a pocket pair bling.js already put on this face comes off: one pair per face
+      if (m) {
+        for (let i = ch.neck.children.length - 1; i >= 0; i--) { const c = ch.neck.children[i]; if (c.userData && c.userData.eyewear && c !== m) c.visible = false; }
+        ch.neck.add(m);
+      }
+      ch._detailShades = m;
+    }
+    // the earpiece
+    const ear = want & 2;
     const cur = ch._detailKit;
-    if (cur && cur.userData.mask === want) return;
+    if (cur && cur.userData.mask === ear) return;
     if (cur) { if (cur.parent) cur.parent.remove(cur); ch._detailKit = null; }
     const neck = ch.neck;
-    if (!want || !neck || typeof THREE === "undefined") return;
+    if (!ear || !neck || typeof THREE === "undefined") return;
     const k = ((ch.profile && ch.profile.headSize) || 0.6) / 0.6;
-    const m = new THREE.Mesh(kitGeometry(want, (want & 2) ? earLead(ch, k) : null), kitMat());
+    const m = new THREE.Mesh(kitGeometry(ear, earLead(ch, k)), kitMat());
     m.name = "detail-kit";
-    m.userData.mask = want;
+    m.userData.mask = ear;
     m.userData.clothingPart = "detail-kit";
     m.scale.setScalar(k);
     m.castShadow = false; m.receiveShadow = false;

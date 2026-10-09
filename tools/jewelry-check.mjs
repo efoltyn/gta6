@@ -29,7 +29,7 @@ const ctx = vm.createContext({ console, Math, performance, Date });
 ctx.window = ctx; ctx.self = ctx;
 const always = [];
 ctx.CBZ = { CONFIG: {}, onAlways(o, f) { always.push(f); }, onUpdate() {}, on() {} };
-for (const f of ["src/vendor/three.r128.min.js", "src/world/materials.js", "src/systems/fphands.js", "src/entities/footwear.js", "src/entities/character.js", "src/entities/watch.js", "src/entities/jewelry_kit.js"]) {
+for (const f of ["src/vendor/three.r128.min.js", "src/world/materials.js", "src/systems/fphands.js", "src/entities/footwear.js", "src/entities/character.js", "src/entities/watch.js", "src/entities/jewelry_kit.js", "src/entities/eyewear.js"]) {
   vm.runInContext(read(f), ctx, { filename: f });
 }
 const { THREE: T, CBZ } = ctx;

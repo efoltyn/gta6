@@ -27,7 +27,7 @@
      • crown  — Diamond Tiara across the front of the head
      • mouth  — Diamond Grill: iced caps ON the teeth, seen when the mouth
                 opens, exactly like the teeth themselves
-     • eyes   — shades (not jewelry: pooled frame + lens parts below)
+     • eyes   — shades (not jewelry: entities/eyewear.js fits a real pair)
    (Crew colours on the head are NOT bling: every crew member's bandana
    is clothes.js's CBZ.cityAttachBandana -> entities/headwear.js, put on
    by the outfit (gang record) — and for YOUR crew by syncPlayerRag here.)
@@ -35,7 +35,7 @@
    PERF: dress only within ~45u of the camera, undress past ~60u, a live
    cap on dressed peds, scan time-sliced (~14 peds/frame). Jewelry geometry
    is cached per piece x body shape inside the kit and swaps to a swept
-   tube past a few metres; shades are pooled meshes on shared geometry.
+   tube past a few metres; shades share geometry per (style, head form).
 
    TRUTH: bling mirrors ped.valuables LIVE. Mug/loot strips the ice
    off the body the moment it's taken (call-through wrappers around
@@ -68,55 +68,19 @@
   // every check so the slider applies instantly
   const CAP = () => Math.round(CBZ.qScale ? CBZ.qScale(30, 120) : 60);
   const SLICE = 14;        // peds scanned per frame (full roster every ~0.2s)
-  const POOL_MAX = 128;    // per-kind pool bound for the shades parts
 
-  /* ---- SHADES: frame + lens parts on shared geometry (pooled). Eyewear is
-     the one thing here that is not jewelry; the metal hardware on the
-     aviators / designer pair is the kit's real gold. */
-  const geos = {};
-  function geoFor(kind) {
-    let gm = geos[kind];
-    if (gm) return gm;
-    if (kind === "lens") gm = CBZ.boxGeom(0.20, 0.17, 0.05);            // one shade lens (two cover the eyes)
-    else if (kind === "bridge") gm = CBZ.boxGeom(0.09, 0.055, 0.05);    // nose bridge joining the lenses
-    else if (kind === "temple") gm = CBZ.boxGeom(0.035, 0.045, 0.30);   // arm running back over the ear
-    else if (kind === "lensDrop") gm = CBZ.boxGeom(0.19, 0.20, 0.05);   // aviator teardrop: taller than wide
-    else if (kind === "lensWrap") gm = CBZ.boxGeom(0.50, 0.13, 0.06);   // sport: ONE wrap shield across both eyes
-    else if (kind === "lensRound") gm = CBZ.boxGeom(0.17, 0.17, 0.05);  // retro: small round-ish lens
-    else if (kind === "rimThick") gm = CBZ.boxGeom(0.21, 0.21, 0.035);  // retro's chunky acetate rim behind the lens
-    else if (kind === "templeThick") gm = CBZ.boxGeom(0.048, 0.055, 0.30);
-    else if (kind === "templeWire") gm = CBZ.boxGeom(0.022, 0.022, 0.31);
-    else if (kind === "browBar") gm = CBZ.boxGeom(0.34, 0.028, 0.04);   // the aviator's straight brow bar
-    else gm = CBZ.boxGeom(0.05, 0.05, 0.05);
-    geos[kind] = gm;
-    return gm;
-  }
-  let _mats = null;
-  function mats() {
-    if (_mats) return _mats;
-    const J = CBZ.jewel;
-    _mats = {
-      gold: J ? J.mat("gold") : CBZ.cmat(0xc9a44a, { emissive: 0x6b4f12, ei: 0.4 }),
-      lensDark: CBZ.cmat(0x0a0d12, { emissive: 0x1b2535, ei: 0.30 }),
-      lensMirror: CBZ.cmat(0x0e1422, { emissive: 0x37588a, ei: 0.50 }),
-      frameDark: CBZ.cmat(0x111317, { emissive: 0x000000, ei: 0.0 }),
-      lensGreen: CBZ.cmat(0x121c16, { emissive: 0x2c5a3a, ei: 0.34 }),
-      lensAmber: CBZ.cmat(0x2a1c0e, { emissive: 0x6b4418, ei: 0.34 }),
-      lensSport: CBZ.cmat(0x0d1a22, { emissive: 0x2f7a8a, ei: 0.55 }),
-      frameTort: CBZ.cmat(0x4a2c16, { emissive: 0x1c1008, ei: 0.15 }),
-      frameSport: CBZ.cmat(0x1a1f26, { emissive: 0x0a0d11, ei: 0.10 }),
-    };
-    return _mats;
-  }
+  /* ---- SHADES are entities/eyewear.js's (CBZ.eyewear): a real pair FITTED to
+     the head it goes on (rim on the nose, temples 2-3 mm off the skin, bent
+     behind the ear). They were five boxes at typed neck-local spots whose
+     temples ran 1-5 cm INSIDE the skull. A look names the style. */
 
   /* ---- LOOKS: a look is a short parts list. A jewelry part is `build` (the
-     kit makes it for the rig it is going on); a shades part is a pooled
-     `kind` at a neck-local spot; a watch is one `watch` part. */
+     kit makes it for the rig it is going on); a shades part names an
+     `eyewear` style (CBZ.eyewear fits it to the rig); a watch is one `watch` part. */
   const WATCH_LOOKS = { watchSteel: 1, watchSilver: 1, watchGold: 1, watchIced: 1, watchDiver: 1, watchAP: 1, watchPatek: 1, watchRM: 1 };
   let _looks = null;
   function looks() {
     if (_looks) return _looks;
-    const M = mats();
     _looks = {
       chainGold: [{ build: "necklace", style: "curb" }],
       chainIced: [{ build: "necklace", style: "cuban" }],
@@ -129,43 +93,12 @@
       earringsIce: [{ build: "earrings", style: "stud" }],
       tiara: [{ build: "tiara" }],
       grill: [{ build: "grill" }],
-      // shades — two lenses + bridge + temples on the eyes (neck-local, they turn with the head)
-      shades: [
-        { kind: "lens", mat: M.lensDark, x: -0.145, y: 0.345, z: 0.34 },
-        { kind: "lens", mat: M.lensDark, x: 0.145, y: 0.345, z: 0.34 },
-        { kind: "bridge", mat: M.frameDark, x: 0.0, y: 0.345, z: 0.34 },
-        { kind: "temple", mat: M.frameDark, x: -0.27, y: 0.345, z: 0.17 },
-        { kind: "temple", mat: M.frameDark, x: 0.27, y: 0.345, z: 0.17 },
-      ],
-      shadesAviator: [
-        { kind: "lensDrop", mat: M.lensGreen, x: -0.145, y: 0.335, z: 0.34 },
-        { kind: "lensDrop", mat: M.lensGreen, x: 0.145, y: 0.335, z: 0.34 },
-        { kind: "browBar", mat: M.gold, x: 0.0, y: 0.425, z: 0.34 },
-        { kind: "bridge", mat: M.gold, x: 0.0, y: 0.365, z: 0.34 },
-        { kind: "templeWire", mat: M.gold, x: -0.27, y: 0.40, z: 0.17 },
-        { kind: "templeWire", mat: M.gold, x: 0.27, y: 0.40, z: 0.17 },
-      ],
-      shadesSport: [
-        { kind: "lensWrap", mat: M.lensSport, x: 0.0, y: 0.345, z: 0.335 },
-        { kind: "temple", mat: M.frameSport, x: -0.27, y: 0.345, z: 0.17 },
-        { kind: "temple", mat: M.frameSport, x: 0.27, y: 0.345, z: 0.17 },
-      ],
-      shadesRetro: [
-        { kind: "rimThick", mat: M.frameTort, x: -0.145, y: 0.345, z: 0.332 },
-        { kind: "rimThick", mat: M.frameTort, x: 0.145, y: 0.345, z: 0.332 },
-        { kind: "lensRound", mat: M.lensAmber, x: -0.145, y: 0.345, z: 0.345 },
-        { kind: "lensRound", mat: M.lensAmber, x: 0.145, y: 0.345, z: 0.345 },
-        { kind: "bridge", mat: M.frameTort, x: 0.0, y: 0.345, z: 0.335 },
-        { kind: "templeThick", mat: M.frameTort, x: -0.284, y: 0.345, z: 0.17 },
-        { kind: "templeThick", mat: M.frameTort, x: 0.284, y: 0.345, z: 0.17 },
-      ],
-      shadesDesigner: [
-        { kind: "lens", mat: M.lensMirror, x: -0.145, y: 0.345, z: 0.34 },
-        { kind: "lens", mat: M.lensMirror, x: 0.145, y: 0.345, z: 0.34 },
-        { kind: "bridge", mat: M.gold, x: 0.0, y: 0.345, z: 0.34 },
-        { kind: "temple", mat: M.gold, x: -0.27, y: 0.345, z: 0.17 },
-        { kind: "temple", mat: M.gold, x: 0.27, y: 0.345, z: 0.17 },
-      ],
+      // shades — a fitted pair on the eyes (rides the neck: turns with the head)
+      shades: [{ eyewear: "wayfarer" }],
+      shadesAviator: [{ eyewear: "aviator" }],
+      shadesSport: [{ eyewear: "sport" }],
+      shadesRetro: [{ eyewear: "round" }],
+      shadesDesigner: [{ eyewear: "navigator" }],
     };
     for (const k in WATCH_LOOKS) _looks[k] = [{ kind: "watch", look: k }];
     return _looks;
@@ -247,27 +180,11 @@
     return "ring";
   }
 
-  // ---- mesh pools per shades part kind (dressing is pointer-swaps, not allocs) ----
-  const pools = Object.create(null);
-  function poolFor(kind) { return pools[kind] || (pools[kind] = []); }
-  function acquire(kind) {
-    const pool = poolFor(kind);
-    let mesh = pool.pop();
-    if (!mesh) {
-      mesh = new THREE.Mesh(geoFor(kind), null);
-      mesh.castShadow = false; mesh.receiveShadow = false;
-      mesh.userData.blingKind = kind;
-    }
-    mesh.visible = true;
-    return mesh;
-  }
   function releaseMesh(mesh) {
     if (!mesh) return;
     if (mesh.userData && mesh.userData.wristwatch) { if (CBZ.wristwatch) CBZ.wristwatch.detach(mesh); return; }
     if (mesh.userData && mesh.userData.jewelPiece) { if (CBZ.jewel) CBZ.jewel.release(mesh); else if (mesh.parent) mesh.parent.remove(mesh); return; }
-    if (mesh.parent) mesh.parent.remove(mesh);
-    const pool = poolFor(mesh.userData.blingKind);
-    if (pool.length < POOL_MAX) pool.push(mesh);
+    if (mesh.parent) mesh.parent.remove(mesh);            // eyewear: shared geometry + materials, the mesh is just dropped
   }
 
   // Landmarks in the forearm (ELBOW group) frame for the rig being dressed
@@ -303,18 +220,12 @@
       if (p.build) { buildJewel(p, rig, lm, out, fresh || rig === CBZ.playerChar); continue; }
       if (!parent || !parent.add) continue;                  // harness rigs have empty parts — skip slot
       if (p.kind === "watch") { const w = CBZ.wristwatch && CBZ.wristwatch.attach(parent, p.look); if (w) out.push(w); continue; }
-      let mesh;
-      if (fresh) {
-        const geo = geoFor(p.kind);
-        if (!geo || !p.mat) continue;
-        mesh = new THREE.Mesh(geo, p.mat);
-        mesh.castShadow = false; mesh.receiveShadow = false;
-      } else { mesh = acquire(p.kind); mesh.material = p.mat; }
-      mesh.position.set(p.x || 0, p.y || 0, p.z || 0);
-      mesh.rotation.set(p.rx || 0, p.ry || 0, p.rz || 0);
-      mesh.scale.set(1, 1, 1);
-      parent.add(mesh);
-      out.push(mesh);
+      if (p.eyewear) {
+        // one pair per face: the protective detail's own shades (outfits.js) outrank a pair in the pocket
+        if (!rig || (rig._detailShades && rig._detailShades.parent) || !CBZ.eyewear) continue;
+        const m = CBZ.eyewear.make(rig, p.eyewear);
+        if (m) { parent.add(m); out.push(m); }
+      }
     }
   }
 
@@ -345,7 +256,7 @@
     return any ? want : null;
   }
 
-  // ---- dress / undress (pooled). ped._bling = { meshes, nVal, looted } ----
+  // ---- dress / undress. ped._bling = { meshes, nVal, looted } ----
   const dressed = [];   // peds currently wearing meshes (≤ CAP)
   function anchorsOf(ped) {
     const ch = ped.char;
@@ -534,7 +445,7 @@
     return { want: any ? want : null, sig, ringStyle };
   }
 
-  // dress/undress the player rig — same SLOTS, same pooled meshes as peds.
+  // dress/undress the player rig — same SLOTS, same meshes as peds.
   // No distance/CAP gating: it's a handful of tiny meshes and it IS the protagonist.
   let _pMeshes = null, _pSig = "", _pT = 0, _pDirty = false;
   function undressPlayer() {
@@ -640,12 +551,11 @@
     const cl = classify(name);
     return cl ? lookParts(cl.look) : null;
   };
-  CBZ.cityBlingGeo = geoFor;                           // shared geometry per part kind
   CBZ.cityBlingLookParts = lookParts;                  // look key -> parts list | null (tools/overlap-audit.mjs)
-  // Mount a parts list on a rig OUTSIDE the pooled street path (the portrait's
-  // offscreen rig). FRESH meshes on purpose: the pool belongs to the dressed
-  // roster, and a caller that removes its meshes without releasing them would
-  // drain it. Same shared geometry + materials, so the read is identical.
+  // Mount a parts list on a rig OUTSIDE the street roster (the portrait's
+  // offscreen rig): the kit builds FRESH jewelry for it instead of sharing the
+  // dressed roster's cache refs, so a caller can just remove what it got.
+  // Same shared geometry + materials, so the read is identical.
   // Jewelry is made by the kit for `rig` (the portrait's own body), so the
   // chain drapes over THAT chest and the ring sits on THAT hand.
   CBZ.cityBlingBuild = function (parts, parent, out, lm, rig) {
