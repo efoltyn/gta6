@@ -2686,6 +2686,8 @@
      ================================================================== */
   const NIGHT = { value: 0 };
   let _mats = null;
+  // the shared turf (textures_surface.js loads first; a page without it gets a flat 1)
+  const TURF = function () { return (CBZ && CBZ.GROUND_TURF_GLSL) || "vec3 groundTurf(vec2 xz, float d, float wear) { return vec3(1.0); }"; };
   const MG_FUNCS = [
     "uniform float uMgNight;",
     "varying vec2 vMgK; varying vec3 vMgW; varying float vMgD;",
@@ -2696,14 +2698,13 @@
     "  float k = vMgK.x; float pr = vMgK.y; vec2 p = vMgW.xz;",
     "  float fine = 1.0 - smoothstep(18.0, 75.0, vMgD); float mid = 1.0 - smoothstep(70.0, 420.0, vMgD);",
     "  float t = 1.0; vec3 col = base;",
-    "  if (k < 0.5) {",                                   // LAWN: mottle, mow stripes, dry patches, blades
-    "    t = 0.80 + 0.30 * mgN(p * 0.043 + 1.7) + 0.14 * (mgN(p * 0.21 + 3.1) - 0.5);",
+    // LAWN: THE TURF (world/textures_surface.js groundTurf: the same grass
+    // the country plate, the annex and the estates wear: hue, bare soil,
+    // clumps to blades, mean 1 at every distance, so MG_MEAN.lawn is 1)
+    // plus the park's mow stripes (zero-mean, gone by 420 m)
+    "  if (k < 0.5) {",
+    "    col = col * groundTurf(p, vMgD, pr < 1.5 ? 0.35 : 1.0);",
     "    if (pr < 1.5) { float ax = pr > 0.5 ? p.y : p.x; float band = step(0.5, fract(ax * 0.2273)); t *= 1.0 + 0.10 * (band - 0.5) * mid; }",
-    // near grain: soil and thatch between the blades (world/grassfield.js
-    // stands the blades up) — was one hash per 14 cm SQUARE, a pixel mosaic
-    // up close; now smooth multi-scale grain, still zero-mean (MG_MEAN holds)
-    "    t *= 1.0 + fine * ((mgN(p * 9.0) - 0.5) * 0.22 + (mgN(p * 31.0 + 5.1) - 0.5) * 0.14 + (mgN(p * 2.3 + 1.9) - 0.5) * 0.12);",
-    "    col = mix(col, col * vec3(1.55, 1.25, 0.72), smoothstep(0.60, 0.82, mgN(p * 0.031 + 7.3)) * 0.55);",
     "  } else if (k < 1.5) {",                            // PAVING: 4.5 m slabs, joints, stains
     "    vec2 g = abs(fract(p / 4.5 + 0.5) - 0.5) * 4.5; float jd = min(g.x, g.y);",
     "    t = 0.90 + 0.14 * mgN(p * 0.17) + fine * (mgH(floor(p * 11.0)) - 0.5) * 0.10;",
@@ -2752,11 +2753,11 @@
           "#ifdef USE_INSTANCING\n  mgW = instanceMatrix * mgW;\n#endif\n" +
           "  mgW = modelMatrix * mgW; vMgW = mgW.xyz; vMgK = gk; vMgD = -mvPosition.z; }");
       sh.fragmentShader = sh.fragmentShader
-        .replace("#include <common>", "#include <common>\n" + MG_FUNCS)
+        .replace("#include <common>", "#include <common>\n" + TURF() + "\n" + MG_FUNCS)
         .replace("#include <color_fragment>", "#ifdef USE_COLOR\n  diffuseColor.rgb *= mgSurface(vColor * vColor);\n#else\n  diffuseColor.rgb *= mgSurface(vec3(0.5));\n#endif")
         .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\nif (abs(vMgK.x - 7.0) < 0.5) totalEmissiveRadiance += vec3(1.0, 0.78, 0.5) * uMgNight * 3.0;");
     };
-    m.customProgramCacheKey = function () { return "metroGround1"; };
+    m.customProgramCacheKey = function () { return "metroGround2"; };
     if (CBZ && CBZ.terrainFogScale) CBZ.terrainFogScale(m, 0.10);
     return m;
   }
@@ -2945,7 +2946,7 @@
      decoded ~122 sRGB slab canvas). tools/metro-far-ground-check.mjs holds
      it to that: per 100 m cell, far map vs the near tile's area-weighted
      mean. */
-  const MG_MEAN = { lawn: [1.0, 0.965, 0.915], paving: [0.94, 0.94, 0.94], crop: 0.97, soil: [0.085, 0.06, 0.04], rowK: 0.62, dirt: 0.96, gravel: 0.99, concrete: 0.9 };
+  const MG_MEAN = { lawn: [1, 1, 1], paving: [0.94, 0.94, 0.94], crop: 0.97, soil: [0.085, 0.06, 0.04], rowK: 0.62, dirt: 0.96, gravel: 0.99, concrete: 0.9 };
   const FM = {
     asphalt: [0.068, 0.067, 0.066], walk: [0.19, 0.186, 0.176],
     paving: mul(lin(COL.paving), MG_MEAN.paving), concrete: lin(COL.concrete).map(function (v) { return v * MG_MEAN.concrete; }),

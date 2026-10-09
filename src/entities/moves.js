@@ -129,7 +129,7 @@
   function reset(m, pos) {
     if (!m) return;
     m.vx = m.vz = 0; m.speed = 0; m.gs = 0; m.arrived = false; m.ax = m.az = 0;
-    m.stuckT = 0; m.stuckN = 0; m.goodT = 0; m.detourT = 0;
+    m.stuckT = 0; m.stuckN = 0; m.goodT = 0; m.detourT = 0; m.fhx = null; m.fhz = null;
     m.lx = pos ? pos.x : null; m.lz = pos ? pos.z : null;
   }
 
@@ -341,8 +341,31 @@
     const vNow = Math.hypot(m.vx, m.vz);
     let faceWant;
     if (o.face != null) faceWant = o.face;
-    else if (want > 0.05) faceWant = Math.atan2(wx, wz);
+    else if (want > 0.05) {
+      /* THE BODY FACES ITS HEADING, NOT EVERY FRAME'S WISH. The travel
+         direction a frame asks for carries the avoidance push, the wall
+         kernel's slot choice and a stuck detour, and any of those can lean
+         left one frame and right the next; the bounded turn then rendered
+         that as a man glancing left-right as he walks. The facing follows a
+         damped copy of the heading (~0.17 s), ignores a wobble inside a 2-5
+         degree deadband (with hysteresis), and in the last half-metre of a braked arrival he
+         does not swing round to a goal that slid beside him. A real turn
+         (the heading moved and STAYED) still lands at the gait's rate. */
+      const il = 1 / want;
+      const hx0 = wx * il, hz0 = wz * il;
+      if (m.fhx == null || lod >= 2 || (m.fhx * hx0 + m.fhz * hz0) < -0.2) { m.fhx = hx0; m.fhz = hz0; }
+      else {
+        const k = 1 - Math.exp(-6 * dt);
+        m.fhx += (hx0 - m.fhx) * k; m.fhz += (hz0 - m.fhz) * k;
+      }
+      faceWant = Math.atan2(m.fhx, m.fhz);
+      const err = Math.abs(wrap(faceWant - m.yaw));
+      // the deadband has its own hysteresis: settled, he turns again only past 5 degrees
+      if (err < (m.fhSet ? 0.09 : 0.035)) { faceWant = m.yaw; m.fhSet = true; }
+      else if (!o.leg && vff < 0.25 && dist < stop + 0.5 && err < 1.2) faceWant = m.yaw;
+    }
     else faceWant = m.yaw;
+    if (faceWant !== m.yaw) m.fhSet = false;
     const rate = (o.turnRate || turnRate(vNow)) * dt;
     if (lod >= 2 && !o.face) m.yaw = want > 0.05 ? turnToward(m.yaw, faceWant, rate * 2) : m.yaw;
     else m.yaw = turnToward(m.yaw, faceWant, rate);
@@ -429,6 +452,40 @@
     if (m.yaw == null || yaw != null) m.yaw = yaw != null ? yaw : (m.yaw || 0);
     m.yaw = turnToward(m.yaw, want, (rate || turnRate(m.gs || 0)) * dt);
     return m.yaw;
+  }
+  /* LOOK: HEAD FIRST, THEN THE BODY. A standing person told to look at
+     something turns his HEAD to it at once (~5.5 rad/s, up to ~45 degrees),
+     and only turns his feet if the look holds (0.2 s) or the head cannot
+     reach it; as the body comes round the head unwinds, so the gaze lands
+     on the thing and stays there. Returns the body yaw; m.neck is the head's
+     yaw relative to the body (the caller writes it onto the neck). A look
+     that changes every frame therefore moves a head a few degrees, never the
+     whole body. */
+  const NECK_MAX = 0.8, NECK_RATE = 5.5, LOOK_BODY = 2.6, LOOK_DWELL = 0.2;
+  function look(m, yaw, want, dt) {
+    if (m.yaw == null || yaw != null) m.yaw = yaw != null ? yaw : (m.yaw || 0);
+    // the INTENT: where he keeps looking (a target that flicks between two
+    // things every frame averages out here; the head still follows the flick)
+    if (m.lookI == null) m.lookI = want;
+    else m.lookI += wrap(want - m.lookI) * (1 - Math.exp(-3 * dt));
+    // the body aims at the intent; once the intent has settled on the thing
+    // itself, at the thing (so the head can unwind to straight)
+    const aim = Math.abs(wrap(want - m.lookI)) < 0.1 ? want : m.lookI;
+    const err = wrap(aim - m.yaw);
+    if (m.lookOn) { if (Math.abs(err) < 0.02) m.lookOn = false; }
+    else {
+      if (Math.abs(err) > 0.12) m.lookT = (m.lookT || 0) + dt; else m.lookT = 0;
+      if (m.lookT > LOOK_DWELL || Math.abs(wrap(want - m.yaw)) > NECK_MAX) { m.lookOn = true; m.lookT = 0; }
+    }
+    if (m.lookOn) m.yaw = turnToward(m.yaw, aim, LOOK_BODY * dt);
+    m.neck = turnToward(m.neck || 0, clamp(wrap(want - m.yaw), -NECK_MAX, NECK_MAX), NECK_RATE * dt);
+    return m.yaw;
+  }
+  // nothing to look at: the head comes back over the shoulders
+  function lookRelax(m, dt) {
+    if (m.neck) m.neck = turnToward(m.neck, 0, 3.5 * dt);
+    m.lookT = 0; m.lookOn = false; m.lookI = null;
+    return m.neck || 0;
   }
   function faceAt(m, yaw, pos, x, z, dt, rate) {
     const dx = x - pos.x, dz = z - pos.z;
@@ -622,7 +679,7 @@
   }
 
   CBZ.moves = Object.assign(CBZ.moves || {}, {
-    GAIT, gaitOf, turnRate, motor, reset, step, face, faceAt, lodFor,
+    GAIT, gaitOf, turnRate, motor, reset, step, face, faceAt, look, lookRelax, lodFor,
     phaseDelta, legWorld, formation, wrap, turnToward, ground, feet,
     // collide() band for an AI body: the player's own feet clearance, so a
     // stair's soffit under a climber and a riser box are stood on, not walls

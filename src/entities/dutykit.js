@@ -217,76 +217,14 @@
     prism(B, F, seal, c0 + 0.0028 * m, 0.0012 * m, spec.enamel != null ? spec.enamel : spec.metal);
   }
 
-  // ---- the body's real section --------------------------------------------
-  const gss = (x, s) => Math.exp(-(x / s) * (x / s));
-  // radius of a superellipse ring {a, zf, zb, zc, n} along direction (dx, dz)
-  function ringRay(R, dx, dz) {
-    const b = dz >= 0 ? R.zf : R.zb, n = R.n || 2.5;
-    const t = Math.pow(Math.pow(Math.abs(dx / R.a), n) + Math.pow(Math.abs(dz / b), n), -1 / n);
-    return [t * dx, (R.zc || 0) + t * dz];
-  }
-  /* The body's outline at height y: 48 points round the waist from the
-     front, the outermost of the chest column (with its own front/back relief
-     read off rig.torsoFrontZ/BackZ), the pelvis (with belly and seat) and,
-     below the hips, the two thighs. Model units. */
+  // ---- the body's real section: ONE owner, entities/character.js
+  // (CBZ.bodySection). The player's stowed-pistol mount (charMounts) seats on
+  // the same outline this belt is built round, so the two never disagree.
   const NS = 48;
-  function outline(ch, y) {
-    const S = ch.torsoShape, P = ch.profile, out = [];
-    for (let j = 0; j < NS; j++) {
-      const th = j / NS * Math.PI * 2, dx = Math.sin(th), dz = Math.cos(th);
-      let best = 0, bx = 0, bz = 0;
-      const take = (x, z) => { const r = Math.hypot(x, z); if (r > best) { best = r; bx = x; bz = z; } };
-      if (y >= S.base - 0.01 && y <= S.yN) {
-        const p = ringRay(S.at(y), dx, dz);
-        let z = p[1];
-        if (dz > 0.05 && ch.torsoFrontZ) z = Math.max(z, ch.torsoFrontZ(p[0], y));
-        else if (dz < -0.05 && ch.torsoBackZ) z = Math.min(z, ch.torsoBackZ(p[0], y));
-        take(p[0], z);
-      }
-      if (y >= S.pBot && y <= S.pTop + 0.005) {
-        const p = ringRay(S.pel(Math.min(y, S.pTop)), dx, dz);
-        let z = p[1];
-        if (dz < 0) z -= (S.glute || 0) * 0.16 * S.pd * gss(y - (S.hipY - 0.015 * S.pk), 0.055 * S.pk) * Math.pow(-dz, 0.8);
-        else z += (S.belly || 0) * 0.05 * S.pd * gss(y - (S.pTop - 0.03 * S.pk), 0.05 * S.pk) * Math.pow(dz, 0.8);
-        take(p[0], z);
-      }
-      if (y < S.hipY + 0.02 && P) {
-        // the thighs: a circle round each hip joint (their outer extent does
-        // not move when a leg swings — the swing is fore and aft)
-        const r = P.legW / 2 + 0.01;
-        for (const sx of [-1, 1]) {
-          const cx = sx * P.hipX, px = cx * dx;                 // ray-circle, far root
-          const disc = px * px - (cx * cx - r * r);
-          if (disc >= 0) { const t = px + Math.sqrt(disc); if (t > 0) take(t * dx, t * dz); }
-        }
-      }
-      out.push([bx, bz]);
-    }
-    return out;
-  }
-  // the outermost outline over [y0, y1]
-  function span(ch, y0, y1, steps) {
-    steps = steps || 4;
-    let acc = null;
-    for (let s = 0; s <= steps; s++) {
-      const o = outline(ch, y0 + (y1 - y0) * s / steps);
-      if (!acc) { acc = o; continue; }
-      for (let j = 0; j < NS; j++) if (Math.hypot(o[j][0], o[j][1]) > Math.hypot(acc[j][0], acc[j][1])) acc[j] = o[j];
-    }
-    return acc;
-  }
-  function samplesAt(list, th) {                             // outline point at any angle
-    const f = ((th / (Math.PI * 2)) % 1 + 1) % 1 * NS, j = Math.floor(f) % NS, k = (j + 1) % NS, w = f - Math.floor(f);
-    return [list[j][0] * (1 - w) + list[k][0] * w, list[j][1] * (1 - w) + list[k][1] * w];
-  }
-  function outNormal(list, th) {
-    const a = samplesAt(list, th - 0.06), b = samplesAt(list, th + 0.06);
-    let nx = b[1] - a[1], nz = -(b[0] - a[0]);
-    const p = samplesAt(list, th);
-    if (nx * p[0] + nz * p[1] < 0) { nx = -nx; nz = -nz; }
-    const l = Math.hypot(nx, nz) || 1;
-    return [nx / l, 0, nz / l];
-  }
+  const span = (ch, y0, y1, steps) => CBZ.bodySection.span(ch, y0, y1, steps);
+  const samplesAt = (list, th) => CBZ.bodySection.at(list, th);
+  const outNormal = (list, th) => CBZ.bodySection.normal(list, th);
+
   /* A frame for something hung at angle th over the height [y0, y1]: n is the
      real section's outward normal there, and the frame's origin is pushed out
      until the item's whole back face (width w) clears every outline given. */
@@ -321,7 +259,7 @@
   }
   function geometry(ch, kind, opts) {
     const K = KINDS[kind], S = ch && ch.torsoShape, P = ch && ch.profile;
-    if (!K || !S || !P || !S.at || !S.pel) return null;
+    if (!K || !S || !P || !S.at || !S.pel || !CBZ.bodySection) return null;
     opts = opts || {};
     const m = 1 / scaleOf(ch);                                // metres -> model units
     const gun = opts.noGun ? null : K.gun, torch = K.torch != null && !opts.torchOut;

@@ -191,6 +191,68 @@ const wrap = M.wrap;
   check("formation: everyone at rest after the stop", settled);
 }
 
+// ---------------------------------------------------------------------------
+// 6. WOBBLING HEADING: the travel direction a frame asks for leans left one
+//    frame and right the next (an avoidance push, a wall-kernel slot choice).
+//    The body must walk straight through it, not glance left-right.
+//    7. ARRIVAL BESIDE: a goal that slides a little sideways during the last
+//    half-metre must not swing the body round to it.
+{
+  const a = { pos: { x: 0, z: 0 }, yaw: 0 };
+  const m = M.motor(a);
+  let flips = 0, lastS = 0, lastT = -9;
+  for (let i = 0; i < 60 * 6; i++) {
+    const y0 = a.yaw, side = (i & 1) ? 1 : -1;
+    // 20 m ahead, wobbling +-0.9 m sideways every frame (+-2.6 degrees) and,
+    // every 9 frames, a hard +-0.5 rad lean (an avoidance kick)
+    const kick = (i % 9 === 0) ? Math.tan(0.5) * 20 * side : 0;
+    M.step(m, a.pos, a.yaw, a.pos.x + side * 0.9 + kick, a.pos.z + 20, { speed: 1.4, leg: true }, DT);
+    a.yaw = m.yaw;
+    const w = wrap(a.yaw - y0) / DT, t = i * DT;
+    if (Math.abs(w) > 0.8) { const s = w > 0 ? 1 : -1; if (lastS && s !== lastS && t - lastT < 0.5) flips++; lastS = s; lastT = t; }
+  }
+  check("wobble: no left-right glancing (yaw flips <= 2 in 6 s)", flips <= 2, `${flips} flips`);
+  check("wobble: still walks the line", a.pos.z > 6.5, `z ${a.pos.z.toFixed(2)}`);
+
+  const b = { pos: { x: 0, z: 0 }, yaw: 0 };
+  const mb = M.motor(b);
+  let swing = 0;
+  for (let i = 0; i < 60 * 6; i++) {
+    const near = Math.hypot(b.pos.x, b.pos.z - 4) < 0.75;
+    const gx = near ? 0.35 * Math.sin(i * 0.3) : 0;
+    const y0 = b.yaw;
+    M.step(mb, b.pos, b.yaw, gx, 4, { speed: 1.4, stop: 0.3 }, DT);
+    b.yaw = mb.yaw;
+    if (near) swing += Math.abs(wrap(b.yaw - y0));
+  }
+  check("arrival: no swing round to a goal sliding beside him (< 0.35 rad)", swing < 0.35, `${swing.toFixed(2)} rad`);
+}
+
+// ---------------------------------------------------------------------------
+// 8. LOOK: HEAD FIRST, THEN THE BODY. Two things to look at, alternating
+//    every frame: the body must not flip, the head absorbs it. A look that
+//    HOLDS (90 degrees right) turns the body and the head unwinds onto it.
+if (M.look) {
+  const m = M.motor({});
+  let yaw = 0, bodyFlips = 0, lastS = 0, lastT = -9;
+  for (let i = 0; i < 120; i++) {
+    const y0 = yaw;
+    yaw = M.look(m, yaw, (i & 1) ? 0.35 : -0.35, DT);
+    const w = wrap(yaw - y0) / DT;
+    if (Math.abs(w) > 0.8) { const s = w > 0 ? 1 : -1; if (lastS && s !== lastS && i * DT - lastT < 0.5) bodyFlips++; lastS = s; lastT = i * DT; }
+  }
+  check("look: alternating targets never flip the body", bodyFlips === 0, `${bodyFlips} flips`);
+  let headFirstAt = -1, bodyAt = -1;
+  for (let i = 0; i < 60 * 3; i++) {
+    yaw = M.look(m, yaw, Math.PI / 2, DT);
+    if (headFirstAt < 0 && Math.abs(m.neck) > 0.4) headFirstAt = i;
+    if (bodyAt < 0 && Math.abs(yaw) > 0.4) bodyAt = i;
+  }
+  check("look: the head turns before the body", headFirstAt >= 0 && headFirstAt < bodyAt, `head@${headFirstAt} body@${bodyAt} frames`);
+  check("look: the body comes round and the head unwinds", Math.abs(wrap(yaw - Math.PI / 2)) < 0.05 && Math.abs(m.neck) < 0.05,
+    `body ${yaw.toFixed(2)} neck ${m.neck.toFixed(2)}`);
+}
+
 export function report() { return fails; }
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   console.log(fails ? `\n${fails} FAILED` : "\nall passed");

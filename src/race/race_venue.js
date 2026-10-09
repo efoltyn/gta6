@@ -8,9 +8,10 @@
        fence, a concourse and parapet on top, the outer wall to grade
      - the main grandstand carries two storeys of lit glass suites; the
        rest of the rim carries roof canopies between the light towers
-     - the crowd: ~40k instanced people (13k on low), one quad each out
-       of a painted atlas, bobbing and standing up with their arms in the
-       air in the vertex shader on state.excite; camera flashes
+     - the crowd: ~40k REAL people (13k on low): the CBZ.human mesh through
+       entities/crowdgpu.js (baked seated / standing / cheering clips, mesh
+       LODs near, impostors rendered from the same mesh far), seated in the
+       rows, a share on their feet, cheering with state.excite
      - light towers with lamp banks + additive halos (no real lights:
        race_game owns the lighting; the pools are baked vertex brightness)
      - the S/F gantry (truss, 5-column start lights, flag stand + flagman,
@@ -55,45 +56,6 @@
   const TEAM = [0xd4202b, 0xf2b705, 0x1b4fd8, 0x111111, 0xf26a1b, 0x0f8a4a, 0xe8e8e8, 0x6a2bbd, 0x14b3c8, 0xa81b5c, 0x5a6470, 0x8bc21f].map(rgb);
 
   // ---- canvases ---------------------------------------------------------------------
-  function crowdAtlas(THREE) {
-    const W = 1024, H = 512, cv = canvas(W, H); if (!cv) return null;
-    const g = cv.getContext("2d"), R = rng(4242);
-    g.clearRect(0, 0, W, H);
-    const shirts = ["#d42a2a", "#f5c518", "#2456d6", "#ffffff", "#111111", "#f07a1a", "#1e9e4a", "#8a8f96", "#e05aa0", "#1b2a55", "#b8e0ff", "#7a1f1f", "#f2f2f2", "#3a3a3a", "#ffda4a", "#00a0b0"];
-    const skins = ["#f1c9a5", "#e0ac84", "#c68a60", "#a0663e", "#7a4a2a", "#5a3620"];
-    const hairs = ["#1a1410", "#3b2616", "#6b4a2a", "#b08850", "#d8c8a0", "#777777"];
-    for (let v = 0; v < 32; v++) {
-      const shirt = shirts[(R() * shirts.length) | 0], skin = skins[(R() * skins.length) | 0], hair = hairs[(R() * hairs.length) | 0];
-      const cap = R() < 0.4 ? shirts[(R() * shirts.length) | 0] : null, wide = 38 + R() * 12, head = 10 + R() * 2.5;
-      for (let pose = 0; pose < 2; pose++) {
-        const col = v % 16, row = (v >> 4) + pose * 2, x0 = col * 64, y0 = row * 128, cx = x0 + 32;
-        // torso
-        g.fillStyle = shirt; g.beginPath();
-        g.moveTo(cx - wide / 2, y0 + 128); g.lineTo(cx - wide / 2, y0 + 66); g.quadraticCurveTo(cx - wide / 2, y0 + 58, cx - wide / 2 + 8, y0 + 57);
-        g.lineTo(cx + wide / 2 - 8, y0 + 57); g.quadraticCurveTo(cx + wide / 2, y0 + 58, cx + wide / 2, y0 + 66); g.lineTo(cx + wide / 2, y0 + 128); g.closePath(); g.fill();
-        if (R() < 0.35) { g.fillStyle = "rgba(255,255,255,0.8)"; g.fillRect(cx - wide / 2, y0 + 78, wide, 4); }
-        // neck + head
-        g.fillStyle = skin; g.fillRect(cx - 4, y0 + 48, 8, 10);
-        g.beginPath(); g.arc(cx, y0 + 42, head, 0, Math.PI * 2); g.fill();
-        g.fillStyle = hair; g.beginPath(); g.arc(cx, y0 + 40, head, Math.PI, Math.PI * 2); g.fill();
-        if (cap) { g.fillStyle = cap; g.beginPath(); g.arc(cx, y0 + 39, head + 0.5, Math.PI, Math.PI * 2); g.fill(); g.fillRect(cx - head - 1, y0 + 38, head * 2 + 7, 3); }
-        // arms
-        g.fillStyle = shirt;
-        if (pose === 0) {
-          g.fillRect(cx - wide / 2 - 5, y0 + 62, 7, 40); g.fillRect(cx + wide / 2 - 2, y0 + 62, 7, 40);
-          g.fillStyle = skin; g.fillRect(cx - wide / 2 - 5, y0 + 100, 7, 8); g.fillRect(cx + wide / 2 - 2, y0 + 100, 7, 8);
-        } else {
-          const lean = (R() - 0.5) * 10;
-          g.save(); g.translate(cx - wide / 2 + 3, y0 + 62); g.rotate(-0.35 + lean * 0.01); g.fillRect(-4, -46, 8, 48); g.fillStyle = skin; g.beginPath(); g.arc(0, -48, 5, 0, 7); g.fill(); g.restore();
-          g.fillStyle = shirt;
-          g.save(); g.translate(cx + wide / 2 - 3, y0 + 62); g.rotate(0.35 + lean * 0.01); g.fillRect(-4, -46, 8, 48); g.fillStyle = skin; g.beginPath(); g.arc(0, -48, 5, 0, 7); g.fill(); g.restore();
-        }
-      }
-    }
-    const t = tex(THREE, cv, false);
-    t.generateMipmaps = true;
-    return t;
-  }
   function haloTex(THREE) {
     const S = 128, cv = canvas(S, S); if (!cv) return null;
     const g = cv.getContext("2d"), gr = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
@@ -157,7 +119,7 @@
 
     // ---- materials ------------------------------------------------------------------
     const signs = signAtlas(THREE);
-    const T = { noise: null, crowd: crowdAtlas(THREE), halo: haloTex(THREE), flag: flagTex(THREE), sky: skylineTex(THREE) };
+    const T = { noise: null, halo: haloTex(THREE), flag: flagTex(THREE), sky: skylineTex(THREE) };
     {
       const cv = canvas(256, 256);
       if (cv) {
@@ -178,7 +140,6 @@
       pylon: new THREE.MeshBasicMaterial({ map: T.pylon, toneMapped: false }),
       jumbo: new THREE.MeshBasicMaterial({ map: T.jumbo, toneMapped: false }),
       sky: new THREE.MeshBasicMaterial({ map: T.sky, alphaTest: 0.4, side: THREE.BackSide, fog: false }),
-      crowd: new THREE.MeshBasicMaterial({ map: T.crowd, alphaTest: 0.5 }),
     };
     M.lot = M.struct;
 
@@ -215,7 +176,12 @@
 
     // ---- the bowl ------------------------------------------------------------------------
     const T1 = STAND.T1, T2 = STAND.T2, TRD = STAND.TREAD, RS = STAND.RISER;
-    const crowd = { x: [], y: [], z: [], yaw: [], v: [], ph: [], rate: [], lit: [], ch: [] };
+    const crowd = { x: [], y: [], z: [], yaw: [], stand: [], ph: [], look: [] };
+    const CG = root && root.CBZ && root.CBZ.crowdGPU;
+    const SKINS = [0xf1c9a5, 0xe0a878, 0xc68642, 0x8d5524, 0xffdbac, 0xa66a3c, 0x6b4226];
+    const HAIRS = [0x2a1d16, 0x3a2a1f, 0x6d4b2b, 0x1a1a1a, 0x9a7a4a, 0xb8b0a0];
+    const PANTS = [0x2a3446, 0x3b3f47, 0x1f2226, 0x4a4036, 0x5a6270, 0x2d3a52];
+    const toHex = (c) => ((Math.round(c[0] * 255) & 255) << 16) | ((Math.round(c[1] * 255) & 255) << 8) | (Math.round(c[2] * 255) & 255);
     const RC = rng(2025);
     const secA = {}, secB = {};
     for (let i = 0; i < sam.length - 1; i++) {
@@ -257,13 +223,18 @@
               const ss = s0 + (k + 0.5) / n2 * (s1 - s0);
               core.frame(ss, F2);
               const ys = yOf(standSection(core, ss, SEC)) + r * RS;
-              const stand = RC() < 0.22 ? 0.42 : 0;
-              core.toWorld(ss, us + (RC() - 0.5) * 0.1, ys + 0.38 + stand, F);
-              crowd.x.push(F.x); crowd.y.push(F.y); crowd.z.push(F.z);
+              const stand = RC() < 0.22;
+              // seated: the root on the cushion top (the baked chair is 0.45);
+              // standing: on the tread in front of the seat
+              core.toWorld(ss, us + (RC() - 0.5) * 0.1, ys + (stand ? 0 : 0.45), F);
+              crowd.x.push(F.x); crowd.y.push(F.y); crowd.z.push(F.z); crowd.stand.push(stand ? 1 : 0);
               crowd.yaw.push(Math.atan2(-F2.nx, -F2.nz) + (RC() - 0.5) * 0.3);
-              crowd.v.push((RC() * 32) | 0); crowd.ph.push(RC()); crowd.rate.push(RC());
-              crowd.lit.push(Math.min(1.25, lit(F.x, F.y, F.z) * (0.85 + RC() * 0.25)));
-              crowd.ch.push(chunk(F.x, F.z));
+              const v = (RC() * 32) | 0; crowd.ph.push(RC()); const rr = RC(); RC();
+              // fans wear the teams' colours more often than not
+              const skin = SKINS[(rr * 977 | 0) % SKINS.length], shirt = v < 20 ? toHex(TEAM[v % TEAM.length]) : [0xe8e6e0, 0x23262b, 0x444a52, 0x2c3e5c][v & 3];
+              crowd.look.push(CG ? CG.look({ build: (v * 7 + (rr * 13 | 0)) % 5 < 2 ? "f" : "m", skin: skin, shirt: shirt,
+                pants: PANTS[(rr * 331 | 0) % PANTS.length], hair: HAIRS[(rr * 113 | 0) % HAIRS.length],
+                shoes: (rr * 57 | 0) % 3 ? 0x2b2b2b : 0xd8d8d8, sleeve: (rr * 29 | 0) % 2 ? skin : shirt }) : -1);
             }
           }
         }
@@ -725,50 +696,31 @@
       surroundings.add(sky);
     }
 
-    // ---- the crowd: 4 instanced quadrants, animated in the vertex shader -----------------------------
-    const U = { uT: { value: 0 }, uEx: { value: 0 } };
-    M.crowd.onBeforeCompile = function (sh) {
-      sh.uniforms.uT = U.uT; sh.uniforms.uEx = U.uEx;
-      sh.vertexShader = "attribute vec4 aP;\nuniform float uT;\nuniform float uEx;\nvarying float vFlash;\n" + sh.vertexShader
-        .replace("#include <uv_vertex>", [
-          "float cheer = step(fract(aP.y * 7.13 + 0.37), uEx * 0.9 + 0.03);",
-          "#ifdef USE_UV",
-          "  vUv = vec2((uv.x + mod(aP.x, 16.0)) / 16.0, (uv.y + 3.0 - floor(aP.x / 16.0) - 2.0 * cheer) / 4.0);",
-          "#endif"].join("\n"))
-        .replace("#include <begin_vertex>", [
-          "vec3 transformed = vec3(position);",
-          "float bob = max(sin(uT * (3.5 + aP.z * 5.0) + aP.y * 6.2831), 0.0);",
-          "transformed.y += bob * (0.015 + 0.14 * uEx * (0.35 + cheer)) + cheer * 0.34 * min(1.0, uEx * 3.0);",
-          "vFlash = uEx * step(0.9965, fract(sin(aP.y * 91.7 + floor(uT * 9.0) * 1.37) * 43758.5453));"].join("\n"));
-      sh.fragmentShader = "varying float vFlash;\n" + sh.fragmentShader.replace("#include <tonemapping_fragment>", "gl_FragColor.rgb += vec3(vFlash * 6.0);\n#include <tonemapping_fragment>");
-    };
-    const crowdMeshes = [];
-    let crowdCount = 0;
-    {
-      const byChunk = [[], [], [], []];
-      for (let i = 0; i < crowd.x.length; i++) byChunk[crowd.ch[i]].push(i);
-      const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), p = new THREE.Vector3(), sc = new THREE.Vector3(1, 1, 1);
-      byChunk.forEach((ids, c) => {
-        if (!ids.length) return;
-        const geo = new THREE.PlaneGeometry(0.56, 1.15); geo.translate(0, 0.575, 0);
-        const aP = new Float32Array(ids.length * 4), col = new Float32Array(ids.length * 3);
-        const im = new THREE.InstancedMesh(geo, M.crowd, ids.length);
-        let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z0 = Infinity, z1 = -Infinity;
-        ids.forEach((i, k) => {
-          p.set(crowd.x[i], crowd.y[i], crowd.z[i]); e.set(0, crowd.yaw[i], 0); q.setFromEuler(e); m4.compose(p, q, sc);
-          im.setMatrixAt(k, m4);
-          aP[k * 4] = crowd.v[i]; aP[k * 4 + 1] = crowd.ph[i]; aP[k * 4 + 2] = crowd.rate[i]; aP[k * 4 + 3] = 0;
-          col[k * 3] = col[k * 3 + 1] = col[k * 3 + 2] = crowd.lit[i];
-          x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z);
-        });
-        geo.setAttribute("aP", new THREE.InstancedBufferAttribute(aP, 4));
-        im.instanceColor = new THREE.InstancedBufferAttribute(col, 3);
-        const ctr = new THREE.Vector3((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
-        geo.boundingSphere = new THREE.Sphere(ctr, Math.hypot(x1 - x0, y1 - y0, z1 - z0) / 2 + 2);
-        im.userData.box = [x0 - 0.3, y0, z0 - 0.3, x1 + 0.3, y1 + 1.6, z1 + 0.3];
-        im.name = "crowd#" + c; im.matrixAutoUpdate = false; im.updateMatrix();
-        crowdMeshes.push(im); group.add(im); crowdCount += ids.length;
-      });
+    // ---- the crowd: one crowdgpu layer under the venue group --------------------------------------
+    // re-cut (who is drawn at which LOD, who is cheering) when the camera has
+    // moved a few metres or the excitement crosses a step; the GPU animates.
+    const crowdCount = crowd.x.length;
+    let crowdLayer = null, cutX = 1e9, cutZ = 1e9, cutT = 0, cutEx = -1, exNow = 0;
+    function recut(dt, cam) {
+      if (!CG || !crowdCount) return;
+      if (!crowdLayer) crowdLayer = CG.layer({ name: "race", cap: crowdCount, parent: group, maxDraw: 700 });
+      cutT -= dt || 0;
+      const c = cam && cam.position ? cam.position : (root.CBZ.camera ? root.CBZ.camera.position : null);
+      const cx = c ? c.x : 0, cz = c ? c.z : 0;
+      const exQ = Math.round(exNow * 8) / 8;
+      const mv = Math.hypot(cx - cutX, cz - cutZ);
+      if (exQ === cutEx && (mv < 0.5 || (mv < 4 && cutT > 0))) return;
+      cutX = cx; cutZ = cz; cutT = 0.3; cutEx = exQ;
+      const thr = exQ * 0.9 + 0.03;
+      crowdLayer.begin();
+      for (let i = 0; i < crowdCount; i++) {
+        if (crowd.look[i] < 0) continue;
+        const ch = ((crowd.ph[i] * 7.13 + 0.37) % 1) < thr;
+        const st = crowd.stand[i];
+        crowdLayer.add(crowd.x[i], crowd.y[i], crowd.z[i], crowd.yaw[i], crowd.look[i],
+          ch ? (st ? "cheer" : "sitCheer") : (st ? "idle" : "sit"), crowd.ph[i], ch ? 8 / (Math.PI * 2) : 0.25);
+      }
+      crowdLayer.commit(cam && cam.isCamera ? cam : null);
     }
 
     // ---- emit the merged meshes ------------------------------------------------------------------
@@ -840,7 +792,8 @@
       t += dt || 0;
       state = state || {};
       const ex = Math.max(0, Math.min(1, state.excite || 0));
-      U.uT.value = t; U.uEx.value += (ex - U.uEx.value) * Math.min(1, (dt || 0) * 4);
+      exNow += (ex - exNow) * Math.min(1, (dt || 0) * 4);
+      recut(dt, state.camera);
       const fk = state.flag || "green";
       if (fk !== flagKey) { flagKey = fk; if (T.flag) T.flag.offset.x = (FLAGS[fk] || 0) * 0.25; flagMesh.visible = fk in FLAGS; }
       flagMesh.rotation.y = flagYaw + Math.sin(t * 5.5) * 0.55;
@@ -880,6 +833,7 @@
     }
 
     function dispose() {
+      if (crowdLayer) { crowdLayer.dispose(); crowdLayer = null; }
       group.traverse((o) => { if (o.isMesh) o.geometry.dispose(); });
       for (const k in M) if (M[k] && M[k].dispose) M[k].dispose();
       for (const k in T) if (T[k]) T[k].dispose();
@@ -889,6 +843,7 @@
 
     return {
       group, surroundings, update, setLights, setPylon, setJumbo, dispose, anchors,
+      crowdSpots: { x: crowd.x, z: crowd.z },
       outerU: SP.outerU, mainEntrance: SP.mainEntrance, spec: SP,
       stats: { crowd: crowdCount, aisles: aisles.length, towers: spots.length, pitBoxes: PIT.boxes, bays, bbox, infield, standSamples: sam.length - 1 },
     };

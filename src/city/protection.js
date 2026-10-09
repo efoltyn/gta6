@@ -404,6 +404,10 @@
       if (!q) break;
       q.controlled = true; q.ammo = gear.ammo; q.maxHp = gear.hp;
       q._protUnit = detail.id;
+      // a Secret Service agent is his job: only his own verbs (city/orders.js:
+      // Attack / Guard / Tail / Hold here / Clear the room), never the
+      // street's Flirt / Mug / Pickpocket
+      if (jobFor(detail) === "secret service") q._iOnly = true;
       // DRESS: the job IS the uniform. "secret service" / "hired security"
       // cast city/outfits.js CAT.detail (black suit, white shirt, black tie,
       // shades, earpiece) through jobFit inside cityPostNpc -> makePed, and
@@ -843,6 +847,7 @@
   }
   function engage(ped, t) {
     if (!t || t.dead) return;
+    if (ped && ped._carries) return;  // the football aide does not fight (city/warroom.js THE FOOTBALL)
     release(ped);                     // the fight brain (peds.js + combat_iq) moves him now
     ped.rage = t; ped.state = "fight"; ped.path = null; ped.pause = 0; ped._boardRun = false;
     ped.fear = 0; ped.alarmed = Math.max(ped.alarmed || 0, 8);
@@ -1008,6 +1013,10 @@
     q.controlled = true; q.ammo = u.role === "counter-sniper" ? 40 : 120; q.maxHp = 170;
     q._protUnit = "mansion"; q._protRole = u.role; q.organization = "state"; q.organizationLoyalty = 100;
     q.nameKnown = false;
+    // on post: no street verbs. They take the President's orders about a man
+    // (city/orders.js "Take him down"); the gate officer clears a protest
+    // (city/president_public.js "Clear the gate")
+    q._iOnly = true;
     if (CBZ.syncActorWeapon) { try { CBZ.syncActorWeapon(q); } catch (e) {} }
     // dress comes from the job (outfits.js jobFit): gate "uniformed division
     // officer" -> police uniform, "counter-sniper" -> all-black tactical with
@@ -1742,7 +1751,9 @@
         gearTier: 2, formation: "escort", fundingSource: "treasury", legalStatus: "state", memberCount: 0 });
     }
     det.principal.ref = cur.sid || "player";
-    det.standing = PRES_BASE;
+    // the Service that has stopped trusting him stands fewer agents round
+    // him (city/politics.js detailSize: the Secret Service's loyalty)
+    det.standing = CBZ.politics && CBZ.politics.detailSize ? CBZ.politics.detailSize(PRES_BASE) : PRES_BASE;
     return det;
   }
 

@@ -29,6 +29,7 @@ const seedArg = argv.indexOf("--seed") >= 0 ? +argv[argv.indexOf("--seed") + 1] 
 const snap = JSON.parse(readFileSync(path.join(ROOT, "tools/metro-world-snapshot.json"), "utf8"));
 const THREE = require(path.join(ROOT, "src/vendor/three.r128.min.js"));
 globalThis.window = { THREE, CBZ: { CONFIG: {}, WORLD_SEED: seedArg, highwayNetTable: () => snap.hw, HIGHWAY_NET_HALF: snap.H } };
+require(path.join(ROOT, "src/city/zoning.js"));        // the world zoning field metro.js plans with
 require(path.join(ROOT, "src/city/metroplan.js"));
 require(path.join(ROOT, "src/city/metro.js"));
 require(path.join(ROOT, "src/city/metro_fabric.js"));

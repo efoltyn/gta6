@@ -19,38 +19,7 @@
   root.userData.dynamic = true;
   (CBZ.prisonRoot || CBZ.scene).add(root);
 
-  const unit = CBZ.boxGeom(1, 1, 1);
-  // r128 quirk: per-instance setColorAt() only tints a Lambert/Phong fragment
-  // when the material has vertexColors AND the geometry carries a (white) color
-  // attribute. Without it, USE_COLOR multiplies by a missing/zero attribute and
-  // the instance renders BLACK (that's the "black faces"). tintUnit carries the
-  // white color attribute so instanced heads/hair/valuables take their skin tint.
-  const tintUnit = new THREE.BoxGeometry(1, 1, 1);
-  {
-    const vc = tintUnit.attributes.position.count, white = new Float32Array(vc * 3);
-    white.fill(1); tintUnit.setAttribute("color", new THREE.BufferAttribute(white, 3));
-  }
-  const orange = CBZ.cmat(0xff7a1a);
-  const dark = CBZ.cmat(0x141414);          // eyes + mouth (flat dark, no per-instance colour)
-  const skinMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
-  const hairMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
-  const valMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, emissive: 0x2a2200, emissiveIntensity: 0.55 });
-  skinMat._shared = true; hairMat._shared = true; valMat._shared = true;
-  function makePart(material, geom) {
-    const m = new THREE.InstancedMesh(geom || unit, material, RIG_CAP);
-    m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    m.castShadow = false; m.receiveShadow = true; m.frustumCulled = false;
-    root.add(m); return m;
-  }
-  const torso = makePart(orange), head = makePart(skinMat, tintUnit), hair = makePart(hairMat, tintUnit);
-  const legL = makePart(orange), legR = makePart(orange), armL = makePart(orange), armR = makePart(orange);
-  // FACES (so the crowd reads as people, not faceless boxes) + a worn valuable
-  const eyeL = makePart(dark), eyeR = makePart(dark), mouth = makePart(dark), valuable = makePart(valMat, tintUnit);
-  const meshes = [torso, head, hair, legL, legR, armL, armR, eyeL, eyeR, mouth, valuable];
-  // NO FAKE PEOPLE: these legacy shared meshes remain allocated only because a
-  // few old debug helpers reference them. They never receive a visible count;
-  // every inmate the player can see is one of the normal registered rigs below.
-  for (let i = 0; i < meshes.length; i++) { meshes[i].count = 0; meshes[i].visible = false; }
+  const unit = CBZ.boxGeom(1, 1, 1);       // the aerial overview's map dots (not people)
 
   // Aerial tier: compact GPU point buffers, not one matrix per dot.
   const POINT_CAP = Math.min(TOTAL, Math.max(0, (CBZ.SIM_OVERVIEW_BUDGET || 12000) | 0));
@@ -92,17 +61,10 @@
   const activeId = new Int32Array(RIG_CAP), slotOf = new Int32Array(TOTAL);
   const selected = new Uint8Array(TOTAL), heapId = new Int32Array(RIG_CAP), heapD2 = new Float64Array(RIG_CAP);
   slotOf.fill(-1);
-  let activeCount = 0, selectedCount = 0, selectAcc = 1, renderAcc = 0, pointsAcc = 0, frame = 0, simTime = 0, fixedAcc = 0;
+  let activeCount = 0, selectedCount = 0, selectAcc = 1, pointsAcc = 0, frame = 0, simTime = 0, fixedAcc = 0;
   let lastOverview = null, lastDensity = null, densityCount = 0;
   let societyWorker = null, societyAcc = 0, societyRunning = false, societyOverview = false, sharedWrite = 0;
-  const tint = new THREE.Color(), rootDummy = new THREE.Object3D(), partDummy = new THREE.Object3D(), worldMatrix = new THREE.Matrix4();
-  // HUMAN SCALE (scale-agent handoff): this prison ambient mass shares the SAME
-  // ~2.6m voxel part layout as city/crowd.js drawParts (torso 1.42, head 2.18…).
-  // The player rig renders at CBZ.HUMAN_SCALE (0.70). Mirror it as one uniform
-  // scale on the per-agent root (parts offset up from the ground-level root, so
-  // every offset + height shrinks proportionally and feet stay grounded). Kept
-  // byte-in-lockstep with crowd.js. One-line revert: CBZ.CONFIG.CHAR_SCALE_REAL=false.
-  const HUMAN_S = (!CBZ.CONFIG || CBZ.CONFIG.CHAR_SCALE_REAL !== false) ? (CBZ.HUMAN_SCALE || 0.70) : 1;
+  const tint = new THREE.Color(), rootDummy = new THREE.Object3D();
   const tempPoint = { x: 0, z: 0 };
   const flowX = new Float32Array(S.zones.length), flowZ = new Float32Array(S.zones.length);
   const flowStrength = new Float32Array(S.zones.length), flowTTL = new Float32Array(S.zones.length);
@@ -600,72 +562,6 @@
     separate();
   }
 
-  function put(mesh, slot, x, y, z, sx, sy, sz, rx) {
-    partDummy.position.set(x, y, z); partDummy.rotation.set(rx || 0, 0, 0); partDummy.scale.set(sx, sy, sz); partDummy.updateMatrix();
-    worldMatrix.multiplyMatrices(rootDummy.matrix, partDummy.matrix); mesh.setMatrixAt(slot, worldMatrix);
-  }
-  function renderRigs(alpha) {
-    // The historical part-instance path is intentionally hard-disabled.  Real
-    // character rigs are positioned and animated by syncFaceRigs below.
-    for (let i = 0; i < meshes.length; i++) { meshes[i].count = 0; meshes[i].visible = false; }
-    CBZ.crowdPerformance.renderTimeMs = 0;
-    return;
-    /* istanbul ignore next -- retained only for old debug-state compatibility */
-    const t0 = performance.now();
-    for (let slot = 0; slot < activeCount; slot++) {
-      const id = activeId[slot], down = S.downT[id] > 0;
-      const activity = S.activity[id] || ACT.WALK;
-      const moving = Math.hypot(S.velX[id], S.velZ[id]) > 0.2;
-      const doing = activity === ACT.ACTION, fighting = activity === ACT.FIGHT;
-      const bob = down ? 0 : doing ? -Math.abs(Math.sin(S.phase[id])) * 0.11
-        : (!moving ? 0 : Math.abs(Math.sin(S.phase[id])) * 0.035);
-      const swing = down || !moving ? 0 : Math.sin(S.phase[id]) * 0.42;
-      // In-place activities have a readable silhouette: ACTION alternates a
-      // squat/stretch; FIGHT throws short opposing punches. Stationary social
-      // and stand states keep relaxed arms instead of the old walk loop.
-      const armLX = down ? 0 : fighting ? (-0.45 - Math.max(0, -Math.sin(S.phase[id])) * 1.0)
-        : doing ? (-0.75 + Math.sin(S.phase[id]) * 0.38) : -swing * 0.82;
-      const armRX = down ? 0 : fighting ? (-0.45 - Math.max(0, Math.sin(S.phase[id])) * 1.0)
-        : doing ? (-0.75 - Math.sin(S.phase[id]) * 0.38) : swing * 0.82;
-      rootDummy.position.set(S.prevX[id] + (S.posX[id] - S.prevX[id]) * alpha, bob, S.prevZ[id] + (S.posZ[id] - S.prevZ[id]) * alpha);
-      rootDummy.rotation.set(0, S.heading[id], down ? Math.PI / 2 : 0); rootDummy.scale.set(HUMAN_S, HUMAN_S, HUMAN_S); rootDummy.updateMatrix();
-      // promoted to a real face-rig? hide this instanced copy (the rig is drawn
-      // instead). Parked (night lockdown, in a cell) hides the same way until
-      // chooseNearby's next sweep deselects it.
-      if (rigOf[id] >= 0 || S.parked[id]) { for (let mi = 0; mi < meshes.length; mi++) put(meshes[mi], slot, 0, 0, 0, 0.0001, 0.0001, 0.0001, 0); continue; }
-      // WOMEN IN THE CROWD (W3): S.fem[id] (ambientstate.js, rolled ~48% off the
-      // same deterministic rnd(id) stream as skin/hair) narrows the torso, trims
-      // the head, slims + closes in the arms/legs, and stretches the hair box
-      // down behind the head so it reads long. Male (else) path is byte-
-      // identical to the original single-path numbers.
-      if (S.fem[id]) {
-        put(torso, slot, 0, 1.42, 0, 0.82 * 0.85, 0.88, 0.44 * 0.88, 0); put(head, slot, 0, 2.18, 0, 0.54 * 0.92, 0.54 * 0.92, 0.54 * 0.92, 0);
-        put(hair, slot, 0, 2.15, 0, 0.58, 0.62, 0.58, 0); put(legL, slot, -0.20, 0.52, 0, 0.28 * 0.9, 0.92, 0.28 * 0.9, swing);
-        put(legR, slot, 0.20, 0.52, 0, 0.28 * 0.9, 0.92, 0.28 * 0.9, -swing); put(armL, slot, -0.55 * 0.9, 1.40, 0, 0.24 * 0.83, 0.78, 0.24 * 0.83, armLX);
-        put(armR, slot, 0.55 * 0.9, 1.40, 0, 0.24 * 0.83, 0.78, 0.24 * 0.83, armRX);
-      } else {
-        put(torso, slot, 0, 1.42, 0, 0.82, 0.88, 0.44, 0); put(head, slot, 0, 2.18, 0, 0.54, 0.54, 0.54, 0);
-        put(hair, slot, 0, 2.50, 0, 0.58, 0.14, 0.58, 0); put(legL, slot, -0.20, 0.52, 0, 0.28, 0.92, 0.28, swing);
-        put(legR, slot, 0.20, 0.52, 0, 0.28, 0.92, 0.28, -swing); put(armL, slot, -0.55, 1.40, 0, 0.24, 0.78, 0.24, armLX);
-        put(armR, slot, 0.55, 1.40, 0, 0.24, 0.78, 0.24, armRX);
-      }
-      // FACE — two eyes + a mouth on the front of the head (z+ = forward)
-      put(eyeL, slot, -0.12, 2.235, 0.25, 0.11, 0.14, 0.12, 0);
-      put(eyeR, slot, 0.12, 2.235, 0.25, 0.11, 0.14, 0.12, 0);
-      put(mouth, slot, 0, 2.045, 0.255, 0.22, 0.055, 0.10, 0);
-      // a worn VALUABLE (chain/watch/tooth/cash) at the chest, only if carried —
-      // this is the "see a guy with a chain" hook; non-carriers shrink to nothing.
-      const vcol = S.itemColor ? S.itemColor(id) : 0;
-      if (vcol) { put(valuable, slot, 0, 1.60, 0.225, 0.36, 0.12, 0.07, 0); valuable.setColorAt(slot, tint.setHex(vcol)); }
-      else put(valuable, slot, 0, 1.60, 0.225, 0.0001, 0.0001, 0.0001, 0);
-      head.setColorAt(slot, tint.setHex(S.skin[id])); hair.setColorAt(slot, tint.setHex(S.hair[id]));
-    }
-    for (let i = 0; i < meshes.length; i++) { meshes[i].count = activeCount; meshes[i].instanceMatrix.needsUpdate = true; }
-    if (head.instanceColor) head.instanceColor.needsUpdate = true;
-    if (hair.instanceColor) hair.instanceColor.needsUpdate = true;
-    if (valuable.instanceColor) valuable.instanceColor.needsUpdate = true;
-    CBZ.crowdPerformance.renderTimeMs = performance.now() - t0;
-  }
   function dotHex(id) {
     if (S.faction[id] === 0) return 0xff8686;
     if (S.faction[id] === 1) return 0x8fb0ff;
@@ -734,7 +630,6 @@
       overviewPoints.visible = false;
       overviewBoxes.visible = false;
       densityPoints.visible = false;
-      for (let i = 0; i < meshes.length; i++) { meshes[i].visible = false; meshes[i].count = 0; }
       lastOverview = overview;
       lastDensity = density;
       CBZ.lastABTest = CBZ.AB_TEST;
@@ -982,9 +877,7 @@
       const every = societyOverview ? (densityMode() ? 3.2 : 1.2) : 6;
       if (societyAcc >= every) { societyAcc %= every; syncSociety(); }
     }
-    pointsAcc += dt; renderAcc += dt;
-    const every = CBZ.qualityLevel != null && CBZ.qualityLevel < 2 ? 1 / 30 : 1 / 60;
-    if (renderAcc >= every) { renderAcc %= every; renderRigs(fixedAcc / FIXED); }
+    pointsAcc += dt;
     // Standard actors follow the simulation in every camera mode; overview no
     // longer swaps them for point-cloud or box people.
     syncFaceRigs(fixedAcc / FIXED, dt);
@@ -998,7 +891,7 @@
     activeCount = 0; selectAcc = 99; fixedAcc = societyAcc = 0; chooseNearby(true); refreshRenderMode(true);
     // resetGame still runs beneath the opaque title card. Allocate and place
     // the real rigs now, before setState("playing") exposes the prison.
-    renderRigs(0); syncFaceRigs(0, 0);
+    syncFaceRigs(0, 0);
     if (societyWorker) { societyWorker.postMessage({ type: "reset" }); syncSociety(); }
   };
   chooseNearby(true); refreshRenderMode(true);

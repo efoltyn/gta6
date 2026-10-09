@@ -111,12 +111,10 @@ for (const q of ["low", "high"]) {
     ok(outer === 0, `nothing past spec.outerU(s) (${outer} vertices; the main gate canopy at s~0 is exempt)`);
     // crowd
     let cMin = Infinity, count = 0;
-    ve.group.traverse((o) => {
-      if (!o.isInstancedMesh) return;
-      const m = new THREE.Matrix4(), p = new THREE.Vector3();
-      for (let i = 0; i < o.count; i += 7) { o.getMatrixAt(i, m); p.setFromMatrixPosition(m); core.nearest(p.x, p.z, null, NR); cMin = Math.min(cMin, NR.u); }
-      count += o.count;
-    });
+    // the crowd is drawn by entities/crowdgpu.js at runtime; its seats are published
+    const CS = ve.crowdSpots || { x: [], z: [] };
+    for (let i = 0; i < CS.x.length; i += 7) { core.nearest(CS.x[i], CS.z[i], null, NR); cMin = Math.min(cMin, NR.u); }
+    count = CS.x.length;
     ok(cMin > D.WALL_U + 1.5, `crowd min u ${cMin.toFixed(2)} (all in the stands)`);
     ok(count === ve.stats.crowd, `crowd instances ${count}`);
     ok(q === "high" ? count >= 10000 : count >= 4000, `crowd ${count} >= ${q === "high" ? 10000 : 4000}`);

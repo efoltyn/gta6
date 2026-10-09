@@ -486,7 +486,7 @@
     ROOM.board = null; ROOM.pads = []; ROOM.rect = null; ROOM.doorPt = null; ROOM.builtFor = null;
     ROOM.seats = 0; ROOM.stateSymbols = 0;
     // the screen and the war table go with the room (their verbs read these)
-    ROOM.screenPt = null; ROOM.redPhones = null; ROOM.mapPt = null;
+    ROOM.redPhones = null; ROOM.mapPt = null;
   }
   // is THIS person entitled through the door? The sitting head of state.
   function doorOpensFor() { return !!seat(); }
@@ -669,24 +669,30 @@
     ROOM.board = canvasTexLive(2048, 512);           // 4:1, exactly the screen's aspect
     ROOM.pads = [];
     let tableRec = null;
-    const kitBox = function (x, y, z, w, h, d, color) { return addBox(grp, x, y, z, w, h, d, color); };
+    // the kit's colliders ride its draw call ({solid, y0, y1}: a chair is a
+    // seat you can step onto and a back); addCol ledgers them on ROOM.cols so
+    // they leave with the room
+    const kitBox = function (x, y, z, w, h, d, color, o) {
+      if (o && o.solid) addCol(x, z, w, d, o.y0 != null ? o.y0 : y - h / 2, o.y1 != null ? o.y1 : y + h / 2);
+      return addBox(grp, x, y, z, w, h, d, color);
+    };
     if (CBZ.furnish && CBZ.furnish.table) {
       try {
         tableRec = CBZ.furnish.table(tcx, Y, tcz, alongX ? 0 : Math.PI / 2, {
-          box: kitBox, ox: 0, oz: 0, oy: 0, solid: false, len: len, deep: 1.7, seats: 14, tone: "exec",
+          box: kitBox, ox: 0, oz: 0, oy: 0, len: len, deep: 1.7, seats: 14, tone: "exec",
         });
       } catch (e) { tableRec = null; }
     }
     if (!tableRec) {
       addBox(grp, tcx, Y + 0.37, tcz, alongX ? len : 1.7, 0.74, alongX ? 1.7 : len, 0x243244);
+      addCol(tcx, tcz, alongX ? len : 1.7, alongX ? 1.7 : len, Y, Y + 0.76);
     }
     ROOM.seats = tableRec && tableRec.seats ? tableRec.seats.length : 0;
-    addCol(tcx, tcz, alongX ? len : 1.7, alongX ? 1.7 : len, Y, Y + 0.76);
     // the President's chair at the head, facing the door and the table
     const headX = alongX ? tcx + far * (len / 2 + 0.7) : tcx, headZ = alongX ? tcz : tcz + far * (len / 2 + 0.7);
     if (CBZ.furnish && CBZ.furnish.armchair) {
       try {
-        const hr = CBZ.furnish.armchair(headX, Y, headZ, alongX ? Math.atan2(-far, 0) : Math.atan2(0, -far), { box: kitBox, ox: 0, oz: 0, oy: 0, solid: false, tone: "exec" });
+        const hr = CBZ.furnish.armchair(headX, Y, headZ, alongX ? Math.atan2(-far, 0) : Math.atan2(0, -far), { box: kitBox, ox: 0, oz: 0, oy: 0, tone: "exec" });
         ROOM.seats += hr && hr.seats ? hr.seats.length : 0;
       } catch (e) {}
     }
@@ -751,7 +757,6 @@
       addCol(p.x, p.z, 0.44, 0.44, Y, Y + 0.3);
       ROOM.stateSymbols++;
     }
-    ROOM.screenPt = alongX ? { x: wallF + inw * 1.6, z: cz } : { x: cx, z: wallF + inw * 1.6 };
 
     // ---- THE WATCH FLOOR: three consoles along the side wall away from the door
     let stationSeats = 0;
@@ -770,7 +775,7 @@
       if (CBZ.furnish && CBZ.furnish.chair) {
         try {
           const cxp = alongX ? px : sideF + 1.35, czp = alongX ? sideF + 1.35 : pz;
-          const cr = CBZ.furnish.chair(cxp, Y, czp, alongX ? Math.PI : -Math.PI / 2, { box: kitBox, ox: 0, oz: 0, oy: 0, solid: false, tone: "exec" });
+          const cr = CBZ.furnish.chair(cxp, Y, czp, alongX ? Math.PI : -Math.PI / 2, { box: kitBox, ox: 0, oz: 0, oy: 0, tone: "exec" });
           stationSeats += cr && cr.seats ? cr.seats.length : 0;
         } catch (e) {}
       }
@@ -1008,8 +1013,15 @@
         const murders = (CBZ.approvalState && CBZ.approvalState.murders7d) ? CBZ.approvalState.murders7d(h.id) : 0;
         const p = politics();
         const crisis = murders >= 5 || (p && (p.scandal || 0) > 40) || (p && (p.emergencyPowers || 0) > 40);
-        shock(h.id, crisis ? 5 : 2);
+        if (!CBZ.politics) shock(h.id, crisis ? 5 : 2);
         if (p && (p.scandal || 0) > 0) p.scandal = clamp((p.scandal || 0) - 6, 0, 100);
+        // ON THE AIR (city/address.js): the airtime is bought, the cameras are
+        // ready, and what is said is chosen statement by statement, each one a
+        // real act. Without that file the order is the old one-line story.
+        if (CBZ.address && CBZ.address.begin) {
+          const r = CBZ.address.begin({ reason: "order" });
+          if (r && r.ok) return { ok: true, why: "", live: true };
+        }
         news(h.title + " addresses the nation" + (crisis ? " from the Situation Room. The country was listening." : ". The country mostly was not."));
         return { ok: true, why: "" };
       },
@@ -1218,52 +1230,41 @@
       emitEvent("order", { key: key, ok: false, why: gt.why || "" });
       return gt;
     }
+    // CONGRESS (city/politics.js): a war, a tax rise, a tax cut need the votes
+    const Pol = CBZ.politics;
+    const actKey = ACT_KEY[key] || key;
+    if (Pol && Pol.gate) {
+      const vg = Pol.gate(actKey);
+      if (!vg.ok) { paintBoard(); emitEvent("order", { key: key, ok: false, why: vg.why || "" }); return vg; }
+    }
+    // THE ONE PRICE. Whatever the organ inside does to approval on its own
+    // is absorbed; the act table (city/politics.js ORDERS) is what the
+    // country feels. The war room's orders report themselves (warroom.js).
     let r;
-    try { r = B.run(h); } catch (e) { r = { ok: false, why: "The order did not go through." }; }
+    const runIt = function () { try { return B.run(h); } catch (e) { return { ok: false, why: "The order did not go through." }; } };
+    r = Pol && Pol.during && !WAR_KEYS[key] ? Pol.during(runIt) : runIt();
     paintBoard();
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     const out = r || { ok: true, why: "" };
+    if (out.ok && Pol && Pol.act && !WAR_KEYS[key]) { try { Pol.act(actKey, { by: "self" }); } catch (e) {} }
     emitEvent("order", { key: key, ok: !!out.ok, why: out.why || "" });
     return out;
   }
+  const ACT_KEY = { taxup: "taxUp", taxdown: "taxDown" };
+  const WAR_KEYS = { war: 1, peace: 1, strike: 1, nuke: 1, bunker: 1 };
 
-  // ---- the room's two verbs: its door, and its video wall ------------------
+  // ---- the room's verbs are its phones and its map ------------------------
   // The sitting head of state never sees a prompt at the door: the leaf slides
-  // as he walks up (the tick below). Anybody else gets a handle that does not
-  // turn. At the far end, E on the video wall is Brief: the officer at the
-  // table nearest it gives you the picture (his proposal, read off the world),
-  // which is the whole of what a Situation Room is for.
+  // as he walks up (the tick below). The video wall has no verb any more: the
+  // officer with something for you SAYS it when you come to the table
+  // (tickOfficers: speakUp), and Talk on him asks.
   function onRoomFloor() {
     const P = CBZ.player;
     return !(P && P.pos && ROOM.floorY != null && Math.abs(P.pos.y - ROOM.floorY) > 1.6);
   }
-  function briefer() {
-    if (!ROOM.screenPt) return null;
-    let best = null, bd = 1e9;
-    for (const role of ["general", "bureau", "police"]) {
-      const p = OFF.peds[role];
-      if (!p || p.dead || !p.pos) continue;
-      const d = Math.hypot(p.pos.x - ROOM.screenPt.x, p.pos.z - ROOM.screenPt.z);
-      if (d < bd) { bd = d; best = role; }
-    }
-    return best;
-  }
   function wireZones() {
     if (ROOM.zonesWired || !CBZ.interactions || !CBZ.interactions.registerZone) return;
     ROOM.zonesWired = true;
-    CBZ.interactions.registerZone({
-      id: "pres-screen", kind: "presscreen", radius: 2.4, prio: 13,
-      find: function (px, pz) {
-        if (!on() || !CFG.PRESIDENCY_SITROOM || !ROOM.screenPt || !seat() || CONV || !onRoomFloor() || !briefer()) return null;
-        const dx = ROOM.screenPt.x - px, dz = ROOM.screenPt.z - pz;
-        return (dx * dx + dz * dz) < 2.4 * 2.4 ? { x: ROOM.screenPt.x, z: ROOM.screenPt.z, kind: "presscreen" } : null;
-      },
-      options: [{
-        id: "pres-screen-brief", slot: "e", campaignSafe: true,
-        label: "Brief",
-        onSelect: function () { const r = briefer(); if (r) talkTo(r); },
-      }],
-    });
     // ---- THE WAR IS ORDERED FROM THE TABLE (city/warroom.js) -------------
     // The left red phone is the army: War, or Peace while there is a war.
     // The right red phone is the nuclear line: it has a verb only while the
@@ -1332,7 +1333,6 @@
     });
     if (CBZ.interactions.describe) {
       try {
-        CBZ.interactions.describe("presscreen", function () { return { label: "", note: "" }; });
         CBZ.interactions.describe("preswarphone", function () { return { label: "", note: "" }; });
         CBZ.interactions.describe("presnukephone", function () { return { label: "", note: "" }; });
         CBZ.interactions.describe("preswarmap", function () { return { label: "", note: "" }; });
@@ -1365,10 +1365,28 @@
     { key: "bureau", title: "Bureau Director", prefix: "Director", job: "federal agent", archetype: "professional" },
     { key: "police", title: "Police Commissioner", prefix: "Commissioner", job: "police commissioner", archetype: "professional" },
     { key: "treasury", title: "Treasury Secretary", prefix: "Secretary", job: "treasury secretary", archetype: "professional" },
+    // the heads of the other two services politics.js keeps loyalty for, and
+    // the minister of the interior (city/politics.js ROLE_INST)
+    { key: "cia", title: "CIA Director", prefix: "Director", job: "intelligence director", archetype: "professional" },
+    { key: "ss", title: "Secret Service Director", prefix: "Director", job: "secret service director", archetype: "professional" },
+    { key: "interior", title: "Interior Minister", prefix: "Minister", job: "interior minister", archetype: "professional" },
   ];
   function surname(n) { const p = String(n || "").trim().split(/\s+/); return p[p.length - 1] || n; }
   function cabinet() {
     const S = st();
+    // a save from before a post existed gets that post filled (its own stream)
+    if (S.cabinet) {
+      for (let i = 0; i < CABINET_ROLES.length; i++) {
+        const R = CABINET_ROLES[i];
+        if (S.cabinet[R.key]) continue;
+        const stream = CBZ.seedStream ? CBZ.seedStream("presidency:cabinet:" + R.key) : rng;
+        const gender = stream() < 0.68 ? "m" : "f";
+        const name = CBZ.cityMintName ? CBZ.cityMintName(stream, gender) : (R.title + " " + (i + 1));
+        const obj = { _parked: true, nameKnown: true, kind: "civilian", archetype: R.archetype, name: name, gender: gender, job: R.job, wealth: 0.7, aggr: 0.2, cash: 300 };
+        if (CBZ.cityPedStash) { try { CBZ.cityPedStash(obj); } catch (e) {} }
+        S.cabinet[R.key] = { name: name, sid: obj._sid || ("cab_" + R.key), role: R.title, gender: gender, dead: false, refused: 0, loyalty: 60, trait: null };
+      }
+    }
     if (!S.cabinet) {
       S.cabinet = {};
       const stream = CBZ.seedStream ? CBZ.seedStream("presidency:cabinet") : rng;
@@ -1386,7 +1404,7 @@
       const R = CABINET_ROLES[i], c = S.cabinet[R.key];
       if (!c) continue;
       out[R.key] = { name: c.name, sid: c.sid, role: c.role, gender: c.gender, dead: !!c.dead, vacant: !!c.vacant,
-        loyalty: isFinite(c.loyalty) ? +c.loyalty : 60, trait: c.trait || null, refused: c.refused | 0,
+        loyalty: isFinite(c.loyalty) ? +c.loyalty : 60, trait: c.trait || null, refused: c.refused | 0, ideology: c.ideology || null,
         display: R.prefix ? (R.prefix + " " + surname(c.name)) : c.name };
     }
     const rec = seatRec() || countryRecAny();
@@ -1407,7 +1425,7 @@
   //  dead and his desk goes quiet: shoot the General and there is nobody to
   //  put soldiers on the street.
   // ============================================================
-  const OFF = { peds: {}, t: 0 };
+  const OFF = { peds: {}, t: 0, clock: 0 };
   let CONV = null;
   function gateOk(key) {
     const h = seat(), B = BUTTONS[key];
@@ -1537,7 +1555,7 @@
     const S = st(), R = CABINET_ROLES.find(function (r) { return r.key === role; });
     if (!R || !who || !who.name) return false;
     S.cabinet[role] = { name: who.name, sid: who.sid || ("cab_" + role + "_" + day()), role: R.title, gender: who.gender || "m", dead: false, refused: 0,
-      loyalty: isFinite(who.loyalty) ? +who.loyalty : 60, trait: who.trait || null };
+      loyalty: isFinite(who.loyalty) ? +who.loyalty : 60, trait: who.trait || null, ideology: who.ideology || null };
     releaseOfficer(role);
     return true;
   }
@@ -1565,11 +1583,22 @@
     try {
       p = CBZ.cityPostNpc(at.x, at.z, {
         job: R.job, archetype: R.archetype, gender: c.gender, pin: true, face: at.face,
-        armed: role === "general", aggr: 0.05, wealth: 0.7, src: "presidency:officer",
+        // NOBODY AT THE TABLE IS ARMED. OWNER: "the president game starts with
+        // one of your ministers pointing a gun at you." The General was posted
+        // armed (and every other staffer rolled the street's ~21% "packing"
+        // default, city/peds.js makePed, because nobody said armed: false).
+        // An armed body is governed by the street's gun rules: a levelled gun
+        // in the camera's cone (peds.js gunpoint sweep), any armed threat in
+        // the room (brain_city "hold" -> poseAimBack) squared him up at the
+        // President across the table. A minister turns a gun on the President
+        // only in a real, announced coup (dissent.js / civilwar), never here;
+        // CBZ.gunDiscipline refuses a draw to any _stateStaff body as well.
+        armed: false, aggr: 0.05, wealth: 0.7, src: "presidency:officer",
       });
     } catch (e) { p = null; }
     if (!p) return null;
-    p.name = c.display; p.nameKnown = true; p.organization = "state"; p._presOfficer = role;
+    p.name = c.display; p.nameKnown = true; p.organization = "state"; p._presOfficer = role; p._stateStaff = true;
+    p._iOnly = true;          // his job's verbs (Talk, Dismiss, the General's buys), never the street's
     OFF.peds[role] = p;
     if (CBZ.interactions && CBZ.interactions.registerFor) {
       try {
@@ -1649,10 +1678,15 @@
         // "decision" below and it costs this officer's loyalty
         sayPed(ped, pr.nope || "Understood.");
       }
+      const PM = CBZ.politics;
+      if (PM && typeof PM.act === "function") {
+        try { PM.act("decision", { target: ped, by: "president", ideology: null, institution: role === "general" ? "Army" : role === "police" ? "Police" : role === "bureau" ? "FBI" : null, topic: pr.key, choice: choice, order: choice === "yes" ? pr.key : null, who: role }); } catch (e) {}
+      }
       emitEvent("decision", { source: "officer", who: c.display, topic: pr.key, choice: choice, order: choice === "yes" ? pr.key : null, ok: choice === "yes" ? !!r.ok : true });
     }
   }
   function tickOfficers(dt) {
+    OFF.clock += dt || 0;
     OFF.t -= dt;
     if (CONV) {
       // he looks at you while he talks; walking off ends the conversation
@@ -1690,6 +1724,34 @@
       if (near && !p) postOfficer(role);
       else if (!near && p) releaseOfficer(role);
     }
+    speakUp();
+  }
+  // THE OFFICER WITH SOMETHING FOR YOU SAYS IT. Come to the table and the one
+  // who has a decision waiting (his proposal, read off the world) turns and
+  // makes the case; the two answers ride on him (campaign_ui.js). Once per
+  // matter per day, one officer at a time, 20 s apart.
+  function speakUp() {
+    const P = CBZ.player;
+    if (CONV || !seat() || !P || !P.pos || !onRoomFloor()) return;
+    if (OFF.spokeAt != null && OFF.clock - OFF.spokeAt < 20) return;
+    const UI = CBZ.campaignUI;
+    if (UI && UI.replies && UI.replies()) return;            // somebody is already waiting on an answer
+    OFF.raised = OFF.raised || {};
+    let best = null, bd = 5.5;
+    for (const role in OFF.peds) {
+      const p = OFF.peds[role];
+      if (!p || p.dead || !p.pos) continue;
+      const d = Math.hypot(p.pos.x - P.pos.x, p.pos.z - P.pos.z);
+      if (d >= bd) continue;
+      let pr = null; try { pr = proposal(role); } catch (e) { pr = null; }
+      if (!pr || !pr.key || !pr.line) continue;
+      if (OFF.raised[role] === pr.key + ":" + day()) continue;
+      best = { role: role, key: pr.key }; bd = d;
+    }
+    if (!best) return;
+    OFF.raised[best.role] = best.key + ":" + day();
+    OFF.spokeAt = OFF.clock;
+    talkTo(best.role);
   }
 
   // ---- THE STATUS — ONE READ OF THE WHOLE PRESIDENCY ---------------------
@@ -1767,8 +1829,22 @@
       const r = regs[i];
       if (!r || !isFinite(r.minX) || !isFinite(r.maxX) || !isFinite(r.minZ) || !isFinite(r.maxZ)) continue;
       if (r.maxX <= r.minX || r.maxZ <= r.minZ) continue;
-      out.push({ name: String(r.name || ""), minX: r.minX, maxX: r.maxX, minZ: r.minZ, maxZ: r.maxZ });
+      // the ground is drawn for every region; only PLACES are lettered (the
+      // one rule fullmap.js owns: no road strips, no indexed builder keys)
+      // A planned city files several rects under one name with mapLabel off
+      // (the big map letters it its own way); here it is lettered once.
+      const place = r.metro && !r.road ? Object.assign({}, r, { mapLabel: true }) : r;
+      const nm = CBZ.mapPlaceName ? CBZ.mapPlaceName(place) : (r.road || place.mapLabel === false ? "" : String(r.name || ""));
+      out.push({ name: nm, minX: r.minX, maxX: r.maxX, minZ: r.minZ, maxZ: r.maxZ });
     }
+    // one name, one word on the map: the largest rect carrying it keeps it
+    const best = {};
+    for (const q of out) {
+      if (!q.name) continue;
+      const area = (q.maxX - q.minX) * (q.maxZ - q.minZ);
+      if (!best[q.name] || area > best[q.name].area) best[q.name] = { q: q, area: area };
+    }
+    for (const q of out) if (q.name && best[q.name].q !== q) q.name = "";
     return out;
   }
   // the frontier line construction.js is actually building on. Its plan is
@@ -2687,6 +2763,16 @@
     const id = S.lastSeatId;
     S.voteDay = null;
     if (!id) return true;
+    // A REFUSED COUNT (city/transfer.js): the vote is in but the seat has not
+    // moved — certification is pending, or the President kept it by force.
+    // Neither is a second term and neither is a defeat yet; transfer.js says
+    // which, and reports it itself.
+    if (CBZ.transfer && CBZ.transfer.ballot) {
+      let b = null;
+      try { b = CBZ.transfer.ballot(id); } catch (e) { b = null; }
+      if (b === "hold") { S.voteDay = d; return false; }
+      if (b === "seized") return true;
+    }
     if (CBZ.elections && CBZ.elections.status) {
       let live = null;
       try { live = CBZ.elections.status(id); } catch (e) {}
@@ -2769,21 +2855,24 @@
       }
       const scandal = (p && p.scandal) || 0;
       const approval = h.rec.approval || 0;
-      const bad = scandal >= IMPEACH_SCANDAL || (approval < IMPEACH_APPROVAL && scandal >= IMPEACH_SCANDAL_LO);
-      const numbers = "Scandal " + Math.round(scandal) + " (limit " + IMPEACH_SCANDAL
-        + "), approval " + Math.round(approval) + " (floor " + IMPEACH_APPROVAL + " while scandal is over " + IMPEACH_SCANDAL_LO + ").";
+      const Pol = CBZ.politics;
+      const chamber = !!(Pol && Pol.congress && Pol.congress() && !/dictator|fascis|junta|monarch|communis|anarch/.test(String(h.rec.govType || "")));
+      const bad = scandal >= IMPEACH_SCANDAL || (approval < IMPEACH_APPROVAL && scandal >= IMPEACH_SCANDAL_LO) || (chamber && Pol.wantsImpeachment());
       if (bad && S.impeachDay == null) {
         S.impeachDay = d + 2;
         emitEvent("impeach", { day: S.impeachDay, scandal: scandal, approval: approval });
         big("ARTICLES OF IMPEACHMENT FILED");
-        orders("Chief of Staff", "The Capitol has the votes and the auditors have the ledgers. " + numbers
-          + " The Senate votes on day " + S.impeachDay + " — two days. Get under those numbers or start packing.", 2);
+        orders("Chief of Staff", "They've filed articles, sir. The Senate votes in two days.", 2);
       } else if (S.impeachDay != null && !bad) {
         S.impeachDay = null;
         news("The impeachment collapses, the scandal went quiet before the vote.");
       } else if (S.impeachDay != null && d < S.impeachDay) {
-        orders("Chief of Staff", "Impeachment vote in " + (S.impeachDay - d) + " day(s). " + numbers
-          + " An address buys " + SCANDAL_ADDRESS_RELIEF + " points back; every order given by force adds more.", 2);
+        orders("Chief of Staff", "The impeachment vote is tomorrow, sir. Talk to the country.", 2);
+      } else if (S.impeachDay != null && d >= S.impeachDay && chamber && !Pol.vote("impeach").pass) {
+        // THE SENATE ACQUITS: two thirds never came
+        const v = Pol.vote("impeach");
+        S.impeachDay = null;
+        emitEvent("vote", { kind: "impeach", pass: false, yes: v.yes, no: v.no, headline: "The Senate acquits the President, " + v.yes + " to " + v.no, cat: "POLITICS" });
       } else if (S.impeachDay != null && d >= S.impeachDay) {
         // CONVICTED. The seat moves through the record's own fields (the
         // same holder/vacuum bookkeeping regimes' restoration writes), the
@@ -2821,7 +2910,7 @@
     S.arrestT += dt;
     const rec = S.lastSeatId && CBZ.polity && CBZ.polity.get ? CBZ.polity.get(S.lastSeatId) : null;
     if (S.arrestT >= ARREST_GRACE_SEC) {
-      if (inCountry(rec)) { arrestNow(S.arrestWhy || "Removed from office", S.impeached ? "IMPEACHED" : "TAKEN"); }
+      if (inCountry(rec)) { arrestNow(S.arrestWhy || "Removed from office", S.arrestTitle || (S.impeached ? "IMPEACHED" : "TAKEN")); }
       else {
         // you ran — the manhunt is the price of freedom, through wanted.js
         S.arrestArmed = false;
@@ -2972,7 +3061,14 @@
         const P = CBZ.player;
         ped._presByPlayer = !!(imp && (imp.byPlayer || imp.src === "player" || imp.attacker === P || imp.from === P));
       }
-      return orig.apply(this, arguments);
+      const was = !ped || ped.dead;
+      const ret = orig.apply(this, arguments);
+      // THE ACT: a death the President caused (his hand or his order), or a
+      // notable death anyone caused, is priced and told by city/politics.js
+      if (!was && ped && ped.dead && CBZ.politics && CBZ.politics.onDeath) {
+        try { CBZ.politics.onDeath(ped, { byPlayer: ped._presByPlayer, attacker: imp && imp.attacker, cause: ped._presCause }); } catch (e) {}
+      }
+      return ret;
     };
     for (const k in orig) { if (/Wrap(ped)?$/.test(k)) w[k] = orig[k]; }
     w._presCauseWrap = true;
@@ -3108,6 +3204,7 @@
       attacksSeen: S.attacksSeen | 0,
       cabinet: S.cabinet ? JSON.parse(JSON.stringify(S.cabinet)) : null,
       staff: S.staff ? JSON.parse(JSON.stringify(S.staff)) : null,
+      politics: S.politics && S.politics.groups ? JSON.parse(JSON.stringify(S.politics)) : null,
       lock: SEAM.lock.active ? { since: SEAM.lock.since, until: SEAM.lock.until, reason: SEAM.lock.reason } : null,
     };
   }
@@ -3135,6 +3232,7 @@
     S.attacksSeen = obj.attacksSeen != null ? (obj.attacksSeen | 0) : (S.attacksDone | 0);
     S.cabinet = obj.cabinet && typeof obj.cabinet === "object" ? obj.cabinet : null;
     S.staff = obj.staff && typeof obj.staff === "object" ? obj.staff : null;
+    S.politics = obj.politics && typeof obj.politics === "object" ? obj.politics : {};
     if (obj.lock && isFinite(obj.lock.until)) { SEAM.lock.active = true; SEAM.lock.since = obj.lock.since; SEAM.lock.until = obj.lock.until; SEAM.lock.reason = obj.lock.reason || "assassination"; }
   }
   function stamp() { const led = g.cityWorld; if (led && typeof led === "object") led.pres = serialize(); }
@@ -3286,6 +3384,8 @@
     CABINET_ROLES: CABINET_ROLES.map(function (r) { return { key: r.key, title: r.title, job: r.job, archetype: r.archetype }; }),
     // the President's people (city/president_staff.js owns the shape; saved here)
     staff: function () { const S = st(); return S.staff || (S.staff = {}); },
+    // the country's politics (city/politics.js owns the shape; saved here)
+    politicsStore: function () { const S = st(); return S.politics || (S.politics = {}); },
     // officers at the Situation Room table (probe surface)
     officers: function () { const o = {}; for (const k in OFF.peds) if (OFF.peds[k]) o[k] = OFF.peds[k]; return o; },
     proposal: proposal,
@@ -3335,6 +3435,18 @@
     _armAttack: function (d) { armAttack(d == null ? day() : d); }, _tickCellDay: tickCellDay,
     _att: ATT, _attackTarget: attackTarget, _tickAttack: tickAttack, _gateTarget: gateTarget,
     _tickFallsDay: tickFallsDay, _safehouses: safehouses, _paint: paintBoard,
+    // THE WARRANT (city/transfer.js): charged for what you did with the
+    // office — the marshals come through §6's own arrest path (the grace,
+    // the border, the jail). impeached marks it as the Senate's doing.
+    charge: function (why, title, impeached) {
+      const S = st();
+      if (S.arrestArmed) return false;
+      S.arrestArmed = true; S.arrestT = 0; S.arrestWhy = why || "Crimes in office"; S.arrestTitle = title || null;
+      if (impeached) S.impeached = true;
+      if (!S.lastSeatId) { const h = seat(); if (h) S.lastSeatId = h.id; }
+      orders("Marshals Service", "You have " + ARREST_GRACE_SEC + " seconds to surrender. Cross the border and you are a fugitive instead.", 2);
+      return true;
+    },
   };
   CBZ.presidencyReset = reset;
 })();

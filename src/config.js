@@ -308,8 +308,8 @@
     playerHpRegen: 0,        // no passive regen — disasters are deadly
     sprintMul: 3.2,
     staminaMax: 100,
-    staminaDrain: 24,        // per second while sprinting
-    staminaRegen: 14,        // per second while not
+    staminaDrain: 12,        // per second while sprinting: ~8 s flat out from full
+    staminaRegen: 18,        // per second while not: a full tank back in ~5.5 s
   };
   // Environment modifier written by active disasters, applied by the
   // survival lighting override (so eruptions/blizzards/nukes recolour the
@@ -363,11 +363,11 @@
     traffic: typeof CBZ.CITY_TRAFFIC === "number" ? CBZ.CITY_TRAFFIC : 84,   // was 66: nine cars per km of road read as a ghost town
     hungerDrain: 0.22,     // hunger lost per second (slow — the real pressure is night/sleep, not starving)
     starveDmg: 2.2,        // hp/s once hunger hits 0
-    tireNight: 1.15,       // tiredness/s gained while up & about at deep night
+    tireNight: 0.07,       // tiredness/s gained while up & about at deep night (~15 min of night to get heavy-legged, not one minute)
     tireRest: 5.0,         // tiredness/s recovered while resting (sleeping)
     tireExhaustDmg: 1.4,   // hp/s once you're fully exhausted and still awake
     sprintMul: 3.2,
-    staminaMax: 100, staminaDrain: 22, staminaRegen: 14,
+    staminaMax: 100, staminaDrain: 12, staminaRegen: 18,   // ~8 s sprint from full, refills in ~5.5 s
     // wanted: heat needed to reach each star, and the cop response per star.
     // The top is a CLIFF: 4★ already costs a sustained rampage, and 4→5 is an
     // enormous wall (3200 → 12000) so a real 5★ is rare and brutally earned.

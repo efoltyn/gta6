@@ -101,6 +101,13 @@
   // outer faces sit at ±13.2 ± 1.1 — that is the widest thing the corridor
   // actually puts on the ground and therefore the thing that has to clear.
   const CW_CX = 470 + DX, CW_HW = 12, CW_OUTER_HW = 14.3;
+  // PINECREST ROAD (layout wave 2): the Mercy causeway stopped at the shore and
+  // Pinecrest stood 210 m inside the island with no road to it (the audit's
+  // "road island"). A two-lane resort road carries on from the causeway's
+  // north end up to the main street's west end and turns into it. Its bed is
+  // GRADED into the mountain (the same flatRectFactor pads every structure
+  // here gets), so the deck lies on the snow, not through it. Authored frame.
+  const PINE_ROAD = { x: 470, mainZ: -1230, half: 5.5, grade: 9, feather: 30 };
 
   /* ==========================================================================
      THE CAUSEWAY DRIVES THROUGH A CITY, AND IT ALWAYS HAS.
@@ -682,6 +689,11 @@
     h *= flatCircleFactor(x, z, 180, -1380, 91, 126);                 // frozen lake
     h *= flatRectFactor(x, z, 360, -1250, 31, 25, 34);               // lodge
     h *= flatRectFactor(x, z, 640, -1230, 122, 92, 46);              // Pinecrest
+    {                                                                // Pinecrest Road bed
+      const zS = MAXZ - DZ, zN = PINE_ROAD.mainZ;                    // shore -> main street
+      h *= flatRectFactor(x, z, PINE_ROAD.x, (zS + zN) / 2, PINE_ROAD.grade, Math.abs(zS - zN) / 2 + PINE_ROAD.grade, PINE_ROAD.feather);
+      h *= flatRectFactor(x, z, (PINE_ROAD.x + 530) / 2, zN, (530 - PINE_ROAD.x) / 2 + PINE_ROAD.grade, PINE_ROAD.grade, PINE_ROAD.feather);
+    }
     h *= flatRectFactor(x, z, CABIN_A.x, CABIN_A.z, 18, 15, 24);     // hunter's cabin pad
     h *= flatRectFactor(x, z, 300, -1275, 26, 22, 28);               // lift base
     for (let i = 0; i < SNOW_BUILDING_CLEARINGS.length; i++) {
@@ -1322,6 +1334,8 @@
       // north end = the snow shore (rides the dial); south end stays butted
       // on the speedway leg — the deck STRETCHES as the island moves away.
       layout.reserve("snow:causeway", { minX: CW_CX - CW_HW, maxX: CW_CX + CW_HW, minZ: MAXZ, maxZ: CAUSEWAY_MAXZ }, { pad: 3 });
+      layout.reserve("snow:pinecrest-road", { minX: PINE_ROAD.x + DX - PINE_ROAD.half, maxX: PINE_ROAD.x + DX + PINE_ROAD.half, minZ: PINE_ROAD.mainZ + DZ - PINE_ROAD.half, maxZ: MAXZ }, { pad: 4 });
+      layout.reserve("snow:pinecrest-road-2", { minX: PINE_ROAD.x + DX, maxX: 530 + DX, minZ: PINE_ROAD.mainZ + DZ - PINE_ROAD.half, maxZ: PINE_ROAD.mainZ + DZ + PINE_ROAD.half }, { pad: 4 });
       for (let i = 0; i < GREAT_MAJOR.length; i++) {
         const m = GREAT_MAJOR[i], scaled = Math.pow(m.s, 0.62);
         layout.reserveCircle("snow:massif-family:" + i, m.x + DX, m.z + DZ,
@@ -2775,6 +2789,32 @@
         cx: TOWN_CX, cz: TOWN_CZ, region: TOWN, rng: rng,
         name: "Pinecrest", district: "snow", integratedSkyline: true,
       }));
+      // PINECREST ROAD: off the causeway's north end, up to the main street.
+      // The main street is read off the grid buildTown returned (never typed):
+      // the deck stops flush at its west end and the records run on to the
+      // west street's centreline, so traffic and the map see one network.
+      if (town && town.roads && CBZ.buildHighway) {
+        let main = null;
+        for (const r of town.roads) if (!r.vertical && isFinite(r.z) && (!main || Math.abs(r.z - TOWN_CZ) < Math.abs(main.z - TOWN_CZ))) main = r;
+        let west = null;
+        for (const r of town.roads) if (r.vertical && isFinite(r.x) && (!west || r.x < west.x)) west = r;
+        if (main && west) {
+          const rx = CW_CX, endX = main.x - main.len / 2, mz = main.z;
+          CBZ.buildHighway(root, {
+            path: [{ x: rx, z: MAXZ }, { x: rx, z: mz }, { x: endX, z: mz }], smooth: true, filletRadius: 24, filletStep: 6,
+            width: 11, lanesPerDir: 1, median: false, laneW: 3.6, theme: "concrete",
+            guardrail: false, elevated: false, rng: rng, registerRoads: false,
+            heightAt: snowTerrainHeightAt,
+          });
+          if (city.roads) {
+            const base = { district: "highway", w: 11, lanesPerDir: 1, laneW: 3.6, rural: true, owner: "snow" };
+            city.roads.push(Object.assign({ x: rx, z: (MAXZ + mz) / 2, vertical: true, len: Math.abs(MAXZ - mz) }, base));
+            city.roads.push(Object.assign({ x: (rx + west.x) / 2, z: mz, vertical: false, len: Math.abs(west.x - rx) }, base));
+          }
+          CBZ.registerCityRegion(city, { name: "Pinecrest Road Link", subtitle: "Mount Mercy", kind: "rect", road: true,
+            minX: rx - 6, maxX: rx + 6, minZ: mz - 6, maxZ: MAXZ, pad: 1 });
+        }
+      }
       // WORK-ANCHORS at the lodge + outfitter so the resort staffs up (same
       // schedule/goal brain the mainland uses). Feature-detected.
       if (town && CBZ.registerWorkAnchor) {

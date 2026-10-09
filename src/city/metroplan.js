@@ -195,6 +195,11 @@
     // coordinate that is FIXED ('x' = a north-south line at x = at).
     const corridors = (spec.corridors || []).map(function (c) { return Object.assign({}, c, { ax: c.axis === "z" ? "x" : "z" }); });
     const cores = spec.cores || [];                     // existing downtowns to grow around: {minX..maxZ, name}
+    // the world zoning field (city/zoning.js, via city/metro.js planSite):
+    // { ceiling(x, z) | null, buffer(x, z, ext) } — see THE CEILING LAW and
+    // THE FREEWAY FRONTAGE LAW below. Absent = the plan as it was.
+    const ZN = spec.zoning || null;
+    const ceilAt = ZN && ZN.ceiling ? ZN.ceiling : null;
     const P = {
       id: spec.id || "metro", name: spec.name || "Metro", tier: spec.tier || "metro", seed: seed,
       cx: cx, cz: cz, A: A, bounds: B, rx: rx, rz: rz,
@@ -609,6 +614,14 @@
     // a town has no CBD towers: its best cells are its main street
     if (spec.tier === "town") for (const c of cells) if (c.use === "cbd" || c.use === "midtown") c.use = "inner";
     if (spec.tier === "city") for (const c of cells) if (c.use === "cbd" && c.L < 0.86) c.use = "midtown";
+    // UNDER A CEILING the band is what the height allows: a tower district
+    // that may only rise 7 storeys is a walk-up district, not stubby towers
+    if (ceilAt) for (const c of cells) {
+      const cap = c.cap = ceilAt(c.cx, c.cz);
+      if (c.use === "cbd" && cap < 25) c.use = "midtown";
+      if (c.use === "midtown" && cap < 9) c.use = "inner";
+      if (c.use === "inner" && cap < 4) c.use = "rows";
+    }
 
     // LANDMARK CELLS: the central park, the stadium, the campus, the mall
     // nodes, the station. Each one a deliberate place in the plan, picked
@@ -842,6 +855,20 @@
       }
       return best - r;
     }
+    // the street whose EDGE is nearest (x,z) within `reach` metres, or null
+    function frontStreet(x, z, reach) {
+      let best = reach, who = null;
+      const ix0 = Math.floor((x - reach) / SH), ix1 = Math.floor((x + reach) / SH), iz0 = Math.floor((z - reach) / SH), iz1 = Math.floor((z + reach) / SH);
+      for (let ix = ix0; ix <= ix1; ix++) for (let iz = iz0; iz <= iz1; iz++) {
+        const l = sHash.get(ix * 100003 + iz); if (!l) continue;
+        for (let k = 0; k < l.length; k++) {
+          const e = l[k];
+          const d = segDist(x, z, e[1].x, e[1].z, e[2].x, e[2].z) - e[0].w / 2;
+          if (d <= best) { best = d; who = e[0]; }
+        }
+      }
+      return who;
+    }
     P.bulbs = [];
     function hashStreet(s) { for (let i = 0; i < s.pts.length - 1; i++) hashSeg(s, s.pts[i], s.pts[i + 1]); }
     for (const s of P.streets) hashStreet(s);
@@ -880,7 +907,15 @@
     }
 
     // --- storey policy: a TABLE keyed on land value, never a clamp -------
+    // THE CEILING LAW (city/zoning.js): a district grown round an existing
+    // core never out-tops it. spec.zoning.ceiling(x, z) is the core's own
+    // height falling with distance; every storey count the table below
+    // makes passes through it (a metro's own CBD has no ceiling).
     function storeysFor(use, L, x, z) {
+      const st = storeysTable(use, L, x, z);
+      return ceilAt ? Math.max(1, Math.min(st, ceilAt(x, z))) : st;
+    }
+    function storeysTable(use, L, x, z) {
       const r = h01(seed, x, z, 201);
       if (use === "cbd") {
         const t = clamp((L - 0.78) / 0.22, 0, 1);
@@ -1106,6 +1141,20 @@
           if (alongX) p = side === 0 ? { x0: x0 + a, x1: x0 + a1, z0: z0 + 1.5, z1: z0 + 1.5 + depth } : { x0: x0 + a, x1: x0 + a1, z0: z1 - 1.5 - depth, z1: z1 - 1.5 };
           else p = side === 0 ? { x0: x0 + 1.5, x1: x0 + 1.5 + depth, z0: z0 + a, z1: z0 + a1 } : { x0: x1 - 1.5 - depth, x1: x1 - 1.5, z0: z0 + a, z1: z0 + a1 };
           const px = (p.x0 + p.x1) / 2, pz = (p.z0 + p.z1) / 2;
+          // A TERRACE FACES A STREET. The block is cut from the local street
+          // LINES, but a local run is clipped where it would meet a freeway,
+          // a compound or water (addLocalRun), and the block still stood
+          // there: whole rows of houses fronted a verge or a freeway
+          // shoulder with no street in front of them (owner, iPad: "facades
+          // like townhouses in a weird location near the highway"). A unit
+          // is only built where a street edge is within its front step +
+          // footway of the middle of its front wall; the rest of the
+          // frontage stays the block's lawn. The unit carries that street,
+          // so if the street is later pruned (step 11: not connected to the
+          // city) the houses on it go with it.
+          const fx = alongX ? px : (side === 0 ? p.x0 : p.x1), fz = alongX ? (side === 0 ? p.z0 : p.z1) : pz;
+          const front = frontStreet(fx, fz, 1.5 + blk.sw + 2);
+          if (!front) { a = a1; continue; }
           // a terrace's height runs in STRETCHES: the same builder did five
           // or six houses at once, then the next one did his
           const stretch = Math.floor(a / 36);
@@ -1115,7 +1164,7 @@
           const corner = (a === 0 || a1 >= len - 0.5);
           const face = alongX ? (side === 0 ? "s" : "n") : (side === 0 ? "w" : "e");
           addBldg({ x: px, z: pz, w: p.x1 - p.x0, d: p.z1 - p.z0, rot: 0, h: st * 3.1 + 0.9, st: st, fh: 3.1, type: "row", style: "row",
-            wall: wall, glass: lk.glass, roof: h01(seed, px, pz, 344) < 0.3 ? "mansard" : "flat", shop: corner && h01(seed, px, pz, 345) < 0.6, face: face, dist: c.dist });
+            wall: wall, glass: lk.glass, roof: h01(seed, px, pz, 344) < 0.3 ? "mansard" : "flat", shop: corner && h01(seed, px, pz, 345) < 0.6, face: face, dist: c.dist, street: front.id });
           occupy(px, pz, Math.hypot(p.x1 - p.x0, p.z1 - p.z0) / 2 - 1);
           a = a1;
         }
@@ -2199,6 +2248,67 @@
     })();
     // THE DETROIT PLAN (5): the elevated downtown loop
     if (DET && spec.mover) planMover();
+    // ---------------------------------------------------------------
+    // 12. THE FREEWAY FRONTAGE LAW (city/zoning.js): nobody's front door is
+    //     on a freeway. A home (house, rowhouse, walk-up) whose wall comes
+    //     within the buffer of a deck edge is not built; its plot becomes
+    //     the verge, a screen of trees between the lanes and the street
+    //     behind. Measured before: 713 homes within 25 m of a freeway edge.
+    // ---------------------------------------------------------------
+    if (ZN && ZN.buffer) {
+      const HOME = { house: 1, row: 1, apt: 1 };
+      let cut = 0;
+      const keep = [];
+      for (const b of P.bldgs) {
+        if (HOME[b.type] && ZN.buffer(b.x, b.z, Math.max(b.w, b.d) / 2)) {
+          cut++;
+          // (its own plot: still in the occupancy hash, so not treeOK's test)
+          if (roadClear(b.x, b.z, 2) >= 0 && !corridorHit(b.x - 2, b.z - 2, b.x + 2, b.z + 2, 4)) addTree(b.x, b.z, "park");
+          continue;
+        }
+        keep.push(b);
+      }
+      if (cut) { P.bldgs = keep; P.verge = cut; }
+    }
+    // ---------------------------------------------------------------
+    // 13. NO STREET TO NOWHERE. A short local or country stub with one end
+    //     touching no other street (cut off by a fence, a river bank, the
+    //     plan's edge) and not one building along it is a road that "ends
+    //     abruptly" (owner, 2026-09-29) and serves nobody: it is not built.
+    //     A cul-de-sac (its bulb), a collector's mouth and an arterial are
+    //     never stubs; a stub with a house on it is a lane and stays.
+    // ---------------------------------------------------------------
+    (function pruneStubs() {
+      if (!ZN) return;
+      const touches = function (s, e) {
+        const l = sHash.get(Math.floor(e.x / SH) * 100003 + Math.floor(e.z / SH));
+        if (l) for (const q of l) { if (q[0] === s || q[0]._stub) continue; if (segDist(e.x, e.z, q[1].x, q[1].z, q[2].x, q[2].z) < q[0].w / 2 + 1.5) return true; }
+        for (const b of P.bulbs) if (b.street === s.id && Math.hypot(b.x - e.x, b.z - e.z) < (b.r || 12) + 4) return true;
+        return false;
+      };
+      const gone = new Set();
+      for (const s of P.streets) {
+        if ((s.k !== "loc" && s.k !== "rural") || s.pts.length !== 2 || s.mouth || s.closed) continue;
+        const a = s.pts[0], b = s.pts[1], L = Math.hypot(b.x - a.x, b.z - a.z);
+        if (L > 150) continue;
+        if (touches(s, a) && touches(s, b)) continue;
+        let served = false;
+        for (let t = 0; t <= L && !served; t += 8) {
+          const f = L ? t / L : 0, x = lerp(a.x, b.x, f), z = lerp(a.z, b.z, f);
+          if (occupied(x, z, s.w / 2 + 16)) served = true;
+        }
+        if (served) continue;
+        gone.add(s.id); s._stub = true;
+      }
+      if (!gone.size) return;
+      P.streets = P.streets.filter(function (s) { return !gone.has(s.id); });
+      P.junctions = P.junctions.filter(function (j) { return !gone.has(j.a) && !gone.has(j.b); });
+      P.bridges = P.bridges.filter(function (b) { return !gone.has(b.street); });
+      P.overpasses = P.overpasses.filter(function (o) { return !gone.has(o.street); });
+      P.interchanges = P.interchanges.filter(function (o) { return !gone.has(o.street); });
+      P.trees = P.trees.filter(function (t) { return t.street == null || !gone.has(t.street); });
+      P.stubs = gone.size;
+    })();
     P.ms = Date.now() - T0;
     P.stats = stats(P);
     return P;

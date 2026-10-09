@@ -100,6 +100,12 @@
   const KIT_R = 250, KIT_DROP = 300, KIT_HYST = 15, KIT_SHADOW_LOD = 1;
 
   CBZ.metroCities = [];
+  // EVERYTHING THE STREAMER DRIVES: the planned cities, then the countryside
+  // (city/countryside.js: farms, roadside houses, diners), which streams
+  // through the same fabric tiles but is no city (the map, crowd and HUD
+  // read CBZ.metroCities and never see it). Rebuilt with the world.
+  const STREAMED = [];
+  CBZ.metroCountryside = null;
 
   // ------------------------------------------------------------------
   //  THE SITES. Coordinates are where the land is (measured against the
@@ -193,7 +199,24 @@
         id: "cityborough", name: "Gang City West", tier: "city", biome: "cityborough",
         cx: (d.minX + d.maxX) / 2, cz: (d.minZ + d.maxZ) / 2, rx: 1400, rz: 1000,
         bounds: { minX: d.minX - 1330, maxX: d.minX - 90, minZ: d.minZ - 470, maxZ: d.maxZ + 120 },
-        cores: [padR(d, 110)], coreIsDowntown: true,
+        cores: [padR(d, 110)], coreIsDowntown: true, coreKey: "downtown",
+      });
+      // GANG CITY NORTH (layout wave, 2026-10-08): the land across the NORTH
+      // harbour, from the quay to the Mercy hills, between the Continental
+      // Loop's west leg and the Mercy causeway (it meets the west borough
+      // north of the Brandt bridge, so no field is left between the two). It was open grass right across the water from
+      // the spawn: the downtown's gradient stopped at the harbour on this side
+      // and nowhere else (tools/layout-audit.mjs: ring 750-1000 m round the
+      // downtown 72% empty). Same planner, same core, same biome as the west
+      // borough (it IS the borough, on its other side): walk-ups on the water,
+      // rowhouses, the suburbs across the Mercy Connector, farms at the edge.
+      // The county jail and the two highways through it are planned round
+      // (obstacle, corridors), never built on.
+      out.push({
+        id: "citynorth", name: "Gang City North", tier: "city", biome: "cityborough",
+        cx: (d.minX + d.maxX) / 2, cz: (d.minZ + d.maxZ) / 2, rx: 1300, rz: 1000,
+        bounds: { minX: d.minX - 380, maxX: d.maxX + 275, minZ: d.minZ - 900, maxZ: d.minZ - 90 },
+        cores: [padR(d, 110)], coreIsDowntown: true, coreKey: "downtown",
       });
     }
     // THE RINGS round the walk-in towngen downtowns (read live: the layout
@@ -211,7 +234,7 @@
         id: r.id + "-ring", name: r.name, tier: r.tier, biome: r.id,
         cx: (core.minX + core.maxX) / 2, cz: (core.minZ + core.maxZ) / 2, rx: r.rx, rz: r.rz,
         bounds: { minX: core.minX - r.grow, maxX: core.maxX + r.grow, minZ: core.minZ - r.grow, maxZ: core.maxZ + r.grow },
-        cores: [padR(core, 24)],
+        cores: [padR(core, 24)], coreKey: r.id,
       });
     }
     return out;
@@ -259,6 +282,7 @@
     const H = CBZ.HIGHWAY_NET_HALF || 15.3;
     const table = CBZ.highwayNetTable ? CBZ.highwayNetTable() : [];
     for (const route of table) {
+      if (route.rural) continue;                 // country roads (the town links) are no freeway
       const pts = route.pts || [];
       const fillet = route.fillet || 0;
       for (let i = 0; i + 1 < pts.length; i++) {
@@ -319,8 +343,16 @@
       }
       if (port) port = Object.assign({}, port, { x: port.x - dx, z: port.z - dz });
     }
+    // THE ZONING FIELD (city/zoning.js): the ceiling for a district grown
+    // round an existing core, and the freeway frontage buffer — both asked
+    // in REAL coordinates (a copy plans in its source's frame)
+    const Z = CBZ.zoningFor ? CBZ.zoningFor(city) : null;
+    const zoning = Z ? {
+      ceiling: site.coreKey ? function (x, z) { return Z.ceilingAt(x + dx, z + dz, site.coreKey); } : null,
+      buffer: function (x, z, ext) { return Z.inFreewayBuffer(x + dx, z + dz, ext); },
+    } : null;
     const P = CBZ.metroPlan({
-      id: site.id, name: site.name, tier: site.tier, seed: CBZ.WORLD_SEED | 0, seedKey: site.seedKey, style: site.style, uniform: site.uniform,
+      id: site.id, name: site.name, tier: site.tier, seed: CBZ.WORLD_SEED | 0, seedKey: site.seedKey, style: site.style, uniform: site.uniform, zoning: zoning,
       cx: site.cx - dx, cz: site.cz - dz, rx: site.rx, rz: site.rz, bounds: mv(site.bounds),
       obstacles: C.obstacles.concat(lakeObs).map(mv),
       corridors: corridors, cores: (site.cores || []).map(mv), river: river, rail: rail, port: port,
@@ -557,7 +589,7 @@
   let solidRef = null;
   function build(city) {
     // a rebuilt world: let go of the last one's cities
-    for (const m of CBZ.metroCities) { try { if (m.group && m.group.parent) m.group.parent.remove(m.group); } catch (e) {} }
+    for (const m of CBZ.metroCities.concat(STREAMED)) { try { if (m.group && m.group.parent) m.group.parent.remove(m.group); } catch (e) {} }
     CBZ.metroCities.length = 0;
     if (!CBZ.metroPlan || !city || !city.root) return;
     const T0 = performance.now();
@@ -572,6 +604,22 @@
       } catch (e) { console.error("[metro] " + site.id, e); }
     }
     CBZ.metroCities.push.apply(CBZ.metroCities, planned);
+    STREAMED.length = 0;
+    STREAMED.push.apply(STREAMED, planned);
+    // THE COUNTRYSIDE, planned from the same zoning field once every city has
+    // claimed its land (their regions are registered above)
+    CBZ.metroCountryside = null;
+    if (CBZ.countrysidePlan && CBZ.zoningFor) {
+      try {
+        const CP = CBZ.countrysidePlan(city, CBZ.zoningFor(city));
+        if (CP && CP.bldgs.length) {
+          const rec = { id: CP.id, name: CP.name, tier: "country", biome: "wilds", plan: CP, regions: [], group: null, tiles: [], site: null, lakes: [], country: true };
+          registerCountry(city, rec);
+          STREAMED.push(rec);
+          CBZ.metroCountryside = rec;
+        }
+      } catch (e) { console.error("[metro] countryside", e); }
+    }
     _audit.buildMs = Math.round(performance.now() - T0);
   }
 
@@ -659,6 +707,36 @@
       if (job) job.noFree = true;                    // its meshes live under the city's own group, which stays
       else if (!F) heavy();
     } else heavy();
+  }
+
+  // THE COUNTRYSIDE: no regions (it owns no place), no roads of its own, no
+  // ground solve (the continent is its ground: every yard is declared built,
+  // so the plate lies flat under it). Fabric tiles + trees + forecourts.
+  function registerCountry(city, M) {
+    const P = M.plan;
+    const g = new THREE.Group();
+    g.name = "metro-" + M.id; g.userData.terrain = true; g.userData.metro = M.id;
+    city.root.add(g);
+    M.group = g;
+    if (CBZ.terrainFlattenUnder) for (const r of P.pads) CBZ.terrainFlattenUnder({ minX: r.minX, maxX: r.maxX, minZ: r.minZ, maxZ: r.maxZ, pad: 4, name: "countryside" });
+    // the gas stops: the real forecourt (world/fuel_station.js), built when
+    // the player comes near (a streamed slice) and pumping fuel
+    // (city/fuel.js reads CBZ.fuelForecourts)
+    CBZ.fuelForecourts = [];
+    for (const f of P.forecourts) {
+      CBZ.fuelForecourts.push({ cx: f.x, cz: f.z, building: { gas: true, door: { x: f.x, z: f.z }, name: "Gas Stop" }, road: f.road });
+      const build1 = function () {
+        if (CBZ.buildFuelStation) { try { CBZ.buildFuelStation({ parent: g, x: f.x, z: f.z, y: 0, rotY: f.rotY, deck: 0.06, walkRise: 0, apron: 1.2 }); } catch (e) { console.error("[metro] forecourt", e); } }
+      };
+      if (CBZ.sliceAt) CBZ.sliceAt({ minX: f.x - 20, maxX: f.x + 20, minZ: f.z - 20, maxZ: f.z + 20 }, build1, { name: "forecourt " + f.road, pure: true });
+      else build1();
+    }
+    M.fabric = null; M.ground = null; M.tiles = []; M.trees = [];
+    if (CBZ.metroFabric && CBZ.metroFabric.prepare) {
+      try { M.fabric = CBZ.metroFabric.prepare(P, { root: g, tile: TILE, name: M.id }); } catch (e) { console.error("[metro fabric prepare] countryside", e); }
+    }
+    M.tiles = mergeTiles(M);
+    try { M.trees = trees(city.root, P, null); } catch (e) { console.error("[metro trees] countryside", e); M.trees = []; }
   }
 
   // one streaming record per tile key, holding both halves
@@ -902,7 +980,7 @@
 
   CBZ.onAlways && CBZ.onAlways(58, function () {
     const g = CBZ.game;
-    if (!g || g.mode !== "city" || !CBZ.metroCities.length) return;
+    if (!g || g.mode !== "city" || !STREAMED.length) return;
     if (_cur || _pending.length) pump();
     else if (!_mapsDone) farMapPump();
     const now = performance.now();
@@ -926,7 +1004,7 @@
     // fog.far on true depth: past it a tile is pure fog colour, not drawn
     if (alt > 900) _viewR = Math.min(_viewR, fogFar + 100);
     let reach = 0;
-    for (const M of CBZ.metroCities) {
+    for (const M of STREAMED) {
       if (!M.group) continue;
       const F = M.plan.stats.footprint;
       const dc = rectDist({ x0: F.minX, z0: F.minZ, x1: F.maxX, z1: F.maxZ }, x, z);
@@ -946,7 +1024,7 @@
     CBZ.metroViewFar = reach > 0 && !(CBZ.CONFIG && CBZ.CONFIG.METRO_VIEW_FAR === false) ? Math.min(_viewR, reach) + 60 : 0;
     _pending.length = 0;
     const want = [], wantFar = [];
-    for (const M of CBZ.metroCities) {
+    for (const M of STREAMED) {
       if (!M.group || !M.tiles) continue;
       for (const t of M.tiles) {
         const d = rectDist(t, x, z);
@@ -970,7 +1048,7 @@
     // camera is as far as the height, and a cell is rebuilt when the eye
     // climbs or drops more than its slack (the kit's height bound)
     const eyeH = Math.max(0, alt - 0.16);
-    for (const M of CBZ.metroCities) {
+    for (const M of STREAMED) {
       const cells = M.fabric && M.fabric.kit;
       if (!cells || !cells.length) continue;
       const Fp = M.plan.stats.footprint;
@@ -1003,7 +1081,7 @@
      three cannot re-upload them: every built level is dropped and the sweep
      above rebuilds what is in view, nearest first, like a first visit. */
   CBZ.metroGpuLost = function () {
-    for (const M of CBZ.metroCities || []) {
+    for (const M of STREAMED) {
       if (!M.tiles) continue;
       for (const t of M.tiles) {
         if (t.gndBuilt || t.fabBuilt) { try { dropTile(M, t); } catch (e) {} }

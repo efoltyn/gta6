@@ -1,19 +1,12 @@
 /* ============================================================
    city/crowd.js — bounded, fully-real ambient city population.
 
-   Reuses the jail crowd's InstancedMesh body-part technique
-   (entities/crowd.js) but is written NATIVELY in city coordinates — no
-   prison-zone graph, no z≈-700 offset bookkeeping, no web-worker society
-   sim. The near-camera detail and ALL interaction stay with the per-rig
-   CBZ.cityPeds; this layer is pure ambient density: hundreds of little
-   people walking the sidewalks, filling the streets out to the fog.
-
-   Each agent strolls between sidewalk waypoints (city/world.js
-   randomSidewalkPoint, clamped into the city). Six instanced parts per
-   body (shirt torso + skin head/arms + pants legs) with per-instance
-   tint and a cheap leg/arm stride. The whole thing is ONE Group toggled
-   by mode; the simulation is pure math (testable headlessly), and the
-   render no-ops where THREE.InstancedMesh is unavailable.
+   The near-camera detail and ALL interaction live in real rigs: every row
+   the player can see is promoted into a pooled cityMakePed rig (the same
+   CBZ.human every person in the game is). Rows that are not promoted are
+   analytical only, never a stand-in body (the old instanced box people are
+   gone; mass crowds draw through entities/crowdgpu.js, the real human
+   GPU-instanced). The simulation is pure math (testable headlessly).
 
    DISTRICT DENSITY + WARDROBE: this layer IS the visible street
    population, so it must carry the district field (config CITY.districts
@@ -70,8 +63,7 @@
   // WOMEN IN THE CROWD (W3): per-instance female flag, rolled ~48% alongside
   // skin/shirt/hair on the SAME Math.random() stream this file already uses
   // for every other appearance roll (city/crowd.js has no seeded rng — see
-  // spawnCityCrowd below). Read by drawParts() to vary the shared put() scale
-  // args for that one instance; the male path stays byte-identical.
+  // spawnCityCrowd below). A promoted row is built as a woman's rig.
   const fem = new Uint8Array(CAP);
 
   // ---- WALKING GROUPS (2-4 bodies) + SIDEWALK LANE BIAS ----------------------
@@ -299,31 +291,7 @@
     return (_nc = { cum, total: t });
   }
 
-  let root, wm = null;
-  // full body + FACE so the city crowd reads as PEOPLE, not short faceless boxes —
-  // same parts + proportions as the jail mass-crowd (entities/crowd.js).
-  let torso, hd, hair, armL, armR, legL, legR, eyeL, eyeR, mouth, meshes = null;
-  // EVERYTHING TOUCHES THE GROUND: one extra InstancedMesh of ground-flattened
-  // blob quads — every walker drops a soft contact shadow, ALL ~320 of them in
-  // ONE draw call. The crowd never casts real sun shadows (castShadow=false on
-  // every part below), so this blob IS what glues the mass to the pavement.
-  let shadowQ = null;
-  function syncInstanceCount() {
-    const drawCount = Math.max(0, Math.min(CAP, count | 0));
-    if (meshes) for (let i = 0; i < meshes.length; i++) meshes[i].count = drawCount;
-    if (shadowQ) shadowQ.count = drawCount;
-  }
-  const rootD = new THREE.Object3D(), partD = new THREE.Object3D(), col = new THREE.Color();
-  // HUMAN SCALE (scale-agent handoff): the instanced body parts in drawParts are
-  // laid out at the OLD ~2.6m voxel-rig proportions (torso 1.42, head 2.18…). The
-  // player rig now renders at CBZ.HUMAN_SCALE (0.70) via a uniform group scale on
-  // its 'model' node so an adult stands ~1.82m. Mirror that here as a single
-  // UNIFORM scale on the per-agent root (feet sit at the root origin, so every
-  // part offset + height shrinks proportionally and stays ground-anchored) — the
-  // cleanest equivalent of the rig's group scale, no per-offset edits. One-line
-  // revert shared with the rig: CBZ.CONFIG.CHAR_SCALE_REAL = false.
-  const HUMAN_S = (!CBZ.CONFIG || CBZ.CONFIG.CHAR_SCALE_REAL !== false) ? (CBZ.HUMAN_SCALE || 0.70) : 1;
-  const shadD = new THREE.Object3D();    // shadow-quad matrix compose scratch (zero per-frame alloc)
+  let root = null;
 
   // ---- ONE shared blob-shadow texture/material for the whole city ----
   // (city/blobshadows.js draws the full-rig ped/car blobs with the SAME
@@ -411,7 +379,6 @@
   // dead-reckoning step direction (unit vector toward the current target),
   // refreshed on think ticks; mid/far agents walk this between ticks.
   const dirX = new Float32Array(CAP), dirZ = new Float32Array(CAP);
-  const collapsedQ = new Uint8Array(CAP);         // park matrices already written (skip rewrites)
   let liveTarget = CAP;                           // how many agents should be ON the street
   let pool = [], poolBuilt = false;               // interactive-promotion pool (declaration was dropped when thinning was added)
   // ---- POOL PRE-WARM (kill the "NPCs pop in / load slowly as I walk up" hitch) ----
@@ -435,86 +402,16 @@
   let prewarming = false;                           // armed by spawnCityCrowd, spent by prewarmTick()
   promotedBy.fill(-1);
 
-  // a UNIT (1×1×1) box scaled per-part at render time, jail-crowd style. Tinted
-  // parts need a white color attribute (r128 USE_COLOR multiplies by 0 → black);
-  // solid parts (legs/eyes/mouth) use a plain unit box.
-  function tintUnit() {
-    const g = new THREE.BoxGeometry(1, 1, 1);
-    const n = g.attributes.position.count, white = new Float32Array(n * 3); white.fill(1);
-    g.setAttribute("color", new THREE.BufferAttribute(white, 3));
-    return g;
-  }
-
+  // The analytical rows are never drawn as stand-ins: a row has a body only
+  // when it is promoted into a pooled cityMakePed rig (makePooled below).
   function buildMeshes() {
     if (built) return;
-    if (STANDARD_ACTORS_ONLY) {
-      built = true;
-      root = new THREE.Group();
-      root.name = "city-crowd-standard-actors";
-      root.visible = false;
-      CBZ.scene.add(root);
-      // Deliberately do not allocate proxy bodies, faces, shadows, or points.
-      // Actual character groups are owned by the city arena through makePooled.
-      meshes = [];
-      ready = false;
-      return;
-    }
-    if (!THREE.InstancedMesh) return;    // headless / no-instancing → sim only, no render
     built = true;
-    wm = new THREE.Matrix4();
-    root = new THREE.Group(); root.name = "city-crowd"; root.visible = false;
+    root = new THREE.Group();
+    root.name = "city-crowd-standard-actors";
+    root.visible = false;
     CBZ.scene.add(root);
-    const unitT = tintUnit();                              // shared geom for all tinted parts
-    const unitP = new THREE.BoxGeometry(1, 1, 1);          // shared geom for solid parts
-    const skinMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
-    const shirtMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
-    const hairMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
-    const pants = CBZ.mat ? CBZ.mat(0x2c3038) : new THREE.MeshLambertMaterial({ color: 0x2c3038 });
-    const dark = CBZ.mat ? CBZ.mat(0x141414) : new THREE.MeshLambertMaterial({ color: 0x141414 });
-    function part(mat, geo) {
-      const m = new THREE.InstancedMesh(geo, mat, CAP);
-      m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      m.castShadow = false; m.receiveShadow = true; m.frustumCulled = false;
-      root.add(m); return m;
-    }
-    torso = part(shirtMat, unitT);
-    hd = part(skinMat, unitT);
-    hair = part(hairMat, unitT);
-    armL = part(skinMat, unitT); armR = part(skinMat, unitT);
-    legL = part(pants, unitP); legR = part(pants, unitP);
-    eyeL = part(dark, unitP); eyeR = part(dark, unitP); mouth = part(dark, unitP);
-    meshes = [torso, hd, hair, armL, armR, legL, legR, eyeL, eyeR, mouth];
-    syncInstanceCount();
-    // WHITE-POP HARDENING (owner: "white people far away then they become
-    // normal skin color"): a tinted InstancedMesh renders flat WHITE
-    // (material 0xffffff × the white vertex-color attribute) for any
-    // instance drawn before its first setColorAt() upload. Pre-seed EVERY
-    // slot with plausible defaults at build time, before the group can ever
-    // render, so no call path (re-seed, mode re-entry, a future refactor
-    // that renders before paintColors()) can draw an unpainted white body.
-    // paintColors()/castTint overwrite these per agent as usual.
-    col.setHex(SKINS[1]);
-    for (let i = 0; i < CAP; i++) { hd.setColorAt(i, col); armL.setColorAt(i, col); armR.setColorAt(i, col); }
-    col.setHex(SHIRTS[4]);
-    for (let i = 0; i < CAP; i++) torso.setColorAt(i, col);
-    col.setHex(HAIRS[0]);
-    for (let i = 0; i < CAP; i++) hair.setColorAt(i, col);
-    [torso, hd, hair, armL, armR].forEach(function (m) { if (m.instanceColor) m.instanceColor.needsUpdate = true; });
-    // the ground-contact blob layer: one more instanced draw for the whole mass
-    const smat = CBZ.blobShadowMat ? CBZ.blobShadowMat() : null;
-    if (smat && THREE.PlaneGeometry) {
-      shadowQ = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), smat, CAP);
-      shadowQ.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      shadowQ.castShadow = false; shadowQ.receiveShadow = false; shadowQ.frustumCulled = false;
-      // park ALL slots off-map up front: instances ≥ count would otherwise sit
-      // as identity matrices — visible dark quads stacked at the origin.
-      wm.makeScale(0.0001, 0.0001, 0.0001); wm.setPosition(0, PARK, 0);
-      for (let i = 0; i < CAP; i++) shadowQ.setMatrixAt(i, wm);
-      shadowQ.instanceMatrix.needsUpdate = true;
-      root.add(shadowQ);
-      syncInstanceCount();
-    }
-    ready = true;
+    ready = false;
   }
 
   function arena() { return CBZ.city && CBZ.city.arena; }
@@ -841,23 +738,13 @@
     const pool = d && ((nightShift && NIGHT_KIND_SHIRTS[d.kind]) || KIND_SHIRTS[d.kind]);
     shirt[i] = pool ? pool[(Math.random() * pool.length) | 0] : ((Math.random() * 10) | 0);
   }
-  function repaintShirt(i) {              // recolour one recycled body in-place
-    if (STANDARD_ACTORS_ONLY || !ready) return;
-    col.setHex(SHIRTS[shirt[i]]); torso.setColorAt(i, col);
-    if (torso.instanceColor) torso.instanceColor.needsUpdate = true;
-  }
-
   CBZ.spawnCityCrowd = function (n) {
     buildMeshes();
-    const A = arena(); if (!A) { count = 0; syncInstanceCount(); return 0; }
+    const A = arena(); if (!A) { count = 0; return 0; }
     count = Math.max(0, Math.min(CAP, n | 0));
-    // r128 draws InstancedMesh.count instances, not merely the slots whose
-    // matrices we touched. Keep the ten body pools + shadow pool at the live
-    // population so unused CAP slots never consume vertex work.
-    syncInstanceCount();
     if (poolBuilt) releaseAll();                 // un-assign any held peds before re-seeding
     promotedBy.fill(-1); deadAgent.fill(0); corpseT.fill(0); suppressed.fill(0);
-    stagT.fill(0); collapsedQ.fill(0); panicT.fill(0); pauseT.fill(0);
+    stagT.fill(0); panicT.fill(0); pauseT.fill(0);
     groupLeader.fill(-1); groupOffset.fill(0);
     groupMemA.fill(-1); groupMemB.fill(-1); groupMemC.fill(-1);
     liveTarget = count;                          // full street at the start of a run
@@ -874,18 +761,6 @@
       fem[i] = Math.random() < 0.48 ? 1 : 0;   // ~48% female, same unseeded stream as the rolls above
     }
     formGroups(count);                           // ~35% link into 2-4 body walking groups (deterministic)
-    paintColors();
-    if (ready) {
-      // park EVERY slot ≥ count across ALL body parts + the blob, so a re-seed
-      // to a smaller crowd can never strand stale frozen bodies (or detached
-      // face parts) from a previous, larger run — render() only writes 0..count-1.
-      wm.makeScale(0.0001, 0.0001, 0.0001); wm.setPosition(0, PARK, 0);
-      for (let i = count; i < CAP; i++) {
-        for (let m = 0; m < meshes.length; m++) meshes[m].setMatrixAt(i, wm);
-        if (shadowQ) shadowQ.setMatrixAt(i, wm);
-      }
-      render(0);                 // place them so frame 0 isn't a pile at the origin
-    }
     // ARM THE POOL PRE-WARM. This fires at city LOAD (mode.js calls spawnCityCrowd
     // on entry) — you're still on the spawn roof, far from anyone — so the ~PROMO
     // rigs get built a couple per frame over the next ~11 frames and are parked,
@@ -943,16 +818,6 @@
     for (let i = 0; i < pool.length; i++) if (pool[i].idx >= 0 && !pool[i].ped.dead) activeReal++;
     return { mode: "standard-actors", population: count, activeReal: activeReal, proxyVisible: false, proxyObjects: 0 };
   };
-
-  function paintColors() {
-    if (STANDARD_ACTORS_ONLY || !ready) return;
-    for (let i = 0; i < count; i++) {
-      col.setHex(SHIRTS[shirt[i]]); torso.setColorAt(i, col);
-      col.setHex(SKINS[skin[i]]); hd.setColorAt(i, col); armL.setColorAt(i, col); armR.setColorAt(i, col);
-      col.setHex(HAIRS[hairC[i]]); hair.setColorAt(i, col);
-    }
-    [torso, hd, hair, armL, armR].forEach(function (m) { if (m.instanceColor) m.instanceColor.needsUpdate = true; });
-  }
 
   // pure-math simulation: stroll toward the target, repick on arrival.
   // TICK TIERS — the 700-strong street at flat per-frame cost: agents near the
@@ -1129,146 +994,6 @@
       if (ttl > panicT[i]) panicT[i] = ttl;                      // refresh, never shorten an active panic
     }
   };
-
-  function put(mesh, i, lx, ly, lz, sx, sy, sz, rx) {
-    partD.position.set(lx, ly, lz);
-    partD.rotation.set(rx || 0, 0, 0);
-    partD.scale.set(sx, sy, sz);
-    partD.updateMatrix();
-    wm.multiplyMatrices(rootD.matrix, partD.matrix);
-    mesh.setMatrixAt(i, wm);
-  }
-  // the 10 body parts at standard proportions (matches the jail mass-crowd).
-  // WOMEN IN THE CROWD (W3): fem[i] set → a narrower/shallower torso, a
-  // slightly smaller head, slimmer + closer-in arms, slimmer legs, and hair
-  // that reads LONG (dropped y-offset + stretched y-scale so it cascades down
-  // behind the head instead of sitting as a short cap). Every number below is
-  // ONLY a scale/offset tweak on the SAME put() calls/instances — the male
-  // (else) branch is byte-identical to the original single path.
-  function drawParts(i, sw, bob) {
-    if (fem[i]) {
-      put(torso, i, 0, 1.42 + bob, 0, 0.82 * 0.85, 0.88, 0.44 * 0.88, 0);
-      put(hd, i, 0, 2.18 + bob, 0, 0.54 * 0.92, 0.54 * 0.92, 0.54 * 0.92, 0);
-      // LONG HAIR: same cap width, dropped ~0.35 lower and stretched ~4.4x
-      // taller so it drapes down behind the head to shoulder height instead
-      // of reading as a short crown.
-      put(hair, i, 0, 2.15 + bob, 0, 0.58, 0.62, 0.58, 0);
-      put(legL, i, -0.20, 0.52, 0, 0.28 * 0.9, 0.92, 0.28 * 0.9, sw);
-      put(legR, i, 0.20, 0.52, 0, 0.28 * 0.9, 0.92, 0.28 * 0.9, -sw);
-      put(armL, i, -0.55 * 0.9, 1.40 + bob, 0, 0.24 * 0.83, 0.78, 0.24 * 0.83, -sw * 0.82);
-      put(armR, i, 0.55 * 0.9, 1.40 + bob, 0, 0.24 * 0.83, 0.78, 0.24 * 0.83, sw * 0.82);
-    } else {
-      put(torso, i, 0, 1.42 + bob, 0, 0.82, 0.88, 0.44, 0);
-      put(hd, i, 0, 2.18 + bob, 0, 0.54, 0.54, 0.54, 0);
-      put(hair, i, 0, 2.50 + bob, 0, 0.58, 0.14, 0.58, 0);
-      put(legL, i, -0.20, 0.52, 0, 0.28, 0.92, 0.28, sw);
-      put(legR, i, 0.20, 0.52, 0, 0.28, 0.92, 0.28, -sw);
-      put(armL, i, -0.55, 1.40 + bob, 0, 0.24, 0.78, 0.24, -sw * 0.82);
-      put(armR, i, 0.55, 1.40 + bob, 0, 0.24, 0.78, 0.24, sw * 0.82);
-    }
-    // FACE — the head box is 0.54 deep (front face at local z 0.27). The old
-    // z 0.235 + 0.06-deep eyes put the face's FRONT at 0.265 — fully BURIED
-    // inside the head, so the whole instanced crowd read as faceless mannequins.
-    // Deep boxes centred at z 0.25 stick ~0.04 proud of the face AND wrap back
-    // into the head, so eyes/mouth read from any reasonable angle, not just
-    // dead-on. Same instances, zero new draw calls.
-    put(eyeL, i, -0.12, 2.235 + bob, 0.25, 0.11, 0.14, 0.12, 0);
-    put(eyeR, i, 0.12, 2.235 + bob, 0.25, 0.11, 0.14, 0.12, 0);
-    put(mouth, i, 0, 2.045 + bob, 0.255, 0.22, 0.055, 0.10, 0);
-  }
-  const FARDRAW2 = 95 * 95;     // beyond this, matrix rewrites drop to every 4th frame
-  let _wroteMatrices = false;   // perf: skip the needsUpdate re-upload (12 buffers,
-                                // ~570KB) on frames where no matrix changed at all
-  function render() {
-    if (STANDARD_ACTORS_ONLY || !ready || !count) return;
-    const frame = _simFrame;
-    const P = CBZ.player;
-    const ppx = P ? P.pos.x : 0, ppz = P ? P.pos.z : 0;
-    // Anything past full fog dissolution is invisible — park its matrices like
-    // a collapsed body instead of rewriting 11 of them (at tier 0's 170m fog
-    // most of a 700-agent crowd is beyond the wall). collapsedQ already owns
-    // the park/rehydrate handshake, so returning inside the fog rewrites live.
-    const fogFar = (CBZ.scene && CBZ.scene.fog && CBZ.game && CBZ.game.mode === "city") ? CBZ.scene.fog.far + 25 : 1e9;
-    const fogGone2 = fogFar * fogFar;
-    _wroteMatrices = false;
-    for (let i = 0; i < count; i++) {
-      const fdx = px[i] - ppx, fdz = pz[i] - ppz;
-      const dist2 = fdx * fdx + fdz * fdz;
-      if (deadAgent[i] || suppressed[i] || promotedBy[i] >= 0 || dist2 > fogGone2) {  // faded corpse, thinned off-street, promoted to a real rig, or fog-invisible → collapse the instanced body
-        if (collapsedQ[i]) continue;                   // park matrices already written — skip the 11 rewrites
-        collapsedQ[i] = 1;
-        wm.makeScale(0.0001, 0.0001, 0.0001); wm.setPosition(0, PARK, 0);
-        for (let m = 0; m < meshes.length; m++) meshes[m].setMatrixAt(i, wm);
-        if (shadowQ) shadowQ.setMatrixAt(i, wm);   // blob collapses with the body
-        _wroteMatrices = true;
-        continue;
-      }
-      collapsedQ[i] = 0;                               // visible again → park matrices need rewriting next collapse
-      if (corpseT[i] > 0) {                            // freshly killed → lie flat ON the ground
-        _wroteMatrices = true;
-        // Rotating the standing rig 90° about X lays it on its back: each part's
-        // local +Z (body depth) becomes the world-vertical extent. The thickest
-        // parts (head/torso, ~0.27 half-depth) set how high the whole body must
-        // ride so NOTHING sinks below the surface — lift the lying body to ~0.42
-        // above the floor so it rests cleanly ON the ground, not bisected by it.
-        const floorY = (CBZ.floorAt ? CBZ.floorAt(px[i], pz[i]) : 0);
-        const fy = floorY + 0.42 * HUMAN_S;          // lying lift scales with the shrunk body depth
-        rootD.position.set(px[i], fy, pz[i]);
-        rootD.rotation.set(Math.PI / 2, heading[i], 0);
-        rootD.scale.set(HUMAN_S, HUMAN_S, HUMAN_S);
-        rootD.updateMatrix();
-        drawParts(i, 0, 0);
-        if (shadowQ) {                               // the dead still touch the ground:
-          shadD.position.set(px[i], floorY + 0.04, pz[i]);   // grounded regardless of body scale
-          shadD.rotation.set(-Math.PI / 2, 0, heading[i]);   // long smear aligned under the lying body
-          shadD.scale.set(1.5, 2.3, 1);
-          shadD.updateMatrix();
-          shadowQ.setMatrixAt(i, shadD.matrix);
-        }
-        continue;
-      }
-      // far bodies move sub-pixel per frame — rewrite their 11 matrices every
-      // 4th frame (round-robin) and let the stale pose coast in between.
-      const isFar = dist2 > FARDRAW2;
-      if (isFar && ((frame + i) & 3) !== 0) continue;
-      _wroteMatrices = true;
-      // FEET ON THE GROUND: the city is flat (groundHeightAt→0) so this is 0
-      // today, but route through floorAt like the corpse path so a body never
-      // sinks/floats if it walks onto raised terrain (beach/boardwalk/etc).
-      const fy = CBZ.floorAt ? CBZ.floorAt(px[i], pz[i]) : 0;
-      rootD.position.set(px[i], fy, pz[i]);
-      if (stagT[i] > 0) {
-        // bumped: face the shover, pitch away with the shove — a readable
-        // stumble straight off the verlet-style skid, no rig animation needed.
-        const lean = Math.min(0.55, stagT[i] * 1.1);
-        rootD.rotation.set(lean, Math.atan2(stagX[i], stagZ[i]) + Math.PI, 0);
-      } else rootD.rotation.set(0, heading[i], 0);
-      rootD.scale.set(HUMAN_S, HUMAN_S, HUMAN_S);   // shrink the ambient body to match the ~1.82m player rig
-      rootD.updateMatrix();
-      // STOP THE FAR-TIER LEG STROBE: a far body's matrices are only rewritten
-      // every 4th frame, but phase[i] keeps advancing every frame — so on each
-      // write Math.sin(phase[i]) has jumped ~4 frames of swing, snapping the legs
-      // to a new angle 4× a second (the filmed far-crowd leg strobe / stutter).
-      // The legs are sub-pixel out there anyway, so draw the far tier in a STILL
-      // pose (sw 0, bob 0 — exactly like the corpse path) and let only the body's
-      // SLIDE (position) read as motion. The 0.94-quarter shadow stays a plain
-      // disc. Near bodies (full per-frame rewrites) keep the normal walk cycle.
-      const sn = isFar ? 0 : (stagT[i] > 0 ? Math.sin(phase[i]) * 0.25 : Math.sin(phase[i]));
-      drawParts(i, isFar ? 0 : sn * 0.5, isFar ? 0 : Math.abs(Math.cos(phase[i])) * 0.05);
-      if (shadowQ) {
-        shadD.position.set(px[i], fy + 0.04, pz[i]);  // a hair above the surface (+ polygonOffset)
-        shadD.rotation.set(-Math.PI / 2, 0, 0);
-        const ss = 1.18 + Math.abs(sn) * 0.22;       // stride spreads the contact patch — reads as WALK
-        shadD.scale.set(ss, ss * 0.94, 1);
-        shadD.updateMatrix();
-        shadowQ.setMatrixAt(i, shadD.matrix);
-      }
-    }
-    if (_wroteMatrices) {
-      for (let m = 0; m < meshes.length; m++) meshes[m].instanceMatrix.needsUpdate = true;
-      if (shadowQ) shadowQ.instanceMatrix.needsUpdate = true;
-    }
-  }
 
   // ---- promotion pool: real makeCharacter peds reused as you move ----
   // setLook paints through CBZ.cityPaintSlot -> CBZ.paintMesh: each slot takes
@@ -1773,7 +1498,7 @@
           if (inForwardCone(rx, rz) && rd2 < FILL_AHEAD_NEAR * FILL_AHEAD_NEAR) continue;
           ungroup(i);                                  // teleport → drop any walking-group link
           px[i] = _tmp.x; pz[i] = _tmp.z; pauseT[i] = 0;
-          castTint(i, px[i], pz[i]); repaintShirt(i);  // re-dress for the district it lands in
+          castTint(i, px[i], pz[i]);  // re-dress for the district it lands in
           repick(i);
           moved++; break;
         }
@@ -1797,7 +1522,7 @@
           if (rd < lo || rd > hi) continue;        // land in the appropriate ring
           ungroup(i);                                  // teleport → drop any walking-group link
           px[i] = _tmp.x; pz[i] = _tmp.z; pauseT[i] = 0;
-          castTint(i, px[i], pz[i]); repaintShirt(i);
+          castTint(i, px[i], pz[i]);
           repick(i);
           moved++; break;
         }
@@ -2388,7 +2113,7 @@
   // a city teardown (new run / mode reset) nukes CBZ.cityPeds — drop the pool too
   if (CBZ.clearCityPeds) {
     const _clear = CBZ.clearCityPeds;
-    CBZ.clearCityPeds = function () { pool = []; poolBuilt = false; prewarming = false; promotedBy.fill(-1); deadAgent.fill(0); suppressed.fill(0); stagT.fill(0); collapsedQ.fill(0); pauseT.fill(0); liveTarget = count; return _clear.apply(this, arguments); };
+    CBZ.clearCityPeds = function () { pool = []; poolBuilt = false; prewarming = false; promotedBy.fill(-1); deadAgent.fill(0); suppressed.fill(0); stagT.fill(0); pauseT.fill(0); liveTarget = count; return _clear.apply(this, arguments); };
   }
 
   // ---- DENSITY THINNING: keep the on-street agent count in step with the finite
@@ -2493,7 +2218,7 @@
               ungroup(i);                            // teleport → drop any walking-group link (already unlinked normally)
               suppressed[i] = 0; pauseT[i] = 0;
               px[i] = _tmp.x; pz[i] = _tmp.z;
-              castTint(i, px[i], pz[i]); repaintShirt(i);
+              castTint(i, px[i], pz[i]);
               repick(i);
               seated = true; break;
             }
@@ -2525,7 +2250,7 @@
           if (!placeSafe(_tmp.x, _tmp.z)) continue;
           ungroup(i);                                             // teleport → drop any walking-group link
           px[i] = _tmp.x; pz[i] = _tmp.z; pauseT[i] = 0;
-          castTint(i, px[i], pz[i]); repaintShirt(i);             // walks on dressed for the hour/biome
+          castTint(i, px[i], pz[i]);             // walks on dressed for the hour/biome
           repick(i);
           landed = true; break;
         }
@@ -2604,6 +2329,5 @@
     thin(dt);             // keep on-street density in step with the finite headcount
     aheadReseed();        // pull distant bodies into the street ahead of you
     updatePromotion();
-    render();
   });
 })();

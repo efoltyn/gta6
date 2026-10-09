@@ -806,7 +806,8 @@
           additive: false, smoke: true, base: 1.3 * scale,
           pop: (4.8 + rng() * 2.6) * scale,
           life: 4.0 + rng() * 2.6, maxOp: 0.44,
-          shade: 0.09 + rng() * 0.06, spin: (rng() - 0.5),
+          // opts.shade: a caller's own grey (tear gas is near-white, 0.75+)
+          shade: opts.shade != null ? Math.max(0, Math.min(1, +opts.shade)) + rng() * 0.05 : 0.09 + rng() * 0.06, spin: (rng() - 0.5),
           vx: Math.cos(a) * drift, vy: 1.2 + rng() * 1.0,
           vz: Math.sin(a) * drift, delay: i * 0.08 + rng() * 0.1,
         });

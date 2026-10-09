@@ -687,49 +687,8 @@
     } catch (e) {}
   }
 
-  // ---- poses: registered into entities/poses.js's registry -------------
-  function dampv(c, t, r, dt) { return c + (t - c) * (1 - Math.exp(-r * dt)); }
-  let posesWired = false;
-  function wirePoses() {
-    if (posesWired || !CBZ.charPoses) return;
-    posesWired = true;
-    function arms(ch, dt, lx, lz, rx, rz, el, er) {
-      const la = ch.parts && ch.parts.la, ra = ch.parts && ch.parts.ra, J = ch.low || {};
-      if (la) { la.rotation.x = dampv(la.rotation.x, lx, 12, dt); la.rotation.z = dampv(la.rotation.z, lz, 12, dt); }
-      if (ra) { ra.rotation.x = dampv(ra.rotation.x, rx, 12, dt); ra.rotation.z = dampv(ra.rotation.z, rz, 12, dt); }
-      if (J.la) J.la.rotation.x = dampv(J.la.rotation.x, Math.min(0, el), 12, dt);
-      if (J.ra) J.ra.rotation.x = dampv(J.ra.rotation.x, Math.min(0, er), 12, dt);
-    }
-    // a board on a stick, both hands up the stick, held over the head
-    CBZ.charPoses.pubPlacard = function (ch, dt) {
-      ch._pubT = (ch._pubT || 0) + dt;
-      const hype = (ch._pubHype || 0) > 0;
-      if (hype) ch._pubHype -= dt;
-      const pump = hype ? Math.sin(ch._pubT * 9) * 0.2 : Math.sin(ch._pubT * 1.4 + (ch._pubPh || 0)) * 0.04;
-      arms(ch, dt, -2.72 + pump, -0.2, -2.72 + pump, 0.2, -0.3, -0.3);
-      const pr = ch._pubProp;
-      if (pr) { pr.position.y = 1.8 + (hype ? Math.max(0, -pump) * 0.5 : 0); pr.rotation.z = pump * 0.25; }
-    };
-    // a little flag on a stick in the right hand, waved
-    CBZ.charPoses.pubFlag = function (ch, dt) {
-      ch._pubT = (ch._pubT || 0) + dt;
-      const hype = (ch._pubHype || 0) > 0;
-      if (hype) ch._pubHype -= dt;
-      const w = Math.sin(ch._pubT * (hype ? 8 : 2.2) + (ch._pubPh || 0));
-      arms(ch, dt, -0.1, ch.armOutZ || 0.08, -2.45 + w * (hype ? 0.3 : 0.08), 0.12, -0.2, -0.25);
-      const pr = ch._pubProp;
-      if (pr) pr.rotation.z = w * (hype ? 0.35 : 0.1);
-    };
-    // both arms up in a V, pumping
-    CBZ.charPoses.pubCheer = function (ch, dt) {
-      ch._pubT = (ch._pubT || 0) + dt;
-      const p = Math.sin(ch._pubT * 8 + (ch._pubPh || 0)) * 0.25;
-      arms(ch, dt, -2.55 + p, 0.45, -2.55 - p, -0.45, -0.25, -0.25);
-    };
-  }
   function setPose(ped, pose) {
     if (!ped || !ped.char) return;
-    wirePoses();
     if (CBZ.setCharPose) { try { CBZ.setCharPose(ped.char, pose || "stand"); return; } catch (e) {} }
     ped.char.pose = pose || null;
   }
@@ -747,7 +706,7 @@
     const bd = new THREE.Mesh(boardGeo(), signMats(text, support));
     bd.position.y = 0.6; pr.add(bd);
     ped.group.add(pr);
-    ped._pubProp = pr;
+    ped._pubProp = pr; ped._sign = text;
     if (ped.char) { ped.char._pubProp = pr; ped.char._pubPh = Math.random() * 6; }
     setPose(ped, "pubPlacard");
   }
@@ -790,7 +749,117 @@
     const fy = CBZ.floorAt ? CBZ.floorAt(x, z) : 0;
     if (ped.pos && isFinite(fy)) ped.pos.y = fy;
     ped._pubRole = role;
+    ped._iOnly = true;              // here for the President: his verbs, not the street's
+    wireMember(ped, role);
     return ped;
+  }
+
+  /* ---- WHAT YOU DO WITH THE PEOPLE WHO CAME (2026-10-08) -------------------
+     A protester:  E "Hear out": he says his piece, you nod, he goes home
+                   (approval up a little; once a day it is on the news).
+                   "Escort out" is the detail's (city/orders.js); a protester
+                   walked off is a story too (the "guards-escort" bus below).
+                   Come close and the nearest one calls out to you himself;
+                   your answer rides on him (campaign_ui.js).
+     A supporter:  E "Shake hands", the wheel "Selfie": a tick of approval
+                   each, once per person.
+     Every one of these is an act the one political model hears
+     (CBZ.politics.act, city/politics.js) and prices; without it they fall
+     back to the presidency's own approval and scandal. No store here.
+     Anyone else of the state on the street (soldiers, officers on a line)
+     offers only the President's orders about a man (city/orders.js). */
+  // pacing only: one call-out at a time, one story a day per kind
+  const PEOPLE = { heardNews: -1, removedNews: -1, callAt: -1e9 };
+  function polAct(kind, t) {
+    const PM = CBZ.politics;
+    if (!PM || typeof PM.act !== "function") return false;
+    try { PM.act(kind, { target: t || null, by: "president", ideology: (t && t.ideology) || null, institution: null }); return true; } catch (e) { return false; }
+  }
+  function scandalUp(n) {
+    const w = CBZ.cityWorldEnsure ? CBZ.cityWorldEnsure() : null, pol = w && w.politics;
+    if (pol) pol.scandal = clamp((+pol.scandal || 0) + n, 0, 100);
+  }
+  function heard(ped) {
+    if (!ped || ped.dead || ped._heard || !playerPres()) return false;
+    ped._heard = true;
+    const sl = (PROT.slogans && PROT.slogans[0]) || "ENOUGH";
+    const line = { "NO CURFEW": "Let us walk our own streets.", "SOLDIERS OUT": "Get the soldiers off my street.", "RESIGN": "You promised us. You lied.",
+      "WHERE IS THE MONEY": "Where did our money go?", "NO DICTATOR": "We voted. Remember that.", "BRING THEM HOME": "Bring my son home.",
+      "STOP THE CRACKDOWN": "They beat my brother.", "KEEP US SAFE": "We're scared. Do something." }[ped._sign || sl] || "We just want to be heard.";
+    say(ped, line, "#ffd9c8", 3.2);
+    if (!polAct("hear-out", ped)) shock(0.4);
+    const d = Math.floor(now());
+    if (PEOPLE.heardNews !== d) { PEOPLE.heardNews = d; news("The President stops to hear protesters"); }
+    // he said it; he goes home
+    setTimeout(function () {
+      for (let i = PROT.members.length - 1; i >= 0; i--) if (PROT.members[i].ped === ped) { const m = PROT.members.splice(i, 1)[0]; if (m.slot) m.slot.ped = ped; startDrift(ped, PROT.drifting, PROT.at, false); return; }
+      for (let i = CROWD.members.length - 1; i >= 0; i--) if (CROWD.members[i].ped === ped) { CROWD.members.splice(i, 1); startDrift(ped, CROWD.drifting, CROWD.stage, false); return; }
+    }, 3200);
+    return true;
+  }
+  function wireMember(ped, role) {
+    const I = CBZ.interactions;
+    if (!I || !I.registerFor) return;
+    if (role === "pro") {
+      I.registerFor(ped, { id: "pv-hear-out", slot: "e", prio: 30, campaignSafe: true, forceYes: true, label: "Hear out",
+        canShow: function () { return playerPres() && !ped.dead && !ped._heard; },
+        onSelect: function () { heard(ped); } });
+      return;
+    }
+    I.registerFor(ped, { id: "pv-shake-hands", slot: "e", prio: 30, campaignSafe: true, forceYes: true, label: "Shake hands",
+      canShow: function () { return playerPres() && !ped.dead && !ped._shook; },
+      onSelect: function () { ped._shook = true; if (!polAct("handshake", ped)) shock(0.1); hype(ped, 3); say(ped, rpick(["An honour, sir!", "God bless you, Mr. President!", "Keep going, sir!"]), "#d9f2c8", 2.4); } });
+    I.registerFor(ped, { id: "pv-selfie", prio: 28, campaignSafe: true, forceYes: true, label: "Selfie",
+      canShow: function () { return playerPres() && !ped.dead && !ped._selfie; },
+      onSelect: function () { ped._selfie = true; if (!polAct("selfie", ped)) shock(0.1); hype(ped, 3); say(ped, rpick(["My mother won't believe this!", "Say cheese, sir!", "This is going up tonight!"]), "#d9f2c8", 2.4); } });
+  }
+  // the nearest protester calls out when you come close; one at a time
+  function tickCallOut() {
+    const P = playerPos(), UI = CBZ.campaignUI;
+    if (!P || !PROT.active || !PROT.members.length || !playerPres() || !UI || !UI.say) return;
+    if (UI.replies && UI.replies()) return;
+    const T = performance.now() / 1000;
+    if (T - PEOPLE.callAt < 45) return;
+    let best = null, bd = 7;
+    for (let i = 0; i < PROT.members.length; i++) {
+      const p = PROT.members[i].ped;
+      if (!p || p.dead || p._heard || p._calledOut) continue;
+      const d = distXZ(P, p.pos.x, p.pos.z);
+      if (d < bd) { bd = d; best = p; }
+    }
+    if (!best) return;
+    PEOPLE.callAt = T; best._calledOut = true;
+    const sl = best._sign || (PROT.slogans && PROT.slogans[0]) || "ENOUGH";
+    const line = (CHANTS[sl] ? "Mr. President! " + CHANTS[sl].split("!")[0] + "!" : "Mr. President! Look at us!");
+    const ped = best;
+    let pr = null;
+    try { pr = UI.say(ped.name || "Protester", line, [{ id: "hear", label: "Hear out" }, { id: "out", label: "Escort out" }], { actor: ped }); } catch (e) { pr = null; }
+    if (pr && pr.then) pr.then(function (c) {
+      if (c === "hear") heard(ped);
+      else if (c === "out" && CBZ.cityOrders2 && CBZ.cityOrders2.takeDown) CBZ.cityOrders2.takeDown(ped, "escort");
+    });
+  }
+  // a protester walked off by the detail is a story (city/orders.js bus)
+  function onEscort(e) {
+    if (!e || e.pubRole !== "pro") return;
+    // city/orders.js already told the political model; without it, ours
+    if (!(CBZ.politics && typeof CBZ.politics.act === "function")) { shock(-0.4); scandalUp(1); }
+    const d = Math.floor(now());
+    if (PEOPLE.removedNews !== d) { PEOPLE.removedNews = d; news("Secret Service drags a protester from the President's path"); }
+  }
+  // THE GATE OFFICER clears the road outside his gate when you tell him
+  let gateWired = false;
+  function wireGate() {
+    const I = CBZ.interactions;
+    if (gateWired || !I || !I.register) return;
+    gateWired = true;
+    I.register("ped", { id: "pv-clear-gate", slot: "e", prio: 30, campaignSafe: true, forceYes: true, anyone: true, label: "Clear the gate",
+      canShow: function (t) { return !!(t && !t.dead && t._protRole === "gate" && PROT.active && playerPres()); },
+      onSelect: function (t) {
+        say(t, "Clear the road! Move!", "#dfe7ff", 2.4);
+        if (!polAct("clear-protest", null)) { shock(-1); scandalUp(2); }
+        disperseProtest();
+      } });
   }
   function slogansNow() {
     const out = [];
@@ -806,6 +875,10 @@
     if (ATTACK.t != null && T - ATTACK.t < pace(1.5)) out.push("KEEP US SAFE", "NEVER AGAIN");
     if (recent("bureau", 2) || recent("martial", 3)) out.push("BRING THEM HOME");
     if (approval() < 35) out.push("RESIGN", "NOT MY PRESIDENT", "ENOUGH");
+    // the angriest people carry their own boards (city/politics.js)
+    const Pol = CBZ.politics;
+    const A = Pol && Pol.angriest ? (function () { try { return Pol.angriest(); } catch (e) { return null; } })() : null;
+    if (A && A.anger >= 55 && A.slogans) for (let i = 0; i < A.slogans.length; i++) out.push(A.slogans[i]);
     if (!out.length) out.push("HEAR US", "RESIGN");
     return out;
   }
@@ -1036,6 +1109,7 @@
     CROWD.members.length = 0; CROWD.slots = []; CROWD.stage = null;
     for (let i = 0; i < PROT.members.length; i++) queuePanic(PROT.members[i].ped, PROT.drifting, x, z);
     PROT.members.length = 0;
+    if (CBZ.mob && CBZ.mob.panic) { try { CBZ.mob.panic(x, z); } catch (e) {} }
     if (CBZ.cityCrowdFlee) { try { CBZ.cityCrowdFlee(x, z, 60, 1); } catch (e) {} }
     if (CBZ.cityPanicRaise) { try { CBZ.cityPanicRaise(x, z, 1.2); } catch (e) {} }
   }
@@ -1087,7 +1161,6 @@
   // ============================================================
   const ORD = {};                       // order key -> dayTime of its last yes
   const ATTACK = { t: null };
-  const UNPOPULAR = { curfew: 0.35, martial: 0.45, emergency: 0.35, taxup: 0.25, crackdown: 0.3, fascism: 0.5, communism: 0.4, crown: 0.5, surge: 0.1 };
   let busWired = false;
   function wireBus() {
     if (busWired) return;
@@ -1101,19 +1174,23 @@
         if ((e.key === "crackdown" || e.key === "martial") && PROT.active) disperseProtest("crackdown");
       });
       p.on("attack", function () { ATTACK.t = now(); });
+      p.on("guards-escort", onEscort);
       p.on("lockdown", function (e) { if (e && e.active) cancelRest("lockdown"); });
     } catch (e) {}
     if (typeof p.onAssassinated === "function") {
       try { p.onAssassinated(function (ev) { onPresidentDown(ev); }); } catch (e) {}
     }
   }
+  // THE STREET'S ANGER IS THE COUNTRY'S (city/politics.js): the groups'
+  // loyalty after every act and order, and the movement the angriest of
+  // them has organised. Only a bombing on your watch is felt here first.
   function anger() {
     const T = now();
-    let a = Math.max(0, (35 - approval()) / 35);
-    for (const k in UNPOPULAR) if (ORD[k] != null && T - ORD[k] < pace(1.5)) a += UNPOPULAR[k];
+    let a = 0;
+    const Pol = CBZ.politics;
+    if (Pol && Pol.streetAnger && Pol.owns && Pol.owns(seatId())) { try { a = Pol.streetAnger(); } catch (e) { a = 0; } }
+    else a = Math.max(0, (35 - approval()) / 35);
     if (ATTACK.t != null && T - ATTACK.t < pace(1.0)) a += 0.2;
-    // an organised movement (city/dissent.js) fills the road on its own
-    if (CBZ.dissent && CBZ.dissent.pressure) { try { a += CBZ.dissent.pressure(); } catch (e) {} }
     return clamp(a, 0, 1.5);
   }
   function curfewLive() {
@@ -1392,7 +1469,9 @@
     // HE SAYS IT TO THE CROWD: over his own head at the podium (a speech is
     // spoken aloud, not inner monologue), then the two stances as replies.
     if (CBZ.speech && CBZ.player) CBZ.speech.lines([{ by: CBZ.player, line: b.line, aloud: true }]);
-    try { pr = ui.say(name, "", [{ id: "a", label: b.a.label }, { id: "b", label: b.b.label }]); } catch (e) { pr = null; }
+    // the two stances ride on the lectern you stand at: E the first, hold E the second
+    const at = L.stage ? { x: L.stage.x, y: (L.stage.y || 0) + 1.1, z: L.stage.z } : (CBZ.player && CBZ.player.pos ? { x: CBZ.player.pos.x, y: CBZ.player.pos.y + 1.1, z: CBZ.player.pos.z } : null);
+    try { pr = ui.say(name, "", [{ id: "a", label: b.a.label }, { id: "b", label: b.b.label }], at ? { at: at } : null); } catch (e) { pr = null; }
     if (!pr || !pr.then) { sp.awaiting = false; applyStance(L, b.a); return; }
     const myI = sp.i;
     pr.then(function (choice) {
@@ -1626,8 +1705,27 @@
     PROT.slots = null;
     PROT.chantT = 3;
     PROT.tries = 0;
-    emit("protest", { phase: "start", size: PROT.size, at: { x: PROT.at.x, z: PROT.at.z } });
-    news(PROT.size >= 14 ? "A large crowd of protesters fills the road outside the Executive Mansion." : "Protesters gather outside the Executive Mansion gate.");
+    const angriest = CBZ.politics && CBZ.politics.angriest ? CBZ.politics.angriest() : null;
+    PROT.group = angriest && angriest.anger >= 55 ? angriest.id : null;
+    // THE PROTEST IS A CROWD (city/mob.js): the people the street's anger puts
+    // at the gate — tens on a sour day, a road packed for a hundred metres when
+    // the country is furious — dressed by the groups that are angry, the
+    // nearest of them ordinary people you can walk up to.
+    PROT.mob = null;
+    if (CBZ.mob && CBZ.mob.form) {
+      const souls = Math.round(30 + a * a * 1600 + (size != null ? size * 20 : 0));
+      let G = null;
+      const A = CBZ.address;
+      if (A && A.groups) { try { G = A.groups().filter(function (q) { return q.loyalty < 45; }).map(function (q) { return { name: q.name, share: q.share, color: q.color, cap: 0.2, shirt: 0.35 }; }); } catch (e) { G = null; } }
+      PROT.souls = souls;
+      PROT.mob = CBZ.mob.form({
+        at: { x: gp.x, z: gp.z + 18 }, face: Math.PI, size: souls, side: "opposition", kind: "protest", place: "the Mansion", hold: true, quiet: true,
+        slogans: PROT.slogans, chants: PROT.slogans.map(function (sl) { return CHANTS[sl] || (sl.charAt(0) + sl.slice(1).toLowerCase() + "!"); }),
+        groups: G && G.length ? G : null, violent: 0.04 + a * 0.18, anger: a, width: 20,
+      });
+    }
+    emit("protest", { phase: "start", size: PROT.mob ? PROT.souls : PROT.size, at: { x: PROT.at.x, z: PROT.at.z }, group: PROT.group, groupName: PROT.group ? angriest.name : null });
+    news((PROT.mob ? PROT.souls >= 300 : PROT.size >= 14) ? "A large crowd of protesters fills the road outside the Executive Mansion." : "Protesters gather outside the Executive Mansion gate.");
     fillProtest(force);
     return true;
   }
@@ -1656,6 +1754,14 @@
     if (!PROT.active) return;
     const gp = gatePoint(), P = playerPos();
     if (!gp) return;
+    if (PROT.mob) {
+      // the crowd owns its bodies; this file only decides whether a line stands at the gate
+      const LW = policeLineWanted();
+      if (LW.want && !PROT.mobLine && CBZ.mob.line) {
+        PROT.mobLine = CBZ.mob.line(PROT.mob, { at: { x: gp.x, z: gp.z + 6 }, face: 0, width: 16, n: 10, kind: LW.soldiers ? "army" : "police", gas: 2, retreat: { x: gp.x, z: gp.z - 6 } });
+      }
+      return;
+    }
     const near = force || distXZ(P, gp.x, gp.z) < 170;
     if (!near) { releaseProtestBodies(); return; }
     const slots = protestSlots();
@@ -1685,6 +1791,7 @@
     }
   }
   function releaseProtestBodies() {
+    if (PROT.mob && CBZ.mob) { CBZ.mob.disperse(PROT.mob, false); PROT.mob = null; PROT.mobLine = null; }
     for (let i = 0; i < PROT.members.length; i++) unpost(PROT.members[i].ped);
     PROT.members.length = 0;
     if (PROT.slots) for (let i = 0; i < PROT.slots.length; i++) PROT.slots[i].ped = null;
@@ -1695,6 +1802,7 @@
     if (!PROT.active) return;
     PROT.active = false;
     const flee = phase === "dispersed";
+    if (PROT.mob && CBZ.mob) { CBZ.mob.disperse(PROT.mob, flee); PROT.mob = null; PROT.mobLine = null; }
     for (let i = 0; i < PROT.members.length; i++) startDrift(PROT.members[i].ped, PROT.drifting, flee ? { x: PROT.at.x, z: PROT.at.z - 6 } : gatePoint(), flee);
     PROT.members.length = 0;
     for (let i = 0; i < PROT.police.length; i++) dropBody(PROT.police[i]);
@@ -1717,6 +1825,7 @@
       // a curfew at night clears the street
       if (curfewLive() && isNight() && policeLineWanted().want) { endProtest("dispersed"); return; }
       fillProtest(false);
+      if (PROT.mob) { if (CBZ.mob && !CBZ.mob.stage(PROT.mob)) { PROT.mob = null; endProtest("end"); } return; }    // the crowd chants for itself
       PROT.chantT -= dt;
       if (PROT.chantT <= 0 && PROT.members.length) {
         PROT.chantT = 5 + Math.random() * 3;
@@ -1748,7 +1857,7 @@
     if (CBZ.cityPostStand) { try { c._post = CBZ.cityPostStand(c, spec) || c._post; } catch (e) {} }
     if (!c._post) c._post = { x: x, z: z, fx: fx, fz: fz, mount: null, mountT: 0, relaxed: true };
     if (c.group) c.group.rotation.y = Math.atan2(fx, fz);
-    c._presPublic = true; c._isCop = true;
+    c._presPublic = true; c._isCop = true; c._iOnly = true;
     return c;
   }
   function postSoldier(x, z, face, tag) {
@@ -1757,7 +1866,7 @@
     try {
       p = CBZ.cityPostNpc(x, z, { job: "soldier", archetype: "military", kind: "security", armed: true, weapon: "Rifle", aggr: 0.35, pin: true, face: face, src: tag, pose: "foldarms" });
     } catch (e) { p = null; }
-    if (p) { p.organization = "military"; p._presPublic = true; }
+    if (p) { p.organization = "military"; p._presPublic = true; p._iOnly = true; }
     return p;
   }
   function dropBody(b) {
@@ -2047,6 +2156,8 @@
     buildBalcony();
     wireZones();
     wireBus();
+    wireGate();
+    tickCallOut();
     tickDiary(step);
     if (CROWD.stage) crowdFill(false);
     tickProtest(step);
@@ -2077,7 +2188,7 @@
     return { x: B.stand.x, y: B.deckY, z: B.stand.z, inside: { x: B.inside.x, y: B.inside.y, z: B.inside.z } };
   }
   function protestsRead() {
-    return PROT.active && PROT.at ? [{ x: PROT.at.x, z: PROT.at.z, size: PROT.size }] : [];
+    return PROT.active && PROT.at ? [{ x: PROT.at.x, z: PROT.at.z, size: PROT.mob ? PROT.souls : PROT.size, mob: PROT.mob || null }] : [];
   }
 
   CBZ.presidentPublic = {
@@ -2087,6 +2198,11 @@
     balcony: balconyRead,
     protests: protestsRead,
     evacuate: evacuate,
+    // THE PROPS AND THE ROAR ARE SHARED (city/mob.js, city/address.js): a
+    // marcher's sign, a supporter's flag, the placard and cheer poses, the
+    // card the sign is lettered on, and the speech crowd's answer.
+    props: { sign: giveSign, flag: giveFlag, lower: lowerProp, hype: hype, pose: setPose, signMats: signMats, signTex: signTex },
+    react: function (kind) { if (CROWD.members.length) react(kind === "boo" ? "boo" : "cheer", false); return CROWD.members.length; },
     // harness/test hooks only, not part of the public contract
     _startNow: function (kind) {
       if (!site()) return null;

@@ -196,6 +196,7 @@
     const HALF = CBZ.HIGHWAY_NET_HALF || 15.3;
     let best = null;
     for (const route of table) {
+      if (route.rural) continue;                 // a country road is not a freeway to plug a city into
       const pts = route.pts || [], fil = (route.fillet || 60) + HALF;
       for (let i = 0; i < pts.length - 1; i++) {
         const A = pts[i], B = pts[i + 1];

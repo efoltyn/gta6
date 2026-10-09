@@ -6002,7 +6002,26 @@
     }
     if (m.vx || m.vz || m.gs) Mv.reset(m, ped.pos);
     else { m.lx = ped.pos.x; m.lz = ped.pos.z; }
-    if (held != null) ped.group.rotation.y = Mv.face(m, ped.group.rotation.y, held, dt);
+    // A LOOK IS HEAD FIRST (CBZ.moves.look): the head turns to the thing, the
+    // feet follow only if the look holds. A fighter squaring up, or a man with
+    // his gun out, turns his whole body at the motor's rate as before.
+    if (held != null) {
+      const combat = ped.state === "fight" || (ped._gd && ped._gd.lv >= 2);
+      if (Mv.look && !combat) { ped.group.rotation.y = Mv.look(m, ped.group.rotation.y, held, dt); lookNeck(ped, m.neck); }
+      else { ped.group.rotation.y = Mv.face(m, ped.group.rotation.y, held, dt); lookNeck(ped, Mv.lookRelax ? Mv.lookRelax(m, dt) : 0); }
+    } else if (m.neck) lookNeck(ped, Mv.lookRelax(m, dt));
+  }
+  /* The head's share of a look rides the neck as an OFFSET (what we added
+     last frame is taken back first), so it composes with the other neck
+     writers (the ready pose's baked counter-turn, a stance's look) instead of
+     overwriting them. Only a drawn body: off-screen nobody sees a head turn. */
+  function lookNeck(ped, v) {
+    const ch = ped.char, nk = ch && ch.neck;
+    if (!nk) return;
+    const was = ch._lookNeck || 0;
+    if (Math.abs(v - was) < 1e-4) return;
+    nk.rotation.y += v - was;
+    ch._lookNeck = v;
   }
 
   // scratch options for the motor step (one per call, reused: no allocation)
@@ -6206,10 +6225,14 @@
       // a jog: the spine stays on the threat and the legs do the moving. Only
       // short hops in engagement range qualify; a real reposition sprint still
       // faces where it runs. The locomotion block reads _combatFace.
+      // HELD, NOT RE-ASKED: footwork that started stays footwork until the hop
+      // is clearly a run (6 m out), so a goal sitting near the 4.5 m line can
+      // not flip the spine between the mark and the road every frame.
+      const wasCf = ped._combatFace === ped.rage;
       ped._combatFace = null;
       if (gunner && spd > 0 && CBZ.CONFIG.NPC_IQ_POSITIONS !== false) {
         const goalD2 = Math.hypot(ped.target.x - ped.pos.x, ped.target.z - ped.pos.z);
-        if (goalD2 < 4.5 && d < prf.hi * 1.15 + 4) ped._combatFace = ped.rage;
+        if (goalD2 < (wasCf ? 6 : 4.5) && d < prf.hi * 1.15 + (wasCf ? 7 : 4)) ped._combatFace = ped.rage;
       }
     } else {
       if (ped._iqM && CBZ.combatIQ && CBZ.combatIQ.meleeReset) CBZ.combatIQ.meleeReset(ped);   // fight's over — drop the beat state
@@ -6403,8 +6426,13 @@
     if (!order && !routed && cmdSpd > 0 && dist > 1.2 && CBZ.cityNav && CBZ.cityNav.contextSteer) {
       const hx = dx / dist, hz = dz / dist;
       const psx = ped._prevSteerX || 0, psz = ped._prevSteerZ || 0;
-      if (lod === 0 || !(ped._probeT > 0) || psx * hx + psz * hz < 0.3) {
-        if (lod !== 0) ped._probeT = 0.25 + (ped.slice & 3) * 0.05;
+      // A STEER IS A COMMITMENT: on screen it is re-asked ~7 times a second,
+      // not every frame (a body between two walls had the kernel's winning
+      // slot alternate frame to frame: the walker's "left-right" glance,
+      // the largest class of yaw flips in the npc-intent trace). The goal
+      // swinging away from the held direction still re-asks at once.
+      if (!(ped._probeT > 0) || psx * hx + psz * hz < 0.3) {
+        ped._probeT = lod === 0 ? 0.14 : 0.25 + (ped.slice & 3) * 0.05;
         const out = CBZ.cityNav.contextSteer(ped.pos.x, ped.pos.z, hx, hz, null, 0, psx, psz, _ctxOut, 1);
         if (out && (out.x || out.z)) { ped._prevSteerX = out.x; ped._prevSteerZ = out.z; }
       }
@@ -6435,6 +6463,13 @@
       const n = gatherNbrs(ped, !order && (st === "walk" || st === "wander"));
       if (n) { o.nbrs = _nbrO; o.nbrN = n; }
     }
+    // A BODY AT REST LOOKS HEAD FIRST (CBZ.moves.look): a detail agent's
+    // sector glance, a man turning to see who spoke. The motor holds the feet;
+    // the look turns the head now and the body only if it holds. Not for a
+    // fighter or a drawn gun (those square the body at the motor's rate).
+    let restLook = null;
+    if (o.face != null && Mv.look && lod === 0 && (m.arrived || cmdSpd <= 0.05) && !(o.vffX || o.vffZ) &&
+        st !== "fight" && !(ped._gd && ped._gd.lv >= 2)) { restLook = o.face; o.face = null; }
     // a compensated off-screen tick (stride/stagger) is sub-stepped, never clipped
     let rem = dt;
     while (rem > 1e-5) {
@@ -6444,6 +6479,8 @@
       rem -= h;
     }
     for (let i = 0; i < o.nbrN; i++) _nbrO[i] = null;
+    if (restLook != null) { ped.group.rotation.y = Mv.look(m, ped.group.rotation.y, restLook, dt); lookNeck(ped, m.neck); }
+    else if (m.neck) lookNeck(ped, Mv.lookRelax(m, dt));     // walking: eyes front again
     ped.speed = m.speed;
     // A DOOR HE MAY NOT OPEN (systems/bodydoors.js refused him: a flat he has
     // no key to, the Situation Room): a free walker gives the errand up and

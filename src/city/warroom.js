@@ -73,7 +73,7 @@
   const PEND = [];               // ordered nukes in the air: {x,z,attacker,target,label,byPlayer,t}
   const RAID = { t: null, n: 0, foe: null };
   let RET = null;                // {foe, us, at}
-  const FB = { ped: null, mesh: null };
+  const FB = { ped: null, mesh: null, down: null };   // the football: carrier, the case, a case set down (THE FOOTBALL below)
   const PARK = Object.create(null);    // nation -> { built, jet:[recs], heavy:[recs], b2:[recs], meshes:[] }
   const OUT = Object.create(null);     // nation -> strike jets in the air
 
@@ -127,6 +127,15 @@
   }
   function warheads(id) { return count(id || nation(), "warhead"); }
   function shock(id, n) { if (CBZ.approvalShock && id) { try { CBZ.approvalShock(id, n); } catch (e) {} } }
+  // THE ACT (city/politics.js): what the country feels about a war, a
+  // strike, a bomb on its own soil is one row of the act table. No act
+  // table loaded (a headless harness), the old flat shock stands in.
+  function polAct(kind, o, fallback) {
+    const Po = CBZ.politics;
+    if (Po && Po.act && Po.owns && Po.owns(nation())) { try { Po.act(kind, o || {}); return true; } catch (e) {} }
+    if (fallback) fallback();
+    return false;
+  }
   function scandal(n) {
     const w = CBZ.cityWorldEnsure ? CBZ.cityWorldEnsure() : null;
     const p = (w && w.politics) || g.cityPolitics;
@@ -556,7 +565,13 @@
     // its leader goes underground the moment the order is given
     if (foe) { goToWar(us, foe); alert(foe, 3); }
     if (tgt.bunker && tgt.bunker.owner) alert(tgt.bunker.owner, 3);
-    if (tgt.nation === us && byPlayer) { shock(us, pl.kind === "nuke" ? -40 : -12); scandal(pl.kind === "nuke" ? 40 : 15); }
+    // the country's verdict: a strike abroad is a strike on that country; a
+    // strike on your own soil is the act everyone hates (a nuke is priced
+    // when it goes off, onNuke below)
+    if (byPlayer && pl.kind !== "nuke") {
+      if (tgt.nation === us) polAct("strike-own", { by: "self" }, function () { shock(us, -12); scandal(15); });
+      else if (foe) polAct("strike", { target: foe, by: "army" });
+    }
     return { ok: true, why: "", line: res.line };
   }
 
@@ -586,8 +601,13 @@
     const gt = canWar(opts);
     if (!gt.ok) return gt;
     const us = nation();
-    if (!goToWar(us, gt.foe)) return { ok: false, why: "The order did not go through." };
-    shock(us, 3);                      // the flag goes up; for a week, the country rallies
+    // CONGRESS AUTHORISES IT (city/politics.js gate): a republic's war needs the votes
+    const Po = CBZ.politics;
+    if (Po && Po.gate) { const v = Po.gate("war"); if (!v.ok) return v; }
+    // the rally polwar/relations shock on their own is the act's to price
+    const went = Po && Po.during && Po.owns && Po.owns(us) ? Po.during(function () { return goToWar(us, gt.foe); }) : goToWar(us, gt.foe);
+    if (!went) return { ok: false, why: "The order did not go through." };
+    polAct("war", { target: gt.foe, by: "self" }, function () { shock(us, 3); });   // the flag goes up
     return { ok: true, why: "", line: "Then it's war with " + gt.name + "." };
   }
   function canPeace() {
@@ -604,6 +624,7 @@
     const r = PW().makePeace ? PW().makePeace(us) : null;
     if (!r) return { ok: false, why: "They will not take the call." };
     RAID.t = null;
+    polAct("peace", { target: gt.foe, by: "self" });
     return { ok: true, why: "", line: r.loser === us ? "They'll take the terms. It will cost us." : nameOf(gt.foe) + " has signed. It's over." };
   }
 
@@ -1008,7 +1029,8 @@
     if (attacker && where && attacker !== where && PW() && PW().nuclearStrike) {
       try { r = PW().nuclearStrike(where, attacker); } catch (e) { r = null; }
     }
-    if (attacker && where === attacker && attacker === nation()) { shock(attacker, -40); scandal(40); }
+    if (attacker && where === attacker && attacker === nation()) polAct("nuke-own", { by: "self" }, function () { shock(attacker, -40); scandal(40); });
+    else if (attacker && where && attacker === nation() && p && p.byPlayer) polAct("nuke", { target: where, by: "army" });
     // A COUNTRY WITH ITS OWN WARHEADS AND A BOMBER ANSWERS.
     const us = nation();
     if (r && r.canAnswer && attacker === us && !RET && carriersOwned(where, "nuke") > 0) {
@@ -1129,9 +1151,85 @@
     box(0.125, 0.03, 0.05, 0, -0.1, -0.15, brass);
     return grp;
   }
+  /* THE MAN WITH THE FOOTBALL IS NOT A SHOOTER.
+     OWNER: "they still hold a briefcase when they hold the gun. It's stupid."
+     The case rode the carrier's left hand socket and nothing told the gun
+     discipline he was carrying it: in a fight the brain made him a shield or
+     an engager like any agent, the discipline drew his gun, the two-hand
+     pose took both hands, and the case stayed welded in the left fist through
+     the grip. The real aide (a military officer, not a protective agent)
+     does not draw: he keeps the case and stays on the President.
+       · the carrier wears `_carries` (one field, read by
+         CBZ.gunDiscipline, systems/actorweapons.js, and by the detail brain,
+         city/brain_protection.js): he never draws, is never picked to engage,
+         and in cover/evac rides behind the President, away from the threat;
+       · the ONE way his hands come free is a real one: he is ordered to
+         attack, or he is somehow shooting ("order" / "fired" reach the
+         discipline). Then `_carries.release` SETS THE CASE DOWN at his feet
+         as a real object before his gun comes out, never both in one hand.
+         Killed, the case falls where he fell;
+       · a case on the ground is picked back up by the first living member of
+         the detail who walks within reach of it with his gun away (or, if
+         nobody does, the backup football comes up with the next aide after
+         FB_REISSUE seconds), so the case never teleports between hands;
+       · the carrier is STICKY: once a man has it he keeps it until he is
+         dead or out of the detail. It used to be re-picked every second from
+         the roster order, and a rig swap (near/far) dropped and rebuilt it. */
+  const FB_REACH = 1.6;          // m: close enough to pick a set-down case up
+  const FB_REISSUE = 30;         // s a case may lie unclaimed before the backup comes up
+  function detachCarrier() {
+    const p = FB.ped;
+    if (p && p._carries && p._carries.what === "football") p._carries = null;
+    FB.ped = null;
+  }
   function dropFootball() {
     if (FB.mesh && FB.mesh.parent) FB.mesh.parent.remove(FB.mesh);
-    FB.mesh = null; FB.ped = null;
+    if (FB.down && FB.down.mesh && FB.down.mesh.parent) FB.down.mesh.parent.remove(FB.down.mesh);
+    FB.mesh = null; FB.down = null;
+    detachCarrier();
+  }
+  // THE CASE GOES DOWN: off his hand onto the ground under it, lying on its
+  // broad side, a real thing in the world (never a case in a shooting hand)
+  function setDownFootball(why) {
+    const p = FB.ped, m = FB.mesh;
+    detachCarrier();
+    FB.mesh = null;
+    if (!m) return;
+    const root = (p && p.group && p.group.parent) || (m.parent && m.parent.parent) || CBZ.scene;
+    const w = new THREE.Vector3();
+    if (m.parent) { m.parent.updateWorldMatrix(true, false); m.getWorldPosition(w); m.parent.remove(m); }
+    else if (p && p.pos) w.set(p.pos.x, p.pos.y || 0, p.pos.z);
+    let y = 0;
+    try { y = CBZ.groundAt ? CBZ.groundAt(w.x, w.z, w.y + 0.5) : (CBZ.floorAt ? CBZ.floorAt(w.x, w.z) : 0); } catch (e) { y = 0; }
+    if (!isFinite(y)) y = p && p.pos ? (p.pos.y || 0) : 0;
+    if (!root) return;
+    // the case is built hanging in a fist: its 0.12 m thickness on local x,
+    // centred 0.22 below the handle. Lie it on that broad side.
+    m.position.set(0, 0, 0); m.rotation.set(0, 0, 0); m.scale.set(1, 1, 1);
+    const holder = new THREE.Group();
+    holder.name = "nuclear-football-down";
+    holder.position.set(w.x, y, w.z);
+    holder.rotation.y = p && p.group ? p.group.rotation.y : 0;
+    m.rotation.z = Math.PI / 2;                    // local x (thickness) -> world up
+    m.position.set(-0.22, 0.06, 0);                // case centre over the spot, resting on the ground
+    holder.add(m);
+    root.add(holder);
+    FB.down = { mesh: holder, x: w.x, z: w.z, t: CLOCK, why: why || "" };
+  }
+  function giveFootball(p, hand) {
+    FB.ped = p;
+    p._carries = { what: "football", release: function (why) { if (FB.ped === p) setDownFootball(why); } };
+    wireFootball(p);
+    if (FB.down) {                                  // he picks up the one on the ground
+      const held = FB.down.mesh.children[0] || null;
+      if (FB.down.mesh.parent) FB.down.mesh.parent.remove(FB.down.mesh);
+      FB.down = null;
+      FB.mesh = held;
+      if (FB.mesh) { FB.mesh.position.set(0, 0, 0); FB.mesh.rotation.set(0, 0, 0); }
+    }
+    if (!FB.mesh) FB.mesh = briefcase();
+    if (FB.mesh && hand) hand.add(FB.mesh);
+    else if (FB.mesh && FB.mesh.parent) FB.mesh.parent.remove(FB.mesh);
   }
   function wireFootball(p) {
     if (p._footballWired || !CBZ.interactions || !CBZ.interactions.registerFor) return;
@@ -1153,26 +1251,53 @@
       onSelect: function () { aideSay(p, bunkerStrike()); },
     });
   }
+  // may this man take the case? hands free: alive, a rig, gun away, not fighting
+  function freeHands(q) {
+    if (!q || q.dead || !q.group || q.rage || q.state === "fight") return false;
+    if (CBZ.gunDiscipline && CBZ.gunDiscipline.drawn(q)) return false;
+    return !(q._carries && q._carries.what !== "football");
+  }
   function tickFootball() {
     const us = nation();
-    let want = null;
+    let refs = [];
     if (us && CBZ.protection && CBZ.protection.get) {
       let det = null;
       try { det = CBZ.protection.get("off_" + us); } catch (e) { det = null; }
-      const refs = (det && det.memberPedRefs) || [];
-      for (let i = 0; i < refs.length && !want; i++) { const q = refs[i]; if (q && !q.dead && q.group && q._protRole !== "shift-leader") want = q; }
-      for (let i = 0; i < refs.length && !want; i++) { const q = refs[i]; if (q && !q.dead && q.group) want = q; }
+      refs = (det && det.memberPedRefs) || [];
     }
-    // CARRIED, in his LEFT hand (the gun hand stays free), never strapped to
-    // the hip: it rides the hand socket, so it swings with the arm. A body
-    // with no rig (far/instanced) or no left hand carries nothing visible.
-    const hand = want && want.char && want.char.sockets ? want.char.sockets.leftHand : null;
-    if (want === FB.ped && (!want || (FB.mesh ? FB.mesh.parent === hand : !hand))) return;
-    dropFootball();
-    if (!want) return;
-    FB.ped = want;
-    wireFootball(want);
-    if (hand) { FB.mesh = briefcase(); if (FB.mesh) hand.add(FB.mesh); }
+    if (!us || !refs.length) { if (FB.ped || FB.mesh || FB.down) dropFootball(); return; }
+    const p = FB.ped;
+    // the carrier fell or left the detail: the case goes down where he was
+    if (p && (p.dead || refs.indexOf(p) < 0)) setDownFootball(p.dead ? "killed" : "left");
+    if (FB.ped) {
+      // CARRIED, in his LEFT hand (the gun hand stays free), never strapped to
+      // the hip: it rides the hand socket, so it swings with the arm. A rig
+      // swap (near/far) only moves the same case to the new hand.
+      const hand = FB.ped.char && FB.ped.char.sockets ? FB.ped.char.sockets.leftHand : null;
+      if (FB.mesh && FB.mesh.parent !== hand) {
+        if (FB.mesh.parent) FB.mesh.parent.remove(FB.mesh);
+        if (hand) hand.add(FB.mesh);
+      }
+      return;
+    }
+    // nobody has it: a case on the ground goes to the first free hand in reach
+    if (FB.down) {
+      for (let i = 0; i < refs.length; i++) {
+        const q = refs[i];
+        if (!freeHands(q) || !q.pos) continue;
+        if (Math.hypot(q.pos.x - FB.down.x, q.pos.z - FB.down.z) > FB_REACH) continue;
+        giveFootball(q, q.char && q.char.sockets ? q.char.sockets.leftHand : null);
+        return;
+      }
+      if (CLOCK - FB.down.t < FB_REISSUE) return;
+      if (FB.down.mesh && FB.down.mesh.parent) FB.down.mesh.parent.remove(FB.down.mesh);
+      FB.down = null;                                // the backup football
+    }
+    // first issue: a member who is not the shift leader (he runs the detail)
+    let want = null;
+    for (let i = 0; i < refs.length && !want; i++) { const q = refs[i]; if (freeHands(q) && q._protRole !== "shift-leader") want = q; }
+    for (let i = 0; i < refs.length && !want; i++) { const q = refs[i]; if (freeHands(q)) want = q; }
+    if (want) giveFootball(want, want.char && want.char.sockets ? want.char.sockets.leftHand : null);
   }
 
   // ================================================================ THE TICK
