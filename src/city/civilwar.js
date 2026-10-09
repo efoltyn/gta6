@@ -777,7 +777,7 @@
     rebelMil.soldiers = 0; rebelMil.planes = 0; rebelMil.missiles = 0;
     if (parentRec) {
       parentRec.treasury = (parentRec.treasury || 0) + (rebelRec ? (rebelRec.treasury || 0) : 0);
-      parentRec.approval = clampNum(0, 100, (parentRec.approval || 0) + RECONQUEST_APPROVAL_BUMP);
+      if (CBZ.approvalSet) CBZ.approvalSet(parentRec, clampNum(0, 100, (parentRec.approval || 0) + RECONQUEST_APPROVAL_BUMP));
     }
     if (rebelRec) rebelRec.treasury = 0;
     // "districts return" — restore whatever rebel-side conscription pulled

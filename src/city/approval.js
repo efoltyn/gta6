@@ -268,12 +268,25 @@
   // ============================================================
   //  SHOCKS — CBZ.approvalShock(id, amount): the new, generic public API
   // ============================================================
+  // THE SEAT IS POLITICS' (city/politics.js): the President's country has
+  // one approval, the weighted loyalty of its people, and a shock aimed at it
+  // is felt by every group there. Everyone else's shock lands here.
+  function politicsOwns(id) { const Pol = CBZ.politics; return !!(Pol && Pol.owns && Pol.owns(id)); }
   CBZ.approvalShock = function (id, amount) {
     if (!id || !isFinite(amount)) return;
+    if (politicsOwns(id)) { CBZ.politics.shock(amount); return; }
     ensureInit();
     const M = g.approvalWorld;
     M.shock[id] = clampNum(-SHOCK_CAP, SHOCK_CAP, (M.shock[id] || 0) + amount);
   };
+  // an absolute approval (a regime's honeymoon, a power vacuum, a hungry
+  // street): the one setter every file outside this one uses
+  CBZ.approvalSet = function (rec, v) {
+    if (!rec || !isFinite(v)) return;
+    if (politicsOwns(rec.id)) { CBZ.politics.setApproval(v); return; }
+    writeApproval(rec, v);
+  };
+  function writeApproval(rec, v) { rec.approval = clampNum(0, 100, v); }
   function decayShocks(sliceDt) {
     ensureInit();
     const M = g.approvalWorld;
@@ -414,7 +427,7 @@
       const es = econOf(rec);
       if (!es) continue; // mini-city with no EconState yet — approval stays put, see NARROWING
       const inp = computeInputs(rec);
-      rec.approval = clampNum(0, 100, rec.approval + (inp.target - rec.approval) * sliceDt / TAU);
+      writeApproval(rec, rec.approval + (inp.target - rec.approval) * sliceDt / TAU);
       lastInputs[rec.id] = inp;
       checkThresholdFeed(rec);
     }
@@ -502,16 +515,17 @@
         if (!kids.length) continue;
         let sum = 0; for (let j = 0; j < kids.length; j++) sum += kids[j].approval;
         const avg = sum / kids.length;
-        s.approval = clampNum(0, 100, s.approval + (avg - s.approval) * STATE_BLEND_LERP);
+        writeApproval(s, s.approval + (avg - s.approval) * STATE_BLEND_LERP);
       }
       const countries = CBZ.polity.list("country");
       for (let i = 0; i < countries.length; i++) {
         const c = countries[i];
+        if (politicsOwns(c.id)) continue;        // the seat drifts in politics.js, off these same states
         const kidStates = states.filter(function (s) { return s.parent === c.id; });
         if (!kidStates.length) continue;
         let sum = 0; for (let j = 0; j < kidStates.length; j++) sum += kidStates[j].approval;
         const avg = sum / kidStates.length;
-        c.approval = clampNum(0, 100, c.approval + (avg - c.approval) * COUNTRY_BLEND_LERP);
+        writeApproval(c, c.approval + (avg - c.approval) * COUNTRY_BLEND_LERP);
       }
     });
   }

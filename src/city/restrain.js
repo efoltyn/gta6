@@ -134,6 +134,12 @@
     if (!cuffablePed(ped)) return false;
     ped.restraint = { state: "cuffed", by: (opts && opts.by) || "player", t: 0, vehicle: null };
     track(ped);
+    // A PRESIDENT'S OWN HANDS: cuffing somebody is a political act
+    // (city/politics.js prices it off who he is; the body stays in your hands)
+    const Pol = CBZ.politics;
+    if (ped.restraint.by === "player" && Pol && Pol.act && Pol.owns && CBZ.gov && CBZ.gov.holds) {
+      try { const h = CBZ.gov.holds(); if (h && h.kind === "country" && Pol.owns(h.id)) Pol.act("detain", { target: ped, by: "self", keepBody: true }); } catch (e) {}
+    }
     // hands are tied: whatever they were holding hits the pavement
     if (ped.armed && ped.weapon && CBZ.cityDropWeapon) {
       CBZ.cityDropWeapon(ped.pos.x, ped.pos.z, ped.weapon, 12, { y: ped.pos.y });

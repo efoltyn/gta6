@@ -1750,7 +1750,9 @@
         gearTier: 2, formation: "escort", fundingSource: "treasury", legalStatus: "state", memberCount: 0 });
     }
     det.principal.ref = cur.sid || "player";
-    det.standing = PRES_BASE;
+    // the Service that has stopped trusting him stands fewer agents round
+    // him (city/politics.js detailSize: the Secret Service's loyalty)
+    det.standing = CBZ.politics && CBZ.politics.detailSize ? CBZ.politics.detailSize(PRES_BASE) : PRES_BASE;
     return det;
   }
 

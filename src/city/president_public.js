@@ -916,6 +916,10 @@
     if (ATTACK.t != null && T - ATTACK.t < pace(1.5)) out.push("KEEP US SAFE", "NEVER AGAIN");
     if (recent("bureau", 2) || recent("martial", 3)) out.push("BRING THEM HOME");
     if (approval() < 35) out.push("RESIGN", "NOT MY PRESIDENT", "ENOUGH");
+    // the angriest people carry their own boards (city/politics.js)
+    const Pol = CBZ.politics;
+    const A = Pol && Pol.angriest ? (function () { try { return Pol.angriest(); } catch (e) { return null; } })() : null;
+    if (A && A.anger >= 55 && A.slogans) for (let i = 0; i < A.slogans.length; i++) out.push(A.slogans[i]);
     if (!out.length) out.push("HEAR US", "RESIGN");
     return out;
   }
@@ -1197,7 +1201,6 @@
   // ============================================================
   const ORD = {};                       // order key -> dayTime of its last yes
   const ATTACK = { t: null };
-  const UNPOPULAR = { curfew: 0.35, martial: 0.45, emergency: 0.35, taxup: 0.25, crackdown: 0.3, fascism: 0.5, communism: 0.4, crown: 0.5, surge: 0.1 };
   let busWired = false;
   function wireBus() {
     if (busWired) return;
@@ -1218,13 +1221,16 @@
       try { p.onAssassinated(function (ev) { onPresidentDown(ev); }); } catch (e) {}
     }
   }
+  // THE STREET'S ANGER IS THE COUNTRY'S (city/politics.js): the groups'
+  // loyalty after every act and order, and the movement the angriest of
+  // them has organised. Only a bombing on your watch is felt here first.
   function anger() {
     const T = now();
-    let a = Math.max(0, (35 - approval()) / 35);
-    for (const k in UNPOPULAR) if (ORD[k] != null && T - ORD[k] < pace(1.5)) a += UNPOPULAR[k];
+    let a = 0;
+    const Pol = CBZ.politics;
+    if (Pol && Pol.streetAnger && Pol.owns && Pol.owns(seatId())) { try { a = Pol.streetAnger(); } catch (e) { a = 0; } }
+    else a = Math.max(0, (35 - approval()) / 35);
     if (ATTACK.t != null && T - ATTACK.t < pace(1.0)) a += 0.2;
-    // an organised movement (city/dissent.js) fills the road on its own
-    if (CBZ.dissent && CBZ.dissent.pressure) { try { a += CBZ.dissent.pressure(); } catch (e) {} }
     return clamp(a, 0, 1.5);
   }
   function curfewLive() {
@@ -1739,7 +1745,9 @@
     PROT.slots = null;
     PROT.chantT = 3;
     PROT.tries = 0;
-    emit("protest", { phase: "start", size: PROT.size, at: { x: PROT.at.x, z: PROT.at.z } });
+    const angriest = CBZ.politics && CBZ.politics.angriest ? CBZ.politics.angriest() : null;
+    PROT.group = angriest && angriest.anger >= 55 ? angriest.id : null;
+    emit("protest", { phase: "start", size: PROT.size, at: { x: PROT.at.x, z: PROT.at.z }, group: PROT.group, groupName: PROT.group ? angriest.name : null });
     news(PROT.size >= 14 ? "A large crowd of protesters fills the road outside the Executive Mansion." : "Protesters gather outside the Executive Mansion gate.");
     fillProtest(force);
     return true;

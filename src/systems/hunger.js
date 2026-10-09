@@ -402,7 +402,7 @@
       }
       const P = CBZ.player;
       const rec = (P && P.pos && CBZ.polity && CBZ.polity.of) ? CBZ.polity.of(P.pos.x, P.pos.z) : null;
-      if (rec) rec.approval = Math.max(0, (rec.approval || 0) - (APPROVAL_PER_DAY / DAY_SECS) * dt);
+      if (rec && CBZ.approvalSet) CBZ.approvalSet(rec, Math.max(0, (rec.approval || 0) - (APPROVAL_PER_DAY / DAY_SECS) * dt));
     }
   });
 

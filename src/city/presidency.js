@@ -1007,7 +1007,7 @@
         const murders = (CBZ.approvalState && CBZ.approvalState.murders7d) ? CBZ.approvalState.murders7d(h.id) : 0;
         const p = politics();
         const crisis = murders >= 5 || (p && (p.scandal || 0) > 40) || (p && (p.emergencyPowers || 0) > 40);
-        shock(h.id, crisis ? 5 : 2);
+        if (!CBZ.politics) shock(h.id, crisis ? 5 : 2);
         if (p && (p.scandal || 0) > 0) p.scandal = clamp((p.scandal || 0) - 6, 0, 100);
         news(h.title + " addresses the nation" + (crisis ? " from the Situation Room. The country was listening." : ". The country mostly was not."));
         return { ok: true, why: "" };
@@ -1217,14 +1217,28 @@
       emitEvent("order", { key: key, ok: false, why: gt.why || "" });
       return gt;
     }
+    // CONGRESS (city/politics.js): a war, a tax rise, a tax cut need the votes
+    const Pol = CBZ.politics;
+    const actKey = ACT_KEY[key] || key;
+    if (Pol && Pol.gate) {
+      const vg = Pol.gate(actKey);
+      if (!vg.ok) { paintBoard(); emitEvent("order", { key: key, ok: false, why: vg.why || "" }); return vg; }
+    }
+    // THE ONE PRICE. Whatever the organ inside does to approval on its own
+    // is absorbed; the act table (city/politics.js ORDERS) is what the
+    // country feels. The war room's orders report themselves (warroom.js).
     let r;
-    try { r = B.run(h); } catch (e) { r = { ok: false, why: "The order did not go through." }; }
+    const runIt = function () { try { return B.run(h); } catch (e) { return { ok: false, why: "The order did not go through." }; } };
+    r = Pol && Pol.during && !WAR_KEYS[key] ? Pol.during(runIt) : runIt();
     paintBoard();
     if (CBZ.cityHudDirty) CBZ.cityHudDirty();
     const out = r || { ok: true, why: "" };
+    if (out.ok && Pol && Pol.act && !WAR_KEYS[key]) { try { Pol.act(actKey, { by: "self" }); } catch (e) {} }
     emitEvent("order", { key: key, ok: !!out.ok, why: out.why || "" });
     return out;
   }
+  const ACT_KEY = { taxup: "taxUp", taxdown: "taxDown" };
+  const WAR_KEYS = { war: 1, peace: 1, strike: 1, nuke: 1, bunker: 1 };
 
   // ---- the room's verbs are its phones and its map ------------------------
   // The sitting head of state never sees a prompt at the door: the leaf slides
@@ -1338,10 +1352,28 @@
     { key: "bureau", title: "Bureau Director", prefix: "Director", job: "federal agent", archetype: "professional" },
     { key: "police", title: "Police Commissioner", prefix: "Commissioner", job: "police commissioner", archetype: "professional" },
     { key: "treasury", title: "Treasury Secretary", prefix: "Secretary", job: "treasury secretary", archetype: "professional" },
+    // the heads of the other two services politics.js keeps loyalty for, and
+    // the minister of the interior (city/politics.js ROLE_INST)
+    { key: "cia", title: "CIA Director", prefix: "Director", job: "intelligence director", archetype: "professional" },
+    { key: "ss", title: "Secret Service Director", prefix: "Director", job: "secret service director", archetype: "professional" },
+    { key: "interior", title: "Interior Minister", prefix: "Minister", job: "interior minister", archetype: "professional" },
   ];
   function surname(n) { const p = String(n || "").trim().split(/\s+/); return p[p.length - 1] || n; }
   function cabinet() {
     const S = st();
+    // a save from before a post existed gets that post filled (its own stream)
+    if (S.cabinet) {
+      for (let i = 0; i < CABINET_ROLES.length; i++) {
+        const R = CABINET_ROLES[i];
+        if (S.cabinet[R.key]) continue;
+        const stream = CBZ.seedStream ? CBZ.seedStream("presidency:cabinet:" + R.key) : rng;
+        const gender = stream() < 0.68 ? "m" : "f";
+        const name = CBZ.cityMintName ? CBZ.cityMintName(stream, gender) : (R.title + " " + (i + 1));
+        const obj = { _parked: true, nameKnown: true, kind: "civilian", archetype: R.archetype, name: name, gender: gender, job: R.job, wealth: 0.7, aggr: 0.2, cash: 300 };
+        if (CBZ.cityPedStash) { try { CBZ.cityPedStash(obj); } catch (e) {} }
+        S.cabinet[R.key] = { name: name, sid: obj._sid || ("cab_" + R.key), role: R.title, gender: gender, dead: false, refused: 0, loyalty: 60, trait: null };
+      }
+    }
     if (!S.cabinet) {
       S.cabinet = {};
       const stream = CBZ.seedStream ? CBZ.seedStream("presidency:cabinet") : rng;
@@ -1359,7 +1391,7 @@
       const R = CABINET_ROLES[i], c = S.cabinet[R.key];
       if (!c) continue;
       out[R.key] = { name: c.name, sid: c.sid, role: c.role, gender: c.gender, dead: !!c.dead, vacant: !!c.vacant,
-        loyalty: isFinite(c.loyalty) ? +c.loyalty : 60, trait: c.trait || null, refused: c.refused | 0,
+        loyalty: isFinite(c.loyalty) ? +c.loyalty : 60, trait: c.trait || null, refused: c.refused | 0, ideology: c.ideology || null,
         display: R.prefix ? (R.prefix + " " + surname(c.name)) : c.name };
     }
     const rec = seatRec() || countryRecAny();
@@ -1510,7 +1542,7 @@
     const S = st(), R = CABINET_ROLES.find(function (r) { return r.key === role; });
     if (!R || !who || !who.name) return false;
     S.cabinet[role] = { name: who.name, sid: who.sid || ("cab_" + role + "_" + day()), role: R.title, gender: who.gender || "m", dead: false, refused: 0,
-      loyalty: isFinite(who.loyalty) ? +who.loyalty : 60, trait: who.trait || null };
+      loyalty: isFinite(who.loyalty) ? +who.loyalty : 60, trait: who.trait || null, ideology: who.ideology || null };
     releaseOfficer(role);
     return true;
   }
@@ -2776,21 +2808,24 @@
       }
       const scandal = (p && p.scandal) || 0;
       const approval = h.rec.approval || 0;
-      const bad = scandal >= IMPEACH_SCANDAL || (approval < IMPEACH_APPROVAL && scandal >= IMPEACH_SCANDAL_LO);
-      const numbers = "Scandal " + Math.round(scandal) + " (limit " + IMPEACH_SCANDAL
-        + "), approval " + Math.round(approval) + " (floor " + IMPEACH_APPROVAL + " while scandal is over " + IMPEACH_SCANDAL_LO + ").";
+      const Pol = CBZ.politics;
+      const chamber = !!(Pol && Pol.congress && Pol.congress() && !/dictator|fascis|junta|monarch|communis|anarch/.test(String(h.rec.govType || "")));
+      const bad = scandal >= IMPEACH_SCANDAL || (approval < IMPEACH_APPROVAL && scandal >= IMPEACH_SCANDAL_LO) || (chamber && Pol.wantsImpeachment());
       if (bad && S.impeachDay == null) {
         S.impeachDay = d + 2;
         emitEvent("impeach", { day: S.impeachDay, scandal: scandal, approval: approval });
         big("ARTICLES OF IMPEACHMENT FILED");
-        orders("Chief of Staff", "The Capitol has the votes and the auditors have the ledgers. " + numbers
-          + " The Senate votes on day " + S.impeachDay + " — two days. Get under those numbers or start packing.", 2);
+        orders("Chief of Staff", "They've filed articles, sir. The Senate votes in two days.", 2);
       } else if (S.impeachDay != null && !bad) {
         S.impeachDay = null;
         news("The impeachment collapses, the scandal went quiet before the vote.");
       } else if (S.impeachDay != null && d < S.impeachDay) {
-        orders("Chief of Staff", "Impeachment vote in " + (S.impeachDay - d) + " day(s). " + numbers
-          + " An address buys " + SCANDAL_ADDRESS_RELIEF + " points back; every order given by force adds more.", 2);
+        orders("Chief of Staff", "The impeachment vote is tomorrow, sir. Talk to the country.", 2);
+      } else if (S.impeachDay != null && d >= S.impeachDay && chamber && !Pol.vote("impeach").pass) {
+        // THE SENATE ACQUITS: two thirds never came
+        const v = Pol.vote("impeach");
+        S.impeachDay = null;
+        emitEvent("vote", { kind: "impeach", pass: false, yes: v.yes, no: v.no, headline: "The Senate acquits the President, " + v.yes + " to " + v.no, cat: "POLITICS" });
       } else if (S.impeachDay != null && d >= S.impeachDay) {
         // CONVICTED. The seat moves through the record's own fields (the
         // same holder/vacuum bookkeeping regimes' restoration writes), the
@@ -2979,7 +3014,14 @@
         const P = CBZ.player;
         ped._presByPlayer = !!(imp && (imp.byPlayer || imp.src === "player" || imp.attacker === P || imp.from === P));
       }
-      return orig.apply(this, arguments);
+      const was = !ped || ped.dead;
+      const ret = orig.apply(this, arguments);
+      // THE ACT: a death the President caused (his hand or his order), or a
+      // notable death anyone caused, is priced and told by city/politics.js
+      if (!was && ped && ped.dead && CBZ.politics && CBZ.politics.onDeath) {
+        try { CBZ.politics.onDeath(ped, { byPlayer: ped._presByPlayer, attacker: imp && imp.attacker, cause: ped._presCause }); } catch (e) {}
+      }
+      return ret;
     };
     for (const k in orig) { if (/Wrap(ped)?$/.test(k)) w[k] = orig[k]; }
     w._presCauseWrap = true;
@@ -3115,6 +3157,7 @@
       attacksSeen: S.attacksSeen | 0,
       cabinet: S.cabinet ? JSON.parse(JSON.stringify(S.cabinet)) : null,
       staff: S.staff ? JSON.parse(JSON.stringify(S.staff)) : null,
+      politics: S.politics && S.politics.groups ? JSON.parse(JSON.stringify(S.politics)) : null,
       lock: SEAM.lock.active ? { since: SEAM.lock.since, until: SEAM.lock.until, reason: SEAM.lock.reason } : null,
     };
   }
@@ -3142,6 +3185,7 @@
     S.attacksSeen = obj.attacksSeen != null ? (obj.attacksSeen | 0) : (S.attacksDone | 0);
     S.cabinet = obj.cabinet && typeof obj.cabinet === "object" ? obj.cabinet : null;
     S.staff = obj.staff && typeof obj.staff === "object" ? obj.staff : null;
+    S.politics = obj.politics && typeof obj.politics === "object" ? obj.politics : {};
     if (obj.lock && isFinite(obj.lock.until)) { SEAM.lock.active = true; SEAM.lock.since = obj.lock.since; SEAM.lock.until = obj.lock.until; SEAM.lock.reason = obj.lock.reason || "assassination"; }
   }
   function stamp() { const led = g.cityWorld; if (led && typeof led === "object") led.pres = serialize(); }
@@ -3293,6 +3337,8 @@
     CABINET_ROLES: CABINET_ROLES.map(function (r) { return { key: r.key, title: r.title, job: r.job, archetype: r.archetype }; }),
     // the President's people (city/president_staff.js owns the shape; saved here)
     staff: function () { const S = st(); return S.staff || (S.staff = {}); },
+    // the country's politics (city/politics.js owns the shape; saved here)
+    politicsStore: function () { const S = st(); return S.politics || (S.politics = {}); },
     // officers at the Situation Room table (probe surface)
     officers: function () { const o = {}; for (const k in OFF.peds) if (OFF.peds[k]) o[k] = OFF.peds[k]; return o; },
     proposal: proposal,
