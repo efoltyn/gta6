@@ -398,41 +398,6 @@
   //  {title} {place} {dir} {item} {price} are filled by the caller.
   // ============================================================
   const BOOK = {
-    // you walked up and spoke to them; their answer
-    talk: {
-      robbed: ["You've got some nerve.", "Get away from me.", "You already took my money.", "Don't. Just don't."],
-      hurtFriend: ["I know what you did to my friend.", "Stay away from my people.", "You're the one. I heard."],
-      armed: ["Whoa. Put that away first.", "Not with that thing out.", "Easy. I don't want trouble."],
-      wanted: ["Cops are looking for you.", "You're all over the news.", "Don't stand next to me."],
-      me: {
-        cop: ["Officer.", "Did I do something?", "I'm just waiting on somebody."],
-        president: ["Can I get a picture?", "You're shorter in person.", "My mom loves you. I don't."],
-        boss: ["Whatever you need.", "Didn't see you there."],
-        hitman: ["I don't want any problems.", "Whatever it is, it wasn't me."],
-      },
-      stand: {
-        friend: ["What's good?", "There you are.", "Long time. You eat yet?"],
-        solid: ["What's up.", "Good to see you."],
-        sour: ["What do you want now?", "Make it fast."],
-        enemy: ["Walk away.", "You got a death wish?"],
-      },
-      them: {
-        vendor: ["What can I get you?", "Cash only.", "You buying or browsing?"],
-        bum: ["Spare a dollar?", "Got anything to eat?", "God bless, man."],
-        kid: ["My mom says don't talk to strangers.", "Are you famous?", "I'm not supposed to be out here."],
-        tourist: ["Is the beach this way?", "Where's good to eat around here?", "Can you take our picture?"],
-        dealer: ["You buying or just talking?", "Talk costs, man."],
-        gang: ["You lost?", "Who you with?", "This ain't your block."],
-        worker: ["I'm on the clock.", "Make it quick, I'm working."],
-        addict: ["You got a couple bucks?", "You holding?"],
-        security: ["Keep it moving.", "Help you with something?"],
-        cop: ["Move along.", "Help you?", "Something you need?"],
-      },
-      rain: ["Can't believe this rain.", "I'm soaked through.", "Should've brought an umbrella."],
-      night: ["Kind of late to be out.", "Can't sleep either?", "Streets get weird this late."],
-      base: ["Hey.", "Can I help you?", "Do I know you?", "What's going on?", "Crazy out here lately.",
-        "You new around here?", "Yeah?", "Nice day for it.", "Busy day. What's up?"],
-    },
     // they walked up to YOU with nothing to sell
     approach: {
       wanted: ["You're the one from the news.", "Everybody's looking for you."],
@@ -491,85 +456,22 @@
       me: { president: ["Mr. President.", "Love what you're doing.", "Hate what you're doing."] },
       base: ["That's the one from the news.", "Heard about you.", "We good. No problems here."],
     },
-    // you paid them a compliment
-    complimentBack: {
-      stand: { sour: ["Don't try it.", "Nice try."] },
-      them: { gang: ["Yeah? Okay.", "Appreciate it."], vendor: ["Flattery won't get you a discount."] },
-      base: ["Ha, appreciate that.", "Aw, thanks.", "You're alright, you know that?", "Tell that to my wife.",
-        "Stop. You're gonna make me blush."],
-    },
-    // you insulted them and they are the kind to fold
-    insultMeek: {
-      base: ["Whatever, man.", "Why you gotta be like that?", "Jerk.", "Okay. Okay.", "Wow. Okay."],
-    },
-    // you insulted them and they are the kind to fight
-    insultBold: {
-      base: ["The hell you say to me?", "Say that again. I dare you.", "You want a problem?", "Keep talking."],
-    },
     // you leaned on them and it worked
     cower: {
       base: ["Okay, okay.", "I don't want trouble.", "I'm going. I'm going.", "Please. I got kids."],
-    },
-    // you leaned on them and they out-read you
-    scoff: {
-      base: ["Cute. Run along.", "Who are you supposed to be?", "Go home, kid."],
     },
     // you leaned on them, they outrank you, and they are the kind to swing
     scoffFight: {
       base: ["You threatening me?", "Big mistake.", "Now we got a problem."],
     },
-    // asked for a light
-    smokeYes: { night: ["Here. Keep it."], base: ["Here.", "Keep the lighter.", "Yeah, here."] },
-    smokeNo: { base: ["Buy your own.", "I quit. Sorry.", "Get lost."] },
-    // you gave them money
-    thanks: {
-      them: { bum: ["God bless you.", "I'm eating tonight.", "You're a real one."] },
-      base: ["You're a real one.", "I won't forget this.", "Thank you. Seriously."],
-    },
-    // asked what's going on and they have nothing hot
-    gossip: {
-      night: ["Stay off the east side tonight.", "Heard shots earlier. Be careful."],
-      base: ["Cops have been thick around here.", "People talk about you, you know.",
-        "My cousin says the mayor's dirty.", "Somebody got shot by the water last week.",
-        "Rent went up again. Nobody's hiring.", "I don't know nothing."],
-    },
-    // a VIP you asked for a picture
-    fan: { base: ["Make it quick.", "One picture.", "No flash.", "Tag me."] },
-    // asked for directions: {place} and {dir}
-    directions: {
-      base: ["{place}? That way.", "{place}, down there on the {dir}.", "Go {dir}. You can't miss it.",
-        "{place}? Keep going {dir}."],
-    },
-    directionsNone: { base: ["No idea. I'm not from here.", "Couldn't tell you.", "Ask somebody else."] },
-    // you tipped a busker
-    busker: { base: ["Thank you!", "Any requests?", "This one's for you.", "Appreciate you."] },
     // a vendor hands you what you bought: {item}
     handOver: {
       them: { vendor: ["Here you go.", "Enjoy.", "Anything else?", "Careful, it's hot."] },
       base: ["Here you go.", "Enjoy."],
     },
-    // a clerk greets you at the counter
-    vendor: {
-      robbed: ["You. Get out of my store.", "Not you. Out.", "I called the cops last time."],
-      armed: ["Hey. Put that away in here.", "Not in my store with that."],
-      wanted: ["I don't want trouble in here.", "Buy something and go."],
-      me: { cop: ["Officer. Coffee's on the house."], president: ["Mr. President! On the house."] },
-      stand: { friend: ["The usual?", "My favorite customer."], enemy: ["We're closed. For you."] },
-      night: ["We're about to close.", "Late one, huh?"],
-      base: ["What can I get you?", "Welcome in.", "Take your time.", "Let me know if you need anything."],
-    },
-    // the clerk won't serve you (you robbed the place)
-    vendorRefuse: {
-      base: ["Not you. Get out.", "You're not welcome here.", "Get out before I call somebody."],
-    },
     // a cop buys your story
     copOk: { base: ["Fine. Move along.", "Alright. Go home.", "Don't let me see you again."] },
     copNo: { base: ["Save it.", "Nice try.", "Hands where I can see them."] },
-    // a cop you talk to with no heat on you
-    copTalk: {
-      night: ["Late to be out. Head home.", "Quiet night. Keep it that way."],
-      base: ["Keep it moving.", "Help you?", "Evening. You live around here?", "Stay out of trouble."],
-    },
     // your crew member answering an order
     crewRob: { base: ["On it.", "Say less.", "Watch this.", "Easy money."] },
     crewScare: { base: ["On it.", "He's gone.", "I got him."] },

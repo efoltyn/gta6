@@ -742,7 +742,8 @@
     W.chief = p;
     if (!CBZ.interactions || !CBZ.interactions.registerFor) return;
     const nm = function () { const n = S().nominee; return n && speakerFor(n.role) && speakerFor(n.role).body === p ? n : null; };
-    CBZ.interactions.registerFor(p, { id: "pres-chief-talk", slot: "e", prio: 30, campaignSafe: true, forceYes: true,
+    // what he has for you, said as you come up (no Talk verb)
+    CBZ.interactions.registerFor(p, { id: "pres-chief-talk", speak: true, prio: 30, campaignSafe: true, forceYes: true,
       label: "Talk", canShow: function () { return !!seat() && !nm(); },
       onSelect: function () {
         const O = CBZ.presidentOffice;

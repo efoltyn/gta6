@@ -131,7 +131,7 @@ function makePage() {
   };
   const sb = {
     window: null, CBZ, document: doc, console, Math, Object, Array, Set, Map, JSON, isFinite, Number, String, Date, RegExp, Error, Promise,
-    THREE: { Vector3: V3 }, performance: { now: () => T * 1000 }, setTimeout: () => 0, clearInterval: () => {}, setInterval: () => 0,
+    THREE: { Vector3: V3, Box3: class { constructor() { this.min = new V3(); this.max = new V3(); } makeEmpty() { return this; } setFromObject() { return this; } isEmpty() { return true; } } }, performance: { now: () => T * 1000 }, setTimeout: () => 0, clearInterval: () => {}, setInterval: () => 0,
     innerWidth: 1280, innerHeight: 800,
     addEventListener: (type, fn, cap) => listeners.push({ type, fn, cap: !!(cap && (cap === true || cap.capture)) }),
   };
@@ -173,7 +173,10 @@ function stage(W, opts) {
     find(px, pz, ctx, push) { if (opts.car) push(car, Math.hypot(car.pos.x - px, car.pos.z - pz)); } });
   I.registerSource({ id: "t-horse", kind: "animal", layers: ["animal"], prio: 6, driving: false,
     find(px, pz, ctx, push) { if (opts.horse) push(horse, Math.hypot(horse.pos.x - px, horse.pos.z - pz)); } });
-  I.register("ped:civ", { id: "ped-talk", slot: "k", prio: 5, label: "Talk", onSelect: () => act("talk") });
+  // his authored primary (a keeper's Buy) owns E; there is no Talk verb:
+  // what he has to say is a `speak` option, said as you come up (once)
+  I.register("ped:civ", { id: "ped-buy", slot: "e", prio: 40, label: "Buy", onSelect: () => act("buy") });
+  I.register("ped:civ", { id: "ped-line", speak: true, prio: 80, label: "Talk", onSelect: () => act("said") });
   I.register("ped:civ", { id: "ped-hire", slot: "k", prio: 37, label: "Hire", onSelect: () => act("hire") });
   I.register("ped:civ", { id: "ped-mug", slot: "i", prio: 10, bad: true, label: "Mug", onSelect: () => act("mug") });
   I.register("ped", { id: "order-attack", prio: 30, pick: "person", label: "Attack", onSelect: (a, c, t) => act("order:" + (t && t.name)) });
@@ -191,12 +194,24 @@ function stage(W, opts) {
 }
 function look(W, x, z) { const P = W.P.pos; W.CBZ.cam.yaw = Math.atan2(-(x - P.x), -(z - P.z)); for (let i = 0; i < 6; i++) W.step(1 / 12); }
 
+// 0. NO TALK VERB: he says his piece as you come up, once per approach
+{
+  const W = makePage(); stage(W, { man: true });   // stage already faces him
+  look(W, 0, -3);
+  ok(W.acts.filter((x) => x === "said").length === 1, "looking at him, he speaks by himself, once: " + W.acts);
+  W.acts.length = 0;
+  for (let i = 0; i < 12; i++) W.step(1 / 12);
+  ok(W.acts.indexOf("said") < 0, "he does not repeat himself while you keep looking: " + W.acts);
+  look(W, 30, 30); look(W, 0, -3);
+  ok(W.acts.indexOf("said") < 0, "a glance away and back inside his hold: still quiet: " + W.acts);
+}
+
 // 1. a person ahead, a car to the side
 {
   const W = makePage(); stage(W, { man: true, car: true });
   look(W, 0, -3);
   let a = W.press("e");
-  ok(a.length === 1 && a[0] === "talk", "on foot facing a stranger: E talks (not Hire, not the car): " + a);
+  ok(a.length === 1 && a[0] === "buy", "on foot facing a stranger: E is his primary verb (not Hire, not the car): " + a);
   a = W.press("f");
   ok(a.length === 1 && (a[0] === "router" || a[0] === "get-in"), "same spot: F takes the car, never a verb on the man: " + a);
   a = W.press("i");
@@ -204,17 +219,17 @@ function look(W, x, z) { const P = W.P.pos; W.CBZ.cam.yaw = Math.atan2(-(x - P.x
   W.press("q");
   ok(W.CBZ.verbWheel.isOpen(), "Q opens the wheel on the man");
   const few = W.CBZ.verbWheel.audit().verbs;
-  ok(few.length <= 5 && few[0] === "Talk", "a few verbs first, the likely one on top: " + few.join(", "));
+  ok(few.length <= 5 && few[0] === "Buy" && few.indexOf("Talk") < 0, "a few verbs first, the likely one on top: " + few.join(", "));
   if (few.includes("More")) W.press(String(few.indexOf("More") + 1));
   ok(W.CBZ.verbWheel.isOpen(), "More opens the rest in place");
   const verbs = W.CBZ.verbWheel.audit().verbs;
-  ok(verbs.includes("Hire") && verbs.includes("Talk") && verbs.includes("Mug") && verbs.includes("Attack"), "the wheel holds every verb he has: " + verbs.join(", "));
+  ok(verbs.includes("Hire") && verbs.includes("Buy") && !verbs.includes("Talk") && verbs.includes("Mug") && verbs.includes("Attack"), "the wheel holds every verb he has: " + verbs.join(", "));
   const hireAt = verbs.indexOf("Hire") + 1;
   a = W.press(String(hireAt));
   ok(a.length === 1 && a[0] === "hire" && !W.CBZ.verbWheel.isOpen(), "a number on the wheel fires that one verb and closes it: " + a);
   W.press("q");
   a = W.press("e");
-  ok(a.length === 1 && a[0] === "talk", "E with the wheel up fires the wheel's first verb once (the card does not also fire): " + a);
+  ok(a.length === 1 && a[0] === "buy", "E with the wheel up fires the wheel's first verb once (the card does not also fire): " + a);
   W.press("q"); W.press("q");
   ok(!W.CBZ.verbWheel.isOpen(), "Q again closes the wheel");
 }
@@ -234,7 +249,7 @@ function look(W, x, z) { const P = W.P.pos; W.CBZ.cam.yaw = Math.atan2(-(x - P.x
   W.man.pos = { x: 0, y: 0, z: -3 }; W.horse.pos = { x: 1.6, y: 0, z: 1.2 };   // the horse is CLOSER
   look(W, 0, -3);
   let a = W.press("e");
-  ok(a.length === 1 && a[0] === "talk", "the man you face beats the closer horse behind you: " + a);
+  ok(a.length === 1 && a[0] === "buy", "the man you face beats the closer horse behind you: " + a);
   look(W, 1.6, 1.2);
   a = W.press("e");
   ok(a.length === 1 && a[0] === "pet", "turn to the horse: E pets it: " + a);
@@ -248,7 +263,7 @@ function look(W, x, z) { const P = W.P.pos; W.CBZ.cam.yaw = Math.atan2(-(x - P.x
   const W = makePage(); stage(W, { man: true, pin: { x: 0, y: 1, z: 3 } });
   look(W, 0, -3);                                        // facing the man, the button behind you
   let a = W.press("e");
-  ok(a.length === 1 && a[0] === "talk", "the man ahead owns E over a lift button behind you: " + a);
+  ok(a.length === 1 && a[0] === "buy", "the man ahead owns E over a lift button behind you: " + a);
   look(W, 0, 3);
   a = W.press("e");
   ok(a.length === 1 && a[0] === "lift", "face the button: E calls the lift, the man is not also talked to: " + a);

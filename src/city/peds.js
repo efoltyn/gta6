@@ -3155,6 +3155,23 @@
   // `res` is the landed strike when this is a fist (CBZ.verbs.strike): the
   // verbs play the reaction on the body, and this may overrule it
   // (res.reaction = "dead" | "knockdown" | "none")
+  /* STRUCK: what a man does the moment a blow lands on him, whoever threw it
+     (an NPC here, the player in city/combat.js landCity). ONE answer: he is
+     alarmed and afraid, off his seat, his set rallies (sizeup.js), the
+     outclassed fold (hands up / run), and a man who dares and has the nerve
+     fights back. Everyone else is left to the shared brain's threatened
+     branch next think (alarmed > 0: flee / cower / report / intervene).
+     A man on the floor is out of the fight. */
+  function struck(att, tgt, down) {
+    if (!tgt || tgt.dead || !att) return;
+    if (tgt.char && tgt.char.sitting) leaveSit(tgt);   // a struck desk worker is off the seat NOW (C3 interrupt)
+    if (down) { tgt.rage = null; return; }
+    tgt.alarmed = Math.max(tgt.alarmed || 0, 6); tgt.fear = Math.min(10, (tgt.fear || 0) + 2);
+    tgt.mem = att;                                     // who did it: the threat the brain reads
+    const dare = CBZ.citySizeUpHit ? CBZ.citySizeUpHit(tgt, att) : true;
+    if (!tgt.rage && dare && !tgt.restraint && (tgt.aggr || 0) >= (A0().bold || 0.5)) { tgt.rage = att; tgt.state = "fight"; }   // fight back — never with wrists tied (restrain.js owns him)
+  }
+  CBZ.cityStruck = struck;
   function hurtActor(att, tgt, dmg, melee, res) {
     if (!tgt || tgt.dead) return;
     const fx = att.pos.x, fz = att.pos.z;
@@ -3222,18 +3239,7 @@
           critical: lethal, cal: att.swat ? 1.1 : 0.9, fromX: fx, fromZ: fz }).outcome;
       }
     }
-    const down = tgt.dead || out === "ko" || out === "down" || (V && V.cuffable(tgt));
-    if (!down) {
-      tgt.alarmed = Math.max(tgt.alarmed, 6); tgt.fear = Math.min(10, tgt.fear + 2);
-      if (tgt.char && tgt.char.sitting) leaveSit(tgt);   // a struck desk worker is off the seat NOW (C3 interrupt)
-      // SIZE-UP (sizeup.js): rallies a gang victim's set, folds the outclassed
-      // (hands up / run), and returns whether this person DARES to fight back.
-      const dare = CBZ.citySizeUpHit ? CBZ.citySizeUpHit(tgt, att) : true;
-      if (!tgt.rage && dare && !tgt.restraint && tgt.aggr >= (A0().bold || 0.5)) { tgt.rage = att; tgt.state = "fight"; }   // fight back — never with wrists tied (restrain.js owns him)
-    } else if (!tgt.dead) {
-      if (tgt.char && tgt.char.sitting) leaveSit(tgt);
-      tgt.rage = null;                                    // a man on the floor is out of the fight
-    }
+    struck(att, tgt, tgt.dead || out === "ko" || out === "down" || (V && V.cuffable(tgt)));
     if (!V && tgt.hp <= 0) {
       CBZ.cityKillPed(tgt, { fromX: fx, fromZ: fz, attacker: att, byPlayer: false, force: melee ? 6 : 5, fling: melee ? 3 : 4 }, melee ? (blade ? "stabbed" : "beaten") : "shot");
     }

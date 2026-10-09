@@ -1965,11 +1965,6 @@
   // same read to hang a verb on a trade. The old private pair stays underneath
   // as the degrade path, byte-identical to what it always was.
   const _jobOf = (p) => (CBZ.cityPedJob ? CBZ.cityPedJob(p) : ((p && p.job) || ""));
-  const _jclass = (p) => {
-    if (CBZ.cityPedJobClass) return CBZ.cityPedJobClass(p);
-    const J = CBZ.cityJobs && CBZ.cityJobs[_jobOf(p)];
-    return J ? J.class : "";
-  };
 
   // is this storefront LOCKED UP for the night? Only the banker's-hours kinds
   // shut (the diner, the gas pump, the bar and the trap never close); hours
@@ -2080,12 +2075,8 @@
   CBZ.cityCabFare = cabFare;
   CBZ.cityCabRide = cabRide;
 
-  const TOOLBAG = ["Crowbar", "Lockpick", "Medkit"];   // the hardware counter's working bundle
-  function toolbagPrice() {
-    const econ = CBZ.cityEcon; let t = 0;
-    for (const n of TOOLBAG) t += econ.buyPrice(n);
-    return Math.round(t * 0.85);
-  }
+  // is this counter shut for the night? (interact.js hides Buy on a shut shop)
+  CBZ.cityShopShut = shopShutSoft;
 
   let _regDone = false;
   CBZ.onUpdate(38.5, function () {
@@ -2143,64 +2134,11 @@
       };
     });
 
-    // ---- LOCKED UP: off-shift = shut shop. The shut line outranks "Shop
-    //      here" on E for the banker's-hours kinds; the register verbs stay
-    //      (a closed store is still a store with a drawer). ----
-    I.register("ped:vendor", {
-      id: "vendor-shut", slot: "e", prio: 20,
-      canShow: (v) => !!v.vendor && shopShut(v.vendor),
-      label: "Knock",
-      onSelect: (v) => {
-        if (CBZ.citySay) CBZ.citySay(v, "We're closed. Sunup.", "#cfe6ff", 2.2);
-      },
-    });
-
-    // ---- counter depth where it PAYS: one trade verb per storefront kind ----
-    // the diner: a HOT PLATE — the best hunger fill in the city, eaten standing
-    I.register("ped:vendor", {
-      id: "vendor-hotmeal", slot: "k", prio: 10,
-      canShow: (v) => !!v.vendor && v.vendor.kind === "food",
-      label: "Eat $15",
-      onSelect: () => {
-        if (!CBZ.city.spend(15)) { CBZ.city.note("A plate runs $15.", 1.4); return; }
-        g.hunger = Math.min(100, (g.hunger || 0) + 50);
-        if (CBZ.player.maxHp) CBZ.player.hp = Math.min(CBZ.player.maxHp, (CBZ.player.hp || 0) + 18);
-        if (CBZ.sfx) CBZ.sfx("coin");
-        CBZ.city.note("Hot plate, straight off the grill.", 1.8);
-        if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-      },
-    });
-    // the barber: the quick chair — a lineup without opening the whole menu
-    I.register("ped:vendor", {
-      id: "vendor-lineup", slot: "k", prio: 10,
-      canShow: (v) => !!v.vendor && v.vendor.kind === "barber" && !shopShut(v.vendor),
-      label: "Trim $25",
-      onSelect: () => {
-        if (!CBZ.city.spend(25)) { CBZ.city.note("The chair runs $25.", 1.4); return; }
-        const lk = look(); lk.swagger = (lk.swagger || 0) + 1;
-        CBZ.city.addRespect(1);
-        if (CBZ.sfx) CBZ.sfx("coin");
-        CBZ.city.note("Edges cleaned up, sharper already.", 1.6);
-      },
-    });
-    // the hardware counter: the working TOOL BAG, bundled under list price
-    I.register("ped:vendor", {
-      id: "vendor-toolbag", slot: "k", prio: 10,
-      canShow: (v) => !!v.vendor && v.vendor.kind === "hardware",
-      label: () => "Buy " + fmt$(toolbagPrice()),
-      onSelect: () => {
-        const price = toolbagPrice();
-        if (!CBZ.city.spend(price)) { CBZ.city.note("The bag runs " + fmt$(price) + ".", 1.6); return; }
-        const econ = CBZ.cityEcon;
-        for (const n of TOOLBAG) {
-          econ.add(n, 1);
-          const m = econ.ITEMS[n];
-          if (m && (m.melee || m.gun) && CBZ.cityGiveWeapon) CBZ.cityGiveWeapon(n);
-        }
-        if (CBZ.sfx) CBZ.sfx("coin");
-        CBZ.city.note("Tool bag over the counter, ready to work.", 1.8);
-      },
-    });
+    // THE KEEPER'S VERBS ARE BUY / ROB / SELL (city/roles.js). Buy opens the
+    // counter's own stock (interact.js vendor-shop -> CBZ.cityOpenShop) and is
+    // simply absent while the shop is shut; the old Knock line, the Eat $15 /
+    // Trim $25 / tool-bag shortcuts (a second price list beside the stock)
+    // are gone.
     // the pawnbroker: one press fences the whole haul (the haggle's built into
     // the counter's own sell prices — no second economy)
     I.register("ped:vendor", {
@@ -2289,18 +2227,6 @@
         let S = null;
         if (V && V.takeFrom) { try { S = V.takeFrom(CBZ.player, p, { at: "wristR", kind: "cash", pose: "card", dur: 0.55, onTaken: eat }); } catch (e) { S = null; } }
         if (!S) eat();
-      },
-    });
-    // a posted guard can be GREASED — fifty bucks buys you blind eyes a while
-    I.register("ped:civ", {
-      id: "ped-guard-grease", slot: "l", prio: 30, bad: true,
-      canShow: (p) => !p.dead && !p.rage && !p.gang && _jclass(p) === "law",
-      label: "Bribe $50",
-      onSelect: (p) => {
-        if (!CBZ.city.spend(50)) { CBZ.city.note("You need a whole fifty to grease anyone.", 1.4); return; }
-        p.snitch = 0; p.reactCD = Math.max(p.reactCD || 0, 90);
-        p.cash = (p.cash | 0) + 50;
-        if (CBZ.citySay) CBZ.citySay(p, "Didn't see a thing.", "#cfe6ff", 2.2);
       },
     });
   });

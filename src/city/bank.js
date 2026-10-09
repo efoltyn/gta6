@@ -2026,7 +2026,14 @@
               archetype: "security", x: gx, z: gz,
               face: Math.atan2(v.inx, v.inz), pose: "foldarms",
               opts: { wealth: 0.4, outfit: 0x23262c, aggr: 0.55, armed: true, weapon: "Pistol", hp: 150 },
-              after: function (ped) { ped._vaultStaff = v.id; },
+              // THE GUARD ON THE VAULT CARRIES ITS CARD (owner 2026-10-09: guards
+              // "guard something... you take their keycard"). The same key row
+              // as the manager's, so taking it off his belt (city/roles.js
+              // Take card), his body or a gun in his back opens the same door.
+              after: function (ped) {
+                ped._vaultStaff = v.id;
+                if (CBZ.cityKeys && CBZ.cityKeys.givePed) CBZ.cityKeys.givePed(ped, v.id, "Vault Key, " + (lot.building.name || "Meridian Trust"));
+              },
             });
             stations++;
           }

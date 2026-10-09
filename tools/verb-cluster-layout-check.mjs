@@ -83,7 +83,7 @@ function pill(word, kind) {
   const h = kind === "lead" ? 50 : kind === "more" ? 38 : 44;
   return { w: Math.min(240, Math.max(minW, Math.ceil(word.length * cw + pad + 3))), h: h };
 }
-const VERBS = ["Talk", "Ask for a smoke", "Compliment", "Hire", "Ask the way", "Flirt", "Insult", "Take $77", "Pickpocket", "Stand down"];
+const VERBS = ["Bribe $150", "Take card", "Punch", "Recruit", "Threaten", "Mug", "Pickpocket", "Rob", "Shake down", "Stand down"];
 function sizesFor(n, collapsed) {
   const words = VERBS.slice(0, n);
   const shown = collapsed && n > 5 ? words.slice(0, 4).concat(["More"]) : words;

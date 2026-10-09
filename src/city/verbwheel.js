@@ -70,7 +70,7 @@
     closedAt: 0, closedT: null,
     order: null,               // { cand, item, t } while picking a target
   };
-  let root = null, ring = null, btns = [];
+  let root = null, ring = null, nameEl = null, btns = [];
 
   function now() { return (performance && performance.now ? performance.now() : Date.now()) / 1000; }
   function I() { return CBZ.interactions || null; }
@@ -97,8 +97,7 @@
      first), so tapping the big pill and pressing E are the same thing. The
      rest keep the registry's own order (its priority is its guess at the
      likely verb) nudged by who this is right now:
-       your man      orders (Guard, Tail, Attack, Stand down) come up; the
-                     stranger's small talk (Compliment, Insult...) goes down
+       your man      orders (Guard, Tail, Attack, Stand down) come up
        angry at you  the hostile verbs come up
        your gun out  robbing comes up
      Two verbs that print the same word are one pill. */
@@ -119,7 +118,7 @@
       let s = i;
       if (crew) {
         if (it.pick || /^order-/.test(id)) s -= 100;
-        else if (/^rich-/.test(id) || it.bad) s += 40;
+        else if (it.bad) s += 40;
       }
       if (angry && it.bad) s -= 60;
       if (armed && /^(Rob|Mug|Take)\b/.test(word)) s -= 30;
@@ -145,6 +144,12 @@
     root.style.cssText = "position:fixed;left:0;top:0;width:0;height:0;z-index:60;pointer-events:none;display:none";
     ring = document.createElement("div");
     root.appendChild(ring);
+    // WHO HE IS (owner 2026-10-09: "it doesn't say people's names when you
+    // click on them"): one short line over his head, the interactions
+    // registry's own card title (city/roles.js titles a person)
+    nameEl = document.createElement("div");
+    nameEl.className = "vname";
+    root.appendChild(nameEl);
     document.body.appendChild(root);
     return root;
   }
@@ -164,6 +169,10 @@
       return { key: touch ? "" : String(i + 1), proposal: it.label, label: it.label, bad: it.bad, more: !!it.more };
     });
     ring.innerHTML = CBZ.cityVerbCluster(rows, { placed: true });
+    let who = "";
+    try { who = (I() && I().titleOf) ? I().titleOf(W.cand) : ""; } catch (e) { who = ""; }
+    nameEl.textContent = who || "";
+    nameEl.style.display = who ? "" : "none";
     const box = ring.firstElementChild;
     btns = [];
     const list = box ? box.querySelectorAll(".vpill") : [];
@@ -218,8 +227,11 @@
     if (!cand) return false;
     // the tap that just closed the verbs on this very person closes, not reopens
     if (W.closedT === cand.t && Date.now() - W.closedAt < RETAP_MS) return true;
+    // the tap is an approach: he says his piece first (no Talk verb), and a
+    // line that opens a conversation puts its replies on this very wheel
+    const spoke = ii.approach ? ii.approach(cand) : false;
     const items = ii.wheelOf(cand);
-    if (!items.length) return false;
+    if (!items.length) return !!spoke;
     if (items.length === 1 && !items[0].pick) { ii.fireOn(cand, items[0].opt); return true; }
     return open(cand);
   }
@@ -339,6 +351,14 @@
       const r = L.rects[i];
       btns[i].style.left = Math.round(r.x) + "px";
       btns[i].style.top = Math.round(r.y) + "px";
+    }
+    if (nameEl && nameEl.textContent) {
+      // centred over his head, kept on the glass
+      const nw = nameEl.offsetWidth || 120, nh = nameEl.offsetHeight || 22;
+      const nx = Math.max(8, Math.min(w - nw - 8, b.ax - nw / 2));
+      const ny = Math.max(8, b.y - nh - 6);
+      nameEl.style.left = Math.round(nx) + "px";
+      nameEl.style.top = Math.round(ny) + "px";
     }
     root.style.visibility = "";
   }

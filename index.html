@@ -20,7 +20,7 @@
 <link rel="stylesheet" href="css/mobile.css?v=neck1001b">
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
 <link rel="stylesheet" href="css/inventory.css?v=onebar0930">
-<link rel="stylesheet" href="css/city.css?v=neck1001">
+<link rel="stylesheet" href="css/city.css?v=verbs2">
 <link rel="stylesheet" href="css/campaign.css?v=neck1001b">
 <link rel="stylesheet" href="css/interact_touch.css?v=jailside1001">
 <link rel="stylesheet" href="css/title_hub.css?v=end1">
@@ -845,7 +845,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/prisontiers.js?v=jailv1001"></script>
 
 <!-- 4b. remaining systems -->
-<script src="src/systems/quests.js?v=jailv1001"></script>
+<script src="src/systems/quests.js?v=verbs2"></script>
 <script src="src/systems/prisonvoice.js?v=jailv1001"></script>
 <script src="src/systems/input.js"></script>
 <script src="src/systems/spatialgrid.js?v=pf0930v"></script>
@@ -923,7 +923,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/dashboard.js?v=cars1"></script>
 <script src="src/systems/combat.js?v=gnp0930"></script>
 <script src="src/systems/killstreaks.js?v=jailv1001"></script>
-<script src="src/systems/interact.js?v=jailside1001"></script>
+<script src="src/systems/interact.js?v=verbs2"></script>
 <!-- TRADE: your pockets and his on one table (opened by the Trade verb on a person). -->
 <script src="src/systems/prisontrade.js?v=jailside1001"></script>
 <!-- FRIENDSHIP IS OFFERED, NOT BROWSED. BEFRIEND used to sit on every inmate's
@@ -1392,14 +1392,14 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE ONE ORGANISATION LAYER. CBZ.factions.declare({id,ranks,wage,admission,bind})
      = a joinable, rankable, paying outfit. MUST precede gangs.js, careers.js,
      playergang.js, promotion.js, heists.js and militia.js — all declare at parse. -->
-<script src="src/city/factions.js?v=w09290219"></script>
+<script src="src/city/factions.js?v=verbs2"></script>
 <script src="src/city/gangs.js?v=cd0929"></script>
-<script src="src/city/social.js?v=cd0929"></script>
+<script src="src/city/social.js?v=verbs2"></script>
 <script src="src/city/realestate.js?v=tap0929"></script>
 <script src="src/city/view.js?v=cars1"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=brainmoves1"></script>
-<script src="src/city/peds.js?v=intent1008"></script>
+<script src="src/city/peds.js?v=verbs2"></script>
 <!-- THE STREET AS A CONFIGURATION OF CBZ.brain: bystanders become witnesses
      (social.crime), react on their own delay through threat.respond, gangs
      retaliate proportionally and rout on brain morale, gang standing is
@@ -1422,8 +1422,8 @@ document.body.appendChild(b);}}catch(e){}})();
      After level.js (cityLevel/cityRole/cityPlayerTitle) and social.js
      (cityRel/cityBond/citySay); every consumer resolves it lazily at call
      time, so nothing below needs reordering. Consumers: humancontact.js (the
-     bump), peds.js (trade + greet), interactions_rich.js (insult scaling). -->
-<script src="src/city/read.js?v=cd0929"></script>
+     bump), peds.js (trade + greet). -->
+<script src="src/city/read.js?v=verbs2"></script>
 <script src="src/city/sizeup.js?v=lvl1y"></script>
 <script src="src/city/bling.js?v=w09290232"></script>
 <script src="src/city/club.js?v=deslop1"></script>
@@ -1435,8 +1435,8 @@ document.body.appendChild(b);}}catch(e){}})();
      READS the fleet at order 37.7, after vehicles.js has moved it at 37. -->
 <script src="src/city/carlamps.js?v=lamps1"></script>
 <script src="src/city/medics.js?v=fit1"></script>
-<script src="src/city/security.js?v=seawave1"></script>
-<script src="src/city/vips.js?v=pf0930c"></script>
+<script src="src/city/security.js?v=verbs2"></script>
+<script src="src/city/vips.js?v=verbs2"></script>
 <script src="src/city/police.js?v=intent1008"></script>
 <script src="src/city/aircraftphysics.js?v=aero1"></script>
 <script src="src/city/aircraft.js?v=mil0929"></script>
@@ -1572,7 +1572,7 @@ document.body.appendChild(b);}}catch(e){}})();
      tornado is a silent no-op. Only needs config.js; no other ordering. -->
 <script src="src/systems/tornado.js?v=loose1"></script>
 <script src="src/city/aircraftimpact.js?v=airimpact1"></script>
-<script src="src/city/shops.js?v=ric0929"></script>
+<script src="src/city/shops.js?v=verbs2"></script>
 <script src="src/city/gunstore.js?v=tap0929"></script>
 <!-- weapon attachments: scopes / bigger mags / suppressor / grips, sold at the
      gunsmith bench in the gun store (sights.js reads a fitted optic) -->
@@ -1591,11 +1591,11 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- The word on every button is a verb (city/verbword.js CBZ.cityVerbWord);
      before interactions.js, whose row renderer prints through it. -->
 <script src="src/city/verbword.js?v=presverbs1008"></script>
-<script src="src/city/interactions.js?v=presverbs1008"></script>
+<script src="src/city/interactions.js?v=verbs2"></script>
 <!-- THE VERB WHEEL (Q / a touch tap): everything you can do to the thing you
      look at, laid round it; orders about a third person start here. Reads
      city/interactions.js's wheelOf/fireOn. -->
-<script src="src/city/verbwheel.js?v=hirefire1001"></script>
+<script src="src/city/verbwheel.js?v=verbs2"></script>
 <!-- FUEL. The world has been generating "Pump & Go Fuel" lots since long
      before this file — they just had nothing to sell, because no vehicle had
      a tank. Player vehicle only (a hundred NPC cars silently running dry is a
@@ -1662,10 +1662,10 @@ document.body.appendChild(b);}}catch(e){}})();
      with real per-segment limits it wins automatically with no edit here.
      After fuel.js (reads CBZ.vehicleFuel). Revert with ?cfg_CAR_CLUSTER=0. -->
 <script src="src/city/carcluster.js?v=speedunit1"></script>
-<script src="src/city/interact.js?v=hirefire1001"></script>
+<script src="src/city/interact.js?v=verbs2"></script>
 <!-- ORDERS ABOUT SOMEONE ELSE (the principal seat): Attack / Guard / Tail /
      Stand down on anyone who works for you. Registers into interactions. -->
-<script src="src/city/orders.js?v=intent1008b"></script>
+<script src="src/city/orders.js?v=verbs2"></script>
 <!-- A ROLE IS A VERB: one data table of job-string -> verb (doctor patches you
      up, cook feeds you, dock hand puts you on the clock, courier hands you a
      run) plus one of streetProp-type -> verb (hydrant, meter, route board,
@@ -1674,9 +1674,9 @@ document.body.appendChild(b);}}catch(e){}})();
      prop rummage (interact.js), all of which are already loaded here.
      CBZ.cityJobs (aigoals.js, below) is only ever read at RUN time.
      Revert with ?cfg_ROLE_VERBS=0 / ?cfg_OBJECT_VERBS=0. -->
-<script src="src/city/roleverbs.js?v=cd0929"></script>
+<script src="src/city/roleverbs.js?v=verbs2"></script>
 <script src="src/city/restrain.js?v=polsim1008b"></script>
-<script src="src/city/combat.js?v=intent1008b"></script>
+<script src="src/city/combat.js?v=verbs2"></script>
 <!-- B7 — RESOURCES: harvest nodes (needs CBZ.assets/placement/CBZ.CITY
      already loaded, and CBZ.cityEcon's Wood/Stone/Scrap/Hatchet/Pickaxe
      entries above). Loads right after city/combat.js, whose lightAttack/
@@ -1694,7 +1694,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/leaderboard.js?v=rg0929"></script>
 <script src="src/city/zillow.js?v=onebet1"></script>
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
-<script src="src/city/bank.js?v=tap0929"></script>
+<script src="src/city/bank.js?v=verbs2"></script>
 <script src="src/city/pawnshop.js?v=tap0929"></script>
 <script src="src/city/clothingstore.js?v=tap0929"></script>
 <!-- THE SHOP FLOOR (city/storegoods.js): every generic store stands wall bays,
@@ -1771,25 +1771,25 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/metro_structs.js?v=wreal0929"></script>
 <script src="src/city/spawnplaces.js?v=sim2"></script>
 <script src="src/city/scenedirector.js?v=w09290218"></script>
-<!-- custom dialogue + street talk (one contextual YES/NO decision) — after the registry -->
 <script src="src/systems/custom_dialogue.js?v=ce1"></script>
-<script src="src/city/street_talk.js?v=cd0929"></script>
-<!-- 4d-3. this wave's feature modules (load after all deps they read) -->
-<script src="src/city/interactions_rich.js?v=tui0929"></script>
-<!-- DIALOGUE IS TWO CHOICES — every talkable person answers with a line and
-     exactly two shown answers (BOARD/HIJACK card grammar); punch and walking
-     away are the two unshown exits. Loads after interactions/interact/
-     street_talk/interactions_rich; contracts.js + phone.js read lazily. -->
-<script src="src/city/dialogue.js?v=cd0929"></script>
+<!-- WHO A PERSON IS AND WHAT YOU CAN DO TO HIM: the role -> verbs table the
+     registry filters every street verb through, the one-line title over a
+     person (card + tap wheel), and the role verbs Threaten / Bribe / Take
+     card. After interactions.js + interact.js; everything else lazily. -->
+<script src="src/city/roles.js?v=verbs2"></script>
+<!-- A MAN WITH WORK PITCHES IT AS YOU COME UP (no Talk verb): his line over
+     his head, Take is the verb, walking off is the no. After the registry;
+     contracts.js + phone.js read lazily. -->
+<script src="src/city/dialogue.js?v=verbs2"></script>
 <!-- THE STORE RACKET — rob-or-extort at every counter, protection as the
      conquerable territory layer, owner memory, and the NPC crews playing the
      same game. Loads after interactions/interact (registers its verbs), after
      shops (cityTill is the only money source) and after gangs/turf (it steers
      crews and feeds zone control). Flag: RACKET_V1. -->
-<script src="src/city/racket.js?v=cd0929"></script>
+<script src="src/city/racket.js?v=verbs2"></script>
 <script src="src/city/aim_dossier.js?v=allmain1"></script>
 <script src="src/city/captives.js?v=nodash1"></script>
-<script src="src/city/millionaires.js?v=pf0930c"></script>
+<script src="src/city/millionaires.js?v=verbs2"></script>
 <script src="src/city/regionlife.js?v=wreal0929"></script>
 <script src="src/city/modshop.js?v=cd0929"></script>
 <script src="src/city/stuntjumps.js?v=metro0929"></script>
@@ -2028,7 +2028,6 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/familytree.js?v=w09290219"></script>
 <script src="src/city/inheritance.js?v=famtree1"></script>
 <script src="src/city/births.js?v=w09290219"></script>
-<script src="src/city/marriage.js?v=nodash1"></script>
 <script src="src/city/familypanel.js?v=nodash1"></script>
 <!-- kinship.js — the BODY for the family/friends arithmetic: bonded walkers,
      greetings, grief, homecoming. Loads after familypanel (reads the whole
@@ -2125,7 +2124,7 @@ document.body.appendChild(b);}}catch(e){}})();
      ledger. Loads after take.js (it is the counterparty to a loss), after
      citystaff/roleverbs (its desks are posts and its rungs are verbs) and
      after structural/demolition (the losses it underwrites). -->
-<script src="src/city/insurance.js?v=cd0929"></script>
+<script src="src/city/insurance.js?v=verbs2"></script>
 <script src="src/sim/motorsport.js?v=nodash1"></script>
 
 <!-- P-wave: politics -->
@@ -2285,7 +2284,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the level+role the pill already shows. After officials.js/officialdom.js
      (it binds real officeholders) and police.js (state principals inherit the
      posted-officer brain). Revert with ?cfg_POWER_PROTECTION=0. -->
-<script src="src/city/power.js?v=cd0929"></script>
+<script src="src/city/power.js?v=verbs2"></script>
 <!-- GARRISON. A stationed job is a job that requires you to BE SOMEWHERE.
      Fourth consumer of police.js's `_post` standing brain (roadblock,
      checkpoints, power details were the first three) — soldiers, sentries and
@@ -2350,8 +2349,8 @@ document.body.appendChild(b);}}catch(e){}})();
      jail's transport). AFTER govcomplex.js (reads CBZ.govComplexes); every
      other read is feature-detected and lazily retried.
      Revert with ?cfg_PRESIDENCY_V1=0. -->
-<script src="src/city/presidency.js?v=address1008"></script>
-<script src="src/city/politics.js?v=polsim1008b"></script>
+<script src="src/city/presidency.js?v=verbs2"></script>
+<script src="src/city/politics.js?v=verbs2"></script>
 <!-- THE PRESIDENT'S WORLD (2026-09-27 rework) — no HUD strip, no mission
      list, no button console. In load order: the office (desk phone that rings
      with real calls, briefing folders you read on the desk, the TV news, aides
@@ -2360,7 +2359,7 @@ document.body.appendChild(b);}}catch(e){}})();
      and lockdown bodies in the street), and the regime dressing that changes
      the Mansion when the republic falls. Security (the detail, the gate
      checkpoint, counter-snipers, the panic protocol) lives in protection.js. -->
-<script src="src/city/president_office.js?v=polsim1008b"></script>
+<script src="src/city/president_office.js?v=verbs2"></script>
 <script src="src/city/motorcade.js?v=presverbs1008"></script>
 <!-- THE PRESIDENT'S PEOPLE: the office comes staffed; Dismiss is on the
      person (or "I need your resignation" by phone) and costs news, approval,
@@ -2368,7 +2367,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Staff fills a chair with two names (loyal or good); refusals feed
      loyalty, loyalty feeds the coup. After presidency.js,
      president_office.js, protection.js, motorcade.js. -->
-<script src="src/city/president_staff.js?v=polsim1008b"></script>
+<script src="src/city/president_staff.js?v=verbs2"></script>
 <!-- THE COMMANDER IN CHIEF (city/warroom.js): war / peace / airstrike / nuke
      for a sitting President, ordered from the Situation Room's red phones and
      map (presidency.js) or the detail agent carrying the football. Rides

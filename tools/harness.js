@@ -939,7 +939,6 @@ function stressTest() {
   tryStep(200);
   console.log("  cops now=" + CBZ.cityCops.filter((c) => !c.dead).length);
   T("rob stash", () => { const lot = (CBZ.cityGangs[0] && CBZ.cityGangs[0].turf[0]); if (lot) CBZ.cityRobStash(lot); });
-  T("flirt→partner", () => { const r = peds.find((p) => CBZ.cityIsRomance && CBZ.cityIsRomance(p)); if (r) { g.cash = 9999; for (let i = 0; i < 5; i++) CBZ.cityFlirt(r); } });
   console.log("  partner=" + (g.cityPartner ? g.cityPartner.name : "none"));
   T("take hostage", () => { const h = peds.find((p) => !p.dead && p !== g.cityPartner); if (h) CBZ.cityTakeHostage(h); });
   T("release hostage", () => { CBZ.cityReleaseHostage(true); });

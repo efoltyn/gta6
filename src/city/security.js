@@ -86,7 +86,9 @@
       if (d2 < bd) { bd = d2; best = p; }
     }
     const actor = CBZ.city && CBZ.city.playerActor;
-    if (actor && !actor.dead && (CBZ.game.wanted | 0) >= 1) {
+    // a guard you paid (city/roles.js Bribe) looks the other way until it runs out
+    const paid = (guard._lookAwayUntil || 0) > ((typeof CBZ.now === "number" ? CBZ.now : Date.now()) / 1000);
+    if (actor && !actor.dead && !paid && (CBZ.game.wanted | 0) >= 1) {
       const dx = actor.pos.x - guard.pos.x, dz = actor.pos.z - guard.pos.z, d2 = dx * dx + dz * dz;
       if (d2 < bd) best = actor;
     }

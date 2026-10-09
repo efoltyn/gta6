@@ -557,7 +557,8 @@
   "src/world/world_grime.js",
   "src/world/building_dress.js",
   "src/city/localinst.js",
-  "src/core/profile.js"
+  "src/core/profile.js",
+  "src/city/roles.js"
  ],
  "readOnly": [],
  "stats": {
@@ -4334,7 +4335,8 @@
   "src/race/race_ai.js",
   "src/race/race_session.js",
   "src/race/race_car.js",
-  "src/city/speedway_race.js"
+  "src/city/speedway_race.js",
+  "src/city/roles.js"
  ],
  "needed": [
   "src/city/facade_kit.js",

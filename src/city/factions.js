@@ -1165,7 +1165,6 @@
     { tag: "memb:zillow", file: "src/city/zillow.js:148,158" },
     { tag: "memb:hud", file: "src/city/hud.js:491" },
     { tag: "memb:interact", file: "src/city/interact.js:116" },
-    { tag: "memb:interactions_rich", file: "src/city/interactions_rich.js:84" },
   ];
   const migrated = Object.create(null);
   CBZ.factionMigrated = function (tag) { if (tag) migrated[String(tag)] = true; };

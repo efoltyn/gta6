@@ -904,54 +904,6 @@
   }
 
   // ============================================================
-  //  OWNER REQUESTS — "store owners tell you what they want," read straight
-  //  off the ledger. The verb is authored; the specifics are world facts.
-  // ============================================================
-  // Everything the owner knows, the owner SAYS — in first person, with the
-  // real names and the real numbers off the ledger. No hint lines, no coach:
-  // if the man wants something done, he tells you like a person would, and
-  // if the robber still walks he points at the map himself (the marker).
-  function requestLine(lot) {
-    const rec = recFor(lot);
-    const day = dayNow();
-
-    // 1) an unavenged robbery — the owner wants his money back, and he names
-    //    the man when he knows the name (rob entries remember it)
-    let openRob = null;
-    for (let i = rec.robs.length - 1; i >= 0; i--) {
-      const rb = rec.robs[i];
-      if (!rb.a && rb.b !== "player" && (day - rb.d) <= 5) { openRob = rb; break; }
-    }
-    if (openRob) {
-      const who = openRob.n ? openRob.n : (openRob.b && openRob.b !== "npc" ? "one of the " + sideName(openRob.b) : "some crook");
-      const when = (day - openRob.d) <= 0 ? "today" : (day - openRob.d) === 1 ? "yesterday" : (day - openRob.d) + " days back";
-      const ped = openRob._ped && !openRob._ped.dead ? openRob._ped : null;
-      if (ped && CBZ.cityMarkTarget) CBZ.cityMarkTarget(ped);
-      if (ped) return { say: who + " robbed me " + when + ". He's still around." };
-      return { say: who + " robbed me " + when + ". Cops did nothing." };
-    }
-    // 2) squeezed by a crew they don't believe in
-    if (rec.gang && !isPlayerSide(rec.gang) && rec.trust < 0.35) {
-      return { say: "We pay the " + sideName(rec.gang) + ". For what?" };
-    }
-    // 3) unprotected and scared
-    if (!rec.gang && (rec.fear > 0.3 || unavengedCount(rec) > 0)) {
-      return { say: "Every week somebody walks in with a gun." };
-    }
-    // 4) yours — the state of the arrangement, money included
-    if (isPlayerSide(rec.gang)) {
-      if (rec.owed > 0) return { say: "Your money's in the drawer." };
-      return { say: "Quiet week. Thank God." };
-    }
-    // 5) protected and content — how content is readable in the phrasing
-    if (rec.gang) {
-      if (rec.trust > 0.6) return { say: "The " + sideName(rec.gang) + " look after us." };
-      return { say: "The " + sideName(rec.gang) + " look after us. Mostly." };
-    }
-    return { say: "Slow. Always slow. You buying?" };
-  }
-
-  // ============================================================
   //  THE NPC RACKET DIRECTOR — rival crews play the same game: sign stores
   //  near their turf, collect daily, rob stores an ENEMY protects (a real
   //  walking robber carrying real cash), and reclaim what was taken.
@@ -1385,17 +1337,6 @@
       onSelect: function (v) { if (v.vendor) extortCounter(v.vendor); },
     });
 
-    // ---- calm-counter verbs (no gun): the ledger speaks through the owner --
-    // J — ASK. The request line reads the world's actual events back to you.
-    I.register("ped:vendor", {
-      id: "rk-ask", slot: "j", prio: 20,
-      canShow: function (v) { return on() && !!v.vendor && !v.vendor.demolished && racketable(v.vendor); },
-      label: "Ask",
-      onSelect: function (v) {
-        const q = requestLine(v.vendor);
-        if (CBZ.citySay) CBZ.citySay(v, q.say, "#cfe6ff", 3.6);
-      },
-    });
     // L — COLLECT, on your own stores with money waiting.
     I.register("ped:vendor", {
       id: "rk-collect", slot: "l", prio: 20,

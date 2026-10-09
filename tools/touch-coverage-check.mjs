@@ -261,11 +261,11 @@ function stage(Pg) {
     find(px, pz, ctx, push) { const d = Math.hypot(car.pos.x - px, car.pos.z - pz); if (d <= 5.2) push(car, d); } });
   I.registerSource({ id: "t-horse", kind: "animal", layers: ["animal"], prio: 6, driving: false,
     find(px, pz, ctx, push) { const d = Math.hypot(horse.pos.x - px, horse.pos.z - pz); if (d <= 5.2) push(horse, d); } });
-  I.register("ped:civ", { id: "ped-talk", prio: 5, label: "Talk", onSelect: () => act("talk") });
+  I.register("ped:civ", { id: "ped-threaten", prio: 5, bad: true, label: "Threaten", onSelect: () => act("threaten") });
   I.register("ped:civ", { id: "ped-hire", prio: 37, label: "Hire", onSelect: () => act("hire") });
   I.register("ped:civ", { id: "ped-mug", prio: 10, bad: true, label: "Mug", onSelect: () => act("mug") });
-  I.register("ped:civ", { id: "ped-flirt", prio: 8, label: "Flirt", onSelect: () => act("flirt") });
-  I.register("ped:civ", { id: "ped-insult", prio: 7, bad: true, label: "Insult", onSelect: () => act("insult") });
+  I.register("ped:civ", { id: "ped-recruit", prio: 8, label: "Recruit", onSelect: () => act("recruit") });
+  I.register("ped:civ", { id: "ped-swing", prio: 7, bad: true, label: "Punch", onSelect: () => act("punch") });
   I.register("ped:civ", { id: "ped-pickpocket", prio: 6, bad: true, label: "Pickpocket", onSelect: () => act("pickpocket") });
   I.register("vehicle", { id: "car-get-in", slot: "e", ride: true, label: "Get in", onSelect: () => act("get-in") });
   I.register("vehicle", { id: "car-lock", prio: 3, label: "Break in", bad: true, onSelect: () => act("break-in") });

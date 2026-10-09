@@ -168,7 +168,7 @@ const pressBody = live().find((p) => p._presStaff === "press");
 ok(!!chief && chief.name === "Ruth Adair", "the Chief of Staff stands in the office");
 ok(!!pressBody && pressBody.name === st.press, "the press secretary is at her desk");
 ok(!live().some((p) => (p._iopts || []).some((o) => /hire|send-away|brief|chief-fire/.test(o.id))), "no Hire, Send away, Brief or Fire verb on anybody");
-ok(opt(chief, "pres-chief-talk") && opt(chief, "pres-chief-talk").slot === "e" && opt(chief, "pres-dismiss-chief") && !opt(chief, "pres-dismiss-chief").slot, "the Chief: E is Talk, the wheel has Dismiss");
+ok(opt(chief, "pres-chief-talk") && opt(chief, "pres-chief-talk").speak === true && opt(chief, "pres-dismiss-chief") && !opt(chief, "pres-dismiss-chief").slot, "the Chief: he speaks as you come up (no Talk verb), the wheel has Dismiss");
 ok(opt(pressBody, "pres-dismiss-press") && !(pressBody._iopts || []).some((o) => o.slot === "e"), "the press secretary has no button, only Dismiss on the wheel");
 ok(/PRES_BASE = 6;/.test(readFileSync(path.join(ROOT, "src/city/protection.js"), "utf8")), "the office grants the full detail (protection.js PRES_BASE 6)");
 ok(!/hasDriver/.test(readFileSync(path.join(ROOT, "src/city/motorcade.js"), "utf8")), "the column has its driver from day one (no hire gate in motorcade.js)");
@@ -203,7 +203,7 @@ ok(line && line.by === "Ruth Adair" && new RegExp("^Two names for General\\. " +
 ok(nm.names.every((c) => c.ideology), "the two names carry an ideology: " + nm.names.map((c) => c.ideology).join(" / "));
 const ea = opt(chief, "pres-chief-name-a"), eb = opt(chief, "pres-chief-name-b");
 ok(ea.slot === "e" && ea.canShow() && label(ea) === sur(nm.names[0].name) && !eb.slot && eb.canShow() && label(eb) === sur(nm.names[1].name), "E is " + label(ea) + ", the wheel is " + label(eb));
-ok(!opt(chief, "pres-chief-talk").canShow(), "Talk steps aside while he holds the names");
+ok(!opt(chief, "pres-chief-talk").canShow(), "his line steps aside while he holds the names");
 
 // ---- 4. the trade-off ------------------------------------------------------------------
 const loyalGen = fillWith("general", 0);

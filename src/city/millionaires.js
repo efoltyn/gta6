@@ -707,23 +707,6 @@
       label: (p) => "Shake down " + money(p._milliBag || 0),
       onSelect: shakeDown,
     });
-    // A flavor read so the rich aren't anonymous (no-gun, harmless).
-    I.register("ped:civ", {
-      id: "milli-sizeup", slot: "e", prio: 2,
-      canShow: (p) => isTycoon(p),
-      label: "Size up",
-      onSelect: (p) => {
-        const job = (p._milli && p._milli.job) || "serious money";
-        // LE5: if his fortune is tied to a tower in the ledger, SAY so — the
-        // building IS the money, which is why he's such a fat mark.
-        if (p._milliLedgerLot && CBZ.cityNpcAcct) {
-          const till = CBZ.cityNpcAcct(p._milliLedgerLot) | 0;
-          if (till > 0) { note("" + (p._milliTitle || "Tycoon") + " — " + job + ". His tower's books carry " + money(till) + "; squeeze him and a slice of that is yours.", 3.0); return; }
-        }
-        note("" + (p._milliTitle || "Tycoon") + " — " + job + ". Worth a small fortune in cash and ice.", 2.6);
-      },
-    });
-
     // THE CHARITY GALA zone: walk up and sponsor it.
     I.registerZone({
       id: "milli-gala", kind: "milli-gala", radius: 5.5, prio: 7,

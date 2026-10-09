@@ -1180,10 +1180,10 @@
     if (!ped) return false;
     ped.name = m.who.name; ped.nameKnown = true; ped.organization = "state";
     ped._presOffice = true; ped._iOnly = true;
-    // he came to see you: E on him hears it now, without waiting for him to
-    // reach the desk
+    // he came to see you: look at him (or tap him) and he says it now,
+    // without waiting for him to reach the desk. No Talk verb: it is his line.
     if (CBZ.interactions && CBZ.interactions.registerFor) {
-      CBZ.interactions.registerFor(ped, { id: "pv-aide-hear", slot: "e", prio: 30, campaignSafe: true, forceYes: true,
+      CBZ.interactions.registerFor(ped, { id: "pv-aide-hear", speak: true, speakCD: 4, prio: 30, campaignSafe: true, forceYes: true,
         label: "Talk",
         canShow: function () { return AIDE.ped === ped && !ped.dead && (AIDE.phase === "wait" || AIDE.phase === "enter") && !M.onCall && !READ.f; },
         onSelect: function () { aideTalk(); } });
@@ -1289,8 +1289,8 @@
     ped._iOnly = true;
     SEC.ped = ped;
     if (CBZ.interactions && CBZ.interactions.registerFor) {
-      // E: what is waiting for you, in one line
-      CBZ.interactions.registerFor(ped, { id: "pv-sec-talk", slot: "e", prio: 30, campaignSafe: true, forceYes: true,
+      // what is waiting for you, in one line, as you come up to her desk
+      CBZ.interactions.registerFor(ped, { id: "pv-sec-talk", speak: true, prio: 30, campaignSafe: true, forceYes: true,
         label: "Talk", canShow: function () { return !ped.dead; },
         onSelect: function () { SEC.lastLine = CLOCK; if (CBZ.citySay) { try { CBZ.citySay(ped, secLine(), "#e8e2cf", 3.0); } catch (e) {} } } });
       // a call you missed: she puts the caller back on your line
