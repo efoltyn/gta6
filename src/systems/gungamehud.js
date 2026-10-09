@@ -18,7 +18,7 @@
      .gg-pulse     one full-screen edge pulse: gold (promote), orange-gold
                    (you reached the fists). A demotion is the track draining
                    and shaking, never a red screen.
-     (low HP is your eyelids, systems/eyes.js fed by vitals.js; nothing here
+     (low HP is the red rim + heartbeat, systems/eyes.js fed by vitals.js; nothing here
       tints the view: owner 2026-09-30, "the red, what does that even mean?")
      .gg-shield    edge shimmer while spawn protection is live.
      .gg-arcs      damage direction: a pool of 4 pale arcs around the reticle,

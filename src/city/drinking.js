@@ -94,12 +94,16 @@
   // ---- canvas blur/saturate — throttled: only touch style.filter when the
   //      ROUNDED value actually changed, so a stone-sober frame (or a frame
   //      where the level barely ticked) never forces a style write. --------
+  //      The filter itself is composed by systems/eyes.js's CBZ.canvasFilter,
+  //      so the drunk blur and the hurt desaturation never overwrite each other.
   let lastFilterKey = "";
+  function setFilter(css) {
+    if (CBZ.canvasFilter) CBZ.canvasFilter("drunk", css);
+    else if (CBZ.canvas) CBZ.canvas.style.filter = css;
+  }
   function applyCanvasFilter(level) {
-    const canvas = CBZ.canvas;
-    if (!canvas) return;
     if (level <= 0.02) {
-      if (lastFilterKey !== "") { canvas.style.filter = ""; lastFilterKey = ""; }
+      if (lastFilterKey !== "") { setFilter(""); lastFilterKey = ""; }
       return;
     }
     const blur = Math.round(Math.min(MAX_LEVEL, level) * BLUR_PER_LEVEL * 10) / 10;
@@ -107,10 +111,10 @@
     const key = blur + "|" + sat.toFixed(2);
     if (key === lastFilterKey) return;
     lastFilterKey = key;
-    canvas.style.filter = "blur(" + blur + "px) saturate(" + sat.toFixed(2) + ")";
+    setFilter("blur(" + blur + "px) saturate(" + sat.toFixed(2) + ")");
   }
   function clearCanvasFilter() {
-    if (lastFilterKey !== "") { if (CBZ.canvas) CBZ.canvas.style.filter = ""; lastFilterKey = ""; }
+    if (lastFilterKey !== "") { setFilter(""); lastFilterKey = ""; }
   }
 
   // ---- camera sway: a BOUNDED delta added on top of the real look each

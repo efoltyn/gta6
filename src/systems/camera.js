@@ -884,6 +884,184 @@
     }
     return best;
   }
+
+  /* ---- HOW FAR CAN A LENS GO FROM HERE TO THERE ---------------------------
+     Free distance along a segment for a camera sphere of radius `rad`: the LOS
+     meshes (building shells) and the swept collider grid, the same two tests
+     the boom uses. Published for city/camera.js's exterior death shot. */
+  const _cdO = new THREE.Vector3(), _cdD = new THREE.Vector3();
+  const _cdRay = new THREE.Raycaster();
+  function clearDist(ox, oy, oz, px, py, pz, rad) {
+    const dx = px - ox, dy = py - oy, dz = pz - oz;
+    const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    if (d < 1e-4) return 0;
+    _cdD.set(dx / d, dy / d, dz / d);
+    let best = d;
+    const blk = CBZ.losBlockers;
+    if (blk && blk.length) {
+      _cdO.set(ox, oy, oz);
+      _cdRay.set(_cdO, _cdD); _cdRay.far = d;
+      const h = CBZ.losRaycast ? CBZ.losRaycast(_cdRay, blk) : _cdRay.intersectObjects(blk, false);
+      // a box the pivot already sits in (a body slumped against a wall) is
+      // skipped, exactly as sweepColliders skips one: it would zero every ray
+      for (let i = 0; i < h.length; i++) {
+        if (h[i].distance <= 0.02) continue;
+        if (h[i].distance < d) best = Math.max(0, h[i].distance - rad);
+        break;
+      }
+    }
+    return Math.min(best, sweepColliders(ox, oy, oz, _cdD.x, _cdD.y, _cdD.z, best, rad));
+  }
+  CBZ.camClearDist = clearDist;
+  // the safety net: pull `pos` (a Vector3) toward the pivot until the lens
+  // sphere has a clear line to it. Returns true if it moved the camera.
+  function pullback(ox, oy, oz, pos, rad, minD) {
+    const dx = pos.x - ox, dy = pos.y - oy, dz = pos.z - oz;
+    const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    if (d < 1e-3) return false;
+    const free = clearDist(ox, oy, oz, pos.x, pos.y, pos.z, rad || 0.3);
+    if (free >= d - 1e-3) return false;
+    const k = Math.min(1, Math.max(minD || 0.35, free) / d);
+    pos.set(ox + dx * k, oy + dy * k, oz + dz * k);
+    return true;
+  }
+  CBZ.camPullback = function (ox, oy, oz, pos, rad, minD) { return pullback(ox, oy, oz, pos, rad, minD); };
+
+  /* ---- THE WASTED CAMERA SEES THE BODY -----------------------------------
+     Owner (iPad, 2026-10-09): "when it shows WASTED, the camera spins around,
+     but often the camera's blocked by buildings, and it looks stupid."
+
+     The old orbit was a blind circle: 5.5 m out, 3 m up, round and round,
+     whatever stood there. Against a facade, half of every lap was the inside of
+     a wall; in a room, all of it was.
+
+     Now the shot is planned. From the body's chest, DS_N bearings are cast out
+     to the orbit point at the normal height and, if that fails, at a crane
+     height over cars and low walls; each bearing keeps the fraction of the arm
+     that is clear. Then:
+       orbit  every bearing is clear far enough: the full circle, as before
+       arc    the longest run of clear bearings: swing back and forth inside it
+       hold   a short run or a single good bearing: a still shot from there
+       top    nothing is far enough (a cell, a closet): a high shot straight
+              down from under the ceiling, inside the room
+     The plan is re-made when the body (or the spectated killer) moves, and
+     every frame the lens is pulled back off anything solid as a safety net. */
+  const DS_N = 24, DS_RMIN = 2.6, DS_HOLD_MIN = 1.4;
+  const dsFrA = new Float32Array(DS_N), dsFrB = new Float32Array(DS_N);
+  let dsFor = null, dsPlan = null, dsT = 0, dsAng = 0, dsDir = 1;
+  const dsCur = new THREE.Vector3(), dsTgt = new THREE.Vector3();
+  function wrap2pi(a) { a %= Math.PI * 2; return a < 0 ? a + Math.PI * 2 : a; }
+  function dsCast(fr, sx, sy, sz, R, hh, pivY) {
+    const oy = sy + pivY, len = Math.hypot(R, hh - pivY);
+    for (let i = 0; i < DS_N; i++) {
+      const a = i / DS_N * Math.PI * 2;
+      fr[i] = Math.min(1, clearDist(sx, oy, sz, sx + Math.cos(a) * R, sy + hh, sz + Math.sin(a) * R, 0.34) / len);
+    }
+  }
+  // longest circular run of bearings whose clear arm reaches rMin
+  function dsRun(fr, fMin) {
+    let n = 0;
+    for (let i = 0; i < DS_N; i++) if (fr[i] >= fMin) n++;
+    if (n === DS_N) return { s: 0, L: DS_N };
+    if (n === 0) return { s: 0, L: 0 };
+    let bestS = 0, bestL = 0;
+    for (let i = 0; i < DS_N; i++) {
+      if (fr[i] < fMin || fr[(i + DS_N - 1) % DS_N] >= fMin) continue;   // run starts only
+      let L = 0;
+      while (L < DS_N && fr[(i + L) % DS_N] >= fMin) L++;
+      if (L > bestL) { bestL = L; bestS = i; }
+    }
+    return { s: bestS, L: bestL };
+  }
+  function solveDeathView(sx, sy, sz, R, H, pivY) {
+    const fMinA = DS_RMIN / R;
+    dsCast(dsFrA, sx, sy, sz, R, H, pivY);
+    let run = dsRun(dsFrA, fMinA), fr = dsFrA, hh = H;
+    if (run.L < DS_N) {
+      // crane up: a parked car or a garden wall stops the low arm, not this one
+      const H2 = H + 2.2;
+      dsCast(dsFrB, sx, sy, sz, R, H2, pivY);
+      const run2 = dsRun(dsFrB, DS_RMIN / R);
+      if (run2.L >= run.L + 2) { run = run2; fr = dsFrB; hh = H2; }
+    }
+    const step = Math.PI * 2 / DS_N;
+    const plan = { sx: sx, sy: sy, sz: sz, R: R, hh: hh, pivY: pivY, fr: Float32Array.from(fr), mode: "hold", a0: 0, span: 0, f: 1 };
+    if (run.L === DS_N) { plan.mode = "orbit"; return plan; }
+    if (run.L >= 3) { plan.mode = "arc"; plan.a0 = run.s * step; plan.span = (run.L - 1) * step; return plan; }
+    // nothing to swing through: the best single bearing
+    let bi = 0;
+    for (let i = 1; i < DS_N; i++) if (fr[i] > fr[bi]) bi = i;
+    const len = Math.hypot(R, hh - pivY);
+    if (run.L > 0) {
+      plan.a0 = (run.s + (run.L - 1) / 2) * step;
+      let f = 1; for (let j = 0; j < run.L; j++) f = Math.min(f, fr[(run.s + j) % DS_N]);
+      plan.f = f; return plan;
+    }
+    if (fr[bi] * len >= DS_HOLD_MIN) { plan.a0 = bi * step; plan.f = fr[bi]; return plan; }
+    // A TIGHT ROOM: look straight down from under the ceiling
+    const up = clearDist(sx, sy + pivY, sz, sx, sy + pivY + 5, sz, 0.3);
+    if (up >= 1.0) {
+      plan.mode = "top"; plan.a0 = bi * step; plan.topY = sy + pivY + Math.min(up - 0.2, 4.0);
+      return plan;
+    }
+    // no room at all: over the shoulder, as far as the best bearing allows
+    plan.a0 = bi * step; plan.f = Math.max(0.45 / len, fr[bi]);
+    return plan;
+  }
+  // per-bearing clear fraction, interpolated between the cast samples
+  function dsFrac(plan, a) {
+    const u = wrap2pi(a) / (Math.PI * 2) * DS_N;
+    const i = Math.floor(u) % DS_N, j = (i + 1) % DS_N, w = u - Math.floor(u);
+    return plan.fr[i] + (plan.fr[j] - plan.fr[i]) * w;
+  }
+  // position + aim the death camera on `subj`; `first` snaps instead of easing
+  function deathView(d, subj, watching, dt, pref) {
+    const R = watching ? 6.6 : 5.5, H = watching ? 3.4 : 3.0, ly = watching ? 1.1 : 0.7;
+    const pivY = watching ? 1.4 : 1.0;           // the chest (a standing killer's is higher)
+    const fresh = dsFor !== d;
+    if (fresh) { dsFor = d; dsPlan = null; dsAng = pref; dsDir = 1; }
+    dsT -= dt;
+    const moved = dsPlan ? Math.hypot(subj.x - dsPlan.sx, subj.y - dsPlan.sy, subj.z - dsPlan.sz) : 1e9;
+    if (!dsPlan || (moved > 1.0 && dsT <= 0) || (dsPlan.watching !== watching)) {
+      dsPlan = solveDeathView(subj.x, subj.y, subj.z, R, H, pivY);
+      dsPlan.watching = watching;
+      dsT = 0.25;
+      if (dsPlan.mode === "arc") {
+        const u = wrap2pi(dsAng - dsPlan.a0);
+        if (u > dsPlan.span) {
+          // outside the clear arc: enter at the nearer end, swinging inward
+          const toEnd = u - dsPlan.span, toStart = Math.PI * 2 - u;
+          if (toStart <= toEnd) { dsAng = dsPlan.a0; dsDir = 1; } else { dsAng = dsPlan.a0 + dsPlan.span; dsDir = -1; }
+        }
+      }
+    }
+    const P = dsPlan, speed = watching ? 0.45 : 0.8;
+    const ox = subj.x, oy = subj.y + P.pivY, oz = subj.z;
+    if (P.mode === "orbit") dsAng += speed * dt;
+    else if (P.mode === "arc") {
+      const u = Math.min(P.span, Math.max(0, wrap2pi(dsAng - P.a0)));
+      const edge = Math.min(u, P.span - u);
+      const ease = Math.max(0.2, Math.min(1, edge / 0.35));       // slow into each end
+      let nu = u + dsDir * speed * ease * dt;
+      if (nu >= P.span) { nu = P.span; dsDir = -1; } else if (nu <= 0) { nu = 0; dsDir = 1; }
+      dsAng = P.a0 + nu;
+    } else dsAng = P.a0;
+    if (P.mode === "top") {
+      dsTgt.set(ox + Math.cos(dsAng) * 0.45, P.topY, oz + Math.sin(dsAng) * 0.45);
+    } else {
+      const f = P.mode === "hold" ? P.f : Math.min(1, dsFrac(P, dsAng));
+      dsTgt.set(ox + Math.cos(dsAng) * P.R * f, oy + (P.hh - P.pivY) * f, oz + Math.sin(dsAng) * P.R * f);
+    }
+    if (fresh) dsCur.copy(dsTgt);
+    else dsCur.lerp(dsTgt, 1 - Math.exp(-6 * dt));
+    camera.position.copy(dsCur);
+    // THE SAFETY NET, every frame: never a lens inside or behind anything solid
+    pullback(ox, oy, oz, camera.position, 0.3, 0.45);
+    dsCur.copy(camera.position);
+    look.set(subj.x, subj.y + ly, subj.z);
+    camera.lookAt(look);
+  }
+
   // …and it never shows the inside of YOUR skull either: an arm shorter than
   // this hides the rig for the frame (the reference shot was exactly that —
   // the prison boom's 0.28 m floor parked the lens in the player's own head).
@@ -1455,10 +1633,8 @@
         const spec = cc.death.spectate;
         const subj = (spec && spec.pos && !spec.culled && !spec._parked) ? spec.pos : player.pos;
         const watching = subj !== player.pos;
-        const ang = (cc.death.ang0 || 0) + cc.death.t * (watching ? 0.45 : 0.8);
-        const r = watching ? 6.6 : 5.5, h = watching ? 3.4 : 3.0, ly = watching ? 1.1 : 0.7;
-        camera.position.set(subj.x + Math.cos(ang) * r, subj.y + h, subj.z + Math.sin(ang) * r);
-        look.set(subj.x, subj.y + ly, subj.z); camera.lookAt(look);
+        // a planned shot that never looks through a wall (deathView, above)
+        deathView(cc.death, subj, watching, dt, cc.death.ang0 || 0);
         fov = smoothDamp(fov, 48, fovV, 0.2, fdt); if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
         return;
       }
@@ -1534,6 +1710,8 @@
           // so the orbit rides down into the hole with you — correct).
           if (CBZ.surv.floorAt) cy = Math.max(cy, CBZ.surv.floorAt(cx, cz) + 0.55);
           camera.position.set(cx, cy, cz);
+          // the island has buildings too: never film the body through one
+          pullback(p.x, p.y + 1.0, p.z, camera.position, 0.3, 0.45);
           look.set(p.x, p.y + 0.7, p.z); camera.lookAt(look);
           fov = smoothDamp(fov, 48, fovV, 0.2, fdt);
           if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }

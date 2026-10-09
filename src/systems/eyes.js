@@ -1,48 +1,83 @@
 /* ============================================================
    systems/eyes.js — CBZ.eyes: HOW A HURT BODY SEES. One file, every game.
 
-   Owner, 2026-09-30: "I hate when the screen starts turning red. It's not
-   realistic ... I don't know if you're about to die. Maybe your eyes can
-   close. But the red, what does that even mean?"
+   Owner, 2026-10-09 (iPad): "I don't like the eyes-closing effect on the
+   screen. You should always see. The eyes can close after you fully die."
 
-   So nothing in this game paints the view red any more. Being close to the
-   end is what it is for a body: the eyelids get heavy. They droop from the
-   top and the bottom, the blinks come slower and longer, the light dims, the
-   breath gets loud, and out cold they are shut. A hit makes you flinch (a
-   snap half-blink). There is no tint, no meter, no word.
+   So while you are ALIVE the view never closes and never goes black, however
+   bad it is: hurt, knocked down, out cold, choked, out of air, nearly dead.
+   What a hurt body gets instead is quiet and at the edge of the frame:
+     - a light, dark-red rim that creeps in from the corners (centre stays clear)
+     - the colour drains out of the world (canvas saturate)
+     - a heartbeat you can hear, faster the worse it is, and loud breath near the end
+     - a hit is a short pulse of that rim, never a blink
+   The lids exist for ONE thing: the final fade AFTER you are dead
+   (CBZ.eyes.close, called by a game's death beat), and they open again when
+   the next life starts (CBZ.eyes.open / reset).
 
-   Anything can close the eyes a little, by name, every frame it is true:
+   API (unchanged names, so every feeder keeps working):
      CBZ.eyes.hurt(k, "body")   0..1  vitals.js: blood, hp, knocked out
      CBZ.eyes.hurt(k, "air")    0..1  holding your breath too long
-   The heaviest one wins. A source that stops calling lets go on its own
-   (half a second), so a mode that ends never leaves your eyes shut.
+       The heaviest one wins; a source that stops calling lets go on its own.
      CBZ.eyes.flinch(p)          a hit landing (0..1)
      CBZ.hitFlash()              the old name for a hit; now a flinch
      CBZ.eyes.level()            the current heaviness (0..1)
-     CBZ.eyes.reset()
+     CBZ.eyes.close(sec)         DEAD ONLY: the lids come down over sec
+     CBZ.eyes.open(sec)          the lids come back up (a new life)
+     CBZ.eyes.reset()            everything off, lids open, now
 
-   The lids are two DOM strips moved by transform only (compositor work, no
-   layout, no repaint), under the HUD so a finger can still find its button.
+   CBZ.canvasFilter(name, css) is the one writer of the game canvas's CSS
+   filter: drinking.js's blur and this file's desaturation used to fight over
+   canvas.style.filter; now each names its part and they compose.
 ============================================================ */
 (function () {
   "use strict";
   const CBZ = window.CBZ = window.CBZ || {};
-  if (CBZ.eyes && CBZ.eyes._v) return;
-  const E = CBZ.eyes = { _v: 1 };
+  if (CBZ.eyes && CBZ.eyes._v >= 2) return;
+  const E = CBZ.eyes = { _v: 2 };
+
+  /* ---- the canvas filter, composed from named parts ---------------------- */
+  const FPARTS = Object.create(null);
+  let fShown = null;
+  CBZ.canvasFilter = function (name, css) {
+    css = css || "";
+    if ((FPARTS[name] || "") === css) return;
+    if (css) FPARTS[name] = css; else delete FPARTS[name];
+    let s = "";
+    for (const n in FPARTS) s += (s ? " " : "") + FPARTS[n];
+    const cv = CBZ.canvas || (CBZ.renderer && CBZ.renderer.domElement);
+    if (!cv || s === fShown) return;
+    fShown = s;
+    cv.style.filter = s;
+  };
 
   const SRC = Object.create(null);     // name -> { k, at }
   const HOLD = 0.5;                     // s a source stays without being renewed
   let t = 0, last = 0, raf = 0;
   let flinchK = 0;
-  let blinkT = 3, blinkDur = 0, blinkAge = -1;
-  let breathT = 0, breathIn = true;
-  let shown = -1, dimShown = -1;
-  let top = null, bot = null, dim = null;
+  let beatT = 0, breathT = 0, breathIn = true;
+  let vigShown = -1, satShown = -1, lidShown = -1;
+  // the death lids: lidK eases toward lidWant at lidRate (per second)
+  let lidK = 0, lidWant = 0, lidRate = 1;
+  let vig = null, top = null, bot = null;
 
   function now() { return (typeof performance !== "undefined" && performance.now) ? performance.now() / 1000 : Date.now() / 1000; }
   const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+  function playerDead() { const P = CBZ.player; return !!(P && P.dead); }
 
-  function build() {
+  function buildVig() {
+    if (vig || typeof document === "undefined" || !document.body) return !!vig;
+    vig = document.createElement("div");
+    vig.setAttribute("aria-hidden", "true");
+    const s = vig.style;
+    s.position = "fixed"; s.left = s.top = s.right = s.bottom = "0";
+    s.pointerEvents = "none"; s.zIndex = "18"; s.opacity = "0"; s.willChange = "opacity";
+    // the centre is fully clear at every strength; only the rim tints
+    s.background = "radial-gradient(ellipse at center,rgba(0,0,0,0) 52%,rgba(70,6,8,.32) 78%,rgba(48,2,4,.62) 100%)";
+    document.body.appendChild(vig);
+    return true;
+  }
+  function buildLids() {
     if (top || typeof document === "undefined" || !document.body) return !!top;
     const lid = function (edge) {
       const d = document.createElement("div");
@@ -51,7 +86,6 @@
       s.position = "fixed"; s.left = "-2%"; s.right = "-2%"; s.height = "58vh";
       s.pointerEvents = "none"; s.zIndex = "18"; s.willChange = "transform";
       s[edge] = "0";
-      // skin-dark lid, a soft lash line rather than a hard edge
       s.background = edge === "top"
         ? "linear-gradient(to bottom,#030202 0%,#070404 82%,rgba(7,4,4,.55) 92%,rgba(7,4,4,0) 100%)"
         : "linear-gradient(to top,#030202 0%,#070404 82%,rgba(7,4,4,.55) 92%,rgba(7,4,4,0) 100%)";
@@ -59,13 +93,6 @@
       document.body.appendChild(d);
       return d;
     };
-    dim = document.createElement("div");
-    dim.setAttribute("aria-hidden", "true");
-    const ds = dim.style;
-    ds.position = "fixed"; ds.left = ds.top = ds.right = ds.bottom = "0";
-    ds.pointerEvents = "none"; ds.zIndex = "18"; ds.opacity = "0"; ds.willChange = "opacity";
-    ds.background = "radial-gradient(ellipse at center,rgba(0,0,0,.35) 30%,rgba(0,0,0,.8) 100%)";
-    document.body.appendChild(dim);
     top = lid("top"); bot = lid("bottom");
     return true;
   }
@@ -86,48 +113,48 @@
     const dt = Math.min(0.1, Math.max(0, n - (last || n)));
     last = n;
     t += dt;
-    const k = level();
+    const dead = playerDead();
+    // a dead man's hurt cues stop; the death beat owns the screen now
+    const k = dead ? 0 : level();
+    flinchK = Math.max(0, flinchK - dt * 4.0);
 
-    // THE BLINK: slower and longer the worse it is; near the end the lids
-    // stay down for a long beat before they drag back up
-    let blink = 0;
-    if (k > 0.05) {
-      blinkT -= dt;
-      if (blinkT <= 0 && blinkAge < 0) {
-        blinkAge = 0;
-        blinkDur = 0.28 + 0.6 * k + (k > 0.8 && Math.random() < 0.4 ? 0.9 : 0);
-        blinkT = (7 - 5 * k) * (0.7 + 0.6 * Math.random());
-      }
-    } else blinkT = Math.max(blinkT, 2);
-    if (blinkAge >= 0) {
-      blinkAge += dt;
-      const u = blinkAge / blinkDur;
-      // fast close, a hold at the bottom, a slow heavy open
-      blink = u < 0.25 ? u / 0.25 : u < 0.55 ? 1 : Math.max(0, 1 - (u - 0.55) / 0.45);
-      if (u >= 1) { blinkAge = -1; blink = 0; }
+    // THE RIM: light, at the edge only, a beat that pulses with the heart
+    const vk = Math.round(clamp01(0.62 * k + 0.5 * flinchK) * 50) / 50;
+    // THE COLOUR: drains toward grey, never all the way
+    const sat = Math.round((1 - 0.5 * clamp01((k - 0.1) / 0.9)) * 20) / 20;
+    // THE LIDS: only ever moved by close()/open()
+    if (lidK !== lidWant) {
+      const step = lidRate * dt;
+      lidK = lidK < lidWant ? Math.min(lidWant, lidK + step) : Math.max(lidWant, lidK - step);
     }
-    flinchK = Math.max(0, flinchK - dt * 5.5);
+    // ...and never shut on a living man, whoever asked
+    if (!dead && lidWant > 0) { lidWant = 0; lidRate = 3; }
+    const lk = Math.round(clamp01(lidK * lidK * (3 - 2 * lidK)) * 200) / 200;
 
-    // how far each lid comes down: 0 open, 1 shut (they meet in the middle)
-    const droop = 0.2 * k + 0.32 * k * k;
-    let c = Math.max(droop, blink * (0.55 + 0.45 * k), flinchK);
-    if (k >= 0.999) c = 1;
-    c = Math.round(clamp01(c) * 200) / 200;
-    const dk = Math.round(clamp01(k * 0.85) * 50) / 50;
-
-    if ((c > 0 || shown > 0 || dk > 0 || dimShown > 0) && build()) {
-      if (c !== shown) {
-        shown = c;
-        // the lid is 58vh tall; at c=1 it covers down past the middle
-        const off = (1 - c) * 100;
-        top.style.transform = "translate3d(0," + (-off).toFixed(1) + "%,0)";
-        bot.style.transform = "translate3d(0," + off.toFixed(1) + "%,0)";
-      }
-      if (dk !== dimShown) { dimShown = dk; dim.style.opacity = String(dk); }
+    if ((vk > 0 || vigShown > 0) && buildVig() && vk !== vigShown) {
+      vigShown = vk; vig.style.opacity = String(vk);
+    }
+    if (sat !== satShown) {
+      satShown = sat;
+      CBZ.canvasFilter("hurt", sat < 0.999 ? "saturate(" + sat.toFixed(2) + ")" : "");
+    }
+    if ((lk > 0 || lidShown > 0) && buildLids() && lk !== lidShown) {
+      lidShown = lk;
+      const off = (1 - lk) * 100;
+      top.style.transform = "translate3d(0," + (-off).toFixed(1) + "%,0)";
+      bot.style.transform = "translate3d(0," + off.toFixed(1) + "%,0)";
     }
 
-    // HEAVY BREATHING: loud, ragged, faster as it gets worse
-    if (k > 0.3 && typeof CBZ.breath === "function") {
+    // THE HEART: you hear it once it matters, faster as it gets worse
+    if (k > 0.2 && typeof CBZ.heartbeat === "function") {
+      beatT -= dt;
+      if (beatT <= 0) {
+        try { CBZ.heartbeat(k); } catch (e) {}
+        beatT = 1.05 - 0.5 * k;
+      }
+    } else beatT = 0;
+    // HEAVY BREATHING near the end
+    if (k > 0.5 && typeof CBZ.breath === "function") {
       breathT -= dt;
       if (breathT <= 0) {
         try { CBZ.breath(k, breathIn); } catch (e) {}
@@ -136,7 +163,7 @@
       }
     }
 
-    if (k > 0 || c > 0 || flinchK > 0 || blinkAge >= 0 || shown > 0 || dimShown > 0) schedule();
+    if (k > 0 || flinchK > 0 || vigShown > 0 || satShown < 1 || lidK !== lidWant || lidShown > 0) schedule();
   }
   function schedule() {
     if (raf || typeof requestAnimationFrame !== "function") return;
@@ -153,15 +180,26 @@
   };
   E.flinch = function (p) {
     p = p == null ? 0.5 : clamp01(+p);
-    flinchK = Math.max(flinchK, 0.25 + 0.35 * p);
+    flinchK = Math.max(flinchK, 0.25 + 0.45 * p);
     schedule();
   };
   E.level = function () { return level(); };
-  E.reset = function () {
-    for (const n in SRC) delete SRC[n];
-    flinchK = 0; blinkAge = -1;
+  // the final fade. Refused for a living player: the view never closes on you.
+  E.close = function (sec) {
+    if (!playerDead()) return false;
+    lidWant = 1; lidRate = 1 / Math.max(0.05, +sec || 1);
+    schedule();
+    return true;
+  };
+  E.open = function (sec) {
+    lidWant = 0; lidRate = 1 / Math.max(0.05, +sec || 0.6);
     schedule();
   };
-  // A hit used to paint the screen red here. It is a flinch now.
+  E.reset = function () {
+    for (const n in SRC) delete SRC[n];
+    flinchK = 0; lidWant = 0; lidK = 0;
+    schedule();
+  };
+  // A hit used to paint the screen red, then to blink. It is a rim pulse now.
   CBZ.hitFlash = function (p) { E.flinch(p == null ? 0.6 : p); };
 })();

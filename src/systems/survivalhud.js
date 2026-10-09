@@ -18,7 +18,7 @@
                   SAFE HERE / NOT SAFE chip and the SURVIVED card are gone:
                   the world shows WHAT it is, the glyph says WHERE to go.
      HURT         no red screen: every loss is a flinch and a jolt; low,
-                  your eyelids get heavy (systems/eyes.js + vitals.js).
+                  a red rim, grey colour and a heartbeat (systems/eyes.js + vitals.js).
      BARS         health shows for a few seconds after you are hit and stays
                   while you are low; stamina only while it is not full; the
                   stamina bar becomes an AIR bar in the water. No captions.
@@ -137,7 +137,7 @@
   }
 
   /* ---- YOU ARE BEING HURT: a flinch and a jolt with every loss (scaled by
-     it). Being LOW is your eyelids (systems/vitals.js feeds systems/eyes.js
+     it). Being LOW is the red rim + heartbeat (systems/vitals.js feeds systems/eyes.js
      from your hp in every mode); nothing here tints the screen. ---- */
   let lastHp = null;
   function drawHurt() {

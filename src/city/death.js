@@ -73,7 +73,7 @@
     titleEl.style.opacity = "0"; titleEl.style.transform = "scale(1.25)"; subEl.style.opacity = "0";
   }
 
-  CBZ.cityDeathReset = function () { dying = false; respawnT = 0; wastedT = 0; pendingWasted = null; pendingDeathCam = null; deathCamHoldT = 0; spectating = false; specKiller = null; pendingSpecKiller = null; g._citySpecTarget = null; finalDeath = false; finalDeathLine = ""; g._cityGameOver = false; if (goCard) goCard.style.display = "none"; if (specHUD) specHUD.style.display = "none"; hideOverlay(); if (CBZ.cityCam) CBZ.cityCam.death = null; if (CBZ.fpsDeathDropReset) CBZ.fpsDeathDropReset(); };
+  CBZ.cityDeathReset = function () { dying = false; respawnT = 0; wastedT = 0; pendingWasted = null; pendingDeathCam = null; deathCamHoldT = 0; spectating = false; specKiller = null; pendingSpecKiller = null; g._citySpecTarget = null; finalDeath = false; finalDeathLine = ""; g._cityGameOver = false; if (goCard) goCard.style.display = "none"; if (specHUD) specHUD.style.display = "none"; hideOverlay(); if (CBZ.cityCam) CBZ.cityCam.death = null; if (CBZ.fpsDeathDropReset) CBZ.fpsDeathDropReset(); if (CBZ.eyes && CBZ.eyes.reset) CBZ.eyes.reset(); };
 
   // A hit is a FLINCH (systems/eyes.js CBZ.hitFlash), never a red screen.
 
@@ -810,6 +810,7 @@
     P.pos.set(spot.x, 0, spot.z);
     P.vy = 0; P.grounded = true; P.dead = false; P.maxHp = P.maxHp || 200; P.hp = P.maxHp; P.ko = 0; P.stun = 0; P._hurtT = 0;
     if (CBZ.vitals) CBZ.vitals.reset(P);         // the ER sent you out whole: no bleeds, full blood, no wraps
+    if (CBZ.eyes && CBZ.eyes.open) CBZ.eyes.open(0.8);   // wake: the lids of the final fade come up
     vDown = false;
     // ARMOR drops with the body: respawn bare. cityArmorResetPlayer clears the
     // pool + kit + unmounts the vest/helmet prop (armor.js). Fallback zeroes the
@@ -865,6 +866,11 @@
       if (pendingWasted && wastedT > 0) { wastedT -= dt; if (wastedT <= 0) { showOverlay(finalDeath ? "DEAD" : "WASTED", pendingWasted, "#c9202a"); pendingWasted = null; } }
       if (spectating) { tickSpectate(dt); return; }
       respawnT -= dt;
+      // THE FINAL FADE: the only place the eyes close (systems/eyes.js). The
+      // last ~0.9 s of the beat, and only when nothing is left to watch (a
+      // spectated killer keeps your eyes on him).
+      if (respawnT < 0.9 && CBZ.eyes && CBZ.eyes.close &&
+          !(pendingSpecKiller && specValid(pendingSpecKiller))) CBZ.eyes.close(0.9);
       if (respawnT <= 0) {
         // PERMADEATH: a final death never reaches respawn() — the run is wiped
         // and the GAME OVER card is the only exit (its button reloads fresh).
@@ -911,118 +917,7 @@
     setTimeout(tick, 50);
   };
 
-  // ---- CINEMATIC EXTERIOR DEATH CAM (self-contained fallback) ----
-  // The primary home for this is city/camera.js, but if that module isn't loaded
-  // we install the exact same exterior-shot plumbing here so the feature still
-  // works. systems/camera.js positions the death ORBIT at onAlways(50); this
-  // override runs at 51 and, ONLY during the authored exterior beat
-  // (CBZ.cityCam.death.ext), takes the camera over — pulling it out to the street
-  // and looking back at the building + blast — without clipping into walls, then
-  // releases cleanly to the orbit. Guarded so it never double-installs.
-  (function installExteriorDeathCam() {
-    const cc = CBZ.cityCam = CBZ.cityCam || { fp: false, death: null };
-    if (cc._extHookInstalled) return;            // camera.js already owns it
-    cc._extHookInstalled = true;
-
-    const camera = CBZ.camera;
-    if (!camera) return;
-    const _ro = new THREE.Vector3(), _rd = new THREE.Vector3();
-    const _eye = new THREE.Vector3(), _look = new THREE.Vector3();
-    const ray = new THREE.Raycaster();
-    const easeOut = (t) => 1 - Math.pow(1 - t, 3);
-    const lerp = (a, b, t) => a + (b - a) * t;
-
-    function unclip(ox, oy, oz, px, py, pz) {
-      _ro.set(ox, oy, oz);
-      _rd.set(px - ox, py - oy, pz - oz);
-      let d = _rd.length();
-      if (d < 0.001) return null;
-      _rd.multiplyScalar(1 / d);
-      let best = d;
-      ray.set(_ro, _rd); ray.far = d;
-      const blk = CBZ.losBlockers;
-      if (blk && blk.length) { const hit = CBZ.losRaycast ? CBZ.losRaycast(ray, blk) : ray.intersectObjects(blk, false); if (hit.length && hit[0].distance < best) best = hit[0].distance; }
-      const rad = 0.34, cs = CBZ.colliders;
-      if (cs) {
-        for (let i = 0; i < cs.length; i++) {
-          const c = cs[i]; if (c.noCam) continue;
-          const minX = c.minX - rad, maxX = c.maxX + rad, minZ = c.minZ - rad, maxZ = c.maxZ + rad;
-          const minY = (c.y0 != null ? c.y0 : -1e4) - rad, maxY = (c.y1 != null ? c.y1 : 1e4) + rad;
-          let t0 = 0, t1 = best, ta, tb, tmp; const dx = _rd.x, dy = _rd.y, dz = _rd.z;
-          if (dx > -1e-8 && dx < 1e-8) { if (ox < minX || ox > maxX) continue; }
-          else { ta = (minX - ox) / dx; tb = (maxX - ox) / dx; if (ta > tb) { tmp = ta; ta = tb; tb = tmp; } if (ta > t0) t0 = ta; if (tb < t1) t1 = tb; if (t0 > t1) continue; }
-          if (dy > -1e-8 && dy < 1e-8) { if (oy < minY || oy > maxY) continue; }
-          else { ta = (minY - oy) / dy; tb = (maxY - oy) / dy; if (ta > tb) { tmp = ta; ta = tb; tb = tmp; } if (ta > t0) t0 = ta; if (tb < t1) t1 = tb; if (t0 > t1) continue; }
-          if (dz > -1e-8 && dz < 1e-8) { if (oz < minZ || oz > maxZ) continue; }
-          else { ta = (minZ - oz) / dz; tb = (maxZ - oz) / dz; if (ta > tb) { tmp = ta; ta = tb; tb = tmp; } if (ta > t0) t0 = ta; if (tb < t1) t1 = tb; if (t0 > t1) continue; }
-          if (t0 > 0.001 && t0 < best) best = t0;
-        }
-      }
-      if (best < d) { const dd = Math.max(2.0, best - 0.4); _eye.set(ox + _rd.x * dd, oy + _rd.y * dd, oz + _rd.z * dd); return _eye; }
-      _eye.set(px, py, pz); return _eye;
-    }
-
-    function resolveLot(x, z) {
-      const A = CBZ.city && CBZ.city.arena;
-      if (!A || !A.lots) return null;
-      let best = null, bestD = 1e9;
-      for (let i = 0; i < A.lots.length; i++) {
-        const l = A.lots[i]; if (!l || !l.building) continue;
-        const hw = (l.w || 8) / 2 + 1.5, hd = (l.d || 8) / 2 + 1.5;
-        if (Math.abs(x - l.cx) <= hw && Math.abs(z - l.cz) <= hd) return l;
-        const dx = x - l.cx, dz = z - l.cz, dd = dx * dx + dz * dz;
-        if (dd < bestD) { bestD = dd; best = l; }
-      }
-      return bestD < 36 * 36 ? best : null;
-    }
-
-    cc.beginExteriorDeathCam = function (opts) {
-      if (!cc.death) return;
-      opts = opts || {};
-      const bx = opts.bx != null ? opts.bx : (opts.px || 0);
-      const bz = opts.bz != null ? opts.bz : (opts.pz || 0);
-      const px = opts.px != null ? opts.px : bx;
-      const pz = opts.pz != null ? opts.pz : bz;
-      const by = opts.by != null ? opts.by : 1.4;
-      let nx = 0, nz = 0;
-      const lot = resolveLot(px, pz);
-      if (lot && lot.building && lot.building.door && lot.building.door.nx != null) { nx = lot.building.door.nx; nz = lot.building.door.nz; }
-      if (nx === 0 && nz === 0) {
-        const A = CBZ.city && CBZ.city.arena;
-        const ccx = (A && A.cx != null) ? A.cx : 0, ccz = (A && A.cz != null) ? A.cz : 0;
-        nx = px - ccx; nz = pz - ccz; const l = Math.hypot(nx, nz) || 1; nx /= l; nz /= l;
-      }
-      const out = 13.5, side = 5.5, height = 3.4;
-      const sx = -nz, sz = nx;
-      const camX = bx + nx * out + sx * side, camZ = bz + nz * out + sz * side;
-      cc.death.ext = {
-        px: camX, py: height, pz: camZ,
-        lx: bx, ly: by + 1.2, lz: bz,
-        ox: bx, oy: by + 1.0, oz: bz,
-        t: 0, dur: opts.dur != null ? opts.dur : 1.4, fov: 44, _bx: null,
-      };
-      cc.death.ang0 = Math.atan2(camZ - bz, camX - bx);
-    };
-
-    CBZ.onAlways(51, function (dt) {
-      if (g.mode !== "city") return;
-      if (!cc.death || !cc.death.ext) return;
-      const ex = cc.death.ext;
-      ex.t = (ex.t || 0) + dt;
-      if (ex.t >= ex.dur) { cc.death.ext = null; return; }
-      const clamped = unclip(ex.ox, ex.oy, ex.oz, ex.px, ex.py, ex.pz);
-      let cx = ex.px, cy = ex.py, cz = ex.pz;
-      if (clamped) { cx = clamped.x; cy = clamped.y; cz = clamped.z; }
-      cy = Math.max(cy, 0.9);
-      const k = easeOut(Math.min(1, ex.t / 0.45));
-      const creep = Math.min(1, ex.t / ex.dur) * 0.6;
-      _eye.set(lerp(cx, ex.ox, creep * 0.06), cy, lerp(cz, ex.oz, creep * 0.06));
-      if (ex._bx == null) { ex._bx = camera.position.x; ex._by = camera.position.y; ex._bz = camera.position.z; }
-      camera.position.set(lerp(ex._bx, _eye.x, k), lerp(ex._by, _eye.y, k), lerp(ex._bz, _eye.z, k));
-      _look.set(ex.lx, ex.ly, ex.lz);
-      camera.lookAt(_look);
-      const wantFov = ex.fov || 46;
-      if (Math.abs(camera.fov - wantFov) > 0.02) { camera.fov += (wantFov - camera.fov) * Math.min(1, dt * 4.5); camera.updateProjectionMatrix(); }
-    });
-  })();
+  // The exterior death shot (explosion indoors) lives in city/camera.js only.
+  // This file used to install a second, "fallback" copy that, loading first,
+  // was the one that actually ran while camera.js's sat dormant.
 })();
