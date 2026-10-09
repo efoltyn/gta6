@@ -129,7 +129,14 @@
     g.tired = Math.max(0, Math.min(100, (g.tired == null ? 0 : g.tired) + rate * dt));
 
     // exhaustion effects: no sprinting, then your body starts giving out
-    if (g.tired > 70) { P.stamina = Math.min(P.stamina || 0, 8); P.sprint = false; }
+    // tired legs: the tank shrinks (60% at 70 tired, 35% at 100), never to a
+    // stub. The old cap of 8 (a third of a second of sprint) hit within a
+    // minute of nightfall and read as "stamina is broken".
+    if (g.tired > 70) {
+      const capK = 0.6 - 0.25 * Math.min(1, (g.tired - 70) / 30);
+      const cap = (P.maxStamina || (CBZ.CITY && CBZ.CITY.staminaMax) || 100) * capK;
+      if ((P.stamina || 0) > cap) P.stamina = cap;
+    }
     if (g.tired >= 100 && g.invuln <= 0) {
       P.hp -= (C.tireExhaustDmg || 1.4) * dt;
       if (P.hp <= 0 && CBZ.cityKillPlayer) CBZ.cityKillPlayer("collapsed from exhaustion");
