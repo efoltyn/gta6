@@ -41,9 +41,19 @@
 
    The messages sink is here too: CBZ.cityPhoneNotify (every city system's
    one text channel). News goes to NEWS ONE's wire; a message from a person
-   lands in Calls' recents.
+   lands in the Calls log.
 
-   PUBLIC: CBZ.phoneApps = { news, recents, contacts, call, choose, hangup,
+   THE CALL LOG: every call in, out and missed, and every text from a
+   person, in one list (Calls opens on it; the desk phone's Dial opens the
+   same app). A missed call leaves one line to read ("Call me. It's Kesh.")
+   and keeps what the caller wanted until it is answered or goes stale.
+   Tapping a row calls back: he says what he wanted and you answer with his
+   verbs, or, if it is gone, "Never mind, sir. It's handled." A missed call
+   on the desk phone (president_office.js) lands in the same log and its
+   callback fetches the same matter from the desk (presidentOffice.callBack).
+
+   PUBLIC: CBZ.phoneApps = { news, log, missedCount, callBack, missed, pending,
+     recents, contacts, call, choose, hangup,
      conv, ringing, answer, decline, ring, feed, postOptions, post, unread,
      markRead, isPresident, audit } and CBZ.cityPhoneNotify / cityPhoneNews.
 ============================================================ */
@@ -136,7 +146,6 @@
   const CONTROL_COPY_RE = /\[[A-Za-z0-9/\- ]{1,8}\]|\b(?:press|click|hold|tap)\b|\bLMB\b|\bRMB\b|Shift\+|\bWASD\b/i;
   const META_COPY_RE = /\b(?:NPC|HUD|UI|reticle|crosshair|respawn(?:ing)?|game over|tutorial|keybind|hotbar|controller|keyboard|mouse|frame ?rate|FPS|first[- ]person|third[- ]person)\b/i;
   const notices = [];            // every accepted notice (tests read CBZ.cityPhoneNews)
-  const recents = [];            // what Calls shows on top: missed calls, texts from people
   const UNREAD = { news: 0, calls: 0, social: 0 };
   let newsSeen = 0;
   function sender(from, app) {
@@ -145,14 +154,38 @@
     if (/^objective$/i.test(s)) return "Dispatch";
     return s;
   }
-  function addRecent(name, text, kind) {
-    const last = recents[recents.length - 1];
-    if (last && last.name === name && last.text === text && CLOCK - last.t < 5) { last.t = CLOCK; return last; }
-    const r = { name: name, text: clean(text), kind: kind || "text", t: CLOCK, day: day() };
-    recents.push(r);
-    if (recents.length > 14) recents.shift();
-    UNREAD.calls++;
-    return r;
+
+  /* THE CALL LOG (owner, iPad: "someone told me the General was trying to
+     call me ... I can't see missed calls, and I can't call back").
+     One list, newest last: every call in, out and missed, and every text
+     from a person. A missed call keeps what the caller wanted (PENDING,
+     below) until it is answered or goes stale, and leaves one line to read
+     ("Call me. It's Kesh."). Every row is a number you can ring. */
+  const LOG = [];
+  let LOG_SEQ = 0;
+  function hourNow() { try { const h = CBZ.citySunHour ? +CBZ.citySunHour() : NaN; return isFinite(h) ? h : null; } catch (e) { return null; } }
+  function logEntry(dir, who, text) {
+    const last = LOG[LOG.length - 1];
+    if (last && last.dir === dir && last.name === who.name && last.text === clean(text || "") && CLOCK - last.t < 5) { last.t = CLOCK; return last; }
+    const e = { n: ++LOG_SEQ, dir: dir, id: who.id || null, alt: who.alt || null, name: clean(who.name), role: clean(who.role || ""),
+      text: clean(text || ""), t: CLOCK, day: day(), hr: hourNow(), returned: dir !== "missed" };
+    LOG.push(e);
+    if (LOG.length > 40) LOG.shift();
+    if (dir === "missed" || dir === "text") UNREAD.calls++;
+    return e;
+  }
+  // tests and the old callers: a text from a person
+  function addRecent(name, text) { return logEntry("text", { name: name }, text); }
+  // "Call me. They hit first." The caller's own first sentence, short.
+  function voicemail(line) {
+    const first = (clean(line).match(/^[^.?!]*[.?!]/) || [""])[0].trim();
+    return first && first.length <= 44 && !/^(sir|mr\.? president)[.,!?]?$/i.test(first) ? "Call me. " + first : "Call me back.";
+  }
+  function whenText(e) {
+    if (e.day !== day()) return "Day " + (e.day + 1);
+    if (e.hr == null) return "";
+    const hh = Math.floor(e.hr) % 24, mm = Math.floor((e.hr - Math.floor(e.hr)) * 60);
+    return hh + ":" + (mm < 10 ? "0" : "") + mm;
   }
   CBZ.cityPhoneNotify = function (payload) {
     if (typeof payload === "string") payload = { text: payload };
@@ -168,7 +201,7 @@
     if (app === "news") {
       // the City Desk's news is NEWS ONE's (city/newsroom.js); tv:false opts out
       if (payload.tv !== false && CBZ.news && CBZ.news.wire) { try { CBZ.news.wire(text, from); } catch (e) {} }
-    } else if (from) addRecent(from, text, "text");
+    } else if (from) addRecent(from, text);
     return item;
   };
   CBZ.cityPhoneNews = notices;
@@ -668,8 +701,28 @@
     return { ok: true, line: "We can work with that." };
   }
 
+  // ---- what a caller still wants (a missed call's matter) ----
+  // id -> {line, choices, until}. Kept until you answer it or it goes stale;
+  // calling that person back (from the log or from Contacts) is how it reaches
+  // you. The desk's own matters (id "desk:<matter>") live in
+  // president_office.js and are fetched from there (callBack).
+  const PENDING = {};
+  const PENDING_SECS = 180;
+  function keepPending(id, line, choices) {
+    if (!id || id.indexOf("desk:") === 0 || id.indexOf("met:") === 0 || !choices || !choices.length) return;
+    PENDING[id] = { line: clean(line), choices: choices, until: CLOCK + PENDING_SECS };
+  }
+  function pendingFor(id) {
+    const p = PENDING[id];
+    if (!p) return null;
+    if (CLOCK > p.until || (isStaff(id) && !staffPerson(id))) { delete PENDING[id]; return null; }
+    return p;
+  }
+  function isStaff(id) { return STAFF.some(function (s) { return s.id === id; }); }
+  function handled() { return isPresident() ? "Never mind, sir. It's handled." : "Never mind. It's handled."; }
+
   // ---- the call in progress (one at a time) ----
-  let CONV = null;      // {id, name, role, line, choices:[{id,label,run}], incoming, state:"talk"|"done", reply, endAt}
+  let CONV = null;      // {id, name, role, line, choices:[{id,label,run}], incoming, state:"talk"|"done", reply, endAt, onDrop}
   function publicConv() {
     if (!CONV) return null;
     return {
@@ -678,15 +731,70 @@
       choices: CONV.state === "talk" ? CONV.choices.map(function (c) { return { id: c.id, label: c.label }; }) : [],
     };
   }
-  function call(id) {
-    if (CONV && CONV.state === "talk") return publicConv();
-    const c = contactById(id);
-    if (!c) return null;
-    const s = script(id);
-    CONV = { id: id, name: c.name, role: c.role, line: clean(s.line), choices: s.choices || [], incoming: false, state: "talk", t0: CLOCK, reply: "" };
-    if (!CONV.choices.length) { CONV.state = "done"; CONV.endAt = CLOCK + END_HOLD; }
+  function startConv(o) {
+    CONV = { id: o.id, name: clean(o.name), role: clean(o.role || ""), line: clean(o.line), choices: o.choices || [], incoming: !!o.incoming,
+      state: "talk", t0: CLOCK, reply: "", onDrop: o.onDrop || null, matter: !!o.matter };
+    if (!CONV.choices.length) { CONV.state = "done"; CONV.endAt = CLOCK + END_HOLD + (o.incoming ? 1 : 0); }
     speak(CONV.line);
     return publicConv();
+  }
+  // a call you return marks that person's missed calls as answered
+  function returned(id) {
+    for (let i = 0; i < LOG.length; i++) if (LOG[i].dir === "missed" && LOG[i].id === id) LOG[i].returned = true;
+  }
+  /* RING SOMEBODY. id is a contact, or a number from the log (who carries
+     the name and title the log kept, so a caller who is not in Contacts,
+     an ambassador, the desk, still picks up). If he called you about
+     something and it still stands, that is what he says; if it is gone,
+     he says so and you get his usual verbs. */
+  function dial(id, who) {
+    if (CONV && CONV.state === "talk") return publicConv();
+    if (!id) return null;
+    const c = contactById(id) || (who && who.alt ? contactById(who.alt) : null);
+    const name = (who && who.name) || (c && c.name), role = (who && who.role) || (c && c.role) || "";
+    if (!name) return null;
+    let line = null, choices = [], onDrop = null, matter = false;
+    if (id.indexOf("desk:") === 0) {
+      const O = CBZ.presidentOffice;
+      let cb = null;
+      try { cb = O && O.callBack ? O.callBack(id.slice(5)) : null; } catch (e) { cb = null; }
+      if (cb) {
+        line = cb.line;
+        choices = cb.choices.map(function (x) { return { id: x.id, label: x.label, run: function () { return { ok: true, line: cb.answer(x.id) }; } }; });
+        onDrop = cb.ignore; matter = true;
+      }
+    } else {
+      const p = pendingFor(id);
+      if (p) {
+        line = p.line;
+        choices = p.choices.map(function (x) { return { id: x.id, label: x.label, run: function () { delete PENDING[id]; return x.run ? x.run() : { ok: true }; } }; });
+        matter = true;
+      }
+    }
+    if (line == null) {
+      const s = script((c && c.id) || id);
+      line = (who && who.missed) ? handled() : s.line;
+      choices = s.choices || [];
+    }
+    returned(id);
+    logEntry("out", { id: id, alt: who && who.alt, name: name, role: role });
+    return startConv({ id: id, name: name, role: role, line: line, choices: choices, onDrop: onDrop, matter: matter });
+  }
+  function call(id) { return dial(id, null); }
+  // tap a row of the log
+  function callBack(n) {
+    let e = null;
+    for (let i = 0; i < LOG.length; i++) if (LOG[i].n === n) e = LOG[i];
+    if (!e) return null;
+    const id = e.id || targetOfName(e.name);
+    if (!id) return null;
+    return dial(id, { name: e.name, role: e.role, alt: e.alt, missed: e.dir === "missed" });
+  }
+  // a text's sender, if he is somebody you can ring
+  function targetOfName(name) {
+    const l = contacts();
+    for (let i = 0; i < l.length; i++) if (l[i].name === name) return l[i].id;
+    return null;
   }
   function choose(choiceId) {
     if (!CONV || CONV.state !== "talk") return null;
@@ -696,14 +804,18 @@
     let r = null;
     try { r = ch.run ? ch.run() : { ok: true }; } catch (e) { r = { ok: false, why: "The line went dead." }; }
     const line = clean(said(r));
-    CONV.state = "done"; CONV.reply = line; CONV.endAt = CLOCK + END_HOLD; CONV.result = r;
+    CONV.state = "done"; CONV.reply = line; CONV.endAt = CLOCK + END_HOLD; CONV.result = r; CONV.onDrop = null;
     speak(line);
     emit("phone-call", { text: "Call with " + CONV.name + ": " + ch.label, with: CONV.id, choice: choiceId, ok: !!(r && r.ok) });
     return { ok: !!(r && r.ok), line: line, result: r };
   }
+  // hanging up before you answered him: what he wanted still stands
   function hangup() {
     if (!CONV) return false;
-    if (CONV.state === "talk" && CONV.onMissed && CONV.incoming) { try { CONV.onMissed(); } catch (e) {} }
+    if (CONV.state === "talk") {
+      if (CONV.onDrop) { try { CONV.onDrop(); } catch (e) {} }
+      else if (CONV.matter) keepPending(CONV.id, CONV.line, CONV.choices);
+    }
     CONV = null;
     return true;
   }
@@ -716,7 +828,8 @@
     const key = def.key || (def.name + ":" + def.line);
     if (RINGING && RINGING.key === key) return RINGING;
     for (let i = 0; i < QUEUE.length; i++) if (QUEUE[i].key === key) return QUEUE[i];
-    const r = { key: key, id: def.id || ("in:" + key), name: clean(def.name), role: clean(def.role || ""), line: clean(def.line), choices: def.choices || [], onMissed: def.onMissed || null, born: CLOCK };
+    const r = { key: key, id: def.id || ("in:" + key), alt: def.alt || null, name: clean(def.name), role: clean(def.role || ""), line: clean(def.line),
+      voicemail: clean(def.voicemail || ""), choices: def.choices || [], onMissed: def.onMissed || null, born: CLOCK };
     QUEUE.push(r);
     return r;
   }
@@ -725,28 +838,35 @@
     if (!RINGING) return null;
     const r = RINGING;
     RINGING = null; lastRingEnd = CLOCK;
-    CONV = { id: r.id, name: r.name, role: r.role, line: r.line, choices: r.choices, incoming: true, state: r.choices.length ? "talk" : "done", t0: CLOCK, reply: "", onMissed: r.onMissed };
-    if (!r.choices.length) CONV.endAt = CLOCK + END_HOLD + 1;
-    speak(r.line);
-    return publicConv();
+    delete PENDING[r.id];
+    returned(r.id);
+    logEntry("in", r);
+    return startConv({ id: r.id, name: r.name, role: r.role, line: r.line, choices: r.choices, incoming: true, onDrop: r.onMissed, matter: true });
   }
+  // declined, or it rang out: a missed call, his line to read, his matter kept
   function decline() {
     if (!RINGING) return false;
     const r = RINGING;
     RINGING = null; lastRingEnd = CLOCK;
-    addRecent(r.name, "Missed call", "missed");
+    missed(r);
     if (r.onMissed) { try { r.onMissed(); } catch (e) {} }
     return true;
+  }
+  // president_office.js: a call that rang out on the desk lands here too
+  function missed(r) {
+    if (!r || !r.name) return null;
+    keepPending(r.id, r.line, r.choices);
+    return logEntry("missed", r, r.voicemail || voicemail(r.line));
   }
 
   // ---- who calls you, and when ----
   const CALLED = {};          // key -> day it last rang
   function calledRecently(key, days) { return CALLED[key] != null && day() - CALLED[key] < days; }
-  function staffCall(role, line, choices, key) {
+  function staffCall(role, line, choices, key, vm) {
     const cab = cabinet(), c = cab[role];
     if (!c || c.dead) return null;
     CALLED[key] = day();
-    return ring({ key: key, id: role, name: role === "general" ? (c.display || c.name) : c.name, role: role === "general" ? "General" : "Chief of Staff", line: line, choices: choices });
+    return ring({ key: key, id: role, name: role === "general" ? (c.display || c.name) : c.name, role: role === "general" ? "General" : "Chief of Staff", line: line, choices: choices, voicemail: vm });
   }
   function onBusCalls(evt, d) {
     d = d || {};
@@ -758,25 +878,25 @@
       if (d.name === "movement") staffCall("chief", "There's a march tomorrow. Thousands. Say something to them.", [
         { id: "address", label: "Address them", run: function () { return D.concede(); } },
         { id: "streets", label: "Clear the streets", run: function () { return D.crackdown(); } },
-      ], "dissent:movement:" + day());
+      ], "dissent:movement:" + day(), "Call me. It's the march.");
       else if (d.name === "army") staffCall("chief", "Officers met last night without you. The General was there.", [
         { id: "relieve", label: "Relieve him", run: function () { return D.purge(); } },
         { id: "leave", label: "Leave it", run: function () { return { ok: true, line: "I hope you're right." }; } },
-      ], "dissent:army:" + day());
+      ], "dissent:army:" + day(), "Call me. It's the General.");
       // a General you put in yourself warns you; the one who was at the meeting does not
       else if (d.name === "coup-armed" && day() - (D.status().purgedDay | 0) < 10) staffCall("general", "Units are moving on the capital without my orders. Get to the bunker.", [
         { id: "bunker", label: "Bunker", run: function () { return D.bunker(); } },
         { id: "stay", label: "Hold them", run: function () { return { ok: true, line: "I'll try. Some of them won't listen." }; } },
-      ], "dissent:coup:" + day());
+      ], "dissent:coup:" + day(), "Call me. Troops are moving.");
       else if (d.name === "coup-armed") staffCall("chief", "Troops are moving on the capital. We have to go.", [
         { id: "bunker", label: "Bunker", run: function () { return D.bunker(); } },
         { id: "stay", label: "I stay", run: function () { return { ok: true, line: "Then God help us." }; } },
-      ], "dissent:coup:" + day());
+      ], "dissent:coup:" + day(), "Call me. Troops are moving.");
     } else if (evt === "war-declared" && d.defender === me && !d.byPlayer) {
       staffCall("general", "They hit first. I need orders.", [
         { id: "strike", label: "Hit back", run: function () { return press("strike"); } },
         { id: "hold", label: "Hold", run: function () { return { ok: true, line: "Holding." }; } },
-      ], "war:" + (d.warId || d.attacker));
+      ], "war:" + (d.warId || d.attacker), "Call me. It's " + shortName(d.attacker) + ".");
     }
   }
   function leaderThreats() {
@@ -790,7 +910,7 @@
       const L = leaderOf(cid);
       if (!L) continue;
       CALLED["threat:" + cid] = day();
-      ring({ key: "threat:" + cid + ":" + day(), id: "leader:" + cid, name: L.display, role: countryName(cid), line: "Pull your forces back. This is your last warning.", choices: [
+      ring({ key: "threat:" + cid + ":" + day(), id: "leader:" + cid, name: L.display, role: countryName(cid), voicemail: "This is your last warning.", line: "Pull your forces back. This is your last warning.", choices: [
         { id: "backoff", label: "Back off", run: function () { if (CBZ.relations && CBZ.relations.event) CBZ.relations.event(me, cid, "trade", 8); return { ok: true, line: "Wise." }; } },
         { id: "makeme", label: "Make me", run: function () { return threaten(cid); } },
       ] });
@@ -821,7 +941,7 @@
     let c = null;
     try { c = O.cellCall(); } catch (e) { c = null; }
     if (!c) return;
-    ring({ key: "desk:" + c.id, id: "desk:" + c.id, name: c.title || c.name, role: "", line: c.line,
+    ring({ key: "desk:" + c.id, id: "desk:" + c.id, alt: isStaff(c.role) ? c.role : null, name: c.title || c.name, role: c.roleTitle || "", line: c.line,
       choices: c.choices.map(function (x) { return { id: x.id, label: x.label, run: function () { return { ok: true, line: c.answer(x.id) }; } }; }),
       onMissed: c.ignore });
   }
@@ -872,7 +992,23 @@
 
   CBZ.phoneApps = {
     news: news,
-    recents: function () { return recents.slice().reverse(); },
+    // THE CALL LOG, newest first: {n, dir:"in"|"out"|"missed"|"text", name,
+    // role, text, when, missed (still unreturned), callable}
+    log: function () {
+      const out = [];
+      for (let i = LOG.length - 1; i >= 0; i--) {
+        const e = LOG[i];
+        const id = e.id || targetOfName(e.name);
+        // a staffer you let go is not on the other end any more
+        if (id && isStaff(id) && !staffPerson(id)) continue;
+        out.push({ n: e.n, dir: e.dir, id: id, name: e.name, role: e.role, text: e.text, when: whenText(e), missed: e.dir === "missed" && !e.returned, callable: !!id });
+      }
+      return out;
+    },
+    missedCount: function () { let n = 0; for (let i = 0; i < LOG.length; i++) if (LOG[i].dir === "missed" && !LOG[i].returned) n++; return n; },
+    callBack: callBack, missed: missed,
+    pending: function (id) { const p = pendingFor(id); return p ? { line: p.line, choices: p.choices.map(function (c) { return c.label; }) } : null; },
+    recents: function () { return LOG.filter(function (e) { return e.dir === "missed" || e.dir === "text"; }).reverse().map(function (e) { return { name: e.name, text: e.text, kind: e.dir }; }); },
     contacts: contacts,
     call: call, choose: choose, hangup: hangup, conv: publicConv,
     ring: ring, ringing: ringing, answer: answer, decline: decline,
@@ -881,7 +1017,7 @@
     unread: function () { return { news: UNREAD.news, calls: UNREAD.calls, social: UNREAD.social, total: UNREAD.news + UNREAD.calls + UNREAD.social + (RINGING ? 1 : 0) }; },
     markRead: function (app) { if (app in UNREAD) UNREAD[app] = 0; },
     isPresident: isPresident,
-    audit: function () { return { posts: feed.length, recents: recents.length, notices: notices.length, queue: QUEUE.length, ringing: !!RINGING, conv: CONV ? CONV.id : null, hooked: hookedBus }; },
+    audit: function () { return { posts: feed.length, log: LOG.length, missed: LOG.filter(function (e) { return e.dir === "missed" && !e.returned; }).length, pending: Object.keys(PENDING).length, notices: notices.length, queue: QUEUE.length, ringing: !!RINGING, conv: CONV ? CONV.id : null, hooked: hookedBus }; },
     // tests
     _tick: tick, _hook: hook, _onBus: onBus,
   };

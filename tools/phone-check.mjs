@@ -212,6 +212,30 @@ ok(thr && A.post(thr.id).ok && CBZ.relations.get("republic", "kesh") < relBefore
 A.call("leader:kesh"); A.choose("peace");
 step(3);
 
+// ---- 3b. the call log: a missed call, its line, the callback
+CBZ.presidency.emit("war-declared", { attacker: "kesh", attackerName: countries.kesh.name, defender: "republic", defenderName: countries.republic.name, byPlayer: false, warId: "w-log" });
+for (let i = 0; i < 40 && !A.ringing(); i++) step(1);
+ok(A.ringing() && A.ringing().name === "General Hale", "the General rings when Kesh attacks (" + (A.ringing() && A.ringing().name) + ")");
+step(26);                                   // it rings out
+const miss = A.log().find((e) => e.dir === "missed" && e.name === "General Hale");
+ok(!!miss && miss.missed && miss.text === "Call me. It's Kesh." && miss.callable, "the missed call is in the log with his line (" + (miss && miss.text) + ")");
+ok(A.missedCount() >= 1 && A.unread().calls >= 1 && CBZ.cityPhoneChip().unread, "missed count, the Calls badge and the hotbar light are up");
+conv = A.callBack(miss.n);
+ok(conv && conv.line === "They hit first. I need orders." && conv.choices.map((c) => c.id).join() === "strike,hold", "calling back: he says what he wanted, his answers on the line (" + (conv && conv.line) + ")");
+ok(!A.log().find((e) => e.n === miss.n).missed, "the missed call is returned");
+// the call screen: every answer clear of the hang-up, which sits alone at the bottom
+CBZ.phoneOpen("calls"); step(0.3);
+const ch = CBZ._phoneHits();
+const hang = ch.find((h) => h.y > 820 && h.y < 900 && h.w <= 160);
+ok(!!hang && ch.every((h) => h === hang || h.y >= 960 || h.y + h.h < hang.y), "the hang-up's tap box overlaps no answer (" + ch.length + " hits)");
+r = A.choose("hold");
+ok(r && r.ok && !A.pending("general"), "answering settles his matter");
+step(4);
+conv = A.callBack(miss.n);
+ok(conv && conv.line === "Never mind, sir. It's handled." && conv.choices.length > 0, "calling back after it's settled: 'Never mind, sir. It's handled.' and his usual verbs");
+A.hangup();
+step(3);
+
 // ---- 4. the country turns: the movement and the coup show up BEFORE the coup
 CBZ.politics._setAll(12);
 const seen = {};
