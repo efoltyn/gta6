@@ -21,9 +21,10 @@
    testbus:  node tools/testbus/submit.mjs --probe "tools/probes/president.mjs --quick"
    alone:    node tools/president-check.mjs [--seed N] [--quick] [--motorcade]
    The world (title card -> President -> Play -> the Mansion built) is booted
-   by tools/testbus/worlds.mjs. It drives the motorcade away and arms attacks,
-   so it runs LAST on a shared world (fresh:false, dirties:true). */
-export const meta = { world: "president", seed: 260811, fresh: false, dirties: true, timeoutMs: 40 * 60e3 };
+   by tools/testbus/worlds.mjs. fresh:true is MEASURED, not cautious: after
+   president-verbs leaves agents with drawn guns, the motorcade evacuates
+   "under fire" and the ride fails. It dirties the world (motorcade, attacks). */
+export const meta = { world: "president", seed: 260811, fresh: true, dirties: true, timeoutMs: 40 * 60e3 };
 
 export default async function (t) {
   const QUICK = t.flag("--quick");

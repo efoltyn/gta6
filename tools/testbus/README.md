@@ -130,9 +130,16 @@ still runs the same probe the old way (its own Chrome, its own boot) through
 
 ## Limits
 
-- The reset between probes is soft (player only). A probe that lies about `dirties`
-  can disturb the next one. Sim state is too large to snapshot generically, so the
-  bus relies on the declaration.
+- The reset between probes is soft (player only). Sim state is too large to snapshot
+  generically, so the bus relies on the declarations. Two guards cover a wrong one:
+  - A probe that fails on a world an earlier probe dirtied is re-run once on a
+    rebooted world before anyone is blamed. If it passes there, the summary says
+    it should declare `fresh:true`.
+  - The bisect gives every probe a clean world.
+
+  Measured in the first demo: `president --quick` passed alone, but after
+  `president-verbs` left 11 agents with guns drawn, its motorcade evacuated and the
+  check failed. That probe is now `fresh:true`.
 - Hot reload is opt-in per file (`testbus:hot-safe`). Re-running a normal IIFE
   module would register its updaters twice, so most JS changes mean a reload.
   The reload still skips Chrome start-up and runs while other worlds stay warm.

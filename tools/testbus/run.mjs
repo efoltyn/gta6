@@ -331,8 +331,24 @@ async function runWorld(B, wk, list, dir, commit, fan, logFor) {
         if (a.p.pg.closed) { u.result = { status: "error", summary: "page died before this probe", infra: true }; fan(u, { status: "error", summary: u.result.summary }); continue; }
         fan(u, { status: "running" });
         const { seed } = parseKey(wk);
-        const r = await runProbe(a.p.pg, u.probe, { args: u.args, seed, world: parseKey(wk).name, timeoutMs: CFG.probeTimeoutMs });
+        const wasDirty = a.p.dirty;
+        let r = await runProbe(a.p.pg, u.probe, { args: u.args, seed, world: parseKey(wk).name, timeoutMs: CFG.probeTimeoutMs });
         if (u.probe.meta.dirties) a.p.dirty = true;
+        /* A fresh:false probe that FAILS on a world an earlier probe dirtied may
+           be the earlier probe's fault (measured: president --quick passes alone
+           and halts its motorcade after president-verbs leaves 11 guns drawn).
+           Re-run it once on a rebooted world before anyone is blamed. */
+        if (r.status === "fail" && wasDirty && !r.broken && !a.p.pg.closed) {
+          log(`  probe ${u.name} failed on a dirtied world: rebooting to re-run it clean`);
+          const b = await bootWorld(a.p.pg, a.p.srv.origin, wk, CFG.bootTimeoutMs);
+          Object.assign(a.p, { loaded: b.loaded, bootMs: b.bootMs, dirty: false });
+          const r2 = await runProbe(a.p.pg, u.probe, { args: u.args, seed, world: parseKey(wk).name, timeoutMs: CFG.probeTimeoutMs });
+          if (u.probe.meta.dirties) a.p.dirty = true;
+          if (r2.status === "pass") r2.summary += "  [failed on a shared world, passed on a fresh one: this probe should declare fresh:true]";
+          r2.log.unshift(`[testbus] first run on a dirtied world: ${r.status} ${r.summary}`);
+          r2.ms += r.ms; R.reruns = (R.reruns || 0) + 1;
+          r = r2;
+        }
         const lf = logFor(u);
         writeFileSync(lf, r.log.concat(["", "SUMMARY " + r.summary, "page errors: " + JSON.stringify(a.p.pg.errors.slice(-10))]).join("\n"));
         u.result = { ...r, infra: r.broken };
@@ -371,7 +387,8 @@ function atCommit(checks, BD, lane) {
         const b = await bootWorld(pg, srv.origin, wk, CFG.bootTimeoutMs);
         log(`  bisect @ ${label}: ${wk} booted in ${(b.bootMs / 1000).toFixed(1)} s`);
         for (const u of plan(list).flat()) {
-          if (u.probe.meta.fresh && dirty) { await bootWorld(pg, srv.origin, wk, CFG.bootTimeoutMs); dirty = false; }
+          // attribution must not depend on probe order: every probe gets a clean world here
+          if (dirty) { await bootWorld(pg, srv.origin, wk, CFG.bootTimeoutMs); dirty = false; }
           const r = await runProbe(pg, u.probe, { args: u.args, seed: parseKey(wk).seed, world: parseKey(wk).name, timeoutMs: CFG.probeTimeoutMs });
           if (u.probe.meta.dirties) dirty = true;
           out.set(u.key, r.status);
