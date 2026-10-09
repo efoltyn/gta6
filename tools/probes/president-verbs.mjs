@@ -300,6 +300,11 @@ export default async function (t) {
     out.after = __pv.forceState();
     for (var i = 0; i < 40 && !a.dead; i++) __pv.step(30);
     out.dead = !!a.dead;
+    if (!a.dead) {
+      var cr = (__pv.forceState().crew || []);
+      out.whyAlive = 'hp=' + (a.hp != null ? (+a.hp).toFixed(0) : '?') + ' state=' + a.state + ' restraint=' + (a.restraint ? a.restraint.state : '-') +
+        ' crew=' + __pv.allForce().map(function (q) { return Math.hypot(q.pos.x - a.pos.x, q.pos.z - a.pos.z).toFixed(0) + 'm/' + q.state + (q.rage === a ? '*' : '') + (q._order ? 'o' : ''); }).join(',');
+    }
     __pv.step(30);
     var st = __pv.stories();
     out.news = st.filter(function (s) { return /guards kill|Secret Service kills/.test(s); }).slice(0, 2);
@@ -328,6 +333,7 @@ export default async function (t) {
     __pv.step(330);
     out.gunsLater = f.filter(function (q) { return !q.dead && out_(q); }).length;
     out.postureLater = PRd();
+    try { var dv = CBZ.protection.detail('president'); out.reasonLater = dv && dv.reason; } catch (e) {}
     out.diag = { members: f.filter(out_).map(function (q) { var r = q._gd || {}; var m = q._det; return [q._protUnit || q._occupySrc || (q._presPublic ? 'pub' : '?'), q.job || q.kind, 'lv=' + r.lv, 'why=' + r.why, 'trig=' + r.trigWhy + '@' + (r.trigT != null ? (GDd.now() - r.trigT).toFixed(2) : '-'), 'det=' + (q._detWhy || ''), 'ph=' + (m && m.D ? m.D.phase : '-'), 'st=' + q.state, 'al=' + (q.alarmed || 0).toFixed(1), 'rage=' + !!q.rage, 'mem=' + !!q.mem].join(' '); }),
       ring: GDd ? GDd.log().slice(-24).map(function (e) { return e.t + ' ' + e.kind + ' ' + e.why + ' ' + e.who; }) : [] };
     out.bAlive = !b.dead;
@@ -346,13 +352,13 @@ export default async function (t) {
     chk(r4.wheel.includes("hold e:pv-take-down"), `the verb is on him, hold E (wheel: ${r4.wheel.join(", ")})`);
     chk(r4.force > 0, `${r4.force} men take the order`);
     chk(r4.after && r4.after.drawn > 0, `agents draw on the order (${r4.after ? r4.after.drawn : 0} of ${r4.after ? r4.after.crew : 0})`);
-    chk(r4.dead, "the target dies");
+    chk(r4.dead, "the target dies" + (r4.whyAlive ? " (" + r4.whyAlive + ")" : ""));
     chk(r4.news.length > 0, "NEWS ONE runs it: " + (r4.news[0] || "-"));
     chk(r4.drawn2 > 0 && r4.callOff, "a second order, then Stand down");
     chk(r4.stillOrdered === 0 && r4.stillDrawn === 0, `nobody keeps the order (${r4.stillOrdered} ordered, ${r4.stillDrawn} drawn)`);
     chk(r4.gunsOut === 0, `the guns go away (${r4.gunsOut} drawn of ${r4.carry} who carry one)`);
     chk(r4.posture === "normal", `Stand down ends the incident: the detail is back to normal (${r4.posture})`);
-    chk(r4.gunsLater === 0 && r4.postureLater === "normal", `...and stays that way 5 s on (${r4.gunsLater} drawn, ${r4.postureLater})`);
+    chk(r4.gunsLater === 0 && r4.postureLater === "normal", `...and stays that way 5 s on (${r4.gunsLater} drawn, ${r4.postureLater}${r4.reasonLater ? ": " + r4.reasonLater : ""})`);
     if (r4.gunsOut || r4.gunsLater || VERBOSE) { for (const m of r4.diag.members) t.log("        " + m); for (const e of r4.diag.ring) t.log("        gd " + e); }
     chk(r4.detainFired && r4.cuffed === "cuffed" && r4.cAlive, "Detain ties him (" + r4.cuffed + ")");
   }

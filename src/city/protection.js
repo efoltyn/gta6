@@ -1737,6 +1737,21 @@
     }
     return { x: bx, z: bz };
   }
+  // an open spot 18-24 m from him, out of his sight, outdoors, dry, with a
+  // clear straight walk to him (a man moved up there can reach him)
+  const CATCH_A = [0, 0.6, -0.6, 1.2, -1.2, 1.8, -1.8, Math.PI];
+  function catchUpSpot(P, hb, y) {
+    for (let k = 0; k < CATCH_A.length; k++) {
+      const a = hb + Math.PI + CATCH_A[k], R = 18 + (k % 3) * 3;
+      const x = P.pos.x + Math.sin(a) * R, z = P.pos.z + Math.cos(a) * R;
+      if (CBZ.cityNav && CBZ.cityNav.indoorLotAt && CBZ.cityNav.indoorLotAt(x, z)) continue;
+      if (CBZ.cityNavWaterAt) { try { if (CBZ.cityNavWaterAt(x, z)) continue; } catch (e) {} }
+      if (CBZ.npcTransitionSafe && !CBZ.npcTransitionSafe(x, z, { minDistance: 15 })) continue;
+      if (CBZ.clearLineOfFire && !CBZ.clearLineOfFire(x, (y || 0) + 1.2, z, P.pos.x, (P.pos.y || 0) + 1.2, P.pos.z)) continue;
+      return { x: x, z: z };
+    }
+    return null;
+  }
   const LEAVING = [];
   function serviceTick(det, A, P, isPres) {
     const svc = svcOf(det);
@@ -1915,12 +1930,16 @@
       // ---- on another floor, or hopelessly behind: come to him -----------
       const hb = playerHeading(P), bx = P.pos.x - Math.sin(hb) * 2.2, bz = P.pos.z - Math.cos(hb) * 2.2;   // just behind him
       if (Math.abs((q.pos.y || 0) - y) > 1.5) { relocateIfFar(q, bx, bz, y, 0.5, dt); continue; }
-      // far behind on the street: he RUNS (the brain's catch-up gait). Only
-      // when he and a spot 20 m behind you are both out of sight is he moved
-      // up there; nobody is ever put down beside you in view.
-      if (hyp(q.pos.x, q.pos.z, P.pos.x, P.pos.z) > 45 && safeSpot(q.pos.x, q.pos.z, q.pos.y)) {
-        const cx = P.pos.x - Math.sin(hb) * 20, cz = P.pos.z - Math.cos(hb) * 20;
-        if (!CBZ.npcTransitionSafe || CBZ.npcTransitionSafe(cx, cz, { minDistance: 15 })) { teleport(q, cx, cz, y); continue; }
+      // far behind on the street (the old rule put him down 2.2 m behind you
+      // after 2.5 s, in view or not). Now: while he is out of sight he is
+      // moved up to an open spot 18-24 m off with a clear walk to you, also
+      // out of sight; otherwise he runs to you on a routed path. Nobody is
+      // ever put down beside you.
+      if (hyp(q.pos.x, q.pos.z, P.pos.x, P.pos.z) > 45) {
+        const c = safeSpot(q.pos.x, q.pos.z, q.pos.y) ? catchUpSpot(P, hb, y) : null;
+        if (c) { teleport(q, c.x, c.z, y); continue; }
+        goTo(q, P.pos.x, P.pos.z, true, dt, null, false);
+        continue;
       }
       _form.push(q);
     }
