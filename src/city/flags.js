@@ -1310,6 +1310,8 @@
     stamp();
     if (!quiet) {
       const text = "President unveils new national flag";
+      // THE ACT (city/politics.js): a new flag is a move on the nation itself
+      if (CBZ.politics && CBZ.politics.act && CBZ.politics.owns && CBZ.politics.owns(id)) { try { CBZ.politics.act("flag", { by: "self" }); } catch (e) {} }
       emit("flag-changed", { nation: id, nationName: nameOf(id), text: text, headline: text, cat: "NATION", breaking: true, custom: !!design, design: designFor(id) });
     }
     return designFor(id);

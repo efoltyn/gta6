@@ -106,6 +106,8 @@ const CBZ = {
     press(key) {
       pressed.push(key);
       const r = key === "strike" ? { ok: true, line: "Two jets wheel up for Keshtown." } : key === "nuke" ? { ok: false, why: "We have no warheads." } : { ok: true, why: "" };
+      // presidency.js pressButton: every order that runs is an act (city/politics.js)
+      if (r.ok && CBZ.politics && !/^(strike|nuke|war|peace)$/.test(key)) CBZ.politics.act(key, { by: "self" });
       CBZ.presidency.emit("order", { key, ok: !!r.ok, why: r.why || "" });
       return r;
     },
@@ -145,7 +147,7 @@ const win = {
 };
 win.window = win;
 vm.createContext(win);
-for (const f of ["src/city/newsroom.js", "src/city/phone_apps.js", "src/city/president_staff.js", "src/city/dissent.js", "src/city/phone.js"]) {
+for (const f of ["src/city/newsroom.js", "src/city/phone_apps.js", "src/city/politics.js", "src/city/president_staff.js", "src/city/dissent.js", "src/city/phone.js"]) {
   vm.runInContext(readFileSync(path.join(root, f), "utf8"), win, { filename: f });
 }
 always.sort((a, b) => a.o - b.o);
@@ -211,7 +213,7 @@ A.call("leader:kesh"); A.choose("peace");
 step(3);
 
 // ---- 4. the country turns: the movement and the coup show up BEFORE the coup
-countries.republic.approval = 12;
+CBZ.politics._setAll(12);
 const seen = {};
 let coupDay = null, coupFiredDay = null;
 const rang = [];
@@ -219,7 +221,7 @@ for (let i = 0; i < 14 && !coups.length; i++) {
   nextDay();
   const h = headlines().join(" | ");
   if (/Protests grow/.test(h) && seen.unrest == null) seen.unrest = day;
-  if (/leads a movement against the President/.test(h) && seen.movement == null) seen.movement = day;
+  if (/leads an? ([a-zA-Z-]+ )?movement against the President/.test(h) && seen.movement == null) seen.movement = day;
   if (/Generals meet without the President/.test(h) && seen.army == null) seen.army = day;
   if (/Troops seen moving/.test(h) && seen.troops == null) seen.troops = day;
   const rg = A.ringing();
@@ -246,7 +248,7 @@ function rebuild() {
   coups.length = 0;
   for (let i = 0; i < 12 && !(CBZ.dissent.status().coupDay != null); i++) nextDay();
 }
-countries.republic.approval = 12;
+CBZ.politics._setAll(12);
 rebuild();
 ok(CBZ.dissent.status().coupDay != null, "the troops move again");
 // call the General: he is cold, and can be relieved
@@ -257,22 +259,24 @@ ok(r && r.ok && cab.general.dead && CBZ.presidentStaff.vacant("general"), "relie
 step(3);
 ok(CBZ.presidentStaff.nominee() && CBZ.presidentStaff.nominee().role === "general", "and the Chief has two names for it");
 // force the troops back up inside the purge window: the coup fails
-CBZ.dissent._state().army = 95; CBZ.dissent._state().coupDay = day;
+CBZ.politics._setInst("army", 5); CBZ.dissent._state().coupDay = day;
 nextDay();
 ok(coups[0] === "failure", "a coup inside the purge window fails (" + coups[0] + ")");
 ok(headlines().some((h) => /Coup attempt crushed/.test(h)), "NEWS ONE: coup attempt crushed");
 // the bunker: the coup takes the capital, not the President
 coups.length = 0;
-CBZ.dissent._state().purgedDay = -99; CBZ.dissent._state().army = 95; CBZ.dissent._state().coupDay = day + 1;
+CBZ.dissent._state().purgedDay = -99; CBZ.politics._setInst("army", 5); CBZ.dissent._state().coupDay = day + 1;
 shelter = true;
 nextDay();
 ok(coups[0] === "partial", "sheltered in a bunker, the coup splits the country instead (" + coups[0] + ")");
 shelter = false;
 // the address: the street calms
 CBZ.dissent.reset(); nextDay();
-const st0 = CBZ.dissent._state(); st0.unrest = 60; st0.movement = 50;
+CBZ.politics._setAll(30); CBZ.politics._state().fear = 0;
+const st0 = CBZ.dissent.status();
 r = A.post ? CBZ.dissent.concede() : null;
-ok(r && r.ok && pressed.includes("address") && CBZ.dissent._state().unrest < 60 && CBZ.dissent._state().movement < 50, "addressing the protests lowers unrest and the movement");
+const st1 = CBZ.dissent.status();
+ok(r && r.ok && pressed.includes("address") && st1.unrest < st0.unrest && st1.movement < st0.movement, "addressing the protests lowers unrest and the movement (" + st0.unrest + "/" + st0.movement + " -> " + st1.unrest + "/" + st1.movement + ")");
 
 // ---- 6. any player: a gang player has the same phone without the state
 CBZ.warroom.nation = () => null;

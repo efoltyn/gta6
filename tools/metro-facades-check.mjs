@@ -47,6 +47,7 @@ require(path.join(ROOT, "src/core/seed.js"));
 require(path.join(ROOT, "src/city/facade_kit.js"));
 const html = readFileSync(path.join(ROOT, "index.html"), "utf8");
 for (const m of html.matchAll(/<script src="(src\/city\/facades\/[a-z]+\.js)/g)) require(path.join(ROOT, m[1]));
+require(path.join(ROOT, "src/city/zoning.js"));        // the world zoning field metro.js plans with
 require(path.join(ROOT, "src/city/metroplan.js"));
 require(path.join(ROOT, "src/city/metro.js"));
 require(path.join(ROOT, "src/city/metro_fabric.js"));

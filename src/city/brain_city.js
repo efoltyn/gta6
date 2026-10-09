@@ -996,6 +996,8 @@
   const _retOpts = { weapon: null, reloading: false, yaw: null };
 
   // the man told "fists" draws the moment it stops being a fist fight
+  // (fists vs gun only: whether a drawn gun SHOWS, and a stand-down order, is
+  // systems/actorweapons.js CBZ.gunDiscipline's one rule)
   function tickHolster(p) {
     const r = p.rage;
     if (!r || r.dead || p.dead) { unholster(p); return; }

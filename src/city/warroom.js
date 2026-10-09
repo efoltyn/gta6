@@ -127,6 +127,15 @@
   }
   function warheads(id) { return count(id || nation(), "warhead"); }
   function shock(id, n) { if (CBZ.approvalShock && id) { try { CBZ.approvalShock(id, n); } catch (e) {} } }
+  // THE ACT (city/politics.js): what the country feels about a war, a
+  // strike, a bomb on its own soil is one row of the act table. No act
+  // table loaded (a headless harness), the old flat shock stands in.
+  function polAct(kind, o, fallback) {
+    const Po = CBZ.politics;
+    if (Po && Po.act && Po.owns && Po.owns(nation())) { try { Po.act(kind, o || {}); return true; } catch (e) {} }
+    if (fallback) fallback();
+    return false;
+  }
   function scandal(n) {
     const w = CBZ.cityWorldEnsure ? CBZ.cityWorldEnsure() : null;
     const p = (w && w.politics) || g.cityPolitics;
@@ -556,7 +565,13 @@
     // its leader goes underground the moment the order is given
     if (foe) { goToWar(us, foe); alert(foe, 3); }
     if (tgt.bunker && tgt.bunker.owner) alert(tgt.bunker.owner, 3);
-    if (tgt.nation === us && byPlayer) { shock(us, pl.kind === "nuke" ? -40 : -12); scandal(pl.kind === "nuke" ? 40 : 15); }
+    // the country's verdict: a strike abroad is a strike on that country; a
+    // strike on your own soil is the act everyone hates (a nuke is priced
+    // when it goes off, onNuke below)
+    if (byPlayer && pl.kind !== "nuke") {
+      if (tgt.nation === us) polAct("strike-own", { by: "self" }, function () { shock(us, -12); scandal(15); });
+      else if (foe) polAct("strike", { target: foe, by: "army" });
+    }
     return { ok: true, why: "", line: res.line };
   }
 
@@ -586,8 +601,13 @@
     const gt = canWar(opts);
     if (!gt.ok) return gt;
     const us = nation();
-    if (!goToWar(us, gt.foe)) return { ok: false, why: "The order did not go through." };
-    shock(us, 3);                      // the flag goes up; for a week, the country rallies
+    // CONGRESS AUTHORISES IT (city/politics.js gate): a republic's war needs the votes
+    const Po = CBZ.politics;
+    if (Po && Po.gate) { const v = Po.gate("war"); if (!v.ok) return v; }
+    // the rally polwar/relations shock on their own is the act's to price
+    const went = Po && Po.during && Po.owns && Po.owns(us) ? Po.during(function () { return goToWar(us, gt.foe); }) : goToWar(us, gt.foe);
+    if (!went) return { ok: false, why: "The order did not go through." };
+    polAct("war", { target: gt.foe, by: "self" }, function () { shock(us, 3); });   // the flag goes up
     return { ok: true, why: "", line: "Then it's war with " + gt.name + "." };
   }
   function canPeace() {
@@ -604,6 +624,7 @@
     const r = PW().makePeace ? PW().makePeace(us) : null;
     if (!r) return { ok: false, why: "They will not take the call." };
     RAID.t = null;
+    polAct("peace", { target: gt.foe, by: "self" });
     return { ok: true, why: "", line: r.loser === us ? "They'll take the terms. It will cost us." : nameOf(gt.foe) + " has signed. It's over." };
   }
 
@@ -1008,7 +1029,8 @@
     if (attacker && where && attacker !== where && PW() && PW().nuclearStrike) {
       try { r = PW().nuclearStrike(where, attacker); } catch (e) { r = null; }
     }
-    if (attacker && where === attacker && attacker === nation()) { shock(attacker, -40); scandal(40); }
+    if (attacker && where === attacker && attacker === nation()) polAct("nuke-own", { by: "self" }, function () { shock(attacker, -40); scandal(40); });
+    else if (attacker && where && attacker === nation() && p && p.byPlayer) polAct("nuke", { target: where, by: "army" });
     // A COUNTRY WITH ITS OWN WARHEADS AND A BOMBER ANSWERS.
     const us = nation();
     if (r && r.canAnswer && attacker === us && !RET && carriersOwned(where, "nuke") > 0) {
@@ -1118,10 +1140,15 @@
     grp.name = "nuclear-football";
     const box = (w, h, d, x, y, z, m) => { const b = new THREE.Mesh(CBZ.boxGeom ? CBZ.boxGeom(w, h, d) : new THREE.BoxGeometry(w, h, d), m); b.position.set(x, y, z); grp.add(b); return b; };
     const leather = mat(0x17181b), brass = mat(0xb08a3e);
-    box(0.13, 0.34, 0.46, 0, 0, 0, leather);          // the case, hanging edge-down by his leg
-    box(0.04, 0.05, 0.16, 0, 0.2, 0, leather);        // handle
-    box(0.135, 0.03, 0.05, 0, 0.12, 0.15, brass);     // the two latches
-    box(0.135, 0.03, 0.05, 0, 0.12, -0.15, brass);
+    // built in the HAND socket's frame: -y runs down the forearm past the
+    // fist, so the handle sits in the grip and the case hangs below it,
+    // edge-down by his leg, swinging with his arm
+    box(0.12, 0.34, 0.46, 0, -0.22, 0, leather);      // the case
+    box(0.035, 0.04, 0.14, 0, -0.03, 0, leather);     // handle, in the fist
+    box(0.03, 0.035, 0.02, 0, -0.06, 0.06, leather);  // handle posts
+    box(0.03, 0.035, 0.02, 0, -0.06, -0.06, leather);
+    box(0.125, 0.03, 0.05, 0, -0.1, 0.15, brass);     // the two latches
+    box(0.125, 0.03, 0.05, 0, -0.1, -0.15, brass);
     return grp;
   }
   function dropFootball() {
@@ -1158,12 +1185,16 @@
       for (let i = 0; i < refs.length && !want; i++) { const q = refs[i]; if (q && !q.dead && q.group && q._protRole !== "shift-leader") want = q; }
       for (let i = 0; i < refs.length && !want; i++) { const q = refs[i]; if (q && !q.dead && q.group) want = q; }
     }
-    if (want === FB.ped && (!want || (FB.mesh && FB.mesh.parent === want.group))) return;
+    // CARRIED, in his LEFT hand (the gun hand stays free), never strapped to
+    // the hip: it rides the hand socket, so it swings with the arm. A body
+    // with no rig (far/instanced) or no left hand carries nothing visible.
+    const hand = want && want.char && want.char.sockets ? want.char.sockets.leftHand : null;
+    if (want === FB.ped && (!want || (FB.mesh ? FB.mesh.parent === hand : !hand))) return;
     dropFootball();
     if (!want) return;
     FB.ped = want;
     wireFootball(want);
-    if (want.group) { FB.mesh = briefcase(); if (FB.mesh) { FB.mesh.position.set(0.36, 0.62, 0.02); want.group.add(FB.mesh); } }
+    if (hand) { FB.mesh = briefcase(); if (FB.mesh) hand.add(FB.mesh); }
   }
 
   // ================================================================ THE TICK

@@ -2048,7 +2048,7 @@
       let r = a._gd;
       if (!r) {
         r = a._gd = { id: ++seq, lv: 0, why: "", trigT: -1e9, trigLv: 0, trigWhy: "", watchT: 0, holdUntil: 0,
-          outAt: -1e9, aimT: -1e9, quietT: 0 };
+          outAt: -1e9, aimT: -1e9, quietT: 0, downT: -1e9 };
         r.sustain = 0.35 + h01(r, 0x51) * 0.35;
         r.hold = 7 + h01(r, 0x7B) * 4;
       }
@@ -2071,15 +2071,36 @@
       if (!a || a.dead || a.isPlayer) return;
       const r = rec(a);
       lv = lv || LV[why] || 2;
+      // STOOD DOWN by an order (npcDrawReason(a, null)): for a few seconds
+      // only a gun actually in play (fired / shot at / aimed at) brings it
+      // back; a lingering grudge or a hunt does not overrule the order.
+      if (T - r.downT < 4 && lv < 3 && why !== "order") return;
       if (r.trigT !== T || lv > r.trigLv) { r.trigLv = lv; r.trigWhy = why; }
       r.trigT = T;
       if (lv >= 3) r.aimT = T;
       if (r.lv < 2 && (NOW[why] || lv >= 3)) draw(a, r, why);
       if (r.lv >= 2) r.holdUntil = Math.max(r.holdUntil, T + r.hold);
     }
+    /* AN ORDER IS A STANDING REASON. city/orders.js (the President's attack
+       order) stamps a._drawWhy = { why: "order", by, target } and calls
+       CBZ.npcDrawReason(a, "order", target); Stand down calls it with null.
+       This is the ONE owner of that hook: the order keeps the gun out for as
+       long as it stands, and a stand-down puts it on the belt deliberately,
+       now, with no second "gun away" flag anywhere else. */
+    function reason(a, why, target) {
+      if (!a || a.isPlayer) return;
+      const r = rec(a);
+      if (why) { trigger(a, why); return; }
+      if (a._drawWhy) a._drawWhy = null;
+      r.downT = T; r.trigT = -1e9; r.watchT = 0;
+      if (r.lv >= 2) log(a, "holster", "stand-down");
+      r.lv = 0; r.holdUntil = 0; r.why = "";
+    }
     /* the triggers a body's own state already states (city peds and cops);
        anything else arrives through trigger() from the system that knows */
     function sense(a) {
+      const dw = a._drawWhy;
+      if (dw && dw.why && !(dw.target && dw.target.dead)) trigger(a, dw.why);
       const g = CBZ.game || {};
       const stars = g.wanted | 0;
       if (a.kind === "cop" || a.swat) {
@@ -2136,10 +2157,11 @@
       }
       return out;
     }
-    return { trigger, sense, tick, drawn, aiming, mayHolster, clock, audit, rec,
+    return { trigger, reason, sense, tick, drawn, aiming, mayHolster, clock, audit, rec,
       log: function () { return ring.slice(); }, LV: LV, now: function () { return T; } };
   })();
   CBZ.gunDiscipline = GD;
+  CBZ.npcDrawReason = GD.reason;
   if (CBZ.onUpdate) CBZ.onUpdate(35.5, function (dt) { GD.clock(dt); });
 
   /* THE LOW READY of an NPC: the gun in the hand, the muzzle down. A long gun

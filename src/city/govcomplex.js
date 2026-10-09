@@ -255,7 +255,15 @@
   const GMAT = {};
   function gm(hex) {
     if (!CBZ.groundLinear) return cm(hex);
-    return GMAT[hex] || (GMAT[hex] = new THREE.MeshLambertMaterial({ color: CBZ.groundLinear(hex) }));
+    if (GMAT[hex]) return GMAT[hex];
+    // a GREEN pad is a lawn: it wears the one ground skin (the turf), not a
+    // flat colour (City Hall's and the Capitol's lawns were one flat green)
+    const r = (hex >> 16) & 255, g = (hex >> 8) & 255, b = hex & 255;
+    if (CBZ.groundSkin && g > r * 1.1 && g > b * 1.2) {
+      GMAT[hex] = CBZ.groundSkin({ name: "gov-lawn", srgb: true, far: 300, sandY: [-9, -8], wear: 0.15, extra: { vertexColors: false, color: hex } });
+      return GMAT[hex];
+    }
+    return (GMAT[hex] = new THREE.MeshLambertMaterial({ color: CBZ.groundLinear(hex) }));
   }
   function bg(w, h, d) { return CBZ.boxGeom ? CBZ.boxGeom(w, h, d) : new THREE.BoxGeometry(w, h, d); }
   function h01(x, z, salt) { return CBZ.hash01 ? CBZ.hash01(x, z, salt) : 0.5; }
@@ -1301,6 +1309,18 @@
     if (EMAT[kind]) return EMAT[kind];
     const d = SURF[kind];
     let m = null;
+    // A LAWN IS THE ONE GROUND. Was the 3.2 m grass map tiled on a flat
+    // tint: the tile counted from the drive, and mip-averaged to one flat
+    // green across the parterre. Now the ground skin with this lawn's
+    // colour: the same turf (hue, bare soil, clumps to blades) the country
+    // round the estate wears, on every quality tier. lawnB keeps its
+    // lighter tint, so the mowing stripes stay.
+    if (d.lib === "grass" && CBZ.groundSkin) {
+      m = CBZ.groundSkin({ name: "estate-" + kind, srgb: true, far: 300, sandY: [-9, -8], wear: 0.15, extra: { vertexColors: false, color: d.tint } });
+      m._shared = true;
+      EMAT[kind] = m;
+      return m;
+    }
     try {
       const pbr = !!(CBZ.pbrMaterialsOn && CBZ.pbrMaterialsOn());
       // THE AUTHORED COLOURS ARE sRGB DISPLAY HEXES; decoded to reflectance

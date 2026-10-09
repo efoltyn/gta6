@@ -476,7 +476,7 @@
       const rec = countries[i];
       if (rec.govType !== "anarchism") continue;
       const s = st(rec.id);
-      if (s.frozenApproval != null) rec.approval = s.frozenApproval;
+      if (s.frozenApproval != null && CBZ.approvalSet) CBZ.approvalSet(rec, s.frozenApproval);
     }
   });
 
@@ -634,7 +634,7 @@
     }
     rec.govType = "dictatorship";
     rec.office.holder = holderSid; rec.office.deputy = null; rec.vacuum = null;
-    rec.approval = 40;   // the strongman's own honeymoon baseline — no longer frozen
+    if (CBZ.approvalSet) CBZ.approvalSet(rec, 40);   // the strongman's own honeymoon baseline — no longer frozen
     applyEffects(rec, "dictatorship", day);
     if (CBZ.city && CBZ.city.big) CBZ.city.big("" + name.toUpperCase() + " SEIZES THE STATE");
     if (CBZ.cityFeed) CBZ.cityFeed("" + name + ", a gang boss, crowns himself over the ashes of anarchy.", "#ffd76a");

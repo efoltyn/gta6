@@ -7962,7 +7962,14 @@
          grammar  facade kit style for homes/towers/hideouts ([A, B] or one)
          shop     style for storefront trades (ground storey kept clear for
                   the shop's glass, door, fascia and awning)
-         storeys  [A, B] for towers/homes; shopSt = minimum for a shop
+         storeys  [A, B] for towers/homes; shopSt = minimum for a shop.
+                  THE CORE IS THE PEAK (layout wave, 2026-10-08): the walk-up
+                  and tower lots of the commercial streets stand 8-10 storeys
+                  and the projects 7-8, so the downtown is the tallest place
+                  near the spawn and the boroughs step DOWN from it. Before,
+                  they stood 4-5 and the Gang City West borough across the
+                  harbour out-topped them with 10-27 storey towers.
+                  city/zoning.js CORE_ST.downtown (10) is this street wall.
          setback  metres from the wall to the footway's back edge. Everything
                   a building dresses itself with stays inside it (makeBuilding
                   opts.reach); residential gets a front yard for its porches.
@@ -7971,13 +7978,13 @@
        rng() draws are kept where the old code drew them (the value is simply
        no longer used), so the rest of the deterministic build is unchanged. */
     const STREET_STYLE = {
-      Midtown:    { grammar: "artdeco",                 shop: "artdeco", storeys: [8, 10], shopSt: 4, setback: 1.5, walls: [0xcfc2a4, 0xbdb096] },
-      Eastgate:   { grammar: "brick",                   shop: "brick",   storeys: [5, 4],  shopSt: 3, setback: 1.5, walls: [0x8a3b26, 0x7d3624] },
-      Westend:    { grammar: "stone",                   shop: "stone",   storeys: [4, 5],  shopSt: 3, setback: 1.5, walls: [0xcab99a, 0xb9a887] },
-      Harborside: { grammar: "brick",                   shop: "brick",   storeys: [4, 3],  shopSt: 3, setback: 1.5, walls: [0x6e4634, 0x62402f] },
+      Midtown:    { grammar: "artdeco",                 shop: "artdeco", storeys: [12, 16], shopSt: 4, setback: 1.5, walls: [0xcfc2a4, 0xbdb096] },
+      Eastgate:   { grammar: "brick",                   shop: "brick",   storeys: [10, 8], shopSt: 3, setback: 1.5, walls: [0x8a3b26, 0x7d3624] },
+      Westend:    { grammar: "stone",                   shop: "stone",   storeys: [8, 10], shopSt: 3, setback: 1.5, walls: [0xcab99a, 0xb9a887] },
+      Harborside: { grammar: "brick",                   shop: "brick",   storeys: [7, 6],  shopSt: 3, setback: 1.5, walls: [0x6e4634, 0x62402f] },
       Northpoint: { grammar: "brickhouse",              shop: "brick",   storeys: [3, 3],  shopSt: 2, setback: 3.5, walls: [0x98482e, 0x8c432c] },
       Crownhill:  { grammar: ["queenanne", "victorian"], shop: "stone",  storeys: [3, 3],  shopSt: 2, setback: 3.5, walls: [0x6f8ea4, 0xb09a78] },
-      Southside:  { grammar: "brutalist",               shop: "brick",   storeys: [5, 6],  shopSt: 2, setback: 3.0, walls: [0x8c8983, 0x807d77] },
+      Southside:  { grammar: "brutalist",               shop: "brick",   storeys: [7, 8],  shopSt: 2, setback: 3.0, walls: [0x8c8983, 0x807d77] },
       Ironworks:  { grammar: "brick",                   shop: "brick",   storeys: [3, 3],  shopSt: 2, setback: 2.0, walls: [0x5c3a2c, 0x543428] },
       Dockyard:   { grammar: "brutalist",               shop: "brick",   storeys: [3, 4],  shopSt: 2, setback: 2.0, walls: [0x77746c, 0x6b6861] },
     };

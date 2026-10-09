@@ -120,11 +120,11 @@ const THREE = { CanvasTexture: class {}, MeshBasicMaterial: class {}, PlaneGeome
 const sb = { window: null, CBZ, THREE, console, Math, Object, Array, Set, Map, JSON, isFinite, Number, String, Date, Infinity, parseInt, setTimeout: (f) => f(), clearTimeout() {} };
 sb.window = sb;
 vm.createContext(sb);
-for (const f of ["src/city/newsroom.js", "src/city/phone_apps.js", "src/city/president_staff.js", "src/city/dissent.js"]) {
+for (const f of ["src/city/newsroom.js", "src/city/phone_apps.js", "src/city/politics.js", "src/city/president_staff.js", "src/city/dissent.js"]) {
   vm.runInContext(readFileSync(path.join(ROOT, f), "utf8"), sb, { filename: f });
 }
 upd.sort((a, b) => a.o - b.o);
-const PS = CBZ.presidentStaff, A = CBZ.phoneApps, N = CBZ.news, D = CBZ.dissent;
+const PS = CBZ.presidentStaff, A = CBZ.phoneApps, N = CBZ.news, D = CBZ.dissent, Po = CBZ.politics;
 const tick = (secs, dt = 0.25) => { for (let t = 0; t < secs; t += dt) for (const u of upd) u.fn(dt); };
 const nextDay = () => { day++; for (const fn of newDay) fn(day); tick(2); };
 const live = () => peds.filter((p) => !p._gone);
@@ -199,7 +199,8 @@ P.pos = { x: chief.pos.x + 1, y: 10, z: chief.pos.z };
 said.length = 0;
 tick(1);
 const line = said.find((s) => /^Two names for General\./.test(s.line));
-ok(line && line.by === "Ruth Adair" && new RegExp("^Two names for General\\. " + sur(nm.names[0].name) + " is loyal\\. " + sur(nm.names[1].name) + " is good\\.$").test(line.line), "over his head: " + (line && line.line));
+ok(line && line.by === "Ruth Adair" && new RegExp("^Two names for General\\. " + sur(nm.names[0].name) + " is (a loyal [a-zA-Z-]+|loyal)\\. " + sur(nm.names[1].name) + " is (a good [a-zA-Z-]+|good)\\.$").test(line.line), "over his head: " + (line && line.line));
+ok(nm.names.every((c) => c.ideology), "the two names carry an ideology: " + nm.names.map((c) => c.ideology).join(" / "));
 const ea = opt(chief, "pres-chief-name-a"), eb = opt(chief, "pres-chief-name-b");
 ok(ea.slot === "e" && ea.canShow() && label(ea) === sur(nm.names[0].name) && !eb.slot && eb.canShow() && label(eb) === sur(nm.names[1].name), "E is " + label(ea) + ", the wheel is " + label(eb));
 ok(!opt(chief, "pres-chief-talk").canShow(), "Talk steps aside while he holds the names");
@@ -208,8 +209,8 @@ ok(!opt(chief, "pres-chief-talk").canShow(), "Talk steps aside while he holds th
 const loyalGen = fillWith("general", 0);
 ok(loyalGen && loyalGen.trait === "loyal" && loyalGen.loyalty === 85, "the loyal pick is the General: " + JSON.stringify(loyalGen));
 ok(PS.obedience("general") > 0 && PS.armyLean().cap === 79 && PS.edge("general") < 0, "loyal: fewer refusals (obedience " + PS.obedience("general") + "), no coup (army capped " + PS.armyLean().cap + "), weaker results (edge " + PS.edge("general") + ")");
-D._state().army = 95; nextDay();
-ok(D._state().army <= 79 && D._state().coupDay == null, "under a loyal General the army never reaches the coup mark: " + D._state().army);
+Po._setInst("army", 5); nextDay();
+ok(D.status().army <= 79 && D._state().coupDay == null, "under a loyal General the army never reaches the coup mark: " + D.status().army);
 // a loyal man's no costs little and never sinks him under 50
 for (let i = 0; i < 12; i++) CBZ.presidency.emit("decision", { source: "officer", who: CBZ.presidency.cabinet().general.display, choice: "no" });
 ok(cabRec("general").refused === 12 && cabRec("general").loyalty === 50, "a loyal General's loyalty floors at 50: " + cabRec("general").loyalty);
@@ -233,16 +234,16 @@ ok(cabRec("general").refused === 1, "a yes costs nothing");
 for (let i = 0; i < 4; i++) CBZ.presidency.emit("decision", { source: "folder", who: cabRec("general").name, choice: "no" });
 ok(cabRec("general").loyalty < 35 && PS.obedience("general") < 0, "five refusals and he is sour: loyalty " + cabRec("general").loyalty + ", obedience " + PS.obedience("general"));
 ok(PS.armyLean().add > 0, "a sour General pushes the army toward a coup: +" + PS.armyLean().add.toFixed(1) + "/day");
-const armyBefore = D._state().army;
+const armyBefore = D.status().army;
 nextDay();
-ok(D._state().army > armyBefore - 8, "...and dissent.js reads it on the army line: " + armyBefore + " -> " + D._state().army.toFixed(1));
+ok(D.status().army > armyBefore - 8, "...and dissent.js reads it on the army line: " + armyBefore + " -> " + D.status().army);
 // dismissing a sour General: he plots
 const sour = cabRec("general").name, sourSid = cabRec("general").sid;
-const army0 = D._state().army;
+const army0 = D.status().army;
 PS.dismiss("general", { via: "phone" });
 ok(PS.former().some((f) => f.name === sour && f.plotting), "a disloyal General dismissed plots");
-ok(D._state().plotter && D._state().plotter.sid === sourSid && D._state().army >= army0 + 20, "dissent's army climbs and he is the plotter (army " + army0.toFixed(0) + " -> " + D._state().army.toFixed(0) + ")");
-D._state().army = 95; D._state().stage = 3; D._state().unrest = 90; D._state().movement = 90; D._state().coupDay = day;
+ok(D._state().plotter && D._state().plotter.sid === sourSid && D.status().army >= army0 + 20, "dissent's army climbs and he is the plotter (army " + army0 + " -> " + D.status().army + ")");
+Po._setInst("army", 5); D._state().stage = 3; D._state().coupDay = day;
 nextDay();
 ok(coups.length === 1 && coups[0].plotterSid === sourSid, "the coup's plotter is the man you fired: " + JSON.stringify(coups[0]));
 country.office.holder = "player"; D.reset();
@@ -333,7 +334,7 @@ const strings = (src.match(/"[^"\n]*"/g) || []).join("\n");
 ok(!/Candidate|He doesn't work for us|"Next\."|"Hire"|Send away/.test(src), "no Candidate N, Hire, Send away or the old Chief lines in the source");
 const allText = said.map((s) => s.line).concat(headlines(), A.feed().map((p) => p.text)).join("\n");
 ok(!/[—–·•]/.test(allText) && !/[—–]/.test(strings), "no em dashes or middle dots in anything said, run or posted");
-ok(said.every((s) => s.line.length <= 80), "every spoken line is short");
+ok(said.every((s) => s.line.length <= 80), "every spoken line is short" + said.filter((s) => s.line.length > 80).map((s) => ": " + s.line).join(""));
 
 console.log((fails ? "PRES-STAFF: FAIL " : "PRES-STAFF: OK ") + passes + " passed, " + fails + " failed");
 process.exit(fails ? 1 : 0);

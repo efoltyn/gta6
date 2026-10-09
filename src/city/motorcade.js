@@ -762,6 +762,7 @@
     try { p = CBZ.cityPostNpc(x, z, o); } catch (e) { p = null; }
     if (!p) return null;
     p._motorcade = true; p.maxHp = Math.max(p.maxHp || 0, 140);
+    p._iOnly = true;              // on duty: the President's orders about a man (city/orders.js), never the street's verbs
     // dress comes from the job: outfits.js jobFit casts "police officer" as the
     // police uniform and "secret service" as the detail's black suit, at spawn
     // and on every re-dress (the old post-spawn dressCop was a second path).
@@ -1773,20 +1774,24 @@
     return carPoint(c, 1.9, -0.9);
   }
   const DLG = { open: false, asked: false, token: 0 };
-  function askWhere() {
+  // `by`: who asks (the driver when you ask him; else the agent at the door)
+  function askWhere(by) {
     const UI = CBZ.campaignUI;
     const sc = stateCar();
     if (!UI || typeof UI.say !== "function" || !sc || BOARD) return false;
     const here = MC.where === "home" ? null : { x: sc.pos.x, z: sc.pos.z };
     const ch = choicesFor(here);
     if (!ch.length) return false;
-    const a = speaker();
+    const a = by && by.group && !by.dead ? by : speaker();
     const name = (a && a.name) || "Agent";
     const line = MC.where === "home" ? "Car's ready, sir. Where to?" : "Where to now, sir?";
     const tok = ++DLG.token;
     DLG.open = true; DLG.asked = true;
     let pr = null;
-    try { pr = UI.say(name, line, ch.map(function (c, i) { return { id: "mc" + i, label: c.label }; }), a ? { actor: a } : null); } catch (e) { pr = null; }
+    // the places ride on whoever asked (E the first, hold E the second, the
+    // wheel all of them); with nobody at the door, on the door itself
+    const ds = doorStand(sc);
+    try { pr = UI.say(name, line, ch.map(function (c, i) { return { id: "mc" + i, label: c.label }; }), a ? { actor: a } : { at: { x: ds.x, y: (sc.pos.y || 0) + 1.2, z: ds.z } }); } catch (e) { pr = null; }
     if (a && a.group && CBZ.player && CBZ.player.pos) a.group.rotation.y = Math.atan2(CBZ.player.pos.x - a.pos.x, CBZ.player.pos.z - a.pos.z);
     if (pr && typeof pr.then === "function") {
       pr.then(function (id) {
@@ -2255,6 +2260,8 @@
     // reads
     destinations: function (here) { return choicesFor(here || null).map(function (d) { return { id: d.id, name: d.name, label: d.label, x: d.x, z: d.z }; }); },
     car: stateCar,
+    // "Where to, sir?" from whoever you asked (the driver), the places on him
+    ask: function (by) { return playerPresident() ? askWhere(by) : false; },
     helicopter: function () { return HELI.rec; },
     // legacy verb (the old card's): a real ride now, never a teleport
     go: function (destId) {
