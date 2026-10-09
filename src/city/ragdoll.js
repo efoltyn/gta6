@@ -196,6 +196,8 @@
       //      is in (see waterProbe). wet=false is the land path, byte-identical.
       pin: null, wet: false, seaY: 0, seaDy: 0,
       down: false, wallT: 0,                 // chest on the floor (see solve) / a wall touched lately
+      live: false,                           // a LIVING body thrown by a car (city/carstrike.js): gets up after
+      strike: null,                          // the car this body is in contact with (city/carstrike.js)
     };
   }
   const slots = [];
@@ -242,6 +244,7 @@
     s.dyt = 0; s.dyMax = 0; s.dyx = 0; s.dyz = 0; s.dyForce = 0; s.dyHead = false;
     s.pin = null; s.wet = false; s.seaY = 0; s.seaDy = 0;
     s.down = false; s.wallT = 0;
+    s.live = false; s.strike = null;
   }
 
   // grounded-corpse contract: down=9999 keeps CBZ.body.busy true forever (peds.js
@@ -352,11 +355,12 @@
     return true;
   }
 
-  function start(target, point, dir, imp, fromNet) {
+  function start(target, point, dir, imp, fromNet, live) {
     if (!allowed()) return false;
     if (!target) return false;
     if (fromNet) target.dead = true;          // the host's word is law — the rag ev beats the snapshot row
-    else if (!target.dead) return false;
+    else if (!target.dead && !live) return false;   // the living only by a car strike (CBZ.ragdollStrike)
+    if (live && target.isPlayer) return false;      // physics.js owns the player's own body
     const ch = charOf(target);
     if (!ch || !ch.parts || !target.group || target.inCar) return false;
     const cam = CBZ.camera && CBZ.camera.position;
@@ -367,6 +371,7 @@
     // already ours → re-kick and wake (shooting a settled corpse stirs it)
     let s = target._ragSlot != null ? slots[target._ragSlot] : null;
     if (s && s.ped === target) {
+      if (target.dead) s.live = false;
       kick(s, point, dir, imp);
       s.asleep = false; s.still = 0; s.life = 0;
       bumpPhys(target);
@@ -447,6 +452,7 @@
     if (wasDown && CBZ.bodyFall) CBZ.bodyFall.clear(target);
     s.noBeat = wasDown;
     s.used = true; s.ped = target; s.ch = ch; s.isPlayer = !!target.isPlayer;
+    s.live = !target.dead; s.strike = null;
     s.age = ++seq; s.still = 0; s.asleep = false; s.life = 0; s.thud = false;
     s.dyt = 0;                                       // cleared so kick() arms a fresh beat
     s.cx = grp.position.x; s.cy = grp.position.y; s.cz = grp.position.z;
@@ -464,7 +470,7 @@
     { const mv = target._mv, vel = target.vel;
       if (mv && (mv.vx || mv.vz)) carry(s, mv.vx || 0, mv.vz || 0);
       else if (vel && (vel.x || vel.z)) carry(s, vel.x || 0, vel.z || 0); }
-    if (!fromNet && CBZ.netRagEmit) CBZ.netRagEmit(target, point, dir, imp);
+    if (!fromNet && !s.live && CBZ.netRagEmit) CBZ.netRagEmit(target, point, dir, imp);
     return true;
   }
 
@@ -924,11 +930,16 @@
       // walls, INSIDE the substep: pushed out after the sticks had their say,
       // so the next substep's sticks relax the rest of the body around the
       // contact instead of dragging the point back in for a whole frame
+      // THE CAR THAT HIT HIM is a solid, moving shape (city/carstrike.js):
+      // swept per point against its real outline, after the sticks and the
+      // street, so nothing later in the substep drags a point back into it
+      if (s.strike && CBZ.carStrike) CBZ.carStrike.substep(s, p, q, p0, h, sub, Math.min(dt, 0.04), RAD);
       if (wallSweep(p, q, p0, sk)) s.wallT = 0.5;
       if (CBZ.collide && wallPass(p, q, sk)) s.wallT = 0.5;
       // the hold gets the LAST word of the substep — after the sticks and
       // after the ground, so nothing can drag the held point off the jaw.
       if (s.pin) applyPin(s);
+      if (s.strike && CBZ.carStrike) CBZ.carStrike.measure(s, RAD);
     }
     if (s.pin) applyPin(s);          // the wall pusher doesn't get to move the grip either
     // sleep: kinetic energy stayed low → freeze the pose where it lies. Never
@@ -954,7 +965,39 @@
     // a held body never freezes — but the pin's own `until` (hard-capped at
     // PIN_MAX) is what bounds that, so a pin can never keep a body awake
     // forever. The frame the pin expires, MAX_LIFE takes it straight to sleep.
-    if (!s.pin && (s.still > SLEEP_T || s.life > MAX_LIFE)) { s.asleep = true; restFit(s); }
+    if (!s.pin && (s.still > SLEEP_T || s.life > MAX_LIFE)) { s.asleep = true; restFit(s); if (s.live) liveHandoff(s); }
+  }
+
+  /* A LIVING MAN THE CAR THREW. The strike is the same physics dead or
+     alive; when the body comes to rest the ragdoll hands him back: the
+     slot is freed, his rig is laid in the collapse's last beat (bodyfall,
+     the way he actually landed: on his back or his face, head where his
+     head is), and the knockdown / KO clock that is already running gets
+     him up. */
+  const _ho = { dirX: 0, dirZ: 0, vx: 0, vz: 0, force: 0, landed: true, dead: false, hold: true };
+  function liveHandoff(s) {
+    const t = s.ped, g = t && t.group, p = s.p;
+    if (!t || !g || t.dead) { s.live = false; return; }
+    const msx = (p[3] + p[6]) * 0.5, msz = (p[5] + p[8]) * 0.5;
+    const mhx = (p[9] + p[12]) * 0.5, mhy = (p[10] + p[13]) * 0.5, mhz = (p[11] + p[14]) * 0.5;
+    let hx = msx - mhx, hz = msz - mhz;
+    const hl = Math.hypot(hx, hz);
+    if (hl > 1e-4) { hx /= hl; hz /= hl; } else { hx = s.fwx; hz = s.fwz; }
+    // chest forward (writePose's frame): pointing up = he is on his back
+    _r.set(p[3] - p[6], p[4] - p[7], p[5] - p[8]);
+    _u.set(msx - mhx, (p[4] + p[7]) * 0.5 - mhy, msz - mhz);
+    _f.crossVectors(_r, _u);
+    const onBack = _f.y > 0;
+    releaseSlot(s);
+    g.quaternion.identity();
+    g.rotation.set(0, onBack ? Math.atan2(-hx, -hz) : Math.atan2(hx, hz), 0);
+    g.position.set(mhx, groundUnder(mhx, mhz, mhy + 0.3), mhz);
+    const ph = CBZ.body && CBZ.body.phys ? CBZ.body.phys(t) : t._phys;
+    if (ph) { ph.down = Math.max(0.6, t.ko || 0); ph.air = false; ph.vx = ph.vy = ph.vz = 0; ph.kx = ph.kz = 0; ph.settle = 1; }
+    if (CBZ.bodyFall && CBZ.bodyFall.start) {
+      _ho.dirX = hx; _ho.dirZ = hz; _ho.vx = hx * 0.01; _ho.vz = hz * 0.01;
+      try { CBZ.bodyFall.start(t, _ho); } catch (e) {}
+    }
   }
 
   // re-orient the EXISTING rig from the points (assign, never add — we run after
@@ -1049,9 +1092,10 @@
       if (!t) { releaseSlot(s); continue; }
       if (s.isPlayer) {
         if (!CBZ.player || !CBZ.player.dead) { releaseSlot(s); continue; }  // respawned
-      } else if (!t.dead || t.culled || (t.group && !t.group.parent)) {
+      } else if ((!t.dead && !s.live) || t.culled || (t.group && !t.group.parent)) {
         releaseSlot(s); continue;                   // culled/picked-up → timeline owns it
       }
+      if (s.live && t.dead) s.live = false;         // the strike killed him after all: a corpse now
       // the pin's clock runs on frame time, not substep time, and a held body
       // is never allowed to be asleep (the thing holding it is still moving).
       if (s.pin) {
@@ -1062,6 +1106,7 @@
       waterProbe(s);
       if (!s.asleep) solve(s, dt);
       else if (s.wet) bobAsleep(s);
+      if (!s.used) continue;                         // a living man handed back to his rig (liveHandoff)
       writePose(s);
       // the death cam orbits player.pos — follow the pelvis down the stairs
       if (s.isPlayer && CBZ.player && CBZ.player.pos) CBZ.player.pos.set(s.cx, s.cy, s.cz);
@@ -1072,6 +1117,53 @@
     if (CBZ.ragdollDriven) return;      // the page owns the clock (see above)
     CBZ.ragdollStep(dt);
   });
+
+  /* THE CAR'S LAST WORD (city/carstrike.js): every car has moved by now
+     (the driven car at 11, traffic at 37, resolveCars at 37.6), so the
+     bodies still touching one are fitted to where it actually ended the
+     frame and redrawn. Only struck bodies; nothing else pays. */
+  CBZ.ragdollCarPost = function (dt) {
+    const CS = CBZ.carStrike;
+    if (!CS) return;
+    for (let i = 0; i < slots.length; i++) {
+      const s = slots[i];
+      if (!s.used) continue;
+      if (!s.strike && !CS.lyingInPath(s, RAD)) continue;   // a body lying where a car is going is still solid
+      CS.post(s, Math.min(dt, 0.05), RAD);
+      writePose(s);
+    }
+  };
+  CBZ.onUpdate(37.9, function (dt) {
+    if (CBZ.ragdollDriven) return;
+    CBZ.ragdollCarPost(dt);
+  });
+
+  /* A CAR HITS HIM: CBZ.ragdollStrike(target, car, info) -> bool. Dead or
+     alive (the living get up after, see liveHandoff); the slot is engaged
+     with the car so its real shape is solid to him every substep. A body
+     already in a slot (the kill just ragdolled him) is engaged as it is. */
+  // the car contact a body is in, if any (city/carstrike.js's record)
+  CBZ.ragdollStrikeOf = function (target) {
+    const s = target && target._ragSlot != null ? slots[target._ragSlot] : null;
+    return s && s.used && s.ped === target ? s.strike : null;
+  };
+  CBZ.ragdollStrike = function (target, car, info) {
+    if (!target || !car || !CBZ.carStrike) return false;
+    let s = target._ragSlot != null ? slots[target._ragSlot] : null;
+    if (!s || !s.used || s.ped !== target) {
+      if (!start(target, info && info.x != null ? info : null, null, 1, false, !target.dead)) return false;
+      s = target._ragSlot != null ? slots[target._ragSlot] : null;
+      if (!s || !s.used || s.ped !== target) return false;
+    }
+    s.asleep = false; s.still = 0; s.life = 0; s.age = ++seq;
+    bumpPhys(target);
+    if (!CBZ.carStrike.engage(s, car, info, RAD)) return false;
+    // engage dropped the kill's radial throw; he keeps the walk he was in
+    const mv = target._mv, vel = target.vel;
+    if (mv && (mv.vx || mv.vz)) carry(s, mv.vx || 0, mv.vz || 0);
+    else if (vel && (vel.x || vel.z)) carry(s, vel.x || 0, vel.z || 0);
+    return true;
+  };
 
   /* HAND A SLOT BACK EARLY. The step releases a slot when the body leaves the
      world, which is the right default and one frame too late for a caller that

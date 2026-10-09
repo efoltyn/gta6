@@ -40,6 +40,12 @@
      manoeuvring target can out-turn it but a straight-flying one gets run
      down. Pure direction math, no scene access.
 
+   • heliStep / planeStep — the player's helicopter and EVERY player
+     fixed-wing (jets, airliners, props, the B-2): pure state-in/state-out
+     flight steps, flown headless by tools/heli-flight-check.mjs and
+     tools/plane-flight-check.mjs. Attitude convention for both: pitch + =
+     nose up, roll + = right wing down, heading increasing = turning left.
+
    Nothing here owns state — every consumer keeps its own craft object and
    passes scalars in, scalars out. Load this BEFORE aircraft.js (which is the
    first consumer) and before playeraircraft.js.
@@ -266,8 +272,10 @@
   //   pedal + = nose LEFT                    coll  collective (+ up)
   // env: { top, vlift, authority, onGround, autorotating, sink }
   // st (mutated): vx, vy, vz, heading, yawRate, bank, pitch, roll
-  //   pitch/roll are the VISUAL rotation the group gets (rotation.x positive
-  //   tips the nose DOWN, rotation.z positive is a RIGHT bank).
+  //   pitch/roll are the attitude the airframe SHOWS, in the one convention
+  //   every craft shares: pitch + = nose UP, roll + = RIGHT wing down
+  //   (playeraircraft.js setCraftRotation turns that into the group's
+  //   rotation).
   const HELI_PEDAL_RATE = 1.15;    // rad/s at full pedal (a full turn in ~5.5 s)
   const HELI_BANK_MAX = 0.42;      // rad of commanded bank at full lateral cyclic
   const HELI_BANK_TURN = 0.75;     // rad/s turn at full bank in cruise
@@ -333,7 +341,7 @@
     }
     // what the airframe SHOWS: nose down to accelerate and a little in cruise,
     // nose up to flare; bank into the turn, a smaller lean for a hover slide
-    const tp = Math.max(-0.35, Math.min(0.35, (wantF - vf) * 0.012 + vf * 0.0035));
+    const tp = -Math.max(-0.35, Math.min(0.35, (wantF - vf) * 0.012 + vf * 0.0035));
     const tr = Math.max(-0.5, Math.min(0.5, st.bank * (0.45 + 0.55 * cruise) + (wantR - vr) * 0.012));
     st.pitch = (st.pitch || 0) + (tp - (st.pitch || 0)) * Math.min(1, dt * 4);
     st.roll = (st.roll || 0) + (tr - (st.roll || 0)) * Math.min(1, dt * 4);
@@ -341,8 +349,121 @@
     return st;
   }
 
+  // ---- EVERY FIXED-WING THE PLAYER FLIES, one pure step --------------------
+  // The F-22, a stolen base jet, the airliners, the prop planes and the B-2
+  // all fly through here; the per-class row C is the personality.
+  //
+  // Same frame as heliStep: nose = (sin h, cos h), a RIGHT turn is h
+  // DECREASING. pitch + = nose up, roll + = right wing down.
+  //
+  // inp: { pitch, roll, yaw, thr } each -1..1
+  //   pitch + = pull back (nose up)      roll + = stick right (bank right)
+  //   yaw   + = right rudder             thr  + = throttle up, - = down/brakes
+  // env: { onGround, agl, authority, groundMul }
+  // C:   { vmax, thrust, dragK, vstall, vminfly, vr, gacc, rollMax, rollRate,
+  //        turnK, pitchMax, pitchRate, bleed, autoLevel, span }
+  //   rollRate / pitchRate are rad/s at full stick; autoLevel is how fast a
+  //   released bank fades (per s); turnK is the turn rate per sin(bank).
+  // st (mutated): airspeed, thr, heading, pitch, roll, yawRate, sag, stalled,
+  //   vx, vy, vz
+  //
+  // The stick flies the attitude: roll asks for a bank (proportional, rate
+  // limited), pitch moves the nose at a rate and the nose STAYS where you
+  // left it. Hands off, bank and pitch fade gently back to level, and with
+  // wings level nothing turns the nose, so the plane flies straight. A bank
+  // turns the plane its way (coordinated: the nose follows the lift), pulling
+  // in a bank tightens the turn instead of only lifting the nose. The flight
+  // path IS the nose (plus the stall sag), so what the airframe shows is
+  // where it goes.
+  const PLANE_PITCH_LEVEL = 0.35;   // per s: how gently a released nose eases to the horizon
+  const PLANE_THR_RATE = 0.6;       // throttle travel per s (idle to full in ~1.7 s)
+  const PLANE_ROTATE_MAX = 0.28;    // rad of nose-up the gear allows on the runway
+  function clamp1(v) { return v > 1 ? 1 : (v < -1 ? -1 : (v || 0)); }
+  function planeStep(st, inp, dt, env, C) {
+    const auth = env.authority != null ? env.authority : 1;
+    const onGround = !!env.onGround, agl = env.agl || 0;
+    const pIn = clamp1(inp.pitch) * auth, rIn = clamp1(inp.roll) * auth;
+    const yIn = clamp1(inp.yaw) * auth, tIn = clamp1(inp.thr);
+    // throttle
+    st.thr = Math.max(0, Math.min(1, (st.thr || 0) + tIn * PLANE_THR_RATE * dt));
+    // airspeed: engine against drag, a climb bleeds it, a dive builds it
+    let v = st.airspeed || 0;
+    let pitch = st.pitch || 0, roll = st.roll || 0;
+    v += (st.thr * C.thrust - C.dragK * v * v) * dt;
+    v -= C.bleed * Math.sin(pitch) * dt;
+    if (onGround) {
+      v -= 0.4 * dt;                               // rolling friction
+      if (tIn < 0) v -= C.gacc * 0.6 * dt;         // wheel brakes on throttle-down
+      if (tIn <= 0 && v < 0.6) v = 0;              // parked stays parked
+    } else if (tIn < 0 && st.thr <= 0) {
+      v -= C.gacc * 0.2 * dt;                      // speed brakes: keep holding THR- at idle
+    }
+    v = Math.max(0, Math.min(C.vmax * 1.05, v));
+
+    // ROLL: the stick asks for a bank, reached at up to rollRate
+    if (onGround) roll += (0 - roll) * Math.min(1, dt * 6);
+    else if (rIn) {
+      const d = rIn * C.rollMax - roll;
+      roll += Math.max(-C.rollRate, Math.min(C.rollRate, d * 3)) * dt;
+    } else roll *= Math.max(0, 1 - C.autoLevel * dt);
+    roll = Math.max(-C.rollMax, Math.min(C.rollMax, roll));
+    const sr = Math.sin(roll), cr = Math.cos(roll);
+
+    // PITCH: the stick moves the nose at a rate; hands off it holds, easing
+    // gently to the horizon. On the runway the nosewheel holds it down until
+    // rotate speed, and the tail limits how far you can lift it.
+    if (onGround) {
+      if (v >= C.vr && pIn > 0) pitch += pIn * C.pitchRate * dt;
+      else pitch += (0 - pitch) * Math.min(1, dt * 3);
+      pitch = Math.max(0, Math.min(PLANE_ROTATE_MAX, pitch));
+    } else {
+      if (pIn) pitch += pIn * C.pitchRate * (pIn > 0 ? Math.abs(cr) : 1) * dt;
+      else pitch *= Math.max(0, 1 - PLANE_PITCH_LEVEL * dt);
+      pitch = Math.max(-C.pitchMax, Math.min(C.pitchMax, pitch));
+    }
+
+    // STALL: under vstall the wing cannot hold the nose; it drops and the
+    // bank wallows out. Flying speed back = control back.
+    const stalled = !onGround && v < C.vstall && agl > 2;
+    if (stalled) {
+      pitch += (-0.5 - pitch) * Math.min(1, dt * 1.2);
+      roll *= Math.max(0, 1 - 0.5 * dt);
+    }
+
+    // YAW: a coordinated bank turn (the nose follows the lift), a pull in the
+    // bank tightens it, the rudder adds a flat yaw. A right bank turns right
+    // (heading decreasing). On the ground the rudder and the stick both steer
+    // the nosewheel.
+    let yawRate = 0;
+    if (!onGround && v > C.vminfly) {
+      const pull = pIn > 0 ? pIn * C.pitchRate * 0.6 * Math.abs(sr) : 0;
+      // the rudder: a flat yaw, weaker than the class's own bank turn
+      yawRate = -(C.turnK * sr + pull * Math.sign(sr)) - yIn * C.turnK * 0.8;
+    } else if (onGround && v > 0.5) {
+      yawRate = -clamp1(yIn + rIn) * 0.9 * Math.min(1, v / C.vr);
+    }
+    st.heading = (st.heading || 0) + yawRate * dt;
+
+    // SAG: under the lift band gravity wins; it fades once flying speed returns
+    const liftFrac = onGround ? 1
+      : Math.max(0, Math.min(1, (v - C.vminfly) / Math.max(1, C.vstall - C.vminfly)));
+    let sag = Math.min(25, (st.sag || 0) + (1 - liftFrac) * 9.8 * dt);
+    sag *= Math.max(0, 1 - (0.8 + 3.2 * liftFrac) * dt);
+
+    // the flight path is the nose
+    const cp = Math.cos(pitch);
+    st.vx = Math.sin(st.heading) * cp * v;
+    st.vz = Math.cos(st.heading) * cp * v;
+    st.vy = Math.sin(pitch) * v - sag;
+    const gm = env.groundMul || 1;
+    if (!onGround && gm > 1) st.vy += (gm - 1) * 6;   // a floaty cushion right at the deck
+    st.airspeed = v; st.pitch = pitch; st.roll = roll; st.sag = sag;
+    st.yawRate = yawRate; st.stalled = stalled;
+    return st;
+  }
+
   CBZ.aeroPhysics = {
     liftCoeff, localVelocity, worldVelocity, aeroForces, groundEffectMul, etlMul, homingSteer,
-    heliStep, STALL_AOA,
+    heliStep, planeStep, STALL_AOA,
   };
 })();

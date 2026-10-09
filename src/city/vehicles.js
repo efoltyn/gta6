@@ -1942,11 +1942,22 @@
      must never be left scaled down, folded, or missing its head. */
   function releaseDriver() {
     dropLive();
-    if (!drv.car) return false;
-    drv.car = null; drv.seatId = null; drv.steer = 0; drv.fit = 1;
     const ch = CBZ.playerChar;
+    /* A CAR SEAT NOBODY HERE IS HOLDING. The door beat (boarding.js, CBZ.
+       moves.board) ends with the rig folded into the seat, scaled to its fit,
+       and hands it to seatDriver. A car that does not want the walking rig
+       at the wheel (a Bullring stock car: its own helmeted driver is you)
+       never runs seatDriver, so drv.car stayed null and this returned early:
+       the seated, wheel-holding, shrunk rig walked out of the car with you
+       ("floating, holding a wheel"). A rig in a car seat with no door beat
+       playing is stood up here, whoever folded it. */
+    const orphan = !drv.car && ch && ch.seatRef && ch.seatRef.kind === "car" &&
+      !(CBZ.moves && CBZ.moves.busy && CBZ.moves.busy(CBZ.player));
+    if (!drv.car && !orphan) return false;
+    drv.car = null; drv.seatId = null; drv.steer = 0; drv.fit = 1;
     if (ch) {
       ch.sitting = false; ch.seatRef = null; ch.driveSteer = 0;
+      ch.seatBlend = null; ch.postureSink = null; ch.seatLean = 0;   // (the rig refunds its own seat sink as it stands)
       if (ch.group) {
         ch.group.scale.setScalar(1);
         ch.group.rotation.x = 0; ch.group.rotation.z = 0;
@@ -4741,8 +4752,14 @@
       const h = car.heading || 0;
       const side = D ? D.side : (paxSide ? -1 : 1);
       const lx = D ? side * (Math.abs(D.x) + 0.7) : side * 1.6, lz = D ? D.zc : 0;
-      // (a race car stands on the banking: you step out onto it, not under it)
-      P.pos.set(car.pos.x + lx * Math.cos(h) + lz * Math.sin(h), car._raceCar ? (+car.pos.y || 0) : 0, car.pos.z - lx * Math.sin(h) + lz * Math.cos(h));
+      // ON THE GROUND THERE: the floor at the door, not y = 0 (a race car
+      // stands on 24 degrees of banking: the door side is up to 0.7 m off the
+      // car's own height; a car on a ramp or a deck is not at sea level)
+      const ex = car.pos.x + lx * Math.cos(h) + lz * Math.sin(h), ez = car.pos.z - lx * Math.sin(h) + lz * Math.cos(h);
+      const cy = +car.pos.y || 0;
+      let ey = CBZ.groundAt ? +CBZ.groundAt(ex, ez, cy + 1.0) : (CBZ.floorAt ? +CBZ.floorAt(ex, ez) : cy);
+      if (!Number.isFinite(ey)) ey = cy;
+      P.pos.set(ex, ey, ez);
       P.grounded = true; P.vy = 0;
       CBZ.playerChar.group.position.copy(P.pos);
     }
@@ -5614,8 +5631,9 @@
         if (vmag > 6) runOver(car, vmag);
         else if (vmag > 0.6) creepInto(car, vmag);
         P.pos.set(car.pos.x, car.pos.y, car.pos.z);
-        // the helmeted driver in the car is you: the walking rig waits outside the frame
-        if (drv.car) releaseDriver();
+        // the helmeted driver in the car is you: the walking rig waits outside
+        // the frame, STANDING (the door beat left it folded in a seat)
+        releaseDriver();
         CBZ.playerChar.group.position.copy(P.pos);
         CBZ.playerChar.group.visible = false;
         P.speed = vmag;
@@ -6326,13 +6344,20 @@
     if (!BI || !car.player) return;
     const hx = Math.sin(car.heading || 0), hz = Math.cos(car.heading || 0);
     const fwd = (car.v || 0) >= 0 ? 1 : -1;
+    const CS = CBZ.carStrike;
+    const reach = (vehicleDims(car).length || 4.4) * 0.5 + 1.2;
     for (const p of CBZ.cityPeds) {
       if (p.dead || p.inCar || p.culled) continue;
       const dx = p.pos.x - car.pos.x, dz = p.pos.z - car.pos.z;
-      if (dx * dx + dz * dz > 7.5) continue;
-      // in the path of the car's travel, within the bumper's width
-      const along = (dx * hx + dz * hz) * fwd, side = Math.abs(dx * hz - dz * hx);
-      if (along < 0.6 || along > 2.9 || side > 1.25) continue;
+      if (dx * dx + dz * dz > reach * reach) continue;
+      // the car's own footprint, swept by this frame's travel (carstrike.js);
+      // the old box ahead of the centre only without it
+      let hitInfo = null;
+      if (CS) { hitInfo = CS.hit(car, p, vmag); if (!hitInfo || hitInfo.end === "side") continue; }
+      else {
+        const along = (dx * hx + dz * hz) * fwd, side = Math.abs(dx * hz - dz * hx);
+        if (along < 0.6 || along > 2.9 || side > 1.25) continue;
+      }
       if ((p._carHitUntil || 0) > (CBZ.now || 0)) continue;
       p._carHitUntil = (CBZ.now || 0) + 700;
       const imp = BI.car(p, car, vmag, hx * fwd, hz * fwd);
@@ -6346,16 +6371,38 @@
         p.alarmed = Math.max(p.alarmed || 0, 4);
         if (CBZ.humanContact && CBZ.city) CBZ.humanContact.react(p, { mode: "city", source: CBZ.city.playerActor, kind: imp.tier >= BI.DOWN ? "run-over" : "shoved", severity: imp.tier >= BI.DOWN ? 0.8 : 0.5 });
         if (imp.tier >= BI.DOWN && CBZ.cityCrime) CBZ.cityCrime(15, { x: p.pos.x, z: p.pos.z, type: "reckless" });
-        car.v *= 0.85;
+        // PUT DOWN BY A CAR: the bumper takes his legs for real (the strike
+        // owns the body and takes the car's lost momentum); a shove is a step
+        if (imp.tier >= BI.DOWN && CS && hitInfo) {
+          p.ko = Math.max(p.ko || 0, 1.6 + vmag * 0.2);
+          if (!CS.strike(p, car, hitInfo, vmag)) CS.cheapLoss(car);
+        } else if (CS) CS.cheapLoss(car);
+        else car.v *= 0.85;
       }
     }
   }
 
+  const _pBody = { pos: null, radius: 0.38 };
+  /* any moving car against the people near it — for cars this file does not
+     step (a Bullring stock car runs on the racing model, city/speedway_race.js) */
+  CBZ.cityCarRunOver = function (car, vmag) { if (car && car.pos && vmag > 0) runOver(car, vmag); };
   function runOver(car, vmag) {
     const P = CBZ.player;
-    if (!car.player && !P.dead && !P.driving && car.playerHitCD <= 0) {
+    if (!car.player && !P.dead && !P.driving && !(car.playerHitCD > 0)) {
       const pdx = P.pos.x - car.pos.x, pdz = P.pos.z - car.pos.z;
-      if (pdx * pdx + pdz * pdz < 3.6) {
+      // YOU ARE HIT BY THE CAR'S SHAPE, like everybody else (carstrike.js:
+      // the footprint swept over this frame's travel; a 1.9 m circle round
+      // the car's centre missed a man at the nose of a 5 m stock car and hit
+      // one standing clear of its flank). The circle only without it.
+      const CSp = CBZ.carStrike;
+      const reachP = (vehicleDims(car).length || 4.4) * 0.5 + 2;
+      let pHit = null;
+      if (pdx * pdx + pdz * pdz < reachP * reachP) {
+        if (CSp) { _pBody.pos = P.pos; _pBody.radius = P.radius || 0.38; pHit = CSp.hit(car, _pBody, vmag); }
+        else if (pdx * pdx + pdz * pdz < 3.6) pHit = {};
+      }
+      if (pHit) {
+        if (CSp && CSp.audit) { CSp.audit.playerHits = (CSp.audit.playerHits || 0) + 1; CSp.audit.lastPlayerV = vmag; }
         car.playerHitCD = 0.85;
         // you get hit the SAME way you hit others: a fast car FLINGS you into a
         // ragdoll tumble (physics.js owns the airborne state); a slow one knocks
@@ -6368,26 +6415,36 @@
         if (car.npcDriver && CBZ.cityNpcOffense) CBZ.cityNpcOffense(car.npcDriver, 48, "vehicular-assault");
         if (CBZ.shake) CBZ.shake(0.4 + Math.min(1.2, vmag * 0.05));
         if (CBZ.doHitstop) CBZ.doHitstop(Math.min(0.1, 0.03 + vmag * 0.002));
-        car.v *= 0.7;
+        // the car pays the momentum a 75 kg body takes, not a fixed 30 %
+        if (CSp) CSp.cheapLoss(car, 75); else car.v *= 0.7;
       }
     }
     // one-per-call latch so a car that clips SEVERAL bodies this frame still
     // fires exactly ONE hit-stop / impact voice / "catch" (never stack N).
     let juiced = false;
     bodyGrids();
-    const near = bodiesNear(_pedBodyGrid, _pedCand, car.pos.x, car.pos.z, 6);   // near-miss ring: d2 < 34
+    /* THE HIT IS THE CAR'S SHAPE (city/carstrike.js). It was a 1.79 m circle
+       round the car's CENTRE: a saloon's nose is 2.2-2.3 m out, so the hit
+       fired with the person already half a metre inside the bonnet, and a
+       person by the front wheel was never inside the circle at all. Now the
+       footprint, swept by this frame's travel; the circle only without it. */
+    const CS = CBZ.carStrike;
+    const _reach = Math.max(6, (vehicleDims(car).length || 4.4) * 0.5 + 1.5);
+    const near = bodiesNear(_pedBodyGrid, _pedCand, car.pos.x, car.pos.z, _reach);   // near-miss ring: d2 < 34
     for (let ni = 0; ni < near.length; ni++) {
       const p = near[ni];
       if (p.dead || p.inCar) continue;
       const dx = p.pos.x - car.pos.x, dz = p.pos.z - car.pos.z;
       const _d2 = dx * dx + dz * dz;
+      if (_d2 > _reach * _reach) continue;
+      const hitInfo = CS ? CS.hit(car, p, vmag) : (_d2 < 3.2 ? {} : null);
       /* THE ONE THAT MISSED. A car doing 15 m/s that passes a metre from
          somebody is an event to that person even though nothing touched them —
          it is most of what makes driving through a crowd FEEL like something,
          and until now the only thing a pedestrian could notice was being hit.
          Costs nothing: this loop was already walking every ped, and the latch
          means one person can only be startled by you every few seconds. */
-      if (_d2 >= 3.2 && _d2 < 34 && car.player && vmag > 10 && !p.inCar &&
+      if (!hitInfo && _d2 < 34 && car.player && vmag > 10 && !p.inCar &&
           (p._nearMissT || 0) <= (CBZ.now || 0)) {
         p._nearMissT = (CBZ.now || 0) + 4200;
         p.fear = Math.min(10, (p.fear || 0) + 1.6);
@@ -6396,17 +6453,27 @@
         if (CBZ.cityPanicRaise) CBZ.cityPanicRaise(p.pos.x, p.pos.z, 0.35);
         if (CBZ.cityScare && CBZ.city) CBZ.cityScare(p, CBZ.city.playerActor, { bias: 0.14 });
       }
-      if (_d2 < 3.2) {
+      if (hitInfo) {
         if ((p._carHitUntil || 0) > (CBZ.now || 0)) continue;
         p._carHitUntil = (CBZ.now || 0) + 850;
         // Low-speed contact knocks a person over and makes them react. Only a
         // genuinely fast impact becomes a lethal run-over.
-        // `car`: gore.js puts the blood on the panels that hit him (bumper, bonnet, screen)
-        const imp = { fromX: car.pos.x, fromZ: car.pos.z, force: 8 + vmag * 0.35, fling: 4 + vmag * 0.3, car: car };
+        // `car`: gore.js puts the blood on the panels that hit him; with the
+        // strike (`strike`) it paints them where his body actually met them
+        const imp = { fromX: car.pos.x, fromZ: car.pos.z, force: 8 + vmag * 0.35, fling: 4 + vmag * 0.3, car: car, strike: !!CS };
+        if (hitInfo.x != null) imp.point = { x: hitInfo.x, y: hitInfo.y, z: hitInfo.z };
         if (!car.player) { imp.attacker = car.npcDriver || null; imp.byPlayer = false; }
         const lethal = vmag >= CRASH.pedLethal && !p.dead;   // a genuine kill THIS contact
-        if (vmag >= CRASH.pedLethal) CBZ.cityKillPed && CBZ.cityKillPed(p, imp, "run over");
-        else {
+        // THE BODY MEETS THE CAR: dead (the kill just ragdolled him) or alive,
+        // the strike engages his body with this car's real shape; false = no
+        // full body for him (far, over budget): the cheap paths below stand
+        let struck = false;
+        if (vmag >= CRASH.pedLethal) {
+          CBZ.cityKillPed && CBZ.cityKillPed(p, imp, "run over");
+          if (CS && p.dead) struck = CS.strike(p, car, hitInfo, vmag);
+          // no full strike for him (over the body budget): the bumper still wears him
+          if (CS && !struck && car.player && hitInfo.x != null && CBZ.goreCarStrike) CBZ.goreCarStrike(car, hitInfo.x, hitInfo.y + 0.1, hitInfo.z, car.pos.x - hitInfo.x, 0, car.pos.z - hitInfo.z, 0.8);
+        } else {
           const offender = car.player ? CBZ.city.playerActor : (car.npcDriver || null);
           p.ko = Math.max(p.ko || 0, 2.2 + vmag * 0.2);
           p.alarmed = Math.max(p.alarmed || 0, 6);
@@ -6415,7 +6482,8 @@
             p.mem = offender;
             if ((p.aggr || 0) >= 0.58) { p.rage = offender; p.state = "fight"; }
           }
-          if (CBZ.body) CBZ.body.hit(p, { fromX: car.pos.x, fromZ: car.pos.z, force: 5 + vmag * 0.45, knockdown: true });
+          if (CS) struck = CS.strike(p, car, hitInfo, vmag);
+          if (!struck && CBZ.body) CBZ.body.hit(p, { fromX: car.pos.x, fromZ: car.pos.z, force: 5 + vmag * 0.45, knockdown: true });
           if (car.player) {
             CBZ.cityAlarm && CBZ.cityAlarm(p.pos.x, p.pos.z, 14, 0.8, CBZ.city.playerActor);
             // only a genuinely HARD impact is the 2★ vehicular-assault; a light
@@ -6450,12 +6518,12 @@
             CBZ.sfx("ko", { dist: dist, volume: vol, pitch: pitch });
           }
         }
-        // one-frame car "catch": a lethal kill bleeds a touch more speed when
-        // juiced so the car visibly hooks on the body (today: *=0.9). Floored at
-        // *=0.82 so a determined player still plows THROUGH a crowd — we never
-        // strand the car, never zero v (that would change driving logic).
-        const lethalBleed = (CBZ.runoverJuice && car.player) ? 0.84 : 0.9;
-        car.v *= vmag >= CRASH.pedLethal ? lethalBleed : 0.72;
+        // THE CAR PAYS IN MOMENTUM, NOT A FIXED CUT. It used to lose 10-28 %
+        // of its speed per body (a person "hooked" it). A 70 kg body off a
+        // 1.4 t car is a few percent: the strike's contact impulses take it
+        // off the car as they happen; a body with no full strike takes the
+        // plastic-collision share here.
+        if (!struck) { if (CS) CS.cheapLoss(car); else car.v *= vmag >= CRASH.pedLethal ? 0.9 : 0.72; }
       }
     }
     // mow down the ambient instanced crowd (the far NPCs) — player car only so
@@ -6535,12 +6603,20 @@
     for (const c of CBZ.cityCops) {
       if (c.dead) continue;
       const dx = c.pos.x - car.pos.x, dz = c.pos.z - car.pos.z;
-      if (dx * dx + dz * dz < 3.2) {
+      if (dx * dx + dz * dz > _reach * _reach) continue;
+      const cHit = CS ? CS.hit(car, c, vmag) : (dx * dx + dz * dz < 3.2 ? {} : null);
+      if (cHit) {
         if ((c._carHitUntil || 0) > (CBZ.now || 0)) continue;
         c._carHitUntil = (CBZ.now || 0) + 850;
-        if (vmag >= CRASH.pedLethal) CBZ.cityHurtCop && CBZ.cityHurtCop(c, 90, { fromX: car.pos.x, fromZ: car.pos.z, force: 8 + vmag * 0.3, fling: 3 + vmag * 0.2, attacker: car.player ? null : (car.npcDriver || null), byPlayer: !!car.player });
-        else if (CBZ.body) CBZ.body.hit(c, { fromX: car.pos.x, fromZ: car.pos.z, force: 5 + vmag * 0.4, knockdown: true });
-        car.v *= 0.82;
+        let struck = false;
+        if (vmag >= CRASH.pedLethal) {
+          CBZ.cityHurtCop && CBZ.cityHurtCop(c, 90, { fromX: car.pos.x, fromZ: car.pos.z, force: 8 + vmag * 0.3, fling: 3 + vmag * 0.2, attacker: car.player ? null : (car.npcDriver || null), byPlayer: !!car.player });
+          if (CS && c.dead) struck = CS.strike(c, car, cHit, vmag);
+        } else {
+          if (CS) { c.ko = Math.max(c.ko || 0, 2 + vmag * 0.2); struck = CS.strike(c, car, cHit, vmag); }
+          if (!struck && CBZ.body) CBZ.body.hit(c, { fromX: car.pos.x, fromZ: car.pos.z, force: 5 + vmag * 0.4, knockdown: true });
+        }
+        if (!struck) { if (CS) CS.cheapLoss(car); else car.v *= 0.82; }
       }
     }
   }

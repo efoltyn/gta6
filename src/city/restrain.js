@@ -140,8 +140,9 @@
     if (ped.restraint.by === "player" && Pol && Pol.act && Pol.owns && CBZ.gov && CBZ.gov.holds) {
       try { const h = CBZ.gov.holds(); if (h && h.kind === "country" && Pol.owns(h.id)) Pol.act("detain", { target: ped, by: "self", keepBody: true }); } catch (e) {}
     }
-    // hands are tied: whatever they were holding hits the pavement
-    if (ped.armed && ped.weapon && CBZ.cityDropWeapon) {
+    // hands are tied: whatever they were holding hits the pavement, unless the
+    // officer bags it (city/custody.js: `seize` keeps it as evidence)
+    if (ped.armed && ped.weapon && CBZ.cityDropWeapon && !(opts && opts.seize)) {
       CBZ.cityDropWeapon(ped.pos.x, ped.pos.z, ped.weapon, 12, { y: ped.pos.y });
     }
     ped.armed = false; ped.weapon = null;
@@ -169,12 +170,18 @@
     return true;
   }
 
-  function escort(ped) {
+  // officer (optional): whose hand is on his arm. Default: yours. An officer
+  // walking him to a unit is city/custody.js's escort; the tick below watches
+  // that officer instead of you.
+  function escort(ped, officer) {
     if (st(ped) !== "cuffed") return false;
     const v = VB();
+    const by = officer && officer.pos && officer !== pa() && !officer.isPlayer ? officer : null;
+    const A = by || pa();
     // a hand on his arm, one on the ties: the march is a hold
-    if (!v || !pa() || !v.escort(pa(), ped, { far: true })) return false;
+    if (!v || !A || !v.escort(A, ped, { far: true })) return false;
     ped.restraint.state = "escorted";
+    ped.restraint.officer = by;
     I.refresh();
     return true;
   }
@@ -182,9 +189,22 @@
   function stand(ped) {
     if (st(ped) !== "escorted") return false;
     letGo(ped, "set");
-    ped.restraint.state = "cuffed";
+    ped.restraint.state = "cuffed"; ped.restraint.officer = null;
     ped.target.set(ped.pos.x, 0, ped.pos.z); ped.speed = 0;
     I.refresh();
+    return true;
+  }
+  // HANDED OVER: the state has him (city/custody.js), and he is leaving the
+  // world with the car that took him. The restraint record ends here without
+  // pulling him out of the seat.
+  function handOff(ped) {
+    if (!ped) return false;
+    const r = ped.restraint;
+    if (r && r.vehicle) dropCaptive(r.vehicle, ped);
+    ped.restraint = null;
+    untrack(ped);
+    letGo(ped, "set");
+    tie(ped, false);
     return true;
   }
   // full release: ties cut, free person again
@@ -233,11 +253,14 @@
     return !!(CBZ.boarding && CBZ.boarding.board && CBZ.CONFIG &&
               CBZ.CONFIG.COMPANION_BOARDING_V1 !== false);
   }
-  function seat(ped, car) {
+  // opts.legacy: the old hidden back seat (city/custody.js's last resort when
+  // the door arc cannot take him)
+  function seat(ped, car, opts) {
     if (!ped || !car || car.dead) return false;
     const s = st(ped);
     if (s !== "escorted" && s !== "cuffed") return false;
-    if (boardingUp()) {
+    if (ped.restraint) ped.restraint.officer = null;
+    if (boardingUp() && !(opts && opts.legacy)) {
       // a real seat, reached on foot. `role: "captive"` is what sends him to
       // the BACK — the seat picker puts a tied man behind the driver, which is
       // both where he goes and why the one-body cap could be lifted at all.
@@ -382,8 +405,12 @@
     letGo(ped, "set");
     tie(ped, false);
     if (wanted) {
+      // the desk takes custody: he is a detainee on the state's list from here
+      // (city/custody.js), walked through the door, off the board
+      if (CBZ.custody && CBZ.custody.book) { try { CBZ.custody.book(ped, { verb: "arrest", by: "player", status: "held", facility: CBZ.custody.facility("police") }); } catch (e) {} }
+      ped._custodyExit = true;
       ped.bounty = 0; ped.bountyTag = null;
-      if (CBZ.cityStationIntake) CBZ.cityStationIntake(ped);   // walked through the door, off the board
+      if (CBZ.cityStationIntake) CBZ.cityStationIntake(ped);
       CBZ.city && CBZ.city.addCash(pay);
       CBZ.city && CBZ.city.addRespect(4);
       if (CBZ.sfx) CBZ.sfx("coin");
@@ -476,11 +503,16 @@
 
       if (r.state === "escorted") {
         // CBZ.verbs.escort marches him (a hand on his arm, one on the ties).
-        // Driving off, dying, a teleport that snapped the march: he stays put, tied.
-        const far = Math.hypot(P.pos.x - ped.pos.x, P.pos.z - ped.pos.z) > TELEPORT_D;
-        if (P.dead || P.driving || far || !held(ped)) {
+        // Driving off, dying, a teleport that snapped the march: he stays put,
+        // tied. An officer's escort (city/custody.js) is watched on the
+        // officer, not on you.
+        const H = r.officer || null;
+        const lost = H
+          ? (H.dead || Math.hypot(H.pos.x - ped.pos.x, H.pos.z - ped.pos.z) > TELEPORT_D || (VB() && !held(ped)))
+          : (P.dead || P.driving || Math.hypot(P.pos.x - ped.pos.x, P.pos.z - ped.pos.z) > TELEPORT_D || !held(ped));
+        if (lost) {
           letGo(ped, "set");
-          r.state = "cuffed"; ped.target.set(ped.pos.x, 0, ped.pos.z);
+          r.state = "cuffed"; r.officer = null; ped.target.set(ped.pos.x, 0, ped.pos.z);
         } else ped.speed = 0;
       }
 
@@ -520,7 +552,7 @@
       }
       // a working officer clocks a stranger marching a CLEAN citizen in ties —
       // a wanted gangster in cuffs gets a nod, not a call. Once per collar.
-      if (!r._copSeen && r.state === "escorted" && !isWanted(ped) && copSuspectCD <= 0) {
+      if (!r._copSeen && r.state === "escorted" && r.by === "player" && !isWanted(ped) && copSuspectCD <= 0) {
         copSuspectCD = 2;
         const cops = CBZ.cityCops || [];
         for (let ci = 0; ci < cops.length; ci++) {
@@ -547,12 +579,15 @@
     for (const p of restrained) if (st(p) === "escorted") return p;
     return null;
   }
-  // your ride (owned or already boosted) parked within stuffing reach
+  // your ride (owned or already boosted) parked within stuffing reach, or the
+  // unit you called for him standing at the kerb (city/custody.js)
   function nearOwnCar(px, pz) {
     let best = null, bd = CAR_REACH * CAR_REACH;
     const cars = CBZ.cityCars || [];
     for (const c of cars) {
-      if (c.dead || c.player || c.npcDriver || !(c.owned || c.stolen)) continue;
+      if (c.dead || c.player) continue;
+      if (c._custodyUnit) { if (c.ai) continue; }
+      else if (c.npcDriver || !(c.owned || c.stolen)) continue;
       const dd = (c.pos.x - px) * (c.pos.x - px) + (c.pos.z - pz) * (c.pos.z - pz);
       if (dd < bd) { bd = dd; best = c; }
     }
@@ -610,27 +645,43 @@
   });
 
   // ---- CUFFED: march / halt / stuff / cut loose ----
+  // a man officers are taking in (city/custody.js) is theirs, not yours:
+  // your own collar keeps every verb, theirs offers none of them
+  function stateHas(p) { const j = CBZ.custody && CBZ.custody.jobOf ? CBZ.custody.jobOf(p) : null; return !!(j && !j.opts.handsOff); }
   I.register("ped", {
     id: "rs-march", slot: "e", prio: 85,
-    canShow: (p, ctx) => st(p) === "cuffed" && !ctx.driving,
+    canShow: (p, ctx) => st(p) === "cuffed" && !ctx.driving && !stateHas(p),
     label: "March",
     onSelect: (p) => escort(p),
   });
   I.register("ped", {
     id: "rs-stand", slot: "e", prio: 85,
-    canShow: (p) => st(p) === "escorted",
+    canShow: (p) => st(p) === "escorted" && !stateHas(p),
     label: "Halt",
     onSelect: (p) => stand(p),
   });
   I.register("ped", {
     id: "rs-stuff", slot: "i", prio: 85, bad: true,
-    canShow: (p, ctx) => (st(p) === "escorted" || st(p) === "cuffed") && !ctx.driving && !!nearOwnCar(ctx.pos.x, ctx.pos.z),
+    canShow: (p, ctx) => (st(p) === "escorted" || st(p) === "cuffed") && !ctx.driving && !stateHas(p) && !!nearOwnCar(ctx.pos.x, ctx.pos.z),
     label: "Stuff in",
     onSelect: (p, ctx) => { const car = nearOwnCar(ctx.pos.x, ctx.pos.z); if (car) seat(p, car); },
   });
+  // CALL IT IN: a unit drives up for the man you have cuffed; you put him in
+  // the back (Stuff in) and it takes him away (city/custody.js)
+  I.register("ped", {
+    id: "rs-call-unit", slot: "j", prio: 84,
+    canShow: (p, ctx) => (st(p) === "cuffed" || st(p) === "escorted") && p.restraint.by === "player" && !ctx.driving &&
+      !!(CBZ.custody && CBZ.custody.take) && !CBZ.custody.jobOf(p),
+    label: "Call a unit",
+    onSelect: (p) => {
+      const pres = !!(CBZ.presidency && CBZ.presidency.seat && CBZ.presidency.seat());
+      CBZ.custody.take(p, { by: pres ? "ss" : "police", verb: pres ? "detain" : "arrest", handsOff: true, owner: "player" });
+      I.refresh();
+    },
+  });
   I.register("ped", {
     id: "rs-cut-loose", slot: "l", prio: 85,
-    canShow: (p) => st(p) === "cuffed" || st(p) === "escorted",
+    canShow: (p) => (st(p) === "cuffed" || st(p) === "escorted") && !stateHas(p),
     label: "Cut loose",
     onSelect: (p) => release(p),
   });
@@ -696,7 +747,7 @@
   // ---- exports: the net layer calls these, same as the keys do --------------
   CBZ.cityRestrain = {
     stateOf: st, isWanted, bountyFor,
-    cuff, grapple, escort, stand, release, seat, unseat, turnIn, slam, shove,
+    cuff, grapple, escort, stand, release, seat, unseat, turnIn, slam, shove, handOff,
     releaseAll,
     // the player side of the same verbs (city/wanted.js's arrest arc)
     cuffPlayer, playerCuffed, posePlayerCuffs,

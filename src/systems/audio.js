@@ -1546,6 +1546,69 @@
     return true;
   };
 
+  /* ---- A DOG (city/dogs.js) -------------------------------------------------
+     CBZ.dogVoice(kind, x, z, size): "bark" | "growl" | "yelp" | "whine", at a
+     place in the world. Synthesised (the repo carries no dog recordings): a
+     bark is a falling saw through a mouth formant over a burst of breath; a
+     growl is a low saw shaken by a ~28 Hz flutter; a yelp and a whine are
+     voiced glides. `size` is the dog's scale (1 = a shepherd): small dogs
+     speak higher. Distance falls off like every other world sound and a
+     voice past earshot is never made. */
+  const _dogLast = {};
+  CBZ.dogVoice = function (kind, x, z, size) {
+    if (!ctx || !sfxBus || ctx.state !== "running") return false;
+    const p = CBZ.player && CBZ.player.pos;
+    if (!p || !isFinite(x) || !isFinite(z)) return false;
+    const dist = Math.hypot(x - p.x, z - p.z);
+    if (dist > 120) return false;
+    const nowS = performance.now() * 0.001;
+    const gap = kind === "growl" ? 0.5 : 0.09;
+    if (_dogLast[kind] && nowS - _dogLast[kind] < gap) return false;
+    _dogLast[kind] = nowS;
+    const k = Math.max(0.6, Math.min(1.4, +size || 1));
+    const att = (dist <= 12 ? 1 : Math.max(0.1, 1 - (dist - 12) / 110)) * 0.5;
+    const t = ctx.currentTime + 0.005;
+    try {
+      const out = ctx.createGain(); out.gain.value = att; out.connect(sfxBus);
+      if (kind === "bark") {
+        const f0 = (430 + Math.random() * 90) / k;
+        const o = ctx.createOscillator(); o.type = "sawtooth";
+        o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f0 * 0.55, t + 0.13);
+        const bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.Q.value = 1.6; bp.frequency.setValueAtTime(1100 / k, t);
+        bp.frequency.exponentialRampToValueAtTime(650 / k, t + 0.14);
+        const gn = ctx.createGain();
+        gn.gain.setValueAtTime(0.0001, t); gn.gain.exponentialRampToValueAtTime(0.55, t + 0.012); gn.gain.exponentialRampToValueAtTime(0.0001, t + 0.17);
+        o.connect(bp); bp.connect(gn); gn.connect(out); o.start(t); o.stop(t + 0.2);
+        const n = nsrc(t, 0.1), nb = ctx.createBiquadFilter(); nb.type = "bandpass"; nb.frequency.value = 1600 / k; nb.Q.value = 0.8;
+        const ng = ctx.createGain(); ng.gain.setValueAtTime(0.0001, t); ng.gain.exponentialRampToValueAtTime(0.25, t + 0.01); ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
+        n.connect(nb); nb.connect(ng); ng.connect(out);
+      } else if (kind === "growl") {
+        const dur = 0.8 + Math.random() * 0.4;
+        const o = ctx.createOscillator(); o.type = "sawtooth"; o.frequency.setValueAtTime(82 / k, t);
+        o.frequency.linearRampToValueAtTime(96 / k, t + dur * 0.4); o.frequency.linearRampToValueAtTime(78 / k, t + dur);
+        const lfo = ctx.createOscillator(); lfo.frequency.value = 26 + Math.random() * 6;
+        const lg = ctx.createGain(); lg.gain.value = 0.18;
+        const am = ctx.createGain(); am.gain.value = 0.22;
+        lfo.connect(lg); lg.connect(am.gain);
+        const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 700 / k; lp.Q.value = 2;
+        const gn = ctx.createGain();
+        gn.gain.setValueAtTime(0.0001, t); gn.gain.linearRampToValueAtTime(1, t + 0.12); gn.gain.linearRampToValueAtTime(0.8, t + dur * 0.7); gn.gain.linearRampToValueAtTime(0.0001, t + dur);
+        o.connect(am); am.connect(lp); lp.connect(gn); gn.connect(out);
+        o.start(t); o.stop(t + dur + 0.05); lfo.start(t); lfo.stop(t + dur + 0.05);
+      } else {
+        const yelp = kind === "yelp", dur = yelp ? 0.2 : 0.55;
+        const f0 = (yelp ? 950 : 680) / k;
+        const o = ctx.createOscillator(); o.type = yelp ? "triangle" : "sine";
+        o.frequency.setValueAtTime(f0, t); o.frequency.linearRampToValueAtTime(f0 * (yelp ? 1.45 : 1.25), t + dur * 0.35);
+        o.frequency.exponentialRampToValueAtTime(f0 * (yelp ? 0.6 : 0.9), t + dur);
+        const gn = ctx.createGain();
+        gn.gain.setValueAtTime(0.0001, t); gn.gain.exponentialRampToValueAtTime(yelp ? 0.45 : 0.16, t + 0.02); gn.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        o.connect(gn); gn.connect(out); o.start(t); o.stop(t + dur + 0.05);
+      }
+    } catch (e) { return false; }
+    return true;
+  };
+
   /* ---- THE HELD BREATH (2026-08-15) ---------------------------------------
      nuclearShock's duck is an impulse that schedules its own recovery; this
      is the other envelope the same pressure stage can make — a duck that

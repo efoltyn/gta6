@@ -534,6 +534,16 @@
     return { x: Math.max(8, xr0 - bw), y: Math.max(ceil, floor - bh), w: bw, h: bh, clear: false };
   }
   CBZ.prisonDockSpot = dockSpot;
+  // a size measured before Fredoka arrived is the fallback font's: once the
+  // webfont lands every pill measures again, so a docked column's fixed width
+  // is never narrower than its words
+  try {
+    if (document.fonts && document.fonts.addEventListener) {
+      document.fonts.addEventListener("loadingdone", function () {
+        pills.forEach(function (p) { p._nat = null; if (!p.label) p.wrap.style.width = ""; });
+      });
+    }
+  } catch (e) { /* no FontFaceSet: sizes stay as measured */ }
 
   // a pill's own size, measured once per build (the sig rebuilds it on change)
   function natSize(p, cls) {

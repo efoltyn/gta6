@@ -3356,7 +3356,6 @@
      suspension and the projectiles read. No second ground system.
      ==================================================================== */
   const ESTATE_GROUND = [];
-  let _egReg = false;
   function estateGroundAt(x, z) {
     let best = 0;
     for (let i = 0; i < ESTATE_GROUND.length; i++) {
@@ -3379,9 +3378,13 @@
     }
     return best;
   }
+  // once per world build: cityWorldGeo drops every provider a builder
+  // registered (a one-shot latch here lost the estates' ground from the
+  // second world build on — a new game, a rebuilt world)
   function registerEstateGround() {
-    if (_egReg || !CBZ.registerCityGroundHeight) return;
-    _egReg = true;
+    if (!CBZ.registerCityGroundHeight) return;
+    const L = CBZ._cityGroundHeightProviders || [];
+    for (let i = 0; i < L.length; i++) if (L[i] && L[i].fn === estateGroundAt) return;
     CBZ.registerCityGroundHeight(estateGroundAt, { owner: "govcomplex-estates" });
   }
   CBZ.estateGroundAt = estateGroundAt;

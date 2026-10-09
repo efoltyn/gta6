@@ -41,9 +41,16 @@
   // Real, reachable landmasses publish their analytic ground here. This keeps
   // elevation tied to actual map geometry instead of a decorative backdrop:
   // player physics, wildlife, projectiles and aircraft all read the same floor.
+  /* TWO KINDS OF PROVIDER. One registered by a landmass builder belongs to
+     that world build (cityWorldGeo starts every build by dropping them, and
+     the builder registers again). One registered when its file LOADED (the
+     Bullring's banking and stands, the highway superelevation) belongs to the
+     page: it reads its own numbers, not a build's, so it is kept. It used to
+     be dropped too — the first world build wiped it and every body on the
+     banking stood at the infield grade, sunk to the chest in the asphalt. */
   CBZ.registerCityGroundHeight = function (fn, meta) {
     if (typeof fn !== "function") return null;
-    const rec = { fn, meta: meta || null };
+    const rec = { fn, meta: meta || null, build: !!CBZ._worldGeoRan };
     CBZ._cityGroundHeightProviders.push(rec);
     return rec;
   };
@@ -522,6 +529,7 @@
   //  register their own hazards (island_airport's airside, the military
   //  runway); every scatter/relocation path tests citySpawnBlocked.
   // ============================================================
+  CBZ.noSpawnTests = CBZ.noSpawnTests || Object.create(null);
   CBZ.registerNoSpawnZone = function (city, zone) {
     if (!city) city = CBZ.city && CBZ.city.arena;
     if (!city || !zone) return zone;
@@ -533,18 +541,36 @@
   // road centreline segment): sidewalk draws sit ~6.4u off a 16u road's
   // centre, so the 5.5u half-width bars the lanes without touching them.
   const _blockNear = [];
-  CBZ.citySpawnBlocked = function (x, z, pad, civilian) {
+  /* the declared keep-outs alone (no road lanes): "is this ground closed to
+     people who do not belong here" — the spawners below, and the street's
+     own approaches (a dealer's pitch is a street thing, not a racetrack one) */
+  CBZ.cityKeepOutAt = function (x, z, pad, civilian) {
     const A = CBZ.city && CBZ.city.arena; if (!A) return false;
     pad = pad || 0;
     const zs = A.noSpawn;
     if (zs) for (let i = 0; i < zs.length; i++) {
       const s = zs[i];
       if (s.civ && !civilian) continue;
+      // a SHAPED zone: its rect is the broadphase, a named test (data, so the
+      // zone survives the JSON replay) says what inside it is closed. Unknown
+      // test = the rect itself.
+      if (s.test) {
+        if (x < s.minX - pad || x > s.maxX + pad || z < s.minZ - pad || z > s.maxZ + pad) continue;
+        const f = CBZ.noSpawnTests && CBZ.noSpawnTests[s.test];
+        if (!f || f(x, z, pad)) return true;
+        continue;
+      }
       if (s.r != null) {
         const dx = x - s.cx, dz = z - s.cz, rr = s.r + pad;
         if (dx * dx + dz * dz <= rr * rr) return true;
       } else if (x >= s.minX - pad && x <= s.maxX + pad && z >= s.minZ - pad && z <= s.maxZ + pad) return true;
     }
+    return false;
+  };
+  CBZ.citySpawnBlocked = function (x, z, pad, civilian) {
+    const A = CBZ.city && CBZ.city.arena; if (!A) return false;
+    pad = pad || 0;
+    if (CBZ.cityKeepOutAt(x, z, pad, civilian)) return true;
     // Only the roads that can reach this point: roadrules.js's bucket grid
     // (the same one roadSegmentAt uses) instead of every road in the world
     // per call — this runs per scatter draw, per crowd relocation, per stroll
@@ -983,8 +1009,14 @@
     city.regions = city.regions || [];
     CBZ._biomeBlendSpecs.length = 0;
     city.biomeBlends = CBZ._biomeBlendSpecs;
-    CBZ._cityGroundHeightProviders.length = 0;
-    CBZ.cityWorkAnchorsReset();        // anchors are rebuilt by the biome builders
+    {
+      const L = CBZ._cityGroundHeightProviders;
+      let k = 0;
+      for (let i = 0; i < L.length; i++) if (L[i] && !L[i].build) L[k++] = L[i];
+      L.length = k;
+    }
+    CBZ._worldGeoRan = true;
+    CBZ.cityWorkAnchorsReset();       // anchors are rebuilt by the biome builders
     // World geometry is assembled by several modules. Start every pass with
     // one shared, idempotent occupancy view seeded from the already-built
     // mainland/annex colliders, so later biomes cannot unknowingly decorate

@@ -1505,18 +1505,20 @@
   CBZ.boardingChooseSeat = choosePlayerSeat;
 
   // ---- THE VERB ON THE DOOR ------------------------------------------------
-  // One pinned label over the door you are at: "Drive", "Ride" / "Sit" with
-  // the seat as the sub line, "Pull out" when somebody is at the wheel. Its
-  // chip says F, the one get-in key; the press is city/interactions.js's F
+  // One pinned label over the door you are at, in the words a person uses
+  // getting into a car: "Drive", "Front seat", "Back seat", "Ride in back"
+  // (somebody else drives), "Pull out" when somebody is at the wheel. Owner
+  // on iPad 2026-10-09: the old "Sit" + a "back" sub line read oddly and
+  // drew on top of itself (the pill fix is css/hud.css). One label, no sub.
+  // Its chip says F, the one get-in key; the press is city/interactions.js's F
   // (the looked-at car's ride verb, else the router), and the touch tap on
   // the car. All of them land in cityEnterVehicle, which asks
   // choosePlayerSeat the same question.
   const _dw = { x: 0, y: 0, z: 0 };
-  function seatWords(seat) {
-    if (!seat) return "";
-    if (seat.row === 0) return seat.side ? "front" : "front, middle";
-    const where = seat.row === 1 ? "back" : "third row";
-    return seat.side ? where : where + ", middle";
+  function seatLabel(seat, ride) {
+    const row = seat ? seat.row | 0 : 1;
+    if (ride) return row === 0 ? "Ride up front" : "Ride in back";
+    return row === 0 ? "Front seat" : row === 1 ? "Back seat" : "Third row";
   }
   let doorCar = null;
   CBZ.cityDoorEnter = function () {
@@ -1554,15 +1556,9 @@
       if (dd < d2) { d2 = dd; car = c; pick = pk; _dw.x = _dwT.x; _dw.y = _dwT.y; _dw.z = _dwT.z; }
     }
     if (!car) return;
-    let verb, sub = "";
-    if (pick.mode === "drive") {
-      verb = jackable(car) ? "Pull out" : "Drive";
-    } else {
-      verb = pick.mode === "ride" ? "Ride" : "Sit";
-      sub = seatWords(pick.seat);
-    }
+    const verb = pick.mode === "drive" ? (jackable(car) ? "Pull out" : "Drive") : seatLabel(pick.seat, pick.mode === "ride");
     doorCar = car;
-    CBZ.prisonPrompt("car-door", "@cityDoorEnter", verb, { at: _dw, sub: sub, d2: d2, key: "F", city: true });
+    CBZ.prisonPrompt("car-door", "@cityDoorEnter", verb, { at: _dw, d2: d2, key: "F", city: true });
   });
   // somebody is at the wheel (or aboard) who has to be got out first
   function jackable(car) {

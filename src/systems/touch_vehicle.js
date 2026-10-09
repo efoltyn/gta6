@@ -31,15 +31,16 @@
                        "control" on purpose: it never collides with the
                        on-foot sprint logic that owns "shift")
               FIRE   = tap   → CBZ.cityAircraftFireMissile() (armed craft)
-     WING     stick = a REAL joystick now (FLIGHT_CONTROLS_V2): left/right =
-              roll (a/d), up/down = PITCH (w/s — the stick writes WASD and the
-              flight model maps W/S to pitch), so the left thumb finally flies
-              the nose. Throttle is the right-thumb hold-pair, reusing the heli's
-              Space/Ctrl power grammar:
+     WING     stick = the joystick, ANALOG (CBZ.touchStickAxis, with a dead
+              zone and a curve in playeraircraft.js): sideways = bank (the
+              plane turns the way it banks), forward = nose down, back = nose
+              up. It used to fly through the WASD switches, full bank or none.
+              Throttle is the right-thumb hold-pair, the heli's power grammar:
               THR+   = hold  → CBZ.keys[" "]        (throttle up)
               THR−   = hold  → CBZ.keys["control"]  (throttle down / wheel brakes)
-              FIRE as heli. (QE rudder is a desktop fine-tune; touch turns
-              by banking, the natural mobile-flight feel — no extra pills.)
+              TURN L / TURN R = hold → CBZ.keys["q"] / ["e"] (rudder, and the
+                       nosewheel on the runway; the heli's pedal pills)
+              FIRE as heli.
 
      ARMOR    the tank / armoured truck (city/militaryvehicles.js). It sets
               P.driving but NOT P._vehicle — it keeps a module-local record —
@@ -411,6 +412,7 @@
         FIRE_BTN + VIEW_BTN;
     } else if (next === "wing") {
       html = pill("tvThrUp", "THR +", "tv-big tv-go") + pill("tvThrDn", "THR −", "tv-big") +
+        '<div class="tv-yaw">' + pill("tvYawL", "TURN L", "") + pill("tvYawR", "TURN R", "") + "</div>" +
         FIRE_BTN + VIEW_BTN;
     } else if (next === "chute") {
       // Falling out of an aircraft is a CONTEXT, not a vehicle, but it is the
@@ -1000,7 +1002,7 @@
     V("bomb-camera", { ctx: "b2", key: "C hold", skip: "a cinematic, not a control; [C] keeps it" });
     V("air-homing", { ctx: "air", key: "H", skip: "homing is the default; the dumb-fire toggle stays on [H]" });
     V("heli-pedals", { ctx: "heli", key: "Q/E", hook: null }); W("heli-pedals", "#tvYawL/#tvYawR");
-    V("wing-rudder", { ctx: "wing", key: "Q/E", skip: "bank covers the turn; two more pills were clutter" });
+    V("wing-rudder", { ctx: "wing", key: "Q/E", hook: null }); W("wing-rudder", "#tvYawL/#tvYawR");
     V("armor-turret", { ctx: "armor", key: "mouse", skip: "the turret already tracks cam.yaw, and on touch cam.yaw IS the look drag, aiming the gun is aiming the camera, so a control would be a duplicate axis" });
   }
 })();
