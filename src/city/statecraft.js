@@ -984,6 +984,10 @@
     const S = st();
     if (!S.curfewUntil || day() >= S.curfewUntil) return;
     const h = holds(); if (!h) return;
+    // a police force that has stopped believing in the President stops
+    // enforcing his curfew (city/politics.js: the police's loyalty)
+    const Pol = CBZ.politics;
+    if (Pol && Pol.owns && Pol.owns(h.id) && Pol.obeys && !Pol.obeys("police")) return;
     const P = CBZ.player; if (!P || P.dead || !P.pos) return;
     const hr = CBZ.citySunHour ? CBZ.citySunHour() : 12;
     if (!(hr >= CURFEW_LO || hr < CURFEW_HI)) { S.curfewNight = null; return; }

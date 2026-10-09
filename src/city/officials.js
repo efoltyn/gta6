@@ -421,7 +421,7 @@
       const day = CBZ.worldDay ? CBZ.worldDay() : 0;
       rec.vacuum = day;
       ensureState().vacantSince[rec.id] = day;
-      rec.approval = Math.max(0, (rec.approval || 0) - 15);
+      if (CBZ.approvalSet) CBZ.approvalSet(rec, Math.max(0, (rec.approval || 0) - 15));
       if (CBZ.cityFeed) CBZ.cityFeed("POWER VACUUM in " + rec.name, "#ff6a5e");
     }
 

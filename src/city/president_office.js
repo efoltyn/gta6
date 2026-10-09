@@ -1940,7 +1940,8 @@
         onSelect: function () { govern(); },
       }, {
         id: "presoffice-send-back", prio: 10, campaignSafe: true,
-        label: "Send back",
+        // a bill's "no" is a Veto (city/politics.js puts noVerb on its folders)
+        label: function () { return (READ.f && READ.f.m && READ.f.m.noVerb) || "Send back"; },
         canShow: function () { return !!READ.f && READ.f.state === "open"; },
         onSelect: function () { returnFolder(); },
       }],

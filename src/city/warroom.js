@@ -127,6 +127,15 @@
   }
   function warheads(id) { return count(id || nation(), "warhead"); }
   function shock(id, n) { if (CBZ.approvalShock && id) { try { CBZ.approvalShock(id, n); } catch (e) {} } }
+  // THE ACT (city/politics.js): what the country feels about a war, a
+  // strike, a bomb on its own soil is one row of the act table. No act
+  // table loaded (a headless harness), the old flat shock stands in.
+  function polAct(kind, o, fallback) {
+    const Po = CBZ.politics;
+    if (Po && Po.act && Po.owns && Po.owns(nation())) { try { Po.act(kind, o || {}); return true; } catch (e) {} }
+    if (fallback) fallback();
+    return false;
+  }
   function scandal(n) {
     const w = CBZ.cityWorldEnsure ? CBZ.cityWorldEnsure() : null;
     const p = (w && w.politics) || g.cityPolitics;
@@ -556,7 +565,13 @@
     // its leader goes underground the moment the order is given
     if (foe) { goToWar(us, foe); alert(foe, 3); }
     if (tgt.bunker && tgt.bunker.owner) alert(tgt.bunker.owner, 3);
-    if (tgt.nation === us && byPlayer) { shock(us, pl.kind === "nuke" ? -40 : -12); scandal(pl.kind === "nuke" ? 40 : 15); }
+    // the country's verdict: a strike abroad is a strike on that country; a
+    // strike on your own soil is the act everyone hates (a nuke is priced
+    // when it goes off, onNuke below)
+    if (byPlayer && pl.kind !== "nuke") {
+      if (tgt.nation === us) polAct("strike-own", { by: "self" }, function () { shock(us, -12); scandal(15); });
+      else if (foe) polAct("strike", { target: foe, by: "army" });
+    }
     return { ok: true, why: "", line: res.line };
   }
 
@@ -586,8 +601,13 @@
     const gt = canWar(opts);
     if (!gt.ok) return gt;
     const us = nation();
-    if (!goToWar(us, gt.foe)) return { ok: false, why: "The order did not go through." };
-    shock(us, 3);                      // the flag goes up; for a week, the country rallies
+    // CONGRESS AUTHORISES IT (city/politics.js gate): a republic's war needs the votes
+    const Po = CBZ.politics;
+    if (Po && Po.gate) { const v = Po.gate("war"); if (!v.ok) return v; }
+    // the rally polwar/relations shock on their own is the act's to price
+    const went = Po && Po.during && Po.owns && Po.owns(us) ? Po.during(function () { return goToWar(us, gt.foe); }) : goToWar(us, gt.foe);
+    if (!went) return { ok: false, why: "The order did not go through." };
+    polAct("war", { target: gt.foe, by: "self" }, function () { shock(us, 3); });   // the flag goes up
     return { ok: true, why: "", line: "Then it's war with " + gt.name + "." };
   }
   function canPeace() {
@@ -604,6 +624,7 @@
     const r = PW().makePeace ? PW().makePeace(us) : null;
     if (!r) return { ok: false, why: "They will not take the call." };
     RAID.t = null;
+    polAct("peace", { target: gt.foe, by: "self" });
     return { ok: true, why: "", line: r.loser === us ? "They'll take the terms. It will cost us." : nameOf(gt.foe) + " has signed. It's over." };
   }
 
@@ -1008,7 +1029,8 @@
     if (attacker && where && attacker !== where && PW() && PW().nuclearStrike) {
       try { r = PW().nuclearStrike(where, attacker); } catch (e) { r = null; }
     }
-    if (attacker && where === attacker && attacker === nation()) { shock(attacker, -40); scandal(40); }
+    if (attacker && where === attacker && attacker === nation()) polAct("nuke-own", { by: "self" }, function () { shock(attacker, -40); scandal(40); });
+    else if (attacker && where && attacker === nation() && p && p.byPlayer) polAct("nuke", { target: where, by: "army" });
     // A COUNTRY WITH ITS OWN WARHEADS AND A BOMBER ANSWERS.
     const us = nation();
     if (r && r.canAnswer && attacker === us && !RET && carriersOwned(where, "nuke") > 0) {

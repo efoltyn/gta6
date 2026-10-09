@@ -372,6 +372,9 @@
     if (!t || IGNORE.test(t)) return false;
     N.events++;
     const loc = inLoc(d);
+    // ---- THE ACT RECORD (city/politics.js): one rich event per political
+    // act, phrased here off its fields (verb, title, name, agent, place, count)
+    if (t === "act") return actStory(d);
     // ---- the war room's own words (city/warroom.js): purchases, deliveries,
     // bunkers and a leader's death carry an exact `text`. Read BEFORE the
     // nuke rule, or "warhead-bought" would air as a nuclear blast.
@@ -482,6 +485,56 @@
       return push(own, { kind: d.breaking ? "breaking" : "story", cat: d.cat || "", key: "ev:" + t + ":" + own, hold: 60 });
     }
     return false;
+  }
+
+  /* THE ACT RECORD -> a headline. politics.js sends what happened, not
+     words: the verb, who it was done to (title, name, ideology, institution,
+     gang, party), who did it, where, how many times this week. */
+  function ordinalWord(n) { return ["", "First", "Second", "Third", "Fourth", "Fifth"][n] || null; }
+  function actStory(d) {
+    if (!d || d.news === false) return false;
+    const T = d.target || {};
+    const opts = function (look, cat) { return { kind: d.breaking ? "breaking" : "story", cat: d.cat || cat || "POLITICS", look: look || "politics", key: "act:" + (d.verb || "") + ":" + (T.name || d.headline || "") + ":" + (d.count || 1) + ":" + (d.day || ""), hold: 120 }; };
+    if (d.headline) return push(d.headline, Object.assign(opts(/leak|investig|exposed/.test(d.verb || "") ? "politics" : /riot|militia|walkout|defy/.test(d.verb || "") ? "police" : "politics", d.cat), { sub: d.sub || "" }));
+    const who = [T.title, T.name].filter(Boolean).join(" ").trim();
+    const adj = T.adj && !T.mainstream ? T.adj + " " : "";
+    const at = d.place ? " in " + d.place : "";
+    const plural = T.plural || T.name || "";
+    const byWhom = d.agent === "the President" ? "The President did it himself"
+      : d.agent === "on the President's order" ? "On the President's order"
+      : d.agent && d.by !== "unknown" && d.by !== "congress" ? "By " + d.agent + ", on the President's order" : "";
+    let h = null, sub = "", look = "politics", cat = "POLITICS";
+    const small = !T.title && (T.notable == null || T.notable < 0.3);
+    switch (d.verb) {
+      case "kill":
+        look = "police"; cat = small ? "CRIME" : "NATION";
+        if (small && (d.count || 1) > 1) h = (ordinalWord(d.count) ? ordinalWord(d.count) + " killing" : d.count + " killings") + (at || " in the city") + " this week";
+        else h = (who || cap(T.noun || "man")) + " killed" + (small ? at : "");
+        sub = byWhom ? byWhom + (small ? "" : at) : (at ? "Killed" + at : "");
+        break;
+      case "arrest": case "detain":
+        look = "police"; cat = small ? "CRIME" : "POLITICS";
+        h = (who || cap(T.noun || "man")) + (d.verb === "arrest" ? " arrested" : " detained") + (small ? at : "");
+        sub = byWhom; break;
+      case "fire": h = (who || T.name || "Official") + (d.how === "resigns" ? " resigns" : " fired"); break;
+      case "appoint": h = "President appoints " + adj + (T.name || "a newcomer") + (T.title ? " as " + T.title : ""); break;
+      case "pardon": h = "President pardons " + (T.title ? T.title.toLowerCase() + " " : "") + (T.name || "a prisoner"); cat = "JUSTICE"; break;
+      case "ban": h = "President bans the " + plural; break;
+      case "deploy": h = "Army deployed against the " + plural; look = "war"; cat = "NATION"; break;
+      case "raisepay": h = T.instName || T.kind === "institution" ? cap(T.instName || T.name) + " gets a pay rise" : T.kind === "person" ? (who || "Official") + " gets a raise" : "President sends money to " + (T.name || "allies"); break;
+      case "cutpay": h = T.instName || T.kind === "institution" ? cap(T.instName || T.name) + " pay cut" : T.kind === "person" ? (who || "Official") + " has pay cut" : "President cuts off " + (T.name || "allies"); break;
+      case "praise": h = "President praises " + (who || plural); break;
+      case "insult": h = "President attacks " + (who || plural); break;
+      case "threaten": h = "President threatens " + (who || plural); break;
+      case "sign": h = "President signs the " + (T.name || "bill"); break;
+      case "veto": h = "President vetoes the " + (T.name || "bill"); break;
+      case "override": h = "Congress overrides the veto on the " + (T.name || "bill"); sub = d.yes != null ? d.yes + " to " + d.no : ""; break;
+      default:
+        if (!who || !d.past) return false;
+        h = who + " " + d.past;
+    }
+    if (!h || /undefined|null/.test(h)) return false;
+    return push(h, Object.assign(opts(look, cat), { sub: sub }));
   }
 
   /* phone news (the City Desk) -> a headline: the first sentence, the rest
