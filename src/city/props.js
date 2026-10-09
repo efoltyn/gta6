@@ -1002,117 +1002,11 @@
   CBZ.kerbKit = kerbKit;
   CBZ.kerbBake = function () { return new Bake(); };
 
-  // ============================================================
-  //  FAKE-GLOW FRESNEL SHELL (Stemkoski Shader-Glow / ektogamat fake-glow-
-  //  material technique, hand-ported to a plain ShaderMaterial string — no
-  //  post-processing bloom pass, just a view-dependent rim on a slightly
-  //  bigger shell around the real bulb). WHY: with hundreds of bulbs city-
-  //  wide, a real light source per bulb is a non-starter (see the POOLED
-  //  POINT-LIGHT section below for why), and a flat emissive box alone reads
-  //  as a dim rectangle at any distance — the Fresnel rim gives every bulb a
-  //  convincing halo for the cost of one extra tiny shell tri-strip, additive-
-  //  blended so overlapping shells only ever brighten, never occlude.
-  //
-  //  ONE InstancedMesh per colour (bulbs only ever need a handful of colours:
-  //  warm streetlamp white + red/yellow/green signals), so citywide bulb
-  //  count adds ZERO new draw calls beyond these few pooled meshes — matches
-  //  this file's existing geo()/smat() sharing discipline, just extended to
-  //  ShaderMaterial + InstancedMesh for this one repeated visual.
-  //
-  //  Per-instance "on/off" without touching instance COUNT: an instanced
-  //  aGlow float attribute (0=dark/broken, 1=lit) lets a shot-out streetlamp
-  //  or a signal's off-phase colour go dark without reshuffling indices —
-  //  same idiom as systems/dustfx.js's per-vertex aFade attribute.
-  // ============================================================
-  const glowShellGeo = geo("glowShell", () => new THREE.SphereGeometry(1, 8, 6));
-  function makeGlowShellMat(colorHex) {
-    if (!THREE.ShaderMaterial) return null;    // minimal/headless THREE stub — caller skips the shell entirely
-    const m = new THREE.ShaderMaterial({
-      uniforms: { uColor: { value: new THREE.Color(colorHex) } },
-      transparent: true, depthWrite: false, side: THREE.DoubleSide,
-      blending: THREE.AdditiveBlending,
-      vertexShader: [
-        "attribute float aGlow;",
-        "varying float vGlow;",
-        "varying vec3 vNormal;",
-        "varying vec3 vViewDir;",
-        "void main() {",
-        "  vGlow = aGlow;",
-        "  vec4 mv = modelViewMatrix * instanceMatrix * vec4(position, 1.0);",
-        "  vNormal = normalize(normalMatrix * mat3(instanceMatrix) * normal);",
-        "  vViewDir = normalize(-mv.xyz);",
-        "  gl_Position = projectionMatrix * mv;",
-        "}",
-      ].join("\n"),
-      fragmentShader: [
-        "precision mediump float;",
-        "uniform vec3 uColor;",
-        "varying float vGlow;",
-        "varying vec3 vNormal;",
-        "varying vec3 vViewDir;",
-        "void main() {",
-        // classic Fresnel rim: glancing angles (normal perpendicular to the
-        // view) glow brightest, face-on reads almost clear — the fake-glow-
-        // material look, no lighting model needed at all.
-        "  float rim = 1.0 - max(0.0, dot(normalize(vNormal), normalize(vViewDir)));",
-        "  float fres = pow(rim, 2.2);",
-        "  gl_FragColor = vec4(uColor, fres * vGlow * 0.85);",
-        "}",
-      ].join("\n"),
-    });
-    m._shared = true;
-    return m;
-  }
-  // one small pooled InstancedMesh per glow colour. `cap` instances are
-  // pre-allocated (never resized); positions/scales are written once at
-  // build time from the collected spot list, aGlow toggled later by index
-  // for broken lamps / dark signal phases. Returns null (headless-safe) if
-  // ShaderMaterial/InstancedMesh aren't available or there's nothing to draw.
-  function buildGlowShellPool(colorHex, spots, sizeScale) {
-    if (!spots.length) return null;
-    const mat2 = makeGlowShellMat(colorHex);
-    if (!mat2) return null;
-    // per-pool geometry CLONE: the aGlow instanced attribute below is
-    // per-pool state — setting it on the shared prototype let the last-built
-    // pool (green) drive every pool's shells (red+yellow halos lit during
-    // green phase, no halo at all during red/yellow).
-    const im = new THREE.InstancedMesh(glowShellGeo.clone(), mat2, spots.length);
-    im.castShadow = false; im.receiveShadow = false; im.frustumCulled = false;
-    im.userData.terrain = true;   // farcull: city-spanning pool, prototype bounds
-                                  // sit at the origin — never distance-cull it
-    im.renderOrder = 5;
-    const aGlow = new Float32Array(spots.length).fill(1);
-    // real THREE.BufferGeometry supports setAttribute on the instanced mesh's
-    // geometry for a per-instance attribute keyed by gl_InstanceID via the
-    // standard "instanced attribute" divisor path r128 wires automatically
-    // when the attribute lives on the geometry of an InstancedMesh.
-    if (im.geometry && im.geometry.setAttribute && THREE.InstancedBufferAttribute) {
-      const attr = new THREE.InstancedBufferAttribute(aGlow, 1);
-      im.geometry.setAttribute("aGlow", attr);
-      im._aGlowAttr = attr;
-    }
-    im._aGlow = aGlow;
-    const m4 = new THREE.Matrix4(), p = new THREE.Vector3(), q0 = new THREE.Quaternion(), s = new THREE.Vector3();
-    spots.forEach((sp, i) => {
-      p.set(sp.x, sp.y, sp.z);
-      s.set(sp.r || sizeScale, sp.r || sizeScale, sp.r || sizeScale);
-      m4.compose(p, q0, s);
-      im.setMatrixAt(i, m4);
-      sp.glowIndex = i; sp.glowPool = im;   // let the caller dim/relight this exact instance later
-    });
-    im.instanceMatrix.needsUpdate = true;
-    return im;
-  }
-  // dim or relight one instance in a glow-shell pool (e.g. a shot-out
-  // streetlamp, or a traffic phase that isn't the currently-lit colour)
-  // without touching the shared instance count/order.
-  function setGlowOn(spot, on) {
-    if (!spot || !spot.glowPool || spot.glowIndex == null) return;
-    const im = spot.glowPool;
-    if (!im._aGlow) return;
-    im._aGlow[spot.glowIndex] = on ? 1 : 0;
-    if (im._aGlowAttr) im._aGlowAttr.needsUpdate = true;
-  }
+  // (The old Fresnel glow-shell halos lived here: an additive 0.6 m sphere
+  // around every mast-arm lens, depthWrite off, so each overhead signal wore
+  // a coloured disc twice the size of its lens spilling past the visor and
+  // backplate. Deleted: a signal is its lit lens under its visor, nothing
+  // else. The pooled PointLights below are the only real night spill.)
 
   // ============================================================
   //  SHOOTABLE STREET PROPS — the street REACTS to gunfire (USER-FILMED:
@@ -1373,7 +1267,7 @@
   const _near = [];
 
   // the lamp goes dark: bulb + glow instances zero-scaled, the per-mesh bulb
-  // swapped dead, its Fresnel shell dimmed, and (via .broken) the pooled
+  // swapped dead, and (via .broken) the pooled
   // real-light driver stops choosing it. Shared by a bullet and a break.
   function killLamp(s) {
     if (!s || s.broken) return;
@@ -1388,12 +1282,11 @@
     }
     if (s.bulb) s.bulb.material = deadLampM;
     if (s.glow) s.glow.visible = false;
-    setGlowOn(s.glowSpot, false);
   }
-  // a signal head dies: its three instanced bulbs collapse, its glow shells
-  // go dark and stay dark (the sync driver reads cand.dead), no pooled light.
+  // a signal head dies: its three instanced bulbs collapse and the road wash
+  // goes dark (the sync driver reads head.dead), no pooled light.
   // A mast-arm installation is one breakable per POLE: cand.heads lists every
-  // head bolted to it ({head, spots}), cand.cands its pooled-light candidates,
+  // head bolted to it ({head}), cand.cands its pooled-light candidates,
   // cand.peds its pedestrian heads. The single-head shape still works.
   function killSignal(b) {
     const c = b.cand;
@@ -1406,7 +1299,6 @@
       for (const k of ["red", "yel", "grn"]) {
         const h = hs.head && hs.head[k];
         if (h && h.sigPool && h.sigIdx != null) { h.sigPool.setMatrixAt(h.sigIdx, _zeroM4); h.sigPool.instanceMatrix.needsUpdate = true; }
-        if (hs.spots) setGlowOn(hs.spots[k], false);
       }
     }
     if (c.cands) for (const x of c.cands) x.dead = true;
@@ -2068,15 +1960,12 @@
     const nightAds = city._nightAds = city._nightAds || [];
     // SMARTER STREET-LIGHT RENDERING collection arrays — fresh per rebuilt
     // world (mirrors shootables/carKnockables above): every streetlamp bulb
-    // and every traffic-signal lamp registers a glow-shell "spot" here as
-    // it's built; once ALL of them exist (end of cityProps) we bake exactly
-    // one pooled InstancedMesh per colour (see buildGlowShellPool) and hand
+    // and every traffic-signal approach registers a light candidate here as
+    // it's built; once ALL of them exist (end of cityProps) we hand
     // out a small fixed pool of real THREE.PointLights to whichever handful
     // are nearest the camera (see the POOLED DYNAMIC LIGHTS driver near the
     // bottom of this function).
-    const lampGlowSpots = [];      // warm streetlamp bulbs {x,y,z,r}
-    const sigGlowSpots = { red: [], yel: [], grn: [] };   // traffic-signal lamps, by colour
-    const lightCandidates = city._lightCandidates = [];   // {x,y,z,kind,ref|head,spots} — every real-light-eligible bulb, for the pool below
+    const lightCandidates = city._lightCandidates = [];   // {x,y,z,kind,ref|head} — every real-light-eligible bulb, for the pool below
     // boards whose ad CONTENT is live (e.g. the player WANTED poster, or the
     // E3 market ticker below). Each entry is { mesh, dyn, lastKey, cats? } so
     // the driver re-skins only the few that actually change, never every frame.
@@ -2699,14 +2588,16 @@
       mastRAt: () => 0.18, pedRAt: () => 0.1, armYAt: (s, L) => 6.25 + 0.35 * s / (L || 1), armRAt: () => 0.1,
     };
     const sigLampHandles = { red: [], yel: [], grn: [] };  // every vehicle lens, by colour slot
-    const sigShellHeads = [];      // {head, spots}: mast-arm heads carry a Fresnel halo per bulb
     const sigPoolSrc = [];         // one faint coloured wash on the road per approach
     const pedHandles = [];         // {axis, hand, walk, state} per crosswalk end
     const HWI = { mast: [], ped: [], arm: [], headTop: [], headSide: [], pedHead: [] };
     const HWSET = {};              // part -> {set, geo, mat, items}: the standing chunk sets
     const mastLums = [];           // {x,z,ang}: the luminaire on top of each mast pole
     const signalBlades = city._signalBlades = [];   // drawn into the sign atlas by world/street_furniture.js
-    function vehHead(cx, cy, cz, ry, mount, halo, owner) {
+    // ONE vehicle-head builder for every placement (mast arm "top", pole
+    // "side"): the same streetHW.vehicleHead body + backplate + visors and the
+    // same instanced lens pool. Only the bracket differs with the mount.
+    function vehHead(cx, cy, cz, ry, mount, owner) {
       const fx = Math.sin(ry), fz = Math.cos(ry);
       const lx = cx + fx * D.LENS_Z, lz = cz + fz * D.LENS_Z;
       const red = { lit: false, x: lx, y: cy + D.LENS_DY, z: lz, ry: ry };
@@ -2715,19 +2606,7 @@
       sigLampHandles.red.push(red); sigLampHandles.yel.push(yel); sigLampHandles.grn.push(grn);
       own(owner, mount === "top" ? "headTop" : "headSide", { x: cx, y: cy, z: cz, ry: ry });
       const head = { red, yel, grn };
-      let entry = { head, spots: null };
-      if (halo) {
-        const hx = lx + fx * 0.06, hz = lz + fz * 0.06;
-        const spots = {
-          red: { x: hx, y: red.y, z: hz, r: 0.3 },
-          yel: { x: hx, y: yel.y, z: hz, r: 0.3 },
-          grn: { x: hx, y: grn.y, z: hz, r: 0.3 },
-        };
-        sigGlowSpots.red.push(spots.red); sigGlowSpots.yel.push(spots.yel); sigGlowSpots.grn.push(spots.grn);
-        entry = { head, spots };
-        sigShellHeads.push(entry);
-      }
-      if (owner) owner.heads.push(entry);
+      if (owner) owner.heads.push({ head });
       return head;
     }
     // every instance a pole carries is recorded on it ({part, i}), so a break
@@ -2835,7 +2714,7 @@
         for (const s of along) {
           const hx = P.x + A.arm[0] * s, hz = P.z + A.arm[1] * s;
           const hy = P.y + D.armYAt(s, L) - D.armRAt(s, L) - D.HEAD_HANG + 0.02;
-          const h = vehHead(hx, hy, hz, A.face, "top", true, P);
+          const h = vehHead(hx, hy, hz, A.face, "top", P);
           axisHeads.push(h);
           if (!firstHead) { firstHead = h; fx0 = hx; fy0 = hy; fz0 = hz; }
         }
@@ -2858,7 +2737,7 @@
         // the supplementary head bolted to the far-left pole
         const F = corner(A.far, "ped");
         const rr = (F.kind === "mast" ? D.mastRAt(D.SIDE_HEAD_Y) : D.pedRAt(D.SIDE_HEAD_Y)) + D.SIDE_BACK;
-        axisHeads.push(vehHead(F.x + fvx * rr, F.y + D.SIDE_HEAD_Y, F.z + fvz * rr, A.face, "side", false, F));
+        axisHeads.push(vehHead(F.x + fvx * rr, F.y + D.SIDE_HEAD_Y, F.z + fvz * rr, A.face, "side", F));
       }
       // pedestrian heads + push buttons on every crosswalk end
       for (const E of PED_ENDS) {
@@ -2985,15 +2864,13 @@
     const lampCensus = city._lampCensus = city._lampCensus || { lamps: 0, noCollider: 0, overRoad: 0 };
     // every luminaire (post or mast top) registers the same records: a lens
     // instance, a light-pool instance at the SAME index (hitProp zero-scales
-    // both through lampPools when the head is shot out), a Fresnel glow shell,
+    // both through lampPools when the head is shot out),
     // a shootable centred on the HEAD, and a real-light candidate.
     function registerLamp(x, z, ang, y0) {
       const lampIdx = lampBulbSpots.length;
       lampBulbSpots.push({ x, z, ang, y0 });
       const bwx = x + Math.sin(ang) * LO.bulbZ, bwz = z + Math.cos(ang) * LO.bulbZ;
-      const glowSpot = { x: bwx, y: y0 + LO.bulbY, z: bwz, r: 0.36 };
-      lampGlowSpots.push(glowSpot);
-      const shootRec = { type: "lamp", x: bwx, z: bwz, y: y0 + LO.bulbY, r: 0.7, bulb: null, glow: null, lampIdx, broken: false, glowSpot };
+      const shootRec = { type: "lamp", x: bwx, z: bwz, y: y0 + LO.bulbY, r: 0.7, bulb: null, glow: null, lampIdx, broken: false };
       shootables.push(shootRec);
       // `ref` lets the pool driver below skip a shot-out lamp (shootRec.broken
       // flips true in hitProp) without a separate "is this lamp dead" lookup.
@@ -4285,47 +4162,6 @@
       });
     }
 
-    // =====================================================================
-    //  SMARTER STREET-LIGHT RENDERING, part 1: bake the pooled Fresnel
-    //  glow-shell InstancedMeshes now that every lamp/signal spot for this
-    //  build has been collected above. ONE InstancedMesh per colour (warm
-    //  streetlamp + red/yellow/green signal) no matter how many hundreds of
-    //  bulbs the city has — draw-call cost is FIXED, not per-bulb. Skips
-    //  cleanly (buildGlowShellPool returns null) on a headless/minimal THREE
-    //  stub that lacks ShaderMaterial, or when a city rebuild has zero spots.
-    // =====================================================================
-    // (no glow shell on the street lamps: a Fresnel sphere under a cobra head
-    // reads as a white ball hanging off the arm. The flat lens + the light
-    // pool on the road are the lamp. lampGlowSpots stay registered so
-    // hitProp's setGlowOn is a harmless no-op.)
-    // signal halos: one shell pool per 200 m cell per colour, each with a
-    // world-space bounding sphere so r128 frustum-culls it (a city-wide pool
-    // has to be frustumCulled=false and shades every junction every frame).
-    // setGlowOn keeps working unchanged: each spot records its own cell pool.
-    function glowShellCells(colorHex, spots, size) {
-      const cell = HW ? HW.CELL : 1e9, groups = new Map(), out = [];
-      for (const sp of spots) {
-        const k = Math.floor(sp.x / cell) + "," + Math.floor(sp.z / cell);
-        let gl = groups.get(k); if (!gl) { gl = []; groups.set(k, gl); }
-        gl.push(sp);
-      }
-      groups.forEach(function (gl) {
-        const im = buildGlowShellPool(colorHex, gl, size);
-        if (!im) return;
-        let cx = 0, cy = 0, cz = 0;
-        for (const sp of gl) { cx += sp.x; cy += sp.y; cz += sp.z; }
-        cx /= gl.length; cy /= gl.length; cz /= gl.length;
-        let r = 0;
-        for (const sp of gl) r = Math.max(r, Math.hypot(sp.x - cx, sp.y - cy, sp.z - cz));
-        if (THREE.Sphere) { im.geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(cx, cy, cz), r + 1.5); im.frustumCulled = true; }
-        out.push(im);
-      });
-      return out;
-    }
-    const sigShellMeshes = [].concat(
-      glowShellCells(0xff3b3b, sigGlowSpots.red, 0.4),
-      glowShellCells(0xffcf3b, sigGlowSpots.yel, 0.4),
-      glowShellCells(0x39ff66, sigGlowSpots.grn, 0.4));
 
     // ---- SIGNAL LENSES ------------------------------------------------------
     // One InstancedMesh per colour SLOT (red/amber/green) for every vehicle
@@ -4422,15 +4258,9 @@
       if (l.lit != null) return !!l.lit;
       return !!(l.material && l.material.emissiveIntensity > 0.5);
     }
-    for (const im of sigShellMeshes) root.add(im);
-    if (HW) HW.registerMeshes(sigShellMeshes, 350);   // halos gate at 350 m
-    // signal glow shells track whichever colour traffic.js actually lit —
-    // read the SAME lamp materials traffic.js's axisSet/lampSet already
-    // drive (emissiveIntensity 1.0 lit / 0.04 dark) rather than re-deriving
-    // the phase clock here, so this never drifts from the real state machine
-    // (traffic.js already IS the red/yellow/green timer this task asked for;
-    // this only mirrors its output onto the Fresnel shells).
-    if (CBZ.onAlways && (sigShellMeshes.length || (lampPools.glow && sigPoolSrc.length)) && !city._sigGlowHooked) {
+    // the coloured road wash tracks whichever colour traffic.js actually lit
+    // (read off the same lens handles traffic.js drives, so it never drifts).
+    if (CBZ.onAlways && lampPools.glow && sigPoolSrc.length && !city._sigGlowHooked) {
       city._sigGlowHooked = true;
       let acc = 0;
       CBZ.onAlways(7.2, function (dt) {
@@ -4438,13 +4268,6 @@
         if (!g || g.mode !== "city" || !root.visible) return;
         acc += (dt || 0.016);
         if (acc < 0.15) return; acc = 0;   // a couple times a second is plenty — the phase itself only flips a few times per cycle
-        for (let i = 0; i < sigShellHeads.length; i++) {
-          if (sigShellHeads[i].dead) continue;      // a snapped head stays dark (killSignal)
-          const h = sigShellHeads[i].head, sp = sigShellHeads[i].spots;
-          setGlowOn(sp.red, sigLit(h.red));
-          setGlowOn(sp.yel, sigLit(h.yel));
-          setGlowOn(sp.grn, sigLit(h.grn));
-        }
         // the coloured wash on the road in front of each approach retints
         // only when that approach's phase actually changes
         const pools = lampPools.glow;
@@ -4469,8 +4292,8 @@
     //  bulb": hundreds of real lights would be a lighting-pass catastrophe
     //  (the exact "many lights in a city game" problem the three.js forum
     //  guidance warns about) — a bounded handful of real lights exist at
-    //  any moment REGARDLESS of city size, and the Fresnel glow shells above
-    //  sell every OTHER bulb's presence for free. The distance-sort itself is
+    //  any moment REGARDLESS of city size; every other bulb is its lit
+    //  lens alone. The distance-sort itself is
     //  a flat scan over lightCandidates (a few hundred entries, cheap) run on
     //  a throttled interval (NOT per frame) — recomputing which handful is
     //  nearest a few times a second is imperceptible; recomputing every
