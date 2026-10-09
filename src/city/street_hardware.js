@@ -494,7 +494,7 @@
   // DISTANCE GATE (invisible-distance only): every set registers here and a
   // 2 Hz tick hides any cell whose nearest point is beyond its set's maxDist:
   // hardware 700 m (a lamp post there is a few pixels), lenses 600, pools
-  // 420, signal halos 350. resetSets() at the start of each world build.
+  // 420. resetSets() at the start of each world build.
   const HW_DIST = 700;
   let live = [], tickOn = false;
   function resetSets() { live = []; }
@@ -513,7 +513,7 @@
     }
     return set;
   }
-  // plain meshes (e.g. props.js's glow-shell pools) joining the gate
+  // plain meshes (any non-chunked pool) joining the gate
   function registerMeshes(meshes, maxDist) {
     const ms = meshes.filter(function (m) { return m && m.geometry && m.geometry.boundingSphere; });
     for (const m of ms) { const b = m.geometry.boundingSphere; m._cellC = { x: b.center.x, z: b.center.z, r: b.radius }; }
