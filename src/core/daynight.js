@@ -31,9 +31,9 @@
    actually is — the one place shadow resolution matters. Below we keep
    the day-night cycle's sun angle/colour/timing math untouched and
    ONLY translate the already-computed sun/target positions by the
-   player's x/z, snapped to a whole shadow-texel so the translation
-   itself can't sub-pixel-shimmer the shadow edges as the player moves
-   (the standard CSM "texel snapping" trick, applied to a single map).
+   player's x/z; core/lights.js stabilizeShadow then snaps the box to
+   whole texels on the shadow camera's own axes (the standard CSM
+   "texel snapping" trick) after every mode has written the sun.
    city/mode.js (@94) and modes/survival.js (@93) run LATER in the frame
    and still win for their own arenas — this is just the shared default
    so any mode without its own override (or the player before a mode
@@ -197,8 +197,10 @@
     if (P && sunTarget) {
       const info = CBZ.shadowFrustumInfo ? CBZ.shadowFrustumInfo() : null;
       const texel = (info && info.texel > 0) ? info.texel : 0;
-      let ox = P.x, oz = P.z;
-      if (texel > 0) { ox = Math.floor(ox / texel) * texel; oz = Math.floor(oz / texel) * texel; }
+      // (the texel snap itself is taken in LIGHT space, after every writer,
+      //  by core/lights.js stabilizeShadow; a world x/z floor here is only
+      //  the light's grid when the sun is overhead)
+      const ox = P.x, oz = P.z;
       sun.position.x += ox; sun.position.z += oz;
       sunTarget.position.x += ox; sunTarget.position.z += oz;
       // Normal movement marks the map dirty and lets renderer.js coalesce it.
@@ -214,7 +216,8 @@
         if (CBZ.requestShadowUpdate) CBZ.requestShadowUpdate(_snapWidth === 0 || widthChanged || jumped);
         else CBZ.renderer.shadowMap.needsUpdate = true;
       }
-      _snapX = ox; _snapZ = oz; _snapWidth = width;
+      if (moved || widthChanged || _snapWidth === 0) { _snapX = ox; _snapZ = oz; }
+      _snapWidth = width;
     }
 
     const dayness = Math.max(0, up);          // 0 at/under horizon (geometry)

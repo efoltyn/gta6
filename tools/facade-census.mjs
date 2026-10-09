@@ -24,6 +24,19 @@
               missing; and the street-door kit: step/stoop, light, number.
      ZFIGHT   coplanar faces with the SAME outward normal within 5 mm that
               would not draw the same pixel (tools/lib/facade-geom.mjs).
+     DEPTH BANDS  5 mm is not what the eye sees: whether a gap fights depends
+              on the range it is seen from and the camera's near plane. Every
+              same-normal overlap up to 30 mm is turned into the distance at
+              which it starts to fight (24-bit depth, near 0.1 m first person /
+              0.2 m chase camera) and counted per band. (The 5 mm census was
+              met by a resolver that left its moved faces 10 mm apart, which
+              fight from ~90 m: "fixed" on paper, flickering on the street.)
+     BAYS     a drive-in bay (parking deck, showroom) with a grammar box laid
+              across it (the flagship's whole ground storey was).
+     SHADOW GRID  core/lights.js loaded headless: the sun's shadow box walked
+              in sub-texel steps must move by whole light-space texels only,
+              and the normal bias must cover the live texel (the iPad tier's
+              1024 map over 340 m is a 0.33 m texel).
 
    COST     per type: merged faces (deco trim + walls), instanced module
             members (the window/door trim pool) and an estimate of what it
@@ -39,7 +52,7 @@
           FC_BREAK=1        faces per mesh kind; FC_FORCED=1 forced windows  */
 import fs from "fs";
 import vm from "vm";
-import { meshQuads, boxQuads, zfight, paneVisible } from "./lib/facade-geom.mjs";
+import { meshQuads, boxQuads, zfight, paneVisible, depthFightRange, DEPTH_K } from "./lib/facade-geom.mjs";
 
 const ROOT = process.env.FC_ROOT || new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 const argv = process.argv.slice(2);
@@ -49,6 +62,26 @@ const ONLY = argv.indexOf("--type") >= 0 ? argv[argv.indexOf("--type") + 1] : nu
 const JSON_OUT = argv.indexOf("--json") >= 0 ? argv[argv.indexOf("--json") + 1] : null;
 const MAXZ = argv.indexOf("--max-zfight") >= 0 ? +argv[argv.indexOf("--max-zfight") + 1] : null;
 const TOL = 0.005;
+/* DEPTH BANDS. 5 mm is a fixed number; whether a gap fights depends on how far
+   away it is seen and on the camera's near plane. Every same-normal overlap up
+   to BAND apart is kept, and each is turned into the range at which it starts
+   to fight (lib/facade-geom.mjs depthFightRange) for the planes the game uses:
+   0.1 m (first person / car cabin / anything held at the eye) and 0.2 m (the
+   on-foot chase camera, city/mode.js). 24 bits (Apple's Depth32Float reads
+   the same near z_ndc = 1).
+   A VISIBLE FIGHT is a pair that starts fighting closer than the range at
+   which its overlap is still at least PX_SEEN pixels across: a 2 cm strip
+   stops being a strip at ~13 m, a 30 cm sill band carries to ~200 m. The far
+   plane does not enter (it is >= 1400 m on foot, far >> near). */
+const BAND = 0.03;
+const NEARS = [0.1, 0.2];
+const BANDS_M = [10, 30, 100, 300];
+const FIGHT_NEAR = 100;
+// one pixel's footprint per metre of range on the iPad: 62 deg vertical fov
+// over ~820 device rows at the tablet's pixel ratio (core/quality.js)
+const PX_PER_M = (2 * Math.tan(31 * Math.PI / 180)) / 820;
+const PX_SEEN = 1.5;
+const visibleTo = (w) => w / (PX_PER_M * PX_SEEN);
 
 // ---------------------------------------------------------------- the env
 function makeEnv() {
@@ -283,6 +316,37 @@ function doorsOf(b, boxes, root) {
   return out;
 }
 
+/* THE DRIVE-IN BAYS (a parking deck, a showroom): an open hole a car drives
+   through. Sample the bay on a grid at the wall plane and look 1.2 m out and
+   0.3 m in: any opaque box thicker than a frame bar across that volume is
+   something laid over the opening (the flagship's grammar used to lay its
+   whole ground storey across them). Returns { n, blocked } in bays. */
+function baysOf(b, boxes) {
+  const out = { n: 0, blocked: 0, ex: [] };
+  for (const bb of (b.bays || [])) {
+    out.n++;
+    const horiz = bb.s === 0 || bb.s === 1, sg = (bb.s === 0 || bb.s === 2) ? -1 : 1;
+    const plane = horiz ? b.oz + sg * b.d / 2 : b.ox + sg * b.w / 2;
+    const T0 = (horiz ? b.ox : b.oz) + bb.t0, T1 = (horiz ? b.ox : b.oz) + bb.t1;
+    let hit = 0, n = 0, what = null;
+    for (let i = 0; i < 6; i++) for (let j = 0; j < 6; j++) {
+      n++;
+      const t = T0 + (T1 - T0) * (i + 0.5) / 6, y = 0.05 + (bb.y1 - 0.15) * (j + 0.5) / 6;
+      const n0 = sg > 0 ? plane - 0.3 : plane - 1.2, n1 = sg > 0 ? plane + 1.2 : plane + 0.3;
+      for (const x of boxes) {
+        const thin = Math.min(horiz ? x.x1 - x.x0 : x.z1 - x.z0, x.y1 - x.y0);
+        if (thin <= 0.09) continue;
+        if (y <= x.y0 || y >= x.y1) continue;
+        const ta = horiz ? x.x0 : x.z0, tb = horiz ? x.x1 : x.z1, na = horiz ? x.z0 : x.x0, nb = horiz ? x.z1 : x.x1;
+        if (t <= ta || t >= tb || nb <= n0 || na >= n1) continue;
+        hit++; what = what || x.look; break;
+      }
+    }
+    if (hit / n > 0.05) { out.blocked++; if (out.ex.length < 2) out.ex.push("bay s" + bb.s + " " + Math.round(100 * hit / n) + "% covered by " + what); }
+  }
+  return out;
+}
+
 const CITY_ROOT = new THREE.Group();
 function shellRecords(b, root) {
   // the pooled records this shell registered: glass (b.windows), plus the
@@ -381,9 +445,10 @@ function measureBuilt(THREE_, name, gen, b, root) {
     if (j.cls !== "real" && ex.length < 3) ex.push(j.cls + " " + o.f.ax + o.f.sg + " y" + o.y0.toFixed(2) + " w" + j.W.toFixed(2) + " rec" + j.recess.toFixed(2) + " vis" + j.vis.toFixed(2) + (j.framed ? "" : " noframe") + (j.sill ? "" : " nosill"));
   }
   const doors = doorsOf(b, boxes, root);
-  const z = zfight(quads, TOL, { samples: 6, solids: boxes });
+  const bays = baysOf(b, boxes);
+  const z = zfight(quads, TOL, { samples: 6, solids: boxes, band: BAND });
   return { name, gen, kind: "shell", style: b.dressStyle || b.facade, openings: ops.length, wins, recess: ops.length ? +(recessSum / ops.length).toFixed(3) : 0,
-    doors, z, tris: G.quads.length, inst: P.instTrim, panes: (b.windows || []).length, cols: (b.colliders || []).length,
+    doors, bays, z, tris: G.quads.length, inst: P.instTrim, panes: (b.windows || []).length, cols: (b.colliders || []).length,
     // what it costs to hold: merged faces (4 vertices x 32 B: position, normal,
     // uv) + instanced trim (a 4x4 matrix + a colour: 76 B each)
     bytes: G.quads.length * 4 * 32 + P.instTrim * 76, ex };
@@ -412,6 +477,13 @@ const SHELL_TYPES = [
   { name: "civic: courthouse (civic order)", gen: "buildings_civic.js / govcomplex.js", w: 30, d: 22, storeys: 3, opts: { facade: "civic", civic: { kind: "courthouse", order: "doric", stone: true, monumental: true }, dress: false }, color: 0xd8d2c4 },
   { name: "civic: state house (4.6 m storeys, dome)", gen: "govcomplex.js estate", w: 40, d: 26, storeys: 2, opts: { fh: 4.6, facade: "civic", civic: { kind: "capitol", order: "ionic", crown: "dome", stone: true, monumental: true }, dress: false }, color: 0xe2dccd },
   { name: "gang: flagship parking deck", gen: "buildings.js makeMegaTower", w: 30, d: 30, storeys: 12, opts: { garageGround: true, office: true, glassKind: "clear", dress: false }, color: 0x223040 },
+  // THE FLAGSHIP AS IT IS ACTUALLY BUILT (the Executive's tower and his HOME
+  // respawn door). makeMegaTower passes no dress, so facadeAutoDress's
+  // "showroom" pick dresses it in the neighbourhood's SHOP grammar (brick or
+  // stone, facade_kit.js FAMILIES), with the whole-body keep-clear carve. The
+  // row above (dress:false) never measured the skin the owner stands next to.
+  { name: "gang: flagship tower (brick, as built)", gen: "buildings.js makeMegaTower", w: 30, d: 30, storeys: 16, opts: { garageGround: true, district: "core", glassKind: "clear", dress: { style: "brick" }, keepClear: [{ x0: -15, x1: 15, z0: -15, z1: 15, y0: 0.01, y1: 16 * 3.2 - 0.01 }] }, color: 0x223040 },
+  { name: "gang: flagship tower (stone, as built)", gen: "buildings.js makeMegaTower", w: 30, d: 30, storeys: 16, opts: { garageGround: true, district: "core", glassKind: "clear", dress: { style: "stone" }, keepClear: [{ x0: -15, x1: 15, z0: -15, z1: 15, y0: 0.01, y1: 16 * 3.2 - 0.01 }] }, color: 0x223040 },
   { name: "gang: Ironworks works (industrial)", gen: "buildings.js", w: 22, d: 18, storeys: 3, opts: { district: "industrial", dress: { style: "brick" }, reach: 2.0 }, color: 0x5c3a2c },
   { name: "gang: apartment block (undressed)", gen: "buildings.js / expansion.js", w: 20, d: 16, storeys: 6, opts: { district: "residential", dress: false }, color: 0x8a8f96 },
   // the automatic family pick (towns, islands, biomes: facade_kit.js FAMILIES)
@@ -485,6 +557,7 @@ for (const r of all) {
   console.log(pad(r.name, 44) + pad(r.openings, 9) + pad(r.wins.real, 6) + pad(r.wins.covered, 8) + pad(r.wins.flat, 6) + pad(r.wins.bare, 6) + pad(r.wins.painted, 8) + pad(r.wins.shader, 7) + pad(dl, 9) + pad(kit, 15) + r.z.pairs + (r.z.pairs ? " (" + r.z.area + " m2)" : ""));
   if (V) {
     for (const e of r.ex || []) console.log("      window " + e);
+    if (r.bays && r.bays.n) console.log("      bays " + r.bays.n + ", covered " + r.bays.blocked + (r.bays.ex.length ? "  (" + r.bays.ex.join("; ") + ")" : ""));
     for (const s of r.z.samples || []) console.log("      zfight " + JSON.stringify(s));
     if (r.z.byKind) [...r.z.byKind.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).forEach(([k, n]) => console.log("      zf " + n + "x " + k));
     if (r.note) console.log("      " + r.note);
@@ -500,11 +573,139 @@ for (const r of all) {
     if (!okWin) gateFail.push(r.name + ": windows " + JSON.stringify(r.wins));
     if (!realDoor && !shaderDoor && !bayDoor && d0.cls !== "-") gateFail.push(r.name + ": door " + dl);
     if (r.z.pairs) gateFail.push(r.name + ": " + r.z.pairs + " z-fights");
+    if (r.bays && r.bays.blocked) gateFail.push(r.name + ": " + r.bays.blocked + " drive-in bays covered");
   }
   if (MAXZ != null && r.z.pairs > MAXZ) gateFail.push(r.name + ": " + r.z.pairs + " z-fights > " + MAXZ);
 }
 console.log("\nTOTAL  types " + tot.types + "  openings " + tot.openings + "  real " + tot.real + "  shader-recessed " + tot.shader + "  covered " + tot.covered + "  flat " + tot.flat + "  bare " + tot.bare + "  painted " + tot.painted +
   "\n       doors: real (geometry) " + tot.doorsReal + "  shader-recessed " + tot.doorsShader + "  drive-in bays " + tot.doorsBay + "  without a door " + tot.typesNoDoor +
   (tot.noDoor.length ? " (" + tot.noDoor.join(", ") + ")" : "") + "  | z-fight pairs " + tot.z);
+// ------------------------------------------------- depth bands (by range)
+{
+  const dz = (z, n) => z * z / (n * Math.pow(2, 24));
+  console.log("\nDEPTH BANDS  same-normal overlaps up to " + (BAND * 1000) + " mm apart that VISIBLY fight at each range");
+  console.log("             a pair fights past depthFightRange(gap) (24-bit, K=" + DEPTH_K + ") and is seen while its overlap is >= " + PX_SEEN + " px (iPad)");
+  for (const n of NEARS) console.log("             near " + n + " m: depth step " + BANDS_M.map((m) => (dz(m, n) * 1000).toFixed(m < 50 ? 3 : 2) + " mm @" + m + " m").join(", ") +
+    "  -> a gap is safe to " + [2, 5, 10, 20].map((mm) => mm + " mm:" + Math.round(depthFightRange(mm / 1000, n, 24)) + " m").join(" "));
+  console.log(pad("", 52) + NEARS.map((n) => pad("near " + n + " m: pairs fighting AND seen at", BANDS_M.length * 7)).join(" | "));
+  console.log(pad("type", 44) + pad("<=" + (BAND * 1000) + "mm", 8) + NEARS.map(() => BANDS_M.map((m) => pad(m + "m", 7)).join("")).join(" | "));
+  const tot = NEARS.map(() => BANDS_M.map(() => 0));
+  let totSeps = 0;
+  const worst = [];
+  const fightsAt = (p, n, m) => depthFightRange(p.d, n, 24) < m && visibleTo(p.w || 0) >= m;
+  for (const r of all) {
+    if (r.error || !r.z || !r.z.seps) continue;
+    // GLASS SITS IN ITS FRAME BY POLYGON OFFSET (city/buildings.js seatGlass:
+    // every pane material is drawn GLASS_SEAT depth steps behind its true
+    // depth), so a pane BEHIND a frame member, a bar or a sill can never win
+    // its pixels at any range: not a fight. Glass in FRONT of a face still is.
+    const seps = r.z.seps.filter((p) => !/^glass/.test(p.back || ""));
+    totSeps += seps.length;
+    const cols = NEARS.map((n, ni) => BANDS_M.map((m, mi) => {
+      let c = 0;
+      for (const p of seps) if (fightsAt(p, n, m)) c++;
+      tot[ni][mi] += c;
+      return c;
+    }));
+    // the nearest range at which this type shows a fight (chase camera)
+    let near = Infinity;
+    for (const p of seps) { const f = depthFightRange(p.d, 0.2, 24); if (visibleTo(p.w || 0) > f && f < near) near = f; }
+    if (seps.length) worst.push({ name: r.name, near, n: seps.length });
+    if (!seps.length && !V) continue;
+    console.log(pad(r.name, 44) + pad(seps.length, 8) + cols.map((c) => c.map((x) => pad(x, 7)).join("")).join(" | "));
+    if (V) {
+      // which layers they are: the commonest VISIBLE fights (chase camera, by 300 m)
+      const by = new Map();
+      for (const p of seps) {
+        if (!fightsAt(p, 0.2, 300)) continue;
+        const k = by.get(p.kind) || { n: 0, d: 1, a: p.a, b: p.b, at: p.at, w: 0 }; k.n++;
+        if (p.d < k.d) { k.d = p.d; k.at = p.r || p.at; k.a = p.a; k.b = p.b; k.w = p.w; }
+        by.set(p.kind, k);
+      }
+      [...by.entries()].sort((x, y) => y[1].n - x[1].n).slice(0, 6).forEach(([k, v]) =>
+        console.log("      " + v.n + "x  " + (v.d * 1000).toFixed(1) + " mm apart, " + Math.round(v.w * 100) + " cm wide: fights from " + Math.round(depthFightRange(v.d, 0.2, 24)) + " m, seen to " + Math.round(visibleTo(v.w)) + " m  " + v.a + "  ~  " + v.b + "  " + JSON.stringify(v.at)));
+    }
+  }
+  console.log(pad("TOTAL", 44) + pad(totSeps, 8) + tot.map((c) => c.map((x) => pad(x, 7)).join("")).join(" | "));
+  worst.sort((a, b) => a.near - b.near);
+  if (worst.length) console.log("  nearest visible fight per type (chase camera): " + worst.filter((w) => isFinite(w.near)).slice(0, 6).map((w) => w.name + " @" + Math.round(w.near) + " m").join(", "));
+  if (GATE) for (const w of worst) if (w.near < FIGHT_NEAR) gateFail.push(w.name + ": a layer gap visibly fights at " + Math.round(w.near) + " m (chase camera)");
+}
+
+// ------------------------------------------------- near/far LOD overlap
+/* A SHELL AND ITS DISTANCE PROXY DRAWN AT ONCE fight only where both are seen.
+   core/farcull.js shows the proxy box from RV - band (band >= 20 m) and hides
+   the shell past RV, RV = max(cull radius, fog.far + 30); the proxy is inset
+   (0.92 w/d, 0.98 h), so its faces are never in the shell's planes, and the
+   overlap must sit where the fog (smoothstep(fog.near, fog.far), renderer.js)
+   has already reached 1. Read off the live quality table, per tier. */
+{
+  const q = fs.readFileSync(ROOT + "/src/core/quality.js", "utf8");
+  const fc = fs.readFileSync(ROOT + "/src/core/farcull.js", "utf8");
+  const rows = [...q.matchAll(/fog:\s*(\d+),\s*cull:\s*(\d+)\s*\}/g)].map((m) => ({ fog: +m[1], cull: +m[2] }));
+  const inset = /scale\.set\(r\.w \* ([0-9.]+), r\.h \* ([0-9.]+), r\.d \* ([0-9.]+)\)/.exec(fc);
+  const rvRule = /fogEnd > R0 \? fogEnd : R0/.test(fc) && /fog\.far\) \|\| CBZ\.cityFogFar \|\| R0\) \+ 30/.test(fc);
+  console.log("\nLOD SWAP  (Gang City shell vs core/farcull.js distance proxy, on foot)");
+  console.log("  proxy inset " + (inset ? inset.slice(1).join(" / ") : "?") + "  (faces never in the shell's planes)   swap held to the fog's end: " + (rvRule ? "yes" : "NO"));
+  rows.forEach(function (r, i) {
+    const fogNear = Math.max(90, Math.round(r.fog * 0.16)), RV = rvRule ? Math.max(r.cull, r.fog + 30) : r.cull, enter = RV - 20;
+    const t = Math.max(0, Math.min(1, (enter - fogNear) / (r.fog - fogNear)));
+    const fogAt = t * t * (3 - 2 * t);
+    console.log("  tier " + i + "  fog " + fogNear + "-" + r.fog + " m  both drawn " + enter + "-" + RV + " m  fog there " + Math.round(fogAt * 100) + "%" + (fogAt < 0.999 ? "  <- the swap can be seen" : ""));
+    if (GATE && fogAt < 0.999) gateFail.push("LOD swap tier " + i + ": shell and proxy both drawn at " + enter + " m with fog at " + Math.round(fogAt * 100) + "%");
+  });
+  if (!inset && GATE) gateFail.push("LOD swap: proxy inset not found in core/farcull.js");
+}
+
+// ------------------------------------------------- the sun's shadow grid
+/* THE SHADOW CAMERA, measured: load core/lights.js headless, walk the player
+   in sub-texel steps through the city frame (cityFrame, then the @94.5
+   stabilizeShadow), and project a world-fixed point into the shadow map each
+   step as r128 does (DirectionalLightShadow.updateMatrices). Snapped, it moves
+   by whole texels only (fractional drift 0). The normal bias is reported
+   against the texel it has to cover. The iPad runs the city at tier 1 (a 1024
+   map over a 340 m box). */
+{
+  const E = makeEnv();
+  const T3 = E.THREE;
+  E.CBZ.scene = new T3.Scene();
+  try {
+    E.load("src/core/lights.js");
+    const rig = E.CBZ.lightRig, sun = E.CBZ.sun;
+    console.log("\nSHADOW GRID  (core/lights.js: cityFrame + stabilizeShadow, a sub-texel walk)");
+    const tiers = [{ name: "iPad tier 1", half: 170, map: 1024 }, { name: "tier 2", half: 150, map: 1024 }, { name: "tier 4", half: 110, map: 2048 }];
+    const P = new T3.Vector3(113.37, 1.2, -42.1);
+    for (const t of tiers) {
+      E.CBZ.gfxTier = { shadowHalf: t.half };
+      sun.shadow.mapSize.set(t.map, t.map);
+      E.CBZ.sunAngle = 1.1;
+      const run = function (snap) {
+        let maxFrac = 0, ref = null;
+        for (let k = 0; k < 40; k++) {
+          rig.cityFrame({ x: 100 + k * 0.037, z: -60 + k * 0.021 });
+          if (snap && rig.stabilizeShadow) rig.stabilizeShadow();
+          sun.updateMatrixWorld(true); sun.target.updateMatrixWorld(true);
+          sun.shadow.updateMatrices(sun);
+          const v = P.clone().applyMatrix4(sun.shadow.matrix);   // [0,1] map coords
+          const tx = v.x * t.map, ty = v.y * t.map;
+          const fx = tx - Math.floor(tx), fy = ty - Math.floor(ty);
+          if (!ref) ref = [fx, fy];
+          const dfx = Math.abs(fx - ref[0]), dfy = Math.abs(fy - ref[1]);
+          maxFrac = Math.max(maxFrac, Math.min(dfx, 1 - dfx), Math.min(dfy, 1 - dfy));
+        }
+        return maxFrac;
+      };
+      const before = run(false), after = run(true);
+      const texel = 2 * t.half / t.map;
+      const cam = sun.shadow.camera;
+      const biasM = Math.abs(sun.shadow.bias) * (cam.far - cam.near);
+      console.log("  " + pad(t.name, 12) + " texel " + texel.toFixed(3) + " m   sub-texel drift: raw " + before.toFixed(3) + " -> snapped " + after.toFixed(4) + " texel" +
+        "   normalBias " + sun.shadow.normalBias.toFixed(3) + " m (" + (sun.shadow.normalBias / texel).toFixed(2) + " texel)   depth bias " + biasM.toFixed(3) + " m");
+      if (GATE && after > 1e-3) gateFail.push("shadow grid " + t.name + ": drifts " + after.toFixed(3) + " texel");
+      if (GATE && sun.shadow.normalBias < texel * 0.75) gateFail.push("shadow grid " + t.name + ": normalBias " + sun.shadow.normalBias.toFixed(3) + " m < 0.75 texel");
+    }
+  } catch (e) { console.log("\nSHADOW GRID  ERROR " + String(e && e.stack || e).split("\n").slice(0, 3).join(" | ")); }
+}
+
 if (JSON_OUT) fs.writeFileSync(JSON_OUT, JSON.stringify(all.map((r) => Object.assign({}, r, { z: r.z ? { pairs: r.z.pairs, area: r.z.area, byKind: r.z.byKind ? Object.fromEntries(r.z.byKind) : null } : null })), null, 1));
 if (gateFail.length) { console.log("\nFAIL\n  " + gateFail.slice(0, 60).join("\n  ")); process.exit(1); }

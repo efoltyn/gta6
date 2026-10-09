@@ -145,6 +145,62 @@
     return true;
   }
 
+  /* stabilizeShadow() — THE LAST WORD ON THE SUN'S SHADOW, every mode, every
+     frame (core/gfx.js's @94.5 finalizer calls it after every writer).
+
+     WHY (owner, iPad: "flickers when you move your look, fine when still"):
+       · NO TEXEL SNAP IN THE CITY. cityFrame aimed the box at the raw player
+         position, so every shadow refresh (10-18 Hz) slid the whole texel grid
+         by a fraction of a texel and every shadow edge and every acne stripe
+         re-quantised: the classic shimmer. daynight.js did snap, but in WORLD
+         x/z, which is only the light's grid when the sun is straight overhead.
+         The grid lives on the shadow camera's own right/up axes, so the snap
+         has to be taken there.
+       · NORMAL BIAS SIZED FOR THE WRONG MAP. 0.022 m was tuned for the
+         prison's 140 m box on a 2048 map (0.07 m texels). The iPad runs the
+         city on a 1024 map over a 340 m box: 0.33 m texels, fifteen times the
+         bias. Every wall at a glancing angle to the sun self-shadowed in
+         texel-sized stripes, a world-fixed high-frequency pattern that
+         aliases differently every frame the view turns (and crawls as the
+         sun moves). survival.js had found this for the island (0.2 for a
+         0.26 m texel) and patched only its own mode; this is that rule for
+         every box: the offset follows the texel.
+     Snapping moves the target and the sun by the same light-space delta, so
+     the light direction, and with it every shadow's shape, is untouched. */
+  const _sx = new THREE.Vector3(), _sy = new THREE.Vector3(), _sz = new THREE.Vector3();
+  const _up = new THREE.Vector3(0, 1, 0);
+  // One texel of normal offset: the PCF-soft kernel reads +-1 texel round the
+  // lookup, so a surface tilted theta from the light sees its own depth vary
+  // by ~texel * sin(theta) inside the kernel; a texel of offset covers it to
+  // grazing angles. (0.022 at a 0.33 m texel covered nothing past ~25 deg.)
+  const NB_PER_TEXEL = 1.0, NB_MIN = 0.022, NB_MAX = 0.4;
+  function stabilizeShadow() {
+    const sh = sun.shadow, cam = sh && sh.camera;
+    if (!cam) return 0;
+    const map = sh.mapSize.x || 2048;
+    const texel = (cam.right - cam.left) / map;
+    if (!(texel > 0)) return 0;
+    if ("normalBias" in sh) {
+      const nb = Math.max(NB_MIN, Math.min(NB_MAX, texel * NB_PER_TEXEL));
+      if (Math.abs(sh.normalBias - nb) > 1e-4) sh.normalBias = nb;
+    }
+    // the shadow camera's basis, exactly as r128 builds it (lookAt with +y up)
+    _sz.copy(sun.position).sub(sunTarget.position);
+    if (_sz.lengthSq() < 1e-8) return texel;
+    _sz.normalize();
+    _sx.crossVectors(cam.up || _up, _sz);
+    if (_sx.lengthSq() < 1e-8) _sx.set(1, 0, 0); else _sx.normalize();
+    _sy.crossVectors(_sz, _sx);
+    const T = sunTarget.position;
+    const u = T.x * _sx.x + T.y * _sx.y + T.z * _sx.z;
+    const v = T.x * _sy.x + T.y * _sy.y + T.z * _sy.z;
+    const du = Math.round(u / texel) * texel - u, dv = Math.round(v / texel) * texel - v;
+    const dx = _sx.x * du + _sy.x * dv, dy = _sx.y * du + _sy.y * dv, dz = _sx.z * du + _sy.z * dv;
+    T.x += dx; T.y += dy; T.z += dz;
+    sun.position.x += dx; sun.position.y += dy; sun.position.z += dz;
+    return texel;
+  }
+
   /* ---------------- THE DAY, KEYED ON WHERE THE SUN ACTUALLY IS --------
      daylight() used to blend three keyframes on `dayness` = max(0, sin(sun)),
      which is GEOMETRY, not light, and it had three real faults:
@@ -360,5 +416,6 @@
     cityFrame: cityFrame,
     setShadowFrustum: setShadowFrustum,
     shadowHalf: function () { return _half; },
+    stabilizeShadow: stabilizeShadow,
   };
 })();
