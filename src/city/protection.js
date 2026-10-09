@@ -2010,7 +2010,9 @@
       // prune the dead and the swept, then top the detail back up near him
       for (let i = pdet.memberPedRefs.length - 1; i >= 0; i--) {
         const q = pdet.memberPedRefs[i];
-        if (!q || (CBZ.cityPeds && CBZ.cityPeds.indexOf(q) < 0)) { pdet.memberPedRefs.splice(i, 1); continue; }
+        // swept by the world (a streaming drain), not killed: still on the
+        // books, so the shift musters again rather than waiting on a dispatch
+        if (!q || (CBZ.cityPeds && CBZ.cityPeds.indexOf(q) < 0)) { pdet.memberPedRefs.splice(i, 1); if (q && !q.dead) svcOf(pdet).mustered = false; continue; }
         // a fallen agent is off the Service's roster (THE SERVICE'S ROSTER)
         if (q.dead) { pdet.memberPedRefs.splice(i, 1); serviceLoss(pdet, q); }
       }
