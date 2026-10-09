@@ -248,6 +248,19 @@
     d = d || {};
     const me = us();
     const c = function (k) { return citizen(strHash(evt) + k + SEQ); };
+    // ANY MOMENT MAY CARRY ITS OWN POSTS: [{kind:"press"|"citizen"|"leader", name?, text, cid?}].
+    // The mob, the address and the transfer of power say what people would
+    // post; this is the one place they land, a breath apart.
+    if (Array.isArray(d.holler)) {
+      for (let k = 0; k < d.holler.length && k < 6; k++) {
+        const hp = d.holler[k];
+        if (!hp || !hp.text) continue;
+        const au = hp.kind === "press" ? PRESS : hp.kind === "leader" && hp.cid ? (leaderAuthor(hp.cid) || PRESS)
+          : hp.name ? { name: hp.name, handle: "@" + String(hp.name).toLowerCase().replace(/[^a-z0-9]/g, ""), kind: "citizen" } : c(20 + k);
+        if (k === 0) addPost(au, hp.text);
+        else later(1.5 + k * 1.8, function () { addPost(au, hp.text); });
+      }
+    }
     switch (evt) {
       case "war-declared": {
         const a = d.attackerName ? shortName(d.attacker) : null, b = d.defenderName ? shortName(d.defender) : null;

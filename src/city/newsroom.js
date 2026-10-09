@@ -746,10 +746,225 @@
     return best;
   }
 
+  /* ========================================================================
+     4b. LIVE. The network cuts away from the studio to a live feed, on every
+         screen at once (it is the same canvas): the President speaking from
+         the podium or the desk ("address"), or the decision desk counting an
+         election district by district ("results"). Whoever runs the event
+         owns the feed: live(spec) starts or updates it, live(null) ends it.
+           address: { kind:"address", who, set:"podium"|"desk", flag, title, line }
+           results: { kind:"results", title, a:{name, pct, won}, b:{...},
+                      districts:[{name, a, b, called}], call, reporting }
+     ======================================================================== */
+  const LIVE = { spec: null, since: 0, lineAt: 0 };
+  function live(spec) {
+    if (spec == null) {
+      if (!LIVE.spec) return false;
+      LIVE.spec = null; N.dirty = true;
+      return true;
+    }
+    if (!LIVE.spec || (spec.kind && spec.kind !== LIVE.spec.kind)) { LIVE.spec = {}; LIVE.since = CLOCK; }
+    const prevLine = LIVE.spec.line;
+    for (const k in spec) LIVE.spec[k] = spec[k];
+    if (LIVE.spec.line && LIVE.spec.line !== prevLine) LIVE.lineAt = CLOCK;
+    N.dirty = true;
+    N.paintAt = -1e9;                 // the cut is immediate on every set in the room
+    return true;
+  }
+  function paintLive(c, t) {
+    const L = LIVE.spec;
+    if (L.kind === "results") paintResults(c, t, L); else paintAddress(c, t, L);
+    // channel bug + LIVE + clock (the same furniture as the studio)
+    c.textBaseline = "middle"; c.textAlign = "left";
+    c.fillStyle = "#c0392b"; c.fillRect(12, 10, 86, 24);
+    c.fillStyle = "#fff"; c.font = "bold 15px Arial, sans-serif"; c.fillText("NEWS ONE", 18, 23);
+    c.fillStyle = "rgba(0,0,0,.6)"; c.fillRect(100, 10, 40, 24);
+    c.fillStyle = (Math.floor(t * 2) % 2) ? "#ff4d3d" : "#b8332a"; c.beginPath(); c.arc(110, 22, 4, 0, Math.PI * 2); c.fill();
+    c.fillStyle = "#fff"; c.font = "bold 12px Arial, sans-serif"; c.fillText("LIVE", 117, 23);
+    const hr = hour(), hh = Math.floor(hr), mm = Math.floor((hr - hh) * 60);
+    c.fillStyle = "rgba(0,0,0,.6)"; c.fillRect(W - 70, 10, 58, 24);
+    c.fillStyle = "#fff"; c.font = "bold 15px Arial, sans-serif"; c.textAlign = "center";
+    c.fillText((hh < 10 ? "0" : "") + hh + ":" + (mm < 10 ? "0" : "") + mm, W - 41, 23);
+    c.textAlign = "left";
+    c.fillStyle = "rgba(0,0,0,.07)";
+    for (let y = 0; y < H; y += 3) c.fillRect(0, y, W, 1);
+  }
+  function drawFlagAt(c, id, x, y, w, h) {
+    const F = CBZ.flags;
+    let ok = false;
+    if (F && F.paint && F.designFor) {
+      try { c.save(); c.translate(x, y); F.paint(c, F.designFor(id || (F.home ? F.home() : "republic")), w, h, { grain: false }); c.restore(); ok = true; }
+      catch (e) { try { c.restore(); } catch (e2) {} ok = false; }
+    }
+    if (!ok) {
+      // a plain tricolour so the set is never empty
+      c.fillStyle = "#1d3c7a"; c.fillRect(x, y, w, h / 3);
+      c.fillStyle = "#e9e6dc"; c.fillRect(x, y + h / 3, w, h / 3);
+      c.fillStyle = "#a8232c"; c.fillRect(x, y + 2 * h / 3, w, h / 3);
+    }
+  }
+  function drawSpeaker(c, cx, t, talking) {
+    const nod = Math.sin(t * 1.3) * 1.0, mouth = talking && (Math.floor(t * 7) % 3) ? 3 : 1;
+    // dark suit, white shirt, red tie, a flag pin
+    c.fillStyle = "#151a24";
+    c.beginPath();
+    c.moveTo(cx - 70, 200); c.lineTo(cx - 56, 152); c.quadraticCurveTo(cx, 136, cx + 56, 152); c.lineTo(cx + 70, 200); c.closePath(); c.fill();
+    c.fillStyle = "#f4f4f2";
+    c.beginPath(); c.moveTo(cx - 14, 144); c.lineTo(cx, 172); c.lineTo(cx + 14, 144); c.closePath(); c.fill();
+    c.fillStyle = "#a01c28";
+    c.beginPath(); c.moveTo(cx - 4, 150); c.lineTo(cx + 4, 150); c.lineTo(cx + 6, 178); c.lineTo(cx, 184); c.lineTo(cx - 6, 178); c.closePath(); c.fill();
+    c.fillStyle = "#d8b04a"; c.fillRect(cx - 34, 160, 6, 4);
+    c.fillStyle = "#c8a080";
+    c.fillRect(cx - 9, 126 + nod, 18, 20);
+    c.beginPath(); c.ellipse(cx, 104 + nod, 22, 27, 0, 0, Math.PI * 2); c.fill();
+    c.fillStyle = "#6d6a66";
+    c.beginPath(); c.ellipse(cx, 86 + nod, 23, 13, 0, Math.PI, Math.PI * 2); c.fill();
+    c.fillRect(cx - 23, 84 + nod, 5, 13); c.fillRect(cx + 18, 84 + nod, 5, 13);
+    c.fillStyle = "#2a1d16";
+    c.fillRect(cx - 10, 101 + nod, 5, 3); c.fillRect(cx + 5, 101 + nod, 5, 3);
+    c.fillRect(cx - 11, 95 + nod, 7, 2); c.fillRect(cx + 4, 95 + nod, 7, 2);
+    c.fillStyle = "#6e3530";
+    c.fillRect(cx - 7, 117 + nod, 14, mouth);
+  }
+  function paintAddress(c, t, L) {
+    const desk = L.set === "desk";
+    // the room: deep blue drapes at the podium, gold drapes and a window at the desk
+    const bg = c.createLinearGradient(0, 0, 0, H);
+    if (desk) { bg.addColorStop(0, "#5a4220"); bg.addColorStop(1, "#2c1f0f"); }
+    else { bg.addColorStop(0, "#14284c"); bg.addColorStop(1, "#081429"); }
+    c.fillStyle = bg; c.fillRect(0, 0, W, H);
+    c.fillStyle = desk ? "rgba(255,220,150,.10)" : "rgba(120,160,230,.10)";
+    for (let i = 0; i < 14; i++) c.fillRect(i * 38 + 6, 0, 16, 230);
+    if (desk) {
+      // the window behind the desk, daylight or night by the real hour
+      const hr = hour(), day_ = hr > 6.5 && hr < 19.5;
+      c.fillStyle = day_ ? "#9fc2e0" : "#1b2440"; c.fillRect(330, 40, 120, 120);
+      c.strokeStyle = "#e8dcc0"; c.lineWidth = 4; c.strokeRect(330, 40, 120, 120);
+      c.beginPath(); c.moveTo(390, 40); c.lineTo(390, 160); c.moveTo(330, 100); c.lineTo(450, 100); c.stroke();
+    }
+    // the flag behind him, on a staff
+    const fx = desk ? 40 : 300, fy = 38, fw = desk ? 132 : 170, fh = desk ? 88 : 112;
+    c.fillStyle = "#b8963e"; c.fillRect(fx - 6, fy - 8, 4, 200);
+    c.beginPath(); c.arc(fx - 4, fy - 10, 5, 0, Math.PI * 2); c.fill();
+    drawFlagAt(c, L.flag, fx, fy, fw, fh);
+    // a soft fold shading so it reads as cloth
+    c.fillStyle = "rgba(0,0,0,.10)";
+    for (let i = 1; i < 5; i++) c.fillRect(fx + (fw * i) / 5, fy, fw / 14, fh);
+    drawSpeaker(c, desk ? 250 : 200, t, CLOCK - LIVE.lineAt < 4);
+    if (desk) {
+      const dk = c.createLinearGradient(0, 176, 0, 236);
+      dk.addColorStop(0, "#6a3f1c"); dk.addColorStop(1, "#3a210d");
+      c.fillStyle = dk; c.fillRect(120, 180, 270, 56);
+      c.fillStyle = "#8a5a2a"; c.fillRect(120, 178, 270, 5);
+    } else {
+      // the lectern with the seal
+      c.fillStyle = "#4a2f1a"; c.fillRect(160, 172, 80, 64);
+      c.fillStyle = "#5e3c22"; c.fillRect(154, 168, 92, 8);
+      c.fillStyle = "#1d3c7a"; c.beginPath(); c.arc(200, 204, 17, 0, Math.PI * 2); c.fill();
+      c.strokeStyle = "#d8b04a"; c.lineWidth = 3; c.beginPath(); c.arc(200, 204, 17, 0, Math.PI * 2); c.stroke();
+      c.fillStyle = "#d8b04a"; c.beginPath(); c.arc(200, 204, 5, 0, Math.PI * 2); c.fill();
+    }
+    // the lower third: ADDRESS TO THE NATION, who, and what he just said
+    c.textBaseline = "middle"; c.textAlign = "left";
+    c.fillStyle = "#a8232c"; c.fillRect(0, 200, 236, 26);
+    c.fillStyle = "#fff"; c.font = "bold 14px Arial, sans-serif";
+    c.fillText(clean(L.title || "ADDRESS TO THE NATION").toUpperCase().slice(0, 28), 10, 214);
+    if (L.who) {
+      c.fillStyle = "rgba(10,20,40,.88)"; c.fillRect(236, 200, W - 236, 26);
+      c.fillStyle = "#dfe7f2"; fitText(c, clean(L.who), 244, 214, W - 252, 13, true);
+    }
+    c.fillStyle = "rgba(245,245,245,.97)"; c.fillRect(0, 226, W, 32);
+    c.fillStyle = "#101010";
+    const q = L.line ? "“" + clean(L.line) + "”" : "The President is speaking from " + (desk ? "the Oval Office" : "the press room");
+    fitText(c, q, 12, 243, W - 24, 18);
+    // the ticker carries the real headlines underneath
+    c.fillStyle = "#0a0f19"; c.fillRect(0, 258, W, 30);
+    c.fillStyle = "#a8232c"; c.fillRect(0, 258, 58, 30);
+    c.fillStyle = "#fff"; c.font = "bold 12px Arial, sans-serif"; c.fillText("LIVE", 16, 274);
+    const txt = tickerItems().join("     ");
+    c.save(); c.beginPath(); c.rect(60, 258, W - 60, 30); c.clip();
+    c.fillStyle = "#e9eef5"; c.font = "14px Arial, sans-serif";
+    const tw = Math.max(200, c.measureText(txt + "     ").width);
+    const off = (t * TICKER_PX) % tw;
+    c.fillText(txt, 66 - off, 274); c.fillText(txt, 66 - off + tw, 274);
+    c.restore();
+  }
+  function paintResults(c, t, L) {
+    const bg = c.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, "#0d1f3f"); bg.addColorStop(1, "#050c1b");
+    c.fillStyle = bg; c.fillRect(0, 0, W, H);
+    const A = L.a || { name: "?", pct: 0, won: 0 }, B = L.b || { name: "?", pct: 0, won: 0 };
+    const CA = L.aColor || "#2f6fd6", CB = L.bColor || "#d23b3b";
+    c.textBaseline = "middle"; c.textAlign = "left";
+    c.fillStyle = "#f4c542"; c.fillRect(150, 10, 200, 24);
+    c.fillStyle = "#0a0f19"; c.font = "bold 14px Arial, sans-serif"; c.textAlign = "center";
+    c.fillText(clean(L.title || "ELECTION NIGHT").toUpperCase().slice(0, 24), 250, 23);
+    // the two candidates and the national count
+    const row = function (y, cand, col) {
+      c.textAlign = "left";
+      c.fillStyle = col; c.fillRect(16, y, 8, 34);
+      c.fillStyle = "#fff"; fitText(c, clean(cand.name || "").toUpperCase(), 32, y + 10, 180, 15);
+      c.fillStyle = "#c9d4e6"; c.font = "12px Arial, sans-serif";
+      c.fillText((cand.won | 0) + " won", 32, y + 27);
+      c.fillStyle = "rgba(255,255,255,.08)"; c.fillRect(220, y + 4, 200, 26);
+      c.fillStyle = col; c.fillRect(220, y + 4, Math.max(0, Math.min(200, 2 * (+cand.pct || 0))), 26);
+      c.fillStyle = "#fff"; c.font = "bold 18px Arial, sans-serif"; c.textAlign = "right";
+      c.fillText(Math.round(+cand.pct || 0) + "%", 490, y + 18);
+    };
+    row(44, A, CA);
+    row(84, B, CB);
+    // the districts as they come in
+    const D = Array.isArray(L.districts) ? L.districts : [];
+    const cols = 4, cw = 118, ch = 22, x0 = 16, y0 = 128;
+    for (let i = 0; i < D.length && i < 12; i++) {
+      const d = D[i], x = x0 + (i % cols) * (cw + 4), y = y0 + Math.floor(i / cols) * (ch + 4);
+      const lead = !d.called ? null : (d.a >= d.b ? CA : CB);
+      c.fillStyle = lead || "rgba(255,255,255,.10)"; c.fillRect(x, y, cw, ch);
+      c.fillStyle = lead ? "#fff" : "#9aa6bd"; c.textAlign = "left";
+      fitText(c, clean(d.name || ""), x + 5, y + ch / 2 + 1, cw - 10, 12, !lead);
+    }
+    // the lower third: the latest call, then the decision
+    c.fillStyle = L.call ? "#e0301e" : "#1d4f9c"; c.fillRect(0, 200, 150, 26);
+    c.fillStyle = "#fff"; c.font = "bold 14px Arial, sans-serif"; c.textAlign = "left";
+    c.fillText(L.call ? "PROJECTION" : "REPORTING", 10, 214);
+    c.fillStyle = "rgba(10,20,40,.88)"; c.fillRect(150, 200, W - 150, 26);
+    c.fillStyle = "#dfe7f2"; fitText(c, clean(L.reporting || ""), 158, 214, W - 166, 13, true);
+    c.fillStyle = "rgba(245,245,245,.97)"; c.fillRect(0, 226, W, 32);
+    c.fillStyle = "#101010";
+    fitText(c, clean(L.call || L.line || "Votes are being counted").toUpperCase(), 12, 243, W - 24, 19);
+    c.fillStyle = "#0a0f19"; c.fillRect(0, 258, W, 30);
+    c.fillStyle = "#f4c542"; c.fillRect(0, 258, 58, 30);
+    c.fillStyle = "#0a0f19"; c.font = "bold 12px Arial, sans-serif"; c.fillText("VOTE", 12, 274);
+    const txt = tickerItems().join("     ");
+    c.save(); c.beginPath(); c.rect(60, 258, W - 60, 30); c.clip();
+    c.fillStyle = "#e9eef5"; c.font = "14px Arial, sans-serif";
+    const tw = Math.max(200, c.measureText(txt + "     ").width);
+    const off = (t * TICKER_PX) % tw;
+    c.fillText(txt, 66 - off, 274); c.fillText(txt, 66 - off + tw, 274);
+    c.restore();
+  }
+
+  // where the sets are, for the people watching them (city/address.js): world
+  // positions of every screen still in the scene, read at most once a second
+  let _scrAt = -1e9, _scr = [];
+  function screensAt() {
+    if (CLOCK - _scrAt < 1 && _scr.length) return _scr;
+    _scrAt = CLOCK; _scr = [];
+    for (let i = SCREENS.length - 1; i >= 0; i--) {
+      const o = SCREENS[i];
+      if (!o || !attached(o)) { SCREENS.splice(i, 1); continue; }
+      if (o.visible === false || !o.getWorldPosition) continue;
+      o.getWorldPosition(_v);
+      _scr.push({ x: _v.x, y: _v.y, z: _v.z });
+    }
+    return _scr;
+  }
+
   /* ---- the painter ------------------------------------------------------- */
   function paint() {
     if (!CTX) return;
     const c = CTX, t = CLOCK;
+    if (LIVE.spec) { paintLive(c, t); N.painted++; N.paintedLive = (N.paintedLive | 0) + 1; return; }
     const s = N.cur || fallback();
     const look = s.look || lookOf(s.cat);
     // the studio: deep blue set, lit panels and a skyline strip
@@ -1218,8 +1433,12 @@
     tvParts: tvParts,
     tvSet: tvSet,
     paintNow: paintNow,
+    live: live,
+    liveState: function () { return LIVE.spec ? Object.assign({ since: LIVE.since }, LIVE.spec) : null; },
+    screens: screensAt,
     audit: function () {
       return {
+        live: LIVE.spec ? LIVE.spec.kind || "address" : null, paintedLive: N.paintedLive | 0,
         stories: N.stories.length, current: N.cur ? N.cur.h : null, screens: SCREENS.length,
         nearest: Math.round(N.nearest), painted: N.painted, pushed: N.pushed, events: N.events,
         hooked: Object.assign({}, SEEN.hooked), canvas: CV ? W + "x" + H : null,

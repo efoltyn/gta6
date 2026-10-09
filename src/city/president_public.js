@@ -1150,6 +1150,7 @@
     CROWD.members.length = 0; CROWD.slots = []; CROWD.stage = null;
     for (let i = 0; i < PROT.members.length; i++) queuePanic(PROT.members[i].ped, PROT.drifting, x, z);
     PROT.members.length = 0;
+    if (CBZ.mob && CBZ.mob.panic) { try { CBZ.mob.panic(x, z); } catch (e) {} }
     if (CBZ.cityCrowdFlee) { try { CBZ.cityCrowdFlee(x, z, 60, 1); } catch (e) {} }
     if (CBZ.cityPanicRaise) { try { CBZ.cityPanicRaise(x, z, 1.2); } catch (e) {} }
   }
@@ -1747,8 +1748,25 @@
     PROT.tries = 0;
     const angriest = CBZ.politics && CBZ.politics.angriest ? CBZ.politics.angriest() : null;
     PROT.group = angriest && angriest.anger >= 55 ? angriest.id : null;
-    emit("protest", { phase: "start", size: PROT.size, at: { x: PROT.at.x, z: PROT.at.z }, group: PROT.group, groupName: PROT.group ? angriest.name : null });
-    news(PROT.size >= 14 ? "A large crowd of protesters fills the road outside the Executive Mansion." : "Protesters gather outside the Executive Mansion gate.");
+    // THE PROTEST IS A CROWD (city/mob.js): the people the street's anger puts
+    // at the gate — tens on a sour day, a road packed for a hundred metres when
+    // the country is furious — dressed by the groups that are angry, the
+    // nearest of them ordinary people you can walk up to.
+    PROT.mob = null;
+    if (CBZ.mob && CBZ.mob.form) {
+      const souls = Math.round(30 + a * a * 1600 + (size != null ? size * 20 : 0));
+      let G = null;
+      const A = CBZ.address;
+      if (A && A.groups) { try { G = A.groups().filter(function (q) { return q.loyalty < 45; }).map(function (q) { return { name: q.name, share: q.share, color: q.color, cap: 0.2, shirt: 0.35 }; }); } catch (e) { G = null; } }
+      PROT.souls = souls;
+      PROT.mob = CBZ.mob.form({
+        at: { x: gp.x, z: gp.z + 18 }, face: Math.PI, size: souls, side: "opposition", kind: "protest", place: "the Mansion", hold: true, quiet: true,
+        slogans: PROT.slogans, chants: PROT.slogans.map(function (sl) { return CHANTS[sl] || (sl.charAt(0) + sl.slice(1).toLowerCase() + "!"); }),
+        groups: G && G.length ? G : null, violent: 0.04 + a * 0.18, anger: a, width: 20,
+      });
+    }
+    emit("protest", { phase: "start", size: PROT.mob ? PROT.souls : PROT.size, at: { x: PROT.at.x, z: PROT.at.z }, group: PROT.group, groupName: PROT.group ? angriest.name : null });
+    news((PROT.mob ? PROT.souls >= 300 : PROT.size >= 14) ? "A large crowd of protesters fills the road outside the Executive Mansion." : "Protesters gather outside the Executive Mansion gate.");
     fillProtest(force);
     return true;
   }
@@ -1777,6 +1795,14 @@
     if (!PROT.active) return;
     const gp = gatePoint(), P = playerPos();
     if (!gp) return;
+    if (PROT.mob) {
+      // the crowd owns its bodies; this file only decides whether a line stands at the gate
+      const LW = policeLineWanted();
+      if (LW.want && !PROT.mobLine && CBZ.mob.line) {
+        PROT.mobLine = CBZ.mob.line(PROT.mob, { at: { x: gp.x, z: gp.z + 6 }, face: 0, width: 16, n: 10, kind: LW.soldiers ? "army" : "police", gas: 2, retreat: { x: gp.x, z: gp.z - 6 } });
+      }
+      return;
+    }
     const near = force || distXZ(P, gp.x, gp.z) < 170;
     if (!near) { releaseProtestBodies(); return; }
     const slots = protestSlots();
@@ -1806,6 +1832,7 @@
     }
   }
   function releaseProtestBodies() {
+    if (PROT.mob && CBZ.mob) { CBZ.mob.disperse(PROT.mob, false); PROT.mob = null; PROT.mobLine = null; }
     for (let i = 0; i < PROT.members.length; i++) unpost(PROT.members[i].ped);
     PROT.members.length = 0;
     if (PROT.slots) for (let i = 0; i < PROT.slots.length; i++) PROT.slots[i].ped = null;
@@ -1816,6 +1843,7 @@
     if (!PROT.active) return;
     PROT.active = false;
     const flee = phase === "dispersed";
+    if (PROT.mob && CBZ.mob) { CBZ.mob.disperse(PROT.mob, flee); PROT.mob = null; PROT.mobLine = null; }
     for (let i = 0; i < PROT.members.length; i++) startDrift(PROT.members[i].ped, PROT.drifting, flee ? { x: PROT.at.x, z: PROT.at.z - 6 } : gatePoint(), flee);
     PROT.members.length = 0;
     for (let i = 0; i < PROT.police.length; i++) dropBody(PROT.police[i]);
@@ -1838,6 +1866,7 @@
       // a curfew at night clears the street
       if (curfewLive() && isNight() && policeLineWanted().want) { endProtest("dispersed"); return; }
       fillProtest(false);
+      if (PROT.mob) { if (CBZ.mob && !CBZ.mob.stage(PROT.mob)) { PROT.mob = null; endProtest("end"); } return; }    // the crowd chants for itself
       PROT.chantT -= dt;
       if (PROT.chantT <= 0 && PROT.members.length) {
         PROT.chantT = 5 + Math.random() * 3;
@@ -2200,7 +2229,7 @@
     return { x: B.stand.x, y: B.deckY, z: B.stand.z, inside: { x: B.inside.x, y: B.inside.y, z: B.inside.z } };
   }
   function protestsRead() {
-    return PROT.active && PROT.at ? [{ x: PROT.at.x, z: PROT.at.z, size: PROT.size }] : [];
+    return PROT.active && PROT.at ? [{ x: PROT.at.x, z: PROT.at.z, size: PROT.mob ? PROT.souls : PROT.size, mob: PROT.mob || null }] : [];
   }
 
   CBZ.presidentPublic = {
@@ -2210,6 +2239,11 @@
     balcony: balconyRead,
     protests: protestsRead,
     evacuate: evacuate,
+    // THE PROPS AND THE ROAR ARE SHARED (city/mob.js, city/address.js): a
+    // marcher's sign, a supporter's flag, the placard and cheer poses, the
+    // card the sign is lettered on, and the speech crowd's answer.
+    props: { sign: giveSign, flag: giveFlag, lower: lowerProp, hype: hype, pose: setPose, signMats: signMats, signTex: signTex },
+    react: function (kind) { if (CROWD.members.length) react(kind === "boo" ? "boo" : "cheer", false); return CROWD.members.length; },
     // harness/test hooks only, not part of the public contract
     _startNow: function (kind) {
       if (!site()) return null;

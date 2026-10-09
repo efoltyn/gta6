@@ -1009,6 +1009,13 @@
         const crisis = murders >= 5 || (p && (p.scandal || 0) > 40) || (p && (p.emergencyPowers || 0) > 40);
         if (!CBZ.politics) shock(h.id, crisis ? 5 : 2);
         if (p && (p.scandal || 0) > 0) p.scandal = clamp((p.scandal || 0) - 6, 0, 100);
+        // ON THE AIR (city/address.js): the airtime is bought, the cameras are
+        // ready, and what is said is chosen statement by statement, each one a
+        // real act. Without that file the order is the old one-line story.
+        if (CBZ.address && CBZ.address.begin) {
+          const r = CBZ.address.begin({ reason: "order" });
+          if (r && r.ok) return { ok: true, why: "", live: true };
+        }
         news(h.title + " addresses the nation" + (crisis ? " from the Situation Room. The country was listening." : ". The country mostly was not."));
         return { ok: true, why: "" };
       },
@@ -2726,6 +2733,16 @@
     const id = S.lastSeatId;
     S.voteDay = null;
     if (!id) return true;
+    // A REFUSED COUNT (city/transfer.js): the vote is in but the seat has not
+    // moved — certification is pending, or the President kept it by force.
+    // Neither is a second term and neither is a defeat yet; transfer.js says
+    // which, and reports it itself.
+    if (CBZ.transfer && CBZ.transfer.ballot) {
+      let b = null;
+      try { b = CBZ.transfer.ballot(id); } catch (e) { b = null; }
+      if (b === "hold") { S.voteDay = d; return false; }
+      if (b === "seized") return true;
+    }
     if (CBZ.elections && CBZ.elections.status) {
       let live = null;
       try { live = CBZ.elections.status(id); } catch (e) {}
@@ -2863,7 +2880,7 @@
     S.arrestT += dt;
     const rec = S.lastSeatId && CBZ.polity && CBZ.polity.get ? CBZ.polity.get(S.lastSeatId) : null;
     if (S.arrestT >= ARREST_GRACE_SEC) {
-      if (inCountry(rec)) { arrestNow(S.arrestWhy || "Removed from office", S.impeached ? "IMPEACHED" : "TAKEN"); }
+      if (inCountry(rec)) { arrestNow(S.arrestWhy || "Removed from office", S.arrestTitle || (S.impeached ? "IMPEACHED" : "TAKEN")); }
       else {
         // you ran — the manhunt is the price of freedom, through wanted.js
         S.arrestArmed = false;
@@ -3388,6 +3405,18 @@
     _armAttack: function (d) { armAttack(d == null ? day() : d); }, _tickCellDay: tickCellDay,
     _att: ATT, _attackTarget: attackTarget, _tickAttack: tickAttack, _gateTarget: gateTarget,
     _tickFallsDay: tickFallsDay, _safehouses: safehouses, _paint: paintBoard,
+    // THE WARRANT (city/transfer.js): charged for what you did with the
+    // office — the marshals come through §6's own arrest path (the grace,
+    // the border, the jail). impeached marks it as the Senate's doing.
+    charge: function (why, title, impeached) {
+      const S = st();
+      if (S.arrestArmed) return false;
+      S.arrestArmed = true; S.arrestT = 0; S.arrestWhy = why || "Crimes in office"; S.arrestTitle = title || null;
+      if (impeached) S.impeached = true;
+      if (!S.lastSeatId) { const h = seat(); if (h) S.lastSeatId = h.id; }
+      orders("Marshals Service", "You have " + ARREST_GRACE_SEC + " seconds to surrender. Cross the border and you are a fugitive instead.", 2);
+      return true;
+    },
   };
   CBZ.presidencyReset = reset;
 })();

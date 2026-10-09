@@ -548,7 +548,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- NEWS ONE (city/newsroom.js): the one news channel, its one canvas and
      the one TV set, shared by every screen in the game. Before world/lounge.js
      (the prison dayroom set) and every city/ room that hangs a TV. -->
-<script src="src/city/newsroom.js?v=polsim1008b"></script>
+<script src="src/city/newsroom.js?v=address1008"></script>
 <!-- FURNITURE MOVES WHEN YOU WALK INTO IT (owner: "physics, not another
      f***ing button"). CBZ.pushables.add(spec) — still exported as CBZ.pushProp —
      makes a drawn prop a mass on a floor:
@@ -1444,7 +1444,7 @@ document.body.appendChild(b);}}catch(e){}})();
      seats) and vehicles.js / boarding.js / passengerseat.js (all read it). -->
 <script src="src/city/carseats.js?v=w09290242x"></script>
 <script src="src/city/playercars.js?v=sl0930b"></script>
-<script src="src/city/crashfx.js?v=jdeb1001"></script>
+<script src="src/city/crashfx.js?v=address1008"></script>
 <script src="src/city/crashdeform.js?v=carblood930"></script>
 <script src="src/systems/skidmarks.js?v=skid1"></script>
 <script src="src/systems/dustfx.js?v=dust1"></script>
@@ -1867,7 +1867,7 @@ document.body.appendChild(b);}}catch(e){}})();
      people running real verbs, Holler is the social feed where a post is the
      act); phone.js draws it in 3D on a canvas screen and routes taps onto
      the glass. Also the city's one text sink (CBZ.cityPhoneNotify). -->
-<script src="src/city/phone_apps.js?v=polsim1008b"></script>
+<script src="src/city/phone_apps.js?v=address1008"></script>
 <script src="src/city/phone.js?v=phone1001"></script>
 <script src="src/city/killfeed.js?v=news0930"></script>
 <!-- THE MORGUE (DEATH_DROPS_V2 / CORPSE_PERSIST / EMS_RESPONSE): what a death
@@ -2134,7 +2134,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/protection.js?v=polsim1008b"></script>
 <script src="src/city/officials.js?v=polsim1008b"></script>
 <script src="src/city/approval.js?v=polsim1008b"></script>
-<script src="src/city/elections.js?v=nodash1"></script>
+<script src="src/city/elections.js?v=address1008"></script>
 
 <!-- X-wave: the world -->
 <script src="src/systems/hunger.js?v=polsim1008b"></script>
@@ -2342,7 +2342,7 @@ document.body.appendChild(b);}}catch(e){}})();
      jail's transport). AFTER govcomplex.js (reads CBZ.govComplexes); every
      other read is feature-detected and lazily retried.
      Revert with ?cfg_PRESIDENCY_V1=0. -->
-<script src="src/city/presidency.js?v=polsim1008b"></script>
+<script src="src/city/presidency.js?v=address1008"></script>
 <script src="src/city/politics.js?v=polsim1008b"></script>
 <!-- THE PRESIDENT'S WORLD (2026-09-27 rework) — no HUD strip, no mission
      list, no button console. In load order: the office (desk phone that rings
@@ -2370,7 +2370,7 @@ document.body.appendChild(b);}}catch(e){}})();
      presidency.js and president_staff.js; everything is read lazily. -->
 <script src="src/city/warroom.js?v=polsim1008b"></script>
 <script src="src/city/frontline.js?v=flagfix1001"></script>
-<script src="src/city/president_public.js?v=polsim1008b"></script>
+<script src="src/city/president_public.js?v=address1008"></script>
 <!-- THE COUNTRY TURNS ON ITS PRESIDENT, AND YOU SEE IT COMING (city/dissent.js):
      unrest, an organised movement with a leader, generals meeting, troops
      moving, then the coup (civilwar.js's own) a day later. Every step is on
@@ -2378,6 +2378,19 @@ document.body.appendChild(b);}}catch(e){}})();
      get to a bunker. After presidency/warroom/civilwar; reads them lazily. -->
 <script src="src/city/dissent.js?v=polsim1008b"></script>
 <script src="src/city/president_regime.js?v=flagm1001"></script>
+<!-- THE CROWD THAT MOVES (city/mob.js): rallies, marches, police lines, gas,
+     breaches. The one mass crowd for every political crowd (the gate protest,
+     a rally the President calls, the Capitol march): the nearest are ordinary
+     rigs, the rest one instanced fill, capped per device. -->
+<script src="src/city/mob.js?v=address1008"></script>
+<!-- THE NATIONAL ADDRESS (city/address.js): the address order puts the
+     President on every TV (newsroom.js live feed); 3 to 5 statements, verb x
+     target off the real world, each one a CBZ.politics.act. After politics.js. -->
+<script src="src/city/address.js?v=address1008"></script>
+<!-- THE TRANSFER OF POWER (city/transfer.js): election night on every TV, the
+     held count, concede or refuse, the Capitol march and breach, the Guard's
+     decision, seized / convicted / certified. After elections.js. -->
+<script src="src/city/transfer.js?v=address1008"></script>
 
 <!-- CASH STORE — the back half of the cash-bag loop (owner: "only driving to
      your own place can store the cash, not just rob"). Turns govcomplex's
