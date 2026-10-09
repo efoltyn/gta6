@@ -1211,6 +1211,7 @@
     ped._parked = false; ped.dead = false; ped.deadT = 0; ped.ko = 0; ped.culled = false; ped.collected = false; ped.needsPickup = false;
     // a new person: none of the last occupant's wounds or bleeds come with the rig
     if (CBZ.vitals && CBZ.vitals.reset) { try { CBZ.vitals.reset(ped); } catch (e) {} }
+    if (CBZ.woundsForget) CBZ.woundsForget(ped);   // ..nor his bullet holes
     ped.pos.set(px[i], 0, pz[i]); ped.char.group.rotation.y = heading[i];
     // PROMOTION MOTION CONTINUITY: the instanced body you were watching was
     // WALKING along its cached heading; the real ped must pick that walk straight

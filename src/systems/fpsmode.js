@@ -784,6 +784,8 @@
   const armR = FPH ? FPH.makeArm({ fore: fistSleeve, upper: fistUpper }, 1) : new THREE.Group();
   const armL = FPH ? FPH.makeArm({ fore: fistSleeve, upper: fistUpper }, -1) : new THREE.Group();
   fpArms.add(armR, armL);
+  // systems/wounds.js mirrors a hole in your rig's arm onto these
+  CBZ.fpViewArms = { r: armR, l: armL };
   let armSleeved = false;
   let fistSleeveHex = -1, fistUpperHex = -1, fistSkinHex = -1;
   function dressFists() {

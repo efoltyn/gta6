@@ -10,20 +10,29 @@
        "there's a hole in his back as if he got shot" from a punch): blunt
        trauma is systems/vitals.js's daze, never a decal.
        Per-wound scale jitter so no two holes are identical.
-     • LOCAL SOAK PATCH: an irregular dark stain SPREADS AROUND each entry
-       wound over a few seconds — anchored to the wound, riding the same
-       body part. Never a whole-garment recolor (the old clean→bloodied→
-       soaked material ladder turned people maroon — DELETED). 3 shared
-       blob geometries (per-vertex radial jitter baked at startup) + random
-       spin + per-axis stretch keep any two stains from matching.
-     • SEVERITY READS: headshot = wound at the head + a HEAVY insta-spread
-       splatter on the head that runs down onto the collar (a second stain
-       seated at the top of the shirt); a shotgun blast scatters 2-3 wounds
-       (per-pellet calls collapse into one ≤3-wound burst).
+     • NO SOAK. THE CLOTHES KEEP THEIR COLOUR (owner 2026-10-09: "I don't
+       really like clothes changing colours because of blood. Instead it
+       should just be the blood holes, like when you just get shot"). Each
+       hole carries ONE small tight blood ring, a few cm, stamped at its
+       final size on the frame of the hit; it never grows, never creeps and
+       never runs down to the collar. The spreading stain (bloom + a 40 s
+       creep to two-thirds of the panel) and the headshot collar run-down
+       are DELETED; gore.js's corpse-in-a-pool material swap is deleted
+       too. Blood lives in the drips and pools on the ground.
+     • HOLES NEVER TIME OUT. A hole stays as long as the body exists, alive
+       or dead (owner: "bullet holes disappear after a while, which is
+       dumb"). Only a cap recycles one, and the global cap picks the hole
+       furthest from the lens / behind it, never the one you are looking at.
+     • THE PLAYER TOO: the city's playerActor (no .char) resolves to
+       capture.js's CBZ.playerWoundActor, and a hole in your forearm or
+       upper arm is mirrored onto the first-person viewmodel arm
+       (CBZ.fpViewArms, published by fpsmode.js).
+     • a shotgun blast scatters 2-3 wounds (per-pellet calls collapse into
+       one burst).
 
    Budget discipline (the game is draw-call bound):
      • caps: a LIVING man carries CITY 22 / elsewhere 10 meshes (a hit =
-       wound + its soak stain). A DEAD body has no low cap: 96 meshes (48
+       hole + cloth hole + its blood ring). A DEAD body has no low cap: 96 meshes (48
        holes with their stains) before his own oldest recycles, so a corpse
        you keep shooting or stabbing keeps collecting holes (owner: "you
        should be able to add unlimited bullet holes or stab holes"). Global
@@ -32,11 +41,10 @@
        shared, nothing cloned or disposed).
      • wounds are CHILDREN of the rig's part meshes → they animate, fall
        and despawn WITH the body for free; a throttled (0.8s) sweep frees
-       records once a rig leaves the scene. Soak growth ticks per-frame
-       ONLY while a stain is actively spreading (a few seconds per hit);
-       the whole system sleeps when nobody is being shot (one early-out).
-     • spawn distance-gated at 45u (matches gore.js's LOD band) so far
-       NPC-vs-NPC scraps cost nothing.
+       records once a rig leaves the scene. Nothing on a body animates
+       after the hit; the whole system sleeps when nobody is being shot.
+     • spawn distance-gated at 300u for holes (a sniper's kill keeps its
+       holes when you walk up to it); bites keep the old 45u band.
 
    Public API:
      CBZ.bodyWound(actor, worldPoint, opts) — opts:
@@ -86,10 +94,12 @@
     if (actor && actor.dead) return PER_CORPSE;
     return cityWounds() ? perActorCity() : perActorBase();
   }
-  const SPAWN_D2 = 45 * 45; // matches gore.js's "only where it can be seen" band
+  const SPAWN_D2 = 45 * 45; // bites: matches gore.js's "only where it can be seen" band
+  // HOLES: a body you shot from across the street still carries the hole when
+  // you walk up to it. Caps bound the cost, not distance.
+  const WOUND_D2 = 300 * 300;
   const DRY_T = 12;         // seconds until a fresh wound dries brown
   const PROUD = 0.013;      // how far the disc sits off the surface (no z-fight)
-  const PROUD_SOAK = 0.008; // the stain sits UNDER its wound disc
 
   // ============================================================
   //  WOUND_DECAL_V2 — THE HOLE IS THE SIZE OF THE ROUND, NOT OF THE DAMAGE.
@@ -137,7 +147,7 @@
   // (Both are quoted as face-WIDTH fractions and must be turned into radii by
   // capR() below, which divides out the decal geometry's own rim wobble.)
   const ENTRY_MAX_FRAC = 0.085;
-  const EXIT_MAX_FRAC = 0.34;      // a blowout is a third of the panel, not more
+  const EXIT_MAX_FRAC = 0.16;      // an exit is SLIGHTLY bigger than the entry, never a blowout
   // fpsmode.js's own heavyRound() line is `cal >= 1.0`; we use STRICTLY greater
   // so the untyped default (`cal` omitted → 1) does not punch through — a
   // caller that never named a round has not told us it was a rifle.
@@ -251,7 +261,7 @@
   //  DISSOLVES into the garment instead of being cut out of it.
   //
   //  AND IT DID NOT DISSOLVE, for two years, because a colour ramp on an
-  //  OPAQUE material cannot dissolve anything (2026-08-26). MAT_SOAK was a
+  //  OPAQUE material cannot dissolve anything (2026-08-26). MAT_RING (then MAT_SOAK) was a
   //  plain MeshBasicMaterial with no `transparent`, so the rim vertices merely
   //  went from near-black to a slightly-less-near-black and then stopped dead
   //  at the outline. That is the hard cut edge, still there, still a sticker,
@@ -273,7 +283,7 @@
         pos.setXY(i, x, y);
       }
       // 1 at the pooled centre → 0.18 at the feathered rim. Multiplied against
-      // MAT_SOAK, the edge all but vanishes into the cloth.
+      // MAT_RING, the edge all but vanishes into the cloth.
       const r = Math.min(1, Math.sqrt(x * x + y * y));
       const v = 1 - 0.82 * (r * r);
       col[i * 4] = v; col[i * 4 + 1] = v * 0.94; col[i * 4 + 2] = v * 0.94;
@@ -289,7 +299,7 @@
     g._maxR = maxRadiusOf(g);
     return g;
   }
-  const G_SOAK = [blobGeo(), blobGeo(), blobGeo()];
+  const G_RING = [blobGeo(), blobGeo(), blobGeo()];
 
   // ---- A DISC WITH ACTUAL RINGS IN IT (the pit the comment above promised) --
   //
@@ -429,10 +439,10 @@
     m._shared = true;
     return m;
   }
-  const RO_SOAK = 0.1, RO_WOUND = 0.2;   // see the renderOrder note in unlit()
+  const RO_RING = 0.1, RO_WOUND = 0.2;   // see the renderOrder note in unlit()
   const MAT_FRESH = unlit(0x4e070b);   // fresh entry wound: near-black red
   const MAT_DRY = unlit(0x351409);     // dried: dark brown scab
-  const MAT_SOAK = unlit(0x310609, -1); // wet cloth around the hole: near-black
+  const MAT_RING = unlit(0x310609, -1); // the wet ring round a hole: near-black red
   // TORN flesh (a bite) is WETTER and brighter than a bullet's cauterised-looking
   // entry hole — a tooth tears the skin open rather than punching through it.
   const MAT_TORN = unlit(0x6b0d10);
@@ -561,8 +571,12 @@
   const RO_CLOTH = 0.15;              // over its soak, under the flesh it shows
   const CLOTH_HOLE_K = 2.3;           // cloth hole radius ÷ entry-wound radius
   const SLIT_MAX_FRAC = 0.40;         // a slit's LENGTH, as a fraction of the face width
-  const SOAK_CREEP = 1.55;            // how far a stain keeps wicking after its bloom
-  const SOAK_CREEP_T = 40;            // ..over this many seconds
+  const SOAK_CREEP_T = 40;            // skin marks (bites): how long their stain wicks
+  // THE BLOOD RING round a hole: a few cm and no more. Radius in rig units
+  // (0.07 u reads as a few centimetres of wet fabric round a torn hole).
+  const RING_K = 1.35;                // ring radius / the hole it rings (cloth hole if any)
+  const RING_MAX = 0.075;             // never more than this, whatever hit
+  const RING_MAX_FRAC = 0.30;         // ..and never more than 30% of the panel's width
   if (CBZ.CONFIG.WOUND_REAL_V3 == null) CBZ.CONFIG.WOUND_REAL_V3 = true;
   function realOn() { return CBZ.CONFIG.WOUND_REAL_V3 !== false; }
 
@@ -625,8 +639,7 @@
   CBZ.CONFIG = CBZ.CONFIG || {};
   if (CBZ.CONFIG.WOUNDS_BITE == null) CBZ.CONFIG.WOUNDS_BITE = true;
 
-  const wounds = [];   // FIFO: { m, actor, age, kind, dried, gone, (soak: gx,gy,gt,t) }
-  const growing = [];  // soak records still spreading (per-frame, short-lived)
+  const wounds = [];   // FIFO: { m, actor, age, kind, dried, gone }
   const free = [];     // recycled meshes awaiting reuse
   const tmpV = new THREE.Vector3();
 
@@ -846,7 +859,7 @@
   // ---- mesh pool ------------------------------------------------------------
   function dropWound(i, reuse) {
     const r = wounds.splice(i, 1)[0];
-    r.gone = true;                               // growing[] skips stale refs
+    r.gone = true;
     if (r.m.parent) r.m.parent.remove(r.m);
     if (r.actor) r.actor._woundN = Math.max(0, (r.actor._woundN || 1) - 1);
     if (!reuse && free.length < 64) free.push(r.m);  // reuse = caller takes the mesh
@@ -868,61 +881,149 @@
       }
     }
     if (free.length) return free.pop();
-    if (wounds.length >= capGlobal()) return dropWound(0, true);   // global cap: oldest-first
+    if (wounds.length >= capGlobal()) return dropWound(victim(), true);
     const m = new THREE.Mesh(G_WOUND, MAT_FRESH);
     m.castShadow = m.receiveShadow = false;
     return m;
   }
 
-  // ---- LOCAL SOAK: an irregular stain spreads around the entry point --------
-  // a child of the SAME part, seated on the SAME face, under the wound disc;
-  // grows from a blot to full spread over `growT` seconds (per-frame while
-  // active, then it costs nothing).
-  // o (optional): { spin, kx, ky } — a stain laid ALONG something (a slit's
-  // blood wells out along the cut): fixed spin, per-axis stretch.
-  function spawnSoak(actor, part, lp, size, growT, o) {
-    const m = meshFor(actor);
-    const geo = G_SOAK[(Math.random() * 3) | 0];
-    m.geometry = geo;
-    m.material = MAT_SOAK;
-    m.renderOrder = RO_SOAK;      // under its own hole (see unlit()'s renderOrder note)
-    const ax = faceAxis(part, lp);         // one face for the clamp AND the seat
-    // A stain can never outgrow the panel it's soaked into — bigger than the
-    // face, it reads as a rigid sheet hovering off the body (user-filmed).
-    //
-    // THE OLD CAP DID NOT DO THAT, and it is the disc in the screenshot. It
-    // compared a RADIUS against the part's FULL WIDTH (`min(w,h,d)*1.05`), an
-    // off-by-two that let a head stain grow to 0.98 m across on a 0.60 m head —
-    // 163% of the face — while the comment above it claimed it was capped. The
-    // cap now measures against the HALF-span of the face the stain is seated
-    // on, through the same fitR() every other decal uses, and folds in the blob
-    // geometry's own ±41% rim wobble so a stain cannot overhang by its wobble
-    // either.
-    let gx, gy, creep = 0;
-    if (v2()) {
-      const mh = faceMin(part, ax);
-      const cap = fitR(geo, mh, mh);
-      gx = Math.min(cap, size * (0.8 + Math.random() * 0.5) * (o && o.kx || 1));
-      gy = Math.min(cap, size * (0.8 + Math.random() * 0.5) * (o && o.ky || 1));
-      // the slow wick through the cloth — never past the panel's own cap
-      if (realOn()) creep = Math.max(1, Math.min(SOAK_CREEP, cap / Math.max(gx, gy)));
-    } else {
-      const pp = part.geometry && part.geometry.parameters || {};
-      const cap = Math.max(0.16, Math.min(pp.width || 0.5, pp.height || 0.7, pp.depth || 0.4) * 1.05);
-      gx = Math.min(cap, size * (0.8 + Math.random() * 0.5));
-      gy = Math.min(cap * 1.25, size * (0.8 + Math.random() * 0.5));
+  // GLOBAL CAP VICTIM. The player must never watch a hole vanish, so when the
+  // pool is full the record recycled is the one furthest from the lens, with
+  // a big bonus for being behind it; age breaks ties (index 0 = oldest). Runs
+  // only at the cap (one pass over the records), never per frame.
+  const _vp = new THREE.Vector3();
+  function victim() {
+    const cam = CBZ.camera;
+    if (!cam || !wounds.length) return 0;
+    const cx = cam.position.x, cz = cam.position.z;
+    cam.getWorldDirection(_vp);
+    const fx = _vp.x, fz = _vp.z;
+    let best = 0, bs = -Infinity;
+    for (let i = 0; i < wounds.length; i++) {
+      const a = wounds[i].actor, p = a && (a.pos || (a.group && a.group.position));
+      let sc;
+      if (!p) sc = 1e9;                        // nobody to see it on
+      else {
+        const dx = p.x - cx, dz = p.z - cz;
+        sc = dx * dx + dz * dz;
+        if (dx * fx + dz * fz < 0) sc += 1e6;  // behind the lens
+      }
+      sc -= i * 1e-3;
+      if (sc > bs) { bs = sc; best = i; }
     }
-    // pad by the CREPT size: a stain that will keep spreading is centred far
-    // enough in that its final extent still cannot hang off the part.
-    seat(m, part, lp, v2() ? PROUD_SOAK_V2 : PROUD_SOAK, o && o.spin != null ? o.spin : undefined, ax,
-         v2() ? Math.max(gx, gy) * Math.max(1, creep) * geo._maxR : 0);
-    hugDecal(m, part, v2() ? PROUD_SOAK_V2 : PROUD_SOAK);
-    m.scale.set(gx * 0.35, gy * 0.35, 1);
+    return best;
+  }
+
+  // ---- THE FIRST-PERSON ARMS CARRY YOUR HOLES TOO ---------------------------
+  // fpsmode.js's viewmodel arms are their own meshes (systems/fphands.js
+  // makeArm: a lathed forearm along local +z, wrist 0 -> elbow 1, posed with
+  // scale (k, k, length); an upper arm the same way, elbow 0 -> shoulder 1).
+  // A hole in the player's rig forearm / upper arm is mirrored onto the same
+  // place on the matching viewmodel arm on the frame of the hit: the same
+  // hole + cloth hole + ring, at real size (the viewmodel is ~real scale, not
+  // the rig's caricature). The arm's scale is non-uniform and re-posed every
+  // frame, so each mark's own scale is counter-set per frame (fpTick) to stay
+  // round. Capped per arm; cleared with the player's other holes.
+  const FPW = [];                      // { m, arm, mesh, s, k }
+  const FP_PER_ARM = 18;
+  // fpsmode.js publishes its two arm groups as CBZ.fpViewArms = { r, l }
+  const _fpQ = new THREE.Quaternion(), _fpM = new THREE.Matrix4();
+  const _fpX = new THREE.Vector3(), _fpY = new THREE.Vector3(), _fpZ = new THREE.Vector3();
+  function fpClear() {
+    for (let i = 0; i < FPW.length; i++) { const w = FPW[i]; if (w.m.parent) w.m.parent.remove(w.m); }
+    FPW.length = 0;
+  }
+  function fpStamp(arm, mesh, a, u, rx, ry, geo, mat, ro, r) {
+    let n = 0, old = -1;
+    for (let i = 0; i < FPW.length; i++) if (FPW[i].arm === arm) { n++; if (old < 0) old = i; }
+    if (n >= FP_PER_ARM && old >= 0) { const w = FPW.splice(old, 1)[0]; if (w.m.parent) w.m.parent.remove(w.m); }
+    const m = new THREE.Mesh(geo, mat);
+    m.renderOrder = 1000 + ro;           // after the arm (renderOrder 1000), in the viewmodel queue
+    m.frustumCulled = false;
+    m.castShadow = m.receiveShadow = false;
+    const ca = Math.cos(a), sa = Math.sin(a);
+    m.position.set(ca * rx * 1.03, sa * ry * 1.03, u);
+    // decal x = around the arm, y = along it (+z), normal = out of the skin
+    _fpX.set(-sa, ca, 0); _fpY.set(0, 0, 1); _fpZ.set(ca, sa, 0);
+    _fpM.makeBasis(_fpX, _fpY, _fpZ);
+    m.quaternion.setFromRotationMatrix(_fpM);
+    mesh.add(m);
+    const w = { m, arm, mesh, s: r };
+    FPW.push(w);
+    fpSize(w);
+    return m;
+  }
+  function fpSize(w) {
+    const ps = w.mesh.scale;
+    const kx = ps.x || 1, kz = ps.z || 1;
+    // the arm's k already sizes its section; the mark sits at real size in
+    // viewmodel units: r * k across, r * k along (the length axis is scaled
+    // by the posed length, so divide it back out)
+    w.m.scale.set(w.s, w.s * kx / kz, 1);
+  }
+  function fpTick() {
+    for (let i = FPW.length - 1; i >= 0; i--) {
+      const w = FPW[i];
+      if (!w.m.parent) { FPW.splice(i, 1); continue; }
+      fpSize(w);
+    }
+  }
+  // the rig hole (part-local lp on `part`) -> the same place on the viewmodel
+  function fpMirror(actor, region, part, lp, holeR, clothed, kind) {
+    const VA = CBZ.fpViewArms;
+    if (!VA || (region !== "armL" && region !== "armR")) return;
+    const ch = actor.char, S = ch && ch.skinSlots;
+    if (!S) return;
+    const isFore = S.armsLower && S.armsLower.indexOf(part) >= 0;
+    const isUpper = !isFore && S.arms && S.arms.indexOf(part) >= 0;
+    if (!isFore && !isUpper) return;
+    const arm = region === "armL" ? VA.l : VA.r;
+    const P = arm && arm.userData && arm.userData.parts;
+    const mesh = P && (isFore ? P.fore : P.upper);
+    if (!mesh) return;
+    const g = part.geometry;
+    if (!g.boundingBox) g.computeBoundingBox();
+    const bb = g.boundingBox, h = Math.max(1e-4, bb.max.y - bb.min.y);
+    // rig: the hanging limb's low end is distal (wrist / elbow); fp: z 0 is distal
+    let u = (lp.y - bb.min.y) / h;
+    u = Math.max(0.12, Math.min(0.88, u));
+    const a = Math.atan2(lp.x * (region === "armL" ? -1 : 1), lp.z) + Math.PI * 0.5;
+    // section radii of the fp limb at u (fphands: forearm ~4.6 x 4.1 cm at the
+    // belly, upper arm ~5 cm); a touch proud so the mark never sinks in
+    const rx = isFore ? 0.044 : 0.05, ry = isFore ? 0.040 : 0.05;
+    // real size: the rig hole is RIG_MAG x life at the head; on the limb the
+    // viewmodel is ~real, so take the hole back to real millimetres x 1.6
+    const r = Math.max(0.0035, Math.min(0.012, holeR / RIG_MAG * 1.6));
+    const blade = kind === "blade";
+    fpStamp(arm, mesh, a, u, rx, ry, G_RING[0], MAT_RING, 1, r * (clothed ? 2.3 : 1.6) * RING_K);
+    if (clothed) fpStamp(arm, mesh, a, u, rx, ry, blade ? G_CLOTH_SLIT : G_CLOTH_HOLE, MAT_CLOTH, 2, r * 2.3);
+    fpStamp(arm, mesh, a, u, rx, ry, blade ? G_SLIT : G_ENTRY, blade ? MAT_TORN : MAT_FRESH, 3, r);
+  }
+
+  // ---- THE BLOOD RING: a small tight ring of blood round a hole --------------
+  // a child of the SAME part, seated on the SAME face, under the hole; stamped
+  // at its FINAL size on the frame of the hit. It never grows and never
+  // spreads: the clothes keep their colour, the blood is in the hole's ring
+  // and on the ground. `holeR` = the outer radius of what it rings.
+  // o (optional): { spin, kx, ky } — a ring laid ALONG something (a slit).
+  function spawnRing(actor, part, lp, ax, holeR, pad, o) {
+    const m = meshFor(actor);
+    const geo = G_RING[(Math.random() * 3) | 0];
+    m.geometry = geo;
+    m.material = MAT_RING;
+    m.renderOrder = RO_RING;      // under its own hole (see unlit()'s renderOrder note)
+    const mh = faceMin(part, ax);
+    const cap = Math.min(RING_MAX, capR(geo, mh, RING_MAX_FRAC), fitR(geo, mh, mh));
+    const r = Math.min(cap, holeR * RING_K * (0.92 + Math.random() * 0.16));
+    const gx = Math.min(cap, r * ((o && o.kx) || 1)), gy = Math.min(cap, r * ((o && o.ky) || 1));
+    seat(m, part, lp, PROUD_SOAK_V2, o && o.spin != null ? o.spin : undefined, ax,
+         Math.max(pad || 0, Math.max(gx, gy) * geo._maxR));
+    hugDecal(m, part, PROUD_SOAK_V2);
+    m.scale.set(gx, gy, 1);
     part.add(m);
-    const r = { m, actor, age: 0, kind: "soak", dried: true, gx, gy, gt: growT, t: 0, creep };
-    wounds.push(r);
-    growing.push(r);
+    wounds.push({ m, actor, age: 0, kind: "ring", dried: true });
     actor._woundN = (actor._woundN || 0) + 1;
+    return m;
   }
 
   // ---- ENTRY vs EXIT: where was the round GOING? ----------------------------
@@ -2112,6 +2213,9 @@
   CBZ.bodyWound = function (actor, wp, opts) {
     LEDGER.woundCalls++;
     if (!actor) { refuse("wound:no-actor"); return; }
+    // the city's playerActor carries no .char: the player's rig is capture.js's
+    // wound actor, one record for every mode (so a hole stays YOUR hole)
+    if (actor.isPlayer && !actor.char && CBZ.playerWoundActor) actor = CBZ.playerWoundActor;
     if (!wp) { refuse("wound:no-point"); return; }
     if (actor.culled) { refuse("wound:culled"); return; }
     if (!CBZ.scene) { refuse("wound:no-scene"); return; }
@@ -2135,7 +2239,7 @@
     if (opts.melee === "blunt" || opts.melee === true) { refuse("wound:blunt"); return; }
     let px = wp.x, py = wp.y, pz = wp.z;
     if (px == null || py == null || pz == null) { refuse("wound:null-coord"); return; }
-    if (dist2Cam(px, pz) > SPAWN_D2) { refuse("wound:too-far"); return; }   // only where it can be seen
+    if (dist2Cam(px, pz) > WOUND_D2) { refuse("wound:too-far"); return; }   // only where it can be seen
 
     // burst window: a shotgun's pellets (or a same-frame double report) land
     // SCATTERED wounds, never a pool-flushing spray. CITY lets more pellets
@@ -2236,9 +2340,11 @@
       }
       wm.rotation.z = spin;
       if (clothed) stamp(actor, part, lp, G_CLOTH_SLIT, MAT_CLOTH, RO_CLOTH, cW, cL, ax, spin, pad, "cloth");
-      // the blood WELLS out along the cut, slower than a bullet's bloom
-      const soakR = minHalf * (0.15 + 0.08 * Math.min(2, Math.max(0, cal))) * (slash ? 1.2 : 1);
-      spawnSoak(actor, part, lp, soakR, 4.5, { spin: spin, kx: 0.75, ky: slash ? 1.7 : 1.35 });
+      // a thin wet margin along the cut, at its final size now: no soak
+      const rW = Math.max(halfW * 1.6, clothed ? cW : 0);
+      const rL = Math.max(halfL, clothed ? cL : 0);
+      spawnRing(actor, part, lp, ax, rW, pad, { spin: spin, kx: 1, ky: Math.min(3.2, rL / Math.max(1e-4, rW)) });
+      if (actor.isPlayer) fpMirror(actor, pick.region, part, lp, rW, clothed, "blade");
       return;
     }
 
@@ -2338,7 +2444,7 @@
     //  above fpsmode's own heavyRound line, so an untyped default does not),
     //  a real direction available (never guessed — see throughDir), and at
     //  least EXIT_MIN_TRAVEL of part crossed rather than a graze.
-    let exitAt = null;
+    let exitAt = null, exitR = 0, exitPad = 0;
     if (shotV2 && cal > EXIT_MIN_CAL) {
       const dir = throughDir(opts, wp);
       const dl = dir ? localDir(part, wp, dir) : null;
@@ -2348,7 +2454,9 @@
         // the panel caps it — the real ratio is wider still, but a third of the
         // face is where a mark stops being a wound and starts being a sticker.
         const eHalf = faceMin(part, ex.ax);
-        const eWant = rad * (1.6 + 2.4 * Math.min(2.4, cal));
+        // SLIGHTLY bigger than the entry (owner: "exit wounds where
+        // through-and-through, slightly bigger"): 1.6x a pistol-plus, ~2x a rifle
+        const eWant = rad * (1.3 + 0.45 * Math.min(2.4, cal));
         const eCap = capR(G_EXIT, eHalf, EXIT_MAX_FRAC);
         let esx = Math.min(eWant * (0.85 + Math.random() * 0.35), eCap);
         let esy = Math.min(eWant * (0.85 + Math.random() * 0.35), eCap);
@@ -2370,59 +2478,16 @@
         wounds.push({ m: em, actor, age: 0, kind: "shot", dried: false });
         actor._woundN = (actor._woundN || 0) + 1;
         if (ctr > 0) stamp(actor, part, ex, G_CLOTH_TEAR, MAT_CLOTH, RO_CLOTH, ctr, ctr * (0.85 + Math.random() * 0.3), ex.ax, Math.random() * 6.28, padX, "cloth");
-        exitAt = ex;
+        exitAt = ex; exitR = Math.max(er * G_EXIT._maxR, ctr * G_CLOTH_TEAR._maxR); exitPad = padX;
       }
     }
 
-    // ---- LOCAL SOAK STAIN ----
-    // the cloth around the hole goes dark and keeps spreading for a few
-    // seconds — local, irregular, anchored to THIS wound. Headshot = heavy
-    // fast splatter on the head PLUS a run-down stain seated at the collar.
-    {
-      if (shotV2) {
-        // THE STAIN IS NOW THE VISIBLE WOUND, so it is sized off the ENERGY and
-        // the PART rather than off the (correctly tiny) hole — otherwise
-        // shrinking the hole by 4x would have silently shrunk the blood by 4x
-        // and left the body looking untouched. gore.js still owns the spray,
-        // the pool and the underwater bloom; this is only the local soak.
-        //
-        // Sized so the FINISHED stain (after spawnSoak's own 0.8-1.3 growth
-        // jitter and the blob's ±33% rim wobble) lands at 49% of the panel's
-        // width for a 9 mm and 66% for a rifle round — heavy, obviously blood,
-        // and never near the 96% rail. It used to reach 159% on a head and
-        // 350% on an arm. Deliberately NOT cap-bound: a design number that only
-        // works because the safety rail catches it is not a design number.
-        const soakR = minHalf * (0.19 + 0.12 * Math.min(2.4, cal));
-        // blood runs from the EXIT, not the entry — when we know where that is,
-        // the heavy stain goes there and the entry keeps only its own seep.
-        spawnSoak(actor, part, exitAt || lp, soakR * (exitAt ? 1.25 : 1), exitAt ? 1.6 : 2.4);
-        if (pick.region === "head") {
-          const torso = ch.skinSlots.torso && ch.skinSlots.torso[0];
-          if (torso && torso.geometry) {
-            torso.updateWorldMatrix(true, false);
-            tmpV.set(px, py, pz);
-            torso.worldToLocal(tmpV);                     // same side the round came from
-            const tp = torso.geometry.parameters || {};
-            tmpV.y = (tp.height || 0.9) * 0.5 * 0.72;     // up at the collar line
-            spawnSoak(actor, torso, tmpV, soakR * 1.2, 1.1);
-          }
-        }
-      } else if (pick.region === "head") {
-        spawnSoak(actor, part, lp, s0 * 3.4, 0.6);
-        const torso = ch.skinSlots.torso && ch.skinSlots.torso[0];
-        if (torso && torso.geometry) {
-          torso.updateWorldMatrix(true, false);
-          tmpV.set(px, py, pz);
-          torso.worldToLocal(tmpV);                       // same side the round came from
-          const tp = torso.geometry.parameters || {};
-          tmpV.y = (tp.height || 0.9) * 0.5 * 0.72;       // up at the collar line
-          spawnSoak(actor, torso, tmpV, s0 * 3.8, 1.1);
-        }
-      } else {
-        const heavy = kind === "shot" && cal >= 1.25;
-        spawnSoak(actor, part, lp, s0 * (heavy ? 3.4 : 2.6), heavy ? 2.2 : 3.2);
-      }
-    }
+    // ---- THE BLOOD RING (no soak, no collar run-down) ----
+    // One small tight ring round each hole, at its final size on this frame.
+    // The clothes keep their colour; the blood is on the ground (gore.js).
+    spawnRing(actor, part, lp, ax, Math.max(rad * geo._maxR, cr * G_CLOTH_HOLE._maxR), padE);
+    if (exitAt) spawnRing(actor, part, exitAt, exitAt.ax, exitR, exitPad);
+    if (actor.isPlayer) fpMirror(actor, pick.region, part, lp, rad, clothOn, "shot");
   };
 
   // ---- RATCHET: CBZ.woundDecalAudit() ---------------------------------------
@@ -4450,7 +4515,16 @@
       if (r.actor) { r.actor._woundN = 0; if (r.actor.char) r.actor.char.legHurt = null; }
     }
     wounds.length = 0;
-    growing.length = 0;
+    fpClear();
+  };
+  // ONE BODY'S HOLES, gone: the rig is being handed to a new person (crowd.js
+  // promotion) or the player respawned. Never called on a timer.
+  CBZ.woundsForget = function (actor) {
+    if (!actor) return;
+    if (actor.isPlayer && !actor.char && CBZ.playerWoundActor) actor = CBZ.playerWoundActor;
+    for (let i = wounds.length - 1; i >= 0; i--) if (wounds[i].actor === actor) dropWound(i);
+    actor._woundN = 0;
+    if (actor === CBZ.playerWoundActor || actor.isPlayer) fpClear();
   };
 
   // chain onto CBZ.clearGore (match reset / scene swap) — checked lazily every
@@ -4462,8 +4536,8 @@
   }
 
   // ---- one updater: ZERO cost while nobody is being shot ---------------------
-  // soak spread runs per-frame (only while a stain is actively growing);
-  // record lifecycle stays on the cheap 0.8s throttle.
+  // record lifecycle rides a cheap 0.8s throttle; nothing on a body animates.
+  // A hole has NO timeout: it goes only with its body (or a cap).
   let tick = 0, chunkT = 0, deadT = 0, skinT = 0;
   CBZ.onAlways(9, function (dt) {
     if (CBZ.clearGore && !CBZ.clearGore._wounds) wrapClearGore();
@@ -4480,38 +4554,26 @@
     // creep / wash / leak sweep on the same 0.8 s clock as the decals
     if (SKIN_GROW.length) skinGrowStep(dt);
     if (SKIN.length) { skinT += dt; if (skinT > 0.8) { skinSweep(skinT); skinT = 0; } }
+    if (FPW.length) fpTick();
     if (!wounds.length) return;   // the whole system sleeps
-    for (let i = growing.length - 1; i >= 0; i--) {
-      const r = growing[i];
-      if (r.gone || !r.m.parent) { growing.splice(i, 1); continue; }
-      r.t += dt;
-      const k = Math.min(1, r.t / r.gt);
-      const e = 0.35 + 0.65 * Math.sqrt(k);   // fast blot, slow creep (gore pools' curve)
-      r.m.scale.set(r.gx * e, r.gy * e, 1);
-      if (k >= 1) growing.splice(i, 1);
-    }
     tick += dt;
     if (tick < 0.8) return;
     const step = tick;
     tick = 0;
     for (let i = wounds.length - 1; i >= 0; i--) {
       const r = wounds[i], a = r.actor;
-      // rig left the scene (corpse cull / crowd replacement) → free the record
-      if (!a || a.culled || !a.group || !a.group.parent) { dropWound(i); continue; }
+      // rig gone (corpse cull) → free the record. A rig merely DETACHED (a car
+      // seat, a cutscene, a crowd park) keeps its holes for a while: a rig
+      // handed to a new person is wiped by CBZ.woundsForget at the hand-off,
+      // and the player's own body is never swept.
+      if (!a || a.culled) { dropWound(i); continue; }
+      if (!a.isPlayer && (!a.group || !a.group.parent)) {
+        r.off = (r.off || 0) + step;
+        if (r.off > 20) { dropWound(i); continue; }
+      } else r.off = 0;
       r.age += step;
       // torn flesh scabs over on the same clock a bullet hole does
       if ((r.kind === "shot" || r.kind === "bite" || r.kind === "blade") && !r.dried && r.age > DRY_T) { r.dried = true; r.m.material = MAT_DRY; }
-      // BLOOD KEEPS WICKING: once the fast bloom is done a soak creeps on
-      // through the cloth (ease-out over SOAK_CREEP_T). Stepped on this 0.8 s
-      // sweep — a millimetre at a time, nobody sees the steps.
-      if (r.creep > 1 && r.t >= r.gt) {
-        const k = Math.min(1, (r.age - r.gt) / SOAK_CREEP_T);
-        if (k > 0) {
-          const e = 1 + (r.creep - 1) * (1 - (1 - k) * (1 - k));
-          r.m.scale.set(r.gx * e, r.gy * e, 1);
-          if (k >= 1) r.creep = 0;
-        }
-      }
     }
   });
 })();

@@ -385,7 +385,7 @@
      round or blade that opens a bleed in you (CBZ.vitals) now also leaves
      the hole on YOUR rig, the same way it does on every man in the yard
      (CBZ.bodyWound, systems/wounds.js): a dark entry, a cut in the shirt,
-     the stain spreading from it. It rides the body part, so you see it over
+     a small blood ring round it. It rides the body part, so you see it over
      the shoulder and when you look down in first person (fpsmode.js keeps
      your body under the lens in this mode).
      A screw's or a tower's round has no ray behind it, only a roll, so the
