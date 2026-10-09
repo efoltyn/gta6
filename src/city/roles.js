@@ -169,11 +169,13 @@
   // a cop's name tag: the rank police.js gave him, and a surname that stays his
   const COP_NAMES = ["Ruiz", "Doyle", "Okafor", "Brennan", "Castillo", "Haines", "Novak", "Pryor", "Delgado", "Walsh", "Kimura", "Ferreira", "Lund", "Abara", "Mercer", "Szabo"];
   let copSeq = 0;
+  // Every officer is a rank AND a man: "Sergeant Doyle", "Police Chief Ruiz".
+  // A bare pip ("Chief") over a head read as a role word, not a person.
   function copTitle(c) {
     const rank = String(c.name || "Officer");
-    if (rank !== "Officer") return rank;          // SWAT, a sergeant's pip
+    if (rank === "SWAT" || c.swat) return "SWAT";   // a helmet, not a face
     if (!c._tagName) c._tagName = COP_NAMES[(copSeq++ * 7) % COP_NAMES.length];
-    return "Officer " + c._tagName;
+    return (rank === "Chief" ? "Police Chief" : rank) + " " + c._tagName;
   }
   const KEEPER = {
     bank: "Teller", pawn: "Pawnbroker", guns: "Gun dealer", jewelry: "Jeweler", bar: "Bartender",
