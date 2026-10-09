@@ -200,7 +200,11 @@
     const cp = T && T.capitolPlan ? T.capitolPlan() : null;
     if (cp) out.push({ id: "capitol", name: "the Capitol", at: cp.muster, face: cp.face, route: cp.route, plan: cp });
     const m = complex("execmansion");
-    if (m && m.gate) {
+    // the Mansion's crowd stands in the pen across from the gate, behind the
+    // racks (city/perimeter.js), never on the grounds
+    const pen = m && CBZ.perimeter ? CBZ.perimeter.pen("execmansion") : null;
+    if (pen) out.push({ id: "mansion", name: "the Mansion", at: { x: pen.at.x, z: pen.at.z }, face: pen.face });
+    else if (m && m.gate) {
       const n = Math.hypot(m.gate.x - m.cx, m.gate.z - m.cz) || 1, ux = (m.gate.x - m.cx) / n, uz = (m.gate.z - m.cz) / n;
       out.push({ id: "mansion", name: "the Mansion", at: { x: m.gate.x + ux * 22, z: m.gate.z + uz * 22 }, face: Math.atan2(-ux, -uz) });
     }

@@ -1968,7 +1968,12 @@ document.body.appendChild(b);}}catch(e){}})();
      presidency.js and president_staff.js; everything is read lazily. -->
 <script src="src/city/warroom.js?v=polsim1008b"></script>
 <script src="src/city/frontline.js?v=flagfix1001"></script>
-<script src="src/city/president_public.js?v=realcrowd1"></script>
+<!-- SECURED GROUND IS A WALL TO A CROWD (city/perimeter.js): every keep-out
+     govcomplex site's fence is a no-go mask for crowds (mob.js, the speech
+     crowd) until a police line is broken; the protest pen across from the
+     Mansion gate (racks, the crowd's front row, the officers' spots). -->
+<script src="src/city/perimeter.js?v=gateprotest1"></script>
+<script src="src/city/president_public.js?v=gateprotest1"></script>
 <!-- THE COUNTRY TURNS ON ITS PRESIDENT, AND YOU SEE IT COMING (city/dissent.js):
      unrest, an organised movement with a leader, generals meeting, troops
      moving, then the coup (civilwar.js's own) a day later. Every step is on
@@ -1979,11 +1984,11 @@ document.body.appendChild(b);}}catch(e){}})();
      breaches. The one mass crowd for every political crowd (the gate protest,
      a rally the President calls, the Capitol march): the nearest are ordinary
      rigs, the rest one instanced fill, capped per device. -->
-<script src="src/city/mob.js?v=realcrowd1"></script>
+<script src="src/city/mob.js?v=gateprotest1"></script>
 <!-- THE NATIONAL ADDRESS (city/address.js): the address order puts the
      President on every TV (newsroom.js live feed); 3 to 5 statements, verb x
      target off the real world, each one a CBZ.politics.act. After politics.js. -->
-<script src="src/city/address.js?v=address1008b"></script>
+<script src="src/city/address.js?v=gateprotest1"></script>
 <!-- THE TRANSFER OF POWER (city/transfer.js): election night on every TV, the
      held count, concede or refuse, the Capitol march and breach, the Guard's
      decision, seized / convicted / certified. After elections.js. -->

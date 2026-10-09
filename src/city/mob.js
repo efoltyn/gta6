@@ -116,6 +116,15 @@
   function PP() { return CBZ.presidentPublic && CBZ.presidentPublic.props ? CBZ.presidentPublic.props : null; }
   function arenaRoot() { const A = CBZ.city && CBZ.city.arena; return (A && A.root) || CBZ.scene || null; }
   function inCity() { return !g.mode || g.mode === "city"; }
+  // SECURED GROUND IS A WALL (city/perimeter.js): a crowd stands on the public
+  // side of a fence, behind the barricades, until it has broken a police line
+  // to get through. Spawn, goal and every step are clamped; officers are not.
+  const _KO = { x: 0, z: 0, moved: false };
+  function walled(m) { return !!CBZ.perimeter && !m.breached && m.stage !== "breach" && m.stage !== "inside"; }
+  function keepOut(m, x, z) {
+    if (walled(m)) return CBZ.perimeter.clampOut(x, z, _KO);
+    _KO.x = x; _KO.z = z; _KO.moved = false; return _KO;
+  }
 
   // ---------------------------------------------------------------- agents (SoA)
   const ax = new Float32Array(CAP), az = new Float32Array(CAP), ay = new Float32Array(CAP);
@@ -263,6 +272,10 @@
     if (freeList.length < want) reclaim(want, m);
     const n = Math.min(want, freeList.length);
     const R = Math.sqrt(n) * 0.5 + 1;
+    // the disk sits BEHIND the muster point (its front edge on it): a crowd
+    // mustered at a barricade never starts on the far side of it
+    const back = spec.hold || m.kind === "protest" ? R : 0;
+    const cx0 = m.at.x - Math.sin(m.face) * back, cz0 = m.at.z - Math.cos(m.face) * back;
     for (let k = 0; k < n; k++) {
       const i = alloc(); if (i < 0) break;
       amob[i] = slot; aside[i] = 0; aact[i] = 0; atim[i] = 0; acd[i] = h01(k, m.seed, 1) * 4; arig[i] = -1; aclimb[i] = 0;
@@ -270,7 +283,8 @@
       const a = h01(k, m.seed, 2) * Math.PI * 2, rr = R * Math.sqrt(h01(k, m.seed, 3));
       const lx = Math.cos(a) * rr, lz = Math.sin(a) * rr;
       const fx = Math.sin(m.face), fz = Math.cos(m.face);
-      ax[i] = m.at.x + lx * fz + lz * fx;  az[i] = m.at.z - lx * fx + lz * fz;
+      ax[i] = cx0 + lx * fz + lz * fx;  az[i] = cz0 - lx * fx + lz * fz;
+      { const q = keepOut(m, ax[i], az[i]); ax[i] = q.x; az[i] = q.z; }
       ay[i] = floorAt(ax[i], az[i]);
       avx[i] = 0; avz[i] = 0; ahd[i] = m.face; aph[i] = h01(k, m.seed, 4) * 6.28; asp[i] = 0;
       // the column slot used when they march: leaders in the first rows
@@ -350,7 +364,7 @@
     if (start !== false) { m.stage = "march"; m.stageT = 0; m.hold = false; note(m, "march"); }
     return true;
   }
-  function setStage(m, st, extra) { if (m.stage === st) return; m.stage = st; m.stageT = 0; note(m, st, extra); }
+  function setStage(m, st, extra) { if (m.stage === st) return; if (st === "breach") m.breached = true; m.stage = st; m.stageT = 0; note(m, st, extra); }
 
   // ---------------------------------------------------------------- police lines
   /* line(id, spec): a police line between the mob and what it wants.
@@ -528,7 +542,19 @@
     }
     if (!m.doorForced) { m.doorForced = true; note(m, "door", { at: { x: at.x, z: at.z } }); }
   }
+  // the goal, then the perimeter: a goal on secured ground becomes the nearest
+  // point outside it, and a crowd going home walks AWAY from the fence
   function desired(m, i) {
+    const v = goal(m, i);
+    if (aside[i] === 0 && walled(m)) {
+      const out = m.stage === "disperse" && CBZ.perimeter.outward ? CBZ.perimeter.outward(atx[i], atz[i]) : null;
+      if (out) { atx[i] = ax[i] + out.x * 30; atz[i] = az[i] + out.z * 30; }
+      const q = CBZ.perimeter.clampOut(atx[i], atz[i], _KO);
+      atx[i] = q.x; atz[i] = q.z;
+    }
+    return v;
+  }
+  function goal(m, i) {
     if (aside[i] === 1) {
       // an officer: his slot on the line, or the way back
       const L = lineOf(i);
@@ -729,6 +755,10 @@
           if (aact[i] !== ACT.flee) m.frontContacts += ddt / dt;      // a sleeping body counts for the steps it slept
           frontActs(i, m, L, ddt);
         }
+      }
+      if (aside[i] === 0 && walled(m)) {
+        const q = CBZ.perimeter.clampOut(nx, nz, _KO);
+        if (q.moved) { nx = q.x; nz = q.z; avx[i] *= 0.3; avz[i] *= 0.3; }
       }
       ax[i] = nx; az[i] = nz;
       const sp = Math.hypot(avx[i], avz[i]);
