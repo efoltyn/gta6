@@ -376,6 +376,29 @@
       q.alarmed = 0;
       drawFor(q, null);
     }
+    // THE OTHER SIDE OF IT STOPS TOO. The man they went for (shot, still on
+    // his feet) and anybody who took his part against the agents back off
+    // instead of fighting on: left alone, the called-off target kept
+    // shooting at the detail, the posture went straight back to evac
+    // ("armed attacker") and every gun came out again. A rampage or a cell
+    // is a real attacker and is left to the detail.
+    const side = crew.concat(force());
+    const backOff = function (p) {
+      if (!p || p.dead || p.player || p.isPlayer || p.rampage || p.organization === "cell" || side.indexOf(p) >= 0) return;
+      p.rage = null;
+      if (p.state === "fight" || p.state === "confront") p.state = "walk";
+      if (p.mem && side.indexOf(p.mem) >= 0) p.mem = null;
+      p._cbThreatSrc = null;
+      p.fear = Math.max(p.fear || 0, 5);
+    };
+    if (t && !t.dead) backOff(t);
+    const P = CBZ.player, peds = CBZ.cityPeds || [];
+    for (let i = 0; P && P.pos && i < peds.length; i++) {
+      const p = peds[i];
+      if (!p || p.dead || !p.pos || !p.rage || side.indexOf(p.rage) < 0) continue;
+      if (hyp(p.pos.x, p.pos.z, P.pos.x, P.pos.z) > 80) continue;
+      backOff(p);
+    }
     if (CBZ.protection && CBZ.protection.standDown) { try { CBZ.protection.standDown("president"); } catch (e) {} }
     if (!quiet) { const L = lead(crew.filter(function (q) { return q && !q.dead; })); if (L) say(L, "Sir."); }
     return crew.length;
