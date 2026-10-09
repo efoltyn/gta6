@@ -1179,7 +1179,7 @@
     } catch (e) { ped = null; }
     if (!ped) return false;
     ped.name = m.who.name; ped.nameKnown = true; ped.organization = "state";
-    ped._presOffice = true; ped._iOnly = true;
+    ped._presOffice = true; ped._iOnly = true; ped._stateStaff = true;
     // he came to see you: E on him hears it now, without waiting for him to
     // reach the desk
     if (CBZ.interactions && CBZ.interactions.registerFor) {
@@ -1285,7 +1285,7 @@
       });
     } catch (e) { ped = null; }
     if (!ped) return;
-    ped.name = person("secretary").name; ped.nameKnown = true; ped.organization = "state";
+    ped.name = person("secretary").name; ped.nameKnown = true; ped.organization = "state"; ped._stateStaff = true;
     ped._iOnly = true;
     SEC.ped = ped;
     if (CBZ.interactions && CBZ.interactions.registerFor) {

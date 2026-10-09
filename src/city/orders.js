@@ -283,8 +283,13 @@
     mode = mode || "attack";
     if (!t || t.dead || t.player || !presSeat()) return { ok: false, why: "" };
     if (PF.target && PF.target !== t) standDown(true);
-    const all = force().filter(function (q) { return q !== t; });
+    let all = force().filter(function (q) { return q !== t; });
     if (!all.length) return { ok: false, why: "Nobody's with you, sir." };
+    // the aide with the football (q._carries, city/warroom.js) stays with the
+    // case while anybody else can go; only when he is all you have does he set
+    // it down and take the order (the gun discipline releases it on "order")
+    const free = all.filter(function (q) { return !q._carries; });
+    if (free.length) all = free;
     // a detention or an escort takes the two nearest pairs of hands
     let pool = all;
     if (mode !== "attack") {

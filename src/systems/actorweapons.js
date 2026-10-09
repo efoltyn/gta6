@@ -2066,9 +2066,28 @@
       r.holdUntil = Math.max(r.holdUntil, T + r.hold);
       log(a, "draw", why);
     }
+    /* HANDS ALREADY FULL. A body wearing `_carries` (city/warroom.js: the
+       military aide with the nuclear football) is not a shooter: no threat,
+       no ward, no grudge draws his gun. Only a real need frees his hands, an
+       order to attack or his own shooting, and then the carried thing is SET
+       DOWN first (its owner's release()) — the gun never comes out into a
+       hand that is holding something. */
+    function exempt(a) { return !!(a && a._carries); }
     // a system NAMES why this body should have his gun out
     function trigger(a, why, lv) {
       if (!a || a.dead || a.isPlayer) return;
+      // THE PRESIDENT'S OWN PEOPLE (_stateStaff: cabinet officers, staff,
+      // senators, stamped where city/presidency.js, president_staff.js,
+      // president_office.js and politics.js post them) never draw. A minister
+      // turns a gun on the President only in a real, announced coup, and the
+      // system running that coup says so by stamping _coup on him.
+      if (a._stateStaff && !a._coup) return;
+      if (a._carries) {
+        if (why !== "order" && why !== "fired") return;
+        const c = a._carries;
+        if (typeof c.release === "function") { try { c.release(why); } catch (e) {} }
+        if (a._carries === c) a._carries = null;
+      }
       const r = rec(a);
       lv = lv || LV[why] || 2;
       // STOOD DOWN by an order (npcDrawReason(a, null)): for a few seconds
@@ -2121,6 +2140,11 @@
     }
     function tick(a, dt) {
       const r = rec(a);
+      if (a._carries || (a._stateStaff && !a._coup)) {   // put away: hands full / one of the President's people
+        if (r.lv >= 2) log(a, "holster", "carrying");
+        r.lv = 0; r.watchT = 0; r.holdUntil = 0; r.why = ""; r.trigT = -1e9;
+        return r;
+      }
       const live = r.trigT >= T - 0.3;
       if (live) {
         r.quietT = 0;
@@ -2157,7 +2181,7 @@
       }
       return out;
     }
-    return { trigger, reason, sense, tick, drawn, aiming, mayHolster, clock, audit, rec,
+    return { trigger, reason, sense, tick, drawn, aiming, mayHolster, clock, audit, rec, exempt,
       log: function () { return ring.slice(); }, LV: LV, now: function () { return T; } };
   })();
   CBZ.gunDiscipline = GD;

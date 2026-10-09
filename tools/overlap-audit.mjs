@@ -832,6 +832,7 @@ if (!ONLY || ONLY === "kit" || ONLY === "stow") {
       prop.position.set(0, 0, 0); prop.rotation.set(0, 0, 0);
       prop.scale.setScalar((CBZ.weaponHeldScale && CBZ.weaponHeldScale(id)) || 0.92);
       mnt.add(prop);
+      if (CBZ.charMountSeat) CBZ.charMountSeat(mnt, prop, prop.position);   // holsterprops' seat on the hip
       prop.traverse((o) => { if (o.isMesh) labels.set(o, "stow:" + slot + ":" + id); });
       run(ch, B.key + " stow " + slot + " " + id, labels, KP.concat(["lookUp", "turnUp"]), Object.assign({ fold: "measured" }, noHair));
     }

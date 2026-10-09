@@ -847,6 +847,7 @@
   }
   function engage(ped, t) {
     if (!t || t.dead) return;
+    if (ped && ped._carries) return;  // the football aide does not fight (city/warroom.js THE FOOTBALL)
     release(ped);                     // the fight brain (peds.js + combat_iq) moves him now
     ped.rage = t; ped.state = "fight"; ped.path = null; ped.pause = 0; ped._boardRun = false;
     ped.fear = 0; ped.alarmed = Math.max(ped.alarmed || 0, 8);

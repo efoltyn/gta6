@@ -77,15 +77,43 @@
         m.prop.position.set(0, 0, 0);
         m.prop.rotation.set(0, 0, 0);
         m.prop.scale.setScalar((CBZ.weaponHeldScale && CBZ.weaponHeldScale(id)) || scale);
+        m.seatedOn = null;
         // stowed guns never cast the aim shadow of a drawn one; keep the
         // silhouette cheap (decorative — colliders/LOS never see them)
         m.prop.traverse((obj) => { obj.castShadow = false; });
       }
     }
     if (m.prop) {
-      if (m.prop.parent !== mountGroup) mountGroup.add(m.prop);
+      if (m.prop.parent !== mountGroup || m.seatedOn !== mountGroup) {
+        mountGroup.add(m.prop);
+        // a SEATED mount (the hip: entities/character.js solves it on this
+        // body's real section) puts the gun's flat against the hip, not its
+        // grip origin on the mount point
+        if (CBZ.charMountSeat) CBZ.charMountSeat(mountGroup, m.prop, m.prop.position);
+        m.seatedOn = mountGroup;
+      }
       m.prop.visible = true;
     }
+  }
+  // The transfer's destination on a seated mount: an empty node at the exact
+  // seat the stowed prop will take, so the travelling gun lands where the
+  // stowed one appears instead of popping by the seat offset at the end.
+  function seatAnchor(mountGroup, prop) {
+    if (!mountGroup || !mountGroup.userData || !mountGroup.userData.seat || !CBZ.charMountSeat) return mountGroup;
+    let a = mountGroup.userData.seatAnchor;
+    if (!a) {
+      a = new THREE.Group();
+      a.name = "weapon-stow-seat";
+      a.userData.isMount = true;
+      mountGroup.add(a);
+      mountGroup.userData.seatAnchor = a;
+    }
+    // measure the gun at the scale it will be stowed at
+    const sx = prop.scale.x, sy = prop.scale.y, sz = prop.scale.z;
+    prop.scale.setScalar((CBZ.weaponHeldScale && CBZ.weaponHeldScale(mounts.hand.id)) || 0.92);
+    CBZ.charMountSeat(mountGroup, prop, a.position);
+    prop.scale.set(sx, sy, sz);
+    return a;
   }
 
   // ---- legacy placement (CHAR_WEAPON_MOUNTS=false revert path) ------------
@@ -153,8 +181,8 @@
   function beginTransfer(rec, ch, stow, mp) {
     if (!rec || !rec.from || !ch || !mp || (CBZ.fps && CBZ.fps.active)) return;
     const zone = transferZone(stow, rec.from);
-    const target = zone && mp[zone];
     const source = mounts.hand.prop;
+    const target = zone && mp[zone] && source ? seatAnchor(mp[zone], source) : null;
     if (!target || !source || mounts.hand.id !== rec.from || !source.parent) return;
     endTransfer();
 

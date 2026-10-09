@@ -1577,11 +1577,21 @@
     try {
       p = CBZ.cityPostNpc(at.x, at.z, {
         job: R.job, archetype: R.archetype, gender: c.gender, pin: true, face: at.face,
-        armed: role === "general", aggr: 0.05, wealth: 0.7, src: "presidency:officer",
+        // NOBODY AT THE TABLE IS ARMED. OWNER: "the president game starts with
+        // one of your ministers pointing a gun at you." The General was posted
+        // armed (and every other staffer rolled the street's ~21% "packing"
+        // default, city/peds.js makePed, because nobody said armed: false).
+        // An armed body is governed by the street's gun rules: a levelled gun
+        // in the camera's cone (peds.js gunpoint sweep), any armed threat in
+        // the room (brain_city "hold" -> poseAimBack) squared him up at the
+        // President across the table. A minister turns a gun on the President
+        // only in a real, announced coup (dissent.js / civilwar), never here;
+        // CBZ.gunDiscipline refuses a draw to any _stateStaff body as well.
+        armed: false, aggr: 0.05, wealth: 0.7, src: "presidency:officer",
       });
     } catch (e) { p = null; }
     if (!p) return null;
-    p.name = c.display; p.nameKnown = true; p.organization = "state"; p._presOfficer = role;
+    p.name = c.display; p.nameKnown = true; p.organization = "state"; p._presOfficer = role; p._stateStaff = true;
     p._iOnly = true;          // his job's verbs (Talk, Dismiss, the General's buys), never the street's
     OFF.peds[role] = p;
     if (CBZ.interactions && CBZ.interactions.registerFor) {

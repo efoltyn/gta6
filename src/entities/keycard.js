@@ -213,7 +213,7 @@
   const tagMat = mat(0xc94d3a, { emissive: 0x4a0f0c, ei: 0.5 });
   function makeFob(man) {
     const M = CBZ.charMounts ? CBZ.charMounts(man.char) : null;
-    const s = (M && M.hip) ? (M.hip.position.y / 1.05) : 1;
+    const s = (M && M.s > 0) ? M.s : 1;
     const f = new THREE.Group();
     f.position.set(-0.30 * s, 1.02 * s, 0.15 * s);   // left hip, forward of the seam
     f.rotation.set(0, 0, 0.18);

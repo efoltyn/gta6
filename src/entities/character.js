@@ -7957,15 +7957,180 @@
      scale spans (-0.33,1.22)→(0.55,2.26) on `back` — clear of the head box
      (y 1.88..2.48, |x|≤0.3, z≥-0.3), inside the shoulder line (0.62),
      behind the torso back plane (z=-0.25). */
-  /* OVERLAP AUDIT (tools/overlap-audit.mjs): the holster's |x| 0.46 was the
-     adult male chest's own side plane, so the holstered pistol's flat lay ON
-     it (a z-fight). Held a clearance outside whichever is widest at the hip on
-     THIS rig — the lowest torso box (chest or waist), the pelvis — measured. */
-  function hipOut(rig, authored) {
-    const s = rig.skinSlots || {}, t = s.torso || [], low = t[t.length - 1], pel = s.pelvis && s.pelvis[0];
-    const wOf = (m) => { const f = m && m.userData && m.userData._cbzFlat && m.userData._cbzFlat.g, g = f || (m && m.geometry); return (g && g.parameters && g.parameters.width) || 0; };
-    return Math.max(authored, Math.max(wOf(low), wOf(pel)) / 2 + 0.04);
+  /* ---- THE BODY'S REAL SECTION (CBZ.bodySection) --------------------------
+     The outline of THIS body round the waist at any height, read off the
+     shaped torso (rig.torsoShape: the chest column rings, the pelvis rings
+     with belly and seat) and the thighs. It used to live inside
+     entities/dutykit.js, which built every officer's belt and holster round
+     it; the player's stowed pistol meanwhile hung off a hand-typed |x| that
+     knew nothing about the body. One outline now, owned by the body:
+       outline(ch, y)          48 [x, z] points from the front, +x = the
+                               wearer's LEFT, model units
+       span(ch, y0, y1, steps) the outermost outline over a height range
+       at(list, th)            the point at any angle round it
+       normal(list, th)        its outward normal there ([nx, 0, nz]) */
+  const bodySection = (function () {
+    // ---- the body's real section --------------------------------------------
+    const gss = (x, s) => Math.exp(-(x / s) * (x / s));
+    // radius of a superellipse ring {a, zf, zb, zc, n} along direction (dx, dz)
+    function ringRay(R, dx, dz) {
+      const b = dz >= 0 ? R.zf : R.zb, n = R.n || 2.5;
+      const t = Math.pow(Math.pow(Math.abs(dx / R.a), n) + Math.pow(Math.abs(dz / b), n), -1 / n);
+      return [t * dx, (R.zc || 0) + t * dz];
+    }
+    /* The body's outline at height y: 48 points round the waist from the
+       front, the outermost of the chest column (with its own front/back relief
+       read off rig.torsoFrontZ/BackZ), the pelvis (with belly and seat) and,
+       below the hips, the two thighs. Model units. */
+    const NS = 48;
+    function outline(ch, y) {
+      const S = ch.torsoShape, P = ch.profile, out = [];
+      for (let j = 0; j < NS; j++) {
+        const th = j / NS * Math.PI * 2, dx = Math.sin(th), dz = Math.cos(th);
+        let best = 0, bx = 0, bz = 0;
+        const take = (x, z) => { const r = Math.hypot(x, z); if (r > best) { best = r; bx = x; bz = z; } };
+        if (y >= S.base - 0.01 && y <= S.yN) {
+          const p = ringRay(S.at(y), dx, dz);
+          let z = p[1];
+          if (dz > 0.05 && ch.torsoFrontZ) z = Math.max(z, ch.torsoFrontZ(p[0], y));
+          else if (dz < -0.05 && ch.torsoBackZ) z = Math.min(z, ch.torsoBackZ(p[0], y));
+          take(p[0], z);
+        }
+        if (y >= S.pBot && y <= S.pTop + 0.005) {
+          const p = ringRay(S.pel(Math.min(y, S.pTop)), dx, dz);
+          let z = p[1];
+          if (dz < 0) z -= (S.glute || 0) * 0.16 * S.pd * gss(y - (S.hipY - 0.015 * S.pk), 0.055 * S.pk) * Math.pow(-dz, 0.8);
+          else z += (S.belly || 0) * 0.05 * S.pd * gss(y - (S.pTop - 0.03 * S.pk), 0.05 * S.pk) * Math.pow(dz, 0.8);
+          take(p[0], z);
+        }
+        if (y < S.hipY + 0.02 && P) {
+          // the thighs: a circle round each hip joint (their outer extent does
+          // not move when a leg swings — the swing is fore and aft)
+          const r = P.legW / 2 + 0.01;
+          for (const sx of [-1, 1]) {
+            const cx = sx * P.hipX, px = cx * dx;                 // ray-circle, far root
+            const disc = px * px - (cx * cx - r * r);
+            if (disc >= 0) { const t = px + Math.sqrt(disc); if (t > 0) take(t * dx, t * dz); }
+          }
+        }
+        out.push([bx, bz]);
+      }
+      return out;
+    }
+    // the outermost outline over [y0, y1]
+    function span(ch, y0, y1, steps) {
+      steps = steps || 4;
+      let acc = null;
+      for (let s = 0; s <= steps; s++) {
+        const o = outline(ch, y0 + (y1 - y0) * s / steps);
+        if (!acc) { acc = o; continue; }
+        for (let j = 0; j < NS; j++) if (Math.hypot(o[j][0], o[j][1]) > Math.hypot(acc[j][0], acc[j][1])) acc[j] = o[j];
+      }
+      return acc;
+    }
+    function samplesAt(list, th) {                             // outline point at any angle
+      const f = ((th / (Math.PI * 2)) % 1 + 1) % 1 * NS, j = Math.floor(f) % NS, k = (j + 1) % NS, w = f - Math.floor(f);
+      return [list[j][0] * (1 - w) + list[k][0] * w, list[j][1] * (1 - w) + list[k][1] * w];
+    }
+    function outNormal(list, th) {
+      const a = samplesAt(list, th - 0.06), b = samplesAt(list, th + 0.06);
+      let nx = b[1] - a[1], nz = -(b[0] - a[0]);
+      const p = samplesAt(list, th);
+      if (nx * p[0] + nz * p[1] < 0) { nx = -nx; nz = -nz; }
+      const l = Math.hypot(nx, nz) || 1;
+      return [nx / l, 0, nz / l];
+    }
+    return { NS, outline, span, at: samplesAt, normal: outNormal };
+  })();
+  CBZ.bodySection = bodySection;
+
+  /* ---- THE HOLSTER SITS ON THE HIP -----------------------------------------
+     OWNER (iPad): "the holster on the side of the player's hip is like a foot
+     away from the hip. It's floating."
+
+     The hip mount was x = -max(0.46·s, widestTorsoSlot/2 + 0.04), y 1.05·s,
+     z -0.20·s, a fixed Euler. Two faults stacked on that one line:
+       · "widest torso slot" is the CHEST when the body has no separate waist
+         box (every adult male), so a holster at belt height was pushed out
+         by the width of the ribcage plus 4 cm. Measured with the real
+         sidearm: 7.4 cm of air on the average man, 9.6 on a muscular one,
+         3-6 on everyone else; the gun's broad face (the slide) also stood
+         canted 15° off the hip, so from behind the gap read wider still.
+       · the pistol model's own origin is its grip, so even a mount ON the
+         skin left the slide wherever the grip offset put it.
+     Now the mount is SOLVED, per rig, from the outline above, the way the
+     duty belt hangs its holster: a frame on the body's own section at the
+     semantic right hip (local -X), a little behind the side seam, pushed
+     out until the gun's back face clears the pelvis AND both thighs over the
+     whole height it hangs. Axes: +X = the section's outward normal (the
+     gun's flat lies along the hip), +Z up with a forward muzzle cant, so the
+     barrel (prop -Z) points down and the grip (prop -Y) to the rear.
+     userData.seat tells systems/holsterprops.js where the gun's faces go:
+     its inner face `clr` off the body, its top `rise` above the belt line.
+     It rides rig.body, the node the pelvis is on, so it moves with the hips;
+     the thighs swing fore and aft under it (their outer extent does not move,
+     which is why the solve clears them as circles round each hip joint). */
+  const HIP_SEAT = {
+    deg: -108,       // round the waist from the front (+x = wearer's left): right side, just behind the seam
+    hang: 0.24,      // m the gun hangs below the belt line (the clear-of-body band)
+    width: 0.06,     // m the gun's back face spans across the hip
+    clr: 0.003,      // m of air between the gun and the body
+    rise: 0.045,     // m the grip end stands above the belt line
+    cant: 0.21,      // forward muzzle cant (tan): ~12°, grip to the rear
+  };
+  function hipSeatPose(rig, s) {
+    const S = rig.torsoShape, P = rig.profile;
+    const hs = (rig.group && rig.group.userData && rig.group.userData.humanScale) || 0.7;
+    if (!S || !P || !S.pel || !S.at || !(S.pTop > 0)) return null;
+    const m = 1 / hs;                                       // metres -> model units
+    const top = S.pTop + 0.005 * m;                         // the belt line (the duty belt's top)
+    const low = bodySection.span(rig, top - HIP_SEAT.hang * m, top, 8);
+    const th = HIP_SEAT.deg * Math.PI / 180;
+    const p = bodySection.at(low, th), n = bodySection.normal(low, th);
+    const tx = -n[2], tz = n[0];                            // horizontal tangent (u x n, u = +Y)
+    // push out until every outline point under the gun's back face is behind it
+    let push = 0;
+    for (let j = 0; j < bodySection.NS; j++) {
+      const q = low[j], dx = q[0] - p[0], dz = q[1] - p[1];
+      if (Math.abs(dx * tx + dz * tz) > HIP_SEAT.width * m / 2 + 0.01) continue;
+      const dn = dx * n[0] + dz * n[2];
+      if (dn > push) push = dn;
+    }
+    const pos = new THREE.Vector3(p[0] + n[0] * push, top, p[1] + n[2] * push);
+    // front tangent: the horizontal perpendicular to n that faces +Z
+    const f = new THREE.Vector3(-n[2], 0, n[0]);
+    if (f.z < 0) f.negate();
+    const X = new THREE.Vector3(n[0], 0, n[2]).normalize();
+    const Z = new THREE.Vector3(0, 1, 0).addScaledVector(f, -HIP_SEAT.cant);   // up, butt back = muzzle forward
+    Z.addScaledVector(X, -Z.dot(X)).normalize();
+    const Y = new THREE.Vector3().crossVectors(Z, X).normalize();
+    const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(X, Y, Z));
+    return { pos, q, seat: { clr: HIP_SEAT.clr * m, rise: HIP_SEAT.rise * m } };
   }
+  /* Where a prop hung on a SEATED mount goes inside it: its inner face (min X)
+     `clr` off the body, its top end (max Z) `rise` above the belt line, centred
+     across the hip. Measured from the prop's own vertices with its scale
+     applied (a weapon added tomorrow is seated by construction); a mount with
+     no seat leaves the prop at its origin. Writes and returns `out`. */
+  const _seatBox = new THREE.Box3(), _seatV = new THREE.Vector3(), _seatInv = new THREE.Matrix4(), _seatM = new THREE.Matrix4();
+  function charMountSeat(mount, prop, out) {
+    out = out || new THREE.Vector3();
+    const fit = mount && mount.userData && mount.userData.seat;
+    if (!fit || !prop) return out.set(0, 0, 0);
+    prop.updateMatrixWorld(true);
+    _seatInv.copy(prop.matrixWorld).invert();
+    _seatBox.makeEmpty();
+    prop.traverse((o) => {
+      if (!o.isMesh || !o.visible || !o.geometry || !o.geometry.attributes || !o.geometry.attributes.position) return;
+      _seatM.multiplyMatrices(_seatInv, o.matrixWorld);
+      const p = o.geometry.attributes.position;
+      for (let i = 0; i < p.count; i++) _seatBox.expandByPoint(_seatV.fromBufferAttribute(p, i).applyMatrix4(_seatM));
+    });
+    if (_seatBox.isEmpty()) return out.set(0, 0, 0);
+    const sc = prop.scale, mn = _seatBox.min, mx = _seatBox.max;
+    return out.set(fit.clr - mn.x * sc.x, -(mn.y + mx.y) / 2 * sc.y, fit.rise - mx.z * sc.z);
+  }
+  CBZ.charMountSeat = charMountSeat;
   function charMounts(rig) {
     if (!rig || !rig.body) return null;
     if (rig._mounts) return rig._mounts;
@@ -7986,11 +8151,17 @@
     rig._mounts = {
       back:  mk(-0.14 * s, 1.44 * s, -0.36 * s, 1.571, -0.698, -1.271),
       back2: mk( 0.14 * s, 1.38 * s, -0.42 * s, 1.571,  0.698, -1.271),
-      // The shoulder roots were corrected to semantic right = local -X in
-      // makeCharacter. Keep the holster on that SAME side so a right-hand
-      // stow does not cross the pelvis toward the obsolete +X hip.
-      hip:   mk(-hipOut(rig, 0.46 * s), 1.05 * s, -0.20 * s, -1.781, 0.26, Math.PI),
+      // semantic right = local -X (makeCharacter's shoulder roots); the
+      // fallback is only for a rig with no shaped torso to solve against
+      hip:   mk(-0.46 * s, 1.05 * s, -0.20 * s, -1.781, 0.26, Math.PI),
+      s,     // the torso-column scale every mount was re-anchored by (entities/keycard.js reads it)
     };
+    const seat = hipSeatPose(rig, s);
+    if (seat) {
+      rig._mounts.hip.position.copy(seat.pos);
+      rig._mounts.hip.quaternion.copy(seat.q);
+      rig._mounts.hip.userData.seat = seat.seat;
+    }
     for (const k in SLING) {
       const m = rig._mounts[k], d = SLING[k];
       m.userData.slingRest = { p: m.position.clone(), q: m.quaternion.clone() };
