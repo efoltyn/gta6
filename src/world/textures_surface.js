@@ -2,18 +2,19 @@
 `),CITY_MAX=8,_cityU={uGndCity:{value:null},uGndCityN:{value:0},uGndCityR:{value:[]},uGndCityA:{value:[]},uGndNight:{value:0}};for(let i=0;i<CITY_MAX;i++)_cityU.uGndCityR.value.push(new THREE.Vector4(0,0,1,1)),_cityU.uGndCityA.value.push(new THREE.Vector4(0,0,0,0));let _cityHooked=!1;CBZ.farCityMap={uniforms:_cityU,max:CITY_MAX};const SRGB_GLSL=`vec3 gndLin( vec3 c ) { c = max( c, vec3( 0.0 ) ); c = c * ( c * ( c * 0.305306011 + 0.682171111 ) + 0.012522878 );
   return mix( vec3( dot( c, vec3( 0.2126, 0.7152, 0.0722 ) ) ), c, 0.8 ); }
 `;CBZ.GROUND_LIN_GLSL=SRGB_GLSL,CBZ.groundLinear=function(x,out){if(x&&x.isTexture)return THREE.sRGBEncoding&&x.encoding!==THREE.sRGBEncoding&&(x.encoding=THREE.sRGBEncoding,x.needsUpdate=!0),x;const c=out?x&&x.isColor?out.copy(x):out.set(x):x&&x.isColor?x.clone():new THREE.Color(x),f=function(v){return v=Math.max(0,v),v*(v*(v*.305306011+.682171111)+.012522878)},r=f(c.r),g=f(c.g),b=f(c.b),l=.2126*r+.7152*g+.0722*b;return c.setRGB(l+(r-l)*.8,l+(g-l)*.8,l+(b-l)*.8)};const CITY_GLSL=["vec4 gndCity( vec2 xz ) {","  vec2 uv = vec2( 0.0 ); float hit = 0.0;","  for ( int i = 0; i < "+CITY_MAX+"; i++ ) {","    if ( float( i ) >= uGndCityN ) break;","    vec4 r = uGndCityR[ i ];","    vec2 t = ( xz - r.xy ) * r.zw;","    if ( hit < 0.5 && t.x > 0.0 && t.y > 0.0 && t.x < 1.0 && t.y < 1.0 ) { vec4 a = uGndCityA[ i ]; uv = a.xy + t * a.zw; hit = 1.0; }","  }","  return texture2D( uGndCity, uv ) * hit;","}"].join(`
-`);function cityHook(){_cityHooked||!CBZ.onAlways||(_cityHooked=!0,CBZ.onAlways(95,function(){_cityU.uGndNight.value=Math.max(0,Math.min(1,+CBZ.nightAmount||0))}))}CBZ.groundSkin=function(opts){opts=opts||{};const SRGB=!!opts.srgb,CITY=!!opts.cityMap;CITY&&cityHook();const tile=Object.assign({grass:3.2,dirt:2.6,sand:2.6,rock:5.5},opts.tile||{}),rockSlope=opts.rockSlope||[.3,.55],sandY=opts.sandY||[.6,2.2],far=opts.far==null?420:+opts.far,mat=new THREE.MeshLambertMaterial(Object.assign({color:16777215,vertexColors:!0},opts.extra||{}));mat.name=opts.name||"ground-skin";const mg=surfaceMaps("grass",{repeat:1}),md=surfaceMaps("dirt",{repeat:1}),ms=surfaceMaps("sand",{repeat:1}),mr=surfaceMaps("rock",{repeat:1});if(!mg||!md||!ms||!mr)return SRGB&&(mat.onBeforeCompile=function(sh){sh.fragmentShader.indexOf("#include <color_fragment>")<0||(sh.fragmentShader=sh.fragmentShader.replace("#include <common>",`#include <common>
-`+SRGB_GLSL).replace("#include <color_fragment>",`#include <color_fragment>
-  diffuseColor.rgb = gndLin( diffuseColor.rgb );`))},mat.customProgramCacheKey=function(){return"cbzGroundSkinLin"}),mat;function inv(t){const m=surfaceMapMean(t);return new THREE.Vector3(1/Math.max(.02,m[0]),1/Math.max(.02,m[1]),1/Math.max(.02,m[2]))}const U={uGndG:{value:mg.map},uGndD:{value:md.map},uGndS:{value:ms.map},uGndR:{value:mr.map},uGndKG:{value:inv(mg.map)},uGndKD:{value:inv(md.map)},uGndKS:{value:inv(ms.map)},uGndKR:{value:inv(mr.map)},uGndTile:{value:new THREE.Vector4(1/tile.grass,1/tile.dirt,1/tile.sand,1/tile.rock)},uGndPar:{value:new THREE.Vector4(rockSlope[0],rockSlope[1],sandY[0],sandY[1])},uGndFar:{value:far},uGndMix:{value:new THREE.Vector2(opts.chroma==null?.35:+opts.chroma,opts.mottle==null?1:+opts.mottle)}};return CITY&&(Object.assign(U,_cityU),CBZ.farCityMap.sampled=!0),U.uGndOpt={value:new THREE.Vector2(SRGB?1:0,CITY?1:0)},mat.userData.groundSkin=!0,mat.onBeforeCompile=function(sh){const vs=sh.vertexShader,fs0=sh.fragmentShader;vs.indexOf("#include <project_vertex>")<0||fs0.indexOf("#include <color_fragment>")<0||(Object.assign(sh.uniforms,U),CITY||Object.assign(sh.uniforms,_cityU),sh.vertexShader=vs.replace("#include <common>",`#include <common>
+`);function cityHook(){_cityHooked||!CBZ.onAlways||(_cityHooked=!0,CBZ.onAlways(95,function(){_cityU.uGndNight.value=Math.max(0,Math.min(1,+CBZ.nightAmount||0))}))}const TURF_SOIL_MEAN=.0723,TURF_DRY_MEAN=.1759,TURF_NORM=[1.0388,1.0098,1.0353],TURF_GLSL=["float tfH( vec2 p ) { p = mod( p, 289.0 ); vec3 q = fract( vec3( p.xyx ) * 0.1031 ); q += dot( q, q.yzx + 33.33 ); return fract( ( q.x + q.y ) * q.z ); }","float tfN( vec2 p ) { vec2 i = floor( p ), f = fract( p ); f = f * f * ( 3.0 - 2.0 * f );","  return mix( mix( tfH( i ), tfH( i + vec2( 1.0, 0.0 ) ), f.x ), mix( tfH( i + vec2( 0.0, 1.0 ) ), tfH( i + vec2( 1.0, 1.0 ) ), f.x ), f.y ); }","vec3 groundTurf( vec2 xz, float d, float wear ) {","  float m150 = tfN( xz * 0.0067 + vec2( 1.3, 7.1 ) );","  float m61 = tfN( xz * 0.0164 + vec2( 3.1, 0.4 ) );","  float m23 = tfN( xz * 0.0435 + vec2( 12.4, 2.6 ) );","  float fM = 1.0 - smoothstep( 300.0, 900.0, d );","  float fF = 1.0 - smoothstep( 40.0, 140.0, d );","  float fG = 1.0 - smoothstep( 6.0, 30.0, d );","  float dry = smoothstep( 0.50, 0.82, 0.6 * m61 + 0.4 * m150 );","  float lush = ( 1.0 - smoothstep( 0.2, 0.52, m23 ) ) * ( 1.0 - dry );","  float dA = 0.8 * ( 0.3 + 0.7 * wear );","  vec3 k = mix( vec3( 1.0 ), vec3( 1.30, 1.04, 0.60 ), dry * dA ) / mix( vec3( 1.0 ), vec3( 1.30, 1.04, 0.60 ), "+TURF_DRY_MEAN.toFixed(4)+" * dA )","    * mix( vec3( 1.0 ), vec3( 0.80, 0.97, 0.86 ), lush * 0.85 );","  float soil = "+TURF_SOIL_MEAN.toFixed(4)+";","  float n8 = 0.5;","  if ( fM > 0.0 ) {","    float n11 = tfN( xz * 0.09 + vec2( 7.7, 1.9 ) ), n4 = tfN( xz * 0.26 + vec2( 2.2, 5.5 ) );","    soil = mix( soil, smoothstep( 0.68, 0.80, 0.68 * n11 + 0.32 * n4 ), fM );","    n8 = mix( 0.5, tfN( xz * 0.125 + vec2( 5.7, 3.3 ) ), fM );","  }","  k *= mix( vec3( 1.0 ), vec3( 1.25, 0.76, 1.42 ), soil * 0.85 * wear ) / mix( vec3( 1.0 ), vec3( 1.25, 0.76, 1.42 ), "+(.85*TURF_SOIL_MEAN).toFixed(5)+" * wear );","  float v = 1.0 + 0.36 * ( m23 - 0.5 ) + 0.26 * ( m61 - 0.5 ) + 0.32 * ( n8 - 0.5 );","  if ( fF > 0.0 ) v += fF * ( 0.26 * ( tfN( xz * 0.55 + vec2( 9.2, 4.4 ) ) - 0.5 ) + 0.18 * ( tfN( xz * 1.7 + vec2( 1.1, 8.8 ) ) - 0.5 ) );","  if ( fG > 0.0 ) v += fG * ( 0.22 * ( tfN( xz * 6.3 ) - 0.5 ) + 0.14 * ( tfN( xz * 17.0 + 3.3 ) - 0.5 ) );","  return k * v * vec3( "+TURF_NORM.map(function(v){return v.toFixed(4)}).join(", ")+" );","}"].join(`
+`);CBZ.GROUND_TURF_GLSL=TURF_GLSL,CBZ.groundTurfConst={soilMean:TURF_SOIL_MEAN,dryMean:TURF_DRY_MEAN,norm:TURF_NORM.slice()};const _roadU={uGndRoad:{value:null},uGndRoadR:{value:new THREE.Vector4(0,0,0,0)}};(function(){const t=new THREE.DataTexture(new Uint8Array([255,255,255,255]),1,1,THREE.RGBAFormat);t.needsUpdate=!0,_roadU.uGndRoad.value=t})(),CBZ.groundRoadField={uniforms:_roadU,build:function(rect,roads,segs,N){const t0=Date.now();N=N||1024;const W=rect.maxX-rect.minX,D=rect.maxZ-rect.minZ,cx=W/N,cz=D/N,REACH=32,f=new Float32Array(N*N).fill(REACH);function seg(ax,az,bx,bz,half){const x0=Math.max(0,Math.floor((Math.min(ax,bx)-half-REACH-rect.minX)/cx)),x1=Math.min(N-1,Math.ceil((Math.max(ax,bx)+half+REACH-rect.minX)/cx)),z0=Math.max(0,Math.floor((Math.min(az,bz)-half-REACH-rect.minZ)/cz)),z1=Math.min(N-1,Math.ceil((Math.max(az,bz)+half+REACH-rect.minZ)/cz)),dx=bx-ax,dz=bz-az,L2=dx*dx+dz*dz;for(let j=z0;j<=z1;j++){const pz=rect.minZ+(j+.5)*cz;for(let i=x0;i<=x1;i++){const px=rect.minX+(i+.5)*cx;let t=L2>0?((px-ax)*dx+(pz-az)*dz)/L2:0;t=t<0?0:t>1?1:t;const d=Math.hypot(ax+dx*t-px,az+dz*t-pz)-half,k=j*N+i;d<f[k]&&(f[k]=d)}}}let n=0;for(const r of roads||[]){if(!r||!isFinite(r.x)||!isFinite(r.z)||!isFinite(r.len))continue;const half=(r.w||r.width||12)/2,hl=r.len/2;r.vertical?seg(r.x,r.z-hl,r.x,r.z+hl,half):seg(r.x-hl,r.z,r.x+hl,r.z,half),n++}for(const s of segs||[])seg(s.x0,s.z0,s.x1,s.z1,s.half),n++;const bytes=new Uint8Array(N*N);for(let k=0;k<N*N;k++){const v=Math.round(128+Math.max(-32,Math.min(31.75,f[k]))*4);bytes[k]=v<0?0:v>255?255:v}const tex=new THREE.DataTexture(bytes,N,N,THREE.LuminanceFormat,THREE.UnsignedByteType);tex.magFilter=THREE.LinearFilter,tex.minFilter=THREE.LinearFilter,tex.generateMipmaps=!1,tex.wrapS=tex.wrapT=THREE.ClampToEdgeWrapping,tex.needsUpdate=!0,tex.onUpdate=function(){tex.image.data=null,tex.onUpdate=null,CBZ.freedStaticArrays=!0};const old=_roadU.uGndRoad.value;return _roadU.uGndRoad.value=tex,_roadU.uGndRoadR.value.set(rect.minX,rect.minZ,1/W,1/D),old&&old!==tex&&old.image&&old.image.width>1&&old.dispose(),CBZ.groundRoadField.stats={N,texel:+(W/N).toFixed(1),roads:n,ms:Date.now()-t0,builds:(CBZ.groundRoadField.stats&&CBZ.groundRoadField.stats.builds||0)+1},CBZ.groundRoadField.sample=function(x,z){const u=Math.max(0,Math.min(N-1.001,(x-rect.minX)/W*N-.5)),v=Math.max(0,Math.min(N-1.001,(z-rect.minZ)/D*N-.5)),i=Math.floor(u),j=Math.floor(v),a=u-i,b=v-j,q=function(ii,jj){return Math.max(-32,Math.min(31.75,f[jj*N+ii]))};return(q(i,j)*(1-a)+q(i+1,j)*a)*(1-b)+(q(i,j+1)*(1-a)+q(i+1,j+1)*a)*b},CBZ.groundRoadField.stats}},CBZ.groundSkin=function(opts){opts=opts||{};const SRGB=!!opts.srgb,CITY=!!opts.cityMap;CITY&&cityHook();const tile=Object.assign({grass:3.2,dirt:2.6,sand:2.6,rock:5.5},opts.tile||{}),rockSlope=opts.rockSlope||[.3,.55],sandY=opts.sandY||[.6,2.2],far=opts.far==null?420:+opts.far,mat=new THREE.MeshLambertMaterial(Object.assign({color:16777215,vertexColors:!0},opts.extra||{}));mat.name=opts.name||"ground-skin";const mg=surfaceMaps("grass",{repeat:1}),md=surfaceMaps("dirt",{repeat:1}),ms=surfaceMaps("sand",{repeat:1}),mr=surfaceMaps("rock",{repeat:1}),MAPS=!!(mg&&md&&ms&&mr);function inv(t){const m=surfaceMapMean(t);return new THREE.Vector3(1/Math.max(.02,m[0]),1/Math.max(.02,m[1]),1/Math.max(.02,m[2]))}const U={uGndTile:{value:new THREE.Vector4(1/tile.grass,1/tile.dirt,1/tile.sand,1/tile.rock)},uGndPar:{value:new THREE.Vector4(rockSlope[0],rockSlope[1],sandY[0],sandY[1])},uGndFar:{value:far},uGndWear:{value:opts.wear==null?1:+opts.wear},uGndMix:{value:new THREE.Vector2(opts.chroma==null?.35:+opts.chroma,opts.mottle==null?1:+opts.mottle)}};return MAPS&&Object.assign(U,{uGndG:{value:mg.map},uGndD:{value:md.map},uGndS:{value:ms.map},uGndR:{value:mr.map},uGndKG:{value:inv(mg.map)},uGndKD:{value:inv(md.map)},uGndKS:{value:inv(ms.map)},uGndKR:{value:inv(mr.map)}}),CITY&&(Object.assign(U,_cityU),CBZ.farCityMap.sampled=!0),U.uGndOpt={value:new THREE.Vector2(SRGB?1:0,CITY?1:0)},mat.userData.groundSkin=!0,mat.onBeforeCompile=function(sh){const vs=sh.vertexShader,fs0=sh.fragmentShader;vs.indexOf("#include <project_vertex>")<0||fs0.indexOf("#include <color_fragment>")<0||(Object.assign(sh.uniforms,U,_roadU),CITY||Object.assign(sh.uniforms,_cityU),sh.vertexShader=vs.replace("#include <common>",`#include <common>
 varying vec3 vGndW;
 varying vec3 vGndN;
 varying float vGndD;`).replace("#include <project_vertex>",`#include <project_vertex>
 vGndW = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;
 vGndN = normalize( mat3( modelMatrix ) * objectNormal );
 vGndD = length( mvPosition.xyz );`),sh.fragmentShader=fs0.replace("#include <common>",`#include <common>
-varying vec3 vGndW;
+`+(MAPS?`#define GND_MAPS
+`:"")+`varying vec3 vGndW;
 varying vec3 vGndN;
 varying float vGndD;
+#ifdef GND_MAPS
 uniform sampler2D uGndG;
 uniform sampler2D uGndD;
 uniform sampler2D uGndS;
@@ -22,18 +23,23 @@ uniform vec3 uGndKG;
 uniform vec3 uGndKD;
 uniform vec3 uGndKS;
 uniform vec3 uGndKR;
+#endif
 uniform vec4 uGndTile;
 uniform vec4 uGndPar;
 uniform float uGndFar;
 uniform vec2 uGndMix;
 uniform vec2 uGndOpt;
+uniform float uGndWear;
+uniform sampler2D uGndRoad;
+uniform vec4 uGndRoadR;
 uniform sampler2D uGndCity;
 uniform float uGndCityN;
 uniform vec4 uGndCityR[ `+CITY_MAX+` ];
 uniform vec4 uGndCityA[ `+CITY_MAX+` ];
 uniform float uGndNight;
 `+GND_GLSL+`
-`+SRGB_GLSL+CITY_GLSL).replace("#include <color_fragment>",`#include <color_fragment>
+`+SRGB_GLSL+TURF_GLSL+`
+`+CITY_GLSL).replace("#include <color_fragment>",`#include <color_fragment>
 vec3 gndLamp = vec3( 0.0 );
 {
   vec3 vc0 = diffuseColor.rgb;
@@ -44,9 +50,10 @@ vec3 gndLamp = vec3( 0.0 );
   float slope = 1.0 - clamp( normalize( vGndN ).y, 0.0, 1.0 );
   float rockW = smoothstep( uGndPar.x, uGndPar.y, slope + ( gndVn( xz / 7.0 ) - 0.5 ) * 0.12 );
   float sandW = ( 1.0 - grassW ) * ( 1.0 - smoothstep( uGndPar.z, uGndPar.w, vGndW.y ) );
+  vec3 det = vec3( 1.0 );
+#ifdef GND_MAPS
   float fade = 1.0 - smoothstep( uGndFar * 0.35, uGndFar, vGndD );
   float w9 = gndVn( xz / 9.0 );
-  vec3 det = vec3( 1.0 );
   if ( fade > 0.001 ) {
     vec3 tG = gndTap( uGndG, xz * uGndTile.x, w9 ) * uGndKG;
     vec3 tD = gndTap( uGndD, xz * uGndTile.y, w9 ) * uGndKD;
@@ -57,21 +64,43 @@ vec3 gndLamp = vec3( 0.0 );
     det = mix( vec3( dl ), det, uGndMix.x );
     det = mix( vec3( 1.0 ), det, fade );
   }
+#endif
   float vl = dot( vc, vec3( 0.2126, 0.7152, 0.0722 ) );
   vec3 stone = vec3( vl ) * vec3( 1.08, 1.0, 0.90 ) * 1.25;
   vec3 base = mix( vc, stone, rockW * 0.8 );
+  vec3 turf = mix( vec3( 1.0 ), groundTurf( xz, vGndD, uGndWear ), uGndMix.y );
   float m1 = gndVn( xz / 23.0 ), m2 = gndVn( xz / 61.0 + 3.1 );
   float mott = 1.0 + uGndMix.y * ( 0.28 * ( m1 * 0.55 + m2 * 0.45 ) - 0.14 );
-  float dry = smoothstep( 0.55, 0.85, m2 ) * grassW * ( 1.0 - rockW );
-  base *= mix( vec3( 1.0 ), vec3( 1.16, 1.04, 0.72 ), dry * 0.55 * uGndMix.y );
-  vec3 gOut = base * det * mott;
+  base *= mix( vec3( mott ), turf, grassW * ( 1.0 - rockW ) );
+  if ( uGndRoadR.z > 0.0 ) {
+    vec2 ruv = ( xz - uGndRoadR.xy ) * uGndRoadR.zw;
+    if ( ruv.x > 0.0 && ruv.y > 0.0 && ruv.x < 1.0 && ruv.y < 1.0 ) {
+      float e = ( texture2D( uGndRoad, ruv ).r * 255.0 - 128.0 ) * 0.25;
+      if ( e < 18.0 ) {
+        float aw = 0.5 + vGndD * 0.004;
+        float fr = ( tfN( xz * 0.7 + 4.1 ) - 0.5 ) * 1.4;
+        float grav = 1.0 - smoothstep( 2.4 - aw, 2.4 + aw, e + fr );
+        float stones = 0.78 + 0.44 * tfN( xz * 7.5 ) * ( 1.0 - smoothstep( 15.0, 60.0, vGndD ) ) + 0.22 * smoothstep( 15.0, 60.0, vGndD );
+        vec3 gravel = vec3( 0.150, 0.138, 0.118 ) * stones;
+        float verge = 1.0 - smoothstep( 7.0, 15.0, e + fr * 2.0 );
+        float rut = ( 1.0 - smoothstep( 2.6, 5.0, e ) ) * smoothstep( 0.45, 0.75, tfN( xz * 0.33 + 6.6 ) ) * ( 1.0 - smoothstep( 120.0, 400.0, vGndD ) );
+        vec3 vg = base * mix( vec3( 1.0 ), vec3( 1.22, 1.06, 0.70 ), 0.75 * grassW );
+        vg = mix( vg, base * vec3( 1.40, 0.76, 0.58 ), rut * 0.7 * grassW );
+        base = mix( base, vg, verge );
+        base = mix( base, gravel, grav );
+      }
+    }
+  }
+  vec3 gOut = base * det;
   if ( uGndOpt.y > 0.5 && uGndCityN > 0.5 ) {
     vec4 cm = gndCity( xz );
     float cw = smoothstep( 0.12, 0.4, cm.a );
-    vec3 cc = cm.rgb * cm.rgb * ( 0.94 + 0.12 * m1 );
+    vec3 cc = cm.rgb * cm.rgb;
+    float cg = smoothstep( 1.15, 1.45, cc.g / max( cc.r, 1e-4 ) );
+    cc *= mix( vec3( 0.94 + 0.12 * m1 ), turf, cg );
     gOut = mix( gOut, cc, cw );
     gndLamp = vec3( 1.0, 0.62, 0.26 ) * smoothstep( 0.55, 1.0, cm.a ) * uGndNight * 0.55;
   }
   diffuseColor.rgb = gOut;
 }`).replace("#include <emissivemap_fragment>",`#include <emissivemap_fragment>
-  totalEmissiveRadiance += gndLamp;`))},mat.customProgramCacheKey=function(){return"cbzGroundSkin2"},mat}})();
+  totalEmissiveRadiance += gndLamp;`))},mat.customProgramCacheKey=function(){return"cbzGroundSkin3"+(MAPS?"m":"p")},mat}})();
