@@ -536,7 +536,7 @@
     }
 
     // a finished ceiling (the slab's underside is raw concrete)
-    B.plane(whole.x0, whole.z0, whole.x1, whole.z1, ceil - 0.01, "plaster", vacant ? 0xe6e4df : 0xf6f4f0, { down: true, cell: 1.2, holes: B.holes() });
+    B.plane(whole.x0, whole.z0, whole.x1, whole.z1, ceil - 0.01, "plaster", vacant ? 0xe6e4df : 0xf6f4f0, { down: true, cell: 1.2, holes: B.holes("ceil") });
 
     // ---- PAINT: the flat's own walls (party walls + the corridor wall) ------
     const paint = vacant ? 0xe9e6df : plan.paint;
@@ -854,7 +854,7 @@
     const info = B.info || {}, fy = B.fy;
     if (info.vacant) {
       B.plane(r.x0, r.z0, r.x1, r.z1, fy, "concrete", 0xffffff);
-      B.plane(r.x0, r.z0, r.x1, r.z1, B.ceil - 0.01, "plaster", 0xe6e4df, { down: true, cell: 1.2, holes: B.holes() });
+      B.plane(r.x0, r.z0, r.x1, r.z1, B.ceil - 0.01, "plaster", 0xe6e4df, { down: true, cell: 1.2, holes: B.holes("ceil") });
       const cx = (r.x0 + r.x1) / 2, cz = (r.z0 + r.z1) / 2;
       B.box(cx, fy + 0.005, cz, 2.6, 0.01, 1.8, 0xe0dccf, { faces: 4 });
       B.box(cx + 0.4, fy + 0.13, cz - 0.3, 0.26, 0.26, 0.26, 0xd8d8d0);
@@ -863,7 +863,7 @@
     }
     const z = info.zones;
     B.plane(r.x0, r.z0, r.x1, r.z1, fy, "wood", 0xffffff, { holes: z && z.bath ? [z.bath].concat(B.holes()) : B.holes() });
-    B.plane(r.x0, r.z0, r.x1, r.z1, B.ceil - 0.01, "plaster", 0xf6f4f0, { down: true, cell: 1.2, holes: B.holes() });
+    B.plane(r.x0, r.z0, r.x1, r.z1, B.ceil - 0.01, "plaster", 0xf6f4f0, { down: true, cell: 1.2, holes: B.holes("ceil") });
     if (z && z.bath) B.plane(z.bath.x0, z.bath.z0, z.bath.x1, z.bath.z1, fy + 0.004, "tile", 0xffffff, { cell: 0.6 });
     if (z && z.din) B.plane(z.din.x0, z.din.z0, z.din.x1, z.din.z1, fy + 0.004, "tile", 0xe8e4dc, { cell: 0.6 });
     const rooms = z ? [z.liv, z.din, z.bed, z.bath] : [r];

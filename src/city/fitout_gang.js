@@ -600,7 +600,7 @@
     const top = B.ceil - 0.01, jh = 0.2;
     B.plane(x0, z0, x1, z1, top, "wood", 0xa8977e, { down: true, cell: 0.9 });
     const alongX = (x1 - x0) <= (z1 - z0);          // joists span the short way
-    const holes = B.holes ? B.holes() : [];
+    const holes = B.holes ? B.holes("ceil") : [];
     const span0 = alongX ? x0 : z0, span1 = alongX ? x1 : z1;
     const run0 = alongX ? z0 : x0, run1 = alongX ? z1 : x1;
     for (let u = run0 + 0.2; u <= run1 - 0.1; u += 0.406) {

@@ -3535,11 +3535,40 @@
         }
       }
     }
-    // 5. upstairs: a balustrade across the far end of the opening (front side),
-    //    and the wall that makes the stair hall a room with one door onto the landing
+    // 5. upstairs: THE WELL IS GUARDED BY A BALUSTRADE, not a parapet. It was
+    //    a solid marble block across the far end, so from the first floor the
+    //    opening read as a hole in the floor behind a kerb. Now every open edge
+    //    of the well on the first floor carries the same balustrade the flights
+    //    do: a newel at each end and corner, turned balusters on a plinth at
+    //    12 cm centres, a brass-capped handrail at RH, and one solid collider
+    //    the length of the run (nobody steps or falls through).
+    //      · the far (front) edge, across the whole opening;
+    //      · the head edge, from the head newel to the stair hall's wall (the
+    //        strip between the flight's string and that wall is open well).
+    function wellRail(xa, xb, z, newels) {
+      const len = xb - xa;
+      if (len < 0.2) return;
+      const inset = newels ? 0.15 : 0.03;
+      const xm = (xa + xb) / 2;
+      b.lbox(xm, y1 + 0.05, z, len, 0.1, 0.16, MARBLE, { cast: false, stair: true });                       // the plinth
+      b.lbox(xm, y1 + RH - 0.035, z, len, 0.07, 0.12, MARBLE, { cast: false, stair: true });                 // the rail's bed
+      b.lbox(xm, y1 + RH + 0.02, z, len + 0.02, 0.05, 0.09, BRASS, { cast: false, stair: true });            // the handrail
+      const n = Math.max(1, Math.round((len - 2 * inset) / 0.12));
+      for (let i = 0; i < n; i++) {
+        const x = xa + inset + (i + 0.5) * (len - 2 * inset) / n;
+        b.lbox(x, y1 + 0.1 + (RH - 0.17) / 2, z, 0.045, RH - 0.17, 0.045, MARBLE, { cast: false, stair: true });
+      }
+      if (newels) for (const x of [xa + 0.12, xb - 0.12]) {
+        b.lbox(x, y1 + 0.6, z, 0.24, 1.2, 0.24, MARBLE, { stair: true });
+        b.lbox(x, y1 + 1.25, z, 0.3, 0.1, 0.3, NOSE, { cast: false, stair: true });
+        b.lbox(x, y1 + 1.36, z, 0.14, 0.12, 0.14, BRASS, { cast: false, stair: true });
+      }
+      solid(xa, xb, z - 0.12, z + 0.12, y1, y1 + RH + 0.05);
+    }
     const zGuard = zBot + 0.52;
-    b.lbox((xW + xPart - 0.1) / 2, y1 + RH / 2, zGuard, xPart - 0.1 - xW, RH, 0.22, MARBLE, { solid: true, stair: true });
-    b.lbox((xW + xPart - 0.1) / 2, y1 + RH + 0.04, zGuard, xPart - 0.1 - xW + 0.1, 0.08, 0.3, NOSE, { cast: false, stair: true });
+    wellRail(xW, xPart - 0.1, zGuard, true);
+    // (from the head newel's face to the wall: its own newel is the head one)
+    wellRail(railX + 0.15, xPart - 0.1, zTop - 0.2, false);
     const room1 = CBZ.interiorFloorRoom ? CBZ.interiorFloorRoom(b, 1) : null;
     const landingZ = zTop - 2.2;
     // it starts at the service core's front face: behind that the core's own

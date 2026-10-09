@@ -765,24 +765,48 @@
                   maxZ: oz + Math.max(z0, z1), y0: ya, y1: yb, ref: null, _fitout: site.key });
     }
     // a subdivided floor/ceiling plane so baked light can pool on it. `holes`
-    // are rects to leave open (stair wells, lift shafts).
+    // are rects to leave open (stair wells, lift shafts): a floor takes this
+    // storey's, a ceiling (o.down) the slab ABOVE's. The rect is CUT at every
+    // hole edge first and each remaining piece subdivided, so the opening is
+    // exactly the well (whole cells touching a hole used to be dropped: a
+    // ragged metre-wide bite round every stair, and a bath's tile floating
+    // in a gap of missing parquet).
+    function cutRects(x0, z0, x1, z1, holes) {
+      let out = [{ x0: x0, z0: z0, x1: x1, z1: z1 }];
+      for (let h = 0; h < holes.length; h++) {
+        const R = holes[h];
+        const next = [];
+        for (let i = 0; i < out.length; i++) {
+          const c = out[i];
+          if (R.x1 <= c.x0 || R.x0 >= c.x1 || R.z1 <= c.z0 || R.z0 >= c.z1) { next.push(c); continue; }
+          if (R.z0 > c.z0) next.push({ x0: c.x0, x1: c.x1, z0: c.z0, z1: R.z0 });
+          if (R.z1 < c.z1) next.push({ x0: c.x0, x1: c.x1, z0: R.z1, z1: c.z1 });
+          const a = Math.max(c.z0, R.z0), b2 = Math.min(c.z1, R.z1);
+          if (R.x0 > c.x0) next.push({ x0: c.x0, x1: R.x0, z0: a, z1: b2 });
+          if (R.x1 < c.x1) next.push({ x0: R.x1, x1: c.x1, z0: a, z1: b2 });
+        }
+        out = next;
+      }
+      return out;
+    }
     function plane(x0, z0, x1, z1, y, matKey, tint, o) {
       o = o || {};
+      const down = !!o.down;
+      const pcs = cutRects(Math.min(x0, x1), Math.min(z0, z1), Math.max(x0, x1), Math.max(z0, z1), o.holes || (down ? CEIL_HOLES : HOLES));
+      for (let i = 0; i < pcs.length; i++) {
+        const p = pcs[i];
+        if (p.x1 - p.x0 > 0.01 && p.z1 - p.z0 > 0.01) planeRect(p.x0, p.z0, p.x1, p.z1, y, matKey, tint, o);
+      }
+    }
+    function planeRect(x0, z0, x1, z1, y, matKey, tint, o) {
       const bk = bucket(matKey);
       const c = hexRGB(tint == null ? 0xffffff : tint);
       const cell = o.cell || 1.0;
       const nxc = Math.max(1, Math.ceil((x1 - x0) / cell)), nzc = Math.max(1, Math.ceil((z1 - z0) / cell));
       const dx = (x1 - x0) / nxc, dz = (z1 - z0) / nzc;
       const down = !!o.down, sc = TEX_SCALE[matKey] || 2;
-      const holes = o.holes || (down ? CEIL_HOLES : HOLES);
       for (let i = 0; i < nxc; i++) for (let j = 0; j < nzc; j++) {
         const ax = x0 + i * dx, az = z0 + j * dz, bx = ax + dx, bz = az + dz;
-        let skip = false;
-        for (let h = 0; h < holes.length && !skip; h++) {
-          const R = holes[h];
-          if (bx > R.x0 && ax < R.x1 && bz > R.z0 && az < R.z1) skip = true;
-        }
-        if (skip) continue;
         const base = bk.pos.length / 3;
         const P4 = down ? [[ax, bz], [ax, az], [bx, az], [bx, bz]] : [[ax, az], [ax, bz], [bx, bz], [bx, az]];
         for (let q = 0; q < 4; q++) {
@@ -1021,7 +1045,9 @@
         return CBZ.interiorLootRegister ? CBZ.interiorLootRegister(ox + x, y0, oz + z, kind, o || null) : null;
       },
       windows: function () { return windowsOn(b, y0, ceil); },
-      holes: function () { return HOLES; },
+      // the open rects of this storey's FLOOR, or (B.holes("ceil")) of its
+      // CEILING: the slab above, which a one-storey grand stair opens alone
+      holes: function (which) { return which === "ceil" ? CEIL_HOLES : HOLES; },
     };
     // lift shafts / stair wells punched through this floor: never floored over
     let HOLES = [];

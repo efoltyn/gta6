@@ -1555,9 +1555,17 @@
     // would have climbed on is not there)
     {
       const yT = tops[kTop];
-      addSolid(dA0 - 0.03, dA0 + 0.03, L0, latMid, yT, yT + 1.05);
+      // a real balustrade, not two bars: a newel at each end, balusters at
+      // 12 cm centres between a bottom rail and the handrail
+      addSolid(dA0 - 0.06, dA0 + 0.06, L0, latMid, yT, yT + 1.05);
       dbox(COREC.rail, dA0, (L0 + latMid) / 2, yT + 1.0, 0.06, laneW, 0.06);
-      dbox(COREC.rail, dA0, (L0 + latMid) / 2, yT + 0.5, 0.04, laneW, 0.04);
+      dbox(COREC.rail, dA0, (L0 + latMid) / 2, yT + 0.1, 0.05, laneW, 0.04);
+      const nB = Math.max(2, Math.round((laneW - 0.2) / 0.12));
+      for (let i = 0; i < nB; i++) {
+        const l = L0 + side * (0.1 + (i + 0.5) * (laneW - 0.2) / nB);
+        dbox(COREC.rail, dA0, l, yT + 0.55, 0.025, 0.025, 0.86);
+      }
+      for (const l of [L0 + side * 0.05, latMid - side * 0.05]) dbox(COREC.rail, dA0, l, yT + 0.55, 0.08, 0.08, 1.1);
     }
     // merge the deco: one mesh per colour
     {

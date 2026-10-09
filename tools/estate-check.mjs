@@ -271,7 +271,7 @@ for (const side of [3, 0, 2]) {
 
 {
 console.log("\n=== the whole govcomplex pass, and the Mansion's inside ===");
-for (const rel of ["src/city/elevators.js", "src/city/furniture.js", "src/world/roombuild.js"]) {
+for (const rel of ["src/city/fitout.js", "src/city/elevators.js", "src/city/furniture.js", "src/world/roombuild.js"]) {
   try { vm.runInContext(fs.readFileSync(ROOT + "/" + rel, "utf8"), ctx, { filename: rel }); } catch (e) { console.log("load fail", rel, e.message); }
 }
 CBZ.colliders.length = 0; CBZ.platforms.length = 0;
@@ -323,7 +323,7 @@ if (m && m.lot) {
 //           core's storey links) walked up at 5 cm on that ground law: it
 //           must arrive (|end error| < 3 cm), never rise more than a riser in
 //           one step, have a drawn tread within 2 cm of the feet on every
-//           sample, a clear column from the ankles to 2.0 m over the feet (no
+//           sample, a clear column from the ankles to 2.1 m over the feet (code headroom) (no
 //           ceiling, slab, beam or fixture in the head path) and no solid in
 //           the body band.
 //   TREADS  every published grand-stair tread answers its own top.
@@ -427,6 +427,13 @@ if (m && m.lot) {
     W0 = Object.assign({}, W); perShell = {};
     const b = sh.b, sid = typeof sh.site === "string" ? sh.site : (sh.site && sh.site.id), srec = (CBZ.govComplexes || []).find((q) => q.id === sid) || null, tag = sid + "/" + (sh.name || "shell") + "@" + b.ox.toFixed(0) + "," + b.oz.toFixed(0);
     if ((b.storeys | 0) >= 2 && CBZ.cityStairCore) { try { CBZ.cityStairCore({ building: b }); } catch (e) { console.log("core fail", tag, e.message); } }
+    // THE FINISH IS WHAT YOU SEE: every declared floor's lazy fit-out (the
+    // state rooms' parquet, ceilings, rugs, coffers; a flat's planes) built
+    // the way walking in builds it, so the stair walk meets what the owner meets
+    const fsite = CBZ.fitoutSiteOf ? CBZ.fitoutSiteOf(b) : null;
+    let fitN = 0;
+    if (fsite && CBZ.fitoutBuildNow) for (const fk in fsite.floors) { try { const r = CBZ.fitoutBuildNow(b, +fk); if (r && r.group) fitN++; } catch (e) { console.log("fitout fail", tag, fk, e.message); } }
+    W.fitFloors = (W.fitFloors | 0) + fitN;
     const TG = triGrid(b.group);
     const tops = b.floorTops, wt = b.wt != null ? b.wt : 0.4;
     const holes = (b.shaftRects || []);
@@ -471,8 +478,8 @@ if (m && m.lot) {
           y = g; W.stairSamples++;
           const hs = TG.at(x, z);
           if (!hs.some((h) => h.up > 0.7 && Math.abs(h.y - y) <= 0.021)) { W.treadMiss++; bad++; note("tread", tag + " link" + L.id + " no tread under the feet at y " + y.toFixed(3) + " @" + (x - b.ox).toFixed(2) + "," + (z - b.oz).toFixed(2)); }
-          // the column from over a riser (a nosing may overhang the toes) to 2 m
-          const head = hs.filter((h) => h.y > y + 0.25 && h.y < y + 2.0);
+          // the column from over a riser (a nosing may overhang the toes) to 2.1 m
+          const head = hs.filter((h) => h.y > y + 0.25 && h.y < y + 2.1);
           if (head.length) { W.head++; bad++; const h = head.sort((p, q) => p.y - q.y)[0]; if (process.env.DBG && samples.head.length < 3) console.log("DBG all", y.toFixed(3), JSON.stringify(head.map((q) => [+(q.y - y).toFixed(3), q.T.p.map((w) => w.map((u, ii) => +(u - (ii === 0 ? b.ox : ii === 2 ? b.oz : 0)).toFixed(2)))])));
           if (process.env.DBG && samples.head.length < 0) console.log("DBG head tri", JSON.stringify(h.T.p.map((q) => q.map((u, ii) => +(u - (ii === 0 ? b.ox : ii === 2 ? b.oz : 0)).toFixed(2)))), "path", JSON.stringify(L.path.map((q) => [+(q.x - b.ox).toFixed(2), +q.y.toFixed(2), +(q.z - b.oz).toFixed(2)])));
           note("head", tag + " link" + L.id + " drawn surface " + (h.y - y).toFixed(2) + " m over the feet (y " + y.toFixed(2) + ") @" + (x - b.ox).toFixed(2) + "," + (z - b.oz).toFixed(2) + " " + h.name); }
@@ -521,7 +528,7 @@ if (m && m.lot) {
     }
   }
   console.log("\n=== the walk: " + shells.length + " shells ===");
-  console.log("floor points", W.floorPts, "walk!=floor", W.floorBad, "feet under a drawn floor", W.sunk, "no drawn floor", W.bare);
+  console.log("floor points", W.floorPts, "walk!=floor", W.floorBad, "feet under a drawn floor", W.sunk, "no drawn floor", W.bare, "| fitted floors walked", W.fitFloors | 0);
   console.log("stair links", W.links, "samples", W.stairSamples, "links with faults", W.stairBad, "| no tread", W.treadMiss, "head path", W.head, "body blocked", W.blocked, "no arrival", W.noArrive, "| grand treads", W.treads, "bad", W.treadBad, "| door->floor routes", W.routes | 0, "failed", W.noRoute | 0);
   for (const k in samples) if (samples[k].length) console.log("  " + k + ":", samples[k].join("\n    "));
   FAIL += (W.noRoute | 0) + W.floorBad + W.sunk + W.bare + W.treadMiss + W.head + W.blocked + W.noArrive + W.treadBad;
