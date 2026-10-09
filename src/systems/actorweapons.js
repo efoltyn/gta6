@@ -2111,6 +2111,7 @@
       const r = rec(a);
       if (why) { trigger(a, why); return; }
       if (a._drawWhy) a._drawWhy = null;
+      if (a._detWhy) a._detWhy = null;          // the detail brain's "ward" reason goes with it
       r.downT = T; r.trigT = -1e9; r.watchT = 0;
       if (r.lv >= 2) log(a, "holster", "stand-down");
       r.lv = 0; r.holdUntil = 0; r.why = "";
@@ -2163,6 +2164,24 @@
       }
       return r;
     }
+    /* ONE SIDE. A body's own side never reads as his threat: the President's
+       detail, the Mansion's posts, the motorcade, the soldiers and police
+       standing for him, a hired detail, a power ring. Their guns coming out
+       for an order is not "an armed man" to the agent beside them; without
+       this, drawn guns seeing each other restarted every HOLD (7-11 s). */
+    function side(a) {
+      if (!a) return null;
+      if (a._protUnit || a._presPublic || a._occupySrc === "motorcade" || a._presRaid) return "state";
+      if (a.organization === "state" || a.organization === "military" || a.kind === "cop" || a.swat) return "state";
+      if (a._powerOf) return "power:" + (a._powerOf.id != null ? a._powerOf.id : "x");
+      if (a._vipGuard) return "vip";
+      return null;
+    }
+    function sameSide(a, b) {
+      if (!a || !b || a === b) return a === b && !!a;
+      const sa = side(a);
+      return !!sa && sa === side(b);
+    }
     function drawn(a) { return !!(a && a._gd && a._gd.lv >= 2); }
     function aiming(a) {
       const r = a && a._gd;
@@ -2181,7 +2200,7 @@
       }
       return out;
     }
-    return { trigger, reason, sense, tick, drawn, aiming, mayHolster, clock, audit, rec, exempt,
+    return { trigger, reason, sense, tick, drawn, aiming, mayHolster, clock, audit, rec, exempt, sameSide,
       log: function () { return ring.slice(); }, LV: LV, now: function () { return T; } };
   })();
   CBZ.gunDiscipline = GD;

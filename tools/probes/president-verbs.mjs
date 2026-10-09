@@ -25,7 +25,12 @@
    4. TAKE HIM DOWN: a named citizen beside the President: the verb is on him
       (hold E), the agents draw (ped._drawWhy "order"), he dies, NEWS ONE runs
       it. A second: ordered, then Stand down: nobody keeps the order, the
-      guns go away. A third: Detain ties him (restraint "cuffed").
+      guns go away (CBZ.gunDiscipline: none drawn) and the detail's incident
+      is over (posture normal), still so 5 s later. A third: Detain ties him
+      (restraint "cuffed").
+   5. THE SERVICE'S ROSTER: shoot one of your own agents; 30 s on nobody has
+      been posted in his place, he is off the roster, Secret Service loyalty
+      fell.
 
    FAILS when a MUST role has no verb, a state person offers the street's
    verbs (Mug, Punch, Flirt...), a fired verb throws or says nothing, the
@@ -309,7 +314,22 @@ export default async function (t) {
     var f = __pv.allForce();
     out.stillOrdered = f.filter(function (q) { return q._order && q._order.force; }).length;
     out.stillDrawn = f.filter(function (q) { return q._drawWhy; }).length;
-    out.armed = f.filter(function (q) { return q.armed && !q._holster; }).length;
+    // A GUN IS OUT when CBZ.gunDiscipline has it drawn (poseList shows the
+    // prop only then). q.armed is "he carries one": every agent does, so the
+    // old count here (armed && !_holster) read 11 forever and was not a draw.
+    var GDd = CBZ.gunDiscipline;
+    var out_ = function (q) { return GDd ? GDd.drawn(q) : !!(q.armed && !q._holster && !q._holstered); };
+    out.carry = f.filter(function (q) { return q.armed; }).length;
+    out.gunsOut = f.filter(out_).length;
+    var PRd = function () { return CBZ.protection && CBZ.protection.posture ? CBZ.protection.posture('president') : null; };
+    out.posture = PRd();
+    // ...and they STAY away: past the 4 s stand-down window nothing of the
+    // take-down (their own shots, the dead man, each other's guns) draws again
+    __pv.step(330);
+    out.gunsLater = f.filter(function (q) { return !q.dead && out_(q); }).length;
+    out.postureLater = PRd();
+    out.diag = { members: f.filter(out_).map(function (q) { var r = q._gd || {}; var m = q._det; return [q._protUnit || q._occupySrc || (q._presPublic ? 'pub' : '?'), q.job || q.kind, 'lv=' + r.lv, 'why=' + r.why, 'trig=' + r.trigWhy + '@' + (r.trigT != null ? (GDd.now() - r.trigT).toFixed(2) : '-'), 'det=' + (q._detWhy || ''), 'ph=' + (m && m.D ? m.D.phase : '-'), 'st=' + q.state, 'al=' + (q.alarmed || 0).toFixed(1), 'rage=' + !!q.rage, 'mem=' + !!q.mem].join(' '); }),
+      ring: GDd ? GDd.log().slice(-24).map(function (e) { return e.t + ' ' + e.kind + ' ' + e.why + ' ' + e.who; }) : [] };
     out.bAlive = !b.dead;
     // detain
     var c = __pv.citizen('Ned Harlow', 3.5);
@@ -330,8 +350,44 @@ export default async function (t) {
     chk(r4.news.length > 0, "NEWS ONE runs it: " + (r4.news[0] || "-"));
     chk(r4.drawn2 > 0 && r4.callOff, "a second order, then Stand down");
     chk(r4.stillOrdered === 0 && r4.stillDrawn === 0, `nobody keeps the order (${r4.stillOrdered} ordered, ${r4.stillDrawn} drawn)`);
-    chk(r4.armed === 0, `the guns go away (${r4.armed} still out)`);
+    chk(r4.gunsOut === 0, `the guns go away (${r4.gunsOut} drawn of ${r4.carry} who carry one)`);
+    chk(r4.posture === "normal", `Stand down ends the incident: the detail is back to normal (${r4.posture})`);
+    chk(r4.gunsLater === 0 && r4.postureLater === "normal", `...and stays that way 5 s on (${r4.gunsLater} drawn, ${r4.postureLater})`);
+    if (r4.gunsOut || r4.gunsLater || VERBOSE) { for (const m of r4.diag.members) t.log("        " + m); for (const e of r4.diag.ring) t.log("        gd " + e); }
     chk(r4.detainFired && r4.cuffed === "cuffed" && r4.cAlive, "Detain ties him (" + r4.cuffed + ")");
+  }
+
+  // 5. YOU SHOOT ONE OF YOUR OWN: he is off the Service's roster, it costs
+  //    the Service's loyalty, and nobody is posted beside you 20 s later
+  //    (owner 2026-10-09: "they keep spawning in around me").
+  t.log("5. THE SERVICE'S ROSTER");
+  const r5a = JSON.parse(await t.evl(`JSON.stringify((function(){
+    var seat = CBZ.presidency && CBZ.presidency.seat ? CBZ.presidency.seat() : null;
+    var det = seat && CBZ.protection.get ? CBZ.protection.get('off_' + seat.id) : null;
+    if (!det) return { err: 'no detail' };
+    var refs = det.memberPedRefs.filter(function (q) { return q && !q.dead; });
+    var q = refs.filter(function (q) { return q._protRole !== 'shift-leader'; })[0] || refs[0];
+    if (!q) return { err: 'no agent' };
+    var PM = CBZ.politics, L0 = PM && PM.instLoyalty ? PM.instLoyalty('ss') : null;
+    window.__pv5 = { det: det, before: refs.slice(), books0: det._svc ? det._svc.books : null, L0: L0 };
+    CBZ.cityKillPed(q, { byPlayer: true, attacker: CBZ.player, fromX: CBZ.player.pos.x, fromZ: CBZ.player.pos.z }, 'shot');
+    return { n0: refs.length, books0: window.__pv5.books0, L0: L0, dead: !!q.dead };
+  })())`));
+  if (r5a.err) chk(false, r5a.err);
+  else {
+    for (let s = 0; s < 30; s++) await step(60);
+    const r5 = JSON.parse(await t.evl(`JSON.stringify((function(){
+      var W = window.__pv5, det = W.det, P = CBZ.player;
+      var now = det.memberPedRefs.filter(function (q) { return q && !q.dead; });
+      var fresh = now.filter(function (q) { return W.before.indexOf(q) < 0; });
+      var PM = CBZ.politics;
+      return { n: now.length, fresh: fresh.length, near: fresh.filter(function (q) { return Math.hypot(q.pos.x - P.pos.x, q.pos.z - P.pos.z) < 40; }).length,
+        books: det._svc ? det._svc.books : null, L1: PM && PM.instLoyalty ? PM.instLoyalty('ss') : null };
+    })())`));
+    chk(r5a.dead, "the agent you shot is down");
+    chk(r5.fresh === 0, `30 s on, no replacement has appeared (${r5.fresh} new, ${r5.near} within 40 m of you); ${r5.n} of ${r5a.n0} left`);
+    chk(r5.books != null && r5a.books0 != null && r5.books === r5a.books0 - 1, `he is off the Service's roster (${r5a.books0} -> ${r5.books})`);
+    if (r5a.L0 != null) chk(r5.L1 < r5a.L0, `the Secret Service's loyalty takes it (${(+r5a.L0).toFixed(1)} -> ${(+r5.L1).toFixed(1)})`);
   }
 
   const errs = [...new Set(t.errors())].filter((e) => /president|presidency|protection|motorcade|warroom|statecraft|interactions|verbwheel|orders|campaign_ui/.test(e));

@@ -323,16 +323,27 @@
     if (Pz && Pz.emit) { try { Pz.emit("guards-order", { mode: mode, name: t.name || null, n: crew.length, refused: no.length }); } catch (e) {} }
     return { ok: true, n: crew.length, refused: no.length };
   }
+  // STAND DOWN ENDS THE INCIDENT, not just the order: the crew drops the
+  // order and holsters (drawFor null -> CBZ.gunDiscipline), forgets the man,
+  // and the detail's own alert / cover / evac and everything it heard during
+  // the take-down is cleared (CBZ.protection.standDown). Without that last
+  // step the detail stayed "under attack" off its own shots and re-drew on
+  // "ward" the moment the order holstered them.
   function standDown(quiet) {
-    const crew = PF.crew.slice();
-    if (!quiet && PF.target) polAct("stand-down", PF.target, crew[0]);
+    const crew = PF.crew.slice(), t = PF.target;
+    if (!quiet && t) polAct("stand-down", t, crew[0]);
     PF.target = null; PF.mode = null; PF.crew = [];
     for (let i = 0; i < crew.length; i++) {
       const q = crew[i];
       if (!q) continue;
       if (q._order && q._order.force) clear(q);
-      if (!q.dead) drawFor(q, null);
+      if (q.dead) continue;
+      if (t && q.mem === t) q.mem = null;
+      if (t && q.rage === t) { q.rage = null; if (q.state === "fight") q.state = "idle"; }
+      q.alarmed = 0;
+      drawFor(q, null);
     }
+    if (CBZ.protection && CBZ.protection.standDown) { try { CBZ.protection.standDown("president"); } catch (e) {} }
     if (!quiet) { const L = lead(crew.filter(function (q) { return q && !q.dead; })); if (L) say(L, "Sir."); }
     return crew.length;
   }
@@ -433,7 +444,10 @@
     // follower engine walks up, demands, hauls it back). It replaced the
     // target-side "Send to rob / scare / tail / Sic" copies on every stranger.
     I.register("ped", { id: "order-rob", prio: 29.5, bad: true, pick: "person", campaignSafe: true, anyone: true,
-      canShow: function (p) { return on(p) && !!CBZ.followerOrder; }, label: "Rob", onSelect: function (a, ctx, t) { give(a, "rob", t); } });
+      // (your crew's job, never the state's: a Secret Service agent, the
+      // football aide, a soldier is not sent to take a stranger's wallet)
+      canShow: function (p) { return on(p) && !!CBZ.followerOrder && !(p._protUnit || p._carries || p._footballWired || p.organization === "state" || p.organization === "military"); },
+      label: "Rob", onSelect: function (a, ctx, t) { give(a, "rob", t); } });
     I.register("ped", { id: "order-guard", prio: 29, pick: "person", campaignSafe: true, anyone: true,
       canShow: on, label: "Guard", onSelect: function (a, ctx, t) { give(a, "guard", t); } });
     I.register("ped", { id: "order-tail", prio: 28, pick: "person", campaignSafe: true, anyone: true,

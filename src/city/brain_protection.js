@@ -84,7 +84,8 @@
    brain walks him). If CBZ.brain is not loaded the executor is called directly.
 
    PUBLIC: CBZ.detailBrain = { create, step, escort(key, principal, members,
-   dt, env), release(ped), sniper(ped, post, dt, target), slotLocal,
+   dt, env), calm(key, disengage) (stand down: the incident is over),
+   release(ped), sniper(ped, post, dt, target), slotLocal,
    formationSlot (the old protection.js shape), TUNE, EXEC }.
    Plain node: module.exports = CBZ.detailBrain (tools/brain-sim.mjs).
    ============================================================ */
@@ -870,6 +871,26 @@
   function escort(key, principal, members, dt, env, opts) {
     return step(detailFor(key, opts), principal, members, dt, env);
   }
+  /* STAND DOWN: the incident is over (city/orders.js "Stand down", the
+     ordered man down). The detail goes back to its formation NOW: no threat
+     remembered, no screen, no engagers (handed back through `disengage`),
+     no "ward" reason left on anybody, so nothing keeps re-drawing a gun the
+     order just put away. A real threat that is still there is found again
+     by the next scan and starts a NEW incident (newEpoch). */
+  function calm(key, disengage) {
+    const D = DETAILS[key]; if (!D) return false;
+    for (let i = 0; i < D.engagers.length; i++) { const q = D.engagers[i]; if (q && disengage) { try { disengage(q); } catch (e) {} } }
+    D.engagers.length = 0; D.screen.length = 0;
+    endChallenge(D, brain());
+    D.phase = "normal"; D.phaseT = 0; D.threat = null; D.hasT = false; D.hostile = false;
+    D.spotted = null; D.shouted = false; D.cpSaid = false; D.rosterDirty = true;
+    for (let i = 0; i < D.roster.length; i++) {
+      const q = D.roster[i]; if (!q) continue;
+      q._detWhy = null;
+      const m = q._det; if (m && m.D === D) { m.postureT = 0; m.lookAt = null; m.lookT = 0; }
+    }
+    return true;
+  }
   function drop(key) {
     const D = DETAILS[key]; if (!D) return;
     for (let i = 0; i < D.roster.length; i++) release(D.roster[i]);
@@ -905,7 +926,7 @@
   }
 
   const API = {
-    create: create, step: step, escort: escort, drop: drop, release: release, sniper: sniper,
+    create: create, step: step, escort: escort, drop: drop, calm: calm, release: release, sniper: sniper,
     detail: function (key) { return DETAILS[key] || null; },
     slotLocal: slotLocal, formationSlot: formationSlot, kindsFor: kindsFor,
     TUNE: TUNE, EXEC: EXEC, _details: DETAILS,

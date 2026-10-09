@@ -56,7 +56,9 @@
    BODIES AND RANGES
    · the player President's detail: 5 standing (the record's runtime
      `standing`), plus one body per "bigger detail" order (memberCount, the
-     only number militia.js counts). A fallen agent is replaced 20 s later.
+     only number militia.js counts). A fallen agent is off the Service's
+     roster; replacements are dispatched after minutes and walk in from out
+     of sight (THE SERVICE'S ROSTER below).
    · Mansion posts: 3 gate officers (+2 in a lockdown, +6 facing the crowd
      at the protest pen while one is open, city/perimeter.js), 4 on the roof,
      2 on the wall walk. Spawned within 180 m of the grounds, released past
@@ -377,12 +379,15 @@
   // `standing` (runtime, never saved) is bodies the STATE owes a principal on
   // top of memberCount: the President's detail of six. militia.js's headcount
   // test reads memberCount only, so a standing detail never becomes a militia.
-  function spawnMembers(detail, A, x, z, spawnRng) {
-    if (!detail || !A || !A.root || !CBZ.cityMakePed) return;
+  // `cap` (optional) = the most bodies this call may post: the Service sends
+  // a set number of replacements, not "up to the record"
+  function spawnMembers(detail, A, x, z, spawnRng, cap) {
+    if (!detail || !A || !A.root || !CBZ.cityMakePed) return 0;
     const r = spawnRng || rng;
     const gear = GEAR[clamp(detail.gearTier | 0, 0, 2)];
-    const want = Math.max(0, (detail.memberCount | 0) + (detail.standing | 0));
-    let guard = 0;
+    const want = Math.min(Math.max(0, (detail.memberCount | 0) + (detail.standing | 0)),
+      cap != null ? detail.memberPedRefs.length + Math.max(0, cap | 0) : 1e9);
+    let guard = 0, made = 0;
     while (detail.memberPedRefs.length < want && guard++ < HIRE_CAP + 8) {
       const i = detail.memberPedRefs.length;
       const ang = (i / Math.max(1, want)) * Math.PI * 2;
@@ -417,7 +422,9 @@
       // that was the President's detail in tan / powder-blue / white suits.
       if (CBZ.cityRelShift) CBZ.cityRelShift(q, "recruited", 0.5);   // a fresh hire starts with SOME goodwill, not none
       detail.memberPedRefs.push(q);
+      made++;
     }
+    return made;
   }
   function removePed(p) {
     if (!p || (p.dead && !p.collected)) return;   // a corpse belongs to the world
@@ -703,7 +710,8 @@
   // ============================================================
   // What the OFFICE grants: the whole detail, on day one. Nobody hires
   // agents (the job line in city/president_staff.js is gone); a fallen agent
-  // is replaced by the service itself, off camera (the 20 s _spawnWait below).
+  // is replaced by the Service itself, minutes later, walking in from out of
+  // sight (THE SERVICE'S ROSTER below).
   // memberCount stays the "bigger detail" order's (statecraft guard deploy).
   const PRES_BASE = 6;
   const POSTS_NEAR = 180, POSTS_FAR = 260;
@@ -1351,12 +1359,17 @@
     // (a) what was heard
     for (let i = 0; i < NOISE.length; i++) {
       const n = NOISE[i];
-      if (clock - n.t > 1.3) continue;
+      if (clock - n.t > 1.3 || n.t < (ps.quietFrom || -1e9)) continue;
       const d = hyp(n.x, n.z, bx, bz);
       if (n.blast) { if (d < 70) raise(ps, 2, "explosion", n.x, n.z, null, false); continue; }
       if (d > GUNFIRE_R) continue;
       const off = n.off;
-      if (off && (off === body || friendly(off))) { if (d < 40) raise(ps, 1, "gunfire", n.x, n.z, null, false); continue; }
+      // HIS OWN PEOPLE'S SHOTS ARE NOT A THREAT. The detail (or a soldier, a
+      // cop) firing is either at a threat the scan already sees by itself, or
+      // at a man the President ordered taken down. Raising "gunfire" off them
+      // kept the posture at alert, and every agent re-drew on "ward", for as
+      // long as anyone on his side kept shooting and 30 s past it.
+      if (off && (off === body || friendly(off))) continue;
       if (isPlayerPrincipal && off && isPlayerBody(off)) continue;   // his own shots
       if (n.loud < 1.15 && !off) continue;
       const hostile = !!(off && (!isPlayerBody(off) || n.loud >= 1.15));
@@ -1372,7 +1385,7 @@
         for (let i = 0; i < DBk.roster.length; i++) {
           let h = null;
           try { h = Br.memory.heard(DBk.roster[i]); } catch (e) { h = null; }
-          if (!h || tn - h.t > 1.3) continue;
+          if (!h || tn - h.t > 1.3 || h.t < (ps.quietFromBr || -1e9)) continue;
           if (h.kind !== "gunshot" && h.kind !== "explosion") continue;
           const d = hyp(h.x, h.z, bx, bz);
           if (h.kind === "explosion") { if (d < 70) raise(ps, 2, "explosion", h.x, h.z, null, false); continue; }
@@ -1621,10 +1634,94 @@
     return false;
   }
   function wantCount(det) { return Math.max(0, (det.memberCount | 0) + (det.standing | 0)); }
-  function spawnNearPlayer(det, A, P, dt, isPres) {
-    if (det.memberPedRefs.length >= wantCount(det) || CBZ.citySpawnDraining) { det._spawnWait = 0; return; }
-    det._spawnWait = (det._spawnWait || 0) + dt;
-    // candidates behind him first, then his flanks
+  /* ------------------------------------------------------------
+     THE SERVICE'S ROSTER. Owner (2026-10-09): "I keep killing all my
+     security and they keep spawning in around me. That's not realistic."
+     A fallen agent used to come back 20 s later, posted beside the
+     President. Now the Secret Service keeps a ROSTER for the detail
+     (svc.books: the agents assigned to him) and nobody is posted near him
+     after the opening shift:
+       · a dead agent is gone from the roster (books - 1). Killing one
+         yourself is an act (politics.act "kill" by "self"): the Service's
+         loyalty takes it, and the detail's size follows that loyalty
+         (politics.detailSize, read into det.standing every frame).
+       · replacements are DISPATCHED after minutes (an attack's losses:
+         2-4 min; agents you killed: 4-7 min). The missing men are posted
+         together at a real place out of sight (the Service's post at the
+         Mansion door, or a point 80-130 m off where you are not looking)
+         and WALK in, routed (q._protInbound), never teleported beside you.
+       · a sour Service sends one man where it owes more and says so on the
+         phone; below SVC_REFUSE it sends nobody ("We're not sending more men
+         to die, sir.").
+       · the roster refills by NEW HIRES, one per game day, up to what the
+         Service will stand round him; none while it is refusing.
+       · a Service that no longer believes in him pulls men off: an agent
+         past det.standing walks away and is gone once out of sight.
+     The opening shift (the detail's first muster of a run) is the one time
+     agents are posted at him: they are on duty when he takes office.
+     ------------------------------------------------------------ */
+  const SVC_REFUSE = 15;              // Secret Service loyalty under which nobody is sent
+  const SVC_GRUDGE = 35;              // under this the Service sends one man and says so
+  const SVC_ATTACK_T = [120, 240];    // s: replacements after an attack's losses
+  const SVC_SELF_T = [240, 420];      // s: after agents YOU killed
+  const SVC_FAR = [80, 130];          // m: where a dispatched team is posted from
+  function ssLoyalty() {
+    const PM = CBZ.politics;
+    if (!PM || typeof PM.instLoyalty !== "function") return 85;
+    try { const L = +PM.instLoyalty("ss"); return isFinite(L) ? L : 85; } catch (e) { return 85; }
+  }
+  function svcOf(det) {
+    if (!det._svc) det._svc = { books: wantCount(det), day: null, mustered: false, dueAt: null, selfKills: 0, pushDay: null };
+    return det._svc;
+  }
+  function today() { try { return CBZ.worldDay ? (CBZ.worldDay() | 0) : 0; } catch (e) { return 0; } }
+  // the Director's voice: a line on the phone (people talk to you; no panel)
+  function directorSays(line) {
+    if (CBZ.speech && CBZ.speech.phone) { try { CBZ.speech.phone(line, { secs: 3.2 }); return; } catch (e) {} }
+    if (CBZ.city && CBZ.city.note) CBZ.city.note(line, 3);
+  }
+  // a man of the detail fell: off the books, and the Service decides when
+  // (and whether) to send the next
+  function serviceLoss(det, q) {
+    const svc = svcOf(det);
+    svc.books = Math.max(0, svc.books - 1);
+    const byYou = !!(q && q._presByPlayer);
+    if (byYou) {
+      svc.selfKills++;
+      // THE ACT (city/politics.js). presidency.js's kill-cause wrap reports
+      // this death as well; politics counts a body once (_politicsCounted).
+      const PM = CBZ.politics;
+      if (PM && typeof PM.act === "function") { try { PM.act("kill", { target: q, by: "self" }); } catch (e) {} }
+    }
+    const span = byYou ? SVC_SELF_T : SVC_ATTACK_T;
+    const at = clock + span[0] + rng() * (span[1] - span[0]);
+    // the team is sent once the LAST loss has been weighed: a later loss
+    // never brings it sooner, and a killing of yours pushes it back
+    svc.dueAt = svc.dueAt == null ? at : (byYou ? Math.max(svc.dueAt, at) : svc.dueAt);
+  }
+  // somewhere real and out of his sight a dispatched team is posted from
+  function dispatchOrigin(P) {
+    const ok = function (x, z) {
+      if (hyp(x, z, P.pos.x, P.pos.z) < 45) return false;
+      if (CBZ.cityNav && CBZ.cityNav.indoorLotAt && CBZ.cityNav.indoorLotAt(x, z)) return false;
+      if (CBZ.cityNavWaterAt) { try { if (CBZ.cityNavWaterAt(x, z)) return false; } catch (e) {} }
+      if (!CBZ.npcTransitionSafe) return true;
+      try { return !!CBZ.npcTransitionSafe(x, z, { minDistance: 45 }); } catch (e) { return true; }
+    };
+    // the Service's own post: the Mansion's front door
+    const dp = doorPost("mansion", 0);
+    if (dp && ok(dp.x, dp.z)) return dp;
+    const a0 = rng() * Math.PI * 2;
+    for (let k = 0; k < 16; k++) {
+      const a = a0 + k * 2.399, R = SVC_FAR[0] + (SVC_FAR[1] - SVC_FAR[0]) * ((k * 0.37) % 1);
+      const x = P.pos.x + Math.sin(a) * R, z = P.pos.z + Math.cos(a) * R;
+      if (ok(x, z)) return { x: x, z: z };
+    }
+    return null;
+  }
+  // the opening shift: where the first muster stands (behind him, his
+  // flanks; upstairs, the building's door)
+  function musterSpot(P, isPres) {
     const h = playerHeading(P), y = P.pos.y || 0;
     let bx = null, bz = null;
     const tries = [[-9, 0], [-7, 5], [-7, -5], [0, 9], [0, -9], [-14, 0]];
@@ -1632,17 +1729,116 @@
       const f = tries[i][0], s = tries[i][1];
       const x = P.pos.x + Math.sin(h) * f + Math.cos(h) * s, z = P.pos.z + Math.cos(h) * f - Math.sin(h) * s;
       if (bx == null) { bx = x; bz = z; }
-      if (safeSpot(x, z, y)) { bx = x; bz = z; if (det._spawnWait >= 0) det._spawnWait = FORCE_SPAWN_T + 1; break; }
+      if (safeSpot(x, z, y)) { bx = x; bz = z; break; }
     }
-    // upstairs (the office): they come on shift at the building's door and
-    // the indoor posting below sends two of them up to his floor
     if (y > 0.5) {
       const dp = doorPost((isPres && indoorBuilding(P)) || "mansion", 0);
-      if (dp) { bx = dp.x; bz = dp.z; if (det._spawnWait >= 0) det._spawnWait = FORCE_SPAWN_T + 1; }
+      if (dp) { bx = dp.x; bz = dp.z; }
     }
-    if (det._spawnWait < FORCE_SPAWN_T) return;
-    spawnMembers(det, A, bx, bz);
-    det._spawnWait = 0;
+    return { x: bx, z: bz };
+  }
+  const LEAVING = [];
+  function serviceTick(det, A, P, isPres) {
+    const svc = svcOf(det);
+    const cap = wantCount(det);                      // what the Service will stand round him now
+    const L = ssLoyalty();
+    // NEW HIRES: one a game day, up to what the Service will stand
+    const d = today();
+    if (svc.day == null) svc.day = d;
+    if (d !== svc.day) {
+      const days = Math.max(1, d - svc.day); svc.day = d;
+      if (L >= SVC_REFUSE && svc.books < cap) svc.books = Math.min(cap, svc.books + days);
+      svc.selfKills = Math.max(0, svc.selfKills - days);
+    }
+    if (CBZ.citySpawnDraining) return;
+    const want = Math.min(cap, svc.books);
+    const have = det.memberPedRefs.length;
+    // THE OPENING SHIFT: on duty when he takes office (and after a load)
+    if (!svc.mustered) {
+      svc.mustered = true;
+      if (have < want) { const m = musterSpot(P, isPres); if (m.x != null) spawnMembers(det, A, m.x, m.z, rng, want - have); }
+      return;
+    }
+    // A SERVICE THAT NO LONGER BELIEVES IN HIM pulls men off the detail
+    if (have > cap) {
+      for (let i = det.memberPedRefs.length - 1; i >= 0 && det.memberPedRefs.length > cap; i--) {
+        const q = det.memberPedRefs[i];
+        if (!q || q._order || q._protRole === "shift-leader") continue;
+        det.memberPedRefs.splice(i, 1);
+        if (q.dead) continue;
+        q._protUnit = null; q._protInbound = null; q._protLeave = clock;
+        unpostIndoor(q); release(q); disengage(q);
+        LEAVING.push(q);
+      }
+      svc.books = Math.min(svc.books, cap);
+      return;
+    }
+    if (have >= want) return;
+    // the missing men come when the Service sends them, not before
+    if (svc.dueAt == null) svc.dueAt = clock + SVC_ATTACK_T[0] + rng() * (SVC_ATTACK_T[1] - SVC_ATTACK_T[0]);
+    if (clock < svc.dueAt) return;
+    if (L < SVC_REFUSE) {
+      // nobody comes; the Director says so, once a day
+      if (svc.pushDay !== d) { svc.pushDay = d; directorSays("We're not sending more men to die, sir."); }
+      svc.dueAt = clock + 600;
+      return;
+    }
+    let n = want - have;
+    if (L < SVC_GRUDGE || svc.selfKills >= 2) {
+      // a sour Service sends one man where it owes more, and says so
+      if (svc.pushDay !== d) { svc.pushDay = d; directorSays(svc.selfKills >= 2 ? "We're not sending more men to die, sir. You get one." : "One agent, sir. That's all I can spare."); }
+      n = Math.min(n, 1);
+    }
+    const o = dispatchOrigin(P);
+    if (!o) { svc.dueAt = clock + 2; return; }   // nowhere out of his sight right now: shortly
+    const before = det.memberPedRefs.length;
+    spawnMembers(det, A, o.x, o.z, rng, n);
+    for (let i = before; i < det.memberPedRefs.length; i++) {
+      const q = det.memberPedRefs[i];
+      if (q) { q._protInbound = clock; q._protProg = null; }
+    }
+    // whoever is still owed comes in a later car
+    svc.dueAt = det.memberPedRefs.length < want ? clock + 60 + rng() * 60 : null;
+  }
+  // a man the Service pulled walks away and is gone once out of sight
+  function tickLeaving(dt) {
+    const P = CBZ.player;
+    for (let i = LEAVING.length - 1; i >= 0; i--) {
+      const q = LEAVING[i];
+      if (!q || q.dead || !q.pos || (CBZ.cityPeds && CBZ.cityPeds.indexOf(q) < 0)) { LEAVING.splice(i, 1); continue; }
+      const d = P && P.pos ? hyp(q.pos.x, q.pos.z, P.pos.x, P.pos.z) : 999;
+      if ((d > 60 && safeSpot(q.pos.x, q.pos.z, q.pos.y)) || clock - q._protLeave > 180) { LEAVING.splice(i, 1); removePed(q); continue; }
+      if (P && P.pos) {
+        if (!q._protAway) {
+          const ax = q.pos.x - P.pos.x, az = q.pos.z - P.pos.z, n = Math.hypot(ax, az) || 1;
+          q._protAway = { x: q.pos.x + ax / n * 140, z: q.pos.z + az / n * 140 };
+        }
+        goTo(q, q._protAway.x, q._protAway.z, false, dt, null, false);
+      }
+    }
+  }
+  // a dispatched man on his way in: routed to the President at a run; he
+  // joins the formation inside 8 m. Stuck (no progress for 20 s) while out
+  // of sight, he is moved up to a spot 30-37 m off, also out of sight.
+  function driveInbound(q, P, dt) {
+    const d = hyp(q.pos.x, q.pos.z, P.pos.x, P.pos.z) + Math.abs((q.pos.y || 0) - (P.pos.y || 0)) * 4;
+    if (d < 8) { q._protInbound = null; q._protProg = null; release(q); return false; }
+    const pr = q._protProg || (q._protProg = { d: d, t: clock });
+    if (d < pr.d - 1) { pr.d = d; pr.t = clock; }
+    else if (clock - pr.t > 20 && safeSpot(q.pos.x, q.pos.z, q.pos.y)) {
+      const a0 = rng() * Math.PI * 2;
+      for (let k = 0; k < 8; k++) {
+        const a = a0 + k * 0.785, R = 30 + k;
+        const x = P.pos.x + Math.sin(a) * R, z = P.pos.z + Math.cos(a) * R;
+        if (CBZ.cityNav && CBZ.cityNav.indoorLotAt && CBZ.cityNav.indoorLotAt(x, z)) continue;
+        if (CBZ.npcTransitionSafe && !CBZ.npcTransitionSafe(x, z, { minDistance: 25 })) continue;
+        teleport(q, x, z, (P.pos.y || 0) > 0.5 ? 0 : (P.pos.y || 0));
+        break;
+      }
+      pr.d = 1e9; pr.t = clock;
+    }
+    goTo(q, P.pos.x, P.pos.z, true, dt, null, false);
+    return true;
   }
   // the shift leader (the CP, the body man) is the first living member and
   // STAYS the same man until he falls
@@ -1680,6 +1876,8 @@
       const ki = leader ? -1 : k++;
       if (CBZ.boardingHolds && CBZ.boardingHolds(q)) continue;
       if ((q._subornT || 0) > 0) { release(q); unpostIndoor(q); disengage(q); q.state = "idle"; q.speed = 0; continue; }
+      // ---- sent by the Service, still on his way in (serviceTick) ----------
+      if (q._protInbound != null && isPres && driveInbound(q, P, dt)) continue;
       if (hot) unpostIndoor(q);
       // ---- he is driving: hold, and catch up when he gets out -----------
       if (inCar && !hot) { if (!q._protIndoor) { q.state = "idle"; q.speed = 0; q._boardRun = false; setTarget(q, q.pos.x, q.pos.z); } continue; }
@@ -1717,7 +1915,13 @@
       // ---- on another floor, or hopelessly behind: come to him -----------
       const hb = playerHeading(P), bx = P.pos.x - Math.sin(hb) * 2.2, bz = P.pos.z - Math.cos(hb) * 2.2;   // just behind him
       if (Math.abs((q.pos.y || 0) - y) > 1.5) { relocateIfFar(q, bx, bz, y, 0.5, dt); continue; }
-      if (relocateIfFar(q, bx, bz, y, 30, dt)) continue;
+      // far behind on the street: he RUNS (the brain's catch-up gait). Only
+      // when he and a spot 20 m behind you are both out of sight is he moved
+      // up there; nobody is ever put down beside you in view.
+      if (hyp(q.pos.x, q.pos.z, P.pos.x, P.pos.z) > 45 && safeSpot(q.pos.x, q.pos.z, q.pos.y)) {
+        const cx = P.pos.x - Math.sin(hb) * 20, cz = P.pos.z - Math.cos(hb) * 20;
+        if (!CBZ.npcTransitionSafe || CBZ.npcTransitionSafe(cx, cz, { minDistance: 15 })) { teleport(q, cx, cz, y); continue; }
+      }
       _form.push(q);
     }
     // ---- THE FORMATION, THE SCAN, THE SHIELD: the detail brain -----------
@@ -1807,11 +2011,10 @@
       for (let i = pdet.memberPedRefs.length - 1; i >= 0; i--) {
         const q = pdet.memberPedRefs[i];
         if (!q || (CBZ.cityPeds && CBZ.cityPeds.indexOf(q) < 0)) { pdet.memberPedRefs.splice(i, 1); continue; }
-        // a fallen agent is replaced, but not in front of you: the next one
-        // comes on shift twenty seconds later
-        if (q.dead) { pdet.memberPedRefs.splice(i, 1); pdet._spawnWait = -20; }
+        // a fallen agent is off the Service's roster (THE SERVICE'S ROSTER)
+        if (q.dead) { pdet.memberPedRefs.splice(i, 1); serviceLoss(pdet, q); }
       }
-      spawnNearPlayer(pdet, A, P, dt, true);
+      if (doSpawn) serviceTick(pdet, A, P, true);
       assignRoles(pdet);
     }
 
@@ -1862,6 +2065,7 @@
     }
     if (npcBody) driveRing(npcBody, PRES, dt);
     driveNpcEvac(dt, PRES);
+    if (LEAVING.length) tickLeaving(dt);
   });
 
   // ------------------------------------------------------------
@@ -1966,6 +2170,45 @@
     if (findPlayerDetail() && P && hyp(P.pos.x, P.pos.z, x, z) < 120) { raise(HIRED, level, r, x, z, null, false); return "player"; }
     return null;
   }
+  /* STAND DOWN ENDS THE INCIDENT (city/orders.js: "Stand down", or the man
+     the President ordered taken down is down). Owner's rule: the guns go
+     away and stay away unless something NEW happens. So the posture record
+     forgets its threat and everything already heard, drops to normal (or to
+     the lockdown floor), the detail brain's phase is reset (calm), and the
+     President's own people lose the alarm, the grudge and the reason that
+     would put a gun back in their hand. A threat that is really still there
+     is seen again by the next 4 Hz scan as a new incident. */
+  function standDown(personId) {
+    const key = resolveKey(personId == null ? "president" : personId);
+    const ps = key === "player" ? HIRED : key === "president" ? PRES : null;
+    if (!ps) return false;
+    ps.threat = null; ps.hostile = false;
+    ps.pend = 0; ps.pendReason = null; ps.pendThreat = null; ps.pendHostile = false;
+    ps.calmT = CALM_DECAY;
+    ps.quietFrom = clock;
+    const Br = CBZ.brain;
+    if (Br && typeof Br.now === "function") { try { ps.quietFromBr = Br.now(); } catch (e) {} }
+    const floor = key === "president" && MS.lock ? 1 : 0;
+    if (RANK[ps.posture] > floor) {
+      ps.posture = LEVEL[floor]; ps.reason = floor ? "lockdown" : null; ps.since = clock;
+      emitPres("security", { level: ps.posture, reason: ps.reason, at: { x: ps.at.x, z: ps.at.z } });
+    }
+    if (key === "president" && MS.challenge && MS.challenge.hostile) MS.challenge = null;
+    const B = DB();
+    const dk = key === "president" ? "player:pres" : "player:hired";
+    if (B && B.calm) { B.calm(dk, disengage); if (key === "president") B.calm("pres:npc", disengage); }
+    // his people: no alarm, no remembered offender, no standing reason
+    const det = key === "president" ? (function () { const cur = presCurrent(); return cur && cur.kind === "player" ? get("off_" + cur.seatId) : null; })() : findPlayerDetail();
+    const refs = det ? det.memberPedRefs : [];
+    for (let i = 0; i < refs.length; i++) {
+      const q = refs[i]; if (!q || q.dead) continue;
+      q._detWhy = null; q.alarmed = 0; q._cbThreatSrc = null;
+      const real = function (t) { return !!(t && !t.dead && (t.rampage || t.organization === "cell")); };
+      if (q.mem && !real(q.mem)) q.mem = null;
+      if (q.rage && !q._order && !real(q.rage)) disengage(q);
+    }
+    return true;
+  }
   function postureOf(personId) {
     const key = resolveKey(personId);
     if (key === "president") return PRES.posture;
@@ -2004,7 +2247,7 @@
     hire, suborn, detailOf,
     reset, GEAR, HIRE_CAP,
     // THE SEAM (see the header): Hitman and everybody else read these
-    detail: detailView, alarm: alarmAt, posture: postureOf,
+    detail: detailView, alarm: alarmAt, posture: postureOf, standDown: standDown,
     formationSlot: formationSlot,
     // any power.js principal's ring on the detail brain (agency.js's marks)
     guardRing: guardRing,
@@ -2019,6 +2262,8 @@
           gearTier: d.gearTier, formation: d.formation, postings: (d.postings || []).slice(),
           fundingSource: d.fundingSource, wageRate: d.wageRate, legalStatus: d.legalStatus,
           memberCount: d.memberCount, escalated: d._escalated || 0,
+          // the Service's roster for this detail (THE SERVICE'S ROSTER)
+          svc: d._svc ? { books: d._svc.books | 0, day: d._svc.day, selfKills: d._svc.selfKills | 0 } : null,
         };
       }
       return { v: 1, nextId: S.nextId, details: out, attempts: Object.assign({}, S.attempts) };
@@ -2038,6 +2283,7 @@
           formation: m.formation || "escort", postings: (m.postings || []).map((p) => ({ x: p.x, z: p.z })),
           fundingSource: m.fundingSource || "treasury", wageRate: m.wageRate,
           legalStatus: m.legalStatus || "state", _escalated: m.escalated || 0, _hpMemo: null,
+          _svc: m.svc ? { books: m.svc.books | 0, day: m.svc.day != null ? m.svc.day : null, mustered: false, dueAt: null, selfKills: m.svc.selfKills | 0, pushDay: null } : null,
         };
       }
     },

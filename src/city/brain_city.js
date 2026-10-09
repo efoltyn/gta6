@@ -346,7 +346,10 @@
         // standing his ground: against a GUN that is the discipline's
         // armed-threat (it must persist past his sustain beat to draw; one
         // bang is a look). Against fists the gun stays on the belt.
-        if (th.armed && CBZ.gunDiscipline) CBZ.gunDiscipline.trigger(p, "armed-threat", 2);
+        // (a man of his own side with his gun out is not a threat to him:
+        // CBZ.gunDiscipline.sameSide)
+        const GDs = CBZ.gunDiscipline;
+        if (th.armed && GDs && !(GDs.sameSide && GDs.sameSide(p, th.source || src))) GDs.trigger(p, "armed-threat", 2);
         EXEC.posture(p, "aim"); hold(p, "hold", 1.2);
         return true;
       }
