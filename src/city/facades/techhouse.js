@@ -145,7 +145,7 @@
       const STONED = F.shade(STONE, 0.78);
       const STEEL = F.mix(0x24282c, ctx.color, 0.07);  // black steel: posts, frames
       const VOID = F.shade(STEEL, 0.50);               // reveals, soffit shadow, upstand
-      const GLASSD = F.mix(0x151d25, ctx.color, 0.12); // the corner jamb, painted as glass
+      const GLASSD = F.glass(ctx, F.mix(0x151d25, ctx.color, 0.12)); // the corner jamb, painted as glass
       const LED = 0xffeccb;
 
       // ---------------- the massing ----------------

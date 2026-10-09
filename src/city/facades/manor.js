@@ -126,7 +126,7 @@
       const ROOFL = F.mix(ROOF, clay ? 0xa2634a : 0x8b949b, 0.30);
       const ROOFD = F.shade(ROOF, 0.74);
       const BRICK = F.shade(F.mix(0x7d4736, base, 0.10), 0.90);        // the stacks
-      const GLASS = F.mix(0x161e28, STONE, 0.10);
+      const GLASS = F.glass(ctx, F.mix(0x161e28, STONE, 0.10));
       const LEAD = F.mix(STONEL, 0x6a7176, 0.34);
 
       // ============================================================

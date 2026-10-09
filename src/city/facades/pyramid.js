@@ -85,7 +85,7 @@
       const LIT = F.shade(CLAD, 1.26);      // top lips, sills catching sun
       const MID = F.shade(CLAD, 0.74);      // course shading
       const DARK = F.shade(CLAD, 0.42);     // soffits, reveals
-      const GLASS = F.mix(0x141920, CLAD, 0.05);
+      const GLASS = F.glass(ctx, F.mix(0x141920, CLAD, 0.05));
       const SPIRE = F.shade(CLAD, 0.88);
       const SPIRE_D = F.shade(CLAD, 0.58);
 

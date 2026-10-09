@@ -85,7 +85,7 @@
       const DARKB = F.shade(F.mix(STONE, 0x5f5340, 0.62), 0.66);  // the podium stone
       const TERRA = F.mix(STONE, 0x8a5a3c, 0.34);      // spandrel terracotta
       const SHADOW = F.shade(STONE, 0.50);
-      const GLASS = F.mix(0x161a1f, STONE, 0.10);      // darkest thing here
+      const GLASS = F.glass(ctx, F.mix(0x161a1f, STONE, 0.10));      // darkest thing here
 
       // ---------------- the stages ----------------
       // Fractions of the roofline, not metres, so the whole stack

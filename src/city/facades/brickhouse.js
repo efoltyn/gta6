@@ -165,7 +165,7 @@
       const SHUTS = [0x1b211c, 0x181c22, 0x201a18, 0x14201c];
       const SHUT = F.shade(F.mix(SHUTS[(ctx.hash(0x2f19) * SHUTS.length) | 0], base, 0.05), 0.92);
       const SHUTL = F.shade(SHUT, 1.45);            // the raised panel inside a shutter
-      const PANE = F.mix(0x121a22, base, 0.05);     // DORMER sash only — never over host glass
+      const PANE = F.glass(ctx, F.mix(0x121a22, base, 0.05));     // DORMER sash only — never over host glass
 
       // ============================================================
       //  2. RELIEF DEPTHS AND THE RULING GRID

@@ -253,11 +253,12 @@
      same projection, a sill on a panel with the same face plane, and each
      colour is its own merged mesh, so which one wins a pixel is decided by
      rounding and changes with every step the camera takes. No amount of
-     depth precision fixes an exact tie. What fixes it is saying who wins:
-     every deco colour bucket gets a polygonOffset rank from the order the
-     grammar painted it (cladding first, the trim laid over it later), and the
-     shell walls rank 0 under all of it. Ties now resolve the same way every
-     frame at every distance, because polygonOffset is in depth units.
+     depth precision fixes an exact tie, and a depth bias (the polygonOffset
+     rank per colour this file used to settle them with) only hides it under
+     a second layer. What fixes it is that there is no tie: the faces are
+     moved apart in GEOMETRY, the box laid last keeps the plane and every
+     earlier one steps back 10 mm behind it (city/facade_openings.js
+     resolveCoplanar, the same pass every city building runs).
 
      THE ART had three faults, each one a sentence:
        * the shell was painted from a party palette (sky blue, pink, mint) and
@@ -317,19 +318,15 @@
   }
   function grimeKey() { return "cbz-island-grime"; }
 
-  // One material per (colour, rank, foot height), shared island-wide. rank 0
-  // is the shell; rank >= 1 is facade deco, pulled forward one step per rank.
+  // One material per (colour, foot height), shared island-wide. Every face
+  // draws at its true depth: coplanar ties are moved apart in geometry
+  // (facadeOpenings.resolveCoplanar), never biased in the depth buffer.
   const finMats = new Map();
-  function finishMat(col, rank, baseY) {
-    const key = col + "|" + rank + "|" + Math.round(baseY * 5);
+  function finishMat(col, baseY) {
+    const key = col + "|" + Math.round(baseY * 5);
     let m = finMats.get(key);
     if (m) return m;
     m = new THREE.MeshLambertMaterial({ color: col });
-    if (rank > 0) {
-      m.polygonOffset = true;
-      m.polygonOffsetFactor = -1;
-      m.polygonOffsetUnits = -(1 + rank);
-    }
     m.onBeforeCompile = grimeCompile({ value: Math.round(baseY * 5) / 5 });
     m.customProgramCacheKey = grimeKey;
     m._shared = true;
@@ -395,14 +392,13 @@
   }
   // a grammar's own dark glass box, as glass: its colour becomes the tint
   const glassBoxMats = new Map();
-  function glassBoxMat(col, rank) {
-    const key = col + "|" + rank;
+  function glassBoxMat(col) {
+    const key = col;
     let m = glassBoxMats.get(key);
     if (m) return m;
     const c = new THREE.Color(col).lerp(new THREE.Color(0x6d7c89), 0.55);
     m = new THREE.MeshStandardMaterial({ color: c, metalness: 0.9, roughness: 0.16,
       envMap: CBZ.ENV || null, envMapIntensity: 1.1 });
-    if (rank > 0) { m.polygonOffset = true; m.polygonOffsetFactor = -1; m.polygonOffsetUnits = -(1 + rank); }
     m._shared = true;
     envWanting.push(m); hookEnv();
     glassBoxMats.set(key, m);
@@ -484,132 +480,24 @@
       }
     }
 
-    // does the facade cover local point (t, y) on face f? (only boxes that
-    // stand proud of the wall face count: a box flush with the wall is paint,
-    // and the window cut goes through it)
-    // A GRAMMAR'S OWN GLASS NEVER HIDES AN OPENING. Nearly every grammar
-    // draws its windows as a dark "glass" box standing proud of the wall with
-    // a frame round it; counted as cladding, that box hid the very opening it
-    // marks, so a Victorian, a Greek Revival, a pagoda house and five of the
-    // ten towers came out with NO window at all: an opaque mirror-metal
-    // panel on a solid wall, a windowless room behind it. The frame round
-    // the glass still bounds the opening; the glass box itself is taken out
-    // of the opening in the cut below and the real window goes in.
-    function coveredFn(f) {
-      const list = [], deep = [];
-      for (const b of o.recs) {
-        if (isGlassHex(b[6])) continue;
-        const nC = f.horiz ? b[2] : b[0], nH = (f.horiz ? b[5] : b[3]) / 2;
-        const outer = f.out > 0 ? (nC + nH) - f.halfN : -f.halfN - (nC - nH);
-        const inner = f.out > 0 ? (nC - nH) - f.halfN : -f.halfN - (nC + nH);
-        if (outer < 0.026 || inner > 0.12) continue;
-        const tC = (f.horiz ? b[0] : b[2]) * (f.horiz ? f.tx : f.tz), tH = (f.horiz ? b[3] : b[5]) / 2;
-        const q = [tC - tH, tC + tH, b[1] - b[4] / 2, b[1] + b[4] / 2];
-        list.push(q);
-        // a mass standing well proud of the wall (a column, a porch, a pier,
-        // an eave): a forced window never goes through one of these
-        if (outer > DEEP_CLAD) deep.push(q);
-      }
-      const hit = function (L, t, y) {
-        for (let i = 0; i < L.length; i++) {
-          const q = L[i];
-          if (t > q[0] && t < q[1] && y > q[2] && y < q[3]) return true;
-        }
-        return false;
-      };
-      const cov = function (t, y) { return hit(list, t, y); };
-      cov.deep = function (t, y) { return hit(deep, t, y); };
-      return cov;
+    /* WHERE THE WINDOWS GO is decided by city/facade_openings.js's ONE scan
+       (the same that places every Gang City and town window): where the
+       grammar left the wall open, its own painted glass marking the window;
+       a storey it clad solid gets windows on a rhythm, cut through the skin
+       laid against the wall but never behind a column, porch or eave. The
+       scan works in the shell's local axes (t = local x on faces 0/1, z on
+       2/3); this file's faces run u = t * tx (or tz). */
+    const FOP = CBZ.facadeOpenings;
+    const found = FOP ? FOP.scan(o.recs, { w: o.w, d: o.d, storeys: o.storeys, fh: o.fh, doorSide: 0,
+      doorHalf: o.doorHalf, tower: !!o.tower, isGlass: o.isGlass || isGlassHex }) : [];
+    for (const op of found) {
+      const f = faces[op.s];
+      const sg = f.horiz ? f.tx : f.tz;
+      const ua = op.t0 * sg, ub = op.t1 * sg;
+      placeWindow(f, op.k, !o.tower && f.s === 0 && op.k === 0, Math.min(ua, ub), Math.max(ua, ub), op.y0, op.y1, !!op.forced, op.bare !== false, op.reach || 0);
     }
-    const DEEP_CLAD = 0.34;               // proud cladding thicker than this is architecture, not skin
-    const FORCE_REACH = 0.3;              // how far out a forced opening cuts through the cladding
-
-    const STEP = 0.06, VSTEP = 0.05;
-    for (const f of faces) {
-      const cov = coveredFn(f);
-      const half = f.span / 2 - 0.35;
-      for (let k = 0; k < o.storeys; k++) {
-        const shop = !o.tower && f.s === 0 && k === 0;
-        const b0 = k * o.fh + (shop ? 0.4 : 0.55), b1 = (k + 1) * o.fh - 0.45;
-        /* THREE SCAN LINES, NOT ONE. The openings used to be looked for along
-           a single line at 55% of the band, which is exactly where a sash
-           window's meeting rail runs: every double-hung window on a Victorian
-           or a Greek Revival house read as "covered" and the house got no
-           windows at all. Scanned at 55%, then 30% and 80%, an opening is
-           found by whichever line crosses it clear, and a later line never
-           re-finds an opening an earlier one already glazed. */
-        const made = [];
-        const runsAt = function (yS) {
-          const out = [];
-          let start = null;
-          for (let t = -half; t <= half + 1e-6; t += STEP) {
-            const doorBlock = f.s === 0 && k === 0 && Math.abs(t) < o.doorHalf;
-            const open = !doorBlock && !cov(t, yS);
-            if (open && start == null) start = t;
-            if ((!open || t + STEP > half + 1e-6) && start != null) {
-              const end = open ? t : t - STEP;
-              if (end - start >= 0.3) out.push([start, end, yS]);
-              start = null;
-            }
-          }
-          return out;
-        };
-        const runs = [];
-        for (const frac of [0.55, 0.3, 0.8]) for (const r of runsAt(b0 + (b1 - b0) * frac)) runs.push(r);
-        const overlapsMade = function (u0, u1, v0, v1) {
-          return made.some(function (m) { return u1 > m[0] + 0.02 && u0 < m[1] - 0.02 && v1 > m[2] + 0.02 && v0 < m[3] - 0.02; });
-        };
-        for (const run of runs) {
-          const tm = (run[0] + run[1]) / 2, yS = run[2];
-          let v0 = yS, v1 = yS;
-          while (v0 - VSTEP >= b0 && !cov(tm, v0 - VSTEP)) v0 -= VSTEP;
-          while (v1 + VSTEP <= b1 && !cov(tm, v1 + VSTEP)) v1 += VSTEP;
-          if (v1 - v0 < 0.35) continue;
-          const u0 = run[0] - STEP / 2, u1 = run[1] + STEP / 2;
-          if (overlapsMade(u0, u1, v0, v1)) continue;
-          placeWindow(f, k, shop, cov, u0, u1, v0, v1, false);
-        }
-        /* EVERY STOREY GETS ITS WINDOWS. Reading the openings off what the
-           grammar left open fails wherever a grammar clads the whole wall:
-           the stone house's ashlar skin, the pagoda's timber screens, the
-           faceted and postmodern towers' panel grids, the ziggurat's stepped
-           cladding. Those storeys came out with one slit or none, a solid box
-           you could not see out of while a tsunami came at it. So after the
-           scan, a storey still short of glass gets real openings on a regular
-           rhythm, sized like the building type (a house: ~1.1 x 1.25 m sash at
-           sill 0.9 m; a tower: a 1.5 m bay from 0.8 m to the ceiling line),
-           cut through the skin cladding (FORCE_REACH) but never through a
-           column, pier, porch or eave (cov.deep), never over the door. */
-        if (!shop) {
-          const span = 2 * half;
-          const winW = o.tower ? 1.5 : 1.1, pitch = o.tower ? 2.3 : 3.1;
-          const want = Math.max(1, Math.floor((span + pitch - winW) / pitch));
-          let have = 0;
-          for (const m of made) have += m[1] - m[0];
-          if (span > winW + 0.3 && have < want * winW * 0.55) {
-            const s0 = k * o.fh;
-            const fv0 = Math.max(b0, s0 + (o.tower ? 0.8 : 0.9));
-            const fv1 = Math.min(b1, o.tower ? b1 : s0 + 2.15);
-            if (fv1 - fv0 >= 0.6) {
-              for (let i = 0; i < want; i++) {
-                const tc = -half + (i + 0.5) * (span / want);
-                const u0 = tc - winW / 2, u1 = tc + winW / 2;
-                if (f.s === 0 && k === 0 && u1 > -o.doorHalf && u0 < o.doorHalf) continue;
-                if (overlapsMade(u0 - 0.25, u1 + 0.25, fv0, fv1)) continue;
-                let blocked = false;
-                for (let q = 0; q <= 4 && !blocked; q++) for (let r = 0; r <= 3 && !blocked; r++) {
-                  blocked = cov.deep(u0 + (u1 - u0) * q / 4, fv0 + (fv1 - fv0) * r / 3);
-                }
-                if (blocked) continue;
-                placeWindow(f, k, false, cov, u0, u1, fv0, fv1, true);
-              }
-            }
-          }
-        }
-        function placeWindow(f, k, shop, cov, u0, u1, v0, v1, forced) {
+    function placeWindow(f, k, shop, u0, u1, v0, v1, forced, bare, reach) {
           const tm = (u0 + u1) / 2;
-          made.push([u0, u1, v0, v1]);
-          const bare = forced || !cov(tm, v0 - 0.12);
           const nMod = Math.max(1, Math.round((u1 - u0) / 1.45));
           const mw = (u1 - u0) / nMod;
           const tall = (v1 - v0) > 1.75;
@@ -628,7 +516,7 @@
           if (o.list) o.list.push(rec);
           // the hole, in the wall's own axis (local x on faces 0/1, z on 2/3)
           const ta = u0 * (f.horiz ? f.tx : f.tz), tb = u1 * (f.horiz ? f.tx : f.tz);
-          holes.push({ s: f.s, a0: Math.min(ta, tb), a1: Math.max(ta, tb), y0: v0, y1: v1, forced: !!forced });
+          holes.push({ s: f.s, a0: Math.min(ta, tb), a1: Math.max(ta, tb), y0: v0, y1: v1, forced: !!forced, reach: reach || 0 });
           // ---- the frame, laid through the deco merge after the cut ------
           const fb = function (t, y, len, hh, proj, col) {
             const n = f.halfN + proj / 2;
@@ -648,45 +536,16 @@
             fb(tm, v0 - 0.045, (u1 - u0) + 0.16, 0.09, 0.13, o.sillCol);
             fb(tm, v0 - 0.12, (u1 - u0) + 0.04, 0.06, 0.035, o.sillStain);
           }
-        }
-      }
     }
 
     // ---- THE CUT: every opening goes through the cladding and the wall ----
-    const SUB = CBZ.FACADE_F && CBZ.FACADE_F.subtractBox;
-    if (holes.length && SUB) {
-      // (1) deco boxes lying in the wall's plane zone (flush paint, a panel
-      //     laid on the wall) lose the part inside the opening
-      // a grammar's glass box is cleared from the opening through its whole
-      // depth (it stands proud of the wall), everything else only where it
-      // lies in the wall's plane
-      const volOf = function (h, reach) {
-        const f = faces[h.s], n0 = f.halfN - WT_ - 0.05, n1 = f.halfN + 0.03 + reach;
-        const lo = f.out > 0 ? n0 : -n1, hi = f.out > 0 ? n1 : -n0;
-        return f.horiz
-          ? { x0: h.a0, x1: h.a1, z0: lo, z1: hi, y0: h.y0, y1: h.y1 }
-          : { x0: lo, x1: hi, z0: h.a0, z1: h.a1, y0: h.y0, y1: h.y1 };
-      };
-      const vol = holes.map(function (h) { return volOf(h, h.forced ? FORCE_REACH : 0); });
-      const volGlass = holes.map(function (h) { return volOf(h, 1.2); });
-      const kept = [];
-      const queue = o.recs.slice();
-      for (let qi = 0; qi < queue.length; qi++) {
-        const b = queue[qi];
-        const bx0 = b[0] - b[3] / 2, bx1 = b[0] + b[3] / 2, by0 = b[1] - b[4] / 2, by1 = b[1] + b[4] / 2, bz0 = b[2] - b[5] / 2, bz1 = b[2] + b[5] / 2;
-        const vols = isGlassHex(b[6]) ? volGlass : vol;
-        let hit = null;
-        for (let j = 0; j < vols.length; j++) {
-          const c = vols[j];
-          if (bx1 > c.x0 + 1e-4 && bx0 < c.x1 - 1e-4 && bz1 > c.z0 + 1e-4 && bz0 < c.z1 - 1e-4 && by1 > c.y0 + 1e-4 && by0 < c.y1 - 1e-4) { hit = c; break; }
-        }
-        if (!hit) { kept.push(b); continue; }
-        const parts = SUB([bx0, bx1, by0, by1, bz0, bz1], hit);
-        for (const p of parts) queue.push([(p[0] + p[1]) / 2, (p[2] + p[3]) / 2, (p[4] + p[5]) / 2, p[1] - p[0], p[3] - p[2], p[5] - p[4], b[6]]);
-      }
-      o.recs.length = 0;
-      for (const b of kept) o.recs.push(b);
-      // (2) the shell walls themselves
+    // (city/facade_openings.js cutRecs: the grammar's glass box out of the
+    // opening through its whole depth, the skin laid against the wall out of
+    // it where it lies in the wall's plane, forced openings through every
+    // layer laid against the wall)
+    if (holes.length && FOP) {
+      FOP.cutRecs(o.recs, holes.map(function (h) { return { s: h.s, t0: h.a0, t1: h.a1, y0: h.y0, y1: h.y1, forced: h.forced, reach: h.reach }; }),
+        { w: o.w, d: o.d, wt: WT_, isGlass: o.isGlass || isGlassHex });
       if (o.walls) for (const wl of o.walls) cutWall(wl, holes.filter(function (h) { return h.s === wl.face; }));
     }
     for (const fr of frames) o.dbox(fr[0], fr[1], fr[2], fr[3], fr[4], fr[5], fr[6]);
@@ -735,51 +594,8 @@
     return panes;
   }
 
-  /* THE SOLID PART OF A RECTANGLE WITH HOLES IN IT. [a0,a1] x [y0,y1] minus
-     every hole {a0, a1, y0, y1}: a grid over the hole edges, solid cells
-     merged into runs, runs merged down the rows. Returns [[a0, a1, y0, y1]].
-     Shared by the wall cut (below) and the interior skin that lines it. */
-  function solidRects(a0, a1, y0, y1, hs) {
-    const mine = hs.filter(function (h) { return h.a1 > a0 + 0.01 && h.a0 < a1 - 0.01 && h.y1 > y0 + 0.01 && h.y0 < y1 - 0.01; });
-    if (!mine.length) return [[a0, a1, y0, y1]];
-    const clampA = function (v) { return Math.max(a0, Math.min(a1, v)); };
-    const clampY = function (v) { return Math.max(y0, Math.min(y1, v)); };
-    const xs = [a0, a1], ys = [y0, y1];
-    for (const h of mine) { xs.push(clampA(h.a0), clampA(h.a1)); ys.push(clampY(h.y0), clampY(h.y1)); }
-    const uniq = function (arr) {
-      arr.sort(function (p, q) { return p - q; });
-      const o2 = [];
-      for (const v of arr) if (!o2.length || v - o2[o2.length - 1] > 0.004) o2.push(v);
-      return o2;
-    };
-    const X = uniq(xs), Y = uniq(ys);
-    const solidCell = function (i, j) {
-      const cx = (X[i] + X[i + 1]) / 2, cy = (Y[j] + Y[j + 1]) / 2;
-      for (const h of mine) if (cx > h.a0 && cx < h.a1 && cy > h.y0 && cy < h.y1) return false;
-      return true;
-    };
-    let open = new Map();
-    const rects = [];
-    for (let j = 0; j < Y.length - 1; j++) {
-      const rowRuns = [];
-      for (let i = 0; i < X.length - 1; ) {
-        if (!solidCell(i, j)) { i++; continue; }
-        let e = i;
-        while (e + 1 < X.length - 1 && solidCell(e + 1, j)) e++;
-        rowRuns.push(i + "|" + e);
-        i = e + 1;
-      }
-      const next = new Map();
-      for (const key of rowRuns) {
-        if (open.has(key)) { next.set(key, open.get(key)); open.delete(key); }
-        else { const pr = key.split("|"); next.set(key, { i0: +pr[0], i1: +pr[1], j0: j }); }
-      }
-      open.forEach(function (r) { rects.push([r.i0, r.i1, r.j0, j - 1]); });
-      open = next;
-    }
-    open.forEach(function (r) { rects.push([r.i0, r.i1, r.j0, Y.length - 2]); });
-    return rects.map(function (r) { return [X[r[0]], X[r[1] + 1], Y[r[2]], Y[r[3] + 1]]; });
-  }
+  // THE SOLID PART OF A RECTANGLE WITH HOLES IN IT: city/facade_openings.js
+  function solidRects(a0, a1, y0, y1, hs) { return CBZ.facadeOpenings.solidRects(a0, a1, y0, y1, hs); }
 
   /* CUT A WALL. wl: { mesh, face (0:-z 1:+z 2:-x 3:+x), lx, ly, lz, bw, bh,
      bd } — a shell wall box in its building's local frame. Its geometry is
@@ -795,6 +611,11 @@
     const y0 = wl.ly - wl.bh / 2, y1 = wl.ly + wl.bh / 2;
     if (!hs.some(function (h) { return h.a1 > a0 + 0.01 && h.a0 < a1 - 0.01 && h.y1 > y0 + 0.01 && h.y0 < y1 - 0.01; })) return;
     const rects = solidRects(a0, a1, y0, y1, hs);
+    // the wall as it now stands, for the dressing's no-shared-plane pass
+    wl.pieces = rects.map(function (r) {
+      return horiz ? [r[0], r[1], r[2], r[3], wl.lz - wl.bd / 2, wl.lz + wl.bd / 2]
+                   : [wl.lx - wl.bw / 2, wl.lx + wl.bw / 2, r[2], r[3], r[0], r[1]];
+    });
     const geos = [];
     const th = horiz ? wl.bd : wl.bw;
     for (const r of rects) {
@@ -824,8 +645,8 @@
     const mat = CBZ.mat;
     // every deco box as a RECORD, local [x,y,z,w,h,d,col], so the glazing pass
     // can cut window openings through the cladding before anything is built;
-    // colours keep the order they were first painted in (that order is the
-    // polygonOffset rank, see THE FINISH)
+    // the list keeps the order the boxes were laid (the coplanar pass gives
+    // a shared plane to the box laid last)
     const recs = [];
     const colOrder = [];
     const seenCol = new Set();
@@ -840,7 +661,7 @@
       recs.push([lx, ly, lz, bw, bh, bd, key]);
     }
     // the shell's own merge-able pieces (treads, slabs, landings) join the
-    // deco merge at rank 0, so they cost one draw call per colour
+    // deco merge, so they cost one draw call per colour
     if (o.shellMerge) for (const it of o.shellMerge) {
       const g2 = new THREE.BoxGeometry(it[3], it[4], it[5]);
       g2.deleteAttribute("uv");
@@ -848,7 +669,7 @@
       it.push(g2);
     }
     function addMesh(geo, col, lx, ly, lz, emissive) {
-      const m = new THREE.Mesh(geo, emissive ? mat(col, { emissive: col, ei: 0.8 }) : finishMat(col, 0, gy));
+      const m = new THREE.Mesh(geo, emissive ? mat(col, { emissive: col, ei: 0.8 }) : finishMat(col, gy));
       m.position.set(lx, ly, lz);
       m.castShadow = !emissive; m.receiveShadow = true;
       group.add(m);
@@ -914,13 +735,13 @@
       group: group, ox: ox, oz: oz, gy: gy, w: o.w, d: o.d, storeys: o.storeys,
       fh: o.fh, wt: o.wt, doorHalf: o.doorHalf || 1.3, list: o.glassList, recs: recs, walls: o.walls,
       tower: !!o.tower, dbox: dbox, frameCol: frameCol,
+      // the grammar's declared glass (F.glass), or a dark cool panel
+      isGlass: function (c) { return (ctx.__glass && ctx.__glass.has(c >>> 0)) || isGlassHex(c); },
       sillCol: shadeHex(0xd6cfbf, 0.94 + fh * 0.1),
       sillStain: shadeHex(o.color, 0.72),
     });
 
-    // ---- flush: one mesh per colour, each ranked by when it was painted ----
-    // (see THE FINISH: the rank is what settles a tie between two buckets'
-    // coplanar faces the same way every frame)
+    // ---- flush: one mesh per colour ----
     const BGU = THREE.BufferGeometryUtils;
     function flush(geos, m2, cast) {
       if (!geos.length) return null;
@@ -935,6 +756,20 @@
       }
       return last;
     }
+    /* NO TWO SURFACES IN ONE PLANE (city/facade_openings.js). The island used
+       to settle every tie between two colours' coplanar faces with a
+       polygonOffset rank per colour: a depth bias, i.e. the flicker hidden
+       under a second layer. Now the faces are moved apart instead (the last
+       box laid wins; a face lying in a wall's face is lifted out of it), and
+       every material draws at its true depth. */
+    if (CBZ.facadeOpenings) {
+      const fixed = [];
+      if (o.walls) for (const wl of o.walls) {
+        if (wl.pieces) for (const pc of wl.pieces) fixed.push(pc);
+        else fixed.push([wl.lx - wl.bw / 2, wl.lx + wl.bw / 2, wl.ly - wl.bh / 2, wl.ly + wl.bh / 2, wl.lz - wl.bd / 2, wl.lz + wl.bd / 2]);
+      }
+      CBZ.facadeOpenings.resolveCoplanar(recs, fixed);
+    }
     const byColour = new Map();
     for (const r of recs) {
       const g2 = new THREE.BoxGeometry(r[3], r[4], r[5]);
@@ -945,11 +780,10 @@
       list.push(g2);
     }
     recs.length = 0;
-    let rank = 0;
+
     for (const col of colOrder) {
-      rank++;
       const geos = byColour.get(col);
-      if (geos) flush(geos, isGlassHex(col) ? glassBoxMat(col, rank) : finishMat(col, rank, gy), false);
+      if (geos) flush(geos, isGlassHex(col) ? glassBoxMat(col) : finishMat(col, gy), false);
     }
     if (o.shellMerge && o.shellMerge.length) {
       const byCol = new Map();
@@ -960,7 +794,7 @@
         b.geos.push(it[8]);
       }
       byCol.forEach(function (b) {
-        const m = flush(b.geos, finishMat(b.col, 0, gy), b.los);
+        const m = flush(b.geos, finishMat(b.col, gy), b.los);
         if (m && b.los) CBZ.losBlockers.push(m);
       });
     }
@@ -990,7 +824,7 @@
     late.forEach(function (bk) {
       const geo = bk.geos.length > 1 && BGU ? BGU.mergeBufferGeometries(bk.geos) : bk.geos[0];
       if (geo !== bk.geos[0]) for (const g2 of bk.geos) g2.dispose();
-      const m = new THREE.Mesh(geo, finishMat(bk.col, 0, gy));
+      const m = new THREE.Mesh(geo, finishMat(bk.col, gy));
       m.castShadow = true; m.receiveShadow = true;
       group.add(m);
       if (bk.los) CBZ.losBlockers.push(m);
@@ -2486,8 +2320,6 @@
         const tk = IN_ALIAS[key] ? IN_ALIAS[key].tex : key;
         const tex = (key === "flat" || !CBZ.fitoutTex) ? null : CBZ.fitoutTex(tk);
         m = new THREE.MeshLambertMaterial({ vertexColors: true, map: tex || null });
-        // the skin wins any tie with the wall it lines, at every distance
-        if (key === "plaster") { m.polygonOffset = true; m.polygonOffsetFactor = -1; m.polygonOffsetUnits = -2; }
       }
       m.name = "island-interior:" + key;
       m._shared = true;
@@ -3367,7 +3199,7 @@
         } else if (opts.merge && !opts.solid) {
           shellMerge.push([lx, ly, lz, bw, bh, bd, col, !!opts.los]);
         } else {
-          m = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), opts.emissive ? mat(col, { emissive: opts.emissive, ei: 0.5 }) : finishMat(col, 0, gy));
+          m = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), opts.emissive ? mat(col, { emissive: opts.emissive, ei: 0.5 }) : finishMat(col, gy));
           m.position.set(lx, ly, lz);
           m.castShadow = opts.cast !== false; m.receiveShadow = true;
           bgroup.add(m);
@@ -3420,6 +3252,17 @@
           wall(0, DOORW / 2 + side / 2, ly, -d / 2 + WT / 2, side, FH, WT);
           // door lintel above the opening (so the facade reads as a doorway)
           lbox(0, FH - 0.35, -d / 2 + WT / 2, DOORW, 0.7, WT, color, { los: true, merge: true });
+          // THE DOORS THEMSELVES: a pair of panelled leaves, hooked back open
+          // against the jambs inside (the street door of a building people run
+          // into when the wave comes; it is never in the way)
+          {
+            const lw = DOORW / 2 - 0.04, lh = FH - 0.7 - 0.12, lz = -d / 2 + WT + lw / 2 + 0.02;
+            for (const sg of [-1, 1]) {
+              lbox(sg * (DOORW / 2 - 0.05), 0.06 + lh / 2, lz, 0.05, lh, lw, 0x5a3f2c, { merge: true });
+              lbox(sg * (DOORW / 2 - 0.05) - sg * 0.035, 0.06 + lh * 0.72, lz, 0.02, lh * 0.3, lw * 0.7, 0x4a3324, { merge: true });
+              lbox(sg * (DOORW / 2 - 0.05) - sg * 0.035, 0.06 + lh * 0.3, lz, 0.02, lh * 0.36, lw * 0.7, 0x4a3324, { merge: true });
+            }
+          }
         } else {
           wall(0, 0, ly, -d / 2 + WT / 2, w, FH, WT);
         }
@@ -3816,7 +3659,7 @@
         } else if (opts.merge && !opts.solid) {
           shellMerge.push([lx, ly, lz, bw, bh, bd, col, !!opts.los]);
         } else {
-          m = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), opts.emissive ? mat(col, { emissive: opts.emissive, ei: opts.ei || 0.4 }) : finishMat(col, 0, gy));
+          m = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), opts.emissive ? mat(col, { emissive: opts.emissive, ei: opts.ei || 0.4 }) : finishMat(col, gy));
           m.position.set(lx, ly, lz); m.castShadow = opts.cast !== false; m.receiveShadow = true;
           g.add(m);
         }
@@ -4499,7 +4342,7 @@
       byCol.forEach(function (geos, col) {
         const geo = geos.length > 1 && BGU ? BGU.mergeBufferGeometries(geos) : geos[0];
         if (geo !== geos[0]) for (const g2 of geos) g2.dispose();
-        const m = new THREE.Mesh(geo, finishMat(col, 0, gy));
+        const m = new THREE.Mesh(geo, finishMat(col, gy));
         m.castShadow = true; m.receiveShadow = true;
         grp.add(m);
         if (col === CLAD || col === DARK) CBZ.losBlockers.push(m);

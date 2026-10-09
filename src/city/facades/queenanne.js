@@ -123,7 +123,7 @@
       const roofC = F.shade(set[3], 0.62);
       const roofL = F.mix(roofC, 0xffffff, 0.07);
       const iron = F.mix(roofC, trim, 0.16);
-      const glass = F.mix(F.shade(ctx.color, 0.26), 0x1a2029, 0.66);
+      const glass = F.glass(ctx, F.mix(F.shade(ctx.color, 0.26), 0x1a2029, 0.66));
       const brick = F.shade(F.mix(0x8a4433, ctx.color, 0.14), 0.88);
 
       // THE RIDGE runs at right angles to the street so the door face is a full

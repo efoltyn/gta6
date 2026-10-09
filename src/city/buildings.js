@@ -123,8 +123,9 @@
       if (!gp.frontageRole) continue;
       frontagePanes++;
       const bottom = gp.y - gp.hh;
-      if (Math.abs(bottom) <= 0.025) groundPanes++;
-      else if (bottom > 0.025) upperPanes++;
+      // a frontage pane sits on its frame's bottom rail (facadeOpenings: <= 7 cm)
+      if (Math.abs(bottom) <= 0.08) groundPanes++;
+      else if (bottom > 0.08) upperPanes++;
       if (!gp.col) colliderMissing++;
       byRole[gp.frontageRole] = (byRole[gp.frontageRole] || 0) + 1;
       // A floor-to-header wall is a vertical GRID: only its lowest pane should
@@ -142,7 +143,7 @@
     const samples = [];
     stacks.forEach(function (st) {
       const err = Math.abs(st.bottom);
-      if (err <= 0.025) groundColumns++;
+      if (err <= 0.08) groundColumns++;
       else {
         offGradeColumns++;
         if (err > maxGroundError) maxGroundError = err;
@@ -397,6 +398,62 @@
       root.add(im); glassPools.push(im);   // rides the same lifecycle as the pane pools
     });
   }
+  // ---- THE WINDOW AND DOOR MODULES, INSTANCED -------------------------------
+  // Every frame member, mullion, glazing bar, sill, lintel, door stop, step
+  // and stoop city/facade_openings.js builds is one instance of ONE unit box,
+  // coloured per instance, in a pool per 320 m cell on the city root (the same
+  // lifecycle and sectoring as the glass panes). Merged into each building's
+  // trim they cost a full box of vertices apiece (~0.8 KB); an instance is a
+  // matrix and a colour (76 B), and a whole city of windows is a few dozen
+  // draw calls. Records hold WORLD coords (the root is at identity).
+  const trimRecs = [];
+  let pendingTrim = [];
+  function addTrim(group, lx, ly, lz, bw, bh, bd, col, ox, oz) {
+    const rec = { x: ox + lx, y: ly, z: oz + lz, hw: bw / 2, hh: bh / 2, hd: bd / 2, col: col >>> 0, pool: null, inst: -1, _grp: group };
+    pendingTrim.push(rec); trimRecs.push(rec);
+    return rec;
+  }
+  const _trimC = new THREE.Color();
+  function buildTrimPools() {
+    if (!pendingTrim.length) return;
+    const batch = pendingTrim; pendingTrim = [];
+    let root = null;
+    for (const r of batch) { if (r._grp && r._grp.parent) { root = CBZ.poolIdentityHost ? (CBZ.poolIdentityHost(r._grp) || r._grp.parent) : r._grp.parent; break; } }
+    if (!root) root = CBZ.scene;
+    if (!root) return;
+    const bySect = new Map();
+    for (const r of batch) {
+      const k = sectorKey(r);
+      let a = bySect.get(k); if (!a) { a = []; bySect.set(k, a); } a.push(r);
+      r._grp = null;
+    }
+    const m = CBZ.cmat ? CBZ.cmat(0xffffff) : new THREE.MeshLambertMaterial({ color: 0xffffff });
+    bySect.forEach(function (recs) {
+      const geo = unitBox().clone();
+      let nx = 1e9, xx = -1e9, ny = 1e9, xy = -1e9, nz = 1e9, xz = -1e9, span = 0;
+      for (const r of recs) {
+        if (r.x < nx) nx = r.x; if (r.x > xx) xx = r.x; if (r.y < ny) ny = r.y; if (r.y > xy) xy = r.y;
+        if (r.z < nz) nz = r.z; if (r.z > xz) xz = r.z;
+        const sp = Math.max(r.hw, r.hh, r.hd); if (sp > span) span = sp;
+      }
+      geo.boundingSphere = new THREE.Sphere(new THREE.Vector3((nx + xx) / 2, (ny + xy) / 2, (nz + xz) / 2), Math.hypot(xx - nx, xy - ny, xz - nz) / 2 + span + 1);
+      const im = new THREE.InstancedMesh(geo, m, recs.length);
+      for (let i = 0; i < recs.length; i++) {
+        const r = recs[i]; r.pool = im; r.inst = i;
+        im.setMatrixAt(i, decoMatrix(r));
+        im.setColorAt(i, _trimC.setHex(r.col));
+      }
+      im.instanceMatrix.needsUpdate = true;
+      if (im.instanceColor) im.instanceColor.needsUpdate = true;
+      im.castShadow = false; im.receiveShadow = true;
+      im.frustumCulled = true;
+      im.name = "facade-trim";
+      im.userData.glassPool = true;              // the pane pools' lifecycle (distance sweep, audits)
+      root.add(im); glassPools.push(im);
+    });
+  }
+  CBZ.cityTrimStats = function () { return { recs: trimRecs.length, pending: pendingTrim.length }; };
+
   // ---- MASONRY VENEER POOLS (BLD_MASONRY_TEXTURE) -------------------------
   // THE BATCHING PROBLEM, stated plainly: core/batch.js refuses to merge ANY
   // mesh whose material carries a `map` (batch.js:171/:196). Brick is the most
@@ -2765,7 +2822,9 @@
     // for the main build; later generations for the expansion island).
     if (pendingGlass.length) buildGlassPools();
     if (pendingDeco.length) buildRoomDecoPools();
+    if (pendingTrim.length) buildTrimPools();
     if (pendingMasonry.length) buildMasonryPools();
+    if (CBZ.facadeNumbersFlush) CBZ.facadeNumbersFlush();
     // drain deferred window-opening carves (see winOpenQ at cityShatter) —
     // WINOPEN_BUDGET carveHole monoliths per frame, off the blast frame's
     // critical path. Each re-resolves against live walls, so stale entries
@@ -2830,121 +2889,130 @@
   function doorVisionMat() { return _doorVisionMat || (_doorVisionMat = new THREE.MeshLambertMaterial({ color: 0xbfe9f7, emissive: 0x2f6f86, emissiveIntensity: 0.4, transparent: true, opacity: 0.55 })); }
   function doorFrameMat() { return _doorFrameMat || (_doorFrameMat = new THREE.MeshLambertMaterial({ color: 0x21262d })); }
   function doorBarMat() { return _doorBarMat || (_doorBarMat = new THREE.MeshLambertMaterial({ color: 0xc8ccd2, emissive: 0x44484e, emissiveIntensity: 0.3 })); }
+  // a derelict's door: old, dark, scuffed paint — one shared material for every abandoned building
+  let _derelictLeafMat = null;
+  function derelictLeafMat() { return _derelictLeafMat || (_derelictLeafMat = new THREE.MeshLambertMaterial({ color: 0x3b3027 })); }
 
-  // Build ONE clean hinged door for the DOORW-wide gap at localDoor (group-local
-  // coords; door.nx/nz is the inward normal). The build is:
-  //   • an OVERSIZED clean FRAME (two jambs + a header) ringing the doorway so the
-  //     opening has breathing room and the closed leaf has something to seat into;
-  //   • ONE solid LEAF on a hinge pivot at one jamb, with a small glass vision
-  //     window + a vertical push-bar handle, that fills the gap FLUSH when closed;
-  //   • a full CLEAN ~95° INWARD swing that tucks the leaf flat against the inner
-  //     wall (clearly out of the doorway), verified to clear the gap and not clip.
-  // Registered globally for the proximity auto-opener. opts.frameH lets a taller
-  // shell (the mega-tower lobby) raise the header.
+  /* THE STREET DOOR'S LEAF — a real hinged door for the gap at localDoor
+     (group-local; localDoor.nx/nz is the INWARD normal). One or two leaves on
+     hinge pivots, each a frame of stiles and rails round a panel (solid) or
+     a pane (opts.glazed: a shop or office door you can see through), a push
+     bar, and a collider that fills the closed gap. Registered for the
+     proximity opener below.
+     opts: recess   how far the leaf's outer face sits BEHIND the wall's outer
+                    face (a real door is set back in its reveal; 0 = the old
+                    flush leaf, kept for the penthouse door)
+           double   two leaves meeting in the middle (an apartment lobby)
+           glazed   glass in the leaf instead of a panel
+           y0, y1   leaf bottom / top (default 0.05 .. DOORH-0.1)
+           frameH   legacy: leaf top = frameH - 0.80                        */
   function makeDoorPanel(bgroup, ox, oz, localDoor, panelW, opts) {
     opts = opts || {};
     const gap = (panelW || DOORW);                 // the doorway opening width
-    const dw = gap - 0.16;                          // leaf a hair narrower so it swings free
-    // default frame rides the person-scaled DOORH (not FH): leaf = DOORH-0.15,
-    // seating just under the wall header that fills DOORH..FH above it.
-    const frameH = opts.frameH != null ? opts.frameH : DOORH + 0.7;
-    const dh = frameH - 0.85;                        // leaf height (header sits above it)
+    const dw = gap - 0.16;                          // leaf(s) a hair narrower so they swing free
+    const ly0 = opts.y0 != null ? opts.y0 : 0.05;
+    const ly1 = opts.y1 != null ? opts.y1 : (opts.frameH != null ? opts.frameH - 0.80 : DOORH - 0.1);
+    const dh = ly1 - ly0;                           // leaf height
     const nx = localDoor.nx, nz = localDoor.nz;
     const tx = -nz, tz = nx;                         // tangent along the doorway width
     const along = Math.abs(nx) > 0.5;               // door faces ±X → leaf spans Z
-    const hingeSign = (nx !== 0 ? nx : nz) >= 0 ? 1 : -1;   // deterministic jamb side
-
-    // (NO chunky frame jambs/header — they read as "weird props" stuck around the
-    // doorway. The wall opening already frames the door; just hang the clean leaf.)
-
-    // ---- the LEAF on its hinge pivot ----
-    // pivot group at the hinge jamb (local); the leaf hangs from it, its centre
-    // offset back to the doorway centre so the CLOSED leaf sits FLUSH in the gap.
-    const pivot = new THREE.Group();
-    pivot.userData.mover = true;   // swings every frame — core/staticfreeze.js must not freeze it
-    const hx = localDoor.x + tx * (dw / 2) * hingeSign;
-    const hz = localDoor.z + tz * (dw / 2) * hingeSign;
-    pivot.position.set(hx, dh / 2 + 0.05, hz);
-    bgroup.add(pivot);
-    const leafOffX = -tx * (dw / 2) * hingeSign, leafOffZ = -tz * (dw / 2) * hingeSign;
-    // SOLID leaf slab (near-opaque) — a closed door obviously looks SHUT
     const slabT = 0.1;                               // leaf thickness
-    const leaf = new THREE.Mesh(new THREE.BoxGeometry(along ? slabT : dw, dh, along ? dw : slabT), doorLeafMat());
-    leaf.position.set(leafOffX, 0, leafOffZ); leaf.castShadow = false; pivot.add(leaf);
-    // a small CLEAR VISION WINDOW inset high on the leaf (so it still reads as a
-    // glass shop door, but only a small pane — the bulk stays solid/shut-looking)
-    const vw = dw * 0.5, vh = dh * 0.32;
-    const vision = new THREE.Mesh(new THREE.BoxGeometry(along ? slabT + 0.02 : vw, vh, along ? vw : slabT + 0.02), doorVisionMat());
-    vision.position.set(leafOffX, dh * 0.18, leafOffZ); vision.renderOrder = 1; pivot.add(vision);
-    let railMesh = null;
-    /* STILES AND RAILS on the outward face — the two uprights, the top, middle
-       and bottom rails, and a kick plate. This is the whole difference between
-       "a slab in a hole" and "a door": at any distance the eye reads the frame
-       pattern long before it can see hardware. They are merged into ONE mesh,
-       because a door is per-building and the city has hundreds of them — five
-       loose boxes each would be five hundred draw calls for panelling.
-       Everything hangs off the pivot, so it swings with the leaf. */
-    {
-      const outSgn = -1;                              // nx/nz is the INWARD normal
-      const pt = 0.025;                               // how proud a rail stands
-      const zo = slabT / 2 + pt / 2;
-      const parts = [];
-      const addPart = function (wid, hei, lat, yy) {
-        const g = new THREE.BoxGeometry(along ? pt : wid, hei, along ? wid : pt);
-        g.translate(leafOffX + tx * lat + nx * outSgn * zo, yy,
-          leafOffZ + tz * lat + nz * outSgn * zo);
-        parts.push(g);
-      };
-      const stile = Math.min(0.17, dw * 0.13), rail = Math.min(0.19, dh * 0.10);
-      addPart(stile, dh, -(dw / 2 - stile / 2), 0);           // hinge stile
-      addPart(stile, dh, (dw / 2 - stile / 2), 0);            // latch stile
-      addPart(dw, rail, 0, dh / 2 - rail / 2);                // top rail
-      addPart(dw, rail, 0, -(dh / 2 - rail / 2));             // bottom rail
-      addPart(dw, rail * 0.85, 0, -dh * 0.06);                // lock rail
-      addPart(dw - stile * 2, dh * 0.13, 0, -(dh / 2 - rail - dh * 0.075));  // kick plate
-      const BGU = THREE.BufferGeometryUtils;
-      if (BGU && BGU.mergeBufferGeometries && parts.length > 1) {
-        const merged = BGU.mergeBufferGeometries(parts);
-        for (const g of parts) g.dispose();
-        if (merged) {
-          const m = new THREE.Mesh(merged, doorRailMat());
-          m.castShadow = false; m.receiveShadow = true; pivot.add(m);
-          railMesh = m;
-        }
+    const rec0 = opts.recess || 0;
+    // the leaf's centre plane: recess + half its thickness in from the outer face
+    const inset = rec0 > 0 ? rec0 + slabT / 2 : 0;
+    const cxD = localDoor.x + nx * inset, czD = localDoor.z + nz * inset;
+    const hingeSign = (nx !== 0 ? nx : nz) >= 0 ? 1 : -1;   // deterministic jamb side
+    const leaves = opts.double ? [{ side: hingeSign, w: dw / 2 }, { side: -hingeSign, w: dw / 2 }] : [{ side: hingeSign, w: dw }];
+    const outSgn = -1;                              // nx/nz is the INWARD normal
+    const made = [];
+    for (const L of leaves) {
+      const lw = L.w;
+      // pivot at this leaf's hinge jamb; the leaf hangs from it
+      const pivot = new THREE.Group();
+      pivot.userData.mover = true;   // swings every frame — core/staticfreeze.js must not freeze it
+      pivot.position.set(cxD + tx * (dw / 2) * L.side, ly0 + dh / 2, czD + tz * (dw / 2) * L.side);
+      bgroup.add(pivot);
+      // the leaf's centre, from its pivot
+      const lcx = -tx * (lw / 2) * L.side, lcz = -tz * (lw / 2) * L.side;
+      const stile = Math.min(0.15, lw * 0.14), rail = Math.min(0.17, dh * 0.09);
+      let leaf;
+      if (opts.glazed) {
+        // a glazed leaf is a FRAME with glass in it, not a slab behind glass
+        const parts = [];
+        const addF = function (wid, hei, lat, yy) {
+          const g = new THREE.BoxGeometry(along ? slabT : wid, hei, along ? wid : slabT);
+          g.translate(lcx + tx * lat, yy, lcz + tz * lat);
+          parts.push(g);
+        };
+        addF(stile, dh, -(lw / 2 - stile / 2), 0);
+        addF(stile, dh, (lw / 2 - stile / 2), 0);
+        addF(lw - stile * 2, rail, 0, dh / 2 - rail / 2);
+        addF(lw - stile * 2, rail * 1.9, 0, -(dh / 2 - rail * 0.95));
+        const BGU = THREE.BufferGeometryUtils;
+        const merged = BGU && BGU.mergeBufferGeometries ? BGU.mergeBufferGeometries(parts) : null;
+        if (merged) for (const g of parts) g.dispose();
+        leaf = new THREE.Mesh(merged || parts[0], doorFrameMat());
+        leaf.castShadow = false; pivot.add(leaf);
+        const gh = dh - rail - rail * 1.9, gy = (rail * 1.9 - rail) / 2;
+        const pane = new THREE.Mesh(new THREE.BoxGeometry(along ? 0.02 : lw - stile * 2, gh, along ? lw - stile * 2 : 0.02), doorVisionMat());
+        pane.position.set(lcx, gy, lcz); pane.renderOrder = 1; pivot.add(pane);
       } else {
-        for (const g of parts) {
-          const m = new THREE.Mesh(g, doorRailMat());
-          m.castShadow = false; m.receiveShadow = true; pivot.add(m);
-          railMesh = m;
+        // a solid leaf, a small vision light high in it, and stiles + rails
+        // (one merged mesh) on its street face: "a door", not "a slab"
+        leaf = new THREE.Mesh(new THREE.BoxGeometry(along ? slabT : lw, dh, along ? lw : slabT), opts.weathered ? derelictLeafMat() : doorLeafMat());
+        leaf.position.set(lcx, 0, lcz); leaf.castShadow = false; pivot.add(leaf);
+        const vw = lw * 0.5, vh = dh * 0.26;
+        const vision = new THREE.Mesh(new THREE.BoxGeometry(along ? slabT + 0.02 : vw, vh, along ? vw : slabT + 0.02), doorVisionMat());
+        vision.position.set(lcx, dh * 0.2, lcz); vision.renderOrder = 1; pivot.add(vision);
+        const pt = 0.025, zo = slabT / 2 + pt / 2;
+        const parts = [];
+        const addPart = function (wid, hei, lat, yy) {
+          const g = new THREE.BoxGeometry(along ? pt : wid, hei, along ? wid : pt);
+          g.translate(lcx + tx * lat + nx * outSgn * zo, yy, lcz + tz * lat + nz * outSgn * zo);
+          parts.push(g);
+        };
+        addPart(stile, dh, -(lw / 2 - stile / 2), 0);
+        addPart(stile, dh, (lw / 2 - stile / 2), 0);
+        addPart(lw - stile * 2, rail, 0, dh / 2 - rail / 2);
+        addPart(lw - stile * 2, rail, 0, -(dh / 2 - rail / 2));
+        addPart(lw - stile * 2, rail * 0.85, 0, -dh * 0.06);
+        addPart(lw - stile * 2, dh * 0.12, 0, -(dh / 2 - rail - dh * 0.07));
+        const BGU = THREE.BufferGeometryUtils;
+        const merged = BGU && BGU.mergeBufferGeometries ? BGU.mergeBufferGeometries(parts) : null;
+        if (merged) {
+          for (const g of parts) g.dispose();
+          const m = new THREE.Mesh(merged, doorRailMat()); m.castShadow = false; m.receiveShadow = true; pivot.add(m);
+          L.rails = m;
         }
       }
+      // a vertical push bar near the free edge, proud of the street face
+      const freeLat = -(lw - 0.12) * L.side;
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(along ? 0.05 : 0.04, dh * 0.4, along ? 0.04 : 0.05), doorBarMat());
+      bar.position.set(tx * freeLat + nx * outSgn * (slabT / 2 + 0.05), -0.02, tz * freeLat + nz * outSgn * (slabT / 2 + 0.05));
+      bar.castShadow = false; pivot.add(bar);
+      L.pivot = pivot; L.leaf = leaf;
+      made.push(L);
     }
-    // a vertical PUSH-BAR / pull handle on the free-edge side, proud of the leaf
-    const handleLat = -(dw / 2 - 0.18) * hingeSign;  // toward the free (latch) edge
-    const bar = new THREE.Mesh(new THREE.BoxGeometry(0.07, dh * 0.55, 0.07), doorBarMat());
-    bar.position.set(leafOffX + tx * handleLat + nx * (slabT / 2 + 0.05), -0.05, leafOffZ + tz * handleLat + nz * (slabT / 2 + 0.05));
-    bar.castShadow = false; pivot.add(bar);
-
-    // collider that exactly fills the CLOSED doorway gap (height-gated)
-    const wx = ox + localDoor.x, wz = oz + localDoor.z;
+    // collider that exactly fills the CLOSED doorway gap (height-gated), at the leaf
+    const wx = ox + cxD, wz = oz + czD;
     const half = dw / 2 + 0.06;
     const col = along
-      ? { minX: wx - 0.2, maxX: wx + 0.2, minZ: wz - half, maxZ: wz + half, ref: leaf, y0: 0.0, y1: dh + 0.1 }
-      : { minX: wx - half, maxX: wx + half, minZ: wz - 0.2, maxZ: wz + 0.2, ref: leaf, y0: 0.0, y1: dh + 0.1 };
+      ? { minX: wx - 0.2, maxX: wx + 0.2, minZ: wz - half, maxZ: wz + half, ref: made[0].leaf, y0: 0.0, y1: ly1 + 0.1 }
+      : { minX: wx - half, maxX: wx + half, minZ: wz - 0.2, maxZ: wz + 0.2, ref: made[0].leaf, y0: 0.0, y1: ly1 + 0.1 };
     CBZ.colliders.push(col);
-    CBZ.losBlockers.push(leaf);
-    // OPEN SWING is INWARD (toward the room) so the leaf tucks flat against the
-    // inner wall, clearly out of the doorway. The leaf's free edge sits on the
-    // -hingeSign tangent side; working THREE's Y-rotation matrix through, the
-    // pivot must turn by -hingeSign·θ to carry that free edge toward +n (into the
-    // room). A full ~95° (1.66 rad) lands the leaf flat along the inner wall.
-    const openSign = -hingeSign;
+    for (const L of made) CBZ.losBlockers.push(L.leaf);
+    // OPEN SWING is INWARD (toward the room) so each leaf tucks flat against
+    // the inner wall. A leaf's free edge sits on the -side tangent; working
+    // THREE's Y-rotation through, its pivot turns by -side·θ to carry that
+    // edge toward +n (into the room). ~95° (1.66 rad) lands it on the wall.
     const rec = {
-      pivot, col, wx, wz, t: 0, open: false, hold: 0,
-      maxAng: openSign * 1.66, colIn: true,
+      pivot: made[0].pivot, col, wx, wz, t: 0, open: false, hold: 0,
+      maxAng: -made[0].side * 1.66, colIn: true,
       inx: nx, inz: nz,                            // inward normal (for proximity test)
-      leaf: leaf, rails: railMesh,                 // so a facade can paint this door
+      leaf: made[0].leaf, rails: made[0].rails || null,   // so a facade can paint this door
+      glazed: !!opts.glazed, recess: rec0,
     };
+    if (made[1]) { rec.pivot2 = made[1].pivot; rec.maxAng2 = -made[1].side * 1.66; rec.leaf2 = made[1].leaf; rec.rails2 = made[1].rails || null; }
     cityDoors.push(rec);
     return rec;
   }
@@ -3090,6 +3158,7 @@
         dr.t += (target - dr.t) * Math.min(1, dt * 6.5);
         if (Math.abs(dr.t - target) < 0.01) dr.t = target;
         dr.pivot.rotation.y = dr.t * dr.maxAng;
+        if (dr.pivot2) dr.pivot2.rotation.y = dr.t * dr.maxAng2;
       }
 
       // Collider sync is evaluated EVERY frame (not only mid-swing) so the
@@ -3124,6 +3193,7 @@
   CBZ.cityDoorsReset = function () {
     for (const dr of cityDoors) {
       dr.open = false; dr.hold = 0; dr.t = 0; dr.playerSoundCycle = false; dr.pivot.rotation.y = 0;
+      if (dr.pivot2) dr.pivot2.rotation.y = 0;
       if (dr.demolished) continue;                 // demolition owns this door's collider until rebuilt
       if (!dr.colIn) { if (CBZ.colliders.indexOf(dr.col) === -1) CBZ.colliders.push(dr.col); dr.colIn = true; }
     }
@@ -3528,14 +3598,25 @@
     // then merges those across buildings at load. Falls back to individual
     // meshes (still batch-merged later) if the vendor script is missing.
     // per colour: flat [lx, ly, lz, bw, bh, bd, ...] (see mergedBoxGeometry)
-    const decoGeos = new Map();
+    // in EMISSION ORDER: the last word on a shared plane goes to the box laid
+    // last (facadeOpenings.resolveCoplanar, run once at the flush)
+    const decoList = [];
+    const decoFixed = [];                         // the trim as drawn, for later dressers' fixed planes
     function dbox(lx, ly, lz, bw, bh, bd, col) {
-      let arr = decoGeos.get(col);
-      if (!arr) { arr = []; decoGeos.set(col, arr); }
-      arr.push(lx, ly, lz, bw, bh, bd);
+      if (!(bw > 0) || !(bh > 0) || !(bd > 0)) return;
+      decoList.push([lx, ly, lz, bw, bh, bd, col]);
     }
-    function flushDeco() {
+    function flushDeco(fixed) {
       const BGU = THREE.BufferGeometryUtils;
+      if (CBZ.facadeOpenings && decoList.length) CBZ.facadeOpenings.resolveCoplanar(decoList, fixed || null);
+      const decoGeos = new Map();
+      for (const r of decoList) {
+        let arr = decoGeos.get(r[6]);
+        if (!arr) { arr = []; decoGeos.set(r[6], arr); }
+        arr.push(r[0], r[1], r[2], r[3], r[4], r[5]);
+      }
+      for (const r of decoList) decoFixed.push([r[0] - r[3] / 2, r[0] + r[3] / 2, r[1] - r[4] / 2, r[1] + r[4] / 2, r[2] - r[5] / 2, r[2] + r[5] / 2]);
+      decoList.length = 0;
       decoGeos.forEach(function (boxes, col) {
         const matD = CBZ.cmat ? CBZ.cmat(col) : mat(col);
         const n = boxes.length / 6;
@@ -3552,7 +3633,6 @@
           }
         }
       });
-      decoGeos.clear();
     }
 
     // ---- MASONRY VENEER (BLD_MASONRY_TEXTURE) -------------------------------
@@ -3568,6 +3648,7 @@
     // the brick always lands exactly on wall and never across a window.
     const MSILL = civicF ? 1.15 : 1.05;    // solid spandrel, floor → window sill
     const MHDR = fortified ? 0.45 : (civicF ? 0.85 : 0.7);   // solid header, window head → ceiling
+    const veneerQueue = [];
     function veneerBand(s, y0, y1, skipHalf) {
       if (!VENEER_ON || y1 - y0 < 0.25) return;
       const TL = CBZ.masonryTile;
@@ -3582,8 +3663,8 @@
         if (skipHalf && Math.abs(t) < skipHalf + tw * 0.5) continue;   // keep the doorway clear
         for (let r = 0; r < rows; r++) {
           const cy = y0 + (r + 0.5) * th;
-          if (horiz) addMasonryTile(bgroup, t, cy, nOff, tw, th, 0.06, MPAL.id, ox, oz);
-          else addMasonryTile(bgroup, nOff, cy, t, 0.06, th, tw, MPAL.id, ox, oz);
+          // queued: laid once the openings are known, never across one
+          veneerQueue.push({ s: s, t: t, cy: cy, tw: tw, th: th, horiz: horiz, nOff: nOff });
         }
       }
     }
@@ -3659,6 +3740,8 @@
       }
       return parts;
     }
+    const structBoxes = [];                       // [x0,x1,y0,y1,z0,z1] of every structural box
+    const roundRecs = [];                         // the caps of round primitives (columns, cones), as thin boxes
     function lbox(lx, ly, lz, bw, bh, bd, col, o) {
       o = o || {};
       if (shaftRects.length && !o.stair && !o.los && !o._clipped) {
@@ -3700,6 +3783,9 @@
       }
       if (o.plat) { const p = { minX: ox + lx - bw / 2, maxX: ox + lx + bw / 2, minZ: oz + lz - bd / 2, maxZ: oz + lz + bd / 2, top: ly + bh / 2 }; CBZ.platforms.push(p); plats.push(p); }
       if (o.los) { CBZ.losBlockers.push(m); losMeshes.push(m); }
+      // the shell's structure (walls, slabs, parapets, the foundation): fixed
+      // planes no dressing may share (facadeOpenings.resolveCoplanar)
+      if (o.los || o.fixed) structBoxes.push([lx - bw / 2, lx + bw / 2, ly - bh / 2, ly + bh / 2, lz - bd / 2, lz + bd / 2]);
       return m;
     }
 
@@ -3707,764 +3793,664 @@
     // (world.js draws a grass plane at y≈0.10 on every lot) or you'd see grass
     // through the ground floor. Top at 0.14 (a tiny doorway step the forgiving
     // auto-climb absorbs) covers the lawn so the interior reads as a real floor.
-    lbox(0, -0.21, 0, w - WT, 0.7, d - WT, opts.boarded ? 0x40433f : 0x5c626b, { plat: true });
+    lbox(0, -0.21, 0, w - WT, 0.7, d - WT, opts.boarded ? 0x40433f : 0x5c626b, { plat: true, fixed: true });
 
     // doorSide: 0=-z (front), 1=+z, 2=-x, 3=+x. Door pierces the ground floor.
     const wallOpt = { solid: true, los: true };
     const modern = storeys >= 3;   // tall towers get fuller, near floor-to-ceiling glass
 
-    // DOOR CASING helpers (Sub-idea B: seal the gap around the swinging door).
-    // makeDoorPanel hangs a leaf sized dw=DOORW-0.16 wide × dh=DOORH-0.15 tall so
-    // it can swing without binding; that leaves a thin see-through slit down each
-    // jamb and across the head of the DOORW×DOORH wall opening. These fill those
-    // slits with slim solid casing (jambs + lintel) flush to the street face so
-    // the surround reads as a framed doorway, not an open gap. The leaf still
-    // swings INWARD into the room, clear of this exterior-plane casing.
-    const DLEAF_W = DOORW - 0.16;     // must match makeDoorPanel leaf width
-    const DLEAF_H = (DOORH + 0.7) - 0.85;   // must match makeDoorPanel leaf height (DOORH-0.15)
-    const DJAMB = 0.18;               // casing reveal width (covers the ~0.08 slit + reads as trim)
-    function doorFrameHoriz(fz) {
-      const jx = (DLEAF_W / 2 + DJAMB / 2);   // jamb centre, just outside the leaf edge
-      // the jambs stand 1 cm proud of both faces of the wall (flush, they lay
-      // in the wall's own plane over its plinth course: one colour shaded two
-      // ways, flickering)
-      lbox(-jx, DLEAF_H / 2 + 0.02, fz, DJAMB, DLEAF_H + 0.04, WT + 0.02, color, { los: true });   // left jamb
-      lbox(jx, DLEAF_H / 2 + 0.02, fz, DJAMB, DLEAF_H + 0.04, WT + 0.02, color, { los: true });    // right jamb
-      // lintel: from the leaf top up to the wall header bottom (DOORH), full DOORW
-      lbox(0, (DLEAF_H + DOORH) / 2, fz, DOORW, DOORH - DLEAF_H, WT, color, { los: true });
-      // a slim casing lip proud of the street face so the doorway reads framed.
-      const fzo = fz + ((f0Out(fz)) * (WT / 2 + 0.04));
-      dbox(0, DOORH + 0.06, fzo, DOORW + 0.3, 0.14, 0.1, TRIM);   // lintel cap
-      dbox(-DOORW / 2 - 0.07, DOORH / 2, fzo, 0.12, DOORH, 0.1, TRIM);   // casing reveals
-      dbox(DOORW / 2 + 0.07, DOORH / 2, fzo, 0.12, DOORH, 0.1, TRIM);
-    }
-    function doorFrameVert(fx) {
-      const jz = (DLEAF_W / 2 + DJAMB / 2);
-      lbox(fx, DLEAF_H / 2 + 0.02, -jz, WT + 0.02, DLEAF_H + 0.04, DJAMB, color, { los: true });
-      lbox(fx, DLEAF_H / 2 + 0.02, jz, WT + 0.02, DLEAF_H + 0.04, DJAMB, color, { los: true });
-      lbox(fx, (DLEAF_H + DOORH) / 2, 0, WT, DOORH - DLEAF_H, DOORW, color, { los: true });
-      const fxo = fx + (f0OutX(fx) * (WT / 2 + 0.04));
-      dbox(fxo, DOORH + 0.06, 0, 0.1, 0.14, DOORW + 0.3, TRIM);
-      dbox(fxo, DOORH / 2, -DOORW / 2 - 0.07, 0.1, DOORH, 0.12, TRIM);
-      dbox(fxo, DOORH / 2, DOORW / 2 + 0.07, 0.1, DOORH, 0.12, TRIM);
-    }
-    // street-facing sign for a ±z / ±x face (door is on side 0/1 → z, 2/3 → x).
-    function f0Out(fz) { return fz < 0 ? -1 : 1; }
-    function f0OutX(fx) { return fx < 0 ? -1 : 1; }
-
-    // GRID GLASS (Sub-idea C, for the ground-floor storefronts/showrooms/garage
-    // and the glass-loft caller below): split a single wide solid glass span into
-    // a mullion grid of individual breakable panes on a ~1.5m module, so one shot
-    // takes out one cell, not the whole storefront. `horizFace` true = the pane
-    // faces ±z (thin in z, given as pw×ph×t); false = faces ±x (thin in x). cx/cy/
-    // cz is the span CENTRE; spanW is the wide dimension (x or z by face), spanH
-    // the height, t the pane thickness. opts forwarded to addCityGlass.
-    function gridGlass(cx, cy, cz, spanW, spanH, t, horizFace, opts) {
-      const MOD = 1.5;
-      const nx = Math.max(1, Math.min(10, Math.round(spanW / MOD)));
-      const ny = Math.max(1, Math.min(3, Math.round(spanH / MOD)));
-      const pw = spanW / nx, ph = spanH / ny;
-      for (let gx = 0; gx < nx; gx++) for (let gy = 0; gy < ny; gy++) {
-        const o2 = -spanW / 2 + (gx + 0.5) * pw, py = cy + (-spanH / 2 + (gy + 0.5) * ph);
-        if (horizFace) addCityGlass(bgroup, cx + o2, py, cz, pw, ph, t, ox, oz, opts, windows);
-        else addCityGlass(bgroup, cx, py, cz + o2, t, ph, pw, ox, oz, opts, windows);
-      }
-    }
-
-    // SHOWROOM GARAGE FRONT (gas / car lot / chop shop): no plain door — a wide
-    // roll-up GARAGE BAY you drive a car straight into, framed by big SOLID
-    // showroom glass that shatters into a drive-through hole if you smash it.
-    function showroomFront(f) {
-      const ly = FH / 2;
-      const GW = Math.min(3.6, (f.horiz ? w : d) * 0.42);   // garage opening width
-      const HDR = FH - 0.9;                                   // header bottom
-      const glassY = HDR / 2;                                 // bottom = 0, top = HDR
-      if (f.horiz) {
-        const zz = f.z, off = (f.s === 0 ? 0.06 : -0.06);
-        lbox(-w / 2 + 0.35, ly, zz, 0.7, FH, WT, color, wallOpt);
-        lbox(w / 2 - 0.35, ly, zz, 0.7, FH, WT, color, wallOpt);
-        // One continuous head beam carries the whole frontage: garage lintel
-        // plus both glass bays. The former garage-only header left the panes
-        // ending in open air at their top edge.
-        lbox(0, HDR + (FH - HDR) / 2, zz, w - 0.7, FH - HDR, WT, color, { solid: true, los: true });
-        lbox(0, HDR - 0.5, zz + off, GW - 0.3, 0.9, 0.14, 0x8a93a0, { cast: false });                   // rolled-up door
-        for (let s = 0; s < 4; s++) lbox(0, HDR - 0.2 - s * 0.2, zz + off * 1.2, GW - 0.4, 0.05, 0.18, 0x6b7480, { cast: false });
-        const a = -w / 2 + 0.7, bb = -GW / 2 - 0.15, cxL = (a + bb) / 2, wL = bb - a;
-        gridGlass(cxL, glassY, zz, wL, HDR, 0.07, true, { solid: true, kind: "clear", role: "showroom" });
-        gridGlass(-cxL, glassY, zz, wL, HDR, 0.07, true, { solid: true, kind: "clear", role: "showroom" });
-      } else {
-        const xx = f.x, off = (f.s === 2 ? 0.06 : -0.06);
-        lbox(xx, ly, -d / 2 + 0.35, WT, FH, 0.7, color, wallOpt);
-        lbox(xx, ly, d / 2 - 0.35, WT, FH, 0.7, color, wallOpt);
-        lbox(xx, HDR + (FH - HDR) / 2, 0, WT, FH - HDR, d - 0.7, color, { solid: true, los: true });
-        lbox(xx + off, HDR - 0.5, 0, 0.14, 0.9, GW - 0.3, 0x8a93a0, { cast: false });
-        for (let s = 0; s < 4; s++) lbox(xx + off * 1.2, HDR - 0.2 - s * 0.2, 0, 0.18, 0.05, GW - 0.4, 0x6b7480, { cast: false });
-        const a = -d / 2 + 0.7, bb = -GW / 2 - 0.15, czL = (a + bb) / 2, dL = bb - a;
-        gridGlass(xx, glassY, czL, dL, HDR, 0.07, false, { solid: true, kind: "clear", role: "showroom" });
-        gridGlass(xx, glassY, -czL, dL, HDR, 0.07, false, { solid: true, kind: "clear", role: "showroom" });
-      }
-    }
-
-    // RETAIL STOREFRONT (clothing / food / electronics / etc.): the showroom
-    // look minus the garage roll-up — corner posts, a slim header, and a WIDE
-    // see-through (clear, pooled) glass span flanking the swinging door, plus a
-    // floor read so the interior is visibly a ROOM through the glass, ALWAYS
-    // (not only after shooting). The hollow shell + furnishShop already supply
-    // the room behind it. makeDoorPanel still hangs the openable door.
-    function retailFront(f) {
-      const ly = FH / 2;
-      const HDR = FH - 1.0;                                   // header bottom (~1.0m header)
-      const gph = HDR;                                        // glass rises to the header
-      const gy = ly - (FH - HDR) / 2;                          // glass band centred under the header
-      if (f.horiz) {
-        const zz = f.z;
-        lbox(-w / 2 + 0.35, ly, zz, 0.7, FH, WT, color, wallOpt);   // corner posts
-        lbox(w / 2 - 0.35, ly, zz, 0.7, FH, WT, color, wallOpt);
-        lbox(0, HDR + (FH - HDR) / 2, zz, w - 1.0, FH - HDR, WT, color, { solid: true, los: true });   // header over the top
-        // DOOR SURROUND: seal the slits around the swinging leaf (jambs + lintel),
-        // tight to the leaf — owner-filmed diner door gap. The leaf still swings.
-        doorFrameHoriz(zz);
-        // the retail header band starts at HDR; the doorFrame lintel tops out at
-        // DOORH (<HDR) → fill the strip over the door so it isn't see-through.
-        if (HDR > DOORH + 0.02) lbox(0, (DOORH + HDR) / 2, zz, DOORW, HDR - DOORH, WT, color, { solid: true, los: true });
-        const osn = (f.s === 0 ? -1 : 1);                     // toward the street
-        const goff = osn * (WT / 2 + 0.06);
-        // FLANK GLASS spans EDGE-TO-EDGE between the door jamb and the corner post
-        // (showroom-clean): the flank runs DOORW/2 → w/2-0.7, exact width `side`.
-        // The OLD `side*0.86` shrink left a see-through strip at BOTH the door and
-        // the corner (owner-filmed gaps); span the full `side` to seal them.
-        const side = (w - DOORW) / 2 - 0.7;                   // glass span each side of the door gap
-        if (side > 1.0) {
-          const fcx = -(DOORW / 2 + side / 2), fcx2 = DOORW / 2 + side / 2;
-          for (const fc of [fcx, fcx2]) {
-            gridGlass(fc, gy, zz + goff, side, gph, 0.05, true, { solid: true, tint: tintIdx, kind: "clear", role: "storefront" });
-          }
-        } else {
-          // too narrow to glaze cleanly: seal each flank with a solid wall span so
-          // the corner stays closed (no see-through hole at the building edge).
-          const flw = (w - DOORW) / 2 - 0.7;
-          if (flw > 0.05) for (const fc of [-(DOORW / 2 + flw / 2), DOORW / 2 + flw / 2])
-            lbox(fc, ly, zz, flw, FH, WT, color, wallOpt);
-        }
-      } else {
-        const xx = f.x;
-        lbox(xx, ly, -d / 2 + 0.35, WT, FH, 0.7, color, wallOpt);
-        lbox(xx, ly, d / 2 - 0.35, WT, FH, 0.7, color, wallOpt);
-        lbox(xx, HDR + (FH - HDR) / 2, 0, WT, FH - HDR, d - 1.0, color, { solid: true, los: true });
-        doorFrameVert(xx);   // seal the door surround (see doorFrameHoriz note)
-        if (HDR > DOORH + 0.02) lbox(xx, (DOORH + HDR) / 2, 0, WT, HDR - DOORH, DOORW, color, { solid: true, los: true });
-        const osn = (f.s === 2 ? -1 : 1);
-        const goff = osn * (WT / 2 + 0.06);
-        const side = (d - DOORW) / 2 - 0.7;
-        if (side > 1.0) {
-          const fcz = -(DOORW / 2 + side / 2), fcz2 = DOORW / 2 + side / 2;
-          for (const fc of [fcz, fcz2]) {
-            gridGlass(xx + goff, gy, fc, side, gph, 0.05, false, { solid: true, tint: tintIdx, kind: "clear", role: "storefront" });
-          }
-        } else {
-          const flw = (d - DOORW) / 2 - 0.7;
-          if (flw > 0.05) for (const fc of [-(DOORW / 2 + flw / 2), DOORW / 2 + flw / 2])
-            lbox(xx, ly, fc, WT, FH, flw, color, wallOpt);
-        }
-      }
-      // floor read so the interior reads as a real room through the clear glass
-      lbox(0, 0.06, 0, w - 2 * WT, 0.08, d - 2 * WT, 0xc8ccd4, { cast: false });
-      // keep the openable swinging door in the gap
-      if (!opts.boarded) { const _dr = makeDoorPanel(bgroup, ox, oz, localDoor, DOORW); if (_dr) doorRecs.push(_dr); }
-    }
-
-    // WRAPAROUND PARKING DECK (opts.garageGround): the flagship's whole ground
-    // floor is an open garage you can drive into from ANY side. Each face gets a
-    // wide central drive-in bay (corner posts + a header to duck under) flanked
-    // by floor-to-ceiling glass — so it reads as glassed-in parking on all four
-    // sides, not a sealed lobby. No swinging door; the bays ARE the entrances.
-    function garageBay(f) {
-      const ly = FH / 2;
-      const span = f.horiz ? w : d;
-      const GW = Math.min(5.0, span * 0.52);     // drive-in opening width
-      const HDR = FH - 0.85;                       // header bottom (clearance)
-      const glassY = HDR / 2;                      // floor-to-head-beam glazing
-      const post = 0.85;
-      if (f.horiz) {
-        const zz = f.z;
-        lbox(-w / 2 + post / 2, ly, zz, post, FH, WT, color, wallOpt);
-        lbox(w / 2 - post / 2, ly, zz, post, FH, WT, color, wallOpt);
-        lbox(0, HDR + (FH - HDR) / 2, zz, w - post, FH - HDR, WT, color, { solid: true, los: true });
-        const a = -w / 2 + post, bb = -GW / 2 - 0.2, cxL = (a + bb) / 2, wL = bb - a;
-        if (wL > 0.5) {
-          gridGlass(cxL, glassY, zz, wL, HDR, 0.06, true, { solid: true, kind: "clear", role: "garage-front" });
-          gridGlass(-cxL, glassY, zz, wL, HDR, 0.06, true, { solid: true, kind: "clear", role: "garage-front" });
-        }
-      } else {
-        const xx = f.x;
-        lbox(xx, ly, -d / 2 + post / 2, WT, FH, post, color, wallOpt);
-        lbox(xx, ly, d / 2 - post / 2, WT, FH, post, color, wallOpt);
-        lbox(xx, HDR + (FH - HDR) / 2, 0, WT, FH - HDR, d - post, color, { solid: true, los: true });
-        const a = -d / 2 + post, bb = -GW / 2 - 0.2, czL = (a + bb) / 2, dL = bb - a;
-        if (dL > 0.5) {
-          gridGlass(xx, glassY, czL, dL, HDR, 0.06, false, { solid: true, kind: "clear", role: "garage-front" });
-          gridGlass(xx, glassY, -czL, dL, HDR, 0.06, false, { solid: true, kind: "clear", role: "garage-front" });
-        }
-      }
-    }
-
-    for (let k = 0; k < storeys; k++) {
-      const ly = k * FH + FH / 2;
-      const faces = [
-        { s: 0, x: 0, z: -d / 2 + WT / 2, w: w, dd: WT, horiz: true },
-        { s: 1, x: 0, z: d / 2 - WT / 2, w: w, dd: WT, horiz: true },
-        // For ±x faces `w` is the wall's X thickness and `dd` is its Z span.
-        // Do not feed `dd` into lbox's width slot: on a 34 m civic shell that
-        // turns each side facade into a 34 m-thick slab across the whole room.
-        { s: 2, x: -w / 2 + WT / 2, z: 0, w: WT, dd: d, horiz: false },
-        { s: 3, x: w / 2 - WT / 2, z: 0, w: WT, dd: d, horiz: false },
-      ];
-      for (const f of faces) {
-        if (opts.garageGround && k === 0) { garageBay(f); continue; }
-        if (k === 0 && f.s === doorSide) {
-          if (opts.showroom) {
-            showroomFront(f);
-          } else if (opts.retail && CBZ.game && CBZ.game.mode === "city") {
-            retailFront(f);          // clear see-through storefront (room visible through glass, always)
-          } else if (f.horiz) {
-            const side = (w - DOORW) / 2;
-            const fcx = -(DOORW / 2 + side / 2), fcx2 = DOORW / 2 + side / 2;
-            lbox(0, (DOORH + FH) / 2, f.z, DOORW, FH - DOORH, WT, color, { los: true });   // door header
-            // DOOR FRAME — seal the surround (owner-filmed: "the area around doors
-            // is a gap"). The wall opening is DOORW×DOORH but the swinging leaf is
-            // a touch smaller (dw=DOORW-0.16, dh=DOORH-0.15) so it can swing free —
-            // leaving a see-through slit on both sides + over the top. Fill those
-            // exact slits with slim solid jambs + a lintel (a real door casing),
-            // tight to the leaf, so there's NO gap but the leaf still opens. The
-            // jamb columns are 0.18m wide framing reveals (a hair wider than the
-            // bare 0.08 slit so the casing reads as trim, not a hairline).
-            doorFrameHoriz(f.z);
-            // FLANKING WINDOWS as REAL framed openings (sill + header + outer
-            // jamb around a GAP glazed with clear glass) so the furnished
-            // ground-floor room shows through and a break opens into it — the
-            // SAME see-through read as the upper storeys. (Was a SOLID full-
-            // height wall + a fake SKY interior slab → "gray building behind"
-            // when shot, user-filmed.)
-            const sillH = 0.5, hdrH = 0.7, jamb = 0.5;
-            const winY0 = ly - FH / 2 + sillH, winY1 = ly + FH / 2 - hdrH;
-            const winCy = (winY0 + winY1) / 2, winPh = winY1 - winY0;
-            const ostreet = (f.s === 0 ? -1 : 1);
-            for (const fc of [fcx, fcx2]) {
-              if (side <= 1.2) { lbox(fc, ly, f.z, side, FH, WT, color, wallOpt); continue; }   // too narrow to glaze
-              const sgn = fc < 0 ? -1 : 1;                    // -1 = left flank
-              lbox(fc, winY0 - sillH / 2, f.z, side, sillH, WT, color, wallOpt);   // sill
-              lbox(fc, winY1 + hdrH / 2, f.z, side, hdrH, WT, color, wallOpt);     // header
-              lbox(sgn * (w / 2 - jamb / 2), winCy, f.z, jamb, winPh, WT, color, wallOpt);   // outer jamb at the corner
-              const span = side - jamb, gcx = fc - sgn * jamb / 2;
-              gridGlass(gcx, winCy, f.z, span, winPh, 0.07, true, { solid: true, tint: tintIdx, kind: "clear" });
-              const faceZ = f.z + ostreet * (WT / 2 + 0.04);
-              const nn = Math.max(2, Math.min(5, Math.round(span / 1.6))), step = span / nn;
-              for (let i = 1; i < nn; i++) dbox(gcx - span / 2 + i * step, winCy, faceZ, 0.07, winPh, 0.05, MULL);
-            }
-          } else {
-            const side = (d - DOORW) / 2;
-            const fcz = -(DOORW / 2 + side / 2), fcz2 = DOORW / 2 + side / 2;
-            lbox(f.x, (DOORH + FH) / 2, 0, WT, FH - DOORH, DOORW, color, { los: true });   // door header
-            doorFrameVert(f.x);   // seal the door surround (see doorFrameHoriz note)
-            const sillH = 0.5, hdrH = 0.7, jamb = 0.5;
-            const winY0 = ly - FH / 2 + sillH, winY1 = ly + FH / 2 - hdrH;
-            const winCy = (winY0 + winY1) / 2, winPh = winY1 - winY0;
-            const ostreet = (f.s === 2 ? -1 : 1);
-            for (const fc of [fcz, fcz2]) {
-              if (side <= 1.2) { lbox(f.x, ly, fc, WT, FH, side, color, wallOpt); continue; }
-              const sgn = fc < 0 ? -1 : 1;
-              lbox(f.x, winY0 - sillH / 2, fc, WT, sillH, side, color, wallOpt);
-              lbox(f.x, winY1 + hdrH / 2, fc, WT, hdrH, side, color, wallOpt);
-              lbox(f.x, winCy, sgn * (d / 2 - jamb / 2), WT, winPh, jamb, color, wallOpt);
-              const span = side - jamb, gcz = fc - sgn * jamb / 2;
-              gridGlass(f.x, winCy, gcz, span, winPh, 0.07, false, { solid: true, tint: tintIdx, kind: "clear" });
-              const faceX = f.x + ostreet * (WT / 2 + 0.04);
-              const nn = Math.max(2, Math.min(5, Math.round(span / 1.6))), step = span / nn;
-              for (let i = 1; i < nn; i++) dbox(faceX, winCy, gcz - span / 2 + i * step, 0.05, winPh, 0.07, MULL);
-            }
-          }
-          // hang an OPENABLE swinging glass door in the gap (real shops/homes
-          // only — derelicts stay gaping). Abandoned (boarded) buildings skip it.
-          // retailFront hangs its own door, so skip it here for city retail.
-          const cityRetail = opts.retail && CBZ.game && CBZ.game.mode === "city";
-          if (!opts.showroom && !opts.boarded && !cityRetail) { const _dr = makeDoorPanel(bgroup, ox, oz, localDoor, DOORW); if (_dr) doorRecs.push(_dr); }
-        } else if (opts.boarded) {
-          // DERELICT: not a blank wall — a real apartment grid of SMASHED-DARK /
-          // boarded-over windows in the same residential rhythm, so an abandoned
-          // building reads as a gutted tenement (dark voids, some planked over,
-          // soot) instead of a flat box with a few marks. (Owner-filmed: the old
-          // solid-plate-+-3-planks read as the "fake black window" blank wall.)
-          const fy0b = k * FH, fy1b = k * FH + FH;
-          const span = (f.horiz ? w : d), margin = 0.7, usable = span - 2 * margin;
-          const nWin = Math.max(1, Math.round(usable / 2.6)), cell = usable / nWin;
-          const winW = Math.min(2.0, cell * 0.62), sillH = 1.05, hdrH = 0.7;
-          const winY0 = fy0b + sillH, winY1 = fy1b - hdrH;
-          const winCy = (winY0 + winY1) / 2, winPh = winY1 - winY0;
-          const fBox = (cT, segLen, cy, ch) => {
-            if (segLen <= 0.02) return;
-            if (f.horiz) lbox(cT, cy, f.z, segLen, ch, f.dd, color, wallOpt);
-            else lbox(f.x, cy, cT, f.w, ch, segLen, color, wallOpt);
-          };
-          fBox(0, span, fy0b + sillH / 2, sillH);                 // spandrel below the sills
-          fBox(0, span, fy1b - hdrH / 2, hdrH);                   // header above the heads
-          fBox(-span / 2 + margin / 2, margin, winCy, winPh);     // corner piers
-          fBox(span / 2 - margin / 2, margin, winCy, winPh);
-          const DARKWIN = 0x14171a;                               // smashed-dark window void
-          const faceSign = f.horiz ? (f.s === 0 ? -1 : 1) : (f.s === 2 ? -1 : 1);
-          for (let i = 0; i < nWin; i++) {
-            const t = -usable / 2 + (i + 0.5) * cell;
-            const cx = f.horiz ? t : f.x, cz = f.horiz ? f.z : t;
-            const pierW = (cell - winW) / 2;
-            fBox(t - winW / 2 - pierW / 2, pierW, winCy, winPh);
-            fBox(t + winW / 2 + pierW / 2, pierW, winCy, winPh);
-            // dark broken-window void SEATED AT THE STREET FACE (not the wall
-            // centre): at f.z it sat buried 0.2m inside the WT-thick wall, so the
-            // derelict read as a near-blank wall with only the proud planks
-            // showing as stray tally-marks (owner-filmed). Recess it just inside
-            // the outer face so every opening reads as a dark smashed-out window.
-            const vo = faceSign * (WT / 2 - 0.02);
-            if (f.horiz) dbox(cx, winCy, f.z + vo, winW, winPh, 0.06, DARKWIN);
-            else dbox(f.x + vo, winCy, cz, 0.06, winPh, winW, DARKWIN);
-            // ~40% of the openings are boarded over with planks proud of the face
-            const h = Math.abs(Math.sin((ox + cx) * 7.1 + (oz + cz) * 3.3 + winCy * 1.7)) % 1;
-            if (h < 0.4) {
-              const fo = faceSign * (WT / 2 + 0.05);
-              for (let p = -1; p <= 1; p++) {
-                if (f.horiz) dbox(cx, winCy + p * winPh * 0.3, f.z + fo, winW + 0.1, 0.16, 0.06, BOARD);
-                else dbox(f.x + fo, winCy + p * winPh * 0.3, cz, 0.06, 0.16, winW + 0.1, BOARD);
-              }
-            }
-          }
-        } else {
-          // REAL WINDOW OPENING — built like retailFront/showroomFront, but on
-          // every storey: the wall is FRAMED (solid sill + header + jambs) around
-          // a genuine GAP, and the gap is glazed with SOLID CLEAR glass. The
-          // furnished room behind (cityFurnishApartment dresses every storey) is
-          // therefore visible THROUGH the glass ALWAYS — and an INTERIOR GLOW
-          // panel (cityInteriorGlow) sits just behind every opening so it reads
-          // as a lived-in room (dim by day, ~15% warm-lit at night) and NEVER as
-          // a flat black "fake window" — the exact complaint this pass fixes.
-          // Breaking the glass (cityShatterRay/cityShatter bursts the solid pane
-          // → frees its collider) leaves a clean opening into the real room.
-          //
-          // THREE FACADE MODES (chosen per building above):
-          //   • OFFICE  — one wide curtain-wall BAND per storey (the loved towers)
-          //   • RESIDENTIAL — several smaller CLEAR PUNCHED windows in a rhythmic
-          //                   row (the NYC brick-apartment read the owner cited)
-          //   • FORTIFIED — a couple of small high windows (bank/utility; rare)
-          //
-          // The solid clear pane doubles as the height-gated collider that used
-          // to be the wall box, so nobody falls out an upper-floor window. The
-          // frame boxes (sill/header/jambs) carry the wall colour + LOS so the
-          // facade still reads structural and cops can't see through the spandrel.
-          const outSgn = (f.s === 0 || f.s === 2) ? -1 : 1;   // toward the street
-          const fy0 = k * FH, fy1 = k * FH + FH;              // storey floor / ceiling
-          // outward wall normal (cityInteriorGlow wants OUTWARD; doorInfo gives
-          // inward, but here we derive it directly from the face/outSgn).
-          const outN = f.horiz ? { x: 0, z: outSgn } : { x: outSgn, z: 0 };
-
-          // ---- helper: glaze ONE punched opening (clear pane + interior glow +
-          //   thin exterior trim). Coordinates are local; spanW/spanH = clear
-          //   opening size; (cx,cy,cz) its centre. Deterministic per-window lit.
-          function glazeOpening(cx, cy, cz, spanW, spanH) {
-            // ===== PANE GRID (Sub-idea C: one shot must not shatter a whole wall)
-            // A wide curtain-wall / storefront opening used to be ONE big solid
-            // pane = ONE breakable mesh, so a single round removed the entire
-            // glass wall (owner-filmed). Real mullioned curtain walls are a GRID
-            // of small panes, each its own unit. So we subdivide the opening into
-            // a grid of individual panes on a ~1.5m mullion pitch (the typical
-            // curtain-wall module is 1.5m / 5ft — research: usglassmag / facades-
-            // plus curtain-wall "module" sizing), each a separate addCityGlass
-            // record → cityShatterRay/cityShatter break only the pane(s) hit. A
-            // small opening (≤ one module each way) stays a single pane.
-            const MOD = 1.5;                                  // target pane module (m)
-            // cap the grid so a very wide band can't explode the pane/collider
-            // count (each pane carries a collider). 10×3 max per opening keeps
-            // panes individually breakable while staying bounded on tall towers.
-            const nx = Math.max(1, Math.min(10, Math.round(spanW / MOD)));  // columns
-            const ny = Math.max(1, Math.min(3, Math.round(spanH / MOD)));   // rows up the opening
-            const pw = spanW / nx, ph = spanH / ny;           // per-pane size
-            const t = 0.07;                                   // pane thickness
-            // WINDOW REVEAL DEPTH (reference SkyscraperGenerator: window modules
-            // carry a real reveal). Default the pane 0.01u PROUD of the outer face
-            // (the pre-existing anti-"buried window" seat). With WINDOW_REVEALS_V2
-            // on, RECESS it REV behind the outer face instead: the full-WT sill/
-            // header/jamb boxes already framing the opening become the reveal
-            // returns, so the glass now sits in a real pocket that self-shadows.
-            // The collider rides the pane, still comfortably inside the WT wall.
-            const revealsOn = !(CBZ.CONFIG && CBZ.CONFIG.WINDOW_REVEALS_V2 === false);
-            // MASONRY doubles the reveal: a load-bearing brick or ashlar wall is
-            // genuinely thick, and the deep shadow pocket around a punched window
-            // is the #1 tell that separates real masonry from a painted box.
-            // 0.17 of a 0.40 wall still leaves the pane comfortably inside.
-            const REV = MASONRY ? 0.17 : 0.09;                // reveal depth (m)
-            const paneOff = outSgn * (WT / 2 - (revealsOn ? REV : -0.01));  // face-normal seat of the pane plane
-            for (let gx = 0; gx < nx; gx++) {
-              for (let gy = 0; gy < ny; gy++) {
-                const ox2 = -spanW / 2 + (gx + 0.5) * pw;     // pane offset within the opening
-                const oy2 = -spanH / 2 + (gy + 0.5) * ph;
-                const py = cy + oy2;
-                if (f.horiz) addCityGlass(bgroup, cx + ox2, py, cz + paneOff, pw, ph, t, ox, oz, { solid: true, tint: tintIdx, kind: "clear" }, windows);
-                else addCityGlass(bgroup, cx + paneOff, py, cz + ox2, t, ph, pw, ox, oz, { solid: true, tint: tintIdx, kind: "clear" }, windows);
-              }
-            }
-            // REVEAL LINER: four slim bright returns framing the recessed glass
-            // (top / bottom / jambs), spanning the pocket from the outer face in to
-            // the pane so the reveal reads as depth, not a flat sticker. Pure merged
-            // deco (dbox → flushDeco), cast:false, no collider — draw-call cheap.
-            if (revealsOn && spanW > 0.4 && spanH > 0.4) {
-              const linZc = outSgn * (WT / 2 - REV / 2 - 0.012);   // pocket centre, pulled in so no face is coplanar with the wall (no z-fight)
-              const eb = 0.03;                                 // liner bar thickness on the opening face
-              if (f.horiz) {
-                dbox(cx, cy + spanH / 2 + eb / 2, cz + linZc, spanW + 2 * eb, eb, REV, REVEAL);   // head
-                dbox(cx, cy - spanH / 2 - eb / 2, cz + linZc, spanW + 2 * eb, eb, REV, REVEAL);   // sill
-                dbox(cx - spanW / 2 - eb / 2, cy, cz + linZc, eb, spanH, REV, REVEAL);            // left jamb
-                dbox(cx + spanW / 2 + eb / 2, cy, cz + linZc, eb, spanH, REV, REVEAL);            // right jamb
-              } else {
-                dbox(cx + linZc, cy + spanH / 2 + eb / 2, cz, REV, eb, spanW + 2 * eb, REVEAL);
-                dbox(cx + linZc, cy - spanH / 2 - eb / 2, cz, REV, eb, spanW + 2 * eb, REVEAL);
-                dbox(cx + linZc, cy, cz - spanW / 2 - eb / 2, REV, spanH, eb, REVEAL);
-                dbox(cx + linZc, cy, cz + spanW / 2 + eb / 2, REV, spanH, eb, REVEAL);
-              }
-            }
-            // INTERIOR READABILITY: the room seen through the glass. Deterministic
-            // per-window so the lit set is stable run-to-run. Apartments glow warm
-            // (lamps), offices cool (overheads); ~26% of residential windows lit
-            // at night so a brick block reads inhabited, ~15% for offices.
-            if (CBZ.cityInteriorGlow) {
-              const wx = ox + cx, wz = oz + cz;
-              // LIT-ROOM selection. Legacy: a flat ~26%/15% of windows lit via a
-              // Math.sin hash. FACADES_V2 (default ON): drive it off CBZ.hash01
-              // with a per-BUILDING occupancy bias + a per-FLOOR clustering nudge,
-              // so the night skyline reads as real lit ROOMS — some towers lit up,
-              // some dark, and a busy floor tends to stay lit — instead of uniform
-              // noise. Deterministic per seed (position + floor salt). Flag off →
-              // the legacy Math.sin set, byte-identical.
-              let lit;
-              if (!(CBZ.CONFIG && CBZ.CONFIG.FACADES_V2 === false) && CBZ.hash01) {
-                const occ = 0.10 + CBZ.hash01(ox, oz, 0x71c) * 0.28;        // building occupancy 0.10..0.38
-                const floorLit = CBZ.hash01(ox, oz, 0x33 + k * 101);        // is THIS floor busy?
-                const bias = occ * (0.55 + 0.9 * floorLit);                 // busy floors light more
-                lit = CBZ.hash01(wx + cy * 0.7, wz, 0x5ad + k * 7) < Math.min(0.62, bias);
-              } else {
-                const hsh = Math.abs(Math.sin(wx * 12.9898 + cy * 4.137 + wz * 78.233) * 43758.5453) % 1;
-                lit = hsh < (punched ? 0.26 : 0.15);
-              }
-              // PER-WINDOW BULB TEMPERATURE (reference: warm/cool lit-room spread).
-              // interiorlight.keyFor buckets warm>=0.5 → "warm" vs "cool", so a
-              // hashed per-room draw costs no extra layers. Offices skew cool
-              // (overheads) with a warm-lamp minority; residential skews warm with
-              // a cool TV/fluorescent minority. Position-hashed (+floor salt) so the
-              // night skyline is stable per seed. Off (flag false) = the old fixed
-              // single temperature, byte-identical.
-              let warm = punched ? 0.9 : 0.35;
-              if (!(CBZ.CONFIG && CBZ.CONFIG.WINDOW_REVEALS_V2 === false) && CBZ.hash01) {
-                const warmShare = punched ? 0.72 : 0.28;       // fraction of rooms lit warm
-                warm = CBZ.hash01(wx, wz, 0x3a7 + k * 17) < warmShare ? 0.8 : 0.22;
-              }
-              if (lit) _facadeLit++;                            // deterministic tally (gate)
-              CBZ.cityInteriorGlow(bgroup, wx, cy, wz, spanW, spanH, outN, { lit: lit, warm: warm });
-            }
-            // WINDOW AC UNIT (FACADE_AC_UNITS, default OFF — owner-cut: the boxes
-            // covered shop signage). When re-enabled, a hashed minority of
-            // residential windows wear a chunky through-the-wall AC box on the
-            // outer sill. Merged deco (dbox → flushDeco, cast:false, no collider).
-            // Placement is a pure position-hash (CBZ.hash01) — no shared rng()
-            // stream draws — so skipping emission never reorders anything else.
-            if (punched && CBZ.CONFIG && CBZ.CONFIG.FACADE_AC_UNITS === true
-                && !(CBZ.CONFIG.FACADES_V2 === false) && CBZ.hash01
-                && spanW > 0.7 && CBZ.hash01(ox + cx, oz + cz, 0x2ac1 + k * 13) < 0.22) {
-              const acW = Math.min(0.9, spanW * 0.66), acH = 0.42, acD = 0.4;   // chunky box
-              const acY = cy - spanH / 2 + acH / 2 + 0.04;                       // seated on the sill
-              const bodyOff = outSgn * (WT / 2 + acD / 2 - 0.04);                // proud of the outer face
-              const ventOff = outSgn * (WT / 2 + acD - 0.05);                    // the grille, a touch further out
-              if (f.horiz) {
-                dbox(cx, acY, cz + bodyOff, acW, acH, acD, 0x9aa0a8);            // AC body
-                dbox(cx, acY, cz + ventOff, acW - 0.12, acH - 0.12, 0.05, 0x5b626b);   // dark vent grille
-              } else {
-                dbox(cx + bodyOff, acY, cz, acD, acH, acW, 0x9aa0a8);
-                dbox(cx + ventOff, acY, cz, 0.05, acH - 0.12, acW - 0.12, 0x5b626b);
-              }
-              _facadeAC++;
-            }
-          }
-
-          if (punched) {
-            // ===== RESIDENTIAL: a row of small CLEAR PUNCHED windows =====
-            // Regular rhythm: a fixed pier (solid brick) between each window so
-            // the wall reads as masonry with windows cut into it, not a glass
-            // band. Window count derives from the face width (≈ one per 3.2m).
-            const span = (f.horiz ? w : d);
-            const margin = 0.7;                       // solid wall at each corner
-            const usable = span - 2 * margin;
-            // WINDOW DENSITY (the owner-filmed blank-wall bug): the count must
-            // TILE the WHOLE face, not stop at a few stranded windows on a wide
-            // wall. Real NYC apartment/loft facades run a regular grid of windows
-            // every ~2.6m of facade (research: chicagobrickco "punched windows",
-            // brownstone/tenement bay spacing ≈ 8-9 ft ≈ 2.5-2.8m). So drop the
-            // old min(6) cap entirely and derive purely from width at a ~2.6m
-            // bay pitch — a 36m loft now gets ~13 windows per floor (was capped
-            // at 6 = the blank-wall read), a 10m brownstone ~3-4. Floor of 1 only
-            // so a tiny shed still gets a window.
-            const BAY = 2.6;                           // facade metres per window bay
-            const nWin = Math.max(1, Math.round(usable / BAY));
-            const cell = usable / nWin;               // each window+pier cell
-            // opening fills more of the bay so the wall reads COVERED in glass,
-            // not dotted with slits; the remaining ~38% of the cell is the brick
-            // pier. Cap at 2.0m so a wide cell still reads as a window, not a band.
-            const winW = Math.min(2.0, cell * 0.68);  // the punched opening width
-            // vertical: a generous sill (apartments aren't floor-to-ceiling) up
-            // to a header lip — a tall-ish punched window, head-height view in.
-            // MSILL/MHDR are shared with veneerBand so the brick veneer always
-            // lands on solid wall and never crosses an opening.
-            const sillH = MSILL, hdrH = MHDR;
-            const winY0 = fy0 + sillH, winY1 = fy1 - hdrH;
-            const winCy = (winY0 + winY1) / 2, winPh = winY1 - winY0;
-            // FRAME the masonry around REAL gaps (never a solid plate — that
-            // would bury the interior-glow room behind brick). Continuous
-            // spandrel below the sill line + header band above, then solid
-            // brick PIERS between each opening. The gaps are where light/room
-            // shows through. Helper places a wall box on the face axis.
-            const faceBox = (centerT, segLen, cy, ch) => {
-              if (segLen <= 0.02) return;
-              if (f.horiz) lbox(centerT, cy, f.z, segLen, ch, f.dd, color, wallOpt);
-              else lbox(f.x, cy, centerT, f.w, ch, segLen, color, wallOpt);
-            };
-            // spandrel (floor → sill) + header (window top → ceiling), full width
-            faceBox(0, span, fy0 + sillH / 2, sillH);
-            faceBox(0, span, fy1 - hdrH / 2, hdrH);
-            // corner margins are solid brick (piers handle the rest)
-            faceBox(-span / 2 + margin / 2, margin, winCy, winPh);
-            faceBox(span / 2 - margin / 2, margin, winCy, winPh);
-            for (let i = 0; i < nWin; i++) {
-              const t = -usable / 2 + (i + 0.5) * cell;   // cell centre on the face axis
-              const cx = f.horiz ? t : f.x;
-              const cz = f.horiz ? f.z : t;
-              // solid brick PIER on each side of this opening (fills the cell
-              // minus the glazed slot) — gives the punched-masonry rhythm.
-              const pierW = (cell - winW) / 2;
-              faceBox(t - winW / 2 - pierW / 2, pierW, winCy, winPh);
-              faceBox(t + winW / 2 + pierW / 2, pierW, winCy, winPh);
-              glazeOpening(cx, winCy, cz, winW, winPh);
-              // ---- PUNCHED-WINDOW DRESSING (the brick-building grammar) ----
-              // A real brick opening carries, from bottom up: a projecting STONE
-              // SILL with a drip nose; brick JAMB reveals; and a head that is
-              // either a flat stone LINTEL or a SEGMENTAL ARCH of header bricks
-              // with a keystone. Which head a building uses is one deterministic
-              // per-building draw (CBZ.hash01, never rng), so a block reads as
-              // one builder's work rather than a random mix window to window.
-              // Everything is merged deco (dbox) — zero extra draw calls.
-              const arched = CBZ.hash01 ? CBZ.hash01(ox, oz, 0x4a2c) < 0.45 : false;
-              const SILLC = TRIM, HEADC = arched ? shadeHex(color, 0.88) : TRIM;
-              if (f.horiz) {
-                const faceZ = f.z + outSgn * (WT / 2 + 0.05);
-                dbox(cx, winY0 - 0.07, faceZ, winW + 0.30, 0.14, 0.16, SILLC);            // stone sill
-                dbox(cx, winY0 - 0.17, faceZ + outSgn * 0.03, winW + 0.22, 0.07, 0.10, shadeHex(SILLC, 0.82));   // drip nose
-                if (arched) {
-                  // five voussoir blocks stepping up to a keystone
-                  for (let v = -2; v <= 2; v++) {
-                    const rise = 0.10 * (2 - Math.abs(v));
-                    dbox(cx + v * (winW / 4.6), winY1 + 0.10 + rise / 2, faceZ,
-                      winW / 4.4, 0.22 + rise, 0.11, HEADC);
-                  }
-                  dbox(cx, winY1 + 0.30, faceZ + outSgn * 0.02, 0.22, 0.34, 0.13, SILLC);  // keystone
-                } else {
-                  dbox(cx, winY1 + 0.10, faceZ, winW + 0.34, 0.18, 0.13, HEADC);           // flat stone lintel
-                  dbox(cx, winY1 + 0.22, faceZ, winW + 0.18, 0.07, 0.09, shadeHex(SILLC, 1.06));
-                }
-                dbox(cx, winCy, faceZ, winW + 0.12, 0.07, 0.06, MULL);          // muntin (horiz bar)
-                dbox(cx, winCy, faceZ, 0.06, winPh, 0.06, MULL);                // muntin (vert bar)
-              } else {
-                const faceX = f.x + outSgn * (WT / 2 + 0.05);
-                dbox(faceX, winY0 - 0.07, cz, 0.16, 0.14, winW + 0.30, SILLC);
-                dbox(faceX + outSgn * 0.03, winY0 - 0.17, cz, 0.10, 0.07, winW + 0.22, shadeHex(SILLC, 0.82));
-                if (arched) {
-                  for (let v = -2; v <= 2; v++) {
-                    const rise = 0.10 * (2 - Math.abs(v));
-                    dbox(faceX, winY1 + 0.10 + rise / 2, cz + v * (winW / 4.6),
-                      0.11, 0.22 + rise, winW / 4.4, HEADC);
-                  }
-                  dbox(faceX + outSgn * 0.02, winY1 + 0.30, cz, 0.13, 0.34, 0.22, SILLC);
-                } else {
-                  dbox(faceX, winY1 + 0.10, cz, 0.13, 0.18, winW + 0.34, HEADC);
-                  dbox(faceX, winY1 + 0.22, cz, 0.09, 0.07, winW + 0.18, shadeHex(SILLC, 1.06));
-                }
-                dbox(faceX, winCy, cz, 0.06, 0.07, winW + 0.12, MULL);
-                dbox(faceX, winCy, cz, 0.06, winPh, 0.06, MULL);
-              }
-            }
-          } else if (civicF) {
-            // ===== CIVIC / GOVERNMENT: ashlar stone, TALL SYMMETRICAL BAYS ====
-            // A courthouse or federal building does not glaze like an office and
-            // does not punch like a tenement: it runs a small number of tall,
-            // evenly-spaced openings separated by full-height engaged PIERS, each
-            // opening capped with a stone architrave and set on a bracketed sill.
-            // The bay count is derived from the face width at a ~4.0m civic pitch
-            // (roughly 13ft, the classic monumental bay), and — crucially — the
-            // bays are laid out SYMMETRICALLY about the face centre, because a
-            // government facade that isn't symmetrical reads instantly wrong.
-            const span = (f.horiz ? w : d);
-            const endPier = Math.max(1.0, span * 0.075);      // heavy corner pier
-            const usableC = span - 2 * endPier;
-            const nBay = Math.max(1, Math.round(usableC / 4.0));
-            const cellC = usableC / nBay;
-            const winW = Math.min(2.6, cellC * 0.56);          // tall, generous opening
-            const sillH = MSILL, hdrH = MHDR;
-            const winY0 = fy0 + sillH, winY1 = fy1 - hdrH;
-            const winCy = (winY0 + winY1) / 2, winPh = winY1 - winY0;
-            const fBoxC = (centerT, segLen, cy, ch) => {
-              if (segLen <= 0.02) return;
-              if (f.horiz) lbox(centerT, cy, f.z, segLen, ch, f.dd, color, wallOpt);
-              else lbox(f.x, cy, centerT, f.w, ch, segLen, color, wallOpt);
-            };
-            fBoxC(0, span, fy0 + sillH / 2, sillH);            // podium/spandrel course
-            fBoxC(0, span, fy1 - hdrH / 2, hdrH);              // frieze course
-            fBoxC(-span / 2 + endPier / 2, endPier, winCy, winPh);
-            fBoxC(span / 2 - endPier / 2, endPier, winCy, winPh);
-            const faceN = f.horiz ? f.z + outSgn * (WT / 2 + 0.05) : f.x + outSgn * (WT / 2 + 0.05);
-            for (let i = 0; i < nBay; i++) {
-              const t = -usableC / 2 + (i + 0.5) * cellC;
-              const cx = f.horiz ? t : f.x, cz = f.horiz ? f.z : t;
-              const pierW = (cellC - winW) / 2;
-              fBoxC(t - winW / 2 - pierW / 2, pierW, winCy, winPh);
-              fBoxC(t + winW / 2 + pierW / 2, pierW, winCy, winPh);
-              glazeOpening(cx, winCy, cz, winW, winPh);
-              // ENGAGED PILASTER on the pier between bays: a shallow flat pier
-              // with a bright reveal, running the full storey, plus a moulded
-              // cap where it meets the frieze. Merged deco — no draw cost.
-              const pw2 = Math.min(0.85, pierW * 0.72);
-              const pT = t + winW / 2 + pierW / 2;
-              if (i < nBay - 1 && pw2 > 0.2) {
-                if (f.horiz) {
-                  dbox(pT, fy0 + FH / 2, faceN, pw2, FH - 0.1, 0.11, PIL);
-                  dbox(pT, fy1 - hdrH - 0.10, faceN, pw2 + 0.24, 0.20, 0.17, TRIM);   // capital
-                  dbox(pT, fy0 + sillH + 0.10, faceN, pw2 + 0.20, 0.16, 0.15, TRIM);  // base
-                } else {
-                  dbox(faceN, fy0 + FH / 2, pT, 0.11, FH - 0.1, pw2, PIL);
-                  dbox(faceN, fy1 - hdrH - 0.10, pT, 0.17, 0.20, pw2 + 0.24, TRIM);
-                  dbox(faceN, fy0 + sillH + 0.10, pT, 0.15, 0.16, pw2 + 0.20, TRIM);
-                }
-              }
-              // ARCHITRAVE + BRACKETED SILL around the opening (stone dressings)
-              if (f.horiz) {
-                dbox(cx, winY1 + 0.13, faceN, winW + 0.56, 0.24, 0.16, TRIM);         // architrave / cornice
-                dbox(cx, winY1 + 0.29, faceN, winW + 0.30, 0.10, 0.20, shadeHex(TRIM, 1.06));
-                dbox(cx, winY0 - 0.10, faceN, winW + 0.44, 0.18, 0.18, TRIM);         // sill slab
-                for (const sg of [-1, 1])
-                  dbox(cx + sg * (winW / 2 - 0.06), winY0 - 0.34, faceN, 0.20, 0.34, 0.16, shadeHex(TRIM, 0.88));  // console brackets
-                for (const sg of [-1, 1])
-                  dbox(cx + sg * (winW / 2 + 0.14), winCy, faceN, 0.14, winPh, 0.10, shadeHex(TRIM, 0.94));        // jamb architrave
-              } else {
-                dbox(faceN, winY1 + 0.13, cz, 0.16, 0.24, winW + 0.56, TRIM);
-                dbox(faceN, winY1 + 0.29, cz, 0.20, 0.10, winW + 0.30, shadeHex(TRIM, 1.06));
-                dbox(faceN, winY0 - 0.10, cz, 0.18, 0.18, winW + 0.44, TRIM);
-                for (const sg of [-1, 1])
-                  dbox(faceN, winY0 - 0.34, cz + sg * (winW / 2 - 0.06), 0.16, 0.34, 0.20, shadeHex(TRIM, 0.88));
-                for (const sg of [-1, 1])
-                  dbox(faceN, winCy, cz + sg * (winW / 2 + 0.14), 0.10, winPh, 0.14, shadeHex(TRIM, 0.94));
-              }
-            }
-          } else if (fortified) {
-            // ===== FORTIFIED: mostly-solid wall + a couple of small high windows
-            // bank/utility read — heavier masonry, but NOT a blank wall: a row
-            // of narrow security windows (tall slots) set high on the storey, on
-            // a wider pier rhythm than residential. Still REAL (clear + glow). We
-            // frame around the gaps so the glow room shows (no buried plate).
-            // (Owner note: nothing should read fully windowless — even a bank has
-            // teller windows; fortified is now "fewer, taller, barred-looking"
-            // rather than "one or two tiny slits on a huge wall".)
-            const span = (f.horiz ? w : d);
-            const margin2 = 0.9;
-            const usable2 = span - 2 * margin2;
-            const nWin = Math.max(1, Math.round(usable2 / 4.2));   // sparser bay (~4.2m) than residential
-            const cell2 = usable2 / nWin;
-            const winW = Math.min(0.95, cell2 * 0.32);  // narrow security slot
-            const winPh = Math.min(2.2, FH * 0.5);      // taller slot (was 0.9)
-            const winCy = fy0 + FH * 0.5 + 0.3;         // mid-high on the wall
-            const slotXs = [];
-            for (let i = 0; i < nWin; i++) slotXs.push(-usable2 / 2 + (i + 0.5) * cell2);
-            const fBox = (centerT, segLen, cy, ch) => {
-              if (segLen <= 0.02) return;
-              if (f.horiz) lbox(centerT, cy, f.z, segLen, ch, f.dd, color, wallOpt);
-              else lbox(f.x, cy, centerT, f.w, ch, segLen, color, wallOpt);
-            };
-            // solid wall everywhere EXCEPT the window band height; in the band,
-            // solid between/around the slots.
-            const bandY0 = winCy - winPh / 2, bandY1 = winCy + winPh / 2;
-            fBox(0, span, fy0 + (bandY0 - fy0) / 2, bandY0 - fy0);     // below band
-            fBox(0, span, bandY1 + (fy1 - bandY1) / 2, fy1 - bandY1);  // above band
-            // brick between/around the slots within the band
-            let prev = -span / 2;
-            for (const t of slotXs) {
-              fBox((prev + (t - winW / 2)) / 2, (t - winW / 2) - prev, winCy, winPh);
-              prev = t + winW / 2;
-            }
-            fBox((prev + span / 2) / 2, span / 2 - prev, winCy, winPh);
-            for (let i = 0; i < nWin; i++) {
-              const t = slotXs[i];
-              const cx = f.horiz ? t : f.x, cz = f.horiz ? f.z : t;
-              glazeOpening(cx, winCy, cz, winW, winPh);
-              if (f.horiz) { const fz = f.z + outSgn * (WT / 2 + 0.05); dbox(cx, winCy - winPh / 2 - 0.06, fz, winW + 0.2, 0.1, 0.12, TRIM); }
-              else { const fx = f.x + outSgn * (WT / 2 + 0.05); dbox(fx, winCy - winPh / 2 - 0.06, cz, 0.12, 0.1, winW + 0.2, TRIM); }
-            }
-          } else {
-            // ===== CLEAN CURTAIN-WALL FACADE (PROCGEN.md #7) ======================
-            // One continuous glazed opening per face, subdivided by the existing
-            // pane grid and hairline mullions below. The old split-terminal pass
-            // position-hashed occasional `balconyWindow` cells, then glued a
-            // 0.55m cantilever and a solid 0.85m rail onto the finished glass.
-            // From the street those read as the repeated black boxes filmed on
-            // Threads & Drip; they had no floor collider, door or usable balcony
-            // behind them. The terminal vocabulary and emitter are gone, so all
-            // districts keep their clean glazing with no side attachments.
-            const sillH = modern ? 0.55 : 0.9;                  // sill top above floor
-            const hdrH = modern ? 0.45 : 0.7;                   // header depth below ceiling
-            const winY0 = fy0 + sillH, winY1 = fy1 - hdrH;
-            const winCy = (winY0 + winY1) / 2, winPh = winY1 - winY0;
-            const jamb = 0.55;                                  // end jambs centre the opening
-            const span = (f.horiz ? w : d) - 2 * jamb;
-            const BAY = 1.5;                                    // facade bay pitch (m) — matches glazeOpening's own pane module
-            const nBays = Math.max(1, Math.min(10, Math.round(span / BAY)));
-            const bayW = span / nBays;
-            if (f.horiz) {
-              lbox(f.x, fy0 + sillH / 2, f.z, f.w, sillH, f.dd, color, wallOpt);   // sill
-              lbox(f.x, fy1 - hdrH / 2, f.z, f.w, hdrH, f.dd, color, wallOpt);     // header
-              lbox(-w / 2 + jamb / 2, winCy, f.z, jamb, winPh, f.dd, color, wallOpt);   // jambs
-              lbox(w / 2 - jamb / 2, winCy, f.z, jamb, winPh, f.dd, color, wallOpt);
-            } else {
-              lbox(f.x, fy0 + sillH / 2, f.z, f.w, sillH, f.dd, color, wallOpt);
-              lbox(f.x, fy1 - hdrH / 2, f.z, f.w, hdrH, f.dd, color, wallOpt);
-              lbox(f.x, winCy, -d / 2 + jamb / 2, f.w, winPh, jamb, color, wallOpt);
-              lbox(f.x, winCy, d / 2 - jamb / 2, f.w, winPh, jamb, color, wallOpt);
-            }
-            // CLEAN-GLASS mullions: hairline vertical reveals on the curtain-wall
-            // module (research: modern all-glass facades minimize framing, mullion
-            // ~5-10mm) — the heavy mid-storey horizontal TRANSOM bar stays dropped.
-            const faceOut = f.horiz ? f.z + outSgn * (WT / 2 + 0.04) : f.x + outSgn * (WT / 2 + 0.04);
-            const gcx = f.horiz ? 0 : f.x, gcz = f.horiz ? f.z : 0;
-            glazeOpening(gcx, winCy, gcz, span - 0.04, winPh);
-            // hairline module ticks at every bay boundary — pure rhythm, cheap
-            // merged deco (dbox), with no geometry projecting off the wall.
-            for (let i = 1; i < nBays; i++) {
-              const tb = -span / 2 + i * bayW;
-              if (f.horiz) dbox(tb, winCy, faceOut, 0.035, winPh, 0.04, MULL);
-              else dbox(faceOut, winCy, tb, 0.04, winPh, 0.035, MULL);
-            }
-            // slim sill/header reveal across the whole face (unchanged)
-            if (f.horiz) {
-              dbox(0, winY0 - 0.04, f.z + outSgn * (WT / 2 + 0.05), span + 0.2, 0.06, 0.08, TRIM);
-              dbox(0, winY1 + 0.04, f.z + outSgn * (WT / 2 + 0.05), span + 0.2, 0.06, 0.08, TRIM);
-            } else {
-              dbox(f.x + outSgn * (WT / 2 + 0.05), winY0 - 0.04, 0, 0.08, 0.06, span + 0.2, TRIM);
-              dbox(f.x + outSgn * (WT / 2 + 0.05), winY1 + 0.04, 0, 0.08, 0.06, span + 0.2, TRIM);
-            }
-          }
-        }
-      }
-    }
-
+    // ============================================================
+    //  THE SKIN, IN ONE PASS (city/facade_openings.js)
+    // ============================================================
+    // The order is the whole fix. A facade grammar used to be laid OVER a
+    // shell that had already decided where its own windows were, so the two
+    // disagreed: the grammar painted dark "glass" panels over the real glass
+    // (1,091 of 1,373 openings covered on a dressed street), and the shell's
+    // reveal liners, sills and corner columns sat in the same planes as its
+    // walls (the flicker). Now:
+    //   1. the facade runs FIRST, recorded, not drawn;
+    //   2. the openings are decided once: where the facade left the wall open
+    //      (facadeOpenings.scan), or the shell's own rhythm when undressed;
+    //   3. the WALL is built round those openings (solidRects), so every
+    //      opening has real reveal faces and nothing is stacked on a wall;
+    //   4. every opening gets the one window (facadeOpenings.window) and the
+    //      street door the one door (facadeOpenings.door);
+    //   5. the facade's boxes are cut out of the openings and drawn, and no
+    //      two surfaces are left in one plane (facadeOpenings.resolveCoplanar).
+    const FO = CBZ.facadeOpenings;
     const slabMinX = ixMin;
     const slabW = ixMax - slabMinX, slabCx = (slabMinX + ixMax) / 2, slabD = izMax - izMin, slabCz = (izMin + izMax) / 2;
+    const rTop = storeys * FH;
+    // FACADE MASSING: parapet height varies per building (0.55..1.05)
+    const pp = 0.55 + vhash * 0.5;
+    const cityRetail = !!(opts.retail && CBZ.game && CBZ.game.mode === "city");
+    const FACES = FO.faces(w, d);
+    const h01b = (salt) => (CBZ.hash01 ? CBZ.hash01(ox, oz, salt) : 0.42);
+    // the wall a face owns: faces 0/1 run corner to corner, faces 2/3 between
+    // them (the corner column belongs to ONE wall, never two)
+    function faceSpan(f) { return f.horiz ? [-w / 2, w / 2] : [-d / 2 + WT, d / 2 - WT]; }
+
+    // ---- WHAT KIND OF STREET DOOR -------------------------------------------
+    const dressDef = DRESS && DRESS.style && CBZ.facadeDef ? CBZ.facadeDef(DRESS.style) : null;
+    const TOWNHOUSE_STYLES = { brickhouse: 1, queenanne: 1, victorian: 1 };
+    const HOUSE_STYLES = { manor: 1, ranch: 1, techhouse: 1, plantation: 1, greekrev: 1, spanish: 1, romanvilla: 1, machiya: 1, desertmod: 1, adobe: 1 };
+    let doorKind;
+    if (opts.garageGround) doorKind = "deck";      // the drive-in bays on every face are its entrances
+    else if (opts.boarded) doorKind = "derelict";
+    else if (opts.showroom || opts.retail) doorKind = "shop";
+    else if (opts.district === "industrial" || opts.industrial) doorKind = "service";
+    else if (dressDef && TOWNHOUSE_STYLES[dressDef.id] && storeys <= 4) doorKind = "townhouse";
+    else if (dressDef && HOUSE_STYLES[dressDef.id]) doorKind = "house";
+    else if (opts.office || FACADE === "office" && storeys >= 6 && !dressDef) doorKind = "office";
+    else if (storeys >= 3) doorKind = "lobby";
+    else doorKind = "house";
+    // the hole: a transom light over the leaf where the storey has the height
+    const DOOR_SILL = 0.13;                       // threshold top (the slab's top is 0.14)
+    const transomDoor = (doorKind === "townhouse" || doorKind === "lobby" || doorKind === "office") && FH >= 3.0;
+    const doorTop = transomDoor ? DOORH + 0.5 : DOORH;
+    const leafTop = DOORH - 0.02;
+    const DOORHALF = DOORW / 2 + 0.75;            // the piers either side carry the lantern and the number
+    const houseNo = opts.houseNumber != null ? opts.houseNumber : FO.houseNumber(ox, oz, doorSide);
+
+    // ---- 1. THE FACADE, RECORDED -------------------------------------------
+    const kitRecs = [];                           // [x, y, z, w, h, d, col] building-local
+    let kitTint = null;                           // the door colour the facade chose
+    function kitRec(x, y, z, bw, bh, bd, col) {
+      if (!(bw > 0) || !(bh > 0) || !(bd > 0) || !Number.isFinite(x + y + z + bw + bh + bd)) return;
+      kitRecs.push([x, y, z, bw, bh, bd, col]);
+    }
+    const veneerRecs = [];                        // the masonry veneer tiles, fixed planes for the resolver
+    let kitDressedDef = null, kitDoorDrawn = false, kitGlass = null;
+    // the facade's glass: the colours it declared (F.glass), or a dark cool panel
+    const kitIsGlass = function (c) { return (kitGlass && kitGlass.has(c >>> 0)) || FO.isGlassHex(c); };
+    let roofCrowned = false, dressedId = null;
+    // the visible wall skin (see THE SKIN). A masonry shell with its textured
+    // veneer: every face is that brick/ashlar; the facade kit overrides below.
+    let skin = null;
+    if (MPAL) {
+      const mk = MPAL.kind === "ashlar" ? "ashlar" : "brick";
+      skin = { faces: [MPAL.wall, MPAL.wall, MPAL.wall, MPAL.wall], hex: MPAL.wall, pattern: mk,
+        kind: mk === "ashlar" ? "rock" : "brick", masonry: VENEER_ON ? MPAL.id : null };
+    }
+    let civicOrderRec = null;
+    {
+      const bhash = (salt) => (CBZ.hash01 ? CBZ.hash01(ox, oz, salt) : 0.42);
+      const addMesh = (geo, col, lx, ly, lz, emissive) => {
+        const mm = emissive ? mat(col, { emissive: col, ei: 0.8 }) : (CBZ.cmat ? CBZ.cmat(col) : mat(col));
+        const m = new THREE.Mesh(geo, mm);
+        m.position.set(lx, ly, lz);
+        m.castShadow = !emissive; m.receiveShadow = true;
+        bgroup.add(m);
+        return m;
+      };
+      const ctxC = {
+        ox, oz, w, d, storeys, FH, WT, rTop, pp, doorSide,
+        // the civic order reports what it actually stood on the front (its
+        // column stations, entablature line, deck) so a host that hangs
+        // things on that front reads the built numbers instead of re-deriving
+        // them in a second file (the drift that floats banners).
+        publishOrder: function (rec) { civicOrderRec = rec; },
+        slabCx, slabCz, slabW, slabD,
+        garageGround: !!opts.garageGround,
+        showroom: !!opts.showroom,
+        civic: civicSpec,
+        // THE FACADE KIT's spec, written at the CALL SITE exactly the way
+        // govcomplex.js writes {crown, order, motto} for the Capitol. Absent on
+        // every existing caller, so the kit is inert until someone asks for it.
+        dress: DRESS || (DRESS === false ? false : null),   // false = explicit opt-out
+        // volumes (building-local {x0,x1,y0,y1,z0,z1}) the facade kit must leave
+        // open: dressFacade re-emits any grammar box through one as the pieces
+        // around it. The mega-tower hands in its executive storey here.
+        keepClear: (function () {
+          const kc = Array.isArray(opts.keepClear) ? opts.keepClear.slice() : [];
+          // THE STOREFRONT BAY. A shop's ground storey on its door face
+          // belongs to the shop: the shell's clear glazing, its door, and the
+          // fascia + awning signAwning hangs on the header band. No grammar
+          // ornament may clad over it — every box a facade lays there is
+          // re-emitted around this volume (corner piers survive, 0.7 m each end).
+          if (opts.storefront === true || (opts.storefront !== false && (opts.retail || opts.showroom))) {
+            const hz = doorSide === 0 || doorSide === 1;
+            const span = hz ? w : d, half = (hz ? d : w) / 2;
+            const sgn = (doorSide === 0 || doorSide === 2) ? -1 : 1;
+            const n0 = sgn > 0 ? half - 0.05 : -half - 40, n1 = sgn > 0 ? half + 40 : -half + 0.05;
+            const t0 = -span / 2 + 0.7, t1 = span / 2 - 0.7;
+            kc.push(hz ? { x0: t0, x1: t1, y0: -1, y1: FH - 0.02, z0: n0, z1: n1 }
+                       : { x0: n0, x1: n1, y0: -1, y1: FH - 0.02, z0: t0, z1: t1 });
+          }
+          return kc.length ? kc : null;
+        })(),
+        pal: MPAL || { wall: color, stone: TRIM, dirt: 0x2a2420, kind: "brick", id: null },
+        color, TRIM, BASE, PIL, MULL,
+        hash: bhash,
+        dbox: kitRec,
+        lbox: kitRec,
+        // the shell's real doorway, so the kit's door carve cuts the hole the
+        // door module frames (a transom door is taller)
+        doorW: DOORW, doorH: doorTop,
+        /* A BODY FOR A DRESSING. dbox trim is merged into one deco mesh per
+           colour, so a facade that draws something you would walk into — a
+           column order on the front walk, cheek walls, a fire escape's hanging
+           flight — had no mesh to measure and no way to say "this is solid"
+           (this ctx is the facade kits' only door to the world). This is that
+           door: a building-local box (same args as dbox) registered as a
+           y-banded collider and filed on the building's own `cols`, so
+           demolition/collapse take it down with the shell. Never a wall to
+           the fracture/breach passes (noBreach); ref-less, so nothing is
+           spared from the batcher on its account. */
+        solid: function (lx, ly, lz, bw, bh, bd, so) {
+          if (!(bw > 0) || !(bd > 0) || !(bh > 0)) return null;
+          const c = { minX: ox + lx - bw / 2, maxX: ox + lx + bw / 2, minZ: oz + lz - bd / 2, maxZ: oz + lz + bd / 2,
+            y0: ly - bh / 2, y1: ly + bh / 2, ref: null, noBreach: true };
+          if (so && so.noCam) c.noCam = true;
+          CBZ.colliders.push(c); cols.push(c);
+          return c;
+        },
+        /* PAINT THE DOOR. The shell hangs the leaf long before a facade runs,
+           and it has no idea what palette that facade is about to put on the
+           walls — so the door was left in one fixed tone for every grammar. A
+           facade knows its own colours, so it gets to pick one: this hands it
+           the leaf and its stiles/rails to tint. The materials are CLONED on
+           first use, because the untinted ones are shared singletons and
+           writing to them would repaint every door in the city. */
+        doorTint: function (leafHex, railHex) { kitTint = [leafHex, railHex]; },
+        // building-local rect → a real walk PLATFORM (mirrored into b.platforms
+        // so demolition can splice it back out). NO collider: a monumental
+        // stair must never be able to seal a building's own front door.
+        plat: function (lx0, lx1, lz0, lz1, top, ramp) {
+          const p = { minX: ox + lx0, maxX: ox + lx1, minZ: oz + lz0, maxZ: oz + lz1, top: top };
+          if (ramp) p.ramp = ramp;
+          CBZ.platforms.push(p); plats.push(p);
+        },
+        ball: function (lx, ly, lz, r, col) { addMesh(new THREE.SphereGeometry(r, 10, 7), col, lx, ly, lz); },
+        // a flagpole and the nation's flag (city/flags.js), building-local
+        flag: function (lx, ly, lz, h, o) {
+          if (!CBZ.flags) return null;
+          return CBZ.flags.pole(bgroup, Object.assign({ x: lx, y: ly, z: lz, height: h, wx: ox + lx, wz: oz + lz }, o || {}));
+        },
+        column: function (lx, ly, lz, r, h, col, seg) {
+          // 12 mm into whatever it stands on and carries: a column's caps never share a plane with a plinth, a slab or an entablature
+          addMesh(new THREE.CylinderGeometry(r, r, h + 0.024, seg || 12), col, lx, ly + h / 2, lz);
+          roundRecs.push([lx - r, lx + r, ly + h + 0.010, ly + h + 0.012, lz - r, lz + r], [lx - r, lx + r, ly - 0.012, ly - 0.010, lz - r, lz + r]);
+        },
+        cone: function (lx, ly, lz, r, h, col) { addMesh(new THREE.ConeGeometry(r, h + 0.012, 14), col, lx, ly + h / 2 - 0.006, lz); roundRecs.push([lx - r, lx + r, ly - 0.012, ly - 0.010, lz - r, lz + r]); },
+        // r128 SphereGeometry(radius, wSeg, hSeg, phiStart, phiLength, thetaStart, thetaLength)
+        // — thetaLength = PI/2 gives the upper hemisphere (a real dome shell).
+        dome: function (lx, ly, lz, r, col) {
+          addMesh(new THREE.SphereGeometry(r, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), col, lx, ly, lz);
+        },
+        lamp: function (lx, ly, lz, r, col) { addMesh(new THREE.SphereGeometry(r, 8, 6), col, lx, ly, lz, true); },
+        // a clock face on one side of a belfry: disc + bezel + two hands
+        disc: function (lx, ly, lz, r, horiz, sg, faceCol, handCol) {
+          const bez = addMesh(new THREE.CylinderGeometry(r * 1.12, r * 1.12, 0.12, 20), handCol, lx, ly, lz);
+          const fc = addMesh(new THREE.CylinderGeometry(r, r, 0.16, 20), faceCol, lx, ly, lz);
+          for (const m of [bez, fc]) { if (horiz) m.rotation.x = Math.PI / 2; else m.rotation.z = Math.PI / 2; }
+          const hOff = horiz ? [0, 0, sg * 0.11] : [sg * 0.11, 0, 0];
+          const hr = addMesh(new THREE.BoxGeometry(horiz ? 0.09 : 0.06, r * 1.15, horiz ? 0.06 : 0.09), handCol,
+            lx + hOff[0], ly + r * 0.34, lz + hOff[2]);
+          const mn = addMesh(new THREE.BoxGeometry(horiz ? r * 1.2 : 0.06, 0.09, horiz ? 0.06 : r * 1.2), handCol,
+            lx + hOff[0], ly - r * 0.12, lz + hOff[2]);
+          hr.castShadow = mn.castShadow = false;
+        },
+        // ---- the ONLY textured (canvas `map`) meshes a building emits, and
+        // only on civic anchors: core/batch.js spares anything with a map, so
+        // this is 2 extra draw calls on ~4-6 buildings city-wide. Deliberate.
+        plaque: function (f, cy, pw, ph, text, stoneHex) {
+          if (!CBZ.civicPlaqueTex || pw < 1.2) return;
+          const halfN = (f.horiz ? d : w) / 2;
+          const m = new THREE.Mesh(new THREE.PlaneGeometry(pw, ph),
+            new THREE.MeshBasicMaterial({ map: CBZ.civicPlaqueTex(text, stoneHex) }));
+          if (f.horiz) { m.position.set(0, cy, f.out * (halfN + 0.38)); m.rotation.y = f.out > 0 ? 0 : Math.PI; }
+          else { m.position.set(f.out * (halfN + 0.38), cy, 0); m.rotation.y = f.out > 0 ? Math.PI / 2 : -Math.PI / 2; }
+          m.renderOrder = 2; bgroup.add(m);
+        },
+        seal: function (f, cy, r, kind) {
+          if (!CBZ.civicSealTex || r < 0.4) return;
+          const halfN = (f.horiz ? d : w) / 2;
+          const m = new THREE.Mesh(new THREE.PlaneGeometry(r * 2, r * 2),
+            new THREE.MeshBasicMaterial({ map: CBZ.civicSealTex(kind), transparent: true }));
+          if (f.horiz) { m.position.set(0, cy, f.out * (halfN + 0.62)); m.rotation.y = f.out > 0 ? 0 : Math.PI; }
+          else { m.position.set(f.out * (halfN + 0.62), cy, 0); m.rotation.y = f.out > 0 ? Math.PI / 2 : -Math.PI / 2; }
+          m.renderOrder = 3; bgroup.add(m);
+        },
+      };
+      /* THE PARCEL LINE. opts.reach = how far past the wall the parcel runs
+         before the footway starts (Gang City: the lot's front setback). All
+         dressing — masonry trim, the civic order and its steps, the facade
+         kit, the door reveal — goes through ctxC, so this one fence keeps
+         every piece of it off the pavement: a box that crosses the line is
+         cut back to it, one wholly outside is dropped, a round piece (column,
+         ball, dome) outside it is dropped, a walk platform is clamped. */
+      if (opts.reach != null && opts.reach >= 0) {
+        const LX = w / 2 + opts.reach, LZ = d / 2 + opts.reach;
+        const clipBox = function (fn) {
+          return function (x, y, z, bw, bh, bd) {
+            const x0 = Math.max(-LX, x - bw / 2), x1 = Math.min(LX, x + bw / 2);
+            const z0 = Math.max(-LZ, z - bd / 2), z1 = Math.min(LZ, z + bd / 2);
+            if (x1 - x0 < 0.02 || z1 - z0 < 0.02) return;
+            const a = Array.prototype.slice.call(arguments);
+            a[0] = (x0 + x1) / 2; a[2] = (z0 + z1) / 2; a[3] = x1 - x0; a[5] = z1 - z0;
+            return fn.apply(this, a);
+          };
+        };
+        const inside = function (x, z, r) { return Math.abs(x) + r <= LX + 1e-3 && Math.abs(z) + r <= LZ + 1e-3; };
+        ctxC.dbox = clipBox(ctxC.dbox);
+        ctxC.lbox = clipBox(ctxC.lbox);
+        ctxC.solid = clipBox(ctxC.solid);
+        for (const nm of ["ball", "column", "cone", "dome", "lamp", "flag"]) {
+          const fn0 = ctxC[nm];
+          ctxC[nm] = function (x, y, z, r) { if (inside(x, z, r || 0)) return fn0.apply(this, arguments); };
+        }
+        const plat0 = ctxC.plat;
+        ctxC.plat = function (x0, x1, z0, z1, top, ramp) {
+          const a0 = Math.max(-LX, x0), a1 = Math.min(LX, x1), b0 = Math.max(-LZ, z0), b1 = Math.min(LZ, z1);
+          if (a1 - a0 < 0.05 || b1 - b0 < 0.05) return;
+          return plat0.call(this, a0, a1, b0, b1, top, ramp);
+        };
+      }
+      if (MASONRY) {
+        // BRICK/STONE VENEER — the spandrel band under every storey's sills plus
+        // the header band under each floor line (never the TOP one: the corbelled
+        // cornice covers it, so those tiles would be pure waste). Bounded by
+        // construction: solid bands only, so brick never crosses a window.
+        if (VENEER_ON) {
+          for (let k = 0; k < storeys; k++) {
+            if (opts.garageGround && k === 0) continue;
+            for (let s = 0; s < 4; s++) {
+              const isFront = (k === 0 && s === doorSide);
+              if (isFront && (opts.showroom || opts.retail)) continue;   // storefront owns that band
+              veneerBand(s, k * FH + 0.12, k * FH + MSILL - 0.05, isFront ? (DOORW / 2 + 0.4) : 0);
+              if (k < storeys - 1) veneerBand(s, (k + 1) * FH - MHDR + 0.06, (k + 1) * FH - 0.10, 0);
+            }
+          }
+        }
+        if (CBZ.bldMasonryDress) CBZ.bldMasonryDress(ctxC);
+        if (CBZ.bldGhostSign && punched) CBZ.bldGhostSign(ctxC);
+      }
+      if (civicF && civicSpec) {
+        if (CBZ.bldCivicOrder) CBZ.bldCivicOrder(ctxC);
+        if (CBZ.bldCivicCrown) CBZ.bldCivicCrown(ctxC);
+      }
+      // ---- THE FACADE KIT (city/facade_kit.js + city/facades/*.js) --------
+      // The generalisation of what govcomplex.js does to this same building:
+      // an object literal at the call site turns the base office shell into a
+      // brick loft / an ashlar bank / a mosque / a pagoda, deriving every
+      // dimension from w, d, storeys, FH and rTop. Emitted here so it lands in
+      // the merged deco buckets below — a dressed building is draw-call equal
+      // to a bare one. Returns the def so we can tell whether it took the roof.
+      // THE SKIN is recorded as the kit paints (see skinNote): every box a
+      // grammar lays on a face, by colour and area.
+      const skinAcc = [new Map(), new Map(), new Map(), new Map()];
+      const hostDbox = ctxC.dbox, hostLbox = ctxC.lbox;
+      ctxC.dbox = function (x, y, z, bw, bh, bd, col) {
+        skinNote(skinAcc, w, d, x, y, z, bw, bh, bd, col);
+        return hostDbox.apply(this, arguments);
+      };
+      ctxC.lbox = function (x, y, z, bw, bh, bd, col) {
+        skinNote(skinAcc, w, d, x, y, z, bw, bh, bd, col);
+        return hostLbox.apply(this, arguments);
+      };
+      const dressed = CBZ.dressFacade ? CBZ.dressFacade(ctxC) : null;
+      kitDressedDef = dressed || null;
+      // the kit's own door reveal brings a threshold of its own
+      kitDoorDrawn = !!(dressed && ctxC.__kitDoor);
+      kitGlass = ctxC.__glass || null;
+      if (dressed) dressedId = dressed.id;
+      ctxC.dbox = hostDbox; ctxC.lbox = hostLbox;
+      if (dressed) {
+        const pk = skinPick(skinAcc, w, d, storeys * FH);
+        if (pk) {
+          const sm = SKIN_OF_STRUCTURE[dressed.structure] || [null, "concrete"];
+          skin = { faces: pk.faces, hex: pk.hex, pattern: sm[0], kind: sm[1], masonry: null };
+        }
+      }
+      // ROOF CLUTTER on every real building (not just masonry) — flat empty
+      // roofs are the second-biggest "this is a box" tell after flat facades.
+      // Skipped on civic anchors: their DOME / CLOCK TOWER already owns the
+      // roof centre, and a water tank next to a courthouse dome is comedy.
+      // Skipped for the same reason when a facade crowned its own roof.
+      // A roof somebody else crowned (a dome, a clock tower, a mansard, a
+      // mosque) is not a plant deck: world/building_dress.js reads this flag
+      // and leaves it alone. Everything else gets its roof plant there, after
+      // the lifts, stashes and helipad have claimed their ground.
+      roofCrowned = !!((civicF && civicSpec) || (dressed && dressed.crownsRoof) || opts.garageGround);
+    }
+
+    const dressedKit = kitDressedDef;
+
+    // ---- 2. THE OPENINGS ------------------------------------------------------
+    // every opening on the shell: { s, k, t0, t1, y0, y1, style, bare, lintel,
+    // arch, broken }. Special fronts (a drive-in deck, a showroom, a shop's
+    // storefront) build their own storey of their own face.
+    function special(f, k) {
+      if (k !== 0) return false;
+      if (opts.garageGround) return true;
+      return f.s === doorSide && (opts.showroom || cityRetail);
+    }
+    const openings = [];
+    const doorBand = function (f, k) { return k === 0 && f.s === doorSide && !opts.garageGround; };
+    // keep a window off the door and its piers: split it round [-DOORHALF, DOORHALF]
+    function pushClear(op, f) {
+      if (doorBand(f, op.k)) {
+        const pieces = [[op.t0, Math.min(op.t1, -DOORHALF)], [Math.max(op.t0, DOORHALF), op.t1]];
+        for (const pc of pieces) if (pc[1] - pc[0] >= 0.6) openings.push(Object.assign({}, op, { t0: pc[0], t1: pc[1] }));
+        return;
+      }
+      openings.push(op);
+    }
+    if (dressedKit) {
+      // WHERE THE FACADE LEFT THE WALL OPEN — the grammar is the author of
+      // its own windows; its painted glass marks them
+      const styleId = FO.styleForStructure(dressedKit.structure, storeys);
+      const found = FO.scan(kitRecs, { w: w, d: d, storeys: storeys, fh: FH, doorSide: doorSide, isGlass: kitIsGlass,
+        doorHalf: opts.garageGround ? 0 : DOORHALF, tower: storeys >= 8,
+        skip: function (f, k) { return special(f, k); } });
+      for (const op of found) {
+        const f = FACES[op.s], sp = faceSpan(f);
+        const t0 = Math.max(op.t0, sp[0] + 0.3), t1 = Math.min(op.t1, sp[1] - 0.3);
+        if (t1 - t0 < 0.45) continue;
+        const k = op.k, y0 = Math.max(op.y0, k * FH + 0.3), y1 = Math.min(op.y1, (k + 1) * FH - 0.3);
+        if (y1 - y0 < 0.45) continue;
+        openings.push({ s: op.s, k: k, t0: t0, t1: t1, y0: y0, y1: y1, style: styleId, bare: op.bare, lintel: false, forced: !!op.forced, reach: op.reach || 0 });
+      }
+      /* A CURTAIN WALL IS ONE OPENING PER STOREY. A glass grammar paints its
+         glass bay by bay between thin fins; read literally that is a framed
+         hole per bay with a strip of wall between each (a tower came out at
+         700 openings, 4x the geometry). Where two openings on a storey are
+         parted by less than 45 cm (a fin, a mullion), they are one opening:
+         the band glazes behind the grammar's fins, which still stand in front
+         of it, and the window's own mullions divide it on the module. */
+      if (styleId === "curtain" || styleId === "industrial") {
+        openings.sort(function (a, b) { return a.s - b.s || a.k - b.k || a.t0 - b.t0; });
+        const merged = [];
+        for (const op of openings) {
+          const m = merged[merged.length - 1];
+          if (m && m.s === op.s && m.k === op.k && op.t0 - m.t1 < 0.45 &&
+              Math.min(m.y1, op.y1) - Math.max(m.y0, op.y0) > 0.7 * Math.min(m.y1 - m.y0, op.y1 - op.y0)) {
+            m.t1 = Math.max(m.t1, op.t1); m.y0 = Math.min(m.y0, op.y0); m.y1 = Math.max(m.y1, op.y1);
+            m.bare = m.bare && op.bare; m.forced = m.forced && op.forced; m.reach = Math.max(m.reach, op.reach);
+            continue;
+          }
+          merged.push(op);
+        }
+        openings.length = 0;
+        for (const op of merged) openings.push(op);
+      }
+    } else {
+      // THE SHELL'S OWN RHYTHM, by what it is built of
+      const arched = h01b(0x4a2c) < 0.45;
+      for (let k = 0; k < storeys; k++) {
+        const fy0 = k * FH, fy1 = fy0 + FH;
+        for (const f of FACES) {
+          if (special(f, k)) continue;
+          const span = f.span;
+          if (opts.boarded) {
+            const margin = 0.7, usable = span - 2 * margin;
+            const nWin = Math.max(1, Math.round(usable / 2.6)), cell = usable / nWin;
+            const winW = Math.min(2.0, cell * 0.62);
+            for (let i = 0; i < nWin; i++) {
+              const t = -usable / 2 + (i + 0.5) * cell;
+              pushClear({ s: f.s, k: k, t0: t - winW / 2, t1: t + winW / 2, y0: fy0 + 1.05, y1: fy1 - 0.7, style: "sash", broken: true }, f);
+            }
+          } else if (punched) {
+            const margin = 0.7, usable = span - 2 * margin;
+            const nWin = Math.max(1, Math.round(usable / 2.6)), cell = usable / nWin;
+            const winW = Math.min(2.0, cell * 0.68);
+            for (let i = 0; i < nWin; i++) {
+              const t = -usable / 2 + (i + 0.5) * cell;
+              pushClear({ s: f.s, k: k, t0: t - winW / 2, t1: t + winW / 2, y0: fy0 + MSILL, y1: fy1 - MHDR, style: "sash", lintel: true, arch: arched }, f);
+            }
+          } else if (civicF) {
+            const endPier = Math.max(1.0, span * 0.075), usable = span - 2 * endPier;
+            const nBay = Math.max(1, Math.round(usable / 4.0)), cell = usable / nBay;
+            const winW = Math.min(2.6, cell * 0.56);
+            for (let i = 0; i < nBay; i++) {
+              const t = -usable / 2 + (i + 0.5) * cell;
+              pushClear({ s: f.s, k: k, t0: t - winW / 2, t1: t + winW / 2, y0: fy0 + MSILL, y1: fy1 - MHDR, style: "civic", lintel: true, civicBay: { cell: cell, pierW: (cell - winW) / 2, last: i === nBay - 1 } }, f);
+            }
+          } else if (fortified) {
+            const margin = 0.9, usable = span - 2 * margin;
+            const nWin = Math.max(1, Math.round(usable / 4.2)), cell = usable / nWin;
+            const winW = Math.min(0.95, cell * 0.32), winPh = Math.min(2.2, FH * 0.5), cy = fy0 + FH * 0.5 + 0.3;
+            for (let i = 0; i < nWin; i++) {
+              const t = -usable / 2 + (i + 0.5) * cell;
+              pushClear({ s: f.s, k: k, t0: t - winW / 2, t1: t + winW / 2, y0: cy - winPh / 2, y1: cy + winPh / 2, style: "security" }, f);
+            }
+          } else {
+            // the curtain wall: one glazed opening per storey per face
+            const sillH = modern ? 0.55 : 0.9, hdrH = modern ? 0.45 : 0.7, jamb = 0.55;
+            pushClear({ s: f.s, k: k, t0: -span / 2 + jamb, t1: span / 2 - jamb, y0: fy0 + sillH, y1: fy1 - hdrH, style: "curtain" }, f);
+          }
+        }
+      }
+    }
+
+    // THE SPECIAL FRONTS — a shop's storefront, a showroom's drive-in bay, the
+    // flagship's parking deck: glazed floor to header, built by the same wall
+    // and the same window as every other opening on the shell
+    const bays = [];                              // open holes with no glass (drive-in)
+    let sideDoor = null;                          // a showroom's personnel door
+    for (const f of FACES) {
+      if (!special(f, 0)) continue;
+      const span = f.span, sp = faceSpan(f), lo = sp[0] + 0.3, hi = sp[1] - 0.3;
+      const flank = function (t0, t1, y1, role) {
+        t0 = Math.max(t0, lo); t1 = Math.min(t1, hi);
+        if (t1 - t0 >= 0.6) openings.push({ s: f.s, k: 0, t0: t0, t1: t1, y0: 0, y1: y1, style: "shop", bare: false, role: role, front: true });
+      };
+      if (opts.garageGround) {
+        const GW = Math.min(5.0, span * 0.52), HDR = FH - 0.85, post = 0.85;
+        bays.push({ s: f.s, t0: -GW / 2, t1: GW / 2, y1: HDR });
+        flank(-span / 2 + post, -GW / 2 - 0.2, HDR, "garage-front");
+        flank(GW / 2 + 0.2, span / 2 - post, HDR, "garage-front");
+      } else if (opts.showroom) {
+        const GW = Math.min(3.6, span * 0.42), HDR = FH - 0.9;
+        bays.push({ s: f.s, t0: -GW / 2, t1: GW / 2, y1: HDR, rollup: true });
+        const L0 = -span / 2 + 0.7, L1 = -GW / 2 - 0.15;
+        if (L1 - L0 > DOORW + 1.1) {
+          // a glazed personnel door in the left flank: the bay is for cars
+          const tc = (L0 + L1) / 2;
+          sideDoor = { s: f.s, t: tc };
+          flank(L0, tc - DOORW / 2 - 0.25, HDR, "showroom");
+          flank(tc + DOORW / 2 + 0.25, L1, HDR, "showroom");
+        } else flank(L0, L1, HDR, "showroom");
+        flank(GW / 2 + 0.15, span / 2 - 0.7, HDR, "showroom");
+      } else {
+        const HDR = FH - 1.0;
+        flank(-span / 2 + 0.7, -DOORW / 2 - 0.3, HDR, "storefront");
+        flank(DOORW / 2 + 0.3, span / 2 - 0.7, HDR, "storefront");
+      }
+    }
+
+    // ---- an industrial building's goods door: a roller shutter on a flank ---
+    let roller = null;
+    if (doorKind === "service" && !opts.garageGround) {
+      const fsI = (doorSide === 0 || doorSide === 1) ? (h01b(0x7b1) < 0.5 ? 2 : 3) : (h01b(0x7b1) < 0.5 ? 0 : 1);
+      const f = FACES[fsI], sp = faceSpan(f);
+      const RW = Math.min(4.2, (sp[1] - sp[0]) - 2.4), RH = Math.min(FH - 0.35, 3.2);
+      if (RW > 2.6) {
+        roller = { s: fsI, t0: -RW / 2, t1: RW / 2, y1: RH };
+        for (let i = openings.length - 1; i >= 0; i--) { const op = openings[i]; if (op.s === fsI && op.k === 0 && op.t1 > roller.t0 - 0.6 && op.t0 < roller.t1 + 0.6) openings.splice(i, 1); }
+      }
+    }
+
+    // ---- 3. THE WALL, BUILT ROUND THE OPENINGS ---------------------------------
+    const wallBoxes = [];                         // [x0,x1,y0,y1,z0,z1] for the resolver
+    const doorHole = (!opts.garageGround && !opts.showroom) ? { s: doorSide, k: 0, t0: -DOORW / 2, t1: DOORW / 2, y0: 0, y1: doorTop, door: true } : null;
+    function wallPiece(f, a0, a1, y0, y1) {
+      const n = f.out * (f.halfN - WT / 2);
+      if (f.horiz) lbox((a0 + a1) / 2, (y0 + y1) / 2, n, a1 - a0, y1 - y0, WT, color, wallOpt);
+      else lbox(n, (y0 + y1) / 2, (a0 + a1) / 2, WT, y1 - y0, a1 - a0, color, wallOpt);
+      const nlo = f.out > 0 ? f.halfN - WT : -f.halfN, nhi = nlo + WT;
+      wallBoxes.push(f.horiz ? [a0, a1, y0, y1, nlo, nhi] : [nlo, nhi, y0, y1, a0, a1]);
+    }
+    const allHoles = [];                          // every hole cut, per face, for the veneer
+    for (let k = 0; k < storeys; k++) {
+      const fy0 = k * FH, fy1 = fy0 + FH;
+      for (const f of FACES) {
+        const holes = [];
+        for (const op of openings) if (op.s === f.s && op.k === k) holes.push({ a0: op.t0, a1: op.t1, y0: op.y0, y1: op.y1 });
+        if (doorHole && k === 0 && f.s === doorSide) holes.push({ a0: doorHole.t0, a1: doorHole.t1, y0: -1, y1: doorTop });
+        if (roller && k === 0 && f.s === roller.s) holes.push({ a0: roller.t0, a1: roller.t1, y0: -1, y1: roller.y1 });
+        if (k === 0) for (const bb of bays) if (bb.s === f.s) holes.push({ a0: bb.t0, a1: bb.t1, y0: -1, y1: bb.y1 });
+        if (k === 0 && sideDoor && sideDoor.s === f.s) holes.push({ a0: sideDoor.t - DOORW / 2, a1: sideDoor.t + DOORW / 2, y0: -1, y1: DOORH });
+        const sp = faceSpan(f);
+        for (const r of FO.solidRects(sp[0], sp[1], fy0, fy1, holes)) wallPiece(f, r[0], r[1], r[2], r[3]);
+        for (const h of holes) allHoles.push({ s: f.s, a0: h.a0, a1: h.a1, y0: h.y0, y1: h.y1 });
+      }
+    }
+    // THE BRICK VENEER, laid only on wall: a tile that would cross an opening
+    // (a window, the door, a transom) is not laid
+    for (const q of veneerQueue) {
+      let hit = false;
+      for (const h of allHoles) {
+        if (h.s !== q.s) continue;
+        if (q.t + q.tw / 2 > h.a0 + 0.01 && q.t - q.tw / 2 < h.a1 - 0.01 && q.cy + q.th / 2 > h.y0 + 0.01 && q.cy - q.th / 2 < h.y1 - 0.01) { hit = true; break; }
+      }
+      if (hit) continue;
+      if (q.horiz) addMasonryTile(bgroup, q.t, q.cy, q.nOff, q.tw, q.th, 0.06, MPAL.id, ox, oz);
+      else addMasonryTile(bgroup, q.nOff, q.cy, q.t, 0.06, q.th, q.tw, MPAL.id, ox, oz);
+      if (q.horiz) veneerRecs.push([q.t - q.tw / 2, q.t + q.tw / 2, q.cy - q.th / 2, q.cy + q.th / 2, q.nOff - 0.03, q.nOff + 0.03]);
+      else veneerRecs.push([q.nOff - 0.03, q.nOff + 0.03, q.cy - q.th / 2, q.cy + q.th / 2, q.t - q.tw / 2, q.t + q.tw / 2]);
+    }
+
+    // ---- 4. THE WINDOWS ------------------------------------------------------
+    // the frame colour is one decision per building, from what it is built of
+    const FRAMES = {
+      curtain: [0x2a2f35, 0x4a4036, 0x8d9399],
+      sash: [0xe9e5da, 0x2f3a33, 0x1f2326, 0x5a2a22],
+      civic: [0x3a3428, 0x2c3238],
+      security: [0x30343a],
+      industrial: [0x2e3338, 0x3c4a3c],
+      house: [0xf1eee6, 0x3a4a5a, 0x2c2c2c],
+    };
+    const framePick = function (st) { const a = FRAMES[st] || FRAMES.curtain; return a[Math.min(a.length - 1, (h01b(0xf4a3) * a.length) | 0)]; };
+    const WPAL = { trim: TRIM, stone: MPAL ? MPAL.stone : shadeHex(TRIM, 1.18) };
+    const trimLocal = [];                         // the module's boxes, building-local, fixed planes for the resolver
+    const E = {
+      dbox: dbox,
+      trim: function (x, y, z, bw, bh, bd, col) {
+        addTrim(bgroup, x, y, z, bw, bh, bd, col, ox, oz);
+        trimLocal.push([x - bw / 2, x + bw / 2, y - bh / 2, y + bh / 2, z - bd / 2, z + bd / 2]);
+      },
+      glass: function (x, y, z, bw, bh, bd, o) {
+        addCityGlass(bgroup, x, y, z, bw, bh, bd, ox, oz, { solid: true, tint: tintIdx, kind: "clear", role: (o && o.role) || "" }, windows);
+      },
+      glow: function (x, y, z, ww, hh, nrm, o) {
+        if (CBZ.cityInteriorGlow) CBZ.cityInteriorGlow(bgroup, ox + x, y, oz + z, ww, hh, nrm, o);
+      },
+      lamp: function (x, y, z, bw, bh, bd, col) { lbox(x, y, z, bw, bh, bd, col, { emissive: col, ei: 0.95, cast: false }); },
+      number: function (x, y, z, nrm, text, hh) { if (CBZ.facadeNumber) CBZ.facadeNumber(bgroup, ox + x, y, oz + z, nrm, text, hh); },
+      plat: function (x0, x1, z0, z1, top) {
+        const p = { minX: ox + x0, maxX: ox + x1, minZ: oz + z0, maxZ: oz + z1, top: top };
+        CBZ.platforms.push(p); plats.push(p);
+      },
+    };
+    // lit rooms at night: a per-building occupancy, busy floors light more
+    function litFor(wx, cy, wz, k) {
+      if (!CBZ.hash01) return false;
+      const occ = 0.10 + CBZ.hash01(ox, oz, 0x71c) * 0.28;
+      const floorLit = CBZ.hash01(ox, oz, 0x33 + k * 101);
+      const bias = occ * (0.55 + 0.9 * floorLit);
+      return CBZ.hash01(wx + cy * 0.7, wz, 0x5ad + k * 7) < Math.min(0.62, bias);
+    }
+    const residential = punched || doorKind === "townhouse" || doorKind === "house" || doorKind === "lobby";
+    for (const op of openings) {
+      const f = FACES[op.s];
+      const S = FO.STYLES[op.style] || FO.STYLES.curtain;
+      if (op.broken) {
+        // a DERELICT's window: the hole is real (you see the gutted room
+        // through it), a weathered frame survives, ~40% are boarded over
+        FO.box(E, f, op.t0, op.t1, op.y1 - 0.06, op.y1, -0.2, -0.12, 0x2b2824);
+        FO.box(E, f, op.t0, op.t1, op.y0, op.y0 + 0.06, -0.2, -0.12, 0x2b2824);
+        FO.box(E, f, op.t0, op.t0 + 0.06, op.y0 + 0.06, op.y1 - 0.06, -0.2, -0.12, 0x2b2824);
+        FO.box(E, f, op.t1 - 0.06, op.t1, op.y0 + 0.06, op.y1 - 0.06, -0.2, -0.12, 0x2b2824);
+        FO.box(E, f, op.t0 - 0.12, op.t1 + 0.12, op.y0 - 0.07, op.y0 + 0.02, -0.12, 0.05, shadeHex(color, 0.8));
+        const wx = ox + (f.horiz ? (op.t0 + op.t1) / 2 : f.out * f.halfN), wz = oz + (f.horiz ? f.out * f.halfN : (op.t0 + op.t1) / 2);
+        const hh = Math.abs(Math.sin(wx * 7.1 + wz * 3.3 + op.y0 * 1.7)) % 1;
+        if (hh < 0.4) {
+          const cy = (op.y0 + op.y1) / 2, ph = op.y1 - op.y0;
+          for (let p = -1; p <= 1; p++) FO.box(E, f, op.t0 - 0.06, op.t1 + 0.06, cy + p * ph * 0.3 - 0.08, cy + p * ph * 0.3 + 0.08, 0.01, 0.06, BOARD);
+        }
+        continue;
+      }
+      const tc = (op.t0 + op.t1) / 2, cy = (op.y0 + op.y1) / 2;
+      const wx = ox + (f.horiz ? tc : f.out * f.halfN), wz = oz + (f.horiz ? f.out * f.halfN : tc);
+      const lit = litFor(wx, cy, wz, op.k);
+      if (lit) _facadeLit++;
+      const warm = CBZ.hash01 ? (CBZ.hash01(wx, wz, 0x3a7 + op.k * 17) < (residential ? 0.72 : 0.28) ? 0.8 : 0.22) : 0.5;
+      FO.window(E, f, op, S, Object.assign({ frame: framePick(op.style) }, WPAL), {
+        sill: op.bare !== false, lintel: !!op.lintel, arch: !!op.arch, archCol: shadeHex(color, 0.88),
+        tint: tintIdx, kind: "clear", role: op.role || "", glow: op.front ? null : { lit: lit, warm: warm },
+      });
+      if (op.civicBay && !op.civicBay.last && op.civicBay.pierW > 0.3 && !(op.k === 0 && f.s === doorSide && Math.abs(op.t1 + op.civicBay.pierW) < DOORHALF + 0.5)) {
+        // an engaged pilaster on the pier between civic bays, standing on the wall
+        const pw2 = Math.min(0.85, op.civicBay.pierW * 0.72), pT = op.t1 + op.civicBay.pierW;
+        const fy0 = op.k * FH;
+        FO.box(E, f, pT - pw2 / 2, pT + pw2 / 2, fy0 + 0.05, fy0 + FH - 0.05, 0, 0.11, PIL);
+        FO.box(E, f, pT - pw2 / 2 - 0.12, pT + pw2 / 2 + 0.12, op.y1 + 0.26, op.y1 + 0.46, 0, 0.17, TRIM);
+      }
+    }
+
+    // ---- 5. THE STREET DOOR ----------------------------------------------------
+    let doorFrontKit = null;
+    // a showroom's drive-in bay: the roll-up shutter wound up in its head
+    for (const bb of bays) {
+      if (!bb.rollup) continue;
+      const f = FACES[bb.s];
+      FO.box(E, f, bb.t0 + 0.05, bb.t1 - 0.05, bb.y1 - 0.42, bb.y1, -0.34, -0.06, 0x8a93a0);
+      for (let i = 0; i < 4; i++) FO.box(E, f, bb.t0 + 0.1, bb.t1 - 0.1, bb.y1 - 0.12 - i * 0.09, bb.y1 - 0.09 - i * 0.09, -0.06, -0.03, 0x6b7480);
+    }
+    if (sideDoor) {
+      const f = FACES[sideDoor.s];
+      const pt = FO.at(f, sideDoor.t, 0, 0, 0, 0, 0);
+      const ld = { x: pt[0], z: pt[2], nx: localDoor.nx, nz: localDoor.nz };
+      const dr = makeDoorPanel(bgroup, ox, oz, ld, DOORW, { recess: FO.DOOR.LEAF_RECESS, y0: 0.155, y1: leafTop, glazed: true });
+      if (dr) doorRecs.push(dr);
+      doorFrontKit = FO.door(E, f, { t: sideDoor.t, w: DOORW, y: DOOR_SILL, top: DOORH, leafTop: leafTop, leafW: DOORW - 0.16, recess: FO.DOOR.LEAF_RECESS, depth: WT * 0.5 },
+        "shop", { number: houseNo, frameCol: 0x24282d, stoneCol: WPAL.stone, light: false, numberOver: true });
+    }
+    if (doorHole) {
+      const f = FACES[doorSide];
+      // every building has its street door; a derelict's is the old one, still
+      // hung (the gang inside comes and goes through it)
+      {
+        const dr = makeDoorPanel(bgroup, ox, oz, localDoor, DOORW, {
+          recess: FO.DOOR.LEAF_RECESS, y0: 0.155, y1: leafTop,
+          double: doorKind === "lobby" || doorKind === "office",
+          glazed: doorKind === "office" || doorKind === "shop",
+          weathered: doorKind === "derelict" });
+        if (dr) doorRecs.push(dr);
+      }
+      doorFrontKit = FO.door(E, f, { t: 0, w: DOORW, y: DOOR_SILL, top: doorTop, leafTop: leafTop, leafW: DOORW - 0.16, recess: FO.DOOR.LEAF_RECESS, depth: WT * 0.5 },
+        doorKind === "derelict" ? "house" : doorKind, {
+          number: doorKind === "derelict" ? null : houseNo,
+          frameCol: doorKind === "derelict" ? 0x2b2824 : (doorKind === "office" || doorKind === "shop" ? 0x24282d : shadeHex(color, 0.45)),
+          numberOver: doorKind === "shop",
+          stoneCol: WPAL.stone, cheekCol: shadeHex(color, 0.92),
+          light: doorKind !== "derelict" && doorKind !== "shop",
+          // a grammar that built its own doorcase and stoop keeps them
+          own: !!(kitDressedDef && kitDressedDef.ownDoor),
+          step: !kitDoorDrawn || doorKind === "townhouse",   // a townhouse always gets its stoop
+          lampSide: (h01b(0x1a3) < 0.5 ? 1 : -1),
+        });
+    }
+    if (roller) {
+      // the shutter: a closed curtain of slats in the reveal, its guides, a
+      // hood box over it, a floodlight and two bollards on the apron
+      const f = FACES[roller.s], t0 = roller.t0, t1 = roller.t1, RH = roller.y1;
+      const SH = 0x7b8086, SDK = 0x5d6268;
+      const oS0 = -0.26, oS1 = -0.2;
+      FO.box(E, f, t0, t1, 0.15, RH, oS0, oS1, SH);      // from the slab's top: never in its face
+      const nS = Math.max(6, Math.round(RH / 0.22));
+      for (let i = 1; i < nS; i++) { const y = RH * i / nS; FO.box(E, f, t0 + 0.02, t1 - 0.02, y - 0.012, y + 0.012, oS1, oS1 + 0.025, SDK); }
+      FO.box(E, f, t0, t0 + 0.1, 0.15, RH, oS1, -0.04, SDK);
+      FO.box(E, f, t1 - 0.1, t1, 0.15, RH, oS1, -0.04, SDK);
+      FO.box(E, f, t0 - 0.2, t1 + 0.2, RH, RH + 0.42, 0, 0.36, SDK);
+      for (const tb of [t0 - 0.45, t1 + 0.45]) FO.box(E, f, tb - 0.09, tb + 0.09, 0, 1.0, 0.25, 0.43, 0xe0b81e);
+      { const bl = FO.at(f, (t0 + t1) / 2, RH + 0.62, 0.2, 0.5, 0.12, 0.2); E.lamp(bl[0], bl[1], bl[2], bl[3], bl[4], bl[5], 0xfff0c8); }
+      const c0 = FO.at(f, (t0 + t1) / 2, RH / 2, (oS0 + oS1) / 2, t1 - t0, RH, 0.3);
+      const c = { minX: ox + c0[0] - c0[3] / 2, maxX: ox + c0[0] + c0[3] / 2, minZ: oz + c0[2] - c0[5] / 2, maxZ: oz + c0[2] + c0[5] / 2, y0: 0, y1: RH, ref: null, noBreach: true };
+      CBZ.colliders.push(c); cols.push(c);
+    }
     // EVERY slab above the foundation is a CARVABLE record (see
     // CBZ.cityCarveShaft): a lift chase and a stair core each open their own
     // hole, in any order, any number of times. floorSlabs = the intermediate
@@ -4484,10 +4470,8 @@
       const rec = slabRecord(sm, plats[plats.length - 1], L * FH - 0.1, isRoof);
       if (isRoof) roofSlab = rec; else floorSlabs.push(rec);
     }
-    const rTop = storeys * FH;
     // FACADE MASSING: parapet height varies per building (0.55..1.05, was a
     // flat 0.7) and a coping lip caps it — rooflines stop reading identical.
-    const pp = 0.55 + vhash * 0.5;
     // PARAPET = the facade wall carried up past the roof, in the facade's own
     // colour (it was one fixed grey band on every building in the city), with
     // a metal coping that oversails both faces, and on the roof side the
@@ -4566,10 +4550,15 @@
     // the textured veneer, all emitted by bldMasonryDress/veneerBand, and a flat
     // painted plinth on top of them would just z-fight the brick.)
     if (!opts.garageGround && !(MASONRY && CBZ.bldMasonryDress)) {
-      if (doorSide !== 0) dbox(0, 0.33, -d / 2 - 0.025, w + 0.1, 0.66, 0.09, BASE);
-      if (doorSide !== 1) dbox(0, 0.33, d / 2 + 0.025, w + 0.1, 0.66, 0.09, BASE);
-      if (doorSide !== 2) dbox(-w / 2 - 0.025, 0.33, 0, 0.09, 0.66, d + 0.1, BASE);
-      if (doorSide !== 3) dbox(w / 2 + 0.025, 0.33, 0, 0.09, 0.66, d + 0.1, BASE);
+      for (const f of FACES) {
+        if (f.s === doorSide) continue;
+        if (roller && roller.s === f.s) continue;
+        let top = 0.66;
+        for (const op of openings) if (op.s === f.s && op.k === 0) top = Math.min(top, op.y0 - 0.12);
+        if (top < 0.2) continue;
+        // from the wall face out (never sunk into it), corner to corner
+        FO.box({ dbox: dbox }, f, -f.span / 2 - 0.05, f.span / 2 + 0.05, 0, top, 0, 0.07, BASE);
+      }
     }
     if (masonryTrim) {
       // corner PILASTERS tying the floors to the parapet line (masonry only)
@@ -4706,261 +4695,33 @@
     // merge). The helper module owns the vocabulary; this block owns the
     // plumbing — a small ctx of closures + the building's real dimensions, so
     // buildings_civic.js never touches the scene graph, colliders or rng.
-    let roofCrowned = false, dressedId = null;
-    // the visible wall skin (see THE SKIN). A masonry shell with its textured
-    // veneer: every face is that brick/ashlar; the facade kit overrides below.
-    let skin = null;
-    if (MPAL) {
-      const mk = MPAL.kind === "ashlar" ? "ashlar" : "brick";
-      skin = { faces: [MPAL.wall, MPAL.wall, MPAL.wall, MPAL.wall], hex: MPAL.wall, pattern: mk,
-        kind: mk === "ashlar" ? "rock" : "brick", masonry: VENEER_ON ? MPAL.id : null };
-    }
-    let civicOrderRec = null;
+    // ---- 6. THE FACADE'S BOXES: out of the openings, then drawn ----------------
+    // (in emission order AFTER the shell's own massing, so where a grammar and
+    // the shell lay a face in one plane the grammar's wins: the resolver at the
+    // flush pulls the shell's back behind it)
     {
-      const bhash = (salt) => (CBZ.hash01 ? CBZ.hash01(ox, oz, salt) : 0.42);
-      const addMesh = (geo, col, lx, ly, lz, emissive) => {
-        const mm = emissive ? mat(col, { emissive: col, ei: 0.8 }) : (CBZ.cmat ? CBZ.cmat(col) : mat(col));
-        const m = new THREE.Mesh(geo, mm);
-        m.position.set(lx, ly, lz);
-        m.castShadow = !emissive; m.receiveShadow = true;
-        bgroup.add(m);
-        return m;
-      };
-      const ctxC = {
-        ox, oz, w, d, storeys, FH, WT, rTop, pp, doorSide,
-        // the civic order reports what it actually stood on the front (its
-        // column stations, entablature line, deck) so a host that hangs
-        // things on that front reads the built numbers instead of re-deriving
-        // them in a second file (the drift that floats banners).
-        publishOrder: function (rec) { civicOrderRec = rec; },
-        slabCx, slabCz, slabW, slabD,
-        garageGround: !!opts.garageGround,
-        showroom: !!opts.showroom,
-        civic: civicSpec,
-        // THE FACADE KIT's spec, written at the CALL SITE exactly the way
-        // govcomplex.js writes {crown, order, motto} for the Capitol. Absent on
-        // every existing caller, so the kit is inert until someone asks for it.
-        dress: DRESS || (DRESS === false ? false : null),   // false = explicit opt-out
-        // volumes (building-local {x0,x1,y0,y1,z0,z1}) the facade kit must leave
-        // open: dressFacade re-emits any grammar box through one as the pieces
-        // around it. The mega-tower hands in its executive storey here.
-        keepClear: (function () {
-          const kc = Array.isArray(opts.keepClear) ? opts.keepClear.slice() : [];
-          // THE STOREFRONT BAY. A shop's ground storey on its door face
-          // belongs to the shop: the shell's clear glazing, its door, and the
-          // fascia + awning signAwning hangs on the header band. No grammar
-          // ornament may clad over it — every box a facade lays there is
-          // re-emitted around this volume (corner piers survive, 0.7 m each end).
-          if (opts.storefront === true || (opts.storefront !== false && (opts.retail || opts.showroom))) {
-            const hz = doorSide === 0 || doorSide === 1;
-            const span = hz ? w : d, half = (hz ? d : w) / 2;
-            const sgn = (doorSide === 0 || doorSide === 2) ? -1 : 1;
-            const n0 = sgn > 0 ? half - 0.05 : -half - 40, n1 = sgn > 0 ? half + 40 : -half + 0.05;
-            const t0 = -span / 2 + 0.7, t1 = span / 2 - 0.7;
-            kc.push(hz ? { x0: t0, x1: t1, y0: -1, y1: FH - 0.02, z0: n0, z1: n1 }
-                       : { x0: n0, x1: n1, y0: -1, y1: FH - 0.02, z0: t0, z1: t1 });
+      const holes = openings.map(function (op) { return { s: op.s, t0: op.t0, t1: op.t1, y0: op.y0, y1: op.y1, forced: !!op.forced, reach: op.reach || 0 }; });
+      if (doorHole) holes.push({ s: doorSide, t0: doorHole.t0, t1: doorHole.t1, y0: 0, y1: doorTop });
+      if (roller) holes.push({ s: roller.s, t0: roller.t0, t1: roller.t1, y0: 0, y1: roller.y1 });
+      if (kitRecs.length) FO.cutRecs(kitRecs, holes, { w: w, d: d, wt: WT, isGlass: kitIsGlass });
+      for (const r of kitRecs) dbox(r[0], r[1], r[2], r[3], r[4], r[5], r[6]);
+      kitRecs.length = 0;
+      if (kitTint) {
+        const leafHex = kitTint[0], railHex = kitTint[1];
+        for (let i = 0; i < doorRecs.length; i++) {
+          const r = doorRecs[i];
+          for (const lf of [r.leaf, r.leaf2]) if (lf && leafHex != null && !r.glazed) {
+            if (!lf.userData.tinted) { lf.material = lf.material.clone(); lf.userData.tinted = true; }
+            lf.material.color.setHex(leafHex);
           }
-          return kc.length ? kc : null;
-        })(),
-        pal: MPAL || { wall: color, stone: TRIM, dirt: 0x2a2420, kind: "brick", id: null },
-        color, TRIM, BASE, PIL, MULL,
-        hash: bhash,
-        dbox: dbox,
-        lbox: lbox,
-        /* A BODY FOR A DRESSING. dbox trim is merged into one deco mesh per
-           colour, so a facade that draws something you would walk into — a
-           column order on the front walk, cheek walls, a fire escape's hanging
-           flight — had no mesh to measure and no way to say "this is solid"
-           (this ctx is the facade kits' only door to the world). This is that
-           door: a building-local box (same args as dbox) registered as a
-           y-banded collider and filed on the building's own `cols`, so
-           demolition/collapse take it down with the shell. Never a wall to
-           the fracture/breach passes (noBreach); ref-less, so nothing is
-           spared from the batcher on its account. */
-        solid: function (lx, ly, lz, bw, bh, bd, so) {
-          if (!(bw > 0) || !(bd > 0) || !(bh > 0)) return null;
-          const c = { minX: ox + lx - bw / 2, maxX: ox + lx + bw / 2, minZ: oz + lz - bd / 2, maxZ: oz + lz + bd / 2,
-            y0: ly - bh / 2, y1: ly + bh / 2, ref: null, noBreach: true };
-          if (so && so.noCam) c.noCam = true;
-          CBZ.colliders.push(c); cols.push(c);
-          return c;
-        },
-        /* PAINT THE DOOR. The shell hangs the leaf long before a facade runs,
-           and it has no idea what palette that facade is about to put on the
-           walls — so the door was left in one fixed tone for every grammar. A
-           facade knows its own colours, so it gets to pick one: this hands it
-           the leaf and its stiles/rails to tint. The materials are CLONED on
-           first use, because the untinted ones are shared singletons and
-           writing to them would repaint every door in the city. */
-        doorTint: function (leafHex, railHex) {
-          for (let i = 0; i < doorRecs.length; i++) {
-            const r = doorRecs[i];
-            if (r.leaf && leafHex != null) {
-              if (!r.leaf.userData.tinted) { r.leaf.material = r.leaf.material.clone(); r.leaf.userData.tinted = true; }
-              r.leaf.material.color.setHex(leafHex);
-            }
-            if (r.rails && railHex != null) {
-              if (!r.rails.userData.tinted) { r.rails.material = r.rails.material.clone(); r.rails.userData.tinted = true; }
-              r.rails.material.color.setHex(railHex);
-            }
-          }
-        },
-        // building-local rect → a real walk PLATFORM (mirrored into b.platforms
-        // so demolition can splice it back out). NO collider: a monumental
-        // stair must never be able to seal a building's own front door.
-        plat: function (lx0, lx1, lz0, lz1, top, ramp) {
-          const p = { minX: ox + lx0, maxX: ox + lx1, minZ: oz + lz0, maxZ: oz + lz1, top: top };
-          if (ramp) p.ramp = ramp;
-          CBZ.platforms.push(p); plats.push(p);
-        },
-        ball: function (lx, ly, lz, r, col) { addMesh(new THREE.SphereGeometry(r, 10, 7), col, lx, ly, lz); },
-        // a flagpole and the nation's flag (city/flags.js), building-local
-        flag: function (lx, ly, lz, h, o) {
-          if (!CBZ.flags) return null;
-          return CBZ.flags.pole(bgroup, Object.assign({ x: lx, y: ly, z: lz, height: h, wx: ox + lx, wz: oz + lz }, o || {}));
-        },
-        column: function (lx, ly, lz, r, h, col, seg) {
-          addMesh(new THREE.CylinderGeometry(r, r, h, seg || 12), col, lx, ly + h / 2, lz);
-        },
-        cone: function (lx, ly, lz, r, h, col) { addMesh(new THREE.ConeGeometry(r, h, 14), col, lx, ly + h / 2, lz); },
-        // r128 SphereGeometry(radius, wSeg, hSeg, phiStart, phiLength, thetaStart, thetaLength)
-        // — thetaLength = PI/2 gives the upper hemisphere (a real dome shell).
-        dome: function (lx, ly, lz, r, col) {
-          addMesh(new THREE.SphereGeometry(r, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), col, lx, ly, lz);
-        },
-        lamp: function (lx, ly, lz, r, col) { addMesh(new THREE.SphereGeometry(r, 8, 6), col, lx, ly, lz, true); },
-        // a clock face on one side of a belfry: disc + bezel + two hands
-        disc: function (lx, ly, lz, r, horiz, sg, faceCol, handCol) {
-          const bez = addMesh(new THREE.CylinderGeometry(r * 1.12, r * 1.12, 0.12, 20), handCol, lx, ly, lz);
-          const fc = addMesh(new THREE.CylinderGeometry(r, r, 0.16, 20), faceCol, lx, ly, lz);
-          for (const m of [bez, fc]) { if (horiz) m.rotation.x = Math.PI / 2; else m.rotation.z = Math.PI / 2; }
-          const hOff = horiz ? [0, 0, sg * 0.11] : [sg * 0.11, 0, 0];
-          const hr = addMesh(new THREE.BoxGeometry(horiz ? 0.09 : 0.06, r * 1.15, horiz ? 0.06 : 0.09), handCol,
-            lx + hOff[0], ly + r * 0.34, lz + hOff[2]);
-          const mn = addMesh(new THREE.BoxGeometry(horiz ? r * 1.2 : 0.06, 0.09, horiz ? 0.06 : r * 1.2), handCol,
-            lx + hOff[0], ly - r * 0.12, lz + hOff[2]);
-          hr.castShadow = mn.castShadow = false;
-        },
-        // ---- the ONLY textured (canvas `map`) meshes a building emits, and
-        // only on civic anchors: core/batch.js spares anything with a map, so
-        // this is 2 extra draw calls on ~4-6 buildings city-wide. Deliberate.
-        plaque: function (f, cy, pw, ph, text, stoneHex) {
-          if (!CBZ.civicPlaqueTex || pw < 1.2) return;
-          const halfN = (f.horiz ? d : w) / 2;
-          const m = new THREE.Mesh(new THREE.PlaneGeometry(pw, ph),
-            new THREE.MeshBasicMaterial({ map: CBZ.civicPlaqueTex(text, stoneHex) }));
-          if (f.horiz) { m.position.set(0, cy, f.out * (halfN + 0.38)); m.rotation.y = f.out > 0 ? 0 : Math.PI; }
-          else { m.position.set(f.out * (halfN + 0.38), cy, 0); m.rotation.y = f.out > 0 ? Math.PI / 2 : -Math.PI / 2; }
-          m.renderOrder = 2; bgroup.add(m);
-        },
-        seal: function (f, cy, r, kind) {
-          if (!CBZ.civicSealTex || r < 0.4) return;
-          const halfN = (f.horiz ? d : w) / 2;
-          const m = new THREE.Mesh(new THREE.PlaneGeometry(r * 2, r * 2),
-            new THREE.MeshBasicMaterial({ map: CBZ.civicSealTex(kind), transparent: true }));
-          if (f.horiz) { m.position.set(0, cy, f.out * (halfN + 0.62)); m.rotation.y = f.out > 0 ? 0 : Math.PI; }
-          else { m.position.set(f.out * (halfN + 0.62), cy, 0); m.rotation.y = f.out > 0 ? Math.PI / 2 : -Math.PI / 2; }
-          m.renderOrder = 3; bgroup.add(m);
-        },
-      };
-      /* THE PARCEL LINE. opts.reach = how far past the wall the parcel runs
-         before the footway starts (Gang City: the lot's front setback). All
-         dressing — masonry trim, the civic order and its steps, the facade
-         kit, the door reveal — goes through ctxC, so this one fence keeps
-         every piece of it off the pavement: a box that crosses the line is
-         cut back to it, one wholly outside is dropped, a round piece (column,
-         ball, dome) outside it is dropped, a walk platform is clamped. */
-      if (opts.reach != null && opts.reach >= 0) {
-        const LX = w / 2 + opts.reach, LZ = d / 2 + opts.reach;
-        const clipBox = function (fn) {
-          return function (x, y, z, bw, bh, bd) {
-            const x0 = Math.max(-LX, x - bw / 2), x1 = Math.min(LX, x + bw / 2);
-            const z0 = Math.max(-LZ, z - bd / 2), z1 = Math.min(LZ, z + bd / 2);
-            if (x1 - x0 < 0.02 || z1 - z0 < 0.02) return;
-            const a = Array.prototype.slice.call(arguments);
-            a[0] = (x0 + x1) / 2; a[2] = (z0 + z1) / 2; a[3] = x1 - x0; a[5] = z1 - z0;
-            return fn.apply(this, a);
-          };
-        };
-        const inside = function (x, z, r) { return Math.abs(x) + r <= LX + 1e-3 && Math.abs(z) + r <= LZ + 1e-3; };
-        ctxC.dbox = clipBox(ctxC.dbox);
-        ctxC.lbox = clipBox(ctxC.lbox);
-        ctxC.solid = clipBox(ctxC.solid);
-        for (const nm of ["ball", "column", "cone", "dome", "lamp", "flag"]) {
-          const fn0 = ctxC[nm];
-          ctxC[nm] = function (x, y, z, r) { if (inside(x, z, r || 0)) return fn0.apply(this, arguments); };
-        }
-        const plat0 = ctxC.plat;
-        ctxC.plat = function (x0, x1, z0, z1, top, ramp) {
-          const a0 = Math.max(-LX, x0), a1 = Math.min(LX, x1), b0 = Math.max(-LZ, z0), b1 = Math.min(LZ, z1);
-          if (a1 - a0 < 0.05 || b1 - b0 < 0.05) return;
-          return plat0.call(this, a0, a1, b0, b1, top, ramp);
-        };
-      }
-      if (MASONRY) {
-        // BRICK/STONE VENEER — the spandrel band under every storey's sills plus
-        // the header band under each floor line (never the TOP one: the corbelled
-        // cornice covers it, so those tiles would be pure waste). Bounded by
-        // construction: solid bands only, so brick never crosses a window.
-        if (VENEER_ON) {
-          for (let k = 0; k < storeys; k++) {
-            if (opts.garageGround && k === 0) continue;
-            for (let s = 0; s < 4; s++) {
-              const isFront = (k === 0 && s === doorSide);
-              if (isFront && (opts.showroom || opts.retail)) continue;   // storefront owns that band
-              veneerBand(s, k * FH + 0.12, k * FH + MSILL - 0.05, isFront ? (DOORW / 2 + 0.4) : 0);
-              if (k < storeys - 1) veneerBand(s, (k + 1) * FH - MHDR + 0.06, (k + 1) * FH - 0.10, 0);
-            }
+          for (const rl of [r.rails, r.rails2]) if (rl && railHex != null) {
+            if (!rl.userData.tinted) { rl.material = rl.material.clone(); rl.userData.tinted = true; }
+            rl.material.color.setHex(railHex);
           }
         }
-        if (CBZ.bldMasonryDress) CBZ.bldMasonryDress(ctxC);
-        if (CBZ.bldGhostSign && punched) CBZ.bldGhostSign(ctxC);
       }
-      if (civicF && civicSpec) {
-        if (CBZ.bldCivicOrder) CBZ.bldCivicOrder(ctxC);
-        if (CBZ.bldCivicCrown) CBZ.bldCivicCrown(ctxC);
-      }
-      // ---- THE FACADE KIT (city/facade_kit.js + city/facades/*.js) --------
-      // The generalisation of what govcomplex.js does to this same building:
-      // an object literal at the call site turns the base office shell into a
-      // brick loft / an ashlar bank / a mosque / a pagoda, deriving every
-      // dimension from w, d, storeys, FH and rTop. Emitted here so it lands in
-      // the merged deco buckets below — a dressed building is draw-call equal
-      // to a bare one. Returns the def so we can tell whether it took the roof.
-      // THE SKIN is recorded as the kit paints (see skinNote): every box a
-      // grammar lays on a face, by colour and area.
-      const skinAcc = [new Map(), new Map(), new Map(), new Map()];
-      const hostDbox = ctxC.dbox, hostLbox = ctxC.lbox;
-      ctxC.dbox = function (x, y, z, bw, bh, bd, col) {
-        skinNote(skinAcc, w, d, x, y, z, bw, bh, bd, col);
-        return hostDbox.apply(this, arguments);
-      };
-      ctxC.lbox = function (x, y, z, bw, bh, bd, col) {
-        skinNote(skinAcc, w, d, x, y, z, bw, bh, bd, col);
-        return hostLbox.apply(this, arguments);
-      };
-      const dressed = CBZ.dressFacade ? CBZ.dressFacade(ctxC) : null;
-      if (dressed) dressedId = dressed.id;
-      ctxC.dbox = hostDbox; ctxC.lbox = hostLbox;
-      if (dressed) {
-        const pk = skinPick(skinAcc, w, d, storeys * FH);
-        if (pk) {
-          const sm = SKIN_OF_STRUCTURE[dressed.structure] || [null, "concrete"];
-          skin = { faces: pk.faces, hex: pk.hex, pattern: sm[0], kind: sm[1], masonry: null };
-        }
-      }
-      // ROOF CLUTTER on every real building (not just masonry) — flat empty
-      // roofs are the second-biggest "this is a box" tell after flat facades.
-      // Skipped on civic anchors: their DOME / CLOCK TOWER already owns the
-      // roof centre, and a water tank next to a courthouse dome is comedy.
-      // Skipped for the same reason when a facade crowned its own roof.
-      // A roof somebody else crowned (a dome, a clock tower, a mansard, a
-      // mosque) is not a plant deck: world/building_dress.js reads this flag
-      // and leaves it alone. Everything else gets its roof plant there, after
-      // the lifts, stashes and helipad have claimed their ground.
-      roofCrowned = !!((civicF && civicSpec) || (dressed && dressed.crownsRoof) || opts.garageGround);
     }
-    flushDeco();
+    flushDeco(structBoxes.concat(veneerRecs, roundRecs, trimLocal));
 
     // PER-FLOOR ARRIVAL HEIGHTS (ground..roof) for the elevator agent's multi-
     // stop logic (elevators.js consumes b.floorTops). Each entry is the exact
@@ -4986,6 +4747,14 @@
       stairPlan: null,                              // where this shell's stair core goes (cityStairPlan), built lazily by elevators.js
       dress: DRESS || (DRESS === false ? false : null),   // the facade-kit spec this shell was built with (false = opted out); structural.js asks facadePick with it
       dressStyle: dressedId,                         // the grammar actually worn (null = bare shell)
+      // THE SKIN (city/facade_openings.js): every opening cut in this shell,
+      // the street door's kind and kit, the house number, and the window
+      // pattern the distance proxy paints (core/farcull.js)
+      openings: openings, doorKind: doorKind, doorKit: doorFrontKit, houseNumber: doorKind === "derelict" ? null : houseNo,
+      facadePattern: FO.pattern(w, d, FH, storeys, openings),
+      // the shell's own surfaces (structure + the window and door modules),
+      // building-local [x0,x1,y0,y1,z0,z1]: planes a later dresser must not share
+      fixedPlanes: structBoxes.concat(veneerRecs, roundRecs, trimLocal, decoFixed),
       reach: opts.reach != null ? opts.reach : null, // parcel depth past the wall (the footway starts there)
       roofCx: ox + slabCx, roofCz: oz + slabCz };   // world centre of the solid roof slab (clear of the -x stairwell)
     // A swinging entrance only speaks when this player caused its cycle or is
@@ -7901,7 +7670,9 @@
   CBZ.cityFlushPools = function () {
     if (pendingGlass.length) buildGlassPools();
     if (pendingDeco.length) buildRoomDecoPools();
+    if (pendingTrim.length) buildTrimPools();
     if (pendingMasonry.length) buildMasonryPools();
+    if (CBZ.facadeNumbersFlush) CBZ.facadeNumbersFlush();
   };
   // the module lists a streamed job writes to (freed with it)
   if (CBZ.streamBus) { CBZ.streamBus(cityGlass, "cityGlass"); CBZ.streamBus(roomDeco, "roomDeco"); CBZ.streamBus(cityDoors, "cityDoors"); }

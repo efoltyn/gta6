@@ -76,7 +76,7 @@
       const MIDT = F.shade(GRAN, 0.80);               // pier flanks, coursing
       const DEEP = F.shade(GRAN, 0.45);               // recesses, soffits
       const BRNZ = F.mix(0x2c241d, GRAN, 0.10);       // window reveals: darkest thing
-      const GLAS = F.mix(0x1a1a1e, GRAN, 0.14);
+      const GLAS = F.glass(ctx, F.mix(0x1a1a1e, GRAN, 0.14));
 
       // ---------------- the four bands ----------------
       // Solved top-down off the roofline so nothing is a metre constant.

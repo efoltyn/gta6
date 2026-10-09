@@ -697,18 +697,13 @@
 
     // ---- CHECKPOINT GATE at the base (west) end of the causeway ----
     const gx = CW_MINX + 6;                               // just inside the base
-    // guard shack
-    box(root, gx, 1.4, CW_MAXZ + 4, 3, 2.8, 3, M.olive);
-    box(root, gx, 2.6, CW_MAXZ + 4, 3.4, 0.3, 3.4, M.oliveD);   // roof
-    // window — OWNER RULE (bda61ab): no gray panes; same clear tinted glass as
-    // every city facade. FRESH material (never cmat(): transparent glass must
-    // stay out of the shared cache, and batch.js skips transparent from merge).
-    const shackWin = new THREE.Mesh(bg(2.6, 1.0, 0.1), new THREE.MeshLambertMaterial({
-      color: 0xbfe9f7, emissive: 0x3f8aa6, emissiveIntensity: 0.5, transparent: true, opacity: 0.6 }));
-    shackWin.position.set(gx, 1.7, CW_MAXZ + 2.5);
-    shackWin.castShadow = false; shackWin.receiveShadow = true;
-    root.add(shackWin);
-    col(gx, CW_MAXZ + 4, 3, 3, 0, 2.8);
+    // guard shack — a real one-room building (the city shell: a door you walk
+    // through, windows set in the wall), not a solid olive box with a pane
+    // pushed half into it and no way in
+    if (CBZ.cityMakeBuilding) {
+      CBZ.cityMakeBuilding(root, gx, CW_MAXZ + 4, 3.6, 3.6, 1, typeof M.olive === "number" ? M.olive : 0x4a5238, 0,
+        { dress: false, stairs: false, facade: "office", houseNumber: 1 });
+    }
     // boom barriers — one raised arm per carriageway at the GATE. THE FLOATING-
     // YELLOW-LINE FIX (owner: "still a floating yellow line at the highway near
     // Fort Brandt"): the old code sized the bar with `w` — the causeway LENGTH

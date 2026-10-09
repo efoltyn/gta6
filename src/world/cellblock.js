@@ -1262,7 +1262,7 @@
     }
     // the glass itself: a plane on the wall face, inside the frame
     const g = new THREE.PlaneGeometry(W - 0.06, H - 0.06);
-    g.translate(x, Y + LIFT, Z + 0.006);
+    g.translate(x, Y + LIFT, Z + 0.015);   // 15 mm off the wall face: never sharing its depth
     GLASS.push(g);
   }
   // wired, lightly frosted safety glass. ONE material for every cell window

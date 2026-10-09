@@ -173,6 +173,21 @@
     "  return mix( l, 2.0 * hw / per, smoothstep( 0.25, 0.6, fw / per ) );",
     "}",
     "float mfFade( float fw, float per ) { return 1.0 - smoothstep( 0.2, 0.55, fw / per ); }",
+    // ONE DIGIT (a brass house number): p in the digit's cell, 0..1 each way,
+    // seven segments lit by the digit's mask (a 1, b 2, c 4, d 8, e 16, f 32, g 64)
+    "float mfSeg( vec2 p, vec2 a, vec2 b ) { vec2 pa = p - a, ba = b - a; float h = clamp( dot( pa, ba ) / dot( ba, ba ), 0.0, 1.0 ); return length( pa - ba * h ); }",
+    "float mfDigit( vec2 p, float d ) {",
+    "  float m = d < 0.5 ? 63.0 : d < 1.5 ? 6.0 : d < 2.5 ? 91.0 : d < 3.5 ? 79.0 : d < 4.5 ? 102.0 : d < 5.5 ? 109.0 : d < 6.5 ? 125.0 : d < 7.5 ? 7.0 : d < 8.5 ? 127.0 : 111.0;",
+    "  float s = 1.0;",
+    "  if ( mfBit( m, 1.0 ) > 0.5 ) s = min( s, mfSeg( p, vec2( 0.2, 0.9 ), vec2( 0.8, 0.9 ) ) );",
+    "  if ( mfBit( m, 2.0 ) > 0.5 ) s = min( s, mfSeg( p, vec2( 0.8, 0.9 ), vec2( 0.8, 0.5 ) ) );",
+    "  if ( mfBit( m, 4.0 ) > 0.5 ) s = min( s, mfSeg( p, vec2( 0.8, 0.5 ), vec2( 0.8, 0.1 ) ) );",
+    "  if ( mfBit( m, 8.0 ) > 0.5 ) s = min( s, mfSeg( p, vec2( 0.2, 0.1 ), vec2( 0.8, 0.1 ) ) );",
+    "  if ( mfBit( m, 16.0 ) > 0.5 ) s = min( s, mfSeg( p, vec2( 0.2, 0.5 ), vec2( 0.2, 0.1 ) ) );",
+    "  if ( mfBit( m, 32.0 ) > 0.5 ) s = min( s, mfSeg( p, vec2( 0.2, 0.9 ), vec2( 0.2, 0.5 ) ) );",
+    "  if ( mfBit( m, 64.0 ) > 0.5 ) s = min( s, mfSeg( p, vec2( 0.2, 0.5 ), vec2( 0.8, 0.5 ) ) );",
+    "  return 1.0 - smoothstep( 0.07, 0.11, s );",
+    "}",
     "vec3 mfPal4( float h, vec3 a, vec3 b, vec3 c, vec3 d ) {",
     "  return h < 0.25 ? a : h < 0.5 ? b : h < 0.75 ? c : d;",
     "}",
@@ -195,6 +210,15 @@
     "  float seed = floor( vMfC.a * 255.0 + 0.5 );",
     "  vec3 N = normalize( vMfN );",
     "  vec3 Vd = normalize( vMfV );",
+    // THE FACE'S OWN FRAME, for the openings' depth (parallax below): the
+    // horizontal tangent u grows along (signed off the screen derivatives),
+    // and how steeply the eye looks into the wall
+    "  vec3 mfT = normalize( vec3( N.z, 0.0, -N.x ) + vec3( 1e-5, 0.0, 0.0 ) );",
+    "  if ( -( dot( dFdx( vMfV ), mfT ) * dFdx( vMfU.x ) + dot( dFdy( vMfV ), mfT ) * dFdy( vMfU.x ) ) < 0.0 ) mfT = -mfT;",
+    "  float mfVn = max( dot( Vd, N ), 0.12 );",
+    "  vec2 mfOff = vec2( dot( Vd, mfT ), Vd.y ) / mfVn;",   // metres walked across the face per metre of depth
+    // the opening this pixel sits in (cell units) and its depth behind the wall
+    "  vec2 oLo = vec2( 2.0 ), oHi = vec2( -1.0 ); float oDep = 0.0;",
     "  float faceId = floor( mod( atan( N.z, N.x ) * 0.63662 + 4.5, 4.0 ) );",
     "  vec3 base = vMfC.rgb * ( 0.93 + 0.14 * mfH( vec3( seed, 3.1, 7.7 ) ) );",
     "  vec3 col = base;",
@@ -256,6 +280,7 @@
     "    wm = mfBox( vec2( cu, cv ), lo, hi, fwc ) * inWin;",
     "    wAvg = ( hi.x - lo.x ) * ( hi.y - lo.y ) * inWin;",
     "    lvl = ( cv - lo.y ) / ( hi.y - lo.y );",
+    "    oLo = lo; oHi = hi; oDep = 0.10;",
     "    float gl = mfBox( vec2( cu, cv ), vec2( mw, 0.0 ), vec2( 1.0 - mw, 1.0 ), fwc );",
     "    glassy = mix( gl, 1.0 - 2.0 * mw, blur ) * step( -0.05, v );",
     "    col = mix( base, base * 1.12, 1.0 - gl );",
@@ -263,6 +288,7 @@
     "    if ( lobby > 0.5 ) litP = 0.9;",
     "  } else if ( mode < 5.5 ) {",                                                 // DECO piers
     "    vec2 lo = vec2( 0.3, 0.14 ), hi = vec2( 0.7, 0.9 );",
+    "    oLo = lo; oHi = hi; oDep = 0.16;",
     "    wm = mfBox( vec2( cu, cv ), lo, hi, fwc ) * inWin;",
     "    wAvg = 0.4 * 0.76 * inWin;",
     "    lvl = ( cv - lo.y ) / ( hi.y - lo.y );",
@@ -290,6 +316,7 @@
     "      else if ( vH > 1.5 && vH < 2.5 ) { lo.y += 0.08; hi.y -= 0.05; }",
     "    }",
     "    fARCH = max( fARCH, step( 2.5, vH ) );",
+    "    oLo = lo; oHi = hi; oDep = mode > 10.5 && mode < 11.5 ? 0.12 : 0.18;",
     "    vec2 p = vec2( cu, cv );",
     "    wm = mfBox( p, lo, hi, fwc );",
     // paired: two lights to a bay, a mullion pier between them
@@ -368,6 +395,7 @@
     "      if ( top > 5.0 ) {",
     "        vec2 lo = vec2( 0.08, top - 2.4 ), hi = vec2( 0.92, top - 1.3 );",
     "        wm = mfBox( vec2( cu, v ), lo, hi, vec2( fwu, fwv ) ) * even;",
+    "        oLo = vec2( lo.x, lo.y / fh ); oHi = vec2( hi.x, hi.y / fh ); oDep = 0.08 * even;",
     "        wAvg = 0.84 * 0.5 * 1.1 / fh;",
     "        lvl = ( v - lo.y ) / 1.1; litP = 0.3; reflK = 0.5;",
     "      }",
@@ -411,6 +439,9 @@
     "      float fw2 = bays * bw * 0.5;",
     "      vec2 dp = vec2( ( um - fw2 ) / 2.4, v / 2.15 - 1.0 );",
     "      float door = mfBox( dp, vec2( -1.0 ), vec2( 1.0 ), vec2( fwum / 2.4, fwv / 2.15 ) );",
+    "      vec2 bq = dp - vec2( mfOff.x / 2.4, mfOff.y / 2.15 ) * 0.2;",
+    "      col = mix( col, base * 0.55, door * ( 1.0 - step( abs( bq.x ), 1.0 ) * step( abs( bq.y ), 1.0 ) ) * ( 1.0 - blur ) );",
+    "      dp = mix( bq, dp, blur );",
     "      float inner = mfBox( dp, vec2( -0.92 ), vec2( 0.92 ), vec2( fwum / 2.4, fwv / 2.15 ) );",
     "      float xb = max( 1.0 - smoothstep( 0.05, 0.09, abs( dp.x - dp.y ) ), 1.0 - smoothstep( 0.05, 0.09, abs( dp.x + dp.y ) ) ) * inner;",
     "      col = mix( col, vec3( 0.9, 0.88, 0.84 ), clamp( door - inner + xb, 0.0, 1.0 ) );",
@@ -457,19 +488,52 @@
     "  }",
     // ---- the door (houses, rows, lobbies, mall entrances) ----
     "  if ( fDOOR > 0.5 && ground > 0.5 && abs( colI - doorBay ) < 0.1 && mode > 4.5 && mode != 15.0 ) {",
-    "    float d0 = mode > 9.5 && mode < 10.5 ? 0.55 : 0.02;",
+    "    float d0 = mode > 9.5 && mode < 10.5 && fSHOP < 0.5 ? 0.55 : 0.02;",
     "    float dw = min( 1.1 / bw, 0.8 ) * 0.5;",
     "    if ( mode > 11.5 && mode < 12.5 ) {",                                         // a mall entrance: a glazed bay
-    "      float ent = mfBox( vec2( cu, v ), vec2( 0.06, 0.02 ), vec2( 0.94, min( top - 0.6, 7.6 ) ), vec2( fwu, fwv ) );",
-    "      wm = max( wm, ent ); litP = 1.0; lvl = v / 7.6; cellH = 0.0;",
+    "      float eTop = min( top - 0.6, 7.6 );",
+    "      float ent = mfBox( vec2( cu, v ), vec2( 0.06, 0.02 ), vec2( 0.94, eTop ), vec2( fwu, fwv ) );",
+    // the glazed entrance stands 20 cm back: its reveal, then mullioned doors
+    "      vec2 eq = vec2( cu, v ) - vec2( mfOff.x / bw, mfOff.y ) * 0.2;",
+    "      float eIn = step( 0.06, eq.x ) * step( eq.x, 0.94 ) * step( 0.02, eq.y ) * step( eq.y, eTop );",
+    "      float eMul = ( 1.0 - smoothstep( 0.02, 0.035, abs( fract( ( eq.x - 0.06 ) / 0.22 + 0.5 ) - 0.5 ) * 0.22 * bw ) ) * ( 1.0 - blur );",
+    "      col = mix( col, base * 0.6, ent * ( 1.0 - eIn ) * ( 1.0 - blur ) );",
+    "      col = mix( col, vec3( 0.16, 0.17, 0.18 ), ent * eIn * eMul );",
+    "      wm = max( wm, ent * mix( eIn * ( 1.0 - eMul ), 1.0, blur ) ); litP = 1.0; lvl = v / 7.6; cellH = 0.0;",
     "    } else {",
     "      float dr = mfBox( vec2( cu, v ), vec2( 0.5 - dw, d0 ), vec2( 0.5 + dw, d0 + 2.25 ), vec2( fwu, fwv ) );",
     "      float dh = mfH( vec3( seed, 17.0, faceId ) );",
     "      vec3 dc = mfPal4( dh, vec3( 0.14, 0.25, 0.18 ), vec3( 0.35, 0.11, 0.11 ), vec3( 0.11, 0.16, 0.27 ), vec3( 0.42, 0.29, 0.19 ) );",
     "      if ( mode > 10.5 && mode < 11.5 && dh > 0.6 ) dc = vec3( 0.86, 0.85, 0.8 );",
     "      if ( vVac > 0.5 ) dc = vec3( 0.5, 0.43, 0.33 );",
-    "      col = mix( col, dc, dr );",
+    // THE DOOR IS SET BACK 15 cm in its opening: where the eye's ray leaves
+    // the opening before it reaches the leaf you see the reveal (jambs in
+    // shadow, the head darker); on the leaf, at its own depth, stiles, rails
+    // and two panels
+    "      vec2 dq = vec2( cu, v ) - vec2( mfOff.x / bw, mfOff.y ) * 0.15;",
+    "      float dIn = step( 0.5 - dw, dq.x ) * step( dq.x, 0.5 + dw ) * step( d0, dq.y ) * step( dq.y, d0 + 2.25 );",
+    "      float dFade = 1.0 - blur;",
+    "      vec3 dRev = base * mix( 0.6, 0.48, step( d0 + 2.25, dq.y ) );",
+    "      vec2 dl = vec2( ( dq.x - ( 0.5 - dw ) ) / ( 2.0 * dw ), ( dq.y - d0 ) / 2.25 );",
+    "      float pan = max( mfBox( dl, vec2( 0.2, 0.1 ), vec2( 0.8, 0.44 ), vec2( 0.02 ) ), mfBox( dl, vec2( 0.2, 0.54 ), vec2( 0.8, 0.88 ), vec2( 0.02 ) ) );",
+    "      vec3 leafC = dc * ( 1.0 - 0.22 * pan * dFade );",
+    // a shop's door is glass in a dark aluminium frame
+    // a shop's door and a glass tower's lobby door are glass in a dark frame
+    "      float glzD = max( fSHOP, step( 3.5, mode ) * step( mode, 4.5 ) );",
+    "      float dGl = glzD * mfBox( dl, vec2( 0.13, 0.1 ), vec2( 0.87, 0.93 ), vec2( 0.02 ) ) * dIn;",
+    "      if ( glzD > 0.5 ) leafC = vec3( 0.15, 0.16, 0.17 );",
+    "      col = mix( col, mix( dRev, leafC, mix( dIn, 1.0, blur ) ), dr );",
     "      wm *= 1.0 - dr;",
+    "      wm = max( wm, dr * dGl * ( 1.0 - blur ) );",
+    // THE HOUSE NUMBER beside a row's or a house's door: two brass digits
+    "      if ( mode > 9.5 && mode < 11.5 && vVac < 0.5 ) {",
+    "        float hn = floor( 2.0 + mfH( vec3( seed, colI, 23.0 + faceId ) ) * 97.0 );",
+    "        float nx0 = 0.5 - dw - 0.05 - 0.2 / bw, ny0 = d0 + 1.62;",
+    "        vec2 np = vec2( ( cu - nx0 ) * bw / 0.1, ( v - ny0 ) / 0.16 );",
+    "        float dg = 0.0;",
+    "        if ( np.y > 0.0 && np.y < 1.0 && np.x > 0.0 && np.x < 2.0 ) dg = mfDigit( vec2( fract( np.x ), np.y ), np.x < 1.0 ? floor( hn / 10.0 ) : mod( hn, 10.0 ) );",
+    "        col = mix( col, vec3( 0.78, 0.62, 0.3 ), dg * ( 1.0 - blur ) );",
+    "      }",
     "      float tr = mfBox( vec2( cu, v ), vec2( 0.5 - dw, d0 + 2.35 ), vec2( 0.5 + dw, d0 + 2.7 ), vec2( fwu, fwv ) ) * step( 9.5, mode ) * step( mode, 10.5 );",
     "      wm = max( wm, tr );",
     "      float sc = mfBox( vec2( cu, v ), vec2( 0.5 + dw + 0.03, d0 + 1.8 ), vec2( 0.5 + dw + 0.03 + 0.16 / bw, d0 + 2.0 ), vec2( fwu, fwv ) );",
@@ -479,8 +543,11 @@
     // ---- a garage door: the whole face ----
     "  if ( fGAR > 0.5 ) {",
     "    float gd = mfBox( vec2( cu, v ), vec2( 0.07, 0.0 ), vec2( 0.93, 2.3 ), vec2( fwu, fwv ) );",
-    "    vec3 gc = vec3( 0.86, 0.85, 0.82 ) * ( 1.0 - 0.14 * mfLine( v, 0.55, 0.02, fwv ) );",
-    "    col = mix( col, gc, gd ); wm = 0.0; wAvg = 0.0;",
+    // the roller door hangs 25 cm back in its opening
+    "    vec2 gq = vec2( cu, v ) - vec2( mfOff.x / bw, mfOff.y ) * 0.25;",
+    "    float gIn = step( 0.07, gq.x ) * step( gq.x, 0.93 ) * step( gq.y, 2.3 );",
+    "    vec3 gc = vec3( 0.86, 0.85, 0.82 ) * ( 1.0 - 0.14 * mfLine( gq.y, 0.55, 0.02, fwv ) );",
+    "    col = mix( col, mix( base * 0.58, gc, mix( gIn, 1.0, blur ) ), gd ); wm = 0.0; wAvg = 0.0;",
     "  }",
     // ---- the clock face (campus tower): no numerals, no text ----
     "  if ( fSPEC > 0.5 && mode > 6.5 && mode < 7.5 ) {",
@@ -495,6 +562,25 @@
     "    col = mix( col, vec3( 0.9, 0.87, 0.78 ), disc );",
     "    col = mix( col, vec3( 0.08 ), clamp( rim + ( hh + mh ) * disc, 0.0, 1.0 ) );",
     "    mfEmit += vec3( 0.95, 0.88, 0.7 ) * disc * ( 1.0 - clamp( rim + hh + mh, 0.0, 1.0 ) ) * 0.7 * uMfNight;",
+    "  }",
+    // ---- THE OPENING HAS DEPTH: the glass and its frame stand oDep behind the
+    //      wall. Follow the eye's ray to the glass plane: where it leaves the
+    //      opening first you are looking at the REVEAL (a jamb, the head in
+    //      shadow, the sill catching the sky); where it reaches the glass, the
+    //      frame round it and the room behind are drawn at the glass's depth.
+    //      Faded to the flat average before it can alias. ----
+    "  if ( oDep > 0.0 && wm > 0.001 && blur < 0.99 ) {",
+    "    vec2 pg = vec2( cu, cv ) - vec2( mfOff.x / bw, mfOff.y / fh ) * oDep;",
+    "    float inX = step( oLo.x, pg.x ) * step( pg.x, oHi.x ), inY = step( oLo.y, pg.y ) * step( pg.y, oHi.y );",
+    "    float rev = ( 1.0 - inX * inY ) * ( 1.0 - blur );",
+    "    float sillF = step( pg.y, oLo.y ), headF = step( oHi.y, pg.y );",
+    "    vec3 rc = base * ( 0.66 + 0.24 * sillF - 0.16 * headF );",
+    "    vec2 fdm = min( pg - oLo, oHi - pg ) * vec2( bw, fh );",
+    "    float frame = ( 1.0 - smoothstep( 0.04, 0.055, min( fdm.x, fdm.y ) ) ) * inX * inY * ( 1.0 - blur );",
+    "    col = mix( col, rc, rev * wm );",
+    "    col = mix( col, vec3( 0.16, 0.17, 0.18 ), frame * wm );",
+    "    wm *= ( 1.0 - rev ) * ( 1.0 - frame );",
+    "    lvl = mix( ( pg.y - oLo.y ) / max( oHi.y - oLo.y, 1e-3 ), lvl, blur );",
     "  }",
     // ---- ground contact grime on every wall ----
     "  col *= mix( 1.0, 0.84 + 0.16 * smoothstep( -0.3, 2.2, v ), wall );",
@@ -1238,7 +1324,7 @@
       const first = k === 0;
       walls(t.x, t.z, t.w / 2, t.d / 2, y0, y1 + par, function (f) {
         bFl = F_OFFICE | (first && b.shop ? F_SHOP : 0);
-        if (first && f === 0 && mode !== M_GLASS) { bFl |= F_DOOR; bDoor = DOOR_MID; }
+        if (first && f === 0) { bFl |= F_DOOR; bDoor = DOOR_MID; }
       });
       parapet(t.x, t.z, t.w / 2, t.d / 2, y1, y1 + par - 0.1, 0.35, b.wall, deck);
       aabb(t.x - t.w / 2, t.x + t.w / 2, t.z - t.d / 2, t.z + t.d / 2, first ? 0 : y0, y1 + par);
@@ -1289,7 +1375,7 @@
     facade(b.wall, b.glass, mode, fh, bay, b.h); bSeed = seed;
     walls(b.x, b.z, hw, hd, FOOT, y1 + par, function (k, len) {
       bFl = (office ? F_OFFICE : 0) | (b.shop && (mask & (1 << k)) ? F_SHOP : 0);
-      if (k === doorFace && mode !== M_GLASS) { bFl |= F_DOOR; bDoor = DOOR_MID; }
+      if (k === doorFace) { bFl |= F_DOOR; bDoor = DOOR_MID; }
     });
     let top = y1 + par;
     if (mans) top = mansardRoof(b.x, b.z, hw, hd, y1 + par, seed, (b.v && b.v.slate) || PAL.slate[(hq(b.x, b.z, 673) * PAL.slate.length) | 0], true);
@@ -1355,7 +1441,8 @@
       const r = Math.min(t.w, t.d) / 2, seg = Math.max(16, Math.min(40, Math.round(2 * Math.PI * r / 1.6)));
       const y0 = k === 0 ? FOOT : GY + t.y0, y1 = GY + t.y1, par = last ? 2.0 : 0.8;
       facade(b.wall, b.glass, M_GLASS, fh, 2 * Math.PI * r / seg, t.y1); bSeed = seed; bBays = seg;
-      bFl = F_OFFICE | (k === 0 && b.shop ? F_SHOP : 0);
+      bFl = F_OFFICE | (k === 0 && b.shop ? F_SHOP : 0) | (k === 0 ? F_DOOR : 0);   // the lobby door, in the first bay
+      if (k === 0) bDoor = 0;
       cylinder(t.x, t.z, r, y0, y1 + par, seg);
       plain(deck, M_DECK);
       dome(t.x, t.z, r, y1 + par, 0.05, seg);
@@ -1413,7 +1500,7 @@
     const hasDoor = !b.shop;
     walls(0, 0, hw, hd, FOOT, mansard ? deckY : parTop, function (k) {
       bFl = painted ? F_SPEC : 0;
-      if (k === 0) { if (b.shop) bFl |= F_SHOP; else { bFl |= F_DOOR; bDoor = DOOR_MID; } }
+      if (k === 0) { bFl |= F_DOOR; bDoor = DOOR_MID; if (b.shop) bFl |= F_SHOP; }
       else if (k === 1 || k === 3) bFl |= F_BLANK;
     });
     let top;
@@ -1449,7 +1536,13 @@
     // stoop to the door, or an awning over the corner shop
     if (hasDoor) {
       plain(0x9a958a);
-      box(0, hd + 0.7, 0.8, 0.7, FOOT, GY + 0.55);
+      box(0, hd + 0.4, 0.8, 0.4, FOOT, GY + 0.55);                       // the landing at the door
+      for (let i = 1; i <= 3; i++) box(0, hd + 0.8 + (i - 0.5) * 0.3, 0.8, 0.15, FOOT, GY + 0.55 - i * 0.18);
+      plain(shade(b.wall, 0.86));
+      for (const sg of [-1, 1]) {
+        box(sg * 0.9, hd + 0.4, 0.1, 0.4, FOOT, GY + 1.25);             // cheek walls with the rail height
+        box(sg * 0.9, hd + 1.25, 0.1, 0.45, FOOT, GY + 0.75);
+      }
     } else {
       awning(0, 0, 0, hw, hd, GY + 2.95, AWNINGS[(hq(b.x, b.z, 813) * AWNINGS.length) | 0]);
     }
@@ -1529,7 +1622,12 @@
     const brush = function () { facade(b.wall, b.glass, mode, fh, bay, hgt); bSeed = seed; };
     brush();
     const saw = b.roof === "saw";
-    walls(b.x, b.z, hw, hd, FOOT, saw ? yE : yE + 0.6, function (k) { bFl = k === 0 ? F_DOCK : 0; });
+    // the street face: loading docks (roller doors) AND a personnel door; a
+    // brick shed has its goods doors on a flank instead
+    walls(b.x, b.z, hw, hd, FOOT, saw ? yE : yE + 0.6, function (k) {
+      bFl = k === 0 ? (brick ? F_DOOR : F_DOCK | F_DOOR) : (brick && k === 2 ? F_GARAGE : 0);
+      if (k === 0) bDoor = brick ? DOOR_MID : 0;
+    });
     let top = yE + 0.6;
     if (saw) {
       const n = Math.max(2, Math.round(b.w / 9)), dx = b.w / n, rise = 2.8;
@@ -1668,7 +1766,7 @@
     frame(0, 0, 0);
     const seed = seedOf(b), hw = b.w / 2, shaftTop = GY + b.h - 9;
     facade(b.wall, 0x2f3a44, M_BRICK, 3.8, hw * 2 / 3, b.h - 9); bSeed = seed; bFl = F_ARCH;
-    walls(b.x, b.z, hw, hw, FOOT, shaftTop);
+    walls(b.x, b.z, hw, hw, FOOT, shaftTop, function (k) { bFl = F_ARCH | (k === 0 ? F_DOOR : 0); if (k === 0) bDoor = DOOR_MID; });
     // the clock stage: one bay a face, a dial centred on each (top = the dial's centre height)
     const sw = hw + 0.6, y0 = shaftTop, y1 = shaftTop + 6.5;
     facade(shade(b.wall, 1.05), 0x2f3a44, M_BRICK, 3.8, sw * 2, y0 + 3.3 - GY); bSeed = seed; bFl = F_SPEC | F_BLANK;
@@ -2090,6 +2188,7 @@
     };
     CBZ.dressFacade(ctx);
     pt.boxes = boxes; pt.rounds = rounds;
+    pt.glass = ctx.__glass || null;             // the colours the grammar declared as glass (F.glass)
   }
 
   // ---- what of it is kept -----------------------------------------------
@@ -2140,7 +2239,7 @@
       const ex = x1 - x0, ey = y1 - y0, ez = z1 - z0, thin = Math.min(ex, ey, ez);
       // GLASS: a dark pane or spandrel laid over an opening. The shader's
       // glass is there already (and reflects, and lights up at night)
-      if (lum8(col) < 0.175 && thin < 0.3 && ex * ey * ez / thin >= 0.45) { KSTAT.glass++; continue; }
+      if (thin < 0.3 && ((pt.glass && pt.glass.has(col)) || (lum8(col) < 0.175 && ex * ey * ez / thin >= 0.45))) { KSTAT.glass++; continue; }
       // inside the footprint in plan: a crown, roof plant, or buried in the
       // shell. The fabric owns the roofline.
       if (x0 >= -hw - e && x1 <= hw + e && z0 >= -hd - e && z1 <= hd + e) { KSTAT.roof++; continue; }

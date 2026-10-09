@@ -237,7 +237,9 @@
       }
       if (!(value > 0)) value = round500(8000 * loc);   // never NaN / zero
 
-      const num = 100 + (((lot.i | 0) * 17 + (lot.j | 0) * 7 + idx * 3) % 89) * 10;
+      // the number on the building's own door (city/facade_openings.js), so the
+      // listing and the brass digits by the front door agree
+      const num = (b && b.houseNumber) || (100 + (((lot.i | 0) * 17 + (lot.j | 0) * 7 + idx * 3) % 89) * 10);
       const street = STREETS[(idx + (lot.i | 0)) % STREETS.length];
       const addr = num + " " + street + (island ? ", Bay Island" : "");
 

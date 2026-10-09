@@ -74,8 +74,8 @@
       const steel = (spec && spec.steelHex) || F.mix(0x2b2622, 0x36302a, ctx.hash(0x4b12));
       const steelL = F.mix(steel, 0x6a6058, 0.34);      // sunlit chord / node
       const steelD = F.shade(steel, 0.62);              // the reveal
-      const glass = F.mix(0x191d20, 0x241d15, ctx.hash(0x7c31));
-      const glassD = F.shade(glass, 0.72);
+      const glass = F.glass(ctx, F.mix(0x191d20, 0x241d15, ctx.hash(0x7c31)));
+      const glassD = F.glass(ctx, F.shade(glass, 0.72));
       const granite = F.mix(0x807f7a, 0x8d8b84, ctx.hash(0x2b70));
       const graniteD = F.shade(granite, 0.72);
 

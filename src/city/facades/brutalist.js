@@ -72,7 +72,7 @@
       const LIT = F.shade(CONC, 1.22);   // a face catching light (hood tops, caps)
       const MID = F.shade(CONC, 0.78);   // reveals
       const DARK = F.shade(CONC, 0.48);  // undersides, recesses
-      const VOID = F.shade(CONC, 0.14);  // glazing behind the reveals
+      const VOID = F.glass(ctx, F.shade(CONC, 0.14));  // glazing behind the reveals
       const STAIN = F.shade(CONC, 0.40); // weathering
 
       // ---- the governing depth. Everything relief-like is a multiple of it.

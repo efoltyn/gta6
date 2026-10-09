@@ -129,7 +129,7 @@
       const STONE_D = F.shade(STONE, 0.60);                      // mortar shadow
       const STEEL = F.mix(0x1d2126, base, 0.08);                 // posts, mullions, beams
       const STEEL_L = F.shade(STEEL, 2.05);                      // the one lit edge of a tube
-      const CLER = F.mix(0x101820, base, 0.06);                  // clerestory glass, deep shade
+      const CLER = F.glass(ctx, F.mix(0x101820, base, 0.06));                  // clerestory glass, deep shade
       const BLOCK = F.shade(BONE, 1.06);                         // painted breeze block
       const CONC = F.shade(F.mix(base, 0xa8a094, 0.55), 0.58);   // paving: up-facing, so darker
       // ONE hot colour, on the door and nowhere else.

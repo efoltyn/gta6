@@ -97,7 +97,7 @@
       // host colour is admitted at 12 percent so a street of these is not one
       // paint chip, and no further.
       const tint = function (base) { return F.mix(base, ctx.color | 0, 0.12); };
-      const GLASS = tint(0x46617d);            // cool blue-silver vision glass
+      const GLASS = F.glass(ctx, tint(0x46617d));            // cool blue-silver vision glass
       const GLASS_L = tint(0x5d7d9a);          // the lit band under each floor line
       const SPAND = tint(0x30435a);            // spandrel: the floor edge
       const VOIDC = tint(0x1c2a38);            // the cut-away plate above a diagonal

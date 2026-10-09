@@ -62,8 +62,8 @@
         accents[(ctx.hash(0x11e1) * accents.length) | 0];
       const frameD = F.shade(frame, 0.82);          // shadow side of the cage
       const frameL = F.shade(frame, 1.08);
-      const glass = F.mix(0x18222c, 0x24303c, ctx.hash(0x2c31));
-      const glassD = F.shade(glass, 0.78);
+      const glass = F.glass(ctx, F.mix(0x18222c, 0x24303c, ctx.hash(0x2c31)));
+      const glassD = F.glass(ctx, F.shade(glass, 0.78));
       const mull = F.mix(frame, 0x3a4149, 0.55);    // slim gasket bars
       const duct = (ctx.hash(0x3d0c) < 0.5) ? 0x2f6fd0 : 0xc9ced4;
       const ductD = F.shade(duct, 0.8);

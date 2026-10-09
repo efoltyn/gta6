@@ -146,7 +146,7 @@
       const SHUT = F.shade(F.mix(SHUTTERS[Math.min(SHUTTERS.length - 1,
         (ctx.hash(0x67a1) * SHUTTERS.length) | 0)], base, 0.10), 0.88);
       const SHUTD = F.shade(SHUT, 0.66);               // the louvre shadows
-      const GLAZ = F.mix(0x131922, PALE, 0.07);        // sidelights, transom, oculus
+      const GLAZ = F.glass(ctx, F.mix(0x131922, PALE, 0.07));        // sidelights, transom, oculus
 
       // ============================================================
       //  2. THE SECTION, SOLVED TOP-DOWN FROM ctx.rTop

@@ -87,7 +87,7 @@
       const BRICK = F.mix(ctx.color, 0x877d70, 0.86);
       const PIER = F.shade(BRICK, 1.14);      // the lit face of a pier
       const SPAND = F.shade(BRICK, 0.62);     // recessed spandrel
-      const VOID = 0x14171c;                  // glazing, the darkest thing here
+      const VOID = F.glass(ctx, 0x14171c);                  // glazing, the darkest thing here
       const NICK = 0x848f9b;                  // nickel steel: cooler than brick
       const NLIT = F.shade(NICK, 1.14);       // arrises catching the sun
       const NDRK = F.shade(NICK, 0.44);       // the shaded side of a course

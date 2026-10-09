@@ -88,7 +88,7 @@
       C.plinth = F.shade(ctx.color, 0.46);
       // leaded glass reads DARK from outside, with a faint warm cast from the
       // painted glass behind it. Never blue - that is a curtain wall.
-      C.glass = F.mix(0x1b1712, 0x33241a, 0.35 + ctx.hash(0x60a1) * 0.25);
+      C.glass = F.glass(ctx, F.mix(0x1b1712, 0x33241a, 0.35 + ctx.hash(0x60a1) * 0.25));
 
       // ---- the ruling grid ----------------------------------------
       const PJb = clamp(unit * 0.085, 0.5, 1.9);      // BUTTRESS projection: deep

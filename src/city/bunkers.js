@@ -691,7 +691,8 @@
       glow(g, cx + s * (DOOR_W / 2 + 0.55), FY + 1.25, faceZ + 0.82, 0.28, 2.5, 0.06, M.warn, 0.25);
       box(g, cx + s * (DOOR_W / 2 + 1.0), FY + 1.25, faceZ + 0.82, 0.28, 2.5, 0.06, M.steelD);
     }
-    glow(g, cx, FY + 3.35, faceZ + 0.86, 1.4, 0.18, 0.1, 0xffe9b0, 0.7);        // door floodlight
+    // the door floodlight hangs UNDER the brow (it sat wholly inside it, unseen)
+    glow(g, cx, FY + 3.16, faceZ + 0.86, 1.4, 0.18, 0.1, 0xffe9b0, 0.7);
     // portal cheeks are solid: the ONLY hole in the face is the door span
     col(cx - (DOOR_W + 4.4) / 2, cx - DOOR_W / 2, faceZ - 0.2, faceZ + 0.9, FY, FY + 3.8);
     col(cx + DOOR_W / 2, cx + (DOOR_W + 4.4) / 2, faceZ - 0.2, faceZ + 0.9, FY, FY + 3.8);

@@ -98,7 +98,7 @@
       const trimD = F.shade(trim, 0.90);
       const slate = F.shade(set[2], 0.55);
       const slateL = F.mix(slate, 0xffffff, 0.07);
-      const glass = F.mix(F.shade(ctx.color, 0.28), 0x1b2430, 0.62);
+      const glass = F.glass(ctx, F.mix(F.shade(ctx.color, 0.28), 0x1b2430, 0.62));
       const iron = F.mix(slate, trim, 0.22);
 
       // ---- the ruling grid ----------------------------------------

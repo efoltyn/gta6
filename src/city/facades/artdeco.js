@@ -66,7 +66,7 @@
       const stone = body;
       const pier = F.shade(body, 1.16);             // pier faces catch the light
       const flute = F.shade(body, 0.94);            // and each flute steps off them
-      const recess = F.shade(body, 0.50);           // spandrel void: a real shadow
+      const recess = F.glass(ctx, F.shade(body, 0.50)); // the field between the piers: the window strip
       const plinth = F.shade(body, 0.34);
       // brass or nickel, chosen by position hash. Pulled only slightly toward
       // the stone — enough to sit in the same daylight, not so much that the
