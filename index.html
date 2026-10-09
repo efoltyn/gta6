@@ -14,13 +14,13 @@
 
 <!-- styles, split by concern -->
 <link rel="stylesheet" href="css/base.css">
-<link rel="stylesheet" href="css/hud.css?v=jailside1001">
+<link rel="stylesheet" href="css/hud.css?v=desk1009c">
 <link rel="stylesheet" href="css/screens.css?v=deathcam1009">
 <link rel="stylesheet" href="css/shark_title.css?v=nored0930">
 <link rel="stylesheet" href="css/mobile.css?v=heli1009">
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
 <link rel="stylesheet" href="css/inventory.css?v=onebar0930">
-<link rel="stylesheet" href="css/city.css?v=verbs2b">
+<link rel="stylesheet" href="css/city.css?v=desk1009c">
 <link rel="stylesheet" href="css/campaign.css?v=neck1001b">
 <link rel="stylesheet" href="css/interact_touch.css?v=jailside1001">
 <link rel="stylesheet" href="css/title_hub.css?v=end1">
@@ -955,7 +955,7 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.prisonFriendOffered), economy.js and killstreaks.js (it wraps both).
      ?cfg_PRISON_FRIENDS=0 → nobody ever offers and the verb never appears. -->
 <script src="src/systems/prisonfriends.js?v=jailv1001"></script>
-<script src="src/systems/interactions.js?v=jailside1001"></script>
+<script src="src/systems/interactions.js?v=desk1009c"></script>
 <!-- A door opened off the clock is noticed (systems/prisondoorwatch.js); after interactions.js (the door registry). -->
 <script src="src/systems/prisondoorwatch.js?v=jailv1001"></script>
 <!-- THE LIFT, AS A MACHINE (no THREE, no DOM): call / go / park, the doors'
@@ -1541,7 +1541,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Reverts: ?cfg_COMPANION_BOARDING_V1=0 (the arcs) ·
      ?cfg_FOLLOWER_ORDERS_V1=0 (the verbs) · ?cfg_CAR_DOOR_ARC=0 (just the
      player's own car door beat, leaving companions boarding). -->
-<script src="src/city/boarding.js?v=po0930"></script>
+<script src="src/city/boarding.js?v=desk1009c"></script>
 <!-- city/pullout.js: THE ONE PULL-OUT VERB. Any human drags whoever sits in
      a stopped car seat out through the real door (CBZ.moves.board beats,
      boarding.js carSpec): the player carjacking, a cop pulling the player or
@@ -1615,11 +1615,11 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- The word on every button is a verb (city/verbword.js CBZ.cityVerbWord);
      before interactions.js, whose row renderer prints through it. -->
 <script src="src/city/verbword.js?v=presverbs1008"></script>
-<script src="src/city/interactions.js?v=verbs2b"></script>
+<script src="src/city/interactions.js?v=desk1009c"></script>
 <!-- THE VERB WHEEL (Q / a touch tap): everything you can do to the thing you
      look at, laid round it; orders about a third person start here. Reads
      city/interactions.js's wheelOf/fireOn. -->
-<script src="src/city/verbwheel.js?v=verbs2b"></script>
+<script src="src/city/verbwheel.js?v=desk1009c"></script>
 <!-- FUEL. The world has been generating "Pump & Go Fuel" lots since long
      before this file — they just had nothing to sell, because no vehicle had
      a tank. Player vehicle only (a hundred NPC cars silently running dry is a
@@ -2376,7 +2376,7 @@ document.body.appendChild(b);}}catch(e){}})();
      other read is feature-detected and lazily retried.
      Revert with ?cfg_PRESIDENCY_V1=0. -->
 <script src="src/city/presidency.js?v=verbs2b"></script>
-<script src="src/city/politics.js?v=custody1009b"></script>
+<script src="src/city/politics.js?v=desk1009c"></script>
 <!-- THE PRESIDENT'S WORLD (2026-09-27 rework) — no HUD strip, no mission
      list, no button console. In load order: the office (desk phone that rings
      with real calls, briefing folders you read on the desk, the TV news, aides
@@ -2385,7 +2385,7 @@ document.body.appendChild(b);}}catch(e){}})();
      and lockdown bodies in the street), and the regime dressing that changes
      the Mansion when the republic falls. Security (the detail, the gate
      checkpoint, counter-snipers, the panic protocol) lives in protection.js. -->
-<script src="src/city/president_office.js?v=phone2b"></script>
+<script src="src/city/president_office.js?v=desk1009c"></script>
 <script src="src/city/motorcade.js?v=presverbs1008"></script>
 <!-- THE PRESIDENT'S PEOPLE: the office comes staffed; Dismiss is on the
      person (or "I need your resignation" by phone) and costs news, approval,
