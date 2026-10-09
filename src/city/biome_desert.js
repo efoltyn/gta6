@@ -737,7 +737,69 @@
       return [m];
     }
     // ---- the TILED bake (WORLD_SCALE_V5) ------------------------------------
+    /* THE STREAMED ERG IS BAKED STRAIGHT INTO ITS RECORDS (memfit, 2026-10).
+       The streamed (phone/tablet) city keeps every tile as a compact record
+       (height per vertex, 8-bit normal and paint: 10 bytes a vertex) and
+       builds the mesh only while the tile is in the keep circle. It used to
+       get there the long way: a full float PlaneGeometry per tile plus a
+       float colour array (437k vertices, ~23 MB), then a 15 MB float
+       concatenation for the bake cache, all of it garbage the moment the
+       records were cut, and all of it at the build's memory peak. Now the
+       field is evaluated once into the records themselves and the cache
+       holds the records ("desert-erg-rec", 4.4 MB). Same maths, same
+       quantisation (round(v * 127), round(c * 255)), so a tile drawn from a
+       record is the tile it always was. The desktop (unstreamed) path below
+       is untouched. */
+    function buildErgRecords() {
+      const T = ERG_TILES, nvT = (GSEG_X + 1) * (GSEG_Z + 1), NV = nvT * T * T;
+      const TW = HX * 2 / T, TD = HZ * 2 / T;
+      let RSIG = null, RB = null;
+      if (CBZ.bakeSig && CBZ.bakeGet) {
+        try {
+          RSIG = CBZ.bakeSig("ergrec|" + CBZ.bakeHash({ MINX: MINX, MINZ: MINZ, HX: HX, HZ: HZ, SX: STEP_X, SZ: STEP_Z, GX: GSEG_X, GZ: GSEG_Z, T: T, GRX: GRID_X, GRZ: GRID_Z, cfg: CFG }));
+          RB = CBZ.bakeGet("desert-erg-rec", RSIG);
+          if (RB && !(RB.y && RB.y.length === NV && RB.n && RB.n.length === NV * 3 && RB.c && RB.c.length === NV * 3)) RB = null;
+        } catch (e) { RSIG = null; RB = null; }
+      }
+      const Y = RB ? RB.y : new Float32Array(NV), Nq = RB ? RB.n : new Int8Array(NV * 3), Cq = RB ? RB.c : new Uint8Array(NV * 3);
+      if (!RB) {
+        const hw = GSEG_X + 3, hh = GSEG_Z + 3;
+        const H = new Float32Array(hw * hh), MG = new Float64Array(hw * hh);
+        const q8 = function (v) { v = Math.round(v * 127); return v < -127 ? -127 : v > 127 ? 127 : v; };
+        const u8 = function (v) { v = Math.round(v * 255); return v < 0 ? 0 : v > 255 ? 255 : v; };
+        for (let tj = 0; tj < T; tj++) for (let ti = 0; ti < T; ti++) {
+          const g0 = ti * GSEG_X, h0 = tj * GSEG_Z, base = (tj * T + ti) * nvT;
+          for (let b = 0; b < hh; b++) {
+            const wz = MINZ + (h0 + b - 1) * STEP_Z;
+            for (let a = 0; a < hw; a++) {
+              H[b * hw + a] = desertHeightAt(MINX + (g0 + a - 1) * STEP_X, wz);
+              MG[b * hw + a] = _lastMesa;
+            }
+          }
+          for (let row = 0; row <= GSEG_Z; row++) for (let col = 0; col <= GSEG_X; col++) {
+            const i = row * (GSEG_X + 1) + col, v = base + i;
+            const wx = MINX + (g0 + col) * STEP_X, wz = MINZ + (h0 + row) * STEP_Z;
+            const hI = (row + 1) * hw + (col + 1), y = H[hI];
+            ergN.set(-(H[hI + 1] - H[hI - 1]) / (2 * STEP_X), 1, -(H[hI + hw] - H[hI - hw]) / (2 * STEP_Z)).normalize();
+            ergVertexColor(wx, wz, y, ergN, ergC, MG[hI]);
+            // (through float32, exactly as the old path read them back off its arrays)
+            Y[v] = y;
+            Nq[v * 3] = q8(Math.fround(ergN.x)); Nq[v * 3 + 1] = q8(Math.fround(ergN.y)); Nq[v * 3 + 2] = q8(Math.fround(ergN.z));
+            Cq[v * 3] = u8(Math.fround(ergC.r)); Cq[v * 3 + 1] = u8(Math.fround(ergC.g)); Cq[v * 3 + 2] = u8(Math.fround(ergC.b));
+          }
+        }
+        if (RSIG && CBZ.bakePut) CBZ.bakePut("desert-erg-rec", RSIG, { y: Y, n: Nq, c: Cq });
+      }
+      for (let k = 0; k < T * T; k++) {
+        const ti = k % T, tj = (k / T) | 0, o = k * nvT;
+        const rec = { y: Y.subarray(o, o + nvT), n: Nq.subarray(o * 3, (o + nvT) * 3), c: Cq.subarray(o * 3, (o + nvT) * 3), g0: ti * GSEG_X, h0: tj * GSEG_Z };
+        const x0 = MINX + rec.g0 * STEP_X, z0 = MINZ + rec.h0 * STEP_Z;
+        CBZ.sliceAt({ minX: x0, maxX: x0 + TW, minZ: z0, maxZ: z0 + TD }, ergJob(rec, nvT, k, T * T), { name: "desert erg " + ti + "," + tj });
+      }
+      return [];
+    }
     function buildErgTiles() {
+      if (CBZ.slice && CBZ.slice.stream && CBZ.sliceAt && CFG.DESERT_TILE_STREAM !== false) return buildErgRecords();
       const out = [];
       const hw = GSEG_X + 3, hh = GSEG_Z + 3;      // halo grid: one ring outside
       const H = new Float32Array(hw * hh);
@@ -812,35 +874,6 @@
       if (!EB && ESIG && CBZ.bakePut && EP.length === out.length) {
         const cat = function (L) { let n = 0; for (const a of L) n += a.length; const o = new Float32Array(n); let k = 0; for (const a of L) { o.set(a, k); k += a.length; } return o; };
         CBZ.bakePut("desert-erg", ESIG, { p: cat(EP), n: cat(EN), c: cat(EC) });
-      }
-      /* THE ERG IS STREAMED LIKE THE CITY (streamed/phone city): a tile is
-         kept as a compact record (height per vertex, 8-bit normal and paint:
-         10 bytes a vertex instead of 44) and becomes a mesh only while it is
-         inside the keep circle (a CBZ.sliceAt job per tile; freed again when
-         the player leaves). The ground under your feet is the height function
-         (registerCityGroundHeight), never these meshes, so physics is
-         unchanged; what is drawn is the same surface, rebuilt exactly. */
-      if (CBZ.slice && CBZ.slice.stream && CBZ.sliceAt && CFG.DESERT_TILE_STREAM !== false) {
-        const TW = HX * 2 / ERG_TILES, TD = HZ * 2 / ERG_TILES;
-        for (let k = 0; k < out.length; k++) {
-          const ti = k % ERG_TILES, tj = (k / ERG_TILES) | 0;
-          const g = out[k].geometry, pa = g.attributes.position.array, na = g.attributes.normal.array, ca = g.attributes.color.array;
-          const nv = pa.length / 3, rec = { y: new Float32Array(nv), n: new Int8Array(nv * 3), c: new Uint8Array(nv * 3), g0: ti * GSEG_X, h0: tj * GSEG_Z };
-          for (let v = 0; v < nv; v++) {
-            rec.y[v] = pa[v * 3 + 1];
-            for (let a = 0; a < 3; a++) {
-              rec.n[v * 3 + a] = Math.max(-127, Math.min(127, Math.round(na[v * 3 + a] * 127)));
-              rec.c[v * 3 + a] = Math.max(0, Math.min(255, Math.round(ca[v * 3 + a] * 255)));
-            }
-          }
-          g.dispose();
-          const x0 = MINX + rec.g0 * STEP_X, z0 = MINZ + rec.h0 * STEP_Z;
-          // (the job is made by ergJob, OUTSIDE this scope: a closure here
-          // would keep every tile's full arrays and the bake alive)
-          CBZ.sliceAt({ minX: x0, maxX: x0 + TW, minZ: z0, maxZ: z0 + TD }, ergJob(rec, nv, k, out.length), { name: "desert erg " + ti + "," + tj });
-        }
-        EP.length = 0; EN.length = 0; EC.length = 0; out.length = 0;
-        return [];
       }
       return out;
     }

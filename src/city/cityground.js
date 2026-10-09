@@ -448,10 +448,42 @@
 
   // Paint every grid parcel into the live splat. Safe to call again (a
   // rebuilt block, a demolition): each parcel's rectangle is repainted whole.
+  /* THE SPLAT KEEPS TWO CHANNELS, NOT EIGHT (memfit, 2026-10). Once a
+     splat is painted and both its textures are on the GPU, the only reader
+     left in JS is coverAt (the grass field): the lawn weight (S.r) and the
+     wear (M.b). Those two bytes a texel stay; the two RGBA arrays (8 MB for
+     the downtown's 1024 splat, 2 MB a town) go. A repaint (a demolition, a
+     rebuilt parcel) brings the full arrays back: every texel the splat ever
+     holds is written by a parcel, so a fresh array repainted whole is the
+     same splat. A lost GL context reloads (CBZ.freedStaticArrays). */
+  function compactSplat(st) {
+    if (st.cg || !st.painted || !st.upS || !st.upM || queue.indexOf(st) >= 0) return;
+    if (CBZ.CONFIG && CBZ.CONFIG.TEX_FREE === false) return;
+    const S = st.S.image.data, M = st.M.image.data, n = st.N * st.N;
+    if (!S || !M) return;
+    const g = new Uint8Array(n), w = new Uint8Array(n);
+    for (let i = 0, j = 0; i < n; i++, j += 4) { g[i] = S[j]; w[i] = M[j + 2]; }
+    st.cg = g; st.cw = w;
+    st.S.image.data = null; st.M.image.data = null;
+    CBZ.freedStaticArrays = true;
+  }
+  function expandSplat(st) {
+    if (!st.cg) return;
+    st.cg = st.cw = null;
+    st.S.image.data = new Uint8Array(st.N * st.N * 4);
+    st.M.image.data = new Uint8Array(st.N * st.N * 4);
+    st.upS = st.upM = false;
+    st.cursor = 0; st.painted = false;
+  }
+  function watchUpload(st) {
+    st.S.onUpdate = function () { st.upS = true; compactSplat(st); };
+    st.M.onUpdate = function () { st.upM = true; compactSplat(st); };
+  }
   function paintLot(state, lot) {
     // the downtown's splat paints the grid parcels out of city.lots; a
     // town's was handed exactly its own parcels
     if (!lot || (state.main && !lot.grid) || !isFinite(lot.cx)) return false;
+    if (state.cg) expandSplat(state);
     const S = state.S.image.data, Mo = state.M.image.data;
     const x0 = state.x0, z0 = state.z0, cell = state.cell, N = state.N;
     const b = lot.building || null;
@@ -494,10 +526,11 @@
   }
   function paint(state) {
     if (!state) return;
+    if (state.cg) expandSplat(state);      // a repaint starts from a clean splat
     const t0 = Date.now();
     let lots = 0;
     for (const lot of state.lots) if (paintLot(state, lot)) lots++;
-    state.S.needsUpdate = true; state.M.needsUpdate = true;
+    state.S.needsUpdate = true; state.M.needsUpdate = true; state.upS = state.upM = false;
     state.painted = true; state.cursor = state.lots.length; state.bIx = null;
     stats.paintMs = Date.now() - t0; stats.paints++; stats.lots = lots;
   }
@@ -552,9 +585,9 @@
       const st = states[k];
       const u = (x - st.x0) / st.cell, v = (z - st.z0) / st.cell;
       if (!(u >= 0 && v >= 0 && u < st.N && v < st.N)) continue;
-      const i = ((v | 0) * st.N + (u | 0)) * 4;
+      const t = (v | 0) * st.N + (u | 0), i = t * 4;
       const S = st.S.image.data, M = st.M.image.data;
-      const g0 = S[i] / 255;
+      const g0 = (st.cg ? st.cg[t] : S[i]) / 255;
       if (g0 < 0.04) { out.g = 0; return true; }
       // the splat is painted 0.8 m past the lot under the footway's back edge
       // (the kerb mesh hides it); a blade must stand on the lot pad itself
@@ -566,7 +599,7 @@
       // and never under a building: the splat's texel (0.3-0.6 m) straddles
       // a wall, the building's own footprint does not
       if (underBuilding(st, x, z)) { out.g = 0; return true; }
-      const wear = M[i + 2] / 255;
+      const wear = (st.cw ? st.cw[t] : M[i + 2]) / 255;
       // the shader's bald rule: wear x a 2.3 m noise through a steep gain
       const wn = wear * (0.55 + 0.9 * cgNoiseJ(x / 2.3 + 9.1, z / 2.3 + 9.1));
       const bald = sm(clamp01((wn - 0.55) / 0.3));
@@ -614,7 +647,7 @@
         paintLot(st, st.lots[st.cursor++]);
         if (Date.now() - t0 >= budget) return;
       }
-      st.S.needsUpdate = true; st.M.needsUpdate = true; st.painted = true;
+      st.S.needsUpdate = true; st.M.needsUpdate = true; st.upS = st.upM = false; st.painted = true;
       stats.paints++;
       queue.shift();
       if (Date.now() - t0 >= budget) return;
@@ -794,6 +827,7 @@
     const S = dataTex(THREE, new Uint8Array(NS * NS * 4), NS, false, true);
     const M = dataTex(THREE, new Uint8Array(NS * NS * 4), NS, false, true);
     const state = { S, M, x0, z0, cell, N: NS, main, lots: ctx.lots || [], districts: ctx.districts || [] };
+    watchUpload(state);
     if (main) { live = state; states = [state]; }     // a new world: the downtown is laid first
     else states.push(state);
     // The landmass pass (order 68) paints once buildings exist; painting the

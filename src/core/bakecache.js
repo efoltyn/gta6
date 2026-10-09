@@ -116,6 +116,12 @@
     if (e && e.sig === sig && VERIFY) { verifyMem.set(key, e); stats.log.push("verify " + key); return null; }
     if (e && e.sig === sig) { stats.hits++; stats.log.push("hit " + key); mem.delete(key); return e.arrays; }
     stats.misses++; stats.log.push("miss " + key + (e ? " (stale)" : ""));
+    // A STALE ENTRY CAN NEVER BE SERVED THIS LOAD (the signature is fixed for
+    // the page's life), yet it was read into memory at parse and sat there
+    // for the whole session: after every update, the old terrain bake (the
+    // continent plate, the ranges, the erg: tens of MB) rode along beside the
+    // fresh one. Drop it the moment it misses; bakePut replaces it on disk.
+    if (e) mem.delete(key);
     return null;
   };
   CBZ.bakePut = function (key, sig, arrays) {
