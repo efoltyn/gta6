@@ -419,6 +419,25 @@
   // REX — a chunky voxel quadruped (a PROP with a mechanic: the smell check),
   // animated via ctx.anim. Built from ctx.box so the package stays self-contained.
   function buildRex(ctx, g, x, z) {
+    // THE ONE DOG BODY (city/dogmodel.js): a shepherd in the kennel, lying
+    // watchful; on the steak it is up, nose down, tail going.
+    if (CBZ.dogModel) {
+      const rig = CBZ.dogModel.build("shepherd", 13);
+      rig.group.position.set(x, 0, z);
+      rig.group.rotation.y = -Math.PI / 2;            // nose toward the alley gate (+z)
+      g.add(rig.group);
+      CBZ.dogModel.collar(rig, 0x1b1a19);
+      V.rex = { group: rig.group, tail: null, base: rig.group.rotation.y, rig: rig };
+      const ctl = { x: x, z: z, y: 0, heading: Math.PI / 2, posture: "lie", alert: 0.5, aggr: 0, fear: 0, happy: 0, sniff: 0, lookYaw: 0, lookPitch: 0 };
+      ctx.anim(function (dt, tt) {
+        const eating = S && S.t < S.dogEatUntil;
+        ctl.posture = eating ? "stand" : "lie";
+        ctl.sniff = eating ? 1 : 0; ctl.happy = eating ? 0.8 : 0; ctl.alert = eating ? 0 : 0.5;
+        ctl.lookYaw = eating ? 0 : Math.sin(tt * 0.35) * 0.5;
+        CBZ.dogModel.animate(rig, dt || 0.016, ctl);
+      });
+      return;
+    }
     const body = new THREE.Group(); body.position.set(x, 0, z); g.add(body);
     const m = ctx.mat(PAL.dog), mD = ctx.mat(0x3a2c1e);
     ctx.box(body, 0, 0.7, 0, 1.3, 0.6, 0.6, m);        // torso

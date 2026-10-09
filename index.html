@@ -692,7 +692,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/entities/security.js"></script>
 
 <!-- 4. systems — economy/quests load before actors that reference them -->
-<script src="src/systems/audio.js?v=deathcam1009"></script>
+<script src="src/systems/audio.js?v=dogs1009b"></script>
 <script src="src/systems/hud.js?v=nored0930"></script>
 <script src="src/systems/economy.js?v=jailv1001"></script>
 
@@ -1017,7 +1017,7 @@ document.body.appendChild(b);}}catch(e){}})();
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
 <script src="src/systems/gamepad.js?v=ekey2"></script>
-<script src="src/systems/fpsmode.js?v=crowdfront1009b"></script>
+<script src="src/systems/fpsmode.js?v=dogs1009b"></script>
 <script src="src/systems/gunfx.js?v=holes1009b"></script>
 <script src="src/systems/intimidate.js?v=jailv1001"></script>
 
@@ -1354,7 +1354,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/wildlife_species.js?v=attach1"></script>
 <script src="src/city/wildlife/forest_deer.js?v=attach1"></script>
 <script src="src/city/wildlife/bears.js?v=attach1"></script>
-<script src="src/city/wildlife/canines.js?v=beasts1"></script>
+<script src="src/city/wildlife/canines.js?v=dogs1009b"></script>
 <script src="src/city/wildlife/apes.js?v=beasts1"></script>
 <script src="src/city/wildlife/bigcats.js?v=attach1"></script>
 <script src="src/city/wildlife/megafauna.js?v=attach1"></script>
@@ -1370,7 +1370,13 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/wildlife_traits.js?v=indiv1"></script>
 <script src="src/city/wildlife.js?v=pf0930g"></script>
 <script src="src/city/wildlife_tame.js?v=ekey2"></script>
-<script src="src/city/dogs.js?v=pf0930d"></script>
+<!-- THE ONE DOG: city/dogmodel.js is the body (skinned lofted shell per breed,
+     planted-foot walk/trot/gallop, body language) and CBZ.dogGait; city/
+     dogbrain.js is the loyal dog's protector rulebook (pure); dogs.js is the
+     actor (pet / stray / guard / K9) and needs both before it. -->
+<script src="src/city/dogmodel.js?v=dogs1009b"></script>
+<script src="src/city/dogbrain.js?v=dogs1009b"></script>
+<script src="src/city/dogs.js?v=dogs1009b"></script>
 <!-- 4d-5. FIGHTING — shared creature-combat (animal fight anims), trait-driven
      companion defense, and the walk-in Fight Arena venue (boxing/MMA/beast pit). -->
 <!-- THE ANGLE LAW loads first because it is the one thing all three biters
@@ -1410,7 +1416,7 @@ document.body.appendChild(b);}}catch(e){}})();
      ladder (warn/order/cuff), witness reports -> wanted, and the "city-law"
      act executor. Pure logic; wanted.js and police.js bind into it. -->
 <script src="src/city/law.js?v=brainmoves1"></script>
-<script src="src/city/wanted.js?v=onebar0930"></script>
+<script src="src/city/wanted.js?v=dogs1009b"></script>
 <script src="src/city/identity.js?v=perm1"></script>
 <script src="src/city/worldstate.js?v=onebar0930"></script>
 <!-- THE ONE ORGANISATION LAYER. CBZ.factions.declare({id,ranks,wage,admission,bind})
@@ -1423,7 +1429,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/view.js?v=cars1"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=brainmoves1"></script>
-<script src="src/city/peds.js?v=crowdfront1009"></script>
+<script src="src/city/peds.js?v=dogs1009b"></script>
 <!-- THE STREET AS A CONFIGURATION OF CBZ.brain: bystanders become witnesses
      (social.crime), react on their own delay through threat.respond, gangs
      retaliate proportionally and rout on brain morale, gang standing is
@@ -1619,7 +1625,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE VERB WHEEL (Q / a touch tap): everything you can do to the thing you
      look at, laid round it; orders about a third person start here. Reads
      city/interactions.js's wheelOf/fireOn. -->
-<script src="src/city/verbwheel.js?v=desk1009c"></script>
+<script src="src/city/verbwheel.js?v=dogs1009b"></script>
 <!-- FUEL. The world has been generating "Pump & Go Fuel" lots since long
      before this file — they just had nothing to sell, because no vehicle had
      a tank. Player vehicle only (a hundred NPC cars silently running dry is a
@@ -1689,7 +1695,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/interact.js?v=verbs2b"></script>
 <!-- ORDERS ABOUT SOMEONE ELSE (the principal seat): Attack / Guard / Tail /
      Stand down on anyone who works for you. Registers into interactions. -->
-<script src="src/city/orders.js?v=custody1009b"></script>
+<script src="src/city/orders.js?v=dogs1009b"></script>
 <!-- A ROLE IS A VERB: one data table of job-string -> verb (doctor patches you
      up, cook feeds you, dock hand puts you on the clock, courier hands you a
      run) plus one of streetProp-type -> verb (hydrant, meter, route board,
@@ -1701,7 +1707,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/roleverbs.js?v=verbs2b"></script>
 <script src="src/city/restrain.js?v=custody1009b"></script>
 <script src="src/city/custody.js?v=custody1009b"></script>
-<script src="src/city/combat.js?v=verbs2b"></script>
+<script src="src/city/combat.js?v=dogs1009b"></script>
 <!-- B7 — RESOURCES: harvest nodes (needs CBZ.assets/placement/CBZ.CITY
      already loaded, and CBZ.cityEcon's Wood/Stone/Scrap/Hatchet/Pickaxe
      entries above). Loads right after city/combat.js, whose lightAttack/
@@ -2483,7 +2489,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/games/airport.js?v=air0929r"></script>
 <script src="src/games/military.js?v=nodash1"></script>
 <script src="src/games/government.js?v=intent1008"></script>
-<script src="src/games/police.js?v=fit1"></script>
+<script src="src/games/police.js?v=dogs1009b"></script>
 <script src="src/games/jail.js?v=nodash1"></script>
 <script src="src/systems/newlife.js?v=newlife1"></script>
 

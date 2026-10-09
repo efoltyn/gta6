@@ -666,7 +666,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/brain.js?v=armed1"></script>
 
 <!-- 4. systems — economy/quests load before actors that reference them -->
-<script src="src/systems/audio.js?v=deathcam1009"></script>
+<script src="src/systems/audio.js?v=dogs1009b"></script>
 <script src="src/systems/hud.js?v=nored0930"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
@@ -1191,6 +1191,12 @@ document.body.appendChild(b);}}catch(e){}})();
      binds CBZ.wildlifeTraits once, at load); absent, the engine falls
      straight back to the species constant. -->
 <script src="src/city/wildlife.js?v=pf0930g"></script>
+<!-- THE ONE DOG: city/dogmodel.js is the body (skinned lofted shell per breed,
+     planted-foot walk/trot/gallop, body language) and CBZ.dogGait; city/
+     dogbrain.js is the loyal dog's protector rulebook (pure); dogs.js is the
+     actor (pet / stray / guard / K9) and needs both before it. -->
+<script src="src/city/dogmodel.js?v=dogs1009b"></script>
+<script src="src/city/dogbrain.js?v=dogs1009b"></script>
 <!-- 4d-5. FIGHTING — shared creature-combat (animal fight anims), trait-driven
      companion defense, and the walk-in Fight Arena venue (boxing/MMA/beast pit). -->
 <!-- THE ANGLE LAW loads first because it is the one thing all three biters
@@ -1367,7 +1373,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE VERB WHEEL (Q / a touch tap): everything you can do to the thing you
      look at, laid round it; orders about a third person start here. Reads
      city/interactions.js's wheelOf/fireOn. -->
-<script src="src/city/verbwheel.js?v=desk1009c"></script>
+<script src="src/city/verbwheel.js?v=dogs1009b"></script>
 <!-- FUEL. The world has been generating "Pump & Go Fuel" lots since long
      before this file — they just had nothing to sell, because no vehicle had
      a tank. Player vehicle only (a hundred NPC cars silently running dry is a
@@ -1428,7 +1434,7 @@ document.body.appendChild(b);}}catch(e){}})();
      After fuel.js (reads CBZ.vehicleFuel). Revert with ?cfg_CAR_CLUSTER=0. -->
 <!-- ORDERS ABOUT SOMEONE ELSE (the principal seat): Attack / Guard / Tail /
      Stand down on anyone who works for you. Registers into interactions. -->
-<script src="src/city/orders.js?v=custody1009b"></script>
+<script src="src/city/orders.js?v=dogs1009b"></script>
 <!-- A ROLE IS A VERB: one data table of job-string -> verb (doctor patches you
      up, cook feeds you, dock hand puts you on the clock, courier hands you a
      run) plus one of streetProp-type -> verb (hydrant, meter, route board,
