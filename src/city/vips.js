@@ -485,8 +485,7 @@
   function stampTag(p, slot) {
     if (!p || !p.tag || p.dead || !CBZ.makeLabelSprite) return;
     const def = slot.def;
-    const lv = Math.max(CBZ.cityLevel ? CBZ.cityLevel(p) : 1, p.vipLvl || 0);
-    const want = "Lv." + lv + " " + def.title;
+    const want = def.title;                     // no level over a head (level.js cityHeadLabel)
     if (p._vipTagText !== want || p.tag.material !== p._vipTagMat) {
       const s = CBZ.makeLabelSprite(want, { color: def.tagColor || derivedCol(p) });
       if (!s) return;
@@ -495,7 +494,7 @@
     }
     // mirror level.js's cache so its sweep agrees this tag is current
     if (CBZ.cityLevel) p._lvlShown = CBZ.cityLevel(p);
-    if (CBZ.cityTitle) p._lvlTitle = CBZ.cityTitle(p);
+    if (CBZ.cityHeadLabel) p._lvlTitle = CBZ.cityHeadLabel(p);
     p._lvlCol = derivedCol(p);
     p._lvlMat = p.tag.material;
   }

@@ -836,7 +836,20 @@
     return "#eef4ff";
   }
 
-  // swap a tag's material to the cached "Lv.N Title" label. Other systems
+  // THE WORDS OVER A HEAD (owner, 2026-10-09): who he is, never a level.
+  // "Lv.62 Chief" was gamey; the tag is title + name ("Police Chief Ruiz"),
+  // the same line the verb card and wheel print (city/roles.js titleOf), or
+  // what he does when he is a stranger (cityTitle). Levels stay internal:
+  // cityLevel still drives respect, standoff, sizeup and the leaderboard.
+  // cityTitle runs first on purpose: it is the call that repairs the cast.
+  CBZ.cityHeadLabel = function (a) {
+    if (!a) return "";
+    const job = CBZ.cityTitle(a);
+    let who = "";
+    if (CBZ.cityPersonTitle) { try { who = CBZ.cityPersonTitle(a) || ""; } catch (e) { who = ""; } }
+    return who || job;
+  };
+  // swap a tag's material to the cached title label. Other systems
   // (gangs.js rank re-tags, bounty prefixes) still create NAME sprites — this
   // loop self-heals them back within a tick because the material ref no
   // longer matches. The sprite OBJECT is never replaced, so every existing
@@ -853,9 +866,9 @@
     // hide (peds.js owns that vocabulary). It must run BEFORE the reads below,
     // or an agent would flash his real title for one sweep before going dark.
     if (CBZ.cityEnsureCover && !a._coverDone) { try { CBZ.cityEnsureCover(a); } catch (e) {} }
-    const lvl = CBZ.cityLevel(a), col = colorFor(a), title = CBZ.cityTitle(a);
+    const lvl = CBZ.cityLevel(a), col = colorFor(a), title = CBZ.cityHeadLabel(a);
     if (a._lvlShown === lvl && a._lvlTitle === title && a._lvlCol === col && a._lvlMat === a.tag.material) return;
-    const s = CBZ.makeLabelSprite("Lv." + lvl + " " + title, { color: col });
+    const s = CBZ.makeLabelSprite(title, { color: col });
     a.tag.material = s.material;
     a._lvlShown = lvl; a._lvlTitle = title; a._lvlCol = col; a._lvlMat = s.material;
   }

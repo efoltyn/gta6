@@ -256,8 +256,7 @@
   // ---- the LEVEL/title tag: "Tycoon" reads over the head -------------------
   function stampTag(p) {
     if (!p || !p.tag || p.dead || !CBZ.makeLabelSprite) return;
-    const lv = CBZ.cityLevel ? CBZ.cityLevel(p) : 50;
-    const want = "Lv." + lv + " " + p._milliTitle;
+    const want = String(p._milliTitle || "");   // no level over a head (level.js cityHeadLabel)
     if (p._milliTagText === want && p.tag.material === p._milliTagMat) {
       // still keep level.js's cache in sync so its sweep doesn't fight us
       if (CBZ.cityLevel) p._lvlShown = CBZ.cityLevel(p);

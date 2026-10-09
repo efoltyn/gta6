@@ -179,17 +179,21 @@
     document.body.appendChild(tag);
     return tag;
   }
-  // human: Lv.N Title (CEO / Mobster / Boxer / Cashier / …). animal: species (+★).
+  // human: who he is, title and name ("Police Chief Ruiz", "Sergeant Doyle",
+  // "Bartender"), the same line the verb card and wheel print (city/roles.js).
+  // NO LEVEL NUMBER over a head (owner, 2026-10-09: "Lv.62 Chief" is gamey).
+  // Levels stay internal (CBZ.cityLevel) for the systems that read them.
+  // animal: species (+★).
   function tagLabel(a) {
     if (a.animal) {
       const sp = a.species || {};
       return (a.legendary ? "★ " : "") + (sp.name || sp.id || "Animal");
     }
-    const lv = CBZ.cityLevel ? CBZ.cityLevel(a) : 1;
-    // "Civilian" is not a role (owner, 2026-07-27) and it is not a degrade
-    // string either — without level.js loaded we still say what we can see.
-    const title = CBZ.cityTitle ? CBZ.cityTitle(a) : (a.swat ? "SWAT" : a.kind === "cop" ? "Police" : "Person");
-    return '<span class="lv">Lv.' + lv + '</span>' + esc(title);
+    let title = "";
+    if (CBZ.cityPersonTitle) { try { title = CBZ.cityPersonTitle(a) || ""; } catch (e) { title = ""; } }
+    // "Civilian" is not a role (owner, 2026-07-27): fall back to what he does.
+    if (!title) title = CBZ.cityTitle ? CBZ.cityTitle(a) : (a.swat ? "SWAT" : a.kind === "cop" ? "Officer" : "Person");
+    return esc(title);
   }
   function tagTone(a) {
     if (a.rage || a.curTarget === (CBZ.city && CBZ.city.playerActor) || (a.relPlayer && a.relPlayer.grudge > 50)) return "hot";

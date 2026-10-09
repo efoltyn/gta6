@@ -603,48 +603,19 @@
   // ============================================================
   //  GUN STOP — a cop spots an openly-carried firearm on a CLEAN record and
   //  walks up to CHALLENGE you (GTA: drawing on the law spikes heat; brandishing
-  //  draws a stop). Reuses the #interact HUD panel and the shared city row
-  //  grammar (interactions.js's rowsHTML) without breaking pointer-lock, so the
-  //  stand-off is LIVE and tense. ONE row — HOLSTER. Everything else you might
-  //  do is done with the world, not with a button: walk off (the refusal, see
-  //  stopWalkOff), stand there and let him lose patience, or shoot him.
+  //  draws a stop). NO SCREEN UI (owner, 2026-10-09: "random pop-up"). The stop
+  //  used to hijack the #interact card as a wide iPad strip with one HOLSTER
+  //  button, and that card's name line ("CHIEF") floated on the right edge.
+  //  Holstering is what you do with your normal weapon controls (hotbar, gun
+  //  cell, wheel); compliance is read off your actual state (openCarry()).
+  //  The officer speaks over his own head. The rest is done with the world:
+  //  holster (released), walk off (the refusal, see stopWalkOff), stand there
+  //  armed and let him lose patience, or shoot him.
   // ============================================================
-  const STOP = { cop: null, case: null, susp: 0, asked: 0, panel: null, name: null, note: null, opts: null, optList: null, key: "" };
-
-  function stopDom() {
-    if (STOP.panel !== null) return STOP.panel;
-    STOP.panel = document.getElementById("interact");
-    STOP.name = document.getElementById("interactName");
-    STOP.note = document.getElementById("interactNote");
-    STOP.opts = document.getElementById("interactOpts");
-    return STOP.panel;
-  }
-  function stopShow() { const p = stopDom(); if (p) { p.style.display = "block"; p.classList.add("show"); } }
-  function stopHide() { const p = stopDom(); if (p) { p.style.display = "none"; p.classList.remove("show"); } STOP.key = ""; }
+  const STOP = { cop: null, case: null, susp: 0, asked: 0 };
 
   function stopActive() { return !!(STOP.cop && !STOP.cop.dead); }
 
-  /* ONE ROW, AND IT IS THE VERB (owner, 2026-08-04). This card used to offer
-     YES / REFUSE. Both were wrong:
-       • YES answered a question the note had to ask. The button now says the
-         thing that happens — HOLSTER — and the note is free to carry the
-         officer's temper instead of restating the control.
-       • REFUSE was never an action. Refusing is turning around and walking
-         off, which the stand-off already tracks (the d > 16 branch in
-         updateGunStop) — so the refusal's teeth moved onto the act itself in
-         `stopWalkOff` and the row is gone.
-     `proposal` is the prose the docked iPad rail prints beside the button;
-     `label` is the button word. The markup is rendered by the shared city
-     grammar (interactions.js's rowsHTML), which is what makes it a real,
-     visible, tappable 52px button inside the iPad dock instead of the bare
-     unstyled text in the owner's screenshot. */
-  function stopOpts() {
-    return [{ key: "e", label: "Holster", proposal: "Holster the weapon", fn: stopComply }];
-  }
-  // NO NOTE ON THE CARD (2026-09-27). The card used to narrate the officer
-  // ("Open carry, he wants it away", "Officer is losing patience", a countdown).
-  // He says it himself now, over his own head (copSay + STOP_WARN), and his
-  // gun coming up is the clock. The card is the one HOLSTER button.
   // THE CLOCK IS THE BRAIN'S. The stop is a CBZ.brain.authority case in
   // gun-stop mode (comply "disarm", outcome "release"): STOP_LIMIT is its
   // patience, a re-challenge of the same man inside a minute is shorter, and
@@ -656,44 +627,8 @@
     { t: 5, line: "Put it away. Now." },
     { t: 9.5, line: "Last warning! Holster that weapon!" },
   ];
-  function stopHideNote() {
-    if (!STOP.note) return;
-    STOP.note.textContent = "";
-    STOP.note.style.display = "none";
-  }
-  function stopRowsHTML() {
-    if (CBZ.cityInteractRowsHTML) return CBZ.cityInteractRowsHTML(STOP.optList);
-    return STOP.optList.map((o, i) =>                      // pre-interactions.js load only
-      `<div class="iopt" data-i="${i}"><span class="ikey">${o.key.toUpperCase()}</span>` +
-      `<span class="ilab">${o.proposal || o.label}</span></div>`
-    ).join("");
-  }
-  // NEVER REWRITE ROWS THAT ARE ALREADY OURS. The @40 re-assert below runs ten
-  // times a second, and a finger needs ~100 ms between touchstart and click: an
-  // unconditional innerHTML write destroys the very button being pressed before
-  // the click can land, so the tap silently does nothing. The stamp rides on a
-  // CHILD, not on #interactOpts itself — interact.js clobbers the children and
-  // leaves the container, so a marker on the container would never notice.
-  function stopStampRows(force) {
-    if (!STOP.opts) return;
-    const want = STOP.key + "|" + STOP.optList.length;
-    const first = STOP.opts.firstElementChild;
-    if (!force && first && first.dataset && first.dataset.gunstop === want) return;
-    STOP.opts.innerHTML = stopRowsHTML();
-    const el = STOP.opts.firstElementChild;
-    if (el) el.dataset.gunstop = want;
-  }
-  function stopRefreshPanel() {
-    const c = STOP.cop; if (!c) return;
-    STOP.optList = stopOpts();
-    if (STOP.name) STOP.name.textContent = "" + (c.name || "Officer");
-    stopHideNote();
-    STOP.key = "gunstop:" + (STOP.susp >= 2.2 ? 2 : STOP.susp >= 1.2 ? 1 : 0);
-    stopStampRows(true);
-  }
-
   function beginStop(cop) {
-    STOP.cop = cop; STOP.asked = 1; STOP.key = ""; STOP.warnI = 0; STOP.case = null;
+    STOP.cop = cop; STOP.asked = 1; STOP.warnI = 0; STOP.case = null;
     if (cop._law && cop._law.suspect) LAW.release(cop);     // one case per officer: the stop is it
     const BA = CBZ.brain && CBZ.brain.authority;
     if (BA) {
@@ -726,8 +661,6 @@
       : STOP.susp >= 1.2 ? "You again? Put that away."
       : "Hey! Is that a gun? Put it away.", 2.4);
     if (CBZ.sfx) CBZ.sfx("whoosh");
-    stopRefreshPanel();
-    stopShow();
   }
   function endStop(calm) {
     const c = STOP.cop;
@@ -739,7 +672,12 @@
       if (BA && STOP.case && BA.caseOf(c) === STOP.case && STOP.case.n === STOP.caseN) BA.cancel(c);
     }
     STOP.cop = null; STOP.case = null; STOP.susp = 0; STOP.asked = 0;
-    stopHide();
+  }
+  // COMPLIANCE IS YOUR STATE: the gun went away by your own controls.
+  function stopComplied() {
+    const c = STOP.cop;
+    if (c) { c._stopRefused = 0; c._gunLowered = true; copSay(c, "Good. Have a nice day.", 2.2); }
+    endStop(true);
   }
 
   // REFUSING IS WALKING AWAY. The REFUSE row is gone, but the refusal it stood
@@ -768,28 +706,9 @@
     endStop(true);
   }
 
-  // COMPLY — actually put the shared engine loadout away. You still own the
-  // guns: the inventory/current selection are snapshotted and restored on draw.
-  function stowGuns() {
-    if (g.cityStowedWeapon || (g._copStow && g._copStow.inv)) return false;   // already away
-    const snap = { inv: (CBZ.weaponInventory || []).slice(), cur: CBZ.currentWeaponId || null };
-    g.cityStowedWeapon = (CBZ.cityCurrentWeaponName && CBZ.cityCurrentWeaponName()) || "Gun";
-    g._copStow = snap;
-    if (CBZ.weaponInventory) CBZ.weaponInventory.length = 0;
-    CBZ.currentWeaponId = null;
-    if (CBZ.cityHudDirty) CBZ.cityHudDirty();
-    return true;
-  }
-  function stopComply() {
-    const c = STOP.cop;
-    if (c) c._stopRefused = 0;                       // you did what he asked — the ledger clears
-    stowGuns();
-    copSay(c, "Good. Have a nice day.", 2.2);
-    if (c) { c._gunLowered = true; }
-    endStop(true);
-  }
   CBZ.cityStowedWeapon = function () { return g.cityStowedWeapon || null; };
-  // re-draw the stowed loadout (the player still owns it; bring it back out).
+  // re-draw a stowed loadout. Nothing stows any more (the gun-stop button that
+  // did is gone); this only hands back a snapshot carried by an older save.
   CBZ.cityRedrawWeapon = function () {
     const snap = g._copStow;
     if (!snap && !g.cityStowedWeapon) return false;
@@ -803,35 +722,6 @@
     // (no "Weapon out." note — the gun filling your hands says it)
     return true;
   };
-
-  // RE-DRAW after a stop: the mouse wheel (fpsmode.js city wheel) brings a
-  // stowed loadout back, and scrolling to empty hands holsters. Q is not a
-  // weapon key in the city any more: it is the verb wheel (city/verbwheel.js).
-
-  // capture-phase key handler: while a stop is live, the stop's own key drives
-  // it FIRST (and we swallow the event so interact.js doesn't also act on it).
-  // Read off optList rather than a hard-coded letter, so the card and the
-  // keyboard can never disagree about which keys exist. Cheap; only does
-  // anything when a stop is actually on screen.
-  addEventListener("keydown", function (e) {
-    if (!stopActive() || g.mode !== "city" || g.state !== "playing") return;
-    if (CBZ.player.driving || CBZ.cityMenuOpen) return;
-    const k = (e.key || "").toLowerCase();
-    const o = STOP.optList && STOP.optList.find((x) => x.key === k);
-    if (o) { e.preventDefault(); e.stopImmediatePropagation(); o.fn(); }
-  }, true);
-  // tap/click the rows too (mobile + mouse), same as the jail/interact panel
-  (function bindStopClicks() {
-    const el = document.getElementById("interactOpts");
-    if (!el) { setTimeout(bindStopClicks, 60); return; }
-    el.addEventListener("click", function (e) {
-      if (!stopActive() || g.mode !== "city" || CBZ.player.driving) return;
-      const row = e.target.closest && e.target.closest(".iopt");
-      if (!row || row.dataset.i == null) return;
-      const o = STOP.optList && STOP.optList[+row.dataset.i];
-      if (o && o.fn) { e.stopImmediatePropagation(); o.fn(); }
-    }, true);
-  })();
 
   // pick a cop to run the stop, drive the approach, and bail on the right cues.
   // Only ONE stop runs at a time; an ambient beat cop nearest you is chosen.
@@ -860,14 +750,15 @@
       if (K) {
         _stopSt.armed = openCarry(); _stopSt.dist = Math.min(d, 14);
         const r = BA.step(c, dt, _stopSt);
-        if (K.outcome === "released") { endStop(true); return; }
+        if (K.outcome === "released") { if (openCarry()) endStop(true); else stopComplied(); return; }
         if (r && (r.phase === "escalate" || r.phase === "force" || r.phase === "lethal")) {
           copSay(c, "Armed subject, not complying! Send units!", 2.0);
           if (CBZ.cityCrime) CBZ.cityCrime(40, { instant: true, x: c.pos.x, z: c.pos.z, type: "brandishing" });
           c.curTarget = CBZ.city.playerActor; c.sees = true; endStop(false);
           return;
         }
-      } else if (STOP.case || !openCarry()) { endStop(true); return; }   // the case ended some other way (he went down, got pulled off it)
+      } else if (!openCarry()) { stopComplied(); return; }
+      else if (STOP.case) { endStop(true); return; }   // the case ended some other way (he went down, got pulled off it)
       // BREAKING CONTACT IS THE REFUSAL — the only one the card offers now.
       // It lands after the checks above on purpose: holstering, dying or
       // getting wanted some other way are their own endings, not a snub.
@@ -878,8 +769,6 @@
       else holdFace(c, -dx, -dz, dt, true);
       // suspicion creeps up the longer you stand there openly armed and ignore him
       STOP.susp = Math.min(2.6, STOP.susp + dt * 0.10);
-      const wantKey = "gunstop:" + (STOP.susp >= 2.2 ? 2 : STOP.susp >= 1.2 ? 1 : 0);
-      if (wantKey !== STOP.key) stopRefreshPanel();
       // he SAYS it, louder each time, over his head, on the case's clock
       // (scaled to its patience, so a shorter re-challenge warns sooner)
       const w = STOP_WARN[STOP.warnI | 0];
@@ -920,23 +809,6 @@
     if (best) beginStop(best);
   }
   let gunStopScanT = 0;
-
-  // interact.js (order 39) writes the SAME #interact panel when you stand next to
-  // the cop — it would clobber the gun-stop rows. We re-assert ours at order 40
-  // (after it) so the stand-off menu always wins while a stop is live; the moment
-  // the stop ends we let interact.js own the panel again.
-  let _stopReassertT = 0;
-  CBZ.onUpdate(40, function (dt) {
-    if (g.mode !== "city") return;
-    if (!(stopActive() && g.state === "playing" && !CBZ.player.driving && !CBZ.player.dead)) return;
-    _stopReassertT -= dt; if (_stopReassertT > 0) { stopShow(); return; }
-    _stopReassertT = 0.1;
-    // re-stamp the rows + force-show (interact.js @39 may have overwritten them)
-    if (STOP.name) STOP.name.textContent = "" + (STOP.cop.name || "Officer");
-    stopHideNote();
-    if (STOP.optList) stopStampRows(false);
-    stopShow();
-  });
 
   // PIT chasers are real traffic cars borrowed from vehicles.js (only flagged
   // here). The chopper is a cheap mesh w/ a sweeping spotlight. ROADBLOCK
@@ -1118,7 +990,7 @@
   };
 
   CBZ.clearCityCops = function () {
-    if (STOP.cop) { STOP.cop = null; stopHide(); }   // tear down any live gun stop first
+    if (STOP.cop) STOP.cop = null;   // tear down any live gun stop first
     for (const c of CBZ.cityCops) {
       if (c.group && c.group.parent) c.group.parent.remove(c.group);
       if (c.group) c.group.traverse(function (o) {
