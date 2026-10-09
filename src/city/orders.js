@@ -29,6 +29,9 @@
    PUBLIC: CBZ.cityOrders2 = { give(agent, kind, target), clear(agent),
             worksForYou(ped), list() }
      (named apart from contracts.js's CBZ.cityOrders board)
+   Your dog is one more body here: worksForYou(dog) is true for a tamed dog
+   and give()/clear() hand it to city/dogs.js (CBZ.cityDogOrder), whose
+   protector rules (city/dogbrain.js) are this file's guard rules.
 ============================================================ */
 (function () {
   "use strict";
@@ -49,6 +52,8 @@
   // who takes orders from you: the people you pay, lead or are protected by
   function worksForYou(p) {
     if (!p || p.dead || p.player || p.vendor || p.kind === "cop") return false;
+    // YOUR DOG is a protector body in this same order system (city/dogs.js)
+    if (p.kind === "dog") return !!p.tamed;
     if (p._iOnly && !p._protUnit) return false;      // a staffer is his job, not your muscle
     if (p.recruited || p.kind === "crew" || p.companion) return true;
     if (CBZ.cityPlayerGangIsMember && CBZ.cityPlayerGangIsMember(p)) return true;
@@ -67,6 +72,9 @@
   // GUARD on a third person, and "go after" for a man the companion brain does
   // not drive (a Secret Service agent). Everything else is handed straight on.
   function give(a, kind, t, quiet) {
+    // a dog takes the same orders through its own body (CBZ.cityDogOrder):
+    // Attack / Guard / Hold / Follow / Stand down, some with no second person
+    if (a && a.kind === "dog") return !!(CBZ.cityDogOrder && CBZ.cityDogOrder(a, kind, t));
     if (!a || a.dead || !t || t.dead || t === a) return false;
     if (kind === "rob") return !!(CBZ.followerOrder && CBZ.followerOrder(a, "rob", { target: t }));
     if (kind === "tail" || (kind === "attack" && a.companion)) {
@@ -86,6 +94,7 @@
   }
   function clear(a, done) {
     if (!a) return;
+    if (a.kind === "dog") { if (CBZ.cityDogOrder) CBZ.cityDogOrder(a, "standdown"); return; }
     const w = a._orderWas;
     a._order = null; a._orderWas = null;
     LIVE.delete(a);
@@ -504,7 +513,7 @@
   if (!wire()) { const t = setInterval(function () { if (wire()) clearInterval(t); }, 250); }
 
   CBZ.cityOrders2 = {
-    give: give, clear: clear, worksForYou: worksForYou,
+    give: give, clear: clear, worksForYou: worksForYou, attackerOf: attackerOf,
     takeDown: takeDown, standDown: standDown,
     force: function () { return force().slice(); },
     forceOrder: function () { return PF.target ? { target: PF.target, mode: PF.mode, crew: PF.crew.slice(), billed: PF.billed } : null; },

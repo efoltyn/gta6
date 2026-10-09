@@ -259,7 +259,7 @@
   function beginOrder(cand, item) {
     W.order = { cand: cand, item: item, t: 0 };
     const a = agentOf(cand);
-    if (a && CBZ.citySay) { try { CBZ.citySay(a, "Who?", null, 1.6); } catch (e) {} }
+    if (a && a.kind !== "dog" && CBZ.citySay) { try { CBZ.citySay(a, "Who?", null, 1.6); } catch (e) {} }
   }
   function endOrder() {
     W.order = null;

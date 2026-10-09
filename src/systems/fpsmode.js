@@ -3638,6 +3638,7 @@
   }
   function cityGunHit(a, hit, w, shotDir) {
     if (shotDir) hit.dir = shotDir; // wildlife + downstream death physics read the same resolved trajectory
+    if (a) a._pHitT = CBZ.now;      // who you shot: your dog joins in (city/dogbrain.js)
     // WILDLIFE: an animal routes into the hunting system (its own damage/skin
     // path — never the human death/wanted/gore chain). See city/wildlife.js.
     if (a.animal && CBZ.cityWildlifeHit) return CBZ.cityWildlifeHit(a, hit, w);
