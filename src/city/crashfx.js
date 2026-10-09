@@ -50,7 +50,7 @@
      • cityExplosionCore's `chainWillCarve` test — the wrapper chain is a
        city fact.
      • applyBlastDamage's `cityRoster` block — cityPeds / cityCops /
-       cityCrowdCircleKill / cityHurtPlayer are city lists, and the prison
+       cityHurtPlayer are city lists (the crowds are crowds.blast), and the prison
        arena overlaps the city's coordinate space.
      • cityAirstrikeCollapse's closing `CBZ.cityDamageBuilding(...)` — that
        is buildings.js's persistent per-building damage state (window panes,
@@ -1694,7 +1694,6 @@
       // ragdoll (city/ragdoll.js), falling off with distance. Before the kill
       // sweep, so the men this blast kills are launched once, by their kill.
       if (CBZ.ragdollBlast) { try { CBZ.ragdollBlast(x, z, R, power); } catch (e) {} }
-      if (CBZ.cityCrowdCircleKill) CBZ.cityCrowdCircleKill(x, z, LR, { byCar: false, quiet: true, fromX: x, fromZ: z, noCrime: !byPlayer, byPlayer: byPlayer, cause: cause });
       for (const p of (CBZ.cityPeds || [])) { if (p.dead) continue; const dx = p.pos.x - x, dz = p.pos.z - z; if (dx * dx + dz * dz <= LR2 && CBZ.cityKillPed) CBZ.cityKillPed(p, { fromX: x, fromZ: z, force: force, fling: fling, byPlayer: byPlayer }, cause); }
       for (const c of (CBZ.cityCops || [])) { if (c.dead) continue; const dx = c.pos.x - x, dz = c.pos.z - z; if (dx * dx + dz * dz <= LR2 && CBZ.cityHurtCop) CBZ.cityHurtCop(c, 9999, { fromX: x, fromZ: z, force: force, fling: fling, byPlayer: byPlayer }); }
       const PL = CBZ.player;

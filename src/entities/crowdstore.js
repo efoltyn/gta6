@@ -51,8 +51,11 @@
      ray(ox,oy,oz, dx,dy,dz, maxT)  a round vs every body's capsule (spatial hash)
      shoot(row, o)              that round lands
      runOver(x, z, r, speed, o) a car through them (vehicles.js runOver)
+     crush(x, z, r, o)          a collapse, a tornado core, a crash on the street
    Survivors panic away from the point; a stampede in a dense crowd knocks
-   people down and tramples the fallen.
+   people down and tramples the fallen. A row added with {prot: true} is a
+   child: no path above ever hurts it, it runs. ahead(x, z, fx, fz, len, half)
+   is the driver's question: how far to the first person in my lane?
 
    THE COUNT. Every casualty joins an EVENT (cause, place, crowd, by whom),
    counted by affiliation. Events report through the paths that already
@@ -88,6 +91,7 @@
     clip: new Uint8Array(CAP), pnow: new Uint8Array(CAP), look: new Int32Array(CAP).fill(-1),
     aff: new Uint8Array(CAP), grp: new Int16Array(CAP).fill(-1), life: new Uint8Array(CAP),
     own: new Uint8Array(CAP), hide: new Uint8Array(CAP),
+    prot: new Uint8Array(CAP),       // 1 = a child (systems/childsafe.js: CHILDREN ARE NOT TARGETS): runs, never hurt
     panicT: new Float32Array(CAP), fleeX: new Float32Array(CAP), fleeZ: new Float32Array(CAP),
     hurtT: new Float32Array(CAP), deadT: new Float32Array(CAP), evt: new Int32Array(CAP),
     posT: new Float32Array(CAP),     // store clock when an owner last wrote x/z (a sleeping far walker is drawn on from there)
@@ -106,14 +110,15 @@
   }
   function freeRow(r) {
     S.life[r] = FREE; S.grp[r] = -1; S.hide[r] = 0; S.own[r] = 0; S.panicT[r] = 0; S.vx[r] = 0; S.vz[r] = 0;
-    S.evt[r] = 0; S.look[r] = -1;
+    S.evt[r] = 0; S.look[r] = -1; S.prot[r] = 0;
     freeRows[nFree++] = r; live--;
     if (inAct[r]) inAct[r] = 0;
   }
 
   // ---------------------------------------------------------------- clips
   // crowdgpu's clip order (its CLIPS table); read from it when it is loaded
-  const CLIP_NAMES = ["idle", "walk", "run", "cheer", "fist", "sign", "signWalk", "flag", "flagWalk", "sit", "sitCheer", "down", "limp", "crawl"];
+  const CLIP_NAMES = ["idle", "walk", "run", "cheer", "fist", "sign", "signWalk", "flag", "flagWalk", "sit", "sitCheer", "down", "limp", "crawl",
+    "talk", "talkWalk", "phone", "phoneWalk", "smoke"];
   const CLIP = Object.create(null);
   function readClips() {
     const G = CBZ.crowdGPU;
@@ -253,6 +258,7 @@
     S.scale[r] = opts && opts.scale > 0 ? opts.scale : 1;
     S.aff[r] = opts && opts.aff != null ? aff(opts.aff) : G.aff;
     S.grp[r] = G.ix; S.life[r] = ALIVE; S.own[r] = G.own ? 1 : 0; S.hide[r] = 0;
+    S.prot[r] = opts && opts.prot ? 1 : 0;
     S.vx[r] = 0; S.vz[r] = 0; S.panicT[r] = 0; S.hurtT[r] = 0; S.deadT[r] = 0; S.evt[r] = 0; S.posT[r] = CLOCK;
     gpos[r] = G.rows.length; G.rows.push(r);
     G.dirty = true; if (G.lifeOn) hashAge = 1e9;
@@ -435,6 +441,16 @@
     const G = GROUPS[S.grp[r]];
     if (!G) return false;
     mw(G); toWorld(G, r);
+    // A CHILD IS NOT A TARGET (systems/childsafe.js): the blast, the round, the
+    // car never land; the child runs from wherever it came from
+    if (S.prot[r]) {
+      if (lf === ALIVE) {
+        S.panicT[r] = Math.max(S.panicT[r], 10);
+        S.fleeX[r] = o.fromX != null ? o.fromX : S.wx[r]; S.fleeZ[r] = o.fromZ != null ? o.fromZ : S.wz[r];
+        activate(r);
+      }
+      return false;
+    }
     const E = eventFor(cause, o.x != null ? o.x : S.wx[r], o.z != null ? o.z : S.wz[r], G, o);
     E.t1 = CLOCK;
     E.causes[cause] = (E.causes[cause] | 0) + 1;
@@ -482,6 +498,7 @@
     for (let gi = 0; gi < GROUPS.length; gi++) {
       const G = GROUPS[gi];
       if (!G || !G.lifeOn || !modeOk(G)) continue;
+      if (o.only && G !== o.only) continue;      // one crowd only (a gunshot on a street does not end a rally)
       mw(G);
       let hitG = false;
       const L = G.rows;
@@ -782,7 +799,7 @@
     if (!to) return 0;
     const G = GROUPS[S.grp[r]]; if (G) { mw(G); toWorld(G, r); }
     const cause = o.cause || (o.byPlayer ? "gunfire" : "gunfire");
-    casualty(r, to, cause, { byPlayer: !!o.byPlayer, by: o.by || null, fromX: o.fromX, fromZ: o.fromZ });
+    if (!casualty(r, to, cause, { byPlayer: !!o.byPlayer, by: o.by || null, fromX: o.fromX, fromZ: o.fromZ })) return 0;
     // the people round them run (a crowd under fire breaks)
     const px = S.wx[r], pz = S.wz[r];
     if (CLOCK - lastShotPanic > 0.35 || Math.hypot(px - lspX, pz - lspZ) > 20) {
@@ -825,6 +842,55 @@
     }
     if (n) panic(x, z, 25, { secs: 8 });
     return n;
+  }
+
+  /* crush(x, z, r, o): everything inside the disc comes down at once (a
+     building collapsing, a tornado's core, an airliner on the street). o.pk =
+     the share killed (default 1; the rest are hurt), o.cause, byPlayer. The
+     people round it run. Returns the dead. */
+  function crush(x, z, r, o) {
+    o = o || {};
+    if (live <= 0 || !(r > 0)) return 0;
+    const R2 = r * r, pk = o.pk == null ? 1 : o.pk, salt = SEQ++, cause = o.cause || "crushed";
+    const ev = { byPlayer: !!o.byPlayer, by: o.by || null, fromX: x, fromZ: z, x: x, z: z };
+    let dead = 0;
+    liveRows(function (rr) {
+      const dx = S.wx[rr] - x, dz = S.wz[rr] - z;
+      if (dx * dx + dz * dz > R2) return;
+      const to = h01(rr, salt, 12) < pk ? DEAD : HURT;
+      if (casualty(rr, to, cause, ev) && to === DEAD) dead++;
+    });
+    panic(x, z, Math.max(30, r * 3), { secs: 10 });
+    return dead;
+  }
+  /* ahead(x, z, fx, fz, len, half): the distance to the nearest standing or
+     crawling person in a lane box running `len` m ahead of (x, z) along the
+     unit (fx, fz), `half` m either side, or Infinity. A driver asks it (city/
+     vehicles.js): a crowd crossing on the walk signal is braked for, like
+     anyone else in the road. */
+  function ahead(x, z, fx, fz, len, half) {
+    if (live <= 0 || !(len > 0)) return Infinity;
+    ensureHash();
+    const q = ++qid;
+    let best = Infinity;
+    const steps = Math.ceil(len / CELL);
+    for (let k = 0; k <= steps; k++) {
+      const px = x + fx * k * CELL, pz = z + fz * k * CELL;
+      const cx = Math.floor(px / CELL), cz = Math.floor(pz / CELL);
+      for (let oz = -1; oz <= 1; oz++) for (let ox = -1; ox <= 1; ox++) {
+        let r = head[cellKey(cx + ox, cz + oz)];
+        while (r >= 0) {
+          if (stamp[r] !== q) {
+            stamp[r] = q;
+            const dx = S.wx[r] - x, dz = S.wz[r] - z, a = dx * fx + dz * fz;
+            if (a > 0.5 && a < len && a < best && Math.abs(dz * fx - dx * fz) < half) best = a;
+          }
+          r = nxt[r];
+        }
+      }
+      if (best < k * CELL - CELL) break;
+    }
+    return best;
   }
 
   // a promoted rig died (mob.js): its body is the rig's; the count is the crowd's
@@ -1138,6 +1204,7 @@
     cap: function () { return CAP; }, device: DEVICE, clock: function () { return CLOCK; }, hi: function () { return hi; }, live: function () { return live; }, room: function () { return nFree; },
     group: group, aff: aff, affOf: function (i) { return AFFS[i] || null; }, clip: clipIx,
     blast: blast, ring: ring, nuke: nuke, ray: ray, shoot: shoot, runOver: runOver, panic: panic, noteDead: noteDead,
+    crush: crush, ahead: ahead,
     // the hand-over: a struck row as a real body (null = the store resolves it)
     realize: realize, roundOnPed: roundOnPed, lastShotPed: function () { return shotPed; },
     kill: function (r, cause, o) { return casualty(r, DEAD, cause || "violence", o || {}); },

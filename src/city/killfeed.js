@@ -5,7 +5,7 @@
    funnels through here with an ACCURATE cause ("airstrike", "car crash",
    "murder", "gunfire", "fall", "explosion", "police", ...) and the victim's
    real name, so the HUD can show "Dave Smith — airstrike". It works by
-   WRAPPING the existing kill functions (cityKillPed / cityCrowdKill) + the
+   WRAPPING the existing kill functions (cityKillPed) + the
    player-death path rather than editing every kill site — the originals are
    saved and called through, so all current behaviour is preserved; we only
    read the outcome and push one feed entry on a confirmed kill.
@@ -170,31 +170,6 @@
     return true;
   }
 
-  // ---------- WRAP: ambient crowd kills (crowd.js cityCrowdKill(i, opts)) ----------
-  function hookCrowdKills() {
-    if (typeof CBZ.cityCrowdKill !== "function") return false;
-    if (CBZ.cityCrowdKill._kfWrapped) return true;
-    const orig = CBZ.cityCrowdKill;
-    CBZ.cityCrowdKill = function (i, opts) {
-      const killed = orig.apply(this, arguments);   // truthy only on a CONFIRMED fresh kill
-      if (killed) {
-        opts = opts || {};
-        // ambient bodies carry no cause string; the crowd dies overwhelmingly to
-        // gunfire (the few car/explosion cases are flagged via byCar/opts.cause).
-        let label = opts.byCar ? "car crash"
-          : normCause(opts.cause || "gunfire", opts);
-        // a player shooting (not byCar, not an NPC/explosion you didn't cause) → "murder"
-        const byPlayer = !opts.noCrime && opts.byPlayer !== false && !opts.attacker;
-        if (label === "gunfire" && byPlayer) label = "murder";
-        const by = (opts.attacker && (opts.attacker.name || (opts.attacker.kind === "cop" && "Police"))) ||
-          (byPlayer ? "You" : (label === "police" ? "Police" : null));
-        log(crowdName(), label, { by: by });
-      }
-      return killed;
-    };
-    CBZ.cityCrowdKill._kfWrapped = true;
-    return true;
-  }
 
   // ---------- HOOK: the PLAYER death (death.js cityKillPlayer(reason, imp)) ----------
   // We don't edit death.js — we wrap its public entry and read the cause/killer it
@@ -228,13 +203,13 @@
     CBZ.cityKillPlayer._kfWrapped = true;
     return true;
   }
-  // peds.js/crowd.js/death.js all load before us in boot order (index.html), so
+  // peds.js/death.js load before us in boot order (index.html), so
   // every hook lands on the first try today — but hook defensively and RE-TRY
   // any that miss, so a future script reshuffle degrades to a 250ms-late wrap
   // instead of a silently dead feed (the owner's exact bug class).
   function hookAllKillPaths() {
-    const a = hookPedKills(), b = hookCrowdKills(), c = hookPlayerDeath();
-    return a && b && c;
+    const a = hookPedKills(), c = hookPlayerDeath();   // (crowd rows die through entities/crowdstore.js, which writes its own ledger entry)
+    return a && c;
   }
   if (!hookAllKillPaths()) {
     let tries = 0;

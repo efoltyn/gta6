@@ -7,8 +7,8 @@
    WHAT EXISTED AND WHAT THIS GROWS. president_public.js already had a gate
    protest: up to 22 posted rigs standing in rows with signs, a four-man
    police line, a chant over one head and a run when soldiers came. It could
-   not grow past a ~50 body budget and it could not move. city/crowd.js is
-   the ambient street population (48 real rigs, no politics). This file is
+   not grow past a ~50 body budget and it could not move. city/streetlife.js is
+   the street population (the same store, no politics). This file is
    what the gate protest becomes when it grows up: president_public.js now
    hands its protest bodies to a mob from here, and the address
    (city/address.js) and the transfer of power (city/transfer.js) raise

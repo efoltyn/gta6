@@ -340,7 +340,7 @@ if (fs.existsSync(path.join(__dirname, "..", "src/weapons/weapon-data.js"))) loa
 
 const cityFiles = [
   "world", "buildings", "citynav", "expansion", "props", "mode", "economy", "hunger", "wanted",
-  "gangs", "social", "realestate", "view", "peds", "level", "sizeup", "crowd", "police", "traffic", "vehicles",
+  "gangs", "social", "realestate", "view", "peds", "level", "sizeup", "streetlife", "police", "traffic", "vehicles",
   "shops", "careers", "interactions", "interact", "combat", "death", "leaderboard", "zillow", "empire", "hud",
   // aigoals: the crowd PURPOSE / needs layer (onUpdate 33) + the lone-wolf rampage
   // director (onUpdate 35). Loaded so the headless sim exercises both.
@@ -742,54 +742,16 @@ function testVehicleModels() {
   console.log("  named vehicle audit OK");
 }
 
-// ---- city mass-crowd: agents spawn on sidewalks, stroll, stay in the city ----
+// ---- the street (city/streetlife.js on the crowd store): people on the pavements ----
+// The full check is tools/streetlife-check.mjs (a downtown grid at noon). Here:
+// when the store and the street are loaded, a few seconds of city put people out.
 function testCrowd() {
-  console.log("== city mass-crowd test ==");
-  if (!CBZ.spawnCityCrowd) { console.log("  (no crowd module — skipped)"); return; }
-  const A = CBZ.city.arena;
-  const n = CBZ.spawnCityCrowd(150);
-  let fails = 0;
-  const ok = (label, cond, info) => { if (cond) console.log("  ✓ " + label + (info ? " — " + info : "")); else { fails++; console.error("  ✗ FAIL " + label + (info ? " — " + info : "")); } };
-  ok("spawns the requested agents", CBZ.cityCrowdCount() === 150, "count=" + CBZ.cityCrowdCount());
-  // sample a handful, remember where they start
-  const idx = [0, 20, 50, 90, 130], start = idx.map((i) => CBZ.cityCrowdAgent(i));
-  for (let f = 0; f < 240; f++) step(1 / 60);       // ~4s of strolling (sim runs via onUpdate 23.7)
-  let moved = 0, inBounds = 0;
-  const padX = 30, x0 = A.minX - padX, x1 = A.maxX + padX, z0 = A.minZ - padX, z1 = A.maxZ + padX;
-  idx.forEach((i, k) => {
-    const a = CBZ.cityCrowdAgent(i);
-    if (Math.hypot(a.x - start[k].x, a.z - start[k].z) > 1.5) moved++;
-    // inside the mainland clamp OR the connected island/bridge (just assert finite + roughly local)
-    const near = a.x > x0 - 200 && a.x < x1 + 200 && a.z > z0 - 200 && a.z < z1 + 200 && isFinite(a.x) && isFinite(a.z);
-    if (near) inBounds++;
-  });
-  ok("agents walk (most moved)", moved >= 4, moved + "/5 moved");
-  ok("agents stay in the city", inBounds === 5, inBounds + "/5 in bounds");
-
-  // ---- MASS FLEE (#8): a gunshot EVENT must scatter the instanced crowd AWAY ----
-  if (CBZ.cityCrowdFlee) {
-    CBZ.crowdMassFlee = true;
-    const threat = CBZ.cityCrowdAgent(0), tpx = threat.x, tpz = threat.z, R = 50;
-    const near = [], nd0 = [];
-    for (let i = 0; i < CBZ.cityCrowdCount(); i++) {
-      const a = CBZ.cityCrowdAgent(i), d = Math.hypot(a.x - tpx, a.z - tpz);
-      if (d < R) { near.push(i); nd0.push(d); }
-    }
-    // trigger via the real event bus when it's loaded (tests the full wiring), else
-    // call the crowd hook directly (cityevents.js isn't in the harness load set).
-    if (CBZ.cityPostEvent) CBZ.cityPostEvent({ type: "gunshot", pos: { x: tpx, z: tpz }, radius: R, intensity: 1 });
-    else CBZ.cityCrowdFlee(tpx, tpz, R, 1);
-    for (let f = 0; f < 90; f++) step(1 / 60);                       // ~1.5s of panic
-    let aBefore = 0, aAfter = 0;
-    near.forEach((i, k) => { aBefore += nd0[k]; const a = CBZ.cityCrowdAgent(i); aAfter += Math.hypot(a.x - tpx, a.z - tpz); });
-    const avgB = aBefore / (near.length || 1), avgA = aAfter / (near.length || 1);
-    ok("crowd flees a gunshot (mass flee #8)", near.length >= 3 && avgA > avgB + 2,
-      near.length + " near, avg dist " + avgB.toFixed(1) + "→" + avgA.toFixed(1) + "m");
-    CBZ.crowdMassFlee = false;                                       // restore default for later tests
-  }
-
-  if (fails > 0) { console.log("RESULT: FAIL (crowd tests, " + fails + ")"); process.exit(1); }
-  console.log("  city mass-crowd OK");
+  console.log("== city street-life smoke ==");
+  if (!CBZ.streetLife || !CBZ.crowds) { console.log("  (no crowd store loaded — skipped; see tools/streetlife-check.mjs)"); return; }
+  for (let f = 0; f < 180; f++) step(1 / 60);
+  const a = CBZ.streetLife.audit();
+  if (!(a.rows > 0)) { console.error("  ✗ FAIL the street is empty after 3 s " + JSON.stringify(a)); process.exit(1); }
+  console.log("  ✓ " + a.rows + " people on the street, " + Math.round(a.grouped * 100) + "% in groups");
 }
 
 // ---- Zillow property/business market ----

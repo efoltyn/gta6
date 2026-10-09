@@ -110,12 +110,24 @@
     // down, head first along the heading)
     { id: "limp", gait: true, speed: 0.7, n: 24, imp: 8 },
     { id: "crawl", gait: true, speed: 0.8, prone: true, n: 20, imp: 8 },
+    // THE STREET (city/streetlife.js): talking with the hands, on the phone,
+    // a smoke outside the office, standing and walking. Appended (indices of
+    // the clips above never move). `impOf`: at impostor range a gesture is
+    // under a pixel, so these share the impostor frames of the clip named
+    // (the atlas stays inside 4096 px on every GPU).
+    { id: "talk", gait: false, pose: "talk", period: 5.6, n: 16, impOf: "idle" },
+    { id: "talkWalk", gait: true, speed: 1.3, overlay: "talkWalk", n: 24, impOf: "walk" },
+    { id: "phone", gait: false, pose: "phone", period: 4.0, n: 6, impOf: "idle" },
+    { id: "phoneWalk", gait: true, speed: 1.3, overlay: "phoneWalk", n: 24, impOf: "walk" },
+    { id: "smoke", gait: false, pose: "smoke", period: 5.2, n: 16, impOf: "idle" },
   ];
   const CLIP_IX = Object.create(null);
   let ROWS = 0, IMP_ROWS = 0;
   for (let i = 0; i < CLIPS.length; i++) {
     const c = CLIPS[i];
-    c.index = i; c.row0 = ROWS; ROWS += c.n; c.imp0 = IMP_ROWS; IMP_ROWS += c.imp;
+    c.index = i; c.row0 = ROWS; ROWS += c.n;
+    if (c.impOf) { const o = CLIP_IX[c.impOf]; c.imp0 = o.imp0; c.imp = o.imp; }
+    else { c.imp0 = IMP_ROWS; IMP_ROWS += c.imp; }
     c.radPerM = 0; c.phase0 = 0;
     CLIP_IX[c.id] = c;
   }
@@ -533,6 +545,7 @@
         scene.add(mesh);
         for (let c = 0; c < CLIPS.length; c++) {
           const C = CLIPS[c];
+          if (C.impOf) continue;              // shares another clip's frames
           for (let f = 0; f < C.imp; f++) {
             const row = C.imp0 + f;
             // the impostor's frame f samples the VAT clip evenly

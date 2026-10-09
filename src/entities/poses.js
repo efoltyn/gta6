@@ -204,6 +204,45 @@
       const beat = b0 * b0 * (3 - 2 * b0);              // eased, no kink at the bottom of the beat
       crowdArms(ch, dt, -0.15, ch.armOutZ || 0.08, -2.25 - beat * 0.6, -0.12, -0.35, -1.1 + beat * 0.9);
     },
+    // ---- THE STREET'S ARMS (city/streetlife.js). People on a pavement talk
+    // with their hands, hold a phone to the ear, smoke outside the office.
+    // Rows here for the same reason as the crowd's: crowdgpu.js BAKES them, so
+    // a person across the street and the same person promoted to a full rig
+    // make the same gesture. ch._pubT is the pose clock, ch._pubPh the offset.
+    // talking: the right hand comes up and turns over at chest height on the
+    // beat of a sentence, the left forearm lifts a little with it
+    talk(ch, dt) {
+      ch._pubT = (ch._pubT || 0) + dt;
+      // one loop is 5.6 s (crowdgpu bakes exactly one): a sentence, a beat
+      const t = ch._pubT + (ch._pubPh || 0), w = (Math.PI * 2) / 5.6;
+      const s = Math.sin(t * w * 2), b = Math.max(0, Math.sin(t * w));
+      crowdArms(ch, dt, -0.12 - b * 0.18, 0.1, -0.55 - b * 0.35 - s * 0.12, -0.18 - s * 0.06, -0.35 - b * 0.4, -1.25 - s * 0.25);
+    },
+    // walking and talking: ONLY the right arm, held up mid-sentence; the left
+    // keeps the gait's swing (a gait overlay: animChar has written the left)
+    talkWalk(ch, dt) {
+      const ra = ch.parts && ch.parts.ra, J = ch.low || {};
+      if (ra) { ra.rotation.x = damp(ra.rotation.x, -0.62, 12, dt); ra.rotation.z = damp(ra.rotation.z, -0.16, 12, dt); }
+      elbow(J.ra, -1.2, dt, 12);
+    },
+    // a phone held to the right ear, the left arm easy
+    phone(ch, dt) {
+      crowdArms(ch, dt, -0.05, 0.08, -0.55, -0.42, -0.15, -2.35);
+    },
+    // walking on the phone: the right hand stays at the ear, the left swings
+    phoneWalk(ch, dt) {
+      const ra = ch.parts && ch.parts.ra, J = ch.low || {};
+      if (ra) { ra.rotation.x = damp(ra.rotation.x, -0.55, 12, dt); ra.rotation.z = damp(ra.rotation.z, -0.42, 12, dt); }
+      elbow(J.ra, -2.35, dt, 12);
+    },
+    // a cigarette: the hand comes up to the mouth for a draw every few
+    // seconds, rests at the waist between
+    smoke(ch, dt) {
+      ch._pubT = (ch._pubT || 0) + dt;
+      const t = ((ch._pubT + (ch._pubPh || 0)) % 5.2) / 5.2;
+      const up = t < 0.12 ? t / 0.12 : t < 0.32 ? 1 : t < 0.44 ? 1 - (t - 0.32) / 0.12 : 0;
+      crowdArms(ch, dt, -0.05, 0.08, -0.35 - up * 0.45, -0.2 - up * 0.2, -0.2, -0.85 - up * 1.45);
+    },
     // explicit neutral (defensive no-op; setCharPose maps "stand" -> null so the
     // idle gait owns the arms instead of freezing them here).
     stand(ch, dt) {},

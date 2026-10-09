@@ -1120,7 +1120,7 @@
       struct: row.struct * (strScale / fxScale), fire: row.fire,
       by: opts.by, byPlayer: !!opts.byPlayer, carBlastId: opts._carBlastId || 0,
       t: 0, r: 0,
-      peds: [], pedHead: 0, crowd: [], crowdHead: 0,
+      peds: [], pedHead: 0,
       cars: [], carHead: 0, structures: [], structHead: 0, thermalHead: 0,
       glass: [], glassHead: 0,
       playerAt: -1, playerHit: false, listenerAt: -1, listenerHit: false,
@@ -1143,13 +1143,6 @@
       if (d <= maxR) w.cars.push({ ref: cv, d: d, at: nuclearShockArrival(d, fireR) });
     }
 
-    // The ambient crowd and city lots own flat/internal storage, so their
-    // owners expose one-shot target planners rather than making this file peek
-    // through their representation or rescan them every band.
-    if (CBZ.cityCrowdBlastTargets) {
-      try { w.crowd = CBZ.cityCrowdBlastTargets(x, z, maxR) || []; } catch (e) { w.crowd = []; }
-      for (let i = 0; i < w.crowd.length; i++) w.crowd[i].at = nuclearShockArrival(w.crowd[i].d, fireR);
-    }
     // THE CROWDS (entities/crowdstore.js): every row inside the 5 psi ring
     // dies at once, the rest by the same lethality curve, counted by ring and
     // reported with the city's own population under it
@@ -1170,7 +1163,7 @@
     }
 
     const byTime = function (a, b) { return a.at - b.at; };
-    w.peds.sort(byTime); w.crowd.sort(byTime); w.cars.sort(byTime); w.structures.sort(byTime);
+    w.peds.sort(byTime); w.cars.sort(byTime); w.structures.sort(byTime);
     while (w.thermalHead < w.structures.length && w.structures[w.thermalHead].d <= w.thermal) w.thermalHead++;
     w.thermalEnd = w.thermalHead;
     w.thermalHead = 0;
@@ -1217,23 +1210,6 @@
     if (!p.inCar && drag > 0.45 && CBZ.body && CBZ.body.hit) {
       try { CBZ.body.hit(p, { dir: dir, force: drag,
         knockdown: psi * exposure >= 2 ? 1.2 + Math.min(1.2, psi * 0.04) : 0 }); } catch (e) {}
-    }
-  }
-
-  function applyNuclearCrowd(w, job) {
-    const psi = nuclearPressureAt(job.d, w.fireR);
-    const pk = lethalFor(w, job.d);
-    if (pk > 0 && hash01(job.x, job.z, (w.id | 0) + 0x6e75) < pk) {
-      if (CBZ.cityCrowdKill) {
-        try { CBZ.cityCrowdKill(job.i, { quiet: true, fromX: w.x, fromZ: w.z,
-          noCrime: !w.byPlayer, byPlayer: w.byPlayer, cause: "nuclear blast" }); } catch (e) {}
-      }
-    } else if (CBZ.cityCrowdBlastHit) {
-      const n = Math.hypot(job.x - w.x, job.z - w.z) || 1;
-      try { CBZ.cityCrowdBlastHit(job.i, {
-        x: (job.x - w.x) / n, z: (job.z - w.z) / n,
-        speed: nuclearDragAt(job.d, w.fireR), knockdown: psi >= 2,
-      }); } catch (e) {}
     }
   }
 
@@ -1399,7 +1375,6 @@
       // eight-per-frame law as the pressure hits below.
       () => drainNuclearThermal(8),
       () => drainNuclearJobs("peds", "pedHead", 32, applyNuclearPed),
-      () => drainNuclearJobs("crowd", "crowdHead", 96, applyNuclearCrowd),
       () => drainNuclearJobs("cars", "carHead", 24, applyNuclearCar),
       // 8, not 16: the doctrine's "maximum eight structural hits per frame"
       // law — tools/test-nuke-freeze-node.mjs measures the ledger delta and
@@ -1413,8 +1388,7 @@
 
     for (let i = nuclearFields.length - 1; i >= 0; i--) {
       const w = nuclearFields[i];
-      if (w.t < w.endAt || w.pedHead < w.peds.length ||
-          w.crowdHead < w.crowd.length || w.carHead < w.cars.length ||
+      if (w.t < w.endAt || w.pedHead < w.peds.length || w.carHead < w.cars.length ||
           w.structHead < w.structures.length || w.thermalHead < w.thermalEnd ||
           w.glassHead < w.glass.length) continue;
       nuclearFields.splice(i, 1);
@@ -1658,77 +1632,6 @@
     //     encodes the lethal-core rule (0.55R) the owner tuned after filming
     //     "kills a huge amount of people", and duplicating it here would let
     //     the two drift apart. Reuse beats re-derive.
-    // cityCrowdCircleKill takes a DISC, not a ring, so every call re-scans the
-    // already-cleared core. Worse, the old low-probability branch called it SIX
-    // times per band. cityCrowdAnnulusKill is the canonical one-pass form: one
-    // scan, only the newly reached band, deterministic thinning. The disc path
-    // remains solely as a partial-load fallback.
-    /* ---- HOW MANY OF THEM DIE, AND IT IS A MEASURED NUMBER ----------------
-       OWNER: "the amount of DEATH in the radius should also be REAL based on
-       the research — the percentage."
-
-       `frac > 0.25` was a CLIFF: everyone inside 0.75*maxR died and nobody
-       outside it did. That is the "flat blast" the owner objects to, and it
-       is not what a nuclear weapon does to a city — Hiroshima killed 86% of
-       the people in the first 500 m, 51% at 1.0-1.5 km and 2.4% at 2.5-3 km,
-       and the gradient between those is the whole shape of the event.
-
-       lethalFor(w, r) is the ONE answer. For the nuke row it is
-       city/nukefx.js's CBZ.nukeLethalAt — the USSBS Hiroshima survey's
-       measured killed-by-distance curve, cube-root scaled to this row's own
-       inverted yield. For every other row it returns the old boolean
-       verbatim, so nothing but the nuke changes by one frame.
-
-       THE ROLL IS A POSITION HASH, NEVER Math.random. A death is gameplay,
-       not FX: two clients in a multiplayer city must agree about who is
-       standing up afterwards, and CBZ.hash01(x, z, salt) is this repo's
-       determinism primitive. Same person, same wave, same verdict, every
-       machine. */
-    if ((CBZ.cityCrowdAnnulusKill || CBZ.cityCrowdCircleKill) &&
-        frac > 0.35 && r1 - (w.crowdR || 0) > 18) {
-      w.crowdR = r1;
-      const pk = lethalFor(w, r1);
-      if (CBZ.cityCrowdAnnulusKill) {
-        try {
-          CBZ.cityCrowdAnnulusKill(w.x, w.z, r0, r1, pk >= 0.5 ? 1 : pk, {
-            byCar: false, quiet: true, fromX: w.x, fromZ: w.z,
-            noCrime: !w.byPlayer, byPlayer: w.byPlayer,
-            cause: w.kind === "nuke" ? "nuclear blast" : "explosion",
-            salt: (w.id | 0) + 0x6e75,
-          });
-        } catch (e) {}
-      } else {
-        /* Partial-load fallback. The instanced crowd has no exposed identity,
-           so the pre-annulus build used a full disc above 50% lethality and
-           six deterministic patches below it. Keep that established visual
-           result only when crowd.js has not loaded the one-pass owner. */
-        if (pk >= 0.5) {
-          try {
-            CBZ.cityCrowdCircleKill(w.x, w.z, r1, {
-              byCar: false, quiet: true, fromX: w.x, fromZ: w.z,
-              noCrime: !w.byPlayer, byPlayer: w.byPlayer,
-              cause: w.kind === "nuke" ? "nuclear blast" : "explosion",
-            });
-          } catch (e) {}
-        } else if (pk > 0.004 && r1 > r0) {
-          const band = Math.PI * (r1 * r1 - r0 * r0);
-          const N = 6;                                   // fallback-only cap
-          const rp = Math.sqrt(Math.max(1, pk * band / (Math.PI * N)));
-          for (let k = 0; k < N; k++) {
-            const hs = hash01(w.x + k * 37.1, w.z + r1, (w.id | 0) + k);
-            const a = hs * 6.2832;
-            const rr = r0 + (r1 - r0) * hash01(w.z + k * 11.7, w.x + r1, (w.id | 0) + k + 91);
-            try {
-              CBZ.cityCrowdCircleKill(w.x + Math.cos(a) * rr, w.z + Math.sin(a) * rr, rp, {
-                byCar: false, quiet: true, fromX: w.x, fromZ: w.z,
-                noCrime: !w.byPlayer, byPlayer: w.byPlayer,
-                cause: w.kind === "nuke" ? "nuclear blast" : "explosion",
-              });
-            } catch (e) {}
-          }
-        }
-      }
-    }
     if (CBZ.cityPeds && CBZ.cityKillPed) {
       const peds = CBZ.cityPeds;
       for (let i = 0; i < peds.length; i++) {

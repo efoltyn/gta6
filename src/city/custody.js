@@ -810,7 +810,7 @@
     else p.restraint = null;
     if (p._custody) p._custody.state = "gone";
     // a crowd body: its street row is consumed (he will not walk this street again)
-    if (p._crowd && CBZ.cityCrowdRetire) { const ok = safe(function () { return CBZ.cityCrowdRetire(p); }); if (ok === false) { /* not pooled */ } }
+    if (p._crowd && CBZ.streetLife && CBZ.streetLife.retire) safe(function () { return CBZ.streetLife.retire(p); });
     if (CBZ.cityUnpostNpc) safe(function () { CBZ.cityUnpostNpc(p); });
     else if (p.group && p.group.parent) p.group.parent.remove(p.group);
     p._gone = true;

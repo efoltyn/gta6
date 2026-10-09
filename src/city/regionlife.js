@@ -55,21 +55,18 @@
   // mix; the actual count rides the LIVE quality tier (scaled ×0.5..×2 at the
   // read site, mid-tier ≈ these base numbers), then clamped under REGION_CAP.
   // 'city'
-  // = 0: the mainland crowd owns those streets — we never add there. These are
-  // small "special" counts: the instanced biome bubble in crowd.js carries the
-  // ambient mass now, so here we keep only the characterful/armed/jobbed rigs.
-  // BIOME_BUDGET_FULL (the OLD pre-bubble counts, for revert if crowd.js's
-  // CBZ.crowdBiomeBubble is turned off and regionlife must carry the mass again):
-  //   { city:0, speedway:14, airport:16, military:10, desert:8, forest:9, farmland:10, snow:8 }
+  // = 0: the street population (city/streetlife.js) owns the city's
+  // pavements: the downtown grid and every planned city's blocks. Outside
+  // those (the base, the farms, the airport, the mini-cities, the country
+  // settlements) THIS file carries the people: crowd.js's instanced biome
+  // bubble that used to carry the mass out here is gone (2026-10-09), so
+  // these are the old pre-bubble counts again (REGION_CAP still clamps).
   var BIOME_BUDGET = {
-    city: 0, military: 5, farmland: 3, forest: 3,
-    desert: 3, airport: 3, speedway: 2, snow: 2,
-    // T6 — the 4 urban mini-cities (citytemplates/minicities). Kept modest
-    // (≤4, under REGION_CAP): the instanced crowd bubble carries the MASS;
-    // regionlife only streams the few characterful/jobbed full rigs each
-    // place needs to read as itself (dockworkers, suits, gamblers, factory
-    // hands) — plus its lone guard/bouncer/foreman.
-    capeharbor: 4, goldspire: 4, neonreef: 4, foundry: 3,
+    city: 0, military: 10, farmland: 10, forest: 9,
+    desert: 8, airport: 16, speedway: 14, snow: 8,
+    // T6 — the 4 urban mini-cities (citytemplates/minicities): dockworkers,
+    // suits, gamblers, factory hands, plus a guard/bouncer/foreman each.
+    capeharbor: 8, goldspire: 8, neonreef: 8, foundry: 6,
     // X5 — the 4 new countries' settlements (city/countries.js), keyed by
     // SETTLEMENT id (registerCityRegion stamps `biome: s.id` — see that
     // file's buildSettlement), same convention as the mini-cities above.
@@ -81,9 +78,8 @@
     keshtown: 4, kesh_north: 3, kesh_east: 3,
     solaracity: 4,
     mbeyacity: 4, mbeya_west: 3, mbeya_south: 3, mbeya_east: 3,
-    // THE PLANNED CITIES (city/metro.js). Same doctrine as the mini-cities:
-    // the crowd bubble carries the mass, these are the few full rigs with a
-    // job. A metro is the biggest place in the world, so it gets the most.
+    // THE PLANNED CITIES (city/metro.js): city/streetlife.js puts the crowds
+    // on their pavements; these are the few full rigs with a job.
     kingsport: 5, cityborough: 4,
     karvel: 2,              // the planned capital: wide streets, few people on them
   };

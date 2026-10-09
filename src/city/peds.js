@@ -271,9 +271,9 @@
   //  FINITE, NON-REGENERATING POPULATION (the "headcount").
   //  The city starts with a fixed living total and only ever goes DOWN as people
   //  die — there is no respawning. Both death paths (cityKillPed here for named
-  //  rigs, cityCrowdKill in crowd.js for the ambient instanced mass) decrement the
-  //  same `_alive` counter, and the ambient crowd's target density is derived FROM
-  //  the remaining living count (crowd.js reads CBZ.cityPopulation()), so the
+  //  rigs, city/streetlife.js for its GPU-crowd rows) decrement the same
+  //  `_alive` counter, and the street's target density is derived FROM the
+  //  remaining living count (streetlife.js reads CBZ.cityPopulation()), so the
   //  streets visibly THIN after a massacre instead of magically refilling.
   //  Total is initialized lazily on first city spawn from the configured ped +
   //  crowd counts (a few hundred), so it tracks however busy the city is built.
@@ -2840,9 +2840,9 @@
     // beside him rattled). gangs.js reads morale.broken for the rout.
     if (CBZ.cityBrain) CBZ.cityBrain.memberDown(ped);
     // FINITE POPULATION: a named rig just died → tick the city headcount DOWN.
-    // Promoted crowd rigs (ped._crowd) die through HERE (they're real peds);
-    // un-promoted ambient agents die through cityCrowdKill (crowd.js) — the two
-    // paths are mutually exclusive per individual, so every distinct death
+    // Promoted street rigs (ped._crowd) die through HERE (they're real peds);
+    // un-promoted street rows die in the crowd store (streetlife.js counts
+    // them) — the two paths are mutually exclusive per person, so every death
     // decrements the roster EXACTLY once. Cops aren't part of the civilian
     // populace and never route through cityKillPed, so the headcount stays clean.
     if (CBZ.cityPopulationDie) CBZ.cityPopulationDie(1);
