@@ -98,12 +98,12 @@
     }
     function free(x0, z0, x1, z1) {
       if (hits(places, x0, z0, x1, z1) || hits(roads, x0, z0, x1, z1) || hits(taken, x0, z0, x1, z1)) return false;
-      // the freeway buffer and protected ground, sampled at the corners + centre
+      // protected land (bases, airfields, bunkers + their clear buffer): the
+      // whole footprint, not a few sample points
+      if (Z.protectedHit ? Z.protectedHit(x0, z0, x1, z1) : Z.protectedAt((x0 + x1) / 2, (z0 + z1) / 2)) return false;
+      // the freeway buffer, sampled at the corners + centre
       const pts = [[x0, z0], [x1, z0], [x0, z1], [x1, z1], [(x0 + x1) / 2, (z0 + z1) / 2]];
-      for (const p of pts) {
-        if (Z.freewayEdge(p[0], p[1]) < Z.BUFFER) return false;
-        if (Z.protectedAt(p[0], p[1])) return false;
-      }
+      for (const p of pts) if (Z.freewayEdge(p[0], p[1]) < Z.BUFFER) return false;
       return true;
     }
     function take(x0, z0, x1, z1, pad) {

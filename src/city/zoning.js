@@ -34,6 +34,11 @@
      freewayEdge(x, z)  metres from the nearest freeway deck edge (the
                         filleted centreline highways.js draws, when loaded).
      inFreewayBuffer(x, z, pad)  no homes here: the verge + sound buffer.
+     protectedAt / protectedHit  protected land (bases, airfields, bunkers,
+                        estates), each with its clear buffer. No generator
+                        builds or lays a street there.
+     CBZ.protectedSite(id)  where a fixed fixture (the B-2 pad, the Brandt
+                        shelter) stands, riding the layout dial.
      snapshot()         the field on a 100 m grid, for tools/layout-audit.mjs.
 
    WHO READS IT: city/metroplan.js (through city/metro.js planSite: the
@@ -49,6 +54,37 @@
 (function (G) {
   "use strict";
   const CBZ = (G.CBZ = G.CBZ || {});
+
+  // ---- PROTECTED LAND: bases, airfields, bunkers. The region rect is the
+  //      fence; the BUFFER is the clear ground round it no generator may
+  //      build or lay a street in (a runway's clear zone, a base's
+  //      standoff). Airfields keep 60 m, a military base 80 m, a fixture 30.
+  const PROTECT_BUFFER = { military: 80, airport: 60 };
+  const FIXTURE_BUFFER = 30;
+  // THE FIXED FORT BRANDT HARDWARE, in the base's AUTHORED (stage-1) frame.
+  // The base rides the layout dial (island_military.js: CBZ.worldOff
+  // ("military"), today dx -900 dz -480); everything parked on it must ride
+  // the same dial. strategic.js used to park the B-2 at the authored literal
+  // (-560, -566) and bunkers.js dug the deep shelter at (-762, -872): after
+  // stage 2 moved the island those spots were the mainland, and by stage 4
+  // the B-2 stood in Gang City West between office blocks while its base was
+  // 1 km away. They ask here now (CBZ.protectedSite), so there is one answer.
+  //   b2-pad          the parked B-2 (52.4 m span along x, 21 m long), just
+  //                   north of the strip, nose toward the runway
+  //   brandt-shelter  the command bunker, NW quadrant
+  const FIXTURES = {
+    "b2-pad":         { base: "military", ax: -560, az: -566, w: 52.4, d: 21 },
+    "brandt-shelter": { base: "military", ax: -762, az: -872, w: 36, d: 30 },
+  };
+  function protectedSite(id) {
+    const f = FIXTURES[id];
+    if (!f) return null;
+    const o = (CBZ.worldOff && CBZ.worldOff(f.base)) || { dx: 0, dz: 0 };
+    const cx = f.ax + o.dx, cz = f.az + o.dz;
+    return { id: id, name: id, kind: "fixture", base: f.base, cx: cx, cz: cz, w: f.w, d: f.d,
+      minX: cx - f.w / 2, maxX: cx + f.w / 2, minZ: cz - f.d / 2, maxZ: cz + f.d / 2, buffer: FIXTURE_BUFFER };
+  }
+  CBZ.protectedSite = protectedSite;
 
   // ---- the curve (metroplan.js landValue's): 1 at the centre, ~0.16 at R
   function fall(t) { return t <= 0 ? 1 : Math.exp(-1.84 * Math.pow(t, 1.4)); }
@@ -122,14 +158,22 @@
     }
 
     // 2. PROTECTED SITES: compounds, estates, civic sites (regions with no
-    //    biome that are not roads), and the airport / base / arena / track
+    //    biome that are not roads), and the airport / base / arena / track.
+    //    A base or an airfield carries its BUFFER (PROTECT_BUFFER); its
+    //    road-like links (an airport causeway) are roads, not apron, and
+    //    keep none. A bunker's region (a remote shelter) is a fixture.
     for (const r of regions) {
       if (!r || r.metro || r.underlay || r.kind === "circle") continue;
       const b = r.biome || "";
       if ((!b && r.name && !ROADLIKE.test(r.name)) || PROTECT_BIOMES.test(b)) {
-        Z.protect.push({ minX: r.minX, maxX: r.maxX, minZ: r.minZ, maxZ: r.maxZ, name: r.name || b, kind: b || "estate" });
+        const w = r.maxX - r.minX, d = r.maxZ - r.minZ;
+        const link = ROADLIKE.test(r.name || "") && Math.min(w, d) <= 40;
+        const bunker = !b && /station|shelter|bunker/i.test((r.name || "") + " " + (r.subtitle || ""));
+        const buffer = link ? 0 : (PROTECT_BUFFER[b] || (bunker ? FIXTURE_BUFFER : 0));
+        Z.protect.push({ minX: r.minX, maxX: r.maxX, minZ: r.minZ, maxZ: r.maxZ, name: r.name || b, kind: b || (bunker ? "bunker" : "estate"), buffer: buffer });
       }
     }
+    for (const id in FIXTURES) Z.protect.push(protectedSite(id));
 
     // 3. FREEWAYS: the network's routes (filleted exactly as highways.js
     //    draws them, when it is loaded) + the 3+3 island causeways
@@ -169,10 +213,25 @@
     Z.inFreewayBuffer = function (x, z, ext, pad) {
       return Z.freewayEdge(x, z) - (ext || 0) < (pad == null ? FREEWAY_BUFFER : pad);
     };
+    // a point on protected land (its buffer included)
     Z.protectedAt = function (x, z) {
-      for (const p of Z.protect) if (x >= p.minX && x <= p.maxX && z >= p.minZ && z <= p.maxZ) return p;
+      for (const p of Z.protect) {
+        const b = p.buffer || 0;
+        if (x >= p.minX - b && x <= p.maxX + b && z >= p.minZ - b && z <= p.maxZ + b) return p;
+      }
       return null;
     };
+    // a footprint (AABB) touching protected land (its buffer included)
+    Z.protectedHit = function (minX, minZ, maxX, maxZ) {
+      for (const p of Z.protect) {
+        const b = p.buffer || 0;
+        if (maxX > p.minX - b && minX < p.maxX + b && maxZ > p.minZ - b && minZ < p.maxZ + b) return p;
+      }
+      return null;
+    };
+    // the sites that carry a buffer: bases, airfields, bunkers, fixtures
+    // (metro.js plans round them at that pad; the node check reads them)
+    Z.airfields = function () { return Z.protect.filter(function (p) { return (p.buffer || 0) > 0; }); };
     Z.intensityAt = function (x, z) {
       let v = 0;
       for (const c of Z.centres) {
@@ -224,6 +283,7 @@
     CBZ.zoning = Z;
     return Z;
   };
-  CBZ.zoningLib = { build: build, fall: fall, CORE_ST: CORE_ST, FLOOR_ST: FLOOR_ST, FREEWAY_BUFFER: FREEWAY_BUFFER };
+  CBZ.zoningLib = { build: build, fall: fall, CORE_ST: CORE_ST, FLOOR_ST: FLOOR_ST, FREEWAY_BUFFER: FREEWAY_BUFFER,
+    PROTECT_BUFFER: PROTECT_BUFFER, FIXTURE_BUFFER: FIXTURE_BUFFER, protectedSite: protectedSite };
   if (typeof module !== "undefined" && module.exports) module.exports = CBZ.zoningLib;
 })(typeof window !== "undefined" ? window : globalThis);

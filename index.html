@@ -1342,7 +1342,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- STRATEGIC LAYER part 1 — hardened bunkers (Fort Brandt command shelter
      w/ the nuclear vault + mountain/desert finds). Landmass order 40: after
      the military island (22) and both biome height fields (30/31). -->
-<script src="src/city/bunkers.js?v=fac1009"></script>
+<script src="src/city/bunkers.js?v=fortb1009"></script>
 <!-- 4d-3. WILD NATURE — lush instanced trees/rocks/grass forested onto the
      far backdrop relief (world/terrain.js). Self-registers as a high-order
      landmass; runs via cityWorldGeo after terrain + biomes exist. -->
@@ -1774,7 +1774,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- STRATEGIC LAYER part 2 — the B-2 (registers into the militaryvehicles
      seam above), the bunker-buster and the nuke. Conventional blasts use the
      wrapped explosion chain; the nuke uses impactbus's analytic field. -->
-<script src="src/city/strategic.js?v=nuke1009b"></script>
+<script src="src/city/strategic.js?v=fortb1009"></script>
 <script src="src/city/squadai.js?v=sim1"></script>
 <script src="src/city/loyalty.js?v=cd0929"></script>
 <!-- sims-overhaul wave 2: living economy + universal housing + place/scene spawning + mini-cities + racing + destruction (additive, feature-detected, self-flagged) -->
@@ -1788,18 +1788,18 @@ document.body.appendChild(b);}}catch(e){}})();
      Kingsport metro + the city rings at landmass order 43 and streams their tiles by distance. -->
 <!-- THE WORLD'S ONE ZONING FIELD (layout wave): intensity, use, the ceiling a grown district may rise to,
      the freeway frontage buffer. Pure data off the regions + highway table; metro.js plans with it. -->
-<script src="src/city/zoning.js?v=layout2b"></script>
-<script src="src/city/metroplan.js?v=layout2g"></script>
+<script src="src/city/zoning.js?v=fortb1009"></script>
+<script src="src/city/metroplan.js?v=fortb1009"></script>
 <!-- THE COUNTRYSIDE (layout wave 2): farms, roadside houses and the gas stop + diner at each country-road
      junction, planned from the zoning field; metro.js streams it through the fabric tiles. -->
-<script src="src/city/countryside.js?v=layout2b"></script>
+<script src="src/city/countryside.js?v=fortb1009"></script>
 <script src="src/city/metro_fabric.js?v=fac1009"></script>
 <!-- REAL GRASS (owner: "when you walk on grass it's just fucking green"): instanced lit blades round
      the camera on every grass surface, fed by CBZ.groundCover (the ONE land-use + ground-colour
      query: cityground 10, metro_ground 20, continent 90 register into it, so it loads before them). -->
 <script src="src/world/grassfield.js?v=grass0929c"></script>
 <script src="src/city/metro_ground.js?v=ground1008c"></script>
-<script src="src/city/metro.js?v=layout2g"></script>
+<script src="src/city/metro.js?v=fortb1009"></script>
 <script src="src/city/metro_structs.js?v=wreal0929"></script>
 <script src="src/city/spawnplaces.js?v=sim2"></script>
 <script src="src/city/scenedirector.js?v=w09290218"></script>
@@ -2407,7 +2407,7 @@ document.body.appendChild(b);}}catch(e){}})();
      strategic.js (the release, the B-2 sortie, the nuke) and the impact bus.
      Emits war/airstrike/nuke events on CBZ.presidency's bus. After
      presidency.js and president_staff.js; everything is read lazily. -->
-<script src="src/city/warroom.js?v=bodyfix1009b"></script>
+<script src="src/city/warroom.js?v=fortb1009"></script>
 <script src="src/city/frontline.js?v=flagfix1001"></script>
 <script src="src/city/perimeter.js?v=gateprotest2"></script>
 <script src="src/city/president_public.js?v=gateprotest2"></script>

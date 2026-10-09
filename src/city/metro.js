@@ -249,10 +249,22 @@
   function worldConstraints(city, site, planned) {
     const box = padR(site.bounds, 60);
     const obstacles = [], corridors = [];
+    // PROTECTED LAND (city/zoning.js): bases, airfields, bunkers and the
+    // fixed Fort Brandt hardware, each planned round at its OWN clear buffer
+    // (60-80 m) rather than the 16 m a compound gets. No building, no
+    // street, no arterial stub inside it.
+    const Z = CBZ.zoningFor ? CBZ.zoningFor(city) : null;
+    const guarded = new Set();
+    for (const p of (Z && Z.airfields ? Z.airfields() : [])) {
+      guarded.add(p.minX + "," + p.maxX + "," + p.minZ + "," + p.maxZ);
+      if (!hit(padR(p, p.buffer), box)) continue;
+      obstacles.push({ minX: p.minX, maxX: p.maxX, minZ: p.minZ, maxZ: p.maxZ, name: p.name, pad: Math.max(16, p.buffer) });
+    }
     // regions: road-like ones are corridors (crossed at grade), the rest
     // are places nobody builds on
     for (const r of city.regions || []) {
       if (!r || r.underlay || r.biome === "wilds" || r.metro) continue;   // metro cities: `planned` below
+      if (guarded.has(r.minX + "," + r.maxX + "," + r.minZ + "," + r.maxZ)) continue;   // protected land: above
       const R = { minX: r.minX, maxX: r.maxX, minZ: r.minZ, maxZ: r.maxZ };
       if (!hit(R, box)) continue;
       if (site.cores && site.cores.some(function (c) { return inside(R, padR(c, 30)); })) continue;   // the core's own region

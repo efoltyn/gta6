@@ -990,7 +990,13 @@
     if (CBZ.CONFIG.STRAT_B2 === false) return;
     const root = city.root || CBZ.scene;
     const made = makeB2();
-    const wx = -560, wz = -566, rotY = Math.PI;        // nose toward the runway
+    // THE PAD RIDES THE BASE. This was the authored literal (-560, -566):
+    // once the layout dial moved Fort Brandt (dx -900, dz -480) that spot was
+    // Gang City West, and the B-2 parked between its office blocks. The spot
+    // is protected land now, published once by city/zoning.js.
+    const pad = (CBZ.protectedSite && CBZ.protectedSite("b2-pad")) ||
+      (function () { const o = (CBZ.worldOff && CBZ.worldOff("military")) || { dx: 0, dz: 0 }; return { cx: -560 + o.dx, cz: -566 + o.dz }; })();
+    const wx = pad.cx, wz = pad.cz, rotY = Math.PI;     // nose toward the runway
     made.group.position.set(wx, 0, wz);
     made.group.rotation.y = rotY;
     made.group.userData.milKind = "plane";

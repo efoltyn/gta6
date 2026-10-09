@@ -727,6 +727,34 @@
       const s = Object.assign({ id: sid++, k: k, w: w, pts: pts }, extra || {});
       P.streets.push(s); return s;
     }
+    // A CELL STREET STOPS AT THE FENCE. The suburb and hood templates draw
+    // their collectors and locals across the WHOLE cell, edge to edge; when a
+    // padded obstacle (a base's or an airfield's clear buffer, a compound)
+    // takes a bite out of the cell, the houses avoided it but the street ran
+    // straight through. This keeps the longest run of segments clear of every
+    // padded obstacle (the carriageway's half-width included), or null when
+    // nothing worth a street is left. `whole`: a ring or a cul-de-sac is all
+    // or nothing (a cut ring is no loop, a cut spur loses its bulb).
+    function landPts(pts, w, whole) {
+      if (!obstacles.length) return pts;
+      const h = w / 2;
+      let best = [], run = [];
+      for (let i = 0; i + 1 < pts.length; i++) {
+        const a = pts[i], b = pts[i + 1];
+        const clear = !obstacleHit(Math.min(a.x, b.x) - h, Math.min(a.z, b.z) - h, Math.max(a.x, b.x) + h, Math.max(a.z, b.z) + h);
+        if (clear) { if (!run.length) run.push(a); run.push(b); }
+        else { if (whole) return null; if (run.length > best.length) best = run; run = []; }
+      }
+      if (run.length > best.length) best = run;
+      if (best.length < 2) return null;
+      let len = 0;
+      for (let i = 0; i + 1 < best.length; i++) len += Math.hypot(best[i + 1].x - best[i].x, best[i + 1].z - best[i].z);
+      return len >= 30 ? best : null;
+    }
+    function landStreet(k, pts, w, extra, whole) {
+      const q = landPts(pts, w, whole);
+      return q ? addStreet(k, q, w, extra) : null;
+    }
     // ARTERIALS: every line, clipped to where the plan actually builds
     // (cells not void) plus a country-road continuation every other line.
     function lineUse(axis, idx) {
@@ -1259,13 +1287,16 @@
         // two cul-de-sacs into the middle, a pocket park at its heart
         const r = 30;
         const ring = roundedRect(x0 + inset - artHalf, z0 + inset - artHalf, x1 - inset + artHalf, z1 - inset + artHalf, r, 6);
-        streets.push(addStreet("col", ring, cw, { closed: true, cell: c.i + "," + c.j }));
+        const ringSt = landStreet("col", ring, cw, { closed: true, cell: c.i + "," + c.j }, true);
+        streets.push(ringSt);
         // mouths: from the middle of the south and north ring sides out to the arterials
-        streets.push(addStreet("col", [{ x: mx, z: z0 - artHalf }, { x: mx, z: z0 + inset - artHalf }], cw, { cell: c.i + "," + c.j, mouth: true }));
-        streets.push(addStreet("col", [{ x: mx, z: z1 - inset + artHalf }, { x: mx, z: z1 + artHalf }], cw, { cell: c.i + "," + c.j, mouth: true }));
+        if (ringSt) {
+          streets.push(landStreet("col", [{ x: mx, z: z0 - artHalf }, { x: mx, z: z0 + inset - artHalf }], cw, { cell: c.i + "," + c.j, mouth: true }, true));
+          streets.push(landStreet("col", [{ x: mx, z: z1 - inset + artHalf }, { x: mx, z: z1 + artHalf }], cw, { cell: c.i + "," + c.j, mouth: true }, true));
+        }
         // two cul-de-sacs from the west and east ring sides
         const cdLen = (W - 2 * inset) / 2 - 38;
-        if (cdLen > 40) {
+        if (cdLen > 40 && ringSt) {
           const zA = mz + (h01(seed, c.i, c.j, 502) - 0.5) * 40;
           streets.push(culdesac(x0 + inset - artHalf, zA, 1, 0, cdLen, lw, c));
           const zB = mz - (h01(seed, c.i, c.j, 503) - 0.5) * 40;
@@ -1277,9 +1308,10 @@
         // LOLLIPOPS: an east-west collector through the middle, cul-de-sacs
         // north and south off it
         const zc = mz + (h01(seed, c.i, c.j, 511) - 0.5) * 50;
-        streets.push(addStreet("col", curvePts(c.x0 - artHalf + artHalf, zc, c.x1, zc, 0, 18, c), cw, { cell: c.i + "," + c.j, mouth: true }));
+        const spine = landStreet("col", curvePts(c.x0 - artHalf + artHalf, zc, c.x1, zc, 0, 18, c), cw, { cell: c.i + "," + c.j, mouth: true });
+        streets.push(spine);
         const n = Math.max(2, Math.round(W / 105));
-        for (let k = 0; k < n; k++) {
+        for (let k = 0; spine && k < n; k++) {
           const x = x0 + (k + 0.5) * W / n + (h01(seed, c.i + k, c.j, 512) - 0.5) * 16;
           const lenN = (z1 - zc) - 44, lenS = (zc - z0) - 44;
           if (lenN > 40) streets.push(culdesac(x, zc + cw / 2 - 1, 0, 1, lenN, lw, c));
@@ -1289,9 +1321,9 @@
         // CURVES: a winding collector across the cell and one winding local
         // crossing it — the post-war subdivision
         const zc = mz + (h01(seed, c.i, c.j, 521) - 0.5) * 60;
-        streets.push(addStreet("col", curvePts(c.x0, zc, c.x1, zc, 34, 14, c), cw, { cell: c.i + "," + c.j, mouth: true }));
+        streets.push(landStreet("col", curvePts(c.x0, zc, c.x1, zc, 34, 14, c), cw, { cell: c.i + "," + c.j, mouth: true }));
         const xc = mx + (h01(seed, c.i, c.j, 522) - 0.5) * 60;
-        streets.push(addStreet("loc", curvePts(xc, c.z0, xc, c.z1, 28, 14, c, true), lw, { cell: c.i + "," + c.j, mouth: true }));
+        streets.push(landStreet("loc", curvePts(xc, c.z0, xc, c.z1, 28, 14, c, true), lw, { cell: c.i + "," + c.j, mouth: true }));
       }
       for (const s of streets) if (s) hashStreet(s);
       // STRIP MALL at the corner nearest the cell's best arterial junction
@@ -1344,6 +1376,8 @@
         pts.push({ x: r2(x + dx * len * t + (dz !== 0 ? off : 0)), z: r2(z + dz * len * t + (dx !== 0 ? off : 0)) });
       }
       const end = pts[pts.length - 1];
+      // spur + bulb clear of every padded obstacle, or no spur at all
+      if (!landPts(pts.concat([{ x: end.x + dx * 19, z: end.z + dz * 19 }]), Math.max(w, 26), true)) return null;
       const bulb = { x: end.x + dx * 6, z: end.z + dz * 6, r: 13, cell: c.i + "," + c.j };
       P.bulbs.push(bulb);
       const st = addStreet("cds", pts, w, { cell: c.i + "," + c.j, bulb: bulb });
@@ -1707,8 +1741,8 @@
       for (let k = 1; k < n; k++) {
         const v = r2((alongX ? c.z0 : c.x0) + k * span / n);
         const pts = alongX ? [{ x: c.x0, z: v }, { x: c.x1, z: v }] : [{ x: v, z: c.z0 }, { x: v, z: c.z1 }];
-        const s = addStreet("loc", pts, tier.locW - 1, { cell: key, mouth: true });
-        hashStreet(s); grid.push(s);
+        const s = landStreet("loc", pts, tier.locW - 1, { cell: key, mouth: true });
+        if (s) { hashStreet(s); grid.push(s); }
       }
       // the avenue's trees first (between kerb and sidewalk), then its shops
       for (const s of avenues) {

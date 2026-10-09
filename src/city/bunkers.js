@@ -1102,9 +1102,14 @@
     // ---- SITE 1: FORT BRANDT DEEP SHELTER (command tier). NW quadrant of
     // the military island — clear of the radar (-590,-900), barracks
     // (-440,-890..-788), watchtowers (corners) and helipads (z=-670).
+    // It rides the base's layout dial: the old literal (-762, -872) was dug
+    // into Gang City West once Fort Brandt moved. The spot is published once
+    // by city/zoning.js (protected land).
+    const bs = (CBZ.protectedSite && CBZ.protectedSite("brandt-shelter")) ||
+      (function () { const o = (CBZ.worldOff && CBZ.worldOff("military")) || { dx: 0, dz: 0 }; return { cx: -762 + o.dx, cz: -872 + o.dz }; })();
     buildBunker(city, root, {
       id: "brandt", name: "Fort Brandt Deep Shelter", subtitle: "Military Reservation",
-      cx: -762, cz: -872, w: 36, d: 30, tier: "command", floorY: 0, grade0: 0,
+      cx: bs.cx, cz: bs.cz, w: 36, d: 30, tier: "command", floorY: 0, grade0: 0,
     });
 
     // ---- SITE 2: MOUNTAIN EARLY-WARNING POST (outpost). East shoulder of

@@ -263,6 +263,18 @@
     const S = W();
     for (const k in S.stations) { const s = S.stations[k]; if (Math.abs(s.x - (r.minX + r.maxX) / 2) < (s.w + r.maxX - r.minX) / 2 && Math.abs(s.z - (r.minZ + r.maxZ) / 2) < (s.d + r.maxZ - r.minZ) / 2) return false; }
     for (const k in S.bunkers) { const b = S.bunkers[k]; if (Math.abs(b.cx - (r.minX + r.maxX) / 2) < (b.w + 16 + r.maxX - r.minX) / 2 && Math.abs(b.cz - (r.minZ + r.maxZ) / 2) < (b.d + 16 + r.maxZ - r.minZ) / 2) return false; }
+    // a planned city's lots are built land even where its tile (and so its
+    // colliders) is not streamed in yet: an apron never lands on a block
+    const MC = (CBZ.metroCities || []).concat(CBZ.metroCountryside ? [CBZ.metroCountryside] : []);
+    for (let m = 0; m < MC.length; m++) {
+      const P = MC[m] && MC[m].plan, B = P && P.bounds;
+      if (!P || !P.bldgs) continue;
+      if (B && (r.maxX < B.minX - 200 || r.minX > B.maxX + 200 || r.maxZ < B.minZ - 200 || r.minZ > B.maxZ + 200)) continue;
+      for (let i = 0; i < P.bldgs.length; i++) {
+        const b = P.bldgs[i], h = Math.max(b.w, b.d) / 2 + 4;
+        if (b.x + h > r.minX && b.x - h < r.maxX && b.z + h > r.minZ && b.z - h < r.maxZ) return false;
+      }
+    }
     return true;
   }
   function findSite(anchor, w, d, owner, opts) {
