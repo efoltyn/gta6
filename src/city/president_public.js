@@ -747,7 +747,7 @@
     const bd = new THREE.Mesh(boardGeo(), signMats(text, support));
     bd.position.y = 0.6; pr.add(bd);
     ped.group.add(pr);
-    ped._pubProp = pr;
+    ped._pubProp = pr; ped._sign = text;
     if (ped.char) { ped.char._pubProp = pr; ped.char._pubPh = Math.random() * 6; }
     setPose(ped, "pubPlacard");
   }
@@ -790,7 +790,117 @@
     const fy = CBZ.floorAt ? CBZ.floorAt(x, z) : 0;
     if (ped.pos && isFinite(fy)) ped.pos.y = fy;
     ped._pubRole = role;
+    ped._iOnly = true;              // here for the President: his verbs, not the street's
+    wireMember(ped, role);
     return ped;
+  }
+
+  /* ---- WHAT YOU DO WITH THE PEOPLE WHO CAME (2026-10-08) -------------------
+     A protester:  E "Hear out": he says his piece, you nod, he goes home
+                   (approval up a little; once a day it is on the news).
+                   "Escort out" is the detail's (city/orders.js); a protester
+                   walked off is a story too (the "guards-escort" bus below).
+                   Come close and the nearest one calls out to you himself;
+                   your answer rides on him (campaign_ui.js).
+     A supporter:  E "Shake hands", the wheel "Selfie": a tick of approval
+                   each, once per person.
+     Every one of these is an act the one political model hears
+     (CBZ.politics.act, city/politics.js) and prices; without it they fall
+     back to the presidency's own approval and scandal. No store here.
+     Anyone else of the state on the street (soldiers, officers on a line)
+     offers only the President's orders about a man (city/orders.js). */
+  // pacing only: one call-out at a time, one story a day per kind
+  const PEOPLE = { heardNews: -1, removedNews: -1, callAt: -1e9 };
+  function polAct(kind, t) {
+    const PM = CBZ.politics;
+    if (!PM || typeof PM.act !== "function") return false;
+    try { PM.act(kind, { target: t || null, by: "president", ideology: (t && t.ideology) || null, institution: null }); return true; } catch (e) { return false; }
+  }
+  function scandalUp(n) {
+    const w = CBZ.cityWorldEnsure ? CBZ.cityWorldEnsure() : null, pol = w && w.politics;
+    if (pol) pol.scandal = clamp((+pol.scandal || 0) + n, 0, 100);
+  }
+  function heard(ped) {
+    if (!ped || ped.dead || ped._heard || !playerPres()) return false;
+    ped._heard = true;
+    const sl = (PROT.slogans && PROT.slogans[0]) || "ENOUGH";
+    const line = { "NO CURFEW": "Let us walk our own streets.", "SOLDIERS OUT": "Get the soldiers off my street.", "RESIGN": "You promised us. You lied.",
+      "WHERE IS THE MONEY": "Where did our money go?", "NO DICTATOR": "We voted. Remember that.", "BRING THEM HOME": "Bring my son home.",
+      "STOP THE CRACKDOWN": "They beat my brother.", "KEEP US SAFE": "We're scared. Do something." }[ped._sign || sl] || "We just want to be heard.";
+    say(ped, line, "#ffd9c8", 3.2);
+    if (!polAct("hear-out", ped)) shock(0.4);
+    const d = Math.floor(now());
+    if (PEOPLE.heardNews !== d) { PEOPLE.heardNews = d; news("The President stops to hear protesters"); }
+    // he said it; he goes home
+    setTimeout(function () {
+      for (let i = PROT.members.length - 1; i >= 0; i--) if (PROT.members[i].ped === ped) { const m = PROT.members.splice(i, 1)[0]; if (m.slot) m.slot.ped = ped; startDrift(ped, PROT.drifting, PROT.at, false); return; }
+      for (let i = CROWD.members.length - 1; i >= 0; i--) if (CROWD.members[i].ped === ped) { CROWD.members.splice(i, 1); startDrift(ped, CROWD.drifting, CROWD.stage, false); return; }
+    }, 3200);
+    return true;
+  }
+  function wireMember(ped, role) {
+    const I = CBZ.interactions;
+    if (!I || !I.registerFor) return;
+    if (role === "pro") {
+      I.registerFor(ped, { id: "pv-hear-out", slot: "e", prio: 30, campaignSafe: true, forceYes: true, label: "Hear out",
+        canShow: function () { return playerPres() && !ped.dead && !ped._heard; },
+        onSelect: function () { heard(ped); } });
+      return;
+    }
+    I.registerFor(ped, { id: "pv-shake-hands", slot: "e", prio: 30, campaignSafe: true, forceYes: true, label: "Shake hands",
+      canShow: function () { return playerPres() && !ped.dead && !ped._shook; },
+      onSelect: function () { ped._shook = true; if (!polAct("handshake", ped)) shock(0.1); hype(ped, 3); say(ped, rpick(["An honour, sir!", "God bless you, Mr. President!", "Keep going, sir!"]), "#d9f2c8", 2.4); } });
+    I.registerFor(ped, { id: "pv-selfie", prio: 28, campaignSafe: true, forceYes: true, label: "Selfie",
+      canShow: function () { return playerPres() && !ped.dead && !ped._selfie; },
+      onSelect: function () { ped._selfie = true; if (!polAct("selfie", ped)) shock(0.1); hype(ped, 3); say(ped, rpick(["My mother won't believe this!", "Say cheese, sir!", "This is going up tonight!"]), "#d9f2c8", 2.4); } });
+  }
+  // the nearest protester calls out when you come close; one at a time
+  function tickCallOut() {
+    const P = playerPos(), UI = CBZ.campaignUI;
+    if (!P || !PROT.active || !PROT.members.length || !playerPres() || !UI || !UI.say) return;
+    if (UI.replies && UI.replies()) return;
+    const T = performance.now() / 1000;
+    if (T - PEOPLE.callAt < 45) return;
+    let best = null, bd = 7;
+    for (let i = 0; i < PROT.members.length; i++) {
+      const p = PROT.members[i].ped;
+      if (!p || p.dead || p._heard || p._calledOut) continue;
+      const d = distXZ(P, p.pos.x, p.pos.z);
+      if (d < bd) { bd = d; best = p; }
+    }
+    if (!best) return;
+    PEOPLE.callAt = T; best._calledOut = true;
+    const sl = best._sign || (PROT.slogans && PROT.slogans[0]) || "ENOUGH";
+    const line = (CHANTS[sl] ? "Mr. President! " + CHANTS[sl].split("!")[0] + "!" : "Mr. President! Look at us!");
+    const ped = best;
+    let pr = null;
+    try { pr = UI.say(ped.name || "Protester", line, [{ id: "hear", label: "Hear out" }, { id: "out", label: "Escort out" }], { actor: ped }); } catch (e) { pr = null; }
+    if (pr && pr.then) pr.then(function (c) {
+      if (c === "hear") heard(ped);
+      else if (c === "out" && CBZ.cityOrders2 && CBZ.cityOrders2.takeDown) CBZ.cityOrders2.takeDown(ped, "escort");
+    });
+  }
+  // a protester walked off by the detail is a story (city/orders.js bus)
+  function onEscort(e) {
+    if (!e || e.pubRole !== "pro") return;
+    // city/orders.js already told the political model; without it, ours
+    if (!(CBZ.politics && typeof CBZ.politics.act === "function")) { shock(-0.4); scandalUp(1); }
+    const d = Math.floor(now());
+    if (PEOPLE.removedNews !== d) { PEOPLE.removedNews = d; news("Secret Service drags a protester from the President's path"); }
+  }
+  // THE GATE OFFICER clears the road outside his gate when you tell him
+  let gateWired = false;
+  function wireGate() {
+    const I = CBZ.interactions;
+    if (gateWired || !I || !I.register) return;
+    gateWired = true;
+    I.register("ped", { id: "pv-clear-gate", slot: "e", prio: 30, campaignSafe: true, forceYes: true, anyone: true, label: "Clear the gate",
+      canShow: function (t) { return !!(t && !t.dead && t._protRole === "gate" && PROT.active && playerPres()); },
+      onSelect: function (t) {
+        say(t, "Clear the road! Move!", "#dfe7ff", 2.4);
+        if (!polAct("clear-protest", null)) { shock(-1); scandalUp(2); }
+        disperseProtest();
+      } });
   }
   function slogansNow() {
     const out = [];
@@ -1101,6 +1211,7 @@
         if ((e.key === "crackdown" || e.key === "martial") && PROT.active) disperseProtest("crackdown");
       });
       p.on("attack", function () { ATTACK.t = now(); });
+      p.on("guards-escort", onEscort);
       p.on("lockdown", function (e) { if (e && e.active) cancelRest("lockdown"); });
     } catch (e) {}
     if (typeof p.onAssassinated === "function") {
@@ -1392,7 +1503,9 @@
     // HE SAYS IT TO THE CROWD: over his own head at the podium (a speech is
     // spoken aloud, not inner monologue), then the two stances as replies.
     if (CBZ.speech && CBZ.player) CBZ.speech.lines([{ by: CBZ.player, line: b.line, aloud: true }]);
-    try { pr = ui.say(name, "", [{ id: "a", label: b.a.label }, { id: "b", label: b.b.label }]); } catch (e) { pr = null; }
+    // the two stances ride on the lectern you stand at: E the first, hold E the second
+    const at = L.stage ? { x: L.stage.x, y: (L.stage.y || 0) + 1.1, z: L.stage.z } : (CBZ.player && CBZ.player.pos ? { x: CBZ.player.pos.x, y: CBZ.player.pos.y + 1.1, z: CBZ.player.pos.z } : null);
+    try { pr = ui.say(name, "", [{ id: "a", label: b.a.label }, { id: "b", label: b.b.label }], at ? { at: at } : null); } catch (e) { pr = null; }
     if (!pr || !pr.then) { sp.awaiting = false; applyStance(L, b.a); return; }
     const myI = sp.i;
     pr.then(function (choice) {
@@ -1748,7 +1861,7 @@
     if (CBZ.cityPostStand) { try { c._post = CBZ.cityPostStand(c, spec) || c._post; } catch (e) {} }
     if (!c._post) c._post = { x: x, z: z, fx: fx, fz: fz, mount: null, mountT: 0, relaxed: true };
     if (c.group) c.group.rotation.y = Math.atan2(fx, fz);
-    c._presPublic = true; c._isCop = true;
+    c._presPublic = true; c._isCop = true; c._iOnly = true;
     return c;
   }
   function postSoldier(x, z, face, tag) {
@@ -1757,7 +1870,7 @@
     try {
       p = CBZ.cityPostNpc(x, z, { job: "soldier", archetype: "military", kind: "security", armed: true, weapon: "Rifle", aggr: 0.35, pin: true, face: face, src: tag, pose: "foldarms" });
     } catch (e) { p = null; }
-    if (p) { p.organization = "military"; p._presPublic = true; }
+    if (p) { p.organization = "military"; p._presPublic = true; p._iOnly = true; }
     return p;
   }
   function dropBody(b) {
@@ -2047,6 +2160,8 @@
     buildBalcony();
     wireZones();
     wireBus();
+    wireGate();
+    tickCallOut();
     tickDiary(step);
     if (CROWD.stage) crowdFill(false);
     tickProtest(step);

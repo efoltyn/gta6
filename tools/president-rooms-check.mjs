@@ -302,7 +302,8 @@ ok(CBZ.presidentInteriorPressPoints().length >= 3, "the press corps has places i
     const z = (CBZ._zones || []).map((q) => q.options.map((o) => (typeof o.label === "function" ? "fn" : o.label)).join("/")).join(" ");
     const sd = (CBZ.cityUnitDoors ? CBZ.cityUnitDoors.all() : []).find((d) => d.id === "state:sitroom");
     ok(!!(sd && sd.col && sd.noForce && typeof sd.free === "function"), "the Sit Room door is on the one door kit (E opens it for the President and from inside; nobody kicks it in)");
-    ok(/Brief/.test(z), "the Sit Room screen says Brief: " + z);
+    // the video wall has no verb (2026-10-08): the officer with a decision says it himself
+    ok(!/Brief/.test(z) && /Order nuke|fn/.test(z), "the Sit Room wall has no Brief button; the phones and the map keep theirs: " + z);
   }
 }
 

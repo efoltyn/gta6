@@ -102,6 +102,13 @@
   function politics() { const w = CBZ.cityWorldEnsure ? CBZ.cityWorldEnsure() : null; return (w && w.politics) || g.cityPolitics || null; }
   function shock(n) { const h = seat(); if (h && CBZ.approvalShock) { try { CBZ.approvalShock(h.id, n); } catch (e) {} } }
   function scandal(n) { const pol = politics(); if (pol) pol.scandal = clamp((+pol.scandal || 0) + n, 0, 100); }
+  // THE ONE POLITICAL MODEL (city/politics.js) hears every act you answer and
+  // prices it; true when it took it. Without it, the presidency's numbers.
+  function polAct(kind, t) {
+    const PM = CBZ.politics;
+    if (!PM || typeof PM.act !== "function") return false;
+    try { PM.act(kind, { target: t || null, by: "president", ideology: (t && t.ideology) || null, institution: null }); return true; } catch (e) { return false; }
+  }
   function military() { const h = seat(), Wp = CBZ.polwar; try { return h && Wp && Wp.militaryOf ? Wp.militaryOf(h.id) : null; } catch (e) { return null; } }
   // a nudge never lifts a weak army up to the floor, it only stops a fall there
   function readiness(d, floor) {
@@ -261,7 +268,7 @@
   }
   function wire(p, role) {
     if (!p || !CBZ.interactions || !CBZ.interactions.registerFor) return;
-    CBZ.interactions.registerFor(p, { id: "pres-dismiss-" + role, prio: 6, campaignSafe: true, forceYes: true,
+    CBZ.interactions.registerFor(p, { id: "pres-dismiss-" + role, prio: 6, wheel: true, campaignSafe: true, forceYes: true,
       label: "Dismiss", canShow: function () { return !!seat() && !p.dead && !vacant(role); },
       onSelect: function () { dismissFace(role, p); } });
   }
@@ -421,22 +428,124 @@
   // ================================================================
   //  THE PRESS SECRETARY: consequences, not a button
   // ================================================================
-  function brief() {
+  // `withYou`: the President stands at the podium beside her (he said
+  // "Let's go" when she came to get him): it cuts deeper and moves approval
+  function brief(withYou) {
     const s = S(), pol = politics(), pr = s.press;
     if (!pr || !pol || s.pressDay === day()) return false;
     const before = +pol.scandal || 0;
-    if (before < BRIEF_AT) return false;
+    if (before < (withYou ? 1 : BRIEF_AT)) return false;
     s.pressDay = day();
     const cred = clamp(pr.cred == null ? 1 : +pr.cred, 0.2, 1.2);
-    const cut = Math.round(6 * cred * 10) / 10;
+    const cut = Math.round((withYou ? 10 : 6) * cred * 10) / 10;
+    if (withYou && !polAct("press-conference", W.press)) shock(cred < 0.5 ? -0.5 : 1);
     pol.scandal = Math.max(0, before - cut);
     pr.briefs = (pr.briefs | 0) + 1;
     pr.cred = clamp(cred * (before >= 40 ? 0.78 : 0.88), 0.2, 1.2);   // every bad week spends her
-    if (W.press) say(W.press, cred < 0.5 ? "They aren't listening any more." : "I'll handle them.", 2.4);
-    emit("briefing", { name: pr.name, cut: cut,
-      headline: cred < 0.5 ? "Briefing goes badly for " + pr.name : "White House briefing: " + pr.name + " takes questions",
+    if (W.press && !withYou) say(W.press, cred < 0.5 ? "They aren't listening any more." : "I'll handle them.", 2.4);
+    emit("briefing", { name: pr.name, cut: cut, withPresident: !!withYou,
+      headline: withYou ? "The President faces the press" : cred < 0.5 ? "Briefing goes badly for " + pr.name : "White House briefing: " + pr.name + " takes questions",
       sub: cred < 0.5 ? "Reporters aren't buying it" : "\"The President is focused on the country.\"" });
     return true;
+  }
+
+  // SHE COMES TO GET YOU. While you are in the office and the scandal is
+  // high, she does not go to the cameras alone: she walks up and asks. Your
+  // answer rides on her (campaign_ui.js: E the first, hold E the second).
+  function pressAsk() {
+    const s = S(), pol = politics(), p = W.press, UI = CBZ.campaignUI;
+    if (!p || p.dead || !pol || !UI || !UI.say || s.pressDay === day() || s.pressAsked === day()) return false;
+    if ((+pol.scandal || 0) < BRIEF_AT) return false;
+    s.pressAsked = day();
+    let pr = null;
+    try {
+      pr = UI.say(p.name, "Press is waiting, sir.", [{ id: "go", label: "Let's go" }, { id: "no", label: "Not today" }], { actor: p });
+    } catch (e) { pr = null; }
+    if (!pr || !pr.then) { brief(false); return true; }
+    W.pressAsking = true;
+    pr.then(function (c) {
+      W.pressAsking = false;
+      if (c === "go") { brief(true); say(p, "Keep it short, sir.", 2.4); }
+      else if (c === "no") { if (!polAct("dodge-press", p)) scandal(1); say(p, "They'll write it anyway.", 2.4); }
+      else brief(false);
+    });
+    return true;
+  }
+
+  // ================================================================
+  //  THE PRESS CORPS (interior_programs.js posts them in the briefing room)
+  //  A reporter shouts one question at you when you come near, read off the
+  //  real state; "Answer" or "No comment" ride on him. E on a reporter asks
+  //  for the question yourself.
+  // ================================================================
+  const PRESS = { lastAsk: -1e9, asked: {}, newsDay: -1 };
+  function question() {
+    const pol = politics(), h = seat(), WR = CBZ.warroom, D = CBZ.dissent;
+    const ap = h && h.rec && h.rec.approval != null ? Math.round(+h.rec.approval) : 50;
+    const sc = pol ? +pol.scandal || 0 : 0;
+    let foe = null; try { foe = WR && WR.enemy ? WR.enemy() : null; } catch (e) { foe = null; }
+    let st = 0; try { st = D && D.stage ? D.stage() : 0; } catch (e) { st = 0; }
+    if (foe) return { topic: "the war", line: "Mr. President! How long does this war go on?" };
+    if (sc >= 30) return { topic: "the scandal", line: "Sir! What did you know, and when?" };
+    if (ap < 35) return { topic: "his numbers", line: "You're at " + ap + " percent. Will you resign?" };
+    if (st >= 1) return { topic: "the protests", line: "Mr. President! Are you hearing the streets?" };
+    if (h && h.rec && (h.rec.treasury || 0) < 20000) return { topic: "the money", line: "Sir! Where did the money go?" };
+    return { topic: "the economy", line: "Mr. President! A question on the economy?" };
+  }
+  function askQuestion(rp) {
+    const UI = CBZ.campaignUI;
+    if (!rp || rp.dead || !UI || !UI.say || !seat()) return false;
+    const q = question();
+    PRESS.lastAsk = CLOCK;
+    PRESS.asked[rp._sid || rp.name || "r"] = day();
+    let pr = null;
+    try { pr = UI.say(rp.name || "Reporter", q.line, [{ id: "answer", label: "Answer" }, { id: "nc", label: "No comment" }], { actor: rp }); } catch (e) { pr = null; }
+    if (!pr || !pr.then) return false;
+    pr.then(function (c) {
+      if (c !== "answer" && c !== "nc") return;
+      const h = seat(), pol = politics();
+      const ap = h && h.rec && h.rec.approval != null ? +h.rec.approval : 50;
+      const strong = ap >= 45 || (pol && (+pol.scandal || 0) < 20);
+      const took = polAct(c === "answer" ? "answer-press" : "no-comment", rp);
+      if (c === "answer") {
+        if (!took) { scandal(strong ? -3 : -1); shock(strong ? 0.6 : -0.4); }
+        say(rp, strong ? "Thank you, Mr. President." : "That's not an answer, sir.", 2.4);
+      } else {
+        if (!took) { scandal(2); shock(-0.3); }
+        say(rp, "So that's a yes?", 2.2);
+      }
+      if (PRESS.newsDay !== day()) {
+        PRESS.newsDay = day();
+        emit("presser", { topic: q.topic, answer: c,
+          headline: c === "answer" ? "The President takes questions on " + q.topic : "President dodges questions on " + q.topic });
+      }
+    });
+    return true;
+  }
+  function wireReporter(rp) {
+    if (rp._pvWired || !CBZ.interactions || !CBZ.interactions.registerFor) return;
+    rp._pvWired = true;
+    rp._iOnly = true;             // at work: the President takes a question, he does not mug the press
+    CBZ.interactions.registerFor(rp, { id: "pv-reporter-ask", slot: "e", prio: 30, campaignSafe: true, forceYes: true,
+      label: "Take a question",
+      canShow: function () { return !!seat() && !rp.dead && PRESS.asked[rp._sid || rp.name || "r"] !== day(); },
+      onSelect: function () { askQuestion(rp); } });
+  }
+  function tickPress() {
+    const P = CBZ.player, L = CBZ.cityPeds;
+    if (!P || !P.pos || !L || !seat()) return;
+    let near = null, nd = 6;
+    for (let i = 0; i < L.length; i++) {
+      const q = L[i];
+      if (!q || q.dead || q.job !== "press correspondent" || !q.pos) continue;
+      wireReporter(q);
+      if (Math.abs((q.pos.y || 0) - (P.pos.y || 0)) > 2.5) continue;
+      const d = Math.hypot(q.pos.x - P.pos.x, q.pos.z - P.pos.z);
+      if (d < nd && PRESS.asked[q._sid || q.name || "r"] !== day()) { nd = d; near = q; }
+    }
+    const UI = CBZ.campaignUI;
+    const busy = UI && UI.replies && UI.replies();
+    if (near && !busy && CLOCK - PRESS.lastAsk > 40) askQuestion(near);
   }
 
   // ================================================================
@@ -627,12 +736,19 @@
     if (!p) return;
     p.name = pr.name; p._presStaff = "press";
     W.press = p;
+    // no "Brief" button on her: she comes to YOU when the press is waiting
+    // (pressAsk), and your answer rides on her
     wire(p, "press");
   }
   function aideVisiting() {
     const O = CBZ.presidentOffice;
     if (!O || !O._M) return false;
     try { return !!(O.audit && O.audit().aide); } catch (e) { return false; }
+  }
+  function aideRole() {
+    const O = CBZ.presidentOffice;
+    if (!O || !O._M || !O.audit) return null;
+    try { const a = O.audit(); return a.aide ? a.aideRole || null : null; } catch (e) { return null; }
   }
   // the driver waits at the state car (motorcade.js drives the column)
   function tickDriver() {
@@ -649,6 +765,13 @@
     if (!p) return;
     p.name = s.driver.name; p.nameKnown = true; p.organization = "state"; p._presStaff = "driver"; p._iOnly = true;
     W.driver = p;
+    // E: "Where to, sir?" The places ride on him (motorcade.js ask)
+    if (CBZ.interactions && CBZ.interactions.registerFor) {
+      CBZ.interactions.registerFor(p, { id: "pv-driver-drive", slot: "e", prio: 30, campaignSafe: true, forceYes: true,
+        label: "Drive",
+        canShow: function () { return !!seat() && !p.dead && !!(M && M.car && M.car()) && !(M.active && M.active()); },
+        onSelect: function () { if (!(M.ask && M.ask(p))) say(p, "Not now, sir.", 2); } });
+    }
   }
   function releaseOffice() {
     if (W.chief) { unpost(W.chief); W.chief = null; }
@@ -683,15 +806,18 @@
     if (acc < 0.5) return;
     acc = 0;
     tickDriver();
-    brief();
+    tickPress();
+    // in the office she comes to get you; anywhere else she goes alone
+    if (!W.pressAsking && !(W.press && r && nearOffice(r) && pressAsk())) brief();
     needNames();
     const inOffice = r && nearOffice(r);
     if (!inOffice) { if (W.chief || W.press) releaseOffice(); ringNames(); return; }
     // in the office, a Chief with names says them to your face; without him the phone rings
     if (nm && !(speakerFor(nm.role) && speakerFor(nm.role).body)) ringNames();
-    if (aideVisiting()) { if (W.chief) { unpost(W.chief); W.chief = null; } }
+    // the one who walks in IS the Chief (or the press secretary): never two of her
+    if (aideVisiting()) { if (W.chief) { unpost(W.chief); W.chief = null; } if (aideRole() === "press" && W.press) { unpost(W.press); W.press = null; } }
     else if ((!W.chief || W.chief.dead) && !vacant("chief")) { W.chief = null; postChief(r); }
-    if (!W.press && !vacant("press")) postPress(r);
+    if (!W.press && !vacant("press") && aideRole() !== "press") postPress(r);
   }
   if (CBZ.onUpdate) CBZ.onUpdate(36.25, tick);
 

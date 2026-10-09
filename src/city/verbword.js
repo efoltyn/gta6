@@ -34,7 +34,8 @@
      is a riddle: "Ask" meant three different things and "Bum one" was the
      slang that stood in for "ask for a smoke" (owner 2026-09-29: verbs in
      plain words). These whole phrases print as authored. Keep it short. */
-  const WHOLE = ["Ask for a smoke", "Ask the way"];
+  // the President's: an order about a man, and two answers that are not verbs
+  const WHOLE = ["Ask for a smoke", "Ask the way", "Take him down", "Clear the room", "No comment", "Shake hands", "Take a question"];
   function verbWord(text) {
     let s = String(text == null ? "" : text).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
     if (!s) return "";

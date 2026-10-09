@@ -792,6 +792,11 @@
       if (m.no.run) { try { m.no.run(); } catch (e) {} }
     }
     M.decisions++;
+    // the one political model hears the answer you gave the person who asked
+    const PM = CBZ.politics;
+    if (PM && typeof PM.act === "function") {
+      try { PM.act("decision", { target: null, by: "president", ideology: null, institution: null, topic: m.topic, choice: choice, order: choice === "yes" ? (m.yes.order || null) : null, who: m.who.role }); } catch (e) {}
+    }
     emit("decision", { source: source, topic: m.topic, choice: choice, order: choice === "yes" ? (m.yes.order || null) : null, ok: !!r.ok, who: m.who.name, id: m.id });
     return r;
   }
@@ -825,7 +830,9 @@
     else { line += " " + cantLine(m, gate.why); choices = [{ id: "no", label: clean(m.no.label) }]; }
     // who is talking, in the world: the voice on the line, or the aide at the desk
     const by = phone ? "phone" : (AIDE.ped && !AIDE.ped.dead ? AIDE.ped : null);
-    const meta = by === "phone" ? { phone: true } : { actor: by };
+    // the answers ride on the man who asked, or on the handset in your hand
+    // (campaign_ui.js pins them in the verb registry: E, hold E, the wheel)
+    const meta = by === "phone" ? { phone: true, at: phoneWorld() } : { actor: by };
     const UI = CBZ.campaignUI;
     if (!UI || !UI.say || !by) { ignore(m, source); if (onDone) onDone(null); return; }
     const tok0 = SAY_TOKEN;
@@ -1172,7 +1179,15 @@
     } catch (e) { ped = null; }
     if (!ped) return false;
     ped.name = m.who.name; ped.nameKnown = true; ped.organization = "state";
-    ped._presOffice = true;
+    ped._presOffice = true; ped._iOnly = true;
+    // he came to see you: E on him hears it now, without waiting for him to
+    // reach the desk
+    if (CBZ.interactions && CBZ.interactions.registerFor) {
+      CBZ.interactions.registerFor(ped, { id: "pv-aide-hear", slot: "e", prio: 30, campaignSafe: true, forceYes: true,
+        label: "Talk",
+        canShow: function () { return AIDE.ped === ped && !ped.dead && (AIDE.phase === "wait" || AIDE.phase === "enter") && !M.onCall && !READ.f; },
+        onSelect: function () { aideTalk(); } });
+    }
     AIDE.ped = ped; AIDE.m = m; AIDE.phase = "enter"; AIDE.t = 0; AIDE.stuck = 0; AIDE.lastD = Infinity;
     AIDE.spawnW = sp; AIDE.standW = st; AIDE.talking = false;
     walkTo(ped, st.x, st.z);
@@ -1217,16 +1232,7 @@
       const near = Pp && Pp.pos && Math.abs(Pp.pos.y - rec.floorY) < 2.2 &&
         Math.hypot(Pp.pos.x - p.pos.x, Pp.pos.z - p.pos.z) < AIDE_TALK_R;
       if (near && !M.onCall && !READ.f) {
-        AIDE.phase = "talk"; AIDE.talking = true;
-        const m = AIDE.m;
-        converse(m, "aide", function () {
-          AIDE.talking = false;
-          M.later.push({ at: CLOCK + 2.6, fn: function () {
-            if (!AIDE.ped || AIDE.phase !== "talk") return;
-            AIDE.phase = "leave"; AIDE.t = 0; AIDE.stuck = 0; AIDE.lastD = Infinity;
-            walkTo(AIDE.ped, AIDE.spawnW.x, AIDE.spawnW.z);
-          } });
-        });
+        aideTalk();
       } else if (AIDE.t > Math.max(40, AIDE.m.expires) || !inOffice(rec)) {
         // he waited; you were not there. What he came to say still happens.
         if (!inOffice(rec) && AIDE.t < 12) return;
@@ -1243,6 +1249,21 @@
       if (d < 1.0 || AIDE.t > 25 || AIDE.stuck > 7) { AIDE.m = null; unpost(p); AIDE.ped = null; AIDE.phase = null; }
       else if (p.state !== "walk") walkTo(p, AIDE.spawnW.x, AIDE.spawnW.z);
     }
+  }
+  // he says what he came to say; your answer rides on him (campaign_ui.js)
+  function aideTalk() {
+    if (!AIDE.ped || !AIDE.m || (AIDE.phase !== "wait" && AIDE.phase !== "enter")) return false;
+    AIDE.phase = "talk"; AIDE.talking = true;
+    holdAt(AIDE.ped, faceTo(AIDE.ped, player()));
+    converse(AIDE.m, "aide", function () {
+      AIDE.talking = false;
+      M.later.push({ at: CLOCK + 2.6, fn: function () {
+        if (!AIDE.ped || AIDE.phase !== "talk") return;
+        AIDE.phase = "leave"; AIDE.t = 0; AIDE.stuck = 0; AIDE.lastD = Infinity;
+        walkTo(AIDE.ped, AIDE.spawnW.x, AIDE.spawnW.z);
+      } });
+    });
+    return true;
   }
   function faceTo(p, Pp) {
     if (!Pp || !Pp.pos || !p || !p.pos) return p && p.group ? p.group.rotation.y : 0;
@@ -1265,7 +1286,34 @@
     } catch (e) { ped = null; }
     if (!ped) return;
     ped.name = person("secretary").name; ped.nameKnown = true; ped.organization = "state";
+    ped._iOnly = true;
     SEC.ped = ped;
+    if (CBZ.interactions && CBZ.interactions.registerFor) {
+      // E: what is waiting for you, in one line
+      CBZ.interactions.registerFor(ped, { id: "pv-sec-talk", slot: "e", prio: 30, campaignSafe: true, forceYes: true,
+        label: "Talk", canShow: function () { return !ped.dead; },
+        onSelect: function () { SEC.lastLine = CLOCK; if (CBZ.citySay) { try { CBZ.citySay(ped, secLine(), "#e8e2cf", 3.0); } catch (e) {} } } });
+      // a call you missed: she puts the caller back on your line
+      CBZ.interactions.registerFor(ped, { id: "pv-sec-call-back", hold: true, prio: 28, campaignSafe: true, forceYes: true,
+        label: "Call back", canShow: function () { return !ped.dead && seated() && M.missed.length > 0 && !M.ringing && !M.onCall; },
+        onSelect: function () {
+          const m = M.missed.pop();
+          if (!m) return;
+          m.born = CLOCK; m.expires = Math.max(90, m.expires || 0);
+          M.phoneQ.unshift(m);
+          M.lastCallEnd = -1e9; M.holdUntil = 0;
+          if (CBZ.citySay) { try { CBZ.citySay(ped, "Putting " + surname(m.who.name) + " through, sir.", "#e8e2cf", 2.6); } catch (e) {} }
+        } });
+    }
+  }
+  function secLine() {
+    const live = liveFolders();
+    if (!seated()) return "Can I help you?";
+    if (M.ringing) return "Your line's ringing, sir.";
+    if (M.missed.length) return speaker(M.missed[M.missed.length - 1].who, false) + " tried to reach you, sir.";
+    if (live) return live === 1 ? "There's one folder waiting on your desk." : "There are " + live + " folders on your desk, sir.";
+    const hr = hour();
+    return hr < 12 ? "Good morning, Mr. President." : hr < 18 ? "Good afternoon, Mr. President." : "Working late, sir?";
   }
   function releaseSecretary() { if (SEC.ped) unpost(SEC.ped); SEC.ped = null; SEC.tries = 0; }
   function tickSecretary() {
@@ -1276,14 +1324,7 @@
     if (!Pp || !Pp.pos || CLOCK - SEC.lastLine < 50) return;
     if (Math.abs(Pp.pos.y - p.pos.y) > 2 || Math.hypot(Pp.pos.x - p.pos.x, Pp.pos.z - p.pos.z) > 3.4) return;
     SEC.lastLine = CLOCK;
-    let line;
-    const live = liveFolders();
-    if (!seated()) line = "Can I help you?";
-    else if (M.ringing) line = "Your line's ringing, sir.";
-    else if (M.missed.length) line = speaker(M.missed[M.missed.length - 1].who, false) + " tried to reach you, sir.";
-    else if (live) line = live === 1 ? "There's one folder waiting on your desk." : "There are " + live + " folders on your desk, sir.";
-    else { const hr = hour(); line = hr < 12 ? "Good morning, Mr. President." : hr < 18 ? "Good afternoon, Mr. President." : "Working late, sir?"; }
-    if (CBZ.citySay) { try { CBZ.citySay(p, line, "#e8e2cf", 3.0); } catch (e) {} }
+    if (CBZ.citySay) { try { CBZ.citySay(p, secLine(), "#e8e2cf", 3.0); } catch (e) {} }
   }
 
   // ============================================================
@@ -2028,7 +2069,7 @@
     return {
       built: !!ROOM.root, office: !!office(), inOffice: !!(ROOM.rec && inOffice(ROOM.rec)),
       ringing: !!M.ringing, onCall: !!M.onCall, phoneQueue: M.phoneQ.length, aideQueue: M.aideQ.length,
-      aide: AIDE.phase, folders: M.folders.map(function (f) { return { id: f.m.id, topic: f.m.topic, state: f.state, blocked: !!f.blocked }; }),
+      aide: AIDE.phase, aideRole: AIDE.m && AIDE.m.who ? AIDE.m.who.role : null, folders: M.folders.map(function (f) { return { id: f.m.id, topic: f.m.topic, state: f.state, blocked: !!f.blocked }; }),
       reading: !!READ.f, stories: CBZ.news ? CBZ.news.stories().length : 0, headline: CBZ.news ? CBZ.news.current().h : null,
       secretary: !!SEC.ped, decisions: M.decisions, missed: M.missed.length, spawnPending: SPAWN.pending,
       desk: deskPoint(),
@@ -2055,7 +2096,7 @@
     deskPoint: deskPoint,
     audit: audit,
     // harness hooks only
-    _M: M, _room: ROOM, _answer: answer, _open: function () { openFolder(topFolder()); }, _sign: signFolder,
+    _M: M, _room: ROOM, _answer: answer, _call: placeCall, _open: function () { openFolder(topFolder()); }, _sign: signFolder,
     _return: returnFolder, _issue: function (d) { M.folderDay = -1; issueFolders(d == null ? day() : d); },
     _relocate: function () { const r = office(); return r ? relocateToDesk(r) : false; }, _chief: chiefVisit,
     // ---- capture hooks (rAF frozen, stepSim ticks, no input) ----
