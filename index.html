@@ -446,7 +446,7 @@ document.body.appendChild(b);}}catch(e){}})();
 ============================================================ -->
 
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=planes1009b"></script>
+<script src="src/config.js?v=custody1009b"></script>
 <!-- CITY SLICES (?slice=name|x,z,r): one piece of Gang City booted as its own world.
      Parses the URL only; with no slice every helper answers "keep". -->
 <script src="src/core/texfree.js?v=pf0930a"></script>
@@ -1434,7 +1434,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- Occupied structures: floors, a role per floor, access control, boss/VIP
      placement. After peds.js (uses the ped factory + the guard primitive) and
      after interior_programs.js. This is what puts a boss on the top floor. -->
-<script src="src/city/occupy.js?v=fallstay1-st1"></script>
+<script src="src/city/occupy.js?v=custody1009b"></script>
 <!-- CHILDHOOD: age bands, the growth curve, child proportions and gait. After
      peds.js (the ped factory) and after the character rig it extends. Without
      this tag children get correct proportions but never grow. -->
@@ -1451,7 +1451,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/sizeup.js?v=lvl1y"></script>
 <script src="src/city/bling.js?v=shades1009b"></script>
 <script src="src/city/club.js?v=deslop1"></script>
-<script src="src/city/crowd.js?v=holes1009b"></script>
+<script src="src/city/crowd.js?v=custody1009b"></script>
 <script src="src/city/blobshadows.js?v=cars1"></script>
 <!-- headlight pools + tail glow on the road at night (instanced ground decals,
      no dynamic lights); pushes the shared lamp emissives up after dark.
@@ -1461,7 +1461,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/medics.js?v=fit1"></script>
 <script src="src/city/security.js?v=verbs2b"></script>
 <script src="src/city/vips.js?v=popup1009b"></script>
-<script src="src/city/police.js?v=popup1009b"></script>
+<script src="src/city/police.js?v=custody1009b"></script>
 <script src="src/city/aircraftphysics.js?v=planes1009b"></script>
 <script src="src/city/aircraft.js?v=mil0929"></script>
 <script src="src/city/traffic.js?v=metro0929"></script>
@@ -1689,7 +1689,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/interact.js?v=verbs2b"></script>
 <!-- ORDERS ABOUT SOMEONE ELSE (the principal seat): Attack / Guard / Tail /
      Stand down on anyone who works for you. Registers into interactions. -->
-<script src="src/city/orders.js?v=verbs2b"></script>
+<script src="src/city/orders.js?v=custody1009b"></script>
 <!-- A ROLE IS A VERB: one data table of job-string -> verb (doctor patches you
      up, cook feeds you, dock hand puts you on the clock, courier hands you a
      run) plus one of streetProp-type -> verb (hydrant, meter, route board,
@@ -1699,7 +1699,8 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.cityJobs (aigoals.js, below) is only ever read at RUN time.
      Revert with ?cfg_ROLE_VERBS=0 / ?cfg_OBJECT_VERBS=0. -->
 <script src="src/city/roleverbs.js?v=verbs2b"></script>
-<script src="src/city/restrain.js?v=polsim1008b"></script>
+<script src="src/city/restrain.js?v=custody1009b"></script>
+<script src="src/city/custody.js?v=custody1009b"></script>
 <script src="src/city/combat.js?v=verbs2b"></script>
 <!-- B7 — RESOURCES: harvest nodes (needs CBZ.assets/placement/CBZ.CITY
      already loaded, and CBZ.cityEcon's Wood/Stone/Scrap/Hatchet/Pickaxe
@@ -2375,7 +2376,7 @@ document.body.appendChild(b);}}catch(e){}})();
      other read is feature-detected and lazily retried.
      Revert with ?cfg_PRESIDENCY_V1=0. -->
 <script src="src/city/presidency.js?v=verbs2b"></script>
-<script src="src/city/politics.js?v=verbs2b"></script>
+<script src="src/city/politics.js?v=custody1009b"></script>
 <!-- THE PRESIDENT'S WORLD (2026-09-27 rework) — no HUD strip, no mission
      list, no button console. In load order: the office (desk phone that rings
      with real calls, briefing folders you read on the desk, the TV news, aides

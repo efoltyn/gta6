@@ -1335,6 +1335,9 @@
       // other nearby civilian — never park one mid-queue, or the line holds a
       // ghost slot pointing at an off-map body. It re-parks once released.
       if (ped._clubLine || ped._clubGoingIn) continue;
+      // a man in custody (cuffed, in the back of a unit) is never parked: he
+      // leaves only by city/custody.js (cityCrowdRetire below)
+      if (ped.restraint || (ped._custody && !ped._custodyExit)) continue;
       if (P.dead || P.driving || dx * dx + dz * dz > PROMO_OUT2) { promotedBy[i] = -1; park(e); }   // walked away → back to density
     }
     if (P.dead || P.driving) return;
@@ -2005,6 +2008,20 @@
     return best >= 0 ? { i: best, dist: bd, head: head, x: px[best], z: pz[best] } : null;
   };
   // kill ambient agent i: leave a body, throw gore, and report the crime (wanted).
+  // TAKEN INTO CUSTODY (city/custody.js): his street row is consumed (he will
+  // not walk this street again) and the slot gets a fresh rig, exactly as a
+  // death consumes one. The old rig is the caller's to take out of play.
+  CBZ.cityCrowdRetire = function (ped) {
+    if (!ped || !Array.isArray(pool)) return false;
+    for (let s = 0; s < pool.length; s++) {
+      const e = pool[s];
+      if (!e || e.ped !== ped) continue;
+      if (e.idx >= 0) { ungroup(e.idx); deadAgent[e.idx] = 1; promotedBy[e.idx] = -1; }
+      pool[s] = { ped: makePooled(), idx: -1 };
+      return true;
+    }
+    return false;
+  };
   CBZ.cityCrowdKill = function (i, opts) {
     opts = opts || {};
     if (i < 0 || i >= count || !shootable(i)) return false;

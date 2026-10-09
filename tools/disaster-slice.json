@@ -4145,6 +4145,7 @@
   "src/city/interact.js",
   "src/city/roleverbs.js",
   "src/city/restrain.js",
+  "src/city/custody.js",
   "src/city/combat.js",
   "src/systems/resources.js",
   "src/city/explosives.js",
