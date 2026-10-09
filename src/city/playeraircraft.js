@@ -59,15 +59,10 @@
   function taperBox(w, h, d, opt) { return CBZ.taperBox(w, h, d, opt); }
 
   // ---- tunables --------------------------------------------------------
-  // NOTE: this used to be flagged "arcade flight — NOT realistic aero". It now
-  // runs through the SAME shared lift/drag/stall/ETL/ground-effect core as the
-  // AI gunship/jets (city/aircraftphysics.js, CBZ.aeroPhysics) — see flyHeli/
-  // flyJet/integrate below. The tunables here are the per-craft knobs that
-  // feed that core (thrust, six-axis drag coefficients, ETL band, etc).
+  // The dynamics are pure steps in city/aircraftphysics.js (heliStep,
+  // planeStep); the tunables here are the per-craft knobs fed to them.
   const JET_PRICE   = 3000000;     // $3M for the F-22
-  // FLIGHT_SPEED_V2: the top-speed caps the owner asked for.
-  // Read at load (config.js runs first). The OLD numbers stay as the literal
-  // fallbacks so CBZ.CONFIG.FLIGHT_SPEED_V2=false is a true one-line revert.
+  // FLIGHT_SPEED_V2: the heli's top speed (the planes' caps live in WING_V2).
   const FLIGHT_SPEED_V2 = !CBZ.CONFIG || CBZ.CONFIG.FLIGHT_SPEED_V2 !== false;
   const GROUND_PAD  = 1.2;         // never sink the belly below this over the floor
 
@@ -80,60 +75,30 @@
 
   // JET feel
   const JET_MIN     = 38;          // min cruise the THROTTLE can be set to (engine idle floor —
-                                    // airSPEED can still fall below this in a stall; see flyJet)
-  const JET_MAX     = 120;         // top throttle
-  const JET_ACCEL   = 26;          // throttle response
-  const JET_TURN    = 1.15;        // bank/turn rate (wide)
-  const JET_SPAN    = 10.8;        // wingspan — feeds ground-effect threshold
+                                    // airSPEED can still fall below this in a stall; see planeStep)
+  const JET_MAX     = 120;         // top throttle (the legacy m/s throttle readout)
 
-  // ---- FLIGHT MODEL V2 (CBZ.CONFIG.AIRCRAFT_FLIGHT_V2) --------------------
-  // Per-class fixed-wing tuning. The V2 wing model is a SCALAR-AIRSPEED craft:
-  // throttle drives airspeed along the nose, bank commands a coordinated turn
-  // (turn rate ∝ sin(bank)), climb bleeds airspeed / dives regain it, and a
-  // persistent gravity "sag" term accumulates whenever airspeed drops under
-  // the lift band — that sag IS the stall sink, and it decays the moment
-  // flying speed returns. Velocity is rebuilt from (heading,pitch,airspeed)
-  // each frame, which is unconditionally stable at this repo's spiky dt
-  // (full force integration was tried for V1 and abandoned — see flyJet).
-  //   vmax      — max level airspeed (m/s)      thrust — engine accel at full throttle
-  //   dragK     — quadratic drag                vstall — below this, the wing stalls
-  //   vminfly   — below this, no lift at all    vr     — rotate/takeoff speed (ground)
-  //   gacc      — brake decel scale             rollMax/rollRate — bank limit / roll-in
-  //   turnK     — yawRate = turnK·sin(roll)     pitchMax/pitchRate — attitude limits
-  //   bleed     — airspeed lost per s per unit sin(pitch) climbing
-  //   autoLevel — wings-level return rate with no input   span — feeds ground effect
+  // ---- per-class fixed-wing tuning (aircraftphysics.js planeStep flies it)
+  //   vmax      max level airspeed (m/s)      thrust  engine accel at full throttle
+  //   dragK     quadratic drag                vstall  below this, the wing stalls
+  //   vminfly   below this, no lift at all    vr      rotate/takeoff speed
+  //   gacc      brake decel scale             rollMax bank limit (rad)
+  //   rollRate  rad/s roll at full stick      turnK   turn rate per sin(bank)
+  //   pitchMax  nose limit (rad)              pitchRate rad/s nose at full stick
+  //   bleed     airspeed lost per s per unit sin(pitch) climbing
+  //   autoLevel how fast a released bank fades (per s)   span  ground effect
   const WING_V2 = {
-    prop:     { vmax: 58,  thrust: 22, dragK: 0.00055, vstall: 20, vminfly: 16, vr: 24, gacc: 9,  rollMax: 0.90, rollRate: 2.6, turnK: 0.55, pitchMax: 0.70, pitchRate: 1.8, bleed: 11, autoLevel: 1.4, span: 10 },
-    jet:      { vmax: 120, thrust: 46, dragK: 0.00042, vstall: 42, vminfly: 34, vr: 55, gacc: 14, rollMax: 0.80, rollRate: 2.0, turnK: 0.42, pitchMax: 0.85, pitchRate: 1.5, bleed: 16, autoLevel: 1.1, span: 10.8 },
-    airliner: { vmax: 105, thrust: 28, dragK: 0.00040, vstall: 46, vminfly: 38, vr: 62, gacc: 9,  rollMax: 0.55, rollRate: 1.3, turnK: 0.30, pitchMax: 0.40, pitchRate: 1.0, bleed: 13, autoLevel: 1.6, span: 34 },
+    prop:     { vmax: 110, thrust: 4.5, dragK: 0.000307, vstall: 20, vminfly: 16, vr: 24, gacc: 9,  rollMax: 0.95, rollRate: 1.6, turnK: 0.60, pitchMax: 0.70, pitchRate: 0.60, bleed: 9.8, autoLevel: 0.8, span: 10 },
+    jet:      { vmax: 420, thrust: 13,  dragK: 0.0000606, vstall: 42, vminfly: 34, vr: 55, gacc: 14, rollMax: 1.05, rollRate: 2.2, turnK: 0.55, pitchMax: 0.85, pitchRate: 0.75, bleed: 9.8, autoLevel: 0.6, span: 10.8 },
+    airliner: { vmax: 240, thrust: 8.5, dragK: 0.000121, vstall: 46, vminfly: 38, vr: 62, gacc: 9,  rollMax: 0.55, rollRate: 0.6, turnK: 0.32, pitchMax: 0.40, pitchRate: 0.30, bleed: 9.8, autoLevel: 0.9, span: 34 },
   };
-  // FLIGHT_SPEED_V2 top-speed lift (GRAND scale). The old vmax/thrust above are
-  // the revert baseline; this raises the caps HARD so each class flies its part —
-  // a brisk prop, a genuinely FAST military jet, a jetliner-quick airliner. The
-  // touch dial now reads on a fixed ~1000 grand scale (touch_vehicle.js), so
-  // these true speeds sit LOW on the gauge with headroom for a future rocket —
-  // the gauge never hugs the craft's cap again. A craft only REACHES its cap if
-  // quadratic-drag equilibrium √(thrust/dragK) sits above it; at the new caps the
-  // jet's old thrust equilibrium (359) fell UNDER 420, so the fast movers get a
-  // thrust bump to put equilibrium back above the cap (prop√(30/.00055)=233 > 110,
-  // jet√(90/.00042)=463 > 420, airliner√(42/.0004)=324 > 240 — all reachable, and
-  // above the vmax·1.05 airspeed clamp so full-throttle level flight actually
-  // pins the top). Handling stays controllable: attitude RATES (roll/pitch/turnK)
-  // are UNCHANGED, so turn radius simply widens with speed the way a real fast
-  // jet's does. High-speed collision is safe — integrateV2 sweeps the FULL frame
-  // segment through the analytic slab test sweptAirframeImpact (no per-step
-  // marching / no distance assumption), so nothing tunnels a building or aircraft
-  // even at 420 m/s on a spiky headless dt. The chase cam's airspeed-scaled
-  // follow (camera.js) is tightened in step so 420 stays framed. Helis stay at
-  // HELI_TOP (~50, already in the owner's 50–55 band) — the complaint was the
-  // fixed-wing speeds, and 50 is a good rooftop-gunship cruise.
-  if (FLIGHT_SPEED_V2) {
-    WING_V2.prop.vmax = 110;     WING_V2.prop.thrust = 30;
-    WING_V2.jet.vmax = 420;      WING_V2.jet.thrust = 90;
-    WING_V2.airliner.vmax = 240; WING_V2.airliner.thrust = 42;
-  }
-  const RUDDER_RATE = 0.55;    // rad/s flat yaw from QE (fine align/crosswind; weaker than a bank turn)
-  function flightV2() { return !CBZ.CONFIG || CBZ.CONFIG.AIRCRAFT_FLIGHT_V2 !== false; }
+  // thrust is the full-throttle acceleration (m/s^2), so it IS the takeoff
+  // roll: the prop reaches Vr in ~70 m, the jet ~120 m, an airliner or the B-2
+  // ~240 m (Fort Brandt's strip is 360). It used to be 30 / 90 / 42 m/s^2,
+  // 3 to 9 g, so every plane leapt off in a car length. dragK puts the
+  // full-throttle level speed (sqrt(thrust/dragK)) ~10% over vmax so the cap
+  // is reachable; bleed is g, so a climb costs what gravity says and only
+  // the jet can hang on its thrust going straight up.
   // FLIGHT_CONTROLS_V2: standard flight grammar (WS pitch, AD roll/yaw, QE
   // rudder/strafe, held throttle on Space/Ctrl) with the mouse as pure free-look.
   // Flip false to restore the previous look-steers-the-nose bindings.
@@ -446,7 +411,7 @@
     });
     grp.userData.plume = plume; grp.userData.plumeMat = plumeMat;
     // LANDING GEAR (nose leg + two mains): chunky struts + wheel drums. The
-    // whole group is toggled by integrate() — down under ~9m AGL, tucked above.
+    // whole group is toggled by integrateV2() — down under ~9m AGL, tucked above.
     // A parked Raptor always shows it (built visible; exitAircraft re-lowers).
     const gear = new THREE.Group();
     function leg(x, z, wr, sh) {
@@ -556,7 +521,7 @@
       vx: 0, vy: 0, vz: 0, speed: opts.speed != null ? opts.speed : (kind === "jet" ? JET_MIN : 0),
       throttle: opts.throttle != null ? opts.throttle : (kind === "jet" ? JET_MIN : 0),   // ENGINE power setting (jet only) — has an idle floor,
                                                  // unlike craft.speed (true airspeed), which can now sag
-                                                 // below it in a stall (see flyJet).
+                                                 // below it in a stall (see planeStep).
       fireCD: 0,
       ammo: armed ? (kind === "jet" ? JET_AMMO : HELI_AMMO) : 0,
       maxAmmo: armed ? (kind === "jet" ? JET_AMMO : HELI_AMMO) : 0,
@@ -609,18 +574,27 @@
   const _craftYawQ = new THREE.Quaternion();
   const _craftUp = new THREE.Vector3(0, 1, 0);
   const _milDrive = { thr: 0 };
+  // pitch + = nose UP, roll + = RIGHT wing down, heading about world Y: the
+  // one convention every flight step (heliStep, planeStep), the bailout
+  // spiral and the chase cam share. Euler order YXZ is the aircraft order
+  // (heading, then pitch about the wing, then roll about the fuselage). It
+  // used to be three.js's default XYZ, which pitches about WORLD X after the
+  // heading: correct only flying due north or south, and flying east or west
+  // a climb showed as a bank. And rotation.x + tips a nose DOWN, so a plane
+  // that was climbing showed its nose dipping.
   function setCraftRotation(craft, pitch, heading, roll) {
     if (!craft || !craft.group) return;
     const off = craft.modelYawOffset || 0;
     if (!off) {
-      craft.group.rotation.set(pitch || 0, heading, roll || 0);
+      craft.group.rotation.order = "YXZ";
+      craft.group.rotation.set(-(pitch || 0), heading, roll || 0);
       return;
     }
     // The airport meshes point down local +X, while the shared flight rig points
     // down +Z. Compose the model correction AFTER the complete flight attitude;
     // merely adding -90deg to Euler yaw makes pitch act like roll once airborne.
     craft.group.quaternion
-      .setFromEuler(_craftEuler.set(pitch || 0, heading, roll || 0, "XYZ"))
+      .setFromEuler(_craftEuler.set(-(pitch || 0), heading, roll || 0, "YXZ"))
       .multiply(_craftYawQ.setFromAxisAngle(_craftUp, off));
   }
 
@@ -931,7 +905,7 @@
   // cruising one — altitude, heading, speed, and the velocity vector that
   // matches them — using the SAME forward convention the V2 integrator uses
   // (forward = sin(heading)·cos(pitch), sin(pitch), cos(heading)·cos(pitch),
-  // flyWingV2 above). Doing it here rather than in origins.js keeps that
+  // flyWing below). Doing it here rather than in origins.js keeps that
   // convention in the one file that owns it; a mission that wants to open in
   // the air gets it for free.
   //
@@ -1712,122 +1686,6 @@
     }
   }
 
-  function flyJet(craft, dt) {
-    const k = CBZ.keys || {};
-    const A = CBZ.aeroPhysics;
-    const authority = controlAuthority(craft);     // damage-degraded control (1 = full)
-
-    // ---- THROTTLE: the engine power setting (still has an idle floor — a
-    // jet doesn't flame out from the stick alone). NOTE this is no longer
-    // the same thing as airSPEED: throttle is what the engine is COMMANDED
-    // to deliver; craft.speed (below) is what the airframe is ACTUALLY
-    // doing, and the two can now diverge — that gap is the stall.
-    let thr = 0;
-    if (k["w"]) thr += 1;
-    if (k["s"]) thr -= 1;
-    craft.throttle = (craft.throttle == null ? JET_MIN : craft.throttle) + thr * JET_ACCEL * dt;
-    craft.throttle = Math.max(JET_MIN, Math.min(JET_MAX, craft.throttle));
-
-    // bank/turn: A/D plus mouse yaw both steer the heading (wide turns)
-    let bank = 0;
-    if (k["a"]) bank += 1;
-    if (k["d"]) bank -= 1;
-    // mouse yaw feeds the heading too (camera sits behind)
-    if (CBZ.cam) {
-      const camHeading = CBZ.cam.yaw + Math.PI;
-      let dh = camHeading - craft.heading;
-      while (dh > Math.PI) dh -= Math.PI * 2;
-      while (dh < -Math.PI) dh += Math.PI * 2;
-      craft.heading += dh * Math.min(1, dt * 2.2) * authority;          // ease toward look dir
-    }
-    craft.heading += bank * JET_TURN * authority * dt;
-    // climb/dive — NOSE attitude command (the pilot's stick input)
-    let climb = 0;
-    if (k[" "]) climb += 1;
-    if (k["control"] || k["shift"]) climb -= 1;
-    craft.pitch = (craft.pitch || 0) + ((climb * 0.4 * authority) - craft.pitch) * Math.min(1, dt * 3);
-    craft.roll = (craft.roll || 0) + ((bank * 0.5 * authority) - craft.roll) * Math.min(1, dt * 3);
-
-    // ---- STALL MODEL (hybrid: kinematic baseline + aero override) ---------
-    // The ORIGINAL jet was pure kinematics: velocity was rebuilt from the
-    // nose vector every single frame, which is exactly why it could never
-    // stall (there's no "actual flightpath" for the nose to diverge from).
-    // A full from-scratch force integration is the "correct" way to fix that
-    // but is notoriously easy to leave subtly unstable (sign/order mistakes
-    // compound every frame and diverge — verified the hard way while tuning
-    // this). So: keep the proven kinematic "nose defines intended velocity"
-    // baseline for normal flight (same feel as always), but let the ACTUAL
-    // velocity LAG behind that intended velocity at a rate driven by the Cl
-    // curve — strong blending (snaps to the nose, old behaviour) when AoA is
-    // small, weak-to-none (gravity/momentum take over, nose and flightpath
-    // genuinely separate) once AoA crosses into the stall. That divergence
-    // IS the angle-of-attack feeding the curve, so it's self-consistent, and
-    // because the baseline IS the old proven model, normal flight is exactly
-    // as stable/fun as before — only deep, sustained high-AoA maneuvers (slow
-    // + nose hauled up) ever expose the stall.
-    craft.speed = (craft.speed == null ? craft.throttle : craft.speed) + thr * JET_ACCEL * authority * dt;
-    craft.speed = Math.max(0, Math.min(JET_MAX, craft.speed));
-    const cp = Math.cos(craft.pitch);
-    const nx = Math.sin(craft.heading) * cp, nz = Math.cos(craft.heading) * cp, ny = Math.sin(craft.pitch);
-    const intendedVx = nx * craft.speed, intendedVy = ny * craft.speed, intendedVz = nz * craft.speed;
-
-    // measure AoA from how far the CURRENT velocity has already drifted from
-    // the nose (last frame's state) before blending this frame's correction.
-    // NOTE: only aoaDeg/stalled are consumed below (they drive the blend
-    // rate that determines how much the kinematic model "wins" each frame) —
-    // liftLocal/dragLocal aren't applied as raw forces here the way the heli
-    // uses them, so liftScale/dragCoef are left at neutral defaults.
-    let aoaDeg = 0, stalled = false, groundMul = 1;
-    if (A) {
-      const curVx = craft.vx || intendedVx, curVy = craft.vy || intendedVy, curVz = craft.vz || intendedVz;
-      const local = A.localVelocity(curVx, curVy, curVz, craft.heading, craft.pitch || 0, craft.roll || 0);
-      const groundY = floorY(craft.pos.x, craft.pos.z);
-      const agl = Math.max(0, craft.pos.y - craft.belly - groundY);
-      groundMul = A.groundEffectMul(agl, JET_SPAN);
-      const aero = A.aeroForces(local, { groundMul, incidenceDeg: 6 });
-      aoaDeg = aero.aoaDeg; stalled = aero.stalled;
-
-      // blend rate: 1 (instant snap, old behaviour) when comfortably inside
-      // the stall margin, collapsing toward a slow drift as AoA approaches
-      // and crosses STALL_AOA — gravity (added below) does the rest.
-      const margin = Math.max(0, A.STALL_AOA - Math.abs(aoaDeg)) / A.STALL_AOA;     // 1 far from stall, 0 AT the limit
-      const snap = stalled ? 0.06 : Math.min(1, 0.18 + margin * margin * 12);
-      const k2 = 1 - Math.pow(1 - Math.min(1, snap), dt * 30);
-      craft.vx = curVx + (intendedVx - curVx) * k2;
-      craft.vy = curVy + (intendedVy - curVy) * k2;
-      craft.vz = curVz + (intendedVz - curVz) * k2;
-      // gravity always applies — what actually produces the sink/stall sag
-      // (when the kinematic blend is strong this is masked by the snap; once
-      // stalled the blend is weak and gravity visibly wins, exactly as
-      // intended: lift has collapsed, so weight takes over).
-      craft.vy -= 9.8 * dt;
-      // ground effect gives a gentle floaty cushion right at the deck
-      if (groundMul > 1) craft.vy += (groundMul - 1) * 6 * dt;
-    } else {
-      craft.vx = intendedVx; craft.vy = intendedVy; craft.vz = intendedVz;
-    }
-    // a STALLED wing: the nose drops on its own (you lose the ability to
-    // HOLD it up, exactly like a real departure) — recoverable the instant
-    // AoA/airspeed come back under the limit, never a hard fail. Capped rate
-    // so it reads as "the jet fighting you", not an instant snap to vertical.
-    if (stalled) craft.pitch += (-0.45 - craft.pitch) * Math.min(1, dt * 1.2);
-
-    // craft.speed re-syncs to the ACTUAL velocity magnitude every frame, so it
-    // genuinely reads low in a stall (the "let speed drop below the old
-    // floor" the brief asks for) and recovers on its own the instant the
-    // blend above snaps speed back toward the kinematic/throttle target.
-    craft.speed = Math.hypot(craft.vx, craft.vy, craft.vz);
-
-    craft.aoa = aoaDeg; craft.stalled = stalled;
-    // afterburner pulse
-    const ud = craft.group.userData;
-    if (ud.burn) ud.burn.scale.z = 1.2 + Math.sin(craft.rotorSpin += dt * 24) * 0.5 + (thr > 0 ? 0.6 : 0);
-    // Hot exhaust is faint at idle and becomes a long, shock-diamond burner at
-    // full throttle. Both cans stay nozzle-anchored while their fire extends aft.
-    const plumePower = Math.max(0, Math.min(1, (craft.throttle - JET_MIN) / (JET_MAX - JET_MIN)));
-    powerJetPlumes(ud, 0.08 + plumePower * 0.92, craft.rotorSpin, 1.55, 0.92);
-  }
-
   // THE AIRFRAME MOVES WITH THE FLYING. Real gear cycles (up after a positive
   // climb, down on a slow descent), control surfaces follow the attitude
   // RATES the flight model produces, flaps run out slow and low, props/fans
@@ -1869,43 +1727,13 @@
     AF.animate(grp, st, dt);
   }
 
-  function integrate(craft, dt) {
-    craft.pos.x += craft.vx * dt;
-    craft.pos.y += craft.vy * dt;
-    craft.pos.z += craft.vz * dt;
-    // ground floor (never sink the belly through terrain)
-    const gy = floorY(craft.pos.x, craft.pos.z);
-    const minY = gy + (craft.groundOffset != null ? craft.groundOffset : craft.belly + GROUND_PAD);
-    if (craft.pos.y < minY) {
-      // HARD-LANDING CHECK (autorotation payoff): if the heli touches down
-      // sinking faster than the flare can bleed off, that's a hard landing —
-      // a little extra airframe damage proportional to the excess sink, so
-      // FLARING (timing the collective pull near the ground) is a real skill
-      // with a real reward, not cosmetic. A normal/jet landing (small vy) is
-      // unaffected — this only fires on a genuinely hard touchdown.
-      if (craft.kind === "heli" && craft.vy < -FLARE_SINK * 1.6) {
-        damageCraft(craft, Math.min(60, (-craft.vy - FLARE_SINK) * 4));
-      }
-      craft.pos.y = minY;
-      if (craft.vy < 0) craft.vy = 0;
-      // a jet that bottoms out keeps cruising level (no stall-crash); a heli rests
-      if (craft.kind === "jet" && craft.pitch < 0) craft.pitch = 0;
-    }
-    animateAirframe(craft, craft.pos.y - gy, dt);
-    // apply transform
-    craft.group.position.set(craft.pos.x, craft.pos.y, craft.pos.z);
-    setCraftRotation(craft, craft.pitch || 0, craft.heading, craft.roll || 0);
-  }
-
   // ============================================================
-  //  FLIGHT MODEL V2 — CBZ.CONFIG.AIRCRAFT_FLIGHT_V2 (one-line revert to the
-  //  V1 flyHeli/flyJet/integrate path above). Adds: real ground-roll →
-  //  rotate-at-Vr → climb takeoffs, coordinated bank-to-turn with auto-level,
-  //  a stall that genuinely sinks (persistent gravity sag under the lift
-  //  band), flare/touchdown judgement (slam in or nose-first = fireball),
-  //  wall strikes, rooftop-aware ground clamp (no more flying THROUGH
-  //  towers), rotor spin-up, and a hover model that visibly leans into its
-  //  own velocity.
+  //  THE FLIGHT MODEL. The dynamics are pure steps in aircraftphysics.js
+  //  (planeStep for every fixed wing, heliStep for the helicopter); this
+  //  file reads the controls and the world: ground-roll takeoffs, rooftop-
+  //  aware ground clamp, wall strikes, touchdown judgement, rotor spin-up.
+  //  The old V1 flyJet/integrate (camera-steered nose, a second stall model)
+  //  is deleted.
   // ============================================================
 
   // tallest collider top at/below the craft's belly — the surface it can land
@@ -2310,31 +2138,25 @@
     return true;
   };
 
-  // ---- V2 FIXED-WING (jet / private jet / airliner share the math, the
-  // per-class WING_V2 row is the personality) --------------------------------
-  function flyWingV2(craft, dt) {
+  // ---- FIXED WING: F-22, stolen jets, airliners, prop planes, the B-2. The
+  // dynamics are CBZ.aeroPhysics.planeStep; this reads the controls.
+  //   keyboard  W/S stick fore/aft (S pulls the nose up), A/D roll (bank to
+  //             turn), Q/E rudder, Space/Shift throttle up, Ctrl down (and the
+  //             wheel brakes on the runway)
+  //   touch     the stick is the joystick, ANALOG (CBZ.touchStickAxis): push
+  //             forward = nose down, pull back = nose up, sideways = bank.
+  //             It used to fly through the WASD switches it also writes: full
+  //             roll or nothing past a 0.28 dead band, so a slightly crooked
+  //             pull held a full bank and the plane went round in circles.
+  //             THR +/- pills hold Space/Ctrl, TURN L/R pills hold Q/E.
+  const _wingIn = { pitch: 0, roll: 0, yaw: 0, thr: 0 };
+  const _wingEnv = { onGround: false, agl: 0, authority: 1, groundMul: 1 };
+  function flyWing(craft, dt) {
     const k = CBZ.keys || {};
+    const A = CBZ.aeroPhysics;
     const C = WING_V2[craft.airClass] || WING_V2.jet;
-    const authority = controlAuthority(craft);
-    if (craft.thr == null) craft.thr = (craft.kind === "jet" && !craft.civilian) ? 0.35 : 0;
     if (craft.airspeed == null) craft.airspeed = craft.speed || 0;
-
     craft.perfVmax = C.vmax;   // published for the derived airspeed gauge (touch dial)
-    // throttle 0..1, ~1.6s idle→firewall sweep. V2 CONTROLS: power is a HELD
-    // pair on Space(up)/Ctrl(down) — the same "power up/down" grammar the heli
-    // collective already uses — which frees W/S to become the PITCH axis below
-    // (and turns the touch stick, which writes WASD, into a real pitch+roll
-    // joystick). LEGACY put throttle on W/S. `thr` stays the throttle-input SIGN
-    // so the ground-brake / burner-plume reads downstream are unchanged.
-    let thr = 0;
-    if (controlsV2()) {
-      if (k[" "] || k["shift"]) thr += 1;
-      if (k["control"]) thr -= 1;
-    } else {
-      if (k["w"]) thr += 1;
-      if (k["s"]) thr -= 1;
-    }
-    craft.thr = Math.max(0, Math.min(1, craft.thr + thr * 0.6 * dt));
 
     // ground state off the cached landing surface (terrain or rooftop) —
     // measured against the craft's REST height (owned craft park GROUND_PAD
@@ -2344,118 +2166,34 @@
     const restY = surfY + (craft.groundOffset != null ? craft.groundOffset : craft.belly + GROUND_PAD);
     const agl = Math.max(0, craft.pos.y - restY);
     craft.onGround = agl < 0.3;
-
-    // ---- airspeed: engine vs drag, climb bleeds / dive regains ----
-    const engine = craft.thr * C.thrust;
-    const drag = C.dragK * craft.airspeed * craft.airspeed;
-    craft.airspeed += (engine - drag) * dt;
-    craft.airspeed -= C.bleed * Math.sin(craft.pitch || 0) * dt;
-    if (craft.onGround) {
-      craft.airspeed -= 2.2 * dt;                          // rolling friction
-      if (thr < 0) craft.airspeed -= C.gacc * 0.6 * dt;    // wheel brakes on throttle-down (Ctrl V2 / S legacy)
-      // PARKING DEADBAND: with no throttle a slow rollout snaps dead still —
-      // a parked/idle plane must never creep or dither on its own
-      if (thr <= 0 && craft.airspeed < 0.6) craft.airspeed = 0;
-    }
-    craft.airspeed = Math.max(0, Math.min(C.vmax * 1.05, craft.airspeed));
-
-    // ---- bank → coordinated turn (A/D), auto-level hands-off ----
-    let bank = 0;
-    if (k["a"]) bank += 1;
-    if (k["d"]) bank -= 1;
-    if (bank !== 0 && !craft.onGround) {
-      const targetRoll = bank * C.rollMax * authority;
-      craft.roll = (craft.roll || 0) + (targetRoll - craft.roll) * Math.min(1, dt * C.rollRate);
-    } else {
-      craft.roll = (craft.roll || 0) * Math.max(0, 1 - C.autoLevel * dt);
-    }
-    craft.roll = Math.max(-C.rollMax, Math.min(C.rollMax, craft.roll));
-    let pitchComp = 0;
-    if (!craft.onGround && craft.airspeed > C.vminfly) {
-      const vGate = Math.min(1, craft.airspeed / C.vmax);
-      craft.heading += C.turnK * Math.sin(craft.roll) * (0.4 + 0.6 * vGate) * authority * dt;
-      pitchComp = 0.10 * Math.abs(Math.sin(craft.roll));   // hold the nose through the bank
-    } else if (craft.onGround && craft.airspeed > 0.5) {
-      // nosewheel steering — sharper when slow, washing out toward Vr
-      craft.heading += bank * 0.9 * Math.min(1, craft.airspeed / C.vr) * dt;
-    }
-    // HEADING STEER. V2 CONTROLS: the mouse no longer touches the nose — it is
-    // pure free-look (camera.js) and the chase cam eases back behind the craft on
-    // its own (see the recenter in onUpdate). Heading comes from the coordinated
-    // bank-turn above plus a real QE RUDDER: a flat yaw for fine alignment,
-    // crosswind kicks and strafing runs, deliberately weaker than a full bank so
-    // it never becomes the primary turn. On the ground it steers the nosewheel
-    // alongside A/D. LEGACY eased the nose toward the camera yaw (the coupling
-    // the owner called "stupid").
-    if (controlsV2()) {
-      let rudder = 0;
-      if (k["q"]) rudder += 1;   // yaw left
-      if (k["e"]) rudder -= 1;   // yaw right
-      if (rudder) {
-        if (!craft.onGround && craft.airspeed > C.vminfly) {
-          craft.heading += rudder * RUDDER_RATE * authority * dt;
-        } else if (craft.onGround && craft.airspeed > 0.5) {
-          craft.heading += rudder * 0.9 * Math.min(1, craft.airspeed / C.vr) * dt;
-        }
-      }
-    } else if (CBZ.cam && !craft.onGround) {
-      const camHeading = CBZ.cam.yaw + Math.PI;
-      let dh = camHeading - craft.heading;
-      while (dh > Math.PI) dh -= Math.PI * 2;
-      while (dh < -Math.PI) dh += Math.PI * 2;
-      craft.heading += dh * Math.min(1, dt * 1.6) * authority;
+    // a plane handed over in the air (airborne starts, a bomber's first frame)
+    // gets the throttle that holds the speed it already has, not idle
+    if (craft.thr == null) {
+      craft.thr = craft.onGround ? ((craft.kind === "jet" && !craft.civilian) ? 0.35 : 0)
+        : Math.min(1, C.dragK * craft.airspeed * craft.airspeed / C.thrust);
     }
 
-    // ---- pitch: the primary attitude axis. V2 CONTROLS put it on W/S (stick
-    // fore/aft): S pulls the nose UP, W pushes it DOWN. With no pitch input the
-    // target attitude is level (targetPitch→0 below), so hands-off flies level —
-    // the flag-gated auto-level assist. Can't rotate before Vr on the ground.
-    // LEGACY kept the attitude command on Space/Ctrl. ----
-    let climb = 0;
-    if (controlsV2()) {
-      if (k["s"]) climb += 1;   // pull back → nose up
-      if (k["w"]) climb -= 1;   // push forward → nose down
-    } else {
-      if (k[" "]) climb += 1;
-      if (k["control"] || k["shift"]) climb -= 1;
+    const inp = _wingIn;
+    const ax = CBZ.touchStickAxis ? CBZ.touchStickAxis() : null;
+    if (ax) { inp.pitch = -stickShape(ax.y); inp.roll = stickShape(ax.x); }
+    else {
+      inp.pitch = (k["s"] ? 1 : 0) - (k["w"] ? 1 : 0);
+      inp.roll = (k["d"] ? 1 : 0) - (k["a"] ? 1 : 0);
     }
-    const targetPitch = (craft.onGround && craft.airspeed < C.vr)
-      ? 0
-      : climb * C.pitchMax * authority + pitchComp;
-    craft.pitch = (craft.pitch || 0) + (targetPitch - craft.pitch) * Math.min(1, dt * C.pitchRate);
-    craft.pitch = Math.max(-C.pitchMax, Math.min(C.pitchMax, craft.pitch));
+    inp.yaw = (k["e"] ? 1 : 0) - (k["q"] ? 1 : 0);
+    inp.thr = ((k[" "] || k["shift"]) ? 1 : 0) - (k["control"] ? 1 : 0);
 
-    // ---- stall: under Vstall the wing can't hold the nose — it drops and
-    // the roll wallows; recovers the instant speed returns ----
-    craft.stalled = !craft.onGround && craft.airspeed < C.vstall && agl > 2;
-    if (craft.stalled) {
-      craft.pitch += (-0.5 - craft.pitch) * Math.min(1, dt * 1.2);
-      craft.roll *= Math.max(0, 1 - 0.5 * dt);
-    }
-
-    // ---- gravity sag: builds whenever airspeed is under the lift band,
-    // decays once flying speed returns — this is the sink you feel ----
-    const liftFrac = craft.onGround ? 1
-      : Math.max(0, Math.min(1, (craft.airspeed - C.vminfly) / Math.max(1, C.vstall - C.vminfly)));
-    craft.sag = Math.min(25, (craft.sag || 0) + (1 - liftFrac) * 9.8 * dt);
-    craft.sag *= Math.max(0, 1 - (0.8 + 3.2 * liftFrac) * dt);
-
-    // ---- derive world velocity for the integrator ----
-    const cp = Math.cos(craft.pitch);
-    craft.vx = Math.sin(craft.heading) * cp * craft.airspeed;
-    craft.vz = Math.cos(craft.heading) * cp * craft.airspeed;
-    craft.vy = Math.sin(craft.pitch) * craft.airspeed - craft.sag;
-    // ground effect: a floaty cushion right at the deck (reused shared curve)
-    if (CBZ.aeroPhysics && !craft.onGround && agl < C.span * 1.25) {
-      const gm = CBZ.aeroPhysics.groundEffectMul(Math.max(0, agl), C.span);
-      if (gm > 1) craft.vy += (gm - 1) * 6;
-    }
+    const env = _wingEnv;
+    env.onGround = craft.onGround; env.agl = agl; env.authority = controlAuthority(craft);
+    env.groundMul = (A && !craft.onGround && agl < C.span * 1.25) ? A.groundEffectMul(agl, C.span) : 1;
+    if (!A || !A.planeStep) return;
+    A.planeStep(craft, inp, dt, env, C);
     craft.speed = craft.airspeed;
     craft.aoa = craft.stalled ? 24 : Math.abs(craft.pitch) * 12;
 
-    // engine visuals: burner glow + throttle-driven plume off the V2 throttle
+    // engine visuals: burner glow + throttle-driven plume
     const ud = craft.group.userData;
-    if (ud.burn) ud.burn.scale.z = 1.2 + Math.sin(craft.rotorSpin += dt * 24) * 0.5 + (thr > 0 ? 0.6 : 0);
+    if (ud.burn) ud.burn.scale.z = 1.2 + Math.sin(craft.rotorSpin += dt * 24) * 0.5 + (inp.thr > 0 ? 0.6 : 0);
     powerJetPlumes(ud, 0.08 + craft.thr * 0.92, craft.rotorSpin, 1.55, 0.92);
     // legacy throttle field kept in the old m/s scale for HUD/exit paths
     craft.throttle = JET_MIN + craft.thr * (JET_MAX - JET_MIN);
@@ -2469,11 +2207,11 @@
   //             Ctrl down
   //   touch     the stick is the cyclic, ANALOG (CBZ.touchStickAxis), never
   //             the WASD switches it also writes; TURN L/R pills hold Q/E
-  const HELI_STICK_DEAD = 0.12;
+  const STICK_DEAD = 0.12;   // the touch stick's own dead zone (planes share it)
   function stickShape(v) {
     const a = Math.abs(v);
-    if (a <= HELI_STICK_DEAD) return 0;
-    const n = Math.min(1, (a - HELI_STICK_DEAD) / (1 - HELI_STICK_DEAD));
+    if (a <= STICK_DEAD) return 0;
+    const n = Math.min(1, (a - STICK_DEAD) / (1 - STICK_DEAD));
     return Math.sign(v) * Math.pow(n, 1.6);   // fine near the middle, full at the rim
   }
   const _heliIn = { cycF: 0, cycR: 0, pedal: 0, coll: 0 };
@@ -2586,18 +2324,11 @@
       return;
     }
     if (craft.fireCD > 0) craft.fireCD = Math.max(0, craft.fireCD - dt);
-    // the helicopter has ONE flight model (the old V1 heli with its circling
-    // torque yaw is deleted), whatever the wing flag says
-    if (flightV2() || craft.kind === "heli") {
-      if (craft.kind === "heli") flyHeliV2(craft, dt); else flyWingV2(craft, dt);
-      integrateV2(craft, dt);
-      // a wall strike / slammed touchdown crashed the craft this frame —
-      // crashCraft already ran exitAircraft, so the pilot owns the transform
-      if (craft.destroyed || !P._aircraft) return;
-    } else {
-      flyJet(craft, dt);
-      integrate(craft, dt);
-    }
+    if (craft.kind === "heli") flyHeliV2(craft, dt); else flyWing(craft, dt);
+    integrateV2(craft, dt);
+    // a wall strike / slammed touchdown crashed the craft this frame —
+    // crashCraft already ran exitAircraft, so the pilot owns the transform
+    if (craft.destroyed || !P._aircraft) return;
     // ---- KEEP-GATE: land a HOT stolen F-22 inside a hangar you OWN, slow, and
     // it becomes permanently yours. This is the only way to keep the trophy.
     if (craft.hot && !craft.fromProp && craft.kind === "jet" && craft.speed < 16 && hangarKeepHit(craft.pos.x, craft.pos.z)) {

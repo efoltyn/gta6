@@ -1049,12 +1049,6 @@
   // raw vanilla brain (every steer is gated on this flag).
   if (CBZ.CONFIG.CITY_SMART_COMBAT == null) CBZ.CONFIG.CITY_SMART_COMBAT = true;
 
-  // FLIGHT MODEL V2 (city/playeraircraft.js): per-class fixed-wing model with
-  // a real ground roll → rotate → climb takeoff, coordinated bank-to-turn,
-  // stall/gravity sag, flare/touchdown + crash conditions, and a velocity-
-  // tilting helicopter hover model. Flip false to restore the previous
-  // flyHeli/flyJet feel — every V2 branch is gated on this flag.
-  if (CBZ.CONFIG.AIRCRAFT_FLIGHT_V2 == null) CBZ.CONFIG.AIRCRAFT_FLIGHT_V2 = true;
   // FLIGHT FEEL PASS (owner: "the plane can't go very fast — the altimeter only
   // goes up to 110, and all the plane controls are stupid"). Three one-line
   // reverts, all consumed by city/playeraircraft.js (+ touch_vehicle.js dial,

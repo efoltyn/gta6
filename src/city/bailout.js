@@ -642,7 +642,7 @@
       G.pitch -= Math.abs(G.roll) * dt * 0.55;
       G.pitch = Math.max(-1.15, G.pitch);
       c.speed = Math.min(140, (c.speed || 40) + (-G.pitch) * 26 * dt);
-      c.heading += G.roll * dt * 0.85;                       // bank turns it
+      c.heading -= G.roll * dt * 0.85;                       // bank turns it (roll + = right, a right turn lowers heading)
       const fwd = Math.cos(G.pitch) * c.speed;
       c.pos.x += Math.sin(c.heading) * fwd * dt;
       c.pos.z += Math.cos(c.heading) * fwd * dt;
