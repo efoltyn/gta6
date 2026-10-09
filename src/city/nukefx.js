@@ -158,9 +158,30 @@
        aftermath: form..dur s, slow growth toward a stabilised anvil, then
                   it thins out and is gone.
      ============================================================ */
+  /* THE NUKE TIMELINE IS MEASURED, NOT STYLED (2026-10-09, owner: "way too
+     fake"). The old curve topped the cloud out at ~5 km and deleted it at
+     3.5 minutes; a 16 kt surface burst's cloud is still climbing at 3
+     minutes and stands for the better part of an hour. The numbers below
+     are Glasstone & Dolan's 20 kt cloud-rise and cap-diameter curves (their
+     Fig. 2.12 / Table 2.12 family) cube-rooted to this row's yield:
+        t      10 s   20 s   40 s   60 s   90 s   180 s   300 s   600 s
+        top    0.9    1.7    2.9    3.9    5.1    7.5     9.2     10.5 km
+        cap Ø  0.45   0.8    1.4    2.0    2.6    3.8     4.6     5.2 km
+     fitted as top = TOP*(1-e^(-t/170))^0.85 and capØ = CAP*(1-e^(-t/150))^0.9.
+     The fireball reaches ~70% of its final radius inside the first 20 ms
+     (the hydrodynamic phase is over before the first frame) and is fully
+     grown by ~1 s; it is drawn as an opaque, brightness-limited sphere until
+     its own smoke takes it over at 2-4 s. */
+  // The prevailing wind the cloud and the fallout ride: out of the WSW, the
+  // way a mid-latitude westerly carries a plume. Published for the news
+  // and for anything that wants to know which suburbs the dust falls on.
+  const WIND = [0.866, 0.5];
+  CBZ.nukeWind = function () { return { x: WIND[0], z: WIND[1], speed: REAL.wind }; };
+  const REAL = { top: 10800, topTau: 170, topP: 0.85, cap: 5300, capTau: 150, capP: 0.9, kt: 16, life: 900, wind: 7.5 };
   const STYLE = {
     nuke: {
-      rFrac: 1.0, form: 34, dur: 210,
+      real: true,
+      rFrac: 1.0, form: 34, dur: REAL.life,
       rise: 17.0, riseTau: 11, riseLate: 40.0,  // cap centre height / R (formation, aftermath)
       ring: 4.1, ringLate: 11.0,                 // torus ring radius / R
       tube: 2.6, tubeLate: 6.0,                  // torus minor radius / R
@@ -168,8 +189,9 @@
       stem: 1.9, stemLate: 3.6,                  // stem radius / R
       surgeK: 6.8, surgeMax: 16,                 // base surge ring radius coefficient / cap
       shell: true, emit: 7.0, heatTau: 5.5, glowTau: 13,
-      smokeHot: [0.40, 0.21, 0.12], smokeCool: [0.56, 0.51, 0.47], dust: [0.50, 0.42, 0.34],
-      sigma: 0.030, white: 2.4, whitePeak: 1, dbl: true, shatter: 4, shake: 9,
+      // nitrogen-dioxide red-brown while hot, water-condensate grey-white cold
+      smokeHot: [0.42, 0.24, 0.15], smokeCool: [0.66, 0.63, 0.60], dust: [0.47, 0.40, 0.33],
+      sigma: 0.030, white: 0.85, whitePeak: 1, dbl: true, shatter: 4, shake: 9,
     },
     moab: {
       rFrac: 0.35, form: 12, dur: 40,
@@ -325,13 +347,18 @@
     "uniform sampler2D uNoise;",
     "uniform mat4 projectionMatrix;",   // r128 only predeclares it in the vertex stage
     "uniform vec3 uGZ;",
-    "uniform vec3 uBoxMin; uniform vec3 uBoxMax;",
+    "uniform vec3 uBoxMin; uniform vec3 uBoxMax;",   // the MARCH box (head, stem, surge)
     "uniform vec4 uHead;",      // ringR, tube, centreY (above ground), flat
     "uniform vec4 uStem;",      // radius, top, base flare, presence
     "uniform vec4 uSurge;",     // ringR, tube, flat, presence
     "uniform vec4 uShell;",     // radius, opacity, centreY, thickness
     "uniform vec4 uHeat;",      // head temperature, emission gain, core glow, fire light gain
     "uniform vec4 uRoll;",      // head roll, stem rise, surge roll, time
+    "uniform vec4 uBall;",      // fireball radius, centreY, temperature, opacity
+    "uniform vec4 uSkirt;",     // front radius, wall height, wall opacity, inner haze height
+    "uniform vec4 uMisc;",      // head presence, inner haze density, ball gain, (spare)
+    "uniform vec2 uDrift;",     // wind shear: xz offset of the cap relative to the deck
+    "uniform vec4 uCollar;",    // condensation collar: height, inner R, outer R, opacity
     "uniform float uSigma; uniform float uSteps; uniform float uHazeL; uniform float uFade;",
     "uniform vec3 uSunDir; uniform vec3 uSunCol; uniform vec3 uSkyCol; uniform vec3 uGndCol; uniform vec3 uFogCol;",
     "uniform vec3 uSmokeHot; uniform vec3 uSmokeCool; uniform vec3 uDust; uniform float uCool;",
@@ -346,6 +373,9 @@
     "  return mix(texture2D(uNoise, (t0 + inner) / 528.0), texture2D(uNoise, (t1 + inner) / 528.0), fz);",
     "}",
     "float smax(float a, float b, float k) { float h = clamp(0.5 + 0.5 * (a - b) / k, 0.0, 1.0); return mix(b, a, h) + k * h * (1.0 - h); }",
+    // the wind shears the column: everything above the deck leans downwind,
+    // the cap most of all
+    "vec3 drifted(vec3 q) { q.xz -= uDrift * clamp(q.y / max(uHead.z, 1.0), 0.0, 1.25); return q; }",
     "",
     // envelopes: ~1 at the core, 0 at the surface, negative outside
     "float headEnv(vec3 q) {",
@@ -354,7 +384,7 @@
     "  float tor = 1.0 - length(m) / uHead.y;",
     "  float dr = uHead.x + uHead.y * 0.55;",
     "  vec3 d = vec3(q.x / dr, (q.y - uHead.z - uHead.y * uHead.w * 0.22) / (uHead.y * uHead.w * 0.95), q.z / dr);",
-    "  return smax(tor, 1.0 - length(d), 0.35);",
+    "  return smax(tor, 1.0 - length(d), 0.35) - (1.0 - uMisc.x) * 1.6;",
     "}",
     "float stemEnv(vec3 q) {",
     "  float top = max(uStem.y, 1.0);",
@@ -371,7 +401,8 @@
     "  return max(tor, sheet) - (1.0 - uSurge.w) * 1.4;",
     "}",
     "float envAll(vec3 q) {",
-    "  return max(max(headEnv(q), stemEnv(q)), surgeEnv(q));",
+    "  vec3 qd = drifted(q);",
+    "  return max(max(headEnv(qd), stemEnv(qd)), surgeEnv(q));",
     "}",
     "",
     "vec3 heatCol(float x) {",
@@ -391,110 +422,207 @@
     "  m = vec2(cs * m.x - sn * m.y, sn * m.x + cs * m.y);",
     "  return vec3(dir.x * (ringR + m.x), m.y + cy, dir.y * (ringR + m.x));",
     "}",
+    // ray / sphere: near and far hit distances, (-1,-1) on a miss
+    "vec2 sphereHit(vec3 ro, vec3 rd, vec3 c, float r) {",
+    "  vec3 oc = ro - c; float b = dot(oc, rd); float cc = dot(oc, oc) - r * r;",
+    "  float h = b * b - cc; if (h <= 0.0) return vec2(-1.0);",
+    "  h = sqrt(h); return vec2(-b - h, -b + h);",
+    "}",
+    // ray / vertical cylinder about the ground-zero axis
+    "vec2 cylHit(vec3 ro, vec3 rd, float r) {",
+    "  vec2 o = ro.xz - uGZ.xz; vec2 d = rd.xz;",
+    "  float a = dot(d, d); if (a < 1e-8) return vec2(-1.0);",
+    "  float b = dot(o, d); float cc = dot(o, o) - r * r;",
+    "  float h = b * b - a * cc; if (h <= 0.0) return vec2(-1.0);",
+    "  h = sqrt(h); return vec2((-b - h) / a, (-b + h) / a);",
+    "}",
     "",
     "void main() {",
     "  vec3 ro = cameraPosition;",
     "  vec3 rd = normalize(vWorld - ro);",
+    "  float tGround = rd.y < 0.0 ? (uGZ.y - ro.y) / rd.y : 1e9;",
+    "  vec3 acc = vec3(0.0); float T = 1.0; float tHit = -1.0;",
+    "  float cosT = dot(rd, uSunDir);",
+    "  float g = 0.35;",
+    "  float phase = (1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * cosT, 1.5) * 0.25 + 0.55;",
+    "",
+    // ---- THE FIREBALL: an opaque, brightness-limited sphere. Its surface
+    // is mottled (cooler cells, the granulation every Trinity frame shows),
+    // slightly darker at the limb, and its lower edge sits in its own dust.
+    "  float tBall = -1.0; vec3 ballC = vec3(0.0); float ballA = 0.0;",
+    "  if (uBall.w > 0.002) {",
+    "    vec3 bc = uGZ + vec3(0.0, uBall.y, 0.0);",
+    "    vec2 hb = sphereHit(ro, rd, bc, uBall.x);",
+    "    float th = hb.x > 0.0 ? hb.x : hb.y;",
+    "    if (th > 0.0 && th < tGround) {",
+    "      vec3 n = (ro + rd * th - bc) / uBall.x;",
+    "      float mu = clamp(dot(-rd, n), 0.0, 1.0);",
+    "      vec4 nb = noise4(n * 0.62 + vec3(0.0, -uRoll.w * 0.035, uRoll.w * 0.011));",
+    "      vec4 nc = noise4(n * 1.9 + vec3(0.31, uRoll.w * 0.05, 0.17));",
+    "      float cells = smoothstep(0.35, 0.9, nb.g) * 0.6 + smoothstep(0.3, 0.85, nc.g) * 0.4;",
+    "      float temp = uBall.z * (0.80 + 0.20 * cells) * (0.86 + 0.14 * pow(mu, 0.5));",
+    "      temp -= (1.0 - smoothstep(0.0, 0.35, n.y + 0.25)) * 0.18 * (1.0 - uBall.z);",
+    "      ballC = heatCol(clamp(temp, 0.0, 1.0)) * uMisc.z * (0.55 + 0.45 * cells);",
+    "      ballA = uBall.w * smoothstep(0.0, 0.08, mu + 0.02);",
+    "      tBall = th;",
+    "    }",
+    "  }",
+    "",
+    // ---- THE VOLUME: head, stem and base surge, marched inside its own box
     "  vec3 inv = 1.0 / (sign(rd) * max(abs(rd), vec3(1e-5)) + vec3(step(abs(rd), vec3(0.0))) * 1e-5);",
     "  vec3 ta = (uBoxMin - ro) * inv, tb = (uBoxMax - ro) * inv;",
     "  vec3 tmn = min(ta, tb), tmx = max(ta, tb);",
     "  float t0 = max(max(max(tmn.x, tmn.y), tmn.z), 0.0);",
     "  float t1 = min(min(tmx.x, tmx.y), tmx.z);",
-    // never march under the deck
-    "  if (rd.y < 0.0) t1 = min(t1, (uGZ.y - ro.y) / rd.y);",
-    "  if (t1 <= t0) discard;",
-    "",
-    "  float n = max(uSteps, 4.0);",
-    "  float stepL = max((t1 - t0) / (n * 1.5), 3.0);",
-    "  float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));",
-    "  float t = t0 + stepL * jit;",
-    "  float cosT = dot(rd, uSunDir);",
-    "  float g = 0.35;",
-    "  float phase = (1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * cosT, 1.5) * 0.25 + 0.55;",
-    "  vec3 headC = vec3(0.0, uHead.z, 0.0);",
-    "  vec3 fireLight = heatCol(clamp(uHeat.x * 0.9 + 0.25, 0.0, 1.0)) * uHeat.w;",
-    "  float shadowL = max(uHead.y, 40.0);",
-    "  vec3 acc = vec3(0.0); float T = 1.0; float tHit = -1.0;",
-    "",
-    "  for (int i = 0; i < 140; i++) {",
-    "    if (float(i) >= n * 1.9 || t > t1 || T < 0.02) break;",
-    "    vec3 q = ro + rd * t - uGZ;",
-    "    float eh = headEnv(q), es = stemEnv(q), eu = surgeEnv(q);",
-    "    float e = max(max(eh, es), eu);",
-    "    if (e < -0.35) { t += stepL * (1.0 + clamp((-e - 0.35) * 2.0, 0.0, 3.0)); continue; }",
+    "  t1 = min(t1, tGround);",
+    "  if (tBall > 0.0 && ballA > 0.6) t1 = min(t1, tBall);",
+    "  if (t1 > t0) {",
+    "    float n = max(uSteps, 4.0);",
+    "    float stepL = max((t1 - t0) / (n * 1.5), 3.0);",
+    "    float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));",
+    "    float t = t0 + stepL * jit;",
+    "    vec3 headC = vec3(uDrift.x, uHead.z, uDrift.y);",
+    "    vec3 fireLight = heatCol(clamp(uHeat.x * 0.9 + 0.25, 0.0, 1.0)) * uHeat.w;",
+    "    float shadowL = max(uHead.y, 40.0);",
+    "    for (int i = 0; i < 140; i++) {",
+    "      if (float(i) >= n * 1.9 || t > t1 || T < 0.02) break;",
+    "      vec3 q = ro + rd * t - uGZ;",
+    "      vec3 qd = drifted(q);",
+    "      float eh = headEnv(qd), es = stemEnv(qd), eu = surgeEnv(q);",
+    "      float e = max(max(eh, es), eu);",
+    "      if (e < -0.35) { t += stepL * (1.0 + clamp((-e - 0.35) * 2.0, 0.0, 3.0)); continue; }",
     // advected noise coordinates, blended by which part dominates
-    "    float wh = exp(6.0 * (eh - e)), ws = exp(6.0 * (es - e)), wu = exp(6.0 * (eu - e));",
-    "    float wsum = wh + ws + wu;",
-    "    vec3 ch = rollAbout(q, uHead.x, uHead.z, uRoll.x) / (uHead.y * 3.4) + vec3(0.0, -uRoll.w * 0.004, 0.0);",
-    "    float tw = q.y * 0.0012 + uRoll.w * 0.03;",
-    "    vec2 sxz = mat2(cos(tw), -sin(tw), sin(tw), cos(tw)) * q.xz;",
-    "    vec3 cs = vec3(sxz.x / (uStem.x * 2.6 + 1.0), (q.y - uRoll.y) / (uStem.x * 7.0 + 1.0), sxz.y / (uStem.x * 2.6 + 1.0));",
-    "    vec3 cu = rollAbout(q, uSurge.x, uSurge.y * uSurge.z * 0.55, -uRoll.z) / (uSurge.y * 3.2 + 1.0);",
-    "    vec3 c = (ch * wh + cs * ws + cu * wu) / wsum;",
-    "    vec4 n1 = noise4(c);",
-    "    float base = e + (n1.r - 0.5) * 0.95 + (n1.g - 0.5) * 0.35;",
-    "    if (base > 0.0) {",
-    "      vec4 n2 = noise4(c * 3.07 + vec3(0.37, 0.11, 0.73));",
-    "      float d = base - (1.0 - (n2.g * 0.65 + n2.b * 0.35)) * 0.34 * (1.0 - clamp(base * 1.6, 0.0, 1.0));",
-    "      d = clamp(d * 1.7, 0.0, 1.0) * uFade;",
-    "      if (d > 0.002) {",
-    "        float a = 1.0 - exp(-d * uSigma * stepL);",
+    "      float wh = exp(6.0 * (eh - e)), ws = exp(6.0 * (es - e)), wu = exp(6.0 * (eu - e));",
+    "      float wsum = wh + ws + wu;",
+    "      vec3 ch = rollAbout(qd, uHead.x, uHead.z, uRoll.x) / (uHead.y * 3.4) + vec3(0.0, -uRoll.w * 0.004, 0.0);",
+    "      float tw = qd.y * 0.00025 + uRoll.w * 0.006;",
+    "      vec2 sxz = mat2(cos(tw), -sin(tw), sin(tw), cos(tw)) * qd.xz;",
+    "      vec3 cs = vec3(sxz.x / (uStem.x * 2.2 + 1.0), (qd.y - uRoll.y) / (uStem.x * 4.0 + 1.0), sxz.y / (uStem.x * 2.2 + 1.0));",
+    "      vec3 cu = rollAbout(q, uSurge.x, uSurge.y * uSurge.z * 0.55, -uRoll.z) / (uSurge.y * 3.2 + 1.0);",
+    "      vec3 c = (ch * wh + cs * ws + cu * wu) / wsum;",
+    "      vec4 n1 = noise4(c);",
+    "      float base = e + (n1.r - 0.5) * 0.95 + (n1.g - 0.5) * 0.35;",
+    "      if (base > 0.0) {",
+    "        vec4 n2 = noise4(c * 3.07 + vec3(0.37, 0.11, 0.73));",
+    "        float d = base - (1.0 - (n2.g * 0.65 + n2.b * 0.35)) * 0.34 * (1.0 - clamp(base * 1.6, 0.0, 1.0));",
+    "        d = clamp(d * 1.7, 0.0, 1.0) * uFade;",
+    "        if (d > 0.002) {",
+    "          float a = 1.0 - exp(-d * uSigma * stepL);",
     // sun transmittance from the analytic envelope, two taps toward the sun
-    "        float o1 = envAll(q + uSunDir * shadowL * 0.45);",
-    "        float o2 = envAll(q + uSunDir * shadowL * 1.3);",
-    "        float od = max(o1 + 0.35, 0.0) + max(o2 + 0.35, 0.0) * 1.4 + d * 0.6;",
-    "        float Ts = exp(-od * 2.6);",
-    "        float up = envAll(q + vec3(0.0, shadowL * 0.7, 0.0));",
-    "        float occ = clamp(0.85 - up * 1.1, 0.12, 1.0);",
-    "        float dustW = (ws + wu) / wsum;",
-    "        vec3 alb = mix(mix(uSmokeHot, uSmokeCool, uCool), uDust, dustW);",
-    "        vec3 amb = mix(uGndCol, uSkyCol, 0.3 + 0.7 * occ) * (0.16 + 0.55 * occ);",
-    "        float fl = exp(-length(q - headC) / (uHead.y * 1.4 + 20.0));",
-    "        vec3 lit = alb * (uSunCol * Ts * phase * 2.1 + amb + fireLight * fl * (0.6 + 0.4 * (1.0 - n1.g)));",
+    "          float o1 = envAll(q + uSunDir * shadowL * 0.45);",
+    "          float o2 = envAll(q + uSunDir * shadowL * 1.3);",
+    "          float od = max(o1 + 0.35, 0.0) + max(o2 + 0.35, 0.0) * 1.4 + d * 0.6;",
+    "          float Ts = exp(-od * 2.6);",
+    "          float up = envAll(q + vec3(0.0, shadowL * 0.7, 0.0));",
+    "          float occ = clamp(0.85 - up * 1.1, 0.12, 1.0);",
+    "          float dustW = (ws + wu) / wsum;",
+    "          vec3 alb = mix(mix(uSmokeHot, uSmokeCool, uCool), uDust, dustW);",
+    "          vec3 amb = mix(uGndCol, uSkyCol, 0.3 + 0.7 * occ) * (0.16 + 0.55 * occ);",
+    "          float fl = exp(-length(q - headC) / (uHead.y * 1.4 + 20.0));",
+    "          vec3 lit = alb * (uSunCol * Ts * phase * 2.1 + amb + fireLight * fl * (0.6 + 0.4 * (1.0 - n1.g)));",
     // blackbody emission: the head's heat, breaking through the smoke skin
-    "        float heat = uHeat.x * smoothstep(-0.15, 0.55, eh) * (wh / wsum);",
-    "        heat = max(heat, uHeat.z * smoothstep(0.25, 0.85, eh + (n1.r - 0.5) * 0.6) * (wh / wsum));",
-    "        float skin = smoothstep(0.15, 0.55, heat + (n2.g - 0.5) * 0.55);",
-    "        vec3 em = heatCol(heat) * uHeat.y * skin * (0.35 + heat * heat * 1.8);",
-    "        vec3 col = lit + em;",
-    "        acc += T * a * col;",
-    "        T *= 1.0 - a;",
-    "        if (tHit < 0.0 && T < 0.7) tHit = t;",
+    "          float heat = uHeat.x * smoothstep(-0.15, 0.55, eh) * (wh / wsum);",
+    "          heat = max(heat, uHeat.z * smoothstep(0.25, 0.85, eh + (n1.r - 0.5) * 0.6) * (wh / wsum));",
+    "          float skin = smoothstep(0.15, 0.55, heat + (n2.g - 0.5) * 0.55);",
+    "          vec3 em = heatCol(heat) * uHeat.y * skin * (0.35 + heat * heat * 1.8);",
+    "          vec3 col = lit + em;",
+    "          acc += T * a * col;",
+    "          T *= 1.0 - a;",
+    "          if (tHit < 0.0 && T < 0.7) tHit = t;",
+    "        }",
     "      }",
+    "      t += stepL;",
     "    }",
-    "    t += stepL;",
+    "  }",
+    // the fireball sits behind whatever smoke the march found in front of it
+    "  if (tBall > 0.0) { acc += T * ballC * ballA; T *= 1.0 - ballA; if (tHit < 0.0 && ballA > 0.3) tHit = tBall; }",
+    "",
+    // ---- THE DUST SKIRT: the wall of dirt and debris the shock front picks
+    // up off the deck and pushes outward, analytic (ray vs the front's
+    // cylinder), with a low pall of dust filling everything behind it.
+    "  vec3 skirtF = vec3(0.0); float skirtFA = 0.0; float tSkirtF = -1.0;",
+    "  if (uSkirt.z > 0.002) {",
+    "    vec2 hc = cylHit(ro, rd, uSkirt.x);",
+    "    vec3 dl = uDust * (uSunCol * (0.55 + 0.45 * max(uSunDir.y, 0.0)) * 0.9 + uSkyCol * 0.45 + uGndCol * 0.2);",
+    // inner pall: path length inside the cylinder and under the haze height
+    "    if (uMisc.y > 0.0 && hc.y > 0.0) {",
+    "      float a0 = max(hc.x, 0.0), a1 = min(hc.y, tGround);",
+    "      float hy = uSkirt.w;",
+    "      if (abs(rd.y) > 1e-4) {",
+    "        float ty = (uGZ.y + hy - ro.y) / rd.y;",
+    "        if (rd.y > 0.0) a1 = min(a1, ty); else a0 = max(a0, ty);",
+    "      } else if (ro.y > uGZ.y + hy) { a1 = a0; }",
+    "      float L = max(a1 - a0, 0.0);",
+    // no hard rim, no flat lid: thin toward the front and toward the top
+    "      vec3 pm = ro + rd * (0.5 * (a0 + a1)) - uGZ;",
+    "      float edge = (1.0 - smoothstep(uSkirt.x * 0.45, uSkirt.x, length(pm.xz))) * (1.0 - smoothstep(hy * 0.25, hy, pm.y));",
+    "      float ia = (1.0 - exp(-L * uMisc.y)) * edge;",
+    "      acc += T * dl * 0.85 * ia; T *= 1.0 - ia;",
+    "    }",
+    "    for (int k = 0; k < 2; k++) {",
+    "      float th = k == 0 ? hc.x : hc.y;",
+    "      if (th <= 0.0 || th > tGround) continue;",
+    "      vec3 ph = ro + rd * th - uGZ;",
+    "      if (ph.y > uSkirt.y * 2.2) continue;",
+    "      float ang = atan(ph.z, ph.x);",
+    "      vec4 nw = noise4(vec3(ang * 1.9, ph.y / (uSkirt.y * 2.4) - uRoll.w * 0.05, uSkirt.x * 0.0004));",
+    "      vec4 nv = noise4(vec3(ang * 6.1, ph.y / (uSkirt.y * 0.9), 0.5 + uRoll.w * 0.02));",
+    "      float hgt = uSkirt.y * (0.55 + 0.9 * nw.r);",
+    "      float prof = (1.0 - smoothstep(hgt * 0.35, hgt, ph.y)) * (0.55 + 0.45 * nv.g);",
+    "      float mu = max(abs(dot(rd.xz, normalize(ph.xz))) / max(length(rd.xz), 1e-4), 0.12);",
+    "      float sa = clamp((1.0 - exp(-uSkirt.z * prof / mu)), 0.0, 0.96);",
+    "      vec3 sc = dl * (0.75 + 0.35 * nv.b);",
+    "      if (k == 1) { acc += T * sc * sa; T *= 1.0 - sa; }",
+    "      else { skirtF = sc * sa; skirtFA = sa; tSkirtF = th; }",
+    "    }",
     "  }",
     "",
-    // the condensation shell: analytic, thin, brightest at the limb
+    // ---- THE WILSON CLOUD: condensation in the rarefaction behind the
+    // front — a pale dome, translucent face-on, dense at the limb, with
+    // the brightest band low down where the air is wettest.
     "  vec3 frontC = vec3(0.0); float frontA = 0.0; vec3 backC = vec3(0.0); float backA = 0.0; float tFront = -1.0;",
     "  if (uShell.y > 0.001) {",
     "    vec3 sc = uGZ + vec3(0.0, uShell.z, 0.0);",
-    "    vec3 oc = ro - sc;",
-    "    float bq = dot(oc, rd); float cq = dot(oc, oc) - uShell.x * uShell.x;",
-    "    float disc = bq * bq - cq;",
-    "    if (disc > 0.0) {",
-    "      float sq = sqrt(disc);",
-    "      for (int k = 0; k < 2; k++) {",
-    "        float th = k == 0 ? -bq - sq : -bq + sq;",
-    "        if (th <= 0.0) continue;",
-    "        vec3 ph = ro + rd * th;",
-    "        if (ph.y < uGZ.y) continue;",
-    "        vec3 nrm = (ph - sc) / uShell.x;",
-    "        float mu = max(abs(dot(rd, nrm)), 0.06);",
-    "        vec4 nv = noise4(nrm * 2.2 + vec3(uRoll.w * 0.02));",
-    "        float nn = nv.b * 0.6 + nv.g * 0.4;",
-    "        float band = smoothstep(0.0, 0.25, nrm.y) * (1.0 - smoothstep(0.55, 1.0, nrm.y) * 0.6);",
-    "        float sa = (1.0 - exp(-uShell.y * uShell.w / mu)) * (0.45 + 0.55 * smoothstep(0.25, 0.75, nn)) * band;",
-    "        vec3 scol = uSkyCol * 1.1 + uSunCol * (0.4 + 0.6 * max(dot(nrm, uSunDir), 0.0)) * 0.8;",
-    "        if (k == 0) { frontC = scol * sa; frontA = sa; tFront = th; } else { backC = scol * sa; backA = sa; }",
-    "      }",
+    "    vec2 hs = sphereHit(ro, rd, sc, uShell.x);",
+    "    for (int k = 0; k < 2; k++) {",
+    "      float th = k == 0 ? hs.x : hs.y;",
+    "      if (th <= 0.0 || th > tGround) continue;",
+    "      vec3 ph = ro + rd * th;",
+    "      vec3 nrm = (ph - sc) / uShell.x;",
+    "      float mu = max(abs(dot(rd, nrm)), 0.05);",
+    "      vec4 nv = noise4(nrm * 1.7 + vec3(uRoll.w * 0.015));",
+    "      vec4 nw = noise4(nrm * 5.3 + vec3(0.2, uRoll.w * 0.03, 0.6));",
+    "      float nn = nv.r * 0.55 + nw.g * 0.45;",
+    "      float band = smoothstep(-0.02, 0.12, nrm.y) * (0.55 + 0.45 * (1.0 - smoothstep(0.1, 0.75, nrm.y)));",
+    // a condensation shell has no hard edge: it is mist of uneven thickness,
+    // so the limb fades out instead of drawing a glass rim, and it is patchy
+    "      float sa = (1.0 - exp(-uShell.y * uShell.w / mu)) * smoothstep(0.35, 0.78, nn) * band * smoothstep(0.02, 0.32, mu);",
+    "      sa = clamp(sa, 0.0, 0.55);",
+    "      vec3 scol = uSkyCol * 1.05 + uSunCol * (0.45 + 0.55 * max(dot(nrm, uSunDir), 0.0)) * 0.95;",
+    "      if (k == 0) { frontC = scol * sa; frontA = sa; tFront = th; } else { backC = scol * sa; backA = sa; }",
     "    }",
     "  }",
+    // ---- CONDENSATION AT ALTITUDE: the collar skirt left standing around
+    // the stem where the head punched through a moist layer.
+    "  if (uCollar.w > 0.002 && abs(rd.y) > 1e-4) {",
+    "    float th = (uGZ.y + uCollar.x - ro.y) / rd.y;",
+    "    if (th > 0.0 && th < tGround) {",
+    "      vec3 ph = ro + rd * th - uGZ;",
+    "      float rho = length(ph.xz - uDrift * clamp(uCollar.x / max(uHead.z, 1.0), 0.0, 1.25));",
+    "      vec4 nc = noise4(vec3(ph.xz / (uCollar.z * 1.4), 0.37 + uRoll.w * 0.004));",
+    "      float ring = smoothstep(uCollar.y, uCollar.y * 1.35, rho) * (1.0 - smoothstep(uCollar.z * 0.7, uCollar.z * (0.95 + 0.25 * nc.r), rho));",
+    "      float ca = clamp((1.0 - exp(-uCollar.w / max(abs(rd.y), 0.05))) * ring * smoothstep(0.25, 0.7, nc.g), 0.0, 0.85);",
+    "      vec3 ccol = uSkyCol * 0.9 + uSunCol * 0.75;",
+    "      if (tHit < 0.0 || th < tHit) { acc = ccol * ca + (1.0 - ca) * acc; } else { acc += T * ccol * ca; }",
+    "      T *= 1.0 - ca;",
+    "    }",
+    "  }",
+    "  if (tSkirtF > 0.0) { acc = skirtF + (1.0 - skirtFA) * acc; T *= 1.0 - skirtFA; }",
     "  acc += T * backC; T *= 1.0 - backA;",
     "  acc = frontC + (1.0 - frontA) * acc;",
     "  float alpha = 1.0 - T * (1.0 - frontA);",
     "  if (alpha < 0.004) discard;",
-    "  if (tHit < 0.0) tHit = tFront > 0.0 ? tFront : t1;",
+    "  if (tHit < 0.0) tHit = tSkirtF > 0.0 ? tSkirtF : (tFront > 0.0 ? tFront : max(length(ro.xz - uGZ.xz) * 0.85, 1.0));",
     // aerial perspective: huge things far away still fade into the air
     "  float hz = (1.0 - exp(-tHit / uHazeL)) * 0.55;",
     "  acc = mix(acc, uFogCol * alpha, hz);",
@@ -529,6 +657,11 @@
         uShell: { value: new THREE.Vector4(1, 0, 0, 10) },
         uHeat: { value: new THREE.Vector4(1, 5, 0, 1) },
         uRoll: { value: new THREE.Vector4() },
+        uBall: { value: new THREE.Vector4(1, 0, 1, 0) },
+        uSkirt: { value: new THREE.Vector4(1, 30, 0, 0) },
+        uMisc: { value: new THREE.Vector4(1, 0, 1, 0) },
+        uDrift: { value: new THREE.Vector2() },
+        uCollar: { value: new THREE.Vector4(1000, 100, 400, 0) },
         uSigma: { value: 0.03 }, uSteps: { value: 48 }, uHazeL: { value: 9000 }, uFade: { value: 1 },
         uSunDir: { value: new THREE.Vector3(0.4, 0.8, 0.2).normalize() },
         uSunCol: { value: new THREE.Color(1, 1, 1) }, uSkyCol: { value: new THREE.Color(0.5, 0.6, 0.7) },
@@ -564,9 +697,15 @@
      THE FLASH (#nukeFlash, one DOM layer). A double pulse: first maximum,
      the dip while the shock front is opaque, then the longer second pulse.
      ============================================================ */
+  // u = t / style.white (0.85 s for the nuke). The first maximum and the
+  // minimum are over inside a frame or two (they are millisecond events);
+  // the SECOND maximum — the thermal pulse — peaks at t_max = 0.0417*W^0.44
+  // = 0.14 s for 16 kt and is what actually blinds. After ~0.5 s the
+  // overlay is gone and the overexposed WORLD (fireball light, below)
+  // carries the rest: you see the fireball, you do not see a white card.
   const FLASH_DOUBLE = [
-    [0.000, 1.00], [0.028, 0.78], [0.062, 0.09], [0.105, 0.12],
-    [0.185, 1.00], [0.400, 0.62], [0.680, 0.22], [1.000, 0.00],
+    [0.000, 1.00], [0.012, 0.55], [0.035, 0.50], [0.165, 0.94],
+    [0.330, 0.48], [0.600, 0.13], [1.000, 0.00],
   ];
   const FLASH_SINGLE = [[0.0, 1.0], [0.22, 0.45], [1.0, 0.0]];
   function keyAt(keys, u) {
@@ -623,6 +762,8 @@
      the whole choreography; the shader only draws what this returns.
      ============================================================ */
   function shapeAt(L, t, out) {
+    if (L.style.real) return shapeReal(L, t, out);
+    out.ballA = 0; out.skirtA = 0; out.pall = 0; out.headP = 1; out.ballGain = 1; out.driftX = 0; out.driftZ = 0;
     const P = L.style, R = L.R;
     const late = sstep(P.form, P.form + (P.dur - P.form) * 0.75, t);   // aftermath growth
     // fireball: Taylor-Sedov R ~ t^0.4 to full size at 1 s, then swelling as it mixes
@@ -665,6 +806,87 @@
     out.fade = 1 - sstep(P.dur - (P.dur - P.form) * 0.45, P.dur, t);
     return out;
   }
+  /* THE REAL TIMELINE (nuke). Every length is metres for THIS yield; the
+     curves are REAL's, cube-rooted from 16 kt so a bigger row grows a
+     bigger, higher, slower cloud without a second table. */
+  function shapeReal(L, t, out) {
+    const P = L.style, R = L.R;
+    if (!(L.maxR > 0)) L.maxR = R * 26;
+    if (L.windX == null) { L.windX = WIND[0]; L.windZ = WIND[1]; }
+    const W = yieldKt(L.eff || R);
+    const ks = Math.pow(Math.max(0.1, W) / REAL.kt, 1 / 3);       // linear scale vs 16 kt
+    const kh = Math.pow(Math.max(0.1, W) / REAL.kt, 0.2);         // cloud height scales slower
+    const tt = Math.max(0, t);
+    // -- fireball: ~67% of its radius in the first frame, full by ~1 s, then
+    // swelling a third again as it entrains air and stops being a ball
+    const fb = R * (1 - 0.33 * Math.exp(-tt / 0.22)) * (1 + 0.35 * easeOut((tt - 1) / 6));
+    out.ballR = fb;
+    // the ball sits on the deck (a surface burst is a dome with a skirt of
+    // its own dust) and starts to lift once buoyancy wins, ~2 s
+    out.ballY = (L.lift || 0) + fb * 0.28 + R * 1.4 * sstep(1.5, 6, tt) * sstep(1.5, 6, tt);
+    // 1.0 white-hot -> 0.72 yellow (1 s) -> 0.55 orange (2.5 s) -> red
+    out.ballT = clamp(1.0 - 0.28 * sstep(0.05, 1.0, tt) - 0.2 * sstep(1.0, 3.0, tt) - 0.22 * sstep(2.5, 6.0, tt), 0, 1);
+    out.ballGain = 1.0 + 5.0 * Math.exp(-tt / 0.18) + 0.9 * Math.exp(-tt / 1.6);
+    // opaque until its own smoke closes over it
+    out.ballA = 1 - sstep(1.8, 5.0, tt);
+    // -- the rising head (Glasstone's rise and cap curves)
+    const top = REAL.top * kh * Math.pow(1 - Math.exp(-tt / REAL.topTau), REAL.topP);
+    const capW = Math.max(fb * 2.05, REAL.cap * ks * Math.pow(1 - Math.exp(-tt / REAL.capTau), REAL.capP));
+    const half = capW * 0.5;
+    const open = sstep(2.5, 14, tt);                                  // ball -> toroid
+    out.flat = (1 - open) * 1.0 + open * (0.86 - 0.26 * sstep(40, 420, tt));
+    out.ring = half * (0.46 * open);
+    out.tube = Math.max(fb * (1 - open) + half * 0.56 * open, fb * 0.9);
+    const ballTop = out.ballY + fb;
+    const capTop = Math.max(ballTop, top);
+    out.cy = Math.max(out.ballY, capTop - out.tube * out.flat * 0.95);
+    out.headP = sstep(0.9, 2.6, tt);                                  // smoke skin over the ball
+    // -- stem: dirt and debris drawn up into the toroid's low pressure
+    out.stemR = Math.max(R * 0.7, capW * (0.085 + 0.075 * sstep(20, 300, tt)));
+    out.stemTop = Math.max(0, out.cy - out.tube * out.flat * 0.3) * Math.pow(clamp((tt - 1.5) / 16, 0, 1), 0.5);
+    out.stemFlare = 1.1 + 0.3 * sstep(5, 60, tt);
+    out.stemP = sstep(2.0, 6.0, tt) * (1 - 0.45 * sstep(240, 800, tt));
+    // -- base surge: the dust cloud that rolls out along the deck and stays
+    out.surgeR = Math.min(R * 11 * ks, 150 * ks * Math.pow(Math.max(0, tt - 0.6), 0.6));
+    out.surgeTube = R * 0.45 + out.surgeR * 0.10;
+    out.surgeFlat = 0.5;
+    out.surgeP = sstep(0.6, 3.0, tt) * (1 - 0.6 * sstep(300, 850, tt));
+    // -- the shock-front dust wall, analytic, for as long as the front is
+    // still lifting dirt (out to the 1 psi contour)
+    const sr = CBZ.impact && CBZ.impact.shockDistance ? CBZ.impact.shockDistance(tt, L.eff) : 343 * tt + R;
+    out.frontR = Math.max(R * 1.1, Math.min(L.maxR * 1.05, sr));
+    const reachK = clamp(out.frontR / Math.max(1, L.maxR), 0, 1);
+    out.skirtH = (18 + 50 * (1 - reachK)) * ks;
+    out.skirtA = sstep(0.12, 0.45, tt) * (1 - sstep(0.75, 1.05, reachK)) * 0.95;
+    // dust left standing behind the front: rises and thins over minutes
+    out.pallH = (25 + 160 * sstep(0.5, 40, tt)) * ks;
+    out.pall = (0.0017 * sstep(0.3, 2.5, tt) * (1 - 0.7 * sstep(20, 400, tt)) + 0.0004) / ks * (1 - sstep(P.dur * 0.8, P.dur, tt));
+    // -- Wilson cloud: forms as the negative phase passes (~0.3 s), thickest
+    // at 1-2 s, evaporates by ~4 s as the air rewarms
+    if (P.shell) {
+      out.shellR = Math.max(R * 1.1, sr * 0.82);
+      out.shellA = sstep(0.25, 0.8, tt) * (1 - sstep(2.2, 4.2, tt)) * 0.010;
+    } else { out.shellR = 1; out.shellA = 0; }
+    // -- heat: the head keeps an incandescent core while the skin goes to
+    // red-brown NO2 smoke and then to grey-white condensate
+    out.heat = clamp(0.9 * Math.exp(-Math.max(0, tt - 1) / 4.5), 0, 1);
+    out.glow = 0.62 * Math.exp(-tt / 16);
+    out.emit = P.emit * (tt < 0.6 ? 2.2 - tt * 2 : 1);
+    out.fireLight = 2.4 * Math.exp(-tt / 5);
+    out.cool = sstep(6, 70, tt);
+    out.fade = 1 - sstep(P.dur * 0.72, P.dur, tt);
+    // -- condensation at altitude: one collar skirt left at the wet layer
+    // the head crossed (no ice cap: 16 kt stops well under the tropopause)
+    out.collarY = 1500 * kh;
+    const crossed = sstep(out.collarY + out.tube * 0.2, out.collarY + out.tube * 1.2, out.cy);
+    out.collarA = crossed * (1 - sstep(70, 150, tt)) * 0.06;
+    out.collarIn = out.stemR * 1.5;
+    out.collarOut = Math.max(out.stemR * 2.2, (out.ring + out.tube) * 0.8);
+    // -- wind shear leans the column downwind over the minutes
+    const wv = REAL.wind * Math.min(tt, 600) * (0.15 + 0.85 * sstep(10, 120, tt));
+    out.driftX = L.windX * wv; out.driftZ = L.windZ * wv;
+    return out;
+  }
   // The double flash rides the fireball too (the dip darkens the world, not only the div).
   function pulseK(t, P) {
     const w = P.white * 0.72;
@@ -702,6 +924,7 @@
       quiet: !!opts.quiet, byPlayer: !!opts.byPlayer,
       burnR: styleName === "nuke" ? nukeRings(radius).psi2 : 0,
       roll: 0, rollS: 0, rise: 0, steps: 0, box: { min: [0, 0, 0], max: [0, 0, 0] },
+      windX: WIND[0], windZ: WIND[1],
     };
     U.uGZ.value.set(x, gy, z);
     U.uSmokeHot.value.set(P.smokeHot[0], P.smokeHot[1], P.smokeHot[2]);
@@ -729,7 +952,17 @@
     if (!live.quiet) {
       // Blinding at any range, but a distant burst doesn't hold the screen white.
       const d = camDist(x, burstY + R, z);
-      const pk = P.whitePeak * clamp(1.2 - d / 12000, 0.5, 1);
+      // light that reaches the eye straight off the fireball blinds; light
+      // scattered by the air from behind you only washes the picture
+      let face = 1;
+      if (CBZ.camera && CBZ.camera.getWorldDirection) {
+        try {
+          const f = CBZ.camera.getWorldDirection(_corner), cp = camPos();
+          const dx = x - cp.x, dy = burstY + R - cp.y, dz = z - cp.z, dl = Math.hypot(dx, dy, dz) || 1;
+          face = clamp(0.8 + 0.2 * ((f.x * dx + f.y * dy + f.z * dz) / dl) * 1.6, 0.8, 1);
+        } catch (e) {}
+      }
+      const pk = P.whitePeak * clamp(1.25 - d / 20000, 0.7, 1) * face;
       whiteout(P.white, pk, P.dbl);
       if (styleName !== "nuke" && CBZ.shake) {
         try { CBZ.shake(P.shake * clamp(1.25 - d / 420, 0.1, 1)); } catch (e) {}
@@ -802,6 +1035,25 @@
       k *= near * (L.styleName === "moab" ? 0.4 : 1);
       L.fogK = k;
       if (k > 0.004) scene.fog.color.lerp(_fogTint, clamp(k, 0, 0.8));
+      // THE DUST STAYS. A surface burst puts hundreds of thousands of tonnes
+      // of pulverised city into the air: a brown-grey pall that stands over
+      // the whole valley for the rest of the event, and downwind of the
+      // column the sky goes dark with what is falling out of it.
+      L.dustK = 0; L.falloutK = 0;
+      if (P.real) {
+        const cp = camPos();
+        if (cp) {
+          const rx = cp.x - L.x, rz = cp.z - L.z, dist = Math.hypot(rx, rz);
+          const along = rx * L.windX + rz * L.windZ, across = Math.abs(rx * L.windZ - rz * L.windX);
+          const life = 1 - sstep(P.dur * 0.75, P.dur, t);
+          const kd = sstep(1.5, 14, t) * life * clamp(1.25 - dist / 14000, 0, 1) * 0.26;
+          const kf = along > 0 ? sstep(40, 260, t) * life * Math.exp(-across / 2600) *
+            clamp(along / 1800, 0, 1) * Math.exp(-along / 24000) * 0.5 : 0;
+          L.dustK = kd; L.falloutK = kf;
+          if (kd > 0.004) scene.fog.color.lerp(_fogTint.setHex(0x8f8170), clamp(kd, 0, 0.6));
+          if (kf > 0.004) scene.fog.color.lerp(_fogTint.setHex(0x4a4540), clamp(kf, 0, 0.6));
+        }
+      }
     }
 
     // ---- the cloud ------------------------------------------------------
@@ -816,19 +1068,37 @@
     U.uRoll.value.set(L.rollS, L.rise, L.rollS * 0.8, t);
     U.uCool.value = S.cool;
     U.uFade.value = S.fade;
+    U.uBall.value.set(S.ballR || 1, S.ballY || 0, S.ballT == null ? 1 : S.ballT, S.ballA || 0);
+    U.uSkirt.value.set(S.frontR || 1, S.skirtH || 30, S.skirtA || 0, S.pallH || 0);
+    U.uMisc.value.set(S.headP == null ? 1 : S.headP, S.pall || 0, S.ballGain || 1, 0);
+    U.uDrift.value.set(S.driftX || 0, S.driftZ || 0);
+    U.uCollar.value.set(S.collarY || 1000, S.collarIn || 100, S.collarOut || 400, S.collarA || 0);
 
-    // the box that holds every live part
+    // THE MARCH BOX holds head, stem and surge (and leans with the drift);
+    // the PROXY box around it also covers the analytic parts — fireball,
+    // Wilson dome, dust wall and pall — which cost no march steps.
+    const dx = S.driftX || 0, dz = S.driftZ || 0;
     const headR = S.ring + S.tube * 1.25;
     const surgeR = S.surgeP > 0.01 ? S.surgeR + S.surgeTube * 1.4 : 0;
+    const stemW = S.stemP > 0.01 ? S.stemR * (1 + S.stemFlare) * 1.2 : 0;
+    const top = S.cy + S.tube * S.flat * 1.5 + 20;
+    const mx0 = Math.min(-headR + Math.min(0, dx * 1.25), -stemW, -surgeR) - 10;
+    const mx1 = Math.max(headR + Math.max(0, dx * 1.25), stemW, surgeR) + 10;
+    const mz0 = Math.min(-headR + Math.min(0, dz * 1.25), -stemW, -surgeR) - 10;
+    const mz1 = Math.max(headR + Math.max(0, dz * 1.25), stemW, surgeR) + 10;
+    U.uBoxMin.value.set(L.x + mx0, L.y - 2, L.z + mz0);
+    U.uBoxMax.value.set(L.x + mx1, L.y + top, L.z + mz1);
     const shellR = S.shellA > 0.0005 ? S.shellR : 0;
-    const halfW = Math.max(headR, S.stemR * (1 + S.stemFlare) * 1.2, surgeR, shellR) + 10;
-    const top = Math.max(S.cy + S.tube * S.flat * 1.5 + 20, shellR ? (L.by - L.y) + shellR : 0);
-    U.uBoxMin.value.set(L.x - halfW, L.y - 2, L.z - halfW);
-    U.uBoxMax.value.set(L.x + halfW, L.y + top, L.z + halfW);
-    mesh.position.set(L.x, L.y - 2 + (top + 2) * 0.5, L.z);
-    mesh.scale.set(halfW * 2, top + 2, halfW * 2);
-    L.box.min[0] = L.x - halfW; L.box.min[1] = L.y; L.box.min[2] = L.z - halfW;
-    L.box.max[0] = L.x + halfW; L.box.max[1] = L.y + top; L.box.max[2] = L.z + halfW;
+    const skirtR = (S.skirtA > 0.002 || S.pall > 0) ? (S.frontR || 0) + 5 : 0;
+    const ballR = S.ballA > 0.002 ? (S.ballR || 0) * 1.02 : 0;
+    const px0 = Math.min(mx0, -shellR, -skirtR, -ballR), px1 = Math.max(mx1, shellR, skirtR, ballR);
+    const pz0 = Math.min(mz0, -shellR, -skirtR, -ballR), pz1 = Math.max(mz1, shellR, skirtR, ballR);
+    const ptop = Math.max(top, shellR ? (L.by - L.y) + shellR : 0, skirtR ? Math.max((S.skirtH || 0) * 2.3, S.pallH || 0) + 5 : 0, (S.ballY || 0) + ballR + 5);
+    mesh.position.set(L.x + (px0 + px1) * 0.5, L.y - 2 + (ptop + 2) * 0.5, L.z + (pz0 + pz1) * 0.5);
+    mesh.scale.set(px1 - px0, ptop + 2, pz1 - pz0);
+    L.box.min[0] = L.x + mx0; L.box.min[1] = L.y; L.box.min[2] = L.z + mz0;
+    L.box.max[0] = L.x + mx1; L.box.max[1] = L.y + top; L.box.max[2] = L.z + mz1;
+    const halfW = Math.max(mx1 - mx0, mz1 - mz0) * 0.5;
 
     // step budget: quality tier, and fewer when the volume fills the view
     const cp = camPos();
@@ -1070,13 +1340,78 @@
   }
   function lightAtten(L) {
     const d = camDist(L.x, L.by + L.R, L.z);
+    // the real fireball lights the whole valley, not a 300 m bubble
+    if (L.style.real) return 1 - 0.55 * clamp((d - 3000) / 14000, 0, 1);
     return d <= 300 ? 1 : 1 - 0.78 * clamp((d - 300) / 2100, 0, 1);
   }
+  const _fbDir = new THREE.Vector3(), _sunOff = new THREE.Vector3();
+  const DUST_C = new THREE.Color(0x9a8b78);
+  /* After the light: the column's own SHADOW and the dust. The cap is miles
+     wide and between the sun and the city — standing under it the day
+     goes dim; the pall browns the sky light and pulls the horizon in. */
+  function cloudShade(L) {
+    const P = L.style;
+    if (!P.real || !CBZ.sun) return;
+    const S = shapeAt(L, L.t, _S2);
+    const cp = camPos(); if (!cp) return;
+    const sun = CBZ.sun;
+    _sunOff.copy(sun.position);
+    if (sun.target) _sunOff.sub(sun.target.position);
+    if (_sunOff.lengthSq() < 1e-6) return;
+    _sunOff.normalize();
+    // head centre (with the drift) and an effective radius
+    const hx = L.x + (S.driftX || 0) - cp.x, hy = L.y + S.cy - cp.y, hz = L.z + (S.driftZ || 0) - cp.z;
+    const along = hx * _sunOff.x + hy * _sunOff.y + hz * _sunOff.z;
+    let shade = 0;
+    if (along > 0) {
+      const off = Math.sqrt(Math.max(0, hx * hx + hy * hy + hz * hz - along * along));
+      const rr = S.ring + S.tube * 0.95;
+      shade = (1 - sstep(rr * 0.6, rr * 1.08, off)) * sstep(6, 30, L.t) * (S.fade == null ? 1 : S.fade);
+    }
+    const dk = (L.dustK || 0) + (L.falloutK || 0);
+    const k = clamp(shade * 0.78 + dk * 0.55, 0, 0.85);
+    L.shadeK = shade;
+    if (k > 0.004) {
+      sun.intensity *= 1 - k;
+      if (CBZ.hemi) {
+        CBZ.hemi.intensity *= 1 - k * 0.45;
+        if (CBZ.hemi.color) CBZ.hemi.color.lerp(DUST_C, clamp(dk * 0.8 + shade * 0.25, 0, 0.6));
+      }
+    }
+    if (dk > 0.004 && scene.fog && scene.fog.far) {
+      scene.fog.far *= 1 - clamp(dk * 0.9, 0, 0.55);
+      scene.fog.near *= 1 - clamp(dk * 0.9, 0, 0.55);
+    }
+  }
+  const _S2 = {};
   if (CBZ.onAlways) CBZ.onAlways(94.6, function () {
     if (!live || !C.NUKE_FX_SKY) return;
     const L = live;
+    try { cloudShade(L); } catch (e) {}
     const k = fireLum(L.t, L) * lightAtten(L) * (L.styleName === "moab" ? 0.5 : 1);
     if (k <= 0.004) return;
+    // HARD SHADOWS OFF THE FIREBALL. For the first seconds the brightest
+    // thing in the sky is not the sun; the key light swings to come from
+    // the ball, so every building throws a long shadow straight away from
+    // ground zero — the photographs' shadow-on-the-wall.
+    const sun0 = CBZ.sun;
+    if (L.style.real && sun0 && sun0.target && L.t < 5) {
+      const w = clamp(k * 1.6, 0, 1) * (1 - sstep(2.5, 5, L.t));
+      if (w > 0.01) {
+        const tp = sun0.target.position;
+        const S = shapeAt(L, L.t, _S2);
+        _fbDir.set(L.x - tp.x, L.y + (S.ballY || L.R) - tp.y, L.z - tp.z);
+        const dl = _fbDir.length();
+        if (dl > 1) {
+          _fbDir.multiplyScalar(1 / dl);
+          if (_fbDir.y < 0.06) { _fbDir.y = 0.06; _fbDir.normalize(); }
+          _sunOff.copy(sun0.position).sub(tp);
+          const len = _sunOff.length() || 100;
+          _sunOff.multiplyScalar(1 / len).lerp(_fbDir, w).normalize();
+          sun0.position.copy(tp).addScaledVector(_sunOff, len);
+        }
+      }
+    }
     if (L.t < 0.45) _lightC.copy(FIRE_WHITE).lerp(FIRE_ORANGE, L.t / 0.45);
     else _lightC.copy(FIRE_ORANGE).lerp(FIRE_EMBER, clamp((L.t - 0.45) / 7, 0, 1));
     const sun = CBZ.sun, hemi = CBZ.hemi, bnc = CBZ.bounce;
@@ -1106,6 +1441,9 @@
         stemWNow: +(S.stemR * 2).toFixed(0), surgeR: +S.surgeR.toFixed(0),
         shellR: +S.shellR.toFixed(0), shellA: +S.shellA.toFixed(4),
         heat: +S.heat.toFixed(3), fade: +S.fade.toFixed(3), steps: Math.round(live.steps),
+        ballR: +(S.ballR || 0).toFixed(0), ballA: +(S.ballA || 0).toFixed(2), ballT: +(S.ballT || 0).toFixed(2),
+        frontR: +(S.frontR || 0).toFixed(0), skirtA: +(S.skirtA || 0).toFixed(2), pall: +(S.pall || 0).toFixed(5),
+        drift: [+(S.driftX || 0).toFixed(0), +(S.driftZ || 0).toFixed(0)], cloudTop: +(S.cy + S.tube * S.flat).toFixed(0),
         lum: +fireLum(live.t, live).toFixed(3),
         box: live.box, volume: !!(mesh && mesh.visible), pending: live.pending.length,
       };
