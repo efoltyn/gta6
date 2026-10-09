@@ -110,7 +110,7 @@ console.log("\n3. metro trees (plan + floor, tools/metro-world-snapshot.json)");
   const snap = JSON.parse(src("tools/metro-world-snapshot.json"));
   const prevWin = globalThis.window;
   globalThis.window = { CBZ: { CONFIG: {}, WORLD_SEED: 90210, highwayNetTable: () => snap.hw, HIGHWAY_NET_HALF: snap.H } };
-  require(path.join(ROOT, "src/city/metroplan.js")); require(path.join(ROOT, "src/city/metro.js")); require(path.join(ROOT, "src/city/metro_ground.js"));
+  require(path.join(ROOT, "src/city/zoning.js")); require(path.join(ROOT, "src/city/metroplan.js")); require(path.join(ROOT, "src/city/metro.js")); require(path.join(ROOT, "src/city/metro_ground.js"));
   const MC = globalThis.window.CBZ, L = MC.metroLib;
   const city = { regions: snap.regions.map((r) => Object.assign({ kind: "rect" }, r)), roads: snap.roads.map((r) => ({ x: r[0], z: r[1], vertical: !!r[2], len: r[3], w: r[4], district: r[5] })), minX: snap.city.minX, maxX: snap.city.maxX, minZ: snap.city.minZ, maxZ: snap.city.maxZ, annex: snap.annex };
   const planned = []; let tot = 0, off = 0;

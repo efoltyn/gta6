@@ -1124,7 +1124,7 @@ document.body.appendChild(b);}}catch(e){}})();
      city/buildings.js, which reads CBZ.CIVIC_SHOPS and CBZ.CIVIC_ACCT_SEED at
      parse time and the bld* helpers at build time. -->
 <script src="src/city/buildings_civic.js?v=flagm1001"></script>
-<script src="src/city/buildings.js?v=presint1001b"></script>
+<script src="src/city/buildings.js?v=layout1008"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
@@ -1749,14 +1749,17 @@ document.body.appendChild(b);}}catch(e){}})();
      metroplan.js is the pure urban planner (land value -> zoning -> arterials -> blocks -> parcels),
      metro_fabric.js draws its buildings, metro_ground.js its streets and ground, metro.js places the
      Kingsport metro + the city rings at landmass order 43 and streams their tiles by distance. -->
-<script src="src/city/metroplan.js?v=ground1008c"></script>
+<!-- THE WORLD'S ONE ZONING FIELD (layout wave): intensity, use, the ceiling a grown district may rise to,
+     the freeway frontage buffer. Pure data off the regions + highway table; metro.js plans with it. -->
+<script src="src/city/zoning.js?v=layout1008"></script>
+<script src="src/city/metroplan.js?v=ground1008m"></script>
 <script src="src/city/metro_fabric.js?v=pf0930q"></script>
 <!-- REAL GRASS (owner: "when you walk on grass it's just fucking green"): instanced lit blades round
      the camera on every grass surface, fed by CBZ.groundCover (the ONE land-use + ground-colour
      query: cityground 10, metro_ground 20, continent 90 register into it, so it loads before them). -->
 <script src="src/world/grassfield.js?v=grass0929c"></script>
 <script src="src/city/metro_ground.js?v=ground1008c"></script>
-<script src="src/city/metro.js?v=ground1001"></script>
+<script src="src/city/metro.js?v=layout1008"></script>
 <script src="src/city/metro_structs.js?v=wreal0929"></script>
 <script src="src/city/spawnplaces.js?v=sim2"></script>
 <script src="src/city/scenedirector.js?v=w09290218"></script>
@@ -2364,7 +2367,7 @@ document.body.appendChild(b);}}catch(e){}})();
      strategic.js (the release, the B-2 sortie, the nuke) and the impact bus.
      Emits war/airstrike/nuke events on CBZ.presidency's bus. After
      presidency.js and president_staff.js; everything is read lazily. -->
-<script src="src/city/warroom.js?v=merge1001b"></script>
+<script src="src/city/warroom.js?v=case1008"></script>
 <script src="src/city/frontline.js?v=flagfix1001"></script>
 <script src="src/city/president_public.js?v=flagm1001"></script>
 <!-- THE COUNTRY TURNS ON ITS PRESIDENT, AND YOU SEE IT COMING (city/dissent.js):
