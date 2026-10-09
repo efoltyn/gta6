@@ -343,6 +343,10 @@
         return perform(p, "freeze", th);
       }
       case "hold": {
+        // standing his ground: against a GUN that is the discipline's
+        // armed-threat (it must persist past his sustain beat to draw; one
+        // bang is a look). Against fists the gun stays on the belt.
+        if (th.armed && CBZ.gunDiscipline) CBZ.gunDiscipline.trigger(p, "armed-threat", 2);
         EXEC.posture(p, "aim"); hold(p, "hold", 1.2);
         return true;
       }
@@ -992,12 +996,11 @@
   const _retOpts = { weapon: null, reloading: false, yaw: null };
 
   // the man told "fists" draws the moment it stops being a fist fight
-  // A gun PUT AWAY on an order (`_holster.stay`: the President's "Stand down",
-  // city/orders.js) stays away while there is nobody to fight; it comes out
-  // on the same triggers as a fist fight's (an armed foe, a bad wound).
+  // (fists vs gun only: whether a drawn gun SHOWS, and a stand-down order, is
+  // systems/actorweapons.js CBZ.gunDiscipline's one rule)
   function tickHolster(p) {
     const r = p.rage;
-    if (!r || r.dead || p.dead) { if (!(p._holster && p._holster.stay) || p.dead) unholster(p); return; }
+    if (!r || r.dead || p.dead) { unholster(p); return; }
     if (armedOf(r) || (p.hp != null && p.maxHp && p.hp < p.maxHp * 0.5)) unholster(p);
   }
 

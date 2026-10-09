@@ -860,17 +860,24 @@
   }
 
   /* ---------------- driving the peds (update tick) ------------------------ */
-  // step a controlled ped toward a point (peds.js hands controlled bodies to
-  // their owner; this mirrors protection.js/social.js's own follow primitive).
+  // send a ped toward a point through THE ONE MOVER (ped.moveOrder, the
+  // CBZ.moves seam in city/peds.js): velocity, a braking arrival, a bounded
+  // turn. This used to integrate its own `speed * dt` and snap the yaw to
+  // atan2 every frame while peds.js's mover walked the same body toward its
+  // own target: two writers, the auditor's yaw ping-ponging ~30 times a second
+  // (tools/npc-intent-check.mjs trace). True once she is there.
   function stepPed(ped, tx, tz, speed, dt) {
     if (!ped || !ped.pos || !ped.group) return true;
     const dx = tx - ped.pos.x, dz = tz - ped.pos.z, d = Math.hypot(dx, dz);
-    if (d < 0.6) { ped.state = "idle"; ped.speed = 0; return true; }
-    ped.state = "walk"; ped.speed = speed;
-    const s = Math.min(d, speed * dt);
-    ped.pos.x += (dx / d) * s; ped.pos.z += (dz / d) * s;
-    ped.group.position.x = ped.pos.x; ped.group.position.z = ped.pos.z;
-    ped.group.rotation.y = Math.atan2(dx, dz);
+    if (d < 0.6) { if (ped.moveOrder) ped.moveOrder = null; ped.state = "idle"; ped.speed = 0; return true; }
+    ped.state = "walk";
+    if (CBZ.protection && CBZ.protection.order) CBZ.protection.order(ped, tx, tz, speed, null, false, 0, 0, 0.45);
+    else {
+      let o = ped.moveOrder;
+      if (!o) o = ped.moveOrder = { x: 0, z: 0, speed: 0, stop: 0.45, face: null, strafe: false, vffX: 0, vffZ: 0, leg: false, t: 0 };
+      o.x = tx; o.z = tz; o.speed = speed; o.t = CBZ.now || 0;
+      if (ped.target && ped.target.set) ped.target.set(tx, 0, tz);
+    }
     return false;
   }
   function driveAuditor(dt) {

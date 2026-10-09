@@ -165,8 +165,11 @@
      THE DRAW IS A REASON. Every body that takes the order is stamped
      ped._drawWhy = { why: "order", by: "president", target } and, when the
      armed-NPC intent layer is loaded, CBZ.npcDrawReason(ped, "order", target)
-     is called (with null on Stand down). A holstered gun comes out
-     (CBZ.cityBrain.unholster); Stand down puts it away (holster).
+     is called (with null on Stand down). systems/actorweapons.js
+     CBZ.gunDiscipline owns that hook and is the one "gun away" rule: the
+     order keeps the gun out while it stands, Stand down holsters it there and
+     then. (A man who had put it away for a fist fight gets it back first:
+     CBZ.cityBrain.unholster.)
 
      WHAT IT COSTS when the man dies under the order: scandal and approval,
      the dissent ladder, a NEWS ONE story when he had a name or a post
@@ -268,8 +271,7 @@
     const B = CBZ.cityBrain;
     if (B) {
       try {
-        if (t) { if (B.unholster) B.unholster(q); }
-        else if (B.holster) { B.holster(q); if (q._holster) q._holster.stay = true; }    // away until a real trigger
+        if (t && B.unholster) B.unholster(q);
       } catch (e) {}
     }
   }

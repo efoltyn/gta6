@@ -1881,7 +1881,12 @@
     // _gunHidden are deliberately NOT honored here: an explicit sync call is a
     // firing path saying "gun out NOW" (police fireAt clears its lowering
     // first) — the per-frame pose pass is what enforces those visual stows.
-    const shouldShow = !!(actor.armed && !actor.dead && !actor._holstered);
+    // A DISCIPLINED BODY (one CBZ.gunDiscipline has a record for: every city
+    // ped and cop) shows the gun only while the discipline has it drawn. A
+    // spawn-time sync used to put every armed guard's pistol in his hand for
+    // the rest of the day.
+    const governed = !!actor._gd || (!actor.isPlayer && CBZ.game && CBZ.game.mode === "city");
+    const shouldShow = !!(actor.armed && !actor.dead && !actor._holstered && (!governed || GD.rec(actor).lv >= 2));
     const id = shouldShow ? normalizeWeaponId(actor.weapon || (actor.swat ? "SMG" : "Pistol")) : null;
     if (!shouldShow) {
       if (actor._weaponProp) actor._weaponProp.visible = false;
@@ -1931,16 +1936,21 @@
 
   function actorAimAt(actor, target, dt) {
     if (!actor || !target || !actor.group || !target.pos) return;
+    if (!actor.isPlayer && actor.armed) GD.trigger(actor, "fired", 3);
     const dx = target.pos.x - actor.pos.x;
     const dz = target.pos.z - actor.pos.z;
     if (dx * dx + dz * dz > 0.0001) {
-      const turn = dt != null ? 1 - Math.pow(0.0005, dt) : 1;
-      const lerp = CBZ.lerpAngle || function (a, b, t) {
-        let d = ((b - a + Math.PI) % (Math.PI * 2)) - Math.PI;
-        if (d < -Math.PI) d += Math.PI * 2;
-        return a + d * t;
-      };
-      actor.group.rotation.y = lerp(actor.group.rotation.y, Math.atan2(dx, dz), turn);
+      // A SHOOTER TURNS ONTO HIS MARK, HE DOES NOT SNAP. Most fire paths call
+      // this with no dt (once per shot), and that was a full one-frame write
+      // of the yaw onto the target while the mover turned the body back toward
+      // where it walks on every frame between shots: the "looks right, looks
+      // left" twitch of every armed body in a fight. Now it is a bounded turn
+      // (7 rad/s, a fast human pivot) over one frame, shortest arc.
+      const want = Math.atan2(dx, dz), cur = actor.group.rotation.y;
+      let d = (want - cur) % (Math.PI * 2);
+      if (d > Math.PI) d -= Math.PI * 2; else if (d < -Math.PI) d += Math.PI * 2;
+      const mx = 7 * (dt != null ? dt : 1 / 60);
+      actor.group.rotation.y = cur + (Math.abs(d) <= mx ? d : (d > 0 ? mx : -mx));
     }
     const ch = actor.char;
     if (!ch || !ch.parts) return;
@@ -1991,6 +2001,185 @@
     }
   }
 
+  /* ==== CBZ.gunDiscipline — A GUN COMES OUT FOR A REASON =====================
+     Owner (2026-10-08): "Security guards and everyone with guns pulls guns out
+     randomly." Measured on main (tools/npc-intent-check.mjs, calm street): 90%
+     of every armed body's time was spent with the gun IN THE HAND in the
+     chest-high ready pose. Nobody drew "randomly": they never holstered. This
+     pass (poseList) showed the gun of anything with .armed, the spawn sync put
+     it in the hand, and the only stows were per-shot / per-LOS-probe flips
+     (police hideOccludedGuns every 0.12 s on c.sees, combat.js lowerGun on
+     every walled-off muzzle) that made the guns that WERE out blink in and
+     out of the hand.
+
+     THE DRILL (how real security carries):
+       0 holstered   on the belt / slung. Patrol, post, crowd, a gun in view.
+       1 watch       something is wrong: he looks, the hand is not on it yet.
+       2 drawn       low ready: the gun in the hand, muzzle down.
+       3 aimed       on a mark: the ready pose (only while actually firing or
+                     holding a seen target).
+     A gun comes out only on a REAL trigger, by name (the ring logs it):
+       fired        he is shooting (actorAimAt / actorMuzzle)        draw now
+       shot-at      rounds came at him                               draw now
+       aimed-at     a gun is pointed at him or his ward              draw now
+       target       a cop holding a seen, wanted suspect             draw now
+       order        the call is in (SWAT, a roadblock, a stop)       draw now
+       ward         his principal is under attack                    draw now
+       post         a roadblock officer on the wall                  draw now
+       assault / armed-threat / shots-near / hunt
+                    held for SUSTAIN (0.35-0.7 s, per person) first: a
+                    one-frame threat is a look, never a draw.
+     HYSTERESIS: once drawn it stays drawn HOLD (7-11 s, per person) past the
+     last trigger and at least 4 s in all, then goes back DELIBERATELY.
+     Watching decays after 3 s quiet. Nothing here can flip twice in a second.
+     Who it governs: any body with a record (`actor._gd`), which city poseList
+     makes for every armed ped and cop. Other games keep their own scripted
+     draws (a taser in the jail, a warlord battle) until they adopt it.
+     ========================================================================= */
+  const GD = (function () {
+    const LV = { fired: 3, "shot-at": 3, "aimed-at": 3, target: 3, order: 2, ward: 3,
+      assault: 2, "armed-threat": 2, "shots-near": 2, hunt: 2, post: 2 };
+    const NOW = { fired: 1, "shot-at": 1, "aimed-at": 1, target: 1, order: 1, ward: 1, post: 1 };
+    const RING_N = 256, ring = [];
+    const counts = { draw: 0, holster: 0, watch: 0, byWhy: {} };
+    let T = 0, seq = 0;
+    function h01(r, salt) { let x = (r.id * 2654435761 + salt) >>> 0; x ^= x >>> 15; x = Math.imul(x, 2246822519) >>> 0; x ^= x >>> 13; return (x >>> 0) / 4294967296; }
+    function rec(a) {
+      let r = a._gd;
+      if (!r) {
+        r = a._gd = { id: ++seq, lv: 0, why: "", trigT: -1e9, trigLv: 0, trigWhy: "", watchT: 0, holdUntil: 0,
+          outAt: -1e9, aimT: -1e9, quietT: 0, downT: -1e9 };
+        r.sustain = 0.35 + h01(r, 0x51) * 0.35;
+        r.hold = 7 + h01(r, 0x7B) * 4;
+      }
+      return r;
+    }
+    function log(a, kind, why) {
+      const e = { t: +T.toFixed(2), kind: kind, why: why || "", who: (a && (a.name || a.job || a.kind)) || "?", job: (a && a.job) || "", ak: (a && a.kind) || "" };
+      if (ring.length >= RING_N) ring.shift();
+      ring.push(e);
+      counts[kind] = (counts[kind] || 0) + 1;
+      if (kind === "draw") counts.byWhy[why] = (counts.byWhy[why] || 0) + 1;
+    }
+    function draw(a, r, why) {
+      r.lv = 2; r.why = why; r.outAt = T; r.watchT = 0;
+      r.holdUntil = Math.max(r.holdUntil, T + r.hold);
+      log(a, "draw", why);
+    }
+    // a system NAMES why this body should have his gun out
+    function trigger(a, why, lv) {
+      if (!a || a.dead || a.isPlayer) return;
+      const r = rec(a);
+      lv = lv || LV[why] || 2;
+      // STOOD DOWN by an order (npcDrawReason(a, null)): for a few seconds
+      // only a gun actually in play (fired / shot at / aimed at) brings it
+      // back; a lingering grudge or a hunt does not overrule the order.
+      if (T - r.downT < 4 && lv < 3 && why !== "order") return;
+      if (r.trigT !== T || lv > r.trigLv) { r.trigLv = lv; r.trigWhy = why; }
+      r.trigT = T;
+      if (lv >= 3) r.aimT = T;
+      if (r.lv < 2 && (NOW[why] || lv >= 3)) draw(a, r, why);
+      if (r.lv >= 2) r.holdUntil = Math.max(r.holdUntil, T + r.hold);
+    }
+    /* AN ORDER IS A STANDING REASON. city/orders.js (the President's attack
+       order) stamps a._drawWhy = { why: "order", by, target } and calls
+       CBZ.npcDrawReason(a, "order", target); Stand down calls it with null.
+       This is the ONE owner of that hook: the order keeps the gun out for as
+       long as it stands, and a stand-down puts it on the belt deliberately,
+       now, with no second "gun away" flag anywhere else. */
+    function reason(a, why, target) {
+      if (!a || a.isPlayer) return;
+      const r = rec(a);
+      if (why) { trigger(a, why); return; }
+      if (a._drawWhy) a._drawWhy = null;
+      r.downT = T; r.trigT = -1e9; r.watchT = 0;
+      if (r.lv >= 2) log(a, "holster", "stand-down");
+      r.lv = 0; r.holdUntil = 0; r.why = "";
+    }
+    /* the triggers a body's own state already states (city peds and cops);
+       anything else arrives through trigger() from the system that knows */
+    function sense(a) {
+      const dw = a._drawWhy;
+      if (dw && dw.why && !(dw.target && dw.target.dead)) trigger(a, dw.why);
+      const g = CBZ.game || {};
+      const stars = g.wanted | 0;
+      if (a.kind === "cop" || a.swat) {
+        if (a.swat) trigger(a, "order", 2);
+        const t = a.curTarget || a.npcTarget;
+        const onMark = !!(a.sees && !a._gunLowered);
+        if (t && !t.dead && (stars >= 1 || a.npcTarget)) trigger(a, onMark ? "target" : "hunt", onMark ? 3 : 2);
+        else if (stars >= 1 && (a.searchT || 0) > 0) trigger(a, "hunt", 2);
+        const post = a._post;
+        if (post && post.kind === "roadblock") trigger(a, "post", 2);
+        if (a.gunstop) trigger(a, "order", 2);
+      }
+      const r = a.rage;
+      if (r && !r.dead && r.pos && a.state === "fight") {
+        const dx = r.pos.x - a.pos.x, dz = r.pos.z - a.pos.z;
+        if (dx * dx + dz * dz < 60 * 60) trigger(a, "assault", 2);
+      }
+    }
+    function tick(a, dt) {
+      const r = rec(a);
+      const live = r.trigT >= T - 0.3;
+      if (live) {
+        r.quietT = 0;
+        if (r.lv < 2) {
+          if (r.lv === 0) { r.lv = 1; log(a, "watch", r.trigWhy); }
+          r.watchT += dt;
+          if (r.watchT >= r.sustain) draw(a, r, r.trigWhy);
+        }
+        if (r.lv >= 2) r.holdUntil = Math.max(r.holdUntil, T + r.hold);
+      } else {
+        r.quietT += dt;
+        if (r.lv === 1) { r.watchT = Math.max(0, r.watchT - dt * 0.5); if (r.quietT > 3) { r.lv = 0; r.watchT = 0; } }
+        else if (r.lv >= 2 && T >= r.holdUntil && T - r.outAt >= 4) {
+          r.lv = 0; r.watchT = 0; log(a, "holster", r.why); r.why = "";
+        }
+      }
+      return r;
+    }
+    function drawn(a) { return !!(a && a._gd && a._gd.lv >= 2); }
+    function aiming(a) {
+      const r = a && a._gd;
+      return !!(r && r.lv >= 2 && T - r.aimT < 1.6 && !a._gunLowered && !a._losBlocked);
+    }
+    // police.js puts a gun on the belt only once the discipline has stood down
+    function mayHolster(a) { const r = a && a._gd; return !r || r.lv < 2; }
+    function clock(dt) { T += dt; }
+    function audit() {
+      const out = { t: +T.toFixed(1), draws: counts.draw || 0, holsters: counts.holster || 0, watches: counts.watch || 0,
+        byWhy: Object.assign({}, counts.byWhy), out: 0, watching: 0 };
+      const L = [CBZ.cityPeds, CBZ.cityCops];
+      for (let k = 0; k < L.length; k++) {
+        const A = L[k] || [];
+        for (let i = 0; i < A.length; i++) { const r = A[i] && A[i]._gd; if (!r || A[i].dead) continue; if (r.lv >= 2) out.out++; else if (r.lv === 1) out.watching++; }
+      }
+      return out;
+    }
+    return { trigger, reason, sense, tick, drawn, aiming, mayHolster, clock, audit, rec,
+      log: function () { return ring.slice(); }, LV: LV, now: function () { return T; } };
+  })();
+  CBZ.gunDiscipline = GD;
+  CBZ.npcDrawReason = GD.reason;
+  if (CBZ.onUpdate) CBZ.onUpdate(35.5, function (dt) { GD.clock(dt); });
+
+  /* THE LOW READY of an NPC: the gun in the hand, the muzzle down. A long gun
+     takes the shared two-hand low-ready solve (CBZ.gunHold.lowReady, the
+     player's own carry); a handgun rides the hanging hand, closed on the grip
+     (CBZ.holds: one hand in third person). */
+  function setLowReady(a, prop) {
+    const ch = a.char;
+    if (!ch || !prop) return;
+    if (CBZ.holds.hands(prop, { view: "tp" }) >= 2) {
+      let ok = false;
+      try { ok = GH.lowReady(ch, prop) || !!prop.userData._low; } catch (e) { ok = false; }
+      if (!ok) setReadyPose(ch, prop);
+      return;
+    }
+    if (ch.setHandPose) ch.setHandPose("r", "pistol");
+  }
+
   // every frame (AFTER the walk animation), force any actor whose gun is OUT
   // to carry it in the ready pose so it never droops to the hip while standing
   // or walking. "Out" respects intent: holstered/lowered/hidden actors are
@@ -2015,7 +2204,10 @@
       // challenge never read as a lowered muzzle and stowed guns popped back
       // through walls. Enforce the hide (visibility flip only — prop stays on
       // its socket) and leave the arms free for the owning system / reactions.
-      if (a._holstered || a._gunLowered || a._gunHidden) {
+      // (_gunLowered is the CHALLENGE stance and combat.js's walled-off
+      // shooter: drawn, muzzle down. It no longer hides the gun; GD.aiming()
+      // reads it and the body carries at low ready below.)
+      if (a._holstered || a._gunHidden) {
         if (a._weaponProp && a._weaponProp.visible) a._weaponProp.visible = false;
         gripHand(a, null);
         continue;
@@ -2027,14 +2219,23 @@
       // (and gun) dangling at the hip and the shots reading as "from the chest".
       const ph = a._phys;
       if (ph && (ph.down > 0 || ph.air || ph.heldBy)) continue;
-      // ATTACH + show the gun prop right here if it isn't already (self-heal): if
-      // the spawn-time syncActorWeapon ever no-op'd (armed flipped on later, a
-      // recycle, etc.) the ped would otherwise fire an INVISIBLE gun from the
-      // hand. Building is cheap — syncActorWeapon early-returns when the prop is
-      // already attached with the right id, only rebuilding when the weapon changed.
+      // THE DISCIPLINE DECIDES (CBZ.gunDiscipline above): holstered unless a
+      // named trigger drew it, low ready while drawn, the ready pose only on a
+      // mark. Holstering is a visibility flip (the prop stays on its socket).
+      GD.sense(a);
+      const r = GD.tick(a, dt);
+      if (r.lv < 2) {
+        if (a._weaponProp && a._weaponProp.visible) a._weaponProp.visible = false;
+        gripHand(a, null);
+        continue;
+      }
+      // ATTACH + show the drawn gun right here if it isn't already (self-heal):
+      // syncActorWeapon early-returns when the prop is already attached with
+      // the right id, only rebuilding when the weapon changed.
       const prop = syncActorWeapon(a);
       if (!prop) continue;
-      setReadyPose(a.char, prop);
+      if (GD.aiming(a) || (prop.userData && prop.userData.weaponMelee)) setReadyPose(a.char, prop);
+      else setLowReady(a, prop);
       bipodFromPosture(a, prop, dt);
     }
   }

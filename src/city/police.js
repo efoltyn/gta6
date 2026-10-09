@@ -474,15 +474,25 @@
   // syncActorWeapon hides the prop AND poseList @36 skips the gun-ready arm
   // pose, so the whole body relaxes. The prop object is KEPT on the socket so a
   // re-draw is a visibility flip, not a geometry rebuild (we're draw-call bound).
+  // THE BELT WAITS FOR THE DISCIPLINE (systems/actorweapons.js
+  // CBZ.gunDiscipline): once a gun is out it stays out its hold time past the
+  // last real trigger. This is called every calm frame, so it simply lands
+  // the frame the discipline stands down; a fresh cop (no record) holsters now.
   function holsterGun(c) {
     if (c.dead || !c.armed) return;
+    if (CBZ.gunDiscipline && !CBZ.gunDiscipline.mayHolster(c)) return;
     c._beltGun = c.weapon || (c.swat ? "SMG" : "Pistol");   // remember what rides the belt
     c.armed = false;
     if (c._weaponProp) c._weaponProp.visible = false;
     c._weaponPropId = null;
   }
-  function drawGun(c) {
-    if (c.dead || c.armed) return;
+  // why: the discipline's reason (order = the call is in, post = a roadblock
+  // wall, target = a seen suspect). police.js's .armed stays its "drawn" flag;
+  // the discipline owns when that shows and how it is carried.
+  function drawGun(c, why) {
+    if (c.dead) return;
+    if (CBZ.gunDiscipline) CBZ.gunDiscipline.trigger(c, why || "order");
+    if (c.armed) return;
     c.armed = true; c.weapon = c.weapon || c._beltGun || (c.swat ? "SMG" : "Pistol");
     if (c._weaponProp && c._weaponProp.userData && c._weaponProp.userData.weaponId) {
       c._weaponProp.visible = true;
@@ -711,7 +721,7 @@
     cop.state = "gunstop"; cop.gunstop = true; cop.npcTarget = null; cop.curTarget = null;
     cop.searchT = 0; cop.giveUp = false; cop.arrestT = 0;
     cop._duty = null;            // the open carry outranks a move-along
-    drawGun(cop);                // challenge stance: gun OUT but lowered (_gunLowered)
+    drawGun(cop, "order");       // challenge stance: gun OUT but lowered (_gunLowered)
     copSay(cop, STOP.susp >= 2.2 ? "You again. Last warning."
       : STOP.susp >= 1.2 ? "You again? Put that away."
       : "Hey! Is that a gun? Put it away.", 2.4);
@@ -2923,7 +2933,7 @@
       c._post = CBZ.cityPostStand
         ? CBZ.cityPostStand(c, { x: c.pos.x, z: c.pos.z, fx: -ux, fz: -uz, kind: "roadblock", org: "police", verb: "roadblock", tag: "police:roadblock" })
         : { x: c.pos.x, z: c.pos.z, fx: -ux, fz: -uz, mount: null, mountT: 0 };
-      drawGun(c);
+      drawGun(c, "post");
       RB.cops.push(c);
     }
     RB.x = bx; RB.z = bz; RB.ux = ux; RB.uz = uz;
@@ -3254,7 +3264,7 @@
         // the instant you have stars or he can see you, the same code below
         // arms him. Absent the flag every existing post is byte-identical.
         if (post.relaxed && (stars | 0) === 0 && !c.sees) { if (c.armed) holsterGun(c); }
-        else if (!c.armed) drawGun(c);
+        else if (!c.armed) drawGun(c, "post");
         if (c.shootCD > 0) c.shootCD -= dt;
         // MOUNTING UP is THIS roadblock's officers only. `_post` began life
         // private to the pursuit roadblock, so "the wall is leaving" could
@@ -3429,7 +3439,7 @@
         // armed suspect, lethal authority, or the player under challenge (drawn
         // but LOWERED: the challenge stance; fireAt clears it when it's live).
         // A plain collar of an unarmed NPC brawler stays hands-on.
-        if (wantShoot || tgt.armed || (isPlayer && law)) drawGun(c);
+        if (wantShoot || tgt.armed || (isPlayer && law)) drawGun(c, wantShoot ? "target" : tgt.armed ? "armed-threat" : "order");
         c._gunLowered = !!(law && !wantShoot && c.armed);
         c._calmT = 0;
 
@@ -3720,7 +3730,6 @@
     rbUpdate(dt);
     updateSwatVan(dt);
     updateGunStop(dt);
-    hideOccludedGuns(dt);
     copClock += dt;
     if (barkCD > 0) barkCD -= dt;
     scanDuty(dt);
@@ -3768,11 +3777,25 @@
     if (A && A.stop && A.face) { A.face(c, c.pos.x + dx, c.pos.z + dz); A.stop(c); return; }
     rawFace(c, c.pos.x + dx, c.pos.z + dz); rawHold(c);
   }
+  const _copSteer = { x: 0, z: 0 };
   function rawStep(c, dx, dz, spd, dt, near) {
     const gd = Math.hypot(dx, dz) || 1;
     const Mv = CBZ.moves, m = Mv.motor(c);
     _copStep.speed = spd; _copStep.accel = spd > 3 ? 5.5 : 3.6;
-    Mv.step(m, c.pos, c.group.rotation.y, c.pos.x + (dx / gd) * 4, c.pos.z + (dz / gd) * 4, _copStep, dt);
+    let hx = dx / gd, hz = dz / gd;
+    // WALLS: the crowd's own context kernel (city/citynav.js, the same one
+    // peds.js walks with), its last choice fed back so the side it picked
+    // round a building is KEPT. A straight-line step into a facade was the
+    // stood-down officer's dance: the motor's stuck detour turned him 83
+    // degrees off the wall, straight again, into it again (police.js:3776
+    // was the third-largest yaw writer flipping sign in the trace).
+    const CN = CBZ.cityNav;
+    if (CN && CN.contextSteer && gd > 1.2) {
+      const psx = c._steerX || 0, psz = c._steerZ || 0;
+      const out = CN.contextSteer(c.pos.x, c.pos.z, hx, hz, null, 0, psx, psz, _copSteer, 1);
+      if (out && (out.x || out.z)) { c._steerX = out.x; c._steerZ = out.z; hx = out.x; hz = out.z; }
+    } else { c._steerX = 0; c._steerZ = 0; }
+    Mv.step(m, c.pos, c.group.rotation.y, c.pos.x + hx * 4, c.pos.z + hz * 4, _copStep, dt);
     c.group.rotation.y = m.yaw;
     c.speed = m.speed;
     finalizeMove(c);
@@ -3839,42 +3862,12 @@
     c.pos.y = 0;
   }
 
-  // ---- GUN-PROP VISIBILITY (no muzzle poking through walls) ----------------
-  // Runs at order 35, BEFORE actorweapons.js poseList @36 (which only re-poses
-  // props that are still .visible). We HIDE a cop's gun whenever he has no live
-  // line of sight to a shoot target (lost you behind cover, or just patrolling)
-  // or is lowering it during a GUN STOP; we re-show it the moment he can see and
-  // wants to fire. Cheap: just toggles the existing prop, no raycasts here (the
-  // per-cop LOS was already computed in the behaviour pass via c.sees/_losClear).
-  let gunVisT = 0;
-  function hideOccludedGuns(dt) {
-    gunVisT -= dt; if (gunVisT > 0) return; gunVisT = 0.12;
-    const cops = CBZ.cityCops;
-    for (let i = 0; i < cops.length; i++) {
-      const c = cops[i];
-      if (c.dead || !c.armed) continue;
-      if (CBZ.body && CBZ.body.busy && CBZ.body.busy(c)) continue;   // ragdoll owns the rig
-      // posted at a roadblock: standing-aim up an OPEN street (no wall to clip
-      // through) — the drawn gun always shows, even before the 40u fire gate
-      if (c._post) {
-        c._gunHidden = false;
-        if (CBZ.syncActorWeapon && (!c._weaponProp || !c._weaponProp.visible)) CBZ.syncActorWeapon(c);
-        continue;
-      }
-      // SHOW the gun only when he's actively a threat with a clear sightline; a
-      // lowered (challenge) gun or a blind/patrolling cop carries it stowed so it
-      // never clips through a building.
-      const wantShow = !c._gunLowered && !c.gunstop && c.sees && !!c.curTarget && c.state !== "leave";
-      // flag-backed: actorweapons' poseList self-heal honors _gunHidden, so the
-      // stow actually STICKS for a drawn-but-blind cop instead of popping back.
-      c._gunHidden = !wantShow;
-      if (wantShow) {
-        if (CBZ.syncActorWeapon && (!c._weaponProp || !c._weaponProp.visible)) CBZ.syncActorWeapon(c);
-      } else if (c._weaponProp && c._weaponProp.visible) {
-        c._weaponProp.visible = false;
-      }
-    }
-  }
+  // (GUN-PROP VISIBILITY used to live here: hideOccludedGuns flipped every
+  // armed cop's gun in and out of his hand every 0.12 s on c.sees, a LOS probe
+  // that itself flickers. That blink WAS the "pulls guns out randomly" on a
+  // hunt. A drawn officer who cannot see his man now carries at LOW READY,
+  // muzzle down, and only aims on a mark: systems/actorweapons.js
+  // CBZ.gunDiscipline.)
 
   const _copWP = { x: 0, y: 0, z: 0 };   // where an officer's round lands on a ped (reused)
   // fireAt(c, tgt, dist, dt) — dt is optional and only used by the competence
@@ -3901,7 +3894,7 @@
     // the gun is OUT and aimed now (clear any challenge/occlusion lowering;
     // a still-holstered cop forced into a fire path ALWAYS clears leather first)
     c._gunLowered = false; c._gunHidden = false;
-    drawGun(c);
+    drawGun(c, "fired");
     if (c.armed && CBZ.syncActorWeapon) CBZ.syncActorWeapon(c);
     if (CBZ.actorAimAt) CBZ.actorAimAt(c, tgt);
     const from = CBZ.actorMuzzle ? CBZ.actorMuzzle(c, tmp) : { x: c.pos.x, y: 1.4, z: c.pos.z };
