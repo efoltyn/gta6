@@ -557,12 +557,19 @@
     const tok = A.token, beat = A.beat;
     if (!UI || !UI.say) return;
     let pr = null;
-    try { pr = UI.say(presTitle(), "", A.opts.map(function (s, i) { return { id: String(i), label: s.label }; }), { actor: CBZ.player }); } catch (e) { pr = null; }
+    try { pr = UI.say(presTitle(), "", A.opts.map(function (s, i) { return { id: String(i), label: s.label }; }), { at: speakSpot() }); } catch (e) { pr = null; }
     if (pr && pr.then) pr.then(function (v) {
       if (!A.live || A.token !== tok || A.beat !== beat || A.phase !== "choosing") return;
       if (v == null) { finish(true); return; }
       choose(+v);
     });
+  }
+  // the answers ride on the spot you are speaking from (the lectern, the desk,
+  // wherever the order found you): campaign_ui pins them to a reply zone there,
+  // E / hold E / the wheel. Never on your own body (you can't look at yourself).
+  function speakSpot() {
+    const P = CBZ.player, p = P && (P.pos || (P.group && P.group.position));
+    return p ? { x: p.x, y: p.y, z: p.z } : { x: 0, y: 0, z: 0 };
   }
   function choose(i) {
     if (!A.live || A.phase !== "choosing" || !A.opts) return null;
