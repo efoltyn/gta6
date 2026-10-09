@@ -777,10 +777,16 @@
     try { return PP.now() || null; } catch (e) { return null; }
   }
   // the detail's own rifles never count as a threat to the man they guard
+  // (the state's other bodies too: the motorcade's agents, the soldiers and
+  // police standing for him at a public event, a Bureau raid, his staff. A
+  // motorcade agent was missing, so the detail's awareness meter filled on
+  // his rifle and the posture went to alert, "drawn weapon", on a colleague)
   function friendly(p) {
     if (!p) return true;
+    if (p._coup) return false;                 // a minister in an announced coup is not his
     return !!(p._protUnit || p._powerOf || p._vipGuard || p.kind === "cop" || p.isFamily ||
-      p.organization === "military" || p._venueStaff || p.companion);
+      p.organization === "military" || p.organization === "state" || p._venueStaff || p.companion ||
+      p._occupySrc === "motorcade" || p._presPublic || p._presRaid || p.swat || p._stateStaff || p._presStaff || p._presOfficer);
   }
   function longGunName(w) { return /rifle|carbine|ak|sniper|lmg|shotgun|rocket|bazooka|launcher/i.test(String(w || "")); }
   function playerLongGunOut() {
