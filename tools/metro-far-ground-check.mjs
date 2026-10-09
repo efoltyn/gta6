@@ -32,7 +32,7 @@ const seed = +opt("--seed", 90210), only = opt("--city", "");
 const snap = JSON.parse(readFileSync(path.join(ROOT, "tools/metro-world-snapshot.json"), "utf8"));
 const THREE = require(path.join(ROOT, "src/vendor/three.r128.min.js"));
 globalThis.window = { THREE, CBZ: { CONFIG: {}, WORLD_SEED: seed, highwayNetTable: () => snap.hw, HIGHWAY_NET_HALF: snap.H } };
-for (const f of ["metroplan", "metro", "metro_ground"]) require(path.join(ROOT, "src/city/" + f + ".js"));
+for (const f of ["zoning", "metroplan", "metro", "metro_ground"]) require(path.join(ROOT, "src/city/" + f + ".js"));
 const CBZ = globalThis.window.CBZ, L = CBZ.metroLib, MG = CBZ.metroGround, FM = MG.FARMAP_COLOURS;
 const CELL = 100, MED_MAX = 0.06, P90_MAX = 0.15, MAX_SLICE_MS = 12;
 const KERB = [0.30, 0.30, 0.285];         // granite (~148 sRGB canvas, decoded)

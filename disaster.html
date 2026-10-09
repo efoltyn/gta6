@@ -1450,14 +1450,17 @@ document.body.appendChild(b);}}catch(e){}})();
      metroplan.js is the pure urban planner (land value -> zoning -> arterials -> blocks -> parcels),
      metro_fabric.js draws its buildings, metro_ground.js its streets and ground, metro.js places the
      Kingsport metro + the city rings at landmass order 43 and streams their tiles by distance. -->
-<script src="src/city/metroplan.js?v=wreal0929"></script>
+<!-- THE WORLD'S ONE ZONING FIELD (layout wave): intensity, use, the ceiling a grown district may rise to,
+     the freeway frontage buffer. Pure data off the regions + highway table; metro.js plans with it. -->
+<script src="src/city/zoning.js?v=layout1008"></script>
+<script src="src/city/metroplan.js?v=layout1008"></script>
 <script src="src/city/metro_fabric.js?v=pf0930q"></script>
 <!-- REAL GRASS (owner: "when you walk on grass it's just fucking green"): instanced lit blades round
      the camera on every grass surface, fed by CBZ.groundCover (the ONE land-use + ground-colour
      query: cityground 10, metro_ground 20, continent 90 register into it, so it loads before them). -->
 <script src="src/world/grassfield.js?v=grass0929c"></script>
 <script src="src/city/metro_ground.js?v=wreal0929"></script>
-<script src="src/city/metro.js?v=ground1001"></script>
+<script src="src/city/metro.js?v=layout1008"></script>
 <script src="src/city/metro_structs.js?v=wreal0929"></script>
 <!-- custom dialogue + street talk (one contextual YES/NO decision) — after the registry -->
 <!-- 4d-3. this wave's feature modules (load after all deps they read) -->

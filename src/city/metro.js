@@ -193,7 +193,24 @@
         id: "cityborough", name: "Gang City West", tier: "city", biome: "cityborough",
         cx: (d.minX + d.maxX) / 2, cz: (d.minZ + d.maxZ) / 2, rx: 1400, rz: 1000,
         bounds: { minX: d.minX - 1330, maxX: d.minX - 90, minZ: d.minZ - 470, maxZ: d.maxZ + 120 },
-        cores: [padR(d, 110)], coreIsDowntown: true,
+        cores: [padR(d, 110)], coreIsDowntown: true, coreKey: "downtown",
+      });
+      // GANG CITY NORTH (layout wave, 2026-10-08): the land across the NORTH
+      // harbour, from the quay to the Mercy hills, between the Continental
+      // Loop's west leg and the Mercy causeway (it meets the west borough
+      // north of the Brandt bridge, so no field is left between the two). It was open grass right across the water from
+      // the spawn: the downtown's gradient stopped at the harbour on this side
+      // and nowhere else (tools/layout-audit.mjs: ring 750-1000 m round the
+      // downtown 72% empty). Same planner, same core, same biome as the west
+      // borough (it IS the borough, on its other side): walk-ups on the water,
+      // rowhouses, the suburbs across the Mercy Connector, farms at the edge.
+      // The county jail and the two highways through it are planned round
+      // (obstacle, corridors), never built on.
+      out.push({
+        id: "citynorth", name: "Gang City North", tier: "city", biome: "cityborough",
+        cx: (d.minX + d.maxX) / 2, cz: (d.minZ + d.maxZ) / 2, rx: 1300, rz: 1000,
+        bounds: { minX: d.minX - 380, maxX: d.maxX + 275, minZ: d.minZ - 900, maxZ: d.minZ - 90 },
+        cores: [padR(d, 110)], coreIsDowntown: true, coreKey: "downtown",
       });
     }
     // THE RINGS round the walk-in towngen downtowns (read live: the layout
@@ -211,7 +228,7 @@
         id: r.id + "-ring", name: r.name, tier: r.tier, biome: r.id,
         cx: (core.minX + core.maxX) / 2, cz: (core.minZ + core.maxZ) / 2, rx: r.rx, rz: r.rz,
         bounds: { minX: core.minX - r.grow, maxX: core.maxX + r.grow, minZ: core.minZ - r.grow, maxZ: core.maxZ + r.grow },
-        cores: [padR(core, 24)],
+        cores: [padR(core, 24)], coreKey: r.id,
       });
     }
     return out;
@@ -319,8 +336,16 @@
       }
       if (port) port = Object.assign({}, port, { x: port.x - dx, z: port.z - dz });
     }
+    // THE ZONING FIELD (city/zoning.js): the ceiling for a district grown
+    // round an existing core, and the freeway frontage buffer — both asked
+    // in REAL coordinates (a copy plans in its source's frame)
+    const Z = CBZ.zoningFor ? CBZ.zoningFor(city) : null;
+    const zoning = Z ? {
+      ceiling: site.coreKey ? function (x, z) { return Z.ceilingAt(x + dx, z + dz, site.coreKey); } : null,
+      buffer: function (x, z, ext) { return Z.inFreewayBuffer(x + dx, z + dz, ext); },
+    } : null;
     const P = CBZ.metroPlan({
-      id: site.id, name: site.name, tier: site.tier, seed: CBZ.WORLD_SEED | 0, seedKey: site.seedKey, style: site.style, uniform: site.uniform,
+      id: site.id, name: site.name, tier: site.tier, seed: CBZ.WORLD_SEED | 0, seedKey: site.seedKey, style: site.style, uniform: site.uniform, zoning: zoning,
       cx: site.cx - dx, cz: site.cz - dz, rx: site.rx, rz: site.rz, bounds: mv(site.bounds),
       obstacles: C.obstacles.concat(lakeObs).map(mv),
       corridors: corridors, cores: (site.cores || []).map(mv), river: river, rail: rail, port: port,
