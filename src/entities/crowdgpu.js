@@ -59,7 +59,9 @@
      look({build, skin, shirt, pants, hair, shoes, sleeve}) -> look id,
      layer({name, cap, parent}) -> L: L.begin(); L.add(x,y,z,yaw,look,clip,
        phase,rate); L.commit(); L.clear(); L.dispose(),
-     dressRig(ch, look), rigOpts(look), audit(), layout() }
+     dressRig(ch, look), rigOpts(look), now(), audit(), layout() }
+   L.add takes (x, y, z, yaw, look, clip, phase, rate, scale, vx, vz): vx/vz is
+   the velocity the GPU carries the body along between cuts.
    Clip phase is in CYCLES (0..1). rate = cycles/second animated on the GPU
    (0 = the caller drives phase every frame).
 ============================================================ */
@@ -72,10 +74,16 @@
   const DEVICE = CBZ.deviceClass || "desktop";
   // LOD bands (m) and instance caps per tier. The nearest people get the
   // expensive tiers; overflow falls to the next tier, never to nothing.
+  // BIG CROWDS (entities/crowdstore.js holds thousands): what still scales
+  // with the head count is vertex + fragment work, so the mesh tiers are kept
+  // for the nearest few hundred and everyone past d2 is an impostor (two
+  // triangles from the same body). The impostor tier has no cap of its own:
+  // it takes the whole layer. d2 sits where a person is ~atlas-cell tall on
+  // that screen (48 px), so the swap is not a visible drop.
   const TIERS = {
-    desktop: { d1: 42, d2: 100, cap1: 140, cap2: 520 },
-    tablet: { d1: 34, d2: 80, cap1: 72, cap2: 260 },
-    phone: { d1: 26, d2: 62, cap1: 36, cap2: 140 },
+    desktop: { d1: 36, d2: 78, cap1: 120, cap2: 520 },
+    tablet: { d1: 26, d2: 52, cap1: 56, cap2: 220 },
+    phone: { d1: 20, d2: 40, cap1: 28, cap2: 110 },
   };
   const TIER = TIERS[DEVICE] || TIERS.desktop;
   const BIN = 1.0, NBIN = 640;            // distance bins for the counting sort (m)
@@ -98,6 +106,10 @@
     { id: "sit", gait: false, sit: true, period: 4.0, n: 8, imp: 2 },
     { id: "sitCheer", gait: false, sit: true, pose: "pubCheer", period: CHEER_P, n: 12, imp: 4 },
     { id: "down", gait: false, down: true, period: 4.0, n: 4, imp: 1 },
+    // the hurt: a slow shuffling walk, and a prone crawl (the gait laid face
+    // down, head first along the heading)
+    { id: "limp", gait: true, speed: 0.7, n: 24, imp: 8 },
+    { id: "crawl", gait: true, speed: 0.8, prone: true, n: 20, imp: 8 },
   ];
   const CLIP_IX = Object.create(null);
   let ROWS = 0, IMP_ROWS = 0;
@@ -243,6 +255,7 @@
     const W = maxBones * 3, H = ROWS * BODIES.length;
     const data = new Float32Array(W * H * 4);
     const DOWN = new THREE.Matrix4().makeTranslation(0, 0.13, 0).multiply(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
+    const PRONE = new THREE.Matrix4().makeTranslation(0, 0.16, 0).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2));
     const M = new THREE.Matrix4();
     function record(R, row, post) {
       R.ch.group.updateMatrixWorld(true);
@@ -298,7 +311,7 @@
           C.phase0 = ph0 > Math.PI ? ph0 - TAU : ph0;
           for (let k = 0; k < C.n; k++) {
             if (C.overlay) snapPose(ch, C.overlay, k * dtF);
-            record(R, row0 + k, null);
+            record(R, row0 + k, C.prone ? PRONE : null);
             CBZ.animChar(ch, speed, dtF);
           }
         } else {
@@ -352,6 +365,12 @@
     "}",
     "vec3 cgYaw(vec3 p) { float c = cos(iPos.w), s = sin(iPos.w); return vec3(c * p.x + s * p.z, p.y, -s * p.x + c * p.z); }",
   ].join("\n");
+  // THE GPU CARRIES A MOVING PERSON BETWEEN RE-CUTS: iVel = (vx, vz, t0) is
+  // the velocity at the cut and the GPU clock then. A crowd of thousands is
+  // re-cut a few times a second, not every frame; between cuts each body
+  // walks on along its own velocity (capped at 0.6 s), its legs on its own
+  // rate-driven gait. Not in GLSL_SKIN: the atlas bake has no instances.
+  const GLSL_VEL = "attribute vec4 iVel;\nvec3 cgBase() { return iPos.xyz + vec3(iVel.x, 0.0, iVel.y) * clamp(uTime - iVel.z, 0.0, 0.6); }";
 
   function capsOk() {
     const R = CBZ.renderer;
@@ -390,11 +409,11 @@
     mat.onBeforeCompile = function (sh) {
       sh.uniforms.uBones = U.uBones; sh.uniforms.uBoneSize = U.uBoneSize; sh.uniforms.uPalette = U.uPalette; sh.uniforms.uTime = U.uTime;
       sh.vertexShader = sh.vertexShader
-        .replace("#include <common>", "#include <common>\n" + GLSL_SKIN + "\nattribute vec2 aPart;\nvec3 cgP; vec3 cgN;\n" +
+        .replace("#include <common>", "#include <common>\n" + GLSL_SKIN + "\n" + GLSL_VEL + "\nattribute vec2 aPart;\nvec3 cgP; vec3 cgN;\n" +
           "void cgSkin() {\n  float r1, a; float r0 = cgFrame(r1, a); float c = aPart.x * 3.0;\n" +
           "  vec4 m0 = mix(cgT(c, r0), cgT(c, r1), a), m1 = mix(cgT(c + 1.0, r0), cgT(c + 1.0, r1), a), m2 = mix(cgT(c + 2.0, r0), cgT(c + 2.0, r1), a);\n" +
           "  vec4 p = vec4(position, 1.0);\n" +
-          "  cgP = cgYaw(vec3(dot(m0, p), dot(m1, p), dot(m2, p))) * iLook2.w + iPos.xyz;\n" +
+          "  cgP = cgYaw(vec3(dot(m0, p), dot(m1, p), dot(m2, p))) * iLook2.w + cgBase();\n" +
           "  cgN = normalize(cgYaw(vec3(dot(m0.xyz, normal), dot(m1.xyz, normal), dot(m2.xyz, normal))));\n}\n" +
           "vec3 cgColor() {\n  float s = aPart.y;\n" +
           "  if (s < 0.5) return cgPal(iLook.x);\n  if (s < 1.5) return cgPal(iLook.y);\n  if (s < 2.5) return cgPal(iLook.z);\n" +
@@ -404,7 +423,7 @@
         .replace("#include <beginnormal_vertex>", "cgSkin();\nvColor = cgColor();\nvec3 objectNormal = cgN;")
         .replace("#include <begin_vertex>", "vec3 transformed = cgP;");
     };
-    mat.customProgramCacheKey = function () { return "crowdgpu-mesh-1"; };
+    mat.customProgramCacheKey = function () { return "crowdgpu-mesh-2"; };
     GPU.mat = mat;
     // ---- the impostor material (LOD3)
     const imp = new THREE.MeshLambertMaterial({ color: 0xffffff });
@@ -413,14 +432,15 @@
       sh.uniforms.uBones = U.uBones; sh.uniforms.uBoneSize = U.uBoneSize; sh.uniforms.uPalette = U.uPalette; sh.uniforms.uTime = U.uTime;
       sh.uniforms.uAtlas = U.uAtlas; sh.uniforms.uAtlasCell = U.uAtlasCell;
       sh.vertexShader = sh.vertexShader
-        .replace("#include <common>", "#include <common>\n" + GLSL_SKIN + "\nuniform vec4 uAtlasCell;\nvarying vec2 vImUv; varying vec4 vLookA; varying vec2 vLookB;\nvec3 cgP; vec3 cgN;\n" +
+        .replace("#include <common>", "#include <common>\n" + GLSL_SKIN + "\n" + GLSL_VEL + "\nuniform vec4 uAtlasCell;\nvarying vec2 vImUv; varying vec4 vLookA; varying vec2 vLookB;\nvec3 cgP; vec3 cgN;\n" +
           "void cgBill() {\n" +
           // the camera in this layer's space (modelView is rigid): -R^T t
           "  vec3 t = modelViewMatrix[3].xyz;\n" +
           "  vec3 cam = -vec3(dot(modelViewMatrix[0].xyz, t), dot(modelViewMatrix[1].xyz, t), dot(modelViewMatrix[2].xyz, t));\n" +
-          "  vec3 d = cam - iPos.xyz; d.y = 0.0; float L = length(d); d = L > 1e-4 ? d / L : vec3(0.0, 0.0, 1.0);\n" +
+          "  vec3 base = cgBase();\n" +
+          "  vec3 d = cam - base; d.y = 0.0; float L = length(d); d = L > 1e-4 ? d / L : vec3(0.0, 0.0, 1.0);\n" +
           "  vec3 right = vec3(d.z, 0.0, -d.x);\n" +
-          "  cgP = iPos.xyz + (right * (position.x * uAtlasCell.z) + vec3(0.0, position.y * uAtlasCell.w, 0.0)) * iLook2.w;\n" +
+          "  cgP = base + (right * (position.x * uAtlasCell.z) + vec3(0.0, position.y * uAtlasCell.w, 0.0)) * iLook2.w;\n" +
           "  cgN = normalize(d + vec3(0.0, 0.35, 0.0));\n" +
           "  float rel = atan(d.x, d.z) - iPos.w;\n" +
           "  float col = mod(floor(rel / 6.2831853 * 8.0 + 0.5), 8.0) + iLook2.z * 8.0;\n" +
@@ -440,7 +460,7 @@
           "else if (sl > 6.5) pc = cgPalF(vLookA.x) * vec3(0.80, 0.60, 0.58);\n" +
           "diffuseColor.rgb *= pc * im.g * 1.6;");
     };
-    imp.customProgramCacheKey = function () { return "crowdgpu-imp-1"; };
+    imp.customProgramCacheKey = function () { return "crowdgpu-imp-2"; };
     GPU.impMat = imp;
     // ---- shared base geometry per (body, lod)
     GPU.geos = B.bodies.map(function (bd) {
@@ -555,7 +575,7 @@
     if (base.color) g.setAttribute("color", base.color);
     if (base.aPart) g.setAttribute("aPart", base.aPart);
     const A = {};
-    for (const k of ["iPos", "iAnim", "iLook", "iLook2"]) {
+    for (const k of ["iPos", "iAnim", "iLook", "iLook2", "iVel"]) {
       const at = new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4);
       at.setUsage(THREE.DynamicDrawUsage);
       g.setAttribute(k, at); A[k] = at;
@@ -568,6 +588,7 @@
     const cap = Math.max(1, opts.cap | 0 || 256);
     const sx = new Float32Array(cap), sy = new Float32Array(cap), sz = new Float32Array(cap), syaw = new Float32Array(cap);
     const slook = new Int32Array(cap), sclip = new Uint8Array(cap), sph = new Float32Array(cap), srate = new Float32Array(cap), sscale = new Float32Array(cap);
+    const svx = new Float32Array(cap), svz = new Float32Array(cap);
     const sbin = new Uint16Array(cap), order = new Int32Array(cap), binCount = new Int32Array(NBIN + 1);
     let n = 0, built = false, group = null, meshes = null, dead = false;
     const L = {
@@ -575,11 +596,13 @@
       maxDraw: opts.maxDraw || 400,
       begin: function () { n = 0; },
       // scale: optional uniform size (1 = the real body); warlord's map zoom reads it
-      add: function (x, y, z, yaw, lk, clip, phase, rate, scale) {
+      // vx, vz: optional velocity (m/s) the GPU carries the body along until the next cut
+      add: function (x, y, z, yaw, lk, clip, phase, rate, scale, vx, vz) {
         if (n >= cap) return -1;
         sx[n] = x; sy[n] = y; sz[n] = z; syaw[n] = yaw; slook[n] = lk | 0;
         const C = typeof clip === "number" ? CLIPS[clip] : CLIP_IX[clip];
         sclip[n] = C ? C.index : 0; sph[n] = phase || 0; srate[n] = rate || 0; sscale[n] = scale > 0 ? scale : 1;
+        svx[n] = vx || 0; svz[n] = vz || 0;
         return n++;
       },
       count: function () { return n; },
@@ -627,13 +650,16 @@
       const ix = lk.ix;
       A.iLook.array[o] = ix[0]; A.iLook.array[o + 1] = ix[1]; A.iLook.array[o + 2] = ix[2]; A.iLook.array[o + 3] = ix[3];
       A.iLook2.array[o] = ix[4]; A.iLook2.array[o + 1] = ix[5]; A.iLook2.array[o + 2] = body; A.iLook2.array[o + 3] = sscale[i];
+      A.iVel.array[o] = svx[i]; A.iVel.array[o + 1] = svz[i]; A.iVel.array[o + 2] = cutT; A.iVel.array[o + 3] = 0;
     }
+    let cutT = 0;
     // cam: optional THREE camera or {x,y,z, fx,fz} in WORLD space; defaults to CBZ.camera
     function commit(cam) {
       if (dead) return 0;
       if (!LOOKS.length) look({});
       if (!build()) return 0;
-      if (GPU.U) GPU.U.uTime.value = clockNow();
+      cutT = clockNow();
+      if (GPU.U) GPU.U.uTime.value = cutT;
       if (palDirty && palTex) { palTex.needsUpdate = true; palDirty = false; }
       // the camera in this layer's space
       let cx = 0, cy = 0, cz = 0, fx = 0, fz = 1;
@@ -743,6 +769,9 @@
     rigOpts: rigOpts,
     dressRig: dressRig,
     tier: function () { return Object.assign({ device: DEVICE }, TIER); },
+    // the GPU clock (s) the shaders animate on: a caller that hands a moving
+    // body's gait phase "as of now" converts it with this
+    now: clockNow,
     audit: function () {
       const drawn = [0, 0, 0, 0];
       for (let i = 0; i < LAYERS.length; i++) for (let k = 1; k < 4; k++) drawn[k] += LAYERS[i].drawn[k];

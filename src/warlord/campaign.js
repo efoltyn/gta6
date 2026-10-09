@@ -903,8 +903,10 @@
   const MAN_SKIN = 0x996f50;
 
   function buildMen() {
-    // the men past the rig band: the real human, one crowd layer
-    menLayer = CBZ.crowdGPU ? CBZ.crowdGPU.layer({ name: "warlord-men", cap: MEN_CAP, parent: root, maxDraw: 2400 }) : null;
+    // the men past the rig band: the real human, one group of the one crowd
+    // store (entities/crowdstore.js), rebuilt every frame from the roster.
+    // Their lives are W.state's (deaths.js), so the store only draws them.
+    menLayer = CBZ.crowds ? CBZ.crowds.group({ name: "warlord-men", frame: true, life: false, parent: root, cap: MEN_CAP, maxDraw: 2400 }) : null;
 
     /* THE BANNER IS THE MAP MARKER, and it is a real object in the world so
        it obeys the terrain and the fog like everything else. Its height and
@@ -2769,12 +2771,12 @@
         const m = menDraw[i];
         if (m.rig || m.look < 0) continue;
         const sp = m.spd || 0, ph = ((i * 0.6180339887) + (m.s ? m.s.id * 0.37 : 0)) % 1;
-        if (sp > 2.4) menLayer.add(m.x, m.y, m.z, m.yaw, m.look, "run", ph, sp * GAIT_R / TAU, m.ms);
-        else if (sp > 0.3) menLayer.add(m.x, m.y, m.z, m.yaw, m.look, "walk", ph, sp * GAIT_W / TAU, m.ms);
-        else menLayer.add(m.x, m.y, m.z, m.yaw, m.look, "idle", ph, 0.25, m.ms);
+        if (sp > 2.4) menLayer.put(m.x, m.y, m.z, m.yaw, m.look, "run", ph, sp * GAIT_R / TAU, m.ms);
+        else if (sp > 0.3) menLayer.put(m.x, m.y, m.z, m.yaw, m.look, "walk", ph, sp * GAIT_W / TAU, m.ms);
+        else menLayer.put(m.x, m.y, m.z, m.yaw, m.look, "idle", ph, 0.25, m.ms);
         n++;
       }
-      menLayer.commit(camera);
+      menLayer.end(camera);
     }
     menShown = n;
     pole.count = bn; banner.count = bn;
@@ -3465,7 +3467,7 @@
          compound after levelPad, which is the number that says whether
          anything is floating. */
       posts: outpostAudit(),
-      men: { instanced: menShown, lods: menLayer ? menLayer.drawn.slice(1) : null, rigs: rigsShown,
+      men: { instanced: menShown, lods: menLayer && menLayer.layer ? menLayer.layer.drawn.slice(1) : null, rigs: rigsShown,
              pool: rigsBuilt, poolCap: RIG_POOL, dressedThisFrame: rigsDressed,
              near: NEAR_IN, out: NEAR_OUT,
              ms: Math.round(menMs * 1000) / 1000 },

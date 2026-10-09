@@ -1150,6 +1150,12 @@
       try { w.crowd = CBZ.cityCrowdBlastTargets(x, z, maxR) || []; } catch (e) { w.crowd = []; }
       for (let i = 0; i < w.crowd.length; i++) w.crowd[i].at = nuclearShockArrival(w.crowd[i].d, fireR);
     }
+    // THE CROWDS (entities/crowdstore.js): every row inside the 5 psi ring
+    // dies at once, the rest by the same lethality curve, counted by ring and
+    // reported with the city's own population under it
+    if (CBZ.crowds && CBZ.crowds.nuke) {
+      try { CBZ.crowds.nuke(x, z, { fireR: fireR, maxR: maxR, byPlayer: !!opts.byPlayer, by: typeof opts.by === "string" ? opts.by : null }); } catch (e) {}
+    }
     if (CBZ.structure && CBZ.structure.radialTargets) {
       try { w.structures = CBZ.structure.radialTargets(x, y, z,
         Math.max(w.structR, w.thermal)) || []; } catch (e) { w.structures = []; }
@@ -1638,6 +1644,10 @@
     const frac = 1 - r1 / (w.maxR + 0.01);            // 1 at ground zero -> 0 at the rim
     const bite = w.power * frac;
     if (bite <= 0.02) return;
+    // the crowds in this band (entities/crowdstore.js: one pass, the same curve)
+    if (CBZ.crowds && CBZ.crowds.ring && w.kind !== "nuke" && r1 > r0) {
+      try { CBZ.crowds.ring(w.x, w.z, r0, r1, lethalFor(w, r1), { cause: "explosion", byPlayer: w.byPlayer, salt: (w.id | 0) + 0x63 }); } catch (e) {}
+    }
 
     // (a) PEOPLE. Route through the shared blast-damage path the whole game
     //     already uses (crashfx.js's applyBlastDamage, reached via a tiny

@@ -1143,7 +1143,9 @@
   function buildRank() {
     if (rank) return rank;
     const G = CBZ.crowdGPU;
-    rank = { layer: G ? G.layer({ name: "warlord-rank", cap: RANK_CAP, parent: scene, maxDraw: 900 }) : null, men: [], shown: 0, gaitW: 0 };
+    // one group of the one crowd store (entities/crowdstore.js), rebuilt every
+    // frame; the men's lives are the roster's, the store only draws them
+    rank = { layer: CBZ.crowds ? CBZ.crowds.group({ name: "warlord-rank", frame: true, life: false, parent: scene, cap: RANK_CAP, maxDraw: 900 }) : null, men: [], shown: 0, gaitW: 0 };
     if (G) { const w = G.clip("walk"); rank.gaitW = (w && w.radPerM) || 4.4; }
     return rank;
   }
@@ -1197,7 +1199,7 @@
     if (!rank) return;
     rank.men.length = 0;
     rank.shown = 0;
-    if (rank.layer) rank.layer.clear();
+    if (rank.layer) { rank.layer.begin(); rank.layer.end(); }
   }
 
   /* THE FRAME. Every man is the real human on the baked clips: standing
@@ -1218,13 +1220,13 @@
       const ph = m.ph / (Math.PI * 2);
       if (m.fall) {
         const prog = Math.abs(m.fall.rx) / FLAT;
-        L.add(m.x, m.y, m.z, m.yaw, m.look, prog > 0.5 ? "down" : "idle", ph, 0);
+        L.put(m.x, m.y, m.z, m.yaw, m.look, prog > 0.5 ? "down" : "idle", ph, 0);
       } else if (m.walk && m.walk.t > m.walk.delay && m.walk.t < m.walk.delay + m.walk.dur) {
         const w = m.walk, sp = Math.hypot(w.x1 - w.x0, w.z1 - w.z0) / Math.max(0.1, w.dur);
-        L.add(m.x, m.y, m.z, m.yaw, m.look, "walk", ph, sp * rank.gaitW / (Math.PI * 2));
-      } else L.add(m.x, m.y, m.z, m.yaw, m.look, "idle", ph, 0.25);
+        L.put(m.x, m.y, m.z, m.yaw, m.look, "walk", ph, sp * rank.gaitW / (Math.PI * 2));
+      } else L.put(m.x, m.y, m.z, m.yaw, m.look, "idle", ph, 0.25);
     }
-    if (L) L.commit();
+    if (L) L.end();
     rank.shown = n;
   }
 

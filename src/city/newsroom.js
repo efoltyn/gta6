@@ -43,8 +43,10 @@
    merges them into one mesh for authored rooms (the Oval, the prison
    dayroom). Both put the same shared screen on the front.
 
-   PUBLIC: CBZ.news = { push, event, stories, current, texture, material,
-     screen, watch, tvParts, tvSet, paintNow, audit }.
+   PUBLIC: CBZ.news = { push, event, massHeadline, stories, current, texture,
+     material, screen, watch, tvParts, tvSet, paintNow, audit }.
+   MASS CASUALTIES (entities/crowdstore.js) arrive through the death ledger as
+   ONE entry carrying the count; massStory() phrases them.
 ============================================================ */
 (function () {
   "use strict";
@@ -185,8 +187,10 @@
     if (opts.key) N.keys[opts.key] = CLOCK;
     const s = {
       h: h, sub: short(opts.sub || "", 80), cat: clean(opts.cat || "").toUpperCase().slice(0, 12),
-      kind: opts.kind === "breaking" ? "breaking" : "story", look: opts.look || null, t: CLOCK, day: day(),
+      kind: opts.kind === "breaking" ? "breaking" : "story", look: opts.look || null, t: CLOCK, day: day(), tag: opts.tag || null,
     };
+    // the same running story with a new number: the old word on it goes
+    if (s.tag) for (let i = N.stories.length - 1; i >= 0; i--) if (N.stories[i].tag === s.tag) N.stories.splice(i, 1);
     N.stories.push(s);
     if (N.stories.length > 16) N.stories.shift();
     N.pushed++;
@@ -646,12 +650,71 @@
         const e = D[i];
         if (!e || e.you || !(e.t > SEEN.deathT)) continue;
         if (e.t > newest) newest = e.t;
+        if (e.mass) { massStory(e.mass); continue; }
         const c = e.cause || "unknown";
+        // a few rigs dying in the same blast as a crowd are already in its count
+        if (CLOCK - (MASS_AT[c] || -1e9) < 90) continue;
         (by[c] = by[c] || []).push(e);
       }
       for (const c in by) deathStory(c, by[c]);
       SEEN.deathT = newest;
     }
+  }
+  /* A MASS CASUALTY (entities/crowdstore.js): one event, its running count,
+     its crowd and its place, by whom. Each new count replaces the last word
+     on the same event (tag), so the bulletin says the latest number once.
+       "Bombing at Liberty Square rally kills 412, 1,130 injured"
+       "Police open fire on protesters at the Mansion: 57 dead"
+       "Nuclear strike on Keshtown: 48,000 dead"                            */
+  const MASS_AT = Object.create(null);
+  function num(n) { n = Math.round(+n || 0); return n.toLocaleString ? n.toLocaleString("en-US") : String(n); }
+  const CROWD_WORD = { rally: "rally", march: "march", protest: "protest", riot: "riot", stadium: "fight night", race: "race" };
+  function massHeadline(M) {
+    const dead = M.dead | 0, hurt = M.hurt | 0;
+    const where = M.place || null;
+    const crowdW = CROWD_WORD[M.crowd] || null;
+    // "Liberty Square rally" / "the Mansion protest" / "a rally"
+    const target = where && crowdW ? where + " " + crowdW : where ? where : crowdW ? "a " + crowdW : "a crowd";
+    const tally = hurt > 0 ? (dead > 0 ? num(dead) + " dead, " + num(hurt) + " injured" : num(hurt) + " injured") : num(dead) + " dead";
+    const kills = dead > 0 ? " kills " + num(dead) + (hurt > 0 ? ", " + num(hurt) + " injured" : "") : ", " + num(hurt) + " injured";
+    const who = M.who || (M.crowd === "rally" ? "supporters" : "protesters");
+    switch (M.family) {
+      case "nuke":
+        return "Nuclear strike on " + (M.city || where || homeCity().name) + ": " + num(dead) + " dead";
+      case "blast":
+        if (/air|missile|rocket/.test(M.cause || "")) return "Airstrike on " + target + kills;
+        return "Bombing at " + target + kills;
+      case "shooting":
+        if (M.by === "police") return "Police open fire on " + who + (where ? " at " + where : "") + ": " + tally;
+        if (M.by === "army") return (M.crowd === "rally" || M.crowd === "protest" || M.crowd === "march" || M.crowd === "riot" ? "Soldiers" : "Troops") + " open fire on " + who + (where ? " at " + where : "") + ": " + tally;
+        if (M.byPlayer) return "Gunman opens fire on " + target + ": " + tally;
+        return "Shooting at " + target + ": " + tally;
+      case "car":
+        return "Car ploughs into " + (where ? "crowd at " + where : "a crowd") + ": " + tally;
+      case "stampede":
+        return "Stampede at " + target + ": " + tally;
+      default:
+        return (where ? "Violence at " + where : "Violence in the streets") + ": " + tally;
+    }
+  }
+  function massSub(M) {
+    if (M.family === "nuke" && M.rings) {
+      const r = M.rings, close = (r[0] | 0) + (r[1] | 0) + (r[2] | 0);
+      return (M.hurt > 0 ? num(M.hurt) + " injured. " : "") + (close ? num(close) + " in the fireball's reach" : "Radiation warning for the area");
+    }
+    if (M.trampled > 0 && M.family !== "stampede") return num(M.trampled) + " hurt in the crush to get away";
+    return M.byPlayer ? "Police are looking for the attacker" : "";
+  }
+  function massStory(M) {
+    if (!M || !((M.dead | 0) + (M.hurt | 0) > 0)) return false;
+    const cause = M.family === "nuke" ? "nuclear blast" : M.family === "blast" ? (/air|missile|rocket/.test(M.cause || "") ? "airstrike" : "explosion") : M.family === "shooting" ? "gunfire" : M.family === "car" ? "car crash" : M.family;
+    MASS_AT[cause] = CLOCK; if (cause === "gunfire") MASS_AT.murder = MASS_AT.police = CLOCK; if (cause === "explosion") MASS_AT["terrorist attack"] = MASS_AT.airstrike = CLOCK;
+    const big = M.dead >= 5 || M.hurt >= 20 || M.family === "nuke";
+    return push(massHeadline(M), {
+      kind: big ? "breaking" : "story", cat: M.family === "nuke" || M.family === "blast" ? "WAR" : M.family === "car" ? "CRIME" : "NATION",
+      look: M.family === "nuke" ? "nuke" : M.family === "blast" ? "strike" : "police", sub: massSub(M),
+      key: "mass:" + M.id + ":" + M.dead + ":" + M.hurt, hold: 5, tag: "mass:" + M.id, phone: M.dead >= 50,
+    });
   }
   const DEATHS = Object.create(null);
   function deathStory(cause, list) {
@@ -1422,6 +1485,7 @@
   CBZ.news = {
     push: push,
     event: event,
+    massHeadline: massHeadline,     // the words for a crowdstore.js casualty event
     wire: wire,
     stories: function () { return N.stories.slice(); },
     current: function () { return N.cur || fallback(); },

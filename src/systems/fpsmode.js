@@ -3256,8 +3256,16 @@
       const ch = CBZ.cityCrowdRayHit(origin.x, origin.y, origin.z, dir.x, dir.y, dir.z, bestDist, hrA, brA);
       if (ch) { bestActor = null; crowdIdx = ch.i; bestDist = ch.dist; bestHead = ch.head; bestOcc = false; }
     }
-    if (!bestActor && crowdIdx < 0) return null;
-    return { actor: bestActor, crowd: crowdIdx >= 0 ? crowdIdx : null, occupant: bestOcc, dist: bestDist, head: bestHead, point: origin.clone().addScaledVector(dir, bestDist) };
+    // THE CROWDS (entities/crowdstore.js): every rally, march and grandstand
+    // is rows of the one store; a round is tested against every body's
+    // capsule through its spatial hash and competes on distance like anyone
+    let crowdRow = -1;
+    if (CBZ.crowds && CBZ.crowds.ray) {
+      const cr = CBZ.crowds.ray(origin.x, origin.y, origin.z, dir.x, dir.y, dir.z, bestDist);
+      if (cr && cr.dist < bestDist) { bestActor = null; crowdIdx = -1; crowdRow = cr.row; bestDist = cr.dist; bestHead = cr.head; bestOcc = false; }
+    }
+    if (!bestActor && crowdIdx < 0 && crowdRow < 0) return null;
+    return { actor: bestActor, crowd: crowdIdx >= 0 ? crowdIdx : null, crowdRow: crowdRow >= 0 ? crowdRow : null, occupant: bestOcc, dist: bestDist, head: bestHead, point: origin.clone().addScaledVector(dir, bestDist) };
   }
 
   // ---- ray vs the DOWNED (every game) ----------------------------------------
@@ -4047,6 +4055,16 @@
             && CBZ.goreSever && w.key === "shotgun" && hit.dist <= 5.5) {
           if (CBZ.goreSever(hit.corpse, "head", { dir: shotDir })) hit.corpse._decapped = true;
         }
+      } else if (hit.crowdRow != null) {
+        // a person in a crowd (crowdstore.js): the round lands, the people round them run
+        acc.hitSomething = true;
+        if (!w.nonlethal && CBZ.crowds) {
+          const to = CBZ.crowds.shoot(hit.crowdRow, { head: hit.head, cal: cal, byPlayer: true, cause: "gunfire", fromX: origin.x, fromZ: origin.z });
+          if (to === CBZ.crowds.DEAD) acc.down = true;
+        }
+        acc.head = acc.head || hit.head;
+        spawnImpact(hit.point, !w.nonlethal, w.key === "shotgun", cal);
+        if (!w.nonlethal && CBZ.gore && CBZ.gore.spray) CBZ.gore.spray(hit.point, hit.head ? 0.9 : 0.55, shotDir, goreOpts(hit, w, cal));
       } else if (hit.crowd != null) {
         // shot an ambient crowd member (the far NPCs that used to be unkillable)
         acc.hitSomething = true;
@@ -4262,7 +4280,7 @@
         // resolveShot always answers; a "wall:false, actor:null" answer at the
         // end of the segment is empty air and the round keeps flying.
         const struck = hit && (hit.actor || hit.wall || hit.car || hit.corpse ||
-          hit.crowd != null || hit.aircraft || hit.civilAircraft || hit.lightAir);
+          hit.crowd != null || hit.crowdRow != null || hit.aircraft || hit.civilAircraft || hit.lightAir);
         // the visible round IS the tracer: one short streak per frame along the
         // segment it actually covered, so the streak travels instead of drawing
         // the whole flight path in the frame the trigger was pulled.

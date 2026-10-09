@@ -614,11 +614,13 @@
     return G.length ? G : groups().slice(0, 2);
   }
   function crowdSize(G, stolen) {
-    // souls: every loyal group sends a share of itself, more of it the more loyal
-    const POP = 6000;          // the capital's reach on a day like this
+    // souls: every loyal group sends a share of itself, more of it the more loyal.
+    // A capital's big day is tens of thousands; the store (entities/crowdstore.js)
+    // draws as many of them as the device holds, the news counts them all.
+    const POP = 60000;         // the capital's reach on a day like this
     let n = 0;
     for (let i = 0; i < G.length; i++) n += (+G[i].share || 0.1) * POP * clamp(((G[i].loyalty || 50) - 40) / 60, 0.05, 1);
-    return Math.round(clamp(n * (stolen ? 1.6 : 1), 40, 12000));
+    return Math.round(clamp(n * (stolen ? 1.6 : 1), 400, 120000));
   }
   function slogansFor(stolen, side) {
     const sn = surname(playerName()).toUpperCase();
@@ -639,7 +641,7 @@
     const P = places().filter(function (p) { return p.id === placeId; })[0];
     if (!P || !P.at) return null;
     const me = myParty();
-    const G = loyalGroups().map(function (q) { return { name: q.name, share: q.share, color: q.color != null ? q.color : colorOf(me), cap: q.party === me.id ? 0.6 : 0.25, shirt: q.party === me.id ? 0.35 : 0.15 }; });
+    const G = loyalGroups().map(function (q) { return { id: q.id, name: q.name, share: q.share, color: q.color != null ? q.color : colorOf(me), cap: q.party === me.id ? 0.6 : 0.25, shirt: q.party === me.id ? 0.35 : 0.15 }; });
     const stolen = !!o.stolen || !!(CBZ.transfer && CBZ.transfer.state && /refused|session/.test(CBZ.transfer.state().phase || ""));
     const size = crowdSize(loyalGroups(), stolen);
     const id = CBZ.mob.form({ at: P.at, face: P.face, size: size, side: "supporters", groups: G, slogans: slogansFor(stolen, "supporters"),
@@ -664,8 +666,8 @@
     const P = places().filter(function (p) { return p.id === "mansion"; })[0];
     if (!P) return null;
     const rv = rivalParty();
-    const G = groups().filter(function (q) { return (q.loyalty || 50) < 45 || (rv && q.party === rv.id); }).map(function (q) { return { name: q.name, share: q.share, color: q.color != null ? q.color : colorOf(rv), cap: 0.2, shirt: 0.3 }; });
-    const size = Math.round(clamp((100 - approval()) * 30, 60, 6000));
+    const G = groups().filter(function (q) { return (q.loyalty || 50) < 45 || (rv && q.party === rv.id); }).map(function (q) { return { id: q.id, name: q.name, share: q.share, color: q.color != null ? q.color : colorOf(rv), cap: 0.2, shirt: 0.3 }; });
+    const size = Math.round(clamp((100 - approval()) * 300, 600, 60000));
     const sl = slogansFor(false, "opposition");
     if (why === "ban" && partyName) sl.unshift(("UNBAN THE " + polName(partyName).toUpperCase()).slice(0, 22));
     const id = CBZ.mob.form({ at: P.at, face: P.face, size: size, side: "opposition", groups: G.length ? G : [{ color: colorOf(rv), share: 1 }], slogans: sl,
