@@ -565,7 +565,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/pushables.js?v=mce86a5"></script>
 <script src="src/world/carfx.js?v=cars2"></script>
 <script src="src/world/ground.js?v=dsl3"></script>
-<script src="src/world/cellblock.js?v=jdeb1001"></script>
+<script src="src/world/cellblock.js?v=fac1009"></script>
 <script src="src/world/yard.js?v=tow929"></script>
 <script src="src/world/razorwire.js?v=dsl3"></script>
 <script src="src/world/towers.js?v=tow929"></script>
@@ -754,7 +754,7 @@ document.body.appendChild(b);}}catch(e){}})();
      warden it schedules is spawned there) and after roofs.js (it asks
      CBZ.prisonRoof for its own ceiling); BEFORE prisonschedule.js, whose
      block ids it reads at runtime. -->
-<script src="src/world/adminwing.js?v=jdeb1001"></script>
+<script src="src/world/adminwing.js?v=fac1009"></script>
 
 <!-- THE COMPOUND'S REAL SIZE (owner 2026-08-11: "the prison should be bigger…
      think of scale of human vs prison size"). 92x195 m of authored prison was
@@ -1017,7 +1017,7 @@ document.body.appendChild(b);}}catch(e){}})();
      scene; it wires itself to the bus lazily, in any script order. -->
 <script src="src/systems/lightningfx.js?v=bolt1"></script>
 <script src="src/world/island_roads.js?v=roads1"></script>
-<script src="src/world/disaster_arena.js?v=lift1-st1"></script>
+<script src="src/world/disaster_arena.js?v=fac1009"></script>
 <script src="src/world/island_dressing.js?v=dress1"></script>
 <script src="src/systems/grapple.js?v=jailv1001"></script>
 <script src="src/entities/survivorbot.js?v=m0928a-st1"></script>
@@ -1129,36 +1129,41 @@ document.body.appendChild(b);}}catch(e){}})();
      city/buildings.js, which reads CBZ.CIVIC_SHOPS and CBZ.CIVIC_ACCT_SEED at
      parse time and the bld* helpers at build time. -->
 <script src="src/city/buildings_civic.js?v=flagm1001"></script>
-<script src="src/city/buildings.js?v=seats1009b"></script>
+<!-- THE ONE WINDOW AND THE ONE DOOR: every generator's openings, wall-round-
+     the-hole rects, the facade scan + cut, the no-shared-plane pass and the
+     house numbers. Before buildings.js and world/disaster_arena.js (both build
+     with it at build time). -->
+<script src="src/city/facade_openings.js?v=fac1009"></script>
+<script src="src/city/buildings.js?v=fac1009m"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
      govcomplex.js does to this same office shell: a spec at the call site.
      Inert until a caller passes {dress:{style}} (or ?cfg_FACADE_KIT_CITY=1). -->
-<script src="src/city/facade_kit.js?v=wreal0929"></script>
-<script src="src/city/facades/brick.js?v=meshcol1"></script>
-<script src="src/city/facades/stone.js?v=fk1"></script>
+<script src="src/city/facade_kit.js?v=fac1009"></script>
+<script src="src/city/facades/brick.js?v=fac1009"></script>
+<script src="src/city/facades/stone.js?v=fac1009"></script>
 <script src="src/city/facades/mosque.js?v=fk1"></script>
-<script src="src/city/facades/artdeco.js?v=fk1"></script>
-<script src="src/city/facades/brutalist.js?v=fk1"></script>
-<script src="src/city/facades/hightech.js?v=fk1"></script>
+<script src="src/city/facades/artdeco.js?v=fac1009"></script>
+<script src="src/city/facades/brutalist.js?v=fac1009"></script>
+<script src="src/city/facades/hightech.js?v=fac1009"></script>
 <script src="src/city/facades/pagoda.js?v=fk1"></script>
-<script src="src/city/facades/gothic.js?v=fk1"></script>
+<script src="src/city/facades/gothic.js?v=fac1009"></script>
 <script src="src/city/facades/adobe.js?v=fk1"></script>
-<script src="src/city/facades/victorian.js?v=fk1"></script>
+<script src="src/city/facades/victorian.js?v=fac1009"></script>
 <!-- TOWER GRAMMARS. Same contract, written for the 40-storey end of the range
      (buildings.js's own makeMegaTower is 52 storeys / ~166m). These declare
      minStoreys so FACADE_KIT_CITY only ever hands them to real towers. -->
-<script src="src/city/facades/intl.js?v=fk2"></script>
-<script src="src/city/facades/ziggurat.js?v=fk2"></script>
-<script src="src/city/facades/sunburst.js?v=fk2"></script>
-<script src="src/city/facades/bundled.js?v=fk2"></script>
-<script src="src/city/facades/pyramid.js?v=fk2"></script>
-<script src="src/city/facades/faceted.js?v=fk2"></script>
-<script src="src/city/facades/pencil.js?v=fk2"></script>
-<script src="src/city/facades/postmodern.js?v=fk2"></script>
-<script src="src/city/facades/neogothic.js?v=fk2"></script>
-<script src="src/city/facades/megabrace.js?v=fk2"></script>
+<script src="src/city/facades/intl.js?v=fac1009"></script>
+<script src="src/city/facades/ziggurat.js?v=fac1009"></script>
+<script src="src/city/facades/sunburst.js?v=fac1009"></script>
+<script src="src/city/facades/bundled.js?v=fac1009"></script>
+<script src="src/city/facades/pyramid.js?v=fac1009"></script>
+<script src="src/city/facades/faceted.js?v=fac1009"></script>
+<script src="src/city/facades/pencil.js?v=fac1009"></script>
+<script src="src/city/facades/postmodern.js?v=fac1009"></script>
+<script src="src/city/facades/neogothic.js?v=fac1009"></script>
+<script src="src/city/facades/megabrace.js?v=fac1009"></script>
 <!-- HOUSE GRAMMARS. The same contract written for the DOMESTIC end of the range:
      every one of these owns a real roof (gable, hip, tile, turret, floating
      plane) where the shell had a parapet, and every one dresses AROUND the base
@@ -1166,17 +1171,17 @@ document.body.appendChild(b);}}catch(e){}})();
      and courses that FRAME the host glass, which is the thing the owner asked
      for. They declare maxStoreys so FACADE_KIT_CITY never hands a mansion
      grammar to a tower. -->
-<script src="src/city/facades/greekrev.js?v=fk3"></script>
+<script src="src/city/facades/greekrev.js?v=fac1009"></script>
 <script src="src/city/facades/romanvilla.js?v=fk3"></script>
 <script src="src/city/facades/spanish.js?v=fk3"></script>
-<script src="src/city/facades/manor.js?v=fk3"></script>
-<script src="src/city/facades/queenanne.js?v=fk3"></script>
-<script src="src/city/facades/plantation.js?v=fk3"></script>
+<script src="src/city/facades/manor.js?v=fac1009"></script>
+<script src="src/city/facades/queenanne.js?v=fac1009"></script>
+<script src="src/city/facades/plantation.js?v=fac1009"></script>
 <script src="src/city/facades/machiya.js?v=fk3"></script>
-<script src="src/city/facades/desertmod.js?v=fk3"></script>
-<script src="src/city/facades/techhouse.js?v=fk3"></script>
+<script src="src/city/facades/desertmod.js?v=fac1009"></script>
+<script src="src/city/facades/techhouse.js?v=fac1009"></script>
 <script src="src/city/facades/ranch.js?v=fk3"></script>
-<script src="src/city/facades/brickhouse.js?v=fk3"></script>
+<script src="src/city/facades/brickhouse.js?v=fac1009"></script>
 <script src="src/city/facade_demo.js?v=fk2"></script>
 <script src="src/city/interiormap.js?v=intmap1"></script>
 <script src="src/city/interiorlight.js?v=deslop1"></script>
@@ -1309,7 +1314,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/mil_air.js?v=mil0929"></script>
 <!-- GROUND ARMOR: tank / IFV / 8x8 / 6x6 truck / light vehicle / rocket artillery / missile launcher at real dimensions, instanced running gear + turret/launcher rigs. Before island_military (makeTank/makeTruck/makePatriot delegate to CBZ.milArmor). -->
 <script src="src/city/mil_armor.js?v=mil0929"></script>
-<script src="src/city/island_military.js?v=flagm1001"></script>
+<script src="src/city/island_military.js?v=fac1009"></script>
 <script src="src/city/biome_desert.js?v=layout2m"></script>
 <script src="src/city/biome_forest.js?v=ground1001"></script>
 <script src="src/city/biome_farmland.js?v=layout2b"></script>
@@ -1318,7 +1323,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- STRATEGIC LAYER part 1 — hardened bunkers (Fort Brandt command shelter
      w/ the nuclear vault + mountain/desert finds). Landmass order 40: after
      the military island (22) and both biome height fields (30/31). -->
-<script src="src/city/bunkers.js?v=arsenal0930"></script>
+<script src="src/city/bunkers.js?v=fac1009"></script>
 <!-- 4d-3. WILD NATURE — lush instanced trees/rocks/grass forested onto the
      far backdrop relief (world/terrain.js). Self-registers as a high-order
      landmass; runs via cityWorldGeo after terrain + biomes exist. -->
@@ -1692,7 +1697,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/camera.js?v=shouldergun2"></script>
 <script src="src/city/ragdoll.js?v=neck1001"></script>
 <script src="src/city/leaderboard.js?v=rg0929"></script>
-<script src="src/city/zillow.js?v=onebet1"></script>
+<script src="src/city/zillow.js?v=fac1009"></script>
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
 <script src="src/city/bank.js?v=verbs2b"></script>
 <script src="src/city/pawnshop.js?v=tap0929"></script>
@@ -1712,7 +1717,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/fitout.js?v=seats1009b"></script>
 <script src="src/city/fitout_plans.js?v=news0930"></script>
 <script src="src/city/fitout_work.js?v=news0930"></script>
-<script src="src/city/fitout_gang.js?v=news0930"></script>
+<script src="src/city/fitout_gang.js?v=fac1009"></script>
 <script src="src/city/family.js?v=ekey2"></script>
 <script src="src/city/swim.js?v=sharkmode1"></script>
 <!-- TSUNAMI. The whole event is one number — the sea-level surge in
@@ -1761,7 +1766,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- THE COUNTRYSIDE (layout wave 2): farms, roadside houses and the gas stop + diner at each country-road
      junction, planned from the zoning field; metro.js streams it through the fabric tiles. -->
 <script src="src/city/countryside.js?v=layout2b"></script>
-<script src="src/city/metro_fabric.js?v=pf0930q"></script>
+<script src="src/city/metro_fabric.js?v=fac1009"></script>
 <!-- REAL GRASS (owner: "when you walk on grass it's just fucking green"): instanced lit blades round
      the camera on every grass surface, fed by CBZ.groundCover (the ONE land-use + ground-colour
      query: cityground 10, metro_ground 20, continent 90 register into it, so it loads before them). -->
@@ -1801,7 +1806,7 @@ document.body.appendChild(b);}}catch(e){}})();
      persistence and net worth work with zero new save code. After storage.js
      — CBZ.cityBerth wraps citySpawnOwnedCar so every existing retrieval path
      became water-aware without a caller changing. -->
-<script src="src/city/marina.js?v=flagm1001"></script>
+<script src="src/city/marina.js?v=fac1009"></script>
 <script src="src/city/boatyard.js?v=cd0929"></script>
 <!-- THE APPROACH: how you get IN and OUT of a property. Every block in the
      city was ringed by an UNBROKEN kerb and every home's retrieved car was
@@ -2151,7 +2156,7 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.addLandmass so load order isn't strictly load-bearing today, but
      this keeps the "assets define before buildTown reads them" contract
      honest for any future eager caller. -->
-<script src="src/city/villagekit.js?v=w0929town"></script>
+<script src="src/city/villagekit.js?v=fac1009"></script>
 <script src="src/city/countries.js?v=arsenal0930"></script>
 <!-- REAL CASINOS — order-90 dress pass over every casino lot (mainland Golden
      Ace + composed town casinos): marquee/mast exterior, felt tables with
@@ -2337,7 +2342,7 @@ document.body.appendChild(b);}}catch(e){}})();
      staffs itself through power.js's protection layer rather than authoring
      guards. After power.js and the biome/continent builders whose empty land
      it claims. Revert with ?cfg_GOV_COMPLEX=0. -->
-<script src="src/city/govcomplex.js?v=maplabels1009"></script>
+<script src="src/city/govcomplex.js?v=fac1009m"></script>
 
 <!-- THE PRESIDENCY — one spine over organs built above: the President origin
      (candidacy's swearIn fast-forward), the Situation Room inside govcomplex's
@@ -2533,7 +2538,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/street_furniture.js?v=deslop1"></script>
 <script src="src/world/world_grime.js?v=detail1"></script>
 <script src="src/world/building_dress.js?v=roof1-st1"></script>
-<script src="src/core/farcull.js?v=pf0930l"></script>
+<script src="src/core/farcull.js?v=fac1009"></script>
 <!-- whole-building frustum hide before every draw (exact: view frustum + sun shadow frustum); also owns CBZ.subtreeSphere, which city/cctv.js's feed scope reuses -->
 <script src="src/core/viewscope.js?v=w09290242x"></script>
 <script src="src/core/losgrid.js?v=lg1"></script>

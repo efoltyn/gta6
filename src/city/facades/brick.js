@@ -63,7 +63,7 @@
       const stone = F.mix(0xd9d3bf, base, 0.14);
       const stoneD = F.shade(stone, 0.88);
       const iron = 0x2c3036;
-      const glass = 0x1c2630;
+      const glass = F.glass(ctx, 0x1c2630);
 
       // ---- the structural grid -----------------------------------
       // one bay per ~3.6 m of face, so bay width stays near-constant while the

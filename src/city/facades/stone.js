@@ -108,7 +108,7 @@
       const LIME = F.mix(ctx.color, 0xf2ece0, 0.55);
       const PALE = F.mix(LIME, 0xfffaf0, 0.22);      // cornice / capitals catch light
       const DEEP = F.shade(LIME, 0.58);              // rustication grooves
-      const GLASS = F.mix(0x161c24, LIME, 0.10);     // reveals: the darkest thing here
+      const GLASS = F.glass(ctx, F.mix(0x161c24, LIME, 0.10));     // reveals: the darkest thing here
 
       // ---------------- the three-part split ----------------
       // Solved top-down from the roofline, per the header. Nothing below is a

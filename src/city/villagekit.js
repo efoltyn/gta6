@@ -107,7 +107,7 @@
       if (CBZ.colliders) CBZ.colliders.push({ minX: minX, maxX: maxX, minZ: minZ, maxZ: maxZ, y0: 0, y1: y1, ref: g });
     };
     if (!v2On()) { push(wx - fhx, wx + fhx, wz - fhz, wz + fhz); return; }  // legacy solid
-    const tw = 0.35, gap = 0.78;
+    const tw = 0.35, gap = HUT_DOOR_W / 2;
     const k = (((Math.round((ctx.rot || 0) / (Math.PI / 2)) % 4) + 4) % 4);  // 0..3
     const gapSide = ["S", "W", "N", "E"][k];   // local -Z door, rotated into world
     function wallZ(sign, split) {               // N(+Z)/S(-Z) wall spanning X
@@ -122,9 +122,6 @@
     }
     wallZ(1, gapSide === "N"); wallZ(-1, gapSide === "S");
     wallX(1, gapSide === "E"); wallX(-1, gapSide === "W");
-    // doorway accent (local -Z → rides the group's rotation onto the gap side)
-    const doorway = new THREE.Mesh(new THREE.BoxGeometry(gap * 2, y1 * 0.7, 0.08), cmat(0x1a140e));
-    doorway.position.set(0, y1 * 0.35, -fhz + 0.05); g.add(doorway);
     // A MADE BEDROLL at the hut centre — the reason a hut is a HOME, not a box.
     // Same three colours the hut already uses (no new material), same 1.9 lie
     // axis, same 0.20 top, plus the two lines that make bedding read as
@@ -166,6 +163,102 @@
     if (CBZ.propRegisterBed) CBZ.propRegisterBed(wx, 0, wz, HD[0], HD[1], 1.9, 0.2, "bedroll", null);
   }
 
+  /* ---- A HUT IS A ROOM WITH A DOOR ------------------------------------
+     The huts were SOLID: a box or a cylinder you walked into through a
+     collider gap, with a dark slab floating 20-30 cm in front of the wall as
+     "the door". Now each one is built as walls round real openings (the
+     same solid-minus-holes rects every city wall is built from,
+     city/facade_openings.js): a doorway on local -Z with a timber frame and a
+     plank door hooked open inside, and a window on local +X with a frame and
+     a shutter hung open beside it. Parts are {geo, color} so build() (per
+     instance, varied colours) and geom() (the one-mesh pool path) share it. */
+  const HUT_DOOR_W = 1.0, HUT_T = 0.2;
+  const TIMBER = 0x4f3b28, PLANK = 0x6b5034;
+  function hutBox(parts, x0, x1, y0, y1, z0, z1, color) {
+    if (x1 - x0 < 0.01 || y1 - y0 < 0.01 || z1 - z0 < 0.01) return;
+    const g = new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0);
+    g.translate((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+    parts.push({ geo: g, color: color });
+  }
+  function rectsMinus(a0, a1, y0, y1, holes) {
+    const FO = CBZ.facadeOpenings;
+    if (FO) return FO.solidRects(a0, a1, y0, y1, holes);
+    return [[a0, a1, y0, y1]];
+  }
+  function boxHutParts(W, D, H, wall) {
+    const parts = [], T = HUT_T;
+    const DW = HUT_DOOR_W, DH = Math.min(1.85, H - 0.2);
+    const WW = 0.7, WY0 = 0.95, WY1 = Math.min(1.5, H - 0.35);
+    // front (-Z): the doorway
+    for (const r of rectsMinus(-W / 2, W / 2, 0, H, [{ a0: -DW / 2, a1: DW / 2, y0: -1, y1: DH }]))
+      hutBox(parts, r[0], r[1], r[2], r[3], -D / 2, -D / 2 + T, wall);
+    // back (+Z): solid
+    hutBox(parts, -W / 2, W / 2, 0, H, D / 2 - T, D / 2, wall);
+    // left (-X): solid, between the front and back walls
+    hutBox(parts, -W / 2, -W / 2 + T, 0, H, -D / 2 + T, D / 2 - T, wall);
+    // right (+X): the window
+    for (const r of rectsMinus(-D / 2 + T, D / 2 - T, 0, H, [{ a0: -WW / 2, a1: WW / 2, y0: WY0, y1: WY1 }]))
+      hutBox(parts, W / 2 - T, W / 2, r[2], r[3], r[0], r[1], wall);
+    // the door frame (inside the opening, 1 cm in from both wall faces) and lintel
+    const zi0 = -D / 2 + 0.01, zi1 = -D / 2 + T - 0.01;
+    hutBox(parts, -DW / 2, -DW / 2 + 0.07, 0, DH, zi0, zi1, TIMBER);
+    hutBox(parts, DW / 2 - 0.07, DW / 2, 0, DH, zi0, zi1, TIMBER);
+    hutBox(parts, -DW / 2, DW / 2, DH - 0.09, DH, zi0, zi1, TIMBER);
+    // the plank door, hooked open against the inside of the wall beside the opening
+    const lw = DW - 0.14;
+    hutBox(parts, -DW / 2 - lw - 0.02, -DW / 2 - 0.02, 0.04, DH - 0.12, -D / 2 + T + 0.01, -D / 2 + T + 0.06, PLANK);
+    hutBox(parts, -DW / 2 - lw + 0.08, -DW / 2 - 0.12, DH * 0.62, DH * 0.62 + 0.1, -D / 2 + T + 0.06, -D / 2 + T + 0.085, TIMBER);
+    // the window frame and its shutter, hung open on the wall beside it
+    const xi0 = W / 2 - T + 0.01, xi1 = W / 2 - 0.01;
+    hutBox(parts, xi0, xi1, WY0, WY0 + 0.06, -WW / 2, WW / 2, TIMBER);
+    hutBox(parts, xi0, xi1, WY1 - 0.06, WY1, -WW / 2, WW / 2, TIMBER);
+    hutBox(parts, xi0, xi1, WY0 + 0.06, WY1 - 0.06, -WW / 2, -WW / 2 + 0.06, TIMBER);
+    hutBox(parts, xi0, xi1, WY0 + 0.06, WY1 - 0.06, WW / 2 - 0.06, WW / 2, TIMBER);
+    hutBox(parts, W / 2, W / 2 + 0.04, WY0 + 0.02, WY1 - 0.02, WW / 2 + 0.04, WW / 2 + 0.04 + WW * 0.55, PLANK);
+    // a stone step at the door
+    hutBox(parts, -DW / 2 - 0.15, DW / 2 + 0.15, -0.2, 0.08, -D / 2 - 0.4, -D / 2, 0x8f8a80);
+    return parts;
+  }
+  // the rondavel: an outer and an inner wall surface with the door's arc left
+  // out, jambs closing the gap, a timber lintel and the wall carried over it
+  function roundHutParts(R0, R1, H, wall) {
+    const parts = [];
+    const r = (R0 + R1) / 2, DW = HUT_DOOR_W, DH = Math.min(1.85, H - 0.25);
+    const gap = 2 * Math.asin(Math.min(0.95, (DW / 2) / r));
+    const t0 = Math.PI + gap / 2, tl = Math.PI * 2 - gap;
+    const outer = new THREE.CylinderGeometry(R0, R1, H, 16, 1, true, t0, tl); outer.translate(0, H / 2, 0);
+    parts.push({ geo: outer, color: wall });
+    const inner = new THREE.CylinderGeometry(R0 - HUT_T, R1 - HUT_T, H, 16, 1, true, t0, tl); inner.translate(0, H / 2, 0);
+    // the inner surface faces into the room: flip its winding and normals
+    const idx = inner.index.array;
+    for (let i = 0; i < idx.length; i += 3) { const k = idx[i + 1]; idx[i + 1] = idx[i + 2]; idx[i + 2] = k; }
+    const nr = inner.attributes.normal.array;
+    for (let i = 0; i < nr.length; i++) nr[i] = -nr[i];
+    parts.push({ geo: inner, color: wall });
+    // the jambs: wall-thick returns at each edge of the gap, as boxes on the chord
+    const zc = -Math.cos(gap / 2) * r;
+    for (const sg of [-1, 1]) {
+      const xc = sg * Math.sin(gap / 2) * r;
+      hutBox(parts, xc - 0.11, xc + 0.11, 0, H, zc - HUT_T / 2 - 0.02, zc + HUT_T / 2 + 0.02, wall);
+      hutBox(parts, xc - sg * 0.17 - 0.035, xc - sg * 0.17 + 0.035, 0, DH, zc - HUT_T / 2 + 0.01, zc + HUT_T / 2 - 0.01, TIMBER);
+    }
+    // over the door: the lintel, and the wall carried up to the eave
+    const cw = 2 * Math.sin(gap / 2) * r;
+    hutBox(parts, -cw / 2, cw / 2, DH - 0.09, DH, zc - HUT_T / 2 + 0.01, zc + HUT_T / 2 - 0.01, TIMBER);
+    hutBox(parts, -cw / 2 - 0.05, cw / 2 + 0.05, DH, H, zc - HUT_T / 2 - 0.02, zc + HUT_T / 2 + 0.02, wall);
+    // the plank door hooked open inside
+    const lw = DW - 0.2;
+    hutBox(parts, -cw / 2 + 0.1, -cw / 2 + 0.15, 0.04, DH - 0.12, zc + HUT_T / 2 + 0.03, zc + HUT_T / 2 + 0.03 + lw, PLANK);
+    hutBox(parts, -DW / 2 - 0.15, DW / 2 + 0.15, -0.2, 0.08, zc - HUT_T / 2 - 0.42, zc - HUT_T / 2 - 0.02, 0x8f8a80);
+    return parts;
+  }
+  function addParts(g, parts) {
+    for (const p of parts) {
+      const m = new THREE.Mesh(p.geo, cmat(p.color));
+      m.castShadow = true; m.receiveShadow = true; g.add(m);
+    }
+  }
+
   // ============================================================
   //  ASSETS — real geometry, real colliders, modest poly counts, all
   //  build(ctx) deterministic off ctx.rng (owner rule #5 — no
@@ -180,16 +273,14 @@
     instanceable: true, noCollide: true,
     geom: function () {
       const wallH = 2.3, roofH = 1.7;
-      const wall = new THREE.CylinderGeometry(1.55, 1.8, wallH, 10); wall.translate(0, wallH / 2, 0);
       const roof = new THREE.ConeGeometry(2.15, roofH, 10); roof.translate(0, wallH + roofH / 2 - 0.05, 0);
-      return paintMerge([{ geo: wall, color: MUD[0] }, { geo: roof, color: THATCH[0] }]);
+      return paintMerge(roundHutParts(1.55, 1.8, wallH, MUD[0]).concat([{ geo: roof, color: THATCH[0] }]));
     },
     material: function () { return vcMat(); },
     build: function (ctx) {
       const r = ctx.rng || Math.random, s = ctx.scale || 1, g = ctx.group;
       const wallH = 2.3 * s;
-      const wall = new THREE.Mesh(new THREE.CylinderGeometry(1.55 * s, 1.8 * s, wallH, 10), cmat(pick(MUD, r)));
-      wall.position.y = wallH / 2; wall.castShadow = true; wall.receiveShadow = true; g.add(wall);
+      addParts(g, roundHutParts(1.55 * s, 1.8 * s, wallH, pick(MUD, r)));
       const roofH = 1.7 * s;
       const roof = new THREE.Mesh(new THREE.ConeGeometry(2.15 * s, roofH, 10), cmat(pick(THATCH, r)));
       roof.position.y = wallH + roofH / 2 - 0.05; roof.castShadow = true; g.add(roof);
@@ -203,16 +294,14 @@
     footprint: { hx: 2.0, hz: 2.0 }, clearance: 0.4, y1: 2.6, zone: "village",
     instanceable: true, noCollide: true,
     geom: function () {
-      const wall = new THREE.BoxGeometry(3.3, 2.1, 3.3); wall.translate(0, 1.05, 0);
       const roof = new THREE.BoxGeometry(3.8, 0.22, 3.8); roof.translate(0, 2.1 + 0.11, 0);
-      return paintMerge([{ geo: wall, color: ADOBE[0] }, { geo: roof, color: CORR[0] }]);
+      return paintMerge(boxHutParts(3.3, 3.3, 2.1, ADOBE[0]).concat([{ geo: roof, color: CORR[0] }]));
     },
     material: function () { return vcMat(); },
     build: function (ctx) {
       const r = ctx.rng || Math.random, s = ctx.scale || 1, g = ctx.group;
       const wallH = 2.1 * s;
-      const wall = new THREE.Mesh(new THREE.BoxGeometry(3.3 * s, wallH, 3.3 * s), cmat(pick(ADOBE, r)));
-      wall.position.y = wallH / 2; wall.castShadow = true; wall.receiveShadow = true; g.add(wall);
+      addParts(g, boxHutParts(3.3 * s, 3.3 * s, wallH, pick(ADOBE, r)));
       const roof = new THREE.Mesh(new THREE.BoxGeometry(3.8 * s, 0.22 * s, 3.8 * s), cmat(pick(CORR, r)));
       roof.position.y = wallH + 0.11 * s; roof.castShadow = true; g.add(roof);
       hutInterior(ctx, 2.0, 2.0, 2.6);
@@ -225,16 +314,14 @@
     footprint: { hx: 1.8, hz: 1.8 }, clearance: 0.35, y1: 2.5, zone: "village",
     instanceable: true, noCollide: true,
     geom: function () {
-      const wall = new THREE.BoxGeometry(3.0, 2.0, 3.0); wall.translate(0, 1.0, 0);
       const roof = new THREE.BoxGeometry(3.4, 0.16, 3.4); roof.rotateX(0.16); roof.translate(0, 2.15, 0);
-      return paintMerge([{ geo: wall, color: WOODW[0] }, { geo: roof, color: CORR[1] }]);
+      return paintMerge(boxHutParts(3.0, 3.0, 2.0, WOODW[0]).concat([{ geo: roof, color: CORR[1] }]));
     },
     material: function () { return vcMat(); },
     build: function (ctx) {
       const r = ctx.rng || Math.random, s = ctx.scale || 1, g = ctx.group;
       const wallH = 2.0 * s;
-      const wall = new THREE.Mesh(new THREE.BoxGeometry(3.0 * s, wallH, 3.0 * s), cmat(pick(WOODW, r)));
-      wall.position.y = wallH / 2; wall.castShadow = true; wall.receiveShadow = true; g.add(wall);
+      addParts(g, boxHutParts(3.0 * s, 3.0 * s, wallH, pick(WOODW, r)));
       // single-slope (lean-to) roof: tilt one axis so it reads high-to-low.
       const roof = new THREE.Mesh(new THREE.BoxGeometry(3.4 * s, 0.16 * s, 3.4 * s), cmat(pick(CORR, r)));
       roof.position.y = wallH + 0.15 * s; roof.rotation.x = 0.16; roof.castShadow = true; g.add(roof);

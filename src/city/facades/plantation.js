@@ -167,7 +167,7 @@
       const ROOF = F.shade(F.mix(0x4a4f4a, ctx.color, 0.14), 0.60);
       const ROOFL = F.mix(ROOF, 0xfdfdf6, 0.10);
       const BRICK = F.shade(F.mix(0x8d5238, ctx.color, 0.16), 0.88);
-      const GLASS = F.mix(0x18202a, WALL, 0.10);
+      const GLASS = F.glass(ctx, F.mix(0x18202a, WALL, 0.10));
 
       // ============================================================
       //  2. THE SOLVE — top-down from the roofline, per the kit's rule

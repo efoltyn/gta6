@@ -1467,11 +1467,12 @@
      "lit:HEX:EI" (an emissive lamp face — rationed: a handful per object).
      A textured material is the one thing core/batch.js cannot merge, so the
      merge is done here: an outbuilding is a few draws, not a hundred. */
-  function Kit() { this.g = new Map(); }
+  function Kit() { this.g = new Map(); this.seq = 0; }
   Kit.prototype.add = function (key, g) {
     let l = this.g.get(key);
     if (!l) this.g.set(key, (l = []));
     l.push(g);
+    g.userData.kitSeq = this.seq++;
     return g;
   };
   Kit.prototype.box = function (key, x, y, z, w, h, d, ry, rz, rx) {
@@ -1481,6 +1482,9 @@
     if (rz) g.rotateZ(rz);
     if (ry) g.rotateY(ry);
     g.translate(x, y, z);
+    // an axis-aligned box keeps its numbers, so the flush can keep it out of
+    // any other colour's plane (city/facade_openings.js resolveCoplanar)
+    if (!rx && !rz && !ry) g.userData.kitBox = [x, y, z, w, h, d];
     return this.add(key, g);
   };
   // a prototype geometry, scaled / yawed / placed (the source is not touched)
@@ -1489,6 +1493,11 @@
     if (sx != null) g.scale(sx, sy == null ? sx : sy, sz == null ? sx : sz);
     if (ry) g.rotateY(ry);
     g.translate(x, y, z);
+    // a shaped part (a baluster, an urn) cannot be moved: its bounds are a
+    // fixed plane the boxes round it keep out of
+    g.computeBoundingBox();
+    const bb = g.boundingBox;
+    g.userData.kitFixed = [bb.min.x, bb.max.x, bb.min.y, bb.max.y, bb.min.z, bb.max.z];
     return this.add(key, g);
   };
   function boxUV(g, tile) {
@@ -1506,8 +1515,38 @@
   function paneMat() {
     return _paneM || (_paneM = new THREE.MeshLambertMaterial({ color: 0x9db4c2, emissive: 0x1a2630, transparent: true, opacity: 0.3, depthWrite: false }));
   }
-  Kit.prototype.flush = function (parent, name) {
+  Kit.prototype.flush = function (parent, name, fixed) {
     const out = [];
+    /* NO TWO COLOURS IN ONE PLANE. Every axis-aligned box of every colour, in
+       the order it was laid; where two colours' faces share a plane over an
+       overlap the earlier one steps back (the flicker on the house's
+       balustrades, cornices and rustication was exactly that tie). */
+    if (CBZ.facadeOpenings) {
+      const recs = [], refs = [], fixedAll = (fixed || []).slice();
+      this.g.forEach(function (list, key) {
+        for (let i = 0; i < list.length; i++) {
+          const g = list[i], kb = g.userData.kitBox;
+          if (g.userData.kitFixed) fixedAll.push(g.userData.kitFixed);
+          if (!kb) continue;
+          recs.push([kb[0], kb[1], kb[2], kb[3], kb[4], kb[5], String(key), g.userData.kitSeq]);
+          refs.push({ list: list, i: i });
+        }
+      });
+      const order = recs.map(function (r, k) { return k; }).sort(function (a, b) { return recs[a][7] - recs[b][7]; });
+      const sorted = order.map(function (k) { return recs[k]; });
+      const before = sorted.map(function (r) { return r.slice(0, 6).join(","); });
+      if (CBZ.facadeOpenings.resolveCoplanar(sorted, fixedAll.length ? fixedAll : null)) {
+        for (let q = 0; q < order.length; q++) {
+          const r = sorted[q];
+          if (r.slice(0, 6).join(",") === before[q]) continue;
+          const ref = refs[order[q]];
+          const ng = new THREE.BoxGeometry(r[3], r[4], r[5]);
+          ng.translate(r[0], r[1], r[2]);
+          ref.list[ref.i].dispose();
+          ref.list[ref.i] = ng;
+        }
+      }
+    }
     this.g.forEach(function (list, key) {
       const geo = mergeGeos(list);
       for (const g of list) g.dispose();
@@ -2821,7 +2860,7 @@
     if (triI.length) instances(G, PG.tri, cm(TRIM), triI);
     if (segI.length) instances(G, PG.seg, cm(TRIM), segI);
     if (bals.length) instances(G, balusterGeo(), cm(TRIM), bals, false);
-    kit.flush(G, "house");
+    kit.flush(G, "house", b.fixedPlanes || null);   // the shell's walls, slabs and parapet: planes the dressing may not share
     return info;
   }
   let _potG = null;

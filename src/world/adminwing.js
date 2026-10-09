@@ -430,7 +430,12 @@
   (function quartersWindow() {
     const pane = addBox(12.9, 1.8, -63.62, 3.0, 1.3, 0.08, 0xbfe9f7, { cast: false });
     pane.material.transparent = true; pane.material.opacity = 0.62;
-    addBox(12.9, 1.8, -63.6, 3.16, 1.46, 0.05, 0x3a3f46, { cast: false });           // frame
+    // the frame is a FRAME (head, sill rail, jambs) round the pane, not a slab
+    // laid 5 mm over it (it hid the glass and fought it for the same pixels)
+    addBox(12.9, 2.49, -63.6, 3.16, 0.08, 0.05, 0x3a3f46, { cast: false });
+    addBox(12.9, 1.115, -63.6, 3.16, 0.07, 0.05, 0x3a3f46, { cast: false });
+    addBox(11.36, 1.8, -63.6, 0.08, 1.3, 0.05, 0x3a3f46, { cast: false });
+    addBox(14.44, 1.8, -63.6, 0.08, 1.3, 0.05, 0x3a3f46, { cast: false });
     addBox(12.9, 1.1, -63.5, 3.2, 0.05, 0.2, 0xd8d2c4, { cast: false });             // sill
     for (let i = 0; i < 5; i++) addBox(11.7 + i * 0.6, 1.8, -63.45, 0.05, 1.3, 0.05, 0x2a2f38, { cast: false });
   })();

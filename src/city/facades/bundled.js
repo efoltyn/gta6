@@ -98,7 +98,7 @@
       const SPAND = F.mix(0x0c0d0f, HOST, 0.05);   // spandrel under every band
       const FIN = 0x080909;                        // fins and parapets: darkest solid
       const SLOT = 0x030304;                       // the tube joint, darker still
-      const GLASS = F.mix(0x3a2a16, HOST, 0.07);   // bronze-tinted vision glass
+      const GLASS = F.glass(ctx, F.mix(0x3a2a16, HOST, 0.07));   // bronze-tinted vision glass
       const LOUV = F.mix(0x1e2126, HOST, 0.05);    // mechanical louvres
       const CAP = F.mix(0x2f333a, HOST, 0.04);     // copings catching sky
 

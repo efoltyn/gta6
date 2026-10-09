@@ -1162,8 +1162,11 @@
           }
         }
         // the glazed door to the quay (+x face), with a canopy
+        // the door's frame is a FRAME round the glass (head + jambs), not a
+        // slab laid 5 mm behind the pane fighting it for the same pixels
         pane.push(K.put(new THREE.BoxGeometry(0.05, 2.2, 1.1), hx + 4.06, Y + 1.1 + 0.35, hz));
-        trim.push(K.put(new THREE.BoxGeometry(0.1, 2.35, 1.3), hx + 4.03, Y + 1.2 + 0.35, hz));
+        trim.push(K.put(new THREE.BoxGeometry(0.1, 0.1, 1.3), hx + 4.03, Y + 1.1 + 0.35 + 1.15, hz));
+        for (const sg of [-1, 1]) trim.push(K.put(new THREE.BoxGeometry(0.1, 2.3, 0.1), hx + 4.03, Y + 1.1 + 0.35 + 0.05, hz + sg * 0.6));
         metal.push(K.put(new THREE.BoxGeometry(1.1, 0.08, 1.8), hx + 4.55, Y + 3.0, hz));
         // signal mast: tapered round spar, a yard, halyards, the ensign
         const mx = hx + 3.4, mz = hz - 2.4, m0 = Y + 6.2;

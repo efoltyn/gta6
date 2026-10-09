@@ -127,6 +127,7 @@
   // proxy is already present. Nothing is invented: position, footprint and
   // height all come from the live lot.building record.
   let proxyArena = null, proxyMesh = null, proxyRecords = [];
+  const winU = { uWinNight: { value: 0 } };
   const proxyDummy = new THREE.Object3D();
   const proxyColor = new THREE.Color();
 
@@ -177,7 +178,7 @@
       seen.add(b.group);
       const x = Number.isFinite(b.ox) ? b.ox : ((lot && +lot.cx) || 0);
       const z = Number.isFinite(b.oz) ? b.oz : ((lot && +lot.cz) || 0);
-      proxyRecords.push({ lot, grp: b.group, x, z, w, d, h, r: Math.hypot(w, d) * 0.5, shown: false, wall: b.wallColor });
+      proxyRecords.push({ lot, grp: b.group, x, z, w, d, h, r: Math.hypot(w, d) * 0.5, shown: false, wall: b.wallColor, pat: b.facadePattern || null });
     }
     if (!proxyRecords.length) { proxyArena = A; return; }
 
@@ -186,7 +187,78 @@
     // multiplies every instance colour by the attribute's default (0,0,0):
     // every distant downtown and town building drew BLACK. instanceColor
     // needs no flag (USE_INSTANCING_COLOR is set by the InstancedMesh itself).
+    /* THE SAME WINDOWS AT EVERY DISTANCE (owner: "near and far must look the
+       same"). Every shell publishes the rhythm of the openings it actually cut
+       (city/facade_openings.js FO.pattern: per face the openings per storey,
+       the extent they occupy, the share of it they glaze, sill and head in
+       the storey); the proxy box paints exactly that rhythm per pixel: glass
+       where the near shell has glass, wall where it has wall, lit rooms at
+       night. Three instance attributes and a few lines of shader; one draw. */
+    const nP = proxyRecords.length;
+    const aWinA = new Float32Array(nP * 4), aWinB = new Float32Array(nP * 4), aWinC = new Float32Array(nP * 4);
+    for (let i = 0; i < nP; i++) {
+      const R = proxyRecords[i], P = R.pat;
+      if (!P || !P.faces) continue;
+      // faces 0/1 run along x (width w), faces 2/3 along z (depth d)
+      const pair = function (A, B, span, o) {
+        const L = [A, B].filter(function (f) { return f && f.n > 0 && f.t1 > f.t0; });
+        if (!L.length) return;
+        let n = 0, t0 = 0, t1 = 0, fr = 0;
+        for (const f of L) { n += f.n; t0 += f.t0; t1 += f.t1; fr += f.frac * span / Math.max(0.1, f.t1 - f.t0); }
+        n /= L.length; t0 /= L.length; t1 /= L.length; fr /= L.length;
+        aWinA[i * 4 + o] = Math.max(1, Math.round(n)); aWinA[i * 4 + o + 1] = Math.min(0.98, fr);
+        aWinC[i * 4 + o] = (t0 + span / 2) / span; aWinC[i * 4 + o + 1] = (t1 + span / 2) / span;
+      };
+      pair(P.faces[0], P.faces[1], R.w, 0);
+      pair(P.faces[2], P.faces[3], R.d, 2);
+      let sl = 0, hd = 0, c = 0;
+      for (const f of P.faces) if (f && f.n > 0) { sl += f.sill; hd += f.head; c++; }
+      aWinB[i * 4] = c ? sl / c : 0; aWinB[i * 4 + 1] = c ? hd / c : 0;
+      aWinB[i * 4 + 2] = c ? (P.fh || 3.2) : 0; aWinB[i * 4 + 3] = P.storeys || 1;
+    }
+    geo.setAttribute("aWinA", new THREE.InstancedBufferAttribute(aWinA, 4));
+    geo.setAttribute("aWinB", new THREE.InstancedBufferAttribute(aWinB, 4));
+    geo.setAttribute("aWinC", new THREE.InstancedBufferAttribute(aWinC, 4));
     const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, fog: true });
+    mat.onBeforeCompile = function (sh) {
+      sh.uniforms.uWinNight = winU.uWinNight;
+      sh.vertexShader = sh.vertexShader
+        .replace("#include <common>", "#include <common>\nattribute vec4 aWinA;\nattribute vec4 aWinB;\nattribute vec4 aWinC;\nvarying vec4 vWinA;\nvarying vec4 vWinB;\nvarying vec4 vWinC;\nvarying vec3 vWinT;")
+        .replace("#include <project_vertex>", [
+          "#include <project_vertex>",
+          "vWinA = aWinA; vWinB = aWinB; vWinC = aWinC;",
+          // across the face 0..1 (x for faces along x, z for faces along z),
+          // metres above the ground, and which way the face looks
+          "vWinT = vec3( position.x + 0.5, ( instanceMatrix * vec4( position, 1.0 ) ).y, abs( normal.z ) > 0.5 ? 1.0 : ( abs( normal.x ) > 0.5 ? 2.0 : 0.0 ) );",
+          "if ( vWinT.z > 1.5 ) vWinT.x = position.z + 0.5;",
+        ].join("\n"));
+      sh.fragmentShader = sh.fragmentShader
+        .replace("#include <common>", "#include <common>\nuniform float uWinNight;\nvarying vec4 vWinA;\nvarying vec4 vWinB;\nvarying vec4 vWinC;\nvarying vec3 vWinT;\nfloat winH( vec2 p ) { return fract( sin( dot( p, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 ); }")
+        .replace("#include <color_fragment>", [
+          "#include <color_fragment>",
+          "vec3 winEmit = vec3( 0.0 );",
+          "if ( vWinB.z > 0.5 && vWinT.z > 0.5 ) {",
+          "  bool xf = vWinT.z < 1.5;",
+          "  float n = xf ? vWinA.x : vWinA.z, fr = xf ? vWinA.y : vWinA.w;",
+          "  float a0 = xf ? vWinC.x : vWinC.z, a1 = xf ? vWinC.y : vWinC.w;",
+          "  float tn = vWinT.x;",
+          "  if ( n > 0.5 && tn > a0 && tn < a1 ) {",
+          "    float fh = vWinB.z;",
+          "    float k = floor( vWinT.y / fh ), cy = vWinT.y - k * fh;",
+          "    float u = ( tn - a0 ) / max( 1e-3, a1 - a0 ) * n;",
+          "    float bay = fract( u );",
+          "    float win = step( abs( bay - 0.5 ), clamp( fr, 0.05, 0.98 ) * 0.5 ) * step( vWinB.x, cy ) * step( cy, vWinB.y ) * step( 0.0, k ) * step( k, vWinB.w - 1.0 );",
+          "    if ( win > 0.5 ) {",
+          "      diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.15, 0.19, 0.23 ), 0.86 );",
+          "      float h = winH( vec2( floor( u ) + vWinT.z * 31.0, k + n * 7.0 + a0 * 13.0 ) );",
+          "      winEmit = vec3( 1.0, 0.78, 0.48 ) * step( h, 0.28 ) * uWinNight * 0.85;",
+          "    }",
+          "  }",
+          "}",
+        ].join("\n"))
+        .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\ntotalEmissiveRadiance += winEmit;");
+    };
+    mat.customProgramCacheKey = function () { return "cbz-far-windows"; };
     proxyMesh = new THREE.InstancedMesh(geo, mat, proxyRecords.length);
     proxyMesh.name = "real-building-distance-lod";
     proxyMesh.userData.dynamic = true;       // batch/farcull must not consume its one draw
@@ -248,6 +320,7 @@
       proxyMesh.setMatrixAt(i, proxyDummy.matrix);
     }
     proxyMesh.visible = !!R;
+    winU.uWinNight.value = CBZ.nightAmount == null ? 0 : Math.max(0, Math.min(1, CBZ.nightAmount));
     if (dirty) proxyMesh.instanceMatrix.needsUpdate = true;
     CBZ.realBuildingLOD = { total: proxyRecords.length, visible, drawCalls: visible ? 1 : 0, detailRadius: R };
   }

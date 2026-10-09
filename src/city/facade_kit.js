@@ -162,6 +162,18 @@
   // would guarantee ten subtly different bugs.
   const F = {};
 
+  // ---- glass --------------------------------------------------
+  // A GRAMMAR SAYS WHICH OF ITS COLOURS IS GLASS. The boxes it paints in a
+  // declared glass colour mark where its windows are: the host turns each one
+  // into a REAL opening (city/facade_openings.js: the wall built round it, a
+  // framed pane set back in the reveal) and never draws the painted panel.
+  // Guessing glass from a colour's darkness misses a bronze or a blue-silver
+  // vision glass and takes a dark iron mullion for a window; the author knows.
+  F.glass = function (ctx, hex) {
+    (ctx.__glass || (ctx.__glass = new Set())).add(hex >>> 0);
+    return hex;
+  };
+
   // ---- colour -------------------------------------------------
   F.shade = function (hex, f) {
     const r = Math.max(0, Math.min(255, (((hex >> 16) & 255) * f) | 0));

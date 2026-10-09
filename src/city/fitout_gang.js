@@ -696,7 +696,7 @@
         const c = R.a0 + 0.5 + B.h(i, 2, salt) * (R.a1 - R.a0 - 1.0), top = B.ceil;
         const tiers = [[0.46, 0.0, 0.42], [0.3, 0.42, 0.95], [0.16, 0.95, 1.5]];
         for (let t = 0; t < tiers.length; t++)
-          wallBox(B, R.W, c - tiers[t][0] / 2, c + tiers[t][0] / 2, top - tiers[t][2], top - tiers[t][1], 0.0175, 0.002, stain, { mat: mat, faces: R.W.face });
+          wallBox(B, R.W, c - tiers[t][0] / 2, c + tiers[t][0] / 2, top - tiers[t][2], top - tiers[t][1], 0.017, 0.009, stain, { mat: mat, faces: R.W.face });
         streaks++;
       }
     }

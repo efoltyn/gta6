@@ -90,7 +90,7 @@
       const BRONZE = F.mix(0x1d160e, ctx.color, 0.05);   // the mullion itself
       const BRZ_LIT = F.shade(BRONZE, 1.90);             // the outer flange face
       const BRZ_DK = F.shade(BRONZE, 0.45);              // webs, reveals, soffits
-      const VISION = F.mix(0x241a0c, ctx.color, 0.05);   // warm smoky bronze glass
+      const VISION = F.glass(ctx, F.mix(0x241a0c, ctx.color, 0.05));   // warm smoky bronze glass
       const SPAND = F.shade(VISION, 0.34);               // opaque panel at the floor line
       const LOUVRE = F.shade(BRONZE, 0.80);
       const GRANITE = F.mix(0x232220, ctx.color, 0.07);  // plaza / pier stone

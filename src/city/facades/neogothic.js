@@ -88,7 +88,7 @@
       C.dark = F.shade(C.lo, 0.52);                  // reveals
       C.deep = F.shade(C.lo, 0.34);                  // the deepest orders
       C.plinth = F.shade(ctx.color, 0.42);
-      C.glass = F.mix(0x141210, 0x2a2018, 0.30 + ctx.hash(0x4e05) * 0.3);
+      C.glass = F.glass(ctx, F.mix(0x141210, 0x2a2018, 0.30 + ctx.hash(0x4e05) * 0.3));
       // the graduated stone: t=0 at the pavement, t=1 at the spire tip
       const stone = function (y) { return F.mix(C.lo, C.hi, clamp(y / Math.max(1, H), 0, 1)); };
 

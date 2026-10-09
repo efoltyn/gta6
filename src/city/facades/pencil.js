@@ -81,7 +81,7 @@
       const LIT = F.shade(STONE, 1.28);     // belt tops, the cap
       const MID = F.shade(STONE, 0.74);     // pier sides, floor bands
       const DEEP = F.shade(STONE, 0.42);    // reveals
-      const GLASS = 0x0e1116;               // the square openings
+      const GLASS = F.glass(ctx, 0x0e1116);               // the square openings
       const VOIDC = 0x0a0c0e;               // inside a mechanical void
       const GAP = 0x101214;                 // the shadow gap at the corners
 
