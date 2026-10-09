@@ -3179,6 +3179,30 @@
     }
     _vMeshes.length = 0; _vRoots.length = 0;
   }
+  /* WHERE HE ACTUALLY HIT IT (city/carstrike.js). The strike knows the
+     contact: the point on the panel and the direction INTO the car. A short
+     ray from just outside along that line finds the real triangle (bumper,
+     bonnet, screen glass, roof) and the mark is laid there, sized to what
+     hit it. runOverBlood's three guessed rays stay for a body that got no
+     full strike. */
+  CBZ.goreCarStrike = function (car, x, y, z, dx, dy, dz, amt) {
+    const g = car && car.group;
+    if (!g || !g.parent || !CBZ.surfaceDecal) return false;
+    const l = Math.hypot(dx, dy, dz);
+    if (!(l > 1e-6)) return false;
+    dx /= l; dy /= l; dz /= l;
+    gatherMeshes([g]);
+    const h = vehicleRay(x - dx * 0.45, y - dy * 0.45, z - dz * 0.45, dx, dy, dz, 1.1);
+    let ok = false;
+    if (h) {
+      const a = Math.max(0.2, Math.min(1.2, amt || 0.7));
+      const S = 0.4 + a * 0.35;
+      vehicleStamp(h, S, S * (dy < -0.5 ? 1.25 : 1), CELL_SPLAT[a > 0.8 ? 0 : 1], { tx: dx, ty: 0, tz: dz, growT: 0.08, grow0: 0.55, dryT: 26 });
+      ok = true;
+    }
+    _vMeshes.length = 0; _vRoots.length = 0;
+    return ok;
+  };
   function nearestCar(x, z, r) {
     const L = CBZ.cityCars;
     let best = null, bd = r * r;
@@ -4671,7 +4695,8 @@
     // and the car that did it wears him: bumper, bonnet, screen
     if (ranOver && !far) {
       const rc = (ctx && ctx.imp && ctx.imp.car) || nearestCar(x, z, 5);
-      if (rc) runOverBlood(rc, x, y, z, amt);
+      // a strike paints its own contacts as they happen (CBZ.goreCarStrike)
+      if (rc && !(ctx && ctx.imp && ctx.imp.strike)) runOverBlood(rc, x, y, z, amt);
     }
     if (ranOver && hasDir) {
       let sl = opts.smearLen || 0;
