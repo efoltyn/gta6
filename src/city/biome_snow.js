@@ -2811,7 +2811,7 @@
             city.roads.push(Object.assign({ x: rx, z: (MAXZ + mz) / 2, vertical: true, len: Math.abs(MAXZ - mz) }, base));
             city.roads.push(Object.assign({ x: (rx + west.x) / 2, z: mz, vertical: false, len: Math.abs(west.x - rx) }, base));
           }
-          CBZ.registerCityRegion(city, { name: "Pinecrest Road Link", subtitle: "Mount Mercy", kind: "rect",
+          CBZ.registerCityRegion(city, { name: "Pinecrest Road Link", subtitle: "Mount Mercy", kind: "rect", road: true,
             minX: rx - 6, maxX: rx + 6, minZ: mz - 6, maxZ: MAXZ, pad: 1 });
         }
       }

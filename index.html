@@ -441,7 +441,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/core/drawcheck.js?v=pf0930a"></script>
 <script src="src/core/bakecache.js?v=memfit1008"></script>
 <script src="src/core/rectgrid.js?v=phonefit1"></script>
-<script src="src/core/slice.js?v=pf0930b"></script>
+<script src="src/core/slice.js?v=maplabels1009"></script>
 <!-- GANG CITY STREAMS: the live city is a slice that follows the player (?stream=0 = whole city). -->
 <script src="src/core/citystream.js?v=sdoor0930"></script>
 <script src="src/core/seed.js?v=w09290242x"></script>
@@ -1191,7 +1191,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/expansion.js?v=ground1001"></script>
 <!-- 4d-2. ARCHIPELAGO — worldmap registry + 3 islands + 4 biomes (worldmap.js
      MUST precede every island/biome; world.js runs them via CBZ.cityWorldGeo) -->
-<script src="src/city/worldmap.js?v=slice0929b"></script>
+<script src="src/city/worldmap.js?v=maplabels1009"></script>
 <!-- Shared signed shoreline/depth/current oracle. Loaded immediately after
      the landmass registry so rendering, swimmers, boats and aquatic wildlife
      all consult the same coast instead of inventing separate radius tests. -->
@@ -1205,7 +1205,7 @@ document.body.appendChild(b);}}catch(e){}})();
      builder. Loads right after the ribbon builder it drives; registers its
      own landmass pass (order 91 — after every causeway, before the
      continent plate reads its relief-corridor gate). -->
-<script src="src/city/highwaynet.js?v=layout2b"></script>
+<script src="src/city/highwaynet.js?v=maplabels1009"></script>
 <!-- THE INTERCHANGE: the R5/R1 flyover (planned by highwaynet at order 91,
      built in highways.js's late pass at 97.5). -->
 <script src="src/city/interchange.js?v=flick1"></script>
@@ -1303,7 +1303,7 @@ document.body.appendChild(b);}}catch(e){}})();
      dressing through the city streamer. island_airport.js (Halloran) and
      airport_capeharbor.js are specs; both builders run at worldgen, after
      this file has parsed. -->
-<script src="src/city/airport_kit.js?v=pf0930a"></script>
+<script src="src/city/airport_kit.js?v=maplabels1009"></script>
 <script src="src/city/airport_capeharbor.js?v=air0929r"></script>
 <!-- MILITARY AIRFRAMES: lofted fighter / attack + utility helicopters / drone / bomber and the kit the cargo lifter is built with. Before island_military (its model factories call CBZ.milAir). -->
 <script src="src/city/mil_air.js?v=mil0929"></script>
@@ -1313,7 +1313,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/biome_desert.js?v=layout2m"></script>
 <script src="src/city/biome_forest.js?v=ground1001"></script>
 <script src="src/city/biome_farmland.js?v=layout2b"></script>
-<script src="src/city/biome_snow.js?v=layout2b"></script>
+<script src="src/city/biome_snow.js?v=maplabels1009"></script>
 <script src="src/city/snowboard.js?v=ric0929"></script>
 <!-- STRATEGIC LAYER part 1 — hardened bunkers (Fort Brandt command shelter
      w/ the nuclear vault + mountain/desert finds). Landmass order 40: after
@@ -1927,7 +1927,7 @@ document.body.appendChild(b);}}catch(e){}})();
      for over 1.5 s at a time. The window is 320 m around the player (peds stop
      drawing at 95 m), marked across frames so a rebuild is never a hitch. -->
 <script src="src/city/pednav.js?v=nav2"></script>
-<script src="src/systems/fullmap.js?v=pf0930a"></script>
+<script src="src/systems/fullmap.js?v=maplabels1009"></script>
 
 <!-- cinematic death gore — shared by both games; loads before loop.js so its
      always-updater is in the sort -->
@@ -2338,7 +2338,7 @@ document.body.appendChild(b);}}catch(e){}})();
      staffs itself through power.js's protection layer rather than authoring
      guards. After power.js and the biome/continent builders whose empty land
      it claims. Revert with ?cfg_GOV_COMPLEX=0. -->
-<script src="src/city/govcomplex.js?v=ground1008c"></script>
+<script src="src/city/govcomplex.js?v=maplabels1009"></script>
 
 <!-- THE PRESIDENCY — one spine over organs built above: the President origin
      (candidacy's swearIn fast-forward), the Situation Room inside govcomplex's
@@ -2350,7 +2350,7 @@ document.body.appendChild(b);}}catch(e){}})();
      jail's transport). AFTER govcomplex.js (reads CBZ.govComplexes); every
      other read is feature-detected and lazily retried.
      Revert with ?cfg_PRESIDENCY_V1=0. -->
-<script src="src/city/presidency.js?v=address1008"></script>
+<script src="src/city/presidency.js?v=maplabels1009"></script>
 <script src="src/city/politics.js?v=polsim1008b"></script>
 <!-- THE PRESIDENT'S WORLD (2026-09-27 rework) — no HUD strip, no mission
      list, no button console. In load order: the office (desk phone that rings

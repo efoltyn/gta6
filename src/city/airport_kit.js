@@ -3401,7 +3401,7 @@
         m.userData.terrain = true; m.userData.worldSurface = true;
         root.add(m);
         CBZ.registerCityRegion(city, {
-          name: ap.name + " Link " + (i + 1), subtitle: ap.subtitle, biome: ap.biome, kind: "rect",
+          name: ap.name + " Link", subtitle: ap.subtitle, biome: ap.biome, kind: "rect", road: true,
           minX: midX - w / 2, maxX: midX + w / 2, minZ: midZ - d / 2, maxZ: midZ + d / 2, pad: 1,
         });
         const link = { x: midX, z: midZ, vertical: Lg.vertical, len: len, district: "highway", w: 20, lanesPerDir: 2, laneW: 3.6, owner: ap.biome };

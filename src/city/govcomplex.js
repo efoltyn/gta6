@@ -5695,10 +5695,13 @@
     //     registered region that is NOT named bridge/causeway/link — so an
     //     approach that has to reach across a bay becomes an isthmus rather
     //     than a road deck over open water. The name is deliberately
-    //     "<Name> Approach N" and deliberately does NOT contain the word
+    //     "<Name> Approach" and deliberately does NOT contain the word
     //     "Link": highwaynet.js uses that word precisely because its route
     //     segments ARE bridges and must not hold land. Ours are country
     //     roads and must.
+    // The name is internal. Every leg shares it (it used to be numbered per
+    // leg, and the map printed "The Capitol Approach 2" across the country);
+    // `road: true` keeps it off every map. An access road is not a place.
     // (Nothing depends on the name for OUR audit — skipRegion() drops any
     //  region carrying `_govOwner` before it ever looks at a name.)
     for (let i = 0; i < clean.length - 1; i++) {
@@ -5706,7 +5709,7 @@
       if (Math.abs(a.x - b.x) < 0.5 && Math.abs(a.z - b.z) < 0.5) continue;
       const HALF = 13;
       const reg = CBZ.registerCityRegion(city, {
-        name: site.def.name + " Approach " + (i + 1), subtitle: site.def.subtitle, kind: "rect",
+        name: site.def.name + " Approach", subtitle: site.def.subtitle, kind: "rect", road: true,
         minX: Math.min(a.x, b.x) - HALF, maxX: Math.max(a.x, b.x) + HALF,
         minZ: Math.min(a.z, b.z) - HALF, maxZ: Math.max(a.z, b.z) + HALF,
         pad: 1, terrainGrade: true,

@@ -586,7 +586,8 @@
         // polwar's front search (/causeway|bridge/) and the shore field's
         // land-holding both ignore it (established link semantics).
         CBZ.registerCityRegion(city, {
-          name: route.name + " Link " + (i + 1), subtitle: route.rural ? "Country Road" : "Highway Network", kind: "rect",
+          name: route.name + " Link", subtitle: route.rural ? "Country Road" : "Highway", kind: "rect",
+          road: true, route: route.id,
           minX: Math.min(a.x, b.x) - route.width / 2, maxX: Math.max(a.x, b.x) + route.width / 2,
           minZ: Math.min(a.z, b.z) - route.width / 2, maxZ: Math.max(a.z, b.z) + route.width / 2,
           pad: 1,

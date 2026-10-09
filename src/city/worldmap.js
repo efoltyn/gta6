@@ -339,6 +339,10 @@
     if (!city || !reg) return reg;
     city.regions = city.regions || [];
     if (reg.pad == null) reg.pad = 2;
+    // `road: true` = a strip of road filed as land (a highway leg, an access
+    // road, an airport link), not a place. It is never lettered on any map;
+    // the road's name is drawn once along the road by the map instead.
+    if (reg.road) reg.mapLabel = false;
     if (reg.kind === "circle") {
       reg.minX = reg.cx - reg.r; reg.maxX = reg.cx + reg.r;
       reg.minZ = reg.cz - reg.r; reg.maxZ = reg.cz + reg.r;

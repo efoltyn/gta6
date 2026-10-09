@@ -1813,8 +1813,22 @@
       const r = regs[i];
       if (!r || !isFinite(r.minX) || !isFinite(r.maxX) || !isFinite(r.minZ) || !isFinite(r.maxZ)) continue;
       if (r.maxX <= r.minX || r.maxZ <= r.minZ) continue;
-      out.push({ name: String(r.name || ""), minX: r.minX, maxX: r.maxX, minZ: r.minZ, maxZ: r.maxZ });
+      // the ground is drawn for every region; only PLACES are lettered (the
+      // one rule fullmap.js owns: no road strips, no indexed builder keys)
+      // A planned city files several rects under one name with mapLabel off
+      // (the big map letters it its own way); here it is lettered once.
+      const place = r.metro && !r.road ? Object.assign({}, r, { mapLabel: true }) : r;
+      const nm = CBZ.mapPlaceName ? CBZ.mapPlaceName(place) : (r.road || place.mapLabel === false ? "" : String(r.name || ""));
+      out.push({ name: nm, minX: r.minX, maxX: r.maxX, minZ: r.minZ, maxZ: r.maxZ });
     }
+    // one name, one word on the map: the largest rect carrying it keeps it
+    const best = {};
+    for (const q of out) {
+      if (!q.name) continue;
+      const area = (q.maxX - q.minX) * (q.maxZ - q.minZ);
+      if (!best[q.name] || area > best[q.name].area) best[q.name] = { q: q, area: area };
+    }
+    for (const q of out) if (q.name && best[q.name].q !== q) q.name = "";
     return out;
   }
   // the frontier line construction.js is actually building on. Its plan is

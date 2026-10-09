@@ -626,8 +626,7 @@
     if (!ICONS_V2() && A) {
       const known = settlementNameSet();
       for (const rg of A.regions || []) {
-        if (isLink(rg) || rg.underlay) continue;
-        const name = rg.name || rg.biome || ""; if (!name) continue;
+        const name = placeLabel(rg); if (!name) continue;
         if (known.has(String(name).toLowerCase().replace(/[^a-z0-9]+/g, ""))) continue;
         const c = regionCentroid(rg);
         const wpx = (rg.kind === "circle" ? rg.r * 2 : (rg.maxX - rg.minX)) * p.sc;
@@ -653,7 +652,7 @@
         if (cnt.shops) bits.push(cnt.shops + " shops");
         if (cnt.homes) bits.push(cnt.homes + " homes");
         if (s.casino) bits.push("casino");
-        pickAdd(mx, mz, 9, "town", name, bits.join(" · "), s.cx, s.cz);
+        pickAdd(mx, mz, 9, "town", name, bits.join(", "), s.cx, s.cz);
       } else {
         ctx.fillStyle = "#e6c069"; ctx.strokeStyle = "rgba(0,0,0,.72)"; ctx.lineWidth = 1.4;
         ctx.beginPath();
@@ -797,7 +796,7 @@
       const P = mc.plan;
       const B = P.bounds, cx = (B.minX + B.maxX) / 2, cz = (B.minZ + B.maxZ) / 2;
       if (!detail) {
-        const nm = mc.name || P.name; if (!nm) continue;
+        const nm = mc.name || P.name; if (!nm || idLike(nm)) continue;
         if (known.has(String(nm).toLowerCase().replace(/[^a-z0-9]+/g, ""))) continue;
         const wpx = (B.maxX - B.minX) * p.sc; if (wpx < 40) continue;
         mapLabel(String(nm).toUpperCase(), p.x(Number.isFinite(P.cx) ? P.cx : cx), p.z(Number.isFinite(P.cz) ? P.cz : cz), {
@@ -807,7 +806,7 @@
         continue;
       }
       for (const d of P.districts || []) {
-        if (!d || !d.name || !Number.isFinite(d.cx) || !Number.isFinite(d.cz)) continue;
+        if (!d || !d.name || idLike(d.name) || !Number.isFinite(d.cx) || !Number.isFinite(d.cz)) continue;
         const nx = p.x(d.cx), ny = p.z(d.cz);
         if (nx < -40 || nx > W + 40 || ny < -20 || ny > H + 20) continue;
         mapLabel(d.name, nx, ny, { size: 10, fill: "rgba(214,224,236,.72)", haloC: "rgba(0,0,0,.6)" });
@@ -1123,6 +1122,26 @@
     ctx.textAlign = o.align || "center";
     ctx.textBaseline = "alphabetic";
     const w = ctx.measureText(str).width;
+    if (o.vertical) {
+      // A name running along a north-south road: turned a quarter, centred on
+      // (x, y). Its box is still axis-aligned (the turn is exactly 90 deg),
+      // so it declutters against every other word like any label.
+      const vx0 = x - size * 0.62, vx1 = x + size * 0.62, vy0 = y - w / 2 - 2, vy1 = y + w / 2 + 2;
+      const vboxes = o.boxes || (bakeMode ? plateLabels : labelBoxes);
+      const vhit = boxHit(vboxes, vx0, vy0, vx1, vy1);
+      if (vhit && !o.force) { stats.skipped++; return false; }
+      if (vhit) { if (bakeMode) plateOverlapN++; else stats.overlaps++; }
+      ctx.save(); ctx.translate(x, y); ctx.rotate(-Math.PI / 2);
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      if (o.halo !== false) { ctx.lineWidth = o.haloW || 3; ctx.strokeStyle = o.haloC || "rgba(0,0,0,.72)"; ctx.strokeText(str, 0, 0); }
+      ctx.fillStyle = o.fill || "rgba(232,242,255,.92)";
+      ctx.fillText(str, 0, 0);
+      ctx.restore();
+      ctx.textBaseline = "alphabetic";
+      vboxes.push({ x0: vx0, y0: vy0, x1: vx1, y1: vy1 });
+      if (!bakeMode) stats.labels++;
+      return true;
+    }
     const half = ctx.textAlign === "center" ? w / 2 : 0;
     const x0 = x - half - 2, x1 = x - half + w + 2;
     const y0 = y - size, y1 = y + size * (o.sub ? 1.2 : 0.28);
@@ -1757,6 +1776,32 @@
   // continent's five underlay bands as roads, creating the giant grey/yellow
   // bars seen on the map.
   function isLink(rg) { return /causeway|bridge|link/i.test(rg.name || ""); }
+  // THE ONE "what does the map call this region" answer. A region is lettered
+  // only if it is a PLACE: a strip of road filed as land (`road: true`, a
+  // causeway, a bridge, a highway link), the continent underlay and anything
+  // that opted out get nothing. ID_LIKE is the last guard: a name that reads
+  // like a builder's index ("Approach 2", "Link 3", "segment 4", "(2)",
+  // snake_case) is an internal key that leaked, never a place name, so it is
+  // dropped here even if some future builder files it. Shared with the
+  // president's country map (CBZ.mapPlaceName) and tools/map-labels-check.mjs.
+  // ("Route 9" and "Station 9" are real names: a bare trailing number is fine,
+  //  an index on a part-of-a-road word is not.)
+  function idLike(s) {
+    s = String(s || "");
+    return /\b(approach|link|leg|seg|segment|stub|spur|ramp|section|piece)\s*#?\d+\b/i.test(s) ||
+      /\b(leg|seg|stub)\b/i.test(s) ||                 // never words a place is called
+      /#\d|\(\d+\)|_/.test(s) ||                        // "#3", "(2)", snake_case
+      /\b[a-z]+[A-Z]\w*/.test(s) ||                     // camelCase keys
+      /[—·]/.test(s);                         // signage law: no em dash, no middle dot
+  }
+  function placeLabel(rg) {
+    if (!rg || rg.road || rg.underlay || rg.mapLabel === false || isLink(rg)) return "";
+    const name = String(rg.name || rg.biome || "").trim();
+    if (!name || idLike(name)) return "";
+    return name;
+  }
+  CBZ.mapPlaceName = placeLabel;
+  CBZ.mapLabelIdLike = idLike;
   function regionCentroid(rg) {
     if (rg.kind === "circle") return { x: rg.cx, z: rg.cz };
     return { x: (rg.minX + rg.maxX) * 0.5, z: (rg.minZ + rg.maxZ) * 0.5 };
@@ -1966,7 +2011,7 @@
       const bits = [iconSpec(c.k).n];
       if (c.count > 1) bits.push("+" + (c.count - 1) + " more nearby");
       if (owns) { try { if (owns(c.lot)) bits.push("yours"); } catch (e) {} }
-      pickAdd(c.mx, c.my, s + 2, c.k, c.info.key ? "Home" : (c.info.label || iconSpec(c.k).n), bits.join(" · "), c.lot.cx, c.lot.cz);
+      pickAdd(c.mx, c.my, s + 2, c.k, c.info.key ? "Home" : (c.info.label || iconSpec(c.k).n), bits.join(", "), c.lot.cx, c.lot.cz);
     }
   }
   // shared so the corner minimap (city/hud.js) colours shops by the SAME trade
@@ -2010,7 +2055,7 @@
           if (ICONS_V2()) {
             const ty = mz - d / 2 + 11;
             drawIcon(ctx, mx, ty, "hq", { size: 6, color: hx, tier: isPlayer }); stats.icons++;
-            pickAdd(mx, ty, 7, "hq", who, (z.name ? z.name + " · " : "") + Math.round((z.strength || 0) * 100) + "% hold",
+            pickAdd(mx, ty, 7, "hq", who, (z.name ? z.name + ", " : "") + Math.round((z.strength || 0) * 100) + "% hold",
               p.wx(mx), p.wz(ty));
           } else {
             ctx.textAlign = "center"; ctx.fillStyle = hx; ctx.font = "700 9px Fredoka, sans-serif";
@@ -2034,7 +2079,7 @@
           // the crew holding the most districts (the one to beat) gets the star
           if (top) starGlyph(mx, mz - s - 6, 5.4, "#ffd451", true);
           pickAdd(mx, mz, s + 2, "hq", (gang.name || "Crew") + " HQ",
-            (gang.isPlayer ? "Your crew" : "Rival crew") + (top ? " · leading the takeover" : ""), hq.x, hq.z);
+            (gang.isPlayer ? "Your crew" : "Rival crew") + (top ? ", leading the takeover" : ""), hq.x, hq.z);
         } else {
           ctx.fillStyle = col; ctx.strokeStyle = "rgba(0,0,0,.7)"; ctx.lineWidth = 2;
           ctx.beginPath(); ctx.moveTo(mx, mz - s); ctx.lineTo(mx + s, mz); ctx.lineTo(mx, mz + s); ctx.lineTo(mx - s, mz); ctx.closePath();
@@ -2077,10 +2122,10 @@
       }
       stats.icons++;
       pickAdd(mx, mz, sz + 2, "racket", s.name,
-        (s.owner ? s.owner + " — " : "") +
+        (s.owner ? s.owner + ", " : "") +
         (s.mine ? "pays you" : "pays the " + ((CBZ.cityGangById && CBZ.cityGangById(s.gang)) || { name: "crew" }).name) +
         " $" + (s.trib || 0) + "/day" +
-        (s.mine && s.owed > 0 ? " · $" + s.owed + " in the drawer" : ""), lot.cx, lot.cz);
+        (s.mine && s.owed > 0 ? ", $" + s.owed + " in the drawer" : ""), lot.cx, lot.cz);
     }
   }
 
@@ -2316,12 +2361,104 @@
     }
   }
 
+  /* ---- ROAD NAMES -------------------------------------------------------
+     A road is named ONCE per road, never once per piece. The name comes from
+     the road itself (highwaynet.js's route table: "Continental Loop", "Kesh
+     Road"; a named causeway or bridge: "Saltlands Causeway"), and is lettered
+     ALONG the road on its longest straight stretch on screen, turned with it
+     when it runs north-south. A long road on a wide view may carry it again,
+     well apart, at most three times. Access roads, airport links and ramps
+     have no name of their own and carry none.
+     Priority (after the places, which drew first): highways, then country
+     roads and causeways. Every word goes through mapLabel, so a road name
+     never lands on a town or another road's name; it is the first thing to
+     go when space runs out. */
+  function roadNameRuns() {
+    const out = [];
+    const routes = (CBZ.cityHighwayNet && CBZ.cityHighwayNet()) || [];
+    for (const r of routes) {
+      if (!r || !r.name || !r.pts || r.pts.length < 2 || idLike(r.name)) continue;
+      const legs = [];
+      for (let i = 0; i + 1 < r.pts.length; i++) legs.push([r.pts[i], r.pts[i + 1]]);
+      out.push({ name: r.name, major: !r.rural && (r.lanesPerDir || 1) >= 2, legs: legs });
+    }
+    // named causeways / bridges: the deck IS the road, one record per name
+    const A = CBZ.city && CBZ.city.arena, byName = {};
+    for (const rg of (A && A.regions) || []) {
+      if (!rg || rg.road || rg.kind !== "rect" || !isLink(rg) || rg.mapLabel === false) continue;
+      const nm = String(rg.name || "").trim();
+      if (!nm || idLike(nm) || /\blink\b/i.test(nm)) continue;
+      const wx = rg.maxX - rg.minX, wz = rg.maxZ - rg.minZ;
+      const leg = wx >= wz
+        ? [{ x: rg.minX, z: (rg.minZ + rg.maxZ) / 2 }, { x: rg.maxX, z: (rg.minZ + rg.maxZ) / 2 }]
+        : [{ x: (rg.minX + rg.maxX) / 2, z: rg.minZ }, { x: (rg.minX + rg.maxX) / 2, z: rg.maxZ }];
+      (byName[nm] = byName[nm] || { name: nm, major: false, legs: [] }).legs.push(leg);
+    }
+    for (const k in byName) out.push(byName[k]);
+    return out;
+  }
+  function drawRoadNames(p) {
+    if (!ICONS_V2()) return;
+    const zm = map.view.z;
+    if (zm < 1.25) return;                         // the world fit is for places
+    const runs = roadNameRuns();
+    const tiers = [runs.filter(function (r) { return r.major; }), zm >= 1.9 ? runs.filter(function (r) { return !r.major; }) : []];
+    for (const tier of tiers) {
+      // each road's visible straight stretches, longest first
+      const cand = [];
+      for (const run of tier) {
+        const spans = [];
+        for (const lg of run.legs) {
+          let ax = p.x(lg[0].x), ay = p.z(lg[0].z), bx = p.x(lg[1].x), by = p.z(lg[1].z);
+          const dx = bx - ax, dy = by - ay;
+          const vert = Math.abs(dy) > Math.abs(dx);
+          // only axis-true stretches carry a name (a word on a diagonal would
+          // reserve the wrong box and read as floating)
+          if ((vert ? Math.abs(dx) / Math.max(1, Math.abs(dy)) : Math.abs(dy) / Math.max(1, Math.abs(dx))) > 0.18) continue;
+          // clip to the canvas along the long axis
+          if (vert) {
+            let y0 = Math.min(ay, by), y1 = Math.max(ay, by);
+            const xm = (ax + bx) / 2;
+            if (xm < 8 || xm > W - 8) continue;
+            y0 = Math.max(y0, 20); y1 = Math.min(y1, H - 20);
+            if (y1 - y0 > 0) spans.push({ x: xm, y: (y0 + y1) / 2, len: y1 - y0, vert: true });
+          } else {
+            let x0 = Math.min(ax, bx), x1 = Math.max(ax, bx);
+            const ym = (ay + by) / 2;
+            if (ym < 14 || ym > H - 8) continue;
+            x0 = Math.max(x0, 20); x1 = Math.min(x1, W - 20);
+            if (x1 - x0 > 0) spans.push({ x: (x0 + x1) / 2, y: ym, len: x1 - x0, vert: false });
+          }
+        }
+        spans.sort(function (a, b) { return b.len - a.len; });
+        if (spans.length) cand.push({ run: run, spans: spans });
+      }
+      cand.sort(function (a, b) { return b.spans[0].len - a.spans[0].len; });
+      for (const c of cand) {
+        const size = c.run.major ? 11 : 10;
+        ctx.font = "700 " + size + "px Fredoka, sans-serif";
+        const need = ctx.measureText(c.run.name).width + 36;
+        const placed = [];
+        for (const s of c.spans) {
+          if (placed.length >= 3) break;
+          if (s.len < need) break;                   // sorted: nothing after fits either
+          if (placed.some(function (q) { return Math.hypot(q.x - s.x, q.y - s.y) < 520; })) continue;
+          const ok = mapLabel(c.run.name, s.x, s.vert ? s.y : s.y + size * 0.36, {
+            size: size, weight: 700, vertical: s.vert,
+            fill: c.run.major ? "rgba(255,226,150,.95)" : "rgba(226,232,240,.9)",
+            haloC: "rgba(14,18,24,.9)", haloW: 3.2,
+          });
+          if (ok) placed.push(s);
+        }
+      }
+    }
+  }
+
   function drawRegionNames(p, A, settlementNames) {
     const cand = [];
     const seen = new Set();
     for (const rg of A.regions || []) {
-      if (isLink(rg) || rg.underlay || rg.mapLabel === false) continue;
-      const name = rg.name || rg.biome || ""; if (!name) continue;
+      const name = placeLabel(rg); if (!name) continue;
       const key = String(name).toLowerCase().replace(/[^a-z0-9]+/g, "");
       if (seen.has(key)) continue;
       seen.add(key);
@@ -2437,13 +2574,13 @@
           const sx = p.x(bx), sy = p.z(by);
           drawIcon(ctx, sx, sy, "sealed", { size: sealed ? 8 : 6, tier: sealed, color: sealed ? null : "rgba(220,232,240,.9)" });
           stats.icons++;
-          pickAdd(sx, sy, 9, "sealed", "Bridge", sealed ? "SEALED · roadblocks up" : "Mainland ↔ island crossing", bx, by);
+          pickAdd(sx, sy, 9, "sealed", "Bridge", sealed ? "Sealed, roadblocks up" : "To the island", bx, by);
           // SEALED is the one bridge word that survives: it is a live obstruction
           // between you and your escape, not a place name you can go and read.
           if (sealed) mapLabel("SEALED", sx, sy - 14, { size: 10, fill: "#ff8b7a", force: true });
         } else {
           dot(bx, by, p, sealed ? "#ff5a4c" : "rgba(220,232,240,.72)", sealed ? 5 : 3);
-          text(sealed ? "BRIDGE · SEALED" : "BRIDGE", bx, by - 12 / p.sc, p,
+          text(sealed ? "BRIDGE SEALED" : "BRIDGE", bx, by - 12 / p.sc, p,
             sealed ? "#ff8b7a" : "rgba(225,240,255,.58)", 10);
         }
       }
@@ -2487,6 +2624,7 @@
     drawMetroNames(p, detail);       // planned cities at the fit, their districts zoomed in
     if (ICONS_V2()) { reserveIconBoxes(); drawRegionNames(p, A, settlementNameSet()); }
     drawWaterNames(p, A);
+    drawRoadNames(p);                // last claim on space: highways, then country roads
     if (MAP_V2() && (map.view.z >= 2.6 || (map._cursor && !ICONS_V2()))) { drawClimbMarks(p, A); drawBoardTicks(p); }
     if (detail && !ICONS_V2()) drawCityLabels(p, A);
     if (detail) drawRentedBoards(p);
