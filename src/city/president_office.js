@@ -801,10 +801,44 @@
     return r;
   }
   function ignore(m, source) {
-    if (m.ifIgnored) { try { m.ifIgnored(); } catch (e) {} }
-    emit("decision", { source: source, topic: m.topic, choice: "ignored", order: null, who: m.who.name, id: m.id });
+    lapse(m, source);
     if (source !== "folder" && m.topic !== "schedule") M.missed.push(m);
-    if (M.missed.length > 4) M.missed.shift();
+    trimMissed();
+  }
+  // the matter is decided without you: what ignoring it costs, once
+  function lapse(m, source) {
+    if (m.lapsed) return;
+    m.lapsed = true;
+    if (m.ifIgnored) { try { m.ifIgnored(); } catch (e) {} }
+    emit("decision", { source: source || "phone", topic: m.topic, choice: "ignored", order: null, who: m.who.name, id: m.id });
+  }
+  function trimMissed() {
+    while (M.missed.length > 6) { const o = M.missed.shift(); lapse(o, "phone"); }
+  }
+  /* A CALL THAT RANG OUT IS NOT DECIDED YET (owner: "the General was trying
+     to call me ... I can't call back"). It waits CALLBACK_SECS for you to ring
+     him back (city/phone_apps.js's call log, or the secretary putting him
+     through); only then does it lapse and cost what ignoring it costs. A
+     call missed on the desk is logged on the handset too: one call log. */
+  const CALLBACK_SECS = 150;
+  function missCall(m, logIt) {
+    if (m.topic === "schedule") { ignore(m, "phone"); return; }
+    m.lapsed = false; m.lapseAt = CLOCK + CALLBACK_SECS;
+    if (M.missed.indexOf(m) < 0) M.missed.push(m);
+    trimMissed();
+    const Ap = CBZ.phoneApps;
+    if (logIt && Ap && Ap.missed) {
+      try { Ap.missed({ id: "desk:" + m.id, alt: m.who.role, name: speaker(m.who, false), role: ROLE_TITLE[m.who.role] || "", line: m.line, voicemail: m.voicemail || "" }); } catch (e) {}
+    }
+  }
+  function waitingCalls() {
+    const out = [];
+    for (let i = 0; i < M.missed.length; i++) {
+      const m = M.missed[i];
+      if (!m.lapsed && m.lapseAt != null && CLOCK > m.lapseAt) lapse(m, "phone");
+      if (!m.lapsed) out.push(m);
+    }
+    return out;
   }
   // "the caller says why, in his own words"
   const CANT = {
@@ -888,7 +922,7 @@
       if (M.ringT > RING_SECS) {
         const m = M.ringing;
         M.ringing = null; M.lastCallEnd = CLOCK;
-        ignore(m, "phone");
+        missCall(m, true);
       } else if (CLOCK >= M.nextBurst) {
         M.nextBurst = CLOCK + RING_PERIOD;
         ringBurst();
@@ -929,7 +963,20 @@
     if (CLOCK - M.lastCallEnd < CALL_GAP) return null;
     const rec = ROOM.rec || office();
     if (rec && inOffice(rec)) return null;
-    const m = M.phoneQ.shift();
+    return cellFor(M.phoneQ.shift());
+  }
+  // ring him back from the handset's log: the matter he called about, if it
+  // still stands (waiting after a missed call, or still queued to ring)
+  function callBack(mid) {
+    const w = waitingCalls();
+    let m = null;
+    for (let i = 0; i < w.length; i++) if (w[i].id === mid) m = w[i];
+    if (m) M.missed.splice(M.missed.indexOf(m), 1);
+    else for (let i = 0; i < M.phoneQ.length; i++) if (M.phoneQ[i].id === mid) { m = M.phoneQ.splice(i, 1)[0]; break; }
+    if (!m) return null;
+    return cellFor(m);
+  }
+  function cellFor(m) {
     const gate = m.yes.order ? btn(m.yes.order) : { ok: true };
     let line = clean(m.line);
     const choices = gate.ok ? [{ id: "yes", label: clean(m.yes.label) }, { id: "no", label: clean(m.no.label) }]
@@ -937,7 +984,7 @@
     if (!gate.ok) line += " " + cantLine(m, gate.why);
     let done = false;
     return {
-      id: m.id, name: m.who.name, role: m.who.role, title: speaker(m.who, false), line: line, choices: choices,
+      id: m.id, name: m.who.name, role: m.who.role, roleTitle: ROLE_TITLE[m.who.role] || "", title: speaker(m.who, false), line: line, choices: choices,
       answer: function (pick) {
         if (done) return null;
         done = true; M.lastCallEnd = CLOCK;
@@ -948,7 +995,8 @@
         decide(m, "no", "cell");
         return clean(m.no.reply || "Understood, sir.");
       },
-      ignore: function () { if (done) return; done = true; M.lastCallEnd = CLOCK; ignore(m, "phone"); },
+      // rang out, declined, or hung up on before an answer: it waits for a callback
+      ignore: function () { if (done) return; done = true; M.lastCallEnd = CLOCK; missCall(m, false); },
     };
   }
   function hangUp() {
@@ -1295,10 +1343,11 @@
         onSelect: function () { SEC.lastLine = CLOCK; if (CBZ.citySay) { try { CBZ.citySay(ped, secLine(), "#e8e2cf", 3.0); } catch (e) {} } } });
       // a call you missed: she puts the caller back on your line
       CBZ.interactions.registerFor(ped, { id: "pv-sec-call-back", hold: true, prio: 28, campaignSafe: true, forceYes: true,
-        label: "Call back", canShow: function () { return !ped.dead && seated() && M.missed.length > 0 && !M.ringing && !M.onCall; },
+        label: "Call back", canShow: function () { return !ped.dead && seated() && waitingCalls().length > 0 && !M.ringing && !M.onCall; },
         onSelect: function () {
-          const m = M.missed.pop();
+          const w = waitingCalls(), m = w[w.length - 1];
           if (!m) return;
+          M.missed.splice(M.missed.indexOf(m), 1);
           m.born = CLOCK; m.expires = Math.max(90, m.expires || 0);
           M.phoneQ.unshift(m);
           M.lastCallEnd = -1e9; M.holdUntil = 0;
@@ -1679,11 +1728,13 @@
     else bits.push("Good morning, Mr. President.");
     const sch = scheduleWords();
     if (sch) bits.push(sch);
-    if (M.missed.length) {
+    const wait = waitingCalls();
+    if (wait.length) bits.push(speaker(wait[wait.length - 1].who, false) + " is waiting on your call.");
+    else if (M.missed.length) {
       const m = M.missed[M.missed.length - 1];
       bits.push(m.missedLine || (speaker(m.who, false) + " tried to reach you and went ahead without you."));
-      M.missed.length = 0;
     }
+    M.missed = wait;
     if (M.flags.unsigned) { bits.push(M.flags.unsigned === 1 ? "One folder went unsigned yesterday. It's been noticed." : M.flags.unsigned + " folders went unsigned yesterday. It's been noticed."); M.flags.unsigned = 0; }
     const live = liveFolders();
     if (!first && live) bits.push(live + (live === 1 ? " folder" : " folders") + " on your desk.");
@@ -2081,6 +2132,8 @@
   // who on the staff is unhappy)
   function dayLine() {
     if (M.ringing) return "Your line's ringing, sir.";
+    const wait = waitingCalls();
+    if (wait.length) return clean(speaker(wait[wait.length - 1].who, false) + " tried to reach you, sir.");
     if (M.missed.length) { const m = M.missed[M.missed.length - 1]; return clean(m.missedLine || (speaker(m.who, false) + " tried to reach you.")); }
     const live = liveFolders();
     if (live) return live === 1 ? "There's a folder on your desk, sir." : live + " folders on your desk, sir.";
@@ -2094,6 +2147,7 @@
     dayLine: dayLine,
     ringing: function () { return !!M.ringing; },
     cellCall: cellCall,
+    callBack: callBack,
     deskPoint: deskPoint,
     audit: audit,
     // harness hooks only

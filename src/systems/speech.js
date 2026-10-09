@@ -260,6 +260,18 @@
     if (!cam) { s.el.style.visibility = "hidden"; return; }
     const w = window.innerWidth || 800, h = window.innerHeight || 600;
     let x, y, scale = 1, alpha = 1, edge = false;
+    // the handset is up (city/phone.js): the voice sits BESIDE it, never on
+    // the glass where the call's buttons are
+    const pr = s.phone && CBZ.phoneScreenRect ? CBZ.phoneScreenRect() : null;
+    if (pr) {
+      s.el.style.visibility = "";
+      const room = pr.left > 180;
+      const px = room ? pr.left - 14 : (pr.left + pr.right) / 2, py = room ? pr.top + (pr.bottom - pr.top) * 0.32 : Math.max(40, pr.top - 8);
+      s.el.style.transform = "translate(" + Math.round(px) + "px," + Math.round(py) + "px) translate(" + (room ? "-100%,-50%" : "-50%,-100%") + ")";
+      s.el.style.setProperty("--a", "1");
+      s.el.classList.remove("edge");
+      return;
+    }
     if (s.phone) {
       // the phone is in his right hand: bottom-right in first person, beside
       // his shoulder in third

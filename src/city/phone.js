@@ -24,7 +24,11 @@
        the camera through the pointer hits the screen plane, its UV is the
        canvas pixel. Touches elsewhere still walk and look.
      - Drawing a gun puts it away (the held-item rule: one thing in the hand).
-   Apps: News, Calls, Holler, and the Map (which is the full map). All the
+     - While it is up, nothing from the world's HUD sits on it: any touch
+       button, verb chip or the wheel whose box crosses the handset is hidden
+       (coverHud), the handset stands above the hotbar, and the voice on the
+       line is drawn beside it (CBZ.phoneScreenRect, systems/speech.js).
+   Apps: News, Calls (opens on the call log), Holler, and the Map (which is the full map). All the
    logic is city/phone_apps.js; this file only draws it and routes input.
 
    KEYS: P take out / put away, Esc back (home: put away).
@@ -144,6 +148,8 @@
     }
     ST.open = true; ST.opens++;
     CBZ.cityMenuOpen = true;
+    if (document.body && document.body.classList) document.body.classList.add("city-phone-up");
+    barReadT = 0; coverT = 0;
     if (CBZ.keys) for (const k in CBZ.keys) CBZ.keys[k] = false;
     if (document.exitPointerLock) { try { document.exitPointerLock(); } catch (e) {} }
     const Ap = A();
@@ -158,6 +164,9 @@
     if (!ST.open) return false;
     ST.open = false;
     CBZ.cityMenuOpen = false;
+    if (document.body && document.body.classList) document.body.classList.remove("city-phone-up");
+    RECT = null;
+    uncoverAll();
     if (CBZ.heldItem && CBZ.heldItem.current && CBZ.heldItem.current() === "phone") { try { CBZ.heldItem.clear(); } catch (e) {} }
     if (VIEW) VIEW.visible = false;
     ST.drag = null;
@@ -363,23 +372,48 @@
   }
 
   function kindColor(k) { return k === "leader" ? "#7a5cff" : k === "gang" ? "#c0392b" : k === "staff" ? "#2d6cdf" : k === "crew" ? "#d68910" : k === "service" ? "#16a085" : k === "press" ? "#b3261e" : k === "you" ? "#2f9e5b" : "#5d6d7e"; }
+  /* CALLS opens on the log: who called, who you called, who you missed
+     (red, with the line he left), newest first, then everybody you can ring.
+     Every row is a number: tap it and it rings. */
+  function arrow(x, y, dir) {
+    // in: an arrow coming down-left into the corner; out: leaving up-right
+    ctx.save(); ctx.translate(x, y); if (dir === "out") ctx.rotate(Math.PI);
+    ctx.strokeStyle = dir === "missed" ? C.red : C.dim; ctx.lineWidth = 3.5; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(8, -8); ctx.lineTo(-7, 7); ctx.moveTo(-7, -2); ctx.lineTo(-7, 7); ctx.lineTo(2, 7); ctx.stroke();
+    ctx.restore();
+  }
   function drawCalls() {
     header("Calls");
     const Ap = A();
-    const rec = Ap ? Ap.recents().slice(0, 4) : [];
+    const log = Ap && Ap.log ? Ap.log().slice(0, 12) : [];
     const cs = Ap ? Ap.contacts() : [];
+    const nMiss = Ap && Ap.missedCount ? Ap.missedCount() : 0;
     const rows = [];
-    if (rec.length) {
-      rows.push(sectionTitle("Recent"));
-      rec.forEach(function (r) {
+    if (log.length) {
+      rows.push(function (y) {
+        font(22, "700"); ctx.fillStyle = C.dim; ctx.textAlign = "left"; ctx.textBaseline = "top";
+        ctx.fillText("RECENT", 32, y + 14);
+        if (nMiss > 0) { ctx.fillStyle = C.red; ctx.textAlign = "right"; ctx.fillText(nMiss + " MISSED", CW - 32, y + 14); }
+        return 52;
+      });
+      log.forEach(function (e) {
         rows.push(function (y) {
-          font(27, "700"); ctx.fillStyle = r.kind === "missed" ? C.red : C.text; ctx.textAlign = "left"; ctx.textBaseline = "top";
-          ctx.fillText(lines(r.name, CW - 64, 1)[0] || "", 32, y + 8);
-          font(23, "500"); ctx.fillStyle = C.dim;
-          const L = lines(r.text, CW - 64, 2);
-          L.forEach(function (l, i) { ctx.fillText(l, 32, y + 44 + i * 30); });
-          const h = 56 + L.length * 30;
-          ctx.fillStyle = C.line; ctx.fillRect(32, y + h - 1, CW - 64, 2);
+          const text = e.dir === "missed" || e.dir === "text" ? e.text : "";
+          font(23, "500");
+          const L = text ? lines(text, CW - 150, 2) : [];
+          const h = Math.max(86, 60 + L.length * 30 + (L.length ? 6 : 0));
+          if (e.dir === "text") {
+            ctx.fillStyle = C.blue; rr(26, y + 22, 26, 20, 6); ctx.fill();
+          } else arrow(40, y + 34, e.dir);
+          font(28, "700"); ctx.fillStyle = e.missed ? C.red : C.text; ctx.textAlign = "left"; ctx.textBaseline = "top";
+          ctx.fillText(lines(e.name, CW - 210, 1)[0] || "", 70, y + 16);
+          font(22, "500"); ctx.fillStyle = C.dim; ctx.textAlign = "right";
+          ctx.fillText(e.when || "", CW - 32, y + 20);
+          ctx.textAlign = "left";
+          if (L.length) { font(23, "500"); ctx.fillStyle = e.missed ? "#ffd2cf" : C.dim; L.forEach(function (l, i) { ctx.fillText(l, 70, y + 54 + i * 30); }); }
+          else if (e.role) { font(22, "500"); ctx.fillStyle = C.dim; ctx.fillText(lines(e.role, CW - 150, 1)[0] || "", 70, y + 52); }
+          ctx.fillStyle = C.line; ctx.fillRect(70, y + h - 1, CW - 102, 2);
+          if (e.callable) hit(0, y, CW, h, function () { const r = Ap.callBack(e.n); if (r) ST.dirty = true; }, true);
           return h;
         });
       });
@@ -393,7 +427,7 @@
         font(29, "700"); ctx.fillStyle = C.text; ctx.textAlign = "left"; ctx.textBaseline = "top";
         ctx.fillText(lines(c.name, CW - 170, 1)[0] || "", 112, y + 18);
         if (c.role) { font(23, "500"); ctx.fillStyle = C.dim; ctx.fillText(lines(c.role, CW - 170, 1)[0] || "", 112, y + 54); }
-        if (c.pending) { ctx.fillStyle = C.green; ctx.beginPath(); ctx.arc(CW - 44, y + h / 2, 9, 0, Math.PI * 2); ctx.fill(); }
+        if (c.pending || (Ap.pending && Ap.pending(c.id))) { ctx.fillStyle = C.green; ctx.beginPath(); ctx.arc(CW - 44, y + h / 2, 9, 0, Math.PI * 2); ctx.fill(); }
         ctx.fillStyle = C.line; ctx.fillRect(112, y + h - 1, CW - 144, 2);
         hit(0, y, CW, h, function () { const r = Ap.call(c.id); if (r) ST.dirty = true; }, true);
         return h;
@@ -454,29 +488,43 @@
     list("social", rows);
   }
 
+  /* ON A CALL, laid out like a real phone: who (name, title) and the timer
+     at the top, his answers as the phone's own buttons in the middle, and
+     the red hang-up ALONE at the bottom. The answers used to stack down from
+     y 640 in 100 px rows, so a General with four of them ran straight over
+     the hang-up (and the hang-up's hit box, pushed last, won the tap). Now
+     the answer band is a fixed window that ends well above the hang-up and
+     the rows shrink to fit it. */
+  const CALL = { top: 400, bottom: 800, hang: 900, hangR: 46 };
   function drawCall(c) {
     const Ap = A();
-    avatar(CW / 2, 300, 96, c.name, c.incoming ? C.green : "#2d6cdf");
-    font(40, "800"); ctx.fillStyle = C.text; ctx.textAlign = "center"; ctx.textBaseline = "top";
-    lines(c.name, CW - 60, 2).forEach(function (l, i) { ctx.fillText(l, CW / 2, 430 + i * 46); });
-    font(26, "500"); ctx.fillStyle = C.dim;
-    if (c.role) ctx.fillText(lines(c.role, CW - 60, 1)[0] || "", CW / 2, 530);
+    avatar(CW / 2, 196, 70, c.name, c.incoming ? C.green : "#2d6cdf");
+    font(38, "800"); ctx.fillStyle = C.text; ctx.textAlign = "center"; ctx.textBaseline = "top";
+    ctx.fillText(lines(c.name, CW - 60, 1)[0] || "", CW / 2, 284);
+    font(25, "500"); ctx.fillStyle = C.dim;
+    if (c.role) ctx.fillText(lines(c.role, CW - 60, 1)[0] || "", CW / 2, 330);
     const s = Math.floor(c.since || 0);
-    ctx.fillText(c.state === "done" ? "Call ended" : (Math.floor(s / 60) + ":" + (s % 60 < 10 ? "0" : "") + (s % 60)), CW / 2, 570);
-    let y = 640;
-    (c.choices || []).forEach(function (ch) {
-      ctx.fillStyle = "rgba(255,255,255,.12)"; rr(56, y, CW - 112, 82, 41); ctx.fill();
-      font(30, "700"); ctx.fillStyle = C.text; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText(lines(ch.label, CW - 150, 1)[0] || "", CW / 2, y + 42);
-      hit(56, y, CW - 112, 82, function () { Ap.choose(ch.id); ST.dirty = true; });
-      y += 100;
-    });
-    // hang up
-    ctx.fillStyle = C.red; ctx.beginPath(); ctx.arc(CW / 2, 905, 46, 0, Math.PI * 2); ctx.fill();
-    ctx.save(); ctx.translate(CW / 2, 905); ctx.rotate(Math.PI * 0.75);
+    ctx.fillText(c.state === "done" ? "Call ended" : (Math.floor(s / 60) + ":" + (s % 60 < 10 ? "0" : "") + (s % 60)), CW / 2, 364);
+    const ch = c.choices || [];
+    if (ch.length) {
+      const GAP = 16, band = CALL.bottom - CALL.top;
+      const bh = Math.min(80, Math.floor((band - GAP * (ch.length - 1)) / ch.length));
+      let y = CALL.top + Math.max(0, Math.floor((band - (bh * ch.length + GAP * (ch.length - 1))) / 2));
+      ch.forEach(function (o) {
+        ctx.fillStyle = "rgba(255,255,255,.13)"; rr(48, y, CW - 96, bh, bh / 2); ctx.fill();
+        font(bh < 64 ? 26 : 30, "700"); ctx.fillStyle = C.text; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(lines(o.label, CW - 140, 1)[0] || "", CW / 2, y + bh / 2 + 1);
+        const yy = y;
+        hit(48, yy, CW - 96, bh, function () { Ap.choose(o.id); ST.dirty = true; });
+        y += bh + GAP;
+      });
+    }
+    // hang up, alone at the bottom
+    ctx.fillStyle = C.red; ctx.beginPath(); ctx.arc(CW / 2, CALL.hang, CALL.hangR, 0, Math.PI * 2); ctx.fill();
+    ctx.save(); ctx.translate(CW / 2, CALL.hang); ctx.rotate(Math.PI * 0.75);
     ctx.fillStyle = "#fff"; rr(-26, -6, 52, 12, 5); ctx.fill(); rr(-28, -6, 12, 18, 5); ctx.fill(); rr(16, -6, 12, 18, 5); ctx.fill();
     ctx.restore();
-    hit(CW / 2 - 60, 845, 120, 120, function () { Ap.hangup(); ST.dirty = true; });
+    hit(CW / 2 - 70, CALL.hang - 62, 140, 124, function () { Ap.hangup(); ST.dirty = true; });
   }
   function drawIncoming(r) {
     const Ap = A();
@@ -525,17 +573,88 @@
   // Camera space, one layout for both views: a phone held up at reading
   // distance, right of centre on a wide screen, centred on a tall one.
   const _q = new THREE.Quaternion(), _e = new THREE.Euler(), _v = new THREE.Vector3(), _m = new THREE.Matrix4();
+  // the bar along the bottom (systems/inventory.js #hotbar): the handset stands
+  // ABOVE it, never over it. Its top as a fraction of the view, re-read twice
+  // a second (it grows and shrinks with what you carry).
+  let barTop = 1, barReadT = 0;
+  function readBar() {
+    barTop = 1;
+    const hb = typeof document !== "undefined" && document.getElementById ? document.getElementById("hotbar") : null;
+    if (!hb || !hb.getBoundingClientRect || hb.style.display === "none") return;
+    const r = hb.getBoundingClientRect(), cr = canvasRect();
+    if (r.height > 0 && cr.height > 0) barTop = Math.max(0.5, Math.min(1, (r.top - cr.top) / cr.height));
+  }
   function layout() {
     const cam = CBZ.camera;
     const fov = (cam && cam.fov) || 62, aspect = (cam && cam.aspect) || 1.6;
     const d = 0.5;
     const halfH = d * Math.tan(fov * Math.PI / 360), halfW = halfH * aspect;
-    let H = 2 * halfH * 0.80;
+    // vertical window, as fractions of the view from the top: a margin under
+    // the top edge, and the bottom a little clear of the hotbar
+    const topMin = 0.04, botMax = Math.min(0.97, barTop - 0.015);
+    let hf = Math.min(0.80, botMax - topMin);
+    let H = 2 * halfH * hf;
     const Wd = H * BODY.w / BODY.h;
-    if (Wd > 2 * halfW * 0.86) H = 2 * halfW * 0.86 * BODY.h / BODY.w;
+    if (Wd > 2 * halfW * 0.86) { H = 2 * halfW * 0.86 * BODY.h / BODY.w; hf = H / (2 * halfH); }
     const w = H * BODY.w / BODY.h;
     const x = aspect > 1.15 ? Math.min(halfW * 0.42, halfW - w * 0.62) : 0;
-    return { x: x, y: -halfH * 0.03, z: -d, s: H / BODY.h, w: w, h: H };
+    const cf = Math.min(0.515, botMax - hf / 2);          // centre, fraction from the top
+    return { x: x, y: halfH * (1 - 2 * cf), z: -d, s: H / BODY.h, w: w, h: H, halfW: halfW, halfH: halfH };
+  }
+  /* WHERE THE HANDSET IS ON SCREEN, in client pixels (the whole body, not just
+     the glass). speech.js puts the voice on the line beside it, and the frame
+     below keeps every HUD control off it. */
+  let RECT = null;
+  function screenRect() {
+    if (!ST.open || !VIEW || !VIEW.visible) return null;
+    const L = layout(), cr = canvasRect();
+    const fx = function (x) { return cr.left + (0.5 + x / (2 * L.halfW)) * cr.width; };
+    const fy = function (y) { return cr.top + (0.5 - y / (2 * L.halfH)) * cr.height; };
+    return { left: fx(L.x - L.w / 2), right: fx(L.x + L.w / 2), top: fy(L.y + L.h / 2), bottom: fy(L.y - L.h / 2) };
+  }
+  CBZ.phoneScreenRect = function () { return ST.open ? RECT : null; };
+
+  /* NOTHING FROM THE WORLD'S HUD ON THE GLASS (owner, iPad: "when you're on
+     the phone, the buttons to interact overlap with the hang-up button").
+     The handset sits right of centre at 80% of the view's height, and the
+     touch cluster (FIRE, JUMP, the verb dock left of it), the verb chips and
+     the wheel all live in that same lower right. They stayed up while the
+     phone was out, drew over the call screen, and, being DOM above the
+     canvas, took the finger before the glass ever saw it. So while the phone
+     is up, any of them whose box crosses the handset's box is hidden and
+     untouchable (body.city-phone-up + .phone-covered), and given back the
+     moment it is put away. Taps then reach the glass first (this file's
+     capture listeners), and only off the glass the world. */
+  const HUD_SEL = "#tbtns > *, #tveh > *, #tstick, #interact, #verbWheel, #hotbar, .tpill, #cRadar, #minimap";
+  let covered = [], coverT = 0, styled = false;
+  function coverStyle() {
+    if (styled || !document.head || !document.createElement) return;
+    styled = true;
+    const st = document.createElement("style");
+    st.textContent = ".phone-covered{visibility:hidden!important;pointer-events:none!important}";
+    try { document.head.appendChild(st); } catch (e) {}
+  }
+  function uncoverAll() {
+    for (let i = 0; i < covered.length; i++) { try { covered[i].classList.remove("phone-covered"); } catch (e) {} }
+    covered = [];
+  }
+  function coverHud(r) {
+    if (!r || !document.querySelectorAll) return;
+    coverStyle();
+    let els = [];
+    try { els = document.querySelectorAll(HUD_SEL); } catch (e) { els = []; }
+    const now = [];
+    for (let i = 0; i < els.length; i++) {
+      const el = els[i];
+      const b = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+      if (!b || !(b.width > 0 && b.height > 0)) continue;
+      // (visibility never moves a box, so a covered one measures true)
+      if (b.right > r.left - 4 && b.left < r.right + 4 && b.bottom > r.top - 4 && b.top < r.bottom + 4) {
+        el.classList.add("phone-covered"); now.push(el);
+      }
+    }
+    for (let i = 0; i < covered.length; i++) if (now.indexOf(covered[i]) < 0) { try { covered[i].classList.remove("phone-covered"); } catch (e) {} }
+    covered = now;
   }
   function placeView() {
     const v = view();
@@ -750,7 +869,12 @@
         ST.inHand = true;
       }
     }
+    barReadT -= dt;
+    if (barReadT <= 0) { barReadT = 0.5; readBar(); }
     placeView();
+    RECT = screenRect();
+    coverT -= dt;
+    if (coverT <= 0) { coverT = 0.2; coverHud(RECT); }
     // a call's timer and the ringing pulse move; everything else is a clock
     ST.paintT += dt;
     const live = !!(ring || (Ap && Ap.conv()));
@@ -761,7 +885,7 @@
   CBZ.phoneAudit = function () {
     return {
       open: ST.open, app: ST.app, hits: ST.hits.length, opens: ST.opens, taps: ST.taps,
-      view: !!(VIEW && VIEW.visible), fp: ST.fpFrame >= ST.frame - 2, canvas: cv ? CW + "x" + CH : null,
+      view: !!(VIEW && VIEW.visible), rect: RECT, covered: covered.length, fp: ST.fpFrame >= ST.frame - 2, canvas: cv ? CW + "x" + CH : null,
       chip: CBZ.cityPhoneChip(), apps: A() ? A().audit() : null,
     };
   };
