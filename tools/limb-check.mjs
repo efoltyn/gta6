@@ -297,7 +297,10 @@ const painter = { key: "test", fn: (face, u, v) => [COL[face] + u * 0.999, v] };
     const want = Math.abs(zc / c.hz) >= Math.abs(x / c.hx) ? (zc > 0 ? 0 : 2) : 1;
     const ax = Math.abs(Math.abs(zc / c.hz) - Math.abs(x / c.hx)) < 0.02;   // on a quadrant seam: either
     if (col === want || ax) okFace++;
-    const vv = Math.min(1, Math.max(0, (y + hb) / (2 * hb)));
+    // v runs along the old box span, held inside it at the ends: the top
+    // dome and the top 7% of the span take v 0.93, the bottom end >= 0.02
+    // (character.js limbBake: THE END DOMES WEAR THE CLOTH, NOT THE ROW'S EDGE)
+    const vv = y > L.y0 - 1e-5 ? 0.93 : Math.min(0.93, Math.max(0.02, (y + hb) / (2 * hb)));
     if (Math.abs(U[i * 2 + 1] - vv) < 1e-5) okV++;
     if (col === 0 && !ax) { dirN++; if ((u - 0.5) * x >= -1e-6) dirOK++; }
   }

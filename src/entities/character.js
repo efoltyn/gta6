@@ -292,8 +292,15 @@
     g.setAttribute("normal", new THREE.BufferAttribute(N, 3));
     if (paint) {
       const U = new Float32Array(nv * 2), F = C.userData.limbFace, Q = C.userData.limbU, hb = spec.boxH / 2;
+      // THE END DOMES WEAR THE CLOTH, NOT THE ROW'S EDGE: a dome past the
+      // segment's top joint (the ball over the hip, the shoulder) takes the
+      // cloth a little way down the span — v clamped to the end itself is the
+      // waistband / sleeve-head line at best and the NEIGHBOURING garment row
+      // at worst (clothes.js rowInset).
+      const vTop = 1 - 0.07, vBot = 0.02;
       for (let i = 0; i < nv; i++) {
-        const v = Math.min(1, Math.max(0, (P[i * 3 + 1] + hb) / spec.boxH));
+        const y = P[i * 3 + 1];
+        const v = y > y0 - 1e-5 ? vTop : Math.min(vTop, Math.max(vBot, (y + hb) / spec.boxH));
         const uv = paint.fn(LIMB_FACE[F[i]], Q[i], v);
         U[i * 2] = uv[0]; U[i * 2 + 1] = uv[1];
       }
@@ -2975,17 +2982,198 @@
   }
   const _neckE = new THREE.Euler(), _neckQ = new THREE.Quaternion();
   // the drawn neck: Object3D.updateMatrix with the angles held to the range
+  // (userData.tiltX / tiltZ: a DRAWN-only nod/tilt a holder lays over whatever
+  // the animation stored — the phone read's chin-down — set and cleared by
+  // its owner, so no damped channel ever integrates it)
   function neckUpdateMatrix() {
-    const r = this.rotation, L = NECK_LIMITS;
-    if (neckInRange(r)) {
+    const r = this.rotation, L = NECK_LIMITS, ud = this.userData;
+    const tx = (ud && ud.tiltX) || 0, tz = (ud && ud.tiltZ) || 0;
+    if (!tx && !tz && neckInRange(r)) {
       this.matrix.compose(this.position, this.quaternion, this.scale);
     } else {
-      _neckE.set(clampNeckValue(r.x || 0, -L.ext, L.flex), clampNeckValue(r.y || 0, -L.yaw, L.yaw),
-        clampNeckValue(r.z || 0, -L.roll, L.roll), r.order);
+      _neckE.set(clampNeckValue((r.x || 0) + tx, -L.ext, L.flex), clampNeckValue(r.y || 0, -L.yaw, L.yaw),
+        clampNeckValue((r.z || 0) + tz, -L.roll, L.roll), r.order);
       _neckQ.setFromEuler(_neckE);
       this.matrix.compose(this.position, _neckQ, this.scale);
     }
     this.matrixWorldNeedsUpdate = true;
+  }
+  /* ============================================================
+     THE ARMS HAVE A RANGE (shoulder, elbow, wrist) — the neck's law, for the
+     arms. Owner (iPad): "when the player's holding the phone, their arm looks
+     really stupid. It contorts weirdly." Measured: the third-person phone
+     hold solved the shoulder to x -8, z +87 degrees with the elbow at 96 —
+     the upper arm lay HORIZONTAL ACROSS THE CHEST at shoulder height, the
+     elbow 13 cm off the sternum, the forearm swinging forward off it like a
+     door. charArmTo's closed form keeps the shoulder's twist at zero, and
+     with a deeply bent elbow the wrist's offset from the upper arm's line is
+     almost all forward, so the sideways swing it needs is asin(dx / |uy|)
+     with |uy| near zero: any hand a little inboard of the shoulder throws
+     the upper arm across the body. Nothing anywhere said that was not a
+     shoulder.
+
+     So every arm joint has a range, in ANATOMICAL terms (not Euler
+     components, which mean different things after a quaternion writer —
+     charArmTo.wrist, a plant, a gun hold — has been through them):
+       SHOULDER  the upper arm's direction in the body: at most ~60 degrees
+                 behind the body line, and across the front only as far as
+                 the arm is raised forward (a hanging arm crosses ~25
+                 degrees; one raised in front may reach the far shoulder);
+                 humeral twist within ~100 degrees either way.
+       ELBOW     a hinge: 0..150 degrees of flexion, never backward (3
+                 degrees of slack for a locked arm), ~11 degrees of side
+                 play; the forearm's own twist lives in the forearm loft.
+       WRIST     ~80 degrees toward the palm, ~80 back, ~35 sideways.
+     Like the neck, the DRAWN pose composes from the clamped angles (the
+     joint's updateMatrix), so whatever any writer leaves, what renders and
+     what the hit zones read is a joint a person has; the stored rotation is
+     untouched (blend-from-current writers keep their state). Writers that
+     own the channel outright clamp their storage: CBZ.human.clampArm(rig).
+     tools/arm-limit-check.mjs holds every pose (and the phone holds) to it. */
+  const ARM_LIMITS = Object.freeze({
+    back: 0.87,         // sin(~60 deg): how far behind the body line the upper arm goes
+    across: 0.42,       // how far across the front a hanging upper arm swings (inward x)…
+    acrossFwd: 0.62,    // …plus this much per unit of forward raise
+    twist: 1.75,        // ~100 deg humeral rotation either way
+    elFlex: 2.62,       // ~150 deg elbow flexion
+    elExt: 0.05,        // ~3 deg past straight, no further
+    elSide: 0.20,       // ~11 deg of side play at the elbow
+    elTwist: 1.60,      // the elbow group's own twist (pronation is the forearm loft's)
+    wrFlex: 1.40,       // ~80 deg toward the palm
+    wrExt: 1.40,        // ~80 deg back of the hand
+    wrDev: 0.62,        // ~35 deg radial / ulnar
+  });
+  const _alQ = new THREE.Quaternion(), _alS = new THREE.Quaternion(), _alT = new THREE.Quaternion();
+  const _alD = new THREE.Vector3(), _alA = new THREE.Vector3(), _alB = new THREE.Vector3();
+  const AL_DOWN = new THREE.Vector3(0, -1, 0), AL_FWD = new THREE.Vector3(0, 0, -1);
+  function wrapPi(a) { return a > Math.PI ? a - 2 * Math.PI : (a < -Math.PI ? a + 2 * Math.PI : a); }
+  // twist of q about local +Y (swing-twist), radians
+  function twistY(q) { return wrapPi(2 * Math.atan2(q.y, q.w)); }
+  // q = swing(dir from -Y) * twist(about Y); rebuilt into `out`
+  function swingTwist(dir, tw, out) {
+    _alS.setFromUnitVectors(AL_DOWN, dir);
+    _alT.set(0, Math.sin(tw / 2), 0, Math.cos(tw / 2));
+    return out.copy(_alS).multiply(_alT);
+  }
+  /* SHOULDER. q: the arm group's quaternion in the body frame; sg: +1 for the
+     arm on +x, -1 on -x. Writes the in-range quaternion to `out`; returns
+     true if it had to move. */
+  function shoulderLimit(q, sg, out) {
+    const L = ARM_LIMITS;
+    // the upper arm's direction: q * (0,-1,0)
+    let dx = -2 * (q.x * q.y - q.w * q.z), dy = -(1 - 2 * (q.x * q.x + q.z * q.z)), dz = -2 * (q.y * q.z + q.w * q.x);
+    const tw = twistY(q);
+    let o = dx * sg, moved = false;
+    if (dz < -L.back) { dz = -L.back; moved = true; }
+    const lim = -(L.across + L.acrossFwd * Math.max(0, dz) + 0.5 * Math.max(0, dy));
+    if (o < lim) { o = lim; moved = true; }
+    const twOk = Math.abs(tw) <= L.twist || dy > 0.9;        // straight up: twist is undefined
+    if (!moved && twOk) return false;
+    if (moved) {
+      // keep the clamped components, give the rest to the vertical
+      const r = 1 - o * o - dz * dz;
+      dy = r > 0 ? (dy >= 0 ? 1 : -1) * Math.sqrt(r) : 0;
+      _alD.set(o * sg, dy, dz).normalize();
+    } else _alD.set(dx, dy, dz).normalize();
+    swingTwist(_alD, Math.max(-L.twist, Math.min(L.twist, tw)), out);
+    return true;
+  }
+  /* ELBOW. q: the elbow group's quaternion in the upper arm's frame. The
+     forearm (-Y) may swing only forward (+Z) up to elFlex, a hair back, and a
+     little sideways; its own twist within elTwist. */
+  function elbowLimit(q, out) {
+    const L = ARM_LIMITS;
+    const fx = -2 * (q.x * q.y - q.w * q.z), fy = -(1 - 2 * (q.x * q.x + q.z * q.z)), fz = -2 * (q.y * q.z + q.w * q.x);
+    const flex = Math.atan2(fz, -fy), side = Math.asin(Math.max(-1, Math.min(1, fx)));
+    const tw = twistY(q);
+    if (flex <= L.elFlex && flex >= -L.elExt && Math.abs(side) <= L.elSide && Math.abs(tw) <= L.elTwist) return false;
+    // a forearm folded "past" 180 is a backward bend: it clamps to straight
+    const f = flex > L.elFlex ? (flex > (L.elFlex + Math.PI) / 2 + 0.5 ? -L.elExt : L.elFlex) : Math.max(-L.elExt, flex);
+    const s = Math.max(-L.elSide, Math.min(L.elSide, side)), cs = Math.cos(s);
+    _alD.set(Math.sin(s), -cs * Math.cos(f), cs * Math.sin(f));
+    swingTwist(_alD, Math.max(-L.elTwist, Math.min(L.elTwist, tw)), out);
+    return true;
+  }
+  /* WRIST. q: the hand's quaternion in the elbow frame; rest = the hand frame
+     placeBodyHand builds (fingers -Z_h down the forearm's -Y). The forearm's
+     axis seen from the hand, A = q^-1 (0,-1,0), is (0,0,-1) at rest; flexion
+     tips it toward +Y_h (fingers to the palm), deviation toward +-X_h. */
+  function wristLimit(q, out) {
+    const L = ARM_LIMITS;
+    _alQ.copy(q).invert();
+    _alA.copy(AL_DOWN).applyQuaternion(_alQ);
+    const ax = _alA.x, ay = _alA.y, az = _alA.z;
+    const fl = Math.atan2(ay, -az), dv = Math.atan2(ax, -az);
+    if (fl <= L.wrFlex && fl >= -L.wrExt && Math.abs(dv) <= L.wrDev && az < 0) return false;
+    const f2 = Math.max(-L.wrExt, Math.min(L.wrFlex, fl)), d2 = Math.max(-L.wrDev, Math.min(L.wrDev, dv));
+    _alB.set(Math.tan(d2), Math.tan(f2), -1).normalize();     // the in-range forearm axis, hand frame
+    // q' = q * R(B -> A): then q'^-1 (0,-1,0) = B
+    _alS.setFromUnitVectors(_alB, _alA);
+    out.copy(q).multiply(_alS);
+    return true;
+  }
+  function armRoot(o) { return !!o._armBody && o.parent === o._armBody; }
+  // the drawn joints: Object3D.updateMatrix with the joint held to its range
+  function shoulderUpdateMatrix() {
+    if (armRoot(this) && shoulderLimit(this.quaternion, this.position.x >= 0 ? 1 : -1, _neckQ)) this.matrix.compose(this.position, _neckQ, this.scale);
+    else this.matrix.compose(this.position, this.quaternion, this.scale);
+    this.matrixWorldNeedsUpdate = true;
+  }
+  function elbowUpdateMatrix() {
+    if (elbowLimit(this.quaternion, _neckQ)) this.matrix.compose(this.position, _neckQ, this.scale);
+    else this.matrix.compose(this.position, this.quaternion, this.scale);
+    this.matrixWorldNeedsUpdate = true;
+  }
+  function wristUpdateMatrix() {
+    if (wristLimit(this.quaternion, _neckQ)) this.matrix.compose(this.position, _neckQ, this.scale);
+    else this.matrix.compose(this.position, this.quaternion, this.scale);
+    this.matrixWorldNeedsUpdate = true;
+  }
+  // in place, for writers that own the arms outright: true if anything moved
+  const _alO = new THREE.Quaternion();
+  function clampArm(rig, arm) {
+    let any = false;
+    for (const k of arm === "l" ? ["la"] : arm === "r" ? ["ra"] : ["la", "ra"]) {
+      const part = rig && rig.parts && rig.parts[k];
+      if (!part) continue;
+      const low = part.userData.low, cap = part.userData.cap;
+      if (shoulderLimit(part.quaternion, part.position.x >= 0 ? 1 : -1, _alO)) { part.quaternion.copy(_alO); any = true; }
+      if (low && elbowLimit(low.quaternion, _alO)) { low.quaternion.copy(_alO); any = true; }
+      if (cap && cap.userData.fit && wristLimit(cap.quaternion, _alO)) { cap.quaternion.copy(_alO); any = true; }
+    }
+    return any;
+  }
+  // tools: the anatomical angles of one arm as drawn-from-storage (radians)
+  function armAngles(rig, arm) {
+    const part = rig && rig.parts && rig.parts[arm === "l" ? "la" : "ra"];
+    if (!part) return null;
+    const q = part.quaternion, sg = part.position.x >= 0 ? 1 : -1;
+    const d = _alD.copy(AL_DOWN).applyQuaternion(q);
+    const lq = part.userData.low.quaternion;
+    const f = _alA.copy(AL_DOWN).applyQuaternion(lq);
+    const out = { out: d.x * sg, fwd: d.z, up: d.y, twist: twistY(q), flex: Math.atan2(f.z, -f.y), side: Math.asin(Math.max(-1, Math.min(1, f.x))), elTwist: twistY(lq) };
+    const cap = part.userData.cap;
+    if (cap && cap.userData.fit) {
+      _alQ.copy(cap.quaternion).invert();
+      const a = _alB.copy(AL_DOWN).applyQuaternion(_alQ);
+      out.wrFlex = Math.atan2(a.y, -a.z); out.wrDev = Math.atan2(a.x, -a.z); out.wrAz = a.z;
+    }
+    return out;
+  }
+  function armInRange(rig, arm, eps) {
+    const L = ARM_LIMITS, e = eps || 1e-3, A = armAngles(rig, arm);
+    if (!A) return true;
+    const lim = -(L.across + L.acrossFwd * Math.max(0, A.fwd) + 0.5 * Math.max(0, A.up));
+    const bad = [];
+    if (A.fwd < -L.back - e) bad.push("shoulder behind");
+    if (A.out < lim - e) bad.push("shoulder across");
+    if (Math.abs(A.twist) > L.twist + e && A.up <= 0.9) bad.push("shoulder twist");
+    if (A.flex > L.elFlex + e) bad.push("elbow over-flexed");
+    if (A.flex < -L.elExt - e) bad.push("elbow backward");
+    if (Math.abs(A.side) > L.elSide + e) bad.push("elbow sideways");
+    if (Math.abs(A.elTwist) > L.elTwist + e) bad.push("elbow twist");
+    if (A.wrFlex != null && (A.wrFlex > L.wrFlex + e || A.wrFlex < -L.wrExt - e || Math.abs(A.wrDev) > L.wrDev + e || A.wrAz >= 0)) bad.push("wrist");
+    return bad.length ? bad : true;
   }
   // per hair mesh, right before it draws (and callable by tools): neck pose -> influences
   function hairFollowSync(mesh) {
@@ -3203,15 +3391,19 @@
     const kY = (k) => base + k * sp;
     // ---- the PELVIS ------------------------------------------------------
     const pw = P.pelvisW / 2, pd = P.pelvisD / 2, pk = P.pelvisH / 0.20;
-    const hipOut = Math.max(pw, P.hipX + P.legW / 2 + 0.012);
+    // THE HIPS ARE THE TOPS OF THE THIGHS: the widest section is the thigh's
+    // outer line plus a hair of cloth, never a ledge wider than the legs
+    // (a man's pelvisW put it 1.6 cm out past his thighs — half the "shorts
+    // over trousers" read). A woman's still comes out of her own hipX.
+    const hipOut = P.hipX + P.legW / 2 + 0.012;
     const pTop = hipY + 0.03 + P.pelvisH / 2, pBot = hipY - 0.115 * pk;
     const pel = ringTable([
       { y: pBot,                a: Math.max(0.26 * pw, P.hipX - P.legW / 2 + 0.05), zf: 0.40 * pd, zb: 0.50 * pd, zc: 0, n: 2.2, tw: 0 },
       { y: hipY - 0.07 * pk,    a: 0.64 * hipOut, zf: 0.72 * pd, zb: 0.86 * pd, zc: 0, n: 2.4, tw: 0 },
       { y: hipY - 0.01 * pk,    a: 0.94 * hipOut, zf: 0.86 * pd, zb: 0.98 * pd, zc: 0, n: 2.6, tw: 0 },
       { y: hipY + 0.05 * pk,    a: hipOut,        zf: 0.92 * pd, zb: 0.98 * pd, zc: 0, n: 2.7, tw: 0 },
-      { y: hipY + 0.10 * pk,    a: lerpN(hipOut, pw, 0.6) * 0.985, zf: 0.93 * pd, zb: 0.93 * pd, zc: 0, n: 2.7, tw: 0 },
-      { y: pTop,                a: 0.95 * pw,     zf: 0.93 * pd, zb: 0.91 * pd, zc: 0, n: 2.7, tw: 0 },
+      { y: hipY + 0.10 * pk,    a: Math.min(hipOut, lerpN(hipOut, pw, 0.6)) * 0.985, zf: 0.93 * pd, zb: 0.93 * pd, zc: 0, n: 2.7, tw: 0 },
+      { y: pTop,                a: Math.min(0.95 * pw, 0.97 * hipOut), zf: 0.93 * pd, zb: 0.91 * pd, zc: 0, n: 2.7, tw: 0 },
     ]);
     // ---- the COLUMN (chest + waist + shoulders), rows in D/W units ----------
     const waistA = P.waistShare > 0 ? (P.waistW / 2) / W : ph.waist;
@@ -3372,10 +3564,36 @@
   // upper loft's fullest section (0.99 R), 1.25x the drop for a swung arm
   // reaching the same height from further down its length; above it the
   // loft's top dome (~0.81 R high), which a swing turns about the pivot.
+  /* THE SHOULDER IS THE JACKET'S, NOT A BALL. The shell used to stop INSIDE
+     the arm's top dome all the way round (the clamp below, above the pivot
+     too), so what a suit showed at the shoulder was the SLEEVE'S end dome — a
+     ball sitting on the end of a sloping trapezius, ringed by the painted
+     sleeve-head seam. A tailored jacket has a structured shoulder: the line
+     runs out level from the collar to past the arm and the sleeve hangs from
+     under it. So over the pivot the shell takes the union with a sphere
+     round the arm's own pivot, a pad's thickness bigger than the arm's top
+     dome (padR). The dome is a ball about that same pivot, so whatever the
+     arm does — swing, raise, cuffs — it turns INSIDE the pad and the seam
+     never opens; a raised arm leaves through the pad like a real sleeve. */
+  function padR(S) { return 0.97 * S.R + 0.016 * S.vs; }
+  const PAD_LO = -0.15;                 // the pad's underside, as a share of padR below the pivot
+  function jacketPad(S, x, y, z, out) {
+    const r = padR(S), dy = y - S.shoulderY;
+    if (dy < PAD_LO * r) return false;
+    const dx = Math.abs(x) - S.AX, d = Math.hypot(dx, dy, z);
+    if (d >= r || d < 1e-6) return false;
+    // medial of the pivot the pad merges into the trapezius: a vertex there is
+    // never pushed toward the neck (it would go in through the body)
+    if (dx < -0.3 * r && dy < 0.6 * r) return false;
+    const k = r / d;
+    out[0] = Math.sign(x || 1) * (S.AX + dx * k); out[1] = S.shoulderY + dy * k; out[2] = z * k;
+    return true;
+  }
   function jacketArmIn(S) {
-    const tilt = Math.min(0, S.P.armOutZ || 0) - 0.02, R = S.R, pad = 0.004 * S.vs;
+    const tilt = Math.min(0, S.P.armOutZ || 0) - 0.02, R = S.R, pad = 0.004 * S.vs, rP = padR(S);
     return function (y) {
       const h = y - S.shoulderY;
+      if (h >= PAD_LO * rP) return Infinity;                    // the pad (jacketPad) owns it
       if (h <= 0) return S.AX - 0.99 * R + 1.25 * tilt * -h - pad;
       // (an arm held out — armour pushes it, ch.armWear — tips the dome in)
       const q = h / R;
@@ -3417,7 +3635,7 @@
     }
     return best;
   }
-  const _jc = [0, 0];
+  const _jc = [0, 0], _jp = [0, 0, 0];
   // twice the hug under the shoulder flare: the surfaces there slope steeply,
   // so a horizontal gap is a much thinner one along the normal
   function jacketHug(S, y) { return y > S.shoulderY - 1.3 * S.R ? 2 * JACKET_HUG : JACKET_HUG; }
@@ -3483,6 +3701,16 @@
     else if (part === "waist") { y0 = S.yBot; y1 = S.chestBot + WAIST_TUCK; n = TORSO_COUNTS.waist[far]; }
     else { y0 = spec.y0; y1 = Math.min(spec.y1, S.yTop); n = TORSO_COUNTS[part][far]; }
     const off = shell ? spec.off : 0;
+    /* THE JACKET COVERS THE SEAT. A suit jacket hangs to about the bottom of
+       the seat; the shell stopped at the hip joint at the back and was swept
+       up to the WAIST at the front (so a seated thigh could not pass through
+       it), and what the camera saw below was a skirt PAINTED onto the pelvis
+       — a jacket-coloured pair of briefs over the trousers. Now the shell
+       itself hangs to the seat all round, straight down from the hips (the
+       drape below), open at the front between the quarters (the paint's
+       cut), and only a SEATED body (spec.seated: jacketPosture swaps it)
+       wears the old swept front. */
+    if (part === "jacket") y0 = Math.min(y0, S.hipY - 0.085 * S.pk);
     const drapeR = part === "jacket" ? S.at(S.base + 0.60 * S.sp) : null;
     const drapeK = part === "jacket" ? (S.P.fem ? 0.90 : 0.96) : 0;
     const armIn = part === "jacket" ? jacketArmIn(S) : null;
@@ -3507,6 +3735,8 @@
           const aFree = r.a;
           r.a = Math.max(aHere + jacketHug(S, y), Math.min(r.a, armIn(y)));
           if (r.a < aFree - 1e-6) r.n = jacketFlankN(S, y, r, r.a - aHere);
+          const rP = padR(S), h = y - S.shoulderY;
+          if (h >= PAD_LO * rP && h < rP) r.a = Math.max(r.a, S.AX + rP * Math.sqrt(1 - (h / rP) * (h / rP)));
         }
         // the shoulder top rises with the shell (a jacket's rise eases in: a
         // step in ring height would stretch one band across the shoulder cap)
@@ -3531,6 +3761,12 @@
       const take = (p) => { for (const r of partRings({ S, part: p }, lod)) if (r.y > y0 && r.y < y1) at.push(r.y); };
       take("chest"); take("pelvis");
       if (S.chestBot > S.base + 0.001) take("waist");
+      const rP = padR(S);                                       // the pad's own sections
+      for (const k of [PAD_LO, -0.05, 0.15, 0.35, 0.52, 0.66, 0.78, 0.88, 0.95]) {
+        const y = S.shoulderY + k * rP;
+        if (y > y0 && y < y1) at.push(y);
+      }
+      for (const k of [0.25, 0.5, 0.75]) at.push(y0 + k * (S.hipY - y0));   // the skirt
       at.sort((a, b) => a - b);
       ys = at.filter((y, i) => i === 0 || y - at[i - 1] > 0.002 * S.vs);
     }
@@ -3540,7 +3776,7 @@
     // vertices move onto the shell's own ring at the height they rise to
     // (ring.lift, blended by front-ness in torsoBake), so they stay the right
     // distance off the belly and the arms there.
-    const liftTop = part === "jacket" ? Math.max(y0, S.hipY + 0.5 * S.P.legW + 0.02 * S.vs) : y0;
+    const liftTop = part === "jacket" && spec.seated ? Math.max(y0, S.hipY + 0.5 * S.P.legW + 0.02 * S.vs) : y0;
     const liftZ = liftTop + 0.12 * S.vs;
     for (let i = ys.length - 1; i >= 0; i--) {
       const y = ys[i], r = ringAt(y);
@@ -3579,6 +3815,7 @@
     const Pp = new Float32Array(nv * 3), Fc = new Uint8Array(nv), Uq = new Float32Array(nv), Vq = new Float32Array(nv);
     const box = spec.box, bh = box.h, bb = box.y - bh / 2, oy = spec.origin;
     const shellRelief = part === "jacket" ? 0.8 : (part === "vest" ? (spec.flat ? 0.35 : 0.7) : 1);
+    const lap = part === "jacket" && spec.lapel && spec.lapel.xr > 0 ? spec.lapel : null;
     const armIn = part === "jacket" ? jacketArmIn(S) : null;
     let o = 0;
     const put = function (x, y, z, f, u, v) { Pp[o * 3] = x; Pp[o * 3 + 1] = y - oy; Pp[o * 3 + 2] = z; Fc[o] = f; Uq[o] = u; Vq[o] = v; return o++; };
@@ -3594,9 +3831,11 @@
         const v = 0.01 + 0.98 * (R.v != null ? R.v : cl01((p.y - bb) / bh));
         if (part === "pelvis") z += pelvisFeatZ(S, p.y, p.xn, p.c);
         else if (part !== "collar") z += featZ(S, R.k, p.xn, p.c) * shellRelief;
+        if (lap && p.c > 0.15) z += lapelRoll(S, lap, p.x, 1 - v) * Math.min(1, (p.c - 0.15) / 0.3);
         let x = p.x, y = p.y;
         if (R.lift) y += R.lift * sm01((p.c + 0.15) / 0.55);   // the jacket's cutaway front (partRings)
         if (armIn) { _jc[0] = x; _jc[1] = z; jacketFit(S, y, _jc, armIn); x = _jc[0]; z = _jc[1]; }
+        if (armIn && jacketPad(S, x, y, z, _jp)) { x = _jp[0]; y = _jp[1]; z = _jp[2]; }
         put(x, y, z, f, u, v);
       }
     }
@@ -3661,6 +3900,25 @@
     g._shared = true;
     return (TORSO_GEO[key] = g);
   }
+  /* MODELLED LAPELS. A painted lapel on a smooth shell is a flat sticker; a
+     real one ROLLS: the cloth turns back along the V and stands proud of the
+     chest, highest at the roll line and settling into the front toward its
+     outer edge. The tailored atlas (city/clothes.js formalTorso) lays the V
+     out in body units — X = x / (2 xr) across the front, row r down the
+     jacket row, the gorge at (g0, 0.1) running to the fastening at (0, yb)
+     — so the shell lifts exactly the band the paint calls lapel: up to
+     ~5 mm at the roll, nothing past the lapel's width. Geometry, not a new
+     draw call: the same shell, the same atlas. */
+  function lapelRoll(S, L, x, r) {
+    const r0 = 0.1, r1 = L.yb;
+    if (r < r0 || r > r1) return 0;
+    const t = (r - r0) / (r1 - r0);
+    const X = Math.abs(x) / (2 * L.xr), Xe = L.g0 * (1 - t), wl = 0.15 - 0.12 * t;
+    const q = (X - Xe) / wl;
+    if (q < -0.15 || q > 1) return 0;
+    const k = q < 0 ? sm01((q + 0.15) / 0.15) : Math.pow(1 - q, 0.6);
+    return 0.0075 * S.vs * k * (1 - 0.5 * t);
+  }
   /* A part's spec: which slice of which body, in which mesh frame. box = the
      box it replaces {w, h, d, y (body-local centre)}, origin = the mesh's
      body-local y (geometry is baked relative to it). */
@@ -3671,7 +3929,8 @@
     // painted-collar pools one per neck, not one per body type
     const who = part === "collar" ? "N" + [S.nRx, S.nRz, S.nZc, S.tf, S.tb, S.vs].map((x) => x.toFixed(4)).join(",") : S.key;
     if (part === "collar") sp.key = who + "|collar|" + (sp.bare ? 1 : 0) + "|" + [box.w, box.h, box.d].map((x) => (+x).toFixed(4)).join(",");
-    else sp.key = who + "|" + part + "|" + [box.w, box.h, box.d, box.y, origin, sp.y0 || 0, sp.y1 || 0, sp.off || 0, sp.flat || 0, sp.bare ? 1 : 0].map((x) => (+x).toFixed(4)).join(",");
+    else sp.key = who + "|" + part + "|" + [box.w, box.h, box.d, box.y, origin, sp.y0 || 0, sp.y1 || 0, sp.off || 0, sp.flat || 0, sp.bare ? 1 : 0, sp.seated ? 1 : 0].map((x) => (+x).toFixed(4)).join(",") +
+      (sp.lapel ? "|L" + [sp.lapel.xr, sp.lapel.yb, sp.lapel.g0].map((x) => (+x).toFixed(4)).join(",") : "");
     return sp;
   }
   function partMesh(spec, material) {
@@ -3728,7 +3987,7 @@
     const y0 = opts.y0 != null ? opts.y0 : S.base, y1 = opts.y1 != null ? opts.y1 : S.yTop;
     const box = opts.box || { w: S.W * 2, h: y1 - y0, d: S.D * 2, y: (y0 + y1) / 2 };
     return partSpec(S, kind, box, opts.origin != null ? opts.origin : 0,
-      { y0, y1, off: opts.off != null ? opts.off : 0.03 * S.vs, flat: opts.flat || 0 });
+      { y0, y1, off: opts.off != null ? opts.off : 0.03 * S.vs, flat: opts.flat || 0, lapel: opts.lapel || null });
   }
   CBZ.humanShellSpec = shellSpec;
 
@@ -4034,6 +4293,14 @@
     const handR = makeBodyHand(1, handFit, c.skin);
     if (handL) { la.userData.low.add(handL); la.userData.cap = handL; }
     if (handR) { ra.userData.low.add(handR); ra.userData.cap = handR; }
+    // THE ARMS HAVE A RANGE: the drawn shoulder / elbow / wrist hold to it
+    // (a shoulder only while it hangs on THIS body: a severed arm tumbles free)
+    for (const a of [la, ra]) {
+      Object.defineProperty(a, "_armBody", { value: body, writable: true, configurable: true, enumerable: false });   // (not userData: Object3D.copy JSON-clones that)
+      a.updateMatrix = shoulderUpdateMatrix;
+      a.userData.low.updateMatrix = elbowUpdateMatrix;
+      if (a.userData.cap) a.userData.cap.updateMatrix = wristUpdateMatrix;
+    }
 
     // neck pivot so the head can turn/tilt independently. neckDrop sinks the
     // head toward the shoulders for the young: a toddler has no visible neck at
@@ -5394,6 +5661,140 @@
       if (fore) fore.rotation.y = 0;
     }
   };
+  /* ---- THE PHONE HOLD — one body, every game -----------------------------
+     The phone used to be held three different wrong ways: the player's
+     third-person hold aimed charArmTo at a point by the chest (the upper arm
+     ended up horizontal across the chest, see THE ARMS HAVE A RANGE), a
+     ped's call was a hand-typed Euler (-0.55, -0.55, -0.35 / elbow -2.35)
+     that put the hand 47 cm out from the ear, beside the head, at chin
+     height, and the gawker's film pose another. Now the BODY knows how a
+     phone is held, from its own measures, and everyone asks it:
+       "ear"   upper arm down and forward, the elbow down and out in front of
+               the shoulder, the palm on the cheek, the phone up the side of
+               the face to the ear; the head leans into it.
+       "read"  the elbow at the side, the forearm up and in, the phone in
+               front of the chest with its glass to the eyes; chin down.
+       "film"  the phone up at eye height out in front, the other hand
+               steadying it.
+     Each places the WRIST CREASE and says where the forearm comes from
+     (charArmTo.wrist: exact, elbow on the reach circle, clear of the body),
+     then turns the hand so the palm faces the cheek / the eyes, untwists the
+     forearm loft to it, and holds the result to the arm's range.
+       CBZ.human.phoneHold(rig, mode, {arm: "r"|"l", k})  -> residual or null
+       CBZ.human.phoneHold.release(rig, arm)
+       CBZ.human.phoneSeat(rig, prop, {arm, scale})  the handset in that palm
+     The handset's convention (city/phone.js, city/peds.js): long axis +Y,
+     glass +Z. Seated: long axis up the hand toward the wrist, glass out of
+     the palm, back in the cupped fingers (fpHands "hold034"). */
+  const PHONE_POSE = "hold034";
+  const _phS = new THREE.Vector3(), _phE = new THREE.Vector3(), _phW = new THREE.Vector3(), _phF = new THREE.Vector3();
+  const _phN = new THREE.Vector3(), _phV = new THREE.Vector3(), _phX = new THREE.Vector3(), _phY = new THREE.Vector3(), _phZ = new THREE.Vector3();
+  const _phM = new THREE.Matrix4(), _phQ = new THREE.Quaternion(), _phBQ = new THREE.Quaternion(), _phLQ = new THREE.Quaternion();
+  const _phFW = new THREE.Vector3(), _phWW = new THREE.Vector3();
+  // a point in the NECK frame, in the body frame
+  function neckToBody(ch, x, y, z, out) {
+    out.set(x, y, z);
+    ch.neck.localToWorld(out);
+    return ch.body.worldToLocal(out);
+  }
+  function phoneHold(ch, mode, opts) {
+    opts = opts || {};
+    const arm = opts.arm === "l" ? "l" : "r";
+    const part = ch && ch.parts && ch.parts[arm === "l" ? "la" : "ra"];
+    const low = part && part.userData && part.userData.low, hand = part && part.userData && part.userData.cap;
+    if (!ch || !ch.body || !ch.neck || !part || !low || !hand || !hand.userData.fit || !ch.profile) return null;
+    if (mode !== "ear" && mode !== "read" && mode !== "film") return null;
+    const k = armWeight(opts.k);
+    if (k <= 0) return null;
+    const P = ch.profile, sg = part.position.x >= 0 ? 1 : -1;
+    const l1 = -low.position.y, l2 = -hand.userData.fit.wristY;
+    const hk = P.headSize / 0.60;
+    ch.body.updateWorldMatrix(true, false);
+    ch.neck.updateWorldMatrix(false, false);
+    _phS.set(part.position.x, part.position.y, part.userData._armRestZ || 0);
+    // the eyes and (ear) the lobe on this arm's side, body frame
+    neckToBody(ch, 0, EYE.y * hk, EYE.front * hk, _phE);
+    if (mode === "ear") {
+      const H = CBZ.charHeadLandmarks ? CBZ.charHeadLandmarks(ch) : null;
+      const lb = H ? H.lobe : [0.27 * hk, 0.30 * hk, -0.02 * hk];
+      neckToBody(ch, Math.abs(lb[0]) * sg, lb[1], lb[2], _phV);
+      // the wrist under the jaw corner, a hand's thickness off the cheek: the
+      // handset runs from there up the face to the ear
+      _phW.set(_phV.x + sg * 0.06 * hk, _phV.y - 0.27 * hk, _phV.z + 0.13 * hk);
+      _phF.set(-sg * 0.12, 1, -0.10).normalize();              // fingers: up the side of the head
+      _phN.set(-sg, 0, 0.30).normalize();                      // palm: on the cheek
+      _phV.set(sg * 0.55, -1, 0.55).normalize();               // the forearm comes up from down, out and in front
+    } else if (mode === "read") {
+      // the elbow at the side, a little forward; the forearm up and in
+      _phV.set(sg * 0.12, -1, 0.42).normalize();
+      _phX.copy(_phS).addScaledVector(_phV, l1);                // the elbow
+      _phF.set(-sg * 0.36, 0.45, 0.82).normalize();             // forearm, elbow -> wrist
+      _phW.copy(_phX).addScaledVector(_phF, l2);
+      _phV.copy(_phF).negate();                                 // wrist -> elbow
+      // the glass to the eyes (the chin comes down to meet it: tiltX below)
+      _phN.copy(_phE).sub(_phW); _phN.y -= 0.10 * hk; _phN.normalize();
+      _phF.x -= sg * 0.20;                                      // the hand turns in across the body
+    } else {
+      // film: the phone up at the eyes, out in front; the other hand steadies it
+      const sup = !!opts.support;
+      _phW.set(_phE.x + sg * (sup ? 0.16 : 0.24) * hk, _phE.y - 0.32 * hk, _phE.z + 0.20 * hk);
+      _phV.set(sg * 0.55, -1, -0.30).normalize();
+      _phF.set(-sg * (sup ? 0.6 : 0.10), 1, 0.15).normalize();
+      _phN.copy(_phE).sub(_phW).normalize();
+    }
+    // the hand frame (body frame): Z_h = -fingers, Y_h = -palm normal
+    _phY.copy(_phN).negate();
+    _phZ.copy(_phF).negate();
+    _phZ.addScaledVector(_phY, -_phZ.dot(_phY)).normalize();
+    _phX.crossVectors(_phY, _phZ);
+    _phM.makeBasis(_phX, _phY, _phZ);
+    _phQ.setFromRotationMatrix(_phM);                           // hand, in the body frame
+    // the wrist and the forearm, world, then the arm
+    _phWW.copy(_phW); ch.body.localToWorld(_phWW);
+    ch.body.getWorldQuaternion(_phBQ);
+    _phFW.copy(_phV).applyQuaternion(_phBQ);
+    if (ch.setHandPose) ch.setHandPose(arm, PHONE_POSE); else setBodyHandPose(ch, arm, PHONE_POSE);
+    const res = charArmTo.wrist(ch, _phWW, arm, _phFW, k);
+    if (res == null) return null;
+    // the hand, in the elbow frame
+    low.updateWorldMatrix(true, false);
+    low.getWorldQuaternion(_phLQ);
+    _phLQ.invert().multiply(_phBQ).multiply(_phQ);
+    hand.position.set(0, hand.userData.fit.wristY, 0);
+    if (k >= 1) hand.quaternion.copy(_phLQ); else hand.quaternion.slerp(_phLQ, k);
+    clampArm(ch, arm);                                          // storage in range too
+    wristTwist(ch, arm);
+    const nu = ch.neck.userData;
+    if (!opts.support) {
+      nu.tiltX = mode === "read" ? 0.30 * k : (mode === "film" ? -0.04 * k : 0.04 * k);
+      nu.tiltZ = mode === "ear" ? -sg * 0.10 * k : 0;
+    }
+    ch._phoneHold = mode;
+    return res;
+  }
+  phoneHold.release = function (ch, arm) {
+    if (!ch) return;
+    if (ch.neck && ch.neck.userData) { ch.neck.userData.tiltX = 0; ch.neck.userData.tiltZ = 0; }
+    charArmTo.contactRelease(ch, arm || "r", "relaxed");
+    ch._phoneHold = null;
+  };
+  const _psC = new THREE.Vector3(), _psX = new THREE.Vector3(), _psY = new THREE.Vector3(), _psZ = new THREE.Vector3(), _psM = new THREE.Matrix4();
+  function phoneSeat(ch, prop, opts) {
+    opts = opts || {};
+    const part = ch && ch.parts && ch.parts[opts.arm === "l" ? "la" : "ra"];
+    const hand = part && part.userData && part.userData.cap;
+    if (!hand || !prop) return false;
+    if (prop.parent !== hand) hand.add(prop);
+    const H = CBZ.fpHands;
+    if (H && H.gripCentre) H.gripCentre(PHONE_POSE, _psC); else _psC.set(0, -0.05, -0.04);
+    if (hand.userData.side < 0) _psC.x = -_psC.x;
+    prop.position.set(_psC.x, _psC.y - 0.012, _psC.z + 0.02);
+    _psX.set(1, 0, 0); _psY.set(0, 0, 1); _psZ.set(0, -1, 0);       // long axis up the hand, glass out of the palm
+    _psM.makeBasis(_psX, _psY, _psZ);
+    prop.quaternion.setFromRotationMatrix(_psM);
+    prop.scale.setScalar(opts.scale > 0 ? opts.scale : 1);
+    return true;
+  }
   /* How far a PALM can get from its shoulder, world metres: the two bones to
      the wrist crease (what charArmTo.wrist solves) plus the crease-to-palm
      offset of a planted hand. charArmTo.span is the socket's reach, which
@@ -5432,9 +5833,39 @@
   // toddler's actual waist. rig.hipY carries the real value; a legacy rig with
   // no profile falls back to the old constant, so nothing can regress.
   const CHARACTER_HIP_Y = 0.95;
+  // a seated body leans its shoulders toward the lap a touch (was 0.06: the
+  // sleeve's shoulder ball slid 4 cm out of a jacket's padded shoulder)
+  const SEAT_PROTRACT = 0.015;
   const hipYOf = (ch) => (ch && ch.hipY > 0 ? ch.hipY : CHARACTER_HIP_Y);
   const LEG_KEYS = ["ll", "rl"];
   const _hipPivot = new THREE.Vector3();
+  /* THE LEGS HANG FROM THE PELVIS'S OWN HIP JOINTS. The pelvis rides `body`
+     and the legs ride `model`; lockCharacterHips keeps the CENTRE of the hips
+     on the leg line, which is exact for a pitch but not for a yaw or a roll:
+     the swimmer's glance over the shoulder (body yaw ~0.5) and the thrash
+     roll swing the pelvis's side joints 6-9 cm off the thighs' tops — the
+     owner's "the top of my legs aren't connected to my torso". A body off
+     its feet (swimming) moves the leg roots onto the joints the pelvis is
+     actually drawing; anything that animates feet on a floor gets them home
+     (legRootsHome, every animChar), so no planted foot ever slides. */
+  const _lrP = new THREE.Vector3();
+  function legRootsFollow(ch) {
+    if (!ch || !ch.body || !ch.parts || !ch.parts.ll || !ch.parts.rl || !ch.profile) return;
+    ch.body.updateMatrix();
+    const hy = hipYOf(ch);
+    for (const leg of [ch.parts.ll, ch.parts.rl]) {
+      const sx = leg.userData._rootX != null ? leg.userData._rootX : (leg.userData._rootX = leg.position.x);
+      _lrP.set(sx, hy, 0).applyMatrix4(ch.body.matrix);
+      leg.position.copy(_lrP);
+    }
+    ch._legRootsMoved = true;
+  }
+  function legRootsHome(ch) {
+    if (!ch || !ch._legRootsMoved || !ch.parts) return;
+    const hy = hipYOf(ch);
+    for (const leg of [ch.parts.ll, ch.parts.rl]) if (leg && leg.userData._rootX != null) leg.position.set(leg.userData._rootX, hy, 0);
+    ch._legRootsMoved = false;
+  }
   function beginCharacterHipFrame(ch) {
     if (!ch || !ch.body) return;
     ch.body.position.x -= ch._hipCompX || 0;
@@ -5943,6 +6374,7 @@
       }
     } else if (ch.body) ch.body.rotation.z = 0;
     lockCharacterHips(ch);
+    legRootsFollow(ch);
     return true;
   }
 
@@ -5952,10 +6384,18 @@
     if (st.prone) {
       ch.swimming = true;
       if (o.pos) ch.group.position.copy(o.pos);
+      legRootsHome(ch);
       return poseSwimmerProne(ch, st, o);
     }
     ch.swimming = true;
     if (o.pos) ch.group.position.copy(o.pos);
+    legRootsHome(ch);
+    /* THE TORSO HINGES AT THE HIPS here too. This branch pitched ch.body (whose
+       origin is at the FEET) by up to 0.95 rad and wrote only its y: the pelvis
+       swung ~0.7 m off the tops of the thighs, carrying whatever hip lock the
+       last pose had left in body.position. The prone branch already strips
+       the lock and re-solves it; so does this one now. */
+    beginCharacterHipFrame(ch);
     const m = st.mood;                      // 0 = gliding crawl, 1 = treading
     const sw = Math.sin(st.stroke);
     const tw = Math.sin(st.tread);
@@ -5965,7 +6405,7 @@
     ch.group.rotation.x = 0;
     if (ch.body) {
       ch.body.rotation.x = (0.30 + pitchDrive) * (1 - m) + 0.95 * m;
-      ch.body.position.y = (Math.sin(st.stroke * 2) * 0.028) * (1 - m) + (tw * 0.02) * m;
+      ch.body.position.set(0, (Math.sin(st.stroke * 2) * 0.028) * (1 - m) + (tw * 0.02) * m, 0);
     }
     if (ch.parts) {
       // crawl: big alternating overhead sweep. tread: short sculling arcs.
@@ -6016,7 +6456,9 @@
         if (ch.low.ll) ch.low.ll.rotation.x = Math.max(0, ch.low.ll.rotation.x + (0.45 + gg * 0.40) * th);
         if (ch.low.rl) ch.low.rl.rotation.x = Math.max(0, ch.low.rl.rotation.x + (0.45 - gg * 0.40) * th);
       }
-    }
+    } else if (ch.body) ch.body.rotation.z = 0;
+    lockCharacterHips(ch);
+    legRootsFollow(ch);
     return true;
   }
 
@@ -6090,12 +6532,48 @@
     }
   }
   CBZ.charAnkleSolve = ankleSolve;
+  /* A SEATED SUIT. The shell hangs to the seat standing (THE JACKET COVERS
+     THE SEAT); a hip folded past ~45 degrees would carry the thighs up
+     through its front quarters, so a seated body wears the swept-front
+     variant — the jacket falls open over the lap — and gets the hanging one
+     back when it stands. Hysteresis, and the geometry is cached per spec. */
+  function jacketPosture(ch) {
+    const jm = ch && ch._jacketMesh;
+    if (!jm || !jm.visible || !ch.parts || !ch.parts.ll || !ch.parts.rl) return;
+    const sp = jm.userData && jm.userData.torsoPart;
+    if (!sp || sp.part !== "jacket" || !sp.S) return;
+    const bx = ch.body ? ch.body.rotation.x : 0;
+    const flex = Math.max(bx - ch.parts.ll.rotation.x, bx - ch.parts.rl.rotation.x);
+    const want = sp.seated ? flex > 0.6 : flex > 0.8;
+    if (want === !!sp.seated) return;
+    const alt = jm.userData._jacketAlt;
+    let next = alt && alt.key && alt.seated === want && alt.y0 === sp.y0 && alt.S === sp.S ? alt : null;
+    if (!next) {
+      next = partSpec(sp.S, "jacket", sp.box, sp.origin, { y0: sp.y0, y1: sp.y1, off: sp.off, flat: sp.flat, lapel: sp.lapel, seated: want });
+    }
+    next.lod = sp.lod;
+    jm.userData._jacketAlt = sp;
+    jm.userData.torsoPart = next;
+    if (jm.geometry && jm.geometry.userData && jm.geometry.userData.torso) jm.geometry = partGeometry(jm);
+  }
   function animChar(ch, speed, dt) {
     animCharBody(ch, speed, dt);
+    // THE THIGHS HANG FROM THE PELVIS, IN EVERY POSE: the walk's bob, the
+    // crouch's drop, the counter-rotation and every posed branch move `body`
+    // (the pelvis is on it) while the legs ride `model` — a sprint's bob put
+    // the tops of the thighs out through the waistband, a crouch dropped the
+    // pelvis 26 cm below them. The leg roots go where the pelvis draws its
+    // hip joints (THE LEGS HANG FROM THE PELVIS'S OWN HIP JOINTS).
+    legRootsFollow(ch);
+    // a held pose that closed a hand ON something (poses.js gripPole: the
+    // flag) lets go the frame the pose ends
+    if (ch._ikPose && ch._ikPose !== ch.pose) { charArmTo.contactRelease(ch, "both"); ch._ikPose = null; }
+    if (ch._jacketMesh) jacketPosture(ch);
     ankleSolve(ch, dt, false);
     if (ch._mounts) slingPose(ch);     // after every pose branch: see "A SLING GIVES"
   }
   function animCharBody(ch, speed, dt) {
+    if (ch._legRootsMoved) legRootsHome(ch);           // back on its feet: the leg roots go home
     // BODY LOD for every rig nobody manages (prison, warlord, disasters...):
     // city/peds.js drives its crowd through rig.setHandLod itself.
     if (!ch._lodExt && ch._autoLod) ch._autoLod();
@@ -6417,7 +6895,21 @@
       // knee), legs stretched forward with knees above the hips for low
       // loungers (the private-jet recliners) where a tuck would demand an
       // anatomically absurd fold.
-      const ref = ch.seatRef && (!CBZ.CONFIG || CBZ.CONFIG.CHAR_SEAT_POSE_V2 !== false) ? ch.seatRef : null;
+      /* A SEAT THAT DECLARED NOTHING still gets the real solve. The legacy
+         fake (below, kept only for a missing CBZ.moves) dropped the BODY 0.6
+         into the chair and left the legs hanging from the standing hip line:
+         the pelvis drew 42 cm under the tops of its own thighs. Undeclared
+         seats now sit the hips at the height the fake put them (the torso
+         lands where every legacy anchor expects it) on a synthesized cushion,
+         and the shared leg solve folds the legs to the floor from there. */
+      const v2 = !CBZ.CONFIG || CBZ.CONFIG.CHAR_SEAT_POSE_V2 !== false;
+      let ref = ch.seatRef && v2 ? ch.seatRef : null;
+      if (!ref && v2) {
+        const hs0 = (ch.group && ch.group.userData && ch.group.userData.humanScale) || 0.70;
+        const L = ch._legacySeat || (ch._legacySeat = { cushion: 0, floorBelow: 0, kind: null, legacy: true });
+        L.cushion = Math.max(0.05, (hipYOf(ch) - 0.6) * hs0 - 0.10 * hs0);
+        ref = L;
+      }
       if (ref && ch.model && CBZ.moves && CBZ.moves.seatLegs) {
         const pf = ch.profile;
         const post = (CBZ.CONFIG.CHAR_SEAT_POSTURE !== false && CBZ.charSeatPosture)
@@ -6648,8 +7140,8 @@
         // posture that is not "drive", so those are byte-identical.
         const stw = (post === "drive" && ch.driveSteer)
           ? Math.max(-1, Math.min(1, +ch.driveSteer || 0)) : 0;
-        if (ch.parts.la) { ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, armX - stw * 0.18, sr, dt); ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, armZ + (ch.armWear || 0) + stw * 0.10, sr, dt); ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, 0, sr, dt); ch.parts.la.position.z = damp(ch.parts.la.position.z, 0.06, sr, dt); }
-        if (ch.parts.ra) { ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, armX + stw * 0.18, sr, dt); ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -armZ - (ch.armWear || 0) + stw * 0.10, sr, dt); ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, 0, sr, dt); ch.parts.ra.position.z = damp(ch.parts.ra.position.z, 0.06, sr, dt); }
+        if (ch.parts.la) { ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, armX - stw * 0.18, sr, dt); ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, armZ + (ch.armWear || 0) + stw * 0.10, sr, dt); ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, 0, sr, dt); ch.parts.la.position.z = damp(ch.parts.la.position.z, SEAT_PROTRACT, sr, dt); }
+        if (ch.parts.ra) { ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, armX + stw * 0.18, sr, dt); ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -armZ - (ch.armWear || 0) + stw * 0.10, sr, dt); ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, 0, sr, dt); ch.parts.ra.position.z = damp(ch.parts.ra.position.z, SEAT_PROTRACT, sr, dt); }
         setElbow(J.la, elb - stw * 0.10, sr); setElbow(J.ra, elb + stw * 0.10, sr);
         if (ch.neck) { ch.neck.rotation.x = damp(ch.neck.rotation.x, neckX, sr, dt); ch.neck.rotation.z = damp(ch.neck.rotation.z, 0, sr, dt); }
         lockCharacterHips(ch);
@@ -6673,8 +7165,8 @@
       // every write stays a damp toward an absolute pose, so entering/leaving
       // the loop can never accumulate (the grapple brace-pose lesson).
       const tw = ch.typing ? Math.sin(ch.breath * 9) * 0.055 : 0;
-      if (ch.parts.la) { ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, -0.34 + tw, sr, dt); ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, 0.12, sr, dt); ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, 0, sr, dt); ch.parts.la.position.z = damp(ch.parts.la.position.z, 0.06, sr, dt); }
-      if (ch.parts.ra) { ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -0.34 - tw, sr, dt); ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.12, sr, dt); ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, 0, sr, dt); ch.parts.ra.position.z = damp(ch.parts.ra.position.z, 0.06, sr, dt); }
+      if (ch.parts.la) { ch.parts.la.rotation.x = damp(ch.parts.la.rotation.x, -0.34 + tw, sr, dt); ch.parts.la.rotation.z = damp(ch.parts.la.rotation.z, 0.12, sr, dt); ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, 0, sr, dt); ch.parts.la.position.z = damp(ch.parts.la.position.z, SEAT_PROTRACT, sr, dt); }
+      if (ch.parts.ra) { ch.parts.ra.rotation.x = damp(ch.parts.ra.rotation.x, -0.34 - tw, sr, dt); ch.parts.ra.rotation.z = damp(ch.parts.ra.rotation.z, -0.12, sr, dt); ch.parts.ra.rotation.y = damp(ch.parts.ra.rotation.y, 0, sr, dt); ch.parts.ra.position.z = damp(ch.parts.ra.position.z, SEAT_PROTRACT, sr, dt); }
       setElbow(J.la, -0.72 - tw, sr); setElbow(J.ra, -0.72 + tw, sr);
       if (ch.neck) { ch.neck.rotation.x = damp(ch.neck.rotation.x, ch.typing ? 0.11 : 0.04, sr, dt); ch.neck.rotation.z = damp(ch.neck.rotation.z, 0, sr, dt); }
       lockCharacterHips(ch);
@@ -7367,7 +7859,10 @@
     const rSwing = moving ? -swing * (hurtSide > 0 ? 1 - sev * 0.62 : 1) : 0;
     const lBend = hurtSide < 0 ? sev * 0.22 : 0;
     const rBend = hurtSide > 0 ? sev * 0.22 : 0;
-    const crouchHip = cb * 0.52;                 // thighs fold toward the chest
+    // (the hips drop 0.38 in a crouch — bobTarget — and the leg roots drop
+    // with them, so the fold is the one that keeps the feet on the floor:
+    // legUp cos 0.95 + legLo cos(0.95 - 1.9) ~ hipY - 0.38)
+    const crouchHip = cb * 0.95;                 // thighs fold toward the chest
     ch.parts.ll.rotation.x = damp(ch.parts.ll.rotation.x, lSwing - lBend - crouchHip, legRate, dt);
     ch.parts.rl.rotation.x = damp(ch.parts.rl.rotation.x, rSwing - rBend - crouchHip, legRate, dt);
     // CROSS-LEG GUARD: pose layers own z/y; recycled corpse splay must not
@@ -7395,8 +7890,8 @@
     const stanceK = (moving ? 0.10 + 0.10 * norm : 0.04) + GA.stanceKnee;
     const kneeL = moving ? stanceK + kneeAmp * Math.pow(Math.max(0, -cosP), 1.3) * (hurtSide < 0 ? 1 - sev * 0.7 : 1) : 0.04;
     const kneeR = moving ? stanceK + kneeAmp * Math.pow(Math.max(0, cosP), 1.3) * (hurtSide > 0 ? 1 - sev * 0.7 : 1) : 0.04;
-    setKnee(J.ll, kneeL + lBend * 1.4 + cb * 1.00, legRate);
-    setKnee(J.rl, kneeR + rBend * 1.4 + cb * 1.00, legRate);
+    setKnee(J.ll, kneeL + lBend * 1.4 + cb * 1.90, legRate);
+    setKnee(J.rl, kneeR + rBend * 1.4 + cb * 1.90, legRate);
 
     // ---- arms ----
     if (ch.aimingPose) {
@@ -7603,7 +8098,10 @@
       setElbow(J.la, -(elbBase + foldL + gd * 0.55), armRate - 2);
       setElbow(J.ra, -(elbBase + foldR + gd * 0.55), armRate - 2);
     }
-    if (!ch.aimingPose) {
+    // a held pose that turns the humerus (poses.js `twist: true`, folded
+    // arms) owns rotation.y; everything else hands it back to zero
+    const poseTwist = !moving && ch.pose && CBZ.charPoses && CBZ.charPoses[ch.pose] && CBZ.charPoses[ch.pose].twist;
+    if (!ch.aimingPose && !poseTwist) {
       if (!(ch.carryPose && ch.aimLong === true && CBZ.CONFIG.CHAR_PORT_ARMS_CARRY === false)) {
         ch.parts.la.rotation.y = damp(ch.parts.la.rotation.y, 0, 10, dt);
         ch.parts.la.position.z = damp(ch.parts.la.position.z, 0, 12, dt);
@@ -8594,6 +9092,15 @@
     neckLimits: NECK_LIMITS,
     clampNeck: clampNeck,
     neckInRange: neckInRange,
+    // THE ARMS HAVE A RANGE: limits, an in-place clamp, the anatomical angles
+    // of an arm and the test (true, or the list of what is out)
+    armLimits: ARM_LIMITS,
+    clampArm: clampArm,
+    armAngles: armAngles,
+    armInRange: armInRange,
+    // THE PHONE HOLD: ear / read / film, and the handset in the palm
+    phoneHold: phoneHold,
+    phoneSeat: phoneSeat,
     // the skull entities/headwear.js fits every hat to (read live, not copied)
     headForms: HEAD_FORMS,
     jawMul: jawMul,

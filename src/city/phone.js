@@ -553,17 +553,38 @@
 
   /* helditems.js calls this from fpsmode's viewmodel pass while the phone is
      the held thing: pose the right wrist under the handset (vm space). */
+  /* THE HAND THAT HOLDS IT (first person). It used to be the fist path's
+     default: fingers continuing the forearm, rolled 1.15 rad about it, so the
+     hand pointed diagonally up and across the glass with its palm to the side
+     and the wrist in front of the screen. A phone is cradled: the palm under
+     its back, the fingers up behind it, the thumb on the right edge. So the
+     wrist sits a little BEHIND the glass below its bottom right corner, and
+     the hand's frame is set outright (T.handQ, vm space): palm toward you
+     (against the handset's back), fingers up and a little in and away. The
+     elbow stays down and out (fpsmode's pole), the forearm rising into it. */
+  const _hq = new THREE.Quaternion(), _hx = new THREE.Vector3(), _hy = new THREE.Vector3(), _hz = new THREE.Vector3(), _hm = new THREE.Matrix4();
   CBZ.phoneFpHold = function (vm, T) {
     if (!ST.open || !vm || !T) return false;
     ST.fpFrame = ST.frame;
     const L = layout();
-    // the wrist sits under the bottom right of the phone, the fingers come up onto it
-    _v.set(L.x + L.w * 0.18, L.y - L.h * 0.5 - 0.17, L.z + 0.07);
+    _v.set(L.x + L.w * 0.30, L.y - L.h * 0.5 - 0.06, L.z - 0.02);
     vm.updateMatrix();
     _m.copy(vm.matrix).invert();
     _v.applyMatrix4(_m);
     T.vis = true; T.hook = 0; T.curl = "hold034";
-    T.x = _v.x; T.y = _v.y; T.z = _v.z; T.roll = 1.15; T.bend = 0.25;
+    T.x = _v.x; T.y = _v.y; T.z = _v.z; T.roll = 0.6; T.bend = 0.2;
+    // the hand frame in camera space (right hand: +Y_h the back of the hand,
+    // -Z_h the fingers): palm to the camera, fingers up / in / away
+    _hy.set(0.30, 0, -1).normalize();                     // back of the hand faces away
+    _hz.set(0.18, -1, 0.35).normalize();                  // fingers (-Z) up, a touch left, away
+    _hz.addScaledVector(_hy, -_hz.dot(_hy)).normalize();
+    _hx.crossVectors(_hy, _hz);
+    _hm.makeBasis(_hx, _hy, _hz);
+    _hq.setFromRotationMatrix(_hm);
+    // camera -> vm space
+    if (!T.handQ) T.handQ = new THREE.Quaternion();
+    T.handQ.copy(vm.quaternion).invert().multiply(_hq);
+    T.handW = 1;
     return true;
   };
 

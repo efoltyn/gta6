@@ -351,13 +351,30 @@
   // remaining ~40 `dot()` calls in this file are each ONE hand-placed button,
   // stud, badge or motif on a known coordinate, which is a different thing.
   // If you want a new print, add a kind HERE and draw it with rect().
+  /* WOOL. A worsted suit is not a flat colour: a fine fleck of lighter and
+     darker fibre, and a faint nap catching the light down the chest and the
+     shoulder blades. Deterministic (a fixed hash), drawn once per atlas. */
+  function woolRow(R, bodyHex) {
+    const hi = rgba(0xffffff, 0.05), lo = rgba(0x000000, 0.07);
+    let h = 0x2545f491;
+    const rnd = () => { h ^= h << 13; h ^= h >>> 17; h ^= h << 5; return ((h >>> 0) % 10000) / 10000; };
+    for (const col of ["front", "back", "side"]) {
+      for (let i = 0; i < 260; i++) R.rect(col, rnd(), rnd(), 0.012 + rnd() * 0.02, 0.004, (i & 1) ? hi : lo);
+      R.rect(col, 0.18, 0.08, 0.16, 0.5, rgba(0xffffff, 0.035));     // the nap's sheen
+    }
+  }
   function patternRow(R, ctx, bodyHex, kind, accentHex) {
     if (kind === "solid" || !kind) return;
     ctx.save(); ctx.globalCompositeOperation = "source-atop";
     const light = tone(bodyHex, 0.22), dark = tone(bodyHex, -0.18);
-    if (kind === "pinstripe") {
+    if (kind === "pinstripe" || kind === "chalk") {
+      // (chalk: a softer, wider stripe further apart — an executive's)
+      const step = kind === "chalk" ? 0.16 : 0.12, w = kind === "chalk" ? 0.016 : 0.012;
       for (const col of ["front", "back", "side"])
-        for (let x = 0.06; x < 1; x += 0.12) R.rect(col, x, 0, 0.012, 1, light);
+        for (let x = 0.06; x < 1; x += step) R.rect(col, x, 0, w, 1, kind === "chalk" ? rgba(0xffffff, 0.16) : light);
+      if (kind === "chalk") woolRow(R, bodyHex);
+    } else if (kind === "wool") {
+      woolRow(R, bodyHex);
     } else if (kind === "windowpane") {
       for (const col of ["front", "back", "side"]) {
         for (let x = 0.12; x < 1; x += 0.26) R.rect(col, x, 0, 0.016, 1, light);
@@ -491,24 +508,13 @@
     // same rows): cloth all round, the quarters falling open below the button
     // over the fly and belt (a DB laps flat), the hip-pocket flaps (a dinner
     // jacket's are jetted). Seated, the thighs cover all of it.
-    const h0 = TAILOR.tHem;
-    // (sides and back from higher up: the swept hem lifts partway round the flank)
+    // (UNDER the shell — character.js partRings: THE JACKET COVERS THE SEAT —
+    // the shirt runs to the belt, which the PELVIS wears with the trousers.
+    // The jacket's skirt used to be PAINTED here and on the pelvis, a body-
+    // tight panel in jacket cloth over the hips and crotch: on any suit whose
+    // trousers were not the jacket's exact colour it was a pair of briefs
+    // pulled on over the trousers — the owner's "underwear over pants".)
     T.rect("side", 0, 0.62, 1, 0.38, jc); T.rect("back", 0, 0.62, 1, 0.38, jc);
-    T.rect("back", 0.494, TAILOR.tBelt + 0.04, 0.012, 1 - TAILOR.tBelt - 0.04, tone(jacketHex, -0.3));   // the vent
-    if (db) {
-      T.rect("front", 0, h0, 1, 1 - h0, jc);
-      T.rect("front", fx(-0.07), h0, 0.008, 1 - h0, tone(jacketHex, -0.3));          // the lap's edge
-    } else {
-      const panel = [[-0.004, h0], [0.5, h0], [0.5, 1], [0.1, 1], [0.05, TAILOR.tBelt], [-0.004, h0 + 0.02]];
-      T.poly("front", fpts(panel), jc);
-      T.poly("front", fpts(panel.map((p) => [-p[0], p[1]])), jc);
-    }
-    for (const s of [1, -1]) {
-      const x0 = s > 0 ? 0.1 : -0.34, fy = TAILOR.tBelt - 0.04;
-      if (!opts.bow) T.rect("front", fx(x0), fy, 0.24, 0.034, tone(jacketHex, -0.08));   // the flap
-      T.rect("front", fx(x0), fy, 0.24, 0.008, tone(jacketHex, -0.38));                   // the welt
-      if (!opts.bow) T.rect("front", fx(x0), fy + 0.034, 0.24, 0.006, "rgba(0,0,0,0.3)");
-    }
     T.shade();
 
     // ---- the JACKET SHELL (jacket row) ----
@@ -541,6 +547,25 @@
     // (the hip pockets are on the skirt, below the shell's swept hem)
     J.poly("front", fpts([[0.285, 0.375], [0.43, 0.36], [0.43, 0.382], [0.285, 0.397]]), tone(jacketHex, -0.32));
     if (opts.square) J.poly("front", fpts([[0.305, 0.377], [0.325, 0.343], [0.35, 0.366], [0.372, 0.346], [0.392, 0.369]]), hx(SHIRT_HEX));
+    // THE LAPEL PIN, on the wearer's left lapel above the breast pocket: the
+    // flag (the President, his cabinet), the detail's enamel pin (the Secret
+    // Service), a small gold one (an executive)
+    if (opts.pin) {
+      const px = fx(0.31), py = 0.215;
+      if (opts.pin === "flag") {
+        J.rect("front", px - 0.018, py - 0.012, 0.036, 0.024, "#e8e6e0");
+        for (let i = 0; i < 3; i++) J.rect("front", px - 0.018, py - 0.012 + i * 0.008, 0.036, 0.004, "#b3212f");
+        J.rect("front", px - 0.018, py - 0.012, 0.016, 0.012, "#2a3d7a");
+      } else J.dot("front", px, py, 0.011, opts.pin === "detail" ? "#c0262e" : "#d4b25a");
+    }
+    // THE HIP POCKETS, on the skirt of the shell (flap + welt; jetted on a
+    // dinner jacket), and the side vents / centre vent run to the hem below
+    for (const s of [1, -1]) {
+      const x0 = s > 0 ? 0.13 : -0.37, fy = 0.865;
+      if (!opts.bow) J.rect("front", fx(x0), fy, 0.24, 0.05, tone(jacketHex, -0.06));   // the flap
+      J.rect("front", fx(x0), fy, 0.24, 0.009, tone(jacketHex, -0.4));                   // the welt
+      if (!opts.bow) J.rect("front", fx(x0), fy + 0.05, 0.24, 0.007, "rgba(0,0,0,0.32)");
+    }
     // BUTTONS: one fastened at the waist (the lower one of a two-button sits
     // under the swept hem, unbuttoned, where nobody sees it); a DB's 2x3
     const btn = buttonTone(jacketHex);
@@ -560,7 +585,8 @@
     J.clearPoly("front", fpts([[-g0, 0], [g0, 0], [g0, gy], [0, yb], [-g0, gy]]));
     if (!db) J.clearPoly("front", fpts([[0, yb + 0.045], [0.1, 1], [-0.1, 1]]));
     J.shade();
-    return opts.bow ? { bow: 0x0b0c10, fp: 1 } : (opts.tie != null ? { tie: opts.tie | 0, fp: 1 } : { fp: 1 });
+    // (lap: the V's apex row — character.js models the lapels' roll off it)
+    return opts.bow ? { bow: 0x0b0c10, fp: 1, lap: yb, gorge: g0 } : (opts.tie != null ? { tie: opts.tie | 0, fp: 1, lap: yb, gorge: g0 } : { fp: 1, lap: yb, gorge: g0 });
   }
   // formalLimbs: sleeves with a shirt cuff and surgeon's cuff buttons; creased
   // trousers that break on the shoe; a satin braid down a dinner suit's outseam;
@@ -600,7 +626,7 @@
     const legs = st.legs != null ? st.legs : 0x14151a;
     const neck = formalTorso(P.T, P.J, body, lapel, { bow: true, square: true, satin: st.satin !== false, lapelType: st.lapel || "shawl", db: !!st.db, ctx: P.ctx, pattern: st.pattern });
     formalLimbs(P.A, P.L, body, legs, true, { ctx: P.ctx, pattern: st.pattern, stripe: true });
-    return { torso: 1, arms: 1, legs: 1, jacket: 1, fp: 1, neck: neck, skirt: { hex: body } };
+    return { torso: 1, arms: 1, legs: 1, jacket: 1, fp: 1, neck: neck, skirt: { hex: body }, trousers: { hex: legs } };
   };
   // suit accepts a STYLE record (SUIT_STYLES entry) OR a raw colors record. The
   // style drives pattern/db/vest/lapel/tie; raw {torso,legs} still works.
@@ -613,13 +639,16 @@
     const neck = formalTorso(P.T, P.J, body, lapelCss, {
       tie: st.tie != null ? st.tie : 0x7a1f2b, lapelType: st.lapel || "notch",
       pattern: st.pattern, db: !!st.db, vest: st.vest, ctx: P.ctx,
+      shirt: st.shirt, pin: st.pin,
       // a pocket square is a DRESSIER stance, so the styles that already carry
       // one (waistcoat, double-breasted, shawl dinner jacket) get it without
       // twenty-two table edits; an explicit st.square still wins either way.
       square: st.square != null ? !!st.square : (!!st.vest || !!st.db || st.lapel === "shawl"),
     });
-    formalLimbs(P.A, P.L, body, legs, false, { ctx: P.ctx, pattern: st.pattern });
-    return { torso: 1, arms: 1, legs: 1, jacket: 1, fp: 1, neck: neck, skirt: { hex: body } };
+    formalLimbs(P.A, P.L, body, legs, false, { ctx: P.ctx, pattern: st.pattern, shirt: st.shirt });
+    // an off-the-rack cut stands further off the body (boxier); a tailored
+    // one hugs it (the shell offset, applyClothes)
+    return { torso: 1, arms: 1, legs: 1, jacket: 1, fp: 1, neck: neck, skirt: { hex: body }, trousers: { hex: legs }, boxy: st.boxy ? 1 : 0 };
   };
 
   // ============================================================
@@ -1708,7 +1737,7 @@
     L.fill(hx(legHex));
     for (const col of ["front", "side", "back"]) L.rect(col, 0, 0.9, 1, 0.022, "rgba(0,0,0,0.22)");   // the break
     L.shade();
-    return { torso: 1, arms: 1, legs: 1, jacket: 1, fp: 1, neck: { fp: 1, band: tone2(tee, -0.1) } };
+    return { torso: 1, arms: 1, legs: 1, jacket: 1, fp: 1, neck: { fp: 1, band: tone2(tee, -0.1) }, trousers: { hex: legHex } };
   };
 
   // DESIGNER — the statement piece. A two-tone luxe jacket worn open: the
@@ -1752,7 +1781,7 @@
     L.rect("front", 0.49, 0.02, 0.02, 0.88, tone(legHex, -0.1));    // crease
     for (const col of ["front", "side", "back"]) L.rect(col, 0, 0.9, 1, 0.022, "rgba(0,0,0,0.18)");   // the break
     L.shade();
-    return { torso: 1, arms: 1, legs: 1, jacket: 1, fp: 1, neck: { fp: 1, open: 1, band: tone2(shirt, -0.06) } };
+    return { torso: 1, arms: 1, legs: 1, jacket: 1, fp: 1, neck: { fp: 1, open: 1, band: tone2(shirt, -0.06) }, trousers: { hex: legHex } };
   };
 
 
@@ -1853,7 +1882,7 @@
     const legs = 0x141519;
     const neck = formalTorso(P.T, P.J, 0x16171c, "rgb(30,31,37)", { bow: true, close: true, lapelType: "notch", vest: 0x141519, ctx: P.ctx });
     formalLimbs(P.A, P.L, 0x16171c, legs, false, { ctx: P.ctx });
-    return { torso: 1, arms: 1, legs: 1, jacket: 1, fp: 1, neck: neck, skirt: { hex: 0x16171c } };
+    return { torso: 1, arms: 1, legs: 1, jacket: 1, fp: 1, neck: neck, skirt: { hex: 0x16171c }, trousers: { hex: legs } };
   };
 
   // PILOT — crisp white shirt, black tie, gold-barred EPAULETTES on the
@@ -2855,7 +2884,19 @@
     { name: "Double-Breasted Peak Tuxedo", tux: true, body: 0x16171c, lapel: "peak", db: true },
     // 22: the protective-detail uniform (outfits.js CAT.detail; warlord's black suit too):
     // near-black two-piece, white shirt, BLACK tie. "Black Suit" (3) wears a banker's grey tie.
-    { name: "Detail Black",             body: 0x121318, tie: 0x08090c, pattern: "solid", legs: 0x101115 },
+    { name: "Detail Black",             body: 0x121318, tie: 0x08090c, pattern: "wool", legs: 0x101115, pin: "detail" },
+    // 23-28: THE ROLE SUITS (owner: "do a run on suits for Gang City,
+    // especially for the executive and the president... a ton of suits worn
+    // by staff look so fake"). Tailored navy / charcoal worsted for the
+    // President and the top floor, a chalk stripe for some executives,
+    // light-blue shirts, a real knotted tie, a square and a pin; the staff
+    // in cheaper off-the-rack grey or black, cut boxier (`boxy`).
+    { name: "President Navy",           body: 0x1b2540, tie: 0xa3162b, pattern: "wool", legs: 0x19223a, square: true, pin: "flag" },
+    { name: "Executive Charcoal Chalk", body: 0x2a2d35, tie: 0x1f3f7a, pattern: "chalk", legs: 0x272a31, shirt: 0xd6e4f2, square: true, pin: "gold" },
+    { name: "Executive Navy",           body: 0x1d2639, tie: 0x6e1f2b, pattern: "wool", legs: 0x1b2335, shirt: 0xd6e4f2 },
+    { name: "Cabinet Charcoal",         body: 0x2c2f36, tie: 0x24405e, pattern: "wool", legs: 0x292c33, pin: "flag" },
+    { name: "Staff Grey",               body: 0x5d6168, tie: 0x2b3d5c, pattern: "solid", legs: 0x585c63, boxy: true },
+    { name: "Staff Black",              body: 0x1c1d22, tie: 0x3a3d44, pattern: "solid", legs: 0x1a1b20, boxy: true },
   ];
   CBZ.citySuitStyles = SUIT_STYLES;                 // outfits.js reads names/indices
 
@@ -3230,11 +3271,23 @@
     p = painters[key] = {
       key: "cloth:" + key,
       fn: function (face, u, v) {
-        const col = COLS[face] || COLS.side, vv = b0 + v * (b1 - b0);
+        const col = COLS[face] || COLS.side, vv = rowInset(b0 + v * (b1 - b0), ry1 - ry0);
         return [(col[0] + u * (col[1] - col[0])) / W, 1 - (ry1 - vv * (ry1 - ry0)) / H];
       },
     };
     return p;
+  }
+  /* NEVER SAMPLE A ROW'S EDGE. Owner, swimming: "the top of my legs aren't
+     connected to my torso" — every thigh wore a pale band where it came out
+     from under the seat. The thigh's top end (and its dome over the hip
+     joint) mapped to v exactly 1, the leg row's top edge, which is the arm
+     row's last texel line: the SHIRT CUFF. Bilinear filtering (and every
+     mip level) blended the cuff's white into the trouser at the root of each
+     leg, and the shoulder ball took the jacket row's hem the same way. Every
+     atlas lookup is held 2.5 texels inside its own row. */
+  function rowInset(vv, rowPx) {
+    const e = 2.5 / Math.max(8, rowPx);
+    return vv < e ? e : (vv > 1 - e ? 1 - e : vv);
   }
   /* ---- TAILORING: the FRONT laid out in BODY units ------------------------
      A torso part's front face maps u ACROSS ITS OWN RING, and on the shaped
@@ -3269,7 +3322,7 @@
       key: "cloth-fp:" + key,
       fn: function (face, u, v, x) {
         if (face === "front" && x != null) u = Math.min(0.996, Math.max(0.004, 0.5 + x / (2 * xr)));
-        const col = COLS[face] || COLS.side, vv = b0 + v * (b1 - b0);
+        const col = COLS[face] || COLS.side, vv = rowInset(b0 + v * (b1 - b0), ry1 - ry0);
         return [(col[0] + u * (col[1] - col[0])) / W, 1 - (ry1 - vv * (ry1 - ry0)) / H];
       },
     };
@@ -3308,6 +3361,7 @@
      fractions on every profile and age). One painter, one baked pelvis per
      body shape per atlas, shared like the legs. */
   const SEAT_PAINTER = limbPainter("jacket", null);
+  const TROUSER_PAINTER = limbPainter("torso", null);
   /* THE SHARED PELVIS. A pelvis baked against an outfit's own atlas is one
      crowd pool per (body shape x outfit) — pedinstance keys pools on geometry
      + map, never colour — and dressing every suit's and every jumpsuit's
@@ -3342,12 +3396,21 @@
     J.rect("back", 0.49, 0, 0.02, 1, g(0.78));                                     // centre-back seam
     J.rect("side", 0.48, 0, 0.04, 1, g(0.78));
     hemBand(J, g(0.84), 0, 0.04);                                                   // waistband
-    const T = rowPainter(ctx, "torso"), y0 = TAILOR.tBelt;
-    T.rect("back", 0.494, y0 + 0.04, 0.012, 1 - y0 - 0.04, g(0.7));               // the vent
-    T.poly("front", fpts([[-0.05, y0], [0.05, y0], [0.1, 1], [-0.1, 1]]), g(0.82));   // the trousers between the quarters
-    T.rect("front", fx(-0.004), y0, 0.008, 1 - y0, g(0.6));                         // the fly
-    T.rect("front", fx(-0.06), y0, 0.12, 0.03, g(0.3));                             // the belt (or a waistband)
-    T.rect("front", fx(-0.02), y0 + 0.006, 0.04, 0.018, g(0.75));
+    // torso rows: TAILORED TROUSERS under a jacket (TROUSER_PAINTER, same
+    // ring-relative v as THE SEAT): a leather belt with its loops and buckle,
+    // the fly, slant pockets, jetted hip pockets, the seams. Tinted by the
+    // TROUSER colour (parts.trousers), so the hips are the top of the legs.
+    const T = rowPainter(ctx, "torso");
+    T.rect("front", 0.493, 0.07, 0.014, 0.52, g(0.72));                            // the fly
+    T.rect("front", 0.505, 0.08, 0.006, 0.46, g(0.86));
+    T.poly("front", [[0.05, 0.08], [0.11, 0.08], [0.2, 0.36], [0.15, 0.36]], g(0.8)); // slant pockets
+    T.poly("front", [[0.95, 0.08], [0.89, 0.08], [0.8, 0.36], [0.85, 0.36]], g(0.8));
+    T.rect("back", 0.14, 0.16, 0.24, 0.02, g(0.7)); T.rect("back", 0.62, 0.16, 0.24, 0.02, g(0.7));   // jetted hip pockets
+    T.rect("back", 0.494, 0.07, 0.012, 0.93, g(0.8));                             // centre-back seam
+    T.rect("side", 0.49, 0.07, 0.02, 0.93, g(0.84));                              // outseam
+    for (const col of ["front", "side", "back"]) T.rect(col, 0, 0, 1, 0.07, g(0.2));   // the belt
+    for (const x of [0.2, 0.8]) { T.rect("front", x, 0, 0.025, 0.075, g(0.5)); T.rect("back", x, 0, 0.025, 0.075, g(0.5)); }   // loops
+    T.rect("front", 0.465, 0.008, 0.07, 0.052, g(0.95)); T.rect("front", 0.478, 0.02, 0.044, 0.028, g(0.2));   // the buckle
     const tex = new THREE.CanvasTexture(cv);
     tex.magFilter = THREE.LinearFilter;
     tex._shared = true;
@@ -3560,10 +3623,15 @@
     // its colour wear THE SHARED PELVIS: a grey mask tinted the garment's colour,
     // one crowd pool per body shape per painter. A seat without a colour (an
     // apron over the lap) still wears its own atlas's jacket row.
-    const pv = xr > 0 && set.parts.skirt ? set.parts.skirt : (set.parts.seat && set.parts.seat.hex != null ? set.parts.seat : null);
+    // THE PELVIS IS THE TOP OF THE TROUSERS. Under a jacket it wears the
+    // TROUSERS (belt, fly, pockets) in the trouser colour, never the jacket's
+    // skirt (that hangs from the shell now: character.js THE JACKET COVERS
+    // THE SEAT). A one-piece SEAT wears its own colour.
+    const pv = set.parts.jacket && set.parts.trousers && set.parts.trousers.hex != null ? set.parts.trousers
+      : (set.parts.seat && set.parts.seat.hex != null ? set.parts.seat : null);
     const pm = pv ? pelvisMat(pv.hex) : null;
     if (pm) dressHips(s.pelvis, (opts && opts.iso) ? isoMat(ch, "pelvis~" + (pv.hex | 0), pm) : pm,
-      pv === set.parts.skirt ? fpPainter("torso", [0, 1 - TAILOR.tBelt], xr) : SEAT_PAINTER);
+      pv === set.parts.trousers ? TROUSER_PAINTER : SEAT_PAINTER);
     else if (set.parts.seat && !set.parts.jacket) dressHips(s.pelvis, m, SEAT_PAINTER);
     else if (set.parts.hips && set.parts.legs) dressHips(s.pelvis, m);
     else restore(s.pelvis);
@@ -3588,8 +3656,10 @@
       // the old box's hem and open at the neck (character.js humanShellSpec).
       const chestM = s.torso && s.torso[0];
       const spec = jf && chestM && CBZ.humanShellSpec ? CBZ.humanShellSpec(ch, "jacket", {
-        y0: chestM.position.y + jf.y - jf.dims[1] / 2, off: 0.03 * ((ch.profile && ch.profile.torsoH) || 0.95) / 0.95,
+        y0: chestM.position.y + jf.y - jf.dims[1] / 2, off: (set.parts.boxy ? 0.044 : 0.03) * ((ch.profile && ch.profile.torsoH) || 0.95) / 0.95,
         box: { w: jf.dims[0], h: jf.dims[1], d: jf.dims[2], y: chestM.position.y + jf.y }, origin: chestM.position.y + jf.y,
+        // MODELLED LAPELS: the tailored fronts tell the shell where the V runs
+        lapel: xr > 0 && set.parts.neck && set.parts.neck.lap ? { xr: xr, yb: set.parts.neck.lap, g0: set.parts.neck.gorge || 0.215 } : null,
       }) : null;
       if (spec) { jm.userData.torsoPart = spec; jm.geometry = CBZ.humanLimbGeometry(jm, xr > 0 ? fpPainter("jacket", null, xr) : limbPainter("jacket", null)); }
       else if (jf) jm.geometry = clothGeom("jacket", jf.dims);
@@ -3823,7 +3893,7 @@
       const neck = formalTorso(T, P.J, c.blazer, tone(c.blazer, 0.16), { tie: tie, bow: bow, shirt: shirt, lapelType: "notch", ctx: P.ctx });
       formalLimbs(A, L, c.blazer, legs, false, { ctx: P.ctx, shirt: shirt });
       if (!bow && tie == null) neck.collar = collar ? 1 : 0;
-      return { torso: 1, arms: 1, legs: 1, jacket: 1, fp: 1, neck: neck, skirt: { hex: c.blazer } };
+      return { torso: 1, arms: 1, legs: 1, jacket: 1, fp: 1, neck: neck, skirt: { hex: c.blazer }, trousers: { hex: legs } };
     }
     const sc = hx(shirt);
     let neck;

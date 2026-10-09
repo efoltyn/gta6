@@ -845,7 +845,7 @@
     } else {
       game.cityBank = T.startBank;
     }
-    if (CBZ.cityWearOutfit) CBZ.cityWearOutfit("suit", { silent: true });
+    if (CBZ.cityWearOutfit && !CBZ.cityWearOutfit("exec_suit", { silent: true })) CBZ.cityWearOutfit("suit", { silent: true });
     // Gold watch + designer shades — owned + worn so bling + drip read live.
     try {
       const e = CBZ.cityEcon;
@@ -1433,7 +1433,7 @@
   const AXES = {
     // ---- WHO: the costume, the title, and where you sit in the world -----
     who: {
-      exec:    { name: "The Executive", outfit: "suit",       title: "Executive",     blurb: "suit, gold watch, zero dollars" },
+      exec:    { name: "The Executive", outfit: "exec_suit",  title: "Executive",     blurb: "suit, gold watch, zero dollars" },
       barfly:  { name: "The Barfly",    outfit: "street",     title: "Regular",       blurb: "last call, every call" },
       tenant:  { name: "The Tenant",    outfit: "wifebeater", title: "Tenant",        blurb: "one room, one way out" },
       hitman:  { name: "The Hitman",    outfit: "suit",       title: "Contractor",    blurb: "somebody paid for a name" },
@@ -1442,7 +1442,7 @@
       debtor:  { name: "The Debtor",    outfit: "street",     title: "Mark",          blurb: "you are three weeks late" },
       wick:    { name: "The Marked",    outfit: "suit",       title: "Open Contract", blurb: "every single person wants the money" },
       racer:   { name: "The Racer",     outfit: "coveralls",  title: "Rookie",        blurb: "a loaner, a back-row start, one way up" },
-      president: { name: "The President", outfit: "suit",     title: "President",     blurb: "sworn in this morning; the country is yours" },
+      president: { name: "The President", outfit: "president_suit", title: "President",     blurb: "sworn in this morning; the country is yours" },
       captain: { name: "The Captain",   outfit: "coveralls",  title: "Skipper",       blurb: "your own hull, a crew, and open water" },
     },
 

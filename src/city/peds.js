@@ -4282,8 +4282,10 @@
     const ch = ped.char;
     const sock = ch && ch.sockets && (ch.sockets.rightHand || ch.sockets.weapon);
     if (!sock) return null;                       // gore took the arm — no hand, no phone
+    const cap = ch.parts && ch.parts.ra && ch.parts.ra.userData && ch.parts.ra.userData.cap;
+    const seat = CBZ.human && CBZ.human.phoneSeat && cap && cap.userData.fit ? cap : null;
     const cur = ped._phoneProp;
-    if (cur && cur.parent === sock) return cur;   // same rig, same socket: reuse
+    if (cur && cur.parent === (seat || sock)) return cur;   // same rig, same hand: reuse
     phoneAssets();
     const grp = new THREE.Group();
     const shell = new THREE.Mesh(_phGeo, _phMat);
@@ -4307,7 +4309,12 @@
     // and the earpiece/mouthpiece axis is unchanged, so the grip still reads.
     grp.rotation.y = Math.PI / 2;
     grp.visible = false;
-    sock.add(grp);
+    // IN THE PALM (entities/character.js phoneSeat): the body's phone hold turns
+    // the HAND to the cheek / the eyes, so the handset rides the hand, glass
+    // out of the palm. Its size stays the legible one (rig units -> the hand's
+    // own frame: / fit.s). No hand mesh (a stub rig): the old socket seat.
+    if (seat) CBZ.human.phoneSeat(ch, grp, { arm: "r", scale: 1 / cap.userData.fit.s });   // (box z = the glass, y = the long axis)
+    else sock.add(grp);
     ped._phoneProp = grp;
     return grp;
   }
@@ -7068,6 +7075,12 @@
       //      (owner's rule: you SEE someone see you — no popup tells you). ----
       // (guard ra/la individually — gore can strip a whole arm off the rig,
       //  and a one-armed witness must not crash the frame loop)
+      // a body that was on the phone and is not calling any more lets go
+      // (whatever took the arms: a gun, a fall, a cuff, the end of the call)
+      if (p.char && p.char._phoneHold && CBZ.human && CBZ.human.phoneHold &&
+          !(vis && p.enterT <= 0 && !p.dead && p.ko <= 0 && !p.armed && (p.reportState === "phone" || p.state === "film"))) {
+        CBZ.human.phoneHold.release(p.char, "r"); CBZ.human.phoneHold.release(p.char, "l");
+      }
       if (vis && p.enterT <= 0 && !p.dead && p.ko <= 0 && !p._traversal &&
           p.char && !p.char.traversePose && p.char.parts && p.char.parts.ra) {
         const ch = p.char, J = ch.low || {};
@@ -7075,10 +7088,19 @@
           // (armed peds skip these — their weapon-ready pose owns the arms,
           //  and an armed witness draws instead of dialing anyway)
           const LEG = legible();
+          // THE PHONE IS HELD BY THE BODY (entities/character.js THE PHONE
+          // HOLD): the hand-typed Euler that lived here put the fist 47 cm out
+          // beside the head at chin height. A body that stops calling lets go.
+          const HP = CBZ.human && CBZ.human.phoneHold;
+          const callMode = p.reportState === "phone" ? "ear" : (p.state === "film" && ch.parts.la ? "film" : null);
+          if (HP && ch._phoneHold && ch._phoneHold !== callMode) { HP.release(ch, "r"); HP.release(ch, "l"); }
           if (p.reportState === "phone") {
-            ch.parts.ra.rotation.set(-0.55, -0.55, -0.35);   // hand to ear
-            if (J.ra) J.ra.rotation.x = -2.35;
-            if (ch.neck) ch.neck.rotation.z = 0.10;          // head leans into the call
+            if (HP) HP(ch, "ear", { arm: "r" });
+            else {
+              ch.parts.ra.rotation.set(-0.55, -0.55, -0.35);   // hand to ear
+              if (J.ra) J.ra.rotation.x = -2.35;
+              if (ch.neck) ch.neck.rotation.z = 0.10;          // head leans into the call
+            }
             if (LEG) {
               // PUT A PHONE IN THE HAND. This arm has been going up empty since
               // the day it shipped, which is why it read as a salute: an ear
@@ -7117,10 +7139,13 @@
               if (ch.neck) ch.neck.rotation.z = 0;           // head up, talking to the officer
             }
           } else if (p.state === "film" && ch.parts.la) {
-            ch.parts.ra.rotation.set(-1.30, -0.18, -0.10);   // phone held up, two hands
-            if (J.ra) J.ra.rotation.x = -0.55;
-            ch.parts.la.rotation.set(-1.15, 0.22, 0.15);
-            if (J.la) J.la.rotation.x = -0.75;
+            if (HP) { HP(ch, "film", { arm: "r" }); HP(ch, "film", { arm: "l", support: true }); }
+            else {
+              ch.parts.ra.rotation.set(-1.30, -0.18, -0.10);   // phone held up, two hands
+              if (J.ra) J.ra.rotation.x = -0.55;
+              ch.parts.la.rotation.set(-1.15, 0.22, 0.15);
+              if (J.la) J.la.rotation.x = -0.75;
+            }
             if (LEG) {
               // the gawker's hands were cupped around nothing too. Same prop,
               // same socket, same lifecycle — a phone held up at you IS the
