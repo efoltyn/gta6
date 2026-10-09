@@ -391,6 +391,9 @@
     else {
       if (CBZ.verbs && CBZ.verbs.block) CBZ.verbs.block(t, 0.7);   // he is covering → punish it with a heavy
       addPosture(t, dmg * 0.22 * weaponFeel().post);
+      // a punch he covered is still a punch thrown at him
+      const pa = CBZ.city && CBZ.city.playerActor;
+      if (pa && t.kind !== "cop" && CBZ.cityStruck) CBZ.cityStruck(pa, t, false);
     }
     if (CBZ.sfx) CBZ.sfx("hit");
     addSelfPosture(10);
@@ -475,8 +478,16 @@
         if (t.gang && CBZ.cityGangProvoke) CBZ.cityGangProvoke(t.gang, 0.4);
         CBZ.cityCrime && CBZ.cityCrime(heavy ? 60 : 40, { x: t.pos.x, z: t.pos.z, type: "assault" });
         if (CBZ.cityPostEvent) CBZ.cityPostEvent({ type: "fight", pos: t.pos, radius: 10, intensity: 0.6 });
-        // SIZE-UP (sizeup.js): a survivor reads who just hit them
-        if (CBZ.citySizeUpHit && CBZ.city && CBZ.city.playerActor) CBZ.citySizeUpHit(t, CBZ.city.playerActor);
+        // HE ANSWERS IT (peds.js cityStruck, the same answer an NPC's fist gets):
+        // alarmed and afraid, his set rallies, the outclassed fold, the bold
+        // swing back, the rest go to the brain (flee / cower / report).
+        // Before this a punched man only had sizeup's fold; one who dared
+        // just stood there and took it.
+        const pa = CBZ.city && CBZ.city.playerActor;
+        if (pa) {
+          if (CBZ.cityStruck) CBZ.cityStruck(pa, t, res.reaction === "knockdown");
+          else if (CBZ.citySizeUpHit) CBZ.citySizeUpHit(t, pa);
+        }
       }
     }
     if (out === "ko" && t.kind !== "cop" && !t.dead) knockedOut(t);
@@ -508,8 +519,11 @@
      mounted, and every press of the one hit button is the next blow of the
      sequence from on top of him; `kind` forces one (the heavy button drops
      the elbow). A blade stabs down from the mount. */
+  // ON THE FLOOR, not merely moving: body.busy() is also true for a man in
+  // the air off a shove or still pitched from a stagger, and reading that as
+  // "down" mounted men who were standing.
   function isDown(t) {
-    return !!(t && !t.dead && (t.ko > 0 || (CBZ.body && CBZ.body.busy && CBZ.body.busy(t)) ||
+    return !!(t && !t.dead && (t.ko > 0 || (t._phys && t._phys.down > 0) ||
       (CBZ.vitals && CBZ.vitals.cuffable && CBZ.vitals.cuffable(t))));
   }
   function groundPound(t, kind) {

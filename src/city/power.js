@@ -1297,7 +1297,7 @@
         return !!(rec && rec.live && !q.dead && q !== rec.actor && !q.isFamily &&
           rec.actor && !rec.actor.dead && rec.audienceT <= 0 && rec.hostileT <= 0);
       },
-      label: "Ask",
+      label: "Request",
       onSelect: function (q) {
         const rec = q._powerOf;
         if (!rec) return;

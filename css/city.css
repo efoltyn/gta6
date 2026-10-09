@@ -330,4 +330,12 @@ body.touch.mode-city #interact .itouch-act:active{ background:var(--verb-press);
   font:700 11px/18px Fredoka, system-ui, sans-serif; text-align:center; text-shadow:none;
 }
 body.touch .vpill .vkey{ display:none; }
-body.full-map-open .vcluster, body.sim-view .vcluster{ display:none !important; }
+/* WHO HE IS, over his head while his verbs are up: "General Brandt",
+   "Officer Ruiz", "Store owner". One short line, a label, not a button. */
+#verbWheel .vname{
+  position:absolute; left:0; top:0; pointer-events:none; white-space:nowrap;
+  padding:3px 10px; border-radius:10px; background:var(--verb-bg, rgba(9,14,21,.72));
+  color:var(--verb-ink, #edf5fc); font:600 14px/1.2 Fredoka, system-ui, sans-serif;
+  letter-spacing:.3px; text-shadow:0 1px 2px rgba(0,0,0,.6);
+}
+body.full-map-open .vcluster, body.sim-view .vcluster, body.full-map-open #verbWheel .vname{ display:none !important; }

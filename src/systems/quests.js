@@ -79,14 +79,19 @@
     return "Good.";
   }
 
-  // the [1] Talk handler. Returns { ok, msg } (systems/interact.js's contract)
-  function onTalk(actor) {
+  // WHAT HE SAYS AS YOU COME UP (systems/interact.js speakOnApproach; there is
+  // no Talk verb). Returns { ok, msg } or null: null is a man with nothing
+  // real to say, and he says nothing. `opts.auto` is that approach: it never
+  // starts an ACT on a glance (the diversion run, a debt claim, a settle:
+  // those are his verbs).
+  function onTalk(actor, opts) {
+    const auto = !!(opts && opts.auto);
     actor.rep = actor.rep || 0;
 
     // A COUNT OUTRANKS A CONVERSATION.
     const S = CBZ.prisonSchedule;
     const counting = !!(S && S.enabled() && (S.is("count") || S.is("secure") || S.is("wake")));
-    if (counting && (actor.kind === "guard" || actor.kind === "warden")) return econ.talk(actor);
+    if (counting && (actor.kind === "guard" || actor.kind === "warden")) return null;
 
     // THE FIXER (systems/escapeplan.js): null = nothing to sell you.
     const fixer = CBZ.escapePlan && CBZ.escapePlan.fixerTalk ? CBZ.escapePlan.fixerTalk(actor) : null;
@@ -94,7 +99,7 @@
 
     // A FRIEND WHO RIDES WITH YOU MAKES NOISE FOR YOU. He walks up on the
     // nearest CO and keeps him busy (ai.js's diversion state).
-    if (actor.pfFriend && actor.rep >= FRIEND && !actor.quest && CBZ.prisonFavor &&
+    if (!auto && actor.pfFriend && actor.rep >= FRIEND && !actor.quest && CBZ.prisonFavor &&
         !(actor._divertAt > CBZ.now - DIVERT_GAP) && CBZ.prisonFavor.divert(actor)) {
       actor._divertAt = CBZ.now;
       return { ok: true, msg: "I'll keep him busy. Go." };
@@ -110,11 +115,11 @@
     // a real debt he holds (PRISON_CONTRACTS, entities/ai.js). ai.js speaks
     // the pitch itself; returning words here would print a second copy.
     const CT = CBZ.prisonContract;
-    if (CT && CT.canOffer(actor)) {
+    if (!auto && CT && CT.canOffer(actor)) {
       const c = CT.offer(actor);
       if (c) return { ok: true, msg: "" };
     }
-    if (CT && CT.forCreditor(actor) && CT.satisfied(CT.live())) {
+    if (!auto && CT && CT.forCreditor(actor) && CT.satisfied(CT.live())) {
       const res = CT.settle(actor);
       if (res && res.ok) return { ok: true, msg: "" };     // he counts it out loud
     }
@@ -141,7 +146,10 @@
       }
     }
 
-    return econ.talk(actor);
+    // what is in front of him (the gun in your hand, the blood, the man you
+    // dropped) is a real thing to say; small talk is not, and is never said
+    const R = CBZ.prisonVoice && CBZ.prisonVoice.react ? CBZ.prisonVoice.react(actor) : null;
+    return R ? { ok: true, msg: R } : null;
   }
 
   CBZ.quests = { onTalk, FRIEND };

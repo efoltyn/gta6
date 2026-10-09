@@ -255,7 +255,7 @@ function addSpeech(file, t) { const key = file + ":" + t.line + ":" + t.value; i
 function addLabel(file, t) { const key = "L" + file + ":" + t.line + ":" + t.value; if (seen.has(key)) return; seen.add(key); labels.push({ file, line: t.line, s: t.value }); }
 
 // the files whose WHOLE purpose is line tables
-const LINE_TABLE_FILES = new Set(["src/city/read.js", "src/city/dialogue.js", "src/city/street_talk.js", "src/city/interactions_rich.js"]);
+const LINE_TABLE_FILES = new Set(["src/city/read.js", "src/city/dialogue.js"]);
 
 for (const abs of FILES) {
   const rel = path.relative(ROOT, abs);

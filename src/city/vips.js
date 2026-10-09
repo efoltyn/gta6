@@ -1011,7 +1011,7 @@
         return !!(CBZ.cityRun && CBZ.cityRun.live && CBZ.cityRun.live()) &&
           vipKindOf(p) === "senator" && !p._endorseAsked;
       },
-      label: "Ask",
+      label: "Lobby",
       onSelect: function (p) { askEndorsement(p); },
     });
   });

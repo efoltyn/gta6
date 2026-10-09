@@ -88,11 +88,11 @@
   function handVerb(id) { return CBZ.handVerbs ? CBZ.handVerbs.verb(id) : null; }
 
   const VERB = {
-    // TALK: systems/quests.js (what he needs from you, when anything real is going on with him)
-    talk:     { label: "Talk",      fn: (a) => (CBZ.quests ? CBZ.quests.onTalk(a) : CBZ.econ.talk(a)) },
+    // NO TALK VERB (owner 2026-10-09: "You shouldn't have to press Talk").
+    // What a man has to say he SAYS as you come up to him (speakOnApproach
+    // below, systems/quests.js onTalk with auto): a job, a debt, a sale.
     // offered, never browsed (systems/prisonfriends.js decides when he owes you)
-    befriend: { label: "Befriend",  fn: (a) => (CBZ.prisonFriendAccept ? CBZ.prisonFriendAccept(a)
-                                      : (CBZ.quests ? CBZ.quests.onTalk(a) : CBZ.econ.talk(a))) },
+    befriend: { label: "Befriend",  fn: (a) => (CBZ.prisonFriendAccept ? CBZ.prisonFriendAccept(a) : { ok: false, msg: "" }) },
     // the way out of a grudge: cigs scaled to how sore he is (entities/ai.js)
     squash:   { label: "Squash",    fn: (a) => (CBZ.squashGrudge ? CBZ.squashGrudge(a) : { ok: false, msg: "" }) },
     // somebody else's debt (PRISON_CONTRACTS): take the claim, then bring proof
@@ -326,8 +326,8 @@
     if (a.kind === "guard") {
       const money = (a.corrupt && guardPayoffWorthIt()) ? "payoff" : "bribe";
       const deals = !!(CBZ.prisonTradeDeals && CBZ.prisonTradeDeals(a));
-      const lead = canTell ? "tell" : (deals ? "trade" : "talk");
-      return [lead, money, "steal", "grab"];
+      const lead = canTell ? "tell" : (deals ? "trade" : null);
+      return lead ? [lead, money, "steal", "grab"] : [money, "steal", "grab"];
     }
     /* AN INMATE: one headline (what this man is to you right now), then the
        three things you can do with anybody: deal, lift, take hold. */
@@ -344,8 +344,8 @@
       : sore ? "squash"
       : claiming ? "collect"
       : recruiting ? "join"
-      : "talk";
-    return [head, "trade", "steal", "grab"];
+      : null;
+    return head ? [head, "trade", "steal", "grab"] : ["trade", "steal", "grab"];
   }
   // HAGGLE and THREATEN are the same rung: the one this man answers to
   function pressureVerb(a) {
@@ -512,6 +512,22 @@
     }
     return best;
   }
+  /* HE SPEAKS AS YOU COME UP (the Talk verb is gone). Once per approach: the
+     man you turn to (or tap) says the one real thing he has for you, a job,
+     its status, a sale, a share, over his head. A man with nothing real to
+     say says nothing. The same man does not repeat himself on every glance:
+     a 40 s hold per man, and a new approach only after you looked away. */
+  let spokeTo = null;
+  function speakOnApproach(a) {
+    if (a === spokeTo) return;
+    spokeTo = a;
+    if (!a || !CBZ.quests || !CBZ.quests.onTalk) return;
+    const now = CBZ.now || 0;
+    if ((a._spokeAt || -1e9) > now - 40000) return;
+    let r = null;
+    try { r = CBZ.quests.onTalk(a, { auto: true }); } catch (e) { r = null; }
+    if (r && r.msg) { a._spokeAt = now; sayResult(a, r.msg, 3.0); }
+  }
   function autoListen(a) {
     if (!a || !a.approach || !(a.approach.t > 0) || a.approach.greeted) return;
     if (!CBZ.resolveNpcApproach) return;
@@ -628,6 +644,7 @@
     if (ap && ap !== lastGreeted) { lastGreeted = ap; autoListen(ap); }
     const a = pickCurrent(dt);
     current = a;
+    speakOnApproach(a);
     const trading = !!(CBZ.prisonTrade && CBZ.prisonTrade.isOpen());
     if (!a || trading || CBZ.invOpen) {
       if (shownVerbs.length) { shownVerbs = []; shownFor = null; clearCluster(); }

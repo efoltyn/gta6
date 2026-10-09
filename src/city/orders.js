@@ -68,6 +68,7 @@
   // not drive (a Secret Service agent). Everything else is handed straight on.
   function give(a, kind, t, quiet) {
     if (!a || a.dead || !t || t.dead || t === a) return false;
+    if (kind === "rob") return !!(CBZ.followerOrder && CBZ.followerOrder(a, "rob", { target: t }));
     if (kind === "tail" || (kind === "attack" && a.companion)) {
       const v = kind === "tail" ? "tail" : "sic";
       if (CBZ.followerOrder && CBZ.followerOrder(a, v, { target: t })) return true;
@@ -428,6 +429,11 @@
     const on = function (p) { return worksForYou(p); };
     I.register("ped", { id: "order-attack", prio: 30, bad: true, pick: "person", campaignSafe: true, anyone: true,
       canShow: on, label: "Attack", onSelect: function (a, ctx, t) { give(a, "attack", t); } });
+    // ROB HIM: the one order a crew member runs on a stranger's wallet (the
+    // follower engine walks up, demands, hauls it back). It replaced the
+    // target-side "Send to rob / scare / tail / Sic" copies on every stranger.
+    I.register("ped", { id: "order-rob", prio: 29.5, bad: true, pick: "person", campaignSafe: true, anyone: true,
+      canShow: function (p) { return on(p) && !!CBZ.followerOrder; }, label: "Rob", onSelect: function (a, ctx, t) { give(a, "rob", t); } });
     I.register("ped", { id: "order-guard", prio: 29, pick: "person", campaignSafe: true, anyone: true,
       canShow: on, label: "Guard", onSelect: function (a, ctx, t) { give(a, "guard", t); } });
     I.register("ped", { id: "order-tail", prio: 28, pick: "person", campaignSafe: true, anyone: true,

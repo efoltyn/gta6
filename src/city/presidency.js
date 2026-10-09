@@ -1602,8 +1602,11 @@
     OFF.peds[role] = p;
     if (CBZ.interactions && CBZ.interactions.registerFor) {
       try {
+        // HIS PROPOSAL PLAYS AS YOU COME UP (owner 2026-10-09: "You shouldn't
+        // have to press Talk"): look at him or tap him and he says it; the
+        // answers are the campaign card's replies pinned on him.
         CBZ.interactions.registerFor(p, {
-          id: "pres-officer-" + role, slot: "e", prio: 40, campaignSafe: true,
+          id: "pres-officer-" + role, speak: true, speakCD: 25, prio: 40, campaignSafe: true, forceYes: true,
           label: function () { return "Talk to " + c.display; },
           canShow: function () { return on() && !!seat() && !CONV && !p.dead; },
           onSelect: function () { talkTo(role); },

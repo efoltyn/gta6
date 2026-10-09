@@ -104,7 +104,7 @@ function node() {
 
 // ---------------------------------------------------------------- CITY
 {
-  const SRC = readFileSync(join(ROOT, "src/city/street_talk.js"), "utf8");
+  const SRC = readFileSync(join(ROOT, "src/city/roles.js"), "utf8");
   const sb = { CBZ: { cityGangs: [{ id: "g1", name: "the Vipers" }] }, g: { cityPartner: null } };
   vm.createContext(sb);
   vm.runInContext(extract(SRC, "function pedRole(p)") + "\nthis.pedRole = pedRole;", sb);

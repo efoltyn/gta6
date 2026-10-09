@@ -7,8 +7,8 @@
 
    Drives "controlled" peds (companion / hostage / kidnap victim) by
    setting their target each frame; city/peds.js skips its brain for
-   them. Exposes: citySocialInit, cityFlirt, cityPropose, cityTakeHostage,
-   cityReleaseHostage, citySocialDeath, cityIsRomance, reset.
+   them. Exposes: citySocialInit, cityTakeHostage, cityReleaseHostage,
+   citySocialDeath, reset.
 
    AMBIENT LIFE layer (new): civilians are woven into couples, families and
    friend cliques; a daily-routine director gathers crowds at a venue that
@@ -664,81 +664,9 @@
     weaveFamilies();
   };
 
-  CBZ.cityIsRomance = function (ped) {
-    if (!(ped && !ped.dead && ped.kind === "civilian" && !ped.vendor && !ped.gang && ped !== g.cityPartner && !ped.partner)) return false;
-    // someone holding a real grudge won't be charmed — feelings gate romance.
-    const r = ped.relPlayer; if (r && r.grudge > 40) return false;
-    return true;
-  };
-
-  // ---- dating ----
-  // Reactions are deeper now: your reputation (respect) and how RICH you look
-  // sway someone, a jealous existing partner of theirs may step in, and a happy
-  // date makes them love you faster. Affection bands give flirty banter.
-  const FLIRT_LINES = ["You're funny.", "I like you.", "Buy me dinner first.",
-    "Maybe.", "You're sweet.", "My sister's gonna kill me.", "Walk me to the corner.",
-    "Is that your real laugh?", "Don't make me late for work."];
-  CBZ.cityFlirt = function (ped) {
-    if (!ped || ped.dead) return;
-    if (ped === g.cityPartner) { say(ped, "Love you too.", "#ff8bd0", 1.8); ped.mood = 1; return; }
-    // someone who already has a partner can be flirted with, but it stings them
-    if (ped.partner && !ped.dead) {
-      const jealous = ped.partner;
-      if (!jealous.dead && Math.hypot(jealous.pos.x - ped.pos.x, jealous.pos.z - ped.pos.z) < 8) {
-        say(jealous, "HEY! Back off!", "#ff7b6b", 2.2);
-        jealous.mood = -1; jealous.alarmed = Math.max(jealous.alarmed || 0, 4);
-        CBZ.city.note(ped.name + " is taken · " + jealous.name + " is not happy.", 2);
-        return;
-      }
-    }
-    if (!CBZ.cityIsRomance(ped)) { say(ped, "No thanks.", "#cfd6e6", 1.6); return; }
-    const cost = S().dateCost || 50;
-    if (!CBZ.city.canAfford(cost)) { say(ped, "You're broke?", "#cfd6e6", 1.8); return; }
-    CBZ.city.spend(cost);
-    // charm = base + temperament fit + your street rep + how loaded you look
-    const repBonus = Math.min(0.6, (g.respect || 0) / 300);
-    const richBonus = Math.min(0.5, (g.cash || 0) / 40000);
-    const gain = (S().affectionPerDate || 22) * (0.7 + (1 - Math.abs(ped.aggr - 0.3)) * 0.5 + repBonus + richBonus);
-    ped.affection = (ped.affection || 0) + gain;
-    ped.nameKnown = true;                     // a date is a conversation — you have their name now
-    ped.mood = 1; ped.knowsHero = Math.min(1, (ped.knowsHero || 0) + 0.3); ped.opinion = Math.min(1, (ped.opinion || 0) + 0.25);
-    // a successful date deepens the multi-axis bond, scaled by how well it went
-    CBZ.cityRelShift(ped, "dated", 0.6 + gain / 30);
-    if (CBZ.sfx) CBZ.sfx("coin");
-    say(ped, FLIRT_LINES[(rng() * FLIRT_LINES.length) | 0], "#ff8bd0", 2);
-    if (ped.affection >= (S().partnerAt || 60)) {
-      g.cityPartner = ped; ped.companion = true; ped.controlled = true; ped.romance = true; ped.together = 1;
-      CBZ.cityRelShift(ped, "dated", 2);   // committing locks in deep loyalty+affection
-      CBZ.city.big("" + ped.name + " is now your partner!");
-      CBZ.city.addRespect(2);
-      // word gets out — their friends now know (and like) you a little
-      gossipFrom(ped, "datedHero", 0.5);
-    } else {
-      CBZ.city.note("You take " + ped.name + " out. (♥ " + Math.round(ped.affection) + "/" + (S().partnerAt || 60) + ")", 2);
-    }
-  };
-
-  CBZ.cityPropose = function (ped) {
-    ped = ped || g.cityPartner;
-    if (!ped || ped !== g.cityPartner) { CBZ.city.note("You need a partner first.", 1.6); return; }
-    const econ = CBZ.cityEcon, ring = (S().marryRing || "Diamond Ring");
-    if (g.citySpouse) { CBZ.city.note("You're already married", 1.6); return; }
-    if (!econ.has(ring)) { CBZ.city.note("You need a " + ring + " to propose.", 2); return; }
-    econ.take(ring, 1); g.citySpouse = true;
-    // W7 minimal persistent hook: force-mint a sid so this marriage can be
-    // found later (spouseOf/heirOf) even if the spouse despawns. NOTE:
-    // cityPedStash (schedule.js) skips companion/controlled peds, and the
-    // partner is BOTH by the time they're proposed to — so this only sticks
-    // if a sid was already minted earlier (e.g. via worth()'s nameKnown gate
-    // before commitment). Full player-in-tree wiring (a real player sid +
-    // a marry() edge) is a later step; this just remembers the sid if we
-    // have one.
-    if (CBZ.cityPedStash) CBZ.cityPedStash(ped);
-    g.citySpouseSid = ped._sid || null;
-    CBZ.cityRelShift(ped, "gift", 4);     // a ring is the ultimate gift → max affection/loyalty
-    CBZ.city.big("You married " + ped.name + "!");
-    CBZ.city.addRespect(10);
-  };
+  // ROMANCE IS DELETED (owner 2026-10-09: "Not even flirt. That's not a
+  // thing. There's no love in this game."). cityFlirt / cityPropose /
+  // cityIsRomance and marriage.js are gone; nothing sets g.cityPartner now.
 
   // ---- gang favors: earn a FACTION's trust ----
   // A gang member is "approachable for a favor" when they're a non-player gang
@@ -771,7 +699,7 @@
     // let the favor happen smaller — the deed is what matters, not the spend.
     const cost = S().favorCost || 25;
     if (CBZ.city.canAfford(cost)) { CBZ.city.spend(cost); if (CBZ.sfx) CBZ.sfx("coin"); }
-    // gain scales with existing respect (modeled on cityFlirt's repBonus)
+    // gain scales with existing respect
     const repBonus = Math.min(0.6, r.respect / 300);
     const gain = 0.7 + repBonus;
     const bond = CBZ.cityRelShift(ped, "ranWork", gain);
@@ -1104,8 +1032,7 @@
   };
 
   // ---- you learn THEIR name only by talking. interact.js calls this from its
-  // Talk verb (see hooksNeeded); flirting with / doing a favor for someone
-  // counts as talking too (wired in cityFlirt/cityDoFavor).
+  // job pitch (dialogue.js) and favours (cityDoFavor) call it.
   CBZ.cityMeet = function (ped) {
     if (!ped || ped.dead) return;
     if (!ped.nameKnown) {

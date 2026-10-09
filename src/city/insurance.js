@@ -759,18 +759,6 @@
         run: function () { say(p, "Sign here. Sorry for the trouble."); payClaim(approved); },
       };
     }
-    const denied = myClaim("denied");
-    if (denied) {
-      return {
-        label: "Ask",
-        run: function () {
-          say(p, officeCan("deny")
-            ? "The director signed that one himself. Sorry."
-            : "Nobody's at that desk right now.");
-          note(denied.addr + " — " + money(denied.amount) + " disputed by " + branch.name + ".", 3.2);
-        },
-      };
-    }
     // 2. the counter sale, and it is gated on the rung that sells.
     if (CBZ.rankCan && CBZ.rankCan(p, ORG, "quote")) {
       const lot = playerLotNear();
@@ -788,20 +776,11 @@
             },
           };
         }
-        return { label: "Ask", run: function () { say(p, q.why); } };
       }
     }
-    // 3. the floor. A working person always has something honest to say, and
-    //    what this one knows is what the branch is holding.
-    return {
-      label: "Ask",
-      run: function () {
-        if (CBZ.cityMeet) { try { CBZ.cityMeet(p); } catch (e) {} }
-        const r = reserve();
-        say(p, r > 0 ? "We're good for about " + money(r) + ". Knock wood."
-                     : "Honestly? We couldn't pay out a window.");
-      },
-    };
+    // nothing to sell you and nothing to sign: no verb (the old "Ask" lines
+    // about the branch's reserve were talk with no consequence)
+    return null;
   };
 
   /* =========================================================================

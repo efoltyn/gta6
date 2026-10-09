@@ -360,7 +360,7 @@
   // Only consensual/social asks are standing-gated.  Getting in a vehicle,
   // buying an item, surrendering, arresting, looting or committing violence is
   // a physical action and must never become impossible because of a level gap.
-  const SOCIAL_ID = /(talk|chat|flirt|propose|recruit|hire|directions|compliment|fan|favor|prospect|claim-crew|patch-in|payroll|promote|roll|lead|smoke|alibi|license|range|meet|ask)/i;
+  const SOCIAL_ID = /(recruit|hire|favor|prospect|claim-crew|promote|roll|lead|alibi|license|range|meet|petition|endorse|lobby)/i;
   function isHuman(t) { return !!(t && !t.animal && (t.kind === "cop" || t.kind === "security" || t.char || t.vendor || t.relPlayer)); }
   function standingGates(o, t) { return isHuman(t) && !o.bad && SOCIAL_ID.test(String(o.id || "") + " " + String(o.label || "")); }
   function rememberChoice(t, verb, yes) {
@@ -425,11 +425,18 @@
     // flagged `anyone` still reaches him: the President's orders about a man
     // (city/orders.js "Take him down") work on literally anyone.
     const only = !!(t && t._iOnly);
+    // WHAT A PERSON OFFERS IS WHAT HE IS: city/roles.js's table (role ->
+    // verbs). A guard is bribed and robbed of his card, a keeper sells and is
+    // robbed, a stranger is punched, mugged, dipped. The street layer's
+    // options pass through it; his own per-entity options never do.
+    const R = (!only && t && cand.layers.indexOf("ped") >= 0 && CBZ.cityRoles) ? CBZ.cityRoles : null;
+    const role = R ? R.roleOf(t) : null;
     for (const ln of cand.layers) {
       const a = layers[ln];
       if (!a) continue;
-      if (!only) pool = pool.concat(a);
-      else for (let i = 0; i < a.length; i++) if (a[i].anyone) pool.push(a[i]);
+      if (only) { for (let i = 0; i < a.length; i++) if (a[i].anyone) pool.push(a[i]); }
+      else if (R) { for (let i = 0; i < a.length; i++) if (R.allows(role, a[i])) pool.push(a[i]); }
+      else pool = pool.concat(a);
     }
     if (t && t._iopts) pool = pool.concat(t._iopts);
     if (cand.zone && cand.zone.options) pool = pool.concat(cand.zone.options);
@@ -451,8 +458,13 @@
   }
   function resolveRows(cand, ctx) {
     const t = cand.t;
-    const pass = gatedPool(cand, ctx);
-    if (!pass.length) return null;
+    const all = gatedPool(cand, ctx);
+    // A `speak` option is not a verb: it is what the person SAYS when you
+    // come up to him (approach() below). It never becomes a row.
+    let speak = null;
+    const pass = [];
+    for (let i = 0; i < all.length; i++) { if (all[i].speak) { if (!speak) speak = all[i]; } else pass.push(all[i]); }
+    if (!pass.length && !speak) return null;
     let tap = null, hold = null, ride = null;
     for (const o of pass) {
       if (o.pick || o.wheel) continue;      // an order about someone else (or `wheel`) is a wheel verb, never a key
@@ -460,20 +472,37 @@
       else if (o.hold) { if (!hold) hold = o; }
       else if (!tap) tap = o;
     }
-    // ON A PERSON, E IS TALK. An authored primary (slot "e": a shop counter's
-    // clerk, a man waiting to be hired) keeps E; otherwise the obvious thing to
-    // do to a person is speak to him, and every offer (hire, recruit, sell,
-    // send your man at him) is on his wheel. This is what ends "E on a
-    // stranger hires him".
-    if (tap && tap.slot !== "e" && !cand.gunpoint && cand.layers.indexOf("ped") >= 0) {
-      for (const o of pass) if (!o.pick && !o.ride && !o.hold && /(^|-)talk(-|$)/.test(String(o.id || ""))) { tap = o; break; }
-    }
     const rows = [];
     if (tap) rows.push(keyRow("e", false, tap, t, ctx));
     if (hold) rows.push(keyRow("e", true, hold, t, ctx));
     if (ride) rows.push(keyRow("f", false, ride, t, ctx));
     rows._pass = pass;   // the full gated pool, best first: the Q wheel reads it
+    rows._speak = speak; // what he says as you come up (never a row)
     return rows;
+  }
+
+  /* ---- HE SPEAKS AS YOU COME UP. THERE IS NO TALK VERB. ------------------
+     OWNER (2026-10-09): "You shouldn't have to press Talk. When you press
+     someone to see the interaction options, they should talk if they have
+     something to say." An option registered with `speak: true` is that
+     line: it fires by itself the moment the person becomes the one you are
+     looking at (or tap), once per approach. A man with no speak option says
+     nothing and shows only his verbs. No repeat chatter: the same man is not
+     re-asked until you have looked away, and then not inside his hold
+     (option `speakCD` seconds, default 40). What he says is the line; his
+     replies are verbs (E / hold E / the wheel, or the campaign card's pinned
+     replies on him). */
+  let approachT = null;
+  function nowS() { return (typeof performance !== "undefined" && performance.now ? performance.now() : Date.now()) / 1000; }
+  function approach(cand, rows) {
+    const t = cand && cand.t;
+    if (!t || cand.gunpoint) { approachT = null; return false; }
+    if (t === approachT) return false;           // same approach: he has had his say
+    approachT = t;
+    const o = rows && rows._speak;
+    if (!o || (t._spokeUntil || 0) > nowS()) return false;
+    t._spokeUntil = nowS() + (o.speakCD || 40);
+    return fireOn(cand, o);
   }
 
   // ---- the shared panel (same DOM + look as the jail card — keep it) ---------
@@ -584,7 +613,7 @@
     const standing = standingGates(opt, t) ? interactionStanding(t) : null;
     // Force / violence / deal-taking options always land (punch is separate;
     // tribute/tax/handouts are economic, not "please listen to my speech").
-    const forceYes = !!(opt.bad || opt.forceYes || /street-offer|gp-|mug|rob|shake|pick/i.test(String(opt.id || "")));
+    const forceYes = !!(opt.bad || opt.forceYes || opt.speak || /gp-|mug|rob|shake|pick/i.test(String(opt.id || "")));
     if (standing && !standing.canInfluence && !forceYes) {
       rememberChoice(t, verb, true);
       if (CBZ.cityRelShift) CBZ.cityRelShift(t, "snubbed", 0.35);
@@ -593,7 +622,6 @@
       return false;
     }
     rememberChoice(t, verb, true);
-    if (standing && CBZ.cityRelShift && /talk|chat|compliment|meet|directions/i.test(String(opt.id || ""))) CBZ.cityRelShift(t, "greeted", 0.4);
     opt.onSelect(t, ctx, arg);
     dirty = true;              // verbs change state → re-resolve next pass
     return true;
@@ -668,7 +696,7 @@
     insideCand = null;
     gatherAt(px, pz, ctx, cands, false);
 
-    if (!cands.length) { if (current) hidePanel(); return; }
+    if (!cands.length) { approachT = null; if (current) hidePanel(); return; }
 
     // score + sort; HYSTERESIS keeps the current target unless clearly beaten
     for (const c of cands) c.score = scoreOf(c, fx, fz, px, pz);
@@ -689,8 +717,20 @@
       const r = resolveRows(c, ctx);
       if (r) { pick = c; rows = r; break; }
     }
-    if (!pick) { if (current) hidePanel(); return; }
+    if (!pick) { approachT = null; if (current) hidePanel(); return; }
 
+    // he says his piece as you come up (before the providers: a line that
+    // opens a conversation turns this very card into its replies)
+    approach(pick, rows);
+
+    rows = finishRows(pick, rows, ctx);
+    current = pick; currentRows = rows; currentScore = pick.score;
+    detectTail(pick, rows, ctx);
+  });
+  // EXTENDED VERB CARDS + the E/F-only key split, shared by the detection
+  // pass and the wheel (so a conversation the tap just opened shows its
+  // replies on the wheel at once)
+  function finishRows(pick, rows, ctx) {
     // EXTENDED VERB CARDS — the airliner two-verb grammar, opened to other
     // systems through registerVerbCard (city/dialogue.js's two-answer card is
     // the second consumer). Runs BEFORE the silent-ride fold so a provider
@@ -698,7 +738,7 @@
     for (let vi = 0; vi < verbCards.length; vi++) {
       let vr = null;
       try { vr = verbCards[vi](pick, rows, ctx); } catch (e) {}
-      if (vr && vr.length) { rows = vr; break; }
+      if (vr && vr.length) { if (!vr._pass) vr._pass = rows._pass; vr._speak = rows._speak; rows = vr; break; }
     }
 
     // ONLY E AND F ARE KEYS. A provider row on any other letter (dialogue's
@@ -706,11 +746,13 @@
     let extra = null;
     for (let i = 0; i < rows.length; i++) if (rows[i].key !== "e" && rows[i].key !== "f") { extra = extra || []; extra.push(rows[i]); }
     if (extra) {
-      const pass = rows._pass;
+      const pass = rows._pass, sp = rows._speak, dual = rows.dualRide;
       rows = rows.filter((r) => r.key === "e" || r.key === "f");
-      rows._pass = pass; rows._extra = extra;
+      rows._pass = pass; rows._extra = extra; rows._speak = sp; rows.dualRide = dual;
     }
-    current = pick; currentRows = rows; currentScore = pick.score;
+    return rows;
+  }
+  function detectTail(pick, rows, ctx) {
 
     // WHAT THE CARD SHOWS. The target is live either way (E / F / Q reach it);
     // the card is only drawn when it says something the world does not:
@@ -772,7 +814,7 @@
       if (optsEl) optsEl.innerHTML = rowsHTML(shown);
       showPanel();
     }
-  });
+  }
 
   /* ---- WHO OWNS E RIGHT NOW: the card, or a verb pinned on a thing --------
      Two surfaces can offer E at once: this card's target (a person, a counter)
@@ -881,7 +923,8 @@
   function wheelOf(cand) {
     if (!cand) return [];
     const ctx = buildCtx();
-    const rows = cand === current ? currentRows : resolveRows(cand, ctx);
+    const r0 = resolveRows(cand, ctx);
+    const rows = r0 ? finishRows(cand, r0, ctx) : null;
     if (!rows) return [];
     const pass = rows._pass || [];
     const out = [], seen = new Set();
@@ -1035,7 +1078,15 @@
     // what the Q wheel opens on: the looked-at thing, else (driving) your car
     wheelCand: function () { return current || insideCand; },
     hasSlot: hasSlot,
-    wheelOf: wheelOf, fireOn: fireOn, tapPick: tapPick, liveLike: liveLike, candidateFor: candidateFor, anchorOf: anchorOf,
+    wheelOf: wheelOf, fireOn: fireOn,
+    // the card title of a candidate (who he is: city/roles.js titles a person)
+    titleOf: function (cand) {
+      if (!cand || !descs[cand.kind]) return "";
+      let d = null; try { d = descs[cand.kind](cand.t, buildCtx()); } catch (e) { d = null; }
+      return d ? String(d.label || "").replace(/\s*, \s*HIJACKABLE\s*$/i, "") : "";
+    },
+    // a tap on a person: he says his piece first (once per approach)
+    approach: function (cand) { if (!cand) return false; const r = resolveRows(cand, buildCtx()); return r ? approach(cand, r) : false; }, tapPick: tapPick, liveLike: liveLike, candidateFor: candidateFor, anchorOf: anchorOf,
     registerFixtures: registerFixtures, aimed: aimed,
     useOwner: useOwner,
     rowsFor: function () { return currentRows.map((r) => ({ key: r.key, hold: !!r.hold, id: r.opt && r.opt.id, label: r.label })); },

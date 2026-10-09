@@ -14,69 +14,27 @@
    don't get a mission from a character you never met. The two-choice
    thing already exists PERFECTLY with hijacking or boarding a plane."
 
-   REVISED 2026-09-29 (owner: "far less text", "no menus", "defaults over
-   toggles"): the second choice was mostly a sentence that meant "no thanks"
-   ("Not my thing", "We've all got problems"), which is walking away written
-   out as a button. Now a conversation is their LINE plus ONE verb (Take,
-   Give $12, Listen, Chat), and a second verb only where there is a second
-   real thing to do (Refuse the toll, Push the man who told you to get lost,
-   Mouth off to a cop). Walking away is the decline, and it is remembered
-   (intent.leave). Every label is a verb; the player never speaks a sentence.
+   REVISED 2026-10-09 (owner, on an iPad: "way too many interaction
+   options... no slop interaction options"): Talk shows only on a man who has
+   something to give you, which in this city is WORK. A ped of an outfit you
+   ride with pitches the exact contracts.js row the orders board would show;
+   accept is CBZ.mission.take(row.id). The chat, gripe, brush-off, cop nod,
+   intro, toll and handout intents are deleted: every one of them was a line
+   with no consequence, and a person's real verbs (Heal, Score, Buy, Recruit)
+   sit on his body in city/roles.js's table, not behind a conversation.
 
-   So this file is the airliner BOARD/HIJACK card grammar, generalised to
-   PEOPLE. Walk up, press Talk, and the card becomes a SCENE: the person
-   turns to face you (peds.js's own _faceT stop-and-look — no new brain),
-   speaks a LINE through the ONE speech-bubble pool (CBZ.citySay), holds a
-   talk gesture through the ONE pose registry (CBZ.charPoses), and offers
-   exactly TWO answers. Never a third button. The unshown answers WORK:
-   punch them mid-card and the dialogue dies instantly with combat/sizeup
-   owning the body; walk out of reach (or just stand there saying nothing)
-   and they shrug it off behind you and the card dismisses with no residue.
+   The card is the person's LINE over his head plus ONE verb (Take). Walking
+   away is the decline, and it is remembered (intent.leave). The unshown
+   answers still work: punch him mid-line and combat owns the body.
 
-   WHAT AN ANSWER IS — never a stat fiction. Every outcome runs an
-   EXISTING primitive, most of them literally the existing option records:
-     · the airliner trick, reapplied: the card's choice A is, wherever
-       possible, an option ALREADY IN THE GATED POOL (rows._pass) — the
-       medic's priced patch-up (roleverbs "rv-role"), the dealer's Score
-       ("rv-score"), street_talk's tribute/tax/handout offer
-       ("street-offer") — fired verbatim through its own onSelect, exactly
-       how dualRideRows reuses airliner_board / milveh-take. This file
-       re-skins the HANDSHAKE; it does not re-author a single trade.
-     · MISSIONS COME FROM PEOPLE: a ped who shares an outfit the player
-       rides with (a crewmate of your set, a soldier of your garrison)
-       PITCHES the exact contracts.js row the orders board would show —
-       accept is CBZ.mission.take(row.id), the very contract it already
-       was. The generator still picks the verb, the world still supplies
-       the specifics; only the handshake moved from a desk to a face.
-     · money moves through CBZ.city.spend/addCash, feelings through
-       CBZ.cityRelShift, respect through CBZ.city.addRespect, fear through
-       CBZ.cityScare/citySizeUp, friendship through the family builder's
-       CBZ.kinshipBefriend (null-guarded; ped.friendOfPlayer fallback).
+   MET CONTACTS CALL BACK. Taking work files the person into g.cityContacts
+   (add-only data, no ped refs); later, rarely (>=1 game day per contact, <=2
+   pings a day, >=4 real minutes apart), they text with the next job, which is
+   itself accept/decline on the phone's CONTACTS card.
 
-   MET CONTACTS CALL BACK. Accepting work (or becoming a friend) files the
-   person into g.cityContacts — add-only data, no ped refs — and later,
-   rarely (hard caps: ≥1 game day per contact, ≤2 pings a day, ≥4 real
-   minutes between any two), they text or call through the phone with a
-   follow-up offer that is itself accept/decline (phone.js CONTACTS card).
-   Strangers never ring: no meeting, no number.
-
-   DETERMINISM: WHO offers WHAT is a position-hash of the ped + the day
-   (the peds.js roleHash idiom) — same person, same day, same intent on
-   every client. Math.random touches only runtime feel: which line in a
-   pool, beat durations, ping jitter.
-
-   Flags (all defaulted HERE, one-line reverts):
-     DIALOGUE_TWO_CHOICE  — the whole system (off → the opener never
-                            registers a passing verb; street_talk's YES
-                            card and every legacy talk path stand as-is).
-     DIALOGUE_GIVER_ROUTE — the job-offer intent (off → desks/boards only).
-     DIALOGUE_CONTACTS    — the phone follow-up loop.
-
-   Ratchet: CBZ.dialogueAudit() → { talkers, twoChoice, offersRouted,
-   contacts, legacyTalkPaths, phonePings, friends }. legacyTalkPaths is a
-   LIVE probe (interactions.hasOption) of the one-line talk verbs still
-   registered — it may only ever go DOWN as those files fold into this
-   grammar. NOT YET PINNED — whoever runs the gate first writes the number.
+   Flags (defaulted HERE): DIALOGUE_TWO_CHOICE (the whole opener),
+   DIALOGUE_GIVER_ROUTE (the job pitch), DIALOGUE_CONTACTS (the phone loop).
+   Probe: CBZ.dialogueAudit().
 ============================================================ */
 (function () {
   "use strict";
@@ -115,7 +73,7 @@
   function mem(p) { return p._dlgMem || (p._dlgMem = { declines: 0, warm: 0, helped: 0, punched: 0, friend: false, lastDay: -99 }); }
 
   // ---- ratchet counters -----------------------------------------------------
-  let opened = 0, twoShown = 0, routed = 0, pinged = 0, befriended = 0;
+  let opened = 0, twoShown = 0, routed = 0, pinged = 0;
 
   /* ==========================================================================
      THE BEAT POSES — the artistry half. Registered into the ONE pose registry
@@ -156,23 +114,6 @@
       if (ra) { ra.rotation.x = d(ra.rotation.x, -1.15, r, dt); ra.rotation.z = d(ra.rotation.z, -0.30 + flick, r, dt); }
       if (la) { la.rotation.x = d(la.rotation.x, -0.08, r, dt); la.rotation.z = d(la.rotation.z, 0.04, r, dt); }
       elbow(J.ra, -0.55, dt, r); elbow(J.la, -0.18, dt, r);
-    };
-    // the point: right arm straight out at shoulder height, where the body is
-    // turned (peds.js _faceAt aims the body; the arm just follows the chest)
-    if (!PS.dlgPoint) PS.dlgPoint = function (ch, dt) {
-      const J = ch.low || {}, r = 14;
-      const la = ch.parts && ch.parts.la, ra = ch.parts && ch.parts.ra;
-      if (ra) { ra.rotation.x = d(ra.rotation.x, -1.45, r, dt); ra.rotation.z = d(ra.rotation.z, -0.08, r, dt); }
-      if (la) { la.rotation.x = d(la.rotation.x, -0.05, r, dt); la.rotation.z = d(la.rotation.z, 0.04, r, dt); }
-      elbow(J.ra, -0.05, dt, r); elbow(J.la, -0.15, dt, r);
-    };
-    // the bow: both hands in front, a small dip (a busker's thanks)
-    if (!PS.dlgBow) PS.dlgBow = function (ch, dt) {
-      const J = ch.low || {}, r = 12;
-      const la = ch.parts && ch.parts.la, ra = ch.parts && ch.parts.ra;
-      if (ra) { ra.rotation.x = d(ra.rotation.x, -0.55, r, dt); ra.rotation.z = d(ra.rotation.z, 0.18, r, dt); }
-      if (la) { la.rotation.x = d(la.rotation.x, -0.55, r, dt); la.rotation.z = d(la.rotation.z, -0.18, r, dt); }
-      elbow(J.ra, -0.9, dt, r); elbow(J.la, -0.9, dt, r);
     };
     // the shrug — both arms flare, elbows deep ("…okay then"), played at the
     // player's back when they walk away mid-line
@@ -281,82 +222,23 @@
   }
 
   /* ==========================================================================
-     THE CASTER — a deterministic intent per person per day, read off what the
-     world already knows about them. Priority is worldliness: a job in hand
-     beats a trade, a trade beats small talk. Every branch that needs a world
-     target REFUSES when the world cannot supply one (the contracts.js law).
+     THE CASTER. Talk exists only where the person has something real to say
+     (owner 2026-10-09: "no slop interaction options"). That is one thing in
+     this city: WORK. A ped of an outfit you ride with pitches the contract the
+     orders board would show. Everybody else's verbs are on their body (a
+     medic's Heal, a dealer's Score, a keeper's Buy), not behind a chat: the
+     small talk, gripes, brush-offs, cop nods, intros and street tolls that
+     used to fill this caster were lines with no consequence and are gone.
      ========================================================================== */
-  function jobKey(p) { return (CBZ.cityPedJob ? CBZ.cityPedJob(p) : "") || ""; }
-  function tradeRow(p) {
-    const T = CBZ.cityRoleVerbs;
-    const j = jobKey(p);
-    if (!T || !j || !T[j]) return null;
-    try { return T[j].can(p, I.ctx ? I.ctx() : null) ? T[j] : null; } catch (e) { return null; }
-  }
-  function streetKind(p) {
-    if (!CBZ.streetTalkOffer) return null;
-    let o = null;
-    try { o = CBZ.streetTalkOffer(p); } catch (e) { o = null; }
-    if (!o) return null;
-    return (o.kind === "tribute" || o.kind === "tax" || o.kind === "handout" || o.kind === "charity") ? o : null;
-  }
-  function introTarget() {
-    // a REAL person/place the sim already runs — never spawned for the line
-    const gangs = CBZ.cityGangs || [];
-    for (let i = 0; i < gangs.length; i++) {
-      const gg = gangs[i];
-      if (gg && !gg.absorbed && gg.boss && !gg.boss.dead && !gg.isPlayer)
-        return { name: gg.bossName || gg.boss.name || "the boss", live: gg.boss, what: "runs the " + (gg.name || "set") };
-    }
-    const peds = CBZ.cityPeds || [];
-    for (let i = 0; i < peds.length; i++) {
-      const q = peds[i];
-      if (q && !q.dead && q.vipLvl) return { name: q.name || "somebody", live: q, what: "has real money" };
-    }
-    const lots = (CBZ.city && CBZ.city.arena && CBZ.city.arena.lots) || [];
-    for (let i = 0; i < lots.length; i++) {
-      const l = lots[i];
-      if (l && l.building && l.building.shop && l.building.name)
-        return { name: l.building.name, live: null, at: { x: l.cx, z: l.cz }, what: "moves everything" };
-    }
-    return null;
-  }
-
   function castIntent(p) {
-    const m = mem(p);
-    if (p.kind === "cop") return intentCop(p, m);
+    if (!p || p.kind === "cop") return null;
     const gv = giverRow(p);
-    if (gv) return intentJob(p, m, gv);
-    const tr = tradeRow(p);
-    if (tr) return intentTrade(p, m, tr);
-    if (p.archetype === "dealer") return intentScore(p, m);
-    const so = streetKind(p);
-    if (so) return intentStreet(p, m, so);
-    if (p.vagrant) return intentFavor(p, m);
-    const h = pedHash(p, 0xD1A0 + day() * 13);
-    if ((p.aggr || 0) >= 0.78) return intentBrushoff(p, m);
-    if (h < 0.18 && !(CBZ.mission && CBZ.mission.busy && CBZ.mission.busy())) {
-      const t = introTarget();
-      if (t) return intentIntro(p, m, t);
-    }
-    if (h < 0.55 && jobKey(p)) return intentGripe(p, m);
-    return intentSocial(p, m);
+    return gv ? intentJob(p, mem(p), gv) : null;
   }
 
-  /* -------------------------------- the intents ---------------------------- */
-  // Each returns { id, line, a, b?, leave? }.
-  //   a      the thing to DO (the one verb on the card). A choice: { label,
-  //          closer?, bad?, mem?, poolId? (fire the existing option from
-  //          rows._pass verbatim), run? (my own outcome), deferred? (run at the
-  //          END of the seal beat: the handshake; a falsy result reverts) }.
-  //   b      a SECOND real action, only when there is one (refuse the toll,
-  //          push a man who told you to get lost, mouth off to a cop). Never a
-  //          "no thanks" row: declining is walking away (owner doctrine, "NO
-  //          is not an option").
-  //   leave  what walking away means to THEM (a decline remembered, a snub),
-  //          run when you walk off or stand there saying nothing.
-  // Labels are verbs (the card is over their head, the person is the noun);
-  // lines are a few words a person would say.
+  /* -------------------------------- the intent ----------------------------- */
+  // { id, line, a, leave }: a is the one verb on the card, leave is what
+  // walking away means to them (a decline remembered).
 
   function intentJob(p, m, gv) {
     const r = gv.row;
@@ -385,217 +267,6 @@
     };
   }
 
-  function intentTrade(p, m, row) {
-    const j = jobKey(p);
-    const LINES = {
-      doctor: ["You look rough. Let me see that.", "Sit down. That needs stitches."],
-      nurse: ["That needs cleaning. Sit.", "Hold still. This'll sting."],
-      paramedic: ["You bleeding? Sit down a second.", "Let me look at that."],
-      bartender: ["Long day? I pour for long days.", "What are you drinking?"],
-      "line cook": ["Kitchen's open. You hungry?", "Grill's hot. What do you want?"],
-      "personal trainer": ["You sit all day, huh? I can fix that.", "Drop and give me twenty."],
-      barber: ["That lineup's a week late.", "Sit. I'll clean you up."],
-      farmer: ["Picked this morning.", "Best tomatoes in the county."],
-      fisherman: ["Caught this morning.", "Still moving an hour ago."],
-      courier: ["More runs than legs today. Want one?", "Got a package going your way."],
-      chauffeur: ["Car's warm. Beats walking.", "Where to?"],
-    };
-    const line = LINES[j] ? pick(LINES[j]) : "You need something?";
-    return {
-      id: "trade", line: line,
-      a: { poolId: "rv-role", closer: pick(["Smart.", "Good choice.", "There you go."]), fallback: { label: "Chat", run: function () { meet(p); relShift(p, "greeted", 0.4); } } },
-      leave: function () { relShift(p, "greeted", 0.1); },
-    };
-  }
-
-  function intentScore(p, m) {
-    return {
-      id: "score",
-      line: pick(["You looking? I got you.", "Walk with me. I'm holding.", "First one's cheap."]),
-      a: { poolId: "rv-score", bad: true, fallback: { label: "Buy", run: function () { sayP(p, "Not here. Come back later.", "#cfd6e6"); } } },
-      leave: function () { relShift(p, "snubbed", 0.2); },
-    };
-  }
-
-  function intentStreet(p, m, o) {
-    const LINE = {
-      tribute: ["Easy. Take it. We're square?", "Here. Just leave me alone."],
-      tax: ["Everybody pays on this block.", "Toll's a toll. Pay up."],
-      handout: ["You look rough. Here.", "Take this. Get something to eat."],
-      charity: ["Spare something? Anything helps.", "Just a couple bucks?"],
-    };
-    let b = null;
-    if (o.kind === "tax") {
-      b = {
-        label: "Refuse", bad: true,
-        closer: "Remember that.",
-        mem: function () {
-          relShift(p, "snubbed", 1);
-          // refusing the toll can go physical, if THEY dare (sizeup, not a coin flip)
-          const pa = playerActor();
-          if (CBZ.citySizeUp && pa && CBZ.citySizeUp(p, pa) && Math.random() < 0.35) {
-            p.rage = pa; p.state = "fight"; p.fear = 0;
-            sayP(p, "Wrong answer.", "#ff8a7a");
-          }
-        },
-      };
-    } else if (o.kind === "tribute") {
-      b = { label: "Refuse", closer: "Thanks? Okay.", mem: function () { relShift(p, "greeted", 0.3); } };
-    }
-    return {
-      id: "street", line: pick(LINE[o.kind] || ["Got a second?"]),
-      a: { poolId: "street-offer", fallback: { label: "Chat", run: function () { meet(p); relShift(p, "greeted", 0.3); } } },
-      b: b,
-      leave: o.kind === "charity" ? function () { m.declines++; relShift(p, "snubbed", 0.15); } : null,
-    };
-  }
-
-  function intentFavor(p, m) {
-    const ASK = 8 + ((pedHash(p, 0xFA) * 10) | 0);
-    const line = m.helped > 0
-      ? pick(["You again. Anything spare?", "Hey, it's you. Got a dollar?"])
-      : pick(["Brother, anything helps.", "Haven't eaten since yesterday.", "Spare a couple bucks?"]);
-    return {
-      id: "favor", line: line,
-      a: {
-        label: "Give " + money(ASK),
-        closer: pick(["God bless. For real.", "You're a real one.", "I'm eating tonight."]),
-        run: function () {
-          if (!spend(ASK)) { sayP(p, "You're broke too, huh?", "#cfd6e6"); return; }
-          if (p.cash != null) p.cash = (p.cash | 0) + ASK;
-          m.helped++; relShift(p, "gift", 1); addRespect(1);
-          if (CBZ.sfx) CBZ.sfx("coin");
-          maybeBefriend(p, m);
-        },
-      },
-      leave: function () { m.declines++; relShift(p, "snubbed", 0.15); },
-    };
-  }
-
-  // A NAME AND A DIRECTION, IN HIS OWN WORDS. The old intro opened a
-  // "Meet X" mission with a reach marker (or dropped a map waypoint): the
-  // game walking you there by the hand. Now all you get is what a man on the
-  // street would actually tell you, and finding it is yours to do.
-  function roughlyWhere(p, t) {
-    const at = (t.live && t.live.pos) ? t.live.pos : t.at;
-    if (!at || !p || !p.pos) return "";
-    const dx = at.x - p.pos.x, dz = at.z - p.pos.z, d = Math.hypot(dx, dz);
-    if (d < 25) return " Right around here.";
-    const ns = dz < 0 ? "north" : "south", ew = dx < 0 ? "west" : "east";
-    const dir = Math.abs(dx) > Math.abs(dz) * 1.6 ? ew : Math.abs(dz) > Math.abs(dx) * 1.6 ? ns : ns + ew;
-    return d > 400 ? " Other side of town." : " Up " + dir + ".";
-  }
-  function intentIntro(p, m, t) {
-    return {
-      id: "intro",
-      line: pick(["I know a guy. " + cap(t.what) + ".", "You should meet somebody."]),
-      a: {
-        label: "Ask",
-        closer: (t.live ? "Ask for " : "Try ") + t.name + "." + roughlyWhere(p, t),
-        run: function () { meet(p); relShift(p, "greeted", 0.6); },
-      },
-      leave: function () { relShift(p, "snubbed", 0.1); },
-    };
-  }
-
-  function intentGripe(p, m) {
-    const l = p._jobLot;
-    const where = (l && l.building && l.building.name) ? l.building.name : null;
-    const line = where
-      ? pick(["Twelve hours at " + where + ". My feet.", where + " again tomorrow. Same pay."])
-      : pick(["My boss docked me again. For nothing.", "Double shift. Again.", "They cut my hours."]);
-    return {
-      id: "gripe", line: line,
-      a: {
-        label: "Listen",
-        closer: pick(["Thanks for hearing it. Most don't.", "Sorry. Needed to say it.", "Anyway. You're alright."]),
-        run: function () { meet(p); relShift(p, "greeted", 0.9); m.warm++; maybeBefriend(p, m); },
-      },
-      leave: function () { relShift(p, "snubbed", 0.3); },
-    };
-  }
-
-  function intentSocial(p, m) {
-    const att = CBZ.cityAttending ? CBZ.cityAttending(p) : null;   // {what, venue} or null
-    const line = m.friend
-      ? pick(["There you are. Still causing trouble?", "My guy. What's the word?", "You eat yet?"])
-      : (att && att.what)
-        ? "You here for " + att.what + " too?"
-        : pick(["Don't know you. That's rare around here.",
-                "Crazy city lately, huh?",
-                "My kid starts school Monday. Can you believe it?",
-                "You from around here?"]);
-    return {
-      id: "social", line: line,
-      a: {
-        label: "Chat",
-        closer: null,   // maybeBefriend / the warm closer speaks
-        run: function () {
-          meet(p); relShift(p, "greeted", 0.6); m.warm++;
-          if (!maybeBefriend(p, m)) sayP(p, pick(["Stay dangerous.", "You're alright.", "See you around."]), "#cdeccd");
-        },
-      },
-      leave: function () { relShift(p, "snubbed", 0.2); },
-    };
-  }
-
-  function intentBrushoff(p, m) {
-    return {
-      id: "brushoff", line: pick(["The hell you want?", "Keep stepping.", "Do I know you?"]),
-      a: { label: "Back off", closer: "Then move.", mem: function () { relShift(p, "greeted", 0.1); } },
-      b: {
-        label: "Push", bad: true,
-        closer: null,
-        mem: function () {
-          const pa = playerActor();
-          relShift(p, "threatened", 0.8);
-          // the push is a real shove through the one hands library
-          if (CBZ.verbs && CBZ.verbs.start && pa) { try { CBZ.verbs.start("shove", pa, p); } catch (e) {} }
-          // do they DARE? The read is sizeup's, not a die.
-          if (CBZ.citySizeUp && pa && !CBZ.citySizeUp(p, pa)) {
-            if (CBZ.cityScare) CBZ.cityScare(p, pa, { bias: 0.1 });
-            addRespect(1);
-            sayP(p, "Forget it. Forget it!", "#cfd6e6");
-          } else if (pa) {
-            p.rage = pa; p.state = "fight"; p.fear = 0;
-            sayP(p, "Big mistake.", "#ff8a7a");
-          }
-        },
-      },
-    };
-  }
-
-  function intentCop(c, m) {
-    const line = (CBZ.cityLine && CBZ.cityLine(c, "copTalk")) || "Keep it moving.";
-    return {
-      id: "cop", line: line,
-      a: {
-        label: "Nod",
-        closer: pick(["Good.", "Have a good one.", "Stay out of trouble."]),
-        run: function () { meet(c); relShift(c, "greeted", 0.5); },
-      },
-      b: {
-        label: "Mouth off",
-        closer: pick(["Keep walking, smart guy.", "Real funny.", "I'll remember that face."]),
-        mem: function () { relShift(c, "snubbed", 0.8); addRespect(1); c._faceT = 2.0; },
-      },
-    };
-  }
-
-  // FRIENDSHIP STARTS FACE TO FACE — two warm exchanges (or two handouts) and
-  // this person is a FRIEND: the family builder's hook when present, an honest
-  // flag + a contact entry when not. Never twice.
-  function maybeBefriend(p, m) {
-    if (m.friend || (m.warm < 2 && m.helped < 2)) return false;
-    m.friend = true; befriended++;
-    if (CBZ.kinshipBefriend) { try { CBZ.kinshipBefriend(p); } catch (e) { p.friendOfPlayer = true; } }
-    else p.friendOfPlayer = true;
-    relShift(p, "gift", 1);
-    contactAdd(p, "friend");
-    sayP(p, "You're alright. I mean it.", "#cdeccd", 3);
-    return true;
-  }
-
   /* ==========================================================================
      THE LIVE DIALOGUE — one at a time, phased like a door arc:
        open  → line up, two answers shown, ped faces you and gestures
@@ -612,6 +283,7 @@
     if (!on() || !p || p.dead) return false;
     if (dlg) endDialogue("replaced", true);
     const it = castIntent(p);
+    if (!it) return false;
     dlg = {
       p: p, intent: it.id, line: it.line, a: it.a, b: it.b || null, leave: it.leave || null,
       t: 0, lostT: 0, holdT: 12 + Math.random() * 5,
@@ -786,13 +458,11 @@
   if (CBZ.mission && CBZ.mission.onInterrupt) CBZ.mission.onInterrupt(function () { if (dlg) endDialogue("interrupt", true); });
 
   /* ==========================================================================
-     THE OPENERS — one registration per layer, superseding the legacy one-line
-     talk verbs by slot exclusivity (street-offer prio 72; power's detail
-     intercept at 74 keeps outranking everything power owns because declared
-     principals and their guards are EXCLUDED here, not out-prioritised).
+     THE OPENER — Talk shows only on a man who carries work (castIntent).
+     Declared principals and their guards are EXCLUDED here: power.js owns
+     that walk-up.
      ========================================================================== */
   function inMyGang(p) { return !!(CBZ.cityPlayerGangIsMember && CBZ.cityPlayerGangIsMember(p)); }
-  function crewmate(p) { const m = CBZ.cityMembership && CBZ.cityMembership(); return !!(m && p.gang && p.gang === m.gangId); }
   function canOpen(p, ctx) {
     if (!on() || !p || p.dead || p.vendor) return false;
     if (dlg) return dlg.p === p;              // keeps the candidate resolvable while open
@@ -802,32 +472,19 @@
     if (p.rage || p.surrender || p.controlled || p.inCar || p._npcAttached) return false;
     if (p.state === "flee" || p.state === "fight" || p.state === "confront" ||
         p.state === "stalk" || p.state === "charge" || p._bumHunt) return false;
-    if (p.companion || p.recruited || p === g.cityPartner) return false;
+    if (p.companion || p.recruited) return false;
     if (inMyGang(p)) return false;            // your soldiers keep their orders verbs
-    if (crewmate(p) && !giverRow(p)) return false;  // crewmates talk when they carry WORK
     if (CBZ.powerOrgOf && CBZ.powerOrgOf(p)) return false;   // principals: power.js owns the walk-up
     if (CBZ.powerGuardOf && CBZ.powerGuardOf(p)) return false;
-    return true;
+    return !!giverRow(p);                     // Talk only when he carries WORK
   }
+  // NOT A VERB: `speak` (city/interactions.js approach) — he pitches the work
+  // the moment you look at him or tap him; Take is the verb, walking off the no
   I.register("ped:civ", {
-    id: "dlg-talk", slot: "e", prio: 80,
+    id: "dlg-talk", speak: true, speakCD: 30, prio: 80, forceYes: true,
     canShow: canOpen,
     label: "Talk",
     onSelect: function (p) { openDialogue(p); },
-  });
-  I.register("ped:cop", {
-    id: "dlg-talk-cop", slot: "e", prio: 80,
-    canShow: function (c, ctx) {
-      if (!on() || !c || c.dead) return false;
-      if (dlg) return dlg.p === c;
-      if ((ctx && ctx.wanted | 0) >= 1 || c._challenged) return false;   // the arrest fabric owns hot cops
-      if ((c._dlgCD || 0) > nowSec()) return false;
-      if (ctx && (ctx.gunDrawn || ctx.driving)) return false;
-      if (c.rage || c.controlled || c.curTarget) return false;
-      return true;
-    },
-    label: "Talk",
-    onSelect: function (c) { openDialogue(c); },
   });
 
   /* ==========================================================================
@@ -853,19 +510,6 @@
         if (rows[i] && rows[i].ok) return { kind: "job", id: rows[i].id, title: rows[i].title, pay: rows[i].pay };
       }
     }
-    // FRIEND contact: meet at a real place the city built (never spawned)
-    if (rec.friend) {
-      const lots = (CBZ.city && CBZ.city.arena && CBZ.city.arena.lots) || [];
-      let best = null, bd = 1e12;
-      for (let i = 0; i < lots.length; i++) {
-        const l = lots[i];
-        if (!l || l.demolished || !l.building) continue;
-        if (l.kind !== "bar" && l.kind !== "food" && l.kind !== "park") continue;
-        const dx = l.cx - rec.x, dz = l.cz - rec.z, dd = dx * dx + dz * dz;
-        if (dd < bd) { bd = dd; best = l; }
-      }
-      if (best) return { kind: "meet", x: best.cx, z: best.cz, place: (best.building && best.building.name) || ("the " + best.kind) };
-    }
     return null;
   }
   CBZ.onUpdate && CBZ.onUpdate(50.7, function () {
@@ -887,9 +531,7 @@
       rec.lastPingDay = dNow; rec.pings++;
       lastPingReal = nowSec(); pingsToday++; pinged++;
       const call = CBZ.hash01(rec.x, rec.z, 0xCA12 + dNow) < 0.3;
-      const text = pend.kind === "job"
-        ? (call ? "Tried to call you. " : "") + "Got another one. Pays " + money(pend.pay) + ". You in?"
-        : (call ? "Rang you twice. " : "") + "Been a minute. " + pend.place + "? First round's mine.";
+      const text = (call ? "Tried to call you. " : "") + "Got another one. Pays " + money(pend.pay) + ". You in?";
       phonePush(rec.name.toUpperCase(), text);
       return;                                 // one ping per pass, ever
     }
@@ -916,17 +558,6 @@
       routed++;
       return true;
     }
-    if (pend.kind === "meet" && CBZ.mission && CBZ.mission.start) {
-      CBZ.mission.start({
-        id: "dlg:meet:" + rec.id, title: "Meet " + rec.name, giver: rec.name,
-        goal: "reach", at: [pend.x, pend.z], radius: 8,
-        reward: { respect: 2 },
-        brief: "Meet " + rec.name + " at " + pend.place + ".",
-        doneText: "Round's on me.",
-        onComplete: function () { const p = contactPed(rec); if (p) relShift(p, "gift", 0.8); },
-      });
-      return true;
-    }
     return false;
   }
 
@@ -937,7 +568,7 @@
     // a held gesture for anybody (the point, the bow, the shrug): restores the
     // prior pose when done; refuses a body something else is holding
     beat: function (p, pose, dur) { tailBeat(p, pose, dur); },
-    intentOf: function (p) { return p ? castIntent(p).id : null; },   // probe surface
+    intentOf: function (p) { const it = p ? castIntent(p) : null; return it ? it.id : null; },   // probe surface
     contacts: contacts,
     phoneAnswer: phoneAnswer,
   };
@@ -947,14 +578,14 @@
   // one-line talk verbs this grammar supersedes (they remain the flag-off
   // degrade path). It may only ever go DOWN — a path leaves the list by being
   // deleted or folded into a two-choice intent, never by editing this array.
-  const LEGACY_TALK = ["ped-talk", "ped-talk-gang", "cop-directions", "vendor-talk", "street-offer"];
+  const LEGACY_TALK = ["ped-talk", "ped-talk-gang", "cop-directions", "vendor-talk", "street-offer", "dlg-talk-cop"];
   CBZ.dialogueAudit = function () {
     let legacy = 0;
     if (I.hasOption) { for (let i = 0; i < LEGACY_TALK.length; i++) if (I.hasOption(LEGACY_TALK[i])) legacy++; }
     else legacy = LEGACY_TALK.length;
     return {
       talkers: opened, twoChoice: twoShown, offersRouted: routed,
-      contacts: contacts().length, friends: befriended,
+      contacts: contacts().length,
       phonePings: pinged, legacyTalkPaths: legacy,
       open: !!dlg, intent: dlg ? dlg.intent : null,
     };

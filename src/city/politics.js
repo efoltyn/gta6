@@ -1444,7 +1444,7 @@
       BODIES.peds[m.sid] = p;
       if (CBZ.interactions && CBZ.interactions.registerFor) {
         try {
-          CBZ.interactions.registerFor(p, { id: "pol-senator-talk", slot: "e", prio: 30, campaignSafe: true, label: "Talk",
+          CBZ.interactions.registerFor(p, { id: "pol-senator-talk", speak: true, prio: 30, campaignSafe: true, label: "Talk",
             canShow: function () { return !!seat() && !p.dead; },
             onSelect: function () { const L2 = partyLoyalty(m.party); const line = L2 >= 65 ? "Mr. President. We're with you." : L2 >= 45 ? "Mr. President." : L2 >= 25 ? "We're watching you, sir." : "You'll get nothing from us."; if (CBZ.citySay) CBZ.citySay(p, line, "#dfe7ff", 2.6); } });
         } catch (e) {}

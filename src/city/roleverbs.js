@@ -420,39 +420,6 @@
     },
   };
 
-  /* ---------------------------------------------------------- the casino floor */
-  function nearestLotKind(kind) {
-    const A = CBZ.city && CBZ.city.arena, lots = A && A.lots;
-    if (!lots) return null;
-    const pl = P();
-    let best = null, bd = Infinity;
-    for (let i = 0; i < lots.length; i++) {
-      const l = lots[i];
-      if (!l || l.demolished || l.kind !== kind || !l.building) continue;
-      if (!isFinite(l.cx) || !isFinite(l.cz)) continue;
-      const d = Math.hypot(l.cx - pl.pos.x, l.cz - pl.pos.z);
-      if (d < bd) { bd = d; best = l; }
-    }
-    return best;
-  }
-  // A CROUPIER POINTS AT THE FLOOR. The verb's whole content is routing, so it
-  // does the routing for real (the shared map waypoint every objective uses)
-  // rather than narrating it — and it does not exist at all in a world with no
-  // casino, which is the same law the delivery run runs on.
-  const ROW_TABLES = {
-    id: "rv-tables",
-    can: function () { return !!(CBZ.fullMap && CBZ.fullMap.setWaypoint && nearestLotKind("casino")); },
-    label: function () { return "Ask"; },
-    run: function (p) {
-      const lot = nearestLotKind("casino"); if (!lot) return;
-      const nm = (lot.building && lot.building.name) || "the casino";
-      CBZ.fullMap.setWaypoint(lot.cx, lot.cz, nm);
-      if (CBZ.cityMeet) CBZ.cityMeet(p);
-      say(p, "Dress nice. They throw people out.");
-      note("Marked " + nm + " on your map.", 2.2);
-    },
-  };
-
   /* -------------------------------------------------------------- the lift */
   // THE CHAUFFEUR REUSES THE FARE. shops.js owns the only "somebody drives you
   // across town" effect in this game (the cab's meter + crosstown drop); it is
@@ -514,8 +481,6 @@
     // --- somebody's parcel, somebody's address
     "courier": ROW_RUN, "delivery driver": ROW_RUN,
     "catering driver": ROW_RUN, "airfield driver": ROW_RUN,
-    // --- the floor
-    "croupier": ROW_TABLES, "cage cashier": ROW_TABLES, "pit boss": ROW_TABLES,
     // --- the wheel
     "chauffeur": ROW_LIFT,
     // --- the counter that pays when the roof comes in (city/insurance.js)
@@ -525,85 +490,27 @@
   };
 
   /* ------------------------------------------ the floor: one verb per class */
-  // WHAT A PERSON KNOWS IS WHERE THEY WORK, and the world already stored it:
-  // aigoals.js stamps ped._jobLot on a commuter, officejobs.js stamps
-  // ped._workAnchor on an anchor worker, and CITY_JOBS declares the lot kinds
-  // either way. So the floor verb never invents a workplace — it reads the one
-  // the simulation routed them to, which is what makes the line TRUE.
-  function workLine(p) {
-    const l = p._jobLot;
-    if (l && l.building) {
-      const nm = l.building.name;
-      if (nm) return "“I'm over at " + nm + " most days.”";
-      if (l.kind) return "“I work the " + l.kind + " counter down the block.”";
-    }
-    const a = p._workAnchor;
-    if (a && a.kind) return "“I work the " + a.kind + ".”";
-    const J = jobRec(jobOf(p));
-    if (J && J.anchor) return "“I'm out at the " + J.anchor + " most of the week.”";
-    if (J && J.lots && J.lots.length) return "“You'll find me at the " + J.lots[0] + ".”";
-    return "Work's work. You get used to it.";
-  }
-  // MEETING SOMEBODY IS A REAL CHANGE. cityMeet flips nameKnown — the card
-  // stops calling them "A stranger" forever after — and the relationship shift
-  // is the same one the registry applies to its own talk verbs. That is the
-  // floor: small, honest, permanent.
-  function greet(p) {
-    if (CBZ.cityMeet) CBZ.cityMeet(p);
-    if (CBZ.cityRelShift) CBZ.cityRelShift(p, "greeted", 0.4);
-  }
-  const ROW_ASK_TRADE = {
-    id: "rv-ask-service",
-    can: function () { return true; },
-    label: function () { return "Ask"; },
-    run: function (p) { greet(p); say(p, workLine(p)); },
-  };
-  const ROW_ASK_BEAT = {
-    id: "rv-ask-law",
-    can: function () { return true; },
-    label: function () { return "Ask"; },
-    run: function (p) {
-      greet(p);
-      const stars = g.wanted | 0;
-      say(p, stars >= 1 ? "Cops were asking about you." : workLine(p));
-    },
-  };
   // A trade with no named verb still has hands, and a medic with no named verb
-  // is still a medic — the class floor routes to the row that already exists
-  // rather than inventing a fifth kind of small talk.
+  // is still a medic. Everybody else has NO trade verb: the old "Ask" floor
+  // (a line about where they work) was talk with no consequence, and the owner
+  // cut it (2026-10-09: "no slop interaction options"). A person with nothing
+  // to sell you offers only what anyone offers: your fist, your hand in his
+  // pocket.
   const CLASS_FALL = {
-    "service": ROW_ASK_TRADE,
     "trade":   ROW_HAND,
-    "law":     ROW_ASK_BEAT,
     "medic":   ROW_MEDIC,
   };
 
   function rowFor(p) {
     const job = jobOf(p);
     if (!job) return null;
-    return ROLE_VERBS[job] || null;
-  }
-  // THE FLOOR RESOLVES, IT DOES NOT JUST LOOK UP. A courier whose run is
-  // refused because you are already carrying a job must not go silent — the
-  // whole point of the floor is that a working person always has SOMETHING —
-  // so the class row is skipped when it is the very row that just refused, and
-  // the last resort is the one verb that can never refuse: ask them about the
-  // work. That is what makes roleVerbAudit().withoutVerb structurally zero and
-  // not merely usually zero.
-  function fallFor(p, ctx, named) {
-    const cls = classOf(p);
-    if (!cls) return null;
-    const primary = CLASS_FALL[cls] || null;
-    if (primary && primary !== named && primary.can(p, ctx)) return primary;
-    return (ROW_ASK_TRADE !== named) ? ROW_ASK_TRADE : null;
+    if (ROLE_VERBS[job]) return ROLE_VERBS[job];
+    return CLASS_FALL[classOf(p)] || null;
   }
 
-  /* ------------------------------------------------ ONE registration, two rows */
-  // Prios sit deliberately UNDER interact.js's crew/relationship ladder (60 /
-  // 50 / 45 / 44 / 43) and under shops.js's mechanic (44) and cab (43): what
-  // somebody is to YOU outranks what they do for a living. The named verb sits
-  // at 42, the class floor at 8 — just above generic "Talk" (5), so a worker
-  // always has something honest to offer and never shadows an authored verb.
+  /* ------------------------------------------------------ ONE registration */
+  // Prio sits under interact.js's crew ladder: what somebody is to YOU
+  // outranks what they do for a living.
   I.register("ped:civ", {
     id: "rv-role", slot: "k", prio: 42,
     canShow: function (p, ctx) {
@@ -613,17 +520,6 @@
     },
     label: function (p, ctx) { const r = rowFor(p); return r ? r.label(p, ctx) : ""; },
     onSelect: function (p, ctx) { const r = rowFor(p); if (r) r.run(p, ctx); },
-  });
-  I.register("ped:civ", {
-    id: "rv-role-floor", slot: "k", prio: 8,
-    canShow: function (p, ctx) {
-      if (!addressable(p, ctx)) return false;
-      const named = rowFor(p);
-      if (named && named.can(p, ctx)) return false;      // the named verb owns them
-      return !!fallFor(p, ctx, named);
-    },
-    label: function (p, ctx) { const r = fallFor(p, ctx, rowFor(p)); return r ? r.label(p, ctx) : ""; },
-    onSelect: function (p, ctx) { const r = fallFor(p, ctx, rowFor(p)); if (r) r.run(p, ctx); },
   });
 
   /* ---------------------------------------------------------- the archetype */
@@ -918,11 +814,7 @@
       if (ROLE_VERBS[k]) { out.withVerb++; out.named++; }
       else if (FOREIGN_JOBS[k]) { out.withVerb++; out.foreign++; }
       else if (CLASS_FALL[cls]) { out.withVerb++; out.viaFallback++; }
-      // A trade whose CLASS has no declared floor still gets fallFor's last
-      // resort at run time, so the player never meets a silent worker — but it
-      // is counted MISSING here ON PURPOSE. An undeclared class is a
-      // declaration bug, and a ratchet that hides it behind a safety net is
-      // the "audit nobody has executed" mistake wearing a different hat.
+      // a trade with nothing to sell you is SILENT on purpose (no Ask floor)
       else { out.withoutVerb++; out.missing.push(k); }
     }
     return out;

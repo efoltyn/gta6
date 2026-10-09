@@ -164,11 +164,10 @@ for (const stall of [false, true]) {
         failed++;
         console.log(`  FAIL inmate stall=${stall} recruiter=${recruiter}: befriend ${has ? "shown without" : "missing despite"} an offer`);
       }
-      // ...and TALK is what carries the favour loop, on every ordinary man
-      // whose headline is not already a conversation of its own (befriend,
-      // join, squash, settle, collect); GRAB and TRADE are on everybody.
-      const headed = raw[0] !== "talk" && ["befriend", "join", "squash", "settle", "collect"].indexOf(raw[0]) >= 0;
-      if (raw.indexOf("talk") < 0 && !headed) { failed++; console.log(`  FAIL inmate stall=${stall}: no TALK — the favour loop is unreachable`); }
+      // ...and there is NO TALK verb (owner 2026-10-09): the favour loop is
+      // what he says as you come up (quests.onTalk auto); GRAB and TRADE are
+      // on everybody.
+      if (raw.indexOf("talk") >= 0) { failed++; console.log(`  FAIL inmate stall=${stall}: a Talk verb is back`); }
       if (raw.indexOf("grab") < 0 || raw.indexOf("trade") < 0) { failed++; console.log(`  FAIL inmate stall=${stall}: GRAB/TRADE missing (${raw.join("/")})`); }
     }
   }
