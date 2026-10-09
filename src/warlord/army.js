@@ -1041,11 +1041,11 @@
      instances are composed as `compose(pos, Euler(0,yaw,0), scale)` inside a
      private draw loop: they are PLUMB, always, and there is no seam through
      which a man can be handed a fall. Prisoners are not on that loop at all
-     (nothing draws a prisoner today), so nothing is drawn twice. The geometry
-     is cut from CBZ.charProfile() and CBZ.HUMAN_SCALE — the same two sources
-     campaign.js's impostor is cut from — so the two cannot drift in
-     proportion, and the colours come from W.outfits.marks(), the same public
-     painter, so a man executed on the sand wears what he wore standing.
+     (nothing draws a prisoner today), so nothing is drawn twice. Every man
+     in the rank is THE SAME HUMAN campaign.js draws: the CBZ.human mesh,
+     GPU-instanced through entities/crowdgpu.js (its own layer here), and the
+     colours come from W.outfits.marks(), the same public painter, so a man
+     executed on the sand wears what he wore standing.
 
      ------------------------------------------------------------ THE FLAG
        ?show=old   every tableau off. Executing, surrendering, hiring and
@@ -1138,101 +1138,17 @@
   const FOLD_K = 7;
   const ROLL = 0.6;
   const DIP = (0.95 - 0.475) * (1 - Math.cos(40 * Math.PI / 180));
-  /* The shipped adult male, kept byte for byte from campaign.js's own fallback
-     so a page without the people pack fields the same man-shaped speck here as
-     it does out on the island. CBZ.charProfile() wins whenever it exists. */
-  const PROFILE = {
-    legUp: 0.48, legLo: 0.47, legW: 0.34, hipX: 0.23, shoeH: 0.20,
-    armUp: 0.46, armLo: 0.46, armW: 0.30, armX: 0.62,
-    pelvisW: 0.84, pelvisH: 0.20, pelvisD: 0.48,
-    torsoW: 0.92, torsoH: 0.95, torsoD: 0.50,
-    collarW: 0.94, collarH: 0.18, collarD: 0.52, headSize: 0.60,
-  };
   let rank = null;
-
-  /* ONE BUFFER PER MESH, tinted per box. Same trick and same reason as
-     campaign.js's impostor: a nine-box man drawn as nine InstancedMeshes is
-     nine draw calls for one silhouette, and the tints (dark boots, shadowed
-     sleeves) are what put a waist back into a merged shape. */
-  function mergeBoxes(parts, scale) {
-    let total = 0;
-    const built = [];
-    for (let i = 0; i < parts.length; i++) {
-      const p = parts[i];
-      const g = new THREE.BoxGeometry(p.w, p.h, p.d).toNonIndexed();
-      g.translate(p.x || 0, p.y, p.z || 0);
-      total += g.attributes.position.count;
-      built.push({ g: g, t: p.tint == null ? 1 : p.tint });
-    }
-    const pos = new Float32Array(total * 3), nor = new Float32Array(total * 3),
-          col = new Float32Array(total * 3);
-    let o = 0;
-    for (let i = 0; i < built.length; i++) {
-      const g = built[i].g, t = built[i].t, c = g.attributes.position.count;
-      pos.set(g.attributes.position.array, o * 3);
-      nor.set(g.attributes.normal.array, o * 3);
-      for (let k = 0; k < c; k++) { col[(o + k) * 3] = t; col[(o + k) * 3 + 1] = t; col[(o + k) * 3 + 2] = t; }
-      o += c;
-      g.dispose();
-    }
-    const out = new THREE.BufferGeometry();
-    out.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-    out.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
-    out.setAttribute("color", new THREE.BufferAttribute(col, 3));
-    if (scale !== 1) out.scale(scale, scale, scale);
-    out.computeBoundingSphere();
-    return out;
-  }
 
   function buildRank() {
     if (rank) return rank;
-    let P = null;
-    try { P = CBZ.charProfile ? CBZ.charProfile() : null; } catch (e) { P = null; }
-    if (!P || !P.torsoH) P = PROFILE;
-    const HS = (CBZ.HUMAN_SCALE > 0) ? CBZ.HUMAN_SCALE : 0.70;
-    const hipY = P.legUp + P.legLo;
-    const neckY = hipY - 0.005 + P.torsoH - 0.015;
-    const shoulderY = neckY - 0.04;
-    const armL = P.armUp + P.armLo;
-    const legH = hipY - P.shoeH;
-    const bodyG = mergeBoxes([
-      { w: P.legW * 1.02, h: P.shoeH, d: P.legW * 1.45, x: -P.hipX, y: P.shoeH / 2, z: 0.05, tint: 0.34 },
-      { w: P.legW * 1.02, h: P.shoeH, d: P.legW * 1.45, x: P.hipX, y: P.shoeH / 2, z: 0.05, tint: 0.34 },
-      { w: P.legW, h: legH, d: P.legW, x: -P.hipX, y: P.shoeH + legH / 2, tint: 0.66 },
-      { w: P.legW, h: legH, d: P.legW, x: P.hipX, y: P.shoeH + legH / 2, tint: 0.66 },
-      { w: P.pelvisW, h: P.pelvisH, d: P.pelvisD, y: hipY + 0.03, tint: 0.78 },
-      { w: P.torsoW, h: P.torsoH, d: P.torsoD, y: hipY - 0.005 + P.torsoH / 2, tint: 1 },
-      { w: P.collarW, h: P.collarH, d: P.collarD, y: shoulderY, tint: 1 },
-      { w: P.armW, h: armL, d: P.armW, x: -P.armX, y: shoulderY - armL / 2, tint: 0.88 },
-      { w: P.armW, h: armL, d: P.armW, x: P.armX, y: shoulderY - armL / 2, tint: 0.88 },
-    ], HS);
-    const headG = mergeBoxes([
-      { w: P.headSize, h: P.headSize, d: P.headSize, y: neckY + P.headSize * 0.5, tint: 1 },
-    ], HS);
-    /* r128 NEEDS BOTH HALVES OF THE COLOUR PATH and the buffer has to be
-       allocated by hand — campaign.js paid for both of these in a screenshot
-       of an army rendered in solid black. vertexColors:true makes USE_COLOR
-       real (the geometry carries its own white/tint attribute), instanceColor
-       multiplies over it, and setColorAt sizes a NEW instanceColor off
-       `count`, which is zero here on frame one. */
-    const mk = function (g) {
-      const m = new THREE.InstancedMesh(g,
-        new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }), RANK_CAP);
-      m.castShadow = true;
-      m.frustumCulled = false;
-      m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(RANK_CAP * 3), 3);
-      m.instanceColor.setUsage(THREE.DynamicDrawUsage);
-      m.count = 0;
-      m.renderOrder = 2;
-      scene.add(m);
-      return m;
-    };
-    rank = { body: mk(bodyG), head: mk(headG), men: [],
-             d: new THREE.Object3D(), col: new THREE.Color(),
-             qy: new THREE.Quaternion(), qx: new THREE.Quaternion(), qz: new THREE.Quaternion(),
-             AX: new THREE.Vector3(1, 0, 0), AY: new THREE.Vector3(0, 1, 0), AZ: new THREE.Vector3(0, 0, 1) };
+    const G = CBZ.crowdGPU;
+    rank = { layer: G ? G.layer({ name: "warlord-rank", cap: RANK_CAP, parent: scene, maxDraw: 900 }) : null, men: [], shown: 0, gaitW: 0 };
+    if (G) { const w = G.clip("walk"); rank.gaitW = (w && w.radPerM) || 4.4; }
     return rank;
+  }
+  function shadeHex(hex, k) {
+    return (Math.round(((hex >> 16) & 255) * k) << 16) | (Math.round(((hex >> 8) & 255) * k) << 8) | Math.round((hex & 255) * k);
   }
 
   function groundY(x, z) {
@@ -1263,11 +1179,14 @@
       const x = cx + rx * lat + fx * lon, z = cz + rz * lat + fz * lon;
       let mk = null;
       try { mk = W.outfits && W.outfits.marks ? W.outfits.marks(s, band || null) : null; } catch (e) { mk = null; }
+      const body = mk ? mk.body : tierColour(s.tier), head = mk ? mk.head : 0x9a7d5c;
       R2.men.push({
         s: s, x: x, z: z, y: groundY(x, z), yaw: Math.atan2(-fx, -fz),
         ph: W.hash01(i * 17 + 5, 9, 23) * 6.28, dy: 0,
-        body: mk ? mk.body : tierColour(s.tier),
-        head: mk ? mk.head : 0x9a7d5c,
+        body: body, head: head,
+        // his look in the crowd: shirt, trousers a shade of it, the head hex
+        // (hat or bare skin) worn where the hair is
+        look: CBZ.crowdGPU ? CBZ.crowdGPU.look({ build: "m", skin: 0x996f50, shirt: body, pants: shadeHex(body, 0.66), hair: head, shoes: 0x241f1a, sleeve: body }) : -1,
         fall: null, walk: null, gone: false,
       });
     }
@@ -1277,41 +1196,36 @@
   function dropRank() {
     if (!rank) return;
     rank.men.length = 0;
-    rank.body.count = rank.head.count = 0;
+    rank.shown = 0;
+    if (rank.layer) rank.layer.clear();
   }
 
-  /* THE FRAME. Every man is one compose() — position, (yaw then the fold, in
-     HIS frame), scale. The fold is post-multiplied for the same reason
-     deaths.js post-multiplies it: a fall written in world axes is a fall that
-     ignores which way the man was facing. */
+  /* THE FRAME. Every man is the real human on the baked clips: standing
+     idle, walking across at his walk's own pace, and once the volley has
+     him, struck on his feet and then down on his back (the fold's progress
+     past half-way is where he lands). */
   function drawRank(t, dt) {
     if (!rank || !rank.men.length) return;
-    const men = rank.men, d = rank.d;
+    const men = rank.men, L = rank.layer;
     let n = 0;
+    if (L) L.begin();
     for (let i = 0; i < men.length; i++) {
       const m = men[i];
       if (m.gone) continue;
       stepMan(m, t, dt);
-      d.position.set(m.x, m.y + m.dy, m.z);
-      rank.qy.setFromAxisAngle(rank.AY, m.yaw);
-      d.quaternion.copy(rank.qy);
-      if (m.fall) {
-        rank.qx.setFromAxisAngle(rank.AX, m.fall.rx);
-        rank.qz.setFromAxisAngle(rank.AZ, m.fall.rz);
-        d.quaternion.multiply(rank.qx).multiply(rank.qz);
-      }
-      d.scale.setScalar(1);
-      d.updateMatrix();
-      rank.body.setMatrixAt(n, d.matrix);
-      rank.head.setMatrixAt(n, d.matrix);
-      rank.col.setHex(m.body); rank.body.setColorAt(n, rank.col);
-      rank.col.setHex(m.head); rank.head.setColorAt(n, rank.col);
       n++;
+      if (!L || m.look < 0) continue;
+      const ph = m.ph / (Math.PI * 2);
+      if (m.fall) {
+        const prog = Math.abs(m.fall.rx) / FLAT;
+        L.add(m.x, m.y, m.z, m.yaw, m.look, prog > 0.5 ? "down" : "idle", ph, 0);
+      } else if (m.walk && m.walk.t > m.walk.delay && m.walk.t < m.walk.delay + m.walk.dur) {
+        const w = m.walk, sp = Math.hypot(w.x1 - w.x0, w.z1 - w.z0) / Math.max(0.1, w.dur);
+        L.add(m.x, m.y, m.z, m.yaw, m.look, "walk", ph, sp * rank.gaitW / (Math.PI * 2));
+      } else L.add(m.x, m.y, m.z, m.yaw, m.look, "idle", ph, 0.25);
     }
-    rank.body.count = rank.head.count = n;
-    rank.body.instanceMatrix.needsUpdate = rank.head.instanceMatrix.needsUpdate = true;
-    if (rank.body.instanceColor) rank.body.instanceColor.needsUpdate = true;
-    if (rank.head.instanceColor) rank.head.instanceColor.needsUpdate = true;
+    if (L) L.commit();
+    rank.shown = n;
   }
 
   function stepMan(m, t, dt) {
@@ -2228,7 +2142,7 @@
       return {
         on: !showOld, live: !!tab, id: tab ? tab.id : "",
         t: tab ? Math.round(tab.t * 100) / 100 : 0,
-        drawn: rank ? rank.body.count : 0,
+        drawn: rank ? rank.shown : 0,
         standing: standing, fallen: fallen, walking: walking,
         arms: armsOut.length,
         prisoners: W.state.prisoners.length,

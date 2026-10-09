@@ -687,49 +687,8 @@
     } catch (e) {}
   }
 
-  // ---- poses: registered into entities/poses.js's registry -------------
-  function dampv(c, t, r, dt) { return c + (t - c) * (1 - Math.exp(-r * dt)); }
-  let posesWired = false;
-  function wirePoses() {
-    if (posesWired || !CBZ.charPoses) return;
-    posesWired = true;
-    function arms(ch, dt, lx, lz, rx, rz, el, er) {
-      const la = ch.parts && ch.parts.la, ra = ch.parts && ch.parts.ra, J = ch.low || {};
-      if (la) { la.rotation.x = dampv(la.rotation.x, lx, 12, dt); la.rotation.z = dampv(la.rotation.z, lz, 12, dt); }
-      if (ra) { ra.rotation.x = dampv(ra.rotation.x, rx, 12, dt); ra.rotation.z = dampv(ra.rotation.z, rz, 12, dt); }
-      if (J.la) J.la.rotation.x = dampv(J.la.rotation.x, Math.min(0, el), 12, dt);
-      if (J.ra) J.ra.rotation.x = dampv(J.ra.rotation.x, Math.min(0, er), 12, dt);
-    }
-    // a board on a stick, both hands up the stick, held over the head
-    CBZ.charPoses.pubPlacard = function (ch, dt) {
-      ch._pubT = (ch._pubT || 0) + dt;
-      const hype = (ch._pubHype || 0) > 0;
-      if (hype) ch._pubHype -= dt;
-      const pump = hype ? Math.sin(ch._pubT * 9) * 0.2 : Math.sin(ch._pubT * 1.4 + (ch._pubPh || 0)) * 0.04;
-      arms(ch, dt, -2.72 + pump, -0.2, -2.72 + pump, 0.2, -0.3, -0.3);
-      const pr = ch._pubProp;
-      if (pr) { pr.position.y = 1.8 + (hype ? Math.max(0, -pump) * 0.5 : 0); pr.rotation.z = pump * 0.25; }
-    };
-    // a little flag on a stick in the right hand, waved
-    CBZ.charPoses.pubFlag = function (ch, dt) {
-      ch._pubT = (ch._pubT || 0) + dt;
-      const hype = (ch._pubHype || 0) > 0;
-      if (hype) ch._pubHype -= dt;
-      const w = Math.sin(ch._pubT * (hype ? 8 : 2.2) + (ch._pubPh || 0));
-      arms(ch, dt, -0.1, ch.armOutZ || 0.08, -2.45 + w * (hype ? 0.3 : 0.08), 0.12, -0.2, -0.25);
-      const pr = ch._pubProp;
-      if (pr) pr.rotation.z = w * (hype ? 0.35 : 0.1);
-    };
-    // both arms up in a V, pumping
-    CBZ.charPoses.pubCheer = function (ch, dt) {
-      ch._pubT = (ch._pubT || 0) + dt;
-      const p = Math.sin(ch._pubT * 8 + (ch._pubPh || 0)) * 0.25;
-      arms(ch, dt, -2.55 + p, 0.45, -2.55 - p, -0.45, -0.25, -0.25);
-    };
-  }
   function setPose(ped, pose) {
     if (!ped || !ped.char) return;
-    wirePoses();
     if (CBZ.setCharPose) { try { CBZ.setCharPose(ped.char, pose || "stand"); return; } catch (e) {} }
     ped.char.pose = pose || null;
   }

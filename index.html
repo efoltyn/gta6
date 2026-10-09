@@ -618,7 +618,12 @@ document.body.appendChild(b);}}catch(e){}})();
      door registry), is refused if not, and it shuts behind them. Asked by
      CBZ.moves.step and by systems/navgrid.js. -->
 <script src="src/systems/bodydoors.js?v=presint1001b"></script>
-<script src="src/entities/poses.js?v=pose1"></script>
+<script src="src/entities/poses.js?v=realcrowd1"></script>
+<!-- THE REAL CROWD (entities/crowdgpu.js): the CBZ.human mesh GPU-instanced
+     with its clips baked into a bone texture; LOD1/LOD2 are the rig's own
+     tiers, LOD3 impostors rendered from it. mob.js, the arena seats and the
+     race grandstands draw through it. Lazy: bakes on first use. -->
+<script src="src/entities/crowdgpu.js?v=realcrowd1"></script>
 <!-- CBZ.verbs: THE ONE library of what two people do to each other with their
      hands, for every game: grab, carry, throw, shove, tackle, cuff, frisk,
      drag, escort, choke, shield, mug (verbs.js), the bodies both of them wear
@@ -873,7 +878,7 @@ document.body.appendChild(b);}}catch(e){}})();
      restores the legacy feet-pivot flop. -->
 <script src="src/systems/prisoncorpse.js?v=fallreal1"></script>
 <script src="src/entities/ambientstate.js?v=contact1"></script>
-<script src="src/entities/crowd.js?v=pf0930c"></script>
+<script src="src/entities/crowd.js?v=realcrowd1"></script>
 <script src="src/systems/simulation.js?v=scale8"></script>
 <script src="src/systems/detection.js?v=jailv1001"></script>
 <script src="src/systems/aitactics.js?v=tac1"></script>
@@ -1276,7 +1281,7 @@ document.body.appendChild(b);}}catch(e){}})();
      city/speedway_race.js: you walk in and get into a car with F. -->
 <script src="src/race/race_core.js?v=ric0929"></script>
 <script src="src/race/race_track.js?v=ric0929"></script>
-<script src="src/race/race_venue.js?v=ric0929"></script>
+<script src="src/race/race_venue.js?v=realcrowd1"></script>
 <script src="src/race/race_physics.js?v=ric0929"></script>
 <script src="src/race/race_ai.js?v=ric0929"></script>
 <script src="src/race/race_session.js?v=ric0929"></script>
@@ -1357,7 +1362,7 @@ document.body.appendChild(b);}}catch(e){}})();
      vomitories, roof truss, light rig, jumbotron, instanced crowd);
      arena_fights.js is the FIGHT SURFACES + sim. Both only run at world build,
      so either order works — keep them adjacent, still landmass order 40. -->
-<script src="src/city/arena_venue.js?v=ironjaw1yz-st1"></script>
+<script src="src/city/arena_venue.js?v=realcrowd1"></script>
 <script src="src/city/arena_fights.js?v=gnp0930"></script>
 <!-- street hardware kit: signal/lamp prototypes + the additive road light
      pools. Pure builders, no placement; props.js (next) places them. -->
@@ -1422,7 +1427,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/sizeup.js?v=lvl1y"></script>
 <script src="src/city/bling.js?v=w09290232"></script>
 <script src="src/city/club.js?v=deslop1"></script>
-<script src="src/city/crowd.js?v=pf0930c"></script>
+<script src="src/city/crowd.js?v=realcrowd1"></script>
 <script src="src/city/blobshadows.js?v=cars1"></script>
 <!-- headlight pools + tail glow on the road at night (instanced ground decals,
      no dynamic lights); pushes the shared lamp emissives up after dark.
@@ -2370,7 +2375,7 @@ document.body.appendChild(b);}}catch(e){}})();
      presidency.js and president_staff.js; everything is read lazily. -->
 <script src="src/city/warroom.js?v=polsim1008b"></script>
 <script src="src/city/frontline.js?v=flagfix1001"></script>
-<script src="src/city/president_public.js?v=address1008"></script>
+<script src="src/city/president_public.js?v=realcrowd1"></script>
 <!-- THE COUNTRY TURNS ON ITS PRESIDENT, AND YOU SEE IT COMING (city/dissent.js):
      unrest, an organised movement with a leader, generals meeting, troops
      moving, then the coup (civilwar.js's own) a day later. Every step is on
@@ -2382,7 +2387,7 @@ document.body.appendChild(b);}}catch(e){}})();
      breaches. The one mass crowd for every political crowd (the gate protest,
      a rally the President calls, the Capitol march): the nearest are ordinary
      rigs, the rest one instanced fill, capped per device. -->
-<script src="src/city/mob.js?v=address1008"></script>
+<script src="src/city/mob.js?v=realcrowd1"></script>
 <!-- THE NATIONAL ADDRESS (city/address.js): the address order puts the
      President on every TV (newsroom.js live feed); 3 to 5 statements, verb x
      target off the real world, each one a CBZ.politics.act. After politics.js. -->
