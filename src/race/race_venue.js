@@ -696,31 +696,41 @@
       surroundings.add(sky);
     }
 
-    // ---- the crowd: one crowdgpu layer under the venue group --------------------------------------
-    // re-cut (who is drawn at which LOD, who is cheering) when the camera has
-    // moved a few metres or the excitement crosses a step; the GPU animates.
+    // ---- the crowd: a group of the one crowd store (entities/crowdstore.js) under the venue group
+    // every fan in the stands is a row: drawn by the store (re-cut on camera
+    // moves, the GPU animates between), hit and counted by its damage path.
+    // When the excitement crosses a step the cheering share changes clip.
     const crowdCount = crowd.x.length;
-    let crowdLayer = null, cutX = 1e9, cutZ = 1e9, cutT = 0, cutEx = -1, exNow = 0;
-    function recut(dt, cam) {
-      if (!CG || !crowdCount) return;
-      if (!crowdLayer) crowdLayer = CG.layer({ name: "race", cap: crowdCount, parent: group, maxDraw: 700 });
-      cutT -= dt || 0;
-      const c = cam && cam.position ? cam.position : (root.CBZ.camera ? root.CBZ.camera.position : null);
-      const cx = c ? c.x : 0, cz = c ? c.z : 0;
+    const CS = root && root.CBZ && root.CBZ.crowds;
+    let crowdG = null, crowdRow = null, cutEx = -1, exNow = 0;
+    function recut() {
+      if (!CS || !CG || !crowdCount) return;
+      if (!crowdG) {
+        crowdRow = new Int32Array(crowdCount).fill(-1);
+        const seatOf = new Map();
+        crowdG = CS.group({ name: "race", kind: "race", place: "the speedway", who: "race fans", parent: group, mode: "city", cap: crowdCount, maxDraw: 700,
+          aff: { id: "fans:speedway", name: "race fans" },
+          onLife: (r) => { const i = seatOf.get(r); if (i != null) { crowdRow[i] = -1; seatOf.delete(r); } } });
+        if (!crowdG) return;
+        for (let i = 0; i < crowdCount; i++) {
+          if (crowd.look[i] < 0) continue;
+          const st = crowd.stand[i];
+          const r = crowdG.add(crowd.x[i], crowd.y[i], crowd.z[i], crowd.yaw[i], crowd.look[i], st ? "idle" : "sit", crowd.ph[i], 0.25);
+          if (r >= 0) { crowdRow[i] = r; seatOf.set(r, i); }
+        }
+      }
       const exQ = Math.round(exNow * 8) / 8;
-      const mv = Math.hypot(cx - cutX, cz - cutZ);
-      if (exQ === cutEx && (mv < 0.5 || (mv < 4 && cutT > 0))) return;
-      cutX = cx; cutZ = cz; cutT = 0.3; cutEx = exQ;
+      if (exQ === cutEx) return;
+      cutEx = exQ;
       const thr = exQ * 0.9 + 0.03;
-      crowdLayer.begin();
       for (let i = 0; i < crowdCount; i++) {
-        if (crowd.look[i] < 0) continue;
+        const r = crowdRow[i];
+        if (r < 0 || CS.life(r) !== CS.ALIVE) continue;
         const ch = ((crowd.ph[i] * 7.13 + 0.37) % 1) < thr;
         const st = crowd.stand[i];
-        crowdLayer.add(crowd.x[i], crowd.y[i], crowd.z[i], crowd.yaw[i], crowd.look[i],
-          ch ? (st ? "cheer" : "sitCheer") : (st ? "idle" : "sit"), crowd.ph[i], ch ? 8 / (Math.PI * 2) : 0.25);
+        crowdG.anim(r, ch ? (st ? "cheer" : "sitCheer") : (st ? "idle" : "sit"), crowd.ph[i], ch ? 8 / (Math.PI * 2) : 0.25);
       }
-      crowdLayer.commit(cam && cam.isCamera ? cam : null);
+      crowdG.markDirty();
     }
 
     // ---- emit the merged meshes ------------------------------------------------------------------
@@ -793,7 +803,7 @@
       state = state || {};
       const ex = Math.max(0, Math.min(1, state.excite || 0));
       exNow += (ex - exNow) * Math.min(1, (dt || 0) * 4);
-      recut(dt, state.camera);
+      recut();
       const fk = state.flag || "green";
       if (fk !== flagKey) { flagKey = fk; if (T.flag) T.flag.offset.x = (FLAGS[fk] || 0) * 0.25; flagMesh.visible = fk in FLAGS; }
       flagMesh.rotation.y = flagYaw + Math.sin(t * 5.5) * 0.55;
@@ -833,7 +843,7 @@
     }
 
     function dispose() {
-      if (crowdLayer) { crowdLayer.dispose(); crowdLayer = null; }
+      if (crowdG) { crowdG.dispose(); crowdG = null; }
       group.traverse((o) => { if (o.isMesh) o.geometry.dispose(); });
       for (const k in M) if (M[k] && M[k].dispose) M[k].dispose();
       for (const k in T) if (T[k]) T[k].dispose();

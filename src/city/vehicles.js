@@ -6472,6 +6472,19 @@
         if (CBZ.doHitstop) CBZ.doHitstop(Math.min(0.05, 0.034 + vmag * 0.0009));
       }
     }
+    // ---- THE CROWDS (entities/crowdstore.js): a car into a march or a rally
+    // ploughs through rows of the one store, any driver (yours is on you).
+    // Each body it goes through costs it a little speed.
+    if (vmag > 4 && CBZ.crowds && CBZ.crowds.runOver) {
+      let n = 0;
+      try { n = CBZ.crowds.runOver(car.pos.x, car.pos.z, 1.8, vmag, { byPlayer: !!car.player }); } catch (e) { n = 0; }
+      if (n > 0) {
+        car.v *= Math.max(0.7, Math.pow(0.94, n));
+        if (car.player && CBZ.shake) CBZ.shake(0.2 + Math.min(0.5, vmag * 0.02));
+        if (!juiced && car.player && CBZ.doHitstop && vmag >= CRASH.pedLethal) { juiced = true; CBZ.doHitstop(Math.min(0.05, 0.034 + vmag * 0.0009)); }
+        if (car.player && CBZ.cityCrime) CBZ.cityCrime(vmag >= CRASH.pedLethal ? 60 : 28, { x: car.pos.x, z: car.pos.z, type: "vehicular-assault" });
+      }
+    }
     // ---- WILDLIFE. OWNER: "they ... don't get hit by cars." They could not:
     // every loop in this function walks CBZ.cityPeds / the ambient crowd /
     // CBZ.cityCops, and animals live in a fourth list (CBZ.cityWildlife) that

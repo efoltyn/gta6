@@ -1657,6 +1657,9 @@ CBZ.arenaVenue = {
       // crowd with a hole in it.
       var q = (CBZ.qualityLevel == null ? 3 : CBZ.qualityLevel);
       crowdCap = [0, 4000, 8000, 14000, 22000][Math.max(0, Math.min(4, q))];
+      // every seated person is a row of the one crowd store: the bowl may
+      // take a little over half of this device's rows (the rest are the street)
+      if (CBZ.crowds) crowdCap = Math.min(crowdCap, Math.floor(CBZ.crowds.cap() * 0.55));
       if (crowdCap <= 0) return;
       var SHIRTS = [0xb23a3a, 0x2f4f8a, 0x2f7a4f, 0xc9a227, 0x8a4fa0, 0xd8d3c8, 0x333a45, 0xa5562a];
       var SKINS = [0xe8c39a, 0xd9a97c, 0xb5794c, 0x8a5a34, 0x5f3a20, 0xf0d4b4];
@@ -1717,34 +1720,60 @@ CBZ.arenaVenue = {
     // than a crowd blinking into the seats.
     var fill = 0, fillWant = 0, fillRate = 1 / 45;
     var shownCount = -1;
-    // the seated crowd: one crowdgpu layer under the venue root. It is re-cut
-    // (who is drawn at which LOD) when the house changes size or the camera
-    // has moved a few metres; between re-cuts the GPU animates everyone.
-    var crowdLayer = null, cutX = 1e9, cutZ = 1e9, cutT = 0, cutCam = new THREE.Vector3();
+    // THE SEATED CROWD IS A GROUP OF THE ONE STORE (entities/crowdstore.js):
+    // each person in a seat is a row, so a bomb in the bowl kills, maims and
+    // stampedes the house and the news counts it. The store draws it (one
+    // crowdgpu layer under the venue root, re-cut on camera moves; the GPU
+    // animates everyone between). Filling the bowl adds rows best seat first;
+    // emptying it sends the living home (the dead stay where they fell).
+    var crowdG = null, rowOf = null, seatOf = null, cheerFull = null, CHEER_RATE = 8 / (Math.PI * 2);
+    function crowdGroup() {
+      if (crowdG || !CBZ.crowds || !seated.length) return crowdG;
+      seatOf = new Map();
+      crowdG = CBZ.crowds.group({ name: "arena", kind: "stadium", place: "Ironjaw Arena", who: "fans", parent: V, mode: "city",
+        cap: seated.length, maxDraw: 420, aff: { id: "fans:ironjaw", name: "fight fans" },
+        // a seat whose person was hit is empty from then on (the body is the store's)
+        onLife: function (r) { var i = seatOf.get(r); if (i != null) { rowOf[i] = -1; seatOf.delete(r); } } });
+      if (crowdG) rowOf = new Int32Array(seated.length).fill(-1);
+      return crowdG;
+    }
+    function seatClip(q, full) { var ch = full && q.cheer; return ch ? "sitCheer" : "sit"; }
     function applyFill() {
       var n = Math.round(fill * crowdTotal);
       if (n === shownCount) return;
+      var prev = Math.max(0, shownCount);
       shownCount = n;
-      cutX = 1e9;                  // re-cut on the next tick
-    }
-    function recut(dt) {
-      if (!seated.length || !CBZ.crowdGPU) return;
-      if (!crowdLayer) crowdLayer = CBZ.crowdGPU.layer({ name: "arena", cap: seated.length, parent: V, maxDraw: 420 });
-      var cam = CBZ.camera;
-      cutT -= dt || 0;
-      if (cam && cam.position) cutCam.copy(cam.position);
-      var mv = Math.hypot(cutCam.x - cutX, cutCam.z - cutZ);
-      if (mv < 0.5 || (mv < 4 && cutT > 0)) return;
-      cutX = cutCam.x; cutZ = cutCam.z; cutT = 0.25;
-      var n = Math.max(0, shownCount), full = fill > 0.5;
-      crowdLayer.begin();
-      for (var i = 0; i < n; i++) {
-        var q = seated[i];
-        if (q.look < 0) continue;
-        var ch = full && q.cheer;
-        crowdLayer.add(q.x, q.y, q.z, q.yaw, q.look, ch ? "sitCheer" : "sit", q.phase, ch ? 8 / (Math.PI * 2) : 0.25);
+      var G = crowdGroup(); if (!G) return;
+      var full = fill > 0.5, i, q, r;
+      if (n > prev) {
+        for (i = prev; i < n; i++) {
+          q = seated[i];
+          if (rowOf[i] >= 0 || q.look < 0) continue;
+          r = G.add(q.x, q.y, q.z, q.yaw, q.look, seatClip(q, full), q.phase, full && q.cheer ? CHEER_RATE : 0.25, { aff: G.aff });
+          if (r >= 0) { rowOf[i] = r; seatOf.set(r, i); }
+        }
+      } else {
+        for (i = n; i < prev; i++) {
+          r = rowOf[i];
+          if (r < 0) continue;
+          rowOf[i] = -1; seatOf.delete(r);
+          if (CBZ.crowds.life(r) === CBZ.crowds.ALIVE) G.remove(r);
+        }
       }
-      crowdLayer.commit();
+    }
+    // the house on its feet when it is full: the keen seats cheer
+    function recut() {
+      if (!crowdG) return;
+      var full = fill > 0.5;
+      if (full === cheerFull) return;
+      cheerFull = full;
+      var n = Math.max(0, shownCount);
+      for (var i = 0; i < n; i++) {
+        var q = seated[i], r = rowOf[i];
+        if (r < 0 || !q.cheer || CBZ.crowds.life(r) !== CBZ.crowds.ALIVE) continue;
+        crowdG.anim(r, seatClip(q, full), q.phase, full ? CHEER_RATE : 0.25);
+      }
+      crowdG.markDirty();
     }
     applyFill();                     // an unattended bowl starts EMPTY, not full
     var meshCount = 0;
@@ -1880,9 +1909,9 @@ CBZ.arenaVenue = {
         var wantProxy = dist < 420;
         if (wantProxy !== proxyOn) {
           proxyOn = wantProxy;
-          if (!wantProxy && crowdLayer) { crowdLayer.clear(); cutX = 1e9; }
+          if (crowdG) crowdG.show(wantProxy);
         }
-        if (proxyOn) recut(dt);
+        if (proxyOn) recut();
         // walk the occupancy toward its target. A bowl fills/empties over ~45 s
         // of game time, so you SEE the house come in before the first bell.
         if (fill !== fillWant) {

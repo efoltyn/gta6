@@ -548,7 +548,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- NEWS ONE (city/newsroom.js): the one news channel, its one canvas and
      the one TV set, shared by every screen in the game. Before world/lounge.js
      (the prison dayroom set) and every city/ room that hangs a TV. -->
-<script src="src/city/newsroom.js?v=address1008"></script>
+<script src="src/city/newsroom.js?v=bigcrowd1009b"></script>
 <!-- FURNITURE MOVES WHEN YOU WALK INTO IT (owner: "physics, not another
      f***ing button"). CBZ.pushables.add(spec) — still exported as CBZ.pushProp —
      makes a drawn prop a mass on a floor:
@@ -623,7 +623,12 @@ document.body.appendChild(b);}}catch(e){}})();
      with its clips baked into a bone texture; LOD1/LOD2 are the rig's own
      tiers, LOD3 impostors rendered from it. mob.js, the arena seats and the
      race grandstands draw through it. Lazy: bakes on first use. -->
-<script src="src/entities/crowdgpu.js?v=realcrowd1"></script>
+<script src="src/entities/crowdgpu.js?v=bigcrowd1009b"></script>
+<!-- THE ONE CROWD STORE (entities/crowdstore.js): every crowd member is a row
+     of typed arrays (position, clip, look, affiliation, alive/hurt/dead). It
+     draws through crowdgpu.js, takes every blast, round, car and nuke through
+     one damage path, and counts the dead for the news. After crowdgpu. -->
+<script src="src/entities/crowdstore.js?v=bigcrowd1009b"></script>
 <!-- CBZ.verbs: THE ONE library of what two people do to each other with their
      hands, for every game: grab, carry, throw, shove, tackle, cuff, frisk,
      drag, escort, choke, shield, mug (verbs.js), the bodies both of them wear
@@ -998,7 +1003,7 @@ document.body.appendChild(b);}}catch(e){}})();
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
 <script src="src/systems/gamepad.js?v=ekey2"></script>
-<script src="src/systems/fpsmode.js?v=headride1001"></script>
+<script src="src/systems/fpsmode.js?v=bigcrowd1009b"></script>
 <script src="src/systems/gunfx.js?v=pf0930t"></script>
 <script src="src/systems/intimidate.js?v=jailv1001"></script>
 
@@ -1286,7 +1291,7 @@ document.body.appendChild(b);}}catch(e){}})();
      city/speedway_race.js: you walk in and get into a car with F. -->
 <script src="src/race/race_core.js?v=ric0929"></script>
 <script src="src/race/race_track.js?v=ric0929"></script>
-<script src="src/race/race_venue.js?v=realcrowd1"></script>
+<script src="src/race/race_venue.js?v=bigcrowd1009b"></script>
 <script src="src/race/race_physics.js?v=ric0929"></script>
 <script src="src/race/race_ai.js?v=ric0929"></script>
 <script src="src/race/race_session.js?v=ric0929"></script>
@@ -1367,7 +1372,7 @@ document.body.appendChild(b);}}catch(e){}})();
      vomitories, roof truss, light rig, jumbotron, instanced crowd);
      arena_fights.js is the FIGHT SURFACES + sim. Both only run at world build,
      so either order works — keep them adjacent, still landmass order 40. -->
-<script src="src/city/arena_venue.js?v=realcrowd1"></script>
+<script src="src/city/arena_venue.js?v=bigcrowd1009b"></script>
 <script src="src/city/arena_fights.js?v=gnp0930"></script>
 <!-- street hardware kit: signal/lamp prototypes + the additive road light
      pools. Pure builders, no placement; props.js (next) places them. -->
@@ -1454,7 +1459,7 @@ document.body.appendChild(b);}}catch(e){}})();
      seats) and vehicles.js / boarding.js / passengerseat.js (all read it). -->
 <script src="src/city/carseats.js?v=w09290242x"></script>
 <script src="src/city/playercars.js?v=sl0930b"></script>
-<script src="src/city/crashfx.js?v=address1008"></script>
+<script src="src/city/crashfx.js?v=bigcrowd1009b"></script>
 <script src="src/city/crashdeform.js?v=carblood930"></script>
 <script src="src/systems/skidmarks.js?v=skid1"></script>
 <script src="src/systems/dustfx.js?v=dust1"></script>
@@ -1463,7 +1468,7 @@ document.body.appendChild(b);}}catch(e){}})();
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
 <script src="src/city/carlod.js?v=pf0930e"></script>
-<script src="src/city/vehicles.js?v=carblood930"></script>
+<script src="src/city/vehicles.js?v=bigcrowd1009b"></script>
 <script src="src/city/carinstances.js?v=pf0930e"></script>
 <script src="src/city/playerair.js?v=phone1001"></script>
 <script src="src/city/playeraircraft.js?v=jailside1001"></script>
@@ -1555,7 +1560,7 @@ document.body.appendChild(b);}}catch(e){}})();
      building damage ledger (INTACT→SCARRED→WOUNDED→BURNING→CRITICAL→COLLAPSING→
      RUBBLE). nukefx + aircraftimpact register FX/consumers by name.
      MUST precede strategic.js, which now routes its B-2/nuke through the bus. -->
-<script src="src/systems/impactbus.js?v=mil0929"></script>
+<script src="src/systems/impactbus.js?v=bigcrowd1009b"></script>
 <!-- THE COLLAPSE ENGINE. The ONE answer to "what does a building look like
      while it is being destroyed", shared by the city ledger (structural.js),
      the disaster island (systems/disasters.js) and anything else that
@@ -1882,7 +1887,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the glass. Also the city's one text sink (CBZ.cityPhoneNotify). -->
 <script src="src/city/phone_apps.js?v=phone2b"></script>
 <script src="src/city/phone.js?v=phone2b"></script>
-<script src="src/city/killfeed.js?v=news0930"></script>
+<script src="src/city/killfeed.js?v=bigcrowd1009b"></script>
 <!-- THE MORGUE (DEATH_DROPS_V2 / CORPSE_PERSIST / EMS_RESPONSE): what a death
      leaves behind and who comes for it. Wraps cityKillPed + cityHurtCop the
      same way killfeed.js does — so it loads AFTER killfeed, leaving the feed
@@ -2382,7 +2387,7 @@ document.body.appendChild(b);}}catch(e){}})();
      presidency.js and president_staff.js; everything is read lazily. -->
 <script src="src/city/warroom.js?v=bodyfix1009b"></script>
 <script src="src/city/frontline.js?v=flagfix1001"></script>
-<script src="src/city/president_public.js?v=realcrowd1"></script>
+<script src="src/city/president_public.js?v=bigcrowd1009b"></script>
 <!-- THE COUNTRY TURNS ON ITS PRESIDENT, AND YOU SEE IT COMING (city/dissent.js):
      unrest, an organised movement with a leader, generals meeting, troops
      moving, then the coup (civilwar.js's own) a day later. Every step is on
@@ -2394,11 +2399,11 @@ document.body.appendChild(b);}}catch(e){}})();
      breaches. The one mass crowd for every political crowd (the gate protest,
      a rally the President calls, the Capitol march): the nearest are ordinary
      rigs, the rest one instanced fill, capped per device. -->
-<script src="src/city/mob.js?v=realcrowd1"></script>
+<script src="src/city/mob.js?v=bigcrowd1009b"></script>
 <!-- THE NATIONAL ADDRESS (city/address.js): the address order puts the
      President on every TV (newsroom.js live feed); 3 to 5 statements, verb x
      target off the real world, each one a CBZ.politics.act. After politics.js. -->
-<script src="src/city/address.js?v=address1008b"></script>
+<script src="src/city/address.js?v=bigcrowd1009b"></script>
 <!-- THE TRANSFER OF POWER (city/transfer.js): election night on every TV, the
      held count, concede or refuse, the Capitol march and breach, the Guard's
      decision, seized / convicted / certified. After elections.js. -->

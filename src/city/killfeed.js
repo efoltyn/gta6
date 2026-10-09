@@ -30,7 +30,7 @@
   CBZ.CONFIG = CBZ.CONFIG || {};
   if (CBZ.CONFIG.CITY_KILLFEED_HUD == null) CBZ.CONFIG.CITY_KILLFEED_HUD = true;
 
-  CBZ.cityRecentDeaths = CBZ.cityRecentDeaths || []; // [{name, cause, t, you?, gang?, by?}]
+  CBZ.cityRecentDeaths = CBZ.cityRecentDeaths || []; // [{name, cause, t, you?, gang?, by?, n?, mass?}]
   const CAP = 12;                                    // keep only the freshest dozen
 
   // generic names for the ambient instanced crowd (they carry no ped.name)
@@ -91,6 +91,10 @@
     if (opts.you) e.you = true;
     if (opts.gang) e.gang = opts.gang;
     if (opts.by) e.by = opts.by;                 // the KILLER, for "X killed Y"
+    // A MASS CASUALTY (entities/crowdstore.js): ONE entry carrying the count
+    // (`n` new dead since the last word on it) and the event record `mass`
+    // (dead, hurt, place, crowd, who did it) that newsroom.js phrases.
+    if (opts.mass) { e.mass = opts.mass; e.n = opts.n | 0; }
     const a = CBZ.cityRecentDeaths;
     a.push(e);
     if (a.length > CAP) a.splice(0, a.length - CAP);
@@ -100,7 +104,7 @@
     // City deaths only: a survival match is 99 eliminations in ten minutes and
     // routing those to the phone's news app would bury every real notification
     // the player has under a casualty list they are already watching happen.
-    if (!e.you && g && g.mode === "city" && typeof CBZ.cityPhoneNotify === "function") {
+    if (!e.you && !e.mass && g && g.mode === "city" && typeof CBZ.cityPhoneNotify === "function") {
       CBZ.cityPhoneNotify({
         app: "news",
         from: "City Desk",

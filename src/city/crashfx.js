@@ -1675,6 +1675,12 @@
     // visual / ground-shock radius. Killing EVERYONE within R wiped out crowds of
     // bystanders most of a block away (filmed "kills a huge amount of people").
     // Lethal core ≈ 0.55R (≈0.3× the area, so ~3× fewer deaths); past it, spared.
+    // ---- THE CROWDS (entities/crowdstore.js): every rally, march, packed
+    // bowl and grandstand is rows of the one store, which takes the blast by
+    // its own falloff (the same 0.55R lethal core), sends the survivors
+    // running and counts the dead for the news. Its groups carry their own
+    // world, so this is safe in every mode.
+    if (CBZ.crowds) { try { CBZ.crowds.blast(x, z, R, power, { cause: cause, byPlayer: byPlayer }); } catch (e) {} }
     const LR = R * 0.55, LR2 = LR * LR;
     // CITY ROSTERS ONLY. The prison arena overlaps the city's coordinate space
     // around the origin — the same overlap city/mode.js stamps `_city` on its

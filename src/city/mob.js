@@ -56,16 +56,26 @@
                LOD3 impostors rendered from it), in the colours its full rig is
                painted with on promotion and in step with its gait phase. Only
                the props (shields, boards, sticks, flags) are boxes, as boxes.
-     BUDGET    agents: desktop 640, tablet 420, phone 260. Rigs: 40/24/14
-               civilians plus 10/8/6 officers. Agents beyond 80 m step at a
-               quarter rate; past the draw range or behind the camera they
-               are not drawn at all. 5 crowd draw calls (2 bodies x 2 mesh
-               LODs + 1 impostor) plus the props, for the whole crowd. A mob over 300 m from the player keeps
-               moving (the march still reaches the Capitol) but skips the
-               contact solve.
+     STORE     every agent is a ROW of entities/crowdstore.js (CBZ.crowds):
+               its position, heading and velocity ARE the store's arrays, so
+               a bomb, a burst of fire or a car hits the marchers through the
+               one damage path, and the dead and hurt are the store's to lie
+               there and crawl away. This file keeps only what a crowd
+               member does in a mob (role, action, formation slot).
+     BUDGET    agents: desktop 12000, tablet 4500, phone 1800. Rigs: 40/24/14
+               civilians plus 10/8/6 officers. The step is banded by distance
+               (every step inside 60 m, every 2nd to 120 m, every 4th to
+               200 m, every 8th past it) and a body standing at its slot
+               past 30 m sleeps on the slowest band. The store re-cuts the
+               drawing ten times a second and the GPU walks everyone between
+               cuts. 5 crowd draw calls (2 bodies x 2 mesh LODs + 1 impostor)
+               plus the props, for the whole crowd. A mob over 300 m from the
+               player keeps moving (the march still reaches the Capitol) but
+               skips the contact solve.
 
    PUBLIC: CBZ.mob = { form(spec), march(id, route), line(id, spec), gas(x,z,r),
      react(kind, id?), chant(id, text), disperse(id, flee), panic(x, z),
+     openFire(id, secs) (the line shoots into the crowd),
      stage(id), get(id), list(), near(x,z,r), budget(), audit() }
      + _step(dt) (tests). Bus: CBZ.presidency.emit("mob", {id, phase, size,
      place, headline, holler}).
@@ -73,23 +83,23 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ, THREE = window.THREE;
-  if (!CBZ || !THREE || CBZ.mob) return;
+  if (!CBZ || !THREE || CBZ.mob || !CBZ.crowds) return;
+  const ST = CBZ.crowds, S = ST.S;
   const g = CBZ.game || (CBZ.game = {});
   const CFG = (CBZ.CONFIG = CBZ.CONFIG || {});
 
   // ---------------------------------------------------------------- budgets
   const DEVICE = CBZ.deviceClass || "desktop";
   const BUDGETS = {
-    desktop: { agents: 640, rigs: 40, cops: 10, draw: 190, near: 30 },
-    tablet: { agents: 420, rigs: 24, cops: 8, draw: 150, near: 26 },
-    phone: { agents: 260, rigs: 14, cops: 6, draw: 120, near: 22 },
+    desktop: { agents: 12000, rigs: 40, cops: 10, draw: 320, near: 30 },
+    tablet: { agents: 4500, rigs: 24, cops: 8, draw: 240, near: 26 },
+    phone: { agents: 1800, rigs: 14, cops: 6, draw: 180, near: 22 },
   };
   const BUD = Object.assign({}, BUDGETS[DEVICE] || BUDGETS.desktop);
   if (CFG.MOB_AGENTS > 0) BUD.agents = CFG.MOB_AGENTS | 0;
   if (CFG.MOB_RIGS >= 0 && CFG.MOB_RIGS != null) BUD.rigs = CFG.MOB_RIGS | 0;
-  const CAP = BUD.agents;
+  const CAP = ST.cap();           // rows of the one store (the arrays below are indexed by row)
   const SIM_DT = 1 / 15, MAX_STEPS = 3;
-  const FAR_SLEEP = 80;          // m: beyond this an agent steps at a quarter rate
   const COARSE = 300;            // m: a whole mob this far off skips the contact solve
   const SEP = 0.55;              // m: two people closer than this push apart
   const CELL = 1.0;              // m: the contact hash
@@ -118,10 +128,12 @@
   function inCity() { return !g.mode || g.mode === "city"; }
 
   // ---------------------------------------------------------------- agents (SoA)
-  const ax = new Float32Array(CAP), az = new Float32Array(CAP), ay = new Float32Array(CAP);
-  const avx = new Float32Array(CAP), avz = new Float32Array(CAP);
-  const ahd = new Float32Array(CAP), aph = new Float32Array(CAP), asp = new Float32Array(CAP);
+  // position, heading and velocity are the store's own arrays (one record per
+  // person); the rest is what this person is doing in this mob
+  const ax = S.x, az = S.z, ay = S.y, ahd = S.yaw, avx = S.vx, avz = S.vz;
+  const aph = new Float32Array(CAP), asp = new Float32Array(CAP);
   const aox = new Float32Array(CAP), aoz = new Float32Array(CAP);     // formation slot: lateral, back
+  const arx = new Float32Array(CAP), arz = new Float32Array(CAP);     // rally slot: offset from the muster point (a packed disk behind it)
   const atx = new Float32Array(CAP), atz = new Float32Array(CAP);     // this step's desired point
   const amob = new Int16Array(CAP).fill(-1);                           // mob slot, -1 free
   const aside = new Uint8Array(CAP);                                   // 0 crowd, 1 police
@@ -133,18 +145,45 @@
   const asign = new Uint8Array(CAP);                                   // slogan index in the mob
   const arig = new Int16Array(CAP).fill(-1);
   const askin = new Int32Array(CAP), ashirt = new Int32Array(CAP), apants = new Int32Array(CAP), ahair = new Int32Array(CAP);
-  const ashoes = new Int32Array(CAP), asleeve = new Int32Array(CAP), abody = new Uint8Array(CAP), alook = new Int32Array(CAP).fill(-1);
+  const ashoes = new Int32Array(CAP), asleeve = new Int32Array(CAP), abody = new Uint8Array(CAP), alook = S.look;
   const ROLE = { plain: 0, leader: 1, flag: 2, sign: 3, fist: 4, thrower: 5, climber: 6, fighter: 7, officer: 8 };
   const ACT = { none: 0, throw: 1, climb: 2, fight: 3, flee: 4, down: 5, inside: 6, cheer: 7, push: 8 };
-  let hiAgent = 0;                                                      // one past the highest used slot
-  let freeList = [];
-  for (let i = CAP - 1; i >= 0; i--) freeList.push(i);
-  function alloc() { const i = freeList.length ? freeList.pop() : -1; if (i >= 0 && i + 1 > hiAgent) hiAgent = i + 1; return i; }
+  let agentsN = 0;                                                      // live agents across every mob
+  function room() { return Math.max(0, Math.min(BUD.agents - agentsN, ST.room())); }
+  // a new person in mob m: a row of the mob's store group
+  function alloc(m, x, z, face, a) {
+    if (agentsN >= BUD.agents || !m.G) return -1;
+    const i = m.G.add(x, floorAt(x, z), z, face || 0, -1, "idle", 0, 0, { aff: a || 0 });
+    if (i < 0) return -1;
+    agentsN++;
+    aph[i] = 0; asp[i] = 0; aact[i] = 0; atim[i] = 0; aclimb[i] = 0; acd[i] = 0; arig[i] = -1;
+    return i;
+  }
+  // the mob lets go of a person: the living go home (the row is freed), the
+  // hurt and the dead are already the store's
   function release(i) {
-    if (amob[i] < 0) return;
+    const mi = amob[i];
+    if (mi < 0) return;
     if (arig[i] >= 0) dropRig(i);
     amob[i] = -1; aact[i] = 0; atim[i] = 0; aclimb[i] = 0;
-    freeList.push(i);
+    agentsN--;
+    const m = MOBS[mi];
+    if (ST.life(i) === ST.ALIVE && S.grp[i] >= 0 && m && m.G) m.G.remove(i);
+  }
+  // the store says this person was hit (a bomb, a round, a car, the crush):
+  // out of the mob, there and then (the lists are tidied after the step)
+  function onLife(i, life) {
+    const mi = amob[i];
+    if (mi < 0) return;
+    const m = MOBS[mi];
+    if (arig[i] >= 0) dropRig(i);
+    amob[i] = -1; aact[i] = 0; agentsN--;
+    if (m) { m._culled = true; if (life === ST.DEAD) m.dead = (m.dead | 0) + 1; else m.hurt = (m.hurt | 0) + 1; }
+  }
+  function cull(m) {
+    m._culled = false;
+    m.agents = m.agents.filter(function (j) { return amob[j] === m.slot; });
+    for (let k = 0; k < LINES.length; k++) if (LINES[k].mob === m.id) LINES[k].officers = LINES[k].officers.filter(function (j) { return amob[j] === m.slot && aside[j] === 1; });
   }
 
   // ---------------------------------------------------------------- dress
@@ -183,6 +222,7 @@
     ashoes[i] = h01(k, mob.seed, 18) < 0.3 ? 0xd8d8d8 : 0x2b2b2b;
     asleeve[i] = h01(k, mob.seed, 19) < 0.4 ? askin[i] : ashirt[i];
     lookOf(i);
+    S.aff[i] = mob.affIx && mob.affIx[gi] != null ? mob.affIx[gi] : 0;
     mob.groupCount[gi] = (mob.groupCount[gi] | 0) + 1;
     return gi;
   }
@@ -192,12 +232,25 @@
     else { ashirt[i] = 0x1b2436; apants[i] = 0x161c28; ahair[i] = 0x10141c; }
     abody[i] = 0; ashoes[i] = 0x141414; asleeve[i] = ashirt[i];
     lookOf(i);
+    S.aff[i] = ST.aff(kind === "police" ? { id: "police", name: "police officers", inst: "police" } : { id: "army", name: "soldiers", inst: "army" });
+  }
+  // who a group of the crowd is, politically: city/politics.js's own ideology
+  // ids (address.js hands them over), else matched by name
+  function affOfGroup(gr, mob) {
+    const P = CBZ.politics, L = (P && P.GROUPS) || [];
+    let ideo = null;
+    for (let k = 0; k < L.length && !ideo; k++) {
+      if (gr.id === L[k].id || (gr.name && String(gr.name).toLowerCase() === String(L[k].name).toLowerCase())) ideo = L[k].id;
+    }
+    if (ideo) return ST.aff({ id: ideo, name: L.filter(function (q) { return q.id === ideo; })[0].name, ideology: ideo });
+    const nm = gr.name || (mob.support ? "supporters" : "protesters");
+    return ST.aff({ id: "crowd:" + nm, name: nm, ideology: gr.ideology || null });
   }
   // the person's look in the real crowd (entities/crowdgpu.js): the same
   // colours the full rig is painted with when this agent is promoted
   function lookOf(i) {
     const G = CBZ.crowdGPU;
-    alook[i] = G ? G.look({ build: abody[i] ? "f" : "m", skin: askin[i], shirt: ashirt[i], pants: apants[i], hair: ahair[i], shoes: ashoes[i], sleeve: asleeve[i] }) : -1;
+    S.look[i] = G ? G.look({ build: abody[i] ? "f" : "m", skin: askin[i], shirt: ashirt[i], pants: apants[i], hair: ahair[i], shoes: ashoes[i], sleeve: asleeve[i] }) : -1;
   }
 
   // ---------------------------------------------------------------- mobs
@@ -208,7 +261,7 @@
   const STATS = { formed: 0, peakAgents: 0, peakRigs: 0, breaches: 0, gasFired: 0, thrown: 0, linesBroken: 0, stepMs: 0, drawMs: 0, drawn: 0 };
   function mobById(id) { for (let i = 0; i < MOBS.length; i++) if (MOBS[i] && MOBS[i].id === id) return MOBS[i]; return null; }
   function mobSlot(m) { return MOBS.indexOf(m); }
-  function liveAgents() { let n = 0; for (let i = 0; i < hiAgent; i++) if (amob[i] >= 0) n++; return n; }
+  function liveAgents() { return agentsN; }
 
   const CHANT_OF = {
     "STOP THE STEAL": "Stop the steal! Stop the steal!", "NO CURFEW": "No curfew! No curfew!", "SOLDIERS OUT": "Soldiers out!",
@@ -256,22 +309,33 @@
     };
     m.chants = (spec.chants && spec.chants.length ? spec.chants : m.slogans.map(chantFor)).filter(Boolean);
     MOBS[slot] = m;
+    // THE CROWD IS A GROUP OF THE ONE STORE (entities/crowdstore.js): drawn,
+    // hit, counted and mourned there; this file walks the living
+    m.G = ST.group({
+      name: m.id, kind: m.kind, place: m.place, who: m.support ? "supporters" : "protesters", side: m.side,
+      parent: arenaRoot(), mode: "city", cap: BUD.agents, maxDraw: BUD.draw, own: true, cutDt: 0.1,
+      onLife: onLife, onPanic: function (x, z, r) { if (!m.gone && Math.hypot(m.centroid.x - x, m.centroid.z - z) < r + 80) disperse(m.id, true); },
+      beforeCut: function () { cutClips(m); },
+    });
+    if (!m.G) { MOBS[slot] = null; return null; }
+    m.affIx = (m.groups.length ? m.groups : [{ name: null }]).map(function (gr) { return affOfGroup(gr, m); });
     // the people who came, as many as the budget simulates: a new crowd may
     // take simulated bodies from crowds farther from the player (their souls,
     // the number the news counts, do not change)
-    const want = Math.min(size, Math.floor(CAP * 0.85));
-    if (freeList.length < want) reclaim(want, m);
-    const n = Math.min(want, freeList.length);
-    const R = Math.sqrt(n) * 0.5 + 1;
+    const want = Math.min(size, Math.floor(BUD.agents * 0.9));
+    if (room() < want) reclaim(want, m);
+    const n = Math.min(want, room());
+    // a packed disk (~1.8 people per square metre) whose front edge is the muster point
+    const R = Math.sqrt(n) * 0.42 + 1;
+    const fx = Math.sin(m.face), fz = Math.cos(m.face);
     for (let k = 0; k < n; k++) {
-      const i = alloc(); if (i < 0) break;
-      amob[i] = slot; aside[i] = 0; aact[i] = 0; atim[i] = 0; acd[i] = h01(k, m.seed, 1) * 4; arig[i] = -1; aclimb[i] = 0;
       // a disk, packed toward the front (the face direction)
       const a = h01(k, m.seed, 2) * Math.PI * 2, rr = R * Math.sqrt(h01(k, m.seed, 3));
       const lx = Math.cos(a) * rr, lz = Math.sin(a) * rr;
-      const fx = Math.sin(m.face), fz = Math.cos(m.face);
-      ax[i] = m.at.x + lx * fz + lz * fx;  az[i] = m.at.z - lx * fx + lz * fz;
-      ay[i] = floorAt(ax[i], az[i]);
+      const ox = lx * fz + lz * fx - fx * R * 0.9, oz = -lx * fx + lz * fz - fz * R * 0.9;
+      const i = alloc(m, m.at.x + ox, m.at.z + oz, m.face); if (i < 0) break;
+      arx[i] = ox; arz[i] = oz;
+      amob[i] = slot; aside[i] = 0; aact[i] = 0; atim[i] = 0; acd[i] = h01(k, m.seed, 1) * 4; arig[i] = -1; aclimb[i] = 0;
       avx[i] = 0; avz[i] = 0; ahd[i] = m.face; aph[i] = h01(k, m.seed, 4) * 6.28; asp[i] = 0;
       // the column slot used when they march: leaders in the first rows
       const cols = Math.max(4, Math.round(m.width / 0.95));
@@ -307,20 +371,20 @@
       const da = P ? Math.hypot(P.x - a.centroid.x, P.z - a.centroid.z) : 0, db = P ? Math.hypot(P.x - b.centroid.x, P.z - b.centroid.z) : 0;
       return db - da;
     });
-    for (let k = 0; k < others.length && freeList.length < want; k++) {
+    for (let k = 0; k < others.length && room() < want; k++) {
       const o = others[k];
       let crowd = 0;
       for (let j = 0; j < o.agents.length; j++) if (aside[o.agents[j]] === 0) crowd++;
-      for (let j = o.agents.length - 1; j >= 0 && freeList.length < want && crowd > MIN_KEEP; j--) {
+      for (let j = o.agents.length - 1; j >= 0 && room() < want && crowd > MIN_KEEP; j--) {
         const i = o.agents[j];
         if (aside[i] !== 0 || arig[i] >= 0) continue;
         release(i); crowd--;
       }
-      o.agents = o.agents.filter(function (j) { return amob[j] >= 0; });
+      o.agents = o.agents.filter(function (j) { return amob[j] === o.slot; });
     }
   }
   // what the news calls it: a number people can picture, and the place
-  function many(m) { return m.size >= 1500 ? "Thousands" : m.size >= 200 ? "Hundreds" : "A crowd"; }
+  function many(m) { return m.size >= 20000 ? "Tens of thousands" : m.size >= 1500 ? "Thousands" : m.size >= 200 ? "Hundreds" : "A crowd"; }
   function at_(m) { return m.place ? " at " + m.place : ""; }
   function headline(m, phase, extra) {
     const who = m.kind === "riot" || m.stage === "breach" ? "Rioters" : m.support ? "Supporters" : "Protesters";
@@ -367,17 +431,17 @@
       id: "line" + (++SEQ), mob: m.id, kind: kind, cx: spec.at.x, cz: spec.at.z, nx: nx, nz: nz, tx: nz, tz: -nx, half: w / 2,
       officers: [], strength: 0, broken: false, shields: spec.shields !== false, gas: spec.gas != null ? spec.gas | 0 : (kind === "police" ? 4 : 10),
       gasCD: 6, retreat: spec.retreat || null, advance: +spec.advance || 0, hostile: spec.hostile !== false, held: 0, t: 0,
-      rigs: [], breakAt: spec.breakAt || 0,
+      rigs: [], breakAt: spec.breakAt || 0, fireT: 0,
     };
     const n = clamp(spec.n | 0 || 12, 2, 60);
-    if (freeList.length < n) reclaim(n, null);
+    if (room() < n) reclaim(n, null);
     for (let k = 0; k < n; k++) {
-      const i = alloc(); if (i < 0) break;
-      amob[i] = m.slot; aside[i] = 1; arole[i] = ROLE.officer; aact[i] = 0; atim[i] = 0; arig[i] = -1; aclimb[i] = 0;
       const rank = k % 2, j = (k >> 1), per = Math.ceil(n / 2);
-      aox[i] = (j - (per - 1) / 2) * (w / Math.max(1, per)); aoz[i] = rank * 1.1;
-      ax[i] = L.cx + L.tx * aox[i] - nx * aoz[i]; az[i] = L.cz + L.tz * aox[i] - nz * aoz[i];
-      ay[i] = floorAt(ax[i], az[i]); ahd[i] = f; aph[i] = 0; asp[i] = 0; avx[i] = 0; avz[i] = 0;
+      const ox = (j - (per - 1) / 2) * (w / Math.max(1, per)), oz = rank * 1.1;
+      const i = alloc(m, L.cx + L.tx * ox - nx * oz, L.cz + L.tz * ox - nz * oz, f); if (i < 0) break;
+      amob[i] = m.slot; aside[i] = 1; arole[i] = ROLE.officer; aact[i] = 0; atim[i] = 0; arig[i] = -1; aclimb[i] = 0;
+      aox[i] = ox; aoz[i] = oz;
+      ahd[i] = f; aph[i] = 0; asp[i] = 0; avx[i] = 0; avz[i] = 0;
       dressOfficer(i, kind);
       L.officers.push(i);
       m.agents.push(i);
@@ -426,7 +490,8 @@
     if (GAS.length > 8) GAS.shift();
     // every rig inside runs out of it, through the shared brain
     const B = CBZ.cityBrain;
-    for (let i = 0; i < hiAgent; i++) {
+    for (let mi = 0; mi < MOBS.length; mi++) for (let k = 0, M = MOBS[mi], A = M ? M.agents : []; k < A.length; k++) {
+      const i = A[k];
       if (amob[i] < 0 || aside[i] !== 0) continue;
       const dx = ax[i] - x, dz = az[i] - z;
       if (dx * dx + dz * dz > (c.r + 2) * (c.r + 2)) continue;
@@ -543,10 +608,8 @@
       return m.flee ? SPD.flee : SPD.walk * 1.2;
     }
     if (m.stage === "rally" || (m.hold && m.stage !== "breach")) {
-      // a knot round the muster point, facing what they came for
-      const fx = Math.sin(m.face), fz = Math.cos(m.face);
-      const lat = aox[i] * 0.85, back = aoz[i] * 0.75;
-      atx[i] = m.at.x + fz * lat - fx * back; atz[i] = m.at.z - fx * lat - fz * back;
+      // a knot behind the muster point, facing what they came for
+      atx[i] = m.at.x + arx[i]; atz[i] = m.at.z + arz[i];
       return SPD.walk;
     }
     if (m.stage === "inside" && m.insideAt) {
@@ -578,6 +641,7 @@
     for (let mi = 0; mi < MOBS.length; mi++) {
       const m = MOBS[mi];
       if (!m) continue;
+      if (m._culled) cull(m);
       m.t += dt; m.stageT += dt;
       // the knot's centre (cheap: a stride through its agents)
       let cx = 0, cz = 0, cn = 0;
@@ -595,6 +659,44 @@
     tickShots(dt);
     tickGas(dt);
   }
+  /* A LINE THAT OPENS FIRE. Each officer picks someone in front of the line
+     and fires a short burst; every round is a ray through the one crowd store
+     (it hits whoever is in the way, not who was aimed at). The dead are
+     counted against the line's institution: "Police open fire on protesters". */
+  const _fd = { x: 0, y: 0, z: 0 };
+  function lineFire(L, m, dt) {
+    const inst = L.kind === "police" ? "police" : "army";
+    const P = player();
+    const near = P && Math.hypot(P.x - L.cx, P.z - L.cz) < 180;
+    for (let k = 0; k < L.officers.length; k++) {
+      const o = L.officers[k];
+      if (amob[o] !== m.slot || arig[o] >= 0) continue;
+      acd[o] -= dt;
+      if (acd[o] > 0) continue;
+      acd[o] = 0.18 + h01(o, stepN, 41) * 0.5;
+      // someone on the crowd's side, in front of him
+      let tgt = -1;
+      for (let t = 0; t < 6 && tgt < 0; t++) {
+        const j = m.agents[(h01(o, stepN + t, 42) * m.agents.length) | 0];
+        if (j == null || aside[j] !== 0 || amob[j] !== m.slot) continue;
+        const s = lineSide(L, ax[j], az[j]);
+        if (s > 0.5 && s < 45 && Math.abs(lineAlong(L, ax[j], az[j])) < L.half + 20) tgt = j;
+      }
+      if (tgt < 0) continue;
+      const ox = ax[o], oy = ay[o] + 1.45, oz = az[o];
+      let dx = ax[tgt] - ox + (h01(o, stepN, 43) - 0.5) * 1.2, dz = az[tgt] - oz + (h01(o, stepN, 44) - 0.5) * 1.2;
+      let dy = ay[tgt] + 1.2 - oy;
+      const l = Math.hypot(dx, dy, dz) || 1; dx /= l; dy /= l; dz /= l;
+      const h = ST.ray(ox + dx * 0.8, oy + dy * 0.8, oz + dz * 0.8, dx, dy, dz, 70);
+      if (h) ST.shoot(h.row, { head: h.head, cause: "gunfire", by: inst, fromX: ox, fromZ: oz });
+      if (near) {
+        _fd.x = h ? h.x : ox + dx * 60; _fd.y = h ? h.y : oy + dy * 60; _fd.z = h ? h.z : oz + dz * 60;
+        if (CBZ.tracer) { try { CBZ.tracer({ x: ox, y: oy, z: oz }, _fd, {}); } catch (e) {} }
+        if (CBZ.gunVoice && (k & 1) === 0) { try { CBZ.gunVoice("rifle", Math.hypot(P.x - ox, P.z - oz)); } catch (e) {} }
+      }
+    }
+    if (CBZ.cityGunshot && ((stepN & 7) === 0)) { try { CBZ.cityGunshot(L.cx, L.cz, null, 90); } catch (e) {} }
+  }
   function tickLines(m, dt) {
     for (let k = 0; k < LINES.length; k++) {
       const L = LINES[k];
@@ -610,6 +712,7 @@
         m.anger = clamp(m.anger - dt * 0.012 * (L.kind === "army" ? 2 : 1), 0, 1);
         if (m.stage !== "disperse" && (m.anger < 0.12 || L.t > 70)) disperse(m.id, true);
       }
+      if (L.fireT > 0) { L.fireT -= dt; lineFire(L, m, dt); }
       if (L.hostile && L.gas > 0 && m.stage !== "disperse") {
         L.gasCD -= dt;
         const hot = m.pressure > L.breakAt * 0.45 || L.advance > 0 || m.stage === "breach";
@@ -658,21 +761,31 @@
     m.frontContacts = 0;
     const L = m.line && !m.line.broken ? m.line : null;
     for (let k = 0; k < n; k++) {
-      const i = A[k]; if (amob[i] < 0) continue;
-      // sleeping: far from the player, a quarter of the steps
+      const i = A[k]; if (amob[i] !== m.slot) continue;
+      // THE STEP IS BANDED BY DISTANCE (every step inside 60 m, every 2nd to
+      // 120, every 4th to 200, every 8th past it); a body standing at its slot
+      // past 30 m sleeps on the slowest band. The GPU walks everyone between.
       let ddt = dt;
       if (P && arig[i] < 0) {
-        const dpx = ax[i] - P.x, dpz = az[i] - P.z;
-        if (dpx * dpx + dpz * dpz > FAR_SLEEP * FAR_SLEEP) { if (((i + stepN) & 3) !== 0) continue; ddt = dt * 4; }
+        const dpx = ax[i] - P.x, dpz = az[i] - P.z, d2 = dpx * dpx + dpz * dpz;
+        let band = d2 > 40000 ? 7 : d2 > 14400 ? 3 : d2 > 3600 ? 1 : 0;
+        if (band < 7 && d2 > 900 && asp[i] < 0.05 && aact[i] === 0 && S.panicT[i] <= 0) {
+          const qx = atx[i] - ax[i], qz = atz[i] - az[i];
+          if (qx * qx + qz * qz < 0.09 && (m.stage === "rally" || m.hold)) band = 7;
+        }
+        if (band) { if (((i + stepN) & band) !== 0) continue; ddt = dt * (band + 1); }
       }
       atim[i] -= ddt; if (acd[i] > 0) acd[i] -= ddt;
       let vmax = desired(m, i);
+      // a blast, a burst of fire, a car into them (crowdstore.js): RUN
+      if (S.panicT[i] > 0 && aact[i] !== ACT.flee) { aact[i] = ACT.flee; atim[i] = S.panicT[i]; }
       // actions with their own clocks
       if (aact[i] === ACT.flee) {
         if (atim[i] <= 0) aact[i] = 0;
         else {
-          const c = inGas(ax[i], az[i]);
-          const fx = c ? ax[i] - c.x : ax[i] - m.centroid.x, fz = c ? az[i] - c.z : az[i] - m.centroid.z, fd = Math.hypot(fx, fz) || 1;
+          const pan = S.panicT[i] > 0;
+          const c = pan ? null : inGas(ax[i], az[i]);
+          const fx = pan ? ax[i] - S.fleeX[i] : c ? ax[i] - c.x : ax[i] - m.centroid.x, fz = pan ? az[i] - S.fleeZ[i] : c ? az[i] - c.z : az[i] - m.centroid.z, fd = Math.hypot(fx, fz) || 1;
           atx[i] = ax[i] + fx / fd * 12; atz[i] = az[i] + fz / fd * 12; vmax = SPD.flee;
         }
       } else if (aside[i] === 0 && GAS.length && inGas(ax[i], az[i])) { aact[i] = ACT.flee; atim[i] = 3 + h01(i, stepN, 3) * 3; }
@@ -737,15 +850,12 @@
       else if (m.stage === "rally" || m.hold) ahd[i] += (((m.face - ahd[i] + Math.PI * 3) % (Math.PI * 2)) - Math.PI) * Math.min(1, ddt * 2);
       else if (L && aside[i] === 0) ahd[i] = Math.atan2(-L.nx, -L.nz);
       aph[i] += ddt * (sp > 0.15 ? sp * (sp > RUN_AT ? GAIT.run : GAIT.walk) : 0);     // the baked stride: feet do not skate
+      S.posT[i] = ST.clock();
       if (aclimb[i] > 0 && (arole[i] !== ROLE.climber || !L)) aclimb[i] = Math.max(0, aclimb[i] - ddt * 1.2);
       if (!coarse || (stepN & 7) === 0) ay[i] = floorAt(ax[i], az[i]) + aclimb[i];
       if (aside[i] === 1) { const Lo = lineOf(i); if (Lo && !Lo.broken) ahd[i] = Math.atan2(Lo.nx, Lo.nz); }
     }
-    if (m._culled) {
-      m._culled = false;
-      m.agents = m.agents.filter(function (j) { return amob[j] >= 0; });
-      for (let k = 0; k < LINES.length; k++) if (LINES[k].mob === m.id) LINES[k].officers = LINES[k].officers.filter(function (j) { return amob[j] >= 0 && aside[j] === 1; });
-    }
+    if (m._culled) cull(m);
   }
   // the front rank: throw, climb, fight
   function frontActs(i, m, L, dt) {
@@ -829,6 +939,7 @@
     let k = RIGS.indexOf(null); if (k < 0) { k = RIGS.length; RIGS.push(null); }
     RIGS[k] = { i: i, ped: ped, cop: cop, t: 0 };
     arig[i] = k;
+    S.hide[i] = 1;                    // the rig IS this person now (drawn and hit as a ped)
     STATS.peakRigs = Math.max(STATS.peakRigs, rigCount(false));
     return true;
   }
@@ -847,6 +958,7 @@
   }
   function dropRig(i) {
     const k = arig[i]; arig[i] = -1;
+    if (S.life[i] === ST.ALIVE) S.hide[i] = 0;
     if (k < 0 || !RIGS[k]) return;
     const R = RIGS[k]; RIGS[k] = null;
     const ped = R.ped;
@@ -866,12 +978,14 @@
     const R = RIGS[arig[i]]; const ped = R && R.ped;
     if (!ped) { arig[i] = -1; return; }
     if (ped.dead) {
-      // a marcher who dies stays down, out of the mob
+      // a marcher who dies stays down, out of the mob: the body is the rig's,
+      // the count is the crowd's (crowdstore.js joins it to whatever is
+      // being counted here: the bomb, the shooting)
       aact[i] = ACT.down;
       RIGS[arig[i]] = null; arig[i] = -1;
       m._culled = true;                       // taken out of the lists after the step loop
-      release(i);
-      m.dead = (m.dead | 0) + 1;
+      ST.noteDead(i, null, {});
+      if (amob[i] >= 0) { amob[i] = -1; agentsN--; m.dead = (m.dead | 0) + 1; }
       return;
     }
     ax[i] = ped.pos.x; az[i] = ped.pos.z; ay[i] = ped.pos.y || 0;
@@ -909,11 +1023,17 @@
     // promote: the nearest agents inside the ring, two a tick
     let made = 0;
     const pairs = [];
-    for (let i = 0; i < hiAgent; i++) {
-      if (amob[i] < 0 || arig[i] >= 0 || aact[i] === ACT.inside) continue;
-      const dx = ax[i] - P.x, dz = az[i] - P.z, d2 = dx * dx + dz * dz;
-      if (d2 > BUD.near * BUD.near) continue;
-      pairs.push([i, d2]);
+    for (let mi = 0; mi < MOBS.length; mi++) {
+      const M = MOBS[mi]; if (!M) continue;
+      // a crowd whose middle is far off has nobody in the ring (cheap skip)
+      if (Math.hypot(M.centroid.x - P.x, M.centroid.z - P.z) > BUD.near + 40 + Math.sqrt(M.agents.length) * 2) continue;
+      for (let k = 0; k < M.agents.length; k++) {
+        const i = M.agents[k];
+        if (amob[i] !== M.slot || arig[i] >= 0 || aact[i] === ACT.inside || S.life[i] !== ST.ALIVE) continue;
+        const dx = ax[i] - P.x, dz = az[i] - P.z, d2 = dx * dx + dz * dz;
+        if (d2 > BUD.near * BUD.near) continue;
+        pairs.push([i, d2]);
+      }
     }
     if (!pairs.length) return;
     pairs.sort(function (a, b) { return a[1] - b[1]; });
@@ -996,8 +1116,10 @@
     return true;
   }
   function endMob(m) {
-    for (let k = m.agents.length - 1; k >= 0; k--) release(m.agents[k]);
+    for (let k = m.agents.length - 1; k >= 0; k--) if (amob[m.agents[k]] === m.slot) release(m.agents[k]);
     m.agents.length = 0;
+    // the living went home; the hurt and the dead stay, the store's now
+    if (m.G) { m.G.release(); m.G = null; }
     for (let k = LINES.length - 1; k >= 0; k--) if (LINES[k].mob === m.id) LINES.splice(k, 1);
     m.gone = true;
     MOBS[m.slot] = null;
@@ -1013,13 +1135,16 @@
   }
 
   // ---------------------------------------------------------------- the picture
-  // EVERY BODY IS THE REAL HUMAN. Past the rig ring the crowd is drawn by
-  // entities/crowdgpu.js: the CBZ.human mesh, GPU-instanced, animated from its
-  // own baked walk / run / chant / cheer / placard / flag clips, LOD'd down to
-  // the rig's far tier and then to impostors rendered from it — and dressed in
-  // the same colours its full rig wears when promoted. What stays instanced
-  // boxes here is what IS a box: shields, sign boards, sticks, flags, bottles.
-  const R_ = { built: false, root: null, crowd: null, parts: null, signs: Object.create(null), flags: Object.create(null), shots: null };
+  // EVERY BODY IS THE REAL HUMAN. Past the rig ring the crowd is drawn by the
+  // store (entities/crowdstore.js -> crowdgpu.js): the CBZ.human mesh,
+  // GPU-instanced, animated from its own baked walk / run / chant / cheer /
+  // placard / flag clips, LOD'd down to the rig's far tier and then to
+  // impostors rendered from it, dressed in the colours its full rig wears when
+  // promoted. This file only says which clip each person is playing (cutClips,
+  // when the store re-cuts). What stays instanced boxes here is what IS a box:
+  // shields, sign boards, sticks, flags, bottles.
+  const PROP_CAP = Math.min(2048, CAP >> 2), STICK_CAP = Math.min(4096, CAP);
+  const R_ = { built: false, root: null, parts: null, signs: Object.create(null), flags: Object.create(null), shots: null };
   const PARTS = ["shield", "stick"];
   function instanced(geo, mat, cap) {
     const m = new THREE.InstancedMesh(geo, mat, cap);
@@ -1037,19 +1162,20 @@
     root.add(grp); R_.root = grp;
     const P = {};
     P.shield = instanced(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshLambertMaterial({ color: 0xc8d6e2, transparent: true, opacity: 0.55, depthWrite: false }), 120);
-    P.stick = instanced(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshLambertMaterial({ color: 0x8a6a44 }), CAP);
+    P.stick = instanced(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshLambertMaterial({ color: 0x8a6a44 }), STICK_CAP);
     for (const k of PARTS) grp.add(P[k]);
     R_.parts = P;
     R_.shots = instanced(new THREE.BoxGeometry(0.09, 0.22, 0.09), new THREE.MeshLambertMaterial({ color: 0x5a7a4a }), 32);
     grp.add(R_.shots);
-    if (CBZ.crowdGPU) {
-      R_.crowd = CBZ.crowdGPU.layer({ name: "mob", cap: CAP, parent: root, maxDraw: BUD.draw });
-      const w = CBZ.crowdGPU.clip("walk"), r = CBZ.crowdGPU.clip("run");
-      if (w && w.radPerM > 0) GAIT.walk = w.radPerM;
-      if (r && r.radPerM > 0) GAIT.run = r.radPerM;
-      GAIT.read = true;
-    }
+    readGait();
     return true;
+  }
+  function readGait() {
+    if (GAIT.read || !CBZ.crowdGPU) return;
+    const w = CBZ.crowdGPU.clip("walk"), r = CBZ.crowdGPU.clip("run");
+    if (w && w.radPerM > 0) GAIT.walk = w.radPerM;
+    if (r && r.radPerM > 0) GAIT.run = r.radPerM;
+    GAIT.read = true;
   }
   function signMesh(text, support) {
     const key = (support ? "s:" : "p:") + text;
@@ -1058,7 +1184,7 @@
     const props = PP();
     if (props && props.signMats) { try { mats = props.signMats(text, support); } catch (e) { mats = null; } }
     if (!mats) { const e = new THREE.MeshLambertMaterial({ color: 0xefe6cf }); mats = [e, e, e, e, e, e]; }
-    const m = instanced(new THREE.BoxGeometry(1, 1, 1), mats, Math.max(32, CAP >> 2));
+    const m = instanced(new THREE.BoxGeometry(1, 1, 1), mats, PROP_CAP);
     R_.root.add(m);
     R_.signs[key] = m;
     return m;
@@ -1072,7 +1198,7 @@
     const face = new THREE.MeshLambertMaterial({ color: 0xffffff, map: tex || null, side: THREE.DoubleSide });
     if (!tex) face.color.setHex(0x1d3c7a);
     const edge = new THREE.MeshLambertMaterial({ color: 0xdedad0 });
-    const m = instanced(new THREE.BoxGeometry(1, 1, 1), [face, face, edge, edge, edge, edge], Math.max(32, CAP >> 2));
+    const m = instanced(new THREE.BoxGeometry(1, 1, 1), [face, face, edge, edge, edge, edge], PROP_CAP);
     R_.root.add(m);
     R_.flags[key] = m;
     return m;
@@ -1105,16 +1231,30 @@
   // which baked clip a crowd member is playing, from what they are doing
   const TAU = Math.PI * 2;
   const POSE_RATE = { idle: 0.25, cheer: 8 / TAU, fist: 5 / TAU, sign: 1.4 / TAU, flag: 2.2 / TAU };
-  let _clip = "idle", _phase = 0, _rate = 0;
+  let _clip = "idle", _phase = 0, _rate = 0, _now = 0;
+  // the store is about to re-cut this mob: each person's clip, from what they are doing
+  function cutClips(m) {
+    readGait();
+    const A = m.agents;
+    for (let k = 0; k < A.length; k++) {
+      const i = A[k];
+      if (amob[i] !== m.slot || arig[i] >= 0) continue;
+      clipFor(i, m);
+      m.G.anim(i, _clip, _phase, _rate, _now);
+    }
+  }
   function clipFor(i, m) {
     const r = arole[i], act = aact[i], sp = asp[i];
     if (act === ACT.down) { _clip = "down"; _phase = 0; _rate = 0; return; }
     if (sp > 0.3 || act === ACT.flee) {
       const run = sp > RUN_AT || act === ACT.flee;
       _clip = run ? "run" : (r === ROLE.sign ? "signWalk" : r === ROLE.flag ? "flagWalk" : "walk");
-      _phase = aph[i] / TAU; _rate = 0;            // the agent's own gait phase drives the frame
+      // the agent's own gait phase, as of now, and its stride rate: the GPU
+      // keeps the legs going between the store's cuts
+      _phase = aph[i] / TAU; _rate = Math.max(0.3, sp) * (run ? GAIT.run : GAIT.walk) / TAU; _now = 1;
       return;
     }
+    _now = 0;
     const pulse = m.chantPulse > 0;
     if (r === ROLE.sign) _clip = "sign";
     else if (r === ROLE.flag) _clip = "flag";
@@ -1129,20 +1269,25 @@
     if (!R_.built) build();
     if (!R_.root) return;
     const t0 = (typeof performance !== "undefined" && performance.now) ? performance.now() : 0;
-    const P = R_.parts, crowd = R_.crowd;
+    const P = R_.parts;
     const n = { shield: 0, stick: 0 };
     for (const k in R_.signs) R_.signs[k].count = 0;
     for (const k in R_.flags) R_.flags[k].count = 0;
-    if (crowd) crowd.begin();
     const pp = player(), cam = CBZ.camera;
     const cx = cam && cam.position ? cam.position.x : (pp ? pp.x : 0), cz = cam && cam.position ? cam.position.z : (pp ? pp.z : 0);
     const PROP2 = 130 * 130;                   // props past this are a pixel or two
     let bodies = 0;
-    for (let i = 0; i < hiAgent; i++) {
-      if (amob[i] < 0 || arig[i] >= 0) continue;
-      const m = MOBS[amob[i]]; if (!m) continue;
+    for (let mi = 0; mi < MOBS.length; mi++) {
+     const m = MOBS[mi]; if (!m) continue;
+     const A = m.agents;
+     // a crowd entirely past the prop range draws no props (its bodies are the store's)
+     const far = Math.hypot(m.centroid.x - cx, m.centroid.z - cz) > 130 + Math.sqrt(A.length) * 4 + 450;
+     bodies += A.length;
+     if (far) continue;
+     for (let k = 0; k < A.length; k++) {
+      const i = A[k];
+      if (amob[i] !== mi || arig[i] >= 0) continue;
       const x = ax[i], y = ay[i], z = az[i];
-      if (crowd && alook[i] >= 0) { clipFor(i, m); crowd.add(x, y, z, ahd[i], alook[i], _clip, _phase, _rate); bodies++; }
       const dx = x - cx, dz = z - cz;
       if (dx * dx + dz * dz > PROP2 || aact[i] === ACT.down || aact[i] === ACT.flee) continue;
       const r = arole[i];
@@ -1155,17 +1300,17 @@
         const sm = signMesh(m.slogans[asign[i] % m.slogans.length], m.support);
         const pump = Math.sin(t * 1.4 + i) * 0.04;
         if (sm.count < sm.instanceMatrix.count) { putBox(sm, sm.count, x, y, z, 0, 2.4, 0.2, pump * 0.25, 0, 0.82, 0.52, 0.02); sm.count++; }
-        if (n.stick < CAP) { putBox(P.stick, n.stick, x, y, z, 0, 1.68, 0.2, 0, 0, 0.034, 1.0, 0.034); n.stick++; }
+        if (n.stick < STICK_CAP) { putBox(P.stick, n.stick, x, y, z, 0, 1.68, 0.2, 0, 0, 0.034, 1.0, 0.034); n.stick++; }
       } else if (r === ROLE.flag) {
         const fm = flagMesh(m.flag);
         if (fm.count < fm.instanceMatrix.count) {
           const wv = Math.sin(t * 2.2 + i * 0.7) * 0.1;
           putBox(fm, fm.count, x, y, z, -0.22, 2.2, 0.0, wv, 0, 0.02, 0.4, 0.62); fm.count++;
         }
-        if (n.stick < CAP) { putBox(P.stick, n.stick, x, y, z, -0.22, 1.92, 0.3, 0, 0, 0.034, 0.9, 0.034); n.stick++; }
+        if (n.stick < STICK_CAP) { putBox(P.stick, n.stick, x, y, z, -0.22, 1.92, 0.3, 0, 0, 0.034, 0.9, 0.034); n.stick++; }
       }
+     }
     }
-    if (crowd) crowd.commit();
     P.shield.count = n.shield; P.stick.count = n.stick;
     for (const k in P) { const M = P[k]; M.instanceMatrix.needsUpdate = M.count > 0; }
     for (const k in R_.signs) R_.signs[k].instanceMatrix.needsUpdate = R_.signs[k].count > 0;
@@ -1180,7 +1325,6 @@
   }
   function blank() {
     if (!R_.root) return;
-    if (R_.crowd) R_.crowd.clear();
     for (const k in R_.parts) R_.parts[k].count = 0;
     for (const k in R_.signs) R_.signs[k].count = 0;
     for (const k in R_.flags) R_.flags[k].count = 0;
@@ -1220,7 +1364,7 @@
       id: m.id, kind: m.kind, side: m.side, stage: m.stage, size: m.size, agents: crowd, police: police, fleeing: flee, inside: inside,
       centroid: { x: m.centroid.x, z: m.centroid.z }, head: { x: m.head.x, z: m.head.z }, anger: +m.anger.toFixed(2),
       pressure: +m.pressure.toFixed(1), line: L ? { kind: L.kind, broken: L.broken, strength: +L.strength.toFixed(1), breakAt: +L.breakAt.toFixed(1), officers: L.officers.length } : null,
-      place: m.place, slogans: m.slogans.slice(), dead: m.dead | 0, doorForced: !!m.doorForced, events: m.events.map(function (e) { return e.phase; }),
+      place: m.place, slogans: m.slogans.slice(), dead: m.dead | 0, hurt: m.hurt | 0, doorForced: !!m.doorForced, events: m.events.map(function (e) { return e.phase; }),
     };
   }
   CBZ.mob = {
@@ -1242,18 +1386,27 @@
     inside: function (id, at) { const m = mobById(id); if (!m || !at) return false; m.insideAt = { x: +at.x, z: +at.z, r: +at.r || 10 }; return true; },
     lineOf: function (id) { const m = mobById(id); return m && m.line ? { id: m.line.id, kind: m.line.kind, broken: m.line.broken } : null; },
     breakLine: function (lineId) { const L = lineById(lineId); if (!L) return false; breakLine(L, "ordered"); return true; },
+    // the line shoots into the crowd for `secs` (a crackdown that becomes a
+    // massacre): every round through the store's one damage path
+    openFire: function (id, secs) {
+      const m = mobById(id); if (!m) return false;
+      let n = 0;
+      for (let k = 0; k < LINES.length; k++) { const L = LINES[k]; if (L.mob === m.id && !L.broken && L.hostile) { L.fireT = Math.max(L.fireT, +secs || 8); n++; } }
+      return n > 0;
+    },
+    group: function (id) { const m = mobById(id); return m ? m.G : null; },
     budget: function () { return Object.assign({ device: DEVICE, cap: CAP }, BUD); },
     audit: function () {
       return {
-        device: DEVICE, cap: CAP, agents: liveAgents(), free: freeList.length, hi: hiAgent, rigs: rigCount(false), copRigs: rigCount(true),
+        device: DEVICE, cap: BUD.agents, store: CAP, agents: liveAgents(), free: room(), rigs: rigCount(false), copRigs: rigCount(true),
         rigCap: BUD.rigs, copCap: BUD.cops, mobs: MOBS.filter(Boolean).length, lines: LINES.length, gas: GAS.length, shots: SHOTS.length,
-        drawn: Math.max(0, STATS.drawn), lods: R_.crowd ? R_.crowd.drawn.slice(1) : null, stepMs: +STATS.stepMs.toFixed(3), drawMs: +STATS.drawMs.toFixed(3), peakAgents: STATS.peakAgents, peakRigs: STATS.peakRigs,
+        drawn: Math.max(0, STATS.drawn), lods: (function () { const L = []; for (let i = 0; i < MOBS.length; i++) if (MOBS[i] && MOBS[i].G && MOBS[i].G.layer) L.push(MOBS[i].G.layer.drawn.slice(1)); return L; })(), stepMs: +STATS.stepMs.toFixed(3), drawMs: +STATS.drawMs.toFixed(3), peakAgents: STATS.peakAgents, peakRigs: STATS.peakRigs,
         formed: STATS.formed, breaches: STATS.breaches, linesBroken: STATS.linesBroken, gasFired: STATS.gasFired, thrown: STATS.thrown,
         built: !!R_.root,
       };
     },
     _step: frame,
-    _agents: function () { return { ax: ax, az: az, amob: amob, aside: aside, aact: aact, arole: arole, hi: hiAgent }; },
+    _agents: function () { return { ax: ax, az: az, amob: amob, aside: aside, aact: aact, arole: arole, hi: ST.hi() }; },
     _reset: function () { for (let i = 0; i < MOBS.length; i++) if (MOBS[i]) endMob(MOBS[i]); GAS.length = 0; SHOTS.length = 0; },
   };
 })();

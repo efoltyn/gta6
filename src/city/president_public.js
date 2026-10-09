@@ -1713,10 +1713,10 @@
     // nearest of them ordinary people you can walk up to.
     PROT.mob = null;
     if (CBZ.mob && CBZ.mob.form) {
-      const souls = Math.round(30 + a * a * 1600 + (size != null ? size * 20 : 0));
+      const souls = Math.round(300 + a * a * 16000 + (size != null ? size * 200 : 0));
       let G = null;
       const A = CBZ.address;
-      if (A && A.groups) { try { G = A.groups().filter(function (q) { return q.loyalty < 45; }).map(function (q) { return { name: q.name, share: q.share, color: q.color, cap: 0.2, shirt: 0.35 }; }); } catch (e) { G = null; } }
+      if (A && A.groups) { try { G = A.groups().filter(function (q) { return q.loyalty < 45; }).map(function (q) { return { id: q.id, name: q.name, share: q.share, color: q.color, cap: 0.2, shirt: 0.35 }; }); } catch (e) { G = null; } }
       PROT.souls = souls;
       PROT.mob = CBZ.mob.form({
         at: { x: gp.x, z: gp.z + 18 }, face: Math.PI, size: souls, side: "opposition", kind: "protest", place: "the Mansion", hold: true, quiet: true,
@@ -1725,7 +1725,7 @@
       });
     }
     emit("protest", { phase: "start", size: PROT.mob ? PROT.souls : PROT.size, at: { x: PROT.at.x, z: PROT.at.z }, group: PROT.group, groupName: PROT.group ? angriest.name : null });
-    news((PROT.mob ? PROT.souls >= 300 : PROT.size >= 14) ? "A large crowd of protesters fills the road outside the Executive Mansion." : "Protesters gather outside the Executive Mansion gate.");
+    news((PROT.mob ? PROT.souls >= 3000 : PROT.size >= 14) ? "A large crowd of protesters fills the road outside the Executive Mansion." : "Protesters gather outside the Executive Mansion gate.");
     fillProtest(force);
     return true;
   }
