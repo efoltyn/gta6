@@ -1297,7 +1297,8 @@
       s.fx.pollDay = d;
       deliver({ id: "pol:poll:" + d, via: "folder", topic: "poll", kind: "people", who: { name: "The pollster", role: "aide" }, expires: 1e9,
         line: "The numbers, sir.", memo: { dept: "Office of Public Opinion", subject: "Where the country stands", body: pollLines(), rec: "For your eyes only." },
-        yes: { label: "File it" }, no: { label: "Bin it" } });
+        // a read, not a decision: one verb, File (president_office.js `info`)
+        info: true, yes: { label: "File it" }, no: { label: "File it" } });
     }
     // executive orders, when the state calls for them (one a day at most)
     if (d - s.fx.eoDay >= 1) {
@@ -1349,10 +1350,18 @@
     }
   }
   function pollWord(l) { return l >= 70 ? "with you" : l >= 55 ? "warm" : l >= 42 ? "split" : l >= 28 ? "cold" : l >= 15 ? "angry" : "furious"; }
+  // the daily read in two lines, not a table of meters: the number, then who
+  // is warmest and who is coldest
   function pollLines() {
     const s = S();
-    const out = ["Overall, " + Math.round(aggregate()) + "% approve."];
-    GROUP_IDS.slice().sort(function (a, b) { return s.groups[b].share - s.groups[a].share; }).forEach(function (k) { out.push(GROUPS[k].name + ": " + pollWord(s.groups[k].loyalty) + "."); });
+    const out = [Math.round(aggregate()) + "% approve."];
+    // among the blocs big enough to matter (a tenth of the country or more)
+    const by = GROUP_IDS.filter(function (k) { return s.groups[k].share >= 0.1; })
+      .sort(function (a, b) { return s.groups[b].loyalty - s.groups[a].loyalty; });
+    if (by.length >= 2) {
+      const hi = by[0], lo = by[by.length - 1];
+      out.push(GROUPS[hi].name + " are " + pollWord(s.groups[hi].loyalty) + ", " + GROUPS[lo].name + " " + pollWord(s.groups[lo].loyalty) + ".");
+    }
     return out;
   }
   // what the Chief says when you ask (president_staff.js's Talk)

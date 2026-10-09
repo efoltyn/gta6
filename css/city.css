@@ -312,7 +312,10 @@ body.touch.mode-city #interact .itouch-act:active{ background:var(--verb-press);
   touch-action:manipulation; -webkit-tap-highlight-color:transparent; cursor:pointer;
   transition:transform .08s ease, background .12s ease;
 }
-.vpill .vword{ overflow:hidden; text-overflow:ellipsis; }
+.vpill .vword{ min-width:0; overflow:hidden; text-overflow:ellipsis; }
+/* a flex item will not shrink below its text without min-width:0: the old
+   rule's ellipsis never fired and a long verb ran out past the 240px rim */
+.vpill .vkey{ flex:none; }
 /* the likely verb: first, a step bigger, the bright rim */
 .vpill.lead{
   min-height:50px; padding:0 22px; font-size:17px; font-weight:700;

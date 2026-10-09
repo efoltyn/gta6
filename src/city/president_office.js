@@ -14,12 +14,20 @@
    facing the door. interior_programs.js built the room; this file only
    reads its landmarks and adds the working objects on top.
 
-   THE PHONE RINGS. A proper desk phone sits where the old placeholder box
-   was: base, handset, a row of line buttons and a red lamp. When somebody
-   needs a decision it rings (a synthesized two-tone trill), the lamp
-   blinks and the handset rattles in its cradle. E on it is Answer: the
-   handset comes up to your ear and the caller talks. When it is quiet, E
-   on it is Call: you ring whoever has business waiting for you. Callers are
+   THE DESK IS REAL (owner, iPad 2026-10-09: "all this stuff on the desk,
+   but when you press it you can't interact with it"). What is on it is a
+   working thing you can put a finger on (the phone, each folder) or
+   dressing that looks right and offers nothing (blotter, pen holder,
+   nameplate, the family photographs, the brass lamp). See THE DESK SET.
+
+   THE PHONE RINGS. A real desk set at the right hand: a wedge body, the
+   handset in its cradle, keypad, line buttons, a red line lamp, the coiled
+   cord. When somebody needs a decision it rings (a synthesized two-tone
+   trill), the lamp blinks and the handset rattles in its cradle. Tap it
+   (or E) to Answer: the handset comes up to your ear, the cord with it,
+   and the caller talks. When it is quiet the same tap is Call: you ring
+   whoever has business waiting for you; Dial (the wheel) opens the call
+   log and the directory. Callers are
    the people who run the state for you: the General, the Bureau Director,
    the Treasury Secretary, the Police Commissioner, a foreign ambassador,
    the party whip, the Chief of Staff. What they say is read off the world
@@ -30,18 +38,16 @@
    that is actually available. Let it ring 25 seconds and the caller does
    what he does without you; the Chief of Staff tells you about it later.
 
-   THE FOLDERS ARE THE AGENDA. Each morning two or three folders are on
-   the desk: red for security, blue for the economy, green for the people,
-   each with a printed cover label (the classification stamp, the
-   department, the day). E on the desk is Sign: the top folder opens flat,
-   the camera leans down over your shoulder and the page is the text (a
-   typed memo, FROM / TO / SUBJECT, a body that quotes the current state, a
-   recommendation); E again inks your signature and a stamp onto the page,
-   runs the order and drops the folder in the out-tray. Send back (on the
-   wheel) stamps it RETURNED. Hold E is Govern: you sit down behind the
-   desk and the day comes to you. If the order cannot run, a yellow note on the page
-   says why and signing is not offered. Folders left unsigned at the end
-   of the day are their own consequence.
+   THE FOLDERS ARE THE AGENDA. Each folder on the desk is ONE pending
+   matter (a bill, an executive order, a pardon, a briefing, the pollster's
+   read): a leather folder with the seal and a typed label, fanned at the
+   left hand so every one shows. Tap one (or E): it opens on the blotter and
+   the camera leans over the page, a heading and a line or two of what it
+   does. E signs it (the matter's own word: Sign, Pardon, File), hold E is
+   its no (Veto, Send back), the wheel puts it down undecided. Decided, it
+   is filed and leaves the desk. If the order cannot run, a yellow note on
+   the page says why and signing is not offered. Folders left unsigned at
+   the end of the day are their own consequence.
 
    THE TV. A wall-mounted set on the side wall, in view of the chair, is
    one of the game's NEWS ONE sets (city/newsroom.js owns the channel, the
@@ -173,7 +179,9 @@
     if (!m) return;
     m.traverse(function (o) {
       if (!o.isMesh) return;
-      if (o.geometry && !o.geometry._shared && o.geometry.type === "PlaneGeometry") o.geometry.dispose();
+      // our own geometry: the folders' pages, the photographs, and the merged
+      // desk set / phone / handset / cord (named pres-*)
+      if (o.geometry && !o.geometry._shared && (o.geometry.type === "PlaneGeometry" || /^pres-/.test(o.name || ""))) o.geometry.dispose();
       const mm = o.material;
       if (mm && !mm._shared && mm.map) mm.dispose();
     });
@@ -278,7 +286,7 @@
     L: null,              // local layout (see layout())
     phone: null, handset: null, lampOn: null, lampOff: null, lamp: null,
     tv: null, tvWorld: null,
-    tray: null,
+    cord: null, liveCord: null,
   };
 
   function layout(rec) {
@@ -302,12 +310,13 @@
       dep: dep, half: half,
       tv: tv,
       // desk-frame positions (x = reader's right, z = toward the chair), on
-      // the Resolute desk's 1.83 x 1.2 top: the phone at the right hand, the
-      // day's folders at the left, the out-tray by the phone
-      phone: { x: 0.60, z: -0.08 },
-      pile: { x: -0.56, z: -0.04 },
-      tray: { x: 0.60, z: 0.36 },
-      open: { x: 0.0, z: 0.26 },
+      // the Resolute desk's 1.93 x 1.2 top (its leather inlay is x +-0.6,
+      // z -0.21..0.41, 6 mm proud): the phone at the right hand on the bare
+      // wood, the day's folders fanned at the left hand, the blotter in
+      // front of the chair where an open folder lies
+      phone: { x: 0.79, z: 0.14 },
+      pile: { x: -0.78, z: 0.26 },
+      open: { x: 0.0, z: 0.24 },
       // people: they come in at the office's staff door and stop in front of the desk
       aideSpawn: spawn,
       aideStand: { x: dl.x, z: dl.z - 2.05 },
@@ -328,8 +337,8 @@
     for (let i = 0; i < M.folders.length; i++) M.folders[i].mesh = null;
     ROOM.rec = null; ROOM.builtFor = null; ROOM.key = ""; ROOM.frame = null; ROOM.desk = null;
     ROOM.phone = null; ROOM.handset = null; ROOM.lamp = null; ROOM.tv = null;
-    ROOM.tray = null; ROOM.L = null; ROOM.tvWorld = null;
-    ROOM.handsetHome = null;
+    ROOM.L = null; ROOM.tvWorld = null;
+    ROOM.handsetHome = null; ROOM.cord = null; ROOM.liveCord = null;
   }
 
   function buildRoom(rec) {
@@ -354,9 +363,7 @@
     grp.add(desk);
     ROOM.desk = desk;
 
-    buildPhone(desk, L.phone);
-    buildInTray(desk, L.pile);
-    buildTray(desk, L.tray);
+    buildDeskSet(desk, L);
     buildTV(grp, L.tv);
     grp.updateMatrixWorld(true);
     if (ROOM.tv) {
@@ -370,75 +377,281 @@
   }
   function roomKey(rec) { return Math.round(rec.approach.x * 10) + ":" + Math.round(rec.approach.z * 10) + ":" + Math.round(rec.floorY * 10); }
 
+  // ---- THE DESK SET ---------------------------------------------------------
+  /* OWNER (iPad, 2026-10-09): "all this stuff on the desk, but when you press
+     it you can't interact with it. It's dumb. And the stuff on the desk looks
+     dumb too." The set was a 50 x 30 x 18 cm black slab of a "console" with
+     its handset floating on top, a 66 x 46 x 13 cm wooden crate the folders
+     sat in and an empty out-tray, and a finger on any of it found nothing
+     (the tap anchor floated 0.9 m over the desk: city/interactions.js
+     anchorOf).
+
+     The rule now: a thing on the desk is REAL AND USABLE (the phone, each
+     folder) or it is DRESSING that looks right and offers nothing (the
+     blotter, the pen holder, the nameplate, the family photographs turned to
+     the chair, the brass lamp). Sizes are the real things': a desk phone
+     20 x 21 cm, letter-size folders, a 13 x 18 cm frame. Every piece stands
+     ON the worktop (y 0) or the leather inlay (y 0.006), nothing floats or
+     sinks. The dressing is ONE merged vertex-coloured mesh with one shared
+     material; the phone's body is another; the handset a third (it moves). */
+  const LEATHER_Y = 0.006;                // interior_programs' leather inlay, 6 mm proud
+  const BLOTTER_TOP = LEATHER_Y + 0.008;
+  const BRASS = 0xb48a3c, WALNUT = 0x3a2416, INK = 0x1b1e23, INK2 = 0x2a2e35;
+  const BGU = THREE.BufferGeometryUtils;
+  let VC_MAT = null;
+  function vcMat() {
+    if (!VC_MAT) { VC_MAT = new THREE.MeshLambertMaterial({ vertexColors: true }); VC_MAT._shared = true; }
+    return VC_MAT;
+  }
+  const _xq = new THREE.Quaternion(), _xe = new THREE.Euler(), _xs = new THREE.Vector3(1, 1, 1), _xp = new THREE.Vector3();
+  // translate * yaw * tilt (tilt about x first, then the yaw)
+  function xf(x, y, z, ry, rx, rz) {
+    _xe.set(rx || 0, ry || 0, rz || 0, "YXZ");
+    _xq.setFromEuler(_xe); _xp.set(x, y, z);
+    return new THREE.Matrix4().compose(_xp, _xq, _xs);
+  }
+  // one part of a merged set: geometry placed by `local`, then by `frame`
+  function put(parts, geo, hex, frame, local) {
+    const g2 = geo.index ? geo.toNonIndexed() : geo;
+    if (g2 !== geo) geo.dispose();
+    if (local) g2.applyMatrix4(local);
+    if (frame) g2.applyMatrix4(frame);
+    if (g2.attributes.uv) g2.deleteAttribute("uv");
+    if (g2.attributes.uv2) g2.deleteAttribute("uv2");
+    g2.clearGroups();
+    const n = g2.attributes.position.count, c = new THREE.Color(hex), a = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) { a[i * 3] = c.r; a[i * 3 + 1] = c.g; a[i * 3 + 2] = c.b; }
+    g2.setAttribute("color", new THREE.BufferAttribute(a, 3));
+    parts.push(g2);
+  }
+  function bx(parts, w, h, d, hex, x, y, z, frame, ry, rx, rz) { put(parts, new THREE.BoxGeometry(w, h, d), hex, frame, xf(x, y, z, ry, rx, rz)); }
+  function cy(parts, rt, rb, h, seg, hex, x, y, z, frame, rx, rz) { put(parts, new THREE.CylinderGeometry(rt, rb, h, seg), hex, frame, xf(x, y, z, 0, rx, rz)); }
+  function bake(parts, name) {
+    if (!parts.length) return null;
+    let g2 = null;
+    if (BGU && BGU.mergeBufferGeometries) { try { g2 = BGU.mergeBufferGeometries(parts); } catch (e) { g2 = null; } }
+    if (g2) {
+      for (let i = 0; i < parts.length; i++) parts[i].dispose();
+      const m = new THREE.Mesh(g2, vcMat());
+      m.name = name; m.castShadow = false; m.receiveShadow = true;
+      return m;
+    }
+    const grp = new THREE.Group();            // no merge helper on this page: same look, more draws
+    grp.name = name;
+    for (let i = 0; i < parts.length; i++) grp.add(new THREE.Mesh(parts[i], vcMat()));
+    return grp;
+  }
+
   // ---- the phone ----------------------------------------------------------
-  const INK = 0x1b1e23, INK2 = 0x2a2e35;
-  // The handset rests on the old brass bar (0.38 x 0.10, top 0.26 over the
-  // desk, 3 cm toward the door). HS_Y is its resting centre.
-  const HS_Y = 0.288, HS_Z = -0.03;
+  // A real desk set: a wedge body (2.8 cm at the front, 7 cm at the back), the
+  // handset lying front-to-back in its cradle on the left, the keypad and the
+  // line buttons on the slope at the right, a red line lamp, and the coiled
+  // cord from the handset's foot round to the jack in the body's side.
+  const PH = { W: 0.20, D: 0.21, FRONT: 0.028, BACK: 0.070, YAW: -0.42 };
+  const SLOPE = Math.atan2(PH.BACK - PH.FRONT, PH.D);
+  function slopeY(z) { return PH.FRONT + (PH.D / 2 - z) / PH.D * (PH.BACK - PH.FRONT); }
+  const HS_X = -0.052, HS_Z = 0.0, HS_Y = slopeY(0) + 0.022;   // the grip's centre: cups resting in the cradle
   function buildPhone(desk, at) {
     const ph = new THREE.Group();
     ph.position.set(at.x, 0, at.z);
+    ph.rotation.y = PH.YAW;                 // turned toward the chair
     desk.add(ph);
-    // the console: a squared secure-line set, 1 cm proud of the old box on
-    // every side so none of its faces is ever coplanar with ours
-    box(ph, 0, 0.0925, 0, 0.50, 0.185, 0.30, INK);
-    box(ph, 0, 0.004, 0, 0.52, 0.008, 0.32, 0x101215);                  // felt foot, a shadow line on the wood
-    box(ph, 0, 0.12, 0.1505, 0.46, 0.09, 0.002, 0x24282e);              // a darker front fascia
-    // the keypad, on the top face in front of the handset rest
-    const pad = new THREE.Group();
-    pad.position.set(0, 0.185, 0.085);
-    ph.add(pad);
-    box(pad, 0, 0.006, 0, 0.44, 0.012, 0.10, INK2);
-    for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++)             // dial keys
-      box(pad, -0.17 + c * 0.028, 0.014, -0.028 + r * 0.026, 0.020, 0.005, 0.018, 0xd9dad6);
-    for (let i = 0; i < 6; i++)                                         // the line buttons, one per office
-      box(pad, -0.045 + i * 0.034, 0.014, -0.022, 0.026, 0.006, 0.020, i === 0 ? 0xc9b37a : 0x8a9099);
-    for (let i = 0; i < 6; i++)                                         // their paper name strips
-      box(pad, -0.045 + i * 0.034, 0.0125, 0.012, 0.028, 0.002, 0.018, 0xe8e2cf);
+    const parts = [];
+    // the body: the side profile extruded across its width
+    const sh = new THREE.Shape();
+    sh.moveTo(-PH.D / 2, 0); sh.lineTo(-PH.D / 2, PH.FRONT); sh.lineTo(PH.D / 2, PH.BACK); sh.lineTo(PH.D / 2, 0); sh.lineTo(-PH.D / 2, 0);
+    put(parts, new THREE.ExtrudeGeometry(sh, { depth: PH.W - 0.008, bevelEnabled: true, bevelThickness: 0.004, bevelSize: 0.004, bevelSegments: 1 }),
+      INK, null, xf(-(PH.W - 0.008) / 2, 0.004, 0, Math.PI / 2));
+    bx(parts, PH.W - 0.01, 0.003, PH.D - 0.01, 0x0e0f11, 0, 0.0015, 0);                     // rubber foot
+    const SF = xf(0, slopeY(0) + 0.004, 0, 0, SLOPE);                                         // the slope's own frame
+    for (const s of [-1, 1]) bx(parts, 0.050, 0.008, 0.042, INK2, HS_X, 0.004, s * 0.076, SF);   // the cradle's two seats
+    bx(parts, 0.078, 0.002, 0.150, INK2, 0.050, 0.001, 0.008, SF);                            // keypad bezel
+    bx(parts, 0.066, 0.002, 0.030, 0x3e4b45, 0.046, 0.0025, -0.050, SF);                     // the little display
+    for (let r = 0; r < 4; r++) for (let c = 0; c < 3; c++)
+      bx(parts, 0.016, 0.005, 0.012, 0xd8d8d2, 0.026 + c * 0.020, 0.0035, -0.014 + r * 0.019, SF);
+    for (let i = 0; i < 4; i++) bx(parts, 0.010, 0.004, 0.012, 0x9097a0, 0.084, 0.003, -0.030 + i * 0.022, SF);   // line buttons
+    // the coiled cord: from the handset's foot, down the front onto the desk,
+    // a loose loop, into the jack on the body's left side
+    const path = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(HS_X - 0.004, slopeY(0.1) + 0.006, 0.112),
+      new THREE.Vector3(HS_X - 0.03, 0.03, 0.135),
+      new THREE.Vector3(-0.14, 0.0075, 0.12),
+      new THREE.Vector3(-0.165, 0.0075, 0.04),
+      new THREE.Vector3(-0.15, 0.008, -0.03),
+      new THREE.Vector3(-PH.W / 2 - 0.004, 0.016, -0.05),
+    ]);
+    const N = 260, fr = path.computeFrenetFrames(N, false), pts = [];
+    for (let i = 0; i <= N; i++) {
+      const p = path.getPointAt(i / N), a = i / N * Math.PI * 2 * 46;
+      const nn = fr.normals[i], bb = fr.binormals[i], r = (i < 6 || i > N - 6) ? 0.002 : 0.0055;
+      pts.push(new THREE.Vector3(p.x + (nn.x * Math.cos(a) + bb.x * Math.sin(a)) * r,
+        p.y + (nn.y * Math.cos(a) + bb.y * Math.sin(a)) * r, p.z + (nn.z * Math.cos(a) + bb.z * Math.sin(a)) * r));
+    }
+    put(parts, new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), N * 2, 0.0016, 3, false), INK, null, null);
+    const body = bake(parts, "pres-phone");
+    ph.add(body);
+    ROOM.cord = null;
+    // the red line lamp: its own mesh, its material swapped while it rings
     ROOM.lampOff = mat(0x4a1512);
     ROOM.lampOn = mat(0xff3322, { emissive: 0xff2210, ei: 1.0 });
-    ROOM.lamp = box(pad, 0.185, 0.015, -0.02, 0.018, 0.008, 0.018, 0x4a1512);
-    ROOM.lamp.material = ROOM.lampOff;
+    const lamp = new THREE.Mesh(geo(0.008, 0.004, 0.008), ROOM.lampOff);
+    lamp.position.set(0.084, 0.004, -0.058);
+    lamp.applyMatrix4(SF);
+    ph.add(lamp);
+    ROOM.lamp = lamp;
     const hs = buildHandset();
-    hs.position.set(0, HS_Y, HS_Z);
+    hs.position.set(HS_X, HS_Y, HS_Z);
+    hs.rotation.set(SLOPE, Math.PI / 2, 0);  // along the body, ear end at the back, following the slope
     ph.add(hs);
     ROOM.phone = ph; ROOM.handset = hs;
-    ROOM.handsetHome = { parent: ph, x: 0, y: HS_Y, z: HS_Z };
+    ROOM.handsetHome = { parent: ph, x: HS_X, y: HS_Y, z: HS_Z, rx: SLOPE, ry: Math.PI / 2 };
   }
   function buildHandset() {
     const hs = new THREE.Group();
-    box(hs, 0, 0, 0, 0.19, 0.028, 0.042, INK);                          // the grip
-    for (const s of [-1, 1]) box(hs, s * 0.092, -0.010, 0, 0.052, 0.034, 0.058, INK);   // ear + mouth cups
+    const parts = [];
+    bx(parts, 0.150, 0.020, 0.036, INK, 0, 0, 0);                               // the grip
+    for (const s of [-1, 1]) {
+      cy(parts, 0.025, 0.022, 0.026, 14, INK, s * 0.082, -0.008, 0);           // ear and mouth cups
+      cy(parts, 0.017, 0.017, 0.002, 12, 0x2c3036, s * 0.082, -0.0215, 0);     // the grilles under them
+    }
+    const m = bake(parts, "pres-handset");
+    hs.add(m);
     return hs;
   }
-
-  // ---- the in-tray: the day's folders, over the old brass slab --------------
-  const PILE_Y = 0.106;                  // the slab's top (0.105) plus a millimetre
-  function buildInTray(desk, at) {
-    const t = new THREE.Group();
-    t.position.set(at.x, 0, at.z);
-    desk.add(t);
-    const W = 0.66, D = 0.46, H = 0.13, WOOD = 0x3b2618;
-    // four walls to the desk top: the slab's floating underside is inside them
-    box(t, -W / 2 + 0.006, H / 2, 0, 0.012, H, D, WOOD);
-    box(t, W / 2 - 0.006, H / 2, 0, 0.012, H, D, WOOD);
-    box(t, 0, H / 2, -D / 2 + 0.006, W - 0.024, H, 0.012, WOOD);
-    box(t, 0, H / 2, D / 2 - 0.006, W - 0.024, H, 0.012, WOOD);
-    box(t, 0, H + 0.004, D / 2 - 0.006, W, 0.008, 0.016, 0x8a6a2e);   // brass edge on the lip you reach over
+  // ON A CALL the handset is at his ear and the cord runs to it from the jack:
+  // a short sagging tube, rebuilt a few times a second while he talks
+  const _cA = new THREE.Vector3(), _cB = new THREE.Vector3(), _cM = new THREE.Vector3();
+  let cordAt = -1;
+  function tickCord() {
+    const hs = ROOM.handset, ph = ROOM.phone, root = ROOM.root;
+    if (!hs || !ph || !root) return;
+    const lifted = hs.parent !== ph;
+    if (!lifted) {
+      if (ROOM.liveCord) { root.remove(ROOM.liveCord); ROOM.liveCord.geometry.dispose(); ROOM.liveCord = null; }
+      return;
+    }
+    if (CLOCK - cordAt < 0.1) return;
+    cordAt = CLOCK;
+    root.updateMatrixWorld(true);
+    _cA.set(-PH.W / 2 - 0.004, 0.016, -0.05); ph.localToWorld(_cA); root.worldToLocal(_cA);
+    _cB.set(-0.09, -0.012, 0); hs.localToWorld(_cB); root.worldToLocal(_cB);
+    _cM.addVectors(_cA, _cB).multiplyScalar(0.5); _cM.y = Math.min(_cA.y, _cB.y) - 0.18;
+    const g2 = new THREE.TubeGeometry(new THREE.CatmullRomCurve3([_cA.clone(), _cM.clone(), _cB.clone()]), 20, 0.003, 4, false);
+    if (!ROOM.liveCord) {
+      ROOM.liveCord = new THREE.Mesh(g2, mat(INK));
+      ROOM.liveCord.name = "pres-phone-cord";
+      root.add(ROOM.liveCord);
+    } else { ROOM.liveCord.geometry.dispose(); ROOM.liveCord.geometry = g2; }
   }
 
-  // ---- the out-tray -------------------------------------------------------
-  function buildTray(desk, at) {
-    const t = new THREE.Group();
-    t.position.set(at.x, 0, at.z);
-    desk.add(t);
-    const W = 0.27, D = 0.34, WOOD = 0x3b2618;
-    box(t, 0, 0.006, 0, W, 0.012, D, WOOD);
-    box(t, -W / 2 + 0.006, 0.028, 0, 0.012, 0.044, D, WOOD);
-    box(t, W / 2 - 0.006, 0.028, 0, 0.012, 0.044, D, WOOD);
-    box(t, 0, 0.028, -D / 2 + 0.006, W - 0.024, 0.044, 0.012, WOOD);
-    box(t, 0, 0.018, D / 2 - 0.006, W - 0.024, 0.024, 0.012, WOOD);    // low front lip, so you see what is in it
-    ROOM.tray = t;
+  // ---- the dressing ---------------------------------------------------------
+  let NP_MAT = null, NP_TEX = null, PHOTO_TEX = null, PHOTO_MAT = null;
+  function nameplateTex() {
+    if (NP_TEX) return NP_TEX;
+    const cv = makeCanvas(512, 96), c = cv.getContext("2d");
+    const gr = c.createLinearGradient(0, 0, 0, 96);
+    gr.addColorStop(0, "#e2c27a"); gr.addColorStop(0.5, "#b8903f"); gr.addColorStop(1, "#8e6a2a");
+    c.fillStyle = gr; c.fillRect(0, 0, 512, 96);
+    c.strokeStyle = "rgba(60,40,10,.6)"; c.lineWidth = 3; c.strokeRect(8, 8, 496, 80);
+    c.fillStyle = "#2e2108"; c.textAlign = "center"; c.textBaseline = "middle";
+    c.font = "bold 40px Georgia, 'Times New Roman', serif";
+    c.fillText("THE PRESIDENT", 256, 50);
+    NP_TEX = canvasTex(cv);
+    return NP_TEX;
+  }
+  // two snapshots on one canvas: the family in a garden, the two of them on a beach
+  function photoTex() {
+    if (PHOTO_TEX) return PHOTO_TEX;
+    const cv = makeCanvas(256, 192), c = cv.getContext("2d");
+    function person(x, y, s, shirt, skin, hair) {
+      c.fillStyle = shirt; c.beginPath(); c.ellipse(x, y + s * 1.55, s * 1.05, s * 0.9, 0, Math.PI, 0); c.fill();
+      c.fillRect(x - s * 1.05, y + s * 1.55, s * 2.1, s * 1.2);
+      c.fillStyle = skin; c.fillRect(x - s * 0.22, y + s * 0.55, s * 0.44, s * 0.5);
+      c.beginPath(); c.ellipse(x, y, s * 0.5, s * 0.62, 0, 0, Math.PI * 2); c.fill();
+      c.fillStyle = hair; c.beginPath(); c.ellipse(x, y - s * 0.26, s * 0.52, s * 0.4, 0, Math.PI, 0); c.fill();
+    }
+    // the garden (left half)
+    let gr = c.createLinearGradient(0, 0, 0, 192);
+    gr.addColorStop(0, "#9cc0d8"); gr.addColorStop(0.45, "#c7d8de"); gr.addColorStop(0.46, "#5b7a3c"); gr.addColorStop(1, "#3f5a2a");
+    c.fillStyle = gr; c.fillRect(0, 0, 128, 192);
+    c.fillStyle = "#2f4a26"; c.beginPath(); c.ellipse(24, 80, 30, 26, 0, 0, Math.PI * 2); c.fill();
+    person(40, 92, 15, "#2c3e66", "#e0b48f", "#3a2a1c");
+    person(72, 96, 14, "#b0413e", "#e8c19c", "#7a5232");
+    person(100, 122, 9, "#e6c14a", "#e8c19c", "#7a5232");
+    // the beach (right half)
+    gr = c.createLinearGradient(0, 0, 0, 192);
+    gr.addColorStop(0, "#6fa6d6"); gr.addColorStop(0.42, "#a9cde6"); gr.addColorStop(0.43, "#2f6f9a"); gr.addColorStop(0.58, "#3f86ad"); gr.addColorStop(0.59, "#e4d3a6"); gr.addColorStop(1, "#d2bd8a");
+    c.fillStyle = gr; c.fillRect(128, 0, 128, 192);
+    person(170, 98, 15, "#f2f2ee", "#d9a982", "#3a2a1c");
+    person(206, 100, 14, "#4f86b8", "#e8c19c", "#9a6a3a");
+    // a print's border and a little fade
+    c.fillStyle = "rgba(255,248,230,.10)"; c.fillRect(0, 0, 256, 192);
+    PHOTO_TEX = canvasTex(cv);
+    return PHOTO_TEX;
+  }
+  function photoMesh(w, h, u0) {
+    const g2 = new THREE.PlaneGeometry(w, h);
+    const uv = g2.attributes.uv;
+    for (let i = 0; i < uv.count; i++) uv.setX(i, u0 + uv.getX(i) * 0.5);
+    if (!PHOTO_MAT) { PHOTO_MAT = new THREE.MeshLambertMaterial({ map: photoTex() }); PHOTO_MAT._shared = true; }
+    const m = new THREE.Mesh(g2, PHOTO_MAT);
+    m.castShadow = false;
+    return m;
+  }
+  function buildDeskSet(desk, L) {
+    const parts = [];
+    // the blotter in front of the chair, leather with darker end-pieces
+    bx(parts, 0.56, 0.008, 0.34, 0x2e2018, 0, LEATHER_Y + 0.004, L.open.z);
+    for (const s of [-1, 1]) bx(parts, 0.045, 0.003, 0.342, 0x4a3122, s * 0.2575, LEATHER_Y + 0.0095, L.open.z);
+    // the pen holder: a leather cup with a brass rim, two pens in it
+    const PX = 0.36, PZ = -0.08;
+    cy(parts, 0.034, 0.032, 0.095, 18, 0x2a1c14, PX, LEATHER_Y + 0.0475, PZ);
+    cy(parts, 0.0356, 0.0356, 0.006, 18, BRASS, PX, LEATHER_Y + 0.092, PZ);
+    for (const p of [[-0.008, -0.004, -0.10, 0.14, 0x15171a], [0.010, 0.006, 0.09, -0.12, 0x1b2a4a]]) {
+      const pm = xf(PX + p[0], LEATHER_Y + 0.105, PZ + p[1], 0, p[2], p[3]);
+      cy(parts, 0.0045, 0.0042, 0.15, 8, p[4], 0, 0, 0, pm);
+      cy(parts, 0.0048, 0.0048, 0.028, 8, BRASS, 0, 0.062, 0, pm);
+    }
+    // the nameplate, facing the visitor: a walnut foot and a brass face
+    const NZ = -0.50, NT = 0.25;
+    bx(parts, 0.24, 0.012, 0.06, WALNUT, 0, 0.006, NZ);
+    const npM = xf(0, 0.012 + 0.024, NZ, 0, NT);
+    bx(parts, 0.22, 0.046, 0.012, 0x4a2e1c, 0, 0, 0, npM);
+    if (!NP_MAT) { NP_MAT = new THREE.MeshLambertMaterial({ map: nameplateTex() }); NP_MAT._shared = true; }
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(0.205, 0.034), NP_MAT);
+    face.position.set(0, 0.012 + 0.024, NZ);
+    face.rotation.set(-NT, Math.PI, 0, "YXZ");
+    face.translateZ(0.0062);
+    desk.add(face);
+    // two photographs turned to the chair, leaning back on their struts
+    const TILT = -0.2;
+    const frames = [[-0.44, -0.40, 0.13, 0.18, 0x6b4a2a, 0], [-0.27, -0.47, 0.10, 0.13, 0xb9b4a8, 0.5]];
+    for (let k = 0; k < frames.length; k++) {
+      const F = frames[k], fw = F[2], fh = F[3];
+      const yaw = Math.atan2(-F[0], 1.12 - F[1]);
+      const cyH = fh / 2 * Math.cos(TILT) + 0.007 * Math.abs(Math.sin(TILT));
+      const fm = xf(F[0], cyH, F[1], yaw, TILT);
+      bx(parts, fw, fh, 0.014, F[4], 0, 0, 0, fm);
+      bx(parts, fw * 0.25, fh * 0.7, 0.005, F[4], 0, -fh * 0.12, -0.03, fm, 0, 0.55);   // the strut behind
+      const ph = photoMesh(fw - 0.024, fh - 0.024, F[5]);
+      ph.position.set(F[0], cyH, F[1]);
+      ph.rotation.set(TILT, yaw, 0, "YXZ");
+      ph.translateZ(0.0075);
+      desk.add(ph);
+    }
+    // the brass lamp at the far right corner: a stepped foot, a turned
+    // column, a cream drum shade
+    const LX = 0.74, LZ = -0.40;
+    cy(parts, 0.070, 0.080, 0.022, 22, BRASS, LX, 0.011, LZ);
+    cy(parts, 0.032, 0.050, 0.020, 16, BRASS, LX, 0.032, LZ);
+    cy(parts, 0.009, 0.009, 0.30, 10, BRASS, LX, 0.042 + 0.15, LZ);
+    cy(parts, 0.016, 0.016, 0.030, 12, BRASS, LX, 0.20, LZ);
+    cy(parts, 0.018, 0.018, 0.040, 10, BRASS, LX, 0.33, LZ);
+    cy(parts, 0.060, 0.125, 0.150, 26, 0xe8dcc0, LX, 0.375, LZ);
+    cy(parts, 0.006, 0.010, 0.026, 8, BRASS, LX, 0.463, LZ);
+    const set = bake(parts, "pres-desk-set");
+    if (set) desk.add(set);
+    buildPhone(desk, L.phone);
   }
 
   // ---- the television -----------------------------------------------------
@@ -461,10 +674,11 @@
   //  §3  PAPER. Canvas painters for the folder cover, the routing slip and
   //  the memo. Painted once per change, never per frame.
   // ============================================================
+  // a leather document folder, the kind's colour in the hide
   const KIND = {
-    security: { cover: 0x7a1f1f, css: "#7a1f1f", stamp: "EYES ONLY", tab: "SECURITY" },
-    economy:  { cover: 0x1f3d6e, css: "#1f3d6e", stamp: "CONFIDENTIAL", tab: "ECONOMY" },
-    people:   { cover: 0x2a5a36, css: "#2a5a36", stamp: "FOR ACTION", tab: "THE PEOPLE" },
+    security: { cover: 0x4a1616, css: "#4a1616", stamp: "EYES ONLY", tab: "SECURITY" },
+    economy:  { cover: 0x16243f, css: "#16243f", stamp: "CONFIDENTIAL", tab: "ECONOMY" },
+    people:   { cover: 0x1e3424, css: "#1e3424", stamp: "FOR ACTION", tab: "THE PEOPLE" },
   };
   function kindOf(m) { return KIND[m.kind] ? m.kind : "people"; }
   function wrap(ctx, text, x, y, maxW, lh, maxLines) {
@@ -492,28 +706,37 @@
     ctx.fillText(text, 0, 2);
     ctx.restore();
   }
+  // THE COVER: dark leather, a gold-tooled border, the seal in gold foil and
+  // one typed label (what it is), so every folder on the desk is told apart
   function paintCover(f) {
     const m = f.m, K = KIND[kindOf(m)];
     const cv = f.coverCv || (f.coverCv = makeCanvas(256, 340));
     const c = cv.getContext("2d");
     c.fillStyle = K.css; c.fillRect(0, 0, 256, 340);
-    // cloth grain
-    c.globalAlpha = 0.08; c.fillStyle = "#000";
-    for (let y = 0; y < 340; y += 3) c.fillRect(0, y, 256, 1);
+    c.globalAlpha = 0.07; c.fillStyle = "#000";                  // the hide's grain
+    for (let i = 0; i < 260; i++) c.fillRect((i * 97) % 256, (i * 53) % 340, 2, 1);
     c.globalAlpha = 1;
+    c.strokeStyle = "#b8954a"; c.lineWidth = 2; c.strokeRect(12, 12, 232, 316);
+    c.lineWidth = 1; c.strokeRect(17, 17, 222, 306);
+    // the seal: two gold rings, a star
+    const sx = 128, sy = 112;
+    c.strokeStyle = "#c9a457"; c.lineWidth = 3;
+    c.beginPath(); c.arc(sx, sy, 46, 0, Math.PI * 2); c.stroke();
+    c.lineWidth = 1.5; c.beginPath(); c.arc(sx, sy, 38, 0, Math.PI * 2); c.stroke();
+    c.fillStyle = "#c9a457"; c.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? 9 : 22;
+      c[i ? "lineTo" : "moveTo"](sx + Math.cos(a) * r, sy + Math.sin(a) * r);
+    }
+    c.closePath(); c.fill();
     // the typed label
-    c.fillStyle = "#efe9d8"; c.fillRect(34, 40, 188, 104);
-    c.strokeStyle = "rgba(0,0,0,.35)"; c.lineWidth = 2; c.strokeRect(34, 40, 188, 104);
-    c.fillStyle = "#1c1c1c"; c.textAlign = "left"; c.textBaseline = "alphabetic";
+    c.fillStyle = "#efe9d8"; c.fillRect(40, 196, 176, 70);
+    c.fillStyle = "#1c1c1c"; c.textAlign = "center"; c.textBaseline = "alphabetic";
     c.font = "bold 15px 'Courier New', monospace";
-    wrap(c, clean(m.memo.dept || m.who.role).toUpperCase(), 44, 62, 170, 17, 2);
-    c.font = "14px 'Courier New', monospace";
-    c.fillText("DAY " + f.day, 44, 100);
-    c.font = "bold 13px 'Courier New', monospace";
-    wrap(c, clean(m.memo.subject).toUpperCase(), 44, 120, 170, 15, 2);
-    stampBox(c, K.stamp, 128, 232, -0.12, "#e8d9b0", 22);
-    if (f.state === "signed") stampBox(c, "SIGNED", 128, 296, 0.08, "#f2f2f2", 18);
-    if (f.state === "returned") stampBox(c, "RETURNED", 128, 296, 0.08, "#f2f2f2", 18);
+    wrap(c, clean(m.memo.subject).toUpperCase(), 128, 220, 160, 17, 3);
+    c.font = "bold 13px 'Courier New', monospace"; c.fillStyle = "#c9a457";
+    c.fillText(K.stamp, 128, 300);
+    c.textAlign = "left";
     if (f.coverTex) f.coverTex.needsUpdate = true; else f.coverTex = canvasTex(cv);
   }
   function paintSlip(f) {
@@ -545,6 +768,10 @@
     stampBox(c, K.stamp, 128, 312, -0.05, "#a3261d", 17);
     if (f.slipTex) f.slipTex.needsUpdate = true; else f.slipTex = canvasTex(cv);
   }
+  /* THE PAGE: what it is and what it does, nothing else (owner: far less
+     text). A heading, one or two short lines, the signature line. The
+     office's memo header (FROM / TO / DATE / RECOMMENDATION) is gone: the
+     folder is on HIS desk, and the button says what signing does. */
   const MW = 512, MH = 683;
   function paintMemo(f) {
     const m = f.m, K = KIND[kindOf(m)];
@@ -553,63 +780,44 @@
     c.fillStyle = "#f6f3ea"; c.fillRect(0, 0, MW, MH);
     c.fillStyle = "rgba(0,0,0,.035)";                  // faint paper tooth
     for (let y = 0; y < MH; y += 4) c.fillRect(0, y, MW, 1);
-    c.fillStyle = "#1a1a1a"; c.textAlign = "center";
-    c.font = "bold 26px 'Courier New', monospace";
-    c.fillText("MEMORANDUM", MW / 2, 50);
-    c.font = "bold 15px 'Courier New', monospace";
-    c.fillStyle = "#a3261d";
-    c.fillText(K.stamp, MW / 2, 74);
-    c.fillStyle = "#1a1a1a"; c.textAlign = "left";
-    c.font = "19px 'Courier New', monospace";
-    const hdr = [
-      ["FROM:", speaker(m.who, false) + ", " + (m.memo.dept || "")],
-      ["TO:", "The President"],
-      ["DATE:", "Day " + f.day],
-      ["SUBJECT:", m.memo.subject],
-    ];
-    let y = 112;
-    for (let i = 0; i < hdr.length; i++) {
-      c.font = "bold 19px 'Courier New', monospace";
-      c.fillText(hdr[i][0], 28, y);
-      c.font = "19px 'Courier New', monospace";
-      y = wrap(c, clean(hdr[i][1]), 138, y, MW - 160, 23, 2) + 4;
-    }
+    c.textAlign = "center"; c.fillStyle = "#6b5a2e";
+    c.font = "bold 17px Georgia, serif";
+    c.fillText(clean(m.memo.dept || "").toUpperCase(), MW / 2, 52);
+    c.fillStyle = "#a3261d"; c.font = "bold 15px 'Courier New', monospace";
+    c.fillText(K.stamp, MW / 2, 78);
+    c.fillStyle = "#151515"; c.font = "bold 38px Georgia, serif";
+    let y = wrap(c, clean(m.memo.subject), MW / 2, 150, MW - 70, 44, 3) + 18;
     c.strokeStyle = "#1a1a1a"; c.lineWidth = 2;
-    c.beginPath(); c.moveTo(28, y); c.lineTo(MW - 28, y); c.stroke();
-    y += 32;
-    c.font = "19px 'Courier New', monospace";
+    c.beginPath(); c.moveTo(70, y - 22); c.lineTo(MW - 70, y - 22); c.stroke();
+    c.textAlign = "left"; c.font = "27px Georgia, serif"; c.fillStyle = "#222";
     const body = m.memo.body || [];
-    for (let i = 0; i < body.length && y < 500; i++) y = wrap(c, clean(body[i]), 28, y, MW - 56, 24, 4) + 8;
-    y += 6;
-    c.font = "bold 19px 'Courier New', monospace";
-    c.fillText("RECOMMENDATION:", 28, y); y += 25;
-    c.font = "19px 'Courier New', monospace";
-    y = wrap(c, clean(m.memo.rec || m.yes.label), 28, y, MW - 56, 24, 3);
-    // the signature block
+    for (let i = 0; i < body.length && i < 3 && y < 470; i++) y = wrap(c, clean(body[i]), 40, y + 16, MW - 80, 33, 3);
     const sy = MH - 70;
-    c.strokeStyle = "#333"; c.lineWidth = 1.5;
-    c.beginPath(); c.moveTo(28, sy); c.lineTo(290, sy); c.stroke();
-    c.font = "15px 'Courier New', monospace"; c.fillStyle = "#333";
-    c.fillText("Signed, the President", 28, sy + 22);
+    if (!m.info) {
+      c.strokeStyle = "#333"; c.lineWidth = 1.5;
+      c.beginPath(); c.moveTo(40, sy); c.lineTo(300, sy); c.stroke();
+      c.font = "16px Georgia, serif"; c.fillStyle = "#333";
+      c.fillText("The President", 40, sy + 24);
+    }
     if (f.blocked && (f.state === "closed" || f.state === "open")) {
       // a yellow note stuck on the page: why this cannot be signed today
       c.save();
       c.translate(360, 560); c.rotate(0.05);
       c.fillStyle = "#f3e27a"; c.fillRect(-120, -70, 240, 140);
       c.fillStyle = "rgba(0,0,0,.12)"; c.fillRect(-120, 62, 240, 8);
-      c.fillStyle = "#2b2b6b"; c.font = "italic 17px Georgia, serif"; c.textAlign = "left";
-      wrap(c, clean(f.blocked), -108, -40, 216, 21, 5);
+      c.fillStyle = "#2b2b6b"; c.font = "italic 19px Georgia, serif"; c.textAlign = "left";
+      wrap(c, clean(f.blocked), -108, -40, 216, 22, 5);
       c.restore();
     }
     if (f.state === "signed") {
-      signature(c, 44, sy - 12, strHash(m.id));
+      signature(c, 56, sy - 12, strHash(m.id));
       stampBox(c, f.failed ? "NOT EXECUTED" : "APPROVED", 380, sy - 40, -0.18, "#b0241b", 30);
       if (f.failed) {
         c.save(); c.fillStyle = "#b0241b"; c.font = "italic 16px Georgia, serif";
         wrap(c, clean(f.failed), 300, sy + 6, 190, 18, 3); c.restore();
       }
     } else if (f.state === "returned") {
-      stampBox(c, "RETURNED", 380, sy - 40, -0.18, "#1d3f8a", 30);
+      stampBox(c, String(m.noVerb || "Returned").toUpperCase(), 380, sy - 40, -0.18, "#1d3f8a", 30);
     }
     if (f.memoTex) f.memoTex.needsUpdate = true; else f.memoTex = canvasTex(cv);
   }
@@ -633,15 +841,16 @@
   }
 
   // ---- folder meshes --------------------------------------------------------
+  // letter-size: 23.5 x 31 cm, 1.2 cm thick with its papers
   const FW = 0.235, FD = 0.31, FT = 0.012;
   function closedMesh(f) {
     if (!f.coverTex) paintCover(f);
     const grp = new THREE.Group();
     box(grp, 0, FT / 2, 0, FW, FT, FD, KIND[kindOf(f.m)].cover);
-    // the paper inside, a pale edge on the open side
-    box(grp, -0.002, FT / 2, 0, FW - 0.008, FT - 0.005, FD - 0.006, 0xeeeae0);
-    const lab = planeFlat(FW - 0.01, FD - 0.01, f.coverTex, true);
-    lab.position.y = FT + 0.002;
+    // the papers inside, a pale edge on the open side
+    box(grp, 0.003, FT / 2, 0, FW - 0.004, FT - 0.004, FD - 0.008, 0xeeeae0);
+    const lab = planeFlat(FW - 0.006, FD - 0.006, f.coverTex, true);
+    lab.position.y = FT + 0.0006;
     grp.add(lab);
     return grp;
   }
@@ -652,43 +861,50 @@
     box(grp, 0, 0.002, 0, FW * 2, 0.004, FD, KIND[kindOf(f.m)].cover);           // the spread cover
     box(grp, FW / 2, 0.0055, 0, FW - 0.012, 0.003, FD - 0.012, 0xeeeae0);         // the stack of pages
     const slip = planeFlat(FW - 0.02, FD - 0.02, f.slipTex, true);
-    slip.position.set(-FW / 2, 0.0065, 0);
+    slip.position.set(-FW / 2, 0.0045, 0);
     grp.add(slip);
     const page = planeFlat(FW - 0.014, FD - 0.014, f.memoTex, true);
-    page.position.set(FW / 2, 0.0095, 0);
+    page.position.set(FW / 2, 0.0075, 0);
     grp.add(page);
     return grp;
   }
+  /* THE DAY'S FOLDERS, fanned at the left hand: the most urgent on top
+     nearest the chair, each one under it showing its own door-side end, so
+     every pending item is a thing you can put a finger on. An open one lies
+     on the blotter; a decided one is filed away (gone from the desk). Each
+     folder carries its tap target (f.tgt: world point + exact height). */
+  const FAN = 0.075;
   function layoutFolders() {
     if (!ROOM.desk || !ROOM.L) return;
     for (let i = 0; i < M.folders.length; i++) {
       const f = M.folders[i];
       if (f.mesh) { disposeMesh(f.mesh); f.mesh = null; }
+      f.tgt = null;
     }
     const L = ROOM.L;
-    let pileN = 0, trayN = 0;
-    // pile: most urgent on top (security, economy, people), so the order you
-    // open them in is the order they are stacked in
-    const order = M.folders.slice().sort(function (a, b) { return rank(b) - rank(a); });
-    for (let i = 0; i < order.length; i++) {
-      const f = order[i];
-      if (f.state === "open") {
-        const m = openMesh(f);
-        m.position.set(L.open.x, 0.0, L.open.z);
-        ROOM.desk.add(m); f.mesh = m;
-      } else if (f.state === "closed") {
-        const m = closedMesh(f);
-        const j = (h01(i, strHash(f.m.id), 311) - 0.5) * 0.12;
-        m.position.set(L.pile.x + j * 0.3, PILE_Y + pileN * (FT + 0.001), L.pile.z + j * 0.2);
-        m.rotation.y = j;
-        ROOM.desk.add(m); f.mesh = m; pileN++;
-      } else if (f.state === "signed" || f.state === "returned") {
-        const m = closedMesh(f);
-        m.position.set(L.tray.x, 0.012 + trayN * (FT + 0.001), L.tray.z);
-        m.rotation.y = (h01(trayN, 7, 97) - 0.5) * 0.08;
-        m.scale.set(0.98, 1, 0.98);                 // inside the tray lips
-        ROOM.desk.add(m); f.mesh = m; trayN++;
-      }
+    const pile = M.folders.filter(function (f) { return f.state === "closed"; }).sort(function (a, b) { return rank(a) - rank(b); });
+    const n = pile.length;
+    for (let i = 0; i < n; i++) {
+      const f = pile[i];
+      const m = closedMesh(f);
+      const j = (h01(i, strHash(f.m.id), 311) - 0.5);
+      const zc = L.pile.z - (n - 1 - i) * FAN, y = i * (FT + 0.0008);
+      m.position.set(L.pile.x + j * 0.02, y, zc);
+      m.rotation.y = j * 0.06;
+      ROOM.desk.add(m); f.mesh = m;
+      // the part of it you can see: all of the top one, the end of the others
+      const az = i === n - 1 ? zc : zc - FD / 2 + FAN / 2;
+      const w = deskWorld(L.pile.x, y + FT, az);
+      if (w) f.tgt = { x: w.x, y: w.y, z: w.z, ay: w.y, ar: i === n - 1 ? 0.12 : 0.05, f: f };
+    }
+    for (let i = 0; i < M.folders.length; i++) {
+      const f = M.folders[i];
+      if (f.state !== "open") continue;
+      const m = openMesh(f);
+      m.position.set(L.open.x, BLOTTER_TOP, L.open.z);
+      ROOM.desk.add(m); f.mesh = m;
+      const w = deskWorld(L.open.x + FW / 2, BLOTTER_TOP + 0.01, L.open.z);
+      if (w) f.tgt = { x: w.x, y: w.y, z: w.z, ay: w.y, ar: 0.16, f: f };
     }
   }
   function rank(f) { const k = kindOf(f.m); return k === "security" ? 3 : k === "economy" ? 2 : 1; }
@@ -1006,7 +1222,7 @@
       if (hs.parent) hs.parent.remove(hs);
       home.parent.add(hs);
       hs.position.set(home.x, home.y, home.z);
-      hs.rotation.set(0, 0, 0);
+      hs.rotation.set(home.rx || 0, home.ry || 0, 0);
       if (CBZ.sfx) { try { CBZ.sfx("switch", { vol: 0.4 }); } catch (e) {} }
     }
   }
@@ -1095,6 +1311,14 @@
     layoutFolders();
     if (CBZ.sfx) { try { CBZ.sfx("pickup", { vol: 0.35 }); } catch (e) {} }
     startReading(f);
+    // TOUCH: the page is up, so its verbs are too (Sign / Veto / Put down by
+    // the folder) without a second tap to ask for them
+    if (CBZ.touchMode) M.later.push({ at: CLOCK + 0.35, fn: function () {
+      const I = CBZ.interactions, VW = CBZ.verbWheel;
+      if (READ.f !== f || !f.tgt || !I || !I.candidateFor || !VW || !VW.openFor) return;
+      const c = I.candidateFor(f.tgt);
+      if (c) { try { VW.openFor(c); } catch (e) {} }
+    } });
   }
   function signFolder() {
     const f = READ.f;
@@ -1102,7 +1326,8 @@
     refreshBlocked(f);
     if (f.blocked) return;
     const r = decide(f.m, "yes", "folder");
-    f.state = "signed";
+    // a read-only folder (the pollster's) is filed, not signed
+    f.state = f.m.info ? "filed" : "signed";
     f.failed = r.ok ? null : (r.why ? cantLine(f.m, r.why) : "The order did not go through.");
     paintMemo(f);
     if (CBZ.sfx) { try { CBZ.sfx("key", { vol: 0.35 }); } catch (e) {} }
@@ -1153,8 +1378,9 @@
   function startReading(f) {
     READ.f = f; READ.t = 0; READ.closing = false;
     const L = ROOM.L;
-    const page = deskWorld(L.open.x + 0.06, 0.01, L.open.z);
-    const eye = deskWorld(L.open.x + 0.06, 0.45, L.open.z + 0.21);
+    // over the memo page (the right leaf of the spread), close enough to read
+    const page = deskWorld(L.open.x + FW / 2 - 0.01, BLOTTER_TOP, L.open.z);
+    const eye = deskWorld(L.open.x + FW / 2 - 0.01, BLOTTER_TOP + 0.40, L.open.z + 0.17);
     if (!page || !eye || !CBZ.cinePlay) return;     // no director: the page is still on the desk to be read
     let busy = false;
     try { busy = CBZ.cineBusy && CBZ.cineBusy(); } catch (e) {}
@@ -1961,28 +2187,31 @@
     liftHandset();
     converse(m, "phone", function () { M.later.push({ at: CLOCK + 3.0, fn: function () { hangUp(); } }); });
   }
-  // GOVERN: the heavier verb on the desk. You sit down behind it and the day
-  // comes to you: today's folders on the desk if they are not there yet, and
-  // the Chief of Staff with the day in words if you have not had it.
-  function govern() {
-    const rec = ROOM.rec;
-    if (!rec) return;
-    relocateToDesk(rec);
-    if (!seated()) return;
-    if (M.folderDay !== day()) issueFolders(day());
-    if (M.chiefDay !== day() && !AIDE.ped) chiefVisit(false);
+  /* GOVERN (hold E on the desk) is gone: sitting is the chair's own verb,
+     the day's folders arrive on their own once you hold the seat, and the
+     Chief of Staff walks in each morning. It was a button for a menu. */
+  // the word on a folder's button: "Sign it" -> "Sign", "Send it back" -> "Send back"
+  function verbWord(label, dflt) {
+    const s = clean(label || "").replace(/[.!]+$/, "").trim();
+    if (!s) return dflt;
+    return s.replace(/^send it back$/i, "Send back").replace(/^(\w+) it$/i, "$1");
   }
+  const FOLDER_TGTS = [];
   function wireZones() {
     if (zonesWired || !CBZ.interactions || !CBZ.interactions.registerZone) return;
     zonesWired = true;
+    // THE PHONE. Tap it (or E): Answer while it rings, Call when it is quiet
+    // (whoever has business waiting), and Dial on the wheel (the call log and
+    // the directory, city/phone_apps.js). Its target says exactly where the
+    // phone is (ay), so a finger on it finds it.
     CBZ.interactions.registerZone({
       id: "presoffice-phone", kind: "presphone", radius: 2.3, prio: 15,
       find: function (px, pz) {
-        if (!ROOM.phone || !ROOM.rec || M.onCall) return null;
+        if (!ROOM.phone || !ROOM.rec || M.onCall || READ.f) return null;
         const w = phoneWorld();
         if (!w || !yGate(ROOM.rec.floorY)) return null;
         const dx = w.x - px, dz = w.z - pz;
-        return dx * dx + dz * dz < 2.3 * 2.3 ? { x: w.x, y: w.y, z: w.z, kind: "presphone" } : null;
+        return dx * dx + dz * dz < 2.3 * 2.3 ? { x: w.x, y: w.y, z: w.z, ay: w.y + 0.05, ar: 0.11, kind: "presphone" } : null;
       },
       options: [{
         id: "presoffice-answer", slot: "e", prio: 22, campaignSafe: true,
@@ -1996,53 +2225,59 @@
         onSelect: function () { placeCall(); },
       }, {
         // the wheel: dial anyone yourself, through the one directory
-        // (city/phone_apps.js Calls: the cabinet, the press secretary,
-        // foreign leaders; "I need your resignation" lives there)
+        // (city/phone_apps.js Calls: the log, the cabinet, the press
+        // secretary, foreign leaders; "I need your resignation" lives there)
         id: "presoffice-dial", prio: 12, campaignSafe: true,
         label: "Dial",
         canShow: function () { return !M.ringing && !M.onCall && seated() && !READ.f && !!CBZ.phoneOpen; },
         onSelect: function () { try { CBZ.phoneOpen("calls"); } catch (e) {} },
       }],
     });
-    // THE DESK: E is Sign (the top folder opens under your hand; E again signs
-    // it), hold E is Govern, and the wheel adds Send back
-    CBZ.interactions.registerZone({
-      id: "presoffice-desk", kind: "presdesk", radius: 2.2, prio: 14,
-      find: function (px, pz) {
-        if (!ROOM.desk || !ROOM.rec || !ROOM.L || READ.closing) return null;
-        if (!yGate(ROOM.rec.floorY)) return null;
-        const L = ROOM.L;
-        const w = READ.f ? deskWorld(L.open.x, 0.01, L.open.z) : deskWorld(L.pile.x, PILE_Y, L.pile.z);
-        if (!w) return null;
-        const dx = w.x - px, dz = w.z - pz;
-        return dx * dx + dz * dz < 2.2 * 2.2 ? { x: w.x, y: w.y, z: w.z, kind: "presdesk" } : null;
+    // THE FOLDERS. Each one on the desk is one pending matter (a bill, an
+    // executive order, a pardon, a briefing, the pollster's read). Tap it (or
+    // look at it, E): he opens it on the blotter and reads it. Then E signs
+    // (the matter's own word: Sign, Pardon, File), hold E is its no (Veto,
+    // Send back), the wheel can put it down undecided. Decided, it is filed.
+    if (!CBZ.interactions.registerFixtures) return;
+    CBZ.interactions.registerFixtures({
+      id: "presoffice-folders", kind: "presfolder", prio: 16,
+      reach: function () { return 2.4; },
+      dot: function (t) { return t.f === READ.f ? -1 : 0.3; },
+      list: function () {
+        if (!ROOM.desk || !ROOM.rec || READ.closing || !yGate(ROOM.rec.floorY)) return null;
+        FOLDER_TGTS.length = 0;
+        for (let i = 0; i < M.folders.length; i++) {
+          const f = M.folders[i];
+          if (!f.tgt) continue;
+          if (READ.f ? f === READ.f && f.state === "open" : f.state === "closed") FOLDER_TGTS.push(f.tgt);
+        }
+        return FOLDER_TGTS;
       },
-      options: [{
-        id: "presoffice-sign", slot: "e", prio: 20, campaignSafe: true,
-        label: function () { return READ.f && READ.f.blocked ? "Close" : "Sign"; },
-        canShow: function () { return READ.f ? READ.f.state === "open" : !!topFolder(); },
-        onSelect: function () {
-          if (!READ.f) { openFolder(topFolder()); return; }
-          if (READ.f.blocked) shutFolder(); else signFolder();
-        },
+      name: function () { return ""; },
+      verbs: [{
+        id: "presfolder-open", slot: "e", prio: 22,
+        label: "Open",
+        canShow: function (t) { return !READ.f && t.f.state === "closed"; },
+        onSelect: function (t) { if (!READ.f && t.f.state === "closed") openFolder(t.f); },
       }, {
-        id: "presoffice-govern", hold: true, prio: 18, campaignSafe: true,
-        label: "Govern",
-        canShow: function () { return seated() && !READ.f; },
-        onSelect: function () { govern(); },
+        id: "presfolder-sign", slot: "e", prio: 22,
+        label: function (t) { return t.f.blocked ? "Put down" : verbWord(t.f.m.yes.label, t.f.m.info ? "File" : "Sign"); },
+        canShow: function (t) { return READ.f === t.f && t.f.state === "open" && !READ.closing; },
+        onSelect: function (t) { if (READ.f !== t.f) return; if (t.f.blocked) shutFolder(); else signFolder(); },
       }, {
-        id: "presoffice-send-back", prio: 10, campaignSafe: true,
-        // a bill's "no" is a Veto (city/politics.js puts noVerb on its folders)
-        label: function () { return (READ.f && READ.f.m && READ.f.m.noVerb) || "Send back"; },
-        canShow: function () { return !!READ.f && READ.f.state === "open"; },
-        onSelect: function () { returnFolder(); },
+        id: "presfolder-no", hold: true, prio: 20,
+        label: function (t) { return t.f.m.noVerb || verbWord(t.f.m.no.label, "Send back"); },
+        canShow: function (t) { return READ.f === t.f && t.f.state === "open" && !READ.closing && !t.f.m.info; },
+        onSelect: function (t) { if (READ.f === t.f) returnFolder(); },
+      }, {
+        id: "presfolder-down", prio: 10,
+        label: "Put down",
+        canShow: function (t) { return READ.f === t.f && t.f.state === "open" && !READ.closing && !t.f.blocked; },
+        onSelect: function (t) { if (READ.f === t.f) shutFolder(); },
       }],
     });
     if (CBZ.interactions.describe) {
-      try {
-        CBZ.interactions.describe("presphone", function () { return { label: "", note: "" }; });
-        CBZ.interactions.describe("presdesk", function () { return { label: "", note: "" }; });
-      } catch (e) {}
+      try { CBZ.interactions.describe("presphone", function () { return { label: "", note: "" }; }); } catch (e) {}
     }
   }
 
@@ -2095,6 +2330,7 @@
     tickSpawn(dt);
     tickLater();
     tickPhone(dt);
+    tickCord();
     tickAide(dt);
     if (nearOffice(ROOM.rec, 40)) { postSecretary(); tickSecretary(); }
     if (READ.f) {
