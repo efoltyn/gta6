@@ -521,11 +521,45 @@
   //  opts.material/opts.object (debris.js kindOf — the same classifier the
   //  impact chips already use, so the hole and the chips can never disagree),
   //  the snapped panel's own material for a mounted hole, else concrete.
-  function holeCap()    { return (CBZ.qScale ? CBZ.qScale(96, 384) : 192) | 0; }
-  const HOLE_MAX = 384;       // instanced capacity (the tier cap never exceeds it)
-  function holeLod()    { return CBZ.qScale ? CBZ.qScale(30, 90) : 50; }
-  function holePerCar() { return (CBZ.qScale ? CBZ.qScale(8, 22) : 12) | 0; }
-  function mountCap()   { return (CBZ.qScale ? CBZ.qScale(40, 120) : 72) | 0; }
+  //  HOLES STAY (owner 2026-10-09: "bullet holes disappear after a while,
+  //  which is dumb"). Nothing here has a timer; a hole goes only when a cap
+  //  is reached, and then the one recycled is the one FURTHEST from the lens
+  //  (behind it first), never the oldest-in-a-ring that may be the wall you
+  //  are looking at. World holes are one InstancedMesh (one draw call for
+  //  all of them), so the cap is generous: 4096 on desktop, a few hundred on
+  //  a phone / iPad. The stamp range went 30-90 m -> 90-300 m, so a hole made
+  //  down the street is still there when you walk up to it.
+  const HOLE_MAX = 4096;      // instanced capacity (the tier cap never exceeds it)
+  function holeCap() {
+    const hi = CBZ.isMobileDevice ? 600 : HOLE_MAX;
+    return (CBZ.qScale ? CBZ.qScale(Math.min(256, hi), hi) : hi) | 0;
+  }
+  function holeLod()    { return CBZ.qScale ? CBZ.qScale(90, 300) : 200; }
+  function holePerCar() { return (CBZ.qScale ? CBZ.qScale(16, 48) : 32) | 0; }
+  function mountCap()   { return (CBZ.qScale ? CBZ.qScale(60, CBZ.isMobileDevice ? 120 : 320) : 160) | 0; }
+  // per-slot world position of every instanced hole, for the far-first recycle
+  const slotPos = new Float32Array(HOLE_MAX * 3);
+  const _cf = new THREE.Vector3();
+  // the hole the player is least likely to be looking at: far, then behind the
+  // lens; `n` candidates, position read by `at(i, out3)`
+  function farthestOf(n, at) {
+    const cam = CBZ.camera;
+    if (!cam || n <= 0) return 0;
+    const cx = cam.position.x, cy = cam.position.y, cz = cam.position.z;
+    cam.getWorldDirection(_cf);
+    let best = 0, bs = -Infinity;
+    const p = _fp3;
+    for (let i = 0; i < n; i++) {
+      if (!at(i, p)) return i;                       // a free/dead slot: take it
+      const dx = p[0] - cx, dy = p[1] - cy, dz = p[2] - cz;
+      let sc = dx * dx + dy * dy + dz * dz;
+      if (dx * _cf.x + dy * _cf.y + dz * _cf.z < 0) sc += 1e6;   // behind the lens
+      if (sc > bs) { bs = sc; best = i; }
+    }
+    return best;
+  }
+  const _fp3 = [0, 0, 0];
+  function slotAt(i, out) { out[0] = slotPos[i * 3]; out[1] = slotPos[i * 3 + 1]; out[2] = slotPos[i * 3 + 2]; return true; }
 
   // ---- HOW BIG IS A BULLET HOLE, ACTUALLY (WOUND_DECAL_V2) -----------------
   //  A 9 mm bore leaves a ~9 mm hole; what you SEE is the spall / chip ring /
@@ -728,7 +762,7 @@
       tileGeos[ks[i]] = pg;
     }
   }
-  let instFill = 0, instIdx = 0;
+  let instFill = 0;
   const mounted = [];            // real meshes riding a car / door
   let holeSeq = 0;
   const _zAxis = new THREE.Vector3(0, 0, 1);
@@ -828,7 +862,13 @@
       const cap = Math.min(HOLE_MAX, holeCap());
       let slot;
       if (instFill < cap) { slot = instFill++; }
-      else { slot = instIdx % cap; instIdx = (instIdx + 1) % cap; if (instFill > cap) instFill = cap; }
+      else {
+        // full: recycle the hole furthest from the lens (a tier drop shrinks
+        // the cap: the instances past it simply stop drawing)
+        if (instFill > cap) instFill = cap;
+        slot = farthestOf(instFill, slotAt);
+      }
+      slotPos[slot * 3] = _hp.x; slotPos[slot * 3 + 1] = _hp.y; slotPos[slot * 3 + 2] = _hp.z;
       if (holeInst.parent !== scene) scene.add(holeInst);   // a world rebuild swept the scene
       holeInst.setMatrixAt(slot, _hm);
       tileOff(kind, aTileI.array, slot * 2);
@@ -839,12 +879,16 @@
     }
     // ---- mounted: a real mesh on the moving body ----
     let m = null;
-    let count = 0, oldest = null, oldestAll = null;
+    let count = 0, oldest = null;
     for (let i = 0; i < mounted.length; i++) {
       const h = mounted[i];
       if (!h.visible) { if (!m) m = h; continue; }
-      if (!oldestAll || h._holeSeq < oldestAll._holeSeq) oldestAll = h;
-      if (h.parent !== parent) continue;
+      if (h.parent !== parent) {
+        // a hole on a car that has left the world (scrapped, despawned) is
+        // nobody's hole any more: the first free slot
+        if (!m && !inScene(h)) { m = h; }
+        continue;
+      }
       count++;
       if (!oldest || h._holeSeq < oldest._holeSeq) oldest = h;
     }
@@ -856,7 +900,7 @@
         m.receiveShadow = true;
         m._bulletHole = true;
         mounted.push(m);
-      } else m = oldestAll;
+      } else m = mounted[farthestOf(mounted.length, mountAt)];
     }
     m.geometry = tileGeos[kind];
     m._holeSeq = seq;
@@ -870,9 +914,18 @@
     m.scale.set(s, s, 1);
     return m;
   };
+  function inScene(o) { while (o) { if (o === scene) return true; o = o.parent; } return false; }
+  const _mw = new THREE.Vector3();
+  function mountAt(i, out) {
+    const h = mounted[i];
+    if (!h.visible || !inScene(h)) return false;
+    h.getWorldPosition(_mw);
+    out[0] = _mw.x; out[1] = _mw.y; out[2] = _mw.z;
+    return true;
+  }
   // wipe every pock (new run / world rebuild) — pools survive, marks don't
   CBZ.bulletHolesReset = function () {
-    instFill = 0; instIdx = 0;
+    instFill = 0;
     if (holeInst) holeInst.count = 0;
     for (let i = 0; i < mounted.length; i++) {
       mounted[i].visible = false;

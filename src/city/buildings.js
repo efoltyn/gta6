@@ -806,16 +806,36 @@
   // collider-backed curtain-wall panes burst on hit one. That is exactly the
   // "the office glass isn't real like the window glass" report.
   //
-  // The fade and the STATE are now separate clocks: the decal still fades on its
-  // own cosmetic schedule, while the pane stays genuinely cracked for CRACK_HOLD
-  // seconds — long enough that a second swing at a normal rhythm always finishes
-  // the job, short enough that the world still re-glazes itself if you wander off.
+  // The decal and the STATE then ran on separate clocks (a 0.5 s fade, a 6 s
+  // re-heal). Neither has a clock now:
+  //
+  //  2026-10-09 (owner: "bullet holes disappear after a while, which is
+  //  dumb"): a struck pane STAYS cracked, and its crack STAYS drawn, until it
+  //  bursts or the city re-glazes for a new run. No re-heal clock, no fade.
   const crackedPanes = [];   // panes holding "one more hit finishes it"
-  const CRACK_HOLD = 6.0;    // seconds a cracked pane stays cracked
   function markCracked(gp) {
     gp.cracked = true;
-    gp.crackHold = CRACK_HOLD;
+    for (let i = crackedPanes.length - 1; i >= 0; i--) if (crackedPanes[i].shattered) crackedPanes.splice(i, 1);
     if (crackedPanes.indexOf(gp) === -1) crackedPanes.push(gp);
+  }
+  // the crack decal pool: capped, and when full the crack furthest from the
+  // lens (behind it first) gives its quad to the new one. Its pane stays
+  // cracked; only the far-away drawing is reused.
+  function crackCap() { return (CBZ.qScale ? CBZ.qScale(24, CBZ.isMobileDevice ? 48 : 160) : 64) | 0; }
+  const _ccd = new THREE.Vector3();
+  function farCrack() {
+    const cam = CBZ.camera;
+    if (!cam) return 0;
+    cam.getWorldDirection(_ccd);
+    let best = 0, bs = -Infinity;
+    for (let i = 0; i < crackQuads.length; i++) {
+      const p = crackQuads[i].mesh.position;
+      const dx = p.x - cam.position.x, dy = p.y - cam.position.y, dz = p.z - cam.position.z;
+      let sc = dx * dx + dy * dy + dz * dz;
+      if (dx * _ccd.x + dy * _ccd.y + dz * _ccd.z < 0) sc += 1e6;
+      if (sc > bs) { bs = sc; best = i; }
+    }
+    return best;
   }
   // lay a fading spider-crack decal flat over a pane (just before it bursts).
   // Cheap: a single quad on a shared material, pooled and capped.
@@ -828,7 +848,12 @@
     if (gp.shattered || gp.cracked) return;
     markCracked(gp);                     // state FIRST: a capped decal pool must
                                          // never cost the player a landed hit
-    if (crackQuads.length > 24) return;
+    if (crackQuads.length >= crackCap()) {
+      const old = crackQuads.splice(farCrack(), 1)[0];
+      CBZ.scene.remove(old.mesh);
+      if (old.mesh.material) old.mesh.material.dispose();
+      old.mesh.geometry.dispose();
+    }
     const horiz = gp.hd < gp.hw;   // pane wider in X than Z → faces ±Z
     const sz = Math.min(1.5, Math.max(0.7, gp.span));
     const q = new THREE.Mesh(new THREE.PlaneGeometry(sz, sz), crackMat());
@@ -842,7 +867,7 @@
     }
     q.renderOrder = 3;
     CBZ.scene.add(q);
-    crackQuads.push({ mesh: q, gp, life: 0.45 + Math.random() * 0.25, fade: 0 });
+    crackQuads.push({ mesh: q, gp });
   }
   // hit (optional): {x, y, z, dx, dz, power} — where the pane was struck and
   // which way the blow travelled, so the shards radiate from the strike.
@@ -1118,7 +1143,7 @@
           else if (CBZ.colliders.indexOf(gp.col) === -1) CBZ.colliders.push(gp.col);
         }
       }
-      gp.cracked = false; gp.crackHold = 0;
+      gp.cracked = false;
     }
     crackedPanes.length = 0;   // a re-glazed city holds no half-broken panes
     // interior band dressing hidden by wall carves comes back with the glass
@@ -1145,31 +1170,9 @@
     addCityGlass(group, lx, ly, lz, pw, ph, pd, ox || 0, oz || 0, o, list);
     return list[0] || null;
   };
-  // shard physics + crack-decal lifecycle (cheap; only works while any exist)
-  CBZ.onAlways(9, function (dt) {
-    // spider cracks: a cracked pane that is left alone re-heals (clears its
-    // decal) so the world doesn't accumulate cracks; a fresh decal stays put
-    // briefly then fades out. (Bursting clears it via burstPane.)
-    if (crackQuads.length) {
-      for (let i = crackQuads.length - 1; i >= 0; i--) {
-        const cq = crackQuads[i]; cq.life -= dt;
-        if (cq.life < 0.2) { cq.fade += dt; cq.mesh.material.opacity = Math.max(0, 0.96 - cq.fade * 4); }
-        if (cq.life <= 0) {
-          CBZ.scene.remove(cq.mesh);
-          if (cq.mesh.material) cq.mesh.material.dispose();
-          cq.mesh.geometry.dispose();
-          crackQuads.splice(i, 1);        // the DECAL is gone; the pane stays
-                                          // cracked on its own clock (below)
-        }
-      }
-    }
-    // cracked panes re-heal on CRACK_HOLD, not on the decal's fade
-    for (let i = crackedPanes.length - 1; i >= 0; i--) {
-      const gp = crackedPanes[i];
-      gp.crackHold -= dt;
-      if (gp.shattered || gp.crackHold <= 0) { gp.cracked = false; crackedPanes.splice(i, 1); }
-    }
-  });
+  // (the crack decals and the cracked state have no clock any more: a crack
+  // goes when its pane bursts, when the pool recycles the furthest one, or
+  // when the city re-glazes — see markCracked)
 
   // ---- VERTEX FACE SHADING (fake AO) ---------------------------------------
   // One-time colour attribute on a box: top face full-bright, ±X/±Z faces
@@ -1471,12 +1474,33 @@
   // a tiny dedicated CRACK-decal pool (kept apart from the bullet holes so cracks don't
   // thrash the bullet-hole LRU). Small cap — only a handful of wounded walls
   // ever show cracks at once before they auto-carve.
-  const crackPool = []; let crackIdx = 0; const CRACK_CAP = 24;
+  // No clock: a wall crack stays until the pool is full, and then the crack
+  // furthest from the lens (behind it first) is the one reused.
+  const crackPool = []; let crackIdx = 0;
+  function wallCrackCap() { return (CBZ.qScale ? CBZ.qScale(24, CBZ.isMobileDevice ? 48 : 128) : 48) | 0; }
+  const _wcd = new THREE.Vector3();
   function placeCrack(px, py, pz, nx, nz, scale) {
     if (!CBZ.scene) return;
-    let m;
-    if (crackPool.length < CRACK_CAP) { m = new THREE.Mesh(crackGeo(), crackMat()); m.renderOrder = 3; CBZ.scene.add(m); crackPool.push(m); }
-    else { m = crackPool[crackIdx]; crackIdx = (crackIdx + 1) % CRACK_CAP; m.visible = true; }
+    let m = null;
+    for (let i = 0; i < crackPool.length && !m; i++) if (!crackPool[i].visible) m = crackPool[i];
+    if (!m && crackPool.length < wallCrackCap()) { m = new THREE.Mesh(crackGeo(), crackMat()); m.renderOrder = 3; CBZ.scene.add(m); crackPool.push(m); }
+    if (!m) {
+      const cam = CBZ.camera;
+      let bs = -Infinity;
+      if (cam) cam.getWorldDirection(_wcd);
+      for (let i = 0; i < crackPool.length; i++) {
+        const p = crackPool[i].position;
+        let sc = 0;
+        if (cam) {
+          const dx = p.x - cam.position.x, dy = p.y - cam.position.y, dz = p.z - cam.position.z;
+          sc = dx * dx + dy * dy + dz * dz;
+          if (dx * _wcd.x + dy * _wcd.y + dz * _wcd.z < 0) sc += 1e6;
+        }
+        if (sc > bs) { bs = sc; m = crackPool[i]; }
+      }
+      m.visible = true;
+    }
+    if (m.parent !== CBZ.scene) CBZ.scene.add(m);
     m.position.set(px + nx * 0.025, py, pz + nz * 0.025); aimDecal(m, nx, 0, nz); m.rotateZ(Math.random() * Math.PI);
     const s = scale || 1.3; m.scale.set(s, s, s);
   }

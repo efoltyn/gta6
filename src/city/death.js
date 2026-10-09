@@ -221,12 +221,39 @@
     _bh.cal = hit && hit.cal ? hit.cal : 1;
     _bh.critical = runOut;
     V.wound(P, _bh);
+    playerHole(kind, _bh, headshot, fromX, fromZ, dx, dz);
     if (P.dead) return true;
     if (runOut) P.hp = 1;                              // down, awake, bleeding: vitals holds you on the floor
     else if (!headshot && !V.cuffable(P)) P.stun = Math.max(P.stun || 0, 0.08 + Math.min(0.12, dmg / 400));   // the round rocks you a beat
     const sev = Math.min(1, dmg / ((P.maxHp || 200) * 0.5));
     if (CBZ.gore && P.pos) CBZ.gore(P.pos.x, P.pos.y + 1.1, P.pos.z, { amount: 0.5 + sev * 0.6, player: true, dir: (fromX != null ? { x: dx, z: dz } : null) });
     return true;
+  }
+  // THE HOLE ON YOUR BODY, on the frame of the hit (systems/wounds.js): the
+  // same entry hole, cloth hole and small blood ring every man in the street
+  // gets, on your third-person rig, and mirrored onto your first-person arms
+  // when it lands there. The city's hits mostly carry no ray, so the zone
+  // picks the height and the shooter's bearing picks the side.
+  const _phP = { x: 0, y: 0, z: 0 }, _phD = { x: 0, y: 0, z: 0 }, _phO = { head: false, cal: 1, melee: undefined, fromX: undefined, fromZ: undefined, dir: null };
+  function playerHole(kind, bh, headshot, fromX, fromZ, dx, dz) {
+    const P = CBZ.player;
+    if (!CBZ.bodyWound || !CBZ.playerWoundActor || !P || !P.pos) return;
+    let wp = bh.point && bh.point.x != null ? bh.point : null;
+    if (!wp) {
+      const z = bh.zone || "";
+      const y = headshot || z === "head" ? 1.95 : /leg/.test(z) ? 0.55 + Math.random() * 0.35
+        : /arm/.test(z) ? 1.2 + Math.random() * 0.25 : 1.05 + Math.random() * 0.4;
+      const side = /arm/.test(z) ? (Math.random() < 0.5 ? -0.42 : 0.42) : (Math.random() - 0.5) * 0.3;
+      // across the shot line (dx,dz points shooter -> you)
+      _phP.x = P.pos.x + (-dz) * side; _phP.y = (P.pos.y || 0) + y; _phP.z = P.pos.z + dx * side;
+      wp = _phP;
+    }
+    _phO.head = !!headshot || bh.zone === "head";
+    _phO.cal = bh.cal || 1;
+    _phO.melee = kind === "blade" ? "blade" : kind === "bite" ? "bite" : undefined;
+    _phO.fromX = fromX != null ? fromX : undefined; _phO.fromZ = fromZ != null ? fromZ : undefined;
+    if (dx || dz) { _phD.x = dx; _phD.y = 0; _phD.z = dz; _phO.dir = _phD; } else _phO.dir = null;
+    try { CBZ.bodyWound(CBZ.playerWoundActor, wp, _phO); } catch (e) { /* wounds off */ }
   }
   // a full dressing (a medkit, a medic, a night's sleep): every open hole
   // wrapped, some blood made back, and up off the floor if the bleeding was
@@ -243,6 +270,8 @@
     if (CBZ.cityPoliceGrace) CBZ.cityPoliceGrace(20);   // a fresh life is not greeted by a gun-stop
     // mode swap / hard reset: never carry a missing head/limb into the next life
     if (CBZ.goreRestoreBody && CBZ.city && CBZ.city.playerActor) CBZ.goreRestoreBody(CBZ.city.playerActor);
+    // a fresh life is a fresh body: the last one's holes stay with the last one
+    if (CBZ.woundsForget && CBZ.playerWoundActor) CBZ.woundsForget(CBZ.playerWoundActor);
   };
 
   /* ---- THE CITY PLUGS ITS PLAYER INTO VITALS. Going down (knocked out,
