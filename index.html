@@ -605,7 +605,7 @@ document.body.appendChild(b);}}catch(e){}})();
   <script src="src/entities/tattoo.js?v=pf0930c"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
-  <script src="src/entities/character.js?v=shades1009b"></script>
+  <script src="src/entities/character.js?v=arms1009b"></script>
   <script src="src/entities/headwear.js?v=hw1"></script>
   <!-- real jewelry (PBR metal, brilliants, draped link chains, pendants): before watch.js (its metals) and bling.js -->
   <script src="src/entities/jewelry_kit.js?v=w09290232"></script>
@@ -632,7 +632,7 @@ document.body.appendChild(b);}}catch(e){}})();
      door registry), is refused if not, and it shuts behind them. Asked by
      CBZ.moves.step and by systems/navgrid.js. -->
 <script src="src/systems/bodydoors.js?v=presint1001b"></script>
-<script src="src/entities/poses.js?v=realcrowd1"></script>
+<script src="src/entities/poses.js?v=arms1009b"></script>
 <!-- THE REAL CROWD (entities/crowdgpu.js): the CBZ.human mesh GPU-instanced
      with its clips baked into a bone texture; LOD1/LOD2 are the rig's own
      tiers, LOD3 impostors rendered from it. mob.js, the arena seats and the
@@ -1017,7 +1017,7 @@ document.body.appendChild(b);}}catch(e){}})();
      per-frame poll joins the updater sort; feeds the same CBZ.keys/CBZ.cam
      the keyboard + touch layers use. -->
 <script src="src/systems/gamepad.js?v=ekey2"></script>
-<script src="src/systems/fpsmode.js?v=dogs1009b"></script>
+<script src="src/systems/fpsmode.js?v=arms1009b"></script>
 <script src="src/systems/gunfx.js?v=holes1009b"></script>
 <script src="src/systems/intimidate.js?v=jailv1001"></script>
 
@@ -1408,8 +1408,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/adboard.js?v=cd0929"></script>
 <script src="src/city/mode.js?v=flicker1009b"></script>
 <script src="src/city/economy.js?v=vit3"></script>
-<script src="src/city/clothes.js?v=pf0930c"></script>
-<script src="src/city/outfits.js?v=shades1009b"></script>
+<script src="src/city/clothes.js?v=arms1009b"></script>
+<script src="src/city/outfits.js?v=arms1009b"></script>
 <script src="src/entities/dutykit.js?v=bodyfix1009b"></script>
 <script src="src/city/hunger.js?v=stam1009"></script>
 <!-- THE CITY'S LAW over CBZ.brain: cop perception/hearing, the authority
@@ -1429,7 +1429,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/view.js?v=cars1"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=brainmoves1"></script>
-<script src="src/city/peds.js?v=speedway1009"></script>
+<script src="src/city/peds.js?v=arms1009b"></script>
 <!-- THE STREET AS A CONFIGURATION OF CBZ.brain: bystanders become witnesses
      (social.crime), react on their own delay through threat.respond, gangs
      retaliate proportionally and rout on brain morale, gang standing is
@@ -1717,7 +1717,7 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.econ.itemStore in systems/economy.js.) -->
 <script src="src/systems/resources.js?v=ground1001"></script>
 <script src="src/city/explosives.js?v=mil0929"></script>
-<script src="src/systems/helditems.js?v=phone1001"></script>
+<script src="src/systems/helditems.js?v=arms1009b"></script>
 <script src="src/city/armored.js?v=deslop1"></script>
 <script src="src/city/death.js?v=holes1009b"></script>
 <script src="src/city/camera.js?v=deathcam1009"></script>
@@ -1908,7 +1908,7 @@ document.body.appendChild(b);}}catch(e){}})();
      act); phone.js draws it in 3D on a canvas screen and routes taps onto
      the glass. Also the city's one text sink (CBZ.cityPhoneNotify). -->
 <script src="src/city/phone_apps.js?v=phone2b"></script>
-<script src="src/city/phone.js?v=phone2b"></script>
+<script src="src/city/phone.js?v=arms1009b"></script>
 <script src="src/city/killfeed.js?v=bigcrowd1009b"></script>
 <!-- THE MORGUE (DEATH_DROPS_V2 / CORPSE_PERSIST / EMS_RESPONSE): what a death
      leaves behind and who comes for it. Wraps cityKillPed + cityHurtCop the
@@ -1925,7 +1925,7 @@ document.body.appendChild(b);}}catch(e){}})();
      worldstate.js, wanted.js, outfits.js, combat.js, police.js, death.js,
      bank.js, housing.js, minicities.js, citytemplates.js and club.js — all
      already loaded above — so it goes last in the city block. -->
-<script src="src/city/origins.js?v=speedway1009"></script>
+<script src="src/city/origins.js?v=arms1009b"></script>
 <!-- The one hitman pipe + the motel room HQ (wall of marks, gear case, the
      tiered ladder of marks) — activities' Crime doors and the campaign's
      merged opening both route through it. -->

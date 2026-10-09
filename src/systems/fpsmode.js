@@ -1537,6 +1537,7 @@
         _aAlong.subVectors(_aW, _aE);
         FPH.orientAlong(side, _aAlong, T.roll, T.bend, hand.quaternion);
         if (T.plantW > 0 && T.plantQ) hand.quaternion.slerp(T.plantQ, T.plantW);   // flat on the ledge (fpPlants)
+        else if (T.handW > 0 && T.handQ) hand.quaternion.slerp(T.handQ, T.handW);   // a held thing's own frame (city/phone.js)
         hand.position.copy(_aW);
         FPH.poseArm(arm, _aW, _aE, _aS, hand.quaternion, HAND_K, armSleeved);
       }
@@ -5964,6 +5965,7 @@
     const pick = CBZ.verbs && CBZ.verbs.fpPickup ? CBZ.verbs.fpPickup(vm, fistT, handR, handL, armed() || fpStowingGun) : null;
     // the charge / detonator / frag in the right hand owns its wrist target
     // (systems/helditems.js), unless a pickup has the hand this beat
+    fistT[0].handW = 0; fistT[1].handW = 0;          // a holder sets its hand frame every frame it holds
     if (CBZ.heldItem) CBZ.heldItem.fpHold(pick ? null : vm, fistT, pick ? null : handR, handL);
     // a vault / mantle puts the bare hands on the obstacle (after the fists' own pose)
     if (!pick && !armed()) fpPlants(); else { fistT[0].plantW = 0; fistT[1].plantW = 0; }

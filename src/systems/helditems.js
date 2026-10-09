@@ -309,11 +309,23 @@
     if (tpKind && (tpKind !== held || !show)) {
       const old = PROPS.tp[tpKind];
       if (old) old.visible = false;
+      // the body's phone hold lets go: the hand back on its forearm, chin up
+      if (tpKind === "phone" && ch && CBZ.human && CBZ.human.phoneHold) { try { CBZ.human.phoneHold.release(ch, "r"); } catch (e) {} }
       tpKind = null;
     }
     if (!show) return;
     const prop = tpProp(held);
     if (!prop) return;
+    // THE PHONE IS HELD BY THE BODY (entities/character.js THE PHONE HOLD):
+    // the elbow at the side, the forearm up, the glass to the eyes, the chin
+    // down — the handset seated in the palm (the hand mesh's own frame, so it
+    // turns with the hand), not on the fixed wrist socket.
+    if (held === "phone" && CBZ.human && CBZ.human.phoneHold && ch.parts && ch.parts.ra && ch.parts.ra.userData.cap) {
+      if (prop.parent !== ch.parts.ra.userData.cap) CBZ.human.phoneSeat(ch, prop, { arm: "r" });
+      prop.visible = true; tpKind = held;
+      try { CBZ.human.phoneHold(ch, "read", { arm: "r" }); } catch (e) {}
+      return;
+    }
     if (prop.parent !== sock) {
       sock.add(prop);
       // the socket's frame is the hand's; the same seat numbers as the FP hand
@@ -330,7 +342,6 @@
       const k = down ? Math.min(1, downT / M.PLACE_HOLD) : (pressedT > 0 ? pressedT / 0.3 : 0);
       reach += 0.3 * k; up += 0.12 * k;
     } else if (held === "grenade" && down) { reach = 0.05; up = 1.6; }
-    else if (held === "phone") { reach = 0.30; up = 1.28; }      // at the chest, looking down at it
     _hand.set(P.pos.x + bx * reach - bz * 0.16, P.pos.y + up, P.pos.z + bz * reach + bx * 0.16);
     try {
       if (CBZ.charArmTo.rest) CBZ.charArmTo.rest(ch, "r", 0);
