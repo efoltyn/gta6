@@ -197,7 +197,10 @@
   };
   EXEC.posture = function (a, p) {
     if (!a) return false;
-    if (p === "aim") { a.alarmed = Math.max(a.alarmed || 0, 4); a._gunLowered = false; }
+    if (p === "aim") {
+      a.alarmed = Math.max(a.alarmed || 0, 4); a._gunLowered = false;
+      if (CBZ.gunDiscipline) CBZ.gunDiscipline.trigger(a, a._detWhy || "ward");
+    }
     else if (p === "cower" || p === "crouch" || p === "down") a.poseCower = Math.max(a.poseCower || 0, 1.0);
     return true;
   };
@@ -702,6 +705,10 @@
       A.moveTo(q, w.x, w.z, _mo);
     }
     if ((hot || D.phase === "alert" || D.phase === "hold") && !reacting && (m.postureT = (m.postureT || 0) - dt) <= 0) {
+      // the discipline's reason: a hot phase (shots, an attacker, a hit) is his
+      // ward under attack, drawn at once; alert / hold is a weapon SEEN, which
+      // has to hold for his sustain beat before leather clears
+      q._detWhy = hot ? "ward" : "armed-threat";
       m.postureT = 0.5; A.posture(q, "aim");
     }
   }

@@ -343,6 +343,10 @@
         return perform(p, "freeze", th);
       }
       case "hold": {
+        // standing his ground: against a GUN that is the discipline's
+        // armed-threat (it must persist past his sustain beat to draw; one
+        // bang is a look). Against fists the gun stays on the belt.
+        if (th.armed && CBZ.gunDiscipline) CBZ.gunDiscipline.trigger(p, "armed-threat", 2);
         EXEC.posture(p, "aim"); hold(p, "hold", 1.2);
         return true;
       }
