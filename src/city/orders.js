@@ -353,19 +353,53 @@
     if (Pz && Pz.emit) { try { Pz.emit("guards-order", { mode: mode, name: t.name || null, n: crew.length, refused: no.length }); } catch (e) {} }
     return { ok: true, n: crew.length, refused: no.length };
   }
+  // STAND DOWN ENDS THE INCIDENT, not just the order: the crew drops the
+  // order and holsters (drawFor null -> CBZ.gunDiscipline), forgets the man,
+  // and the detail's own alert / cover / evac and everything it heard during
+  // the take-down is cleared (CBZ.protection.standDown). Without that last
+  // step the detail stayed "under attack" off its own shots and re-drew on
+  // "ward" the moment the order holstered them.
   function standDown(quiet) {
-    const crew = PF.crew.slice();
-    if (!quiet && PF.target) polAct("stand-down", PF.target, crew[0]);
+    const crew = PF.crew.slice(), t = PF.target;
+    if (!quiet && t) polAct("stand-down", t, crew[0]);
     // before the cuffs the detention is off; after them he is in custody and
     // the car takes him (custody.cancel refuses a cuffed man)
-    if (PF.mode === "detain" && PF.target && CBZ.custody && CBZ.custody.cancel) { try { CBZ.custody.cancel(PF.target); } catch (e) {} }
+    if (PF.mode === "detain" && t && CBZ.custody && CBZ.custody.cancel) { try { CBZ.custody.cancel(t); } catch (e) {} }
     PF.target = null; PF.mode = null; PF.crew = [];
     for (let i = 0; i < crew.length; i++) {
       const q = crew[i];
       if (!q) continue;
       if (q._order && q._order.force && !q._custodyJob) clear(q);   // custody hands its own back
-      if (!q.dead) drawFor(q, null);
+      if (q.dead) continue;
+      if (t && q.mem === t) q.mem = null;
+      if (t && q.rage === t && !q._custodyJob) { q.rage = null; if (q.state === "fight") q.state = "idle"; }
+      q.alarmed = 0;
+      drawFor(q, null);
     }
+    // THE OTHER SIDE OF IT STOPS TOO. The man they went for (shot, still on
+    // his feet) and anybody who took his part against the agents back off
+    // instead of fighting on: left alone, the called-off target kept
+    // shooting at the detail, the posture went straight back to evac
+    // ("armed attacker") and every gun came out again. A rampage or a cell
+    // is a real attacker and is left to the detail.
+    const side = crew.concat(force());
+    const backOff = function (p) {
+      if (!p || p.dead || p.player || p.isPlayer || p.rampage || p.organization === "cell" || side.indexOf(p) >= 0) return;
+      p.rage = null;
+      if (p.state === "fight" || p.state === "confront") p.state = "walk";
+      if (p.mem && side.indexOf(p.mem) >= 0) p.mem = null;
+      p._cbThreatSrc = null;
+      p.fear = Math.max(p.fear || 0, 5);
+    };
+    if (t && !t.dead) backOff(t);
+    const P = CBZ.player, peds = CBZ.cityPeds || [];
+    for (let i = 0; P && P.pos && i < peds.length; i++) {
+      const p = peds[i];
+      if (!p || p.dead || !p.pos || !p.rage || side.indexOf(p.rage) < 0) continue;
+      if (hyp(p.pos.x, p.pos.z, P.pos.x, P.pos.z) > 80) continue;
+      backOff(p);
+    }
+    if (CBZ.protection && CBZ.protection.standDown) { try { CBZ.protection.standDown("president"); } catch (e) {} }
     if (!quiet) { const L = lead(crew.filter(function (q) { return q && !q.dead; })); if (L) say(L, "Sir."); }
     return crew.length;
   }
@@ -460,7 +494,10 @@
     // follower engine walks up, demands, hauls it back). It replaced the
     // target-side "Send to rob / scare / tail / Sic" copies on every stranger.
     I.register("ped", { id: "order-rob", prio: 29.5, bad: true, pick: "person", campaignSafe: true, anyone: true,
-      canShow: function (p) { return on(p) && !!CBZ.followerOrder; }, label: "Rob", onSelect: function (a, ctx, t) { give(a, "rob", t); } });
+      // (your crew's job, never the state's: a Secret Service agent, the
+      // football aide, a soldier is not sent to take a stranger's wallet)
+      canShow: function (p) { return on(p) && !!CBZ.followerOrder && !(p._protUnit || p._carries || p._footballWired || p.organization === "state" || p.organization === "military"); },
+      label: "Rob", onSelect: function (a, ctx, t) { give(a, "rob", t); } });
     I.register("ped", { id: "order-guard", prio: 29, pick: "person", campaignSafe: true, anyone: true,
       canShow: on, label: "Guard", onSelect: function (a, ctx, t) { give(a, "guard", t); } });
     I.register("ped", { id: "order-tail", prio: 28, pick: "person", campaignSafe: true, anyone: true,
