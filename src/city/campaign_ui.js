@@ -1027,6 +1027,7 @@
     const resolve = choiceResolve;
     state.dialogue = null;
     choiceResolve = null;
+    unpinReplies();
     if (lineTimer) { clearTimeout(lineTimer); lineTimer = 0; }
     if (dialogueEl) dialogueEl.classList.remove("show");
     document.body.classList.remove("campaign-dialogue-active");
@@ -1069,6 +1070,76 @@
     return CBZ.speech.say(actor, text, { secs: secs, force: true, important: true });
   }
 
+  /* THE ANSWERS RIDE ON WHOEVER ASKED (owner 2026-10-08: "All buttons and
+     interactions should come from players talking to you").
+     A question asked by a body (meta.actor: the General at the table, the
+     aide at the desk, the agent at the car door) or at a thing (meta.at: the
+     desk phone in your hand, the lectern you stand at) puts its answers into
+     the ONE verb registry (city/interactions.js), on him or on that spot:
+       E        the first answer
+       hold E   the second
+       Q / tap  all of them (city/verbwheel.js)
+     so a reply is the same act as every other verb: look at the man who
+     asked, answer him. Nothing is drawn along the bottom of the screen.
+     Only a voice with no place in the world at all (a handler on the phone)
+     still gets the old reply strip. */
+  const REPLY = { actor: null, at: null, opts: [], zone: null };
+  function replyOptions(list) {
+    return list.map(function (c, i) {
+      return {
+        id: "reply-" + i, _reply: true, prio: 900 - i, campaignSafe: true, forceYes: true,
+        slot: i === 0 ? "e" : undefined, hold: i === 1,
+        label: c.label,
+        onSelect: function () { choose(c.id); },
+      };
+    });
+  }
+  function replyZone() {
+    const I = CBZ.interactions;
+    if (REPLY.zone || !I || !I.registerZone) return REPLY.zone;
+    REPLY.zone = {
+      id: "reply-spot", kind: "reply", radius: 3.6, prio: 40, faceWins: true, options: [],
+      find: function (px, pz) {
+        const a = REPLY.at;
+        if (!a || REPLY.actor || !REPLY.zone.options.length) return null;
+        return Math.hypot(a.x - px, a.z - pz) < 3.6 ? { x: a.x, y: a.y, z: a.z, kind: "reply" } : null;
+      },
+    };
+    I.registerZone(REPLY.zone);
+    if (I.describe) { try { I.describe("reply", function () { return { label: "", note: "" }; }); } catch (e) {} }
+    return REPLY.zone;
+  }
+  function pinReplies(meta, list) {
+    const I = CBZ.interactions;
+    if (!I || !list.length || !meta) return false;
+    const a = meta.actor && (meta.actor.group || meta.actor.pos) && !meta.actor.dead ? meta.actor : null;
+    const at = !a && meta.at && isFinite(meta.at.x) && isFinite(meta.at.z) ? meta.at : null;
+    if (!a && !at) return false;
+    unpinReplies();
+    REPLY.opts = replyOptions(list);
+    if (a) {
+      REPLY.actor = a;
+      const mine = a._iopts || (a._iopts = []);
+      for (let i = 0; i < REPLY.opts.length; i++) mine.push(REPLY.opts[i]);
+    } else {
+      const z = replyZone();
+      if (!z) return false;
+      REPLY.at = { x: at.x, y: at.y != null ? at.y : null, z: at.z };
+      z.options.length = 0;
+      for (let i = 0; i < REPLY.opts.length; i++) z.options.push(REPLY.opts[i]);
+    }
+    if (I.refresh) I.refresh();
+    return true;
+  }
+  function unpinReplies() {
+    const a = REPLY.actor;
+    if (a && a._iopts) a._iopts = a._iopts.filter(function (o) { return !o._reply; });
+    if (REPLY.zone) REPLY.zone.options.length = 0;
+    const had = !!(a || REPLY.at);
+    REPLY.actor = null; REPLY.at = null; REPLY.opts = [];
+    if (had && CBZ.interactions && CBZ.interactions.refresh) CBZ.interactions.refresh();
+  }
+
   // say(speaker, text, choices?|meta?, meta?) -> Promise<choice|null>
   function say(speaker, text, choices, meta4) {
     ensureDom();
@@ -1082,6 +1153,10 @@
       actor: metadata && metadata.actor ? metadata.actor : null,
     };
     const spoke = speakLine(metadata, speaker, state.dialogue.text, normalized.length > 0);
+    if (normalized.length && pinReplies(metadata, normalized)) {
+      state.dialogue.pinned = true;
+      return new Promise(function (resolve) { choiceResolve = resolve; });
+    }
     if (dialogueChoices) {
       dialogueChoices.textContent = "";
       normalized.forEach(function (choice, i) {
@@ -1298,6 +1373,10 @@
     isOpen: function () { return state.open; },
     activeApp: function () { return state.app; },
     state: function () { return state; },
+    // the question standing right now, and who (or where) its answers ride on
+    replies: function () {
+      return REPLY.opts.length ? { actor: REPLY.actor, at: REPLY.at, labels: REPLY.opts.map(function (o) { return o.label; }) } : null;
+    },
   };
   CBZ.campaignUI = api;
   // The clean cross-module notification API: any system (bounties, inventory,

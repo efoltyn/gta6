@@ -486,7 +486,7 @@
     ROOM.board = null; ROOM.pads = []; ROOM.rect = null; ROOM.doorPt = null; ROOM.builtFor = null;
     ROOM.seats = 0; ROOM.stateSymbols = 0;
     // the screen and the war table go with the room (their verbs read these)
-    ROOM.screenPt = null; ROOM.redPhones = null; ROOM.mapPt = null;
+    ROOM.redPhones = null; ROOM.mapPt = null;
   }
   // is THIS person entitled through the door? The sitting head of state.
   function doorOpensFor() { return !!seat(); }
@@ -751,7 +751,6 @@
       addCol(p.x, p.z, 0.44, 0.44, Y, Y + 0.3);
       ROOM.stateSymbols++;
     }
-    ROOM.screenPt = alongX ? { x: wallF + inw * 1.6, z: cz } : { x: cx, z: wallF + inw * 1.6 };
 
     // ---- THE WATCH FLOOR: three consoles along the side wall away from the door
     let stationSeats = 0;
@@ -1227,43 +1226,18 @@
     return out;
   }
 
-  // ---- the room's two verbs: its door, and its video wall ------------------
+  // ---- the room's verbs are its phones and its map ------------------------
   // The sitting head of state never sees a prompt at the door: the leaf slides
-  // as he walks up (the tick below). Anybody else gets a handle that does not
-  // turn. At the far end, E on the video wall is Brief: the officer at the
-  // table nearest it gives you the picture (his proposal, read off the world),
-  // which is the whole of what a Situation Room is for.
+  // as he walks up (the tick below). The video wall has no verb any more: the
+  // officer with something for you SAYS it when you come to the table
+  // (tickOfficers: speakUp), and Talk on him asks.
   function onRoomFloor() {
     const P = CBZ.player;
     return !(P && P.pos && ROOM.floorY != null && Math.abs(P.pos.y - ROOM.floorY) > 1.6);
   }
-  function briefer() {
-    if (!ROOM.screenPt) return null;
-    let best = null, bd = 1e9;
-    for (const role of ["general", "bureau", "police"]) {
-      const p = OFF.peds[role];
-      if (!p || p.dead || !p.pos) continue;
-      const d = Math.hypot(p.pos.x - ROOM.screenPt.x, p.pos.z - ROOM.screenPt.z);
-      if (d < bd) { bd = d; best = role; }
-    }
-    return best;
-  }
   function wireZones() {
     if (ROOM.zonesWired || !CBZ.interactions || !CBZ.interactions.registerZone) return;
     ROOM.zonesWired = true;
-    CBZ.interactions.registerZone({
-      id: "pres-screen", kind: "presscreen", radius: 2.4, prio: 13,
-      find: function (px, pz) {
-        if (!on() || !CFG.PRESIDENCY_SITROOM || !ROOM.screenPt || !seat() || CONV || !onRoomFloor() || !briefer()) return null;
-        const dx = ROOM.screenPt.x - px, dz = ROOM.screenPt.z - pz;
-        return (dx * dx + dz * dz) < 2.4 * 2.4 ? { x: ROOM.screenPt.x, z: ROOM.screenPt.z, kind: "presscreen" } : null;
-      },
-      options: [{
-        id: "pres-screen-brief", slot: "e", campaignSafe: true,
-        label: "Brief",
-        onSelect: function () { const r = briefer(); if (r) talkTo(r); },
-      }],
-    });
     // ---- THE WAR IS ORDERED FROM THE TABLE (city/warroom.js) -------------
     // The left red phone is the army: War, or Peace while there is a war.
     // The right red phone is the nuclear line: it has a verb only while the
@@ -1332,7 +1306,6 @@
     });
     if (CBZ.interactions.describe) {
       try {
-        CBZ.interactions.describe("presscreen", function () { return { label: "", note: "" }; });
         CBZ.interactions.describe("preswarphone", function () { return { label: "", note: "" }; });
         CBZ.interactions.describe("presnukephone", function () { return { label: "", note: "" }; });
         CBZ.interactions.describe("preswarmap", function () { return { label: "", note: "" }; });
@@ -1407,7 +1380,7 @@
   //  dead and his desk goes quiet: shoot the General and there is nobody to
   //  put soldiers on the street.
   // ============================================================
-  const OFF = { peds: {}, t: 0 };
+  const OFF = { peds: {}, t: 0, clock: 0 };
   let CONV = null;
   function gateOk(key) {
     const h = seat(), B = BUTTONS[key];
@@ -1570,6 +1543,7 @@
     } catch (e) { p = null; }
     if (!p) return null;
     p.name = c.display; p.nameKnown = true; p.organization = "state"; p._presOfficer = role;
+    p._iOnly = true;          // his job's verbs (Talk, Dismiss, the General's buys), never the street's
     OFF.peds[role] = p;
     if (CBZ.interactions && CBZ.interactions.registerFor) {
       try {
@@ -1649,10 +1623,15 @@
         // "decision" below and it costs this officer's loyalty
         sayPed(ped, pr.nope || "Understood.");
       }
+      const PM = CBZ.politics;
+      if (PM && typeof PM.act === "function") {
+        try { PM.act("decision", { target: ped, by: "president", ideology: null, institution: role === "general" ? "Army" : role === "police" ? "Police" : role === "bureau" ? "FBI" : null, topic: pr.key, choice: choice, order: choice === "yes" ? pr.key : null, who: role }); } catch (e) {}
+      }
       emitEvent("decision", { source: "officer", who: c.display, topic: pr.key, choice: choice, order: choice === "yes" ? pr.key : null, ok: choice === "yes" ? !!r.ok : true });
     }
   }
   function tickOfficers(dt) {
+    OFF.clock += dt || 0;
     OFF.t -= dt;
     if (CONV) {
       // he looks at you while he talks; walking off ends the conversation
@@ -1690,6 +1669,34 @@
       if (near && !p) postOfficer(role);
       else if (!near && p) releaseOfficer(role);
     }
+    speakUp();
+  }
+  // THE OFFICER WITH SOMETHING FOR YOU SAYS IT. Come to the table and the one
+  // who has a decision waiting (his proposal, read off the world) turns and
+  // makes the case; the two answers ride on him (campaign_ui.js). Once per
+  // matter per day, one officer at a time, 20 s apart.
+  function speakUp() {
+    const P = CBZ.player;
+    if (CONV || !seat() || !P || !P.pos || !onRoomFloor()) return;
+    if (OFF.spokeAt != null && OFF.clock - OFF.spokeAt < 20) return;
+    const UI = CBZ.campaignUI;
+    if (UI && UI.replies && UI.replies()) return;            // somebody is already waiting on an answer
+    OFF.raised = OFF.raised || {};
+    let best = null, bd = 5.5;
+    for (const role in OFF.peds) {
+      const p = OFF.peds[role];
+      if (!p || p.dead || !p.pos) continue;
+      const d = Math.hypot(p.pos.x - P.pos.x, p.pos.z - P.pos.z);
+      if (d >= bd) continue;
+      let pr = null; try { pr = proposal(role); } catch (e) { pr = null; }
+      if (!pr || !pr.key || !pr.line) continue;
+      if (OFF.raised[role] === pr.key + ":" + day()) continue;
+      best = { role: role, key: pr.key }; bd = d;
+    }
+    if (!best) return;
+    OFF.raised[best.role] = best.key + ":" + day();
+    OFF.spokeAt = OFF.clock;
+    talkTo(best.role);
   }
 
   // ---- THE STATUS — ONE READ OF THE WHOLE PRESIDENCY ---------------------

@@ -420,9 +420,17 @@
   function gatedPool(cand, ctx) {
     const t = cand.t, gp = !!cand.gunpoint;
     let pool = [];
-    // `_iOnly`: a person who is his job (the President's staff, a candidate
-    // for a post) offers only his own verbs, never the street's
-    if (!(t && t._iOnly)) for (const ln of cand.layers) { const a = layers[ln]; if (a) pool = pool.concat(a); }
+    // `_iOnly`: a person who is his job (the President's staff, an agent of
+    // the detail) offers only his own verbs, never the street's. An option
+    // flagged `anyone` still reaches him: the President's orders about a man
+    // (city/orders.js "Take him down") work on literally anyone.
+    const only = !!(t && t._iOnly);
+    for (const ln of cand.layers) {
+      const a = layers[ln];
+      if (!a) continue;
+      if (!only) pool = pool.concat(a);
+      else for (let i = 0; i < a.length; i++) if (a[i].anyone) pool.push(a[i]);
+    }
     if (t && t._iopts) pool = pool.concat(t._iopts);
     if (cand.zone && cand.zone.options) pool = pool.concat(cand.zone.options);
     const pass = [];
@@ -447,7 +455,7 @@
     if (!pass.length) return null;
     let tap = null, hold = null, ride = null;
     for (const o of pass) {
-      if (o.pick) continue;                 // an order about someone else is a wheel verb, never a key
+      if (o.pick || o.wheel) continue;      // an order about someone else (or `wheel`) is a wheel verb, never a key
       if (isRide(o)) { if (!ride) ride = o; }
       else if (o.hold) { if (!hold) hold = o; }
       else if (!tap) tap = o;
