@@ -22,8 +22,14 @@
      own              1 = the group's owner moves it (mob.js); 0 = this file does
      hide             1 = drawn elsewhere (promoted to a full rig) and not hit here
      panicT fleeX fleeZ   running from a danger point
-   Only the nearest few become full rigs with brains: that promotion stays
-   with the owner (mob.js's near ring), which sets `hide` on the row.
+   THE FRONT LINE IS REAL. Whoever can be interacted with is a full rig
+   with a brain before it matters; that promotion stays with the owner
+   (mob.js: the front rows, the verb ring, the aimed-at, the engaged), which
+   sets `hide` on the row. A group that can promote passes `promote(row, why)
+   -> ped`: then anything that STRIKES a still-instanced row (a round, a
+   blast near the lens, a car) promotes it on that same call and lands on
+   the rig's own body (wound decal, the reaction, the death) — never a
+   statistic now and a mark later. realize(row) is that hand-over.
 
    GROUPS. group({name, kind, place, who, parent, mode, cap, maxDraw, own,
    life, onLife, onPanic, beforeCut, frame}) -> G. G.add/remove/clear/anim/
@@ -192,7 +198,7 @@
       side: o.side || null, parent: o.parent || null, mode: o.mode === undefined ? null : o.mode,
       cap: Math.max(1, Math.min(CAP, o.cap | 0 || 4096)), maxDraw: o.maxDraw || 300,
       own: !!o.own, lifeOn: o.life !== false, frame: !!o.frame, aff: aff(o.aff || 0),
-      onLife: o.onLife || null, onPanic: o.onPanic || null, beforeCut: o.beforeCut || null,
+      onLife: o.onLife || null, onPanic: o.onPanic || null, beforeCut: o.beforeCut || null, promote: o.promote || null,
       moving: !!o.moving, cutDt: o.cutDt || (o.own ? 0.1 : 0.25),
       rows: [], layer: null, dirty: true, lastCut: -1e9, cutX: 1e9, cutZ: 1e9, m: null,
       released: false, dead: 0, hurt: 0, k: 0, gone: false, shown: true,
@@ -212,7 +218,7 @@
     // dead stay where they are, this file looks after them, and the group
     // goes when its last body is cleared
     G.release = function () {
-      G.released = true; G.own = false; G.onLife = null; G.onPanic = null; G.beforeCut = null;
+      G.released = true; G.own = false; G.onLife = null; G.onPanic = null; G.beforeCut = null; G.promote = null;
       for (let k = G.rows.length - 1; k >= 0; k--) { const r = G.rows[k]; if (S.life[r] === ALIVE) remove(G, r); else S.own[r] = 0; }
       G.dirty = true;
       if (!G.rows.length) dispose(G);
@@ -495,6 +501,89 @@
     return n;
   }
 
+  // ---------------------------------------------------------------- THE HAND-OVER: a struck row becomes a real body
+  /* realize(r, why) -> ped | null. The owner's promote(r) builds the full rig
+     for this person NOW (mob.js frees a slot from the farthest non-front rig
+     when its budget is full), so the hit that follows lands on a body that
+     can carry it. Null when the group cannot promote (a grandstand, the
+     warlord's men) or the row is the store's (the hurt crawling away): those
+     resolve here as before. */
+  function realize(r, why) {
+    if (r < 0 || r >= CAP) return null;
+    const lf = S.life[r];
+    if (lf !== ALIVE && lf !== HURT) return null;
+    const G = GROUPS[S.grp[r]];
+    if (!G || !G.promote || !modeOk(G)) return null;
+    let ped = null;
+    try { ped = G.promote(r, why || "hit"); } catch (e) { ped = null; }
+    if (!ped || ped.dead || !ped.pos) return null;
+    hashAge = 1e9;                    // hidden now: the hash forgets it
+    // the rig's matrices are true this instant (the wound reads the body's parts)
+    if (ped.group && ped.group.updateMatrixWorld) { try { ped.group.updateMatrixWorld(true); } catch (e) {} }
+    return ped;
+  }
+  // within this of the lens a blast or a car makes the struck real (the gore
+  // and wound band); farther the rows resolve here. Per call, nearest first.
+  const REAL_R = 45;
+  const REAL_MAX = ({ desktop: 14, tablet: 10, phone: 6 })[DEVICE] || 14;
+  function camNear(r, R) {
+    const c = CBZ.camera && CBZ.camera.position;
+    if (!c) return -1;
+    const d = Math.hypot(S.wx[r] - c.x, S.wz[r] - c.z);
+    return d <= R ? d : -1;
+  }
+  /* A ROUND ON A REAL BODY: the same answer a street round gives any ped
+     (peds.js hurtActor): the entry hole on the part it hit (wounds.js), the
+     bleed and the verdict (vitals.js: dead on the head or the heart, down
+     when the hp ran out), the flinch or the spin on the rig (verbs.shot). */
+  const _rp = { x: 0, y: 0, z: 0 };
+  function roundOnPed(ped, o) {
+    if (!ped || ped.dead) return 0;
+    const cal = o.cal || 1;
+    const fx = o.fromX != null ? o.fromX : ped.pos.x - 1, fz = o.fromZ != null ? o.fromZ : ped.pos.z;
+    const py = ped.pos.y || 0;
+    if (o.point) { _rp.x = o.point.x; _rp.y = o.point.y; _rp.z = o.point.z; }
+    else { _rp.x = ped.pos.x; _rp.y = py + (o.head ? 1.62 : 1.0 + h01(SEQ, 3, 12) * 0.5); _rp.z = ped.pos.z; }
+    const att = o.attacker || null;
+    if (CBZ.bodyWound) { try { CBZ.bodyWound(ped, _rp, { head: !!o.head, cal: cal, dir: o.dir || null, fromX: fx, fromZ: fz }); } catch (e) {} }
+    const dmg = o.dmg != null ? o.dmg : (o.head ? 160 : 30 + 18 * cal);
+    const lethal = (ped.hp || 0) - dmg <= 0;
+    const V = CBZ.vitals;
+    let out = null;
+    if (V && V.wound) {
+      ped.hp = Math.max(1, (ped.hp || 0) - dmg);
+      try { const res = V.wound(ped, { kind: "bullet", zone: o.head ? "head" : "", head: !!o.head, point: _rp, by: att, critical: lethal, cal: cal, fromX: fx, fromZ: fz }); out = res && res.outcome; } catch (e) {}
+    } else {
+      ped.hp = (ped.hp || 0) - dmg;
+      if (ped.hp <= 0 && CBZ.cityKillPed) { try { CBZ.cityKillPed(ped, { fromX: fx, fromZ: fz, attacker: att, byPlayer: !!o.byPlayer, force: 5, fling: 4 }, o.cause === "gunfire" ? "shot" : (o.cause || "shot")); } catch (e) {} }
+    }
+    if (!ped.dead && out !== "down" && out !== "dead") {
+      // alive: the round lands on his rig (the spin, the stagger)
+      let took = false;
+      if (CBZ.cityStreetShot) { try { took = !!CBZ.cityStreetShot(ped, fx, fz, _rp, cal); } catch (e) {} }
+      if (!took && CBZ.body && CBZ.body.hit) { try { CBZ.body.hit(ped, { fromX: fx, fromZ: fz, force: 3 }); } catch (e) {} }
+    }
+    return ped.dead ? DEAD : HURT;
+  }
+  // a blast or a car on a real body: the kill funnel (the ragdoll throws it)
+  // or the knock off its feet with the shrapnel in it
+  function forceOnPed(ped, to, x, z, o, force, cause) {
+    if (!ped || ped.dead) return 0;
+    if (to === DEAD) {
+      if (CBZ.cityKillPed) { try { CBZ.cityKillPed(ped, { fromX: x, fromZ: z, force: force, fling: force * 0.66, byPlayer: !!o.byPlayer }, cause); } catch (e) {} }
+      if (!ped.dead) { ped.hp = 0; ped.dead = true; }
+      return DEAD;
+    }
+    if (cause !== "car crash" && CBZ.bodyWound) {
+      _rp.x = ped.pos.x; _rp.y = (ped.pos.y || 0) + 0.7 + h01(SEQ, 5, 13) * 0.8; _rp.z = ped.pos.z;
+      try { CBZ.bodyWound(ped, _rp, { cal: 0.8, fromX: x, fromZ: z }); } catch (e) {}
+    }
+    ped.hp = Math.max(1, (ped.hp || 0) - 40);
+    if (CBZ.vitals && CBZ.vitals.wound && cause !== "car crash") { try { CBZ.vitals.wound(ped, { kind: "blast", zone: "", point: _rp, critical: true, cal: 1, fromX: x, fromZ: z }); } catch (e) {} }
+    if (!ped.dead && CBZ.body && CBZ.body.hit) { try { CBZ.body.hit(ped, { fromX: x, fromZ: z, force: Math.max(3, force * 0.6) }); } catch (e) {} }
+    return ped.dead ? DEAD : HURT;
+  }
+
   // ---------------------------------------------------------------- the damage path
   function liveRows(fn) {
     for (let gi = 0; gi < GROUPS.length; gi++) {
@@ -531,7 +620,8 @@
     const LR = R * 0.55, HR = R * 1.8, HR2 = HR * HR, salt = SEQ++;
     const ev = { byPlayer: !!o.byPlayer, by: o.by || null, place: o.place || null, fromX: x, fromZ: z, x: x, z: z };
     let dead = 0, hurt = 0;
-    liveRows(function (r) {
+    const real = [];                  // [row, to, camDist] — the struck near the lens become real
+    liveRows(function (r, G) {
       const dx = S.wx[r] - x, dz = S.wz[r] - z, d2 = dx * dx + dz * dz;
       if (d2 > HR2) return;
       const d = Math.sqrt(d2), u = h01(r, salt, 1);
@@ -542,6 +632,7 @@
       else if (d < R) { const k = 1 - (d - LR) / Math.max(0.1, R - LR); to = u < 0.45 * k * k ? DEAD : u < 0.2 + 0.75 * k ? HURT : 0; }
       else { const k = 1 - (d - R) / Math.max(0.1, HR - R); to = u < 0.35 * k ? HURT : 0; }
       if (!to) return;
+      if (G.promote) { const cd = camNear(r, REAL_R); if (cd >= 0) { real.push([r, to, cd]); return; } }
       if (to === DEAD && d > 0.5) {
         // thrown a little way out from the seat of the blast
         const G = GROUPS[S.grp[r]], th = Math.max(0, 1 - d / R) * 3.5 * Math.min(2, power || 1);
@@ -549,6 +640,20 @@
       }
       if (casualty(r, to, cause, ev)) { if (to === DEAD) { dead++; if (d < R * 0.8) goreAt(r, true); } else hurt++; }
     });
+    // the nearest of the struck become real bodies this instant and take it
+    // there (the ragdoll throws them); past the per-call cap, the store's way
+    if (real.length) {
+      real.sort(function (a, b) { return a[2] - b[2]; });
+      for (let k = 0; k < real.length; k++) {
+        const r = real[k][0], to = real[k][1];
+        const ped = k < REAL_MAX ? realize(r, "blast") : null;
+        if (ped) {
+          const d = Math.max(0.5, Math.hypot(ped.pos.x - x, ped.pos.z - z));
+          const got = forceOnPed(ped, to, x, z, o, 9 * Math.max(0.3, 1 - d / Math.max(1, HR)) * Math.min(2, power || 1) + 2, cause);
+          if (got === DEAD) dead++; else hurt++;
+        } else if (casualty(r, to, cause, ev)) { if (to === DEAD) { dead++; goreAt(r, true); } else hurt++; }
+      }
+    }
     panic(x, z, Math.min(260, Math.max(30, R * 5)), { secs: 10 });
     return { dead: dead, hurt: hurt };
   }
@@ -658,6 +763,20 @@
     if (r < 0 || r >= CAP) return 0;
     const lf = S.life[r];
     if (lf !== ALIVE && lf !== HURT) return 0;
+    // THE STRUCK PERSON BECOMES REAL, on this call: the round lands on the
+    // rig's own body (the hole, the spin, the fall), never a number now and
+    // a mark later. Only a row its group cannot promote is resolved below.
+    const ped = o.noPromote ? null : realize(r, "shot");
+    if (ped) {
+      shotPed = ped;
+      const got = roundOnPed(ped, o);
+      if (CLOCK - lastShotPanic > 0.35 || Math.hypot(ped.pos.x - lspX, ped.pos.z - lspZ) > 20) {
+        lastShotPanic = CLOCK; lspX = ped.pos.x; lspZ = ped.pos.z;
+        panic(o.fromX != null ? o.fromX : ped.pos.x, o.fromZ != null ? o.fromZ : ped.pos.z, 45, { secs: 9 });
+      }
+      return got;
+    }
+    shotPed = null;
     const u = h01(r, SEQ++, 6), cal = o.cal || 1;
     const to = lf === HURT ? (u < 0.8 ? DEAD : 0) : (o.head ? (u < 0.95 ? DEAD : HURT) : (u < 0.42 + 0.12 * Math.min(2, cal) ? DEAD : HURT));
     if (!to) return 0;
@@ -672,7 +791,7 @@
     }
     return to;
   }
-  let lastShotPanic = -1e9, lspX = 0, lspZ = 0;
+  let lastShotPanic = -1e9, lspX = 0, lspZ = 0, shotPed = null;
 
   // a car through them: o: speed (m/s), byPlayer, heading {x,z}
   function runOver(x, z, r, speed, o) {
@@ -693,8 +812,10 @@
           if (dx * dx + dz * dz < R * R && (S.life[rr] === ALIVE || S.life[rr] === HURT)) {
             const u = h01(rr, salt, 8);
             const to = speed >= 13 ? (u < 0.8 ? DEAD : HURT) : speed >= 8 ? (u < 0.3 ? DEAD : HURT) : HURT;
-            // knocked aside off the bonnet
+            // near the lens: a real body goes over the bonnet
             const G = GROUPS[S.grp[rr]], d = Math.hypot(dx, dz) || 1;
+            const ped = G && G.promote && n < REAL_MAX && camNear(rr, REAL_R) >= 0 ? realize(rr, "car") : null;
+            if (ped) { forceOnPed(ped, to, x, z, o, 4 + speed * 0.5, "car crash"); n++; rr = nx_; continue; }
             if (G) { const l = dirLocal(G, dx / d, dz / d, _dl); const th = 0.6 + speed * 0.12; S.x[rr] += l[0] * th; S.z[rr] += l[1] * th; }
             if (casualty(rr, to, "car crash", ev)) { n++; if (to === DEAD) goreAt(rr, false); }
           }
@@ -1017,6 +1138,8 @@
     cap: function () { return CAP; }, device: DEVICE, clock: function () { return CLOCK; }, hi: function () { return hi; }, live: function () { return live; }, room: function () { return nFree; },
     group: group, aff: aff, affOf: function (i) { return AFFS[i] || null; }, clip: clipIx,
     blast: blast, ring: ring, nuke: nuke, ray: ray, shoot: shoot, runOver: runOver, panic: panic, noteDead: noteDead,
+    // the hand-over: a struck row as a real body (null = the store resolves it)
+    realize: realize, roundOnPed: roundOnPed, lastShotPed: function () { return shotPed; },
     kill: function (r, cause, o) { return casualty(r, DEAD, cause || "violence", o || {}); },
     hurt: function (r, cause, o) { return casualty(r, HURT, cause || "violence", o || {}); },
     life: function (r) { return S.life[r]; },

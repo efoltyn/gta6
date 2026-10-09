@@ -78,6 +78,7 @@
    SHARED WITH EVERY LOOSE BODY (see below): CBZ.PHYS gravities and
    CBZ.looseContact (swept segment vs colliders, pushOut, ground).
      pile(o) / adopt(obj, o)      settled rubble mound / hand a whole part to the sim
+                                  (o.whole "all": a multi-mesh part as ONE body)
      chunkGeo(i)                  shared irregular chunk geometry for authored scenery rubble
      stats()                      live/static/grit counts for audits
    Everything is headless-safe and never throws into a caller.
@@ -1502,21 +1503,27 @@
         }
         if (!tris.length) return;
         fixNormals(tris);
-        const parts = (convex || o.whole === "one") ? [tris] : components(tris);
+        const parts = (convex || o.whole === "one" || o.whole === "all") ? [tris] : components(tris);
         for (const p of parts) comps.push({ t: p, kind: o.kind || kindOf(mat, obj), mat, obj });
       };
       if (source.isObject3D) {
         source.updateWorldMatrix(true, true);
+        // whole "all": every mesh of the object is ONE rigid body (a sign is
+        // its board AND its stick; they fall together, not as two pieces)
+        const all = o.whole === "all" ? [] : null;
+        let allMat = null;
         source.traverse((obj) => {
           if (!obj.isMesh || obj.isInstancedMesh || obj.userData.debrisPiece) return;
           // skip anything the viewer can't see (hidden sub-parts, LOD twins)
           for (let a = obj; a && a !== source.parent; a = a.parent) if (a.visible === false && a !== source) return;
           if (!obj.geometry || !obj.geometry.attributes.position) return;
           const mat = obj.material;
-          const tris = [];
+          const tris = all || [];
           meshTris(obj.geometry, obj.matrixWorld, mat, slotOf, tris);
+          if (all) { if (!allMat) allMat = Array.isArray(mat) ? mat[0] : mat; return; }
           pushComps(tris, obj, Array.isArray(mat) ? mat[0] : mat, CONVEX_TYPES.test(obj.geometry.type));
         });
+        if (all && all.length) pushComps(all, source, allMat, false);
       } else if (source.box) {
         const tris = [];
         const wear = skinOf(source.material);

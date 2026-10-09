@@ -2857,6 +2857,9 @@
     // interact.js's "Take armor" reads — and DEFERS the payout for a body with
     // no resting place yet, paying it at the wreck once the body is down.
     // Degrade-safe: no morgue.js, and this is byte-for-byte what it always was.
+    // A HELD SIGN, FLAG OR SHIELD LEAVES THE HANDS NOW (city/mob.js): it falls
+    // as a real loose body, never hangs in the air over a falling man
+    if (CBZ.dropHeldProp) { try { CBZ.dropHeldProp(ped, imp); } catch (e) {} }
     if (CBZ.cityDeathDrop) CBZ.cityDeathDrop(ped);
     else {
       if (ped.armed && ped.weapon) dropWeapon(ped.pos.x, ped.pos.z, ped.weapon, ped.ammo, { y: ped.pos.y, body: ped });
