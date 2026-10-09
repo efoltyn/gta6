@@ -86,7 +86,7 @@
   // first); the 600 stays as the floor so the flag-off deck is unchanged.
   const DESERT_HWY_Z = Number.isFinite(CBZ.DESERT_HWY_Z) ? CBZ.DESERT_HWY_Z : null;
   const ROAD_MINZ = MAXZ;
-  const ROAD_MAXZ = Math.max(DESERT_MINZ + 600, DESERT_HWY_Z == null ? -Infinity : DESERT_HWY_Z + 30);
+  const ROAD_MAXZ = Math.max(DESERT_MINZ + 600, DESERT_HWY_Z == null ? -Infinity : DESERT_HWY_Z + 6);   // a T onto the spine's far edge (half 5.5), no stub past it
   const ROAD_REGION_MAXZ = (CBZ.CONFIG && CBZ.CONFIG.WORLD_ENLARGE_V2 !== false) ? DESERT_MINZ : ROAD_MAXZ;
 
   // shared materials (one instance each → no per-mesh material churn)
@@ -818,12 +818,29 @@
     //     the recipe is absent this whole block no-ops and the fields above stand
     //     as the farm (the inTown skips were HAS_TOWN-gated → zero regression).
     // =====================================================================
+    // THE CAUSEWAY REACHES THE TOWN (layout wave 2). It used to start at the
+    // county's south shore (MAXZ), 16 m of grass short of Harvest Market's
+    // south street: tools/layout-audit.mjs found the market a road island and
+    // the whole causeway cut off from it. The deck now starts flush at the
+    // edge of the town street it meets, and its record runs on to that
+    // street's centreline (the HWY-4 dock doctrine), read off the grid
+    // buildTown returns, never typed.
+    let causewayDeckZ = ROAD_MINZ, causewayRecZ = ROAD_MINZ;
     if (HAS_TOWN) {
       if (CBZ.placement && CBZ.placement.seedFromColliders) { try { CBZ.placement.seedFromColliders(); } catch (e) {} }
       const town = CBZ.buildTown(root, Object.assign({}, CBZ.CITY_TEMPLATES.harvestmarket, {
         cx: TOWN_CX, cz: TOWN_CZ, region: TOWN, rng: rng,
         name: "Harvest Market", district: "farmland", integratedSkyline: true,
       }));
+      if (town && town.roads) {
+        let best = null;
+        for (const r of town.roads) {
+          if (r.vertical || !isFinite(r.z) || r.z > ROAD_MINZ) continue;
+          if (ROAD_X < r.x - r.len / 2 || ROAD_X > r.x + r.len / 2) continue;
+          if (!best || r.z > best.z) best = r;
+        }
+        if (best && ROAD_MINZ - best.z < 80) { causewayRecZ = best.z; causewayDeckZ = best.z + (best.w || 12) / 2; }
+      }
       // WORK-ANCHORS at the grocer + co-op bank so county NPCs commute to the
       // market (the same schedule/goal brain the mainland uses). Feature-detected.
       if (town && CBZ.registerWorkAnchor) {
@@ -857,7 +874,7 @@
       // heightAt: grade-follow world/terrain.js relief (0 over this rect's
       // flat playable footprint — a free, safe hook for the backdrop rim).
       CBZ.buildHighway(root, {
-        path: [{ x: ROAD_X, z: ROAD_MINZ }, { x: ROAD_X, z: ROAD_MAXZ }],
+        path: [{ x: ROAD_X, z: causewayDeckZ }, { x: ROAD_X, z: ROAD_MAXZ }],
         width: 24, lanesPerDir: 2, laneW: 3.6, theme: "dirt",
         guardrail: false, elevated: false, rng: rng,
         heightAt: CBZ.terrainHeight,
@@ -954,10 +971,10 @@
     // =====================================================================
     CBZ.registerCityRegion(city, { name: "Coyle Valley", subtitle: "Farm County", biome: "farmland", kind: "rect", minX: MINX, maxX: MAXX, minZ: MINZ, maxZ: MAXZ, pad: 8 });
     // causeway widened to the 24m highway deck (x-span ±12 about the centreline)
-    CBZ.registerCityRegion(city, { name: "Coyle Causeway", subtitle: "Farm County", kind: "rect", minX: ROAD_X - 12, maxX: ROAD_X + 12, minZ: ROAD_MINZ, maxZ: ROAD_REGION_MAXZ, pad: 1 });
+    CBZ.registerCityRegion(city, { name: "Coyle Causeway", subtitle: "Farm County", kind: "rect", minX: ROAD_X - 12, maxX: ROAD_X + 12, minZ: causewayDeckZ, maxZ: ROAD_REGION_MAXZ, pad: 1 });
     // give traffic a road down the causeway (runs along Z → vertical)
     if (city.roads) {
-      city.roads.push({ x: ROAD_X, z: (ROAD_MINZ + ROAD_MAXZ) / 2, vertical: true, len: ROAD_MAXZ - ROAD_MINZ, district: "highway", w: 24, lanesPerDir: 2, laneW: 3.6 });
+      city.roads.push({ x: ROAD_X, z: (causewayRecZ + ROAD_MAXZ) / 2, vertical: true, len: ROAD_MAXZ - causewayRecZ, district: "highway", w: 24, lanesPerDir: 2, laneW: 3.6, rural: true, owner: "farmland" });
     }
   }, 33);
 })();

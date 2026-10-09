@@ -188,9 +188,12 @@
     const A = CBZ.city && (CBZ.city.arena || CBZ.city);
     const lots = A && A.lots;
     if (!lots) return null;
-    if (!gasLots._cache || gasLots._n !== lots.length) {
-      gasLots._cache = lots.filter((l) => l && l.building && l.building.gas && !l.demolished);
-      gasLots._n = lots.length;
+    // + the countryside's roadside gas stops (city/countryside.js via
+    //   city/metro.js): real forecourts on no town lot
+    const roadside = CBZ.fuelForecourts || [];
+    if (!gasLots._cache || gasLots._n !== lots.length || gasLots._r !== roadside.length) {
+      gasLots._cache = lots.filter((l) => l && l.building && l.building.gas && !l.demolished).concat(roadside);
+      gasLots._n = lots.length; gasLots._r = roadside.length;
     }
     return gasLots._cache;
   }

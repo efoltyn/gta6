@@ -159,6 +159,15 @@
   // (the spine sits HZ-40 south of the shore, not 600). One published number,
   // one junction, and the deck follows any future scale.
   CBZ.DESERT_HWY_Z = HWY_Z;
+  // THE SPINE IS A REAL ROAD (layout wave 2): one 3.6 m lane each way from
+  // the shared highway kit, with drivable records, so the Saltlands causeway,
+  // the Coyle causeway and Dry Gulch are one network (the audit found Dry
+  // Gulch a road island: the spine was a flat asphalt PLANE with painted
+  // dashes and no record, which traffic, the map and the router never saw).
+  // highwaynet.js's Saltlands Road docks on its east end and runs on to the
+  // Continental Loop.
+  const SPINE_HALF = 5.5, SPINE_W = 11;
+  CBZ.DESERT_SPINE = { z: HWY_Z, west: MINX + 30, east: MAXX - 4, half: SPINE_HALF };
   // The town generator's three 64m blocks + road shoulders occupy this exact
   // stretch. The regional highway stops at its two edges, then Dry Gulch owns
   // the main street itself—no duplicate asphalt/decal planes fighting at y=0.
@@ -366,7 +375,7 @@
   const _FARM = (CBZ.worldFoot && CBZ.worldFoot("farmland")) || null;
   const COYLE_X = _FARM ? _FARM.cx : null;
   // …AND IT ENDS WHERE THE DECK ENDS, WHICH IS NOT "600 m IN". biome_farmland
-  // runs that deck to `max(our MINZ + 600, our HWY_Z + 30)` — it aims at the
+  // runs that deck to `max(our MINZ + 600, our HWY_Z + 6)` — it aims at the
   // SPINE, not at a fixed depth — so the 600 was only ever right while the two
   // happened to coincide. On the 10x basin the spine is 2.3 km inside the
   // shore and the old literal would have flattened the first 600 m and left
@@ -374,7 +383,7 @@
   // Same expression as the deck's, so the flat band cannot fall short of it
   // again. Held at the literal below stage 5 (that world's deck overruns by
   // 142 m and the 150 m fade covers it, so nothing there changes).
-  const COYLE_Z1 = _V5 ? Math.max(MINZ + 600, HWY_Z + 30) : (MINZ + 600);
+  const COYLE_Z1 = _V5 ? Math.max(MINZ + 600, HWY_Z + 6) : (MINZ + 600);
   // (c) THE SALTLANDS APPROACH — the leg the deck turns onto at CW_X1 and
   // runs south to the spine. Only exists on the 10x basin; see CW_X1.
   const APPROACH_Z0 = Math.min(CW_Z, HWY_Z), APPROACH_Z1 = Math.max(CW_Z, HWY_Z);
@@ -617,6 +626,9 @@
     // give traffic a road across the causeway (runs along X → not vertical)
     if (city.roads) {
       city.roads.push({ x: (CW_X0 + CW_X1) / 2, z: CW_Z, vertical: false, len: Math.abs(CW_X1 - CW_X0), district: "highway", w: 24, lanesPerDir: 3, laneW: 3.6, median: true, medianW: 1.2 });
+      // the 10x basin's approach leg down to the spine: drawn by the
+      // causeway's buildHighway below, and now drivable on record as well
+      if (_V5) city.roads.push({ x: CW_X1, z: (CW_Z + HWY_Z) / 2, vertical: true, len: Math.abs(HWY_Z - CW_Z), district: "highway", w: 24, lanesPerDir: 3, laneW: 3.6, median: true, medianW: 1.2 });
     }
 
     // =====================================================================
@@ -1248,16 +1260,32 @@
     //     cars + telephone poles live. WHY a road in the wild: it's the
     //     only reason any of these outposts exist out here.
     // =====================================================================
-    const roadMin = MINX + 4, roadMax = MAXX - 4;
+    // The west end is the Saltlands causeway's approach leg (x CW_X1 on the
+    // 10x basin), which runs down onto it: the spine starts flush at that
+    // deck's east edge; the record runs on to its centreline.
+    const roadMin = _V5 ? CW_X1 + 14.4 : MINX + 4, roadMax = MAXX - 4;
+    const recMin = _V5 ? CW_X1 : roadMin;
+    const spineRuns = HAS_TOWN ? [[roadMin, TOWN_SPINE_MIN], [TOWN_SPINE_MAX, roadMax]] : [[roadMin, roadMax]];
     const highwayGeoms = [];
-    function addHighwaySegment(x0, x1) {
-      if (x1 - x0 > 0.2) highwayGeoms.push(plane((x0 + x1) / 2, HWY_Z, x1 - x0, 9, 0.05));
+    if (CBZ.buildHighway) {
+      for (const run of spineRuns) {
+        if (run[1] - run[0] < 1) continue;
+        CBZ.buildHighway(root, {
+          path: [{ x: run[0], z: HWY_Z }, { x: run[1], z: HWY_Z }],
+          width: SPINE_W, lanesPerDir: 1, median: false, laneW: 3.6, theme: "asphalt",
+          guardrail: false, elevated: false, rng: rng, registerRoads: false,
+          heightAt: CBZ.terrainHeight,
+        });
+        // the record: from the approach's centreline (west run) / the town's
+        // main street (Dry Gulch owns the segment between) to the run's end
+        const a = run[0] === roadMin ? recMin : run[0];
+        if (city.roads) city.roads.push({ x: (a + run[1]) / 2, z: HWY_Z, vertical: false, len: run[1] - a,
+          district: "highway", w: SPINE_W, lanesPerDir: 1, laneW: 3.6, rural: true, owner: "desert" });
+      }
+    } else {
+      for (const run of spineRuns) if (run[1] - run[0] > 0.2) highwayGeoms.push(plane((run[0] + run[1]) / 2, HWY_Z, run[1] - run[0], 9, 0.05));
+      mergeAdd(highwayGeoms, cmat(ASPHALT), { receive: true });
     }
-    if (HAS_TOWN) {
-      addHighwaySegment(roadMin, TOWN_SPINE_MIN);
-      addHighwaySegment(TOWN_SPINE_MAX, roadMax);
-    } else addHighwaySegment(roadMin, roadMax);
-    mergeAdd(highwayGeoms, cmat(ASPHALT), { receive: true });
     // Dashed centre line follows the regional road only; Dry Gulch supplies
     // its own main-street paint over the town-owned segment.
     const dashXs = [];
@@ -1265,7 +1293,7 @@
     // dash every 14.3 m, which is the ROAD MARKING, not a budget. Left fixed it
     // would stretch to 23 m on a stage-4 basin and read as ticks. No rng here,
     // so this is free of the seeded stream.
-    const nDash = Math.round(60 * FSC);
+    const nDash = CBZ.buildHighway ? 0 : Math.round(60 * FSC);
     for (let i = 0; i < nDash; i++) {
       const x = MINX + 12 + i * ((HX * 2 - 24) / nDash);
       if (HAS_TOWN && x >= TOWN_SPINE_MIN && x <= TOWN_SPINE_MAX) continue;
@@ -1280,7 +1308,7 @@
     }
     dashIM.count = dashXs.length;
     dashIM.instanceMatrix.needsUpdate = true; dashIM.matrixAutoUpdate = false;
-    root.add(dashIM);
+    if (dashXs.length) root.add(dashIM);
 
     // ---- CAUSEWAY: a REAL wide highway land-bridge to the speedway -----------
     const cwLen = Math.abs(CW_X1 - CW_X0);
@@ -1295,7 +1323,7 @@
       // the new leg as a drivable segment for free (HWY-3), deduping the
       // horizontal one this file already pushed in section 0.
       const cwPath = [{ x: CW_X0, z: CW_Z }, { x: CW_X1, z: CW_Z }];
-      if (_V5) cwPath.push({ x: CW_X1, z: HWY_Z });
+      if (_V5) cwPath.push({ x: CW_X1, z: HWY_Z + (HWY_Z > CW_Z ? SPINE_HALF : -SPINE_HALF) });
       CBZ.buildHighway(root, {
         path: cwPath,
         width: 24, lanesPerDir: 3, median: true, medianW: 1.2, laneW: 3.6, theme: "asphalt",
@@ -1555,7 +1583,7 @@
 
     // a couple of cars out on the highway (one parked at gas, one cruising)
     if (CBZ.cityMakeCar) {
-      try { CBZ.cityMakeCar(GAS_X - 4, HWY_Z - 2, 0, false); } catch (e) {}
+      try { CBZ.cityMakeCar(GAS_X - 4, HWY_Z + 12, 0, false); } catch (e) {}   // the forecourt, off the lanes
       try { CBZ.cityMakeCar(CX + 40, HWY_Z, Math.PI, false); } catch (e) {}
     }
 

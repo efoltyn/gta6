@@ -95,7 +95,7 @@ function zoningFromDump(D) {
   const require = createRequire(import.meta.url);
   const metroIds = new Set(D.metros.map((m) => m.id));
   globalThis.window = { CBZ: { CONFIG: {}, WORLD_SEED: D.seed,
-    highwayNetTable: () => D.hw.map((h) => ({ id: h.id, name: h.name, pts: h.pts.map(([x, z]) => ({ x, z })), fillet: 0 })),
+    highwayNetTable: () => D.hw.map((h) => ({ id: h.id, name: h.name, rural: !!h.rural, pts: h.pts.map(([x, z]) => ({ x, z })), fillet: 0 })),
     HIGHWAY_NET_HALF: 15.3 } };
   require(path.join(ROOT, "src/city/metroplan.js"));
   require(path.join(ROOT, "src/city/metro.js"));
@@ -172,7 +172,8 @@ function analyse(D) {
   const segs = [];
   for (const r of D.roads) { const c = clsOf(r); if (c < 0) continue; segs.push({ x0: r[0], z0: r[1], x1: r[2], z1: r[3], w: r[4], k: r[5], c, gen: r[6], place: r[7], el: r[8] }); }
   for (const h of D.hw) for (let p = 0; p + 1 < h.pts.length; p++) {
-    segs.push({ x0: h.pts[p][0], z0: h.pts[p][1], x1: h.pts[p + 1][0], z1: h.pts[p + 1][1], w: h.width, k: "highway", c: 0, gen: "highway", place: h.name, hw: h.id, el: 0 });
+    // a country road from the network table (the town links) is a rural road
+    segs.push({ x0: h.pts[p][0], z0: h.pts[p][1], x1: h.pts[p + 1][0], z1: h.pts[p + 1][1], w: h.width, k: h.rural ? "rural" : "highway", c: h.rural ? 3 : 0, gen: "highway", place: h.name, hw: h.rural ? null : h.id, el: 0 });
   }
   // the highway table is the truth for the freeways (highwaynet.js): drop the
   // per-record copies of those routes. The OTHER "highway" records are the
@@ -337,7 +338,7 @@ function analyse(D) {
   const deadBy = {}; for (const d of deadEnds) { const k = d.gen + "/" + d.cls; deadBy[k] = (deadBy[k] || 0) + 1; }
 
   // highways: access points (interchanges, docks, at-grade T's) per route
-  const hwAccess = D.hw.map((h) => {
+  const hwAccess = D.hw.filter((h) => !h.rural).map((h) => {
     const pts = [];
     const hs = allSegs.filter((s) => s.hw === h.id);
     for (const s of net) {
@@ -556,6 +557,7 @@ function useOf(b) {
     return u || "midrise";
   }
   if (gen === "annex") return "commercial";
+  if (gen === "countryside") return u || "rural";
   if (gen === "towngen") return u === "residential" ? (type === "home" ? "suburb" : "midrise") : u === "civic" ? "civic" : "commercial";
   return "other";
 }

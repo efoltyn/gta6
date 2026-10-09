@@ -136,11 +136,12 @@
     const table = CBZ.highwayNetTable ? CBZ.highwayNetTable() : [];
     const H = CBZ.HIGHWAY_NET_HALF || 15.3;
     for (const route of table) {
+      if (route.rural) continue;                 // a two-lane country road wants houses on it
       const pts = CBZ.highwaySmoothPath ? CBZ.highwaySmoothPath(route.pts, route.fillet || 60, 9) : route.pts;
       for (let i = 0; i + 1 < pts.length; i++) Z.freeways.push({ ax: pts[i].x, az: pts[i].z, bx: pts[i + 1].x, bz: pts[i + 1].z, half: H, name: route.name });
     }
     for (const r of (city && city.roads) || []) {
-      if (!r || r.district !== "highway" || r.frontier || !isFinite(r.x) || (r.w || 0) < 20) continue;
+      if (!r || r.district !== "highway" || r.frontier || r.rural || !isFinite(r.x) || (r.w || 0) < 20) continue;   // a country road (r.rural) is no freeway
       if (table.length && Math.abs((r.w || 0) - H * 2) < 0.5) continue;     // a network leg: already in from its table
       const h = r.len / 2, half = (r.w || 24) / 2 + 3;
       if (r.vertical) Z.freeways.push({ ax: r.x, az: r.z - h, bx: r.x, bz: r.z + h, half: half, name: "causeway" });

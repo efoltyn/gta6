@@ -1124,7 +1124,7 @@ document.body.appendChild(b);}}catch(e){}})();
      city/buildings.js, which reads CBZ.CIVIC_SHOPS and CBZ.CIVIC_ACCT_SEED at
      parse time and the bld* helpers at build time. -->
 <script src="src/city/buildings_civic.js?v=flagm1001"></script>
-<script src="src/city/buildings.js?v=layout1008"></script>
+<script src="src/city/buildings.js?v=layout2b"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
@@ -1200,7 +1200,7 @@ document.body.appendChild(b);}}catch(e){}})();
      builder. Loads right after the ribbon builder it drives; registers its
      own landmass pass (order 91 — after every causeway, before the
      continent plate reads its relief-corridor gate). -->
-<script src="src/city/highwaynet.js?v=wreal0929"></script>
+<script src="src/city/highwaynet.js?v=layout2b"></script>
 <!-- THE INTERCHANGE: the R5/R1 flyover (planned by highwaynet at order 91,
      built in highways.js's late pass at 97.5). -->
 <script src="src/city/interchange.js?v=flick1"></script>
@@ -1305,10 +1305,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- GROUND ARMOR: tank / IFV / 8x8 / 6x6 truck / light vehicle / rocket artillery / missile launcher at real dimensions, instanced running gear + turret/launcher rigs. Before island_military (makeTank/makeTruck/makePatriot delegate to CBZ.milArmor). -->
 <script src="src/city/mil_armor.js?v=mil0929"></script>
 <script src="src/city/island_military.js?v=flagm1001"></script>
-<script src="src/city/biome_desert.js?v=pf0930f"></script>
+<script src="src/city/biome_desert.js?v=layout2b"></script>
 <script src="src/city/biome_forest.js?v=ground1001"></script>
-<script src="src/city/biome_farmland.js?v=wreal0929"></script>
-<script src="src/city/biome_snow.js?v=ground1001"></script>
+<script src="src/city/biome_farmland.js?v=layout2b"></script>
+<script src="src/city/biome_snow.js?v=layout2b"></script>
 <script src="src/city/snowboard.js?v=ric0929"></script>
 <!-- STRATEGIC LAYER part 1 — hardened bunkers (Fort Brandt command shelter
      w/ the nuclear vault + mountain/desert finds). Landmass order 40: after
@@ -1598,7 +1598,7 @@ document.body.appendChild(b);}}catch(e){}})();
      read for any instrument cluster. After interactions.js — it registers the
      forecourt zone at parse time; after vehicles.js, whose throttle gate calls
      CBZ.fuelStarved(). Revert with ?cfg_VEH_FUEL=0. -->
-<script src="src/city/fuel.js?v=cd0929"></script>
+<script src="src/city/fuel.js?v=layout2b"></script>
 <!-- ROAD RULES. Answers "what road am I on" off city.roads — the record every
      road builder in the game already pushes — and turns it into a real posted
      speed limit, plus the enforcement that makes the limit mean something
@@ -1744,22 +1744,25 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/wallet.js?v=sim2"></script>
 <script src="src/city/housing.js?v=cpd1"></script>
 <script src="src/city/citytemplates.js?v=pres0929b"></script>
-<script src="src/city/minicities.js?v=w0929town"></script>
+<script src="src/city/minicities.js?v=layout2b"></script>
 <!-- REAL CITIES AT REAL SCALE (owner: "realistically large ... not just one mass of tall buildings"):
      metroplan.js is the pure urban planner (land value -> zoning -> arterials -> blocks -> parcels),
      metro_fabric.js draws its buildings, metro_ground.js its streets and ground, metro.js places the
      Kingsport metro + the city rings at landmass order 43 and streams their tiles by distance. -->
 <!-- THE WORLD'S ONE ZONING FIELD (layout wave): intensity, use, the ceiling a grown district may rise to,
      the freeway frontage buffer. Pure data off the regions + highway table; metro.js plans with it. -->
-<script src="src/city/zoning.js?v=layout1008"></script>
+<script src="src/city/zoning.js?v=layout2b"></script>
 <script src="src/city/metroplan.js?v=layout1008"></script>
+<!-- THE COUNTRYSIDE (layout wave 2): farms, roadside houses and the gas stop + diner at each country-road
+     junction, planned from the zoning field; metro.js streams it through the fabric tiles. -->
+<script src="src/city/countryside.js?v=layout2b"></script>
 <script src="src/city/metro_fabric.js?v=pf0930q"></script>
 <!-- REAL GRASS (owner: "when you walk on grass it's just fucking green"): instanced lit blades round
      the camera on every grass surface, fed by CBZ.groundCover (the ONE land-use + ground-colour
      query: cityground 10, metro_ground 20, continent 90 register into it, so it loads before them). -->
 <script src="src/world/grassfield.js?v=grass0929c"></script>
 <script src="src/city/metro_ground.js?v=wreal0929"></script>
-<script src="src/city/metro.js?v=layout1008"></script>
+<script src="src/city/metro.js?v=layout2b"></script>
 <script src="src/city/metro_structs.js?v=wreal0929"></script>
 <script src="src/city/spawnplaces.js?v=sim2"></script>
 <script src="src/city/scenedirector.js?v=w09290218"></script>

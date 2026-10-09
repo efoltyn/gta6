@@ -47,6 +47,13 @@
       districts: (P.districts || []).map(function (d) { return [d.name, d.kind, R1(d.cx), R1(d.cz), d.cells]; }) });
   });
 
+  // the countryside (city/countryside.js, streamed by metro.js): farms,
+  // roadside houses, diners; its gas stops are forecourts
+  var CS = CBZ.metroCountryside && CBZ.metroCountryside.plan;
+  if (CS) (CS.bldgs || []).forEach(function (b) {
+    B(b.x, b.z, b.w, b.d, b.rot, b.h, b.st, b.type, "countryside", "countryside", b.farm || b.type === "barn" || b.type === "silo" ? "rural" : b.diner ? "commercial" : "exurb");
+  });
+  if (CS) (CS.forecourts || []).forEach(function (f) { B(f.x, f.z, 24, 26, f.rotY, 5, 1, "gas", "countryside", "countryside", "commercial"); });
   // ---- roads (non-metro records): [x0, z0, x1, z1, w, class, gen, place, elevated]
   function cls(r) {
     if (r.district === "highway") return r.frontier ? "frontier" : "highway";
@@ -78,7 +85,7 @@
   (CBZ.highwayNetTable ? CBZ.highwayNetTable() : []).forEach(function (h) {
     // the deck's own centreline: the corners filleted exactly as highways.js draws them
     var sp = CBZ.highwaySmoothPath ? CBZ.highwaySmoothPath(h.pts, h.fillet || 60, 9) : h.pts;
-    out.hw.push({ id: h.id, name: h.name, width: h.width, pts: sp.map(function (p) { return [R1(p.x), R1(p.z)]; }) });
+    out.hw.push({ id: h.id, name: h.name, width: h.width, rural: !!h.rural, pts: sp.map(function (p) { return [R1(p.x), R1(p.z)]; }) });
   });
   (CBZ.cityInterchanges ? CBZ.cityInterchanges() : []).forEach(function (G) { out.ix.push([R1(G.X0), R1(G.Z0), G.thrId, G.stemId, "flyover"]); });
 

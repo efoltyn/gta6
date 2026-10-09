@@ -329,7 +329,61 @@
         recA: brandtEastX > timberX + HALF ? brandtEastX - 20 : timberX, recB: mercyX,
         docks: [{ x: mercyX, z: brandtZ, note: "Mercy causeway" }],
       },
-    ];
+    ].concat(V5 ? townLinks(eastX, westX) : []);
+  }
+
+  // ============================================================
+  //  THE COUNTRY ROADS (layout wave 2, 2026-10-08). tools/layout-audit.mjs
+  //  measured nine settlements whose streets touched no other road: the
+  //  nations east of the Loop (Veridia + Lowport, Keshtown + Nur Hollow +
+  //  Adar's Well, Solara) and Mbeya with its three villages in the west.
+  //  You could only reach them across open grass. Each now has a REAL
+  //  two-lane country road from the same kit as every highway (one 3.6 m
+  //  lane each way, 1.9 m shoulders, centre line, edge furniture, relief
+  //  flattened under it by the same corridor gate, a drivable record per
+  //  leg that T's at grade into the Loop exactly as Routes 5/6 do — the
+  //  Loop's barriers gap at every junction a record makes).
+  //
+  //  Every coordinate is a TOWN STREET's centreline or edge, read off the
+  //  towngen grids these places build (countries.js; numbers measured on
+  //  the live world, seed-independent: the nations' grids are authored).
+  //  A deck stops flush at the street edge it meets and its record runs on
+  //  to the street's centreline (recA / recB), the HWY-4 dock doctrine.
+  //  The route's final point is always inside the place it serves, so the
+  //  clearance law (roadrules.js) lets the arriving leg in.
+  // ============================================================
+  const RURAL_W = 11;                          // 3.6 + 3.6 lanes + 1.9 m shoulders
+  function townLinks(eastX, westX) {
+    const LX = eastX + HALF, WX = westX - HALF;   // the Loop's east / west deck edges
+    const R = function (id, name, pts, recA, recB, fillet) {
+      return { id: id, name: name, width: RURAL_W, lanesPerDir: 1, median: false, rural: true, fillet: fillet || 40,
+        pts: pts, recA: recA, recB: recB, docks: [] };
+    };
+    return [
+      // east of the Loop: the nations
+      R("C1", "Veridia Road", [{ x: LX, z: -400 }, { x: 7465, z: -400 }], eastX, 7472),
+      R("C2", "Lowport Lane", [{ x: 7600, z: -624 }, { x: 7600, z: -523 }], -630, -516),
+      R("C3", "Kesh Road", [{ x: LX, z: -2265.5 }, { x: 7411, z: -2265.5 }], eastX, 7417.5),
+      R("C4", "Nur Hollow Lane", [{ x: 7501.5, z: -2157 }, { x: 7501.5, z: -2069 }], -2163.5, -2063.5),
+      R("C5", "Adar's Well Lane", [{ x: 7589, z: -2238.5 }, { x: 7705.6, z: -2238.5 }], 7582.5, 7711.1),
+      R("C6", "Solara Road", [{ x: LX, z: 1620 }, { x: 7679.5, z: 1620 }], eastX, 7686),
+      // west of the Loop: Mbeya and its villages. The road leaves the Loop's
+      // west leg 60 m south of the corner fillet's end (the arc spans z
+      // -1600..-1460) and turns on 40 m fillets onto Ruvu's main street.
+      R("C7", "Mbeya Road", [{ x: WX, z: -1400 }, { x: -2700, z: -1400 }, { x: -2700, z: -1558.5 }, { x: -4130.2, z: -1558.5 }], westX, -4135.7),
+      R("C8", "Ruvu Lane", [{ x: -4356, z: -1576 }, { x: -4231.9, z: -1576 }], -4362, -4226.4),
+      R("C9", "Kolo Lane", [{ x: -4648.4, z: -1576 }, { x: -4524, z: -1576 }], -4653.9, -4518),
+      R("C10", "Tende Lane", [{ x: -4439.9, z: -1771.8 }, { x: -4439.9, z: -1678 }], -1777.3, -1672),
+    ].concat(saltlandsRoad(eastX));
+  }
+  // The Saltlands spine (biome_desert.js, published as CBZ.DESERT_SPINE) ran
+  // to the basin's east shore and stopped in the sand. It carries on to the
+  // Continental Loop's east leg, so Dry Gulch is reached from both sides.
+  function saltlandsRoad(eastX) {
+    const S = CBZ.DESERT_SPINE;
+    if (!S || !isFinite(S.z) || !isFinite(S.east) || S.east >= eastX - HALF - 20) return [];
+    return [{ id: "C11", name: "Saltlands Road", width: RURAL_W, lanesPerDir: 1, median: false, rural: true, fillet: 40,
+      pts: [{ x: eastX - HALF, z: S.z }, { x: S.east, z: S.z }], recA: eastX, recB: S.east, docks: [] }];
   }
 
   // The table is pure data off the layout dial, so a builder that runs
@@ -374,9 +428,10 @@
     const out = [], pts = route.pts;
     for (let i = 0; i < pts.length - 1; i++) {
       const a = pts[i], b = pts[i + 1];
+      const h = route.width / 2;
       out.push({
-        minX: Math.min(a.x, b.x) - HALF, maxX: Math.max(a.x, b.x) + HALF,
-        minZ: Math.min(a.z, b.z) - HALF, maxZ: Math.max(a.z, b.z) + HALF,
+        minX: Math.min(a.x, b.x) - h, maxX: Math.max(a.x, b.x) + h,
+        minZ: Math.min(a.z, b.z) - h, maxZ: Math.max(a.z, b.z) + h,
         a: a, b: b, i: i,
       });
     }
@@ -480,7 +535,7 @@
       const hw = CBZ.buildHighway(group, {
         path: route.pts, smooth: true, filletRadius: route.fillet, filletStep: 9,
         width: route.width, lanesPerDir: route.lanesPerDir,
-        median: true, medianW: MEDIAN_W, laneW: LANE_W, theme: "asphalt",
+        median: route.median !== false, medianW: MEDIAN_W, laneW: LANE_W, theme: route.theme || "asphalt",
         registerRoads: false,            // records come from the LEG table below,
         route: route.id,                 // never from the arc-subdivided path
       });
@@ -519,7 +574,9 @@
           : { x: (lo + hi) / 2, z: a.z, vertical: false, len: hi - lo };
         seg.district = "highway";
         seg.w = route.width; seg.lanesPerDir = route.lanesPerDir; seg.laneW = LANE_W;
-        seg.median = true; seg.medianW = MEDIAN_W; seg.route = route.id;
+        if (route.median !== false) { seg.median = true; seg.medianW = MEDIAN_W; }
+        seg.route = route.id;
+        if (route.rural) seg.rural = true;
         // ENFORCE (roadrules.js): dock at a place's edge, never cross it. The
         // route's FINAL point is the destination, so the leg that arrives is
         // allowed in and a leg that merely passes a town is cut at the kerb.
@@ -529,9 +586,9 @@
         // polwar's front search (/causeway|bridge/) and the shore field's
         // land-holding both ignore it (established link semantics).
         CBZ.registerCityRegion(city, {
-          name: route.name + " Link " + (i + 1), subtitle: "Highway Network", kind: "rect",
-          minX: Math.min(a.x, b.x) - HALF, maxX: Math.max(a.x, b.x) + HALF,
-          minZ: Math.min(a.z, b.z) - HALF, maxZ: Math.max(a.z, b.z) + HALF,
+          name: route.name + " Link " + (i + 1), subtitle: route.rural ? "Country Road" : "Highway Network", kind: "rect",
+          minX: Math.min(a.x, b.x) - route.width / 2, maxX: Math.max(a.x, b.x) + route.width / 2,
+          minZ: Math.min(a.z, b.z) - route.width / 2, maxZ: Math.max(a.z, b.z) + route.width / 2,
           pad: 1,
         });
       }

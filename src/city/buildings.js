@@ -7963,6 +7963,14 @@
          shop     style for storefront trades (ground storey kept clear for
                   the shop's glass, door, fascia and awning)
          storeys  [A, B] for towers/homes; shopSt = minimum for a shop.
+         mixSt    MIXED USE (layout wave 2): on the core and commercial
+                  streets a shopfront is the ground floor of a mid-rise, the
+                  flats stacked over it to mixSt storeys, so the street wall
+                  at eye level is the tallest in the city. Floors above shopSt
+                  are fitted out LAZILY (city/fitout.js "flat": built when you
+                  walk in, freed when you leave), so the height costs shell
+                  geometry only, never an eager interior per storey. Drive-in
+                  trades and civic porticoes keep their own heights.
                   THE CORE IS THE PEAK (layout wave, 2026-10-08): the walk-up
                   and tower lots of the commercial streets stand 8-10 storeys
                   and the projects 7-8, so the downtown is the tallest place
@@ -7978,10 +7986,10 @@
        rng() draws are kept where the old code drew them (the value is simply
        no longer used), so the rest of the deterministic build is unchanged. */
     const STREET_STYLE = {
-      Midtown:    { grammar: "artdeco",                 shop: "artdeco", storeys: [12, 16], shopSt: 4, setback: 1.5, walls: [0xcfc2a4, 0xbdb096] },
-      Eastgate:   { grammar: "brick",                   shop: "brick",   storeys: [10, 8], shopSt: 3, setback: 1.5, walls: [0x8a3b26, 0x7d3624] },
-      Westend:    { grammar: "stone",                   shop: "stone",   storeys: [8, 10], shopSt: 3, setback: 1.5, walls: [0xcab99a, 0xb9a887] },
-      Harborside: { grammar: "brick",                   shop: "brick",   storeys: [7, 6],  shopSt: 3, setback: 1.5, walls: [0x6e4634, 0x62402f] },
+      Midtown:    { grammar: "artdeco",                 shop: "artdeco", storeys: [12, 16], shopSt: 4, mixSt: 7, setback: 1.5, walls: [0xcfc2a4, 0xbdb096] },
+      Eastgate:   { grammar: "brick",                   shop: "brick",   storeys: [10, 8], shopSt: 3, mixSt: 6, setback: 1.5, walls: [0x8a3b26, 0x7d3624] },
+      Westend:    { grammar: "stone",                   shop: "stone",   storeys: [8, 10], shopSt: 3, mixSt: 6, setback: 1.5, walls: [0xcab99a, 0xb9a887] },
+      Harborside: { grammar: "brick",                   shop: "brick",   storeys: [7, 6],  shopSt: 3, mixSt: 5, setback: 1.5, walls: [0x6e4634, 0x62402f] },
       Northpoint: { grammar: "brickhouse",              shop: "brick",   storeys: [3, 3],  shopSt: 2, setback: 3.5, walls: [0x98482e, 0x8c432c] },
       Crownhill:  { grammar: ["queenanne", "victorian"], shop: "stone",  storeys: [3, 3],  shopSt: 2, setback: 3.5, walls: [0x6f8ea4, 0xb09a78] },
       Southside:  { grammar: "brutalist",               shop: "brick",   storeys: [7, 8],  shopSt: 2, setback: 3.0, walls: [0x8c8983, 0x807d77] },
@@ -8350,8 +8358,11 @@
         const dk = districtKind(lot);
         if (dk === "core" || dk === "commercial") rng();   // the old height roll (RNG order preserved)
         const driveIn = !!(shop.gas || shop.carlot || shop.chop || shop.showroom);
-        const shopStoreys = (driveIn && dk !== "core" && dk !== "commercial") ? shop.storeys
+        const baseShopSt = (driveIn && dk !== "core" && dk !== "commercial") ? shop.storeys
           : Math.max(shop.storeys, SS.shopSt);
+        const civicKind = !!(CBZ.CIVIC_FACADE_KINDS && CBZ.CIVIC_FACADE_KINDS.has(shop.kind));
+        const mixSt = (!driveIn && !civicKind && (dk === "core" || dk === "commercial")) ? (SS.mixSt || 0) : 0;
+        const shopStoreys = Math.max(baseShopSt, mixSt);
         // FACADE POLICY BY TRADE. Still NO deliberately sealed facades — the
         // owner's blank-block complaint stands. What changes: the civic trades
         // (and the bank / security firm, which have always been civic in
@@ -8425,6 +8436,12 @@
           // answers it once: a public counter has its own admin above it, a
           // storefront has tenants. The apartment dresser is still the fallback.
           for (let k = 1; k < shopStoreys; k++) {
+            // the mixed-use storeys over the old storefront height: flats the
+            // fit-out builds when you walk in (no eager interior per storey)
+            if (k >= baseShopSt && CBZ.fitoutDeclare) {
+              CBZ.fitoutDeclare(b, k * FH, "flat", CBZ.interiorFloorRoom ? CBZ.interiorFloorRoom(b, k) : null, { floor: k, floors: shopStoreys });
+              continue;
+            }
             if (!coherentFloor(b, k * FH, shop.kind, "above"))
               furnishApartmentFloor(b, k * FH, (lot.i | 0) * 7 + (lot.j | 0) + k);
           }
