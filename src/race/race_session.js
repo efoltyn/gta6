@@ -25,7 +25,13 @@
      session.abandon()  the player left mid-race: everyone cools down
      session.standings()
      session.on         { lights(n, green), flash(text, kind),
-                          finish(entry, place), results(order) }
+                          finish(entry, place), results(order), caution(on) }
+     session.hazards    what is on the racing surface that is not a car (a
+                        person who got out, a body), as {s, u}; the host
+                        fills it every frame. The drivers see each one as a
+                        stopped car (they lift, brake and steer round it) and
+                        a hazard during the race brings out the caution: the
+                        yellow, the field slows, green 4 s after it is clear.
 ============================================================ */
 (function (root) {
   "use strict";
@@ -40,6 +46,8 @@
   // the field is dealt onto the grid MIXED (a grid sorted fastest-first is a procession)
   const GRID_MIX = [3, 7, 0, 5, 8, 1, 6, 2, 4, 9, 10, 11];
   const HOLD = Object.freeze({ steer: 0, throttle: 0, brake: 1, hold: true });   // a foot on the brake that never reverses
+  const CAUTION_PACE = 0.5;     // under yellow the field runs at half pace
+  const CAUTION_CLEAR = 4;      // s of clear track before the green
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
   const ordinal = (n) => n + (n % 10 === 1 && n !== 11 ? "ST" : n % 10 === 2 && n !== 12 ? "ND" : n % 10 === 3 && n !== 13 ? "RD" : "TH");
@@ -52,7 +60,7 @@
     const COOL_PLAYER = o.coolPlayer !== false;
     const playerNumber = o.playerNumber || 17;
     const presets = AI.field(FIELD, o.seed || 17);
-    const on = Object.assign({ lights() {}, flash() {}, finish() {}, results() {} }, o.on || {});
+    const on = Object.assign({ lights() {}, flash() {}, finish() {}, results() {}, caution() {} }, o.on || {});
 
     const entries = [];
     for (let i = 0; i < FIELD; i++) {
@@ -65,6 +73,7 @@
       phase: "idle", t: 0, lit: 0, holdT: 0, raceT: 0, doneT: 0, flag: "green",
       finishOrder: [], leaderLap: -1, leader: null, excite: 0, laps: LAPS, field: FIELD,
       entries, me: null, on, ordinal,
+      hazards: [], caution: false, clearT: 0,
     };
 
     /* WHO IS THE PLAYER. The page seats you in slot 5 (row 3, outside: you start
@@ -99,6 +108,7 @@
         e.finishT = 0; e.place = e.i + 1;
       }
       S.phase = "idle"; S.finishOrder = []; S.leaderLap = -1; S.leader = null; S.flag = "green"; S.excite = 0;
+      S.caution = false; S.clearT = 0;
       S.lit = 0; on.lights(0, false);                     // the gantry goes dark over a fresh grid
     };
     /* a car that is not on the grid any more (the city: the player drove it
@@ -156,7 +166,37 @@
       }
     }
 
-    const cars = [], inputs = [], laps0 = [];
+    const cars = [], inputs = [], laps0 = [], seen = [];
+    /* what the drivers look at: the field plus every hazard as a stopped car */
+    const HZ = [];
+    function sightOf() {
+      const H = S.hazards;
+      if (!H || !H.length) return cars;
+      seen.length = 0;
+      for (let i = 0; i < cars.length; i++) seen.push(cars[i]);
+      for (let i = 0; i < H.length && i < 16; i++) {
+        const h = H[i], z = HZ[i] || (HZ[i] = { id: -1 - i, s: 0, u: 0, speed: 0, vel: { x: 0, z: 0 }, lapS: 0, lap: 0, yaw: 0, isPlayer: false, hazard: true });
+        z.s = h.s; z.u = h.u;
+        seen.push(z);
+      }
+      return seen;
+    }
+    /* THE CAUTION. Somebody on the racing surface mid-race: the yellow comes
+       out and every driver backs off to the caution pace until the track has
+       been clear for CAUTION_CLEAR seconds. */
+    function caution(dt) {
+      const any = !!(S.hazards && S.hazards.length);
+      if (any) S.clearT = 0; else S.clearT += dt;
+      const want = any || (S.caution && S.clearT < CAUTION_CLEAR);
+      if (want !== S.caution) {
+        S.caution = want;
+        if (S.phase === "race" && !(S.flag === "white" || S.flag === "checker")) S.flag = want ? "yellow" : "green";
+        else if (!want && S.flag === "yellow") S.flag = "green";
+        on.caution(want);
+        on.flash(want ? "CAUTION" : "GREEN FLAG", want ? "yellow" : "green");
+      }
+      for (const e of entries) if (e.driver) e.driver.yellow = S.caution ? CAUTION_PACE : 0;
+    }
     const pin = { steer: 0, throttle: 0, brake: 0, hold: false };
     function playerIn(e, input, dt) {
       if (!input) return HOLD;
@@ -186,7 +226,9 @@
       }
       if (S.phase === "race") {
         S.raceT += dt;
-        for (const e of entries) inputs.push(e.driver ? e.driver.drive(e.car, cars, dt) : playerIn(e, input, dt));
+        caution(dt);
+        const sight = sightOf();
+        for (const e of entries) inputs.push(e.driver ? e.driver.drive(e.car, sight, dt) : playerIn(e, input, dt));
         for (let i = 0; i < entries.length; i++) laps0[i] = entries[i].car.lap;
         PH.stepAll(cars, inputs, dt);
         for (let i = 0; i < entries.length; i++) if (entries[i].car.lap > laps0[i]) onLap(entries[i]);
@@ -205,9 +247,11 @@
       // (practice on a parked field) only the player's car moves
       S.doneT += dt;
       const idle = S.phase === "idle";
+      if (!idle) caution(dt);
+      const sight = idle ? cars : sightOf();
       for (const e of entries) {
         if (e.player && (!e.driver || idle)) inputs.push(playerIn(e, input, dt));
-        else if (e.driver && !idle) inputs.push(e.driver.drive(e.car, cars, dt));
+        else if (e.driver && !idle) inputs.push(e.driver.drive(e.car, sight, dt));
         else inputs.push(HOLD);
       }
       PH.stepAll(cars, inputs, dt);

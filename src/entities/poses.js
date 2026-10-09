@@ -34,7 +34,8 @@
 (function () {
   "use strict";
   const CBZ = window.CBZ;
-  if (!CBZ) return;
+  const THREE = window.THREE;
+  if (!CBZ || !THREE) return;
   CBZ.CONFIG = CBZ.CONFIG || {};
   if (CBZ.CONFIG.CHAR_POSES == null) CBZ.CONFIG.CHAR_POSES = true;
 
@@ -50,34 +51,87 @@
     elbow(J.la, el, dt, 12); elbow(J.ra, er, dt, 12);
   }
 
+  /* ---- ARMS THAT KNOW WHAT THEY ARE DOING ---------------------------------
+     Owner: "people just have no control over their arms, they're being
+     stupid with their arms. Especially protesters, the chef outside the
+     White House." Measured on the rig (tools/arm-limit-check.mjs prints the
+     same numbers): the counter pose ("table" — every vendor, cashier and the
+     chef at his cart) held both fists out at SHOULDER height 60 cm in front
+     of the chest, a sleepwalker; folded arms put both hands up at the CHIN
+     (an elbow flexed on an untwisted shoulder swings the forearm UP, never
+     across); the dealer worked at chest height; the placard's board floated
+     30 cm over the hands holding it, the flag 14 cm off the fist on its
+     stick. These rows now put the hands where the job is — on the counter
+     at waist height, forearms ACROSS the ribs (the humerus turns in: rows
+     may own shoulder twist, `twist: true`, which animChar then leaves
+     alone), the board and the flag ON the fists that hold them — and every
+     arm is held to its range (character.js THE ARMS HAVE A RANGE). This rig
+     has broad shoulders and short forearms: a hand cannot reach a front
+     pocket or the far elbow, so no pose asks it to. */
+  const _ikW = new THREE.Vector3(), _ikF = new THREE.Vector3(), _ikN = new THREE.Vector3(), _ikQ = new THREE.Quaternion();
+  function bodyPt(ch, x, y, z, out) { return ch.body.localToWorld(out.set(x, y, z)); }
+  function bodyDir(ch, x, y, z, out) { ch.body.getWorldQuaternion(_ikQ); return out.set(x, y, z).normalize().applyQuaternion(_ikQ); }
+  function sideOf(ch, arm) { const p = ch.parts && ch.parts[arm === "l" ? "la" : "ra"]; return p && p.position.x >= 0 ? 1 : -1; }
+  // a fist round a pole at body-local (x, y, z): the bar's axis vertical
+  function gripPole(ch, arm, x, y, z, rate, dt) {
+    const A = CBZ.charArmTo;
+    if (!A || !A.plant || !ch.body) return false;
+    ch.body.updateWorldMatrix(true, false);
+    const s = sideOf(ch, arm);
+    const r = A.plant(ch, bodyPt(ch, x, y, z, _ikW), arm, bodyDir(ch, s * 0.6, 0, 1, _ikN), bodyDir(ch, -s, 0, -0.35, _ikF), 1 - Math.exp(-(rate || 10) * dt), "grip");
+    ch._ikPose = ch.pose || ch._ikPose || "grip";
+    return r != null;
+  }
+  // shoulder x / y (twist) / z and the elbow, both arms mirrored, damped
+  function armsTo(ch, dt, r, lx, ly, lz, le, rx, ry, rz, re) {
+    const J = ch.low || {};
+    const la = ch.parts && ch.parts.la, ra = ch.parts && ch.parts.ra;
+    if (la) { la.rotation.x = damp(la.rotation.x, lx, r, dt); la.rotation.y = damp(la.rotation.y, ly, r, dt); la.rotation.z = damp(la.rotation.z, lz, r, dt); }
+    if (ra) { ra.rotation.x = damp(ra.rotation.x, rx, r, dt); ra.rotation.y = damp(ra.rotation.y, ry, r, dt); ra.rotation.z = damp(ra.rotation.z, rz, r, dt); }
+    elbow(J.la, le, dt, r); elbow(J.ra, re, dt, r);
+  }
+  // where a fist's grip actually is (world), after the solve
+  const _gc = new THREE.Vector3();
+  function gripAt(ch, arm, out) {
+    const part = ch.parts && ch.parts[arm === "l" ? "la" : "ra"], cap = part && part.userData.cap;
+    const A = CBZ.charArmTo;
+    if (!cap || !A || !A.contactOf) return false;
+    const pc = A.contactOf("grip");
+    cap.updateMatrixWorld(true);
+    return !!cap.localToWorld(out.set(pc[0] * (cap.userData.side < 0 ? -1 : 1), pc[1], pc[2]));
+  }
+  // the body's own measures (rig units, body frame)
+  function M(ch) {
+    const S = ch.torsoShape, P = ch.profile || {};
+    if (!S) return null;
+    return { S, P, hip: S.hipY, sh: S.shoulderY, W: S.W, D: S.D, AX: S.AX, hk: (P.headSize || 0.6) / 0.6 };
+  }
+
   // Each pose writes arm targets on a rig `ch`, using the SAME surface
   // animChar uses: ch.parts.{la,ra} (upper-arm pivots) + ch.low.{la,ra}
   // (elbow joints). Rates sit at/above animChar's arm rate (~14) so the pose
   // dominates the frame it owns.
   const POSES = {
-    // hands held forward over the felt, forearms level — dealing / croupier.
+    // hands low and forward over the felt (table height, not the chest) —
+    // dealing / croupier; the right hand works the cards a little
     deal(ch, dt) {
-      const J = ch.low || {}, r = 15;
-      const la = ch.parts && ch.parts.la, ra = ch.parts && ch.parts.ra;
-      if (la) { la.rotation.x = damp(la.rotation.x, -0.95, r, dt); la.rotation.z = damp(la.rotation.z, 0.14, r, dt); }
-      if (ra) { ra.rotation.x = damp(ra.rotation.x, -0.95, r, dt); ra.rotation.z = damp(ra.rotation.z, -0.14, r, dt); }
-      elbow(J.la, -0.95, dt, r); elbow(J.ra, -0.95, dt, r);
+      ch._pubT = (ch._pubT || 0) + dt;
+      const w = Math.sin(ch._pubT * 2.1 + (ch._pubPh || 0)) * 0.06;
+      armsTo(ch, dt, 15, -0.80, 0, -0.06, -0.60, -0.80 - w, 0, 0.06, -0.60 + w);
     },
-    // both forearms extended forward, resting on the table edge — cashier/pitboss.
+    // hands resting on the counter at waist height, arms easy, a slow weight
+    // shift between them — the vendor, the cashier, the pitboss, the chef at
+    // his cart (was: fists out at shoulder height, a sleepwalker)
     table(ch, dt) {
-      const J = ch.low || {}, r = 14;
-      const la = ch.parts && ch.parts.la, ra = ch.parts && ch.parts.ra;
-      if (la) { la.rotation.x = damp(la.rotation.x, -1.12, r, dt); la.rotation.z = damp(la.rotation.z, 0.10, r, dt); }
-      if (ra) { ra.rotation.x = damp(ra.rotation.x, -1.12, r, dt); ra.rotation.z = damp(ra.rotation.z, -0.10, r, dt); }
-      elbow(J.la, -0.55, dt, r); elbow(J.ra, -0.55, dt, r);
+      ch._pubT = (ch._pubT || 0) + dt;
+      const s = Math.sin(ch._pubT * 0.6 + (ch._pubPh || 0)) * 0.04;
+      armsTo(ch, dt, 12, -0.70 + s, 0, -0.10, -0.35, -0.70 - s, 0, 0.10, -0.35);
     },
-    // arms crossed high over the chest — guard / bouncer / pitboss at ease.
+    // arms folded: the humerus turned in so each forearm lies ACROSS the
+    // ribs, level, one a hand's depth over the other (was: both fists at the
+    // chin — an elbow flexed on an untwisted shoulder swings the forearm up)
     foldarms(ch, dt) {
-      const J = ch.low || {}, r = 14;
-      const la = ch.parts && ch.parts.la, ra = ch.parts && ch.parts.ra;
-      if (la) { la.rotation.x = damp(la.rotation.x, -1.15, r, dt); la.rotation.z = damp(la.rotation.z, -0.52, r, dt); }
-      if (ra) { ra.rotation.x = damp(ra.rotation.x, -1.22, r, dt); ra.rotation.z = damp(ra.rotation.z, 0.56, r, dt); }
-      elbow(J.la, -1.40, dt, r); elbow(J.ra, -1.50, dt, r);
+      armsTo(ch, dt, 14, -0.75, -1.20, -0.10, -1.60, -0.82, 1.20, 0.14, -1.66);
     },
     // both hands reaching down and forward, elbows well bent — somebody
     // WORKING with their hands at knee height on the thing in front of them.
@@ -97,7 +151,9 @@
     // a person far away and the same person as a full rig hold the same pose.
     // ch._pubT is the pose clock, ch._pubPh a per-body offset, ch._pubHype a
     // timed burst, ch._pubProp the held prop (a sign board rides the pump).
-    // a board on a stick, both hands up the stick, held over the head
+    // a board held up over the head by its two lower corners (both arms up,
+    // a hand under each corner); a hype burst pumps it. The board RIDES the
+    // hands: it is placed on them every frame, not beside them.
     pubPlacard(ch, dt) {
       ch._pubT = (ch._pubT || 0) + dt;
       const hype = (ch._pubHype || 0) > 0;
@@ -105,17 +161,35 @@
       const pump = hype ? Math.sin(ch._pubT * 9) * 0.2 : Math.sin(ch._pubT * 1.4 + (ch._pubPh || 0)) * 0.04;
       crowdArms(ch, dt, -2.72 + pump, -0.2, -2.72 + pump, 0.2, -0.3, -0.3);
       const pr = ch._pubProp;
-      if (pr) { pr.position.y = 1.8 + (hype ? Math.max(0, -pump) * 0.5 : 0); pr.rotation.z = pump * 0.25; }
+      if (pr && pr.parent && ch.sockets) {
+        ch.group.updateMatrixWorld(true);
+        ch.sockets.leftHand.getWorldPosition(_ikW); ch.sockets.rightHand.getWorldPosition(_ikF);
+        _ikW.add(_ikF).multiplyScalar(0.5);
+        pr.parent.worldToLocal(_ikW);
+        // (the prop's origin is its grip point: the board's bottom edge sits
+        // 0.34 above it; the stick hangs below and is not in anybody's hand)
+        pr.position.set(_ikW.x, _ikW.y - 0.30, _ikW.z);
+        pr.rotation.set(0, 0, pump * 0.15);
+        if (pr.children[0] && pr.children[0].geometry && pr.children[0].geometry.type === "CylinderGeometry") pr.children[0].visible = false;
+      }
     },
-    // a little flag on a stick in the right hand, waved
+    // a little flag on a stick in the right hand, held up at the side of the
+    // head and waved from the wrist; the other arm easy at the side
     pubFlag(ch, dt) {
       ch._pubT = (ch._pubT || 0) + dt;
       const hype = (ch._pubHype || 0) > 0;
       if (hype) ch._pubHype -= dt;
       const w = Math.sin(ch._pubT * (hype ? 8 : 2.2) + (ch._pubPh || 0));
-      crowdArms(ch, dt, -0.1, ch.armOutZ || 0.08, -2.45 + w * (hype ? 0.3 : 0.08), 0.12, -0.2, -0.25);
+      const m = M(ch);
+      if (!m) return;
+      const s = sideOf(ch, "r");
+      const gx = s * 0.40, gy = m.sh + 0.42 + (hype ? 0.06 * Math.abs(w) : 0), gz = 0.30;
+      gripPole(ch, "r", gx, gy, gz, 12, dt);
+      const la = ch.parts && ch.parts.la, J = ch.low || {};
+      if (la) { la.rotation.x = damp(la.rotation.x, -0.1, 10, dt); la.rotation.z = damp(la.rotation.z, ch.armOutZ != null ? ch.armOutZ : -0.08, 10, dt); la.rotation.y = damp(la.rotation.y, 0, 10, dt); }
+      elbow(J.la, -0.25, dt, 10);
       const pr = ch._pubProp;
-      if (pr) pr.rotation.z = w * (hype ? 0.35 : 0.1);
+      if (pr && pr.parent && gripAt(ch, "r", _ikW)) { pr.position.copy(pr.parent.worldToLocal(_ikW)); pr.rotation.z = w * (hype ? 0.35 : 0.1); }
     },
     // both arms up in a V, pumping
     pubCheer(ch, dt) {
@@ -126,7 +200,8 @@
     // the chant: one fist punched up on the beat, the other arm at the side
     pubFist(ch, dt) {
       ch._pubT = (ch._pubT || 0) + dt;
-      const beat = Math.max(0, Math.sin(ch._pubT * 5 + (ch._pubPh || 0)));
+      const b0 = Math.max(0, Math.sin(ch._pubT * 5 + (ch._pubPh || 0)));
+      const beat = b0 * b0 * (3 - 2 * b0);              // eased, no kink at the bottom of the beat
       crowdArms(ch, dt, -0.15, ch.armOutZ || 0.08, -2.25 - beat * 0.6, -0.12, -0.35, -1.1 + beat * 0.9);
     },
     // ---- THE STREET'S ARMS (city/streetlife.js). People on a pavement talk
@@ -172,6 +247,7 @@
     // idle gait owns the arms instead of freezing them here).
     stand(ch, dt) {},
   };
+  POSES.foldarms.twist = true;           // owns shoulder twist (animChar leaves rotation.y to it)
   // contract-vocabulary aliases so packages/ped brains can name poses naturally
   POSES.handsOnTable = POSES.table;
   POSES.croupier = POSES.deal;

@@ -17,7 +17,10 @@ import vm from "node:vm";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const G = { console, Math, Date, JSON, Float32Array, Uint16Array, Uint32Array, Uint8Array, Int32Array, Array, Object, Map, Set, WeakMap };
 G.window = G; G.self = G;
-G.document = { createElement: () => ({ getContext: () => ({ createRadialGradient: () => ({ addColorStop() {} }), fillRect() {} }) }) };
+// a 2D context where every call is a no-op and every gradient takes stops
+// (the B-2's painted skin draws a whole planform through it)
+const ctx2d = new Proxy({}, { get: (t, k) => (k in t ? t[k] : (k === "createRadialGradient" || k === "createLinearGradient") ? () => ({ addColorStop() {} }) : () => {}), set: (t, k, v) => { t[k] = v; return true; } });
+G.document = { createElement: () => ({ width: 0, height: 0, getContext: () => ctx2d }) };
 vm.createContext(G);
 vm.runInContext(readFileSync(path.join(root, "src/vendor/three.r128.min.js"), "utf8"), G);
 const THREE = G.THREE;
@@ -29,10 +32,11 @@ G.CBZ = {
 G.CBZ.mat = G.CBZ.cmat;
 for (const f of ["src/world/carfx.js", "src/weapons/munitions.js", "src/city/mil_air.js", "src/city/island_military.js", "src/city/strategic.js"]) {
   try { vm.runInContext(readFileSync(path.join(root, f), "utf8"), G, { filename: f }); }
-  catch (e) { if (!/strategic|munitions/.test(f)) throw e; }
+  catch (e) { if (!/strategic|munitions/.test(f)) throw e; if (/strategic/.test(f)) G.__strategicErr = String(e && e.stack || e).slice(0, 300); }
 }
 const CBZ = G.CBZ;
 let fails = 0;
+const _b2err = [];
 const ok = (c, m) => { if (!c) { fails++; console.log("FAIL " + m); } else console.log("ok   " + m); };
 
 // ---- 1. winding ----------------------------------------------------------
@@ -60,7 +64,7 @@ const REF = {
   attackHeli:  { L: [15.6, 18.2], W: [14.0, 15.0], H: [4.4, 5.2], R: [7.1, 7.5], name: "AH-64-class rotor 14.6, 17.7 overall, 4.9 to tail-rotor tip" },
   utilityHeli: { L: [18.0, 20.2], W: [15.4, 16.8], H: [4.8, 5.4], R: [8.0, 8.4], name: "UH-60-class rotor 16.4, 19.8 overall, 5.13 tall" },
   drone:       { L: [10.5, 11.8], W: [19.6, 20.6], H: [2.8, 4.0], name: "MQ-9-class 11 x 20.1" },
-  bomber:      { L: [43.5, 45.5], W: [41.0, 42.4], H: [9.8, 11.0], name: "B-1-class 44.5 x 41.7 x 10.4" },
+  bomber:      { L: [47.8, 49.2], W: [55.8, 57.0], H: [12.0, 12.8], name: "B-52H 48.5 x 56.4 x 12.4" },
 };
 const bb = (o) => { o.updateMatrixWorld(true); return new THREE.Box3().setFromObject(o); };
 function census(g) {
@@ -132,6 +136,45 @@ for (const k of ["jet", "bomber", "cargo", "heli", "attackHeli", "drone"]) {
   const b = bb(g), s = b.getSize(new THREE.Vector3());
   console.log(`     cargo: L ${s.z.toFixed(2)} W ${s.x.toFixed(2)} H ${s.y.toFixed(2)}`);
   ok(s.x > 40 && s.x < 44 && s.z > 40 && s.z < 46 && s.y > 13 && s.y < 15.5, "cargo: A400M-class 45 x 42.4 x 14.7 envelope");
+}
+
+// ---- 3. THE B-2 (city/strategic.js CBZ.strategicModels.b2) ---------------
+if (CBZ.strategicModels && CBZ.strategicModels.b2) {
+  const m = CBZ.strategicModels.b2(), g = m.group;
+  g.updateMatrixWorld(true);
+  const bb = new THREE.Box3().setFromObject(g), sz = bb.getSize(new THREE.Vector3());
+  let draws = 0, tris = 0; g.traverse((o) => { if (o.isMesh && o.visible) { draws++; tris += (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3; } });
+  console.log(`---- b2 (B-2A 21.0 x 52.4): L ${sz.z.toFixed(2)} W ${sz.x.toFixed(2)} H ${sz.y.toFixed(2)} · ${draws} draws · ${tris} tris`);
+  ok(sz.x > 52.0 && sz.x < 53.0, `b2 span ${sz.x.toFixed(2)} in 52,53`);
+  ok(sz.z > 20.5 && sz.z < 21.8, `b2 length ${sz.z.toFixed(2)} in 20.5,21.8 (sawtooth points included)`);
+  ok(Math.abs(bb.min.y) < 0.02, `b2 stands on its wheels (min ${bb.min.y.toFixed(3)})`);
+  ok(draws <= 40, `b2 draw calls ${draws} <= 40`);
+  const ud = g.userData;
+  ok(typeof ud.setGear === "function" && ud.gear && ud.gear.isObject3D, "b2 gear is its own retractable group (userData.gear + setGear)");
+  ok(typeof ud.setBay === "function" && Array.isArray(ud.bayDoors) && ud.bayDoors.length === 4, "b2 has two bays, four doors (setBay)");
+  ok(!!ud.b2Glass, "b2 windscreen is cut from the hull (b2Glass)");
+  // the loft's two sheets must face OUT: top up, belly down (inside-out
+  // sheets show the top paint from below and light backwards)
+  const ny = (mesh) => { const n = mesh.geometry.attributes.normal.array; let a = 0; for (let i = 1; i < n.length; i += 3) a += n[i]; return a / (n.length / 3); };
+  ok(ud.b2Skin && ny(ud.b2Skin[0]) > 0.3 && ny(ud.b2Skin[1]) < -0.3, `b2 skin faces out (top n.y ${ud.b2Skin ? ny(ud.b2Skin[0]).toFixed(2) : "?"}, belly ${ud.b2Skin ? ny(ud.b2Skin[1]).toFixed(2) : "?"})`);
+  ud.setGear(0); g.updateMatrixWorld(true);
+  // visible geometry only (r128's setFromObject counts hidden parts — the
+  // stowed ladder hangs under the hatch at all times)
+  const bbUp = new THREE.Box3();
+  g.traverseVisible((o) => { if (o.isMesh) { o.geometry.computeBoundingBox(); bbUp.union(o.geometry.boundingBox.clone().applyMatrix4(o.matrixWorld)); } });
+  ok(ud.gear.visible === false && bbUp.min.y > 1.5, `b2 gear up: nothing below the belly (min ${bbUp.min.y.toFixed(2)})`);
+  ud.setGear(1);
+  // every door's free edge must swing DOWN, not up into the wing
+  const lo0 = ud.bayDoors.map((d) => { d.updateMatrixWorld(true); return new THREE.Box3().setFromObject(d).min.y; });
+  ud.setBay(1); g.updateMatrixWorld(true);
+  const lo1 = ud.bayDoors.map((d) => new THREE.Box3().setFromObject(d).min.y);
+  ok(lo1.every((y, i) => y < lo0[i] - 0.5), `b2 bay doors open downward (${lo0.map((y, i) => (y - lo1[i]).toFixed(2)).join(", ")} m)`);
+  ud.setBay(0);
+  ok(ud.bayDoors.every((d) => Math.abs(d.rotation.z) < 1e-6), "b2 bay doors close flush");
+  ok(!!(ud.doorRig && ud.b2Hatch && ud.b2Ladder), "b2 crew hatch + ladder contract");
+  ok(ud.cockpitClass === "bomber" && ud.bombBay === true, "b2 bomber cockpit class + bomb bay flag");
+} else {
+  ok(false, "strategic.js publishes CBZ.strategicModels.b2" + (G.__strategicErr ? " — " + G.__strategicErr : ""));
 }
 console.log(fails ? `\n${fails} FAIL` : "\nall ok");
 process.exit(fails ? 1 : 0);

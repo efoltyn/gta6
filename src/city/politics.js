@@ -644,36 +644,63 @@
         if (m.status !== "sitting") return;
         if (T.kind === "party" ? m.party === party : m.ideology === T.ideology || (kind === "ban" && m.party === party && m.leader)) {
           m.status = "held"; C.seats[m.party] = Math.max(0, C.seats[m.party] - 1); C.vacant++;
-          s.held.push({ sid: m.sid, name: m.name, title: "Senator", party: m.party, ideology: m.ideology, day: day(), kind: "member" });
+          bookHeld({ sid: m.sid, name: m.name, title: "Senator", party: m.party, ideology: m.ideology, kind: "member", member: m.sid }, kind, "order");
         }
       });
       if (kind === "ban" && T.kind === "party") { C.vacant += C.seats[party]; C.seats[party] = 0; }
       s.fear = clamp((s.fear || 0) + (kind === "deploy" ? 35 : 20), 0, 100);
       if (T.kind === "group") { const G = s.groups[T.ideology]; if (G) G.banned = kind === "ban" ? day() : G.banned; }
     }
-    // the arrested are held (the state's own list; a pardon reads it)
+    // THE ARRESTED ARE HELD, and nobody vanishes. A person with a body here
+    // is taken in by city/custody.js (officers, cuffs, a car, out of draw
+    // range: the one arrest pipeline), which books him itself. Never a
+    // removal here: this line used to unpost him the instant the act fired,
+    // which is why a Detain made a man disappear before anybody reached him.
+    // A person with no body here (a minister in another city, a member of
+    // Congress) is booked straight onto the custody list.
     if ((kind === "arrest" || kind === "detain") && T.kind === "person") {
-      if (!s.held.some(function (h) { return h.sid && h.sid === T.sid && T.sid; })) {
-        s.held.push({ sid: T.sid || ("held_" + hash((T.name || "x") + day() + s.held.length)), name: T.name || "an unnamed prisoner", title: T.title || "", ideology: T.ideology,
-          party: T.party || null, gang: T.gang != null ? T.gang : null, gangName: T.gangName || null, inst: T.inst || null, role: T.role || null, day: day(), kind: T.role ? "minister" : T.member ? "member" : T.gang != null ? "gang" : "citizen" });
-      }
       const p = T.ped;
-      if (p && !p.dead) {
+      const CU = CBZ.custody;
+      if (p && !p.dead && p.pos) {
         const gn = T.gang != null ? gangOf(T.gang) : null;
         if (gn && gn.boss === p) gn.bossJailed = day();
-        // taken away (unless it is your own hands holding him: restrain.js)
-        if (!opts.keepBody && CBZ.cityUnpostNpc) { try { CBZ.cityUnpostNpc(p); } catch (e) {} }
-      }
+        // keepBody: the pipeline (or your own hands, restrain.js) already has him
+        if (!opts.keepBody && CU && CU.take && !CU.jobOf(p) && !p.restraint) {
+          try { CU.take(p, { by: opts.by || "police", verb: kind }); } catch (e) {}
+        }
+      } else bookHeld(T, kind, opts.by);
     }
     // a pardon lets the person go
     if (kind === "pardon") releaseHeld(T);
   }
+  // THE HELD ARE city/custody.js's list (one store for everybody in custody);
+  // the political model only reads it and prices what happens to them
+  function bookHeld(T, verb, by) {
+    const CU = CBZ.custody;
+    if (!CU || !CU.book) return null;
+    try {
+      return CU.book({ sid: T.sid || ("held_" + hash((T.name || "x") + day())), name: T.name || "an unnamed prisoner", title: T.title || "", ideology: T.ideology,
+        party: T.party || null, gang: T.gang != null ? T.gang : null, gangName: T.gangName || null, inst: T.inst || null, role: T.role || null,
+        member: T.member || null, kind: T.role ? "minister" : T.member ? "member" : T.gang != null ? "gang" : (T.kind && T.kind !== "person" ? T.kind : "citizen") },
+        { verb: verb || "arrest", by: by || "order", status: "held" });
+    } catch (e) { return null; }
+  }
+  function heldList() {
+    const s = S(), CU = CBZ.custody;
+    if (!CU || !CU.held) return [];
+    // a save from before custody.js kept its own list here: move it over once
+    if (Array.isArray(s.held) && s.held.length) {
+      const old = s.held.splice(0);
+      for (let i = 0; i < old.length; i++) { try { CU.book(old[i], { verb: "arrest", by: "order", status: "held", day: old[i].day }); } catch (e) {} }
+    }
+    return CU.held();
+  }
   function releaseHeld(T) {
     const s = S();
-    for (let i = s.held.length - 1; i >= 0; i--) {
-      const H = s.held[i];
+    const L = heldList();
+    for (let i = L.length - 1; i >= 0; i--) {
+      const H = L[i];
       if ((T.sid && H.sid === T.sid) || (!T.sid && T.name && H.name === T.name)) {
-        s.held.splice(i, 1);
         if (H.gang != null) {
           s.debts[H.gang] = (s.debts[H.gang] | 0) + 1;              // the gang owes you
           const gn = gangOf(H.gang); if (gn) gn.bossJailed = null;
@@ -682,14 +709,10 @@
           const m = member(H.sid);
           if (m && m.status === "held") { m.status = "sitting"; s.congress.seats[m.party]++; s.congress.vacant = Math.max(0, s.congress.vacant - 1); }
         }
-        // he walks out of the gate (the body comes back into the world)
+        // he walks out of the gate he is held behind (the body comes back into
+        // the world); a facility with no gate of its own lets him out at the seat's
         const site = Pz() && Pz().site ? (function () { try { return Pz().site(); } catch (e) { return null; } })() : null;
-        if (site && site.gate && CBZ.cityPostNpc) {
-          try {
-            const p = CBZ.cityPostNpc(site.gate.x + 3, site.gate.z + 9, { job: H.gang != null ? "gang member" : "civilian", archetype: "resident", src: "politics:pardon" });
-            if (p) { p.name = H.name; p.nameKnown = true; p._sid = H.sid; if (H.gang != null) p.gangId = H.gang; }
-          } catch (e) {}
-        }
+        try { CBZ.custody.release(H.id, { how: "pardoned", at: site && site.gate ? site.gate : null }); } catch (e) {}
         return H;
       }
     }
@@ -793,10 +816,19 @@
       emit("order-refused", { inst: inst, verb: verb, target: T.name || null, line: line, p: p });
       return { ok: false, refused: true, line: line, p: p };
     }
-    // carried out: arrest and detain happen now; a kill is counted when the
-    // body falls (onDeath reads the stamp), so a miss costs nothing
-    if (target && typeof target === "object" && target.pos) target._politicsOrder = { inst: inst, verb: verb, day: day() };
-    if (verb !== "kill" || !(target && typeof target === "object" && target.pos)) act(verb, Object.assign({}, opts, { target: target, by: inst }));
+    // carried out. A kill is counted when the body falls (onDeath reads the
+    // stamp), so a miss costs nothing. An arrest or a detention of somebody
+    // standing in the world is the one arrest pipeline (city/custody.js):
+    // officers, cuffs, a car; the act fires when the cuffs go on, with the
+    // witnesses who saw it. Anything else (a role, a member, a group) now.
+    const body = !!(target && typeof target === "object" && target.pos && !target.dead);
+    if (body) target._politicsOrder = { inst: inst, verb: verb, day: day() };
+    if ((verb === "arrest" || verb === "detain") && body && CBZ.custody && CBZ.custody.take) {
+      let j = null;
+      try { j = CBZ.custody.take(target, { by: inst, verb: verb, act: true, actBy: inst, actOpts: opts }); } catch (e) { j = null; }
+      if (j) return { ok: true, line: "Yes, sir.", p: p };
+    }
+    if (verb !== "kill" || !body) act(verb, Object.assign({}, opts, { target: target, by: inst }));
     return { ok: true, line: "Yes, sir.", p: p };
   }
 
@@ -1127,11 +1159,12 @@
   // ================================================================
   //  PARDONS
   // ================================================================
-  function held() { const s = ensure(); return s ? s.held.slice() : []; }
+  function held() { const s = ensure(); return s ? heldList() : []; }
   function pardon(who) {
     const s = ensure();
     if (!s) return { ok: false, why: "You do not hold the country." };
-    const H = typeof who === "object" && who && who.sid ? s.held.filter(function (h) { return h.sid === who.sid; })[0] : s.held.filter(function (h) { return h.sid === who || h.name === who; })[0];
+    const L = heldList();
+    const H = typeof who === "object" && who && who.sid ? L.filter(function (h) { return h.sid === who.sid; })[0] : L.filter(function (h) { return h.sid === who || h.name === who || h.id === who; })[0];
     if (!H) return { ok: false, why: "Nobody by that name is held." };
     act("pardon", { target: { kind: "person", _desc: 1, sid: H.sid, name: H.name, title: H.title || (H.gang != null ? "Gang leader" : ""), ideology: H.ideology || "dem",
       gang: H.gang, gangName: H.gangName, party: H.party, notable: H.kind === "citizen" ? 0.2 : 0.6, lawless: H.gang != null, member: H.kind === "member" ? H.sid : null, inst: H.inst }, by: "self", news: true });
@@ -1297,7 +1330,8 @@
       s.fx.pollDay = d;
       deliver({ id: "pol:poll:" + d, via: "folder", topic: "poll", kind: "people", who: { name: "The pollster", role: "aide" }, expires: 1e9,
         line: "The numbers, sir.", memo: { dept: "Office of Public Opinion", subject: "Where the country stands", body: pollLines(), rec: "For your eyes only." },
-        yes: { label: "File it" }, no: { label: "Bin it" } });
+        // a read, not a decision: one verb, File (president_office.js `info`)
+        info: true, yes: { label: "File it" }, no: { label: "File it" } });
     }
     // executive orders, when the state calls for them (one a day at most)
     if (d - s.fx.eoDay >= 1) {
@@ -1336,8 +1370,9 @@
         yes: { label: "Arrange it", run: function () { deal(k, { kind: "bribe", amount: 40000 }); } }, no: { label: "No", run: function () { personLoyalty(head, -4); } } });
     });
     // the held ask for a pardon through someone
-    for (let i = 0; i < s.held.length; i++) {
-      const H = s.held[i];
+    const HL = heldList();
+    for (let i = 0; i < HL.length; i++) {
+      const H = HL[i];
       if (H.asked || d - H.day < 1) continue;
       H.asked = d;
       const via = H.gang != null ? "His lawyer" : H.kind === "member" ? (PARTIES[H.party] ? PARTIES[H.party].adj + " leadership" : "His party") : H.kind === "minister" ? "His family" : "A lawyer";
@@ -1349,10 +1384,18 @@
     }
   }
   function pollWord(l) { return l >= 70 ? "with you" : l >= 55 ? "warm" : l >= 42 ? "split" : l >= 28 ? "cold" : l >= 15 ? "angry" : "furious"; }
+  // the daily read in two lines, not a table of meters: the number, then who
+  // is warmest and who is coldest
   function pollLines() {
     const s = S();
-    const out = ["Overall, " + Math.round(aggregate()) + "% approve."];
-    GROUP_IDS.slice().sort(function (a, b) { return s.groups[b].share - s.groups[a].share; }).forEach(function (k) { out.push(GROUPS[k].name + ": " + pollWord(s.groups[k].loyalty) + "."); });
+    const out = [Math.round(aggregate()) + "% approve."];
+    // among the blocs big enough to matter (a tenth of the country or more)
+    const by = GROUP_IDS.filter(function (k) { return s.groups[k].share >= 0.1; })
+      .sort(function (a, b) { return s.groups[b].loyalty - s.groups[a].loyalty; });
+    if (by.length >= 2) {
+      const hi = by[0], lo = by[by.length - 1];
+      out.push(GROUPS[hi].name + " are " + pollWord(s.groups[hi].loyalty) + ", " + GROUPS[lo].name + " " + pollWord(s.groups[lo].loyalty) + ".");
+    }
     return out;
   }
   // what the Chief says when you ask (president_staff.js's Talk)
@@ -1500,7 +1543,7 @@
   }
   function audit() {
     const s = S();
-    return { seat: s.seat || null, approval: s.groups ? Math.round(aggregate() * 10) / 10 : null, absorbed: s.absorbed | 0, held: s.held ? s.held.length : 0,
+    return { seat: s.seat || null, approval: s.groups ? Math.round(aggregate() * 10) / 10 : null, absorbed: s.absorbed | 0, held: s.groups ? heldList().length : 0,
       secrets: s.secrets ? s.secrets.length : 0, bills: s.bills ? s.bills.list.length : 0, desk: s.desk ? s.desk.length : 0, bodies: Object.keys(BODIES.peds).length };
   }
 

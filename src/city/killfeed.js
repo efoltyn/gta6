@@ -32,6 +32,12 @@
 
   CBZ.cityRecentDeaths = CBZ.cityRecentDeaths || []; // [{name, cause, t, you?, gang?, by?, n?, mass?}]
   const CAP = 12;                                    // keep only the freshest dozen
+  // Area weapons kill crowds, not people one at a time: their dead are a
+  // HEADLINE (crowdstore.js -> newsroom.js), never a corner line or a phone
+  // buzz per body.
+  const AREA_CAUSE = /nuclear|airstrike|explosion|terrorist|bomb|blast/;
+  // what still earns a corner line in the city: one person, by your hand
+  const PERSONAL_CAUSE = /murder|gunfire|beaten|car crash|execut|sanction|\bshot\b|hunted|stab|police/;
 
   // generic names for the ambient instanced crowd (they carry no ped.name)
   const FIRST = ["Dave", "Sam", "Nina", "Cole", "Rosa", "Marco", "Lena", "Theo",
@@ -104,7 +110,7 @@
     // City deaths only: a survival match is 99 eliminations in ten minutes and
     // routing those to the phone's news app would bury every real notification
     // the player has under a casualty list they are already watching happen.
-    if (!e.you && !e.mass && g && g.mode === "city" && typeof CBZ.cityPhoneNotify === "function") {
+    if (!e.you && !e.mass && !AREA_CAUSE.test(e.cause) && g && g.mode === "city" && typeof CBZ.cityPhoneNotify === "function") {
       CBZ.cityPhoneNotify({
         app: "news",
         from: "City Desk",
@@ -335,6 +341,18 @@
     const mine = g.mode === "city";
     for (let i = a.length - 1; i >= 0 && show.length < MAX_LINES; i--) {
       if (mine && !(a[i].you || a[i].by === "You")) continue;
+      // NO SCOREBOARD FOR A MASSACRE (owner 2026-10-09: "it shows that you
+      // killed. It's very dumb."). A nuke, an airstrike or a bomb is not a
+      // duel: "You killed 18,000 people" in the corner turns the worst thing
+      // in the game into a high score, and it lands at 0.5 s, before the
+      // shock has even reached anyone. Counted deaths (crowdstore's mass
+      // events) and area weapons go to the NEWS only — newsroom.js phrases
+      // the toll as a headline once there is one. The corner keeps the
+      // personal: the man you shot, the car you hit, your own death.
+      // Whitelist, not blacklist: a tower that falls on a man or the fire
+      // that follows the flash logs as "crushed"/"fire"/"killed", and those
+      // are the nuke's dead too.
+      if (mine && !a[i].you && (a[i].mass || !PERSONAL_CAUSE.test(a[i].cause || ""))) continue;
       if (now - (a[i].t || 0) <= SHOW_MS) show.push(a[i]);
     }
     const fp = show.map(function (e) { return (e.by || "") + ">" + e.name + ":" + e.cause + "@" + e.t; }).join("|");

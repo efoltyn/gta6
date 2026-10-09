@@ -498,7 +498,10 @@
   function storeGroup() {
     if (GS && !GS.gone) return GS;
     GS = ST.group({ name: "street", kind: "street", who: "pedestrians", mode: "city", cap: BUD.rows + 260,
-      maxDraw: R + 20, own: true, moving: true, cutDt: 0.1, aff: "public", onLife: onLife });
+      maxDraw: R + 20, own: true, moving: true, cutDt: 0.1, aff: "public", onLife: onLife,
+      // the store's hand-over (a round, a blast, a car near the lens): the
+      // struck person becomes a real body on that call
+      promote: function (r) { return promoteNow(r); } });
     return GS;
   }
   function stamp() { return ST.clock() + 1 / 60; }
@@ -1790,7 +1793,7 @@
       if (mG[r] < 0) {
         // detached: back in the street when calm and out of the ring
         if (!busy(ped) && d > rout) reattach(r, ent);
-        else if (d > R * 0.7) removeRow(r);        // ran off for good: the rig goes back to the pool
+        else if (d > R * 0.7 && !inCustody(ped)) removeRow(r);   // ran off for good: the rig goes back to the pool
         continue;
       }
       if (d > rout && G_()._citySpecTarget !== ped) unpromote(r, true);   // (your killer stays real for the kill-cam)
@@ -1825,6 +1828,33 @@
     }
   }
   const _cand = [], _idx = [];
+  function inCustody(ped) { return !!(ped && (ped.restraint || (ped._custody && !ped._custodyExit))); }
+  // a row made real at once (crowds.realize): its own rig if it has one, else
+  // the first free one of its build
+  function promoteNow(r) {
+    if (mRig[r] >= 0) { const e = POOL[mRig[r]]; return e && e.ped && !e.ped.dead ? e.ped : null; }
+    if (S.life[r] !== ST.ALIVE || mStand[r] === 4 || (CBZ.net && CBZ.net.noSim && CBZ.net.noSim())) return null;
+    const ent = freeEntry(mKid[r] ? "kid" : bodyOf(r));
+    if (!ent) return null;
+    assign(ent, r);
+    return ent.ped;
+  }
+  // TAKEN INTO CUSTODY (city/custody.js): his street row is consumed and the
+  // pool slot gets a new rig later; the old rig is the caller's to take away
+  function retire(ped) {
+    for (const ent of POOL) {
+      if (!ent || ent.ped !== ped) continue;
+      const r = ent.row;
+      if (r >= 0) {
+        mRig[r] = -1;
+        if (mG[r] >= 0) dropMember(r);
+        if (GS && S.grp[r] === GS.ix && S.life[r] === ST.ALIVE) GS.remove(r);
+      }
+      ent.row = -1; ent.g = -1; ent.ped = null; poolReady = false;
+      return true;
+    }
+    return false;
+  }
   function freeAny() { for (const e of POOL) if (e.ped && e.row < 0) return true; return false; }
   function bodyOf(r) {
     const C = CBZ.crowdGPU, L = C && C.lookOf ? C.lookOf(S.look[r]) : null;
@@ -2095,6 +2125,7 @@
     reset: reset, audit: audit, inspect: inspect, budget: function () { return Object.assign({ device: DEVICE }, BUD); },
     sites: function () { return SITES.filter(Boolean).map(function (s) { return { key: s.key, rings: s.rings.length, edges: s.nE, crossings: s.crossings, spots: s.spots.length }; }); },
     // a scare on the street (a gunshot, a scene): the pavement runs, not the rallies
+    retire: retire,
     panic: function (x, z, r, secs) { const G = GS; if (!G || G.gone) return 0; return ST.panic(x, z, r || 30, { only: G, secs: secs || 8 }); },
     MODE: MODE, _step: frame,
   };

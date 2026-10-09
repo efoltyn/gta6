@@ -1942,11 +1942,22 @@
      must never be left scaled down, folded, or missing its head. */
   function releaseDriver() {
     dropLive();
-    if (!drv.car) return false;
-    drv.car = null; drv.seatId = null; drv.steer = 0; drv.fit = 1;
     const ch = CBZ.playerChar;
+    /* A CAR SEAT NOBODY HERE IS HOLDING. The door beat (boarding.js, CBZ.
+       moves.board) ends with the rig folded into the seat, scaled to its fit,
+       and hands it to seatDriver. A car that does not want the walking rig
+       at the wheel (a Bullring stock car: its own helmeted driver is you)
+       never runs seatDriver, so drv.car stayed null and this returned early:
+       the seated, wheel-holding, shrunk rig walked out of the car with you
+       ("floating, holding a wheel"). A rig in a car seat with no door beat
+       playing is stood up here, whoever folded it. */
+    const orphan = !drv.car && ch && ch.seatRef && ch.seatRef.kind === "car" &&
+      !(CBZ.moves && CBZ.moves.busy && CBZ.moves.busy(CBZ.player));
+    if (!drv.car && !orphan) return false;
+    drv.car = null; drv.seatId = null; drv.steer = 0; drv.fit = 1;
     if (ch) {
       ch.sitting = false; ch.seatRef = null; ch.driveSteer = 0;
+      ch.seatBlend = null; ch.postureSink = null; ch.seatLean = 0;   // (the rig refunds its own seat sink as it stands)
       if (ch.group) {
         ch.group.scale.setScalar(1);
         ch.group.rotation.x = 0; ch.group.rotation.z = 0;
@@ -4741,8 +4752,14 @@
       const h = car.heading || 0;
       const side = D ? D.side : (paxSide ? -1 : 1);
       const lx = D ? side * (Math.abs(D.x) + 0.7) : side * 1.6, lz = D ? D.zc : 0;
-      // (a race car stands on the banking: you step out onto it, not under it)
-      P.pos.set(car.pos.x + lx * Math.cos(h) + lz * Math.sin(h), car._raceCar ? (+car.pos.y || 0) : 0, car.pos.z - lx * Math.sin(h) + lz * Math.cos(h));
+      // ON THE GROUND THERE: the floor at the door, not y = 0 (a race car
+      // stands on 24 degrees of banking: the door side is up to 0.7 m off the
+      // car's own height; a car on a ramp or a deck is not at sea level)
+      const ex = car.pos.x + lx * Math.cos(h) + lz * Math.sin(h), ez = car.pos.z - lx * Math.sin(h) + lz * Math.cos(h);
+      const cy = +car.pos.y || 0;
+      let ey = CBZ.groundAt ? +CBZ.groundAt(ex, ez, cy + 1.0) : (CBZ.floorAt ? +CBZ.floorAt(ex, ez) : cy);
+      if (!Number.isFinite(ey)) ey = cy;
+      P.pos.set(ex, ey, ez);
       P.grounded = true; P.vy = 0;
       CBZ.playerChar.group.position.copy(P.pos);
     }
@@ -5614,8 +5631,9 @@
         if (vmag > 6) runOver(car, vmag);
         else if (vmag > 0.6) creepInto(car, vmag);
         P.pos.set(car.pos.x, car.pos.y, car.pos.z);
-        // the helmeted driver in the car is you: the walking rig waits outside the frame
-        if (drv.car) releaseDriver();
+        // the helmeted driver in the car is you: the walking rig waits outside
+        // the frame, STANDING (the door beat left it folded in a seat)
+        releaseDriver();
         CBZ.playerChar.group.position.copy(P.pos);
         CBZ.playerChar.group.visible = false;
         P.speed = vmag;
@@ -6364,11 +6382,27 @@
     }
   }
 
+  const _pBody = { pos: null, radius: 0.38 };
+  /* any moving car against the people near it — for cars this file does not
+     step (a Bullring stock car runs on the racing model, city/speedway_race.js) */
+  CBZ.cityCarRunOver = function (car, vmag) { if (car && car.pos && vmag > 0) runOver(car, vmag); };
   function runOver(car, vmag) {
     const P = CBZ.player;
-    if (!car.player && !P.dead && !P.driving && car.playerHitCD <= 0) {
+    if (!car.player && !P.dead && !P.driving && !(car.playerHitCD > 0)) {
       const pdx = P.pos.x - car.pos.x, pdz = P.pos.z - car.pos.z;
-      if (pdx * pdx + pdz * pdz < 3.6) {
+      // YOU ARE HIT BY THE CAR'S SHAPE, like everybody else (carstrike.js:
+      // the footprint swept over this frame's travel; a 1.9 m circle round
+      // the car's centre missed a man at the nose of a 5 m stock car and hit
+      // one standing clear of its flank). The circle only without it.
+      const CSp = CBZ.carStrike;
+      const reachP = (vehicleDims(car).length || 4.4) * 0.5 + 2;
+      let pHit = null;
+      if (pdx * pdx + pdz * pdz < reachP * reachP) {
+        if (CSp) { _pBody.pos = P.pos; _pBody.radius = P.radius || 0.38; pHit = CSp.hit(car, _pBody, vmag); }
+        else if (pdx * pdx + pdz * pdz < 3.6) pHit = {};
+      }
+      if (pHit) {
+        if (CSp && CSp.audit) { CSp.audit.playerHits = (CSp.audit.playerHits || 0) + 1; CSp.audit.lastPlayerV = vmag; }
         car.playerHitCD = 0.85;
         // you get hit the SAME way you hit others: a fast car FLINGS you into a
         // ragdoll tumble (physics.js owns the airborne state); a slow one knocks
@@ -6381,7 +6415,8 @@
         if (car.npcDriver && CBZ.cityNpcOffense) CBZ.cityNpcOffense(car.npcDriver, 48, "vehicular-assault");
         if (CBZ.shake) CBZ.shake(0.4 + Math.min(1.2, vmag * 0.05));
         if (CBZ.doHitstop) CBZ.doHitstop(Math.min(0.1, 0.03 + vmag * 0.002));
-        car.v *= 0.7;
+        // the car pays the momentum a 75 kg body takes, not a fixed 30 %
+        if (CSp) CSp.cheapLoss(car, 75); else car.v *= 0.7;
       }
     }
     // one-per-call latch so a car that clips SEVERAL bodies this frame still

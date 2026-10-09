@@ -274,6 +274,21 @@
     detail:    { id: "suit",      name: "Protective Detail Suit", tier: "law", who: "protective details", price: 0, drip: 9, formal: "suit",
                  uniform: "detail", style: null, kit: { shades: 1, earpiece: 1 },
                  colors: { legs: 0x101115, torso: 0x121318, collar: 0xf1f2ec, arms: 0x121318, shoes: 0x08090c, shirt: 0xf1f2ec, tie: 0x08090c } },
+    // THE ROLE SUITS (clothes.js SUIT_STYLES 23-28, pinned by name in
+    // pinDetail): the President's navy, the top floor's chalk stripe and
+    // navy, the cabinet's charcoal, the staff's off-the-rack grey / black
+    president_suit: { id: "suit", uniform: "president", name: "The President's Navy Suit", tier: "money", who: "the President", price: 0, drip: 12, formal: "suit",
+                 style: null, colors: { legs: 0x19223a, torso: 0x1b2540, collar: 0xf1f2ec, arms: 0x1b2540, shoes: 0x08090c, shirt: 0xf1f2ec, tie: 0xa3162b, gloss: true } },
+    exec_suit: { id: "suit", uniform: "exec", name: "Chalk-Stripe Suit", tier: "money", who: "the top floor", price: 0, drip: 11, formal: "suit",
+                 style: null, colors: { legs: 0x272a31, torso: 0x2a2d35, collar: 0xd6e4f2, arms: 0x2a2d35, shoes: 0x08090c, shirt: 0xd6e4f2, tie: 0x1f3f7a, gloss: true } },
+    exec_navy: { id: "suit", uniform: "exec", name: "Navy Worsted Suit", tier: "money", who: "the top floor", price: 0, drip: 11, formal: "suit",
+                 style: null, colors: { legs: 0x1b2335, torso: 0x1d2639, collar: 0xd6e4f2, arms: 0x1d2639, shoes: 0x0c0d10, shirt: 0xd6e4f2, tie: 0x6e1f2b, gloss: true } },
+    official_suit: { id: "suit", uniform: "official", name: "Cabinet Charcoal", tier: "law", who: "officials", price: 0, drip: 9, formal: "suit",
+                 style: null, colors: { legs: 0x292c33, torso: 0x2c2f36, collar: 0xf1f2ec, arms: 0x2c2f36, shoes: 0x0c0d10, shirt: 0xf1f2ec, tie: 0x24405e } },
+    staff_grey: { id: "suit", uniform: "staff", name: "Off-the-Rack Grey", tier: "work", who: "staffers", price: 0, drip: 5, formal: "suit",
+                 style: null, colors: { legs: 0x585c63, torso: 0x5d6168, collar: 0xf1f2ec, arms: 0x5d6168, shoes: 0x16171b, shirt: 0xf1f2ec, tie: 0x2b3d5c } },
+    staff_black: { id: "suit", uniform: "staff", name: "Off-the-Rack Black", tier: "work", who: "staffers", price: 0, drip: 5, formal: "suit",
+                 style: null, colors: { legs: 0x1a1b20, torso: 0x1c1d22, collar: 0xf1f2ec, arms: 0x1c1d22, shoes: 0x101114, shirt: 0xf1f2ec, tie: 0x3a3d44 } },
     designer:  { id: "designer",  name: "Designer Drip",    tier: "money",  who: "ballers",          price: 1600, drip: 12,
                  colors: { legs: 0xe9e4da, torso: 0x7a3df0, collar: 0xffd451, arms: 0x7a3df0, shoes: 0xffffff } },
     // THE APEX: priced like a car, and the rope opens for the cloth alone
@@ -330,7 +345,20 @@
   }
   function pinDetail() {
     pinSuitByName(CAT.warden, ["Charcoal 3-Piece Suit", "Charcoal Suit"]);
+    pinSuitByName(CAT.president_suit, ["President Navy", "Navy Suit"]);
+    pinSuitByName(CAT.exec_suit, ["Executive Charcoal Chalk", "Charcoal Pinstripe Suit"]);
+    pinSuitByName(CAT.exec_navy, ["Executive Navy", "Navy Suit"]);
+    pinSuitByName(CAT.official_suit, ["Cabinet Charcoal", "Charcoal Suit"]);
+    pinSuitByName(CAT.staff_grey, ["Staff Grey", "Mid-Grey Suit"]);
+    pinSuitByName(CAT.staff_black, ["Staff Black", "Black Suit"]);
     return pinSuitByName(CAT.detail, ["Detail Black", "Black Suit"]);
+  }
+  // the role suits, by job (a stable pick per body where a role has two cuts)
+  function roleSuit(kind, seed) {
+    pinDetail();
+    if (kind === "exec") return (seed & 1) ? CAT.exec_navy : CAT.exec_suit;
+    if (kind === "staff") return (seed & 1) ? CAT.staff_black : CAT.staff_grey;
+    return CAT.official_suit;
   }
   pinDetail();
 
@@ -381,6 +409,7 @@
   //      painted suit). Websearch-grounded pairings: navy blazer / white or
   //      light-blue shirt / burgundy tie; charcoal blazer / light-blue shirt /
   //      burgundy or navy tie. The visualIds match clothes.js's COMP table.
+  const BIZ_LEGS = { blazer_navy: 0x1a1e2d, blazer_charcoal: 0x272a31, blazer_black: 0x131418, blazer_burgundy: 0x272a31, blazer_forest: 0x272a31 };
   const BIZ_COMPOSITES = [
     { blazer: "blazer_navy",     shirt: "shirt_white_collar",    tie: "tie_burgundy", shirtHex: 0xf2f2f2 },
     { blazer: "blazer_charcoal", shirt: "shirt_white_collar",    tie: "tie_navy",     shirtHex: 0xe9eaec },
@@ -405,14 +434,17 @@
     const idx = pickBizIdx(spec);
     const c = BIZ_COMPOSITES[idx];
     const base = CAT.suit;
+    // the trousers are the jacket's cloth (a blazer over street jeans was half
+    // the "staff suits look so fake")
+    const legs = BIZ_LEGS[c.blazer] != null ? BIZ_LEGS[c.blazer] : JEAN;
     return {
       id: "biz:" + idx, name: "Business Suit", tier: "money", who: "professionals",
       price: 0, drip: base.drip, formal: "suit",
-      colors: { legs: JEAN, torso: c.shirtHex, collar: c.shirtHex, arms: c.shirtHex, shoes: 0x14161c },
+      colors: { legs: legs, torso: c.shirtHex, collar: c.shirtHex, arms: c.shirtHex, shoes: 0x14161c },
       // feature-detect every composable id: a clothes.js that doesn't ship a
       // given blazer/shirt/tie just drops it from the list (cityApplyComposite
       // ignores unknown ids anyway, but a clean list keeps the drip honest).
-      composite: { shirt: c.shirtHex, legs: JEAN, items: compFilter([c.blazer, c.shirt, c.tie]) },
+      composite: { shirt: c.shirtHex, legs: legs, items: compFilter([c.blazer, c.shirt, c.tie]) },
     };
   }
   // keep only composable ids clothes.js actually knows (graceful when the
@@ -1860,6 +1892,7 @@
   // job stays in street clothes. Specific trades match BEFORE the generic
   // laborer line — the old bare /worker/ regex put office workers in dock
   // hi-vis, which is exactly the "weird clothes" this table retires.
+  function jobSeed(job) { let h = 0; for (let i = 0; i < job.length; i++) h = (h * 31 + job.charCodeAt(i)) | 0; return h >>> 0; }
   function jobFit(job) {
     if (!job) return null;
     // specific new uniforms first (they'd otherwise be eaten by broader lines)
@@ -1926,9 +1959,15 @@
     // senator/judge principals carry these exact job strings ("the senator",
     // "holds the bench") and dress through this one wardrobe now — the office
     // row turns into the composed business suit via adultFitFor's bizRecord.
-    if (/\bsenator\b|congress|assembly member|council member|\bmayor\b/i.test(job)) return CAT.office;
-    if (/\bjudge\b|holds the bench|magistrate|district attorney|prosecutor/i.test(job)) return CAT.office;
-    if (/accountant|office|banker|bank manager|analyst|lawyer|air traffic controller|yacht broker|receptionist/i.test(job)) return CAT.office;
+    // THE GOVERNMENT AND THE TOP FLOOR WEAR SUITS, NOT A BLAZER OVER JEANS
+    // (the composed business fit's trousers were the street jean): officials
+    // the cabinet charcoal, the executive floor and the bar the chalk stripe
+    // or navy worsted, the staff the off-the-rack grey or black.
+    const sd = jobSeed(job);
+    if (/chief of staff|press secretary|national security adviser|\bminister\b|secretary of|cabinet|\bsenator\b|congress|assembly member|council member|\bmayor\b|governor|ambassador/i.test(job)) return roleSuit("official", sd);
+    if (/\bjudge\b|holds the bench|magistrate|district attorney|prosecutor|\blawyer\b|attorney|counsel|executive|\bceo\b|chairman|director|banker|bank manager|financier|investor/i.test(job)) return roleSuit("exec", sd);
+    if (/\baide\b|staffer|staff assistant|\bsecretary\b|speechwriter|clerk of|press officer|intern|scheduler|analyst/i.test(job)) return roleSuit("staff", sd);
+    if (/accountant|office|air traffic controller|yacht broker|receptionist/i.test(job)) return CAT.office;
     return null;
   }
   // THE GATE: age first, everything else after. A child must never reach the

@@ -42,7 +42,19 @@
                (crashfx's pooled smoke, opts.shade); everyone in it runs out
                of it, the rigs through the shared brain (cityBrain.perform
                "flee"), and the front's push drains away.
-     BODIES    the nearest agents (RIG cap per device) are ORDINARY RIGS —
+     BODIES    THE FRONT LINE IS REAL (owner: "the people you're interacting
+               with should not be fake"). Full rigs, chosen five times a second
+               in this order: whoever the player's crosshair is on; anyone in
+               verb range; the front rows (pressed on a police line, or the
+               leading 2.4 m of the knot / column, which at the Mansion pen is
+               the barricade line) and anyone within 30 m of the detail when
+               the player has one; then the plain ring round the player. A
+               rig is held 3.5 s past the last tick that wanted it, and never
+               let go while it is hurt, fighting, down, struck or ordered
+               against. Anything that strikes a still-instanced person (a
+               round, a blast, a car: crowdstore.realize) promotes them on
+               that call, freeing a slot from the farthest non-front rig if
+               the budget is full. These are ORDINARY RIGS —
                cityPostNpc civilians and citySpawnCop officers with the whole
                peds.js brain — walked to their formation slot through the
                move-order seam, so they collide, react to gunfire, can be
@@ -62,8 +74,8 @@
                one damage path, and the dead and hurt are the store's to lie
                there and crawl away. This file keeps only what a crowd
                member does in a mob (role, action, formation slot).
-     BUDGET    agents: desktop 12000, tablet 4500, phone 1800. Rigs: 40/24/14
-               civilians plus 10/8/6 officers. The step is banded by distance
+     BUDGET    agents: desktop 12000, tablet 4500, phone 1800. Rigs: 72/48/20
+               civilians plus 14/10/6 officers (THE FRONT LINE IS REAL below). The step is banded by distance
                (every step inside 60 m, every 2nd to 120 m, every 4th to
                200 m, every 8th past it) and a body standing at its slot
                past 30 m sleeps on the slowest band. The store re-cuts the
@@ -90,10 +102,14 @@
 
   // ---------------------------------------------------------------- budgets
   const DEVICE = CBZ.deviceClass || "desktop";
+  // rigs = full-rig civilians (the front line, the verb ring, the aimed-at),
+  // cops = full-rig officers on a line, per = promotions per rig tick (5 Hz),
+  // near = the plain ring round the player. Everyone else is the instanced
+  // copy of the same person (crowdgpu).
   const BUDGETS = {
-    desktop: { agents: 12000, rigs: 40, cops: 10, draw: 320, near: 30 },
-    tablet: { agents: 4500, rigs: 24, cops: 8, draw: 240, near: 26 },
-    phone: { agents: 1800, rigs: 14, cops: 6, draw: 180, near: 22 },
+    desktop: { agents: 12000, rigs: 72, cops: 14, draw: 320, near: 32, per: 8 },
+    tablet: { agents: 4500, rigs: 48, cops: 10, draw: 240, near: 28, per: 6 },
+    phone: { agents: 1800, rigs: 20, cops: 6, draw: 180, near: 22, per: 3 },
   };
   const BUD = Object.assign({}, BUDGETS[DEVICE] || BUDGETS.desktop);
   if (CFG.MOB_AGENTS > 0) BUD.agents = CFG.MOB_AGENTS | 0;
@@ -185,6 +201,7 @@
     const mi = amob[i];
     if (mi < 0) return;
     const m = MOBS[mi];
+    if (arig[i] < 0) dropAgentProp(i, S.fleeX[i], S.fleeZ[i]);   // the sign leaves the hands as they go down
     if (arig[i] >= 0) dropRig(i);
     amob[i] = -1; aact[i] = 0; agentsN--;
     if (m) { m._culled = true; if (life === ST.DEAD) m.dead = (m.dead | 0) + 1; else m.hurt = (m.hurt | 0) + 1; }
@@ -267,7 +284,7 @@
   let SEQ = 0;
   const LINES = [];
   const GAS = [];
-  const STATS = { formed: 0, peakAgents: 0, peakRigs: 0, breaches: 0, gasFired: 0, thrown: 0, linesBroken: 0, stepMs: 0, drawMs: 0, drawn: 0 };
+  const STATS = { formed: 0, peakAgents: 0, peakRigs: 0, breaches: 0, gasFired: 0, thrown: 0, linesBroken: 0, stepMs: 0, drawMs: 0, drawn: 0, realized: 0 };
   function mobById(id) { for (let i = 0; i < MOBS.length; i++) if (MOBS[i] && MOBS[i].id === id) return MOBS[i]; return null; }
   function mobSlot(m) { return MOBS.indexOf(m); }
   function liveAgents() { return agentsN; }
@@ -323,7 +340,7 @@
     m.G = ST.group({
       name: m.id, kind: m.kind, place: m.place, who: m.support ? "supporters" : "protesters", side: m.side,
       parent: arenaRoot(), mode: "city", cap: BUD.agents, maxDraw: BUD.draw, own: true, cutDt: 0.1,
-      onLife: onLife, onPanic: function (x, z, r) { if (!m.gone && Math.hypot(m.centroid.x - x, m.centroid.z - z) < r + 80) disperse(m.id, true); },
+      onLife: onLife, promote: function (r, why) { return realize(r, why); }, onPanic: function (x, z, r) { if (!m.gone && Math.hypot(m.centroid.x - x, m.centroid.z - z) < r + 80) disperse(m.id, true); },
       beforeCut: function () { cutClips(m); },
     });
     if (!m.G) { MOBS[slot] = null; return null; }
@@ -685,19 +702,38 @@
      and fires a short burst; every round is a ray through the one crowd store
      (it hits whoever is in the way, not who was aimed at). The dead are
      counted against the line's institution: "Police open fire on protesters". */
-  const _fd = { x: 0, y: 0, z: 0 };
+  /* THE MEN THEY SHOOT AT ARE REAL: an officer picks his mark from the
+     crowd's full rigs in front of the line first (the front rows are rigs
+     by now), and any round that meets a still-instanced body on the way is
+     promoted on the spot by the store (ST.shoot -> realize), so every hit
+     lands on a body that shows it. A promoted officer fires too, from his
+     own hands, aimed at his man. */
+  const _fd = { x: 0, y: 0, z: 0 }, _marks = [];
+  function lineMarks(L, m) {
+    _marks.length = 0;
+    for (let k = 0; k < RIGS.length; k++) {
+      const R = RIGS[k]; if (!R || R.cop || !R.ped || R.ped.dead || amob[R.i] !== m.slot) continue;
+      const s = lineSide(L, R.ped.pos.x, R.ped.pos.z);
+      if (s > 0.5 && s < 45 && Math.abs(lineAlong(L, R.ped.pos.x, R.ped.pos.z)) < L.half + 20) _marks.push(R.i);
+    }
+    return _marks;
+  }
   function lineFire(L, m, dt) {
     const inst = L.kind === "police" ? "police" : "army";
     const P = player();
     const near = P && Math.hypot(P.x - L.cx, P.z - L.cz) < 180;
+    const marks = lineMarks(L, m);
     for (let k = 0; k < L.officers.length; k++) {
       const o = L.officers[k];
-      if (amob[o] !== m.slot || arig[o] >= 0) continue;
+      if (amob[o] !== m.slot) continue;
+      const shooter = arig[o] >= 0 ? rigPed(o) : null;
+      if (shooter && (shooter.dead || lying(shooter))) continue;
       acd[o] -= dt;
       if (acd[o] > 0) continue;
       acd[o] = 0.18 + h01(o, stepN, 41) * 0.5;
-      // someone on the crowd's side, in front of him
+      // a real man in front of him first; else someone on the crowd's side
       let tgt = -1;
+      if (marks.length) tgt = marks[(h01(o, stepN, 45) * marks.length) | 0];
       for (let t = 0; t < 6 && tgt < 0; t++) {
         const j = m.agents[(h01(o, stepN + t, 42) * m.agents.length) | 0];
         if (j == null || aside[j] !== 0 || amob[j] !== m.slot) continue;
@@ -705,14 +741,27 @@
         if (s > 0.5 && s < 45 && Math.abs(lineAlong(L, ax[j], az[j])) < L.half + 20) tgt = j;
       }
       if (tgt < 0) continue;
-      const ox = ax[o], oy = ay[o] + 1.45, oz = az[o];
-      let dx = ax[tgt] - ox + (h01(o, stepN, 43) - 0.5) * 1.2, dz = az[tgt] - oz + (h01(o, stepN, 44) - 0.5) * 1.2;
-      let dy = ay[tgt] + 1.2 - oy;
+      const tped = arig[tgt] >= 0 ? rigPed(tgt) : null;
+      const ox = shooter ? shooter.pos.x : ax[o], oy = (shooter ? shooter.pos.y || 0 : ay[o]) + 1.45, oz = shooter ? shooter.pos.z : az[o];
+      const tx = tped ? tped.pos.x : ax[tgt], ty = (tped ? tped.pos.y || 0 : ay[tgt]) + 1.2, tz = tped ? tped.pos.z : az[tgt];
+      let dx = tx - ox + (h01(o, stepN, 43) - 0.5) * 1.2, dz = tz - oz + (h01(o, stepN, 44) - 0.5) * 1.2;
+      let dy = ty - oy;
       const l = Math.hypot(dx, dy, dz) || 1; dx /= l; dy /= l; dz /= l;
-      const h = ST.ray(ox + dx * 0.8, oy + dy * 0.8, oz + dz * 0.8, dx, dy, dz, 70);
-      if (h) ST.shoot(h.row, { head: h.head, cause: "gunfire", by: inst, fromX: ox, fromZ: oz });
+      if (shooter && tped && CBZ.actorAimAt) { try { CBZ.actorAimAt(shooter, tped); } catch (e) {} }
+      // whoever is in the way takes it (an instanced body is made real by the store)
+      const h = ST.ray(ox + dx * 0.8, oy + dy * 0.8, oz + dz * 0.8, dx, dy, dz, tped ? Math.max(0.5, l - 1.0) : 70);
+      let hitAt = null;
+      if (h) { ST.shoot(h.row, { head: h.head, cause: "gunfire", by: inst, fromX: ox, fromZ: oz, attacker: shooter, point: { x: h.x, y: h.y, z: h.z } }); hitAt = h; }
+      else if (tped && !tped.dead && h01(o, stepN, 46) < 0.72) {
+        // the round finds the man he aimed at: on his body, this step
+        _fd.x = tx; _fd.y = (tped.pos.y || 0) + 0.95 + h01(o, stepN, 47) * 0.6; _fd.z = tz;
+        const head = h01(o, stepN, 48) < 0.12;
+        if (head) _fd.y = (tped.pos.y || 0) + 1.62;
+        ST.roundOnPed(tped, { head: head, cause: "gunfire", fromX: ox, fromZ: oz, attacker: shooter, point: { x: _fd.x, y: _fd.y, z: _fd.z }, cal: 1 });
+        hitAt = { x: _fd.x, y: _fd.y, z: _fd.z };
+      }
       if (near) {
-        _fd.x = h ? h.x : ox + dx * 60; _fd.y = h ? h.y : oy + dy * 60; _fd.z = h ? h.z : oz + dz * 60;
+        _fd.x = hitAt ? hitAt.x : ox + dx * 60; _fd.y = hitAt ? hitAt.y : oy + dy * 60; _fd.z = hitAt ? hitAt.z : oz + dz * 60;
         if (CBZ.tracer) { try { CBZ.tracer({ x: ox, y: oy, z: oz }, _fd, {}); } catch (e) {} }
         if (CBZ.gunVoice && (k & 1) === 0) { try { CBZ.gunVoice("rifle", Math.hypot(P.x - ox, P.z - oz)); } catch (e) {} }
       }
@@ -981,6 +1030,7 @@
     s.position.set(-0.12, 1.05, 0.42);
     s.userData.mobShield = true;
     ped.group.add(s);
+    ped._mobShield = s;
   }
   function dropRig(i) {
     const k = arig[i]; arig[i] = -1;
@@ -1006,7 +1056,9 @@
     if (ped.dead) {
       // a marcher who dies stays down, out of the mob: the body is the rig's,
       // the count is the crowd's (crowdstore.js joins it to whatever is
-      // being counted here: the bomb, the shooting)
+      // being counted here: the bomb, the shooting). Whatever he held falls
+      // (an officer killed through the cop funnel never passed cityKillPed).
+      dropHeldProp(ped, null);
       aact[i] = ACT.down;
       RIGS[arig[i]] = null; arig[i] = -1;
       m._culled = true;                       // taken out of the lists after the step loop
@@ -1031,45 +1083,338 @@
     const face = L && !L.broken && aside[i] === 0 ? Math.atan2(-L.nx, -L.nz) : (m.stage === "rally" || m.hold ? m.face : ahd[i]);
     ped.moveOrder = { x: there ? ax[i] : atx[i], z: there ? az[i] : atz[i], speed: there ? 0 : Math.min(vmax, vmax > 3 ? vmax : 1.6), stop: 0.5, face: there ? face : undefined, t: now() };
   }
-  let rigAcc = 0;
+  /* ---------------------------------------------------------------- THE FRONT LINE IS REAL
+     Five times a second every agent near enough to matter gets a TIER:
+       1 AIM    the crosshair is on them (a ray from the lens through the store)
+       2 VERB   inside verb range of the player
+       3 FRONT  the front rows (pressed on a line, or the leading FRONT_DEPTH of
+                the knot or the column: at the Mansion pen, the barricade
+                line), the line's own officers, anyone within ENGAGE_R of the
+                detail; while within FRONT_R of the player
+       4 NEAR   the plain ring round the player
+     The best (tier, distance) fill the rig budget; a rig is held KEEP_T past
+     the last tick that wanted it (the hysteresis: nobody pops at the moment
+     of interaction), and a PROTECTED rig (hurt, down, fighting, struck, the
+     man an order is against) is never let go for budget. A hit on an
+     instanced person promotes on the spot (realize, from crowdstore). */
+  const VERB_R = 7, FRONT_R = 90, FRONT_DEPTH = 2.4, ENGAGE_R = 30, AIM_R = 160, KEEP_T = 3.5, HIT_KEEP = 12, FAR_DROP = 160;
+  const T_AIM = 1, T_VERB = 2, T_FRONT = 3, T_NEAR = 4, T_NONE = 9;
+  const akeep = new Float32Array(CAP);      // hold this rig until (mob clock)
+  const atier = new Uint8Array(CAP).fill(T_NONE);
+  const awant = new Int32Array(CAP);        // the rig tick that last wanted it
+  let rigTick = 0, rigAcc = 0;
+  function lying(p) {
+    if (!p) return false;
+    if (p.ko > 0 || p.restraint) return true;
+    const f = p.char && p.char.fall;
+    if (f && f.on && f.phase !== "getup") return true;
+    if (p._bf && p._bf.on) return true;
+    const V = CBZ.vitals;
+    if (V && V.state) { try { const s = V.state(p); if (s === "down" || s === "ko" || s === "tased") return true; } catch (e) {} }
+    return false;
+  }
+  function orderTarget() {
+    const O = CBZ.cityOrders2;
+    if (!O || !O.forceOrder) return null;
+    try { const f = O.forceOrder(); return f ? f.target : null; } catch (e) { return null; }
+  }
+  function protectedRig(R, tgt) {
+    const p = R.ped;
+    if (!p || p.dead) return false;
+    if (p === tgt || CLOCK - (R.hitT || -1e9) < HIT_KEEP) return true;
+    if (p._woundT || p.state === "fight" || p.state === "flee" || p.rage || lying(p) || (p.poseCower || 0) > 0) return true;
+    return false;
+  }
+  // the slot for a struck person: the farthest non-front rig on that side goes
+  // back to the instanced crowd (never a protected one)
+  function evict(cop) {
+    const P = player(), tgt = orderTarget();
+    let best = -1, bk = -1;
+    for (let k = 0; k < RIGS.length; k++) {
+      const R = RIGS[k];
+      if (!R || !!R.cop !== !!cop || protectedRig(R, tgt)) continue;
+      const i = R.i;
+      const d = P ? Math.hypot(ax[i] - P.x, az[i] - P.z) : 0;
+      const key = (atier[i] >= T_NEAR ? 1e6 : 0) + atier[i] * 1e4 + d;   // non-front first, then the worst tier, then the farthest
+      if (key > bk) { bk = key; best = i; }
+    }
+    if (best < 0) return false;
+    dropRig(best);
+    return true;
+  }
+  /* realize(i): this person becomes a full rig NOW (a round, a blast, a car
+     just reached them). Over budget, the farthest non-front rig makes room;
+     with nobody to give way the budget is overrun by one until the next
+     tick: the struck person always becomes real. */
+  function realize(i, why) {
+    if (i < 0 || i >= CAP || amob[i] < 0) return null;
+    if (arig[i] >= 0) { const p = rigPed(i); return p && !p.dead ? p : null; }
+    if (!inCity() || !CBZ.cityPostNpc) return null;
+    const cop = aside[i] === 1;
+    const cap = cop ? BUD.cops : BUD.rigs, have = rigCount(cop);
+    // every rig protected (a massacre of the wounded): overrun by half, no more
+    if (have >= cap && !evict(cop) && have >= Math.ceil(cap * 1.5)) return null;
+    if (!makeRig(i)) return null;
+    const R = RIGS[arig[i]];
+    R.hitT = CLOCK; R.why = why || "hit";
+    akeep[i] = CLOCK + HIT_KEEP;
+    if (atier[i] > T_FRONT) atier[i] = T_FRONT;
+    STATS.realized++;
+    // the instanced copy and its sign are gone from this very frame
+    if (R_.root) draw(CLOCK);
+    return R.ped;
+  }
+  // the front of a mob: an unbroken line in front of it, or its leading edge
+  const _front = { line: null, fx: 0, fz: 0, edge: 0, ok: false };
+  function frontOf(m) {
+    _front.ok = false; _front.line = null;
+    if (m.stage === "disperse" || m.stage === "inside") return _front;
+    const L = m.line && !m.line.broken ? m.line : null;
+    if (L) { _front.line = L; _front.ok = true; return _front; }
+    const hold = m.stage === "rally" || m.hold;
+    const fx = hold ? Math.sin(m.face) : m.dir.x, fz = hold ? Math.cos(m.face) : m.dir.z;
+    let edge = -1e9;
+    for (let k = 0; k < m.agents.length; k++) {
+      const i = m.agents[k]; if (aside[i] !== 0 || amob[i] !== m.slot) continue;
+      const p = ax[i] * fx + az[i] * fz; if (p > edge) edge = p;
+    }
+    _front.fx = fx; _front.fz = fz; _front.edge = edge; _front.ok = edge > -1e9;
+    return _front;
+  }
+  function inFront(F, i) {
+    if (!F.ok) return false;
+    const L = F.line;
+    if (L) {
+      if (aside[i] === 1) return lineOf(i) === L;
+      const s = lineSide(L, ax[i], az[i]);
+      return s > -2.5 && s < FRONT_DEPTH + 1.2 && Math.abs(lineAlong(L, ax[i], az[i])) < L.half + 3;
+    }
+    return aside[i] === 0 && ax[i] * F.fx + az[i] * F.fz >= F.edge - FRONT_DEPTH;
+  }
+  // candidates as one sortable number each: (tier, distance) high, the row low
+  // (CAP < 65536), so a native Float64 sort orders them with no garbage
+  const CAND = new Float64Array(CAP); let CN = 0;
+  const ROWBITS = 65536;
+  function candKey(t, d2) { return (t * 100000 + Math.min(99999, Math.round(d2 * 4))) * ROWBITS; }
   function manageRigs(dt) {
     rigAcc += dt;
-    if (rigAcc < 0.25) return;
-    rigAcc = 0;
+    if (rigAcc < 0.2) return;
+    rigAcc = 0; rigTick++;
     const P = player();
-    // release: too far, or the mob is gone
+    const city = inCity() && !!CBZ.cityPostNpc;
+    // who matters this tick
+    CN = 0;
+    let aimRow = -1;
+    const cam = CBZ.camera;
+    if (cam && cam.matrixWorld && cam.position) {
+      const e = cam.matrixWorld.elements;
+      const h = ST.ray(cam.position.x, cam.position.y, cam.position.z, -e[8], -e[9], -e[10], AIM_R);
+      if (h && amob[h.row] >= 0) aimRow = h.row;
+    }
+    let crew = null;
+    if (CBZ.cityOrders2 && CBZ.cityOrders2.force) { try { crew = CBZ.cityOrders2.force(); } catch (e) { crew = null; } }
+    if (P && city) {
+      const NR2 = BUD.near * BUD.near, VR2 = VERB_R * VERB_R;
+      for (let mi = 0; mi < MOBS.length; mi++) {
+        const M = MOBS[mi]; if (!M) continue;
+        const reach = Math.sqrt(M.agents.length) * 2 + 40;
+        if (Math.hypot(M.centroid.x - P.x, M.centroid.z - P.z) > FRONT_R + reach) continue;
+        const F = frontOf(M);
+        for (let k = 0; k < M.agents.length; k++) {
+          const i = M.agents[k];
+          if (amob[i] !== M.slot || S.life[i] !== ST.ALIVE) continue;
+          const dx = ax[i] - P.x, dz = az[i] - P.z, d2 = dx * dx + dz * dz;
+          let t = T_NONE;
+          if (i === aimRow) t = T_AIM;
+          else if (d2 < VR2) t = T_VERB;
+          else if (d2 < FRONT_R * FRONT_R && inFront(F, i)) t = T_FRONT;
+          else if (crew && crew.length && d2 < (ENGAGE_R + 45) * (ENGAGE_R + 45)) {        // the detail is within 45 m of you (orders.js force)
+            for (let c = 0; c < crew.length; c++) { const q = crew[c]; if (q && q.pos && Math.abs(q.pos.x - ax[i]) < ENGAGE_R && Math.abs(q.pos.z - az[i]) < ENGAGE_R && Math.hypot(q.pos.x - ax[i], q.pos.z - az[i]) < ENGAGE_R) { t = T_FRONT; break; } }
+          }
+          if (t === T_NONE && d2 < NR2 && aact[i] !== ACT.inside) t = T_NEAR;
+          atier[i] = t;
+          if (t === T_NONE) continue;
+          if (t <= T_FRONT) akeep[i] = Math.max(akeep[i], CLOCK + KEEP_T);
+          CAND[CN++] = candKey(t, d2) + i;
+        }
+      }
+    }
+    const ORD = CAND.subarray(0, CN); ORD.sort();
+    // the wanted: the best of each side up to its budget
+    let civW = 0, copW = 0;
+    for (let k = 0; k < CN; k++) {
+      const i = ORD[k] % ROWBITS, cop = aside[i] === 1;
+      if (cop ? copW >= BUD.cops : civW >= BUD.rigs) { ORD[k] = -1; continue; }
+      if (cop) copW++; else civW++;
+      awant[i] = rigTick;
+    }
+    // let go: gone from the mob, far, or no longer wanted once its hold ran out
+    const tgt = orderTarget();
     for (let k = 0; k < RIGS.length; k++) {
       const R = RIGS[k]; if (!R) continue;
       const i = R.i;
-      if (amob[i] < 0 || !P) { dropRig(i); continue; }
+      if (amob[i] < 0 || !P || !city) { dropRig(i); continue; }
+      if (awant[i] === rigTick) { if (atier[i] <= T_FRONT) akeep[i] = Math.max(akeep[i], CLOCK + KEEP_T); continue; }
       const d = Math.hypot(ax[i] - P.x, az[i] - P.z);
-      if (d > BUD.near + 10 || aact[i] === ACT.inside) dropRig(i);
+      if (protectedRig(R, tgt)) { if (d > FAR_DROP && R.ped !== tgt) dropRig(i); continue; }
+      if (CLOCK < akeep[i]) continue;
+      if (d < BUD.near + 10 && aact[i] !== ACT.inside) continue;      // the ring's own hysteresis
+      dropRig(i);
     }
-    if (!P || !inCity() || !CBZ.cityPostNpc) return;
-    // promote: the nearest agents inside the ring, two a tick
+    if (!P || !city) return;
+    // promote the wanted, best first; a full budget gives up an unwanted rig
     let made = 0;
-    const pairs = [];
-    for (let mi = 0; mi < MOBS.length; mi++) {
-      const M = MOBS[mi]; if (!M) continue;
-      // a crowd whose middle is far off has nobody in the ring (cheap skip)
-      if (Math.hypot(M.centroid.x - P.x, M.centroid.z - P.z) > BUD.near + 40 + Math.sqrt(M.agents.length) * 2) continue;
-      for (let k = 0; k < M.agents.length; k++) {
-        const i = M.agents[k];
-        if (amob[i] !== M.slot || arig[i] >= 0 || aact[i] === ACT.inside || S.life[i] !== ST.ALIVE) continue;
-        const dx = ax[i] - P.x, dz = az[i] - P.z, d2 = dx * dx + dz * dz;
-        if (d2 > BUD.near * BUD.near) continue;
-        pairs.push([i, d2]);
+    let civ = rigCount(false), cops = rigCount(true);
+    for (let k = 0; k < CN && made < BUD.per; k++) {
+      if (ORD[k] < 0) continue;
+      const i = ORD[k] % ROWBITS;
+      if (arig[i] >= 0 || amob[i] < 0) continue;
+      if (CBZ.citySpawnDraining) break;
+      const cop = aside[i] === 1;
+      if (cop ? cops >= BUD.cops : civ >= BUD.rigs) {
+        if (!evictUnwanted(cop, tgt)) continue;
+        if (cop) cops--; else civ--;
+      }
+      if (makeRig(i)) { made++; if (cop) cops++; else civ++; if (atier[i] <= T_FRONT) akeep[i] = Math.max(akeep[i], CLOCK + KEEP_T); }
+    }
+  }
+  // budget pressure on a promotion tick: an unwanted, unprotected rig gives way
+  function evictUnwanted(cop, tgt) {
+    const P = player();
+    let best = -1, bd = -1;
+    for (let k = 0; k < RIGS.length; k++) {
+      const R = RIGS[k];
+      if (!R || !!R.cop !== !!cop || awant[R.i] === rigTick || protectedRig(R, tgt)) continue;
+      const d = P ? Math.hypot(ax[R.i] - P.x, az[R.i] - P.z) : 0;
+      if (d > bd) { bd = d; best = R.i; }
+    }
+    if (best < 0) return false;
+    dropRig(best);
+    return true;
+  }
+  // a held thing leaves the hands the moment a rig goes down (a cop killed
+  // through the cop funnel, a man knocked flat, cuffed)
+  function tickRigProps() {
+    for (let k = 0; k < RIGS.length; k++) {
+      const R = RIGS[k]; if (!R || !R.ped) continue;
+      const p = R.ped;
+      if ((p._pubProp || p._mobShield) && (p.dead || lying(p))) dropHeldProp(p, null);
+    }
+  }
+
+  /* ---------------------------------------------------------------- WHAT THEY HOLD, WHEN THEY FALL
+     A sign, a flag or a shield is never left hanging where hands were. On a
+     rig (president_public.js's props on the body) it leaves on the death
+     (peds.js cityKillPed -> CBZ.dropHeldProp, the same instant) or on the
+     knockdown (tickRigProps, every frame); on an instanced person (blast,
+     the crush, a round the store resolved) it leaves in onLife, and a runner
+     drops it as they break (draw). Near the lens it is a REAL loose body
+     (systems/debris.js adopt: its own board and stick as one rigid body,
+     falling, tipping, landing and baked where it lies); farther, it lies
+     flat on the ground in the instanced prop meshes, as long as a body does. */
+  const PROP_PHYS_R = 90;
+  const PHYS_PER_S = ({ desktop: 30, tablet: 16, phone: 8 })[DEVICE] || 30;
+  const FALLEN_CAP = ({ desktop: 1500, tablet: 600, phone: 240 })[DEVICE] || 1500;
+  const FALLEN = [];                 // {k: "sign"|"flag"|"shield", x, y, z, h, text, support, flag, t}
+  const LAID = [];                   // rig props laid flat with no rigid-body sim (capped)
+  const DROPS = { phys: 0, flat: 0, laid: 0, physT: 0, physN: 0 };
+  let fallenTtl = 0;
+  const _wp = new THREE.Vector3(), _wq = new THREE.Quaternion();
+  function physRoom() {
+    if (CLOCK - DROPS.physT >= 1) { DROPS.physT = CLOCK; DROPS.physN = 0; }
+    return DROPS.physN < PHYS_PER_S;
+  }
+  function loosen(pr, vx, vz) {
+    const parent = pr.parent;
+    if (!parent) return false;
+    pr.updateWorldMatrix(true, true);
+    pr.getWorldPosition(_wp);
+    const cam = CBZ.camera && CBZ.camera.position;
+    const near = !cam || Math.hypot(_wp.x - cam.x, _wp.z - cam.z) < PROP_PHYS_R;
+    if (near && CBZ.debris && CBZ.debris.adopt && physRoom()) {
+      let out = null;
+      // tipping over away from the push: spin about the horizontal axis across it
+      const sp = Math.hypot(vx, vz) || 1;
+      try {
+        out = CBZ.debris.adopt(pr, { whole: "all", kind: "wood", snap: false, owner: "crowd-prop",
+          velocity: { x: vx, y: 0.4, z: vz }, angular: { x: vz / sp * 2.2, y: 0, z: -vx / sp * 2.2 } });
+      } catch (e) { out = null; }
+      if (out && out.pieces > 0) {
+        parent.remove(pr);
+        DROPS.phys++; DROPS.physN++;
+        return true;
       }
     }
-    if (!pairs.length) return;
-    pairs.sort(function (a, b) { return a[1] - b[1]; });
-    let civ = rigCount(false), cops = rigCount(true);
-    for (let k = 0; k < pairs.length && made < 2; k++) {
-      const i = pairs[k][0];
-      if (aside[i] === 1 ? cops >= BUD.cops : civ >= BUD.rigs) continue;
-      if (CBZ.citySpawnDraining) break;
-      if (makeRig(i)) { made++; if (aside[i] === 1) cops++; else civ++; }
+    // no rigid-body sim here (or past its range): it lies where it fell
+    const root = arenaRoot() || CBZ.scene;
+    if (!root) { parent.remove(pr); return false; }
+    pr.getWorldQuaternion(_wq);
+    const yaw = Math.atan2(2 * (_wq.w * _wq.y + _wq.x * _wq.z), 1 - 2 * (_wq.y * _wq.y + _wq.x * _wq.x));
+    parent.remove(pr);
+    root.add(pr);
+    pr.visible = true;
+    pr.position.set(_wp.x + vx * 0.3, floorAt(_wp.x, _wp.z) + 0.03, _wp.z + vz * 0.3);
+    pr.rotation.set(-Math.PI / 2, yaw, 0, "YXZ");
+    LAID.push(pr);
+    if (LAID.length > 64) { const o = LAID.shift(); if (o.parent) o.parent.remove(o); }
+    DROPS.laid++;
+    return true;
+  }
+  function dropHeldProp(ped, imp) {
+    if (!ped) return false;
+    const pr = ped._pubProp, sh = ped._mobShield;
+    if (!pr && !sh) return false;
+    ped._pubProp = null; ped._mobShield = null;
+    if (ped.char) {
+      ped.char._pubProp = null;
+      if (!ped.dead && CBZ.setCharPose) { try { CBZ.setCharPose(ped.char, "stand"); } catch (e) {} }
     }
+    // the person is plain now: the instanced copy never grows the sign back
+    const i = ped._mobAgent;
+    if (i != null && i >= 0 && i < CAP && rigPed(i) === ped && (arole[i] === ROLE.sign || arole[i] === ROLE.flag)) arole[i] = ROLE.plain;
+    // pushed away from whatever put him down, a little
+    let vx = 0, vz = 0;
+    const px = ped.pos ? ped.pos.x : 0, pz = ped.pos ? ped.pos.z : 0;
+    if (imp && imp.fromX != null) { const dx = px - imp.fromX, dz = pz - imp.fromZ, l = Math.hypot(dx, dz) || 1; vx = dx / l * 1.4; vz = dz / l * 1.4; }
+    else { const h = ped.group ? ped.group.rotation.y : 0; vx = Math.sin(h) * 0.8; vz = Math.cos(h) * 0.8; }
+    if (pr) loosen(pr, vx, vz);
+    if (sh) loosen(sh, vx * 0.6, vz * 0.6);
+    return true;
+  }
+  // an instanced person goes down (or breaks and runs): what they held drops
+  function dropAgentProp(i, fx, fz) {
+    const r = arole[i];
+    if (r !== ROLE.sign && r !== ROLE.flag && r !== ROLE.officer) return false;
+    const m = amob[i] >= 0 ? MOBS[amob[i]] : null;
+    const x = ax[i], y = ay[i], z = az[i], h = ahd[i];
+    if (r !== ROLE.officer) arole[i] = ROLE.plain;
+    if (r === ROLE.officer && (S.life[i] === ST.ALIVE)) return false;        // a retreating officer keeps his shield
+    let vx = 0, vz = 0;
+    if (fx != null && isFinite(fx) && (fx !== 0 || fz !== 0)) { const dx = x - fx, dz = z - fz, l = Math.hypot(dx, dz) || 1; vx = dx / l * 1.2; vz = dz / l * 1.2; }
+    const cam = CBZ.camera && CBZ.camera.position;
+    const props = PP();
+    const near = !cam || Math.hypot(x - cam.x, z - cam.z) < PROP_PHYS_R;
+    const root = arenaRoot();
+    if (near && root && CBZ.debris && CBZ.debris.adopt && physRoom() && (r === ROLE.officer || props)) {
+      // the same prop a full rig carries, built in their hands, then let go
+      const holder = new THREE.Group();
+      holder.position.set(x, y, z); holder.rotation.y = h;
+      root.add(holder);
+      const fake = { group: holder, char: null, pos: holder.position };
+      try {
+        if (r === ROLE.officer) giveShield(fake);
+        else if (r === ROLE.sign) props.sign(fake, m ? m.slogans[asign[i] % m.slogans.length] : "HEAR US", m ? m.support : false);
+        else props.flag(fake);
+      } catch (e) {}
+      const ok = dropHeldProp(fake, fx != null ? { fromX: fx, fromZ: fz } : null);
+      if (holder.parent) holder.parent.remove(holder);
+      if (ok) return true;
+    }
+    FALLEN.push({ k: r === ROLE.officer ? "shield" : r === ROLE.sign ? "sign" : "flag", x: x + vx * 0.4, y: y, z: z + vz * 0.4, h: h,
+      text: m ? m.slogans[asign[i] % m.slogans.length] : "HEAR US", support: m ? m.support : false, flag: m ? m.flag : null, t: CLOCK });
+    if (FALLEN.length > FALLEN_CAP) FALLEN.shift();
+    DROPS.flat++;
+    return true;
   }
 
   // ---------------------------------------------------------------- chants, voices
@@ -1315,6 +1660,8 @@
       if (amob[i] !== mi || arig[i] >= 0) continue;
       const x = ax[i], y = ay[i], z = az[i];
       const dx = x - cx, dz = z - cz;
+      // a runner lets go of the sign as they break (it drops, it never vanishes in the air)
+      if (aact[i] === ACT.flee && (arole[i] === ROLE.sign || arole[i] === ROLE.flag)) dropAgentProp(i, S.panicT[i] > 0 ? S.fleeX[i] : m.centroid.x, S.panicT[i] > 0 ? S.fleeZ[i] : m.centroid.z);
       if (dx * dx + dz * dz > PROP2 || aact[i] === ACT.down || aact[i] === ACT.flee) continue;
       const r = arole[i];
       base(ahd[i], 0);
@@ -1337,15 +1684,33 @@
       }
      }
     }
+    // WHAT WAS DROPPED, lying flat where it fell (past the rigid-body range):
+    // local (a, b, c) -> (a, c, -b) under Ry(h) Rx(-pi/2): the stick along the
+    // ground, the board's face to the sky
+    if (!fallenTtl) fallenTtl = (ST.audit && ST.audit().bodyTtl) || 600;
+    const ttl = fallenTtl;
+    while (FALLEN.length && CLOCK - FALLEN[0].t > ttl) FALLEN.shift();
+    for (let k = 0; k < FALLEN.length; k++) {
+      const f = FALLEN[k];
+      const dx = f.x - cx, dz = f.z - cz;
+      if (dx * dx + dz * dz > PROP2) continue;
+      base(f.h, -Math.PI / 2);
+      if (f.k === "shield") { if (n.shield < P.shield.instanceMatrix.count) { putBox(P.shield, n.shield, f.x, f.y, f.z, 0.3, 0.5, 0.03, 0, 0, 0.6, 1.0, 0.04); n.shield++; } continue; }
+      if (n.stick < STICK_CAP) { putBox(P.stick, n.stick, f.x, f.y, f.z, 0.45, 0.35, 0.02, 0, 0, 0.034, 1.0, 0.034); n.stick++; }
+      if (f.k === "sign") {
+        const sm = signMesh(f.text, f.support);
+        if (sm.count < sm.instanceMatrix.count) { putBox(sm, sm.count, f.x, f.y, f.z, 0.45, 1.11, 0.03, 0, 0, 0.82, 0.52, 0.02); sm.count++; }
+      }
+    }
     P.shield.count = n.shield; P.stick.count = n.stick;
     for (const k in P) { const M = P[k]; M.instanceMatrix.needsUpdate = M.count > 0; }
     for (const k in R_.signs) R_.signs[k].instanceMatrix.needsUpdate = R_.signs[k].count > 0;
     for (const k in R_.flags) R_.flags[k].instanceMatrix.needsUpdate = R_.flags[k].count > 0;
     // projectiles in flight
-    const S = R_.shots; let ns = 0;
+    const SH = R_.shots; let ns = 0;
     base(0, 0);
-    for (let k = 0; k < SHOTS.length && ns < 32; k++) { const s = SHOTS[k]; if (!s.alive) continue; base(s.t * 9, s.t * 7); putBox(S, ns++, s.x, s.y, s.z, 0, 0, 0, 0, 0, 1, 1, 1); }
-    S.count = ns; S.instanceMatrix.needsUpdate = ns > 0;
+    for (let k = 0; k < SHOTS.length && ns < 32; k++) { const s = SHOTS[k]; if (!s.alive) continue; base(s.t * 9, s.t * 7); putBox(SH, ns++, s.x, s.y, s.z, 0, 0, 0, 0, 0, 1, 1, 1); }
+    SH.count = ns; SH.instanceMatrix.needsUpdate = ns > 0;
     STATS.drawn = bodies;
     if (t0) STATS.drawMs = STATS.drawMs * 0.9 + ((performance.now() - t0) * 0.1);
   }
@@ -1364,7 +1729,7 @@
     CLOCK += dt;
     let any = false;
     for (let i = 0; i < MOBS.length; i++) if (MOBS[i]) { any = true; break; }
-    if (!any && !SHOTS.length && !GAS.length) {
+    if (!any && !SHOTS.length && !GAS.length && !FALLEN.length) {
       if (R_.root && STATS.drawn >= 0) { blank(); STATS.drawn = -1; }
       return;
     }
@@ -1375,6 +1740,7 @@
     if (steps >= MAX_STEPS) acc = 0;
     for (let i = 0; i < MOBS.length; i++) if (MOBS[i]) tickVoices(MOBS[i], dt);
     manageRigs(dt);
+    tickRigProps();
     if (t0) STATS.stepMs = STATS.stepMs * 0.9 + ((performance.now() - t0) * 0.1);
     if (inCity()) draw(CLOCK);
   }
@@ -1393,6 +1759,9 @@
       place: m.place, slogans: m.slogans.slice(), dead: m.dead | 0, hurt: m.hurt | 0, doorForced: !!m.doorForced, events: m.events.map(function (e) { return e.phase; }),
     };
   }
+  // the one "let go of what you hold" (peds.js cityKillPed calls it on every
+  // death, so a president_public protester's sign falls the same way)
+  CBZ.dropHeldProp = dropHeldProp;
   CBZ.mob = {
     form: form,
     march: march,
@@ -1428,10 +1797,15 @@
         rigCap: BUD.rigs, copCap: BUD.cops, mobs: MOBS.filter(Boolean).length, lines: LINES.length, gas: GAS.length, shots: SHOTS.length,
         drawn: Math.max(0, STATS.drawn), lods: (function () { const L = []; for (let i = 0; i < MOBS.length; i++) if (MOBS[i] && MOBS[i].G && MOBS[i].G.layer) L.push(MOBS[i].G.layer.drawn.slice(1)); return L; })(), stepMs: +STATS.stepMs.toFixed(3), drawMs: +STATS.drawMs.toFixed(3), peakAgents: STATS.peakAgents, peakRigs: STATS.peakRigs,
         formed: STATS.formed, breaches: STATS.breaches, linesBroken: STATS.linesBroken, gasFired: STATS.gasFired, thrown: STATS.thrown,
-        built: !!R_.root,
+        built: !!R_.root, realized: STATS.realized, propsPhys: DROPS.phys, propsFlat: DROPS.flat, propsLaid: DROPS.laid, fallen: FALLEN.length,
+        front: (function () { let n = 0; for (let k = 0; k < RIGS.length; k++) if (RIGS[k] && atier[RIGS[k].i] <= T_FRONT) n++; return n; })(),
       };
     },
+    // the rig standing in for a crowd row (null = still the instanced copy)
+    rigOf: function (row) { return row >= 0 && row < CAP && arig[row] >= 0 ? rigPed(row) : null; },
+    tierOf: function (row) { return atier[row]; },
     _step: frame,
+    _fallen: function () { return FALLEN.slice(); },
     _agents: function () { return { ax: ax, az: az, amob: amob, aside: aside, aact: aact, arole: arole, hi: ST.hi() }; },
     _reset: function () { for (let i = 0; i < MOBS.length; i++) if (MOBS[i]) endMob(MOBS[i]); GAS.length = 0; SHOTS.length = 0; },
   };

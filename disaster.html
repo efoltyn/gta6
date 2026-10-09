@@ -4,7 +4,7 @@
 
        node tools/build-disaster-page.mjs
 
-     Natural Disaster Survival, standing alone: index.html minus the 449
+     Natural Disaster Survival, standing alone: index.html minus the 450
      script tags this game never runs, opening straight onto the island. This
      is the page the iOS build ships (tools/build-ios.mjs bundles it).
 ============================================================ -->
@@ -23,13 +23,13 @@
 
 <!-- styles, split by concern -->
 <link rel="stylesheet" href="css/base.css">
-<link rel="stylesheet" href="css/hud.css?v=jailside1001">
+<link rel="stylesheet" href="css/hud.css?v=desk1009c">
 <link rel="stylesheet" href="css/screens.css?v=deathcam1009">
 <link rel="stylesheet" href="css/shark_title.css?v=nored0930">
 <link rel="stylesheet" href="css/mobile.css?v=heli1009">
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
 <link rel="stylesheet" href="css/inventory.css?v=onebar0930">
-<link rel="stylesheet" href="css/city.css?v=verbs2b">
+<link rel="stylesheet" href="css/city.css?v=desk1009c">
 <link rel="stylesheet" href="css/campaign.css?v=neck1001b">
 <link rel="stylesheet" href="css/interact_touch.css?v=jailside1001">
 <link rel="stylesheet" href="css/title_hub.css?v=end1">
@@ -515,9 +515,9 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- A ROOM UNDER AN INTACT STREET: a hole with a lid on it. -->
 <!-- A TUNNEL IS A HOLE LYING DOWN: a swept carving with its lid intact. -->
 <!-- GROUND YOU CAN TAKE AWAY A BUCKET AT A TIME (bare ground only). -->
-<script src="src/core/lights.js?v=w09290204"></script>
+<script src="src/core/lights.js?v=flicker1009b"></script>
 <script src="src/core/sky.js?v=w09290204"></script>
-<script src="src/core/daynight.js?v=w09290219"></script>
+<script src="src/core/daynight.js?v=flicker1009b"></script>
 
 <!-- 2. world geometry -->
 <!-- Procedural surface library: tiling colour + normal + roughness CanvasTextures
@@ -583,7 +583,7 @@ document.body.appendChild(b);}}catch(e){}})();
   <script src="src/entities/tattoo.js?v=pf0930c"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
-  <script src="src/entities/character.js?v=shades1009b"></script>
+  <script src="src/entities/character.js?v=arms1009b"></script>
   <script src="src/entities/headwear.js?v=hw1"></script>
   <!-- real jewelry (PBR metal, brilliants, draped link chains, pendants): before watch.js (its metals) and bling.js -->
   <script src="src/entities/jewelry_kit.js?v=w09290232"></script>
@@ -666,7 +666,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/brain.js?v=armed1"></script>
 
 <!-- 4. systems — economy/quests load before actors that reference them -->
-<script src="src/systems/audio.js?v=deathcam1009"></script>
+<script src="src/systems/audio.js?v=dogs1009b"></script>
 <script src="src/systems/hud.js?v=nored0930"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
@@ -798,7 +798,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/physics.js?v=gnp0930"></script>
 <script src="src/systems/meshcollider.js?v=meshcol1"></script>
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
-<script src="src/systems/climb.js?v=tow929"></script>
+<script src="src/systems/climb.js?v=speedway1009"></script>
 <!-- The tower post officers (entities/towerwatch.js): after guards.js, prisonkit.js (CBZ.prisonTowers) and climb.js. -->
 <script src="src/entities/towerwatch.js?v=tow929"></script>
 <!-- THE MOVING-PLATFORM PRIMITIVE. Nothing in this engine could carry a
@@ -855,7 +855,7 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.prisonFriendOffered), economy.js and killstreaks.js (it wraps both).
      ?cfg_PRISON_FRIENDS=0 → nobody ever offers and the verb never appears. -->
 <script src="src/systems/prisonfriends.js?v=jailv1001"></script>
-<script src="src/systems/interactions.js?v=jailside1001"></script>
+<script src="src/systems/interactions.js?v=desk1009c"></script>
 <!-- A door opened off the clock is noticed (systems/prisondoorwatch.js); after interactions.js (the door registry). -->
 <script src="src/systems/prisondoorwatch.js?v=jailv1001"></script>
 <!-- THE LIFT, AS A MACHINE (no THREE, no DOM): call / go / park, the doors'
@@ -916,7 +916,7 @@ document.body.appendChild(b);}}catch(e){}})();
      its world lazily, so the prison game above is untouched. Must load
      BEFORE loop.js so its frame-work is included in the sort. -->
 <script src="src/systems/fx.js?v=sharkmode1"></script>
-<script src="src/systems/debris.js?v=jdeb1001"></script>
+<script src="src/systems/debris.js?v=crowdfront1009"></script>
 <!-- REAL LIGHTNING. Registers a `lightning` row + FX composer on the impact
      bus, so a cloud-to-ground strike draws a forked channel with return
      strokes, ground flashover, steam and a burn scar instead of falling
@@ -930,7 +930,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/world/island_dressing.js?v=dress1"></script>
 <script src="src/systems/grapple.js?v=jailv1001"></script>
 <script src="src/entities/survivorbot.js?v=m0928a-st1"></script>
-<script src="src/modes/survival.js?v=vit3"></script>
+<script src="src/modes/survival.js?v=flicker1009b"></script>
 <!-- SHARK SIM's own front door: hides the shared card in shark mode, lays
      PLAY over the live sea, proxies every original control by id. -->
 <script src="src/modes/shark_title.js?v=uicut1"></script>
@@ -1036,7 +1036,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the-hole rects, the facade scan + cut, the no-shared-plane pass and the
      house numbers. Before buildings.js and world/disaster_arena.js (both build
      with it at build time). -->
-<script src="src/city/facade_openings.js?v=fac1009"></script>
+<script src="src/city/facade_openings.js?v=flicker1009b"></script>
 <!-- THE FACADE KIT. facade_kit.js is the registry + the shared vocabulary and
      the seam buildings.js calls (CBZ.dressFacade); city/facades/*.js each
      register ONE style and must load after it. The generalisation of what
@@ -1086,7 +1086,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/facades/brickhouse.js?v=fac1009"></script>
 <!-- 4d-2. ARCHIPELAGO — worldmap registry + 3 islands + 4 biomes (worldmap.js
      MUST precede every island/biome; world.js runs them via CBZ.cityWorldGeo) -->
-<script src="src/city/worldmap.js?v=maplabels1009"></script>
+<script src="src/city/worldmap.js?v=speedway1009"></script>
 <!-- Shared signed shoreline/depth/current oracle. Loaded immediately after
      the landmass registry so rendering, swimmers, boats and aquatic wildlife
      all consult the same coast instead of inventing separate radius tests. -->
@@ -1171,7 +1171,7 @@ document.body.appendChild(b);}}catch(e){}})();
      airport_capeharbor.js are specs; both builders run at worldgen, after
      this file has parsed. -->
 <!-- MILITARY AIRFRAMES: lofted fighter / attack + utility helicopters / drone / bomber and the kit the cargo lifter is built with. Before island_military (its model factories call CBZ.milAir). -->
-<script src="src/city/mil_air.js?v=mil0929"></script>
+<script src="src/city/mil_air.js?v=nuke1009b"></script>
 <!-- GROUND ARMOR: tank / IFV / 8x8 / 6x6 truck / light vehicle / rocket artillery / missile launcher at real dimensions, instanced running gear + turret/launcher rigs. Before island_military (makeTank/makeTruck/makePatriot delegate to CBZ.milArmor). -->
 <script src="src/city/mil_armor.js?v=mil0929"></script>
 <!-- STRATEGIC LAYER part 1 — hardened bunkers (Fort Brandt command shelter
@@ -1191,6 +1191,12 @@ document.body.appendChild(b);}}catch(e){}})();
      binds CBZ.wildlifeTraits once, at load); absent, the engine falls
      straight back to the species constant. -->
 <script src="src/city/wildlife.js?v=pf0930g"></script>
+<!-- THE ONE DOG: city/dogmodel.js is the body (skinned lofted shell per breed,
+     planted-foot walk/trot/gallop, body language) and CBZ.dogGait; city/
+     dogbrain.js is the loyal dog's protector rulebook (pure); dogs.js is the
+     actor (pet / stray / guard / K9) and needs both before it. -->
+<script src="src/city/dogmodel.js?v=dogs1009b"></script>
+<script src="src/city/dogbrain.js?v=dogs1009b"></script>
 <!-- 4d-5. FIGHTING — shared creature-combat (animal fight anims), trait-driven
      companion defense, and the walk-in Fight Arena venue (boxing/MMA/beast pit). -->
 <!-- THE ANGLE LAW loads first because it is the one thing all three biters
@@ -1368,11 +1374,11 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- The word on every button is a verb (city/verbword.js CBZ.cityVerbWord);
      before interactions.js, whose row renderer prints through it. -->
 <script src="src/city/verbword.js?v=presverbs1008"></script>
-<script src="src/city/interactions.js?v=verbs2b"></script>
+<script src="src/city/interactions.js?v=desk1009c"></script>
 <!-- THE VERB WHEEL (Q / a touch tap): everything you can do to the thing you
      look at, laid round it; orders about a third person start here. Reads
      city/interactions.js's wheelOf/fireOn. -->
-<script src="src/city/verbwheel.js?v=verbs2b"></script>
+<script src="src/city/verbwheel.js?v=dogs1009b"></script>
 <!-- FUEL. The world has been generating "Pump & Go Fuel" lots since long
      before this file — they just had nothing to sell, because no vehicle had
      a tank. Player vehicle only (a hundred NPC cars silently running dry is a
@@ -1433,7 +1439,7 @@ document.body.appendChild(b);}}catch(e){}})();
      After fuel.js (reads CBZ.vehicleFuel). Revert with ?cfg_CAR_CLUSTER=0. -->
 <!-- ORDERS ABOUT SOMEONE ELSE (the principal seat): Attack / Guard / Tail /
      Stand down on anyone who works for you. Registers into interactions. -->
-<script src="src/city/orders.js?v=verbs2b"></script>
+<script src="src/city/orders.js?v=dogs1009b"></script>
 <!-- A ROLE IS A VERB: one data table of job-string -> verb (doctor patches you
      up, cook feeds you, dock hand puts you on the clock, courier hands you a
      run) plus one of streetProp-type -> verb (hydrant, meter, route board,
@@ -1449,7 +1455,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the cone. (systems/craft.js is DELETED — owner mandate "kill crafting";
      its one live organ, the mode-aware item store, moved to
      CBZ.econ.itemStore in systems/economy.js.) -->
-<script src="src/systems/helditems.js?v=phone1001"></script>
+<script src="src/systems/helditems.js?v=arms1009b"></script>
 <!-- why-chain storefronts (walk-in, contextual prompts; loaded after their econ/clothes/zillow deps, before core/loop.js + main.js) -->
 <!-- THE SHOP FLOOR (city/storegoods.js): every generic store stands wall bays,
      gondola aisles, a cooler bank and its packaged goods for the few stores
@@ -1971,7 +1977,7 @@ document.body.appendChild(b);}}catch(e){}})();
      jail's transport). AFTER govcomplex.js (reads CBZ.govComplexes); every
      other read is feature-detected and lazily retried.
      Revert with ?cfg_PRESIDENCY_V1=0. -->
-<script src="src/city/politics.js?v=verbs2b"></script>
+<script src="src/city/politics.js?v=desk1009c"></script>
 <!-- THE PRESIDENT'S WORLD (2026-09-27 rework) — no HUD strip, no mission
      list, no button console. In load order: the office (desk phone that rings
      with real calls, briefing folders you read on the desk, the TV news, aides
@@ -1980,7 +1986,7 @@ document.body.appendChild(b);}}catch(e){}})();
      and lockdown bodies in the street), and the regime dressing that changes
      the Mansion when the republic falls. Security (the detail, the gate
      checkpoint, counter-snipers, the panic protocol) lives in protection.js. -->
-<script src="src/city/president_office.js?v=phone2b"></script>
+<script src="src/city/president_office.js?v=desk1009c"></script>
 <script src="src/city/motorcade.js?v=presverbs1008"></script>
 <!-- THE PRESIDENT'S PEOPLE: the office comes staffed; Dismiss is on the
      person (or "I need your resignation" by phone) and costs news, approval,
@@ -2141,7 +2147,7 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.onQualityChange) AND after core/batch.js — it wraps CBZ.batchStaticUnder
      and registers its own window-load handler SECOND, so the static merge has
      finished before it promotes materials. -->
-<script src="src/core/gfx.js?v=w09290204"></script>
+<script src="src/core/gfx.js?v=flicker1009b"></script>
 <script src="src/core/loop.js?v=front1001"></script>
 <script src="src/main.js?v=sharkmode1"></script>
 </body>

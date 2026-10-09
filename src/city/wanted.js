@@ -112,6 +112,7 @@
     "burglary":          { stars: 2, label: "Burglary" },
     "red-light":         { stars: 1, label: "Traffic Violation" },
     "trespass":          { stars: 1, label: "Trespassing" },
+    "animal-cruelty":    { stars: 1, label: "Animal Cruelty" },   // city/dogs.js: hurting a dog that was not on you
     "dealing":           { stars: 1, label: "Drug Dealing" },
     "chop":              { stars: 1, label: "Vehicle Trafficking" },
     "till grab":         { stars: 2, label: "Robbery" },

@@ -316,6 +316,18 @@
   }
   city.build = build;
 
+  // is anything held at the eye this frame? (the on-foot near plane, @94 below)
+  function closeLens() {
+    if (CBZ.fpsActive && CBZ.fpsActive()) return true;
+    if (CBZ.carFpActive && CBZ.carFpActive()) return true;
+    const kids = CBZ.camera ? CBZ.camera.children : null;
+    if (kids) for (let i = 0; i < kids.length; i++) {
+      const k = kids[i];
+      if (k.visible && !k.isLight && k.type !== "AudioListener" && !k.isAudio) return true;
+    }
+    return false;
+  }
+
   // ---- lighting override: re-aim the sun + shadow box onto the far-off city
   //      (daynight.js @2 and survival's override @93 both run first; we sit
   //      after them at @94 and take over whenever city mode is active). ----
@@ -400,7 +412,17 @@
       // quantises to the same value and water wins over valid ground. Nothing
       // in the chase camera lives within half a metre, so tighten the flight
       // frustum while retaining the close first-person near plane on foot.
-      const wantNear = airborne ? 0.75 : 0.1;
+      // ON FOOT, THE NEAR PLANE FOLLOWS THE LENS. Depth resolution at range
+      // scales with the near plane (dz ~ z^2 / (near * 2^bits)): at 0.1 m a
+      // 24-bit buffer resolves 1.5 mm at 50 m and 6 mm at 100 m, so two
+      // facade layers a few millimetres apart trade pixels at street
+      // distances, and only while the view moves (owner, iPad). The chase
+      // camera is held 0.25 m off anything it backs into (systems/camera.js)
+      // and carries nothing closer, so it takes 0.2 m: twice the precision
+      // everywhere. Anything that puts a held thing or a cabin at the eye
+      // (first person, the car's driver view, a viewmodel/phone/inspected
+      // item hung on the camera) keeps 0.1 m.
+      const wantNear = airborne ? 0.75 : (closeLens() ? 0.1 : 0.2);
       if (CBZ.camera.far !== wantFar || CBZ.camera.near !== wantNear) {
         CBZ.camera.near = wantNear;
         CBZ.camera.far = wantFar;

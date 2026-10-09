@@ -2857,6 +2857,9 @@
     // interact.js's "Take armor" reads — and DEFERS the payout for a body with
     // no resting place yet, paying it at the wreck once the body is down.
     // Degrade-safe: no morgue.js, and this is byte-for-byte what it always was.
+    // A HELD SIGN, FLAG OR SHIELD LEAVES THE HANDS NOW (city/mob.js): it falls
+    // as a real loose body, never hangs in the air over a falling man
+    if (CBZ.dropHeldProp) { try { CBZ.dropHeldProp(ped, imp); } catch (e) {} }
     if (CBZ.cityDeathDrop) CBZ.cityDeathDrop(ped);
     else {
       if (ped.armed && ped.weapon) dropWeapon(ped.pos.x, ped.pos.z, ped.weapon, ped.ammo, { y: ped.pos.y, body: ped });
@@ -3164,6 +3167,9 @@
      A man on the floor is out of the fight. */
   function struck(att, tgt, down) {
     if (!tgt || tgt.dead || !att) return;
+    // WHO YOU STARTED ON: your dog (city/dogbrain.js) and anyone else on
+    // your side reads this stamp to join in
+    if (att.isPlayer || att === CBZ.player || (CBZ.city && att === CBZ.city.playerActor)) tgt._pHitT = CBZ.now;
     if (tgt.char && tgt.char.sitting) leaveSit(tgt);   // a struck desk worker is off the seat NOW (C3 interrupt)
     if (down) { tgt.rage = null; return; }
     tgt.alarmed = Math.max(tgt.alarmed || 0, 6); tgt.fear = Math.min(10, (tgt.fear || 0) + 2);
@@ -3174,6 +3180,13 @@
   CBZ.cityStruck = struck;
   function hurtActor(att, tgt, dmg, melee, res) {
     if (!tgt || tgt.dead) return;
+    // AN ANIMAL (a dog that bit him, a stray, a deer): the blow lands through
+    // the hunting funnel, which routes a dog to city/dogs.js. Never vitals,
+    // never the human death chain.
+    if (tgt.animal) {
+      if (CBZ.cityWildlifeHit) { try { CBZ.cityWildlifeHit(tgt, { head: false, point: null }, { damage: dmg, by: att }); } catch (e) {} }
+      return;
+    }
     const fx = att.pos.x, fz = att.pos.z;
     if (tgt.isPlayer) {
       // a REMOTE player (multiplayer): the wound travels over the wire and is
@@ -4288,8 +4301,10 @@
     const ch = ped.char;
     const sock = ch && ch.sockets && (ch.sockets.rightHand || ch.sockets.weapon);
     if (!sock) return null;                       // gore took the arm — no hand, no phone
+    const cap = ch.parts && ch.parts.ra && ch.parts.ra.userData && ch.parts.ra.userData.cap;
+    const seat = CBZ.human && CBZ.human.phoneSeat && cap && cap.userData.fit ? cap : null;
     const cur = ped._phoneProp;
-    if (cur && cur.parent === sock) return cur;   // same rig, same socket: reuse
+    if (cur && cur.parent === (seat || sock)) return cur;   // same rig, same hand: reuse
     phoneAssets();
     const grp = new THREE.Group();
     const shell = new THREE.Mesh(_phGeo, _phMat);
@@ -4313,7 +4328,12 @@
     // and the earpiece/mouthpiece axis is unchanged, so the grip still reads.
     grp.rotation.y = Math.PI / 2;
     grp.visible = false;
-    sock.add(grp);
+    // IN THE PALM (entities/character.js phoneSeat): the body's phone hold turns
+    // the HAND to the cheek / the eyes, so the handset rides the hand, glass
+    // out of the palm. Its size stays the legible one (rig units -> the hand's
+    // own frame: / fit.s). No hand mesh (a stub rig): the old socket seat.
+    if (seat) CBZ.human.phoneSeat(ch, grp, { arm: "r", scale: 1 / cap.userData.fit.s });   // (box z = the glass, y = the long axis)
+    else sock.add(grp);
     ped._phoneProp = grp;
     return grp;
   }
@@ -4711,7 +4731,10 @@
       cand.push(["trade", Math.max(0, s) * (0.85 + rng() * 0.3)]);
     }
     // DEAL / drugs: a dealer-ish ped sidles up to sell PRODUCT when you're not a threat.
-    if ((ped.archetype === "dealer" || ped.drugUser) && !hot && dpl < 9) {
+    // (a street pitch: never on ground the world closed to the street — the
+    // racing surface, the pit lane, an airside apron)
+    if ((ped.archetype === "dealer" || ped.drugUser) && !hot && dpl < 9 &&
+        !(CBZ.cityKeepOutAt && (CBZ.cityKeepOutAt(P.pos.x, P.pos.z, 0) || CBZ.cityKeepOutAt(ped.pos.x, ped.pos.z, 0)))) {
       let s = 0.16 + (ped.archetype === "dealer" ? 0.22 : 0.08);
       cand.push(["deal", Math.max(0, s) * (0.85 + rng() * 0.3)]);
     }
@@ -7074,6 +7097,12 @@
       //      (owner's rule: you SEE someone see you — no popup tells you). ----
       // (guard ra/la individually — gore can strip a whole arm off the rig,
       //  and a one-armed witness must not crash the frame loop)
+      // a body that was on the phone and is not calling any more lets go
+      // (whatever took the arms: a gun, a fall, a cuff, the end of the call)
+      if (p.char && p.char._phoneHold && CBZ.human && CBZ.human.phoneHold &&
+          !(vis && p.enterT <= 0 && !p.dead && p.ko <= 0 && !p.armed && (p.reportState === "phone" || p.state === "film"))) {
+        CBZ.human.phoneHold.release(p.char, "r"); CBZ.human.phoneHold.release(p.char, "l");
+      }
       if (vis && p.enterT <= 0 && !p.dead && p.ko <= 0 && !p._traversal &&
           p.char && !p.char.traversePose && p.char.parts && p.char.parts.ra) {
         const ch = p.char, J = ch.low || {};
@@ -7081,10 +7110,19 @@
           // (armed peds skip these — their weapon-ready pose owns the arms,
           //  and an armed witness draws instead of dialing anyway)
           const LEG = legible();
+          // THE PHONE IS HELD BY THE BODY (entities/character.js THE PHONE
+          // HOLD): the hand-typed Euler that lived here put the fist 47 cm out
+          // beside the head at chin height. A body that stops calling lets go.
+          const HP = CBZ.human && CBZ.human.phoneHold;
+          const callMode = p.reportState === "phone" ? "ear" : (p.state === "film" && ch.parts.la ? "film" : null);
+          if (HP && ch._phoneHold && ch._phoneHold !== callMode) { HP.release(ch, "r"); HP.release(ch, "l"); }
           if (p.reportState === "phone") {
-            ch.parts.ra.rotation.set(-0.55, -0.55, -0.35);   // hand to ear
-            if (J.ra) J.ra.rotation.x = -2.35;
-            if (ch.neck) ch.neck.rotation.z = 0.10;          // head leans into the call
+            if (HP) HP(ch, "ear", { arm: "r" });
+            else {
+              ch.parts.ra.rotation.set(-0.55, -0.55, -0.35);   // hand to ear
+              if (J.ra) J.ra.rotation.x = -2.35;
+              if (ch.neck) ch.neck.rotation.z = 0.10;          // head leans into the call
+            }
             if (LEG) {
               // PUT A PHONE IN THE HAND. This arm has been going up empty since
               // the day it shipped, which is why it read as a salute: an ear
@@ -7123,10 +7161,13 @@
               if (ch.neck) ch.neck.rotation.z = 0;           // head up, talking to the officer
             }
           } else if (p.state === "film" && ch.parts.la) {
-            ch.parts.ra.rotation.set(-1.30, -0.18, -0.10);   // phone held up, two hands
-            if (J.ra) J.ra.rotation.x = -0.55;
-            ch.parts.la.rotation.set(-1.15, 0.22, 0.15);
-            if (J.la) J.la.rotation.x = -0.75;
+            if (HP) { HP(ch, "film", { arm: "r" }); HP(ch, "film", { arm: "l", support: true }); }
+            else {
+              ch.parts.ra.rotation.set(-1.30, -0.18, -0.10);   // phone held up, two hands
+              if (J.ra) J.ra.rotation.x = -0.55;
+              ch.parts.la.rotation.set(-1.15, 0.22, 0.15);
+              if (J.la) J.la.rotation.x = -0.75;
+            }
             if (LEG) {
               // the gawker's hands were cupped around nothing too. Same prop,
               // same socket, same lifecycle — a phone held up at you IS the

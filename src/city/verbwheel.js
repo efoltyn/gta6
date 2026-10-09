@@ -259,7 +259,7 @@
   function beginOrder(cand, item) {
     W.order = { cand: cand, item: item, t: 0 };
     const a = agentOf(cand);
-    if (a && CBZ.citySay) { try { CBZ.citySay(a, "Who?", null, 1.6); } catch (e) {} }
+    if (a && a.kind !== "dog" && CBZ.citySay) { try { CBZ.citySay(a, "Who?", null, 1.6); } catch (e) {} }
   }
   function endOrder() {
     W.order = null;
@@ -320,6 +320,15 @@
   function bodyRect(w, h) {
     const ii = I(), a = ii && ii.anchorOf ? ii.anchorOf(W.cand) : null;
     const cam = CBZ.camera;
+    if (a && cam && _v && a.small) {
+      // a thing on a desk: a box round the thing itself, not a body's height
+      cam.updateMatrixWorld();
+      const top = project(a.x, a.y + a.small, a.z, w, h), bot = project(a.x, a.y - a.small, a.z, w, h);
+      if (top && bot) {
+        const tall = Math.max(24, bot.y - top.y), half = Math.max(22, tall * 0.6);
+        return { x: top.x - half, y: top.y, w: half * 2, h: tall, ax: top.x, ay: top.y + tall * 0.5 };
+      }
+    }
     if (a && cam && _v) {
       cam.updateMatrixWorld();
       const person = W.cand.layers && W.cand.layers.indexOf("ped") >= 0;

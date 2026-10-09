@@ -27,6 +27,22 @@
    the next time you come up the tunnel (it is re-laid while you cannot see
    the track: underground, or outside the stadium).
 
+   ON FOOT ON THE BANKING. Get out mid-race and you are standing on the
+   racing surface while nine cars come round at racing speed: each one is a
+   moving solid (city/carstrike.js, through vehicles.js's one runOver), so
+   it hits you or anybody else out there exactly as a city car would. The
+   drivers see a person on the track as a stopped car (race_session
+   hazards): they lift, brake and steer round him, and the caution comes
+   out until the track is clear.
+
+   THE RACER STARTS IN HIS CAR. The racer origin stands you on the grid and
+   asks seatOnGrid(): the moment the field exists you are in No. 17, on the
+   grid, and the lights come on.
+
+   THE PEOPLE WHO BELONG HERE. Pit crews at the boxes and marshals at their
+   posts behind the wall are posted while the field is built (the street's
+   spawners are closed out of the bowl: island_speedway.js).
+
    Phone: the ten cars are built when you are inside FIELD_R of the bowl
    (quality "low" on touch: 512 px liveries, the far LOD past 65 m) and given
    back past DROP_R. Nothing is stepped while the field is parked.
@@ -53,6 +69,9 @@
 
   const F = {
     built: false, ses: null, cars: [], fx: null, root: null,
+    wantSeat: 0,             // s left to put the player in his car on the grid (the racer origin)
+    staff: [],               // the pit crews and the marshals (posted rigs)
+    hz: [], hzT: 0,          // people on the racing surface, as {s, u} for the drivers
     onGrid: false,           // every car is in its grid box and nothing has moved
     live: false,             // the field is being stepped with nobody at the wheel
     stepped: -1, frame: 0, poseT: 0, pylonT: 0, lampsT: 0, lastLit: 0, green: false,
@@ -180,6 +199,43 @@
       pose(fc, 0, false);
     }
     F.built = true; F.onGrid = true; F.live = false;
+    postStaff();
+  }
+
+  /* ---- THE PEOPLE WHO WORK HERE: a crew at the pit boxes, a marshal at each
+     turn's post on the walkway behind the wall. Posted rigs (the one atom,
+     CBZ.cityPostNpc): they are people, they react through the shared brain,
+     and they go when the field is given back. */
+  function postStaff() {
+    dropStaff();
+    if (!CBZ.cityPostNpc) return;
+    const sw = SW(), PIT = RC.PIT, K = RACE.track && RACE.track.kit;
+    const touch = sw.QUALITY === "low";
+    const crew = touch ? 3 : 6, posts = touch ? [110, 500] : [110, 250, 380, 520, 650];
+    const post = (cx, cz, y, yaw, job, outfit) => {
+      const c = sw.toCity(cx, cz);
+      let p = null;
+      try { p = CBZ.cityPostNpc(c.x, c.z, { job, kind: "civilian", archetype: "worker", pin: true, face: sw.yawToCity(yaw), outfit, src: "speedway:staff" }); } catch (e) { p = null; }
+      if (!p) return;
+      p.pos.y = y;
+      if (CBZ.citySetAttending) CBZ.citySetAttending(p, "working the races", "The Bullring");
+      F.staff.push(p);
+    };
+    // the crews: one a box, the boxes nearest the middle of pit road first
+    for (let k = 0; k < crew; k++) {
+      const b = Math.min(PIT.boxes - 1, ((PIT.boxes / 2) | 0) + (k % 2 ? -1 : 1) * ((k + 1) >> 1));
+      const s = PIT.boxS(b) + 3.2, f = RC.frame(s), u = PIT.boxU + 2.4;
+      post(f.x + f.nx * u, f.z + f.nz * u, Math.max(0, RC.surfaceY(s, u)) + 0.035, f.yaw + Math.PI / 2, "pit crew", [0xd4202b, 0xf2b705, 0x1b4fd8][k % 3]);
+    }
+    // the marshals: on the walkway behind the wall, facing the track
+    if (K) for (const s0 of posts) {
+      const sec = K.standSection(RC, s0, {}), f = RC.frame(s0), u = D.WALL_U + D.WALL_T + 0.7;
+      post(f.x + f.nx * u, f.z + f.nz * u, sec.wallTop, Math.atan2(-f.nx, -f.nz), "track marshal", 0xf26a1b);
+    }
+  }
+  function dropStaff() {
+    for (const p of F.staff) if (p && !p.dead && CBZ.cityUnpostNpc) { try { CBZ.cityUnpostNpc(p); } catch (e) {} }
+    F.staff.length = 0;
   }
   function dropField() {
     for (const fc of F.cars) {
@@ -189,6 +245,7 @@
       fc.visual.dispose();
     }
     if (F.fx) { F.fx.dispose(); F.fx = null; }
+    dropStaff();
     F.cars = []; F.ses = null; F.built = false; F.onGrid = false; F.live = false;
     hudShow(false);
   }
@@ -212,9 +269,60 @@
   const HIN = { steer: 0, throttle: 0, brake: 0, hold: false };
   let skidLast = [];
   function stepField(dt, input) {
+    hazards(dt);
     F.ses.step(Math.min(dt, 0.1), input);
     F.stepped = F.frame;
     marks();
+  }
+
+  /* WHO IS ON THE RACING SURFACE: you on foot, anybody else (alive or not),
+     as {s, u} in the circuit's frame. The drivers treat each one as a stopped
+     car; any one of them brings out the caution. Sampled 10 times a second. */
+  const _fr = {};
+  function hazards(dt) {
+    F.hzT -= dt;
+    if (F.hzT > 0) return;
+    F.hzT = 0.1;
+    const H = F.hz; H.length = 0;
+    const sw = SW(), P = CBZ.player;
+    const onTrack = (x, z) => {
+      if (!CBZ.speedwayFrame || !CBZ.speedwayFrame(x, z, _fr)) return false;
+      return _fr.u > D.APRON_IN + 1 && _fr.u < D.WALL_U;
+    };
+    if (P && P.pos && !P.driving && onTrack(P.pos.x, P.pos.z)) H.push({ s: _fr.s, u: _fr.u, who: "player" });
+    const L = CBZ.cityPeds;
+    if (L) for (let i = 0; i < L.length && H.length < 12; i++) {
+      const p = L[i];
+      if (!p || !p.pos || p.inCar || p.culled) continue;
+      if (sw.distance(p.pos.x, p.pos.z) > 200) continue;
+      if (onTrack(p.pos.x, p.pos.z)) H.push({ s: _fr.s, u: _fr.u, who: p });
+    }
+    F.ses.hazards = H;
+  }
+
+  /* THE CARS ARE SOLID TO PEOPLE. Every field car that is moving goes through
+     vehicles.js's one runOver (the car's real shape, carstrike.js) against
+     you and everybody near it; the momentum a body takes off it comes back
+     off the racing car's own velocity. The car you drive already does this
+     in vehicles.js's helm seam. */
+  function strikes(dt, mine) {
+    if (!CBZ.cityCarRunOver) return;
+    const P = CBZ.player;
+    for (const fc of F.cars) {
+      const c = fc.e.car, r = fc.rec;
+      if (r === mine) continue;
+      if (r.playerHitCD > 0) r.playerHitCD = Math.max(0, r.playerHitCD - dt);
+      const v = Math.abs(c.speed);
+      if (v < 3) continue;
+      // cheap gate: only cars with somebody who could be near them
+      if (P && P.pos && Math.hypot(r.pos.x - P.pos.x, r.pos.z - P.pos.z) > 160) continue;
+      const v0 = r.v;
+      CBZ.cityCarRunOver(r, v);
+      if (r.v !== v0 && Math.abs(v0) > 0.1) {
+        const k = Math.max(0, Math.min(1, r.v / v0));
+        c.vel.x *= k; c.vel.z *= k;
+      }
+    }
   }
   /* rubber on the concrete: the driven (rear) wheels lay it past the tyres' peak */
   function marks() {
@@ -266,6 +374,7 @@
         if (vIn < 0) { c.vel.x -= nx * vIn * 1.2; c.vel.z -= nz * vIn * 1.2; }
       }
     } else poseAll(dt);
+    strikes(dt, car);
     // the engine you hear is the car's own rev and gear
     if (CBZ.carAudio) {
       const w = c.wheels, sl = Math.max(w[0].slip, w[1].slip, w[2].slip, w[3].slip);
@@ -301,15 +410,29 @@
     const S = F.ses;
     for (const fc of F.cars) { const vis = sw.stadium.shown; if (fc.visual.group.visible !== vis) fc.visual.group.visible = vis; }
     if (S.me && !inRace) playerLeft();
+    // THE RACER'S START: in his car on the grid, not beside it
+    if (F.wantSeat > 0) {
+      F.wantSeat -= dt;
+      if (inRace) F.wantSeat = 0;
+      else if (P && !P.dead && !P.driving && CBZ.cityEnterVehicle) {
+        const fc = F.cars.find((c) => c.e.i === HOME_SLOT);
+        if (fc && fc.rec && !fc.rec.dead) {
+          let ok = false;
+          try { ok = CBZ.cityEnterVehicle(fc.rec, { instant: true }) !== false; } catch (e) { ok = false; }
+          if (ok && P.driving) F.wantSeat = 0;
+        }
+      }
+    }
     if (!inRace && F.live) {
       stepField(dt, null);
+      poseAll(dt);
+      strikes(dt, null);
       if (S.phase === "done" && S.doneT > PARK_AFTER) S.park();
       if (S.phase === "idle") {
         let moving = false;
         for (const fc of F.cars) if (Math.abs(fc.e.car.speed) > 0.2) { moving = true; break; }
         if (!moving) F.live = false;
       }
-      poseAll(dt);
     } else if (!inRace && F.stepped !== F.frame && sw.stadium.shown) {
       F.poseT -= dt;                                   // parked: a slow refresh keeps the near/far LOD right
       if (F.poseT <= 0) { F.poseT = 0.3; poseAll(0); }
@@ -351,11 +474,15 @@
     const S = F.ses;
     return {
       built: F.built, onGrid: F.onGrid, live: F.live, phase: S ? S.phase : null, laps: LAPS,
+      flag: S ? S.flag : null, caution: S ? !!S.caution : false, hazards: F.hz.length, staff: F.staff.length,
       me: S && S.me ? S.me.number : null, place: S && S.me ? S.me.place : null,
       cars: F.cars.map((fc) => ({ number: fc.e.number, x: +fc.rec.pos.x.toFixed(2), z: +fc.rec.pos.z.toFixed(2), mph: CBZ.speedMph ? Math.round(CBZ.speedMph(fc.rec.v)) : null })),
     };
   };
-  CBZ.speedwayRace = { F, helm, buildField, dropField, HOME_SLOT, LAPS };
+  /* the racer origin (city/origins.js): put him in his car on the grid as
+     soon as the field exists (it is built when he is near the bowl) */
+  function seatOnGrid() { F.wantSeat = 30; return true; }
+  CBZ.speedwayRace = { F, helm, buildField, dropField, seatOnGrid, strikes, hazards, HOME_SLOT, LAPS };
 
   // ---- the HUD: the position chip, the five lamps, a word at the flag ------------------
   let hud = null, flashT = 0;

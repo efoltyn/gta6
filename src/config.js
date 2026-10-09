@@ -1348,6 +1348,9 @@
   CBZ.bodyMayLeave = function (a, opts) {
     if (!a) return true;
     if (a.dead) return !!(a.collected || (CBZ.corpseMayReap && CBZ.corpseMayReap(a)));
+    // a body in custody (cuffed, walked to a car, riding in one) leaves only
+    // through city/custody.js, which marks the moment (_custodyExit)
+    if (a.restraint || a._custody) return !!a._custodyExit;
     if (a.ko > 0 || a.tasedT > 0 || a._ragSlot != null || (a._bf && a._bf.on)) return false;
     if (CBZ.vitals && CBZ.vitals.state && CBZ.vitals.state(a) !== "ok") return false;
     if (CBZ.body && CBZ.body.busy && CBZ.body.busy(a)) return false;

@@ -172,9 +172,28 @@
   // guess at it. Degrade-safe: no CBZ.glass (materials.js stripped) and the
   // exact original inline recipe still runs, so the city cannot regress.
   function glassMat() {
-    if (CBZ.glass) return CBZ.glass();
-    return _gmat || (_gmat = new THREE.MeshLambertMaterial({ color: 0xbfe9f7, emissive: 0x3f8aa6, emissiveIntensity: 0.5, transparent: true, opacity: 0.6 }));
+    if (CBZ.glass) return seatGlass(CBZ.glass());
+    return _gmat || (_gmat = seatGlass(new THREE.MeshLambertMaterial({ color: 0xbfe9f7, emissive: 0x3f8aa6, emissiveIntensity: 0.5, transparent: true, opacity: 0.6 })));
   }
+
+  /* GLASS SITS IN ITS FRAME, AT EVERY RANGE. A pane is 2 cm thick and the
+     frame members, glazing bars and sills round it stand 1-2.5 cm proud of its
+     face (facade_openings.js FO.window). A 24-bit depth buffer resolves that
+     to ~130 m at the on-foot near plane and ~90 m in first person; past it the
+     pane and the bar in front of it trade pixels, and which wins changes with
+     every sub-pixel move of the camera (owner, iPad: facades flicker "when you
+     move your look"; tools/facade-census.mjs DEPTH BANDS: ~20k glass/bar
+     pairs). Polygon offset in UNITS is exactly that resolution: GLASS_SEAT
+     units = GLASS_SEAT depth steps at whatever range the pane is seen, so the
+     pane always loses to the frame in front of it and never to the room 15 cm
+     and more behind it. No slope factor: at a glancing angle that would push
+     a pane back by metres. Pure GL state: no shader, no recompile, no geometry. */
+  const GLASS_SEAT = 6;
+  function seatGlass(m) {
+    if (m && !m.polygonOffset) { m.polygonOffset = true; m.polygonOffsetFactor = 0; m.polygonOffsetUnits = GLASS_SEAT; }
+    return m;
+  }
+  CBZ.citySeatGlass = seatGlass;
 
   // ---- INSTANCED GLASS POOLS ---------------------------------------------
   // Window panes are all axis-aligned boxes, so the whole city's glass folds
@@ -194,6 +213,7 @@
       new THREE.MeshLambertMaterial({ color: 0xc8efdb, emissive: 0x3f9c7d, emissiveIntensity: 0.5, transparent: true, opacity: 0.6 }),  // green
       new THREE.MeshLambertMaterial({ color: 0xf0ddb2, emissive: 0xa6803f, emissiveIntensity: 0.5, transparent: true, opacity: 0.6 }),  // amber
     ];
+    _tintMats.forEach(seatGlass);
     return _tintMats;
   }
   // VIEW glass: the pane you stand behind to look at the city. The default
@@ -204,10 +224,10 @@
   // interior partition that wants the same glass (CBZ.cityViewGlassMat).
   let _viewGlassMat = null;
   function viewGlassMat() {
-    return _viewGlassMat || (_viewGlassMat = new THREE.MeshLambertMaterial({ color: 0xd4e4ea, emissive: 0x0c1418, emissiveIntensity: 1, transparent: true, opacity: 0.13 }));
+    return _viewGlassMat || (_viewGlassMat = seatGlass(new THREE.MeshLambertMaterial({ color: 0xd4e4ea, emissive: 0x0c1418, emissiveIntensity: 1, transparent: true, opacity: 0.13 })));
   }
   CBZ.cityViewGlassMat = viewGlassMat;
-  function litWinMat() { return _litWinMat || (_litWinMat = new THREE.MeshLambertMaterial({ color: 0xffe2a8, emissive: 0xffb648, emissiveIntensity: 0.85, transparent: true, opacity: 0.66 })); }
+  function litWinMat() { return _litWinMat || (_litWinMat = seatGlass(new THREE.MeshLambertMaterial({ color: 0xffe2a8, emissive: 0xffb648, emissiveIntensity: 0.85, transparent: true, opacity: 0.66 }))); }
   // REFLECTIVE glass (offices/apartments by default): a mirror-ish, near-opaque
   // tint you can NOT see through — until it shatters into a real see-through
   // hole. r128 has no PMREM/envMap reflection that works under a Lambert world
@@ -222,6 +242,7 @@
       new THREE.MeshLambertMaterial({ color: 0xc8efdb, emissive: 0x6fb89a, emissiveIntensity: 0.75, transparent: true, opacity: 0.80 }),
       new THREE.MeshLambertMaterial({ color: 0xf0ddb2, emissive: 0xb89a6f, emissiveIntensity: 0.75, transparent: true, opacity: 0.80 }),
     ];
+    _reflectMats.forEach(seatGlass);
     return _reflectMats;
   }
   const glassPools = [];     // every live pool (all generations)
@@ -4732,6 +4753,14 @@
       const holes = openings.map(function (op) { return { s: op.s, t0: op.t0, t1: op.t1, y0: op.y0, y1: op.y1, forced: !!op.forced, reach: op.reach || 0 }; });
       if (doorHole) holes.push({ s: doorSide, t0: doorHole.t0, t1: doorHole.t1, y0: 0, y1: doorTop });
       if (roller) holes.push({ s: roller.s, t0: roller.t0, t1: roller.t1, y0: 0, y1: roller.y1 });
+      // THE DRIVE-IN BAYS ARE HOLES TOO. They were never in this list, so a
+      // grammar's ground storey (brick's dark storefront "glass", its water
+      // table and spandrel panels; stone's plinth ring and sills) was laid
+      // straight across every bay of the flagship's parking deck: a dark slab
+      // over the opening and a ledge across the floor you drive in on, at the
+      // Executive's own door. A car passes through, so anything standing
+      // proud in front of a bay goes too (reach).
+      for (const bb of bays) holes.push({ s: bb.s, t0: bb.t0, t1: bb.t1, y0: -1, y1: bb.y1, reach: 1.2 });
       if (kitRecs.length) FO.cutRecs(kitRecs, holes, { w: w, d: d, wt: WT, isGlass: kitIsGlass });
       for (const r of kitRecs) dbox(r[0], r[1], r[2], r[3], r[4], r[5], r[6]);
       kitRecs.length = 0;
@@ -4779,7 +4808,7 @@
       // THE SKIN (city/facade_openings.js): every opening cut in this shell,
       // the street door's kind and kit, the house number, and the window
       // pattern the distance proxy paints (core/farcull.js)
-      openings: openings, doorKind: doorKind, doorKit: doorFrontKit, houseNumber: doorKind === "derelict" ? null : houseNo,
+      openings: openings, bays: bays, doorKind: doorKind, doorKit: doorFrontKit, houseNumber: doorKind === "derelict" ? null : houseNo,
       facadePattern: FO.pattern(w, d, FH, storeys, openings),
       // the shell's own surfaces (structure + the window and door modules),
       // building-local [x0,x1,y0,y1,z0,z1]: planes a later dresser must not share

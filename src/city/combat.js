@@ -410,6 +410,7 @@
     if (CBZ.meleeScale) dmg *= CBZ.meleeScale(P, t);
     if (t.netKind && CBZ.net && CBZ.net.localMeleeHit) { CBZ.net.localMeleeHit(t, dmg, tier); return; }
     if (t.animal) {
+      t._pHitT = CBZ.now;                                // your dog joins in
       const heavyA = tier !== "light";
       if (CBZ.doHitstop) CBZ.doHitstop(heavyA ? 0.08 : 0.05);
       if (CBZ.shake) CBZ.shake(heavyA ? 0.4 : 0.22);
