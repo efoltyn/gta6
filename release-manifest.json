@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "7c587f1611dfc7b47f9fb87ff5f9dca6d15fea99",
-  "createdAt": "2026-10-01T06:47:11.742Z",
+  "sourceCommit": "0858ea1c0a2c5a2706835bfe6d770bd41d0835b7",
+  "createdAt": "2026-10-09T03:07:25.421Z",
   "fileCount": 1196,
-  "totalBytes": 48392386,
+  "totalBytes": 48392488,
   "files": [
     {
       "file": "src/bootstrap.js",
@@ -1598,8 +1598,8 @@
     },
     {
       "file": "src/city/warroom.js",
-      "bytes": 39820,
-      "sha256": "9c8c5cb16dca5dd8df3a7a38bd466d60cb3ce4b2fe86efb4390dd0a47410dda5"
+      "bytes": 39932,
+      "sha256": "d4be7489a4ebbfe51372b0659cf22a054e1bd9a208d30d52406bf92c76de9127"
     },
     {
       "file": "src/city/waterfield.js",
@@ -5878,28 +5878,28 @@
     },
     {
       "file": "shark-sim.html",
-      "bytes": 59934,
-      "sha256": "b78a41a7a376d35a6102b10aea6728f9f26eabf71f0e4957bdf40cdf16992f99"
+      "bytes": 59932,
+      "sha256": "ecb3ef0561667d5f6a593f74fa124e8008d63867ee760f04d1f0932e10b6e602"
     },
     {
       "file": "disaster-survival.html",
-      "bytes": 59977,
-      "sha256": "9e2ec4bf0ace8ffd22e92e4ab75fd091e9ce5dc3f38142fe1c26061a6eabd083"
+      "bytes": 59975,
+      "sha256": "7491cc1b3953ef3916273efeeb4c6ae8a4775432f8633ee3b8e7a3860ecc9fc6"
     },
     {
       "file": "prison-escape.html",
-      "bytes": 59946,
-      "sha256": "0d4709d9b9c26576f6342956ff7ecb0c94e2f8edd031ae7a4ad95d0beffa29c6"
+      "bytes": 59944,
+      "sha256": "a095c97d741cf1711489be4ee5cbc94f4465499c7a4cf038214bb3a33b927410"
     },
     {
       "file": "gang-city.html",
-      "bytes": 59901,
-      "sha256": "c9e357dc1804f15914fd7b4649b3e86537fac594c4612cc6a88daf2d57a0b08c"
+      "bytes": 59899,
+      "sha256": "2fea10c25687319b46de883f1cedd1d5485ce4f1e164f7259f12b998bc244777"
     },
     {
       "file": "gun-game.html",
-      "bytes": 59923,
-      "sha256": "8316197fa920d6761a532f05c247bab02fd5891c7058c5bb1825c22c7c0d1659"
+      "bytes": 59921,
+      "sha256": "6f3f6c7aa5eb90be0956fcab2b3cb17cb82f63b8db94d3a18d4dd306972783a1"
     },
     {
       "file": "games/battle.html",
