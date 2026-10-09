@@ -251,8 +251,98 @@
     return { x: _hs_tl.x / l, y: _hs_tl.y / l, z: _hs_tl.z / l };
   }
 
+  // ---- THE PLAYER HELICOPTER, one pure step ------------------------------
+  // Pure state in, state out (no scene, no keys), so a node check can fly it.
+  //
+  // Frame: heading h, nose = (sin h, cos h). The camera sits behind the nose,
+  // so screen-RIGHT is (-cos h, sin h) and a LEFT turn is h INCREASING (the
+  // planes' A/D and Q/E already turn that way). The old heli had both signs
+  // backwards (A turned right, E slid left) AND an un-trimmable torque yaw
+  // that turned the nose whenever W or UP was held, so hands-on-the-stick it
+  // flew circles.
+  //
+  // inp: { cycF, cycR, pedal, coll } each -1..1
+  //   cycF  cyclic fore/aft (+ forward)      cycR  lateral cyclic (+ right)
+  //   pedal + = nose LEFT                    coll  collective (+ up)
+  // env: { top, vlift, authority, onGround, autorotating, sink }
+  // st (mutated): vx, vy, vz, heading, yawRate, bank, pitch, roll
+  //   pitch/roll are the VISUAL rotation the group gets (rotation.x positive
+  //   tips the nose DOWN, rotation.z positive is a RIGHT bank).
+  const HELI_PEDAL_RATE = 1.15;    // rad/s at full pedal (a full turn in ~5.5 s)
+  const HELI_BANK_MAX = 0.42;      // rad of commanded bank at full lateral cyclic
+  const HELI_BANK_TURN = 0.75;     // rad/s turn at full bank in cruise
+  const HELI_BACK_TOP = 12;        // m/s flying backwards
+  const HELI_SIDE_TOP = 14;        // m/s sideways at the hover
+  function heliStep(st, inp, dt, env) {
+    const auth = env.authority != null ? env.authority : 1;
+    const top = env.top || 40;
+    const cycF = (inp.cycF || 0) * auth, cycR = (inp.cycR || 0) * auth;
+    const pedal = (inp.pedal || 0) * auth, coll = inp.coll || 0;
+    const h0 = st.heading || 0;
+    let fx = Math.sin(h0), fz = Math.cos(h0), rx = -fz, rz = fx;
+    // body-frame horizontal velocity
+    let vf = st.vx * fx + st.vz * fz, vr = st.vx * rx + st.vz * rz;
+    const parked = env.onGround && coll <= 0;
+    // forward speed decides how much a sideways stick banks-and-turns (cruise)
+    // versus slides (hover): 0 below 4 m/s, 1 above 14
+    const t = Math.max(0, Math.min(1, (vf - 4) / 10)), cruise = t * t * (3 - 2 * t);
+    // bank follows the lateral stick, levels itself hands-off
+    const bankCmd = parked ? 0 : cycR * HELI_BANK_MAX;
+    st.bank = (st.bank || 0) + (bankCmd - (st.bank || 0)) * Math.min(1, dt * 3);
+    // yaw: the pedals, plus the coordinated turn a bank makes at speed. The
+    // rate EASES to its target and the target is exactly 0 with hands off, so
+    // nothing can spin the nose on its own.
+    const pedalRate = parked ? 0 : pedal * HELI_PEDAL_RATE;
+    // (g*tan(bank)/v is the true rate, but at 50 m/s that is a 70-second
+    // circle; a game heli turns on the bank it shows, full stick ~8 s round)
+    const bankRate = (!parked && cruise > 0) ? -HELI_BANK_TURN * (st.bank / HELI_BANK_MAX) * cruise : 0;
+    st.yawRate = (st.yawRate || 0) + (pedalRate + bankRate - (st.yawRate || 0)) * Math.min(1, dt * 5);
+    if (Math.abs(st.yawRate) < 1e-4 && !pedalRate && !bankRate) st.yawRate = 0;
+    const dh = st.yawRate * dt;
+    st.heading = h0 + dh;
+    // a banked turn carries the flight path round with the nose (the rotor's
+    // lift is what turns it); a pedal turn at speed is a skid the side drag
+    // below straightens out
+    const share = Math.abs(st.yawRate) > 1e-6 ? Math.max(0, Math.min(1, bankRate / st.yawRate)) : 0;
+    const carry = dh * share;
+    if (carry) {
+      const c = Math.cos(carry), s = Math.sin(carry);
+      const x = st.vx * c + st.vz * s, z = -st.vx * s + st.vz * c;
+      st.vx = x; st.vz = z;
+    }
+    fx = Math.sin(st.heading); fz = Math.cos(st.heading); rx = -fz; rz = fx;
+    vf = st.vx * fx + st.vz * fz; vr = st.vx * rx + st.vz * rz;
+    // cyclic: each body axis eases toward the speed the stick asks for; hands
+    // off that is zero, the trimmed hover holds still
+    const wantF = parked ? 0 : (cycF >= 0 ? cycF * top : cycF * HELI_BACK_TOP);
+    const wantR = parked ? 0 : cycR * HELI_SIDE_TOP * (1 - cruise);
+    const kF = parked ? 6 : (Math.abs(wantF) > Math.abs(vf) ? 0.55 : 0.8);
+    const kR = parked ? 6 : 1.6;
+    vf += (wantF - vf) * Math.min(1, dt * kF);
+    vr += (wantR - vr) * Math.min(1, dt * kR);
+    if (!cycF && Math.abs(vf) < 0.02) vf = 0;
+    if (!cycR && Math.abs(vr) < 0.02) vr = 0;
+    st.vx = fx * vf + rx * vr; st.vz = fz * vf + rz * vr;
+    if (Math.hypot(st.vx, st.vz) > top) { const s = top / Math.hypot(st.vx, st.vz); st.vx *= s; st.vz *= s; }
+    // collective
+    if (env.autorotating) {
+      st.vy += ((env.sink != null ? env.sink : -6) - st.vy) * Math.min(1, dt * 3);
+    } else {
+      st.vy += (coll * (env.vlift || 14) - st.vy) * Math.min(1, dt * 3);
+      if (!coll && Math.abs(st.vy) < 0.02) st.vy = 0;
+    }
+    // what the airframe SHOWS: nose down to accelerate and a little in cruise,
+    // nose up to flare; bank into the turn, a smaller lean for a hover slide
+    const tp = Math.max(-0.35, Math.min(0.35, (wantF - vf) * 0.012 + vf * 0.0035));
+    const tr = Math.max(-0.5, Math.min(0.5, st.bank * (0.45 + 0.55 * cruise) + (wantR - vr) * 0.012));
+    st.pitch = (st.pitch || 0) + (tp - (st.pitch || 0)) * Math.min(1, dt * 4);
+    st.roll = (st.roll || 0) + (tr - (st.roll || 0)) * Math.min(1, dt * 4);
+    st.forward = vf;
+    return st;
+  }
+
   CBZ.aeroPhysics = {
     liftCoeff, localVelocity, worldVelocity, aeroForces, groundEffectMul, etlMul, homingSteer,
-    STALL_AOA,
+    heliStep, STALL_AOA,
   };
 })();

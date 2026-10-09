@@ -494,6 +494,9 @@ body.touch #interact .iopt.tverb.tno .ilab { font-size: 13.5px; font-weight: 700
 #tveh .tvbtn.on, #tveh .tvbtn:active { transform: translateY(4px); box-shadow: 0 1px 0 rgba(0,0,0,.35); background: rgba(255,122,26,.62); }
 #tveh .tv-big { min-height: 72px; min-width: 128px; font-size: 20px; }
 #tveh .tv-sm { min-height: 46px; min-width: 92px; font-size: 14px; opacity: .92; }
+/* the helicopter's pedals: one row, left pedal on the left */
+#tveh .tv-yaw { display: flex; gap: 10px; }
+#tveh .tv-yaw .tvbtn { min-width: 84px; min-height: 60px; padding: 8px 12px; }
 #tveh .tv-warn { border-color: rgba(255,160,90,.7); background: rgba(150,60,20,.55); }
 #tveh .tv-go { border-color: rgba(90,220,140,.65); background: rgba(30,110,60,.5); }
 #tveh .tv-fire {

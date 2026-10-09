@@ -681,12 +681,24 @@
     "#phone, #dashboard, button, [data-act], .iopt, .tpill, #cRadar, #minimap, #verbWheel, #prisonTrade";
   const inUI = (t) => t && t.closest && t.closest(UI_SEL);
 
+  // The stick's ANALOG reading, published for anything that flies. WASD are
+  // on/off switches past a 0.28 dead band, so a forward push 17 degrees off
+  // true also held a full pedal and the helicopter flew circles. The heli
+  // reads this instead (x right, y FORWARD, length <= 1); null with no thumb.
+  const stickAxis = { x: 0, y: 0 };
+  let stickAxisOn = false;
   function setMove(nx, ny) {
     const k = CBZ.keys;
     k["w"] = ny < -DEAD; k["s"] = ny > DEAD; k["a"] = nx < -DEAD; k["d"] = nx > DEAD;
     stickMag = Math.hypot(nx, ny);   // the gait pump maps this to walk/sprint
+    const m = Math.max(1, stickMag);
+    stickAxis.x = nx / m; stickAxis.y = -ny / m; stickAxisOn = true;
   }
-  function clearMove() { const k = CBZ.keys; k["w"] = k["a"] = k["s"] = k["d"] = false; stickMag = 0; }
+  function clearMove() {
+    const k = CBZ.keys; k["w"] = k["a"] = k["s"] = k["d"] = false; stickMag = 0;
+    stickAxis.x = stickAxis.y = 0; stickAxisOn = false;
+  }
+  CBZ.touchStickAxis = function () { return enabled && stickAxisOn ? stickAxis : null; };
 
   // deflect the knob + movement keys from the stick centre (fixed: the anchor;
   // dynamic: wherever the press recentred it) — shared by touchstart/touchmove

@@ -71,23 +71,12 @@
   const FLIGHT_SPEED_V2 = !CBZ.CONFIG || CBZ.CONFIG.FLIGHT_SPEED_V2 !== false;
   const GROUND_PAD  = 1.2;         // never sink the belly below this over the floor
 
-  // HELI feel
-  const HELI_THRUST = FLIGHT_SPEED_V2 ? 32 : 26;     // forward accel (collective tilt → cyclic thrust)
-  const HELI_TOP    = FLIGHT_SPEED_V2 ? 50 : 34;     // top forward speed (forward drag equilibrium sits above 50, so it's reachable)
+  // HELI feel (the dynamics live in aircraftphysics.js heliStep)
+  const HELI_TOP    = FLIGHT_SPEED_V2 ? 50 : 34;     // top forward speed, m/s
   const HELI_VLIFT  = 16;          // ascend/descend speed (collective authority)
-  const HELI_YAW    = 1.7;         // rad/s yaw from A/D (pedal authority)
-  const HELI_DRAG   = 1.6;         // legacy hover drag scalar (kept as a floor under the 6-axis model)
-  const HELI_SPAN   = 9.6;         // main-rotor diameter — feeds ground-effect threshold
-  const HELI_ETL_LO = 8.2;         // m/s (~16kt) — ETL ramp start
-  const HELI_ETL_HI = 12.3;        // m/s (~24kt) — ETL ramp end (full lift efficiency)
-  // TORQUE/TAIL-ROTOR COUPLING: applying collective (climb/descend power) spins
-  // up main-rotor torque reaction — the airframe wants to yaw opposite rotor
-  // spin unless the pilot holds in opposing pedal (A/D). Modelled as a small
-  // reactive yaw RATE proportional to how hard you're pulling power, decaying
-  // when you let off — so climbing "fights the pedals" exactly like a real
-  // heli, and trimming it out is a skill, not a hard fail.
-  const HELI_TORQUE_GAIN = 0.62;   // rad/s reactive yaw per unit of collective input
-  const HELI_TORQUE_DAMP = 3.2;    // how fast the reactive yaw eases when power is released
+  const HELI_SPAN   = 9.6;         // main-rotor diameter, feeds ground-effect threshold
+  const HELI_ETL_LO = 8.2;         // m/s (~16kt), ETL ramp start
+  const HELI_ETL_HI = 12.3;        // m/s (~24kt), ETL ramp end (full lift efficiency)
 
   // JET feel
   const JET_MIN     = 38;          // min cruise the THROTTLE can be set to (engine idle floor —
@@ -144,14 +133,6 @@
     WING_V2.airliner.vmax = 240; WING_V2.airliner.thrust = 42;
   }
   const RUDDER_RATE = 0.55;    // rad/s flat yaw from QE (fine align/crosswind; weaker than a bank turn)
-  const HELI_STRAFE = 18;      // m/s² lateral cyclic accel from QE on the heli
-  // V2 helicopter hover feel: cyclic tilt is a VISUAL read of the body-frame
-  // velocity (nose dips when accelerating forward, rolls into a lateral drift),
-  // and vertical velocity EASES toward the collective command so the hover
-  // breathes instead of snapping.
-  const HELI_TILTMAX = 0.40;   // rad (~23°) max hover tilt
-  const HELI_TILT_K  = 0.012;  // tilt per m/s of body-frame velocity
-  const HELI_VDAMP   = 3.0;    // vertical-velocity ease rate /s
   function flightV2() { return !CBZ.CONFIG || CBZ.CONFIG.AIRCRAFT_FLIGHT_V2 !== false; }
   // FLIGHT_CONTROLS_V2: standard flight grammar (WS pitch, AD roll/yaw, QE
   // rudder/strafe, held throttle on Space/Ctrl) with the mouse as pure free-look.
@@ -294,10 +275,13 @@
     m.position.set(x, y, z); grp.add(m); return m;
   }
 
-  // a small bright marker at the muzzle so the firing point reads
+  // the firing point: an EMPTY node, never a mesh. It used to be a glowing
+  // 18 cm cube, and on Executive One (footL 12) it was pinned 6.6 m ahead of
+  // the rotor mast, 3 m past the nose: the floating cube in front of the
+  // President's helicopter.
   function addMuzzle(grp, x, y, z) {
-    const a = assets();
-    const m = new THREE.Mesh(boxGeo(0.18, 0.18, 0.18), a.mWarn);
+    const m = new THREE.Object3D();
+    m.name = "muzzle";
     m.position.set(x, y, z);
     grp.add(m);
     grp.userData.muzzle = m;                 // local-space muzzle node
@@ -590,7 +574,6 @@
       cameraAhead: opts.cameraAhead,
       // ---- damage / aero state (new) ----
       hp: CRAFT_MAX_HP, maxHp: CRAFT_MAX_HP,
-      torqueYaw: 0,            // reactive yaw rate from the tail-rotor coupling model (heli only)
       autorotating: false,     // heli engine-out fallback state
       stalled: false,          // jet (or heli rotor) currently past the stall AoA
       aoa: 0,                  // last computed angle-of-attack, deg (HUD/diagnostic)
@@ -717,7 +700,7 @@
     const py = (pad.y != null ? pad.y : floorY(px, pz)) + heli.belly;
     heli.pos.set(px, py, pz);
     heli.heading = 0; heli.pitch = 0; heli.roll = 0;
-    heli.vx = heli.vy = heli.vz = 0; heli.speed = 0; heli.torqueYaw = 0; heli.autorotating = false;
+    heli.vx = heli.vy = heli.vz = 0; heli.speed = 0; heli.yawRate = 0; heli.bank = 0; heli.autorotating = false;
     setCraftRotation(heli, 0, 0, 0);
     if (RESUPPLY_AT_BASE) { heli.ammo = heli.maxAmmo; heli.hp = heli.maxHp; }
   }
@@ -898,8 +881,10 @@
     stolenAir = craft;
     // a reused military group has no builder muzzle — pin one to the model's
     // visual nose (respecting its yaw offset) so missiles leave the airframe,
-    // not its centroid. addMuzzle also drops the small hot marker bead.
-    if (milGroup && !craft.group.userData.muzzle) {
+    // not its centroid. An unarmed craft fires nothing, and an airframes.js
+    // build already published its own muzzleLocal: neither gets one.
+    const mud = craft.group.userData;
+    if (milGroup && craft.armed !== false && !mud.unarmed && !mud.muzzle && !mud.muzzleLocal) {
       const yo = craft.modelYawOffset || 0, nose = (rec.footL || 5) * 0.55;
       addMuzzle(craft.group, Math.sin(-yo) * nose, 1.1, Math.cos(-yo) * nose);
       craft.muzzle = craft.group.userData.muzzleLocal;
@@ -1727,122 +1712,6 @@
     }
   }
 
-  function flyHeli(craft, dt) {
-    const k = CBZ.keys || {};
-    const A = CBZ.aeroPhysics;
-    const authority = controlAuthority(craft);     // damage-degraded control (1 = full)
-
-    // ---- AUTOROTATION FALLBACK: heavy damage (or any future "engine out"
-    // trigger) takes the engine away — collective can no longer ADD lift, but
-    // the freewheeling rotor still gives the pilot a controlled descent: sink
-    // rate is capped (not a death plummet), and a FLARE near the ground
-    // (pulling collective right at touchdown) cushions the landing. This is
-    // ADDITIONAL to the existing scripted death-spiral elsewhere in the game
-    // (that's for the AI gunship being shot down — a wholly different code
-    // path in aircraft.js, untouched) — this is what happens to the PLAYER'S
-    // OWN heli when it's critically hurt, and it's survivable for a skilled
-    // pilot instead of a guaranteed loss.
-    craft.autorotating = craft.maxHp > 0 && (craft.hp / craft.maxHp) <= AUTOROTATE_AT;
-
-    // heading from mouse yaw (look = heading), plus A/D yaw trim (PEDAL input)
-    if (CBZ.cam) {
-      // craft faces away from the camera yaw (chase cam sits behind)
-      craft.heading = CBZ.cam.yaw + Math.PI;
-    }
-    let yaw = 0;
-    if (k["a"]) yaw += 1;
-    if (k["d"]) yaw -= 1;
-    // forward/back thrust along heading (collective tilt)
-    let thr = 0;
-    if (k["w"]) thr += 1;
-    if (k["s"]) thr -= 1;
-    // vertical: SPACE ascend, SHIFT/CTRL descend (collective input)
-    let liftIn = 0;
-    if (k[" "]) liftIn += 1;
-    if (k["shift"] || k["control"]) liftIn -= 1;
-
-    // ---- TORQUE / TAIL-ROTOR COUPLING: pulling collective (climbing, or
-    // gaining forward thrust) spins the main rotor harder, and Newton's third
-    // law wants to yaw the fuselage the opposite way — the pilot has to hold
-    // opposing pedal (A/D) to counter it, exactly like a real heli. Modelled
-    // as a reactive yaw rate that builds toward a target proportional to the
-    // POSITIVE collective/thrust input (climbing or accelerating forward both
-    // load the disc) and eases back down when power is released. Pedal input
-    // (yaw) both steers AND is how the player fights this reaction.
-    const powerLoad = Math.max(0, liftIn) * 0.7 + Math.max(0, thr) * 0.3;
-    const targetTorqueYaw = -powerLoad * HELI_TORQUE_GAIN;   // reacts opposite rotor spin
-    craft.torqueYaw = (craft.torqueYaw || 0) + (targetTorqueYaw - (craft.torqueYaw || 0)) * Math.min(1, dt * HELI_TORQUE_DAMP);
-    if (CBZ.cam) CBZ.cam.yaw -= (yaw * HELI_YAW * authority + craft.torqueYaw) * dt;   // pedal trim + reactive yaw, both via cam.yaw
-
-    const fx = Math.sin(craft.heading), fz = Math.cos(craft.heading);
-    craft.vx += fx * thr * HELI_THRUST * authority * dt;
-    craft.vz += fz * thr * HELI_THRUST * authority * dt;
-
-    // ---- LIFT/DRAG AERO STEP (shared core) --------------------------------
-    // Resolve the CURRENT world velocity into the body frame, run it through
-    // the Cl(alpha) stall curve for a genuine AoA-driven lift reading, apply
-    // six-axis drag (sideways/backward motion bleeds off harder than clean
-    // forward flight — a pirouette decelerates fast), and feed ETL + ground
-    // effect into the vertical authority instead of a flat HELI_VLIFT.
-    let etl = 1, groundMul = 1, aoaDeg = 0, stalled = false;
-    if (A) {
-      const local = A.localVelocity(craft.vx, craft.vy, craft.vz, craft.heading, craft.pitch || 0, craft.roll || 0);
-      const groundY = floorY(craft.pos.x, craft.pos.z);
-      const agl = Math.max(0, craft.pos.y - craft.belly - groundY);
-      groundMul = A.groundEffectMul(agl, HELI_SPAN);
-      etl = A.etlMul(Math.max(0, local.z), HELI_ETL_LO, HELI_ETL_HI);
-      const aero = A.aeroForces(local, {
-        liftScale: 0.0065, etl, groundMul,
-        dragCoef: { px: 0.085, nx: 0.085, py: 0.06, ny: 0.06, pz: 0.018, nz: 0.11 },
-      });
-      aoaDeg = aero.aoaDeg; stalled = aero.stalled;
-      // six-axis drag re-expressed back into world space via the verified
-      // inverse transform (worldVelocity — the exact mathematical inverse of
-      // localVelocity, see aircraftphysics.js). (vy is a direct collective
-      // COMMAND below, not force-integrated, so only the horizontal drag
-      // components feed back into vx/vz here.)
-      const dragWorld = A.worldVelocity(aero.dragLocal.x, 0, aero.dragLocal.z, craft.heading, craft.pitch || 0, craft.roll || 0);
-      craft.vx += dragWorld.x * dt;
-      craft.vz += dragWorld.z * dt;
-    }
-    // legacy hover-bleed kept as a gentle FLOOR under the new 6-axis drag so a
-    // motionless hover still settles cleanly even before the aero term above
-    // has much velocity to act on (it scales with v^2 — near-zero speed needs
-    // a linear term to actually stop drifting).
-    craft.vx *= Math.max(0, 1 - HELI_DRAG * dt * (thr ? 0.3 : 1));
-    craft.vz *= Math.max(0, 1 - HELI_DRAG * dt * (thr ? 0.3 : 1));
-    // clamp horizontal speed
-    const hsp = Math.hypot(craft.vx, craft.vz);
-    if (hsp > HELI_TOP) { const s = HELI_TOP / hsp; craft.vx *= s; craft.vz *= s; }
-
-    // vertical authority: ETL (mushy near hover, solid in forward flight) +
-    // ground effect (a cushioning bonus low to the deck), both damage-scaled.
-    const vlift = HELI_VLIFT * authority * (0.85 + (etl - 0.85) + (groundMul - 1) * 0.6);
-    if (craft.autorotating) {
-      // ENGINE OUT: collective can no longer ADD net lift — sink is capped,
-      // not stopped, and a FLARE (holding UP near the ground) bleeds the
-      // final sink rate down to something a skilled pilot walks away from.
-      const groundY = floorY(craft.pos.x, craft.pos.z);
-      const agl = Math.max(0, craft.pos.y - craft.belly - groundY);
-      const flareT = agl < FLARE_HEIGHT ? 1 - agl / FLARE_HEIGHT : 0;
-      const targetSink = -AUTOROTATE_SINK + flareT * (AUTOROTATE_SINK - FLARE_SINK) * Math.max(0, liftIn);
-      craft.vy += (targetSink - craft.vy) * Math.min(1, dt * 3);
-    } else {
-      craft.vy = liftIn * vlift;
-    }
-    // body tilt: nose down on forward thrust, bank into yaw — a stalled disc
-    // (deep negative AoA from a hard vertical drop) noses over further, which
-    // reads as the "nose drops, lift collapses" stall behaviour from a heli's
-    // rotor losing efficiency, and recovers the instant airspeed/AoA come back.
-    const stallPitch = stalled ? -0.22 : 0;
-    craft.pitch = (craft.pitch || 0) + ((-thr * 0.18 + stallPitch) - craft.pitch) * Math.min(1, dt * 4);
-    craft.roll = (craft.roll || 0) + ((yaw * 0.22) - craft.roll) * Math.min(1, dt * 4);
-    // spin the rotors (autorotation keeps them windmilling, just slower/no power feel)
-    spinRotors(craft, dt, craft.autorotating ? 18 : 30);
-    craft.speed = hsp;
-    craft.aoa = aoaDeg; craft.stalled = stalled;
-  }
-
   function flyJet(craft, dt) {
     const k = CBZ.keys || {};
     const A = CBZ.aeroPhysics;
@@ -2592,139 +2461,74 @@
     craft.throttle = JET_MIN + craft.thr * (JET_MAX - JET_MIN);
   }
 
-  // ---- V2 HELICOPTER: V1's torque/ETL/autorotation core, plus an eased
-  // vertical command (the hover breathes), skid grip on the ground, rotor
-  // spin-up, and a fuselage that visibly leans into its own velocity ----
+  // ---- V2 HELICOPTER. The dynamics are CBZ.aeroPhysics.heliStep (pure, so a
+  // node check can fly it); this reads the controls and the world around it.
+  //   keyboard  W/S cyclic fore/aft, A/D lateral cyclic (slide at the hover,
+  //             bank-and-turn at speed, the planes' A/D), Q/E pedals (nose
+  //             turns in place, the planes' rudder keys), Space/Shift up,
+  //             Ctrl down
+  //   touch     the stick is the cyclic, ANALOG (CBZ.touchStickAxis), never
+  //             the WASD switches it also writes; TURN L/R pills hold Q/E
+  const HELI_STICK_DEAD = 0.12;
+  function stickShape(v) {
+    const a = Math.abs(v);
+    if (a <= HELI_STICK_DEAD) return 0;
+    const n = Math.min(1, (a - HELI_STICK_DEAD) / (1 - HELI_STICK_DEAD));
+    return Math.sign(v) * Math.pow(n, 1.6);   // fine near the middle, full at the rim
+  }
+  const _heliIn = { cycF: 0, cycR: 0, pedal: 0, coll: 0 };
+  const _heliEnv = { top: 0, vlift: 0, authority: 1, onGround: false, autorotating: false, sink: 0 };
   function flyHeliV2(craft, dt) {
     const k = CBZ.keys || {};
     const A = CBZ.aeroPhysics;
     const authority = controlAuthority(craft);
     craft.autorotating = craft.maxHp > 0 && (craft.hp / craft.maxHp) <= AUTOROTATE_AT;
-
     craft.perfVmax = HELI_TOP;   // published for the derived airspeed gauge (touch dial)
-    // V2 CONTROLS: the heli OWNS its heading — A/D are real pedals (applied to
-    // craft.heading below, with the tail-rotor torque) and the MOUSE is pure
-    // free-look, the camera recentering behind the tail on its own. LEGACY
-    // steered the whole airframe off the mouse yaw (look = heading), the exact
-    // "camera drives the aircraft" coupling we're removing.
-    if (!controlsV2() && CBZ.cam) craft.heading = CBZ.cam.yaw + Math.PI;
-    let yaw = 0;
-    if (k["a"]) yaw += 1;   // pedal left
-    if (k["d"]) yaw -= 1;   // pedal right
-    let thr = 0;
-    if (k["w"]) thr += 1;   // cyclic forward (nose down → accelerate)
-    if (k["s"]) thr -= 1;   // cyclic aft
-    let liftIn = 0;
-    if (controlsV2()) {
-      if (k[" "] || k["shift"]) liftIn += 1;   // collective up
-      if (k["control"]) liftIn -= 1;           // collective down
-    } else {
-      if (k[" "]) liftIn += 1;
-      if (k["shift"] || k["control"]) liftIn -= 1;
-    }
-    let strafe = 0;
-    if (controlsV2()) {
-      if (k["e"]) strafe += 1;   // lateral cyclic right
-      if (k["q"]) strafe -= 1;   // lateral cyclic left
-    }
 
-    // torque / tail-rotor coupling (same model as V1 — pulling power fights
-    // the pedals until you trim it out)
-    const powerLoad = Math.max(0, liftIn) * 0.7 + Math.max(0, thr) * 0.3;
-    const targetTorqueYaw = -powerLoad * HELI_TORQUE_GAIN;
-    craft.torqueYaw = (craft.torqueYaw || 0) + (targetTorqueYaw - (craft.torqueYaw || 0)) * Math.min(1, dt * HELI_TORQUE_DAMP);
-    // pedal trim + reactive torque yaw: V2 turns the OWNED heading (mouse is
-    // free-look); legacy turned cam.yaw, which the heading then chased.
-    if (controlsV2()) craft.heading -= (yaw * HELI_YAW * authority + craft.torqueYaw) * dt;
-    else if (CBZ.cam) CBZ.cam.yaw -= (yaw * HELI_YAW * authority + craft.torqueYaw) * dt;
-
-    const fx = Math.sin(craft.heading), fz = Math.cos(craft.heading);
-    craft.vx += fx * thr * HELI_THRUST * authority * dt;
-    craft.vz += fz * thr * HELI_THRUST * authority * dt;
-    if (strafe) {   // lateral cyclic (QE): push along the right-wing vector
-      const rx = Math.cos(craft.heading), rz = -Math.sin(craft.heading);
-      craft.vx += rx * strafe * HELI_STRAFE * authority * dt;
-      craft.vz += rz * strafe * HELI_STRAFE * authority * dt;
+    const inp = _heliIn;
+    const ax = CBZ.touchStickAxis ? CBZ.touchStickAxis() : null;
+    if (ax) { inp.cycF = stickShape(ax.y); inp.cycR = stickShape(ax.x); }
+    else {
+      inp.cycF = (k["w"] ? 1 : 0) - (k["s"] ? 1 : 0);
+      inp.cycR = (k["d"] ? 1 : 0) - (k["a"] ? 1 : 0);
     }
+    inp.pedal = (k["q"] ? 1 : 0) - (k["e"] ? 1 : 0);
+    inp.coll = ((k[" "] || k["shift"]) ? 1 : 0) - (k["control"] ? 1 : 0);
 
-    // shared aero core: six-axis drag + ETL + ground effect (rooftop-aware AGL,
-    // measured against the skids' REST height — see flyWingV2's note)
+    // ETL + ground effect feed the collective's authority (rooftop-aware AGL,
+    // measured against the skids' REST height)
     const baseY = floorY(craft.pos.x, craft.pos.z);
     const groundY = craft._roof == null ? baseY : Math.max(baseY, craft._roof);
     const restY = groundY + (craft.groundOffset != null ? craft.groundOffset : craft.belly + GROUND_PAD);
     const agl = Math.max(0, craft.pos.y - restY);
-    let etl = 1, groundMul = 1, aoaDeg = 0, stalled = false;
-    if (A) {
-      const local = A.localVelocity(craft.vx, craft.vy, craft.vz, craft.heading, craft.pitch || 0, craft.roll || 0);
-      groundMul = A.groundEffectMul(agl, HELI_SPAN);
-      etl = A.etlMul(Math.max(0, local.z), HELI_ETL_LO, HELI_ETL_HI);
-      const aero = A.aeroForces(local, {
-        liftScale: 0.0065, etl, groundMul,
-        dragCoef: { px: 0.085, nx: 0.085, py: 0.06, ny: 0.06, pz: 0.018, nz: 0.11 },
-      });
-      aoaDeg = aero.aoaDeg; stalled = aero.stalled;
-      const dragWorld = A.worldVelocity(aero.dragLocal.x, 0, aero.dragLocal.z, craft.heading, craft.pitch || 0, craft.roll || 0);
-      craft.vx += dragWorld.x * dt;
-      craft.vz += dragWorld.z * dt;
-    }
-    craft.vx *= Math.max(0, 1 - HELI_DRAG * dt * (thr ? 0.3 : 1));
-    craft.vz *= Math.max(0, 1 - HELI_DRAG * dt * (thr ? 0.3 : 1));
-    const hsp = Math.hypot(craft.vx, craft.vz);
-    if (hsp > HELI_TOP) { const s = HELI_TOP / hsp; craft.vx *= s; craft.vz *= s; }
-
     craft.onGround = agl < 0.3;
-    const vlift = HELI_VLIFT * authority * (0.85 + (etl - 0.85) + (groundMul - 1) * 0.6);
-    if (craft.autorotating) {
-      // engine out: capped sink, flare near the deck (unchanged from V1)
-      const flareT = agl < FLARE_HEIGHT ? 1 - agl / FLARE_HEIGHT : 0;
-      const targetSink = -AUTOROTATE_SINK + flareT * (AUTOROTATE_SINK - FLARE_SINK) * Math.max(0, liftIn);
-      craft.vy += (targetSink - craft.vy) * Math.min(1, dt * 3);
-    } else {
-      let targetVy = liftIn * vlift;
-      // hover bob: the disc breathes when you're off the collective in the air
-      if (!liftIn && !craft.onGround) targetVy += Math.sin(craft.rotorSpin * 0.22) * 0.35;
-      craft.vy += (targetVy - craft.vy) * Math.min(1, dt * HELI_VDAMP);
-    }
-    // skids grip: a heli sitting on its skids doesn't ice-skate
-    if (craft.onGround && liftIn <= 0) {
-      const s = Math.max(0, 1 - 6 * dt);
-      craft.vx *= s; craft.vz *= s;
-    }
-
-    // visual attitude: lean into the body-frame velocity (cyclic read), bank
-    // with pedal input AND into mouse-steered turns, nose-over on a disc stall
-    let tp = -thr * 0.10 + (stalled ? -0.22 : 0);
-    let trl = yaw * 0.18;
-    // bank into the turn: the mouse IS the heli's steering, so read the
-    // heading RATE and roll into it (purely visual — roll drives nothing on
-    // the heli, so there's no feedback loop), scaled by forward speed
-    if (dt > 0.0001) {
-      let dh = craft.heading - (craft._lastHeading != null ? craft._lastHeading : craft.heading);
-      while (dh > Math.PI) dh -= Math.PI * 2;
-      while (dh < -Math.PI) dh += Math.PI * 2;
-      const hRate = Math.max(-3, Math.min(3, dh / dt));
-      // sign matches the pedal pairing: V1 rolls +0.22 with A (which yaws the
-      // heading NEGATIVE-ward via cam.yaw), so a negative heading rate = the
-      // same positive roll
-      trl += Math.max(-0.3, Math.min(0.3, -hRate * 0.12)) * Math.min(1, hsp / 12);
-    }
-    craft._lastHeading = craft.heading;
+    let etl = 1, groundMul = 1;
     if (A) {
-      const lv = A.localVelocity(craft.vx, 0, craft.vz, craft.heading, 0, 0);
-      tp += Math.max(-HELI_TILTMAX, Math.min(HELI_TILTMAX, -lv.z * HELI_TILT_K));
-      trl += Math.max(-HELI_TILTMAX, Math.min(HELI_TILTMAX, lv.x * HELI_TILT_K));
+      const fwd = craft.vx * Math.sin(craft.heading) + craft.vz * Math.cos(craft.heading);
+      groundMul = A.groundEffectMul(agl, HELI_SPAN);
+      etl = A.etlMul(Math.max(0, fwd), HELI_ETL_LO, HELI_ETL_HI);
     }
-    craft.pitch = (craft.pitch || 0) + (tp - craft.pitch) * Math.min(1, dt * 4);
-    craft.roll = (craft.roll || 0) + (trl - craft.roll) * Math.min(1, dt * 4);
+    const env = _heliEnv;
+    env.top = HELI_TOP; env.authority = authority; env.onGround = craft.onGround;
+    env.vlift = HELI_VLIFT * authority * (etl + (groundMul - 1) * 0.6);
+    env.autorotating = craft.autorotating;
+    if (craft.autorotating) {
+      // engine out: capped sink, collective near the deck flares it off
+      const flareT = agl < FLARE_HEIGHT ? 1 - agl / FLARE_HEIGHT : 0;
+      env.sink = -AUTOROTATE_SINK + flareT * (AUTOROTATE_SINK - FLARE_SINK) * Math.max(0, inp.coll);
+    }
+    if (!A || !A.heliStep) return;
+    A.heliStep(craft, inp, dt, env);
 
     // rotor spin-up/down: the commanded rate is eased, so lifting off from
     // cold visibly winds the disc up and settling down lets it sigh back
-    const wantRate = craft.autorotating ? 18 : (craft.onGround && !liftIn && !thr ? 10 : 30);
+    const busy = inp.coll || inp.cycF || inp.cycR || inp.pedal;
+    const wantRate = craft.autorotating ? 18 : (craft.onGround && !busy ? 10 : 30);
     if (craft.rotorRate == null) craft.rotorRate = wantRate;
     craft.rotorRate += (wantRate - craft.rotorRate) * Math.min(1, dt * 0.9);
     spinRotors(craft, dt, craft.rotorRate);
-    craft.speed = hsp;
-    craft.aoa = aoaDeg; craft.stalled = stalled;
+    craft.speed = Math.hypot(craft.vx, craft.vz);
+    craft.aoa = 0; craft.stalled = false;
   }
 
   // ---- V2 integrator: rooftop-aware ground clamp, wall strikes, touchdown
@@ -2782,14 +2586,16 @@
       return;
     }
     if (craft.fireCD > 0) craft.fireCD = Math.max(0, craft.fireCD - dt);
-    if (flightV2()) {
+    // the helicopter has ONE flight model (the old V1 heli with its circling
+    // torque yaw is deleted), whatever the wing flag says
+    if (flightV2() || craft.kind === "heli") {
       if (craft.kind === "heli") flyHeliV2(craft, dt); else flyWingV2(craft, dt);
       integrateV2(craft, dt);
       // a wall strike / slammed touchdown crashed the craft this frame —
       // crashCraft already ran exitAircraft, so the pilot owns the transform
       if (craft.destroyed || !P._aircraft) return;
     } else {
-      if (craft.kind === "jet") flyJet(craft, dt); else flyHeli(craft, dt);
+      flyJet(craft, dt);
       integrate(craft, dt);
     }
     // ---- KEEP-GATE: land a HOT stolen F-22 inside a hangar you OWN, slow, and

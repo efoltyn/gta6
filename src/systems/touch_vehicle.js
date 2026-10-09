@@ -19,7 +19,13 @@
      BOAT     stick = steer/throttle (unchanged). ASTERN = hold → Ctrl
               (water_helm's crash-stop; Space is the get-up now).
               VIEW = the [V] wheel view, same handler as the car's.
-     HELI     stick = yaw/thrust (unchanged).
+     HELI     stick = the CYCLIC, analog (CBZ.touchStickAxis): push to fly
+              that way; at speed a sideways push banks into a turn, like the
+              planes' stick. It used to be yaw/thrust through the WASD
+              switches, so any slightly-off forward push held a full pedal
+              and the helicopter flew circles.
+              TURN L / TURN R = hold → CBZ.keys["q"] / ["e"] (pedals: the
+                       nose turns in place)
               UP     = hold  → CBZ.keys[" "]        (collective up)
               DOWN   = hold  → CBZ.keys["control"]  (collective down —
                        "control" on purpose: it never collides with the
@@ -395,7 +401,13 @@
       // Patriots use the shared full-map target and launch through the same verb.
       html = isArmedArmor() ? FIRE_BTN : "";
     } else if (next === "heli") {
+      // The stick is the CYCLIC (analog, read through CBZ.touchStickAxis):
+      // push to fly that way, and at speed a sideways push banks into a turn,
+      // the same stick the planes use. The right thumb holds the power (UP /
+      // DOWN) and the PEDALS, which turn the nose in place (Q/E, the planes'
+      // rudder keys).
       html = pill("tvUp", "UP", "tv-big tv-go") + pill("tvDown", "DOWN", "tv-big") +
+        '<div class="tv-yaw">' + pill("tvYawL", "TURN L", "") + pill("tvYawR", "TURN R", "") + "</div>" +
         FIRE_BTN + VIEW_BTN;
     } else if (next === "wing") {
       html = pill("tvThrUp", "THR +", "tv-big tv-go") + pill("tvThrDn", "THR −", "tv-big") +
@@ -431,6 +443,8 @@
     if (q("tvTilt")) tapBtn(q("tvTilt"), () => { setTilt(!tiltOn); });
     if (q("tvUp")) holdBtn(q("tvUp"), " ");
     if (q("tvDown")) holdBtn(q("tvDown"), "control");
+    if (q("tvYawL")) holdBtn(q("tvYawL"), "q");
+    if (q("tvYawR")) holdBtn(q("tvYawR"), "e");
     // throttle reuses the heli's power grammar (Space up / Ctrl down) so the
     // stick is free to be the pitch+roll joystick (FLIGHT_CONTROLS_V2).
     if (q("tvThrUp")) holdBtn(q("tvThrUp"), " ");
@@ -985,7 +999,7 @@
     V("hangar-buy", { ctx: "foot", key: "B", skip: "playeraircraft's [B] at a hangar only ever prints the steal-it notice; the F-22 is not buyable and a pill for a refusal is a lie" });
     V("bomb-camera", { ctx: "b2", key: "C hold", skip: "a cinematic, not a control; [C] keeps it" });
     V("air-homing", { ctx: "air", key: "H", skip: "homing is the default; the dumb-fire toggle stays on [H]" });
-    V("heli-lateral", { ctx: "heli", key: "Q/E", skip: "bank covers the turn; two more pills were clutter" });
+    V("heli-pedals", { ctx: "heli", key: "Q/E", hook: null }); W("heli-pedals", "#tvYawL/#tvYawR");
     V("wing-rudder", { ctx: "wing", key: "Q/E", skip: "bank covers the turn; two more pills were clutter" });
     V("armor-turret", { ctx: "armor", key: "mouse", skip: "the turret already tracks cam.yaw, and on touch cam.yaw IS the look drag, aiming the gun is aiming the camera, so a control would be a duplicate axis" });
   }
