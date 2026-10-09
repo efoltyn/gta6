@@ -4151,6 +4151,7 @@
   "src/city/death.js",
   "src/city/camera.js",
   "src/city/ragdoll.js",
+  "src/city/carstrike.js",
   "src/city/leaderboard.js",
   "src/city/zillow.js",
   "src/city/bank.js",
