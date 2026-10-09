@@ -422,7 +422,7 @@ async function culprit(u, base, merged, at) {
     const c = chain(base, merged.slice(0, mid + 1));
     if (c && await fails(c, "main+" + merged.slice(0, mid + 1).map((q) => q.branch).join("+"))) hi = mid; else lo = mid + 1;
   }
-  return { preexisting: false, branch: merged[lo].branch, id: merged[lo].id, interaction: lo > 0, runs };
+  return { preexisting: false, branch: merged[lo].branch, id: merged[lo].id, runs };
 }
 
 function finalize(q, bid, nodeU, probeU, merged) {
@@ -461,11 +461,12 @@ function finalize(q, bid, nodeU, probeU, merged) {
 function report(B) {
   const L = [`testbus batch ${B.id} (${B.lane} lane)  ${((B.wallMs || 0) / 1000).toFixed(1)} s  load ${B.startLoad} -> peak ${B.peakLoad}`,
     `base origin/main ${String(B.base || "").slice(0, 10)}  merged: ${(B.merged || []).join(", ") || "-"}`];
-  for (const c of B.conflicts || []) L.push(`CONFLICT ${c.branch} with ${c.with.join(", ")}: ${c.files.slice(0, 5).join(", ")}`);
+  for (const c of B.conflicts || []) L.push(`CONFLICT ${c.branch} with ${c.with.join(", ")}: ${c.files.slice(0, 5).join(", ")}` +
+    (c.with[0] === "origin/main" ? "" : "  -> runs in its own mini-batch next"));
   for (const w of B.worlds) for (const r of w.runs) L.push(`world ${w.key}: ${r.how || "-"} ${((r.acquireMs || 0) / 1000).toFixed(1)} s` + (r.chromeMs ? ` (chrome ${(r.chromeMs / 1000).toFixed(1)} s)` : "") + (r.error ? " ERROR " + r.error : "") +
     "  probes: " + r.probes.map((p) => `${p.name} ${p.status} ${(p.ms / 1000).toFixed(1)} s`).join(", "));
   for (const n of B.node) L.push(`node ${n.status} ${(n.ms / 1000).toFixed(1)} s  ${n.check}`);
-  for (const b of B.bisect) L.push(`BISECT ${b.check}: ${b.preexisting ? "already fails on origin/main" : "FIX " + b.branch + (b.interaction ? " (only with the branches merged before it)" : "")}  runs: ${b.runs.map((r) => r.on + "=" + r.status).join(", ")}`);
+  for (const b of B.bisect) L.push(`BISECT ${b.check}: ${b.preexisting ? "already fails on origin/main" : "FIX " + b.branch}  runs: ${b.runs.map((r) => r.on + "=" + r.status).join(", ")}`);
   for (const q of B.requests) { const r = res(q.id); if (r) L.push(`${q.id}  ${r.status}  ${r.short || ""}`); }
   return L.join("\n") + "\n";
 }

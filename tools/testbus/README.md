@@ -128,6 +128,25 @@ still runs the same probe the old way (its own Chrome, its own boot) through
 `TESTBUS_IDLE_MIN`, `TESTBUS_HEADROOM`, `TESTBUS_MAX_PAGES` and
 `TESTBUS_MAX_LOAD_PER_CORE`.
 
+## Measured (2026-10-09, M-series, 8 cores, load 20-50 from other agents)
+
+The demo batch had 5 requests from 5 branches. Together they asked for 3 president
+probes (one asked for twice), a tiny in-page probe, and 3 node checks. One branch
+conflicted, and one deliberately broke a node check.
+
+| | old way (each check boots its own Chrome) | testbus |
+|---|---|---|
+| agent blocked per change | 246-287 s per browser check (people 245.8, verbs 287.3, president --quick 273.1); one run hung for 20 min and had to be killed | **0.05-0.06 s** (`submit.mjs`), then `status.mjs` (instant) |
+| node checks answered | after the agent's own sequence | **1-2 s** after the batch formed |
+| boots | one per check per agent (people would boot twice: 2 agents asked) | **1 cold boot** (38.1 s; Chrome 0.9 s) for 4 probes + 1 reload (29.3 s) for the conflict mini-batch |
+| wall time, same 3 probes + 3 node checks | 808 s sequential (+1249 s for the hang) | 660 s for everything after the boot was allowed (826 s including 3.3 min held by the load gate) |
+| culprit | none; you read logs | the rooms-check break was bisected to `tb-demo-c` (FAIL), the branch that asked for it too was BLOCKED (not FAIL), and the conflict ran in its own mini-batch |
+
+The probes here mostly step the sim (200-260 s each), so one shared boot saves
+about 15% of wall time. The big win is that no agent sits idle: ~270 s per
+browser check per change. The machine pays for 1 Chrome instead of N, and the
+load gate keeps boots from piling onto a machine that's already saturated.
+
 ## Limits
 
 - The reset between probes is soft (player only). Sim state is too large to snapshot
