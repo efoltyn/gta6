@@ -328,6 +328,7 @@ export default async function (t) {
     out.gunsOut = f.filter(out_).length;
     var PRd = function () { return CBZ.protection && CBZ.protection.posture ? CBZ.protection.posture('president') : null; };
     out.posture = PRd();
+    try { var dv0 = CBZ.protection.detail('president'); out.reason = dv0 && dv0.reason; } catch (e) {}
     // ...and they STAY away: past the 4 s stand-down window nothing of the
     // take-down (their own shots, the dead man, each other's guns) draws again
     __pv.step(330);
@@ -344,6 +345,11 @@ export default async function (t) {
     for (var j = 0; j < 40 && !(c.restraint && c.restraint.state); j++) __pv.step(30);
     out.cuffed = c.restraint ? c.restraint.state : null;
     out.cAlive = !c.dead;
+    if (!out.cuffed) {
+      var jb = null; try { jb = CBZ.custody && CBZ.custody.jobOf ? CBZ.custody.jobOf(c) : null; } catch (e) {}
+      out.whyFree = 'fired=' + out.detainFired + ' dead=' + !!c.dead + ' job=' + (jb ? jb.phase + '/' + (jb.officers || []).map(function (q) { return Math.hypot(q.pos.x - c.pos.x, q.pos.z - c.pos.z).toFixed(1) + 'm/' + q.state + (q._order ? ':' + q._order.kind : ''); }).join(',') : 'none') +
+        ' order=' + JSON.stringify(__pv.forceState());
+    }
     return out;
   })())`));
   const chk = (c, m) => { if (!c) bad++; t.log((c ? "  ok  " : "FAIL  ") + m); };
@@ -357,10 +363,17 @@ export default async function (t) {
     chk(r4.drawn2 > 0 && r4.callOff, "a second order, then Stand down");
     chk(r4.stillOrdered === 0 && r4.stillDrawn === 0, `nobody keeps the order (${r4.stillOrdered} ordered, ${r4.stillDrawn} drawn)`);
     chk(r4.gunsOut === 0, `the guns go away (${r4.gunsOut} drawn of ${r4.carry} who carry one)`);
-    chk(r4.posture === "normal", `Stand down ends the incident: the detail is back to normal (${r4.posture})`);
-    chk(r4.gunsLater === 0 && r4.postureLater === "normal", `...and stays that way 5 s on (${r4.gunsLater} drawn, ${r4.postureLater}${r4.reasonLater ? ": " + r4.reasonLater : ""})`);
+    // the incident is over: whatever raises the posture now must be NEW, not
+    // what the take-down left (the agents' own shots, the man they shot, a
+    // counter-sniper firing into the aftermath). The probe's own protest at
+    // the gate may still send a man through the arch ("gate breach"): that
+    // is a new event, and an unarmed one draws no gun.
+    const RESIDUE = /gunfire|drawn weapon|attacker|principal hit|counter-sniper/;
+    const over = (p, r) => p === "normal" || !RESIDUE.test(String(r || ""));
+    chk(over(r4.posture, r4.reason), `Stand down ends the incident (${r4.posture}${r4.reason ? ": " + r4.reason : ""})`);
+    chk(r4.gunsLater === 0 && over(r4.postureLater, r4.reasonLater), `...and the guns stay away 5 s on (${r4.gunsLater} drawn, ${r4.postureLater}${r4.reasonLater ? ": " + r4.reasonLater : ""})`);
     if (r4.gunsOut || r4.gunsLater || VERBOSE) { for (const m of r4.diag.members) t.log("        " + m); for (const e of r4.diag.ring) t.log("        gd " + e); }
-    chk(r4.detainFired && r4.cuffed === "cuffed" && r4.cAlive, "Detain ties him (" + r4.cuffed + ")");
+    chk(r4.detainFired && r4.cuffed === "cuffed" && r4.cAlive, "Detain ties him (" + r4.cuffed + ")" + (r4.whyFree ? " " + r4.whyFree : ""));
   }
 
   // 5. YOU SHOOT ONE OF YOUR OWN: he is off the Service's roster, it costs

@@ -1514,6 +1514,9 @@
   //  fighting or held by boarding.js).
   // ------------------------------------------------------------
   const ENVS = {};
+  const GUN_REASONS = { gunfire: 1, explosion: 1, "armed attacker": 1, "weapon aimed": 1, "drawn weapon": 1,
+    "counter-sniper fire": 1, "long gun": 1, "armed at the gate": 1, "principal hit": 1, assassination: 1, lockdown: 1,
+    attack: 1, "attack at the gate": 1 };
   function busyUnit(q) {
     if (!q || q.dead) return true;
     if (CBZ.boardingHolds && CBZ.boardingHolds(q)) return true;
@@ -1536,6 +1539,9 @@
     // the man being protected is never the target of his own detail
     e.threat = t && !(own && isPlayerBody(t)) ? t : null;
     e.hostile = !!(ps && ps.hostile && e.threat);
+    // is the posture about a gun? (the detail brain draws in alert / hold
+    // only then; an unarmed gate breach is a tight formation, not drawn guns)
+    e.gun = !!(ps && ps.posture !== "normal" && GUN_REASONS[ps.reason]);
     e.threatAt.x = ps ? ps.at.x : 0; e.threatAt.z = ps ? ps.at.z : 0;
     e.crowd = ps ? (ps._crowd | 0) : 0;
     e.door = !!(principal && principal.pos && nearDoor(principal.pos.x, principal.pos.z));

@@ -522,7 +522,8 @@
     if (want !== prev) {
       D.phase = want; D.phaseT = 0; D.rosterDirty = true;
       if (want === "cover" || want === "alert" || (want === "evac" && prev !== "cover")) newEpoch(D);
-      if (want === "normal") { D.engagers.length = 0; D.screen.length = 0; D.shouted = false; D.cpSaid = false; }
+      if (want === "normal") { D.engagers.length = 0; D.screen.length = 0; D.shouted = false; D.cpSaid = false; D.wasHot = false; }
+      if (want === "cover" || want === "evac") D.wasHot = true;
     }
     D.phaseT += dt;
     threatPos(D, env);
@@ -715,13 +716,25 @@
       _mo.vffX = w.vx; _mo.vffZ = w.vz;
       A.moveTo(q, w.x, w.z, _mo);
     }
-    if ((hot || D.phase === "alert" || D.phase === "hold") && !reacting && !q._carries && (m.postureT = (m.postureT || 0) - dt) <= 0) {
-      // the discipline's reason: a hot phase (shots, an attacker, a hit) is his
-      // ward under attack, drawn at once; alert / hold is a weapon SEEN, which
-      // has to hold for his sustain beat before leather clears
+    // GUNS COME OUT FOR A GUN. A hot phase (shots, an attacker, a hit) is his
+    // ward under attack, drawn at once. ALERT / HOLD draws only when there is
+    // a gun in it: the threat is armed, or the hold follows a real fight
+    // (D.wasHot). An unarmed man through the gate arch is "Hands! Let me see
+    // your hands!", tight formation, guns on the belt: the old rule drew the
+    // whole detail on "armed-threat" for a protester 100 m off.
+    const gunInIt = hot || D.wasHot || threatArmed(D) || D.gunEnv;
+    if (gunInIt && (hot || D.phase === "alert" || D.phase === "hold") && !reacting && !q._carries && (m.postureT = (m.postureT || 0) - dt) <= 0) {
       q._detWhy = hot ? "ward" : "armed-threat";
       m.postureT = 0.5; A.posture(q, "aim");
     }
+  }
+
+  // is there a gun in it? (an NPC's own gun; the player's in his hand)
+  function threatArmed(D) {
+    const t = D.threat;
+    if (!t || t.dead) return false;
+    if (isPlayer(t)) return !!(CBZ.cityHasGun && CBZ.cityHasGun());
+    return !!t.armed;
   }
 
   // ---- 8. the words (one shout per man per event, never in chorus) ------
@@ -833,6 +846,7 @@
     if (!M || !M.formation) return D;                       // no locomotion layer: nothing to walk them with
     if (!D.F) D.F = M.formation({ lead: TUNE.FRAME_LEAD });
     env.principal = principal;
+    D.gunEnv = !!env.gun;                      // the caller's posture is about a gun (shots, a weapon)
     track(D, pp, principal, dt);
     syncRoster(D, members, env);
     updatePhase(D, env, dt);
@@ -882,7 +896,7 @@
     for (let i = 0; i < D.engagers.length; i++) { const q = D.engagers[i]; if (q && disengage) { try { disengage(q); } catch (e) {} } }
     D.engagers.length = 0; D.screen.length = 0;
     endChallenge(D, brain());
-    D.phase = "normal"; D.phaseT = 0; D.threat = null; D.hasT = false; D.hostile = false;
+    D.phase = "normal"; D.phaseT = 0; D.threat = null; D.hasT = false; D.hostile = false; D.wasHot = false;
     D.spotted = null; D.shouted = false; D.cpSaid = false; D.rosterDirty = true;
     for (let i = 0; i < D.roster.length; i++) {
       const q = D.roster[i]; if (!q) continue;
