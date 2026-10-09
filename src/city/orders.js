@@ -150,8 +150,11 @@
      soldiers and police standing near you, take the order through the same
      engine as the crew's Attack (give() above, CBZ.cityBrain.exec.verb).
        Take him down  they draw and go for him
-       Detain         the nearest agent ties him (city/restrain.js cuff);
-                      nobody shoots
+       Detain         the two nearest take him in (city/custody.js): the order
+                      shouted, the cuffs (a runner is tackled), the pat-down,
+                      walked by the arm to an SUV that pulls up, the door, and
+                      the car drives off. He is a detainee from the cuffs on;
+                      Stand down calls it off until then. Nobody shoots.
        Escort out     two agents walk up and he is walked off, away from you
        Stand down     (on an agent, or on the man) everyone holsters and
                       comes back to you
@@ -206,14 +209,14 @@
     if (presSeat()) {
       const d = presDetail();
       const refs = (d && d.memberPedRefs) || [];
-      for (let i = 0; i < refs.length; i++) { const q = refs[i]; if (q && !q.dead && q.group && !q.restraint) out.push(q); }
+      for (let i = 0; i < refs.length; i++) { const q = refs[i]; if (q && !q.dead && q.group && !q.restraint && !q._custodyJob) out.push(q); }
       if (P && P.pos) {
         const lists = [CBZ.cityPeds, CBZ.cityCops];
         for (let k = 0; k < lists.length; k++) {
           const L = lists[k]; if (!L) continue;
           for (let i = 0; i < L.length; i++) {
             const q = L[i];
-            if (!q || q.dead || !q.group || !q.pos || q.restraint || !stateBody(q) || out.indexOf(q) >= 0) continue;
+            if (!q || q.dead || !q.group || !q.pos || q.restraint || q._custodyJob || !stateBody(q) || out.indexOf(q) >= 0) continue;
             if (hyp(q.pos.x, q.pos.z, P.pos.x, P.pos.z) > 45) continue;
             out.push(q);
           }
@@ -305,7 +308,9 @@
       if (!took && CBZ.dissent && CBZ.dissent.bump) { try { CBZ.dissent.bump(1, 2, no.some(soldier) ? 4 : 1); } catch (e) {} }
     }
     if (!crew.length) return { ok: false, why: "" };
-    polAct(mode === "attack" ? "take-down" : mode, t, crew[0]);
+    // a detention is priced when the cuffs go on (custody fires the act, with
+    // the witnesses who saw it), never at the word
+    if (mode !== "detain") polAct(mode === "attack" ? "take-down" : mode, t, crew[0]);
     PF.target = t; PF.mode = mode; PF.crew = crew; PF.billed = false;
     for (let i = 0; i < crew.length; i++) {
       const q = crew[i];
@@ -318,7 +323,23 @@
       }
       if (q._order) q._order.force = true;
     }
-    say(lead(crew), mode === "attack" ? "Yes, sir." : mode === "detain" ? "Hands where I can see them!" : "Sir. This way, please.");
+    if (mode === "detain") {
+      // THE ONE ARREST PIPELINE (city/custody.js). The agents keep their
+      // force order (protection.js leaves them be) until custody hands them back.
+      const CU = CBZ.custody;
+      const j = CU && CU.take ? CU.take(t, {
+        by: "ss", verb: "detain", officers: crew, owner: "president", act: true, actBy: "president",
+        actOpts: { ideology: (t && t.ideology) || null, institution: institution(crew[0]) },
+        onCuffed: function () {
+          const L = lead(PF.crew.filter(function (q) { return q && !q.dead; }));
+          if (L) say(L, "He's secured, sir.");
+          if (CBZ.presidency && CBZ.presidency.emit) { try { CBZ.presidency.emit("guards-detain", { name: t.name || null }); } catch (e) {} }
+        },
+        onRelease: function (q) { if (q && q._order && q._order.force) clear(q); },
+      }) : null;
+      if (!j) { standDown(true); return { ok: false, why: "" }; }
+    }
+    if (mode !== "detain") say(lead(crew), mode === "attack" ? "Yes, sir." : "Sir. This way, please.");
     const Pz = CBZ.presidency;
     if (Pz && Pz.emit) { try { Pz.emit("guards-order", { mode: mode, name: t.name || null, n: crew.length, refused: no.length }); } catch (e) {} }
     return { ok: true, n: crew.length, refused: no.length };
@@ -326,27 +347,24 @@
   function standDown(quiet) {
     const crew = PF.crew.slice();
     if (!quiet && PF.target) polAct("stand-down", PF.target, crew[0]);
+    // before the cuffs the detention is off; after them he is in custody and
+    // the car takes him (custody.cancel refuses a cuffed man)
+    if (PF.mode === "detain" && PF.target && CBZ.custody && CBZ.custody.cancel) { try { CBZ.custody.cancel(PF.target); } catch (e) {} }
     PF.target = null; PF.mode = null; PF.crew = [];
     for (let i = 0; i < crew.length; i++) {
       const q = crew[i];
       if (!q) continue;
-      if (q._order && q._order.force) clear(q);
+      if (q._order && q._order.force && !q._custodyJob) clear(q);   // custody hands its own back
       if (!q.dead) drawFor(q, null);
     }
     if (!quiet) { const L = lead(crew.filter(function (q) { return q && !q.dead; })); if (L) say(L, "Sir."); }
     return crew.length;
   }
-  // the first agent to reach him ties him; the other stands beside him
+  // a detention is city/custody.js's from the order on: it walks the agents,
+  // and hands each back (onRelease -> clear) when the man is in the car
   function detainStep(a, o, t, dt) {
-    if (t.restraint) { if (PF.target === t && lead(PF.crew) === a) say(a, "He's secured, sir."); clear(a); return; }
-    const d = hyp(a.pos.x, a.pos.z, t.pos.x, t.pos.z);
-    if (d < 1.4 && CBZ.cityRestrain && CBZ.cityRestrain.cuff) {
-      let ok = false;
-      try { ok = !!CBZ.cityRestrain.cuff(t, { by: "secret service" }); } catch (e) { ok = false; }
-      if (ok && CBZ.presidency && CBZ.presidency.emit) { try { CBZ.presidency.emit("guards-detain", { name: t.name || null }); } catch (e) {} }
-      return;
-    }
-    follow(a, t, 1.0, dt);
+    const j = CBZ.custody && CBZ.custody.jobOf ? CBZ.custody.jobOf(t) : null;
+    if (!j || a._custodyJob !== j.id) clear(a);
   }
   // two agents walk up; then he is walked off down the road, away from you
   function escortStep(a, o, t, dt) {
@@ -491,13 +509,13 @@
       canShow: function (t) { return target(t); }, label: "Take him down",
       onSelect: function (t) { takeDown(t, "attack"); } });
     I.register("ped", { id: "pv-detain", prio: 26, wheel: true, campaignSafe: true, forceYes: true, anyone: true,
-      canShow: function (t) { return target(t) && !t.restraint && !t.vendor && t.kind !== "cop"; }, label: "Detain",
+      canShow: function (t) { return target(t) && !t.restraint && !t.vendor && t.kind !== "cop" && !(CBZ.custody && CBZ.custody.jobOf(t)); }, label: "Detain",
       onSelect: function (t) { takeDown(t, "detain"); } });
     I.register("ped", { id: "pv-escort-out", prio: 25, wheel: true, campaignSafe: true, forceYes: true, anyone: true,
       canShow: function (t) { return target(t) && !t.restraint && !stateBody(t) && !t._presOfficer && !t._presStaff && t.kind !== "cop"; },
       label: "Escort out", onSelect: function (t) { takeDown(t, "escort"); } });
     I.register("ped", { id: "pv-call-off", prio: 80, campaignSafe: true, forceYes: true, anyone: true,
-      canShow: function (t) { return !!(t && PF.target === t); }, label: "Stand down",
+      canShow: function (t) { return !!(t && PF.target === t && !(PF.mode === "detain" && CBZ.custody && CBZ.custody.cuffed(t))); }, label: "Stand down",
       onSelect: function () { standDown(false); } });
     return true;
   }
