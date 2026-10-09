@@ -165,7 +165,7 @@
     let name = null;
     if (CBZ.cityMintName) { try { name = CBZ.cityMintName(rng, gender); } catch (e) { name = null; } }
     if (!name) name = (gender === "f" ? FALLBACK_F : FALLBACK_M)[(rng() * 8) | 0] + " " + FALLBACK_L[(rng() * FALLBACK_L.length) | 0];
-    const obj = { _parked: true, nameKnown: true, kind: "civilian", archetype: "professional", name: name, gender: gender, job: job || "civil servant", wealth: 0.7, aggr: 0.2, cash: 300 };
+    const obj = { _parked: true, nameKnown: true, kind: "civilian", archetype: "professional", name: name, gender: gender, job: job || "civil servant", wealth: 0.7, aggr: 0.2, cash: 300, armed: false };
     if (CBZ.cityPedStash) { try { CBZ.cityPedStash(obj); } catch (e) {} }
     return { name: name, gender: gender, sid: obj._sid || null };
   }
@@ -697,12 +697,16 @@
   }
   function post(r, at, R, opts) {
     if (!CBZ.cityPostNpc) return null;
-    const o = { job: R.job, archetype: R.archetype, aggr: 0.05, wealth: 0.7, floorY: r.floorY, src: "presstaff" };
+    // armed: false — a staffer is never the street's 21% "packing" roll
+    // (city/peds.js makePed arms anyone who does not say otherwise); a Chief
+    // of Staff with a gun was governed by the street's gun rules and levelled
+    // it at the President (see presidency.js postOfficer)
+    const o = { job: R.job, archetype: R.archetype, aggr: 0.05, wealth: 0.7, floorY: r.floorY, src: "presstaff", armed: false };
     if (opts) for (const k in opts) if (opts[k] != null) o[k] = opts[k];
     let p = null;
     try { p = CBZ.cityPostNpc(at.x, at.z, o); } catch (e) { p = null; }
     // a staffer is his job: only his own verbs, no street Talk / Mug / Hire
-    if (p) { p.organization = "state"; p.nameKnown = true; p._iOnly = true; }
+    if (p) { p.organization = "state"; p.nameKnown = true; p._iOnly = true; p._stateStaff = true; }
     return p;
   }
   function unpost(p) {
@@ -793,7 +797,7 @@
     const h = car.heading != null ? car.heading : (car.group ? car.group.rotation.y : 0);
     const x = car.pos.x + Math.cos(h) * 1.6, z = car.pos.z - Math.sin(h) * 1.6;
     let p = null;
-    try { p = CBZ.cityPostNpc(x, z, { job: "chauffeur", archetype: "professional", pin: true, face: h, floorY: car.pos.y || 0, src: "presstaff:driver" }); } catch (e) { p = null; }
+    try { p = CBZ.cityPostNpc(x, z, { job: "chauffeur", archetype: "professional", armed: false, pin: true, face: h, floorY: car.pos.y || 0, src: "presstaff:driver" }); } catch (e) { p = null; }
     if (!p) return;
     p.name = s.driver.name; p.nameKnown = true; p.organization = "state"; p._presStaff = "driver"; p._iOnly = true;
     W.driver = p;

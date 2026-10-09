@@ -1437,10 +1437,10 @@
       if (!m.body || m.status !== "sitting" || BODIES.peds[m.sid]) { i++; return; }
       const side = (i % 2 ? 1 : -1) * (3 + i * 1.6), along = 8 + (i % 3) * 2;
       let p = null;
-      try { p = CBZ.cityPostNpc(sp.x + nx * along - nz * side, sp.z + nz * along + nx * side, { job: "senator", archetype: "professional", gender: m.gender, pin: true, face: Math.atan2(nx, nz), aggr: 0.05, wealth: 0.8, src: "politics:congress" }); } catch (e) { p = null; }
+      try { p = CBZ.cityPostNpc(sp.x + nx * along - nz * side, sp.z + nz * along + nx * side, { job: "senator", archetype: "professional", armed: false, gender: m.gender, pin: true, face: Math.atan2(nx, nz), aggr: 0.05, wealth: 0.8, src: "politics:congress" }); } catch (e) { p = null; }
       i++;
       if (!p) return;
-      p.name = (m.leader ? PARTIES[m.party].adj + " Leader " : "Senator ") + m.name; p.nameKnown = true; p.organization = "state"; p._congress = m.sid; p._sid = m.sid; p._ideology = m.ideology;
+      p.name = (m.leader ? PARTIES[m.party].adj + " Leader " : "Senator ") + m.name; p.nameKnown = true; p.organization = "state"; p._stateStaff = true; p._congress = m.sid; p._sid = m.sid; p._ideology = m.ideology;
       BODIES.peds[m.sid] = p;
       if (CBZ.interactions && CBZ.interactions.registerFor) {
         try {

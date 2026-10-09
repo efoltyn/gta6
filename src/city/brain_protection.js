@@ -544,6 +544,9 @@
     _byD.length = 0;
     for (let i = 0; i < D.active.length; i++) {
       const q = D.active[i]; if (q === D.cp) continue;
+      // the aide with the football (q._carries, city/warroom.js) is not a
+      // shooter: never a screen, never an engager; he stays on the man
+      if (q._carries) continue;
       const p = P(q), k = _byD.length;
       const e = _byDPool[k] || (_byDPool[k] = { q: null, d: 0 });
       e.q = q; e.d = hyp(p.x, p.z, D.tx, D.tz); _byD.push(e);
@@ -574,6 +577,13 @@
       // hands on him, on the far side from the gun, pushing him away
       const a = tb + PI + 0.5;
       out.x = Math.sin(a) * 0.8; out.z = Math.cos(a) * 0.8; out.look = tb;
+      return out;
+    }
+    if (q._carries) {
+      // the football stays at the President's back, on the far side from the
+      // gun and opposite the CP's hands: it goes where he goes, case and all
+      const a = tb + PI - 0.55;
+      out.x = Math.sin(a) * 1.05; out.z = Math.cos(a) * 1.05; out.look = tb;
       return out;
     }
     if (!D.hasT) {                                          // no bearing: a closed ring
@@ -704,7 +714,7 @@
       _mo.vffX = w.vx; _mo.vffZ = w.vz;
       A.moveTo(q, w.x, w.z, _mo);
     }
-    if ((hot || D.phase === "alert" || D.phase === "hold") && !reacting && (m.postureT = (m.postureT || 0) - dt) <= 0) {
+    if ((hot || D.phase === "alert" || D.phase === "hold") && !reacting && !q._carries && (m.postureT = (m.postureT || 0) - dt) <= 0) {
       // the discipline's reason: a hot phase (shots, an attacker, a hit) is his
       // ward under attack, drawn at once; alert / hold is a weapon SEEN, which
       // has to hold for his sustain beat before leather clears
@@ -842,7 +852,7 @@
     D.rosterDirty = false;
     // shield indices: non-CP, non-engaging members in a stable order
     let count = 0;
-    for (let i = 0; i < D.active.length; i++) { const q = D.active[i]; if (q !== D.cp && D.engagers.indexOf(q) < 0) count++; }
+    for (let i = 0; i < D.active.length; i++) { const q = D.active[i]; if (q !== D.cp && !q._carries && D.engagers.indexOf(q) < 0) count++; }
     let idx = 0;
     if (D.spotted && (D.spotted.dead || D.t - (D.spottedT || 0) > 1.5)) D.spotted = null;
     for (let i = 0; i < D.active.length; i++) {
@@ -850,8 +860,8 @@
       if (D.engagers.indexOf(q) >= 0) continue;
       const m = memberOf(D, q);
       q._detailBrain = D.key;
-      driveMember(D, q, m, q === D.cp ? 0 : idx, count, dt, env);
-      if (q !== D.cp) idx++;
+      driveMember(D, q, m, q === D.cp || q._carries ? 0 : idx, count, dt, env);
+      if (q !== D.cp && !q._carries) idx++;
     }
     voice(D, env);
     D.lastPosture = env.posture || "normal";
