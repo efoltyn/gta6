@@ -3179,6 +3179,30 @@
     }
     _vMeshes.length = 0; _vRoots.length = 0;
   }
+  /* WHERE HE ACTUALLY HIT IT (city/carstrike.js). The strike knows the
+     contact: the point on the panel and the direction INTO the car. A short
+     ray from just outside along that line finds the real triangle (bumper,
+     bonnet, screen glass, roof) and the mark is laid there, sized to what
+     hit it. runOverBlood's three guessed rays stay for a body that got no
+     full strike. */
+  CBZ.goreCarStrike = function (car, x, y, z, dx, dy, dz, amt) {
+    const g = car && car.group;
+    if (!g || !g.parent || !CBZ.surfaceDecal) return false;
+    const l = Math.hypot(dx, dy, dz);
+    if (!(l > 1e-6)) return false;
+    dx /= l; dy /= l; dz /= l;
+    gatherMeshes([g]);
+    const h = vehicleRay(x - dx * 0.45, y - dy * 0.45, z - dz * 0.45, dx, dy, dz, 1.1);
+    let ok = false;
+    if (h) {
+      const a = Math.max(0.2, Math.min(1.2, amt || 0.7));
+      const S = 0.4 + a * 0.35;
+      vehicleStamp(h, S, S * (dy < -0.5 ? 1.25 : 1), CELL_SPLAT[a > 0.8 ? 0 : 1], { tx: dx, ty: 0, tz: dz, growT: 0.08, grow0: 0.55, dryT: 26 });
+      ok = true;
+    }
+    _vMeshes.length = 0; _vRoots.length = 0;
+    return ok;
+  };
   function nearestCar(x, z, r) {
     const L = CBZ.cityCars;
     let best = null, bd = r * r;
@@ -3409,25 +3433,16 @@
     else { o.y1 = y + 0.15; airStream(0, null, x, y + 0.15, z, jx, 0.75, jz, o); }
   }
 
-  // ---- CORPSE STAIN: a body lying in a pool slowly soaks dark -----------------
-  // ONE cheap shared-material swap per corpse (never a per-frame tint): torso/
-  // legs/arms switch to a cached darkened-blood lambert from the same matCache
-  // the gibs use (tagged _shared, so the rig disposal sweep never frees it).
-  // Throttled scan, camera-gated, dead+settled bodies only.
-  const stainCache = new Map();
-  function stainHex(hex) {
-    let s = stainCache.get(hex);
-    if (s == null) {
-      const r = Math.min(255, (((hex >> 16) & 255) * 0.38 + 46) | 0);
-      const gr = Math.min(255, (((hex >> 8) & 255) * 0.26 + 8) | 0);
-      const b = Math.min(255, ((hex & 255) * 0.26 + 10) | 0);
-      s = (r << 16) | (gr << 8) | b; stainCache.set(hex, s);
-    }
-    return s;
-  }
+  // ---- NO CORPSE STAIN (owner 2026-10-09: "I don't really like clothes
+  // changing colours because of blood. Instead it should just be the blood
+  // holes"). A body lying in its pool used to have its torso/legs/arms
+  // materials swapped for a darkened-blood lambert, so every corpse went
+  // maroon. Deleted: the blood is in the pool under him and in the holes on
+  // him (systems/wounds.js), never in the colour of his clothes.
+
   // walk every body slot of a rig and hand each mesh's current colour to `fn`,
   // swapping in the shared lambert `fn` names back. The ONE place that knows
-  // which slots make up a body — stainCorpse and corpseTreat both ride it.
+  // which slots make up a body (corpseTreat rides it).
   const BODY_SLOTS = ["torso", "collar", "legs", "legsLower", "pelvis", "shoes",
     "arms", "armsLower", "hands", "stripes", "belt", "cap", "hair"];
   function eachBodyMesh(ch, slots, fn) {
@@ -3441,53 +3456,6 @@
       }
     }
   }
-  const STAIN_SLOTS = ["torso", "legs", "arms", "collar", "legsLower", "armsLower"];
-  function stainCorpse(ped) {
-    ped._goreStained = true;
-    const ch = ped.char || (ped.isPlayer ? CBZ.playerChar : null);
-    if (!ch || !ch.skinSlots) return;
-    eachBodyMesh(ch, STAIN_SLOTS, function (mesh) {
-      const src = mesh.material;
-      // a painted outfit (texture-page or printed) keeps its print under the
-      // soak: tint a clone that still carries the map, shared per source
-      // material. The flat swap wiped every patterned corpse to one colour.
-      if (src.map) {
-        let m = stainTexCache.get(src);
-        if (!m) { m = src.clone(); m.color.setHex(stainHex(src.color.getHex())); stainTexCache.set(src, m); }
-        mesh.material = m;
-      } else mesh.material = lambert(stainHex(src.color.getHex()));
-    });
-  }
-  const stainTexCache = new Map();
-  let stainT = 0;
-  function stainRoster(list) {
-    if (!list) return;
-    // "a real kill pool, not a droplet splash" — the threshold has to ride
-    // POOL_K with the pools it is filtering, or the realism pass silently
-    // stops every corpse in the game from ever soaking dark.
-    const kmin = 0.85 * (realism() ? POOL_K : 1);
-    for (let i = 0; i < list.length; i++) {
-      const p = list[i];
-      if (!p || !p.dead || p._goreStained || p.culled || !p.pos || (p.deadT || 0) < 2.5) continue;
-      if (dist2Cam(p.pos.x, p.pos.z) > 45 * 45) continue;     // only stain where it can be seen
-      for (let j = 0; j < splats.length; j++) {
-        const s = splats[j];
-        if (s.streak || s.water || s.max < kmin || s.t < 1.2) continue;  // settled kill-pools only
-        const dx = s.m.position.x - p.pos.x, dz = s.m.position.z - p.pos.z;
-        if (dx * dx + dz * dz < 1.8) { stainCorpse(p); break; }
-      }
-    }
-  }
-  function stainScan() {
-    if (!splats.length) return;
-    stainRoster(CBZ.cityPeds);
-    // THE ISLAND'S DEAD SOAK TOO. This scan only ever looked at CBZ.cityPeds,
-    // so a survival corpse could lie face-down in its own kill pool for the
-    // whole round and stay factory-clean. Same test, same throttle, same
-    // camera gate — the survival roster was simply never asked.
-    if (CBZ.game && CBZ.islandModeOn(CBZ.game.mode)) stainRoster(CBZ.bots);
-  }
-
   /* ============================================================
      THE CORPSE TELLS YOU HOW IT DIED — CBZ.corpseTreat(actor, kind).
 
@@ -3503,7 +3471,7 @@
      everything. Deleting it without replacing it just moves the problem.
 
      So each cause gets its own honest read, and it is the SAME cheap device
-     stainCorpse has always used: one shared-material swap per corpse, never a
+     the old corpse stain used: one shared-material swap per corpse, never a
      per-frame tint, never a new mesh, never a shader.
        frost  — rime-pale, blue-white, the colour drained out (blizzard)
        char   — blackened through (lava, wildfire, a nuclear flash, lightning)
@@ -4671,7 +4639,8 @@
     // and the car that did it wears him: bumper, bonnet, screen
     if (ranOver && !far) {
       const rc = (ctx && ctx.imp && ctx.imp.car) || nearestCar(x, z, 5);
-      if (rc) runOverBlood(rc, x, y, z, amt);
+      // a strike paints its own contacts as they happen (CBZ.goreCarStrike)
+      if (rc && !(ctx && ctx.imp && ctx.imp.strike)) runOverBlood(rc, x, y, z, amt);
     }
     if (ranOver && hasDir) {
       let sl = opts.smearLen || 0;
@@ -4818,10 +4787,7 @@
     if (CBZ.scene && airMesh && airMesh.parent !== CBZ.scene) airReady();
     updateAir(dt);
 
-    // throttled corpse-stain scan: bodies lying in a pool soak dark, once each
-    // + the dismemberment audit: recycled/respawned rigs get their parts back
-    stainT -= dt;
-    if (stainT <= 0) { stainT = 0.85; stainScan(); }
+    // the dismemberment audit: recycled/respawned rigs get their parts back
     // THE DISMEMBERMENT AUDIT RUNS EVERY FRAME. It used to ride the 0.85 s
     // corpse-stain throttle, which was fine while its rule was "alive → restore"
     // but is not fine now that the rule is a distance one: see clause (4) in
