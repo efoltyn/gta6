@@ -371,7 +371,14 @@
       presentModeSwitch(btn.dataset.mode);
     });
   });
-  setMode(g.mode || "escape");
+  // A GUN GAME boot (?mode=, START_MODE or the remembered game) cannot be
+  // answered yet: modes/gungame.js registers ~25 scripts later, and setMode
+  // would normalise it to escape, pulling index.html's first-paint
+  // body.mode-gungame back off and painting the prison card until then.
+  // Leave it pending; gungame.js answers it the moment it registers, and
+  // main.js falls back to escape if it never does (GUNGAME_V1 off).
+  if (g.mode === "gungame" && !CBZ.modes.gungame) CBZ.gungameBootPending = true;
+  else setMode(g.mode || "escape");
 
   // ---- CITY: character-origin picker (index.html #originSelect, city/
   // origins.js applies the pick at run-start). Selection just lives on
