@@ -49,9 +49,24 @@
                  opts.box draws in host-local coords, because propuse anchors
                  are always WORLD. Default 0. (opts.oy for a lifted host y.)
      opts.lot    lot record passed straight through to the propuse anchors.
-     opts.solid  colliders. Default path: big pieces are solid unless this is
-                 explicitly false. Host path: the HOST owns solidity, so
-                 nothing is marked solid unless the caller passes solid:true.
+     opts.solid  colliders. EVERY piece is solid unless this is explicitly
+                 false, on the default path and on a host's `box` alike: the
+                 collider rides the draw call as {solid, y0, y1} (the contract
+                 buildings.js lbox, fitout.js kitBox and every venue box
+                 honour), so the host ledgers and tears it down with its own.
+                 (It used to be "host path: nothing solid unless solid:true",
+                 and that is why you walked through every fit-out couch.)
+
+   SOLID THAT FITS THE MESH. A piece's colliders are the SHAPE of the piece,
+   not one box round it: a sofa is a seat, a back and two arms; a chair is
+   a seat and a back. Every collider stands on the floor (band [0, top]),
+   so the physics step-up (systems/physics.js stepTopAt: a banded box whose
+   top is within a step of your feet is ground) lets you WALK UP onto a seat
+   the way you walk up a kerb, and anything taller than a step is a wall.
+   A seat's collider top is its cushion less SEAT_GIVE (3 cm of padding
+   under a standing foot), which also brings a 0.45 chair under the 0.42 m
+   the resolver steps (physics.js STEP_SOLID). Tables, counters, stools and
+   beds stay above it: those are a jump or a vault, never a stroll.
      opts.tone   palette variant: "warm" | "cool" | "exec" | "clinic" | "auto"
                  ("auto" = deterministic per-position pick via CBZ.hash01).
 
@@ -245,10 +260,9 @@
     const hostBox = typeof opts.box === "function" ? opts.box : null;
     const draw = hostBox || CBZ.addBox;
     const ox = opts.ox || 0, oz = opts.oz || 0, oy = opts.oy || 0;
-    // Default path → this file owns colliders for big pieces. Host path → the
-    // host owns solidity (its lbox already ledgers colliders per building), so
-    // nothing is solid unless the caller explicitly asked.
-    const solidOn = hostBox ? (opts.solid === true) : (opts.solid !== false);
+    // Solid unless the caller says otherwise; a host box gets the collider on
+    // the same call that draws the box, so the host owns its lifetime.
+    const solidOn = opts.solid !== false;
     // `tone` is normally one of TONE_NAMES. Accept a RAW HEX too: callers
     // migrating an authored room already have the exact colour they were
     // drawing (world/lounge.js's 0x2b3a67 couch) and silently discarding it
@@ -293,9 +307,13 @@
           if (o.emissive != null) { oo.emissive = o.emissive; oo.ei = o.ei != null ? o.ei : 0.5; }
           if (o.cast) oo.cast = true;
           if (o.solid && solidOn) {
+            // o.band = [lo, hi] above the floor: the collider's own band, so
+            // a seat's solid runs floor-to-cushion while its drawn box is
+            // just the cushion (see SOLID THAT FITS THE MESH up top)
             oo.solid = true;
-            oo.y0 = y + up;
-            oo.y1 = y + up + (o.colH != null ? o.colH : h);
+            oo.noBreach = true;            // furniture is never a wall to carve
+            oo.y0 = y + (o.band ? o.band[0] : up);
+            oo.y1 = y + (o.band ? o.band[1] : up + (o.colH != null ? o.colH : h));
             if (!hostBox) nSolid++;
           }
         }
@@ -381,6 +399,11 @@
 
   const F = {};
 
+  // the solid band of a seat: floor to the cushion, less the give of the
+  // padding under a standing foot (SOLID THAT FITS THE MESH, top of file)
+  const SEAT_GIVE = 0.03;
+  function seatBand(cushion) { return [0, cushion - SEAT_GIVE]; }
+
   // ======================================================================
   //  SEATING
   // ======================================================================
@@ -414,23 +437,22 @@
     // reveal on every side). It also ties the four legs together, which is what
     // stops them reading as four unrelated sticks.
     if (D) p.put(0, 0.37, 0, 0.44, 0.05, 0.44, leg);
-    // The pad carries the collider (height-gated to the cushion, so a body can
-    // still stand in the chair's footprint to reach the seat anchor) — a chair
-    // you walk through is a decoy, and `opts.solid` used to be a no-op here.
+    // The pad carries the seat's collider, floor to cushion (less the give),
+    // and the back carries its own: walk into it and you step up onto it.
     const top = D
-      ? p.put(0, 0.39, 0, 0.52, 0.06, 0.52, pad, { solid: true, colH: 0.06 })            // cushion → 0.45
-      : p.put(0, 0.37, 0, 0.50, 0.08, 0.50, pad, { solid: true, colH: 0.08 });           // cushion → 0.45
+      ? p.put(0, 0.39, 0, 0.52, 0.06, 0.52, pad, { solid: true, band: seatBand(0.45) })   // cushion → 0.45
+      : p.put(0, 0.37, 0, 0.50, 0.08, 0.50, pad, { solid: true, band: seatBand(0.45) });  // cushion → 0.45
     if (D) {
       // AN OPEN BACK, the way a chair is joined: a top rail and a lower rail
       // tenoned between the two rear uprights, two slats between them, and AIR
       // round the slats. The old back was three solid panels stacked into a
       // wall; the gaps are what make it read as a chair from across a room.
-      p.put(0, 0.79, -0.205, 0.41, 0.10, 0.035, body);               // top rail
+      p.put(0, 0.79, -0.205, 0.41, 0.10, 0.035, body, { solid: true, band: [0, 0.89] });   // top rail (the back's solid)
       p.put(0, 0.53, -0.205, 0.41, 0.045, 0.03, body);               // lower rail
       for (let a = -1; a <= 1; a += 2)
         p.put(a * 0.075, 0.575, -0.205, 0.04, 0.215, 0.022, body);    // slats
     } else {
-      p.put(0, 0.49, -0.21, 0.50, 0.55, 0.08, body);                 // backrest (legacy slab)
+      p.put(0, 0.49, -0.21, 0.50, 0.55, 0.08, body, { solid: true, band: [0, 1.04] });   // backrest (legacy slab)
     }
     p.seat(0, 0, yaw, "chair", 0.45, top);
     return p.done(0.52, D ? 0.55 : 0.50, 0.95, top);
@@ -453,9 +475,9 @@
     }
     p.put(0, 0.06, 0, 0.05, 0.28, 0.05, P.shelf);                              // gas lift
     p.put(0, 0.34, 0, 0.42, 0.04, 0.42, frame);                                // seat pan
-    const top = p.put(0, 0.38, 0.01, 0.5, 0.07, 0.5, pad, { solid: true, colH: 0.07 });   // cushion → 0.45
+    const top = p.put(0, 0.38, 0.01, 0.5, 0.07, 0.5, pad, { solid: true, band: seatBand(0.45) });   // cushion → 0.45
     p.put(0, 0.36, -0.25, 0.06, 0.18, 0.03, frame);                            // back stem, up to the back
-    p.put(0, 0.54, -0.27, 0.46, 0.42, 0.06, pad);                              // back 0.54..0.96
+    p.put(0, 0.54, -0.27, 0.46, 0.42, 0.06, pad, { solid: true, band: [0, 0.96] });   // back 0.54..0.96
     if (D) p.put(0, 0.58, -0.306, 0.4, 0.34, 0.012, frame);                    // its shell, ON the back (it sat 1 mm inside it: two backs fighting)
     if (D) for (let a = -1; a <= 1; a += 2) {
       p.put(a * 0.27, 0.40, -0.02, 0.03, 0.2, 0.03, frame);                    // arm post
@@ -480,12 +502,12 @@
     // short legs under the body, not a plinth: you see floor under a chair
     for (let a = -1; a <= 1; a += 2) for (let b = -1; b <= 1; b += 2)
       p.put(a * (W / 2 - 0.1), 0, b * 0.32, 0.05, 0.10, 0.05, P.darkwood);
-    p.put(0, 0.10, 0, W, 0.24, 0.88, cloth, { solid: true, colH: 0.74 });     // body
+    p.put(0, 0.10, 0, W, 0.24, 0.88, cloth, { solid: true, band: seatBand(0.42) });   // body (the seat's solid)
     const top = p.put(0, 0.34, 0.04, W - 0.30, 0.08, 0.72, cloth);            // cushion → 0.42
     p.put(0, 0.42, -0.34, W - 0.26, 0.40, 0.14, cloth);                       // back cushion → 0.82
-    p.put(0, 0.34, -0.42, W, 0.48, 0.06, cloth);                              // back frame → 0.82
+    p.put(0, 0.34, -0.42, W, 0.48, 0.06, cloth, { solid: true, band: [0, 0.82] });   // back frame → 0.82
     for (let a = -1; a <= 1; a += 2) {
-      p.put(a * (W / 2 - 0.08), 0.34, 0.02, 0.16, 0.22, 0.84, cloth);         // arm
+      p.put(a * (W / 2 - 0.08), 0.34, 0.02, 0.16, 0.22, 0.84, cloth, { solid: true, band: [0, D ? 0.61 : 0.56] });   // arm
       if (D) p.put(a * (W / 2 - 0.08), 0.56, 0.02, 0.18, 0.05, 0.80, cloth);  // soft arm pad → 0.61
     }
     p.seat(0, 0.04, yaw, "armchair", 0.42, top);
@@ -498,7 +520,7 @@
     p.put(0, 0, 0, 0.36, 0.05, 0.36, P.chair);                       // base plate
     p.put(0, 0.05, 0, 0.10, 0.55, 0.10, P.chair);                    // column
     p.put(0, 0.22, 0, 0.30, 0.04, 0.30, P.chair);                    // foot ring
-    const top = p.put(0, 0.60, 0, 0.42, 0.08, 0.42, p.col("cloth"), { solid: true, colH: 0.08 }); // cushion → 0.68
+    const top = p.put(0, 0.60, 0, 0.42, 0.08, 0.42, p.col("cloth"), { solid: true, band: [0, 0.68] }); // cushion → 0.68 (above a step: a jump)
     p.seat(0, 0, yaw, "stool", 0.68, top);
     return p.done(0.42, 0.42, 0.68, top);
   };
@@ -522,18 +544,18 @@
     // The COLLIDER stays on ONE box either way (a seat frame under the slats,
     // height-gated to the same 0.45 the plank used to reach) so slatting the
     // seat cannot double the bench's collider count.
-    if (DT) p.put(0, 0.29, 0, L - 0.06, 0.06, 0.48, P.chair, { solid: true, colH: 0.16 });
+    if (DT) p.put(0, 0.29, 0, L - 0.06, 0.06, 0.48, P.chair, { solid: true, band: seatBand(0.45) });
     const top = DT
       ? p.put(0, 0.35, 0.11, L, 0.10, 0.22, wood)                                      // front slat → 0.45
-      : p.put(0, 0.35, 0, L, 0.10, 0.48, wood, { solid: true, colH: 0.10 });           // plank → 0.45
+      : p.put(0, 0.35, 0, L, 0.10, 0.48, wood, { solid: true, band: seatBand(0.45) });  // plank → 0.45
     if (DT) p.put(0, 0.35, -0.13, L, 0.10, 0.22, wood);                                // rear slat → 0.45
     if (back && DT) {
       p.put(0, 0.50, -0.19, L, 0.16, 0.07, wood);                    // lower back rail
-      p.put(0, 0.72, -0.23, L, 0.16, 0.07, wood);                    // upper back rail, stepped aft
+      p.put(0, 0.72, -0.23, L, 0.16, 0.07, wood, { solid: true, band: [0, 0.88] });   // upper back rail, stepped aft (the back's solid)
       for (let a = -1; a <= 1; a += 2)
         p.put(a * (L / 2 - 0.22), 0.45, -0.21, 0.09, 0.45, 0.09, P.chair);   // back uprights
     } else if (back) {
-      p.put(0, 0.55, -0.20, L, 0.42, 0.08, wood);                    // backrest
+      p.put(0, 0.55, -0.20, L, 0.42, 0.08, wood, { solid: true, band: [0, 0.97] });   // backrest
     }
     const n = Math.max(1, Math.floor(L / 0.75));
     for (let i = 0; i < n; i++)
@@ -556,7 +578,7 @@
     for (let a = -1; a <= 1; a += 2) for (let b = -1; b <= 1; b += 2)
       p.put(a * (L / 2 - 0.1), 0, b * 0.33, 0.05, 0.12, 0.05, P.darkwood);
     if (L > 1.9) for (let b = -1; b <= 1; b += 2) p.put(0, 0, b * 0.33, 0.05, 0.12, 0.05, P.darkwood);
-    p.put(0, 0.12, 0, L, 0.22, 0.85, cloth, { solid: true, colH: 0.73 });   // body
+    p.put(0, 0.12, 0, L, 0.22, 0.85, cloth, { solid: true, band: seatBand(0.40) });   // body (the seat's solid: step up onto it)
     // THE SEAM IS THE WHOLE READ. A sofa is three cushions, and one 2.24-long
     // slab is a bench with upholstery on it. Draw the cushion ONCE PER SEAT
     // with a 3cm gap between, all at the identical 0.34→0.40 band, so the
@@ -574,11 +596,11 @@
     // the frame is what the arms and the top edge belong to, the cushions are
     // what the shoulders touch, and the 4cm they stand proud is the difference
     // between "sofa" and "padded wall".
-    p.put(0, 0.34, -0.375, L, 0.51, 0.10, cloth);                           // back frame → 0.85
+    p.put(0, 0.34, -0.375, L, 0.51, 0.10, cloth, { solid: true, band: [0, 0.85] });   // back frame → 0.85
     if (D) for (let i = -1; i <= 1; i++)
       p.put(i * (cw + GAP), 0.40, -0.285, cw, 0.36, 0.10, cloth);           // back cushions → 0.76
     for (let a = -1; a <= 1; a += 2) {
-      p.put(a * (L / 2 - 0.09), 0.34, 0.02, 0.18, 0.24, 0.80, cloth);       // arm frame → 0.58
+      p.put(a * (L / 2 - 0.09), 0.34, 0.02, 0.18, 0.24, 0.80, cloth, { solid: true, band: [0, D ? 0.63 : 0.58] });   // arm frame → 0.58
       if (D) p.put(a * (L / 2 - 0.09), 0.58, 0.02, 0.20, 0.05, 0.76, cloth); // soft arm pad → 0.63
     }
     for (let i = -1; i <= 1; i++) p.seat(i * (L / 3), 0.03, yaw, "sofa", 0.40, top);
@@ -608,7 +630,7 @@
     const p = pen("bed", x, y, z, yaw, opts);
     const linen = p.col("linen"), frame = p.col("frame");
     const D = det();
-    p.put(0, 0, 0, W, D ? 0.26 : 0.32, L, frame, { solid: true, colH: 0.32 });    // base
+    p.put(0, 0, 0, W, D ? 0.26 : 0.32, L, frame, { solid: true, band: seatBand(0.55) });    // base (the mattress's solid: a jump, not a step)
     if (D) {
       for (let a = -1; a <= 1; a += 2)
         p.put(a * (W / 2 - 0.03), 0.26, 0, 0.06, 0.11, L, frame);                 // side rails
@@ -636,12 +658,12 @@
       // SHAPED headboard: a recessed panel between two proud posts under a cap
       // rail. Three boxes instead of one slab, and the whole reason a bed reads
       // as furniture rather than a plinth when you walk in the door.
-      p.put(0, 0.12, L / 2 + 0.05, W - 0.12, 0.72, 0.09, P.head);                 // panel → 0.84
+      p.put(0, 0.12, L / 2 + 0.05, W - 0.12, 0.72, 0.09, P.head, { solid: true, band: [0, 0.93] });   // panel → 0.84 (the headboard's solid)
       for (let a = -1; a <= 1; a += 2)
         p.put(a * (W / 2 + 0.01), 0.06, L / 2 + 0.0525, 0.10, 0.86, 0.115, frame);   // posts → 0.92 (their backs 1.5 cm in from the cap rail's)
       p.put(0, 0.84, L / 2 + 0.05, W + 0.14, 0.09, 0.15, P.head);                 // cap rail → 0.93
     } else {
-      p.put(0, 0.12, L / 2 + 0.06, W + 0.10, 0.83, 0.12, P.head);                 // headboard
+      p.put(0, 0.12, L / 2 + 0.06, W + 0.10, 0.83, 0.12, P.head, { solid: true, band: [0, 0.95] });   // headboard
     }
     p.bed(L - 0.10, y + 0.55, "bed", top);
     return p.done(W, L + 0.12, 0.95, top);
@@ -667,9 +689,8 @@
     for (let a = -1; a <= 1; a += 2) for (let b = -1; b <= 1; b += 2)
       p.put(a * (W / 2 - 0.08), 0, b * (L / 2 - 0.22), 0.05, 0.24, 0.05, frame);   // legs
     p.put(0, 0.24, 0, W, 0.04, L, frame);                                          // rails
-    // The deck carries the collider but only up to its own top, so the height
-    // gate in propuse's entry solve still lets a body stand alongside it.
-    const top = p.put(0, 0.28, 0, W - 0.06, 0.06, L - 0.08, canvas, { solid: true, colH: 0.06 });  // deck → 0.34
+    // The deck carries the collider, floor to deck: a step you walk up onto.
+    const top = p.put(0, 0.28, 0, W - 0.06, 0.06, L - 0.08, canvas, { solid: true, band: seatBand(0.34) });  // deck → 0.34
     // SLAT SEAMS: three cross battens laid on the deck at the same 0.34, so a
     // sun lounger reads as a slatted frame instead of one canvas plank. Derived
     // from the length, never a magic spacing, so a long or short lounger both
@@ -693,9 +714,9 @@
       p.put(a * 0.27, 0, -0.20, 0.05, 0.34, 0.05, frame);       // rear uprights (shorter)
       p.put(a * 0.27, 0.34, -0.30, 0.05, 0.62, 0.05, frame);    // back frame, staggered aft
     }
-    const top = p.put(0, 0.32, 0.02, 0.58, 0.06, 0.56, canvas, { solid: true, colH: 0.06 });  // seat → 0.38
+    const top = p.put(0, 0.32, 0.02, 0.58, 0.06, 0.56, canvas, { solid: true, band: seatBand(0.38) });  // seat → 0.38
     p.put(0, 0.38, -0.22, 0.54, 0.24, 0.06, canvas);            // back, lower panel
-    p.put(0, 0.60, -0.30, 0.54, 0.24, 0.06, canvas);            // back, upper panel
+    p.put(0, 0.60, -0.30, 0.54, 0.24, 0.06, canvas, { solid: true, band: [0, 0.84] });   // back, upper panel
     p.seat(0, 0.02, yaw, "deck", 0.38, top);
     return p.done(0.60, 0.68, 0.96, top);
   };
@@ -729,7 +750,7 @@
     const D = Math.max(0.6, opts.deep != null ? +opts.deep : 0.75);
     const p = pen("desk", x, y, z, yaw, opts);
     const DT = det();
-    p.put(-(L / 2 - 0.26), 0.02, 0, 0.46, 0.64, D - 0.10, P.desk, { solid: true, colH: 0.72 });
+    p.put(-(L / 2 - 0.26), 0.02, 0, 0.46, 0.64, D - 0.10, P.desk);
     if (DT) {
       // THREE DRAWER FACES on the pedestal, facing the worker (-forward), each
       // with a handle. A pedestal with no lines on it is a filing box; the
@@ -745,7 +766,7 @@
     // The worktop already oversails it by 4cm, so the rail is never lit the way
     // the top is and the top reads as a separate, floating slab.
     if (DT) p.put(0, 0.62, D / 2 - 0.05, L - 0.08, 0.06, 0.06, P.chair);
-    const top = p.put(0, 0.68, 0, L, 0.06, D, P.worktop);                  // worktop → 0.74
+    const top = p.put(0, 0.68, 0, L, 0.06, D, P.worktop, { solid: true, band: [0, 0.74] });   // worktop → 0.74 (the whole desk is solid)
     if (DT) p.put(0, 0.74, -0.02, 0.44, 0.02, 0.15, P.bezel);              // keyboard, worker side
     monitor(p, 0, D / 2 - 0.22, 0.74, 0.60);
     // the TASK chair behind the desk, facing it (= facing along yaw, over the top)
@@ -776,9 +797,9 @@
         p.put(0, 0.61, b * (D / 2 - 0.08), L - 0.24, 0.09, 0.025, P.darkwood);       // long aprons
       for (let a = -1; a <= 1; a += 2)
         p.put(a * (L / 2 - 0.09), 0.61, 0, 0.025, 0.09, D - 0.22, P.darkwood);       // end aprons, between the legs (not into their tops)
-      p.put(0, 0.665, 0, L - 0.2, 0.03, D - 0.2, P.darkwood, { solid: true, colH: 0.08 });   // under-frame (collider)
+      p.put(0, 0.665, 0, L - 0.2, 0.03, D - 0.2, P.darkwood, { solid: true, band: [0, 0.74] });   // under-frame (collider)
     } else {
-      p.put(0, 0.56, 0, L - 0.16, 0.10, D - 0.16, wood, { solid: true, colH: 0.18 });       // apron
+      p.put(0, 0.56, 0, L - 0.16, 0.10, D - 0.16, wood, { solid: true, band: [0, 0.74] });   // apron
     }
     const top = DT ? p.put(0, 0.705, 0, L, 0.035, D, wood) : p.put(0, 0.66, 0, L, 0.08, D, wood);   // top → 0.74
     // ring: half the chairs down each long side, the remainder at the +x end
@@ -824,7 +845,7 @@
     // The top oversails the legs by 9cm and carries a SHIN-HIGH collider only:
     // a coffee table between a sofa and a screen is an obstacle you step round,
     // never a wall, and never something the body can stand on.
-    const top = p.put(0, 0.35, 0, L, 0.05, D, wood, { solid: true, colH: 0.05 });   // top → 0.40
+    const top = p.put(0, 0.35, 0, L, 0.05, D, wood, { solid: true, band: [0, 0.40] });   // top → 0.40 (low enough to step up onto)
     if (DT) p.put(0, 0.30, 0, L - 0.10, 0.04, D - 0.12, P.darkwood);        // apron shadow under the lip (its top 1 cm below the legs', never in their plane)
     return p.done(L, D, 0.40, top);
   };
@@ -839,7 +860,7 @@
     const D = Math.max(0.5, opts.deep != null ? +opts.deep : 0.75);
     const p = pen("counter", x, y, z, yaw, opts);
     p.put(0, 0, 0, L - 0.12, 0.12, D - 0.14, P.chair);                       // kick recess
-    p.put(0, 0.12, 0, L, 0.74, D, P.desk, { solid: true, colH: 0.80 });      // body
+    p.put(0, 0.12, 0, L, 0.74, D, P.desk, { solid: true, band: [0, 0.92] });      // body
     const top = p.put(0, 0.86, 0, L + 0.08, 0.06, D + 0.10, P.worktop);      // worktop → 0.92
     p.put(0, 0.60, D / 2 + 0.06, L, 0.06, 0.04, P.worktop);                  // customer-side rail
     p.put(L / 2 - 0.42, 0.92, -0.05, 0.34, 0.22, 0.28, P.bezel);             // till
@@ -911,7 +932,7 @@
     const p = pen("wardrobe", x, y, z, yaw, opts);
     const wood = p.col("wood");
     p.put(0, 0, -0.02, L - 0.06, 0.08, D - 0.08, P.darkwood);                   // plinth, set back
-    p.put(0, 0.08, 0, L, H - 0.12, D, wood, { solid: true, colH: H - 0.08 });   // carcass
+    p.put(0, 0.08, 0, L, H - 0.12, D, wood, { solid: true, band: [0, H] });   // carcass
     p.put(0, H - 0.04, 0.01, L + 0.04, 0.04, D + 0.03, wood);                   // cornice
     const dw = L / n;
     for (let i = 0; i < n; i++) {
@@ -938,7 +959,7 @@
     const p = pen("credenza", x, y, z, yaw, opts);
     const wood = p.col("wood");
     p.put(0, 0, -0.03, L - 0.08, 0.07, D - 0.08, P.darkwood);                          // plinth
-    p.put(0, 0.07, 0, L - 0.02, H - 0.105, D - 0.02, wood, { solid: true, colH: H - 0.07 });   // carcass
+    p.put(0, 0.07, 0, L - 0.02, H - 0.105, D - 0.02, wood, { solid: true, band: [0, H] });   // carcass
     const top = p.put(0, H - 0.035, 0, L + 0.02, 0.035, D + 0.01, wood);               // top → H
     const dw = (L - 0.02) / n;
     for (let i = 0; i < n; i++) {
@@ -1051,8 +1072,8 @@
     const surf = p.col("wood"), cloth = p.col("cloth");
     for (let a = -1; a <= 1; a += 2)
       p.put(a * (L / 2 - 0.32), 0.02, 0, 0.56, 0.64, D - 0.16, P.darkwood);
-    p.put(0, 0.06, D / 2 - 0.06, L - 0.20, 0.60, 0.10, P.darkwood, { solid: true, colH: 0.68 });
-    const top = p.put(0, 0.66, 0, L, 0.08, D, surf);                         // worktop → 0.74
+    p.put(0, 0.06, D / 2 - 0.06, L - 0.20, 0.60, 0.10, P.darkwood);
+    const top = p.put(0, 0.66, 0, L, 0.08, D, surf, { solid: true, band: [0, 0.74] });   // worktop → 0.74 (the whole desk is solid)
     p.put(0, 0.74, D / 2 - 0.10, 0.46, 0.05, 0.08, P.worktop);               // nameplate
     monitor(p, 0.55, D / 2 - 0.34, 0.74, 0.66);
 
@@ -1060,8 +1081,8 @@
     const tf = -(D / 2 + 0.52);
     p.put(0, 0, tf, 0.54, 0.05, 0.54, P.chair);                              // base
     p.put(0, 0.05, tf, 0.14, 0.37, 0.14, P.chair);                           // column
-    const tTop = p.put(0, 0.42, tf, 0.62, 0.08, 0.62, cloth);                // cushion → 0.50
-    p.put(0, 0.50, tf - 0.27, 0.62, 0.80, 0.10, cloth);                      // high back → 1.30
+    const tTop = p.put(0, 0.42, tf, 0.62, 0.08, 0.62, cloth, { solid: true, band: seatBand(0.50) });   // cushion → 0.50
+    p.put(0, 0.50, tf - 0.27, 0.62, 0.80, 0.10, cloth, { solid: true, band: [0, 1.30] });               // high back → 1.30
     for (let a = -1; a <= 1; a += 2)
       p.put(a * 0.31, 0.50, tf, 0.08, 0.16, 0.48, cloth);                    // arms
     p.seat(0, tf, yaw, "throne", 0.50, tTop);                                // looks out over the desk

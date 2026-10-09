@@ -30,6 +30,10 @@
         exit  the owning system's own exit, nothing re-implemented here
      CBZ.seatExit()   -> fires seatState().exit(); true when it did
 
+   A TAP ON THE SCREEN IS NEVER A WAY OUT (touch.js used to stand you up on
+   any tap that hit nothing). Out of furniture is: #tExit, the seat's key
+   verb, or the stick / W pushed forward and held PUSH_HOLD (pushOut below).
+
    Every probe is feature-detected against the system that owns the seat, so
    this file holds no seat state of its own and a page without one of those
    systems simply never reports that kind.
@@ -288,11 +292,38 @@
     if (btn && btnShown) { btnShown = false; btn.style.display = "none"; btn.classList.remove("on"); }
   }
 
+  /* ---- PUSH OUT: the stick (or W) held forward stands you up -------------
+     The third deliberate way out of a chair, bench, couch or bed, and the
+     one a thumb already on the stick finds by itself: push forward and hold
+     it a moment. Furniture only: in a car, forward is the throttle.
+     ARMED only after forward has been seen RELEASED while seated, so the
+     walk that carried you into the chair never carries you straight back
+     out of it. A brief nudge (< PUSH_HOLD) does nothing. touch.js's stick
+     writes the same keys map (w/a/s/d) the keyboard does. */
+  const PUSH_HOLD = 0.45;            // seconds of forward before you get up
+  let pushArmed = false, pushSince = -1, pushSeat = null;
+  function pushOut(st) {
+    if (st.kind !== "seat" && st.kind !== "bed") { pushSeat = null; return false; }
+    const P = CBZ.player, spot = P._propSeat || P._propBed;
+    if (spot !== pushSeat) { pushSeat = spot; pushArmed = false; pushSince = -1; }
+    const k = CBZ.keys || {};
+    const fwd = !!(k.w || k.arrowup) && !k.s && !k.arrowdown;
+    if (!fwd) { pushArmed = true; pushSince = -1; return false; }
+    if (!pushArmed) return false;
+    const now = (typeof performance !== "undefined" ? performance.now() : Date.now()) / 1000;
+    if (pushSince < 0) { pushSince = now; return false; }
+    if (now - pushSince < PUSH_HOLD) return false;
+    pushArmed = false; pushSince = -1;
+    try { st.exit(); } catch (e) {}
+    return true;
+  }
+
   // After the camera (50) and before systems/interactions.js places the
   // prompts (96), so a label armed here is swept and pinned the same frame.
   function tick() {
     const st = live() ? seatState() : null;
-    if (!st) { hideBtn(); return; }
+    if (!st) { hideBtn(); pushSeat = null; return; }
+    if (pushOut(st)) { hideBtn(); return; }
     if (onTouch()) showBtn(st.verb);
     else { hideBtn(); pin(st); }
   }

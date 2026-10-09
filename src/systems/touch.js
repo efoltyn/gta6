@@ -1282,7 +1282,9 @@
     // finger. Same result, no per-seat mesh bookkeeping, and it works for every
     // seat in the game — desk chairs, benches, deck chairs, cabin seats —
     // because they all register through the one anchor system.
-    if (!target && CBZ.propNearestSeat && !CBZ.player.dead) {
+    // Not while already seated: the seat hit is a loose ground-plane pick
+    // (1.5 m), so in a room full of chairs a stray tap would hop you seats.
+    if (!target && CBZ.propNearestSeat && !CBZ.player.dead && !CBZ.player._propSeat && !CBZ.player._propBed) {
       const P = CBZ.player;
       // where the ray crosses the player's own floor level
       const dirY = tapRay.ray.direction.y;
@@ -1301,10 +1303,12 @@
         }
       }
     }
-    // ---- TAP ANYWHERE TO GET UP ----------------------------------------
-    // The mirror of the above, and the reason the "stand up" card can go too:
-    // once you are seated the only verb you want is OUT, so any tap is it.
-    if (!target && CBZ.player._propSeat && CBZ.propStand) { CBZ.propStand(CBZ.player); return true; }
+    // A tap while seated is NOT a way out. (It was: "tap anywhere to get up",
+    // and the owner on iPad: "when you sit in a chair and then just randomly
+    // press anywhere on the screen, you stand up. That's dumb.") Standing up
+    // is deliberate: the #tExit button, the stick pushed forward and held
+    // (systems/seat_exit.js), or the seat's own verb. Every other tap falls
+    // through to what it does on foot: a thing under the finger, or nothing.
 
     if (!target) return false;
 

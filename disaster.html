@@ -513,7 +513,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Needs core/seed.js for CBZ.hashN; bakes lazily on first request, so it only
      has to precede its first consumer — world/materials.js. -->
 <script src="src/world/textures_surface.js?v=ground1008c"></script>
-<script src="src/world/materials.js?v=ground1001"></script>
+<script src="src/world/materials.js?v=seats1009b"></script>
 <script src="src/world/fuel_station.js?v=pf0930a"></script>
 <script src="src/world/prisonkit.js?v=tow929b"></script>
 <!-- THE LADDER, DRAWN (world/ladderkit.js): stiles, rungs and a cage built
@@ -531,7 +531,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- Furniture kit: CBZ.furnish draws a piece AND registers its use-anchor in one
      call. After materials.js (resolves addBox at call time); before its consumers
      lounge.js / cafeteria.js / clutter.js. -->
-<script src="src/city/furniture.js?v=presint1001b"></script>
+<script src="src/city/furniture.js?v=seats1009b"></script>
 <!-- NEWS ONE (city/newsroom.js): the one news channel, its one canvas and
      the one TV set, shared by every screen in the game. Before world/lounge.js
      (the prison dayroom set) and every city/ room that hangs a TV. -->
@@ -882,7 +882,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/fixedstep.js?v=fixed1"></script>
 <!-- how a prison run ends: the run out past the wall, the fade, one line (after state.js and save.js) -->
 <script src="src/systems/escapeend.js?v=end1"></script>
-<script src="src/systems/touch.js?v=jailv1001"></script>
+<script src="src/systems/touch.js?v=seats1009b"></script>
 <!-- THE WAY OUT of any seat (car, boat, cockpit, armor, saddle, chair, bed):
      CBZ.seatState/seatExit, the key pinned on the door, the one touch EXIT. -->
 <!-- where a floating touch button may go (the verb column, the way out): pure rect math -->
@@ -1434,7 +1434,7 @@ document.body.appendChild(b);}}catch(e){}})();
      real fixtures) and freed when you leave. After storegoods (same lazy
      dresser shape), furniture.js (CBZ.furnish) and interior_programs.js
      (which declares every floor to it). -->
-<script src="src/city/fitout.js?v=presint1001b"></script>
+<script src="src/city/fitout.js?v=seats1009b"></script>
 <script src="src/city/fitout_plans.js?v=news0930"></script>
 <script src="src/city/fitout_work.js?v=news0930"></script>
 <script src="src/city/fitout_gang.js?v=news0930"></script>
