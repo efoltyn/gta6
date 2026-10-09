@@ -675,7 +675,17 @@ body.mode-survival #objective:not(.killfeed){ display:none; }
 /* touch: a band pill never lands on the verb stack or the lifted cluster;
    it rides above whichever is taller (touch.js / interact.js write the vars) */
 body.touch .wprompt.band{bottom:max(calc(168px + var(--tb-lift, 0px) + env(safe-area-inset-bottom,0px)), calc(var(--sv-bottom, 34px) + var(--pi-dock-h, 0px) + 14px));}
-.wprompt .tpill{margin:0;}
+/* ONE LAYOUT FOR EVERY PILL, BOTH INPUTS. Owner on iPad (2026-10-09): the
+   car door's "Sit" + "back" drew on top of each other. The touch .tpill
+   (mobile.css) is inline-flex with NO gap, and .wsub pulled itself 2px LEFT
+   into the verb (a nudge written for the desktop pill's 8px gap), so on
+   touch the two words touched and overlapped. The gap is now the pill's
+   own on both inputs, the sub never pulls left, the words never break or
+   squeeze (flex:none), and a pill wider than the glass caps there with an
+   ellipsis on the sub first instead of spilling past its rim. */
+.wprompt .tpill{margin:0; gap:7px; white-space:nowrap; max-width:min(340px, calc(100vw - 24px)); box-sizing:border-box;}
+.wprompt .tpill > .wverb{flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis;}
+.wprompt .tpill > .wkey{flex:none;}
 body:not(.touch) .wprompt .tpill{
   display:inline-flex; align-items:center; gap:8px; padding:6px 12px 6px 7px;
   border-radius:9px; border:1px solid rgba(255,255,255,.22); background:rgba(9,14,20,.84);
@@ -683,7 +693,7 @@ body:not(.touch) .wprompt .tpill{
   box-shadow:0 2px 10px rgba(0,0,0,.45); cursor:default; pointer-events:none;
 }
 .wprompt .wkey{width:auto; min-width:23px; padding:0 5px; font-size:11px; letter-spacing:.06em;}
-.wprompt .wsub{font-weight:500; font-size:12px; opacity:.72; margin-left:-2px;}
+.wprompt .wsub{font-weight:500; font-size:12px; opacity:.72; flex:0 1000 auto; min-width:0; overflow:hidden; text-overflow:ellipsis;}
 .wprompt:not(.band)::after{
   content:""; position:absolute; left:50%; bottom:4px; width:8px; height:8px; margin-left:-4px;
   background:rgba(9,14,20,.84); border-right:1px solid rgba(255,255,255,.22); border-bottom:1px solid rgba(255,255,255,.22);

@@ -2857,6 +2857,9 @@
     // interact.js's "Take armor" reads — and DEFERS the payout for a body with
     // no resting place yet, paying it at the wreck once the body is down.
     // Degrade-safe: no morgue.js, and this is byte-for-byte what it always was.
+    // A HELD SIGN, FLAG OR SHIELD LEAVES THE HANDS NOW (city/mob.js): it falls
+    // as a real loose body, never hangs in the air over a falling man
+    if (CBZ.dropHeldProp) { try { CBZ.dropHeldProp(ped, imp); } catch (e) {} }
     if (CBZ.cityDeathDrop) CBZ.cityDeathDrop(ped);
     else {
       if (ped.armed && ped.weapon) dropWeapon(ped.pos.x, ped.pos.z, ped.weapon, ped.ammo, { y: ped.pos.y, body: ped });
@@ -3164,6 +3167,9 @@
      A man on the floor is out of the fight. */
   function struck(att, tgt, down) {
     if (!tgt || tgt.dead || !att) return;
+    // WHO YOU STARTED ON: your dog (city/dogbrain.js) and anyone else on
+    // your side reads this stamp to join in
+    if (att.isPlayer || att === CBZ.player || (CBZ.city && att === CBZ.city.playerActor)) tgt._pHitT = CBZ.now;
     if (tgt.char && tgt.char.sitting) leaveSit(tgt);   // a struck desk worker is off the seat NOW (C3 interrupt)
     if (down) { tgt.rage = null; return; }
     tgt.alarmed = Math.max(tgt.alarmed || 0, 6); tgt.fear = Math.min(10, (tgt.fear || 0) + 2);
@@ -3174,6 +3180,13 @@
   CBZ.cityStruck = struck;
   function hurtActor(att, tgt, dmg, melee, res) {
     if (!tgt || tgt.dead) return;
+    // AN ANIMAL (a dog that bit him, a stray, a deer): the blow lands through
+    // the hunting funnel, which routes a dog to city/dogs.js. Never vitals,
+    // never the human death chain.
+    if (tgt.animal) {
+      if (CBZ.cityWildlifeHit) { try { CBZ.cityWildlifeHit(tgt, { head: false, point: null }, { damage: dmg, by: att }); } catch (e) {} }
+      return;
+    }
     const fx = att.pos.x, fz = att.pos.z;
     if (tgt.isPlayer) {
       // a REMOTE player (multiplayer): the wound travels over the wire and is

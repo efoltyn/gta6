@@ -258,6 +258,10 @@
     // shop closed, a drive-by pulled) must never take a dead body with it:
     // it stays where it fell under peds.js's corpse law (city/morgue.js).
     if (ped.dead && !ped.collected) return true;
+    // A BODY IN CUSTODY IS NOBODY ELSE'S TO REMOVE: cuffed, being walked to a
+    // car, in the back of one. city/custody.js lets him out of the world (when
+    // the car that took him leaves draw range) by opening this door itself.
+    if (CBZ.custody && CBZ.custody.holds && CBZ.custody.holds(ped)) { if (CBZ.custody.blocked) CBZ.custody.blocked(ped, "unpost"); return false; }
     try {
       if (ped._npcAttached && CBZ.npcLife && CBZ.npcLife.detach) CBZ.npcLife.detach(ped, { parent: arenaRoot() });
       unlift(ped);

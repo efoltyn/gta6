@@ -1920,22 +1920,20 @@
     ped.npcWanted = ped.npcHeat > 130 ? 3 : ped.npcHeat > 60 ? 2 : ped.npcHeat > 22 ? 1 : 0;
   };
   CBZ.cityRegisterCarSuspect = function (car) { if (car && carSuspects.indexOf(car) < 0) carSuspects.push(car); };
-  // cop (optional): the officer making it. His hands do it (CBZ.verbs.cuff):
-  // turned round (or knelt on, if he is already down), wrists behind the
-  // back, the cuffs ON them; he sits out the count cuffed until he is let up.
+  // cop (optional): the officer making it. THE ONE ARREST PIPELINE
+  // (city/custody.js): his hands cuff him (CBZ.verbs.cuff, on the ground if he
+  // is down), the gun is bagged, he is patted down, walked to a cruiser that
+  // pulls up, put in the back, and driven off; a detainee from the cuffs on.
+  // This used to cuff him, knock him down for a count and let him walk on.
   CBZ.cityNpcArrest = function (ped, cop) {
-    if (!ped || ped.dead) return;
-    ped.npcHeat = 0; ped.npcWanted = 0; ped.rage = null; ped.armed = false; ped.weapon = null;
-    ped.alarmed = 0;
-    if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(ped);
-    const V = CBZ.verbs;
-    const down = function () {
-      ped.ko = Math.max(ped.ko || 0, 4);
-      if (V && V.setCuffs) V.setCuffs(ped, true, { whileKo: true });
-      // (no shove to the ground: a cuffed man who gave up is not hit again)
-    };
-    const S = V && V.cuff && cop && !cop.dead ? V.cuff(cop, ped, { far: true, onEnd: down }) : null;
-    if (!S) down();
+    if (!ped || ped.dead) return false;
+    const CU = CBZ.custody;
+    if (!CU || !CU.take) return false;
+    const j = CU.take(ped, { by: "police", verb: "arrest", officers: cop && !cop.dead ? [cop] : null, subdued: true });
+    if (!j) return false;
+    // the street ledger's heat is settled by the collar (the record keeps the charges)
+    ped.npcHeat = 0; ped.npcWanted = 0; ped.rage = null; ped.alarmed = 0;
+    return true;
   };
 
   // ---- the PRECINCT DESK (city/restrain.js's citizen-collar pipeline) -------
@@ -1961,6 +1959,8 @@
   // headcount only falls for corpses).
   CBZ.cityStationIntake = function (ped) {
     if (!ped || ped.dead) return false;
+    // a body in custody goes through the door only when custody says so
+    if (CBZ.custody && CBZ.custody.holds && CBZ.custody.holds(ped)) { if (CBZ.custody.blocked) CBZ.custody.blocked(ped, "intake"); return false; }
     ped.npcHeat = 0; ped.npcWanted = 0; ped.rage = null; ped.rampage = null;
     ped.armed = false; ped.weapon = null;
     if (CBZ.syncActorWeapon) CBZ.syncActorWeapon(ped);
@@ -3097,6 +3097,9 @@
       // ---- HANDS ON THE PLAYER (systems/arrest.js's take: the cuffs, the
       // escort): the verb has his body; the beat must not walk him off it
       if (c._arresting) { c.sees = true; c.curTarget = null; c.npcTarget = null; c.speed = 0; c.rage = null; continue; }
+      // ---- TAKING SOMEBODY IN (city/custody.js): the cuffs, the pat-down, the
+      // walk to the unit. Custody walks and animates him until it hands him back
+      if (c._custodyJob) { c.sees = false; c.curTarget = null; c.npcTarget = null; c.rage = null; continue; }
       // ---- AT A CAR DOOR (city/pullout.js): the door beats have his body
       // until whoever was in that seat is out on the pavement
       if (c._pulling) { c.sees = true; c.speed = 0; c.rage = null; continue; }

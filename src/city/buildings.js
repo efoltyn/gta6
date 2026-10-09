@@ -172,9 +172,28 @@
   // guess at it. Degrade-safe: no CBZ.glass (materials.js stripped) and the
   // exact original inline recipe still runs, so the city cannot regress.
   function glassMat() {
-    if (CBZ.glass) return CBZ.glass();
-    return _gmat || (_gmat = new THREE.MeshLambertMaterial({ color: 0xbfe9f7, emissive: 0x3f8aa6, emissiveIntensity: 0.5, transparent: true, opacity: 0.6 }));
+    if (CBZ.glass) return seatGlass(CBZ.glass());
+    return _gmat || (_gmat = seatGlass(new THREE.MeshLambertMaterial({ color: 0xbfe9f7, emissive: 0x3f8aa6, emissiveIntensity: 0.5, transparent: true, opacity: 0.6 })));
   }
+
+  /* GLASS SITS IN ITS FRAME, AT EVERY RANGE. A pane is 2 cm thick and the
+     frame members, glazing bars and sills round it stand 1-2.5 cm proud of its
+     face (facade_openings.js FO.window). A 24-bit depth buffer resolves that
+     to ~130 m at the on-foot near plane and ~90 m in first person; past it the
+     pane and the bar in front of it trade pixels, and which wins changes with
+     every sub-pixel move of the camera (owner, iPad: facades flicker "when you
+     move your look"; tools/facade-census.mjs DEPTH BANDS: ~20k glass/bar
+     pairs). Polygon offset in UNITS is exactly that resolution: GLASS_SEAT
+     units = GLASS_SEAT depth steps at whatever range the pane is seen, so the
+     pane always loses to the frame in front of it and never to the room 15 cm
+     and more behind it. No slope factor: at a glancing angle that would push
+     a pane back by metres. Pure GL state: no shader, no recompile, no geometry. */
+  const GLASS_SEAT = 6;
+  function seatGlass(m) {
+    if (m && !m.polygonOffset) { m.polygonOffset = true; m.polygonOffsetFactor = 0; m.polygonOffsetUnits = GLASS_SEAT; }
+    return m;
+  }
+  CBZ.citySeatGlass = seatGlass;
 
   // ---- INSTANCED GLASS POOLS ---------------------------------------------
   // Window panes are all axis-aligned boxes, so the whole city's glass folds
@@ -194,6 +213,7 @@
       new THREE.MeshLambertMaterial({ color: 0xc8efdb, emissive: 0x3f9c7d, emissiveIntensity: 0.5, transparent: true, opacity: 0.6 }),  // green
       new THREE.MeshLambertMaterial({ color: 0xf0ddb2, emissive: 0xa6803f, emissiveIntensity: 0.5, transparent: true, opacity: 0.6 }),  // amber
     ];
+    _tintMats.forEach(seatGlass);
     return _tintMats;
   }
   // VIEW glass: the pane you stand behind to look at the city. The default
@@ -204,10 +224,10 @@
   // interior partition that wants the same glass (CBZ.cityViewGlassMat).
   let _viewGlassMat = null;
   function viewGlassMat() {
-    return _viewGlassMat || (_viewGlassMat = new THREE.MeshLambertMaterial({ color: 0xd4e4ea, emissive: 0x0c1418, emissiveIntensity: 1, transparent: true, opacity: 0.13 }));
+    return _viewGlassMat || (_viewGlassMat = seatGlass(new THREE.MeshLambertMaterial({ color: 0xd4e4ea, emissive: 0x0c1418, emissiveIntensity: 1, transparent: true, opacity: 0.13 })));
   }
   CBZ.cityViewGlassMat = viewGlassMat;
-  function litWinMat() { return _litWinMat || (_litWinMat = new THREE.MeshLambertMaterial({ color: 0xffe2a8, emissive: 0xffb648, emissiveIntensity: 0.85, transparent: true, opacity: 0.66 })); }
+  function litWinMat() { return _litWinMat || (_litWinMat = seatGlass(new THREE.MeshLambertMaterial({ color: 0xffe2a8, emissive: 0xffb648, emissiveIntensity: 0.85, transparent: true, opacity: 0.66 }))); }
   // REFLECTIVE glass (offices/apartments by default): a mirror-ish, near-opaque
   // tint you can NOT see through — until it shatters into a real see-through
   // hole. r128 has no PMREM/envMap reflection that works under a Lambert world
@@ -222,6 +242,7 @@
       new THREE.MeshLambertMaterial({ color: 0xc8efdb, emissive: 0x6fb89a, emissiveIntensity: 0.75, transparent: true, opacity: 0.80 }),
       new THREE.MeshLambertMaterial({ color: 0xf0ddb2, emissive: 0xb89a6f, emissiveIntensity: 0.75, transparent: true, opacity: 0.80 }),
     ];
+    _reflectMats.forEach(seatGlass);
     return _reflectMats;
   }
   const glassPools = [];     // every live pool (all generations)
@@ -806,16 +827,36 @@
   // collider-backed curtain-wall panes burst on hit one. That is exactly the
   // "the office glass isn't real like the window glass" report.
   //
-  // The fade and the STATE are now separate clocks: the decal still fades on its
-  // own cosmetic schedule, while the pane stays genuinely cracked for CRACK_HOLD
-  // seconds — long enough that a second swing at a normal rhythm always finishes
-  // the job, short enough that the world still re-glazes itself if you wander off.
+  // The decal and the STATE then ran on separate clocks (a 0.5 s fade, a 6 s
+  // re-heal). Neither has a clock now:
+  //
+  //  2026-10-09 (owner: "bullet holes disappear after a while, which is
+  //  dumb"): a struck pane STAYS cracked, and its crack STAYS drawn, until it
+  //  bursts or the city re-glazes for a new run. No re-heal clock, no fade.
   const crackedPanes = [];   // panes holding "one more hit finishes it"
-  const CRACK_HOLD = 6.0;    // seconds a cracked pane stays cracked
   function markCracked(gp) {
     gp.cracked = true;
-    gp.crackHold = CRACK_HOLD;
+    for (let i = crackedPanes.length - 1; i >= 0; i--) if (crackedPanes[i].shattered) crackedPanes.splice(i, 1);
     if (crackedPanes.indexOf(gp) === -1) crackedPanes.push(gp);
+  }
+  // the crack decal pool: capped, and when full the crack furthest from the
+  // lens (behind it first) gives its quad to the new one. Its pane stays
+  // cracked; only the far-away drawing is reused.
+  function crackCap() { return (CBZ.qScale ? CBZ.qScale(24, CBZ.isMobileDevice ? 48 : 160) : 64) | 0; }
+  const _ccd = new THREE.Vector3();
+  function farCrack() {
+    const cam = CBZ.camera;
+    if (!cam) return 0;
+    cam.getWorldDirection(_ccd);
+    let best = 0, bs = -Infinity;
+    for (let i = 0; i < crackQuads.length; i++) {
+      const p = crackQuads[i].mesh.position;
+      const dx = p.x - cam.position.x, dy = p.y - cam.position.y, dz = p.z - cam.position.z;
+      let sc = dx * dx + dy * dy + dz * dz;
+      if (dx * _ccd.x + dy * _ccd.y + dz * _ccd.z < 0) sc += 1e6;
+      if (sc > bs) { bs = sc; best = i; }
+    }
+    return best;
   }
   // lay a fading spider-crack decal flat over a pane (just before it bursts).
   // Cheap: a single quad on a shared material, pooled and capped.
@@ -828,7 +869,12 @@
     if (gp.shattered || gp.cracked) return;
     markCracked(gp);                     // state FIRST: a capped decal pool must
                                          // never cost the player a landed hit
-    if (crackQuads.length > 24) return;
+    if (crackQuads.length >= crackCap()) {
+      const old = crackQuads.splice(farCrack(), 1)[0];
+      CBZ.scene.remove(old.mesh);
+      if (old.mesh.material) old.mesh.material.dispose();
+      old.mesh.geometry.dispose();
+    }
     const horiz = gp.hd < gp.hw;   // pane wider in X than Z → faces ±Z
     const sz = Math.min(1.5, Math.max(0.7, gp.span));
     const q = new THREE.Mesh(new THREE.PlaneGeometry(sz, sz), crackMat());
@@ -842,7 +888,7 @@
     }
     q.renderOrder = 3;
     CBZ.scene.add(q);
-    crackQuads.push({ mesh: q, gp, life: 0.45 + Math.random() * 0.25, fade: 0 });
+    crackQuads.push({ mesh: q, gp });
   }
   // hit (optional): {x, y, z, dx, dz, power} — where the pane was struck and
   // which way the blow travelled, so the shards radiate from the strike.
@@ -1118,7 +1164,7 @@
           else if (CBZ.colliders.indexOf(gp.col) === -1) CBZ.colliders.push(gp.col);
         }
       }
-      gp.cracked = false; gp.crackHold = 0;
+      gp.cracked = false;
     }
     crackedPanes.length = 0;   // a re-glazed city holds no half-broken panes
     // interior band dressing hidden by wall carves comes back with the glass
@@ -1145,31 +1191,9 @@
     addCityGlass(group, lx, ly, lz, pw, ph, pd, ox || 0, oz || 0, o, list);
     return list[0] || null;
   };
-  // shard physics + crack-decal lifecycle (cheap; only works while any exist)
-  CBZ.onAlways(9, function (dt) {
-    // spider cracks: a cracked pane that is left alone re-heals (clears its
-    // decal) so the world doesn't accumulate cracks; a fresh decal stays put
-    // briefly then fades out. (Bursting clears it via burstPane.)
-    if (crackQuads.length) {
-      for (let i = crackQuads.length - 1; i >= 0; i--) {
-        const cq = crackQuads[i]; cq.life -= dt;
-        if (cq.life < 0.2) { cq.fade += dt; cq.mesh.material.opacity = Math.max(0, 0.96 - cq.fade * 4); }
-        if (cq.life <= 0) {
-          CBZ.scene.remove(cq.mesh);
-          if (cq.mesh.material) cq.mesh.material.dispose();
-          cq.mesh.geometry.dispose();
-          crackQuads.splice(i, 1);        // the DECAL is gone; the pane stays
-                                          // cracked on its own clock (below)
-        }
-      }
-    }
-    // cracked panes re-heal on CRACK_HOLD, not on the decal's fade
-    for (let i = crackedPanes.length - 1; i >= 0; i--) {
-      const gp = crackedPanes[i];
-      gp.crackHold -= dt;
-      if (gp.shattered || gp.crackHold <= 0) { gp.cracked = false; crackedPanes.splice(i, 1); }
-    }
-  });
+  // (the crack decals and the cracked state have no clock any more: a crack
+  // goes when its pane bursts, when the pool recycles the furthest one, or
+  // when the city re-glazes — see markCracked)
 
   // ---- VERTEX FACE SHADING (fake AO) ---------------------------------------
   // One-time colour attribute on a box: top face full-bright, ±X/±Z faces
@@ -1471,12 +1495,33 @@
   // a tiny dedicated CRACK-decal pool (kept apart from the bullet holes so cracks don't
   // thrash the bullet-hole LRU). Small cap — only a handful of wounded walls
   // ever show cracks at once before they auto-carve.
-  const crackPool = []; let crackIdx = 0; const CRACK_CAP = 24;
+  // No clock: a wall crack stays until the pool is full, and then the crack
+  // furthest from the lens (behind it first) is the one reused.
+  const crackPool = []; let crackIdx = 0;
+  function wallCrackCap() { return (CBZ.qScale ? CBZ.qScale(24, CBZ.isMobileDevice ? 48 : 128) : 48) | 0; }
+  const _wcd = new THREE.Vector3();
   function placeCrack(px, py, pz, nx, nz, scale) {
     if (!CBZ.scene) return;
-    let m;
-    if (crackPool.length < CRACK_CAP) { m = new THREE.Mesh(crackGeo(), crackMat()); m.renderOrder = 3; CBZ.scene.add(m); crackPool.push(m); }
-    else { m = crackPool[crackIdx]; crackIdx = (crackIdx + 1) % CRACK_CAP; m.visible = true; }
+    let m = null;
+    for (let i = 0; i < crackPool.length && !m; i++) if (!crackPool[i].visible) m = crackPool[i];
+    if (!m && crackPool.length < wallCrackCap()) { m = new THREE.Mesh(crackGeo(), crackMat()); m.renderOrder = 3; CBZ.scene.add(m); crackPool.push(m); }
+    if (!m) {
+      const cam = CBZ.camera;
+      let bs = -Infinity;
+      if (cam) cam.getWorldDirection(_wcd);
+      for (let i = 0; i < crackPool.length; i++) {
+        const p = crackPool[i].position;
+        let sc = 0;
+        if (cam) {
+          const dx = p.x - cam.position.x, dy = p.y - cam.position.y, dz = p.z - cam.position.z;
+          sc = dx * dx + dy * dy + dz * dz;
+          if (dx * _wcd.x + dy * _wcd.y + dz * _wcd.z < 0) sc += 1e6;
+        }
+        if (sc > bs) { bs = sc; m = crackPool[i]; }
+      }
+      m.visible = true;
+    }
+    if (m.parent !== CBZ.scene) CBZ.scene.add(m);
     m.position.set(px + nx * 0.025, py, pz + nz * 0.025); aimDecal(m, nx, 0, nz); m.rotateZ(Math.random() * Math.PI);
     const s = scale || 1.3; m.scale.set(s, s, s);
   }
@@ -4708,6 +4753,14 @@
       const holes = openings.map(function (op) { return { s: op.s, t0: op.t0, t1: op.t1, y0: op.y0, y1: op.y1, forced: !!op.forced, reach: op.reach || 0 }; });
       if (doorHole) holes.push({ s: doorSide, t0: doorHole.t0, t1: doorHole.t1, y0: 0, y1: doorTop });
       if (roller) holes.push({ s: roller.s, t0: roller.t0, t1: roller.t1, y0: 0, y1: roller.y1 });
+      // THE DRIVE-IN BAYS ARE HOLES TOO. They were never in this list, so a
+      // grammar's ground storey (brick's dark storefront "glass", its water
+      // table and spandrel panels; stone's plinth ring and sills) was laid
+      // straight across every bay of the flagship's parking deck: a dark slab
+      // over the opening and a ledge across the floor you drive in on, at the
+      // Executive's own door. A car passes through, so anything standing
+      // proud in front of a bay goes too (reach).
+      for (const bb of bays) holes.push({ s: bb.s, t0: bb.t0, t1: bb.t1, y0: -1, y1: bb.y1, reach: 1.2 });
       if (kitRecs.length) FO.cutRecs(kitRecs, holes, { w: w, d: d, wt: WT, isGlass: kitIsGlass });
       for (const r of kitRecs) dbox(r[0], r[1], r[2], r[3], r[4], r[5], r[6]);
       kitRecs.length = 0;
@@ -4755,7 +4808,7 @@
       // THE SKIN (city/facade_openings.js): every opening cut in this shell,
       // the street door's kind and kit, the house number, and the window
       // pattern the distance proxy paints (core/farcull.js)
-      openings: openings, doorKind: doorKind, doorKit: doorFrontKit, houseNumber: doorKind === "derelict" ? null : houseNo,
+      openings: openings, bays: bays, doorKind: doorKind, doorKit: doorFrontKit, houseNumber: doorKind === "derelict" ? null : houseNo,
       facadePattern: FO.pattern(w, d, FH, storeys, openings),
       // the shell's own surfaces (structure + the window and door modules),
       // building-local [x0,x1,y0,y1,z0,z1]: planes a later dresser must not share

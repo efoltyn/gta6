@@ -118,7 +118,7 @@ const THREE = { CanvasTexture: class {}, MeshBasicMaterial: class {}, PlaneGeome
 const sb = { window: null, CBZ, THREE, console, Math, Object, Array, Set, Map, JSON, isFinite, Number, String, Date, Infinity, parseInt, setTimeout: (f) => f(), clearTimeout() {} };
 sb.window = sb;
 vm.createContext(sb);
-for (const f of ["src/city/newsroom.js", "src/city/phone_apps.js", "src/city/politics.js", "src/city/president_staff.js", "src/city/dissent.js"]) {
+for (const f of ["src/city/newsroom.js", "src/city/phone_apps.js", "src/city/custody.js", "src/city/politics.js", "src/city/president_staff.js", "src/city/dissent.js"]) {
   vm.runInContext(readFileSync(path.join(ROOT, f), "utf8"), sb, { filename: f });
 }
 upd.sort((a, b) => a.o - b.o);

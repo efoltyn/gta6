@@ -784,6 +784,8 @@
   const armR = FPH ? FPH.makeArm({ fore: fistSleeve, upper: fistUpper }, 1) : new THREE.Group();
   const armL = FPH ? FPH.makeArm({ fore: fistSleeve, upper: fistUpper }, -1) : new THREE.Group();
   fpArms.add(armR, armL);
+  // systems/wounds.js mirrors a hole in your rig's arm onto these
+  CBZ.fpViewArms = { r: armR, l: armL };
   let armSleeved = false;
   let fistSleeveHex = -1, fistUpperHex = -1, fistSkinHex = -1;
   function dressFists() {
@@ -3139,7 +3141,10 @@
     return { on: CBZ.CONFIG.AIM_CHILD_NO_ASSIST !== false, childSafe: !!CBZ.isProtectedActor, denied: aimChildSkips };
   };
 
-  function findActorHit(origin, dir, maxT, w) {
+  // `resolve` = this trace is a round landing (not the reticle asking): a
+  // crowd member it strikes becomes a real body on this call (crowdstore
+  // realize) and the round lands on that rig like on anyone
+  function findActorHit(origin, dir, maxT, w, resolve) {
     // generous-but-fair aim assist (bigger from the third-person shoulder cam)
     const headAssist = shoulderActive() ? 0.22 : (fps.active ? 0.13 : 0);
     const bodyAssist = shoulderActive() ? 0.40 : (fps.active ? 0.16 : 0);
@@ -3262,7 +3267,11 @@
     let crowdRow = -1;
     if (CBZ.crowds && CBZ.crowds.ray) {
       const cr = CBZ.crowds.ray(origin.x, origin.y, origin.z, dir.x, dir.y, dir.z, bestDist);
-      if (cr && cr.dist < bestDist) { bestActor = null; crowdIdx = -1; crowdRow = cr.row; bestDist = cr.dist; bestHead = cr.head; bestOcc = false; }
+      if (cr && cr.dist < bestDist) {
+        const real = resolve && CBZ.crowds.realize ? CBZ.crowds.realize(cr.row, "shot") : null;
+        if (real) { bestActor = real; crowdIdx = -1; crowdRow = -1; bestDist = cr.dist; bestHead = cr.head; bestOcc = false; }
+        else { bestActor = null; crowdIdx = -1; crowdRow = cr.row; bestDist = cr.dist; bestHead = cr.head; bestOcc = false; }
+      }
     }
     if (!bestActor && crowdIdx < 0 && crowdRow < 0) return null;
     return { actor: bestActor, crowd: crowdIdx >= 0 ? crowdIdx : null, crowdRow: crowdRow >= 0 ? crowdRow : null, occupant: bestOcc, dist: bestDist, head: bestHead, point: origin.clone().addScaledVector(dir, bestDist) };
@@ -3370,7 +3379,7 @@
     // search so a ped ducked behind a sedan is safe — the panel eats the round.
     const carHit = findCarHit(eye, dir, maxT);
     if (carHit) maxT = Math.max(0.1, carHit.dist - 0.04);
-    const hit = findActorHit(eye, dir, maxT, w);
+    const hit = findActorHit(eye, dir, maxT, w, true);
     // the police gunship overhead is a valid target — ray-test it (no damage here;
     // the shoot loop / rocket splash applies it) and take it if it's the nearest.
     const policeAir = (CBZ.game.mode === "city" && CBZ.cityAircraftRayTest) ? CBZ.cityAircraftRayTest(eye.x, eye.y, eye.z, dir.x, dir.y, dir.z, maxT) : null;
@@ -3481,7 +3490,7 @@
     if (thickness <= PEN_THIN_MAX && cal >= PEN_MIN_CAL && hit.dist < w.range - 0.5) {
       const exitPt = hit.point.clone().addScaledVector(shotDir, thickness + 0.06);
       const remaining = Math.max(0.5, w.range - hit.dist - thickness);
-      const beyondActor = findActorHit(exitPt, shotDir, Math.min(remaining, 24), w);
+      const beyondActor = findActorHit(exitPt, shotDir, Math.min(remaining, 24), w, true);
       if (beyondActor && beyondActor.actor) {
         // a SECOND, lighter gunHit on whatever was standing behind the cover —
         // same damage pipeline (falloff, headshot, city/prison routing), just
@@ -3521,7 +3530,7 @@
       // a token hit. Deliberately small range + flat damage — this is flavor,
       // never the headline outcome of firing a gun near a wall.
       if (rng() < RICOCHET_STRAY_CHANCE) {
-        const strayHit = findActorHit(hit.point, deflectDir, 9, w);
+        const strayHit = findActorHit(hit.point, deflectDir, 9, w, true);
         if (strayHit && strayHit.actor) {
           const strayW = Object.create(w); strayW.damage = RICOCHET_STRAY_DMG; strayW.headMult = 1;
           gunHit({ actor: strayHit.actor, head: false, dist: strayHit.dist, point: strayHit.point }, strayW, deflectDir);
@@ -3638,6 +3647,7 @@
   }
   function cityGunHit(a, hit, w, shotDir) {
     if (shotDir) hit.dir = shotDir; // wildlife + downstream death physics read the same resolved trajectory
+    if (a) a._pHitT = CBZ.now;      // who you shot: your dog joins in (city/dogbrain.js)
     // WILDLIFE: an animal routes into the hunting system (its own damage/skin
     // path — never the human death/wanted/gore chain). See city/wildlife.js.
     if (a.animal && CBZ.cityWildlifeHit) return CBZ.cityWildlifeHit(a, hit, w);

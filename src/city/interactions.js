@@ -969,6 +969,15 @@
     // where it was found (the point it was asked about)
     if (!p && c.qx != null) p = { x: c.qx, y: null, z: c.qz };
     if (!p) return null;
+    /* A SMALL THING SAYS WHERE IT IS. The +0.9 below is "a counter / a body's
+       middle over the floor it stands on": a target that answers with its own
+       floor y. A phone or a folder on a desk answered with ITS height, so its
+       anchor floated 0.9 m over the desk, above a seated President's eye
+       line, and a finger on the phone itself was never within TAP_RADIUS of
+       it (owner on iPad: "you press it and can't interact with it"). A target
+       with `ay` (world height of the thing itself) is anchored exactly there;
+       `ar` is its rough radius, for the verb column beside it. */
+    if (t.ay != null && isFinite(t.ay)) return { x: p.x, y: t.ay, z: p.z, small: t.ar || 0.12 };
     const y = (p.y != null ? p.y : (CBZ.player && CBZ.player.pos ? CBZ.player.pos.y : 0));
     return { x: p.x, y: y + (c.layers && c.layers.indexOf("ped") >= 0 ? 1.2 : 0.9), z: p.z };
   }
