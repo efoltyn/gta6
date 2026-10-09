@@ -25,14 +25,26 @@
 </head>
 <body class="campaign-build">
 <script>
-/* SHARK SIM FIRST PIXEL. The static title markup below is Cell Block Z's card,
-   and it painted for the whole script parse (15-20 s on a loaded machine)
-   before state.js could apply mode-sharksim: CrazyGames rejected the build for
-   "a quick shot of another game at the start". A shark page marks <html>
-   here, before any of that markup paints; css/shark_title.css hides the card
-   and puts up the ocean boot screen, and modes/shark_title.js takes it down
-   once the live sea is on screen. */
-(function(){try{var m=(window.CBZ&&CBZ.START_MODE)||new URLSearchParams(location.search).get("mode");
+/* FIRST PAINT IS THE RIGHT GAME. The #title markup below holds every game's
+   card, and with no body.mode-* class the CSS shows the PRISON's (Cell Block
+   Z is the unclassed default). state.js applies the mode class, but it is
+   script ~210 of ~710: on a 36 MB page the prison card painted for seconds
+   before Gang Life (or Disaster, Gun Game, Shark) replaced it, every load.
+   So the boot mode is resolved HERE, before any title markup parses, and the
+   same body classes state.js's setMode toggles go on now; setMode later
+   re-applies them, so there is still one set of classes and one owner.
+   The resolution mirrors src/config.js exactly (?mode= beats a page's
+   START_MODE, then the menu's remembered game); keep the two in step.
+   Shark pages also get html.boot-sharksim + the ocean boot screen
+   (css/shark_title.css; modes/shark_title.js takes it down): CrazyGames
+   rejected the build for "a quick shot of another game at the start". */
+(function(){try{var C=window.CBZ||{},m=null;
+try{m=new URLSearchParams(location.search).get("mode");}catch(e){}
+if(!m)m=C.START_MODE;
+if(!m){try{m=localStorage.getItem("cbz.hub.last");}catch(e){}}
+var cls={city:["mode-city"],survival:["mode-survival"],gungame:["mode-gungame"],sharksim:["mode-survival","mode-sharksim"],escape:[]}[m];
+if(!cls)return;
+for(var i=0;i<cls.length;i++)document.body.classList.add(cls[i]);
 if(m==="sharksim"){document.documentElement.classList.add("boot-sharksim");
 var b=document.createElement("div");b.id="sharkBoot";b.innerHTML='<div class="sb-mark">SHARK SIM</div><div class="sb-bar"><i></i></div>';
 document.body.appendChild(b);}}catch(e){}})();
@@ -654,7 +666,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/inventory.js?v=merge1001"></script>
 
 <script src="src/systems/bootprogress.js?v=slice0929b"></script>
-<script src="src/systems/state.js?v=nored0930"></script>
+<script src="src/systems/state.js?v=bootflash1"></script>
 
 <script src="src/systems/glcontext.js?v=glguard1"></script>
 
@@ -691,7 +703,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/modes/shark_title.js?v=uicut1"></script>
 <script src="src/systems/title_hub.js?v=end1"></script>
 
-<script src="src/modes/gungame.js?v=colcore1"></script>
+<script src="src/modes/gungame.js?v=bootflash1"></script>
 
 <script src="src/world/groundshaft.js?v=shaft1"></script>
 
