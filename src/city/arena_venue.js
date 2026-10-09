@@ -55,7 +55,7 @@ var CFG = CBZ.CONFIG || (CBZ.CONFIG = {});
 // OFF → arena_fights.js keeps its bare octagon plaza and skips all of it.
 // Flip false (or ?cfg_ARENA_VENUE_V2=0) for a one-line revert.
 if (CFG.ARENA_VENUE_V2 == null) CFG.ARENA_VENUE_V2 = true;
-// ARENA_CROWD_PROXY — instanced seated bodies filling the seats the live-NPC
+// ARENA_CROWD_PROXY — the seated crowd (the real human via entities/crowdgpu.js) filling the seats the live-NPC
 // budget can't reach. OFF → only the ~42 real NPCs, every other seat empty.
 if (CFG.ARENA_CROWD_PROXY == null) CFG.ARENA_CROWD_PROXY = true;
 // ARENA_LIGHT_RIG — real THREE lights on the overhead gantry (count gated by
@@ -330,7 +330,7 @@ CBZ.arenaVenue = {
     V.name = "ironjaw-arena";
     root.add(V);
 
-    var colliders = [], platforms = [], losMeshes = [], lights = [], proxies = [];
+    var colliders = [], platforms = [], losMeshes = [], lights = [];
     // census: how many ring colliders are oriented, and how much invisible
     // wall the old AABB-per-chord form would have added around this bowl.
     var ringOriented = 0, ringSlack = 0;
@@ -435,9 +435,6 @@ CBZ.arenaVenue = {
     pool("rail", 0xc8a132);
     pool("seat", 0xffffff, { tint: true });
     pool("seatframe", 0x20252a);
-    pool("body", 0xffffff, { tint: true });
-    pool("head", 0xffffff, { tint: true });
-    pool("lap", 0x22252c);
     pool("truss", 0x3b4250);
     pool("lampbox", 0x14161b);
     pool("lamp", 0xfff4cf, { basic: true, receive: false });
@@ -1605,8 +1602,8 @@ CBZ.arenaVenue = {
 
     // ============================================================ SPECTATORS
     // Live NPCs get the best seats (closest to the fight surfaces). Every other
-    // seat is a candidate for the instanced proxy crowd — one static seated
-    // body, three instanced draws total, deterministic colour and occupancy.
+    // seat is a candidate for the seated crowd — the real human, instanced
+    // through entities/crowdgpu.js, deterministic look and occupancy.
     var seatSlots = [];
     // THE SEAT DECLARES ITS GEOMETRY. `y` stays the CUSHION TOP (npclife's
     // attach() writes the anchor straight onto the rig group), and the two new
@@ -1652,7 +1649,7 @@ CBZ.arenaVenue = {
     // write per frame: no matrices are rebuilt, no geometry is created or
     // destroyed, and an empty bowl costs the renderer three draw calls of zero
     // instances. Draw-call budget for the WHOLE crowd: 3, at any fill.
-    var crowdTotal = 0, crowdCap = 0;
+    var crowdTotal = 0, crowdCap = 0, seated = [];
     (function () {
       if (!CFG.ARENA_CROWD_PROXY) return;
       // instance budget by quality tier — the ONE knob a weak device turns. The
@@ -1674,52 +1671,41 @@ CBZ.arenaVenue = {
               + Math.min(1, Math.hypot(dx, dz) / (D_TOP + A + B)) * 0.20
               + h01(s.x, s.z, 0x5c) * 0.40;
         order.push({ s: s, k: k, y: s.y + SEAT_CUSH,
-                     lean: (h01(s.x, s.z, 0x5f) - 0.5) * 0.25,
-                     // A WATCHING BODY SITS FORWARD. A bored one sits back.
-                     // Elbows-on-knees is what a fight crowd looks like, and a
-                     // bowl of bodies all at the same upright angle is the
-                     // single clearest "these are boxes" tell. Deterministic
-                     // per seat, and biased forward for the good seats — the
-                     // people who paid to be close are the ones leaning in.
-                     pitch: (h01(s.x, s.z, 0x63) * 0.34 - 0.09) * (1 - s.tier / (TIERS * 1.6)) });
+                     lean: (h01(s.x, s.z, 0x5f) - 0.5) * 0.25 });
       }
       for (i = 0; i < floorSlots.length; i++) {
         s = floorSlots[i];
         // ringside floor seats are the most-wanted in the house
-        order.push({ s: s, k: h01(s.x, s.z, 0x60) * 0.22, y: s.y + SEAT_CUSH, lean: 0,
-                     pitch: h01(s.x, s.z, 0x64) * 0.30 - 0.04 });
+        order.push({ s: s, k: h01(s.x, s.z, 0x60) * 0.22, y: s.y + SEAT_CUSH, lean: 0 });
       }
       order.sort(function (a, b) { return a.k - b.k || a.s.x - b.s.x || a.s.z - b.s.z; });
       if (order.length > crowdCap) order.length = crowdCap;
+      // THE REAL PERSON IN EVERY SEAT (entities/crowdgpu.js): the CBZ.human
+      // mesh baked SEATED against the same cushion height the live rigs are
+      // posed against, instanced, LOD'd to impostors rendered from it. Each
+      // seat keeps one person (deterministic look); a share of the good seats
+      // cheer in their seats when the house is full.
+      var PANTS = [0x2a3446, 0x3b3f47, 0x1f2226, 0x4a4036, 0x5a6270, 0x2d3a52];
+      var HAIRS = [0x2a1d16, 0x3a2a1f, 0x6d4b2b, 0x1a1a1a, 0x9a7a4a, 0xb8b0a0];
+      var G = CBZ.crowdGPU;
       for (i = 0; i < order.length; i++) {
         var o = order[i]; s = o.s;
-        // a seated body: torso, head, thighs. Solved against the SAME declared
-        // cushion the live rigs are posed against, so a proxy and a promoted
-        // rig sit at the same height in the same chair.
-        // the lean pivots about the HIPS, so the torso tips and the head
-        // travels forward with it instead of the box just rotating in place.
-        var pt = o.pitch || 0, sp = Math.sin(pt);
-        put("body", { x: s.x + Math.sin(s.yaw) * sp * 0.30, y: o.y + 0.40 - (1 - Math.cos(pt)) * 0.24,
-                      z: s.z + Math.cos(s.yaw) * sp * 0.30,
-                      sx: 0.44, sy: 0.60, sz: 0.30,
-                      ry: s.yaw + o.lean, rx: pt, eo: "YXZ", c: hpick(SHIRTS, s.x, s.z, 0x5d) });
-        put("head", { x: s.x + Math.sin(s.yaw) * sp * 0.66, y: o.y + 0.84 - (1 - Math.cos(pt)) * 0.62,
-                      z: s.z + Math.cos(s.yaw) * sp * 0.66,
-                      sx: 0.22, sy: 0.25, sz: 0.22,
-                      ry: s.yaw + o.lean, c: hpick(SKINS, s.x, s.z, 0x5e) });
-        put("lap", { x: s.x + Math.sin(s.yaw) * 0.24, y: o.y + 0.05, z: s.z + Math.cos(s.yaw) * 0.24,
-                     sx: 0.42, sy: 0.18, sz: 0.42, ry: s.yaw });
+        var skin = hpick(SKINS, s.x, s.z, 0x5e), shirt = hpick(SHIRTS, s.x, s.z, 0x5d);
+        seated.push({
+          x: s.x, y: o.y, z: s.z, yaw: s.yaw + o.lean * 0.5,
+          look: G ? G.look({ build: h01(s.x, s.z, 0x66) < 0.42 ? "f" : "m", skin: skin, shirt: shirt,
+            pants: hpick(PANTS, s.x, s.z, 0x67), hair: hpick(HAIRS, s.x, s.z, 0x68),
+            shoes: h01(s.x, s.z, 0x69) < 0.3 ? 0xd8d8d8 : 0x2b2b2b,
+            sleeve: h01(s.x, s.z, 0x6a) < 0.45 ? skin : shirt }) : -1,
+          cheer: h01(s.x, s.z, 0x6b) < 0.22 * (1 - s.tier / Math.max(1, TIERS)),
+          phase: h01(s.x, s.z, 0x6c)
+        });
       }
       crowdTotal = order.length;
     })();
 
     // ------------------------------------------------------------- finalise
     flushPools();
-    var pk;
-    for (pk = 0; pk < 3; pk++) {
-      var nm2 = ["body", "head", "lap"][pk];
-      if (pools[nm2] && pools[nm2].mesh) proxies.push(pools[nm2].mesh);
-    }
     if (typeof CBZ.markCollidersDirty === "function") CBZ.markCollidersDirty();
     if (typeof CBZ.losGridDirty === "function") CBZ.losGridDirty();
     V.updateMatrixWorld(true);
@@ -1731,11 +1717,34 @@ CBZ.arenaVenue = {
     // than a crowd blinking into the seats.
     var fill = 0, fillWant = 0, fillRate = 1 / 45;
     var shownCount = -1;
+    // the seated crowd: one crowdgpu layer under the venue root. It is re-cut
+    // (who is drawn at which LOD) when the house changes size or the camera
+    // has moved a few metres; between re-cuts the GPU animates everyone.
+    var crowdLayer = null, cutX = 1e9, cutZ = 1e9, cutT = 0, cutCam = new THREE.Vector3();
     function applyFill() {
       var n = Math.round(fill * crowdTotal);
       if (n === shownCount) return;
       shownCount = n;
-      for (var i = 0; i < proxies.length; i++) proxies[i].count = n;
+      cutX = 1e9;                  // re-cut on the next tick
+    }
+    function recut(dt) {
+      if (!seated.length || !CBZ.crowdGPU) return;
+      if (!crowdLayer) crowdLayer = CBZ.crowdGPU.layer({ name: "arena", cap: seated.length, parent: V, maxDraw: 420 });
+      var cam = CBZ.camera;
+      cutT -= dt || 0;
+      if (cam && cam.position) cutCam.copy(cam.position);
+      var mv = Math.hypot(cutCam.x - cutX, cutCam.z - cutZ);
+      if (mv < 0.5 || (mv < 4 && cutT > 0)) return;
+      cutX = cutCam.x; cutZ = cutCam.z; cutT = 0.25;
+      var n = Math.max(0, shownCount), full = fill > 0.5;
+      crowdLayer.begin();
+      for (var i = 0; i < n; i++) {
+        var q = seated[i];
+        if (q.look < 0) continue;
+        var ch = full && q.cheer;
+        crowdLayer.add(q.x, q.y, q.z, q.yaw, q.look, ch ? "sitCheer" : "sit", q.phase, ch ? 8 / (Math.PI * 2) : 0.25);
+      }
+      crowdLayer.commit();
     }
     applyFill();                     // an unattended bowl starts EMPTY, not full
     var meshCount = 0;
@@ -1748,7 +1757,7 @@ CBZ.arenaVenue = {
           typeof reality.supportAudit !== "function") {
         return { available: false, reason: "systems/reality.js unavailable" };
       }
-      var boxes = [], skip = { body: 1, head: 1, lap: 1 };
+      var boxes = [], skip = {};
       for (var kind in pools) {
         if (skip[kind]) continue;       // people move; this is STATIC structure
         var items = pools[kind].items;
@@ -1784,7 +1793,7 @@ CBZ.arenaVenue = {
         sampleLimit: 20
       });
       supportCache.available = true;
-      supportCache.scope = "arena static box primitives; crowd proxies excluded";
+      supportCache.scope = "arena static box primitives";
       return supportCache;
     }
     return {
@@ -1839,8 +1848,8 @@ CBZ.arenaVenue = {
         losBlockers: losMeshes.length,
         seatCushion: SEAT_CUSH,
         // every InstancedMesh + the five merged canvas batches + the three
-        // per-object meshes. The crowd is 3 of these AT ANY FILL.
-        drawCallEst: meshCount + 8
+        // per-object meshes + the seated crowd's 5 (2 bodies x 2 LODs + impostors)
+        drawCallEst: meshCount + 8 + 5
       },
       // ---- OCCUPANCY -------------------------------------------------------
       // `f` 0..1. `snap` skips the arrival ramp (world build / teleport in).
@@ -1871,8 +1880,9 @@ CBZ.arenaVenue = {
         var wantProxy = dist < 420;
         if (wantProxy !== proxyOn) {
           proxyOn = wantProxy;
-          for (var j = 0; j < proxies.length; j++) proxies[j].visible = wantProxy;
+          if (!wantProxy && crowdLayer) { crowdLayer.clear(); cutX = 1e9; }
         }
+        if (proxyOn) recut(dt);
         // walk the occupancy toward its target. A bowl fills/empties over ~45 s
         // of game time, so you SEE the house come in before the first bell.
         if (fill !== fillWant) {

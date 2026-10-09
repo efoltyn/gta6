@@ -49,15 +49,18 @@
                shot, cuffed and talked to. Their signs and flags are
                president_public.js's props. They fight officers with the
                shared strike verb (CBZ.verbs.strike) and run from gas through
-               cityBrain.perform. Everyone past the rig ring is drawn by one
-               set of InstancedMeshes (legs, torso, arms, head, hair, shield,
-               stick, one per sign text, one per flag), tinted per body, walking
-               with a stride, arms up with the sign or pumping with the chant.
+               cityBrain.perform. Everyone past the rig ring is THE SAME HUMAN,
+               drawn by entities/crowdgpu.js: the CBZ.human mesh GPU-instanced
+               with its walk / run / chant / cheer / placard / flag baked into
+               a bone texture (LOD1 the rig's mid tier, LOD2 its far tier,
+               LOD3 impostors rendered from it), in the colours its full rig is
+               painted with on promotion and in step with its gait phase. Only
+               the props (shields, boards, sticks, flags) are boxes, as boxes.
      BUDGET    agents: desktop 640, tablet 420, phone 260. Rigs: 40/24/14
                civilians plus 10/8/6 officers. Agents beyond 80 m step at a
-               quarter rate and draw without arms; past the draw range or
-               behind the camera they are not drawn at all. ~20 draw calls
-               for the whole crowd. A mob over 300 m from the player keeps
+               quarter rate; past the draw range or behind the camera they
+               are not drawn at all. 5 crowd draw calls (2 bodies x 2 mesh
+               LODs + 1 impostor) plus the props, for the whole crowd. A mob over 300 m from the player keeps
                moving (the march still reaches the Capitol) but skips the
                contact solve.
 
@@ -86,11 +89,15 @@
   if (CFG.MOB_RIGS >= 0 && CFG.MOB_RIGS != null) BUD.rigs = CFG.MOB_RIGS | 0;
   const CAP = BUD.agents;
   const SIM_DT = 1 / 15, MAX_STEPS = 3;
-  const FAR_SLEEP = 80;          // m: beyond this an agent steps at a quarter rate and draws without arms
+  const FAR_SLEEP = 80;          // m: beyond this an agent steps at a quarter rate
   const COARSE = 300;            // m: a whole mob this far off skips the contact solve
   const SEP = 0.55;              // m: two people closer than this push apart
   const CELL = 1.0;              // m: the contact hash
   const SPD = { walk: 1.25, march: 1.15, run: 3.4, flee: 4.6, police: 1.6 };
+  const RUN_AT = 2.4;            // m/s: past this a body runs (the run clip)
+  // gait phase per metre (rad/m), replaced by the real rig's measured stride
+  // once the crowd is baked (crowdgpu clip radPerM)
+  const GAIT = { walk: 4.4, run: 2.3, read: false };
 
   // ---------------------------------------------------------------- helpers
   function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
@@ -126,6 +133,7 @@
   const asign = new Uint8Array(CAP);                                   // slogan index in the mob
   const arig = new Int16Array(CAP).fill(-1);
   const askin = new Int32Array(CAP), ashirt = new Int32Array(CAP), apants = new Int32Array(CAP), ahair = new Int32Array(CAP);
+  const ashoes = new Int32Array(CAP), asleeve = new Int32Array(CAP), abody = new Uint8Array(CAP), alook = new Int32Array(CAP).fill(-1);
   const ROLE = { plain: 0, leader: 1, flag: 2, sign: 3, fist: 4, thrower: 5, climber: 6, fighter: 7, officer: 8 };
   const ACT = { none: 0, throw: 1, climb: 2, fight: 3, flee: 4, down: 5, inside: 6, cheer: 7, push: 8 };
   let hiAgent = 0;                                                      // one past the highest used slot
@@ -168,7 +176,13 @@
     const w = h01(k, mob.seed, 15);
     const plain = [0x2c3e5c, 0x444a52, 0x8a939c, 0xe8e6e0, 0x33573b, 0x6e2b33, 0x23262b, 0xc9a23a];
     ashirt[i] = w < (grp.shirt != null ? grp.shirt : 0.35) ? col : plain[(h01(k, mob.seed, 16) * plain.length) | 0];
-    if (h01(k, mob.seed, 17) < (grp.cap != null ? grp.cap : 0.4)) ahair[i] = col;     // the cap
+    // the group's colour is worn, never dyed into the hair: a cap-share roll
+    // that missed the shirt puts the colour on the shirt instead
+    if (ashirt[i] !== col && h01(k, mob.seed, 17) < (grp.cap != null ? grp.cap : 0.4) * 0.5) ashirt[i] = col;
+    abody[i] = h01(k, mob.seed, 33) < 0.38 ? 1 : 0;
+    ashoes[i] = h01(k, mob.seed, 18) < 0.3 ? 0xd8d8d8 : 0x2b2b2b;
+    asleeve[i] = h01(k, mob.seed, 19) < 0.4 ? askin[i] : ashirt[i];
+    lookOf(i);
     mob.groupCount[gi] = (mob.groupCount[gi] | 0) + 1;
     return gi;
   }
@@ -176,6 +190,14 @@
     askin[i] = SKINS[(h01(i, 7, 21) * SKINS.length) | 0];
     if (kind === "army" || kind === "guard") { ashirt[i] = 0x4b5236; apants[i] = 0x434a31; ahair[i] = 0x3b4229; }
     else { ashirt[i] = 0x1b2436; apants[i] = 0x161c28; ahair[i] = 0x10141c; }
+    abody[i] = 0; ashoes[i] = 0x141414; asleeve[i] = ashirt[i];
+    lookOf(i);
+  }
+  // the person's look in the real crowd (entities/crowdgpu.js): the same
+  // colours the full rig is painted with when this agent is promoted
+  function lookOf(i) {
+    const G = CBZ.crowdGPU;
+    alook[i] = G ? G.look({ build: abody[i] ? "f" : "m", skin: askin[i], shirt: ashirt[i], pants: apants[i], hair: ahair[i], shoes: ashoes[i], sleeve: asleeve[i] }) : -1;
   }
 
   // ---------------------------------------------------------------- mobs
@@ -714,7 +736,7 @@
       if (sp > 0.15) ahd[i] = Math.atan2(avx[i], avz[i]);
       else if (m.stage === "rally" || m.hold) ahd[i] += (((m.face - ahd[i] + Math.PI * 3) % (Math.PI * 2)) - Math.PI) * Math.min(1, ddt * 2);
       else if (L && aside[i] === 0) ahd[i] = Math.atan2(-L.nx, -L.nz);
-      aph[i] += ddt * (sp > 0.15 ? sp * 5.6 : 0);
+      aph[i] += ddt * (sp > 0.15 ? sp * (sp > RUN_AT ? GAIT.run : GAIT.walk) : 0);     // the baked stride: feet do not skate
       if (aclimb[i] > 0 && (arole[i] !== ROLE.climber || !L)) aclimb[i] = Math.max(0, aclimb[i] - ddt * 1.2);
       if (!coarse || (stepN & 7) === 0) ay[i] = floorAt(ax[i], az[i]) + aclimb[i];
       if (aside[i] === 1) { const Lo = lineOf(i); if (Lo && !Lo.broken) ahd[i] = Math.atan2(Lo.nx, Lo.nz); }
@@ -775,11 +797,21 @@
         if (ped) giveShield(ped);
       } else if (CBZ.cityPostNpc) {
         const k = m.agents.indexOf(i);
-        ped = CBZ.cityPostNpc(x, z, {
+        // THE SAME PERSON: built with the crowd member's body, skin, shirt and
+        // hair style, then painted with the rest of the look (crowdgpu rigOpts
+        // + dressRig), so the one who walks up is the one you were watching
+        const G = CBZ.crowdGPU, lo = G && alook[i] >= 0 ? G.rigOpts(alook[i]) : {};
+        ped = CBZ.cityPostNpc(x, z, Object.assign({
           job: JOBS[(h01(k, m.seed, 31) * JOBS.length) | 0], kind: "civilian", archetype: "resident", face: ahd[i],
           armed: false, aggr: arole[i] === ROLE.fighter ? 0.6 : 0.15 + m.violent * 0.2, wealth: 0.35 + h01(k, m.seed, 32) * 0.3,
-          gender: h01(k, m.seed, 33) < 0.38 ? "f" : "m", src: "mob:" + m.id,
-        });
+          gender: abody[i] ? "f" : "m", skin: askin[i], outfit: ashirt[i], src: "mob:" + m.id,
+        }, lo));
+        if (ped && ped.char && G && alook[i] >= 0) {
+          G.dressRig(ped.char, alook[i]);
+          // and in step: the stride carries on from the crowd's gait phase
+          const wc = G.clip("walk");
+          if (wc) ped.char.phase = wc.phase0 + aph[i];
+        }
       }
     } catch (e) { ped = null; }
     if (!ped) return false;
@@ -980,19 +1012,18 @@
     return n;
   }
 
-  // ---------------------------------------------------------------- the picture (instanced fill)
-  const R_ = { built: false, root: null, parts: null, signs: Object.create(null), flags: Object.create(null), shots: null };
-  const PARTS = ["legL", "legR", "torso", "armL", "armR", "head", "hair", "shield", "stick"];
-  function tintBox() {
-    const geo = new THREE.BoxGeometry(1, 1, 1);
-    const n = geo.attributes.position.count, c = new Float32Array(n * 3); c.fill(1);
-    geo.setAttribute("color", new THREE.BufferAttribute(c, 3));
-    return geo;
-  }
-  function instanced(geo, mat, cap, tint) {
+  // ---------------------------------------------------------------- the picture
+  // EVERY BODY IS THE REAL HUMAN. Past the rig ring the crowd is drawn by
+  // entities/crowdgpu.js: the CBZ.human mesh, GPU-instanced, animated from its
+  // own baked walk / run / chant / cheer / placard / flag clips, LOD'd down to
+  // the rig's far tier and then to impostors rendered from it — and dressed in
+  // the same colours its full rig wears when promoted. What stays instanced
+  // boxes here is what IS a box: shields, sign boards, sticks, flags, bottles.
+  const R_ = { built: false, root: null, crowd: null, parts: null, signs: Object.create(null), flags: Object.create(null), shots: null };
+  const PARTS = ["shield", "stick"];
+  function instanced(geo, mat, cap) {
     const m = new THREE.InstancedMesh(geo, mat, cap);
     m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    if (tint && m.setColorAt) { const w = new THREE.Color(1, 1, 1); for (let i = 0; i < cap; i++) m.setColorAt(i, w); m.instanceColor.setUsage(THREE.DynamicDrawUsage); }
     m.count = 0; m.frustumCulled = false; m.castShadow = false; m.receiveShadow = false;
     m.userData.dynamic = true; m.userData.transient = true;
     return m;
@@ -1002,25 +1033,22 @@
     R_.built = true;
     if (!THREE.InstancedMesh || typeof document === "undefined") return false;
     const root = arenaRoot(); if (!root) { R_.built = false; return false; }
-    const grp = new THREE.Group(); grp.name = "mob-crowd"; grp.userData.dynamic = true;
+    const grp = new THREE.Group(); grp.name = "mob-props"; grp.userData.dynamic = true;
     root.add(grp); R_.root = grp;
-    const tint = tintBox();
-    const skinMat = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
-    skinMat._shared = true;
     const P = {};
-    for (let k = 0; k < PARTS.length; k++) {
-      const nm = PARTS[k];
-      let mat = skinMat, tinted = true;
-      if (nm === "shield") { mat = new THREE.MeshLambertMaterial({ color: 0xc8d6e2, transparent: true, opacity: 0.55, depthWrite: false }); tinted = false; }
-      if (nm === "stick") { mat = new THREE.MeshLambertMaterial({ color: 0x6a5238 }); tinted = false; }
-      const cap = nm === "shield" ? 120 : CAP;
-      P[nm] = instanced(tinted ? tint : new THREE.BoxGeometry(1, 1, 1), mat, cap, tinted);
-      grp.add(P[nm]);
-    }
+    P.shield = instanced(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshLambertMaterial({ color: 0xc8d6e2, transparent: true, opacity: 0.55, depthWrite: false }), 120);
+    P.stick = instanced(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshLambertMaterial({ color: 0x8a6a44 }), CAP);
+    for (const k of PARTS) grp.add(P[k]);
     R_.parts = P;
-    const bm = new THREE.MeshLambertMaterial({ color: 0x5a7a4a });
-    R_.shots = instanced(new THREE.BoxGeometry(0.09, 0.22, 0.09), bm, 32, false);
+    R_.shots = instanced(new THREE.BoxGeometry(0.09, 0.22, 0.09), new THREE.MeshLambertMaterial({ color: 0x5a7a4a }), 32);
     grp.add(R_.shots);
+    if (CBZ.crowdGPU) {
+      R_.crowd = CBZ.crowdGPU.layer({ name: "mob", cap: CAP, parent: root, maxDraw: BUD.draw });
+      const w = CBZ.crowdGPU.clip("walk"), r = CBZ.crowdGPU.clip("run");
+      if (w && w.radPerM > 0) GAIT.walk = w.radPerM;
+      if (r && r.radPerM > 0) GAIT.run = r.radPerM;
+      GAIT.read = true;
+    }
     return true;
   }
   function signMesh(text, support) {
@@ -1030,7 +1058,7 @@
     const props = PP();
     if (props && props.signMats) { try { mats = props.signMats(text, support); } catch (e) { mats = null; } }
     if (!mats) { const e = new THREE.MeshLambertMaterial({ color: 0xefe6cf }); mats = [e, e, e, e, e, e]; }
-    const m = instanced(new THREE.BoxGeometry(1, 1, 1), mats, Math.max(32, CAP >> 2), false);
+    const m = instanced(new THREE.BoxGeometry(1, 1, 1), mats, Math.max(32, CAP >> 2));
     R_.root.add(m);
     R_.signs[key] = m;
     return m;
@@ -1044,7 +1072,7 @@
     const face = new THREE.MeshLambertMaterial({ color: 0xffffff, map: tex || null, side: THREE.DoubleSide });
     if (!tex) face.color.setHex(0x1d3c7a);
     const edge = new THREE.MeshLambertMaterial({ color: 0xdedad0 });
-    const m = instanced(new THREE.BoxGeometry(1, 1, 1), [face, face, edge, edge, edge, edge], Math.max(32, CAP >> 2), false);
+    const m = instanced(new THREE.BoxGeometry(1, 1, 1), [face, face, edge, edge, edge, edge], Math.max(32, CAP >> 2));
     R_.root.add(m);
     R_.flags[key] = m;
     return m;
@@ -1074,86 +1102,72 @@
     e[o + 14] = z + _B[2] * px + _B[5] * py + _B[8] * pz + c1z * oy;
     e[o + 15] = 1;
   }
-  function tint(mesh, slot, hex) {
-    const a = mesh.instanceColor && mesh.instanceColor.array; if (!a) return;
-    const o = slot * 3;
-    a[o] = ((hex >> 16) & 255) / 255; a[o + 1] = ((hex >> 8) & 255) / 255; a[o + 2] = (hex & 255) / 255;
+  // which baked clip a crowd member is playing, from what they are doing
+  const TAU = Math.PI * 2;
+  const POSE_RATE = { idle: 0.25, cheer: 8 / TAU, fist: 5 / TAU, sign: 1.4 / TAU, flag: 2.2 / TAU };
+  let _clip = "idle", _phase = 0, _rate = 0;
+  function clipFor(i, m) {
+    const r = arole[i], act = aact[i], sp = asp[i];
+    if (act === ACT.down) { _clip = "down"; _phase = 0; _rate = 0; return; }
+    if (sp > 0.3 || act === ACT.flee) {
+      const run = sp > RUN_AT || act === ACT.flee;
+      _clip = run ? "run" : (r === ROLE.sign ? "signWalk" : r === ROLE.flag ? "flagWalk" : "walk");
+      _phase = aph[i] / TAU; _rate = 0;            // the agent's own gait phase drives the frame
+      return;
+    }
+    const pulse = m.chantPulse > 0;
+    if (r === ROLE.sign) _clip = "sign";
+    else if (r === ROLE.flag) _clip = "flag";
+    else if (r === ROLE.officer) _clip = "idle";
+    else if (act === ACT.cheer || act === ACT.climb) _clip = "cheer";
+    else if (act === ACT.fight || act === ACT.throw) _clip = "fist";
+    else if (pulse && (r === ROLE.fist || r === ROLE.leader || r === ROLE.plain)) _clip = r === ROLE.leader ? "cheer" : "fist";
+    else _clip = "idle";
+    _phase = h01(i, 3, 9); _rate = POSE_RATE[_clip] || 0.25;
   }
-  const _cam = { x: 0, z: 0, fx: 0, fz: 1 };
   function draw(t) {
     if (!R_.built) build();
     if (!R_.root) return;
     const t0 = (typeof performance !== "undefined" && performance.now) ? performance.now() : 0;
-    const P = R_.parts;
-    const cam = CBZ.camera;
-    if (cam && cam.position) {
-      _cam.x = cam.position.x; _cam.z = cam.position.z;
-      const e = cam.matrixWorld && cam.matrixWorld.elements;
-      if (e) { const fx = -e[8], fz = -e[10], L = Math.hypot(fx, fz) || 1; _cam.fx = fx / L; _cam.fz = fz / L; }
-    } else { const pp = player(); if (pp) { _cam.x = pp.x; _cam.z = pp.z; } }
-    const n = { body: 0, arm: 0, shield: 0, stick: 0 };
+    const P = R_.parts, crowd = R_.crowd;
+    const n = { shield: 0, stick: 0 };
     for (const k in R_.signs) R_.signs[k].count = 0;
     for (const k in R_.flags) R_.flags[k].count = 0;
-    const DRAW2 = BUD.draw * BUD.draw;
+    if (crowd) crowd.begin();
+    const pp = player(), cam = CBZ.camera;
+    const cx = cam && cam.position ? cam.position.x : (pp ? pp.x : 0), cz = cam && cam.position ? cam.position.z : (pp ? pp.z : 0);
+    const PROP2 = 130 * 130;                   // props past this are a pixel or two
+    let bodies = 0;
     for (let i = 0; i < hiAgent; i++) {
       if (amob[i] < 0 || arig[i] >= 0) continue;
       const m = MOBS[amob[i]]; if (!m) continue;
-      const dx = ax[i] - _cam.x, dz = az[i] - _cam.z, d2 = dx * dx + dz * dz;
-      if (d2 > DRAW2) continue;
-      if (d2 > 144 && dx * _cam.fx + dz * _cam.fz < -Math.sqrt(d2) * 0.35) continue;       // behind the camera
-      const far = d2 > FAR_SLEEP * FAR_SLEEP;
-      const off = aside[i] === 1;
       const x = ax[i], y = ay[i], z = az[i];
-      const down = aact[i] === ACT.down;
-      base(ahd[i], down ? -1.45 : 0);
-      const sp = asp[i], walk = Math.min(1, sp / 1.4);
-      const sw = Math.sin(aph[i]) * 0.55 * walk;
-      const s = n.body;
-      putBox(P.legL, s, x, y, z, -0.1, 0.9, 0, sw, -0.44, 0.15, 0.88, 0.17);
-      putBox(P.legR, s, x, y, z, 0.1, 0.9, 0, -sw, -0.44, 0.15, 0.88, 0.17);
-      putBox(P.torso, s, x, y, z, 0, 0.9, 0, aact[i] === ACT.push ? 0.18 : 0, 0.3, 0.42, 0.6, 0.25);
-      putBox(P.head, s, x, y, z, 0, 1.5, 0, 0, 0.13, 0.21, 0.25, 0.23);
-      putBox(P.hair, s, x, y, z, 0, 1.5, 0, 0, 0.27, off ? 0.26 : 0.23, off ? 0.12 : 0.08, off ? 0.28 : 0.25);
-      tint(P.legL, s, apants[i]); tint(P.legR, s, apants[i]); tint(P.torso, s, ashirt[i]);
-      tint(P.head, s, askin[i]); tint(P.hair, s, ahair[i]);
-      n.body++;
-      if (far) continue;
-      // arms: what the hands are doing
-      const r = arole[i], act = aact[i];
-      let la = -sw * 0.8, ra = sw * 0.8;
-      const pulse = m.chantPulse > 0 || act === ACT.cheer;
-      if (r === ROLE.sign) { la = -2.75; ra = -2.75; }
-      else if (r === ROLE.flag) { ra = -2.5 + Math.sin(t * 2.4 + i) * 0.12; }
-      else if (r === ROLE.officer) { la = -1.25; ra = -0.6; }
-      if (act === ACT.throw) ra = -2.9 + clamp(1 - atim[i] / 0.6, 0, 1) * 2.4;
-      else if (act === ACT.climb) { la = -2.9; ra = -2.7; }
-      else if (act === ACT.fight) { ra = -1.5 + Math.sin(t * 14 + i) * 0.4; la = -1.2; }
-      else if (act === ACT.flee) { la = -sw * 1.2; ra = sw * 1.2; }
-      else if (pulse && (r === ROLE.fist || r === ROLE.leader || r === ROLE.plain)) { ra = -2.9 + Math.max(0, Math.sin(t * 5 + (i & 7))) * 0.7; if (r === ROLE.leader) la = -2.8; }
-      const a = n.arm;
-      putBox(P.armL, a, x, y, z, -0.27, 1.44, 0, la, -0.31, 0.11, 0.62, 0.12);
-      putBox(P.armR, a, x, y, z, 0.27, 1.44, 0, ra, -0.31, 0.11, 0.62, 0.12);
-      tint(P.armL, a, ashirt[i]); tint(P.armR, a, ashirt[i]);
-      n.arm++;
+      if (crowd && alook[i] >= 0) { clipFor(i, m); crowd.add(x, y, z, ahd[i], alook[i], _clip, _phase, _rate); bodies++; }
+      const dx = x - cx, dz = z - cz;
+      if (dx * dx + dz * dz > PROP2 || aact[i] === ACT.down || aact[i] === ACT.flee) continue;
+      const r = arole[i];
+      base(ahd[i], 0);
       if (r === ROLE.officer && n.shield < P.shield.instanceMatrix.count) {
-        putBox(P.shield, n.shield, x, y, z, -0.1, 1.05, 0.4, 0, 0, 0.6, 1.0, 0.04); n.shield++;
-      } else if (r === ROLE.sign && act !== ACT.flee) {
+        putBox(P.shield, n.shield, x, y, z, -0.1, 1.05, 0.42, 0, 0, 0.6, 1.0, 0.04); n.shield++;
+      } else if (r === ROLE.sign) {
+        // where president_public's placard sits in the same pose: the board
+        // over the head, both hands up the stick
         const sm = signMesh(m.slogans[asign[i] % m.slogans.length], m.support);
-        if (sm.count < sm.instanceMatrix.count) { putBox(sm, sm.count, x, y, z, 0, 2.24, 0.12, 0, 0, 0.72, 0.46, 0.025); sm.count++; }
-        if (n.stick < CAP) { putBox(P.stick, n.stick, x, y, z, 0, 1.78, 0.12, 0, 0, 0.03, 0.5, 0.03); n.stick++; }
-      } else if (r === ROLE.flag && act !== ACT.flee) {
+        const pump = Math.sin(t * 1.4 + i) * 0.04;
+        if (sm.count < sm.instanceMatrix.count) { putBox(sm, sm.count, x, y, z, 0, 2.4, 0.2, pump * 0.25, 0, 0.82, 0.52, 0.02); sm.count++; }
+        if (n.stick < CAP) { putBox(P.stick, n.stick, x, y, z, 0, 1.68, 0.2, 0, 0, 0.034, 1.0, 0.034); n.stick++; }
+      } else if (r === ROLE.flag) {
         const fm = flagMesh(m.flag);
         if (fm.count < fm.instanceMatrix.count) {
-          const wv = Math.sin(t * 3 + i * 0.7) * 0.08;
-          putBox(fm, fm.count, x, y, z, 0.3, 2.5, -0.4, wv, 0, 0.02, 0.48, 0.76); fm.count++;
+          const wv = Math.sin(t * 2.2 + i * 0.7) * 0.1;
+          putBox(fm, fm.count, x, y, z, -0.22, 2.2, 0.0, wv, 0, 0.02, 0.4, 0.62); fm.count++;
         }
-        if (n.stick < CAP) { putBox(P.stick, n.stick, x, y, z, 0.3, 2.25, 0, 0, 0, 0.035, 1.0, 0.035); n.stick++; }
+        if (n.stick < CAP) { putBox(P.stick, n.stick, x, y, z, -0.22, 1.92, 0.3, 0, 0, 0.034, 0.9, 0.034); n.stick++; }
       }
     }
-    P.legL.count = P.legR.count = P.torso.count = P.head.count = P.hair.count = n.body;
-    P.armL.count = P.armR.count = n.arm;
+    if (crowd) crowd.commit();
     P.shield.count = n.shield; P.stick.count = n.stick;
-    for (const k in P) { const M = P[k]; M.instanceMatrix.needsUpdate = M.count > 0; if (M.instanceColor && M.count) M.instanceColor.needsUpdate = true; }
+    for (const k in P) { const M = P[k]; M.instanceMatrix.needsUpdate = M.count > 0; }
     for (const k in R_.signs) R_.signs[k].instanceMatrix.needsUpdate = R_.signs[k].count > 0;
     for (const k in R_.flags) R_.flags[k].instanceMatrix.needsUpdate = R_.flags[k].count > 0;
     // projectiles in flight
@@ -1161,8 +1175,16 @@
     base(0, 0);
     for (let k = 0; k < SHOTS.length && ns < 32; k++) { const s = SHOTS[k]; if (!s.alive) continue; base(s.t * 9, s.t * 7); putBox(S, ns++, s.x, s.y, s.z, 0, 0, 0, 0, 0, 1, 1, 1); }
     S.count = ns; S.instanceMatrix.needsUpdate = ns > 0;
-    STATS.drawn = n.body;
+    STATS.drawn = bodies;
     if (t0) STATS.drawMs = STATS.drawMs * 0.9 + ((performance.now() - t0) * 0.1);
+  }
+  function blank() {
+    if (!R_.root) return;
+    if (R_.crowd) R_.crowd.clear();
+    for (const k in R_.parts) R_.parts[k].count = 0;
+    for (const k in R_.signs) R_.signs[k].count = 0;
+    for (const k in R_.flags) R_.flags[k].count = 0;
+    if (R_.shots) R_.shots.count = 0;
   }
 
   // ---------------------------------------------------------------- the frame
@@ -1173,7 +1195,7 @@
     let any = false;
     for (let i = 0; i < MOBS.length; i++) if (MOBS[i]) { any = true; break; }
     if (!any && !SHOTS.length && !GAS.length) {
-      if (R_.root && R_.parts && R_.parts.torso.count) { for (const k in R_.parts) R_.parts[k].count = 0; for (const k in R_.signs) R_.signs[k].count = 0; for (const k in R_.flags) R_.flags[k].count = 0; }
+      if (R_.root && STATS.drawn >= 0) { blank(); STATS.drawn = -1; }
       return;
     }
     const t0 = (typeof performance !== "undefined" && performance.now) ? performance.now() : 0;
@@ -1225,7 +1247,7 @@
       return {
         device: DEVICE, cap: CAP, agents: liveAgents(), free: freeList.length, hi: hiAgent, rigs: rigCount(false), copRigs: rigCount(true),
         rigCap: BUD.rigs, copCap: BUD.cops, mobs: MOBS.filter(Boolean).length, lines: LINES.length, gas: GAS.length, shots: SHOTS.length,
-        drawn: STATS.drawn, stepMs: +STATS.stepMs.toFixed(3), drawMs: +STATS.drawMs.toFixed(3), peakAgents: STATS.peakAgents, peakRigs: STATS.peakRigs,
+        drawn: Math.max(0, STATS.drawn), lods: R_.crowd ? R_.crowd.drawn.slice(1) : null, stepMs: +STATS.stepMs.toFixed(3), drawMs: +STATS.drawMs.toFixed(3), peakAgents: STATS.peakAgents, peakRigs: STATS.peakRigs,
         formed: STATS.formed, breaches: STATS.breaches, linesBroken: STATS.linesBroken, gasFired: STATS.gasFired, thrown: STATS.thrown,
         built: !!R_.root,
       };

@@ -129,12 +129,6 @@
   const FLAG_NOCLOCK = QP.get("clock") === "off";
   const FLAG_NOBANDAI = QP.get("bandai") === "off";
   const FLAG_GUEST = QP.get("guest") === "1";
-  /* THE CONE, ON PURPOSE. ?men=old restores the six-sided cylinder-and-box
-     every man on this map used to be, with the old camera-driven size lie and
-     no near-band rigs at all — so the thing the owner complained about can be
-     photographed beside the thing that replaced it. Repo doctrine: every
-     behaviour change ships with its own revert. */
-  const FLAG_MEN_OLD = QP.get("men") === "old";
   /* ?folk=off — the outposts still stand, and nobody is in them. The honest
      A/B for the people, and the thing the owner was actually looking at:
      "a man with a crate popup with no man there". */
@@ -192,7 +186,7 @@
   let root = null;                 // everything this file draws
   let controls = null;
   let you = null, youRig = null;   // the real cast body
-  let menBody = null, menLegs = null, menHead = null, menCap = null, banner = null, pole = null;
+  let menLayer = null, menShown = 0, banner = null, pole = null;
   let marker = null, markerT = 0;
   let dest = null;                 // {x,z} or null
   let camYaw = 0, camDist = 46, camDistWant = 46;
@@ -830,9 +824,13 @@
        · 150 m in, 178 m out. A man walking the boundary would otherwise
          flicker between forms every time the camera breathed.
 
-     ?men=old restores the cone, byte for byte, so the two can be photographed
-     against each other. That is what the before/after pair is FOR. */
+     Past the rig band every man is THE SAME HUMAN, GPU-instanced through
+     entities/crowdgpu.js (the CBZ.human mesh with its baked walk/run/idle,
+     mesh LODs and impostors rendered from it), in his own marks. There is no
+     box man and no cone any more; without vertex float textures the men past
+     the band are simply not drawn. */
   const MEN_CAP = 980;
+  let GAIT_W = 0, GAIT_R = 0;   // the baked stride (rad of gait phase per metre), read once
   const RIG_POOL = 48;          // see above: battle.js's own measured budget
   const NEAR_IN = 150;          // m from the camera — acquire a rig
   const NEAR_OUT = 178;         // m — release it. The gap is the hysteresis.
@@ -864,7 +862,6 @@
      them. */
   const LIE_NEAR = 60, LIE_FAR = 520, LIE_MAX = 3.2;
   function manScale(d) {
-    if (FLAG_MEN_OLD) return 1 + clamp((camDist - 16) / (520 - 16), 0, 1) * 2.2;
     return 1 + (LIE_MAX - 1) * clamp((d - LIE_NEAR) / (LIE_FAR - LIE_NEAR), 0, 1);
   }
 
@@ -900,210 +897,14 @@
     return geo;
   }
 
-  /* MERGE THE IMPOSTOR INTO ONE BUFFER, because the draw-call argument the
-     cone was built on is still the right argument at range — a nine-box man
-     drawn as nine InstancedMeshes would be nine draw calls for the same
-     picture. One geometry, one InstancedMesh, and the per-box shade rides in
-     the geometry's own `color` attribute where it is MULTIPLIED by the
-     instance colour: tint 0.30 on the boots makes them dark whatever uniform
-     the man is wearing, 0.80 on the legs makes trousers a shade off the
-     shirt. That is a free second tone per man on a path that only carries
-     one. r128's BufferGeometryUtils is not loaded on this page and there is
-     no reason to load it for twenty lines. */
-  function mergeBoxes(parts, scale) {
-    let total = 0;
-    const built = [];
-    for (let i = 0; i < parts.length; i++) {
-      const p = parts[i];
-      const g = new THREE.BoxGeometry(p.w, p.h, p.d).toNonIndexed();
-      g.translate(p.x || 0, p.y, p.z || 0);
-      total += g.attributes.position.count;
-      built.push({ g: g, t: p.tint == null ? 1 : p.tint });
-    }
-    const pos = new Float32Array(total * 3);
-    const nor = new Float32Array(total * 3);
-    const col = new Float32Array(total * 3);
-    let o = 0;
-    for (let i = 0; i < built.length; i++) {
-      const g = built[i].g, t = built[i].t, c = g.attributes.position.count;
-      pos.set(g.attributes.position.array, o * 3);
-      nor.set(g.attributes.normal.array, o * 3);
-      for (let k = 0; k < c; k++) { col[(o + k) * 3] = t; col[(o + k) * 3 + 1] = t; col[(o + k) * 3 + 2] = t; }
-      o += c;
-      g.dispose();
-    }
-    const out = new THREE.BufferGeometry();
-    out.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-    out.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
-    out.setAttribute("color", new THREE.BufferAttribute(col, 3));
-    if (scale !== 1) out.scale(scale, scale, scale);
-    out.computeBoundingSphere();
-    return out;
-  }
-
-  /* THE IMPOSTOR IS CUT FROM THE RIG'S OWN TABLE. CBZ.charProfile() is the
-     one place a body's proportions live (entities/character.js), and
-     CBZ.HUMAN_SCALE is what the rig is drawn at. Reading them here rather
-     than typing eleven box sizes is the only version of this that cannot drift:
-     change the body and the impostor follows it in the same commit. The
-     fallback numbers are the shipped adult male, kept so a page without the
-     people pack still fields a man-shaped speck instead of throwing.
-
-     ORIGIN AT THE FEET, unlike the cone, whose body and head instances each
-     carried their own hand-typed height offset. Feet-at-zero means the
-     impostor takes the SAME matrix the rig gets from sand.plant, and the two
-     forms cannot disagree about where the ground is. */
-  const PROFILE_FALLBACK = {
-    legUp: 0.48, legLo: 0.47, legW: 0.34, hipX: 0.23, shoeH: 0.20,
-    armUp: 0.46, armLo: 0.46, armW: 0.30, armX: 0.62,
-    pelvisW: 0.84, pelvisH: 0.20, pelvisD: 0.48,
-    torsoW: 0.92, torsoH: 0.95, torsoD: 0.50,
-    collarW: 0.94, collarH: 0.18, collarD: 0.52, headSize: 0.60,
-  };
-  function impostorGeometry() {
-    let P = null;
-    try { P = CBZ.charProfile ? CBZ.charProfile() : null; } catch (e) { P = null; }
-    if (!P || !P.torsoH) P = PROFILE_FALLBACK;
-    const HS = (CBZ.HUMAN_SCALE > 0) ? CBZ.HUMAN_SCALE : 0.70;
-    const hipY = P.legUp + P.legLo;
-    const neckY = hipY - 0.005 + P.torsoH - 0.015;
-    const shoulderY = neckY - 0.04;
-    const armL = P.armUp + P.armLo;
-    const legH = hipY - P.shoeH;
-    /* THE GAP BETWEEN THE LEGS IS THE WHOLE READ. hipX 0.23 with legW 0.34
-       leaves 0.12 of daylight up the middle, and that slot is the single
-       feature that separates "a man" from "a bollard" at 60 m — more than the
-       arms, which foreshorten to nothing head-on. It is the rig's own number;
-       do not close it up to save two triangles.
-
-       THE TROUSERS ARE THEIR OWN MESH BECAUSE THEY ARE THEIR OWN COLOUR, and
-       the swap strip is what proved it. A fit's `legs` hex is frequently
-       nothing like its `torso` — khaki shirt over black trousers is half this
-       catalogue — so shading the torso colour down for the legs gave every
-       impostor tan trousers beside a rig wearing dark ones, on a part of the
-       silhouette that is a third of the man. One more instanced mesh for every
-       man on the island; still four draw calls where a single rig is
-       twenty-five. */
-    const legs = mergeBoxes([
-      // boots: dark ALWAYS. outfits.js's own rule — the one tone that never
-      // reads as sand — and here it doubles as the thing that stops the legs
-      // dissolving into the ground they are standing on. A shade of the
-      // trousers rather than the fit's own boot hex, because a fifth mesh to
-      // carry one more colour across two boxes eleven centimetres tall is not
-      // a trade worth making.
-      { w: P.legW * 1.02, h: P.shoeH, d: P.legW * 1.45, x: -P.hipX, y: P.shoeH / 2, z: 0.05, tint: 0.34 },
-      { w: P.legW * 1.02, h: P.shoeH, d: P.legW * 1.45, x: P.hipX, y: P.shoeH / 2, z: 0.05, tint: 0.34 },
-      { w: P.legW, h: legH, d: P.legW, x: -P.hipX, y: P.shoeH + legH / 2, tint: 1 },
-      { w: P.legW, h: legH, d: P.legW, x: P.hipX, y: P.shoeH + legH / 2, tint: 1 },
-      { w: P.pelvisW, h: P.pelvisH, d: P.pelvisD, y: hipY + 0.03, tint: 1 },
-    ], HS);
-    const body = mergeBoxes([
-      { w: P.torsoW, h: P.torsoH, d: P.torsoD, y: hipY - 0.005 + P.torsoH / 2, tint: 1 },
-      { w: P.collarW, h: P.collarH, d: P.collarD, y: shoulderY, tint: 1 },
-      /* THE ARMS ARE DARKER THAN THE SHIRT ON PURPOSE. Geometrically they are
-         the rig's own boxes, but flat-shaded at the rig's exact tone the
-         torso and both arms merge into one wide rectangle and the man reads
-         a head wider than he is. On the rig the sleeves sit in their own
-         fold shadow; 0.88 is that shadow, and it is what puts a waist back
-         into the silhouette. */
-      { w: P.armW, h: armL, d: P.armW, x: -P.armX, y: shoulderY - armL / 2, tint: 0.88 },
-      { w: P.armW, h: armL, d: P.armW, x: P.armX, y: shoulderY - armL / 2, tint: 0.88 },
-    ], HS);
-    /* THE HEAD IS TWO MESHES BECAUSE IT IS TWO COLOURS, and getting that
-       wrong was the first thing the swap-boundary pair showed. marks() answers
-       ONE head hex and it is the HAT when the man has one, so painting the
-       whole head with it gave every impostor a solid pale-blue block for a
-       skull — a lego head — beside rigs whose heads read as a small dark cap
-       over a tan face. Same silhouette, completely different creature.
-       So: a FACE cube on a constant dusty skin (no per-instance colour at all;
-       skin at 165 m is one colour for everybody) and a CAP slab carrying the
-       hat hex. It costs one draw call for every man on the island and it is
-       the difference between a man and a bollard with a light on it. For a
-       bare-headed man marks() already answers skin, so the slab just becomes
-       the top of his head and nothing special-cases it.
-
-       THE CAP SLAB IS WHAT MAKES THE HEIGHTS AGREE. The rig measures 1.862 m
-       to the top of its cap (read off a live Box3) and a bare head box tops
-       out at 1.736; the slab spans exactly that gap, so a man is the same
-       height in both forms and the swap has nothing vertical in it. */
-    const face = mergeBoxes([
-      { w: P.headSize, h: P.headSize, d: P.headSize, y: neckY + P.headSize / 2, tint: 1 },
-    ], HS);
-    const cap = mergeBoxes([
-      { w: P.headSize * 1.08, h: 0.18, d: P.headSize * 1.08, y: neckY + P.headSize + 0.09, tint: 1 },
-    ], HS);
-    return { body: body, legs: legs, face: face, cap: cap };
-  }
-
-  /* THE MEAN OF studio.js's OWN SKIN TABLE. CASTING picks a rig's tone out of
-     six (0xc9a07a 0x8d5a3b 0x6b4228 0xe0b894 0x4a2f1e 0xa87551) off the
-     variant index, and the pool spreads its forty-eight bodies across all of
-     them. At the range an impostor is drawn, one face is four pixels; the
-     honest single answer is the average of what the rigs beside it actually
-     are, not the lightest of the six, which is what outfits.js's bare-head
-     branch happens to use. Channel means of that table, rounded. */
-  /* AND THIS ONE IS DELIBERATELY *NOT* CONVERTED. Every cloth colour on an
-     impostor goes through toLinear because outfits.js converts the same hexes
-     before they reach a rig's material — but outfits.js states, and means, that
-     it leaves SKIN AND HAIR alone: entities/character.js owns those and sets
-     them raw. So the rig's face renders from an unconverted sRGB hex, and an
-     impostor face that WAS converted came back a shade of dark brown standing
-     next to rigs with tan faces. Match what is actually on the rig, not what
-     the theory says should be. */
-  const IMPOSTOR_SKIN = 0x996f50;
+  /* THE SKIN every instanced man wears: the mean of studio.js's six cast
+     tones, RAW (character.js sets skin unconverted; outfits.js converts cloth
+     only), so the instanced face matches the rigs beside it. */
+  const MAN_SKIN = 0x996f50;
 
   function buildMen() {
-    let bodyG, faceG, capG = null, legsG = null;
-    if (FLAG_MEN_OLD) {
-      // the cone, for the A/B. This is what the owner was looking at.
-      bodyG = whiteColors(new THREE.CylinderGeometry(0.26, 0.38, 1.30, 6));
-      faceG = whiteColors(new THREE.BoxGeometry(0.34, 0.34, 0.34));
-    } else {
-      const g = impostorGeometry();
-      bodyG = g.body; legsG = g.legs; faceG = g.face; capG = g.cap;
-    }
-    const bodyM = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
-    menBody = new THREE.InstancedMesh(bodyG, bodyM, MEN_CAP);
-    menBody.castShadow = true;
-    menBody.frustumCulled = false;
-    menBody.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    colourable(menBody, MEN_CAP);
-    menBody.count = 0;
-    root.add(menBody);
-
-    if (legsG) {
-      menLegs = new THREE.InstancedMesh(legsG,
-        new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }), MEN_CAP);
-      menLegs.castShadow = true;
-      menLegs.frustumCulled = false;
-      menLegs.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      colourable(menLegs, MEN_CAP);
-      menLegs.count = 0;
-      root.add(menLegs);
-    }
-
-    /* THE FACE NEEDS NO PER-INSTANCE COLOUR AT ALL, which is why it is worth
-       having as its own mesh: one flat material, no instanceColor buffer, no
-       vertexColors, no r128 USE_COLOR trap to fall into. In the cone revert
-       this mesh IS the old head box and it keeps the old colour path. */
-    menHead = new THREE.InstancedMesh(faceG,
-      FLAG_MEN_OLD ? new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true })
-                   : new THREE.MeshLambertMaterial({ color: IMPOSTOR_SKIN }), MEN_CAP);
-    menHead.frustumCulled = false;
-    menHead.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    if (FLAG_MEN_OLD) colourable(menHead, MEN_CAP);
-    menHead.count = 0;
-    root.add(menHead);
-
-    if (capG) {
-      menCap = new THREE.InstancedMesh(capG,
-        new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }), MEN_CAP);
-      menCap.frustumCulled = false;
-      menCap.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      colourable(menCap, MEN_CAP);
-      menCap.count = 0;
-      root.add(menCap);
-    }
+    // the men past the rig band: the real human, one crowd layer
+    menLayer = CBZ.crowdGPU ? CBZ.crowdGPU.layer({ name: "warlord-men", cap: MEN_CAP, parent: root, maxDraw: 2400 }) : null;
 
     /* THE BANNER IS THE MAP MARKER, and it is a real object in the world so
        it obeys the terrain and the fog like everything else. Its height and
@@ -2306,7 +2107,7 @@
     let m = menDraw[menDrawN];
     if (!m) m = menDraw[menDrawN] = {};
     m.key = key; m.x = x; m.z = z; m.y = y; m.yaw = yaw; m.bob = bob; m.ms = ms;
-    m.body = mk.body; m.legs = mk.legs; m.head = mk.head; m.s = s; m.band = band; m.spd = spd;
+    m.body = mk.body; m.legs = mk.legs; m.head = mk.head; m.look = mk.look == null ? -1 : mk.look; m.s = s; m.band = band; m.spd = spd;
     m.d2 = 0; m.rig = null;
     menDrawN++;
     return m;
@@ -2373,7 +2174,7 @@
   const _linCache = new Map();
   function lin1(c) { return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }
   function toLinear(hex) {
-    if (hex == null || FLAG_MEN_OLD) return hex;
+    if (hex == null) return hex;
     const k = hex | 0;
     let v = _linCache.get(k);
     if (v !== undefined) return v;
@@ -2425,6 +2226,7 @@
     }
     mk = { body: toLinear(mk.body), head: toLinear(mk.head),
            legs: toLinear(legs == null ? shade(mk.body, 0.78) : legs) };
+    mk.look = lookOf(mk);
     markCache.set(s, { bk: bk, mk: mk });
     return mk;
   }
@@ -2433,9 +2235,16 @@
   function flatMark(bodyCol, headCol) {
     _flat.body = toLinear(bodyCol); _flat.legs = toLinear(shade(bodyCol, 0.78));
     _flat.head = toLinear(headCol);
+    _flat.look = lookOf(_flat);
     return _flat;
   }
-  const _flat = { body: 0, legs: 0, head: 0 };
+  /* A MAN'S LOOK IN THE CROWD: shirt = his mark's body, trousers = its legs,
+     and the head hex (his hat, or bare skin) worn where the hair is. */
+  function lookOf(mk) {
+    const G = CBZ.crowdGPU;
+    return G ? G.look({ build: "m", skin: MAN_SKIN, shirt: mk.body, pants: mk.legs, hair: mk.head, shoes: 0x241f1a, sleeve: mk.body }) : -1;
+  }
+  const _flat = { body: 0, legs: 0, head: 0, look: -1 };
 
   /* PEERS ARE PARTIES AND THEIR MEN ARE MEN. W.state.peers carries
      {id,name,x,z,size,colour} and no roster — warnet.js never sends one,
@@ -2610,7 +2419,6 @@
      it anyway, because the camera is behind you looking at it. */
   function assignRigs(dt) {
     rigsShown = 0; rigsDressed = 0;
-    if (FLAG_MEN_OLD) return;
     const cam = camera.position;
     nearIdx.length = 0;
     for (let i = 0; i < menDrawN; i++) {
@@ -2950,56 +2758,29 @@
     assignRigs(dt);
 
     let n = 0;
-    for (let i = 0; i < menDrawN; i++) {
-      const m = menDraw[i];
-      if (m.rig) continue;
-      /* THE IMPOSTOR'S ORIGIN IS AT ITS FEET, so one matrix seats both the
-         body and the head and neither can drift from the other or from the
-         rig. The bob is the only motion a merged instance can carry — legs
-         cannot swing inside a shared buffer — and at 150 m a stride is three
-         pixels wide, so it buys nothing a vertical breath does not. */
-      n = instMan(n, m.x, m.y + m.bob * m.ms, m.z, m.yaw, m.ms, m.body, m.legs, m.head);
+    if (menLayer) {
+      /* EVERY MAN WITHOUT A RIG IS THE REAL HUMAN, instanced: walking or
+         running on the baked gait at his own speed (rate-driven, so the GPU
+         keeps his legs going between frames), standing idle otherwise. The
+         origin is at his feet, the same seat the rig takes from sand.plant. */
+      if (!GAIT_W) { const G = CBZ.crowdGPU, w = G.clip("walk"), r = G.clip("run"); GAIT_W = (w && w.radPerM) || 4.4; GAIT_R = (r && r.radPerM) || 2.3; }
+      menLayer.begin();
+      for (let i = 0; i < menDrawN; i++) {
+        const m = menDraw[i];
+        if (m.rig || m.look < 0) continue;
+        const sp = m.spd || 0, ph = ((i * 0.6180339887) + (m.s ? m.s.id * 0.37 : 0)) % 1;
+        if (sp > 2.4) menLayer.add(m.x, m.y, m.z, m.yaw, m.look, "run", ph, sp * GAIT_R / TAU, m.ms);
+        else if (sp > 0.3) menLayer.add(m.x, m.y, m.z, m.yaw, m.look, "walk", ph, sp * GAIT_W / TAU, m.ms);
+        else menLayer.add(m.x, m.y, m.z, m.yaw, m.look, "idle", ph, 0.25, m.ms);
+        n++;
+      }
+      menLayer.commit(camera);
     }
-    menBody.count = menHead.count = n;
-    menBody.instanceMatrix.needsUpdate = menHead.instanceMatrix.needsUpdate = true;
-    if (menBody.instanceColor) menBody.instanceColor.needsUpdate = true;
-    if (menHead.instanceColor) menHead.instanceColor.needsUpdate = true;
-    if (menCap) {
-      menCap.count = menLegs.count = n;
-      menCap.instanceMatrix.needsUpdate = menLegs.instanceMatrix.needsUpdate = true;
-      if (menCap.instanceColor) menCap.instanceColor.needsUpdate = true;
-      if (menLegs.instanceColor) menLegs.instanceColor.needsUpdate = true;
-    }
+    menShown = n;
     pole.count = bn; banner.count = bn;
     pole.instanceMatrix.needsUpdate = banner.instanceMatrix.needsUpdate = true;
     if (banner.instanceColor) banner.instanceColor.needsUpdate = true;
     menMs = menMs * 0.9 + (performance.now() - _t0) * 0.1;
-  }
-
-  /* ONE MATRIX, TWO MESHES. The body and the head are separate InstancedMeshes
-     only because they are separate COLOURS; they share a transform, so compose
-     it once. (The cone's two halves each carried their own hand-typed vertical
-     offset and a separate compose, which is how the head ended up 1.48 m up a
-     body that had been scaled by 3.2.) */
-  function instMan(n, x, y, z, yaw, ms, bodyCol, legCol, headCol) {
-    if (n >= MEN_CAP) return n;
-    if (FLAG_MEN_OLD) {
-      // the cone's own offsets, byte for byte, so ?men=old is a real revert
-      inst(menBody, n, x, y + 0.65 * ms, z, yaw, ms, ms, ms, bodyCol);
-      inst(menHead, n, x, y + 1.48 * ms, z, yaw, ms, ms, ms, headCol);
-      return n + 1;
-    }
-    _e.set(0, yaw, 0); _q.setFromEuler(_e);
-    _p3.set(x, y, z); _s3.set(ms, ms, ms);
-    _m4.compose(_p3, _q, _s3);
-    menBody.setMatrixAt(n, _m4);
-    menLegs.setMatrixAt(n, _m4);
-    menHead.setMatrixAt(n, _m4);
-    menCap.setMatrixAt(n, _m4);
-    if (menBody.setColorAt) { _col.setHex(bodyCol); menBody.setColorAt(n, _col); }
-    if (menLegs.setColorAt) { _col.setHex(legCol); menLegs.setColorAt(n, _col); }
-    if (menCap.setColorAt) { _col.setHex(headCol); menCap.setColorAt(n, _col); }
-    return n + 1;
   }
 
   /* ONE BANNER RULE for AI bands, peers and anything else that is a party:
@@ -3676,7 +3457,7 @@
   C.audit = function () {
     return {
       live: live, bands: S.bands.length, outposts: S.outposts.length,
-      army: S.army.length, drawnMen: menBody ? menBody.count : 0,
+      army: S.army.length, drawnMen: menShown,
       /* WHAT AN OUTPOST ACTUALLY IS ON SCREEN, because it was a lie for
          months and nothing here could have said so. `raised` counts the
          props.js compounds actually standing; `folk` the men drawn at them
@@ -3684,9 +3465,9 @@
          compound after levelPad, which is the number that says whether
          anything is floating. */
       posts: outpostAudit(),
-      men: { impostors: menBody ? menBody.count : 0, rigs: rigsShown,
+      men: { instanced: menShown, lods: menLayer ? menLayer.drawn.slice(1) : null, rigs: rigsShown,
              pool: rigsBuilt, poolCap: RIG_POOL, dressedThisFrame: rigsDressed,
-             near: NEAR_IN, out: NEAR_OUT, cone: FLAG_MEN_OLD,
+             near: NEAR_IN, out: NEAR_OUT,
              ms: Math.round(menMs * 1000) / 1000 },
       calls: (CBZ.renderer && CBZ.renderer.info) ? CBZ.renderer.info.render.calls : null,
       you: { x: Math.round(S.you.x), z: Math.round(S.you.z), y: Math.round(W.desert.heightAt(S.you.x, S.you.z)) },

@@ -42,6 +42,13 @@
   function damp(cur, target, rate, dt) { return cur + (target - cur) * (1 - Math.exp(-rate * dt)); }
   // elbow joints only bend one way (<=0), like animChar's setElbow
   function elbow(J, x, dt, rate) { if (J) J.rotation.x = damp(J.rotation.x, Math.min(0, x), rate || 14, dt); }
+  // both shoulders (x = swing, z = out) and both elbows, damped at 12
+  function crowdArms(ch, dt, lx, lz, rx, rz, el, er) {
+    const la = ch.parts && ch.parts.la, ra = ch.parts && ch.parts.ra, J = ch.low || {};
+    if (la) { la.rotation.x = damp(la.rotation.x, lx, 12, dt); la.rotation.z = damp(la.rotation.z, lz, 12, dt); }
+    if (ra) { ra.rotation.x = damp(ra.rotation.x, rx, 12, dt); ra.rotation.z = damp(ra.rotation.z, rz, 12, dt); }
+    elbow(J.la, el, dt, 12); elbow(J.ra, er, dt, 12);
+  }
 
   // Each pose writes arm targets on a rig `ch`, using the SAME surface
   // animChar uses: ch.parts.{la,ra} (upper-arm pivots) + ch.low.{la,ra}
@@ -83,6 +90,44 @@
       if (la) { la.rotation.x = damp(la.rotation.x, -0.62, r, dt); la.rotation.z = damp(la.rotation.z, 0.26, r, dt); }
       if (ra) { ra.rotation.x = damp(ra.rotation.x, -0.62, r, dt); ra.rotation.z = damp(ra.rotation.z, -0.26, r, dt); }
       elbow(J.la, -1.35, dt, r); elbow(J.ra, -1.35, dt, r);
+    },
+    // ---- THE CROWD'S ARMS (rallies, protests, marches, a stadium). These
+    // lived inside city/president_public.js; they are rows here because the
+    // instanced crowd (entities/crowdgpu.js) BAKES them from this registry, so
+    // a person far away and the same person as a full rig hold the same pose.
+    // ch._pubT is the pose clock, ch._pubPh a per-body offset, ch._pubHype a
+    // timed burst, ch._pubProp the held prop (a sign board rides the pump).
+    // a board on a stick, both hands up the stick, held over the head
+    pubPlacard(ch, dt) {
+      ch._pubT = (ch._pubT || 0) + dt;
+      const hype = (ch._pubHype || 0) > 0;
+      if (hype) ch._pubHype -= dt;
+      const pump = hype ? Math.sin(ch._pubT * 9) * 0.2 : Math.sin(ch._pubT * 1.4 + (ch._pubPh || 0)) * 0.04;
+      crowdArms(ch, dt, -2.72 + pump, -0.2, -2.72 + pump, 0.2, -0.3, -0.3);
+      const pr = ch._pubProp;
+      if (pr) { pr.position.y = 1.8 + (hype ? Math.max(0, -pump) * 0.5 : 0); pr.rotation.z = pump * 0.25; }
+    },
+    // a little flag on a stick in the right hand, waved
+    pubFlag(ch, dt) {
+      ch._pubT = (ch._pubT || 0) + dt;
+      const hype = (ch._pubHype || 0) > 0;
+      if (hype) ch._pubHype -= dt;
+      const w = Math.sin(ch._pubT * (hype ? 8 : 2.2) + (ch._pubPh || 0));
+      crowdArms(ch, dt, -0.1, ch.armOutZ || 0.08, -2.45 + w * (hype ? 0.3 : 0.08), 0.12, -0.2, -0.25);
+      const pr = ch._pubProp;
+      if (pr) pr.rotation.z = w * (hype ? 0.35 : 0.1);
+    },
+    // both arms up in a V, pumping
+    pubCheer(ch, dt) {
+      ch._pubT = (ch._pubT || 0) + dt;
+      const p = Math.sin(ch._pubT * 8 + (ch._pubPh || 0)) * 0.25;
+      crowdArms(ch, dt, -2.55 + p, 0.45, -2.55 - p, -0.45, -0.25, -0.25);
+    },
+    // the chant: one fist punched up on the beat, the other arm at the side
+    pubFist(ch, dt) {
+      ch._pubT = (ch._pubT || 0) + dt;
+      const beat = Math.max(0, Math.sin(ch._pubT * 5 + (ch._pubPh || 0)));
+      crowdArms(ch, dt, -0.15, ch.armOutZ || 0.08, -2.25 - beat * 0.6, -0.12, -0.35, -1.1 + beat * 0.9);
     },
     // explicit neutral (defensive no-op; setCharPose maps "stand" -> null so the
     // idle gait owns the arms instead of freezing them here).
