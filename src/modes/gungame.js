@@ -1999,13 +1999,13 @@
   });
 
   // ---- THE URL DOOR, ANSWERED LATE ----------------------------------------------------------
-  // state.js answers ?mode=gungame at parse time, before this file registered
-  // the mode, and normalised it to escape. Re-answer it once, now.
-  try {
-    const want = (typeof location !== "undefined" && location.search &&
-      new URLSearchParams(location.search).get("mode")) || CBZ.START_MODE;
-    if (want === "gungame" && g.mode !== "gungame" && g.state !== "playing" && CBZ.setMode) CBZ.setMode("gungame");
-  } catch (e) {}
+  // state.js reaches a gungame boot (?mode=, START_MODE, the remembered game)
+  // before this file registered the mode, so it leaves it pending instead of
+  // normalising it to escape. Answer it once, now.
+  if (CBZ.gungameBootPending) {
+    CBZ.gungameBootPending = false;
+    if (g.state !== "playing" && CBZ.setMode) { try { CBZ.setMode("gungame"); } catch (e) { console.error("[gungame boot]", e); } }
+  }
 
   // ---- audit -----------------------------------------------------------------------------------
   CBZ.gungameAudit = function () {

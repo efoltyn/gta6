@@ -65,9 +65,11 @@ export function buildPage(html, dropSet) {
     return true;
   }).join("\n");
 
-  // 2. the start mode, declared in its own inline block right before
-  //    config.js reads it (index.html's old pre-config block is gone).
-  const ANCHOR = `<!-- 0. namespace + constants -->`;
+  // 2. the start mode, declared in <head>: BEFORE index.html's first-paint
+  //    script right after <body> (which picks the title card off it), and so
+  //    long before config.js reads it. Declared lower down, the first paint
+  //    fell back to the remembered game or the prison card.
+  const ANCHOR = `</head>`;
   const DECL = `<script>
   /* THIS PAGE IS ONE GAME. src/config.js reads START_MODE and opens there, so
      the island is the only world this build ever stands up — no city, no
@@ -75,7 +77,7 @@ export function buildPage(html, dropSet) {
   window.CBZ = Object.assign(window.CBZ || {}, { START_MODE: "survival" });
 </script>
 `;
-  if (!out.includes(ANCHOR)) throw new Error("index.html's config.js anchor moved — update this tool");
+  if (!out.includes(ANCHOR)) throw new Error("index.html has no </head> — update this tool");
   out = out.replace(ANCHOR, DECL + ANCHOR);
 
   // 3. the document is this game, not the release

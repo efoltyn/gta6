@@ -33,17 +33,35 @@
 <link rel="stylesheet" href="css/campaign.css?v=neck1001b">
 <link rel="stylesheet" href="css/interact_touch.css?v=jailside1001">
 <link rel="stylesheet" href="css/title_hub.css?v=end1">
+<script>
+  /* THIS PAGE IS ONE GAME. src/config.js reads START_MODE and opens there, so
+     the island is the only world this build ever stands up — no city, no
+     prison, nothing behind the title card that the player did not ask for. */
+  window.CBZ = Object.assign(window.CBZ || {}, { START_MODE: "survival" });
+</script>
 </head>
 <body class="campaign-build">
 <script>
-/* SHARK SIM FIRST PIXEL. The static title markup below is Cell Block Z's card,
-   and it painted for the whole script parse (15-20 s on a loaded machine)
-   before state.js could apply mode-sharksim: CrazyGames rejected the build for
-   "a quick shot of another game at the start". A shark page marks <html>
-   here, before any of that markup paints; css/shark_title.css hides the card
-   and puts up the ocean boot screen, and modes/shark_title.js takes it down
-   once the live sea is on screen. */
-(function(){try{var m=(window.CBZ&&CBZ.START_MODE)||new URLSearchParams(location.search).get("mode");
+/* FIRST PAINT IS THE RIGHT GAME. The #title markup below holds every game's
+   card, and with no body.mode-* class the CSS shows the PRISON's (Cell Block
+   Z is the unclassed default). state.js applies the mode class, but it is
+   script ~210 of ~710: on a 36 MB page the prison card painted for seconds
+   before Gang Life (or Disaster, Gun Game, Shark) replaced it, every load.
+   So the boot mode is resolved HERE, before any title markup parses, and the
+   same body classes state.js's setMode toggles go on now; setMode later
+   re-applies them, so there is still one set of classes and one owner.
+   The resolution mirrors src/config.js exactly (?mode= beats a page's
+   START_MODE, then the menu's remembered game); keep the two in step.
+   Shark pages also get html.boot-sharksim + the ocean boot screen
+   (css/shark_title.css; modes/shark_title.js takes it down): CrazyGames
+   rejected the build for "a quick shot of another game at the start". */
+(function(){try{var C=window.CBZ||{},m=null;
+try{m=new URLSearchParams(location.search).get("mode");}catch(e){}
+if(!m)m=C.START_MODE;
+if(!m){try{m=localStorage.getItem("cbz.hub.last");}catch(e){}}
+var cls={city:["mode-city"],survival:["mode-survival"],gungame:["mode-gungame"],sharksim:["mode-survival","mode-sharksim"],escape:[]}[m];
+if(!cls)return;
+for(var i=0;i<cls.length;i++)document.body.classList.add(cls[i]);
 if(m==="sharksim"){document.documentElement.classList.add("boot-sharksim");
 var b=document.createElement("div");b.id="sharkBoot";b.innerHTML='<div class="sb-mark">SHARK SIM</div><div class="sb-bar"><i></i></div>';
 document.body.appendChild(b);}}catch(e){}})();
@@ -425,12 +443,6 @@ document.body.appendChild(b);}}catch(e){}})();
      config → core → world → entities → systems → loop → main.
 ============================================================ -->
 
-<script>
-  /* THIS PAGE IS ONE GAME. src/config.js reads START_MODE and opens there, so
-     the island is the only world this build ever stands up — no city, no
-     prison, nothing behind the title card that the player did not ask for. */
-  window.CBZ = Object.assign(window.CBZ || {}, { START_MODE: "survival" });
-</script>
 <!-- 0. namespace + constants -->
 <script src="src/config.js?v=stam1009"></script>
 <!-- CITY SLICES (?slice=name|x,z,r): one piece of Gang City booted as its own world.
@@ -866,7 +878,7 @@ document.body.appendChild(b);}}catch(e){}})();
      thread cannot repaint during that). Must load BEFORE state.js, which
      shows it, and before the city modules that call CBZ.bootStep(). -->
 <script src="src/systems/bootprogress.js?v=slice0929b"></script>
-<script src="src/systems/state.js?v=nored0930"></script>
+<script src="src/systems/state.js?v=bootflash1"></script>
 <!-- AN APP GETS INTERRUPTED AND A TAB DOES NOT. WKWebView drops the WebGL
      context under memory pressure and hands it back later; three.js rebuilds
      its own GL resources, but nothing told the GAME, so a hundred survivors
