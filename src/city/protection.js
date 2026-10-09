@@ -1739,10 +1739,13 @@
   }
   // an open spot 18-24 m from him, out of his sight, outdoors, dry, with a
   // clear straight walk to him (a man moved up there can reach him)
-  const CATCH_A = [0, 0.6, -0.6, 1.2, -1.2, 1.8, -1.8, Math.PI];
+  // Searched round the CAMERA's back (forward is (-sin yaw, -cos yaw), so
+  // straight behind the lens is the bearing `yaw`), widening to the sides.
+  const CATCH_A = [0, 0.45, -0.45, 0.9, -0.9, 1.35, -1.35, 1.8, -1.8, 2.25, -2.25, Math.PI];
   function catchUpSpot(P, hb, y) {
-    for (let k = 0; k < CATCH_A.length; k++) {
-      const a = hb + Math.PI + CATCH_A[k], R = 18 + (k % 3) * 3;
+    const base = CBZ.cam && isFinite(CBZ.cam.yaw) ? CBZ.cam.yaw : hb + Math.PI;
+    for (let k = 0; k < CATCH_A.length * 2; k++) {
+      const a = base + CATCH_A[k % CATCH_A.length], R = k < CATCH_A.length ? 18 + (k % 3) * 2 : 26 + (k % 3) * 3;
       const x = P.pos.x + Math.sin(a) * R, z = P.pos.z + Math.cos(a) * R;
       if (CBZ.cityNav && CBZ.cityNav.indoorLotAt && CBZ.cityNav.indoorLotAt(x, z)) continue;
       if (CBZ.cityNavWaterAt) { try { if (CBZ.cityNavWaterAt(x, z)) continue; } catch (e) {} }
@@ -1936,7 +1939,9 @@
       // out of sight; otherwise he runs to you on a routed path. Nobody is
       // ever put down beside you.
       if (hyp(q.pos.x, q.pos.z, P.pos.x, P.pos.z) > 45) {
-        const c = safeSpot(q.pos.x, q.pos.z, q.pos.y) ? catchUpSpot(P, hb, y) : null;
+        // (past 100 m he is a speck, the LOD contract's own staging range)
+        const unseen = !CBZ.npcTransitionSafe || CBZ.npcTransitionSafe(q.pos.x, q.pos.z, { minDistance: 3, maxDistance: 100, y: (q.pos.y || 0) + 1.05 });
+        const c = unseen ? catchUpSpot(P, hb, y) : null;
         if (c) { teleport(q, c.x, c.z, y); continue; }
         goTo(q, P.pos.x, P.pos.z, true, dt, null, false);
         continue;
