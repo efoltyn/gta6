@@ -126,6 +126,15 @@
   function PP() { return CBZ.presidentPublic && CBZ.presidentPublic.props ? CBZ.presidentPublic.props : null; }
   function arenaRoot() { const A = CBZ.city && CBZ.city.arena; return (A && A.root) || CBZ.scene || null; }
   function inCity() { return !g.mode || g.mode === "city"; }
+  // SECURED GROUND IS A WALL (city/perimeter.js): a crowd stands on the public
+  // side of a fence, behind the barricades, until it has broken a police line
+  // to get through. Spawn, goal and every step are clamped; officers are not.
+  const _KO = { x: 0, z: 0, moved: false };
+  function walled(m) { return !!CBZ.perimeter && !m.breached && m.stage !== "breach" && m.stage !== "inside"; }
+  function keepOut(m, x, z) {
+    if (walled(m)) return CBZ.perimeter.clampOut(x, z, _KO);
+    _KO.x = x; _KO.z = z; _KO.moved = false; return _KO;
+  }
 
   // ---------------------------------------------------------------- agents (SoA)
   // position, heading and velocity are the store's own arrays (one record per
@@ -333,7 +342,8 @@
       const a = h01(k, m.seed, 2) * Math.PI * 2, rr = R * Math.sqrt(h01(k, m.seed, 3));
       const lx = Math.cos(a) * rr, lz = Math.sin(a) * rr;
       const ox = lx * fz + lz * fx - fx * R * 0.9, oz = -lx * fx + lz * fz - fz * R * 0.9;
-      const i = alloc(m, m.at.x + ox, m.at.z + oz, m.face); if (i < 0) break;
+      const q = keepOut(m, m.at.x + ox, m.at.z + oz);   // never spawn inside a secured fence (perimeter.js)
+      const i = alloc(m, q.x, q.z, m.face); if (i < 0) break;
       arx[i] = ox; arz[i] = oz;
       amob[i] = slot; aside[i] = 0; aact[i] = 0; atim[i] = 0; acd[i] = h01(k, m.seed, 1) * 4; arig[i] = -1; aclimb[i] = 0;
       avx[i] = 0; avz[i] = 0; ahd[i] = m.face; aph[i] = h01(k, m.seed, 4) * 6.28; asp[i] = 0;
@@ -414,7 +424,7 @@
     if (start !== false) { m.stage = "march"; m.stageT = 0; m.hold = false; note(m, "march"); }
     return true;
   }
-  function setStage(m, st, extra) { if (m.stage === st) return; m.stage = st; m.stageT = 0; note(m, st, extra); }
+  function setStage(m, st, extra) { if (m.stage === st) return; if (st === "breach") m.breached = true; m.stage = st; m.stageT = 0; note(m, st, extra); }
 
   // ---------------------------------------------------------------- police lines
   /* line(id, spec): a police line between the mob and what it wants.
@@ -593,7 +603,19 @@
     }
     if (!m.doorForced) { m.doorForced = true; note(m, "door", { at: { x: at.x, z: at.z } }); }
   }
+  // the goal, then the perimeter: a goal on secured ground becomes the nearest
+  // point outside it, and a crowd going home walks AWAY from the fence
   function desired(m, i) {
+    const v = goal(m, i);
+    if (aside[i] === 0 && walled(m)) {
+      const out = m.stage === "disperse" && CBZ.perimeter.outward ? CBZ.perimeter.outward(atx[i], atz[i]) : null;
+      if (out) { atx[i] = ax[i] + out.x * 30; atz[i] = az[i] + out.z * 30; }
+      const q = CBZ.perimeter.clampOut(atx[i], atz[i], _KO);
+      atx[i] = q.x; atz[i] = q.z;
+    }
+    return v;
+  }
+  function goal(m, i) {
     if (aside[i] === 1) {
       // an officer: his slot on the line, or the way back
       const L = lineOf(i);
@@ -842,6 +864,10 @@
           if (aact[i] !== ACT.flee) m.frontContacts += ddt / dt;      // a sleeping body counts for the steps it slept
           frontActs(i, m, L, ddt);
         }
+      }
+      if (aside[i] === 0 && walled(m)) {
+        const q = CBZ.perimeter.clampOut(nx, nz, _KO);
+        if (q.moved) { nx = q.x; nz = q.z; avx[i] *= 0.3; avz[i] *= 0.3; }
       }
       ax[i] = nx; az[i] = nz;
       const sp = Math.hypot(avx[i], avz[i]);

@@ -24,8 +24,10 @@
       state residence upstairs ("Step out"); "Go
       inside" takes you in again.
 
-   3. THE CROWD. For a speech a crowd gathers on the motor court in front of
-      the house (or round the rally stage). Its SIZE is the approval rating:
+   3. THE CROWD. For a speech a crowd gathers on the PUBLIC side of the
+      railing, in the pen behind the bike racks across from the gate (city/
+      perimeter.js), looking up the drive at the balcony; or round the rally
+      stage. Never on the grounds: the fence is a wall to every crowd. Its SIZE is the approval rating:
       a handful at 20%, three dozen at 80%. Supporters wave small flags and a
       few hold FOUR MORE YEARS boards; protesters, a bigger share the lower the
       rating and after unpopular orders and attacks, hold signs over their
@@ -42,10 +44,13 @@
       is on the news. An NPC President walks out and does the same by himself.
 
    5. PROTESTS. When approval is low or after an unpopular order, a protest
-      forms OUTSIDE the Mansion gate on the approach road, with signs and
-      chanting, for a few minutes. If police or soldiers are deployed a line
-      of them stands between it and the gate. A crackdown or soldiers on the
-      street breaks it up and people run.
+      forms OUTSIDE the Mansion gate in the pen behind the bike racks, with
+      signs and chanting, for a few minutes, uniformed officers on the apron
+      facing it (protection.js). If police or soldiers are deployed a shield
+      line stands against the racks. A crackdown or soldiers on the street
+      breaks it up and people run. Only a crowd that BREAKS that line gets
+      in: it forces the gate, runs up the drive to the door, the house goes
+      to evac (breachGate).
 
    6. THE STATE ON THE STREET. statecraft.js already puts real troopers at the
       martial-law point and adds real cops to the police pool for a surge. What
@@ -914,8 +919,8 @@
         const k = i === 0 ? 0 : (i % 2 ? (i + 1) / 2 : -i / 2);
         const lat = k * 1.35 + (r % 2 ? 0.6 : 0) + (h01(r, i, 0x5b1) - 0.5) * 0.4;
         const dd = dist + (h01(i, r, 0x5b2) - 0.5) * 0.5;
-        const x = stage.x + dx * dd + px * lat, z = stage.z + dz * dd + pz * lat;
-        out.push({ x: x, z: z, row: r, lat: lat, face: faceTo(x, z, stage.x, stage.z) });
+        const q = publicPoint(stage.x + dx * dd + px * lat, stage.z + dz * dd + pz * lat);
+        out.push({ x: q.x, z: q.z, row: r, lat: lat, face: faceTo(q.x, q.z, stage.x, stage.z) });
       }
       r++;
     }
@@ -925,10 +930,18 @@
     if (!place) return null;
     if (place.stage === "balcony") {
       if (!B.group) return null;
-      // first row at cz-4, clear of the perron treads (cz-8); d0 is metres
-      // from the lectern out over the lawn
+      // THE PUBLIC SIDE OF THE RAILING (owner 2026-10-09: "they're right in
+      // front of the front door. That's dumb."). The speech crowd used to be
+      // posted on the carriage court 13 m from the door, protesters and all,
+      // inside the fence. A real balcony address is heard from the street:
+      // the crowd stands in the pen behind the barricades across from the
+      // gate (perimeter.js), looking up the drive at the balcony through the
+      // railing. d0 is metres from the lectern to that front row.
       const s = site();
-      return { kind: "balcony", x: B.stand.x, y: B.deckY, z: B.stand.z, face: 0, d0: (s.cz - 4) - B.stand.z, place: place };
+      const plan = CBZ.perimeter ? CBZ.perimeter.pen("execmansion") : null;
+      const f = 0, fx = Math.sin(f), fz = Math.cos(f);
+      const d0 = plan ? (plan.at.x - B.stand.x) * fx + (plan.at.z - B.stand.z) * fz : (s.rect.maxZ + 8.2) - B.stand.z;
+      return { kind: "balcony", x: B.stand.x, y: B.deckY, z: B.stand.z, face: f, d0: d0, place: place, pen: true };
     }
     return { kind: "rally", x: place.x, y: 0.42, z: place.z, face: place.face || 0, d0: 5.2, place: place };
   }
@@ -937,6 +950,7 @@
     if (CROWD.stage !== stage) {
       crowdRelease(false);
       CROWD.stage = stage;
+      if (stage.pen) penUse("speech", true);
       const n = crowdSize();
       const share = protestShare();
       CROWD.slots = makeSlots(stage, n);
@@ -986,6 +1000,7 @@
       if (drift) startDrift(m.ped, CROWD.drifting, CROWD.stage, false);
       else unpost(m.ped);
     }
+    if (CROWD.stage && CROWD.stage.pen) penUse("speech", false);
     CROWD.members.length = 0; CROWD.slots = []; CROWD.stage = null; CROWD.want = 0;
     CROWD.supporters = 0; CROWD.protesters = 0;
   }
@@ -1154,6 +1169,93 @@
     for (let i = 0; i < RALLY.cols.length; i++) uncol(RALLY.cols[i]);
     if (RALLY.cols.length) dirtyCols();
     RALLY.cols = [];
+  }
+
+  // ---- THE PEN: bike-rack barricades on the sidewalk in front of the gate --
+  // Where any crowd at the Mansion stands (a protest, the balcony speech's
+  // public). city/perimeter.js owns the plan (where the racks go, the crowd's
+  // front row, the officers' spots, the apron the crowd may not enter);
+  // protection.js mans the officers; this draws the racks while the pen is
+  // open. One InstancedMesh for every rack, one thin collider each.
+  const PEN = { users: {}, group: null, cols: [], plan: null };
+  let _rackGeo = null;
+  function rackGeo() {
+    if (_rackGeo) return _rackGeo;
+    // a 2.4 m galvanised crowd barrier: end tubes, top and bottom rails,
+    // eleven pickets, two splayed flat feet; local x along the run
+    const parts = [];
+    const L = 2.3, H = 1.08, t = 0.034;
+    function add(w, h, d, x, y, z) { const g = new THREE.BoxGeometry(w, h, d).toNonIndexed(); g.translate(x, y, z); parts.push(g); }
+    for (const s of [-1, 1]) {
+      add(t * 1.3, H - 0.1, t * 1.3, s * L / 2, 0.1 + (H - 0.1) / 2, 0);
+      add(0.07, 0.03, 0.62, s * (L / 2 - 0.1), 0.015, 0);            // the foot
+    }
+    add(L, t * 1.3, t * 1.3, 0, H, 0);
+    add(L, t, t, 0, 0.2, 0);
+    for (let k = 1; k <= 11; k++) add(0.02, H - 0.2, 0.02, -L / 2 + k * (L / 12), 0.2 + (H - 0.2) / 2, 0);
+    let n = 0; for (let i = 0; i < parts.length; i++) n += parts[i].attributes.position.count;
+    const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3);
+    let o = 0;
+    for (let i = 0; i < parts.length; i++) {
+      pos.set(parts[i].attributes.position.array, o * 3); nor.set(parts[i].attributes.normal.array, o * 3);
+      o += parts[i].attributes.position.count; parts[i].dispose();
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    g.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
+    g.computeBoundingSphere();
+    return (_rackGeo = g);
+  }
+  function penUse(who, on) {
+    const P = CBZ.perimeter;
+    if (!P) return null;
+    if (on) PEN.users[who] = true; else delete PEN.users[who];
+    const any = Object.keys(PEN.users).length > 0;
+    if (on) P.openPen("execmansion", who); else P.closePen("execmansion", who);
+    if (any && !PEN.group) buildPen();
+    else if (!any && PEN.group) dropPen();
+    return PEN.plan || P.pen("execmansion");
+  }
+  function buildPen() {
+    const P = CBZ.perimeter, root = arenaRoot();
+    const plan = P && P.pen("execmansion");
+    if (!plan || !root) return;
+    PEN.plan = plan;
+    const grp = new THREE.Group(); grp.name = "mansion-protest-pen";
+    const R = plan.barricades;
+    const im = new THREE.InstancedMesh(rackGeo(), cm(0xa4a9ad), R.length);
+    const d = new THREE.Object3D();
+    for (let i = 0; i < R.length; i++) {
+      const b = R[i], y = CBZ.floorAt ? CBZ.floorAt(b.x, b.z) : 0;
+      d.position.set(b.x, isFinite(y) ? y : 0, b.z); d.rotation.set(0, b.yaw - Math.PI / 2, 0); d.updateMatrix();
+      im.setMatrixAt(i, d.matrix);
+      // the rack's footprint as an axis-aligned sliver (racks run along x or z)
+      const ax = Math.abs(Math.sin(b.yaw)) > 0.7;
+      const hx = ax ? b.len / 2 : 0.18, hz = ax ? 0.18 : b.len / 2;
+      col(PEN.cols, b.x - hx, b.x + hx, b.z - hz, b.z + hz, (isFinite(y) ? y : 0), (isFinite(y) ? y : 0) + 1.1);
+    }
+    im.instanceMatrix.needsUpdate = true; im.castShadow = true; im.receiveShadow = true;
+    im.computeBoundingSphere && im.computeBoundingSphere();
+    grp.add(im); root.add(grp); PEN.group = grp;
+    dirtyCols();
+  }
+  function dropPen() {
+    if (PEN.group && PEN.group.parent) PEN.group.parent.remove(PEN.group);
+    PEN.group = null; PEN.plan = null;
+    for (let i = 0; i < PEN.cols.length; i++) uncol(PEN.cols[i]);
+    if (PEN.cols.length) dirtyCols();
+    PEN.cols = [];
+  }
+  function penReset() {
+    for (const k in PEN.users) if (CBZ.perimeter) CBZ.perimeter.closePen("execmansion", k);
+    PEN.users = {}; dropPen();
+  }
+  // a point a crowd may stand on (never on secured ground or the gate apron)
+  function publicPoint(x, z) {
+    const P = CBZ.perimeter;
+    if (!P) return { x: x, z: z };
+    const q = P.clampOut(x, z, {});
+    return { x: q.x, z: q.z };
   }
 
   // ============================================================
@@ -1692,13 +1794,31 @@
   //  §7  PROTESTS AT THE GATE
   // ============================================================
   function gatePoint() { const s = site(); return s && s.gate ? { x: s.gate.x, z: s.gate.z } : (s ? { x: s.cx, z: s.rect.maxZ } : null); }
+  // THE PROTEST PEN (city/perimeter.js): the gate's outward normal is READ
+  // from the fence the gate sits on, never assumed to be +z, and the crowd's
+  // front row is the pen's, behind the bike racks across from the gate.
+  function gateOutN() {
+    const s = site();
+    if (s && CBZ.perimeter) return CBZ.perimeter.gateOut(s);
+    return { x: 0, z: 1 };
+  }
+  function penPlan() {
+    if (CBZ.perimeter) { const p = CBZ.perimeter.pen("execmansion"); if (p) return p; }
+    const gp = gatePoint(); if (!gp) return null;
+    const o = gateOutN();
+    return { gate: gp, out: o, along: { x: o.z, z: -o.x }, at: { x: gp.x + o.x * 8.2, z: gp.z + o.z * 8.2 }, face: Math.atan2(-o.x, -o.z), half: 17, barricadeD: 6.5, frontD: 8.2, officers: [] };
+  }
   function startProtest(size, force) {
     const gp = gatePoint(); if (!gp) return false;
+    const pen = penUse("protest", true) || penPlan();
+    if (!pen) return false;
     const a = anger();
     PROT.active = true;
     PROT.anger = a;
+    PROT.breached = false;
     PROT.size = clamp(Math.round(size != null ? size : 6 + a * 14), 4, 22);
-    PROT.at = { x: gp.x, z: gp.z + 13 };            // +z is out of the compound: the approach road, never inside
+    PROT.pen = pen;
+    PROT.at = { x: pen.at.x, z: pen.at.z };          // the pen's front row: the public side of the racks
     PROT.startT = now();
     PROT.until = now() + pace(size != null ? 1.6 : 1.0 + 0.6 * h01(Math.floor(now()), PROT.size, 0x5c1));
     PROT.slogans = slogansNow();
@@ -1719,7 +1839,7 @@
       if (A && A.groups) { try { G = A.groups().filter(function (q) { return q.loyalty < 45; }).map(function (q) { return { id: q.id, name: q.name, share: q.share, color: q.color, cap: 0.2, shirt: 0.35 }; }); } catch (e) { G = null; } }
       PROT.souls = souls;
       PROT.mob = CBZ.mob.form({
-        at: { x: gp.x, z: gp.z + 18 }, face: Math.PI, size: souls, side: "opposition", kind: "protest", place: "the Mansion", hold: true, quiet: true,
+        at: { x: pen.at.x, z: pen.at.z }, face: pen.face, size: souls, side: "opposition", kind: "protest", place: "the Mansion", hold: true, quiet: true,
         slogans: PROT.slogans, chants: PROT.slogans.map(function (sl) { return CHANTS[sl] || (sl.charAt(0) + sl.slice(1).toLowerCase() + "!"); }),
         groups: G && G.length ? G : null, violent: 0.04 + a * 0.18, anger: a, width: 20,
       });
@@ -1732,14 +1852,16 @@
   function protestSlots() {
     if (PROT.slots) return PROT.slots;
     const gp = gatePoint(), out = [];
+    const pen = PROT.pen || penPlan(), o = pen.out, t = pen.along;
     let r = 0;
     while (out.length < PROT.size && r < 6) {
       const cnt = 6 + r;
       for (let i = 0; i < cnt && out.length < PROT.size; i++) {
         const k = i === 0 ? 0 : (i % 2 ? (i + 1) / 2 : -i / 2);
-        const x = gp.x + k * 1.4 + (r % 2 ? 0.7 : 0) + (h01(r, i, 0x5c2) - 0.5) * 0.5;
-        const z = gp.z + 9 + r * 1.7 + (h01(i, r, 0x5c3) - 0.5) * 0.5;
-        out.push({ x: x, z: z, face: faceTo(x, z, gp.x, gp.z) });
+        const lat = k * 1.4 + (r % 2 ? 0.7 : 0) + (h01(r, i, 0x5c2) - 0.5) * 0.5;
+        const dep = r * 1.7 + (h01(i, r, 0x5c3) - 0.5) * 0.5 + 0.3;
+        const q = publicPoint(pen.at.x + t.x * lat + o.x * dep, pen.at.z + t.z * lat + o.z * dep);
+        out.push({ x: q.x, z: q.z, face: faceTo(q.x, q.z, gp.x, gp.z) });
       }
       r++;
     }
@@ -1758,7 +1880,9 @@
       // the crowd owns its bodies; this file only decides whether a line stands at the gate
       const LW = policeLineWanted();
       if (LW.want && !PROT.mobLine && CBZ.mob.line) {
-        PROT.mobLine = CBZ.mob.line(PROT.mob, { at: { x: gp.x, z: gp.z + 6 }, face: 0, width: 16, n: 10, kind: LW.soldiers ? "army" : "police", gas: 2, retreat: { x: gp.x, z: gp.z - 6 } });
+        // the shield line stands on the apron, against the racks, facing the pen
+        const pen = PROT.pen || penPlan(), o = pen.out, d = pen.barricadeD - 0.9;
+        PROT.mobLine = CBZ.mob.line(PROT.mob, { at: { x: gp.x + o.x * d, z: gp.z + o.z * d }, face: Math.atan2(o.x, o.z), width: 16, n: 10, kind: LW.soldiers ? "army" : "police", gas: 2, retreat: { x: gp.x - o.x * 6, z: gp.z - o.z * 6 } });
       }
       return;
     }
@@ -1780,9 +1904,10 @@
     // the line between them and the gate
     const LW = policeLineWanted();
     if (LW.want && !PROT.police.length) {
+      const pen = PROT.pen || penPlan(), o = pen.out, t = pen.along;
       for (let i = 0; i < 4 && owned() < BUDGET; i++) {
-        const x = gp.x + (i - 1.5) * 2.6, z = gp.z + 4.8;
-        const b = LW.soldiers ? postSoldier(x, z, 0, "prespublic:protestline") : postCop(x, z, 0, 1, "prespublic:protestline");
+        const x = gp.x + t.x * (i - 1.5) * 2.6 + o.x * (pen.barricadeD - 1.2), z = gp.z + t.z * (i - 1.5) * 2.6 + o.z * (pen.barricadeD - 1.2);
+        const b = LW.soldiers ? postSoldier(x, z, Math.atan2(o.x, o.z), "prespublic:protestline") : postCop(x, z, o.x, o.z, "prespublic:protestline");
         if (b) PROT.police.push(b);
       }
     } else if (!LW.want && PROT.police.length) {
@@ -1803,7 +1928,11 @@
     PROT.active = false;
     const flee = phase === "dispersed";
     if (PROT.mob && CBZ.mob) { CBZ.mob.disperse(PROT.mob, flee); PROT.mob = null; PROT.mobLine = null; }
-    for (let i = 0; i < PROT.members.length; i++) startDrift(PROT.members[i].ped, PROT.drifting, flee ? { x: PROT.at.x, z: PROT.at.z - 6 } : gatePoint(), flee);
+    // home is AWAY from the gate: the flee point is on the gate side of them
+    const o = gateOutN();
+    for (let i = 0; i < PROT.members.length; i++) startDrift(PROT.members[i].ped, PROT.drifting, flee ? { x: PROT.at.x - o.x * 6, z: PROT.at.z - o.z * 6 } : gatePoint(), flee);
+    penUse("protest", false);
+    PROT.pen = null; PROT.breached = false;
     PROT.members.length = 0;
     for (let i = 0; i < PROT.police.length; i++) dropBody(PROT.police[i]);
     PROT.police.length = 0;
@@ -1813,6 +1942,25 @@
     if (flee) news("Police break up the protest outside the Executive Mansion.");
   }
   function disperseProtest() { endProtest("dispersed"); }
+  /* THE ONLY WAY IN. A crowd crosses the fence only by breaking the line in
+     front of it (mob.js "breach": the pressure beat the shields). Then it is
+     a real event: they force the gate, pour up the drive to the front door,
+     the house goes to evac and the Secret Service takes it from there. */
+  function breachGate() {
+    PROT.breached = true;
+    const s = site(), gp = gatePoint(); if (!s || !gp || !CBZ.mob) return;
+    const o = gateOutN(), door = s.seatPoint || { x: s.cx, z: s.cz };
+    const route = [
+      { x: gp.x + o.x * 2, z: gp.z + o.z * 2 },
+      { x: gp.x - o.x * 8, z: gp.z - o.z * 8 },
+      { x: door.x, z: door.z, door: true },
+    ];
+    try { CBZ.mob.march(PROT.mob, route, false); CBZ.mob.inside(PROT.mob, { x: door.x, z: door.z, r: 9 }); } catch (e) {}
+    if (CBZ.protection && CBZ.protection.alarm) { try { CBZ.protection.alarm(gp.x, gp.z, "attack: the gate is breached"); } catch (e) {} }
+    shock(-2); scandalUp(3);
+    news("Protesters break through the police line and force the gate of the Executive Mansion");
+    emit("protest", { phase: "breach", size: PROT.souls || PROT.size, at: { x: gp.x, z: gp.z } });
+  }
   const CHANTS = {
     "NO CURFEW": "No curfew! No curfew!", "SOLDIERS OUT": "Soldiers out! Soldiers out!", "RESIGN": "Resign! Resign!",
     "WHERE IS THE MONEY": "Where's the money?", "NO DICTATOR": "No dictator! No dictator!", "BRING THEM HOME": "Bring them home!",
@@ -1825,7 +1973,12 @@
       // a curfew at night clears the street
       if (curfewLive() && isNight() && policeLineWanted().want) { endProtest("dispersed"); return; }
       fillProtest(false);
-      if (PROT.mob) { if (CBZ.mob && !CBZ.mob.stage(PROT.mob)) { PROT.mob = null; endProtest("end"); } return; }    // the crowd chants for itself
+      if (PROT.mob) {
+        const st = CBZ.mob ? CBZ.mob.stage(PROT.mob) : null;
+        if (!st) { PROT.mob = null; endProtest("end"); return; }
+        if (st === "breach" && !PROT.breached) breachGate();
+        return;                                                     // the crowd chants for itself
+      }
       PROT.chantT -= dt;
       if (PROT.chantT <= 0 && PROT.members.length) {
         PROT.chantT = 5 + Math.random() * 3;
@@ -2131,7 +2284,8 @@
     releaseProtestBodies();
     for (let i = 0; i < PROT.drifting.length; i++) unpost(PROT.drifting[i].ped);
     PROT.drifting.length = 0;
-    PROT.active = false;
+    PROT.active = false; PROT.pen = null; PROT.breached = false;
+    penReset();
     for (let i = 0; i < CONS.items.length; i++) dropItem(CONS.items[i]);
     CONS.items.length = 0;
     dropRally();

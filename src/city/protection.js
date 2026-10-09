@@ -57,7 +57,8 @@
    · the player President's detail: 5 standing (the record's runtime
      `standing`), plus one body per "bigger detail" order (memberCount, the
      only number militia.js counts). A fallen agent is replaced 20 s later.
-   · Mansion posts: 3 gate officers (+2 in a lockdown), 4 on the roof,
+   · Mansion posts: 3 gate officers (+2 in a lockdown, +6 facing the crowd
+     at the protest pen while one is open, city/perimeter.js), 4 on the roof,
      2 on the wall walk. Spawned within 180 m of the grounds, released past
      260 m, killed stays dead until the next day.
    · an NPC President keeps power.js's ring (tier 5: six officers); this
@@ -953,7 +954,7 @@
   const MS = {
     site: null, sec: null, units: [], live: false, hostiles: [], hostileT: 0,
     challenge: null, gateHostile: null, gateHostileT: 0, pSide: 1, lampT: 0, gateLineT: 0,
-    lock: false, scanT: 0, gateT: 0, snipeT: 0,
+    lock: false, pen: false, scanT: 0, gateT: 0, snipeT: 0,
   };
   function unitSpec(id, role, x, y, z, face, extra) {
     const u = { id: id, role: role, x: x, y: y || 0, z: z, face: face || 0, ped: null, lost: false, waitT: 0,
@@ -972,6 +973,15 @@
     for (let i = 0; i < gp.length; i++) {
       MS.units.push(unitSpec("gate:" + gp[i].id, "gate", gp[i].x, 0, gp[i].z, gp[i].face, { lockdown: !!gp[i].lockdown }));
     }
+    // THE PEN LINE (city/perimeter.js): while a crowd stands in the pen across
+    // from the gate, six more uniformed officers stand OUTSIDE it, four on the
+    // apron against the bike racks and one at each end along the fence, all
+    // facing the crowd. Same gate role, same post brain, same challenge.
+    const pen = CBZ.perimeter && CBZ.perimeter.pen ? CBZ.perimeter.pen(site.id) : null;
+    const po = (pen && pen.officers) || [];
+    for (let i = 0; i < po.length; i++) {
+      MS.units.push(unitSpec("gate:pen" + i, "gate", po[i].x, 0, po[i].z, po[i].face, { pen: true }));
+    }
     const rp = (sec.roof && sec.roof.posts) || [];
     for (let i = 0; i < rp.length; i++) {
       MS.units.push(unitSpec("roof:" + rp[i].team + ":" + rp[i].role, "counter-sniper", rp[i].x, rp[i].y, rp[i].z, rp[i].face,
@@ -985,6 +995,8 @@
     }
     return true;
   }
+  // a lockdown post is manned in a lockdown, a pen post while the pen is open
+  function onDuty(u) { return !(u.lockdown && !MS.lock) && !(u.pen && !MS.pen); }
   function releasePosts() {
     for (let i = 0; i < MS.units.length; i++) dropUnit(MS.units[i]);
     MS.live = false;
@@ -1065,11 +1077,11 @@
       if (u.ped) {
         if (u.ped.dead) { u.lost = true; if (u.ped._post && CBZ.cityPostRelease) { try { CBZ.cityPostRelease(u.ped, "dead"); } catch (e) {} } u.ped = null; continue; }
         if (CBZ.cityPeds && CBZ.cityPeds.indexOf(u.ped) < 0) { u.ped = null; continue; }   // swept, not shot: re-man
-        if (u.lockdown && !MS.lock) { dropUnit(u); }
+        if (!onDuty(u)) { dropUnit(u); }
         continue;
       }
       if (u.lost) continue;
-      if (u.lockdown && !MS.lock) continue;
+      if (!onDuty(u)) continue;
       if (CBZ.citySpawnDraining) continue;
       u.waitT += dt;
       if (u.waitT < FORCE_SPAWN_T && !safeSpot(u.x, u.z, u.y)) continue;
@@ -1785,6 +1797,7 @@
     if (doSpawn) {
       if (!MS.lock && lockActive()) MS.lock = true;
       else if (MS.lock && !lockActive() && pres() && typeof pres().lockdown === "function") MS.lock = false;
+      MS.pen = !!(CBZ.perimeter && CBZ.perimeter.penOpen && MS.site && CBZ.perimeter.penOpen(MS.site.id));
       tickPostSpawns(spawnAcc, A, P);
       if (playerIsPres) _officeRoom = readOfficeRoom();
       spawnAcc = 0;
@@ -1877,7 +1890,7 @@
     for (let i = 0; i < MS.units.length; i++) {
       const u = MS.units[i];
       const r = u.role === "counter-sniper" ? SNIPER_RANGE : u.role === "gate" ? 14 : 10;
-      if (u.lockdown && !MS.lock) continue;
+      if (!onDuty(u)) continue;
       posts.push({ role: u.role, x: u.x, y: u.y, z: u.z, r: r, manned: !!(u.ped && !u.ped.dead), lost: !!u.lost });
       if (u.ped) units.push({ ped: u.ped, role: u.role, post: { x: u.x, y: u.y, z: u.z }, alive: !u.ped.dead });
     }
