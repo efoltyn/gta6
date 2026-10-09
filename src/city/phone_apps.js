@@ -248,6 +248,19 @@
     d = d || {};
     const me = us();
     const c = function (k) { return citizen(strHash(evt) + k + SEQ); };
+    // ANY MOMENT MAY CARRY ITS OWN POSTS: [{kind:"press"|"citizen"|"leader", name?, text, cid?}].
+    // The mob, the address and the transfer of power say what people would
+    // post; this is the one place they land, a breath apart.
+    if (Array.isArray(d.holler)) {
+      for (let k = 0; k < d.holler.length && k < 6; k++) {
+        const hp = d.holler[k];
+        if (!hp || !hp.text) continue;
+        const au = hp.kind === "press" ? PRESS : hp.kind === "leader" && hp.cid ? (leaderAuthor(hp.cid) || PRESS)
+          : hp.name ? { name: hp.name, handle: "@" + String(hp.name).toLowerCase().replace(/[^a-z0-9]/g, ""), kind: "citizen" } : c(20 + k);
+        if (k === 0) addPost(au, hp.text);
+        else later(1.5 + k * 1.8, function () { addPost(au, hp.text); });
+      }
+    }
     switch (evt) {
       case "war-declared": {
         const a = d.attackerName ? shortName(d.attacker) : null, b = d.defenderName ? shortName(d.defender) : null;
@@ -296,7 +309,7 @@
         return;
       }
       case "protest":
-        if (d.phase === "start") addPost(c(11), "At the Mansion gate. It's packed.");
+        if (d.phase === "start") addPost(c(11), d.groupName ? "The " + d.groupName.toLowerCase() + " are at the Mansion gate. It's packed." : "At the Mansion gate. It's packed.");
         return;
       // the President's people (city/president_staff.js)
       case "dismissal":
@@ -319,6 +332,21 @@
         return;
       case "impeach":
         addPost(PRESS, "Articles of impeachment filed against the President.");
+        return;
+      // THE ACT RECORD (city/politics.js): the groups that minded most say so
+      // in their own voices; a Congress vote is a line from the press
+      case "act": {
+        const R0 = d.reactions || [];
+        for (let i = 0; i < R0.length; i++) {
+          const x = R0[i];
+          if (!x || !x.text || !x.name) continue;
+          later(1 + i * 2, function () { addPost({ name: x.name, handle: x.handle || ("@" + String(x.name).toLowerCase().replace(/[^a-z]/g, "")), kind: "citizen", group: x.group }, x.text); });
+        }
+        if (d.headline && d.news !== false) addPost(PRESS, d.headline + ".");
+        return;
+      }
+      case "vote":
+        if (d.headline) addPost(PRESS, d.headline + ".");
         return;
       default:
         return;
@@ -387,7 +415,11 @@
       const L = leaderOf(cid);
       if (!L || !CBZ.relations || !CBZ.relations.event) r = { ok: false, why: "Nobody to threaten." };
       else {
-        const v = CBZ.relations.event(me, cid, "insult", 15);
+        // THE POST IS THE ACT (city/politics.js): a threat at a country
+        const Po = CBZ.politics;
+        let v;
+        if (Po && Po.act && Po.owns && Po.owns(me)) { Po.act("threaten", { target: cid, by: "self", scale: 1.2 }); v = rel(me, cid); }
+        else v = CBZ.relations.event(me, cid, "insult", 15);
         r = { ok: true };
         text = L.display + ", one more move against us and you will answer for it.";
         headline = "President threatens " + L.display + " in a post";
@@ -456,8 +488,17 @@
   function contactById(id) { const l = contacts(); for (let i = 0; i < l.length; i++) if (l[i].id === id) return l[i]; return null; }
   const STAFF = [
     { id: "general", role: "General" }, { id: "chief", role: "Chief of Staff" }, { id: "bureau", role: "Bureau Director" },
-    { id: "police", role: "Police Commissioner" }, { id: "treasury", role: "Treasury Secretary" }, { id: "press", role: "Press Secretary" },
+    { id: "police", role: "Police Commissioner" }, { id: "treasury", role: "Treasury Secretary" }, { id: "cia", role: "CIA Director" },
+    { id: "ss", role: "Secret Service Director" }, { id: "interior", role: "Interior Minister" }, { id: "press", role: "Press Secretary" },
   ];
+  // the heads of the services take a quiet word: a deal off the books
+  // (city/politics.js deal: their service's loyalty, a hidden scandal risk)
+  const HEAD_INST = { general: "army", bureau: "fbi", police: "police", cia: "cia", ss: "ss" };
+  function quietWord(role) {
+    const Po = CBZ.politics;
+    if (!Po || !Po.deal || !HEAD_INST[role]) return null;
+    return { id: "deal", label: "Something for your people", run: function () { return Po.deal(HEAD_INST[role], { kind: "bribe", amount: 40000 }); } };
+  }
   function staffPerson(role) {
     const PS = CBZ.presidentStaff;
     if (PS && PS.person) { try { return PS.person(role); } catch (e) { return null; } }
@@ -497,6 +538,8 @@
       if (st >= 1 && ch.length < 3) ch.push({ id: "streets", label: "Clear the streets", run: function () { return CBZ.dissent.crackdown(); } });
       const line = st >= 3 ? "Yes?" : foe ? shortName(foe) + " is still fighting. Orders?" : "Go ahead, sir.";
       const out = ch.slice(0, st >= 3 ? 3 : 2);
+      const qw = quietWord("general");
+      if (qw && out.length < 3) out.push(qw);
       if (st < 3) out.push(resign("general"));
       return { line: line, choices: out };
     }
@@ -508,9 +551,10 @@
       return { line: line, choices: ch.slice(0, 2).concat([resign("chief")]) };
     }
     // the rest of the cabinet and the press secretary: a word, and the one verb
-    if ((id === "bureau" || id === "police" || id === "treasury" || id === "press") && me) {
-      const LINE = { bureau: "Director.", police: "Commissioner here.", treasury: "Treasury.", press: "Yes, sir?" };
-      return { line: LINE[id], choices: [resign(id)] };
+    if (/^(bureau|police|treasury|cia|ss|interior|press)$/.test(id) && me) {
+      const LINE = { bureau: "Director.", police: "Commissioner here.", treasury: "Treasury.", cia: "Langley.", ss: "Service.", interior: "Interior.", press: "Yes, sir?" };
+      const qw = quietWord(id);
+      return { line: LINE[id], choices: qw ? [qw, resign(id)] : [resign(id)] };
     }
     if (id.indexOf("leader:") === 0 && me) {
       const cid = id.slice(7);

@@ -404,6 +404,10 @@
       if (!q) break;
       q.controlled = true; q.ammo = gear.ammo; q.maxHp = gear.hp;
       q._protUnit = detail.id;
+      // a Secret Service agent is his job: only his own verbs (city/orders.js:
+      // Attack / Guard / Tail / Hold here / Clear the room), never the
+      // street's Flirt / Mug / Pickpocket
+      if (jobFor(detail) === "secret service") q._iOnly = true;
       // DRESS: the job IS the uniform. "secret service" / "hired security"
       // cast city/outfits.js CAT.detail (black suit, white shirt, black tie,
       // shades, earpiece) through jobFit inside cityPostNpc -> makePed, and
@@ -1008,6 +1012,10 @@
     q.controlled = true; q.ammo = u.role === "counter-sniper" ? 40 : 120; q.maxHp = 170;
     q._protUnit = "mansion"; q._protRole = u.role; q.organization = "state"; q.organizationLoyalty = 100;
     q.nameKnown = false;
+    // on post: no street verbs. They take the President's orders about a man
+    // (city/orders.js "Take him down"); the gate officer clears a protest
+    // (city/president_public.js "Clear the gate")
+    q._iOnly = true;
     if (CBZ.syncActorWeapon) { try { CBZ.syncActorWeapon(q); } catch (e) {} }
     // dress comes from the job (outfits.js jobFit): gate "uniformed division
     // officer" -> police uniform, "counter-sniper" -> all-black tactical with
@@ -1742,7 +1750,9 @@
         gearTier: 2, formation: "escort", fundingSource: "treasury", legalStatus: "state", memberCount: 0 });
     }
     det.principal.ref = cur.sid || "player";
-    det.standing = PRES_BASE;
+    // the Service that has stopped trusting him stands fewer agents round
+    // him (city/politics.js detailSize: the Secret Service's loyalty)
+    det.standing = CBZ.politics && CBZ.politics.detailSize ? CBZ.politics.detailSize(PRES_BASE) : PRES_BASE;
     return det;
   }
 

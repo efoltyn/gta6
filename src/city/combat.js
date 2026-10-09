@@ -842,7 +842,10 @@
     if (!a) return;
     a._losBlocked = true;
     a._gunLowered = true;
-    if (a._weaponProp && a._weaponProp.visible) a._weaponProp.visible = false;
+    // (it used to HIDE the prop here too, and raiseGun showed it on the next
+    // clear muzzle: a gun blinking in and out of the hand on every walled-off
+    // shot. Lowered is LOW READY now, muzzle down and clear of the wall:
+    // systems/actorweapons.js CBZ.gunDiscipline.)
   }
   function raiseGun(a) {
     if (!a) return;
@@ -914,6 +917,7 @@
     if (!a.char || !a.char.parts) return false;
     if (!a._weaponProp || !a._weaponProp.visible) return false;
     if (a._holstered || a._gunLowered || a._gunHidden) return false;
+    if (a._gd && CBZ.gunDiscipline && !CBZ.gunDiscipline.aiming(a)) return false;   // low ready: poseList owns the arm
     if (a.surrender || (a.surrenderT || 0) > 0 || a.char.surrender || a.char.handsUp) return false;
     if (a.restraint) return false;   // wrists zip-tied behind the back (restrain.js) — never lift the gun arm
     const ph = a._phys;

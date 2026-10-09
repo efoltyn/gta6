@@ -422,7 +422,15 @@
   // (see header for exactly what that means this wave: nominal equal pop,
   // turnout scaled by the child's own live approval).
   function childBlocs(rec) {
-    const kids = rec.kind === "country"
+    // A COUNTRY VOTES BY ITS CITIES (the districts election night counts one by
+    // one), falling back to its states where no city is registered under it.
+    let kids = [];
+    if (rec.kind === "country" && CBZ.polity.countryOf) {
+      kids = CBZ.polity.list("city").filter(function (c) {
+        try { const k = CBZ.polity.countryOf(c.id); return !!(k && k.id === rec.id); } catch (e) { return false; }
+      });
+    }
+    if (!kids.length) kids = rec.kind === "country"
       ? CBZ.polity.list("state").filter(function (s) { return s.parent === rec.id; })
       : CBZ.polity.list("city").filter(function (c) { return c.parent === rec.id; });
     const out = [];
@@ -456,6 +464,8 @@
     return clampNum(0, 1, 0.12 + 0.88 * (r / PLAYER_CHARISMA_RESPECT));
   }
   function scoreCandidate(cand, bloc, rec) {
+    // the seat country's approval IS the population-weighted loyalty of its
+    // ideological groups (city/politics.js writes it): the groups vote here
     const approvalTerm = cand.type === "incumbent" ? 0.5 * (rec.approval || 0) : 0;
     const platformDot = (-cand.platform.tax * bloc.taxPref) + (cand.platform.police * bloc.policePref);
     // FRAUD — the slot P4 wired and left at zero. It is no longer always zero:
@@ -472,6 +482,7 @@
     const blocs = buildBlocs(rec);
     const machineIdx = candidates.findIndex(function (c) { return c.type === "machine"; });
     const votes = candidates.map(function () { return 0; });
+    const perBloc = [];
     let totalVotes = 0;
     for (let bi = 0; bi < blocs.length; bi++) {
       const bloc = blocs[bi];
@@ -485,8 +496,9 @@
       }
       const weight = bloc.pop * bloc.turnout;
       for (let i = 0; i < shares.length; i++) { votes[i] += shares[i] * weight; totalVotes += shares[i] * weight; }
+      perBloc.push({ id: bloc.id, name: bloc.name, votes: shares.map(function (sh) { return sh * weight; }), weight: weight });
     }
-    return { votes: votes, totalVotes: totalVotes, blocs: blocs };
+    return { votes: votes, totalVotes: totalVotes, blocs: blocs, perBloc: perBloc };
   }
   // poll: same tally(), ±4-point noise, clamped — always exactly 2 candidates
   // this wave (see header NARROWING), so "A / 100−A" is always well-formed.
@@ -711,6 +723,27 @@
     const t = tally(rec, race.candidates);
     let bestI = 0;
     for (let i = 1; i < t.votes.length; i++) if (t.votes[i] > t.votes[bestI]) bestI = i;
+    // ELECTION NIGHT (city/transfer.js): the count goes out on every TV, city
+    // by city. And A COUNT IS NOT A HANDOVER when a sitting President loses:
+    // the seat stays where it is until Congress certifies (or does not).
+    const night = {
+      id: id, rec: rec, title: title, day: day, winner: bestI,
+      candidates: race.candidates.map(function (c) { return { sid: c.sid, name: nameOf(c.sid), type: c.type, player: !!c.player }; }),
+      votes: t.votes.slice(), total: t.totalVotes, perBloc: t.perBloc,
+    };
+    const T = CBZ.transfer;
+    if (T && typeof T.night === "function") { try { T.night(night); } catch (e) {} }
+    if (isPlayerSid(rec.office.holder) && !race.candidates[bestI].player && T && typeof T.hold === "function") {
+      let held = false;
+      try { held = !!T.hold(night); } catch (e) { held = false; }
+      if (held) { race.phase = "certify"; race.pendingWinner = bestI; race.certifyFrom = day; return; }
+    }
+    seatWinner(id, rec, race, day, bestI);
+  }
+  // THE HANDOVER: the winner takes the seat. On a normal count resolve() runs
+  // it at once; a held count runs it when Congress certifies (certify()).
+  function seatWinner(id, rec, race, day, bestI) {
+    const title = titleFor(rec);
     const winner = race.candidates[bestI];
     const incumbent = race.candidates.find(function (c) { return c.type === "incumbent"; });
     const winnerIsIncumbent = !!winner && winner.type === "incumbent";
@@ -747,6 +780,38 @@
     race.phase = null;
     race.candidates = [];
     race.lastPoll = null;
+    race.pendingWinner = null;
+  }
+  // certify(id): Congress certifies a held count — the winner takes the seat
+  function certify(id) {
+    ensureInit();
+    const race = g.elections.races[id];
+    const rec = CBZ.polity && CBZ.polity.get ? CBZ.polity.get(id) : null;
+    if (!race || race.phase !== "certify" || !rec) return false;
+    const day = CBZ.worldDay ? CBZ.worldDay() : 0;
+    seatWinner(id, rec, race, day, race.pendingWinner | 0);
+    return true;
+  }
+  // voidCount(id): the count is thrown out (a President who kept the seat by
+  // force). The seat stays; the next term runs from today.
+  function voidCount(id) {
+    ensureInit();
+    const race = g.elections.races[id];
+    const rec = CBZ.polity && CBZ.polity.get ? CBZ.polity.get(id) : null;
+    if (!race || race.phase !== "certify" || !rec) return false;
+    const day = CBZ.worldDay ? CBZ.worldDay() : 0;
+    const loser = race.candidates[race.pendingWinner | 0];
+    if (loser && !loser.player) { const e = CBZ.cityLedgerEntry && CBZ.cityLedgerEntry(loser.sid); if (e) e.job = "politician"; }
+    rec.office.termDay = day + termDaysFor(rec);
+    race.phase = null; race.candidates = []; race.lastPoll = null; race.pendingWinner = null;
+    return true;
+  }
+  function pendingOf(id) {
+    ensureInit();
+    const race = g.elections.races[id];
+    if (!race || race.phase !== "certify") return null;
+    const w = race.candidates[race.pendingWinner | 0];
+    return { winner: w ? { sid: w.sid, name: nameOf(w.sid) } : null, since: race.certifyFrom };
   }
 
   // ============================================================
@@ -820,10 +885,10 @@
       // player who paid a filing fee on day 3 for a race called on day 5 had
       // that pledge silently dropped by every save in between, so the papers
       // were pulled and the ballot never showed the name.
-      if (r.phase !== "campaign" && r.pledged !== true) continue;
+      if (r.phase !== "campaign" && r.phase !== "certify" && r.pledged !== true) continue;
       out[id] = {
         phase: r.phase, calledDay: r.calledDay, electionDay: r.electionDay,
-        pledged: r.pledged === true,
+        pledged: r.pledged === true, pendingWinner: r.phase === "certify" ? (r.pendingWinner | 0) : null, certifyFrom: r.certifyFrom != null ? r.certifyFrom : null,
         candidates: r.candidates.map(function (c) {
           // `player` and `fraud` are load-bearing: without the flag a restored
           // player candidate reads as a sid-less NPC (nameOf/charismaOf both
@@ -847,7 +912,8 @@
       const src = obj.races[id];
       if (!src) continue;
       R[id] = {
-        phase: src.phase === "campaign" ? "campaign" : null,
+        phase: src.phase === "campaign" ? "campaign" : src.phase === "certify" ? "certify" : null,
+        pendingWinner: src.phase === "certify" ? (src.pendingWinner | 0) : null, certifyFrom: src.certifyFrom != null ? src.certifyFrom : null,
         calledDay: src.calledDay != null ? src.calledDay : null,
         electionDay: src.electionDay != null ? src.electionDay : null,
         pledged: src.pledged === true,
@@ -972,6 +1038,10 @@
     playerRace: playerRace,
     openRaces: openRaces,
     pledge: pledge,
+    // --- the held count (city/transfer.js) ---
+    certify: certify,
+    voidCount: voidCount,
+    pending: pendingOf,
     serialize: serialize,
     apply: apply,
     reset: reset,

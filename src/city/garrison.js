@@ -405,22 +405,45 @@
     actor.state = "walk"; actor.pause = 0;
   }
 
-  function standIdle(actor, rec, dt) {
+  /* A MAN ON A POST SCANS LIKE A MAN. With nothing on, he does not stare
+     down one bearing forever and he does not twitch: he holds a look for a
+     few seconds, then turns SLOWLY to the next one across his sector (left,
+     centre, right, centre), pausing on each. Alerted (cityPostAlert) the
+     sector widens and the dwell shortens. Deterministic off the slot, so two
+     sentries on one gate never pan in lockstep. */
+  const SCAN_SEQ = [0, -1, 0, 1];
+  function scanBearing(rec, dt) {
+    const base = Math.atan2(rec.fx, rec.fz);
+    if (rec._scanI == null) { rec._scanI = (h01(rec.x, rec.z, 0x5CA1) * 4) | 0; rec._scanT = 1 + h01(rec.x, rec.z, 0x5CA2) * 3; }
+    rec._scanT -= dt;
+    const alert = rec.alertT > 0;
+    if (rec._scanT <= 0) {
+      rec._scanI = (rec._scanI + 1) % SCAN_SEQ.length;
+      rec._scanT = (alert ? 1.6 : 2.8) + h01(rec.x + rec._scanI, rec.z, 0x5CA3) * (alert ? 1.4 : 2.6);
+    }
+    return base + SCAN_SEQ[rec._scanI] * (alert ? 0.85 : 0.55);
+  }
+  // the yaw a standing body turns to: the motor's bounded turn (CBZ.moves),
+  // slow for a scan, quicker onto a threat. Never a one-frame write.
+  function turnTo(actor, want, dt, rate) {
+    if (!actor.group) return;
+    const Mv = CBZ.moves;
+    if (Mv && Mv.face && Mv.motor) { actor.group.rotation.y = Mv.face(Mv.motor(actor), actor.group.rotation.y, want, dt || 0.016, rate); return; }
+    actor.group.rotation.y = CBZ.lerpAngle ? CBZ.lerpAngle(actor.group.rotation.y, want, 1 - Math.pow(0.02, dt || 0.016)) : want;
+  }
+  // faceYaw: the bearing to hold (a threat); omitted = his post's own scan
+  function standIdle(actor, rec, dt, faceYaw) {
     // a post up a tower, and he is standing under it: up the ladder first
     if (rec.y != null && actor.pos.y < rec.y - 1.2 && CBZ.climb) { walkTo(actor, rec, rec.x, rec.z); return; }
-    if (rec.hold) { try { rec.hold(actor, Math.atan2(rec.fx, rec.fz), dt); return; } catch (e) {} }
+    const want = faceYaw != null ? faceYaw : scanBearing(rec, dt || 0.016);
+    if (rec.hold) { try { rec.hold(actor, want, dt); return; } catch (e) {} }
     actor.path = null; actor.finalGoal = null;
     actor.state = "idle"; actor.speed = 0;
     // `pause` is what stops peds.js's wander from re-issuing a stroll on the
     // next think() slice — island_military.js's stationed loop uses exactly
     // this, and it is the only reason a plain ped can hold a spot at all.
     actor.pause = Math.max(actor.pause || 0, 2);
-    if (actor.group) {
-      const want = Math.atan2(rec.fx, rec.fz);
-      actor.group.rotation.y = CBZ.lerpAngle
-        ? CBZ.lerpAngle(actor.group.rotation.y, want, 1 - Math.pow(0.02, dt || 0.016))
-        : want;
-    }
+    turnTo(actor, want, dt, faceYaw != null ? 4.5 : 1.1);
   }
 
   // WHO IS THE PROBLEM. Never a new threat model: security.js already answers
@@ -544,8 +567,7 @@
           return "flee";
         }
         // freeze / hold: he stays on the slot and faces the problem.
-        standIdle(actor, rec, dt);
-        if (actor.group) actor.group.rotation.y = Math.atan2(threat.pos.x - actor.pos.x, threat.pos.z - actor.pos.z);
+        standIdle(actor, rec, dt, Math.atan2(threat.pos.x - actor.pos.x, threat.pos.z - actor.pos.z));
         return "hold";
       }
       if (hot) {
@@ -571,8 +593,7 @@
       // A post that may not stand to WATCHES. He is alert, he faces the
       // problem, and he does not draw — the difference between a checkpoint and
       // martial law, and the visible consequence of a dead command element.
-      standIdle(actor, rec, dt);
-      if (actor.group) actor.group.rotation.y = Math.atan2(threat.pos.x - actor.pos.x, threat.pos.z - actor.pos.z);
+      standIdle(actor, rec, dt, Math.atan2(threat.pos.x - actor.pos.x, threat.pos.z - actor.pos.z));
       return "hold";
     }
 

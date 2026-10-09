@@ -855,6 +855,20 @@
       }
       return best - r;
     }
+    // the street whose EDGE is nearest (x,z) within `reach` metres, or null
+    function frontStreet(x, z, reach) {
+      let best = reach, who = null;
+      const ix0 = Math.floor((x - reach) / SH), ix1 = Math.floor((x + reach) / SH), iz0 = Math.floor((z - reach) / SH), iz1 = Math.floor((z + reach) / SH);
+      for (let ix = ix0; ix <= ix1; ix++) for (let iz = iz0; iz <= iz1; iz++) {
+        const l = sHash.get(ix * 100003 + iz); if (!l) continue;
+        for (let k = 0; k < l.length; k++) {
+          const e = l[k];
+          const d = segDist(x, z, e[1].x, e[1].z, e[2].x, e[2].z) - e[0].w / 2;
+          if (d <= best) { best = d; who = e[0]; }
+        }
+      }
+      return who;
+    }
     P.bulbs = [];
     function hashStreet(s) { for (let i = 0; i < s.pts.length - 1; i++) hashSeg(s, s.pts[i], s.pts[i + 1]); }
     for (const s of P.streets) hashStreet(s);
@@ -1127,6 +1141,20 @@
           if (alongX) p = side === 0 ? { x0: x0 + a, x1: x0 + a1, z0: z0 + 1.5, z1: z0 + 1.5 + depth } : { x0: x0 + a, x1: x0 + a1, z0: z1 - 1.5 - depth, z1: z1 - 1.5 };
           else p = side === 0 ? { x0: x0 + 1.5, x1: x0 + 1.5 + depth, z0: z0 + a, z1: z0 + a1 } : { x0: x1 - 1.5 - depth, x1: x1 - 1.5, z0: z0 + a, z1: z0 + a1 };
           const px = (p.x0 + p.x1) / 2, pz = (p.z0 + p.z1) / 2;
+          // A TERRACE FACES A STREET. The block is cut from the local street
+          // LINES, but a local run is clipped where it would meet a freeway,
+          // a compound or water (addLocalRun), and the block still stood
+          // there: whole rows of houses fronted a verge or a freeway
+          // shoulder with no street in front of them (owner, iPad: "facades
+          // like townhouses in a weird location near the highway"). A unit
+          // is only built where a street edge is within its front step +
+          // footway of the middle of its front wall; the rest of the
+          // frontage stays the block's lawn. The unit carries that street,
+          // so if the street is later pruned (step 11: not connected to the
+          // city) the houses on it go with it.
+          const fx = alongX ? px : (side === 0 ? p.x0 : p.x1), fz = alongX ? (side === 0 ? p.z0 : p.z1) : pz;
+          const front = frontStreet(fx, fz, 1.5 + blk.sw + 2);
+          if (!front) { a = a1; continue; }
           // a terrace's height runs in STRETCHES: the same builder did five
           // or six houses at once, then the next one did his
           const stretch = Math.floor(a / 36);
@@ -1136,7 +1164,7 @@
           const corner = (a === 0 || a1 >= len - 0.5);
           const face = alongX ? (side === 0 ? "s" : "n") : (side === 0 ? "w" : "e");
           addBldg({ x: px, z: pz, w: p.x1 - p.x0, d: p.z1 - p.z0, rot: 0, h: st * 3.1 + 0.9, st: st, fh: 3.1, type: "row", style: "row",
-            wall: wall, glass: lk.glass, roof: h01(seed, px, pz, 344) < 0.3 ? "mansard" : "flat", shop: corner && h01(seed, px, pz, 345) < 0.6, face: face, dist: c.dist });
+            wall: wall, glass: lk.glass, roof: h01(seed, px, pz, 344) < 0.3 ? "mansard" : "flat", shop: corner && h01(seed, px, pz, 345) < 0.6, face: face, dist: c.dist, street: front.id });
           occupy(px, pz, Math.hypot(p.x1 - p.x0, p.z1 - p.z0) / 2 - 1);
           a = a1;
         }

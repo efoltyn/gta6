@@ -37,7 +37,7 @@ const CBZ = globalThis.window.CBZ, L = CBZ.metroLib, MG = CBZ.metroGround, FM = 
 const CELL = 100, MED_MAX = 0.06, P90_MAX = 0.15, MAX_SLICE_MS = 12;
 const KERB = [0.30, 0.30, 0.285];         // granite (~148 sRGB canvas, decoded)
 const GKM = {                              // mean of mgSurface per ground kind (FARMAP_COLOURS's MG_MEAN)
-  0: [1.0, 0.965, 0.915], 1: [0.94, 0.94, 0.94], 2: [0.96, 0.96, 0.96], 4: [0.99, 0.99, 0.99], 5: [0.9, 0.9, 0.9],
+  0: [1, 1, 1], 1: [0.94, 0.94, 0.94], 2: [0.96, 0.96, 0.96], 4: [0.99, 0.99, 0.99], 5: [0.9, 0.9, 0.9],
 };
 
 const city = {

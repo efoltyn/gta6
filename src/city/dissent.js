@@ -51,6 +51,15 @@
    civilwar.js still owns the coup itself (CBZ.civilwar.coup), and skips its
    blind roll for the seat this file is watching.
 
+   2026-10-08 ONE MODEL (city/politics.js). The three lines are no longer
+   counted here: unrest is the country's anger (politics.unrest()), the
+   movement is the angriest group organising (politics.movement(), and its
+   leader is one of them), the army line is 100 minus the Army's loyalty
+   (politics.instLoyalty("army")). This file keeps the LADDER: the stages,
+   the warnings, the coup day, the plotter, the answers. Its daily push on
+   the army (a strong movement, a losing war, a sour General) is written
+   into that one loyalty; what an order costs is politics.js's act table.
+
    PUBLIC: CBZ.dissent = { status, stage, owns, pressure, concede, crackdown,
      purge, bunker, inShelter, reset } + _tick/_daily/_state (tests).
    Bus (CBZ.presidency.emit): "dissent" {stage, name, text, headline,
@@ -76,10 +85,6 @@
     return (h && h.kind === "country" && h.rec) ? h : null;
   }
   function emit(evt, payload) { const p = P(); if (p && p.emit) { try { p.emit(evt, payload); } catch (e) {} } }
-  function politics() {
-    const w = CBZ.cityWorldEnsure ? CBZ.cityWorldEnsure() : null;
-    return (w && w.politics) || g.cityPolitics || null;
-  }
   function polGet(id) { try { return CBZ.polity && CBZ.polity.get ? CBZ.polity.get(id) : null; } catch (e) { return null; } }
   function capitalName(rec) {
     const W = CBZ.polwar;
@@ -102,17 +107,28 @@
   // ---------------------------------------------------------------- state
   function fresh() {
     return {
-      seat: null, unrest: 0, movement: 0, army: 0, stage: 0, coupDay: null, lastDay: -1,
+      seat: null, stage: 0, coupDay: null, lastDay: -1,
       leader: null, purgedDay: -99, plotter: null, conceded: 0, crackdowns: 0, coups: 0, lastCoup: null, log: [],
     };
   }
+  // THE THREE LINES, read off the one model (never stored here)
+  function Pol() { return CBZ.politics || null; }
+  function nums() {
+    const Po = Pol();
+    if (!Po || !seat()) return { unrest: 0, movement: 0, army: 0 };
+    return { unrest: Po.unrest(), movement: Po.movement(), army: 100 - Po.instLoyalty("army") };
+  }
+  function armyPush(da) { const Po = Pol(); if (Po && da) Po.instNudge("army", -da); }
   function S() { return g.dissentWorld || (g.dissentWorld = fresh()); }
   function reset() { g.dissentWorld = fresh(); }
 
-  // the man (or woman) who leads the street: a minted name, stable per seat
+  // the man (or woman) who leads the street: one of the angriest group
+  // (city/politics.js angriest()), a minted name, stable per seat
   function leaderFor(seatId) {
     const s = S();
     if (s.leader) return s.leader;
+    const Po = Pol();
+    const A = Po && Po.angriest ? Po.angriest() : null;
     let rng = null;
     if (CBZ.seedStream) { try { rng = CBZ.seedStream("dissent:leader:" + seatId + ":" + day()); } catch (e) { rng = null; } }
     if (!rng) { let x = 0x2f6b ^ (day() * 977); rng = function () { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; }; }
@@ -123,7 +139,7 @@
       const F = ["Ana", "Teo", "Mara", "Ilya", "Rosa", "Dario", "Lena", "Omar"], L = ["Varga", "Sato", "Moreno", "Kale", "Brandt", "Okoye", "Lind", "Duarte"];
       name = F[(rng() * F.length) | 0] + " " + L[(rng() * L.length) | 0];
     }
-    s.leader = { name: name, gender: gender };
+    s.leader = { name: name, gender: gender, group: A ? A.id : null, adj: A ? A.adj : null };
     return s.leader;
   }
   function generalName() {
@@ -150,7 +166,7 @@
     if (to === 1) say(1, "unrest", "Protests grow in " + capitalName(rec), { sub: "Approval at " + ap + "%" });
     else if (to === 2) {
       const L = leaderFor(rec.id);
-      say(2, "movement", L.name + " leads a movement against the President", { sub: "Rallies planned in " + capitalName(rec) });
+      say(2, "movement", L.name + " leads a " + (L.adj ? L.adj + " " : "") + "movement against the President", { sub: "Rallies planned in " + capitalName(rec) });
     } else if (to === 3) {
       const gn = generalName();
       say(3, "army", "Generals meet without the President", { sub: gn ? gn + " was seen there" : "The army is uneasy", breaking: true });
@@ -164,20 +180,22 @@
 
   function evaluate(rec, d) {
     const s = S();
+    const n = nums();
     let st = 0;
-    if (s.unrest >= UP.unrest) st = 1;
-    if (st >= 1 && s.movement >= UP.movement) st = 2;
-    if (st >= 2 && s.army >= UP.army) st = 3;
+    if (n.unrest >= UP.unrest) st = 1;
+    if (st >= 1 && n.movement >= UP.movement) st = 2;
+    if (st >= 2 && n.army >= UP.army) st = 3;
     const was = s.stage;
     if (st > was) for (let k = was + 1; k <= st; k++) announceUp(k, rec);
     else if (st < was && was <= 3) announceDown(was);
     s.stage = Math.max(st, s.coupDay != null ? 4 : 0);
     // THE TROOPS MOVE: one day's warning
-    if (s.coupDay == null && s.army >= UP.coup && st >= 3) {
+    if (st < 2) s.leader = null;                 // a new movement brings its own face
+    if (s.coupDay == null && n.army >= UP.coup && st >= 3) {
       s.coupDay = d + 1;
       s.stage = 4;
       say(4, "coup-armed", "Troops seen moving near " + capitalName(rec), { sub: "The President has not been seen", breaking: true });
-    } else if (s.coupDay != null && s.army < COUP_CANCEL) {
+    } else if (s.coupDay != null && n.army < COUP_CANCEL) {
       s.coupDay = null;
       s.stage = st;
       say(st, "coup-off", "Troops return to barracks");
@@ -197,25 +215,20 @@
     s.lastDay = d;
     const rec = h.rec;
     const ap = rec.approval != null ? +rec.approval : 50;
-    const pol = politics();
-    const scandal = pol ? (+pol.scandal || 0) : 0;
     const lose = losing(h.id);
     const auth = /dictator|fascis|junta|monarch|communis/.test(String(rec.govType || "")) ? 1.3 : 1;
-    // the street
-    let du = (45 - ap) * 0.6 + scandal * 0.08 + (lose ? 6 : 0);
-    if (ap >= 55) du -= 8;
-    s.unrest = clamp(s.unrest + du, 0, 100);
-    // the movement grows out of a street that stays angry
-    const dm = s.unrest > 35 ? (s.unrest - 35) * 0.5 : -10;
-    s.movement = clamp(s.movement + dm, 0, 100);
+    // a war going badly is felt in the street (the one model's groups)
+    const Po = Pol();
+    if (lose && Po && Po.event) Po.event("losing", { all: -2.5 });
     // the army cools on a President the country has turned on
-    let da = (s.movement > 40 ? (s.movement - 40) * 0.45 : -8) + (ap < 30 ? 5 : 0) + (lose ? 8 : 0);
+    const n = nums();
+    let da = (n.movement > 40 ? (n.movement - 40) * 0.45 : -8) + (ap < 30 ? 5 : 0) + (lose ? 8 : 0);
     da *= auth;
     const lean = staffLean();
     da += lean.add;
     if (d - s.purgedDay < PURGE_GUARD_DAYS) da = Math.min(da, -10);
-    s.army = clamp(s.army + da, 0, 100);
-    if (lean.cap != null && !s.plotter) s.army = Math.min(s.army, lean.cap);
+    armyPush(da);
+    if (lean.cap != null && !s.plotter && Po && Po.instFloor) Po.instFloor("army", 100 - lean.cap);
     // the coup day
     if (s.coupDay != null && d >= s.coupDay) { fire(h, d); return; }
     evaluate(rec, d);
@@ -251,15 +264,16 @@
     // the man who plotted it is the junta's General (a dismissed one, if any)
     if (CW && typeof CW.coup === "function") { try { out = CW.coup(h.id, kind, s.plotter ? s.plotter.sid : null); } catch (e) { out = null; } }
     if (kind === "failure") s.plotter = null;
+    const Po = Pol();
     if (kind === "failure") {
       say(2, "coup-failed", "Coup attempt crushed in " + capitalName(rec), { sub: "The plotters are under arrest", breaking: true });
-      s.army = 10; s.movement = Math.max(0, s.movement - 20);
+      if (Po) { Po.instFloor("army", 90); Po.event("coup", { fear: 20 }); }
     } else if (kind === "partial") {
       say(4, "coup-split", "The army splits, the country is at war with itself", { sub: "The President is safe", breaking: true });
-      s.army = 20; s.movement = Math.max(0, s.movement - 30);
+      if (Po) { Po.instFloor("army", 80); Po.event("coup", { fear: 30 }); }
     } else {
       say(4, "coup", "The army seizes " + capitalName(rec), { sub: "The President is missing", breaking: true });
-      s.army = 0; s.movement = 0; s.unrest = Math.max(0, s.unrest - 30);
+      if (Po) { Po.instFloor("army", 100); Po.event("coup", { fear: 60, all: 4 }); }
     }
     s.stage = 0;
     return { kind: kind, result: out };
@@ -303,8 +317,7 @@
     const s = S();
     s.purgedDay = day();
     s.plotter = null;
-    s.army = Math.max(0, s.army - 40);
-    s.movement = clamp(s.movement + 5, 0, 100);
+    armyPush(-40);
     evaluate(h.rec, day());
     return true;
   }
@@ -315,7 +328,7 @@
     const s = S();
     if (who && who.name) s.plotter = { name: who.name, sid: who.sid || null };
     s.purgedDay = -99;
-    s.army = clamp(s.army + ((who && who.push) || 25), 0, 100);
+    armyPush(who && who.push != null ? who.push : 25);
     evaluate(h.rec, day());
     return true;
   }
@@ -349,53 +362,22 @@
   }
 
   // ---------------------------------------------------------------- the bus
+  // a nudge from outside (the old three-number bump): unrest is the groups'
+  // anger, the movement is fear's absence, the army is its loyalty
   function bump(du, dm, da) {
-    const s = S(), h = seat();
-    if (!h) return;
-    if (s.seat !== h.id) { const keep = s.coups; reset(); S().seat = h.id; S().coups = keep; return bump(du, dm, da); }
-    s.unrest = clamp(s.unrest + (du || 0), 0, 100);
-    s.movement = clamp(s.movement + (dm || 0), 0, 100);
-    s.army = clamp(s.army + (da || 0), 0, 100);
+    const Po = Pol();
+    if (!Po || !seat()) return;
+    Po.event("dissent", { all: -(du || 0) / 2.5, fear: -(dm || 0), inst: { army: -(da || 0) } });
   }
-  function us() { const h = seat(); return h ? h.id : null; }
-  function approval() { const h = seat(); return h && h.rec && h.rec.approval != null ? +h.rec.approval : 50; }
+  // every act and order is priced in city/politics.js; this file only
+  // re-reads the ladder when something happened
   function onBus(evt, d) {
-    d = d || {};
-    const me = us();
-    if (!me) return;
-    switch (evt) {
-      case "order":
-        if (!d.ok) return;
-        if (d.key === "address") { S().conceded++; bump(-15, -12, 0); }
-        else if (d.key === "taxDown" || d.key === "amnesty") bump(-8, -6, 0);
-        else if (d.key === "martial" || d.key === "curfew" || d.key === "surge" || d.key === "crackdown") {
-          S().crackdowns++;
-          bump(6, -25, approval() < 35 ? 12 : -5);
-        }
-        else if (d.key === "emergency" || d.key === "fascism" || d.key === "communism" || d.key === "crown") bump(10, 8, -6);
-        break;
-      case "airstrike-ordered":
-        if (d.byPlayer && d.nation === me) bump(12, 6, 4);
-        break;
-      case "nuke-launched":
-        if (d.byPlayer) bump(d.nation === me ? 30 : 8, 4, 0);
-        break;
-      case "war-declared":
-        if (d.byPlayer && approval() < 40) bump(6, 4, 0);
-        else if (d.defender === me) bump(-6, -4, -4);           // they hit us first: the country rallies
-        break;
-      case "war-ended":
-        if (d.loser === me) bump(15, 10, 15);
-        else if (d.winner === me) bump(-10, -8, -10);
-        break;
-      case "protest":
-        if (d.phase === "start") bump(3, 1, 0);
-        break;
-      case "speech":
-        if (+d.approvalDelta > 0) bump(-4, -2, 0); else if (+d.approvalDelta < 0) bump(3, 1, 0);
-        break;
-      default: return;
+    if (!seat()) return;
+    if (evt === "order" && d && d.ok) {
+      if (d.key === "address") S().conceded++;
+      else if (/^(martial|curfew|surge|crackdown)$/.test(d.key)) S().crackdowns++;
     }
+    if (!/^(order|act|war-ended|war-declared|airstrike-ordered|nuke-launched)$/.test(evt)) return;
     const h = seat();
     if (h) evaluate(h.rec, day());
   }
@@ -419,10 +401,10 @@
 
   CBZ.dissent = {
     status: function () {
-      const s = S();
+      const s = S(), n = nums();
       return {
         seat: s.seat, stage: s.stage, stageName: STAGES[s.stage] || "calm",
-        unrest: Math.round(s.unrest), movement: Math.round(s.movement), army: Math.round(s.army),
+        unrest: Math.round(n.unrest), movement: Math.round(n.movement), army: Math.round(n.army), leaderGroup: s.leader ? s.leader.group : null,
         coupDay: s.coupDay, leader: s.leader ? s.leader.name : null, purgedDay: s.purgedDay,
         lastCoup: s.lastCoup, log: s.log.slice(),
       };
@@ -430,7 +412,8 @@
     stage: function () { return seat() ? S().stage : 0; },
     owns: function (id) { const h = seat(); return !!(h && id && h.id === id); },
     // president_public.js's protest anger: the movement fills the street
-    pressure: function () { if (!seat()) return 0; const s = S(); return clamp(s.unrest / 100 * 0.3 + s.movement / 100 * 0.3, 0, 0.6); },
+    pressure: function () { if (!seat()) return 0; const n = nums(); return clamp(n.unrest / 100 * 0.3 + n.movement / 100 * 0.3, 0, 0.6); },
+    nums: nums,
     concede: concede, crackdown: crackdown, purge: purge, bunker: bunker, inShelter: inShelter,
     relieved: relieved, plot: plot,
     bump: function (du, dm, da) { bump(du, dm, da); const h = seat(); if (h) evaluate(h.rec, day()); },

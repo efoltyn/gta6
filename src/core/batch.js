@@ -309,6 +309,9 @@
     const mat = m.material;
     if (!mat || Array.isArray(mat)) return null;
     if (mat.map || mat.transparent || mat.opacity < 1) return null;
+    // the one ground skin is a shader, not a colour: merged under a shared
+    // Lambert it would lose the turf (a lawn back to one flat green)
+    if (mat.userData && mat.userData.groundSkin) return null;
     // A depth-ordered surface (ground layer pushed back, decal pulled forward)
     // loses its polygonOffset the moment it is merged under a shared material,
     // and the flat ground it was ordered against z-fights again. Never merge it.
@@ -338,6 +341,7 @@
     const mat = m.material;
     if (!mat || Array.isArray(mat)) return null;
     if (mat.map || mat.transparent || mat.opacity < 1) return null;
+    if (mat.userData && mat.userData.groundSkin) return null;   // see mergeableKey
     if (mat.polygonOffset) return null;                   // see mergeableKey
     if (mat.emissive && mat.emissive.getHex() !== 0) return null;
     if (!(mat.isMeshLambertMaterial || mat.isMeshBasicMaterial)) return null; // Standard/Phong keep their look
