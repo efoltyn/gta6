@@ -24,6 +24,10 @@
      bottom    {x,z} where you stand at the foot (default 0.75 out along n)
      top       {x,z} where you stand at the head (default 0.6 past the rungs)
      name, tag, meta   free data (the prison tower hangs its record on meta)
+     over      {x, y, z}: a FENCE, not a ladder. There is no landing at the
+               head (y1 is the top rail): at the top you swing over it and
+               drop down the far side onto (x, y, z). The Bullring's catch
+               fence (city/island_speedway.js) is climbed this way, both ways.
 
    THE CLIMB (a body, not a fade):
      mount     walk up to the foot and take it (E, or walk into it facing
@@ -94,6 +98,8 @@
       // topVia {cx, cz, r, x, z}: a landing inside a room (a tower cabin) is
       // left through its door: inside r of (cx,cz), walk to (x,z) first
       topVia: s.topVia || null,
+      over: s.over && isFinite(+s.over.x) && isFinite(+s.over.y) && isFinite(+s.over.z)
+        ? { x: +s.over.x, y: +s.over.y, z: +s.over.z } : null,
       climber: null,
     };
     L.cx = L.x + nx * L.stand; L.cz = L.z + nz * L.stand;   // the body's column
@@ -422,7 +428,7 @@
         C._jumpLatch = true;
         if (C.s > 0.9) { knockOff(a, L.nx, L.nz, "let go"); return; }
       }
-      if (C.s >= L.sTop - 1e-4 && mv > 0) { C.ph = "offTop"; C.t = 0; C.fyaw = L.yaw; }
+      if (C.s >= L.sTop - 1e-4 && mv > 0) { C.ph = L.over ? "over" : "offTop"; C.t = 0; C.fyaw = L.yaw; }
       else if (C.s <= 1e-4 && mv < 0) { C.ph = "offBottom"; C.t = 0; }
     } else if (C.ph === "offTop") {
       const T = L.top, k = smooth(C.t / 0.9);
@@ -433,6 +439,26 @@
       w = 1 - smooth((C.t - 0.1) / 0.75);
       C.s = L.sTop;
       if (C.t >= 0.9) { place(a, T.x, L.y1, T.z, yaw); anim(ch, dt); finish(C, "top"); return; }
+    } else if (C.ph === "over") {
+      // a leg over the top rail and the body after it: from the near column
+      // to the far one, a hand's height over the rail, still facing the way
+      // you were climbing (forward, over it)
+      const T = 0.85, k = smooth(C.t / T);
+      const fx = L.x - L.nx * L.stand, fz = L.z - L.nz * L.stand;
+      x = L.cx + (fx - L.cx) * k; z = L.cz + (fz - L.cz) * k;
+      y = L.y1 + Math.sin(PI * clamp(C.t / T, 0, 1)) * 0.35;
+      w = 1 - smooth((C.t - 0.15) / 0.6);
+      C.s = L.sTop;
+      if (C.t >= T) { C.ph = "drop"; C.t = 0; C.fx = fx; C.fz = fz; }
+    } else if (C.ph === "drop") {
+      // let go on the far side and drop onto the ground there (feet first:
+      // a fall you chose, not one that put you down)
+      const O = L.over, h = Math.max(0, L.y1 - O.y);
+      const Td = clamp(Math.sqrt(2 * h / 9.8), 0.3, 1.1), p = clamp(C.t / Td, 0, 1);
+      x = C.fx + (O.x - C.fx) * p; z = C.fz + (O.z - C.fz) * p;
+      y = L.y1 - h * p * p;
+      w = 0;
+      if (p >= 1) { place(a, O.x, O.y, O.z, yaw); anim(ch, dt); finish(C, "over"); return; }
     } else if (C.ph === "offBottom") {
       const B = L.bottom, k = smooth(C.t / 0.45);
       x = L.cx + (B.x - L.cx) * k; z = L.cz + (B.z - L.cz) * k; y = L.y0;
@@ -564,7 +590,7 @@
     const at = n.dir === "up"
       ? { x: L.x, y: L.y0 + 1.4, z: L.z }
       : { x: L.x, y: L.y1 + 0.9, z: L.z };
-    if (CBZ.prisonPrompt) CBZ.prisonPrompt("climb", "@climbGrab", n.dir === "up" ? "Climb" : "Climb down",
+    if (CBZ.prisonPrompt) CBZ.prisonPrompt("climb", "@climbGrab", n.dir === "up" ? (L.over ? "Climb over" : "Climb") : "Climb down",
       { at: at, d2: n.d * n.d, bind: true, key: "e", city: true });
     // walking INTO the foot of it, facing it, takes it (the way a body does)
     if (n.dir === "up" && CBZ.keys && CBZ.keys["w"] && n.d < 0.6) {

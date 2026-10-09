@@ -202,6 +202,7 @@
       input: { steer: 0, throttle: 0, brake: 0 },
       rb: 0, state: "race",
       cruise: 1,            // the game sets ~0.7 after the flag: a cool-down lap that stays out of the way
+      yellow: 0,            // the caution's pace cap (race_session), 0 = green
       drive(c, cars, dt) { return driveOne(this, c || this.car, cars || [], dt); },
     };
     return drv;
@@ -254,6 +255,8 @@
     if (d.mistake === "late") pace = Math.min(1.04, pace * 1.045);   // overdriving: the one way past the limit
     // damage slows a sensible driver down
     pace *= 1 - 0.05 * car.damage.aero;
+    // under the caution (race_session: somebody on the track) everybody backs off
+    if (d.yellow > 0) pace = Math.min(pace, d.yellow);
 
     // ---- racecraft: where do I want to be across the track -----------------
     /* The path is a blend of the racing line and an absolute LANE (a groove at

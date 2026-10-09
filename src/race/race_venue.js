@@ -854,6 +854,14 @@
     return {
       group, surroundings, update, setLights, setPylon, setJumbo, dispose, anchors,
       crowdSpots: { x: crowd.x, z: crowd.z },
+      /* the seats, for a host that promotes the fans near you to full rigs
+         (city/island_speedway.js): seat i in core space, its row in the one
+         crowd store (-1 when gone), its look */
+      seats: {
+        n: crowdCount, x: crowd.x, y: crowd.y, z: crowd.z, yaw: crowd.yaw, stand: crowd.stand, look: crowd.look,
+        row: (i) => (crowdRow ? crowdRow[i] : -1),
+        group: () => crowdG,
+      },
       outerU: SP.outerU, mainEntrance: SP.mainEntrance, spec: SP,
       stats: { crowd: crowdCount, aisles: aisles.length, towers: spots.length, pitBoxes: PIT.boxes, bays, bbox, infield, standSamples: sam.length - 1 },
     };

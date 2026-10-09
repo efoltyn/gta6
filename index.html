@@ -874,7 +874,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/physics.js?v=gnp0930"></script>
 <script src="src/systems/meshcollider.js?v=meshcol1"></script>
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
-<script src="src/systems/climb.js?v=tow929"></script>
+<script src="src/systems/climb.js?v=speedway1009"></script>
 <!-- The tower post officers (entities/towerwatch.js): after guards.js, prisonkit.js (CBZ.prisonTowers) and climb.js. -->
 <script src="src/entities/towerwatch.js?v=tow929"></script>
 <!-- THE MOVING-PLATFORM PRIMITIVE. Nothing in this engine could carry a
@@ -1215,7 +1215,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/expansion.js?v=ground1001"></script>
 <!-- 4d-2. ARCHIPELAGO — worldmap registry + 3 islands + 4 biomes (worldmap.js
      MUST precede every island/biome; world.js runs them via CBZ.cityWorldGeo) -->
-<script src="src/city/worldmap.js?v=maplabels1009"></script>
+<script src="src/city/worldmap.js?v=speedway1009"></script>
 <!-- Shared signed shoreline/depth/current oracle. Loaded immediately after
      the landmass registry so rendering, swimmers, boats and aquatic wildlife
      all consult the same coast instead of inventing separate radius tests. -->
@@ -1303,15 +1303,15 @@ document.body.appendChild(b);}}catch(e){}})();
      tyre physics, drivers, rules), the SAME ones games/race.html runs. The
      place is city/island_speedway.js; the race is run IN THE WORLD by
      city/speedway_race.js: you walk in and get into a car with F. -->
-<script src="src/race/race_core.js?v=ric0929"></script>
+<script src="src/race/race_core.js?v=speedway1009"></script>
 <script src="src/race/race_track.js?v=ric0929"></script>
-<script src="src/race/race_venue.js?v=bigcrowd1009b"></script>
+<script src="src/race/race_venue.js?v=speedway1009"></script>
 <script src="src/race/race_physics.js?v=ric0929"></script>
-<script src="src/race/race_ai.js?v=ric0929"></script>
-<script src="src/race/race_session.js?v=ric0929"></script>
+<script src="src/race/race_ai.js?v=speedway1009"></script>
+<script src="src/race/race_session.js?v=speedway1009"></script>
 <script src="src/race/race_car.js?v=ric0929"></script>
-<script src="src/city/island_speedway.js?v=ric0929"></script>
-<script src="src/city/speedway_race.js?v=ric0929"></script>
+<script src="src/city/island_speedway.js?v=speedway1009"></script>
+<script src="src/city/speedway_race.js?v=speedway1009"></script>
 <!-- CIVIL AIRFRAMES. The loft/aerofoil/lathe kit and every civil aircraft
      type drawn from it at real dimensions (narrowbody, widebody, turboprop,
      business jet, light single, helicopter variants), shared per type, with
@@ -1423,7 +1423,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/view.js?v=cars1"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=brainmoves1"></script>
-<script src="src/city/peds.js?v=verbs2b"></script>
+<script src="src/city/peds.js?v=speedway1009"></script>
 <!-- THE STREET AS A CONFIGURATION OF CBZ.brain: bystanders become witnesses
      (social.crime), react on their own delay through threat.respond, gangs
      retaliate proportionally and rout on brain morale, gang standing is
@@ -1482,7 +1482,7 @@ document.body.appendChild(b);}}catch(e){}})();
      geometry, switched in pixel space). Before vehicles.js (buildCar queues
      each style's twins) and carinstances.js (proxied cars draw the far tier). -->
 <script src="src/city/carlod.js?v=pf0930e"></script>
-<script src="src/city/vehicles.js?v=runover1009b"></script>
+<script src="src/city/vehicles.js?v=speedway1009"></script>
 <script src="src/city/carinstances.js?v=pf0930e"></script>
 <script src="src/city/playerair.js?v=phone1001"></script>
 <script src="src/city/playeraircraft.js?v=planes1009b"></script>
@@ -1918,7 +1918,7 @@ document.body.appendChild(b);}}catch(e){}})();
      worldstate.js, wanted.js, outfits.js, combat.js, police.js, death.js,
      bank.js, housing.js, minicities.js, citytemplates.js and club.js — all
      already loaded above — so it goes last in the city block. -->
-<script src="src/city/origins.js?v=ric0929"></script>
+<script src="src/city/origins.js?v=speedway1009"></script>
 <!-- The one hitman pipe + the motel room HQ (wall of marks, gear case, the
      tiered ladder of marks) — activities' Crime doors and the campaign's
      merged opening both route through it. -->
@@ -2362,7 +2362,7 @@ document.body.appendChild(b);}}catch(e){}})();
      staffs itself through power.js's protection layer rather than authoring
      guards. After power.js and the biome/continent builders whose empty land
      it claims. Revert with ?cfg_GOV_COMPLEX=0. -->
-<script src="src/city/govcomplex.js?v=stairs1009b"></script>
+<script src="src/city/govcomplex.js?v=speedway1009"></script>
 
 <!-- THE PRESIDENCY — one spine over organs built above: the President origin
      (candidacy's swearIn fast-forward), the Situation Room inside govcomplex's

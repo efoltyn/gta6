@@ -196,15 +196,26 @@
   const _n = {};
   function nearest(x, z, hintS, o) {
     o = o || {};
-    let best = Infinity, bi = 0;
+    let best = Infinity, bi = 0, edge = true;
     if (hintS != null) {
       const c = Math.round(wrapS(hintS) / DS), W = Math.round(40 / DS);
+      let bj = 0;
       for (let j = -W; j <= W; j++) {
         const i = ((c + j) % N + N) % N;
         const dx = x - T.X[i], dz = z - T.Z[i], d = dx * dx + dz * dz;
-        if (d < best) { best = d; bi = i; }
+        if (d < best) { best = d; bi = i; bj = j; }
       }
-    } else {
+      /* A STALE HINT. The window only answers when the nearest sample is
+         INSIDE it: a best at the window's edge means the true nearest is
+         further along the lap (the hint belonged to some other body), and
+         projecting from that edge gives a wrong s and a wrong u. That was
+         the floor under every pedestrian on the banking: one shared hint
+         for every caller, so feet read the surface height of a point 40 m
+         away, or 0. Fall through to the full scan. */
+      edge = Math.abs(bj) >= W - 1;
+    }
+    if (edge) {
+      best = Infinity;
       for (let i = 0; i < N; i += 8) {
         const dx = x - T.X[i], dz = z - T.Z[i], d = dx * dx + dz * dz;
         if (d < best) { best = d; bi = i; }

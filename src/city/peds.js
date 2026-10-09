@@ -4711,7 +4711,10 @@
       cand.push(["trade", Math.max(0, s) * (0.85 + rng() * 0.3)]);
     }
     // DEAL / drugs: a dealer-ish ped sidles up to sell PRODUCT when you're not a threat.
-    if ((ped.archetype === "dealer" || ped.drugUser) && !hot && dpl < 9) {
+    // (a street pitch: never on ground the world closed to the street — the
+    // racing surface, the pit lane, an airside apron)
+    if ((ped.archetype === "dealer" || ped.drugUser) && !hot && dpl < 9 &&
+        !(CBZ.cityKeepOutAt && (CBZ.cityKeepOutAt(P.pos.x, P.pos.z, 0) || CBZ.cityKeepOutAt(ped.pos.x, ped.pos.z, 0)))) {
       let s = 0.16 + (ped.archetype === "dealer" ? 0.22 : 0.08);
       cand.push(["deal", Math.max(0, s) * (0.85 + rng() * 0.3)]);
     }

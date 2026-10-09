@@ -1419,12 +1419,18 @@
     return { x: sp.x, z: sp.z, y: CBZ.floorAt ? CBZ.floorAt(sp.x, sp.z) : 0.14, heading: 0 };
   }
   // the speedway's front gate (island_speedway.js publishes it)
-  /* THE RACER STANDS BESIDE HIS CAR ON THE GRID (No. 17, the third row):
-     get in with F and the lights come on (city/speedway_race.js). No grid
-     published (a trimmed page): the gate. */
+  /* THE RACER STARTS IN HIS CAR ON THE GRID (No. 17, the third row): he is
+     stood at its door and city/speedway_race.js seats him the moment the
+     field exists; the lights come on. No grid published (a trimmed page):
+     the gate. */
   function speedwaySpawn() {
     const sw = CBZ.speedway, gp = sw && sw.gridPose ? sw.gridPose(5) : null;
-    if (gp) return { x: gp.x, z: gp.z, y: gp.y, heading: gp.heading };
+    if (gp) {
+      // and IN it: the field is built a frame or two later (when the bowl is),
+      // and speedway_race.js seats him the moment it exists
+      if (CBZ.speedwayRace && CBZ.speedwayRace.seatOnGrid) CBZ.speedwayRace.seatOnGrid();
+      return { x: gp.x, z: gp.z, y: gp.y, heading: gp.heading };
+    }
     const g0 = CBZ.speedwayGate ? CBZ.speedwayGate() : null;
     if (!g0) return null;
     return { x: g0.x, z: g0.z, y: CBZ.floorAt ? CBZ.floorAt(g0.x, g0.z) : 0.14, heading: g0.heading };
@@ -1458,8 +1464,8 @@
       airborne:   { find: null,            feed: "The field is fogged in. You start on the apron with the keys in your hand." },
       corner:     { find: null,            feed: "" },   // the street IS the place — never fails
       motel:      { find: findMotelLot,    feed: "No room at the motel. You slept in the stairwell." },
-      // The racer opens on the Bullring's grid beside his own car: the race is
-      // run in the world (city/speedway_race.js), you get in with F.
+      // The racer opens on the Bullring's grid in his own car: the race is
+      // run in the world (city/speedway_race.js); out of it, you are on foot.
       speedway:   { resolve: speedwaySpawn, feed: "The speedway is dark tonight. You wait at the gate." },
       // never fails (internal degrade to the arena spawn — the seat is the story)
       mansion:    { resolve: mansionSpawn,  feed: "The Mansion is dark. The motorcade never came." },
