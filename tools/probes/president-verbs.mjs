@@ -328,13 +328,20 @@ export default async function (t) {
     out.gunsOut = f.filter(out_).length;
     var PRd = function () { return CBZ.protection && CBZ.protection.posture ? CBZ.protection.posture('president') : null; };
     out.posture = PRd();
-    try { var dv0 = CBZ.protection.detail('president'); out.reason = dv0 && dv0.reason; } catch (e) {}
+    var who = function (th) {
+      if (!th) return '';
+      var P = CBZ.player, r = th.rage;
+      var rw = !r ? '-' : (r === CBZ.player || r === (CBZ.city && CBZ.city.playerActor) || r.isPlayer) ? 'PRESIDENT' : r._protUnit ? 'agent' : (r.name || r.job || '?');
+      return ' [' + (th === a ? 'Walter' : th === b ? 'Ruth' : (th.name || '?')) + ' ' + (th.job || th.kind || '') + (th.gang != null ? ' gang' : '') + (th.rampage ? ' RAMPAGE' : '') +
+        (th.organization ? ' ' + th.organization : '') + ' armed=' + !!th.armed + ' st=' + th.state + ' rage->' + rw + ' ' + Math.hypot(th.pos.x - P.pos.x, th.pos.z - P.pos.z).toFixed(0) + 'm]';
+    };
+    try { var dv0 = CBZ.protection.detail('president'); out.reason = dv0 && dv0.reason; out.reason += who(dv0 && dv0.threat); } catch (e) {}
     // ...and they STAY away: past the 4 s stand-down window nothing of the
     // take-down (their own shots, the dead man, each other's guns) draws again
     __pv.step(330);
     out.gunsLater = f.filter(function (q) { return !q.dead && out_(q); }).length;
     out.postureLater = PRd();
-    try { var dv = CBZ.protection.detail('president'); out.reasonLater = dv && dv.reason; } catch (e) {}
+    try { var dv = CBZ.protection.detail('president'); out.reasonLater = dv && dv.reason; out.reasonLater += who(dv && dv.threat); } catch (e) {}
     out.diag = { members: f.filter(out_).map(function (q) { var r = q._gd || {}; var m = q._det; return [q._protUnit || q._occupySrc || (q._presPublic ? 'pub' : '?'), q.job || q.kind, 'lv=' + r.lv, 'why=' + r.why, 'trig=' + r.trigWhy + '@' + (r.trigT != null ? (GDd.now() - r.trigT).toFixed(2) : '-'), 'det=' + (q._detWhy || ''), 'ph=' + (m && m.D ? m.D.phase : '-'), 'st=' + q.state, 'al=' + (q.alarmed || 0).toFixed(1), 'rage=' + !!q.rage, 'mem=' + !!q.mem].join(' '); }),
       ring: GDd ? GDd.log().slice(-24).map(function (e) { return e.t + ' ' + e.kind + ' ' + e.why + ' ' + e.who; }) : [] };
     out.bAlive = !b.dead;

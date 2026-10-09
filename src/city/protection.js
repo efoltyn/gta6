@@ -2159,7 +2159,7 @@
       return {
         principal: { kind: cur.kind, name: cur.name || null, sid: cur.sid || null },
         posture: cur.kind === "vacant" ? (MS.lock ? "alert" : "normal") : PRES.posture,
-        reason: PRES.reason || null, units: units, posts: posts, checkpoints: checkpoints,
+        reason: PRES.reason || null, threat: PRES.threat && !PRES.threat.dead ? PRES.threat : null, units: units, posts: posts, checkpoints: checkpoints,
       };
     }
     if (key === "player") {
