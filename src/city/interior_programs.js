@@ -4791,7 +4791,40 @@
       const flo = info.flo;
       if (flo) for (let i = 0; i + 6 < flo.length; i += 7)
         B.plane(flo[i], flo[i + 1], flo[i + 2], flo[i + 3], flo[i + 4], FIN_KINDS[flo[i + 5]], flo[i + 6], { cell: 1.2 });
-      const lay = function (fin, y0, y1) {
+      // NOTHING THE ROOM FILED CROSSES A STAIRWELL. A finish box lying in the
+      // floor band (a rug, a border, a skirting run) over one of this storey's
+      // holes, or in the ceiling band (a coffer beam, a cornice, a chandelier)
+      // under one of the slab above's, keeps only its part outside the hole;
+      // a round or a turned piece standing in one is not laid at all. The
+      // eager boxes get the same clip in buildings.js lbox (holeClip); the
+      // finish used to bypass it.
+      const fHoles = B.holes ? B.holes() : [], cHoles = B.holes ? B.holes("ceil") : [];
+      const inR = function (R, x, z) { return x > R.x0 && x < R.x1 && z > R.z0 && z < R.z1; };
+      const holeCut = function (x, y, z, w, h, d, round) {
+        const yb = y - h / 2, yt = y + h / 2;
+        const H = yt <= B.fy + 0.4 ? fHoles : yb >= B.ceil - 1.35 ? cHoles : null;
+        if (!H || !H.length) return null;
+        let parts = null;
+        for (let j = 0; j < H.length; j++) {
+          const R = H[j];
+          if (x + w / 2 <= R.x0 || x - w / 2 >= R.x1 || z + d / 2 <= R.z0 || z - d / 2 >= R.z1) continue;
+          if (round) return inR(R, x, z) ? [] : null;
+          if (!parts) parts = [{ x0: x - w / 2, x1: x + w / 2, z0: z - d / 2, z1: z + d / 2 }];
+          const nx = [];
+          for (let q = 0; q < parts.length; q++) {
+            const c = parts[q];
+            if (R.x1 <= c.x0 || R.x0 >= c.x1 || R.z1 <= c.z0 || R.z0 >= c.z1) { nx.push(c); continue; }
+            if (R.z0 > c.z0) nx.push({ x0: c.x0, x1: c.x1, z0: c.z0, z1: R.z0 });
+            if (R.z1 < c.z1) nx.push({ x0: c.x0, x1: c.x1, z0: R.z1, z1: c.z1 });
+            const a = Math.max(c.z0, R.z0), b2 = Math.min(c.z1, R.z1);
+            if (R.x0 > c.x0) nx.push({ x0: c.x0, x1: R.x0, z0: a, z1: b2 });
+            if (R.x1 < c.x1) nx.push({ x0: R.x1, x1: c.x1, z0: a, z1: b2 });
+          }
+          parts = nx;
+        }
+        return parts;
+      };
+      const lay = function (fin, y0, y1, clip) {
         for (let i = 0; i + 9 < fin.length; i += 10) {
           if (y0 != null && (fin[i + 1] < y0 || fin[i + 1] >= y1)) continue;
           const o = OPT[fin[i + 7]] || OPT[9];
@@ -4799,10 +4832,16 @@
           // bits 64 / 128 / 256 of the mask name a round primitive (FIN_CYL)
           const shape = mask & FIN_CYL ? "cyl" : mask & FIN_HCYL ? "hcyl" : mask & FIN_OCT ? "oct" : null;
           const oo = (yaw || mask !== 63) ? Object.assign({}, o, { yaw: yaw, faces: mask & 63, shape: shape, seg: shape ? ((mask >> 9) & 31) || 12 : 0 }) : o;
-          B.box(fin[i], fin[i + 1], fin[i + 2], fin[i + 3], fin[i + 4], fin[i + 5], fin[i + 6], oo);
+          const cut = clip ? holeCut(fin[i], fin[i + 1], fin[i + 2], fin[i + 3], fin[i + 4], fin[i + 5], !!(shape || yaw)) : null;
+          if (!cut) { B.box(fin[i], fin[i + 1], fin[i + 2], fin[i + 3], fin[i + 4], fin[i + 5], fin[i + 6], oo); continue; }
+          for (let q = 0; q < cut.length; q++) {
+            const c = cut[q];
+            if (c.x1 - c.x0 < 0.004 || c.z1 - c.z0 < 0.004) continue;
+            B.box((c.x0 + c.x1) / 2, fin[i + 1], (c.z0 + c.z1) / 2, c.x1 - c.x0, fin[i + 4], c.z1 - c.z0, fin[i + 6], oo);
+          }
         }
       };
-      if (info.fin) lay(info.fin);
+      if (info.fin) lay(info.fin, null, null, true);
       const dec = info.decals || [];
       for (let i = 0; i < dec.length; i++) { const q = dec[i]; if (B.decal) B.decal(q.id, q.x, q.z, q.w, q.d, q.y, q.yaw); }
       // what other files built into this storey (the grand stair, the Situation Room)

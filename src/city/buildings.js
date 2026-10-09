@@ -4850,8 +4850,26 @@
   function unlist(m, b) {
     for (const list of [CBZ.losBlockers, b.losMeshes]) { const i = list ? list.indexOf(m) : -1; if (i >= 0) list.splice(i, 1); }
   }
+  // THE CARVED-SLAB MESHES LIVE ON THE GROUP, not on the record. govcomplex's
+  // civic() hands the lot a SHALLOW COPY of the building record (same slabs,
+  // same group, its own top-level fields): the Mansion's grand stair carved
+  // slab 1 through the shell, the service core then carved it again through
+  // the lot's copy, and each copy kept its own list, so the copy's rebuild
+  // never took the shell's first mesh down. That stale slab (a full-width
+  // strip over the whole service core at 4.3-4.5 m) is the floor you walked
+  // through going down the Mansion's back stair. One list per drawn group.
+  function carvedList(b) {
+    const ud = b.group && b.group.userData;
+    if (ud) return ud.carvedSlabs || null;
+    return b._carvedSlabs || null;
+  }
+  function setCarvedList(b, L) {
+    const ud = b.group && b.group.userData;
+    if (ud) ud.carvedSlabs = L; else b._carvedSlabs = L;
+    return L;
+  }
   function rebuildCarved(b) {
-    const old = b._carvedSlabs;
+    const old = carvedList(b);
     // (a carve BEFORE the batch pass gets its mesh merged into the shell like
     // any slab: a later carve zeroes that slice, exactly as dropPiece does)
     if (old) for (const m of old) {
@@ -4860,7 +4878,7 @@
       unlist(m, b);
       if (!merged) m.geometry.dispose();
     }
-    b._carvedSlabs = [];
+    const carved = setCarvedList(b, []);
     const groups = new Map();
     const recs = (b.floorSlabs || []).concat(b.roofSlab ? [b.roofSlab] : []);
     for (const fs of recs) {
@@ -4908,7 +4926,7 @@
       m.updateMatrix(); m.matrixAutoUpdate = false;
       if (CBZ.losBlockers) CBZ.losBlockers.push(m);
       if (b.losMeshes) b.losMeshes.push(m);
-      b._carvedSlabs.push(m);
+      carved.push(m);
     });
   }
   function dropPiece(b, pc) {

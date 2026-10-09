@@ -229,27 +229,11 @@
   }
 
   // ---- surfaces ---------------------------------------------------------
-  // a floor finish over R, split at every hole edge so the stairwell and
-  // lift chase are cut clean instead of losing a whole metre cell round them
+  // a floor finish (or, `ceiling`, the soffit) over R: fitout.js's B.plane
+  // cuts it exactly at this storey's holes (a ceiling at the slab above's)
   function floorPlane(B, R, mat, tint, dy, ceiling) {
-    const H = holesOf(B);
-    const xs = [R.x0, R.x1], zs = [R.z0, R.z1];
-    for (let i = 0; i < H.length; i++) {
-      const h = H[i];
-      if (!(h.x1 > R.x0 && h.x0 < R.x1 && h.z1 > R.z0 && h.z0 < R.z1)) continue;
-      if (h.x0 > R.x0 && h.x0 < R.x1) xs.push(h.x0);
-      if (h.x1 > R.x0 && h.x1 < R.x1) xs.push(h.x1);
-      if (h.z0 > R.z0 && h.z0 < R.z1) zs.push(h.z0);
-      if (h.z1 > R.z0 && h.z1 < R.z1) zs.push(h.z1);
-    }
-    xs.sort(function (a, b) { return a - b; }); zs.sort(function (a, b) { return a - b; });
     const y = ceiling ? B.ceil - 0.012 : B.fy + (dy || 0);
-    for (let i = 0; i + 1 < xs.length; i++) for (let j = 0; j + 1 < zs.length; j++) {
-      const a0 = xs[i], a1 = xs[i + 1], b0 = zs[j], b1 = zs[j + 1];
-      if (a1 - a0 < 0.02 || b1 - b0 < 0.02) continue;
-      if (inHole(B, (a0 + a1) / 2, (b0 + b1) / 2, 0)) continue;
-      B.plane(a0, b0, a1, b1, y, mat, tint, { cell: ceiling ? 1.2 : 1.0, holes: [], down: !!ceiling });
-    }
+    B.plane(R.x0, R.z0, R.x1, R.z1, y, mat, tint, { cell: ceiling ? 1.2 : 1.0, down: !!ceiling });
   }
   // THE FIXTURE WITHOUT ITS SOURCE — the same boxes fitout.js's B.light
   // draws, for the fixtures that are not baked sources. The bake is
