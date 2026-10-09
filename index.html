@@ -523,7 +523,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (asphalt, concrete, plaster, metal, dirt, grass, sand, wood, glass grime).
      Needs core/seed.js for CBZ.hashN; bakes lazily on first request, so it only
      has to precede its first consumer — world/materials.js. -->
-<script src="src/world/textures_surface.js?v=ground1001"></script>
+<script src="src/world/textures_surface.js?v=ground1008c"></script>
 <script src="src/world/materials.js?v=ground1001"></script>
 <script src="src/world/fuel_station.js?v=pf0930a"></script>
 <script src="src/world/prisonkit.js?v=tow929b"></script>
@@ -1749,13 +1749,13 @@ document.body.appendChild(b);}}catch(e){}})();
      metroplan.js is the pure urban planner (land value -> zoning -> arterials -> blocks -> parcels),
      metro_fabric.js draws its buildings, metro_ground.js its streets and ground, metro.js places the
      Kingsport metro + the city rings at landmass order 43 and streams their tiles by distance. -->
-<script src="src/city/metroplan.js?v=wreal0929"></script>
+<script src="src/city/metroplan.js?v=ground1008c"></script>
 <script src="src/city/metro_fabric.js?v=pf0930q"></script>
 <!-- REAL GRASS (owner: "when you walk on grass it's just fucking green"): instanced lit blades round
      the camera on every grass surface, fed by CBZ.groundCover (the ONE land-use + ground-colour
      query: cityground 10, metro_ground 20, continent 90 register into it, so it loads before them). -->
 <script src="src/world/grassfield.js?v=grass0929c"></script>
-<script src="src/city/metro_ground.js?v=wreal0929"></script>
+<script src="src/city/metro_ground.js?v=ground1008c"></script>
 <script src="src/city/metro.js?v=ground1001"></script>
 <script src="src/city/metro_structs.js?v=wreal0929"></script>
 <script src="src/city/spawnplaces.js?v=sim2"></script>
@@ -2161,7 +2161,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/river.js?v=wreal0929"></script>
 <!-- THE CONTINENT: runs after every landmass builder (order 97) and fills the
      ocean between POIs with walkable backcountry — one world, not circles. -->
-<script src="src/city/continent.js?v=ground1001"></script>
+<script src="src/city/continent.js?v=ground1008c"></script>
 <script src="src/city/demographics.js?v=world1"></script>
 <!-- X6: the affinity matrix (country/state/city relations) — after
      countries.js (CBZ.COUNTRIES) and officials.js/polity.js (both already
@@ -2327,7 +2327,7 @@ document.body.appendChild(b);}}catch(e){}})();
      staffs itself through power.js's protection layer rather than authoring
      guards. After power.js and the biome/continent builders whose empty land
      it claims. Revert with ?cfg_GOV_COMPLEX=0. -->
-<script src="src/city/govcomplex.js?v=presint1001b"></script>
+<script src="src/city/govcomplex.js?v=ground1008c"></script>
 
 <!-- THE PRESIDENCY — one spine over organs built above: the President origin
      (candidacy's swearIn fast-forward), the Situation Room inside govcomplex's
@@ -2515,7 +2515,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/core/losgrid.js?v=lg1"></script>
 <script src="src/core/staticfreeze.js?v=sf1"></script>
 <script src="src/systems/settings.js?v=nodash1"></script>
-<script src="src/core/batch.js?v=pf0930l"></script>
+<script src="src/core/batch.js?v=ground1008c"></script>
 <!-- Render-realism layer: light-writer arbiter, world PBR promotion, env reach,
      exposure, contact AO. MUST load after core/quality.js (reads
      CBZ.onQualityChange) AND after core/batch.js — it wraps CBZ.batchStaticUnder

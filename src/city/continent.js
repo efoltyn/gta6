@@ -1951,6 +1951,29 @@
     // how a 1441 m backdrop range ended up standing on driveable backcountry.
     CBZ.CONTINENT_PLATE = { minX: minX, maxX: maxX, minZ: minZ, maxZ: maxZ, seg: SEG };
     CBZ.CONTINENT_PLATE_SEG = SEG;
+    // THE ROAD FIELD the ground skin reads for shoulders and verges: every
+    // road this plate meets (the records outside the metros, whose own
+    // ground draws their streets) and the filleted freeway centrelines at
+    // their deck half-width (the corridor list carries +2 m of clearance).
+    // Roads laid AFTER this (the frontier loop below, late towns) re-run it:
+    // the field follows the road list's length, checked once a frame.
+    if (CBZ.groundRoadField) {
+      const rect = { minX: minX, maxX: maxX, minZ: minZ, maxZ: maxZ };
+      let seen = -1;
+      CBZ.groundRoadField.follow = function () {
+        const n = (city.roads || []).length;
+        if (n === seen) return;
+        seen = n;
+        const hw = CBZ.highwayNetCorridors ? CBZ.highwayNetCorridors() : [];
+        CBZ.groundRoadField.build(rect, (city.roads || []).filter(function (r) { return r && !r.metro; }),
+          hw.map(function (s) { return { x0: s.x0, z0: s.z0, x1: s.x1, z1: s.z1, half: Math.max(1, s.half - 2) }; }), 2048);
+      };
+      CBZ.groundRoadField.follow();
+      if (!CBZ.groundRoadField.hooked && CBZ.onAlways) {
+        CBZ.groundRoadField.hooked = true;
+        CBZ.onAlways(96, function () { if (CBZ.groundRoadField.follow) CBZ.groundRoadField.follow(); });
+      }
+    }
     /* ---- continentCoverAt: THE GRASS FIELD'S QUESTION (world/grassfield.js)
        The plate's own vertex colour decides where the backcountry is grass
        (the same green test groundSkin uses: g/r through 0.88..1.22), and the

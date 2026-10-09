@@ -586,22 +586,29 @@
                   not green paint on a slope;
        - no tile can be counted: every layer reads its map twice (the second
          read rotated 37 deg at 3.2x the size) and mixes the two by a 9 m
-         noise, and a 23 m / 61 m brightness + dryness mottle rides over all
-         of it so a meadow is patchy at every distance;
-       - the detail fades out by `far` (mip averages are ~1 anyway; the fade
-         keeps grazing angles from shimmering), the mottle does not.
+         noise;
+       - grass wears THE TURF (groundTurf, below: hue, bare soil and value
+         at every scale from 150 m to 6 cm, each term faded to its own mean
+         as it recedes), soil and sand a 23 m / 61 m value mottle;
+       - where it meets a road (the road field, below): a gravel shoulder,
+         a dry mown verge with wheel-worn soil, then the field;
+       - the map detail fades out by `far` (mip averages are ~1 anyway; the
+         fade keeps grazing angles from shimmering), the turf does not.
 
      Lambert on purpose: lighting stays per vertex (the cost the plate always
-     had), only the albedo is per pixel: a handful of texture reads, no new
-     draw, no new geometry. Tier 0 / textures off -> the exact plain
-     vertex-colour Lambert it replaces.
+     had), only the albedo is per pixel: a handful of texture reads and
+     noise taps, no new draw, no new geometry. Tier 0 / textures off: no
+     maps, everything else (turf, verges, stone, decode) still runs.
+       opts.extra.vertexColors = false + extra.color: a pad with no vertex
+                      colours (an estate lawn) wears the same skin.
 
        opts.tile      { grass, dirt, sand, rock } metres per repeat
        opts.rockSlope [s0, s1] of 1-n.y where rock starts / is full
        opts.sandY     [y0, y1] world heights over which sand gives way
        opts.far       metres by which the per-pixel detail has faded
        opts.chroma    how much of the maps' own colour survives (0.35)
-       opts.mottle    strength of the 23/61 m patch mottle (1)
+       opts.mottle    strength of the turf and the soil mottle (1)
+       opts.wear      bare-soil patches in the grass (1; a kept lawn ~0.15)
        opts.extra     extra MeshLambertMaterial params (polygonOffset, side)
        opts.srgb      the vertex colours are sRGB DISPLAY colours (THREE.Color
                       hexes, which r128 hands over unconverted): decode them
@@ -688,6 +695,154 @@
     _cityHooked = true;
     CBZ.onAlways(95, function () { _cityU.uGndNight.value = Math.max(0, Math.min(1, +CBZ.nightAmount || 0)); });
   }
+  /* ==================================================================
+     THE TURF — one grass look for every ground system, every tier.
+
+     WHY. On the owner's iPad (tablet, quality tier 1) the fields round
+     the city measured luminance CV 0.07-0.12 and a 2-px local contrast of
+     0.5-2.7 levels out of 255 past 20 m: "plain green". The ground skin's
+     variation was a 3.2 m grass texture (128 px on tiers 0-1, mip-averaged
+     to its mean a few metres out) plus a +-14 % brightness mottle; the
+     metro lawns had their own +-15 % mottle; the estate lawns a tiled
+     texture; tier 0 got bare vertex colour. Nothing between 1 m and 20 m
+     varied, and nothing at all varied in hue.
+
+     WHAT. groundTurf(xz, dist, wear) is pure shader math (no texture, so it is
+     the same on every tier and every device) and returns a multiplier for
+     the lawn's own colour, MEAN (1,1,1) over the plane:
+       - hue, never faded: sun-dried straw over a 61/150 m field, a deeper
+         irrigated green in the low half of a 23 m field;
+       - bare soil: 6-14 m worn patches with frayed edges, scaled by
+         `wear` (1 a yard or a field, ~0.15 a head of state's lawn, which
+         is also watered: less of it dries to straw; the soil and dry
+         terms are divided by their own means, so any wear keeps mean 1);
+       - value: clumps at 23, 61 and 8 m, tufts at 1.8 and 0.6 m, blades
+         and thatch at 16 and 6 cm;
+     and every term finer than a few pixels at its distance is replaced by
+     ITS OWN MEAN as it recedes (not by grey, not by nothing), so the far
+     field is the near field averaged: one world at every distance. The
+     constants below (TURF_SOIL_MEAN, TURF_NORM) are measured by
+     tools/ground-turf-check.mjs, which keeps a JS twin of this function and
+     fails if they drift.
+
+     The hash wraps its lattice at 289 cells, so world coordinates of
+     several km never reach the float precision a mobile GPU runs out of.
+     ================================================================== */
+  const TURF_SOIL_MEAN = 0.0723, TURF_DRY_MEAN = 0.1759;
+  const TURF_NORM = [1.0388, 1.0098, 1.0353];
+  const TURF_GLSL = [
+    "float tfH( vec2 p ) { p = mod( p, 289.0 ); vec3 q = fract( vec3( p.xyx ) * 0.1031 ); q += dot( q, q.yzx + 33.33 ); return fract( ( q.x + q.y ) * q.z ); }",
+    "float tfN( vec2 p ) { vec2 i = floor( p ), f = fract( p ); f = f * f * ( 3.0 - 2.0 * f );",
+    "  return mix( mix( tfH( i ), tfH( i + vec2( 1.0, 0.0 ) ), f.x ), mix( tfH( i + vec2( 0.0, 1.0 ) ), tfH( i + vec2( 1.0, 1.0 ) ), f.x ), f.y ); }",
+    "vec3 groundTurf( vec2 xz, float d, float wear ) {",
+    "  float m150 = tfN( xz * 0.0067 + vec2( 1.3, 7.1 ) );",
+    "  float m61 = tfN( xz * 0.0164 + vec2( 3.1, 0.4 ) );",
+    "  float m23 = tfN( xz * 0.0435 + vec2( 12.4, 2.6 ) );",
+    "  float fM = 1.0 - smoothstep( 300.0, 900.0, d );",
+    "  float fF = 1.0 - smoothstep( 40.0, 140.0, d );",
+    "  float fG = 1.0 - smoothstep( 6.0, 30.0, d );",
+    "  float dry = smoothstep( 0.50, 0.82, 0.6 * m61 + 0.4 * m150 );",
+    "  float lush = ( 1.0 - smoothstep( 0.2, 0.52, m23 ) ) * ( 1.0 - dry );",
+    // a kept lawn (low wear) is watered: less of it dries to straw; the
+    // dry term is divided by its own mean so any wear keeps mean 1
+    "  float dA = 0.8 * ( 0.3 + 0.7 * wear );",
+    "  vec3 k = mix( vec3( 1.0 ), vec3( 1.30, 1.04, 0.60 ), dry * dA ) / mix( vec3( 1.0 ), vec3( 1.30, 1.04, 0.60 ), " + TURF_DRY_MEAN.toFixed(4) + " * dA )",
+    "    * mix( vec3( 1.0 ), vec3( 0.80, 0.97, 0.86 ), lush * 0.85 );",
+    "  float soil = " + TURF_SOIL_MEAN.toFixed(4) + ";",
+    "  float n8 = 0.5;",
+    "  if ( fM > 0.0 ) {",
+    "    float n11 = tfN( xz * 0.09 + vec2( 7.7, 1.9 ) ), n4 = tfN( xz * 0.26 + vec2( 2.2, 5.5 ) );",
+    "    soil = mix( soil, smoothstep( 0.68, 0.80, 0.68 * n11 + 0.32 * n4 ), fM );",
+    "    n8 = mix( 0.5, tfN( xz * 0.125 + vec2( 5.7, 3.3 ) ), fM );",
+    "  }",
+    "  k *= mix( vec3( 1.0 ), vec3( 1.25, 0.76, 1.42 ), soil * 0.85 * wear ) / mix( vec3( 1.0 ), vec3( 1.25, 0.76, 1.42 ), " + (0.85 * TURF_SOIL_MEAN).toFixed(5) + " * wear );",
+    "  float v = 1.0 + 0.36 * ( m23 - 0.5 ) + 0.26 * ( m61 - 0.5 ) + 0.32 * ( n8 - 0.5 );",
+    "  if ( fF > 0.0 ) v += fF * ( 0.26 * ( tfN( xz * 0.55 + vec2( 9.2, 4.4 ) ) - 0.5 ) + 0.18 * ( tfN( xz * 1.7 + vec2( 1.1, 8.8 ) ) - 0.5 ) );",
+    "  if ( fG > 0.0 ) v += fG * ( 0.22 * ( tfN( xz * 6.3 ) - 0.5 ) + 0.14 * ( tfN( xz * 17.0 + 3.3 ) - 0.5 ) );",
+    "  return k * v * vec3( " + TURF_NORM.map(function (v) { return v.toFixed(4); }).join(", ") + " );",
+    "}",
+  ].join("\n");
+  CBZ.GROUND_TURF_GLSL = TURF_GLSL;
+  CBZ.groundTurfConst = { soilMean: TURF_SOIL_MEAN, dryMean: TURF_DRY_MEAN, norm: TURF_NORM.slice() };
+
+  /* THE ROAD FIELD — where the country meets a road. A signed distance (m)
+     from the nearest road EDGE over the whole continent plate (negative on
+     the carriageway), one byte a texel: d = (byte - 128) / 4, so -32..+31.75
+     m at 25 cm. Signed, because a signed distance to a straight edge is
+     linear across the edge, so a 17 m texel still interpolates a 2 m gravel
+     shoulder exactly. city/continent.js rasterises it once from the road
+     records and the filleted freeway centrelines; until then (and on any
+     ground that is not near a road) it reads "far from every road". The
+     skin turns it into a gravel shoulder, a mown dry verge with wheel-worn
+     soil, and the field beyond. */
+  const _roadU = {
+    uGndRoad: { value: null },
+    uGndRoadR: { value: new THREE.Vector4(0, 0, 0, 0) },
+  };
+  (function () {
+    const t = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1, THREE.RGBAFormat);
+    t.needsUpdate = true;
+    _roadU.uGndRoad.value = t;
+  })();
+  CBZ.groundRoadField = {
+    uniforms: _roadU,
+    // rect {minX,maxX,minZ,maxZ}; roads: [{x,z,len,vertical,w}]; segs:
+    // [{x0,z0,x1,z1,half}]. Pure CPU raster + one upload; returns stats.
+    build: function (rect, roads, segs, N) {
+      const t0 = Date.now();
+      N = N || 1024;
+      const W = rect.maxX - rect.minX, D = rect.maxZ - rect.minZ;
+      const cx = W / N, cz = D / N, REACH = 32;
+      const f = new Float32Array(N * N).fill(REACH);
+      function seg(ax, az, bx, bz, half) {
+        const x0 = Math.max(0, Math.floor((Math.min(ax, bx) - half - REACH - rect.minX) / cx)), x1 = Math.min(N - 1, Math.ceil((Math.max(ax, bx) + half + REACH - rect.minX) / cx));
+        const z0 = Math.max(0, Math.floor((Math.min(az, bz) - half - REACH - rect.minZ) / cz)), z1 = Math.min(N - 1, Math.ceil((Math.max(az, bz) + half + REACH - rect.minZ) / cz));
+        const dx = bx - ax, dz = bz - az, L2 = dx * dx + dz * dz;
+        for (let j = z0; j <= z1; j++) {
+          const pz = rect.minZ + (j + 0.5) * cz;
+          for (let i = x0; i <= x1; i++) {
+            const px = rect.minX + (i + 0.5) * cx;
+            let t = L2 > 0 ? ((px - ax) * dx + (pz - az) * dz) / L2 : 0;
+            t = t < 0 ? 0 : t > 1 ? 1 : t;
+            const d = Math.hypot(ax + dx * t - px, az + dz * t - pz) - half;
+            const k = j * N + i;
+            if (d < f[k]) f[k] = d;
+          }
+        }
+      }
+      let n = 0;
+      for (const r of roads || []) {
+        if (!r || !isFinite(r.x) || !isFinite(r.z) || !isFinite(r.len)) continue;
+        const half = (r.w || r.width || 12) / 2, hl = r.len / 2;
+        if (r.vertical) seg(r.x, r.z - hl, r.x, r.z + hl, half); else seg(r.x - hl, r.z, r.x + hl, r.z, half);
+        n++;
+      }
+      for (const s of segs || []) { seg(s.x0, s.z0, s.x1, s.z1, s.half); n++; }
+      const bytes = new Uint8Array(N * N);
+      for (let k = 0; k < N * N; k++) { const v = Math.round(128 + Math.max(-32, Math.min(31.75, f[k])) * 4); bytes[k] = v < 0 ? 0 : v > 255 ? 255 : v; }
+      const tex = new THREE.DataTexture(bytes, N, N, THREE.LuminanceFormat, THREE.UnsignedByteType);
+      tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearFilter; tex.generateMipmaps = false;
+      tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+      tex.needsUpdate = true;
+      // the CPU copy goes once it is on the GPU (one phone-sized MB)
+      tex.onUpdate = function () { tex.image.data = null; tex.onUpdate = null; CBZ.freedStaticArrays = true; };
+      const old = _roadU.uGndRoad.value;
+      _roadU.uGndRoad.value = tex;
+      _roadU.uGndRoadR.value.set(rect.minX, rect.minZ, 1 / W, 1 / D);
+      if (old && old !== tex && old.image && old.image.width > 1) old.dispose();
+      CBZ.groundRoadField.stats = { N: N, texel: +(W / N).toFixed(1), roads: n, ms: Date.now() - t0, builds: ((CBZ.groundRoadField.stats && CBZ.groundRoadField.stats.builds) || 0) + 1 };
+      // (node checks read the field back through this)
+      // (bilinear, like the GPU's read)
+      CBZ.groundRoadField.sample = function (x, z) {
+        const u = Math.max(0, Math.min(N - 1.001, (x - rect.minX) / W * N - 0.5)), v = Math.max(0, Math.min(N - 1.001, (z - rect.minZ) / D * N - 0.5));
+        const i = Math.floor(u), j = Math.floor(v), a = u - i, b = v - j;
+        const q = function (ii, jj) { return Math.max(-32, Math.min(31.75, f[jj * N + ii])); };
+        return (q(i, j) * (1 - a) + q(i + 1, j) * a) * (1 - b) + (q(i, j + 1) * (1 - a) + q(i + 1, j + 1) * a) * b;
+      };
+      return CBZ.groundRoadField.stats;
+    },
+  };
+
   CBZ.groundSkin = function (opts) {
     opts = opts || {};
     const SRGB = !!opts.srgb, CITY = !!opts.cityMap;
@@ -696,39 +851,37 @@
     const rockSlope = opts.rockSlope || [0.30, 0.55];
     const sandY = opts.sandY || [0.6, 2.2];
     const far = opts.far == null ? 420 : +opts.far;
+    // vertex colours carry the land cover; a pad with none passes
+    // extra.vertexColors = false and its lawn colour as extra.color
     const mat = new THREE.MeshLambertMaterial(Object.assign({ color: 0xffffff, vertexColors: true }, opts.extra || {}));
     mat.name = opts.name || "ground-skin";
     // r128 samples a custom sampler raw (no mapTexelToLinear), so the shader
-    // decodes; these are the SAME cached maps the island volcano reads
+    // decodes; these are the SAME cached maps the island volcano reads.
+    // Tier 0 / textures off: no maps, and the turf, the verges, the stone
+    // and the decode all still run (they are math, not textures): the land
+    // looks like the land on every tier.
     const mg = surfaceMaps("grass", { repeat: 1 }), md = surfaceMaps("dirt", { repeat: 1 });
     const ms = surfaceMaps("sand", { repeat: 1 }), mr = surfaceMaps("rock", { repeat: 1 });
-    if (!mg || !md || !ms || !mr) {                       // tier 0 / textures off: plain vertex colour
-      if (!SRGB) return mat;
-      // ...still decoded: the colour of the land must not depend on the tier
-      mat.onBeforeCompile = function (sh) {
-        if (sh.fragmentShader.indexOf("#include <color_fragment>") < 0) return;
-        sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>\n" + SRGB_GLSL)
-          .replace("#include <color_fragment>", "#include <color_fragment>\n  diffuseColor.rgb = gndLin( diffuseColor.rgb );");
-      };
-      mat.customProgramCacheKey = function () { return "cbzGroundSkinLin"; };
-      return mat;
-    }
+    const MAPS = !!(mg && md && ms && mr);
     function inv(t) { const m = surfaceMapMean(t); return new THREE.Vector3(1 / Math.max(0.02, m[0]), 1 / Math.max(0.02, m[1]), 1 / Math.max(0.02, m[2])); }
     const U = {
-      uGndG: { value: mg.map }, uGndD: { value: md.map }, uGndS: { value: ms.map }, uGndR: { value: mr.map },
-      uGndKG: { value: inv(mg.map) }, uGndKD: { value: inv(md.map) }, uGndKS: { value: inv(ms.map) }, uGndKR: { value: inv(mr.map) },
       uGndTile: { value: new THREE.Vector4(1 / tile.grass, 1 / tile.dirt, 1 / tile.sand, 1 / tile.rock) },
       uGndPar: { value: new THREE.Vector4(rockSlope[0], rockSlope[1], sandY[0], sandY[1]) },
       uGndFar: { value: far },
+      uGndWear: { value: opts.wear == null ? 1 : +opts.wear },
       uGndMix: { value: new THREE.Vector2(opts.chroma == null ? 0.35 : +opts.chroma, opts.mottle == null ? 1 : +opts.mottle) },
     };
+    if (MAPS) Object.assign(U, {
+      uGndG: { value: mg.map }, uGndD: { value: md.map }, uGndS: { value: ms.map }, uGndR: { value: mr.map },
+      uGndKG: { value: inv(mg.map) }, uGndKD: { value: inv(md.map) }, uGndKS: { value: inv(ms.map) }, uGndKR: { value: inv(mr.map) },
+    });
     if (CITY) { Object.assign(U, _cityU); CBZ.farCityMap.sampled = true; }   // (metro.js builds the atlas only if some ground samples it)
     U.uGndOpt = { value: new THREE.Vector2(SRGB ? 1 : 0, CITY ? 1 : 0) };
     mat.userData.groundSkin = true;
     mat.onBeforeCompile = function (sh) {
       const vs = sh.vertexShader, fs0 = sh.fragmentShader;
       if (vs.indexOf("#include <project_vertex>") < 0 || fs0.indexOf("#include <color_fragment>") < 0) return;
-      Object.assign(sh.uniforms, U);
+      Object.assign(sh.uniforms, U, _roadU);
       if (!CITY) Object.assign(sh.uniforms, _cityU);      // declared in every variant (one program), inert at N = 0
       sh.vertexShader = vs
         .replace("#include <common>", "#include <common>\nvarying vec3 vGndW;\nvarying vec3 vGndN;\nvarying float vGndD;")
@@ -737,12 +890,14 @@
           "vGndN = normalize( mat3( modelMatrix ) * objectNormal );\n" +
           "vGndD = length( mvPosition.xyz );");
       sh.fragmentShader = fs0
-        .replace("#include <common>", "#include <common>\nvarying vec3 vGndW;\nvarying vec3 vGndN;\nvarying float vGndD;\n" +
-          "uniform sampler2D uGndG;\nuniform sampler2D uGndD;\nuniform sampler2D uGndS;\nuniform sampler2D uGndR;\n" +
-          "uniform vec3 uGndKG;\nuniform vec3 uGndKD;\nuniform vec3 uGndKS;\nuniform vec3 uGndKR;\n" +
-          "uniform vec4 uGndTile;\nuniform vec4 uGndPar;\nuniform float uGndFar;\nuniform vec2 uGndMix;\nuniform vec2 uGndOpt;\n" +
+        .replace("#include <common>", "#include <common>\n" + (MAPS ? "#define GND_MAPS\n" : "") +
+          "varying vec3 vGndW;\nvarying vec3 vGndN;\nvarying float vGndD;\n" +
+          "#ifdef GND_MAPS\nuniform sampler2D uGndG;\nuniform sampler2D uGndD;\nuniform sampler2D uGndS;\nuniform sampler2D uGndR;\n" +
+          "uniform vec3 uGndKG;\nuniform vec3 uGndKD;\nuniform vec3 uGndKS;\nuniform vec3 uGndKR;\n#endif\n" +
+          "uniform vec4 uGndTile;\nuniform vec4 uGndPar;\nuniform float uGndFar;\nuniform vec2 uGndMix;\nuniform vec2 uGndOpt;\nuniform float uGndWear;\n" +
+          "uniform sampler2D uGndRoad;\nuniform vec4 uGndRoadR;\n" +
           "uniform sampler2D uGndCity;\nuniform float uGndCityN;\nuniform vec4 uGndCityR[ " + CITY_MAX + " ];\nuniform vec4 uGndCityA[ " + CITY_MAX + " ];\nuniform float uGndNight;\n" +
-          GND_GLSL + "\n" + SRGB_GLSL + CITY_GLSL)
+          GND_GLSL + "\n" + SRGB_GLSL + TURF_GLSL + "\n" + CITY_GLSL)
         .replace("#include <color_fragment>", "#include <color_fragment>\nvec3 gndLamp = vec3( 0.0 );\n{\n" +
           // grass/dirt/sand are told apart on the AUTHORED hue (g/r of the
           // display colour), so the decode comes after the classification
@@ -756,9 +911,10 @@
           // outcrops, not a contour line
           "  float rockW = smoothstep( uGndPar.x, uGndPar.y, slope + ( gndVn( xz / 7.0 ) - 0.5 ) * 0.12 );\n" +
           "  float sandW = ( 1.0 - grassW ) * ( 1.0 - smoothstep( uGndPar.z, uGndPar.w, vGndW.y ) );\n" +
+          "  vec3 det = vec3( 1.0 );\n" +
+          "#ifdef GND_MAPS\n" +
           "  float fade = 1.0 - smoothstep( uGndFar * 0.35, uGndFar, vGndD );\n" +
           "  float w9 = gndVn( xz / 9.0 );\n" +
-          "  vec3 det = vec3( 1.0 );\n" +
           "  if ( fade > 0.001 ) {\n" +
           "    vec3 tG = gndTap( uGndG, xz * uGndTile.x, w9 ) * uGndKG;\n" +
           "    vec3 tD = gndTap( uGndD, xz * uGndTile.y, w9 ) * uGndKD;\n" +
@@ -771,24 +927,53 @@
           "    det = mix( vec3( dl ), det, uGndMix.x );\n" +
           "    det = mix( vec3( 1.0 ), det, fade );\n" +
           "  }\n" +
+          "#endif\n" +
           // exposed rock: the vertex's own brightness, desaturated to stone
           "  float vl = dot( vc, vec3( 0.2126, 0.7152, 0.0722 ) );\n" +
           "  vec3 stone = vec3( vl ) * vec3( 1.08, 1.0, 0.90 ) * 1.25;\n" +
           "  vec3 base = mix( vc, stone, rockW * 0.8 );\n" +
-          // patch mottle: brightness at 23 m + 61 m, and sun-dried grass in
-          // the dry half of the 61 m field
+          // THE TURF on the grass (the same function the metro lawns and the
+          // estates wear); soil and sand keep a plain 23/61 m value mottle
+          "  vec3 turf = mix( vec3( 1.0 ), groundTurf( xz, vGndD, uGndWear ), uGndMix.y );\n" +
           "  float m1 = gndVn( xz / 23.0 ), m2 = gndVn( xz / 61.0 + 3.1 );\n" +
           "  float mott = 1.0 + uGndMix.y * ( 0.28 * ( m1 * 0.55 + m2 * 0.45 ) - 0.14 );\n" +
-          "  float dry = smoothstep( 0.55, 0.85, m2 ) * grassW * ( 1.0 - rockW );\n" +
-          "  base *= mix( vec3( 1.0 ), vec3( 1.16, 1.04, 0.72 ), dry * 0.55 * uGndMix.y );\n" +
-          "  vec3 gOut = base * det * mott;\n" +
+          "  base *= mix( vec3( mott ), turf, grassW * ( 1.0 - rockW ) );\n" +
+          // WHERE THE COUNTRY MEETS A ROAD (signed metres from the road
+          // edge): a 2-3 m gravel shoulder with a frayed inner edge, then a
+          // mown verge drier than the field and worn to soil in wheel-ruts
+          // near the shoulder, easing into the field by ~14 m. Edges widen
+          // with distance so a 2 m band never shimmers at 500 m.
+          "  if ( uGndRoadR.z > 0.0 ) {\n" +
+          "    vec2 ruv = ( xz - uGndRoadR.xy ) * uGndRoadR.zw;\n" +
+          "    if ( ruv.x > 0.0 && ruv.y > 0.0 && ruv.x < 1.0 && ruv.y < 1.0 ) {\n" +
+          "      float e = ( texture2D( uGndRoad, ruv ).r * 255.0 - 128.0 ) * 0.25;\n" +
+          "      if ( e < 18.0 ) {\n" +
+          "        float aw = 0.5 + vGndD * 0.004;\n" +
+          "        float fr = ( tfN( xz * 0.7 + 4.1 ) - 0.5 ) * 1.4;\n" +
+          "        float grav = 1.0 - smoothstep( 2.4 - aw, 2.4 + aw, e + fr );\n" +
+          "        float stones = 0.78 + 0.44 * tfN( xz * 7.5 ) * ( 1.0 - smoothstep( 15.0, 60.0, vGndD ) ) + 0.22 * smoothstep( 15.0, 60.0, vGndD );\n" +
+          "        vec3 gravel = vec3( 0.150, 0.138, 0.118 ) * stones;\n" +
+          "        float verge = 1.0 - smoothstep( 7.0, 15.0, e + fr * 2.0 );\n" +
+          "        float rut = ( 1.0 - smoothstep( 2.6, 5.0, e ) ) * smoothstep( 0.45, 0.75, tfN( xz * 0.33 + 6.6 ) ) * ( 1.0 - smoothstep( 120.0, 400.0, vGndD ) );\n" +
+          "        vec3 vg = base * mix( vec3( 1.0 ), vec3( 1.22, 1.06, 0.70 ), 0.75 * grassW );\n" +
+          "        vg = mix( vg, base * vec3( 1.40, 0.76, 0.58 ), rut * 0.7 * grassW );\n" +
+          "        base = mix( base, vg, verge );\n" +
+          "        base = mix( base, gravel, grav );\n" +
+          "      }\n" +
+          "    }\n" +
+          "  }\n" +
+          "  vec3 gOut = base * det;\n" +
           // THE FAR CITY: where a metro stands, its own ground (streets,
           // blocks, lawns, lots, fields) replaces the country's; mipmapped,
-          // so kilometres off it averages instead of shimmering
+          // so kilometres off it averages instead of shimmering. Its lawns
+          // carry the same turf as the near tile (the atlas holds the
+          // turf's MEAN, the turf multiplier has mean 1)
           "  if ( uGndOpt.y > 0.5 && uGndCityN > 0.5 ) {\n" +
           "    vec4 cm = gndCity( xz );\n" +
           "    float cw = smoothstep( 0.12, 0.4, cm.a );\n" +
-          "    vec3 cc = cm.rgb * cm.rgb * ( 0.94 + 0.12 * m1 );\n" +
+          "    vec3 cc = cm.rgb * cm.rgb;\n" +
+          "    float cg = smoothstep( 1.15, 1.45, cc.g / max( cc.r, 1e-4 ) );\n" +
+          "    cc *= mix( vec3( 0.94 + 0.12 * m1 ), turf, cg );\n" +
           "    gOut = mix( gOut, cc, cw );\n" +
           "    gndLamp = vec3( 1.0, 0.62, 0.26 ) * smoothstep( 0.55, 1.0, cm.a ) * uGndNight * 0.55;\n" +
           "  }\n" +
@@ -796,7 +981,7 @@
           "}")
         .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\n  totalEmissiveRadiance += gndLamp;");
     };
-    mat.customProgramCacheKey = function () { return "cbzGroundSkin2"; };
+    mat.customProgramCacheKey = function () { return "cbzGroundSkin3" + (MAPS ? "m" : "p"); };
     return mat;
   };
 })();
