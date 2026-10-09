@@ -24,7 +24,7 @@
 <!-- styles, split by concern -->
 <link rel="stylesheet" href="css/base.css">
 <link rel="stylesheet" href="css/hud.css?v=jailside1001">
-<link rel="stylesheet" href="css/screens.css?v=nored0930">
+<link rel="stylesheet" href="css/screens.css?v=deathcam1009">
 <link rel="stylesheet" href="css/shark_title.css?v=nored0930">
 <link rel="stylesheet" href="css/mobile.css?v=neck1001b">
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
@@ -634,9 +634,9 @@ document.body.appendChild(b);}}catch(e){}})();
      drains his blood until someone wraps it or he bleeds out; state(a) is what
      cuffs, AI and HUD ask. Games plug in through CBZ.vitals.on(mode, hooks). -->
 <!-- CBZ.eyes: how a hurt body sees. No red screen anywhere: near death the
-     eyelids droop and the blinks drag, a hit is a flinch, out cold they shut. -->
-<script src="src/systems/eyes.js?v=nored0930"></script>
-<script src="src/systems/vitals.js?v=nored0930"></script>
+     a light red rim, grey colour and a heartbeat; the view never closes while alive (lids are for the dead). -->
+<script src="src/systems/eyes.js?v=deathcam1009"></script>
+<script src="src/systems/vitals.js?v=deathcam1009"></script>
 <script src="src/systems/verbs_pickup.js?v=w09290250"></script>
 <script src="src/entities/player.js?v=pf0930c"></script>
 <!-- Legacy down-state decals were REMOVED, not merely untagged (the file itself
@@ -652,7 +652,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/brain.js?v=armed1"></script>
 
 <!-- 4. systems — economy/quests load before actors that reference them -->
-<script src="src/systems/audio.js?v=nored0930"></script>
+<script src="src/systems/audio.js?v=deathcam1009"></script>
 <script src="src/systems/hud.js?v=nored0930"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
@@ -780,7 +780,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/prisonvoice.js?v=jailv1001"></script>
 <script src="src/systems/input.js"></script>
 <script src="src/systems/spatialgrid.js?v=pf0930v"></script>
-<script src="src/systems/camera.js?v=tui0929"></script>
+<script src="src/systems/camera.js?v=deathcam1009"></script>
 <script src="src/systems/physics.js?v=gnp0930"></script>
 <script src="src/systems/meshcollider.js?v=meshcol1"></script>
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
@@ -979,7 +979,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the disaster dock (survival_interact.js) and the prison (interact.js). -->
 <script src="src/systems/handverbs.js?v=jailv1001"></script>
 <script src="src/systems/survival_interact.js?v=jailv1001"></script>
-<script src="src/systems/survivalhud.js?v=nored0930"></script>
+<script src="src/systems/survivalhud.js?v=deathcam1009"></script>
 <!-- THE SEAM A TRANSPORT PLUGS INTO. Not multiplayer — the three things that
      have to be true before a transport is worth writing: every actor carries a
      stable id, the whole match serialises to one ArrayBuffer and back

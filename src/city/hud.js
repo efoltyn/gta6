@@ -15,9 +15,9 @@
        appears when the number changes, holds ~3 s, fades.
      • WANTED: no stars, no pill, no screen wash. The minimap's heat ring and
        the world: sirens, cruisers, the chopper, the roadblock.
-     • HEALTH: no bar, no hearts, NO RED SCREEN (owner, 2026-09-30: "the
+     • HEALTH: no bar, no hearts, no full red wash (owner, 2026-09-30: "the
        red, what does that even mean?"). Your body tells you: a flinch on
-       every hit, and near the end heavy eyelids, dragging blinks, loud
+       every hit, and near the end a light red rim, grey colour, a heartbeat, loud
        breath and a stagger (systems/eyes.js fed by systems/vitals.js).
      • AMMO is not this file: the one gauge every game draws (systems/fpsmode.js
        #ammo), only while a gun is in your hands.

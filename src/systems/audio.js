@@ -1520,6 +1520,32 @@
     return true;
   };
 
+  /* ---- A HURT MAN'S HEART (systems/eyes.js) -------------------------------
+     One lub-dub: two low sine thumps a short beat apart, louder the closer he
+     is to going under (k 0..1). The cue that replaced closing the eyes. */
+  CBZ.heartbeat = function (k) {
+    if (!ctx || !sfxBus || ctx.state !== "running") return false;
+    k = k < 0 ? 0 : k > 1 ? 1 : +k || 0;
+    const t0 = ctx.currentTime + 0.01;
+    const vol = 0.06 + 0.16 * k;
+    try {
+      for (let i = 0; i < 2; i++) {
+        const t = t0 + i * (0.30 - 0.08 * k);
+        const v = i ? vol * 0.7 : vol;
+        const o = ctx.createOscillator(); o.type = "sine";
+        o.frequency.setValueAtTime(i ? 66 : 58, t);
+        o.frequency.exponentialRampToValueAtTime(30, t + 0.14);
+        const gn = ctx.createGain();
+        gn.gain.setValueAtTime(0.0001, t);
+        gn.gain.exponentialRampToValueAtTime(v, t + 0.012);
+        gn.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+        o.connect(gn); gn.connect(sfxBus);
+        o.start(t); o.stop(t + 0.24);
+      }
+    } catch (e) { return false; }
+    return true;
+  };
+
   /* ---- THE HELD BREATH (2026-08-15) ---------------------------------------
      nuclearShock's duck is an impulse that schedules its own recovery; this
      is the other envelope the same pressure stage can make — a duck that

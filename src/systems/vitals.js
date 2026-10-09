@@ -22,7 +22,7 @@
      · BLOOD (0..1 of his volume). A bullet or a blade opens a BLEED whose rate
        depends on where it went in (a thigh artery empties a man in under a
        minute, a graze on the arm clots on its own). Blood drains; below 85%
-       he is weak and slow (the player's eyelids get heavy), below ~62% he collapses
+       he is weak and slow (the player sees the red rim and hears his heart), below ~62% he collapses
        unconscious, below ~48% he is dead of it. Only a truly lethal hit kills
        at once: the head, the heart, a body riddled with rounds.
 
@@ -74,7 +74,7 @@
 
   /* ---- the body's numbers ---- */
   const K = {
-    BLOOD_WEAK: 0.85,        // below this: weak, slow, the player's eyelids get heavy
+    BLOOD_WEAK: 0.85,        // below this: weak, slow, the player sees the red rim and hears his heart
     BLOOD_COLLAPSE: 0.62,    // below this: unconscious (hemorrhagic)
     BLOOD_WAKE: 0.68,        // above this again (and not pouring): comes round
     BLOOD_DEAD: 0.48,        // below this: dead of it
@@ -749,8 +749,8 @@
   /* ============================================================
      HOW CLOSE THE PLAYER IS TO THE END, AND WHAT HIS BODY DOES ABOUT IT.
      Owner, 2026-09-30: no red screen, ever ("what does that even mean?").
-     Near death is the body's own tells: the eyelids get heavy and the
-     blinks drag (systems/eyes.js), the breath gets loud, the legs go (a
+     Near death is the body's own tells: a light red rim, the colour drains and the
+     heart pounds (systems/eyes.js), the breath gets loud, the legs go (a
      stagger in the walk, slower), and the blood is on him (wounds.js).
      Every game's number counts: the blood this file keeps, and the hp the
      game keeps (the city's 200, everyone else's 100).
@@ -768,7 +768,7 @@
     const P = CBZ.player;
     if (!P || P.dead) return 0;
     const R = P._vt;
-    if (R && (R.koT > 0 || R.collapsed)) return 1;      // out cold: the lids are shut
+    if (R && (R.koT > 0 || R.collapsed)) return 1;      // out cold: the strongest cue (the view itself never closes on a living man)
     // awake, they never quite close: heavy, dragging, but you can still see
     return Math.max(R ? 0.9 * weak(R) : 0, 0.85 * hpLow());
   };

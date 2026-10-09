@@ -299,7 +299,7 @@ body.mode-gungame.state-playing #ggHud{ display:block; }
 }
 @keyframes ggEdge{ 0%{ opacity:0; } 15%{ opacity:1; } 100%{ opacity:0; } }
 
-/* low HP is NOT painted here: your eyelids get heavy (systems/eyes.js) */
+/* low HP is NOT painted here: systems/eyes.js owns the hurt rim */
 
 /* spawn protection: a cool shimmer at the screen edge */
 #ggHud .gg-shield{

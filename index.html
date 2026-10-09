@@ -15,7 +15,7 @@
 <!-- styles, split by concern -->
 <link rel="stylesheet" href="css/base.css">
 <link rel="stylesheet" href="css/hud.css?v=jailside1001">
-<link rel="stylesheet" href="css/screens.css?v=nored0930">
+<link rel="stylesheet" href="css/screens.css?v=deathcam1009">
 <link rel="stylesheet" href="css/shark_title.css?v=nored0930">
 <link rel="stylesheet" href="css/mobile.css?v=neck1001b">
 <link rel="stylesheet" href="css/dashboard.css?v=standing1">
@@ -658,9 +658,9 @@ document.body.appendChild(b);}}catch(e){}})();
      drains his blood until someone wraps it or he bleeds out; state(a) is what
      cuffs, AI and HUD ask. Games plug in through CBZ.vitals.on(mode, hooks). -->
 <!-- CBZ.eyes: how a hurt body sees. No red screen anywhere: near death the
-     eyelids droop and the blinks drag, a hit is a flinch, out cold they shut. -->
-<script src="src/systems/eyes.js?v=nored0930"></script>
-<script src="src/systems/vitals.js?v=nored0930"></script>
+     a light red rim, grey colour and a heartbeat; the view never closes while alive (lids are for the dead). -->
+<script src="src/systems/eyes.js?v=deathcam1009"></script>
+<script src="src/systems/vitals.js?v=deathcam1009"></script>
 <script src="src/systems/verbs_pickup.js?v=w09290250"></script>
 <script src="src/entities/player.js?v=pf0930c"></script>
 <script src="src/entities/coins.js"></script>
@@ -678,7 +678,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/entities/security.js"></script>
 
 <!-- 4. systems — economy/quests load before actors that reference them -->
-<script src="src/systems/audio.js?v=nored0930"></script>
+<script src="src/systems/audio.js?v=deathcam1009"></script>
 <script src="src/systems/hud.js?v=nored0930"></script>
 <script src="src/systems/economy.js?v=jailv1001"></script>
 
@@ -856,7 +856,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/spatialgrid.js?v=pf0930v"></script>
 <script src="src/systems/reality.js?v=support1"></script>
 <script src="src/systems/npcgrid.js?v=scale2"></script>
-<script src="src/systems/camera.js?v=tui0929"></script>
+<script src="src/systems/camera.js?v=deathcam1009"></script>
 <script src="src/systems/physics.js?v=gnp0930"></script>
 <script src="src/systems/meshcollider.js?v=meshcol1"></script>
 <!-- LADDERS (systems/climb.js): the one climb for every body; physics.js hands it the player while on one. -->
@@ -1091,7 +1091,7 @@ document.body.appendChild(b);}}catch(e){}})();
      the disaster dock (survival_interact.js) and the prison (interact.js). -->
 <script src="src/systems/handverbs.js?v=jailv1001"></script>
 <script src="src/systems/survival_interact.js?v=jailv1001"></script>
-<script src="src/systems/survivalhud.js?v=nored0930"></script>
+<script src="src/systems/survivalhud.js?v=deathcam1009"></script>
 <!-- THE SEAM A TRANSPORT PLUGS INTO. Not multiplayer — the three things that
      have to be true before a transport is worth writing: every actor carries a
      stable id, the whole match serialises to one ArrayBuffer and back
@@ -1101,7 +1101,7 @@ document.body.appendChild(b);}}catch(e){}})();
      nothing they need. ?cfg_SURVNET_V1=0 makes it inert. -->
 <script src="src/net/survnet.js?v=survnet1"></script>
 <!-- GUN GAME ladder HUD (mode-gated; shares #survBars with survival) -->
-<script src="src/systems/gungamehud.js?v=nored0930"></script>
+<script src="src/systems/gungamehud.js?v=deathcam1009"></script>
 
 <!-- 4d. CITY — open-world GTA-style mode (a third game mode). Additive:
      registers its own updaters (gated by game.mode==="city") and builds its
@@ -1698,8 +1698,8 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/explosives.js?v=mil0929"></script>
 <script src="src/systems/helditems.js?v=phone1001"></script>
 <script src="src/city/armored.js?v=deslop1"></script>
-<script src="src/city/death.js?v=nored0930"></script>
-<script src="src/city/camera.js?v=shouldergun2"></script>
+<script src="src/city/death.js?v=deathcam1009"></script>
+<script src="src/city/camera.js?v=deathcam1009"></script>
 <script src="src/city/ragdoll.js?v=neck1001"></script>
 <script src="src/city/leaderboard.js?v=rg0929"></script>
 <script src="src/city/zillow.js?v=fac1009"></script>
@@ -1865,10 +1865,10 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/gigs.js?v=w09290250y"></script>
 <script src="src/city/gigfleet.js?v=nodash1"></script>
 <script src="src/city/giglife.js?v=w09290250y"></script>
-<script src="src/city/hud.js?v=neck1001b"></script>
+<script src="src/city/hud.js?v=deathcam1009"></script>
 <!-- drinking/tipsy system (a sibling agent's file — provides CBZ.cityDrink;
      loads after shops.js/hud so it can hook the same HUD/economy surface) -->
-<script src="src/city/drinking.js?v=nored0930"></script>
+<script src="src/city/drinking.js?v=deathcam1009"></script>
 <script src="src/city/charpanel.js?v=onebar0930"></script>
 <!-- THE PHOTO BOOTH: one offscreen rig that photographs any body in the
      outfit it is ACTUALLY wearing (CBZ.cityMugshot). The hitman contract
@@ -2496,7 +2496,7 @@ document.body.appendChild(b);}}catch(e){}})();
      field, splash/wake FX. After core/quality.js so CBZ.onQualityChange exists
      at parse time; before core/loop.js so their updaters make the boot sort.
      No dependency on each other — any order among these three works. -->
-<script src="src/world/water_underwater.js?v=nored0930"></script>
+<script src="src/world/water_underwater.js?v=deathcam1009"></script>
 <script src="src/world/water_buoyancy.js?v=waterv2"></script>
 <!-- Roll and capsize. A shark can now put a boat on its beam ends and roll it
      over, and a hull that goes over stays over — inverted, keel up, its people

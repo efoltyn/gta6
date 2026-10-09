@@ -2069,8 +2069,8 @@
 
   // ---- low-air warning -----------------------------------------------------
   // Reads city/swim.js's meter through the published seam. No card, no toast,
-  // NO RED: as the air runs out the eyes close (systems/eyes.js), heavier and
-  // with dragging blinks, the way a body going under actually loses the light.
+  // as the air runs out the hurt cues build (systems/eyes.js: rim, grey, heart)
+  // and the view itself stays open: you always see.
   function breathVignette() {
     if (CFG.WATER_BREATH_HUD === false || !CBZ.citySwimState || !CBZ.eyes) return;
     const st = CBZ.citySwimState();
