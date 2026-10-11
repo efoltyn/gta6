@@ -115,11 +115,6 @@ async function measure(C, seed) {
   W.sb.__tacClock = () => Number(process.hrtime.bigint()) / 1e6;
   if (C.boom) realBoom(W);
   await H.settle();
-  // the cover field is laid out round the ground's own centre, between the two starts
-  if (W.boxes && W.boxes.length) {
-    const cx = H.G(W, "MAP.cx") || 0, cz = H.G(W, "MAP.cz") || 0;
-    for (const b of W.boxes) { b.minX += cx; b.maxX += cx; b.minZ += cz; b.maxZ += cz; b._g = null; }
-  }
   if (C.beasts) stubBeasts(W);
   const sb = W.sb, B = W.B();
   const G = (e) => H.G(W, e);
@@ -130,7 +125,10 @@ async function measure(C, seed) {
   const fs0 = sb.fireShot;
   sb.fireShot = function (m, tgt, r) {
     M.shots++;
-    if (!tgt || tgt.dead || tgt.fled || tgt.surrendered || tgt.downed || !sb.eyeLos(m, tgt)) M.blindShots++;
+    // a man down in cover putting rounds over the top (ai/squad.js blindFire)
+    // is doing it on purpose: counted, but not as a shot at nothing
+    if (m._blindShot) M.blindFire = (M.blindFire || 0) + 1;
+    else if (!tgt || tgt.dead || tgt.fled || tgt.surrendered || tgt.downed || !sb.eyeLos(m, tgt)) { M.blindShots++; if (m.vehicle) M.blindVeh = (M.blindVeh || 0) + 1; }
     else if (tgt.vehicle && !m.vehicle && tgt.def && tgt.def.stats && tgt.def.stats.armour && (tgt.def.stats.armour.side || 0) > 30) M.blindShots++;
     if (sb.mateInLane(m, tgt)) M.throughMate++;
     return fs0.apply(this, arguments);
@@ -219,6 +217,8 @@ async function measure(C, seed) {
     bunching: +(M.bunchS / Math.max(1, M.contactS) * 100).toFixed(1),   // % of samples
     oscillation: +(M.reversals / mm).toFixed(2),               // per man-minute
     blindShots: +(M.blindShots / Math.max(1, M.shots) * 100).toFixed(1),   // % of rounds
+    blindByVehicles: +((M.blindVeh || 0) / Math.max(1, M.shots) * 100).toFixed(1),   // ...of which a hull's guns
+    blindFire: M.blindFire || 0,                                     // deliberate, from cover
     throughMate: +(M.throughMate / Math.max(1, M.shots) * 100).toFixed(1),
     friendlyHits: M.friendlyHits,
     stuck: +(M.stuck / mm).toFixed(2),
@@ -230,7 +230,7 @@ async function measure(C, seed) {
 }
 
 const SEEDS = +((args.find((a) => a.startsWith("--seeds=")) || "--seeds=3").slice(8));
-const KEYS = ["exposedAdvance", "standShot", "bunching", "oscillation", "blindShots", "throughMate", "friendlyHits", "stuck", "idle", "roundsPerKill", "lineSilent", "secs"];
+const KEYS = ["exposedAdvance", "standShot", "bunching", "oscillation", "blindShots", "blindByVehicles", "blindFire", "throughMate", "friendlyHits", "stuck", "idle", "roundsPerKill", "lineSilent", "secs"];
 const rows = [];
 for (const C of CASES) {
   if (FILTER && !C.name.includes(FILTER)) continue;
@@ -254,7 +254,7 @@ for (const C of CASES) {
     if (r.err) { console.log(C.name + ": THREW " + r.err); continue; }
     console.log(C.name.padEnd(44) + " | " + r.outcomes.join("  |  "));
     console.log("    exposedAdvance " + r.exposedAdvance + "  standShot " + r.standShot + "  bunching " + r.bunching + "%  oscillation " + r.oscillation +
-      "  blindShots " + r.blindShots + "%  throughMate " + r.throughMate + "%  friendlyHits " + r.friendlyHits + "  stuck " + r.stuck + "  idle " + r.idle + "  rnds/kill " + r.roundsPerKill + (r.lineSilent ? "  lineSilent " + r.lineSilent + "%" : "") + "  (" + r.wall + " s)");
+      "  blindShots " + r.blindShots + "% (hulls " + r.blindByVehicles + "%, deliberate " + r.blindFire + ")  throughMate " + r.throughMate + "%  friendlyHits " + r.friendlyHits + "  stuck " + r.stuck + "  idle " + r.idle + "  rnds/kill " + r.roundsPerKill + (r.lineSilent ? "  lineSilent " + r.lineSilent + "%" : "") + "  (" + r.wall + " s)");
     if (r.tactics) console.log("    tactics " + JSON.stringify(r.tactics));
   }
 }

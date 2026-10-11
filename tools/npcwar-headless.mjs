@@ -185,15 +185,31 @@ function boot(url, opts) {
   const input = { keys: {}, down: {}, up: {}, mx: 0, mz: 0, wheel: 0, buttons: [false, false, false], clicked: [false, false, false], locked: false, enabled: true };
   input.isDown = (c) => !!input.keys[c]; input.pressed = (c) => !!input.down[c];
   input.axis = (n, p) => (input.keys[p] ? 1 : 0) - (input.keys[n] ? 1 : 0);
-  /* opts.boxes: a field of axis-aligned colliders ({minX,maxX,minZ,maxZ,y0,y1},
-     y relative to the ground under the box) so cover, sight and the walls can
-     be measured in node (tools/npcwar-ai-metrics.mjs). None by default. */
-  const BOX = (opts.boxes || []).map((b) => Object.assign({}, b));
-  const boxG = (b) => (b._g != null ? b._g : (b._g = heightAt((b.minX + b.maxX) / 2, (b.minZ + b.maxZ) / 2)));
+  /* opts.boxes: a field of axis-aligned colliders ({minX,maxX,minZ,maxZ,y0,y1})
+     laid out RELATIVE to the ground's centre (MAP.cx/cz) with y0/y1 over the
+     ground under each box, so cover, sight and the walls can be measured in
+     node (tools/npcwar-ai-metrics.mjs). They become world records — world x/z,
+     world heights, exactly microboot's colliders — the first time anything
+     asks, once the ground is raised. None by default. */
+  const BOXR = (opts.boxes || []).map((b) => Object.assign({}, b));
+  const BOX = [];
+  function boxesNow() {
+    if (BOX.length || !BOXR.length) return BOX;
+    let M = null;
+    try { M = vm.runInContext("typeof MAP !== 'undefined' ? MAP : null", sb); } catch (e) { M = null; }
+    if (!M || !M.groundAt) return BOX;
+    for (const r of BOXR) {
+      const b = Object.assign({}, r);
+      b.minX += M.cx || 0; b.maxX += M.cx || 0; b.minZ += M.cz || 0; b.maxZ += M.cz || 0;
+      const g = M.groundAt((b.minX + b.maxX) / 2, (b.minZ + b.maxZ) / 2);
+      b.y0 = (b.y0 || 0) + g; b.y1 = (b.y1 == null ? 50 : b.y1) + g;
+      BOX.push(b);
+    }
+    return BOX;
+  }
   function segBox3(ax, ay, az, bx, by, bz, b) {
     let t0 = 0, t1 = 1;
-    const g = boxG(b);
-    const lo = [b.minX, (b.y0 || 0) + g, b.minZ], hi = [b.maxX, (b.y1 == null ? 50 : b.y1) + g, b.maxZ];
+    const lo = [b.minX, b.y0, b.minZ], hi = [b.maxX, b.y1, b.maxZ];
     const a = [ax, ay, az], d = [bx - ax, by - ay, bz - az];
     for (let k = 0; k < 3; k++) {
       if (Math.abs(d[k]) < 1e-9) { if (a[k] < lo[k] || a[k] > hi[k]) return false; continue; }
@@ -205,15 +221,15 @@ function boot(url, opts) {
   }
   const boxQuery = (x, z, r, out) => {
     out = out || []; out.length = 0;
-    for (const b of BOX) if (x + r > b.minX && x - r < b.maxX && z + r > b.minZ && z - r < b.maxZ) out.push(b);
+    for (const b of boxesNow()) if (x + r > b.minX && x - r < b.maxX && z + r > b.minZ && z - r < b.maxZ) out.push(b);
     return out;
   };
   CBZ.micro = {
     boot() {}, onFrame(fn) { frameHooks.push(fn); }, input, pauseKey: "Space",
-    segmentBlocked: BOX.length ? (ax, ay, az, bx, by, bz) => { for (const b of BOX) if (segBox3(ax, ay, az, bx, by, bz, b)) return true; return false; } : () => false,
-    resolveCircle: BOX.length ? (p, r) => {
-      for (const b of BOX) {
-        if (b.y1 != null && b.y1 < 0.5) continue;
+    segmentBlocked: BOXR.length ? (ax, ay, az, bx, by, bz) => { for (const b of boxesNow()) if (segBox3(ax, ay, az, bx, by, bz, b)) return true; return false; } : () => false,
+    resolveCircle: BOXR.length ? (p, r, y) => {
+      for (const b of boxesNow()) {
+        if (y != null && b.y1 < y + 0.35) continue;          // a kerb is stepped over, as microboot's step height does
         const cx = Math.max(b.minX, Math.min(p.x, b.maxX)), cz = Math.max(b.minZ, Math.min(p.z, b.maxZ));
         let dx = p.x - cx, dz = p.z - cz, d = Math.hypot(dx, dz);
         if (d >= r) continue;
@@ -246,7 +262,7 @@ function boot(url, opts) {
   // run the page
   try { for (const s of PAGE_SCRIPTS) vm.runInContext(s.code, sb, { filename: s.name }); }
   catch (e) { return { err: e }; }
-  return { sb, CBZ, doc, posted, input, B: () => sb.__battle, frames: frameHooks, THREE, boxes: BOX };
+  return { sb, CBZ, doc, posted, input, B: () => sb.__battle, frames: frameHooks, THREE, boxes: boxesNow };
 }
 async function settle() { for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r)); }
 function run(W, secs, each) {
@@ -565,8 +581,11 @@ scenario(6, "calibration: the headless resolver against the page's own battle", 
 /* 7  DOES HOLDING THE LINE HELP THE MEN HOLDING IT? The same outnumbered army,
    once told to hold (the default now) and once in the old meeting engagement
    (?hold=0), on each open ground. Holding must not make them die faster:
-   the exchange (attackers killed per holder lost) is printed and held to
-   at least what the meeting engagement got. */
+   the exchange (attackers lost per holder lost) is printed and held to
+   at least what the meeting engagement got. A LOSS is a man out of the
+   fight — dead, fled or taken, or still running at the end — since the
+   squads (src/battle/ai/squad.js) break and fall back long before the last
+   man dies; a man is added to each side so a 6-0 is a number, not infinity. */
 scenario(7, "holding the line: the exchange, held v met", async () => {
   const CASES = [
     { g: "dunes", r: 60, b: 25, rt: "pro", bt: "pro" },
@@ -582,7 +601,8 @@ scenario(7, "holding the line: the exchange, held v met", async () => {
       await settle();
       run(W, 300);
       const T = W.sb.__battle.tally();
-      out[hold] = { win: T.winner, xr: T.dead.red / Math.max(1, T.dead.blue), rd: T.dead.red, bd: T.dead.blue, secs: Math.round(T.simT) };
+      const rl = T.dead.red + T.fled.red + T.routed.red, bl = T.dead.blue + T.fled.blue + T.routed.blue;
+      out[hold] = { win: T.winner, xr: Math.round((rl + 1) / (bl + 1) * 100) / 100, rLost: rl, bLost: bl, rd: T.dead.red, bd: T.dead.blue, secs: Math.round(T.simT) };
     }
     console.log("    " + c.g.padEnd(6) + (c.r + " " + c.rt + " attack " + c.b + " " + c.bt).padEnd(28) +
       " held: " + JSON.stringify(out["1"]) + "   met: " + JSON.stringify(out["0"]));

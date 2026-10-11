@@ -94,7 +94,7 @@
     CONTACT_HOLD: 6,                     // s a squad stays deployed after the last contact
     BOUND_MIN: 9, BOUND_MAX: 26, BOUND_T: 7.5,
     ENGAGE_PAD: 14,                      // past the guns' preferred band by this: keep bounding
-    PIN_SUPP: 0.72, PIN_OUT: 0.32, PIN_MIN_T: 2.5, PIN_LONG: 14,
+    PIN_SUPP: 0.58, PIN_OUT: 0.3, PIN_MIN_T: 2.5, PIN_LONG: 14,
     FALLBACK_MORALE: 0.36, FALLBACK_DIST: 32,
     FLANK_ODDS: 1.15, FLANK_MAX_T: 30, FLANK_ANG: 1.2,
     ASSAULT_D: 30, ASSAULT_ODDS: 1.7,
@@ -106,7 +106,10 @@
     BEAST_KEEP: 22,                      // m: the range a firing line holds off an animal
     SHOCK_LEADER: 0.28, SHOCK_DECAY: 0.04,
   };
-  const COST = { full: { n: 0, ms: 0 }, mid: { n: 0, ms: 0 }, far: { n: 0, ms: 0 }, squad: { n: 0, ms: 0 } };
+  const COST = { full: { n: 0, ms: 0 }, mid: { n: 0, ms: 0 }, far: { n: 0, ms: 0 }, squad: { n: 0, ms: 0 },
+    // the squad ticks again, by the squad's own tier
+    sqFull: { n: 0, ms: 0 }, sqMid: { n: 0, ms: 0 }, sqFar: { n: 0, ms: 0 } };
+  const SQ_COST = ["sqFull", "sqMid", "sqFar"];
   const STATS = { bounds: 0, flanks: 0, assaults: 0, pins: 0, fallbacks: 0, drills: 0, screens: 0,
     focusSwitch: 0, nades: 0, drags: 0, leadersLost: 0, surrendered: { red: 0, blue: 0 }, coverPosts: 0, foldPosts: 0, openPosts: 0 };
 
@@ -133,6 +136,8 @@
     const a = o.def.stats.armour || {};
     return (a.side || 0) > 30;
   }
+  // armour that can still kill you: a hull whose gun is knocked out is a hulk to walk past
+  function armedArmour(o) { return armoured(o) && !(o.vs && o.vs.firepower) && !o.dead && !o.routed; }
   function wclass(m) {
     if (m.launcher) return "at";
     const w = m.wid || "";
@@ -242,7 +247,7 @@
   const _cols = [];
   const _taken = [];
   let _foldBudget = 0;
-  const FOLDS = [3, 1, 0];          // fold searches per post assignment, by the squad's tier
+  const FOLDS = [2, 1, 0];          // fold searches per post assignment, by the squad's tier
   function coverCands(A, x, z, r) {
     const h = A.host;
     if (!h || !h.queryColliders) return [];
@@ -251,12 +256,16 @@
   }
   function hidePoint(c, tx, tz, A) {
     if (c.minX == null) return null;
-    const hgt = c.y1 == null ? 9 : (c.y1 - (c.y0 || 0));
-    if (hgt < 0.85 || (c.y0 || 0) > 1.2) return null;           // a kerb is not cover
     const w = c.maxX - c.minX, d = c.maxZ - c.minZ;
     if (w < 0.7 && d < 0.7) return null;                        // a post is not cover
     if (w > 60 || d > 60) return null;                          // a whole block: not a man's wall
     const cx = (c.minX + c.maxX) * 0.5, cz = (c.minZ + c.maxZ) * 0.5;
+    // colliders carry WORLD heights (microboot): measured from the ground under it
+    // (cached on the record: walls do not move, and dune ground is not cheap)
+    let gy = c._tacGy;
+    if (gy == null) gy = c._tacGy = A.host && A.host.groundAt ? A.host.groundAt(cx, cz) : 0;
+    const hgt = c.y1 == null ? 9 : c.y1 - gy, bot = c.y0 == null ? 0 : c.y0 - gy;
+    if (hgt < 0.85 || bot > 1.2) return null;                  // a kerb, or a balcony, is not cover
     let ax = cx - tx, az = cz - tz;
     const al = Math.hypot(ax, az);
     if (al < 0.001) return null;
@@ -317,6 +326,30 @@
     _taken.push(null, { px: dx, pz: dz });
     STATS.openPosts++;
     return { x: dx, z: dz, px: dx, pz: dz, low: true, kind: "open" };
+  }
+  /* THE LINE GOES WHERE THE COVER IS. Before a line is laid, its centre is
+     pulled toward the best cover within reach of it (boxes that would hide a
+     man from the threat, not nearer the threat than the centre by much):
+     a squad does not form up in the open twenty metres from a wall. */
+  const _pull = { x: 0, z: 0 };
+  function coverPull(A, ax, az, tx, tz, r) {
+    _pull.x = ax; _pull.z = az;
+    const cols = coverCands(A, ax, az, r);
+    if (!cols.length) return _pull;
+    const dT = Math.hypot(ax - tx, az - tz);
+    let sx = 0, sz = 0, sw = 0;
+    for (let i = 0; i < cols.length && i < 40; i++) {
+      const hp = hidePoint(cols[i], tx, tz, A);
+      if (!hp) continue;
+      const d = Math.hypot(hp.x - ax, hp.z - az);
+      if (d > r) continue;
+      const closing = dT - Math.hypot(hp.x - tx, hp.z - tz);
+      if (closing > 12) continue;                       // not a dash INTO the gun for a crate
+      const w = 1 / (4 + d + Math.max(0, closing) * 1.5);
+      sx += hp.x * w; sz += hp.z * w; sw += w;
+    }
+    if (sw > 0) { _pull.x = ax + (sx / sw - ax) * 0.7; _pull.z = az + (sz / sw - az) * 0.7; }
+    return _pull;
   }
   // posts for a group of men in a line across the threat axis, centred on (ax, az)
   function linePosts(A, S, group, ax, az, tx, tz, sp, wantCover) {
@@ -393,8 +426,14 @@
     }
     // ---- where it is, how hard it is being hit
     let cx = 0, cz = 0, sp = 0;
-    for (let i = 0; i < S.men.length; i++) { const m = S.men[i]; cx += m.pos.x; cz += m.pos.z; sp += Math.min(1.2, m.supp || 0); }
+    let pinnedN = 0;
+    for (let i = 0; i < S.men.length; i++) {
+      const m = S.men[i]; cx += m.pos.x; cz += m.pos.z; sp += Math.min(1.2, m.supp || 0);
+      if ((m.supp || 0) > 0.6) pinnedN++;
+    }
     S.cx = cx / S.alive; S.cz = cz / S.alive; S.supp = sp / S.alive;
+    // suppression is all-or-nothing per man: count the men it has put down
+    S.pinFrac = pinnedN / S.alive;
     platoonSlot(S, A, now);
     S.shock = Math.max(0, S.shock - K.SHOCK_DECAY * (now - (S.lastTick || now)));
     S.lastTick = now;
@@ -408,7 +447,7 @@
       if (m.sees) seen = true;
       const sc = threat(S, o, A);
       allS += sc; if (o.beast) beastS += sc;
-      if (armoured(o)) enemyArmour.push(o);
+      if (armedArmour(o)) enemyArmour.push(o);
       if (sc > bs) { bs = sc; best = o; }
       if (m.sees && sc > bvs) { bvs = sc; bestVis = o; }
     }
@@ -419,7 +458,7 @@
         const v = ev[i];
         if (v.dead || v.air) continue;
         const d = Math.hypot(v.pos.x - S.cx, v.pos.z - S.cz);
-        if (d < 260 && armoured(v)) { S.hasArmour = true; if (enemyArmour.indexOf(v) < 0) enemyArmour.push(v); }
+        if (d < 260 && armedArmour(v)) { S.hasArmour = true; if (enemyArmour.indexOf(v) < 0) enemyArmour.push(v); }
         if (d < 200) { const sc = threat(S, v, A); if (sc > bs) { bs = sc; best = v; } }
       }
     }
@@ -475,10 +514,11 @@
         task = holding ? "hold" : S.escort ? "screen" : dEnemy > band + K.ENGAGE_PAD ? "bound" : "fight";
       }
       if (holding && task !== "pinned" && task !== "fallback" && task !== "hold" && task !== "drill") task = "hold";
-      const pinned = S.supp > K.PIN_SUPP && !hunting;
+      // pinned: the fire on it is heavy, or half its men are flat under it
+      const pinned = (S.supp > K.PIN_SUPP || (S.pinFrac >= 0.4 && S.alive >= 2)) && !hunting;
       if (task !== "pinned" && pinned && task !== "fallback") task = "pinned";
       if (task === "pinned") {
-        if (S.supp < K.PIN_OUT) { S.pinOutT += now - (S.prevTick || now); if (S.pinOutT > 1.6) { task = holding ? "hold" : dEnemy > band + K.ENGAGE_PAD ? "bound" : "fight"; S.pinOutT = 0; } }
+        if (S.supp < K.PIN_OUT && S.pinFrac < 0.25) { S.pinOutT += now - (S.prevTick || now); if (S.pinOutT > 1.6) { task = holding ? "hold" : dEnemy > band + K.ENGAGE_PAD ? "bound" : "fight"; S.pinOutT = 0; } }
         else S.pinOutT = 0;
       }
       if (S.morale < K.FALLBACK_MORALE && !hunting && task !== "fallback" && (task !== "hold" || S.morale < K.FALLBACK_MORALE * 0.6)) {
@@ -496,15 +536,20 @@
         const dv = Math.hypot(v.pos.x - S.cx, v.pos.z - S.cz);
         if (dv < 120 && !(S.focus && !armoured(S.focus) && Math.hypot(S.focus.pos.x - S.cx, S.focus.pos.z - S.cz) < 60)) task = "fallback";
       }
-      // a bound ends in a fight only where the squad can SEE the enemy
-      if (task === "bound" && dEnemy <= band + K.ENGAGE_PAD * 0.4 && blind < 3) task = "fight";
+      // a bound ends in a fight only where the squad can SEE the enemy — and
+      // a squad that is SEEN and shot at inside its guns' reach does not keep
+      // running across the open to a better range: it goes down and fights
+      if (task === "bound" && blind < 3 && (dEnemy <= band + K.ENGAGE_PAD * 0.4 || (S.supp > 0.12 && dEnemy <= band * 2.1))) task = "fight";
       if (task === "bound" && dEnemy < 18 && blind > 3) task = "assault";      // blind and on top of them: go in
       if (task === "fight" && !holding) {
         if (hunting || A.enemyBroken(S.team)) task = "assault";
         // a base of fire that cannot see anything is not one: move to find the shot
         else if (blind > 5 && now - S.taskT > 4) task = "bound";
         else if (dEnemy < K.ASSAULT_D && odds > K.ASSAULT_ODDS && S.supp < 0.4) task = "assault";
-        else if (two && now - S.taskT > 6 && odds > K.FLANK_ODDS && S.supp < 0.45 && S.morale > 0.55 && dEnemy < band * 2.2) {
+        // a flank goes round an enemy that is FIXED (kept down by our fire),
+        // never round one that is free to turn and shoot the men in the open
+        else if (two && now - S.taskT > 6 && odds > K.FLANK_ODDS && S.supp < 0.45 && S.morale > 0.55 && dEnemy < band * 2.2 &&
+          S.focus && ((S.focus.supp || 0) > 0.35 || S.focus.stance === "prone" || S.focus.routed)) {
           task = "flank"; S.flankSide = pickFlankSide(S, A, tx, tz); S.flankFrom = { x: tx, z: tz };
         }
         else if (dEnemy > band + K.ENGAGE_PAD * 1.6 && S.supp < 0.35) task = "bound";
@@ -568,7 +613,10 @@
       if (m.dragTgt && (m.dragTgt.dead || !m.dragTgt.downed || m.dragTgt.cared)) m.dragTgt = null;
       m.task = manTask(S, m, now);
     }
-    if (A.clock) { COST.squad.n++; COST.squad.ms += A.clock() - t0; }
+    if (A.clock) {
+      const ms = A.clock() - t0, C = COST[SQ_COST[S.tier | 0] || "sqFull"];
+      COST.squad.n++; COST.squad.ms += ms; C.n++; C.ms += ms;
+    }
   }
 
   /* THE PLATOON: a side's squads fight SIDE BY SIDE, not one behind another
@@ -735,7 +783,8 @@
       // where it stands, slid toward its own sector of the side's front
       if (!S.anchor || S.postsDirty) {
         const sl = (S.latErr || 0) * 0.8, sd = S.depErr || 0;
-        S.anchor = { x: S.cx + (S.rx || 0) * sl + (S.fwdx || 0) * sd, z: S.cz + (S.rz || 0) * sl + (S.fwdz || 0) * sd };
+        const p = coverPull(A, S.cx + (S.rx || 0) * sl + (S.fwdx || 0) * sd, S.cz + (S.rz || 0) * sl + (S.fwdz || 0) * sd, tx, tz, 22);
+        S.anchor = { x: p.x, z: p.z };
       }
       if (S.postsDirty || !S.postedAt || now - S.postedAt > 10) {
         linePosts(A, S, S.men, S.anchor.x, S.anchor.z, tx, tz, sp, true);
@@ -792,7 +841,8 @@
             const sl = (S.latErr || 0) * 0.8, sd = S.depErr || 0;
             gx += (S.rx || 0) * sl + (S.fwdx || 0) * sd; gz += (S.rz || 0) * sl + (S.fwdz || 0) * sd;
           }
-          linePosts(A, S, movers, gx, gz, tx, tz, sp, true);
+          const p = coverPull(A, gx, gz, tx, tz, 16);
+          linePosts(A, S, movers, p.x, p.z, tx, tz, sp, true);
         }
         S.postsDirty = false;
       }

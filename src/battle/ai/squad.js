@@ -90,7 +90,7 @@ function tacFold(x, z, tx, tz) {
   }
   if (hullTokens < 1) return null;
   hullTokens--;
-  return hullDown(x, z, tx, tz);
+  return hullDown(x, z, tx, tz, 3);
 }
 
 /* ============================================================ THE TICK
@@ -161,7 +161,7 @@ function squadThink(m, thinkDt) {
   if (tgt && CBZ.combatIQ && CBZ.combatIQ.aimTick) CBZ.combatIQ.aimTick(m, tgt, thinkDt);
   if (tgt && !m.sees) {
     m.losBadT += thinkDt;
-    if (m.losBadT > 4.5) { m.tgt = tgt = null; m.losBadT = 0; }
+    if (m.losBadT > 6) { m.tgt = tgt = null; m.losBadT = 0; }
   } else m.losBadT = 0;
 
   // ---- reflexes before orders
@@ -177,9 +177,36 @@ function squadThink(m, thinkDt) {
     else { throwNade(m, o); }
   }
   if (task === "drag") return dragThink(m, S);
+  // THE ROCKET MAN HUNTS ARMOUR: a launcher whose mark is a vehicle does not
+  // sit on a post it cannot see the tank from. He works in toward a firing
+  // spot inside his range, angling off the line (a side shot, out of the
+  // turret's first arc), and stops and fires the moment he has it.
+  if (m.launcher && tgt && tgt.vehicle && !tacOut(tgt) && task !== "pinned" && task !== "withdraw") {
+    const dx = tgt.pos.x - m.pos.x, dz = tgt.pos.z - m.pos.z, d = Math.hypot(dx, dz) || 1;
+    if (!m.sees || d > 125) {
+      const side = (m.i & 1) ? 1 : -1, a = Math.atan2(dx, dz) + side * 0.45;
+      const step = Math.max(6, Math.min(18, d - 70));
+      m.target.set(m.pos.x + Math.sin(a) * step, 0, m.pos.z + Math.cos(a) * step);
+      m.slot = "rush";
+    } else { m.target.set(m.pos.x, 0, m.pos.z); m.slot = "fire"; }
+    m.atPost = false; m.inCover = false;
+    return true;
+  }
   if (task === "march") { marchSlot(m, S); return true; }
-  const p = m.post;
+  let p = m.post;
   if (!p) { marchSlot(m, S); return true; }
+  /* A POST IN THE OPEN ON GROUND THAT HAS FOLDS: the man's own reverse-slope
+     search (morale.js hullFor — per-man clock, global budget) finds the crest
+     nearest his post, and he fights from behind it instead. This is what a
+     held line on the dunes IS; the squad's own post search only has the
+     budget for a couple of folds per assignment. */
+  if (p.kind === "open" && MAP.terrainLos && tgt && !m.hunt &&
+      (task === "hold" || task === "fight" || task === "overwatch")) {
+    const hd = hullFor(m, tgt);
+    if (hd && Math.hypot(hd.x - p.x, hd.z - p.z) < 12) {
+      p = m.post = { x: hd.x, z: hd.z, px: hd.x, pz: hd.z, low: true, kind: "fold" };
+    }
+  }
   // the goal: his post (the peek spot is the cover cycle's, in stanceStep)
   let gx = p.x, gz = p.z;
   if (S.task === "fallback" && task === "overwatch") { gx = m.pos.x; gz = m.pos.z; }
@@ -451,6 +478,20 @@ function surrender(m) {
   emitWar("surrender", { team: m.team, id: m.id });
   return true;
 }
+/* A FIST FIGHT HE HAS LOST (systems/melee.js judged it: "yield" = hands up,
+   "flee" = he runs). The fighter layer only poses it; the page makes it
+   real — a prisoner, or a man routing like any other. melee.js asks. */
+function fistQuit(m) {
+  const q = m._vfS && m._vfS.quit;
+  if (q === "yield") return surrender(m);
+  if (q === "flee" && !m.routed) {
+    m.routed = true; m.routT = 0; m.routStall = 0; m.tgt = null; m.sees = false;
+    const foe = foeCentre(m);
+    m.routBest = Math.hypot(m.pos.x - foe.x, m.pos.z - foe.z);
+    return true;
+  }
+  return false;
+}
 // a broken man, cornered: does he put his hands up? (routCheck asks)
 function trySurrender(m) {
   if (!TAC.on || m.you) return false;
@@ -594,7 +635,7 @@ function tacMayFire(m, dist) {
   if (m.tgt && m.tgt.beast && dist < 70 && m.slot !== "panic" && m.slot !== "rush" && m.slot !== "dodge") return true;
   if (!FIRE_SLOTS[m.slot]) return false;
   // a pinned man fires little, and only when the fire on him slackens a hair
-  if (m.slot === "pinned" && ((m.supp || 0) > 1.0 || lcg() < 0.55)) { m.cool = Math.max(m.cool, 0.8); return false; }
+  if (m.slot === "pinned" && ((m.supp || 0) > 1.0 || lcg() < 0.35)) { m.cool = Math.max(m.cool, 0.6); return false; }
   return true;
 }
 /* STANCE: what he does with his body this sub-step. Returns true when the
@@ -620,7 +661,17 @@ function stanceStep(m, spd, sdt) {
     if (s === "push" && spd <= 0.1) { setStance(m, "crouch"); m.coverK = CROUCH_HIT; }
     return true;
   }
-  if (s === "crawl" || s === "pinned") { setStance(m, "prone"); m.coverK = 0.3; return true; }
+  if (s === "crawl") { setStance(m, "prone"); m.coverK = 0.3; return true; }
+  // a pinned SQUAD is not a squad of men with their faces in the sand: the
+  // ones the fire is actually on stay flat, the rest return what fire they
+  // can from the lowest stance that still has the line
+  if (s === "pinned") {
+    if (pinned || supp > 0.75 || spd > 0.1) { setStance(m, "prone"); m.coverK = 0.3; return true; }
+    const fs = m.fireStance || "crouch";
+    setStance(m, fs);
+    m.coverK = fs === "prone" ? 0.3 : fs === "crouch" ? CROUCH_HIT : 1;
+    return true;
+  }
   // at a post: fire / hold
   const p = m.post;
   if (p && m.inCover) {
@@ -745,6 +796,63 @@ function soldierRig(m) {
   if (m.downed && CBZ.soldier.wound && !m._woundSet) { m._woundSet = true; try { CBZ.soldier.wound(ch, "legs", 0.9); } catch (e) {} }
 }
 
+/* OVER, NOT ROUND: a man whose move is eaten by a LOW wall (a crate, a
+   sandbag line, a kerb wall: 0.4-1.3 m over the ground, under 1.8 m deep)
+   vaults it — hands on the top, legs over, down the far side — instead of
+   sliding along it on the detour (stepMan asks when the wall stops him).
+   The pose is entities/soldier.js's vault; the arc is its vaultArc. */
+const _vq = [], _vq2 = [];
+function tryVault(m, nx, nz) {
+  if (!TAC.on || m.beast || m.vehicle || m.downed || m.dragging || m.stance === "prone" || m.vault) return false;
+  const H = HOST || MAP;
+  if (!H || !H.queryColliders) return false;
+  const cols = H.queryColliders(m.pos.x + nx * 0.8, m.pos.z + nz * 0.8, 0.35, _vq) || [];
+  for (let i = 0; i < cols.length; i++) {
+    const c = cols[i];
+    if (c.minX == null) continue;
+    const cx = (c.minX + c.maxX) * 0.5, cz = (c.minZ + c.maxZ) * 0.5;
+    const gy = MAP.groundAt(cx, cz);
+    const top = (c.y1 == null ? 9 : c.y1) - gy;
+    if (top < 0.4 || top > 1.3) continue;
+    const thick = Math.abs(nx) * (c.maxX - c.minX) + Math.abs(nz) * (c.maxZ - c.minZ);
+    if (thick > 1.8) continue;
+    const bx = m.pos.x + nx * (thick + 1.5), bz = m.pos.z + nz * (thick + 1.5);
+    // the far side has to be ground he can stand on
+    const land = H.queryColliders(bx, bz, 0.45, _vq2) || [];
+    let blocked = false;
+    for (let k = 0; k < land.length; k++) {
+      const o = land[k];
+      if (H.colliderContains && H.colliderContains(o, bx, bz, 0.4) && (o.y1 == null ? 9 : o.y1) - MAP.groundAt(bx, bz) > 0.35) { blocked = true; break; }
+    }
+    if (blocked) continue;
+    const dur = 0.5 + top * 0.18;
+    m.vault = { t: 0, dur, ax: m.pos.x, az: m.pos.z, bx, bz, h: top };
+    m.yaw = Math.atan2(nx, nz);
+    if (m.group) m.group.rotation.y = m.yaw;
+    if (m.char && CBZ.soldier && CBZ.soldier.vault && camDist2(m.pos) < 120 * 120) {
+      try { CBZ.soldier.vault(m.char, { ledgeX: m.pos.x + nx * 0.6, ledgeZ: m.pos.z + nz * 0.6, top: gy + top, dirX: nx, dirZ: nz, span: thick, dur }); } catch (e) {}
+    }
+    TAC.vaults = (TAC.vaults || 0) + 1;
+    return true;
+  }
+  return false;
+}
+// one sub-step of a vault in progress (stepMan, before anything else moves him)
+function stepVault(m, sdt) {
+  const V0 = m.vault;
+  V0.t += sdt;
+  const u = Math.min(1, V0.t / V0.dur);
+  m.pos.x = V0.ax + (V0.bx - V0.ax) * u;
+  m.pos.z = V0.az + (V0.bz - V0.az) * u;
+  const arc = CBZ.soldier && CBZ.soldier.vaultArc ? CBZ.soldier.vaultArc(u, V0.h) : (V0.h + 0.12) * Math.sin(Math.PI * u);
+  m.pos.y = MAP.groundAt(m.pos.x, m.pos.z) + arc;
+  m.speed = Math.hypot(V0.bx - V0.ax, V0.bz - V0.az) / V0.dur;
+  if (u >= 1) {
+    m.vault = null; m.stuckT = 0; m.detourT = 0;
+    m.pos.y = MAP.bodyY(m, m.pos.x, m.pos.z);
+  }
+}
+
 /* DANGER CLOSE: is one of this side's own (standing, on foot) within r of a
    point? Asked before anything that explodes is aimed there: a rocket, a
    tank's HE round. One fine-grid query. */
@@ -766,6 +874,20 @@ function dangerClose(team, x, z, r) {
    do not leave it). Returns true when it has set the vehicle's goal. */
 function tacticsVehicle(u) {
   if (!TAC.on || u.air) return false;
+  /* A HULL WITH NO GUN IS OUT OF THE FIGHT. Its gun knocked out, a crew
+     does not sit in it on the line (and a war cannot end on a hulk nobody
+     can hurt and nothing in it can shoot): it pulls back toward its own
+     edge — off the field once it is clear, like a routed man. Immobilised
+     too, it is simply out of the fight where it sits. */
+  if (u.vs && u.vs.firepower) {
+    if (!u.routed) { u.routed = true; u.tgt = null; TAC.withdrawn = (TAC.withdrawn || 0) + 1; }
+    const h = tacHomeDir(u.team), foe = foeCentre(u);
+    if (!u.vs.mobility) u.target.set(u.pos.x + h.x * 60, 0, u.pos.z + h.z * 60);
+    else u.target.set(u.pos.x, 0, u.pos.z);
+    u.slot = "fallback";
+    if (Math.hypot(u.pos.x - foe.x, u.pos.z - foe.z) > FLEE_GAPS * (MAP.gap || 150)) u.fled = true;
+    return true;
+  }
   const S = u._escortBy;
   if (!S || S.task === "gone" || simT - (u._escortT || 0) > 3 || !S.alive) return false;
   const c = foeCentre(u);
@@ -787,7 +909,7 @@ function tacReset() {
   TAC.home = null; TAC.at = -1;
   for (let i = 0; i < TAC.nades.length; i++) { const N = TAC.nades[i]; if (N.mesh && N.mesh.parent) N.mesh.parent.remove(N.mesh); }
   TAC.nades.length = 0; TAC.captives.length = 0;
-  TAC.panics = TAC.dodges = TAC.downed = TAC.saved = TAC.booms = TAC.blind = TAC.paced = 0;
+  TAC.panics = TAC.dodges = TAC.downed = TAC.saved = TAC.booms = TAC.blind = TAC.paced = TAC.vaults = TAC.heldFire = 0;
   if (CBZ.battleTactics) CBZ.battleTactics.reset();
 }
 
@@ -797,6 +919,7 @@ function tacticsReadout() {
   const o = BT ? BT.stats() : {};
   o.panics = TAC.panics || 0; o.dodges = TAC.dodges || 0; o.downed = TAC.downed || 0; o.saved = TAC.saved || 0;
   o.booms = TAC.booms || 0; o.blind = TAC.blind || 0; o.paced = TAC.paced || 0;
+  o.vaults = TAC.vaults || 0; o.heldFire = TAC.heldFire || 0;
   o.tiers = { full: 0, mid: 0, far: 0 };
   for (let i = 0; i < men.length; i++) {
     const t = men[i].aiTier;

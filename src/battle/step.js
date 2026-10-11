@@ -50,6 +50,8 @@ function stepMan(m, sdt) {
   if (m.you) { stepYou(m, sdt); return; }
   // a man on the ground, wounded: he bleeds, crawls, waits for a mate (ai/squad.js)
   if (m.downed) { downedStep(m, sdt); return; }
+  // over a low wall: the vault owns him until his feet are down (ai/squad.js)
+  if (m.vault) { stepVault(m, sdt); return; }
   if (simT >= m.thinkAt) think(m, simT);
   if (m.fled) return;
   if (m.supp > 0) m.supp = Math.max(0, m.supp - sdt * SUPP_DECAY);
@@ -154,7 +156,9 @@ function stepMan(m, sdt) {
     CBZ.micro.resolveCircle(m.pos, m.rad || 0.5, m.pos.y, 1.8);
     const got = Math.hypot(m.pos.x - ox, m.pos.z - oz);
     const want = spd * sdt;
-    if (want > 0.001 && got < want * 0.25) {
+    if (want > 0.001 && got < want * 0.25 && !m.beast && tryVault(m, nx, nz)) {
+      // a low wall: over it, not round it
+    } else if (want > 0.001 && got < want * 0.25) {
       m.stuckT = (m.stuckT || 0) + sdt;
       if (PROBE) QUAL.wallSeconds += sdt;      // the wall-running metric, held near zero
       if (m.stuckT > 0.8) {
@@ -240,7 +244,8 @@ function stepMan(m, sdt) {
   if (may === false) return;
   if (m.launcher) {
     if (m.cool <= 0 && m.sees && dist > 16 && dist < (tgt.vehicle ? 140 : 95) &&
-        !dangerClose(m.team, tgt.pos.x, tgt.pos.z, 7.5)) {        // never onto his own men
+        !dangerClose(m.team, tgt.pos.x, tgt.pos.z, 11) &&              // never onto his own men,
+        !dangerClose(m.team, (m.pos.x + tgt.pos.x) / 2, (m.pos.z + tgt.pos.z) / 2, Math.min(11, dist * 0.3))) {   // nor over them
       const w = CBZ.weaponById(m.wid);
       fireRocket(m, tgt);
       if (m.mag <= 0) { m.reloadT = w.reloadTime || w.reload || 2; m.mag = 0; m.reloads++; gunLedger(m.wid).reloads++; soldierReload(m); }

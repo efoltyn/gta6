@@ -288,7 +288,7 @@
   const SURRENDER_P = { civ: 0.85, thug: 0.6, pro: 0.42, elite: 0.26, swat: 0.18 };
 
   function MOr() { return (CBZ.brain && CBZ.brain.morale) || null; }
-  function armyRec() { return { p0: 0, pNow: 0, men0: 0, morale: 1, shock: 0, alive: 0, routing: 0, fled: 0, broken: false, noFightT: 0 }; }
+  function armyRec() { return { p0: 0, pNow: 0, men0: 0, morale: 1, shock: 0, alive: 0, routing: 0, fled: 0, broken: false, noFightT: 0, down: 0 }; }
   function armyStep(A, F, dt) {
     const M = MOr();
     if (M && M.armyStep) return M.armyStep(A, F, dt, null);
@@ -458,12 +458,14 @@
       const hunting = { red: fR > 0 && fR >= Math.max(1, fB) * 3, blue: fB > 0 && fB >= Math.max(1, fR) * 3 };
       ["red", "blue"].forEach(function (team) {
         const Aa = A[team];
-        Aa.alive = 0; Aa.routing = 0; Aa.pNow = 0;
+        Aa.alive = 0; Aa.routing = 0; Aa.pNow = 0; Aa.down = 0;
         for (const m of men[team]) {
           if (m.dead || m.fled) continue;
+          // the page's wounded: out of the fight, no power, but not runners
+          if (m.down) { Aa.down++; continue; }
           Aa.alive++;
-          if (m.routed || m.down) Aa.routing++;          // the page counts its wounded out of the fight too
-          if (!m.down) Aa.pNow += m.w * (0.45 + 0.55 * clamp(0, 1, m.hp / m.maxHp));
+          if (m.routed) Aa.routing++;
+          Aa.pNow += m.w * (0.45 + 0.55 * clamp(0, 1, m.hp / m.maxHp));
         }
       });
       armyStep(A.red, A.blue, dt); armyStep(A.blue, A.red, dt);
@@ -492,13 +494,13 @@
             else if (m.routT > 40) { m.fled = true; fledN[team]++; }
           }
         }
-        if (Aa.alive > 0 && Aa.alive - Aa.routing <= 0) Aa.noFightT += dt; else Aa.noFightT = 0;
+        if (Aa.alive + Aa.down > 0 && Aa.alive - Aa.routing <= 0) Aa.noFightT += dt; else Aa.noFightT = 0;
       });
       // the win check: battle.html inFight()
       const inFight = function (team) {
         const Aa = A[team];
-        if (Aa.alive > 0 && Aa.alive - Aa.routing <= 0 && Aa.noFightT >= 5) return 0;
-        return Aa.alive;
+        if (Aa.alive + Aa.down > 0 && Aa.alive - Aa.routing <= 0 && Aa.noFightT >= 5) return 0;
+        return Aa.alive + Aa.down;
       };
       const r = inFight("red"), b = inFight("blue");
       if (r === 0 || b === 0) { winner = r > 0 ? "red" : b > 0 ? "blue" : null; break; }

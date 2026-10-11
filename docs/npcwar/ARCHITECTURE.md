@@ -73,6 +73,7 @@ change it only in coordination.
 | `src/battle/core/host.js` | `CBZ.battleHost`: the host interface (§8) | core |
 | `src/battle/core/store.js` | `CBZ.battleStore`: the unit store, typed arrays, one row per unit (§9) | performance / scale |
 | `src/battle/core/lod.js` | `CBZ.battleLod`: tier rules and budgets (§9) | performance / scale |
+| `src/battle/core/tactics.js` | `CBZ.battleTactics`: THE SQUAD BRAIN — fire teams, formations, tasks, posts, threat/focus, squad morale, per-tier cost ledger (§9b) | AI |
 
 ### The units
 | file | what | owner |
@@ -104,6 +105,7 @@ change it only in coordination.
 | `src/battle/ai/think.js` | one unit's decision (target, slot, cover) | AI |
 | `src/battle/ai/morale.js` | morale, stance, hull-down | AI |
 | `src/battle/ai/orders.js` | hold / advance, the centre of mass, the hunt | AI |
+| `src/battle/ai/squad.js` | the squad brain's page half: the adapter, the tick, `squadThink`, stances + the cover cycle, `soldierRig` (entities/soldier.js), the wounded, surrender, grenades, vaults, danger close, `tacticsVehicle` (§9b) | AI |
 | `src/battle/step.js` | one unit's body for one tick: locomotion, the strike bubble, the punch exchange | AI / melee / physics |
 | `src/battle/player.js` | YOU: taking over a man (and a crew seat) | player control |
 | `src/battle/camera/camera.js` | the director, follow, the point man | camera |
@@ -476,6 +478,52 @@ what is live today:
 
 ---
 
+## 9b. The squad brain (the AI's half of the tiers)
+
+Armed men fight as **squads** (the page's `squads[team][sq]`, ten men): a leader, two fire
+teams, and one task at a time decided on the squad's own clock. The brain is
+`src/battle/core/tactics.js` (`CBZ.battleTactics`, page-free: it reads unit fields and asks the
+world through an adapter `A` — Gang City hands it the city's); `src/battle/ai/squad.js` is NPC
+War's adapter and what each man does with the answer.
+
+- **Tasks** (`S.task`): `march` (column far off, wedge near, 4.5-6 m spacing), `bound` (one team
+  moves to the next cover while the other watches; swap), `fight` (a base of fire from posts),
+  `flank` (alpha fixes, bravo swings 70° round on the side with more cover), `assault`,
+  `pinned` (two in five of its men flat under fire: nobody moves until it slackens), `fallback` (to cover/a crest behind,
+  then `hold`), `hold` (the page's ORDER: each man on his own formed-up spot, snapped to cover),
+  `drill` (an animal: a firing line across its approach, reloads staggered), `screen` (riding a
+  friendly tank's rear quarters; the tank waits for its infantry: `tacticsVehicle`).
+- **Posts** (`m.post`): cover first (a collider between him and the threat, the hide point past
+  it; a tall wall gets a peek point at its edge), then the terrain's reverse slope (`hullDown`,
+  budgeted), then open ground. The line's centre is pulled toward the nearest cover before it is
+  laid. The **platoon**: a side's squads take sectors of one front, side by side (a second line
+  40 m back past 320 m of front).
+- **The man** (`squadThink`): the squad's focus if he can see it (≤60% of the guns; a man with a
+  closer or comparable mark keeps his), never rifle ball at armour, combat_iq's aim clocks, the
+  lowest stance with the shot, the cover cycle (down / up over or out round it / down to reload,
+  blind fire when the fire is too heavy), reflexes before orders (a grenade at his feet, an
+  animal charging him, panic only from real cues).
+- **Casualties are not only the dead**: a bad hit can put a man DOWN (`m.downed`: bleeding,
+  crawling, out of the fight; a mate drags him to cover, which stops the bleeding); a broken man
+  who is cornered may surrender (`m.surrendered`, counted with the fled); a beaten brawler yields
+  (systems/melee.js `quit`). `city/frontline.js`'s resolver models both (`WOUNDED_P`,
+  `SURRENDER_P`) and stays calibrated (`npcwar-headless.mjs 6`).
+- **Tiers**: every unit gets `m.aiTier` (0 FULL / 1 MID / 2 FAR) from `m.lod` when the scale
+  scheduler sets it, else the lens distance through `CBZ.battleLod.tierOf`. A MID man thinks on
+  `BUDGET.think.mid`, a FAR man on `.far`, with fewer sight lines per target search; the squad
+  ticks at `K.SQUAD_TICK[tier]` with fold searches `FOLDS[tier]` (FAR: none — its posts are the
+  line and open ground). `CBZ.battleTactics.COST` holds measured ms per tier (`full/mid/far` per
+  think, `sqFull/sqMid/sqFar` per squad tick); `__battle.tactics()` reads them with the tasks
+  fired and the counts above.
+- **Revert**: `?tac=old` turns the whole layer off (the old march column, combat_iq posture, the
+  old stance rules) in the same build — the before of every measurement.
+- **Measured**: `node tools/npcwar-ai-metrics.mjs` (seeded, node only): walking into fire in the
+  open, standing still being shot, bunching, oscillation, shots at nothing, rounds through a
+  mate, friendly hits, stuck, idle, a firing line going silent on an animal. `--old` is the
+  same cases with `?tac=old`.
+
+---
+
 ## 10. Checks: node only, no browser
 
 ```
@@ -487,6 +535,7 @@ node tools/npcwar-headless.mjs     the page's own sim in node: war room, hold, t
                                    series + URL.   node tools/npcwar-headless.mjs 3  runs one.
 node tools/units-kit-check.mjs     the animal kit: planted feet never slide; the dog bit for bit.
 node tools/front-sim.mjs           the city's front resolver (frontline.js) it is calibrated to.
+node tools/npcwar-ai-metrics.mjs   the soldiers' dumb-behaviour numbers (§9b); --old = ?tac=old.
 ```
 
 `tools/npcwar-headless.mjs` lifts the page's `src/battle` / `src/units` script tags out of

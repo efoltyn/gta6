@@ -15,8 +15,11 @@ function stepFists(m, tgt, dist, sdt) {
   if (!(dist < mr * 1.9 && CBZ.combatIQ && CBZ.combatIQ.melee)) return;
   // `incoming` is how a brawler reads the other man's windup and gets his
   // guard up — without it two NPCs never block each other
+  // quit: a beaten fighter gives up (hands up) or runs (systems/melee.js judge)
+  // and the page makes it count: a prisoner, or a man routing (ai/squad.js)
   const st = CBZ.combatIQ.melee(m, tgt, sdt,
-    { reach: mr, incoming: (tgt._windup || 0) > 0 || (tgt._iqM && tgt._iqM.st === "windup") });
+    { reach: mr, incoming: (tgt._windup || 0) > 0 || (tgt._iqM && tgt._iqM.st === "windup"), quit: TAC.on });
+  if (TAC.on && m._vfS && m._vfS.quit && fistQuit(m)) return;
   if (st !== "swing") return;
   /* AND IT MATTERS WHO HE IS HITTING. `m.punch` is a number off the THROWER
      and nothing else, so a civilian's fist used to take the same bite out of

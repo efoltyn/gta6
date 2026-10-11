@@ -339,13 +339,14 @@ function thinkVehicle(u) {
   if (u.air) return;
   // where to be: the weapon's standoff from the mark, else at the enemy
   const stand = S.standoff || 200;
+  // a tank leads its infantry, it does not leave it behind; a hull with no
+  // gun pulls out of the fight (ai/squad.js)
+  if (tacticsVehicle(u)) return;
   if (u.vs.mobility) { u.target.set(u.pos.x, 0, u.pos.z); u.slot = "hold"; return; }
   if (holding(u) && u.home) {
     u.target.set(u.home.x, 0, u.home.z); u.slot = "hold";
     return;
   }
-  // a tank leads its infantry, it does not leave it behind (ai/squad.js)
-  if (tacticsVehicle(u)) return;
   if (u.tgt && !u.tgt.dead) {
     const dx = u.tgt.pos.x - u.pos.x, dz = u.tgt.pos.z - u.pos.z, d = Math.hypot(dx, dz) || 1;
     // close threats (beasts, men with fists) get run at or run over; a

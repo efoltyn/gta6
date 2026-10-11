@@ -74,7 +74,7 @@ function manWeight(m) {
 }
 function armyRec() {
   return { p0: 0, pNow: 0, men0: 0, morale: 1, shock: 0, alive: 0, routing: 0,
-    fled: 0, broken: false, noFightT: 0, lastman: false, beasts: 0 };
+    fled: 0, broken: false, noFightT: 0, lastman: false, beasts: 0, down: 0 };
 }
 CBZ.npcwar.onBoot(function () {
   ARMY = { red: armyRec(), blue: armyRec() };
@@ -106,7 +106,7 @@ function updateMorale() {
   const dt = moraleT < 0 ? 0 : Math.max(0, Math.min(2, simT - moraleT));
   moraleT = simT;
   const R = ARMY.red, B = ARMY.blue;
-  R.alive = B.alive = R.routing = B.routing = R.beasts = B.beasts = 0;
+  R.alive = B.alive = R.routing = B.routing = R.beasts = B.beasts = R.down = B.down = 0;
   R.pNow = B.pNow = 0;
   for (let i = men.length - 1; i >= 0; i--) {
     const m = men[i];
@@ -128,11 +128,16 @@ function updateMorale() {
       }
       continue;
     }
+    /* A MAN ON THE GROUND (ai/squad.js: wounded, down) is out of the fight:
+       no power, and not one of the standing the break arithmetic counts —
+       but not a runner either (counting him as one too was the wounded
+       counted twice, and armies broke on their casualty lists) */
+    if (m.downed) { A.down++; continue; }
     A.alive++;
     if (m.beast || m.vehicle) A.beasts++;   // machines and animals do not do the arithmetic
-    if (m.routed || m.downed) A.routing++;       // a man on the ground is out of the fight too
+    if (m.routed) A.routing++;
     const hf = Math.max(0, Math.min(1, m.hp / (m.maxHp || 1)));
-    if (!m.downed) A.pNow += m._mw * (0.45 + 0.55 * hf);   // a man on the ground is no power
+    A.pNow += m._mw * (0.45 + 0.55 * hf);
   }
   ["red", "blue"].forEach(function (t) {
     const A = ARMY[t], F = ARMY[t === "red" ? "blue" : "red"];
@@ -144,7 +149,7 @@ function updateMorale() {
     const ev = MO.armyStep(A, F, dt, _armyOpts(bench || (A.alive && A.beasts === A.alive)));
     if (ev) emitWar(ev, { team: t });
     // nobody left fighting: the clock the win check reads
-    if (A.alive > 0 && A.alive - A.routing <= 0 && spawnQueue.length === 0) A.noFightT += dt;
+    if (A.alive + (A.down || 0) > 0 && A.alive - A.routing <= 0 && spawnQueue.length === 0) A.noFightT += dt;
     else A.noFightT = 0;
   });
 }
@@ -319,14 +324,16 @@ const HULL_R0 = 2.5, HULL_R1 = 20, HULL_STEP = 2.2;
 const HULL_CROUCH_EYE = 1.0, HULL_STAND_EYE = 1.55, HULL_BEHIND = 0.7;
 const HULL_RATE = 60;          // searches per sim-second, whole field
 let hullTokens = 20, hullTokT = 0, hullQ = 0, hullHit = 0;
-function hullDown(x, z, tx, tz) {
+// nb: how many of the bearings to try (a squad's post search asks the three
+// nearest straight back; a rattled man's own search asks all seven)
+function hullDown(x, z, tx, tz, nb) {
   const gA = MAP.groundAt;
   const ty = gA(tx, tz) + HULL_STAND_EYE;
   const away = Math.atan2(x - tx, z - tz);
   const dThreat = Math.hypot(x - tx, z - tz);
   hullQ++;
   let best = null, bs = 1e9;
-  for (let ai = 0; ai < HULL_BEARINGS.length; ai++) {
+  for (let ai = 0, an = Math.min(HULL_BEARINGS.length, nb || 99); ai < an; ai++) {
     const ang = away + HULL_BEARINGS[ai];
     const sa = Math.sin(ang), ca = Math.cos(ang);
     let lo = -1, hi = -1;
