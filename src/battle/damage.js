@@ -18,6 +18,9 @@ CBZ.npcwar.onBoot(function () {
       return out;
     },
     hurt: function (a, dmg, imp) { hurtMan(a, dmg, imp || {}); return true; },
+    // a detonation is pressure and impulse by distance, on this roster's
+    // real masses: src/battle/physics.js blastBodies
+    blast: function (x, y, z, R, power, opts) { return blastBodies(x, y, z, R, power, opts); },
     hurtPlayer: function () { return true; },   // nobody IS the player here
     route: "npcwar roster + hurtMan",
   });

@@ -40,12 +40,15 @@ function beastDeathPhysics(m, imp) {
   const grp = m.group;
   if (!grp) return "none";
   if (DEATH_OLD) { m.dieT = 0.0001; return "topple"; }
+  if (MAP.water && floatCorpse(m)) return "float";
   // WHICH WAY IT GOES OVER. A body does not fall over its own facing, it
-  // falls away from whatever hit it: the shooter's line if we have one, the
-  // blast centre if we have that, else the direction it was already going.
+  // falls away from whatever hit it: the way the killing blow pushed it if
+  // that is known (a charge, a hull, a blast), the shooter's line if we have
+  // one, the blast centre if we have that, else the way it was going.
   let dx = 0, dz = 0;
   const by = imp && imp.by;
-  if (by && by.pos) { dx = m.pos.x - by.pos.x; dz = m.pos.z - by.pos.z; }
+  if (imp && (imp.dvx || imp.dvz)) { dx = imp.dvx; dz = imp.dvz; }
+  else if (by && by.pos) { dx = m.pos.x - by.pos.x; dz = m.pos.z - by.pos.z; }
   else if (imp && imp.fromX != null) { dx = m.pos.x - imp.fromX; dz = m.pos.z - imp.fromZ; }
   const dl = Math.hypot(dx, dz);
   if (dl > 0.01) { dx /= dl; dz /= dl; }
@@ -59,7 +62,17 @@ function beastDeathPhysics(m, imp) {
   // ENERGY. A rocket throws a wolf; a pistol round folds it where it stands.
   // The solver's band is 1..30 (~6 a pistol, ~14 a shotgun, 20+ a blast).
   const cause = imp && imp.cause;
-  const energy = cause === "bomb" ? 24 : (by && by.beast) ? 9 : 11;
+  let energy = cause === "bomb" ? 24 : (by && by.beast) ? 9 : 11;
+  /* AND HOW HARD IS MOMENTUM, when the blow had any: the solver divides its
+     kick by the square root of its own mass proxy (scale² x 1.7), so the
+     speed the blow left the body with comes back out of it as that speed. A
+     bull a tank hit at 12 m/s goes over hard; a rabbit a grenade lifted
+     flies; a rifle round still folds an elk where it stands. */
+  const dv = deathDv(m, imp);
+  if (dv > 1) {
+    const sc = (grp.scale && grp.scale.x > 0.05) ? grp.scale.x : 1;
+    energy = Math.max(energy, Math.min(30, dv / 0.12) * Math.sqrt(Math.max(0.6, sc * sc * 1.7)));
+  }
   if (CBZ.quadRagdoll) {
     try {
       if (CBZ.quadRagdoll(m, { point: _kpt, dir: _kdir, imp: energy })) {
@@ -100,9 +113,11 @@ function beastDeathPhysics(m, imp) {
    is left when it declines (budget full, too far, no rig). */
 function manDeathPhysics(m, imp) {
   if (DEATH_OLD || !m.group || !m.char) { m.dieT = 0.0001; return "topple"; }
+  if (MAP.water && floatCorpse(m)) return "float";
   let dx = 0, dz = 0;
   const by = imp && imp.by;
-  if (by && by.pos) { dx = m.pos.x - by.pos.x; dz = m.pos.z - by.pos.z; }
+  if (imp && (imp.dvx || imp.dvz)) { dx = imp.dvx; dz = imp.dvz; }
+  else if (by && by.pos) { dx = m.pos.x - by.pos.x; dz = m.pos.z - by.pos.z; }
   else if (imp && imp.fromX != null) { dx = m.pos.x - imp.fromX; dz = m.pos.z - imp.fromZ; }
   const dl = Math.hypot(dx, dz);
   if (dl > 0.01) { dx /= dl; dz /= dl; }
@@ -124,6 +139,11 @@ function manDeathPhysics(m, imp) {
   else if (by && by.beast) energy = 9;                    // teeth: a maul, not a round
   else if (by && by.fists) energy = 4;                    // a fist drops you where you stand
   else if (w) energy = w.pellets ? 15 : Math.max(5, Math.min(13, (w.damage || 20) * 0.35));
+  // momentum, when the blow had any: the solver gives ~0.12 m/s per unit
+  // (city/ragdoll.js kick), so a man a tank or a blast left at 9 m/s is
+  // thrown at 9 m/s and not at a pistol's 0.5
+  const dv = deathDv(m, imp);
+  if (dv > 1) energy = Math.max(energy, Math.min(34, dv / 0.12));
   if (CBZ.cityRagdoll) {
     try {
       if (CBZ.cityRagdoll(m, _kpt, _kdir, energy)) {
@@ -194,6 +214,7 @@ function retireOldestCorpse() {
   // hand the solver its slot back before the body starts sinking, or a
   // frozen pose keeps a slot a live death could have used — and the solver
   // would go on writing this group's transform against the sink.
+  if (old._wf) { try { old._wf.release(); } catch (e) {} old._wf = null; }
   if (CBZ.quadRagdollDrop) { try { CBZ.quadRagdollDrop(old); } catch (e) {} }
   if (CBZ.ragdollDrop) { try { CBZ.ragdollDrop(old); } catch (e) {} }
   if (old.ragdoll) { old.ragdoll = false; deadSolving = Math.max(0, deadSolving - 1); }
@@ -208,4 +229,48 @@ function stepSinking(dt) {
     s.g.position.y -= dt * s.h * 0.55;
     if (s.t > 2.2) { CBZ.studio.drop(s.g); sinking.splice(i, 1); }
   }
+}
+
+/* ============================================================ THE DEAD IN THE WATER
+   On OPEN WATER a body that dies is not a ragdoll on a floor: the "floor"
+   there is the swell, and a corpse rigidly lying ON a wave is a plank on a
+   trampoline. It goes to world/water_float.js instead (the one float block
+   every game's boats, wrecks and corpses ride), with its own buoyancy:
+
+     a man          floats awash face down, waterlogs and goes under in ~40 s
+                    (lungs: nearly neutral, slightly heavy)
+     sharks         no swim bladder and no lungs: they sink straight away
+     whales, orcas,
+     dolphins,seals blubber: they float on their side and stay up
+     other fish     the swim bladder: belly up at the surface
+     land animals   lungs and fat: they float, and very slowly waterlog
+
+   Returns false when the float block is not on the page (then the solver
+   takes the body as before). */
+const SINKERS = /shark|megalodon|ray|sawfish/;
+const BLUBBER = /orca|whale|dolphin|porpoise|seal|sea_lion|walrus|manatee|dugong|otter/;
+function floatCorpse(m) {
+  if (!CBZ.waterFloat || !m.group) return false;
+  // the float block asks three questions of the world; on this map the
+  // answers are "everywhere", "the swell" and "the bed" (sea.js)
+  if (!CBZ.cityWaterAt) CBZ.cityWaterAt = function () { return !!(MAP && MAP.water); };
+  if (!CBZ.waterModeOn) CBZ.waterModeOn = function () { return !!(MAP && MAP.water); };
+  if (!CBZ.cityWaterDepthAt) CBZ.cityWaterDepthAt = function () { return typeof SEA !== "undefined" && SEA.seabed != null ? -SEA.seabed : 14; };
+  const id = (m.species && m.species.id) || "";
+  let buoy = 1, log = 0, tilt = Math.PI / 2, ride = -0.1;
+  if (!m.beast) { log = 0.02; }
+  else if (SINKERS.test(id)) { buoy = 0.1; }
+  else if (BLUBBER.test(id)) { buoy = 1.15; ride = -0.25; }
+  else if (m.species && m.species.aquatic) { tilt = Math.PI; ride = -0.05; }
+  else { log = 0.004; ride = -0.3; }
+  let h = null;
+  try {
+    h = CBZ.waterFloat(m, { len: m.bodyL || 1.8, beam: Math.max(0.4, m.bodyW || 0.5), buoy: buoy, waterlog: log,
+      ride: ride, baseTilt: tilt, keepDead: true, kind: "corpse",
+      heading: m.beast ? function () { return -(m.heading || 0); } : null });
+  } catch (e) { h = null; }
+  if (!h) return false;
+  m._wf = h;
+  m.dieT = 0;
+  return true;
 }

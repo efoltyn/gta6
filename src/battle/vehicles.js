@@ -393,10 +393,11 @@ function stepVehicle(u, sdt) {
       const shoot = u.tgt && !u.tgt.dead && u.sees;
       const halt = crew <= 1 && shoot && u._wantShot;
       vehDriveTo(u, sdt, halt);
-      vehCrush(u, sdt);
       vehFight(u, sdt);
     }
   }
+  // what the hull runs into is physics, whoever is driving it
+  if (!u.air) vehCrush(u, sdt);
   vehAnimate(u, sdt);
 }
 function thinkVehicle(u) {
@@ -530,22 +531,69 @@ function vehMove(u, sdt, ctrl) {
   u.yaw = u.h + u.tur.yaw;
   u.heading = u.h;
 }
-// a hull at speed does not stop for a man in the way
+/* A HULL AT SPEED MEETS WHAT IS IN ITS WAY, AND THAT IS A COLLISION.
+
+   This was `speed x 9 x min(4, mass / 15000)` off any body in front of the
+   nose, the same number for a man and an elephant, and the hull never knew
+   it had hit anything. Now it is momentum (src/battle/physics.js):
+
+     the face: the closing speed along the travel is an impact,
+               J = (1 + e) v M m / (M + m). The body takes J / m along the
+               nose (a man in front of a 60 t tank at 10 m/s leaves at 12 m/s
+               and is thrown; a bull elephant in front of a 2.5 t Humvee at
+               15 m/s takes 5 m/s and a wound), the HULL takes J / M off its
+               own speed (the tank does not notice; the Humvee stops dead).
+               The injury is the velocity change (impactDmg).
+     under:    a body the hull outweighs 12 to 1 that is down (knocked over,
+               or the face just put it there) is not pushed out of the
+               footprint (pushVehicle stands down) and the running gear goes
+               over it: tracks carry the whole weight on a man, wheels part.
+     the dead: a man the strike kills is handed to city/carstrike.js through
+               CBZ.ragdollStrike, so the hull's real profile drives his body
+               (the bumper, the wrap, the throw, the wheels over him). */
 const _vn = [];
 function vehCrush(u, sdt) {
-  if (u.speed < 2.5) return;
-  const a = fineNear(u.pos.x, u.pos.z, u.vlen + 1, _vn);
+  if (u.air || u.speed < 1.2) return;
+  const v = u.ds.v, sgn = v >= 0 ? 1 : -1;
+  const a = fineNear(u.pos.x, u.pos.z, u.vlen + 2.5, _vn);
   const fx = Math.sin(u.h), fz = Math.cos(u.h);
+  const kv = u._mass || 10000;
   for (let k = 0; k < a.length; k++) {
     const o = a[k];
-    if (o === u || o.dead || o.vehicle || o.air) continue;
+    if (o === u || o.dead || o.vehicle || o.air || o.fled || o._tossed || o._apeHeld) continue;
     const rx = o.pos.x - u.pos.x, rz = o.pos.z - u.pos.z;
-    const along = rx * fx + rz * fz, across = rx * fz - rz * fx;
-    if (along < u.vlen * 0.2 || along > u.vlen + (o.rad || 0.45) || Math.abs(across) > u.vwid) continue;
+    const along = (rx * fx + rz * fz) * sgn, across = rx * fz - rz * fx;
+    const r = o.rad || 0.45;
+    if (Math.abs(across) > u.vwid + r * 0.6 || along > u.vlen + r + 0.15 || along < -u.vlen) continue;
     if ((o._crushT || 0) > simT) continue;
-    o._crushT = simT + 0.6;
-    const mk = Math.min(4, u._mass / 15000);
-    hurtMan(o, u.speed * 9 * mk, { by: u, cause: "crush" });
+    const kb = bodyKg(o);
+    if (along > u.vlen * 0.55) {
+      const vrel = Math.abs(u.ds.v) - ((o._vx || 0) * fx + (o._vz || 0) * fz) * sgn;
+      if (vrel < 1.2) continue;
+      o._crushT = simT + 0.5;
+      const J = (1 + RESTITUTION) * vrel * kv * kb / (kv + kb);
+      const dvb = J / kb;
+      u.ds.v -= sgn * Math.min(Math.abs(u.ds.v), J / kv);
+      u.speed = Math.abs(u.ds.v);
+      // along the nose, and a little to the side he was already on
+      const sx = across >= 0 ? 0.22 : -0.22;
+      const dvx = (fx * sgn + fz * sx) * dvb, dvz = (fz * sgn - fx * sx) * dvb;
+      PHYS.audit.impacts++;
+      if (dvb > PHYS.audit.maxDv) PHYS.audit.maxDv = dvb;
+      hurtMan(o, impactDmg(o, dvb), { by: u, cause: "crush", J: J, dvx: dvx, dvz: dvz, fromX: u.pos.x, fromZ: u.pos.z });
+      if (!o.dead) addKnock(o, dvx, dvz, u, { vy: kb < 450 && dvb > 5 ? dvb * 0.3 : 0 });
+      else if (o.ragdoll && CBZ.ragdollStrike && CBZ.carStrike) {
+        try { CBZ.ragdollStrike(o, hullForStrike(u), { x: o.pos.x, y: o.pos.y + 0.9, z: o.pos.z }); } catch (e) {}
+      }
+    } else if (kb * 12 < kv && knockedDown(o)) {
+      // under the running gear
+      o._crushT = simT + 0.5;
+      PHYS.audit.crushes++;
+      const hp = (o.maxHp > 0 && o.maxHp < 1e8) ? o.maxHp : 100;
+      const tracked = u.def && u.def.drive === "tracked";
+      const share = tracked ? 1.2 : Math.min(1, 0.25 + kv / 20000);
+      hurtMan(o, hp * share, { by: u, cause: "crush", fromX: u.pos.x, fromZ: u.pos.z });
+    }
   }
 }
 
@@ -1285,7 +1333,11 @@ function pushVehicle(m, o, k) {
     return;
   }
   const v = m.vehicle ? m : o, b = m.vehicle ? o : m;
-  if (b._apeHeld || b._apeFlying) return;
+  if (b._apeHeld || b._apeFlying || b._tossed) return;
+  const kb = bodyKg(b), kv = v._mass || 10000;
+  // a body down in front of a hull that outweighs it 12 to 1 goes UNDER it
+  // (vehCrush runs the gear over him); a standing one is put outside
+  if (kb * 12 < kv && v.speed > 0.5 && knockedDown(b)) return;
   const fx = Math.sin(v.h), fz = Math.cos(v.h);
   const rx = b.pos.x - v.pos.x, rz = b.pos.z - v.pos.z;
   const along = rx * fx + rz * fz, across = rx * fz - rz * fx;
@@ -1296,6 +1348,14 @@ function pushVehicle(m, o, k) {
   let nx, nz, amt;
   if (pa < pc) { const s = along >= 0 ? 1 : -1; nx = fx * s; nz = fz * s; amt = pa; }
   else { const s = across >= 0 ? 1 : -1; nx = fz * s; nz = -fx * s; amt = pc; }
+  /* BY MASS, like every other contact: a man is put all the way out (the
+     hull's share is under a percent and it keeps its line, exactly as
+     before), a bull elephant leaning on a Humvee moves the Humvee. */
+  const shareV = kb / (kb + kv);
+  if (shareV > 0.02 && !v.air) {
+    v.pos.x -= nx * amt * shareV; v.pos.z -= nz * amt * shareV;
+    amt *= 1 - shareV;
+  }
   b.pos.x += nx * amt; b.pos.z += nz * amt;
   b.resT = 0;
   sepFixed++;
