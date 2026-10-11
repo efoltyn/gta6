@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "34897396303a02165da6b9d830b35e6b4e2d2a77",
-  "createdAt": "2026-10-11T06:32:56.326Z",
+  "sourceCommit": "7c06be0237d91c86d37c996cad0a6a508ee07add",
+  "createdAt": "2026-10-11T06:33:58.148Z",
   "fileCount": 1331,
-  "totalBytes": 48967647,
+  "totalBytes": 49010659,
   "files": [
     {
       "file": "src/battle/ai/morale.js",
@@ -3413,8 +3413,8 @@
     },
     {
       "file": "src/units/kit/vehicle.js",
-      "bytes": 4718,
-      "sha256": "5a097686451e203c7b2598681ec5c6ca97929247adabb77c23f9d76a1bfcff9a"
+      "bytes": 4817,
+      "sha256": "280f19b8801dabcfc2a0539f87ca1c430aadadae60e0a5a5facc496d06d2365e"
     },
     {
       "file": "src/units/manifest.js",
@@ -3718,8 +3718,8 @@
     },
     {
       "file": "src/units/vehicles/m1_abrams.js",
-      "bytes": 1168,
-      "sha256": "4e1b760f8904144be353f1aec6e17f1d8f24d2a2d4fda6d3e2a94d1ef276568c"
+      "bytes": 44071,
+      "sha256": "e82c3af369203cc6121a7966a4360075a26d1f1285754773d7c043669fd730eb"
     },
     {
       "file": "src/units/vehicles/m270_mlrs.js",
@@ -6578,8 +6578,8 @@
     },
     {
       "file": "games/battle.html",
-      "bytes": 12832,
-      "sha256": "712c581c64203888e563aa6223781b6cda49f6a5ca1cb661e043f17fb08440f5"
+      "bytes": 12838,
+      "sha256": "e47f599543eccc954782ad9a4504239c392f30b9e8ce33bbc2207b65b3960ccf"
     },
     {
       "file": "games/bomb-survivor-scene.js",
@@ -6588,8 +6588,8 @@
     },
     {
       "file": "games/bomb-survivor.html",
-      "bytes": 75915,
-      "sha256": "27fba295e7deeb2f2e32ec684138d422ea9c0c1ede24404ff8bdb7dc410a5e77"
+      "bytes": 75917,
+      "sha256": "bce26db5de01c3c1ac9e003ae29d67e1fc617de703e785544438f384a2e05d6e"
     },
     {
       "file": "games/dev.html",
@@ -6608,8 +6608,8 @@
     },
     {
       "file": "games/warlord.html",
-      "bytes": 73709,
-      "sha256": "24068340ef3c24d03a0ef80aa9ee25da2934a37b0e2d67f213ae4d1a921e4374"
+      "bytes": 73711,
+      "sha256": "64ace581ef5900bf45ca38f8a0af3ec291c50d0fa0989c3529e93fb4e6801287"
     },
     {
       "file": "thumbs/shark-sim.jpg",
