@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "ec11d5022838d380def07dd0540cf94c573fde6c",
-  "createdAt": "2026-10-11T07:18:16.808Z",
-  "fileCount": 1340,
-  "totalBytes": 49360090,
+  "sourceCommit": "ef5457816279d0b87e56a03aecf337900ada8af2",
+  "createdAt": "2026-10-11T12:52:29.256Z",
+  "fileCount": 1341,
+  "totalBytes": 49624410,
   "files": [
     {
       "file": "src/battle/ai/morale.js",
@@ -273,8 +273,8 @@
     },
     {
       "file": "src/battle/vehicles.js",
-      "bytes": 40596,
-      "sha256": "1ba929e2bac0c64ff18fa9757adace63b46eda644058e3ec7f47e6905fbd7d77"
+      "bytes": 42020,
+      "sha256": "1eb270e9467311b1b595898e51457255f13a2ccdd06034529f470aa7a5943418"
     },
     {
       "file": "src/bootstrap.js",
@@ -3427,6 +3427,11 @@
       "sha256": "7dec3d4995a3ee38a904094e8ee3f94395f9151a75ca1d0fb3ce0bf948767fbc"
     },
     {
+      "file": "src/units/kit/canid.js",
+      "bytes": 41320,
+      "sha256": "e72d951171b3b03e0c21a8257ea1fabb1588595f0d21c6a3ff91346ee8a9ecb7"
+    },
+    {
       "file": "src/units/kit/felid.js",
       "bytes": 46740,
       "sha256": "de649c5d20422a013385bd0cbccf905bdef3b2eb7ffae5f3f4f7c6c97f3a67b2"
@@ -3458,8 +3463,8 @@
     },
     {
       "file": "src/units/manifest.js",
-      "bytes": 4539,
-      "sha256": "60acb3077f9941eae279f176350322c10374d1dfe37d4249e2a69c79bf74add3"
+      "bytes": 5592,
+      "sha256": "f3fcf795e8775612406923f915be96982ef634d47229c5e640a67ade54f003b3"
     },
     {
       "file": "src/units/species/african_elephant.js",
@@ -3468,8 +3473,8 @@
     },
     {
       "file": "src/units/species/arctic_wolf.js",
-      "bytes": 227,
-      "sha256": "c4e5c38378356a384d0269a0ac71fe1f9a4a9b32e8c1a909d23dee75e021dcdc"
+      "bytes": 1990,
+      "sha256": "150f63c64b3849b7ef45acc89575475d09b71919d295d4b0331731fc104c2dcd"
     },
     {
       "file": "src/units/species/barracuda.js",
@@ -3488,18 +3493,18 @@
     },
     {
       "file": "src/units/species/bison.js",
-      "bytes": 220,
-      "sha256": "c7383f9012b900553367ba5138db4658335f9c511400fbf2f7827aca503b0ddb"
+      "bytes": 53213,
+      "sha256": "088ad00b6c7ba8237ab018e4e657e2be164852408ea5d83b8da6784a89098692"
     },
     {
       "file": "src/units/species/black_bear.js",
-      "bytes": 195,
-      "sha256": "17a11c4d96a3023dec6595f7b7664d4dcf9b0917ca22ca5106f5c10cb8d6a3e8"
+      "bytes": 2908,
+      "sha256": "c8e2f5679a68886b543a629b2cfe550080994f6b9fad09ba6ad039ec86a81b2e"
     },
     {
       "file": "src/units/species/brown_bear.js",
-      "bytes": 227,
-      "sha256": "8cd8333c4b193d02fafa79302c5791b7ae746aa14ce0b8a93348e8a35471d543"
+      "bytes": 38316,
+      "sha256": "456178710896a830e1563729e10c1e5f47a909a9b046acdd42e08807259e7fda"
     },
     {
       "file": "src/units/species/bull_shark.js",
@@ -3508,8 +3513,8 @@
     },
     {
       "file": "src/units/species/caribou.js",
-      "bytes": 201,
-      "sha256": "90456094d76508522ed0878e77c6833a7d1cca04caf5b1cb98e594886efaa85b"
+      "bytes": 8855,
+      "sha256": "47e7229c210f39a7f50a86bf568aff50dfd237e67d976b6a09ac064bb51f2721"
     },
     {
       "file": "src/units/species/cheetah.js",
@@ -3533,8 +3538,8 @@
     },
     {
       "file": "src/units/species/coyote.js",
-      "bytes": 193,
-      "sha256": "7eac7681b799db4a7c178a482dd0783f8f30b48b04403ba60fa1d3276a108445"
+      "bytes": 2004,
+      "sha256": "a71949189e418b79ba4a07a835d3e9686bb359d82ca8c9cf9436272862064889"
     },
     {
       "file": "src/units/species/dog.js",
@@ -3548,8 +3553,8 @@
     },
     {
       "file": "src/units/species/elk.js",
-      "bytes": 197,
-      "sha256": "d07b1428b0124c0adc06297ab8f117045673d3c4e4b9327d2ba43b7fce4798ae"
+      "bytes": 7699,
+      "sha256": "7f9aaae94cc9d77e7771d8c0a5717b0ce05c21f942c51bd392a1cda692143fa2"
     },
     {
       "file": "src/units/species/fish.js",
@@ -3573,8 +3578,8 @@
     },
     {
       "file": "src/units/species/gray_wolf.js",
-      "bytes": 227,
-      "sha256": "c052ba74a015ddfbba1e1c9ed31b7ddf276006a05dd8f0f8a85959f2cdf8e583"
+      "bytes": 2767,
+      "sha256": "2a6b4dd10b336d2da649165c37a4d9fac31e405cac41a45d74098553a79b3977"
     },
     {
       "file": "src/units/species/great_white_shark.js",
@@ -3588,8 +3593,8 @@
     },
     {
       "file": "src/units/species/horse.js",
-      "bytes": 183,
-      "sha256": "2458f6c4fb2e88178f7efbc39bd5e28e314e59945b53f4164fc606b3490ac3b9"
+      "bytes": 54787,
+      "sha256": "2ccf76da5e01fe45d005dbf633c935e4f72b5f0560973d95140de7cd4ad1e6f7"
     },
     {
       "file": "src/units/species/humpback_whale.js",
@@ -3623,8 +3628,8 @@
     },
     {
       "file": "src/units/species/moose.js",
-      "bytes": 234,
-      "sha256": "7a6610527bb64c42db31c821b9117f37c24fc1b334136e7644465cffb48bfd39"
+      "bytes": 9174,
+      "sha256": "8a8beb2b331562f4657c878deabf7729b7d739db6c55e4a4acfba64642c69761"
     },
     {
       "file": "src/units/species/mountain_goat.js",
@@ -3643,8 +3648,8 @@
     },
     {
       "file": "src/units/species/polar_bear.js",
-      "bytes": 216,
-      "sha256": "2f26feaccf6859df66eed7241c965499759fbd3be2be8ec8a36aed55de9f08b6"
+      "bytes": 2614,
+      "sha256": "f53dcf79a7090bffdfe607292aec7bf103d5b05ad8972210bb92bbfeeed27e8d"
     },
     {
       "file": "src/units/species/raccoon.js",
@@ -3653,8 +3658,8 @@
     },
     {
       "file": "src/units/species/red_fox.js",
-      "bytes": 184,
-      "sha256": "d0525609a7e4ee4e54d72c2d2f17337fda0e82ef902fddafd0c0d094b9e54946"
+      "bytes": 1953,
+      "sha256": "e57ae286d53f3e4f671871dacb54dd130402bdafe5125e299276fa7b54282642"
     },
     {
       "file": "src/units/species/sardine.js",
@@ -3793,8 +3798,8 @@
     },
     {
       "file": "src/units/vehicles/uh60_black_hawk.js",
-      "bytes": 742,
-      "sha256": "6fd0ade5f429af9b86753e91e9ced17f5d73eb37736f4d70b359fc3260dbc78a"
+      "bytes": 37480,
+      "sha256": "39b3a1c0b367262526f2e3d8c94e75744ea6888d1d346c2e29836b2ca7972eaf"
     },
     {
       "file": "src/vendor/3MFLoader.js",
@@ -6623,8 +6628,8 @@
     },
     {
       "file": "games/battle.html",
-      "bytes": 13332,
-      "sha256": "5cf51c01b8b8a2109e72f644d39843283c6d6ebf58fbdeede3e517df51f9323c"
+      "bytes": 13341,
+      "sha256": "b9fdc3afd5d01981e6ce0c8d13492dc1e138e6de024e9b366fd0c935145c446d"
     },
     {
       "file": "games/bomb-survivor-scene.js",
@@ -6634,7 +6639,7 @@
     {
       "file": "games/bomb-survivor.html",
       "bytes": 75916,
-      "sha256": "c4bc042e79a86bb6742a28df1d76993c4d6a82a652464903cf6730893ea10646"
+      "sha256": "2bda4bdca31ce22eaf9cc38ae45de9fa1b8fd694e048886e2b1e69830f3494b7"
     },
     {
       "file": "games/dev.html",
@@ -6654,7 +6659,7 @@
     {
       "file": "games/warlord.html",
       "bytes": 73710,
-      "sha256": "f1a4c58d6d03ef8c6d694333f3f8feb775b875038cd378ac509cdf0df706af31"
+      "sha256": "535866196cf0a3cf2533f150bfef0177eb9a7def62c8c382197cddd5dbe6bae9"
     },
     {
       "file": "thumbs/shark-sim.jpg",
