@@ -22,6 +22,8 @@
      layClamp(cur, want, lo, hi, rate, dt)
      ballistic(dx, dy, dist, v0, g) -> {elev, t} low-angle firing solution
      zone(h, fromX, fromZ, x, z, top) -> "front"|"side"|"rear"|"top"
+                                  ("belly" is the battle's: a blast under the hull,
+                                  read off stats.armour.belly, else the roof's figure)
      threatOf(imp, weaponPen)     -> {pen (mm RHA), beh (damage behind armour),
                                   he (true for blast), cls}  what hit us
      resolve(vs, stats, zone, threat, rnd) -> {pen:bool, dmg, kill:{mobility,
@@ -144,6 +146,10 @@
     imp = imp || {};
     by = by || imp.by || null;
     if (imp.cause === "bomb") return { pen: 240, beh: 2400, he: true, cls: "bomb", top: true };
+    // a buried charge (IED, mine) goes off UNDER the hull: it meets the belly.
+    // ~10 kg TNT-equivalent against a floor: 160 mm RHA-equivalent of blast
+    // loading; a flat-floored Humvee or a truck folds, a V-hull deflects it
+    if (imp.cause === "ied" || imp.cause === "mine") return { pen: 160, beh: 900, he: true, cls: "ied", below: true };
     const blast = imp.fromX != null || imp.cause === "explosion";
     // a flown round says what it defeats where it arrived (weapons/ballistics.js:
     // the cartridge's RHA depth at its retained velocity), which beats a table
@@ -175,7 +181,10 @@
     // face's chemical-energy figure (additive: units without it are unchanged)
     const ce = (th.cls === "heat" || th.cls === "atgm" || th.cls === "hedp") && stats.armourCE && stats.armourCE[zn] != null;
     const tab = ce ? stats.armourCE : stats.armour;
-    const arm = (tab && tab[zn]) != null ? tab[zn] : 0;
+    // the belly (a blast from below): a unit that rates its floor gives
+    // armour.belly (a V-hull's blast figure); else the floor is as thin as the roof
+    let arm = (tab && tab[zn]) != null ? tab[zn] : 0;
+    if (zn === "belly" && !(tab && tab.belly != null)) arm = (stats.armour && stats.armour.top) || 0;
     const out = { zone: zn, armour: arm, pen: false, dmg: 0, mobility: false, firepower: false, burning: false, wreck: false };
     // a slat cage shorts or crushes an RPG's fuze before its jet forms
     const slat = vs.slat != null ? vs.slat : stats.slat;

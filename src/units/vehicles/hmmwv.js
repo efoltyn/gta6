@@ -228,40 +228,7 @@
 
     /* ---- THE TURRET (O-GPK) + THE M2, in turret space (origin on the ring) */
     const Tg = HK.geo();
-    Tg.m("dark").c(1).cyl(0, 0.03, 0, 0.68, 0.68, 0.06, "y", 28);                            // traversing ring
-    Tg.m("paint").c(P);
-    // front shield: lower plate, two upper plates either side of the gun slot,
-    // a slot lip over the gun, all leaning back 8 degrees
-    const lean = -0.14;
-    Tg.save().tf(0, 0, 0.62, lean, 0, 0);
-    Tg.box(0, 0.16, 0, 1.30, 0.32, 0.04);
-    [-1, 1].forEach(function (s) { Tg.box(s * 0.40, 0.55, 0, 0.50, 0.46, 0.04); });
-    Tg.box(0, 0.72, 0, 0.32, 0.12, 0.04);
-    Tg.m("dark").c(1);
-    [-1, 1].forEach(function (s) {
-      // window frames, and the transparent armour in them
-      Tg.box(s * 0.40, 0.57, 0.025, 0.36, 0.30, 0.02);
-    });
-    Tg.m("glass").c(1);
-    [-1, 1].forEach(function (s) { Tg.box(s * 0.40, 0.57, 0.04, 0.30, 0.24, 0.02); });
-    Tg.restore();
-    // wings: angled out and back from the front shield's edges
-    Tg.m("paint").c(D);
-    [-1, 1].forEach(function (s) {
-      Tg.save().tf(s * 0.78, 0, 0.40, 0, s * -0.78, 0);
-      Tg.box(0, 0.38, 0, 0.04, 0.70, 0.52);
-      Tg.m("glass").c(1).box(s * 0.02, 0.56, 0, 0.02, 0.18, 0.22);
-      Tg.restore();
-      // side plates to the rear corners
-      Tg.box(s * 0.86, 0.32, -0.12, 0.04, 0.58, 0.58);
-      Tg.box(s * 0.70, 0.30, -0.56, 0.04, 0.54, 0.36, 0, s * 0.62, 0);
-    });
-    // bolts on the front plate
-    Tg.m("dark").c(1);
-    for (let i = 0; i < 6; i++) Tg.cyl(-0.55 + i * 0.22, 0.04, 0.60, 0.012, 0.012, 0.02, "z", 6);
-    // the pintle post and cradle under the gun
-    Tg.cyl(0, 0.13, 0.28, 0.04, 0.05, 0.22, "y", 8);
-    Tg.box(0, 0.24, 0.28, 0.12, 0.06, 0.14);
+    HK.ogpk(Tg, D);                                // the kit's O-GPK (the MaxxPro carries the same one)
     const tGeos = Tg.build({ uv: 2.6, mud: 0 });
 
     // the M2 (gun space: pivot at the cradle trunnion, +Z down the barrel)

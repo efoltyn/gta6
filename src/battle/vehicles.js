@@ -454,7 +454,7 @@ function thinkVehicle(u) {
     let want = stand;
     if (u.tgt.beast || u.tgt.fists) want = Math.min(stand, 18);
     if (u.tgt.launcher && d < 60) want = 90;
-    if (!u.sees) want = Math.min(want, d * 0.6);
+    if (!u.sees && !vehIndirect(u)) want = Math.min(want, d * 0.6);   // an indirect launcher needs no sight line: it keeps its standoff
     if (d > want * 1.15 || d < want * 0.6) {
       const go = d - want;
       u.target.set(u.pos.x + dx / d * go, 0, u.pos.z + dz / d * go);
@@ -657,8 +657,9 @@ function vehFight(u, sdt) {
   for (let k = 0; k < u.wpn.length; k++) {
     const W = u.wpn[k], w = W.w;
     if (W.off || W.ammo <= 0 || W.cool > 0 || W.reloadT > 0) continue;
-    // a bomb's reach is its fall (vehBombRun), not a range number
-    if (w.kind !== "bombs" && (dist > (w.range || 600) || dist < (w.minRange || 0))) continue;
+    // a bomb's reach is its fall (vehBombRun), not a range number. A gun's
+    // reach is SLANT range: a tank's .50 does not reach a Reaper 4.5 km up
+    if (w.kind !== "bombs" && (Math.hypot(dist, dy) > (w.range || 600) || dist < (w.minRange || 0))) continue;
     if (!vehWeaponFits(u, w, t)) continue;
     const manned = vehSeatManned(u, w);
     if (!manned) continue;                                   // nobody at this gun
@@ -856,11 +857,15 @@ function vehFireHE(u, w, t, dist) {
   const ch = Math.cos(sol.elev), sh = Math.sin(sol.elev);
   const vel = new THREE.Vector3((tx - from.x) / dd * v0 * ch, v0 * sh, (tz - from.z) / dd * v0 * ch);
   u._he = { pen: he.pen, beh: he.beh, he: true, cls: "he" };
-  rockets.push({
+  const rk = {
     pos: V().copy(from), vel: vel, grav: g, t: 0, by: u, life: Math.max(7, sol.t * 1.5 + 2),
     w: { blastRadius: he.blast || 6, blastPower: (he.power || 1.4) / 0.55, sfx: null },
     trail: CBZ.studio.trail({ length: 12, color: 0xffd9a0, opacity: 0.45, minStep: 2 }),
-  });
+  };
+  rockets.push(rk);
+  // the rig may fly its own round (rig.launched: a guided rocket's profile,
+  // its homing mark, its body): fire.js stepRockets flies whatever it set
+  if (u.rig && u.rig.launched) { try { u.rig.launched(rk, u._firing, t); } catch (e) { console.warn("[war] rig.launched", e); } }
   const dCam = Math.sqrt(camDist2(u.pos));
   if (dCam < 600) { try { CBZ.sfx("explosion", { dist: dCam, ghost: true, volume: 0.7, pitch: 0.6 }); } catch (e) {} }
 }
@@ -1152,7 +1157,10 @@ function stepJet(u, sdt) {
     gx = u.airPt.x; gz = u.airPt.z;
     wantAGL = Math.max(runAlt, cruise * 0.6);
     // far enough out to turn and line up a run that reaches its release point
-    if (dRef > Math.max(1600, R * 2.2, release + R * 1.2)) u.airPhase = "in";
+    // (or the out point is reached: a slow airframe with a long-range
+    // missile, the Reaper, never gets that far out and used to circle the
+    // point for minutes; it turns back in from there, a loiter orbit)
+    if (dRef > Math.max(1600, R * 2.2, release + R * 1.2) || Math.hypot(gx - u.pos.x, gz - u.pos.z) < R * 0.6) u.airPhase = "in";
   } else {
     u.airPhase = "in";
     gx = ref.x; gz = ref.z;
@@ -1264,8 +1272,18 @@ function hurtVehicle(u, dmg, imp) {
   if (imp.fromX != null) { fx = imp.fromX; fz = imp.fromZ; }
   else if (by && by.pos) { fx = by.pos.x; fz = by.pos.z; }
   const above = th.top || (by && by.pos && by.pos.y - u.pos.y > 30 && Math.hypot(fx - u.pos.x, fz - u.pos.z) < (by.pos.y - u.pos.y) * 2);
-  const zn = D.zone(u.h, fx, fz, u.pos.x, u.pos.z, above);
-  const res = D.resolve(u.vs, u.def.stats || {}, zn, th, dmg, lcg);
+  /* THE BELLY. A charge under the hull (an IED, a mine: th.below) meets the
+     floor, and so does a ground blast inside the footprint of a hull that
+     rates its floor (stats.armour.belly: a V-hull). Hulls without one keep
+     the face the blast came from, as they always did. */
+  const S = u.def.stats || {};
+  let under = !!th.below;
+  if (!under && th.he && !above && th.cls !== "heat" && imp.fromX != null && S.armour && S.armour.belly != null) {
+    const ox = fx - u.pos.x, oz = fz - u.pos.z, c = Math.cos(u.h), s = Math.sin(u.h);
+    under = Math.abs(ox * c - oz * s) < u.vwid * 0.6 && Math.abs(ox * s + oz * c) < u.vlen * 0.6;
+  }
+  const zn = under ? "belly" : D.zone(u.h, fx, fz, u.pos.x, u.pos.z, above);
+  const res = D.resolve(u.vs, S, zn, th, dmg, lcg);
   u.hp = Math.max(0, u.vs.hp);
   u.lastHit = res;
   if (PROBE) { VEH.hits = VEH.hits || { pen: 0, bounced: 0 }; if (res.pen) VEH.hits.pen++; else VEH.hits.bounced++; }
@@ -1302,11 +1320,12 @@ function vehCrewHits(u, res, th, zn, fx, fz, by) {
   // where it came in, and its path inward
   let ix, iy, iz, px, py, pz;
   if (zn === "top") { ix = (lcg() - 0.5) * Wd; iz = (lcg() - 0.5) * L; iy = H; px = 0; py = -1; pz = 0; }
+  else if (zn === "belly") { ix = (lcg() - 0.5) * Wd; iz = (lcg() - 0.5) * L; iy = 0.3; px = 0; py = 1; pz = 0; }
   else {
     const tt = Math.min(Wd / Math.max(1e-3, Math.abs(dx)), L / Math.max(1e-3, Math.abs(dz)));
     ix = dx * tt; iz = dz * tt; iy = H * (0.35 + lcg() * 0.45); px = -dx; py = 0; pz = -dz;
   }
-  const reach = zn === "top" ? H : (Math.abs(px) > Math.abs(pz) ? Wd * 2 : L * 2) * 0.8;
+  const reach = zn === "top" || zn === "belly" ? H : (Math.abs(px) > Math.abs(pz) ? Wd * 2 : L * 2) * 0.8;
   const beh = Math.max(th.beh || 0, res.dmg || 0);
   const pk = Math.min(0.9, beh / 600);
   let lost = 0;
