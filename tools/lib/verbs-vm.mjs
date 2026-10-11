@@ -111,7 +111,7 @@ export function loadVerbsVM(opts = {}) {
   if (has("src/systems/arrest.js")) run("src/systems/arrest.js");
   run("src/entities/verbposes.js");
   const errors = [];
-  for (const f of ["src/entities/meleeposes.js", "src/systems/verbs_strike.js", "src/systems/bodyfall.js"]) {
+  for (const f of ["src/entities/meleeposes.js", "src/systems/verbs_strike.js", "src/systems/bodyfall.js", "src/systems/melee.js"]) {
     if (!has(f)) continue;
     try { run(f); if (f.includes("strike")) loaded.strike = true; else loaded.meleePoses = true; }
     catch (e) { errors.push(f + ": " + (e && e.message)); }

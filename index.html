@@ -664,8 +664,9 @@ document.body.appendChild(b);}}catch(e){}})();
      CBZ.arrest.playerCuffed. Before input.js and every game module. -->
 <script src="src/systems/cuffedplayer.js?v=cuffs1"></script>
 <script src="src/entities/verbposes.js?v=verbs1"></script>
-<script src="src/entities/meleeposes.js?v=neck1001"></script>
-<script src="src/systems/verbs_strike.js?v=gnp0930"></script>
+<script src="src/entities/meleeposes.js?v=melee1011"></script>
+<script src="src/systems/verbs_strike.js?v=melee1011"></script>
+<script src="src/systems/melee.js?v=melee1011"></script>
 <script src="src/systems/bodyfall.js?v=neck1001"></script>
 <!-- CBZ.vitals: ONE body that can be hurt, in every game. Blunt trauma knocks a
      man out (and he comes to, groggy); a bullet or a blade opens a bleed that
@@ -765,7 +766,7 @@ document.body.appendChild(b);}}catch(e){}})();
      Before npc.js (its key holders are indexed by car) and ai.js. -->
 <script src="src/systems/prisoncars.js?v=jailv1001"></script>
 <script src="src/entities/npc.js?v=jailv1001"></script>
-<script src="src/entities/ai.js?v=jailv1001"></script>
+<script src="src/entities/ai.js?v=melee1011"></script>
 <!-- ADMINISTRATION, and a warden who lives somewhere. Builds the block north
      of the cell wing (CBZ.WORLD.adminWing) behind the staff door cellblock.js
      now opens, and puts the Warden on a day: rounds, his desk, his quarters.
@@ -908,7 +909,7 @@ document.body.appendChild(b);}}catch(e){}})();
      (whose LOS/search/flank primitives it composes and never re-implements)
      and BEFORE every consumer: gangs.js, peds.js, police.js, city/combat.js.
      Revert with ?cfg_NPC_COMBAT_IQ=0. -->
-<script src="src/systems/combat_iq.js?v=colcore1"></script>
+<script src="src/systems/combat_iq.js?v=melee1011"></script>
 <!-- ONE TASER VISUAL OWNER. Player fire and the prison capture escalation both
      launch its pooled twin probes/wires and electrical body arc; it also draws
      the shared taser appearance in a guard's real weapon socket for that beat. -->
@@ -940,7 +941,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/systems/weather.js?v=w09290204"></script>
 <script src="src/systems/compass.js"></script>
 <script src="src/systems/dashboard.js?v=cars1"></script>
-<script src="src/systems/combat.js?v=gnp0930"></script>
+<script src="src/systems/combat.js?v=melee1011"></script>
 <script src="src/systems/killstreaks.js?v=jailv1001"></script>
 <script src="src/systems/interact.js?v=verbs2b"></script>
 <!-- TRADE: your pockets and his on one table (opened by the Trade verb on a person). -->
@@ -1006,7 +1007,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- how a prison run ends: the run out past the wall, the fade, one line (after state.js and save.js) -->
 <script src="src/systems/escapeend.js?v=end1"></script>
 <script src="src/systems/runstats.js?v=end1"></script>
-<script src="src/systems/touch.js?v=planes1009b"></script>
+<script src="src/systems/touch.js?v=melee1011"></script>
 <script src="src/systems/touch_vehicle.js?v=planes1009b"></script>
 <!-- THE WAY OUT of any seat (car, boat, cockpit, armor, saddle, chair, bed):
      CBZ.seatState/seatExit, the key pinned on the door, the one touch EXIT. -->
@@ -1429,7 +1430,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/view.js?v=cars1"></script>
 <script src="src/city/los.js?v=city4"></script>
 <script src="src/systems/casttraits.js?v=brainmoves1"></script>
-<script src="src/city/peds.js?v=street1009"></script>
+<script src="src/city/peds.js?v=melee1011"></script>
 <!-- THE STREET AS A CONFIGURATION OF CBZ.brain: bystanders become witnesses
      (social.crime), react on their own delay through threat.respond, gangs
      retaliate proportionally and rout on brain morale, gang standing is
@@ -1712,7 +1713,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/roleverbs.js?v=verbs2b"></script>
 <script src="src/city/restrain.js?v=custody1009b"></script>
 <script src="src/city/custody.js?v=street1009"></script>
-<script src="src/city/combat.js?v=dogs1009b"></script>
+<script src="src/city/combat.js?v=melee1011"></script>
 <!-- B7 — RESOURCES: harvest nodes (needs CBZ.assets/placement/CBZ.CITY
      already loaded, and CBZ.cityEcon's Wood/Stone/Scrap/Hatchet/Pickaxe
      entries above). Loads right after city/combat.js, whose lightAttack/

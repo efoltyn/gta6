@@ -55,8 +55,16 @@
                 — a round that hit a LIVING man (see SHOT below); false = no
                   rig to react with, the caller falls back to CBZ.body.hit
      step(a, dx, dz, dist) — a footwork step with root motion
-     fighter(a, opts) -> F:  F.tick(dt, target, opts) -> action|null, F.telegraph()
-     strikeOf(a) · cancelStrike(a) · reachOf(kind, a)
+     condition(a) -> { daze, wind, legs, gst, openT, downs, chin } (see CONDITION)
+     telegraphOf(t) -> what his rig is throwing now, or null
+     strikeOf(a) · cancelStrike(a) · reachOf(kind, a) · powerOf(kind)
+     res also carries: force (how much arrived), counter (he walked into it),
+       blind (he never saw it), parried, guardBroken, ko (a knockout)
+     opts.aimErr (m): how far off the line an untrained hand throws
+     opts.weapon {kind: bat|pipe|club|baton|knife|shank|rifle, len, force,
+       blade}: the striking point rides out along the forearm by len
+     THE FIGHTER (V.fighter) and the one control grammar live in
+     systems/melee.js (CBZ.melee): who throws what. This file is how it lands.
 ============================================================ */
 (function () {
   "use strict";
@@ -121,23 +129,54 @@
     jab: 1.28, cross: 1.30, hook: 1.30, upper: 0.80, body: 1.32, bodyStraight: 1.12, overhand: 1.42,
     elbow: 0.92, headbutt: 0.74, stab: 0.95, shove: 1.10, front: 0.95, round: 0.90, low: 0.95, knee: 0.62,
     gnp: 1.0, gnpElbow: 0.9, hammer: 1.0,
+    // with a weapon in the hand the reach is the weapon's (the contact point
+    // is carried out along the forearm by weapon.len, see WEAPON below)
+    bat: 1.80, slash: 1.30, butt: 1.40,
   };
   const POWER = {
     jab: 0.35, cross: 0.75, hook: 0.82, upper: 0.82, body: 0.70, bodyStraight: 0.62, overhand: 0.92,
     elbow: 0.80, headbutt: 0.85, stab: 0.55, shove: 0.55, front: 0.72, round: 0.95, low: 0.62, knee: 0.88,
     gnp: 0.62, gnpElbow: 0.86, hammer: 0.72,
+    bat: 1.0, slash: 0.42, butt: 0.85,
   };
   const ZONE_MUL = { jaw: 1.3, head: 1.0, liver: 1.25, body: 0.8, legs: 0.6 };
   const FIST_R = 0.05;                      // m: the striking surface (knuckles, elbow point, shin)
+  /* WEAPONS: what a held thing adds to a blow. len = how far past the hand
+     the striking part sits (the contact point is carried out along the
+     forearm by it), force = how much more of the swing arrives (a bat's head
+     is moving and heavy; a knife adds nothing to the push, it cuts). The
+     caller's opts.weapon may carry its own len/force; kind picks the row. */
+  const WEAPON = {
+    bat:   { len: 0.55, force: 1.6, r: 0.06 },
+    pipe:  { len: 0.45, force: 1.5, r: 0.05 },
+    club:  { len: 0.45, force: 1.5, r: 0.05 },
+    baton: { len: 0.42, force: 1.35, r: 0.04 },
+    knife: { len: 0.14, force: 1.0, r: 0.02, blade: true },
+    shank: { len: 0.10, force: 1.0, r: 0.02, blade: true },
+    rifle: { len: 0.30, force: 1.4, r: 0.06 },
+  };
+  function weaponRow(w) {
+    if (!w) return null;
+    const row = WEAPON[w.kind] || null;
+    return {
+      len: w.len != null ? w.len : row ? row.len : (w.blade ? 0.12 : 0.3),
+      force: w.force != null ? w.force : row ? row.force : (w.blade ? 1 : 1.3),
+      r: row ? row.r : 0.04,
+    };
+  }
   function kindOf(kind) {
-    if (kind === "kick") return "front";
-    if (kind === "roundKick") return "round";
+    if (kind === "kick" || kind === "teep" || kind === "pushKick") return "front";
+    if (kind === "roundKick" || kind === "roundhouse") return "round";
     if (kind === "lowKick") return "low";
     if (kind === "uppercut") return "upper";
+    if (kind === "batSwing") return "bat";
+    if (kind === "knifeSlash") return "slash";
+    if (kind === "rifleButt") return "butt";
     if (!kind || kind === "straight") return "cross";
     return kind;
   }
   function isKick(k) { return k === "front" || k === "round" || k === "low" || k === "knee"; }
+  V.powerOf = function (kind) { return POWER[kindOf(kind)] || 0.6; };
   V.reachOf = function (kind, a) {
     const k = kindOf(kind), B = a ? bod(a) : null;
     const s = B && B.ch ? scaleOf(B.ch) / 0.7 : 1;
@@ -152,7 +191,8 @@
   function newRes() {
     return { landed: false, blocked: false, slipped: false, zone: null, dmgMul: 1, reaction: "none",
       point: new THREE.Vector3(), dir: { x: 0, z: 1 }, power: 0.5, kind: "jab", target: null, attacker: null,
-      heavy: false, weapon: null, stagger: false, blood: 0, strike: null };
+      heavy: false, weapon: null, stagger: false, blood: 0, strike: null,
+      parried: false, guardBroken: false, ko: false, force: 0, counter: false, blind: false };
   }
   function getSt() {
     let S = pool.pop();
@@ -273,6 +313,7 @@
     S.on = true; S.id = ++serial;
     S.att = att; S.tgt = tgt || null; S.Ba = Ba; S.kind = kind; S.kick = kick;
     S.heavy = !!opts.heavy; S.weapon = opts.weapon || null; S.opts = opts;
+    S.wrow = weaponRow(S.weapon);
     S.level = MP.levelOf(kind);
     S.arm = opts.arm || (ch ? (kick ? MP.legFor(ch, kind) : MP.armFor(ch, kind)) : "r");
     const gas = ch ? clamp01(ch.winded || 0) : 0;
@@ -280,10 +321,19 @@
     S.power = clamp01((opts.power != null ? opts.power : (POWER[kind] || 0.6) + (S.heavy ? 0.18 : 0)) * (1 - 0.35 * gas));
     S.t = 0; S.p = 0; S.landed = false; S.whiffed = false; S.aimLocked = false; S.hasAim = false; S.beat = false;
     S.lastPT = -1; S.stall = 0; S.walled = false;
+    S.rng = opts.rng || Math.random;
+    // opts.aimErr (m): how far off the line this hand throws (a novice ~0.1,
+    // a pro ~0.02); lateral and vertical, fixed for the blow
+    S.ex = 0; S.ey = 0;
+    if (opts.aimErr > 0) {
+      const u = S.rng() * TAU, rr = opts.aimErr * Math.sqrt(S.rng()) * 1.4;
+      S.ex = Math.cos(u) * rr; S.ey = Math.sin(u) * rr * 0.8;
+    }
     S.lunge.D = 0; S.lunge.last = 0;
     S.rng = opts.rng || Math.random;
     const res = S.res;
     res.landed = false; res.blocked = false; res.slipped = false; res.zone = null; res.dmgMul = 1;
+    res.parried = false; res.guardBroken = false; res.ko = false; res.force = 0; res.counter = false; res.blind = false;
     res.reaction = "none"; res.stagger = false; res.blood = 0; res.kind = kind; res.heavy = S.heavy;
     res.weapon = S.weapon; res.attacker = att; res.target = null; res.power = S.power; res.strike = S;
     // the player swings at whoever is in front: pick the aim among the candidates
@@ -394,18 +444,35 @@
     const ap = Ba.pos, tp = Bt.pos;
     let dx = tp.x - ap.x, dz = tp.z - ap.z;
     const d = Math.hypot(dx, dz) || 1; dx /= d; dz /= d;
-    res.landed = !blocked; res.blocked = !!blocked; res.zone = zone; res.target = c;
+    res.zone = zone; res.target = c;
     res.point.copy(P); res.dir.x = dx; res.dir.z = dz;
-    res.dmgMul = (ZONE_MUL[zone] || 1) * (blocked ? 0.2 : 1);
-    res.stagger = !blocked && S.power >= 0.72 && zone !== "legs";
+    // HOW MUCH ARRIVES (see CONDITION): the swing, the bodies, the moment
+    const F = forceOf(S, c, Bt, dx, dz);
+    res.force = F;
+    const tc = condOf(c);
+    if (blocked) {
+      // THE GUARD: raised in the last beat before the blow it is a PARRY (the
+      // blow is turned aside and the thrower is left open); held, it takes it
+      // on the forearms and pays for it; a guard with nothing left in it caves
+      const tch = Bt.ch;
+      if (!S.kick && tch && tch.blockAt != null && clock - tch.blockAt <= PARRY_T) {
+        res.parried = true;
+        const oc = condOf(S.att);
+        oc.openT = Math.max(oc.openT, 0.55);
+      } else {
+        tc.gst -= F * GUARD_COST;
+        if (tc.gst < 0) {
+          tc.gst = 0.15; blocked = false; res.guardBroken = true;
+          if (tch) { tch.blockT = 0; tch.blockK = Math.min(tch.blockK || 0, 0.3); }
+        }
+      }
+    }
+    res.landed = !blocked; res.blocked = !!blocked;
+    res.dmgMul = (ZONE_MUL[zone] || 1) * (res.parried ? 0 : blocked ? 0.2 : res.guardBroken ? 0.6 : 1);
+    res.stagger = !blocked && (F >= 0.72 || S.power >= 0.72) && zone !== "legs";
     if (blocked) res.reaction = "block";
     else if (S.kind === "shove") res.reaction = "stagger";
-    else if (zone === "jaw" || zone === "head") res.reaction = "snap";
-    else if (zone === "liver") res.reaction = "liver";
-    else if (zone === "body") res.reaction = "fold";
-    else res.reaction = "buckle";
-    // the flash knockdown lives on the jaw: a clean power shot there
-    if (!blocked && zone === "jaw" && S.power >= 0.8 && S.rng() < 0.22 * S.power) res.reaction = "knockdown";
+    else res.reaction = bodyAnswer(S, c, tc, zone, F, res);
     S.landed = true;
     // the attacker's rig stops ON him (or bounces off the guard)
     const ch = Ba.ch;
@@ -435,12 +502,26 @@
     if (r === "dead" || r === "none") { /* the caller owns it */ }
     else if (r === "block") {
       if (tch) { tch.blockT = Math.max(tch.blockT || 0, 0.3); tch.blockHitT = 0.2; }
-      // the forearms took it, the feet pay for it: a short step back along the blow
-      if (Bt.pos && !Bt.isPlayer) stepAlong(c, Bt, tch, res.dir.x, res.dir.z, (0.05 + 0.13 * res.power) * mass, 0.26);
+      if (res.parried) {
+        // turned aside: HIS arm is thrown wide and his weight goes past you —
+        // a half step and an open beat (condition.openT) the other man can use
+        V.react(S.att, { zone: "body", reaction: "stagger", stagger: true, power: 0.35, dir: { x: res.dir.x, z: res.dir.z }, mass: 0.6 });
+      } else if (Bt.pos && !Bt.isPlayer) {
+        // the forearms took it, the feet pay for it: a short step back along the blow
+        stepAlong(c, Bt, tch, res.dir.x, res.dir.z, (0.05 + 0.13 * res.power) * mass, 0.26);
+      }
     } else if (r === "knockdown") {
-      V.knockdown(c, { dir: res.dir, ko: true, power: res.power });
+      condOf(c).downs++;
+      V.knockdown(c, { dir: res.dir, ko: !!res.ko, power: res.power,
+        dur: res.ko ? KO_MIN + (KO_MAX - KO_MIN) * S.rng() : 0.9 + 0.8 * S.rng() });
+    } else if (r === "kneel") {
+      // the leg is gone under him: down onto that knee for a count
+      condOf(c).downs++;
+      V.knockdown(c, { variant: "kneel", side: _legSide === "R" ? 1 : -1, dir: res.dir, ko: false, dur: 1.0 + 0.6 * S.rng() });
     } else {
-      V.react(c, { zone: res.zone, kind: S.kind, arm: S.arm, dir: res.dir, power: res.power, stagger: res.stagger || r === "stagger", reaction: r, legSide: _legSide, mass: mass, heavy: S.heavy });
+      // a liver shot he takes standing folds him like any body shot; only
+      // the one that drops him is the liver reaction
+      V.react(c, { zone: res.zone === "liver" && r !== "liver" ? "body" : res.zone, kind: S.kind, arm: S.arm, dir: res.dir, power: res.power, stagger: res.stagger || r === "stagger", reaction: r, legSide: _legSide, mass: mass, heavy: S.heavy });
     }
     if (!res.blocked) {
       // the ledger (island modes) and the blade
@@ -466,6 +547,124 @@
       if (his) finish(his, true);
       if (tch && (r !== "block")) { tch.punchT = 0; tch.kickT = 0; }
     }
+  }
+  /* ============================================================
+     CONDITION — what the fight has done to a body so far, and what a blow
+     does to it. Before this a blow's outcome was its zone and a dice roll
+     (22% of clean power shots to the jaw were a knockdown, whoever threw
+     them and whoever took them): a gassed welterweight's arm punch dropped
+     a fresh heavyweight as often as the reverse, nobody was ever "rocked",
+     and a man could take forty body shots without his hands coming down.
+
+     FORCE (res.force, ~0..2): the swing's power x how much body is behind
+     it (sqrt of the mass ratio) x how fresh the arm is x the moment it met
+     him — walking INTO a shot while throwing your own (COUNTER x1.35) or
+     never seeing it come (BLIND, from the side or behind, x1.25: nothing
+     braced, the head is loose on the neck) — x what is in the hand.
+
+     THE BODY KEEPS THREE SHORT-TERM NUMBERS (a._mc, V.condition(a)):
+       daze  the head's: rocked. A clean one to the CHIN over his chin's
+             tolerance switches him off (KO); a man already rocked goes down
+             for a count off a good one (flash knockdown) and covers up.
+             Wears off ~0.05/s. Where systems/vitals.js is loaded it is the
+             authority on knockouts (the game's caller asks it); here the
+             default never knocks a man OUT, only down.
+       wind  the body's: every body shot takes breath and stamina; a liver
+             shot that lands hard, or one more on a man with none left,
+             drops him to a knee (the delayed fold every fighter knows).
+       legs  the thighs': low kicks stack; past the line the leg goes and he
+             drops onto that knee.
+     plus gst, the GUARD's own stamina: every blow taken on the forearms
+     costs it, and a guard with nothing left caves (res.guardBroken: the blow
+     lands at 60%), and openT, the beat after a PARRY when he is wide open.
+     ============================================================ */
+  const PARRY_T = 0.2;          // s: a guard raised this close before the blow turns it aside
+  const GUARD_COST = 0.32;      // guard stamina per unit of force taken on the forearms
+  const KO_MIN = 6, KO_MAX = 14;
+  function chinOf(a) {
+    if (a && a.chin > 0) return a.chin;
+    let c = 0.85 + 0.3 * (a && a._chinRoll != null ? a._chinRoll : Math.random());
+    const r = a && a.ratings;
+    if (r && r.toughness > 0) c *= 0.8 + r.toughness / 250;
+    const m = massOf(a) / 80;
+    c *= Math.pow(m < 0.4 ? 0.4 : m > 2.5 ? 2.5 : m, 0.25);
+    try { a.chin = c; } catch (e) { /* frozen adapter */ }
+    return c;
+  }
+  function condOf(a) {
+    const o = isPlayer(a) ? (CBZ.player || a) : a;
+    let c = o._mc;
+    if (!c) c = o._mc = { daze: 0, wind: 0, legs: 0, gst: 1, openT: 0, downs: 0, t: clock, chin: chinOf(o) };
+    const dt = clock - c.t;
+    if (dt > 0) {
+      c.t = clock;
+      c.daze = Math.max(0, c.daze - 0.05 * dt);
+      c.wind = Math.max(0, c.wind - 0.10 * dt);
+      c.legs = Math.max(0, c.legs - 0.04 * dt);
+      c.gst = Math.min(1, c.gst + 0.22 * dt);
+      c.openT = Math.max(0, c.openT - dt);
+    }
+    return c;
+  }
+  V.condition = function (a) {
+    if (!a) return null;
+    const c = condOf(a);
+    // the head's truth lives in vitals where a game keeps it
+    const VT = CBZ.vitals;
+    if (VT && VT.daze) { try { const d = VT.daze(isPlayer(a) ? CBZ.player : a); if (d > c.daze) c.daze = d; } catch (e) { /* no record */ } }
+    return c;
+  };
+  function staminaOf(a) {
+    const F = a && a._vfS;
+    if (F && F.stam != null) return F.stam;
+    const B = bod(a), ch = B && B.ch;
+    return 1 - clamp01((ch && ch.winded) || 0);
+  }
+  function forceOf(S, c, Bt, dx, dz) {
+    const res = S.res;
+    let F = S.power * Math.sqrt(massRatio(S.att, c)) * (0.7 + 0.3 * staminaOf(S.att));
+    // he was throwing: his weight was coming forward into it
+    const his = strikeOf(c);
+    res.counter = !!(his && his.p > 0.08 && his.p < 0.62 && !his.landed);
+    if (res.counter) F *= 1.35;
+    // he never saw it: a blow from his side or back finds a loose neck
+    const yaw = Bt.yaw(), fx = Math.sin(yaw), fz = Math.cos(yaw);
+    res.blind = (-dx * fx - dz * fz) < 0.25;
+    if (res.blind) F *= 1.25;
+    if (S.wrow) F *= S.wrow.force;
+    return F * (0.88 + 0.24 * S.rng());
+  }
+  // the default answer of the body to an unblocked blow (the caller's onLand
+  // may overrule it). Writes res.ko for a knockout.
+  function bodyAnswer(S, c, tc, zone, F, res) {
+    const chin = tc.chin || 1;
+    const vitals = !!(CBZ.vitals && CBZ.vitals.blunt);
+    if (zone === "jaw" || zone === "head") {
+      const jaw = zone === "jaw";
+      tc.daze += F * (jaw ? 0.55 : 0.34) / chin;
+      if (!vitals) {
+        // THE BUTTON: a clean shot on the point of the chin past what this
+        // chin can take, or one more on a man who is already out on his feet
+        if ((jaw && F / chin >= 0.92) || tc.daze >= 1.0) { res.ko = true; tc.daze = 0.6; return "knockdown"; }
+        // ROCKED: a good one on a man already rocked puts him down for a count
+        if (tc.daze >= 0.55 && F >= 0.45 && S.rng() < 0.5 + 0.5 * (tc.daze - 0.55) / 0.45) return "knockdown";
+      }
+      return "snap";
+    }
+    if (zone === "liver" || zone === "body") {
+      tc.wind += F * (zone === "liver" ? 0.55 : 0.32);
+      // a body shot takes the breath: the stamina goes with it
+      const tf = c && c._vfS;
+      if (tf && tf.stam != null) tf.stam = Math.max(0, tf.stam - F * 0.12);
+      if (tc.wind >= 1 || (zone === "liver" && F >= 0.85)) { tc.wind = 0.45; return "liver"; }
+      return "fold";
+    }
+    if (zone === "legs") {
+      tc.legs += F * 0.40;
+      if (tc.legs >= 1) { tc.legs = 0.5; return "kneel"; }
+      return "buckle";
+    }
+    return "stagger";
   }
   function whiff(S) {
     if (S.whiffed || S.landed) return;
@@ -518,7 +717,24 @@
         if (F.counted && !F.a.dead && F.a.ko > 0 && F.a.ko === F.lastKo) F.a.ko = 0;
         falls.splice(i, 1); continue;
       }
-      if (F.B.isPlayer || F.noKo) continue;
+      if (F.B.isPlayer) continue;
+      /* A BODY ON THE FLOOR STAYS WHERE IT FELL. A host whose own steering
+         does not know about knockdowns (games/battle.html walks every man at
+         his m.target each frame) slid a knocked-out man along the sand. The
+         fall's own root motion (moves) and a verb that is moving him (a
+         drag, a carry) are the only things allowed to move him now. */
+      const fp = F.B.pos;
+      if (fp) {
+        let rooted = false;
+        for (let k = 0; k < moves.length; k++) if (moves[k].a === F.a) { rooted = true; break; }
+        if (rooted || F.px == null || (typeof V.held === "function" && V.held(F.a))) { F.px = fp.x; F.pz = fp.z; }
+        else {
+          const ex = F.px - fp.x, ez = F.pz - fp.z;
+          if (ex * ex + ez * ez > 4) { F.px = fp.x; F.pz = fp.z; }          // moved on purpose (a respawn, a teleport)
+          else if (ex || ez) { fp.x = F.px; fp.z = F.pz; const g = F.B.ch && F.B.ch.group; if (g && g.position !== fp) { g.position.x = F.px; g.position.z = F.pz; } }
+        }
+      }
+      if (F.noKo) continue;
       // the brain is off while he is down (a.ko); the rig stands up in time
       // for it to come back on. A body whose ko nobody counts down (a mode
       // without a ko brain) gets it counted here.
@@ -563,6 +779,11 @@
         if (!S.aimLocked) {
           const Z = zonesOf(tch);
           aimPoint(Z, S.level, S.kind, S.arm, Ba.pos, S.aim);
+          // an untrained hand does not go exactly where it was sent
+          if (S.ex || S.ey) {
+            const lx = S.aim.x - Ba.pos.x, lz = S.aim.z - Ba.pos.z, ll = Math.hypot(lx, lz) || 1;
+            S.aim.x += (-lz / ll) * S.ex; S.aim.z += (lx / ll) * S.ex; S.aim.y += S.ey;
+          }
           S.hasAim = true;
           // a punch commits when it launches: whatever the head does after this, the fist goes where it was
           if (p >= (S.kick ? 0.20 : 0.12)) S.aimLocked = true;
@@ -594,7 +815,15 @@
     // a raised guard takes it on the forearms
     const tch = B.ch;
     const guarding = (tch.blockK || 0) > 0.55;
-    if (guarding && forearmTouch(Z, P, r)) return "block";
+    /* THE STANCE IS A GUARD TOO. A man squared up carries his fists at his
+       eyes and his jaw with the elbows in: a blow that runs into those
+       forearms is taken on them whether or not he "blocked". Only the real
+       arms decide (forearmTouch on the live rig) — a hand that is out
+       throwing, a guard sagging off a gassed man (the pose drops it), a
+       head still snapping from the last one, are all open. */
+    const stance = !guarding && tch.fightStance && (tch._mK || 0) > 0.6 && !(tch.punchT > 0) && !(tch.kickT > 0) && !(tch.dodgeT > 0) &&
+      !(tch.hitReact && tch.hitReact.on && tch.hitReact.t < 0.35) && !((tch.winded || 0) > 0.7);
+    if ((guarding || (stance && S.level === "head")) && S.level !== "legs" && forearmTouch(Z, P, r)) return "block";
     const zone = hitZone(Z, P, r, S.level === "legs");
     // a head moving off the line that the fist only finds at the rim of the
     // skull: it slides off — that is what a slip is
@@ -604,9 +833,22 @@
     }
     return zone;
   }
+  const _el = new THREE.Vector3();
   function contact(S, ch, MP) {
     MP.strikePoint(ch, S.kind, S.arm, _v);
-    const r = FIST_R * (scaleOf(ch) / 0.7) * (S.kick ? 1.3 : 1);
+    let r = FIST_R * (scaleOf(ch) / 0.7) * (S.kick ? 1.3 : 1);
+    if (S.wrow && !S.kick && S.wrow.len > 0) {
+      // the weapon meets him, not the hand: carry the point out along the
+      // forearm (elbow -> wrist) by the weapon's length
+      const low = S.arm === "l" ? ch.low && ch.low.la : ch.low && ch.low.ra;
+      if (low) {
+        low.getWorldPosition(_el);
+        _w.subVectors(_v, _el);
+        const l = _w.length();
+        if (l > 1e-4) _v.addScaledVector(_w, S.wrow.len * (scaleOf(ch) / 0.7) / l);
+      }
+      r = Math.max(r, S.wrow.r);
+    }
     let hit = null, zone = null;
     if (S.tgt) { zone = testTarget(S, S.tgt, _v, r); if (zone) hit = S.tgt; }
     else if (S.opts.candidates) {
@@ -654,9 +896,14 @@
     if (typeof ch.setHandPose === "function") ch.setHandPose("both", on ? "fist" : "relaxed");
     return true;
   };
-  V.block = function (a, dur) {
+  V.block = function (a, dur, held) {
     const B = bod(a), ch = B && B.ch;
     if (!ch || B.down()) return false;
+    // the moment the hands come UP is what a parry is timed off (a guard
+    // already held is not raised again by holding it). held: the hands were
+    // up already (a cover rolled by a game, not a read): never a parry.
+    if (held) ch.blockAt = -9;
+    else if (!(ch.blockT > 0) && !((ch.blockK || 0) > 0.3)) ch.blockAt = clock;
     ch.blockT = Math.max(ch.blockT || 0, dur == null ? 0.5 : dur);
     return true;
   };
@@ -1055,35 +1302,6 @@
   };
 
   /* ============================================================
-     THE FIGHTER — the timing brain for HOW an exchange looks. The BRAIN
-     lead decides a man fights; this decides his next beat:
-       · combinations with rhythm (jab-cross, jab-jab-cross, cross-hook,
-         body-head, jab-body...), the guard back between them, rest beats;
-       · reads the other man's wind-up (his fighter's telegraph, or his rig's
-         punch clock) and blocks or slips after a human reaction time
-         (0.30 s for a brawler, 0.18 s for a pro) — if he reads it in time;
-       · steps in to his range and back out of the other man's;
-       · gets tired (ch.winded), and tired men throw less and slower;
-       · never spams: at most MAXN blows in any WINDOW seconds.
-     F.tick(dt, target, opts) -> { type: "strike"|"block"|"slip"|"step", kind, arm, dir, x, z } | null
-     opts.perform: run the action itself (strike/block/slip/step) with
-       opts.onLand / onWhiff / onBlocked. opts.rng / opts.seed: deterministic.
-     ============================================================ */
-  const COMBOS = [
-    { k: ["jab"], w: 1.2, r: "mid" },
-    { k: ["jab", "cross"], w: 1.6, r: "mid" },
-    { k: ["jab", "jab", "cross"], w: 0.9, r: "mid" },
-    { k: ["cross", "hook"], w: 0.9, r: "mid" },
-    { k: ["jab", "cross", "hook"], w: 0.8, r: "mid" },
-    { k: ["body", "hook"], w: 0.8, r: "mid" },
-    { k: ["jab", "body"], w: 0.7, r: "mid" },
-    { k: ["hook", "cross"], w: 0.5, r: "mid" },
-    { k: ["upper", "hook"], w: 0.9, r: "close" },
-    { k: ["body", "upper"], w: 0.6, r: "close" },
-    { k: ["elbow"], w: 0.35, r: "close" },
-  ];
-  const WINDOW = 2.0, MAXN = 4;
-  /* ============================================================
      GROUND AND POUND — the one hit button on a man who is down.
      (OWNER: "add headbutting and ground and pound, legit UFC level".)
      V.groundStrike(att, tgt, opts) gets you ON him the first time (a quick
@@ -1224,33 +1442,9 @@
     };
   }
   V.fighterRng = mulberry;
-  function Fighter(a, o) {
-    o = o || EMPTY;
-    this.a = a;
-    this.skill = clamp01(o.skill != null ? o.skill : (a.skill != null ? a.skill : 0.5));
-    this.aggr = clamp01(o.aggression != null ? o.aggression : 0.55);
-    this.rng = o.rng || mulberry(o.seed != null ? o.seed : ((Math.random() * 1e9) | 0));
-    this.state = "guard";
-    this.combo = null; this.ci = 0;
-    this.restT = 0.4 + this.rng() * 0.5;
-    this.stam = 1;
-    this.clock = 0;
-    this.log = new Float64Array(8); this.logN = 0;
-    this.readN = -1; this.defT = -1; this.defKind = null; this.defDir = 1;
-    this.stepCD = 0;
-    this.act = { type: null, kind: null, arm: null, dir: 0, x: 0, z: 0 };
-    this.tel = { kind: null, prog: 0, dur: 0, impactIn: 0, n: 0 };
-    this.thrown = 0;
-  }
-  Fighter.prototype.recent = function () {
-    let n = 0;
-    for (let i = 0; i < this.log.length; i++) if (this.log[i] > 0 && this.clock - this.log[i] < WINDOW) n++;
-    return n;
-  };
-  Fighter.prototype.telegraph = function () {
-    const B = bod(this.a), ch = B && B.ch;
-    return telegraphOfRig(ch, this.tel);
-  };
+  /* THE FIGHTER (the AI brain that decides the next beat of an exchange) and
+     the group around a man moved to systems/melee.js (CBZ.melee), which
+     publishes V.fighter. This file is HOW a blow lands, not who throws it. */
   function telegraphOfRig(ch, out) {
     if (!ch || !(ch.punchT > 0 || ch.kickT > 0)) return null;
     const MP = MPf();
@@ -1264,146 +1458,9 @@
     out.n = ch._mSwingN || 0;
     return out;
   }
-  const _telO = { kind: null, prog: 0, dur: 0, impactIn: 0, n: 0 };
-  function telegraphOf(t) {
-    if (t && t._vfS) return t._vfS.telegraph();
-    const B = bod(t);
-    return telegraphOfRig(B && B.ch, _telO);
-  }
-  Fighter.prototype.tick = function (dt, target, o) {
-    o = o || EMPTY;
-    const a = this.a, B = bod(a), ch = B && B.ch;
-    this.clock += dt;
-    if (!B || B.dead() || B.down() || !target) return null;
-    const Bt = bod(target);
-    if (!Bt || !Bt.pos || Bt.dead()) return null;
-    const mine = strikeOf(a);
-    // stamina: every blow costs, the guard breathes it back
-    this.stam = Math.min(1, this.stam + dt * (mine ? 0.04 : 0.16));
-    if (ch) { ch.winded = clamp01(1 - this.stam * 1.25); ch.fightStance = true; }
-    const ap = B.pos, tp = Bt.pos;
-    const dx = tp.x - ap.x, dz = tp.z - ap.z, dist = Math.hypot(dx, dz) || 1e-4;
-    const ux = dx / dist, uz = dz / dist;
-    const A = this.act;
-    A.type = null;
-    // HE IS DOWN: get on him and pound him out (a burst, then you get off him
-    // the way a fighter does when the ref is not stopping it fast enough)
-    if (Bt.down()) {
-      if (mine || !o.perform || o.groundAndPound === false) return null;
-      if (this.gnpLeft == null) this.gnpLeft = 3 + ((this.rng() * (3 + 4 * this.aggr)) | 0);
-      if (this.gnpLeft <= 0) return null;
-      if (dist > 2.0) return this.footwork(dt, dist, ux, uz, 1.2, o, target);
-      if (this.rng() > (1.6 + 2.4 * this.aggr) * dt) return null;
-      if (!V.groundStrike(a, target, { onLand: o.onLand, rng: this.rng })) return null;
-      this.gnpLeft--; this.thrown++;
-      this.stam = Math.max(0, this.stam - 0.08);
-      A.type = "ground"; A.kind = "gnp";
-      return A;
-    }
-    this.gnpLeft = null;
-    if (!mine) B.face(Math.atan2(dx, dz), Math.min(1, dt * 8));
-    // ---- DEFENCE: read his wind-up, answer after a human reaction time ----
-    const tel = Bt.down() ? null : telegraphOf(target);
-    if (tel && tel.n !== this.readN && tel.prog < 0.4) {
-      this.readN = tel.n;
-      const rt = 0.30 - 0.12 * this.skill + (this.rng() - 0.5) * 0.06;
-      this.defT = rt;
-      const r = this.rng();
-      const pBlock = 0.62 - 0.30 * this.skill, pSlip = 0.26 + 0.24 * this.skill;
-      this.defKind = r < pBlock ? "block" : r < pBlock + pSlip ? "slip" : "pull";
-      if (MPf() && MPf().levelOf(tel.kind) === "body") this.defKind = r < 0.5 ? "pull" : "block";
-      this.defDir = this.rng() < 0.5 ? -1 : 1;
-      this.defAt = this.clock;
-    }
-    if (this.defT >= 0) {
-      this.defT -= dt;
-      if (this.defT < 0) {
-        this.defT = -1;
-        // A punch lands 0.1-0.15 s after it starts: nobody reacts to the
-        // FIRST one. What a fighter reacts to is the exchange: he saw it start,
-        // and after his reaction time he covers up or moves his head for the
-        // shots that come behind it (or the tail of a slow one).
-        if (this.clock - this.defAt < 0.65 && !mine && dist < V.reachOf("overhand", target) + 0.2 &&
-            this.rng() < 0.35 + 0.6 * this.skill) {
-          A.type = this.defKind === "block" ? "block" : "slip";
-          A.kind = this.defKind; A.dir = this.defDir;
-          this.state = "guard";
-          return this.perform(o, target);
-        }
-      }
-    }
-    // ---- OFFENCE ----
-    const reachMid = V.reachOf("jab", a), reachClose = V.reachOf("upper", a);
-    if (this.state === "combo") {
-      if (mine && mine.p < 0.62) return null;                   // let this one finish its beat
-      if (this.ci >= this.combo.length) {
-        this.state = "rest";
-        this.restT = (0.55 + this.rng() * 0.9) * (1 + (1 - this.stam) * 1.4) * (1.2 - 0.4 * this.aggr);
-        return null;
-      }
-      if (this.recent() >= MAXN) return null;
-      const kind = this.combo[this.ci++];
-      return this.strikeAct(kind, o, target);
-    }
-    if (this.state === "rest") {
-      this.restT -= dt;
-      if (this.restT > 0) return this.footwork(dt, dist, ux, uz, reachMid, o, target);
-      this.state = "guard";
-    }
-    // guard: pick a moment to open up
-    if (mine) return null;
-    if (dist > reachMid + 0.55) return this.footwork(dt, dist, ux, uz, reachMid, o, target);
-    if (this.stam < 0.22 || this.recent() >= MAXN) return this.footwork(dt, dist, ux, uz, reachMid, o, target);
-    const want = (0.8 + 1.6 * this.aggr) * dt;
-    if (this.rng() > want) return this.footwork(dt, dist, ux, uz, reachMid, o, target);
-    const close = dist < reachClose + 0.15;
-    let tot = 0;
-    for (let i = 0; i < COMBOS.length; i++) if ((COMBOS[i].r === "close") === close || (!close && COMBOS[i].r === "mid")) tot += COMBOS[i].w;
-    let pick = this.rng() * tot, c = COMBOS[0];
-    for (let i = 0; i < COMBOS.length; i++) {
-      const C = COMBOS[i];
-      if ((C.r === "close") !== close) continue;
-      pick -= C.w;
-      if (pick <= 0) { c = C; break; }
-    }
-    this.combo = c.k; this.ci = 0; this.state = "combo";
-    return this.strikeAct(this.combo[this.ci++], o, target);
-  };
-  Fighter.prototype.strikeAct = function (kind, o, target) {
-    const A = this.act;
-    A.type = "strike"; A.kind = kind; A.arm = null;
-    this.log[this.logN++ % this.log.length] = this.clock;
-    this.stam = Math.max(0, this.stam - (kind === "jab" ? 0.07 : kind === "cross" || kind === "body" ? 0.11 : 0.13));
-    this.thrown++;
-    return this.perform(o, target);
-  };
-  Fighter.prototype.footwork = function (dt, dist, ux, uz, reach, o, target) {
-    this.stepCD -= dt;
-    if (this.stepCD > 0) return null;
-    const A = this.act;
-    const lo = reach - 0.45, hi = reach + 0.1;
-    if (dist > hi) { A.type = "step"; A.x = ux; A.z = uz; A.dir = 1; }
-    else if (dist < lo) { A.type = "step"; A.x = -ux; A.z = -uz; A.dir = -1; }
-    else if (this.rng() < 0.25) { const s = this.rng() < 0.5 ? 1 : -1; A.type = "step"; A.x = uz * s; A.z = -ux * s; A.dir = 0; }   // circle
-    else return null;
-    this.stepCD = 0.45 + this.rng() * 0.35;
-    return this.perform(o, target);
-  };
-  Fighter.prototype.perform = function (o, target) {
-    const A = this.act;
-    if (!o.perform || !A.type) return A.type ? A : null;
-    if (A.type === "strike") {
-      const S = V.strike(this.a, target, { kind: A.kind, arm: A.arm || undefined, onLand: o.onLand, onWhiff: o.onWhiff, onBlocked: o.onBlocked, rng: this.rng, maxLunge: 0.3 });
-      if (!S) { this.ci = Math.max(0, this.ci - 1); return null; }
-    } else if (A.type === "block") V.block(this.a, 0.45);
-    else if (A.type === "slip") V.slip(this.a, A.dir, A.kind === "pull" ? "pull" : "slip");
-    else if (A.type === "step") V.step(this.a, A.x, A.z, 0.3);
-    return A;
-  };
-  V.fighter = function (a, o) {
-    if (!a) return null;
-    return a._vfS || (a._vfS = new Fighter(a, o));
-  };
+  // what the man in front of you is throwing (null = nothing): read off his rig
+  V.telegraphOf = function (t, out) { const B = bod(t); return telegraphOfRig(B && B.ch, out || { kind: null, prog: 0, dur: 0, impactIn: 0, n: 0 }); };
+  V.strikeClock = function () { return clock; };
 
   if (CBZ.onUpdate) CBZ.onUpdate(86, update);
 })();

@@ -453,10 +453,11 @@
     // a charge / the detonator / a frag in hand (systems/helditems.js): FIRE is its use
     if (CBZ.heldItem && CBZ.heldItem.use(down)) return;
     if (((CBZ.fps && CBZ.fps.active) || (CBZ.weaponThirdPersonActive && CBZ.weaponThirdPersonActive())) && CBZ.fpsFire) CBZ.fpsFire(down);
-    else if (down) {
-      if (CBZ.islandModeOn(CBZ.game.mode)) { if (CBZ.grapple) CBZ.grapple.punch(); }
-      else if (CBZ.punch) CBZ.punch();
-    }
+    else if (CBZ.islandModeOn(CBZ.game.mode)) { if (down && CBZ.grapple) CBZ.grapple.punch(); }
+    // the fists: systems/melee.js's one button (press throws, hold guards,
+    // releasing a hold throws the power shot; the stick picks the blow)
+    else if (CBZ.melee && CBZ.melee.trigger) CBZ.melee.trigger(down);
+    else if (down && CBZ.punch) CBZ.punch();
   }
   // Refcounted trigger: every way FIRE can be down (the physical button, each
   // aim/scope finger currently slid onto it) holds one count; the weapon sees

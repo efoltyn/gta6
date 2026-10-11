@@ -221,6 +221,12 @@
   // weapon is out (the mousedown listener at the bottom of this file
   // deliberately stands down whenever playerArmed() is true).
   const BLADE_W = { kind: "shank", blade: true, mass: 0.2 };
+  // what each blow is worth over a jab, before where it lands (a kick has
+  // the leg behind it; a knee is the hardest thing you can throw inside)
+  const KIND_DMG = { cross: 1.16, hook: 1.25, upper: 1.25, body: 1.1, bodyStraight: 1.05, overhand: 1.4,
+    elbow: 1.3, knee: 1.45, headbutt: 1.3, kick: 1.25, lowKick: 1.1, roundKick: 1.6 };
+  // the strike's name in vitals' vocabulary (how much daze it carries)
+  const BLUNT_W = { elbow: "elbow", headbutt: "headbutt", knee: "knee", kick: "kick", roundKick: "kick", lowKick: "kick" };
   function punch(actor, opts) {
     const V = CBZ.verbs;
     if (!V || !V.strike) return { ok: false, msg: "" };
@@ -246,13 +252,17 @@
     const spec = blade ? bladeSpec() : null;
 
     const next = cuffs ? 1 : CBZ.now - lastPunch < 980 ? combo + 1 : 1;
-    // A fist winds up every third beat into a hook. A shank has no wind-up —
-    // its "heavy" is the DEEP one you get for staying on him, every fourth.
-    const heavy = !cuffs && (blade ? next % 4 === 0 : next % 3 === 0);
+    // WHAT IS THROWN is systems/melee.js's one control grammar when the
+    // button came through it (opts.kind: tap / tap+direction / the power
+    // release); a bare call keeps the old rhythm. A fist winds up every third
+    // beat into a hook; a shank's "heavy" is the DEEP one, every fourth.
+    const picked = !cuffs && opts && opts.kind ? opts.kind : null;
+    const heavy = picked ? !!opts.heavy : !cuffs && (blade ? next % 4 === 0 : next % 3 === 0);
     // CHEST TO CHEST the heavy beat is the HEADBUTT: there is no room to
     // turn a hook over, so the forehead goes through his nose instead
-    const close = !cuffs && !blade && heavy && closeFoe(hasTarget ? actor : null) < 0.82;
-    const kind = cuffs ? "kick" : blade ? "stab" : (heavy ? (close ? "headbutt" : "hook") : (next % 2 ? "jab" : "cross"));
+    const close = !cuffs && !blade && !picked && heavy && closeFoe(hasTarget ? actor : null) < 0.82;
+    const kind = cuffs ? "kick" : picked ? (blade && (picked === "slash" || picked === "stab") ? picked : blade ? "stab" : picked)
+      : blade ? "stab" : (heavy ? (close ? "headbutt" : "hook") : (next % 2 ? "jab" : "cross"));
     // no man named: square up to where you are looking; the swing finds
     // whoever is actually there
     if (!hasTarget && CBZ.playerChar && CBZ.lerpAngle) {
@@ -271,12 +281,12 @@
     const fresh = blade ? (0.66 + 0.34 * stam) : (0.35 + 0.65 * stam);
     const attack = {
       heavy, kind, blade, fresh,
-      dmg: baseDmg * (blade ? (heavy ? 1.55 : 1) : (heavy ? 1.8 : (kind === "cross" ? 1.16 : 1))) * fresh * (cuffs ? 0.9 : 1),
+      dmg: baseDmg * (blade ? (heavy ? 1.55 : 1) : (heavy ? 1.8 : (KIND_DMG[kind] || 1))) * fresh * (cuffs ? 0.9 : 1),
     };
     // a held point reaches further than a fist: the step in covers the rest
-    const maxLunge = blade ? Math.max(0.75, (spec.range || BLADE_DEF.range) + (heavy ? 0.16 : 0) - 0.95) : 0.75;
+    const maxLunge = blade ? Math.max(0.75, (spec.range || BLADE_DEF.range) + (heavy ? 0.16 : 0) - 0.95) : (picked && opts.lunge ? 0.95 : 0.75);
     const S = V.strike(playerActor(), hasTarget ? actor : null, {
-      kind, heavy, arm: blade ? "r" : undefined, speed: cuffs ? 0.8 : undefined,
+      kind, heavy, arm: blade ? "r" : (picked && opts.arm) || undefined, speed: cuffs ? 0.8 : undefined,
       weapon: blade ? BLADE_W : null,
       candidates: hasTarget ? null : candidates,
       maxLunge,
@@ -292,7 +302,7 @@
     // a point) is now his forearms actually in front of his face: a head shot
     // lands on them, and a hook to the body or a shank low goes under.
     const T = S.aimT;
-    if (T && !heavy && CBZ.econ.rng() < (blade ? 0.06 : 0.16)) V.block(T, 0.42);
+    if (T && !heavy && CBZ.econ.rng() < (blade ? 0.06 : 0.16)) V.block(T, 0.42, true);   // already up: a cover, never a parry
     // a swing is a swing: systems/capture.js reads it as resisting an order
     CBZ.game._lawSwingT = CBZ.game.elapsed || 0;
     return { ok: true, msg: "" };
@@ -337,8 +347,11 @@
        never a death: what the blow does to him is vitals.blunt's call. */
     actor.hp = Math.max(1, actor.hp - dmg);
     const scale = CBZ.meleeScale ? CBZ.meleeScale(CBZ.player, actor) : 1;
-    const out = V ? V.blunt(actor, { zone: res.zone || "head", power: res.power, weapon: "fist", heavy,
-      by: CBZ.player, dirX: res.dir.x, dirZ: res.dir.z, mul: attack.fresh * scale,
+    // walking into it (res.counter) or never seeing it (res.blind) is what
+    // turns an ordinary shot into the one that drops him
+    const moment = (res.counter ? 1.35 : 1) * (res.blind ? 1.25 : 1);
+    const out = V ? V.blunt(actor, { zone: res.zone || "head", power: res.power, weapon: BLUNT_W[res.kind] || "fist", heavy,
+      by: CBZ.player, dirX: res.dir.x, dirZ: res.dir.z, mul: attack.fresh * scale * moment,
       fromX: CBZ.player.pos.x, fromZ: CBZ.player.pos.z }) : "none";
     /* BLOOD IS EARNED, AND IT IS NOT A DICE ROLL (owner: "blood flying if it's
        a hard enough punch but no fake shit blood on every punch"). A HEAVY
@@ -593,15 +606,64 @@
   //   • first-person   → fpsmode owns LMB (shoot / FPS-punch)
   //   • armed          → LMB fires the gun (over-the-shoulder)
   // Requires pointer-lock so the click that re-grabs the cursor doesn't swing.
+  //
+  // THE BUTTON IS systems/melee.js's ONE GRAMMAR (CBZ.melee.trigger): the
+  // press throws (tap = the next in the combination; with the stick held it
+  // is the step-in cross, the hook from that side, the push kick, the
+  // tackle at a sprint), holding it raises the guard, letting go of a hold
+  // throws the power shot. This file is the prison's adapter: what can be
+  // hit, and what a landed blow costs. The city has its own (city/combat.js).
+  function fightReady() {
+    if (CBZ.islandModeOn(CBZ.game.mode) || CBZ.game.mode === "city") return false;
+    if (CBZ.game.state !== "playing" || CBZ.player.dead) return false;
+    if (CBZ.fps && CBZ.fps.active) return false;
+    if (CBZ.playerArmed && CBZ.playerArmed()) return false;
+    // held: the click is a wrench against his grip (verbs.js)
+    if (CBZ.verbs && CBZ.verbs.playerHeld && CBZ.verbs.playerHeld()) return false;
+    return true;
+  }
+  // the man you would tackle: the nearest standing man in front of you
+  function frontStanding(maxD) {
+    _cf.length = 0; candidates(_cf);
+    const P = CBZ.player, ch = CBZ.playerChar, yaw = CBZ.cam ? cameraFacingYaw() : (ch ? ch.group.rotation.y : 0);
+    const fx = Math.sin(yaw), fz = Math.cos(yaw);
+    let best = null, bd = maxD;
+    for (let i = 0; i < _cf.length; i++) {
+      const p = _cf[i].group.position, dx = p.x - P.pos.x, dz = p.z - P.pos.z, d = Math.hypot(dx, dz);
+      if (d < bd && d > 0.05 && (dx * fx + dz * fz) / d > 0.6) { bd = d; best = _cf[i]; }
+    }
+    _cf.length = 0;
+    return best;
+  }
+  if (CBZ.melee && CBZ.melee.adapt) {
+    CBZ.melee.adapt("*", {
+      ready: fightReady,
+      context(c) {
+        c.dist = closeFoe(null);
+        c.down = !!((CBZ.player._gnpOn && floored(CBZ.player._gnpOn)) || (c.dist > 1.9 && floorTarget()));
+        c.cuffed = !!(CBZ.cuffedPlayer && CBZ.cuffedPlayer.on());
+      },
+      strike(spec) {
+        if (spec.verb === "tackle") {
+          const t = frontStanding(3.4), V = CBZ.verbs;
+          if (!t || !V || !V.tackle) return punch(null, { kind: "cross", heavy: true, lunge: 1 }).ok;
+          const S = V.tackle(playerActor(), t, {});
+          if (S) { stamina = Math.max(0, stamina - 0.3); CBZ.game._lawSwingT = CBZ.game.elapsed || 0; theLaw(t, false, t.kind === "guard" || t.kind === "warden"); }
+          return !!S;
+        }
+        return punch(null, spec.verb === "ground" ? null : spec).ok;
+      },
+      guard(on) { CBZ.player._blocking = on ? 1 : 0; if (CBZ.playerChar) CBZ.playerChar.fightStance = on || CBZ.playerChar.fightStance; },
+    });
+  }
   addEventListener("mousedown", (e) => {
-    if (e.button !== 0) return;
-    if (CBZ.islandModeOn(CBZ.game.mode)) return;
-    if (CBZ.game.state !== "playing" || !document.pointerLockElement) return;
-    if (CBZ.fps && CBZ.fps.active) return;
-    if (CBZ.playerArmed && CBZ.playerArmed()) return;
-    // cuffed: the click is a kick (punch() above); held: the click is a
-    // wrench against his grip (verbs.js)
-    if (CBZ.verbs && CBZ.verbs.playerHeld && CBZ.verbs.playerHeld()) return;
-    punch();   // the swing is the feedback; there is no line left to print
+    if (e.button !== 0 || !document.pointerLockElement || !fightReady()) return;
+    if (CBZ.melee && CBZ.melee.trigger) CBZ.melee.trigger(true);
+    else punch();   // the swing is the feedback; there is no line left to print
+  });
+  addEventListener("mouseup", (e) => {
+    if (e.button !== 0 || !CBZ.melee || !CBZ.melee.trigger || !CBZ.melee.holding()) return;
+    if (CBZ.game.mode === "city") return;
+    CBZ.melee.trigger(false);
   });
 })();
