@@ -23,7 +23,7 @@
                         any OTHER key goes on the page URL (map=water, blood=0, ...)
                         or a JS snippet: run after spawning with (S=subjects, B=__battle, CBZ, THREE, spec)
      --js CODE          a JS snippet in addition to URL params
-     --cams L           front,side,back,left,3q,3qb,top,head,feet,wide,hot,orbit:<yaw>:<pitch>[:dist]
+     --cams L           front,side,back,left,3q,3qb,top,head,feet,wide,hot,lens (the game camera),orbit:<yaw>:<pitch>[:dist]
      --times L          sim seconds (attack: strike phase 0..1); cycle:N = N frames over one gait cycle
      --size WxH         default 640x400; --big = 1280x800
      --jpg              JPEG frames (smaller, faster to Read)

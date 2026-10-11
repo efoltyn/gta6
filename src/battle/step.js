@@ -18,6 +18,8 @@ function stepMan(m, sdt) {
      strand a man mid-air. Tested first, above the death branch, because a man
      who dies IN the hand is still in the hand until it lets go. */
   if (m._apeHeld || m._apeFlying) return;
+  // AND A BODY AN ELEPHANT THREW is the throw's until it lands (player.js)
+  if (m._tossed) { stepTossed(m, sdt); return; }
   if (m.dead) {
     // A SOLVED CORPSE HAS EXACTLY ONE WRITER. quadruped_ragdoll.js owns the
     // group's position and quaternion from the frame the animal died (this

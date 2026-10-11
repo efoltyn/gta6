@@ -420,6 +420,39 @@ CBZ.npcwar.onBoot(function () {
       return !!best;
     },
     youHurt: function (n) { if (YOU.m) hurtMan(YOU.m, n, { byTeam: YOU.m.team === "red" ? "blue" : "red" }); return YOU.down; },
+    /* TAKE OVER, by hand (player.js takeOver). sel: a unit, "a:3" / "b:0"
+       (that side's body by spawn index), or a unit id (the first living one;
+       "a:lion" names the side too). */
+    take: function (sel) {
+      let u = sel && sel.pos ? sel : null;
+      if (!u && typeof sel === "string") {
+        const ix = /^([ab]):(\d+)$/.exec(sel), sd = /^([ab]):(.+)$/.exec(sel);
+        for (let i = 0; i < men.length && !u; i++) {
+          const m = men[i];
+          if (m.dead || m.fled || m.inVeh) continue;
+          if (ix) { if (m.team === (ix[1] === "a" ? "red" : "blue") && m.i === +ix[2]) u = m; continue; }
+          const id = sd ? sd[2] : sel;
+          if (sd && m.team !== (sd[1] === "a" ? "red" : "blue")) continue;
+          if ((m.species && m.species.id === id) || m.unitId === id || (id === "men" && !m.beast && !m.vehicle)) u = m;
+        }
+      }
+      return u ? takeOver(u) : false;
+    },
+    // a tool's thumbs: { ax, az, run, atk, yaw } instead of the keys (null = the keys)
+    youDrive: function (d) { YOU.drive = d || null; return true; },
+    youState: function () {
+      const m = YOU.m, t = YOU.tgt;
+      return { on: !!m, kind: youKind(m), id: m ? m.id : null, hp: m ? Math.round(m.hp) : 0,
+        kills: m ? (m.kills || 0) : 0, tgt: t && !t.dead ? t.id : null,
+        tgtDist: t && m ? Math.round(Math.hypot(t.pos.x - m.pos.x, t.pos.z - m.pos.z) * 10) / 10 : null,
+        strike: YOU.strike ? YOU.strike.mv.id : null, beat: !!YOU.beat, down: YOU.down,
+        moves: YOU.moves || null, hits: YOU.hits || 0, whiffs: YOU.whiffs || 0, tossed: men.filter(function (o) { return !!o._tossed; }).length };
+    },
+    // where the director is looking and why
+    director: function () {
+      return { mode: cam.mode, shot: cam.shot, on: cam.followM ? cam.followM.id : null, score: Math.round(cam.score * 10) / 10,
+        cuts: cam.cuts, slow: SLOW.n, fov: Math.round(cam.fov * 10) / 10, events: CAMEV.length };
+    },
     freeze: function () {
       if (CBZ.micro.stop) CBZ.micro.stop();
       lastWall = 0;                       // the next real frame must not see a gap
