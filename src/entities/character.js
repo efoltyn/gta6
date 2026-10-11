@@ -349,6 +349,7 @@
     const s = rig && rig.skinSlots;
     if (!s) return;
     if (CBZ.footwear) CBZ.footwear.lod(rig, lod);
+    if (CBZ.combatKit && rig._combatKit) CBZ.combatKit.lod(rig, lod);   // entities/combatkit.js: the carrier swaps with the limbs
     const lists = [s.arms, s.armsLower, s.legs, s.legsLower];
     for (let j = 0; j < lists.length; j++) {
       const list = lists[j];
@@ -8613,6 +8614,54 @@
     return { NS, outline, span, at: samplesAt, normal: outNormal };
   })();
   CBZ.bodySection = bodySection;
+
+  /* ARMS CLEAR OF THE CARRIER. A vest the width of the chest still meets an
+     arm that hangs against the ribs (the male idle carry tucks the hands IN,
+     armOutZ -0.08). People in plate carry their arms a touch out from it, so
+     the rig does: the smallest idle abduction (rig.armOutZ, read every frame
+     by animChar's idle/walk carry) that puts every upper-arm and forearm
+     section down the vest's height `clear` outside its side face, measured
+     off the rig's own lofted arm (CBZ.humanLimbHalfAt) at mount time.
+     Restored when the last chest piece comes off (releaseMesh). Shared by
+     city/armor.js's vests, warlord/outfits.js's carrier and
+     entities/combatkit.js's plate carriers (moved here from city/armor.js). */
+  function humanArmClear(ch, halfW, yTop, yBot, clear) {
+    const la = ch && ch.parts && ch.parts.la, P = ch && ch.profile;
+    if (!la || !P || !la.userData || !la.userData.main || !CBZ.humanLimbHalfAt) return null;
+    const up = la.userData.main, lo = la.userData.lower, low = la.userData.low;
+    const armX = Math.abs(la.position.x), pivY = la.position.y;
+    const base = P.armOutZ;
+    const samples = [];
+    for (const seg of [up, lo]) {
+      const g = seg && seg.geometry, L = g && g.userData && g.userData.limb;
+      if (!L) continue;
+      // along the segment, in the SHOULDER frame (the forearm hangs straight
+      // off the elbow at idle; its small bend only moves it forward)
+      const off = seg === up ? up.position.y : (low ? low.position.y : 0) + seg.position.y;
+      for (let t = 0; t <= 1.0001; t += 0.125) {
+        const yl = L.y0 - t * L.sy, h = CBZ.humanLimbHalfAt(g, yl);
+        if (h) samples.push([off + yl, h.hx]);
+      }
+    }
+    // the first angle that clears everything; if none can (a piece reaching
+    // up into the armpit, where the arm cannot swing away from its own
+    // pivot), the angle that leaves the least of the arm inside it
+    let best = base, bestDef = Infinity;
+    for (let a = base; a <= 0.45; a += 0.01) {
+      let def = 0;
+      for (const [dy, hx] of samples) {
+        const y = pivY + dy * Math.cos(a);                 // the section's height, arm swung out by a
+        if (y > yTop || y < yBot) continue;
+        const cx = armX - dy * Math.sin(a);                // dy < 0 below the pivot: out is +x
+        const hw = typeof halfW === "function" ? halfW(y) : halfW;      // a width PROFILE (drawn shells) or one number
+        def = Math.max(def, hw + clear - (cx - hx * Math.cos(a)));
+      }
+      if (def <= 0) return Math.max(base, a);
+      if (def < bestDef - 1e-4) { bestDef = def; best = a; }
+    }
+    return Math.max(base, best);
+  }
+  CBZ.humanArmClear = humanArmClear;
 
   /* ---- THE HOLSTER SITS ON THE HIP -----------------------------------------
      OWNER (iPad): "the holster on the side of the player's hip is like a foot

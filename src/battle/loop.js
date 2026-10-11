@@ -227,6 +227,8 @@ function frame(dt) {
       const showGun = d2 < 130 * 130;
       if (m._weaponProp.visible !== showGun) m._weaponProp.visible = showGun;
     }
+    // the sling's free runs to the rifle's swivels (entities/combatkit.js), near the lens only
+    if (m.char && m.char._kitSling && CBZ.combatKit) CBZ.combatKit.sling(m.char, m._weaponProp, d2 < 40 * 40);
   }
   if (MASS.on) MASS.frame(realDt);      // promotion, demotion, ghosts, the crowd draw
   stepKill(realDt);                     // ...on WALL time: see THE KILL CAM

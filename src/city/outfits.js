@@ -229,7 +229,9 @@
                  colors: { legs: 0x24272e, torso: 0x2c2f36, collar: 0xf1f2ec, arms: 0x2c2f36, shoes: 0x0c0d10, shirt: 0xf1f2ec, tie: 0x7a1f2b, belt: 0x16171b } },
     sheriff:   { id: "sheriff", hat: "campaign:sheriff",   name: "Sheriff Khakis",   tier: "law",    who: "county deputies",  price: 0,    drip: 0, cap: true, capColor: 0x8a7752, duty: "sheriff",
                  colors: { legs: 0x5a4632, torso: 0xb8a070, collar: 0x7a6a4a, arms: 0xb8a070, shoes: 0x2b241c, belt: 0x1a140c } },
-    soldier:   { id: "soldier", hat: "milcap",   name: "Olive Fatigues",   tier: "work",   who: "soldiers",         price: 0,    drip: 0, cap: true, capColor: 0x44503a,
+    // the city's soldiers wear the Republic's issue (entities/combatkit.js
+    // "rifleman": OCP, the ACH, a plate carrier; the cap is under the helmet)
+    soldier:   { id: "soldier", hat: "milcap",   name: "Olive Fatigues",   tier: "work",   who: "soldiers",         price: 0,    drip: 0, cap: true, capColor: 0x44503a, kit: "rifleman", nation: "republic",
                  colors: { legs: 0x4a5238, torso: 0x4a5238, collar: 0x3a4030, arms: 0x4a5238, shoes: 0x2b2a22, gloves: 0x3a3a2c } },
     office:    { id: "office",    name: "Office Slacks",    tier: "work",   who: "accountants",      price: 0,    drip: 1,
                  colors: { legs: 0x39414f, torso: 0x9ab4c8, collar: 0x7d97ab, arms: 0x9ab4c8, shoes: 0x23262b } },
@@ -730,6 +732,7 @@
       if (ch._bandana && CBZ.cityAttachBandana) CBZ.cityAttachBandana(ch, null);
       detailKit(ch, null);
       if (CBZ.dutyKit) CBZ.dutyKit.wear(ch, null);
+      if (CBZ.combatKit && ch._combatKit) CBZ.combatKit.strip(ch);
       paintGloves(ch, null);
       if (CBZ.tattoo) CBZ.tattoo.refresh(ch);
       return true;
@@ -822,6 +825,15 @@
     // radio, torch, cuff case, epaulettes and the metal badge ride the uniform
     // as ONE mesh, and any other fit (or none) takes them off.
     if (CBZ.dutyKit) CBZ.dutyKit.wear(ch, rec || null);
+    // THE COMBAT KIT (entities/combatkit.js): rec.kit names a soldier's loadout
+    // (plate carrier, helmet, eye pro, gloves, knee pads, boots, the nation's
+    // camouflage) and it IS armour (systems/armour.js); any other fit strips it.
+    // The player's own armour is city/armor.js's vest, so his body never wears
+    // a second one.
+    if (CBZ.combatKit) {
+      if (rec && rec.kit && ch !== CBZ.playerChar) CBZ.combatKit.wear(ch, { loadout: rec.kit, nation: rec.nation || "republic", seed: ch.group ? ch.group.id : 0 });
+      else if (ch._combatKit) CBZ.combatKit.strip(ch);
+    }
     // INK (entities/tattoo.js): whatever this fit left bare skin — a tee's
     // forearms, a tank's arms, the hands, the throat — wears the body's own
     // tattoos; whatever it covered has just been painted cloth

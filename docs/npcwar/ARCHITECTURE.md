@@ -100,10 +100,10 @@ change it only in coordination.
 | `src/battle/menu.js` | the war room: matchups (`MATCHUPS`), grounds, sides, best-of, the call | menu / UX |
 | `src/battle/teams.js` | the two slots, `SIDES`, `refreshSides()`, nation marks, flags | core |
 | `src/battle/arms.js` | the guns on the menu, the mixed issue, punch per training | weapons |
-| `src/battle/men.js` | `makeMan`, uniforms, helmets | humans |
+| `src/battle/men.js` | `makeMan`, uniforms; `kitUp` dresses each man through `CBZ.combatKit` (§9a) | humans / armour |
 | `src/battle/beasts.js` | `makeBeast`, `animateBeast`, `beastFight`: the animal unit, routed through `CBZ.unitKit` | core (species agents edit their species file instead) |
 | `src/battle/vehicles.js` | `makeVehicle`, the vehicle sim, crew mount/dismount | vehicles / armour |
-| `src/battle/damage.js` | `hurtMan`: the one damage funnel, reachability | armour / weapons |
+| `src/battle/damage.js` | `hurtMan`: the one damage funnel (asks `CBZ.armour.resolve`, §9a), reachability | armour / weapons |
 | `src/battle/death.js` | a beast dies, a man dies, the sinking dead | physics / humans |
 | `src/battle/physics.js` | the grid, body separation, pinned pairs, the flow field (`NAV`), COM | physics |
 | `src/battle/fire.js` | the trigger (aimed / suppressive fire, pairs, bursts, reloads, stoppages, grenades, the gun's stance), flown rounds, penetration, ricochets, wounds, bleeding, rockets, backblast | weapons |
@@ -673,6 +673,71 @@ pixel per CSS pixel. URL keys win for tools: `?tier=full|mid|far ?fullcap ?midca
 
 ---
 
+## 9a. Kit and armour (shared with Gang City)
+
+A soldier's kit is part of the one human body, not of this page:
+
+| file | what |
+|---|---|
+| `src/entities/combatkit.js` | `CBZ.combatKit`: plate carrier (front/back plate bags on the body's own chest/back, cummerbund round `CBZ.bodySection`, straps over the trapezius crest, MOLLE), role pouches, radio, hydration, IFAK, tourniquet, sling; helmet (`entities/headwear.js` `ballistic` = ACH/ECH, `b6b47` = 6B47, `pasgt`), eye pro (`entities/eyewear.js` `eyepro`), gloves, knee pads, combat boots, ID tape; the nation's camouflage as a triplanar uniform material |
+| `src/warlord/camo.js` | `CBZ.camo`: the camouflage library (OCP, MultiCam, woodland M81, EMR, digital desert, flecktarn, three-colour desert, ...) |
+| `src/systems/armour.js` | `CBZ.armour`: zones, pieces, rounds, `resolve(hit)` |
+
+**Who wears what.** `CBZ.combatKit.roleFor({ tier, wid, i, nation })`: `civ` = civilian (no kit),
+`thug` (or an irregular faction) = militia (chest rig, no plates, no helmet), `swat` = police
+tactical, else by gun and squad slot: `lmg` = machine gunner (100-round box pouches), `sniper` =
+marksman (single 7.62 pouches, rangefinder), every 30th man an officer (admin pouch, manpack radio
+with whip, handset), every squad's tenth a medic (aid bag, IFAK, armband), the rest riflemen
+(three mag pouches, radio, hydration). `pro` wears second-line plates (`grade: "second"`).
+
+**Nations** (`CBZ.combatKit.NATIONS`, by `city/flags.js` id; one look per nation, always):
+republic = OCP + ACH + coyote kit + ESAPI/ESBI; kesh = digital desert + 6B47 + tan + 6B45 Gr.6;
+veridia = flecktarn + ACH + olive + ESAPI; solara = EMR + 6B47 + ranger green + Gr.6; mbeya =
+woodland M81 + PASGT + olive drab + Level III steel. Both arms carry ID tape in the side's mark.
+
+**The armour rules** (`CBZ.armour.resolve(hit) -> res`, documented in full in the file header):
+- A hit lands in a zone: skull, face, neck, thorax, abdomen, side, armpit, pelvis, upper arm,
+  forearm, thigh, shin (area-weighted, or the caller's `zone` / `region` / `headshot`).
+- A zone is covered by a piece or not: plates cover 86% of the thorax and the top of the abdomen,
+  soft armour the rest of the torso, side plates or the soft cummerbund the flanks, the helmet 92%
+  of the skull. The face, neck, armpits, pelvis and limbs are bare: that is where wounds happen.
+- Threat v rating on one NIJ-like scale (9 mm 1.0, IIIA 2.2, 5.56 3.4, 7.62x51 3.7, Level III
+  plate 3.75, ESAPI 4.8, .50 BMG 6.5): a logistic P(pen). Stopped = blunt trauma (10-20% of the
+  damage), a stagger (`CBZ.soldier.hit`) and a winded man (`res.winded` s: half speed). Beaten = the
+  round goes on with 72-90% of its damage and leaves a `CBZ.soldier.wound`.
+- Helmets turn ~23% of rifle rounds (a deflection: stopped, hard stagger).
+- Plates crack: every stop costs integrity in proportion to the energy, and a cracked ceramic
+  plate's rating falls, so a burst into one plate gets through.
+- Blasts are cut by the share of the body the kit covers; blows, bites and crushes keep their
+  own numbers, a plate or helmet only takes some off.
+- Unarmoured, the zone multipliers average exactly 1 for the body and 2.2 for the head, so balance
+  moves only where there is armour.
+
+**The hooks for weapons.** Two doors, one rule book (`systems/armour.js`):
+- **A flown round** (§9b, `fire.js` armsHit): `CBZ.battleArmour.layer(unit, zone, { cart, v, v0, dx, dz })
+  -> {mat, mm} | null`, asked for the ballistics zone the round enters (`head`, `torso`, `gut`; a
+  limb returns null). It rolls which piece covers the point, decides plate v cartridge with the
+  rules above (the round's steel penetration at its speed against the piece's cracked rating as mm
+  of steel, `CBZ.armour.rateMM`; aramid is cut by anything over ~600 m/s; a helmet's deflection),
+  cracks the piece, and answers in ballistics' language: a stop is a layer thicker than the round
+  can cross (ballistics then deals the blunt trauma), a defeat is a layer it crosses losing speed.
+  The stagger and winded seconds are left on `unit.armour.last`, and `hurtMan` (which sees
+  `imp.bullet` and does not resolve again) winds the man.
+- **Anything else** through `hurtMan(m, dmg, imp)`: `CBZ.armour.resolve` runs when `imp.kind` is
+  given or inferred (bomb = blast, beast = bite, hull = blast, fist = blow) and returns `res`. A
+  caller with no ballistics passes `{ kind: "bullet", round: "556" | { threat, energy }, wid, zone? }`.
+- **Gang City's hitscan** (`systems/fpsmode.js` cityGunHit) asks `CBZ.armour.resolve` with
+  `raw: true` (its own head and limb multipliers already applied) for a soldier wearing kit; a stop
+  is a spark and no lethal headshot.
+
+**Gang City.** `city/outfits.js`'s `soldier` fit is `kit: "rifleman", nation: "republic"`;
+recolorRig wears it (and strips it for any other fit). `entities/crowdgpu.js` bakes a third body,
+the kitted soldier: `look({ soldier: true, shirt, pants, shoes })` (`CBZ.combatKit.crowdLook(spec)`
+gives the colours), and `dressRig` puts the kit on the promoted rig.
+
+`node tools/combatkit-check.mjs`: the fit on 8 bodies x 6 loadouts (nothing inside the torso, the
+plates rest on the body, knee pads on the shins, the arms clear the carrier through idle, walk,
+run and the rifle carries) and the armour rules.
 ## 9b. Weapons: the round is flown, not rolled
 
 Every round any gun on this page fires (a man's rifle, YOUR rifle, a vehicle's machine gun) goes
@@ -731,6 +796,7 @@ node tools/npcwar-headless.mjs     the page's own sim in node: war room, hold, t
                                    rifle, snow/fields, calibration, held v met, vehicles, sides +
                                    series + URL.   node tools/npcwar-headless.mjs 3  runs one.
 node tools/units-kit-check.mjs     the animal kit: planted feet never slide; the dog bit for bit.
+node tools/combatkit-check.mjs     soldier kit fit (every body, every loadout, every carry) + armour rules.
 node tools/npcwar-fidelity.mjs     the tiers fight the page's war (see 9)
 node tools/npcwar-worker-check.mjs the sim worker, both modes
 node tools/npcwar-scale-bench.mjs  1k / 10k / 100k a side, ms per tier

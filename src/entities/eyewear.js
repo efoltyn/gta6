@@ -108,6 +108,9 @@
     round: { shape: "round", frame: "tortoise", lens: "amber" },
     sport: { shape: "wrap", frame: "matte", lens: "sportMirror" },
     agent: { shape: "wrap", frame: "matte", lens: "smoke" },
+    // BALLISTIC EYE PROTECTION (entities/combatkit.js): a soldier's wraparound
+    // shooting glasses, a light grey polycarbonate lens in a matte frame
+    eyepro: { shape: "wrap", frame: "matte", lens: "eyepro" },
   };
   // bling looks + item names -> style
   const LOOK_STYLE = { shades: "wayfarer", shadesDesigner: "navigator", shadesAviator: "aviator", shadesSport: "sport", shadesRetro: "round" };
@@ -534,6 +537,7 @@
     g15: { color: 0x1c2a1f, metalness: 0.25, roughness: 0.05, env: 1.8 },
     mirror: { color: 0x5d82b8, metalness: 0.92, roughness: 0.07, env: 1.3 },
     amber: { color: 0x4a2a0c, metalness: 0.18, roughness: 0.06, env: 1.6 },
+    eyepro: { color: 0x3a3c3a, metalness: 0.35, roughness: 0.04, env: 1.7 },
     sportMirror: { color: 0x2f8f94, metalness: 0.88, roughness: 0.08, env: 1.3 },
     acetate: { color: 0x0b0b0d, metalness: 0.0, roughness: 0.22, env: 1.0 },
     matte: { color: 0x121316, metalness: 0.0, roughness: 0.55, env: 0.5 },

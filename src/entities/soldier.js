@@ -178,6 +178,10 @@
         const C = CARRY[mode] || CARRY.low;
         setArm(P.ra, J.ra, C.ra, 1, dt, 14);
         setArm(P.la, J.la, C.la, 1, dt, 14);
+        // a man in a plate carrier or a chest rig carries the rifle out over it
+        // (entities/combatkit.js: how far his kit stands proud of his chest)
+        const kd = ch._combatKit && ch._combatKit.chestDepth;
+        if (kd) { add(ch, P.ra && P.ra.rotation, "x", -kd); add(ch, P.la && P.la.rotation, "x", -kd); }
         // the rifle rides the stride: a hair of bounce, never a swing
         if (moving) {
           const b = Math.sin((ch.phase || 0) * 2) * 0.025 * Math.min(1, speed / 3);

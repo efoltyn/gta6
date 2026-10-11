@@ -835,7 +835,10 @@ function armsHit(r, u, v) {
   }
   const an = armsAnatomy(u);
   const zone0 = B.HIT_ZONE[first.name] || "torso";
-  const layer = CBZ.battleArmour && CBZ.battleArmour.layer ? CBZ.battleArmour.layer(u, zone0) : null;
+  // (the round rides along: systems/armour.js decides plate v cartridge with
+  // its own rules, cracking and helmet deflection, and answers in this file's
+  // {mat, mm} language)
+  const layer = CBZ.battleArmour && CBZ.battleArmour.layer ? CBZ.battleArmour.layer(u, zone0, { cart: r.c, v: v, v0: r.c.v0, dx: r.dx, dz: r.dz }) : null;
   const res = B.wound(_bTr, an, r.c, v, r.c.v0, layer, _wr);
   if (!res.hit) return v;
   const H = B.harm(res, an, !u.beast);
