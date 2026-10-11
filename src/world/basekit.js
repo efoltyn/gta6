@@ -594,11 +594,13 @@
     opt = opt || {};
     const cv = document.createElement("canvas");
     const W = 2 * P.hx, D = 2 * P.hz;
-    const sc = res / Math.max(W, D);
-    cv.width = Math.round(W * sc); cv.height = Math.round(D * sc);
+    // power-of-two on both sides (WebGL1 mipmaps), each axis its own scale
+    const pot = function (v) { return Math.pow(2, Math.max(8, Math.round(Math.log2(v)))); };
+    cv.width = pot(W >= D ? res : res * W / D); cv.height = pot(D >= W ? res : res * D / W);
+    const sx = cv.width / W, sz = cv.height / D, sc = (sx + sz) / 2;
     const c = cv.getContext("2d");
-    const X = function (x) { return (x + P.hx) * sc; }, Z = function (z) { return (z + P.hz) * sc; };
-    const R = function (r, col) { c.fillStyle = col; c.fillRect(X(r.x0), Z(r.z0), (r.x1 - r.x0) * sc, (r.z1 - r.z0) * sc); };
+    const X = function (x) { return (x + P.hx) * sx; }, Z = function (z) { return (z + P.hz) * sz; };
+    const R = function (r, col) { c.fillStyle = col; c.fillRect(X(r.x0), Z(r.z0), (r.x1 - r.x0) * sx, (r.z1 - r.z0) * sz); };
     const line = function (x0, z0, x1, z1, wm, col, dash) {
       c.strokeStyle = col; c.lineWidth = Math.max(1, wm * sc);
       c.setLineDash(dash ? dash.map(function (v) { return v * sc; }) : []);
@@ -682,9 +684,9 @@
     P.marks.numbers.forEach(function (n) { text(n.text, n.x + 4, n.z, 2.4, 0, SURF.yellow); });
     // HELIPADS: darker disc, white ring, yellow touchdown circle, the H
     P.marks.pads.forEach(function (p) {
-      c.fillStyle = "#6e6c66"; c.beginPath(); c.arc(X(p.x), Z(p.z), p.r * sc, 0, 7); c.fill();
-      c.strokeStyle = SURF.white; c.lineWidth = 0.5 * sc; c.beginPath(); c.arc(X(p.x), Z(p.z), (p.r - 0.6) * sc, 0, 7); c.stroke();
-      c.strokeStyle = SURF.yellow; c.lineWidth = 0.6 * sc; c.beginPath(); c.arc(X(p.x), Z(p.z), (p.r * 0.62) * sc, 0, 7); c.stroke();
+      c.fillStyle = "#6e6c66"; c.beginPath(); c.ellipse(X(p.x), Z(p.z), p.r * sx, p.r * sz, 0, 0, 7); c.fill();
+      c.strokeStyle = SURF.white; c.lineWidth = 0.5 * sc; c.beginPath(); c.ellipse(X(p.x), Z(p.z), (p.r - 0.6) * sx, (p.r - 0.6) * sz, 0, 0, 7); c.stroke();
+      c.strokeStyle = SURF.yellow; c.lineWidth = 0.6 * sc; c.beginPath(); c.ellipse(X(p.x), Z(p.z), (p.r * 0.62) * sx, (p.r * 0.62) * sz, 0, 0, 7); c.stroke();
       R(rect(p.x - 2.6, p.z - 3.2, p.x - 1.6, p.z + 3.2), SURF.white);
       R(rect(p.x + 1.6, p.z - 3.2, p.x + 2.6, p.z + 3.2), SURF.white);
       R(rect(p.x - 1.6, p.z - 0.5, p.x + 1.6, p.z + 0.5), SURF.white);
@@ -713,7 +715,7 @@
     (P.marks.rows || []).forEach(function (r) { line(r.x0, r.z, r.x1, r.z, 0.3, SURF.yellow); });
     // the flag circle and the parade field's border
     const fl = P.anchors.flag;
-    if (fl) { c.fillStyle = SURF.concrete; c.beginPath(); c.arc(X(fl.x), Z(fl.z), 5 * sc, 0, 7); c.fill(); }
+    if (fl) { c.fillStyle = SURF.concrete; c.beginPath(); c.ellipse(X(fl.x), Z(fl.z), 5 * sx, 5 * sz, 0, 0, 7); c.fill(); }
     return cv;
   }
   CBZ.baseKit.paintGround = paintGround;
