@@ -203,6 +203,7 @@ function frame(dt) {
       // of cover and he would stand up straight behind it. One boolean, and
       // the posture the fight brain already chose is finally visible.
       m.char.crouch = crouchPose(m);     // the stance the fight uses (THE MEN: STANCE)
+      m.char.pronePose = m.stance === "prone";   // flat behind the gun (fire.js weaponStance)
       try { CBZ.animChar(m.char, m.speed * speed, dt * every); } catch (e) {}
     }
     const engaged = m.tgt && !m.tgt.dead && m.sees;
