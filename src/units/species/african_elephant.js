@@ -291,11 +291,19 @@
     pushH(H(2.62, 2.2), 0.23, 0.24, 0.23, [HD, 0.6, TB[0], 0.4], "trunk");
     // the trunk, down its rest curve; weights by arc length over the 6 bones
     const tb = D.trunkBase, Lt = D.trunkLen, seg = D.trunkSeg;
-    const NT = 12;
+    // a ring belongs to the bone whose segment it sits in, blended across
+    // each joint, and to the skull near the root, so the trunk bends out of
+    // the face instead of tearing away from it
+    const NT = 16;
     for (let i = 1; i <= NT; i++) {
       const s = i / NT, len = s * Lt;
-      const f = len / seg, i0 = Math.min(TRUNK_N - 1, Math.floor(f)), fr = f - i0;
-      const wts = i0 >= TRUNK_N - 1 ? [TB[TRUNK_N - 1], 1] : [TB[i0], 1 - fr, TB[i0 + 1], fr];
+      const g = len / seg - 0.5;
+      let wts;
+      if (g < 0) { const hw = Math.min(0.6, -g * 1.2); wts = [HD, hw, TB[0], 1 - hw]; }
+      else {
+        const i0 = Math.min(TRUNK_N - 1, Math.floor(g)), fr = g - i0;
+        wts = i0 >= TRUNK_N - 1 ? [TB[TRUNK_N - 1], 1] : [TB[i0], 1 - fr, TB[i0 + 1], fr];
+      }
       const curl = sstep(0.8, 1, s);
       const x = tb.x + 0.1 * K * hs * s + 0.07 * K * hs * curl, y = tb.y - len + 0.03 * K * curl;
       const r = lerp(0.215, 0.07, Math.pow(s, 0.85)) * K * hs * (0.9 + 0.1 * V.trunk);
@@ -321,11 +329,11 @@
     if (D.tuskL > 0) {
       const tp = {};
       for (let sd = -1; sd <= 1; sd += 2) {
-        const L = D.tuskL * (broken && sd > 0 ? 0.45 : 1);
+        const L = D.tuskL, stub = broken && sd > 0 ? 0.42 : 1;
         const st = [];
         const N = 9;
         for (let i = 0; i <= N; i++) {
-          const s = i / N;
+          const s = (i / N) * stub;
           D.tuskAt(s, L, tp);
           const r = D.tuskR * (1 - 0.6 * s) * (i === N && broken && sd > 0 ? 1.1 : 1);
           st.push({ x: tp.x, y: tp.y, z: sd * tp.z, rt: r, rb: r, w: r, wts: [HD, 1] });
@@ -581,13 +589,13 @@
     const D = R.D, K = D.K, key = D.vk;
     let geo = COLLAR.get(key);
     if (!geo) {
-      geo = new THREE.TorusGeometry(1, 0.045 / (0.66 * K), 6, 28);
+      geo = new THREE.TorusGeometry(1, 0.035 / (0.66 * K), 6, 28);
       geo._shared = true; COLLAR.set(key, geo);
     }
     box.geometry = geo;
     const neck = R.bones[R.BN.neck], nb = D.neckB;
     neck.add(box);
-    box.position.set(1.7 * K - nb.x, 2.6 * K - nb.y, 0);
+    box.position.set(1.55 * K - nb.x, 2.58 * K - nb.y, 0);
     box.rotation.set(0, HALF, 0);
     box.scale.set(0.63 * K, 0.7 * K, 0.66 * K);
     box.castShadow = false;
@@ -875,7 +883,8 @@
       const dx = t.pos.x - m.pos.x, dz = t.pos.z - m.pos.z, d = Math.hypot(dx, dz) || 1;
       const want = (D.tuskL > 0 ? D.tuskTip.x : D.faceX + 0.1 * K) * s - 0.1 * s;
       if (d - (t.rad || 0.45) > want) opts.move(m, dx / d, dz / d, Math.min(Math.max(2.2, E.vcap * 0.6) * dt, d - (t.rad || 0.45) - want));
-      face(m, E, t.pos.x, t.pos.z, dt, TURN * 0.7);
+      // close in, an elephant pivots on its forefeet to bring the trunk round
+      face(m, E, t.pos.x, t.pos.z, dt, A.kind === "grab" || A.kind === "swat" ? 2.2 : TURN * 0.8);
     }
     if (A.kind === "gore") {
       if (live && u > 0.33 && u < 0.47 && opts && opts.move) opts.move(m, c, sn, 0.6 * K * s * dt / (0.14 * A.T));
@@ -894,7 +903,10 @@
         if (live && t && !t.dead) {
           const dx = t.pos.x - m.pos.x, dz = t.pos.z - m.pos.z;
           const lx = (c * dx + sn * dz) / s, lz = (-sn * dx + c * dz) / s, tr = (t.rad || 0.45) / s;
-          inReach = lx > D.faceX * 0.8 - tr && lx < D.faceX + D.trunkLen + tr && Math.abs(lz) < 0.6 * K + tr;
+          // anywhere the trunk can swing to: within its length of the root,
+          // forward of the shoulder, up to ~65 degrees off the nose
+          const bx = lx - D.faceX * 0.9, bd = Math.hypot(bx, lz);
+          inReach = lx > D.FJ.x && bd < D.trunkLen + tr && Math.abs(Math.atan2(lz, Math.max(1e-3, lx))) < 1.15;
         }
         if (inReach) {
           A.held = true;
@@ -1053,12 +1065,12 @@
   // ------------------------------------------------------------ the pose
   // trunk shapes: z-rotation per bone (+ curls forward / up)
   const SH = {
-    raise: [2.0, 0.5, 0.25, -0.35, -0.5, -0.35],    // the trumpet S
-    peri:  [1.45, 0.15, 0.1, 0.0, 0.05, 0.25],       // up and forward, smelling
+    raise: [0.75, 0.7, 0.62, 0.45, 0.05, -0.35],     // the trumpet: up in a curve, tip flared
+    peri:  [0.5, 0.42, 0.32, 0.22, 0.15, 0.25],      // up and forward, smelling
     tuck:  [-0.15, -0.35, -0.45, -0.5, -0.5, -0.45], // curled under, out of harm (the real charge)
-    reach: [1.2, 0.08, 0.05, 0.05, 0.1, 0.15],
-    lift:  [2.2, 0.5, 0.4, 0.5, 0.5, 0.4],
-    whip:  [1.4, 0.05, -0.05, -0.1, -0.1, 0.0],
+    reach: [0.5, 0.35, 0.25, 0.15, 0.1, 0.15],
+    lift:  [0.85, 0.75, 0.65, 0.55, 0.5, 0.4],
+    whip:  [0.6, 0.45, 0.3, 0.1, 0.0, -0.05],
     feed:  [-0.1, -0.5, -0.7, -0.8, -0.7, -0.5],     // curled back to the mouth
     curl:  [0.05, 0.05, 0.1, 0.18, 0.3, 0.45],       // the relaxed hang, tip turned up
   };
