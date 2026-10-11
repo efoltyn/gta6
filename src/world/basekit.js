@@ -1,0 +1,1249 @@
+/* ============================================================
+   world/basekit.js — ONE BASE PLANNER AND ONE KIT FOR EVERY MILITARY BASE.
+
+   WHY. Two files laid bases out by hand, separately, and both read as slop:
+   city/island_military.js (Fort Brandt, the base in the shipped world and the
+   NPC War "MILITARY ISLAND" venue) parked its fighters 22 m off the runway
+   with their noses pointed AWAY from it, put the hangars 300 m from any
+   pavement, stood the helicopters on dirt and lined the motor pool across
+   open ground; world/airbase.js (the portable base) did the same job again
+   with its own constants. This file is the one answer both now ask.
+
+   THE PLAN (pure data, no THREE — tools/base-plan-check.mjs loads it in node)
+     CBZ.basePlan({ hx, hz, northGate, fighters, hangars, reserve })
+   lays a base out the way a real US installation is organised, in a LOCAL
+   frame: +x along the runway, +z toward the airfield side, gate on the +x
+   edge where the gate road (z = 0) leaves the base.
+
+     AIRFIELD (z > 0)  the runway sets the axis. A full-length parallel
+       taxiway, linked to it by connectors with hold-short bars, feeds the
+       apron. Fighters stand on the apron or in hardened shelters, nose to
+       the taxiway; the heavies (B-2, B-52, the A400M) have their own stands;
+       helicopters stand on marked helipads on their own ramp. Maintenance
+       hangars, the control tower, crash-rescue and base ops line the back of
+       the apron; the fuel farm is bunded and set back at the west end.
+     GATE ROAD (z = 0) from the main gate (guardhouse, booms, HESCO wing
+       walls, overwatch tower) across the base.
+     CANTONMENT (z < 0) a road grid. HQ with its flagpole facing the parade
+       field, the parking lot, barracks rows with a street between them, a
+       small-arms range on the west wire; the motor pool (maintenance sheds,
+       hardstand, vehicles in ranks facing the gate road); the Patriot/HIMARS
+       battery in HESCO revetments; the ammunition igloos behind traverses,
+       as far from the airfield as the wire allows.
+
+   Every footprint in the plan is a rect, so overlap is CHECKABLE, and the
+   check exists (tools/base-plan-check.mjs): no structure overlaps another,
+   every aircraft stands on pavement, nothing stands on the runway.
+
+   THE KIT (needs THREE at call time)
+     CBZ.baseKit.raise(plan, host)  builds the ground skin and every
+       structure into host.root (local frame), merged per material.
+       host = { root, solid(lx,lz,w,d,y0,y1,tag), toWorld(lx,lz),
+                building(lx,lz,w,d,storeys,color,doorSide,opts)?,  // a real shell
+                axisAligned?, y? }
+     The vehicles are NOT placed here: each host seats its own (Fort Brandt
+     registers them as stealable, airbase.js seats them on its slab). The
+     plan's `stands` say where, facing which way.
+     CBZ.baseKit.hescoGeo() is the one HESCO basket in the repo (NPC War's
+     battlefield dressing uses it too).
+
+   Units are metres. Vehicle models here face +z at yaw 0.
+============================================================ */
+(function () {
+  "use strict";
+  const G = typeof window !== "undefined" ? window : globalThis;
+  const CBZ = (G.CBZ = G.CBZ || {});
+  if (CBZ.baseKit && CBZ.baseKit.raise) return;       // one kit, however many pages ask
+
+  /* ======================================================================
+     THE HARDWARE'S FOOTPRINTS (span across x, length along z, at yaw 0).
+     Read from the models' own published dims (city/mil_air.js B.finish,
+     city/mil_armor.js spec, the A400M in island_military.js). `oz` is the
+     model-origin offset of the footprint centre along z.
+  ====================================================================== */
+  const DIMS = {
+    fighter: { w: 10.7, l: 15.9 }, drone: { w: 20.1, l: 11.1 },
+    b2: { w: 52.4, l: 21 }, bomber: { w: 56.4, l: 48.5 },
+    cargo: { w: 42.4, l: 43.5, oz: -1.85 },
+    heli: { w: 16.4, l: 19.8 }, attackHeli: { w: 14.6, l: 17.7 },
+    tank: { w: 3.7, l: 9.8 }, ifv: { w: 3.3, l: 6.8 }, apc: { w: 2.9, l: 7.2 },
+    luv: { w: 2.3, l: 4.9 }, truck: { w: 2.5, l: 8.4 }, mlrs: { w: 2.5, l: 7.6 },
+    patriot: { w: 2.5, l: 9.4 },
+  };
+  const AIR = { fighter: 1, drone: 1, b2: 1, bomber: 1, cargo: 1, heli: 1, attackHeli: 1 };
+
+  function rect(x0, z0, x1, z1) { return { x0: Math.min(x0, x1), z0: Math.min(z0, z1), x1: Math.max(x0, x1), z1: Math.max(z0, z1) }; }
+  function crect(x, z, w, d) { return rect(x - w / 2, z - d / 2, x + w / 2, z + d / 2); }
+  function standRect(s) {
+    const D = DIMS[s.kind] || { w: 4, l: 8 };
+    const side = Math.abs(Math.sin(s.yaw || 0)) > 0.5;
+    const w = side ? D.l : D.w, l = side ? D.w : D.l;
+    const oz = (D.oz || 0) * Math.cos(s.yaw || 0), ox = (D.oz || 0) * Math.sin(s.yaw || 0);
+    return crect(s.x + ox, s.z + oz, w, l);
+  }
+
+  /* ======================================================================
+     THE PLANNER
+  ====================================================================== */
+  function basePlan(o) {
+    o = o || {};
+    const HX = Math.max(240, o.hx || 240), HZ = Math.max(250, o.hz || 250);
+    const W = -HX, E = HX, N = -HZ, S = HZ;
+    const NGX = o.northGate == null ? 60 : o.northGate;          // null: no north gate
+    const P = {
+      hx: HX, hz: HZ, pave: [], marks: { leads: [], holds: [], pads: [], stalls: [], numbers: [] },
+      stands: [], build: [], hesco: [], towers: [], gates: [], lights: {}, anchors: {}, sites: {},
+      reserve: (o.reserve || []).map(function (r) { return Object.assign({ id: r.id || "reserve" }, crect(r.x, r.z, r.w, r.d)); }),
+    };
+    function pave(kind, r, id) { const p = Object.assign({ kind: kind, id: id || kind }, r); P.pave.push(p); return p; }
+    function build(kind, x, z, w, d, extra) {
+      const b = Object.assign({ kind: kind, id: (extra && extra.id) || kind + P.build.length, x: x, z: z, w: w, d: d, yaw: 0 }, extra || {});
+      b.rect = crect(x, z, (Math.abs(Math.sin(b.yaw)) > 0.5 ? d : w), (Math.abs(Math.sin(b.yaw)) > 0.5 ? w : d));
+      P.build.push(b); return b;
+    }
+    function stand(kind, x, z, yaw, name, extra) {
+      const s = Object.assign({ kind: kind, x: x, z: z, yaw: yaw || 0, name: name || kind }, extra || {});
+      s.rect = standRect(s); P.stands.push(s); return s;
+    }
+
+    /* ---------------- AIRFIELD ---------------- */
+    const rwLen = Math.min(o.runwayLength || 1e9, 2 * HX - 60);
+    const RW = { x: 0, z: S - 65, len: rwLen, w: 30, x0: -rwLen / 2, x1: rwLen / 2 };
+    P.runway = RW;
+    pave("runway", rect(RW.x0, RW.z - RW.w / 2, RW.x1, RW.z + RW.w / 2));
+    const TW = { z: RW.z - 45, w: 18, x0: RW.x0 + 10, x1: RW.x1 - 10 };
+    P.taxiway = TW;
+    pave("taxi", rect(TW.x0, TW.z - TW.w / 2, TW.x1, TW.z + TW.w / 2), "taxiway");
+    // connectors: both ends and the middle, each with a hold-short bar 10 m
+    // before the runway edge (the line an aircraft does not cross uncleared)
+    P.connectors = [TW.x0 + 10, 0, TW.x1 - 10];
+    P.connectors.forEach(function (cx, i) {
+      pave("taxi", rect(cx - 10, TW.z + TW.w / 2, cx + 10, RW.z - RW.w / 2), "connector" + i);
+      P.marks.holds.push({ x: cx, z: RW.z - RW.w / 2 - 10, w: 20 });
+    });
+    const AZ1 = TW.z - TW.w / 2, AZ0 = AZ1 - 69;                  // apron depth 69 m
+    const AX0 = W + 106, AX1 = E - 80;
+    P.apron = rect(AX0, AZ0, AX1, AZ1);
+    pave("apron", P.apron);
+    // the apron's own taxi lane: the yellow line every stand's lead-in joins
+    P.apronLane = AZ1 - 8;
+    // HARDENED AIRCRAFT SHELTERS at the west end, doors on the taxiway
+    pave("apron", rect(W + 8, AZ1 - 41, AX0, AZ1), "has-pad");
+    const hasZ = AZ1 - 20;
+    for (let i = 0; i < 3; i++) {
+      const hx = W + 24 + i * 32;
+      build("has", hx, hasZ, 32, 30, { id: "has" + i, inner: 22 });
+      stand("fighter", hx, hasZ, 0, "Fighter Jet", { shelter: "has" + i, lead: AZ1 });
+    }
+    // FUEL FARM: bunded, set back at the west end, the road on its north side
+    build("fuelfarm", W + 41, 46, 58, 60, { id: "fuel", tanks: [[-13, -14], [13, -14], [-13, 14], [13, 14]], r: 6, h: 9 });
+    // MAINTENANCE HANGARS along the back of the apron, doors onto it
+    const nHangar = Math.max(1, Math.min(o.hangars || 2, 6));
+    const hangars = [];
+    for (let i = 0; i < nHangar; i++) hangars.push(build("hangar", W + 122 + i * 54, 35, 48, 44, { id: "hangar" + i }));
+    // inside them: one jet under maintenance, the two recon drones
+    stand("fighter", hangars[0].x, 38, 0, "Fighter Jet", { shelter: hangars[0].id });
+    if (hangars[1]) {
+      stand("drone", hangars[1].x - 11, 44, 0, "Recon Drone", { shelter: hangars[1].id, scenery: true });
+      stand("drone", hangars[1].x + 11, 28, 0, "Recon Drone", { shelter: hangars[1].id, scenery: true });
+    }
+    // TOWER, CRASH-RESCUE, BASE OPS — the line facing the field
+    const TX = E - 254;
+    build("tower", TX, 30, 16, 12, { id: "tower", h: 24 });
+    build("building", E - 218, 36, 28, 20, { id: "firestation", storeys: 1, color: 0x8e3b33, door: 1, facade: "brick", name: "Crash Rescue" });
+    build("building", E - 176, 36, 26, 20, { id: "airops", storeys: 2, color: 0x6c7158, door: 1, facade: "brick", name: "Airfield Ops" });
+    build("shed", E - 139, 34, 34, 18, { id: "ageshed", h: 6.5 });
+    // CARGO LANE: the tanks drive from the gate road onto the A400M's ramp
+    pave("apron", rect(E - 115, 7, E - 95, AZ0), "cargo-lane");
+    // HEAVY STANDS. B-2, B-52, A400M (ramp toward the cargo lane)
+    const b2 = stand("b2", E - 230, AZ1 - 31, 0, "B-2 SPIRIT", { fixture: true, lead: AZ1 });
+    stand("bomber", E - 165, AZ1 - 35, 0, "Heavy Bomber", { lead: AZ1 });
+    stand("cargo", E - 105, AZ1 - 26, 0, "Cargo Lifter", { lead: AZ1 });
+    P.fixtures = { "b2-pad": { x: b2.x, z: b2.z, w: DIMS.b2.w, d: DIMS.b2.l, yaw: 0 } };
+    // THE FLIGHT LINE: fighters nose to the taxiway, as many as fit before
+    // the B-2's wingtip with a 10 m clearance
+    const fz = AZ1 - 19, flMax = b2.x - DIMS.b2.w / 2 - 10 - DIMS.fighter.w / 2;
+    const nF = o.fighters == null ? 5 : o.fighters;
+    for (let i = 0, x = W + 118; i < nF && x <= flMax; i++, x += 22) stand("fighter", x, fz, 0, "Fighter Jet", { lead: AZ1 });
+    // HELO RAMP: four marked pads at the east end, the gunships nearest the strip
+    pave("apron", rect(E - 80, 26, E - 8, AZ1), "helo-ramp");
+    [[E - 26, 96, true], [E - 60, 96, true], [E - 26, 48, false], [E - 60, 48, false]].forEach(function (p) {
+      P.marks.pads.push({ x: p[0], z: p[1], r: 10 });
+      stand(p[2] ? "attackHeli" : "heli", p[0], p[1], Math.PI / 2, p[2] ? "Attack Helicopter" : "Helicopter", { pad: true, attack: p[2] });
+    });
+    // stand numbers + lead-in lines for every aircraft stand on the apron
+    P.stands.forEach(function (s, i) {
+      if (!AIR[s.kind] || s.pad) return;
+      const D = DIMS[s.kind];
+      P.marks.leads.push({ x: s.x, z0: s.z + (D.oz || 0) + D.l / 2 + 1.5, z1: s.lead || AZ1, stop: s.z + (D.oz || 0) + D.l / 2 + 1.5, w: D.w });
+      P.marks.numbers.push({ x: s.x, z: s.z + (D.oz || 0) + D.l / 2 + 4.5, text: String(i + 1) });
+    });
+
+    /* ---------------- ROADS ---------------- */
+    const R = {};
+    R.main = pave("road", rect(W + 14, -7, E, 7), "gate-road");
+    pave("road", rect(E - 44, -13, E, 13), "gate-plaza");
+    R.cross = pave("road", rect(W + 38, -146, E - 14, -134), "cross-road");
+    R.west = pave("road", rect(W + 38, -146, W + 50, -7), "west-road");
+    if (NGX != null) {
+      R.north = pave("road", rect(NGX - 7, N, NGX + 7, -7), "north-road");
+      R.back = pave("road", rect(-110, -198, E - 14, -188), "back-road");
+    } else {
+      R.back = pave("road", rect(-110, -198, E - 14, -188), "back-road");
+      pave("road", rect(53, -188, 67, -146), "back-link");
+    }
+    P.roads = R;
+
+    /* ---------------- MAIN GATE ---------------- */
+    P.gates.push({ side: "east", x: E, z: 0, w: 26 });
+    build("guardhouse", E - 14, -24, 8, 6, { id: "guardhouse", storeys: 1, color: 0x55603f, door: 1 });
+    build("watchtower", E - 9, -42, 3.4, 3.4, { id: "gatetower" });
+    P.hesco.push({ x0: E - 4, z0: 15, x1: E - 4, z1: 24, layers: 2 });
+    P.hesco.push({ x0: E - 4, z0: -15, x1: E - 4, z1: -32, layers: 2 });
+    P.booms = [{ x: E - 4, z: -6.5, toward: 1 }, { x: E - 4, z: 6.5, toward: -1 }];
+    P.anchors.gate = { x: E - 4, z: 0 };
+    if (NGX != null) {
+      P.gates.push({ side: "north", x: NGX, z: N, w: 14 });
+      build("booth", NGX + 11, N + 8, 3.2, 3.2, { id: "northbooth" });
+      P.hesco.push({ x0: NGX + 9, z0: N + 4, x1: NGX + 40, z1: N + 4, layers: 2 });
+      P.hesco.push({ x0: NGX - 9, z0: N + 4, x1: NGX - 40, z1: N + 4, layers: 2 });
+      P.booms.push({ x: NGX - 3.5, z: N + 4, toward: 1, axis: "x" });
+      P.anchors.northGate = { x: NGX, z: N + 6 };
+    }
+    // corner towers: the wire is watched
+    [[W + 18, N + 18], [E - 18, N + 18], [W + 18, S - 18], [E - 18, S - 18]].forEach(function (c, i) {
+      build("watchtower", c[0], c[1], 3.4, 3.4, { id: "corner" + i, corner: true });
+    });
+
+    /* ---------------- CANTONMENT: HQ, PARADE, PARKING ---------------- */
+    const hq = build("building", -110, -108, 36, 22, { id: "hq", storeys: 3, color: 0x6b6450, door: 1, facade: "brick", name: "Headquarters" });
+    P.anchors.hq = { x: hq.x, z: hq.z };
+    P.anchors.armory = { x: hq.x, z: hq.z + 6 };
+    P.anchors.flag = { x: -110, z: -86 };
+    pave("concrete", crect(-110, -86, 10, 10), "flag-circle");
+    pave("grass", rect(-150, -78, -70, -18), "parade");
+    P.anchors.parade = { x: -110, z: -46 };
+    build("stand", -110, -16, 16, 4, { id: "reviewing" });         // reviewing stand on the gate-road edge
+    pave("lot", rect(-62, -128, -14, -96), "parking");
+    P.marks.stalls.push({ x0: -60, x1: -16, z: -128, d: 6, n: 15, dir: 1 });
+    P.marks.stalls.push({ x0: -60, x1: -16, z: -96, d: 6, n: 15, dir: -1 });
+    [-52, -43, -34, -25].forEach(function (x) { stand("luv", x, -124, Math.PI, "Light Utility Vehicle"); });
+
+    /* ---------------- BARRACKS ---------------- */
+    [[-70, -172], [0, -172], [-70, -214], [0, -214]].forEach(function (b, i) {
+      build("building", b[0], b[1], 44, 16, { id: "barracks" + i, storeys: 2, color: 0x7a7560, door: b[1] < -190 ? 1 : 0, facade: "brick", name: "Barracks" });
+    });
+    P.anchors.barracks = { x: -35, z: -193 };
+    build("radar", 36, -160, 6, 6, { id: "radar" });
+
+    /* ---------------- RANGE (west wire) ---------------- */
+    build("range", W + 21, -143, 26, 166, { id: "range" });
+
+    /* ---------------- MOTOR POOL ---------------- */
+    [96, 140, 184].forEach(function (x, i) { build("shed", x, -119, 40, 18, { id: "mpshed" + i, h: 7 }); });
+    pave("hardstand", rect(72, -106, 208, -7), "motor-pool");
+    P.anchors.motorPool = { x: 140, z: -56 };
+    [86, 104, 122, 140, 158].forEach(function (x) { stand("tank", x, -24, 0, "Main Battle Tank", { rank: "A" }); });
+    [["ifv", "Infantry Fighting Vehicle"], ["ifv", "Infantry Fighting Vehicle"], ["apc", "Armored Personnel Carrier"],
+     ["apc", "Armored Personnel Carrier"], ["luv", "Light Utility Vehicle"], ["luv", "Light Utility Vehicle"]].forEach(function (v, i) {
+      stand(v[0], 86 + i * 16, -54, 0, v[1], { rank: "B" });
+    });
+    [["truck", "Cargo Truck"], ["truck", "Cargo Truck"], ["truck", "Cargo Truck"]].forEach(function (v, i) {
+      stand(v[0], 86 + i * 16, -84, 0, v[1], { rank: "C" });
+    });
+    // painted row lines: one per rank, the vehicles' noses on it
+    P.marks.rows = [{ x0: 76, x1: 204, z: -24 + 6 }, { x0: 76, x1: 204, z: -54 + 4.5 }, { x0: 76, x1: 204, z: -84 + 5.4 }];
+
+    /* ---------------- AIR DEFENCE + ARTILLERY: revetments ---------------- */
+    pave("gravel", rect(76, -157, 204, -146), "battery-apron");
+    [["patriot", "Missile Launcher"], ["patriot", "Missile Launcher"], ["mlrs", "Rocket Artillery"], ["mlrs", "Rocket Artillery"]].forEach(function (v, i) {
+      const x = 92 + i * 32;
+      build("revetment", x, -166, 16, 19, { id: "revet" + i, open: "+z" });
+      stand(v[0], x, -167, 0, v[1], { shelter: "revet" + i });
+    });
+    /* ---------------- AMMUNITION: igloos behind traverses ---------------- */
+    pave("gravel", rect(108, -216, 210, -198), "ammo-apron");
+    [120, 158, 196].forEach(function (x, i) { build("igloo", x, -226, 14, 18, { id: "igloo" + i }); });
+    P.hesco.push({ x0: 139, z0: -235, x1: 139, z1: -217, layers: 2, traverse: true });
+    P.hesco.push({ x0: 177, z0: -235, x1: 177, z1: -217, layers: 2, traverse: true });
+
+    /* ---------------- KEEP-OUTS + SITES FOR OTHER PACKAGES ---------------- */
+    P.keepOut = rect(RW.x0 - 8, RW.z - RW.w / 2 - 2, RW.x1 + 8, RW.z + RW.w / 2 + 2);
+    // free ground the Fort Halstead package (games/military.js) builds on
+    P.sites = {
+      proto: { x: -180, z: -222 }, comms: { x: 84, z: -228 }, gen: { x: E - 139, z: 52 },
+      mess: { x: 10, z: -112 }, brig: { x: -30, z: -60 },
+      lights: [[W + 54, -60], [40, 10], [75, -150], [214, -60], [W + 90, 40]],
+      fence: [{ ax: -152, az: -195, bx: -152, bz: -240 }, { ax: 70, az: -211, bx: 106, bz: -211 }],
+      searchlights: [[W + 18, S - 18, 0], [E - 18, S - 18, Math.PI], [NGX != null ? NGX - 30 : 0, N + 14, Math.PI / 2]],
+      guards: {
+        motor: [[74, -108], [206, -108], [206, -10], [74, -10]],
+        proto: [[-166, -150], [-166, -204], [-198, -204], [-198, -150]],
+        signals: [[70, -150], [214, -150], [214, -205], [70, -205]],
+        yard: [[-30, 60], [44, 60], [44, 10], [-30, 10]],
+        gate: [[E - 28, -9]],
+      },
+    };
+    P.siteSize = { proto: [18, 13], comms: [4, 4], gen: [7, 5], mess: [17, 11], brig: [6.4, 6.4] };
+    P.dims = DIMS;
+    P.standRect = standRect;
+    return P;
+  }
+
+  /* THE FOOTPRINTS, FOR THE CHECK AND FOR ANY CALLER THAT ASKS "IS THIS FREE" */
+  function overlaps(a, b, pad) {
+    pad = pad || 0;
+    return a.x0 < b.x1 - pad && a.x1 > b.x0 + pad && a.z0 < b.z1 - pad && a.z1 > b.z0 + pad;
+  }
+  function inside(a, b, tol) {
+    tol = tol || 0;
+    return a.x0 >= b.x0 - tol && a.x1 <= b.x1 + tol && a.z0 >= b.z0 - tol && a.z1 <= b.z1 + tol;
+  }
+  /* Audit a plan: returns a list of strings, empty when the layout is sound. */
+  function auditPlan(P) {
+    const bad = [];
+    const fence = rect(-P.hx + 6, -P.hz + 6, P.hx - 6, P.hz - 6);
+    const runway = P.pave.filter(function (p) { return p.kind === "runway"; })[0];
+    const pavedFor = function (s) {
+      const ok = AIR[s.kind] ? ["apron", "taxi"] : ["hardstand", "lot", "gravel", "apron", "road"];
+      return P.pave.filter(function (p) { return ok.indexOf(p.kind) >= 0; });
+    };
+    const things = P.build.map(function (b) { return { id: b.id, r: b.rect }; })
+      .concat(P.reserve.map(function (r) { return { id: r.id, r: r }; }))
+      .concat(Object.keys(P.sites).filter(function (k) { return P.siteSize[k]; }).map(function (k) {
+        const s = P.sites[k], d = P.siteSize[k];
+        return { id: "site:" + k, r: crect(s.x, s.z, d[0], d[1]) };
+      }));
+    // structures vs structures
+    for (let i = 0; i < things.length; i++) {
+      if (!inside(things[i].r, fence)) bad.push(things[i].id + " outside the wire");
+      if (overlaps(things[i].r, runway)) bad.push(things[i].id + " on the runway");
+      for (let j = i + 1; j < things.length; j++) if (overlaps(things[i].r, things[j].r, 0.01)) bad.push(things[i].id + " overlaps " + things[j].id);
+    }
+    // structures vs roads/aprons (a building is never ON the pavement)
+    P.build.forEach(function (b) {
+      if (b.kind === "has" || b.kind === "hangar" || b.kind === "revetment" || b.kind === "stand") return;
+      P.pave.forEach(function (p) {
+        if (p.kind === "grass" || p.kind === "concrete" || p.kind === "gravel") return;
+        if (overlaps(b.rect, p, 0.01)) bad.push(b.id + " stands on " + p.id);
+      });
+    });
+    // stands
+    for (let i = 0; i < P.stands.length; i++) {
+      const s = P.stands[i];
+      if (!inside(s.rect, fence)) bad.push(s.kind + "@" + s.x + "," + s.z + " outside the wire");
+      if (overlaps(s.rect, P.keepOut)) bad.push(s.kind + "@" + s.x + "," + s.z + " blocks the runway");
+      if (s.shelter) {
+        const sh = P.build.filter(function (b) { return b.id === s.shelter; })[0];
+        if (!sh || !inside(s.rect, sh.rect, 0.5)) bad.push(s.kind + " not inside its shelter " + s.shelter);
+      } else {
+        const pv = pavedFor(s);
+        if (!pv.some(function (p) { return inside(s.rect, p, 0.5); })) bad.push(s.kind + "@" + s.x + "," + s.z + " parked off the pavement");
+      }
+      for (let j = 0; j < things.length; j++) {
+        if (s.shelter && things[j].id === s.shelter) continue;
+        if (overlaps(s.rect, things[j].r, 0.01)) bad.push(s.kind + "@" + s.x + "," + s.z + " overlaps " + things[j].id);
+      }
+      for (let j = i + 1; j < P.stands.length; j++) if (overlaps(s.rect, P.stands[j].rect, 0.01)) bad.push(s.kind + "@" + s.x + "," + s.z + " overlaps " + P.stands[j].kind + "@" + P.stands[j].x + "," + P.stands[j].z);
+    }
+    return bad;
+  }
+
+  /* THE TAXI PATH: stand → apron lane → taxiway → runway threshold, and the
+     heading the roll goes down. dir +1 rolls toward +x, -1 toward -x. */
+  function taxiPath(P, s, dir) {
+    dir = dir > 0 ? 1 : -1;
+    const TW = P.taxiway, RW = P.runway;
+    const cx = dir > 0 ? P.connectors[0] : P.connectors[P.connectors.length - 1];
+    const pts = [];
+    if (s.pad) {
+      pts.push({ x: s.x, z: TW.z });
+    } else {
+      pts.push({ x: s.x, z: P.apronLane });
+      pts.push({ x: s.x, z: TW.z });
+    }
+    pts.push({ x: cx, z: TW.z });
+    pts.push({ x: cx, z: RW.z });
+    const start = dir > 0 ? RW.x0 + 15 : RW.x1 - 15;
+    pts.push({ x: start, z: RW.z });
+    return { points: pts, heading: dir > 0 ? Math.PI / 2 : -Math.PI / 2, rollFrom: { x: start, z: RW.z }, rollLen: RW.len - 30 };
+  }
+
+  CBZ.basePlan = basePlan;
+  CBZ.basePlanAudit = auditPlan;
+  CBZ.baseTaxiPath = taxiPath;
+  CBZ.baseKit = CBZ.baseKit || {};
+  CBZ.baseKit.DIMS = DIMS;
+  CBZ.baseKit.rect = rect;
+  CBZ.baseKit.overlaps = overlaps;
+
+  /* ======================================================================
+     THE KIT — everything below needs THREE, at call time
+  ====================================================================== */
+  function T() { return G.THREE; }
+  const MATS = {};
+  function cm(hex, o) {
+    if (CBZ.cmat) return CBZ.cmat(hex, o);
+    const k = hex + "|" + (o && o.emissive || 0);
+    return MATS[k] || (MATS[k] = new (T().MeshLambertMaterial)({ color: hex, emissive: (o && o.emissive) || 0, emissiveIntensity: o && o.ei != null ? o.ei : 1 }));
+  }
+  function own(key, make) { return MATS["own:" + key] || (MATS["own:" + key] = make()); }
+  const C = {
+    concrete: 0x9b988f, concreteD: 0x7d7a72, hasConc: 0x8c897f, steel: 0x6a7078, steelD: 0x3f444b,
+    roof: 0x7a8189, olive: 0x4a5238, oliveD: 0x3a4230, earth: 0x5f6440, warn: 0xd4a017, red: 0xb43a32,
+    tank: 0xc9cbc4, tankBand: 0x5a6a52, glass: 0x24384a, door: 0x2b2f35, white: 0xe8e6de, sandbag: 0x9a8a5e,
+  };
+
+  /* ---- THE MERGER: one mesh per material per structure group ---- */
+  function Batch() { this.sets = new Map(); }
+  const _m4 = function () { return new (T().Matrix4)(); };
+  Batch.prototype.add = function (geo, mat, x, y, z, ry, rx, rz, sx, sy, sz) {
+    const THREE = T();
+    let g = geo.index ? geo.toNonIndexed() : geo.clone();
+    if (!g.attributes.normal) g.computeVertexNormals();
+    if (!g.attributes.uv) g.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+    const m = _m4();
+    const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(rx || 0, ry || 0, rz || 0, "YXZ"));
+    m.compose(new THREE.Vector3(x || 0, y || 0, z || 0), q, new THREE.Vector3(sx == null ? 1 : sx, sy == null ? 1 : sy, sz == null ? 1 : sz));
+    g.applyMatrix4(m);
+    let set = this.sets.get(mat);
+    if (!set) { set = []; this.sets.set(mat, set); }
+    set.push(g);
+    return this;
+  };
+  Batch.prototype.box = function (mat, x, y, z, w, h, d, ry, rx, rz) {
+    return this.add(new (T().BoxGeometry)(w, h, d), mat, x, y, z, ry, rx, rz);
+  };
+  Batch.prototype.flush = function (parent, name, opts) {
+    const THREE = T(), out = [];
+    opts = opts || {};
+    this.sets.forEach(function (geos, mat) {
+      let n = 0;
+      geos.forEach(function (g) { n += g.attributes.position.count; });
+      const P = new Float32Array(n * 3), N = new Float32Array(n * 3), U = new Float32Array(n * 2);
+      let o = 0;
+      geos.forEach(function (g) {
+        const c = g.attributes.position.count;
+        P.set(g.attributes.position.array, o * 3);
+        N.set(g.attributes.normal.array, o * 3);
+        U.set(g.attributes.uv.array.subarray(0, c * 2), o * 2);
+        o += c; g.dispose();
+      });
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(P, 3));
+      geo.setAttribute("normal", new THREE.BufferAttribute(N, 3));
+      geo.setAttribute("uv", new THREE.BufferAttribute(U, 2));
+      geo.computeBoundingSphere(); geo.computeBoundingBox();
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.name = name || "base-batch";
+      mesh.castShadow = opts.cast !== false && !mat.transparent; mesh.receiveShadow = true;
+      parent.add(mesh); out.push(mesh);
+    });
+    this.sets.clear();
+    return out;
+  };
+  CBZ.baseKit.Batch = Batch;
+
+  /* ---- shapes ---- */
+  // a half-ellipse arch profile (width w, rise h) as a Shape, optionally with a door cut
+  function archShape(w, h, seg, hole) {
+    const THREE = T(), s = new THREE.Shape();
+    s.moveTo(-w / 2, 0);
+    for (let i = 0; i <= seg; i++) { const a = Math.PI - (i / seg) * Math.PI; s.lineTo(Math.cos(a) * w / 2, Math.sin(a) * h); }
+    s.lineTo(-w / 2, 0);
+    if (hole) {
+      const p = new THREE.Path();
+      p.moveTo(-hole.w / 2, 0); p.lineTo(hole.w / 2, 0); p.lineTo(hole.w / 2, hole.h); p.lineTo(-hole.w / 2, hole.h); p.lineTo(-hole.w / 2, 0);
+      s.holes.push(p);
+    }
+    return s;
+  }
+  // an arched shell along z: half-cylinder radius w/2, scaled to rise h, length d
+  function vaultGeo(w, h, d, seg, open) {
+    const THREE = T();
+    const g = new THREE.CylinderGeometry(w / 2, w / 2, d, seg || 18, 1, open !== false, Math.PI / 2, Math.PI);
+    g.rotateX(Math.PI / 2);          // axis along z; arc over +y
+    g.scale(1, (2 * h) / w, 1);
+    return g;
+  }
+
+  /* ---- HESCO: the wire basket, four 1.07 m cells, 1.37 m tall. ONE
+     geometry in the repo (NPC War's dressing builds its fighting positions
+     from this same function), vertex-coloured, uv'd. `seg` trades the bulge
+     resolution: the battlefield's close-up props use the full 4/5/4, a
+     base's perimeter run the 2/3/2 that reads the same at a wall's range. */
+  const _hesco = {};
+  function hescoGeo(fine) {
+    const key = fine === false ? "c" : "f";
+    if (_hesco[key]) return _hesco[key];
+    const THREE = T(), parts = [];
+    const S = 1.07, H = 1.37, sx = fine === false ? 2 : 4, sy = fine === false ? 3 : 5;
+    let tot = 0;
+    for (let i = 0; i < 4; i++) {
+      const g = new THREE.BoxGeometry(S, H, S, sx, sy, sx).toNonIndexed();
+      const p = g.attributes.position;
+      for (let k = 0; k < p.count; k++) {
+        const x = p.getX(k), y = p.getY(k), z = p.getZ(k);
+        // the fill pushes the mesh out between the corner posts
+        const b = (1 - Math.pow(2 * x / S, 4)) * (1 - Math.pow(2 * z / S, 4)) * (1 - Math.pow(2 * y / H, 6));
+        const bx = Math.abs(x) > S * 0.49 ? Math.sign(x) * 0.05 * b : 0;
+        const bz = Math.abs(z) > S * 0.49 ? Math.sign(z) * 0.05 * b : 0;
+        const top = y > H * 0.49 ? -0.06 * (1 - Math.pow(2 * x / S, 2)) * (1 - Math.pow(2 * z / S, 2)) : 0;
+        p.setXYZ(k, x + bx + (i - 1.5) * S, y + H / 2 + top, z + bz);
+      }
+      g.computeVertexNormals();
+      const n = g.attributes.normal, c = new Float32Array(p.count * 3);
+      for (let k = 0; k < p.count; k++) {
+        const y = p.getY(k);
+        let col;
+        if (n.getY(k) > 0.8 && y > H - 0.08) col = [0.62, 0.5, 0.34];            // the sand fill showing at the top
+        else {
+          const hv = Math.abs(Math.sin(i * 12.9898 + Math.round(y * 9) * 78.233) * 43758.5453) % 1;
+          const t = 0.94 + hv * 0.08;
+          col = [0.64 * t, 0.6 * t, 0.49 * t];
+        }
+        c[k * 3] = col[0]; c[k * 3 + 1] = col[1]; c[k * 3 + 2] = col[2];
+      }
+      g.setAttribute("color", new THREE.BufferAttribute(c, 3));
+      parts.push(g); tot += p.count;
+    }
+    const P = new Float32Array(tot * 3), N = new Float32Array(tot * 3), Cc = new Float32Array(tot * 3), U = new Float32Array(tot * 2);
+    let o = 0;
+    parts.forEach(function (g) {
+      const c = g.attributes.position.count;
+      P.set(g.attributes.position.array, o * 3); N.set(g.attributes.normal.array, o * 3);
+      Cc.set(g.attributes.color.array, o * 3); U.set(g.attributes.uv.array, o * 2);
+      o += c; g.dispose();
+    });
+    const out = new THREE.BufferGeometry();
+    out.setAttribute("position", new THREE.BufferAttribute(P, 3));
+    out.setAttribute("normal", new THREE.BufferAttribute(N, 3));
+    out.setAttribute("color", new THREE.BufferAttribute(Cc, 3));
+    out.setAttribute("uv", new THREE.BufferAttribute(U, 2));
+    out.computeBoundingSphere();
+    return (_hesco[key] = out);
+  }
+  // the wire grid over the geotextile, 76 mm squares, fading with range
+  function hescoMat() {
+    return own("hesco", function () {
+      const m = new (T().MeshLambertMaterial)({ vertexColors: true });
+      m.onBeforeCompile = function (sh) {
+        sh.vertexShader = "varying vec3 vPO;\nvarying vec3 vPW;\n" + sh.vertexShader.replace("#include <project_vertex>",
+          "#include <project_vertex>\nvPO = transformed;\n{ vec4 w = vec4(transformed, 1.0);\n#ifdef USE_INSTANCING\n w = instanceMatrix * w;\n#endif\n vPW = (modelMatrix * w).xyz; }");
+        sh.fragmentShader = "varying vec3 vPO;\nvarying vec3 vPW;\n" + sh.fragmentShader.replace("#include <color_fragment>",
+          "#include <color_fragment>\n{ vec3 g = abs(fract(vPO / 0.0762 + 0.5) - 0.5); float wire = 1.0 - smoothstep(0.03, 0.09, min(min(g.x, g.y), g.z));\n" +
+          "  float d = length(vPW - cameraPosition); wire *= 1.0 - smoothstep(25.0, 70.0, d);\n" +
+          "  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.26, 0.25, 0.22), wire * 0.55);\n" +
+          "  float low = 1.0 - smoothstep(0.0, 0.45, vPO.y); diffuseColor.rgb *= 1.0 - low * 0.3; }");
+      };
+      m.customProgramCacheKey = function () { return "basekit-hesco"; };
+      return m;
+    });
+  }
+  CBZ.baseKit.hescoGeo = hescoGeo;
+  CBZ.baseKit.hescoMat = hescoMat;
+  const HESCO_LEN = 4.28, HESCO_H = 1.37, HESCO_D = 1.07;
+
+  /* ---- CHAIN-LINK: one alpha-tested diamond texture, one material ---- */
+  function chainMat() {
+    return own("chain", function () {
+      const THREE = T();
+      let map = null;
+      if (typeof document !== "undefined") {
+        const cv = document.createElement("canvas"); cv.width = cv.height = 64;
+        const c = cv.getContext("2d");
+        c.strokeStyle = "#b7bdc2"; c.lineWidth = 3;
+        c.beginPath(); c.moveTo(0, 32); c.lineTo(32, 0); c.lineTo(64, 32); c.lineTo(32, 64); c.closePath(); c.stroke();
+        c.beginPath(); c.moveTo(-32, 32); c.lineTo(0, 0); c.moveTo(64, 0); c.lineTo(96, 32); c.stroke();
+        map = new THREE.CanvasTexture(cv);
+        map.wrapS = map.wrapT = THREE.RepeatWrapping;
+      }
+      return new THREE.MeshLambertMaterial({ color: 0xb0b6bb, map: map, alphaTest: 0.35, transparent: !map, opacity: map ? 1 : 0.3, side: THREE.DoubleSide });
+    });
+  }
+  // one run of fabric between (x0,z0)-(x1,z1), h tall from y0; uv repeats per 0.6 m
+  function chainLink(parent, x0, z0, x1, z1, h, y0) {
+    const THREE = T();
+    const len = Math.hypot(x1 - x0, z1 - z0);
+    if (len < 0.3) return null;
+    const g = new THREE.PlaneGeometry(len, h);
+    const uv = g.attributes.uv;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * len / 0.6, uv.getY(i) * h / 0.6);
+    const m = new THREE.Mesh(g, chainMat());
+    m.position.set((x0 + x1) / 2, (y0 || 0) + h / 2, (z0 + z1) / 2);
+    m.rotation.y = -Math.atan2(z1 - z0, x1 - x0);
+    m.castShadow = false; m.receiveShadow = false;
+    m.name = "chain-link";
+    parent.add(m);
+    return m;
+  }
+  CBZ.baseKit.chainLink = chainLink;
+  CBZ.baseKit.chainMat = chainMat;
+
+  /* ======================================================================
+     THE GROUND SKIN: every pavement, line and number painted once into one
+     canvas, on one plane. One surface means no stacked slabs to z-fight
+     (the runway flicker Fort Brandt already paid for once).
+  ====================================================================== */
+  const SURF = {
+    dirt: "#6b5d44", grass: "#5b6838", grassL: "#66733f", runway: "#2c2f33", taxi: "#35383c", road: "#3b3e41",
+    apron: "#8f8c84", hardstand: "#888579", lot: "#3d4043", gravel: "#857c69", concrete: "#9a978e",
+    yellow: "#d9b02a", white: "#e7e5dc",
+  };
+  function paintGround(P, res, opt) {
+    opt = opt || {};
+    const cv = document.createElement("canvas");
+    const W = 2 * P.hx, D = 2 * P.hz;
+    const sc = res / Math.max(W, D);
+    cv.width = Math.round(W * sc); cv.height = Math.round(D * sc);
+    const c = cv.getContext("2d");
+    const X = function (x) { return (x + P.hx) * sc; }, Z = function (z) { return (z + P.hz) * sc; };
+    const R = function (r, col) { c.fillStyle = col; c.fillRect(X(r.x0), Z(r.z0), (r.x1 - r.x0) * sc, (r.z1 - r.z0) * sc); };
+    const line = function (x0, z0, x1, z1, wm, col, dash) {
+      c.strokeStyle = col; c.lineWidth = Math.max(1, wm * sc);
+      c.setLineDash(dash ? dash.map(function (v) { return v * sc; }) : []);
+      c.beginPath(); c.moveTo(X(x0), Z(z0)); c.lineTo(X(x1), Z(z1)); c.stroke();
+      c.setLineDash([]);
+    };
+    const text = function (s, x, z, hm, rot, col) {
+      c.save(); c.translate(X(x), Z(z)); c.rotate(rot || 0);
+      c.fillStyle = col || SURF.white; c.font = "bold " + Math.round(hm * sc) + "px sans-serif";
+      c.textAlign = "center"; c.textBaseline = "middle"; c.fillText(s, 0, 0); c.restore();
+    };
+    // the land: dirt, with the cantonment and the airfield infield grassed
+    c.fillStyle = opt.dirt || SURF.dirt; c.fillRect(0, 0, cv.width, cv.height);
+    let seed = 7;
+    const rnd = function () { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+    c.globalAlpha = 0.07;
+    for (let i = 0; i < 900; i++) { c.fillStyle = rnd() < 0.5 ? "#8a7754" : "#4f4532"; c.beginPath(); c.arc(rnd() * cv.width, rnd() * cv.height, (2 + rnd() * 9) * sc, 0, 7); c.fill(); }
+    c.globalAlpha = 1;
+    R(rect(-P.hx + 6, P.taxiway.z + 9, P.hx - 6, P.hz - 6), SURF.grass);                 // infield + overrun
+    R(rect(-P.hx + 52, -P.hz + 6, P.hx - 6, -7), SURF.grass);                             // cantonment lawns
+    c.globalAlpha = 0.25;
+    for (let z = -P.hz; z < P.hz; z += 12) R(rect(-P.hx, z, P.hx, z + 6), SURF.grassL);
+    c.globalAlpha = 1;
+    // pavements, in painting order
+    const ORDER = ["gravel", "grass", "concrete", "lot", "hardstand", "road", "apron", "taxi", "runway"];
+    ORDER.forEach(function (k) {
+      P.pave.forEach(function (p) {
+        if (p.kind !== k) return;
+        if (k === "grass") { R(p, SURF.grassL); c.globalAlpha = 0.35; for (let x = p.x0; x < p.x1; x += 8) R(rect(x, p.z0, x + 4, p.z1), SURF.grass); c.globalAlpha = 1; return; }
+        R(p, SURF[k] || SURF.concrete);
+      });
+    });
+    // concrete joints on the apron and hardstand (6 m slabs)
+    c.globalAlpha = 0.18;
+    P.pave.forEach(function (p) {
+      if (p.kind !== "apron" && p.kind !== "hardstand") return;
+      for (let x = Math.ceil(p.x0 / 6) * 6; x < p.x1; x += 6) line(x, p.z0, x, p.z1, 0.12, "#3a3a36");
+      for (let z = Math.ceil(p.z0 / 6) * 6; z < p.z1; z += 6) line(p.x0, z, p.x1, z, 0.12, "#3a3a36");
+    });
+    c.globalAlpha = 1;
+    // RUNWAY markings
+    const RW = P.runway, rz0 = RW.z - RW.w / 2, rz1 = RW.z + RW.w / 2;
+    line(RW.x0 + 2, rz0 + 1.2, RW.x1 - 2, rz0 + 1.2, 0.9, SURF.white);
+    line(RW.x0 + 2, rz1 - 1.2, RW.x1 - 2, rz1 - 1.2, 0.9, SURF.white);
+    line(RW.x0 + 60, RW.z, RW.x1 - 60, RW.z, 0.9, SURF.white, [24, 14]);
+    [-1, 1].forEach(function (e) {
+      const end = e < 0 ? RW.x0 : RW.x1, inn = -e;
+      for (let k = 0; k < 8; k++) {                                      // threshold piano keys
+        const zz = RW.z - 12.6 + k * 3.6 + (k >= 4 ? 1.8 : 0) - 0.9;
+        R(rect(end + inn * 6, zz, end + inn * 36, zz + 1.8), SURF.white);
+      }
+      text(e < 0 ? "09" : "27", end + inn * 46, RW.z, 9, e < 0 ? Math.PI / 2 : -Math.PI / 2);
+      [-1, 1].forEach(function (s) { R(rect(end + inn * 90, RW.z + s * 6.5 - 2, end + inn * 120, RW.z + s * 6.5 + 2), SURF.white); });  // aiming points
+      // overrun chevrons (yellow) beyond the threshold
+      const ov = Math.abs(end - (e < 0 ? -P.hx + 6 : P.hx - 6));
+      for (let k = 6; k < ov - 2; k += 8) {
+        line(end - inn * k, RW.z - 12, end - inn * (k + 6), RW.z, 0.9, SURF.yellow);
+        line(end - inn * k, RW.z + 12, end - inn * (k + 6), RW.z, 0.9, SURF.yellow);
+      }
+    });
+    // TAXIWAY: yellow centreline, edge lines, connectors, hold-short bars
+    const TW = P.taxiway;
+    line(TW.x0 + 4, TW.z, TW.x1 - 4, TW.z, 0.45, SURF.yellow);
+    line(TW.x0, TW.z - TW.w / 2 + 0.6, TW.x1, TW.z - TW.w / 2 + 0.6, 0.25, SURF.yellow);
+    line(TW.x0, TW.z + TW.w / 2 - 0.6, TW.x1, TW.z + TW.w / 2 - 0.6, 0.25, SURF.yellow);
+    P.connectors.forEach(function (cx) { line(cx, TW.z, cx, RW.z - RW.w / 2, 0.45, SURF.yellow); });
+    P.marks.holds.forEach(function (h) {
+      line(h.x - h.w / 2, h.z - 1.2, h.x + h.w / 2, h.z - 1.2, 0.3, SURF.yellow);
+      line(h.x - h.w / 2, h.z - 0.6, h.x + h.w / 2, h.z - 0.6, 0.3, SURF.yellow);
+      line(h.x - h.w / 2, h.z + 0.6, h.x + h.w / 2, h.z + 0.6, 0.3, SURF.yellow, [1, 1]);
+      line(h.x - h.w / 2, h.z + 1.2, h.x + h.w / 2, h.z + 1.2, 0.3, SURF.yellow, [1, 1]);
+    });
+    // APRON: the taxi lane, every stand's lead-in, its stop bar and number
+    line(P.apron.x0, P.apronLane, P.hx - 8, P.apronLane, 0.45, SURF.yellow);
+    P.marks.leads.forEach(function (l) {
+      line(l.x, l.z0, l.x, l.z1, 0.35, SURF.yellow);
+      line(l.x - 2.5, l.stop, l.x + 2.5, l.stop, 0.5, SURF.yellow);
+      line(l.x - l.w / 2, l.stop - 1, l.x - l.w / 2, l.stop + 1, 0.25, SURF.white);
+      line(l.x + l.w / 2, l.stop - 1, l.x + l.w / 2, l.stop + 1, 0.25, SURF.white);
+    });
+    P.marks.numbers.forEach(function (n) { text(n.text, n.x + 4, n.z, 2.4, 0, SURF.yellow); });
+    // HELIPADS: darker disc, white ring, yellow touchdown circle, the H
+    P.marks.pads.forEach(function (p) {
+      c.fillStyle = "#6e6c66"; c.beginPath(); c.arc(X(p.x), Z(p.z), p.r * sc, 0, 7); c.fill();
+      c.strokeStyle = SURF.white; c.lineWidth = 0.5 * sc; c.beginPath(); c.arc(X(p.x), Z(p.z), (p.r - 0.6) * sc, 0, 7); c.stroke();
+      c.strokeStyle = SURF.yellow; c.lineWidth = 0.6 * sc; c.beginPath(); c.arc(X(p.x), Z(p.z), (p.r * 0.62) * sc, 0, 7); c.stroke();
+      R(rect(p.x - 2.6, p.z - 3.2, p.x - 1.6, p.z + 3.2), SURF.white);
+      R(rect(p.x + 1.6, p.z - 3.2, p.x + 2.6, p.z + 3.2), SURF.white);
+      R(rect(p.x - 1.6, p.z - 0.5, p.x + 1.6, p.z + 0.5), SURF.white);
+    });
+    // ROADS: white edge lines, dashed yellow centre
+    P.pave.forEach(function (p) {
+      if (p.kind !== "road" || /plaza|link/.test(p.id)) return;
+      const along = (p.x1 - p.x0) > (p.z1 - p.z0);
+      if (along) {
+        const zc = (p.z0 + p.z1) / 2;
+        line(p.x0, p.z0 + 0.5, p.x1, p.z0 + 0.5, 0.2, SURF.white); line(p.x0, p.z1 - 0.5, p.x1, p.z1 - 0.5, 0.2, SURF.white);
+        line(p.x0 + 3, zc, p.x1 - 3, zc, 0.2, SURF.yellow, [3, 6]);
+      } else {
+        const xc = (p.x0 + p.x1) / 2;
+        line(p.x0 + 0.5, p.z0, p.x0 + 0.5, p.z1, 0.2, SURF.white); line(p.x1 - 0.5, p.z0, p.x1 - 0.5, p.z1, 0.2, SURF.white);
+        line(xc, p.z0 + 3, xc, p.z1 - 3, 0.2, SURF.yellow, [3, 6]);
+      }
+    });
+    // the gate: a stop line and the inbound/outbound split
+    if (P.anchors.gate) { const gx = P.anchors.gate.x - 10; line(gx, -12, gx, 12, 0.5, SURF.white); line(gx - 30, 0, gx + 10, 0, 0.3, SURF.yellow); }
+    // PARKING + MOTOR-POOL rows
+    P.marks.stalls.forEach(function (s) {
+      const step = (s.x1 - s.x0) / s.n;
+      for (let i = 0; i <= s.n; i++) line(s.x0 + i * step, s.z, s.x0 + i * step, s.z + s.dir * s.d, 0.15, SURF.white);
+    });
+    (P.marks.rows || []).forEach(function (r) { line(r.x0, r.z, r.x1, r.z, 0.3, SURF.yellow); });
+    // the flag circle and the parade field's border
+    const fl = P.anchors.flag;
+    if (fl) { c.fillStyle = SURF.concrete; c.beginPath(); c.arc(X(fl.x), Z(fl.z), 5 * sc, 0, 7); c.fill(); }
+    return cv;
+  }
+  CBZ.baseKit.paintGround = paintGround;
+
+  /* ======================================================================
+     THE STRUCTURES. Each draws into a Batch in base-local metres and asks
+     host.solid for its walls. Front faces +z at yaw 0.
+  ====================================================================== */
+  function rot(b, lx, lz) { const c = Math.cos(b.yaw || 0), s = Math.sin(b.yaw || 0); return { x: b.x + lx * c + lz * s, z: b.z - lx * s + lz * c }; }
+  function solidL(host, b, lx, lz, w, d, y0, y1, tag) {
+    const p = rot(b, lx, lz), side = Math.abs(Math.sin(b.yaw || 0)) > 0.5;
+    return host.solid(p.x, p.z, side ? d : w, side ? w : d, y0, y1, tag);
+  }
+
+  // MAINTENANCE HANGAR: steel arch on 8 m walls, doors slid open into pockets
+  function hangar(K, host, b) {
+    const THREE = T(), w = b.w, d = b.d, WALL = 8, RISE = 7, y = host.y || 0;
+    const shellM = own("hangarRoof", function () { return new THREE.MeshLambertMaterial({ color: C.roof, side: THREE.DoubleSide }); });
+    const wallM = cm(0x7b8178), frameM = cm(C.steelD), doorM = cm(0x8a9097), liteM = cm(0xf2f4f0, { emissive: 0xdfe6e0, ei: 0.9 });
+    const g = new THREE.Group(); g.position.set(b.x, y, b.z); g.rotation.y = b.yaw || 0;
+    const B = new Batch();
+    B.add(vaultGeo(w, RISE, d, 20), shellM, 0, WALL, 0);
+    [-1, 1].forEach(function (s) { B.box(wallM, s * (w / 2 - 0.2), WALL / 2, 0, 0.4, WALL, d); });
+    B.add(new THREE.ShapeGeometry(archShape(w, RISE, 20)), shellM, 0, WALL, -d / 2 + 0.05);
+    B.box(wallM, 0, WALL / 2, -d / 2 + 0.2, w, WALL, 0.4);
+    // the front: an arched gable over a full-width door opening
+    B.add(new THREE.ShapeGeometry(archShape(w, RISE, 20)), shellM, 0, WALL, d / 2 - 0.05);
+    B.box(frameM, 0, WALL - 0.4, d / 2 - 0.2, w, 0.8, 0.6);
+    // ribs every 5.5 m over the roof
+    for (let z = -d / 2 + 2; z <= d / 2 - 2; z += 5.5) {
+      const rib = new THREE.TorusGeometry(w / 2 + 0.12, 0.16, 4, 20, Math.PI);
+      rib.scale(1, (RISE + 0.12) / (w / 2 + 0.12), 1);
+      B.add(rib, frameM, 0, WALL, z);
+      [-1, 1].forEach(function (s) { B.box(frameM, s * (w / 2 + 0.1), WALL / 2, z, 0.3, WALL, 0.3); });
+    }
+    // door leaves stacked open in their pockets beyond the side walls
+    [-1, 1].forEach(function (s) {
+      for (let k = 0; k < 2; k++) B.box(doorM, s * (w / 2 + 1.0 + k * 0.5), WALL / 2 - 0.2, d / 2 - 2.2 - k * 0.6, 0.35, WALL - 0.4, 4.2);
+      B.box(frameM, s * (w / 2 + 1.25), WALL / 2, d / 2 - 4.6, 1.6, WALL, 0.3);
+    });
+    // light strips under the roof, a workbench line along the back
+    for (let x = -w / 4; x <= w / 4; x += w / 4) B.box(liteM, x, WALL + RISE * 0.7, 0, 0.4, 0.1, d - 6);
+    B.box(cm(0x5b4a3a), 0, 0.5, -d / 2 + 1.2, w * 0.6, 1.0, 1.4);
+    B.flush(g, "base-hangar");
+    K.root.add(g);
+    solidL(host, b, -(w / 2 - 0.2), 0, 0.5, d, 0, WALL + RISE * 0.5, "hangar");
+    solidL(host, b, w / 2 - 0.2, 0, 0.5, d, 0, WALL + RISE * 0.5, "hangar");
+    solidL(host, b, 0, -d / 2 + 0.2, w, 0.5, 0, WALL + RISE, "hangar");
+    solidL(host, b, -(w / 2 + 1.25), d / 2 - 2.6, 1.8, 4.6, 0, WALL, "hangar");
+    solidL(host, b, w / 2 + 1.25, d / 2 - 2.6, 1.8, 4.6, 0, WALL, "hangar");
+    return g;
+  }
+  // HARDENED AIRCRAFT SHELTER: a concrete arch, blast doors drawn open
+  function has(K, host, b) {
+    const THREE = T(), w = b.inner || b.w - 6, d = b.d, H = 8.6, y = host.y || 0;
+    const outM = cm(C.hasConc), inM = own("hasIn", function () { return new THREE.MeshLambertMaterial({ color: 0x6d6a63, side: THREE.BackSide }); });
+    const doorM = cm(0x5c6066), darkM = cm(0x34373b);
+    const g = new THREE.Group(); g.position.set(b.x, y, b.z); g.rotation.y = b.yaw || 0;
+    const B = new Batch();
+    B.add(vaultGeo(w + 2, H + 1.2, d, 22), outM, 0, 0, 0);            // the outer skin, 1.2 m of concrete
+    B.add(vaultGeo(w, H, d - 0.2, 22), inM, 0, 0, 0);                 // the vault you park in
+    B.add(new THREE.ShapeGeometry(archShape(w + 2, H + 1.2, 22)), outM, 0, 0, -d / 2, Math.PI);   // rear wall, facing out
+    B.add(new THREE.ShapeGeometry(archShape(w, H, 22)), cm(0x6d6a63), 0, 0, -d / 2 + 0.6);           // and facing in
+    // the front portal: a thick concrete header and jambs
+    B.box(outM, 0, H + 0.9, d / 2 + 0.6, w + 4, 1.8, 1.2);
+    [-1, 1].forEach(function (s) {
+      B.box(outM, s * (w / 2 + 1.6), (H + 1.8) / 2, d / 2 + 0.6, 2.2, H + 1.8, 1.2);
+      // the blast doors, rolled back into their housings either side of the portal:
+      // the leaf's edge shows in the slot, the housing is the concrete around it
+      B.box(outM, s * (w / 2 + 3.6), (H + 1.8) / 2, d / 2 - 0.4, 1.8, H + 1.8, 3.2);
+      B.box(doorM, s * (w / 2 + 2.75), H / 2 + 0.4, d / 2 + 0.4, 0.5, H + 0.8, 1.6);
+      B.box(darkM, s * (w / 2 + 1.2), 0.08, d / 2 + 0.9, 3.4, 0.16, 0.25);
+    });
+    // exhaust port in the rear and a lamp over the portal
+    B.box(darkM, 0, H * 0.75, -d / 2 - 0.4, 3, 1.6, 0.8);
+    B.box(cm(0xfff0c0, { emissive: 0xffe0a0, ei: 0.8 }), 0, H + 1.9, d / 2 + 1.3, 1.2, 0.3, 0.5);
+    B.flush(g, "base-has");
+    K.root.add(g);
+    // walls you cannot walk through, the arch's foot as two low walls, the rear, the doors
+    solidL(host, b, -(w / 2 + 0.3), 0, 1.6, d, 0, H, "has");
+    solidL(host, b, w / 2 + 0.3, 0, 1.6, d, 0, H, "has");
+    solidL(host, b, 0, -d / 2 - 0.2, w + 2, 1.2, 0, H + 1.2, "has");
+    [-1, 1].forEach(function (s) { solidL(host, b, s * (w / 2 + 3.3), d / 2 - 0.2, 3.4, 3.4, 0, H + 1.8, "has"); });
+    return g;
+  }
+  // CONTROL TOWER: an ops block, a concrete shaft, a glazed cab with a catwalk
+  function tower(K, host, b) {
+    const THREE = T(), y = host.y || 0, h = b.h || 24;
+    const conc = cm(0xb3b0a6), concD = cm(0x8f8c83), steel = cm(C.steelD);
+    const glass = own("towerGlass", function () { return new THREE.MeshLambertMaterial({ color: 0x2c4658, emissive: 0x1b3444, emissiveIntensity: 0.8, transparent: true, opacity: 0.82 }); });
+    const g = new THREE.Group(); g.position.set(b.x, y, b.z); g.rotation.y = b.yaw || 0;
+    const B = new Batch();
+    B.box(conc, 0, 2.2, 0, b.w, 4.4, b.d);                            // ops block
+    B.box(concD, 0, 4.55, 0, b.w + 0.4, 0.3, b.d + 0.4);
+    for (let x = -b.w / 2 + 2; x <= b.w / 2 - 2; x += 2.6) B.box(glass, x, 2.6, b.d / 2 + 0.02, 1.6, 1.4, 0.06);
+    B.box(cm(C.door), 0, 1.2, b.d / 2 + 0.03, 1.6, 2.4, 0.06);
+    const sx = -b.w / 2 + 4, sz = -1;                                   // the shaft rises from the block's west end
+    B.box(conc, sx, h / 2, sz, 5, h, 5);
+    for (let yy = 6; yy < h - 2; yy += 3.2) B.box(glass, sx, yy, sz + 2.52, 0.8, 1.6, 0.06);
+    // the cab: octagonal glass, sloped outward, under a deep roof
+    const cabY = h + 0.3;
+    B.add(new THREE.CylinderGeometry(4.6, 3.9, 0.6, 8), concD, sx, cabY, sz);                 // cab floor slab
+    B.add(new THREE.CylinderGeometry(4.5, 3.9, 3.6, 8, 1, true), glass, sx, cabY + 2.1, sz);  // canted glazing
+    for (let i = 0; i < 8; i++) {
+      const a = (i + 0.5) * Math.PI / 4;
+      B.box(steel, sx + Math.sin(a) * 4.2, cabY + 2.1, sz + Math.cos(a) * 4.2, 0.18, 3.7, 0.18, a, 0.17);
+    }
+    B.add(new THREE.CylinderGeometry(5.6, 5.0, 0.7, 8), conc, sx, cabY + 4.25, sz);           // roof
+    B.add(new THREE.TorusGeometry(5.1, 0.06, 4, 16), steel, sx, cabY + 1.0, sz, 0, Math.PI / 2);   // catwalk rail
+    B.add(new THREE.CylinderGeometry(5.2, 5.2, 0.15, 16), steel, sx, cabY - 0.05, sz);        // catwalk
+    B.box(steel, sx, cabY + 6.5, sz, 0.2, 4, 0.2);                                             // antenna mast
+    B.box(steel, sx + 1.2, cabY + 5.2, sz, 2.4, 0.12, 0.12);
+    B.add(new THREE.SphereGeometry(0.45, 8, 6), cm(0x59ff8a, { emissive: 0x59ff8a, ei: 1 }), sx, cabY + 8.7, sz);
+    B.flush(g, "base-tower");
+    K.root.add(g);
+    solidL(host, b, 0, 0, b.w, b.d, 0, 4.6, "tower");
+    solidL(host, b, sx, sz, 5, 5, 0, h, "tower");
+    return { x: b.x, z: b.z, h: h + 9 };
+  }
+  // FUEL FARM: vertical tanks with ladders and rails inside a concrete bund
+  function fuelFarm(K, host, b) {
+    const THREE = T(), y = host.y || 0, r = b.r || 6, h = b.h || 9;
+    const tankM = cm(C.tank), band = cm(C.tankBand), steel = cm(C.steelD), bund = cm(0x8d8a80), pipe = cm(0x6a6f60);
+    const g = new THREE.Group(); g.position.set(b.x, y, b.z);
+    const B = new Batch();
+    (b.tanks || []).forEach(function (t) {
+      const tx = t[0], tz = t[1];
+      B.add(new THREE.CylinderGeometry(r, r, h, 24), tankM, tx, h / 2, tz);
+      B.add(new THREE.CylinderGeometry(0.4, r + 0.05, 1.2, 24), tankM, tx, h + 0.6, tz);       // the cone roof
+      B.add(new THREE.CylinderGeometry(r + 0.04, r + 0.04, 0.8, 24, 1, true), band, tx, h * 0.62, tz);
+      B.add(new THREE.CylinderGeometry(r + 0.6, r + 0.6, 0.25, 24), cm(0x77746c), tx, 0.12, tz);   // ring footing
+      B.add(new THREE.TorusGeometry(r - 0.15, 0.04, 4, 24), steel, tx, h + 1.0, tz, 0, Math.PI / 2);   // roof rail
+      // a caged ladder up the side that faces the bund gate
+      B.box(steel, tx + r + 0.25, h / 2 + 0.5, tz, 0.08, h + 1, 0.6);
+      for (let k = 0; k < 4; k++) B.box(steel, tx + r + 0.6, 2.5 + k * 2, tz, 0.08, 0.08, 0.9);
+      B.box(pipe, tx, 0.6, tz + r + 1.5, 0.35, 0.35, 3, 0, 0, 0);
+    });
+    // the bund: a 1.2 m concrete wall with a gate gap on the road side (north)
+    const hw = b.w / 2, hd = b.d / 2;
+    B.box(bund, 0, 0.6, hd, b.w, 1.2, 0.4);
+    B.box(bund, -hw, 0.6, 0, 0.4, 1.2, b.d);
+    B.box(bund, hw, 0.6, 0, 0.4, 1.2, b.d);
+    B.box(bund, -hw / 2 - 2.5, 0.6, -hd, hw - 5, 1.2, 0.4);
+    B.box(bund, hw / 2 + 2.5, 0.6, -hd, hw - 5, 1.2, 0.4);
+    // the manifold pipe rack along the bund's north side
+    B.box(pipe, 0, 1.6, -hd + 3, b.w - 6, 0.3, 0.3);
+    B.box(pipe, 0, 2.1, -hd + 3, b.w - 6, 0.25, 0.25);
+    for (let x = -hw + 4; x <= hw - 4; x += 6) B.box(steel, x, 1.0, -hd + 3, 0.2, 2.1, 0.8);
+    B.flush(g, "base-fuel");
+    K.root.add(g);
+    (b.tanks || []).forEach(function (t) { host.solid(b.x + t[0], b.z + t[1], r * 1.6, r * 1.6, 0, h + 1.2, "fuel"); });
+    host.solid(b.x, b.z + hd, b.w, 0.4, 0, 1.2, "bund");
+    host.solid(b.x - hw, b.z, 0.4, b.d, 0, 1.2, "bund");
+    host.solid(b.x + hw, b.z, 0.4, b.d, 0, 1.2, "bund");
+    host.solid(b.x - hw / 2 - 2.5, b.z - hd, hw - 5, 0.4, 0, 1.2, "bund");
+    host.solid(b.x + hw / 2 + 2.5, b.z - hd, hw - 5, 0.4, 0, 1.2, "bund");
+    return g;
+  }
+  // EARTH-COVERED MAGAZINE: a grassed mound, a concrete headwall, steel doors
+  function igloo(K, host, b) {
+    const THREE = T(), y = host.y || 0, w = b.w, d = b.d;
+    const earth = cm(0x56603a), conc = cm(0xa3a097), steel = cm(0x4a5048);
+    const g = new THREE.Group(); g.position.set(b.x, y, b.z);
+    const B = new Batch();
+    B.add(vaultGeo(w, 5.2, d - 2, 18, false), earth, 0, 0, -1);
+    B.box(conc, 0, 2.6, d / 2 - 1, w + 2, 5.2, 1.0);                             // headwall
+    [-1, 1].forEach(function (s) { B.box(conc, s * (w / 2 + 1.5), 1.5, d / 2 + 0.4, 0.8, 3.0, 3.2, s * 0.35); });   // wing walls
+    B.box(steel, -1.3, 1.6, d / 2 - 0.45, 2.5, 3.2, 0.12);
+    B.box(steel, 1.3, 1.6, d / 2 - 0.45, 2.5, 3.2, 0.12);
+    B.box(cm(C.warn), 0, 4.0, d / 2 - 0.45, 3.2, 0.5, 0.06);
+    B.box(cm(C.steel), 0, 6.3, -d / 2 + 2, 0.15, 3, 0.15);                        // lightning mast
+    B.flush(g, "base-igloo");
+    K.root.add(g);
+    host.solid(b.x, b.z - 1, w, d - 1, 0, 4.6, "igloo");
+    return g;
+  }
+  // OPEN-FRONT MAINTENANCE SHED: steel portal frames, a gabled roof, bays
+  function shed(K, host, b) {
+    const THREE = T(), y = host.y || 0, w = b.w, d = b.d, H = b.h || 7;
+    const clad = cm(0x737a6b), roofM = own("shedRoof", function () { return new THREE.MeshLambertMaterial({ color: 0x7c848c, side: THREE.DoubleSide }); });
+    const frame = cm(C.steelD), lite = cm(0xf2f4f0, { emissive: 0xdfe6e0, ei: 0.85 });
+    const g = new THREE.Group(); g.position.set(b.x, y, b.z); g.rotation.y = b.yaw || 0;
+    const B = new Batch();
+    const pitch = 0.22, half = d / 2, ridge = H + half * Math.tan(pitch);
+    B.box(clad, 0, H / 2, -d / 2 + 0.15, w, H, 0.3);                               // back wall
+    [-1, 1].forEach(function (s) {
+      B.box(clad, s * (w / 2 - 0.15), H / 2, 0, 0.3, H, d);                        // end walls
+      const tri = new THREE.Shape(); tri.moveTo(-half, 0); tri.lineTo(half, 0); tri.lineTo(0, ridge - H); tri.lineTo(-half, 0);
+      B.add(new THREE.ShapeGeometry(tri), clad, s * (w / 2 - 0.15), H, 0, Math.PI / 2);
+      // the two roof planes
+      B.box(roofM, 0, H + (ridge - H) / 2, s * half / 2, w + 0.8, 0.12, half / Math.cos(pitch) + 0.4, 0, s * pitch);
+    });
+    const bays = Math.max(2, Math.round(w / 13));
+    for (let i = 0; i <= bays; i++) {
+      const x = -w / 2 + i * (w / bays);
+      B.box(frame, x, H / 2, d / 2 - 0.3, 0.35, H, 0.35);                         // front columns
+      if (i > 0 && i < bays) B.box(cm(0x60675a), x, H / 2, -d / 4, 0.25, H, d / 2); // bay dividers (half depth)
+    }
+    B.box(frame, 0, H - 0.3, d / 2 - 0.3, w, 0.6, 0.4);                           // front beam
+    for (let i = 0; i < bays; i++) {
+      const x = -w / 2 + (i + 0.5) * (w / bays);
+      B.box(lite, x, H - 0.1, 0, 3, 0.08, 0.4);
+      B.box(cm(0x5b4a3a), x, 0.45, -d / 2 + 1.0, (w / bays) * 0.6, 0.9, 1.0);     // workbench
+      B.box(cm(0x8a2d26), x + (w / bays) * 0.35, 0.9, -d / 2 + 0.9, 0.7, 1.8, 0.6); // tool chest
+    }
+    B.flush(g, "base-shed");
+    K.root.add(g);
+    solidL(host, b, 0, -d / 2 + 0.15, w, 0.4, 0, H, "shed");
+    solidL(host, b, -(w / 2 - 0.15), 0, 0.4, d, 0, H, "shed");
+    solidL(host, b, w / 2 - 0.15, 0, 0.4, d, 0, H, "shed");
+    for (let i = 1; i < bays; i++) solidL(host, b, -w / 2 + i * (w / bays), -d / 4, 0.3, d / 2, 0, H, "shed");
+    return g;
+  }
+  // RADAR: a lattice mast with a dish on top
+  function radar(K, host, b) {
+    const THREE = T(), y = host.y || 0;
+    const steel = cm(C.steel), dishM = own("dish", function () { return new THREE.MeshLambertMaterial({ color: 0xd9d6cc, side: THREE.DoubleSide }); });
+    const g = new THREE.Group(); g.position.set(b.x, y, b.z);
+    const B = new Batch();
+    [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(function (q) { B.box(steel, q[0] * 1.1, 6, q[1] * 1.1, 0.22, 12, 0.22, 0, q[1] * 0.06, -q[0] * 0.06); });
+    for (let h = 2; h < 12; h += 2.5) { B.box(steel, 0, h, -1.0, 2.2, 0.12, 0.12); B.box(steel, 0, h, 1.0, 2.2, 0.12, 0.12); B.box(steel, -1.0, h, 0, 0.12, 0.12, 2.2); B.box(steel, 1.0, h, 0, 0.12, 0.12, 2.2); }
+    B.box(cm(C.steelD), 0, 12.2, 0, 2.6, 0.4, 2.6);
+    B.add(new THREE.SphereGeometry(3.4, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2.6), dishM, 0, 14.4, 0, 0, -1.1);
+    B.box(steel, 0, 14.4, 1.4, 0.12, 0.12, 2.8, 0, -0.45);
+    B.box(cm(0x2b2f35), 2.0, 1.2, 0, 1.6, 2.4, 2.2);                                // equipment shelter
+    B.flush(g, "base-radar");
+    K.root.add(g);
+    host.solid(b.x, b.z, 2.6, 2.6, 0, 12.4, "radar");
+    host.solid(b.x + 2, b.z, 1.6, 2.2, 0, 2.4, "radar");
+    return g;
+  }
+  // SMALL-ARMS RANGE along z: firing shed at the near end, target frames, the berm
+  function range(K, host, b) {
+    const THREE = T(), y = host.y || 0, w = b.w, d = b.d;
+    const earth = cm(0x6a5a3e), wood = cm(0x6b5236), roofM = cm(0x5f665a), tgt = cm(0xd8d2bf), steel = cm(C.steelD);
+    const g = new THREE.Group(); g.position.set(b.x, y, b.z);
+    const B = new Batch();
+    const near = d / 2, far = -d / 2;
+    // the impact berm: a trapezoid of earth across the far end
+    const berm = new THREE.Shape(); berm.moveTo(-6, 0); berm.lineTo(6, 0); berm.lineTo(1.5, 6); berm.lineTo(-1.5, 6); berm.lineTo(-6, 0);
+    const bg = new THREE.ExtrudeGeometry(berm, { depth: w, bevelEnabled: false });
+    bg.translate(0, 0, -w / 2); bg.rotateY(Math.PI / 2);
+    B.add(bg, earth, 0, 0, far + 6);
+    // side berms (low), so the range reads as a cut
+    [-1, 1].forEach(function (s) { B.box(earth, s * (w / 2 - 0.8), 1.0, 0, 1.6, 2.0, d - 14); });
+    // target frames at 25/50/100 m, one per lane
+    const lanes = Math.floor((w - 4) / 4);
+    [25, 50, 100].forEach(function (m) {
+      for (let i = 0; i < lanes; i++) {
+        const x = -w / 2 + 2 + (i + 0.5) * ((w - 4) / lanes), z = near - 8 - m;
+        if (z < far + 13) continue;
+        B.box(wood, x - 0.4, 0.8, z, 0.08, 1.6, 0.08); B.box(wood, x + 0.4, 0.8, z, 0.08, 1.6, 0.08);
+        B.box(tgt, x, 1.45, z, 0.6, 1.0, 0.03);
+      }
+    });
+    // the firing line: a covered shed with lane dividers and a range tower flag
+    B.box(roofM, 0, 3.1, near - 4, w - 2, 0.2, 7);
+    for (let i = 0; i <= lanes; i++) {
+      const x = -w / 2 + 2 + i * ((w - 4) / lanes);
+      B.box(steel, x, 1.5, near - 1, 0.15, 3.0, 0.15);
+      B.box(steel, x, 1.5, near - 7, 0.15, 3.0, 0.15);
+      if (i > 0 && i < lanes) B.box(wood, x, 0.6, near - 6.5, 0.08, 1.2, 1.4);
+      if (i < lanes) B.box(wood, x + ((w - 4) / lanes) / 2, 0.45, near - 7.4, 1.2, 0.9, 0.5);       // firing bench
+    }
+    B.box(steel, w / 2 - 1.5, 4, near, 0.12, 8, 0.12);
+    B.box(cm(C.red), w / 2 - 1.5 + 0.7, 7.3, near, 1.3, 0.8, 0.03);                                // red range flag
+    B.flush(g, "base-range");
+    K.root.add(g);
+    host.solid(b.x, b.z + far + 6, w, 12, 0, 6, "berm");
+    return g;
+  }
+  // HESCO: one InstancedMesh per base, plus one collider per run
+  function hescoRuns(K, host, runs) {
+    const THREE = T(), mats = [];
+    runs.forEach(function (r) {
+      const len = Math.hypot(r.x1 - r.x0, r.z1 - r.z0), n = Math.max(1, Math.round(len / HESCO_LEN));
+      const ux = (r.x1 - r.x0) / len, uz = (r.z1 - r.z0) / len, yaw = -Math.atan2(uz, ux);
+      const step = len / n;
+      for (let L = 0; L < (r.layers || 1); L++) {
+        for (let i = 0; i < n; i++) {
+          const t = (i + 0.5) * step;
+          mats.push([r.x0 + ux * t, L * HESCO_H, r.z0 + uz * t, yaw, step / HESCO_LEN]);
+        }
+      }
+      const cx = (r.x0 + r.x1) / 2, cz = (r.z0 + r.z1) / 2;
+      const horiz = Math.abs(ux) > Math.abs(uz);
+      const hc = host.solid(cx, cz, horiz ? len : HESCO_D, horiz ? HESCO_D : len, 0, HESCO_H * (r.layers || 1), "hesco"); if (hc) hc.mat = "sand";
+    });
+    if (!mats.length) return null;
+    const im = new THREE.InstancedMesh(hescoGeo(false), hescoMat(), mats.length);
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), s = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+    mats.forEach(function (a, i) { q.setFromAxisAngle(up, a[3]); m.compose(v.set(a[0], (host.y || 0) + a[1], a[2]), q, s.set(a[4], 1, 1)); im.setMatrixAt(i, m); });
+    im.instanceMatrix.needsUpdate = true;
+    im.castShadow = true; im.receiveShadow = true;
+    im.name = "base-hesco";
+    K.root.add(im);
+    return im;
+  }
+  // a revetment is three HESCO walls, two baskets high, open on its +z side
+  function revetmentRuns(b) {
+    const hw = b.w / 2 - HESCO_D / 2, hd = b.d / 2;
+    return [
+      { x0: b.x - hw, z0: b.z - hd + HESCO_D / 2, x1: b.x + hw, z1: b.z - hd + HESCO_D / 2, layers: 2 },
+      { x0: b.x - hw, z0: b.z - hd, x1: b.x - hw, z1: b.z + hd, layers: 2 },
+      { x0: b.x + hw, z0: b.z - hd, x1: b.x + hw, z1: b.z + hd, layers: 2 },
+    ];
+  }
+  // SANDBAG BUNKER: an L of bags (instanced)
+  function sandbags(K, host, cx, cz) {
+    const THREE = T(), rows = [];
+    for (let i = 0; i < 6; i++) rows.push([cx - 3 + i, cz, 0]);
+    for (let i = 0; i < 5; i++) rows.push([cx - 2.5 + i, cz, 1]);
+    for (let j = 1; j < 5; j++) rows.push([cx - 3, cz + j, 0]);
+    const im = new THREE.InstancedMesh(new THREE.BoxGeometry(1.0, 0.45, 0.7), cm(C.sandbag), rows.length);
+    const d = new THREE.Object3D();
+    rows.forEach(function (r, i) { d.position.set(r[0], (host.y || 0) + 0.22 + r[2] * 0.45, r[1]); d.updateMatrix(); im.setMatrixAt(i, d.matrix); });
+    im.instanceMatrix.needsUpdate = true; im.castShadow = true; im.receiveShadow = true;
+    K.root.add(im);
+    const s1 = host.solid(cx - 0.5, cz, 7, 0.9, 0, 1.0, "sand"); if (s1) s1.mat = "sand";
+    const s2 = host.solid(cx - 3, cz + 2.5, 0.9, 5, 0, 1.0, "sand"); if (s2) s2.mat = "sand";
+    return im;
+  }
+  CBZ.baseKit.sandbags = sandbags;
+  // WATCHTOWER: four legs, a railed deck at 6.35 m under a roof, a caged ladder
+  // on the face toward `in` (world/ladderkit.js draws it, systems/climb.js
+  // climbs it) — so a sentry can go up and come down.
+  function watchtower(K, host, b, inX, inZ) {
+    const THREE = T(), DECK = 6.35, PAR = 1.0, ROOF = 8.6, HW = 1.7, y = host.y || 0;
+    const ol = cm(C.olive), olD = cm(C.oliveD);
+    const dx = (inX == null ? 0 : inX) - b.x, dz = (inZ == null ? 0 : inZ) - b.z;
+    const alongX = Math.abs(dx) >= Math.abs(dz);
+    const s = alongX ? (dx >= 0 ? 1 : -1) : (dz >= 0 ? 1 : -1);
+    const g = new THREE.Group(); g.position.set(b.x, y, b.z);
+    const B = new Batch();
+    [-1, 1].forEach(function (sx) {
+      [-1, 1].forEach(function (sz) {
+        B.box(olD, sx * 1.4, (DECK - 0.3) / 2, sz * 1.4, 0.25, DECK - 0.3, 0.25);
+        B.box(olD, sx * 1.55, (DECK + PAR + ROOF - 0.15) / 2, sz * 1.55, 0.12, ROOF - 0.15 - DECK - PAR, 0.12);
+        host.solid(b.x + sx * 1.4, b.z + sz * 1.4, 0.3, 0.3, 0, DECK - 0.3, "tower");
+      });
+    });
+    B.box(olD, 0, 3.0, -1.4, 2.8, 0.14, 0.14); B.box(olD, 0, 3.0, 1.4, 2.8, 0.14, 0.14);
+    B.box(olD, -1.4, 3.0, 0, 0.14, 0.14, 2.8); B.box(olD, 1.4, 3.0, 0, 0.14, 0.14, 2.8);
+    B.box(ol, 0, DECK - 0.15, 0, HW * 2, 0.3, HW * 2);
+    const py = DECK + PAR / 2, seg = HW - 0.42;
+    // parapet: three full walls; the ladder face split round its gap
+    const wall = function (axisX, sign, full) {
+      if (axisX) {
+        if (full) B.box(ol, sign * (HW - 0.05), py, 0, 0.1, PAR, HW * 2);
+        else { B.box(ol, sign * (HW - 0.05), py, -(0.42 + seg / 2), 0.1, PAR, seg); B.box(ol, sign * (HW - 0.05), py, 0.42 + seg / 2, 0.1, PAR, seg); }
+      } else {
+        if (full) B.box(ol, 0, py, sign * (HW - 0.05), HW * 2, PAR, 0.1);
+        else { B.box(ol, -(0.42 + seg / 2), py, sign * (HW - 0.05), seg, PAR, 0.1); B.box(ol, 0.42 + seg / 2, py, sign * (HW - 0.05), seg, PAR, 0.1); }
+      }
+    };
+    wall(true, 1, !(alongX && s > 0)); wall(true, -1, !(alongX && s < 0));
+    wall(false, 1, !(!alongX && s > 0)); wall(false, -1, !(!alongX && s < 0));
+    B.box(olD, 0, ROOF, 0, 3.6, 0.3, 3.6);
+    B.add(new THREE.CylinderGeometry(0.3, 0.35, 0.5, 8), cm(C.warn), alongX ? -s * 1.45 : 0, DECK + PAR + 0.25, alongX ? 0 : -s * 1.45, 0, 0, Math.PI / 2);
+    B.flush(g, "base-watchtower");
+    K.root.add(g);
+    const w = host.toWorld ? host.toWorld(b.x, b.z) : { x: b.x, z: b.z };
+    if (CBZ.ladderKit && host.axisAligned !== false && host.ladders !== false) {
+      const nx = alongX ? s : 0, nz = alongX ? 0 : s;
+      CBZ.ladderKit.deck({
+        minX: w.x - HW, maxX: w.x + HW, minZ: w.z - HW, maxZ: w.z + HW, top: (host.worldY || 0) + DECK, rail: PAR,
+        gaps: [{ x: w.x + nx * HW, z: w.z + nz * HW, w: 0.42 }],
+      });
+      CBZ.ladderKit.build(host.ladderRoot || K.root.parent || K.root, {
+        x: w.x + nx * (HW + 0.05), z: w.z + nz * (HW + 0.05), nx: nx, nz: nz, y0: host.worldY || 0, y1: (host.worldY || 0) + DECK,
+        name: "watchtower", tag: "military:watchtower", mode: "city",
+      }, cm(C.steelD));
+      return { x: w.x, z: w.z, y: (host.worldY || 0) + DECK };
+    }
+    host.solid(b.x, b.z, 3.4, 3.4, 0, DECK, "tower");
+    return null;
+  }
+  CBZ.baseKit.watchtower = watchtower;
+  // a small guard booth (when no real building shell is available)
+  function booth(K, host, b) {
+    const THREE = T(), y = host.y || 0;
+    const g = new THREE.Group(); g.position.set(b.x, y, b.z);
+    const B = new Batch();
+    B.box(cm(0x9a9688), 0, 1.3, 0, b.w, 2.6, b.d);
+    B.box(own("boothGlass", function () { return new THREE.MeshLambertMaterial({ color: 0x2c4658, emissive: 0x1b3444, emissiveIntensity: 0.6 }); }), 0, 1.7, 0, b.w + 0.04, 0.9, b.d + 0.04);
+    B.box(cm(C.white), 0, 2.75, 0, b.w + 0.6, 0.3, b.d + 0.6);
+    B.flush(g, "base-booth");
+    K.root.add(g);
+    host.solid(b.x, b.z, b.w, b.d, 0, 2.9, "booth");
+  }
+  // A PLAIN BLOCK BUILDING, for a host with no shell factory (the portable
+  // base on a slice page): storeys of punched windows, a parapet, a door on
+  // the door side, plant on the roof. Solid; not enterable.
+  function block(K, host, b) {
+    const THREE = T(), y = host.y || 0, st = Math.max(1, b.storeys || 1), FH = 3.4, H = st * FH;
+    const wall = cm(b.color || 0x7a7560), trim = cm(0x5b5d55), win = cm(0x22303c, { emissive: 0x0f1a24, ei: 0.6 });
+    const g = new THREE.Group(); g.position.set(b.x, y, b.z);
+    const B = new Batch();
+    B.box(wall, 0, H / 2, 0, b.w, H, b.d);
+    B.box(trim, 0, H + 0.45, 0, b.w + 0.3, 0.9, b.d + 0.3);
+    B.box(cm(0x4d4f4a), 0, H + 0.05, 0, b.w - 0.6, 0.1, b.d - 0.6);
+    for (let f = 0; f < st; f++) {
+      const wy = f * FH + 1.9;
+      for (let x = -b.w / 2 + 2; x <= b.w / 2 - 2; x += 3) { B.box(win, x, wy, b.d / 2 + 0.02, 1.4, 1.5, 0.05); B.box(win, x, wy, -b.d / 2 - 0.02, 1.4, 1.5, 0.05); }
+      for (let z = -b.d / 2 + 2; z <= b.d / 2 - 2; z += 3) { B.box(win, b.w / 2 + 0.02, wy, z, 0.05, 1.5, 1.4); B.box(win, -b.w / 2 - 0.02, wy, z, 0.05, 1.5, 1.4); }
+    }
+    const dz = b.door === 0 ? -1 : 1;
+    B.box(cm(C.door), 0, 1.25, dz * (b.d / 2 + 0.04), 2.4, 2.5, 0.08);
+    B.box(trim, 0, 2.75, dz * (b.d / 2 + 0.9), 3.6, 0.2, 1.8);
+    if (b.w > 10) { B.box(cm(0x9da19c), -b.w / 4, H + 0.9, 0, 2.4, 1.2, 1.6); B.box(cm(0x9da19c), b.w / 4, H + 0.9, 0, 2.4, 1.2, 1.6); }
+    B.flush(g, "base-block");
+    K.root.add(g);
+    host.solid(b.x, b.z, b.w, b.d, 0, H + 0.9, "building");
+  }
+  // the reviewing stand on the parade field's edge
+  function reviewStand(K, host, b) {
+    const THREE = T(), y = host.y || 0;
+    const g = new THREE.Group(); g.position.set(b.x, y, b.z);
+    const B = new Batch();
+    for (let k = 0; k < 3; k++) B.box(cm(0xa29f95), 0, 0.25 + k * 0.5, -k * 1.0 + 1.0, b.w, 0.5 + k * 0.0, b.d - k * 1.0);
+    B.box(cm(0x3f4a5c), 0, 3.2, 0, b.w + 0.6, 0.15, b.d + 0.6);
+    [-1, 1].forEach(function (s) { B.box(cm(C.steelD), s * (b.w / 2), 1.6, b.d / 2 - 0.2, 0.15, 3.2, 0.15); B.box(cm(C.steelD), s * (b.w / 2), 1.6, -b.d / 2 + 0.2, 0.15, 3.2, 0.15); });
+    B.flush(g, "base-review");
+    K.root.add(g);
+    host.solid(b.x, b.z, b.w, b.d, 0, 1.4, "stand");
+  }
+  // runway + taxiway edge lights: two instanced meshes for the whole field
+  function fieldLights(K, host, P) {
+    const THREE = T(), y = host.y || 0;
+    const RW = P.runway, TW = P.taxiway, white = [], blue = [];
+    for (let x = RW.x0 + 4; x <= RW.x1 - 4; x += 30) { white.push([x, RW.z - RW.w / 2 - 1.5]); white.push([x, RW.z + RW.w / 2 + 1.5]); }
+    for (let x = TW.x0 + 4; x <= TW.x1 - 4; x += 30) { blue.push([x, TW.z - TW.w / 2 - 1]); blue.push([x, TW.z + TW.w / 2 + 1]); }
+    const put = function (pts, col) {
+      const im = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.12, 0.16, 0.5, 6), cm(col, { emissive: col, ei: 0.9 }), pts.length);
+      const d = new THREE.Object3D();
+      pts.forEach(function (p, i) { d.position.set(p[0], y + 0.25, p[1]); d.updateMatrix(); im.setMatrixAt(i, d.matrix); });
+      im.instanceMatrix.needsUpdate = true; im.castShadow = false; im.name = "base-field-lights";
+      K.root.add(im);
+    };
+    put(white, 0xfff2c0); put(blue, 0x3a6dff);
+    // a windsock beside the touchdown zone
+    const B = new Batch();
+    B.box(cm(C.steel), RW.x0 + 70, 3, RW.z - RW.w / 2 - 22, 0.15, 6, 0.15);
+    B.add(new THREE.CylinderGeometry(0.5, 0.25, 3.2, 8, 1, true), cm(0xe4642a), RW.x0 + 71.6, 5.8, RW.z - RW.w / 2 - 22, 0, 0, Math.PI / 2);
+    const gg = new THREE.Group(); gg.position.y = y; B.flush(gg, "base-windsock"); K.root.add(gg);
+  }
+
+  /* ======================================================================
+     RAISE — the whole plan into host.root.
+  ====================================================================== */
+  function raise(P, host) {
+    const THREE = T();
+    const K = { root: host.root, plan: P, out: { hangars: [], towers: [], tower: null, buildings: {} } };
+    if (host.ground !== false && typeof document !== "undefined") {
+      const cv = paintGround(P, host.res || 2048, { dirt: host.dirt });
+      const tex = new THREE.CanvasTexture(cv);
+      tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearMipmapLinearFilter; tex.generateMipmaps = true;
+      tex.anisotropy = Math.min(8, CBZ.renderer && CBZ.renderer.capabilities ? CBZ.renderer.capabilities.getMaxAnisotropy() : 1);
+      if (THREE.sRGBEncoding && host.srgb) tex.encoding = THREE.sRGBEncoding;
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(2 * P.hx, 2 * P.hz), new THREE.MeshLambertMaterial({ color: 0xffffff, map: tex }));
+      plane.rotation.x = -Math.PI / 2;
+      plane.position.y = (host.y || 0) + (host.groundLift || 0);
+      plane.receiveShadow = true; plane.castShadow = false;
+      plane.name = host.groundName || "base-surface";
+      K.root.add(plane);
+      K.out.ground = plane;
+    }
+    fieldLights(K, host, P);
+    const runs = P.hesco.slice();
+    P.build.forEach(function (b) {
+      try {
+        switch (b.kind) {
+          case "hangar": K.out.hangars.push({ b: b, g: hangar(K, host, b) }); break;
+          case "has": has(K, host, b); break;
+          case "tower": K.out.tower = tower(K, host, b); break;
+          case "fuelfarm": fuelFarm(K, host, b); break;
+          case "igloo": igloo(K, host, b); break;
+          case "shed": shed(K, host, b); break;
+          case "radar": radar(K, host, b); break;
+          case "range": range(K, host, b); break;
+          case "stand": reviewStand(K, host, b); break;
+          case "revetment": revetmentRuns(b).forEach(function (r) { runs.push(r); }); break;
+          case "booth": booth(K, host, b); break;
+          case "watchtower": {
+            const t = watchtower(K, host, b, b.corner ? 0 : b.x - 20, b.corner ? 0 : b.z);
+            if (t) K.out.towers.push(Object.assign({ id: b.id, corner: !!b.corner }, t));
+            break;
+          }
+          case "guardhouse":
+          case "building": {
+            let made = null;
+            if (host.building) made = host.building(b.x, b.z, b.w, b.d, b.storeys || 1, b.color, b.door == null ? 1 : b.door, { facade: b.facade, name: b.name, id: b.id });
+            if (!made) (b.kind === "guardhouse" ? booth : block)(K, host, b);
+            K.out.buildings[b.id] = made;
+            break;
+          }
+        }
+      } catch (e) { if (G.console) console.warn("[basekit] " + b.kind + " " + b.id + " failed:", e); }
+    });
+    hescoRuns(K, host, runs);
+    if (host.merge !== false) K.out.drawCalls = mergeStatic(K.root, K.out.ground);
+    return K.out;
+  }
+  /* ONE MESH PER MATERIAL FOR THE WHOLE BASE. Every structure flushed its own
+     few meshes; a base is one place, seen whole or not at all, so its static
+     shells merge across structures too (instancing and merging only — the
+     geometry is untouched). Returns the merged mesh count. */
+  function mergeStatic(rootG, skip) {
+    const THREE = T();
+    rootG.updateMatrixWorld(true);
+    const inv = new THREE.Matrix4().copy(rootG.matrixWorld).invert();
+    const B = new Batch(), dead = [], m = new THREE.Matrix4();
+    rootG.traverse(function (o) {
+      if (!o.isMesh || o.isInstancedMesh || o === skip || !/^base-/.test(o.name)) return;
+      m.multiplyMatrices(inv, o.matrixWorld);
+      const g = o.geometry.clone().applyMatrix4(m);
+      let set = B.sets.get(o.material);
+      if (!set) { set = []; B.sets.set(o.material, set); }
+      set.push(g);
+      dead.push(o);
+    });
+    dead.forEach(function (o) {
+      const p = o.parent; p.remove(o); o.geometry.dispose();
+      if (p !== rootG && p.children.length === 0 && p.parent) p.parent.remove(p);
+    });
+    return B.flush(rootG, "base-static").length;
+  }
+  CBZ.baseKit.mergeStatic = mergeStatic;
+  CBZ.baseKit.raise = raise;
+  CBZ.baseKit.revetmentRuns = revetmentRuns;
+
+  if (typeof module !== "undefined" && module.exports) module.exports = { basePlan: basePlan, auditPlan: auditPlan, taxiPath: taxiPath };
+})();

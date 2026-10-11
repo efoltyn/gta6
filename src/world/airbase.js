@@ -46,7 +46,9 @@
    so `group.rotation.y = heading` aims it and nothing has to remember
    an offset. `group.userData.airframe` carries {span,length,kind}.
 
-   Flags: AIRBASE_V1 (master), AIRBASE_FIGHTERS, AIRBASE_LIGHTS.
+   Flags: AIRBASE_V1 (master), AIRBASE_FIGHTERS (flight-line count).
+   THE LAYOUT is world/basekit.js's plan (the same planner Fort Brandt uses);
+   this file owns the slab, the rotation, world colliders and seating.
    Audit: CBZ.airbaseAudit().
 ============================================================ */
 (function () {
@@ -59,7 +61,6 @@
   const C = CBZ.CONFIG;
   if (C.AIRBASE_V1 == null) C.AIRBASE_V1 = true;
   if (C.AIRBASE_FIGHTERS == null) C.AIRBASE_FIGHTERS = 8;
-  if (C.AIRBASE_LIGHTS == null) C.AIRBASE_LIGHTS = true;
   if (C.AIRBASE_V1 === false) return;
 
   function cm(hex, o) { return CBZ.cmat ? CBZ.cmat(hex, o) : new THREE.MeshLambertMaterial({ color: hex }); }
@@ -353,20 +354,23 @@
   }
 
   // ---------------------------------------------------------------- BUILD
+  /* THE LAYOUT IS NOT AUTHORED HERE ANY MORE. world/basekit.js plans every
+     military base in the repo (CBZ.basePlan) and raises its structures
+     (CBZ.baseKit.raise) — Fort Brandt in the shipped world and this portable
+     field are the same plan at two sizes. This function owns only what is
+     portable about it: the slab on rough ground, the rotation, the colliders
+     in world space, and seating the aeroplanes on their wheels. */
   airbase.build = function (opts) {
     opts = opts || {};
     const CX = opts.x || 0, CZ = opts.z || 0;
     const HEAD = opts.heading || 0;                       // runway bearing, radians
     const groundAt = opts.groundAt || function () { return 0; };
-    // seed 0 is a seed. Swept up with the gearDrop fix below: the other `||`
-    // defaults in this function guard dimensions (a 0 m runway is not a
-    // request) or already default to 0, so this was the only other one where
-    // a falsy value the caller meant could be silently overruled.
-    const rng = CBZ.seedStream ? CBZ.seedStream(opts.seed != null ? opts.seed : "airbase") : Math.random;
-    const rr = function (a, b) { return a + rng() * (b - a); };
+    if (!CBZ.basePlan || !CBZ.baseKit || !CBZ.baseKit.raise) {
+      console.warn("[airbase] world/basekit.js is not loaded; no base to build");
+      return null;
+    }
 
     const RW_LEN = opts.runwayLength || 1800;
-    const RW_W = 60;
     const PAD_L = RW_LEN + 240, PAD_W = 760;
 
     // THE PAD (see header): find the highest ground under the footprint and
@@ -394,41 +398,37 @@
     //        [   0  1  0  ]
     //        [ -sin 0 cos ]
     // so local +X lands on world (cos, −sin) and local +Z on (sin, cos).
-    // Writing the "obvious" (cos, +sin) / (−sin, cos) instead is not a
-    // rotation at all — it is a REFLECTION about the base's own axis, and
-    // because every published landmark and every collider went through it
-    // together, nothing looked wrong: the spawn was still the right distance
-    // from the bomber, the pad still contained the runway. They were all
-    // just mirrored off the meshes they described. What actually gives it
-    // away is a camera: point one at base.hangars[1] and you photograph
-    // empty apron, because the hangar is on the other side.
+    // Writing (cos, +sin) / (−sin, cos) instead is a REFLECTION, and every
+    // landmark and collider went through it together, so nothing looked wrong
+    // until a camera pointed at a hangar photographed empty apron.
     const cosH = Math.cos(HEAD), sinH = Math.sin(HEAD);
     function wx(lx, lz) { return CX + lx * cosH + lz * sinH; }
     function wz(lx, lz) { return CZ - lx * sinH + lz * cosH; }
-    // A rotated box has no exact AABB; use the circumscribed square, which
-    // over-blocks by at most 41% on a 45° base and never lets you inside a
-    // hangar wall. Bases are placed axis-ish in practice, so this is cheap
-    // honesty rather than a compromise.
+    // A rotated box has no exact AABB; take the box's own extent along the
+    // world axes (exact for an axis-aligned base, a slight over-block at 45°).
     function solidAt(lx, lz, w, d, y0, y1, tag) {
-      const R = Math.max(w, d) / 2 * (Math.abs(cosH) + Math.abs(sinH)) * 0.5 + Math.min(w, d) / 2 * 0.5;
       const cx = wx(lx, lz), cz = wz(lx, lz);
       const ew = (Math.abs(cosH) * w + Math.abs(sinH) * d) / 2;
       const ed = (Math.abs(sinH) * w + Math.abs(cosH) * d) / 2;
       return collide({
         minX: cx - ew, maxX: cx + ew, minZ: cz - ed, maxZ: cz + ed,
         y0: y0 != null ? padY + y0 : undefined, y1: y1 != null ? padY + y1 : undefined,
-        tag: tag || "base", _r: R,
+        tag: tag || "base",
       });
     }
 
+    const P = CBZ.basePlan({
+      hx: PAD_L / 2, hz: PAD_W / 2, northGate: null, runwayLength: RW_LEN,
+      fighters: Math.max(0, C.AIRBASE_FIGHTERS | 0), hangars: 4,
+    });
     const base = {
       root: root, x: CX, z: CZ, y: padY, heading: HEAD,
       parked: [], hangars: [], props: [],
       pad: { length: PAD_L, width: PAD_W },
-      groundY: padY,
+      groundY: padY, plan: P,
     };
 
-    // ---- the slab + its skirt
+    // ---- the slab + its skirt (the painted skin sits on its top face)
     (function pad() {
       const slab = new THREE.Mesh(bg(PAD_L, 1.2, PAD_W), cm(M.concrete));
       slab.position.set(0, -0.6, 0);
@@ -439,371 +439,117 @@
       root.add(skirt);
     })();
 
-    // ---- runway, threshold bars, centreline, edge lights
-    (function runway() {
-      // THE CONVENTION SEAM, PUBLISHED ONCE. This file lays a base out along
-      // its local +X, so a heading here means "the runway points at
-      // (cos H, sin H)". systems/airframe.js puts the nose down local −Z, so
-      // the SAME direction is a different number to an aeroplane. Every
-      // caller that ever put an aircraft on this runway had to re-derive
-      // that conversion, and the first one to get it wrong took off across
-      // the runway instead of down it. So the base states both.
-      // runway runs toward (cos HEAD, −sin HEAD); an airframe's nose is −Z,
-      // i.e. (−sin h, −cos h). Solving the two gives:
-      const AIR_HEAD = Math.atan2(-Math.cos(HEAD), Math.sin(HEAD));
+    // ---- THE PLAN, RAISED: ground skin, shelters, hangars, tower, fuel farm,
+    //      sheds, revetments, igloos, range, towers, HESCO
+    const axis = Math.abs(Math.sin(2 * HEAD)) < 1e-6;
+    const out = CBZ.baseKit.raise(P, {
+      root: root, y: 0, worldY: padY, groundLift: 0.03, res: 2048,
+      axisAligned: axis, ladders: false,
+      toWorld: function (lx, lz) { return { x: wx(lx, lz), z: wz(lx, lz) }; },
+      solid: solidAt,
+    });
+    base.groundMesh = out.ground || null;
 
-      const rw = new THREE.Mesh(bg(RW_LEN, 0.5, RW_W), cm(M.runway));
-      rw.position.set(0, 0.25, -PAD_W * 0.22);
-      rw.receiveShadow = true;
-      root.add(rw);
-      const RZ = rw.position.z;
+    // ---- the runway, both conventions published once
+    (function runway() {
+      // This base lays out along local +X, so a heading here means "the runway
+      // points at (cos H, −sin H)". systems/airframe.js puts the nose down
+      // local −Z, so the SAME direction is a different number to an aeroplane:
+      const AIR_HEAD = Math.atan2(-Math.cos(HEAD), Math.sin(HEAD));
+      const R = P.runway, RZ = R.z;
       base.runway = {
-        length: RW_LEN, width: RW_W,
-        heading: HEAD,          // base convention: runway runs toward (cos,sin)
+        length: R.len, width: R.w,
+        heading: HEAD,          // base convention: runway runs toward (cos,−sin)
         airHeading: AIR_HEAD,   // airframe convention: hand this to af.place()
         cx: wx(0, RZ), cz: wz(0, RZ), y: padY,
-        startX: wx(-RW_LEN / 2 + 60, RZ), startZ: wz(-RW_LEN / 2 + 60, RZ),
-        endX: wx(RW_LEN / 2 - 60, RZ), endZ: wz(RW_LEN / 2 - 60, RZ),
+        startX: wx(R.x0 + 60, RZ), startZ: wz(R.x0 + 60, RZ),
+        endX: wx(R.x1 - 60, RZ), endZ: wz(R.x1 - 60, RZ),
       };
-
-      const paint = cm(M.paint, { emissive: 0x2a2a24, ei: 0.35 });
-      // centreline dashes — one instanced mesh
-      const n = Math.floor(RW_LEN / 60);
-      const dash = new THREE.InstancedMesh(bg(30, 0.06, 1.6), paint, n);
-      const mtx = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(1, 1, 1), v = new THREE.Vector3();
-      for (let i = 0; i < n; i++) {
-        mtx.compose(v.set(-RW_LEN / 2 + 30 + i * 60, 0.53, RZ), q, s);
-        dash.setMatrixAt(i, mtx);
-      }
-      dash.instanceMatrix.needsUpdate = true;
-      dash.frustumCulled = false;
-      root.add(dash);
-
-      // threshold piano keys at both ends
-      const keys = new THREE.InstancedMesh(bg(26, 0.06, 4), paint, 16);
-      let k = 0;
-      for (let e = -1; e <= 1; e += 2) for (let i = 0; i < 8; i++) {
-        const off = (i - 3.5) * 6.4;
-        mtx.compose(v.set(e * (RW_LEN / 2 - 30), 0.53, RZ + off), q, s);
-        keys.setMatrixAt(k++, mtx);
-      }
-      keys.instanceMatrix.needsUpdate = true;
-      keys.frustumCulled = false;
-      root.add(keys);
-
-      // edge lights — a runway you can find at night is the whole point
-      if (C.AIRBASE_LIGHTS) {
-        const cnt = Math.floor(RW_LEN / 50) * 2;
-        const lights = new THREE.InstancedMesh(
-          new THREE.SphereGeometry(0.7, 5, 4),
-          new THREE.MeshBasicMaterial({ color: 0xfff0b0 }), cnt);
-        let li = 0;
-        for (let i = 0; i * 50 < RW_LEN && li < cnt - 1; i++) {
-          const x = -RW_LEN / 2 + i * 50;
-          mtx.compose(v.set(x, 1.1, RZ - RW_W / 2 - 2), q, s); lights.setMatrixAt(li++, mtx);
-          mtx.compose(v.set(x, 1.1, RZ + RW_W / 2 + 2), q, s); lights.setMatrixAt(li++, mtx);
-        }
-        lights.count = li;
-        lights.instanceMatrix.needsUpdate = true;
-        lights.frustumCulled = false;
-        root.add(lights);
-      }
-
-      // taxiway linking runway to apron
-      const taxi = new THREE.Mesh(bg(RW_LEN * 0.72, 0.4, 26), cm(M.tarmac));
-      taxi.position.set(0, 0.3, RZ + RW_W / 2 + 70);
-      root.add(taxi);
-      for (let s2 = -1; s2 <= 1; s2 += 2) {
-        const link = new THREE.Mesh(bg(26, 0.4, 140), cm(M.tarmac));
-        link.position.set(s2 * RW_LEN * 0.3, 0.3, RZ + RW_W / 2 + 70);
-        root.add(link);
-      }
+      const az = (P.apron.z0 + P.apron.z1) / 2, ax = (P.apron.x0 + P.apron.x1) / 2;
+      base.apron = { x: wx(ax, az), z: wz(ax, az), y: padY };
+      P.build.forEach(function (b) {
+        if (b.kind === "hangar") base.hangars.push({ lx: b.x, lz: b.z, x: wx(b.x, b.z), z: wz(b.x, b.z) });
+      });
+      const tw = P.build.filter(function (b) { return b.kind === "tower"; })[0];
+      if (tw) base.tower = { x: wx(tw.x, tw.z), z: wz(tw.x, tw.z), y: padY + (out.tower ? out.tower.h : 33) };
     })();
 
-    // ---- apron: where the aeroplanes actually stand
-    // An aeroplane stands on the apron's TOP FACE, not on its centre and not
-    // on the pad slab underneath it — three surfaces within half a metre of
-    // each other, which is exactly the spread a hand-tuned constant gets
-    // wrong. Derive the top from the geometry that defines it and hand THAT
-    // to seat(), so the slab and the aircraft on it can never drift apart.
-    const APRON_Z = -PAD_W * 0.22 + RW_W / 2 + 190;
-    const APRON_Y = 0.32, APRON_H = 0.45, APRON_TOP = APRON_Y + APRON_H / 2;
-    (function apron() {
-      const ap = new THREE.Mesh(bg(RW_LEN * 0.66, APRON_H, 210), cm(M.tarmac));
-      ap.position.set(0, APRON_Y, APRON_Z);
-      ap.receiveShadow = true;
-      root.add(ap);
-      base.apron = { x: wx(0, APRON_Z), z: wz(0, APRON_Z), y: padY };
-    })();
-
-    // ---- hangars, tower, fuel farm, radar, barracks
-    (function structures() {
-      const HZ = APRON_Z + 150;
-      const wall = cm(M.olive), roofM = cm(M.greyD);
-      for (let i = 0; i < 4; i++) {
-        const hx = (i - 1.5) * 190;
-        const hgr = new THREE.Group();
-        hgr.position.set(hx, 0, HZ);
-        const shell = new THREE.Mesh(new THREE.CylinderGeometry(34, 34, 120, 14, 1, false, 0, Math.PI), roofM);
-        shell.rotation.z = Math.PI / 2;
-        shell.rotation.y = Math.PI / 2;
-        shell.position.y = 0.5;
-        shell.castShadow = true;
-        hgr.add(shell);
-        const back = new THREE.Mesh(bg(70, 34, 2), wall);
-        back.position.set(0, 17, 59);
-        hgr.add(back);
-        const frameL = new THREE.Mesh(bg(6, 30, 3), wall); frameL.position.set(-32, 15, -59); hgr.add(frameL);
-        const frameR = new THREE.Mesh(bg(6, 30, 3), wall); frameR.position.set(32, 15, -59); hgr.add(frameR);
-        root.add(hgr);
-        solidAt(hx, HZ, 70, 120, 0, 34, "hangar");
-        base.hangars.push({ lx: hx, lz: HZ, x: wx(hx, HZ), z: wz(hx, HZ) });
-      }
-
-      // control tower — the tallest thing on the field, and the landmark a
-      // player walking the apron navigates by
-      const TX = -RW_LEN * 0.30, TZ = APRON_Z + 120;
-      const shaft = new THREE.Mesh(bg(16, 40, 16), cm(M.grey));
-      shaft.position.set(TX, 20, TZ);
-      shaft.castShadow = true;
-      root.add(shaft);
-      const cab = new THREE.Mesh(bg(26, 9, 26), cm(M.steelD));
-      cab.position.set(TX, 44, TZ);
-      cab.castShadow = true;
-      root.add(cab);
-      const glass = new THREE.Mesh(bg(26.5, 5.5, 26.5), new THREE.MeshLambertMaterial({
-        color: M.glass, emissive: 0x18303f, emissiveIntensity: 0.9, transparent: true, opacity: 0.85,
-      }));
-      glass.position.set(TX, 44.5, TZ);
-      root.add(glass);
-      const capT = new THREE.Mesh(bg(30, 1.4, 30), cm(M.greyD));
-      capT.position.set(TX, 49.4, TZ);
-      root.add(capT);
-      solidAt(TX, TZ, 16, 16, 0, 50, "tower");
-      base.tower = { x: wx(TX, TZ), z: wz(TX, TZ), y: padY + 50 };
-
-      // rotating beacon on the tower cap
-      const beacon = new THREE.Mesh(new THREE.SphereGeometry(1.6, 6, 5), new THREE.MeshBasicMaterial({ color: 0x59ff8a }));
-      beacon.position.set(TX, 51, TZ);
-      root.add(beacon);
-      base.props.push({ kind: "beacon", mesh: beacon });
-
-      // fuel farm
-      for (let i = 0; i < 4; i++) {
-        const fx = RW_LEN * 0.30 + (i % 2) * 40, fz = APRON_Z + 116 + Math.floor(i / 2) * 44;
-        const tank = new THREE.Mesh(new THREE.CylinderGeometry(15, 15, 16, 14), cm(0x8d9683));
-        tank.position.set(fx, 8, fz);
-        tank.castShadow = true;
-        root.add(tank);
-        solidAt(fx, fz, 30, 30, 0, 16, "fuel");
-      }
-
-      // radar
-      const mast = new THREE.Mesh(bg(3, 26, 3), cm(M.steel));
-      mast.position.set(RW_LEN * 0.40, 13, APRON_Z + 190);
-      root.add(mast);
-      const dish = new THREE.Mesh(new THREE.BoxGeometry(22, 7, 1.4), cm(0xc9c6bb));
-      dish.position.set(RW_LEN * 0.40, 27, APRON_Z + 190);
-      root.add(dish);
-      base.props.push({ kind: "radar", mesh: dish });
-
-      // barracks + ops block
-      for (let i = 0; i < 5; i++) {
-        const bx = -RW_LEN * 0.42 + i * 58, bz = APRON_Z + 205;
-        const b = new THREE.Mesh(bg(46, 11, 22), cm(M.oliveD));
-        b.position.set(bx, 5.5, bz);
-        b.castShadow = true; b.receiveShadow = true;
-        root.add(b);
-        const rf = new THREE.Mesh(bg(48, 1.4, 24), cm(M.greyD));
-        rf.position.set(bx, 11.6, bz);
-        root.add(rf);
-        solidAt(bx, bz, 46, 22, 0, 12, "barracks");
-      }
-    })();
-
-    /* ---- HELIPADS AND THE MOTOR POOL ------------------------------------
-       An air base is not only fixed wing, and now that the real rotary and
-       ground hardware is reachable (CBZ.milModels, published by
-       city/island_military.js) there is no reason for the field to be bare.
-       Everything here is CONDITIONAL: no city files loaded → no helicopters,
-       no tanks, and the base still builds. The pads and the parking bays are
-       drawn either way, because a marked-out empty pad reads as a base
-       waiting for its aircraft, and a blank apron reads as a mistake. */
-    (function fleet() {
-      const padMat = cm(M.tarmac), lineMat = cm(M.paint, { emissive: 0x2a2a24, ei: 0.3 });
-      const HELI_Z = APRON_Z - 96;
-      // the discs stand slightly proud of the apron; their top is its own
-      // surface and the helicopters are seated on it, not on the apron
-      const HELI_Y = 0.35, HELI_H = 0.4, HELI_TOP = HELI_Y + HELI_H / 2;
-      for (let i = 0; i < 4; i++) {
-        const hx = RW_LEN * 0.10 + i * 74;
-        const pad = new THREE.Mesh(new THREE.CylinderGeometry(24, 24, HELI_H, 20), padMat);
-        pad.position.set(hx, HELI_Y, HELI_Z);
-        pad.receiveShadow = true;
-        root.add(pad);
-        // the H every helipad wears, so the circle reads as a landing point
-        const bar1 = new THREE.Mesh(bg(3, 0.06, 20), lineMat); bar1.position.set(hx - 6, 0.58, HELI_Z); root.add(bar1);
-        const bar2 = new THREE.Mesh(bg(3, 0.06, 20), lineMat); bar2.position.set(hx + 6, 0.58, HELI_Z); root.add(bar2);
-        const cross = new THREE.Mesh(bg(12, 0.06, 3), lineMat); cross.position.set(hx, 0.58, HELI_Z); root.add(cross);
-
-        const heli = airbase.heli({ name: "HELO " + (i + 1) });
-        if (heli) {
-          const yaw = Math.PI + (i % 2 ? 0.3 : -0.3);
-          const hy = seat(heli, hx, HELI_Z, HELI_TOP, yaw);
-          root.add(heli);
-          base.parked.push({
-            kind: "heli", group: heli, x: wx(hx, HELI_Z), z: wz(hx, HELI_Z),
-            y: padY + hy, heading: HEAD + yaw, airframe: heli.userData.airframe,
-          });
-          solidAt(hx, HELI_Z, 14, 18, 0, 5, "heli");
-        }
-      }
-
-      // motor pool: tanks nose-out in a row, trucks staged behind them, the
-      // way a real pool lines up so nothing has to be shunted to move one
-      const POOL_X = -RW_LEN * 0.44, POOL_Z = APRON_Z - 70;
-      const POOL_Y = 0.32, POOL_H = 0.4, POOL_TOP = POOL_Y + POOL_H / 2;
-      const apronPool = new THREE.Mesh(bg(240, POOL_H, 120), padMat);
-      apronPool.position.set(POOL_X + 90, POOL_Y, POOL_Z);
-      apronPool.receiveShadow = true;
-      root.add(apronPool);
-      for (let i = 0; i < 6; i++) {
-        const tx = POOL_X + 18 + i * 34, tz = POOL_Z - 28;
-        const t = airbase.tank({ name: "TANK " + (i + 1) });
-        if (!t) break;
-        const ty = seat(t, tx, tz, POOL_TOP, Math.PI);
-        root.add(t);
-        solidAt(tx, tz, 9, 12, 0, 4, "tank");
-        base.parked.push({ kind: "tank", group: t, x: wx(tx, tz), z: wz(tx, tz), y: padY + ty, heading: HEAD + Math.PI });
-      }
-      for (let i = 0; i < 5; i++) {
-        const tx = POOL_X + 26 + i * 40, tz = POOL_Z + 26;
-        const t = airbase.truck({ name: "TRUCK " + (i + 1) });
-        if (!t) break;
-        const ty = seat(t, tx, tz, POOL_TOP, Math.PI);
-        root.add(t);
-        solidAt(tx, tz, 8, 14, 0, 4, "truck");
-        base.parked.push({ kind: "truck", group: t, x: wx(tx, tz), z: wz(tx, tz), y: padY + ty, heading: HEAD + Math.PI });
-      }
-
-      // one transport on the far apron — the thing that brought everyone here
-      const cargo = airbase.cargo({ name: "TRANSPORT" });
-      if (cargo) {
-        const cx = -RW_LEN * 0.30, cz = APRON_Z + 40;
-        const cy = seat(cargo, cx, cz, APRON_TOP, Math.PI - 0.4);
-        root.add(cargo);
-        solidAt(cx, cz, 40, 44, 0, 12, "aircraft");
-        base.parked.push({ kind: "cargo", group: cargo, x: wx(cx, cz), z: wz(cx, cz), y: padY + cy, heading: HEAD + Math.PI - 0.4 });
-      }
-    })();
-
-    // ---- perimeter fence + the one gate (a base is SEALED; that is what
-    //      makes the gate mean anything)
-    (function fence() {
-      const postM = cm(M.fence);
-      const HW = PAD_W / 2 + 8, HL = PAD_L / 2 + 8;
-      const step = 24;
-      const nx = Math.floor(HL * 2 / step), nz = Math.floor(HW * 2 / step);
-      const posts = new THREE.InstancedMesh(bg(0.7, 6, 0.7), postM, (nx + nz) * 2 + 4);
-      const mesh = new THREE.InstancedMesh(bg(step, 5.4, 0.18),
-        new THREE.MeshLambertMaterial({ color: 0x8f959b, transparent: true, opacity: 0.42, side: THREE.DoubleSide }),
-        (nx + nz) * 2 + 4);
-      const mtx = new THREE.Matrix4(), q = new THREE.Quaternion(), qr = new THREE.Quaternion()
-        .setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2);
-      const s = new THREE.Vector3(1, 1, 1), v = new THREE.Vector3();
-      let pi = 0, mi = 0;
-      const GATE_X = 0;   // the gate is the pad's south face, centre
-      for (let i = 0; i <= nx; i++) {
-        const x = -HL + i * step;
-        for (let e = -1; e <= 1; e += 2) {
-          const z = e * HW;
-          if (e > 0 && Math.abs(x - GATE_X) < 30) continue;          // gate gap
-          mtx.compose(v.set(x, 3, z), q, s); posts.setMatrixAt(pi++, mtx);
-          mtx.compose(v.set(x + step / 2, 3, z), q, s); mesh.setMatrixAt(mi++, mtx);
-        }
-      }
-      for (let i = 0; i <= nz; i++) {
-        const z = -HW + i * step;
-        for (let e = -1; e <= 1; e += 2) {
-          const x = e * HL;
-          mtx.compose(v.set(x, 3, z), q, s); posts.setMatrixAt(pi++, mtx);
-          mtx.compose(v.set(x, 3, z + step / 2), qr, s); mesh.setMatrixAt(mi++, mtx);
-        }
-      }
-      posts.count = pi; mesh.count = mi;
-      posts.instanceMatrix.needsUpdate = true;
-      mesh.instanceMatrix.needsUpdate = true;
-      posts.frustumCulled = false; mesh.frustumCulled = false;
-      root.add(posts); root.add(mesh);
-
-      // guard shack + barrier at the gate
-      const shack = new THREE.Mesh(bg(9, 7, 9), cm(M.oliveD));
-      shack.position.set(GATE_X + 22, 3.5, HW);
-      root.add(shack);
-      solidAt(GATE_X + 22, HW, 9, 9, 0, 7, "shack");
-      const barrier = new THREE.Mesh(bg(28, 0.7, 0.7), cm(M.warn));
-      barrier.position.set(GATE_X, 2.6, HW);
-      root.add(barrier);
-      base.gate = { x: wx(GATE_X, HW), z: wz(GATE_X, HW) };
-    })();
-
-    // ---- the aeroplanes. The bomber gets the centre stand; the fighters
-    //      line the apron either side of it, nose-out, the way a real ramp
-    //      parks alert aircraft.
+    // ---- the fleet, on the plan's stands. Every airframe this file hands
+    //      out points −Z, the plan's yaw is +Z-forward: add π.
     (function park() {
-      const bomber = airbase.bomber({});
-      // WAS: `bomber.userData.gearDrop || 3.2`, and that `||` is the whole
-      // bug — adopt() sets a legitimate 0 for models already standing on
-      // their wheels, 0 is falsy, so the real B-2 inherited the PRIMITIVE
-      // wing's 3.2 m undercarriage and hovered over the apron. `!= null`
-      // would have patched it; measuring the model instead means the next
-      // airframe with no gearDrop at all lands on the concrete too.
-      const by = seat(bomber, 0, APRON_Z, APRON_TOP, Math.PI);  // nose out, toward the taxiway
-      root.add(bomber);
-      // hold the RECORD, not an index: the helipads and the motor pool push
-      // into base.parked before this runs, so parked[0] is a helicopter now
-      const rec = {
-        kind: "bomber", group: bomber,
-        x: wx(0, APRON_Z), z: wz(0, APRON_Z), y: padY + by,
-        heading: HEAD + Math.PI, airframe: bomber.userData.airframe,
+      const SURF = 0.03;                       // the painted skin's top
+      const make = {
+        fighter: function (i) { return airbase.fighter({ color: i % 2 ? M.jet : M.jetD, name: "FIGHTER " + (i + 1) }); },
+        b2: function () { return airbase.bomber({}); },
+        bomber: function () { return realModel("milModels.bomber", { kind: "bomber", name: "B-52" }); },
+        cargo: function () { return airbase.cargo({ name: "TRANSPORT" }); },
+        drone: function () { return realModel("milModels.drone", { kind: "drone", name: "RECON DRONE" }); },
+        heli: function (i) { return airbase.heli({ name: "HELO " + (i + 1) }); },
+        attackHeli: function () { return realModel("milModels.attackHeli", { kind: "heli", name: "GUNSHIP" }) || airbase.heli({ name: "GUNSHIP" }); },
+        tank: function (i) { return airbase.tank({ name: "TANK " + (i + 1) }); },
+        truck: function (i) { return airbase.truck({ name: "TRUCK " + (i + 1) }); },
+        ifv: function () { return realModel("milModels.ifv", { kind: "ifv" }); },
+        apc: function () { return realModel("milModels.apc", { kind: "apc" }); },
+        luv: function () { return realModel("milModels.luv", { kind: "luv" }); },
+        patriot: function () { return realModel("milModels.patriot", { kind: "patriot" }); },
+        mlrs: function () { return realModel("milModels.mlrs", { kind: "mlrs" }); },
       };
-      base.parked.push(rec);
-      base.bomber = rec;
-      // a mission marker on the concrete so the stand reads as THE stand
-      const ring = new THREE.Mesh(new THREE.RingGeometry(30, 33, 40, 1), cm(M.warn, { emissive: 0x3a2c05, ei: 0.5 }));
-      ring.rotation.x = -Math.PI / 2;
-      ring.position.set(0, 0.56, APRON_Z);
-      root.add(ring);
+      const D = CBZ.baseKit.DIMS;
+      P.stands.forEach(function (s, i) {
+        const fn = make[s.kind];
+        const g = fn ? fn(i) : null;
+        if (!g) return;
+        const yaw = (s.yaw || 0) + Math.PI;
+        const gy = seat(g, s.x, s.z, SURF, yaw);
+        root.add(g);
+        const kind = s.kind === "b2" ? "bomber" : s.kind;
+        const rec = {
+          kind: kind, group: g, x: wx(s.x, s.z), z: wz(s.x, s.z), y: padY + gy,
+          heading: HEAD + yaw, airframe: g.userData.airframe, stand: s,
+        };
+        base.parked.push(rec);
+        if (s.kind === "b2" || (s.kind === "bomber" && !base.bomber)) base.bomber = rec;
+        const dm = D[s.kind];
+        if (dm && !s.shelter) {
+          const side = Math.abs(Math.sin(s.yaw || 0)) > 0.5;
+          // the solid is the body, not the wing: a span-wide box walls off the apron
+          const bw = /fighter|drone|b2|bomber|cargo/.test(s.kind) ? Math.min(dm.w, 9) : dm.w;
+          solidAt(s.x, s.z, side ? dm.l : bw, side ? bw : dm.l, 0, 5, /heli/.test(s.kind) ? "heli" : "aircraft");
+        }
+      });
+    })();
 
-      const NF = C.AIRBASE_FIGHTERS | 0;
-      for (let i = 0; i < NF; i++) {
-        const side = i % 2 === 0 ? -1 : 1;
-        const row = Math.floor(i / 2);
-        const lx = side * (95 + row * 62);
-        const lz = APRON_Z + (row % 2 === 0 ? -34 : 30);
-        const f = airbase.fighter({ color: row % 2 ? M.jet : M.jetD, name: "FIGHTER " + (i + 1) });
-        // same trap as the bomber above: `gearDrop || 2.1` lifted all eight
-        const fy = seat(f, lx, lz, APRON_TOP, Math.PI + side * 0.16);
-        root.add(f);
-        base.parked.push({
-          kind: "fighter", group: f,
-          x: wx(lx, lz), z: wz(lx, lz), y: padY + fy,
-          heading: HEAD + Math.PI + side * 0.16, airframe: f.userData.airframe,
-        });
-        // parked aircraft are solid: they read as real and they block you
-        solidAt(lx, lz, 14, 18, 0, 5, "aircraft");
-      }
+    // ---- the wire: instanced posts, chain-link fabric, one gate on the east face
+    (function fence() {
+      const HL = PAD_L / 2 - 2, HW = PAD_W / 2 - 2, step = 4, GATE = 14;
+      const pts = [];
+      const runs = [
+        [-HL, -HW, HL, -HW], [-HL, HW, HL, HW], [-HL, -HW, -HL, HW],
+        [HL, -HW, HL, -GATE], [HL, GATE, HL, HW],
+      ];
+      runs.forEach(function (r) {
+        const len = Math.hypot(r[2] - r[0], r[3] - r[1]), n = Math.max(1, Math.round(len / step));
+        for (let i = 0; i <= n; i++) pts.push([r[0] + (r[2] - r[0]) * i / n, r[1] + (r[3] - r[1]) * i / n]);
+        CBZ.baseKit.chainLink(root, r[0], r[1], r[2], r[3], 2.05, 0.1);
+        const horiz = Math.abs(r[2] - r[0]) > Math.abs(r[3] - r[1]);
+        solidAt((r[0] + r[2]) / 2, (r[1] + r[3]) / 2, horiz ? len : 0.4, horiz ? 0.4 : len, 0, 2.4, "fence");
+      });
+      const posts = new THREE.InstancedMesh(bg(0.14, 2.4, 0.14), cm(M.steelD), pts.length);
+      const d = new THREE.Object3D();
+      pts.forEach(function (p, i) { d.position.set(p[0], 1.2, p[1]); d.updateMatrix(); posts.setMatrixAt(i, d.matrix); });
+      posts.instanceMatrix.needsUpdate = true; posts.castShadow = true;
+      root.add(posts);
+      base.gate = { x: wx(HL, 0), z: wz(HL, 0) };
     })();
 
     // ---- where a player standing at this base begins: off the bomber's
-    //      starboard quarter, far enough back to see the whole aeroplane
-    //      (a 52 m wing filling the screen reads as a wall, not an
-    //      aircraft), and already LOOKING at it. Published so a caller
-    //      never guesses coordinates — and the heading is derived from the
-    //      two positions, so moving either one keeps the gaze correct.
+    //      quarter on the open ground behind the flight line, already LOOKING
+    //      at it. Derived from the two positions, so moving either keeps the gaze.
     (function spawn() {
-      const sx = wx(52, APRON_Z + 74), sz = wz(52, APRON_Z + 74);
-      const b = base.bomber;      // never parked[0] — the pool fills first
+      const b = base.bomber;
+      const s = b && b.stand ? b.stand : { x: 0, z: P.apron.z0 };
+      const lx = s.x + 40, lz = P.apron.z0 - 7;
+      const sx = wx(lx, lz), sz = wz(lx, lz);
       const dx = (b ? b.x : CX) - sx, dz = (b ? b.z : CZ) - sz;
       base.spawn = { x: sx, z: sz, y: padY, heading: Math.atan2(-dx, -dz) };
     })();

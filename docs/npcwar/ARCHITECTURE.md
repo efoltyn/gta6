@@ -133,7 +133,7 @@ change it only in coordination.
 | `src/battle/arenas/field.js` | `buildMap(id)`: raise a ground, return the MAP record (spawn, ground, sight) | terrain |
 | `src/battle/arenas/erg.js` | the open dunes / snow / fields / wood: the height forms (barchan + transverse dunes off one wind, snow drifts, rolling ground), the crest table, the parcels, the skin and its per-surface shader (ripples, sastrugi, litter + dapple, crops) | terrain |
 | `src/battle/arenas/cover.js` | `CBZ.battleCover`: every cover point (props, walls, crests, crater lips), hit points, destruction; `MAP.coverNear/coverFrom` | terrain |
-| `src/battle/arenas/dress.js` | `CBZ.battleDress`: the real objects (sandbags, hesco, jersey, burnt cars, boulders, logs, dry walls, bales, rubble, containers), instanced, and where they go (open ground, the downtown's streets) | terrain |
+| `src/battle/arenas/dress.js` | `CBZ.battleDress`: the real objects (sandbags, hesco, jersey, burnt cars, boulders, logs, dry walls, bales, rubble, containers), instanced, and where they go (open ground, the downtown's streets). The HESCO basket is `world/basekit.js`'s (`CBZ.baseKit.hescoGeo`, loaded before this file), the same one Fort Brandt's revetments use; the MILITARY ISLAND venue is laid out by that kit's base planner | terrain |
 | `src/battle/arenas/ground.js` | `CBZ.battleGround`: earthworks + craters in groundAt, prints and tracks, scorch, blast spray, blowing sand, the baked dead (remains) | terrain |
 | `src/battle/arenas/woods.js` | `CBZ.battleWoods`: THE WOOD (canopy, understory, bracken, deadfall, canopy map) and the snow's spruce groves | terrain |
 | `src/battle/arenas/fields.js` | `CBZ.battleFields`: farmland (hedgerows on banks, dry walls, wheat, maize, bales, pasture) | terrain |

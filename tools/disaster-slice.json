@@ -4026,6 +4026,7 @@
   "src/city/island_airport.js",
   "src/city/airport_kit.js",
   "src/city/airport_capeharbor.js",
+  "src/world/basekit.js",
   "src/city/island_military.js",
   "src/city/biome_desert.js",
   "src/city/biome_forest.js",

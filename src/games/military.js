@@ -216,6 +216,19 @@
     } catch (e) { return null; }
   }
 
+  /* WHERE THE NIGHT JOB'S PROPS GO. Fort Brandt's plan (world/basekit.js,
+     published as CBZ._militaryBase.sites, base-local metres) reserves free
+     ground for them; these literals were typed against a base layout that no
+     longer exists and put the brig on the apron and the mess in the motor
+     pool. The literals stay only as the no-plan fallback. */
+  function site(k, d) {
+    const S = CBZ._militaryBase && CBZ._militaryBase.sites;
+    const v = S && S[k];
+    if (v == null) return d;
+    if (typeof v === "object" && !Array.isArray(v) && v.x != null) return [v.x, v.z];
+    return v;
+  }
+
   /* ================================ build ================================ */
   function build(ctx, venue) {
     C = ctx;
@@ -318,7 +331,7 @@
   /* -------------------------------------------------------- PROTOTYPE ---- */
   function buildPrototype(ctx, gy) {
     // deep NW corner — the "far hangar" the brief names, hardest to reach.
-    const lx = -170, lz = -160;
+    const [lx, lz] = site("proto", [-170, -160]);
     const g = V.group;
     // 3-wall revetment (open on the SE side). The walls are REAL LOS blockers,
     // so a clean photo demands the open side — cover IS the puzzle.
@@ -347,7 +360,7 @@
 
   /* ------------------------------------------------------------ COMMS ---- */
   function buildComms(ctx, gy) {
-    const lx = 80, lz = -175;
+    const [lx, lz] = site("comms", [80, -175]);
     const g = V.group;
     // a lattice mast: 4 legs + cross-braces + a stack of antennas (chunky ≥0.3u)
     const legMat = ctx.mat(M.antenna);
@@ -370,7 +383,7 @@
 
   /* -------------------------------------------------------- GENERATOR ---- */
   function buildGenerator(ctx, gy) {
-    const lx = -30, lz = 44;
+    const [lx, lz] = site("gen", [-30, 44]);
     const g = V.group;
     ctx.box(g, lx, gy + 1.6, lz, 6, 3.2, 4, ctx.mat(M.olive));              // shed
     ctx.box(g, lx, gy + 3.3, lz, 6.4, 0.3, 4.4, ctx.mat(M.oliveD));         // roof
@@ -400,7 +413,7 @@
 
   /* ------------------------------------------------------------- MESS ---- */
   function buildMess(ctx, gy) {
-    const lx = 150, lz = -70;
+    const [lx, lz] = site("mess", [150, -70]);
     const g = V.group;
     ctx.box(g, lx, gy + 2, lz, 16, 4, 10, ctx.mat(0x6f7560));               // mess hall
     ctx.box(g, lx, gy + 4.1, lz, 16.6, 0.3, 10.6, ctx.mat(M.oliveD));       // roof
@@ -413,7 +426,7 @@
 
   /* ------------------------------------------------------------- BRIG ---- */
   function buildBrig(ctx, gy) {
-    const lx = 70, lz = 120;
+    const [lx, lz] = site("brig", [70, 120]);
     const g = V.group;
     const wm = ctx.mat(0x4a4e44);
     // 3 solid walls + a barred front; a real cell you get thrown into
@@ -435,7 +448,7 @@
   /* -------------------------------------------------- PERIMETER LIGHTS ---- */
   function buildPerimeterLights(ctx, gy) {
     // the measurable "lights" the generator kills — a handful of warm posts
-    const spots = [[-150, 150], [150, 150], [0, 6], [-110, -110], [120, -120]];
+    const spots = site("lights", [[-150, 150], [150, 150], [0, 6], [-110, -110], [120, -120]]);
     for (let i = 0; i < spots.length; i++) {
       const [lx, lz] = spots[i];
       ctx.cyl(V.group, lx, gy + 2.4, lz, 0.14, 0.18, 4.8, ctx.mat(M.steelD), 8);   // pole
@@ -449,7 +462,7 @@
   function buildElectricFence(ctx, gy) {
     // signed LIVE runs — the tell. Touch a live run: zap (damage) + alarm spike.
     // Placed to pinch the routes into the prototype revetment and the comms mast.
-    const runs = [
+    const runs = site("fence", null) || [
       { ax: -140, az: -120, bx: -140, bz: -200 },      // guards the prototype approach
       { ax: 30, az: -140, bx: 130, bz: -140 },         // screens the comms mast row
     ];
@@ -474,7 +487,7 @@
   function buildSearchlights(ctx, gy) {
     // remove any beams a previous mount of THIS package left in the shared array
     if (CBZ.searchlights) for (let i = CBZ.searchlights.length - 1; i >= 0; i--) if (CBZ.searchlights[i] && CBZ.searchlights[i]._pkgMil) CBZ.searchlights.splice(i, 1);
-    const towers = [[-215, 225, 0], [215, 225, Math.PI], [0, -232, Math.PI / 2]];
+    const towers = site("searchlights", [[-215, 225, 0], [215, 225, Math.PI], [0, -232, Math.PI / 2]]);
     for (let i = 0; i < towers.length; i++) {
       const [lx, lz, phase] = towers[i];
       // tower head (visual, in venue-local)
@@ -548,15 +561,17 @@
   }
   function spawnBaseGuards(ctx) {
     // motor pool ring — makes the vehicle theft hot
-    makeGuard(ctx, [[-150, -90], [-70, -90], [-70, -40], [-150, -40]], { name: "Motor Pool Sentry", speed: 2.7 });
+    const R = site("guards", {});
+    makeGuard(ctx, R.motor || [[-150, -90], [-70, -90], [-70, -40], [-150, -40]], { name: "Motor Pool Sentry", speed: 2.7 });
     // prototype approach — makes the photo hard
-    makeGuard(ctx, [[-120, -160], [-120, -100], [-200, -100], [-200, -160]], { name: "Hangar Sentry", speed: 2.6 });
+    makeGuard(ctx, R.proto || [[-120, -160], [-120, -100], [-200, -100], [-200, -160]], { name: "Hangar Sentry", speed: 2.6 });
     // comms/central
-    makeGuard(ctx, [[40, -150], [120, -150], [120, -60], [40, -60]], { name: "Signals Sentry", speed: 2.8 });
+    makeGuard(ctx, R.signals || [[40, -150], [120, -150], [120, -60], [40, -60]], { name: "Signals Sentry", speed: 2.8 });
     // central yard rover
-    makeGuard(ctx, [[0, 60], [80, 60], [80, -10], [0, -10]], { name: "Yard Sentry", speed: 2.9 });
+    makeGuard(ctx, R.yard || [[0, 60], [80, 60], [80, -10], [0, -10]], { name: "Yard Sentry", speed: 2.9 });
     // GATE post — stationed, scanning into the base
-    makeGuard(ctx, [[210, -8]], { name: "Gate Sentry", mode: "post", station: [210, -8], face: -Math.PI / 2, viewDist: GATE_VIEW_DIST });
+    const gp = (R.gate && R.gate[0]) || [210, -8];
+    makeGuard(ctx, [gp], { name: "Gate Sentry", mode: "post", station: gp, face: -Math.PI / 2, viewDist: GATE_VIEW_DIST });
     V.baseGuardCount = V.guards.length;
   }
   function stepGuard(gd, dt) {

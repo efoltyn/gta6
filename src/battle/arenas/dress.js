@@ -178,32 +178,10 @@ CBZ.battleDress = (function () {
       return merge(parts);
     });
   }
+  // the wire basket is the base kit's (world/basekit.js): ONE HESCO in the
+  // repo, the same geometry Fort Brandt's revetments and gate walls stand on
   function hescoGeo() {
-    return once("hesco", function () {
-      const parts = [];
-      const S = 1.07, H = 1.37;
-      for (let i = 0; i < 4; i++) {
-        const g = flat(new THREE.BoxGeometry(S, H, S, 4, 5, 4));
-        const p = g.attributes.position;
-        for (let k = 0; k < p.count; k++) {
-          const x = p.getX(k), y = p.getY(k), z = p.getZ(k);
-          // the fill pushes the mesh out between the corner posts
-          const b = (1 - Math.pow(2 * x / S, 4)) * (1 - Math.pow(2 * z / S, 4)) * (1 - Math.pow(2 * y / H, 6));
-          const bx = Math.abs(x) > S * 0.49 ? Math.sign(x) * 0.05 * b : 0;
-          const bz = Math.abs(z) > S * 0.49 ? Math.sign(z) * 0.05 * b : 0;
-          const top = y > H * 0.49 ? -0.06 * (1 - Math.pow(2 * x / S, 2)) * (1 - Math.pow(2 * z / S, 2)) : 0;
-          p.setXYZ(k, x + bx + (i - 1.5) * S, y + H / 2 + top, z + bz);
-        }
-        g.computeVertexNormals();
-        paint(g, function (x, y, z, ny) {
-          if (ny > 0.8 && y > H - 0.08) return [0.62, 0.5, 0.34];          // the sand fill showing at the top
-          const t = 0.94 + h01(i, Math.round(y * 9), 11) * 0.08;
-          return [0.64 * t, 0.6 * t, 0.49 * t];
-        });
-        parts.push(g);
-      }
-      return merge(parts);
-    });
+    return once("hesco", function () { return CBZ.baseKit.hescoGeo(true); });
   }
   function jerseyGeo() {
     return once("jersey", function () {
