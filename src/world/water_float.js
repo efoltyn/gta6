@@ -143,7 +143,7 @@
   // Vertical spring. Damping is EXPONENTIAL (vy *= exp(-c*dt)), which is
   // unconditionally stable at any dt — the naive `vy -= vy*c*dt` explodes the
   // moment c*dt > 2, i.e. on exactly the slow frames this engine ships with.
-  const SPRING_K = 26, DAMP_C = 5.5, MAX_VY = 8;
+  const MAX_VY = 8;                   // heave stiffness is per body now (g / draft), see tickBody
   // Submersion depth is CLAMPED before it drives the spring, so a teleport or
   // a freshly adopted body cannot spike into orbit; past SNAP_D we just snap.
   const MAX_D = 2.5, SNAP_D = 6;
@@ -446,18 +446,37 @@
     if (d > SNAP_D || d < -SNAP_D) { e.y = target; e.vy = 0; d = 0; }
     else d = clamp(d, -MAX_D, MAX_D);
 
-    e.vy += d * SPRING_K * dt;
-    e.vy *= Math.exp(-DAMP_C * dt);          // unconditionally stable at any dt
+    /* HEAVE IS ARCHIMEDES, NOT A CONSTANT SPRING (WATER V3). Displacing d
+       metres more water lifts a body by rho*g*Awp*d against a mass of
+       rho*Awp*D (D its equilibrium draft), so the stiffness per unit mass is
+       g/D: a corpse (D ~0.2 m) snaps back to the surface in ~0.9 s, a
+       swamped car (D ~0.7 m) wallows over ~1.7 s, which is what the eye knows
+       about small and big things in a sea. Damping is a fixed fraction of
+       critical (radiation + viscous), more as the body fills with water.
+       Exponential decay keeps it unconditionally stable at any dt. */
+    const Deq = Math.max(0.12, Math.min(1.2, e.beam * 0.36));
+    const wn = Math.sqrt(9.81 / Deq);
+    const zeta = 0.22 + Math.min(0.5, (e.waterlog || 0) * 0.6) + (e.buoy < 0.6 ? 0.2 : 0);
+    e.vy += d * wn * wn * dt;
+    e.vy *= Math.exp(-2 * zeta * wn * dt);
     e.vy = clamp(e.vy, -MAX_VY, MAX_VY);
     e.y += e.vy * dt;
 
-    // ---- attitude: damp toward the wave gradient, never integrated ---------
+    // ---- attitude: a damped pendulum toward the wave slope it rides --------
+    // Pitch and roll are second-order now (they overshoot and rock back),
+    // with a natural period set by the body's own length / beam: a long body
+    // answers the sea slowly, a short one quickly.
     if (e.tilt) {
       const tp = clamp(r.pitch * settle - pl * 0.085, -MAX_PITCH, MAX_PITCH);
       const tr = clamp(r.roll * settle, -MAX_ROLL, MAX_ROLL);
-      const k = 1 - Math.exp(-ATT_K * dt);
-      e.pitch += (tp - e.pitch) * k;
-      e.roll += (tr - e.roll) * k;
+      const wp = Math.min(9, Math.sqrt(9.81 / Math.max(0.3, e.len * 0.5)) * 1.4);
+      const wr = Math.min(10, Math.sqrt(9.81 / Math.max(0.25, e.beam * 0.5)) * 1.2);
+      e.pv = (e.pv || 0) + ((tp - e.pitch) * wp * wp) * dt;
+      e.pv *= Math.exp(-2 * 0.35 * wp * dt);
+      e.rv = (e.rv || 0) + ((tr - e.roll) * wr * wr) * dt;
+      e.rv *= Math.exp(-2 * 0.30 * wr * dt);
+      e.pitch = clamp(e.pitch + e.pv * dt, -MAX_PITCH, MAX_PITCH);
+      e.roll = clamp(e.roll + e.rv * dt, -MAX_ROLL, MAX_ROLL);
     }
 
     driftStep(e, dt);
@@ -468,13 +487,34 @@
   // The current carries a floating body — but only onto more water. Rejecting
   // a step that leaves the surface is what stops the drift field from
   // conveyor-belting a corpse up a beach and into a wall.
+  /* WHAT CARRIES A FLOATING THING (WATER V3): the current (when the water
+     field has one), the waves' own ORBITAL velocity — a cork surges forward
+     on every crest and back in every trough, which is the motion that sells
+     "afloat" more than any bob — the surface flow of a river channel, and
+     WINDAGE: the wind pushing on whatever stands above the water, a few per
+     cent of the wind speed (more for a high-sided wreck than an awash body). */
+  const _orb = { x: 0, z: 0 }, _rf = { x: 0, z: 0, f: 0 };
   function driftStep(e, dt) {
     if (e.drift <= 0) { e.speed = 0; return; }
     const wf = CBZ.waterField;
-    if (!wf || !wf.currentAt) { e.speed = 0; return; }
-    const c = wf.currentAt(e.x, e.z, undefined, _cur);
-    const nx = e.x + c.x * e.drift * dt;
-    const nz = e.z + c.z * e.drift * dt;
+    let cx = 0, cz = 0;
+    if (wf && wf.currentAt) { const c = wf.currentAt(e.x, e.z, undefined, _cur); cx = c.x; cz = c.z; }
+    if (CBZ.waterOrbitalAt && !e.sunk) {
+      const o = CBZ.waterOrbitalAt(e.x, e.z, undefined, _orb);
+      const follow = Math.max(0.25, 1 - e.len * 0.06);     // a long hull averages its orbit out
+      cx += o.x * follow; cz += o.z * follow;
+    }
+    if (CBZ.waterFlowAt) {
+      const f = CBZ.waterFlowAt(e.x, e.z, _rf);
+      if (f.f > 0.01) { cx += f.x * f.f; cz += f.z * f.f; }
+    }
+    if (CBZ.waterWind && !e.sunk) {
+      const w = CBZ.waterWind();
+      const lee = e.kind === "car" ? 0.035 : e.kind === "corpse" ? 0.012 : 0.022;
+      cx += w.x * w.speed * lee; cz += w.z * w.speed * lee;
+    }
+    const nx = e.x + cx * e.drift * dt;
+    const nz = e.z + cz * e.drift * dt;
     if (overWater(nx, nz, 0.4)) {
       e.speed = Math.hypot(nx - e.x, nz - e.z) / Math.max(1e-4, dt);
       e.x = nx; e.z = nz;
