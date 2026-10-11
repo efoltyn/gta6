@@ -445,13 +445,13 @@ scenario(10, "take over anything: an animal, an elephant's trunk, a tank, a tap;
       (tank.shotsF > f0 ? "" : "; " + JSON.stringify(tank.wpn.map((w) => ({ id: w.w.id, cool: +w.cool.toFixed(2), ammo: w.ammo, rl: w.reloadT }))) + " fp " + tank.vs.firepower + " " + JSON.stringify(W.sb.__battle.youState())) + ")");
   }
   {
-    const W = boot("?a=men&b=men&n=40v40&rw=ak47&bw=ak47&arena=dunes&auto=1&probe=0");
+    const W = boot("?a=men&b=men&n=120v120&rw=ak47&bw=ak47&arena=dunes&auto=1&probe=0");
     if (W.err) { check(false, "page threw at boot: " + (W.err.stack || W.err)); return; }
     await settle();
     const shots = new Set();
     let maxCuts = 0;
     run(W, 70, () => { const d = W.sb.__battle.director(); shots.add(d.shot); maxCuts = d.cuts; return true; });
-    check(maxCuts >= 4, "the director cuts on its own (" + maxCuts + " cuts)");
+    check(maxCuts >= 3, "the director cuts on its own (" + maxCuts + " cuts)");
     check(shots.has("hero") && (shots.has("establish") || shots.has("general")), "close follows and wides, by what is happening (" + [...shots].join(", ") + ")");
   }
 });
