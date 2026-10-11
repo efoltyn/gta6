@@ -605,7 +605,7 @@ document.body.appendChild(b);}}catch(e){}})();
   <script src="src/entities/tattoo.js?v=pf0930c"></script>
   <!-- shoes by role + the ankle they hang on; before character.js (it fits them at build) -->
   <script src="src/entities/footwear.js?v=feet1"></script>
-  <script src="src/entities/character.js?v=arms1009b"></script>
+  <script src="src/entities/character.js?v=hmove1011"></script>
   <script src="src/entities/headwear.js?v=hw1"></script>
   <!-- real jewelry (PBR metal, brilliants, draped link chains, pendants): before watch.js (its metals) and bling.js -->
   <script src="src/entities/jewelry_kit.js?v=w09290232"></script>
@@ -626,18 +626,24 @@ document.body.appendChild(b);}}catch(e){}})();
      avoidance, stuck recovery, foot-matched stride, formations). Pure math;
      every AI mover in every game steps through it. Before poses.js so the
      rig's gait phase (character.js animChar) can read CBZ.moves.phaseDelta. -->
-<script src="src/entities/moves.js?v=intent1008"></script>
+<script src="src/entities/moves.js?v=hmove1011"></script>
+<!-- THE FEET PLANT (entities/gait.js): cadence, stride and the planted-foot
+     leg solve every human walks with; animChar calls it (after moves.js). -->
+<script src="src/entities/gait.js?v=hmove1011"></script>
 <!-- CBZ.bodyDoors: PEOPLE OPEN DOORS, every game. A body walking a route
      through a shut door opens it if cleared (the city door kit, the prison
      door registry), is refused if not, and it shuts behind them. Asked by
      CBZ.moves.step and by systems/navgrid.js. -->
 <script src="src/systems/bodydoors.js?v=presint1001b"></script>
 <script src="src/entities/poses.js?v=street1009"></script>
+<!-- A SOLDIER (entities/soldier.js): rifle carries, cover, reload, the throw,
+     hit reactions, wounds, the dive and the crawl, on the shared body. -->
+<script src="src/entities/soldier.js?v=hmove1011"></script>
 <!-- THE REAL CROWD (entities/crowdgpu.js): the CBZ.human mesh GPU-instanced
      with its clips baked into a bone texture; LOD1/LOD2 are the rig's own
      tiers, LOD3 impostors rendered from it. mob.js, the arena seats and the
      race grandstands draw through it. Lazy: bakes on first use. -->
-<script src="src/entities/crowdgpu.js?v=street1009"></script>
+<script src="src/entities/crowdgpu.js?v=hmove1011"></script>
 <!-- THE ONE CROWD STORE (entities/crowdstore.js): every crowd member is a row
      of typed arrays (position, clip, look, affiliation, alive/hurt/dead). It
      draws through crowdgpu.js, takes every blast, round, car and nuke through
@@ -721,7 +727,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- ONE prison flashlight model: held guard tool, physical death drop and
      inventory thumbnail all consume this factory. -->
 <script src="src/weapons/flashlight.js?v=anchor1"></script>
-<script src="src/systems/actorweapons.js?v=standdown1009"></script>
+<script src="src/systems/actorweapons.js?v=hmove1011"></script>
 <script src="src/city/weapon_thumbnails.js?v=duty1"></script>
 <script src="src/systems/holsterprops.js?v=bodyfix1009b"></script>
 <!-- THE OFF HAND ACTUALLY HOLDS THE GUN, AND RELOADS IT. Solves the
@@ -1731,7 +1737,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/city/armored.js?v=deslop1"></script>
 <script src="src/city/death.js?v=holes1009b"></script>
 <script src="src/city/camera.js?v=deathcam1009"></script>
-<script src="src/city/ragdoll.js?v=runover1009b"></script>
+<script src="src/city/ragdoll.js?v=hmove1011"></script>
 <script src="src/city/carstrike.js?v=runover1009b"></script>
 <script src="src/city/leaderboard.js?v=rg0929"></script>
 <script src="src/city/zillow.js?v=fac1009"></script>
