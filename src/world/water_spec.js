@@ -275,62 +275,186 @@
   const VEIL_K = 0.115;      // Beer-Lambert extinction, per metre of water (~8.7 m e-fold)
 
   // ============================================================
-  //  1. THE SWELL TABLE — the single source of truth
+  //  1. THE WAVE SPECTRUM — the single source of truth (WATER V3, 2026-10-11)
   // ============================================================
-  // [ kx, kz, omega, amplitude, isChop ] : y += amp * sin(kx*x + kz*z + omega*t)
-  // The first three rows are the historical swells (unchanged coefficients,
-  // so the sea keeps its familiar long-period roll); rows 4-5 add the shorter
-  // chop that the old 111m tessellation could never have resolved anyway.
-  // Wavelengths: 105m / 138m / 404m / 52m / 33m.
-  //   swell rows (isChop 0): 0.355m    chop rows (isChop 1): 0.065m
-  //   BASE TOTAL: 0.420m — unchanged.
-  // The two groups carry SEPARATE amplitude scales (see cbzWaveAmp3 /
-  // CBZ.waterAmpAt + CBZ.waterChopAmpAt) so a storm can add steepness without
-  // adding crest height, which is what actually reads as rough water.
+  // The sea used to be five plain sines with hand-typed speeds (the 105 m row
+  // ran 1.4x faster than water of that wavelength can, the 52/33 m "chop" rows
+  // twice as fast) and one fixed direction no weather could touch. It is now a
+  // GERSTNER sum in two physical groups:
+  //
+  //   SWELL (rows 0-2)  long-period water from distant storms. Directions and
+  //                     wavelengths are the historical three (105/138/404 m),
+  //                     so the coast keeps its familiar roll; speeds are now the
+  //                     deep-water dispersion relation, omega = sqrt(g k).
+  //   WIND SEA (3-14)   six compass bearings x two wavelengths (8-35 m). The
+  //                     LIVE weather wind (CBZ.weatherWind) weights the bearings
+  //                     with a cos^n spreading lobe that narrows as it blows
+  //                     harder, and scales the group with wind speed. Rows are
+  //                     NEVER rotated (rotating k swims every far crest); the
+  //                     wind turns the sea by re-weighting fixed bearings, which
+  //                     is also what a real sea does: the new sea builds as the
+  //                     old one dies.
+  //
+  // Each row: y += a sin(theta), xz += Q a d cos(theta), theta = k (d.p) - w t +
+  // phi. The horizontal term is the Gerstner crest-sharpening; Q is the live
+  // choppiness (wind), capped every frame so sum(Q k a) can never fold the
+  // surface through itself.
+  //
+  // LOD ON THE SUM. A row is only displaced where the mesh can carry it: each
+  // WIND row fades over [lod.y, lod.z] * wavelength of camera distance, with
+  // lod derived from the radial disc's ring growth for the live quality tier
+  // (about 3.5 vertices per wavelength). The CPU query applies the identical
+  // fade, so a hull 300 m away rides the swell it is drawn on, not chop it
+  // cannot see. Past that the ripple normal field carries the detail.
   //
   // AMPLITUDE BUDGET — READ BEFORE RETUNING. Two neighbours were authored
   // against the crest/trough envelope of this table:
   //   • city/biome_forest.js sinks the Redhollow lake bed to -1.10 at its
   //     shore ring, so the deepest trough must stay ABOVE -1.10.
-  //   • city/beach.js's swash apron starts at y=+0.048 (this file's owner
-  //     lowered nothing; the old two-triangle ramp started at +0.03), so the
-  //     highest crest must stay BELOW +0.03.
-  // With SEA_Y = -0.48 that is an envelope of ±0.51 at worst, and the old
-  // "do not exceed ~0.46 total" rule is what kept it.
-  //
-  // THE RULE THAT REPLACES IT (WATER_DEEP_SWELL): the base table is unchanged,
-  // and ANY multiplier greater than 1 is gated behind cbzDeepFactor(), which
-  // is ZERO everywhere within DEEP_MARGIN (220m) of ANY coast — the land boxes
-  // are fitted to the live shoreline oracle at build time and every step of
-  // that fit rounds toward MORE land, so a point can only be called "deep" if
-  // the nearest land is at least 220m away. Both neighbour constraints are
-  // therefore untouched BY CONSTRUCTION, not by arithmetic luck:
-  //   • shore / lake water: total 0.420 * weather(≤1.06) = 0.445
-  //       crest -0.035 (< +0.03 ✓)   trough -0.925 (> -1.10 ✓)
-  //     — and the lake is damped a further 0.26x by WATER_INLAND_CALM.
-  //   • open ocean (≥220m offshore, deep factor 1): 0.355*2.70 + 0.065*1.00
-  //       = 1.024m calm, up to ~1.62m in a full storm. Nothing is authored
-  //       against a height envelope out there; the seabed is 400m+ down.
-  // If you add a NEW amplitude multiplier, it must be deep-gated too, or you
-  // must re-derive the two numbers above by hand.
-  const SWELLS = [
-    [0.052000, 0.030000, 1.10, 0.145, 0],
-    [-0.020000, 0.041000, 0.70, 0.125, 0],
-    [0.011000, 0.011000, -0.40, 0.085, 0],
-    [0.093000, -0.077000, 1.90, 0.042, 1],
-    [-0.145000, 0.121000, 2.60, 0.023, 1],
-  ];
-  let TOTAL_AMP = 0, SWELL_AMP = 0, CHOP_AMP = 0;
-  for (let i = 0; i < SWELLS.length; i++) {
-    TOTAL_AMP += SWELLS[i][3];
-    if (SWELLS[i][4]) CHOP_AMP += SWELLS[i][3]; else SWELL_AMP += SWELLS[i][3];
-  }
+  //   • city/beach.js's swash apron starts at y=+0.048, so the highest crest
+  //     must stay BELOW +0.03.
+  // With SEA_Y = -0.48 that is an envelope of +-0.51. The budget is the SUM of
+  // amplitudes (Gerstner never changes a crest's height, only its shape):
+  //   swell 0.300 + wind 0.120 = 0.420 at the shore, exactly the old total.
+  //   Wind bearing weights are normalised to sum to 1 and the wind-speed scale
+  //   is <= 1, so the wind group can never exceed 0.120 at a shore. Every gain
+  //   above 1 is gated behind cbzDeepFactor() (zero within 220 m of ANY coast).
+  //   • shore / lake: 0.420 * weather(<=1.06) = 0.445  (crest -0.035, trough -0.925)
+  //   • open ocean calm: 0.300*3.20 + 0.120*1.00 = 1.08 m; full storm ~2.1 m.
+  const G_ACC = 9.81;
+  const WIND_BEARINGS = 6;
+  // [dirX, dirZ, k, omega, amp, group(0 swell / 1 wind), phase, lambda]
+  const WAVES = [];
+  (function buildSpectrum() {
+    const swell = [[0.052, 0.030, 0.1225], [-0.020, 0.041, 0.1056], [0.011, 0.011, 0.0719]];
+    for (let i = 0; i < swell.length; i++) {
+      const kx = swell[i][0], kz = swell[i][1], k = Math.hypot(kx, kz);
+      WAVES.push([kx / k, kz / k, k, Math.sqrt(G_ACC * k), swell[i][2], 0, 0.7 + i * 2.1, 2 * Math.PI / k]);
+    }
+    const LONG = [31, 26, 35, 28, 33, 24], SHORT = [11.5, 9.0, 13.0, 10.2, 8.4, 12.2];
+    for (let j = 0; j < WIND_BEARINGS; j++) {
+      const a = (17 + 60 * j) * Math.PI / 180;
+      const dx = Math.cos(a), dz = Math.sin(a);
+      const pairs = [[LONG[j], 0.075], [SHORT[j], 0.045]];
+      for (let q = 0; q < 2; q++) {
+        const lam = pairs[q][0], k = 2 * Math.PI / lam;
+        WAVES.push([dx, dz, k, Math.sqrt(G_ACC * k), pairs[q][1], 1, (j * 2 + q) * 2.3999632, lam]);
+      }
+    }
+  })();
+  const N_WAVES = WAVES.length;                      // 15
+  const N_SWELL = 3;
+  const WIND_ROW_SLOTS = 4;                          // vec4 x4 = 16 row weights
+  let SWELL_AMP = 0;
+  for (let i = 0; i < N_SWELL; i++) SWELL_AMP += WAVES[i][4];
+  const CHOP_AMP = 0.075 + 0.045;                    // one bearing's worth (weights sum to 1)
+  const TOTAL_AMP = SWELL_AMP + CHOP_AMP;
 
-  CBZ.WATER_SWELLS = SWELLS;
+  CBZ.WATER_WAVES = WAVES;
   CBZ.WATER_SWELL_AMP = TOTAL_AMP;           // 0.42 — peak displacement AT THE SHORE
-  CBZ.WATER_SWELL_ROWS_AMP = SWELL_AMP;      // 0.355 — the long-period rows
-  CBZ.WATER_CHOP_ROWS_AMP = CHOP_AMP;        // 0.065 — the short chop rows
-  CBZ.WATER_NORMAL_EXAGGERATION = 15.0;      // slope -> shading normal gain
+  CBZ.WATER_SWELL_ROWS_AMP = SWELL_AMP;      // 0.300 — the long-period rows
+  CBZ.WATER_CHOP_ROWS_AMP = CHOP_AMP;        // 0.120 — the wind sea
+  // Shading-normal gain per group. The swell's true slope (k a ~ 0.02) is too
+  // gentle to read in a lit frame at all, so its normal keeps an exaggeration;
+  // the wind sea's slopes are real slopes and need almost none.
+  const NORMAL_GAIN_SWELL = 6.0, NORMAL_GAIN_WIND = 1.5;
+  CBZ.WATER_NORMAL_EXAGGERATION = NORMAL_GAIN_SWELL;
+
+  // ---- THE WIND, ONE STATE FOR CPU AND GPU ---------------------------------
+  // Read off systems/weather.js's one wind vector, eased (the bearing on a
+  // ~25 s time constant, the speed on ~8 s) so a weather phase change turns
+  // the sea over tens of seconds instead of snapping it. `rowW` is the
+  // per-row amplitude scale the vertex program multiplies by (uWaveRow) and
+  // the CPU query multiplies by: the same numbers, so they agree exactly.
+  const WIND = { x: 0.882, z: 0.471, speed: 5.0, w01: 0.45, q: 0.6, stamp: -1, t: -1 };
+  const rowW = new Float32Array(WIND_ROW_SLOTS * 4);
+  const rowWVecs = [];
+  for (let i = 0; i < WIND_ROW_SLOTS; i++) rowWVecs.push(new THREE.Vector4(1, 1, 1, 1));
+  // x = Gerstner Q, y/z = wind-row LOD near/far in wavelengths, w = unused
+  const waveCtl = new THREE.Vector4(0.6, 0.95, 1.9, 0);
+  // the shading wind: the ripple octaves and streak lanes ride this, on a much
+  // slower bearing (60 s) because rotating a texture frame swims far water
+  const windDirShade = new THREE.Vector2(0.882, 0.471);
+  function windTarget(out) {
+    let x = 0.882, z = 0.471, sp = 5.0;
+    if (typeof CBZ.weatherWind === "function") {
+      try {
+        const w = CBZ.weatherWind();
+        if (w && Number.isFinite(w.x) && Number.isFinite(w.z) && (w.x * w.x + w.z * w.z) > 1e-6) {
+          x = w.x; z = w.z; sp = Number.isFinite(+w.speed) ? +w.speed : sp;
+          // a dead calm still has a breath of air on it — a sea with no wind
+          // at all is a mirror, which is the one thing open water never is
+          sp = Math.max(1.2, sp);
+        }
+      } catch (e) {}
+    } else if (CBZ.world && CBZ.world.wind && Number.isFinite(CBZ.world.wind.x)) {
+      x = CBZ.world.wind.x; z = CBZ.world.wind.z; sp = +CBZ.world.wind.speed || sp;
+    }
+    const m = Math.hypot(x, z) || 1;
+    out.x = x / m; out.z = z / m; out.speed = sp;
+    return out;
+  }
+  const _wt = { x: 1, z: 0, speed: 0 };
+  function lodForTier() {
+    // ring growth of the radial disc at this tier (see waterBuildSurfaceGeometry)
+    const p = CBZ.waterTierParams ? CBZ.waterTierParams() : { rings: 80 };
+    const NR = Math.max(8, Math.round(p.rings * Math.log(15000 / 1.6) / Math.log(4500 / 1.6)));
+    const g = Math.pow(15000 / 1.6, 1 / Math.max(1, NR - 1));
+    return 1 / (3.5 * Math.max(0.02, g - 1));
+  }
+  function windTick() {
+    const tNow = (typeof performance !== "undefined" ? performance.now() : Date.now()) * 0.001;
+    // one evaluation per frame: the sim clock's stamp, or (a page with no
+    // sim clock) the wall clock quantised to a 120 Hz tick
+    const stamp = CBZ.now || Math.floor(tNow * 120);
+    if (stamp === WIND.stamp) return WIND;
+    const dt = WIND.t < 0 ? 1e3 : Math.min(2, Math.max(0, tNow - WIND.t));
+    WIND.t = tNow; WIND.stamp = stamp;
+    windTarget(_wt);
+    const kd = 1 - Math.exp(-dt / 25), ks = 1 - Math.exp(-dt / 8), kv = 1 - Math.exp(-dt / 60);
+    let nx = WIND.x + (_wt.x - WIND.x) * kd, nz = WIND.z + (_wt.z - WIND.z) * kd;
+    const nm = Math.hypot(nx, nz);
+    if (nm < 1e-3) { nx = _wt.x; nz = _wt.z; } else { nx /= nm; nz /= nm; }
+    WIND.x = nx; WIND.z = nz;
+    let sx = windDirShade.x + (nx - windDirShade.x) * kv, sz = windDirShade.y + (nz - windDirShade.y) * kv;
+    const sm = Math.hypot(sx, sz);
+    if (sm < 1e-3) { sx = nx; sz = nz; } else { sx /= sm; sz /= sm; }
+    windDirShade.set(sx, sz);
+    WIND.speed += (_wt.speed - WIND.speed) * ks;
+    WIND.w01 = Math.max(0, Math.min(1, WIND.speed / 11));
+    // bearing weights: cos^n spreading, narrower in a stronger wind
+    const n = 2 + 6 * WIND.w01;
+    let sum = 0;
+    const wb = _wb;
+    for (let j = 0; j < WIND_BEARINGS; j++) {
+      const r = WAVES[N_SWELL + j * 2];
+      const c = Math.max(0, r[0] * WIND.x + r[1] * WIND.z);
+      wb[j] = Math.pow(c, n); sum += wb[j];
+    }
+    const scale = 0.35 + 0.65 * WIND.w01;            // <= 1: the shore budget
+    for (let i = 0; i < rowW.length; i++) rowW[i] = i < N_SWELL ? 1 : 0;
+    for (let j = 0; j < WIND_BEARINGS; j++) {
+      const w = sum > 1e-6 ? wb[j] / sum * scale : 0;
+      rowW[N_SWELL + j * 2] = w; rowW[N_SWELL + j * 2 + 1] = w;
+    }
+    for (let i = 0; i < WIND_ROW_SLOTS; i++) rowWVecs[i].set(rowW[i * 4], rowW[i * 4 + 1], rowW[i * 4 + 2], rowW[i * 4 + 3]);
+    // Choppiness, then capped so sum(Q k a) < 0.9 at the WORST amplitude the
+    // vertex program can produce (deep gains, full weather) — no loops, ever.
+    let steep = 0;
+    const gs = DEEP_GAIN * (1 + DEEP_STORM) * 1.06, gc = CHOP_BASE_GAIN * (1 + CHOP_STORM) * (1 + WIND_CHOP) * 1.06;
+    for (let i = 0; i < N_WAVES; i++) {
+      const r = WAVES[i];
+      steep += r[2] * r[4] * rowW[i] * (r[5] ? gc : gs);
+    }
+    let q = 0.35 + 0.6 * WIND.w01;
+    if (steep * q > 0.9) q = 0.9 / steep;
+    WIND.q = q;
+    const far = lodForTier();
+    waveCtl.set(q, far * 0.5, far, 0);
+    return WIND;
+  }
+  const _wb = new Float64Array(WIND_BEARINGS);
+  CBZ.waterWind = function () { return windTick(); };
 
   // ---- DEEP-WATER SWELL ---------------------------------------------------
   // Multipliers applied ONLY where cbzDeepFactor() says the nearest land is
@@ -341,13 +465,16 @@
   // surface's vertical RATE down (a taller wave at the same frequency is a
   // faster wave, and everything that samples CBZ.citySeaHeightAt one tick
   // behind the render — wildlife, buoyancy — pays for that in tracking error).
-  //   calm open ocean:  0.355*2.70 + 0.065*1.00 = 1.024m
-  //   full storm:      (0.355*3.78 + 0.065*2.80) * 1.06 = 1.615m
-  const DEEP_GAIN = 2.70;                    // long swell rows, calm weather
+  //   calm open ocean:  0.300*3.20 + 0.120*1.00 = 1.08m
+  //   full storm, full wind: (0.300*4.48 + 0.120*2.80*1.9) * 1.06 = ~2.1m
+  // The WIND gain (WIND_CHOP) is deep-gated like the rest: a gale raises the
+  // open sea, never the shore envelope.
+  const DEEP_GAIN = 3.20;                    // long swell rows, calm weather
   const CHOP_BASE_GAIN = 1.00;               // chop rows are WIND, not depth
   const DEEP_STORM = 0.40;                   // + this fraction per unit of rain
   const CHOP_STORM = 1.80;                   // storms buy STEEPNESS, not height
-  CBZ.WATER_DEEP_AMP = SWELL_AMP * DEEP_GAIN + CHOP_AMP * CHOP_BASE_GAIN;  // 1.024
+  const WIND_CHOP = 0.90;                    // + this fraction at full wind (deep only)
+  CBZ.WATER_DEEP_AMP = SWELL_AMP * DEEP_GAIN + CHOP_AMP * CHOP_BASE_GAIN;  // 1.08
 
   // "How far offshore am I" reduced to something a VERTEX program can evaluate
   // with no texture fetch: the world's land is covered by at most 8 axis-
@@ -727,7 +854,7 @@
   }
   function chopGain() {
     if (CFG.WATER_DEEP_SWELL === false || !landBoxes.length) return 1;
-    return CHOP_BASE_GAIN * (1 + weatherWet() * CHOP_STORM);
+    return CHOP_BASE_GAIN * (1 + weatherWet() * CHOP_STORM) * (1 + windTick().w01 * WIND_CHOP);
   }
   CBZ.waterDeepGain = deepGain;
   CBZ.waterChopGain = chopGain;
@@ -738,7 +865,8 @@
   function baseAmpAt(x, z) {
     // inlandAt() is already 0 when the lake treatment is off, so this is the
     // identical expression the vertex program evaluates in every flag state.
-    return fadeAt(x, z) * weatherAmp() * (1 + (INLAND_CALM - 1) * inlandAt(x, z));
+    return fadeAt(x, z) * weatherAmp() * (1 + (INLAND_CALM - 1) * inlandAt(x, z)) *
+      (1 + (RIVER_CALM - 1) * riverAt(x, z));
   }
   CBZ.waterAmpAt = function (x, z) {
     return baseAmpAt(x, z) * (1 + (deepGain() - 1) * deepAt(x, z));
@@ -928,47 +1056,123 @@
       last: lastSurfaceImpulse ? Object.assign({}, lastSurfaceImpulse) : null };
   };
 
-  // Instantaneous surface Y at (x,z). `t` defaults to the shared clock;
+  // ---- the spectrum, evaluated on the CPU ----------------------------------
+  // Mirrors cbzWaveSum() in the vertex program term for term: same rows, same
+  // per-row wind weights (rowW), same Q, same per-row distance LOD.
+  function camDist(x, z) {
+    const cam = CBZ.camera;
+    if (!cam) return 0;
+    const dx = x - cam.position.x, dz = z - cam.position.z;
+    return Math.sqrt(dx * dx + dz * dz);
+  }
+  function rowFade(r, dist) {
+    if (!r[5]) return 1;
+    const n = waveCtl.y * r[7], f = waveCtl.z * r[7];
+    if (dist <= n) return 1;
+    if (dist >= f) return 0;
+    const u = (dist - n) / (f - n);
+    return 1 - u * u * (3 - 2 * u);
+  }
+  // Evaluates the sum at PARAMETRIC point (px,pz). Fills out.h (height),
+  // out.dx/out.dz (Gerstner horizontal displacement) and, with deriv, the
+  // displaced surface's true slope (out.sx/out.sz) and its fold (1 - J).
+  const _ev = { h: 0, dx: 0, dz: 0, sx: 0, sz: 0, fold: 0 };
+  function evalSum(px, pz, t, ampS, ampW, dist, deriv, out) {
+    windTick();
+    const Q = waveCtl.x;
+    let h = 0, dx = 0, dz = 0, hx = 0, hz = 0, sxx = 0, szz = 0, sxz = 0;
+    for (let i = 0; i < N_WAVES; i++) {
+      const r = WAVES[i];
+      const a = r[4] * rowW[i] * (r[5] ? ampW * rowFade(r, dist) : ampS);
+      if (!(a > 1e-7)) continue;
+      const th = r[2] * (r[0] * px + r[1] * pz) - r[3] * t + r[6];
+      const s = Math.sin(th), c = Math.cos(th);
+      h += a * s;
+      dx += Q * a * r[0] * c; dz += Q * a * r[1] * c;
+      if (deriv) {
+        const ka = r[2] * a;
+        hx += ka * r[0] * c; hz += ka * r[1] * c;
+        sxx += Q * ka * r[0] * r[0] * s; szz += Q * ka * r[1] * r[1] * s; sxz += Q * ka * r[0] * r[1] * s;
+      }
+    }
+    out.h = h; out.dx = dx; out.dz = dz;
+    if (deriv) {
+      // tangents of the displaced sheet: Tx = (1-sxx, hx, -sxz), Tz = (-sxz, hz, 1-szz)
+      const ny = (1 - sxx) * (1 - szz) - sxz * sxz;
+      const nx = -hz * sxz - (1 - szz) * hx;
+      const nz = -sxz * hx - hz * (1 - sxx);
+      const iy = 1 / Math.max(0.05, ny);
+      out.sx = -nx * iy; out.sz = -nz * iy;
+      out.fold = Math.max(0, 1 - ny);
+    }
+    return out;
+  }
+  function ampPair(x, z, ampScale, chopScale, out) {
+    const ampGiven = Number.isFinite(ampScale);
+    out.a = ampGiven ? ampScale : CBZ.waterAmpAt(x, z);
+    out.c = Number.isFinite(chopScale) ? chopScale : (ampGiven ? ampScale : CBZ.waterChopAmpAt(x, z));
+    return out;
+  }
+  const _amp = { a: 1, c: 1 };
+
+  // Instantaneous surface Y at WORLD (x,z). `t` defaults to the shared clock;
   // `ampScale` defaults to the same distance+inland+depth scale the shader
   // uses, so a boat's hull sits exactly where the rendered crest is.
-  // `chopScale` (ADDITIVE, optional) scales the short chop rows separately.
-  // BACK-COMPAT: pass ampScale alone and it scales EVERY row, exactly as the
-  // single-scale version did — callers that already override the amplitude
-  // keep their old meaning.
+  // `chopScale` (optional) scales the wind sea separately. BACK-COMPAT: pass
+  // ampScale alone and it scales EVERY row.
+  //
+  // A Gerstner surface is parametric: the vertex that ends up over (x,z)
+  // started at p with p + D(p) = (x,z). One fixed-point step p = X - D(X)
+  // inverts it to well under a centimetre (sum Q k a < 0.9 by construction).
   CBZ.waterWaveHeight = function (x, z, t, ampScale, chopScale) {
     if (!Number.isFinite(t)) t = CBZ.waterClock();
-    const ampGiven = Number.isFinite(ampScale);
-    const amp = ampGiven ? ampScale : CBZ.waterAmpAt(x, z);
-    const chp = Number.isFinite(chopScale) ? chopScale : (ampGiven ? ampScale : CBZ.waterChopAmpAt(x, z));
-    const y0 = seaY();
-    let hs = 0, hc = 0;
-    for (let i = 0; i < SWELLS.length; i++) {
-      const s = SWELLS[i];
-      const v = Math.sin(x * s[0] + z * s[1] + t * s[2]) * s[3];
-      if (s[4]) hc += v; else hs += v;
-    }
+    const A = ampPair(x, z, ampScale, chopScale, _amp);
+    const dist = camDist(x, z);
+    evalSum(x, z, t, A.a, A.c, dist, false, _ev);
+    evalSum(x - _ev.dx, z - _ev.dz, t, A.a, A.c, dist, false, _ev);
     const imp = sampleSurfaceImpulses(x, z, t, _surfaceImpulseSample);
-    return y0 + hs * amp + hc * chp + imp.h;
+    return seaY() + _ev.h + imp.h;
   };
 
-  // Surface slope (dY/dx, dY/dz) — the same analytic derivative the vertex
-  // program uses for its normal. Allocation-free with a reusable `out`.
+  // Surface slope (dY/dx, dY/dz) of the DISPLACED sheet — the true geometric
+  // slope, which is what a hull pitches on. Allocation-free with `out`.
+  // out.fold (0 flat .. ~1 folding) is the Gerstner Jacobian's compression:
+  // where the sea is about to break.
   CBZ.waterWaveSlope = function (x, z, t, out, ampScale, chopScale) {
     if (!Number.isFinite(t)) t = CBZ.waterClock();
-    const ampGiven = Number.isFinite(ampScale);
-    const amp = ampGiven ? ampScale : CBZ.waterAmpAt(x, z);
-    const chp = Number.isFinite(chopScale) ? chopScale : (ampGiven ? ampScale : CBZ.waterChopAmpAt(x, z));
+    const A = ampPair(x, z, ampScale, chopScale, _amp);
+    const dist = camDist(x, z);
     out = out || {};
-    let dxs = 0, dzs = 0, dxc = 0, dzc = 0;
-    for (let i = 0; i < SWELLS.length; i++) {
-      const s = SWELLS[i];
-      const c = Math.cos(x * s[0] + z * s[1] + t * s[2]) * s[3];
-      if (s[4]) { dxc += c * s[0]; dzc += c * s[1]; }
-      else { dxs += c * s[0]; dzs += c * s[1]; }
-    }
+    evalSum(x, z, t, A.a, A.c, dist, false, _ev);
+    evalSum(x - _ev.dx, z - _ev.dz, t, A.a, A.c, dist, true, _ev);
     const imp = sampleSurfaceImpulses(x, z, t, _surfaceImpulseSample);
-    out.x = dxs * amp + dxc * chp + imp.x;
-    out.z = dzs * amp + dzc * chp + imp.z;
+    out.x = _ev.sx + imp.x;
+    out.z = _ev.sz + imp.z;
+    out.fold = _ev.fold;
+    return out;
+  };
+
+  // The orbital velocity of the water at the surface (m/s, horizontal), for
+  // anything that floats: a cork in a Gerstner wave rides a circle of radius a
+  // at omega, so its velocity is a*omega*d*sin(theta) along the row. Bodies
+  // that integrate this (water_float.js) surge forward on a crest and back in
+  // the trough, and the small net forward drift is Stokes drift for free.
+  CBZ.waterOrbitalAt = function (x, z, t, out) {
+    if (!Number.isFinite(t)) t = CBZ.waterClock();
+    out = out || {};
+    const A = ampPair(x, z, undefined, undefined, _amp);
+    const dist = camDist(x, z);
+    windTick();
+    let vx = 0, vz = 0;
+    for (let i = 0; i < N_WAVES; i++) {
+      const r = WAVES[i];
+      const a = r[4] * rowW[i] * (r[5] ? A.c * rowFade(r, dist) : A.a);
+      if (!(a > 1e-7)) continue;
+      const th = r[2] * (r[0] * x + r[1] * z) - r[3] * t + r[6];
+      const v = a * r[3] * Math.sin(th);
+      vx += v * r[0]; vz += v * r[1];
+    }
+    out.x = vx; out.z = vz;
     return out;
   };
 
@@ -981,41 +1185,354 @@
     return s;
   }
 
-  // Emits statements DECLARING hName/dxName/dzName and filling them from the
-  // swell table. `pExpr` is a vec2 (world xz), `tExpr` a float (seconds),
-  // `ampExpr` a float amplitude scale for the LONG SWELL rows.
-  // `chopExpr` (ADDITIVE, optional 7th argument) is the scale for the SHORT
-  // CHOP rows; omit it and every row uses `ampExpr`, which is byte-for-byte
-  // the GLSL this function emitted before the chop split existed.
-  // Mirrors CBZ.waterWaveHeight/Slope exactly — same table, same grouping.
+  // The one GLSL wave function. Declared by waterVertexDecl() (and by anyone
+  // who calls waterWaveGLSL, via CBZ.waterWaveDecl()). Rows are unrolled with
+  // their constants inlined; only the live wind weights and Q are uniforms.
+  //   p     parametric world xz        t     the shared clock
+  //   aS    swell amplitude scale      aW    wind-sea amplitude scale
+  //   dist  camera distance (per-row LOD)
+  //   disp  (dx, height, dz)           nrm   shading normal (gain applied)
+  //   fold  1 - Jacobian (0 flat .. ~1 about to break)
+  function waveFnGLSL() {
+    const L = [];
+    L.push("uniform vec4 uWaveRow[" + WIND_ROW_SLOTS + "];");
+    L.push("uniform vec4 uWaveCtl;");
+    L.push("void cbzWaveSum(vec2 p, float t, float aS, float aW, float dist, out vec3 disp, out vec3 nrm, out float fold) {");
+    L.push("  float Q = uWaveCtl.x;");
+    L.push("  float th; float s; float c; float a; float ka;");
+    L.push("  vec3 d = vec3(0.0);");
+    L.push("  float hx = 0.0; float hz = 0.0; float sxx = 0.0; float szz = 0.0; float sxz = 0.0;");
+    L.push("  float ex = 0.0; float ez = 0.0;");
+    const comp = ["x", "y", "z", "w"];
+    for (let i = 0; i < N_WAVES; i++) {
+      const r = WAVES[i];
+      const wsel = "uWaveRow[" + (i >> 2) + "]." + comp[i & 3];
+      const scale = r[5]
+        ? "aW * (1.0 - smoothstep(uWaveCtl.y * " + gnum(r[7]) + ", uWaveCtl.z * " + gnum(r[7]) + ", dist))"
+        : "aS";
+      const gain = r[5] ? NORMAL_GAIN_WIND : NORMAL_GAIN_SWELL;
+      L.push("  a = " + gnum(r[4]) + " * " + wsel + " * " + scale + ";");
+      L.push("  th = dot(p, vec2(" + gnum(r[0] * r[2]) + ", " + gnum(r[1] * r[2]) + ")) - t * " + gnum(r[3]) + " + " + gnum(r[6]) + ";");
+      L.push("  s = sin(th); c = cos(th); ka = " + gnum(r[2]) + " * a;");
+      L.push("  d += vec3(Q * a * " + gnum(r[0]) + " * c, a * s, Q * a * " + gnum(r[1]) + " * c);");
+      L.push("  hx += ka * " + gnum(r[0]) + " * c; hz += ka * " + gnum(r[1]) + " * c;");
+      L.push("  sxx += Q * ka * " + gnum(r[0] * r[0]) + " * s; szz += Q * ka * " + gnum(r[1] * r[1]) + " * s; sxz += Q * ka * " + gnum(r[0] * r[1]) + " * s;");
+      L.push("  ex += ka * " + gnum(r[0] * gain) + " * c; ez += ka * " + gnum(r[1] * gain) + " * c;");
+    }
+    L.push("  disp = d;");
+    L.push("  float J = (1.0 - sxx) * (1.0 - szz) - sxz * sxz;");
+    L.push("  fold = clamp(1.0 - J, 0.0, 2.0);");
+    L.push("  nrm = normalize(vec3(-ex, max(0.25, 1.0 - (sxx + szz)), -ez));");
+    L.push("}");
+    return L.join("\n");
+  }
+  CBZ.waterWaveDecl = waveFnGLSL;
+
+  // LEGACY FORM, kept for callers that only want a height + slope (the flood
+  // banks in world/tsunami_flow.js): emits statements DECLARING hName/dxName/
+  // dzName from cbzWaveSum. The caller's program must include
+  // CBZ.waterWaveDecl() (and so own uWaveRow/uWaveCtl, which
+  // waterCommonUniforms provides). The horizontal Gerstner shift is ignored
+  // here — a height field is what these callers ask for.
   CBZ.waterWaveGLSL = function (pExpr, tExpr, ampExpr, hName, dxName, dzName, chopExpr) {
     const L = [];
     L.push("float " + hName + " = 0.0;");
     L.push("float " + dxName + " = 0.0;");
     L.push("float " + dzName + " = 0.0;");
     L.push("{");
+    L.push("  vec3 wvD; vec3 wvN; float wvF;");
     L.push("  vec2 wvP = " + pExpr + ";");
-    L.push("  float wvT = " + tExpr + ";");
-    L.push("  float wvA = " + ampExpr + ";");
-    L.push("  float wvB = " + (chopExpr || ampExpr) + ";");
-    L.push("  float wvPh; float wvC;");
-    L.push("  float wvHs = 0.0; float wvXs = 0.0; float wvZs = 0.0;");
-    L.push("  float wvHc = 0.0; float wvXc = 0.0; float wvZc = 0.0;");
-    for (let i = 0; i < SWELLS.length; i++) {
-      const s = SWELLS[i];
-      const H = s[4] ? "wvHc" : "wvHs", X = s[4] ? "wvXc" : "wvXs", Z = s[4] ? "wvZc" : "wvZs";
-      L.push("  wvPh = wvP.x * " + gnum(s[0]) + " + wvP.y * " + gnum(s[1]) + " + wvT * " + gnum(s[2]) + ";");
-      L.push("  wvC = cos(wvPh);");
-      L.push("  " + H + " += sin(wvPh) * " + gnum(s[3]) + ";");
-      L.push("  " + X + " += wvC * " + gnum(s[3] * s[0]) + ";");
-      L.push("  " + Z + " += wvC * " + gnum(s[3] * s[1]) + ";");
-    }
-    L.push("  " + hName + " = wvHs * wvA + wvHc * wvB;");
-    L.push("  " + dxName + " = wvXs * wvA + wvXc * wvB;");
-    L.push("  " + dzName + " = wvZs * wvA + wvZc * wvB;");
+    L.push("  cbzWaveSum(wvP, " + tExpr + ", " + ampExpr + ", " + (chopExpr || ampExpr) +
+      ", length(wvP - cameraPosition.xz), wvD, wvN, wvF);");
+    L.push("  " + hName + " = wvD.y;");
+    L.push("  " + dxName + " = -wvN.x / max(0.25, wvN.y);");
+    L.push("  " + dzName + " = -wvN.z / max(0.25, wvN.y);");
     L.push("}");
     return L.join("\n");
   };
+
+  // ============================================================
+  //  3b. WHAT THE WATER TOUCHES — contact foam, river flow, the sky
+  // ============================================================
+  // Three inputs every water material reads by reference, gathered ONCE a
+  // frame (sceneTick, stamp-guarded) no matter how many seas are drawn.
+  //
+  // CONTACT FOAM. A real sea is white where it meets anything: the wash
+  // round a hull, the ring at a piling, the lather on a rock, the stir round
+  // a swimmer. There is no depth pass in this forward r128 renderer, so the
+  // contact is not read off a depth buffer — it is DECLARED: the six nearest
+  // floating or standing things to the camera, each a capsule (centre, half
+  // axis, radius, strength), from the registries that already know where
+  // they are (marine hulls, the sea craft, the shark sim's pier and rocks,
+  // every occupant of the water). CBZ.waterFoamSource(fn) adds a provider;
+  // fn(push) calls push(x, z, hx, hz, radius, strength).
+  //
+  // RIVER FLOW. The city's rivers are carved out of the one sea (city/
+  // river.js draws no water; the sea shows through), so the sea has to know
+  // which way a river runs. The four channel segments nearest the camera are
+  // uploaded; inside a channel the swell dies, the ripples are advected
+  // downstream (two-phase flow map) and foam streaks run with the current.
+  // The CPU twin (CBZ.waterFlowAt) reads the same four segments, so the
+  // swell a swimmer feels dies exactly where the drawn one does.
+  const water2 = new THREE.Vector4(1, 1, 0, 0);
+  const FOAM_N = 6;
+  const foamA = [], foamB = [];
+  for (let i = 0; i < FOAM_N; i++) foamA.push(new THREE.Vector4(0, 0, 0, 0));
+  for (let i = 0; i < FOAM_N / 2; i++) foamB.push(new THREE.Vector4(0, 0, 0, 0));
+  const FLOW_N = 4;
+  const flowA = [], flowB = [];
+  for (let i = 0; i < FLOW_N; i++) flowA.push(new THREE.Vector4(0, 0, 1, 0));
+  for (let i = 0; i < FLOW_N / 2; i++) flowB.push(new THREE.Vector4(0, 0, 0, 0));
+  const RIVER_SPEED = 0.95;          // m/s, mid-channel surface current
+  const RIVER_CALM = 0.15;           // the sea's swell inside a channel
+
+  const foamProviders = [];
+  CBZ.waterFoamSource = function (fn) {
+    if (typeof fn === "function" && foamProviders.indexOf(fn) < 0) foamProviders.push(fn);
+    return fn;
+  };
+  const cand = [];
+  let candN = 0, candCx = 0, candCz = 0;
+  function pushFoam(x, z, hx, hz, r, s) {
+    if (!Number.isFinite(x) || !Number.isFinite(z) || !(s > 0.01)) return;
+    const dx = x - candCx, dz = z - candCz;
+    const d2 = dx * dx + dz * dz;
+    if (d2 > 260 * 260) return;
+    let c = cand[candN];
+    if (!c) c = cand[candN] = { x: 0, z: 0, hx: 0, hz: 0, r: 0, s: 0, d2: 0 };
+    c.x = x; c.z = z; c.hx = +hx || 0; c.hz = +hz || 0; c.r = Math.max(0.15, +r || 0.5); c.s = s; c.d2 = d2;
+    candN++;
+  }
+  function hullFoam(rec, moving) {
+    if (!rec || rec.dead || !rec.pos || rec._far) return;
+    const sp = rec._hullSpec || null;
+    const loa = sp && sp.loa > 0 ? sp.loa : 6.2, beam = sp && sp.beam > 0 ? sp.beam : 2.1;
+    const h = +rec.heading || 0;
+    const v = Math.abs(+rec.v || 0);
+    pushFoam(rec.pos.x, rec.pos.z, Math.sin(h) * loa * 0.40, Math.cos(h) * loa * 0.40, beam * 0.5,
+      0.30 + Math.min(0.65, v * 0.06) * (moving ? 1 : 0.5));
+  }
+  const _occ = [];
+  function gatherFoam() {
+    candN = 0;
+    const cam = CBZ.camera;
+    if (!cam) return;
+    candCx = cam.position.x; candCz = cam.position.z;
+    const cars = CBZ.cityCars;
+    if (cars && cars.length) {
+      for (let i = 0; i < cars.length; i++) {
+        const c = cars[i];
+        if (!c || c.dead || !c.pos) continue;
+        const marine = c._hullSpec || (c._playerCarFeel && c._playerCarFeel.marine) || (c.model && c.model.body === "boat");
+        if (marine) hullFoam(c, true);
+      }
+    }
+    if (CBZ.seaCraft && typeof CBZ.seaCraft.list === "function") {
+      const L = CBZ.seaCraft.list() || [];
+      for (let i = 0; i < L.length; i++) if (L[i] && !L[i]._sinking) hullFoam(L[i], true);
+    }
+    const S = CBZ.sharkSeaScene;
+    if (S && S.built && S.group && S.group.visible && S.obstacles) {
+      for (let i = 0; i < S.obstacles.length; i++) {
+        const o = S.obstacles[i];
+        if (o) pushFoam(o.x, o.z, 0, 0, o.r || 0.3, 0.55);
+      }
+    }
+    if (typeof CBZ.waterOccupants === "function") {
+      let L = null;
+      try { L = CBZ.waterOccupants(_occ); } catch (e) { L = null; }
+      if (L) for (let i = 0; i < L.length; i++) {
+        const o = L[i];
+        if (!o || o.kind === "boat") continue;
+        if (!(o.submergence > 0.02) || o.submergence > 0.98) continue;   // must cut the surface
+        const big = o.kind === "car";
+        pushFoam(o.x, o.z, 0, 0, big ? 1.3 : 0.4, (o.moving ? 0.42 : 0.22) * (big ? 1.2 : 1));
+      }
+    }
+    for (let i = 0; i < foamProviders.length; i++) {
+      try { foamProviders[i](pushFoam); } catch (e) {}
+    }
+    // the FOAM_N nearest (by distance to the capsule surface)
+    for (let k = 0; k < FOAM_N; k++) {
+      let best = -1, bd = 1e30;
+      for (let i = 0; i < candN; i++) {
+        const c = cand[i];
+        if (c.d2 < 0) continue;
+        const reach = Math.sqrt(c.hx * c.hx + c.hz * c.hz) + c.r;
+        const d = Math.sqrt(c.d2) - reach;
+        if (d < bd) { bd = d; best = i; }
+      }
+      const A = foamA[k], B = foamB[k >> 1];
+      if (best < 0) {
+        A.set(0, 0, 0, 0);
+        if (k & 1) { B.z = 0; B.w = 0; } else { B.x = 0; B.y = 0; }
+        continue;
+      }
+      const c = cand[best];
+      c.d2 = -1;
+      // fade out before the slot can be lost to a nearer source, so a swap
+      // never pops on screen
+      const dd = Math.max(0, bd);
+      const fade = 1 - Math.min(1, Math.max(0, (dd - 140) / 80));
+      A.set(c.x, c.z, c.hx, c.hz);
+      if (k & 1) { B.z = c.r; B.w = c.s * fade; } else { B.x = c.r; B.y = c.s * fade; }
+    }
+    water2.z = candN > 0 ? 1 : 0;
+  }
+
+  // ---- rivers ---------------------------------------------------------------
+  let flowSegs = null, flowSrc = null;
+  function riverSegments() {
+    const list = typeof CBZ.cityRivers === "function" ? CBZ.cityRivers() : null;
+    if (!list || !list.length) { flowSegs = null; flowSrc = null; return null; }
+    if (flowSrc === list.length && flowSegs) return flowSegs;
+    const segs = [];
+    for (let r = 0; r < list.length; r++) {
+      const rv = list[r];
+      const p = rv && rv.pts, h = rv && rv.half;
+      if (!p || p.length < 2) continue;
+      for (let i = 0; i + 1 < p.length; i++) {
+        const hw = Array.isArray(h) ? (h[i] + h[i + 1]) * 0.5 : (+h || 40);
+        segs.push({ x0: p[i].x, z0: p[i].z, x1: p[i + 1].x, z1: p[i + 1].z, hw: hw, d: 0 });
+      }
+    }
+    flowSegs = segs; flowSrc = list.length;
+    return segs;
+  }
+  function gatherFlow() {
+    const cam = CBZ.camera;
+    const segs = CFG.WATER_RIVER_FLOW === false ? null : riverSegments();
+    if (!cam || !segs || !segs.length) {
+      for (let i = 0; i < FLOW_N; i++) flowA[i].set(0, 0, 1, 0);
+      for (let i = 0; i < FLOW_N / 2; i++) flowB[i].set(0, 0, 0, 0);
+      water2.w = 0;
+      return;
+    }
+    const cx = cam.position.x, cz = cam.position.z;
+    for (let i = 0; i < segs.length; i++) {
+      const s = segs[i];
+      const vx = s.x1 - s.x0, vz = s.z1 - s.z0, L2 = vx * vx + vz * vz || 1;
+      let t = ((cx - s.x0) * vx + (cz - s.z0) * vz) / L2;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      s.d = Math.hypot(cx - s.x0 - vx * t, cz - s.z0 - vz * t) - s.hw;
+    }
+    let live = 0;
+    const used = _usedSeg;
+    used.length = 0;
+    for (let k = 0; k < FLOW_N; k++) {
+      let best = -1, bd = 1e30;
+      for (let i = 0; i < segs.length; i++) {
+        if (used.indexOf(i) >= 0) continue;
+        if (segs[i].d < bd) { bd = segs[i].d; best = i; }
+      }
+      const B = flowB[k >> 1];
+      if (best < 0 || bd > 1500) {
+        flowA[k].set(0, 0, 1, 0);
+        if (k & 1) { B.z = 0; B.w = 0; } else { B.x = 0; B.y = 0; }
+        continue;
+      }
+      used.push(best);
+      const s = segs[best];
+      flowA[k].set(s.x0, s.z0, s.x1, s.z1);
+      if (k & 1) { B.z = s.hw; B.w = RIVER_SPEED; } else { B.x = s.hw; B.y = RIVER_SPEED; }
+      live++;
+    }
+    water2.w = live > 0 ? 1 : 0;
+  }
+  const _usedSeg = [];
+
+  // CPU twin of cbzFlowAt(): (vx, vz) the surface current, f 0..1 how far
+  // inside a channel. Same four segments the GPU has.
+  CBZ.waterFlowAt = function (x, z, out) {
+    out = out || {};
+    out.x = 0; out.z = 0; out.f = 0;
+    if (!(water2.w > 0.5)) return out;
+    for (let k = 0; k < FLOW_N; k++) {
+      const A = flowA[k], B = flowB[k >> 1];
+      const hw = (k & 1) ? B.z : B.x, sp = (k & 1) ? B.w : B.y;
+      if (!(hw > 0)) continue;
+      const abx = A.z - A.x, abz = A.w - A.y, L2 = Math.max(abx * abx + abz * abz, 1);
+      let t = ((x - A.x) * abx + (z - A.y) * abz) / L2;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const d = Math.hypot(x - A.x - abx * t, z - A.y - abz * t);
+      const e0 = hw * 0.70, e1 = hw * 1.02;
+      let u = (d - e0) / (e1 - e0); u = u < 0 ? 0 : u > 1 ? 1 : u;
+      const f = 1 - u * u * (3 - 2 * u);
+      if (f > out.f) {
+        const q = d / hw, il = 1 / Math.sqrt(L2), v = sp * (1 - 0.55 * q * q);
+        out.x = abx * il * v; out.z = abz * il * v; out.f = f;
+      }
+    }
+    return out;
+  };
+  const _flowQ = { x: 0, z: 0, f: 0 };
+  function riverAt(x, z) { return CBZ.waterFlowAt(x, z, _flowQ).f; }
+
+  // GLSL twin, generated so the slot packing is constant-indexed.
+  function flowGLSL() {
+    const L = ["uniform vec4 uFlowA[" + FLOW_N + "];", "uniform vec4 uFlowB[" + (FLOW_N / 2) + "];",
+      "vec3 cbzFlowAt(vec2 p) {", "  vec3 best = vec3(0.0);"];
+    for (let k = 0; k < FLOW_N; k++) {
+      const hs = "uFlowB[" + (k >> 1) + "]." + ((k & 1) ? "zw" : "xy");
+      L.push("  { vec4 a = uFlowA[" + k + "]; vec2 hs = " + hs + ";");
+      L.push("    if (hs.x > 0.0) {");
+      L.push("      vec2 ab = a.zw - a.xy; float L2 = max(dot(ab, ab), 1.0);");
+      L.push("      float tt = clamp(dot(p - a.xy, ab) / L2, 0.0, 1.0);");
+      L.push("      float d = length(p - a.xy - ab * tt);");
+      L.push("      float f = 1.0 - smoothstep(hs.x * 0.70, hs.x * 1.02, d);");
+      L.push("      if (f > best.z) { float q = d / hs.x; best = vec3(ab * inversesqrt(L2) * hs.y * (1.0 - 0.55 * q * q), f); }");
+      L.push("    } }");
+    }
+    L.push("  return best;", "}");
+    return L.join("\n");
+  }
+  function foamGLSL() {
+    const L = ["uniform vec4 uFoamA[" + FOAM_N + "];", "uniform vec4 uFoamB[" + (FOAM_N / 2) + "];",
+      // n: 0..1 breakup noise (the caller's), returns 0..1 foam
+      "float cbzContactFoam(vec2 p, float n) {", "  float f = 0.0;"];
+    for (let k = 0; k < FOAM_N; k++) {
+      const rs = "uFoamB[" + (k >> 1) + "]." + ((k & 1) ? "zw" : "xy");
+      L.push("  { vec4 a = uFoamA[" + k + "]; vec2 rs = " + rs + ";");
+      L.push("    if (rs.y > 0.0) {");
+      L.push("      vec2 q = p - a.xy; float L2 = max(dot(a.zw, a.zw), 0.0001);");
+      L.push("      float tt = clamp(dot(q, a.zw) / L2, -1.0, 1.0);");
+      L.push("      float d = max(0.0, length(q - a.zw * tt) - rs.x);");
+      L.push("      float w = 0.35 + rs.x * 0.45;");
+      L.push("      f = max(f, rs.y * exp(-d / (w * (0.45 + n * 1.1))));");
+      L.push("    } }");
+    }
+    L.push("  return clamp(f, 0.0, 1.0);", "}");
+    return L.join("\n");
+  }
+
+  // ---- the sky the water sees ----------------------------------------------
+  const skyRef = { tex: null, tint: new THREE.Color(1, 1, 1), top: null, bottom: null };
+  function gatherSky() {
+    skyRef.tex = null; skyRef.top = null; skyRef.bottom = null;
+    const dome = CBZ.skyDome || (CBZ.micro && CBZ.micro.skyDome) || null;
+    const m = dome && dome.material;
+    if (!m) return;
+    if (m.map && m.map.image) {
+      skyRef.tex = m.map;
+      skyRef.tint.copy(m.color || skyRef.tint.setRGB(1, 1, 1));
+    } else if (m.uniforms && m.uniforms.topColor && m.uniforms.bottomColor) {
+      // microboot's gradient dome: the analytic pair IS the sky
+      skyRef.top = m.uniforms.topColor.value;
+      skyRef.bottom = m.uniforms.bottomColor.value;
+    }
+  }
+
+  let sceneStamp = -1;
+  function sceneTick() {
+    const stamp = CBZ.now || Math.floor((typeof performance !== "undefined" ? performance.now() : Date.now()) * 0.12);
+    if (stamp === sceneStamp) return;
+    sceneStamp = stamp;
+    gatherFoam();
+    gatherFlow();
+    gatherSky();
+    water2.x = CFG.WATER_CAUSTICS === false ? 0 : 1;
+  }
+  CBZ.waterSceneTick = sceneTick;
 
   // ============================================================
   //  4. SHARED UNIFORMS
@@ -1104,7 +1621,29 @@
     // Unit wind direction in world XZ. Fixed (deterministic, and a coastline's
     // prevailing wind does not spin); the streak lanes and every ripple octave
     // are built in this frame.
-    u.uWindDir = { value: new THREE.Vector2(0.882, 0.471) };
+    // BY REFERENCE: windTick() eases it toward the live weather wind (60 s
+    // bearing constant, see WIND above), so every material turns together.
+    u.uWindDir = { value: windDirShade };
+    // ---- WATER V3 (2026-10-11) -------------------------------------------
+    // The wave spectrum's live state (wind weights per row, Gerstner Q, LOD).
+    u.uWaveRow = { value: rowWVecs };
+    u.uWaveCtl = { value: waveCtl };
+    // The sky the water reflects: the dome's own painted texture when there
+    // is one (core/sky.js), sampled by the reflected ray, times the dome's
+    // tint. xyz = tint, w = 1 when uSkyTex is live. Falls back to the
+    // analytic uSkyLow/uSkyHigh pair, which is the dome at the horizon.
+    u.uSkyTex = { value: null };
+    u.uSkyTint = { value: new THREE.Vector4(1, 1, 1, 0) };
+    // Caustics: the shared tile, and (x = gain on shallow floors seen from
+    // above, y = crest subsurface gain, z = contact-foam on, w = river flow on)
+    u.uCaustic = { value: CBZ.waterCausticTexture() };
+    u.uWater2 = { value: water2 };
+    // Contact foam (hulls, pilings, rocks, swimmers): capsules, by reference.
+    u.uFoamA = { value: foamA };
+    u.uFoamB = { value: foamB };
+    // River flow: up to four channel segments near the camera, by reference.
+    u.uFlowA = { value: flowA };
+    u.uFlowB = { value: flowB };
     // x = ripple/sheen gain, y = lane contrast, z = shore calm strength,
     // w = distance-roughness master. All four go to 0 with the flag, which is
     // what makes the revert exact on BOTH sea materials at once.
@@ -1136,8 +1675,10 @@
   CBZ.waterSurfaceLookOn = surfaceLookOn;
   CBZ.waterDriveCommonUniforms = function (u) {
     if (!u) return;
+    windTick();
+    sceneTick();
     if (u.uSeaTime) u.uSeaTime.value = CBZ.waterClock();
-    if (u.uSeaY) u.uSeaY.value = seaY();
+    if (u.uSeaY && !u.fixedSeaY) u.uSeaY.value = seaY();
     // Surge -> how far inland the rendered waterline creeps. The ramp is
     // normalised, so this is a shape constant, not a distance: SHORE_CUT_PER_M
     // was chosen so a 1m surge moves the edge a plausible dozen-odd metres up
@@ -1157,9 +1698,23 @@
 
     // Direction TO the sun (light travels sun -> target, so it is target->sun),
     // plus its live dawn/dusk tint, straight from core/daynight.js.
-    if (u.uSunDir && CBZ.sun && CBZ.sunTarget) {
-      _sunDir.copy(CBZ.sun.position).sub(CBZ.sunTarget.position);
+    const sunT = CBZ.sunTarget || (CBZ.sun && CBZ.sun.target) || null;
+    if (u.uSunDir && CBZ.sun && sunT) {
+      _sunDir.copy(CBZ.sun.position).sub(sunT.position);
       if (_sunDir.lengthSq() > 1e-6) u.uSunDir.value.copy(_sunDir.normalize());
+    }
+    if (u.uSkyTint) {
+      const tx = CFG.WATER_SKY_REFLECT === false ? null : skyRef.tex;
+      if (tx) {
+        // the equirect lookup runs both atan2 branches (see cbzSkyRadiance),
+        // so the dome texture must wrap in u. Harmless for the dome itself:
+        // its own u seam then filters across the join instead of clamping.
+        if (tx.wrapS !== THREE.RepeatWrapping) { tx.wrapS = THREE.RepeatWrapping; tx.needsUpdate = true; }
+        u.uSkyTex.value = tx;
+        u.uSkyTint.value.set(skyRef.tint.r, skyRef.tint.g, skyRef.tint.b, 1);
+      } else {
+        u.uSkyTint.value.w = 0;
+      }
     }
     if (u.uSunColor && CBZ.sunTint) u.uSunColor.value.copy(CBZ.sunTint);
 
@@ -1217,11 +1772,12 @@
       u.uSkyHigh.value.copy(u.uSkyLow ? u.uSkyLow.value : SKY_HIGH_DAY).lerp(_skyHigh, 0.86);
     }
     veilDrive(u);
+    causticDrive(u);
     if (u.uClarity) {
       // Clarity is a live read, not a boot-time one, so ?cfg_SEA_TRANSLUCENT=0
       // and a runtime toggle land on the same frame. Rain silts the water:
       // heavy chop closes the window rather than opening a murky hole.
-      u.uClarity.value.x = translucentOn() ? CLARITY * (1 - wet * 0.55) : 0.0;
+      u.uClarity.value.x = translucentOn() && !u.noClarity ? CLARITY * (1 - wet * 0.55) : 0.0;
       u.uClarity.value.y = CLARITY_POW;
       u.uClarity.value.z = CLARITY_NEAR;
       u.uClarity.value.w = CLARITY_FAR;
@@ -1362,9 +1918,13 @@
       // and read by cbzWhitecap() in the fragment stage, so foam can sit on the
       // TIP of a crest without changing any shared function's signature.
       "varying float vCbzSteep;",
+      // 1 - Jacobian of the Gerstner sum: the crests that are about to break
+      "varying float vCbzFold;",
       INLAND_FN,
       DEEP_FN,
       IMPULSE_FN,
+      waveFnGLSL(),
+      flowGLSL(),
       // Distance + inland + DEPTH amplitude scale.
       //   .x = scale for the long swell rows   (mirrors CBZ.waterAmpAt)
       //   .y = scale for the short chop rows   (mirrors CBZ.waterChopAmpAt)
@@ -1379,7 +1939,7 @@
       "  float cfade = " + (farCalmOn()
         ? "mix(1.0, " + gnum(CHOP_FLOOR) + ", smoothstep(" + gnum(CHOP_NEAR) + ", " + gnum(CHOP_FAR) + ", dist))"
         : "1.0") + ";",
-      "  float calm = mix(1.0, " + gnum(INLAND_CALM) + ", cbzInlandFactor(p));",
+      "  float calm = mix(1.0, " + gnum(INLAND_CALM) + ", cbzInlandFactor(p)) * mix(1.0, " + gnum(RIVER_CALM) + ", cbzFlowAt(p).z);",
       "  float deep = cbzDeepFactor(p);",
       "  float base = fade * calm * uWaveAmp;",
       "  float gs = mix(1.0, uDeepGain, deep);",
@@ -1973,6 +2533,145 @@
       "  }",
       "  return normalize(geoN + fine * detail - vec3(0.0, detail, 0.0));",
       "}",
+      /* ================= THE ONE SEA SHADE (WATER V3) ====================
+         Every water surface in the game — the city ocean, its rivers and
+         lakes, the survival / shark-sim sea, NPC War's seas, the pools — ends
+         in this one function. It used to be three hand-diverged main()s (the
+         city shader sea, the planar-mirror graft on the vendor Water shader,
+         and the disaster sea) plus two private Phong sheets in NPC War, each
+         missing what the others had. What it adds over all of them:
+           • the reflected sky is the DOME'S OWN PAINTED SKY (clouds and all),
+             sampled along the reflected ray, pre-filtered by roughness — the
+             thing the half-rate planar mirror existed to provide, without a
+             second render of anything;
+           • a turquoise subsurface glow through thin backlit crests;
+           • caustics dancing on shallow sand seen through the surface;
+           • foam that comes from the WAVES: the Gerstner fold (Jacobian) at
+             breaking crests, the depth-driven surf line, and contact foam
+             against every hull, piling, rock and swimmer (cbzContactFoam);
+           • river channels that flow (advected ripples + streaks);
+           • from BELOW, a real Snell's window: refract() decides, so total
+             internal reflection is exact, softened by the surface roughness.
+         Returns rgb, and the foam fraction in .a (the caller turns it into
+         cbzSeaAlpha). tirCol is the colour of the water column a swimmer sees
+         mirrored outside the window (the live underwater fog colour). */
+      "uniform sampler2D uSkyTex;",
+      "uniform vec4 uSkyTint;",
+      "uniform sampler2D uCaustic;",
+      "uniform vec4 uWater2;",
+      "varying float vCbzFold;",
+      flowGLSL(),
+      foamGLSL(),
+      // The dome is an equirect sphere (three's SphereGeometry UVs): u from
+      // atan2(z, -x), v from acos(y), horizon at v = 0.5. The atan2 branch cut
+      // would print a mip seam down one bearing, so a quad that straddles it
+      // switches to the other branch (the texture wraps; same texel).
+      "vec3 cbzSkyRadiance(vec3 R, float rough) {",
+      "  vec3 a = cbzSkyTone(R, rough * 0.12);",
+      "  if (uSkyTint.w > 0.5) {",
+      "    vec3 d = normalize(vec3(R.x, max(R.y, 0.02), R.z));",
+      "    float u = atan(d.z, -d.x) * 0.15915494 + 0.5;",
+      "    float u2 = fract(u + 0.5) - 0.5;",
+      "    if (fwidth(u) > 0.25) u = u2;",
+      "    vec2 uv = vec2(u, 1.0 - acos(clamp(d.y, -1.0, 1.0)) * 0.31830989);",
+      "    vec3 tx = texture2D(uSkyTex, uv, rough * 4.0).rgb * uSkyTint.rgb;",
+      "    a = mix(tx, a, clamp(rough * 0.55, 0.0, 1.0));",
+      "  }",
+      "  return a;",
+      "}",
+      // two drifting, rotated taps of the shared caustic tile, min'd: the
+      // classic non-repeating light web on a sandy floor
+      "float cbzCausticAt(vec2 p, float t) {",
+      "  vec2 a = p * 0.21 + vec2(t * 0.031, t * 0.017);",
+      "  vec2 b = vec2(p.y, -p.x) * 0.17 + vec2(-t * 0.023, t * 0.029);",
+      "  float c = min(texture2D(uCaustic, a).r, texture2D(uCaustic, b).r);",
+      "  return c * c * 1.6;",
+      "}",
+      // two-phase flow map: the ripple tile dragged downstream on two
+      // staggered clocks, cross-faded so neither ever visibly resets
+      "vec4 cbzFlowDetail(vec2 p, vec2 v, float dist) {",
+      "  float T = 5.0;",
+      "  float ph0 = fract(uSeaTime / T);",
+      "  float ph1 = fract(uSeaTime / T + 0.5);",
+      "  float w0 = 1.0 - abs(ph0 * 2.0 - 1.0);",
+      "  vec2 o0 = v * (ph0 * T); vec2 o1 = v * (ph1 * T);",
+      "  vec3 n0 = texture2D(uSeaNormal, (p - o0) * 0.085).rgb * 2.0 - 1.0;",
+      "  vec3 n1 = texture2D(uSeaNormal, (p - o1) * 0.085 + 0.37).rgb * 2.0 - 1.0;",
+      "  vec3 n = n0 * w0 + n1 * (1.0 - w0);",
+      "  float fd = 1.0 - smoothstep(60.0, 420.0, dist);",
+      "  vec3 nrm = normalize(vec3(n.r * 0.60 * fd, 1.0, n.g * 0.60 * fd));",
+      "  vec2 dv = v / max(0.001, length(v)); vec2 dq = vec2(-dv.y, dv.x);",
+      "  float s0 = texture2D(uSeaNormal, vec2(dot(p - o0, dv) * 0.011, dot(p, dq) * 0.12)).r;",
+      "  float s1 = texture2D(uSeaNormal, vec2(dot(p - o1, dv) * 0.011, dot(p, dq) * 0.12) + 0.5).r;",
+      "  float st = smoothstep(0.60, 0.80, s0 * w0 + s1 * (1.0 - w0)) * 0.30 * fd;",
+      "  return vec4(nrm, st);",
+      "}",
+      "vec4 cbzShadeSea(vec3 P, vec3 Ng, float hN, float fold, float dist, float fade,",
+      "                 vec4 field, float inland, float under, vec3 deepCol, vec3 tirCol) {",
+      "  vec2 p = P.xz;",
+      "  vec3 flow = vec3(0.0);",
+      "  if (uWater2.w > 0.5) flow = cbzFlowAt(p);",
+      "  inland = max(inland, flow.z * 0.8);",
+      "  float calm = cbzShoreCalm(field);",
+      "  float lane = cbzLane(p);",
+      "  float detail = mix(0.60, 0.16, smoothstep(90.0, 1500.0, dist)) * mix(1.0, 0.42, inland) * (1.0 + uChop * 0.5);",
+      "  vec3 N = cbzSeaNormal(Ng, p, dist, detail, calm, lane);",
+      "  float streak = 0.0;",
+      "  if (flow.z > 0.01) {",
+      "    vec4 fl = cbzFlowDetail(p, flow.xy, dist);",
+      "    N = normalize(mix(N, fl.xyz, flow.z));",
+      "    streak = fl.w * flow.z;",
+      "  }",
+      "  vec3 V = normalize(cameraPosition - P);",
+      "  N = mix(N, -N, under);",
+      "  vec3 L = normalize(uSunDir);",
+      "  float ndl = max(dot(N, L), 0.0);",
+      "  float ndv = dot(N, V);",
+      "  float rgh = cbzRough(dist, ndv);",
+      "  float fres = cbzFresnel(ndv, dist);",
+      "  float sunUp = smoothstep(-0.05, 0.25, L.y);",
+      "  vec3 body = cbzDepthColor(deepCol, field, inland);",
+      "  vec3 base = body * vec3(0.95, 1.06, 1.03) + vec3(0.003, 0.012, 0.018);",
+      "  base *= 0.63 + ndl * 0.37;",
+      // light through a thin crest: looking toward the sun, the tip of a wave
+      // glows the colour of shallow water
+      "  float crest = smoothstep(0.05, 0.85, hN) + clamp(fold, 0.0, 1.0) * 0.6;",
+      "  float back = pow(clamp(dot(V, -normalize(L + N * 0.45)), 0.0, 1.0), 3.0);",
+      "  base += uShallowColor * (back * crest * 0.11 * uWater2.y * sunUp * (1.0 - inland * 0.6));",
+      // light on a shallow floor, seen through the surface
+      "  float shallow = pow(clamp(field.g, 0.0, 1.0), 1.6) * (1.0 - inland * 0.6);",
+      "  if (uWater2.x > 0.5 && shallow > 0.01 && under < 0.5 && dist < 160.0) {",
+      "    base += uSunColor * (cbzCausticAt(p, uSeaTime) * shallow * 0.13 * sunUp * (1.0 - smoothstep(35.0, 160.0, dist)));",
+      "  }",
+      "  vec3 R = reflect(-V, N);",
+      "  vec3 sky = cbzSkyRadiance(R, rgh) * " + gnum(REFL_GAIN) + " * mix(0.80, 1.22, lane);",
+      "  sky = mix(sky, uSunColor * 0.34 + sky * 0.70, 0.22);",
+      "  vec3 outColor = mix(base, sky, fres * 0.90 * mix(1.0, 0.55, inland));",
+      "  outColor += cbzSunGlitter(N, V, L, fres, fade) * mix(1.0, 0.30, inland);",
+      "  outColor += cbzSheen(N, V, L, lane, dist, fres) * mix(1.0, 0.35, inland);",
+      // ---- foam: what the waves make, what the shore makes, what things make
+      "  float n = texture2D(uSeaNormal, p * 0.13 + vec2(uSeaTime * 0.011, -uSeaTime * 0.007)).g;",
+      "  float surf = cbzSurf(p, field, hN, fade);",
+      "  float cap = cbzWhitecap(p, hN, fade, inland);",
+      "  float brk = smoothstep(0.10, 0.45, fold) * (0.45 + n * 1.0) * fade * (1.0 - inland);",
+      "  float contact = (uWater2.z > 0.5 && dist < 240.0) ? cbzContactFoam(p, n) : 0.0;",
+      "  float foam = clamp(surf * 0.66 + cap * 0.60 + brk * 0.55 + contact * 0.80 + streak, 0.0, 0.94) * (1.0 - under * 0.72);",
+      // foam is lace, not paint: thin where it is thin
+      "  float lace = smoothstep(0.30, 0.80, n + foam * 0.55);",
+      "  vec3 foamCol = uFoamColor * (0.80 + 0.20 * ndl);",
+      // ---- from below: Snell's window, decided by refract() itself
+      "  if (under > 0.5) {",
+      "    float cw = clamp(dot(N, V), 0.0, 1.0);",
+      "    float k = 1.0 - 1.7769 * (1.0 - cw * cw);",
+      "    float win = smoothstep(-0.06, 0.32, k);",
+      "    vec3 rt = refract(-V, N, 1.333);",
+      "    vec3 ru = normalize(rt + vec3(0.0, 0.002, 0.0));",
+      "    vec3 skyW = cbzSkyTone(ru, 0.1) * 1.05 + uSunColor * (pow(max(dot(ru, L), 0.0), 48.0) * 0.6 * sunUp);",
+      "    outColor = mix(tirCol, mix(outColor, skyW, 0.86), win);",
+      "  }",
+      "  outColor = mix(outColor, foamCol, foam * mix(0.62, 1.0, lace));",
+      "  return vec4(outColor, foam);",
+      "}",
     ].join("\n");
   };
 
@@ -2213,17 +2912,25 @@
   // camera here. Declares: vec3 wWorld, vec3 wNormal, float wHeight,
   // float wHeightN (height normalised to +-1), float wDist, float wFade,
   // float wInland.
-  CBZ.waterVertexBody = function (wp0Expr) {
+  // opts.arena: amplitudes come from uDisasterAmp/uDisasterChop (the island's
+  // explicit sea state) instead of the city's coast/lake/depth field, and the
+  // city's tsunami-front drop is left to the caller (the island has its own).
+  CBZ.waterVertexBody = function (wp0Expr, opts) {
+    const arena = !!(opts && opts.arena);
     const L = [];
     L.push("vec4 wBase = " + wp0Expr + ";");
     L.push("vec2 wXZ = vec2(cameraPosition.x + wBase.x, cameraPosition.z + wBase.z);");
     L.push("float wDist = length(wXZ - cameraPosition.xz);");
-    L.push("float wInland = cbzInlandFactor(wXZ);");
+    L.push(arena ? "float wInland = 0.0;" : "float wInland = cbzInlandFactor(wXZ);");
     L.push("float wFade = mix(1.0, " + gnum(FADE_FLOOR) + ", smoothstep(" + gnum(FADE_NEAR) + ", " + gnum(FADE_FAR) + ", wDist));");
-    L.push("vec3 wAmp3 = cbzWaveAmp3(wXZ, wDist);");
-    L.push(CBZ.waterWaveGLSL("wXZ", "uSeaTime", "wAmp3.x", "wHeight", "wDhx", "wDhz", "wAmp3.y"));
+    L.push(arena
+      ? "vec3 wAmp3 = vec3(uDisasterAmp, uDisasterChop, max(0.0001, max(uDisasterAmp, uDisasterChop)));"
+      : "vec3 wAmp3 = cbzWaveAmp3(wXZ, wDist);");
+    L.push("vec3 wDisp; vec3 wGN; float wFold;");
+    L.push("cbzWaveSum(wXZ, uSeaTime, wAmp3.x, wAmp3.y, wDist, wDisp, wGN, wFold);");
+    L.push("float wHeight = wDisp.y;");
     L.push("vec3 wEntryImp = cbzEntryImpulse(wXZ, uSeaTime);");
-    L.push("wHeight += wEntryImp.x; wDhx += wEntryImp.y; wDhz += wEntryImp.z;");
+    L.push("wHeight += wEntryImp.x;");
     // Normalised crest height (+-1 at the theoretical peak) so every threshold
     // downstream — whitecaps, surf gain, spray — is expressed in one unit and
     // keeps working if the amplitude table is retuned. wAmp3.z divides the
@@ -2231,34 +2938,232 @@
     // crests still report +-1 while the distance fade and the lake calm keep
     // shrinking the reported crest exactly as they always did.
     L.push("float wHeightN = wHeight * " + gnum(1 / TOTAL_AMP) + " / max(0.0001, wAmp3.z);");
-    L.push("vec3 wWorld = vec3(wXZ.x, wBase.y + wHeight - cbzFrontDrop(wXZ), wXZ.y);");
-    L.push("vec3 wNormal = normalize(vec3(-wDhx * " + gnum(CBZ.WATER_NORMAL_EXAGGERATION) + ", 1.0, -wDhz * " + gnum(CBZ.WATER_NORMAL_EXAGGERATION) + "));");
+    // Gerstner: the vertex MOVES horizontally toward each crest, which is
+    // what sharpens crests and flattens troughs. The entry impulse's slope is
+    // added to the shading normal at the swell's own exaggeration.
+    L.push("vec3 wWorld = vec3(wXZ.x + wDisp.x, wBase.y + wHeight" + (arena ? "" : " - cbzFrontDrop(wXZ)") + ", wXZ.y + wDisp.z);");
+    L.push("vec3 wNormal = normalize(wGN - vec3(wEntryImp.y, 0.0, wEntryImp.z) * " + gnum(NORMAL_GAIN_SWELL) + " * wGN.y);");
     // The fragment stage's whitecap tip test rides on this (see cbzWhitecap).
     L.push("vCbzSteep = wNormal.y;");
+    L.push("vCbzFold = wFold;");
     return L.join("\n");
+  };
+
+  // ============================================================
+  //  8b. THE ONE SEA MATERIAL
+  // ============================================================
+  // Every sea, lake, river and flood sheet in the game is built here, in one
+  // of three geometry modes that share every line of shading:
+  //
+  //   "city"      the camera-centred radial disc; amplitude from the coast /
+  //               lake / depth field (cbzWaveAmp3); the baked city shore field
+  //               discards dry land.
+  //   "arena"     the same disc, amplitude from the island's explicit sea state
+  //               (uDisasterAmp/uDisasterChop); the island's own baked field.
+  //               opts.vertexTail / opts.fragTail let the disaster sea add its
+  //               dry disc, its tsunami front and its sediment load.
+  //   "external"  geometry the CALLER displaces (or a flat sheet): position and
+  //               normal are used as given. What NPC War's seas are, and any
+  //               page that owns its own swell function.
+  //
+  // opts: { kind, name, fieldTex, fieldBounds, uniforms, vertexDecl, vertexTail,
+  //         fragDecl, fragTail, fogScale, horizonFuse, transparent }
+  // Returns the ShaderMaterial; its live uniform block is mat.userData.waterUniforms.
+  CBZ.waterSeaMaterial = function (opts) {
+    opts = opts || {};
+    const kind = opts.kind === "arena" || opts.kind === "external" ? opts.kind : "city";
+    const U = opts.uniforms || CBZ.waterCommonUniforms();
+    if (opts.fieldTex) {
+      U.uSeaLandMask.value = opts.fieldTex;
+      if (opts.fieldBounds) U.uSeaLandBounds.value.copy(opts.fieldBounds);
+      U.uSeaHasLandMask.value = 1;
+    }
+    if (!U.uSeaOpacity) U.uSeaOpacity = { value: 1 };
+    if (kind === "external" && !U.uClip) U.uClip = { value: new THREE.Vector4(0, 0, -1, 0) };
+    const VARY = [
+      "varying vec3 vSeaWorld;",
+      "varying vec3 vSeaNormal;",
+      "varying vec4 vSeaMisc;",          // x crest height (+-1), y distance, z far fade, w inland
+    ].join("\n");
+    const body = kind === "external" ? [
+      "  vec4 wB = modelMatrix * vec4(position, 1.0);",
+      "  vec3 wWorld = wB.xyz;",
+      "  vec3 wNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);",
+      "  float wDist = length(wWorld.xz - cameraPosition.xz);",
+      "  float wFade = mix(1.0, " + gnum(FADE_FLOOR) + ", smoothstep(" + gnum(FADE_NEAR) + ", " + gnum(FADE_FAR) + ", wDist));",
+      "  float wHeightN = clamp((wWorld.y - uSeaY) / 0.8, -1.0, 1.0);",
+      "  float wInland = 0.0;",
+      "  vCbzSteep = wNormal.y;",
+      "  vCbzFold = 0.0;",
+    ].join("\n") : CBZ.waterVertexBody("modelMatrix * vec4(position, 1.0)", { arena: kind === "arena" });
+    const fogScale = Number.isFinite(opts.fogScale) ? opts.fogScale : (kind === "city" ? 0.66 : 1.0);
+    const vs = [
+      CBZ.waterVertexDecl(),
+      kind === "arena" ? "uniform float uDisasterAmp;\nuniform float uDisasterChop;" : "",
+      opts.vertexDecl || "",
+      VARY,
+      "#include <fog_pars_vertex>",
+      "void main() {",
+      body,
+      opts.vertexTail || "",
+      "  vSeaWorld = wWorld;",
+      "  vSeaNormal = wNormal;",
+      "  vSeaMisc = vec4(wHeightN, wDist, wFade, wInland);",
+      "  vec4 mvPosition = viewMatrix * vec4(wWorld, 1.0);",
+      "  gl_Position = projectionMatrix * mvPosition;",
+      "  #include <fog_vertex>",
+      // Ocean atmosphere accumulates more slowly than city-block fog.
+      fogScale !== 1 ? "  #ifdef USE_FOG\n    fogDepth *= " + gnum(fogScale) + ";\n  #endif" : "",
+      "}",
+    ].join("\n");
+    const cut = kind === "city"
+      ? "  if (uSeaHasLandMask > 0.5 && field.r > cbzShoreCutAt(vSeaWorld.xz)) discard;"
+      : kind === "arena"
+        ? "  if (uSeaHasLandMask > 0.5 && field.r > uShoreCut) discard;"
+        : "  if (uClip.z > 0.0 && abs(vSeaWorld.x - uClip.x) < uClip.z && abs(vSeaWorld.z - uClip.y) < uClip.z) discard;";
+    const fs = [
+      CBZ.waterFragmentDecl(),
+      "uniform float uSeaOpacity;",
+      kind === "external" ? "uniform vec4 uClip;" : "",
+      opts.fragDecl || "",
+      VARY,
+      "#include <fog_pars_fragment>",
+      "void main() {",
+      "  vec4 field = cbzWaterField(vSeaWorld.xz);",
+      cut,
+      "  float inland = max(vSeaMisc.w, field.a);",
+      "  float under = gl_FrontFacing ? 0.0 : 1.0;",
+      // outside Snell's window a swimmer sees the water column mirrored: the
+      // live medium (water_underwater.js writes the fog off the depth ramp)
+      "  #ifdef USE_FOG",
+      "    vec3 cbzTir = fogColor * 0.55;",
+      "  #else",
+      "    vec3 cbzTir = uSeaColor * 0.34;",
+      "  #endif",
+      "  vec4 sh = cbzShadeSea(vSeaWorld, vSeaNormal, vSeaMisc.x, vCbzFold, vSeaMisc.y, vSeaMisc.z, field, inland, under, uSeaColor, cbzTir);",
+      "  vec3 outColor = sh.rgb;",
+      "  float foam = sh.a;",
+      "  float solid = foam;",
+      "  vec3 V = normalize(cameraPosition - vSeaWorld);",
+      opts.fragTail || "",
+      // HORIZON FUSE (aerial seam): converge on fogColor before the far clip so
+      // the disc's rim lands exactly on the dome's below-horizon band.
+      opts.horizonFuse === false ? "" :
+        "  #ifdef USE_FOG\n  outColor = mix(outColor, fogColor, smoothstep(3600.0, 6400.0, vSeaMisc.y));\n  #endif",
+      "  gl_FragColor = vec4(outColor, uSeaOpacity * cbzSeaAlpha(V, vSeaMisc.y, under, solid));",
+      "  #include <tonemapping_fragment>",
+      "  #include <encodings_fragment>",
+      "  #include <fog_fragment>",
+      "}",
+    ].join("\n");
+    const clear = translucentOn() || opts.transparent === true || U.uSeaOpacity.value < 0.999;
+    const mat = new THREE.ShaderMaterial({
+      name: opts.name || "CBZ Water",
+      uniforms: U,
+      vertexShader: vs,
+      fragmentShader: fs,
+      fog: true,
+      transparent: clear,
+      // depthWrite STAYS ON while blending: the sea owns its depth; it just
+      // draws after the opaque bodies it has to show through.
+      depthWrite: opts.depthWrite == null ? true : !!opts.depthWrite,
+      depthTest: true,
+      side: THREE.DoubleSide,           // you can swim UNDER every sea
+      extensions: { derivatives: true },
+    });
+    mat.userData.waterUniforms = U;
+    mat.userData.waterKind = kind;
+    mat.userData.waterMode = "water-v3-" + kind;
+    // a shaft dug through the ground must see through the sea as well
+    if (CBZ.groundMaskAttach) { try { CBZ.groundMaskAttach(mat); } catch (e) {} }
+    seaMaterials.push(mat);
+    return mat;
+  };
+  // every sea material built, so one tick can drive the ones nobody else does
+  const seaMaterials = [];
+  CBZ.waterSeaMaterials = function () { return seaMaterials; };
+
+  // ============================================================
+  //  8c. A BAKED SHORE FIELD FOR ANY HEIGHTFIELD WORLD
+  // ============================================================
+  // The city bakes its shore field from its coastline oracle (city/world.js).
+  // Any other world with a ground function gets the same four channels here,
+  // so its sea has surf lines, a depth-graded colour, caustic shallows and a
+  // land cut. Channels, by DEPTH (the honest quantity) rather than distance:
+  //   R  0.5 - depth/8 m: > 0.5 is dry land (the cut moves with sea level:
+  //      uShoreCut = 0.5 + (surge + margin)/8, see waterFieldCut)
+  //   G  surf proximity: 1 at the waterline, 0 by 2.4 m of water — breakers
+  //      live where the depth is about their own height
+  //   B  openness: depth / 30 m
+  //   A  0 (no lake flag)
+  // Baked INCREMENTALLY (rows per call to step()), so a 512^2 field never
+  // lands on one frame. Until it completes the texture reads "deep" (open
+  // water), which is exactly the sea that was there before.
+  const FIELD_RANGE = 8.0;
+  CBZ.waterFieldCut = function (surge, margin) {
+    return 0.5 + ((+surge || 0) + (margin == null ? 0.6 : +margin)) / FIELD_RANGE;
+  };
+  CBZ.waterBakeField = function (o) {
+    o = o || {};
+    const N = Math.max(64, Math.min(1024, o.size | 0 || 512));
+    const cx = +o.cx || 0, cz = +o.cz || 0, half = Math.max(50, +o.half || 800);
+    const groundAt = o.groundAt, seaY = Number.isFinite(+o.seaY) ? +o.seaY : 0;
+    const data = new Uint8Array(N * N * 4);
+    for (let i = 0; i < N * N; i++) { data[i * 4] = 0; data[i * 4 + 1] = 0; data[i * 4 + 2] = 255; data[i * 4 + 3] = 0; }
+    const tex = new THREE.DataTexture(data, N, N, THREE.RGBAFormat);
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.magFilter = tex.minFilter = THREE.LinearFilter;
+    tex.generateMipmaps = false;
+    tex.needsUpdate = true;
+    const bounds = new THREE.Vector4(cx - half, cz - half, cx + half, cz + half);
+    let row = 0;
+    const h = {
+      tex: tex, bounds: bounds, done: typeof groundAt !== "function",
+      // bake `rows` more rows; returns true when complete
+      step: function (rows) {
+        if (h.done) return true;
+        const end = Math.min(N, row + Math.max(1, rows | 0 || 24));
+        for (; row < end; row++) {
+          // texel centres: DataTexture row 0 is v = 0 (flipY is false)
+          const z = cz - half + (row + 0.5) / N * half * 2;
+          for (let c = 0; c < N; c++) {
+            const x = cx - half + (c + 0.5) / N * half * 2;
+            let g = +groundAt(x, z);
+            if (!Number.isFinite(g)) g = seaY - 60;
+            const depth = seaY - g;
+            const r = Math.max(0, Math.min(1, 0.5 - depth / FIELD_RANGE));
+            const gg = depth <= 0 ? 1 : Math.max(0, 1 - depth / 2.4);
+            const b = Math.max(0, Math.min(1, depth / 30));
+            const q = (row * N + c) * 4;
+            data[q] = Math.round(r * 255); data[q + 1] = Math.round(gg * 255);
+            data[q + 2] = Math.round(b * 255); data[q + 3] = 0;
+          }
+        }
+        if (row >= N) { h.done = true; tex.needsUpdate = true; }
+        return h.done;
+      },
+    };
+    return h;
   };
 
   // ============================================================
   //  9. MODE-SCOPED DISASTER WATER
   // ============================================================
-  // Survival used to own an unsegmented Lambert ocean and a second flat flood
-  // sheet. This is the reusable bridge: it keeps the canonical SWELLS table,
-  // clock, analytic slope, ripple texture and daylight uniforms, but omits the
-  // city coastline mask (the circular Survival island has its own event field).
-  // Macro displacement and the CPU sample below are the SAME five rows. Fine
-  // detail changes the shading normal only, never the gameplay waterline.
-
+  // The survival / shark-sim sea: the ONE sea material in "arena" mode on the
+  // same camera-centred radial disc as the city (it used to be a 2 km square
+  // grid snapped under the camera at 8-22 m per vertex, too coarse to carry a
+  // single wind wave). The disc is built with the city's ring growth for the
+  // live tier, so the wave sum's LOD is the same on both.
   CBZ.waterBuildDisasterGeometry = function (span, segments) {
-    const tier = Math.max(0, Math.min(4, (CBZ.qualityLevel == null ? 2 : CBZ.qualityLevel) | 0));
-    // Metres per vertex, per tier. This used to be a fixed segment count
-    // (64..168) tuned against the original 1400 m sheet; quoting it as PITCH
-    // keeps the swell sampling density identical when a caller asks for a
-    // bigger sheet, instead of silently aliasing the wave table.
-    const pitchByTier = [21.9, 15.9, 11.7, 9.7, 8.3];
-    const seg = Math.max(16, (segments | 0) || Math.round(span / pitchByTier[tier]));
-    const geo = new THREE.PlaneGeometry(span, span, seg, seg);
-    geo.rotateX(-Math.PI / 2);
-    geo.userData.waterDisasterGrid = { span: span, segments: seg };
+    const outer = Math.max(400, (+span || 2048) * 0.78);
+    const p = CBZ.waterTierParams();
+    const NRc = Math.max(8, Math.round(p.rings * Math.log(OUTER_R / INNER_R) / Math.log(RING_REF_R / INNER_R)));
+    const g = Math.pow(OUTER_R / INNER_R, 1 / Math.max(1, NRc - 1));
+    const rings = Math.max(16, Math.round(Math.log(outer / INNER_R) / Math.log(g)) + 1);
+    const geo = CBZ.waterBuildSurfaceGeometry({ tier: CBZ.qualityLevel, rings: rings, outerRadius: outer });
+    // the radial disc is re-centred on the camera in the vertex program, so
+    // the mesh itself must sit at x = z = 0 (disaster_arena.js reads radial)
+    geo.userData.waterDisasterGrid = { span: +span || 2048, segments: segments | 0 || rings, radial: true, outer: outer };
     return geo;
   };
 
@@ -2272,115 +3177,56 @@
     const U = CBZ.waterCommonUniforms();
     U.uDisasterAmp = { value: Number.isFinite(opts.amp) ? +opts.amp : 1.0 };
     U.uDisasterChop = { value: Number.isFinite(opts.chop) ? +opts.chop : 1.0 };
-    U.uDisasterOpacity = { value: Number.isFinite(opts.opacity) ? +opts.opacity : 1.0 };
+    U.uSeaOpacity = { value: Number.isFinite(opts.opacity) ? +opts.opacity : 1.0 };
+    U.uDisasterOpacity = U.uSeaOpacity;                 // the old name, same object
     U.uDisasterFoam = { value: Number.isFinite(opts.foam) ? +opts.foam : 0.45 };
-    U.uDisasterNormalGain = { value: Number.isFinite(opts.normalGain) ? +opts.normalGain : 9.0 };
-    U.uDisasterTint = { value: new THREE.Color(opts.color == null ? 0x155878 : opts.color) };
-    U.uDisasterShallow = { value: new THREE.Color(opts.shallowColor == null ? 0x3198a9 : opts.shallowColor) };
+    // The body tint IS the sea colour (one uniform, two names): the veil, the
+    // Snell mirror and the depth ramp all read uSeaColor.
+    U.uSeaColor.value.set(opts.color == null ? 0x155878 : opts.color);
+    U.uDisasterTint = U.uSeaColor;
+    if (opts.shallowColor != null) U.uShallowColor.value.set(opts.shallowColor);
+    U.uDisasterShallow = U.uShallowColor;
     /* ---- SEDIMENT LOAD (the Miyako term) --------------------------------
        A tsunami that has crossed a beach is not water any more, it is a
-       suspension: sand, silt, sewage, ground-up timber and everything the
-       front has already demolished, and it reads GRAY-BLACK, not blue. That
-       is one number (uDwSediment) plus the front geometry, because the load
-       is not uniform — it is heaviest AT the leading edge, where the bore is
-       still scouring, and thins the further inland the same water has spread.
-       Zero by default, so every existing consumer renders exactly as before. */
+       suspension: sand, silt, sewage, ground-up timber, and it reads
+       GRAY-BLACK, heaviest AT the leading edge. Zero by default, so every
+       other consumer renders clean water. */
     U.uDwSediment = { value: 0 };
     U.uDwFrontC = { value: new THREE.Vector2(0, 0) };     // event origin, world XZ
     U.uDwFrontDir = { value: new THREE.Vector2(1, 0) };   // unit travel direction
     U.uDwFrontS = { value: -1e9 };                        // signed front position along dir
     U.uDwFrontRun = { value: 110 };                       // m the churn decays over, behind
-    /* ---- THE WATER AHEAD OF THE FRONT (the tsunami's leading edge) ------
-       A tsunami is not a sea level. The water BEHIND the front is the flood;
-       the water AHEAD of it is still wherever it was before the wave came
-       (drawn back off the reef, or at rest on the far side of the island).
-       One global surge rose the whole island at once, so the town ahead of
-       the wall was already a lake before the wall reached it. uDwAhead is
-       the metres the sheet is pulled DOWN ahead of uDwFrontS (0 = off, and
-       0 for every other consumer); CBZ.waterFrontDropAt is the CPU twin. */
+    // metres the sheet is pulled DOWN ahead of the front (0 = off); CPU twin
+    // CBZ.waterFrontDropAt
     U.uDwAhead = { value: 0 };
     U.uDwMud = { value: new THREE.Color(opts.mudColor == null ? 0x171208 : opts.mudColor) };
-    /* ---- THE FLOW, AND WHY THE SHEET NEEDED TO KNOW ABOUT IT -------------
-       A flood is not a rough sea; it is a RIVER with no banks, and the one
-       thing that says so on screen is that everything on it — every ripple,
-       every foam streak, every plume of silt — is travelling the same way at
-       the same speed. Without a flow vector the surface could only be
-       isotropic noise, which is what made the old streak term a wash: it was
-       "some white", not "white being dragged somewhere".
-
-       uDwFlow is a unit direction in world XZ and uDwFlowSpd its speed in m/s
-       (both published by the tsunami: inland while it sweeps and stands,
-       SEAWARD on the drain, which is what makes the undertow visible from a
-       helicopter). uDwStand is 0 for a live bore and 1 for water that has
-       been standing — the two ends of the foam's life, streaks torn off a
-       moving front at one end and a slow scum network at the other. */
+    // the flood is a river with no banks: everything on it moves one way
     U.uDwFlow = { value: new THREE.Vector2(1, 0) };
     U.uDwFlowSpd = { value: 0 };
     U.uDwStand = { value: 0 };
-    /* The lighter end of the sediment ramp — silt held near the surface, which
-       is what makes a real inundation MOTTLED instead of one flat brown. And
-       the foam colour the soup is allowed to make: whitewater churned out of
-       a suspension is tan, never paper-white, and painting it white is most of
-       what made the flooded town read as snow. */
-    /* ---- THE DRY DISC: (cx, cz, r, sink). An island's sea sheet runs
-       under the whole island, and its swell crests rose through the flat
-       plain and the upper beach as z-fighting stripes (measured: 21k of 26k
-       flickering pixels in a high view of the disaster island). Inside r the
-       sheet is pulled `sink` metres down, fading to nothing over 8 m at r so
-       the waterline contact is untouched. w = 0 (the default) is a no-op for
-       every other consumer; the owner zeroes it while a flood is up. */
+    // THE DRY DISC: (cx, cz, r, sink) — the sheet is pulled `sink` m down
+    // inside r so a swell crest never stripes the plain. w = 0 is a no-op.
     U.uDwDryDisc = { value: new THREE.Vector4(0, 0, 0, 0) };
     U.uDwSilt = { value: new THREE.Color(opts.siltColor == null ? 0x1f1810 : opts.siltColor) };
     U.uDwFoam = { value: new THREE.Color(opts.dirtyFoamColor == null ? 0x8e8271 : opts.dirtyFoamColor) };
 
-    const vs = [
-      "uniform float uSeaTime;",
-      "uniform float uDisasterAmp;",
-      "uniform float uDisasterChop;",
-      "uniform float uDisasterNormalGain;",
+    const vDecl = [
       "uniform vec4 uDwDryDisc;",
       "uniform vec2 uDwFrontC;",
       "uniform vec2 uDwFrontDir;",
       "uniform float uDwFrontS;",
       "uniform float uDwAhead;",
-      "varying vec3 vDwWorld;",
-      "varying vec3 vDwNormal;",
-      "varying float vDwHeight;",
-      "varying float vDwDist;",
-      "#include <fog_pars_vertex>",
-      "void main() {",
-      "  vec4 dwBase = modelMatrix * vec4(position, 1.0);",
-      CBZ.waterWaveGLSL("dwBase.xz", "uSeaTime", "uDisasterAmp", "dwH", "dwDx", "dwDz", "uDisasterChop"),
-      "  vec3 dwWorld = vec3(dwBase.x, dwBase.y + dwH, dwBase.z);",
-      "  float dwDisc = 1.0 - smoothstep(uDwDryDisc.z - 8.0, uDwDryDisc.z, distance(dwBase.xz, uDwDryDisc.xy));",
-      "  dwWorld.y -= uDwDryDisc.w * dwDisc;",
-      // ahead of a tsunami front the sheet stays at its pre-wave level, and
-      // under the island there it is calm water again, so the dry disc's
-      // 3 m sink comes back with it (swell crests never stripe the plain)
-      "  float dwAk = uDwAhead > 0.001 ? smoothstep(-1.0, 7.0, dot(dwBase.xz - uDwFrontC, uDwFrontDir) - uDwFrontS) : 0.0;",
-      "  dwWorld.y -= dwAk * (uDwAhead + 3.0 * dwDisc * step(uDwDryDisc.w, 0.01));",
-      "  vec3 dwNormal = normalize(vec3(-dwDx * uDisasterNormalGain, 1.0, -dwDz * uDisasterNormalGain));",
-      "  vDwWorld = dwWorld;",
-      "  vDwNormal = dwNormal;",
-      "  vDwHeight = dwH / max(0.0001, " + gnum(TOTAL_AMP) + " * max(uDisasterAmp, uDisasterChop));",
-      "  vDwDist = distance(cameraPosition.xz, dwWorld.xz);",
-      "  vec4 mvPosition = viewMatrix * vec4(dwWorld, 1.0);",
-      "  gl_Position = projectionMatrix * mvPosition;",
-      "  #include <fog_vertex>",
-      "}",
     ].join("\n");
-
-    const fs = [
-      CBZ.waterClarityGLSL(),
-      "uniform float uSeaTime;",
-      "uniform sampler2D uSeaNormal;",
-      "uniform vec3 uSunDir;",
-      "uniform vec3 uSunColor;",
-      "uniform vec3 uFoamColor;",
-      "uniform vec3 uDisasterTint;",
-      "uniform vec3 uDisasterShallow;",
-      "uniform float uDisasterOpacity;",
-      "uniform float uDisasterFoam;",
+    const vTail = [
+      "  float dwDisc = 1.0 - smoothstep(uDwDryDisc.z - 8.0, uDwDryDisc.z, length(wWorld.xz - uDwDryDisc.xy));",
+      "  wWorld.y -= uDwDryDisc.w * dwDisc;",
+      // ahead of a tsunami front the sheet stays at its pre-wave level, and
+      // under the island there it is calm water again, so the dry disc's 3 m
+      // sink comes back with it (swell crests never stripe the plain)
+      "  float dwAk = uDwAhead > 0.001 ? smoothstep(-1.0, 7.0, dot(wWorld.xz - uDwFrontC, uDwFrontDir) - uDwFrontS) : 0.0;",
+      "  wWorld.y -= dwAk * (uDwAhead + 3.0 * dwDisc * step(uDwDryDisc.w, 0.01));",
+    ].join("\n");
+    const fDecl = [
       "uniform float uDwSediment;",
       "uniform vec2 uDwFrontC;",
       "uniform vec2 uDwFrontDir;",
@@ -2392,27 +3238,8 @@
       "uniform vec2 uDwFlow;",
       "uniform float uDwFlowSpd;",
       "uniform float uDwStand;",
-      "varying vec3 vDwWorld;",
-      "varying vec3 vDwNormal;",
-      "varying float vDwHeight;",
-      "varying float vDwDist;",
-      "#include <fog_pars_fragment>",
-      /* ---- ACTUAL NOISE, AND WHY THE OLD SURFACE WAS A WHITE SHEET --------
-         Every broken-up term in this shader used to be broken up by
-         `n = (a.b + b.b) * 0.5` — the BLUE channel of the shared ripple tile.
-         That tile is a NORMAL MAP: blue is 1/sqrt(nx*nx+1+nz*nz), and the
-         ripples in it are shallow, so blue never leaves [0.92, 1.0] and `n`
-         is a CONSTANT 0.93 to within four per cent. Everything "broken by
-         noise" was therefore not broken at all. The streak term —
-         smoothstep(0.58, 0.95, tile.b), i.e. smoothstep of a number that is
-         always ~0.96 — evaluated to 1.0 across the entire 130 m behind the
-         front and mixed 62% pure white over it. That is the flat snow-white
-         plain in the landfall shot, and no amount of retuning a threshold was
-         going to fix a signal with no variance in it.
-
-         So the turbid block gets a real value-noise field. Two octaves, four
-         hashes each, evaluated only where uDwSediment > 0 — which is nowhere
-         at all for the calm sea, the flash flood and every other consumer. */
+      // a real value-noise field for the soup (the ripple tile's channels are
+      // far too uniform to break foam up — see the 2026-09 note in git)
       "float dwHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }",
       "float dwNoise(vec2 p) {",
       "  vec2 i = floor(p), f = fract(p);",
@@ -2425,272 +3252,84 @@
       "  vec2 r = vec2(p.x * 0.862 + p.y * 0.507, p.y * 0.862 - p.x * 0.507);",
       "  return dwNoise(p) * 0.62 + dwNoise(r * 2.31 + 17.7) * 0.38;",
       "}",
-      "void main() {",
-      // Two octave normal flow: the useful part of the reference's FBM, but
-      // sampled from the one shared tile and distance-damped to avoid sparkle.
-      /* AND IT FLOWS. The detail coordinates are dragged along the flow
-         vector, so the small-scale texture of a flood visibly MOVES the way
-         the flood does — inland under the bore, seaward on the drain. Scaled
-         by uDwSediment, so a clean sea samples the identical coordinate it
-         always did. */
-      "  vec2 dwP = vDwWorld.xz - uDwFlow * (uDwFlowSpd * uSeaTime * uDwSediment);",
-      /* AND THE TILE HAS TO STOP BEING A TILE. uSeaNormal is six integer-
-         frequency sines on a 256px wrap: on open blue water nobody sees it,
-         but a glossy mud sheet reflects the sky off exactly that relief and
-         the 24 m lattice prints a visible CHECKERBOARD across the flooded
-         town. One domain warp — two noise samples nudging the lookup by up to
-         12 m — turns the lattice into an irregular field for the cost of eight
-         hashes, and it is inside a uniform branch, so the calm sea, the flash
-         flood and every other consumer pay nothing and sample the identical
-         coordinate they always did. */
-      "  if (uDwSediment > 0.002) {",
-      "    dwP += (vec2(dwNoise(dwP * 0.019), dwNoise(dwP * 0.019 + 53.0)) - 0.5) * 11.0;",
-      "  }",
-      "  vec2 q0 = dwP * 0.042 + vec2(uSeaTime * 0.030, -uSeaTime * 0.021);",
-      "  vec2 q1 = vec2(dwP.y, -dwP.x) * 0.079 + vec2(-uSeaTime * 0.022, uSeaTime * 0.027);",
-      "  vec3 a = texture2D(uSeaNormal, q0).rgb * 2.0 - 1.0;",
-      "  vec3 b = texture2D(uSeaNormal, q1).rgb * 2.0 - 1.0;",
-      // Dirty water is ROUGHER than clean water — it is boiling. Turbidity
-      // deepens the micro-relief, which is what breaks the sky sheen into
-      // moving facets and gives the sun something to glint off.
-      "  float detail = mix(0.46, 0.12, smoothstep(45.0, 520.0, vDwDist)) * (1.0 - 0.34 * uDwSediment);",
-      "  vec3 micro = normalize(vec3((a.r + b.r) * 0.33, 1.0, (a.g + b.g) * 0.33));",
-      "  vec3 N = normalize(vDwNormal + micro * detail - vec3(0.0, detail, 0.0));",
-      "  if (!gl_FrontFacing) N = -N;",
-      "  vec3 V = normalize(cameraPosition - vDwWorld);",
-      "  vec3 L = normalize(uSunDir);",
-      "  float ndl = max(dot(N, L), 0.0);",
-      "  float fres = 0.025 + 0.975 * pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 4.8);",
-      // Crest translucency/subsurface tint: bright turquoise only on the thin
-      // sun-facing crest, not a global neon water colour.
-      "  float crest = smoothstep(0.18, 0.88, vDwHeight);",
-      "  float back = pow(max(dot(-L, N), 0.0), 2.0) * crest;",
-      "  vec3 body = mix(uDisasterTint * 0.62, uDisasterShallow, crest * 0.42);",
-      "  body *= 0.58 + ndl * 0.42;",
-      "  body += uDisasterShallow * back * 0.18;",
-      // Coherent analytic sky gradient in the reflected direction. High-tier
-      // city water still mirrors the real scene; this cheap arena surface gets
-      // a stable horizon rather than a flat Lambert card.
-      "  vec3 R = reflect(-V, N);",
-      "  float skyT = smoothstep(-0.12, 0.72, R.y);",
-      "  vec3 sky = mix(vec3(0.48, 0.65, 0.72), vec3(0.16, 0.36, 0.58), skyT);",
-      /* THE SKY A FLOOD REFLECTS IS THE SKY OVER THE FLOOD. The analytic
-         gradient above is a fair-weather blue and a disaster day is not one;
-         a mud sheet that mirrors clear blue looks like painted ground with a
-         blue wash on it. fogColor is the exact value modes/survival.js is
-         painting the dome with this frame, so taking the turbid sheen from it
-         makes the water agree with the sky by construction — including every
-         later change to the tsunami's env block. */
-      "  #ifdef USE_FOG",
-      "    vec3 dwSkyC = mix(fogColor * 1.12, fogColor * 0.60, skyT);",
-      "  #else",
-      "    vec3 dwSkyC = sky;",
-      "  #endif",
-      "  vec3 outColor = mix(body, sky, fres * 0.72);",
-      "  vec3 H = normalize(L + V);",
-      "  float glitter = pow(max(dot(N, H), 0.0), 34.0) * (0.18 + fres * 1.35);",
-      "  outColor += uSunColor * glitter * 0.72;",
-      // Restrained crest foam. Detail noise breaks it into patches; height and
-      // analytic tilt keep it at the tipping apex instead of painting flanks.
-      "  float n = (a.b + b.b) * 0.5;",
-      /* ---- THE TURBID FRONT -----------------------------------------------
-         Everything inside the branch below is gated on uDwSediment, which is 0
-         for every non-tsunami consumer, so the calm sea and the flash flood
-         run not one instruction of it.
-
-         What it has to be, from the Tohoku helicopter footage: the inundation
-         is DARK gray-brown, OPAQUE and GLOSSY. It reflects the overcast as a
-         bright sheen at grazing angles and carries hard sun glints; it is
-         mottled with plumes of silt that drift with the current; and the white
-         on it is not a wash but STRUCTURE — a boiling roll a few metres deep
-         riding the leading edge, torn streaks lying along the flow behind it,
-         and, where the water has stood a while, a sparse network of scum lines
-         and rafts covering a tenth of the surface. The previous version had
-         one of those five (a dark body) and painted the other four as a flat
-         62% white over 130 m, which is why the flooded town read as snow.
-
-         Three things make the difference and all three are one idea — the
-         flood is a river: a real noise field (dwFbm) so the foam has
-         variance, a flow VECTOR so that variance is anisotropic and moving,
-         and a fresnel so the body is a liquid rather than a colour. */
-      "  float fdS = dot(vDwWorld.xz - uDwFrontC, uDwFrontDir) - uDwFrontS;",
-      "  float behind = clamp(-fdS / max(1.0, uDwFrontRun), 0.0, 1.0);",
-      "  float dwWet = 1.0 - smoothstep(-1.0, 7.0, fdS);",
-      "  float turb = uDwSediment * dwWet;",
-      "  float sed = 0.0, boil = 0.0, whitew = 0.0;",
-      "  if (turb > 0.002) {",
-      "    float bd = max(0.0, -fdS);",                      // metres behind the front
-      "    vec2 fl = uDwFlow;",
-      "    vec2 ax = vec2(-fl.y, fl.x);",
-      "    vec2 adv = vDwWorld.xz - fl * (uDwFlowSpd * uSeaTime);",
-      "    float sAl = dot(adv, fl);",                       // along the flow, advected
-      "    float sAc = dot(adv, ax);",                       // across it
-      // Water that has stood is old water: 1 in the flooded/drain phases, and
-      // reached anyway far enough behind a live front.
-      "    float stand = max(uDwStand, smoothstep(0.30, 1.0, behind));",
-      // THE BODY. Silt plumes are two low-frequency fields drifting with the
-      // current, so the sheet is mottled and the mottling MOVES.
-      "    float plume = clamp(dwFbm(vec2(sAl, sAc) * 0.0068) * 0.72 +",
-      "                        dwNoise(vec2(sAl * 0.0021, sAc * 0.0029) + 11.0) * 0.46, 0.0, 1.0);",
-      "    sed = turb * mix(1.0, 0.92, behind);",
-      "    vec3 mudBody = mix(uDwMud * 0.62, uDwSilt, smoothstep(0.18, 0.92, plume));",
-      "    mudBody *= 0.52 + ndl * 0.44;",
-      // ...AND IT IS GLOSSY. Schlick against the live sky, plus a tight sun
-      // lobe. This is the whole difference between a flood and painted ground:
-      // matte olive was never a wrong colour, it was a missing reflection.
-      "    vec3 Nf = normalize(mix(vDwNormal, N, 0.20));",
-      "    float mf = 0.02 + 0.98 * pow(1.0 - clamp(dot(Nf, V), 0.0, 1.0), 5.0);",
-      "    vec3 turbCol = mix(mudBody, dwSkyC, clamp(mf * 0.80, 0.0, 0.62));",
-      "    turbCol += uSunColor * pow(max(dot(N, H), 0.0), 110.0) * (0.45 + 2.4 * mf);",
-      "    outColor = mix(outColor, turbCol, clamp(sed * 1.28, 0.0, 0.985));",
-      // Whitewater churned out of a suspension is TAN. The dirtier the load,
-      // the further from paper-white the foam is allowed to get.
-      "    vec3 dfoam = mix(uFoamColor, uDwFoam, uDwSediment * 0.88);",
-      // 1. THE ROLL AT THE EDGE. A few metres deep, e-folded behind the front
-      //    and torn into tongues by noise running along the front line, so the
-      //    leading edge is ragged and churning instead of a ruled band.
-      "    float tongue = dwFbm(vec2(sAc * 0.052 + 4.0, uSeaTime * 0.28));",
-      "    boil = clamp(turb * exp(-bd / (2.0 + 5.4 * tongue)) * (0.50 + 0.80 * tongue), 0.0, 0.92);",
-      // 2. STREAKS BEHIND IT. 13:1 anisotropy along the flow and scrolling
-      //    with it, decaying over ~48 m so they read as whitewater being LEFT
-      //    BEHIND by a front rather than as a field of white.
-      "    float streak = smoothstep(0.60, 0.95, dwFbm(vec2(sAl * 0.023, sAc * 0.30)));",
-      "    streak *= exp(-bd / 48.0) * (1.0 - stand * 0.70);",
-      // 3. STANDING FLOOD. A ridged noise gives thin scum LINES; a coarse
-      //    threshold gives the occasional raft. Together a few per cent of the
-      //    surface, which is what a real inundation carries.
-      "    float sc = dwFbm(vec2(sAl * 0.026 + 21.0, sAc * 0.205));",
-      "    float lines = smoothstep(0.92, 1.0, 1.0 - abs(sc * 2.0 - 1.0)) * smoothstep(0.26, 0.72, plume);",
-      "    float raft = smoothstep(0.72, 0.95, dwFbm(vec2(sAl * 0.048, sAc * 0.086) + 31.0));",
-      "    whitew = clamp((streak * 0.38 + (lines * 0.32 + raft * 0.24) * stand) * turb, 0.0, 0.52);",
-      "    outColor = mix(outColor, dfoam, whitew);",
-      "    outColor = mix(outColor, mix(dfoam, uFoamColor, 0.30), boil);",
-      "  }",
-      "  float tip = pow(clamp(vDwNormal.y, 0.0, 1.0), 18.0);",
-      // The clean sea's crest foam stands down inside the soup — the front's
-      // own foam system owns that water, and running both painted it twice.
-      "  float foam = smoothstep(0.48, 0.90, vDwHeight + (n - 0.5) * 0.38) * tip * uDisasterFoam * (1.0 - turb * 0.96);",
-      "  outColor = mix(outColor, uFoamColor, clamp(foam, 0.0, 0.88));",
-      // SEA_TRANSLUCENT. The island's sea is the one you actually swim a shark
-      // under, so it gets the same view-angle clarity the city ocean does. Any
-      // opacity a disaster has already dialled in (a receding tsunami fades
-      // this plane out) still wins: the two multiply.
-      "  float dwUnder = gl_FrontFacing ? 0.0 : 1.0;",
-      /* ---- SNELL'S WINDOW (2026-08-25) ---------------------------------
-         Seen from BELOW, this shader was handing every angle the same thing
-         it hands the sky: `sky = mix(vec3(0.48,0.65,0.72), ...)`, an unlit
-         pale grey-blue that owes nothing to the water it is the roof of. So
-         the ceiling of the sea was a flat #7aa6b8 sheet from one metre down
-         to twenty, and it is most of what made the owner's underwater frames
-         read as washed out — measured at 3.4 m under the shark island, a
-         #327ea5 medium under a (152,203,215) ceiling.
-
-         What actually happens is Snell's window: water/air total-internal-
-         reflects past a critical angle of 48.6 degrees, so a diver sees the
-         whole sky squeezed into a bright disc directly overhead and a MIRROR
-         of the dark water everywhere outside it. cos(48.6 deg) = 0.661, so
-         the window is the smoothstep across it; outside, the surface takes
-         the sea's own body tint. That is the "lighter showing surface" the
-         brief asks for AND the dark ceiling at grazing angles the reference
-         photographs have, from one physical fact rather than two dials.
-         Above water nothing changes: dwUnder is 0 and the mix never runs. */
-      /* ...AND INSIDE THE WINDOW THERE HAS TO BE A SKY (2026-08-25).
-
-         The note above says the flat pale ceiling came from `sky`. Measured,
-         it did not: from BELOW, N is flipped downward and V points down at the
-         eye, so dot(N,V) is LARGE, and `fres` — which is
-         0.025 + 0.975 * pow(1 - dot(N,V), 4.8) — collapses to about 0.028.
-         `mix(body, sky, fres * 0.72)` therefore takes TWO PER CENT of the sky.
-         What the ceiling actually was, at every angle, is `body` with ndl = 0:
-         uDisasterTint * 0.62 * 0.58, a dark blue-green. Which is why the
-         window branch could not brighten anything and why, once the black band
-         stopped hiding it, the frame came out DARKEST at the top and brightest
-         at the horizon — the exact inversion of the owner's master reference,
-         where a shimmering ceiling sits over a column that only gets darker.
-
-         Fresnel is the wrong law to be reading here anyway. It describes what
-         a surface REFLECTS; a diver looking up is seeing what it TRANSMITS,
-         and inside the critical cone the whole sky hemisphere is refracted
-         into that cone at near-total transmittance. So inside the window the
-         ceiling is the sky (keeping 28% of the surface's own body and its sun
-         glitter, so it still ripples and still catches the sun); outside it,
-         total internal reflection shows the water column below you, which is
-         the live medium at its dim end — fogColor, the value
-         world/water_underwater.js is already writing per frame off the depth
-         ramp, rather than a fixed tint that stays shallow-blue twenty metres
-         down. 0.55 and a wide, soft window edge because a real surface is
-         ROUGH: every wave facet tilts the cone, which smears the boundary over
-         tens of degrees instead of ruling a ring at 48.6.
-
-         No seam to engineer at the horizon: fogColor is linear here and so is
-         outColor, so the fog mix carries this fragment to exactly the byte the
-         open water beside it lands on. Above water dwUnder is 0 and not one
-         line of this runs. */
-      "  if (dwUnder > 0.5) {",
-      "    float dwWin = smoothstep(0.36, 0.80, clamp(dot(N, V), 0.0, 1.0));",
-      "    #ifdef USE_FOG",
-      "      vec3 dwMirror = fogColor * 0.55;",
-      "    #else",
-      "      vec3 dwMirror = uDisasterTint * 0.34;",
-      "    #endif",
-      // 0.86 and not 0.72: measured, 0.72 left the ceiling at luminance 132
-      // against a horizon at 148, i.e. still the wrong way round by a nose.
-      // The remaining 14% is the surface's own body colour and its sun
-      // glitter, which is what stops the window being a plain card.
-      "    outColor = mix(dwMirror, mix(outColor, sky, 0.86), dwWin);",
-      "  }",
-      /* A SUSPENSION IS OPAQUE, AND THAT WAS THE LAST BIG TELL. dwSolid is
-         what closes cbzSeaAlpha, and feeding it the raw sediment left the
-         flood 5-11% clear — enough, over a bright plaza or a road, to see the
-         LANE MARKINGS through two metres of tsunami. Magnified, the "checker-
-         board" on the flooded town was the town's own pavement grid showing
-         through, and the olive cast on the standing water was grass. Half a
-         metre of Tohoku mud hid a car; the term saturates well before the load
-         does. uDisasterOpacity still multiplies afterwards, so a receding
-         tsunami fades exactly as it always has. */
-      "  float dwSolid = clamp(max(max(foam, boil), max(whitew, min(1.0, sed * 1.9))), 0.0, 1.0);",
-      "  gl_FragColor = vec4(outColor, uDisasterOpacity * cbzSeaAlpha(V, vDwDist, dwUnder, dwSolid));",
-      "  #include <tonemapping_fragment>",
-      "  #include <encodings_fragment>",
-      "  #include <fog_fragment>",
-      "}",
     ].join("\n");
-
-    const transparent = opts.transparent === true || U.uDisasterOpacity.value < 0.999 ||
-      translucentOn();
-    /* DEPTH STAYS OURS. A transparent material normally drops depthWrite, and
-       for a sprite that is right — but this is a 1.4 km sheet that half the
-       world sits behind, and a sea that stopped writing depth would stop
-       occluding every particle, decal and foam layer under it. The sea keeps
-       writing depth and simply blends on the way in; the only thing that
-       changes is that it is now drawn in the transparent pass, AFTER the
-       opaque animals it has to show through. Callers that ask for a specific
-       depthWrite (the receding tsunami) still get exactly what they asked. */
-    const mat = new THREE.ShaderMaterial({
-      name: opts.name || "CBZ Disaster Water",
-      uniforms: U, vertexShader: vs, fragmentShader: fs,
-      fog: true, transparent: transparent,
-      opacity: U.uDisasterOpacity.value,
-      // ...but only for a sea at FULL body opacity. A caller that deliberately
-      // fades this sheet out (the receding tsunami) still gets the old
-      // depthWrite:false, because a half-faded sheet that writes depth punches
-      // a hole in everything behind it.
-      depthWrite: opts.depthWrite == null
-        ? ((translucentOn() && U.uDisasterOpacity.value >= 0.999) ? true : !transparent)
-        : !!opts.depthWrite,
-      depthTest: true, side: THREE.DoubleSide,
+    /* THE TURBID FRONT, from the Tohoku helicopter footage: the inundation is
+       DARK gray-brown, OPAQUE and GLOSSY; mottled with silt plumes drifting
+       with the current; and its white is STRUCTURE — a boiling roll at the
+       leading edge, torn streaks along the flow behind it, and a sparse scum
+       network where the water has stood. Gated on uDwSediment, which is 0 for
+       every clean sea, so they run not one instruction of it. */
+    const fTail = [
+      "  if (uDwSediment > 0.002) {",
+      "    vec3 tN = normalize(vSeaNormal);",
+      "    if (under > 0.5) tN = -tN;",
+      "    vec3 tL = normalize(uSunDir);",
+      "    vec3 tH = normalize(tL + V);",
+      "    float tndl = max(dot(tN, tL), 0.0);",
+      "    float skyT = smoothstep(-0.12, 0.72, reflect(-V, tN).y);",
+      "    #ifdef USE_FOG",
+      "      vec3 dwSkyC = mix(fogColor * 1.12, fogColor * 0.60, skyT);",
+      "    #else",
+      "      vec3 dwSkyC = mix(uSkyLow, uSkyHigh, skyT);",
+      "    #endif",
+      "    float fdS = dot(vSeaWorld.xz - uDwFrontC, uDwFrontDir) - uDwFrontS;",
+      "    float behind = clamp(-fdS / max(1.0, uDwFrontRun), 0.0, 1.0);",
+      "    float dwWet = 1.0 - smoothstep(-1.0, 7.0, fdS);",
+      "    float turb = uDwSediment * dwWet;",
+      "    if (turb > 0.002) {",
+      "      float bd = max(0.0, -fdS);",
+      "      vec2 fl = uDwFlow;",
+      "      vec2 ax = vec2(-fl.y, fl.x);",
+      "      vec2 adv = vSeaWorld.xz - fl * (uDwFlowSpd * uSeaTime);",
+      "      float sAl = dot(adv, fl);",
+      "      float sAc = dot(adv, ax);",
+      "      float stand = max(uDwStand, smoothstep(0.30, 1.0, behind));",
+      "      float plume = clamp(dwFbm(vec2(sAl, sAc) * 0.0068) * 0.72 +",
+      "                          dwNoise(vec2(sAl * 0.0021, sAc * 0.0029) + 11.0) * 0.46, 0.0, 1.0);",
+      "      float sed = turb * mix(1.0, 0.92, behind);",
+      "      vec3 mudBody = mix(uDwMud * 0.62, uDwSilt, smoothstep(0.18, 0.92, plume));",
+      "      mudBody *= 0.52 + tndl * 0.44;",
+      "      float mf = 0.02 + 0.98 * pow(1.0 - clamp(dot(tN, V), 0.0, 1.0), 5.0);",
+      "      vec3 turbCol = mix(mudBody, dwSkyC, clamp(mf * 0.80, 0.0, 0.62));",
+      "      turbCol += uSunColor * pow(max(dot(tN, tH), 0.0), 110.0) * (0.45 + 2.4 * mf);",
+      "      outColor = mix(outColor, turbCol, clamp(sed * 1.28, 0.0, 0.985));",
+      "      vec3 dfoam = mix(uFoamColor, uDwFoam, uDwSediment * 0.88);",
+      "      float tongue = dwFbm(vec2(sAc * 0.052 + 4.0, uSeaTime * 0.28));",
+      "      float boil = clamp(turb * exp(-bd / (2.0 + 5.4 * tongue)) * (0.50 + 0.80 * tongue), 0.0, 0.92);",
+      "      float streak = smoothstep(0.60, 0.95, dwFbm(vec2(sAl * 0.023, sAc * 0.30)));",
+      "      streak *= exp(-bd / 48.0) * (1.0 - stand * 0.70);",
+      "      float sc = dwFbm(vec2(sAl * 0.026 + 21.0, sAc * 0.205));",
+      "      float lines = smoothstep(0.92, 1.0, 1.0 - abs(sc * 2.0 - 1.0)) * smoothstep(0.26, 0.72, plume);",
+      "      float raft = smoothstep(0.72, 0.95, dwFbm(vec2(sAl * 0.048, sAc * 0.086) + 31.0));",
+      "      float whitew = clamp((streak * 0.38 + (lines * 0.32 + raft * 0.24) * stand) * turb, 0.0, 0.52);",
+      "      outColor = mix(outColor, dfoam, whitew);",
+      "      outColor = mix(outColor, mix(dfoam, uFoamColor, 0.30), boil);",
+      // a suspension is opaque: half a metre of Tohoku mud hid a car
+      "      solid = clamp(max(max(foam, boil), max(whitew, min(1.0, sed * 1.9))), 0.0, 1.0);",
+      "    }",
+      "  }",
+    ].join("\n");
+    const mat = CBZ.waterSeaMaterial({
+      kind: "arena", uniforms: U, name: opts.name || "CBZ Disaster Water",
+      vertexDecl: vDecl, vertexTail: vTail, fragDecl: fDecl, fragTail: fTail,
+      horizonFuse: false, transparent: opts.transparent === true,
+      depthWrite: opts.depthWrite == null ? (U.uSeaOpacity.value >= 0.999) : !!opts.depthWrite,
     });
+    mat.opacity = U.uSeaOpacity.value;
     mat.userData.waterMode = "shared-disaster-fresnel";
-    mat.userData.waterUniforms = U;
-    /* THE SEA GOES WITH THE GROUND OVER A HOLE. This shader #includes the fog
-       chunks, so core/groundmask.js's discard is already compiled into it — but
-       a ShaderMaterial owns its own uniforms and three will not hand it the
-       shared slot array, so the CODE arrives without the DATA and the test
-       reads zeros. One line gives it the data. It matters: the ocean plane sits
-       at y=-0.8 across the whole island, so a 46 m shaft looked up at blue
-       water and down into it saw the sea. */
-    if (CBZ.groundMaskAttach) CBZ.groundMaskAttach(mat);
     return mat;
+  };
+
+  // Hand an arena sea its baked field (CBZ.waterBakeField handle).
+  CBZ.waterSetField = function (target, field) {
+    const mat = target && target.material ? target.material : target;
+    const u = mat && mat.userData && mat.userData.waterUniforms;
+    if (!u || !field || !field.tex) return false;
+    u.uSeaLandMask.value = field.tex;
+    u.uSeaLandBounds.value.copy(field.bounds);
+    u.uSeaHasLandMask.value = 1;
+    mat.userData.waterField = field;
+    return true;
   };
 
   CBZ.waterDriveDisasterSurface = function (target, state) {
@@ -2698,6 +3337,12 @@
     const u = mat && mat.userData && mat.userData.waterUniforms;
     if (!u) return false;
     CBZ.waterDriveCommonUniforms(u);
+    // The island's field is in DEPTH units, so its land cut follows the live
+    // surge in metres (the city's ramp cut written above does not apply).
+    u.uShoreCut.value = CBZ.waterFieldCut(_surge, 0.6);
+    // finish baking the field a slice per frame, off the load path
+    const fld = mat.userData && mat.userData.waterField;
+    if (fld && !fld.done) fld.step(20);
     state = state || {};
     if (Number.isFinite(state.amp)) u.uDisasterAmp.value = +state.amp;
     if (Number.isFinite(state.chop)) u.uDisasterChop.value = +state.chop;
@@ -2705,6 +3350,7 @@
     if (Number.isFinite(state.opacity)) {
       u.uDisasterOpacity.value = +state.opacity;
       mat.opacity = +state.opacity;
+      if (+state.opacity < 0.999 && !mat.transparent) { mat.transparent = true; mat.needsUpdate = true; }
       /* SEA_TRANSLUCENT made this number mean something. Before it, the sea was
          built transparent:false and a runtime opacity was simply ignored by the
          renderer; now the sheet really does fade — so the moment it stops being
@@ -3709,6 +4355,234 @@
     out.undertow = flow < 0 ? -flow : 0;
     return out;
   };
+
+  /* ============================================================
+     10. CAUSTICS ON THE FLOOR, POOLS, AND THE SEAS NOBODY ELSE DRIVES
+     ============================================================ */
+
+  /* ---- SEABED CAUSTICS ---------------------------------------------------
+     The web of focused sunlight on a shallow sandy bottom. Applied to the
+     FLOOR's own material (a patched clone, chained onto any hook it already
+     has, exactly like the veil above), so it is right from above — seen
+     through the translucent sea — and from below, with no extra geometry.
+     Only fragments below the live sea level get it, it dims and blurs with
+     the depth of water the light has crossed (gone by ~20 m), and it follows
+     the sun. Uses the same tile, scale and drift as the shallow-water glints
+     in cbzShadeSea, so the two line up. */
+  const CAU_U = {
+    uCauSeaY: { value: -0.48 },
+    uCauTime: { value: 0 },
+    uCauSun: { value: new THREE.Vector4(1, 1, 1, 0) },   // rgb sun * gain, w = on
+    uCauTex: { value: null },
+  };
+  CBZ.waterCausticUniforms = CAU_U;
+  const _cauCache = new WeakMap();
+  function cauBefore(shader) {
+    if (shader.vertexShader.indexOf("#include <project_vertex>") < 0) return;
+    if (shader.vertexShader.indexOf("#include <common>") < 0) return;
+    if (shader.fragmentShader.indexOf("#include <tonemapping_fragment>") < 0) return;
+    if (shader.fragmentShader.indexOf("#include <common>") < 0) return;
+    if (!CAU_U.uCauTex.value) CAU_U.uCauTex.value = CBZ.waterCausticTexture();
+    shader.uniforms.uCauSeaY = CAU_U.uCauSeaY;
+    shader.uniforms.uCauTime = CAU_U.uCauTime;
+    shader.uniforms.uCauSun = CAU_U.uCauSun;
+    shader.uniforms.uCauTex = CAU_U.uCauTex;
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", "#include <common>\nvarying vec3 vCbzCauW;")
+      .replace("#include <project_vertex>",
+        "#include <project_vertex>\n" +
+        "vec4 cbzCauP = vec4( transformed, 1.0 );\n" +
+        "#ifdef USE_INSTANCING\n  cbzCauP = instanceMatrix * cbzCauP;\n#endif\n" +
+        "vCbzCauW = ( modelMatrix * cbzCauP ).xyz;");
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <common>",
+        "#include <common>\nvarying vec3 vCbzCauW;\nuniform float uCauSeaY;\nuniform float uCauTime;\nuniform vec4 uCauSun;\nuniform sampler2D uCauTex;")
+      .replace("#include <tonemapping_fragment>",
+        "if ( uCauSun.w > 0.0 && vCbzCauW.y < uCauSeaY ) {\n" +
+        "  float cbzCd = uCauSeaY - vCbzCauW.y;\n" +
+        "  vec2 cbzCp = vCbzCauW.xz;\n" +
+        "  vec2 cbzCa = cbzCp * 0.21 + vec2( uCauTime * 0.031, uCauTime * 0.017 );\n" +
+        "  vec2 cbzCb = vec2( cbzCp.y, -cbzCp.x ) * 0.17 + vec2( -uCauTime * 0.023, uCauTime * 0.029 );\n" +
+        "  float cbzCc = min( texture2D( uCauTex, cbzCa ).r, texture2D( uCauTex, cbzCb ).r );\n" +
+        // light that has crossed cd metres of water no longer focuses: the
+        // web dims, and right at the waterline there is no lens yet
+        "  float cbzCk = exp( -cbzCd * 0.15 ) * smoothstep( 0.05, 0.7, cbzCd );\n" +
+        "  gl_FragColor.rgb += gl_FragColor.rgb * uCauSun.rgb * ( cbzCc * cbzCc * 1.6 * cbzCk * uCauSun.w );\n" +
+        "}\n#include <tonemapping_fragment>");
+  }
+  CBZ.waterCausticMaterial = function (mat) {
+    if (!mat || CFG.WATER_CAUSTICS === false) return mat;
+    if (mat.userData && mat.userData.cbzCaustic) return mat;
+    const hit = _cauCache.get(mat);
+    if (hit) return hit;
+    if (mat.isShaderMaterial || mat.isRawShaderMaterial) return mat;
+    let clone;
+    try { clone = mat.clone(); } catch (e) { return mat; }
+    const prev = mat.onBeforeCompile;
+    const prevSrc = (prev && prev !== THREE.Material.prototype.onBeforeCompile) ? String(prev) : "";
+    clone.onBeforeCompile = prev ? function (sh) { prev.call(this, sh); cauBefore(sh); } : cauBefore;
+    clone.customProgramCacheKey = function () { return "cbzCaustic|" + prevSrc; };
+    clone.userData = Object.assign({}, clone.userData, { cbzCaustic: true });
+    clone.needsUpdate = true;
+    _cauCache.set(mat, clone);
+    _cauCache.set(clone, clone);
+    return clone;
+  };
+  CBZ.waterCausticsApply = function (obj) {
+    if (!obj || CFG.WATER_CAUSTICS === false) return false;
+    let n = 0;
+    obj.traverse(function (o) {
+      if (!o.isMesh || !o.material || Array.isArray(o.material)) return;
+      const y = CBZ.waterCausticMaterial(o.material);
+      if (y !== o.material) { o.material = y; n++; }
+    });
+    return n > 0;
+  };
+  // driven from waterDriveCommonUniforms (one sea is always driven)
+  function causticDrive(u) {
+    CAU_U.uCauTime.value = u && u.uSeaTime ? u.uSeaTime.value : CBZ.waterClock();
+    let y = u && u.uCauSeaY ? u.uCauSeaY.value : seaY();
+    if (CBZ.game && CBZ.islandModeOn && CBZ.islandModeOn(CBZ.game.mode) && CBZ.survSeaMeanY) {
+      const iy = CBZ.survSeaMeanY();
+      if (Number.isFinite(iy)) y = iy;
+    }
+    CAU_U.uCauSeaY.value = y;
+    const s = u && u.uSunColor ? u.uSunColor.value : null;
+    const L = u && u.uSunDir ? u.uSunDir.value : null;
+    const up = L ? Math.max(0, Math.min(1, (L.y + 0.05) / 0.35)) : 1;
+    const day = Math.max(0, Math.min(1, CBZ.dayness == null ? 1 : +CBZ.dayness));
+    const g = 0.85 * up * (0.25 + 0.75 * day);
+    if (s) CAU_U.uCauSun.value.set(s.r * g, s.g * g, s.b * g, CFG.WATER_CAUSTICS === false ? 0 : 1);
+  }
+
+  /* ---- POOL WATER ---------------------------------------------------------
+     Swimming pools, spas and fountain basins were opaque turquoise Lambert
+     slabs. Real pool water is a still, clear surface: the sky and the sun on
+     top (the same reflected dome every sea uses), a faint wind ripple, and
+     THROUGH it the bright tiled floor with the sunlight caustic web dancing
+     across it — that web is what makes a pool read as a pool from any
+     distance. The floor is drawn here (the water slab is opaque, the basin is
+     under it), at uPoolDepth below the surface, so no extra mesh is needed.
+     One shared material; world XZ drives the pattern, so it survives
+     batch.js merging. */
+  let poolMat = null;
+  CBZ.waterPoolMaterial = function () {
+    if (poolMat) return poolMat;
+    const U = CBZ.waterCommonUniforms();
+    U.uPoolDepth = { value: 1.6 };
+    U.uPoolTile = { value: new THREE.Color(0x8fd8e6) };
+    U.uPoolLine = { value: new THREE.Color(0x2c6f8a) };
+    const vs = [
+      "varying vec3 vPW;",
+      "varying vec3 vPN;",
+      // the shared fragment library declares these two; write them so every
+      // varying it names is fed
+      "varying float vCbzSteep;",
+      "varying float vCbzFold;",
+      "#include <fog_pars_vertex>",
+      "void main() {",
+      "  vCbzSteep = 1.0; vCbzFold = 0.0;",
+      "  vec4 lp = vec4(position, 1.0);",
+      "  vec4 ln = vec4(normal, 0.0);",
+      "  #ifdef USE_INSTANCING",
+      "    lp = instanceMatrix * lp; ln = instanceMatrix * ln;",
+      "  #endif",
+      "  vec4 wp = modelMatrix * lp;",
+      "  vPW = wp.xyz;",
+      "  vPN = normalize((modelMatrix * ln).xyz);",
+      "  vec4 mvPosition = viewMatrix * wp;",
+      "  gl_Position = projectionMatrix * mvPosition;",
+      "  #include <fog_vertex>",
+      "}",
+    ].join("\n");
+    const fs = [
+      CBZ.waterFragmentDecl(),
+      "uniform float uPoolDepth;",
+      "uniform vec3 uPoolTile;",
+      "uniform vec3 uPoolLine;",
+      "varying vec3 vPW;",
+      "varying vec3 vPN;",
+      "#include <fog_pars_fragment>",
+      "void main() {",
+      "  vec3 V = normalize(cameraPosition - vPW);",
+      "  float dist = length(cameraPosition - vPW);",
+      // sides of the slab are the basin's waterline band, not water: keep
+      // them the deep body colour so the edge reads as the tank wall
+      "  if (vPN.y < 0.5) {",
+      "    gl_FragColor = vec4(uPoolLine * 0.55, 1.0);",
+      "  } else {",
+      "    vec2 p = vPW.xz;",
+      "    vec3 a = texture2D(uSeaNormal, p * 0.31 + vec2(uSeaTime * 0.021, -uSeaTime * 0.016)).rgb * 2.0 - 1.0;",
+      "    vec3 b = texture2D(uSeaNormal, vec2(p.y, -p.x) * 0.47 + vec2(-uSeaTime * 0.018, uSeaTime * 0.024)).rgb * 2.0 - 1.0;",
+      "    float fine = 1.0 - smoothstep(8.0, 60.0, dist);",
+      "    vec3 N = normalize(vec3((a.r + b.r) * 0.10 * fine, 1.0, (a.g + b.g) * 0.10 * fine));",
+      "    vec3 L = normalize(uSunDir);",
+      "    float ndv = clamp(dot(N, V), 0.0, 1.0);",
+      "    float fres = 0.02 + 0.98 * pow(1.0 - ndv, 5.0);",
+      // refraction: the floor point seen through the surface, shifted along
+      // the refracted ray by the depth (Snell, eta = 1/1.333)
+      "    vec3 rt = refract(-V, N, 0.75);",
+      "    vec2 fp = p + rt.xz / max(0.2, -rt.y) * uPoolDepth;",
+      "    vec2 tg = abs(fract(fp / 0.25) - 0.5);",
+      "    float grout = smoothstep(0.47, 0.5, max(tg.x, tg.y));",
+      "    vec3 floorC = mix(uPoolTile, uPoolLine, grout * 0.35);",
+      "    float sunUp = smoothstep(-0.05, 0.25, L.y);",
+      "    float cau = cbzCausticAt(fp * 1.6, uSeaTime * 1.3);",
+      "    vec3 lit = floorC * (0.30 + 0.70 * sunUp * max(L.y, 0.0)) + uSunColor * floorC * cau * 0.55 * sunUp;",
+      // the water column tints it: red goes first
+      "    vec3 body = lit * exp(-uPoolDepth * vec3(0.45, 0.09, 0.06)) * 1.05;",
+      "    vec3 sky = cbzSkyRadiance(reflect(-V, N), 0.0) * " + gnum(REFL_GAIN) + ";",
+      "    vec3 c = mix(body, sky, fres);",
+      "    vec3 H = normalize(L + V);",
+      "    c += uSunColor * pow(max(dot(N, H), 0.0), 260.0) * 2.2 * sunUp;",
+      "    gl_FragColor = vec4(c, 1.0);",
+      "  }",
+      "  #include <tonemapping_fragment>",
+      "  #include <encodings_fragment>",
+      "  #include <fog_fragment>",
+      "}",
+    ].join("\n");
+    poolMat = new THREE.ShaderMaterial({
+      name: "CBZ Pool Water", uniforms: U, vertexShader: vs, fragmentShader: fs,
+      fog: true, extensions: { derivatives: true },
+    });
+    poolMat.userData.waterUniforms = U;
+    poolMat.userData.selfDrive = true;
+    poolMat.userData.waterMode = "water-v3-pool";
+    poolMat._shared = true;
+    selfDriven.push(poolMat);
+    return poolMat;
+  };
+
+  /* ---- THE SEAS NOBODY ELSE DRIVES ---------------------------------------
+     The city sea is driven by city/world.js's day/night tick and the island
+     sea by disaster_arena.js. Anything else built from this family (pools,
+     a page's adopted sea) is driven here, once a frame, even while paused —
+     a frozen pool next to a moving sea is the first thing an eye notices. */
+  const selfDriven = [];
+  CBZ.waterSelfDrive = function (mat) {
+    if (mat && mat.userData && mat.userData.waterUniforms && selfDriven.indexOf(mat) < 0) selfDriven.push(mat);
+    return mat;
+  };
+  function driveSelf() {
+    for (let i = 0; i < selfDriven.length; i++) {
+      const m = selfDriven[i];
+      if (m && m.userData && m.userData.waterUniforms) CBZ.waterDriveCommonUniforms(m.userData.waterUniforms);
+    }
+  }
+  if (CBZ.onAlways) CBZ.onAlways(93.6, driveSelf);
+  else if (CBZ.onUpdate) CBZ.onUpdate(93.6, driveSelf);
+  else {
+    // a page that registers its loop after this file (microboot pages):
+    // retry the hook on the next few animation frames
+    let tries = 0;
+    const hook = function () {
+      if (CBZ.onAlways) { CBZ.onAlways(93.6, driveSelf); return; }
+      if (CBZ.onUpdate) { CBZ.onUpdate(93.6, driveSelf); return; }
+      if (++tries < 600 && typeof requestAnimationFrame === "function") requestAnimationFrame(hook);
+    };
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(hook);
+  }
 
   CBZ.waterSpecReady = true;
 })();

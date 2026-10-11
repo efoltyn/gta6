@@ -4,7 +4,7 @@
 
        node tools/build-disaster-page.mjs
 
-     Natural Disaster Survival, standing alone: index.html minus the 450
+     Natural Disaster Survival, standing alone: index.html minus the 448
      script tags this game never runs, opening straight onto the island. This
      is the page the iOS build ships (tools/build-ios.mjs bundles it).
 ============================================================ -->
@@ -411,8 +411,6 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/vendor/three.r128.min.js?v=pf0930e"></script>
 <!-- real frustum culling for InstancedMesh pools (every camera, shadow pass included); must precede every InstancedMesh -->
 <script src="src/core/instcull.js?v=w09290242x"></script>
-<!-- Slayvin flat-mirror reflective water (ported to r128 as THREE.WaterReflect;
-     wired onto the ocean by src/world/waterfx.js). Must follow the THREE tag. -->
 <script src="src/vendor/BufferGeometryUtils.js"></script>
 <!-- Official Three.js sample loaders used by the farm truck / BIM campus.
      fflate must precede ThreeMFLoader because .3mf is a ZIP container. -->
@@ -444,7 +442,7 @@ document.body.appendChild(b);}}catch(e){}})();
 ============================================================ -->
 
 <!-- 0. namespace + constants -->
-<script src="src/config.js?v=street1009"></script>
+<script src="src/config.js?v=water1011"></script>
 <!-- CITY SLICES (?slice=name|x,z,r): one piece of Gang City booted as its own world.
      Parses the URL only; with no slice every helper answers "keep". -->
 <script src="src/core/texfree.js?v=pf0930a"></script>
@@ -926,7 +924,7 @@ document.body.appendChild(b);}}catch(e){}})();
      scene; it wires itself to the bus lazily, in any script order. -->
 <script src="src/systems/lightningfx.js?v=bolt1"></script>
 <script src="src/world/island_roads.js?v=roads1"></script>
-<script src="src/world/disaster_arena.js?v=fac1009"></script>
+<script src="src/world/disaster_arena.js?v=water1011"></script>
 <script src="src/world/island_dressing.js?v=dress1"></script>
 <script src="src/systems/grapple.js?v=jailv1001"></script>
 <script src="src/entities/survivorbot.js?v=m0928a-st1"></script>
@@ -1014,10 +1012,10 @@ document.body.appendChild(b);}}catch(e){}})();
      camera-centred radial sea geometry, the shared ripple normal map and the
      shared water shading chunks. MUST load before city/world.js (its buildSea
      reads this) and before city/waterfield.js (its surfaceY delegates here). -->
-<script src="src/world/water_spec.js?v=pf0930g"></script>
+<script src="src/world/water_spec.js?v=water1011"></script>
 <!-- the tsunami kit shared by the island and the city: the entrained debris, the flood hitting buildings, the drawdown seabed and the aftermath mud -->
 <script src="src/world/tsunami_debris.js?v=tsureal1"></script>
-<script src="src/world/tsunami_flow.js?v=tsureal1"></script>
+<script src="src/world/tsunami_flow.js?v=water1011"></script>
 <script src="src/world/tsunami_scene.js?v=tsureal1"></script>
 <!-- the grid street layer (road, kerbs, footways, markings) world.js builds -->
 <script src="src/city/streetkit.js?v=metro0929"></script>
@@ -1090,9 +1088,6 @@ document.body.appendChild(b);}}catch(e){}})();
 <!-- Shared signed shoreline/depth/current oracle. Loaded immediately after
      the landmass registry so rendering, swimmers, boats and aquatic wildlife
      all consult the same coast instead of inventing separate radius tests. -->
-<!-- Reflective-ocean FX: swaps CBZ.citySea for a THREE.WaterReflect plane when
-     CBZ.CONFIG.WATER_REFLECT is on (default). Reads the sea lazily at runtime,
-     so load order past config.js + WaterReflect.js is all it needs. -->
 <!-- THE HIGHWAY NETWORK AS DATA (HIGHWAY_NET_V2): the named-route table +
      builder. Loads right after the ribbon builder it drives; registers its
      own landmass pass (order 91 — after every causeway, before the
@@ -2141,7 +2136,7 @@ document.body.appendChild(b);}}catch(e){}})();
 <script src="src/core/viewscope.js?v=w09290242x"></script>
 <script src="src/core/staticfreeze.js?v=sf1"></script>
 <script src="src/systems/settings.js?v=nodash1"></script>
-<script src="src/core/batch.js?v=ground1008c"></script>
+<script src="src/core/batch.js?v=water1011"></script>
 <!-- Render-realism layer: light-writer arbiter, world PBR promotion, env reach,
      exposure, contact AO. MUST load after core/quality.js (reads
      CBZ.onQualityChange) AND after core/batch.js — it wraps CBZ.batchStaticUnder
