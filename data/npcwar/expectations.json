@@ -36,8 +36,7 @@
           0.9
         ]
       },
-      "why": "A grizzly/brown bear (~300 kg, up to 400+) has 40% more mass than a Bengal tiger, a heavy skull and thick fur and fat that blunt bites. In the Russian Far East Amur tigers do kill brown bears, but mostly females and young, and adult male bears also displace tigers from kills (Seryodkin, Kostyria et al. on Sikhote-Alin). A big cat against a full-grown bear loses more often than not.",
-      "known": "bears: the first brown bear drawn is a 188 kg sow (hp 177) against a 'seed 0 is male' 347 kg tiger (hp 442); tiger hp is about 1.5x the mass rule (BALANCE.md F1, F2)"
+      "why": "A grizzly/brown bear (~300 kg, up to 400+) has 40% more mass than a Bengal tiger, a heavy skull and thick fur and fat that blunt bites. In the Russian Far East Amur tigers do kill brown bears, but mostly females and young, and adult male bears also displace tigers from kills (Seryodkin, Kostyria et al. on Sikhote-Alin). A big cat against a full-grown bear loses more often than not."
     },
     {
       "id": "bear_v_lion",
@@ -53,8 +52,7 @@
           0.92
         ]
       },
-      "why": "Same argument as the tiger with a lighter cat (190 kg): the bear's mass, reach and the cat's lack of a killing hold on a 300 kg animal. 19th-century Californian bear-and-bull/lion pit accounts favour the bear.",
-      "known": "bears: sow hp 177, deals 135 dmg a fight against the lion's 178 (F2)"
+      "why": "Same argument as the tiger with a lighter cat (190 kg): the bear's mass, reach and the cat's lack of a killing hold on a 300 kg animal. 19th-century Californian bear-and-bull/lion pit accounts favour the bear."
     },
     {
       "id": "gorilla_v_lion",
@@ -72,8 +70,7 @@
           0.3
         ]
       },
-      "why": "A silverback (~160 kg) is enormously strong but has no killing tool against a big cat except its canines; the lion has a throat or nape bite, claws and 30 kg more. Leopards (a third of a lion's mass) are documented gorilla predators (Fay et al. 1995, Central African Republic). The gorilla loses.",
-      "known": "gorilla hp 260 for 170 kg and the ape move set out-trade a lion (F3)"
+      "why": "A silverback (~160 kg) is enormously strong but has no killing tool against a big cat except its canines; the lion has a throat or nape bite, claws and 30 kg more. Leopards (a third of a lion's mass) are documented gorilla predators (Fay et al. 1995, Central African Republic). The gorilla loses."
     },
     {
       "id": "gorilla_v_tiger",
@@ -286,7 +283,7 @@
         ]
       },
       "why": "The 'hundred men v a gorilla' question (the 2025 internet argument): a gorilla can maim the first several men but does not have the endurance or killing efficiency to beat dozens that pile on. Fifty men should usually win.",
-      "known": "gorilla / ape_combat: body-club kills ~43 hp per man touched, civilian morale (F4)"
+      "known": "fists on a gorilla land ~2.3 hp (hide threshold, bodymass.js) and node men are stub rigs with no grappling, so 50 civilians take ~30 s to deal 120 hp while the silverback kills ~15; the 100-man row is in band (BALANCE.md F4 follow-up)"
     },
     {
       "id": "men100_fists_v_gorilla",
@@ -304,8 +301,7 @@
           1.0
         ]
       },
-      "why": "As above with twice the men: the men win nearly always.",
-      "known": "gorilla / ape_combat: body-club kills, civilian morale (F4)"
+      "why": "As above with twice the men: the men win nearly always."
     },
     {
       "id": "bear_v_10men_fists",
@@ -380,8 +376,7 @@
           0.9
         ]
       },
-      "why": "One man, one tiger, 10 m: the man has one chance to stop it with a brain or spine shot in under a second. The tiger is favoured.",
-      "known": "tiger charge from a standing start; weapons: a heart-shot animal drops at once (F6)"
+      "why": "One man, one tiger, 10 m: the man has one chance to stop it with a brain or spine shot in under a second. The tiger is favoured."
     },
     {
       "id": "bear_v_5rifles_150m",

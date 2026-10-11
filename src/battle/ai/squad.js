@@ -293,7 +293,7 @@ function marchSlot(m, S) {
 }
 
 /* ---- REFLEXES: an animal ---- */
-const _bx = [];
+const _bx = [], _bxm = [];
 function beastReflex(m, S) {
   // the nearest animal he knows about: his mark, or his squad's
   let b = m.tgt && m.tgt.beast ? m.tgt : (S.focus && S.focus.beast ? S.focus : (S.threatTop && S.threatTop.beast ? S.threatTop : null));
@@ -313,7 +313,18 @@ function beastReflex(m, S) {
   }
   const tier = m.tier || "pro";
   const steady = tier === "elite" || tier === "swat" ? 0.35 : tier === "pro" ? 0.6 : 1;
-  if (d < fearR) m.supp = Math.min(1.2, (m.supp || 0) + 0.3 * steady * (1 - d / fearR) + (charging ? 0.15 * steady : 0));
+  /* THE FEAR OF IT, SHARED. Near a big animal a man is rattled; a man with
+     a dozen others round the same animal much less, since it can only be on
+     one of them at a time (sqrt past three mates within 6 m). Not when it
+     is coming at HIM. Measured before: 50 civilians round one gorilla were
+     every one at the 1.2 rattle cap from proximity alone. */
+  if (d < fearR) {
+    let mates = 0;
+    const a = fineNear(m.pos.x, m.pos.z, 6, _bxm);
+    for (let i = 0; i < a.length; i++) { const o = a[i]; if (o !== m && !o.dead && !o.routed && o.team === m.team && !o.beast) mates++; }
+    const share = Math.sqrt(Math.min(1, 3 / Math.max(1, mates)));
+    m.supp = Math.min(1.2, (m.supp || 0) + 0.3 * steady * (1 - d / fearR) * share + (charging ? 0.15 * steady : 0));
+  }
   // PANIC: the real cue (a big animal on top of him, coming), not a dice roll
   if (charging && d < fearR * 0.75 && (m.supp || 0) > 0.9 && steady > 0.5) {
     m.panicT = simT + 2.2 + CBZ.battleTactics.hash01(m, 0x3A11) * 2;
@@ -391,11 +402,7 @@ function tacticsOnHurt(m, dmg, imp, res) {
     // beside him most (morale.js moraleOnDeath's two terms)
     const A = ARMY[m.team];
     if (A && m._mc) MO.deathShock(A, m._mw || 1);
-    const a = fineNear(m.pos.x, m.pos.z, 7, _dn);
-    for (let i = 0; i < a.length; i++) {
-      const o = a[i];
-      if (o !== m && !o.dead && o.team === m.team && !o.beast) o.supp = Math.min(SUPP_CAP, (o.supp || 0) + SUPP_MATE);
-    }
+    rattleMates(m);
     if (m.char && CBZ.soldier && CBZ.soldier.wound) { try { CBZ.soldier.wound(m.char, zone === "legL" || zone === "legR" ? "legs" : "gut", 0.9); } catch (e) {} }
     TAC.downed = (TAC.downed || 0) + 1;
   }
@@ -533,6 +540,14 @@ function fistQuit(m) {
 // a broken man, cornered: does he put his hands up? (routCheck asks)
 function trySurrender(m) {
   if (!TAC.on || m.you) return false;
+  // hands up to WHOM: an animal takes no prisoners. Measured: 2-9 men a
+  // battle "surrendered" to a gorilla or a tiger and left the field
+  let captor = false;
+  for (let i = 0; i < men.length && !captor; i++) {
+    const o = men[i];
+    if (o.team !== m.team && !o.dead && !o.fled && !o.beast) captor = true;
+  }
+  if (!captor) return false;
   const p = SURRENDER_P[m.tier] != null ? SURRENDER_P[m.tier] : 0.4;
   const hurt = m.hp < (m.maxHp || 100) * 0.5 ? 0.2 : 0;
   const A = tacAdapter();

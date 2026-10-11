@@ -119,7 +119,7 @@
   var SLAM_T = 0.46;        // s — overhead to the floor
   var THROW_T = 0.20;       // s — the release beat
   var FLIGHT_MAX = 2.6;     // s — a thrown body is nobody's problem after this
-  var CLUB_DMG = 1.15;      // the swung body hits HARDER than a fist: it is 75 kg
+  var CLUB_DMG = 0.3;       // the swung body is soft: the dv knocks men down, this is the bruise
   var CLUB_SELF = 0.30;     // ...and it costs the club something every time
   var THROW_SPD_CAP = 17;   // m/s — ω·r uncapped reaches silly numbers
   var GRAV = 21;            // m/s² — matches CBZ.TUNE.gravity's default register
@@ -282,6 +282,13 @@
     var p = posOf(ape);
     if (dmg > 0) hurt(o, dmg, impOf(ape, cause, spd, p ? p.x : 0, p ? p.z : 0));
     if (CBZ.combatIQ && CBZ.combatIQ.suppress) { try { CBZ.combatIQ.suppress(o, 1.2); } catch (e) {} }
+    // NPC War's body layer (battle/physics.js): the blow is a velocity change,
+    // and the page decides by mass whether he staggers, goes down or flies
+    var BP = CBZ.bodyPhys;
+    if (BP && BP.knock && !o._apeHeld && !o._apeFlying && !o.dead) {
+      var ks = kgShare(o);
+      try { BP.knock(o, dirx * spd * ks, dirz * spd * ks, ape, { hurt: false, vy: up * ks }); return; } catch (e) {}
+    }
     if (CBZ.body && CBZ.body.hit && !o._apeHeld) {
       try {
         CBZ.body.hit(o, { dir: { x: dirx, z: dirz }, force: spd, fling: up, knockdown: up < 2 ? 1.1 : 0 });
@@ -300,8 +307,23 @@
      walking his route mid-flight. The local integrator below is for the hosts
      that have no body layer at all, which is precisely games/battle.html: the
      `beasts` studio pack does not include grapple.js and never should. */
+  // a gorilla's push moves a man; on a 240 kg lion the same push is a third
+  function kgShare(o) {
+    var BP = CBZ.bodyPhys;
+    if (!BP || !BP.kg) return 1;
+    var kg = BP.kg(o) || 80;
+    return kg <= 80 ? 1 : 80 / kg;
+  }
   function hurl(o, vx, vy, vz, by, landDmg, cause) {
     if (!o || o.dead) { if (landDmg > 0) hurt(o, landDmg, impOf(by, cause, 0)); return; }
+    /* THE PAGE'S BALLISTIC THROW (battle/physics.js flingBody): 9.81, swept
+       through the walls (a wall at speed is an impact), bowls whoever it
+       arrives at by momentum, and the landing speed is the injury. landDmg
+       rides on the landing as the grip-and-swing trauma. */
+    var BP = CBZ.bodyPhys;
+    if (BP && BP.fling && !o._apeHeld) {
+      try { if (BP.fling(o, vx, vy, vz, { by: by, dmg: landDmg || 0 })) return; } catch (e) {}
+    }
     if (CBZ.body && CBZ.body.hit) {
       var sp = Math.hypot(vx, vz) || 1;
       try {
@@ -813,8 +835,16 @@
       var tx = -Math.sin(h.ph), tz = Math.cos(h.ph);
       var spd = clamp(hz * 6.283 * h.arm.hold * 0.42, 4, 13);
       o._apeClubTok = h.tok;
+      /* A SWUNG BODY KNOCKS MEN DOWN; IT DOES NOT KILL THEM. It was billed at
+         1.15 x the gorilla's blow (~43 hp) to every man the arc touched:
+         measured, 2,000-3,400 hp and 11-21 dead a battle against 50-100 men.
+         A 75 kg body at v into an 80 kg man is a collision, dv = 1.2 v 75 /
+         155 ~ 0.58 v: at the club's 4-13 m/s, 2.3-7.5 m/s. He goes down or is
+         thrown (the body layer decides), and the bruise is a soft body
+         hitting him (CLUB_DMG of the blow), not a sledgehammer. */
+      var dvC = spd * 0.58;
       launch(ape, o, (tx * 0.75 + dx / d * 0.25), (tz * 0.75 + dz / d * 0.25),
-        spd, 3.6, h.dmg * CLUB_DMG, 'clubbed with a body');
+        dvC, Math.min(2.4, dvC * 0.3), h.dmg * CLUB_DMG, 'clubbed with a body');
       struck++;
       STATS.clubHits++;
     }
@@ -863,7 +893,9 @@
     var tx = -Math.sin(h.ph), tz = Math.cos(h.ph);
     v._apeHeld = null;
     endHold(h, true, true);
-    hurl(v, tx * spd, 4.2 + spd * 0.14, tz * spd, ape, h.dmg * 1.6, 'thrown by a gorilla');
+    // with the page's body layer the landing speed is the injury (impactDmg);
+    // the rest is the grip and the swing
+    hurl(v, tx * spd, 4.2 + spd * 0.14, tz * spd, ape, CBZ.bodyPhys ? h.dmg * 0.4 : h.dmg * 1.6, 'thrown by a gorilla');
     if (CBZ.sfx) { try { CBZ.sfx('whoosh'); } catch (e) {} }
   }
 

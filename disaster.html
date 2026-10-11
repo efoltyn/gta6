@@ -674,14 +674,14 @@ document.body.appendChild(b);}}catch(e){}})();
      memory, witnesses, morale, the authority ladder). Pure logic with no
      parse-time dependencies, so it loads before its first consumers
      (entities/security.js, entities/guards.js). -->
-<script src="src/systems/brain.js?v=armed1"></script>
+<script src="src/systems/brain.js?v=bal2m1011"></script>
 
 <!-- 4. systems — economy/quests load before actors that reference them -->
 <script src="src/systems/audio.js?v=weap1011m"></script>
 <script src="src/systems/hud.js?v=nored0930"></script>
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
-<script src="src/weapons/ballistics.js?v=weap1011m"></script>
+<script src="src/weapons/ballistics.js?v=bal2m1011"></script>
 <script src="src/weapons/appearances/c4.js?v=mil0929"></script>
 <!-- MUNITIONS: every round's shape (after bazooka.js: the PG-7V profile), the shared smoke/flare clouds and the rocket plume. Before fpsmode (builds its RPG round on it), island_military (plumes), aircraft + strategic (missiles, bombs). -->
 <script src="src/weapons/munitions.js?v=mil0929"></script>

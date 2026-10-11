@@ -79,6 +79,9 @@ function hurtMan(m, dmg, imp) {
     });
     dmg = res.dmg;
   } else if (kind === "bullet" && imp.headshot) dmg *= 2.2;      // a beast's head: the old rule
+  // an animal shot through the heart is dead on its feet, not dropped
+  if (m.beast && imp && imp.bullet && m.hp - dmg <= 0 && imp.organ !== "brain" && imp.organ !== "spine" &&
+      m.maxHp < 1e8 && onItsFeet(m, dmg, imp)) dmg = 0;
   m.hp -= dmg;
   if (res) armourHit(m, res, imp);
   // ...and what the kit did to that round (systems/armour.js layer: a stop
@@ -104,6 +107,31 @@ function hurtMan(m, dmg, imp) {
   // armourHit's when the armour layer resolved the round (res)
   else tacticsOnHurt(m, dmg, imp, res);
   return res;
+}
+/* DEAD ON ITS FEET. A round that would finish an animal without touching its
+   brain or spine does not drop it: it has CBZ.ballistics.onFeet(kg) seconds
+   (a tiger ~6, an elephant ~15, +-30%) of oxygen left and spends them on
+   whoever shot it. Every further hit spends that time faster, in proportion
+   to the share of the animal it takes; a brain or spine hit, or anything
+   that is not a bullet (a bite, a blast, a fall), ends it at once. Measured
+   before: a charging tiger at 10 m died in 1.1-1.4 s and landed nothing
+   (BALANCE.md F6). While it stands, a lethal round's hp is not taken: the
+   species files slow a body by its hp (a tiger at 1 hp ran at 55%), and a
+   dead-on-its-feet animal runs on adrenaline, not on its wounds. Bleeding
+   still runs it down, held at 1 hp. stepBleed (fire.js) runs the clock.
+   Answers true while the animal still stands. */
+function onItsFeet(m, dmg, imp) {
+  const B = CBZ.ballistics;
+  const win = B && B.onFeet ? B.onFeet(bodyKg(m)) : 6;
+  if (!(m._doomT > 0)) {
+    m._doomT = simT + win * (0.7 + 0.6 * lcg());
+    // more holes empty it faster, but the brain's own oxygen is a floor
+    // no number of body hits takes away (~40% of the window)
+    m._doomMin = simT + win * 0.4;
+    m._doomBy = imp.by || null;
+    if (!m._bleeding) { m._bleeding = true; m._bleed = m._bleed || 0; BLEEDERS.push(m); }
+  } else m._doomT = Math.max(m._doomMin || 0, m._doomT - win * Math.min(0.15, 0.25 * dmg / Math.max(1, m.maxHp)));
+  return simT < m._doomT;
 }
 const DEADN = { red: 0, blue: 0 };       // the dead, by side (corpses retire; this does not)
 function killMan(m, imp) {

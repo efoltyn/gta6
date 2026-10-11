@@ -49,7 +49,7 @@
    NUMBERS  real: silverback ~170 kg (wild males 140-200), female ~85,
          blackback ~120; charge 8.3 m/s (~30 km/h) for ~9 s of sprint, then
          blown; knuckle-walk 1.1 m/s, march 2.4. Damage scales with mass^0.67
-         (muscle cross-section). hp 260 for a silverback is about 2.3 men by
+         (muscle cross-section). hp 220 for a silverback (mass^0.75 against the lion's 215 at 190 kg; it was 260 and beat big cats 42-50%, BALANCE.md F3) is about 2 men by
          mass and nothing more: a rifle round to a gorilla is a rifle round.
 
    POSSESSED  moves(unit, tgt, ctx): a player's ATTACK throws the move the
@@ -102,7 +102,7 @@
   }
 
   const STATS = {
-    hp: 260, spd: 1.1, danger: 0.85, bite: 30, scale: 1,
+    hp: 220, spd: 1.1, danger: 0.85, bite: 30, scale: 1,
     chase: 8.3, march: 2.4,
     dmg: 40.5, rate: 1.0,
     brave: true, prey: false,

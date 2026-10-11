@@ -1102,7 +1102,18 @@ function stepBleed(sdt) {
   for (let i = BLEEDERS.length - 1; i >= 0; i--) {
     const u = BLEEDERS[i];
     if (u.dead || u.fled || over) { u._bleeding = false; BLEEDERS.splice(i, 1); continue; }
+    // an animal dead on its feet (damage.js onItsFeet) drops when its time is up
+    if (u._doomT > 0 && simT >= u._doomT) {
+      u._bleeding = false; BLEEDERS.splice(i, 1);
+      ARMS.bleedKills++;
+      killMan(u, { by: u._doomBy || u._bledBy || null, cause: "bleed" });
+      continue;
+    }
     u.hp -= u._bleed * sdt;
+    // an animal bled to nothing by heart and lung holes is dead on its feet
+    // too: the bleed was the wound, the clock is its oxygen (damage.js)
+    if (u.hp <= 0 && u.beast && !(u._doomT > 0) && u.maxHp < 1e8) onItsFeet(u, 0, { by: u._bledBy || null });
+    if (u.hp <= 0 && u._doomT > simT) { u.hp = 1; continue; }
     if (u.hp <= 0) {
       u._bleeding = false; BLEEDERS.splice(i, 1);
       ARMS.bleedKills++;
