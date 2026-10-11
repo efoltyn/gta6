@@ -37,6 +37,8 @@ function hurtMan(m, dmg, imp) {
   if (!m.routed && imp && imp.by && imp.by.team && imp.by.team !== m.team &&
       (!m.tgt || m.tgt.dead || m.tgt.fled)) m.tgt = imp.by;
   if (m.hp <= 0) killMan(m, imp);
+  // a hit he lives through: the body's reaction, and maybe DOWN (ai/squad.js)
+  else tacticsOnHurt(m, dmg, imp);
 }
 const DEADN = { red: 0, blue: 0 };       // the dead, by side (corpses retire; this does not)
 function killMan(m, imp) {

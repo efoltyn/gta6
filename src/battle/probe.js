@@ -600,6 +600,8 @@ CBZ.npcwar.onBoot(function () {
        is the same array the sim walks, deliberately: a copy would let a stale
        flag hide behind the copy. */
     roster: function () { return men; },
+    // the squad brain's ledger: tasks, tactics fired, per-tier think cost (ai/squad.js)
+    tactics: function () { return tacticsReadout(); },
     /* WHICH PAIRS, AND WHAT WERE THEY DOING. An overlap COUNT tells you the
        bodies are wrong; it never tells you which rule put them there, and
        three rules can produce the same number. This lists the live offenders

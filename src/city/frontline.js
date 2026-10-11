@@ -281,6 +281,11 @@
   // a man holding the line is down behind something: crest, wall, container
   const HOLD_COVER = { dunes: 0.72, snow: 0.72, grass: 0.78, city: 0.62, harbor: 0.72, arena: 0.66, water: 1 };
   const GAP = { dunes: 150, snow: 150, grass: 150, city: 170, harbor: 170, arena: 120, water: 110 };
+  // the page's squads (battle.html ai/squad.js): of the men a fight puts out,
+  // this share is down and dragged clear rather than dead; a cornered man
+  // gives himself up at his training's rate
+  const WOUNDED_P = 0.45;
+  const SURRENDER_P = { civ: 0.85, thug: 0.6, pro: 0.42, elite: 0.26, swat: 0.18 };
 
   function MOr() { return (CBZ.brain && CBZ.brain.morale) || null; }
   function armyRec() { return { p0: 0, pNow: 0, men0: 0, morale: 1, shock: 0, alive: 0, routing: 0, fled: 0, broken: false, noFightT: 0 }; }
@@ -366,7 +371,8 @@
     const dt = 0.5;
     let t = 0, winner = null;
     const deadN = { red: 0, blue: 0 }, fledN = { red: 0, blue: 0 };
-    const standing = function (team) { return men[team].filter(function (m) { return !m.dead && !m.fled; }); };
+    // a man DOWN (wounded, out of the fight, alive) is not standing
+    const standing = function (team) { return men[team].filter(function (m) { return !m.dead && !m.fled && !m.down; }); };
     function kill(m) {
       if (m.dead) return;
       m.dead = true; m.hp = 0; deadN[m.team]++;
@@ -375,10 +381,19 @@
       if (M && M.deathShock) M.deathShock(Aa, m.w); else if (Aa.p0 > 0) Aa.shock += 1.8 * m.w / Aa.p0;
     }
     function hurt(m, dmg) {
-      if (m.dead || m.fled) return;
+      if (m.dead || m.fled || m.down) return;
       m.hp -= dmg;
       m.supp = Math.min(1.2, m.supp + 0.12);
-      if (m.hp <= 0) kill(m);
+      // THE WOUNDED (battle.html ai/squad.js): a bad hit puts a man down, and a
+      // mate drags him to cover — out of the fight, alive at the end
+      // (a man going down screaming shakes his army exactly as a death does)
+      if (m.hp <= 0) {
+        if (rnd() < WOUNDED_P) {
+          m.down = true; m.hp = 1;
+          const Aa = A[m.team], M = MOr();
+          if (M && M.deathShock) M.deathShock(Aa, m.w); else if (Aa.p0 > 0) Aa.shock += 1.8 * m.w / Aa.p0;
+        } else kill(m);
+      }
     }
     while (t < BATTLE_CAP) {
       t += dt;
@@ -407,7 +422,7 @@
           // target), so fire concentrates and men FALL instead of a whole line
           // carrying the same scratch
           let o = m.tgt;
-          if (!o || o.dead || o.fled) {
+          if (!o || o.dead || o.fled || o.down) {
             // a new mark: of three men in his sights, the most exposed — the
             // front rank of an advance, or a man already bleeding. Fire lands
             // where the line meets the enemy, so men FALL there (the page's
@@ -438,7 +453,7 @@
       });
       for (let h = 0; h < hits.length; h += 2) hurt(hits[h], hits[h + 1]);
       // morale: the army, then every man on his own nerve
-      const fightingOf = function (team) { let n = 0; for (const m of men[team]) if (!m.dead && !m.fled && !m.routed) n++; return n; };
+      const fightingOf = function (team) { let n = 0; for (const m of men[team]) if (!m.dead && !m.fled && !m.routed && !m.down) n++; return n; };
       const fR = fightingOf("red"), fB = fightingOf("blue");
       const hunting = { red: fR > 0 && fR >= Math.max(1, fB) * 3, blue: fB > 0 && fB >= Math.max(1, fR) * 3 };
       ["red", "blue"].forEach(function (team) {
@@ -447,15 +462,15 @@
         for (const m of men[team]) {
           if (m.dead || m.fled) continue;
           Aa.alive++;
-          if (m.routed) Aa.routing++;
-          Aa.pNow += m.w * (0.45 + 0.55 * clamp(0, 1, m.hp / m.maxHp));
+          if (m.routed || m.down) Aa.routing++;          // the page counts its wounded out of the fight too
+          if (!m.down) Aa.pNow += m.w * (0.45 + 0.55 * clamp(0, 1, m.hp / m.maxHp));
         }
       });
       armyStep(A.red, A.blue, dt); armyStep(A.blue, A.red, dt);
       ["red", "blue"].forEach(function (team) {
         const Aa = A[team];
         for (const m of men[team]) {
-          if (m.dead || m.fled) continue;
+          if (m.dead || m.fled || m.down) continue;
           m.supp = Math.max(0, m.supp - dt * 0.28);
           if (m.rallyT > 0) m.rallyT -= dt;
           const eff = manMorale(Aa.morale, m.supp, clamp(0, 1, m.hp / m.maxHp));
@@ -467,7 +482,12 @@
             // catches a man running at 6, and a man caught turns and fights
             // and will not break again for a while — the last stand
             const caught = hunting[team === "red" ? "blue" : "red"] && m.routT > 1.5 && rnd() < (m.hp < m.maxHp * 0.45 ? 0.16 : 0.1);
-            if (caught) { m.routed = false; m.rallyT = 12; m.routT = 0; m.cornered = true; }
+            // ...unless he puts his hands up (battle.html trySurrender: by his
+            // training, his wounds, and the odds): a prisoner is counted fled
+            const giveUp = caught && rnd() < Math.min(0.95, (SURRENDER_P[m.tier] != null ? SURRENDER_P[m.tier] : 0.4) +
+              (m.hp < m.maxHp * 0.5 ? 0.2 : 0) + (A[team].pNow < 0.5 * A[team === "red" ? "blue" : "red"].pNow ? 0.2 : 0));
+            if (giveUp) { m.fled = true; fledN[team]++; }
+            else if (caught) { m.routed = false; m.rallyT = 12; m.routT = 0; m.cornered = true; }
             else if (m.routT > 4 && eff > m.nerve + 0.16 && m.supp < 0.3) { m.routed = false; m.rallyT = 6; }
             else if (m.routT > 40) { m.fled = true; fledN[team]++; }
           }

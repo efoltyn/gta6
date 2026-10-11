@@ -67,8 +67,9 @@ function join() {
   }
   for (let i = 0; i < men.length; i++) {
     const o = men[i];
-    if (o.team !== team || o.dead || o.fled || o.beast || o.routed || o._apeHeld || o._apeFlying) continue;
-    const d = Math.hypot(o.pos.x - c.x, o.pos.z - c.z) + (o.armed ? 0 : 40);
+    if (o.team !== team || o.dead || o.fled || o.beast || o.routed || o.downed || o._apeHeld || o._apeFlying) continue;
+    // the RIFLE button: a rifleman first, the launcher crew only if nobody else is near
+    const d = Math.hypot(o.pos.x - c.x, o.pos.z - c.z) + (o.armed ? 0 : 40) + (o.launcher ? 30 : 0);
     if (d < bd) { bd = d; m = o; }
   }
   if (!m) return false;

@@ -344,6 +344,8 @@ function thinkVehicle(u) {
     u.target.set(u.home.x, 0, u.home.z); u.slot = "hold";
     return;
   }
+  // a tank leads its infantry, it does not leave it behind (ai/squad.js)
+  if (tacticsVehicle(u)) return;
   if (u.tgt && !u.tgt.dead) {
     const dx = u.tgt.pos.x - u.pos.x, dz = u.tgt.pos.z - u.pos.z, d = Math.hypot(dx, dz) || 1;
     // close threats (beasts, men with fists) get run at or run over; a
@@ -373,7 +375,7 @@ function vehPickTarget(u) {
   _vc.length = 0;
   for (let k = 0; k < men.length; k++) {
     const o = men[k];
-    if (o.team === u.team || o.dead || o.fled) continue;
+    if (o.team === u.team || o.dead || o.fled || o.downed) continue;
     if (o.air && !vehCanHitAir(u)) continue;
     const d = Math.hypot(o.pos.x - u.pos.x, o.pos.z - u.pos.z);
     if (d > range) continue;
@@ -510,6 +512,8 @@ function vehFight(u, sdt) {
     // and a machine gun is in range; the machine gun leaves armour alone
     if (w.kind === "mg" && t.vehicle && (t.def.stats.armour.front || 0) > w.pen * 2) continue;
     if (w.kind === "cannon" && !t.vehicle && dist < 500 && vehHasMG(u, dist) && lcg() < 0.6) { W.cool = 1; continue; }
+    // DANGER CLOSE: high explosive is not put down on top of our own men (ai/squad.js)
+    if (w.kind !== "mg" && !(w.kind === "cannon" && t.vehicle) && dangerClose(u.team, t.pos.x, t.pos.z, ((w.he && w.he.blast) || 6) * 0.9)) { W.cool = 0.6; continue; }
     if ((w.turret || tr) && aimErr > 0.05 && !w.indirect) { u._wantShot = true; continue; }
     if (u.air && w.kind !== "missile" && !w.indirect && Math.abs(D.wrap(Math.atan2(dx, dz) - u.h)) > 0.25 && !u.group.userData.chinGun) continue;
     u._wantShot = true;

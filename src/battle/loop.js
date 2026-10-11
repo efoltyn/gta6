@@ -92,6 +92,7 @@ function frame(dt) {
         if (simT - NAV.at.red > 1.4) navSolve("red");
         else if (simT - NAV.at.blue > 1.4) navSolve("blue");
       }
+      tacticsStep(sdt);                    // the squads decide; grenades fly (ai/squad.js)
       for (let i = 0; i < men.length; i++) stepMan(men[i], sdt);
       /* THE HOLD AND EVERYTHING IN THE AIR. This has to be its own call and
          not a seam inside beastFight: the strike bubble above only runs while
@@ -203,7 +204,9 @@ function frame(dt) {
       // had ever set it, so combat_iq could send a soldier to a real piece
       // of cover and he would stand up straight behind it. One boolean, and
       // the posture the fight brain already chose is finally visible.
-      m.char.crouch = crouchPose(m);     // the stance the fight uses (THE MEN: STANCE)
+      // ...and now the whole soldier: carry, stance, cover peek / lean /
+      // blind fire as entities/soldier.js's ch.soldier record (ai/squad.js)
+      soldierRig(m);
       try { CBZ.animChar(m.char, m.speed * speed, dt * every); } catch (e) {}
     }
     const engaged = m.tgt && !m.tgt.dead && m.sees;
@@ -227,6 +230,7 @@ function frame(dt) {
       if (m._weaponProp.visible !== showGun) m._weaponProp.visible = showGun;
     }
   }
+  if (TAC.captives.length) animCaptives(dt);   // the prisoners kneel, hands up
   stepKill(realDt);                     // ...on WALL time: see THE KILL CAM
   stepCamera(dt);
   if (SEA.on) seaUnderwater();          // after the camera moved, before the draw

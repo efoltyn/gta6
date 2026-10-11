@@ -92,6 +92,7 @@ function resetArmies() {
   }
   fledMen.length = 0;
   moraleT = -1;
+  if (typeof tacReset === "function") tacReset();      // the squads of the last war (ai/squad.js)
 }
 const _ao = { fearless: false };
 function _armyOpts(fearless) { _ao.fearless = !!fearless; return _ao; }
@@ -119,7 +120,7 @@ function updateMorale() {
       men.splice(i, 1);
       A.fled++;
       fledMen.push(m);
-      if (m.group) m.group.visible = false;
+      if (m.group && !m.surrendered) m.group.visible = false;   // a prisoner stays where he knelt
       if (m.ordTgt) {
         m.ordTgt.alive = false;
         if (CBZ.ordnance && CBZ.ordnance.removeTarget) { try { CBZ.ordnance.removeTarget(m.ordTgt); } catch (e) {} }
@@ -129,9 +130,9 @@ function updateMorale() {
     }
     A.alive++;
     if (m.beast || m.vehicle) A.beasts++;   // machines and animals do not do the arithmetic
-    if (m.routed) A.routing++;
+    if (m.routed || m.downed) A.routing++;       // a man on the ground is out of the fight too
     const hf = Math.max(0, Math.min(1, m.hp / (m.maxHp || 1)));
-    A.pNow += m._mw * (0.45 + 0.55 * hf);
+    if (!m.downed) A.pNow += m._mw * (0.45 + 0.55 * hf);   // a man on the ground is no power
   }
   ["red", "blue"].forEach(function (t) {
     const A = ARMY[t], F = ARMY[t === "red" ? "blue" : "red"];
@@ -156,7 +157,7 @@ function inFight(team) {
     const m = men[i];
     if (m.team !== team || m.dead || m.fled) continue;
     alive++;
-    if (!m.routed) fighting++;
+    if (!m.routed && !m.downed) fighting++;
   }
   // asked live, so a stale clock from a restaged war can never end this one
   const A = ARMY[team];
@@ -193,7 +194,8 @@ function moraleOnDeath(m, aliveMine) {
 function manMorale(m) {
   const A = ARMY[m.team];
   const hf = Math.max(0, Math.min(1, m.hp / (m.maxHp || 1)));
-  return MO.manMorale(A ? A.morale : 1, m.supp, hf);
+  // ...and his squad's: a leader dropped beside him shakes him more than the army's sums do
+  return MO.manMorale(A ? A.morale : 1, m.supp, hf) - (m.sqd ? m.sqd.shock * 0.5 : 0);
 }
 function foeCentre(m) { return teamCOM[m.team === "red" ? "blue" : "red"]; }
 /* THE BREAK, THE RUN, THE RALLY — one man, on his think tick. Returns true
@@ -224,6 +226,8 @@ function routCheck(m, dt) {
       }
     }
     if (cornered) {
+      // ...or he puts his hands up: by his training, his wounds and the odds (ai/squad.js)
+      if (typeof trySurrender === "function" && trySurrender(m)) return true;
       m.routed = false; m.rallyT = 12; m.routStall = 0;
       return false;
     }
@@ -264,7 +268,9 @@ function routCheck(m, dt) {
    makes going down actually hide him behind a dune lip. And a crouched body
    is a smaller one — coverK is the hit-chance multiplier fireShot applies
    to rounds aimed at him (set each step in stepMan). */
-const STANCE_K = { stand: 1, crouch: 0.645 };
+// prone: flat on the ground, a head and a rifle (eye 0.38 m); rush: the low,
+// fast run of a bound (ai/squad.js)
+const STANCE_K = { stand: 1, crouch: 0.645, prone: 0.25, rush: 0.82 };
 const CROUCH_HIT = 0.5;        // a kneeling man presents about half the target
 const HULL_UP_HIT = 0.7;       // up over a crest, the sand still covers his legs
 function setStance(m, st) {
@@ -285,7 +291,7 @@ function crouchPose(m) {
 // not blind, he is ducking; think() asks this so the duck does not read as
 // lost contact and send him charging out of his own cover
 function seesStanding(m, o) {
-  if (m.stance !== "crouch") return eyeLos(m, o);
+  if (m.stance === "stand" || !m.stance) return eyeLos(m, o);
   const e = m.eyeH;
   m.eyeH = m.eyeH0;
   const s = eyeLos(m, o);

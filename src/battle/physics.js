@@ -35,7 +35,7 @@ function nearestEnemy(m, range) {
       if (!a) continue;
       for (let i = 0; i < a.length; i++) {
         const o = a[i];
-        if (o.team === m.team || o.dead) continue;
+        if (o.team === m.team || o.dead || o.downed) continue;
         const d = (o.pos.x - m.pos.x) * (o.pos.x - m.pos.x) + (o.pos.z - m.pos.z) * (o.pos.z - m.pos.z);
         if (d < bd) { bd = d; best = o; }
       }
@@ -82,7 +82,8 @@ function pickTarget(m, range) {
       if (!a) continue;
       for (let i = 0; i < a.length; i++) {
         const o = a[i];
-        if (o.team === m.team || o.dead) continue;
+        // a wounded man on the ground is out of the fight, not a mark (ai/squad.js)
+        if (o.team === m.team || o.dead || o.downed) continue;
         // an aircraft is only a mark for what can reach it
         if (o.air && !vehicleCanTarget(m, o)) continue;
         const d2 = (o.pos.x - m.pos.x) * (o.pos.x - m.pos.x) + (o.pos.z - m.pos.z) * (o.pos.z - m.pos.z);

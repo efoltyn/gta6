@@ -195,7 +195,15 @@ function thinkBeast(m, tgt, thinkDt) {
    push, chase or run does not carry a crouch across open sand. */
 function think(m, now) {
   if (m.you) return;
+  // THE TIERS COST WHAT THEY COST (ARCHITECTURE.md §9): every man's think is
+  // timed into his LOD tier's ledger (CBZ.battleTactics.COST), so the scale
+  // work can read what a FULL, MID or FAR brain actually spends
+  const t0 = TAC.on && !m.beast ? tacClock() : 0;
   thinkMan(m, now);
+  if (t0) {
+    const C = CBZ.battleTactics.COST[m.aiTier === 1 ? "mid" : m.aiTier === 2 ? "far" : "full"];
+    C.n++; C.ms += tacClock() - t0;
+  }
   if (m.hull && m.slot !== "hull") m.hull = null;
 }
 function thinkMan(m, now) {
@@ -203,6 +211,12 @@ function thinkMan(m, now) {
   m.lastThink = now;
   const crowd = men.length;
   m.thinkAt = now + 0.14 + Math.min(0.42, crowd / 2600) + lcg() * 0.06;
+  // a MID man thinks on the mid tick, a FAR man on the far one: his squad's
+  // posts and its focus carry him between (core/lod.js BUDGET.think)
+  if (TAC.on && m.aiTier && !m.beast) {
+    const B = CBZ.battleLod.BUDGET.think;
+    m.thinkAt = now + (m.aiTier === 1 ? B.mid : B.far) * (0.8 + CBZ.battleTactics.hash01(m, now * 10 | 0) * 0.4);
+  }
   m.hunt = HUNT[m.team];
   // HIS NERVE FIRST: a man who has broken is not deciding anything else
   if (routCheck(m, thinkDt)) return;
@@ -211,7 +225,7 @@ function thinkMan(m, now) {
   // him back in the lane.
   if (m.stepAsideT > 0 && m.tgt && !m.tgt.dead && !m.tgt.fled) { m.stepAsideT -= thinkDt; return; }
 
-  if (!m.tgt || m.tgt.dead || m.tgt.fled) { m.tgt = pickTarget(m, m.hunt ? SIGHT * 2 : SIGHT); m.losBadT = 0; }
+  if (!m.tgt || m.tgt.dead || m.tgt.fled || m.tgt.downed) { m.tgt = pickTarget(m, m.hunt ? SIGHT * 2 : SIGHT); m.losBadT = 0; }
   // CONTACT IS INFORMATION A SQUAD SHARES. Before marching blind past a
   // fight, a man asks his own column: a mate already engaged hands him the
   // mark, and the squad turns to the guns together instead of one man
@@ -236,13 +250,19 @@ function thinkMan(m, now) {
       const bd = Math.hypot(b.tgt.pos.x - m.pos.x, b.tgt.pos.z - m.pos.z);
       if (bd < SIGHT * 1.3) {
         m.tgt = b.tgt; m.losBadT = 0;
-        // and hold rank for the rest of this beat — the man engages on his
-        // own next think, with the fire arcs handing him a bearing.
+        // a squad deploys as a squad (ai/squad.js); otherwise hold rank for
+        // the rest of this beat — the man engages on his own next think, with
+        // the fire arcs handing him a bearing.
+        if (TAC.on && !m.beast && squadThink(m, thinkDt)) return;
         marchGoal(m);
         return;
       }
     }
   }
+  // THE SQUAD DECIDES FOR ITS MEN (ai/squad.js, core/tactics.js): the post,
+  // the slot, the mark. What follows is the lone rifleman's logic — a man
+  // with no squad left, a brawler, or ?tac=old.
+  if (TAC.on && !m.beast && squadThink(m, thinkDt)) return;
   const tgt = m.tgt;
   if (!tgt) { marchGoal(m); return; }
   if (m.beast) { thinkBeast(m, tgt, thinkDt); return; }
