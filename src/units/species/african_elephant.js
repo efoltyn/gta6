@@ -509,7 +509,13 @@
   // ------------------------------------------------------------ the world
   const HERD = [];
   const ACT = []; let actT = -9;
-  function nowS() { return (typeof performance !== "undefined" && performance.now ? performance.now() : Date.now()) * 0.001; }
+  // the SIM clock (CBZ.now follows the speed dial): the trample cooldown and
+  // the roster cache were on the wall clock, so at 4x a man could be trampled
+  // once per 3.2 sim s and at 0.25x four times as often as authored
+  function nowS() {
+    if (typeof CBZ.now === "number" && isFinite(CBZ.now)) return CBZ.now * 0.001;
+    return (typeof performance !== "undefined" && performance.now ? performance.now() : Date.now()) * 0.001;
+  }
   function modeDesc() { const g = CBZ.game, ms = CBZ.modes; return g && ms ? ms[g.mode] : null; }
   function actors() {
     const t = nowS();
@@ -555,6 +561,11 @@
     QG.reset(E.G, m.pos.x, m.pos.z, m.heading || 0, CBZ.floorAt || null, m.pos.y);
     E.tn = m.tn = Object.assign({}, m.tn);
     E.mass = V.mass * s * s * s; m._mass = E.mass;
+    /* THIS FILE BILLS ITS OWN CHARGE: the ram (28 x v), the splash (17 x v)
+       and the trample (16 x v) already are the collision's injury. The
+       battle's body layer (physics.js contactImpulse) still moves the man
+       by momentum, but does not hurt him a second time for the same hit. */
+    m.impactBilled = true;
     E.mf = Math.pow(E.mass / 6000, 0.67);
     if (m.maxHp > 0 && m.maxHp < 1e8) {
       const hp = Math.max(30, Math.round(m.maxHp * V.hpK));
@@ -784,6 +795,9 @@
 
   // ---- trample: the front of a running elephant goes through people
   const TRAMPLED = typeof WeakMap !== "undefined" ? new WeakMap() : null;
+  // a man the ram (or its splash) just struck is not trampled again by the
+  // same front in the same 0.8 s: one collision, billed once
+  function trampled(a) { if (TRAMPLED && a) TRAMPLED.set(a, nowS() + 0.8); }
   function trample(m, E, dt) {
     if (E.act || E.v < 2.6 || E.V.calf) return;
     E.trT -= dt;
@@ -829,6 +843,7 @@
       if (a === except || !enemy(m, a)) continue;
       if (Math.hypot(a.pos.x - px, a.pos.z - pz) > r + (a.rad || 0.45)) continue;
       sum += hurt(m, a, dmg); n++;
+      trampled(a);
     }
     return sum;
   }
@@ -1003,7 +1018,7 @@
     if (Math.abs(dh) < 0.5 && E.v > 3.0 && gap < D.faceX * s + 0.6 * s) {
       startAct(m, E, "ram", t, opts);
       const mf = E.mf * (opts && opts.dmg ? opts.dmg / STATS.dmg : 1);
-      RES.dealt += bill(m, t, 28 * E.v * mf, opts, true);
+      RES.dealt += bill(m, t, 28 * E.v * mf, opts, true); trampled(t);
       toWorld(m, E, D.faceX + 0.4 * K, 0, _w);
       splash(m, E, _w.x, _w.z, 1.1 * K * s, 17 * E.v * mf, t, 5);
       return RES;
@@ -1037,7 +1052,7 @@
       const D = E.D, K = D.K;
       const mf = E.mf * (opts.dmg ? opts.dmg / STATS.dmg : 1);
       if (!t.dead && !t.dummy && inFront(m, E, t, D.faceX * 0.8, D.faceX + 0.8 * K, 0.7 * K)) {
-        RES.dealt += bill(m, t, 28 * Math.max(2.5, Math.abs(E.v)) * mf, opts, true);
+        RES.dealt += bill(m, t, 28 * Math.max(2.5, Math.abs(E.v)) * mf, opts, true); trampled(t);
         toWorld(m, E, D.faceX + 0.4 * K, 0, _w);
         splash(m, E, _w.x, _w.z, 1.1 * K * E.s, 17 * Math.max(2.5, Math.abs(E.v)) * mf, t, 5);
       } else RES.missed = true;

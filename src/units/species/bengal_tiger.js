@@ -129,14 +129,16 @@
     m: { len: 1.0, girth: 1.0, mass: 220, hpK: 1.12, top: 15.0 },
     f: { len: 0.87, girth: 0.93, mass: 140, hpK: 0.85, top: 14.6 },
   };
-  /* hp: what it takes to stop one. A carbine round lands ~41 here (28 x the
-     page's 1.45) and drops a 140 hp soldier in four; a tiger has 2.7x the
-     tissue and needs ~9 body hits (male 380, female 290 after the sex split
-     in brain()). bite is the row's "what it does to a man" (the city reads
+  /* hp: what it takes to stop one, by MASS against the lion (215 hp at
+     190 kg, hp ~ mass^0.75): a 220 kg male is ~290 (260 x hpK 1.12), a
+     140 kg female ~220, and the size draw rides on top (beasts.js,
+     size^1.35), so seed 0's big 1.12 male is ~340. It was 340 here (a male
+     at 381-444), twice the lion's: measured, a lion won 19% and a brown bear
+     19% against bands of 30-60% and 50-90% (BALANCE.md F1). bite is the row's "what it does to a man" (the city reads
      it); the battle uses the move table below. chase/march are the opening
      numbers only: brain() owns them per individual from the first frame. */
   const STATS = {
-    hp: 340, spd: 3.2, danger: 0.8, bite: 60, scale: ROW_SCALE,
+    hp: 260, spd: 3.2, danger: 0.8, bite: 60, scale: ROW_SCALE,
     chase: 13.5, march: 1.3, dmg: 50, rate: 1.0,
     brave: true, prey: false,
     /* for weapons/ballistics.js's wound model (anatomyOf reads these first):
@@ -819,7 +821,10 @@
     else if (av > 5) T.stam -= sdt / 40;
     else T.stam += sdt / (av < 2 ? 14 : 24);
     T.stam = clamp(T.stam, 0, 1);
-    const topNow = T.top * (0.55 + 0.45 * clamp(hpF * 1.4, 0, 1)) * (1 - 0.4 * T.limp);
+    // dead on its feet (battle/damage.js onItsFeet): its last seconds are
+    // adrenaline, not its wounds; the hp left is a clock, not its legs
+    const legF = m._doomT > 0 ? Math.max(hpF, 0.6) : hpF;
+    const topNow = T.top * (0.55 + 0.45 * clamp(legF * 1.4, 0, 1)) * (1 - 0.4 * T.limp);
     const sprint = topNow * lerp(0.42, 1, sstep(0.04, 0.45, T.stam));
     const t = liveTgt(m);
     let want = 1.25, mode = "prowl";

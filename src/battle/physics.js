@@ -638,8 +638,13 @@ function contactImpulse(m, o, ux, uz, km, ko) {
   const J = (1 + RESTITUTION) * vrel * km * ko / (km + ko);
   const dvO = J / ko, dvM = J / km;
   PHYS.audit.impacts++;
-  addKnock(o, ux * dvO, uz * dvO, m, { hurt: !o.beast || !m.beast || ko < km });
-  addKnock(m, -ux * dvM, -uz * dvM, o, { hurt: !m.beast || !o.beast || km < ko });
+  /* ONE HIT, BILLED ONCE. A species file that bills its own charge (the
+     elephant's ram / trample: m.impactBilled) has already dealt the
+     collision's injury; this pass still moves the light body by momentum
+     but does not hurt it again. Measured before: a charging bull's victims
+     took the ram's 28 x v AND impactDmg for the same contact. */
+  addKnock(o, ux * dvO, uz * dvO, m, { hurt: (!o.beast || !m.beast || ko < km) && !(m.impactBilled && heavy === m) });
+  addKnock(m, -ux * dvM, -uz * dvM, o, { hurt: (!m.beast || !o.beast || km < ko) && !(o.impactBilled && heavy === o) });
 }
 
 /* A VELOCITY CHANGE ON A LIVING BODY. o = { hurt, vy, noDown } */
@@ -913,3 +918,9 @@ function physPost(sdt) {
   }
   if (CBZ.ragdollCarPost) { try { CBZ.ragdollCarPost(sdt); } catch (e) {} }
 }
+
+/* THE BODY LAYER, for the shared systems (systems/ape_combat.js) that throw
+   and strike bodies on this page. One integrator for a body in the air: a
+   thrown man arcs at 9.81, is stopped (and hurt) by walls, bowls whoever he
+   lands on by momentum, and is injured by the speed he arrives at. */
+CBZ.bodyPhys = { kg: bodyKg, knock: addKnock, fling: flingBody, impactDmg: impactDmg, manKg: MAN_KG };

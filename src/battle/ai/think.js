@@ -153,7 +153,16 @@ function thinkBeast(m, tgt, thinkDt) {
   // a mauled animal that is not one of the brave ones quits and runs — and
   // is run down or lives by the same chase-and-retreat physics the men
   // already play by. Prey species skip straight to flight.
-  const beaten = m.hp < m.maxHp * 0.3 && !tn.brave;
+  /* ...EXCEPT ONE THAT IS ALREADY DEAD ON ITS FEET (damage.js onItsFeet)
+     with its killers in reach. A mortally hit predator inside ~30 m of the
+     men who shot it spends its last seconds on them, which is what makes a
+     wounded big cat or bear the most dangerous animal in the bush; prey, and
+     a predator hit far off, still run off to die. Measured before: a tiger
+     at 1 hp killed the first of three riflemen and then ran from the other
+     two at 11 m, and the 12 m ambush row read 6% against a 15-70% band. */
+  const dying = m._doomT > simT && !tn.prey && tgt && !tgt.dead &&
+    Math.hypot(tgt.pos.x - m.pos.x, tgt.pos.z - m.pos.z) < 30;
+  const beaten = m.hp < m.maxHp * 0.3 && !tn.brave && !dying;
   if (beaten || tn.prey) {
     const com = teamCOM[m.team === "red" ? "blue" : "red"];
     const fx = m.pos.x - (tgt ? tgt.pos.x : com.x), fz = m.pos.z - (tgt ? tgt.pos.z : com.z);
@@ -165,7 +174,13 @@ function thinkBeast(m, tgt, thinkDt) {
   m.state = "charge";                        // the gait's flee-bound reads this
   const sees = eyeLos(m, tgt);
   m.sees = sees;
-  if (!sees) {
+  /* INSIDE 25 m AN ANIMAL DOES NOT NEED TO SEE YOU. It hears the shots and
+     smells you; a dune crest or a corpse in the eye line is not a facade.
+     Measured: a tiger 11 m from two riflemen who were shooting it lost the
+     sight line over a crest, took the flow field (which leads to the enemy's
+     START line) and ran away from them for five seconds. */
+  const near = Math.hypot(tgt.pos.x - m.pos.x, tgt.pos.z - m.pos.z) < 25;
+  if (!sees && !near) {
     m.losBadT += thinkDt;
     if (m.losBadT > 7) { m.tgt = null; m.losBadT = 0; return; }
     if (m.losBadT > 2.0) {                   // an animal does not trade with a facade at all

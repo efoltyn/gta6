@@ -1172,7 +1172,7 @@
     TIER_W: { civ: 0.7, thug: 0.85, pro: 1.0, elite: 1.25, swat: 1.4 },
     SUPP_CAP: 1.2, SUPP_HIT: 0.4, SUPP_SNAP: 0.26, SUPP_MATE: 0.22, SUPP_DECAY: 0.28,
     SUPP_K: 0.16, WOUND_K: 0.28, SHOCK_K: 1.8, SHOCK_TAU: 7, RALLY_BAND: 0.16,
-    FLEE_GAPS: 2.2, BREAK_GRACE: 5,
+    FLEE_GAPS: 2.2, BREAK_GRACE: 5, ODDS_K: 0.1, ODDS_CAP: 0.4,
   };
   function nerveFor(tier, i) {
     const R = CBZ.combatIQ && CBZ.combatIQ.ROLE && CBZ.combatIQ.ROLE[tier];
@@ -1189,8 +1189,25 @@
     const lost = A.p0 > 0 ? Math.max(0, 1 - A.pNow / A.p0) : 0;
     const theirLost = F && F.p0 > 0 ? Math.max(0, 1 - F.pNow / F.p0) : 0;
     let mo = 1 - lost * 1.5 + theirLost * 0.5 - (A.alive ? A.routing / A.alive : 0) * 0.35 - A.shock;
+    /* THE ODDS. Men count heads: fifty against one animal is not the same
+       fight as one against one, and the nerve to keep going rises with how
+       much of the fight is on your side (Lanchester's square, read as
+       confidence). The power each side still has standing (training x gun;
+       an animal by its hp, a hull by its own weight), as a log ratio:
+       even = 0, 2:1 = +0.1, 16:1 = +0.4 (cap); outnumbered the same
+       downward. Measured before: 100 civilians against one gorilla broke 84-87
+       of 100 at the casualty arithmetic alone, as if each death were one of
+       an even fight's. */
+    const odds = F && F.pNow > 0 ? A.pNow / F.pNow : 8;
+    let ob = A.pNow > 0 ? Math.max(-MK.ODDS_CAP, Math.min(MK.ODDS_CAP, MK.ODDS_K * Math.log2(Math.max(0.01, odds)))) : 0;
+    // numbers that cannot hurt the enemy (rifles against armour: A.noAnswer,
+    // set by the page) are no comfort
+    if (A.noAnswer && ob > 0) ob = 0;
+    mo += ob;
     if (opts && opts.fearless) mo = 1;
-    A.morale = Math.max(0, Math.min(1, mo));
+    // the odds are a reserve over "unshaken" (1): a big side absorbs losses
+    // before it starts to waver, which a clamp at 1 would throw away
+    A.morale = Math.max(0, Math.min(1 + Math.max(0, ob), mo));
     if (!A.broken && A.alive >= 2 && A.routing >= A.alive * 0.5) { A.broken = true; return "rout"; }
     if (A.broken && A.alive - A.routing > 0 && A.routing < A.alive * 0.25) { A.broken = false; return "rally"; }
     return null;
