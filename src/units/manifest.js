@@ -107,7 +107,7 @@
     mq9_reaper: V("MQ-9 Reaper", "MQ-9 Reapers", "air", ["city/mil_air.js"]),
     b52: V("B-52", "B-52s", "air", ["city/mil_air.js"]),
     b2_spirit: V("B-2 Spirit", "B-2 Spirits", "air", []),            // draws itself (units/vehicles/b2_spirit.js)
-    a400m: V("A400M", "A400Ms", "air", ["city/mil_air.js", "city/mil_armor.js", "city/island_military.js"]),
+    a400m: V("A400M", "A400Ms", "air", []),                         // draws itself (units/vehicles/a400m.js)
   };
   // a vehicle row: `domain` ground|air, `needs` engine files its build uses.
   // A group of vehicles is a platoon (4 tanks) / troop / flight: left to the
