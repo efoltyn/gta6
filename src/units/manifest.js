@@ -100,6 +100,7 @@
     jltv: V("JLTV", "JLTVs", "ground", ["units/kit/hull.js"]),
     maxxpro_mrap: V("MaxxPro MRAP", "MaxxPro MRAPs", "ground", ["units/kit/hull.js"]),
     m35_truck: V("M35 cargo truck", "M35 cargo trucks", "ground", ["units/kit/hull.js"]),
+    fmtv: V("FMTV truck", "FMTV trucks", "ground", ["units/kit/hull.js"]),
     m270_mlrs: V("M142 HIMARS", "M142 HIMARS launchers", "ground", ["units/kit/hull.js"]),   // the id keeps the census name (the model is the M142, one six-round GMLRS pod)
     patriot_launcher: V("Patriot launcher", "Patriot launchers", "ground", ["units/kit/hull.js"]),
     technical: V("technical", "technicals", "ground", ["units/kit/hull.js"]),

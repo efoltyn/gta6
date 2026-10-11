@@ -117,6 +117,8 @@ function vehSeatMan(v, man, s) {
       if (b.crew && b.seat === s.seat && !b.man) { b.man = man; b.implicit = false; seat = b; break; }
     }
   }
+  // a passenger who turns up after his carrier has unloaded gets out with the rest
+  if (!seat && !s.crew && v.dismounted) { vehPutOnField(v, man, 0); return; }
   if (!seat) seat = CBZ.vehicleDrive.seat(book, man, s.crew ? null : "passenger");
   if (!seat) { vehPutOnField(v, man, 0); return; }        // no room after all: he walks
   man.inVeh = v;
@@ -431,7 +433,10 @@ function thinkVehicle(u) {
   const com = teamCOM[enemy];
   const S = u.def.stats || {};
   // carried infantry gets out at the vehicle's dismount range
-  if (!u.dismounted && vehPassengers(u) > 0 && !(u.air && u.def.drive === "rotor" && !u.vs.mobility)) {
+  // (not while the spawn queue is still filling the benches: a truck that
+  // unloads at its first think goes on with half its squad in the back)
+  if (!u.dismounted && vehPassengers(u) > 0 && !(u.air && u.def.drive === "rotor" && !u.vs.mobility) &&
+      (spawnQueue.length === 0 || simT > 5 || u.vs.mobility)) {
     const ref = u.tgt && !u.tgt.dead ? u.tgt.pos : com;
     const d = Math.hypot(ref.x - u.pos.x, ref.z - u.pos.z);
     if (d < (S.dismountAt || 150) || u.vs.mobility) vehDismount(u);
@@ -1283,7 +1288,11 @@ function hurtVehicle(u, dmg, imp) {
     under = Math.abs(ox * c - oz * s) < u.vwid * 0.6 && Math.abs(ox * s + oz * c) < u.vlen * 0.6;
   }
   const zn = under ? "belly" : D.zone(u.h, fx, fz, u.pos.x, u.pos.z, above);
-  const res = D.resolve(u.vs, S, zn, th, dmg, lcg);
+  // a flown round says where it struck (imp.at): armour by place, and the rig
+  // and the spall line are told the hull point (res.hx/hy/hz)
+  const hp = imp.at ? vehHullPoint(u, imp.at, _vHp) : null;
+  const res = D.resolve(u.vs, vehArmourAt(u, hp), zn, th, dmg, lcg);
+  if (hp) { res.hx = hp[0]; res.hy = hp[1]; res.hz = hp[2]; }
   u.hp = Math.max(0, u.vs.hp);
   u.lastHit = res;
   if (PROBE) { VEH.hits = VEH.hits || { pen: 0, bounced: 0 }; if (res.pen) VEH.hits.pen++; else VEH.hits.bounced++; }
@@ -1303,6 +1312,29 @@ function hurtVehicle(u, dmg, imp) {
   if (res.pen && vehPassengers(u) && !(u.air && u.pos.y - MAP.groundAt(u.pos.x, u.pos.z) > 3)) vehDismount(u);
   if (u.air && u.vs.mobility) { u._abandoned = true; killMan(u, imp); }
 }
+/* ARMOUR BY PLACE. stats.armour is per face; stats.plates (optional) refines
+   it by WHERE the round struck, in hull space (x left, y up from the ground,
+   z forward): [{ box: [x0, y0, z0, x1, y1, z1], armour: {front, side, rear,
+   top}, armourCE? }], first match wins, else the face table. The FMTV's
+   LTAS cab stops rifle ball and its canvas-covered bed does not. Only a
+   flown round brings its impact point (fire.js armsHit: imp.at, world); a
+   blast or a table hit takes the face table. */
+const _vHp = [0, 0, 0];
+function vehHullPoint(u, at, out) {
+  const wx = at.x - u.pos.x, wz = at.z - u.pos.z, c = Math.cos(u.h), s = Math.sin(u.h);
+  out[0] = wx * c - wz * s; out[1] = at.y - u.pos.y; out[2] = wx * s + wz * c;
+  return out;
+}
+function vehArmourAt(u, p) {
+  const S = u.def.stats || {}, P = S.plates;
+  if (!P || !p) return S;
+  for (let k = 0; k < P.length; k++) {
+    const b = P[k].box;
+    if (p[0] < b[0] || p[0] > b[3] || p[1] < b[1] || p[1] > b[4] || p[2] < b[2] || p[2] > b[5]) continue;
+    return P[k]._st || (P[k]._st = Object.assign({}, S, { armour: P[k].armour, armourCE: P[k].armourCE || S.armourCE, plates: null }));
+  }
+  return S;
+}
 /* CREW CASUALTIES BY SEAT. A penetration enters through the face it hit
    (`zn`), on the line from whoever fired it, and its spall runs on through
    the hull. Each crewman (and passenger) is at his seat's `pos` in hull
@@ -1319,7 +1351,10 @@ function vehCrewHits(u, res, th, zn, fx, fz, by) {
   const dl = Math.hypot(dx, dz) || 1; dx /= dl; dz /= dl;
   // where it came in, and its path inward
   let ix, iy, iz, px, py, pz;
-  if (zn === "top") { ix = (lcg() - 0.5) * Wd; iz = (lcg() - 0.5) * L; iy = H; px = 0; py = -1; pz = 0; }
+  if (res.hx != null) {                       // a flown round: it came in where it struck
+    ix = res.hx; iy = res.hy; iz = res.hz;
+    if (zn === "top") { px = 0; py = -1; pz = 0; } else { px = -dx; py = 0; pz = -dz; }
+  } else if (zn === "top") { ix = (lcg() - 0.5) * Wd; iz = (lcg() - 0.5) * L; iy = H; px = 0; py = -1; pz = 0; }
   else if (zn === "belly") { ix = (lcg() - 0.5) * Wd; iz = (lcg() - 0.5) * L; iy = 0.3; px = 0; py = 1; pz = 0; }
   else {
     const tt = Math.min(Wd / Math.max(1e-3, Math.abs(dx)), L / Math.max(1e-3, Math.abs(dz)));
