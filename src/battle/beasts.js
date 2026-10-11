@@ -78,7 +78,8 @@ function makeBeast(teamId, i, spIdIn) {
   let sizeMul = 1;
   if (CBZ.wildlifeTraits && CBZ.wildlifeTraits.sampleSize) {
     try {
-      const v = +CBZ.wildlifeTraits.sampleSize(sp, (teamId === "red" ? -1 : 1) * (i + 1) * 3.7, (i + 1) * 2.3);
+      // + the battle's seed (settings.js): another round, other individuals
+      const v = +CBZ.wildlifeTraits.sampleSize(sp, (teamId === "red" ? -1 : 1) * (i + 1) * 3.7 + BATTLE_SEED * 17.31, (i + 1) * 2.3 + BATTLE_SEED * 5.77);
       if (v > 0.05 && v < 4) sizeMul = v;
     } catch (e) {}
   }

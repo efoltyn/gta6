@@ -126,6 +126,24 @@
     if (!sp) return REF_MASS;
     var m = num(sp.mass, 0);
     if (m > 0) return m;                       // authored wins, always
+    /* THEN THE GAME'S OTHER STATEMENT OF THE SAME NUMBER. The species' own
+       unit file (NPC War, src/units/species/<id>.js stats.mass) and the
+       weapons' anatomy table (weapons/ballistics.js SPECIES, the mass a round
+       has to go through) both already say what this animal weighs. The cube
+       below is a fallback for an animal nobody weighed, and it is badly wrong
+       at the ends: measured by tools/npcwar-arena.mjs it called an African
+       elephant and a white rhino 125 kg (scale 1, like a man) and a 45 kg
+       wolf, a 50 kg cheetah and a 30 kg dog 107-125 kg, so a fist hurt an
+       elephant like it hurt a big dog and a wolf soaked a bite like a lion. */
+    var id = sp.id;
+    if (id) {
+      if (CBZ.unitKit && CBZ.unitKit.stat) {
+        try { m = num(CBZ.unitKit.stat(id, 'mass', 0), 0); } catch (e) { m = 0; }
+        if (m > 0) return m;
+      }
+      var B = CBZ.ballistics && CBZ.ballistics.SPECIES && CBZ.ballistics.SPECIES[id];
+      if (B && num(B.mass, 0) > 0) return B.mass;
+    }
     /* THE ROW WINS, and the live group scale is only a fallback. The obvious
        version of this preferred whatever the actor was actually built at —
        which read a gorilla as 125 kg instead of 190, because creature_combat's

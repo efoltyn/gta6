@@ -72,29 +72,40 @@ function eyeLos(m, o) {
   if (CBZ.micro.segmentBlocked(m.pos.x, ay, m.pos.z, o.pos.x, by, o.pos.z)) return false;
   return !(MAP.terrainLos && terrainBlocked(m.pos.x, ay, m.pos.z, o.pos.x, by, o.pos.z));
 }
-/* IS ONE OF MINE STANDING IN THIS LANE? Only the near end is asked: past
-   about twelve metres the round has cleared the firing line and anybody it
-   meets is the enemy's problem. Cheap enough to ask on every trigger pull,
-   which is what makes it a rule and not a report. */
+/* IS ONE OF MINE STANDING IN THIS LANE? The whole line out to the mark (90 m
+   at most), in a cone as wide as the round's spread. Cheap enough to ask on
+   every trigger pull, which is what makes it a rule and not a report. */
+const _laneNear = [];
 function mateInLane(m, tgt) {
   const dx = tgt.pos.x - m.pos.x, dz = tgt.pos.z - m.pos.z;
   const d = Math.hypot(dx, dz);
   if (d < 0.5) return 0;
-  const nx = dx / d, nz = dz / d, reach = Math.min(d - 0.6, 12);
+  /* THE WHOLE LINE, not its first twelve metres. The old window assumed a
+     round past 12 m had "cleared the firing line"; measured (npcwar-arena,
+     200 men on one hull) half the blue-on-blue hits were mates 16-45 m out,
+     who had run ahead toward the mark. And the cone widens with range: a
+     standing rifleman's spread plus a man's shoulders (~12 mil). */
+  const nx = dx / d, nz = dz / d, reach = Math.min(d - 0.6, 90);
   if (reach <= 1) return 0;
-  const a = fineNear(m.pos.x + nx * reach * 0.5, m.pos.z + nz * reach * 0.5, reach * 0.5 + 1.2);
+  // walked in grid-cell steps (a 90 m disc query would sweep ~1,400 cells)
   let worst = 0, worstOff = 9;
-  for (let i = 0; i < a.length; i++) {
-    const o = a[i];
-    if (o === m || o.dead || o.team !== m.team) continue;
-    const ox = o.pos.x - m.pos.x, oz = o.pos.z - m.pos.z;
-    const along = ox * nx + oz * nz;
-    if (along < 0.8 || along > reach) continue;
-    const off = ox * nz - oz * nx;                 // SIGNED: which side he is on
-    if (Math.abs(off) < 0.62 && Math.abs(off) < worstOff) {
-      worstOff = Math.abs(off);
-      worst = off >= 0 ? 1 : -1;                   // 0 means clear, ±1 the side
+  const step = FINE * 0.9;
+  for (let s = 0; s < reach + step; s += step) {
+    const sc = Math.min(s, reach);
+    const a = fineNear(m.pos.x + nx * sc, m.pos.z + nz * sc, step * 0.5 + 0.62 + sc * 0.012, _laneNear);
+    for (let i = 0; i < a.length; i++) {
+      const o = a[i];
+      if (o === m || o.dead || o.team !== m.team) continue;
+      const ox = o.pos.x - m.pos.x, oz = o.pos.z - m.pos.z;
+      const along = ox * nx + oz * nz;
+      if (along < 0.8 || along > reach) continue;
+      const off = ox * nz - oz * nx;                 // SIGNED: which side he is on
+      if (Math.abs(off) < 0.62 + along * 0.012 && Math.abs(off) < worstOff) {
+        worstOff = Math.abs(off);
+        worst = off >= 0 ? 1 : -1;                   // 0 means clear, +-1 the side
+      }
     }
+    if (worst && worstOff < 0.3) break;
   }
   return worst;
 }
@@ -133,7 +144,7 @@ const ARMS = CBZ.battleArms = {
   // where the war is fought: trigger pulls and hits by range (0-25-50-100-200-400-inf m)
   shotsAt: [0, 0, 0, 0, 0, 0, 0], hitsAt: [0, 0, 0, 0, 0, 0, 0], area: 0,
   // why a man whose gun was ready did not fire (the AI's tuning question)
-  why: { dry: 0, topup: 0, nade: 0, range: 0, slot: 0, ducked: 0, react: 0, unseen: 0, suppress: 0, blind: 0, lane: 0, jam: 0, fired: 0 },
+  why: { dry: 0, topup: 0, nade: 0, range: 0, slot: 0, ducked: 0, react: 0, unseen: 0, suppress: 0, blind: 0, lane: 0, futile: 0, jam: 0, fired: 0 },
   stoppedBy: {},
 };
 function armsTier(m) {
@@ -160,6 +171,22 @@ function armOf(m) {
     seenX: 0, seenY: 0, seenZ: 0, seenT: -99, supT: 0, resT: 0,
   };
   return A;
+}
+
+/* A RIFLE DOES NOT SHOOT AT A TANK. Measured by tools/npcwar-arena.mjs (1 M1
+   Abrams v 200 riflemen): the men put ~260 rounds a battle into armour no
+   7.62 x 39 can dent, and the rear ranks, firing through the front ones at a
+   hull among them, killed ~15 of their own men a battle (a third of all their
+   dead). A man fires at a hull only if his round, at this range, could go
+   through its thinnest face (side or rear: he can hope for a flank); the
+   vehicles' own machine guns already hold the same rule (vehicles.js). */
+function armsCanHurtHull(A, tgt, dist) {
+  const ar = tgt.def && tgt.def.stats && tgt.def.stats.armour;
+  if (!ar || !A.c || !CBZ.ballistics || !CBZ.ballistics.penRHA) return true;
+  const thin = Math.min(ar.front != null ? ar.front : 1e9, ar.side != null ? ar.side : 1e9, ar.rear != null ? ar.rear : 1e9);
+  if (!(thin < 1e9)) return true;
+  const B = CBZ.ballistics, v = B.vAt(A.v0, A.k, Math.max(0, dist));
+  return B.penRHA(A.c, v, A.v0) >= thin;
 }
 
 /* ---- the magazine: reload, the basic load, resupply ---- */
@@ -327,6 +354,7 @@ function armsTrigger(m, tgt, dist, sdt) {
   if (m.mag < m.magSize * 0.34 && A.ammo > 0 && (!m.sees || !m.up || m.slot === "cover" || tgt.dead)) { ARMS.why.topup++; armsReload(m); return; }
   if (armsGrenade(m, tgt, dist)) { ARMS.why.nade++; return; }
   if (dist > Math.min(g.area, SIGHT * 1.2)) { ARMS.why.range++; return; }
+  if (tgt.vehicle && !armsCanHurtHull(A, tgt, dist)) { ARMS.why.futile++; m.cool = 0.5 + lcg() * 0.5; return; }
   if (m.slot !== "fire" && m.slot !== "peek" && m.slot !== "push" && m.slot !== "sidestep" &&
       m.slot !== "hull" && dist > 12) { ARMS.why.slot++; return; }
   if (!m.up) { ARMS.why.ducked++; return; }   // ducked behind his crest (workHull)
