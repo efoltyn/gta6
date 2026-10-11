@@ -39,8 +39,19 @@
 
   S.species = function () {
     var SP = CBZ.WILDLIFE_SPECIES || {};
-    return Object.keys(SP).filter(function (k) { return SP[k] && SP[k].build; }).sort();
+    var out = Object.keys(SP).filter(function (k) { return SP[k] && SP[k].build; });
+    // and every unit with its own file (src/units/manifest.js): the dog, the vehicles
+    var MAN = CBZ.UNIT_MANIFEST || {};
+    Object.keys(MAN).forEach(function (k) { if (MAN[k].kind !== "men" && out.indexOf(k) < 0) out.push(k); });
+    return out.sort();
   };
+  // a unit id this page can field: a bestiary species, or a unit file (species/vehicle)
+  function knownUnit(k) {
+    var SP = CBZ.WILDLIFE_SPECIES || {};
+    if (k === "men" || (SP[k] && SP[k].build)) return true;
+    var K = CBZ.unitKit;
+    return !!(K && (K.kindOf(k) === "vehicle" || (K.kindOf(k) === "species" && K.has(k))));
+  }
 
   /* ---- bodies ----------------------------------------------------------- */
   function grp(m) { return m.group || (m.char && m.char.group) || null; }
@@ -194,7 +205,18 @@
   };
 
   var MOTION = { walk: 1, trot: 1, run: 1 };
+  /* THE UNITS LOAD FIRST. Unit files are lazy on the page (a roster asks for
+     them); the stage asks the registry for its subject and opponent (and their
+     engine needs) and stages once they are in. A swapped-in file is already
+     registered; need() still brings its needs. */
   S.stage = function (spec) {
+    spec = spec || {};
+    var K = CBZ.unitKit, R = CBZ.battleRoster;
+    if (!K || !R) return stageNow(spec);
+    var ids = R.ids(spec.species || spec.unit || "men").concat(spec.vs ? R.ids(spec.vs) : []);
+    return K.need(ids).then(function () { return stageNow(spec); });
+  };
+  function stageNow(spec) {
     spec = spec || {};
     ST.warn = [];
     if (ST.studio) { if (ST.studio.parent) ST.studio.parent.remove(ST.studio); ST.studio = null; }
@@ -202,11 +224,11 @@
     var kind = spec.species || spec.unit || "men";
     var kinds = String(kind).split("|");
     for (var i = 0; i < kinds.length; i++) {
-      if (kinds[i] !== "men" && !(SP[kinds[i]] && SP[kinds[i]].build)) {
+      if (!knownUnit(kinds[i])) {
         return { ok: false, error: "unknown species \"" + kinds[i] + "\". Known: " + S.species().join(" ") };
       }
     }
-    if (spec.vs && spec.vs !== "men" && !(SP[spec.vs] && SP[spec.vs].build)) return { ok: false, error: "unknown species \"" + spec.vs + "\"" };
+    if (spec.vs && !knownUnit(spec.vs)) return { ok: false, error: "unknown species \"" + spec.vs + "\"" };
     var pose = spec.pose || "idle";
     var fight = pose === "fight" || !!spec.vs;
     var n = Math.max(1, Math.min(200, +spec.n || 1));

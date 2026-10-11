@@ -150,12 +150,14 @@
     return "units/" + (k === "species" ? "species" : "vehicles") + "/" + id + ".js";
   }
   function loadOne(id) {
-    if (REG[id]) return Promise.resolve();
     if (loading[id]) return loading[id];
     const rel = fileOf(id);
     if (!rel || typeof document === "undefined") return Promise.resolve();
     const root = (CBZ.studio && CBZ.studio.root) || "../src/";
     const extra = (manifest()[id] && manifest()[id].needs) || [];
+    // already registered (a tool swapped the file in): its engine files still
+    // have to be there before anything builds it
+    if (REG[id]) return (loading[id] = Promise.all(extra.map(loadScript)));
     loading[id] = Promise.all(extra.map(loadScript)).then(function () { return loadScript(rel); });
     // one tag per path, however many units need it (five hulls share mil_armor)
     function loadScript(r) {

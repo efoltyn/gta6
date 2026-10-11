@@ -115,8 +115,15 @@ function originMain() {
    CBZ.defineSpecies per animal, last write wins); anything else opts in with
    the testbus marker. wildlife_orca.js is NOT (it stands up its own fight). */
 const hotCache = new Map();
+/* THE UNIT FILES (docs/npcwar/ARCHITECTURE.md): src/units/species|vehicles/<id>.js
+   only call CBZ.unitKit.register (last write wins) and the kit files only
+   (re)define their namespace. A page loads unit files LAZILY (a roster asks
+   for them), so a changed one is swapped in even when the page never loaded
+   it: that is the 1-2 s glance an animal or vehicle agent gets. */
+const UNIT_FILE = /^src\/units\/(species|vehicles|kit)\/[^/]+\.js$/;
 function hotSafe(commit, f) {
   if (/^src\/city\/wildlife\/[^/]+\.js$/.test(f)) return true;
+  if (UNIT_FILE.test(f)) return true;
   if (!f.endsWith(".js")) return false;
   const k = commit + ":" + f;
   if (hotCache.has(k)) return hotCache.get(k);
@@ -210,7 +217,7 @@ async function acquire(c, world, query, commit, T) {
     if (p.wk !== wk || p.pg.closed || p.dirty) continue;
     const ch = changed(p.commit, commit);
     if (ch == null) continue;
-    const rel = ch.filter((f) => p.loaded.has(f));
+    const rel = ch.filter((f) => p.loaded.has(f) || UNIT_FILE.test(f));
     if (!rel.length) { best = p; bestHow = "warm"; bestSwap = []; break; }
     if (rel.every((f) => hotSafe(commit, f)) && (!best || bestHow !== "warm")) { best = p; bestHow = "hot"; bestSwap = rel; }
   }
@@ -231,7 +238,7 @@ async function acquire(c, world, query, commit, T) {
   let swap = [];
   if (main && known && main !== commit) {
     const ch = changed(main, commit);
-    const rel = ch ? ch.filter((f) => known.has(f)) : null;
+    const rel = ch ? ch.filter((f) => known.has(f) || UNIT_FILE.test(f)) : null;
     if (rel && rel.every((f) => hotSafe(commit, f))) { base = main; swap = rel; }
   }
   while (c.pages.length >= CFG.pagesPerChrome) {

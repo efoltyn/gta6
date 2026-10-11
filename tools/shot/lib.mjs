@@ -76,6 +76,26 @@ export const NPCWAR_STAGE_KEYS = new Set(["species", "unit", "n", "vs", "vn", "p
 // the CBZ worlds (page/world.js): look point, bearing, orbit radius; the rest is page URL (cfg_X=1, seed=N)
 export const WORLD_STAGE_KEYS = new Set(["at", "heading", "dist", "pose"]);
 export const NPCWAR_BASE_QUERY = "auto=1&map=arena&red=1&blue=1&killcam=0";
+/* NPC War's own URL names (docs/npcwar/ARCHITECTURE.md §6) work in --setup
+   too, so a matchup link and a shot are written the same way:
+     a=<unit>  -> species      b=<unit> -> vs       n=AvB -> n + vn
+     aw at     -> rw rt        arena    -> map (page)                          */
+export function npcwarAliases(params) {
+  const o = { ...params };
+  if (o.a != null && o.species == null && o.unit == null) { o.species = o.a; }
+  if (o.b != null && o.vs == null) { o.vs = o.b; }
+  delete o.a; delete o.b;
+  if (o.n != null) {
+    const m = /^(\d+)\s*v\s*(\d+)$/i.exec(String(o.n));
+    if (m) { o.n = m[1]; if (o.vn == null) o.vn = m[2]; }
+  }
+  if (o.aw != null && o.rw == null) o.rw = o.aw;
+  if (o.at != null && o.rt == null) o.rt = o.at;
+  delete o.aw; delete o.at;
+  if (o.arena != null && o.map == null) o.map = o.arena;
+  delete o.arena;
+  return o;
+}
 
 export function newId(agent) {
   return `${Date.now().toString(36)}-${slug(agent).slice(0, 20)}-${Math.random().toString(36).slice(2, 6)}`;

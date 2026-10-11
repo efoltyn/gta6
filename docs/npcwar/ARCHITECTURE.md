@@ -124,9 +124,12 @@ change it only in coordination.
 | `src/battle/arenas/sea.js` | open water: swell, reef, fleet, depth | water |
 | `src/battle/arenas/yard.js` | the kill box | terrain |
 
-Melee for men is the punch exchange in `step.js` (around the `m.fists` branch) together with
-`CBZ.combatIQ.melee`. A melee agent should lift it into its own `src/battle/melee.js` as its
-first move, then own that file.
+| `src/battle/melee.js` | men with bare hands: `stepFists` (combat_iq's IQ.melee, damage x `IQ.lastBlow(m).dmgMul`), `knockedDown` (a man on the floor is not steered) | melee |
+
+Melee is shared with every game. The fighter brain is `systems/melee.js` (`CBZ.melee`, in the
+`verbs` pack, which is in `NEED`). combat_iq's `IQ.melee` hands NPC fist fights to it, and the
+possessed man goes through `CBZ.melee.drive` (`youMelee` in `player.js`). Everything is
+feature-detected, so the page works before that layer lands on main.
 
 ---
 
@@ -240,8 +243,67 @@ of writing its own.
 
 **A vehicle.** Add a manifest row with `V(name, plural, domain, needs)` and create
 `src/units/vehicles/my_id.js`. Shared drive, turret and armour maths go in
-`src/units/kit/vehicle.js`. The battle side (crew, AI, firing, damage states) is
-`src/battle/vehicles.js`.
+`src/units/kit/vehicle.js` (`CBZ.vehicleDrive`: tracked/wheeled drive, ground-follow
+suspension, rate-limited turret laying, ballistics, armour zones, penetration, damage states,
+the crew seat book; pure maths, node-loadable). The battle side (crew, AI, firing, damage
+states, wrecks, player driving) is `src/battle/vehicles.js`.
+
+The 15 vehicles today, each on the game's existing builder (there is no new art in wave A; the
+vehicle agents redraw):
+
+| id | name | builder | crew | weapons | armour F/S/R/T (mm) |
+|---|---|---|---|---|---|
+| m1_abrams | M1A2 Abrams | milArmor.tank | commander, gunner, loader, driver | 120 mm, coax, .50 | 800/120/50/40 |
+| bradley_ifv | M2A3 Bradley (6 dismounts) | milArmor.ifv | driver, gunner, commander | 25 mm, TOW, coax | 60/30/20/15 |
+| stryker_apc | Stryker (9) | milArmor.apc | driver, commander | .50 RWS | 20/14/12/8 |
+| hmmwv | Humvee (2) | milArmor.luv | driver, gunner | .50 | 10/10/8/5 |
+| m35_truck | M35 (16) | milArmor.truck | driver, commander | none | 2/0/0/0 |
+| m270_mlrs | label "M142 HIMARS" (the model is the wheeled pod) | milArmor.mlrs | 3 | 6 rockets | 8/2/2/2 |
+| patriot_launcher | Patriot | milArmor.patriot | 2 | SAM (air only) | 6/2/2/2 |
+| technical | MG technical | stand-in in its file (warlord's builder needs CBZ.warlord) | driver, gunner | MG | 1/0/0/0 |
+| ah64_apache | AH-64 | milAir attackHeli | pilot, gunner | 30 mm, Hellfire, Hydra | 20/15/10/8 |
+| uh60_black_hawk | UH-60 (11) | milAir utilityHeli | pilot, copilot, door gunner | minigun | 8/6/4/4 |
+| f35 | F-35A | milAir fighter | pilot | 2 GBUs/pass, 25 mm | 2 |
+| mq9_reaper | MQ-9 | milAir drone | remote | Hellfire | 0 |
+| b52 | B-52H | milAir bomber | 5 | bomb sticks | 0 |
+| b2_spirit | B-2 | strategicModels.b2 | 2 | heavy bombs | 0 |
+| a400m | A400M (airdrops 116) | milAir cargo | 3 | none | 0 |
+
+**Crew rules.** A side's men fill seats in roster order: drivers and pilots first, then gunners,
+copilots, commanders, loaders, then passenger benches. Seated men are off the field (hidden, not
+targets). A vehicle nobody on its side was assigned to gets its full crew implicitly. A one-man
+crew stops to shoot, and a cannon with no loader fires 1.6x slower. Passengers dismount at the
+vehicle's dismount range, or when the hull is penetrated or immobilised, and transports airdrop.
+A knocked-out vehicle's crew bails out as wounded men: 85% survive, 30% if it blew up. Rifles,
+teeth and fists do nothing to thick plate.
+
+**Player.** The rifle button (G) joins a crewed vehicle on your side first. W/S throttle, A/D
+steer (or the touch stick), the mouse lays the turret, attack (LMB / J) fires your seat's weapon,
+X changes seat. The camera is a chase cam. G hands it back. In aircraft you work the guns while
+the AI flies.
+
+**Known gaps.** The HIMARS' indirect fire needs tuning, the F-35 drops few bombs, aircraft fly
+their own pattern (not `studio.fly`), and there is no per-track split on the rig. In node,
+strategic.js and the A400M build fall back to stand-ins (browser untested).
+
+### Seeing your work: the shot service
+
+Never launch Chrome yourself. Ask the warm capture pool (`tools/shot/`), which shoots your
+working tree as it is, uncommitted edits included:
+
+```
+node tools/shot/req.mjs --preset turntable --setup 'species=bengal_tiger' --wait
+node tools/shot/req.mjs --preset gait --setup 'species=dog' --wait            (also walk|trot|run|attack|death|glance)
+node tools/shot/req.mjs --preset matchup --setup 'a=m1_abrams&b=men&n=1v30' --wait
+node tools/shot/req.mjs --preset turntable --setup 'species=lion' --ba --wait  (origin/main vs you, one sheet)
+```
+
+It prints a sheet path: Read it. `--setup` takes the matchup URL names (`a b n=AvB aw at arena`)
+as well as the stage keys (`species unit vs vn pose speed heading stage grid ruler`). Any other
+key goes on the page URL. A change that touches only `src/units/species|vehicles|kit/*.js` (or
+the bestiary's `src/city/wildlife/*.js`) is hot-swapped into a warm page, so a glance takes 1-2 s.
+The stage loads the unit's file and its `needs` through `CBZ.unitKit.need()` first. A glance is
+not a test: look, fix, look.
 
 ---
 

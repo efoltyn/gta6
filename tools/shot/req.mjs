@@ -18,6 +18,7 @@
    WHAT TO SHOOT (NPC War)
      --preset P         glance | turntable | gait | walk | trot | run | attack | death | matchup
      --setup S          URL params: species=lion  n=3  vs=men  vn=20  pose=walk,trot
+                        (the matchup URL names work too: a=lion b=men n=3v20 aw at arena)
                         heading=30  speed=5  style=maul  stage=studio|map  grid=0  ruler=0
                         any OTHER key goes on the page URL (map=water, blood=0, ...)
                         or a JS snippet: run after spawning with (S=subjects, B=__battle, CBZ, THREE, spec)
@@ -37,7 +38,7 @@ import { copyFileSync, openSync, existsSync, rmSync, mkdtempSync } from "node:fs
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { SD, LOG, OUT_ROOT, PRESETS, NPCWAR_STAGE_KEYS, WORLD_STAGE_KEYS, NPCWAR_BASE_QUERY, CFG, parseSetup, newId, daemonInfo, writeJson, readJson, resultPath, now, sleep } from "./lib.mjs";
+import { SD, LOG, OUT_ROOT, PRESETS, NPCWAR_STAGE_KEYS, WORLD_STAGE_KEYS, NPCWAR_BASE_QUERY, npcwarAliases, CFG, parseSetup, newId, daemonInfo, writeJson, readJson, resultPath, now, sleep } from "./lib.mjs";
 import { merge2 } from "../testbus/tree.mjs";
 import { mainRepo } from "../testbus/lib.mjs";
 
@@ -104,7 +105,8 @@ const presetName = val("--preset", null);
 const P = presetName ? (PRESETS[world] || {})[presetName] : null;
 if (presetName && !P) die(`no preset "${presetName}" for ${world} (know: ${Object.keys(PRESETS[world] || {}).join(", ")})`);
 const S = parseSetup(val("--setup", ""));
-const params = { ...(P ? P.setup : {}), ...S.params };
+const params0 = { ...(P ? P.setup : {}), ...S.params };
+const params = world === "npcwar" ? npcwarAliases(params0) : params0;
 const js = [S.js, val("--js", "")].filter(Boolean).join(";\n");
 const stage = {}, page = new URLSearchParams(world === "npcwar" ? NPCWAR_BASE_QUERY : "");
 const STAGE_KEYS = world === "npcwar" ? NPCWAR_STAGE_KEYS : WORLD_STAGE_KEYS;
