@@ -454,7 +454,7 @@ function thinkVehicle(u) {
     let want = stand;
     if (u.tgt.beast || u.tgt.fists) want = Math.min(stand, 18);
     if (u.tgt.launcher && d < 60) want = 90;
-    if (!u.sees) want = Math.min(want, d * 0.6);
+    if (!u.sees && !vehIndirect(u)) want = Math.min(want, d * 0.6);   // an indirect launcher needs no sight line: it keeps its standoff
     if (d > want * 1.15 || d < want * 0.6) {
       const go = d - want;
       u.target.set(u.pos.x + dx / d * go, 0, u.pos.z + dz / d * go);
@@ -856,11 +856,15 @@ function vehFireHE(u, w, t, dist) {
   const ch = Math.cos(sol.elev), sh = Math.sin(sol.elev);
   const vel = new THREE.Vector3((tx - from.x) / dd * v0 * ch, v0 * sh, (tz - from.z) / dd * v0 * ch);
   u._he = { pen: he.pen, beh: he.beh, he: true, cls: "he" };
-  rockets.push({
+  const rk = {
     pos: V().copy(from), vel: vel, grav: g, t: 0, by: u, life: Math.max(7, sol.t * 1.5 + 2),
     w: { blastRadius: he.blast || 6, blastPower: (he.power || 1.4) / 0.55, sfx: null },
     trail: CBZ.studio.trail({ length: 12, color: 0xffd9a0, opacity: 0.45, minStep: 2 }),
-  });
+  };
+  rockets.push(rk);
+  // the rig may fly its own round (rig.launched: a guided rocket's profile,
+  // its homing mark, its body): fire.js stepRockets flies whatever it set
+  if (u.rig && u.rig.launched) { try { u.rig.launched(rk, u._firing, t); } catch (e) { console.warn("[war] rig.launched", e); } }
   const dCam = Math.sqrt(camDist2(u.pos));
   if (dCam < 600) { try { CBZ.sfx("explosion", { dist: dCam, ghost: true, volume: 0.7, pitch: 0.6 }); } catch (e) {} }
 }
