@@ -325,6 +325,87 @@
     return out;
   }
 
+  /* ---- THE FLOWN ROUND (NPC War's fire.js, src/weapons/ballistics.js) ------
+     CBZ.battleArmour.layer(unit, zone, hit) -> {mat, mm} | null is the hook
+     the weapons layer asks for the zone a traced round enters (ballistics
+     zones: head, torso, gut, armL/armR, legL/legR). The ballistics model
+     stops a round when the layer is thicker than the round's penetration
+     depth in that material. This answers in that language with THIS file's
+     rules: which piece covers the point (coverage roll inside the zone),
+     whether it holds (threat v the piece's cracked rating, the same logistic),
+     a helmet's deflection, and the crack it takes. Stopped -> a layer far
+     thicker than the round can cross; beaten -> a layer it crosses, losing
+     speed; nothing there -> null. The stop's blunt trauma is ballistics'
+     own (12% of the energy); the stagger and the winded seconds are left on
+     state.last for the damage funnel (battle/damage.js). hit = { cart, v, v0,
+     dx, dz } (the round: a ballistics cartridge and its speed). */
+  // the ballistics zone -> this file's zones (area-weighted inside it)
+  const BZ = { head: ["skull", "face"], torso: ["neck", "thorax", "side", "armpit"], gut: ["abdomen", "pelvis"] };
+  // a rating on the threat scale as mm of mild steel, the ballistics layer's unit
+  const RATE_MM = [[0.9, 3], [1.4, 4.5], [1.7, 5.5], [2.2, 7.5], [3.6, 13.6], [3.75, 14.6], [4.6, 19], [4.8, 21], [6, 40]];
+  function rateMM(r) {
+    if (r <= RATE_MM[0][0]) return RATE_MM[0][1];
+    for (let i = 1; i < RATE_MM.length; i++) {
+      const a = RATE_MM[i - 1], b = RATE_MM[i];
+      if (r <= b[0]) return a[1] + (b[1] - a[1]) * (r - a[0]) / (b[0] - a[0]);
+    }
+    return RATE_MM[RATE_MM.length - 1][1];
+  }
+  function layer(unit, zone, hit) {
+    const state = unit && unit.armour;
+    if (!state || !state.pieces) return null;
+    const list = BZ[zone];
+    if (!list) return null;                         // a limb: no plate on it
+    const R = Math.random;
+    let tot = 0;
+    for (const k of list) tot += ZONES[k].area || ZONES[k].headArea * 0.5;
+    let u = R() * tot, zn = list[0];
+    for (const k of list) { u -= ZONES[k].area || ZONES[k].headArea * 0.5; if (u <= 0) { zn = k; break; } }
+    const yaw = unit.yaw != null ? unit.yaw : (unit.group ? unit.group.rotation.y : 0);
+    const cv = coverOf(state, zn, { dirX: hit && hit.dx, dirZ: hit && hit.dz, yaw: yaw }, R);
+    if (!cv) return null;
+    const p = cv.p;
+    p.hits++; state.hits = (state.hits || 0) + 1;
+    const B = CBZ.ballistics;
+    // the round's steel-equivalent penetration now, in mm
+    let pdMM = 10, ej = 1750;
+    if (B && hit && hit.cart) {
+      pdMM = B.depth(hit.cart, "steel", hit.v, hit.v0) * 1000;
+      ej = B.energy(hit.cart, hit.v) / (hit.cart.pellets || 1);
+    }
+    // aramid (a soft panel, a helmet shell) is rated against handgun speeds: a
+    // rifle round past ~600 m/s cuts it like the cloth it is
+    const pdReal = pdMM;
+    if (p.mat === "aramid" && hit && hit.v > 600) pdMM *= 2.2;
+    const mm = rateMM(ratingOf(p));
+    const rifle = pdMM > 8.5;
+    const last = { t: state.hits, piece: cv.key, zone: zn, stopped: false, pen: false, deflect: false, stagger: 0, winded: 0 };
+    state.last = last;
+    if (p.kind === "helmet" && pdMM > mm && R() < p.deflect) {
+      last.deflect = last.stopped = true; last.stagger = 0.72; last.winded = 0.6;
+      p.integrity = Math.max(0, p.integrity - 0.18);
+      state.stops++;
+      return { mat: "steel", mm: pdMM * 4 + 10, piece: cv.key, deflect: true };
+    }
+    // the same logistic as resolve(), on the steel scale (a mm of margin ~ 0.1 of threat)
+    const pPen = 1 / (1 + Math.exp(-((pdMM - mm) / Math.max(1, mm * 0.06))));
+    const cost = ej * RULES.crackPerJ * (RULES.crack[p.mat] || 0.5);
+    if (R() < pPen) {
+      last.pen = true; last.stagger = rifle ? 0.5 : 0.3;
+      p.integrity = Math.max(0, p.integrity - cost * 1.6);
+      state.pens++;
+      // it crosses: a layer it goes through, costing it what the plate took
+      return { mat: "steel", mm: Math.min(mm, pdReal * 0.9), piece: cv.key };
+    }
+    last.stopped = true;
+    const e = Math.min(1.6, Math.sqrt(ej / 1750));
+    last.stagger = Math.min(1, (rifle ? RULES.staggerRifle : RULES.staggerPistol) * (0.7 + 0.3 * e));
+    last.winded = p.kind === "helmet" ? 0.5 : (rifle ? RULES.windedRifle : RULES.windedPistol) * (0.7 + 0.3 * e);
+    p.integrity = Math.max(0, p.integrity - cost);
+    state.stops++;
+    return { mat: "steel", mm: pdMM * 4 + 10, piece: cv.key };
+  }
+
   // the share of a standing man's presented area under armour (blasts)
   function coverage(state) {
     if (!state || !state.pieces) return 0;
@@ -352,5 +433,10 @@
     pickZone: pickZone,
     resolve: resolve,
     coverage: coverage,
+    layer: layer,
+    rateMM: rateMM,
   };
+  // the weapons layer's name for the hook (src/battle/fire.js armsHit)
+  CBZ.battleArmour = CBZ.battleArmour || {};
+  CBZ.battleArmour.layer = layer;
 })();

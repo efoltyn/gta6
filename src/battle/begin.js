@@ -180,15 +180,9 @@ function urlLens() {
   const c = SET.cam;
   if (c === "a" || c === "b") setCamMode("follow", c === "a" ? "red" : "blue");
   else if (c) {
-    let pick = null;
-    const ix = /^([ab]):(\d+)$/.exec(c);
-    for (let i = 0; i < men.length && !pick; i++) {
-      const m = men[i];
-      if (m.dead) continue;
-      if (ix) { if (m.team === (ix[1] === "a" ? "red" : "blue") && m.i === +ix[2]) pick = m; }
-      else if ((m.species && m.species.id === c) || m.unitId === c || (c === "men" && !m.beast && !m.vehicle)) pick = m;
-    }
-    if (pick) { STUDY.m = pick; setCamMode("study"); }
+    // the study desk follows it, and finds the next of its kind if it falls
+    const pick = studyFind(c);
+    if (pick) { STUDY.m = pick; STUDY.want = c; setCamMode("study"); }
   }
   if (SET.freeze) setSpeed(0);
 }

@@ -34,6 +34,9 @@ CBZ.npcwar.onBoot(function () {
 function hitKind(imp) {
   if (!imp) return null;
   if (imp.kind) return imp.kind;
+  // a flown round (fire.js armsHit) was already resolved against the kit by
+  // CBZ.battleArmour.layer: its damage is final here
+  if (imp.bullet || imp.pen != null) return null;
   if (imp.cause === "bomb") return "blast";
   if (imp.cause === "crush") return "crush";
   const by = imp.by;
@@ -73,6 +76,13 @@ function hurtMan(m, dmg, imp) {
   } else if (kind === "bullet" && imp.headshot) dmg *= 2.2;      // a beast's head: the old rule
   m.hp -= dmg;
   if (res) armourHit(m, res, imp);
+  // ...and what the kit did to that round (systems/armour.js layer: a stop
+  // still winds him and rocks him; fire.js already flinched him)
+  else if (imp && imp.bullet && m.armour && m.armour.last && m.armour.last.t === m.armour.hits) {
+    const L = m.armour.last; m.armour.last = null;
+    if (L.winded > 0) m.windedT = Math.max(m.windedT || 0, L.winded);
+    m.lastHit = L;
+  }
   if (CBZ.combatIQ && CBZ.combatIQ.suppress) CBZ.combatIQ.suppress(m, 0.9);
   // a round that lands rattles harder than one that snaps past
   m.supp = Math.min(SUPP_CAP, (m.supp || 0) + SUPP_HIT);

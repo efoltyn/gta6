@@ -36,7 +36,20 @@
 
    STUDY.m is a REFERENCE to a live body, so it can go stale exactly once (a
    corpse), and every framing function revalidates before it reads. */
-const STUDY = { m: null, idx: 0, orbit: 0.9, spin: 0.28 };
+const STUDY = { m: null, idx: 0, orbit: 0.9, spin: 0.28, want: null };
+/* ?cam=<unit id> (begin.js urlLens) names a KIND, not a body: when the one
+   on the lens dies or flies off the map, the lens goes to the next living
+   body of the same kind rather than to the biggest animal on the field. */
+function studyWants(m, sel) {
+  if (!m || m.dead || m.fled || !sel) return false;
+  const ix = /^([ab]):(\d+)$/.exec(sel);
+  if (ix) return m.team === (ix[1] === "a" ? "red" : "blue") && m.i === +ix[2];
+  return (m.species && m.species.id === sel) || m.unitId === sel || (sel === "men" && !m.beast && !m.vehicle);
+}
+function studyFind(sel) {
+  for (let i = 0; i < men.length; i++) if (studyWants(men[i], sel)) return men[i];
+  return null;
+}
 function studyList() {
   const out = [];
   for (let i = 0; i < men.length; i++) if (!men[i].dead && men[i].beast) out.push(men[i]);
@@ -57,6 +70,7 @@ function studyPick(delta) {
     }
     STUDY.idx = bi;
   } else {
+    STUDY.want = null;                       // a person walking the roster has picked by hand
     const cur = STUDY.m ? list.indexOf(STUDY.m) : -1;
     const from = cur >= 0 ? cur : STUDY.idx;
     STUDY.idx = ((from + delta) % list.length + list.length) % list.length;
@@ -92,7 +106,11 @@ function studyRange(m) {
 }
 function studyBody() {
   let m = STUDY.m;
-  if (!m || m.dead) m = studyPick(null);
+  if (!m || m.dead || m.fled) {
+    const w = STUDY.want ? studyFind(STUDY.want) : null;
+    if (w) STUDY.m = m = w;
+    else m = studyPick(null);
+  }
   return m;
 }
 function studyHold(m) {
@@ -103,11 +121,29 @@ function frameStudy(dt) {
   const m = studyBody();
   if (!m) { cam.wFocus.set(MAP.cx, MAP.groundAt(MAP.cx, MAP.cz), MAP.cz); cam.wDist = 60; return; }
   STUDY.orbit += STUDY.spin * dt;
+  if (m.vehicle) { frameStudyVehicle(m, dt); studyHold(m); return; }
   cam.wFocus.set(m.pos.x, m.pos.y + (m.eyeH || 1) * 0.3, m.pos.z);
   cam.wYaw = (m.faceH == null ? 0 : m.faceH) + STUDY.orbit;
   cam.wPitch = 0.22;
   cam.wDist = studyRange(m);
   studyHold(m);
+}
+/* A HULL IS FOLLOWED, NOT ORBITED. A tank at 18 m/s or a helicopter in a
+   pop-up leaves a free orbit behind in a second, so the lens rides it: off
+   the rear quarter, swinging slowly across it (the orbit is a sway of +-0.6
+   rad, not a spin), back by its own size, the airframe and its mark both
+   read when the mark is close. Yaw is unwrapped so a heading that crosses
+   +-pi does not spin the lens the long way round. */
+function frameStudyVehicle(m, dt) {
+  const sz = m.vlen || 3, H = m.vheight || 2.5;
+  cam.wFocus.set(m.pos.x, m.pos.y + H * 0.55, m.pos.z);
+  const want = m.h + Math.PI + 0.75 + 0.6 * Math.sin(STUDY.orbit * 0.7);
+  let d = want - cam.wYaw;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  cam.wYaw += d;
+  cam.wPitch = m.air ? 0.2 : 0.24;
+  cam.wDist = Math.max(10, sz * 2 * 1.7 + 4);
 }
 function frameUnder(dt) {
   const m = studyBody();

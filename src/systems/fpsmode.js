@@ -4221,6 +4221,8 @@
      and the inverse has a closed form. Used by the latency audit and by any
      tool asking "how long is this round in the air". */
   function bulletFlightTime(w, dist) {
+    // ONE LAW: weapons/ballistics.js owns the flight maths every gun shares
+    if (CBZ.ballistics) return Math.min(12, CBZ.ballistics.tof(w.v0 || 0, w.dragK || 0, dist));
     const v0 = w.v0 || 0, k = w.dragK || 0;
     if (v0 <= 0) return 0;
     if (k <= 1e-4) return dist / v0;

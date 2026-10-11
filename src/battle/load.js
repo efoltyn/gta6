@@ -38,6 +38,8 @@ function isWaterSpecies(u) {
 }
 const ARMOURY = [
   "weapons/weapon-data.js",
+  "weapons/ballistics.js",     // what a round does: flight, drop, penetration, wounds (fire.js flies it)
+  "weapons/munitions.js",      // the PG-7 round, and the smoke: muzzle, backblast, dust that hangs
   "weapons/weapon-scale.js",   // real-dimension display sizing (math, not magic scalars)
   "systems/fphands.js",        // the one first-person hand (the gun kit closes it on every grip)
   "weapons/optics.js",         // the one real scope factory (the sniper's glass)
@@ -92,7 +94,7 @@ function loadArmoury() {
     if (!left) return resolve();
     ARMOURY.forEach(function (rel) {
       const s = document.createElement("script");
-      s.src = CBZ.studio.root + rel;
+      s.src = CBZ.studio.root + rel + (CBZ.studio.bust || "");
       s.async = false;                        // ordered execution, parallel download
       const tick = function () {
         filesIn++; bar("ARMOURY");
@@ -113,7 +115,7 @@ function loadArmourySerial() {
     chain = chain.then(function () {
       return new Promise(function (resolve) {
         const s = document.createElement("script");
-        s.src = CBZ.studio.root + rel;
+        s.src = CBZ.studio.root + rel + (CBZ.studio.bust || "");
         s.async = false;
         s.onload = function () { filesIn++; bar("ARMOURY"); resolve(); };
         s.onerror = function () { filesIn++; resolve(); };

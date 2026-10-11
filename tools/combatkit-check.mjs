@@ -34,7 +34,7 @@ const read = (f) => readFileSync(new URL(f, ROOT), "utf8");
 const FILES = ["src/vendor/three.r128.min.js", "src/config.js", "src/core/matrixskip.js", "src/world/materials.js", "src/systems/fphands.js",
   "src/entities/footwear.js", "src/entities/character.js", "src/entities/headwear.js", "src/entities/eyewear.js", "src/entities/heritage.js",
   "src/entities/moves.js", "src/entities/gait.js", "src/entities/poses.js", "src/entities/soldier.js", "src/entities/moves_posture.js",
-  "src/warlord/camo.js", "src/systems/armour.js", "src/entities/combatkit.js"];
+  "src/warlord/camo.js", "src/systems/armour.js", "src/entities/combatkit.js", "src/weapons/ballistics.js"];
 const ctx = vm.createContext({ console: { log() {}, warn() {}, error: console.error }, Math, setTimeout: () => 0, clearTimeout() {}, performance, Date });
 ctx.window = ctx; ctx.self = ctx; ctx.document = fakeDocument();
 ctx.navigator = { userAgent: "node" }; ctx.location = { search: "", href: "" };
@@ -260,6 +260,31 @@ ok(st.stopped && st.stagger > 0.3 && st.winded > 1 && st.dmg > 0 && st.dmg < 10,
 const bl0 = A.resolve({ dmg: 100, kind: "blast" }).dmg, bl1 = A.resolve({ armour: A.issue(plate), dmg: 100, kind: "blast" }).dmg;
 ok(bl1 < bl0 * 0.9, "full kit should cut a blast (" + bl0 + " -> " + bl1.toFixed(1) + ")");
 
+// THE FLOWN ROUND (fire.js -> CBZ.battleArmour.layer -> ballistics.wound's {mat, mm})
+const BL = CBZ.ballistics;
+function layerStop(spec, cartId, zone, n) {
+  const c = BL.CART[cartId];
+  let st = 0, tried = 0;
+  while (tried < n) {
+    const u = { armour: A.issue(spec), yaw: 0 };
+    const L = CBZ.battleArmour.layer(u, zone, { cart: c, v: c.v0 * 0.9, v0: c.v0, dx: 0, dz: -1 });
+    if (!L) continue;                               // the roll missed the plates
+    tried++;
+    if (L.mm / 1000 >= BL.depth(c, L.mat, c.v0 * 0.9, c.v0)) st++;
+  }
+  return st / n;
+}
+const L556 = layerStop(plate, "556", "torso", 300), L762 = layerStop(plate, "762x54r", "torso", 300), L50 = layerStop(plate, "50bmg", "torso", 300);
+const L9 = layerStop(soft, "9x19", "torso", 300), L39 = layerStop(soft, "762x39", "torso", 300);
+const Lfr = layerStop({ helmet: "ach" }, "frag", "head", 300);
+ok(L556 > 0.6, "layer: ESAPI-covered torso stops 5.56 only " + (L556 * 100).toFixed(0) + "%");
+ok(L762 > 0.6, "layer: ESAPI-covered torso stops 7.62x54R only " + (L762 * 100).toFixed(0) + "%");
+ok(L50 < 0.1, "layer: plates stop .50 BMG " + (L50 * 100).toFixed(0) + "%");
+ok(L9 > 0.95 && L39 < 0.1, "layer: IIIA v 9 mm " + (L9 * 100).toFixed(0) + "%, v 7.62x39 " + (L39 * 100).toFixed(0) + "%");
+ok(Lfr > 0.95, "layer: helmet v fragment " + (Lfr * 100).toFixed(0) + "%");
+ok(CBZ.battleArmour.layer({ armour: A.issue(plate) }, "legL", {}) === null, "layer: a leg has no plate");
+console.log("layer (fire.js): plated torso v 5.56 " + (L556 * 100).toFixed(0) + "%, v 7.62x54R " + (L762 * 100).toFixed(0) + "%, v .50 " + (L50 * 100).toFixed(0) +
+  "%; IIIA v 9mm " + (L9 * 100).toFixed(0) + "%, v 7.62x39 " + (L39 * 100).toFixed(0) + "%; helmet v frag " + (Lfr * 100).toFixed(0) + "%");
 for (const r of rows.filter((r, i) => i % 6 === 0)) console.log(r);
 console.log("worst: carrier inside torso " + (worstIn * 1000).toFixed(1) + " mm, plate gap " + (worstFloat * 1000).toFixed(1) +
   " mm, knee pad inside " + (worstKnee * 1000).toFixed(1) + " mm / off " + (worstKneeGap * 1000).toFixed(1) + " mm, arm into carrier " +

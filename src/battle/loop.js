@@ -182,10 +182,9 @@ function frame(dt) {
     const d2 = (m.pos.x - camP.x) * (m.pos.x - camP.x) + (m.pos.z - camP.z) * (m.pos.z - camP.z);
     m.animF = (m.animF + 1) & 1023;
     const every = CBZ.battleLod.animEvery(d2);      // battle/core/lod.js: the one tier table
-    if (m.vehicle) {                     // tracks, wheels, rotors (src/battle/vehicles.js)
-      if ((m.animF % every) === 0) animateVehicle(m, dt * every);
-      continue;
-    }
+    // a vehicle animates itself on the SIM clock, in stepVehicle (its unit
+    // file's animate(veh, dt, ctx), src/battle/vehicles.js vehAnimate)
+    if (m.vehicle) continue;
     if (m.beast) {
       // the species walks on the shared rig — legs swing by distance
       // actually moved, so the charge, the march and the rout all animate
@@ -204,6 +203,7 @@ function frame(dt) {
       // of cover and he would stand up straight behind it. One boolean, and
       // the posture the fight brain already chose is finally visible.
       m.char.crouch = crouchPose(m);     // the stance the fight uses (THE MEN: STANCE)
+      m.char.pronePose = m.stance === "prone";   // flat behind the gun (fire.js weaponStance)
       try { CBZ.animChar(m.char, m.speed * speed, dt * every); } catch (e) {}
     }
     const engaged = m.tgt && !m.tgt.dead && m.sees;

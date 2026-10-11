@@ -141,7 +141,8 @@ function seaReef(cx, cz) {
      its bow section torn off below and the mast down. The colliders are
      the same boxes as before: they were always the honest volumes. */
   const rx = cx, rz = cz + 96, bed = SEA.seabed;
-  const collide = function (w, h, d, x, y, z) { CBZ.micro.addBoxCollider(x, y, z, w, h, d); };
+  // a hull is steel plate with a ship's insides behind it (src/battle/fire.js)
+  const collide = function (w, h, d, x, y, z) { CBZ.micro.addBoxCollider(x, y, z, w, h, d, { mat: "steel", hollow: 0.012 }); };
   const reefPaint = function (salt) {
     return function (x, y, z, ny) {
       let c = [0.2, 0.25, 0.23];
