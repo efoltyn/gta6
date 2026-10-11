@@ -73,6 +73,14 @@ SET.bo = parseInt(Q.get("bo") || saved.bo || 1, 10) || 1;
 let SERIES = CBZ.battleSeries.make(SET.bo, Q.get("sa"), Q.get("sb"));
 if (SERIES.over) SERIES = CBZ.battleSeries.make(SET.bo, 0, 0);   // a decided series starts over
 SET.bo = SERIES.bo;
+/* THE BATTLE'S SEED. The sim is deterministic (state.js `lcg`, the animals'
+   size draw), which is right, but with ONE fixed seed every round of a best
+   of 5 between two AI armies was the same battle played five times, and one
+   lion v one tiger was always the same two individuals. `?seed=N` names the
+   battle; with none, the series round (sa + sb) is the seed, so round 1 is
+   exactly what it always was and the rematches differ. tools/npcwar-arena.mjs
+   runs a matchup over seeds through this. */
+const BATTLE_SEED = (parseInt(Q.get("seed"), 10) || 0) + (Q.get("seed") ? 0 : (SERIES.a + SERIES.b));
 /* A COUNTED ROSTER CARRIES ITS OWN SIZE: "m1_abrams*3,men*20" is 23 bodies
    whatever `n` said. */
 if (CBZ.battleRoster.parse(SET.redU).counted) SET.redN = CBZ.battleRoster.size(SET.redU);

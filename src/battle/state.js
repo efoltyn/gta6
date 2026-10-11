@@ -71,5 +71,5 @@ CBZ.npcwar.onBoot(function () {
   // seeded streams — the determinism law reaches world layout and combat alike
   sWorld = CBZ.seedStream("npcwar-world");
 });
-let _s = 421371;
+let _s = BATTLE_SEED ? ((421371 + BATTLE_SEED * 2654435761) % 2147483647) || 421371 : 421371;   // settings.js: ?seed= / the series round
 function lcg() { _s = (_s * 1103515245 + 12345) & 0x7fffffff; return _s / 0x7fffffff; }

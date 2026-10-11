@@ -100,6 +100,23 @@ function spreadGoal(m) {
   }
   if (n) { m.target.x += ox; m.target.z += oz; }
 }
+/* AN ANIMAL THAT GETS AWAY HAS GOT AWAY: off the field and counted as fled,
+   by the men's own rule (ai/morale.js: FLEE_GAPS start gaps from the enemy,
+   or 45 s of running). Whoever put it to flight: the beaten branch below, or
+   a species file's own nerve (a lion that quits a fight). Before this a
+   running animal faster than its pursuer ran off the map for ever, or led
+   it round in circles, and the battle could not end: tools/npcwar-arena.mjs
+   measured 1 gray wolf v 1 dog as 10 draws in 10 (300 s timeouts, the dog
+   1,400 m out and running), 10 wolves v a bear 13 in 16, an elephant v six
+   lions 9 in 10. */
+function beastEscaped(m, dt) {
+  if (m.state !== "flee") { m.fleeT = 0; return false; }
+  m.fleeT = (m.fleeT || 0) + dt;
+  const com = teamCOM[m.team === "red" ? "blue" : "red"];
+  const far = Math.hypot(m.pos.x - com.x, m.pos.z - com.z) > FLEE_GAPS * (MAP.gap || 150);
+  if (far || m.fleeT > 45) { m.fled = true; return true; }
+  return false;
+}
 // the beast's slow tick: pick the fight, close on it, surround it. The
 // strike itself is creature_combat's, in the bubble stepMan owns.
 function thinkBeast(m, tgt, thinkDt) {
@@ -206,6 +223,7 @@ function thinkMan(m, now) {
   m.hunt = HUNT[m.team];
   // HIS NERVE FIRST: a man who has broken is not deciding anything else
   if (routCheck(m, thinkDt)) return;
+  if (m.beast && beastEscaped(m, thinkDt)) return;
   // a man stepping off his own man's firing line finishes the step. Half a
   // second of not re-deciding is the whole point: re-deciding is what put
   // him back in the lane.

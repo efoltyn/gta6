@@ -78,8 +78,17 @@ function makeBeast(teamId, i, spIdIn) {
   let sizeMul = 1;
   if (CBZ.wildlifeTraits && CBZ.wildlifeTraits.sampleSize) {
     try {
-      const v = +CBZ.wildlifeTraits.sampleSize(sp, (teamId === "red" ? -1 : 1) * (i + 1) * 3.7, (i + 1) * 2.3);
-      if (v > 0.05 && v < 4) sizeMul = v;
+      // + the battle's seed (settings.js): another round, other individuals
+      const v = +CBZ.wildlifeTraits.sampleSize(sp, (teamId === "red" ? -1 : 1) * (i + 1) * 3.7 + BATTLE_SEED * 17.31, (i + 1) * 2.3 + BATTLE_SEED * 5.77);
+      /* HALF THE WORLD'S SPREAD. The bestiary's draw is for a whole population
+         (calves, runts, the one-in-260 monster): 0.62-1.86 in LENGTH, i.e.
+         0.24-6.4x in mass. An army is adults of fighting age, and adult
+         body length varies ~10-15% (a male Bengal tiger 2.7-3.1 m). Measured
+         by tools/npcwar-arena.mjs: one gorilla drew 0.66 and fought as a
+         24 kg, 86 hp animal, and a 1 v 1 was decided by the dice of the size
+         draw more than by the species. So the battle keeps the direction
+         and half the distance from the norm. */
+      if (v > 0.05 && v < 4) sizeMul = 1 + (v - 1) * 0.5;
     } catch (e) {}
   }
   const s = (sp.scale || 1) * sizeMul;

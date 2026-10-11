@@ -1,22 +1,69 @@
-/* tools/lib/npcwar-node.mjs — NPC WAR IN NODE: the page's own sim in a vm.
+/* tools/lib/npcwar-node.mjs — NPC WAR'S PAGE, IN NODE: the one boot every
+   node tool shares (tools/npcwar-headless.mjs, npcwar-fidelity.mjs, npcwar-scale-bench.mjs,
+   npcwar-arena.mjs, npcwar-balance-check.mjs). Lifted out of npcwar-headless.mjs so the
+   arena does not grow a second copy of the fake DOM and the studio stub.
 
-   games/battle.html's src/battle + src/units script tags run as their own
-   scripts in one vm context (as the browser does), over real three.js r128,
-   the real brain, combat_iq and weapon table; the studio, renderer and DOM
-   are stubbed. Shared by tools/npcwar-headless.mjs (the scenarios),
-   tools/npcwar-fidelity.mjs (the tier proof) and tools/npcwar-scale-bench.mjs.
+   games/battle.html's src/battle/* and src/units/* scripts run in one vm
+   context over real three.js r128 (math and scene graph only), the real
+   brain, combat_iq, ballistics and weapon table. The studio is stubbed.
 
-     import { boot, settle, run, G } from "./lib/npcwar-node.mjs";
-     const W = boot("?a=men&b=men&n=100v100&auto=1&probe=0", { seed: 7 });
-     await settle(); run(W, 300); W.B().tally();
-   opts.seed reseeds the page's own lcg (the combat dice) after boot. */
+   boot(url, { packs }) — `packs` names studio packs (src/core/studio.js
+   PACKS) whose files are run FOR REAL when the page calls studio.need(),
+   in the studio's own plan order. The headless scenarios pass none (bare
+   men, no bestiary: the old behaviour). The arena passes the bestiary and
+   the beasts pack, so an animal is the bestiary's own build, measured box,
+   gait rig, traits and creature_combat strike driver: the same numbers the
+   browser fights with. Files the node world cannot or must not run (three,
+   microboot: they are the stubs) are skipped. */
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 
-const ROOT = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
+// NPCWAR_ROOT=<dir> runs the game files of another tree (a before/after: an
+// extracted origin/main) under these tools
+const ROOT = process.env.NPCWAR_ROOT ? path.resolve(process.env.NPCWAR_ROOT)
+  : path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
 export { ROOT };
+export const G = (W, expr) => vm.runInContext(expr, W.sb);
+
+/* THE STUDIO'S PACK TABLE, read off src/core/studio.js itself (run once in a
+   throwaway context: PACKS is data), so a pack's file list is never copied. */
+let PLANNER = null;
+export function packPlan(names) {
+  if (!PLANNER) {
+    const doc = { currentScript: { src: "http://x/src/core/studio.js", getAttribute() { return "../src/core/studio.js"; } },
+      getElementsByTagName: () => [], createElement: () => ({ style: {}, setAttribute() {}, appendChild() {} }),
+      head: { appendChild() {} }, body: { appendChild() {} }, addEventListener() {}, querySelector: () => null };
+    const sb = { document: doc, location: { href: "http://x/games/battle.html", search: "", pathname: "/games/battle.html" },
+      navigator: { maxTouchPoints: 0, userAgent: "node" }, console, setTimeout, clearTimeout,
+      matchMedia: () => ({ matches: false }), addEventListener() {}, innerWidth: 1, innerHeight: 1 };
+    sb.window = sb;
+    vm.createContext(sb);
+    vm.runInContext(fs.readFileSync(path.join(ROOT, "src/core/studio.js"), "utf8"), sb, { filename: "src/core/studio.js" });
+    PLANNER = sb.CBZ.studio;
+  }
+  return PLANNER.plan(names).files;
+}
+// the studio stub IS three + microboot (running the real ones would replace
+// it); `look` (materials, carfx) is the browser's paint and wants the frame
+// loop: microboot's own cmat/boxGeom fallbacks stand in for it (boot below)
+const PACK_SKIP = new Set(["vendor/three.r128.min.js", "core/microboot.js", "world/materials.js", "world/carfx.js"]);
+// the bestiary needs `look` (materials, carfx) only for the browser's paint
+export const BEAST_PACKS = ["caps", "bestiary", "beasts"];
+/* ...and the single files of the `people` pack the FIGHT reads (the rest of
+   that pack is the drawn body, which the stub's cast stands in for):
+   bodymass.js is meleeScale / meleeAbsorb, the mass ratio every fist and
+   every bite is multiplied by. Without it a civilian's punch takes the same
+   bite out of a tiger as out of a man. */
+export const FIGHT_FILES = ["systems/bodymass.js"];
+const SRC_CACHE = new Map();
+function srcOf(rel) {
+  let s = SRC_CACHE.get(rel);
+  if (s == null) { s = fs.readFileSync(path.join(ROOT, "src", rel), "utf8"); SRC_CACHE.set(rel, s); }
+  return s;
+}
+
 /* The page is src/battle/*.js, loaded in the order games/battle.html lists
    them (one shared script scope, exactly like the browser: each file runs as
    its own script in the same context). Any inline <script> blocks still on
@@ -32,7 +79,6 @@ for (const m of HTML.matchAll(/<script(?:\s+src="([^"]+)")?\s*>([\s\S]*?)<\/scri
   } else if (m[2].trim()) PAGE_SCRIPTS.push({ name: "battle.inline.js", code: m[2] });
 }
 const THREE_SRC = fs.readFileSync(path.join(ROOT, "src/vendor/three.r128.min.js"), "utf8");
-export const G = (W, expr) => vm.runInContext(expr, W.sb);
 
 // ------------------------------------------------------------------ a fake DOM
 function mkEl(tag, doc) {
@@ -98,8 +144,16 @@ export function boot(url, opts) {
   const posted = [];
   let clock = 0;
   const frameHooks = [];
+  // a seeded Math.random for the engine files that roll their own
+  // (creature_combat's seize, ape_combat's slam-or-throw)
+  let MathX = Math;
+  if (opts.seed != null) {
+    let r = ((opts.seed >>> 0) ^ 0x9e3779b9) >>> 0 || 1;
+    MathX = Object.create(Math);
+    MathX.random = () => { r ^= r << 13; r >>>= 0; r ^= r >>> 17; r ^= r << 5; r >>>= 0; return r / 4294967296; };
+  }
   const sb = {
-    console, Math, JSON, Date, Promise, Map, Set, WeakMap, Symbol, Proxy, Reflect, Array, Object, Number, String, Boolean,
+    console, Math: MathX, JSON, Date, Promise, Map, Set, WeakMap, Symbol, Proxy, Reflect, Array, Object, Number, String, Boolean,
     Float32Array, Float64Array, Uint8Array, Uint16Array, Uint32Array, Int32Array, Int16Array, Uint8ClampedArray, ArrayBuffer, DataView,
     Error, TypeError, RangeError, parseInt, parseFloat, isFinite, isNaN, Infinity, NaN, undefined,
     encodeURIComponent, decodeURIComponent, escape, unescape, atob: (s) => Buffer.from(s, "base64").toString("binary"), btoa: (s) => Buffer.from(s, "binary").toString("base64"),
@@ -142,11 +196,29 @@ export function boot(url, opts) {
   CBZ.scene = new THREE.Scene();
   CBZ.camera = new THREE.PerspectiveCamera(60, 1.6, 0.1, 9000);
   const sun = new THREE.DirectionalLight(0xffffff, 1);
-  CBZ.seedStream = (name) => { let s = 1234567; for (const c of String(name)) s = (s * 31 + c.charCodeAt(0)) & 0x7fffffff; return () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }; };
+  CBZ.seedStream = (name) => { let s = 1234567 + (opts.seed != null ? (opts.seed >>> 0) * 7919 : 0); for (const c of String(name)) s = (s * 31 + c.charCodeAt(0)) & 0x7fffffff; return () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }; };
   CBZ.studio = {
     root: "../src/", touchDevice: false,
     plan: () => ({ files: [] }), onProgress() {}, warm() {}, prefetch() {},
-    need: () => Promise.resolve(),
+    /* the page's studio.need(NEED): with opts.packs, those packs' files run
+       for real here, in the studio's plan order, once each. */
+    need: () => {
+      if (opts.packs && opts.packs.length && !sb.__packsIn) {
+        sb.__packsIn = [];
+        // microboot's slice-page helpers (what the bestiary builds with)
+        const mc = new Map(), gc = new Map();
+        CBZ.onUpdate = CBZ.onUpdate || (() => {}); CBZ.onAlways = CBZ.onAlways || (() => {});
+        CBZ.mat = CBZ.mat || ((c, o) => new THREE.MeshLambertMaterial({ color: c, emissive: (o && o.emissive) || 0 }));
+        CBZ.cmat = CBZ.cmat || ((c, o) => { const k = c + "|" + ((o && o.emissive) || 0); let m = mc.get(k); if (!m) { m = new THREE.MeshLambertMaterial({ color: c }); m._shared = true; mc.set(k, m); } return m; });
+        CBZ.boxGeom = CBZ.boxGeom || ((w, h, d) => { const k = w + "," + h + "," + d; let g = gc.get(k); if (!g) { g = new THREE.BoxGeometry(w, h, d); g._shared = true; gc.set(k, g); } return g; });
+        for (const rel of packPlan(opts.packs).concat(opts.files || [])) {
+          if (PACK_SKIP.has(rel)) continue;
+          try { vm.runInContext(srcOf(rel), sb, { filename: "src/" + rel }); sb.__packsIn.push(rel); }
+          catch (e) { (sb.__packErr = sb.__packErr || []).push(rel + ": " + e.message); }
+        }
+      }
+      return Promise.resolve();
+    },
     world: () => { const root = new THREE.Group(); root.add(terrain); return { heightAt, rings: { city: 1050, dune: 2700 }, root, terrain }; },
     cast: (role, o) => {
       const g = new THREE.Group();
@@ -161,7 +233,17 @@ export function boot(url, opts) {
       const af = { pos: new THREE.Vector3(o && o.at ? o.at.x : 3000, o && o.at ? o.at.y : 330, o && o.at ? o.at.z : 0), vel: new THREE.Vector3(-165, 0, 0), speed: 165, heading: 0 };
       return { af: new Proxy(af, { get: (t, key) => (key in t ? t[key] : () => {}) }), group: new THREE.Group() };
     },
-    trail: () => new Proxy({}, { get: () => () => {} }), collapseAt() {}, drop() {}, boom() {}, join() {},
+    trail: () => new Proxy({}, { get: () => () => {} }), collapseAt() {}, drop() {}, boom() {},
+    // the real join (src/core/studio.js): become the mode, register its cast
+    // with modecaps when that pack is in (ape_combat reaches men through it)
+    join(spec) {
+      spec = spec || {}; const id = spec.id || "slice";
+      if (CBZ.game && spec.mode !== false) CBZ.game.mode = id;
+      if (!CBZ.registerMode) return null;
+      CBZ.registerMode(id, { id, label: spec.label || id, caps: spec.caps || {}, actors: spec.actors || null, hurt: spec.hurt || null,
+        hurtPlayer: spec.hurtPlayer || null, blast: spec.blast || null, route: spec.route || id });
+      return id;
+    },
   };
   const input = { keys: {}, down: {}, up: {}, mx: 0, mz: 0, wheel: 0, buttons: [false, false, false], clicked: [false, false, false], locked: false, enabled: true };
   input.isDown = (c) => !!input.keys[c]; input.pressed = (c) => !!input.down[c];
@@ -192,6 +274,7 @@ export function boot(url, opts) {
   // the combat dice: the page's own lcg, reseeded so a tool can run N seeds
   if (opts.seed != null) vm.runInContext("_s = " + ((opts.seed | 0) & 0x7fffffff), sb);
   return { sb, CBZ, doc, posted, input, B: () => sb.__battle, frames: frameHooks, THREE };
+  return { sb, CBZ, doc, posted, input, B: () => sb.__battle, frames: frameHooks, THREE };
 }
 export async function settle() { for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r)); }
 export function run(W, secs, each) {
@@ -205,4 +288,24 @@ export function run(W, secs, each) {
   }
   return B.audit();
 }
-
+/* The node world's studio.boom is a stub; this gives it the shape of the
+   real one (modecaps blastWorldActors: everyone inside 0.55 R takes the
+   blast, with `by` and `fromX/Z`) so a high-explosive round can kill. */
+export function realBoom(W) {
+  W.CBZ.studio.boom = function (p, o) {
+    // with the `caps` pack in, this IS the real sweep (studio.js boom ->
+    // modecaps blastWorldActors -> the page's joined hurt funnel)
+    if (W.CBZ.blastWorldActors && W.CBZ.modes && W.CBZ.modes.npcwar) {
+      o = o || {};
+      const R0 = o.radius > 0 ? o.radius : 18;
+      return { hit: W.CBZ.blastWorldActors(p.x, p.y || 1, p.z, R0, o.power > 0 ? o.power : 1, o) || 0 };
+    }
+    const R = (o && o.radius) || 6, LR = R * 0.55;
+    const list = W.sb.__battle.roster().slice();
+    for (const a of list) {
+      if (a.dead || a.fled || (a.group && a.group.visible === false)) continue;
+      if (Math.hypot(a.pos.x - p.x, a.pos.z - p.z) > LR || Math.abs(a.pos.y - p.y) > LR + 3) continue;
+      W.sb.hurtMan(a, 1e6, { fromX: p.x, fromZ: p.z, by: (o && o.by) || null, cause: "explosion" });
+    }
+  };
+}
