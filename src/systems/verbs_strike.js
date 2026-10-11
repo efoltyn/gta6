@@ -594,17 +594,24 @@
   function condOf(a) {
     const o = isPlayer(a) ? (CBZ.player || a) : a;
     let c = o._mc;
-    if (!c) c = o._mc = { daze: 0, wind: 0, legs: 0, gst: 1, openT: 0, downs: 0, t: clock, chin: chinOf(o) };
-    const dt = clock - c.t;
-    if (dt > 0) {
-      c.t = clock;
+    if (!c) c = o._mc = { daze: 0, wind: 0, legs: 0, gst: 1, openT: 0, downs: 0, chin: chinOf(o), live: false };
+    if (!c.live) { c.live = true; conds.push(c); }
+    return c;
+  }
+  // the records that are still wearing off, decayed by the pass's own dt
+  // (never by differences of an absolute clock: those round differently
+  // depending on how long the page has been up, and a seeded fight replays)
+  const conds = [];
+  function decayConds(dt) {
+    for (let i = conds.length - 1; i >= 0; i--) {
+      const c = conds[i];
       c.daze = Math.max(0, c.daze - 0.05 * dt);
       c.wind = Math.max(0, c.wind - 0.10 * dt);
       c.legs = Math.max(0, c.legs - 0.04 * dt);
       c.gst = Math.min(1, c.gst + 0.22 * dt);
       c.openT = Math.max(0, c.openT - dt);
+      if (!c.daze && !c.wind && !c.legs && c.gst >= 1 && !c.openT) { c.live = false; conds.splice(i, 1); }
     }
-    return c;
   }
   V.condition = function (a) {
     if (!a) return null;
@@ -687,6 +694,7 @@
   const falls = [];     // fallen actors whose ko timer the rig's get-up follows
   function update(dt) {
     frameN++;
+    decayConds(dt);
     clock += dt;
     const MP = MPf();
     if (!MP) return;

@@ -55,6 +55,7 @@ export default async function (t) {
     try {
       for (var s = 0; s < steps; s++) {
         n.huntPlayer = Math.max(n.huntPlayer || 0, 5);
+        n._shankOut = false; n._steelT = 0;          // fists: the blade is its own probe (prison-shank)
         if (s % 120 === 0) trace.push([s / 60, Math.round(Math.hypot(n.group.position.x - P.pos.x, n.group.position.z - P.pos.z) * 100) / 100, n.aiState, Math.round((n.huntPlayer || 0) * 10) / 10]);
         var hp0 = P.hp;
         CBZ.stepSim(1 / 60);
@@ -69,7 +70,7 @@ export default async function (t) {
       kinds: kinds, secs: s / 60, dEnd: Math.round(dEnd * 100) / 100, asked: asked, trace: trace };`, 600000);
   t.log(JSON.stringify(r));
   if (!r || r.err || r.__err) return { ok: false, summary: String(r && (r.err || r.__err)) };
-  const rate = r.hpLost / Math.max(1, r.secs);
+  const rate = r.dmg / Math.max(1, r.secs);
   const ok = r.hits >= 5 && rate >= 0.5 && rate <= 12 && Object.keys(r.kinds).length >= 3;
-  return { ok, summary: `${r.thrown} blows thrown, ${r.hits} reached hurtPlayer (${r.blocked} on the guard), ${r.hpLost} hp in ${r.secs.toFixed(1)} s (${rate.toFixed(1)} hp/s), kinds ${JSON.stringify(r.kinds)}, end gap ${r.dEnd} m`, data: r };
+  return { ok, summary: `${r.thrown} blows thrown, ${r.hits} reached hurtPlayer (${r.blocked} on the guard), ${r.hpLost} hp in ${r.secs.toFixed(1)} s (hurt ${r.dmg} = ${rate.toFixed(1)} hp/s), kinds ${JSON.stringify(r.kinds)}, end gap ${r.dEnd} m`, data: r };
 }
