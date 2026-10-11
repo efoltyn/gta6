@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "df314fd7c62811b9eedc7803566d0826640bbd72",
-  "createdAt": "2026-10-11T13:11:54.561Z",
+  "sourceCommit": "551b03241905941aca0f01f0ae1168ed5fc5287d",
+  "createdAt": "2026-10-11T13:23:59.658Z",
   "fileCount": 1349,
-  "totalBytes": 49929609,
+  "totalBytes": 49944168,
   "files": [
     {
       "file": "src/battle/ai/morale.js",
@@ -3503,8 +3503,8 @@
     },
     {
       "file": "src/units/manifest.js",
-      "bytes": 5658,
-      "sha256": "6ec66d069de0408a25a850e77e0008cedd8b7d0481a0407c7626c1a606a3f7b5"
+      "bytes": 5884,
+      "sha256": "c99049d71b60dfceb5015624e6c90db9b1e627effd071f28e9ab2a74fb4c5e7a"
     },
     {
       "file": "src/units/species/african_elephant.js",
@@ -3528,8 +3528,8 @@
     },
     {
       "file": "src/units/species/bighorn_sheep.js",
-      "bytes": 242,
-      "sha256": "335e7fc6dae4365560fb7e98161e0ecb2961043e30dd7de77188ec8de9cab107"
+      "bytes": 7505,
+      "sha256": "d083f1e05bfb10ca7c08f3e3821d4377797b67626c91fef29dddb4fc9c01e62f"
     },
     {
       "file": "src/units/species/bison.js",
@@ -3673,8 +3673,8 @@
     },
     {
       "file": "src/units/species/mountain_goat.js",
-      "bytes": 207,
-      "sha256": "c9e9f08eb8eceae18aadf249a8d381c4274389f62f8fab7cd4dcc0442d8619a5"
+      "bytes": 7292,
+      "sha256": "d220cfcac3f1151b750a0be82608d1754c57e7c42a3695f98fcb75ea6042d887"
     },
     {
       "file": "src/units/species/orca.js",
@@ -6668,8 +6668,8 @@
     },
     {
       "file": "games/battle.html",
-      "bytes": 13732,
-      "sha256": "c54da4b64d2da86676414b8dac0ad2c8069200ff562ab902d451c7cb4b58d0d6"
+      "bytes": 13723,
+      "sha256": "248a424dad79455aa02f92b58b2b648706edc284c4eb910b7aa5dfd6b5fba513"
     },
     {
       "file": "games/bomb-survivor-scene.js",
@@ -6678,8 +6678,8 @@
     },
     {
       "file": "games/bomb-survivor.html",
-      "bytes": 75918,
-      "sha256": "913d2d07773da9a11730dd86d9e8b49b089fd1665c3ddf24652c9ecdbe725cc3"
+      "bytes": 75915,
+      "sha256": "5537e3c8117a66353627e183b506f018733b22563bc0f8a1ee5ef6ee3dd7a94d"
     },
     {
       "file": "games/dev.html",
@@ -6698,8 +6698,8 @@
     },
     {
       "file": "games/warlord.html",
-      "bytes": 73712,
-      "sha256": "97e8e80568ad6b7ba30a6a8aea03cfba5e1a4a3d7d2089d2c5333a930a6af5de"
+      "bytes": 73709,
+      "sha256": "1ed2f8edc10d0b37b80425cd446b7a005b885109dee715b36cc528d9b835c87f"
     },
     {
       "file": "thumbs/shark-sim.jpg",
