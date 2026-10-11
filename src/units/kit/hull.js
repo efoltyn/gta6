@@ -453,7 +453,8 @@
     if (TEX["c:" + id] !== undefined) return TEX["c:" + id];
     const sc = SCHEMES[id] || SCHEMES.nato3, S = 512, c = canvasEl(S, S);
     if (!c || !THREE) return (TEX["c:" + id] = null);
-    const g = c.getContext("2d"), rnd = rngOf(id.length * 977 + id.charCodeAt(0) * 31);
+    const g = c.getContext ? c.getContext("2d") : null, rnd = rngOf(id.length * 977 + id.charCodeAt(0) * 31);
+    if (!g || !g.getImageData) return (TEX["c:" + id] = null);
     g.fillStyle = sc.base; g.fillRect(0, 0, S, S);
     sc.layers.forEach(function (L) {
       g.fillStyle = L.col;
@@ -475,7 +476,8 @@
     if (TEX["k:" + id] !== undefined) return TEX["k:" + id];
     const sc = SCHEMES[id] || SCHEMES.nato3, S = 256, c = canvasEl(S, S);
     if (!c || !THREE) return (TEX["k:" + id] = null);
-    const g = c.getContext("2d"), rnd = rngOf(id.length * 131 + 7);
+    const g = c.getContext ? c.getContext("2d") : null, rnd = rngOf(id.length * 131 + 7);
+    if (!g || !g.getImageData) return (TEX["k:" + id] = null);
     g.fillStyle = sc.canvas; g.fillRect(0, 0, S, S);
     g.globalAlpha = 0.04;
     for (let y = 0; y < S; y += 2) { g.fillStyle = y % 4 ? "#000" : "#fff"; g.fillRect(0, y, S, 1); }
