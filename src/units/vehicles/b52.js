@@ -60,7 +60,7 @@
 
    WEAPONS. A B-52H mixed load as flown over Afghanistan and Iraq:
      mk82_stick   27 x Mk-82 500 lb in the bay, rippled as ONE stick walked
-                  across the mark (~30 m apart, ~0.8 km long) from 9,100 m
+                  across the mark (~27 m apart, ~0.8 km long) from 9,100 m
      gbu31_jdam   12 x GBU-31 (Mk-84 + JDAM kit) on the two Heavy Stores
                   Adapter Beams, GPS-guided: one per aim point per pass (the
                   first one at armour; the Mk-82 stick does not go at tanks)
@@ -143,7 +143,7 @@
 
   const WEAPONS = [
     { id: "mk82_stick", seat: "radar", kind: "bombs", vs: "soft", store: "mk82", alt: ALT,
-      rof: 7.7, stick: 820, pen: 120, beh: 1800, he: { pen: 120, beh: 1800, blast: 18, power: 2.8 }, range: 12000, ammo: 27 },
+      rof: 8.5, stick: 820, pen: 120, beh: 1800, he: { pen: 120, beh: 1800, blast: 18, power: 2.8 }, range: 12000, ammo: 27 },
     { id: "gbu31_jdam", seat: "radar", kind: "bombs", vs: "any", store: "jdam", alt: ALT, guided: true, basket: 0.15,
       rof: 1.2, pen: 300, beh: 2600, he: { pen: 300, beh: 2600, blast: 30, power: 4.4 }, range: 12000, ammo: 12 },
   ];
@@ -1083,7 +1083,8 @@
     };
     const rig = {
       turret: null,
-      settle: function () { R.seeded = false; tick(R, true, 0, null); },
+      // settle(o?): snap every part to the pose for where the airframe is (o.agl forces it: 0 = parked)
+      settle: function (o) { R.seeded = false; tick(R, true, 0, o && isFinite(o.agl) ? o : null); },
       muzzleWorld: function (out, shot) { return storePoint(R, out, shot); },
       fire: function (shot) { fire(R, shot); },
       canFire: function (shot) { return canFire(R, shot); },
@@ -1391,7 +1392,7 @@
       profile: "level, 9,100 m; one straight run from beyond the horizon, release where the 43 s fall lands on the mark",
       engage: { bombs: Math.round(SPD * FALL) },
       priorities: ["massed men", "soft", "armour (JDAM, one per aim point)"],
-      stick: "27 x Mk-82 walked across the mark, ~30 m apart",
+      stick: "27 x Mk-82 walked across the mark, ~27 m apart",
       hullDown: false, faceThreat: false, screen: null,
       breakaway: "46 deg bank, out past the mark, round again only with bombs left",
     },
