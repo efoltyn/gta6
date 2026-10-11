@@ -1,10 +1,10 @@
 {
   "product": "Play",
   "mode": "portal",
-  "sourceCommit": "075e8dbea4a775191d295d1a58d662c3b96857e9",
-  "createdAt": "2026-10-11T07:17:13.311Z",
+  "sourceCommit": "ec11d5022838d380def07dd0540cf94c573fde6c",
+  "createdAt": "2026-10-11T07:18:16.808Z",
   "fileCount": 1340,
-  "totalBytes": 49318741,
+  "totalBytes": 49360090,
   "files": [
     {
       "file": "src/battle/ai/morale.js",
@@ -3458,13 +3458,13 @@
     },
     {
       "file": "src/units/manifest.js",
-      "bytes": 4451,
-      "sha256": "b689437ada6054e8a7d64ed867153aa28220a2c63f4b484eebe7e19f1e563495"
+      "bytes": 4539,
+      "sha256": "60acb3077f9941eae279f176350322c10374d1dfe37d4249e2a69c79bf74add3"
     },
     {
       "file": "src/units/species/african_elephant.js",
-      "bytes": 212,
-      "sha256": "6bcd2d3dfc77ab5aab6bbb6a19c151c80053ed94126e1898d01d4c738a6e3387"
+      "bytes": 41483,
+      "sha256": "a266f256d6c58f5801c172b1f79f8c8cbc49767b56613b23a4e8c780166d33d1"
     },
     {
       "file": "src/units/species/arctic_wolf.js",
@@ -6623,8 +6623,8 @@
     },
     {
       "file": "games/battle.html",
-      "bytes": 13338,
-      "sha256": "bc4be9e2adb8587a1332a309fd5e59e0cbc689b2e46f9a1983a9d5722c7f5135"
+      "bytes": 13332,
+      "sha256": "5cf51c01b8b8a2109e72f644d39843283c6d6ebf58fbdeede3e517df51f9323c"
     },
     {
       "file": "games/bomb-survivor-scene.js",
@@ -6633,8 +6633,8 @@
     },
     {
       "file": "games/bomb-survivor.html",
-      "bytes": 75918,
-      "sha256": "c9b98ea5dcb2c5a8b897ab03026b09b09c99ac7c0613783b48feb6cb88425fb7"
+      "bytes": 75916,
+      "sha256": "c4bc042e79a86bb6742a28df1d76993c4d6a82a652464903cf6730893ea10646"
     },
     {
       "file": "games/dev.html",
@@ -6653,8 +6653,8 @@
     },
     {
       "file": "games/warlord.html",
-      "bytes": 73712,
-      "sha256": "b2ff3d91c0c7c0d99a1bc5e65eed7293d7186a18f5ebce06ec421e7eddf0ae36"
+      "bytes": 73710,
+      "sha256": "f1a4c58d6d03ef8c6d694333f3f8feb775b875038cd378ac509cdf0df706af31"
     },
     {
       "file": "thumbs/shark-sim.jpg",
