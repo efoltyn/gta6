@@ -744,11 +744,26 @@
     },
 
     // ---- what things look like when they break -----------------------------
+    /* THE ONE WATER. world/water_spec.js is every sea in the game (the
+       spectrum, the CPU height query, the one sea material); water_pages.js
+       re-shades a page's own sea sheets with it (NPC War's plate and OPEN
+       WATER) until the page calls CBZ.waterSeaMaterial / waterAdoptSea
+       itself. It rides with `fx` because a page that throws ordnance at a
+       sea is a page whose sea should look like one. */
+    water: {
+      gives: "the one water: Gerstner wave spectrum on the live wind, the CPU " +
+             "height/slope/orbital query, and the one sea material (sky " +
+             "reflection, depth colour, foam, caustics, Snell's window) for " +
+             "any sheet a page owns",
+      needs: ["boot"],
+      files: ["world/water_spec.js", "world/water_pages.js"],
+      publishes: ["waterSeaMaterial", "waterWaveHeight", "waterAdoptSea"],
+    },
     fx: {
       gives: "the pooled particle, puff, chunk and scorch systems everything " +
              "violent draws out of. Cheap because it is pooled, so a salvo " +
              "cannot flood the frame",
-      needs: ["look"],
+      needs: ["look", "water"],
       files: ["systems/fx.js", "systems/debris.js"],
       publishes: ["fx", "debris"],
     },

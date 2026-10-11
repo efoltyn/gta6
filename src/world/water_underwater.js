@@ -1150,6 +1150,8 @@
     abyss.userData.terrain = true;
     abyss.userData.underlay = true;
     abyss.userData.seaFloor = true;
+    // the sun's caustic web on the floor, seen from above and below alike
+    if (CBZ.waterCausticsApply) CBZ.waterCausticsApply(abyss);
     root.add(abyss);
   }
   // Registered the way world/terrain_overhaul.js registers its own tiles:
