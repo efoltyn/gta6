@@ -131,14 +131,14 @@ change it only in coordination.
 | `src/battle/core.js` | `CBZ.now`, `CBZ.floorAt` shims | core |
 | `src/battle/arenas/maps.js` | `MAPS`: every ground the page offers | terrain |
 | `src/battle/arenas/field.js` | `buildMap(id)`: raise a ground, return the MAP record (spawn, ground, sight) | terrain |
-| `src/battle/arenas/erg.js` | the open dunes / snow / fields / wood: the height forms (barchan + transverse dunes off one wind, snow drifts, rolling ground), the crest table, the parcels, the skin and its per-surface shader (ripples, sastrugi, litter + dapple, crops) | terrain |
+| `src/battle/arenas/erg.js` | the open dunes / snow / fields / wood: the height forms (barchan + transverse dunes off one wind, snow drifts, rolling ground), the crest table, the parcels, the skin and its per-surface shader (ripples, sastrugi, litter + dapple, crops); `FOLD`: the war window is one half turned 180 degrees about the centre, so both start lines get the same ground, cover and sight lines (`foldEmit` / `foldSeg` place every prop, tree, bank and drift in turned pairs while the field is dressed) | terrain |
 | `src/battle/arenas/cover.js` | `CBZ.battleCover`: every cover point (props, walls, crests, crater lips), hit points, destruction; `MAP.coverNear/coverFrom` | terrain |
 | `src/battle/arenas/dress.js` | `CBZ.battleDress`: the real objects (sandbags, hesco, jersey, burnt cars, boulders, logs, dry walls, bales, rubble, containers), instanced, and where they go (open ground, the downtown's streets) | terrain |
 | `src/battle/arenas/ground.js` | `CBZ.battleGround`: earthworks + craters in groundAt, prints and tracks, scorch, blast spray, blowing sand, the baked dead (remains) | terrain |
 | `src/battle/arenas/woods.js` | `CBZ.battleWoods`: THE WOOD (canopy, understory, bracken, deadfall, canopy map) and the snow's spruce groves | terrain |
 | `src/battle/arenas/fields.js` | `CBZ.battleFields`: farmland (hedgerows on banks, dry walls, wheat, maize, bales, pasture) | terrain |
 | `src/battle/arenas/sea.js` | open water: swell, reef, fleet, depth | water |
-| `src/battle/arenas/yard.js` | the kill box | terrain |
+| `src/battle/arenas/yard.js` | the kill box (its props in turned pairs about the centre, like the erg) | terrain |
 
 | `src/battle/melee.js` | men with bare hands: `stepFists` (combat_iq's IQ.melee, damage x `IQ.lastBlow(m).dmgMul`), `knockedDown` (a man on the floor is not steered) | melee |
 

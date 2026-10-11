@@ -30,6 +30,7 @@
      node tools/npcwar-arena.mjs --a bengal_tiger --b men --n 1v10 --bw fists --bt civ [--gap 20] [--arena dunes]
      node tools/npcwar-arena.mjs --q "?a=lion&b=bengal_tiger&n=1v1"      a raw page URL
      node tools/npcwar-arena.mjs --json out.json         write the full results there too
+     node tools/npcwar-arena.mjs ... --noswap            never swap the slots (A is always red)
 
    Workers: os.cpus() minus headroom (2), halved again when the load average
    is already over the core count, never more than the jobs. --jobs N
@@ -73,11 +74,12 @@ function classify(m, imp) {
   if (imp.byTeam) return "ordnance";
   return "other";
 }
-/* SIDES ARE SWAPPED ON ODD SEEDS. The page's ground is a place and "a place
-   has a better side" (arenas/field.js picks a dune window with a crest that
-   cuts the sight line): measured, 30 v 30 identical riflemen went 83% to the
-   first slot. So side A takes the first slot on even seeds and the second on
-   odd ones, and every number below is reported by roster, not by slot. */
+/* SIDES ARE SWAPPED ON ODD SEEDS. The open grounds used to deal one slot the
+   better ground (30 v 30 identical riflemen went 83% to the first slot); the
+   erg is folded on its centre line now (arenas/erg.js FOLD), but a raised
+   venue is still a real place. So side A takes the first slot on even seeds
+   and the second on odd ones, and every number below is reported by roster,
+   not by slot. --noswap turns it off, to measure the slots themselves. */
 let SWAP = false;
 const RA = () => (SWAP ? "blue" : "red"), RB = () => (SWAP ? "red" : "blue");
 const sideOf = (t) => (t === RA() ? "A" : t === RB() ? "B" : "?");
@@ -329,6 +331,10 @@ async function main() {
     const only = arg("--only", null);
     if (only) list = list.filter((m) => only.split(",").some((o) => m.id.includes(o)));
   }
+  // --noswap: every seed fights from the slots as written (red = A). The
+  // start lines are mirror images now (arenas/erg.js FOLD), so identical
+  // armies must split about evenly from either slot; this is how to see it.
+  if (has("--noswap")) list.forEach((mu) => { mu.swap = false; });
   const seedsOver = arg("--seeds", null);
   const jobs = [];
   for (const mu of list) {

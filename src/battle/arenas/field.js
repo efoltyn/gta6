@@ -164,7 +164,13 @@ function venueDress(id, cx, cz, gap, g) {
   CBZ.battleDress.begin(ctx);
   try {
     if (id === "city" && town && town.roads) { ctx.roads = town.roads; ctx.reach = gap * 0.5 + 110; CBZ.battleDress.city(ctx); }
-    else CBZ.battleDress.open(ctx);
+    else {
+      /* the cover WE add to a venue goes in turned pairs about the start
+         lines' centre (erg.js FOLD), each pair only where both spots are
+         free; the venue's own walls are the real place and stay as built */
+      FOLD.cx = cx; FOLD.cz = cz; FOLD.src = -1; FOLD.on = true;
+      try { CBZ.battleDress.open(ctx); } finally { FOLD.on = false; }
+    }
   } catch (e) { console.warn("[battle] venue dressing failed:", e); }
 }
 
@@ -179,6 +185,7 @@ function buildMap(id) {
      three-block approach now that still has to be fought through. */
   const M = MAPS[id] || MAPS.arena;
   _claim.length = 0;          // spawn claims belong to ONE build
+  FOLD.ground = false; FOLD.on = false;   // only the erg folds (below)
   /* ...and OPEN WATER is the shortest of them, measured the same way the
      others were. Water has no cover, no walls to path around and no crest to
      climb: closure there is a straight line at the animals' own charge speed
@@ -255,9 +262,8 @@ function buildMap(id) {
        the old axis entirely. The terrain derives from WORLD_SEED alone, so
        the same URL lands the same war on the same sand. The fallback is the
        old constant, so a retuned noise field can never strand the map with
-       no centre at all. High ground is not dealt evenly here; neither are
-       the city map's streets. A venue is a place, and a place has a better
-       side. */
+       no centre at all. The window found here is then TURNED (below), so
+       neither side is dealt the better ground. */
     const rings = (world && world.rings) || { city: 1050, dune: 2700 };
     cx = rings.city + 650; cz = 0;
     scan:
@@ -281,41 +287,97 @@ function buildMap(id) {
     }
     // THE ERG over the chosen window: crests, slip faces, the skin that shows them
     DUNE.on = true; DUNE.cx = cx; DUNE.cz = cz; DUNE.phase = 0;
-    /* A FAIR FIELD. The crest train is set along the wind so neither start
-       line is dealt the trough under the other's crest: twelve phases of the
-       lattice are measured and the one that leaves both lines at the most
-       nearly equal height over the ground between them (and neither of them
-       low) wins. The world's own terrain under the window still decides who
-       has the better side, as it always did; the dunes no longer do it by
-       accident. Measured with one phase: the east line sat 10 m above the
-       west on the snow and won every near-even fight from it. */
-    if (DUNE.pal.form !== "roll") {
-      const lineH = function (side) {
-        let s = 0, n = 0;
-        for (let c = 0; c < 4; c++) for (let r = 0; r < 10; r += 3) {
-          s += duneDetail(cx + side * (gap / 2 + 8 + c * 3.1), cz + (r - 4.5) * 3.4); n++;
-        }
-        return s / n;
-      };
-      let bestP = 0, bestS = 1e9;
-      for (let k = 0; k < 12; k++) {
-        DUNE.phase = k * DUNE.lam / 12;
-        let mid = 0, mn = 0;
-        for (let x = -gap / 2 + 20; x <= gap / 2 - 20; x += 10) for (let z = -30; z <= 30; z += 15) { mid += duneDetail(cx + x, cz + z); mn++; }
-        mid /= mn;
-        const a = lineH(-1) - mid, b = lineH(1) - mid;
-        const sc = Math.abs(a - b) * 2 - Math.min(a, b);
-        if (sc < bestS) { bestS = sc; bestP = DUNE.phase; }
-      }
-      DUNE.phase = bestP;
-    }
+    /* A FAIR FIELD: THE ERG IS TURNED ABOUT ITS CENTRE (erg.js FOLD).
+       The old fix here slid the crest train along the wind until the two
+       start lines stood at nearly the same height. It could not work: the
+       world's own ground under the window is a slope (red stood 7.2 m over
+       blue on the dunes, 7.1 on the fields), a dune is not the same ground
+       from its stoss as from its slip face, and the woods, hedges and rocks
+       were scattered by hash. Now the far half is the kept half turned 180
+       degrees, so the two lines stand on the same ground, behind the same
+       crests and cover, with the same sight lines, by construction.
+
+       Which half, and where the crest train sits, is still measured (and
+       fixed by WORLD_SEED, so the same URL is the same war): for each half
+       and each of twelve phases of the train, the two lines must be hidden
+       from each other at the start (a rifleman's eye and a hull's: the
+       dunes stand BETWEEN the armies), the ground between them must be ONE
+       crossing (walking out from his line, a man first has the far line in
+       his sights near the middle, from the crest of no-man's land), and no
+       line may stand on a slope steep enough to make a rank a ladder.
+       Measured, 60 pro attacking 25 holding: with each line's own crest 36 m
+       in front of it (the attackers top it and shoot DOWN into the holders)
+       holding traded 0.12-0.19 against 0.19-0.35 for meeting them; with the
+       crossing in the middle it trades as well or better. A layout where a
+       tank's eye never clears the ground (no crossing at all) left a lone
+       Abrams and thirty riflemen staring at a dune for five minutes. */
     const worldGround = groundAt;
-    const ergGround = function (x, z) { return worldGround(x, z) + duneDetail(x, z); };
+    const ergRaw = function (x, z) { return worldGround(x, z) + duneDetail(x, z); };
+    FOLD.cx = cx; FOLD.cz = cz; FOLD.ground = true; FOLD.on = false;
+    const ergGround = function (x, z) {
+      const a = foldA((x - cx) * FOLD.src);
+      const tx = 2 * cx - x, tz = 2 * cz - z;
+      // out past R0 the turned ground fades back into the world's own (the
+      // window's edge is the world's); duneWeight is square about the centre
+      const w = duneWeight(x, z);
+      if (a >= 1 || w <= 0) return ergRaw(x, z);
+      if (a <= 0 && w >= 1) return ergRaw(tx, tz);
+      // both halves, the dominant one sampled LAST (the dunes' anatomy, DS,
+      // is what the skin colours by)
+      const k = a + (1 - a) * (1 - w);                   // the share of (x, z) itself
+      if (k >= 0.5) { const q = ergRaw(tx, tz), p = ergRaw(x, z); return k * p + (1 - k) * q; }
+      const p = ergRaw(x, z), q = ergRaw(tx, tz);
+      return k * p + (1 - k) * q;
+    };
+    (function choose() {
+      const roll = DUNE.pal.form === "roll";
+      const slope = function (side) {
+        const x = cx + side * (gap / 2 + 12);
+        let m = 0;
+        for (let z = -15; z <= 15; z += 7.5) {
+          const a = ergGround(x - 6, cz + z), b = ergGround(x + 6, cz + z), c = ergGround(x, cz + z - 6), d = ergGround(x, cz + z + 6);
+          m = Math.max(m, Math.hypot(b - a, d - c) / 12);
+        }
+        return m;
+      };
+      let best = { s: 1e9, src: -1, ph: 0 };
+      for (const src of [-1, 1]) {
+        FOLD.src = src;
+        for (let k = 0; k < (roll ? 1 : 12); k++) {
+          DUNE.phase = roll ? 0 : k * DUNE.lam / 12;
+          // the lines hidden from each other at spawn, a rifleman's eye and a
+          // hull's alike: lanes (of 3 x 3) the far line is seen down
+          let seen = 0;
+          for (let la = -1; la <= 1; la++) for (let lb = -1; lb <= 1; lb++) {
+            const ax = cx - gap / 2 - 8, bx = cx + gap / 2 + 8, az = cz + la * 12, bz = cz + lb * 12;
+            if (!terrainBlocked(ax, ergGround(ax, az) + 2.6, az, bx, ergGround(bx, bz) + 1.4, bz, ergGround)) seen++;
+          }
+          // ...and one crossing between them: walking out from his line, how
+          // far a man goes before the far line is in his sights (the crest)
+          let walk = -1;
+          for (let d = 0; d <= gap / 2 + 20 && walk < 0; d += 4) {
+            let v = 0;
+            for (let li = -1; li <= 1; li++) {
+              const ax = cx - gap / 2 - 8 + d, bx = cx + gap / 2 + 8, lz = cz + li * 10;
+              if (!terrainBlocked(ax, ergGround(ax, lz) + 1.6, lz, bx, ergGround(bx, lz) + 1.4, lz, ergGround)) v++;
+            }
+            if (v >= 2) walk = d;
+          }
+          const sl = slope(-1);
+          const sc = seen * 2 + (walk < 0 ? 12 : Math.abs(walk - (gap / 2 - 8)) / 8) + Math.max(0, sl - 0.3) * 20;
+          if (sc < best.s) best = { s: sc, src: src, ph: DUNE.phase };
+        }
+      }
+      FOLD.src = best.src; DUNE.phase = best.ph;
+    })();
     // ...and the ground REMEMBERS: berms, banks, drifts and the craters to
     // come are part of the height every man stands on (arenas/ground.js)
     groundAt = CBZ.battleGround.begin({ id: id, surface: DUNE.pal.surface, soft: true, groundAt: ergGround });
     MAP_GROUND = groundAt;
-    ergDress(id, cx, cz, gap, groundAt);
+    // the dressing lands in turned pairs on the erg; battle-time
+    // placements (a felled tree's log) land where they fall
+    FOLD.on = FOLD.ground;
+    try { ergDress(id, cx, cz, gap, groundAt); } finally { FOLD.on = false; }
     ergSkin(world);
   } else if (id === "city") {
     // THE REAL FABRIC. Eight blocks square is 490 m of street — big enough
@@ -415,7 +477,14 @@ function buildMap(id) {
     const side = team === "red" ? -1 : 1;
     const col = (i / 10) | 0, row = i % 10;
     const x = cx + side * (gap / 2 + 8 + col * 3.1) + (sWorld() - 0.5) * 1.8;
-    const z = cz + (row - 4.5) * 3.4 + (col % 2) * 1.7 + (sWorld() - 0.5) * 1.8;
+    /* THE RANKS TURN WITH THE SIDE. Man i of blue stands where man i of red
+       stands, turned 180 degrees through the centre, the way the ground is
+       (erg.js FOLD): row 0 (the first man, the squad's leader) is on each
+       side's own LEFT, not at the same world z for both. With one z for
+       both, red's leader formed up on red's left and blue's on blue's
+       right, and squads that steer off their leader fought different
+       ground on a field that was otherwise the same. */
+    const z = cz - side * ((row - 4.5) * 3.4 + (col % 2) * 1.7) + (sWorld() - 0.5) * 1.8;
     return { x: x, z: z };
   };
   /* WHERE A BODY ACTUALLY SITS, which on every other map is the ground and
@@ -448,7 +517,8 @@ function buildMap(id) {
       const crests = duneCrests(cx, cz, 330, 330, 7);
       const snowy = DUNE.pal.form === "drift";
       CBZ.battleGround.blowing(crests, { wx: DUNE.wx, wz: DUNE.wz, per: snowy ? 10 : 8, travel: snowy ? 12 : 8,
-        color: snowy ? [0.95, 0.97, 1.0] : [0.86, 0.7, 0.48], size: snowy ? 0.06 : 0.045, spread: 5 });
+        color: snowy ? [0.95, 0.97, 1.0] : [0.86, 0.7, 0.48], size: snowy ? 0.06 : 0.045, spread: 5,
+        fold: FOLD.ground ? { cx: FOLD.cx, src: FOLD.src } : null });     // the far half's wind is reversed
     }
   }
   return {

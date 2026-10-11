@@ -177,14 +177,19 @@ CBZ.battleFields = (function () {
       for (let t = 0; t < L - 1; t += 6) {
         const tl = Math.min(6, L - t), x = r.A[0] + ux * (t + tl / 2), z = r.A[1] + uz * (t + tl / 2);
         if (keep(x, z, 1)) continue;
-        CBZ.battleCover.add({ kind: "hedge", x: x, z: z, yaw: yaw, hw: tl / 2, hd: 0.9, h: 2.0, hp: 600, rubbleH: 0.9 });
-        F.hedges++;
+        // a turned erg (erg.js FOLD): the bank was turned, so is its cover
+        foldEmit(x, z, tl / 2, function (hx, hz, sg) {
+          CBZ.battleCover.add({ kind: "hedge", x: hx, z: hz, yaw: foldYaw(yaw, sg), hw: tl / 2, hd: 0.9, h: 2.0, hp: 600, rubbleH: 0.9 });
+          F.hedges++;
+        });
       }
       for (let t = 1.2; t < L - 1; t += 2.6) {
         const x = r.A[0] + ux * t + (h01(ri, t * 10, 607) - 0.5) * 0.6, z = r.A[1] + uz * t + (h01(ri, t * 10, 609) - 0.5) * 0.6;
         if (keep(x, z, 0)) continue;
-        thick.push({ x: x, z: z, y: g(x, z), s: 0.5 + h01(ri, t * 10, 611) * 0.3, yaw: h01(ri, t * 7, 613) * 6.28 });
-        if (h01(ri, t * 3, 615) < 0.035) oaks.push({ x: x, z: z, y: g(x, z), s: 0.75 + h01(ri, t, 617) * 0.35 });
+        foldEmit(x, z, 0, function (hx, hz, sg) {
+          thick.push({ x: hx, z: hz, y: g(hx, hz), s: 0.5 + h01(ri, t * 10, 611) * 0.3, yaw: foldYaw(h01(ri, t * 7, 613) * 6.28, sg) });
+          if (h01(ri, t * 3, 615) < 0.035) oaks.push({ x: hx, z: hz, y: g(hx, hz), s: 0.75 + h01(ri, t, 617) * 0.35 });
+        });
       }
     });
     const GL = !!(CBZ.renderer || (CBZ.micro && CBZ.micro.renderer)) && typeof document !== "undefined";
@@ -248,7 +253,8 @@ CBZ.battleFields = (function () {
           const w = W(a, b);
           if (Math.abs(w[0] - cx) > CROPS || Math.abs(w[1] - cz) > CROPS) continue;
           if (keep(w[0], w[1], 1)) continue;
-          (P.type === CROP.wheat ? wheat : maize).push({ x: w[0], z: w[1], yaw: yaw });
+          const into = P.type === CROP.wheat ? wheat : maize;
+          foldEmit(w[0], w[1], 0, function (wx, wz, sg) { into.push({ x: wx, z: wz, yaw: foldYaw(yaw, sg) }); });
         }
       } else if (P.type === CROP.stubble) {
         // a line of round bales left where the baler dropped them
@@ -265,7 +271,7 @@ CBZ.battleFields = (function () {
         for (let k = 0; k < 220; k++) {
           const a = i * PARCEL.w + h01(i, j * 300 + k, 639) * PARCEL.w, b = j * PARCEL.d + h01(i * 300 + k, j, 641) * PARCEL.d;
           const w = W(a, b);
-          tufts.push({ x: w[0], z: w[1] });
+          foldEmit(w[0], w[1], 0, function (wx, wz) { tufts.push({ x: wx, z: wz }); });
         }
       }
     }

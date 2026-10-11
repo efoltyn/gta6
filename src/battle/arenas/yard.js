@@ -627,72 +627,99 @@ function buildYard(W, D, gap) {
   };
   const L20 = 6.058, L40 = 12.192;
 
+  /* THE YARD IS TURNED ABOUT ITS CENTRE, like the open grounds (erg.js
+     FOLD): every prop is drawn on the west half and placed again turned
+     180 degrees through (0, 0), so the kill box (the control map) deals both
+     start lines the same cover, each side's right flank the same as the
+     other's (the men are handed, so a mirror is not fair; a turn is). It
+     used to scatter fourteen containers, nine barrier runs and eight crate
+     piles anywhere across the field, so one side's line could be dealt a
+     wall of steel and the other a bare slab. A draw that would stand in its
+     own twin at the centre line is drawn again. */
   // 1. THE BACK OF THE YARD behind each start line: rows along x, stacked
   //    two high, on the flanks so the columns form up in the open
-  for (const side of [-1, 1]) {
-    for (const zs of [-1, 1]) {
-      let z = zs * (28 + sWorld() * 6);
-      for (let r = 0; r < 3; r++) {
-        const L = sWorld() < 0.55 ? L40 : L20;
-        const x = side * (hw - 3 - L / 2 - sWorld() * 2);
-        if (fits(x, z, L / 2, CN.W / 2, 0.25)) place(x, z, L, true, sWorld() < 0.6 ? 2 : 1, side > 0);
-        z += zs * (CN.W + 0.35 + (sWorld() < 0.3 ? 5 : 0));
-      }
+  for (const zs of [-1, 1]) {
+    let z = zs * (28 + sWorld() * 6);
+    for (let r = 0; r < 3; r++) {
+      const L = sWorld() < 0.55 ? L40 : L20;
+      const off = hw - 3 - L / 2 - sWorld() * 2, tiers = sWorld() < 0.6 ? 2 : 1;
+      if (fits(-off, z, L / 2, CN.W / 2, 0.25)) { place(-off, z, L, true, tiers, false); place(off, -z, L, true, tiers, true); }
+      z += zs * (CN.W + 0.35 + (sWorld() < 0.3 ? 5 : 0));
     }
   }
+  // the west half's x, and whether a thing of half-width ex is too near the line
+  const west = function (x) { return -Math.abs(x); };
+  const onLine = function (x, ex, aisle) { return Math.abs(x) < ex + aisle / 2 + 0.6; };
   // 2. NO-MAN'S LAND: broadside rows (long axis across the fire line), some
   //    stacked, some in pairs, with aisles to move through
   let tries = 0, placed = 0;
   while (placed < 14 && tries++ < 80) {
-    const x = (sWorld() - 0.5) * (gap - 20), z = (sWorld() - 0.5) * (D - 24);
+    const x = west((sWorld() - 0.5) * (gap - 20));
+    const z = (sWorld() - 0.5) * (D - 24);
     const L = sWorld() < 0.7 ? L20 : L40;
-    if (!fits(x, z, CN.W / 2, L / 2, 3.2)) continue;
-    const tiers = sWorld() < 0.3 ? 2 : 1;
-    place(x, z, L, false, tiers, sWorld() < 0.5);
-    placed++;
+    const tiers = sWorld() < 0.3 ? 2 : 1, flip = sWorld() < 0.5;
+    if (onLine(x, CN.W / 2, 3.2) || !fits(x, z, CN.W / 2, L / 2, 3.2)) continue;
+    place(x, z, L, false, tiers, flip);
+    place(-x, -z, L, false, tiers, !flip);
+    placed += 2;
     // a neighbour in the same row, 30 cm off, the way they get dropped
-    const nx = x + (x > 0 ? -1 : 1) * (CN.W + 0.3);
-    if (sWorld() < 0.35 && fits(nx, z, CN.W / 2, L / 2, 0.1)) { place(nx, z, L, false, 1, sWorld() < 0.5); placed++; }
+    // (toward the centre line, never across it)
+    const nx = x + (CN.W + 0.3);
+    if (sWorld() < 0.35 && !onLine(nx, CN.W / 2, 0.1) && fits(nx, z, CN.W / 2, L / 2, 0.1)) {
+      const nf = sWorld() < 0.5;
+      place(nx, z, L, false, 1, nf); place(-nx, -z, L, false, 1, !nf); placed += 2;
+    }
   }
   // 3. JERSEY BARRIER RUNS: low cover, laid end to end
   const jB = new GeoBatch();
   let runs = 0; tries = 0;
   while (runs < 9 && tries++ < 80) {
-    const x = (sWorld() - 0.5) * (gap - 14), z = (sWorld() - 0.5) * (D - 30);
+    const x = west((sWorld() - 0.5) * (gap - 14));
+    const z = (sWorld() - 0.5) * (D - 30);
     const n = 2 + ((sWorld() * 3) | 0), alongZ = sWorld() < 0.6, len = n * 3.05;
     const ex = alongZ ? 0.31 : len / 2, ez = alongZ ? len / 2 : 0.31;
-    if (!fits(x, z, ex, ez, 2.2)) continue;
-    for (let i = 0; i < n; i++) {
-      const o = -len / 2 + 1.525 + i * 3.05, k = 0.92 + sWorld() * 0.14;
-      jB.xf(alongZ ? x : x + o, 0, alongZ ? z + o : z, alongZ ? Math.PI / 2 + (sWorld() - 0.5) * 0.02 : (sWorld() - 0.5) * 0.02);
-      jerseyInto(jB, 3.0, [k, k, k * 0.98]);
+    if (onLine(x, ex, 2.2) || !fits(x, z, ex, ez, 2.2)) continue;
+    const ks = [], js = [];
+    for (let i = 0; i < n; i++) { ks.push(0.92 + sWorld() * 0.14); js.push((sWorld() - 0.5) * 0.02); }
+    for (const m of [1, -1]) {
+      const mx = x * m, mz = z * m;
+      for (let i = 0; i < n; i++) {
+        const o = (-len / 2 + 1.525 + i * 3.05) * m, k = ks[i];
+        jB.xf(alongZ ? mx : mx + o, 0, alongZ ? mz + o : mz, (alongZ ? Math.PI / 2 : 0) + js[i] + (m < 0 ? Math.PI : 0));
+        jerseyInto(jB, 3.0, [k, k, k * 0.98]);
+      }
+      claim(mx, mz, ex, ez);
+      CBZ.micro.addBoxCollider(mx, 0.405, mz, ex * 2, 0.81, ez * 2, { mat: "concrete" });
+      SCENERY.push({ kind: "barrier", x: mx, y: 0.4, z: mz });
+      runs++;
     }
-    claim(x, z, ex, ez);
-    CBZ.micro.addBoxCollider(x, 0.405, z, ex * 2, 0.81, ez * 2, { mat: "concrete" });
-    SCENERY.push({ kind: "barrier", x: x, y: 0.4, z: z });
-    runs++;
   }
   // 4. CRATES ON PALLETS, beside the containers they came out of
   const cB = new GeoBatch();
   let piles = 0; tries = 0;
   while (piles < 8 && tries++ < 60) {
-    const x = (sWorld() - 0.5) * (gap - 10), z = (sWorld() - 0.5) * (D - 30);
+    const x = west((sWorld() - 0.5) * (gap - 10));
+    const z = (sWorld() - 0.5) * (D - 30);
     const two = sWorld() < 0.5;             // two pallets side by side
     const ex = two ? 1.25 : 0.62, ez = 0.52;
-    if (!fits(x, z, ex, ez, 1.6)) continue;
+    if (onLine(x, ex, 1.6) || !fits(x, z, ex, ez, 1.6)) continue;
     const yaw = sWorld() < 0.5 ? 0 : Math.PI;
-    let high = 0;
-    for (let p = 0; p < (two ? 2 : 1); p++) {
-      const px = two ? x + (p ? 0.63 : -0.63) : x;
-      cB.xf(px, 0, z, yaw); palletInto(cB);
-      const stack = 1 + ((sWorld() * 2) | 0);
-      for (let s = 0; s < stack; s++) crateInto(cB, 0.122 + s * 1.02, 1.14, 1.0, 0.94);
-      high = Math.max(high, 0.122 + stack * 1.02);
+    const stacks = [1 + ((sWorld() * 2) | 0), 1 + ((sWorld() * 2) | 0)];
+    for (const m of [1, -1]) {
+      const mx = x * m, mz = z * m;
+      let high = 0;
+      for (let p = 0; p < (two ? 2 : 1); p++) {
+        const px = two ? mx + (p ? 0.63 : -0.63) * m : mx;
+        cB.xf(px, 0, mz, yaw + (m < 0 ? Math.PI : 0)); palletInto(cB);
+        const stack = stacks[p];
+        for (let s = 0; s < stack; s++) crateInto(cB, 0.122 + s * 1.02, 1.14, 1.0, 0.94);
+        high = Math.max(high, 0.122 + stack * 1.02);
+      }
+      claim(mx, mz, ex, ez);
+      CBZ.micro.addBoxCollider(mx, high / 2, mz, ex * 2, high, ez * 2, { mat: "wood", fill: 0.45 });
+      SCENERY.push({ kind: "crates", x: mx, y: high / 2, z: mz });
+      piles++;
     }
-    claim(x, z, ex, ez);
-    CBZ.micro.addBoxCollider(x, high / 2, z, ex * 2, high, ez * 2, { mat: "wood", fill: 0.45 });
-    SCENERY.push({ kind: "crates", x: x, y: high / 2, z: z });
-    piles++;
   }
 
   // ONE MESH PER MATERIAL

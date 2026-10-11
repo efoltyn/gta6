@@ -271,11 +271,14 @@ CBZ.battleWoods = (function () {
         const conifer = vn2(x * 0.007 + 5, z * 0.007, 443) > 0.62;
         const giant = h01(ix, iz, 445) < 0.07;
         const sc = giant ? 1.3 + h01(ix, iz, 447) * 0.28 : 0.8 + h01(ix, iz, 449) * 0.42;
-        const t = tree(CH, g, x, z, sc, conifer, ctx);
-        if (!ring) { bole(t, ctx, true); stands.push(t); }
-        else W.belt++;
-        paint(x, z, (conifer ? 3.6 : 8.4) * sc);
-        if (feet && !ring) feet.push(x, t.y, z, (conifer ? 3 : 6) * sc, 0);
+        // a turned erg (erg.js FOLD): the kept half's tree, and its twin
+        foldEmit(x, z, 0, function (tx, tz) {
+          const t = tree(CH, g, tx, tz, sc, conifer, ctx);
+          if (!ring) { bole(t, ctx, true); stands.push(t); }
+          else W.belt++;
+          paint(tx, tz, (conifer ? 3.6 : 8.4) * sc);
+          if (feet && !ring) feet.push(tx, t.y, tz, (conifer ? 3 : 6) * sc, 0);
+        });
       }
     }
     // the understory: saplings where the canopy is open, thicket in clumps,
@@ -284,17 +287,15 @@ CBZ.battleWoods = (function () {
       const ix = Math.round(gx / 6), iz = Math.round(gz / 6);
       const x = cx + gx + h01(ix, iz, 451) * 5.5, z = cz + gz + h01(ix, iz, 453) * 5.5;
       if (open(x, z, 0.5)) continue;
-      const r = h01(ix, iz, 455), y = g(x, z);
+      const r = h01(ix, iz, 455);
       const yaw = h01(ix, iz, 457) * 6.28;
       const v = K.variantAt ? K.variantAt(x, z, "thicket") : 0;
       if (r < 0.07) {
         const s = 0.55 + h01(ix, iz, 459) * 0.5;
-        CH.add("under", v, x, z, M4(x, y - 0.1, z, yaw, s, s, s), [0.2, 0.34, 0.12]);
-        W.under++;
+        foldEmit(x, z, 0, function (ux, uz, sg) { CH.add("under", v, ux, uz, M4(ux, g(ux, uz) - 0.1, uz, foldYaw(yaw, sg), s, s, s), [0.2, 0.34, 0.12]); W.under++; });
       } else if (r < 0.16 && vn2(x * 0.04, z * 0.04, 461) > 0.45) {
         const s = 0.45 + h01(ix, iz, 463) * 0.35;
-        CH.add("thicket", v, x, z, M4(x, y - 0.15, z, yaw, s, s * 0.8, s), [0.13, 0.26, 0.09]);
-        W.under++;
+        foldEmit(x, z, 0, function (ux, uz, sg) { CH.add("thicket", v, ux, uz, M4(ux, g(ux, uz) - 0.15, uz, foldYaw(yaw, sg), s, s * 0.8, s), [0.13, 0.26, 0.09]); W.under++; });
       }
       // bracken in drifts
       const fb = vn2(x * 0.03, z * 0.03, 465);
@@ -305,9 +306,11 @@ CBZ.battleWoods = (function () {
           if (open(fx, fz, 0)) continue;
           const s = 0.7 + h01(ix + f, iz, 471) * 0.6;
           const j = h01(ix, iz + f, 473);
-          CH.add("fern", 0, fx, fz, M4(fx, g(fx, fz) - 0.05, fz, h01(ix, f, 475) * 6.28, s, s * (0.8 + j * 0.4), s),
-            [0.36 + j * 0.12, 0.48 + j * 0.1, 0.2]);
-          W.ferns++;
+          foldEmit(fx, fz, 0, function (ux, uz) {
+            CH.add("fern", 0, ux, uz, M4(ux, g(ux, uz) - 0.05, uz, h01(ix, f, 475) * 6.28, s, s * (0.8 + j * 0.4), s),
+              [0.36 + j * 0.12, 0.48 + j * 0.1, 0.2]);
+            W.ferns++;
+          });
         }
       }
     }
@@ -396,8 +399,7 @@ CBZ.battleWoods = (function () {
           const x = G.x + Math.cos(a) * d, z = G.z + Math.sin(a) * d;
           if (blocked(x, z, 3)) continue;
           const sc = 0.5 + h01(gi, i, 497) * 0.6 * (1 - d / G.r * 0.4);
-          const t = tree(CH, g, x, z, sc, true, ctx, { frost: true });
-          bole(t, ctx, true);
+          foldEmit(x, z, 0, function (tx, tz) { bole(tree(CH, g, tx, tz, sc, true, ctx, { frost: true }), ctx, true); });
         }
       });
       CH.build(geoOf, matOf, { name: "snow-spruce" });
@@ -408,8 +410,12 @@ CBZ.battleWoods = (function () {
       if (blocked(x, z, 4)) continue;
       const s = 0.9 + h01(k, 6, 499) * 1.8;
       // the stone is seated first, then the drift builds against its lee
-      D.place("boulder", x, z, h01(k, 7, 499) * 6.28, { size: s });
-      if (CBZ.battleGround) CBZ.battleGround.drift(x + wx * s * 0.5, z + wz * s * 0.5, wx, wz, s * 5, s * 1.1, s * 0.5);
+      // the stone and its drift are one thing on a turned erg: turned together
+      // (the far half's wind is the kept half's, reversed)
+      foldEmit(x, z, s, function (bx, bz, sg) {
+        D.place("boulder", bx, bz, foldYaw(h01(k, 7, 499) * 6.28, sg), { size: s });
+        if (CBZ.battleGround) CBZ.battleGround.drift(bx + wx * sg * s * 0.5, bz + wz * sg * s * 0.5, wx * sg, wz * sg, s * 5, s * 1.1, s * 0.5);
+      });
     }
     return { groves: groves.length };
   }

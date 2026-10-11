@@ -18,9 +18,71 @@ NPCWAR_ROOT=<extracted tree> node tools/npcwar-arena.mjs    the same table on an
 How to read it: **IN** means the win rate is inside the band. **OUT** means the point estimate is
 outside the band but the 95% interval still touches it, so re-run with more seeds before acting.
 **FAR** means the whole 95% interval is outside the band, so the sim is confidently wrong. Side A
-takes the first slot on even seeds and the second on odd ones, because the dunes have a better
-side. Without that, 30 identical riflemen won 83% from slot A. Each run writes
+takes the first slot on even seeds and the second on odd ones. That once hid the dunes' better
+side (30 identical riflemen won 83% from slot A). The open grounds are fair now (see "A fair
+start" below), and the swap stays for the raised venues, which are real places. Each run writes
 `~/harness/out/gta6/npcwar-arena/<stamp>.txt` and `.json`.
+
+## A fair start, 2026-10-11
+
+**The cause.** Every open ground (dunes, snow, fields, wood) is a 1.2 km window cut out of the
+desert world's terrain, and that terrain under the window is a slope: red's start line stood
+7.2 m above blue's on the dunes and 5-7 m on the other three. The dunes come off one wind, so
+they are not the same ground seen from either side: a long stoss slope one way and a 32° slip
+face the other. The props, trees, hedges and the kill box's containers were scattered by hash.
+The old fix slid the crest train until both lines were at the same height. That could not work,
+because the world under the dunes was never touched.
+
+**The fix (arenas/erg.js `FOLD`, field.js, dress.js, woods.js, fields.js, ground.js, yard.js).**
+The war window is now one half of the ground, plus that half turned 180° about the centre.
+That covers the ground, the dunes' anatomy, the skin's ripples, the blowing sand, and every
+prop, tree, hedge, bank, drift and foxhole. It is a turn, not a mirror, and both were measured:
+
+- On the ground mirrored across the centre line, red still won only 8-17%. The men are
+  handed (flank sides, sidesteps, the order bearings are tried in), so a mirror sends red's
+  right hook into the ground that blue's left hook gets.
+- Turned, each side's right flank is the other side's right flank.
+
+Two smaller things came with it:
+
+- **The ranks turn too.** Before, man i of either side formed up at the same world z. That put
+  red's squad leaders on red's left and blue's on blue's right.
+- **The layout is chosen for one crossing.** The two lines are hidden from each other at the
+  start (a hull's eye included). A man walking out first sees the far line from the crest in
+  the middle. Each line's own crest is not 36 m in front of it, where attackers who top it
+  shoot down into the holders.
+
+The kill box and the cover we add to a raised venue are turned pairs too. The venues
+themselves (Cape Harbor, the downtown's blocks) are real Gang City places and stay as they are
+built. Node raises no venue geometry, so their own asymmetry is not measured here, and
+`npcwar-arena` keeps swapping sides on odd seeds for them. `--noswap` turns the swap off so you
+can measure the slots themselves.
+
+30 v 30 identical pro riflemen (AK-47). The table gives red's win share, from the red slot,
+with no swap. Before is origin/main at 81284c57.
+
+| ground | before (40 seeds) | after (40 seeds) |
+|---|---|---|
+| dunes | 3% [0-13] | 53% [37-67] |
+| snow | 28% [16-43] | 53% [37-67] |
+| fields | 8% [3-20] | 55% [40-69] |
+| wood | 3% [0-13] | 55% [40-69] |
+
+With the swap on, the share for roster A came out at 38-75% over 24-40 seeds (the dunes at
+68% [52-80] over 40). The swap only relabels the same battles by seed parity, so this is a
+seed-parity effect in the sim's dice, not the ground.
+
+Training now shows from either slot. With 30 elite against 30 thugs on the dunes:
+
+- elite on red won 4% before and 58% after;
+- elite on blue won 100% before and 83% after.
+
+The before numbers were the ground. The after numbers are training, which is still weaker
+than real life (see below).
+
+`npcwar-headless` passes 115/115: the resolver names the page's winner 6/7, and holding trades
+at least as well as meeting them in the open 2/3. `front-sim` passes 40/40 and
+`npcwar-balance-check` passes.
 
 ## The matrix, 2026-10-11
 

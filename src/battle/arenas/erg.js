@@ -38,6 +38,87 @@
    face falls into its own shade: the crest is a hard line between the two. */
 const DUNE = { on: false, cx: 0, cz: 0, R0: 420, R1: 585, half: 600,
   wa: 0.42 + Math.PI, wx: Math.cos(0.42 + Math.PI), wz: Math.sin(0.42 + Math.PI), lam: 118, phase: 0, skin: null, pal: null, tab: null };
+/* THE FAIR FIELD: THE ERG IS TURNED ABOUT ITS CENTRE.
+
+   The armies start at cx -/+ gap/2 on the x axis. The world's ground under
+   the window is a place (a slope, a hill), the dunes come off one wind
+   (long stoss one way, a 32 deg slip face the other), and the forest, the
+   hedgerows and the rocks are scattered by hash. Every one of those dealt
+   the two start lines different ground. Measured on main at 81284c57: red
+   stood 7.2 m above blue on the dunes (5-7 m on snow, fields, forest), and
+   30 v 30 identical riflemen from the red slot won 8% on the dunes, 0% on
+   the fields and 33% on the snow. Phase-tuning the crest train could not
+   fix it: a dune is not the same ground from its stoss as from its slip
+   face, and the world under it was never touched.
+
+   So the war window is one half of the erg and that half TURNED 180 DEGREES
+   about the centre (cx, cz): a point (x, z) on the far half reads the ground
+   at (2cx - x, 2cz - z). Point symmetry, not a mirror, and that was
+   measured too: on a ground mirrored across the centre line red still won
+   8-17%, because the men are HANDED (a squad's flank, a sidestep, the order
+   bearings are tried in), and a mirror sends red's right hook into the
+   ground blue's LEFT hook gets. Turned, each side's right is the other's
+   right, the way every fair RTS map is built; the same armies split 50/50.
+
+   `src` is the half that is kept (field.js picks it by measurement). The
+   two halves are blended across a SEAM band either side of the centre line
+   (a smoothstep weight a(d) with a(-d) = 1 - a(d), so the blend is itself
+   point-symmetric and has no crease), and from R0 to R1 out the turned
+   ground fades back into the world's own, so the horizon is the world's.
+   Every prop, tree, hedge, bank and drift placed on the kept half while the
+   field is dressed is placed again turned (position through the centre,
+   yaw + PI, a direction reversed); what lands on the far half on its own is
+   dropped. The far half's dunes are dunes off the reversed wind, and the
+   skin's ripples and the blowing sand there follow it. FOLD.on is a
+   BUILD-TIME flag (field.js sets it around the dressing), so a log felled
+   or a crater dug in battle lands where it lands; FOLD.ground (the turned
+   ground) stays on for the battle. */
+const FOLD = { on: false, ground: false, cx: 0, cz: 0, src: -1, seam: 30, inside: 0 };
+// the kept half's share of a point d metres onto the kept side of the line
+function foldA(d) {
+  const S = FOLD.seam;
+  if (d >= S) return 1;
+  if (d <= -S) return 0;
+  const t = (d + S) / (2 * S);
+  return t * t * (3 - 2 * t);
+}
+// is (x) on the far half?
+function foldFar(x) { return (x - FOLD.cx) * FOLD.src < 0; }
+/* Folds nest: whatever an emitted thing places in turn (a boulder's drift,
+   a cluster's stones) is already on its own side, so an inner fold passes
+   straight through. */
+function foldRun(fn, a, b, c, d, e) {
+  FOLD.inside++;
+  try { return fn(a, b, c, d, e); } finally { FOLD.inside--; }
+}
+/* EMIT ONE THING ON A TURNED FIELD: fn(x, z, sign) once on the kept half
+   and again turned through the centre with sign -1 (a yaw gains PI, a
+   direction is reversed); nothing on the far half, and nothing that would
+   overlap its own twin at the centre. Not folding: fn(x, z, 1), as always. */
+function foldEmit(x, z, r, fn) {
+  if (!FOLD.on || FOLD.inside) return fn(x, z, 1);
+  const d = (x - FOLD.cx) * FOLD.src, rr = Math.max(0.5, r || 0);
+  if (d < 0) return null;
+  if (d <= rr && Math.abs(z - FOLD.cz) <= rr) return null;
+  const out = foldRun(fn, x, z, 1);
+  foldRun(fn, 2 * FOLD.cx - x, 2 * FOLD.cz - z, -1);
+  return out;
+}
+function foldYaw(yaw, sg) { return sg < 0 ? yaw + Math.PI : yaw; }
+/* A SEGMENT (a bank, a berm): the kept half of it, and its turned twin. */
+function foldSeg(ax, az, bx, bz, fn) {
+  if (!FOLD.on || FOLD.inside) return fn(ax, az, bx, bz);
+  const c = FOLD.cx, s = FOLD.src;
+  const ka = (ax - c) * s >= 0, kb = (bx - c) * s >= 0;
+  if (!ka && !kb) return null;
+  if (ka !== kb) {                                     // clip at the line
+    const t = (c - ax) / (bx - ax), mz = az + (bz - az) * t;
+    if (ka) { bx = c; bz = mz; } else { ax = c; az = mz; }
+  }
+  const out = foldRun(fn, ax, az, bx, bz);
+  foldRun(fn, 2 * c - ax, 2 * FOLD.cz - az, 2 * c - bx, 2 * FOLD.cz - bz);
+  return out;
+}
 /* WHAT THE ERG IS WEARING. `form` is the height function, `surface` what the
    ground layer (ground.js) digs, prints and sprays. Colours are albedo (the
    skin is lit per pixel now); `tint` is what the world's far terrain is worked
@@ -193,7 +274,14 @@ function duneCrests(cx, cz, hx, hz, step) {
       if (_cH < (snow ? 1.6 : 2.5)) continue;
       const cu = _cU + DUNE.phase, x = cu * DUNE.wx - v * DUNE.wz, z = cu * DUNE.wz + v * DUNE.wx;
       if (Math.abs(x - cx) > hx || Math.abs(z - cz) > hz) continue;
+      // on a turned field the crests are the kept half's, twice (the far
+      // half's own crest train is not the ground there any more)
+      if (FOLD.ground && (x - FOLD.cx) * FOLD.src < FOLD.seam) continue;    // the blend band has no clean crest
       out.push({ x: x, z: z, y: MAP_GROUND(x, z), h: _cH });
+      if (FOLD.ground) {
+        const mx = 2 * FOLD.cx - x, mz = 2 * FOLD.cz - z;
+        if (Math.abs(mx - cx) <= hx && Math.abs(mz - cz) <= hz) out.push({ x: mx, z: mz, y: MAP_GROUND(mx, mz), h: _cH });
+      }
     }
   }
   return out;
@@ -239,11 +327,15 @@ function ergSurfaceGLSL(form, surface) {
   const head =
     "{ float dist = length(vEW - cameraPosition);\n" +
     "  vec2 rel = vEW.xz - uC;\n" +
+    // the turned field (FOLD): the far half wears the kept half's surface,
+    // turned through the centre, and its bent normals turn with it
+    "  float fS = 1.0; if (uF.x > 0.5 && rel.x * uF.y < 0.0) { rel = -rel; fS = -1.0; }\n" +
     "  vec2 q = vec2(dot(rel, uW), dot(rel, vec2(-uW.y, uW.x)));\n" +
     "  float lee = vED.x, crest = vED.y, trough = vED.z, frac = vED.w;\n" +
     "  vec3 wN = vec3(0.0);\n" +
     "  diffuseColor.rgb *= 0.95 + 0.1 * egN(rel * 0.013) + 0.04 * (egN(rel * 0.07 + 7.0) - 0.5);\n";
   const tail =
+    "  wN.xz *= fS;\n" +
     "  normal = normalize(normal + (viewMatrix * vec4(wN, 0.0)).xyz);\n" +
     "  diffuseColor.rgb *= 1.0 - smoothstep(160.0, 800.0, dist) * 0.04; }\n";
   if (form === "dune") return head +
@@ -382,6 +474,7 @@ function ergMaterial(P) {
   mat.onBeforeCompile = function (sh) {
     sh.uniforms.uC = { value: new THREE.Vector2(DUNE.cx, DUNE.cz) };
     sh.uniforms.uW = { value: new THREE.Vector2(DUNE.wx, DUNE.wz) };
+    sh.uniforms.uF = { value: new THREE.Vector2(FOLD.ground ? 1 : 0, FOLD.src) };
     sh.uniforms.uCanopy = { value: ERG_CANOPY.tex };
     sh.uniforms.uCanopyR = { value: ERG_CANOPY.rect };
     sh.uniforms.uParcel = { value: new THREE.Vector3(PARCEL.ang, PARCEL.w, PARCEL.d) };
@@ -391,7 +484,7 @@ function ergMaterial(P) {
         "#include <project_vertex>\nvED = aD; vEW = (modelMatrix * vec4(transformed, 1.0)).xyz;");
     let surf = ergSurfaceGLSL(form, surface).replace("TURF_CALL",
       turfOn ? "turf = groundTurf(vEW.xz, dist, 0.35);" : "turf = vec3(0.92 + 0.16 * egN(rel * 0.043) + 0.08 * (egN(vEW.xz * 0.6) - 0.5) * kF);");
-    sh.fragmentShader = "varying vec4 vED;\nvarying vec3 vEW;\nuniform vec2 uC;\nuniform vec2 uW;\n" +
+    sh.fragmentShader = "varying vec4 vED;\nvarying vec3 vEW;\nuniform vec2 uC;\nuniform vec2 uW;\nuniform vec2 uF;\n" +
       "uniform sampler2D uCanopy;\nuniform vec4 uCanopyR;\nuniform vec3 uParcel;\nuniform sampler2D uParcelT;\n" +
       ERG_GLSL + "\n" + (turfOn ? CBZ.GROUND_TURF_GLSL + "\n" : "") +
       sh.fragmentShader
@@ -430,7 +523,8 @@ function ergSkin(world) {
       const y = MAP_GROUND(x, z);
       const k = j * (NU + 1) + i;
       pos[k * 3] = lx; pos[k * 3 + 1] = y; pos[k * 3 + 2] = lz;
-      const w = duneWeight(x, z);
+      const far = FOLD.ground && foldFar(x);
+      const w = duneWeight(x, z), fx = far ? 2 * FOLD.cx - x : x, fz = far ? 2 * FOLD.cz - z : z;
       const lee = DS.lee * w, cr = DS.crest * w, tr = DS.trough * w;
       tmp.copy(sand);
       if (roll) {
@@ -439,10 +533,10 @@ function ergSkin(world) {
         tmp.lerp(crest, cr * 0.55);
         tmp.lerp(slip, lee * 0.45);
         tmp.lerp(trough, tr * 0.6);
-        const flat = vn2(x * 0.012, z * 0.012, 61);
+        const flat = vn2(fx * 0.012, fz * 0.012, 61);
         if (flat > 0.6) tmp.lerp(pan, Math.min(1, (flat - 0.6) * 4) * tr * 0.7);
       }
-      tmp.multiplyScalar(0.96 + vn2(x * 0.21, z * 0.21, 71) * 0.06);
+      tmp.multiplyScalar(0.96 + vn2(fx * 0.21, fz * 0.21, 71) * 0.06);
       if (w < 1) tmp.lerp(sand, 1 - w);
       col[k * 3] = tmp.r; col[k * 3 + 1] = tmp.g; col[k * 3 + 2] = tmp.b;
       aD[k * 4] = lee; aD[k * 4 + 1] = cr; aD[k * 4 + 2] = tr; aD[k * 4 + 3] = DS.frac;

@@ -637,19 +637,22 @@ CBZ.battleGround = (function () {
     const col = o.color || [0.86, 0.7, 0.48];
     const mat = new THREE.ShaderMaterial({
       uniforms: { uTime: { value: 0 }, uWind: { value: new THREE.Vector2(o.wx || 1, o.wz || 0) },
+        uFold: { value: new THREE.Vector3(o.fold ? 1 : 0, o.fold ? o.fold.cx : 0, o.fold ? o.fold.src : 0) },
         uCol: { value: new THREE.Vector3(col[0], col[1], col[2]) }, uScale: { value: 500 },
         uTravel: { value: o.travel || 9 }, uSize: { value: o.size || 0.05 } },
       vertexShader: [
-        "attribute vec3 aS; uniform float uTime; uniform vec2 uWind; uniform float uScale; uniform float uTravel; uniform float uSize;",
+        "attribute vec3 aS; uniform float uTime; uniform vec2 uWind; uniform vec3 uFold; uniform float uScale; uniform float uTravel; uniform float uSize;",
         "varying float vA;",
         "void main() {",
         "  float ph = fract(uTime * 0.32 * aS.y + aS.x);",
         // gusts: whole stretches of crest smoke at once, then go quiet
         "  float gust = 0.35 + 0.65 * smoothstep(0.25, 0.85, 0.5 + 0.5 * sin(uTime * 0.7 + position.x * 0.021 + position.z * 0.017));",
         "  vec3 p = position;",
-        "  p.xz += uWind * ph * uTravel * aS.y;",
+        // a turned erg: the far half's dunes face the reversed wind
+        "  vec2 wnd = uWind; if (uFold.x > 0.5 && (p.x - uFold.y) * uFold.z < 0.0) wnd = -wnd;",
+        "  p.xz += wnd * ph * uTravel * aS.y;",
         "  p.y += sin(ph * 3.1416) * (0.35 + 0.5 * aS.y) - ph * aS.z * 0.45;",
-        "  p.xz += vec2(-uWind.y, uWind.x) * sin(ph * 9.0 + aS.x * 30.0) * 0.25;",
+        "  p.xz += vec2(-wnd.y, wnd.x) * sin(ph * 9.0 + aS.x * 30.0) * 0.25;",
         "  vec4 mv = modelViewMatrix * vec4(p, 1.0);",
         "  float d = -mv.z;",
         "  vA = sin(ph * 3.1416) * gust * (1.0 - smoothstep(70.0, 160.0, d));",
@@ -842,7 +845,18 @@ CBZ.battleGround = (function () {
   });
 
   return {
-    begin: begin, arm: arm, deform: deform, berm: berm, pit: pit, drift: drift,
+    begin: begin, arm: arm, deform: deform,
+    // earthworks laid while the field is being dressed land on the erg in
+    // turned pairs (erg.js FOLD); in battle FOLD.on is off
+    berm: function (ax, az, bx, bz, hgt, w) {
+      return typeof foldSeg === "function" ? foldSeg(ax, az, bx, bz, function (a, b, c, d) { return berm(a, b, c, d, hgt, w); }) : berm(ax, az, bx, bz, hgt, w);
+    },
+    pit: function (x, z, r, d) {
+      return typeof foldEmit === "function" ? foldEmit(x, z, r, function (fx, fz) { return pit(fx, fz, r, d); }) : pit(x, z, r, d);
+    },
+    drift: function (x, z, dx, dz, len, w, hgt) {
+      return typeof foldEmit === "function" ? foldEmit(x, z, 0, function (fx, fz, sg) { return drift(fx, fz, dx * sg, dz * sg, len, w, hgt); }) : drift(x, z, dx, dz, len, w, hgt);
+    },
     crater: crater, scorch: scorch, blast: blast, mark: mark, TILE: TILE,
     patchTerrain: patchTerrain, blowing: blowing, keepBody: keepBody,
     craters: function () { return G.craters; },

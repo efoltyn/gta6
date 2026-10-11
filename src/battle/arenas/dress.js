@@ -567,7 +567,17 @@ CBZ.battleDress = (function () {
     bale:     { hw: 0.62, hd: 0.76, h: 1.5, hp: 70, rubble: 0 },
     rubble:   { hw: 1.4, hd: 1.0, h: 1.0, hp: 1e9, rubble: 0 },
   };
+  /* ON A TURNED ERG (erg.js FOLD) a thing placed while the field is being
+     dressed lands on the kept half and again turned through the centre
+     (yaw + PI), never on the far half on its own: both start lines get the
+     same cover. */
   function place(kind, x, z, yaw, o) {
+    if (typeof foldEmit !== "function" || !FOLD.on) return placeOne(kind, x, z, yaw, o);
+    const S = SPEC[kind] || { hw: 1, hd: 1 };
+    const r = kind === "log" ? ((o && o.len) || 8) / 2 : kind === "boulder" ? ((o && o.size) || 1.4) : Math.max(S.hw, S.hd);
+    return foldEmit(x, z, r, function (fx, fz, sg) { return placeOne(kind, fx, fz, foldYaw(yaw, sg), o); });
+  }
+  function placeOne(kind, x, z, yaw, o) {
     o = o || {};
     const C = D.ctx || {};
     const g = C.groundAt ? C.groundAt(x, z) : 0;
@@ -652,6 +662,10 @@ CBZ.battleDress = (function () {
      static, one merged mesh per paint, colliders and cover like the rest. */
   const contB = {};
   function containers(x, z, yaw, tiers, L) {
+    if (typeof foldEmit !== "function" || !FOLD.on) return containersOne(x, z, yaw, tiers, L);
+    return foldEmit(x, z, L / 2, function (fx, fz, sg) { return containersOne(fx, fz, foldYaw(yaw, sg), tiers, L); });
+  }
+  function containersOne(x, z, yaw, tiers, L) {
     const paints = CONT_PAINT;
     for (let t = 0; t < tiers; t++) {
       const hex = paints[(rnd() * paints.length) | 0];
@@ -689,11 +703,19 @@ CBZ.battleDress = (function () {
     const cx = ctx.cx, cz = ctx.cz, gap = ctx.gap;
     const half = gap / 2;
     let made = 0;
+    /* ON A TURNED FIELD (erg.js FOLD) every draw lands on the kept half and
+       place() puts each thing there and at its turned twin, so the spot must
+       be free on BOTH sides (a raised venue's walls are not symmetric). */
+    const fold = typeof FOLD !== "undefined" && FOLD.on;
     const tryAt = function (fn, r, n, xs, zs) {
       for (let t = 0; t < n; t++) {
-        const x = cx + xs(), z = cz + zs();
+        let x = cx + xs();
+        const z = cz + zs();
+        if (fold) x = FOLD.cx + FOLD.src * Math.abs(x - FOLD.cx);
         if (!free(x, z, r) || !flatEnough(x, z, r * 0.7, ctx.tol || 1.2)) continue;
+        if (fold && (!free(2 * FOLD.cx - x, 2 * FOLD.cz - z, r) || !flatEnough(2 * FOLD.cx - x, 2 * FOLD.cz - z, r * 0.7, ctx.tol || 1.2))) continue;
         claim(x, z, r);
+        if (fold) claim(2 * FOLD.cx - x, 2 * FOLD.cz - z, r);
         fn(x, z);
         made++;
         return true;
@@ -702,6 +724,7 @@ CBZ.battleDress = (function () {
     };
     // forward positions: two to three a side, a little ahead of each line
     for (const side of [-1, 1]) {
+      if (fold && side !== FOLD.src) continue;                // the turn makes the other side's
       const face = side < 0 ? Math.PI / 2 : -Math.PI / 2;     // red (west) looks east, blue looks west
       const nPos = theme === "forest" ? 2 : 3;
       for (let k = 0; k < nPos; k++) {
