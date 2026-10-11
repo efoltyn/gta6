@@ -698,7 +698,7 @@ document.body.appendChild(b);}}catch(e){}})();
      memory, witnesses, morale, the authority ladder). Pure logic with no
      parse-time dependencies, so it loads before its first consumers
      (entities/security.js, entities/guards.js). -->
-<script src="src/systems/brain.js?v=bal2m1011"></script>
+<script src="src/systems/brain.js?v=bal2m1012"></script>
 <script src="src/entities/security.js"></script>
 
 <!-- 4. systems — economy/quests load before actors that reference them -->
@@ -708,7 +708,7 @@ document.body.appendChild(b);}}catch(e){}})();
 
 <!-- weapon tuning/appearances are data-only and also feed the armory room -->
 <script src="src/weapons/weapon-data.js?v=mce86a5"></script>
-<script src="src/weapons/ballistics.js?v=bal2m1011"></script>
+<script src="src/weapons/ballistics.js?v=bal2m1012"></script>
 <script src="src/weapons/weapon-scale.js?v=w09290250"></script>
 <script src="src/weapons/optics.js?v=anchor1"></script>
 <script src="src/weapons/appearances/sidearm.js?v=mce86a5"></script>
@@ -2010,7 +2010,7 @@ document.body.appendChild(b);}}catch(e){}})();
      own: it PICKS A MAN UP, spins, and uses him as a club on everyone else.
      MUST follow predator_anim.js (it drives its new hand layers) and
      creature_combat.js (which calls into it through three guarded seams). -->
-<script src="src/systems/ape_combat.js?v=bal2m1011"></script>
+<script src="src/systems/ape_combat.js?v=bal2m1012"></script>
 <!-- VERLET CORPSE PHYSICS FOR ANIMALS — the sibling of city/ragdoll.js, which
      is hard-wired to the humanoid skeleton, so every one of the 45 species used
      to die by easing group.rotation.z to a constant ("head pointed to sky").

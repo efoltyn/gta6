@@ -1071,9 +1071,11 @@
         else this.smoke.emit(a[0], a[1], a[2], (r() - 0.5) * 0.5, 1.6 + r() * 1.2, (r() - 0.5) * 0.5, 2.5 + r() * 2, 0.4, 3.0, 0.35, FXC.grey, -0.06, 0.6);
       }
     }
-    if (vs.burning && !this.dead) this.fire(dt, E, 10);
+    if (vs.burning && !this.dead) this.burn(dt, E, 10);
   };
-  RP.fire = function (dt, at, rate) {
+  // the flames (was a second RP.fire, which silently replaced the contract's
+  // fire(shot) above: no rig on this kit ever flashed or kicked on a round)
+  RP.burn = function (dt, at, rate) {
     const r = Math.random, a = this._a;
     this.acc.fire += dt * rate;
     this.acc.fire = Math.min(this.acc.fire, 6);
@@ -1104,8 +1106,8 @@
     const burning = u && u.burnT > 0;
     if (burning) {
       this.burnt += dt;
-      this.fire(dt, this.cabin || this.engine || [0, 1.2, 0], 16);
-      this.fire(dt, this.engine || [0, 1, 1], 8);
+      this.burn(dt, this.cabin || this.engine || [0, 1.2, 0], 16);
+      this.burn(dt, this.engine || [0, 1, 1], 8);
       // tyres burn away over a minute: the hull settles onto its rims
       const k = clamp(this.burnt / 50, 0, 1);
       for (let i = 0; i < this.wheels.length; i++) this.wheels[i].sq = 1 - k * 0.22;
