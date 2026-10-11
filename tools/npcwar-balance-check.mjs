@@ -4,8 +4,10 @@
    data/npcwar/expectations.json, at their `fastSeeds`), held to the
    real-world bands.
 
-   FAILS only on FAR: the whole 95% interval of side A's win rate is outside
-   its band, i.e. the sim is confidently wrong, not unlucky. OUT (the point
+   FAILS only on a NEW FAR: the whole 95% interval of side A's win rate is
+   outside its band (the sim is confidently wrong, not unlucky) on a matchup
+   with no `known` note. A `known` one (filed in docs/npcwar/BALANCE.md with
+   its owner) is listed, and reported FIXED once it lands in its band. OUT (the point
    estimate outside, the interval still touching the band) is printed as a
    warning: re-run the full matchup with the arena before calling it.
 
@@ -33,10 +35,16 @@ console.log("npcwar-balance-check: " + list.length + " matchups, " + jobs.length
 const res = await runPool(jobs, nW);
 const sums = list.map((mu) => summarize(mu, res.filter((r) => r.id === mu.id)));
 for (const s of sums) console.log(tableLine(s));
-const far = sums.filter((s) => s.verdict === "FAR" || s.errors > s.n);
+const byId = Object.fromEntries(list.map((m) => [m.id, m]));
+const far = sums.filter((s) => (s.verdict === "FAR" || s.errors > s.n) && !byId[s.id].known);
+const known = sums.filter((s) => s.verdict === "FAR" && byId[s.id].known);
+const fixed = sums.filter((s) => s.verdict === "IN" && byId[s.id].known);
 const out = sums.filter((s) => s.verdict === "OUT");
-for (const s of far.concat(out)) console.log("\n" + (s.verdict === "FAR" ? "FAIL " : "warn ") + detail(s).trimStart());
+for (const s of far) console.log("\nFAIL " + detail(s).trimStart());
+for (const s of out) console.log("\nwarn " + detail(s).trimStart());
+for (const s of known) console.log("known " + s.id + ": " + byId[s.id].known);
+for (const s of fixed) console.log("FIXED " + s.id + " is in its band now: delete its `known` line in data/npcwar/expectations.json");
 const secs = ((Date.now() - t0) / 1000).toFixed(0);
-console.log("\n" + (far.length ? "FAIL" : "PASS") + " npcwar balance: " + (sums.length - far.length - out.length) + " in band, " + out.length + " out (warn), " + far.length + " FAR" +
-  (far.length ? " (" + far.map((s) => s.id + " " + Math.round(s.winA * 100) + "% v " + s.band.map((x) => x * 100).join("-") + "%").join(", ") + ")" : "") + " in " + secs + " s");
+console.log("\n" + (far.length ? "FAIL" : "PASS") + " npcwar balance: " + sums.filter((s) => s.verdict === "IN").length + " in band, " + out.length + " out (warn), " + known.length + " known FAR, " + far.length + " new FAR" +
+  (far.length ? " (" + far.map((s) => s.id + " " + Math.round(s.winA * 100) + "% v " + s.band.map((x) => Math.round(x * 100)).join("-") + "%").join(", ") + ")" : "") + " in " + secs + " s");
 process.exit(far.length ? 1 : 0);

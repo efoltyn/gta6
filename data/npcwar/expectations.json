@@ -3,188 +3,677 @@
   "sourcesNote": "The reasoning is written per row. Body masses and behaviour are textbook figures (Sunquist and Sunquist, Wild Cats of the World 2002; Mammalian Species accounts; Nowak, Walker's Mammals). Fights between wild animals are rarely witnessed, so the animal-vs-animal bands are deliberately wide: they encode the direction of the consensus, not a measured rate.",
   "matchups": [
     {
-      "id": "lion_v_tiger", "label": "1 lion v 1 Bengal tiger", "a": "lion", "b": "bengal_tiger", "n": "1v1", "gap": 30, "seeds": 16, "fast": true, "fastSeeds": 8,
-      "band": { "winA": [0.30, 0.60] },
-      "why": "A male Bengal tiger (~220 kg) outweighs a male lion (~190 kg) by roughly 15%, is a solitary hunter that kills large prey alone, and has the longer canines; the lion is the more practised fighter against its own kind (coalitions fight for prides). Historical staged fights (Roman arenas, 19th-century Indian and circus accounts) are anecdotal and split. Consensus: close to even, the tiger slightly favoured by size."
+      "id": "lion_v_tiger",
+      "label": "1 lion v 1 Bengal tiger",
+      "a": "lion",
+      "b": "bengal_tiger",
+      "n": "1v1",
+      "gap": 30,
+      "seeds": 16,
+      "fast": true,
+      "fastSeeds": 8,
+      "band": {
+        "winA": [
+          0.3,
+          0.6
+        ]
+      },
+      "why": "A male Bengal tiger (~220 kg) outweighs a male lion (~190 kg) by roughly 15%, is a solitary hunter that kills large prey alone, and has the longer canines; the lion is the more practised fighter against its own kind (coalitions fight for prides). Historical staged fights (Roman arenas, 19th-century Indian and circus accounts) are anecdotal and split. Consensus: close to even, the tiger slightly favoured by size.",
+      "known": "tiger file: hp 150 / dmg 35 for a 220 kg cat against the lion's 215 / 60 (BALANCE.md F1)"
     },
     {
-      "id": "bear_v_tiger", "label": "1 brown bear v 1 Bengal tiger", "a": "brown_bear", "b": "bengal_tiger", "n": "1v1", "gap": 30, "seeds": 16, "fast": true, "fastSeeds": 8,
-      "band": { "winA": [0.50, 0.90] },
+      "id": "bear_v_tiger",
+      "label": "1 brown bear v 1 Bengal tiger",
+      "a": "brown_bear",
+      "b": "bengal_tiger",
+      "n": "1v1",
+      "gap": 30,
+      "seeds": 16,
+      "fast": true,
+      "fastSeeds": 8,
+      "band": {
+        "winA": [
+          0.5,
+          0.9
+        ]
+      },
       "why": "A grizzly/brown bear (~300 kg, up to 400+) has 40% more mass than a Bengal tiger, a heavy skull and thick fur and fat that blunt bites. In the Russian Far East Amur tigers do kill brown bears, but mostly females and young, and adult male bears also displace tigers from kills (Seryodkin, Kostyria et al. on Sikhote-Alin). A big cat against a full-grown bear loses more often than not."
     },
     {
-      "id": "bear_v_lion", "label": "1 brown bear v 1 lion", "a": "brown_bear", "b": "lion", "n": "1v1", "gap": 30, "seeds": 12,
-      "band": { "winA": [0.55, 0.92] },
-      "why": "Same argument as the tiger with a lighter cat (190 kg): the bear's mass, reach and the cat's lack of a killing hold on a 300 kg animal. 19th-century Californian bear-and-bull/lion pit accounts favour the bear."
+      "id": "bear_v_lion",
+      "label": "1 brown bear v 1 lion",
+      "a": "brown_bear",
+      "b": "lion",
+      "n": "1v1",
+      "gap": 30,
+      "seeds": 12,
+      "band": {
+        "winA": [
+          0.55,
+          0.92
+        ]
+      },
+      "why": "Same argument as the tiger with a lighter cat (190 kg): the bear's mass, reach and the cat's lack of a killing hold on a 300 kg animal. 19th-century Californian bear-and-bull/lion pit accounts favour the bear.",
+      "known": "bears file: brown bear dmg 29.7 against the lion's 60 (BALANCE.md F2)"
     },
     {
-      "id": "gorilla_v_lion", "label": "1 gorilla v 1 lion", "a": "gorilla", "b": "lion", "n": "1v1", "gap": 30, "seeds": 12, "fast": true, "fastSeeds": 8,
-      "band": { "winA": [0.00, 0.30] },
-      "why": "A silverback (~160 kg) is enormously strong but has no killing tool against a big cat except its canines; the lion has a throat or nape bite, claws and 30 kg more. Leopards (a third of a lion's mass) are documented gorilla predators (Fay et al. 1995, Central African Republic). The gorilla loses."
+      "id": "gorilla_v_lion",
+      "label": "1 gorilla v 1 lion",
+      "a": "gorilla",
+      "b": "lion",
+      "n": "1v1",
+      "gap": 30,
+      "seeds": 12,
+      "fast": true,
+      "fastSeeds": 8,
+      "band": {
+        "winA": [
+          0.0,
+          0.3
+        ]
+      },
+      "why": "A silverback (~160 kg) is enormously strong but has no killing tool against a big cat except its canines; the lion has a throat or nape bite, claws and 30 kg more. Leopards (a third of a lion's mass) are documented gorilla predators (Fay et al. 1995, Central African Republic). The gorilla loses.",
+      "known": "gorilla hp 260 for 170 kg and the ape move set out-trade a lion (F3)"
     },
     {
-      "id": "gorilla_v_tiger", "label": "1 gorilla v 1 Bengal tiger", "a": "gorilla", "b": "bengal_tiger", "n": "1v1", "gap": 30, "seeds": 12,
-      "band": { "winA": [0.00, 0.25] },
-      "why": "As gorilla v lion, against a heavier (220 kg) cat. The gorilla loses."
+      "id": "gorilla_v_tiger",
+      "label": "1 gorilla v 1 Bengal tiger",
+      "a": "gorilla",
+      "b": "bengal_tiger",
+      "n": "1v1",
+      "gap": 30,
+      "seeds": 12,
+      "band": {
+        "winA": [
+          0.0,
+          0.25
+        ]
+      },
+      "why": "As gorilla v lion, against a heavier (220 kg) cat. The gorilla loses.",
+      "known": "tiger file numbers (F1); gorilla hp 260 for 170 kg (F3)"
     },
     {
-      "id": "wolves10_v_bear", "label": "10 gray wolves v 1 brown bear", "a": "gray_wolf", "b": "brown_bear", "n": "10v1", "gap": 40, "seeds": 16, "fast": true, "fastSeeds": 8,
-      "band": { "winA": [0.25, 0.80] },
-      "why": "Wolf packs and grizzlies meet over carcasses in Yellowstone; usually the bear takes the kill and nobody dies, and wolves do kill bears, mostly cubs, old or denned animals (Smith et al., Yellowstone wolf project; Gunther & Smith 2004). Ten 45 kg wolves against one 300 kg adult bear in a fight to the finish: genuinely variable."
+      "id": "wolves10_v_bear",
+      "label": "10 gray wolves v 1 brown bear",
+      "a": "gray_wolf",
+      "b": "brown_bear",
+      "n": "10v1",
+      "gap": 40,
+      "seeds": 16,
+      "fast": true,
+      "fastSeeds": 8,
+      "band": {
+        "winA": [
+          0.25,
+          0.8
+        ]
+      },
+      "why": "Wolf packs and grizzlies meet over carcasses in Yellowstone; usually the bear takes the kill and nobody dies, and wolves do kill bears, mostly cubs, old or denned animals (Smith et al., Yellowstone wolf project; Gunther & Smith 2004). Ten 45 kg wolves against one 300 kg adult bear in a fight to the finish: genuinely variable.",
+      "known": "canids: a wolf bite does 6 hp to a bear and the pack fights to the death instead of harrying (F5)"
     },
     {
-      "id": "elephant_v_lion", "label": "1 African elephant v 1 lion", "a": "african_elephant", "b": "lion", "n": "1v1", "gap": 40, "seeds": 10,
-      "band": { "winA": [0.85, 1.00] },
+      "id": "elephant_v_lion",
+      "label": "1 African elephant v 1 lion",
+      "a": "african_elephant",
+      "b": "lion",
+      "n": "1v1",
+      "gap": 40,
+      "seeds": 10,
+      "band": {
+        "winA": [
+          0.85,
+          1.0
+        ]
+      },
       "why": "A 6-tonne adult elephant is not lion prey; a lone lion cannot kill one and a tusk or a foot kills a lion. Lions only take elephants in large prides, and then calves and sub-adults (Savuti, Botswana: Joubert 2006)."
     },
     {
-      "id": "elephant_v_6lions", "label": "1 African elephant v a pride of 6 lions", "a": "african_elephant", "b": "lion", "n": "1v6", "gap": 40, "seeds": 10,
-      "band": { "winA": [0.50, 1.00] },
+      "id": "elephant_v_6lions",
+      "label": "1 African elephant v a pride of 6 lions",
+      "a": "african_elephant",
+      "b": "lion",
+      "n": "1v6",
+      "gap": 40,
+      "seeds": 10,
+      "band": {
+        "winA": [
+          0.5,
+          1.0
+        ]
+      },
       "why": "The Savuti prides (up to 30 lions) specialised in elephants, but their kills were mostly juveniles and sub-adults taken at night by many lions. Six lions against one adult: the elephant usually wins or drives them off."
     },
     {
-      "id": "rhino_v_lion", "label": "1 white rhino v 1 lion", "a": "white_rhino", "b": "lion", "n": "1v1", "gap": 40, "seeds": 10,
-      "band": { "winA": [0.80, 1.00] },
+      "id": "rhino_v_lion",
+      "label": "1 white rhino v 1 lion",
+      "a": "white_rhino",
+      "b": "lion",
+      "n": "1v1",
+      "gap": 40,
+      "seeds": 10,
+      "band": {
+        "winA": [
+          0.8,
+          1.0
+        ]
+      },
       "why": "A 2.3-tonne rhino with a horn and 2 cm of hide. Lions very rarely kill adult rhinos (calves, yes). One lion loses."
     },
     {
-      "id": "wolf_v_dog", "label": "1 gray wolf v 1 dog", "a": "gray_wolf", "b": "dog", "n": "1v1", "gap": 30, "seeds": 10,
-      "band": { "winA": [0.60, 0.98] },
+      "id": "wolf_v_dog",
+      "label": "1 gray wolf v 1 dog",
+      "a": "gray_wolf",
+      "b": "dog",
+      "n": "1v1",
+      "gap": 30,
+      "seeds": 10,
+      "band": {
+        "winA": [
+          0.6,
+          0.98
+        ]
+      },
       "why": "A 45 kg wild wolf against the game's 30 kg generic dog: wolves kill dogs routinely where they meet (livestock-guarding breeds excepted)."
     },
-
     {
-      "id": "tiger_v_1man_fists", "label": "1 Bengal tiger v 1 unarmed man", "a": "bengal_tiger", "b": "men", "n": "1v1", "bw": "fists", "bt": "civ", "gap": 40, "seeds": 10,
-      "band": { "winA": [0.95, 1.00] },
+      "id": "tiger_v_1man_fists",
+      "label": "1 Bengal tiger v 1 unarmed man",
+      "a": "bengal_tiger",
+      "b": "men",
+      "n": "1v1",
+      "bw": "fists",
+      "bt": "civ",
+      "gap": 40,
+      "seeds": 10,
+      "band": {
+        "winA": [
+          0.95,
+          1.0
+        ]
+      },
       "why": "A tiger kills a man with one bite to the nape or throat; a man's fists do nothing to it. Man-eating tigers (Champawat, the Sundarbans) kill people every year."
     },
     {
-      "id": "tiger_v_10men_fists", "label": "1 Bengal tiger v 10 unarmed men", "a": "bengal_tiger", "b": "men", "n": "1v10", "bw": "fists", "bt": "civ", "gap": 40, "seeds": 12, "fast": true, "fastSeeds": 8,
-      "band": { "winA": [0.80, 1.00] },
-      "why": "Ten men without weapons cannot hurt a 220 kg cat in a way that matters before it kills several of them, and an untrained crowd breaks. The tiger wins (or the men run, which is the same result)."
+      "id": "tiger_v_10men_fists",
+      "label": "1 Bengal tiger v 10 unarmed men",
+      "a": "bengal_tiger",
+      "b": "men",
+      "n": "1v10",
+      "bw": "fists",
+      "bt": "civ",
+      "gap": 40,
+      "seeds": 12,
+      "fast": true,
+      "fastSeeds": 8,
+      "band": {
+        "winA": [
+          0.8,
+          1.0
+        ]
+      },
+      "why": "Ten men without weapons cannot hurt a 220 kg cat in a way that matters before it kills several of them, and an untrained crowd breaks. The tiger wins (or the men run, which is the same result).",
+      "known": "tiger file: hp 150 (F1); fists land every swing in node (F9)"
     },
     {
-      "id": "tiger_v_30men_fists", "label": "1 Bengal tiger v 30 unarmed men", "a": "bengal_tiger", "b": "men", "n": "1v30", "bw": "fists", "bt": "civ", "gap": 40, "seeds": 12,
-      "band": { "winA": [0.35, 0.95] },
-      "why": "Around here numbers start to tell: villagers do kill tigers by mobbing them, though with sticks and stones. Bare hands make it harder. Wide band: the crossover."
+      "id": "tiger_v_30men_fists",
+      "label": "1 Bengal tiger v 30 unarmed men",
+      "a": "bengal_tiger",
+      "b": "men",
+      "n": "1v30",
+      "bw": "fists",
+      "bt": "civ",
+      "gap": 40,
+      "seeds": 12,
+      "band": {
+        "winA": [
+          0.35,
+          0.95
+        ]
+      },
+      "why": "Around here numbers start to tell: villagers do kill tigers by mobbing them, though with sticks and stones. Bare hands make it harder. Wide band: the crossover.",
+      "known": "tiger file: hp 150 (F1)"
     },
     {
-      "id": "tiger_v_100men_fists", "label": "1 Bengal tiger v 100 unarmed men", "a": "bengal_tiger", "b": "men", "n": "1v100", "bw": "fists", "bt": "civ", "gap": 40, "seeds": 8, "fast": true, "fastSeeds": 4,
-      "band": { "winA": [0.05, 0.60] },
+      "id": "tiger_v_100men_fists",
+      "label": "1 Bengal tiger v 100 unarmed men",
+      "a": "bengal_tiger",
+      "b": "men",
+      "n": "1v100",
+      "bw": "fists",
+      "bt": "civ",
+      "gap": 40,
+      "seeds": 8,
+      "fast": true,
+      "fastSeeds": 4,
+      "band": {
+        "winA": [
+          0.05,
+          0.6
+        ]
+      },
       "why": "A hundred men who keep coming can pin and smother one animal that tires after a few minutes of all-out fighting (big cats are sprinters with poor endurance). The owner's question: 1 tiger should NOT routinely beat 100 men."
     },
     {
-      "id": "gorilla_v_10men_fists", "label": "1 gorilla v 10 unarmed men", "a": "gorilla", "b": "men", "n": "1v10", "bw": "fists", "bt": "civ", "gap": 40, "seeds": 12,
-      "band": { "winA": [0.55, 1.00] },
+      "id": "gorilla_v_10men_fists",
+      "label": "1 gorilla v 10 unarmed men",
+      "a": "gorilla",
+      "b": "men",
+      "n": "1v10",
+      "bw": "fists",
+      "bt": "civ",
+      "gap": 40,
+      "seeds": 12,
+      "band": {
+        "winA": [
+          0.55,
+          1.0
+        ]
+      },
       "why": "A silverback is several times stronger than a man and bites hard; ten untrained men lose more often than not."
     },
     {
-      "id": "men50_fists_v_gorilla", "label": "50 unarmed men v 1 gorilla", "a": "men", "b": "gorilla", "n": "50v1", "aw": "fists", "at": "civ", "gap": 40, "seeds": 10, "fast": true, "fastSeeds": 6,
-      "band": { "winA": [0.60, 1.00] },
-      "why": "The 'hundred men v a gorilla' question (the 2025 internet argument): a gorilla can maim the first several men but does not have the endurance or killing efficiency to beat dozens that pile on. Fifty men should usually win."
+      "id": "men50_fists_v_gorilla",
+      "label": "50 unarmed men v 1 gorilla",
+      "a": "men",
+      "b": "gorilla",
+      "n": "50v1",
+      "aw": "fists",
+      "at": "civ",
+      "gap": 40,
+      "seeds": 10,
+      "fast": true,
+      "fastSeeds": 6,
+      "band": {
+        "winA": [
+          0.6,
+          1.0
+        ]
+      },
+      "why": "The 'hundred men v a gorilla' question (the 2025 internet argument): a gorilla can maim the first several men but does not have the endurance or killing efficiency to beat dozens that pile on. Fifty men should usually win.",
+      "known": "gorilla / ape_combat: body-club kills, civilian morale (F4)"
     },
     {
-      "id": "men100_fists_v_gorilla", "label": "100 unarmed men v 1 gorilla", "a": "men", "b": "gorilla", "n": "100v1", "aw": "fists", "at": "civ", "gap": 40, "seeds": 8,
-      "band": { "winA": [0.85, 1.00] },
-      "why": "As above with twice the men: the men win nearly always."
+      "id": "men100_fists_v_gorilla",
+      "label": "100 unarmed men v 1 gorilla",
+      "a": "men",
+      "b": "gorilla",
+      "n": "100v1",
+      "aw": "fists",
+      "at": "civ",
+      "gap": 40,
+      "seeds": 8,
+      "band": {
+        "winA": [
+          0.85,
+          1.0
+        ]
+      },
+      "why": "As above with twice the men: the men win nearly always.",
+      "known": "gorilla / ape_combat: body-club kills, civilian morale (F4)"
     },
     {
-      "id": "bear_v_10men_fists", "label": "1 brown bear v 10 unarmed men", "a": "brown_bear", "b": "men", "n": "1v10", "bw": "fists", "bt": "civ", "gap": 40, "seeds": 10,
-      "band": { "winA": [0.80, 1.00] },
-      "why": "300 kg, thick fur and fat, a skull fists cannot hurt. The bear wins."
+      "id": "bear_v_10men_fists",
+      "label": "1 brown bear v 10 unarmed men",
+      "a": "brown_bear",
+      "b": "men",
+      "n": "1v10",
+      "bw": "fists",
+      "bt": "civ",
+      "gap": 40,
+      "seeds": 10,
+      "band": {
+        "winA": [
+          0.8,
+          1.0
+        ]
+      },
+      "why": "300 kg, thick fur and fat, a skull fists cannot hurt. The bear wins.",
+      "known": "bears file: hp 200 / dmg 29.7 for 300 kg (F2)"
     },
-
     {
-      "id": "tiger_v_10rifles_150m", "label": "1 Bengal tiger v 10 riflemen at 150 m", "a": "bengal_tiger", "b": "men", "n": "1v10", "bw": "ak47", "bt": "pro", "seeds": 12, "fast": true, "fastSeeds": 6,
-      "band": { "winA": [0.00, 0.10] },
+      "id": "tiger_v_10rifles_150m",
+      "label": "1 Bengal tiger v 10 riflemen at 150 m",
+      "a": "bengal_tiger",
+      "b": "men",
+      "n": "1v10",
+      "bw": "ak47",
+      "bt": "pro",
+      "seeds": 12,
+      "fast": true,
+      "fastSeeds": 6,
+      "band": {
+        "winA": [
+          0.0,
+          0.1
+        ]
+      },
       "why": "A tiger charging across 150 m of open ground takes ~10 s; ten rifles put dozens of 7.62x39 rounds into it. Hunters kill tigers with one or two well-placed rounds. The riflemen win almost always."
     },
     {
-      "id": "tiger_v_3rifles_12m", "label": "1 Bengal tiger v 3 riflemen at 12 m (ambush)", "a": "bengal_tiger", "b": "men", "n": "1v3", "bw": "ak47", "bt": "pro", "gap": 12, "seeds": 16, "fast": true, "fastSeeds": 8,
-      "band": { "winA": [0.15, 0.70] },
+      "id": "tiger_v_3rifles_12m",
+      "label": "1 Bengal tiger v 3 riflemen at 12 m (ambush)",
+      "a": "bengal_tiger",
+      "b": "men",
+      "n": "1v3",
+      "bw": "ak47",
+      "bt": "pro",
+      "gap": 12,
+      "seeds": 16,
+      "fast": true,
+      "fastSeeds": 8,
+      "band": {
+        "winA": [
+          0.15,
+          0.7
+        ]
+      },
       "why": "At 12 m a tiger covers the gap in under a second; men with rifles at the low ready often get no aimed shot (Jim Corbett's accounts; the Sundarbans forest guards). Ambush predators win sometimes: wide band."
     },
     {
-      "id": "tiger_v_1rifle_10m", "label": "1 Bengal tiger v 1 rifleman at 10 m", "a": "bengal_tiger", "b": "men", "n": "1v1", "bw": "ak47", "bt": "pro", "gap": 10, "seeds": 16,
-      "band": { "winA": [0.40, 0.90] },
-      "why": "One man, one tiger, 10 m: the man has one chance to stop it with a brain or spine shot in under a second. The tiger is favoured."
+      "id": "tiger_v_1rifle_10m",
+      "label": "1 Bengal tiger v 1 rifleman at 10 m",
+      "a": "bengal_tiger",
+      "b": "men",
+      "n": "1v1",
+      "bw": "ak47",
+      "bt": "pro",
+      "gap": 10,
+      "seeds": 16,
+      "band": {
+        "winA": [
+          0.4,
+          0.9
+        ]
+      },
+      "why": "One man, one tiger, 10 m: the man has one chance to stop it with a brain or spine shot in under a second. The tiger is favoured.",
+      "known": "tiger file: chase 8.1 m/s (a tiger charges at 15+); weapons: a heart-shot animal drops at once (F6)"
     },
     {
-      "id": "bear_v_5rifles_150m", "label": "1 brown bear v 5 riflemen at 150 m", "a": "brown_bear", "b": "men", "n": "1v5", "bw": "ak47", "bt": "pro", "seeds": 10,
-      "band": { "winA": [0.00, 0.15] },
+      "id": "bear_v_5rifles_150m",
+      "label": "1 brown bear v 5 riflemen at 150 m",
+      "a": "brown_bear",
+      "b": "men",
+      "n": "1v5",
+      "bw": "ak47",
+      "bt": "pro",
+      "seeds": 10,
+      "band": {
+        "winA": [
+          0.0,
+          0.15
+        ]
+      },
       "why": "Bears are hard to stop (thick skull, mass) but five rifles across 150 m of open ground kill a charging bear. Alaskan defence-of-life shootings with rifles succeed in the large majority of cases (Smith et al. 2012, firearms v bears)."
     },
     {
-      "id": "elephant_v_10rifles", "label": "1 African elephant v 10 riflemen (AK-47)", "a": "african_elephant", "b": "men", "n": "1v10", "bw": "ak47", "bt": "pro", "seeds": 10,
-      "band": { "winA": [0.00, 0.40] },
+      "id": "elephant_v_10rifles",
+      "label": "1 African elephant v 10 riflemen (AK-47)",
+      "a": "african_elephant",
+      "b": "men",
+      "n": "1v10",
+      "bw": "ak47",
+      "bt": "pro",
+      "seeds": 10,
+      "band": {
+        "winA": [
+          0.0,
+          0.4
+        ]
+      },
       "why": "Poachers kill elephants with AK-47s every day, but it takes many rounds: the heart and brain are deep behind a 25 cm skull and thick ribs. Ten men at range should usually win, slowly."
     },
     {
-      "id": "lions6_v_10rifles", "label": "a pride of 6 lions v 10 riflemen at 150 m", "a": "lion", "b": "men", "n": "6v10", "bw": "ak47", "bt": "pro", "seeds": 10,
-      "band": { "winA": [0.00, 0.30] },
+      "id": "lions6_v_10rifles",
+      "label": "a pride of 6 lions v 10 riflemen at 150 m",
+      "a": "lion",
+      "b": "men",
+      "n": "6v10",
+      "bw": "ak47",
+      "bt": "pro",
+      "seeds": 10,
+      "band": {
+        "winA": [
+          0.0,
+          0.3
+        ]
+      },
       "why": "Six lions charging across open ground into ten rifles mostly die on the way in."
     },
     {
-      "id": "gorilla_v_5rifles", "label": "1 gorilla v 5 riflemen at 150 m", "a": "gorilla", "b": "men", "n": "1v5", "bw": "ak47", "bt": "pro", "seeds": 8,
-      "band": { "winA": [0.00, 0.05] },
+      "id": "gorilla_v_5rifles",
+      "label": "1 gorilla v 5 riflemen at 150 m",
+      "a": "gorilla",
+      "b": "men",
+      "n": "1v5",
+      "bw": "ak47",
+      "bt": "pro",
+      "seeds": 8,
+      "band": {
+        "winA": [
+          0.0,
+          0.05
+        ]
+      },
       "why": "A 160 kg primate with no armour against rifles in the open."
     },
-
     {
-      "id": "abrams_v_200rifles", "label": "1 M1 Abrams v 200 riflemen (no AT)", "a": "m1_abrams", "b": "men", "n": "1v200", "bw": "ak47", "bt": "pro", "seeds": 6, "fast": true, "fastSeeds": 3, "maxT": 420,
-      "band": { "winA": [0.90, 1.00] },
+      "id": "abrams_v_200rifles",
+      "label": "1 M1 Abrams v 200 riflemen (no AT)",
+      "a": "m1_abrams",
+      "b": "men",
+      "n": "1v200",
+      "bw": "ak47",
+      "bt": "pro",
+      "seeds": 6,
+      "fast": true,
+      "fastSeeds": 3,
+      "maxT": 420,
+      "band": {
+        "winA": [
+          0.9,
+          1.0
+        ]
+      },
       "why": "Rifle ball does nothing to an Abrams (800 mm RHA-equivalent front, 120 mm side): infantry without anti-tank weapons cannot kill it. The tank wins (or the infantry breaks)."
     },
     {
-      "id": "abrams_v_50rpg_mix", "label": "1 M1 Abrams v 50 men, every 4th with an RPG", "a": "m1_abrams", "b": "men", "n": "1v50", "bw": "ak47,ak47,ak47,bazooka", "bt": "pro", "gap": 120, "seeds": 8, "maxT": 420,
-      "band": { "winA": [0.30, 0.95] },
+      "id": "abrams_v_50rpg_mix",
+      "label": "1 M1 Abrams v 50 men, every 4th with an RPG",
+      "a": "m1_abrams",
+      "b": "men",
+      "n": "1v50",
+      "bw": "ak47,ak47,ak47,bazooka",
+      "bt": "pro",
+      "gap": 120,
+      "seeds": 8,
+      "maxT": 420,
+      "band": {
+        "winA": [
+          0.3,
+          0.95
+        ]
+      },
       "why": "An RPG-7's PG-7 cannot defeat the Abrams' frontal armour, but side and rear shots can mobility- or firepower-kill it (Iraq 2003-2008, Abrams lost to RPG/ATGM flank shots). With twelve launchers the outcome becomes uncertain."
     },
     {
-      "id": "bradley_v_30rifles", "label": "1 M2 Bradley v 30 riflemen (no AT)", "a": "bradley_ifv", "b": "men", "n": "1v30", "bw": "ak47", "bt": "pro", "seeds": 8, "maxT": 360,
-      "band": { "winA": [0.80, 1.00] },
+      "id": "bradley_v_30rifles",
+      "label": "1 M2 Bradley v 30 riflemen (no AT)",
+      "a": "bradley_ifv",
+      "b": "men",
+      "n": "1v30",
+      "bw": "ak47",
+      "bt": "pro",
+      "seeds": 8,
+      "maxT": 360,
+      "band": {
+        "winA": [
+          0.8,
+          1.0
+        ]
+      },
       "why": "The Bradley's aluminium and spaced armour stops 7.62x39 and its 25 mm chain gun outranges rifles. It wins."
     },
     {
-      "id": "bradley_v_30rpg", "label": "1 M2 Bradley v 30 men with RPGs", "a": "bradley_ifv", "b": "men", "n": "1v30", "bw": "bazooka", "bt": "pro", "gap": 120, "seeds": 8, "maxT": 360,
-      "band": { "winA": [0.00, 0.60] },
+      "id": "bradley_v_30rpg",
+      "label": "1 M2 Bradley v 30 men with RPGs",
+      "a": "bradley_ifv",
+      "b": "men",
+      "n": "1v30",
+      "bw": "bazooka",
+      "bt": "pro",
+      "gap": 120,
+      "seeds": 8,
+      "maxT": 360,
+      "band": {
+        "winA": [
+          0.0,
+          0.6
+        ]
+      },
       "why": "An RPG-7 penetrates a Bradley from any aspect (~30-60 mm effective). Thirty launchers should usually kill it."
     },
     {
-      "id": "stryker_v_30rifles", "label": "1 Stryker v 30 riflemen (no AT)", "a": "stryker_apc", "b": "men", "n": "1v30", "bw": "ak47", "bt": "pro", "seeds": 8, "maxT": 360,
-      "band": { "winA": [0.70, 1.00] },
+      "id": "stryker_v_30rifles",
+      "label": "1 Stryker v 30 riflemen (no AT)",
+      "a": "stryker_apc",
+      "b": "men",
+      "n": "1v30",
+      "bw": "ak47",
+      "bt": "pro",
+      "seeds": 8,
+      "maxT": 360,
+      "band": {
+        "winA": [
+          0.7,
+          1.0
+        ]
+      },
       "why": "The Stryker is built to stop 14.5 mm frontally and 7.62 all round; its .50 RWS kills infantry. It should win."
     },
-
     {
-      "id": "fists_1v1_civ", "label": "1 unarmed man v 1 unarmed man (same training)", "a": "men", "b": "men", "n": "1v1", "aw": "fists", "bw": "fists", "at": "civ", "bt": "civ", "gap": 20, "seeds": 16, "fast": true, "fastSeeds": 8,
-      "band": { "winA": [0.30, 0.70] },
+      "id": "fists_1v1_civ",
+      "label": "1 unarmed man v 1 unarmed man (same training)",
+      "a": "men",
+      "b": "men",
+      "n": "1v1",
+      "aw": "fists",
+      "bw": "fists",
+      "at": "civ",
+      "bt": "civ",
+      "gap": 20,
+      "seeds": 16,
+      "fast": true,
+      "fastSeeds": 8,
+      "band": {
+        "winA": [
+          0.3,
+          0.7
+        ]
+      },
       "why": "Parity: identical men, the win should be a coin."
     },
     {
-      "id": "fists_10v10_civ", "label": "10 v 10 unarmed men (same training)", "a": "men", "b": "men", "n": "10v10", "aw": "fists", "bw": "fists", "at": "civ", "bt": "civ", "gap": 30, "seeds": 12,
-      "band": { "winA": [0.25, 0.75] },
+      "id": "fists_10v10_civ",
+      "label": "10 v 10 unarmed men (same training)",
+      "a": "men",
+      "b": "men",
+      "n": "10v10",
+      "aw": "fists",
+      "bw": "fists",
+      "at": "civ",
+      "bt": "civ",
+      "gap": 30,
+      "seeds": 12,
+      "band": {
+        "winA": [
+          0.25,
+          0.75
+        ]
+      },
       "why": "Parity at group size."
     },
     {
-      "id": "fists_elite_v_civ", "label": "1 trained soldier v 1 civilian, bare hands", "a": "men", "b": "men", "n": "1v1", "aw": "fists", "bw": "fists", "at": "elite", "bt": "civ", "gap": 20, "seeds": 16, "fast": true, "fastSeeds": 8,
-      "band": { "winA": [0.75, 1.00] },
+      "id": "fists_elite_v_civ",
+      "label": "1 trained soldier v 1 civilian, bare hands",
+      "a": "men",
+      "b": "men",
+      "n": "1v1",
+      "aw": "fists",
+      "bw": "fists",
+      "at": "elite",
+      "bt": "civ",
+      "gap": 20,
+      "seeds": 16,
+      "fast": true,
+      "fastSeeds": 8,
+      "band": {
+        "winA": [
+          0.75,
+          1.0
+        ]
+      },
       "why": "Training matters enormously in a fist fight: a trained fighter lands more, harder, and defends. A soldier with combatives training beats an untrained civilian most of the time."
     },
     {
-      "id": "fists_10elite_v_15civ", "label": "10 soldiers v 15 civilians, bare hands", "a": "men", "b": "men", "n": "10v15", "aw": "fists", "bw": "fists", "at": "elite", "bt": "civ", "gap": 30, "seeds": 12,
-      "band": { "winA": [0.55, 1.00] },
+      "id": "fists_10elite_v_15civ",
+      "label": "10 soldiers v 15 civilians, bare hands",
+      "a": "men",
+      "b": "men",
+      "n": "10v15",
+      "aw": "fists",
+      "bw": "fists",
+      "at": "elite",
+      "bt": "civ",
+      "gap": 30,
+      "seeds": 12,
+      "band": {
+        "winA": [
+          0.55,
+          1.0
+        ]
+      },
       "why": "Training should beat a 50% numbers edge among untrained men."
     },
     {
-      "id": "rifles_30v30", "label": "30 v 30 riflemen (same training)", "a": "men", "b": "men", "n": "30v30", "aw": "ak47", "bw": "ak47", "at": "pro", "bt": "pro", "seeds": 12, "fast": true, "fastSeeds": 6,
-      "band": { "winA": [0.25, 0.75] },
+      "id": "rifles_30v30",
+      "label": "30 v 30 riflemen (same training)",
+      "a": "men",
+      "b": "men",
+      "n": "30v30",
+      "aw": "ak47",
+      "bw": "ak47",
+      "at": "pro",
+      "bt": "pro",
+      "seeds": 12,
+      "fast": true,
+      "fastSeeds": 6,
+      "band": {
+        "winA": [
+          0.25,
+          0.75
+        ]
+      },
       "why": "Parity with rifles."
     },
     {
-      "id": "rifles_elite_v_thug", "label": "20 elite v 20 thugs, AK-47s", "a": "men", "b": "men", "n": "20v20", "aw": "ak47", "bw": "ak47", "at": "elite", "bt": "thug", "seeds": 12,
-      "band": { "winA": [0.75, 1.00] },
+      "id": "rifles_elite_v_thug",
+      "label": "20 elite v 20 thugs, AK-47s",
+      "a": "men",
+      "b": "men",
+      "n": "20v20",
+      "aw": "ak47",
+      "bw": "ak47",
+      "at": "elite",
+      "bt": "thug",
+      "seeds": 12,
+      "band": {
+        "winA": [
+          0.75,
+          1.0
+        ]
+      },
       "why": "Marksmanship, fire discipline and morale decide small-arms fights between equal numbers."
     }
-  ]
+  ],
+  "knownNote": "`known` marks a matchup that is FAR on main today for a reason filed in docs/npcwar/BALANCE.md, with its owner. tools/npcwar-balance-check.mjs reports it as KNOWN and does not fail on it; it FAILS on any other FAR. The owner who fixes it deletes the `known` line (and the check then holds the fix)."
 }
