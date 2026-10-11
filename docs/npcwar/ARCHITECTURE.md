@@ -424,7 +424,7 @@ vehicle agents redraw):
 | technical | MG technical | stand-in in its file (warlord's builder needs CBZ.warlord) | driver, gunner | MG | 1/0/0/0 |
 | ah64_apache | AH-64 | milAir attackHeli | pilot, gunner | 30 mm, Hellfire, Hydra | 20/15/10/8 |
 | uh60_black_hawk | UH-60M (11, fast rope) | its own file (redrawn) | pilot, copilot, gunner, crew chief | 2 x M240H door guns | 3/2/2/2 (unarmoured, hp 820) |
-| f35 | F-35A | milAir fighter | pilot | 2 GBUs/pass, 25 mm | 2 |
+| f35 | F-35A | its own file (redrawn: chined airframe, internal bays) | pilot | 2 x AIM-120C + 2 x GBU-31 (soft marks) or 8 x GBU-39 (armour), 182 x 25 mm | 3/2/2/2 |
 | mq9_reaper | MQ-9 | milAir drone | remote | Hellfire | 0 |
 | b52 | B-52H (redrawn: skinned flexing wing) | its own file | pilot, copilot, radar nav, nav, EWO | 27 x Mk-82 stick (bay), 12 x GBU-31 JDAM (HSABs) | 3/2/2/2 (unarmoured, hp 1800) |
 | b2_spirit | B-2A Spirit | its own file (redrawn: real planform, hinged surfaces, two bays with rotary launchers) | pilot, commander | 8 GBU-31 BLU-109 (armour), 8 GBU-31 Mk 84 | 3/2/2/2 (unarmoured) |
